@@ -228,18 +228,32 @@ func TestTurnOverHTTP(t *testing.T) {
 	if code := call(t, uc, "POST", "http://ir/api/sessions/"+id+"/send", api.Send{Text: "again"}, nil); code != 200 {
 		t.Fatalf("send over the socket: %d", code)
 	}
-	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
-		var after api.MessagePage
-		call(t, uc, "GET", "http://ir/api/sessions/"+id+"/messages?after="+itoa(page.End), nil, &after)
-		if len(after.Blocks) == 2 {
-			if after.Blocks[0].From != TerminalLocal || after.Blocks[1].Text != "ok: again" {
-				t.Errorf("after: %+v", after.Blocks)
+	waitAfter := func(end int64) api.MessagePage {
+		t.Helper()
+		for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+			var after api.MessagePage
+			call(t, uc, "GET", "http://ir/api/sessions/"+id+"/messages?after="+itoa(end), nil, &after)
+			if len(after.Blocks) == 2 {
+				return after
 			}
-			break
+			if time.Now().After(deadline) {
+				t.Fatalf("nothing after %d: %+v", end, after)
+			}
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("nothing after %d: %+v", page.End, after)
-		}
+	}
+	after := waitAfter(page.End)
+	if after.Blocks[0].From != TerminalLocal || after.Blocks[1].Text != "ok: again" {
+		t.Errorf("after: %+v", after.Blocks)
+	}
+	// An agent's ir in another session: a letter from that session, still 本机's.
+	req, _ := http.NewRequest("POST", "http://ir/api/sessions/"+id+"/send", strings.NewReader(`{"text":"from a session"}`))
+	req.Header.Set(HeaderAgent, "1")
+	req.Header.Set(HeaderSession, "caller-1")
+	if resp, err := uc.Do(req); err != nil || resp.StatusCode != 200 {
+		t.Fatalf("an agent's send: %v %v", resp, err)
+	}
+	if b := waitAfter(after.End).Blocks; b[0].From != "ir:caller-1" || b[0].FromTerminal != "local" || b[0].Text != "from a session" || b[1].Text != "ok: from a session" {
+		t.Errorf("an agent's send: %+v", b)
 	}
 	// A second daemon on the same socket is refused.
 	if _, _, err := s.Listen(); err == nil {

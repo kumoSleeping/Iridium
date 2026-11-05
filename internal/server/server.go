@@ -201,7 +201,7 @@ func (s *Server) create(w http.ResponseWriter, r *http.Request) {
 		s.error(w, err)
 		return
 	}
-	id, err := s.m.Create(r.Context(), req, c.EndpointID)
+	id, err := s.m.Create(r.Context(), req, s.fromOf(c, req.Caller))
 	if id != "" {
 		if err := s.st.SetOpener(id, c.EndpointID); err != nil {
 			s.logf("server: opener of %s: %v", id, err)
@@ -273,7 +273,7 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 		s.fileError(w, err)
 		return
 	}
-	input, queued, err := s.m.SendWith(r.Context(), r.PathValue("id"), text, c.EndpointID, req.Steer, images...)
+	input, queued, err := s.m.SendWith(r.Context(), r.PathValue("id"), text, s.fromOf(c, req.Caller), req.Steer, images...)
 	if err != nil {
 		s.error(w, err)
 		return

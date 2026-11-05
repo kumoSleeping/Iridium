@@ -107,6 +107,24 @@ func (l logWriter) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
+// fromOf is who a message is from, for session.Manager's Send and Create: the caller's terminal;
+// for an agent's ir as 本机, the terminal and the session it runs in (the X-Iridium-Session header,
+// else the request's caller), which the agent sees as "[ir:<session>]" and the page draws as a
+// letter from that session.
+func (s *Server) fromOf(c caller, callerSession string) string {
+	if !c.socket || !c.agent || !c.Local {
+		return c.EndpointID
+	}
+	from := c.session
+	if from == "" {
+		from = callerSession
+	}
+	if from == "" || strings.ContainsAny(from, "[] \n") {
+		return c.EndpointID
+	}
+	return session.From(c.EndpointID, "ir:"+from)
+}
+
 // Tag is the name terminal goes by in source tags: its name now.
 func (s *Server) Tag(terminal string) string {
 	if info, ok := s.gate().Endpoint(terminal); ok {
