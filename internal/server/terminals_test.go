@@ -409,15 +409,18 @@ func TestPublicOrigin(t *testing.T) {
 	if !strings.HasPrefix(inv.URL, "https://ir.example.com/_ir/join#") || inv.Name != "pad" || inv.ExpiresAt == 0 {
 		t.Fatalf("invite: %+v", inv)
 	}
+	if !strings.HasPrefix(inv.QR, "data:image/svg+xml;base64,") {
+		t.Fatalf("invite's QR: %.40q", inv.QR)
+	}
 	var p api.Pending
 	l.want(202, "agent", "POST", "/api/terminals/invites", api.NewInvite{}, &p)
 	var raw string
 	l.do("socket", "POST", "/api/confirms/"+p.Confirm.ID, api.ConfirmAnswer{Allow: true}, &raw)
-	if !strings.Contains(raw, "https://ir.example.com/_ir/join#") {
+	if !strings.Contains(raw, "https://ir.example.com/_ir/join#") || !strings.Contains(raw, `"qr":"data:image/svg+xml;base64,`) {
 		t.Fatalf("the panel's answer: %s", raw)
 	}
 	l.do("agent", "GET", "/api/confirms/"+p.Confirm.ID, nil, &raw)
-	if !strings.Contains(raw, `"allowed"`) || strings.Contains(raw, "/_ir/join") {
+	if !strings.Contains(raw, `"allowed"`) || strings.Contains(raw, "/_ir/join") || strings.Contains(raw, "qr") {
 		t.Fatalf("the agent's view: %s", raw)
 	}
 	var ts api.Terminals

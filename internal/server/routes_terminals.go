@@ -200,7 +200,12 @@ func (s *Server) makeInvite(name string) (*api.Invite, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &api.Invite{ID: inv.ID, Name: inv.Name, URL: inv.URL, ExpiresAt: ms(inv.ExpiresAt)}, nil
+	out := &api.Invite{ID: inv.ID, Name: inv.Name, URL: inv.URL, ExpiresAt: ms(inv.ExpiresAt)}
+	// The same link as a QR code, for a phone to open it; without one the link alone still works.
+	if out.QR, err = qrSVG(inv.URL); err != nil {
+		s.logf("server: the invite's QR code: %v", err)
+	}
+	return out, nil
 }
 
 func (s *Server) makeToken(name string) (*api.Token, error) {
