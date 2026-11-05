@@ -21,7 +21,7 @@ import (
 	"time"
 
 	"github.com/kumoSleeping/iridium/internal/agent"
-	"github.com/kumoSleeping/iridium/internal/agent/claude"
+	"github.com/kumoSleeping/iridium/internal/agents"
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/config"
 	"github.com/kumoSleeping/iridium/internal/hub"
@@ -151,8 +151,12 @@ func (m *Manager) Create(ctx context.Context, req api.NewSession, from string) (
 	if req.Agent == "" {
 		req.Agent = api.AgentClaude
 	}
-	if req.Agent != api.AgentClaude {
+	info, ok := agents.Get(req.Agent)
+	if !ok {
 		return "", fmt.Errorf("agent %s is not supported yet", req.Agent)
+	}
+	if req.Mode != "" && !slices.Contains(info.Modes, req.Mode) {
+		return "", fmt.Errorf("%s has no approval mode %q (%s)", info.Name, req.Mode, strings.Join(info.Modes, ", "))
 	}
 	if st, err := os.Stat(req.Cwd); err != nil || !st.IsDir() || !filepath.IsAbs(req.Cwd) {
 		return "", fmt.Errorf("not a directory: %q", req.Cwd)
@@ -430,8 +434,7 @@ func (m *Manager) agentEnv() []string {
 }
 
 func (m *Manager) newDriver(a api.Agent, emit func(agent.Event)) agent.Driver {
-	// One kind for now; the others come with their drivers.
-	return claude.New(claude.Options{Emit: emit, Logf: m.o.Logf})
+	return agents.NewDriver(a, emit, m.o.Logf)
 }
 
 func newUUID() string {

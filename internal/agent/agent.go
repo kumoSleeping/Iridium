@@ -39,9 +39,12 @@ type Message struct {
 type SpawnOptions struct {
 	Session string // the session's id
 	Resume  bool   // the agent has the session on record: resume it, else start it under this id
-	Cwd     string
-	Env     []string // the environment to start from; the driver drops what a parent session hands down
-	Program string   // absolute, or a bare name looked up on Env's PATH
+	// AgentSession is the agent's own id for the session where the agent makes it (Codex's
+	// thread, which Started reports); empty: none yet.
+	AgentSession string
+	Cwd          string
+	Env          []string // the environment to start from; the driver drops what a parent session hands down
+	Program      string   // absolute, or a bare name looked up on Env's PATH
 	// SystemPromptFile is appended to the agent's system prompt, re-read at every resume.
 	SystemPromptFile string
 	Model            string
@@ -119,10 +122,13 @@ type (
 		Commands []Command
 	}
 	// TurnUsage is one turn's tokens, and the session's running totals as the agent counts them.
+	// CostUSD: the turn's own cost, where the agent prices each answer but keeps no totals by
+	// model (pi); nil if not known.
 	TurnUsage struct {
 		Tokens  Tokens
 		Context int // tokens the last request carried
 		Total   *Usage
+		CostUSD *float64
 	}
 	// QuotaHit: the agent was refused for its quota until ResetsAt (ms), or told it may go on.
 	QuotaHit struct {
@@ -220,6 +226,22 @@ func CleanEnv(env []string) []string {
 	for _, kv := range env {
 		k, _, _ := strings.Cut(kv, "=")
 		if k == "CLAUDE_CODE_RESUME_INTERRUPTED_TURN" || !parentSession.MatchString(k) {
+			out = append(out, kv)
+		}
+	}
+	return out
+}
+
+// claudeKeys: Claude's keys, subscription and settings (ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN,
+// ANTHROPIC_BASE_URL, CLAUDE_CODE_OAUTH_TOKEN, CLAUDE_CONFIG_DIR...), which no agent but Claude
+// may see (Rhodium src/agents.ts): pi's bundled Anthropic SDK would read them.
+var claudeKeys = regexp.MustCompile(`^(ANTHROPIC_|CLAUDE)`)
+
+// ForeignEnv is CleanEnv for an agent other than Claude: Claude's keys go too.
+func ForeignEnv(env []string) []string {
+	out := CleanEnv(env)[:0:0]
+	for _, kv := range CleanEnv(env) {
+		if k, _, _ := strings.Cut(kv, "="); !claudeKeys.MatchString(k) {
 			out = append(out, kv)
 		}
 	}

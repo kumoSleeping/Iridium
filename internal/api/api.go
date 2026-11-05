@@ -15,6 +15,20 @@ const (
 	AgentDsh    Agent = "dsh"
 )
 
+// AgentInfo is what an agent Iridium hosts can do (GET /api/agents).
+type AgentInfo struct {
+	Agent Agent  `json:"agent"`
+	Name  string `json:"name"`
+	// Modes: its approval modes, in the order the mode key cycles them; DefaultMode is an empty
+	// mode's. ModeSwitch: when a switch takes effect: now | next turn | restart.
+	Modes       []string `json:"modes"`
+	DefaultMode string   `json:"defaultMode"`
+	ModeSwitch  string   `json:"modeSwitch"`
+	// ContextBreakdown: its context comes in categories. Quota: it reports quota windows.
+	ContextBreakdown bool `json:"contextBreakdown"`
+	Quota            bool `json:"quota"`
+}
+
 // Status is a session's lamp (plan "风格"). idle shows none.
 type Status string
 

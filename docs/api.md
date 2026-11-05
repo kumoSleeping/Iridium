@@ -16,7 +16,7 @@
 | 请求 | 正文 → 回答 | 说明 |
 |---|---|---|
 | `GET /api/sessions` | → `Session[]` | 会话列表（现在只有托管的；自动发现以后并进来）。置顶在前，再按最近 |
-| `POST /api/sessions` | `NewSession` → `{id}` | 在 `cwd` 开一个托管会话，带 `text` 就作为第一条消息。`agent` 现在只有 `claude` |
+| `POST /api/sessions` | `NewSession` → `{id}` | 在 `cwd` 开一个托管会话，带 `text` 就作为第一条消息。`agent`：`claude`、`codex`、`pi`；`model` 可带强度（Codex `gpt-6-luna:low`，pi `provider/id:off`）；`mode` 取 `GET /api/agents` 列的模式 |
 | `GET /api/sessions/{id}` | → `SessionState` | 打开的会话的状态，和事件流里的同一份 |
 | `GET /api/sessions/{id}/messages` | → `MessagePage` | 不带参数：最新一页。`before=<start>`：往回一页。`after=<end>`：之后新写的 |
 | `GET /api/sessions/{id}/block?at=<at>` | → `{text}` | 截短的块（工具参数、结果、思考、系统行）的全文 |
@@ -25,6 +25,7 @@
 | `POST /api/sessions/{id}/stop` | → `{ok}` | 停掉 agent 进程（关 stdin，写完记录自己退出）。会话还在，下一条消息再拉起 |
 | `POST /api/sessions/{id}/answer` | `Answer` → `{ok}` | 回答提问：审批 `allow`（不许时可带 `message`）；选择题 `answers`（问题原文 → 选项 `label`）；计划确认 `allow` |
 | `GET /api/events?sub=…` | SSE | 见下 |
+| `GET /api/agents` | → `AgentInfo[]` | 能开的 agent：审批模式（`modes`、`defaultMode`、`modeSwitch`：now / next turn / restart）、有没有上下文分项、有没有额度窗口 |
 | `GET /api/health` | → `{ok}` | |
 
 ## 消息页
