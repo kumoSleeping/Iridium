@@ -320,6 +320,7 @@ function SessionRow({ s, where, depth, flip, selected, onSelect, chatCode }: { s
             <Rename s={s} done={() => setRenaming(false)} />
           ) : (
             <>
+              {s.subagent && <span className="mr-1.5 shrink-0 text-sm text-ink-4">{t("row.subagent")}</span>}
               <span className="min-w-0 truncate">{title}</span>
               {where && (
                 <Tip label={tilde(s.cwd)} side="bottom">

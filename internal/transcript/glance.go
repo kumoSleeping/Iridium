@@ -22,10 +22,12 @@ const (
 
 // Glimpse is what a session list needs of a Claude transcript.
 type Glimpse struct {
-	Cwd       string // where it was started: the first line's cwd
-	Title     string // the opening of the first thing you said
-	Last      *api.LastSaid
-	Sidechain bool // an Agent tool's subtask, part of its parent session
+	Cwd   string // where it was started: the first line's cwd
+	Title string // the opening of the first thing you said
+	Last  *api.LastSaid
+	// Sidechain: an Agent tool's subtask, started by session Parent.
+	Sidechain bool
+	Parent    string
 }
 
 // Glance reads the start of the Claude transcript at path for where it was started and its
@@ -48,13 +50,13 @@ func Glance(path string, sources Sources) (Glimpse, error) {
 		var l struct {
 			Cwd         string `json:"cwd"`
 			IsSidechain bool   `json:"isSidechain"`
+			SessionID   string `json:"sessionId"`
 		}
 		if json.Unmarshal(raw, &l) != nil {
 			return true
 		}
 		if first && l.IsSidechain {
-			g.Sidechain = true
-			return false
+			g.Sidechain, g.Parent = true, l.SessionID
 		}
 		first = false
 		if g.Cwd == "" {
@@ -70,7 +72,7 @@ func Glance(path string, sources Sources) (Glimpse, error) {
 		}
 		return g.Cwd == "" || g.Title == ""
 	})
-	if err != nil || g.Sidechain {
+	if err != nil {
 		return g, err
 	}
 	g.Last, err = Tail(f, func(off int64, raw []byte) *api.LastSaid {

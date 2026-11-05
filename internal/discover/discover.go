@@ -273,7 +273,7 @@ func (x *Index) touched(paths map[string]bool) {
 	x.scanMu.Lock()
 	defer x.scanMu.Unlock()
 	procs := false
-	dirs := map[string]bool{}
+	dirs := map[string]bool{} // true: a directory made, whose own may be made already
 	for p := range paths {
 		if filepath.Dir(p) == filepath.Join(x.o.ClaudeDir, "sessions") {
 			procs = true
@@ -281,13 +281,13 @@ func (x *Index) touched(paths map[string]bool) {
 		}
 		if st, err := os.Stat(p); err == nil && st.IsDir() {
 			dirs[p] = true
-		} else {
-			dirs[filepath.Dir(p)] = true
+		} else if d := filepath.Dir(p); !dirs[d] {
+			dirs[d] = false
 		}
 	}
 	fresh := false
-	for d := range dirs {
-		fresh = x.scanDir(d) || fresh
+	for d, made := range dirs {
+		fresh = x.scanDir(d, made) || fresh
 	}
 	// A new session's launcher is known from its process: look at /proc before classifying it.
 	if procs || fresh {
@@ -355,8 +355,10 @@ func (x *Index) scanDisk() {
 }
 
 // scanDir looks at one directory inotify named: one of the agents' session directories, or one
-// above them (a new day of Codex's, a new project). True if a session is new.
-func (x *Index) scanDir(dir string) (fresh bool) {
+// above them (a new day of Codex's, a new project). made: dir was just made, so session
+// directories in it (Claude's <id>/subagents/, made at once) are looked at too, not yet watched.
+// True if a session is new.
+func (x *Index) scanDir(dir string, made bool) (fresh bool) {
 	for _, s := range x.sources() {
 		if roots := s.roots(); slices.Contains(roots, dir) {
 			for _, r := range roots {
@@ -370,9 +372,12 @@ func (x *Index) scanDir(dir string) (fresh bool) {
 			}
 			return fresh
 		}
+		matched := false
 		for _, d := range s.dirs() {
 			// dsh: a file in <project>/<session>/ is that project's.
-			if d == dir || filepath.Dir(dir) == d && strings.HasPrefix(d, filepath.Join(x.o.DshHome, "sessions")+"/") {
+			if d == dir || made && strings.HasPrefix(d, dir+"/") || filepath.Dir(dir) == d && strings.HasPrefix(d, filepath.Join(x.o.DshHome, "sessions")+"/") {
+				matched = true
+				x.watch(d)
 				x.watch(dir)
 				seen := map[string]bool{}
 				for _, f := range s.files(d) {
@@ -390,8 +395,10 @@ func (x *Index) scanDir(dir string) (fresh bool) {
 					}
 				}
 				x.mu.Unlock()
-				return fresh
 			}
+		}
+		if matched {
+			return fresh
 		}
 	}
 	return false
@@ -415,11 +422,6 @@ func (x *Index) look(f onDisk) bool {
 		g.cwd = e.cwd // read before; the head does not change
 	}
 	x.mu.Lock()
-	if g.skip {
-		delete(x.entries, f.id)
-		x.mu.Unlock()
-		return false
-	}
 	x.entries[f.id] = &entry{onDisk: f, glimpse: g, size: st.Size(), mtime: st.ModTime()}
 	x.changed[f.id] = true
 	x.mu.Unlock()
@@ -496,7 +498,8 @@ func (x *Index) Sessions(context.Context) ([]api.Session, error) {
 func (x *Index) row(e *entry) api.Session {
 	s := api.Session{
 		ID: e.id, Agent: e.agent, Cwd: e.cwd, Title: e.title, Status: api.StatusIdle,
-		Last: e.last, UpdatedAt: e.mtime.UnixMilli(), Launcher: x.launchers[e.id],
+		Last: e.last, UpdatedAt: e.mtime.UnixMilli(), Launcher: x.launcherOf(e),
+		Subagent: e.sub, Parent: e.parent,
 	}
 	if r, ok := x.running[e.id]; ok && !r.ours {
 		s.Status, s.Live = api.StatusElsewhere, true
@@ -505,6 +508,15 @@ func (x *Index) row(e *entry) api.Session {
 		}
 	}
 	return s
+}
+
+// launcherOf is the session that started e: a subagent's parent, else the one seen starting its
+// process. x.mu is held.
+func (x *Index) launcherOf(e *entry) string {
+	if e.sub && e.parent != "" {
+		return e.parent
+	}
+	return x.launchers[e.id]
 }
 
 // Found is session id as the list has it, and its transcript, read through the index in its

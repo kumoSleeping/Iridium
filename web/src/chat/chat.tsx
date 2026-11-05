@@ -168,11 +168,20 @@ export function ChatPage({ id, phone, onBack }: { id: string; phone: boolean; on
       </Stick>
       <Bar phone={phone} onBack={onBack} s={s} />
       <div ref={stack} className="absolute inset-x-0 bottom-0 z-10 px-2.5 pb-[max(6px,env(safe-area-inset-bottom))] sm:px-5">
-        {!elsewhere && <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-[calc(36px+22px+max(6px,env(safe-area-inset-bottom)))] bg-[linear-gradient(to_bottom,transparent,var(--paper)_14px)]" />}
+        {!elsewhere && !s.subagent && <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-[calc(36px+22px+max(6px,env(safe-area-inset-bottom)))] bg-[linear-gradient(to_bottom,transparent,var(--paper)_14px)]" />}
         <div className="relative mx-auto max-w-[760px]">
           <Queue session={id} queue={s.queue ?? []} steered={(q) => onSent({ key: crypto.randomUUID(), text: q.text, files: [], from: 0, input: q.id, steer: true })} />
           <Asks session={id} asks={s.asks} cwd={cwd} confirms={confirms.filter((c) => c.session === id)} />
-          {elsewhere ? (
+          {s.subagent ? (
+            <div className="glass float flex h-12 items-center justify-center gap-1 rounded-xl text-sm text-ink-3">
+              {t("chat.subagent")}
+              {s.parent && (
+                <button type="button" className="cursor-pointer text-ink-2 underline-offset-2 hover:underline" onClick={() => openChat(s.parent!)}>
+                  {t("chat.subagentParent")}
+                </button>
+              )}
+            </div>
+          ) : elsewhere ? (
             <div className="glass float flex h-12 items-center justify-center rounded-xl text-sm text-ink-3">{t("chat.elsewhere")}</div>
           ) : (
             <Under s={s} composer={composer} onSent={onSent} onSentDone={(x) => ((log.sent = log.sent.filter((y) => y !== x || !x.queued)), changed())} modelOpen={modelOpen} setModelOpen={setModelOpen} modeOpen={modeOpen} setModeOpen={setModeOpen} />

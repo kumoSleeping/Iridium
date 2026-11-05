@@ -167,3 +167,40 @@ func TestCreateInWorkspace(t *testing.T) {
 		t.Errorf("created in a workspace that is not there")
 	}
 }
+
+// A subagent's session is listed and read, never resumed: only its parent talks to it.
+func TestSubagentReadOnly(t *testing.T) {
+	var d *discover.Index
+	r := newRig(t, func(c *config.Config, o *Options) {
+		d = discover.New(discover.Options{ClaudeDir: c.ClaudeHome, CodexHome: t.TempDir(), PiSessions: t.TempDir(), DshHome: t.TempDir(), Store: o.Store, Procs: &procs{}, UID: os.Getuid(), Logf: t.Logf})
+		o.Discovery = d
+	})
+	ctx := context.Background()
+	parent := "88888888-8888-4888-8888-888888888888"
+	dir := filepath.Join(r.cfg.ClaudeHome, "projects", strings.ReplaceAll(r.cwd, "/", "-"), parent, "subagents")
+	os.MkdirAll(dir, 0o700)
+	var lines []byte
+	for _, l := range []map[string]any{
+		{"type": "user", "isSidechain": true, "agentId": "a1", "uuid": "00000000-0000-4000-8000-0000000000f1", "timestamp": "2026-01-01T00:00:00Z", "cwd": r.cwd, "sessionId": parent, "message": map[string]any{"role": "user", "content": "count the files"}},
+		{"type": "assistant", "isSidechain": true, "agentId": "a1", "timestamp": "2026-01-01T00:00:01Z", "cwd": r.cwd, "sessionId": parent, "message": map[string]any{"role": "assistant", "content": []any{map[string]any{"type": "text", "text": "three"}}}},
+	} {
+		b, _ := json.Marshal(l)
+		lines = append(append(lines, b...), '\n')
+	}
+	os.WriteFile(filepath.Join(dir, "agent-a1.jsonl"), lines, 0o600)
+	d.Scan()
+
+	l, _ := r.m.List(ctx)
+	if len(l) != 1 || l[0].ID != "agent-a1" || !l[0].Subagent || l[0].Parent != parent || l[0].Hosted {
+		t.Fatalf("list: %+v", l)
+	}
+	if st, err := r.m.State("agent-a1"); err != nil || !st.Subagent || st.Parent != parent {
+		t.Fatalf("state: %+v %v", st, err)
+	}
+	if b := r.messages("agent-a1"); len(b) != 2 || b[1].Text != "three" {
+		t.Fatalf("messages: %+v", b)
+	}
+	if _, err := r.m.Send(ctx, "agent-a1", "hello", "网页"); !errors.Is(err, ErrSubagent) {
+		t.Fatalf("send to a subagent: %v", err)
+	}
+}

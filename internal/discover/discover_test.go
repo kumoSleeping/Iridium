@@ -25,6 +25,8 @@ const (
 	idC     = "33333333-3333-4333-8333-333333333333" // Claude, /w/c
 	idCodex = "00000000-0000-7000-8000-8d5c554c3185" // /tmp/codex-probe/work/project
 	idSub   = "00000000-0000-7000-8000-00000000aaaa" // its subagent's thread
+	idTask  = "agent-a0be53fc45406abf7"              // an Agent tool subtask of idA, in idA/subagents/
+	idOld   = "agent-ab6082737f86b4771"              // an older one, beside idA
 	idPi    = "00000000-0000-4000-8000-4c4a2a950dc8"
 	idDsh   = "session-0123abcd"
 	me      = 1000
@@ -242,10 +244,23 @@ func TestListsEveryAgent(t *testing.T) {
 		ids = append(ids, id)
 	}
 	slices.Sort(ids)
-	want := []string{idCodex, idPi, idA, idB, idC, idDsh}
+	want := []string{idCodex, idSub, idPi, idA, idB, idC, idDsh, idTask, idOld}
 	slices.Sort(want)
 	if !slices.Equal(ids, want) {
-		t.Fatalf("sessions %v, want %v (no Agent tool subtasks, no Codex subagent threads)", ids, want)
+		t.Fatalf("sessions %v, want %v (subagents too)", ids, want)
+	}
+	// Subagents are sessions of their own, read-only, started by their parent.
+	if s := got[idTask]; !s.Subagent || s.Parent != idA || s.Launcher != idA || s.Agent != api.AgentClaude || s.Cwd != "/w/a" || s.Title != "Look up the weekday" {
+		t.Errorf("claude subagent: %+v", s)
+	}
+	if s := got[idOld]; !s.Subagent || s.Parent != idA || s.Title != "an old subtask" {
+		t.Errorf("older claude subagent: %+v", s)
+	}
+	if s := got[idSub]; !s.Subagent || s.Parent != idCodex || s.Launcher != idCodex || s.Agent != api.AgentCodex || s.Title != "/root/weekday" {
+		t.Errorf("codex subagent: %+v", s)
+	}
+	if s := got[idA]; s.Subagent || s.Parent != "" {
+		t.Errorf("a session is no subagent: %+v", s)
 	}
 	a := got[idA]
 	if a.Agent != api.AgentClaude || a.Cwd != "/w/a" || a.Title != "Fix the build in a" || a.Status != api.StatusIdle || a.Live || a.Hosted {

@@ -58,7 +58,11 @@ type Session struct {
 	Archived  bool  `json:"archived,omitempty"`
 	Workspace int64 `json:"workspace,omitempty"` // 0: none
 	// Launcher: the session that started this one, if discovery saw it.
-	Launcher  string    `json:"launcher,omitempty"`
+	Launcher string `json:"launcher,omitempty"`
+	// Subagent: an Agent tool's subtask (Claude) or a subagent's thread (Codex), listed as a
+	// session of its own, read-only; Parent: the session that started it.
+	Subagent  bool      `json:"subagent,omitempty"`
+	Parent    string    `json:"parent,omitempty"`
 	Last      *LastSaid `json:"last,omitempty"`
 	UpdatedAt int64     `json:"updatedAt"` // ms since the epoch
 }

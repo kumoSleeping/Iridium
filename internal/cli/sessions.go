@@ -305,7 +305,7 @@ func cmdRead(e *env, args []string) int {
 	return exitDone
 }
 
-// ir ls: one session a line: id, agent, status, directory, name or title.
+// ir ls: one session a line: id, agent, status, directory, name or title (a subagent's marked).
 func cmdLs(e *env, args []string) int {
 	o, err := parse(args, "all")
 	if err != nil || len(o.pos) != 0 {
@@ -332,6 +332,12 @@ func cmdLs(e *env, args []string) int {
 		title := s.Name
 		if title == "" {
 			title = s.Title
+		}
+		// A subagent: read-only, its parent named.
+		if s.Subagent && s.Parent != "" {
+			title = "[子代理 ← " + short(s.Parent, ids) + "] " + title
+		} else if s.Subagent {
+			title = "[子代理] " + title
 		}
 		fmt.Fprintf(e.out, "%s\t%s\t%s\t%s\t%s\n", short(s.ID, ids), s.Agent, s.Status, cwd, title)
 	}
