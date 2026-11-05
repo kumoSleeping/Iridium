@@ -38,11 +38,13 @@ type Session struct {
 	Title  string `json:"title,omitempty"`
 	Status Status `json:"status"`
 	// Hosted: Iridium runs (or ran) it through a holder. Live: an agent process runs now.
-	Hosted    bool      `json:"hosted"`
-	Live      bool      `json:"live"`
-	Pinned    bool      `json:"pinned,omitempty"`
-	Archived  bool      `json:"archived,omitempty"`
-	Workspace int64     `json:"workspace,omitempty"` // 0: none
+	Hosted    bool  `json:"hosted"`
+	Live      bool  `json:"live"`
+	Pinned    bool  `json:"pinned,omitempty"`
+	Archived  bool  `json:"archived,omitempty"`
+	Workspace int64 `json:"workspace,omitempty"` // 0: none
+	// Launcher: the session that started this one, if discovery saw it.
+	Launcher  string    `json:"launcher,omitempty"`
 	Last      *LastSaid `json:"last,omitempty"`
 	UpdatedAt int64     `json:"updatedAt"` // ms since the epoch
 }
@@ -196,6 +198,8 @@ type NewSession struct {
 	Text  string `json:"text,omitempty"`
 	Model string `json:"model,omitempty"`
 	Mode  string `json:"mode,omitempty"`
+	// Workspace: the workspace it goes in (0: as discovery classifies it).
+	Workspace int64 `json:"workspace,omitempty"`
 }
 
 type NewSessionReply struct {

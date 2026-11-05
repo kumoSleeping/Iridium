@@ -36,6 +36,8 @@ type Config struct {
 	ClaudeHome string `json:"claudeHome,omitempty"`
 	// UnitPrefix names the holders' systemd units; "" is iridium-hold-. Tests use iridium-test-.
 	UnitPrefix string `json:"unitPrefix,omitempty"`
+	// FolderRoots are where the folder picker may go; none is the user's home.
+	FolderRoots []string `json:"folderRoots,omitempty"`
 }
 
 func Default() Config {

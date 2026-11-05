@@ -22,6 +22,7 @@ import (
 
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/config"
+	"github.com/kumoSleeping/iridium/internal/discover"
 	"github.com/kumoSleeping/iridium/internal/hub"
 	"github.com/kumoSleeping/iridium/internal/session"
 	"github.com/kumoSleeping/iridium/internal/transcript"
@@ -39,6 +40,9 @@ type Server struct {
 	m    *session.Manager
 	hub  *hub.Hub
 	logf func(string, ...any)
+	// Discover and Folders, if set, serve the workspaces and the folder picker (routes_discover.go).
+	Discover *discover.Index
+	Folders  discover.Folders
 }
 
 func New(cfg config.Config, m *session.Manager, h *hub.Hub, logf func(string, ...any)) *Server {
@@ -68,6 +72,7 @@ func (s *Server) Handler(local bool) http.Handler {
 	mux.HandleFunc("POST /api/sessions/{id}/stop", s.stop)
 	mux.HandleFunc("POST /api/sessions/{id}/answer", s.answer)
 	mux.HandleFunc("GET /api/events", s.events)
+	s.discoverRoutes(mux)
 	name := TerminalWeb
 	if local {
 		name = TerminalLocal
@@ -262,7 +267,7 @@ func (s *Server) answer(w http.ResponseWriter, r *http.Request) {
 	s.done(w, s.m.Answer(r.Context(), r.PathValue("id"), a))
 }
 
-var stateKey = regexp.MustCompile(`^(list|quota|(session|context):[0-9a-fA-F-]{1,64})$`)
+var stateKey = regexp.MustCompile(`^(list|quota|workspaces|(session|context):[0-9a-zA-Z_-]{1,128})$`)
 
 // events is the page's one event stream: ?sub=<key> for each state it wants (list, quota,
 // session:<id>, context:<id>). See package hub.
@@ -303,7 +308,7 @@ func (s *Server) error(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, session.ErrNotFound), errors.Is(err, transcript.ErrNoBlock):
 		fail(w, http.StatusNotFound, err.Error())
-	case errors.Is(err, session.ErrNotLive):
+	case errors.Is(err, session.ErrNotLive), errors.Is(err, session.ErrElsewhere):
 		fail(w, http.StatusConflict, err.Error())
 	case errors.Is(err, context.DeadlineExceeded):
 		fail(w, http.StatusGatewayTimeout, "the agent did not answer in time")

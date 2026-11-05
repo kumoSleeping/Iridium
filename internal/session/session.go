@@ -157,6 +157,9 @@ func (m *Manager) Create(ctx context.Context, req api.NewSession, from string) (
 	if st, err := os.Stat(req.Cwd); err != nil || !st.IsDir() || !filepath.IsAbs(req.Cwd) {
 		return "", fmt.Errorf("not a directory: %q", req.Cwd)
 	}
+	if _, err := m.o.Store.Workspace(req.Workspace); req.Workspace != 0 && err != nil {
+		return "", err
+	}
 	mt := meta{ID: newUUID(), Agent: req.Agent, Cwd: filepath.Clean(req.Cwd), Created: time.Now().UnixMilli(), Model: req.Model, Mode: req.Mode}
 	h := m.newHosted(mt)
 	if err := os.MkdirAll(h.dir, 0o700); err != nil {
@@ -169,6 +172,11 @@ func (m *Manager) Create(ctx context.Context, req api.NewSession, from string) (
 	m.hosted[mt.ID] = h
 	m.mu.Unlock()
 	h.newSession = true
+	if req.Workspace != 0 {
+		if err := m.o.Store.Move(mt.ID, req.Workspace); err != nil {
+			return mt.ID, err
+		}
+	}
 	if err := h.start(ctx); err != nil {
 		return mt.ID, err
 	}
@@ -184,7 +192,7 @@ func (m *Manager) Create(ctx context.Context, req api.NewSession, from string) (
 // agent if it is not running: a new turn when idle, else it joins the running one. The agent sees
 // "[from] " before it, unless it is a slash command, which must reach the agent as typed.
 func (m *Manager) Send(ctx context.Context, id, text, from string) (string, error) {
-	h, err := m.get(id)
+	h, err := m.take(ctx, id)
 	if err != nil {
 		return "", err
 	}
@@ -265,7 +273,7 @@ func (m *Manager) List(ctx context.Context) ([]api.Session, error) {
 	out := make([]api.Session, 0, len(hosted))
 	seen := map[string]bool{}
 	for _, h := range hosted {
-		out = append(out, h.summary(over[h.id]))
+		out = append(out, m.elsewhere(h.summary(over[h.id])))
 		seen[h.id] = true
 	}
 	if m.o.Discovery != nil {
@@ -297,7 +305,7 @@ func (m *Manager) List(ctx context.Context) ([]api.Session, error) {
 func (m *Manager) State(id string) (*api.SessionState, error) {
 	h, err := m.get(id)
 	if err != nil {
-		return nil, err
+		return m.foreignState(id, nil)
 	}
 	over, _ := m.o.Store.Overlays()
 	s := h.state(over[id])
@@ -307,11 +315,10 @@ func (m *Manager) State(id string) (*api.SessionState, error) {
 // Messages is a page of the session's transcript: the latest (before and after < 0), the one
 // before an offset, or what came after one.
 func (m *Manager) Messages(id string, before, after int64) (api.MessagePage, error) {
-	h, err := m.get(id)
+	f, err := m.readable(id)
 	if err != nil {
 		return api.MessagePage{}, err
 	}
-	f := h.transcript()
 	if f == nil {
 		return api.MessagePage{Blocks: []api.Block{}}, nil
 	}
@@ -326,11 +333,10 @@ func (m *Manager) Messages(id string, before, after int64) (api.MessagePage, err
 
 // Full is the whole text of the block at at.
 func (m *Manager) Full(id, at string) (string, error) {
-	h, err := m.get(id)
+	f, err := m.readable(id)
 	if err != nil {
 		return "", err
 	}
-	f := h.transcript()
 	if f == nil {
 		return "", ErrNotFound
 	}
