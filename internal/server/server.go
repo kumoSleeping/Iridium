@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -50,6 +51,7 @@ type Server struct {
 	// Updater, if set, serves /api/update and carries the state "update".
 	Updater *update.Updater
 
+	cmu     sync.Mutex // one config change at a time (SaveConfig); guards cfg's settings
 	gmu     sync.Mutex // one gate change at a time
 	g       atomic.Pointer[gate.Gate]
 	initErr error // the gate for cfg.Public.Origin would not open; Listen gives it
@@ -62,6 +64,8 @@ type Server struct {
 	// Discover and Folders, if set, serve the workspaces and the folder picker (routes_discover.go).
 	Discover *discover.Index
 	Folders  discover.Folders
+	// App is the web app on the TCP address, past the API; nil is the embedded build (webui).
+	App http.Handler
 
 	files *files.Service // routes_files.go
 }
@@ -74,6 +78,7 @@ func New(cfg config.Config, m *session.Manager, h *hub.Hub, logf func(string, ..
 	}
 	s := &Server{cfg: cfg, m: m, hub: h, st: m.Store(), files: newFiles(cfg, m, logf), logf: logf}
 	s.asks = newConfirms(h)
+	m.SetAnnotate(s.files.AnnotateBlocks) // a state's tail names files as a page of messages does
 	g, err := s.newGate(cfg.Public.Origin)
 	if err != nil {
 		s.initErr = err
@@ -108,6 +113,7 @@ func (s *Server) Handler(local bool) http.Handler {
 	mux.HandleFunc("GET /api/events", s.events)
 	s.terminalRoutes(mux)
 	s.updateRoutes(mux)
+	s.settingsRoutes(mux)
 	s.sessionRoutes(mux)
 	s.pushRoutes(mux)
 	s.pluginRoutes(mux)
@@ -198,7 +204,7 @@ func (s *Server) create(w http.ResponseWriter, r *http.Request) {
 		s.error(w, err)
 		return
 	}
-	id, err := s.m.Create(r.Context(), req, c.EndpointID)
+	id, err := s.m.Create(r.Context(), req, s.fromOf(c, req.Caller))
 	if id != "" {
 		if err := s.st.SetOpener(id, c.EndpointID); err != nil {
 			s.logf("server: opener of %s: %v", id, err)
@@ -270,7 +276,7 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 		s.fileError(w, err)
 		return
 	}
-	input, queued, err := s.m.SendWith(r.Context(), r.PathValue("id"), text, c.EndpointID, req.Steer, images...)
+	input, queued, err := s.m.SendWith(r.Context(), r.PathValue("id"), text, s.fromOf(c, req.Caller), req.Steer, images...)
 	if err != nil {
 		s.error(w, err)
 		return
@@ -299,7 +305,9 @@ func (s *Server) answer(w http.ResponseWriter, r *http.Request) {
 var stateKey = regexp.MustCompile(`^(list|quota|workspaces|confirms|update|(session|context):[0-9a-zA-Z_-]{1,128})$`)
 
 // events is the page's one event stream: ?sub=<key> for each state it wants (list, quota,
-// session:<id>, context:<id>, confirms, update). See package hub.
+// workspaces, session:<id>, context:<id>, confirms, update). See package hub. A key it does not
+// know, or one not for this terminal (confirms, but for panels), does not fail the stream: it is
+// left out, and the stream's first events say so (StateEvent.Ignored).
 func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	keys := r.URL.Query()["sub"]
 	if len(keys) == 0 && s.Chat != nil {
@@ -310,13 +318,20 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "name 1 to 16 states with sub=")
 		return
 	}
+	c := callerOf(r)
+	var carried []string
+	var ignored []api.StateEvent
 	for _, k := range keys {
-		if !stateKey.MatchString(k) {
-			fail(w, http.StatusBadRequest, "unknown state "+k)
-			return
+		switch {
+		case !stateKey.MatchString(k):
+			ignored = append(ignored, api.StateEvent{Key: k, Ignored: "unknown"})
+		case k == "confirms" && !c.panel():
+			ignored = append(ignored, api.StateEvent{Key: k, Ignored: "forbidden"})
+		case !slices.Contains(carried, k):
+			carried = append(carried, k)
 		}
 	}
-	c := callerOf(r)
+	keys = carried
 	if !s.mayWatch(w, c, keys) {
 		return
 	}
@@ -331,8 +346,12 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 	io.WriteString(w, "retry: 2000\n\n")
+	for _, e := range ignored {
+		b, _ := json.Marshal(e)
+		fmt.Fprintf(w, "event: state\ndata: %s\n\n", b)
+	}
 	_ = rc.Flush()
-	sub := s.hub.Subscribe(keys)
+	sub := s.hub.Subscribe(keys) // none it may carry: open all the same, pinging
 	defer sub.Close()
 	sub.Filter = s.filter(c)
 	_ = sub.Serve(r.Context(), w, func() { _ = rc.Flush() })

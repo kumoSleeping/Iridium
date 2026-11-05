@@ -85,11 +85,13 @@ type CardOption struct {
 }
 
 // CardAnswer answers a card: Option, or Choices (one option id per group, more for a Multi
-// group); Message goes with a denial or rejection.
+// group); Message goes with a denial or rejection. Words: a question's own answers, by group
+// ("" for none), each in place of that group's choice.
 type CardAnswer struct {
 	Card    string   `json:"card"`
 	Option  string   `json:"option,omitempty"`
 	Choices []string `json:"choices,omitempty"`
+	Words   []string `json:"words,omitempty"`
 	Message string   `json:"message,omitempty"`
 }
 

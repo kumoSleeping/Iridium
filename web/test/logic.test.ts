@@ -1,7 +1,7 @@
 // The page's pure logic: folding tool calls, reading sources and file references, the sidebar's
 // tree, the composer's key, the upgrade rules, the i18n dictionaries.
 import { describe, expect, test } from "vitest";
-import type { Block, Session } from "../src/api/types.gen";
+import type { Block, Session, Terminal } from "../src/api/types.gen";
 import { argOf, folded, foldLine, inputOf } from "../src/chat/fold";
 import { commandsOf, keyMode, matching } from "../src/chat/composer";
 import { ctxParts } from "../src/chat/meters";
@@ -76,20 +76,24 @@ describe("filesIn", () => {
 
 describe("sourceOf", () => {
   const sessions = [{ id: "s1", agent: "codex", cwd: "/w", name: "holder", status: "idle", hosted: true, live: false, updatedAt: 0 } as Session];
-  const endpoints = [
-    { id: "p", name: "kumo-phone", kind: "panel" as const, avatar: "/a.png" },
-    { id: "q", name: "QQ", kind: "channel" as const },
+  const rules = {} as Terminal["rules"];
+  const terminals: Terminal[] = [
+    { id: "local", name: "本机", kind: "channel", local: true, rules, usedToday: 0 },
+    { id: "me", name: "kumo-mac", kind: "panel", rules, usedToday: 0 },
+    { id: "p", name: "kumo-phone", kind: "panel", avatar: "/a.png", rules, usedToday: 0 },
+    { id: "q", name: "QQ", kind: "channel", avatar: "/q.png", rules, usedToday: 0 },
   ];
   test("your words: typed here, in a terminal, or on another panel with its avatar", () => {
-    expect(sourceOf("网页", ["网页"], endpoints, sessions)).toEqual({ kind: "you" });
-    expect(sourceOf(undefined, ["网页"], endpoints, sessions)).toEqual({ kind: "you" });
-    expect(sourceOf("kumo-phone", ["网页"], endpoints, sessions)).toEqual({ kind: "you", panel: { name: "kumo-phone", avatar: "/a.png" } });
+    expect(sourceOf("kumo-mac", "me", "me", terminals, sessions)).toEqual({ kind: "you" });
+    expect(sourceOf(undefined, undefined, "me", terminals, sessions)).toEqual({ kind: "you" });
+    expect(sourceOf("本机", "local", "local", terminals, sessions)).toEqual({ kind: "you" }); // the page with no gate
+    expect(sourceOf("kumo-phone", "p", "me", terminals, sessions)).toEqual({ kind: "you", panel: { name: "kumo-phone", avatar: "/a.png" } });
   });
-  test("letters: a plugin, another session's ir; Iridium's own line", () => {
-    expect(sourceOf("QQ", ["网页"], endpoints, sessions)).toMatchObject({ kind: "letter", name: "QQ", channel: true });
-    expect(sourceOf("ir:s1", ["网页"], endpoints, sessions)).toMatchObject({ kind: "letter", name: "holder", agent: "codex", session: "s1" });
-    expect(sourceOf("本机", ["网页"], endpoints, sessions)).toMatchObject({ kind: "letter", name: "本机" });
-    expect(sourceOf("Iridium", ["网页"], endpoints, sessions)).toEqual({ kind: "iridium" });
+  test("letters: a plugin with its sender, another session's ir; 本机 is yours; Iridium's own line", () => {
+    expect(sourceOf("QQ·张三", "q", "me", terminals, sessions)).toMatchObject({ kind: "letter", name: "QQ·张三", avatar: "/q.png", channel: true });
+    expect(sourceOf("ir:s1", "local", "local", terminals, sessions)).toMatchObject({ kind: "letter", name: "holder", agent: "codex", session: "s1" });
+    expect(sourceOf("本机", "local", "me", terminals, sessions)).toEqual({ kind: "you", panel: { name: "本机", avatar: undefined } });
+    expect(sourceOf("Iridium", "Iridium", "me", terminals, sessions)).toEqual({ kind: "iridium" });
   });
 });
 
@@ -100,17 +104,21 @@ describe("buildTree", () => {
     { id: 1, name: "Iridium", path: "/w/ir" },
     { id: 2, name: "Empty", path: "/w/empty" },
   ];
-  test("workspace → folder → session; a folder of one is not shown; 未归类 named from its common folder", () => {
+  test("workspace → folder → session; a folder of one is not shown; 未归类 named from its common folder; one that needs you only in 需要你", () => {
     const list = [S("a", "/w/ir", { workspace: 1 }), S("b", "/w/ir/web", { workspace: 1, updatedAt: 5 }), S("c", "/w/ir/web", { workspace: 1 }), S("d", "/w/ir/docs", { workspace: 1 }), S("e", "/w/x/one"), S("f", "/w/x/two"), S("g", "/w/x/two", { archived: true }), S("h", "/w/ir", { workspace: 1, status: "waiting" })];
     const t = buildTree(list, ws, "未归类");
     expect(t.workspaces.map((w) => w.name)).toEqual(["Iridium", "Empty", "未归类"]);
     const ir = t.workspaces[0]!;
-    expect(ir.rows.map((r) => (r.kind === "session" ? r.s.id : `[${r.f.name}:${r.f.sessions.map((s) => s.id)}]`))).toEqual(["a", "d", "h", "[web:b,c]"]);
+    expect(ir.rows.map((r) => (r.kind === "session" ? r.s.id : `[${r.f.name}:${r.f.sessions.map((s) => s.id)}]`))).toEqual(["a", "d", "[web:b,c]"]);
     expect(t.workspaces[1]!.rows).toEqual([]);
     expect(t.workspaces[2]!.root).toBe("/w/x");
     expect(t.archived.map((s) => s.id)).toEqual(["g"]);
     expect(t.needs.map((s) => s.id)).toEqual(["h"]);
-    expect(flat(t).map((s) => s.id)).toEqual(["a", "d", "h", "b", "c", "e", "f"]);
+    expect(flat(t).map((s) => s.id)).toEqual(["h", "a", "d", "b", "c", "e", "f"]);
+    // Answered, it is back in its place.
+    const back = buildTree(list.map((s) => (s.id === "h" ? { ...s, status: "idle" as const } : s)), ws, "未归类");
+    expect(back.needs).toEqual([]);
+    expect(back.workspaces[0]!.rows.map((r) => (r.kind === "session" ? r.s.id : r.f.name))).toEqual(["a", "d", "h", "web"]);
   });
   test("commonDir", () => {
     expect(commonDir(["/a/b/c", "/a/b/d"])).toBe("/a/b");

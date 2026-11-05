@@ -29,16 +29,24 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("api", () => {
-  test("send carries files only when there are some; answer carries always only when set", async () => {
+  test("send carries files only when there are some; answers go to the card", async () => {
     await api.send("s1", "hi");
     await api.send("s1", "hi", ["r1"], true);
-    await api.answer("s1", { requestId: "q", kind: "permission", allow: true });
-    await api.answer("s1", { requestId: "q", kind: "permission", allow: true, always: true });
+    await api.answer({ card: "ask:s1:q", option: "always" });
+    await api.answer({ card: "ask:s1:r", choices: ["0.1"], words: ["", "mine"] });
+    await api.editQueued("s1", "in 1", "again");
+    await api.putSettings({ idleReap: "2h", modes: { claude: "plan" } });
+    await api.setRules("t 1", { rules: { agents: ["claude"] } as never, ownerConfirmed: true });
+    await api.answerConfirm("c1", true);
     expect(calls.map((c) => [c.method, c.url, c.body])).toEqual([
       ["POST", "/api/sessions/s1/send", { text: "hi" }],
       ["POST", "/api/sessions/s1/send", { text: "hi", attachments: ["r1"], steer: true }],
-      ["POST", "/api/sessions/s1/answer", { requestId: "q", kind: "permission", allow: true }],
-      ["POST", "/api/sessions/s1/answer", { requestId: "q", kind: "permission", allow: true, always: true }],
+      ["POST", "/api/answer", { card: "ask:s1:q", option: "always" }],
+      ["POST", "/api/answer", { card: "ask:s1:r", choices: ["0.1"], words: ["", "mine"] }],
+      ["PUT", "/api/sessions/s1/queue/in%201", { text: "again" }],
+      ["PUT", "/api/settings", { idleReap: "2h", modes: { claude: "plan" } }],
+      ["PUT", "/api/terminals/t%201/rules", { rules: { agents: ["claude"] }, ownerConfirmed: true }],
+      ["POST", "/api/confirms/c1", { allow: true }],
     ]);
     expect(calls.every((c) => c.headers.get("x-requested-with") === "XMLHttpRequest")).toBe(true);
   });
@@ -65,9 +73,9 @@ describe("api", () => {
 });
 
 describe("the event stream", () => {
-  test("names the list, the quota and the open session with its context", () => {
-    expect(keysFor(null)).toEqual(["list", "workspaces", "quota"]);
-    expect(streamURL("a")).toBe("/api/events?sub=list&sub=workspaces&sub=quota&sub=session%3Aa&sub=context%3Aa");
+  test("names the list, the quota, the update, the confirmations and the open session with its context", () => {
+    expect(keysFor(null)).toEqual(["list", "workspaces", "quota", "update", "confirms"]);
+    expect(streamURL("a")).toBe("/api/events?sub=list&sub=workspaces&sub=quota&sub=update&sub=confirms&sub=session%3Aa&sub=context%3Aa");
   });
   test("the store: whole values, null drops, listeners told", () => {
     const told: string[] = [];
@@ -142,7 +150,7 @@ describe("Messages", () => {
     const m = new Messages("s", async () => ({ blocks: [blk(0, "user", "a"), blk(10, "tool", undefined, { id: "t" })], start: 0, end: 20, more: false }));
     await m.newer();
     expect(m.fromTail({ start: 30, end: 40, blocks: [] })).toBe(false); // a gap: fetch
-    expect(m.fromTail({ start: 5, end: 40, blocks: [blk(10, "tool", undefined, { id: "t", result: { at: "25.0", text: "ok" } }), blk(30, "assistant", "b")] })).toEqual({ said: 20 });
+    expect(m.fromTail({ start: 5, end: 40, blocks: [blk(10, "tool", undefined, { id: "t", result: { at: "25.0", text: "ok" } }), blk(30, "assistant", "b")] })).toBe(true);
     expect(m.blocks.map((b) => [b.at, b.result?.text ?? b.text])).toEqual([
       ["0.0", "a"],
       ["10.0", "ok"],

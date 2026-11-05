@@ -96,6 +96,15 @@ type SessionState struct {
 	QuotaUntil int64 `json:"quotaUntil,omitempty"`
 	// Tail: the newest blocks, when they are few and small; else the page fetches after its end.
 	Tail *BlockTail `json:"tail,omitempty"`
+	// Commands: the slash commands its agent offers, as its last handshake named them.
+	Commands []Command `json:"commands,omitempty"`
+}
+
+// Command is a slash command an agent offers (the composer's palette), without its slash.
+type Command struct {
+	Name         string `json:"name"`
+	Description  string `json:"description,omitempty"`
+	ArgumentHint string `json:"argumentHint,omitempty"`
 }
 
 // Ask is a question, a plan to confirm or a tool to approve, open until answered or withdrawn.
@@ -294,6 +303,9 @@ type Error struct {
 type StateEvent struct {
 	Key   string `json:"key"`
 	Value any    `json:"value" tstype:"unknown"`
+	// Ignored: the stream does not carry Key, and says why once, as it opens: "unknown" (no such
+	// state) or "forbidden" (not for this terminal). The rest of the stream goes on.
+	Ignored string `json:"ignored,omitempty"`
 }
 
 // DraftEvent is the event stream's "draft" event: text the agent is writing, appended to draft N

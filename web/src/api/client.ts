@@ -1,8 +1,56 @@
-// The one module that talks to the daemon (docs/api.md). Every path the page uses is here; the ones
-// marked "assumed" are not served yet and follow docs/plan.md (their types are in ./assumed.ts).
+// The one module that talks to the daemon (docs/api.md, docs/gate.md). Every path the page uses is
+// here, typed by internal/api's generated types.
 import { QueryClient } from "@tanstack/react-query";
-import type { Endpoint, Me, Settings, UpdateState } from "./assumed";
-import type { AgentInfo, AllowRule, Answer, CompleteUpload, EditQueued, FolderReply, Folders, FullText, MessagePage, NewFolder, NewSession, NewSessionReply, NewUpload, NewWorkspace, PushEvents, PushState, PushSubscription, PushSwitch, Send, SendReply, Session, SessionPatch, SessionState, SetMode, SetModel, Upload, Workspace, WorkspacePatch } from "./types.gen";
+import type {
+  AgentInfo,
+  AllowRule,
+  ApplyUpdate,
+  CardAnswer,
+  CardReply,
+  CompleteUpload,
+  ConfirmAnswer,
+  ConfirmReply,
+  Confirms,
+  EditQueued,
+  FolderReply,
+  Folders,
+  FullText,
+  Invite,
+  Me,
+  MessagePage,
+  NewFolder,
+  NewInvite,
+  NewSession,
+  NewSessionReply,
+  NewUpload,
+  NewWorkspace,
+  PushEvents,
+  PushState,
+  PushSubscription,
+  PushSwitch,
+  Send,
+  SendReply,
+  Session,
+  SessionPatch,
+  SessionState,
+  SetMode,
+  SetModel,
+  SetRules,
+  Settings,
+  SettingsPatch,
+  Terminal,
+  Terminals,
+  Token,
+  UpdateState,
+  Upload,
+  Workspace,
+  WorkspacePatch,
+} from "./types.gen";
+
+/** The gate's GET /_ir/api/session (docs/gate.md). */
+export type GateSession = { authenticated: boolean; name?: string; local?: boolean; setup?: boolean };
+/** What PUT /api/me/profile and /api/terminals/{id}/profile answer: the terminal's name and avatar. */
+export type Profile = { id: string; name: string; kind: string; avatar?: string };
 
 /** The answers shown. A failed one is not retried: the next state or the clock asks again. */
 export const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 5_000, refetchOnWindowFocus: false } } });
@@ -108,8 +156,8 @@ export const api = {
     write<SendReply>("POST", `${S(id)}/send`, { text, ...(attachments?.length ? { attachments } : {}), ...(steer ? { steer } : {}) } satisfies Send),
   interrupt: (id: string) => write<{ ok: boolean }>("POST", `${S(id)}/interrupt`),
   stop: (id: string) => write<{ ok: boolean }>("POST", `${S(id)}/stop`),
-  /** always: allow this tool, as the ask's pattern says, for the rest of the session. */
-  answer: (id: string, a: Answer) => write<{ ok: boolean }>("POST", `${S(id)}/answer`, a),
+  /** An ask's card answered (docs/api.md "卡片"): an option, a choice per question, own words. */
+  answer: (a: CardAnswer) => write<CardReply>("POST", "/api/answer", a),
   health: (init?: RequestInit) => get<{ ok: boolean }>("/api/health", init),
   agents: () => get<AgentInfo[]>("/api/agents"),
 
@@ -150,26 +198,36 @@ export const api = {
   pushSubscribe: (sub: PushSubscription) => write<{ ok: boolean }>("POST", "/api/push/subscriptions", sub),
   pushUnsubscribe: (endpoint: string) => write<{ ok: boolean }>("DELETE", "/api/push/subscriptions", { endpoint }),
 
-  // --- assumed: settings, update ---
+  // --- settings, update ---
   settings: () => get<Settings>("/api/settings"),
-  putSettings: (s: Partial<Settings>) => writeAgain<Settings>("PUT", "/api/settings", s),
+  putSettings: (p: SettingsPatch) => writeAgain<Settings>("PUT", "/api/settings", p),
   update: () => get<UpdateState>("/api/update"),
-  applyUpdate: () => write<{ ok: boolean }>("POST", "/api/update"),
+  checkUpdate: () => write<UpdateState>("POST", "/api/update/check"),
+  applyUpdate: (force = false) => write<UpdateState>("POST", "/api/update", force ? ({ force } satisfies ApplyUpdate) : undefined),
 
-  // --- this terminal: /api/me is assumed; the gate's own routes are served once it is mounted ---
+  // --- this terminal (GET /api/me), the gate's session, profile and logout ---
   me: () => get<Me>("/api/me"),
-  gateSession: () => get<{ authenticated: boolean; name?: string; local?: boolean; setup?: boolean }>("/_ir/api/session"),
-  /** PUT /api/me/profile (internal/gate): multipart name, avatar, removeAvatar. */
-  profile: (p: { name?: string; avatar?: Blob; removeAvatar?: boolean }) => {
+  gateSession: () => get<GateSession>("/_ir/api/session"),
+  /** PUT /api/me/profile, or another terminal's (internal/gate): multipart name, avatar, removeAvatar. */
+  profile: (p: { name?: string; avatar?: Blob; removeAvatar?: boolean }, of?: string) => {
     const f = new FormData();
     if (p.name !== undefined) f.set("name", p.name);
     if (p.avatar) f.set("avatar", p.avatar, "avatar.png");
     if (p.removeAvatar) f.set("removeAvatar", "1");
-    return write<Me>("PUT", "/api/me/profile", f);
+    return write<Profile>("PUT", of ? `/api/terminals/${enc(of)}/profile` : "/api/me/profile", f);
   },
   logout: () => write<{ ok: boolean }>("POST", "/_ir/api/logout"),
-  endpoints: () => get<Endpoint[]>("/api/endpoints"),
+
+  // --- the interactive terminals (docs/api.md "交互终端"), the confirmations agents ask for ---
+  terminals: () => get<Terminals>("/api/terminals"),
+  setRules: (id: string, r: SetRules) => write<Terminal>("PUT", `/api/terminals/${enc(id)}/rules`, r),
+  invite: (name: string) => write<Invite>("POST", "/api/terminals/invites", (name ? { name } : {}) satisfies NewInvite),
+  token: (name: string) => write<Token>("POST", "/api/terminals/tokens", { name } satisfies NewInvite),
+  revoke: (id: string) => write<{ ok: boolean }>("DELETE", `/api/terminals/${enc(id)}`),
+  confirms: () => get<Confirms>("/api/confirms"),
+  answerConfirm: (id: string, allow: boolean) => write<ConfirmReply>("POST", `/api/confirms/${enc(id)}`, { allow } satisfies ConfirmAnswer),
 };
 
-/** Whether an error is the route not being served yet: the page then shows what it can without it. */
+/** Whether an error is the route not being there (an older daemon, a part turned off): the page
+ *  then shows what it can without it. */
 export const missing = (e: unknown) => e instanceof ApiError && (e.status === 404 || e.status === 405 || e.status === 501);

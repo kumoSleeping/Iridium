@@ -1,14 +1,35 @@
-// Drives the real app through what it should do end to end and says what worked, against a dev
-// daemon with the fake claude (internal/testagent) and its sessions from the screenshots' setup
-// (a workspace Iridium with a folder web and a session "Holder: ..."), served by devserve without -mock:
-//   CHROME=<chrome-headless-shell> node scripts/e2e.mjs [http://127.0.0.1:7832/]
-// It writes, renames, pins, archives and makes folders on that daemon: never point it at a real one.
-// Failures leave a screenshot in $TMPDIR/iridium-e2e-<n>.png. The browser is muted.
-import { writeFileSync } from "node:fs";
+// Drives the real app through what it should do end to end and says what worked, against an
+// installed test daemon with the fake claude (scripts/test-deploy.sh up, then scripts/seed.mjs: a
+// workspace Iridium with a folder web, a session "Holder: ...", a "Style sample" waiting):
+//   CHROME=<chrome-headless-shell> node scripts/e2e.mjs [dir of test-deploy.sh]
+// It writes, renames, pins, archives, makes folders, terminals and tokens on that daemon: never point
+// it at a real one. Failures leave a screenshot in $TMPDIR/iridium-e2e-<n>.png. The browser is muted.
+import { readFileSync, writeFileSync } from "node:fs";
+import { request } from "node:http";
 import { tmpdir } from "node:os";
 import puppeteer from "puppeteer-core";
-const BASE = process.argv[2] ?? "http://127.0.0.1:7832/";
+const dir = process.argv[2] ?? `${process.env.TMPDIR ?? "/tmp"}/iridium-test-deploy`;
+const env = Object.fromEntries(
+  readFileSync(`${dir}/env`, "utf8")
+    .split("\n")
+    .filter((l) => l.includes("="))
+    .map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1)]),
+);
+const BASE = env.IRIDIUM_TEST_BASE;
 const TMP = tmpdir();
+/** A request on the unix socket as an agent's ir in session `from` makes it. */
+function asAgent(method, path, body, from) {
+  return new Promise((resolve, reject) => {
+    const b = JSON.stringify(body);
+    const req = request({ socketPath: env.IRIDIUM_SOCKET, path, method, headers: { "content-type": "application/json", "content-length": Buffer.byteLength(b), "x-iridium-agent": "1", "x-iridium-session": from } }, (res) => {
+      let out = "";
+      res.on("data", (d) => (out += d));
+      res.on("end", () => (res.statusCode < 300 ? resolve(out ? JSON.parse(out) : {}) : reject(new Error(`${path}: ${res.statusCode} ${out}`))));
+    });
+    req.on("error", reject);
+    req.end(b);
+  });
+}
 const browser = await puppeteer.launch({ executablePath: process.env.CHROME, headless: "shell", args: ["--mute-audio"] });
 const page = await browser.newPage();
 const errors = [];
@@ -75,15 +96,42 @@ await step("a permission ask shows its card; Allow answers it and the turn goes 
   if (!card.includes("Run command") || !card.includes("ls")) throw new Error(`card: ${card}`);
 });
 
-await step("words sent while a turn runs wait in the queue, and go once it ends", async () => {
+await step("words sent while a turn runs wait in the queue, edited in place; they go once it ends", async () => {
   await page.type("textarea", "while it waits");
   await page.keyboard.press("Enter");
   await page.waitForFunction(() => document.querySelector('section[aria-label="Queue"]')?.textContent.includes("while it waits"), { timeout: 5000 });
+  await page.click('section[aria-label="Queue"] button[aria-label="Edit"]');
+  await page.waitForSelector('section[aria-label="Queue"] input');
+  await page.keyboard.type(", edited");
+  await page.keyboard.press("Enter");
+  await page.waitForFunction(() => document.querySelector('section[aria-label="Queue"]')?.textContent.includes("while it waits, edited"), { timeout: 5000 });
   await clickText("Allow", "button");
   await page.waitForFunction(() => !document.querySelector('[role="alertdialog"]'), { timeout: 8000 });
   await waitText("ok: please ASK", 10000);
-  await waitText("ok: while it waits", 10000);
+  await waitText("ok: while it waits, edited", 10000);
   await page.waitForFunction(() => !document.querySelector('section[aria-label="Queue"]'), { timeout: 5000 });
+});
+
+await step("a question card: an option picked, own words for the other; the agent gets both", async () => {
+  await page.type("textarea", "pick QUESTION");
+  await page.keyboard.press("Enter");
+  await page.waitForSelector('[role="alertdialog"] fieldset', { timeout: 10000 });
+  await clickText("Blue", "*[@role='alertdialog']//button");
+  const own = await page.$$('[role="alertdialog"] input[aria-label="Write your own"]');
+  await own[1].type("XL only");
+  await clickText("Answer", "*[@role='alertdialog']//button");
+  await waitText("Which color?=Blue", 10000);
+  await waitText("Which sizes?=XL only", 2000);
+});
+
+await step("an agent's ir asks for a plugin token: a card above its chat and under Needs you; allowed, the token shows once", async () => {
+  await asAgent("POST", "/api/terminals/tokens", { name: "e2e-agent" }, id);
+  await page.waitForSelector('[role="alertdialog"][aria-label="Plugin token"]', { timeout: 8000 });
+  await page.waitForFunction(() => document.querySelector('[role="tree"]').innerText.includes("e2e-agent"), { timeout: 5000 });
+  await clickText("Allow", "*[@role='alertdialog' and @aria-label='Plugin token']//button");
+  await page.waitForFunction(() => document.querySelector("code[data-secret]")?.textContent.startsWith("ir_"), { timeout: 8000 });
+  await clickText("Done");
+  await page.waitForFunction(() => !document.querySelector("code[data-secret]") && !document.querySelector('[role="alertdialog"][aria-label="Plugin token"]'), { timeout: 5000 });
 });
 
 await step("a file attached goes up in chunks and is sent with the message", async () => {
@@ -136,6 +184,39 @@ await step("archive from the row's menu: it goes under Archive", async () => {
   await row.click({ button: "right" });
   await clickText("Archive", "*[@role='menuitem']");
   await page.waitForFunction(() => [...document.querySelectorAll('[role="treeitem"]')].some((r) => r.textContent.trim().startsWith("Archive")), { timeout: 8000 });
+});
+
+await step("settings: the idle reap and a default approval mode are saved to the daemon", async () => {
+  await page.click('button[aria-label="Settings"]');
+  await page.waitForSelector('select[aria-label="Idle reap"]', { timeout: 8000 });
+  await page.select('select[aria-label="Idle reap"]', "2h");
+  await page.select('select[aria-label="Approval mode of new sessions · Codex"]', "untrusted");
+  await sleep(500);
+  const s = await (await fetch(new URL("api/settings", BASE))).json();
+  if (s.idleReap !== "2h" || s.modes.codex !== "untrusted") throw new Error(JSON.stringify(s));
+  await page.select('select[aria-label="Idle reap"]', "1h");
+  await page.select('select[aria-label="Approval mode of new sessions · Codex"]', "");
+  await sleep(300);
+});
+
+await step("terminals: a plugin token made (shown once), its permissions narrowed, then revoked", async () => {
+  await clickText("Panels, plugins and peers", "button");
+  await page.waitForFunction(() => location.hash === "#/settings/terminals", { timeout: 5000 });
+  await (await page.waitForSelector('button[aria-label="New terminal"]', { timeout: 8000 })).click();
+  await clickText("Plugin token", "*[@role='dialog']//button");
+  await page.keyboard.type("e2e-bot");
+  await clickText("Make", "*[@role='dialog']//button");
+  await page.waitForFunction(() => document.querySelector("code[data-secret]")?.textContent.startsWith("ir_"), { timeout: 8000 });
+  await clickText("Done");
+  const row = await page.waitForSelector('xpath/.//button[contains(., "e2e-bot")]', { timeout: 8000 });
+  await row.click();
+  await page.click('button[role="switch"][aria-label="Copy files out"]');
+  await sleep(500);
+  const t = (await (await fetch(new URL("api/terminals", BASE))).json()).terminals.find((x) => x.name === "e2e-bot");
+  if (!t || t.rules.filesOut) throw new Error(`rules: ${JSON.stringify(t?.rules)}`);
+  await clickText("Revoke");
+  await clickText("Revoke", "*[@role='alertdialog']//button");
+  await page.waitForFunction(() => ![...document.querySelectorAll("button")].some((b) => b.textContent.includes("e2e-bot")), { timeout: 8000 });
 });
 
 await step("the topology view draws the workspaces, folders and sessions", async () => {

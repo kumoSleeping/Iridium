@@ -3,18 +3,19 @@
 // anything but "#/" covers it, its back key going back.
 import { useSyncExternalStore } from "react";
 
-export type Route = { name: "home" } | { name: "chat"; id: string } | { name: "topology" } | { name: "settings" };
+export type Route = { name: "home" } | { name: "chat"; id: string } | { name: "topology" } | { name: "settings" } | { name: "terminals" };
 
 export function parse(hash: string): Route {
   const h = hash.replace(/^#/, "");
   const chat = /^\/s\/([^/?]+)/.exec(h);
   if (chat) return { name: "chat", id: decodeURIComponent(chat[1]!) };
   if (h.startsWith("/topology")) return { name: "topology" };
+  if (h.startsWith("/settings/terminals")) return { name: "terminals" };
   if (h.startsWith("/settings")) return { name: "settings" };
   return { name: "home" };
 }
 
-export const hashOf = (r: Route) => (r.name === "chat" ? `#/s/${encodeURIComponent(r.id)}` : r.name === "home" ? "#/" : `#/${r.name}`);
+export const hashOf = (r: Route) => (r.name === "chat" ? `#/s/${encodeURIComponent(r.id)}` : r.name === "home" ? "#/" : r.name === "terminals" ? "#/settings/terminals" : `#/${r.name}`);
 
 /** The sessions opened lately in this tab, the latest first, for the jump box. */
 export function recent(): string[] {

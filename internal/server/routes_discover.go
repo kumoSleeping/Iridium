@@ -98,6 +98,14 @@ func (s *Server) patchSession(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "bad workspace")
 		return
 	}
+	// Archiving is the shown marker's, and stops a hosted agent: the session manager's.
+	if req.Archived != nil {
+		if err := s.m.SetArchived(r.Context(), id, *req.Archived); err != nil {
+			s.error(w, err)
+			return
+		}
+		req.Archived = nil
+	}
 	s.discoverDone(w, s.Discover.Patch(id, req))
 }
 

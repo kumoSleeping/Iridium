@@ -41,12 +41,23 @@ func (h *Hosted) updateTail(f *transcript.File, old, size int64) {
 	if size-from <= TailBytes {
 		if p, err := f.After(from); err == nil && p.End == size && small(p.Blocks) {
 			t.Blocks = p.Blocks
+			// The files they name, as a page of messages has them (Manager.SetAnnotate).
+			if a := h.m.annotate.Load(); a != nil {
+				(*a)(h.id, h.meta.Cwd, t.Blocks)
+			}
 		}
 	}
 	h.mu.Lock()
 	h.tail = t
 	h.mu.Unlock()
 }
+
+// Annotate fills in blocks' Files (files.Service.AnnotateBlocks): what they name that exists.
+type Annotate func(session, cwd string, blocks []api.Block)
+
+// SetAnnotate makes the tails of the sessions' states carry the files their blocks name, as a
+// page of messages does. The server sets it; it comes after the manager.
+func (m *Manager) SetAnnotate(a Annotate) { m.annotate.Store(&a) }
 
 // small: no block cut short, and little to carry.
 func small(blocks []api.Block) bool {

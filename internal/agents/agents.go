@@ -31,7 +31,8 @@ type Info struct {
 	Agent api.Agent
 	Name  string
 	// Modes are its approval modes, as SetMode and SpawnOptions.Mode take them; DefaultMode is
-	// the one an empty mode means.
+	// the one an empty mode means: for every agent the one that approves by itself (Claude auto,
+	// Codex auto, pi auto without the approval extension).
 	Modes       []string
 	DefaultMode string
 	// ModeSwitch: when a mode set on a running agent takes effect: "now", "next turn", or
@@ -56,9 +57,10 @@ type Info struct {
 var all = []Info{
 	{
 		Agent: api.AgentClaude, Name: "Claude",
-		// claude --help (2.1.318); "default" is still taken as manual's old name.
+		// claude --help (2.1.318); "default" is still taken as manual's old name. New sessions
+		// start in auto (the user's choice, 2026-11-05): Claude decides what to ask.
 		Modes:       []string{"manual", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"},
-		DefaultMode: "manual", ModeSwitch: "now", ContextBreakdown: true, Quota: true,
+		DefaultMode: "auto", ModeSwitch: "now", ContextBreakdown: true, Quota: true,
 		Efforts: []string{"low", "medium", "high", "xhigh", "max"},
 		New: func(emit func(agent.Event), logf func(string, ...any)) agent.Driver {
 			return claude.New(claude.Options{Emit: emit, Logf: logf})

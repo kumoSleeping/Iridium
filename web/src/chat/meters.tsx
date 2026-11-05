@@ -6,7 +6,7 @@ import { Menu } from "@base-ui/react/menu";
 import { Popover } from "@base-ui/react/popover";
 import { Check, ChevronDown, FilePen, ListChecks, ShieldCheck, ShieldOff, ShieldQuestion, ShieldX, SlidersHorizontal, Sparkles } from "lucide-react";
 import { useState, type CSSProperties, type ReactNode } from "react";
-import type { LiveSession } from "../api/assumed";
+import type { SessionState as LiveSession } from "../api/types.gen";
 import { api } from "../api/client";
 import type { Agent, AgentQuota, Context, ContextCategory, Model } from "../api/types.gen";
 import { useAgent, useSettings } from "../data";
@@ -14,6 +14,7 @@ import { t, useLang } from "../i18n";
 import { useContextState, useQuota } from "../store";
 import { errText, toast } from "../toast";
 import { cn, PopSurface, Tip } from "../ui";
+import { modeName } from "../modes";
 import { quotaKey, windowName } from "../quota";
 
 const k = (n: number) => (n >= 100_000 ? `${Math.round(n / 1000)}k` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`);
@@ -147,7 +148,7 @@ export function QuotaBars({ agent, live }: { agent: Agent; live: boolean }) {
 
 /** An agent's approval modes, in the order the key cycles them: as GET /api/agents lists them, else
  *  Claude's own. */
-const MODES: Partial<Record<Agent, string[]>> = { claude: ["default", "acceptEdits", "plan", "bypassPermissions"] };
+const MODES: Partial<Record<Agent, string[]>> = { claude: ["manual", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"], codex: ["untrusted", "on-request", "granular", "auto"], pi: ["auto", "ask"] };
 type Mode = { id: string };
 
 const MODE_ICON: Record<string, ReactNode> = {
@@ -164,21 +165,7 @@ const MODE_ICON: Record<string, ReactNode> = {
   bypassPermissions: <ShieldOff size={14} />,
   never: <ShieldOff size={14} />,
 };
-const MODE_KEY: Record<string, Parameters<typeof t>[0]> = {
-  default: "mode.default",
-  manual: "mode.default",
-  ask: "mode.default",
-  acceptEdits: "mode.acceptEdits",
-  plan: "mode.plan",
-  auto: "mode.auto",
-  dontAsk: "mode.dontAsk",
-  bypassPermissions: "mode.bypass",
-  untrusted: "mode.untrusted",
-  "on-request": "mode.onRequest",
-  granular: "mode.granular",
-  never: "mode.never",
-};
-export const modeName = (m: Mode) => (MODE_KEY[m.id] ? t(MODE_KEY[m.id]!) : m.id);
+export { modeName };
 
 /** Sets the mode; what it shows meanwhile is the one picked. */
 export function useMode(s: LiveSession) {

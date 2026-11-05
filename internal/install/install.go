@@ -10,10 +10,13 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/kumoSleeping/iridium/internal/config"
 )
+
+var unitName = regexp.MustCompile(`^[a-zA-Z0-9_.@-]{1,200}$`)
 
 type Options struct {
 	Exe        string // the binary the unit runs
@@ -21,6 +24,8 @@ type Options struct {
 	UnitDir    string // user units: ~/.config/systemd/user
 	Unit       string // "" is iridium
 	Path       string // the PATH the daemon and its agents run with; "" is none set
+	// Env are more NAME=VALUE the daemon runs with (a test's HOME, CODEX_HOME...).
+	Env []string
 	// Systemctl runs systemctl --user with args; nil runs nothing.
 	Systemctl func(args ...string) error
 	Now       bool   // enable and start it too
@@ -28,11 +33,14 @@ type Options struct {
 	Out       io.Writer
 }
 
-// Unit is the unit file.
-func Unit(exe, configPath, path string) string {
-	env := ""
+// Unit is the unit file. env: more NAME=VALUE for the daemon.
+func Unit(exe, configPath, path string, env ...string) string {
 	if path != "" {
-		env = "Environment=" + quote("PATH="+path) + "\n"
+		env = append([]string{"PATH=" + path}, env...)
+	}
+	lines := ""
+	for _, e := range env {
+		lines += "Environment=" + quote(e) + "\n"
 	}
 	return fmt.Sprintf(`# Written by iridium install.
 [Unit]
@@ -49,7 +57,7 @@ RestartSec=2
 
 [Install]
 WantedBy=default.target
-`, quote(exe), quote(configPath), env)
+`, quote(exe), quote(configPath), lines)
 }
 
 // quote quotes a word for a unit file when it needs it.
@@ -70,6 +78,14 @@ func Install(o Options) error {
 	if !filepath.IsAbs(o.Exe) || !filepath.IsAbs(o.ConfigPath) {
 		return errors.New("install: the binary and the config need absolute paths")
 	}
+	if !unitName.MatchString(o.Unit) {
+		return fmt.Errorf("install: %q is not a unit name", o.Unit)
+	}
+	for _, e := range o.Env {
+		if k, _, ok := strings.Cut(e, "="); !ok || k == "" || strings.ContainsAny(e, "\n") {
+			return fmt.Errorf("install: %q is not NAME=VALUE", e)
+		}
+	}
 	cfg, err := config.Load(o.ConfigPath)
 	if err != nil {
 		return err
@@ -88,7 +104,7 @@ func Install(o Options) error {
 	}
 	unit := filepath.Join(o.UnitDir, o.Unit+".service")
 	tmp := unit + ".tmp"
-	if err := os.WriteFile(tmp, []byte(Unit(o.Exe, o.ConfigPath, o.Path)), 0o644); err != nil {
+	if err := os.WriteFile(tmp, []byte(Unit(o.Exe, o.ConfigPath, o.Path, o.Env...)), 0o644); err != nil {
 		return err
 	}
 	if err := os.Rename(tmp, unit); err != nil {

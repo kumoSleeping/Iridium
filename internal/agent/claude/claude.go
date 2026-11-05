@@ -551,8 +551,9 @@ func (d *Driver) response(r ctlResponse) {
 func (d *Driver) hello(r ctlResponse) {
 	var body struct {
 		Commands []struct {
-			Name        string `json:"name"`
-			Description string `json:"description"`
+			Name         string `json:"name"`
+			Description  string `json:"description"`
+			ArgumentHint string `json:"argumentHint"`
 		} `json:"commands"`
 		Models []struct {
 			Value       string `json:"value"`
@@ -576,7 +577,7 @@ func (d *Driver) hello(r ctlResponse) {
 		h.Models = append(h.Models, agent.Model{Value: m.Value, Name: m.DisplayName, Description: m.Description})
 	}
 	for _, c := range body.Commands {
-		h.Commands = append(h.Commands, agent.Command{Name: c.Name, Description: c.Description})
+		h.Commands = append(h.Commands, agent.Command{Name: c.Name, Description: c.Description, ArgumentHint: c.ArgumentHint})
 	}
 	d.emitLocked(h)
 	var list []struct {

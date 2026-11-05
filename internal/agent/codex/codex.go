@@ -35,11 +35,21 @@ const Version = "0.1.0"
 // danger-full-access (Rhodium §6.4: a resumed thread otherwise falls back to read-only, and the
 // sandbox could not start on this machine), so the policy alone says what Codex asks:
 // untrusted every command and patch; on-request what the model asks for (with full access, next
-// to nothing); granular like on-request with every kind of prompt let through; never nothing.
-var Modes = []string{"untrusted", "on-request", "granular", "never"}
+// to nothing); granular like on-request with every kind of prompt let through; auto (Codex's
+// policy "never") nothing.
+var Modes = []string{"untrusted", "on-request", "granular", "auto"}
 
-// DefaultMode is Codex's own default policy.
-const DefaultMode = "on-request"
+// DefaultMode is the mode an empty one means: auto, asking nothing (the user's choice, 2026-11-05;
+// the stricter ones stay selectable).
+const DefaultMode = "auto"
+
+// modeOf is Iridium's mode for one given: Codex's own name "never" is auto.
+func modeOf(mode string) string {
+	if mode == "never" {
+		return "auto"
+	}
+	return mode
+}
 
 // optOut are deltas Iridium has no use for, left out of out.log; the reply's text stays.
 var optOut = []string{
@@ -59,8 +69,11 @@ var errReplaced = errors.New("codex: the agent process ended")
 
 // policy is the approvalPolicy for mode.
 func policy(mode string) any {
-	if mode == "granular" {
+	switch mode {
+	case "granular":
 		return map[string]any{"granular": map[string]bool{"sandbox_approval": true, "rules": true, "skill_approval": true, "request_permissions": true, "mcp_elicitations": true}}
+	case "auto":
+		return "never"
 	}
 	return mode
 }
@@ -216,7 +229,7 @@ func (d *Driver) Spawn(o agent.SpawnOptions) (hold.Spec, error) {
 	if err != nil {
 		return hold.Spec{}, err
 	}
-	mode := o.Mode
+	mode := modeOf(o.Mode)
 	if mode == "" {
 		mode = DefaultMode
 	}
@@ -771,6 +784,7 @@ func (d *Driver) SetEffort(ctx context.Context, level string) error {
 
 // SetMode switches the approval policy from the next turn/start on, which carries it.
 func (d *Driver) SetMode(ctx context.Context, mode string) error {
+	mode = modeOf(mode)
 	if !slices.Contains(Modes, mode) {
 		return fmt.Errorf("codex: no approval mode %q (%s)", mode, strings.Join(Modes, ", "))
 	}
@@ -1176,8 +1190,8 @@ func (d *Driver) response(m *message) {
 		// The policy it opened with: a process an earlier daemon started keeps the session's.
 		var s string
 		var g map[string]any
-		if json.Unmarshal(r.Policy, &s) == nil && slices.Contains(Modes, s) {
-			d.mode = s
+		if json.Unmarshal(r.Policy, &s) == nil && slices.Contains(Modes, modeOf(s)) {
+			d.mode = modeOf(s)
 		} else if json.Unmarshal(r.Policy, &g) == nil && g["granular"] != nil {
 			d.mode = "granular"
 		}

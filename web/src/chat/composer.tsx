@@ -6,7 +6,7 @@
 // pasted, dropped or attached go up in chunks while you type.
 import { ArrowUp, CornerUpRight, FileText, ListPlus, LoaderCircle, Paperclip, Slash, Square, X } from "lucide-react";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type CSSProperties } from "react";
-import type { Command, LiveSession } from "../api/assumed";
+import type { Command, SessionState as LiveSession } from "../api/types.gen";
 import { api, missing } from "../api/client";
 import type { Sent } from "../chats";
 import { t } from "../i18n";

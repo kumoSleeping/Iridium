@@ -32,6 +32,8 @@ type Config struct {
 	Modes map[string]string `json:"modes,omitempty"`
 	// Push is Web Push's total switch, off by default.
 	Push bool `json:"push"`
+	// QuotaHidden are the quota bars the page does not show, each "<agent>:<account>:<group>:<model>".
+	QuotaHidden []string `json:"quotaHidden,omitempty"`
 	// ChatDir is where a plugin's chat opens a session before it set one with /new; "" is home.
 	ChatDir string `json:"chatDir,omitempty"`
 	// Path is the PATH agents run with; "" is the daemon's own.
@@ -77,7 +79,9 @@ func Default() Config {
 		CrashResume: true,
 		QuotaResume: true,
 		Programs:    map[string]string{"claude": "claude", "codex": "codex", "pi": "pi", "dsh": "dsh"},
-		Uploads:     Uploads{Keep: Duration(30 * 24 * time.Hour), MaxFile: 2 << 30},
+		// Every agent approves by itself unless a session picks a mode that asks (2026-11-05).
+		Modes:   map[string]string{"claude": "auto", "codex": "auto", "pi": "auto"},
+		Uploads: Uploads{Keep: Duration(30 * 24 * time.Hour), MaxFile: 2 << 30},
 	}
 }
 

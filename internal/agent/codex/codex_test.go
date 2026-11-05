@@ -344,7 +344,7 @@ func find[T agent.Event](h *harness) []T {
 }
 
 func TestTurn(t *testing.T) {
-	h := replay(t, "turn", opts{mode: "never", model: "gpt-6-luna:low"})
+	h := replay(t, "turn", opts{mode: "auto", model: "gpt-6-luna:low"})
 	want := []string{"Started", "Hello", "TurnStart", "StateChange:running", "ToolStart", "ToolDone", "ToolStart", "ToolDone", "TextDelta", "MessageDone", "TurnUsage", "StateChange:idle", "TurnEnd"}
 	if got := h.kinds(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("events\n  %v\nwant\n  %v", got, want)
@@ -352,7 +352,7 @@ func TestTurn(t *testing.T) {
 	if s := find[agent.Started](h)[0]; s.Session != "00000000-0000-7000-8000-8d5c554c3185" || s.Model != "gpt-6-luna" {
 		t.Errorf("started %+v", s)
 	}
-	if hello := find[agent.Hello](h)[0]; hello.Version != "0.162.1" || hello.Mode != "never" || len(hello.Models) != 8 {
+	if hello := find[agent.Hello](h)[0]; hello.Version != "0.162.1" || hello.Mode != "auto" || len(hello.Models) != 8 {
 		t.Errorf("hello %+v", hello)
 	}
 	ts := find[agent.ToolStart](h)

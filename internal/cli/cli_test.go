@@ -151,7 +151,7 @@ func TestAgentCommands(t *testing.T) {
 		}
 	}
 	prompt, err := os.ReadFile(filepath.Join(cfg.StatePath(), "hold", full, "system-prompt.md"))
-	if err != nil || !strings.Contains(string(prompt), "用 ir 开别的 agent 会话、发消息、等结果、跨机器拷文件；见 ir --help") {
+	if err != nil || !strings.Contains(string(prompt), "在需要时用 ir 开别的 agent 会话、发消息、等结果、跨机器拷文件；见 ir --help") {
 		t.Errorf("system prompt %q %v", prompt, err)
 	}
 
@@ -191,6 +191,21 @@ func TestAgentCommands(t *testing.T) {
 
 	if r := ir("ls"); r.code != 0 || !strings.HasPrefix(r.out, sid+"\tclaude\tidle\t") || !strings.Contains(r.out, "hello") {
 		t.Errorf("ls: %+v", r)
+	}
+	// Archived (no shown marker): only ir ls --all lists it.
+	if st, err := store.Open(filepath.Join(cfg.StateDir, "iridium.db")); err == nil {
+		st.Hide("claude", full, 1<<40, 0)
+		st.Close()
+	}
+	if r := ir("ls"); r.code != 0 || strings.Contains(r.out, sid) {
+		t.Errorf("ls with it archived: %+v", r)
+	}
+	if r := ir("ls", "--all"); r.code != 0 || !strings.Contains(r.out, sid) {
+		t.Errorf("ls --all: %+v", r)
+	}
+	if st, err := store.Open(filepath.Join(cfg.StateDir, "iridium.db")); err == nil {
+		st.Show("claude", full)
+		st.Close()
 	}
 	if r := ir("read", sid[:6]); r.code != 0 || !strings.Contains(r.out, "> [本机] hello\n") || !strings.Contains(r.out, "ok: again") {
 		t.Errorf("read: %+v", r)

@@ -8,11 +8,11 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Camera, Check, ChevronLeft, ChevronRight, Laptop, LogOut, Minus, Monitor, Moon, PencilLine, ShieldCheck, Sun } from "lucide-react";
 import { useRef, useState, type ReactNode } from "react";
 import { ApiError, api } from "./api/client";
-import type { Me, Permissions } from "./api/assumed";
-import { useMe, useWorkspaces } from "./data";
+import type { Me, Rules } from "./api/types.gen";
+import { LOCAL_ME, useMe, useWorkspaces } from "./data";
 import { setLang, t, useLang, type Lang } from "./i18n";
 import { errText, toast } from "./toast";
-import { AGENTS, Avatar, cn, IconKey, keep, kept, Logo, PopSurface, Tip } from "./ui";
+import { AGENTS, Avatar, cn, IconKey, keep, kept, Logo, PopSurface, tilde, Tip } from "./ui";
 
 export type ThemePref = "light" | "dark" | "auto";
 type Page = "main" | "perms" | "crop";
@@ -36,7 +36,8 @@ export function MeChip({ theme, setTheme, initialPage = "main", defaultOpen = fa
   const lang = useLang();
   const qc = useQueryClient();
   const { data } = useMe();
-  const me: Me = data ?? { id: "local", name: "本机", kind: "channel", local: true };
+  const me: Me = data ?? LOCAL_ME;
+  const local = !!me.local;
   const name = me.local ? t("me.local") : me.name;
   const [open, setOpen] = useState(defaultOpen);
   const [page, setPage] = useState<Page>(initialPage);
@@ -47,7 +48,8 @@ export function MeChip({ theme, setTheme, initialPage = "main", defaultOpen = fa
   const save = async (p: { name?: string; avatar?: Blob }) => {
     try {
       const next = await api.profile(p);
-      qc.setQueryData(["me"], { ...me, ...next });
+      qc.setQueryData(["me"], { ...me, name: next.name, avatar: next.avatar } satisfies Me);
+      void qc.invalidateQueries({ queryKey: ["terminals"] });
       return true;
     } catch (e) {
       toast(p.name ? t("me.rename") : t("me.avatar"), { error: true, description: nameError(e) });
@@ -155,7 +157,7 @@ export function MeChip({ theme, setTheme, initialPage = "main", defaultOpen = fa
               )}
             </div>
           )}
-          {page === "perms" && <Perms p={me.permissions} local={me.local} onBack={() => setPage("main")} />}
+          {page === "perms" && <Perms p={me.rules} local={local} onBack={() => setPage("main")} />}
           {page === "crop" && img && (
             <Crop
               src={img}
@@ -170,7 +172,7 @@ export function MeChip({ theme, setTheme, initialPage = "main", defaultOpen = fa
 }
 
 /** 本机's mark in place of an avatar: the machine itself. */
-function LocalMark({ size }: { size: number }) {
+export function LocalMark({ size }: { size: number }) {
   return (
     <span className="grid shrink-0 place-items-center rounded-full bg-fill-2 text-ink-2" style={{ width: size, height: size }} aria-hidden>
       <Laptop size={Math.round(size * 0.55)} strokeWidth={1.75} />
@@ -228,11 +230,17 @@ export function Segmented({ label, value, onChange, items }: { label: string; va
   );
 }
 
-/** The permissions, read only. 本机's are all; none given: not known yet. */
-function Perms({ p, local, onBack }: { p?: Permissions; local: boolean; onBack: () => void }) {
+/** Where a permission table lets a terminal work: everywhere, or its workspaces and folders. */
+export function placesOf(q: Rules, ws: { id: number; name: string }[] | null | undefined): string {
+  if (q.allDirs) return t("perm.all");
+  const names = [...(q.workspaces ?? []).map((id) => ws?.find((w) => w.id === id)?.name ?? `#${id}`), ...(q.dirs ?? []).map((d) => tilde(d))];
+  return names.length ? names.join(t("msg.sep")) : t("perm.none");
+}
+
+/** The permissions (GET /api/me's rules), read only. 本机's are all. */
+function Perms({ p, local, onBack }: { p?: Rules; local: boolean; onBack: () => void }) {
   const ws = useWorkspaces().data;
-  const all: Permissions = { agents: AGENTS, workspaces: "all", others: true, copyOut: true, copyIn: true, answer: true, mustApprove: false };
-  const q = p ?? (local ? all : undefined);
+  const q = local ? LOCAL_ME.rules : p;
   const yes = <Check size={15} aria-label={t("perm.yes")} className="text-ink" />;
   const no = <Minus size={15} aria-label={t("perm.no")} className="text-ink-4" />;
   const yn = (v: boolean | undefined) => (v ? yes : no);
@@ -241,18 +249,19 @@ function Perms({ p, local, onBack }: { p?: Permissions; local: boolean; onBack: 
         [
           t("perm.agents"),
           <span className="flex gap-1.5">
-            {q.agents.map((a) => (
+            {AGENTS.filter((a) => q.agents?.includes(a)).map((a) => (
               <Logo key={a} agent={a} size={14} />
             ))}
           </span>,
         ],
-        [t("perm.workspaces"), <span className="text-sm text-ink-2">{q.workspaces === "all" ? t("perm.all") : q.workspaces.map((id) => ws?.find((w) => w.id === id)?.name ?? id).join("、")}</span>],
-        [t("perm.others"), yn(q.others)],
-        [t("perm.copyOut"), yn(q.copyOut)],
-        [t("perm.copyIn"), yn(q.copyIn)],
+        [t("perm.workspaces"), <span className="block max-w-40 truncate text-sm text-ink-2">{placesOf(q, ws)}</span>],
+        [t("perm.others"), yn(q.seeOthers)],
+        [t("perm.copyOut"), yn(q.filesOut)],
+        [t("perm.copyIn"), yn(q.filesIn)],
         [t("perm.answer"), yn(q.answer)],
         [t("perm.mustApprove"), yn(q.mustApprove)],
-        [t("perm.daily"), <span className="text-sm text-ink-2 tabular-nums">{q.daily ? `${Math.round(q.daily / 1000)}k` : t("perm.unlimited")}</span>],
+        [t("perm.commands"), <span className="block max-w-40 truncate text-sm text-ink-2">{q.allCommands ? t("perm.all") : (q.commands ?? []).join(" ") || t("perm.none")}</span>],
+        [t("perm.daily"), <span className="text-sm text-ink-2 tabular-nums">{q.dailyTokens ? `${Math.round(q.dailyTokens / 1000)}k` : t("perm.unlimited")}</span>],
       ]
     : [];
   return (

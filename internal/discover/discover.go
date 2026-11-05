@@ -3,9 +3,11 @@
 // now (/proc). The list is the disk's; the index of it is kept in memory, built at start, kept
 // up by inotify and a light periodic look. Read-only: it never writes an agent's files.
 //
-// Each session seen for the first time is put in a workspace, once (the store remembers): the
+// A session is in the list only while it carries a shown marker (shown.go): activity sets it.
+// Each session shown for the first time is put in a workspace, once (the store remembers): the
 // workspace of the session that started it; else the one that holds a session of the same
-// folder, or of the nearest folder above; else none (未归类). One the user moved stays.
+// folder, or of the nearest folder above, or is that folder; else none (未归类). One the user
+// moved stays.
 package discover
 
 import (
@@ -119,6 +121,9 @@ type Index struct {
 
 	aliasMu sync.Mutex
 	alias   func(hosted string) string
+
+	sinceOnce sync.Once
+	since     int64 // when Iridium began watching (ms)
 }
 
 // SetAlias tells the index the agent's own id of a session Iridium hosts under another (Codex's
@@ -199,6 +204,9 @@ func (x *Index) Close() {
 func (x *Index) Scan() {
 	x.scanMu.Lock()
 	defer x.scanMu.Unlock()
+	// Watching begins with the first look, whether or not it finds anything: a transcript
+	// written after it is activity, however long until a look finds it.
+	x.watchingSince()
 	x.scanDisk()
 	x.scanProcs()
 	x.classify()
@@ -407,13 +415,15 @@ func (x *Index) look(f onDisk) bool {
 		g.cwd = e.cwd // read before; the head does not change
 	}
 	x.mu.Lock()
-	defer x.mu.Unlock()
 	if g.skip {
 		delete(x.entries, f.id)
+		x.mu.Unlock()
 		return false
 	}
 	x.entries[f.id] = &entry{onDisk: f, glimpse: g, size: st.Size(), mtime: st.ModTime()}
 	x.changed[f.id] = true
+	x.mu.Unlock()
+	x.activity(f.agent, f.id, st.Size(), st.ModTime(), e != nil && e.path == f.path && st.Size() > e.size)
 	return e == nil
 }
 

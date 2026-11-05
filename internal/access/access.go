@@ -233,7 +233,7 @@ func Command(r api.Rules, text string) error {
 }
 
 // skipping are the approval modes that let tools run without asking anyone: Claude's
-// bypassPermissions, acceptEdits and auto, Codex's never and on-request (the model decides,
+// bypassPermissions, acceptEdits and auto, Codex's auto (its policy never) and on-request (the model decides,
 // in a full-access sandbox), pi's auto, dsh's danger-full-access.
 var skipping = []string{"bypassPermissions", "acceptEdits", "auto", "never", "on-request", "danger-full-access"}
 

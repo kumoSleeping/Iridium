@@ -139,10 +139,10 @@ const Assistant = memo(function Assistant({ b, session, cwd }: { b: Block; sessi
   );
 });
 
-export function Said({ b, session, cwd, source, onJump }: { b: Shown; session: string; cwd: string; source: (from?: string) => Source; onJump: (id: string) => void }) {
+export function Said({ b, session, cwd, source, onJump }: { b: Shown; session: string; cwd: string; source: (b: { from?: string; fromTerminal?: string }) => Source; onJump: (id: string) => void }) {
   switch (b.kind) {
     case "user": {
-      const src = source(b.from);
+      const src = source(b);
       const text = b.text ?? "";
       if (src.kind === "iridium") return <Line icon={<RotateCcw size={12} />}>{text}</Line>;
       if (src.kind === "letter") return <Letter src={src} text={text} onJump={onJump} />;

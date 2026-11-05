@@ -307,12 +307,17 @@ func cmdRead(e *env, args []string) int {
 
 // ir ls: one session a line: id, agent, status, directory, name or title.
 func cmdLs(e *env, args []string) int {
-	if o, err := parse(args, ""); err != nil || len(o.pos) != 0 {
-		return e.failf("usage: ir ls")
+	o, err := parse(args, "all")
+	if err != nil || len(o.pos) != 0 {
+		return e.failf("usage: ir ls [--all]")
 	}
 	var list []api.Session
 	if err := e.do("GET", "/api/sessions", nil, &list); err != nil {
 		return e.fail(err)
+	}
+	// The archive (no shown marker) only with --all.
+	if !o.all {
+		list = slices.DeleteFunc(list, func(s api.Session) bool { return s.Archived })
 	}
 	ids := make([]string, len(list))
 	for i, s := range list {

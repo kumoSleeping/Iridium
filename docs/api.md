@@ -5,7 +5,7 @@
 - HTTP：`127.0.0.1:7810`（配置 `listen`），给网页，前面是 Passkey 门（`docs/gate.md`）。没配 `public.origin` 时只认本机的主机名（`localhost`、回环地址和配置 `hosts`），非 GET 请求带了别的 `Origin` 就拒绝，请求都算内置终端“本机”（带插件 TOKEN 的算那个插件）。配了以后每个请求都要面板登录或 TOKEN。
 - unix socket：`$XDG_RUNTIME_DIR/iridium/ir.sock`（0600），给本机 `ir`，不经过门，算“本机”。`ir` 认出是 agent 在调（环境里有 `CLAUDECODE`、`CODEX_THREAD_ID`、`IRIDIUM_SESSION`，或者没有终端）时带头 `X-Iridium-Agent: 1`，这时不回任何秘密（见“确认”）。`ir` 还带 `X-Iridium-Session`（它所在的会话：`IRIDIUM_SESSION` 或 agent 自己的会话变量）；那个会话是别的终端经 Iridium 开的，这个请求就算那个终端的：用它的权限表，记它的用量和来源（agent 在插件的会话里调 `ir`，等于插件自己做）。
 
-来源：每条交给 agent 的消息开头是 `[终端名] `（`/` 开头的命令除外），名字取发送时终端的名字。库里记下这条输入是哪个终端（ID）发的、用的什么名字；读记录时服务端按 Iridium 自己写进去的输入认（Claude：发消息时给的 uuid；没有 ID 的 agent：`store.SourceByText` 比对输入记录），去掉前缀，消息块带 `from`（名字）和 `fromTerminal`（终端 ID，取头像用）。用量行按终端 ID 记，改名不丢。
+来源：每条交给 agent 的消息开头是 `[终端名] `（`/` 开头的命令除外），名字取发送时终端的名字。库里记下这条输入是哪个终端（ID）发的、用的什么名字；读记录时服务端按 Iridium 自己写进去的输入认（Claude：发消息时给的 uuid；没有 ID 的 agent：`store.SourceByText` 比对输入记录），去掉前缀，消息块带 `from`（名字）和 `fromTerminal`（终端 ID，取头像用）。用量行按终端 ID 记，改名不丢。agent 以“本机”调 `ir send`、`ir new`（带 `X-Iridium-Agent` 和它所在的会话）时前缀是 `[ir:<会话 ID>] `，`from` 也是它，页面画成那个会话的来信；终端仍是本机。
 
 类型都在 `internal/api`。`go generate ./internal/api` 用 tygo 生成 `web/src/api/types.gen.ts`，前端只用它（生成的文件不进库）。
 
@@ -27,6 +27,8 @@
 | `GET /api/events?sub=…` | SSE | 见下。不带 `sub`：插件的事件流，见“插件” |
 | `GET /api/agents` | → `AgentInfo[]` | 能开的 agent：审批模式（`modes`、`defaultMode`、`modeSwitch`：now / next turn / restart）、有没有上下文分项、有没有额度窗口 |
 | `GET /api/health` | → `{ok}` | |
+| `GET /api/settings` | → `Settings` | 设置页改的配置项：空闲回收、崩溃续跑、额度续跑、隐藏的额度条、各 agent 新会话的审批模式、推送总开关。管理权 |
+| `PUT /api/settings` | `SettingsPatch` → `Settings` | 只改给了的项，写进配置文件，马上生效。面板权 |
 
 ## 消息页
 
@@ -45,11 +47,13 @@
 |---|---|
 | `list` | `Session[]` |
 | `workspaces` | `Workspace[]` |
-| `session:<id>` | `SessionState`：状态、提问（带 `card`）、后台任务、模型、审批模式、思考强度、可选的模型/模式/强度、待发队列、上下文总数、等额度到几点、`tail`、`end`、`proc`、出错原因 |
+| `session:<id>` | `SessionState`：状态、提问（带 `card`）、后台任务、模型、审批模式、思考强度、可选的模型/模式/强度、待发队列、上下文总数、等额度到几点、`tail`（块带 `files`）、`end`、`proc`、出错原因、`commands`（agent 自己的命令，给输入框的命令面板） |
 | `context:<id>` | `Context`：上下文用了多少、分项。回合结束和压缩后更新；存在托管目录，没进程时也有 |
 | `quota` | `Quota`：按 agent + 账号（Claude：邮箱和套餐）的额度窗口、读到的时间、`live` |
 | `confirms` | `Confirms`：等面板确认的事（只有面板能订） |
 | `update` | `UpdateState`：有没有新版本、更新到哪一步 |
+
+不认识的键、不给这个终端的键（`confirms` 只给面板）不让整条流失败：开流时先为每个发一条 `state`，`{key, value: null, ignored: "unknown" | "forbidden"}`，其余照常。
 
 `list` 按订阅者的权限表过滤；看不到的会话订 `session:`、`context:` 回 404。终端被撤销、面板退出、`public.origin` 改了，流就断开。
 
@@ -73,6 +77,15 @@
   - `tail` 至少往回盖 1 秒；只装没截短的块，JSON 不超过 16KB。
 - 草稿：同一 `proc`、同一 `n` 的 `text` 接起来；`n` 变了，上一段封口（记录里马上会有这段话）；`proc` 变了，丢掉所有草稿。记录里来了 agent 的话，就换掉最早封口的那段。重连后清掉草稿，照 `end` 取新块。
 
+## Iridium 重启后
+
+托管进程和 agent 照跑；新的 Iridium 接上每个还在跑的托管进程：
+
+- 托管目录 `seen.json` 记着上一个 Iridium 读 `out.log` 读到哪（每秒最多写一次，退出时写一次）。那之前的输出重放，只为恢复驱动的状态；之后的（停机期间回合结束、用量、提问）照新来的处理。没有这个文件的（旧版）当全读过。
+- 再发一次握手。Claude 回 `initialize` 时带 `pending_permission_requests`（还在等答复的提问，原样的 `control_request`），挂着的提问以它为准：没答的回来，带卡片，照常能答；答过的不再出现。
+- 上下文（托管目录 `context.json`）和额度（状态目录 `quota.json`）是上次读到的值和读的时间（`at`）；额度的 `live` 要等这个 agent 和账号又有进程在跑。
+- 托管进程在停机期间已经退出的：不补读它的输出，按它的退出处理。
+
 ## 状态灯（`Status`）
 
 `idle` 无灯，`starting` 启动中，`running` 运行中，`compacting` 压缩中，`waiting` 需要你（有提问），`error` 上次进程出错退出（原因在 `SessionState.error`），`elsewhere` 在别处运行（只读）。`live` 说 agent 进程在不在跑。
@@ -84,7 +97,12 @@
 - 来源：Claude `~/.claude/projects/<目录>/<id>.jsonl`（`<id>/subagents/` 和 `agent-*.jsonl` 是 Agent 工具的子任务，不列）；Codex `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-*.jsonl`（`source.subagent` 的不列，标题用 `session_index.jsonl` 的线程名）；pi `~/.pi/agent/sessions/*/*.jsonl`（标题用最后一个 `session_info` 名字）；dsh `~/.dsh/sessions/--<键>--/<id>/session.v<N>.jsonl.zstd`（现在只看路径和时间，目录由键反推）。标题、最近一句话只读文件开头 8MB 和末尾 4MB。
 - 在跑的：`~/.claude/sessions/<pid>.json`（核对 `procStart`），`/proc` 里本人的 codex、pi、dsh 进程（打开的记录文件或锁、命令行；pi 用工作目录里进程起来后最新写的那份）。环境变量只读本人进程的，只取下面几个，不记日志。
 - 拉起者：子进程环境里依次看 `IRIDIUM_SESSION`、`CLAUDE_CODE_SESSION_ID`、`CODEX_THREAD_ID`、`CODEX_SESSION_ID`、`DSH_SESSION_ID`、`PI_SESSION_ID`；都没有就往上找第一个只跑一个会话的 agent 进程。`IRIDIUM_SESSION` 等于自己的 ID 是 Iridium 托管的，不算在别处。
-- 首次发现归类一次（库里记下，以后不再动）：拉起者的工作区 → 同目录或最近上层目录已有会话所在的工作区 → 未归类（`workspace` 为 0）。手动移过的永远不再自动动。新建工作区时，那个目录及以下未归类、没被手动移过的会话进新工作区。
+- 显示标记（用户定的，2026-11-05）：会话只有带“显示”标记才在列表里正常显示；标记在库里（`shown` 表），按 agent + agent 自己的会话 ID 记（托管的 Codex 在知道线程 ID 前用 Iridium 的 ID，两个哪个有标记都算）。从不写 agent 的文件，不删记录。
+  - 设上：Iridium 开的、接管的托管会话；托管会话的 agent 开始回合或收到消息；发现看到“活动”：没见过的记录且最后修改晚于 Iridium 开始看的时间（第一次启动时记在库里，重启不变），或者记录比上次看时长了。
+  - 没标记的就是归档：`Session.archived` 为 `true`，页面放在底部折叠的“归档”里，能搜。第一次启动时磁盘上已有、之后没动过的都在这里。
+  - 归档（`PATCH archived: true`）：去掉标记，记下记录当时的长度；之后长过这个长度（有了新活动）就自动回来。托管的另外像空闲回收那样停掉 agent；它退出时写的不算活动（退出后重记长度）。恢复（`archived: false`）：设上标记。没有按时间自动归档。
+  - 旧版的归档标记迁移成“没标记”。
+- 首次归类一次（库里记下，以后不再动），在会话第一次显示时（第一次活动）做，不给归档里的做：拉起者的工作区 → 同目录或最近上层目录已有会话所在的工作区，工作区自己的目录也算 → 未归类（`workspace` 为 0）。手动移过的永远不再自动动。新建工作区不收已有的会话：之后在那个目录里显示的按这条规则进它。
 - 状态：`hosted` 托管；`elsewhere` 在别处运行，只读（能看状态和消息页，发消息回 409）；其余是磁盘上空闲的。别处退出后，发消息就接成托管会话（`--resume`），前提是没有别的进程在用（Claude：`sessions/` 里没有活着的同 ID 进程；dsh：`session.lock` 能拿到 flock；Codex：写锁）。现在只能接 Claude 的。
 - 列表变了（新会话、记录长了、进程起停、改了覆盖层）攒 200ms 发一次 `list` 整份，变了的会话另发 `session:<id>`。
 
@@ -94,7 +112,7 @@
 | `POST /api/workspaces` | `NewWorkspace` → `Workspace` | 用一个文件夹建（要在选择器能去的范围里）；`name` 不给就用文件夹名。同一文件夹已有工作区回 409 |
 | `PATCH /api/workspaces/{id}` | `{name}` → `{ok}` | 改名 |
 | `DELETE /api/workspaces/{id}` | → `{ok}` | 删掉；里面的会话变成未归类 |
-| `PATCH /api/sessions/{id}` | `SessionPatch` → `{ok}` | 只改覆盖层，不碰 agent 的文件：`name`（空串去掉）、`pinned`、`archived`、`workspace`（移动，0 为未归类；移过就不再自动归类） |
+| `PATCH /api/sessions/{id}` | `SessionPatch` → `{ok}` | 只改覆盖层，不碰 agent 的文件：`name`（空串去掉）、`pinned`、`archived`（归档或恢复，见上面的显示标记）、`workspace`（移动，0 为未归类；移过就不再自动归类） |
 | `GET /api/folders?path=` | → `Folders` | 选择器：只列文件夹，不列隐藏的，按名字排；`path` 为空或 `~` 是家目录。`parent` 为空表示到顶了 |
 | `POST /api/folders` | `NewFolder` → `{path}` | 在 `path` 里新建文件夹 `name`（不能以 `.` 开头、不能带 `/`）。已有回 409 |
 
@@ -135,7 +153,7 @@
 ## `ir`（agent 用的部分）
 
 - 代码在 `internal/cli`，走上面这套接口；socket 用 `IRIDIUM_SOCKET`，没有就读配置（`IRIDIUM_CONFIG` 或默认位置）。
-- `<id>` 可只写开头（唯一即可）；`ir new`、`ir ls` 打印至少 8 位的短 ID。`机器:路径`、`机器/<id>` 现在报 `peer not connected`。
+- `<id>` 可只写开头（唯一即可）；`ir new`、`ir ls` 打印至少 8 位的短 ID。`ir ls` 只列有显示标记的，`ir ls --all` 连归档一起列。`机器:路径`、`机器/<id>` 现在报 `peer not connected`。
 - 输出给 agent 看：只打最后一段回复（`new --wait` 先一行 ID）；`cp` 一行 `路径 大小 sha256`；需要你时每个提问一行 `需要你：…`。进度只在 stderr 是终端时画。
 - `send`、`new` 不带 `--wait` 时等到 agent 接了这条消息（最多 15 秒）再返回，所以紧接着的 `ir wait` 等的是这一回合。
 - 回合在跑时 `ir send` 的话进待发队列：不带 `--wait` 马上返回；带 `--wait` 等它发出去、再等它那一回合（队列暂停了就退出码 2）。`--steer` 插进正在跑的回合。
@@ -173,10 +191,18 @@
 | `GET /api/sessions/{id}/rules` | → `AllowRule[]` | “本会话一直允许”记下的规则 |
 | `DELETE /api/sessions/{id}/rules` | → `{ok}` | 清掉 |
 
-- 新会话的审批模式：`NewSession.mode`，没给就用配置 `modes.<agent>`，再没有就是 agent 自己的。
+- 新会话的审批模式：`NewSession.mode`，没给就用配置 `modes.<agent>`，再没有就是 agent 的默认（`GET /api/agents` 的 `defaultMode`）。默认一律自动批准（用户定的，2026-11-05）：Claude `auto`；Codex `auto`（Codex 的 `approvalPolicy: never`，`never` 也认），更严的 `untrusted`、`on-request`、`granular` 照样能选；pi `auto`，不装审批扩展，选了 `ask` 才装。配置默认就写着这三项。
 - 模式和强度按 agent 登记表（`GET /api/agents`）：Codex 从下一回合起生效（`turn/start` 带上）；pi 的模式只在启动时装（`modeSwitch: restart`），在跑时改了就重启它（空闲时马上，否则等这个回合结束；接着 `--session-id` 续上，队列照常发）。强度：Codex `effort`、pi `set_thinking_level`，启动时 pi 用 `--thinking`；模型自己带 `:级别` 的以模型的为准。
 - 本会话一直允许：`answer` 带 `always: true`（或卡片选 `always`）。记下工具和 `Ask.pattern`（Claude 自己建议的规则，例如 `ls *`；没有时 shell 命令取第一个词加 ` *`，别的工具不带模式＝这个工具全部）。之后这个会话里匹配的审批自动允许，不通知、不出卡片。
 - 匹配：`*` 是任意一段字；`前缀:*` 同 `前缀*`。shell 命令里有 `;`、`&&`、`||`、`|`、`` ` ``、`$(`、换行的，一律不按模式放行。
+
+## 设置
+
+`GET /api/settings` 给 `Settings`：`idleReap`（`"1h"`、`"15m"`，`"0"` 是不回收）、`crashResume`、`quotaResume`、`quotaHidden`（隐藏的额度条，`<agent>:<账号>:<窗口>:<模型>`）、`modes`（agent → 新会话的审批模式，没列的用 agent 自己的）、`push`（推送总开关，和 `PUT /api/push` 是同一个）。
+
+- `PUT /api/settings` 带 `SettingsPatch`，只改给了的项；`modes` 里给 `""` 是去掉那个 agent 的。时长不对、agent 没有这个模式回 400。
+- 先读配置文件，只改这几项再写回（文件里别的照旧），同时改内存：空闲回收、续跑开关下次判断时就用新的，审批模式从下一次拉起起。
+- 会话自己的设置（库里的）照样盖过这里的。
 
 ## 续跑
 
@@ -197,7 +223,7 @@
   - 选择题：每个问题一组（`group` 是问题序号），选项 `id` 是 `<问题>.<选项>`；`multi` 列出可多选的组。
 - `pick`：插件命令（`/use`、`/model`、`/mode`）给的选择，只有发起的插件能答，24 小时内有效。
 
-`POST /api/answer`：`{card, option}` 或 `{card, choices: [...]}`（每组一个，多选组可多个），拒绝时可带 `message` → `CardReply{ok, reply?, card?}`。已答过或撤回：410。
+`POST /api/answer`：`{card, option}` 或 `{card, choices: [...]}`（每组一个，多选组可多个）；选择题自己写的答案放 `words`（按组，空串是没写），顶替那一组的选择；拒绝时可带 `message` → `CardReply{ok, reply?, card?}`。已答过或撤回：410。
 
 ## 推送
 
@@ -265,7 +291,7 @@ Web Push，总开关在配置 `push`，默认关。VAPID 密钥存在状态目�
 | `PUT /api/me/profile` | 资料 → `EndpointInfo` | 改自己的名字、头像（见 `docs/gate.md`）；本机回 409 |
 | `PUT /api/endpoints/{id}/profile` | 同上 | 改别的终端的（`id` 也可以是名字）；`/api/terminals/{id}/profile` 同 |
 | `GET /api/terminals` | → `Terminals` | `ir access`：所有终端（本机在最前）、权限表、今天的用量，和未用的邀请。没有秘密 |
-| `POST /api/terminals/invites` | `NewInvite` → `Invite` | `ir invite [名字]`：新面板的一次性链接（10 分钟）。要先有 `public.origin`（否则 409）。没有面板权时回 202 `Pending` |
+| `POST /api/terminals/invites` | `NewInvite` → `Invite` | `ir invite [名字]`：新面板的一次性链接（10 分钟），`qr` 是同一链接的二维码（SVG data URL）。要先有 `public.origin`（否则 409）。没有面板权时回 202 `Pending` |
 | `POST /api/terminals/tokens` | `NewInvite` → `Token` | `ir token <名字>`：插件 TOKEN，只给这一次；已有的通道换新 TOKEN，旧的作废。没有面板权时回 202 `Pending` |
 | `PUT /api/terminals/{id}/rules` | `SetRules` → `Terminal` | 改权限表。放宽要面板权；加 Claude 还要 `ownerConfirmed: true` |
 | `DELETE /api/terminals/{id}` | → `{ok}` | `ir revoke`：终端（连同登录、权限、连接）或未用的邀请；最后一个有 Passkey 的面板删不了（409） |
@@ -340,5 +366,6 @@ agent 调 `ir invite`、`ir token` 时，邀请链接和 TOKEN 不能进它的�
 
 ## 部署
 
-- `iridium install [-config <文件>] [-now]`：写用户级单元 `~/.config/systemd/user/iridium.service`（`iridium serve -config ~/.config/iridium/config.json`，带装的时候的 `PATH`），没有配置就写一份默认的（`127.0.0.1:7810`），建 `~/.local/state/iridium`，`daemon-reload`。不加 `-now` 不启动。没开 linger 时提醒：退出登录后服务和托管的 agent 都会停（`sudo loginctl enable-linger <用户>`）。
-- `scripts/deploy.sh`：`web/package.json` 在就先 `npm ci && npm run build`；`go build`（版本取 `git describe`）装到 `~/.local/opt/iridium/iridium`，`~/.local/bin/ir` 链过去，再跑 `iridium install`；服务已在跑就重启它。`IRIDIUM_NO_SYSTEMCTL=1` 不碰 systemd。
+- `iridium install [-config <文件>] [-unit <名>] [-env 名=值]... [-now]`：写用户级单元 `~/.config/systemd/user/iridium.service`（`iridium serve -config ~/.config/iridium/config.json`，带装的时候的 `PATH` 和 `-env` 给的变量；`$XDG_CONFIG_HOME` 设了就写在它下面），没有配置就写一份默认的（`127.0.0.1:7810`），建 `~/.local/state/iridium`，`daemon-reload`。不加 `-now` 不启动。没开 linger 时提醒：退出登录后服务和托管的 agent 都会停（`sudo loginctl enable-linger <用户>`）。
+- `scripts/deploy.sh`：`web/package.json` 在就先 `npm ci && npm run build`（`NO_WEB=1` 用现成的），`internal/webui/dist` 里没有网页就停；`go build`（版本取 `git describe`）装到 `~/.local/opt/iridium/iridium`（`PREFIX`），`~/.local/bin/ir`（`BIN`）链过去，再跑 `iridium install`（`CONFIG`、`UNIT`、`UNIT_ENV` 照传）；服务已在跑就重启它。`IRIDIUM_NO_SYSTEMCTL=1` 不碰 systemd。TCP 地址上就是网页本身（`/api/`、`/_ir/` 之外都是网页，前面同样是门）。
+- `scripts/test-deploy.sh up|again|down [目录]`：不碰真的服务，把 `deploy.sh` 真跑一遍：临时的安装位置、状态、家目录和 Claude 目录，假 claude（`internal/testagent`），单元 `iridium-test-deploy-<n>` 写在 `$XDG_RUNTIME_DIR/systemd/user`（不进 `~/.config`），随机端口；托管进程的单元是 `iridium-test-hold-<n>-*`。`web/scripts/seed.mjs` 往里放会话，`e2e.mjs`、`shoot.mjs` 对着它跑。

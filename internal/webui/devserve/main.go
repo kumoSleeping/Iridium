@@ -1,10 +1,10 @@
-// Command devserve serves the web app as the daemon will (package webui: hashed files kept for
-// good, brotli and gzip twins, JSON gzipped) in front of a running daemon, for trying the page and
-// taking screenshots before webui is mounted in the daemon itself:
+// Command devserve serves a web build from disk as the daemon serves its embedded one (package
+// webui: hashed files kept for good, brotli and gzip twins, JSON gzipped) in front of a running
+// daemon, for working on the page without building Go again after each npm run build:
 //
-//	go run ./internal/webui/devserve -api 127.0.0.1:7831 -listen 127.0.0.1:7832 [-dir internal/webui/dist]
+//	go run ./internal/webui/devserve -api 127.0.0.1:7831 -listen 127.0.0.1:7832 -dir internal/webui/dist
 //
-// -dir serves a build from disk, so a new npm run build shows without building Go again.
+// The daemon serves the app itself on its own address; this is only for the loop of changing it.
 package main
 
 import (
@@ -25,9 +25,6 @@ func main() {
 	apiAddr := flag.String("api", "127.0.0.1:7810", "the daemon's address")
 	listen := flag.String("listen", "127.0.0.1:7832", "where to serve")
 	dir := flag.String("dir", "", "a build on disk; none: the embedded one")
-	mocked := flag.Bool("mock", false, "answer the routes the daemon does not serve yet (mock.go)")
-	me := flag.Bool("me", false, "-mock: a signed-in panel rather than 本机")
-	update := flag.Bool("update", false, "-mock: an update is out")
 	flag.Parse()
 	target := &url.URL{Scheme: "http", Host: *apiAddr}
 	proxy := &httputil.ReverseProxy{
@@ -38,22 +35,12 @@ func main() {
 		},
 		FlushInterval: -1, // the event stream as it comes
 	}
-	var m *mock
-	if *mocked {
-		m = newMock(*me, *update)
-	}
-	api := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if m != nil && m.serve(w, r) {
-			return
-		}
-		proxy.ServeHTTP(w, r)
-	})
 	var app http.Handler = webui.Handler()
 	if *dir != "" {
 		app = fresh(*dir)
 	}
 	log.Printf("devserve: http://%s → %s", *listen, target)
-	log.Fatal(http.ListenAndServe(*listen, webui.WrapApp(api, app)))
+	log.Fatal(http.ListenAndServe(*listen, webui.WrapApp(proxy, app)))
 }
 
 // fresh serves the build in dir, read again whenever its index.html changes.

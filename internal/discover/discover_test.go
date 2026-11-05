@@ -145,6 +145,14 @@ func newRig(t *testing.T) *rig {
 	if err := os.CopyFS(home, os.DirFS("testdata/home")); err != nil {
 		t.Fatal(err)
 	}
+	// There before Iridium watched: the archive, until they show activity.
+	past := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
+	filepath.WalkDir(home, func(p string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
+			os.Chtimes(p, past, past)
+		}
+		return nil
+	})
 	os.MkdirAll(filepath.Join(home, ".claude", "sessions"), 0o700)
 	st, err := store.Open(filepath.Join(t.TempDir(), "iridium.db"))
 	if err != nil {
@@ -188,6 +196,31 @@ func (r *rig) register(pid int, session, cwd string) {
 	if err := os.WriteFile(filepath.Join(r.home, ".claude", "sessions", strconv.Itoa(pid)+".json"), b, 0o600); err != nil {
 		r.t.Fatal(err)
 	}
+}
+
+// shown says whether session id of agent carries the shown marker.
+func (r *rig) shown(agent api.Agent, id string) bool {
+	r.t.Helper()
+	v, err := r.store.Visibility()
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	return v.Shown(string(agent), id)
+}
+
+// grow appends a line to session id's transcript, as its agent goes on.
+func (r *rig) grow(id string) {
+	r.t.Helper()
+	_, f, ok := r.x.Found(id)
+	if !ok || f == nil {
+		r.t.Fatalf("no transcript of %s", id)
+	}
+	w, err := os.OpenFile(f.Path(), os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	w.WriteString(`{"type":"user","message":{"role":"user","content":"more"}}` + "\n")
+	w.Close()
 }
 
 func (r *rig) assignment(id string) (store.Assignment, bool) {
@@ -303,29 +336,39 @@ func TestRunningAndLaunchers(t *testing.T) {
 
 func TestClassification(t *testing.T) {
 	r := newRig(t)
-	// Before any workspace: everything seen is 未归类, and seen.
+	// What was there before Iridium watched is the archive: not shown, and not classified.
 	r.x.Scan()
 	for _, id := range []string{idA, idB, idC, idCodex, idPi, idDsh} {
-		if a, ok := r.assignment(id); !ok || a.Workspace != 0 || a.Manual {
-			t.Fatalf("%s: %+v %v", id, a, ok)
+		if a, ok := r.assignment(id); ok {
+			t.Fatalf("%s classified while hidden: %+v", id, a)
 		}
 	}
-
-	// New sessions: one in /w/a/b/c (the nearest folder above with a session in a workspace
-	// is /w/a/b), one in /w (none above), one started by C's session wherever it is.
+	// A new workspace takes no session by itself.
 	wsA, _ := r.x.CreateWorkspace("/w/a", "")
 	wsB, _ := r.x.CreateWorkspace("/w/a/b", "B")
 	wsC, _ := r.x.CreateWorkspace("/w/c", "")
-	if a, _ := r.assignment(idA); a.Workspace != wsA.ID {
-		t.Fatalf("a new workspace takes its folder's 未归类 sessions: %+v", a)
+	if _, ok := r.assignment(idA); ok {
+		t.Fatal("a new workspace took a session")
 	}
-	if b, _ := r.assignment(idB); b.Workspace != wsA.ID {
-		t.Fatalf("B (in /w/a/b) went with the first workspace above it: %+v", b)
-	}
-	r.x.Patch(idB, api.SessionPatch{Workspace: &wsB.ID})
 	if wsA.Name != "a" || wsB.Name != "B" {
 		t.Errorf("names: %q %q", wsA.Name, wsB.Name)
 	}
+	// Activity shows a session and classifies it once: A in /w/a, the folder of a workspace.
+	r.grow(idA)
+	r.grow(idC)
+	r.x.Scan()
+	if a, _ := r.assignment(idA); a.Workspace != wsA.ID || a.Manual {
+		t.Fatalf("A in /w/a: %+v, want the workspace of that folder %d", a, wsA.ID)
+	}
+	if c, _ := r.assignment(idC); c.Workspace != wsC.ID {
+		t.Fatalf("C in /w/c: %+v", c)
+	}
+	if _, ok := r.assignment(idB); ok {
+		t.Fatal("B, still hidden, classified")
+	}
+
+	// New sessions: one in /w/a/b/c (the nearest folder above is B's workspace's), one in /w
+	// (none above), one started by C's session wherever it is.
 	newClaude := func(id, cwd string, at time.Time) {
 		dir := filepath.Join(r.home, ".claude", "projects", filepath.Base(cwd)+"-x")
 		os.MkdirAll(dir, 0o700)
@@ -337,7 +380,7 @@ func TestClassification(t *testing.T) {
 	idD := "44444444-4444-4444-8444-444444444444"
 	idE := "55555555-5555-4555-8555-555555555555"
 	idF := "66666666-6666-4666-8666-666666666666"
-	now := time.Now()
+	now := time.Now().Add(time.Second)
 	newClaude(idD, "/w/a/b/c", now)
 	newClaude(idE, "/w", now)
 	newClaude(idF, "/somewhere/else", now)
@@ -354,8 +397,9 @@ func TestClassification(t *testing.T) {
 		t.Errorf("F started by C: %+v, want C's workspace %d", f, wsC.ID)
 	}
 
-	// Only once: with B moved back to A's workspace, a later look leaves D where it went.
-	r.x.Patch(idB, api.SessionPatch{Workspace: &wsA.ID})
+	// Only once: with A moved to C's workspace, a later look leaves D where it went.
+	r.x.Patch(idA, api.SessionPatch{Workspace: &wsC.ID})
+	r.grow(idD)
 	r.x.Scan()
 	if d, _ := r.assignment(idD); d.Workspace != wsB.ID {
 		t.Errorf("D moved: %+v", d)
@@ -371,8 +415,72 @@ func TestClassification(t *testing.T) {
 	}
 }
 
+// The shown marker: activity after Iridium began watching sets it; hiding notes the size, and
+// only growth past it shows the session again; a restart keeps when watching began.
+func TestShownMarker(t *testing.T) {
+	r := newRig(t)
+	r.x.Scan()
+	for _, id := range []string{idA, idB, idC} {
+		if r.shown(api.AgentClaude, id) {
+			t.Fatalf("%s shown with no activity", id)
+		}
+	}
+	if r.shown(api.AgentCodex, idCodex) || r.shown(api.AgentPi, idPi) {
+		t.Fatal("codex or pi shown with no activity")
+	}
+	r.grow(idA)
+	r.x.Scan()
+	if !r.shown(api.AgentClaude, idA) || r.shown(api.AgentClaude, idB) {
+		t.Fatal("A grew: shown; B did not")
+	}
+	// Archived: hidden at its size; looking again does not bring it back, growing does.
+	size, _ := r.x.Size(idA)
+	if err := r.store.Hide(string(api.AgentClaude), idA, size, 0); err != nil {
+		t.Fatal(err)
+	}
+	r.x.Scan()
+	if r.shown(api.AgentClaude, idA) {
+		t.Fatal("A came back with no growth")
+	}
+	// Growth while it is quiet (its agent ending) does not count.
+	r.store.Hide(string(api.AgentClaude), idA, size, time.Now().Add(time.Hour).UnixMilli())
+	r.grow(idA)
+	r.x.Scan()
+	if r.shown(api.AgentClaude, idA) {
+		t.Fatal("A came back while quiet")
+	}
+	size, _ = r.x.Size(idA)
+	r.store.Hide(string(api.AgentClaude), idA, size, 0)
+	r.grow(idA)
+	r.x.Scan()
+	if !r.shown(api.AgentClaude, idA) {
+		t.Fatal("A grew after it was archived: shown again")
+	}
+
+	// A restart: a new index over the same store. What is there stays as it was; a transcript
+	// written meanwhile, never seen, is activity.
+	_, fb, _ := r.x.Found(idB)
+	later := time.Now().Add(time.Second)
+	os.Chtimes(fb.Path(), later, later)
+	x := New(Options{
+		ClaudeDir: filepath.Join(r.home, ".claude"), CodexHome: filepath.Join(r.home, ".codex"),
+		PiSessions: filepath.Join(r.home, ".pi", "agent", "sessions"), DshHome: filepath.Join(r.home, ".dsh"),
+		Store: r.store, Procs: r.procs, UID: me, Logf: t.Logf, Settle: 10 * time.Millisecond, ProcScan: time.Hour, Rescan: time.Hour,
+	})
+	x.Scan()
+	if !r.shown(api.AgentClaude, idB) {
+		t.Error("B written while no daemon looked: shown")
+	}
+	if r.shown(api.AgentClaude, idC) {
+		t.Error("C untouched: still hidden after a restart")
+	}
+}
+
 func TestMoveSticks(t *testing.T) {
 	r := newRig(t)
+	r.x.Scan()
+	r.grow(idA)
+	r.grow(idB)
 	r.x.Scan()
 	wsA, _ := r.x.CreateWorkspace("/w/a", "")
 	wsC, _ := r.x.CreateWorkspace("/w/c", "")
@@ -386,35 +494,17 @@ func TestMoveSticks(t *testing.T) {
 	if a, _ := r.assignment(idA); a.Workspace != wsC.ID || !a.Manual {
 		t.Fatalf("A: %+v", a)
 	}
-	// A new workspace of their folder takes neither.
 	r.x.DeleteWorkspace(wsA.ID)
-	again, _ := r.x.CreateWorkspace("/w", "")
-	if a, _ := r.assignment(idA); a.Workspace != wsC.ID {
-		t.Errorf("A moved by a new workspace: %+v", a)
-	}
-	if b, _ := r.assignment(idB); b.Workspace != 0 {
-		t.Errorf("B moved by a new workspace: %+v", b)
-	}
-	// Deleting a workspace leaves its sessions in none, and they stay seen.
+	// Deleting a workspace leaves its sessions in none, and they are not classified again.
 	if err := r.x.DeleteWorkspace(wsC.ID); err != nil {
 		t.Fatal(err)
 	}
+	r.grow(idA)
 	r.x.Scan()
 	if a, ok := r.assignment(idA); !ok || a.Workspace != 0 {
 		t.Errorf("A after its workspace went: %+v %v", a, ok)
 	}
-	if c, _ := r.assignment(idC); c.Workspace != 0 {
-		t.Errorf("C, whose workspace went, is not classified again: %+v", c)
-	}
-	// One never moved, in none, goes in a new workspace of its folder.
-	if e, _ := r.assignment(idCodex); e.Workspace != 0 {
-		t.Fatalf("codex: %+v", e)
-	}
-	tmp, _ := r.x.CreateWorkspace("/tmp", "")
-	if e, _ := r.assignment(idCodex); e.Workspace != tmp.ID {
-		t.Errorf("codex in /tmp/...: %+v", e)
-	}
-	if b, _ := r.assignment(idB); b.Workspace != 0 || again.ID == 0 {
+	if b, _ := r.assignment(idB); b.Workspace != 0 {
 		t.Errorf("B: %+v", b)
 	}
 	// Moving to a workspace that is not there fails.
@@ -422,14 +512,17 @@ func TestMoveSticks(t *testing.T) {
 	if err := r.x.Patch(idA, api.SessionPatch{Workspace: &bad}); !errors.Is(err, store.ErrNoWorkspace) {
 		t.Errorf("move to none: %v", err)
 	}
+	if _, err := r.x.CreateWorkspace("/w", ""); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := r.x.CreateWorkspace("/w", ""); !errors.Is(err, store.ErrWorkspacePath) {
 		t.Errorf("a second workspace of /w: %v", err)
 	}
-	// The overlay: name, pin, archive.
+	// The overlay: name, pin.
 	name, yes := "mine", true
-	r.x.Patch(idA, api.SessionPatch{Name: &name, Pinned: &yes, Archived: &yes})
+	r.x.Patch(idA, api.SessionPatch{Name: &name, Pinned: &yes})
 	o, _ := r.store.Overlays()
-	if o[idA].Name != "mine" || !o[idA].Pinned || !o[idA].Archived {
+	if o[idA].Name != "mine" || !o[idA].Pinned {
 		t.Errorf("overlay: %+v", o[idA])
 	}
 }

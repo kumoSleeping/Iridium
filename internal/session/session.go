@@ -18,6 +18,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kumoSleeping/iridium/internal/agent"
@@ -33,7 +34,7 @@ import (
 const UnitPrefix = "iridium-hold-"
 
 // SystemPrompt is appended to every hosted agent's system prompt (plan "ir").
-const SystemPrompt = "用 ir 开别的 agent 会话、发消息、等结果、跨机器拷文件；见 ir --help\n"
+const SystemPrompt = "在需要时用 ir 开别的 agent 会话、发消息、等结果、跨机器拷文件；见 ir --help\n"
 
 // Discovery finds the sessions on disk that agents started by themselves (agents' record
 // directories, ~/.claude/sessions/, /proc). Another package implements it.
@@ -78,6 +79,9 @@ type Manager struct {
 
 	wmu      sync.Mutex
 	watchers []func(Notice)
+
+	tune     atomic.Pointer[Tunables] // tune.go
+	annotate atomic.Pointer[Annotate] // carry.go
 }
 
 func New(o Options) (*Manager, error) {
@@ -108,6 +112,7 @@ func New(o Options) (*Manager, error) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	m := &Manager{o: o, ctx: ctx, cancel: cancel, hosted: map[string]*Hosted{}, quota: map[string]api.AgentQuota{}}
+	m.Tune(TunablesOf(o.Config))
 	o.Hub.Provide = m.provide
 	return m, nil
 }
@@ -124,6 +129,7 @@ func (m *Manager) Start() error {
 		return err
 	}
 	m.loadQuota()
+	vis := m.visibility()
 	metas, _ := filepath.Glob(filepath.Join(m.holdRoot(), "*", fileMeta))
 	for _, p := range metas {
 		var mt meta
@@ -139,6 +145,7 @@ func (m *Manager) Start() error {
 		m.mu.Lock()
 		m.hosted[mt.ID] = h
 		m.mu.Unlock()
+		h.adoptShown(vis)
 		if err := h.adopt(); err != nil {
 			m.o.Logf("session %s: %v", mt.ID, err)
 		}
@@ -241,6 +248,7 @@ func (m *Manager) Create(ctx context.Context, req api.NewSession, from string) (
 	m.hosted[mt.ID] = h
 	m.mu.Unlock()
 	h.newSession = true
+	h.show() // Iridium's own: shown from the start
 	if req.Workspace != 0 {
 		if err := m.o.Store.Move(mt.ID, req.Workspace); err != nil {
 			return mt.ID, err
@@ -336,11 +344,12 @@ func (m *Manager) List(ctx context.Context) ([]api.Session, error) {
 		hosted = append(hosted, h)
 	}
 	m.mu.Unlock()
+	vis := m.visibility()
 	out := make([]api.Session, 0, len(hosted))
 	seen := map[string]bool{}
 	for _, h := range hosted {
 		as := h.discoveredAs()
-		out = append(out, m.elsewhere(h.summary(over[h.id]), as))
+		out = append(out, m.elsewhere(h.summary(over[h.id], !h.shownIn(vis)), as))
 		// A hosted Codex session is on disk under its thread: listed once, as hosted.
 		seen[h.id], seen[as] = true, true
 	}
@@ -352,7 +361,8 @@ func (m *Manager) List(ctx context.Context) ([]api.Session, error) {
 		for _, s := range found {
 			if !seen[s.ID] {
 				o := over[s.ID]
-				s.Name, s.Pinned, s.Archived, s.Workspace = o.Name, o.Pinned, o.Archived, o.Workspace
+				s.Name, s.Pinned, s.Workspace = o.Name, o.Pinned, o.Workspace
+				s.Archived = !vis.Shown(string(s.Agent), s.ID)
 				out = append(out, s)
 			}
 		}
@@ -376,7 +386,7 @@ func (m *Manager) State(id string) (*api.SessionState, error) {
 		return m.foreignState(id, nil)
 	}
 	over, _ := m.o.Store.Overlays()
-	s := h.state(over[id])
+	s := h.state(over[id], !h.shown())
 	return &s, nil
 }
 
@@ -463,7 +473,7 @@ func (m *Manager) reap() {
 		}
 		m.mu.Unlock()
 		for _, h := range hosted {
-			after := m.o.Config.IdleReap.D()
+			after := m.tuned().IdleReap
 			if st, err := m.o.Store.Settings(h.id); err == nil && st.IdleReap != nil {
 				after = *st.IdleReap
 			}

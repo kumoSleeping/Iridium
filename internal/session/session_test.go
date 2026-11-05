@@ -122,7 +122,7 @@ func TestHostedTurn(t *testing.T) {
 	s := r.waitState(id, "the reply", func(s *api.SessionState) bool {
 		return s.Status == api.StatusIdle && s.Last != nil && s.Last.Text == "ok: hello"
 	})
-	if !s.Live || s.Model != "fake-model" || s.Mode != "default" || s.Proc != 1 || s.Title != "hello" {
+	if !s.Live || s.Model != "fake-model" || s.Mode != "auto" || s.Proc != 1 || s.Title != "hello" {
 		t.Errorf("state: %+v", s)
 	}
 	b := r.messages(id)
@@ -259,7 +259,7 @@ func TestDaemonRestart(t *testing.T) {
 
 	o := Options{Config: r.cfg, Store: r.store, Launcher: r.l, Exe: os.Args[0], UnitPrefix: "iridium-test-", Logf: t.Logf, Poll: 10 * time.Millisecond}
 	r.start(o)
-	s := r.waitState(id, "the session taken up", func(s *api.SessionState) bool { return s.Live && s.Mode == "default" })
+	s := r.waitState(id, "the session taken up", func(s *api.SessionState) bool { return s.Live && s.Mode == "auto" })
 	if s.Proc != 1 || s.Model != "fake-model" {
 		t.Errorf("taken up: %+v", s)
 	}

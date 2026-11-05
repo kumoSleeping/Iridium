@@ -33,6 +33,12 @@ func TestMain(m *testing.M) {
 
 func setup(t *testing.T) (*Server, config.Config, string) {
 	t.Helper()
+	return setupWith(t, nil)
+}
+
+// setupWith is setup with the session manager's options changed by edit first.
+func setupWith(t *testing.T, edit func(*session.Options)) (*Server, config.Config, string) {
+	t.Helper()
 	root := t.TempDir()
 	bin := filepath.Join(root, "bin")
 	os.MkdirAll(bin, 0o700)
@@ -53,7 +59,11 @@ func setup(t *testing.T) (*Server, config.Config, string) {
 	l := &platform.Direct{}
 	var srv *Server
 	tag := func(id string) string { return srv.Tag(id) }
-	m, err := session.New(session.Options{Config: cfg, Store: st, Hub: h, Launcher: l, Exe: os.Args[0], UnitPrefix: "iridium-test-", Logf: t.Logf, Poll: 10 * time.Millisecond, Tag: tag})
+	o := session.Options{Config: cfg, Store: st, Hub: h, Launcher: l, Exe: os.Args[0], UnitPrefix: "iridium-test-", Logf: t.Logf, Poll: 10 * time.Millisecond, Tag: tag}
+	if edit != nil {
+		edit(&o)
+	}
+	m, err := session.New(o)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,11 +152,8 @@ func TestTurnOverHTTP(t *testing.T) {
 	if code := call(t, c, "GET", base+"/api/sessions/nope", nil, nil); code != 404 {
 		t.Errorf("unknown session: %d", code)
 	}
-	if code := call(t, c, "GET", base+"/api/events?sub=bad", nil, nil); code != 400 {
-		t.Errorf("bad sub: %d", code)
-	}
-
-	resp, err := http.Get(base + "/api/events?sub=list&sub=session:" + id)
+	// A key the daemon does not know is left out, and the stream says so; the rest goes on.
+	resp, err := http.Get(base + "/api/events?sub=list&sub=bad&sub=session:" + id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +181,7 @@ func TestTurnOverHTTP(t *testing.T) {
 	}
 	var draft strings.Builder
 	var last api.SessionState
-	gotList := false
+	gotList, gotBad := false, false
 	for deadline := time.After(10 * time.Second); last.Last == nil || last.Last.Text != "ok: hello" || last.Status != api.StatusIdle; {
 		select {
 		case e := <-events:
@@ -185,11 +192,14 @@ func TestTurnOverHTTP(t *testing.T) {
 				draft.WriteString(d.Text)
 			case "state":
 				var se struct {
-					Key   string          `json:"key"`
-					Value json.RawMessage `json:"value"`
+					Key     string          `json:"key"`
+					Value   json.RawMessage `json:"value"`
+					Ignored string          `json:"ignored"`
 				}
 				json.Unmarshal([]byte(e[1]), &se)
-				if se.Key == "list" {
+				if se.Key == "bad" {
+					gotBad = se.Ignored == "unknown"
+				} else if se.Key == "list" {
 					gotList = true
 				} else {
 					last = api.SessionState{}
@@ -200,8 +210,8 @@ func TestTurnOverHTTP(t *testing.T) {
 			t.Fatalf("no reply on the stream; last state %+v", last)
 		}
 	}
-	if draft.String() != "ok: hello" || !gotList || last.End == 0 {
-		t.Errorf("draft %q, list %v, end %d", draft.String(), gotList, last.End)
+	if draft.String() != "ok: hello" || !gotList || !gotBad || last.End == 0 {
+		t.Errorf("draft %q, list %v, bad key told %v, end %d", draft.String(), gotList, gotBad, last.End)
 	}
 
 	var page api.MessagePage
@@ -228,18 +238,32 @@ func TestTurnOverHTTP(t *testing.T) {
 	if code := call(t, uc, "POST", "http://ir/api/sessions/"+id+"/send", api.Send{Text: "again"}, nil); code != 200 {
 		t.Fatalf("send over the socket: %d", code)
 	}
-	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
-		var after api.MessagePage
-		call(t, uc, "GET", "http://ir/api/sessions/"+id+"/messages?after="+itoa(page.End), nil, &after)
-		if len(after.Blocks) == 2 {
-			if after.Blocks[0].From != TerminalLocal || after.Blocks[1].Text != "ok: again" {
-				t.Errorf("after: %+v", after.Blocks)
+	waitAfter := func(end int64) api.MessagePage {
+		t.Helper()
+		for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+			var after api.MessagePage
+			call(t, uc, "GET", "http://ir/api/sessions/"+id+"/messages?after="+itoa(end), nil, &after)
+			if len(after.Blocks) == 2 {
+				return after
 			}
-			break
+			if time.Now().After(deadline) {
+				t.Fatalf("nothing after %d: %+v", end, after)
+			}
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("nothing after %d: %+v", page.End, after)
-		}
+	}
+	after := waitAfter(page.End)
+	if after.Blocks[0].From != TerminalLocal || after.Blocks[1].Text != "ok: again" {
+		t.Errorf("after: %+v", after.Blocks)
+	}
+	// An agent's ir in another session: a letter from that session, still 本机's.
+	req, _ := http.NewRequest("POST", "http://ir/api/sessions/"+id+"/send", strings.NewReader(`{"text":"from a session"}`))
+	req.Header.Set(HeaderAgent, "1")
+	req.Header.Set(HeaderSession, "caller-1")
+	if resp, err := uc.Do(req); err != nil || resp.StatusCode != 200 {
+		t.Fatalf("an agent's send: %v %v", resp, err)
+	}
+	if b := waitAfter(after.End).Blocks; b[0].From != "ir:caller-1" || b[0].FromTerminal != "local" || b[0].Text != "from a session" || b[1].Text != "ok: from a session" {
+		t.Errorf("an agent's send: %+v", b)
 	}
 	// A second daemon on the same socket is refused.
 	if _, _, err := s.Listen(); err == nil {

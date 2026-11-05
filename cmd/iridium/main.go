@@ -32,7 +32,8 @@ const usage = `usage:
   iridium serve [-config <file>]   the daemon
   iridium hold <dir>               the holder of one agent process (the daemon starts it)
   iridium ir ...                   the CLI, as when run as ir
-  iridium install [-config <file>] [-now]   the user unit iridium.service (started only with -now)
+  iridium install [-config <file>] [-unit <name>] [-env NAME=VALUE]... [-now]
+                                   the user unit iridium.service (started only with -now)
   iridium version
 `
 
@@ -119,14 +120,9 @@ func serve(args []string) int {
 	srv.ConfigPath = *path
 	srv.Updater = newUpdater(cfg, h)
 	h.Set("update", srv.Updater.State())
-	// Web Push's total switch is the config's: turning it writes the file.
+	// Web Push's total switch is the config's: turning it writes the file (with the settings').
 	srv.Push, err = push.Open(push.Options{StateDir: state, Store: st, Manager: m, Enabled: cfg.Push, Save: func(on bool) error {
-		c, err := config.Load(*path)
-		if err != nil {
-			return err
-		}
-		c.Push = on
-		return c.Save(*path)
+		return srv.SaveConfig(func(c *config.Config) { c.Push = on })
 	}})
 	if err != nil {
 		log.Print(err)
