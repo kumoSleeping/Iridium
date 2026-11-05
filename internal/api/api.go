@@ -142,6 +142,8 @@ type Block struct {
 	Error  bool    `json:"error,omitempty"` // result
 	// system: what happened.
 	Event SystemEvent `json:"event,omitempty"`
+	// Files the block names that exist: user and assistant text, a Write call's file.
+	Files []FileRef `json:"files,omitempty"`
 }
 
 type BlockKind string
@@ -196,6 +198,9 @@ type NewSession struct {
 	Text  string `json:"text,omitempty"`
 	Model string `json:"model,omitempty"`
 	Mode  string `json:"mode,omitempty"`
+	// Caller is the session that ran ir new (from IRIDIUM_SESSION, CLAUDE_CODE_SESSION_ID,
+	// CODEX_THREAD_ID…): the new session goes into its workspace.
+	Caller string `json:"caller,omitempty"`
 }
 
 type NewSessionReply struct {
@@ -205,6 +210,10 @@ type NewSessionReply struct {
 // Send gives the session a message: a new turn when idle, else it joins the running one.
 type Send struct {
 	Text string `json:"text"`
+	// Attachments are file refs of the session (uploads, attached paths): their paths are written
+	// into the message, and images go to the agent as images too.
+	Attachments []string `json:"attachments,omitempty"`
+	Caller      string   `json:"caller,omitempty"` // as NewSession's
 }
 
 type SendReply struct {

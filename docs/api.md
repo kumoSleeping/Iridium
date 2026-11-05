@@ -67,3 +67,45 @@
 ## 状态灯（`Status`）
 
 `idle` 无灯，`starting` 启动中，`running` 运行中，`compacting` 压缩中，`waiting` 需要你（有提问），`error` 上次进程出错退出（原因在 `SessionState.error`），`elsewhere` 在别处运行（自动发现做好后才有）。`live` 说 agent 进程在不在跑。
+
+## 文件和上传
+
+代码在 `internal/files`（路径检查在 `internal/pathsafe`），路由在 `internal/server/routes_files.go`。
+
+| 请求 | 正文 → 回答 | 说明 |
+|---|---|---|
+| `GET /api/sessions/{id}/files/{ref}` | → 文件 | 支持 `Range`/`If-Range`；`ETag`（大小 + 修改时间）；`X-Sha256` 和 `Repr-Digest`（64MB 以下当场算，大的算过才有）。`?download` 强制下载 |
+| `GET /api/sessions/{id}/files/{ref}/thumb?size=1024` | → 图片 | 缩略图，最长边默认 1024（32–4096）。png/jpeg/gif/webp；按路径 + 大小 + 修改时间缓存在状态目录 `thumbs/`；SVG 原样给 |
+| `GET /api/sessions/{id}/files/{ref}/info` | → `FileRef` | 带 `sha256` |
+| `POST /api/sessions/{id}/uploads` | `NewUpload` → `Upload` | 建上传任务。超过 `uploads.maxFile`（默认 2GB）是 413 |
+| `PUT /api/uploads/{upload}?offset=<n>` | 块 → `Upload` | `offset` 必须等于 `received`，否则 409（正文也带 `Upload`）。一块最多 64MB；块大小客户端定（8–50MB，按测到的速度） |
+| `GET /api/uploads/{upload}` | → `Upload` | 已收多少（续传从 `received` 接着发）。断在半块时，到达的部分也算 |
+| `POST /api/uploads/{upload}/complete` | `{sha256}` → `Upload` | 核对 sha256，对上了原子改名，`file` 里是引用。对不上 422，已收的丢掉，从 0 重传 |
+| `DELETE /api/uploads/{upload}` | → `{ok}` | 取消 |
+
+只走 unix socket（本机 `ir`）：
+
+| 请求 | 正文 → 回答 | 说明 |
+|---|---|---|
+| `POST /api/sessions/{id}/attach` | `{path}` → `FileRef` | 把本机文件当这个会话的附件（`ir send -a`），不复制 |
+| `GET /api/files?path=<目录>` | → `DirListing` | 列一层（`ir files`） |
+| `POST /api/files/copy` | `{from, to}` → NDJSON | 拷文件（`ir cp`）：每 250ms 一行 `CopyProgress`，最后一行带 `path`、`sha256` 或 `error`。由 Iridium 拷，`ir` 断了也接着拷；同样的请求再来就接上 |
+
+规则：
+
+- **引用**：`ref` 只对这个会话有效，同一路径每次一样（状态目录 `files.key` 做的 HMAC），看不出路径。只有会话记录里出现过的路径、它的上传和附件才有引用；服务器取不到就从上次读到的地方往后读记录。
+- **认文件**（`Block.files`）：你的话和 agent 的话里的 `![](路径)`、`[名](路径)`（相对会话目录；可带 `#行号`、`file://`；网址不算）、行内代码里的绝对路径或 `~/` 路径（可带 `:行:列`），以及 `Write` 调用的 `file_path`。围栏代码块里的不算。只认存在的普通文件。
+- **类型**：先看扩展名，没有再嗅前 512 字节。图片、音视频、PDF、纯文本内联显示，其余下载。所有文件都带 `Content-Security-Policy: …; sandbox` 和 `nosniff`，SVG、HTML 里的脚本不会跑。
+- **上传位置**：会话目录的 `.iridium/uploads/`（建目录时写一个只有 `*` 的 `.gitignore`）。会话目录是 `$HOME`、写不进或不许写时，放状态目录 `uploads/files/<会话>/`。同名不覆盖，改叫 `名 (2).扩展名`。先写 `.<id>.part`，核对后用硬链接放到位（原子、不覆盖）。上传记录在状态目录 `uploads/records/`，重启后能续传。
+- **清理**：`uploads.keep`（默认 `720h`，`"0"` 不清）以前的上传连同文件（没改过的才删）和缩略图，每小时一次。
+- **附件**：`Send.attachments` 是引用。每个附件在消息末尾占一行 `` [附件] `路径` ``；图片另作为图片块给 Claude（超过 5MB 或边长 8000 时给缩到 1568 的副本，一条消息的图片共 20MB 以内），最多 20 个附件。
+- **路径检查**（`pathsafe.Guard`）：先解析符号链接（不存在的路径解析到最深的已有上层）再比允许的目录；写着的路径和解析后的都不能落在 Iridium 的状态和配置目录、`~/.ssh`、`~/.claude`（及 `CLAUDE_CONFIG_DIR`）、`~/.codex`（及 `CODEX_HOME`）、`~/.pi`、`~/.dsh`、`/proc` 里，状态目录的 `uploads/files` 例外。被拒是 403。
+## `ir`（agent 用的部分）
+
+- 代码在 `internal/cli`，走上面这套接口；socket 用 `IRIDIUM_SOCKET`，没有就读配置（`IRIDIUM_CONFIG` 或默认位置）。
+- `<id>` 可只写开头（唯一即可）；`ir new`、`ir ls` 打印至少 8 位的短 ID。`机器:路径`、`机器/<id>` 现在报 `peer not connected`。
+- 输出给 agent 看：只打最后一段回复（`new --wait` 先一行 ID）；`cp` 一行 `路径 大小 sha256`；需要你时每个提问一行 `需要你：…`。进度只在 stderr 是终端时画。
+- `send`、`new` 不带 `--wait` 时等到 agent 接了这条消息（最多 15 秒）再返回，所以紧接着的 `ir wait` 等的是这一回合。
+- 退出码：0 结束，2 需要你，1 出错（agent 出错退出、回合中被停、`ir` 自己出错）。
+
+- `NewSession.caller`、`Send.caller`：`ir` 从环境变量（`IRIDIUM_SESSION`、`CLAUDE_CODE_SESSION_ID`、`CODEX_THREAD_ID`…）读到的调用者会话，新会话进它的工作区；服务器现在还不用。
