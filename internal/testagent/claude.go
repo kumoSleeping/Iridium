@@ -132,6 +132,8 @@ func Claude() int {
 		req := map[string]any{"type": "control_request", "request_id": id, "request": map[string]any{"subtype": "can_use_tool", "tool_name": "Bash", "input": map[string]any{"command": command}, "tool_use_id": "toolu_" + id,
 			"permission_suggestions": []any{map[string]any{"type": "addRules", "rules": []any{map[string]any{"toolName": "Bash", "ruleContent": "ls *"}}, "behavior": "allow", "destination": "localSettings"}}}}
 		open = []any{req}
+		// As the CLI does: the call in an assistant message (its usage the context so far), then the ask.
+		say(map[string]any{"type": "assistant", "parent_tool_use_id": nil, "message": map[string]any{"role": "assistant", "content": []any{map[string]any{"type": "tool_use", "id": "toolu_" + id, "name": "Bash", "input": map[string]any{"command": command}}}, "usage": map[string]any{"input_tokens": 10}}})
 		say(req)
 	}
 	question := func(id string) {

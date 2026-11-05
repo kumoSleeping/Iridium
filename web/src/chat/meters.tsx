@@ -1,7 +1,6 @@
-// The composer's meters (plan "网页"): the context ring beside the send key, its breakdown in a
-// popover; the quota bars on the composer's top-right, one thin bar per window, amber nearly full,
-// red full, faded when last read long ago or no process runs; the approval-mode key and the model
-// key under the composer.
+// The composer's meters (plan "网页"), in a row under it: the approval-mode key, the model key, the
+// quota bars after them, a bar and its percent per window, amber nearly full, red full, faded when
+// last read long ago or no process runs; at the right the context ring, its breakdown in a popover.
 import { Menu } from "@base-ui/react/menu";
 import { Popover } from "@base-ui/react/popover";
 import { Check, ChevronDown, FilePen, ListChecks, ShieldCheck, ShieldOff, ShieldQuestion, ShieldX, SlidersHorizontal, Sparkles } from "lucide-react";
@@ -64,8 +63,8 @@ export function ContextRing({ session, summary, open, onOpenChange }: { session:
       <Tip label={label}>
         <Popover.Trigger
           render={
-            <button type="button" aria-label={label} className="g-press flex h-8 items-center gap-1.5 rounded-md px-1.5 text-xs text-ink-3 tabular-nums hover:bg-fill hover:text-ink-2 data-popup-open:bg-fill pointer-coarse:h-10">
-              <svg width="18" height="18" viewBox="0 0 18 18" className="-rotate-90">
+            <button type="button" aria-label={label} className="g-press flex h-7 shrink-0 items-center gap-1.5 rounded-md px-1.5 text-xs text-ink-3 tabular-nums hover:bg-fill hover:text-ink-2 data-popup-open:bg-fill pointer-coarse:h-9">
+              <svg width="16" height="16" viewBox="0 0 18 18" className="-rotate-90">
                 <circle cx="9" cy="9" r={r} fill="none" stroke="var(--fill-2)" strokeWidth="2.25" />
                 <circle cx="9" cy="9" r={r} fill="none" stroke={pct >= 90 ? "var(--need)" : "var(--ink-2)"} strokeWidth="2.25" strokeLinecap="round" strokeDasharray={`${(circ * pct) / 100} ${circ}`} />
               </svg>
@@ -116,7 +115,7 @@ function resetIn(at: number | undefined, lang: string): string {
 
 const STALE = 15 * 60_000;
 
-/** The agent's quota bars, on the composer's top-right. */
+/** The agent's quota bars, after the model key in the row under the composer. */
 export function QuotaBars({ agent, live }: { agent: Agent; live: boolean }) {
   const lang = useLang();
   const quota = useQuota();
@@ -127,17 +126,18 @@ export function QuotaBars({ agent, live }: { agent: Agent; live: boolean }) {
   // Faded once no process of the agent runs (the daemon says, else this session), or read long ago.
   const stale = !(q.live ?? live) || Date.now() - q.at > STALE;
   return (
-    <div className={cn("absolute top-[3px] right-4 flex gap-1 transition-opacity", stale && "opacity-50")}>
+    <div className={cn("flex shrink-0 items-center gap-3 px-1.5 transition-opacity", stale && "opacity-50")}>
       {windows.map((w) => {
         const pct = Math.round(w.percent);
         const label = `${windowName(agent, w)} · ${t("quota.tip", { pct, time: resetIn(w.resetsAt, lang) })}`;
         const tone = pct >= 95 ? "bg-err" : pct >= 80 ? "bg-need" : "bg-ink-3";
         return (
           <Tip key={quotaKey(q, w)} label={label}>
-            <span role="meter" aria-label={label} aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} className="relative flex h-3 w-7 items-center before:absolute before:-inset-x-0.5 before:-inset-y-2 before:content-['']">
-              <span className="relative h-[3px] w-full overflow-hidden rounded-full bg-fill-2">
+            <span role="meter" aria-label={label} aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} className="relative flex h-7 items-center gap-1.5 pointer-coarse:h-9">
+              <span className="relative h-1 w-9 overflow-hidden rounded-full bg-fill-2">
                 <span className={cn("absolute inset-y-0 left-0 w-full origin-left rounded-full transition-transform duration-(--dur-3)", tone)} style={{ transform: `scaleX(${Math.min(100, pct) / 100})` }} />
               </span>
+              <span className={cn("text-xs tabular-nums", pct >= 95 ? "text-err" : pct >= 80 ? "text-need" : "text-ink-3")}>{pct}%</span>
             </span>
           </Tip>
         );

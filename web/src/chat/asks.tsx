@@ -40,8 +40,9 @@ export function Asks({ session, asks, cwd, confirms = [] }: { session: string; a
   };
   if (!asks.length && !confirms.length) return null;
   return (
-    // Padded out under negative margins: the cards' shadows are not cut where the list scrolls.
-    <div className="-mx-3 -mt-3 mb-[-4px] flex max-h-[55dvh] flex-col gap-2 overflow-y-auto px-3 pt-3 pb-3">
+    // Padded out under negative margins: the cards' shadows (12px down, 32px blur) are not cut where
+    // the list scrolls, nor over the meters row under it.
+    <div className="-mx-8 -mt-3 mb-[-36px] flex max-h-[55dvh] flex-col gap-2 overflow-y-auto px-8 pt-3 pb-11">
       {confirms.map((c) => (
         <ConfirmCard key={c.id} c={c} />
       ))}

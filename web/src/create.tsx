@@ -1,9 +1,9 @@
-// Creating things (plan "网页" 新建): the sidebar's "+" popover (new session, new workspace), the
-// new-session page (pick an agent; the folder defaults to the workspace's root) and the folder-only
+// Creating things (plan "网页" 新建): the sidebar's "+" (a new workspace), a workspace row's "+" (a
+// new session: pick an agent; the folder defaults to the workspace's root) and the folder-only
 // picker: a breadcrumb you can tap or type into, folders only, an inline new folder, one key.
 import { Popover } from "@base-ui/react/popover";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, Folder, FolderPlus, LoaderCircle, MessageSquarePlus, PencilLine, SquarePlus } from "lucide-react";
+import { ChevronRight, Folder, FolderPlus, LoaderCircle, PencilLine } from "lucide-react";
 import { useState, type CSSProperties, type ReactElement } from "react";
 import type { Workspace } from "./api/types.gen";
 import { api, missing } from "./api/client";
@@ -12,8 +12,6 @@ import { t } from "./i18n";
 import { useAgents, useHome } from "./data";
 import { errText, toast } from "./toast";
 import { AGENTS, agentName, cn, homeOf, IconKey, Logo, PopSurface, tilde, Tip } from "./ui";
-
-export type NewPage = "menu" | "session" | "sessionFolder" | "workspace";
 
 const base = (p: string) => p.split("/").filter(Boolean).pop() ?? p;
 const join = (dir: string, name: string) => (dir.endsWith("/") ? dir + name : `${dir}/${name}`);
@@ -184,20 +182,11 @@ export function useStart(opened: (id: string) => void) {
   return { busy, start };
 }
 
-/** The "+" at the sidebar's top: two items, whose pages replace it in place. ws: the workspace a new
- *  session goes in, the open one's or the first; home: where a new workspace's picker opens. */
-export function CreatePopover({ trigger, ws, fallbackDir, opened }: { trigger: ReactElement; ws: Workspace | null; fallbackDir: string; opened: (id: string) => void }) {
+/** The "+" at the sidebar's top: a new workspace, its folder picked. New sessions are made in a
+ *  workspace, from its row's "+" (the user's decision, 2026-11-05). */
+export function CreatePopover({ trigger }: { trigger: ReactElement }) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
-  const [page, setPage] = useState<NewPage>("menu");
-  const root = ws?.path ?? fallbackDir;
-  const [folder, setFolder] = useState(root);
-  const [lastRoot, setLastRoot] = useState(root);
-  if (lastRoot !== root) {
-    setLastRoot(root);
-    setFolder(root);
-  }
-  const { busy, start } = useStart((id) => (setOpen(false), opened(id)));
   const [making, setMaking] = useState(false);
   const newWorkspace = async (path: string) => {
     setMaking(true);
@@ -213,34 +202,10 @@ export function CreatePopover({ trigger, ws, fallbackDir, opened }: { trigger: R
     }
   };
   return (
-    <Popover.Root
-      open={open}
-      onOpenChange={(o) => {
-        setOpen(o);
-        if (o) setPage("menu");
-      }}
-    >
+    <Popover.Root open={open} onOpenChange={setOpen}>
       <Popover.Trigger render={trigger} />
       <PopSurface align="start" finalFocus={false}>
-        <div key={page} className={page === "menu" ? "" : "g-fade"}>
-          {page === "menu" && (
-            <div className="g-stagger flex w-52 flex-col p-1.5">
-              <MenuRow i={0} icon={<MessageSquarePlus size={16} />} label={t("nav.newSession")} onClick={() => setPage("session")} />
-              <MenuRow i={1} icon={<SquarePlus size={16} />} label={t("nav.newWorkspace")} onClick={() => setPage("workspace")} />
-            </div>
-          )}
-          {page === "session" && <NewSession ws={ws?.name ?? ""} folder={folder} busy={busy} onFolder={() => setPage("sessionFolder")} onPick={(a) => void start(a, folder, ws?.id)} />}
-          {page === "sessionFolder" && (
-            <FolderPicker
-              initial={folder}
-              onChoose={(p) => {
-                setFolder(p);
-                setPage("session");
-              }}
-            />
-          )}
-          {page === "workspace" && <FolderPicker initial="~" busy={making} onChoose={(p) => void newWorkspace(p)} />}
-        </div>
+        <FolderPicker initial="~" busy={making} onChoose={(p) => void newWorkspace(p)} />
       </PopSurface>
     </Popover.Root>
   );
@@ -276,14 +241,5 @@ export function WsPlus({ w, trigger, open, setOpen, opened }: { w: Workspace; tr
         </div>
       </PopSurface>
     </Popover.Root>
-  );
-}
-
-function MenuRow({ i, icon, label, onClick }: { i: number; icon: ReactElement; label: string; onClick: () => void }) {
-  return (
-    <button type="button" onClick={onClick} style={{ "--i": i } as CSSProperties} className="flex h-9 items-center gap-2.5 rounded-md px-2.5 text-left text-base hover:bg-fill pointer-coarse:h-11">
-      <span className="text-ink-2">{icon}</span>
-      {label}
-    </button>
   );
 }

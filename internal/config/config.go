@@ -34,6 +34,8 @@ type Config struct {
 	Push bool `json:"push"`
 	// QuotaHidden are the quota bars the page does not show, each "<agent>:<account>:<group>:<model>".
 	QuotaHidden []string `json:"quotaHidden,omitempty"`
+	// EnterInTurn is what the page's Enter does while a turn runs: "steer" ("" too) or "queue".
+	EnterInTurn string `json:"enterInTurn,omitempty"`
 	// ChatDir is where a plugin's chat opens a session before it set one with /new; "" is home.
 	ChatDir string `json:"chatDir,omitempty"`
 	// Path is the PATH agents run with; "" is the daemon's own.

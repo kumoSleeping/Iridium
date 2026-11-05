@@ -16,7 +16,7 @@ import { quotaKey, windowName } from "./quota";
 import { go } from "./route";
 import { useConfirms, useQuota } from "./store";
 import { errText, toast } from "./toast";
-import { agentName, cn, IconKey, Logo, Switch, Tip } from "./ui";
+import { agentName, cn, IconKey, Logo, steerKey, Switch, Tip } from "./ui";
 import { remindBy, reminding } from "./unread";
 
 const REAP = ["0", "15m", "30m", "1h", "2h", "4h", "12h"];
@@ -118,6 +118,12 @@ export function SettingsPage({ phone, onBack, theme, setTheme }: { phone: boolea
             </Item>
             <Item label={t("settings.quotaResume")} hint={t("settings.quotaResumeHint")}>
               <Switch label={t("settings.quotaResume")} disabled={off} on={!!s?.quotaResume} onChange={(v) => void put({ quotaResume: v })} />
+            </Item>
+            <Item label={t("settings.enter")} hint={t("settings.enterHint")}>
+              <select disabled={off} value={s?.enterInTurn || "steer"} onChange={(e) => void put({ enterInTurn: e.target.value })} aria-label={t("settings.enter")} className="no-ring h-8 max-w-56 rounded-md bg-fill px-2 text-sm disabled:opacity-40">
+                <option value="steer">{t("settings.enterSteer", { key: steerKey() })}</option>
+                <option value="queue">{t("settings.enterQueue", { key: steerKey() })}</option>
+              </select>
             </Item>
           </Group>
 

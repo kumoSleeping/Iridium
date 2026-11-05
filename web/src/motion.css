@@ -1,5 +1,5 @@
 /* Iridium motion system. One set of tokens, a handful of gestures; everything moves only transform
-   and opacity. Use a gesture class (or motion.ts for FLIP and the send flight); never write one-off
+   and opacity. Use a gesture class (or motion.ts for FLIP and the send push); never write one-off
    keyframes or timings for a surface.
 
    Gestures
@@ -10,14 +10,14 @@
      g-fade     plain cross-fade
      g-stagger  children of an unfolded menu rise one after another
      reorder    FLIP of rows that moved (motion.ts useFlip)
-     send       the sent message flies from the composer into the chat (motion.ts flySend)
+     send       the sent message pushes the chat up and fades in (motion.ts pushIn)
 */
 
 :root {
   --dur-1: 120ms; /* fold, fade, press */
   --dur-2: 200ms; /* unfold, pop */
   --dur-3: 280ms; /* slide, reorder */
-  --dur-4: 420ms; /* send flight */
+  --dur-4: 420ms; /* long moves */
   --stagger: 18ms;
 
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);

@@ -19,18 +19,8 @@ import { showSecret } from "./secrets";
 import { Group, Item } from "./settings";
 import { useConfirms } from "./store";
 import { errText, toast } from "./toast";
-import { agentName, AGENTS, Avatar, cn, IconKey, Logo, PopSurface, Switch, tilde, Tip } from "./ui";
+import { agentName, AGENTS, ago, Avatar, cn, IconKey, Logo, PopSurface, Switch, tilde, Tip } from "./ui";
 
-/** How long ago, in words: just now, minutes, hours, days. */
-export function ago(ms: number | undefined, now = Date.now()): string {
-  if (!ms) return t("term.never");
-  const m = Math.floor((now - ms) / 60_000);
-  if (m < 1) return t("ago.now");
-  if (m < 60) return t("ago.min", { n: m });
-  const h = Math.floor(m / 60);
-  if (h < 48) return t("ago.hour", { n: h });
-  return t("ago.day", { n: Math.floor(h / 24) });
-}
 
 export const tokens = (n: number) => (n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 100) / 10}k` : `${n}`);
 

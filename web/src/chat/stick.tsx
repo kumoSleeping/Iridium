@@ -6,7 +6,9 @@ import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, 
 import { flushSync } from "react-dom";
 import { t } from "../i18n";
 
-const NEAR = 600; // px from the top where the page before is brought
+// How near the top the page before is put in: two screens, at least 600px. It was asked for ahead
+// (chats.ts), so this is drawing only.
+const near = (el: HTMLElement) => Math.max(600, el.clientHeight * 2);
 const END = 40; // px from the bottom that count as at the newest
 
 export function Stick({ tail, older, place, style, children, scroller, bottom }: { tail: unknown; older: () => Promise<boolean>; place: { top: number | null }; style?: CSSProperties; children: ReactNode; scroller?: RefObject<HTMLDivElement | null>; bottom: number }) {
@@ -23,7 +25,7 @@ export function Stick({ tail, older, place, style, children, scroller, bottom }:
     if (!el || paging.current) return;
     paging.current = true;
     try {
-      while (el.isConnected && el.scrollTop < NEAR && (await older())) {
+      while (el.isConnected && el.scrollTop < near(el) && (await older())) {
         const h = el.scrollHeight;
         flushSync(() => redraw((n) => n + 1));
         el.scrollTop += el.scrollHeight - h;

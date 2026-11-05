@@ -9,7 +9,7 @@ import type { Block, DraftEvent, MessagePage, Session } from "./api/types.gen";
 /** A message of yours sent from this page, till the transcript has it: input, the id the server gave
  *  it (Claude's uuid, which the user block carries); text, as typed; files, upload refs with their
  *  names; from, where the transcript ended as it was sent. failed: why it did not go. */
-export type Sent = { key: string; text: string; files: { ref: string; name: string; type: string }[]; from: number; input?: string; failed?: string; queued?: boolean };
+export type Sent = { key: string; text: string; files: { ref: string; name: string; type: string }[]; from: number; input?: string; failed?: string; queued?: boolean; steer?: boolean };
 
 /** Where a block's transcript line begins: its at up to the dot. */
 export const lineOf = (b: { at: string }) => parseInt(b.at);
@@ -48,6 +48,14 @@ export class Messages {
   /** The last draft the transcript has: a piece of it that comes late (the stream batches drafts,
    *  the transcript may be read first) is not a new draft. */
   private gone = { proc: -1, n: -1 };
+  /** The page before the one shown, asked for ahead, so scrolling up does not wait on it. */
+  private ahead: { before: number; page: Promise<MessagePage> } | null = null;
+  private prefetch() {
+    if (!this.more || this.ahead?.before === this.start) return;
+    const page = this.get(this.id, { before: this.start });
+    page.catch(() => {});
+    this.ahead = { before: this.start, page };
+  }
   private forget(d: Draft) {
     if (d.proc !== this.gone.proc) this.gone = { proc: d.proc, n: -1 };
     this.gone.n = Math.max(this.gone.n, d.n);
@@ -66,6 +74,7 @@ export class Messages {
       if (this.loaded) return this.newer(); // another came first
       Object.assign(this, { blocks: p.blocks, start: p.start, end: p.end, more: p.more, loaded: true });
       this.took(p.blocks);
+      this.prefetch();
       return;
     }
     for (;;) {
@@ -108,16 +117,25 @@ export class Messages {
     return true;
   }
 
-  /** The page before the blocks shown. Says whether it brought any. */
+  /** The page before the blocks shown, asked for ahead if it was; then the one before that is asked
+   *  for. Says whether it brought any. */
   async older(): Promise<boolean> {
     if (!this.more) return false;
     const start = this.start;
-    const p = await this.get(this.id, { before: start });
+    this.prefetch();
+    const ahead = this.ahead!;
+    let p: MessagePage;
+    try {
+      p = await ahead.page;
+    } finally {
+      if (this.ahead === ahead) this.ahead = null;
+    }
     if (this.start !== start) return true;
     this.blocks = [...p.blocks.filter((b) => lineOf(b) < start), ...this.blocks];
     this.start = Math.min(start, p.start);
     this.more = p.more;
     this.version++;
+    this.prefetch();
     return p.blocks.length > 0;
   }
 

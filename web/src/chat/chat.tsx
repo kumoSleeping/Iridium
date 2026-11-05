@@ -12,7 +12,7 @@ import type { Session } from "../api/types.gen";
 import { chatOf, type Sent } from "../chats";
 import { useMe, useTerminalList, useWorkspaces } from "../data";
 import { t, useLang } from "../i18n";
-import { flySend } from "../motion";
+import { pushIn } from "../motion";
 import { openChat } from "../route";
 import { MenuItems, Rename, sessionActions } from "../sidebar";
 import { useConfirms, useLink, useList, useSession } from "../store";
@@ -23,7 +23,7 @@ import { Asks } from "./asks";
 import { Composer, type ComposerHandle } from "./composer";
 import { folded } from "./fold";
 import { Draft } from "./markdown";
-import { ModeKey, ModelKey, useMode } from "./meters";
+import { ContextRing, ModeKey, ModelKey, QuotaBars, useMode } from "./meters";
 import { Queue } from "./queue";
 import { sourceOf } from "./refs";
 import { Pending, Said } from "./said";
@@ -89,18 +89,18 @@ export function ChatPage({ id, phone, onBack }: { id: string; phone: boolean; on
     return () => ro.disconnect();
   }, []);
 
-  // The send flight, once the new bubble is in the page.
+  // A message sent: at the bottom, the conversation pushed up by it as it fades in.
   const bubbles = useRef(new Map<string, HTMLDivElement>());
-  const fly = useRef<{ key: string; from: { x: number; y: number } } | null>(null);
+  const fly = useRef<string | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
+  const column = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
-    const f = fly.current;
-    const el = f && bubbles.current.get(f.key);
-    if (!f || !el) return;
+    const el = fly.current && bubbles.current.get(fly.current);
+    if (!el) return;
     fly.current = null;
     const sc = scroller.current;
     if (sc) sc.scrollTop = sc.scrollHeight;
-    flySend(el, f.from);
+    if (column.current) pushIn(el, column.current);
   });
 
   const composer = useRef<ComposerHandle>(null);
@@ -109,10 +109,10 @@ export function ChatPage({ id, phone, onBack }: { id: string; phone: boolean; on
   const shown = folded(log.blocks);
   const cwd = s?.cwd ?? row?.cwd ?? "";
 
-  const onSent = (sent: Sent, from: { x: number; y: number }) => {
+  const onSent = (sent: Sent) => {
     sent.from = log.end;
     log.sent.push(sent);
-    fly.current = { key: sent.key, from };
+    fly.current = sent.key;
     changed();
   };
   const retry = async (sent: Sent) => {
@@ -140,7 +140,7 @@ export function ChatPage({ id, phone, onBack }: { id: string; phone: boolean; on
   return (
     <div className="relative h-full" onDragOver={files} onDrop={(e) => files(e) && composer.current?.attach([...e.dataTransfer.files])}>
       <Stick scroller={scroller} tail={`${log.blocks.at(-1)?.at} ${log.drafts.length} ${log.drafts.at(-1)?.text.length} ${log.sent.length}`} older={() => log.older()} place={chat.place} bottom={stackH} style={{ paddingTop: 64, paddingBottom: stackH + 16 }}>
-        <div className="mx-auto flex max-w-[760px] flex-col gap-5 px-4 sm:px-6">
+        <div ref={column} className="mx-auto flex max-w-[760px] flex-col gap-5 px-4 sm:px-6">
           {log.loaded && !log.blocks.length && !log.drafts.length && !log.sent.length && <p className="g-fade m-0 pt-16 text-center text-sm text-ink-4">{t("chat.empty")}</p>}
           {shown.map((b) => (
             <Said key={b.at} b={b} session={id} cwd={cwd} source={source} onJump={openChat} />
@@ -168,8 +168,9 @@ export function ChatPage({ id, phone, onBack }: { id: string; phone: boolean; on
       </Stick>
       <Bar phone={phone} onBack={onBack} s={s} />
       <div ref={stack} className="absolute inset-x-0 bottom-0 z-10 px-2.5 pb-[max(6px,env(safe-area-inset-bottom))] sm:px-5">
-        <div className="mx-auto max-w-[760px]">
-          <Queue session={id} queue={s.queue ?? []} />
+        {!elsewhere && <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-[calc(36px+22px+max(6px,env(safe-area-inset-bottom)))] bg-[linear-gradient(to_bottom,transparent,var(--paper)_14px)]" />}
+        <div className="relative mx-auto max-w-[760px]">
+          <Queue session={id} queue={s.queue ?? []} steered={(q) => onSent({ key: crypto.randomUUID(), text: q.text, files: [], from: 0, input: q.id, steer: true })} />
           <Asks session={id} asks={s.asks} cwd={cwd} confirms={confirms.filter((c) => c.session === id)} />
           {elsewhere ? (
             <div className="glass float flex h-12 items-center justify-center rounded-xl text-sm text-ink-3">{t("chat.elsewhere")}</div>
@@ -182,8 +183,10 @@ export function ChatPage({ id, phone, onBack }: { id: string; phone: boolean; on
   );
 }
 
-/** The composer and, under it, the approval-mode key and the model key. */
-function Under({ s, composer, onSent, onSentDone, modelOpen, setModelOpen, modeOpen, setModeOpen }: { s: LiveSession; composer: React.RefObject<ComposerHandle | null>; onSent: (x: Sent, from: { x: number; y: number }) => void; onSentDone: (x: Sent) => void; modelOpen: boolean; setModelOpen: (o: boolean) => void; modeOpen: boolean; setModeOpen: (o: boolean) => void }) {
+/** The composer and, under it, the approval-mode key, the model key, the quota bars, and at the
+ *  right the context ring (back under it, user 2026-11-06). Behind the row, from the composer's middle
+ *  down, paper: the conversation scrolled under the stack stops there and never runs into the row. */
+function Under({ s, composer, onSent, onSentDone, modelOpen, setModelOpen, modeOpen, setModeOpen }: { s: LiveSession; composer: React.RefObject<ComposerHandle | null>; onSent: (x: Sent) => void; onSentDone: (x: Sent) => void; modelOpen: boolean; setModelOpen: (o: boolean) => void; modeOpen: boolean; setModeOpen: (o: boolean) => void }) {
   const mode = useMode(s);
   return (
     <>
@@ -191,6 +194,10 @@ function Under({ s, composer, onSent, onSentDone, modelOpen, setModelOpen, modeO
       <div className="flex h-9 min-w-0 items-center gap-0.5 px-1">
         <ModeKey mode={mode} open={modeOpen} onOpenChange={setModeOpen} />
         <ModelKey s={s} open={modelOpen} onOpenChange={setModelOpen} />
+        <QuotaBars agent={s.agent} live={s.live} />
+        <span className="ml-auto flex shrink-0">
+          <ContextRing session={s.id} summary={s.context} />
+        </span>
       </div>
     </>
   );

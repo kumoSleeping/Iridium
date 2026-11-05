@@ -59,6 +59,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const chat = (id) => `#/s/${encodeURIComponent(id)}`;
 const click = (sel) => async (p) => p.click(sel);
 const clickText = (t, sel = "button") => async (p) => (await p.waitForSelector(`xpath/.//${sel}[contains(., "${t}")]`, { timeout: 5000 })).click();
+/** The mouse over a sidebar row with these words (a workspace's shows its "+"). */
+const hoverText = (t) => async (p) => (await p.waitForSelector(`xpath/.//*[@role='treeitem'][@aria-expanded][contains(., "${t}")]`, { timeout: 5000 })).hover();
 /** A key in the open popover or dialog, not one of the same words elsewhere on the page. */
 const inPop = (t) => clickText(t, "*[@role='dialog']//button");
 const steps =
@@ -83,9 +85,9 @@ shots.push(
   ["desktop-mode-light-zh", desk, { theme: "light", lang: "zh" }, chat(PLAIN), click('button[aria-label^="审批模式"]')],
   ["desktop-model-light-en", desk, { theme: "light", lang: "en" }, chat(PLAIN), click('button[aria-label^="Model"]')],
   ["desktop-menu-dark-en", desk, { theme: "dark", lang: "en" }, chat(PLAIN), click('header button[aria-label="More"]')],
-  ["desktop-plus-light-zh", desk, { theme: "light", lang: "zh" }, chat(PLAIN), click('button[aria-label="新建"]')],
-  ["desktop-newsession-light-en", desk, { theme: "light", lang: "en" }, chat(PLAIN), steps(click('button[aria-label="New"]'), clickText("New session"))],
-  ["desktop-picker-light-en", desk, { theme: "light", lang: "en" }, chat(PLAIN), steps(click('button[aria-label="New"]'), clickText("New workspace"))],
+  ["desktop-plus-light-zh", desk, { theme: "light", lang: "zh" }, chat(PLAIN), click('button[aria-label="新工作区"]')],
+  ["desktop-newsession-light-en", desk, { theme: "light", lang: "en" }, chat(PLAIN), steps(hoverText("Iridium"), click('button[aria-label="New session in Iridium"]'))],
+  ["desktop-picker-light-en", desk, { theme: "light", lang: "en" }, chat(PLAIN), steps(click('button[aria-label="New workspace"]'), click('button[aria-label="New folder"]'))],
   ["desktop-me-light-zh", desk, { theme: "light", lang: "zh" }, chat(PLAIN), click("aside button:has(> span + span.truncate)")],
   ["desktop-me-dark-en", desk, { theme: "dark", lang: "en" }, chat(PLAIN), click("aside button:has(> span + span.truncate)")],
   ["desktop-palette-light-en", desk, { theme: "light", lang: "en" }, chat(PLAIN), async (p) => (await p.focus("textarea"), await p.keyboard.type("/c"))],
@@ -96,7 +98,7 @@ shots.push(
   ["desktop-topology-dark-zh", desk, { theme: "dark", lang: "zh" }, "#/topology"],
   ["desktop-home-light-en", desk, { theme: "light", lang: "en" }, "#/"],
   ["phone-context-dark-en", phone, { theme: "dark", lang: "en" }, chat(PLAIN), click('button[aria-label^="Context"]')],
-  ["phone-plus-light-en", phone, { theme: "light", lang: "en" }, "#/", click('button[aria-label="New"]')],
+  ["phone-plus-light-en", phone, { theme: "light", lang: "en" }, "#/", click('button[aria-label="New workspace"]')],
   ["phone-me-dark-zh", phone, { theme: "dark", lang: "zh" }, "#/", click("aside button:has(> span + span.truncate)")],
   ["phone-settings-light-zh", phone, { theme: "light", lang: "zh" }, "#/settings"],
   ["desktop-solid-light-en", desk, { theme: "light", lang: "en" }, chat(PLAIN), click('button[aria-label^="Context"]'), [{ name: "prefers-reduced-transparency", value: "reduce" }]],
@@ -190,7 +192,7 @@ if (!only || gated.some(([n]) => n.includes(only))) {
     await page.waitForFunction((b) => location.href.startsWith(b) && !location.pathname.startsWith("/_ir/"), { timeout: 10000 }, PUBLIC);
     // The owner's panel: Claude too, as the owner says on its 终端 page (here 本机 says it).
     const me = (await sock("GET", "/api/terminals")).terminals.filter((x) => x.kind === "panel").sort((a, b) => b.createdAt - a.createdAt)[0];
-    await sock("PUT", `/api/terminals/${me.id}/rules`, { rules: { ...me.rules, agents: ["claude", ...me.rules.agents.filter((a) => a !== "claude")] }, ownerConfirmed: true });
+    await sock("PUT", `/api/terminals/${me.id}/rules`, { rules: { ...me.rules, agents: ["claude", ...me.rules.agents.filter((a) => a !== "claude")] } });
     // An agent's ir asks for an invite: a card for the panel.
     if (!(await sock("GET", "/api/confirms")).pending.some((c) => c.kind === "invite")) await sock("POST", "/api/terminals/invites", { name: "ipad" }, STYLE);
     for (const s of gated) await shoot(PUBLIC, s);

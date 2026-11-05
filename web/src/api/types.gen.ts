@@ -813,6 +813,11 @@ export interface Settings {
    * Push: Web Push's total switch (off by default); GET /api/push has the rest.
    */
   push: boolean;
+  /**
+   * EnterInTurn: what Enter does with words while a turn runs: "steer" (the default) puts them
+   * into the turn, Ctrl or ⌘+Enter queues them; "queue" the other way round.
+   */
+  enterInTurn: string;
 }
 /**
  * SettingsPatch changes what it gives and nothing else. A mode "" goes back to the agent's own.
@@ -824,6 +829,7 @@ export interface SettingsPatch {
   quotaHidden?: string[];
   modes?: { [key: string]: string};
   push?: boolean;
+  enterInTurn?: string;
 }
 
 //////////

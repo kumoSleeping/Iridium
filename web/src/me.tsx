@@ -1,4 +1,4 @@
-// This panel's identity at the sidebar's bottom-right (plan "网页"): a terminal, not a person, shown
+// This panel's identity at the sidebar's bottom-left (plan "网页"): a terminal, not a person, shown
 // like a signed-in account. Its popover: avatar (upload, cropped round, stored at 128px by the gate),
 // rename, the read-only permissions, appearance and language, sign out. Local-only with no Passkey,
 // it is 本机, which has nothing to rename or sign out of.
@@ -74,7 +74,7 @@ export function MeChip({ theme, setTheme, initialPage = "main", defaultOpen = fa
           }
         />
       </Tip>
-      <PopSurface side="top" align="end">
+      <PopSurface side="top" align="start">
         <input
           ref={file}
           type="file"

@@ -1,6 +1,8 @@
 // The one list (plan "网页", "风格"; web/sample's design): workspace → folder → session. No panel, no
-// cards, no headings; groups split by space, chevrons in their own column, one truncated line per
-// row, colour only in logos and lamps, the selected row only bolder. 需要你 on top when anything
+// cards, no headings; groups split by space, chevrons in their own column, colour only in logos and
+// lamps, the selected row only bolder. A session's row has two truncated lines, as Rhodium's: its name
+// and, where the tree does not say it, its folder; under them the last thing said, yours after 你：
+// (the user's decision, 2026-11-05); out of a turn, the first line ends with how long ago it was. 需要你 on top when anything
 // waits on you, 归档 folded at the bottom. A row's menu (right click, long-press): pin, rename, stop,
 // archive. The mouse resting on a row fetches its chat ahead.
 import { Menu } from "@base-ui/react/menu";
@@ -13,10 +15,12 @@ import { t } from "./i18n";
 import { useFlip } from "./motion";
 import type { Tree, WsNode } from "./tree";
 import { errText, toast } from "./toast";
-import { agentName, cn, IconKey, LogoLamp, statusText, tilde, Tip, titleOf, useLongPress } from "./ui";
+import { useSaidLine } from "./data";
+import { agentName, ago, cn, IconKey, LogoLamp, statusText, tilde, Tip, titleOf, useLongPress, useMinute } from "./ui";
 import { useUnread } from "./unread";
 
 const STEP = 18;
+const BUSY = new Set(["running", "compacting", "starting"]);
 
 type Props = {
   tree: Tree;
@@ -48,12 +52,12 @@ export function Sidebar(p: Props) {
   const needs = p.tree.needs.length + p.confirms.length;
   const shape = [needs, ...p.tree.workspaces.map((w) => `${w.key}:${p.expanded(w.key)}:${w.rows.map((r) => (r.kind === "session" ? r.s.id : `${r.f.key}${p.expanded(r.f.key)}${r.f.sessions.length}`)).join(",")}`), p.expanded("archive"), p.tree.archived.length].join("|");
   useFlip(list, shape);
-  const row = (s: Session, depth: number, flip = `s:${s.id}`) => <SessionRow key={flip} s={s} depth={depth} flip={flip} selected={p.selected === s.id} onSelect={p.onSelect} chatCode={p.chatCode} />;
+  const row = (s: Session, depth: number, flip = `s:${s.id}`) => <SessionRow key={flip} s={s} where={p.tree.where.get(s.id)} depth={depth} flip={flip} selected={p.selected === s.id} onSelect={p.onSelect} chatCode={p.chatCode} />;
 
   const head = (
     <div className={cn("flex shrink-0 items-center gap-0.5 px-2", p.phone ? "glass absolute inset-x-0 top-0 z-20 h-13 pt-[env(safe-area-inset-top)] shadow-[0_0.5px_0_var(--edge)]" : "h-12")}>
       {p.createKey(
-        <button type="button" aria-label={t("nav.new")} className="g-press grid size-8 place-items-center rounded-md text-ink-2 hover:bg-fill hover:text-ink data-popup-open:bg-fill pointer-coarse:size-10">
+        <button type="button" aria-label={t("nav.newWorkspace")} className="g-press grid size-8 place-items-center rounded-md text-ink-2 hover:bg-fill hover:text-ink data-popup-open:bg-fill pointer-coarse:size-10">
           <Plus size={18} />
         </button>,
       )}
@@ -134,7 +138,7 @@ export function Sidebar(p: Props) {
                         chevron={p.expanded(r.f.key) ? "open" : "closed"}
                         onClick={() => p.toggle(r.f.key)}
                         icon={<Folder size={15} className="text-ink-3" />}
-                        label={w.id === 0 ? tilde(r.f.name) : r.f.name}
+                        label={w.id === 0 ? tilde(r.f.path) : r.f.name}
                         end={<Count n={r.f.sessions.length} faint />}
                       />
                       {p.expanded(r.f.key) && r.f.sessions.map((s) => row(s, 2))}
@@ -153,13 +157,13 @@ export function Sidebar(p: Props) {
         {!p.tree.workspaces.length && !needs && <div className="g-fade px-2 pt-10 text-center text-sm text-ink-3">{t("nav.empty")}</div>}
       </div>
       <div className="flex shrink-0 items-center justify-between gap-2 px-2 pt-1 pb-[max(8px,env(safe-area-inset-bottom))]">
-        <span className="relative">
+        <div className="min-w-0">{p.me}</div>
+        <span className="relative shrink-0">
           <IconKey label={p.updateDot ? `${t("nav.settings")} · ${t("settings.updateReady")}` : t("nav.settings")} onClick={p.onSettings} aria-pressed={p.settings} className={p.settings ? "bg-fill text-ink" : undefined}>
             <Settings size={16} />
           </IconKey>
           {p.updateDot && <span className="g-pop pointer-events-none absolute top-1 right-1 size-2 rounded-full bg-err shadow-[0_0_0_1.5px_var(--paper)]" aria-hidden />}
         </span>
-        <div className="min-w-0">{p.me}</div>
       </div>
     </aside>
   );
@@ -189,9 +193,12 @@ type RowProps = {
   aria?: string;
   extra?: Record<string, unknown>;
   faded?: boolean;
+  /** A second line, under the label: the row is two lines high, its icon by the first. */
+  sub?: ReactNode;
 };
 
-function Row({ depth, flip, chevron, icon, label, end, selected, onClick, aria, extra, faded }: RowProps) {
+function Row({ depth, flip, chevron, icon, label, end, selected, onClick, aria, extra, faded, sub }: RowProps) {
+  const two = sub !== undefined;
   return (
     <div
       data-flip={flip}
@@ -202,14 +209,23 @@ function Row({ depth, flip, chevron, icon, label, end, selected, onClick, aria, 
       tabIndex={0}
       onClick={onClick}
       onKeyDown={(e) => e.target === e.currentTarget && (e.key === "Enter" || e.key === " ") && (e.preventDefault(), onClick?.())}
-      className={cn("group relative flex h-[30px] cursor-default items-center rounded-md pr-2 select-none hover:bg-fill hover:[--row-bg:var(--fill)] pointer-coarse:h-10", faded && "opacity-60")}
+      className={cn(
+        "group relative flex cursor-default rounded-md pr-2 select-none hover:bg-fill hover:[--row-bg:var(--fill)]",
+        two ? "items-start py-[5px] pointer-coarse:py-2" : "h-[30px] items-center pointer-coarse:h-10",
+        faded && "opacity-60",
+      )}
       style={{ paddingLeft: depth * STEP } as CSSProperties}
       {...extra}
     >
       <Chevron state={chevron} />
-      {icon && <span className="mr-2 grid w-4 shrink-0 place-items-center">{icon}</span>}
-      <span className={cn("min-w-0 flex-1 truncate text-base pointer-coarse:text-md", selected ? "font-semibold text-ink" : "text-ink")}>{label}</span>
-      {end && <span className="ml-2 flex shrink-0 items-center">{end}</span>}
+      {icon && <span className={cn("mr-2 grid w-4 shrink-0 place-items-center", two && "h-5 pointer-coarse:h-[23px]")}>{icon}</span>}
+      <span className="min-w-0 flex-1">
+        <span className="flex min-w-0 items-center">
+          <span className={cn("min-w-0 flex-1 text-base pointer-coarse:text-md", two ? "flex items-baseline leading-5 pointer-coarse:leading-[23px]" : "truncate", selected ? "font-semibold text-ink" : "text-ink")}>{label}</span>
+          {end && <span className="ml-2 flex shrink-0 items-center">{end}</span>}
+        </span>
+        {two && <span className="block truncate text-sm text-ink-3">{sub}</span>}
+      </span>
     </div>
   );
 }
@@ -218,16 +234,22 @@ function WsRow({ flip, name, open, onToggle, end, setHover }: { flip: string; na
   const lp = useLongPress(() => setHover(true));
   return (
     <div onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} {...lp}>
-      <Row depth={0} flip={flip} chevron={open ? "open" : "closed"} onClick={onToggle} label={<span className="font-medium">{name}</span>} end={end} />
+      {/* Its "+" popover is a portal, but React events bubble through it: a press in it must not fold
+          the workspace (the user's, 2026-11-05: only you fold or unfold). */}
+      <Row depth={0} flip={flip} chevron={open ? "open" : "closed"} onClick={onToggle} label={<span className="font-medium">{name}</span>} end={<span className="flex items-center" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>{end}</span>} />
     </div>
   );
 }
 
 /** A session's row: its logo and lamp, its name, unread or pinned at the end. The mouse resting on
  *  it 0.1 s, counted from its last move, or a press, fetches its chat ahead. */
-function SessionRow({ s, depth, flip, selected, onSelect, chatCode }: { s: Session; depth: number; flip: string; selected: boolean; onSelect: (id: string) => void; chatCode: () => void }) {
+function SessionRow({ s, where, depth, flip, selected, onSelect, chatCode }: { s: Session; where?: string; depth: number; flip: string; selected: boolean; onSelect: (id: string) => void; chatCode: () => void }) {
   const unread = useUnread(s.id);
+  const said = useSaidLine();
+  const now = useMinute();
   const title = titleOf(s);
+  // How long ago it was last active (its turn ended, it was last written to), but in a turn.
+  const when = !BUSY.has(s.status) && s.updatedAt > 0 && !s.archived && <span className="text-xs whitespace-nowrap text-ink-4 tabular-nums">{ago(s.updatedAt, now, true)}</span>;
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
   const [renaming, setRenaming] = useState(false);
   const rest = useRef<number | undefined>(undefined);
@@ -262,7 +284,7 @@ function SessionRow({ s, depth, flip, selected, onSelect, chatCode }: { s: Sessi
       (err) => toast(t("err.action"), { error: true, description: errText(err) }),
     );
   };
-  const end = s.archived ? (
+  const mark = s.archived ? (
     <IconKey label={t("menu.unarchive")} onClick={restore} className="-mr-1 size-6 text-ink-3 pointer-coarse:size-8">
       <ArchiveRestore size={14} />
     </IconKey>
@@ -270,6 +292,12 @@ function SessionRow({ s, depth, flip, selected, onSelect, chatCode }: { s: Sessi
     <span className="unread" aria-hidden />
   ) : s.pinned ? (
     <Pin size={12} className="text-ink-4" aria-label={t("menu.pinned")} />
+  ) : undefined;
+  const end = when || mark ? (
+    <span className="flex items-center gap-1.5">
+      {when}
+      {mark}
+    </span>
   ) : undefined;
   return (
     <>
@@ -287,7 +315,21 @@ function SessionRow({ s, depth, flip, selected, onSelect, chatCode }: { s: Sessi
             </span>
           </Tip>
         }
-        label={renaming ? <Rename s={s} done={() => setRenaming(false)} /> : title}
+        label={
+          renaming ? (
+            <Rename s={s} done={() => setRenaming(false)} />
+          ) : (
+            <>
+              <span className="min-w-0 truncate">{title}</span>
+              {where && (
+                <Tip label={tilde(s.cwd)} side="bottom">
+                  <span className="ml-1.5 max-w-[35%] shrink-0 truncate text-xs font-normal text-ink-3">{where.startsWith("/") ? tilde(where) : where}</span>
+                </Tip>
+              )}
+            </>
+          )
+        }
+        sub={s.status === "error" ? <span className="text-err">{statusText(s.status)}</span> : (said(s.last) ?? tilde(s.cwd))}
         end={end}
         extra={{ ...lp, ...hover, onClickCapture: lp.onClickCapture }}
       />

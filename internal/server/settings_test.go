@@ -36,13 +36,14 @@ func TestSettings(t *testing.T) {
 	})
 	var st api.Settings
 	l.want(200, "web", "GET", "/api/settings", nil, &st)
-	if st.IdleReap != "1h" || !st.CrashResume || !st.QuotaResume || st.Push || len(st.QuotaHidden) != 0 || st.Modes == nil {
+	if st.IdleReap != "1h" || !st.CrashResume || !st.QuotaResume || st.Push || len(st.QuotaHidden) != 0 || st.Modes == nil || st.EnterInTurn != "steer" {
 		t.Fatalf("defaults: %+v", st)
 	}
 
-	off, reap, hidden := false, "15m", []string{"claude:me@example.com:weekly:", "claude:me@example.com:weekly:"}
-	l.want(200, "web", "PUT", "/api/settings", api.SettingsPatch{IdleReap: &reap, CrashResume: &off, QuotaHidden: &hidden, Modes: map[string]string{"claude": "plan", "codex": "untrusted"}}, &st)
-	if st.IdleReap != "15m" || st.CrashResume || !st.QuotaResume || len(st.QuotaHidden) != 1 || st.Modes["claude"] != "plan" || st.Modes["codex"] != "untrusted" {
+	off, reap, hidden, queue, later := false, "15m", []string{"claude:me@example.com:weekly:", "claude:me@example.com:weekly:"}, "queue", "later"
+	l.want(400, "web", "PUT", "/api/settings", api.SettingsPatch{EnterInTurn: &later}, nil)
+	l.want(200, "web", "PUT", "/api/settings", api.SettingsPatch{IdleReap: &reap, CrashResume: &off, QuotaHidden: &hidden, Modes: map[string]string{"claude": "plan", "codex": "untrusted"}, EnterInTurn: &queue}, &st)
+	if st.IdleReap != "15m" || st.CrashResume || !st.QuotaResume || len(st.QuotaHidden) != 1 || st.Modes["claude"] != "plan" || st.Modes["codex"] != "untrusted" || st.EnterInTurn != "queue" {
 		t.Fatalf("after the change: %+v", st)
 	}
 	if tu := l.s.m.Tuned(); tu.IdleReap != 15*time.Minute || tu.CrashResume || !tu.QuotaResume || tu.Modes["claude"] != "plan" {
@@ -52,7 +53,7 @@ func TestSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if saved.IdleReap.D() != 15*time.Minute || saved.CrashResume || saved.Modes["codex"] != "untrusted" || len(saved.QuotaHidden) != 1 || saved.ChatDir != l.work {
+	if saved.IdleReap.D() != 15*time.Minute || saved.CrashResume || saved.Modes["codex"] != "untrusted" || len(saved.QuotaHidden) != 1 || saved.ChatDir != l.work || saved.EnterInTurn != "queue" {
 		t.Fatalf("file: %+v", saved)
 	}
 

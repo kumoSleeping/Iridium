@@ -137,6 +137,7 @@ type Hosted struct {
 	quotaTimer  *time.Timer
 
 	ctxSum   *api.ContextSummary
+	ctxAsked time.Time // when the context was last asked for: within a turn, at most every ctxEvery
 	tail     *api.BlockTail
 	tailFrom int64
 	tailAt   time.Time
@@ -524,7 +525,15 @@ func (h *Hosted) onEvent(e agent.Event) {
 		h.m.notify(notes...)
 		return
 	case agent.ToolStart:
+		// A long turn's context grows with each call: read it in the turn too, not only at its end.
+		due := !replay && time.Since(h.ctxAsked) >= ctxEvery
+		if due {
+			h.ctxAsked = time.Now()
+		}
 		h.mu.Unlock()
+		if due {
+			later(h.refreshContext)
+		}
 		note(Notice{Kind: NoticeTool, Tool: e.Name})
 		h.m.notify(notes...)
 		return
@@ -555,6 +564,7 @@ func (h *Hosted) onEvent(e agent.Event) {
 		h.lastActive = time.Now()
 		h.hadTurn = false
 		list = true
+		h.ctxAsked = time.Now()
 		later(h.refreshContext)
 		later(h.refreshQuota)
 		if !replay && h.restartDue {

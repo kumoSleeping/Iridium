@@ -7,7 +7,7 @@ import { useState } from "react";
 import type { Session } from "./api/types.gen";
 import { t } from "./i18n";
 import { openChat, recent } from "./route";
-import { useTerminalList } from "./data";
+import { useSaidLine } from "./data";
 import { useList } from "./store";
 import { flat, type Tree } from "./tree";
 import { cn, LogoLamp, tilde, titleOf } from "./ui";
@@ -35,9 +35,7 @@ export function jumpList(all: Session[], order: Session[], typed: string, open: 
 
 export function Jump({ close, tree, open }: { close: () => void; tree: Tree; open: string | null }) {
   const all = useList() ?? [];
-  const terminals = useTerminalList();
-  // Your words: none tagged, or a panel's or 本机's; a letter says whom it is from.
-  const yours = (from?: string) => !from || from === "本机" || terminals.some((x) => x.name === from && (x.kind === "panel" || x.local));
+  const said = useSaidLine();
   const [typed, setTyped] = useState("");
   const [pick, setPick] = useState(0);
   const list = jumpList(all, flat(tree), typed, open, recent());
@@ -86,7 +84,7 @@ export function Jump({ close, tree, open }: { close: () => void; tree: Tree; ope
             >
               <LogoLamp agent={s.agent} status={s.status} />
               <span className="min-w-0 shrink truncate text-base">{titleOf(s)}</span>
-              <span className="min-w-0 flex-1 truncate text-xs text-ink-3">{s.last ? `${s.last.role === "user" ? (yours(s.last.from) ? t("jump.you") : `${s.last.from}: `) : ""}${s.last.text}` : tilde(s.cwd)}</span>
+              <span className="min-w-0 flex-1 truncate text-xs text-ink-3">{said(s.last) ?? tilde(s.cwd)}</span>
               {s.archived && <Archive size={13} className="shrink-0 text-ink-4" aria-label={t("nav.archive")} />}
             </button>
           ))}

@@ -1,6 +1,7 @@
 // The tool calls and thoughts in a chat (Rhodium spec web-chat 196–199): those between two things
 // said fold into one line; the calls still running at the end show on their own. Pure, for tests.
 import type { Block } from "../api/types.gen";
+import { t } from "../i18n";
 
 export type Tool = Block & { kind: "tool" };
 export type Step = Block & { kind: "tool" | "thinking" };
@@ -86,19 +87,98 @@ export function inputOf(input = ""): Record<string, unknown> {
 }
 
 const rel = (p: string, cwd?: string) => (cwd && p.startsWith(cwd + "/") ? p.slice(cwd.length + 1) : p);
-const lines = (s: unknown) => (typeof s === "string" && s ? s.split("\n").length : 0);
+
+/** Lines added and taken. */
+export type Diff = { added: number; taken: number };
+const split = (s: unknown): string[] => (typeof s === "string" && s ? s.replace(/\n$/, "").split("\n") : []);
+const plus = (a: Diff | undefined, b: Diff): Diff => ({ added: (a?.added ?? 0) + b.added, taken: (a?.taken ?? 0) + b.taken });
+
+/** The lines b adds to a and takes from it: past their common start and end, less the longest run
+ *  they share (a middle too long to compare counts whole). */
+export function lineDiff(a: unknown, b: unknown): Diff {
+  const x = split(a);
+  const y = split(b);
+  let s = 0;
+  while (s < x.length && s < y.length && x[s] === y[s]) s++;
+  let e = 0;
+  while (e < x.length - s && e < y.length - s && x[x.length - 1 - e] === y[y.length - 1 - e]) e++;
+  const p = x.slice(s, x.length - e);
+  const q = y.slice(s, y.length - e);
+  let common = 0;
+  if (p.length && q.length && p.length * q.length <= 250_000) {
+    let prev = new Array<number>(q.length + 1).fill(0);
+    for (const u of p) {
+      const row = [0];
+      for (let j = 0; j < q.length; j++) row.push(u === q[j] ? prev[j]! + 1 : Math.max(prev[j + 1]!, row[j]!));
+      prev = row;
+    }
+    common = prev[q.length]!;
+  }
+  return { added: q.length - common, taken: p.length - common };
+}
+
+/** A patch's + and − lines: a unified diff's or a Codex apply_patch's, headers left out. */
+export function patchDiff(text: unknown): Diff {
+  const d = { added: 0, taken: 0 };
+  const ls = typeof text === "string" ? text.split("\n") : [];
+  for (let i = 0; i < ls.length; i++) {
+    const l = ls[i]!;
+    if (l.startsWith("--- ") && ls[i + 1]?.startsWith("+++ ")) i++;
+    else if (/^(@@|\*\*\* |diff --git |index )/.test(l)) continue;
+    else if (l.startsWith("+")) d.added++;
+    else if (l.startsWith("-")) d.taken++;
+  }
+  return d;
+}
+
+/** One of Codex's file changes: {path, kind: {type}, diff} live, {path, type, content | unified_diff}
+ *  in its transcript; an added file's text is all added, a deleted one's all taken. */
+function changeDiff(c: unknown): Diff {
+  const o = (c && typeof c === "object" ? c : {}) as Record<string, unknown>;
+  const kind = o.kind && typeof o.kind === "object" ? (o.kind as Record<string, unknown>).type : o.type;
+  const text = o.diff ?? o.unified_diff ?? o.content;
+  if (kind === "add") return { added: split(text).length, taken: 0 };
+  if (kind === "delete") return { added: 0, taken: split(text).length };
+  return patchDiff(text);
+}
+
+/** An edit call's lines added and taken, from what it was given: Claude's Edit, MultiEdit, Write and
+ *  NotebookEdit, pi's edit (oldText/newText, or edits of them) and write, Codex's apply_patch. A
+ *  write counts its whole text as added. An input cut short counts what the page has. */
+export function diffOf(t: { name?: string; input?: string }): Diff | undefined {
+  if (kindOf(t.name) !== "edit") return undefined;
+  const name = (t.name ?? "").toLowerCase();
+  const i = inputOf(t.input);
+  const pair = (e: unknown): Diff => {
+    const o = (e && typeof e === "object" ? e : {}) as Record<string, unknown>;
+    return lineDiff(o.old_string ?? o.oldText, o.new_string ?? o.newText);
+  };
+  const sum = (es: unknown[], f: (e: unknown) => Diff) => es.reduce<Diff>((a, e) => plus(a, f(e)), { added: 0, taken: 0 });
+  const d =
+    name === "write"
+      ? { added: split(i.content).length, taken: 0 }
+      : name === "notebookedit"
+        ? { added: i.edit_mode === "delete" ? 0 : split(i.new_source).length, taken: 0 }
+        : name === "apply_patch"
+          ? Array.isArray(i.changes)
+            ? sum(i.changes, changeDiff)
+            : patchDiff(i.input ?? i.patch)
+          : Array.isArray(i.edits)
+            ? sum(i.edits, pair)
+            : pair(i);
+  return d.added || d.taken ? d : undefined;
+}
 
 /** What a call is about, on one line: its file, command, pattern, address or what it is told; code:
- *  shown in monospace. stat: an edit's lines added and taken. */
-export function argOf(t: { name?: string; input?: string }, cwd?: string): { arg: string; code: boolean; stat?: string } {
+ *  shown in monospace. diff: an edit's lines added and taken. */
+export function argOf(t: { name?: string; input?: string }, cwd?: string): { arg: string; code: boolean; diff?: Diff } {
   const i = inputOf(t.input);
   const str = (...ks: string[]) => ks.map((k) => i[k]).find((v): v is string => typeof v === "string" && v !== "");
   const name = (t.name ?? "").toLowerCase();
   const file = str("file_path", "notebook_path", "path");
-  if (["edit", "multiedit", "write", "notebookedit"].includes(name) && file) {
-    const added = name === "write" ? lines(i.content) : name === "multiedit" && Array.isArray(i.edits) ? i.edits.reduce((n: number, e: { new_string?: string }) => n + lines(e.new_string), 0) : lines(i.new_string);
-    const taken = name === "write" ? 0 : name === "multiedit" && Array.isArray(i.edits) ? i.edits.reduce((n: number, e: { old_string?: string }) => n + lines(e.old_string), 0) : lines(i.old_string);
-    return { arg: rel(file, cwd), code: true, stat: added || taken ? `+${added} −${taken}` : undefined };
+  if (kindOf(t.name) === "edit") {
+    const files = file ? [file] : Array.isArray(i.changes) ? i.changes.flatMap((c: { path?: unknown }) => (typeof c?.path === "string" ? [c.path] : [])) : [];
+    if (files.length) return { arg: files.map((f) => rel(f, cwd)).join(" "), code: true, diff: diffOf(t) };
   }
   if (file) return { arg: rel(file, cwd), code: true };
   const cmd = str("command", "cmd");
@@ -112,15 +192,37 @@ export function argOf(t: { name?: string; input?: string }, cwd?: string): { arg
   return { arg: first ? first.replace(/\s+/g, " ").slice(0, 200) : "", code: true };
 }
 
+/** A run of calls by one name in a fold: how many, how many failed, the lines its edits changed
+ *  (failed ones changed nothing). Thinking's name is "". */
+export type Run = { name: string; n: number; failed: number; diff?: Diff };
+
 /** A fold's line: each name once, with ×n for more than one, in the order first called. */
-export function foldLine(steps: Step[]): { name: string; n: number; failed: number }[] {
-  const runs: { name: string; n: number; failed: number }[] = [];
+export function foldLine(steps: Step[]): Run[] {
+  const runs: Run[] = [];
   for (const s of steps) {
     const name = s.kind === "thinking" ? "" : (s.name ?? "?");
-    const r = runs.find((x) => x.name === name);
-    const bad = s.kind === "tool" && s.result?.error ? 1 : 0;
-    if (r) (r.n++, (r.failed += bad));
-    else runs.push({ name, n: 1, failed: bad });
+    let r = runs.find((x) => x.name === name);
+    if (!r) runs.push((r = { name, n: 0, failed: 0 }));
+    r.n++;
+    if (s.kind === "tool" && s.result?.error) r.failed++;
+    else if (s.kind === "tool") {
+      const d = diffOf(s);
+      if (d) r.diff = plus(r.diff, d);
+    }
   }
   return runs;
+}
+
+/** All the lines a fold's runs changed; undefined for none. */
+export const diffSum = (runs: Run[]): Diff | undefined => runs.reduce<Diff | undefined>((a, r) => (r.diff ? plus(a, r.diff) : a), undefined);
+
+/** "+12 −3", either side left out at 0. */
+export const diffText = (d: Diff) => [d.added && `+${d.added}`, d.taken && `−${d.taken}`].filter(Boolean).join(" ");
+
+/** A fold's line said: "Tool calls: Bash ×2, Thinking, Edit +12 −3, 1 failed". */
+export function foldSaid(runs: Run[]): string {
+  const bad = runs.reduce((n, r) => n + r.failed, 0);
+  const said = runs.map((r) => [r.name || t("msg.thinking"), r.n > 1 && `×${r.n}`, r.diff && diffText(r.diff)].filter(Boolean).join(" "));
+  if (bad) said.push(t("msg.failedN", { n: bad }));
+  return t("msg.toolsSaid", { list: said.join(t("msg.sep")) });
 }

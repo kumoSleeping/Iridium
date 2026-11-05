@@ -3,7 +3,7 @@
 // peer sent, its logo or avatar and name, a key to go there; Iridium's own lines centred and faint;
 // the agent's words as Markdown with the files they name; tool calls and thoughts folded to a line.
 import { ArrowUpRight, Bot, Brain, ChevronRight, CircleX, FilePen, FileText, Globe, ListChecks, LoaderCircle, MessageCircleQuestionMark, Plug, RotateCcw, RotateCw, Search, SquareTerminal, Wrench, X, type LucideIcon } from "lucide-react";
-import { forwardRef, memo, useEffect, useState, type ReactNode } from "react";
+import { forwardRef, memo, useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { api } from "../api/client";
 import type { Block, FileRef, Result } from "../api/types.gen";
 import type { Sent } from "../chats";
@@ -11,7 +11,7 @@ import { t } from "../i18n";
 import { Avatar, cn, IconKey, Logo, Tip } from "../ui";
 import { useHome } from "../data";
 import { Files, Picture, size } from "./files";
-import { argOf, foldLine, kindOf, kindOfStep, type Kind, type Shown, type Step, type Tool } from "./fold";
+import { argOf, diffSum, foldLine, foldSaid, kindOf, type Diff, type Kind, type Shown, type Step, type Tool } from "./fold";
 import { Markdown } from "./markdown";
 import { filesIn, type Source } from "./refs";
 
@@ -62,6 +62,12 @@ export function Pending({ s, retry, drop, bubbleRef }: { s: Sent; retry: () => P
           </span>
         ))}
       </YouBubble>
+      {s.steer && s.failed === undefined && (
+        <span role="status" className="g-fade flex items-center gap-1 text-xs text-ink-3">
+          <LoaderCircle size={11} className="animate-spin" />
+          {t("msg.steering")}
+        </span>
+      )}
       {s.failed !== undefined && (
         <div className="-mr-1 flex items-center gap-0.5">
           <span className="max-w-[280px] truncate text-xs text-err">{s.failed || t("err.send")}</span>
@@ -187,11 +193,33 @@ function SystemFold({ b, session }: { b: Block; session: string }) {
   );
 }
 
-const KINDS: Record<Kind, LucideIcon> = { read: FileText, search: Search, web: Globe, edit: FilePen, command: SquareTerminal, agent: Bot, todo: ListChecks, ask: MessageCircleQuestionMark, mcp: Plug, other: Wrench, thinking: Brain };
-const KindIcon = ({ kind, failed }: { kind: Kind; failed?: boolean }) => {
-  const Icon = KINDS[kind];
-  return <Icon size={14} className={cn("shrink-0", failed ? "text-err" : "text-ink-3")} aria-hidden />;
+/** Each kind's icon and its hue, muted (.k-tint); other calls stay grey. */
+const KINDS: Record<Kind, [LucideIcon, number?]> = {
+  read: [FileText, 230],
+  search: [Search, 195],
+  web: [Globe, 255],
+  edit: [FilePen, 60],
+  command: [SquareTerminal, 285],
+  agent: [Bot, 350],
+  todo: [ListChecks, 140],
+  ask: [MessageCircleQuestionMark, 85],
+  mcp: [Plug, 110],
+  other: [Wrench],
+  thinking: [Brain, 320],
 };
+const KindIcon = ({ kind, failed, size = 14, className }: { kind: Kind; failed?: boolean; size?: number; className?: string }) => {
+  const [Icon, hue] = KINDS[kind];
+  const tint = !failed && hue !== undefined;
+  return <Icon size={size} className={cn("shrink-0", failed ? "text-err" : tint ? "k-tint" : "text-ink-3", className)} style={tint ? ({ "--k-h": hue } as CSSProperties) : undefined} aria-hidden />;
+};
+/** An edit's lines added and taken, green and red; a side at 0 left out. */
+const DiffStat = ({ d }: { d: Diff }) => (
+  <span className="shrink-0 font-mono text-xs tabular-nums">
+    {d.added > 0 && <span className="text-plus">+{d.added}</span>}
+    {d.added > 0 && d.taken > 0 && " "}
+    {d.taken > 0 && <span className="text-minus">−{d.taken}</span>}
+  </span>
+);
 const failed = (s: Step) => s.kind === "tool" && !!s.result?.error;
 
 /** A step's line: its icon, its name, what it is about in monospace, an edit's +/−. */
@@ -210,7 +238,7 @@ function StepLine({ s, cwd }: { s: Step; cwd?: string }) {
       <KindIcon kind={kindOf(s.name)} failed={failed(s)} />
       <span className="shrink-0 text-ink-2">{s.name}</span>
       <span className={cn("min-w-0 truncate", a.code ? "font-mono text-xs" : "text-xs")}>{a.arg}</span>
-      {a.stat && <span className="shrink-0 font-mono text-xs tabular-nums">{a.stat}</span>}
+      {a.diff && !failed(s) && <DiffStat d={a.diff} />}
       {failed(s) && <CircleX size={13} className="shrink-0 text-err" aria-label={t("msg.failed")} />}
     </>
   );
@@ -218,31 +246,27 @@ function StepLine({ s, cwd }: { s: Step; cwd?: string }) {
 
 const ROW = "flex h-7 min-w-0 cursor-default list-none items-center gap-2 rounded-sm text-sm text-ink-3 hover:text-ink-2 [&::-webkit-details-marker]:hidden pointer-coarse:h-9";
 
-/** The steps between two things said: one of them is its own line; more fold into one, the icons
- *  of their kinds and their names, which opens to a line each. Each opens to what it was given and
- *  what came back. */
+/** The steps between two things said: one of them is its own line; more fold into one, each name
+ *  once with its kind's icon and ×n, then the lines their edits changed, which opens to a line each.
+ *  Each opens to what it was given and what came back. */
 function Fold({ steps, session, cwd }: { steps: Step[]; session: string; cwd: string }) {
   if (steps.length === 1) return <StepView s={steps[0]!} session={session} cwd={cwd} />;
   const runs = foldLine(steps);
-  const kinds = [...new Set(steps.map(kindOfStep))].slice(0, 3);
+  const diff = diffSum(runs);
   const bad = steps.filter(failed).length;
   return (
     <details className="group/fold -my-0.5 w-full min-w-0">
-      <summary className={ROW} aria-label={`${t("msg.tools")}: ${runs.map((r) => r.name || t("msg.thinking")).join(", ")}`}>
-        <span className="flex shrink-0 gap-1">
-          {kinds.map((k) => (
-            <KindIcon key={k} kind={k} />
-          ))}
-        </span>
+      <summary className={ROW} aria-label={foldSaid(runs)}>
         <span className="min-w-0 truncate">
           {runs.map((r, i) => (
-            <span key={i}>
-              {i > 0 && <span className="text-ink-4">{t("msg.sep")}</span>}
+            <span key={i} className={cn(i > 0 && "ml-3")}>
+              <KindIcon kind={r.name ? kindOf(r.name) : "thinking"} className="mr-2 inline-block align-[-2.5px]" />
               <span className="text-ink-2">{r.name || t("msg.thinking")}</span>
               {r.n > 1 && <span className="tabular-nums"> ×{r.n}</span>}
             </span>
           ))}
         </span>
+        {diff && <DiffStat d={diff} />}
         {bad > 0 && (
           <span className="flex shrink-0 items-center gap-0.5 text-xs text-err tabular-nums">
             <CircleX size={13} aria-label={t("msg.failed")} />

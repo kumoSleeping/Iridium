@@ -109,6 +109,29 @@ describe("Messages", () => {
     expect(m.blocks.map((b) => b.text)).toEqual(["z", "a", "b", "c"]);
     expect(await m.older()).toBe(false);
   });
+  test("the page before is asked for ahead, once: scrolling up takes it without waiting", async () => {
+    const asked: string[] = [];
+    const pages: Record<string, MessagePage> = {
+      "": { blocks: [blk(200, "user", "b")], start: 200, end: 300, more: true },
+      "before=200": { blocks: [blk(100, "user", "a")], start: 100, end: 200, more: true },
+      "before=100": { blocks: [blk(0, "user", "z")], start: 0, end: 100, more: false },
+    };
+    const m = new Messages("s", async (_, q) => {
+      const k = q.before !== undefined ? `before=${q.before}` : "";
+      asked.push(k);
+      return pages[k]!;
+    });
+    await m.newer();
+    expect(asked).toEqual(["", "before=200"]);
+    expect(await m.older()).toBe(true);
+    // Taken from what was asked ahead; the next one asked for at once.
+    expect(asked).toEqual(["", "before=200", "before=100"]);
+    expect(await m.older()).toBe(true);
+    expect(m.blocks.map((b) => b.text)).toEqual(["z", "a", "b"]);
+    // The first page reached: nothing more asked for.
+    expect(await m.older()).toBe(false);
+    expect(asked).toEqual(["", "before=200", "before=100"]);
+  });
   test("drafts: same n joins, another n seals, another proc drops; the transcript's words take a draft's place", async () => {
     let page: MessagePage = { blocks: [], start: 0, end: 0, more: false };
     const m = new Messages("s", async () => page);

@@ -1,9 +1,9 @@
 // The script half of the motion system (motion.css has the tokens and the CSS gestures): FLIP for rows
-// that move or appear, and the send flight. Both read their timings from the CSS tokens and move only
-// transform and opacity; with reduced motion they fall back to a short fade.
+// that move or appear, and the push of a sent message. Both read their timings from the CSS tokens
+// and move only transform and opacity; with reduced motion they fall back to a short fade.
 import { useLayoutEffect, useRef, type RefObject } from "react";
 
-const reduced = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
+export const reduced = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 function token(name: string, fallback: string) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
@@ -51,42 +51,17 @@ export function useFlip(ref: RefObject<HTMLElement | null>, dep: unknown) {
   }, [dep, ref]);
 }
 
-/** Send: a copy of the new bubble starts where the text sat in the composer and flies to the bubble's
- *  place; the bubble shows when it lands. from: the composer text's top-left corner. */
-export function flySend(bubble: HTMLElement, from: { x: number; y: number }) {
-  const to = bubble.getBoundingClientRect();
-  if (reduced() || to.width === 0) {
+/** Send: the new bubble at the bottom, the conversation pushed up by it, as a chat app does; the
+ *  bubble fades in as it comes up. column: what holds the conversation, the bubble in it. */
+export function pushIn(bubble: HTMLElement, column: HTMLElement) {
+  if (reduced()) {
     bubble.animate([{ opacity: 0 }, { opacity: 1 }], { duration: motion.dur(1) });
     return;
   }
-  const clone = bubble.cloneNode(true) as HTMLElement;
-  const pad = parseFloat(getComputedStyle(bubble).paddingLeft) || 0;
-  const padT = parseFloat(getComputedStyle(bubble).paddingTop) || 0;
-  Object.assign(clone.style, {
-    position: "fixed",
-    left: `${to.left}px`,
-    top: `${to.top}px`,
-    width: `${to.width}px`,
-    height: `${to.height}px`,
-    margin: "0",
-    zIndex: "60",
-    pointerEvents: "none",
-    transformOrigin: "0 0",
-  });
-  clone.removeAttribute("data-flip");
-  document.body.appendChild(clone);
-  bubble.style.opacity = "0";
-  const dx = from.x - (to.left + pad);
-  const dy = from.y - (to.top + padT);
-  const dur = motion.dur(4);
-  const bg = clone.querySelector<HTMLElement>("[data-bubble-bg]");
-  bg?.animate([{ opacity: 0 }, { opacity: 1 }], { duration: dur * 0.6, easing: motion.ease("out"), fill: "both" });
-  const a = clone.animate([{ transform: `translate(${dx}px, ${dy}px) scale(0.98)` }, { transform: "none" }], {
-    duration: dur,
-    easing: motion.ease("spring"),
-  });
-  a.onfinish = a.oncancel = () => {
-    bubble.style.opacity = "";
-    clone.remove();
-  };
+  const gap = parseFloat(getComputedStyle(column).rowGap) || 0;
+  const by = bubble.offsetHeight + gap;
+  const dur = motion.dur(3);
+  const ease = motion.ease("out");
+  column.animate([{ transform: `translateY(${by}px)` }, { transform: "none" }], { duration: dur, easing: ease });
+  bubble.animate([{ opacity: 0, transform: "translateY(6px) scale(0.98)" }, { opacity: 1, transform: "none" }], { duration: dur, easing: ease, delay: motion.dur(1) / 2, fill: "backwards" });
 }

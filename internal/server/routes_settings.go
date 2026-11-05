@@ -25,8 +25,11 @@ func (s *Server) settingsRoutes(mux *http.ServeMux) {
 func (s *Server) settings() api.Settings {
 	t := s.m.Tuned()
 	s.cmu.Lock()
-	hidden, push := slices.Clone(s.cfg.QuotaHidden), s.cfg.Push
+	hidden, push, enter := slices.Clone(s.cfg.QuotaHidden), s.cfg.Push, s.cfg.EnterInTurn
 	s.cmu.Unlock()
+	if enter == "" {
+		enter = "steer"
+	}
 	if s.Push != nil {
 		push = s.Push.Enabled()
 	}
@@ -37,7 +40,7 @@ func (s *Server) settings() api.Settings {
 	if modes == nil {
 		modes = map[string]string{}
 	}
-	return api.Settings{IdleReap: shortDuration(t.IdleReap), CrashResume: t.CrashResume, QuotaResume: t.QuotaResume, QuotaHidden: hidden, Modes: modes, Push: push}
+	return api.Settings{IdleReap: shortDuration(t.IdleReap), CrashResume: t.CrashResume, QuotaResume: t.QuotaResume, QuotaHidden: hidden, Modes: modes, Push: push, EnterInTurn: enter}
 }
 
 func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
@@ -53,6 +56,10 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		reap = d
+	}
+	if p.EnterInTurn != nil && *p.EnterInTurn != "steer" && *p.EnterInTurn != "queue" {
+		fail(w, http.StatusBadRequest, `enterInTurn: "steer" or "queue"`)
+		return
 	}
 	for a, mode := range p.Modes {
 		info, ok := agents.Get(api.Agent(a))
@@ -91,6 +98,9 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			c.Modes = modes
+		}
+		if p.EnterInTurn != nil {
+			c.EnterInTurn = *p.EnterInTurn
 		}
 		if p.Push != nil && s.Push == nil {
 			c.Push = *p.Push

@@ -17,6 +17,9 @@ let session: string | null = null;
 let retry: ReturnType<typeof setTimeout> | undefined;
 let soon: ReturnType<typeof setTimeout> | undefined;
 let started = false;
+/** When the stream last began opening, or the browser trying it again; how many round trips in a row failed. */
+let since = 0;
+let missed = 0;
 
 const link = (l: Partial<Link>) => setCarried("link", { ...(getCarried<Link>("link") ?? { live: null, rtt: null }), ...l });
 
@@ -33,8 +36,10 @@ function connect() {
   es?.close();
   const src = new EventSource(streamURL(session));
   es = src;
+  since = performance.now();
   src.onopen = () => {
     if (es !== src) return;
+    missed = 0;
     link({ live: true });
     opened.forEach((f) => f());
     void measure();
@@ -51,7 +56,8 @@ function connect() {
   });
   src.onerror = () => {
     if (es !== src) return;
-    link({ live: false });
+    link({ live: false, rtt: null }); // back, it is measured afresh
+    since = performance.now(); // the browser's own try begins
     // The browser retries a dropped stream itself, but gives up for good on an answer other than
     // 200 (a proxy's 502 while the daemon restarts, a login that ran out): then open a new one.
     if (src.readyState !== EventSource.CLOSED) return;
@@ -74,17 +80,49 @@ export function follow(s: string | null) {
   soon = setTimeout(connect, 60);
 }
 
-/** The round trip of one small request, shown by the top bar's dot. */
-export async function measure() {
-  const t = performance.now();
-  try {
-    await api.health({ priority: "low" } as RequestInit);
-    link({ rtt: Math.round(performance.now() - t) });
-  } catch {
-    link({ rtt: null });
-  }
+/** How often the round trip is measured while the page is in front, and how long one may take. */
+export const EVERY = 10_000;
+export const WAIT = 8_000;
+
+let measuring: Promise<boolean> | undefined;
+/** The round trip of one small request, shown by the top bar's dot; whether it came back in time.
+ *  One at a time: a request that hangs (a dead tunnel) is cut off at WAIT, not left to show the
+ *  number from before. */
+export function measure(): Promise<boolean> {
+  return (measuring ??= (async () => {
+    const stop = new AbortController();
+    const cut = setTimeout(() => stop.abort(), WAIT);
+    const t = performance.now();
+    try {
+      // Not low priority: a request held back behind others is not the round trip.
+      await api.health({ signal: stop.signal });
+      link({ rtt: Math.round(performance.now() - t) });
+      return true;
+    } catch {
+      link({ rtt: null });
+      return false;
+    } finally {
+      clearTimeout(cut);
+      measuring = undefined;
+    }
+  })());
 }
 
-// While in front and connected, the round trip every half minute; back in front, at once.
-setInterval(() => void (document.visibilityState === "visible" && getCarried<Link>("link")?.live && measure()), 30_000);
-document.addEventListener("visibilitychange", () => void (document.visibilityState === "visible" && getCarried<Link>("link")?.live && measure()));
+/** One beat of the dot, while in front: the round trip again. A stream that looks open while two
+ *  round trips in a row fail (a tunnel or a laptop's sleep that dropped it without a word) is taken
+ *  as down and opened again; one still opening long after requests get through again is too. */
+export async function beat() {
+  if (!started || document.visibilityState !== "visible") return;
+  const live = getCarried<Link>("link")?.live;
+  const ok = await measure();
+  missed = ok ? 0 : missed + 1;
+  if (live && missed >= 2) {
+    missed = 0;
+    link({ live: false, rtt: null });
+    connect();
+  } else if (!live && ok && es?.readyState !== EventSource.OPEN && performance.now() - since > WAIT) connect();
+}
+
+// While in front, a beat every EVERY; back in front, at once.
+setInterval(() => void beat(), EVERY);
+document.addEventListener("visibilitychange", () => void beat());

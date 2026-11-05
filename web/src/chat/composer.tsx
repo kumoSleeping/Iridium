@@ -1,7 +1,8 @@
 // Where you type to a session (web/sample's composer; Rhodium spec web-write): attach, the words,
-// the context ring, one round key whose icon says what it does now. Idle it sends; in a turn with
+// one round key whose icon says what it does now; the meters are under it, not in it (chat.tsx). Idle it sends; in a turn with
 // nothing typed it stops the turn; with words it queues them (or steers them into the turn, with a
-// leading ! or where the server has no queue). / at the start lists the session's commands.
+// leading !, Ctrl or ⌘+Enter as Claude Code's send now, or where the server has no queue). / at
+// the start lists the session's commands.
 // Shift+Tab cycles the approval mode; Esc stops the turn. The draft is kept on this device; files
 // pasted, dropped or attached go up in chunks while you type.
 import { ArrowUp, CornerUpRight, FileText, ListPlus, LoaderCircle, Paperclip, Slash, Square, X } from "lucide-react";
@@ -11,21 +12,22 @@ import { api, missing } from "../api/client";
 import type { Sent } from "../chats";
 import { t } from "../i18n";
 import { errText, toast } from "../toast";
-import { cn, fine, IconKey, keep, kept, Tip } from "../ui";
+import { cn, fine, IconKey, keep, kept, steerKey, Tip } from "../ui";
+import { useSettings } from "../data";
 import { askOnce, sentFromHere } from "../unread";
-import { ContextRing, QuotaBars } from "./meters";
 import { upload } from "./upload";
 
 export const draftKey = (id: string) => `draft:${id}`;
 
-/** What the key does now. */
+/** What the key does now. steers: Enter puts words into a running turn (the setting enterInTurn,
+ *  the default); other: as Ctrl or ⌘+Enter, which does the other. */
 export type KeyMode = "send" | "stop" | "queue" | "steer";
-export function keyMode(turn: boolean, text: string, files: number, queues: boolean): KeyMode {
+export function keyMode(turn: boolean, text: string, files: number, queues: boolean, steers = true, other = false): KeyMode {
   if (!turn) return "send";
   const words = text.trim();
   if (!words && !files) return "stop";
   if (/^[!！]/.test(words) || !queues) return "steer";
-  return "queue";
+  return steers !== other ? "steer" : "queue";
 }
 
 /** The commands for what was typed after the /: names that start with it first, then names that
@@ -56,7 +58,7 @@ type Props = {
   s: LiveSession;
   turn: boolean;
   /** A message is going: shown at once as yours, faint till the transcript has it. */
-  onSent: (sent: Sent, from: { x: number; y: number }) => void;
+  onSent: (sent: Sent) => void;
   onSentDone: (sent: Sent) => void;
   cycleMode: () => void;
   openModel: () => void;
@@ -123,7 +125,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
   const uploading = atts.some((a) => !a.ref && !a.error);
   const empty = !text.trim() && !atts.length;
   const queues = s.queue !== undefined;
-  const mode = keyMode(turn, text, atts.length, queues);
+  const steers = (useSettings().data?.enterInTurn ?? "steer") !== "queue";
+  const mode = keyMode(turn, text, atts.length, queues, steers);
 
   /** Page-handled commands: true when done here. */
   const own = (words: string) => {
@@ -143,17 +146,15 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
       setBusy(false);
     }
   };
-  const go = async () => {
+  const go = async (other = false) => {
+    const mode = keyMode(turn, text, atts.length, queues, steers, other);
     if (busy || uploading || (empty && mode !== "stop")) return;
     if (mode === "stop") return stop();
     if (atts.some((a) => a.error)) return toast(t("err.upload"), { error: true });
     const words = text.trim().replace(/^[!！]\s*/, "");
     if (!atts.length && own(words)) return;
     const files = atts.map((a) => ({ ref: a.ref!, name: a.file.name, type: a.file.type }));
-    const sent: Sent = { key: crypto.randomUUID(), text: words, files, from: 0 };
-    const el = box.current!;
-    const r = el.getBoundingClientRect();
-    const cs = getComputedStyle(el);
+    const sent: Sent = { key: crypto.randomUUID(), text: words, files, from: 0, steer: mode === "steer" };
     type("");
     setAtts([]);
     // While a turn runs the server queues what is sent; steering joins the turn. Queued, the queue
@@ -169,7 +170,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
     }
     askOnce();
     sentFromHere(s.id);
-    onSent(sent, { x: r.left + parseFloat(cs.paddingLeft), y: r.top + parseFloat(cs.paddingTop) });
+    onSent(sent);
     try {
       const r = await api.send(s.id, words, files.map((f) => f.ref), mode === "steer");
       sent.input = r.input;
@@ -184,8 +185,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
   const KEYS: Record<KeyMode, [string, React.ReactNode]> = {
     send: [t("composer.send"), <ArrowUp size={17} strokeWidth={2.25} />],
     stop: [t("composer.stop"), <Square size={12} fill="currentColor" />],
-    queue: [t("composer.queue"), <ListPlus size={17} />],
-    steer: [t("composer.steer"), <CornerUpRight size={16} />],
+    queue: [t("composer.queue", { key: steerKey() }), <ListPlus size={17} />],
+    steer: [steers && queues && !/^[!！]/.test(text.trim()) ? t("composer.steerOr", { key: steerKey() }) : t("composer.steer"), <CornerUpRight size={16} />],
   };
   const [label, icon] = KEYS[mode];
 
@@ -194,7 +195,6 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
     <div className="relative">
       {list.length > 0 && <Palette list={list} at={Math.min(at, list.length - 1)} point={setAt} pick={(c) => (own(`/${c.name}`) ? undefined : (type(`/${c.name} `), box.current?.focus()))} />}
     <div className="glass float relative rounded-xl">
-      <QuotaBars agent={s.agent} live={s.live} />
       {atts.length > 0 && (
         <ul data-attachments className="m-0 flex list-none gap-2 overflow-x-auto px-3 pt-3 pb-0">
           {atts.map((a) => (
@@ -218,7 +218,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
           ))}
         </ul>
       )}
-      <div className="flex items-end gap-0.5 px-1.5 pt-3 pb-1.5 pointer-coarse:pt-3.5">
+      <div className="flex items-end gap-0.5 p-1.5">
         <input
           ref={picker}
           type="file"
@@ -257,6 +257,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
               if (!own(`/${c.name}`)) type(`/${c.name} `);
             } else if (list.length && e.key === "Escape") setShut(text);
             else if (e.key === "Tab" && e.shiftKey) cycleMode();
+            // In a turn, Ctrl or ⌘+Enter does what Enter does not: steer in (Claude Code's send now) or queue.
+            else if (e.key === "Enter" && !e.shiftKey && (e.ctrlKey || e.metaKey) && turn) void (empty || go(true));
             // Enter sends on a computer (Ctrl or ⌘ with it on a phone); in an empty box it does nothing,
             // as it would stop the turn: Esc does that.
             else if (e.key === "Enter" && !e.shiftKey && (fine() || e.ctrlKey || e.metaKey)) void (empty || go());
@@ -266,7 +268,6 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
           }}
           className="no-ring max-h-[180px] min-h-8 min-w-0 flex-1 resize-none bg-transparent px-1.5 py-[5.5px] text-md leading-[21px] placeholder:text-ink-3"
         />
-        <ContextRing session={s.id} summary={s.context} />
         <Tip label={label}>
           <button
             type="button"

@@ -15,6 +15,9 @@ type Settings struct {
 	Modes map[string]string `json:"modes"`
 	// Push: Web Push's total switch (off by default); GET /api/push has the rest.
 	Push bool `json:"push"`
+	// EnterInTurn: what Enter does with words while a turn runs: "steer" (the default) puts them
+	// into the turn, Ctrl or ⌘+Enter queues them; "queue" the other way round.
+	EnterInTurn string `json:"enterInTurn"`
 }
 
 // SettingsPatch changes what it gives and nothing else. A mode "" goes back to the agent's own.
@@ -25,4 +28,5 @@ type SettingsPatch struct {
 	QuotaHidden *[]string         `json:"quotaHidden,omitempty"`
 	Modes       map[string]string `json:"modes,omitempty"`
 	Push        *bool             `json:"push,omitempty"`
+	EnterInTurn *string           `json:"enterInTurn,omitempty"`
 }

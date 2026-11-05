@@ -4,7 +4,8 @@
 // asked for once at first.
 import { useQuery } from "@tanstack/react-query";
 import { api, missing } from "./api/client";
-import type { AgentInfo, Me, Settings, Terminal, UpdateState, Workspace } from "./api/types.gen";
+import type { AgentInfo, LastSaid, Me, Settings, Terminal, UpdateState, Workspace } from "./api/types.gen";
+import { t } from "./i18n";
 import { useCarried, useUpdateState } from "./store";
 import { setHome } from "./ui";
 
@@ -63,5 +64,13 @@ export function useTerminals() {
   return useQuery({ queryKey: ["terminals"], queryFn: orNone(api.terminals), staleTime: 60_000, enabled: manages });
 }
 export const useTerminalList = (): Terminal[] => useTerminals().data?.terminals ?? [];
+
+/** The last thing said, on one line: yours after 你：, another terminal's after its name. Yours: none
+ *  tagged, or a panel's or 本机's. */
+export function useSaidLine() {
+  const terminals = useTerminalList();
+  const yours = (from?: string) => !from || from === "本机" || terminals.some((x) => x.name === from && (x.kind === "panel" || x.local));
+  return (l?: LastSaid) => l && `${l.role === "user" ? (yours(l.from) ? t("jump.you") : `${l.from}: `) : ""}${l.text}`;
+}
 
 export type { Me, Settings, UpdateState, Workspace };

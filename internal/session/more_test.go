@@ -295,6 +295,16 @@ func TestQuotaResume(t *testing.T) {
 	}
 }
 
+// Within a turn that waits on a tool call, the context is read already, not only at the turn's end.
+func TestContextInTurn(t *testing.T) {
+	r := newRig(t, nil)
+	id, _ := r.m.Create(bg, api.NewSession{Cwd: r.cwd, Text: "please ASK"}, "网页")
+	s := r.waitState(id, "the ask, with the context", func(s *api.SessionState) bool { return len(s.Asks) == 1 && s.Context != nil })
+	if s.Status != api.StatusWaiting || s.Context.Used != 100 {
+		t.Errorf("status %s context %+v", s.Status, s.Context)
+	}
+}
+
 // The tail carries the newest small blocks; context and quota are kept, quota per account.
 func TestCarried(t *testing.T) {
 	r := newRig(t, nil)

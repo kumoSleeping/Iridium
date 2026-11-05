@@ -64,19 +64,30 @@ await step("the sidebar lists the daemon's workspaces and sessions", async () =>
 });
 
 let id = "";
-await step("+ → new session in a folder picked → the chat opens, caret in the composer", async () => {
-  await page.click('button[aria-label="New"]');
-  await clickText("New session");
+await step("a workspace's + → new session in a folder picked → the chat opens, caret in the composer; the workspace never folds", async () => {
+  const ws = 'xpath/.//*[@role="treeitem"][@aria-expanded][contains(., "Iridium")]';
+  // Every press in its popover is checked: an even number of them would fold and unfold it back.
+  const stillOpen = async (after) => {
+    const open = await page.$eval(ws, (e) => e.getAttribute("aria-expanded"));
+    if (open !== "true") throw new Error(`the workspace folded after ${after}`);
+  };
+  await (await page.waitForSelector(ws)).hover();
+  await page.click('button[aria-label="New session in Iridium"]');
+  await stillOpen("its +");
   await page.click('button[aria-label="Folder"]');
+  await stillOpen("Folder");
   await clickText("web");
   await sleep(300);
+  await stillOpen("web");
   await clickText("Choose this folder");
+  await stillOpen("Choose this folder");
   await page.click('button[aria-label="Claude"]');
   await page.waitForFunction(() => location.hash.startsWith("#/s/"), { timeout: 8000 });
   id = decodeURIComponent((await page.evaluate(() => location.hash)).slice(4));
   await page.waitForSelector("textarea");
   await sleep(300);
   if (!(await page.evaluate(() => document.activeElement?.tagName === "TEXTAREA"))) throw new Error("caret not in the composer");
+  await stillOpen("Claude");
 });
 
 await step("send: a faint bubble at once, then the transcript's, then the reply", async () => {
@@ -96,15 +107,32 @@ await step("a permission ask shows its card; Allow answers it and the turn goes 
   if (!card.includes("Run command") || !card.includes("ls")) throw new Error(`card: ${card}`);
 });
 
-await step("words sent while a turn runs wait in the queue, edited in place; they go once it ends", async () => {
+await step("in a turn, Ctrl+Enter queues (edited in place, sent all or deleted) and Enter steers in, saying so; the queue goes once it ends", async () => {
+  const ctrlEnter = async () => {
+    await page.keyboard.down("Control");
+    await page.keyboard.press("Enter");
+    await page.keyboard.up("Control");
+  };
   await page.type("textarea", "while it waits");
-  await page.keyboard.press("Enter");
+  await ctrlEnter();
   await page.waitForFunction(() => document.querySelector('section[aria-label="Queue"]')?.textContent.includes("while it waits"), { timeout: 5000 });
   await page.click('section[aria-label="Queue"] button[aria-label="Edit"]');
   await page.waitForSelector('section[aria-label="Queue"] input');
   await page.keyboard.type(", edited");
   await page.keyboard.press("Enter");
   await page.waitForFunction(() => document.querySelector('section[aria-label="Queue"]')?.textContent.includes("while it waits, edited"), { timeout: 5000 });
+  // Two lines: a key sends them all; one deleted, it goes.
+  await page.type("textarea", "a second line");
+  await ctrlEnter();
+  await page.waitForSelector('section[aria-label="Queue"] button[aria-label="Send all now"]', { timeout: 5000 });
+  const drops = await page.$$('section[aria-label="Queue"] button[aria-label="Delete"]');
+  await drops[drops.length - 1].click();
+  await page.waitForFunction(() => !document.querySelector('section[aria-label="Queue"] button[aria-label="Send all now"]'), { timeout: 5000 });
+  // Enter steers into the turn (the default): yours at once, saying it is going in.
+  await page.type("textarea", "steer this in");
+  await page.keyboard.press("Enter");
+  await page.waitForFunction(() => [...document.querySelectorAll('[role="status"]')].some((e) => e.textContent.includes("Steering in")), { timeout: 5000 });
+  if (await page.evaluate(() => document.querySelector('section[aria-label="Queue"]')?.textContent.includes("steer this in"))) throw new Error("Enter queued it");
   await clickText("Allow", "button");
   await page.waitForFunction(() => !document.querySelector('[role="alertdialog"]'), { timeout: 8000 });
   await waitText("ok: please ASK", 10000);
@@ -166,8 +194,7 @@ await step("pin from the row's menu (right click): a pin on the row", async () =
 });
 
 await step("+ → new workspace: a new folder in the picker, chosen, listed", async () => {
-  await page.click('button[aria-label="New"]');
-  await clickText("New workspace");
+  await page.click('button[aria-label="New workspace"]');
   await page.click('button[aria-label="New folder"]');
   await page.waitForSelector('input[aria-label="Folder name"]');
   const name = `e2e-ws-${Date.now() % 100000}`;

@@ -5,7 +5,6 @@
 import { Toast } from "@base-ui/react/toast";
 import { Tooltip } from "@base-ui/react/tooltip";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
-import type { Workspace } from "./api/types.gen";
 import { watchTurns } from "./chats";
 import { CreatePopover, WsPlus } from "./create";
 import { useHome, useMe, useSettings, useTerminals, useUpdate, useWorkspaces } from "./data";
@@ -118,9 +117,6 @@ export function App() {
     return () => removeEventListener("keydown", key);
   }, [tree, open]);
 
-  const current = (list ?? []).find((s) => s.id === open);
-  const curWs: Workspace | null = ws.data?.find((w) => w.id === current?.workspace) ?? ws.data?.[0] ?? null;
-  const fallbackDir = current?.cwd ?? list?.[0]?.cwd ?? "~";
 
   const sidebar = (
     <Sidebar
@@ -139,7 +135,7 @@ export function App() {
       confirms={confirms}
       onConfirm={(c) => (c.session && list?.some((s) => s.id === c.session) ? openChat(c.session) : go({ name: "terminals" }, r.name !== "home"))}
       chatCode={() => void loadChat().catch(() => {})}
-      createKey={(trigger) => <CreatePopover trigger={trigger} ws={curWs} fallbackDir={fallbackDir} opened={(id) => openChat(id)} />}
+      createKey={(trigger) => <CreatePopover trigger={trigger} />}
       wsPlus={(w, trigger, o, setO) => <WsPlus key={w.key} w={{ id: w.id, name: w.name, path: w.root }} trigger={trigger} open={o} setOpen={setO} opened={(id) => openChat(id)} />}
       me={<MeChip theme={theme} setTheme={(v) => (setTheme(v), keepTheme(v))} defaultOpen={params.get("open") === "me"} initialPage={params.get("open") === "perms" ? "perms" : "main"} />}
     />

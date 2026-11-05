@@ -43,7 +43,7 @@ describe("folded", () => {
 
 describe("argOf", () => {
   test("a file relative to the folder, an edit's lines, a command on one line", () => {
-    expect(argOf({ name: "Edit", input: JSON.stringify({ file_path: "/w/a/b.ts", old_string: "x", new_string: "x\ny" }) }, "/w")).toEqual({ arg: "a/b.ts", code: true, stat: "+2 −1" });
+    expect(argOf({ name: "Edit", input: JSON.stringify({ file_path: "/w/a/b.ts", old_string: "x", new_string: "x\ny" }) }, "/w")).toEqual({ arg: "a/b.ts", code: true, diff: { added: 1, taken: 0 } });
     expect(argOf({ name: "Bash", input: JSON.stringify({ command: "go test\n  ./..." }) })).toEqual({ arg: "go test ./...", code: true });
     expect(argOf({ name: "WebSearch", input: JSON.stringify({ query: "iridium" }) })).toEqual({ arg: "iridium", code: false });
   });
@@ -120,6 +120,11 @@ describe("buildTree", () => {
     expect(back.needs).toEqual([]);
     expect(back.workspaces[0]!.rows.map((r) => (r.kind === "session" ? r.s.id : r.f.name))).toEqual(["a", "d", "h", "web"]);
   });
+  test("where: the folder a row says, where the tree does not", () => {
+    const list = [S("a", "/w/ir", { workspace: 1 }), S("b", "/w/ir/web", { workspace: 1 }), S("c", "/w/ir/web", { workspace: 1 }), S("d", "/w/ir/docs", { workspace: 1 }), S("e", "/w/x/one"), S("f", "/w/x/two"), S("g", "/w/x/two", { archived: true }), S("h", "/w/ir/web", { workspace: 1, status: "waiting" }), S("i", "/w/ir", { workspace: 1, archived: true })];
+    const t = buildTree(list, ws, "未归类");
+    expect(Object.fromEntries(t.where)).toEqual({ d: "docs", e: "/w/x/one", f: "/w/x/two", g: "two", h: "Iridium/web", i: "Iridium" });
+  });
   test("commonDir", () => {
     expect(commonDir(["/a/b/c", "/a/b/d"])).toBe("/a/b");
     expect(commonDir(["/a/b", "/a/b"])).toBe("/a");
@@ -139,13 +144,17 @@ describe("jumpList", () => {
 });
 
 describe("composer", () => {
-  test("the key: send idle; in a turn, stop with nothing typed, queue words, steer with ! or no queue", () => {
+  test("the key: send idle; in a turn, stop with nothing typed; words steer by default, Ctrl+Enter queues; the setting turns it round; ! or no queue steers", () => {
     expect(keyMode(false, "hi", 0, true)).toBe("send");
     expect(keyMode(true, " ", 0, true)).toBe("stop");
-    expect(keyMode(true, "", 1, true)).toBe("queue");
-    expect(keyMode(true, "hi", 0, true)).toBe("queue");
-    expect(keyMode(true, "!hi", 0, true)).toBe("steer");
-    expect(keyMode(true, "hi", 0, false)).toBe("steer");
+    expect(keyMode(true, "hi", 0, true)).toBe("steer");
+    expect(keyMode(true, "", 1, true)).toBe("steer");
+    expect(keyMode(true, "hi", 0, true, true, true)).toBe("queue");
+    expect(keyMode(true, "hi", 0, true, false)).toBe("queue");
+    expect(keyMode(true, "hi", 0, true, false, true)).toBe("steer");
+    expect(keyMode(true, "!hi", 0, true, false)).toBe("steer");
+    expect(keyMode(true, "!hi", 0, true, true, true)).toBe("steer");
+    expect(keyMode(true, "hi", 0, false, false)).toBe("steer");
   });
   test("commands: name start, name, description", () => {
     const cs = [

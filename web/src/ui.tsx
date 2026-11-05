@@ -26,7 +26,41 @@ export function useMedia(q: string) {
 export const PHONE = "(max-width: 767px)";
 /** A keyboard and a pointer, not a phone: Enter sends, the caret goes to the composer. Only a
  *  touch screen alone says no (a headless browser has no pointer at all). */
+/** How long ago, in words: just now, minutes, hours, days. */
+export function ago(ms: number | undefined, now = Date.now(), short = false): string {
+  if (!ms) return t("term.never");
+  const m = Math.floor((now - ms) / 60_000);
+  if (m < 1) return t("ago.now");
+  if (m < 60) return t(short ? "ago.minShort" : "ago.min", { n: m });
+  const h = Math.floor(m / 60);
+  if (h < 48) return t(short ? "ago.hourShort" : "ago.hour", { n: h });
+  return t(short ? "ago.dayShort" : "ago.day", { n: Math.floor(h / 24) });
+}
+
+/** The time now, again each minute: for what says how long ago. */
+let minute = Date.now();
+const minuteSubs = new Set<() => void>();
+export function useMinute(): number {
+  return useSyncExternalStore(
+    (f) => {
+      minuteSubs.add(f);
+      if (minuteSubs.size === 1) tick = window.setInterval(() => ((minute = Date.now()), minuteSubs.forEach((g) => g())), 60_000);
+      return () => {
+        minuteSubs.delete(f);
+        if (!minuteSubs.size) clearInterval(tick);
+      };
+    },
+    () => minute,
+  );
+}
+let tick: number | undefined;
+
 export const fine = () => !matchMedia("(pointer: coarse)").matches;
+
+const mac = () => /Mac|iPhone|iPad/.test(navigator.platform);
+/** The other key for words in a turn, as Claude Code's ctrl+enter (send now); Enter itself. */
+export const steerKey = () => (mac() ? "⌘↩" : "Ctrl+Enter");
+export const enterKey = () => (mac() ? "↩" : "Enter");
 export const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
 
 /** Long-press on touch: fires after 450 ms held still, and swallows the click that follows. */

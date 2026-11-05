@@ -70,8 +70,11 @@ func small(blocks []api.Block) bool {
 	return err == nil && len(j) <= TailJSON
 }
 
+// ctxEvery: within a turn, the context is read again on a tool call this long after the last read.
+const ctxEvery = 30 * time.Second
+
 // refreshContext asks the agent how full its context is (Claude: get_context_usage): at the end of
-// each turn and after a compaction. The answer is kept beside the holder's files, so it is there
+// each turn, after a compaction, and within a turn on a tool call at most every ctxEvery. The answer is kept beside the holder's files, so it is there
 // when no process runs.
 func (h *Hosted) refreshContext() {
 	ctx, cancel := context.WithTimeout(h.m.ctx, 10*time.Second)
