@@ -46,6 +46,7 @@ type SpawnOptions struct {
 	SystemPromptFile string
 	Model            string
 	Mode             string // the approval mode; empty: the agent's default
+	Effort           string // the thinking effort; empty: the agent's default
 	// CrashResume: the last process died mid-turn; an agent that can run that turn again by itself
 	// is told to.
 	CrashResume bool
@@ -117,6 +118,8 @@ type (
 		Mode     string
 		Models   []Model
 		Commands []Command
+		// Account, Plan: the login the agent runs under (Claude: e-mail, subscriptionType).
+		Account, Plan string
 	}
 	// TurnUsage is one turn's tokens, and the session's running totals as the agent counts them.
 	TurnUsage struct {

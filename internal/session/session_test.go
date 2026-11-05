@@ -216,7 +216,7 @@ func TestStopAndResume(t *testing.T) {
 }
 
 func TestCrash(t *testing.T) {
-	r := newRig(t, nil)
+	r := newRig(t, func(c *config.Config, _ *Options) { c.CrashResume = false })
 	id, _ := r.m.Create(context.Background(), api.NewSession{Cwd: r.cwd, Text: "crash"}, "网页")
 	s := r.waitState(id, "the crash", func(s *api.SessionState) bool { return !s.Live && s.Status == api.StatusError })
 	if !strings.Contains(s.Error, "agent exited 3") {

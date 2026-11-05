@@ -101,6 +101,34 @@ var schema = []string{
 		at INTEGER NOT NULL
 	);
 	CREATE INDEX outbox_plugin ON outbox(plugin, seq);`,
+	// 2: session effort, "always allow" rules, push settings by workspace, plugin chat pointers.
+	`ALTER TABLE session_settings ADD COLUMN effort TEXT;
+	CREATE TABLE allow_rules (
+		session TEXT NOT NULL,
+		tool TEXT NOT NULL,
+		pattern TEXT NOT NULL,
+		created_at INTEGER NOT NULL,
+		PRIMARY KEY (session, tool, pattern)
+	);
+	-- workspace 0: sessions in none. No row: the defaults (needs you and errors on).
+	CREATE TABLE push_settings (
+		workspace INTEGER PRIMARY KEY,
+		needs_you INTEGER NOT NULL,
+		error INTEGER NOT NULL,
+		turn_end INTEGER NOT NULL,
+		compact INTEGER NOT NULL
+	);
+	-- What a plugin's chat window points at: its session, and what /new opens.
+	CREATE TABLE chat_pointers (
+		plugin TEXT NOT NULL,
+		chat TEXT NOT NULL,
+		session TEXT,
+		agent TEXT,
+		cwd TEXT,
+		updated_at INTEGER NOT NULL,
+		PRIMARY KEY (plugin, chat)
+	);
+	CREATE INDEX chat_pointers_session ON chat_pointers(session);`,
 }
 
 type Store struct{ db *sql.DB }
@@ -282,13 +310,14 @@ type Settings struct {
 	IdleReap *time.Duration
 	Model    string
 	Mode     string
+	Effort   string
 }
 
 func (s *Store) Settings(session string) (Settings, error) {
 	var st Settings
 	var reap sql.NullInt64
-	var model, mode sql.NullString
-	err := s.db.QueryRow(`SELECT idle_reap, model, mode FROM session_settings WHERE session = ?`, session).Scan(&reap, &model, &mode)
+	var model, mode, effort sql.NullString
+	err := s.db.QueryRow(`SELECT idle_reap, model, mode, effort FROM session_settings WHERE session = ?`, session).Scan(&reap, &model, &mode, &effort)
 	if errors.Is(err, sql.ErrNoRows) {
 		return st, nil
 	}
@@ -296,7 +325,7 @@ func (s *Store) Settings(session string) (Settings, error) {
 		d := time.Duration(reap.Int64) * time.Second
 		st.IdleReap = &d
 	}
-	st.Model, st.Mode = model.String, mode.String
+	st.Model, st.Mode, st.Effort = model.String, mode.String, effort.String
 	return st, err
 }
 
@@ -305,10 +334,20 @@ func (s *Store) SetSettings(session string, st Settings) error {
 	if st.IdleReap != nil {
 		reap = int64(*st.IdleReap / time.Second)
 	}
-	_, err := s.db.Exec(`INSERT INTO session_settings (session, idle_reap, model, mode) VALUES (?, ?, ?, ?)
-		ON CONFLICT (session) DO UPDATE SET idle_reap = excluded.idle_reap, model = excluded.model, mode = excluded.mode`,
-		session, reap, nullable(st.Model), nullable(st.Mode))
+	_, err := s.db.Exec(`INSERT INTO session_settings (session, idle_reap, model, mode, effort) VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT (session) DO UPDATE SET idle_reap = excluded.idle_reap, model = excluded.model, mode = excluded.mode, effort = excluded.effort`,
+		session, reap, nullable(st.Model), nullable(st.Mode), nullable(st.Effort))
 	return err
+}
+
+// UpdateSettings reads a session's settings, changes them with f and writes them back.
+func (s *Store) UpdateSettings(session string, f func(*Settings)) error {
+	st, err := s.Settings(session)
+	if err != nil {
+		return err
+	}
+	f(&st)
+	return s.SetSettings(session, st)
 }
 
 func nullable(s string) any {
