@@ -22,10 +22,12 @@ import (
 
 	"github.com/kumoSleeping/iridium/internal/agents"
 	"github.com/kumoSleeping/iridium/internal/api"
+	"github.com/kumoSleeping/iridium/internal/chat"
 	"github.com/kumoSleeping/iridium/internal/config"
 	"github.com/kumoSleeping/iridium/internal/discover"
 	"github.com/kumoSleeping/iridium/internal/files"
 	"github.com/kumoSleeping/iridium/internal/hub"
+	"github.com/kumoSleeping/iridium/internal/push"
 	"github.com/kumoSleeping/iridium/internal/session"
 	"github.com/kumoSleeping/iridium/internal/transcript"
 )
@@ -42,6 +44,11 @@ type Server struct {
 	m    *session.Manager
 	hub  *hub.Hub
 	logf func(string, ...any)
+
+	// Set before Handler, if at all: the plugin chat layer, Web Push, and who a request is from.
+	Chat *chat.Service
+	Push *push.Service
+	Who  Identities
 	// Discover and Folders, if set, serve the workspaces and the folder picker (routes_discover.go).
 	Discover *discover.Index
 	Folders  discover.Folders
@@ -79,6 +86,9 @@ func (s *Server) Handler(local bool) http.Handler {
 	mux.HandleFunc("POST /api/sessions/{id}/stop", s.stop)
 	mux.HandleFunc("POST /api/sessions/{id}/answer", s.answer)
 	mux.HandleFunc("GET /api/events", s.events)
+	s.sessionRoutes(mux)
+	s.pushRoutes(mux)
+	s.pluginRoutes(mux)
 	s.discoverRoutes(mux)
 	s.fileRoutes(mux, local)
 	name := TerminalWeb
@@ -256,12 +266,12 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 		s.fileError(w, err)
 		return
 	}
-	input, err := s.m.SendImages(r.Context(), r.PathValue("id"), text, terminal(r), images)
+	input, queued, err := s.m.SendWith(r.Context(), r.PathValue("id"), text, terminal(r), req.Steer, images...)
 	if err != nil {
 		s.error(w, err)
 		return
 	}
-	reply(w, http.StatusOK, api.SendReply{Input: input})
+	reply(w, http.StatusOK, api.SendReply{Input: input, Queued: queued})
 }
 
 func (s *Server) interrupt(w http.ResponseWriter, r *http.Request) {
@@ -288,6 +298,10 @@ var stateKey = regexp.MustCompile(`^(list|quota|workspaces|(session|context):[0-
 // session:<id>, context:<id>). See package hub.
 func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	keys := r.URL.Query()["sub"]
+	if len(keys) == 0 && s.Chat != nil {
+		s.pluginEvents(w, r) // a plugin's stream (routes_plugin.go)
+		return
+	}
 	if len(keys) == 0 || len(keys) > 16 {
 		fail(w, http.StatusBadRequest, "name 1 to 16 states with sub=")
 		return

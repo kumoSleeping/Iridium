@@ -14,12 +14,14 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/kumoSleeping/iridium/internal/chat"
 	"github.com/kumoSleeping/iridium/internal/cli"
 	"github.com/kumoSleeping/iridium/internal/config"
 	"github.com/kumoSleeping/iridium/internal/discover"
 	"github.com/kumoSleeping/iridium/internal/hold"
 	"github.com/kumoSleeping/iridium/internal/hub"
 	"github.com/kumoSleeping/iridium/internal/platform"
+	"github.com/kumoSleeping/iridium/internal/push"
 	"github.com/kumoSleeping/iridium/internal/server"
 	"github.com/kumoSleeping/iridium/internal/session"
 	"github.com/kumoSleeping/iridium/internal/store"
@@ -104,6 +106,25 @@ func serve(args []string) int {
 	}
 	defer m.Close()
 	srv := server.New(cfg, m, h, nil)
+	// Web Push's total switch is the config's: turning it writes the file.
+	srv.Push, err = push.Open(push.Options{StateDir: state, Store: st, Manager: m, Enabled: cfg.Push, Save: func(on bool) error {
+		c, err := config.Load(*path)
+		if err != nil {
+			return err
+		}
+		c.Push = on
+		return c.Save(*path)
+	}})
+	if err != nil {
+		log.Print(err)
+		return 1
+	}
+	srv.Chat, err = chat.New(chat.Options{Manager: m, Store: st, StateDir: state, ChatDir: cfg.ChatDir})
+	if err != nil {
+		log.Print(err)
+		return 1
+	}
+	defer srv.Chat.Close()
 	home, _ := os.UserHomeDir()
 	srv.Discover, srv.Folders = d, discover.DefaultFolders(home, state, filepath.Dir(*path))
 	if len(cfg.FolderRoots) > 0 {

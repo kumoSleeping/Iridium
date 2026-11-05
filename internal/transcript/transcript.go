@@ -496,6 +496,10 @@ func blocksOf(off int64, raw []byte, max int, sources Sources) []api.Block {
 				b.Text = strings.TrimPrefix(text, "["+from+"] ")
 			}
 		}
+		if b.From == api.SourceIridium {
+			// Iridium's own line (a recovery prompt), not your words.
+			b = api.Block{Kind: api.BlockKindSystem, Event: api.SystemEventIridium, Text: b.Text, From: b.From, ID: b.ID}
+		}
 		add(b)
 	case "assistant":
 		for _, i := range items {

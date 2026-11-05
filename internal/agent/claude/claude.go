@@ -106,6 +106,10 @@ func (d *Driver) Spawn(o agent.SpawnOptions) (hold.Spec, error) {
 	if o.Mode != "" {
 		argv = append(argv, "--permission-mode", o.Mode)
 	}
+	if o.Effort != "" {
+		// Not --settings effortLevel, which drops max (Rhodium §6.2, 2.1.309).
+		argv = append(argv, "--effort", o.Effort)
+	}
 	argv = append(argv, "--allow-dangerously-skip-permissions")
 	if o.Resume {
 		argv = append(argv, "--resume="+o.Session)
@@ -283,6 +287,44 @@ func (d *Driver) SetModel(ctx context.Context, model string) error {
 func (d *Driver) SetMode(ctx context.Context, mode string) error {
 	_, err := d.request(ctx, "set_permission_mode", map[string]any{"mode": mode}, true)
 	return err
+}
+
+// SetEffort sets effortLevel with apply_flag_settings. Setting it alone turns ultracode off, so
+// get_settings first says whether it was asked for, and it goes along as it was (Rhodium §6.2).
+// A CLI without get_settings reads as ultracode off.
+func (d *Driver) SetEffort(ctx context.Context, level string) error {
+	ultracode := false
+	r, err := d.request(ctx, "get_settings", nil, true)
+	switch {
+	case err == nil:
+		var body struct {
+			Applied struct {
+				UltracodeRequested bool `json:"ultracodeRequested"`
+			} `json:"applied"`
+		}
+		_ = json.Unmarshal(r.raw(), &body)
+		ultracode = body.Applied.UltracodeRequested
+	case !strings.HasPrefix(err.Error(), "Unsupported control request subtype"):
+		return err
+	}
+	_, err = d.request(ctx, "apply_flag_settings", map[string]any{"settings": map[string]any{"effortLevel": level, "ultracode": ultracode}}, true)
+	return err
+}
+
+// Effort is the effort level the process applies (get_settings' applied.effort), "" if it does
+// not say.
+func (d *Driver) Effort(ctx context.Context) (string, error) {
+	r, err := d.request(ctx, "get_settings", nil, true)
+	if err != nil {
+		return "", err
+	}
+	var body struct {
+		Applied struct {
+			Effort string `json:"effort"`
+		} `json:"applied"`
+	}
+	_ = json.Unmarshal(r.raw(), &body)
+	return body.Applied.Effort, nil
 }
 
 // Context asks get_context_usage, from the last answer's usage (summary: no count call per part).
@@ -520,12 +562,16 @@ func (d *Driver) hello(r ctlResponse) {
 		Version      string   `json:"claude_code_version"`
 		Mode         string   `json:"current_permission_mode"`
 		Capabilities []string `json:"capabilities"`
+		Account      struct {
+			Email            string `json:"email"`
+			SubscriptionType string `json:"subscriptionType"`
+		} `json:"account"`
 	}
 	_ = json.Unmarshal(r.raw(), &body)
 	for _, c := range body.Capabilities {
 		d.caps[c] = true
 	}
-	h := agent.Hello{Version: body.Version, Mode: body.Mode}
+	h := agent.Hello{Version: body.Version, Mode: body.Mode, Account: body.Account.Email, Plan: body.Account.SubscriptionType}
 	for _, m := range body.Models {
 		h.Models = append(h.Models, agent.Model{Value: m.Value, Name: m.DisplayName, Description: m.Description})
 	}
@@ -751,7 +797,8 @@ func (d *Driver) flush(evs []agent.Event) {
 func (d *Driver) emit(e agent.Event) { d.emitFn(e) }
 
 // askOf is the ask a can_use_tool request makes. AskUserQuestion is a question, ExitPlanMode a
-// plan to confirm, anything else a tool to approve.
+// plan to confirm, anything else a tool to approve, whose Pattern is the CLI's own suggested
+// rule for that tool (permission_suggestions), if it made one.
 func askOf(id string, raw json.RawMessage) (api.Ask, bool) {
 	var r struct {
 		Subtype     string `json:"subtype"`
@@ -759,6 +806,13 @@ func askOf(id string, raw json.RawMessage) (api.Ask, bool) {
 		Input       any    `json:"input"`
 		ToolUseID   string `json:"tool_use_id"`
 		Description string `json:"description"`
+		Suggestions []struct {
+			Type  string `json:"type"`
+			Rules []struct {
+				ToolName    string `json:"toolName"`
+				RuleContent string `json:"ruleContent"`
+			} `json:"rules"`
+		} `json:"permission_suggestions"`
 	}
 	if id == "" || json.Unmarshal(raw, &r) != nil || r.Subtype != "can_use_tool" {
 		return api.Ask{}, false
@@ -770,7 +824,15 @@ func askOf(id string, raw json.RawMessage) (api.Ask, bool) {
 	case "ExitPlanMode":
 		kind = "plan"
 	}
-	return api.Ask{RequestID: id, Kind: kind, Tool: r.ToolName, Input: r.Input, ToolUseID: r.ToolUseID, Description: r.Description}, true
+	a := api.Ask{RequestID: id, Kind: kind, Tool: r.ToolName, Input: r.Input, ToolUseID: r.ToolUseID, Description: r.Description}
+	for _, s := range r.Suggestions {
+		for _, rule := range s.Rules {
+			if a.Pattern == "" && s.Type == "addRules" && rule.ToolName == r.ToolName {
+				a.Pattern = rule.RuleContent
+			}
+		}
+	}
+	return a, true
 }
 
 // parseUsage reads get_usage's answer: rate_limits.limits (group, percent, resets_at, a model's

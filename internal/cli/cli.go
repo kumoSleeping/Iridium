@@ -18,7 +18,8 @@ const Help = `ir：本机 Iridium 的命令行（经 unix socket）。<id> 写�
   ir ls / ir stop <id>               列会话 / 停掉 agent
   ir cp <源> <目标>                  拷文件，打印路径、大小、sha256
   ir files <目录>                    列一层：名字、大小、时间、类型
-  new、send 加 --wait 等到回复；new 可加 --model <模型>、--approve <审批模式>
+  new、send 加 --wait 等到回复；send 加 --steer 插进正在跑的回合（不加就排队）
+  new 可加 --model <模型>、--approve <审批模式>
   退出码：0 结束，2 需要你（提问、审批），1 出错或已退出。路径可写 机器:路径
 `
 

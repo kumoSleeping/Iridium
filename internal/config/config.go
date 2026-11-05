@@ -28,6 +28,12 @@ type Config struct {
 	// CrashResume and QuotaResume run a turn again after the agent crashed or its quota came back.
 	CrashResume bool `json:"crashResume"`
 	QuotaResume bool `json:"quotaResume"`
+	// Modes are the approval mode a new session of each agent starts in; none: the agent's own.
+	Modes map[string]string `json:"modes,omitempty"`
+	// Push is Web Push's total switch, off by default.
+	Push bool `json:"push"`
+	// ChatDir is where a plugin's chat opens a session before it set one with /new; "" is home.
+	ChatDir string `json:"chatDir,omitempty"`
 	// Path is the PATH agents run with; "" is the daemon's own.
 	Path string `json:"path,omitempty"`
 	// Programs are the agents' programs, absolute or looked up on Path.

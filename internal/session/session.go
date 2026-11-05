@@ -52,6 +52,11 @@ type Options struct {
 	Logf       func(string, ...any)
 	ReapEvery  time.Duration // how often idle agents are looked for; 0 is 30s
 	Poll       time.Duration // how often a live agent's out.log is read; 0 is 50ms
+	// QuotaEvery: how often running agents' quota windows are read again; 0 is 5 minutes.
+	QuotaEvery time.Duration
+	// QuotaStagger: sessions going on after the quota came back wait up to this much more, so
+	// they do not all go at once; 0 is a minute, below 0 none.
+	QuotaStagger time.Duration
 }
 
 var (
@@ -67,7 +72,10 @@ type Manager struct {
 
 	mu     sync.Mutex
 	hosted map[string]*Hosted
-	quota  map[api.Agent]api.AgentQuota
+	quota  map[string]api.AgentQuota // by quotaKey
+
+	wmu      sync.Mutex
+	watchers []func(Notice)
 }
 
 func New(o Options) (*Manager, error) {
@@ -90,8 +98,14 @@ func New(o Options) (*Manager, error) {
 	if o.Poll == 0 {
 		o.Poll = 50 * time.Millisecond
 	}
+	if o.QuotaEvery == 0 {
+		o.QuotaEvery = 5 * time.Minute
+	}
+	if o.QuotaStagger == 0 {
+		o.QuotaStagger = time.Minute
+	}
 	ctx, cancel := context.WithCancel(context.Background())
-	m := &Manager{o: o, ctx: ctx, cancel: cancel, hosted: map[string]*Hosted{}, quota: map[api.Agent]api.AgentQuota{}}
+	m := &Manager{o: o, ctx: ctx, cancel: cancel, hosted: map[string]*Hosted{}, quota: map[string]api.AgentQuota{}}
 	o.Hub.Provide = m.provide
 	return m, nil
 }
@@ -104,6 +118,7 @@ func (m *Manager) Start() error {
 	if err := os.MkdirAll(m.holdRoot(), 0o700); err != nil {
 		return err
 	}
+	m.loadQuota()
 	metas, _ := filepath.Glob(filepath.Join(m.holdRoot(), "*", fileMeta))
 	for _, p := range metas {
 		var mt meta
@@ -123,8 +138,9 @@ func (m *Manager) Start() error {
 			m.o.Logf("session %s: %v", mt.ID, err)
 		}
 	}
-	m.wg.Add(1)
+	m.wg.Add(2)
 	go m.reap()
+	go m.quotaLoop()
 	m.publishList()
 	return nil
 }
@@ -238,56 +254,24 @@ func (m *Manager) Create(ctx context.Context, req api.NewSession, from string) (
 	return mt.ID, nil
 }
 
-// Send gives the session a message from `from` (an interactive terminal's name), starting its
-// agent if it is not running: a new turn when idle, else it joins the running one. The agent sees
-// "[from] " before it, unless it is a slash command, which must reach the agent as typed.
-func (m *Manager) Send(ctx context.Context, id, text, from string) (string, error) {
-	return m.SendImages(ctx, id, text, from, nil)
-}
-
-// SendImages is Send with images for the agent to see; the text names their files.
-func (m *Manager) SendImages(ctx context.Context, id, text, from string, images []agent.Image) (string, error) {
-	h, err := m.take(ctx, id)
-	if err != nil {
-		return "", err
-	}
-	if strings.TrimSpace(text) == "" {
-		return "", errors.New("an empty message")
-	}
-	input := newUUID()
-	if err := m.o.Store.AddInput(store.Input{ID: input, Session: id, Terminal: from, Text: text, State: "sent"}); err != nil {
-		return "", err
-	}
-	if err := h.start(ctx); err != nil {
-		return "", err
-	}
-	line := text
-	if !strings.HasPrefix(text, "/") {
-		line = "[" + from + "] " + text
-	}
-	h.mu.Lock()
-	h.lastFrom = from
-	ready := h.ready
-	h.mu.Unlock()
-	// The process says its use so far first, so this turn's share can be told from it.
-	select {
-	case <-ready:
-	case <-time.After(5 * time.Second):
-	case <-ctx.Done():
-		return "", ctx.Err()
-	}
-	return input, h.drv.Send(ctx, agent.Message{ID: input, Text: line, Human: true, Images: images})
-}
-
 // Interrupt stops the running turn; the agent stays.
 func (m *Manager) Interrupt(ctx context.Context, id string) error {
 	h, err := m.get(id)
 	if err != nil {
 		return err
 	}
-	if !h.isLive() {
+	h.mu.Lock()
+	live, quota := h.live, h.quotaUntil != 0
+	h.quotaStop = h.quotaStop || quota // no "继续" when the quota is back; what waits still goes
+	h.mu.Unlock()
+	if quota && (!live || h.drv.State() == agent.Idle) {
+		h.publish()
+		return nil
+	}
+	if !live {
 		return ErrNotLive
 	}
+	h.pause()
 	return h.drv.Interrupt(ctx)
 }
 
@@ -298,18 +282,11 @@ func (m *Manager) Stop(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
+	h.mu.Lock()
+	h.quotaStop = h.quotaStop || h.quotaUntil != 0
+	h.mu.Unlock()
+	h.pause()
 	return h.stop(ctx)
-}
-
-func (m *Manager) Answer(ctx context.Context, id string, a api.Answer) error {
-	h, err := m.get(id)
-	if err != nil {
-		return err
-	}
-	if !h.isLive() {
-		return ErrNotLive
-	}
-	return h.drv.Answer(ctx, a)
 }
 
 // List is the hosted sessions, then those the Discovery found that Iridium does not host,
@@ -414,6 +391,12 @@ func (m *Manager) provide(key string) (any, bool) {
 			return nil, true
 		}
 		return s, true
+	case strings.HasPrefix(key, "context:"):
+		c, err := m.Context(strings.TrimPrefix(key, "context:"))
+		if err != nil || c == nil {
+			return nil, true
+		}
+		return c, true
 	}
 	return nil, false
 }
@@ -425,24 +408,6 @@ func (m *Manager) publishList() {
 		return
 	}
 	m.o.Hub.Set("list", l)
-}
-
-func (m *Manager) setQuota(a api.Agent, windows []api.QuotaWindow) {
-	m.mu.Lock()
-	m.quota[a] = api.AgentQuota{Agent: a, Windows: windows, At: time.Now().UnixMilli()}
-	m.mu.Unlock()
-	m.o.Hub.Set("quota", m.quotaState())
-}
-
-func (m *Manager) quotaState() api.Quota {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	q := api.Quota{Agents: []api.AgentQuota{}}
-	for _, a := range m.quota {
-		q.Agents = append(q.Agents, a)
-	}
-	slices.SortFunc(q.Agents, func(a, b api.AgentQuota) int { return strings.Compare(string(a.Agent), string(b.Agent)) })
-	return q
 }
 
 // reap stops agents idle for longer than their session's idle reap, or the config's: no turn,
@@ -509,9 +474,18 @@ func writeJSON(path string, v any) error {
 	if err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+	// A name of its own: two writers of one file must not share a temporary file.
+	f, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	_, err = f.Write(b)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		os.Remove(f.Name())
+		return err
+	}
+	return os.Rename(f.Name(), path)
 }
