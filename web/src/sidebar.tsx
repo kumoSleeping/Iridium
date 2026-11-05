@@ -254,7 +254,23 @@ function SessionRow({ s, depth, flip, selected, onSelect, chatCode }: { s: Sessi
       setMenuAt({ x: e.clientX, y: e.clientY });
     },
   };
-  const end = unread ? <span className="unread" aria-hidden /> : s.pinned ? <Pin size={12} className="text-ink-4" aria-label={t("menu.pinned")} /> : undefined;
+  // An archived one (no shown marker): one press brings it back.
+  const restore = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    void api.patch(s.id, { archived: false }).then(
+      () => toast(t("toast.restored")),
+      (err) => toast(t("err.action"), { error: true, description: errText(err) }),
+    );
+  };
+  const end = s.archived ? (
+    <IconKey label={t("menu.unarchive")} onClick={restore} className="-mr-1 size-6 text-ink-3 pointer-coarse:size-8">
+      <ArchiveRestore size={14} />
+    </IconKey>
+  ) : unread ? (
+    <span className="unread" aria-hidden />
+  ) : s.pinned ? (
+    <Pin size={12} className="text-ink-4" aria-label={t("menu.pinned")} />
+  ) : undefined;
   return (
     <>
       <Row

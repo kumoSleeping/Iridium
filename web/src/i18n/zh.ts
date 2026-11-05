@@ -158,6 +158,7 @@ export const zh = {
   "toast.copied": "已复制",
   "toast.stopped": "已停掉",
   "toast.archived": "已归档",
+  "toast.restored": "已恢复",
   "toast.cleared": "已清掉",
 
   "err.offline": "连不上 Iridium",
