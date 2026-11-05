@@ -177,7 +177,7 @@ func Claude() int {
 			switch req["subtype"] {
 			case "initialize":
 				say(map[string]any{"type": "control_response", "response": map[string]any{"subtype": "success", "request_id": id, "pending_permission_requests": []any{},
-					"response": map[string]any{"claude_code_version": "fake", "current_permission_mode": modeOf(os.Args), "models": []any{map[string]any{"value": "default", "displayName": "Default"}, map[string]any{"value": "haiku", "displayName": "Haiku"}}, "commands": []any{map[string]any{"name": "compact", "description": "Compact the conversation"}},
+					"response": map[string]any{"claude_code_version": "fake", "current_permission_mode": modeOf(os.Args), "models": []any{map[string]any{"value": "default", "displayName": "Default"}, map[string]any{"value": "haiku", "displayName": "Haiku"}}, "commands": []any{map[string]any{"name": "compact", "description": "Compact the conversation", "argumentHint": "<instructions>"}},
 						"account": map[string]any{"email": "user@example.com", "subscriptionType": "Claude Pro"}}}})
 			case "get_usage":
 				answer(id, map[string]any{"session": map[string]any{"total_cost_usd": cost, "model_usage": usage()}, "rate_limits": map[string]any{"limits": []any{map[string]any{"group": "session", "percent": 10, "resets_at": "2026-01-01T00:00:00Z"}}}})

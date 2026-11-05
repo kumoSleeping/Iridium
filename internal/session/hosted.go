@@ -755,6 +755,9 @@ func (h *Hosted) state(o store.Overlay) api.SessionState {
 	for _, m := range h.models {
 		s.Models = append(s.Models, api.Model{Value: m.Value, Name: m.Name, Description: m.Description})
 	}
+	for _, c := range h.commands {
+		s.Commands = append(s.Commands, api.Command{Name: strings.TrimPrefix(c.Name, "/"), Description: c.Description, ArgumentHint: c.ArgumentHint})
+	}
 	if info, ok := agents.Get(h.meta.Agent); ok {
 		s.Modes = info.Modes
 		if _, ok := h.drv.(agent.Efforter); ok {

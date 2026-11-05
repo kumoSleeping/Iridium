@@ -117,6 +117,18 @@ func TestSettings(t *testing.T) {
 	if s.Mode != "acceptEdits" || len(s.Models) != 2 || len(s.Modes) != 6 || len(s.Efforts) != 5 {
 		t.Fatalf("state: mode %q models %v modes %v efforts %v", s.Mode, s.Models, s.Modes, s.Efforts)
 	}
+	// The agent's own commands, for the palette, as its handshake named them.
+	if len(s.Commands) != 1 || s.Commands[0] != (api.Command{Name: "compact", Description: "Compact the conversation", ArgumentHint: "<instructions>"}) {
+		t.Fatalf("commands: %+v", s.Commands)
+	}
+	// The default mode changed while it runs: the next new session takes it.
+	tu := r.m.Tuned()
+	tu.Modes = map[string]string{"claude": "plan"}
+	r.m.Tune(tu)
+	id2, _ := r.m.Create(bg, api.NewSession{Cwd: r.cwd, Text: "hi"}, "网页")
+	if s2 := r.waitState(id2, "the reply", func(s *api.SessionState) bool { return said(s, "ok: hi") }); s2.Mode != "plan" {
+		t.Fatalf("tuned default mode: %q", s2.Mode)
+	}
 	if err := r.m.SetModel(bg, id, "haiku"); err != nil {
 		t.Fatal(err)
 	}
