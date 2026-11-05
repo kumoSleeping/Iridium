@@ -138,7 +138,7 @@ transcript(`${kdj}/app`, [
   [900, "user", "List scroll direction: no stutter, no blank, numbers always"],
   [897, "assistant", [text("Three causes found; the list now owns its scrolling.")]],
 ]);
-transcript(`${HOME}/notes`, [
+const notes = transcript(`${HOME}/notes`, [
   [1500, "user", "Notes on cloudflared tunnels and DNS records"],
   [1499, "assistant", [text("cloudflared cannot delete DNS records; the dashboard or an API token can.")]],
 ]);
@@ -157,5 +157,8 @@ await until("the approval", async () => (await api("GET", `/api/sessions/${style
 // A letter: the Style sample's agent writes to the holder session with ir send.
 await asAgent("POST", `/api/sessions/${holder}/send`, { text: "The card's details open under it; check the spacing on a phone." }, style);
 await until("the letter's reply", async () => (await api("GET", `/api/sessions/${holder}`)).status === "idle");
+
+// One archived by hand: under 归档, back with its next activity.
+await api("PATCH", `/api/sessions/${notes}`, { archived: true });
 
 console.log(JSON.stringify({ holder, style }));
