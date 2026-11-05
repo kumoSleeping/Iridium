@@ -33,6 +33,15 @@ type Message struct {
 	ID    string
 	Text  string
 	Human bool
+	// Images go with the text to an agent that takes them (Claude); the text names their paths.
+	Images []Image
+}
+
+// Image is an image the agent sees: its bytes within the agent's limits, and their media type
+// (image/png, image/jpeg, image/gif, image/webp).
+type Image struct {
+	MediaType string
+	Data      []byte
 }
 
 // SpawnOptions say how to launch the agent for a session.
@@ -140,6 +149,9 @@ type (
 		Failed        bool
 	}
 	ProtocolError struct{ Reason, Detail string }
+	// GiveUp: the process can do nothing for the session (Codex could not open its thread): the host
+	// stops it, and Why is the session's error.
+	GiveUp struct{ Why string }
 )
 
 func (TurnStart) event()     {}
@@ -160,6 +172,7 @@ func (TurnUsage) event()     {}
 func (QuotaHit) event()      {}
 func (Compacted) event()     {}
 func (ProtocolError) event() {}
+func (GiveUp) event()        {}
 
 type Model struct {
 	Value       string `json:"value"`

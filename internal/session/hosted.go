@@ -94,6 +94,7 @@ type Hosted struct {
 	model      string
 	mode       string
 	errText    string
+	failed     string // why the driver gave the process up: the error once it has ended
 	lastActive time.Time
 	lastFrom   string // who sent the last message: whose turn an agent's own turn is counted to
 	turnFrom   string // who began the running turn
@@ -370,6 +371,9 @@ func (h *Hosted) ended(e *hold.Exit) {
 	if e != nil && !asked && (e.From == "holder" || e.Signal != nil || (e.Code != nil && *e.Code != 0)) {
 		h.errText = describe(e) + errTail(h.dir)
 	}
+	if h.failed != "" {
+		h.errText, h.failed = h.failed, ""
+	}
 	h.mu.Unlock()
 	h.readTranscript()
 	h.publish()
@@ -482,6 +486,16 @@ func (h *Hosted) onEvent(e agent.Event) {
 		}
 	case agent.ProtocolError:
 		h.logf("protocol: %s: %s", e.Reason, e.Detail)
+	case agent.GiveUp:
+		if !replay {
+			h.failed = e.Why
+			h.logf("stopping its agent: %s", e.Why)
+			go func() {
+				if err := h.stop(h.m.ctx); err != nil {
+					h.logf("stopping: %v", err)
+				}
+			}()
+		}
 	}
 	h.mu.Unlock()
 	h.publish()

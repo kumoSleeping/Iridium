@@ -36,6 +36,15 @@ type Config struct {
 	ClaudeHome string `json:"claudeHome,omitempty"`
 	// UnitPrefix names the holders' systemd units; "" is iridium-hold-. Tests use iridium-test-.
 	UnitPrefix string `json:"unitPrefix,omitempty"`
+	// FolderRoots are where the folder picker may go; none is the user's home.
+	FolderRoots []string `json:"folderRoots,omitempty"`
+	// Uploads: how long uploaded files are kept ("0": always) and the largest one, in bytes.
+	Uploads Uploads `json:"uploads"`
+}
+
+type Uploads struct {
+	Keep    Duration `json:"keep"`
+	MaxFile int64    `json:"maxFile"`
 }
 
 func Default() Config {
@@ -46,6 +55,7 @@ func Default() Config {
 		CrashResume: true,
 		QuotaResume: true,
 		Programs:    map[string]string{"claude": "claude", "codex": "codex", "pi": "pi", "dsh": "dsh"},
+		Uploads:     Uploads{Keep: Duration(30 * 24 * time.Hour), MaxFile: 2 << 30},
 	}
 }
 

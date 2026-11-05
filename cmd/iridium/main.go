@@ -16,6 +16,7 @@ import (
 
 	"github.com/kumoSleeping/iridium/internal/cli"
 	"github.com/kumoSleeping/iridium/internal/config"
+	"github.com/kumoSleeping/iridium/internal/discover"
 	"github.com/kumoSleeping/iridium/internal/hold"
 	"github.com/kumoSleeping/iridium/internal/hub"
 	"github.com/kumoSleeping/iridium/internal/platform"
@@ -82,17 +83,32 @@ func serve(args []string) int {
 	}
 	defer st.Close()
 	h := hub.New()
-	m, err := session.New(session.Options{Config: cfg, Store: st, Hub: h, Launcher: platform.Systemd{}, UnitPrefix: cfg.UnitPrefix})
+	do := discover.Defaults(cfg)
+	do.Store, do.Hub = st, h
+	d := discover.New(do)
+	m, err := session.New(session.Options{Config: cfg, Store: st, Hub: h, Launcher: platform.Systemd{}, UnitPrefix: cfg.UnitPrefix, Discovery: d})
 	if err != nil {
 		log.Print(err)
 		return 1
 	}
+	d.SetOnChange(m.Refresh)
+	d.SetAlias(m.AgentID)
+	if err := d.Start(); err != nil {
+		log.Print(err)
+		return 1
+	}
+	defer d.Close()
 	if err := m.Start(); err != nil {
 		log.Print(err)
 		return 1
 	}
 	defer m.Close()
 	srv := server.New(cfg, m, h, nil)
+	home, _ := os.UserHomeDir()
+	srv.Discover, srv.Folders = d, discover.DefaultFolders(home, state, filepath.Dir(*path))
+	if len(cfg.FolderRoots) > 0 {
+		srv.Folders.Roots = cfg.FolderRoots
+	}
 	tcp, sock, err := srv.Listen()
 	if err != nil {
 		log.Print(err)

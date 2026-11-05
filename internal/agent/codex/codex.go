@@ -342,10 +342,15 @@ func (d *Driver) open(proc int, w *open, ready chan struct{}) {
 			h.Models = append(h.Models, agent.Model{Value: m.ID, Name: m.DisplayName, Description: m.Description})
 		}
 	}
-	if err != nil {
-		d.emitLocked(agent.ProtocolError{Reason: "open_failed", Detail: "Codex did not open the thread: " + err.Error()})
-	}
 	d.emitLocked(h)
+	if err != nil {
+		// Nothing to do with a process without its thread: it goes, saying why.
+		why := "Codex did not open the thread: " + err.Error()
+		if strings.Contains(err.Error(), "already has an active writer") {
+			why = "Codex says another program has the thread open (your own codex, or the app-server it left it loaded in): " + err.Error()
+		}
+		d.emitLocked(agent.GiveUp{Why: why})
+	}
 	close(ready)
 	evs := d.take()
 	d.mu.Unlock()
