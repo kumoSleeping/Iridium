@@ -394,3 +394,20 @@ func TestNames(t *testing.T) {
 		t.Errorf("quote %s", q)
 	}
 }
+
+func TestCreateOutputWithTrailingWarning(t *testing.T) {
+	out := "{\n  \"id\": \"b72f90f6-7388-4192-8273-1e1654461c68\",\n  \"name\": \"iridium-x\",\n  \"token\": \"eyJhIjoiNTBmNGM1MGY1Y2YzMjY2Yzg5MWRkOTgyNzdhYzNkNzIiLCJ0IjoiYjcy\"\n}\n{\"level\":\"warn\",\"message\":\"Your version 2026.10.0 is outdated.\"}\n"
+	var v struct {
+		ID string `json:"id"`
+	}
+	if err := decodeFirst(out, &v); err != nil || v.ID != "b72f90f6-7388-4192-8273-1e1654461c68" {
+		t.Fatalf("decodeFirst = %q, %v", v.ID, err)
+	}
+	c := clean(out)
+	if strings.Contains(c, "eyJhIjoi") {
+		t.Fatalf("token not hidden: %s", c)
+	}
+	if !strings.Contains(c, "b72f90f6-7388-4192-8273-1e1654461c68") {
+		t.Fatalf("tunnel id hidden too: %s", c)
+	}
+}

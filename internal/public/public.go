@@ -370,29 +370,47 @@ func (o *Options) tunnel(ctx context.Context, cf, name string) (string, error) {
 		var t struct {
 			ID string `json:"id"`
 		}
-		if json.Unmarshal([]byte(jsonPart(out)), &t) == nil && t.ID != "" {
+		if decodeFirst(out, &t) == nil && t.ID != "" {
 			o.say("建好隧道 %s（%s）。", name, t.ID)
 			return t.ID, nil
 		}
-		return "", fmt.Errorf("cloudflared tunnel create: no id in %q", out)
+		return "", fmt.Errorf("cloudflared tunnel create: no tunnel id in its output: %s", clean(out))
 	}
 	if !strings.Contains(strings.ToLower(out), "already exists") {
-		return "", fmt.Errorf("cloudflared tunnel create %s: %v: %s", name, err, strings.TrimSpace(out))
+		return "", fmt.Errorf("cloudflared tunnel create %s: %v: %s", name, err, clean(out))
 	}
 	out, err = o.quiet(ctx, cf, append(base, "list", "-o", "json", "--name", name)...)
 	var list []struct {
 		ID   string `json:"id"`
 		Name string `json:"name"`
 	}
-	if err != nil || json.Unmarshal([]byte(jsonPart(out)), &list) != nil || len(list) == 0 {
-		return "", fmt.Errorf("隧道 %s 已经有了，但列不出来：%v %s", name, err, strings.TrimSpace(out))
+	if err != nil || decodeFirst(out, &list) != nil || len(list) == 0 {
+		return "", fmt.Errorf("隧道 %s 已经有了，但列不出来：%v %s", name, err, clean(out))
 	}
 	id := list[0].ID
 	if out, err := o.quiet(ctx, cf, append(base, "token", "--cred-file", o.creds(), id)...); err != nil {
-		return "", fmt.Errorf("取隧道 %s 的凭证：%v: %s", name, err, strings.TrimSpace(out))
+		return "", fmt.Errorf("取隧道 %s 的凭证：%v: %s", name, err, clean(out))
 	}
 	o.say("隧道 %s 已经有了（%s），重新取了凭证。", name, id)
 	return id, nil
+}
+
+// decodeFirst decodes the first JSON value in out: cloudflared may log lines before and after it
+// (e.g. its "version is outdated" warning).
+func decodeFirst(out string, v any) error {
+	return json.NewDecoder(strings.NewReader(jsonPart(out))).Decode(v)
+}
+
+var (
+	tokenField = regexp.MustCompile(`(?i)("(?:token|secret|tunnel_secret|tunnelsecret)"\s*:\s*)"[^"]*"`)
+	longSecret = regexp.MustCompile(`[A-Za-z0-9+/_\-]{40,}={0,2}`)
+)
+
+// clean is cloudflared's output fit to show: trimmed, with tunnel tokens and other long secret-looking
+// strings hidden. It never goes into an error or a message unredacted.
+func clean(out string) string {
+	out = tokenField.ReplaceAllString(strings.TrimSpace(out), `$1"[hidden]"`)
+	return longSecret.ReplaceAllString(out, "[hidden]")
 }
 
 // jsonPart is out from its first [ or {: cloudflared may log a line before.
@@ -413,7 +431,7 @@ func (o *Options) route(ctx context.Context, cf, id, host string) error {
 	}
 	low := strings.ToLower(out)
 	if !strings.Contains(low, "already exists") && !strings.Contains(low, "code: 1003") {
-		return fmt.Errorf("cloudflared tunnel route dns: %v: %s", err, strings.TrimSpace(out))
+		return fmt.Errorf("cloudflared tunnel route dns: %v: %s", err, clean(out))
 	}
 	over, aerr := o.yes(fmt.Sprintf("%s 已经有 DNS 记录。改成指向 Iridium 的隧道？", host), false)
 	if aerr != nil {
@@ -423,7 +441,7 @@ func (o *Options) route(ctx context.Context, cf, id, host string) error {
 		return fmt.Errorf("%s 已经有别的记录，没动它。换个子域名再跑 ir public", host)
 	}
 	if out, err := o.quiet(ctx, cf, append(base, "--overwrite-dns", id, host)...); err != nil {
-		return fmt.Errorf("cloudflared tunnel route dns --overwrite-dns: %v: %s", err, strings.TrimSpace(out))
+		return fmt.Errorf("cloudflared tunnel route dns --overwrite-dns: %v: %s", err, clean(out))
 	}
 	o.say("DNS：%s → 隧道（覆盖了原来的记录）。", host)
 	return nil
@@ -446,7 +464,7 @@ func (o *Options) writeConfig(ctx context.Context, cf, id, host string) error {
 		return err
 	}
 	if out, err := o.quiet(ctx, cf, "tunnel", "--config", o.config(), "ingress", "validate"); err != nil {
-		return fmt.Errorf("隧道配置不对：%v: %s", err, strings.TrimSpace(out))
+		return fmt.Errorf("隧道配置不对：%v: %s", err, clean(out))
 	}
 	return nil
 }
@@ -558,7 +576,7 @@ func Off(ctx context.Context, o Options) error {
 	o.say("public.origin 清掉了：只听本机。")
 	if st.Tunnel != "" && st.Cloudflared != "" {
 		if out, err := o.quiet(ctx, st.Cloudflared, "tunnel", "--origincert", o.cert(), "delete", "-f", st.Tunnel); err != nil {
-			o.say("删隧道 %s 没成功（%v）：%s\n去 Cloudflare 控制台的 Networks → Tunnels 删。", st.Name, err, strings.TrimSpace(out))
+			o.say("删隧道 %s 没成功（%v）：%s\n去 Cloudflare 控制台的 Networks → Tunnels 删。", st.Name, err, clean(out))
 		} else {
 			o.say("删了隧道 %s。", st.Name)
 		}
