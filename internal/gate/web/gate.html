@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="referrer" content="no-referrer">
+  <title>Iridium</title>
+  <link rel="stylesheet" href="/_ir/gate.css">
+  <!-- In the head so the saved theme applies before the first paint; the UI waits for DOMContentLoaded. -->
+  <script src="/_ir/gate.js"></script>
+</head>
+<body>
+  <main class="shell">
+    <div class="card">
+      <h1 class="brand">Iridium</h1>
+
+      <section id="v-wait" class="view">
+        <span class="spinner" role="progressbar"></span>
+      </section>
+
+      <section id="v-login" class="view" hidden>
+        <button id="login" class="btn" type="button" data-t="signIn"></button>
+        <p id="setup" class="note" data-t="setup" hidden></p>
+      </section>
+
+      <section id="v-join" class="view" hidden>
+        <form id="join-form" novalidate>
+          <input id="name" name="name" type="text" autocomplete="off" spellcheck="false" autocapitalize="off"
+                 enterkeyhint="go" maxlength="40" data-tp="namePh" aria-describedby="name-note">
+          <p id="name-note" class="note field-note" aria-live="polite"></p>
+          <button id="join" class="btn" type="submit" data-t="create" disabled></button>
+        </form>
+      </section>
+
+      <section id="v-bad" class="view" hidden>
+        <p class="note" data-t="badLink"></p>
+      </section>
+
+      <p id="status" class="status" role="status" aria-live="polite"></p>
+    </div>
+  </main>
+</body>
+</html>
