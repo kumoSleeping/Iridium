@@ -410,7 +410,7 @@ func (x *Index) unprefix(text, id string) (string, string) {
 	if id == "" {
 		return text, ""
 	}
-	from, ok := x.o.Store.Source(id)
+	_, from, ok := x.o.Store.Source(id) // the terminal, and the tag it was sent with
 	if !ok {
 		return text, ""
 	}

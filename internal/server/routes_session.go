@@ -11,15 +11,16 @@ import (
 // sessionRoutes: a session's model, mode, effort, its queue and its "always allow" rules
 // (docs/api.md "会话设置", "待发队列").
 func (s *Server) sessionRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("PUT /api/sessions/{id}/model", s.setModel)
-	mux.HandleFunc("PUT /api/sessions/{id}/mode", s.setMode)
-	mux.HandleFunc("PUT /api/sessions/{id}/effort", s.setEffort)
-	mux.HandleFunc("POST /api/sessions/{id}/continue", s.continueQueue)
-	mux.HandleFunc("POST /api/sessions/{id}/queue/{input}/steer", s.steer)
-	mux.HandleFunc("PUT /api/sessions/{id}/queue/{input}", s.editQueued)
-	mux.HandleFunc("DELETE /api/sessions/{id}/queue/{input}", s.deleteQueued)
-	mux.HandleFunc("GET /api/sessions/{id}/rules", s.rules)
-	mux.HandleFunc("DELETE /api/sessions/{id}/rules", s.clearRules)
+	// The permission table (access.go): what a terminal may see and use.
+	mux.HandleFunc("PUT /api/sessions/{id}/model", s.use(s.setModel))
+	mux.HandleFunc("PUT /api/sessions/{id}/mode", s.use(s.setMode))
+	mux.HandleFunc("PUT /api/sessions/{id}/effort", s.use(s.setEffort))
+	mux.HandleFunc("POST /api/sessions/{id}/continue", s.use(s.continueQueue))
+	mux.HandleFunc("POST /api/sessions/{id}/queue/{input}/steer", s.use(s.steer))
+	mux.HandleFunc("PUT /api/sessions/{id}/queue/{input}", s.use(s.editQueued))
+	mux.HandleFunc("DELETE /api/sessions/{id}/queue/{input}", s.use(s.deleteQueued))
+	mux.HandleFunc("GET /api/sessions/{id}/rules", s.see(s.rules))
+	mux.HandleFunc("DELETE /api/sessions/{id}/rules", s.use(s.clearRules))
 }
 
 func (s *Server) settle(w http.ResponseWriter, err error) {
@@ -47,6 +48,10 @@ func (s *Server) setModel(w http.ResponseWriter, r *http.Request) {
 func (s *Server) setMode(w http.ResponseWriter, r *http.Request) {
 	var req api.SetMode
 	if !readJSON(w, r, &req) {
+		return
+	}
+	if err := s.checkMode(callerOf(r), req.Mode); err != nil {
+		s.error(w, err)
 		return
 	}
 	ctx, cancel := agentCtx(r)

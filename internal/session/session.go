@@ -52,6 +52,8 @@ type Options struct {
 	Logf       func(string, ...any)
 	ReapEvery  time.Duration // how often idle agents are looked for; 0 is 30s
 	Poll       time.Duration // how often a live agent's out.log is read; 0 is 50ms
+	// Tag names an interactive terminal (by ID) in the source tag "[name] "; nil or "" is the ID.
+	Tag func(terminal string) string
 	// QuotaEvery: how often running agents' quota windows are read again; 0 is 5 minutes.
 	QuotaEvery time.Duration
 	// QuotaStagger: sessions going on after the quota came back wait up to this much more, so
@@ -111,6 +113,9 @@ func New(o Options) (*Manager, error) {
 }
 
 func (m *Manager) holdRoot() string { return filepath.Join(m.o.Config.StatePath(), "hold") }
+
+// Store is the database the manager keeps its inputs and usage in.
+func (m *Manager) Store() *store.Store { return m.o.Store }
 
 // Start takes up the sessions an earlier daemon hosted, whose holders may still run, and starts
 // reaping idle agents.
@@ -252,6 +257,35 @@ func (m *Manager) Create(ctx context.Context, req api.NewSession, from string) (
 		}
 	}
 	return mt.ID, nil
+}
+
+// tagOf is the name terminal goes by in source tags now (Options.Tag), else its ID.
+func (m *Manager) tagOf(terminal string) string {
+	if m.o.Tag != nil {
+		if t := m.o.Tag(terminal); t != "" {
+			return t
+		}
+	}
+	return terminal
+}
+
+const fromSep = "\x1f"
+
+// From is a sender for Send and Create whose agent sees it by tag rather than by the terminal's
+// own name (a plugin's "[QQ·张三]"): the terminal's ID still counts the message and its usage.
+func From(terminal, tag string) string {
+	if tag == "" {
+		return terminal
+	}
+	return terminal + fromSep + tag
+}
+
+// source splits a sender into the terminal's ID and the tag the agent sees.
+func (m *Manager) source(from string) (terminal, tag string) {
+	if t, g, ok := strings.Cut(from, fromSep); ok {
+		return t, g
+	}
+	return from, m.tagOf(from)
 }
 
 // Interrupt stops the running turn; the agent stays.

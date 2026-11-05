@@ -46,11 +46,27 @@ type Config struct {
 	FolderRoots []string `json:"folderRoots,omitempty"`
 	// Uploads: how long uploaded files are kept ("0": always) and the largest one, in bytes.
 	Uploads Uploads `json:"uploads"`
+	// Public is the way in from outside (docs/gate.md): set, every web request needs a passkey.
+	Public Public `json:"public,omitzero"`
+	// Update is where new versions are looked for.
+	Update Update `json:"update,omitzero"`
 }
 
 type Uploads struct {
 	Keep    Duration `json:"keep"`
 	MaxFile int64    `json:"maxFile"`
+}
+
+type Public struct {
+	// Origin is public.origin, e.g. https://ir.example.com; "" serves this machine only.
+	Origin string `json:"origin,omitempty"`
+}
+
+type Update struct {
+	// URL answers {version, sha256, url, notes} (package update); "" looks for none.
+	URL string `json:"url,omitempty"`
+	// Every is how often to look; "" or "0" is once a day.
+	Every Duration `json:"every,omitzero"`
 }
 
 func Default() Config {

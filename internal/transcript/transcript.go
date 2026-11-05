@@ -32,9 +32,10 @@ const (
 	TitleLen     = 100  // characters of Title
 )
 
-// Sources names the user messages Iridium wrote: by the uuid it sent one with, the source it
-// prefixed it with ("[name] "). ok false for one it did not write.
-type Sources func(uuid string) (from string, ok bool)
+// Sources names the user messages Iridium wrote: by the uuid it sent one with, the interactive
+// terminal that sent it and the tag it was prefixed with ("[tag] "). ok false for one it did not
+// write.
+type Sources func(uuid string) (terminal, tag string, ok bool)
 
 // Format gives the blocks of one line of an agent's transcript: max is the characters to cut
 // texts to (-1: none); sources names the user messages Iridium wrote (may be nil).
@@ -491,9 +492,9 @@ func blocksOf(off int64, raw []byte, max int, sources Sources) []api.Block {
 		}
 		b := api.Block{Kind: api.BlockKindUser, Text: text, ID: l.UUID}
 		if sources != nil && l.UUID != "" {
-			if from, ok := sources(l.UUID); ok {
-				b.From = from
-				b.Text = strings.TrimPrefix(text, "["+from+"] ")
+			if terminal, tag, ok := sources(l.UUID); ok {
+				b.From, b.FromTerminal = tag, terminal
+				b.Text = strings.TrimPrefix(text, "["+tag+"] ")
 			}
 		}
 		if b.From == api.SourceIridium {

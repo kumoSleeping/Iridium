@@ -41,6 +41,51 @@ type Options struct {
 	StateDir string // the file refs' key is kept here
 	ChatDir  string // where a chat opens a session before /new set one; "" is home
 	Logf     func(string, ...any)
+	// Guard checks what a plugin does against its terminal's permissions; nil allows it all.
+	Guard Guard
+}
+
+// Guard is the interactive terminals' permission table as the chat layer meets it (the server
+// implements it). Each says why not, or nil.
+type Guard interface {
+	// Open: may c open req (agent, folder)? It may set the approval mode a must-approve one needs.
+	Open(c Caller, req *api.NewSession) error
+	// Opened: c opened session id (it is c's own now).
+	Opened(c Caller, id string)
+	// Send: may c send text to session id?
+	Send(c Caller, id, text string) error
+	// Command: may c run Iridium's command name ("/mode") at all?
+	Command(c Caller, id, name string) error
+	// Mode: may c switch a session to approval mode mode?
+	Mode(c Caller, mode string) error
+	// Use: may c point its chat at session id, stop it, change its model?
+	Use(c Caller, id string) error
+	// Sessions is the part of l that c may see.
+	Sessions(c Caller, l []api.Session) []api.Session
+	// Answer: may c answer session id's asks?
+	Answer(c Caller, id string) error
+	// FileOut: may c take session id's files?
+	FileOut(c Caller, id string) error
+}
+
+// open is a Guard that allows everything.
+type open struct{}
+
+func (open) Open(Caller, *api.NewSession) error               { return nil }
+func (open) Opened(Caller, string)                            {}
+func (open) Send(Caller, string, string) error                { return nil }
+func (open) Command(Caller, string, string) error             { return nil }
+func (open) Mode(Caller, string) error                        { return nil }
+func (open) Use(Caller, string) error                         { return nil }
+func (open) Sessions(_ Caller, l []api.Session) []api.Session { return l }
+func (open) Answer(Caller, string) error                      { return nil }
+func (open) FileOut(Caller, string) error                     { return nil }
+
+func (s *Service) guard() Guard {
+	if s.o.Guard == nil {
+		return open{}
+	}
+	return s.o.Guard
 }
 
 var (
@@ -140,9 +185,19 @@ func source(c Caller, sender string) string {
 		sender = string(r[:24])
 	}
 	if sender == "" {
-		return c.Name
+		return session.From(c.ID, c.Name)
 	}
-	return c.Name + "·" + sender
+	return session.From(c.ID, c.Name+"·"+sender)
+}
+
+// CardSession is the session of an ask's card ("ask:<session>:<request>"), else "".
+func CardSession(card string) string {
+	rest, ok := strings.CutPrefix(card, "ask:")
+	if !ok {
+		return ""
+	}
+	id, _, _ := strings.Cut(rest, ":")
+	return id
 }
 
 // Pointer is what the chat points at.
@@ -167,11 +222,17 @@ func (s *Service) Input(ctx context.Context, c Caller, chat string, in api.ChatI
 	}
 	if name, args, ok := command(text); ok {
 		if cmd, ok := commands[name]; ok {
+			if err := s.guard().Command(c, p.Session, "/"+name); err != nil {
+				return api.ChatInputReply{}, err
+			}
 			return cmd.run(s, ctx, c, &p, args)
 		}
 	}
 	id, err := s.ensure(ctx, c, &p, source(c, in.Sender))
 	if err != nil {
+		return api.ChatInputReply{}, err
+	}
+	if err := s.guard().Send(c, id, text); err != nil {
 		return api.ChatInputReply{}, err
 	}
 	_, queued, err := s.o.Manager.SendWith(ctx, id, text, source(c, in.Sender), true)
@@ -181,7 +242,7 @@ func (s *Service) Input(ctx context.Context, c Caller, chat string, in api.ChatI
 // ensure is the session the chat points at, opening one with its defaults if none (or gone).
 func (s *Service) ensure(ctx context.Context, c Caller, p *store.ChatPointer, from string) (string, error) {
 	if p.Session != "" {
-		if _, err := s.o.Manager.State(p.Session); err == nil {
+		if _, err := s.o.Manager.State(p.Session); err == nil && s.guard().Use(c, p.Session) == nil {
 			return p.Session, nil
 		}
 	}
@@ -191,7 +252,14 @@ func (s *Service) ensure(ctx context.Context, c Caller, p *store.ChatPointer, fr
 func (s *Service) open(ctx context.Context, c Caller, p *store.ChatPointer, a api.Agent, cwd, from string) (string, error) {
 	a = cmp.Or(a, api.AgentClaude)
 	cwd = cmp.Or(cwd, s.o.ChatDir)
-	id, err := s.o.Manager.Create(ctx, api.NewSession{Agent: a, Cwd: cwd}, from)
+	req := api.NewSession{Agent: a, Cwd: cwd}
+	if err := s.guard().Open(c, &req); err != nil {
+		return "", err
+	}
+	id, err := s.o.Manager.Create(ctx, req, from)
+	if id != "" {
+		s.guard().Opened(c, id)
+	}
 	if err != nil && id == "" {
 		return "", fmt.Errorf("%w: %v", ErrBadRequest, err)
 	}
@@ -236,6 +304,11 @@ func (s *Service) Answer(ctx context.Context, c Caller, a api.CardAnswer) (api.C
 		delete(s.picks, a.Card)
 		s.mu.Unlock()
 		return api.CardReply{OK: true, Reply: r.Reply, Card: r.Card}, nil
+	}
+	if id := CardSession(a.Card); id != "" {
+		if err := s.guard().Answer(c, id); err != nil {
+			return api.CardReply{}, err
+		}
 	}
 	if err := s.o.Manager.AnswerCard(ctx, a); err != nil {
 		return api.CardReply{}, err

@@ -48,18 +48,19 @@ func (a sessionsOf) After(id string, at int64) (api.MessagePage, error) {
 // fileRoutes are the files a session names, uploads, and (local: the unix socket only)
 // attaching, listing and copying by path.
 func (s *Server) fileRoutes(mux *http.ServeMux, local bool) {
-	mux.HandleFunc("GET /api/sessions/{id}/files/{ref}", s.fileGet)
-	mux.HandleFunc("GET /api/sessions/{id}/files/{ref}/thumb", s.fileThumb)
-	mux.HandleFunc("GET /api/sessions/{id}/files/{ref}/info", s.fileInfo)
-	mux.HandleFunc("POST /api/sessions/{id}/uploads", s.uploadCreate)
-	mux.HandleFunc("GET /api/uploads/{upload}", s.uploadGet)
-	mux.HandleFunc("PUT /api/uploads/{upload}", s.uploadPut)
-	mux.HandleFunc("POST /api/uploads/{upload}/complete", s.uploadComplete)
-	mux.HandleFunc("DELETE /api/uploads/{upload}", s.uploadCancel)
+	// The permission table (access.go): taking files out, copying them in, the directories.
+	mux.HandleFunc("GET /api/sessions/{id}/files/{ref}", s.filesOut(s.fileGet))
+	mux.HandleFunc("GET /api/sessions/{id}/files/{ref}/thumb", s.filesOut(s.fileThumb))
+	mux.HandleFunc("GET /api/sessions/{id}/files/{ref}/info", s.see(s.fileInfo))
+	mux.HandleFunc("POST /api/sessions/{id}/uploads", s.filesIn(s.uploadCreate))
+	mux.HandleFunc("GET /api/uploads/{upload}", s.uploading(s.uploadGet))
+	mux.HandleFunc("PUT /api/uploads/{upload}", s.uploading(s.uploadPut))
+	mux.HandleFunc("POST /api/uploads/{upload}/complete", s.uploading(s.uploadComplete))
+	mux.HandleFunc("DELETE /api/uploads/{upload}", s.uploading(s.uploadCancel))
 	if local {
-		mux.HandleFunc("POST /api/sessions/{id}/attach", s.attachPath)
-		mux.HandleFunc("GET /api/files", s.listDir)
-		mux.HandleFunc("POST /api/files/copy", s.copyFile)
+		mux.HandleFunc("POST /api/sessions/{id}/attach", s.filesIn(s.pathRoute("", []string{"path"}, true, false, s.attachPath)))
+		mux.HandleFunc("GET /api/files", s.pathRoute("path", nil, false, false, s.listDir))
+		mux.HandleFunc("POST /api/files/copy", s.pathRoute("", []string{"from", "to"}, true, true, s.copyFile))
 	}
 }
 

@@ -96,7 +96,7 @@ func cmdNew(s *Service, ctx context.Context, c Caller, p *store.ChatPointer, arg
 		}
 		cwd = filepath.Clean(dir)
 	}
-	id, err := s.open(ctx, c, p, a, cwd, c.Name)
+	id, err := s.open(ctx, c, p, a, cwd, source(c, ""))
 	if err != nil {
 		return api.ChatInputReply{}, err
 	}
@@ -104,12 +104,12 @@ func cmdNew(s *Service, ctx context.Context, c Caller, p *store.ChatPointer, arg
 }
 
 // sessions are the ones a chat can use: not archived, the most recent first, ten.
-func (s *Service) sessions(ctx context.Context) ([]api.Session, error) {
+func (s *Service) sessions(ctx context.Context, c Caller) ([]api.Session, error) {
 	l, err := s.o.Manager.List(ctx)
 	if err != nil {
 		return nil, err
 	}
-	l = slices.DeleteFunc(l, func(x api.Session) bool { return x.Archived })
+	l = slices.DeleteFunc(s.guard().Sessions(c, l), func(x api.Session) bool { return x.Archived })
 	return l[:min(len(l), 10)], nil
 }
 
@@ -120,7 +120,7 @@ func label(x api.Session) string {
 func short(id string) string { return id[:min(len(id), 8)] }
 
 func cmdUse(s *Service, ctx context.Context, c Caller, p *store.ChatPointer, args string) (api.ChatInputReply, error) {
-	l, err := s.sessions(ctx)
+	l, err := s.sessions(ctx, c)
 	if err != nil {
 		return api.ChatInputReply{}, err
 	}
@@ -142,6 +142,7 @@ func cmdUse(s *Service, ctx context.Context, c Caller, p *store.ChatPointer, arg
 		if err != nil {
 			return api.ChatInputReply{}, err
 		}
+		all = s.guard().Sessions(c, all)
 		for i := range all {
 			if strings.HasPrefix(all[i].ID, args) {
 				if chosen != nil {
@@ -162,7 +163,7 @@ func cmdUse(s *Service, ctx context.Context, c Caller, p *store.ChatPointer, arg
 }
 
 func cmdLs(s *Service, ctx context.Context, c Caller, p *store.ChatPointer, args string) (api.ChatInputReply, error) {
-	l, err := s.sessions(ctx)
+	l, err := s.sessions(ctx, c)
 	if err != nil {
 		return api.ChatInputReply{}, err
 	}
@@ -181,7 +182,7 @@ func cmdLs(s *Service, ctx context.Context, c Caller, p *store.ChatPointer, args
 }
 
 // current is the session the chat points at, or an error saying there is none.
-func (s *Service) current(p *store.ChatPointer) (*api.SessionState, error) {
+func (s *Service) current(c Caller, p *store.ChatPointer) (*api.SessionState, error) {
 	if p.Session == "" {
 		return nil, fmt.Errorf("%w: this chat has no session yet; send a message or /new", ErrNotFound)
 	}
@@ -189,11 +190,14 @@ func (s *Service) current(p *store.ChatPointer) (*api.SessionState, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: its session is gone; /use or /new", ErrNotFound)
 	}
+	if err := s.guard().Use(c, st.ID); err != nil {
+		return nil, err
+	}
 	return st, nil
 }
 
 func cmdStop(s *Service, ctx context.Context, c Caller, p *store.ChatPointer, args string) (api.ChatInputReply, error) {
-	st, err := s.current(p)
+	st, err := s.current(c, p)
 	if err != nil {
 		return api.ChatInputReply{}, err
 	}
@@ -207,7 +211,7 @@ func cmdStop(s *Service, ctx context.Context, c Caller, p *store.ChatPointer, ar
 }
 
 func cmdModel(s *Service, ctx context.Context, c Caller, p *store.ChatPointer, args string) (api.ChatInputReply, error) {
-	st, err := s.current(p)
+	st, err := s.current(c, p)
 	if err != nil {
 		return api.ChatInputReply{}, err
 	}
@@ -232,7 +236,7 @@ func cmdModel(s *Service, ctx context.Context, c Caller, p *store.ChatPointer, a
 }
 
 func cmdMode(s *Service, ctx context.Context, c Caller, p *store.ChatPointer, args string) (api.ChatInputReply, error) {
-	st, err := s.current(p)
+	st, err := s.current(c, p)
 	if err != nil {
 		return api.ChatInputReply{}, err
 	}
@@ -243,6 +247,9 @@ func cmdMode(s *Service, ctx context.Context, c Caller, p *store.ChatPointer, ar
 		}
 		return api.ChatInputReply{Session: st.ID, Card: s.newPick(c, p.Chat, "mode", card)}, nil
 	}
+	if err := s.guard().Mode(c, args); err != nil {
+		return api.ChatInputReply{}, err
+	}
 	if err := s.o.Manager.SetMode(ctx, st.ID, args); err != nil {
 		return api.ChatInputReply{}, err
 	}
@@ -250,7 +257,7 @@ func cmdMode(s *Service, ctx context.Context, c Caller, p *store.ChatPointer, ar
 }
 
 func cmdStatus(s *Service, ctx context.Context, c Caller, p *store.ChatPointer, args string) (api.ChatInputReply, error) {
-	st, err := s.current(p)
+	st, err := s.current(c, p)
 	if err != nil {
 		return api.ChatInputReply{}, err
 	}
@@ -285,7 +292,7 @@ func contextLine(used, max int) string {
 }
 
 func cmdUsage(s *Service, ctx context.Context, c Caller, p *store.ChatPointer, args string) (api.ChatInputReply, error) {
-	st, err := s.current(p)
+	st, err := s.current(c, p)
 	if err != nil {
 		return api.ChatInputReply{}, err
 	}
@@ -319,7 +326,7 @@ func cmdUsage(s *Service, ctx context.Context, c Caller, p *store.ChatPointer, a
 }
 
 func cmdContext(s *Service, ctx context.Context, c Caller, p *store.ChatPointer, args string) (api.ChatInputReply, error) {
-	st, err := s.current(p)
+	st, err := s.current(c, p)
 	if err != nil {
 		return api.ChatInputReply{}, err
 	}

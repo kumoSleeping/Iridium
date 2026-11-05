@@ -51,7 +51,9 @@ func setup(t *testing.T) (*Server, config.Config, string) {
 	t.Cleanup(func() { st.Close() })
 	h := hub.New()
 	l := &platform.Direct{}
-	m, err := session.New(session.Options{Config: cfg, Store: st, Hub: h, Launcher: l, Exe: os.Args[0], UnitPrefix: "iridium-test-", Logf: t.Logf, Poll: 10 * time.Millisecond})
+	var srv *Server
+	tag := func(id string) string { return srv.Tag(id) }
+	m, err := session.New(session.Options{Config: cfg, Store: st, Hub: h, Launcher: l, Exe: os.Args[0], UnitPrefix: "iridium-test-", Logf: t.Logf, Poll: 10 * time.Millisecond, Tag: tag})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +69,9 @@ func setup(t *testing.T) (*Server, config.Config, string) {
 	})
 	work := filepath.Join(root, "work")
 	os.MkdirAll(work, 0o700)
-	return New(cfg, m, h, t.Logf), cfg, work
+	srv = New(cfg, m, h, t.Logf)
+	t.Cleanup(srv.Close)
+	return srv, cfg, work
 }
 
 func call(t *testing.T, c *http.Client, method, url string, body any, out any) int {
@@ -202,7 +206,7 @@ func TestTurnOverHTTP(t *testing.T) {
 
 	var page api.MessagePage
 	call(t, c, "GET", base+"/api/sessions/"+id+"/messages", nil, &page)
-	if len(page.Blocks) != 2 || page.Blocks[0].From != TerminalWeb || page.Blocks[0].Text != "hello" || page.End != last.End {
+	if len(page.Blocks) != 2 || page.Blocks[0].From != TerminalLocal || page.Blocks[0].Text != "hello" || page.End != last.End {
 		t.Fatalf("page: %+v", page)
 	}
 	var full api.FullText

@@ -25,11 +25,11 @@ func kindsOf(blocks []api.Block) string {
 // item_completed and turn_aborted events give blocks; response_item (what Codex sends the model)
 // none.
 func TestCodexTranscript(t *testing.T) {
-	sources := func(id string) (string, bool) {
+	sources := func(id string) (string, string, bool) {
 		if id == "00000000-0000-4000-8000-1eb4566700b7" {
-			return "网页", true
+			return "pppppppppppppppp", "网页", true
 		}
-		return "", false
+		return "", "", false
 	}
 	f := OpenAs("testdata/codex-thread.jsonl", Codex, sources)
 	page, err := f.Latest()
@@ -125,7 +125,7 @@ func TestPiTranscript(t *testing.T) {
 		t.Errorf("blocks: %+v", page.Blocks)
 	}
 	// A message Iridium wrote has its source prefix; pi keeps no id of it.
-	b := Pi(0, []byte(`{"type":"message","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":[{"type":"text","text":"[网页] hi"}]}}`), Clip, func(string) (string, bool) { return "", false })
+	b := Pi(0, []byte(`{"type":"message","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":[{"type":"text","text":"[网页] hi"}]}}`), Clip, func(string) (string, string, bool) { return "", "", false })
 	if len(b) != 1 || b[0].From != "网页" || b[0].Text != "hi" {
 		t.Errorf("source: %+v", b)
 	}

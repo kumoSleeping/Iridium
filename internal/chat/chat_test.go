@@ -1,6 +1,10 @@
 package chat
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/kumoSleeping/iridium/internal/session"
+)
 
 func TestPlain(t *testing.T) {
 	for md, want := range map[string]string{
@@ -18,7 +22,7 @@ func TestPlain(t *testing.T) {
 func TestSource(t *testing.T) {
 	c := Caller{ID: "x", Name: "QQ"}
 	for sender, want := range map[string]string{"": "QQ", "张三": "QQ·张三", "[evil] name": "QQ·evil name", "a/b:c": "QQ·abc"} {
-		if got := source(c, sender); got != want {
+		if got := source(c, sender); got != session.From("x", want) {
 			t.Errorf("source(%q) = %q, want %q", sender, got, want)
 		}
 	}

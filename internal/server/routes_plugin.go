@@ -29,12 +29,11 @@ type IdentityFunc func(r *http.Request) (chat.Caller, bool)
 
 func (f IdentityFunc) Caller(r *http.Request) (chat.Caller, bool) { return f(r) }
 
-// caller is the request's terminal: from Who if set, else the terminal name the handler gives
-// every request (网页, 本机) as both its id and its name.
+// caller is the request's terminal: from Who if set (tests), else the gate's identity (a plugin
+// by its TOKEN, a panel, 本机).
 func (s *Server) caller(w http.ResponseWriter, r *http.Request) (chat.Caller, bool) {
 	if s.Who == nil {
-		n := terminal(r)
-		return chat.Caller{ID: n, Name: n}, true
+		return chatCaller(callerOf(r)), true
 	}
 	c, ok := s.Who.Caller(r)
 	if !ok {
@@ -139,6 +138,12 @@ func (s *Server) answerCard(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), time.Minute)
 	defer cancel()
 	if s.Chat == nil {
+		if id := chat.CardSession(a.Card); id != "" && s.Who == nil {
+			if err := s.ChatGuard().Answer(c, id); err != nil {
+				s.fault(w, err)
+				return
+			}
+		}
 		if err := s.m.AnswerCard(ctx, a); err != nil {
 			s.fault(w, err)
 			return

@@ -121,6 +121,9 @@ func (s *Service) File(c Caller, ref string) (string, error) {
 	if denied(r.P) {
 		return "", fmt.Errorf("%w: no such file", ErrNotFound)
 	}
+	if err := s.guard().FileOut(c, r.S); err != nil {
+		return "", err
+	}
 	return r.P, nil
 }
 

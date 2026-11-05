@@ -1,5 +1,6 @@
 // Package cli is `ir`, the command line agents and you use to reach the local daemon over its
-// unix socket (plan "ir"), with the same API as the web page.
+// unix socket (plan "ir"), with the same API as the web page. The commands that manage
+// interactive terminals, ir public and ir update are in admin.go.
 package cli
 
 import (
@@ -21,6 +22,12 @@ const Help = `ir：本机 Iridium 的命令行（经 unix socket）。<id> 写�
   new、send 加 --wait 等到回复；send 加 --steer 插进正在跑的回合（不加就排队）
   new 可加 --model <模型>、--approve <审批模式>
   退出码：0 结束，2 需要你（提问、审批），1 出错或已退出。路径可写 机器:路径
+管理（agent 调用时 TOKEN 不进对话，由网页面板确认）：
+  ir invite [名字] | token <名字>    新网页面板的链接 | 插件 TOKEN
+  ir access | revoke <名字>          列出终端和邀请 | 撤销
+  ir profile <名字> [--name 新名] [--avatar 图片]
+  ir public [off]                    经 Cloudflare 上公网（在终端里跑）
+  ir update [--check]                更新 Iridium
 `
 
 // Main runs ir with args, giving the exit code.
@@ -42,6 +49,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
 		fmt.Fprint(stdout, Help)
 		return 0
+	}
+	if admin, ok := adminCommands[args[0]]; ok { // admin.go
+		e, err := detect()
+		if err != nil {
+			return failed(stderr, args[0], err)
+		}
+		return admin(e, args[1:], stdout, stderr)
 	}
 	cmd := commands[args[0]]
 	if cmd == nil {

@@ -46,15 +46,17 @@
 
 ## 接进 Iridium
 
+已接上（`internal/server`）：
+
 ```go
-store, _ := gate.OpenJSONStore(filepath.Join(stateDir, "gate.json")) // 以后换 SQLite
-g, _ := gate.New(gate.Config{PublicOrigin: cfg.Public.Origin, Store: store, StateDir: stateDir, OnRevoke: dropPush})
-defer g.Close()
-mux.HandleFunc("PUT /api/me/profile", func(w http.ResponseWriter, r *http.Request) { g.ServeProfile(w, r, "") })
-mux.HandleFunc("PUT /api/endpoints/{id}/profile", func(w http.ResponseWriter, r *http.Request) { g.ServeProfile(w, r, r.PathValue("id")) })
+g, _ := gate.New(gate.Config{PublicOrigin: cfg.Public.Origin, Store: st.Gate(), StateDir: cfg.StatePath(), Hosts: cfg.Hosts})
 http.Serve(tcpListener, g.Wrap(mux))
 // unix socket（本机 ir）不经过门：在 handler 外层用 gate.NewContext(ctx, 本机身份)
 ```
+
+- 存储是 SQLite（`store.Store.Gate()`）；`JSONStore` 只留给门自己的测试。
+- `PUT /api/public` 换 `public.origin`：用新配置开一个新门换上，旧门 `CloseAll()` 断开它放进来的长连接。
+- 交互终端的权限表、确认、`ir` 管理命令见 `docs/api.md`“交互终端”。
 
 - 处理函数里 `gate.FromContext(ctx)` 拿到 `Identity{EndpointID, Name, Kind, Local}`；`CanManage()` 是面板或本机。
 - 长连接（事件流、WebSocket）调 `g.Track(r, closeFn)`，会话结束或终端被撤销时门会调 `closeFn`；连接自己结束时调返回的 `untrack`。
@@ -81,7 +83,7 @@ type Store interface {
 }
 ```
 
-现在用 `JSONStore`：一个文件，0600，写临时文件再改名。换 SQLite 时：`endpoints`（头像 BLOB，passkeys 存 JSON 列或子表）、`invites`（hash 唯一）、`sessions`（hash 主键，endpoint_id 建索引）三张表；`Apply` 一个事务。删终端时门自己在同一个 `Change` 里删它的会话，不用级联。JSON 版每次改动整文件重写（会话每分钟最多记一次活动），换 SQLite 后就没这个开销。
+现在用 SQLite（库的第 2 次迁移）：`terminals`（头像 BLOB，passkeys 存 JSON 列，`token_hash` 唯一）、`invites`（hash 唯一）、`logins`（门的“会话”，hash 主键，按终端建索引）三张表，时间存纳秒（0 是没有）；`Apply` 一个事务，删终端时连它的 `permissions` 一起删。删终端时门自己在同一个 `Change` 里删它的登录，不用级联。`JSONStore`（一个文件，0600，整文件重写）只给门的测试用。
 
 ## 反代
 
@@ -101,4 +103,5 @@ type Store interface {
 ## 还没做
 
 - 本机模式下“本机”没有可存的资料（`ServeProfile` 回 409 `local`）。
-- 节点（`ir invite --peer`）的签名请求；权限表；改 `public.origin` 要重建 Gate。
+- 节点（`ir invite --peer`）的签名请求。
+- 每个面板都有面板权，包括给别人开的面板（它能放宽自己的权限）；要分就在权限表里加一项。

@@ -546,6 +546,10 @@ func (g *Gate) Track(r *http.Request, closeFn func()) (untrack func()) {
 	}
 }
 
+// CloseAll closes every tracked connection: the gate is being replaced (public.origin changed),
+// and what it let in must come in again through the new one.
+func (g *Gate) CloseAll() { g.closeConns(func(*conn) bool { return true }) }
+
 func (g *Gate) closeConns(match func(*conn) bool) {
 	g.connMu.Lock()
 	var hit []*conn

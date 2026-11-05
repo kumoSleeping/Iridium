@@ -89,14 +89,16 @@ func rig(t *testing.T) (config.Config, string) {
 	t.Cleanup(func() { st.Close() })
 	h := hub.New()
 	l := &platform.Direct{}
-	m, err := session.New(session.Options{Config: cfg, Store: st, Hub: h, Launcher: l, Exe: os.Args[0], UnitPrefix: "iridium-test-", Logf: t.Logf, Poll: 10 * time.Millisecond})
+	var s *server.Server
+	m, err := session.New(session.Options{Config: cfg, Store: st, Hub: h, Launcher: l, Exe: os.Args[0], UnitPrefix: "iridium-test-", Logf: t.Logf, Poll: 10 * time.Millisecond, Tag: func(id string) string { return s.Tag(id) }})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := m.Start(); err != nil {
 		t.Fatal(err)
 	}
-	s := server.New(cfg, m, h, t.Logf)
+	s = server.New(cfg, m, h, t.Logf)
+	t.Cleanup(s.Close)
 	tcp, unix, err := s.Listen()
 	if err != nil {
 		t.Fatal(err)

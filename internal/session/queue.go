@@ -18,10 +18,10 @@ import (
 // queue: what waits then goes only on continue, or by its own steer. While the quota is out
 // messages wait too, and go when it is back. The queue is in the store (inputs not sent).
 
-// Send gives the session a message from `from` (an interactive terminal's name), starting its
+// Send gives the session a message from `from` (an interactive terminal's ID), starting its
 // agent if it is not running: a new turn when idle; while a turn runs it waits in the queue.
-// The agent sees "[from] " before it, unless it is a slash command, which must reach the agent as
-// typed.
+// The agent sees "[name] " before it (the terminal's name then, Options.Tag), unless it is a slash
+// command, which must reach the agent as typed.
 func (m *Manager) Send(ctx context.Context, id, text, from string) (string, error) {
 	input, _, err := m.SendWith(ctx, id, text, from, false)
 	return input, err
@@ -46,14 +46,15 @@ func (m *Manager) SendWith(ctx context.Context, id, text, from string, steer boo
 	}
 	h.qmu.Lock()
 	defer h.qmu.Unlock()
-	in := store.Input{ID: newUUID(), Session: h.id, Terminal: from, Text: text, State: "sent"}
+	terminal, tag := m.source(from)
+	in := store.Input{ID: newUUID(), Session: h.id, Terminal: terminal, Tag: tag, Text: text, State: "sent"}
 	if !steer && h.busy() {
 		in.State = "queued"
 		if err := m.o.Store.AddInput(in); err != nil {
 			return "", false, err
 		}
 		h.mu.Lock()
-		h.queue = append(h.queue, api.Queued{ID: in.ID, Text: text, From: from, At: time.Now().UnixMilli()})
+		h.queue = append(h.queue, api.Queued{ID: in.ID, Text: text, From: in.Tag, FromTerminal: terminal, At: time.Now().UnixMilli()})
 		if len(images) > 0 {
 			h.qimages[in.ID] = images
 		}
@@ -93,7 +94,11 @@ func (h *Hosted) write(ctx context.Context, in store.Input, images []agent.Image
 	}
 	line := in.Text
 	if !strings.HasPrefix(line, "/") {
-		line = "[" + in.Terminal + "] " + line
+		tag := in.Tag
+		if tag == "" {
+			tag = in.Terminal
+		}
+		line = "[" + tag + "] " + line
 	}
 	h.mu.Lock()
 	h.lastFrom = in.Terminal
@@ -130,7 +135,7 @@ func (h *Hosted) releaseLocked(ctx context.Context, all bool) {
 		h.mu.Lock()
 		images := h.qimages[q.ID]
 		h.mu.Unlock()
-		err := h.write(ctx, store.Input{ID: q.ID, Session: h.id, Terminal: q.From, Text: q.Text}, images)
+		err := h.write(ctx, queuedInput(h.id, q), images)
 		if err == nil {
 			err = h.m.o.Store.SetInputState(q.ID, "sent")
 		}
@@ -226,7 +231,7 @@ func (m *Manager) Steer(ctx context.Context, id, input string) error {
 	if i < 0 {
 		return store.ErrNoInput
 	}
-	if err := h.write(ctx, store.Input{ID: q.ID, Session: id, Terminal: q.From, Text: q.Text}, h.queuedImages(q.ID)); err != nil {
+	if err := h.write(ctx, queuedInput(id, q), h.queuedImages(q.ID)); err != nil {
 		return err
 	}
 	if err := m.o.Store.SetInputState(q.ID, "sent"); err != nil {
@@ -294,6 +299,19 @@ func (h *Hosted) loadQueue() {
 		return
 	}
 	for _, in := range ins {
-		h.queue = append(h.queue, api.Queued{ID: in.ID, Text: in.Text, From: in.Terminal, Paused: in.State == "paused", At: in.Created})
+		tag := in.Tag
+		if tag == "" {
+			tag = in.Terminal
+		}
+		h.queue = append(h.queue, api.Queued{ID: in.ID, Text: in.Text, From: tag, FromTerminal: in.Terminal, Paused: in.State == "paused", At: in.Created})
 	}
+}
+
+// queuedInput is a queued message as the input it was stored as: its terminal's ID, its tag.
+func queuedInput(session string, q api.Queued) store.Input {
+	terminal := q.FromTerminal
+	if terminal == "" {
+		terminal = q.From
+	}
+	return store.Input{ID: q.ID, Session: session, Terminal: terminal, Tag: q.From, Text: q.Text}
 }

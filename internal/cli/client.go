@@ -91,6 +91,10 @@ func (e *env) request(method, path string, body any) (*http.Response, error) {
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	// The session ir runs in: what an agent does through it counts to that session's terminal.
+	if c := caller(); c != "" {
+		req.Header.Set(headerSession, c)
+	}
 	resp, err := e.hc.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("iridium is not running (no answer on %s)", e.sock)

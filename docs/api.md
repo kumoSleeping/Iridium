@@ -2,14 +2,14 @@
 
 一套接口，两个入口：
 
-- HTTP：`127.0.0.1:7810`（配置 `listen`），给网页。只认本机的主机名（`localhost`、`127.0.0.1`、`::1` 和配置 `hosts`）；非 GET 请求带了别的 `Origin` 就拒绝。
-- unix socket：`$XDG_RUNTIME_DIR/iridium/ir.sock`（0600），给本机 `ir`。
+- HTTP：`127.0.0.1:7810`（配置 `listen`），给网页，前面是 Passkey 门（`docs/gate.md`）。没配 `public.origin` 时只认本机的主机名（`localhost`、回环地址和配置 `hosts`），非 GET 请求带了别的 `Origin` 就拒绝，请求都算内置终端“本机”（带插件 TOKEN 的算那个插件）。配了以后每个请求都要面板登录或 TOKEN。
+- unix socket：`$XDG_RUNTIME_DIR/iridium/ir.sock`（0600），给本机 `ir`，不经过门，算“本机”。`ir` 认出是 agent 在调（环境里有 `CLAUDECODE`、`CODEX_THREAD_ID`、`IRIDIUM_SESSION`，或者没有终端）时带头 `X-Iridium-Agent: 1`，这时不回任何秘密（见“确认”）。`ir` 还带 `X-Iridium-Session`（它所在的会话：`IRIDIUM_SESSION` 或 agent 自己的会话变量）；那个会话是别的终端经 Iridium 开的，这个请求就算那个终端的：用它的权限表，记它的用量和来源（agent 在插件的会话里调 `ir`，等于插件自己做）。
 
-来源名：HTTP 来的消息记作 `网页`，socket 来的记作 `本机`（交互终端做好后换成终端名）。agent 看到的消息开头是 `[来源名] `（`/` 开头的命令除外），读记录时服务端去掉它，放进消息块的 `from`。
+来源：每条交给 agent 的消息开头是 `[终端名] `（`/` 开头的命令除外），名字取发送时终端的名字。库里记下这条输入是哪个终端（ID）发的、用的什么名字；读记录时服务端按 Iridium 自己写进去的输入认（Claude：发消息时给的 uuid；没有 ID 的 agent：`store.SourceByText` 比对输入记录），去掉前缀，消息块带 `from`（名字）和 `fromTerminal`（终端 ID，取头像用）。用量行按终端 ID 记，改名不丢。
 
-类型都在 `internal/api`。`go generate ./internal/api` 用 tygo 生成 `web/src/api/types.gen.ts`，前端只用它。
+类型都在 `internal/api`。`go generate ./internal/api` 用 tygo 生成 `web/src/api/types.gen.ts`，前端只用它（生成的文件不进库）。
 
-出错时状态码非 2xx，正文 `{"error": "…"}`：400 请求不对，404 没有这个会话或位置，409 agent 没在运行，504 agent 没按时回。
+出错时状态码非 2xx，正文 `{"error": "…"}`：400 请求不对，403 权限表不许，404 没有这个会话或位置（看不到的会话也是 404），409 agent 没在运行或状态不对，429 今天的用量到上限了，504 agent 没按时回。名字不行时 409 另带 `nameError`（`empty`、`too_long`、`invalid`、`reserved`、`taken`）。
 
 ## 请求
 
@@ -48,6 +48,10 @@
 | `session:<id>` | `SessionState`：状态、提问（带 `card`）、后台任务、模型、审批模式、思考强度、可选的模型/模式/强度、待发队列、上下文总数、等额度到几点、`tail`、`end`、`proc`、出错原因 |
 | `context:<id>` | `Context`：上下文用了多少、分项。回合结束和压缩后更新；存在托管目录，没进程时也有 |
 | `quota` | `Quota`：按 agent + 账号（Claude：邮箱和套餐）的额度窗口、读到的时间、`live` |
+| `confirms` | `Confirms`：等面板确认的事（只有面板能订） |
+| `update` | `UpdateState`：有没有新版本、更新到哪一步 |
+
+`list` 按订阅者的权限表过滤；看不到的会话订 `session:`、`context:` 回 404。终端被撤销、面板退出、`public.origin` 改了，流就断开。
 
 事件：
 
@@ -244,3 +248,97 @@ Web Push，总开关在配置 `push`，默认关。VAPID 密钥存在状态目�
 - 只发指针指着这个会话的聊天。事件存库 24 小时（`outbox` 表），过期删掉。
 - `ref` 只对这个插件有效，签过名，重启后照样能用；`~/.ssh`、`~/.claude`、`~/.codex`、`~/.pi`、Iridium 的状态和配置目录里的文件一律不给。
 - 例子：`examples/plugin/echo_im.py`（只用标准库）把 stdin/stdout 当成一个假 IM。
+
+## 交互终端
+
+“本机”是内置终端（ID `local`），不在库里，权限全开，不能改、不能撤销。其余的是门里登记的面板（`panel`）和通道（`channel`），表在 SQLite（`terminals`、`invites`、`logins`、`permissions`）。
+
+谁能做什么：
+
+- **面板权**（批准新终端、放宽权限、看到 TOKEN 和邀请链接、答确认）：面板；本机 `ir` 由人在终端里跑时；没配 `public.origin` 时的本机网页。
+- **管理**（列出、改名和头像、收窄权限、撤销）：面板和本机，包括 agent 调的 `ir`。
+- 通道什么都不管，只能改自己的名字和头像。
+
+| 请求 | 正文 → 回答 | 说明 |
+|---|---|---|
+| `GET /api/me` | → `Me` | 调用者自己：终端、权限表、`panel`（有没有面板权）、`public` |
+| `PUT /api/me/profile` | 资料 → `EndpointInfo` | 改自己的名字、头像（见 `docs/gate.md`）；本机回 409 |
+| `PUT /api/endpoints/{id}/profile` | 同上 | 改别的终端的（`id` 也可以是名字）；`/api/terminals/{id}/profile` 同 |
+| `GET /api/terminals` | → `Terminals` | `ir access`：所有终端（本机在最前）、权限表、今天的用量，和未用的邀请。没有秘密 |
+| `POST /api/terminals/invites` | `NewInvite` → `Invite` | `ir invite [名字]`：新面板的一次性链接（10 分钟）。要先有 `public.origin`（否则 409）。没有面板权时回 202 `Pending` |
+| `POST /api/terminals/tokens` | `NewInvite` → `Token` | `ir token <名字>`：插件 TOKEN，只给这一次；已有的通道换新 TOKEN，旧的作废。没有面板权时回 202 `Pending` |
+| `PUT /api/terminals/{id}/rules` | `SetRules` → `Terminal` | 改权限表。放宽要面板权；加 Claude 还要 `ownerConfirmed: true` |
+| `DELETE /api/terminals/{id}` | → `{ok}` | `ir revoke`：终端（连同登录、权限、连接）或未用的邀请；最后一个有 Passkey 的面板删不了（409） |
+
+## 权限表（`Rules`）
+
+| 项 | 说明 |
+|---|---|
+| `agents` | 能用哪些 agent，也只看得到这些 agent 的会话。`claude` 另要 `claudeOwner` |
+| `claudeOwner` | 面板确认过“这是我本人在用”（Claude 用户协议）：`{by: 面板 ID, at}`，服务端写，请求里带的不算。去掉 Claude 就清掉 |
+| `allDirs`、`dirs`、`workspaces` | 能用哪些目录：全部，或某些目录（含下层）和工作区 |
+| `seeOthers` | 看不看别的终端开的会话；不经 Iridium 开的算本机的 |
+| `filesIn`、`filesOut` | 拷入（上传、附件、按路径）、拷出（下载、缩略图、插件取文件） |
+| `answer` | 答提问和审批 |
+| `mustApprove` | 它开的会话一律要审批：不能用跳过审批的模式（`bypassPermissions`、`acceptEdits`、`auto`、`never`、`on-request`、`danger-full-access`），没给模式时用会询问的（Claude `manual`、Codex `untrusted`、pi `ask`）；不能往跳过审批的会话发消息 |
+| `dailyTokens` | 每天（本地时间）它起的回合用的 token 上限（输入、输出、缓存都算），0 不限；到了回 429 |
+| `allCommands`、`commands` | 能发哪些 `/` 命令：全部，或列出的（如 `/compact`） |
+
+默认：面板除 Claude 外全开；通道除 Claude 外，只看自己开的会话、必须审批。没存过表的终端用默认。
+
+每个会话接口都查：列表（和事件流的 `list`）只给看得到的；看、读消息、取全文看不到就 404；发消息查 agent、命令、审批模式、上限（带附件另查 `filesIn`）；开会话查 agent、目录、模式、命令、上限，并记下是谁开的；停、中断、换模型和强度、待发队列、改名置顶查 agent；换审批模式另查 `mustApprove`；答提问（含 `POST /api/answer` 的卡片）另查 `answer`。
+
+文件：会话的文件和缩略图要 `filesOut`；上传（建任务、传块、完成、取消）要 `filesIn`；socket 上按路径的（`attach` 要 `filesIn`，`GET /api/files`、`POST /api/files/copy` 要 `filesIn`+`filesOut`）和文件夹选择器，路径都得在允许的目录里（先解析符号链接）。工作区的建、改、删只给面板和本机。
+
+插件的聊天层（`/api/chat/…`）按 TOKEN 认终端，同一张表：开会话（含 `/new`）查 agent、目录、上限，必须审批时用会询问的模式；发消息、`/use`、`/stop`、`/model` 只对看得到的会话；Iridium 命令本身查 `commands`，`/mode` 查 `mustApprove`；`/ls`、`/use` 只列看得到的；取文件查 `filesOut`。聊天开的会话记在插件名下，来源标记是 `[插件名·发送者]`。
+
+## 确认（agent 的 `ir` 要秘密时）
+
+agent 调 `ir invite`、`ir token` 时，邀请链接和 TOKEN 不能进它的对话。服务端不回秘密，改记一条确认（内存里，10 分钟），网页面板在“需要你”里看到，同意后**只有点同意的那个面板**拿到链接或 TOKEN；agent 只拿到结果。认 agent 靠 `ir` 带的头，只防 TOKEN 进记录，挡不住故意读库。
+
+| 请求 | 正文 → 回答 | 说明 |
+|---|---|---|
+| `GET /api/confirms` | → `Confirms` | 等确认的（面板权）。事件流 `confirms` 是同一份 |
+| `POST /api/confirms/{id}` | `ConfirmAnswer` → `ConfirmReply` | 面板同意或拒绝；同意时回答里带 `invite` 或 `token`，只此一次 |
+| `GET /api/confirms/{id}?wait=<秒>` | → `ConfirmState` | 结果：`pending`、`allowed`、`denied`、`expired`、`failed`，从不带秘密。`wait` 最多 60 秒，有结果就回 |
+
+## 公网入口
+
+| 请求 | 正文 → 回答 | 说明 |
+|---|---|---|
+| `GET /api/public` | → `PublicState` | `public.origin`，有没有面板注册过 Passkey |
+| `PUT /api/public` | `SetPublic` → `PublicState` | 设 `public.origin`（`""` 关掉）：写进配置文件，门马上换成新的，旧门放进来的连接全断开。要面板权 |
+
+`ir public` 在终端里跑（不是终端、或者是 agent 调的，就拒绝），一步步做到能用为止：
+
+1. 找 `cloudflared`（`~/.local/bin`，再 `PATH`）；没有就从 GitHub 最新版下载到 `~/.local/bin`，sha256 对上 release 的 digest（或说明里列的）、能跑才放进去。
+2. `HOME=<状态目录>/cloudflared cloudflared tunnel login`：打印登录链接，你在 Cloudflare 上选域名。登录凭证在 `<状态目录>/cloudflared/.cloudflared/cert.pem`，不碰 `~/.cloudflared`。没成就说缺一个托管在 Cloudflare 的域名。
+3. 用凭证问 Cloudflare 这个站点的域名（问不到就让你填），问子域名（默认 `ir`）。
+4. 建隧道 `iridium-<机器名>`（已有就接着用、重新取凭证），`route dns`；已有记录时问要不要覆盖（`--overwrite-dns`）。写 `config.yml`：这个主机名 → `http://127.0.0.1:<端口>`，其余 404，`ingress validate` 过了才用。
+5. 写用户级单元 `iridium-cloudflared.service`（`cloudflared tunnel --no-autoupdate --config … run`），`daemon-reload`、`enable`、`restart`。机器上的 `cloudflared` 服务和 `/etc/cloudflared` 不碰。
+6. `PUT /api/public`，再从外网（先问 1.1.1.1 解析）取 `https://<主机名>/_ir/health`，等到通（3 分钟）。
+7. 生成第一个面板邀请，打印链接。
+
+`ir public off`：停掉并删掉单元，清 `public.origin`，删隧道和它的文件（登录凭证留着，下次不用再登录）。DNS 记录 `cloudflared` 删不了，提示去控制台删。
+
+## 更新
+
+| 请求 | 正文 → 回答 | 说明 |
+|---|---|---|
+| `GET /api/update` | → `UpdateState` | 现在的版本、最新版本和说明、`available`、`phase`（`idle`、`checking`、`downloading`、`restarting`、`failed`）。事件流 `update` 是同一份 |
+| `POST /api/update/check` | → `UpdateState` | 马上查一次 |
+| `POST /api/update` | `ApplyUpdate` → `UpdateState` | `ir update`：下载、核对 sha256、跑一次 `iridium version` 看版本对不对、原子替换二进制、重启服务。没有更新的（`force` 除外）回 409 |
+
+更新源是配置 `update.url`（`update.every` 默认一天查一次；以后加 GitHub Releases），返回：
+
+```json
+{"version": "1.2.0", "notes": "…", "url": "https://…/iridium-linux-amd64", "sha256": "<hex>",
+ "platforms": {"linux-arm64": {"url": "…", "sha256": "…"}}}
+```
+
+`platforms` 里有本机的（`GOOS-GOARCH`）就用它。版本是带点的数字（可有 `v`、`-rc.1`）；`dev` 版不提示更新，`ir update --force` 照样装。重启：在 systemd 单元里就 `systemctl --user restart --no-block <单元>`，否则原地重新执行。托管进程在自己的单元里，不受影响。
+
+## 部署
+
+- `iridium install [-config <文件>] [-now]`：写用户级单元 `~/.config/systemd/user/iridium.service`（`iridium serve -config ~/.config/iridium/config.json`，带装的时候的 `PATH`），没有配置就写一份默认的（`127.0.0.1:7810`），建 `~/.local/state/iridium`，`daemon-reload`。不加 `-now` 不启动。没开 linger 时提醒：退出登录后服务和托管的 agent 都会停（`sudo loginctl enable-linger <用户>`）。
+- `scripts/deploy.sh`：`web/package.json` 在就先 `npm ci && npm run build`；`go build`（版本取 `git describe`）装到 `~/.local/opt/iridium/iridium`，`~/.local/bin/ir` 链过去，再跑 `iridium install`；服务已在跑就重启它。`IRIDIUM_NO_SYSTEMCTL=1` 不碰 systemd。

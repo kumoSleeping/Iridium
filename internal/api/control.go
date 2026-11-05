@@ -3,11 +3,13 @@ package api
 // Queued is a message waiting in a session's queue (docs/api.md "待发队列"). Paused: it waits for
 // "continue" (POST continue) or its own steer, not for the turn to end.
 type Queued struct {
-	ID     string `json:"id"`
-	Text   string `json:"text"`
-	From   string `json:"from"`
-	Paused bool   `json:"paused,omitempty"`
-	At     int64  `json:"at"`
+	ID   string `json:"id"`
+	Text string `json:"text"`
+	From string `json:"from"` // the sender's name, as the agent saw it
+	// FromTerminal is the sending terminal's ID.
+	FromTerminal string `json:"fromTerminal,omitempty"`
+	Paused       bool   `json:"paused,omitempty"`
+	At           int64  `json:"at"`
 }
 
 // EditQueued changes a queued message's text.

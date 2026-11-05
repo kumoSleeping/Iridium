@@ -104,6 +104,9 @@ type Sub struct {
 	dirty  map[string]bool
 	drafts []api.DraftEvent
 	wake   chan struct{}
+	// Filter, if set before Serve, gives what this stream may see of a state's JSON (a terminal
+	// that sees only some sessions gets only those in "list").
+	Filter func(key string, value []byte) []byte
 }
 
 // Subscribe opens a stream for keys. Every key is due at once: the whole state on connect, and
@@ -198,7 +201,11 @@ func (s *Sub) Serve(ctx context.Context, w io.Writer, flush func()) error {
 		buf.Reset()
 		for _, k := range due {
 			// The value now, not when it was marked: anything set since is in it.
-			fmt.Fprintf(&buf, "event: state\ndata: {\"key\":%q,\"value\":%s}\n\n", k, s.h.Get(k))
+			v := s.h.Get(k)
+			if s.Filter != nil {
+				v = s.Filter(k, v)
+			}
+			fmt.Fprintf(&buf, "event: state\ndata: {\"key\":%q,\"value\":%s}\n\n", k, v)
 			sent[k] = now
 		}
 		for _, d := range drafts {
