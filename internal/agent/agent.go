@@ -209,9 +209,10 @@ func (u *Usage) Since(before *Usage) map[string]ModelUsage {
 
 // What a parent Claude or Codex session or a Herdr pane hands down (Rhodium src/agents.ts). Left
 // in, the agent would think it runs inside that session, and hooks would report it as that pane.
-// Every CLAUDE_CODE_ variable goes but the crash-resume switch, which the driver sets itself.
-// IRIDIUM_SESSION and RHODIUM_SLOT go too: Iridium sets its own.
-var parentSession = regexp.MustCompile(`^(CLAUDECODE|CLAUDE_CODE_.*|CLAUDE_PID|CLAUDE_EFFORT|CODEX_(THREAD_ID|SESSION_ID|CI|VERSION|APPLY_PATCH_PRESERVE_LINE_ENDINGS)|AI_AGENT|HERDR_.*|IRIDIUM_SESSION|RHODIUM_SLOT)$`)
+// Every CLAUDE_CODE_ variable goes but the crash-resume switch, which the driver sets itself;
+// CLAUDE_JOB_DIR too, the parent's job directory (Claude 2.1.318 hands it down; Rhodium's list
+// predates it). IRIDIUM_SESSION and RHODIUM_SLOT go too: Iridium sets its own.
+var parentSession = regexp.MustCompile(`^(CLAUDECODE|CLAUDE_CODE_.*|CLAUDE_PID|CLAUDE_EFFORT|CLAUDE_JOB_DIR|CODEX_(THREAD_ID|SESSION_ID|CI|VERSION|APPLY_PATCH_PRESERVE_LINE_ENDINGS)|AI_AGENT|HERDR_.*|IRIDIUM_SESSION|RHODIUM_SLOT)$`)
 
 // CleanEnv is env without what a parent session hands down.
 func CleanEnv(env []string) []string {

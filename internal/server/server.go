@@ -139,11 +139,13 @@ func (s *Server) Listen() (tcp, unix net.Listener, err error) {
 	return tcp, unix, nil
 }
 
-// Serve serves both until ctx ends.
+// Serve serves both until ctx ends. Requests' contexts end with it, so event streams close at
+// once rather than hold the shutdown.
 func (s *Server) Serve(ctx context.Context, tcp, unix net.Listener) error {
+	base := func(net.Listener) context.Context { return ctx }
 	servers := []*http.Server{
-		{Handler: s.Handler(false), ReadHeaderTimeout: 10 * time.Second},
-		{Handler: s.Handler(true), ReadHeaderTimeout: 10 * time.Second},
+		{Handler: s.Handler(false), ReadHeaderTimeout: 10 * time.Second, BaseContext: base},
+		{Handler: s.Handler(true), ReadHeaderTimeout: 10 * time.Second, BaseContext: base},
 	}
 	errs := make(chan error, 2)
 	for i, l := range []net.Listener{tcp, unix} {

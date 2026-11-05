@@ -213,7 +213,9 @@ func pump(fifo io.Reader, stdin io.Writer, inLog, out *os.File, logf func(string
 	for {
 		line, err := r.ReadBytes('\n')
 		if err != nil {
-			logf("reading the input pipe: %v", err)
+			if !errors.Is(err, os.ErrClosed) { // closed: the holder is ending
+				logf("reading the input pipe: %v", err)
+			}
 			return
 		}
 		size := int64(-1)

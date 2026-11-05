@@ -82,7 +82,7 @@ func serve(args []string) int {
 	}
 	defer st.Close()
 	h := hub.New()
-	m, err := session.New(session.Options{Config: cfg, Store: st, Hub: h, Launcher: platform.Systemd{}})
+	m, err := session.New(session.Options{Config: cfg, Store: st, Hub: h, Launcher: platform.Systemd{}, UnitPrefix: cfg.UnitPrefix})
 	if err != nil {
 		log.Print(err)
 		return 1

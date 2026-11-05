@@ -125,7 +125,8 @@ func TestTurnOverHTTP(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go s.Serve(ctx, tcp, unix)
+	served := make(chan error, 1)
+	go func() { served <- s.Serve(ctx, tcp, unix) }()
 	base := "http://" + tcp.Addr().String()
 	c := &http.Client{Timeout: 10 * time.Second}
 
@@ -242,6 +243,15 @@ func TestTurnOverHTTP(t *testing.T) {
 	}
 	if code := call(t, c, "POST", base+"/api/sessions/"+id+"/stop", nil, nil); code != 200 {
 		t.Errorf("stop: %d", code)
+	}
+	// Shutting down with the event stream still open ends it at once, and the socket goes.
+	start := time.Now()
+	cancel()
+	if err := <-served; err != nil || time.Since(start) > time.Second {
+		t.Errorf("shutdown took %v: %v", time.Since(start), err)
+	}
+	if _, err := os.Stat(cfg.SocketPath()); !os.IsNotExist(err) {
+		t.Errorf("socket left: %v", err)
 	}
 }
 

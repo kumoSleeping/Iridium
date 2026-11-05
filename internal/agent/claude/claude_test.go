@@ -456,7 +456,7 @@ func TestSpawn(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(bin, "claude"), []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	env := []string{"PATH=" + bin, "CLAUDECODE=1", "CLAUDE_CODE_SESSION_ID=parent", "CLAUDE_CODE_ENTRYPOINT=cli", "HERDR_PANE=3", "IRIDIUM_SESSION=parent", "HOME=/home/x", "ANTHROPIC_MODEL=x"}
+	env := []string{"PATH=" + bin, "CLAUDECODE=1", "CLAUDE_CODE_SESSION_ID=parent", "CLAUDE_CODE_ENTRYPOINT=cli", "HERDR_PANE=3", "CLAUDE_JOB_DIR=/tmp/job", "IRIDIUM_SESSION=parent", "HOME=/home/x", "ANTHROPIC_MODEL=x"}
 	d := New(Options{})
 	spec, err := d.Spawn(agent.SpawnOptions{Session: "s1", Cwd: "/w", Env: env, Program: "claude", SystemPromptFile: "/p.md", Model: "haiku"})
 	if err != nil {
