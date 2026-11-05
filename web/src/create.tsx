@@ -168,10 +168,10 @@ export function NewSession({ ws, folder, onFolder, onPick, busy }: { ws: string;
 /** Starts a session: the chat opens on it, the caret in the composer. */
 export function useStart(opened: (id: string) => void) {
   const [busy, setBusy] = useState<Agent | null>(null);
-  const start = async (agent: Agent, cwd: string) => {
+  const start = async (agent: Agent, cwd: string, workspace?: number) => {
     setBusy(agent);
     try {
-      const { id } = await api.create({ agent, cwd });
+      const { id } = await api.create({ agent, cwd, ...(workspace ? { workspace } : {}) });
       opened(id);
     } catch (e) {
       toast(t("err.newSession"), { error: true, description: errText(e) });
@@ -227,7 +227,7 @@ export function CreatePopover({ trigger, ws, fallbackDir, opened }: { trigger: R
               <MenuRow i={1} icon={<SquarePlus size={16} />} label={t("nav.newWorkspace")} onClick={() => setPage("workspace")} />
             </div>
           )}
-          {page === "session" && <NewSession ws={ws?.name ?? ""} folder={folder} busy={busy} onFolder={() => setPage("sessionFolder")} onPick={(a) => void start(a, folder)} />}
+          {page === "session" && <NewSession ws={ws?.name ?? ""} folder={folder} busy={busy} onFolder={() => setPage("sessionFolder")} onPick={(a) => void start(a, folder, ws?.id)} />}
           {page === "sessionFolder" && (
             <FolderPicker
               initial={folder}
@@ -261,7 +261,7 @@ export function WsPlus({ w, trigger, open, setOpen, opened }: { w: Workspace; tr
       <PopSurface side="bottom" align="end" finalFocus={false}>
         <div key={page} className={page === "folder" ? "g-fade" : ""}>
           {page === "session" ? (
-            <NewSession ws={w.name} folder={folder} busy={busy} onFolder={() => setPage("folder")} onPick={(a) => void start(a, folder)} />
+            <NewSession ws={w.name} folder={folder} busy={busy} onFolder={() => setPage("folder")} onPick={(a) => void start(a, folder, w.id)} />
           ) : (
             <FolderPicker
               initial={folder}

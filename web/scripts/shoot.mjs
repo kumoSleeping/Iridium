@@ -85,8 +85,10 @@ for (const [name, vp, q, hash, act, media] of shots) {
   await page.emulateMediaFeatures(media ?? []);
   await page.setViewport(vp);
   const qs = new URLSearchParams({ still: "1", ...q });
-  // A fresh page each time: the address's query decides the theme and language.
-  await page.goto("about:blank");
+  // A fresh page each time, nothing kept from the last (drafts, open groups): the address's query
+  // decides the theme and language.
+  await page.goto(new URL("api/health", BASE).href);
+  await page.evaluate(() => (localStorage.clear(), sessionStorage.clear()));
   await page.goto(`${BASE}?${qs}${hash}`, { waitUntil: "networkidle2" });
   await page.evaluate(() => document.fonts.ready);
   await sleep(900);

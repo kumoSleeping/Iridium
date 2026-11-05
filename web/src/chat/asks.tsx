@@ -33,7 +33,8 @@ export function Asks({ session, asks, cwd }: { session: string; asks: Ask[]; cwd
   };
   if (!asks.length) return null;
   return (
-    <div className="mb-2 flex max-h-[55dvh] flex-col gap-2 overflow-y-auto">
+    // Padded out under negative margins: the cards' shadows are not cut where the list scrolls.
+    <div className="-mx-3 -mt-3 mb-[-4px] flex max-h-[55dvh] flex-col gap-2 overflow-y-auto px-3 pt-3 pb-3">
       {asks.map((a) => (
         <div key={a.requestId} data-leaving={leaving === a.requestId || undefined} className="g-pop glass float @container rounded-lg p-2.5 pl-3" role="alertdialog" aria-label={titleOf(a)}>
           {a.kind === "question" ? <Question a={a} busy={busy === a.requestId} send={(answers) => void answer(a, { answers })} /> : <Decide a={a} cwd={cwd} busy={busy === a.requestId} send={(b) => void answer(a, b)} />}

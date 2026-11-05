@@ -187,10 +187,12 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
   };
   const [label, icon] = KEYS[mode];
 
+  // The palette beside the composer, not in it: a frosted layer inside another sees only that one.
   return (
+    <div className="relative">
+      {list.length > 0 && <Palette list={list} at={Math.min(at, list.length - 1)} point={setAt} pick={(c) => (own(`/${c.name}`) ? undefined : (type(`/${c.name} `), box.current?.focus()))} />}
     <div className="glass float relative rounded-xl">
       <QuotaBars agent={s.agent} live={s.live} />
-      {list.length > 0 && <Palette list={list} at={Math.min(at, list.length - 1)} point={setAt} pick={(c) => (own(`/${c.name}`) ? undefined : (type(`/${c.name} `), box.current?.focus()))} />}
       {atts.length > 0 && (
         <ul data-attachments className="m-0 flex list-none gap-2 overflow-x-auto px-3 pt-3 pb-0">
           {atts.map((a) => (
@@ -275,6 +277,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
           </button>
         </Tip>
       </div>
+    </div>
     </div>
   );
 });

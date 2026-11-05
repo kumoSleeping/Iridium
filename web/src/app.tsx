@@ -161,7 +161,7 @@ export function App() {
               <div className="g-push absolute inset-0 flex bg-paper" data-at={r.name === "home" ? "here" : "under"} inert={r.name !== "home"}>
                 {sidebar}
               </div>
-              <div className="g-push absolute inset-0 z-10 flex bg-paper shadow-[-1px_0_0_var(--edge)]" data-at={r.name === "home" ? "off" : "here"} inert={r.name === "home"}>
+              <div className="g-push absolute inset-0 z-10 flex bg-paper shadow-[-1px_0_0_var(--edge)] data-[at=off]:shadow-none" data-at={r.name === "home" ? "off" : "here"} inert={r.name === "home"}>
                 {shown.name !== "home" && main(shown)}
               </div>
             </div>

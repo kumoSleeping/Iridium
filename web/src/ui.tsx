@@ -24,7 +24,9 @@ export function useMedia(q: string) {
   );
 }
 export const PHONE = "(max-width: 767px)";
-export const fine = () => matchMedia("(pointer: fine)").matches;
+/** A keyboard and a pointer, not a phone: Enter sends, the caret goes to the composer. Only a
+ *  touch screen alone says no (a headless browser has no pointer at all). */
+export const fine = () => !matchMedia("(pointer: coarse)").matches;
 export const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
 
 /** Long-press on touch: fires after 450 ms held still, and swallows the click that follows. */
