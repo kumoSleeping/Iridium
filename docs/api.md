@@ -77,6 +77,15 @@
   - `tail` 至少往回盖 1 秒；只装没截短的块，JSON 不超过 16KB。
 - 草稿：同一 `proc`、同一 `n` 的 `text` 接起来；`n` 变了，上一段封口（记录里马上会有这段话）；`proc` 变了，丢掉所有草稿。记录里来了 agent 的话，就换掉最早封口的那段。重连后清掉草稿，照 `end` 取新块。
 
+## Iridium 重启后
+
+托管进程和 agent 照跑；新的 Iridium 接上每个还在跑的托管进程：
+
+- 托管目录 `seen.json` 记着上一个 Iridium 读 `out.log` 读到哪（每秒最多写一次，退出时写一次）。那之前的输出重放，只为恢复驱动的状态；之后的（停机期间回合结束、用量、提问）照新来的处理。没有这个文件的（旧版）当全读过。
+- 再发一次握手。Claude 回 `initialize` 时带 `pending_permission_requests`（还在等答复的提问，原样的 `control_request`），挂着的提问以它为准：没答的回来，带卡片，照常能答；答过的不再出现。
+- 上下文（托管目录 `context.json`）和额度（状态目录 `quota.json`）是上次读到的值和读的时间（`at`）；额度的 `live` 要等这个 agent 和账号又有进程在跑。
+- 托管进程在停机期间已经退出的：不补读它的输出，按它的退出处理。
+
 ## 状态灯（`Status`）
 
 `idle` 无灯，`starting` 启动中，`running` 运行中，`compacting` 压缩中，`waiting` 需要你（有提问），`error` 上次进程出错退出（原因在 `SessionState.error`），`elsewhere` 在别处运行（只读）。`live` 说 agent 进程在不在跑。

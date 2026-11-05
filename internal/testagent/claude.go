@@ -120,9 +120,14 @@ func Claude() int {
 		}
 		end(f, "success")
 	}
+	// open: the asks waiting for an answer, as their requests went; initialize names them again
+	// (pending_permission_requests), as the CLI does for a daemon that comes back.
+	open := []any{}
 	ask := func(id, command string) {
-		say(map[string]any{"type": "control_request", "request_id": id, "request": map[string]any{"subtype": "can_use_tool", "tool_name": "Bash", "input": map[string]any{"command": command}, "tool_use_id": "toolu_" + id,
-			"permission_suggestions": []any{map[string]any{"type": "addRules", "rules": []any{map[string]any{"toolName": "Bash", "ruleContent": "ls *"}}, "behavior": "allow", "destination": "localSettings"}}}})
+		req := map[string]any{"type": "control_request", "request_id": id, "request": map[string]any{"subtype": "can_use_tool", "tool_name": "Bash", "input": map[string]any{"command": command}, "tool_use_id": "toolu_" + id,
+			"permission_suggestions": []any{map[string]any{"type": "addRules", "rules": []any{map[string]any{"toolName": "Bash", "ruleContent": "ls *"}}, "behavior": "allow", "destination": "localSettings"}}}}
+		open = []any{req}
+		say(req)
 	}
 
 	// Run the interrupted turn again by itself, before initialize's answer, as Claude does.
@@ -176,7 +181,7 @@ func Claude() int {
 			req := f["request"].(map[string]any)
 			switch req["subtype"] {
 			case "initialize":
-				say(map[string]any{"type": "control_response", "response": map[string]any{"subtype": "success", "request_id": id, "pending_permission_requests": []any{},
+				say(map[string]any{"type": "control_response", "response": map[string]any{"subtype": "success", "request_id": id, "pending_permission_requests": open,
 					"response": map[string]any{"claude_code_version": "fake", "current_permission_mode": modeOf(os.Args), "models": []any{map[string]any{"value": "default", "displayName": "Default"}, map[string]any{"value": "haiku", "displayName": "Haiku"}}, "commands": []any{map[string]any{"name": "compact", "description": "Compact the conversation", "argumentHint": "<instructions>"}},
 						"account": map[string]any{"email": "user@example.com", "subscriptionType": "Claude Pro"}}}})
 			case "get_usage":
@@ -201,6 +206,7 @@ func Claude() int {
 			}
 		case "control_response":
 			if pending != nil {
+				open = []any{}
 				text := textOf(pending)
 				if strings.HasSuffix(text, "ASKASK") && asked == 1 {
 					asked++
