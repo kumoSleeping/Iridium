@@ -11,7 +11,9 @@ import (
 	"time"
 
 	"github.com/kumoSleeping/iridium/internal/api"
+	"github.com/kumoSleeping/iridium/internal/config"
 	"github.com/kumoSleeping/iridium/internal/discover"
+	"github.com/kumoSleeping/iridium/internal/session"
 	"github.com/kumoSleeping/iridium/internal/store"
 )
 
@@ -106,5 +108,66 @@ func TestWorkspacesAndFolders(t *testing.T) {
 	call(t, c, "GET", base+"/api/sessions", nil, &sessions)
 	if len(sessions) != 1 || sessions[0].Workspace != 0 {
 		t.Errorf("after delete: %+v", sessions)
+	}
+}
+
+// A session on disk from before Iridium watched is the archive: listed archived. Restored, it
+// is shown; archived again, it stays so till its transcript grows.
+func TestArchiveFound(t *testing.T) {
+	var d *discover.Index
+	var cfg config.Config
+	s, cfg, work := setupWith(t, func(o *session.Options) {
+		empty := t.TempDir()
+		d = discover.New(discover.Options{ClaudeDir: o.Config.ClaudeHome, CodexHome: empty, PiSessions: empty, DshHome: empty, Store: o.Store, Hub: o.Hub, Procs: discover.ProcFS{Root: empty}, Logf: t.Logf, Settle: 10 * time.Millisecond})
+		o.Discovery = d
+	})
+	id := "77777777-7777-4777-8777-777777777777"
+	dir := filepath.Join(cfg.ClaudeHome, "projects", "-old")
+	os.MkdirAll(dir, 0o700)
+	path := filepath.Join(dir, id+".jsonl")
+	os.WriteFile(path, []byte(`{"type":"user","message":{"role":"user","content":"long ago"},"cwd":"`+work+`"}`+"\n"), 0o600)
+	past := time.Now().Add(-time.Hour)
+	os.Chtimes(path, past, past)
+	d.SetOnChange(s.m.Refresh)
+	if err := d.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	s.Discover = d
+	srv := httptest.NewServer(s.Handler(false))
+	defer srv.Close()
+	c, base := srv.Client(), srv.URL
+	archived := func() bool {
+		t.Helper()
+		var l []api.Session
+		call(t, c, "GET", base+"/api/sessions", nil, &l)
+		for _, x := range l {
+			if x.ID == id {
+				return x.Archived
+			}
+		}
+		t.Fatalf("%s not listed: %+v", id, l)
+		return false
+	}
+	if !archived() {
+		t.Fatal("an old session is shown")
+	}
+	no, yes := false, true
+	if code := call(t, c, "PATCH", base+"/api/sessions/"+id, api.SessionPatch{Archived: &no}, nil); code != 200 || archived() {
+		t.Fatalf("restore: %d", code)
+	}
+	if code := call(t, c, "PATCH", base+"/api/sessions/"+id, api.SessionPatch{Archived: &yes}, nil); code != 200 || !archived() {
+		t.Fatalf("archive: %d", code)
+	}
+	d.Scan()
+	if !archived() {
+		t.Fatal("back with no growth")
+	}
+	f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	f.WriteString(`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"again"}]}}` + "\n")
+	f.Close()
+	d.Scan()
+	if archived() {
+		t.Fatal("it grew: shown again")
 	}
 }

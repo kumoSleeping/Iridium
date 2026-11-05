@@ -53,7 +53,6 @@ func TestOverlays(t *testing.T) {
 	must(t, s.SetName("a", "first"))
 	must(t, s.SetPinned("a", true))
 	must(t, s.SetPinned("a", true))
-	must(t, s.SetArchived("b", true))
 	must(t, s.Assign("b", ws, true))
 	must(t, s.Assign("b", 0, false)) // discovery does not move what was dragged
 	must(t, s.Assign("c", ws, false))
@@ -61,7 +60,7 @@ func TestOverlays(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if o["a"] != (Overlay{Name: "first", Pinned: true}) || o["b"] != (Overlay{Archived: true, Workspace: ws, Manual: true}) || o["c"].Workspace != ws {
+	if o["a"] != (Overlay{Name: "first", Pinned: true}) || o["b"] != (Overlay{Workspace: ws, Manual: true}) || o["c"].Workspace != ws {
 		t.Fatalf("overlays: %+v", o)
 	}
 	must(t, s.SetName("a", ""))
