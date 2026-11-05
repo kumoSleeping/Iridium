@@ -47,7 +47,13 @@ func (s *Server) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		s.discoverError(w, err)
 		return
 	}
-	ws, err := s.Discover.CreateWorkspace(path, req.Name)
+	// Hosted sessions too, those discovery has not listed (no transcript yet, the agent's own id).
+	all, err := s.m.List(r.Context())
+	if err != nil {
+		s.error(w, err)
+		return
+	}
+	ws, err := s.Discover.CreateWorkspace(path, req.Name, all...)
 	if err != nil {
 		s.discoverError(w, err)
 		return
