@@ -48,7 +48,9 @@ func Default() Config {
 }
 
 // DefaultPath is $XDG_CONFIG_HOME/iridium/config.json.
-func DefaultPath() string { return filepath.Join(xdg("XDG_CONFIG_HOME", ".config"), "iridium", "config.json") }
+func DefaultPath() string {
+	return filepath.Join(xdg("XDG_CONFIG_HOME", ".config"), "iridium", "config.json")
+}
 
 // Load reads path over the defaults; none there is the defaults. Unknown fields are an error, so
 // a misspelt one is not silently ignored.
