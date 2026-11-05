@@ -48,25 +48,25 @@ type Driver struct {
 	prefix string
 	logf   func(string, ...any)
 
-	mu       sync.Mutex
-	w        agent.Writer
-	proc     int
-	seq      int
-	pending  map[string]chan ctlResponse
-	helloID  string
-	state    agent.State
-	asks     []api.Ask
-	tasks    []api.Task
-	agents   bool   // a background task other than a shell runs: the CLI holds back idle (#226)
-	reply    string // the turn's last assistant message so far
-	sent     string // since the last turn ended: "", "compact" (only /compact), "other"
-	waiting  []string
-	model    string
-	session  string
-	caps     map[string]bool
-	context  int
-	queue    []agent.Event
-	unknown  map[string]int
+	mu      sync.Mutex
+	w       agent.Writer
+	proc    int
+	seq     int
+	pending map[string]chan ctlResponse
+	helloID string
+	state   agent.State
+	asks    []api.Ask
+	tasks   []api.Task
+	agents  bool   // a background task other than a shell runs: the CLI holds back idle (#226)
+	reply   string // the turn's last assistant message so far
+	sent    string // since the last turn ended: "", "compact" (only /compact), "other"
+	waiting []string
+	model   string
+	session string
+	caps    map[string]bool
+	context int
+	queue   []agent.Event
+	unknown map[string]int
 }
 
 func New(o Options) *Driver {
