@@ -41,7 +41,7 @@ func Main() (code int, ok bool) {
 //   - crash begins the turn, then exits 3. Resumed with CLAUDE_CODE_RESUME_INTERRUPTED_TURN=1, it
 //     runs that turn again by itself, saying "ok: continued". crash! exits the same way but is
 //     never run again by itself; crashloop crashes again each time it is run again.
-//   - QUOTA is refused for the quota, which comes back in a second.
+//   - QUOTA is refused for the quota, which comes back in one to two seconds.
 func Claude() int {
 	session := ""
 	for _, a := range os.Args[1:] {
@@ -276,7 +276,7 @@ func Claude() int {
 				timer = time.After(500 * time.Millisecond)
 				continue
 			case strings.HasSuffix(text, "QUOTA"):
-				back := time.Now().Add(time.Second).Unix()
+				back := time.Now().Add(2 * time.Second).Unix() // whole seconds: back in one to two
 				say(map[string]any{"type": "rate_limit_event", "rate_limit_info": map[string]any{"status": "rejected", "resetsAt": back, "rateLimitType": "five_hour"}})
 				assistant("You've hit your limit")
 				end(f, "error_during_execution")
