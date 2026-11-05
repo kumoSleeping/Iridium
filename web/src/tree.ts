@@ -3,7 +3,7 @@
 // in its place. Sessions keep the list's order (pinned first, then the latest); folders follow the
 // sessions at the root, by their latest session. Sessions in no workspace go under 未归类; archived
 // ones only under 归档; those that wait on you are also in 需要你.
-import type { Workspace } from "./api/assumed";
+import type { Workspace } from "./api/types.gen";
 import type { Session } from "./api/types.gen";
 
 export type Folder = { key: string; name: string; path: string; sessions: Session[] };
@@ -44,7 +44,7 @@ export function buildTree(list: Session[], workspaces: Workspace[], unsorted: st
     return { key, id, name, root, rows: [...ordered, ...multi.map((f): Row => ({ kind: "folder", f }))], count: sessions.length };
   };
   // A workspace with no session yet shows too: one was just made.
-  const nodes = workspaces.map((w) =>node(`w${w.id}`, w.id, w.name, w.root, byWs.get(w.id) ?? []));
+  const nodes = workspaces.map((w) =>node(`w${w.id}`, w.id, w.name, w.path, byWs.get(w.id) ?? []));
   // 未归类 has no root: its folders are named from the directory all its sessions share.
   const none = byWs.get(0);
   if (none?.length) nodes.push(node("w0", 0, unsorted, commonDir(none.map((s) => s.cwd)), none));

@@ -31,12 +31,12 @@ afterEach(() => vi.unstubAllGlobals());
 describe("api", () => {
   test("send carries files only when there are some; answer carries always only when set", async () => {
     await api.send("s1", "hi");
-    await api.send("s1", "hi", ["r1"]);
+    await api.send("s1", "hi", ["r1"], true);
     await api.answer("s1", { requestId: "q", kind: "permission", allow: true });
     await api.answer("s1", { requestId: "q", kind: "permission", allow: true, always: true });
     expect(calls.map((c) => [c.method, c.url, c.body])).toEqual([
       ["POST", "/api/sessions/s1/send", { text: "hi" }],
-      ["POST", "/api/sessions/s1/send", { text: "hi", files: ["r1"] }],
+      ["POST", "/api/sessions/s1/send", { text: "hi", attachments: ["r1"], steer: true }],
       ["POST", "/api/sessions/s1/answer", { requestId: "q", kind: "permission", allow: true }],
       ["POST", "/api/sessions/s1/answer", { requestId: "q", kind: "permission", allow: true, always: true }],
     ]);
@@ -51,6 +51,16 @@ describe("api", () => {
     answer = () => json({ error: "the session's agent is not running" }, 409);
     await expect(api.interrupt("s1")).rejects.toMatchObject({ status: 409, message: "the session's agent is not running" });
   });
+  test("steering a server that has no steer yet sends again without it, which joins the turn", async () => {
+    answer = (c) => ((c.body as { steer?: boolean }).steer ? json({ error: 'bad request body: json: unknown field "steer"' }, 400) : json({ input: "u" }));
+    expect(await api.send("s1", "now", undefined, true)).toEqual({ input: "u" });
+    expect(calls.map((c) => c.body)).toEqual([{ text: "now", steer: true }, { text: "now" }]);
+  });
+  test("files and uploads by the session", () => {
+    expect(api.fileURL("s 1", "r/1")).toBe("/api/sessions/s%201/files/r%2F1");
+    expect(api.fileURL("s", "r", true)).toBe("/api/sessions/s/files/r?download");
+    expect(api.thumbURL("s", "r")).toBe("/api/sessions/s/files/r/thumb?size=1024");
+  });
   test("writes that may go twice go again after a 502", async () => {
     let n = 0;
     answer = () => (n++ === 0 ? json({ error: "bad gateway" }, 502) : json({ ok: true }));
@@ -61,8 +71,8 @@ describe("api", () => {
 
 describe("the event stream", () => {
   test("names the list, the quota and the open session with its context", () => {
-    expect(keysFor(null)).toEqual(["list", "quota"]);
-    expect(streamURL("a")).toBe("/api/events?sub=list&sub=quota&sub=session%3Aa&sub=context%3Aa");
+    expect(keysFor(null)).toEqual(["list", "workspaces", "quota"]);
+    expect(streamURL("a")).toBe("/api/events?sub=list&sub=workspaces&sub=quota&sub=session%3Aa&sub=context%3Aa");
   });
   test("the store: whole values, null drops, listeners told", () => {
     const told: string[] = [];
@@ -162,24 +172,29 @@ describe("uploads", () => {
     const file = new File([new Uint8Array(size).map((_, i) => i % 256)], "big.bin", { lastModified: 1 });
     let received = 0;
     let fail = true;
+    const up = () => ({ id: "up1", session: "s1", name: "big.bin", size, received, done: false, max: 1 << 31 });
     answer = async (c) => {
-      if (c.method === "POST" && c.url === "/api/uploads") return json({ id: "up1", size, received: 0 });
-      if (c.method === "GET" && c.url === "/api/uploads/up1") return json({ id: "up1", size, received });
+      if (c.method === "POST" && c.url === "/api/sessions/s1/uploads") {
+        expect(c.body).toEqual({ name: "big.bin", size });
+        return json(up());
+      }
+      if (c.method === "GET" && c.url === "/api/uploads/up1") return json(up());
       if (c.method === "PUT") {
         const offset = Number(new URL(c.url, "http://x").searchParams.get("offset"));
-        expect(offset).toBe(received);
         const n = (c.body as Blob).size;
-        // The first chunk lands, its answer lost.
-        received = offset + n;
+        // The first chunk lands but half, its answer lost; the next asks from the wrong place once.
         if (fail) {
           fail = false;
+          received = offset + Math.floor(n / 2);
           throw new TypeError("network");
         }
-        return json({ id: "up1", size, received });
+        if (offset !== received) return json({ ...up(), error: "offset" }, 409);
+        received = offset + n;
+        return json(up());
       }
-      if (c.url === "/api/uploads/up1/done") {
+      if (c.url === "/api/uploads/up1/complete") {
         expect((c.body as { sha256: string }).sha256).toBe(createHash("sha256").update(new Uint8Array(await file.arrayBuffer())).digest("hex"));
-        return json({ ref: "r1", path: "/w/.iridium/uploads/big.bin", name: "big.bin", size });
+        return json({ ...up(), done: true, file: { ref: "r1", name: "big.bin", path: "/w/.iridium/uploads/big.bin", size, mime: "application/octet-stream", kind: "file", mtime: 0 } });
       }
       return json({ error: "?" }, 404);
     };

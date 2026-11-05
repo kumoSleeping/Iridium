@@ -4,12 +4,11 @@
 // they are opened, or the page is idle: the first screen stays light.
 import { Toast } from "@base-ui/react/toast";
 import { Tooltip } from "@base-ui/react/tooltip";
-import { useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
-import type { Workspace } from "./api/assumed";
+import type { Workspace } from "./api/types.gen";
 import { watchTurns } from "./chats";
 import { CreatePopover, WsPlus } from "./create";
-import { knowsAll, useSettings, useUpdate, useWorkspaces } from "./data";
+import { useHome, useSettings, useUpdate, useWorkspaces } from "./data";
 import { t, useLang } from "./i18n";
 import { applyTheme, initialTheme, keepTheme, MeChip, type ThemePref } from "./me";
 import { prefetch } from "./prefetch";
@@ -63,7 +62,6 @@ function useExpanded() {
 
 export function App() {
   useLang();
-  const qc = useQueryClient();
   const phone = useMedia(PHONE);
   const systemDark = useMedia("(prefers-color-scheme: dark)");
   const [theme, setTheme] = useState<ThemePref>(initialTheme);
@@ -74,12 +72,11 @@ export function App() {
   const ws = useWorkspaces();
   const update = useUpdate();
   useSettings(); // asked early: the chat's quota bars read it
+  useHome(); // paths show ~ for it
   const { expanded, toggle } = useExpanded();
   const tree = useMemo(() => buildTree(list ?? [], ws.data ?? [], t("nav.unsorted")), [list, ws.data, t("nav.unsorted")]);
 
   useEffect(() => follow(open), [open]);
-  // A workspace the list names that the page does not know yet: ask again.
-  useEffect(() => void (!knowsAll(list, ws.data) && qc.invalidateQueries({ queryKey: ["workspaces"] })), [list, ws.data, qc]);
   // Unread, the done reminder, and the chats of turns that end off screen.
   const unread = useRef<ReturnType<typeof watchUnread>>(undefined);
   useEffect(() => {
@@ -134,7 +131,7 @@ export function App() {
       updateDot={!!update.data?.available}
       chatCode={() => void loadChat().catch(() => {})}
       createKey={(trigger) => <CreatePopover trigger={trigger} ws={curWs} fallbackDir={fallbackDir} opened={(id) => openChat(id)} />}
-      wsPlus={(w, trigger, o, setO) => <WsPlus key={w.key} w={w} trigger={trigger} open={o} setOpen={setO} opened={(id) => openChat(id)} />}
+      wsPlus={(w, trigger, o, setO) => <WsPlus key={w.key} w={{ id: w.id, name: w.name, path: w.root }} trigger={trigger} open={o} setOpen={setO} opened={(id) => openChat(id)} />}
       me={<MeChip theme={theme} setTheme={(v) => (setTheme(v), keepTheme(v))} defaultOpen={params.get("open") === "me"} initialPage={params.get("open") === "perms" ? "perms" : "main"} />}
     />
   );

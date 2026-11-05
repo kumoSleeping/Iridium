@@ -26,14 +26,9 @@ func main() {
 	listen := flag.String("listen", "127.0.0.1:7832", "where to serve")
 	dir := flag.String("dir", "", "a build on disk; none: the embedded one")
 	mocked := flag.Bool("mock", false, "answer the routes the daemon does not serve yet (mock.go)")
-	home := flag.String("home", "", "-mock: the folder picker's ~")
-	spaces := flag.String("workspaces", "", "-mock: workspaces, name=/root,...")
 	me := flag.Bool("me", false, "-mock: a signed-in panel rather than 本机")
 	update := flag.Bool("update", false, "-mock: an update is out")
 	flag.Parse()
-	if *home == "" {
-		*home, _ = os.UserHomeDir()
-	}
 	target := &url.URL{Scheme: "http", Host: *apiAddr}
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(r *httputil.ProxyRequest) {
@@ -45,13 +40,7 @@ func main() {
 	}
 	var m *mock
 	if *mocked {
-		m = newMock(*home, *spaces, *me, *update)
-		proxy.ModifyResponse = func(r *http.Response) error {
-			if r.Request.URL.Path == "/api/events" {
-				r.Body = m.rewrite(r.Body)
-			}
-			return nil
-		}
+		m = newMock(*me, *update)
 	}
 	api := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if m != nil && m.serve(w, r) {

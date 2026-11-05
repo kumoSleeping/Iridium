@@ -156,9 +156,11 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
     const cs = getComputedStyle(el);
     type("");
     setAtts([]);
-    if (mode === "queue") {
+    // While a turn runs the server queues what is sent; steering joins the turn. Queued, the queue
+    // shows it, not a bubble; turned away, the words go back where they were typed.
+    if (mode === "queue" && queues) {
       try {
-        await api.queue(s.id, words, files.map((f) => f.ref));
+        await api.send(s.id, words, files.map((f) => f.ref));
       } catch (e) {
         type([words, textNow.current].filter(Boolean).join("\n"));
         toast(t("err.queue"), { error: true, description: errText(e) });
@@ -169,7 +171,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
     sentFromHere(s.id);
     onSent(sent, { x: r.left + parseFloat(cs.paddingLeft), y: r.top + parseFloat(cs.paddingTop) });
     try {
-      const { input } = await api.send(s.id, words, files.map((f) => f.ref));
+      const { input } = await api.send(s.id, words, files.map((f) => f.ref), mode === "steer");
       sent.input = input;
     } catch (e) {
       sent.failed = errText(e);

@@ -2,52 +2,46 @@
 // original, a video or a sound to play in place, anything else a card to download. Only paths the
 // server says the conversation named, and that exist, show; it serves them by the session.
 import { Dialog } from "@base-ui/react/dialog";
-import { useQuery } from "@tanstack/react-query";
 import { Download, FileCode2, FileText, X } from "lucide-react";
-import type { FileInfo } from "../api/assumed";
-import { api, missing } from "../api/client";
+import { api } from "../api/client";
+import type { FileRef } from "../api/types.gen";
 import { t } from "../i18n";
 import { cn, IconKey, Tip } from "../ui";
-import { AUDIO, VIDEO, type FileRef } from "./refs";
 
 export const size = (n: number) => (n < 1024 ? `${n} B` : n < 1 << 20 ? `${(n / 1024).toFixed(1)} KB` : n < 1 << 30 ? `${(n / (1 << 20)).toFixed(1)} MB` : `${(n / (1 << 30)).toFixed(2)} GB`);
 
-export function Files({ session, refs }: { session: string; refs: FileRef[] }) {
-  const paths = refs.map((r) => r.path);
-  const q = useQuery({
-    queryKey: ["files", session, paths.join("\n")],
-    enabled: paths.length > 0,
-    staleTime: Infinity,
-    queryFn: () => api.files(session, paths).catch((e) => (missing(e) ? ([] as FileInfo[]) : Promise.reject(e))),
-  });
-  const found = (q.data ?? []).filter((f) => paths.includes(f.path));
-  if (!found.length) return null;
+/** The files a message names, as the server found them (Block.files): only those that exist. */
+export function Files({ session, files, labels }: { session: string; files: FileRef[]; labels?: Map<string, string> }) {
+  if (!files.length) return null;
   return (
     <div className="flex w-full flex-col items-start gap-2">
-      {found.map((f) => (
-        <One key={f.path} session={session} f={f} label={refs.find((r) => r.path === f.path)?.label} />
+      {files.map((f) => (
+        <One key={f.ref} session={session} f={f} label={labels?.get(f.path)} />
       ))}
     </div>
   );
 }
 
-function One({ session, f, label }: { session: string; f: FileInfo; label?: string }) {
-  const url = api.fileURL(session, f.path);
-  if (f.image || f.type.startsWith("image/")) return <Picture src={api.thumbURL(session, f.path)} full={url} name={label ?? f.name} />;
-  if (VIDEO.test(f.path) || f.type.startsWith("video/")) return <video controls preload="metadata" src={url} className="block w-full max-w-[480px] rounded-lg bg-fill shadow-[0_0_0_0.5px_var(--edge)]" aria-label={f.name} />;
-  if (AUDIO.test(f.path) || f.type.startsWith("audio/")) return <audio controls preload="metadata" src={url} className="w-full max-w-[340px]" aria-label={f.name} />;
-  return <FileCard name={label ?? f.name} detail={size(f.size)} href={api.fileURL(session, f.path, true)} code={/\.(tsx?|jsx?|go|rs|py|css|json|ya?ml|toml|sh|md)$/i.test(f.name)} />;
+const CODE = /\.(tsx?|jsx?|go|rs|py|css|json|ya?ml|toml|sh|md)$/i;
+
+function One({ session, f, label }: { session: string; f: FileRef; label?: string }) {
+  const url = api.fileURL(session, f.ref);
+  const name = label ?? f.name;
+  if (f.kind === "image") return <Picture src={f.thumb ? api.thumbURL(session, f.ref) : url} full={url} name={name} />;
+  if (f.kind === "video") return <video controls preload="metadata" src={url} className="block w-full max-w-[480px] rounded-lg bg-fill shadow-[0_0_0_0.5px_var(--edge)]" aria-label={name} />;
+  if (f.kind === "audio") return <audio controls preload="metadata" src={url} className="w-full max-w-[340px]" aria-label={name} />;
+  return <FileCard name={name} detail={size(f.size)} href={api.fileURL(session, f.ref, true)} code={CODE.test(f.name)} />;
 }
 
 /** A picture: its thumbnail, opening the original over the page. */
-export function Picture({ src, full, name }: { src: string; full: string; name: string }) {
+export function Picture({ src, full, name, small }: { src: string; full: string; name: string; small?: boolean }) {
   return (
     <Dialog.Root>
       <Tip label={t("msg.openImage")}>
         <Dialog.Trigger
           render={
-            <button type="button" aria-label={`${name} · ${t("msg.openImage")}`} className="g-press block w-full max-w-[340px] overflow-hidden rounded-lg bg-fill shadow-[0_0_0_0.5px_var(--edge)]">
-              <img src={src} alt={name} loading="lazy" className="block max-h-[420px] w-full object-cover" />
+            <button type="button" aria-label={`${name} · ${t("msg.openImage")}`} className={cn("g-press block overflow-hidden rounded-lg bg-fill shadow-[0_0_0_0.5px_var(--edge)]", small ? "size-16" : "w-full max-w-[340px]")}>
+              <img src={src} alt={name} loading="lazy" className={cn("block w-full object-cover", small ? "h-full" : "max-h-[420px]")} />
             </button>
           }
         />

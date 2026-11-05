@@ -4,12 +4,12 @@
 // key under the composer.
 import { Menu } from "@base-ui/react/menu";
 import { Popover } from "@base-ui/react/popover";
-import { Check, ChevronDown, FilePen, ListChecks, ShieldCheck, ShieldOff, ShieldQuestion, Sparkles } from "lucide-react";
+import { Check, ChevronDown, FilePen, ListChecks, ShieldCheck, ShieldOff, ShieldQuestion, ShieldX, SlidersHorizontal, Sparkles } from "lucide-react";
 import { useState, type CSSProperties, type ReactNode } from "react";
-import type { AccountQuota, LiveSession, Mode, Model } from "../api/assumed";
+import type { AccountQuota, LiveSession, Model } from "../api/assumed";
 import { api } from "../api/client";
 import type { Agent, Context, ContextCategory } from "../api/types.gen";
-import { useSettings } from "../data";
+import { useAgent, useSettings } from "../data";
 import { t, useLang } from "../i18n";
 import { useContextState, useQuota } from "../store";
 import { errText, toast } from "../toast";
@@ -143,38 +143,47 @@ export function QuotaBars({ agent, live }: { agent: Agent; live: boolean }) {
   );
 }
 
-/** An agent's approval modes as it names them, when the session does not list its own. */
-const MODES: Partial<Record<Agent, string[]>> = {
-  claude: ["default", "acceptEdits", "plan", "bypassPermissions"],
-  codex: ["untrusted", "on-request", "never"],
-};
-export const modesOf = (s: LiveSession): Mode[] => s.modes ?? (MODES[s.agent] ?? []).map((id) => ({ id }));
+/** An agent's approval modes, in the order the key cycles them: as GET /api/agents lists them, else
+ *  Claude's own. */
+const MODES: Partial<Record<Agent, string[]>> = { claude: ["default", "acceptEdits", "plan", "bypassPermissions"] };
+type Mode = { id: string };
 
 const MODE_ICON: Record<string, ReactNode> = {
   default: <ShieldQuestion size={14} />,
+  manual: <ShieldQuestion size={14} />,
+  ask: <ShieldQuestion size={14} />,
   untrusted: <ShieldQuestion size={14} />,
   "on-request": <ShieldCheck size={14} />,
+  granular: <SlidersHorizontal size={14} />,
   acceptEdits: <FilePen size={14} />,
   plan: <ListChecks size={14} />,
+  auto: <Sparkles size={14} />,
+  dontAsk: <ShieldX size={14} />,
   bypassPermissions: <ShieldOff size={14} />,
   never: <ShieldOff size={14} />,
 };
 const MODE_KEY: Record<string, Parameters<typeof t>[0]> = {
   default: "mode.default",
+  manual: "mode.default",
+  ask: "mode.default",
   acceptEdits: "mode.acceptEdits",
   plan: "mode.plan",
+  auto: "mode.auto",
+  dontAsk: "mode.dontAsk",
   bypassPermissions: "mode.bypass",
   untrusted: "mode.untrusted",
   "on-request": "mode.onRequest",
+  granular: "mode.granular",
   never: "mode.never",
 };
-export const modeName = (m: Mode) => m.name ?? (MODE_KEY[m.id] ? t(MODE_KEY[m.id]!) : m.id);
+export const modeName = (m: Mode) => (MODE_KEY[m.id] ? t(MODE_KEY[m.id]!) : m.id);
 
 /** Sets the mode; what it shows meanwhile is the one picked. */
 export function useMode(s: LiveSession) {
   const [want, setWant] = useState<string | null>(null);
-  const modes = modesOf(s);
-  const now = want ?? s.mode ?? modes[0]?.id ?? "default";
+  const info = useAgent(s.agent);
+  const modes: Mode[] = (info?.modes ?? MODES[s.agent] ?? []).map((id) => ({ id }));
+  const now = want ?? s.mode ?? info?.defaultMode ?? modes[0]?.id ?? "default";
   if (want !== null && s.mode === want) setWant(null);
   const set = async (m: string) => {
     if (m === now) return;

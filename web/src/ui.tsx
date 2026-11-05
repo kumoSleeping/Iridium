@@ -238,7 +238,11 @@ export const titleOf = (s: { name?: string; title?: string; cwd: string }) => s.
 /** The home directory as a path shows it: /home/<user>, /Users/<user> or /root. */
 export const homeOf = (p: string) => /^(\/home\/[^/]+|\/Users\/[^/]+|\/root)(?=\/|$)/.exec(p)?.[1];
 
+/** The home folder as the daemon resolves ~ (src/data.ts useHome), once known. */
+let knownHome: string | undefined;
+export const setHome = (h: string) => (knownHome = h);
+
 /** ~ for the home directory at a path's start. */
-export function tilde(p: string, home = homeOf(p)) {
+export function tilde(p: string, home = knownHome ?? homeOf(p)) {
   return home && (p === home || p.startsWith(home + "/")) ? "~" + p.slice(home.length) : p;
 }

@@ -5,7 +5,7 @@ import type { Block, Session } from "../src/api/types.gen";
 import { argOf, folded, foldLine, inputOf } from "../src/chat/fold";
 import { commandsOf, keyMode, matching } from "../src/chat/composer";
 import { ctxParts } from "../src/chat/meters";
-import { filesIn, sourceOf } from "../src/chat/refs";
+import { filesIn, resolve, sourceOf } from "../src/chat/refs";
 import { en } from "../src/i18n/en";
 import { zh } from "../src/i18n/zh";
 import { jumpList } from "../src/jump";
@@ -53,19 +53,24 @@ describe("argOf", () => {
 });
 
 describe("filesIn", () => {
-  test("pictures out of the text, links as their names, paths in inline code; none in fenced code", () => {
-    const r = filesIn("See ![](/w/a.png) and [the log](/w/run.log), also `/w/b.mp4` and `relative.txt`.\n\n```\n/w/c.png\n```");
-    expect(r.refs).toEqual([
-      { path: "/w/a.png", image: true, label: undefined },
-      { path: "/w/run.log", image: false, label: "the log" },
-      { path: "/w/b.mp4", image: false, label: undefined },
+  test("pictures out of the text, file links as their names by their absolute paths; fenced code as it is", () => {
+    const r = filesIn("See ![](a.png) and [the log](./logs/run.log#L3), [home](~/x.txt), `/w/b.mp4`.\n\n```\n![](/w/c.png)\n```", "/w", "/home/k");
+    expect(r.text).toContain("See  and the log, home, `/w/b.mp4`.");
+    expect(r.text).toContain("![](/w/c.png)");
+    expect([...r.labels]).toEqual([
+      ["/w/logs/run.log", "the log"],
+      ["/home/k/x.txt", "home"],
     ]);
-    expect(r.text).toContain("and the log,");
-    expect(r.text).not.toContain("a.png");
-    expect(r.text).toContain("/w/c.png");
   });
-  test("web links stay links", () => {
-    expect(filesIn("[x](https://example.com)").refs).toEqual([]);
+  test("web links and pictures stay", () => {
+    const r = filesIn("[x](https://example.com) ![y](https://example.com/a.png)");
+    expect(r.labels.size).toBe(0);
+    expect(r.text).toBe("[x](https://example.com) ![y](https://example.com/a.png)");
+  });
+  test("resolve: file://, a line, ~/ and the session's folder", () => {
+    expect(resolve("file:///w/a.go:10:2", "/s")).toBe("/w/a.go");
+    expect(resolve("b/c.md", "/s/")).toBe("/s/b/c.md");
+    expect(resolve("~/d", "/s", "/home/k")).toBe("/home/k/d");
   });
 });
 
@@ -92,8 +97,8 @@ const S = (id: string, cwd: string, more: Partial<Session> = {}): Session => ({ 
 
 describe("buildTree", () => {
   const ws = [
-    { id: 1, name: "Iridium", root: "/w/ir" },
-    { id: 2, name: "Empty", root: "/w/empty" },
+    { id: 1, name: "Iridium", path: "/w/ir" },
+    { id: 2, name: "Empty", path: "/w/empty" },
   ];
   test("workspace → folder → session; a folder of one is not shown; 未归类 named from its common folder", () => {
     const list = [S("a", "/w/ir", { workspace: 1 }), S("b", "/w/ir/web", { workspace: 1, updatedAt: 5 }), S("c", "/w/ir/web", { workspace: 1 }), S("d", "/w/ir/docs", { workspace: 1 }), S("e", "/w/x/one"), S("f", "/w/x/two"), S("g", "/w/x/two", { archived: true }), S("h", "/w/ir", { workspace: 1, status: "waiting" })];

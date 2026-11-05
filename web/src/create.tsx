@@ -5,10 +5,11 @@ import { Popover } from "@base-ui/react/popover";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, Folder, FolderPlus, LoaderCircle, MessageSquarePlus, PencilLine, SquarePlus } from "lucide-react";
 import { useState, type CSSProperties, type ReactElement } from "react";
-import type { Workspace } from "./api/assumed";
+import type { Workspace } from "./api/types.gen";
 import { api, missing } from "./api/client";
 import type { Agent } from "./api/types.gen";
 import { t } from "./i18n";
+import { useHome } from "./data";
 import { errText, toast } from "./toast";
 import { AGENTS, agentName, cn, homeOf, IconKey, Logo, PopSurface, tilde, Tip } from "./ui";
 
@@ -26,7 +27,7 @@ export function FolderPicker({ initial, onChoose, startNew = false, busy }: { in
   const [newName, setNewName] = useState<string | null>(startNew ? "" : null);
   const q = useQuery({ queryKey: ["folders", path], queryFn: () => api.folders(path), retry: false, staleTime: 10_000 });
   const here = q.data?.path ?? path;
-  const home = q.data?.home ?? homeOf(here);
+  const home = useHome().data ?? homeOf(here);
   const gone = q.error && missing(q.error); // the route is not served yet: only typing a path works
   const shown = tilde(here, home);
   const segs = shown.split("/").filter((s, i) => s || i === 0);
@@ -44,7 +45,7 @@ export function FolderPicker({ initial, onChoose, startNew = false, busy }: { in
     setNewName(null);
     if (!n || /[/\0]/.test(n)) return;
     try {
-      await api.mkdir(join(here, n));
+      await api.mkdir({ path: here, name: n });
       await qc.invalidateQueries({ queryKey: ["folders", path] });
     } catch (e) {
       toast(t("err.mkdir"), { error: true, description: errText(e) });
@@ -187,7 +188,7 @@ export function CreatePopover({ trigger, ws, fallbackDir, opened }: { trigger: R
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [page, setPage] = useState<NewPage>("menu");
-  const root = ws?.root ?? fallbackDir;
+  const root = ws?.path ?? fallbackDir;
   const [folder, setFolder] = useState(root);
   const [lastRoot, setLastRoot] = useState(root);
   if (lastRoot !== root) {
@@ -199,7 +200,7 @@ export function CreatePopover({ trigger, ws, fallbackDir, opened }: { trigger: R
   const newWorkspace = async (path: string) => {
     setMaking(true);
     try {
-      const w = await api.createWorkspace(path, base(path));
+      const w = await api.createWorkspace({ path, name: base(path) });
       await qc.invalidateQueries({ queryKey: ["workspaces"] });
       setOpen(false);
       toast(t("toast.created"), { description: w.name });
@@ -236,7 +237,7 @@ export function CreatePopover({ trigger, ws, fallbackDir, opened }: { trigger: R
               }}
             />
           )}
-          {page === "workspace" && <FolderPicker initial={homeOf(fallbackDir) ?? "~"} busy={making} onChoose={(p) => void newWorkspace(p)} />}
+          {page === "workspace" && <FolderPicker initial="~" busy={making} onChoose={(p) => void newWorkspace(p)} />}
         </div>
       </PopSurface>
     </Popover.Root>
@@ -244,9 +245,9 @@ export function CreatePopover({ trigger, ws, fallbackDir, opened }: { trigger: R
 }
 
 /** The "+" on a workspace row: a new session there. */
-export function WsPlus({ w, trigger, open, setOpen, opened }: { w: { name: string; root: string }; trigger: ReactElement; open: boolean; setOpen: (o: boolean) => void; opened: (id: string) => void }) {
+export function WsPlus({ w, trigger, open, setOpen, opened }: { w: Workspace; trigger: ReactElement; open: boolean; setOpen: (o: boolean) => void; opened: (id: string) => void }) {
   const [page, setPage] = useState<"session" | "folder">("session");
-  const [folder, setFolder] = useState(w.root);
+  const [folder, setFolder] = useState(w.path);
   const { busy, start } = useStart((id) => (setOpen(false), opened(id)));
   return (
     <Popover.Root

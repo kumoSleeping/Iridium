@@ -5,11 +5,12 @@
 import { ArrowUpRight, Bot, Brain, ChevronRight, CircleX, FilePen, FileText, Globe, ListChecks, LoaderCircle, MessageCircleQuestionMark, Plug, RotateCcw, RotateCw, Search, SquareTerminal, Wrench, X, type LucideIcon } from "lucide-react";
 import { forwardRef, memo, useEffect, useState, type ReactNode } from "react";
 import { api } from "../api/client";
-import type { Block, Result } from "../api/types.gen";
+import type { Block, FileRef, Result } from "../api/types.gen";
 import type { Sent } from "../chats";
 import { t } from "../i18n";
 import { Avatar, cn, IconKey, Logo, Tip } from "../ui";
-import { Files, Picture } from "./files";
+import { useHome } from "../data";
+import { Files, Picture, size } from "./files";
 import { argOf, foldLine, kindOf, kindOfStep, type Kind, type Shown, type Step, type Tool } from "./fold";
 import { Markdown } from "./markdown";
 import { filesIn, type Source } from "./refs";
@@ -35,6 +36,18 @@ export const YouBubble = forwardRef<HTMLDivElement, { text: string; panel?: { na
     </div>
   );
 });
+
+/** A file in your words: a picture small, opening the original; any other its name and size. */
+function Attached({ session, f }: { session: string; f: FileRef }) {
+  if (f.kind === "image") return <Picture src={f.thumb ? api.thumbURL(session, f.ref, 256) : api.fileURL(session, f.ref)} full={api.fileURL(session, f.ref)} name={f.name} small />;
+  return (
+    <a href={api.fileURL(session, f.ref, true)} download={f.name} className="flex max-w-full items-center gap-1 rounded-md bg-paper/60 px-1.5 py-0.5 text-xs text-ink-2 hover:text-ink">
+      <FileText size={12} className="shrink-0" />
+      <span className="truncate">{f.name}</span>
+      <span className="shrink-0 text-ink-3 tabular-nums">{size(f.size)}</span>
+    </a>
+  );
+}
 
 /** A message sent from here the transcript has yet to bring: faint; not taken, red with a retry. */
 export function Pending({ s, retry, drop, bubbleRef }: { s: Sent; retry: () => Promise<void>; drop: () => void; bubbleRef?: (el: HTMLDivElement | null) => void }) {
@@ -115,12 +128,13 @@ function Line({ icon, children, error, title }: { icon?: ReactNode; children: Re
 const SYSTEM: Record<string, Parameters<typeof t>[0]> = { compact: "sys.compact", interrupted: "sys.interrupted", unreadable: "sys.unreadable", api_error: "sys.apiError", local_command: "sys.localCommand" };
 
 /** What the agent said: Markdown, then the files it names. */
-const Assistant = memo(function Assistant({ text, session }: { text: string; session: string }) {
-  const f = filesIn(text);
+const Assistant = memo(function Assistant({ b, session, cwd }: { b: Block; session: string; cwd: string }) {
+  const home = useHome().data;
+  const f = filesIn(b.text ?? "", cwd, home);
   return (
     <div className="flex min-w-0 flex-col items-start gap-2 pr-6">
       {f.text && <Markdown text={f.text} className="w-full" />}
-      {f.refs.length > 0 && <Files session={session} refs={f.refs} />}
+      {!!b.files?.length && <Files session={session} files={b.files} labels={f.labels} />}
     </div>
   );
 });
@@ -132,10 +146,14 @@ export function Said({ b, session, cwd, source, onJump }: { b: Shown; session: s
       const text = b.text ?? "";
       if (src.kind === "iridium") return <Line icon={<RotateCcw size={12} />}>{text}</Line>;
       if (src.kind === "letter") return <Letter src={src} text={text} onJump={onJump} />;
-      return <YouBubble text={text} panel={src.panel} time={b.time} />;
+      return (
+        <YouBubble text={text} panel={src.panel} time={b.time}>
+          {b.files?.map((f) => <Attached key={f.ref} session={session} f={f} />)}
+        </YouBubble>
+      );
     }
     case "assistant":
-      return <Assistant text={b.text ?? ""} session={session} />;
+      return <Assistant b={b} session={session} cwd={cwd} />;
     case "system":
       return b.event === "api_error" || b.event === "local_command" || b.event === "unreadable" ? (
         <SystemFold b={b} session={session} />
@@ -259,8 +277,6 @@ function StepView({ s, session, cwd }: { s: Step; session: string; cwd: string }
 }
 
 function ResultView({ r, session }: { r: Result; session: string }) {
-  // A result that is a picture's path (a screenshot tool's) shows the picture.
-  if (/^\/\S+\.(png|jpe?g|webp|gif)$/i.test(r.text.trim())) return <Picture src={api.thumbURL(session, r.text.trim())} full={api.fileURL(session, r.text.trim())} name={r.text.trim().split("/").pop()!} />;
   return <Clipped text={r.text} length={r.length} at={r.at} session={session} error={r.error} />;
 }
 

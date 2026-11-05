@@ -1,8 +1,8 @@
 // The one module that talks to the daemon (docs/api.md). Every path the page uses is here; the ones
 // marked "assumed" are not served yet and follow docs/plan.md (their types are in ./assumed.ts).
 import { QueryClient } from "@tanstack/react-query";
-import type { FolderList, Endpoint, FileInfo, Me, SessionPatch, Settings, Upload, UploadDone, UpdateState, Workspace } from "./assumed";
-import type { Answer, FullText, MessagePage, NewSession, NewSessionReply, Session, SendReply, SessionState } from "./types.gen";
+import type { Endpoint, Me, Settings, UpdateState } from "./assumed";
+import type { AgentInfo, Answer, CompleteUpload, FolderReply, Folders, FullText, MessagePage, NewFolder, NewSession, NewSessionReply, NewUpload, NewWorkspace, Send, SendReply, Session, SessionPatch, SessionState, Upload, Workspace, WorkspacePatch } from "./types.gen";
 
 /** The answers shown. A failed one is not retried: the next state or the clock asks again. */
 export const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 5_000, refetchOnWindowFocus: false } } });
@@ -102,39 +102,49 @@ export const api = {
     get<MessagePage>(`${S(id)}/messages${q.before !== undefined ? `?before=${q.before}` : q.after !== undefined ? `?after=${q.after}` : ""}`, init),
   block: (id: string, at: string) => get<FullText>(`${S(id)}/block?at=${enc(at)}`),
   create: (s: NewSession) => write<NewSessionReply>("POST", "/api/sessions", s),
-  /** files: upload refs (assumed: Send.files); sent only when there are some, as the server takes no unknown field. */
-  send: (id: string, text: string, files?: string[]) => write<SendReply>("POST", `${S(id)}/send`, files?.length ? { text, files } : { text }),
+  /** A message: queued while a turn runs, or joining it with steer (assumed: Send.steer; a server
+   *  without it joins the turn anyway, so it is sent again without). attachments: upload refs. */
+  send: async (id: string, text: string, attachments?: string[], steer = false): Promise<SendReply> => {
+    const body: Send & { steer?: boolean } = { text, ...(attachments?.length ? { attachments } : {}), ...(steer ? { steer } : {}) };
+    try {
+      return await write<SendReply>("POST", `${S(id)}/send`, body);
+    } catch (e) {
+      if (steer && e instanceof ApiError && e.status === 400 && /steer/.test(e.message)) return write<SendReply>("POST", `${S(id)}/send`, { ...body, steer: undefined });
+      throw e;
+    }
+  },
   interrupt: (id: string) => write<{ ok: boolean }>("POST", `${S(id)}/interrupt`),
   stop: (id: string) => write<{ ok: boolean }>("POST", `${S(id)}/stop`),
   /** always: allow this tool for the rest of the session (assumed: Answer.always). */
   answer: (id: string, a: Answer & { always?: boolean }) => write<{ ok: boolean }>("POST", `${S(id)}/answer`, a.always ? a : stripAlways(a)),
   health: (init?: RequestInit) => get<{ ok: boolean }>("/api/health", init),
+  agents: () => get<AgentInfo[]>("/api/agents"),
 
-  // --- assumed: workspaces, folders, the session overlay ---
+  // --- workspaces, folders, the session overlay ---
   workspaces: () => get<Workspace[]>("/api/workspaces"),
-  createWorkspace: (root: string, name: string) => write<Workspace>("POST", "/api/workspaces", { root, name }),
-  patchWorkspace: (id: number, p: { name?: string }) => writeAgain<Workspace>("PATCH", `/api/workspaces/${id}`, p),
-  folders: (path: string) => get<FolderList>(`/api/folders?path=${enc(path)}`),
-  mkdir: (path: string) => write<{ path: string }>("POST", "/api/folders", { path }),
-  patch: (id: string, p: SessionPatch) => writeAgain<Session>("PATCH", S(id), p),
+  createWorkspace: (w: NewWorkspace) => write<Workspace>("POST", "/api/workspaces", w),
+  patchWorkspace: (id: number, p: WorkspacePatch) => writeAgain<{ ok: boolean }>("PATCH", `/api/workspaces/${id}`, p),
+  deleteWorkspace: (id: number) => write<{ ok: boolean }>("DELETE", `/api/workspaces/${id}`),
+  folders: (path: string) => get<Folders>(`/api/folders?path=${enc(path)}`),
+  mkdir: (f: NewFolder) => write<FolderReply>("POST", "/api/folders", f),
+  patch: (id: string, p: SessionPatch) => writeAgain<{ ok: boolean }>("PATCH", S(id), p),
+
+  // --- files in messages, uploads ---
+  fileURL: (id: string, ref: string, download = false) => `${S(id)}/files/${enc(ref)}${download ? "?download" : ""}`,
+  thumbURL: (id: string, ref: string, size = 1024) => `${S(id)}/files/${enc(ref)}/thumb?size=${size}`,
+  upload: (id: string, u: NewUpload) => write<Upload>("POST", `${S(id)}/uploads`, u),
+  uploadAt: (up: string) => get<Upload>(`/api/uploads/${enc(up)}`),
+  uploadChunk: (up: string, offset: number, chunk: Blob, signal?: AbortSignal) =>
+    write<Upload>("PUT", `/api/uploads/${enc(up)}?offset=${offset}`, chunk, { headers: { "content-type": "application/octet-stream" }, signal }),
+  uploadDone: (up: string, sha256: string) => write<Upload>("POST", `/api/uploads/${enc(up)}/complete`, { sha256 } satisfies CompleteUpload),
+  uploadCancel: (up: string) => write<{ ok: boolean }>("DELETE", `/api/uploads/${enc(up)}`),
 
   // --- assumed: queue, mode, model ---
-  queue: (id: string, text: string, files?: string[]) => write<{ id: string }>("POST", `${S(id)}/queue`, files?.length ? { text, files } : { text }),
   steer: (id: string, input: string) => write<{ ok: boolean }>("POST", `${S(id)}/queue/${enc(input)}/steer`),
   unqueue: (id: string, input: string) => write<{ ok: boolean }>("DELETE", `${S(id)}/queue/${enc(input)}`),
   pauseQueue: (id: string, paused: boolean) => writeAgain<{ ok: boolean }>("POST", `${S(id)}/queue/pause`, { paused }),
   mode: (id: string, mode: string) => writeAgain<{ ok: boolean }>("POST", `${S(id)}/mode`, { mode }),
   model: (id: string, p: { model?: string; effort?: string }) => writeAgain<{ ok: boolean }>("POST", `${S(id)}/model`, p),
-
-  // --- assumed: files in replies, uploads ---
-  files: (id: string, paths: string[]) => write<FileInfo[]>("POST", `${S(id)}/files`, { paths }),
-  fileURL: (id: string, path: string, download = false) => `${S(id)}/file?path=${enc(path)}${download ? "&download=1" : ""}`,
-  thumbURL: (id: string, path: string) => `${S(id)}/file?path=${enc(path)}&thumb=1024`,
-  upload: (session: string, name: string, size: number, type: string) => write<Upload>("POST", "/api/uploads", { session, name, size, type }),
-  uploadAt: (up: string) => get<Upload>(`/api/uploads/${enc(up)}`),
-  uploadChunk: (up: string, offset: number, chunk: Blob, signal?: AbortSignal) =>
-    write<Upload>("PUT", `/api/uploads/${enc(up)}?offset=${offset}`, chunk, { headers: { "content-type": "application/octet-stream" }, signal }),
-  uploadDone: (up: string, sha256: string) => write<UploadDone>("POST", `/api/uploads/${enc(up)}/done`, { sha256 }),
 
   // --- assumed: settings, update, push ---
   settings: () => get<Settings>("/api/settings"),

@@ -18,6 +18,25 @@ export const AgentPi = "pi";
 export const AgentDsh = "dsh";
 export type Agent = typeof AgentClaude | typeof AgentCodex | typeof AgentPi | typeof AgentDsh;
 /**
+ * AgentInfo is what an agent Iridium hosts can do (GET /api/agents).
+ */
+export interface AgentInfo {
+  agent: Agent;
+  name: string;
+  /**
+   * Modes: its approval modes, in the order the mode key cycles them; DefaultMode is an empty
+   * mode's. ModeSwitch: when a switch takes effect: now | next turn | restart.
+   */
+  modes: string[];
+  defaultMode: string;
+  modeSwitch: string;
+  /**
+   * ContextBreakdown: its context comes in categories. Quota: it reports quota windows.
+   */
+  contextBreakdown: boolean;
+  quota: boolean;
+}
+/**
  * Status is a session's lamp (plan "风格"). idle shows none.
  */
 export const StatusIdle = "idle";
@@ -49,6 +68,10 @@ export interface Session {
   pinned?: boolean;
   archived?: boolean;
   workspace?: number /* int64 */; // 0: none
+  /**
+   * Launcher: the session that started this one, if discovery saw it.
+   */
+  launcher?: string;
   last?: LastSaid;
   updatedAt: number /* int64 */; // ms since the epoch
 }
@@ -162,6 +185,10 @@ export interface Block {
    * system: what happened.
    */
   event?: SystemEvent;
+  /**
+   * Files the block names that exist: user and assistant text, a Write call's file.
+   */
+  files?: FileRef[];
 }
 export const BlockKindUser = "user";
 export const BlockKindAssistant = "assistant";
@@ -212,6 +239,15 @@ export interface NewSession {
   text?: string;
   model?: string;
   mode?: string;
+  /**
+   * Workspace: the workspace it goes in (0: the caller's, else as discovery classifies it).
+   */
+  workspace?: number /* int64 */;
+  /**
+   * Caller is the session that ran ir new (from IRIDIUM_SESSION, CLAUDE_CODE_SESSION_ID,
+   * CODEX_THREAD_ID…): the new session goes into its workspace.
+   */
+  caller?: string;
 }
 export interface NewSessionReply {
   id: string;
@@ -221,6 +257,12 @@ export interface NewSessionReply {
  */
 export interface Send {
   text: string;
+  /**
+   * Attachments are file refs of the session (uploads, attached paths): their paths are written
+   * into the message, and images go to the agent as images too.
+   */
+  attachments?: string[];
+  caller?: string; // as NewSession's
 }
 export interface SendReply {
   input: string; // the message's id (Claude: its uuid)
@@ -260,4 +302,157 @@ export interface DraftEvent {
   proc: number /* int */;
   n: number /* int */;
   text: string;
+}
+
+//////////
+// source: discover.go
+
+/**
+ * Workspace is a group of sessions, made from a folder. The carried state "workspaces" is
+ * Workspace[]; a session's Workspace 0 is none (未归类).
+ */
+export interface Workspace {
+  id: number /* int64 */;
+  name: string;
+  path: string;
+}
+/**
+ * NewWorkspace makes a workspace of folder Path; Name "" is the folder's name.
+ */
+export interface NewWorkspace {
+  path: string;
+  name?: string;
+}
+/**
+ * WorkspacePatch renames a workspace.
+ */
+export interface WorkspacePatch {
+  name: string;
+}
+/**
+ * SessionPatch changes what lies over a session; a field left out stays. Name "" takes the name
+ * off. Workspace moves it (0: none), and it is never moved by discovery again.
+ */
+export interface SessionPatch {
+  name?: string;
+  pinned?: boolean;
+  archived?: boolean;
+  workspace?: number /* int64 */;
+}
+/**
+ * Folders is one folder's subfolders for the picker: names only, no hidden ones, sorted. Parent
+ * is "" at the top of what may be listed.
+ */
+export interface Folders {
+  path: string;
+  parent?: string;
+  folders: string[];
+}
+/**
+ * NewFolder makes folder Name in Path.
+ */
+export interface NewFolder {
+  path: string;
+  name: string;
+}
+/**
+ * FolderReply is the folder made.
+ */
+export interface FolderReply {
+  path: string;
+}
+
+//////////
+// source: files.go
+
+/**
+ * FileRef is a file a session's transcript names (in a reply, a message, a Write call) or a
+ * message's attachment: GET /api/sessions/<session>/files/<ref>. A ref is only good for its
+ * session, and only paths the session's transcript names (or its attachments) get one.
+ */
+export interface FileRef {
+  ref: string;
+  name: string;
+  path: string;
+  size: number /* int64 */;
+  mime: string;
+  /**
+   * Kind: image (a thumbnail at .../thumb), video, audio, or file (a download card).
+   */
+  kind: FileKind;
+  thumb?: boolean; // GET .../<ref>/thumb gives a thumbnail
+  mtime: number /* int64 */; // ms since the epoch
+  /**
+   * Sha256 (hex) where it has been worked out: always from .../info and an upload's complete.
+   */
+  sha256?: string;
+}
+export const FileKindImage = "image";
+export const FileKindVideo = "video";
+export const FileKindAudio = "audio";
+export const FileKindFile = "file";
+export type FileKind = typeof FileKindImage | typeof FileKindVideo | typeof FileKindAudio | typeof FileKindFile;
+/**
+ * NewUpload starts an upload into the session's working directory (.iridium/uploads/).
+ */
+export interface NewUpload {
+  name: string;
+  size: number /* int64 */;
+}
+/**
+ * Upload is an upload's progress. Received: the bytes the server has, where the next chunk's
+ * offset must be. Max: the largest file allowed.
+ */
+export interface Upload {
+  id: string;
+  session: string;
+  name: string;
+  size: number /* int64 */;
+  received: number /* int64 */;
+  done: boolean;
+  max: number /* int64 */;
+  file?: FileRef; // once done
+}
+/**
+ * CompleteUpload ends an upload: the server checks the whole file's sha256 (hex).
+ */
+export interface CompleteUpload {
+  sha256: string;
+}
+/**
+ * AttachPath makes a local file an attachment of the session (local ir only).
+ */
+export interface AttachPath {
+  path: string;
+}
+/**
+ * DirEntry is one entry of GET /api/files?path=<dir> (local ir only): one level.
+ */
+export interface DirEntry {
+  name: string;
+  size: number /* int64 */;
+  mtime: number /* int64 */; // ms since the epoch
+  type: string; // file | dir | link | other
+}
+export interface DirListing {
+  path: string;
+  entries: DirEntry[];
+}
+/**
+ * Copy copies a file (local ir only): POST /api/files/copy streams CopyProgress lines.
+ */
+export interface Copy {
+  from: string;
+  to: string;
+}
+/**
+ * CopyProgress is one line of a copy's stream: progress (Done of Size), then the last line with
+ * Path and Sha256, or Error.
+ */
+export interface CopyProgress {
+  done: number /* int64 */;
+  size: number /* int64 */;
+  path?: string;
+  sha256?: string;
+  error?: string;
 }

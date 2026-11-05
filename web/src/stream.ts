@@ -20,7 +20,10 @@ let started = false;
 
 const link = (l: Partial<Link>) => setCarried("link", { ...(getCarried<Link>("link") ?? { live: null, rtt: null }), ...l });
 
-export const keysFor = (s: string | null) => ["list", "quota", ...(s ? [`session:${s}`, `context:${s}`] : [])];
+// The states every page carries. update and confirms join these once the daemon serves them: a key it
+// does not know fails the whole stream.
+const ALWAYS = ["list", "workspaces", "quota"];
+export const keysFor = (s: string | null) => [...ALWAYS, ...(s ? [`session:${s}`, `context:${s}`] : [])];
 export const streamURL = (s: string | null) => `/api/events?${keysFor(s).map((k) => `sub=${encodeURIComponent(k)}`).join("&")}`;
 
 function connect() {
