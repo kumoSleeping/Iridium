@@ -35,8 +35,8 @@ export const MARKDOWN: Partial<StreamdownProps> = {
   plugins: { cjk },
   controls: false,
   components: {
+    // Streamdown's own pre marks the code inside as a block (data-block): that one is ours.
     code: (p) => ("data-block" in p ? <CodeBlock {...p} /> : <defaultComponents.code {...p} />),
-    pre: ({ children }) => <>{children}</>,
   },
   lineNumbers: false,
   linkSafety: { enabled: false },

@@ -45,6 +45,13 @@ export class Messages {
   proc = -1;
   /** Bumped at each change, for a view to draw again. */
   version = 0;
+  /** The last draft the transcript has: a piece of it that comes late (the stream batches drafts,
+   *  the transcript may be read first) is not a new draft. */
+  private gone = { proc: -1, n: -1 };
+  private forget(d: Draft) {
+    if (d.proc !== this.gone.proc) this.gone = { proc: d.proc, n: -1 };
+    this.gone.n = Math.max(this.gone.n, d.n);
+  }
 
   constructor(
     readonly id: string,
@@ -80,7 +87,7 @@ export class Messages {
       const d = this.drafts[0];
       if (!d) continue;
       const head = (s: string) => s.trim().slice(0, 32);
-      if (d.whole || (b.text ?? "").trim().startsWith(head(d.text)) || d.text.trim().startsWith(head(b.text ?? ""))) this.drafts.shift();
+      if (d.whole || (b.text ?? "").trim().startsWith(head(d.text)) || d.text.trim().startsWith(head(b.text ?? ""))) this.forget(this.drafts.shift()!);
     }
     this.sent = unsent(this.sent, this.blocks);
     this.version++;
@@ -102,6 +109,7 @@ export class Messages {
   /** A draft event (docs/api.md): the same proc and n join; another n seals the one before; another
    *  proc drops them all. */
   wrote(d: DraftEvent) {
+    if (d.proc === this.gone.proc && d.n <= this.gone.n) return;
     if (d.proc !== this.proc) {
       this.drafts = [];
       this.proc = d.proc;
@@ -126,6 +134,7 @@ export class Messages {
   /** The stream opened again, or the turn ended: drafts go, the transcript has them. */
   dropDrafts() {
     if (!this.drafts.length) return;
+    this.drafts.forEach((d) => this.forget(d));
     this.drafts = [];
     this.version++;
   }

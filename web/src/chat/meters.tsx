@@ -190,6 +190,9 @@ export function useMode(s: LiveSession) {
     setWant(m);
     try {
       await api.mode(s.id, m);
+      // Not every agent switches at once (GET /api/agents modeSwitch): say when it does.
+      if (info?.modeSwitch === "next turn") toast(t("mode.nextTurn"));
+      else if (info?.modeSwitch === "restart") toast(t("mode.restart"));
     } catch (e) {
       setWant(null);
       toast(t("err.mode"), { error: true, description: errText(e) });

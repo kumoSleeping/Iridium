@@ -127,6 +127,22 @@ describe("Messages", () => {
     m.wrote({ session: "s", proc: 2, n: 1, text: "y" });
     expect(m.drafts.map((d) => d.text)).toEqual(["y"]);
   });
+  test("a piece of a draft that comes after the transcript had it starts no new draft", async () => {
+    let page: MessagePage = { blocks: [], start: 0, end: 0, more: false };
+    const m = new Messages("s", async () => page);
+    await m.newer();
+    m.wrote({ session: "s", proc: 1, n: 4, text: "Rivers carve " });
+    page = { blocks: [blk(0, "assistant", "Rivers carve valleys.")], start: 0, end: 50, more: false };
+    await m.newer();
+    expect(m.drafts).toEqual([]);
+    m.wrote({ session: "s", proc: 1, n: 4, text: "valleys." });
+    expect(m.drafts).toEqual([]);
+    m.wrote({ session: "s", proc: 1, n: 5, text: "Next" });
+    expect(m.drafts.map((d) => d.text)).toEqual(["Next"]);
+    m.dropDrafts();
+    m.wrote({ session: "s", proc: 1, n: 5, text: " late" });
+    expect(m.drafts).toEqual([]);
+  });
   test("what you sent finds its block by its input id, else its words; a failed one stays", () => {
     const sent: Sent[] = [
       { key: "1", text: "hello", files: [], from: 0, input: "u1" },

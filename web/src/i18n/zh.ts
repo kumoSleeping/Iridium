@@ -123,6 +123,8 @@ export const zh = {
   "mode.auto": "自动判断",
   "mode.dontAsk": "不问，没许可的拒绝",
   "mode.granular": "按规则询问",
+  "mode.nextTurn": "下一回合起生效",
+  "mode.restart": "agent 重启后生效",
   "mode.untrusted": "不信任的都问",
   "mode.onRequest": "需要时询问",
   "mode.never": "从不询问",

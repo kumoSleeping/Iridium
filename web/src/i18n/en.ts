@@ -123,6 +123,8 @@ export const en: Dict = {
   "mode.auto": "Auto",
   "mode.dontAsk": "Don't ask, deny the rest",
   "mode.granular": "Ask by rule",
+  "mode.nextTurn": "Takes effect from the next turn",
+  "mode.restart": "Takes effect once the agent restarts",
   "mode.untrusted": "Ask for untrusted",
   "mode.onRequest": "Ask when needed",
   "mode.never": "Never ask",

@@ -9,7 +9,7 @@ import type { Workspace } from "./api/types.gen";
 import { api, missing } from "./api/client";
 import type { Agent } from "./api/types.gen";
 import { t } from "./i18n";
-import { useHome } from "./data";
+import { useAgents, useHome } from "./data";
 import { errText, toast } from "./toast";
 import { AGENTS, agentName, cn, homeOf, IconKey, Logo, PopSurface, tilde, Tip } from "./ui";
 
@@ -144,6 +144,8 @@ export function FolderPicker({ initial, onChoose, startNew = false, busy }: { in
 
 /** Pick an agent; the folder line opens the picker for a subfolder. Picking an agent opens the chat. */
 export function NewSession({ ws, folder, onFolder, onPick, busy }: { ws: string; folder: string; onFolder: () => void; onPick: (a: Agent) => void; busy: Agent | null }) {
+  // The agents the daemon can host (GET /api/agents); all four before it says.
+  const agents = useAgents().data?.map((a) => a.agent) ?? AGENTS;
   return (
     <div className="flex w-[min(288px,calc(100vw-16px))] flex-col gap-1 p-1.5">
       <button type="button" onClick={onFolder} className="flex h-9 items-center gap-2 rounded-md px-2 text-left hover:bg-fill pointer-coarse:h-11" aria-label={t("new.folder")}>
@@ -153,7 +155,7 @@ export function NewSession({ ws, folder, onFolder, onPick, busy }: { ws: string;
         <ChevronRight size={14} className="shrink-0 text-ink-4" />
       </button>
       <div role="group" aria-label={t("new.agent")} className="g-stagger grid grid-cols-4 gap-1">
-        {AGENTS.map((a, i) => (
+        {agents.map((a, i) => (
           <Tip key={a} label={agentName(a)}>
             <button type="button" aria-label={agentName(a)} disabled={busy !== null} onClick={() => onPick(a)} style={{ "--i": i } as CSSProperties} className="g-press grid h-14 place-items-center rounded-md hover:bg-fill disabled:opacity-50">
               {busy === a ? <LoaderCircle size={20} className="animate-spin text-ink-3" /> : <Logo agent={a} size={24} />}
