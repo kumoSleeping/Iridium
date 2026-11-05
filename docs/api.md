@@ -361,5 +361,6 @@ agent 调 `ir invite`、`ir token` 时，邀请链接和 TOKEN 不能进它的�
 
 ## 部署
 
-- `iridium install [-config <文件>] [-now]`：写用户级单元 `~/.config/systemd/user/iridium.service`（`iridium serve -config ~/.config/iridium/config.json`，带装的时候的 `PATH`），没有配置就写一份默认的（`127.0.0.1:7810`），建 `~/.local/state/iridium`，`daemon-reload`。不加 `-now` 不启动。没开 linger 时提醒：退出登录后服务和托管的 agent 都会停（`sudo loginctl enable-linger <用户>`）。
-- `scripts/deploy.sh`：`web/package.json` 在就先 `npm ci && npm run build`；`go build`（版本取 `git describe`）装到 `~/.local/opt/iridium/iridium`，`~/.local/bin/ir` 链过去，再跑 `iridium install`；服务已在跑就重启它。`IRIDIUM_NO_SYSTEMCTL=1` 不碰 systemd。
+- `iridium install [-config <文件>] [-unit <名>] [-env 名=值]... [-now]`：写用户级单元 `~/.config/systemd/user/iridium.service`（`iridium serve -config ~/.config/iridium/config.json`，带装的时候的 `PATH` 和 `-env` 给的变量；`$XDG_CONFIG_HOME` 设了就写在它下面），没有配置就写一份默认的（`127.0.0.1:7810`），建 `~/.local/state/iridium`，`daemon-reload`。不加 `-now` 不启动。没开 linger 时提醒：退出登录后服务和托管的 agent 都会停（`sudo loginctl enable-linger <用户>`）。
+- `scripts/deploy.sh`：`web/package.json` 在就先 `npm ci && npm run build`（`NO_WEB=1` 用现成的），`internal/webui/dist` 里没有网页就停；`go build`（版本取 `git describe`）装到 `~/.local/opt/iridium/iridium`（`PREFIX`），`~/.local/bin/ir`（`BIN`）链过去，再跑 `iridium install`（`CONFIG`、`UNIT`、`UNIT_ENV` 照传）；服务已在跑就重启它。`IRIDIUM_NO_SYSTEMCTL=1` 不碰 systemd。TCP 地址上就是网页本身（`/api/`、`/_ir/` 之外都是网页，前面同样是门）。
+- `scripts/test-deploy.sh up|again|down [目录]`：不碰真的服务，把 `deploy.sh` 真跑一遍：临时的安装位置、状态、家目录和 Claude 目录，假 claude（`internal/testagent`），单元 `iridium-test-deploy-<n>` 写在 `$XDG_RUNTIME_DIR/systemd/user`（不进 `~/.config`），随机端口；托管进程的单元是 `iridium-test-hold-<n>-*`。`web/scripts/seed.mjs` 往里放会话，`e2e.mjs`、`shoot.mjs` 对着它跑。
