@@ -24,7 +24,8 @@ export function sourceOf(from: string | undefined, terminal: string | undefined,
   if (!from || (terminal ?? "") === me) return { kind: "you" };
   const e = terminals.find((x) => x.id === terminal) ?? terminals.find((x) => x.name.toLowerCase() === from.toLowerCase());
   if (e?.id === me) return { kind: "you" };
-  if (e?.kind === "panel") return { kind: "you", panel: { name: e.name, avatar: e.avatar } };
+  // Another panel, or 本机 (this machine: its page with no gate, a person's ir): your words too.
+  if (e?.kind === "panel" || e?.local) return { kind: "you", panel: { name: e.name, avatar: e.avatar } };
   // A plugin writes "[name·sender]": the plugin's avatar, the whole tag as the name.
   return { kind: "letter", name: from, avatar: e?.avatar, channel: true };
 }

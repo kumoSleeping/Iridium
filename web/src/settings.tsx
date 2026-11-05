@@ -151,7 +151,7 @@ export function SettingsPage({ phone, onBack, theme, setTheme }: { phone: boolea
               <button type="button" onClick={() => go({ name: "terminals" })} className="g-press -mx-2 flex min-h-12 items-center gap-3 rounded-lg px-2 text-left hover:bg-fill">
                 <MonitorSmartphone size={17} className="shrink-0 text-ink-2" />
                 <span className="min-w-0 flex-1">
-                  <span className="block text-base">{t("settings.terminals")}</span>
+                  <span className="block text-base">{t("settings.terminalsRow")}</span>
                   <span className="block truncate text-xs text-ink-3">{t("settings.terminalsHint")}</span>
                 </span>
                 {confirms.length > 0 && <span className="size-2 shrink-0 rounded-full bg-need" aria-label={t("nav.needsYou")} />}

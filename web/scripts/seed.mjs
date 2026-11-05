@@ -158,6 +158,10 @@ await until("the approval", async () => (await api("GET", `/api/sessions/${style
 await asAgent("POST", `/api/sessions/${holder}/send`, { text: "The card's details open under it; check the spacing on a phone." }, style);
 await until("the letter's reply", async () => (await api("GET", `/api/sessions/${holder}`)).status === "idle");
 
+// The holder session goes on and asks to run a command: its approval card over a long chat.
+await api("POST", `/api/sessions/${holder}/send`, { text: "Fine; run them once more. ASK" });
+await until("the holder's approval", async () => (await api("GET", `/api/sessions/${holder}`)).asks?.length > 0);
+
 // One archived by hand: under 归档, back with its next activity.
 await api("PATCH", `/api/sessions/${notes}`, { archived: true });
 

@@ -41,12 +41,14 @@ function sock(method, path, body, from) {
 
 const list = await sock("GET", "/api/sessions");
 const by = (re) => list.find((s) => re.test(s.title ?? ""))?.id ?? list[0]?.id;
-const ASK = by(/Style sample/);
-const PLAIN = by(/Holder/);
+// The holder session: a long chat waiting on an approval; the Style sample asks for a token.
+const ASK = by(/Holder/);
+const PLAIN = ASK;
+const STYLE = by(/Style sample/);
 // What agents ask a panel for, so the cards have something to show: a plugin token from the Style
 // sample's agent (an invite needs the gate on: asked for later).
 const pending = (await sock("GET", "/api/confirms")).pending;
-if (!pending.some((c) => c.kind === "token")) await sock("POST", "/api/terminals/tokens", { name: "qq-bot" }, ASK);
+if (!pending.some((c) => c.kind === "token")) await sock("POST", "/api/terminals/tokens", { name: "qq-bot" }, STYLE);
 // A plugin terminal of its own on the 终端 page, with a narrower table.
 const terms = (await sock("GET", "/api/terminals")).terminals;
 if (!terms.some((x) => x.name === "tg-bot")) await sock("POST", "/api/terminals/tokens", { name: "tg-bot" });
@@ -104,8 +106,8 @@ shots.push(
   ["desktop-terminal-rules-light-zh", desk, { theme: "light", lang: "zh" }, "#/settings/terminals", clickText("tg-bot")],
   ["desktop-terminal-owner-light-en", desk, { theme: "light", lang: "en" }, "#/settings/terminals", steps(clickText("tg-bot"), click('button[aria-label="Claude"][aria-pressed="false"]'))],
   ["phone-terminals-light-zh", phone, { theme: "light", lang: "zh" }, "#/settings/terminals"],
-  ["desktop-confirm-light-zh", desk, { theme: "light", lang: "zh" }, chat(ASK), click('[role="alertdialog"][aria-label="插件 TOKEN"] button[aria-expanded]')],
-  ["phone-confirm-dark-en", phone, { theme: "dark", lang: "en" }, chat(ASK)],
+  ["desktop-confirm-light-zh", desk, { theme: "light", lang: "zh" }, chat(STYLE), click('[role="alertdialog"][aria-label="插件 TOKEN"] button[aria-expanded]')],
+  ["phone-confirm-dark-en", phone, { theme: "dark", lang: "en" }, chat(STYLE)],
   ["desktop-token-light-en", desk, { theme: "light", lang: "en" }, "#/settings/terminals", steps(click('button[aria-label="New terminal"]'), inPop("Plugin token"), async (p) => p.keyboard.type("echo-im"), inPop("Make"))],
 );
 // With the gate on (public), as a panel that joined with a passkey.
@@ -190,7 +192,7 @@ if (!only || gated.some(([n]) => n.includes(only))) {
     const me = (await sock("GET", "/api/terminals")).terminals.filter((x) => x.kind === "panel").sort((a, b) => b.createdAt - a.createdAt)[0];
     await sock("PUT", `/api/terminals/${me.id}/rules`, { rules: { ...me.rules, agents: ["claude", ...me.rules.agents.filter((a) => a !== "claude")] }, ownerConfirmed: true });
     // An agent's ir asks for an invite: a card for the panel.
-    if (!(await sock("GET", "/api/confirms")).pending.some((c) => c.kind === "invite")) await sock("POST", "/api/terminals/invites", { name: "ipad" }, ASK);
+    if (!(await sock("GET", "/api/confirms")).pending.some((c) => c.kind === "invite")) await sock("POST", "/api/terminals/invites", { name: "ipad" }, STYLE);
     for (const s of gated) await shoot(PUBLIC, s);
   } finally {
     await sock("PUT", "/api/public", { origin: "" });

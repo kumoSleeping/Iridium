@@ -200,7 +200,7 @@ await step("settings: the idle reap and a default approval mode are saved to the
 });
 
 await step("terminals: a plugin token made (shown once), its permissions narrowed, then revoked", async () => {
-  await clickText("Terminals", "button");
+  await clickText("Panels, plugins and peers", "button");
   await page.waitForFunction(() => location.hash === "#/settings/terminals", { timeout: 5000 });
   await (await page.waitForSelector('button[aria-label="New terminal"]', { timeout: 8000 })).click();
   await clickText("Plugin token", "*[@role='dialog']//button");

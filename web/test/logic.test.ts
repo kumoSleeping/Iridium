@@ -89,10 +89,10 @@ describe("sourceOf", () => {
     expect(sourceOf("本机", "local", "local", terminals, sessions)).toEqual({ kind: "you" }); // the page with no gate
     expect(sourceOf("kumo-phone", "p", "me", terminals, sessions)).toEqual({ kind: "you", panel: { name: "kumo-phone", avatar: "/a.png" } });
   });
-  test("letters: a plugin with its sender, another session's ir, 本机's ir to a panel; Iridium's own line", () => {
+  test("letters: a plugin with its sender, another session's ir; 本机 is yours; Iridium's own line", () => {
     expect(sourceOf("QQ·张三", "q", "me", terminals, sessions)).toMatchObject({ kind: "letter", name: "QQ·张三", avatar: "/q.png", channel: true });
     expect(sourceOf("ir:s1", "local", "local", terminals, sessions)).toMatchObject({ kind: "letter", name: "holder", agent: "codex", session: "s1" });
-    expect(sourceOf("本机", "local", "me", terminals, sessions)).toMatchObject({ kind: "letter", name: "本机", channel: true });
+    expect(sourceOf("本机", "local", "me", terminals, sessions)).toEqual({ kind: "you", panel: { name: "本机", avatar: undefined } });
     expect(sourceOf("Iridium", "Iridium", "me", terminals, sessions)).toEqual({ kind: "iridium" });
   });
 });
