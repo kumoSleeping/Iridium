@@ -158,3 +158,16 @@ func (m *Manager) Refresh(ids []string) {
 		}
 	}
 }
+
+// intoCallers puts a session made for a caller (the session that ran ir new) in the caller's
+// workspace, as its launcher's (plan: 新会话进调用者的工作区). A caller in none leaves it to
+// discovery.
+func (m *Manager) intoCallers(id, caller string) {
+	over, err := m.o.Store.Overlays()
+	if err != nil || over[caller].Workspace == 0 {
+		return
+	}
+	if _, err := m.o.Store.AssignIfNew(id, over[caller].Workspace); err != nil {
+		m.o.Logf("session %s: %v", id, err)
+	}
+}

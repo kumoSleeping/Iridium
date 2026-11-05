@@ -155,6 +155,14 @@ func TestCreateInWorkspace(t *testing.T) {
 	if s, _ := r.m.State(id); s.Workspace != ws {
 		t.Errorf("workspace: %+v", s)
 	}
+	// ir new from that session: the new one goes in the caller's workspace.
+	child, err := r.m.Create(context.Background(), api.NewSession{Agent: api.AgentClaude, Cwd: t.TempDir(), Caller: id}, "本机")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s, _ := r.m.State(child); s.Workspace != ws {
+		t.Errorf("caller's workspace: %+v", s)
+	}
 	if _, err := r.m.Create(context.Background(), api.NewSession{Agent: api.AgentClaude, Cwd: r.cwd, Workspace: 999}, "网页"); err == nil {
 		t.Errorf("created in a workspace that is not there")
 	}

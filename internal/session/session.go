@@ -176,6 +176,8 @@ func (m *Manager) Create(ctx context.Context, req api.NewSession, from string) (
 		if err := m.o.Store.Move(mt.ID, req.Workspace); err != nil {
 			return mt.ID, err
 		}
+	} else if req.Caller != "" {
+		m.intoCallers(mt.ID, req.Caller)
 	}
 	if err := h.start(ctx); err != nil {
 		return mt.ID, err
@@ -192,6 +194,11 @@ func (m *Manager) Create(ctx context.Context, req api.NewSession, from string) (
 // agent if it is not running: a new turn when idle, else it joins the running one. The agent sees
 // "[from] " before it, unless it is a slash command, which must reach the agent as typed.
 func (m *Manager) Send(ctx context.Context, id, text, from string) (string, error) {
+	return m.SendImages(ctx, id, text, from, nil)
+}
+
+// SendImages is Send with images for the agent to see; the text names their files.
+func (m *Manager) SendImages(ctx context.Context, id, text, from string, images []agent.Image) (string, error) {
 	h, err := m.take(ctx, id)
 	if err != nil {
 		return "", err
@@ -221,7 +228,7 @@ func (m *Manager) Send(ctx context.Context, id, text, from string) (string, erro
 	case <-ctx.Done():
 		return "", ctx.Err()
 	}
-	return input, h.drv.Send(ctx, agent.Message{ID: input, Text: line, Human: true})
+	return input, h.drv.Send(ctx, agent.Message{ID: input, Text: line, Human: true, Images: images})
 }
 
 // Interrupt stops the running turn; the agent stays.
