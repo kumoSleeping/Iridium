@@ -19,14 +19,14 @@ func TestInstall(t *testing.T) {
 	var out bytes.Buffer
 	o := Options{
 		Exe: "/home/u/.local/opt/iridium/iridium", ConfigPath: cfgPath, UnitDir: filepath.Join(root, "config", "systemd", "user"),
-		Unit: "iridium-test-daemon", Path: "/home/u/.local/bin:/usr/bin", Linger: filepath.Join(root, "linger", "u"),
+		Unit: "iridium-test-daemon", Path: "/home/u/.local/bin:/usr/bin", Env: []string{"HOME=/tmp/a home"}, Linger: filepath.Join(root, "linger", "u"),
 		Systemctl: func(args ...string) error { calls = append(calls, args); return nil }, Out: &out,
 	}
 	if err := Install(o); err != nil {
 		t.Fatal(err)
 	}
 	unit, _ := os.ReadFile(filepath.Join(o.UnitDir, "iridium-test-daemon.service"))
-	for _, want := range []string{"ExecStart=/home/u/.local/opt/iridium/iridium serve -config " + cfgPath, "Environment=PATH=/home/u/.local/bin:/usr/bin", "Restart=on-failure", "WantedBy=default.target"} {
+	for _, want := range []string{"ExecStart=/home/u/.local/opt/iridium/iridium serve -config " + cfgPath, "Environment=PATH=/home/u/.local/bin:/usr/bin", `Environment="HOME=/tmp/a home"`, "Restart=on-failure", "WantedBy=default.target"} {
 		if !strings.Contains(string(unit), want) {
 			t.Errorf("unit has no %q:\n%s", want, unit)
 		}

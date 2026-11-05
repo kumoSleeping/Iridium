@@ -28,6 +28,9 @@ func installCmd(args []string) int {
 	path := fs.String("config", config.DefaultPath(), "the config file the service reads")
 	now := fs.Bool("now", false, "enable and start the service too")
 	reload := fs.Bool("reload", true, "run systemctl --user daemon-reload")
+	unit := fs.String("unit", "iridium", "the unit's name (tests: iridium-test-*)")
+	var env envFlag
+	fs.Var(&env, "env", "NAME=VALUE the service runs with too (repeatable)")
 	fs.Parse(args)
 	exe, err := os.Executable()
 	if err == nil {
@@ -43,7 +46,7 @@ func installCmd(args []string) int {
 	if d := os.Getenv("XDG_CONFIG_HOME"); d != "" {
 		unitDir = filepath.Join(d, "systemd", "user")
 	}
-	o := install.Options{Exe: exe, ConfigPath: cfgPath, UnitDir: unitDir, Path: os.Getenv("PATH"), Now: *now, Out: os.Stdout}
+	o := install.Options{Exe: exe, ConfigPath: cfgPath, UnitDir: unitDir, Unit: *unit, Path: os.Getenv("PATH"), Env: env, Now: *now, Out: os.Stdout}
 	if *reload || *now {
 		o.Systemctl = func(args ...string) error {
 			cmd := exec.Command("systemctl", append([]string{"--user"}, args...)...)
@@ -57,6 +60,12 @@ func installCmd(args []string) int {
 	}
 	return 0
 }
+
+// envFlag is -env NAME=VALUE, once for each.
+type envFlag []string
+
+func (e *envFlag) String() string     { return strings.Join(*e, " ") }
+func (e *envFlag) Set(v string) error { *e = append(*e, v); return nil }
 
 // newUpdater looks for new versions where the config says, carrying its state on h.
 func newUpdater(cfg config.Config, h *hub.Hub) *update.Updater {

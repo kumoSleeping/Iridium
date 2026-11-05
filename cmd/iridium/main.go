@@ -32,7 +32,8 @@ const usage = `usage:
   iridium serve [-config <file>]   the daemon
   iridium hold <dir>               the holder of one agent process (the daemon starts it)
   iridium ir ...                   the CLI, as when run as ir
-  iridium install [-config <file>] [-now]   the user unit iridium.service (started only with -now)
+  iridium install [-config <file>] [-unit <name>] [-env NAME=VALUE]... [-now]
+                                   the user unit iridium.service (started only with -now)
   iridium version
 `
 
