@@ -28,6 +28,12 @@ type Config struct {
 	// CrashResume and QuotaResume run a turn again after the agent crashed or its quota came back.
 	CrashResume bool `json:"crashResume"`
 	QuotaResume bool `json:"quotaResume"`
+	// Modes are the approval mode a new session of each agent starts in; none: the agent's own.
+	Modes map[string]string `json:"modes,omitempty"`
+	// Push is Web Push's total switch, off by default.
+	Push bool `json:"push"`
+	// ChatDir is where a plugin's chat opens a session before it set one with /new; "" is home.
+	ChatDir string `json:"chatDir,omitempty"`
 	// Path is the PATH agents run with; "" is the daemon's own.
 	Path string `json:"path,omitempty"`
 	// Programs are the agents' programs, absolute or looked up on Path.
@@ -36,10 +42,19 @@ type Config struct {
 	ClaudeHome string `json:"claudeHome,omitempty"`
 	// UnitPrefix names the holders' systemd units; "" is iridium-hold-. Tests use iridium-test-.
 	UnitPrefix string `json:"unitPrefix,omitempty"`
+	// FolderRoots are where the folder picker may go; none is the user's home.
+	FolderRoots []string `json:"folderRoots,omitempty"`
+	// Uploads: how long uploaded files are kept ("0": always) and the largest one, in bytes.
+	Uploads Uploads `json:"uploads"`
 	// Public is the way in from outside (docs/gate.md): set, every web request needs a passkey.
 	Public Public `json:"public,omitzero"`
 	// Update is where new versions are looked for.
 	Update Update `json:"update,omitzero"`
+}
+
+type Uploads struct {
+	Keep    Duration `json:"keep"`
+	MaxFile int64    `json:"maxFile"`
 }
 
 type Public struct {
@@ -62,6 +77,7 @@ func Default() Config {
 		CrashResume: true,
 		QuotaResume: true,
 		Programs:    map[string]string{"claude": "claude", "codex": "codex", "pi": "pi", "dsh": "dsh"},
+		Uploads:     Uploads{Keep: Duration(30 * 24 * time.Hour), MaxFile: 2 << 30},
 	}
 }
 

@@ -3,6 +3,7 @@ module github.com/kumoSleeping/iridium
 go 1.27.3
 
 require (
+	github.com/fsnotify/fsnotify v1.10.1
 	github.com/go-webauthn/webauthn v0.18.2
 	golang.org/x/image v0.47.0
 	golang.org/x/sys v0.49.0

@@ -19,10 +19,16 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/kumoSleeping/iridium/internal/access"
+	"github.com/kumoSleeping/iridium/internal/agents"
 	"github.com/kumoSleeping/iridium/internal/api"
+	"github.com/kumoSleeping/iridium/internal/chat"
 	"github.com/kumoSleeping/iridium/internal/config"
+	"github.com/kumoSleeping/iridium/internal/discover"
+	"github.com/kumoSleeping/iridium/internal/files"
 	"github.com/kumoSleeping/iridium/internal/gate"
 	"github.com/kumoSleeping/iridium/internal/hub"
+	"github.com/kumoSleeping/iridium/internal/push"
 	"github.com/kumoSleeping/iridium/internal/session"
 	"github.com/kumoSleeping/iridium/internal/store"
 	"github.com/kumoSleeping/iridium/internal/transcript"
@@ -48,6 +54,16 @@ type Server struct {
 	g       atomic.Pointer[gate.Gate]
 	initErr error // the gate for cfg.Public.Origin would not open; Listen gives it
 	asks    *confirms
+
+	// Set before Handler, if at all: the plugin chat layer, Web Push, and who a request is from.
+	Chat *chat.Service
+	Push *push.Service
+	Who  Identities
+	// Discover and Folders, if set, serve the workspaces and the folder picker (routes_discover.go).
+	Discover *discover.Index
+	Folders  discover.Folders
+
+	files *files.Service // routes_files.go
 }
 
 // New is the API over m. The interactive terminals live in m's store, behind the Passkey gate
@@ -56,7 +72,7 @@ func New(cfg config.Config, m *session.Manager, h *hub.Hub, logf func(string, ..
 	if logf == nil {
 		logf = log.Printf
 	}
-	s := &Server{cfg: cfg, m: m, hub: h, st: m.Store(), logf: logf}
+	s := &Server{cfg: cfg, m: m, hub: h, st: m.Store(), files: newFiles(cfg, m, logf), logf: logf}
 	s.asks = newConfirms(h)
 	g, err := s.newGate(cfg.Public.Origin)
 	if err != nil {
@@ -77,6 +93,9 @@ func (s *Server) Handler(local bool) http.Handler {
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
 		reply(w, http.StatusOK, map[string]any{"ok": true})
 	})
+	mux.HandleFunc("GET /api/agents", func(w http.ResponseWriter, r *http.Request) {
+		reply(w, http.StatusOK, agents.Describe())
+	})
 	mux.HandleFunc("GET /api/sessions", s.list)
 	mux.HandleFunc("POST /api/sessions", s.create)
 	mux.HandleFunc("GET /api/sessions/{id}", s.see(s.get))
@@ -89,6 +108,11 @@ func (s *Server) Handler(local bool) http.Handler {
 	mux.HandleFunc("GET /api/events", s.events)
 	s.terminalRoutes(mux)
 	s.updateRoutes(mux)
+	s.sessionRoutes(mux)
+	s.pushRoutes(mux)
+	s.pluginRoutes(mux)
+	s.discoverRoutes(mux)
+	s.fileRoutes(mux, local)
 	if local {
 		return s.socketHandler(mux)
 	}
@@ -135,6 +159,7 @@ func (s *Server) Serve(ctx context.Context, tcp, unix net.Listener) error {
 		{Handler: s.Handler(false), ReadHeaderTimeout: 10 * time.Second, BaseContext: base},
 		{Handler: s.Handler(true), ReadHeaderTimeout: 10 * time.Second, BaseContext: base},
 	}
+	go s.files.Janitor(ctx)
 	errs := make(chan error, 2)
 	for i, l := range []net.Listener{tcp, unix} {
 		go func() { errs <- servers[i].Serve(l) }()
@@ -169,7 +194,8 @@ func (s *Server) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c := callerOf(r)
-	if !s.mayCreate(w, c, &req) {
+	if err := s.checkCreate(c, &req); err != nil {
+		s.error(w, err)
 		return
 	}
 	id, err := s.m.Create(r.Context(), req, c.EndpointID)
@@ -216,6 +242,7 @@ func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 		s.error(w, err)
 		return
 	}
+	s.files.Annotate(r.PathValue("id"), &p)
 	reply(w, http.StatusOK, p)
 }
 
@@ -234,15 +261,21 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c := callerOf(r)
-	if !s.maySend(w, c, r.PathValue("id"), req.Text) {
+	if err := s.checkSend(c, r.PathValue("id"), req.Text, len(req.Attachments) > 0); err != nil {
+		s.error(w, err)
 		return
 	}
-	input, err := s.m.Send(r.Context(), r.PathValue("id"), req.Text, c.EndpointID)
+	text, images, err := s.files.Message(r.PathValue("id"), req.Text, req.Attachments)
+	if err != nil {
+		s.fileError(w, err)
+		return
+	}
+	input, queued, err := s.m.SendWith(r.Context(), r.PathValue("id"), text, c.EndpointID, req.Steer, images...)
 	if err != nil {
 		s.error(w, err)
 		return
 	}
-	reply(w, http.StatusOK, api.SendReply{Input: input})
+	reply(w, http.StatusOK, api.SendReply{Input: input, Queued: queued})
 }
 
 func (s *Server) interrupt(w http.ResponseWriter, r *http.Request) {
@@ -263,12 +296,16 @@ func (s *Server) answer(w http.ResponseWriter, r *http.Request) {
 	s.done(w, s.m.Answer(r.Context(), r.PathValue("id"), a))
 }
 
-var stateKey = regexp.MustCompile(`^(list|quota|confirms|update|(session|context):[0-9a-fA-F-]{1,64})$`)
+var stateKey = regexp.MustCompile(`^(list|quota|workspaces|confirms|update|(session|context):[0-9a-zA-Z_-]{1,128})$`)
 
 // events is the page's one event stream: ?sub=<key> for each state it wants (list, quota,
 // session:<id>, context:<id>, confirms, update). See package hub.
 func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	keys := r.URL.Query()["sub"]
+	if len(keys) == 0 && s.Chat != nil {
+		s.pluginEvents(w, r) // a plugin's stream (routes_plugin.go)
+		return
+	}
 	if len(keys) == 0 || len(keys) > 16 {
 		fail(w, http.StatusBadRequest, "name 1 to 16 states with sub=")
 		return
@@ -313,10 +350,14 @@ func (s *Server) error(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, session.ErrNotFound), errors.Is(err, transcript.ErrNoBlock):
 		fail(w, http.StatusNotFound, err.Error())
-	case errors.Is(err, session.ErrNotLive):
+	case errors.Is(err, session.ErrNotLive), errors.Is(err, session.ErrElsewhere):
 		fail(w, http.StatusConflict, err.Error())
 	case errors.Is(err, context.DeadlineExceeded):
 		fail(w, http.StatusGatewayTimeout, "the agent did not answer in time")
+	case errors.Is(err, access.ErrCap):
+		fail(w, http.StatusTooManyRequests, err.Error())
+	case access.IsDenied(err):
+		fail(w, http.StatusForbidden, err.Error())
 	default:
 		s.logf("server: %v", err)
 		fail(w, http.StatusInternalServerError, err.Error())

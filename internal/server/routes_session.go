@@ -1,0 +1,107 @@
+package server
+
+import (
+	"context"
+	"net/http"
+	"time"
+
+	"github.com/kumoSleeping/iridium/internal/api"
+)
+
+// sessionRoutes: a session's model, mode, effort, its queue and its "always allow" rules
+// (docs/api.md "会话设置", "待发队列").
+func (s *Server) sessionRoutes(mux *http.ServeMux) {
+	// The permission table (access.go): what a terminal may see and use.
+	mux.HandleFunc("PUT /api/sessions/{id}/model", s.use(s.setModel))
+	mux.HandleFunc("PUT /api/sessions/{id}/mode", s.use(s.setMode))
+	mux.HandleFunc("PUT /api/sessions/{id}/effort", s.use(s.setEffort))
+	mux.HandleFunc("POST /api/sessions/{id}/continue", s.use(s.continueQueue))
+	mux.HandleFunc("POST /api/sessions/{id}/queue/{input}/steer", s.use(s.steer))
+	mux.HandleFunc("PUT /api/sessions/{id}/queue/{input}", s.use(s.editQueued))
+	mux.HandleFunc("DELETE /api/sessions/{id}/queue/{input}", s.use(s.deleteQueued))
+	mux.HandleFunc("GET /api/sessions/{id}/rules", s.see(s.rules))
+	mux.HandleFunc("DELETE /api/sessions/{id}/rules", s.use(s.clearRules))
+}
+
+func (s *Server) settle(w http.ResponseWriter, err error) {
+	if err != nil {
+		s.fault(w, err)
+		return
+	}
+	reply(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func agentCtx(r *http.Request) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(r.Context(), 30*time.Second)
+}
+
+func (s *Server) setModel(w http.ResponseWriter, r *http.Request) {
+	var req api.SetModel
+	if !readJSON(w, r, &req) {
+		return
+	}
+	ctx, cancel := agentCtx(r)
+	defer cancel()
+	s.settle(w, s.m.SetModel(ctx, r.PathValue("id"), req.Model))
+}
+
+func (s *Server) setMode(w http.ResponseWriter, r *http.Request) {
+	var req api.SetMode
+	if !readJSON(w, r, &req) {
+		return
+	}
+	if err := s.checkMode(callerOf(r), req.Mode); err != nil {
+		s.error(w, err)
+		return
+	}
+	ctx, cancel := agentCtx(r)
+	defer cancel()
+	s.settle(w, s.m.SetMode(ctx, r.PathValue("id"), req.Mode))
+}
+
+func (s *Server) setEffort(w http.ResponseWriter, r *http.Request) {
+	var req api.SetEffort
+	if !readJSON(w, r, &req) {
+		return
+	}
+	ctx, cancel := agentCtx(r)
+	defer cancel()
+	s.settle(w, s.m.SetEffort(ctx, r.PathValue("id"), req.Effort))
+}
+
+func (s *Server) continueQueue(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := agentCtx(r)
+	defer cancel()
+	s.settle(w, s.m.Continue(ctx, r.PathValue("id")))
+}
+
+func (s *Server) steer(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := agentCtx(r)
+	defer cancel()
+	s.settle(w, s.m.Steer(ctx, r.PathValue("id"), r.PathValue("input")))
+}
+
+func (s *Server) editQueued(w http.ResponseWriter, r *http.Request) {
+	var req api.EditQueued
+	if !readJSON(w, r, &req) {
+		return
+	}
+	s.settle(w, s.m.EditQueued(r.PathValue("id"), r.PathValue("input"), req.Text))
+}
+
+func (s *Server) deleteQueued(w http.ResponseWriter, r *http.Request) {
+	s.settle(w, s.m.DeleteQueued(r.PathValue("id"), r.PathValue("input")))
+}
+
+func (s *Server) rules(w http.ResponseWriter, r *http.Request) {
+	l, err := s.m.Rules(r.PathValue("id"))
+	if err != nil {
+		s.fault(w, err)
+		return
+	}
+	reply(w, http.StatusOK, l)
+}
+
+func (s *Server) clearRules(w http.ResponseWriter, r *http.Request) {
+	s.settle(w, s.m.ClearRules(r.PathValue("id")))
+}

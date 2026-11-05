@@ -124,7 +124,7 @@ func (s *Server) setRules(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	b, _ := json.Marshal(next)
-	if err := s.st.SetRules(id, b); err != nil {
+	if err := s.st.SetTerminalRules(id, b); err != nil {
 		s.error(w, err)
 		return
 	}

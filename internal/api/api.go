@@ -15,6 +15,20 @@ const (
 	AgentDsh    Agent = "dsh"
 )
 
+// AgentInfo is what an agent Iridium hosts can do (GET /api/agents).
+type AgentInfo struct {
+	Agent Agent  `json:"agent"`
+	Name  string `json:"name"`
+	// Modes: its approval modes, in the order the mode key cycles them; DefaultMode is an empty
+	// mode's. ModeSwitch: when a switch takes effect: now | next turn | restart.
+	Modes       []string `json:"modes"`
+	DefaultMode string   `json:"defaultMode"`
+	ModeSwitch  string   `json:"modeSwitch"`
+	// ContextBreakdown: its context comes in categories. Quota: it reports quota windows.
+	ContextBreakdown bool `json:"contextBreakdown"`
+	Quota            bool `json:"quota"`
+}
+
 // Status is a session's lamp (plan "风格"). idle shows none.
 type Status string
 
@@ -38,11 +52,13 @@ type Session struct {
 	Title  string `json:"title,omitempty"`
 	Status Status `json:"status"`
 	// Hosted: Iridium runs (or ran) it through a holder. Live: an agent process runs now.
-	Hosted    bool      `json:"hosted"`
-	Live      bool      `json:"live"`
-	Pinned    bool      `json:"pinned,omitempty"`
-	Archived  bool      `json:"archived,omitempty"`
-	Workspace int64     `json:"workspace,omitempty"` // 0: none
+	Hosted    bool  `json:"hosted"`
+	Live      bool  `json:"live"`
+	Pinned    bool  `json:"pinned,omitempty"`
+	Archived  bool  `json:"archived,omitempty"`
+	Workspace int64 `json:"workspace,omitempty"` // 0: none
+	// Launcher: the session that started this one, if discovery saw it.
+	Launcher  string    `json:"launcher,omitempty"`
 	Last      *LastSaid `json:"last,omitempty"`
 	UpdatedAt int64     `json:"updatedAt"` // ms since the epoch
 }
@@ -67,6 +83,19 @@ type SessionState struct {
 	// Proc: the agent process's number, up by one at each start; drafts of another are stale.
 	Proc  int    `json:"proc"`
 	Error string `json:"error,omitempty"` // why its last process ended badly
+	// Effort: the thinking effort set for it; Models, Modes, Efforts: what the agent offers.
+	Effort  string   `json:"effort,omitempty"`
+	Models  []Model  `json:"models,omitempty"`
+	Modes   []string `json:"modes,omitempty"`
+	Efforts []string `json:"efforts,omitempty"`
+	// Queue: messages waiting for the turn to end, oldest first (docs/api.md "待发队列").
+	Queue []Queued `json:"queue"`
+	// Context: how full its context window was when last read; context:<id> has the parts.
+	Context *ContextSummary `json:"context,omitempty"`
+	// QuotaUntil: the agent's quota ran out; Iridium goes on at this time (ms).
+	QuotaUntil int64 `json:"quotaUntil,omitempty"`
+	// Tail: the newest blocks, when they are few and small; else the page fetches after its end.
+	Tail *BlockTail `json:"tail,omitempty"`
 }
 
 // Ask is a question, a plan to confirm or a tool to approve, open until answered or withdrawn.
@@ -77,6 +106,11 @@ type Ask struct {
 	Input       any    `json:"input" tstype:"unknown"`
 	ToolUseID   string `json:"toolUseId,omitempty"`
 	Description string `json:"description,omitempty"`
+	// Pattern: what "always allow for this session" allows (Claude: its own rule suggestion,
+	// such as "git status *"); empty: every call of Tool.
+	Pattern string `json:"pattern,omitempty"`
+	// Card: the ask as the confirmation panel and plugins show it.
+	Card *Card `json:"card,omitempty"`
 }
 
 // Task is a background task of the agent's. While one runs the session is not reaped.
@@ -106,10 +140,15 @@ type Quota struct {
 	Agents []AgentQuota `json:"agents"`
 }
 
+// AgentQuota is one agent and account's windows. Live: a process of that agent and account runs,
+// so they are kept fresh; else they are the last read, and At says how old.
 type AgentQuota struct {
 	Agent   Agent         `json:"agent"`
+	Account string        `json:"account,omitempty"` // the login the agent reports (Claude: e-mail)
+	Plan    string        `json:"plan,omitempty"`    // Claude: subscriptionType
 	Windows []QuotaWindow `json:"windows"`
 	At      int64         `json:"at"` // when they were read
+	Live    bool          `json:"live"`
 }
 
 type QuotaWindow struct {
@@ -144,6 +183,8 @@ type Block struct {
 	Error  bool    `json:"error,omitempty"` // result
 	// system: what happened.
 	Event SystemEvent `json:"event,omitempty"`
+	// Files the block names that exist: user and assistant text, a Write call's file.
+	Files []FileRef `json:"files,omitempty"`
 }
 
 type BlockKind string
@@ -165,7 +206,12 @@ const (
 	SystemEventLocalCommand SystemEvent = "local_command"
 	SystemEventInterrupted  SystemEvent = "interrupted" // you stopped the turn
 	SystemEventUnreadable   SystemEvent = "unreadable"  // a line that is not a JSON object
+	SystemEventIridium      SystemEvent = "iridium"     // Iridium's own line, such as a recovery prompt
 )
+
+// SourceIridium is the source of what Iridium itself writes to an agent (recovery prompts,
+// "继续"): the page shows those as a faint line of its own, not as your words.
+const SourceIridium = "Iridium"
 
 // Result is a tool call's result.
 type Result struct {
@@ -193,24 +239,37 @@ type FullText struct {
 
 // NewSession starts a hosted session. Cwd must exist; Text, if any, is its first message.
 type NewSession struct {
-	Agent Agent  `json:"agent"`
-	Cwd   string `json:"cwd"`
-	Text  string `json:"text,omitempty"`
-	Model string `json:"model,omitempty"`
-	Mode  string `json:"mode,omitempty"`
+	Agent  Agent  `json:"agent"`
+	Cwd    string `json:"cwd"`
+	Text   string `json:"text,omitempty"`
+	Model  string `json:"model,omitempty"`
+	Mode   string `json:"mode,omitempty"`
+	Effort string `json:"effort,omitempty"`
+	// Workspace: the workspace it goes in (0: the caller's, else as discovery classifies it).
+	Workspace int64 `json:"workspace,omitempty"`
+	// Caller is the session that ran ir new (from IRIDIUM_SESSION, CLAUDE_CODE_SESSION_ID,
+	// CODEX_THREAD_ID…): the new session goes into its workspace.
+	Caller string `json:"caller,omitempty"`
 }
 
 type NewSessionReply struct {
 	ID string `json:"id"`
 }
 
-// Send gives the session a message: a new turn when idle, else it joins the running one.
+// Send gives the session a message: a new turn when idle; while a turn runs it waits in the
+// queue for the turn to end, unless Steer, which joins the running turn.
 type Send struct {
-	Text string `json:"text"`
+	Text  string `json:"text"`
+	Steer bool   `json:"steer,omitempty"`
+	// Attachments are file refs of the session (uploads, attached paths): their paths are written
+	// into the message, and images go to the agent as images too.
+	Attachments []string `json:"attachments,omitempty"`
+	Caller      string   `json:"caller,omitempty"` // as NewSession's
 }
 
 type SendReply struct {
-	Input string `json:"input"` // the message's id (Claude: its uuid)
+	Input  string `json:"input"`            // the message's id (Claude: its uuid)
+	Queued bool   `json:"queued,omitempty"` // it waits in the queue
 }
 
 // Answer answers an ask. permission: Allow (and Message if not); question: Answers, by question
@@ -221,6 +280,8 @@ type Answer struct {
 	Allow     bool              `json:"allow,omitempty"`
 	Message   string            `json:"message,omitempty"`
 	Answers   map[string]string `json:"answers,omitempty"`
+	// Always: allow, and from now on allow the ask's Pattern of its tool in this session.
+	Always bool `json:"always,omitempty"`
 }
 
 // Error is every failed request's body.

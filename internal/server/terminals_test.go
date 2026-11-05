@@ -29,9 +29,15 @@ type live struct {
 	sock *http.Client
 }
 
-func start(t *testing.T) *live {
+func start(t *testing.T) *live { return startWith(t, nil) }
+
+// startWith is start, with ready run on the server before it serves.
+func startWith(t *testing.T, ready func(*Server, config.Config, string)) *live {
 	t.Helper()
 	s, cfg, work := setup(t)
+	if ready != nil {
+		ready(s, cfg, work)
+	}
 	tcp, unix, err := s.Listen()
 	if err != nil {
 		t.Fatal(err)
@@ -64,6 +70,11 @@ func (l *live) do(as, method, path string, body any, out any) int {
 	case as == "agent":
 		req.Header.Set(HeaderAgent, "1")
 		req.Header.Set(HeaderSession, "caller-session")
+	case strings.HasPrefix(as, "agent-in:"): // an agent's ir in that session
+		c, url = l.sock, "http://ir"+path
+		req, _ = http.NewRequest(method, url, r)
+		req.Header.Set(HeaderAgent, "1")
+		req.Header.Set(HeaderSession, strings.TrimPrefix(as, "agent-in:"))
 	case strings.HasPrefix(as, "ir_"):
 		req.Header.Set("Authorization", "Bearer "+as)
 	}
@@ -197,7 +208,7 @@ func TestPermissions(t *testing.T) {
 	l.want(200, bot, "POST", "/api/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "hello"}, &its)
 	l.waitReply(bot, its.ID, "ok: hello")
 	meta, _ := os.ReadFile(filepath.Join(l.cfg.StatePath(), "hold", its.ID, "session.json"))
-	if !strings.Contains(string(meta), `"mode":"default"`) {
+	if !strings.Contains(string(meta), `"mode":"manual"`) {
 		t.Errorf("a must-approve terminal's session: %s", meta)
 	}
 	l.want(200, bot, "GET", "/api/sessions", nil, &list)
@@ -254,7 +265,7 @@ func TestPermissions(t *testing.T) {
 	l.want(409, "socket", "DELETE", "/api/terminals/local", nil, nil)
 	l.want(200, "socket", "DELETE", "/api/terminals/bot", nil, nil)
 	l.want(401, bot, "GET", "/api/me", nil, nil)
-	if _, ok, _ := st.Rules(botID); ok {
+	if _, ok, _ := st.TerminalRules(botID); ok {
 		t.Error("the revoked terminal's rules stayed")
 	}
 }

@@ -1,0 +1,5 @@
+{"type":"api-request-blob","cwd":"/elsewhere","blob":"skipped"}
+{"parentUuid":null,"isSidechain":false,"type":"attachment","attachment":{"type":"hook_success"},"uuid":"00000000-0000-4000-8000-000000000a01","timestamp":"2026-01-01T00:00:00.100Z","cwd":"/w/a","sessionId":"11111111-1111-4111-8111-111111111111"}
+{"parentUuid":"00000000-0000-4000-8000-000000000a01","isSidechain":false,"type":"user","message":{"role":"user","content":"Fix the   build\nin a"},"uuid":"00000000-0000-4000-8000-000000000a02","timestamp":"2026-01-01T00:00:01.000Z","cwd":"/w/a","sessionId":"11111111-1111-4111-8111-111111111111"}
+{"parentUuid":"00000000-0000-4000-8000-000000000a02","isSidechain":false,"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"## Done\n**Fixed** it in `main.go`, see [the log](/tmp/log)."}]},"uuid":"00000000-0000-4000-8000-000000000a03","timestamp":"2026-01-01T00:00:02.000Z","cwd":"/w/a","sessionId":"11111111-1111-4111-8111-111111111111"}
+{"type":"system","subtype":"turn_duration","timestamp":"2026-01-01T00:00:03.000Z","cwd":"/w/a"}

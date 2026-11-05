@@ -58,10 +58,10 @@ func TestGateStore(t *testing.T) {
 	}
 
 	// An update, a deletion with its rules, all in one change; then from a new connection.
-	must(t, s.SetRules(bot.ID, []byte(`{"agents":["pi"]}`)))
+	must(t, s.SetTerminalRules(bot.ID, []byte(`{"agents":["pi"]}`)))
 	bot.Name, bot.TokenHash = "bot2", "def"
 	must(t, g.Apply(gate.Change{DeleteEndpoints: []string{bot.ID}, DeleteInvites: []string{inv.ID}, DeleteSessions: []string{"s1"}, Endpoints: []gate.Endpoint{other}}))
-	if _, ok, _ := s.Rules(bot.ID); ok {
+	if _, ok, _ := s.TerminalRules(bot.ID); ok {
 		t.Error("rules outlived their terminal")
 	}
 	// Two channels without a token are fine; two with the same are not.
@@ -86,12 +86,12 @@ func TestGateStore(t *testing.T) {
 
 func TestRulesOpenersTokens(t *testing.T) {
 	s, _ := open(t)
-	if _, ok, err := s.Rules("x"); ok || err != nil {
+	if _, ok, err := s.TerminalRules("x"); ok || err != nil {
 		t.Fatalf("no rules: %v %v", ok, err)
 	}
-	must(t, s.SetRules("x", []byte(`{"a":1}`)))
-	must(t, s.SetRules("x", []byte(`{"a":2}`)))
-	if r, ok, err := s.Rules("x"); !ok || err != nil || string(r) != `{"a":2}` {
+	must(t, s.SetTerminalRules("x", []byte(`{"a":1}`)))
+	must(t, s.SetTerminalRules("x", []byte(`{"a":2}`)))
+	if r, ok, err := s.TerminalRules("x"); !ok || err != nil || string(r) != `{"a":2}` {
 		t.Fatalf("rules %s %v %v", r, ok, err)
 	}
 	must(t, s.SetOpener("s1", "x"))

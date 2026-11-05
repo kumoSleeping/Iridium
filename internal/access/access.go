@@ -11,16 +11,30 @@ import (
 	"github.com/kumoSleeping/iridium/internal/api"
 )
 
-// Errors the checks give; the server answers 403 (429 for the cap).
+// Denied is what the permission table refuses; the server answers 403 (429 for ErrCap).
+type Denied struct{ Reason string }
+
+func (d *Denied) Error() string { return d.Reason }
+
+// IsDenied reports whether err is (or wraps) a Denied.
+func IsDenied(err error) bool {
+	var d *Denied
+	return errors.As(err, &d)
+}
+
+// Errors the checks give.
 var (
-	ErrAgent       = errors.New("this terminal may not use that agent")
-	ErrDir         = errors.New("this terminal may not use that directory")
-	ErrCommand     = errors.New("this terminal may not send that command")
-	ErrMustApprove = errors.New("this terminal must run with approvals")
-	ErrAnswer      = errors.New("this terminal may not answer questions or approvals")
-	ErrCap         = errors.New("this terminal used its tokens for today")
-	ErrOwner       = errors.New("claude is only for the owner's own terminals: confirm it is yours")
-	ErrWiden       = errors.New("only a web panel may widen a terminal's permissions")
+	ErrAgent       = &Denied{"this terminal may not use that agent"}
+	ErrDir         = &Denied{"this terminal may not use that directory"}
+	ErrCommand     = &Denied{"this terminal may not send that command"}
+	ErrMustApprove = &Denied{"this terminal must run with approvals"}
+	ErrAnswer      = &Denied{"this terminal may not answer questions or approvals"}
+	ErrFilesIn     = &Denied{"this terminal may not copy files in"}
+	ErrFilesOut    = &Denied{"this terminal may not copy files out"}
+	ErrCap         = &Denied{"this terminal used its tokens for today"}
+	ErrOwner       = &Denied{"claude is only for the owner's own terminals: confirm it is yours"}
+	ErrWiden       = &Denied{"only a web panel may widen a terminal's permissions"}
+	ErrManage      = &Denied{"only a web panel or 本机 manages this"}
 	ErrLocal       = errors.New("本机's permissions are all of them and do not change")
 )
 
@@ -219,8 +233,9 @@ func Command(r api.Rules, text string) error {
 }
 
 // skipping are the approval modes that let tools run without asking anyone: Claude's
-// bypassPermissions, acceptEdits and auto, Codex's never, dsh's danger-full-access.
-var skipping = []string{"bypassPermissions", "acceptEdits", "auto", "never", "danger-full-access"}
+// bypassPermissions, acceptEdits and auto, Codex's never and on-request (the model decides,
+// in a full-access sandbox), pi's auto, dsh's danger-full-access.
+var skipping = []string{"bypassPermissions", "acceptEdits", "auto", "never", "on-request", "danger-full-access"}
 
 // SkipsApproval reports whether mode lets tools run unasked.
 func SkipsApproval(mode string) bool { return slices.Contains(skipping, mode) }
@@ -230,7 +245,11 @@ func SkipsApproval(mode string) bool { return slices.Contains(skipping, mode) }
 func ApprovingMode(a api.Agent) string {
 	switch a {
 	case api.AgentClaude, "":
-		return "default"
+		return "manual"
+	case api.AgentCodex:
+		return "untrusted"
+	case api.AgentPi:
+		return "ask"
 	}
 	return ""
 }

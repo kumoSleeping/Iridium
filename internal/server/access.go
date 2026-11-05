@@ -1,24 +1,29 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/kumoSleeping/iridium/internal/access"
 	"github.com/kumoSleeping/iridium/internal/api"
+	"github.com/kumoSleeping/iridium/internal/chat"
 	"github.com/kumoSleeping/iridium/internal/gate"
 	"github.com/kumoSleeping/iridium/internal/session"
 )
 
 // Headers the local ir sends over the unix socket. HeaderAgent: an agent ran it (its environment
 // says so, or it has no terminal), so no secret may go back: what needs one becomes a
-// confirmation a panel answers. HeaderSession: the IRIDIUM_SESSION it ran in.
+// confirmation a panel answers. HeaderSession: the session it ran in (IRIDIUM_SESSION, or the
+// agent's own session variable).
 const (
 	HeaderAgent   = "X-Iridium-Agent"
 	HeaderSession = "X-Iridium-Session"
@@ -48,10 +53,20 @@ func callerOf(r *http.Request) caller {
 
 var localIdentity = gate.Identity{EndpointID: gate.LocalEndpointID, Name: gate.LocalName, Kind: gate.KindChannel, Local: true}
 
-// socketHandler serves the local ir: 本机, past the gate.
+// socketHandler serves the local ir, past the gate: 本机, or, when an agent's ir names the session
+// it runs in and another terminal opened that session, that terminal. What an agent does through
+// ir is its session's terminal's doing: its permissions, its usage.
 func (s *Server) socketHandler(mux http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c := caller{Identity: localIdentity, socket: true, agent: r.Header.Get(HeaderAgent) != "", session: r.Header.Get(HeaderSession)}
+		if c.session != "" {
+			if id := s.st.Opener(c.session); id != "" && id != gate.LocalEndpointID {
+				if info, ok := s.gate().Endpoint(id); ok {
+					c.Identity = gate.Identity{EndpointID: info.ID, Name: info.Name, Kind: info.Kind}
+					c.agent = true
+				}
+			}
+		}
 		ctx := context.WithValue(gate.NewContext(r.Context(), c.Identity), callerKey{}, c)
 		mux.ServeHTTP(w, r.WithContext(ctx))
 	})
@@ -80,15 +95,8 @@ func (s *Server) newGate(origin string) (*gate.Gate, error) {
 type logWriter struct{ logf func(string, ...any) }
 
 func (l logWriter) Write(b []byte) (int, error) {
-	l.logf("%s", string(trimNL(b)))
+	l.logf("%s", strings.TrimRight(string(b), "\n"))
 	return len(b), nil
-}
-
-func trimNL(b []byte) []byte {
-	for len(b) > 0 && b[len(b)-1] == '\n' {
-		b = b[:len(b)-1]
-	}
-	return b
 }
 
 // Tag is the name terminal goes by in source tags: its name now.
@@ -99,14 +107,14 @@ func (s *Server) Tag(terminal string) string {
 	return ""
 }
 
-// rules is the caller's permission table.
-func (s *Server) rules(c caller) api.Rules { return s.rulesOf(c.EndpointID, c.Kind, c.Local) }
+// rulesFor is the caller's permission table.
+func (s *Server) rulesFor(c caller) api.Rules { return s.rulesOf(c.EndpointID, c.Kind, c.Local) }
 
 func (s *Server) rulesOf(id, kind string, local bool) api.Rules {
 	if local || id == gate.LocalEndpointID {
 		return access.Full()
 	}
-	if b, ok, err := s.st.Rules(id); ok && err == nil {
+	if b, ok, err := s.st.TerminalRules(id); ok && err == nil {
 		var r api.Rules
 		if json.Unmarshal(b, &r) == nil {
 			return access.Clean(r)
@@ -126,13 +134,11 @@ func (s *Server) usedToday(id string) int64 {
 	return n
 }
 
-// underCap checks the daily cap; it has answered when false.
-func (s *Server) underCap(w http.ResponseWriter, c caller, r api.Rules) bool {
+func (s *Server) underCap(c caller, r api.Rules) error {
 	if r.DailyTokens > 0 && s.usedToday(c.EndpointID) >= r.DailyTokens {
-		fail(w, http.StatusTooManyRequests, access.ErrCap.Error())
-		return false
+		return access.ErrCap
 	}
-	return true
+	return nil
 }
 
 func forbid(w http.ResponseWriter, err error) bool {
@@ -140,7 +146,6 @@ func forbid(w http.ResponseWriter, err error) bool {
 	return false
 }
 
-// seeing is a session as a terminal's permissions look at it.
 func (s *Server) canSee(c caller, r api.Rules, sess api.Session) bool {
 	return access.Visible(r, c.EndpointID, sess.Agent, sess.Cwd, sess.Workspace, s.st.Opener(sess.ID))
 }
@@ -150,7 +155,7 @@ func (s *Server) visible(c caller, l []api.Session) []api.Session {
 	if c.Local {
 		return l
 	}
-	r := s.rules(c)
+	r := s.rulesFor(c)
 	openers, _ := s.st.Openers()
 	out := make([]api.Session, 0, len(l))
 	for _, sess := range l {
@@ -161,121 +166,240 @@ func (s *Server) visible(c caller, l []api.Session) []api.Session {
 	return out
 }
 
-// session is session {id} if the caller may see it; else it has answered (404, as if there
-// were none).
-func (s *Server) session(w http.ResponseWriter, r *http.Request) (*api.SessionState, api.Rules, bool) {
-	c := callerOf(r)
-	rules := s.rules(c)
-	st, err := s.m.State(r.PathValue("id"))
+// seeing is session id if the caller may see it; one it may not is no such session.
+func (s *Server) seeing(c caller, id string) (*api.SessionState, api.Rules, error) {
+	rules := s.rulesFor(c)
+	st, err := s.m.State(id)
 	if err != nil {
-		s.error(w, err)
-		return nil, rules, false
+		return nil, rules, err
 	}
 	if !c.Local && !s.canSee(c, rules, st.Session) {
-		s.error(w, session.ErrNotFound)
-		return nil, rules, false
+		return nil, rules, session.ErrNotFound
 	}
-	return st, rules, true
+	return st, rules, nil
+}
+
+// using is session id if the caller may see it and use its agent.
+func (s *Server) using(c caller, id string) (*api.SessionState, api.Rules, error) {
+	st, rules, err := s.seeing(c, id)
+	if err == nil {
+		err = access.Agent(rules, st.Agent)
+	}
+	return st, rules, err
+}
+
+// guarded lets h serve session {id} only when check passes for the caller.
+func (s *Server) guarded(check func(caller, api.Rules) error, h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		c := callerOf(r)
+		_, rules, err := s.using(c, r.PathValue("id"))
+		if err == nil && check != nil {
+			err = check(c, rules)
+		}
+		if err != nil {
+			s.error(w, err)
+			return
+		}
+		h(w, r)
+	}
 }
 
 // see lets h serve only sessions the caller may see.
 func (s *Server) see(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if _, _, ok := s.session(w, r); ok {
-			h(w, r)
+		if _, _, err := s.seeing(callerOf(r), r.PathValue("id")); err != nil {
+			s.error(w, err)
+			return
 		}
+		h(w, r)
 	}
 }
 
 // use lets h act on sessions the caller may see and whose agent it may use.
-func (s *Server) use(h http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		st, rules, ok := s.session(w, r)
-		if !ok {
-			return
-		}
-		if err := access.Agent(rules, st.Agent); err != nil {
-			forbid(w, err)
-			return
-		}
-		h(w, r)
-	}
-}
+func (s *Server) use(h http.HandlerFunc) http.HandlerFunc { return s.guarded(nil, h) }
 
 // answering lets h answer asks only for a terminal that may.
 func (s *Server) answering(h http.HandlerFunc) http.HandlerFunc {
-	return s.use(func(w http.ResponseWriter, r *http.Request) {
-		if !s.rules(callerOf(r)).Answer {
-			forbid(w, access.ErrAnswer)
+	return s.guarded(func(_ caller, r api.Rules) error {
+		if !r.Answer {
+			return access.ErrAnswer
+		}
+		return nil
+	}, h)
+}
+
+// filesOut lets h give a session's files only to a terminal that may take files out.
+func (s *Server) filesOut(h http.HandlerFunc) http.HandlerFunc {
+	return s.guarded(func(_ caller, r api.Rules) error {
+		if !r.FilesOut {
+			return access.ErrFilesOut
+		}
+		return nil
+	}, h)
+}
+
+// filesIn lets h take files into session {id} only from a terminal that may.
+func (s *Server) filesIn(h http.HandlerFunc) http.HandlerFunc {
+	return s.guarded(func(_ caller, r api.Rules) error {
+		if !r.FilesIn {
+			return access.ErrFilesIn
+		}
+		return nil
+	}, h)
+}
+
+// uploading lets h go on with an upload only for a terminal that may copy files in.
+func (s *Server) uploading(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !s.rulesFor(callerOf(r)).FilesIn {
+			s.error(w, access.ErrFilesIn)
 			return
 		}
 		h(w, r)
-	})
+	}
 }
 
-// mayCreate checks a new session against the caller's permissions, and makes a must-approve
-// terminal's session one that asks. It has answered when false.
-func (s *Server) mayCreate(w http.ResponseWriter, c caller, req *api.NewSession) bool {
-	r := s.rules(c)
-	if err := access.Agent(r, req.Agent); err != nil {
-		return forbid(w, err)
+// inDirs checks a path against the caller's directories (AllDirs: any; the rest the files
+// service's own guard checks).
+func (s *Server) inDirs(c caller, path string) error {
+	r := s.rulesFor(c)
+	if r.AllDirs {
+		return nil
 	}
-	if !r.AllDirs {
-		paths := map[int64]string{}
-		if ws, err := s.st.Workspaces(); err == nil {
-			for _, x := range ws {
-				paths[x.ID] = x.Path
+	if path == "" || !filepath.IsAbs(path) {
+		return access.ErrDir
+	}
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		path = real
+	} else if real, err := filepath.EvalSymlinks(filepath.Dir(path)); err == nil {
+		path = filepath.Join(real, filepath.Base(path)) // one not made yet
+	}
+	return access.Dir(r, path, 0, s.workspacePaths())
+}
+
+func (s *Server) workspacePaths() map[int64]string {
+	paths := map[int64]string{}
+	if ws, err := s.st.Workspaces(); err == nil {
+		for _, x := range ws {
+			paths[x.ID] = x.Path
+		}
+	}
+	return paths
+}
+
+// pathRoute lets h serve only paths in the caller's directories: the query's path (q), or the
+// JSON body's fields (fields), and with the files rules in and out.
+func (s *Server) pathRoute(q string, fields []string, in, out bool, h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		c := callerOf(r)
+		rules := s.rulesFor(c)
+		if in && !rules.FilesIn {
+			s.error(w, access.ErrFilesIn)
+			return
+		}
+		if out && !rules.FilesOut {
+			s.error(w, access.ErrFilesOut)
+			return
+		}
+		var paths []string
+		if q != "" {
+			paths = append(paths, r.URL.Query().Get(q))
+		}
+		if len(fields) > 0 {
+			b, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+			if err != nil {
+				fail(w, http.StatusBadRequest, "bad request body")
+				return
+			}
+			r.Body = io.NopCloser(bytes.NewReader(b))
+			var body map[string]any
+			_ = json.Unmarshal(b, &body)
+			for _, f := range fields {
+				if v, ok := body[f].(string); ok {
+					paths = append(paths, v)
+				}
 			}
 		}
-		if err := access.Dir(r, filepath.Clean(req.Cwd), 0, paths); err != nil {
-			return forbid(w, err)
+		for _, p := range paths {
+			// machine:path names another machine's, which its own permissions guard.
+			if !strings.HasPrefix(p, "/") && strings.Contains(p, ":") {
+				continue
+			}
+			if err := s.inDirs(c, filepath.Clean(p)); err != nil {
+				s.error(w, err)
+				return
+			}
+		}
+		h(w, r)
+	}
+}
+
+// manages lets h through for panels and 本机 only.
+func (s *Server) manages(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !callerOf(r).CanManage() {
+			s.error(w, access.ErrManage)
+			return
+		}
+		h(w, r)
+	}
+}
+
+// checkCreate checks a new session against the caller's permissions, and makes a must-approve
+// terminal's session one that asks.
+func (s *Server) checkCreate(c caller, req *api.NewSession) error {
+	r := s.rulesFor(c)
+	if err := access.Agent(r, req.Agent); err != nil {
+		return err
+	}
+	if !r.AllDirs {
+		if err := access.Dir(r, filepath.Clean(req.Cwd), req.Workspace, s.workspacePaths()); err != nil {
+			return err
 		}
 	}
 	if err := access.Mode(r, req.Mode); err != nil {
-		return forbid(w, err)
+		return err
 	}
 	if r.MustApprove && req.Mode == "" {
 		req.Mode = access.ApprovingMode(req.Agent)
 	}
 	if req.Text != "" {
 		if err := access.Command(r, req.Text); err != nil {
-			return forbid(w, err)
+			return err
 		}
 	}
-	return s.underCap(w, c, r)
+	return s.underCap(c, r)
 }
 
-// maySend checks a message for session id against the caller's permissions. It has answered
-// when false.
-func (s *Server) maySend(w http.ResponseWriter, c caller, id, text string) bool {
+// checkSend checks a message for session id against the caller's permissions. files: it carries
+// attachments.
+func (s *Server) checkSend(c caller, id, text string, files bool) error {
 	if c.Local {
-		return true
+		return nil
 	}
-	r := s.rules(c)
-	st, err := s.m.State(id)
+	st, r, err := s.using(c, id)
 	if err != nil {
-		s.error(w, err)
-		return false
+		return err
 	}
-	if !s.canSee(c, r, st.Session) {
-		s.error(w, session.ErrNotFound)
-		return false
-	}
-	if err := access.Agent(r, st.Agent); err != nil {
-		return forbid(w, err)
+	if files && !r.FilesIn {
+		return access.ErrFilesIn
 	}
 	if err := access.Command(r, text); err != nil {
-		return forbid(w, err)
+		return err
 	}
 	if err := access.Mode(r, st.Mode); err != nil {
-		return forbid(w, err)
+		return err
 	}
-	return s.underCap(w, c, r)
+	return s.underCap(c, r)
+}
+
+// checkMode checks switching session id to an approval mode.
+func (s *Server) checkMode(c caller, mode string) error {
+	return access.Mode(s.rulesFor(c), mode)
 }
 
 // mayWatch checks the states an event stream asks for. It has answered when false.
 func (s *Server) mayWatch(w http.ResponseWriter, c caller, keys []string) bool {
-	r := s.rules(c)
 	for _, k := range keys {
 		switch {
 		case k == "confirms" && !c.panel():
@@ -284,15 +408,16 @@ func (s *Server) mayWatch(w http.ResponseWriter, c caller, keys []string) bool {
 			if c.Local {
 				continue
 			}
-			st, err := s.m.State(k[8:])
-			if err == nil && !s.canSee(c, r, st.Session) {
-				s.error(w, session.ErrNotFound)
+			if _, _, err := s.seeing(c, k[8:]); errors.Is(err, session.ErrNotFound) && s.exists(k[8:]) {
+				s.error(w, err)
 				return false
 			}
 		}
 	}
 	return true
 }
+
+func (s *Server) exists(id string) bool { _, err := s.m.State(id); return err == nil }
 
 // filter gives the caller's stream only the sessions it may see.
 func (s *Server) filter(c caller) func(string, []byte) []byte {
@@ -359,4 +484,73 @@ func widened(c caller, old api.Rules, req api.SetRules) (api.Rules, error) {
 		return next, access.ErrWiden
 	}
 	return next, nil
+}
+
+// ---- the plugin chat layer ----
+
+// chatCaller is a chat request's terminal (routes_plugin.go): the gate's identity.
+func chatCaller(c caller) chat.Caller { return chat.Caller{ID: c.EndpointID, Name: c.Name} }
+
+// callerOfChat is the terminal behind a chat.Caller.
+func (s *Server) callerOfChat(c chat.Caller) caller {
+	if c.ID == gate.LocalEndpointID {
+		return caller{Identity: localIdentity}
+	}
+	info, ok := s.gate().Endpoint(c.ID)
+	if !ok {
+		return caller{Identity: gate.Identity{EndpointID: c.ID, Name: c.Name, Kind: gate.KindChannel}}
+	}
+	return caller{Identity: gate.Identity{EndpointID: info.ID, Name: info.Name, Kind: info.Kind}}
+}
+
+// ChatGuard is the permission table as the chat layer checks it.
+func (s *Server) ChatGuard() chat.Guard { return chatGuard{s} }
+
+type chatGuard struct{ s *Server }
+
+func (g chatGuard) Open(c chat.Caller, req *api.NewSession) error {
+	return g.s.checkCreate(g.s.callerOfChat(c), req)
+}
+
+func (g chatGuard) Opened(c chat.Caller, id string) {
+	if err := g.s.st.SetOpener(id, c.ID); err != nil {
+		g.s.logf("server: opener of %s: %v", id, err)
+	}
+}
+
+func (g chatGuard) Send(c chat.Caller, id, text string) error {
+	return g.s.checkSend(g.s.callerOfChat(c), id, text, false)
+}
+
+func (g chatGuard) Command(c chat.Caller, id, name string) error {
+	return access.Command(g.s.rulesFor(g.s.callerOfChat(c)), name)
+}
+
+func (g chatGuard) Mode(c chat.Caller, mode string) error {
+	return g.s.checkMode(g.s.callerOfChat(c), mode)
+}
+
+func (g chatGuard) Use(c chat.Caller, id string) error {
+	_, _, err := g.s.using(g.s.callerOfChat(c), id)
+	return err
+}
+
+func (g chatGuard) Sessions(c chat.Caller, l []api.Session) []api.Session {
+	return g.s.visible(g.s.callerOfChat(c), l)
+}
+
+func (g chatGuard) Answer(c chat.Caller, id string) error {
+	_, r, err := g.s.using(g.s.callerOfChat(c), id)
+	if err == nil && !r.Answer {
+		err = access.ErrAnswer
+	}
+	return err
+}
+
+func (g chatGuard) FileOut(c chat.Caller, id string) error {
+	_, r, err := g.s.seeing(g.s.callerOfChat(c), id)
+	if err == nil && !r.FilesOut {
+		err = access.ErrFilesOut
+	}
+	return err
 }

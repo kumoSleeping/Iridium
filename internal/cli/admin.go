@@ -54,8 +54,8 @@ func detect() (adminEnv, error) {
 		return adminEnv{}, err
 	}
 	tty := isTerminal(os.Stdin) && isTerminal(os.Stdout)
-	e := adminEnv{cfg: cfg, cfgPath: path, session: os.Getenv("IRIDIUM_SESSION"), tty: tty, stdin: os.Stdin}
-	e.agent = !tty || os.Getenv("CLAUDECODE") != "" || os.Getenv("CODEX_THREAD_ID") != "" || e.session != ""
+	e := adminEnv{cfg: cfg, cfgPath: path, session: caller(), tty: tty, stdin: os.Stdin}
+	e.agent = !tty || os.Getenv("CLAUDECODE") != "" || os.Getenv("CODEX_THREAD_ID") != "" || os.Getenv("IRIDIUM_SESSION") != ""
 	e.client = socketClient(cfg.SocketPath())
 	return e, nil
 }

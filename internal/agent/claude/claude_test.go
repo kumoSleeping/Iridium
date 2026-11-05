@@ -38,6 +38,7 @@ type harness struct {
 	ids    map[string]string // the recording's request ids to the driver's
 	ops    sync.WaitGroup
 	result map[string]any // what the operations returned, by control request subtype
+	next   []byte         // the in.log line after the one acted on
 }
 
 func replay(t *testing.T, name string) *harness {
@@ -66,6 +67,10 @@ func replay(t *testing.T, name string) *harness {
 	}
 	for i, in := range ins {
 		feedUntil(in.at)
+		h.next = nil
+		if i+1 < len(ins) {
+			h.next = ins[i+1].line
+		}
 		if i > 0 {
 			h.act(in.line)
 		}
@@ -172,6 +177,23 @@ func (h *harness) act(line []byte) {
 			h.op(sub, func() (any, error) { return nil, h.d.SetModel(ctx, f.Request["model"].(string)) })
 		case "set_permission_mode":
 			h.op(sub, func() (any, error) { return nil, h.d.SetMode(ctx, f.Request["mode"].(string)) })
+		case "get_settings":
+			// SetEffort writes get_settings, then apply_flag_settings; Effort only the first.
+			var next struct {
+				Request struct {
+					Subtype  string         `json:"subtype"`
+					Settings map[string]any `json:"settings"`
+				} `json:"request"`
+			}
+			_ = json.Unmarshal(h.next, &next)
+			if next.Request.Subtype == "apply_flag_settings" {
+				level := next.Request.Settings["effortLevel"].(string)
+				h.op("set_effort", func() (any, error) { return nil, h.d.SetEffort(ctx, level) })
+			} else {
+				h.op(sub, func() (any, error) { return h.d.Effort(ctx) })
+			}
+		case "apply_flag_settings":
+			// written by the SetEffort begun at the get_settings before
 		default:
 			h.t.Fatalf("no operation writes %s", sub)
 		}
@@ -481,5 +503,59 @@ func TestSpawn(t *testing.T) {
 	}
 	if _, err := d.Spawn(agent.SpawnOptions{Session: "s1", Env: env, Program: "nope"}); err == nil {
 		t.Error("spawned a missing program")
+	}
+}
+
+// /effort lists (get_settings' applied.effort), then sets a level with ultracode as it was.
+func TestEffort(t *testing.T) {
+	h := replay(t, "cmd-effort")
+	if got := h.result["get_settings"]; got != "medium" {
+		t.Errorf("effort: %v", got)
+	}
+	if _, ok := h.result["set_effort"]; !ok {
+		t.Error("set_effort did not return")
+	}
+	d := New(Options{})
+	bin := t.TempDir()
+	os.WriteFile(filepath.Join(bin, "claude"), []byte("#!/bin/sh\n"), 0o755)
+	spec, err := d.Spawn(agent.SpawnOptions{Session: "s", Env: []string{"PATH=" + bin}, Program: "claude", SystemPromptFile: "/p", Effort: "high"})
+	if err != nil || !strings.Contains(strings.Join(spec.Argv, " "), " --effort high ") {
+		t.Errorf("spawn: %v %v", spec.Argv, err)
+	}
+}
+
+// The CLI's suggested rule is the ask's pattern; initialize names the account.
+func TestPatternAndAccount(t *testing.T) {
+	h := replay(t, "approval-allow-deny")
+	asks := find[agent.AskOpen](h)
+	if asks[0].Ask.Pattern != "echo first *" || asks[1].Ask.Pattern != "echo second *" {
+		t.Errorf("patterns %q %q", asks[0].Ask.Pattern, asks[1].Ask.Pattern)
+	}
+	h = replay(t, "basic-turn")
+	if hello := find[agent.Hello](h)[0]; hello.Account != "user@example.com" || hello.Plan != "Claude Pro" {
+		t.Errorf("hello: %+v", hello)
+	}
+}
+
+// Images go after the text as base64 image blocks.
+func TestSendImages(t *testing.T) {
+	var lines [][]byte
+	d := New(Options{Logf: func(string, ...any) {}})
+	d.Attach(func(l []byte) error { lines = append(lines, l); return nil }, 1)
+	err := d.Send(context.Background(), agent.Message{ID: "u1", Text: "[本机] look\n\n[附件] `/w/a.png`", Human: true, Images: []agent.Image{{MediaType: "image/png", Data: []byte{0x89, 'P', 'N', 'G'}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var f struct {
+		Message struct {
+			Content []map[string]any `json:"content"`
+		} `json:"message"`
+	}
+	if err := json.Unmarshal(lines[len(lines)-1], &f); err != nil || len(f.Message.Content) != 2 {
+		t.Fatalf("frame %s: %v", lines[len(lines)-1], err)
+	}
+	src, _ := f.Message.Content[1]["source"].(map[string]any)
+	if f.Message.Content[0]["type"] != "text" || f.Message.Content[1]["type"] != "image" || src["type"] != "base64" || src["media_type"] != "image/png" || src["data"] != "iVBORw==" {
+		t.Errorf("content %v", f.Message.Content)
 	}
 }

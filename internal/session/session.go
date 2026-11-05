@@ -21,7 +21,7 @@ import (
 	"time"
 
 	"github.com/kumoSleeping/iridium/internal/agent"
-	"github.com/kumoSleeping/iridium/internal/agent/claude"
+	"github.com/kumoSleeping/iridium/internal/agents"
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/config"
 	"github.com/kumoSleeping/iridium/internal/hub"
@@ -54,6 +54,11 @@ type Options struct {
 	Poll       time.Duration // how often a live agent's out.log is read; 0 is 50ms
 	// Tag names an interactive terminal (by ID) in the source tag "[name] "; nil or "" is the ID.
 	Tag func(terminal string) string
+	// QuotaEvery: how often running agents' quota windows are read again; 0 is 5 minutes.
+	QuotaEvery time.Duration
+	// QuotaStagger: sessions going on after the quota came back wait up to this much more, so
+	// they do not all go at once; 0 is a minute, below 0 none.
+	QuotaStagger time.Duration
 }
 
 var (
@@ -69,7 +74,10 @@ type Manager struct {
 
 	mu     sync.Mutex
 	hosted map[string]*Hosted
-	quota  map[api.Agent]api.AgentQuota
+	quota  map[string]api.AgentQuota // by quotaKey
+
+	wmu      sync.Mutex
+	watchers []func(Notice)
 }
 
 func New(o Options) (*Manager, error) {
@@ -92,8 +100,14 @@ func New(o Options) (*Manager, error) {
 	if o.Poll == 0 {
 		o.Poll = 50 * time.Millisecond
 	}
+	if o.QuotaEvery == 0 {
+		o.QuotaEvery = 5 * time.Minute
+	}
+	if o.QuotaStagger == 0 {
+		o.QuotaStagger = time.Minute
+	}
 	ctx, cancel := context.WithCancel(context.Background())
-	m := &Manager{o: o, ctx: ctx, cancel: cancel, hosted: map[string]*Hosted{}, quota: map[api.Agent]api.AgentQuota{}}
+	m := &Manager{o: o, ctx: ctx, cancel: cancel, hosted: map[string]*Hosted{}, quota: map[string]api.AgentQuota{}}
 	o.Hub.Provide = m.provide
 	return m, nil
 }
@@ -109,6 +123,7 @@ func (m *Manager) Start() error {
 	if err := os.MkdirAll(m.holdRoot(), 0o700); err != nil {
 		return err
 	}
+	m.loadQuota()
 	metas, _ := filepath.Glob(filepath.Join(m.holdRoot(), "*", fileMeta))
 	for _, p := range metas {
 		var mt meta
@@ -128,8 +143,9 @@ func (m *Manager) Start() error {
 			m.o.Logf("session %s: %v", mt.ID, err)
 		}
 	}
-	m.wg.Add(1)
+	m.wg.Add(2)
 	go m.reap()
+	go m.quotaLoop()
 	m.publishList()
 	return nil
 }
@@ -150,17 +166,68 @@ func (m *Manager) get(id string) (*Hosted, error) {
 	return h, nil
 }
 
+// AgentID is the agent's own id for hosted session id where it is another (Codex's thread, made
+// after Iridium's id); "" otherwise. Discovery lists the session under it.
+func (m *Manager) AgentID(id string) string {
+	h, err := m.get(id)
+	if err != nil {
+		return ""
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if a := h.meta.agentID(); a != id {
+		return a
+	}
+	return ""
+}
+
+// byAgentID is the hosted session whose agent knows it as id under another id of Iridium's.
+func (m *Manager) byAgentID(id string) *Hosted {
+	m.mu.Lock()
+	hosted := make([]*Hosted, 0, len(m.hosted))
+	for _, h := range m.hosted {
+		hosted = append(hosted, h)
+	}
+	m.mu.Unlock()
+	for _, h := range hosted {
+		h.mu.Lock()
+		a := h.meta.agentID()
+		h.mu.Unlock()
+		if a == id && h.id != id {
+			return h
+		}
+	}
+	return nil
+}
+
+// discoveredAs is the id discovery lists hosted session h under: the agent's own.
+func (h *Hosted) discoveredAs() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if a := h.meta.agentID(); a != "" {
+		return a
+	}
+	return h.id
+}
+
 // Create starts a hosted session in req.Cwd and, if req.Text is given, sends it as the first
 // message from `from`. The id is the agent's own session id.
 func (m *Manager) Create(ctx context.Context, req api.NewSession, from string) (string, error) {
 	if req.Agent == "" {
 		req.Agent = api.AgentClaude
 	}
-	if req.Agent != api.AgentClaude {
+	info, ok := agents.Get(req.Agent)
+	if !ok {
 		return "", fmt.Errorf("agent %s is not supported yet", req.Agent)
+	}
+	if req.Mode != "" && !slices.Contains(info.Modes, req.Mode) {
+		return "", fmt.Errorf("%s has no approval mode %q (%s)", info.Name, req.Mode, strings.Join(info.Modes, ", "))
 	}
 	if st, err := os.Stat(req.Cwd); err != nil || !st.IsDir() || !filepath.IsAbs(req.Cwd) {
 		return "", fmt.Errorf("not a directory: %q", req.Cwd)
+	}
+	if _, err := m.o.Store.Workspace(req.Workspace); req.Workspace != 0 && err != nil {
+		return "", err
 	}
 	mt := meta{ID: newUUID(), Agent: req.Agent, Cwd: filepath.Clean(req.Cwd), Created: time.Now().UnixMilli(), Model: req.Model, Mode: req.Mode}
 	h := m.newHosted(mt)
@@ -174,6 +241,13 @@ func (m *Manager) Create(ctx context.Context, req api.NewSession, from string) (
 	m.hosted[mt.ID] = h
 	m.mu.Unlock()
 	h.newSession = true
+	if req.Workspace != 0 {
+		if err := m.o.Store.Move(mt.ID, req.Workspace); err != nil {
+			return mt.ID, err
+		}
+	} else if req.Caller != "" {
+		m.intoCallers(mt.ID, req.Caller)
+	}
 	if err := h.start(ctx); err != nil {
 		return mt.ID, err
 	}
@@ -185,47 +259,33 @@ func (m *Manager) Create(ctx context.Context, req api.NewSession, from string) (
 	return mt.ID, nil
 }
 
-// Send gives the session a message from `from` (an interactive terminal's ID), starting its
-// agent if it is not running: a new turn when idle, else it joins the running one. The agent sees
-// "[name] " before it (the terminal's name, Options.Tag), unless it is a slash command, which must
-// reach the agent as typed.
-func (m *Manager) Send(ctx context.Context, id, text, from string) (string, error) {
-	h, err := m.get(id)
-	if err != nil {
-		return "", err
-	}
-	if strings.TrimSpace(text) == "" {
-		return "", errors.New("an empty message")
-	}
-	tag := from
+// tagOf is the name terminal goes by in source tags now (Options.Tag), else its ID.
+func (m *Manager) tagOf(terminal string) string {
 	if m.o.Tag != nil {
-		if t := m.o.Tag(from); t != "" {
-			tag = t
+		if t := m.o.Tag(terminal); t != "" {
+			return t
 		}
 	}
-	input := newUUID()
-	if err := m.o.Store.AddInput(store.Input{ID: input, Session: id, Terminal: from, Tag: tag, Text: text, State: "sent"}); err != nil {
-		return "", err
+	return terminal
+}
+
+const fromSep = "\x1f"
+
+// From is a sender for Send and Create whose agent sees it by tag rather than by the terminal's
+// own name (a plugin's "[QQ·张三]"): the terminal's ID still counts the message and its usage.
+func From(terminal, tag string) string {
+	if tag == "" {
+		return terminal
 	}
-	if err := h.start(ctx); err != nil {
-		return "", err
+	return terminal + fromSep + tag
+}
+
+// source splits a sender into the terminal's ID and the tag the agent sees.
+func (m *Manager) source(from string) (terminal, tag string) {
+	if t, g, ok := strings.Cut(from, fromSep); ok {
+		return t, g
 	}
-	line := text
-	if !strings.HasPrefix(text, "/") {
-		line = "[" + tag + "] " + text
-	}
-	h.mu.Lock()
-	h.lastFrom = from
-	ready := h.ready
-	h.mu.Unlock()
-	// The process says its use so far first, so this turn's share can be told from it.
-	select {
-	case <-ready:
-	case <-time.After(5 * time.Second):
-	case <-ctx.Done():
-		return "", ctx.Err()
-	}
-	return input, h.drv.Send(ctx, agent.Message{ID: input, Text: line, Human: true})
+	return from, m.tagOf(from)
 }
 
 // Interrupt stops the running turn; the agent stays.
@@ -234,9 +294,18 @@ func (m *Manager) Interrupt(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	if !h.isLive() {
+	h.mu.Lock()
+	live, quota := h.live, h.quotaUntil != 0
+	h.quotaStop = h.quotaStop || quota // no "继续" when the quota is back; what waits still goes
+	h.mu.Unlock()
+	if quota && (!live || h.drv.State() == agent.Idle) {
+		h.publish()
+		return nil
+	}
+	if !live {
 		return ErrNotLive
 	}
+	h.pause()
 	return h.drv.Interrupt(ctx)
 }
 
@@ -247,18 +316,11 @@ func (m *Manager) Stop(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
+	h.mu.Lock()
+	h.quotaStop = h.quotaStop || h.quotaUntil != 0
+	h.mu.Unlock()
+	h.pause()
 	return h.stop(ctx)
-}
-
-func (m *Manager) Answer(ctx context.Context, id string, a api.Answer) error {
-	h, err := m.get(id)
-	if err != nil {
-		return err
-	}
-	if !h.isLive() {
-		return ErrNotLive
-	}
-	return h.drv.Answer(ctx, a)
 }
 
 // List is the hosted sessions, then those the Discovery found that Iridium does not host,
@@ -277,8 +339,10 @@ func (m *Manager) List(ctx context.Context) ([]api.Session, error) {
 	out := make([]api.Session, 0, len(hosted))
 	seen := map[string]bool{}
 	for _, h := range hosted {
-		out = append(out, h.summary(over[h.id]))
-		seen[h.id] = true
+		as := h.discoveredAs()
+		out = append(out, m.elsewhere(h.summary(over[h.id]), as))
+		// A hosted Codex session is on disk under its thread: listed once, as hosted.
+		seen[h.id], seen[as] = true, true
 	}
 	if m.o.Discovery != nil {
 		found, err := m.o.Discovery.Sessions(ctx)
@@ -309,7 +373,7 @@ func (m *Manager) List(ctx context.Context) ([]api.Session, error) {
 func (m *Manager) State(id string) (*api.SessionState, error) {
 	h, err := m.get(id)
 	if err != nil {
-		return nil, err
+		return m.foreignState(id, nil)
 	}
 	over, _ := m.o.Store.Overlays()
 	s := h.state(over[id])
@@ -319,11 +383,10 @@ func (m *Manager) State(id string) (*api.SessionState, error) {
 // Messages is a page of the session's transcript: the latest (before and after < 0), the one
 // before an offset, or what came after one.
 func (m *Manager) Messages(id string, before, after int64) (api.MessagePage, error) {
-	h, err := m.get(id)
+	f, err := m.readable(id)
 	if err != nil {
 		return api.MessagePage{}, err
 	}
-	f := h.transcript()
 	if f == nil {
 		return api.MessagePage{Blocks: []api.Block{}}, nil
 	}
@@ -338,11 +401,10 @@ func (m *Manager) Messages(id string, before, after int64) (api.MessagePage, err
 
 // Full is the whole text of the block at at.
 func (m *Manager) Full(id, at string) (string, error) {
-	h, err := m.get(id)
+	f, err := m.readable(id)
 	if err != nil {
 		return "", err
 	}
-	f := h.transcript()
 	if f == nil {
 		return "", ErrNotFound
 	}
@@ -363,6 +425,12 @@ func (m *Manager) provide(key string) (any, bool) {
 			return nil, true
 		}
 		return s, true
+	case strings.HasPrefix(key, "context:"):
+		c, err := m.Context(strings.TrimPrefix(key, "context:"))
+		if err != nil || c == nil {
+			return nil, true
+		}
+		return c, true
 	}
 	return nil, false
 }
@@ -374,24 +442,6 @@ func (m *Manager) publishList() {
 		return
 	}
 	m.o.Hub.Set("list", l)
-}
-
-func (m *Manager) setQuota(a api.Agent, windows []api.QuotaWindow) {
-	m.mu.Lock()
-	m.quota[a] = api.AgentQuota{Agent: a, Windows: windows, At: time.Now().UnixMilli()}
-	m.mu.Unlock()
-	m.o.Hub.Set("quota", m.quotaState())
-}
-
-func (m *Manager) quotaState() api.Quota {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	q := api.Quota{Agents: []api.AgentQuota{}}
-	for _, a := range m.quota {
-		q.Agents = append(q.Agents, a)
-	}
-	slices.SortFunc(q.Agents, func(a, b api.AgentQuota) int { return strings.Compare(string(a.Agent), string(b.Agent)) })
-	return q
 }
 
 // reap stops agents idle for longer than their session's idle reap, or the config's: no turn,
@@ -442,8 +492,7 @@ func (m *Manager) agentEnv() []string {
 }
 
 func (m *Manager) newDriver(a api.Agent, emit func(agent.Event)) agent.Driver {
-	// One kind for now; the others come with their drivers.
-	return claude.New(claude.Options{Emit: emit, Logf: m.o.Logf})
+	return agents.NewDriver(a, emit, m.o.Logf)
 }
 
 func newUUID() string {
@@ -459,9 +508,18 @@ func writeJSON(path string, v any) error {
 	if err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+	// A name of its own: two writers of one file must not share a temporary file.
+	f, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	_, err = f.Write(b)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		os.Remove(f.Name())
+		return err
+	}
+	return os.Rename(f.Name(), path)
 }

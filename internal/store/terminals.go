@@ -9,7 +9,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/gate"
 )
 
-// terminalsSchema is migration 2. The tables of migration 1 for terminals were placeholders and
+// terminalsSchema is migration 3. The tables of migration 1 for terminals were placeholders and
 // never written; the gate's endpoints take their place (docs/gate.md "存储接口"). Permissions have
 // no foreign key: the built-in 本机 is no row, and the gate deletes a terminal in the same
 // transaction that deletes its rules (ApplyGate).
@@ -204,8 +204,8 @@ func (g gateStore) Apply(c gate.Change) error {
 	})
 }
 
-// Rules is terminal's permission table as stored (JSON), ok false when it has none of its own.
-func (s *Store) Rules(terminal string) (rules []byte, ok bool, err error) {
+// TerminalRules is terminal's permission table as stored (JSON), ok false when it has none of its own.
+func (s *Store) TerminalRules(terminal string) (rules []byte, ok bool, err error) {
 	err = s.db.QueryRow(`SELECT rules FROM permissions WHERE terminal = ?`, terminal).Scan(&rules)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, false, nil
@@ -213,8 +213,8 @@ func (s *Store) Rules(terminal string) (rules []byte, ok bool, err error) {
 	return rules, err == nil, err
 }
 
-// SetRules stores terminal's permission table (JSON).
-func (s *Store) SetRules(terminal string, rules []byte) error {
+// SetTerminalRules stores terminal's permission table (JSON).
+func (s *Store) SetTerminalRules(terminal string, rules []byte) error {
 	_, err := s.db.Exec(`INSERT INTO permissions (terminal, rules) VALUES (?, ?) ON CONFLICT (terminal) DO UPDATE SET rules = excluded.rules`, terminal, string(rules))
 	return err
 }

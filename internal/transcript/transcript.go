@@ -1,5 +1,5 @@
 // Package transcript reads an agent's own transcript file as message blocks (Rhodium §7.7):
-// Claude's JSONL for now. Read-only. It keeps a byte-offset index of the lines that give blocks,
+// Claude's, Codex's and pi's JSONL, each by its Format. Read-only. It keeps a byte-offset index of the lines that give blocks,
 // read once and then only the new bytes, so a page of a 100 MB file reads only that page.
 package transcript
 
@@ -37,10 +37,18 @@ const (
 // write.
 type Sources func(uuid string) (terminal, tag string, ok bool)
 
+// Format gives the blocks of one line of an agent's transcript: max is the characters to cut
+// texts to (-1: none); sources names the user messages Iridium wrote (may be nil).
+type Format func(off int64, raw []byte, max int, sources Sources) []api.Block
+
+// Claude is Claude Code's format; Codex (codex.go) and Pi (pi.go) the others.
+var Claude Format = blocksOf
+
 // File is one transcript file and its index. Safe for concurrent use.
 type File struct {
 	path    string
 	sources Sources
+	format  Format
 
 	mu    sync.Mutex
 	ino   uint64
@@ -56,8 +64,13 @@ type entry struct {
 	blocks uint16
 }
 
-// Open is the file at path; it need not exist yet. sources may be nil.
-func Open(path string, sources Sources) *File { return &File{path: path, sources: sources} }
+// Open is Claude's transcript at path; it need not exist yet. sources may be nil.
+func Open(path string, sources Sources) *File { return OpenAs(path, Claude, sources) }
+
+// OpenAs is the transcript at path, in format f.
+func OpenAs(path string, f Format, sources Sources) *File {
+	return &File{path: path, sources: sources, format: f}
+}
 
 func (f *File) Path() string { return f.path }
 
@@ -108,7 +121,7 @@ func (f *File) refresh() error {
 			line = append(long, line...)
 			long = nil
 		}
-		if blocks := blocksOf(off, line, Clip, nil); len(blocks) > 0 {
+		if blocks := f.format(off, line, Clip, nil); len(blocks) > 0 {
 			f.lines = append(f.lines, entry{off: off, n: int32(len(line)), msgs: uint16(messages(blocks)), blocks: uint16(min(len(blocks), 65535))})
 		}
 		off += int64(len(line)) + 1
@@ -201,7 +214,7 @@ func (f *File) read(lines []entry) []api.Block {
 		if _, err := r.ReadAt(buf, e.off); err != nil {
 			continue
 		}
-		out = append(out, blocksOf(e.off, buf, Clip, f.sources)...)
+		out = append(out, f.format(e.off, buf, Clip, f.sources)...)
 	}
 	return paired(out)
 }
@@ -258,7 +271,7 @@ func (f *File) Full(at string) (string, error) {
 	if _, err := r.ReadAt(buf, e.off); err != nil {
 		return "", err
 	}
-	blocks := blocksOf(e.off, buf, -1, f.sources)
+	blocks := f.format(e.off, buf, -1, f.sources)
 	if idx < 0 || idx >= len(blocks) {
 		return "", ErrNoBlock
 	}
@@ -322,7 +335,7 @@ func (f *File) walk(back bool, ok func(api.Block) bool) (*api.Block, error) {
 		if _, err := r.ReadAt(buf, e.off); err != nil {
 			return nil, err
 		}
-		blocks := blocksOf(e.off, buf, Clip, f.sources)
+		blocks := f.format(e.off, buf, Clip, f.sources)
 		for j := range blocks {
 			if back {
 				j = len(blocks) - 1 - j
@@ -483,6 +496,10 @@ func blocksOf(off int64, raw []byte, max int, sources Sources) []api.Block {
 				b.From, b.FromTerminal = tag, terminal
 				b.Text = strings.TrimPrefix(text, "["+tag+"] ")
 			}
+		}
+		if b.From == api.SourceIridium {
+			// Iridium's own line (a recovery prompt), not your words.
+			b = api.Block{Kind: api.BlockKindSystem, Event: api.SystemEventIridium, Text: b.Text, From: b.From, ID: b.ID}
 		}
 		add(b)
 	case "assistant":
