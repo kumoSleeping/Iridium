@@ -20,8 +20,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kumoSleeping/iridium/internal/agents"
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/config"
+	"github.com/kumoSleeping/iridium/internal/discover"
+	"github.com/kumoSleeping/iridium/internal/files"
 	"github.com/kumoSleeping/iridium/internal/hub"
 	"github.com/kumoSleeping/iridium/internal/session"
 	"github.com/kumoSleeping/iridium/internal/transcript"
@@ -39,13 +42,18 @@ type Server struct {
 	m    *session.Manager
 	hub  *hub.Hub
 	logf func(string, ...any)
+	// Discover and Folders, if set, serve the workspaces and the folder picker (routes_discover.go).
+	Discover *discover.Index
+	Folders  discover.Folders
+
+	files *files.Service // routes_files.go
 }
 
 func New(cfg config.Config, m *session.Manager, h *hub.Hub, logf func(string, ...any)) *Server {
 	if logf == nil {
 		logf = log.Printf
 	}
-	return &Server{cfg: cfg, m: m, hub: h, logf: logf}
+	return &Server{cfg: cfg, m: m, hub: h, files: newFiles(cfg, m, logf), logf: logf}
 }
 
 type ctxKey struct{}
@@ -58,6 +66,9 @@ func (s *Server) Handler(local bool) http.Handler {
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
 		reply(w, http.StatusOK, map[string]any{"ok": true})
 	})
+	mux.HandleFunc("GET /api/agents", func(w http.ResponseWriter, r *http.Request) {
+		reply(w, http.StatusOK, agents.Describe())
+	})
 	mux.HandleFunc("GET /api/sessions", s.list)
 	mux.HandleFunc("POST /api/sessions", s.create)
 	mux.HandleFunc("GET /api/sessions/{id}", s.get)
@@ -68,6 +79,8 @@ func (s *Server) Handler(local bool) http.Handler {
 	mux.HandleFunc("POST /api/sessions/{id}/stop", s.stop)
 	mux.HandleFunc("POST /api/sessions/{id}/answer", s.answer)
 	mux.HandleFunc("GET /api/events", s.events)
+	s.discoverRoutes(mux)
+	s.fileRoutes(mux, local)
 	name := TerminalWeb
 	if local {
 		name = TerminalLocal
@@ -147,6 +160,7 @@ func (s *Server) Serve(ctx context.Context, tcp, unix net.Listener) error {
 		{Handler: s.Handler(false), ReadHeaderTimeout: 10 * time.Second, BaseContext: base},
 		{Handler: s.Handler(true), ReadHeaderTimeout: 10 * time.Second, BaseContext: base},
 	}
+	go s.files.Janitor(ctx)
 	errs := make(chan error, 2)
 	for i, l := range []net.Listener{tcp, unix} {
 		go func() { errs <- servers[i].Serve(l) }()
@@ -219,6 +233,7 @@ func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 		s.error(w, err)
 		return
 	}
+	s.files.Annotate(r.PathValue("id"), &p)
 	reply(w, http.StatusOK, p)
 }
 
@@ -236,7 +251,12 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &req) {
 		return
 	}
-	input, err := s.m.Send(r.Context(), r.PathValue("id"), req.Text, terminal(r))
+	text, images, err := s.files.Message(r.PathValue("id"), req.Text, req.Attachments)
+	if err != nil {
+		s.fileError(w, err)
+		return
+	}
+	input, err := s.m.SendImages(r.Context(), r.PathValue("id"), text, terminal(r), images)
 	if err != nil {
 		s.error(w, err)
 		return
@@ -262,7 +282,7 @@ func (s *Server) answer(w http.ResponseWriter, r *http.Request) {
 	s.done(w, s.m.Answer(r.Context(), r.PathValue("id"), a))
 }
 
-var stateKey = regexp.MustCompile(`^(list|quota|(session|context):[0-9a-fA-F-]{1,64})$`)
+var stateKey = regexp.MustCompile(`^(list|quota|workspaces|(session|context):[0-9a-zA-Z_-]{1,128})$`)
 
 // events is the page's one event stream: ?sub=<key> for each state it wants (list, quota,
 // session:<id>, context:<id>). See package hub.
@@ -303,7 +323,7 @@ func (s *Server) error(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, session.ErrNotFound), errors.Is(err, transcript.ErrNoBlock):
 		fail(w, http.StatusNotFound, err.Error())
-	case errors.Is(err, session.ErrNotLive):
+	case errors.Is(err, session.ErrNotLive), errors.Is(err, session.ErrElsewhere):
 		fail(w, http.StatusConflict, err.Error())
 	case errors.Is(err, context.DeadlineExceeded):
 		fail(w, http.StatusGatewayTimeout, "the agent did not answer in time")

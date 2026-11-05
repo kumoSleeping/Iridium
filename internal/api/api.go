@@ -15,6 +15,20 @@ const (
 	AgentDsh    Agent = "dsh"
 )
 
+// AgentInfo is what an agent Iridium hosts can do (GET /api/agents).
+type AgentInfo struct {
+	Agent Agent  `json:"agent"`
+	Name  string `json:"name"`
+	// Modes: its approval modes, in the order the mode key cycles them; DefaultMode is an empty
+	// mode's. ModeSwitch: when a switch takes effect: now | next turn | restart.
+	Modes       []string `json:"modes"`
+	DefaultMode string   `json:"defaultMode"`
+	ModeSwitch  string   `json:"modeSwitch"`
+	// ContextBreakdown: its context comes in categories. Quota: it reports quota windows.
+	ContextBreakdown bool `json:"contextBreakdown"`
+	Quota            bool `json:"quota"`
+}
+
 // Status is a session's lamp (plan "风格"). idle shows none.
 type Status string
 
@@ -38,11 +52,13 @@ type Session struct {
 	Title  string `json:"title,omitempty"`
 	Status Status `json:"status"`
 	// Hosted: Iridium runs (or ran) it through a holder. Live: an agent process runs now.
-	Hosted    bool      `json:"hosted"`
-	Live      bool      `json:"live"`
-	Pinned    bool      `json:"pinned,omitempty"`
-	Archived  bool      `json:"archived,omitempty"`
-	Workspace int64     `json:"workspace,omitempty"` // 0: none
+	Hosted    bool  `json:"hosted"`
+	Live      bool  `json:"live"`
+	Pinned    bool  `json:"pinned,omitempty"`
+	Archived  bool  `json:"archived,omitempty"`
+	Workspace int64 `json:"workspace,omitempty"` // 0: none
+	// Launcher: the session that started this one, if discovery saw it.
+	Launcher  string    `json:"launcher,omitempty"`
 	Last      *LastSaid `json:"last,omitempty"`
 	UpdatedAt int64     `json:"updatedAt"` // ms since the epoch
 }
@@ -142,6 +158,8 @@ type Block struct {
 	Error  bool    `json:"error,omitempty"` // result
 	// system: what happened.
 	Event SystemEvent `json:"event,omitempty"`
+	// Files the block names that exist: user and assistant text, a Write call's file.
+	Files []FileRef `json:"files,omitempty"`
 }
 
 type BlockKind string
@@ -196,6 +214,11 @@ type NewSession struct {
 	Text  string `json:"text,omitempty"`
 	Model string `json:"model,omitempty"`
 	Mode  string `json:"mode,omitempty"`
+	// Workspace: the workspace it goes in (0: the caller's, else as discovery classifies it).
+	Workspace int64 `json:"workspace,omitempty"`
+	// Caller is the session that ran ir new (from IRIDIUM_SESSION, CLAUDE_CODE_SESSION_ID,
+	// CODEX_THREAD_ID…): the new session goes into its workspace.
+	Caller string `json:"caller,omitempty"`
 }
 
 type NewSessionReply struct {
@@ -205,6 +228,10 @@ type NewSessionReply struct {
 // Send gives the session a message: a new turn when idle, else it joins the running one.
 type Send struct {
 	Text string `json:"text"`
+	// Attachments are file refs of the session (uploads, attached paths): their paths are written
+	// into the message, and images go to the agent as images too.
+	Attachments []string `json:"attachments,omitempty"`
+	Caller      string   `json:"caller,omitempty"` // as NewSession's
 }
 
 type SendReply struct {
