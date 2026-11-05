@@ -19,7 +19,8 @@ const LocalTerminal = "local"
 type Rules struct {
 	// Agents it may use (and whose sessions it sees). claude needs ClaudeOwner.
 	Agents []Agent `json:"agents"`
-	// ClaudeOwner: a panel confirmed that this terminal is the owner's own (Claude's terms).
+	// ClaudeOwner: the terminal is the owner's own (Claude's terms), as said on the machine. Only
+	// the server writes it; the web may take Claude away but never give it.
 	ClaudeOwner *OwnerConfirm `json:"claudeOwner,omitempty"`
 	// AllDirs: every directory; else only under Dirs or in Workspaces.
 	AllDirs    bool     `json:"allDirs"`
@@ -41,9 +42,11 @@ type Rules struct {
 	Commands    []string `json:"commands"`
 }
 
-// OwnerConfirm is who confirmed, and when (ms), that a terminal is the owner's own.
+// OwnerConfirm is how, and when (ms), a terminal was found the owner's own.
 type OwnerConfirm struct {
-	By string `json:"by"` // the confirming panel's ID
+	// By: "local" (a person's ir on the machine: ir invite --owner, ir token --owner,
+	// ir access --claude on) or "first" (the first panel registered).
+	By string `json:"by"`
 	At int64  `json:"at"`
 }
 
@@ -68,6 +71,7 @@ type PendingInvite struct {
 	ID        string `json:"id"`
 	Name      string `json:"name,omitempty"`
 	Setup     bool   `json:"setup,omitempty"` // the first-run link in the state directory
+	Owner     bool   `json:"owner,omitempty"` // ir invite --owner: the panel gets Claude
 	CreatedAt int64  `json:"createdAt"`
 	ExpiresAt int64  `json:"expiresAt,omitempty"`
 }
@@ -86,8 +90,11 @@ type Me struct {
 }
 
 // NewInvite asks for a panel invite (ir invite [name]) or a channel token (ir token <name>).
+// Owner (--owner): the terminal is the owner's own and gets Claude; only a person's ir on the
+// machine may say so.
 type NewInvite struct {
-	Name string `json:"name,omitempty"`
+	Name  string `json:"name,omitempty"`
+	Owner bool   `json:"owner,omitempty"`
 }
 
 // Invite is a new panel invite. URL holds the secret: only a panel (or ir at a terminal) sees it.
@@ -106,11 +113,10 @@ type Token struct {
 	Token    string   `json:"token"`
 }
 
-// SetRules changes a terminal's permission table. OwnerConfirmed: the panel says the terminal is
-// the owner's own, which adding claude needs.
+// SetRules changes a terminal's permission table. Adding claude is for a person's ir on the
+// machine only (ir access <name> --claude on); anyone that manages may take it away.
 type SetRules struct {
-	Rules          Rules `json:"rules"`
-	OwnerConfirmed bool  `json:"ownerConfirmed,omitempty"`
+	Rules Rules `json:"rules"`
 }
 
 // Confirm is what an agent's ir asked for that only a panel may give (an invite link, a token):

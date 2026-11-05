@@ -120,9 +120,9 @@ func (l *live) waitReply(as, id, text string) {
 	}
 }
 
-func (l *live) rules(as, id string, r api.Rules, confirmed bool) int {
+func (l *live) rules(as, id string, r api.Rules) int {
 	l.t.Helper()
-	return l.do(as, "PUT", "/api/terminals/"+id+"/rules", api.SetRules{Rules: r, OwnerConfirmed: confirmed}, nil)
+	return l.do(as, "PUT", "/api/terminals/"+id+"/rules", api.SetRules{Rules: r}, nil)
 }
 
 // The permission table, on every session route there is.
@@ -163,21 +163,23 @@ func TestPermissions(t *testing.T) {
 	// A channel manages nothing, its own table included.
 	full := tok.Terminal.Rules
 	full.Agents = append(full.Agents, api.AgentClaude)
-	if code := l.rules(bot, botID, full, true); code != 403 {
+	if code := l.rules(bot, botID, full); code != 403 {
 		t.Fatalf("a channel set rules: %d", code)
 	}
 	l.want(403, bot, "GET", "/api/terminals", nil, nil)
 	l.want(403, bot, "POST", "/api/terminals/tokens", api.NewInvite{Name: "other"}, nil)
 
-	// Claude takes a panel's word that the terminal is the owner's; an agent's ir cannot give it.
-	if code := l.rules("web", botID, full, false); code != 403 {
-		t.Fatalf("claude without the owner's word: %d", code)
+	// Claude only from a person at the machine: not the web (here the local page, 本机 itself), not
+	// an agent's ir, whatever owner mark the request carries.
+	full.ClaudeOwner = &api.OwnerConfirm{By: "local", At: 1}
+	if code := l.rules("web", botID, full); code != 403 {
+		t.Fatalf("the web turned claude on: %d", code)
 	}
-	if code := l.rules("agent", botID, full, true); code != 403 {
+	if code := l.rules("agent", botID, full); code != 403 {
 		t.Fatalf("an agent turned claude on: %d", code)
 	}
-	if code := l.rules("web", botID, full, true); code != 200 {
-		t.Fatalf("claude with the owner's word: %d", code)
+	if code := l.rules("socket", botID, full); code != 200 {
+		t.Fatalf("claude from the machine: %d", code)
 	}
 	var ts api.Terminals
 	l.want(200, "agent", "GET", "/api/terminals", nil, &ts)
@@ -193,12 +195,12 @@ func TestPermissions(t *testing.T) {
 	// An agent narrows (answers off, two commands) but does not widen.
 	narrow := row.Rules
 	narrow.Answer, narrow.AllCommands, narrow.Commands = false, false, []string{"/compact"}
-	if code := l.rules("agent", botID, narrow, false); code != 200 {
+	if code := l.rules("agent", botID, narrow); code != 200 {
 		t.Fatalf("narrowing: %d", code)
 	}
 	wide := narrow
 	wide.SeeOthers = true
-	if code := l.rules("agent", botID, wide, false); code != 403 {
+	if code := l.rules("agent", botID, wide); code != 403 {
 		t.Fatalf("an agent widened: %d", code)
 	}
 
@@ -236,14 +238,14 @@ func TestPermissions(t *testing.T) {
 	// The daily cap.
 	capped := narrow
 	capped.DailyTokens = 1
-	if code := l.rules("agent", botID, capped, false); code != 200 {
+	if code := l.rules("agent", botID, capped); code != 200 {
 		t.Fatalf("a cap: %d", code)
 	}
 	l.want(429, bot, "POST", "/api/sessions/"+its.ID+"/send", api.Send{Text: "more"}, nil)
 	// Directories: none but another.
 	dirs := capped
 	dirs.DailyTokens, dirs.AllDirs, dirs.Dirs = 0, false, []string{"/nowhere"}
-	if code := l.rules("web", botID, dirs, false); code != 200 {
+	if code := l.rules("web", botID, dirs); code != 200 {
 		t.Fatalf("dirs: %d", code)
 	}
 	l.want(403, bot, "POST", "/api/sessions", api.NewSession{Agent: api.AgentPi, Cwd: l.work}, nil)
@@ -259,7 +261,7 @@ func TestPermissions(t *testing.T) {
 	}
 
 	// 本机 cannot change, nor be revoked; a revoked token stops working.
-	if code := l.rules("web", "local", full, true); code != 409 {
+	if code := l.rules("web", "local", full); code != 409 {
 		t.Errorf("本机's rules: %d", code)
 	}
 	l.want(409, "socket", "DELETE", "/api/terminals/local", nil, nil)

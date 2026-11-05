@@ -42,6 +42,7 @@ type harness struct {
 	cookie  string // the browser's session cookie value
 	secrets []string
 	revoked []string
+	joined  []Joined
 }
 
 type appReply struct {
@@ -73,6 +74,7 @@ func (h *harness) open(origin string) {
 		Logger:       slog.New(slog.NewTextHandler(h.logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
 		Now:          h.clock.Now,
 		OnRevoke:     func(id string) { h.revoked = append(h.revoked, id) },
+		OnJoin:       func(j Joined) { h.joined = append(h.joined, j) },
 	})
 	if err != nil {
 		h.t.Fatal(err)
@@ -306,7 +308,7 @@ func TestRegisterAndLogin(t *testing.T) {
 	wantStatus(t, h.do(req{method: "POST", path: "/_ir/api/join/check", body: joinRequest{Token: setup}}), http.StatusForbidden)
 
 	// A named invite for a second device. Its name is reserved meanwhile.
-	inv, err := h.g.CreateInvite("手机")
+	inv, err := h.g.CreateInvite("手机", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -318,7 +320,7 @@ func TestRegisterAndLogin(t *testing.T) {
 	if _, err := h.g.CheckName("手机"); err != ErrNameTaken {
 		t.Fatalf("pending invite name not reserved: %v", err)
 	}
-	if _, err := h.g.CreateInvite("kumo mac"); err != ErrNameTaken {
+	if _, err := h.g.CreateInvite("kumo mac", false); err != ErrNameTaken {
 		t.Fatalf("invite with a taken name: %v", err)
 	}
 	if r := decode[joinReply](t, h.do(req{method: "POST", path: "/_ir/api/join/check", body: joinRequest{Token: tok}})); r.Name != "手机" {
@@ -446,7 +448,7 @@ func TestInviteExpiry(t *testing.T) {
 	h := newHarness(t, testOrigin)
 	a := &authenticator{t: t, origin: testOrigin}
 	wantStatus(t, h.join(a, h.setupToken(), ptr("mac")), http.StatusOK)
-	inv, _ := h.g.CreateInvite("")
+	inv, _ := h.g.CreateInvite("", false)
 	tok := tokenOf(t, inv.URL)
 
 	// Options fetched in time, verified after expiry: refused, nothing registered.
@@ -462,19 +464,64 @@ func TestInviteExpiry(t *testing.T) {
 	}
 
 	// A revoked invite is gone too.
-	inv, _ = h.g.CreateInvite("tablet")
+	inv, _ = h.g.CreateInvite("tablet", false)
 	if err := h.g.Revoke("TABLET"); err != nil {
 		t.Fatal(err)
 	}
 	wantStatus(t, h.do(req{method: "POST", path: "/_ir/api/join/check", body: joinRequest{Token: tokenOf(t, inv.URL)}}), http.StatusForbidden)
 }
 
+// Joined says which panel is the owner's own: the first one, and one whose invite said --owner;
+// any other is not. Once a panel is there, the setup link is gone and not listed, whichever
+// invite the panel came by.
+func TestJoinedOwnerAndSetup(t *testing.T) {
+	h := newHarness(t, testOrigin)
+	h.setupToken()
+	first, _ := h.g.CreateInvite("", false) // a plain invite, used while the setup link waits
+	wantStatus(t, h.join(&authenticator{t: t, origin: testOrigin}, tokenOf(t, first.URL), ptr("mac")), http.StatusOK)
+	if _, err := os.Stat(filepath.Join(h.dir, "state", setupFile)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("setup file after the first panel: %v", err)
+	}
+	if acc := h.g.Access(); len(acc.Invites) != 0 {
+		t.Fatalf("invites after the first panel: %+v", acc.Invites)
+	}
+	owner, _ := h.g.CreateInvite("pad", true)
+	plain, _ := h.g.CreateInvite("", false)
+	if acc := h.g.Access(); len(acc.Invites) != 2 || acc.Invites[0].Owner == acc.Invites[1].Owner || acc.Invites[0].Owner != (acc.Invites[0].Name == "pad") {
+		t.Fatalf("owner invite not listed as one: %+v", acc.Invites)
+	}
+	h.cookie = ""
+	wantStatus(t, h.join(&authenticator{t: t, origin: testOrigin}, tokenOf(t, owner.URL), nil), http.StatusOK)
+	h.cookie = ""
+	wantStatus(t, h.join(&authenticator{t: t, origin: testOrigin}, tokenOf(t, plain.URL), ptr("guest")), http.StatusOK)
+	if len(h.joined) != 3 {
+		t.Fatalf("joined: %+v", h.joined)
+	}
+	for i, want := range []Joined{{Owner: false, First: true}, {Owner: true}, {}} {
+		j := h.joined[i]
+		if j.Owner != want.Owner || j.First != want.First || j.Endpoint.Kind != KindPanel {
+			t.Errorf("join %d (%s): %+v", i, j.Endpoint.Name, j)
+		}
+	}
+
+	// A stale setup link (from before this rule) is dropped at start, also in local mode.
+	h.store.Apply(Change{Invites: []Invite{{ID: "setup", Hash: hashToken(newToken()), Setup: true, CreatedAt: h.clock.Now()}}})
+	os.WriteFile(filepath.Join(h.dir, "state", setupFile), []byte("x\n"), 0o600)
+	h.open("")
+	if _, err := os.Stat(filepath.Join(h.dir, "state", setupFile)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stale setup file kept: %v", err)
+	}
+	if st, _ := h.store.Load(); len(st.Invites) != 0 {
+		t.Fatalf("stale setup invite kept: %+v", st.Invites)
+	}
+}
+
 func TestNameRaceAtVerify(t *testing.T) {
 	h := newHarness(t, testOrigin)
 	a := &authenticator{t: t, origin: testOrigin}
 	wantStatus(t, h.join(a, h.setupToken(), ptr("mac")), http.StatusOK)
-	inv1, _ := h.g.CreateInvite("")
-	inv2, _ := h.g.CreateInvite("")
+	inv1, _ := h.g.CreateInvite("", false)
+	inv2, _ := h.g.CreateInvite("", false)
 	w := h.do(req{method: "POST", path: "/_ir/api/join/options", body: joinRequest{Token: tokenOf(t, inv1.URL), Name: ptr("pad")}})
 	c := decode[ceremonyReply](t, w)
 	h.cookie = ""
@@ -620,7 +667,7 @@ func TestLocalMode(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.h.ServeHTTP(w, r)
 	wantStatus(t, w, http.StatusFound)
-	if _, err := h.g.CreateInvite(""); err != ErrNotPublic {
+	if _, err := h.g.CreateInvite("", false); err != ErrNotPublic {
 		t.Fatalf("invite in local mode: %v", err)
 	}
 }

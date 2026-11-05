@@ -849,7 +849,8 @@ export interface Rules {
    */
   agents: Agent[];
   /**
-   * ClaudeOwner: a panel confirmed that this terminal is the owner's own (Claude's terms).
+   * ClaudeOwner: the terminal is the owner's own (Claude's terms), as said on the machine. Only
+   * the server writes it; the web may take Claude away but never give it.
    */
   claudeOwner?: OwnerConfirm;
   /**
@@ -882,10 +883,14 @@ export interface Rules {
   commands: string[];
 }
 /**
- * OwnerConfirm is who confirmed, and when (ms), that a terminal is the owner's own.
+ * OwnerConfirm is how, and when (ms), a terminal was found the owner's own.
  */
 export interface OwnerConfirm {
-  by: string; // the confirming panel's ID
+  /**
+   * By: "local" (a person's ir on the machine: ir invite --owner, ir token --owner,
+   * ir access --claude on) or "first" (the first panel registered).
+   */
+  by: string;
   at: number /* int64 */;
 }
 /**
@@ -912,6 +917,7 @@ export interface PendingInvite {
   id: string;
   name?: string;
   setup?: boolean; // the first-run link in the state directory
+  owner?: boolean; // ir invite --owner: the panel gets Claude
   createdAt: number /* int64 */;
   expiresAt?: number /* int64 */;
 }
@@ -931,9 +937,12 @@ export interface Me extends Terminal {
 }
 /**
  * NewInvite asks for a panel invite (ir invite [name]) or a channel token (ir token <name>).
+ * Owner (--owner): the terminal is the owner's own and gets Claude; only a person's ir on the
+ * machine may say so.
  */
 export interface NewInvite {
   name?: string;
+  owner?: boolean;
 }
 /**
  * Invite is a new panel invite. URL holds the secret: only a panel (or ir at a terminal) sees it.
@@ -956,12 +965,11 @@ export interface Token {
   token: string;
 }
 /**
- * SetRules changes a terminal's permission table. OwnerConfirmed: the panel says the terminal is
- * the owner's own, which adding claude needs.
+ * SetRules changes a terminal's permission table. Adding claude is for a person's ir on the
+ * machine only (ir access <name> --claude on); anyone that manages may take it away.
  */
 export interface SetRules {
   rules: Rules;
-  ownerConfirmed?: boolean;
 }
 /**
  * Confirm is what an agent's ir asked for that only a panel may give (an invite link, a token):

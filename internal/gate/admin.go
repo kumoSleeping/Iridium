@@ -31,6 +31,7 @@ type InviteInfo struct {
 	ID        string    `json:"id"`
 	Name      string    `json:"name,omitempty"`
 	Setup     bool      `json:"setup,omitempty"`
+	Owner     bool      `json:"owner,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 	ExpiresAt time.Time `json:"expiresAt,omitzero"`
 }
@@ -68,8 +69,9 @@ func infoOf(e Endpoint) EndpointInfo {
 
 // CreateInvite makes a one-time link (valid InviteTTL) for a new web panel: `ir invite
 // [名字]`. A name, if given, is reserved for the invite and offered to the joiner, who may
-// change it.
-func (g *Gate) CreateInvite(name string) (InviteLink, error) {
+// change it. owner (ir invite --owner): the panel that joins with it is the owner's own; Joined
+// says so.
+func (g *Gate) CreateInvite(name string, owner bool) (InviteLink, error) {
 	if !g.public {
 		return InviteLink{}, ErrNotPublic
 	}
@@ -88,11 +90,11 @@ func (g *Gate) CreateInvite(name string) (InviteLink, error) {
 	for g.st.invites[id].ID != "" {
 		id = newID(5)
 	}
-	inv := Invite{ID: id, Hash: hashToken(token), Name: name, CreatedAt: now, ExpiresAt: now.Add(InviteTTL)}
+	inv := Invite{ID: id, Hash: hashToken(token), Name: name, Owner: owner, CreatedAt: now, ExpiresAt: now.Add(InviteTTL)}
 	if err := g.commitLocked(Change{Invites: []Invite{inv}}); err != nil {
 		return InviteLink{}, err
 	}
-	g.log.Info("gate: invite created", "invite", inv.ID, "name", name)
+	g.log.Info("gate: invite created", "invite", inv.ID, "name", name, "owner", owner)
 	return InviteLink{ID: inv.ID, Name: name, URL: g.joinURL(token), ExpiresAt: inv.ExpiresAt}, nil
 }
 
@@ -156,9 +158,10 @@ func (g *Gate) Access() Access {
 		info.Sessions, info.Online = sessions[e.ID], online[e.ID]
 		out.Endpoints = append(out.Endpoints, info)
 	}
+	panel := g.hasPanelLocked() // then a setup link is no use, and not listed
 	for _, inv := range st.Invites {
-		if inv.Setup || now.Before(inv.ExpiresAt) {
-			out.Invites = append(out.Invites, InviteInfo{ID: inv.ID, Name: inv.Name, Setup: inv.Setup,
+		if (inv.Setup && !panel) || (!inv.Setup && now.Before(inv.ExpiresAt)) {
+			out.Invites = append(out.Invites, InviteInfo{ID: inv.ID, Name: inv.Name, Setup: inv.Setup, Owner: inv.Owner,
 				CreatedAt: inv.CreatedAt, ExpiresAt: inv.ExpiresAt})
 		}
 	}

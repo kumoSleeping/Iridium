@@ -20,6 +20,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	irAccess "github.com/kumoSleeping/iridium/internal/access"
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/config"
 	"github.com/kumoSleeping/iridium/internal/public"
@@ -150,13 +151,40 @@ func failed(stderr io.Writer, cmd string, err error) int {
 	return 1
 }
 
-// invite: ir invite [名字]. A person gets the link; an agent, only what the panel decided.
+// ownerFlag takes --owner out of args: the terminal is the owner's own, so it gets Claude.
+func ownerFlag(args []string) (rest []string, owner bool) {
+	for _, a := range args {
+		if a == "--owner" {
+			owner = true
+		} else {
+			rest = append(rest, a)
+		}
+	}
+	return rest, owner
+}
+
+// personOnly refuses what only a person at the machine may do (give a terminal Claude) when an
+// agent runs ir, by the same signs that keep secrets from agents. The daemon refuses it too.
+func personOnly(e adminEnv, cmd, what string, stderr io.Writer) bool {
+	if !e.agent {
+		return true
+	}
+	fmt.Fprintf(stderr, "ir %s: %s只能你本人在本机的终端里跑；agent 不能给终端 Claude（Claude 只给本人的终端）。\n", cmd, what)
+	return false
+}
+
+// invite: ir invite [名字] [--owner]. A person gets the link; an agent, only what the panel
+// decided. --owner (a person only): the panel is the owner's own and gets Claude.
 func invite(e adminEnv, args []string, stdout, stderr io.Writer) int {
-	if len(args) > 1 {
-		fmt.Fprintln(stderr, "用法：ir invite [名字]")
+	args, owner := ownerFlag(args)
+	if len(args) > 1 || (len(args) == 1 && strings.HasPrefix(args[0], "-")) {
+		fmt.Fprintln(stderr, "用法：ir invite [名字] [--owner]\n  --owner：确认这是我本人用的终端，带 Claude")
 		return 2
 	}
-	req := api.NewInvite{}
+	if owner && !personOnly(e, "invite", "--owner ", stderr) {
+		return 2
+	}
+	req := api.NewInvite{Owner: owner}
 	if len(args) == 1 {
 		req.Name = args[0]
 	}
@@ -172,18 +200,27 @@ func invite(e adminEnv, args []string, stdout, stderr io.Writer) int {
 	if err := json.Unmarshal(raw, &inv); err != nil {
 		return failed(stderr, "invite", err)
 	}
-	fmt.Fprintf(stdout, "新网页面板的邀请（%s 前有效，只能用一次）：\n\n  %s\n\n在那台设备的浏览器里打开，起名、建 Passkey。\n", hhmm(inv.ExpiresAt), inv.URL)
+	claude := "不带 Claude（要带：ir invite --owner）"
+	if owner {
+		claude = "带 Claude"
+	}
+	fmt.Fprintf(stdout, "新网页面板的邀请（%s 前有效，只能用一次，%s）：\n\n  %s\n\n在那台设备的浏览器里打开，起名、建 Passkey。\n", hhmm(inv.ExpiresAt), claude, inv.URL)
 	return 0
 }
 
-// token: ir token <名字>. A person gets the token; an agent, only what the panel decided.
+// token: ir token <名字> [--owner]. A person gets the token; an agent, only what the panel
+// decided. --owner (a person only): the plugin is the owner's own and gets Claude.
 func token(e adminEnv, args []string, stdout, stderr io.Writer) int {
-	if len(args) != 1 {
-		fmt.Fprintln(stderr, "用法：ir token <名字>")
+	args, owner := ownerFlag(args)
+	if len(args) != 1 || strings.HasPrefix(args[0], "-") {
+		fmt.Fprintln(stderr, "用法：ir token <名字> [--owner]\n  --owner：确认这是我本人用的终端，带 Claude")
+		return 2
+	}
+	if owner && !personOnly(e, "token", "--owner ", stderr) {
 		return 2
 	}
 	var raw json.RawMessage
-	code, err := e.call("POST", "/api/terminals/tokens", api.NewInvite{Name: args[0]}, &raw)
+	code, err := e.call("POST", "/api/terminals/tokens", api.NewInvite{Name: args[0], Owner: owner}, &raw)
 	if err != nil {
 		return failed(stderr, "token", err)
 	}
@@ -194,7 +231,11 @@ func token(e adminEnv, args []string, stdout, stderr io.Writer) int {
 	if err := json.Unmarshal(raw, &t); err != nil {
 		return failed(stderr, "token", err)
 	}
-	fmt.Fprintf(stdout, "%s 的 TOKEN（只显示这一次；再跑一次就换新的，旧的作废）：\n\n  %s\n\n请求带 Authorization: Bearer <TOKEN>。\n", t.Terminal.Name, t.Token)
+	claude := "不带 Claude"
+	if irAccess.HasClaude(t.Terminal.Rules) {
+		claude = "带 Claude"
+	}
+	fmt.Fprintf(stdout, "%s 的 TOKEN（只显示这一次；再跑一次就换新的，旧的作废；%s）：\n\n  %s\n\n请求带 Authorization: Bearer <TOKEN>。\n", t.Terminal.Name, claude, t.Token)
 	return 0
 }
 
@@ -242,19 +283,38 @@ func hhmm(ms int64) string {
 	return time.UnixMilli(ms).Format("15:04")
 }
 
-// access: ir access, every terminal and unused invite. Nothing secret.
+// access: ir access, every terminal and unused invite (nothing secret); ir access <名字> --claude
+// on|off, Claude for a terminal (on: a person only).
 func access(e adminEnv, args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 {
+		var ref, val string
+		switch {
+		case len(args) == 3 && args[1] == "--claude":
+			ref, val = args[0], args[2]
+		case len(args) == 2 && strings.HasPrefix(args[1], "--claude="):
+			ref, val = args[0], strings.TrimPrefix(args[1], "--claude=")
+		}
+		if ref == "" || strings.HasPrefix(ref, "-") || (val != "on" && val != "off") {
+			fmt.Fprintln(stderr, "用法：ir access [<名字> --claude on|off]")
+			return 2
+		}
+		return claudeSwitch(e, ref, val == "on", stdout, stderr)
+	}
 	var ts api.Terminals
 	if _, err := e.call("GET", "/api/terminals", nil, &ts); err != nil {
 		return failed(stderr, "access", err)
 	}
-	rows := [][]string{{"名字", "类型", "ID", "在线", "今天用量", "上次"}}
+	rows := [][]string{{"名字", "类型", "ID", "Claude", "在线", "今天用量", "上次"}}
 	for _, t := range ts.Terminals {
 		kind := map[api.TerminalKind]string{api.TerminalPanel: "面板", api.TerminalChannel: "通道"}[t.Kind]
 		if t.Local {
 			kind = "内置"
 		}
-		rows = append(rows, []string{t.Name, kind, t.ID, strconv.Itoa(t.Online), strconv.FormatInt(t.UsedToday, 10), when(t.LastSeenAt)})
+		claude := "—"
+		if irAccess.HasClaude(t.Rules) {
+			claude = "开"
+		}
+		rows = append(rows, []string{t.Name, kind, t.ID, claude, strconv.Itoa(t.Online), strconv.FormatInt(t.UsedToday, 10), when(t.LastSeenAt)})
 	}
 	table(stdout, rows)
 	if len(ts.Invites) > 0 {
@@ -265,9 +325,54 @@ func access(e adminEnv, args []string, stdout, stderr io.Writer) int {
 			if i.Setup {
 				until = "首次设置（状态目录里的 setup-token）"
 			}
+			if i.Owner {
+				until += "，带 Claude"
+			}
 			rows = append(rows, []string{"", i.ID, i.Name, until})
 		}
 		table(stdout, rows)
+	}
+	return 0
+}
+
+// claudeSwitch turns Claude on or off for terminal ref (name or ID): its permission table with
+// claude added or taken out. Only a person at the machine turns it on; the daemon checks too.
+func claudeSwitch(e adminEnv, ref string, on bool, stdout, stderr io.Writer) int {
+	if on && !personOnly(e, "access", "--claude on ", stderr) {
+		return 2
+	}
+	var ts api.Terminals
+	if _, err := e.call("GET", "/api/terminals", nil, &ts); err != nil {
+		return failed(stderr, "access", err)
+	}
+	var t *api.Terminal
+	for i, x := range ts.Terminals {
+		if x.ID == ref || strings.EqualFold(x.Name, ref) {
+			t = &ts.Terminals[i]
+			break
+		}
+	}
+	switch {
+	case t == nil:
+		return failed(stderr, "access", fmt.Errorf("没有叫 %s 的终端", ref))
+	case t.Local:
+		fmt.Fprintln(stdout, "本机一直有 Claude，不用开关。")
+		return 0
+	case irAccess.HasClaude(t.Rules) == on:
+		fmt.Fprintf(stdout, "%s 的 Claude 本来就%s。\n", t.Name, map[bool]string{true: "开着", false: "关着"}[on])
+		return 0
+	}
+	r := irAccess.WithoutClaude(t.Rules)
+	if on {
+		r.Agents = append(r.Agents, api.AgentClaude) // the daemon marks it the owner's own
+	}
+	if _, err := e.call("PUT", "/api/terminals/"+url.PathEscape(t.ID)+"/rules", api.SetRules{Rules: r}, nil); err != nil {
+		return failed(stderr, "access", err)
+	}
+	if on {
+		fmt.Fprintf(stdout, "给 %s 开了 Claude：确认它是你本人用的终端。\n", t.Name)
+	} else {
+		fmt.Fprintf(stdout, "关了 %s 的 Claude；要再开，在本机跑 ir access %s --claude on。\n", t.Name, t.Name)
 	}
 	return 0
 }

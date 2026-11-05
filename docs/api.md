@@ -291,9 +291,9 @@ Web Push，总开关在配置 `push`，默认关。VAPID 密钥存在状态目�
 | `PUT /api/me/profile` | 资料 → `EndpointInfo` | 改自己的名字、头像（见 `docs/gate.md`）；本机回 409 |
 | `PUT /api/endpoints/{id}/profile` | 同上 | 改别的终端的（`id` 也可以是名字）；`/api/terminals/{id}/profile` 同 |
 | `GET /api/terminals` | → `Terminals` | `ir access`：所有终端（本机在最前）、权限表、今天的用量，和未用的邀请。没有秘密 |
-| `POST /api/terminals/invites` | `NewInvite` → `Invite` | `ir invite [名字]`：新面板的一次性链接（10 分钟），`qr` 是同一链接的二维码（SVG data URL）。要先有 `public.origin`（否则 409）。没有面板权时回 202 `Pending` |
-| `POST /api/terminals/tokens` | `NewInvite` → `Token` | `ir token <名字>`：插件 TOKEN，只给这一次；已有的通道换新 TOKEN，旧的作废。没有面板权时回 202 `Pending` |
-| `PUT /api/terminals/{id}/rules` | `SetRules` → `Terminal` | 改权限表。放宽要面板权；加 Claude 还要 `ownerConfirmed: true` |
+| `POST /api/terminals/invites` | `NewInvite` → `Invite` | `ir invite [名字]`：新面板的一次性链接（10 分钟），`qr` 是同一链接的二维码（SVG data URL）。要先有 `public.origin`（否则 409）。没有面板权时回 202 `Pending`。`owner: true`（`--owner`）：加入的面板带 Claude，只认本机由人跑的 `ir`，否则 403 |
+| `POST /api/terminals/tokens` | `NewInvite` → `Token` | `ir token <名字>`：插件 TOKEN，只给这一次；已有的通道换新 TOKEN，旧的作废。没有面板权时回 202 `Pending`。`owner: true` 同上：给它开 Claude |
+| `PUT /api/terminals/{id}/rules` | `SetRules` → `Terminal` | 改权限表。放宽要面板权；加 Claude 只认本机由人跑的 `ir`（`ir access <名字> --claude on`），网页和 agent 一律 403；去掉 Claude 谁管都行 |
 | `DELETE /api/terminals/{id}` | → `{ok}` | `ir revoke`：终端（连同登录、权限、连接）或未用的邀请；最后一个有 Passkey 的面板删不了（409） |
 
 ## 权限表（`Rules`）
@@ -301,7 +301,7 @@ Web Push，总开关在配置 `push`，默认关。VAPID 密钥存在状态目�
 | 项 | 说明 |
 |---|---|
 | `agents` | 能用哪些 agent，也只看得到这些 agent 的会话。`claude` 另要 `claudeOwner` |
-| `claudeOwner` | 面板确认过“这是我本人在用”（Claude 用户协议）：`{by: 面板 ID, at}`，服务端写，请求里带的不算。去掉 Claude 就清掉 |
+| `claudeOwner` | 这是你本人的终端（Claude 用户协议）：`{by, at}`，`by` 是 `local`（本机 `ir` 的 `--owner`、`--claude on`）或 `first`（第一个面板）。服务端写，请求里带的不算。去掉 Claude 就清掉 |
 | `allDirs`、`dirs`、`workspaces` | 能用哪些目录：全部，或某些目录（含下层）和工作区 |
 | `seeOthers` | 看不看别的终端开的会话；不经 Iridium 开的算本机的 |
 | `filesIn`、`filesOut` | 拷入（上传、附件、按路径）、拷出（下载、缩略图、插件取文件） |
@@ -310,7 +310,7 @@ Web Push，总开关在配置 `push`，默认关。VAPID 密钥存在状态目�
 | `dailyTokens` | 每天（本地时间）它起的回合用的 token 上限（输入、输出、缓存都算），0 不限；到了回 429 |
 | `allCommands`、`commands` | 能发哪些 `/` 命令：全部，或列出的（如 `/compact`） |
 
-默认：面板除 Claude 外全开；通道除 Claude 外，只看自己开的会话、必须审批。没存过表的终端用默认。
+默认：面板除 Claude 外全开（第一个面板连 Claude 也开）；通道除 Claude 外，只看自己开的会话、必须审批。没存过表的终端用默认。
 
 每个会话接口都查：列表（和事件流的 `list`）只给看得到的；看、读消息、取全文看不到就 404；发消息查 agent、命令、审批模式、上限（带附件另查 `filesIn`）；开会话查 agent、目录、模式、命令、上限，并记下是谁开的；停、中断、换模型和强度、待发队列、改名置顶查 agent；换审批模式另查 `mustApprove`；答提问（含 `POST /api/answer` 的卡片）另查 `answer`。
 

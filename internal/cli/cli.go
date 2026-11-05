@@ -24,7 +24,9 @@ const Help = `ir：本机 Iridium 的命令行（经 unix socket）。<id> 写�
   退出码：0 结束，2 需要你（提问、审批），1 出错或已退出。路径可写 机器:路径
 管理（agent 调用时 TOKEN 不进对话，由网页面板确认）：
   ir invite [名字] | token <名字>    新网页面板的链接 | 插件 TOKEN
+    --owner：确认这是我本人用的终端，带 Claude（只能你本人跑，agent 不行）
   ir access | revoke <名字>          列出终端和邀请 | 撤销
+  ir access <名字> --claude on|off   开关 Claude（开：同 --owner）
   ir profile <名字> [--name 新名] [--avatar 图片]
   ir public [off]                    经 Cloudflare 上公网（在终端里跑）
   ir update [--check]                更新 Iridium

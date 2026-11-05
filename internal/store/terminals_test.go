@@ -44,7 +44,7 @@ func TestGateStore(t *testing.T) {
 	bot := gate.Endpoint{ID: "bbbbbbbbbbbbbbbb", Name: "bot", Kind: gate.KindChannel, TokenHash: "abc", CreatedAt: t0.Add(time.Second)}
 	other := gate.Endpoint{ID: "cccccccccccccccc", Name: "other", Kind: gate.KindChannel, CreatedAt: t0.Add(2 * time.Second)}
 	setup := gate.Invite{ID: "setup", Hash: "h0", Setup: true, CreatedAt: t0}
-	inv := gate.Invite{ID: "invite01", Hash: "h1", Name: "pad", CreatedAt: t0, ExpiresAt: t0.Add(10 * time.Minute)}
+	inv := gate.Invite{ID: "invite01", Hash: "h1", Name: "pad", Owner: true, CreatedAt: t0, ExpiresAt: t0.Add(10 * time.Minute)}
 	login := gate.Session{Hash: "s1", EndpointID: panel.ID, CreatedAt: t0, LastSeenAt: t0, ExpiresAt: t0.Add(7 * 24 * time.Hour)}
 	must(t, g.Apply(gate.Change{Endpoints: []gate.Endpoint{panel, bot, other}, Invites: []gate.Invite{setup, inv}, Sessions: []gate.Session{login}}))
 	// Ordered by creation, then ID.

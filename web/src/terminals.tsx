@@ -1,12 +1,12 @@
 // The settings' 终端 page (plan "交互终端", docs/api.md "交互终端"): every interactive terminal —
 // 本机, the web panels, the channels (plugins, peers) — with its avatar, name, kind, when it was
-// last used and today's use; one opened shows its name and its permission table to change (giving
-// a terminal Claude takes the panel's word that it is the owner's own), and revoking it. The +
+// last used and today's use; one opened shows its name and its permission table to change (Claude
+// only shows: the web may turn it off, never on; that is ir's on the machine), and revoking it. The +
 // makes a new panel's invite (its link and QR code) or a plugin's token, shown once. What agents'
 // ir asked for waits on top. Changes are saved at once.
 import { Popover } from "@base-ui/react/popover";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, KeyRound, Link2, LoaderCircle, Plus, ShieldCheck, Trash2, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, KeyRound, Link2, LoaderCircle, Plus, Trash2, X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { ApiError, api } from "./api/client";
 import type { Agent, Rules, Terminal, Terminals } from "./api/types.gen";
@@ -75,6 +75,7 @@ export function TerminalsPage({ phone, onBack }: { phone: boolean; onBack: () =>
                 <div key={i.id} className="flex min-h-10 items-center gap-3">
                   <Link2 size={15} className="shrink-0 text-ink-3" />
                   <span className="min-w-0 flex-1 truncate text-base">{i.setup ? t("term.setup") : i.name || <span className="text-ink-3">{t("term.unnamed")}</span>}</span>
+                  {i.owner && <span className="shrink-0 text-xs text-ink-3">{t("term.withClaude")}</span>}
                   {i.expiresAt ? <span className="text-xs text-ink-3 tabular-nums">{t("term.until", { time: clock(i.expiresAt) })}</span> : null}
                   <IconKey label={t("term.revoke")} onClick={() => void revoke(qc, i.id, i.name || t("term.unnamed"))} className="size-7">
                     <X size={15} />
@@ -202,21 +203,24 @@ function Detail({ x }: { x: Terminal }) {
   );
 }
 
-/** A terminal's permission table (docs/api.md "权限表"), each change saved at once. Giving it Claude
- *  first asks: is this terminal the owner's own (Claude's terms)? */
+/** Claude is on: the server marked the terminal the owner's own. */
+export const hasClaude = (r: Rules) => !!r.claudeOwner && (r.agents ?? []).includes("claude");
+
+/** A terminal's permission table (docs/api.md "权限表"), each change saved at once. Claude only
+ *  shows, on or off, and may be turned off: only a person at the machine turns it on (Claude's
+ *  terms: the owner's own terminals only), with ir. */
 function RulesEditor({ x }: { x: Terminal }) {
   const qc = useQueryClient();
   const ws = useWorkspaces().data ?? [];
   const [r, setR] = useState<Rules>(x.rules);
-  const [owner, setOwner] = useState(false);
   const [saving, setSaving] = useState(false);
   useEffect(() => setR(x.rules), [x.rules]);
-  const put = async (next: Rules, ownerConfirmed = false) => {
+  const put = async (next: Rules) => {
     const was = r;
     setR(next);
     setSaving(true);
     try {
-      const got = await api.setRules(x.id, { rules: next, ownerConfirmed });
+      const got = await api.setRules(x.id, { rules: next });
       qc.setQueryData<Terminals | null>(["terminals"], (d) => d && { ...d, terminals: d.terminals.map((y) => (y.id === x.id ? got : y)) });
     } catch (e) {
       setR(was);
@@ -226,11 +230,8 @@ function RulesEditor({ x }: { x: Terminal }) {
     }
   };
   const agents = r.agents ?? [];
-  const toggleAgent = (a: Agent) => {
-    if (agents.includes(a)) return void put({ ...r, agents: agents.filter((y) => y !== a) });
-    if (a === "claude") return setOwner(true);
-    void put({ ...r, agents: [...agents, a] });
-  };
+  const claude = hasClaude(r);
+  const toggleAgent = (a: Agent) => void put({ ...r, agents: agents.includes(a) ? agents.filter((y) => y !== a) : [...agents, a] });
   const flag = (k: "seeOthers" | "filesIn" | "filesOut" | "answer" | "mustApprove", label: string, hint?: string) => (
     <Item label={label} hint={hint}>
       <Switch label={label} on={!!r[k]} onChange={(v) => void put({ ...r, [k]: v })} />
@@ -240,7 +241,7 @@ function RulesEditor({ x }: { x: Terminal }) {
     <Group title={saving ? `${t("me.perms")} ·` : t("me.perms")}>
       <Item label={t("perm.agents")}>
         <div className="flex gap-1">
-          {AGENTS.map((a) => (
+          {AGENTS.filter((a) => a !== "claude").map((a) => (
             <Tip key={a} label={agentName(a)}>
               <button
                 type="button"
@@ -255,21 +256,16 @@ function RulesEditor({ x }: { x: Terminal }) {
           ))}
         </div>
       </Item>
-      {owner && (
-        <CardFrame label={t("term.ownerTitle")} className="my-1">
-          <CardHead
-            icon={<ShieldCheck size={16} />}
-            title={t("term.ownerTitle")}
-            summary={t("term.ownerHint")}
-            keys={
-              <>
-                <SecondKey onClick={() => setOwner(false)}>{t("me.cancel")}</SecondKey>
-                <MainKey onClick={() => (setOwner(false), void put({ ...r, agents: [...agents, "claude"] }, true))}>{t("term.ownerYes")}</MainKey>
-              </>
-            }
-          />
-        </CardFrame>
-      )}
+      <Item label={agentName("claude")} hint={claude ? t("term.claudeOnHint") : t("term.claudeOffHint", { name: /\s/.test(x.name) ? `"${x.name}"` : x.name })}>
+        <span className="flex items-center gap-1">
+          <span className={cn("px-1 text-sm", claude ? "text-ink-2" : "text-ink-3")}>{claude ? t("term.on") : t("term.off")}</span>
+          {claude && (
+            <button type="button" onClick={() => void put({ ...r, agents: agents.filter((y) => y !== "claude"), claudeOwner: undefined })} className="g-press h-8 rounded-md px-2.5 text-sm text-ink-2 hover:bg-fill">
+              {t("term.claudeTurnOff")}
+            </button>
+          )}
+        </span>
+      </Item>
       <Item label={t("term.places")} hint={r.allDirs ? undefined : placesHint(r, ws)}>
         <Segmented
           label={t("term.places")}

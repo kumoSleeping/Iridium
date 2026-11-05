@@ -36,7 +36,7 @@ describe("api", () => {
     await api.answer({ card: "ask:s1:r", choices: ["0.1"], words: ["", "mine"] });
     await api.editQueued("s1", "in 1", "again");
     await api.putSettings({ idleReap: "2h", modes: { claude: "plan" } });
-    await api.setRules("t 1", { rules: { agents: ["claude"] } as never, ownerConfirmed: true });
+    await api.setRules("t 1", { rules: { agents: ["codex"] } as never });
     await api.answerConfirm("c1", true);
     expect(calls.map((c) => [c.method, c.url, c.body])).toEqual([
       ["POST", "/api/sessions/s1/send", { text: "hi" }],
@@ -45,7 +45,7 @@ describe("api", () => {
       ["POST", "/api/answer", { card: "ask:s1:r", choices: ["0.1"], words: ["", "mine"] }],
       ["PUT", "/api/sessions/s1/queue/in%201", { text: "again" }],
       ["PUT", "/api/settings", { idleReap: "2h", modes: { claude: "plan" } }],
-      ["PUT", "/api/terminals/t%201/rules", { rules: { agents: ["claude"] }, ownerConfirmed: true }],
+      ["PUT", "/api/terminals/t%201/rules", { rules: { agents: ["codex"] } }],
       ["POST", "/api/confirms/c1", { allow: true }],
     ]);
     expect(calls.every((c) => c.headers.get("x-requested-with") === "XMLHttpRequest")).toBe(true);

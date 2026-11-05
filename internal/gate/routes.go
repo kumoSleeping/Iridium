@@ -332,17 +332,21 @@ func (g *Gate) apiJoinVerify(w http.ResponseWriter, r *http.Request, key string)
 		CreatedAt: now, LastSeenAt: now,
 	}
 	token, s := g.newSessionLocked(ep.ID, now)
-	err = g.commitLocked(Change{DeleteInvites: []string{inv.ID}, Endpoints: []Endpoint{ep}, Sessions: []Session{s}})
+	first := !g.hasPanelLocked()
+	// With a panel there, the first-run link has done its part, whichever invite was used.
+	del := append(g.setupInvitesLocked(), inv.ID)
+	err = g.commitLocked(Change{DeleteInvites: del, Endpoints: []Endpoint{ep}, Sessions: []Session{s}})
 	g.mu.Unlock()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, apiError{"internal"})
 		return
 	}
-	if inv.Setup {
-		g.removeSetupFile()
-	}
+	g.removeSetupFile()
 	g.lim.success(key)
-	g.log.Info("gate: panel joined", "endpoint", ep.ID, "name", ep.Name, "client", key, "setup", inv.Setup)
+	g.log.Info("gate: panel joined", "endpoint", ep.ID, "name", ep.Name, "client", key, "setup", inv.Setup, "owner", inv.Owner, "first", first)
+	if g.cfg.OnJoin != nil {
+		g.cfg.OnJoin(Joined{Endpoint: infoOf(ep), Owner: inv.Owner, First: first})
+	}
 	http.SetCookie(w, sessionCookie(token))
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "name": name})
 }

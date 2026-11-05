@@ -70,6 +70,9 @@ type Config struct {
 	// connections closed.
 	OnRevoke func(endpointID string)
 
+	// OnJoin runs after a new panel registered, before its browser hears so.
+	OnJoin func(Joined)
+
 	Logger *slog.Logger     // default slog.Default()
 	Now    func() time.Time // default time.Now; for tests
 }
@@ -100,6 +103,14 @@ type Gate struct {
 	stop      chan struct{}
 	done      chan struct{}
 	closeOnce sync.Once
+}
+
+// Joined is a panel just registered: Owner, its invite was made with ir invite --owner; First, no
+// other panel was there (the owner's own, by the first-run setup or the first invite).
+type Joined struct {
+	Endpoint EndpointInfo
+	Owner    bool
+	First    bool
 }
 
 // Identity is who sent a request, as Wrap found it.
@@ -203,7 +214,7 @@ func New(cfg Config) (*Gate, error) {
 	if err != nil {
 		return nil, err
 	}
-	if g.public && cfg.StateDir != "" {
+	if cfg.StateDir != "" {
 		if err := g.ensureSetup(); err != nil {
 			return nil, err
 		}
@@ -475,20 +486,36 @@ func (g *Gate) hasPasskeyLocked() bool {
 	return false
 }
 
+// hasPanelLocked reports whether any panel is registered.
+func (g *Gate) hasPanelLocked() bool {
+	for _, e := range g.st.endpoints {
+		if e.Kind == KindPanel {
+			return true
+		}
+	}
+	return false
+}
+
 func (g *Gate) joinURL(token string) string { return g.origin + "/_ir/join#" + token }
 
-// ensureSetup replaces any old setup token: a new one while no panel has a passkey,
-// none after.
+// setupInvitesLocked are the setup invites' IDs.
+func (g *Gate) setupInvitesLocked() []string {
+	var ids []string
+	for id, inv := range g.st.invites {
+		if inv.Setup {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+// ensureSetup replaces any old setup token: a new one in public mode while no panel is
+// registered, none after (nor in local mode), and then no file either.
 func (g *Gate) ensureSetup() error {
 	path := filepath.Join(g.cfg.StateDir, setupFile)
 	g.mu.Lock()
-	var ch Change
-	for id, inv := range g.st.invites {
-		if inv.Setup {
-			ch.DeleteInvites = append(ch.DeleteInvites, id)
-		}
-	}
-	need := !g.hasPasskeyLocked()
+	ch := Change{DeleteInvites: g.setupInvitesLocked()}
+	need := g.public && !g.hasPanelLocked()
 	var token string
 	if need {
 		token = newToken()

@@ -42,6 +42,10 @@ type caller struct {
 // panel, or 本机 when a person runs ir (or the page, with no public origin).
 func (c caller) panel() bool { return !c.agent && (c.Kind == gate.KindPanel || c.Local) }
 
+// machine reports whether a person at the machine sent it: ir over the socket, as 本机, not run
+// by an agent. Only that gives a terminal Claude (Claude's terms: the owner's own terminals only).
+func (c caller) machine() bool { return c.socket && c.Local && !c.agent }
+
 type callerKey struct{}
 
 func callerOf(r *http.Request) caller {
@@ -96,6 +100,7 @@ func (s *Server) newGate(origin string) (*gate.Gate, error) {
 		Store:        s.st.Gate(),
 		StateDir:     s.cfg.StatePath(),
 		Hosts:        s.cfg.Hosts,
+		OnJoin:       s.joined,
 		Logger:       slog.New(slog.NewTextHandler(logWriter{s.logf}, nil)),
 	})
 }
@@ -487,24 +492,25 @@ func ms(t time.Time) int64 {
 	return t.UnixMilli()
 }
 
-// widened is the rules a change asks for, checked: only a panel widens, adding claude needs its
-// word that the terminal is the owner's, and the confirmation itself is the server's to write.
+// widened is the rules a change asks for, checked: only a panel widens, and only a person at the
+// machine adds claude (no panel, not for itself nor for others); taking it away is anyone's that
+// manages. The owner mark is the server's to write: one in the request counts for nothing.
 func widened(c caller, old api.Rules, req api.SetRules) (api.Rules, error) {
-	next := access.Clean(req.Rules)
+	r := req.Rules
+	r.ClaudeOwner = nil
+	if slices.Contains(r.Agents, api.AgentClaude) {
+		switch {
+		case access.HasClaude(old):
+			r.ClaudeOwner = old.ClaudeOwner
+		case !c.machine():
+			return access.Clean(r), access.ErrOwner
+		default:
+			r.ClaudeOwner = &api.OwnerConfirm{By: access.ByLocal, At: time.Now().UnixMilli()}
+		}
+	}
+	next := access.Clean(r)
 	if err := access.Validate(next); err != nil {
 		return next, err
-	}
-	next.ClaudeOwner = nil
-	if slices.Contains(next.Agents, api.AgentClaude) {
-		if old.ClaudeOwner != nil && slices.Contains(old.Agents, api.AgentClaude) {
-			next.ClaudeOwner = old.ClaudeOwner
-		} else if !c.panel() {
-			return next, access.ErrWiden
-		} else if !req.OwnerConfirmed {
-			return next, access.ErrOwner
-		} else {
-			next.ClaudeOwner = &api.OwnerConfirm{By: c.EndpointID, At: time.Now().UnixMilli()}
-		}
 	}
 	if access.Widens(old, next) && !c.panel() {
 		return next, access.ErrWiden

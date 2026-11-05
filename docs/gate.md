@@ -14,7 +14,8 @@
 - `kind`：`panel`（网页面板，Passkey 登录）或 `channel`（插件、节点，TOKEN）。
 - 名字：1–12 个字，字母、数字、空格和 `- _ .`；全角 ASCII 转半角，空格合并；不分大小写查重；`本机`、`未知`、`local`、`unknown` 保留。`[ ] / : ·` 之类不收，因为名字要放进 `[名字]`、`[QQ·张三]`、`mac:~/dir`。内部用 16 位随机 ID，比任何名字都长，不会混。
 - 新面板只能靠一次性邀请：`https://<域名>/_ir/join#<token>`，10 分钟。`#` 后面不进服务器日志；页面读到后立刻从地址栏去掉。打开后起名（边打边查重）、建 Passkey，成功才用掉邀请。邀请时定的名字只是预填，可改。
-- 首次：上公网且还没有 Passkey 时，启动会在状态目录写 `setup-token`（0600，内容就是一条 join 链接，不过期）；每次重启换新的；第一个面板注册后删掉。
+- 首次：上公网且还没有面板时，启动会在状态目录写 `setup-token`（0600，内容就是一条 join 链接，不过期）；每次重启换新的。只要有了面板（不管用哪个邀请进来的），文件和这条邀请就删掉，`ir access` 也不再列；启动时（本机模式也一样）发现有面板就清掉残留的。
+- Claude（Claude 用户协议：只给本人的终端）：面板注册后门调 `OnJoin(Joined{Endpoint, Owner, First})`。`First`：注册时还没有别的面板；`Owner`：邀请是 `ir invite --owner` 生成的（`CreateInvite(名字, owner)`，存在 `invites.owner`）。两者之一，服务端就给它开 Claude。插件同理：`ir token --owner`。网页不能开 Claude（规则接口只认本机由人跑的 `ir`，见 `docs/api.md`），只能关。
 - 每次注册用新的随机 user handle、不带 excludeCredentials（同步型 Passkey 提供方会互相覆盖或挡住新设备，Rhodium 踩过）。登录用可发现凭证，不把凭证 ID 发给未登录的人。计数器回退就拒绝。
 - 通道：`CreateToken(名字)` 建通道终端并给 TOKEN（`ir_` 开头）；对已有通道再调一次就换 TOKEN，旧的连接断开。请求带 `Authorization: Bearer <TOKEN>`，不查 Origin（TOKEN 不是浏览器自动带的）。
 - 名字和头像：`UpdateProfile`。头像收 PNG/JPEG/WebP，≤2MB，服务端居中裁方、缩到 128×128（不透明存 JPEG，透明存 PNG），照 JPEG 的 EXIF 方向转正。地址 `/_ir/avatar/<id>?v=<版本>`，带版本时可永久缓存（private）。
@@ -66,9 +67,10 @@ http.Serve(tcpListener, g.Wrap(mux))
 
 | 命令 | 函数 |
 |---|---|
-| `ir invite [名字]` | `CreateInvite(name)` → `InviteLink{ID, Name, URL, ExpiresAt}`（URL 带 TOKEN，只给确认面板看） |
-| `ir token <名字>` | `CreateToken(name)` → `EndpointInfo`、TOKEN |
+| `ir invite [名字] [--owner]` | `CreateInvite(name, owner)` → `InviteLink{ID, Name, URL, ExpiresAt}`（URL 带 TOKEN，只给确认面板看） |
+| `ir token <名字> [--owner]` | `CreateToken(name)` → `EndpointInfo`、TOKEN；`--owner` 时服务端再给它开 Claude |
 | `ir access` | `Access()` → 终端（含在线连接数、会话数）和未用邀请 |
+| `ir access <名字> --claude on\|off` | 服务端的 `PUT /api/terminals/{id}/rules`（开只认本机由人跑的 `ir`） |
 | `ir profile <名字> [--name] [--avatar]` | `UpdateProfile(ref, Profile{Name, Avatar, RemoveAvatar})` |
 | `ir revoke <名字>` | `Revoke(ref)`：终端或未用邀请；最后一个有 Passkey 的面板删不了（`ErrLastPasskey`） |
 
@@ -83,7 +85,7 @@ type Store interface {
 }
 ```
 
-现在用 SQLite（库的第 2 次迁移）：`terminals`（头像 BLOB，passkeys 存 JSON 列，`token_hash` 唯一）、`invites`（hash 唯一）、`logins`（门的“会话”，hash 主键，按终端建索引）三张表，时间存纳秒（0 是没有）；`Apply` 一个事务，删终端时连它的 `permissions` 一起删。删终端时门自己在同一个 `Change` 里删它的登录，不用级联。`JSONStore`（一个文件，0600，整文件重写）只给门的测试用。
+现在用 SQLite（库的第 3 次迁移；第 5 次加 `invites.owner`，并一次性给最早的面板开 Claude）：`terminals`（头像 BLOB，passkeys 存 JSON 列，`token_hash` 唯一）、`invites`（hash 唯一）、`logins`（门的“会话”，hash 主键，按终端建索引）三张表，时间存纳秒（0 是没有）；`Apply` 一个事务，删终端时连它的 `permissions` 一起删。删终端时门自己在同一个 `Change` 里删它的登录，不用级联。库文件和 `-wal`、`-shm` 都是 0600。`JSONStore`（一个文件，0600，整文件重写）只给门的测试用。
 
 ## 反代
 

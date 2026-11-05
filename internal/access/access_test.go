@@ -28,6 +28,20 @@ func TestDefaults(t *testing.T) {
 	if Clean(ch).ClaudeOwner != nil || Clean(Default(api.TerminalPanel)).ClaudeOwner != nil {
 		t.Error("an owner confirmation without claude")
 	}
+	if HasClaude(Clean(ch)) || len(Clean(ch).Agents) != 3 {
+		t.Errorf("clean kept claude without the owner's word: %+v", Clean(ch).Agents)
+	}
+	// On, and off again.
+	on := WithClaude(Default(api.TerminalChannel), ByLocal, 5)
+	if Agent(on, api.AgentClaude) != nil || on.ClaudeOwner.By != ByLocal || on.ClaudeOwner.At != 5 || !on.MustApprove {
+		t.Errorf("with claude: %+v", on)
+	}
+	if again := WithClaude(on, ByFirst, 9); again.ClaudeOwner.By != ByLocal {
+		t.Errorf("with claude twice: %+v", again.ClaudeOwner)
+	}
+	if off := WithoutClaude(on); HasClaude(off) || off.ClaudeOwner != nil || len(off.Agents) != 3 {
+		t.Errorf("without claude: %+v", off)
+	}
 }
 
 func TestWidens(t *testing.T) {

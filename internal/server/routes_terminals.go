@@ -84,7 +84,7 @@ func (s *Server) terminals(w http.ResponseWriter, r *http.Request) {
 		out.Terminals = append(out.Terminals, s.terminalOf(e))
 	}
 	for _, i := range a.Invites {
-		out.Invites = append(out.Invites, api.PendingInvite{ID: i.ID, Name: i.Name, Setup: i.Setup, CreatedAt: ms(i.CreatedAt), ExpiresAt: ms(i.ExpiresAt)})
+		out.Invites = append(out.Invites, api.PendingInvite{ID: i.ID, Name: i.Name, Setup: i.Setup, Owner: i.Owner, CreatedAt: ms(i.CreatedAt), ExpiresAt: ms(i.ExpiresAt)})
 	}
 	reply(w, http.StatusOK, out)
 }
@@ -116,7 +116,7 @@ func (s *Server) setRules(w http.ResponseWriter, r *http.Request) {
 	c := callerOf(r)
 	next, err := widened(c, s.rulesOf(id, info.Kind, false), req)
 	switch {
-	case errors.Is(err, access.ErrWiden), errors.Is(err, access.ErrOwner):
+	case access.IsDenied(err):
 		forbid(w, err)
 		return
 	case err != nil:
@@ -145,6 +145,11 @@ func (s *Server) invite(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &req) {
 		return
 	}
+	c := callerOf(r)
+	if req.Owner && !c.machine() {
+		forbid(w, errOwnerFlag)
+		return
+	}
 	if !s.gate().Public() {
 		fail(w, http.StatusConflict, "no public origin: a panel needs one for its passkey (ir public)")
 		return
@@ -153,12 +158,11 @@ func (s *Server) invite(w http.ResponseWriter, r *http.Request) {
 		s.gateDone(w, err)
 		return
 	}
-	c := callerOf(r)
 	if !c.panel() {
 		s.ask(w, c, "invite", req.Name)
 		return
 	}
-	inv, err := s.makeInvite(req.Name)
+	inv, err := s.makeInvite(req.Name, req.Owner)
 	if err != nil {
 		s.gateDone(w, err)
 		return
@@ -176,11 +180,15 @@ func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c := callerOf(r)
+	if req.Owner && !c.machine() {
+		forbid(w, errOwnerFlag)
+		return
+	}
 	if !c.panel() {
 		s.ask(w, c, "token", req.Name)
 		return
 	}
-	tok, err := s.makeToken(req.Name)
+	tok, err := s.makeToken(req.Name, req.Owner)
 	if err != nil {
 		s.gateDone(w, err)
 		return
@@ -195,8 +203,12 @@ func (s *Server) ask(w http.ResponseWriter, c caller, kind, name string) {
 	reply(w, http.StatusAccepted, api.Pending{Confirm: cf})
 }
 
-func (s *Server) makeInvite(name string) (*api.Invite, error) {
-	inv, err := s.gate().CreateInvite(name)
+// errOwnerFlag answers --owner from anyone but a person at the machine.
+var errOwnerFlag = errors.New("only a person at the machine says a terminal is the owner's own (--owner): not an agent, not the web")
+
+// makeInvite makes a panel invite; owner: the panel that joins gets Claude (joined).
+func (s *Server) makeInvite(name string, owner bool) (*api.Invite, error) {
+	inv, err := s.gate().CreateInvite(name, owner)
 	if err != nil {
 		return nil, err
 	}
@@ -208,12 +220,53 @@ func (s *Server) makeInvite(name string) (*api.Invite, error) {
 	return out, nil
 }
 
-func (s *Server) makeToken(name string) (*api.Token, error) {
+// makeToken gives channel name its token; owner (ir token --owner): it gets Claude too. Without
+// it, a channel that has Claude keeps it.
+func (s *Server) makeToken(name string, owner bool) (*api.Token, error) {
 	info, tok, err := s.gate().CreateToken(name)
 	if err != nil {
 		return nil, err
 	}
+	if owner {
+		if err := s.giveClaude(info, access.ByLocal); err != nil {
+			return nil, err
+		}
+	}
 	return &api.Token{Terminal: s.terminalOf(info), Token: tok}, nil
+}
+
+// giveClaude turns Claude on for terminal info: it is the owner's own, as by says.
+func (s *Server) giveClaude(info gate.EndpointInfo, by string) error {
+	r := s.rulesOf(info.ID, info.Kind, false)
+	if access.HasClaude(r) {
+		return nil
+	}
+	b, err := json.Marshal(access.WithClaude(r, by, time.Now().UnixMilli()))
+	if err != nil {
+		return err
+	}
+	if err := s.st.SetTerminalRules(info.ID, b); err != nil {
+		return err
+	}
+	s.logf("server: claude for %s (%s), the owner's own (%s)", info.Name, info.ID, by)
+	return nil
+}
+
+// joined is the gate's word that a panel registered: the first one, or one invited with
+// --owner, is the owner's own and gets Claude.
+func (s *Server) joined(j gate.Joined) {
+	by := ""
+	switch {
+	case j.First:
+		by = access.ByFirst
+	case j.Owner:
+		by = access.ByLocal
+	default:
+		return
+	}
+	if err := s.giveClaude(j.Endpoint, by); err != nil {
+		s.logf("server: claude for the new panel %s: %v", j.Endpoint.ID, err)
+	}
 }
 
 func (s *Server) answerConfirm(w http.ResponseWriter, r *http.Request) {
@@ -233,12 +286,12 @@ func (s *Server) answerConfirm(w http.ResponseWriter, r *http.Request) {
 		var err error
 		switch cf.Kind {
 		case "invite":
-			out.Invite, err = s.makeInvite(cf.Name)
+			out.Invite, err = s.makeInvite(cf.Name, false)
 			if err == nil {
 				st.Name, st.ExpiresAt = out.Invite.Name, out.Invite.ExpiresAt
 			}
 		case "token":
-			out.Token, err = s.makeToken(cf.Name)
+			out.Token, err = s.makeToken(cf.Name, false)
 			if err == nil {
 				st.Name = out.Token.Terminal.Name
 			}

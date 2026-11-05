@@ -50,6 +50,7 @@ type Invite struct {
 	Hash      string    `json:"hash"`           // SHA-256 (hex) of the token; the token itself is never stored
 	Name      string    `json:"name,omitempty"` // optional name chosen by the inviter; the joiner may change it
 	Setup     bool      `json:"setup,omitempty"`
+	Owner     bool      `json:"owner,omitempty"` // ir invite --owner: the joiner is the owner's own (Claude)
 	CreatedAt time.Time `json:"createdAt"`
 	ExpiresAt time.Time `json:"expiresAt"` // zero for the first-run setup token
 }
@@ -94,7 +95,7 @@ func (c Change) empty() bool {
 // For SQLite: tables endpoints (id primary key, name, kind, user_handle, token_hash
 // unique, avatar blob, avatar_version, created_at, last_seen_at; passkeys as a JSON
 // column or a child table keyed by credential ID), invites (id primary key, hash unique,
-// name, setup, created_at, expires_at) and sessions (hash primary key, endpoint_id
+// name, setup, owner, created_at, expires_at) and sessions (hash primary key, endpoint_id
 // indexed, created_at, last_seen_at, expires_at). Apply is one transaction: deletes, then
 // INSERT ... ON CONFLICT DO UPDATE. The gate deletes an endpoint's sessions itself, in the
 // same Change, so no cascade is needed.

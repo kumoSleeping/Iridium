@@ -13,7 +13,11 @@ IM、Bot、终端模拟（网页终端、TUI、Herdr）、组网（Tailscale）�
   - **界面型**（网页面板，每台浏览器一个）：Passkey 登录，看得到确认面板，收 Web Push。
   - **通道型**（插件、节点、本机 `ir`）：TOKEN 或节点密钥，走接口，用 SSE 收推送。
 - 每个都有唯一名字（≤12 字符，不分大小写查重，内部用固定 ID）和同一张权限表：能用哪些 agent、能看哪些工作区和目录、看不看别的终端开的会话、文件拷出/拷入、答提问和审批、必须审批、每天用量上限。
-- Claude 只给本人的交互终端：给某个终端打开 Claude 时确认“这是我本人在用”（Claude 用户协议）。Codex、pi、dsh 不受限，可以开给别人的终端。
+- Claude 只给本人的交互终端（Claude 用户协议），只能在本机由你本人给：
+  - 第一个注册的网页面板默认有 Claude（就是你的）。已有数据一次性补上：有面板但都没有 Claude 时，最早注册的那个得到。
+  - 之后的终端只有在本机用 `--owner` 生成才有：`ir invite [名字] --owner`、`ir token <名字> --owner`（确认这是我本人用的终端）；以后再开用 `ir access <名字> --claude on`。
+  - 网页上 Claude 只读显示开/关，只能关（自己的、别人的都行），不能开；服务端也拒绝。agent 调用（认法同秘密：环境变量、没有终端）带 `--owner` 或 `--claude on` 一律拒绝。
+  - Codex、pi、dsh 不受限，可以开给别人的终端。
 - 只有界面型能批准新终端、放宽权限、看到 TOKEN。
 - 本机 `ir` 是内置通道型终端“本机”，权限全开；agent 调用时记在调用它的会话名下。
 - 名字是来源标记，也是用量统计的单位。
@@ -77,10 +81,11 @@ ir stop <id>
 管理交互终端：
 
 ```
-ir invite [名字]       新网页面板：带 TOKEN 的链接
-ir invite --peer       节点邀请码；对方 ir join <码>
-ir token <名字>        插件 TOKEN
-ir access              列出所有交互终端和未用邀请
+ir invite [名字] [--owner]   新网页面板：带 TOKEN 的链接；--owner 带 Claude
+ir invite --peer             节点邀请码；对方 ir join <码>
+ir token <名字> [--owner]    插件 TOKEN；--owner 带 Claude
+ir access                    列出所有交互终端和未用邀请
+ir access <名字> --claude on|off
 ir profile <名字> [--name 新名] [--avatar 图片]
 ir revoke <名字>
 ```
@@ -171,7 +176,7 @@ ir revoke <名字>
   - 每条事件有序号，插件断线后带 `Last-Event-ID` 接着收；未收的保留 24 小时。这是唯一存进库的事件，网页那边照旧只发整份状态。
 - **长文本切分、平台格式**：插件自己做，Iridium 不管。
 - **权限表**另加：能用哪些命令（例如不准 `/mode` 跳过审批）、`/new` 能开在哪些目录。
-- **Claude 规则**：插件的 Claude 开关打开，等于声明它只转你本人的消息。群聊、别人的私聊要用另一个 TOKEN，不开 Claude。同一个 Bot 程序可以拿两个 TOKEN。
+- **Claude 规则**：插件用 `ir token <名字> --owner` 拿的 TOKEN 才有 Claude，等于声明它只转你本人的消息。群聊、别人的私聊要用另一个不带 `--owner` 的 TOKEN。同一个 Bot 程序可以拿两个 TOKEN。
 - 给一个最小的示例插件（约 100 行）。
 
 ## 节点

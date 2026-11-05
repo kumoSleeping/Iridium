@@ -4,8 +4,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
+	"github.com/kumoSleeping/iridium/internal/access"
+	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/gate"
 )
 
@@ -58,6 +61,56 @@ const terminalsSchema = `DROP TABLE permissions;
 	ALTER TABLE inputs ADD COLUMN tag TEXT NOT NULL DEFAULT '';
 	CREATE INDEX usage_terminal ON usage(terminal, at);`
 
+// ownerSchema is migration 5: an invite made with ir invite --owner says so. Its step,
+// claudeForFirstPanel, gives the first panel Claude.
+const ownerSchema = `ALTER TABLE invites ADD COLUMN owner INTEGER NOT NULL DEFAULT 0;`
+
+// claudeForFirstPanel is migration 5's step, run once: Claude only for the owner's own terminals,
+// and the first panel registered is the owner's (plan "交互终端"). Panels from before the rule have
+// Claude only if a panel turned it on; when none has it, the earliest registered gets it.
+func claudeForFirstPanel(tx *sql.Tx) error {
+	rows, err := tx.Query(`SELECT t.id, IFNULL(p.rules, '') FROM terminals t LEFT JOIN permissions p ON p.terminal = t.id
+		WHERE t.kind = ? ORDER BY t.created_at, t.id`, gate.KindPanel)
+	if err != nil {
+		return err
+	}
+	type panel struct {
+		id    string
+		rules api.Rules
+	}
+	var panels []panel
+	for rows.Next() {
+		var id, raw string
+		if err := rows.Scan(&id, &raw); err != nil {
+			rows.Close()
+			return err
+		}
+		r := access.Default(api.TerminalPanel)
+		if raw != "" {
+			if err := json.Unmarshal([]byte(raw), &r); err != nil {
+				rows.Close()
+				return fmt.Errorf("rules of %s: %w", id, err)
+			}
+		}
+		panels = append(panels, panel{id, access.Clean(r)})
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil || len(panels) == 0 {
+		return err
+	}
+	for _, p := range panels {
+		if access.HasClaude(p.rules) {
+			return nil
+		}
+	}
+	b, err := json.Marshal(access.WithClaude(panels[0].rules, access.ByFirst, now()))
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(`INSERT INTO permissions (terminal, rules) VALUES (?, ?) ON CONFLICT (terminal) DO UPDATE SET rules = excluded.rules`, panels[0].id, string(b))
+	return err
+}
+
 // Gate is the store as the gate's Store: its state in the terminals, invites and logins tables.
 func (s *Store) Gate() gate.Store { return gateStore{s} }
 
@@ -103,14 +156,14 @@ func (g gateStore) Load() (gate.State, error) {
 	if err := rows.Err(); err != nil {
 		return st, err
 	}
-	rows, err = db.Query(`SELECT id, hash, name, setup, created_at, expires_at FROM invites ORDER BY created_at, id`)
+	rows, err = db.Query(`SELECT id, hash, name, setup, owner, created_at, expires_at FROM invites ORDER BY created_at, id`)
 	if err != nil {
 		return st, err
 	}
 	for rows.Next() {
 		var i gate.Invite
 		var created, expires int64
-		if err := rows.Scan(&i.ID, &i.Hash, &i.Name, &i.Setup, &created, &expires); err != nil {
+		if err := rows.Scan(&i.ID, &i.Hash, &i.Name, &i.Setup, &i.Owner, &created, &expires); err != nil {
 			rows.Close()
 			return st, err
 		}
@@ -183,10 +236,10 @@ func (g gateStore) Apply(c gate.Change) error {
 			}
 		}
 		for _, i := range c.Invites {
-			_, err := tx.Exec(`INSERT INTO invites (id, hash, name, setup, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)
+			_, err := tx.Exec(`INSERT INTO invites (id, hash, name, setup, owner, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)
 				ON CONFLICT (id) DO UPDATE SET hash = excluded.hash, name = excluded.name, setup = excluded.setup,
-					created_at = excluded.created_at, expires_at = excluded.expires_at`,
-				i.ID, i.Hash, i.Name, i.Setup, nanos(i.CreatedAt), nanos(i.ExpiresAt))
+					owner = excluded.owner, created_at = excluded.created_at, expires_at = excluded.expires_at`,
+				i.ID, i.Hash, i.Name, i.Setup, i.Owner, nanos(i.CreatedAt), nanos(i.ExpiresAt))
 			if err != nil {
 				return err
 			}

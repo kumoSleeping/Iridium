@@ -35,7 +35,7 @@ func TestChatFilesAndAgents(t *testing.T) {
 	l.want(403, bot, "POST", "/api/chat/qq:1/input", api.ChatInput{Text: "hi", Sender: "张三"}, nil)
 	rules := tok.Terminal.Rules
 	rules.Agents = append(rules.Agents, api.AgentClaude)
-	if code := l.rules("web", botID, rules, true); code != 200 {
+	if code := l.rules("socket", botID, rules); code != 200 {
 		t.Fatalf("claude for the plugin: %d", code)
 	}
 	var in api.ChatInputReply
@@ -56,7 +56,7 @@ func TestChatFilesAndAgents(t *testing.T) {
 	narrow := rules
 	narrow.Agents = append([]api.Agent{}, rules.Agents...)
 	narrow.AllCommands, narrow.Commands = false, []string{"/status"}
-	if code := l.rules("agent", botID, narrow, false); code != 200 {
+	if code := l.rules("agent", botID, narrow); code != 200 {
 		t.Fatalf("narrowing: %d", code)
 	}
 	l.want(403, bot, "POST", "/api/chat/qq:1/input", api.ChatInput{Text: "/stop"}, nil)
@@ -67,7 +67,7 @@ func TestChatFilesAndAgents(t *testing.T) {
 	l.want(200, bot, "POST", "/api/sessions/"+in.Session+"/uploads", api.NewUpload{Name: "a.txt", Size: 3}, nil)
 	closed := narrow
 	closed.FilesIn, closed.FilesOut = false, false
-	if code := l.rules("agent", botID, closed, false); code != 200 {
+	if code := l.rules("agent", botID, closed); code != 200 {
 		t.Fatalf("closing files: %d", code)
 	}
 	l.want(403, bot, "GET", "/api/sessions/"+in.Session+"/files/nope", nil, nil)
@@ -87,7 +87,7 @@ func TestChatFilesAndAgents(t *testing.T) {
 	l.want(403, as, "POST", "/api/terminals/tokens", api.NewInvite{Name: "x"}, nil)
 	dirs := closed
 	dirs.AllDirs, dirs.Dirs = false, []string{l.work}
-	if code := l.rules("agent", botID, dirs, false); code != 200 {
+	if code := l.rules("agent", botID, dirs); code != 200 {
 		t.Fatalf("dirs: %d", code)
 	}
 	l.want(200, as, "GET", "/api/files?path="+l.work, nil, nil)

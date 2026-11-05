@@ -10,6 +10,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -134,12 +135,21 @@ var schema = []string{
 	terminalsSchema,
 	// 4: the shown marker in place of the archive flag (shown.go).
 	shownSchema,
+	// 5: owner invites, and Claude for the first panel once (terminals.go).
+	ownerSchema,
 }
+
+// steps run in Go after the migration of their version, in the same transaction.
+var steps = map[int]func(*sql.Tx) error{5: claudeForFirstPanel}
 
 type Store struct{ db *sql.DB }
 
-// Open opens (and makes, or migrates) the database at path.
+// Open opens (and makes, or migrates) the database at path. The file and its -wal and -shm are
+// the owner's alone (0600): they hold the terminals' token hashes and passkeys.
 func Open(path string) (*Store, error) {
+	if err := private(path); err != nil {
+		return nil, err
+	}
 	dsn := "file:" + path + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=synchronous(NORMAL)&_txlock=immediate"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -151,6 +161,22 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("store %s: %w", path, err)
 	}
 	return s, nil
+}
+
+// private makes the database file 0600 before SQLite opens it (SQLite gives the -wal and -shm it
+// makes the database's mode), and brings an older one, and its -wal and -shm, down to 0600.
+func private(path string) error {
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		return err
+	}
+	f.Close()
+	for _, p := range []string{path, path + "-wal", path + "-shm"} {
+		if err := os.Chmod(p, 0o600); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Store) Close() error { return s.db.Close() }
@@ -174,6 +200,11 @@ func (s *Store) migrate() error {
 		for ; v < len(schema); v++ {
 			if _, err := tx.Exec(schema[v]); err != nil {
 				return fmt.Errorf("migration %d: %w", v+1, err)
+			}
+			if step := steps[v+1]; step != nil {
+				if err := step(tx); err != nil {
+					return fmt.Errorf("migration %d: %w", v+1, err)
+				}
 			}
 		}
 		_, err := tx.Exec(fmt.Sprintf(`PRAGMA user_version = %d`, v))
