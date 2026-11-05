@@ -1,3 +1,6 @@
 .claude/worktrees/
 node_modules/
 /dist/
+/iridium
+/ir
+/bin/

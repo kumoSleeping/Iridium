@@ -1,0 +1,8 @@
+# TypeScript types of the API, from internal/api: go generate ./internal/api
+# (it runs in internal/api, so output_path is from there).
+packages:
+  - path: "github.com/kumoSleeping/iridium/internal/api"
+    output_path: "../../web/src/api/types.gen.ts"
+    frontmatter: |
+      // Generated from internal/api by tygo (go generate ./internal/api). Do not edit.
+    enum_style: "union"
