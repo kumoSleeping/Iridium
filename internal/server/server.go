@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -62,6 +63,8 @@ type Server struct {
 	// Discover and Folders, if set, serve the workspaces and the folder picker (routes_discover.go).
 	Discover *discover.Index
 	Folders  discover.Folders
+	// App is the web app on the TCP address, past the API; nil is the embedded build (webui).
+	App http.Handler
 
 	files *files.Service // routes_files.go
 }
@@ -299,7 +302,9 @@ func (s *Server) answer(w http.ResponseWriter, r *http.Request) {
 var stateKey = regexp.MustCompile(`^(list|quota|workspaces|confirms|update|(session|context):[0-9a-zA-Z_-]{1,128})$`)
 
 // events is the page's one event stream: ?sub=<key> for each state it wants (list, quota,
-// session:<id>, context:<id>, confirms, update). See package hub.
+// workspaces, session:<id>, context:<id>, confirms, update). See package hub. A key it does not
+// know, or one not for this terminal (confirms, but for panels), does not fail the stream: it is
+// left out, and the stream's first events say so (StateEvent.Ignored).
 func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	keys := r.URL.Query()["sub"]
 	if len(keys) == 0 && s.Chat != nil {
@@ -310,13 +315,20 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "name 1 to 16 states with sub=")
 		return
 	}
+	c := callerOf(r)
+	var carried []string
+	var ignored []api.StateEvent
 	for _, k := range keys {
-		if !stateKey.MatchString(k) {
-			fail(w, http.StatusBadRequest, "unknown state "+k)
-			return
+		switch {
+		case !stateKey.MatchString(k):
+			ignored = append(ignored, api.StateEvent{Key: k, Ignored: "unknown"})
+		case k == "confirms" && !c.panel():
+			ignored = append(ignored, api.StateEvent{Key: k, Ignored: "forbidden"})
+		case !slices.Contains(carried, k):
+			carried = append(carried, k)
 		}
 	}
-	c := callerOf(r)
+	keys = carried
 	if !s.mayWatch(w, c, keys) {
 		return
 	}
@@ -331,8 +343,12 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 	io.WriteString(w, "retry: 2000\n\n")
+	for _, e := range ignored {
+		b, _ := json.Marshal(e)
+		fmt.Fprintf(w, "event: state\ndata: %s\n\n", b)
+	}
 	_ = rc.Flush()
-	sub := s.hub.Subscribe(keys)
+	sub := s.hub.Subscribe(keys) // none it may carry: open all the same, pinging
 	defer sub.Close()
 	sub.Filter = s.filter(c)
 	_ = sub.Serve(r.Context(), w, func() { _ = rc.Flush() })

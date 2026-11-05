@@ -124,6 +124,18 @@ export interface SessionState extends Session {
    * Tail: the newest blocks, when they are few and small; else the page fetches after its end.
    */
   tail?: BlockTail;
+  /**
+   * Commands: the slash commands its agent offers, as its last handshake named them.
+   */
+  commands?: Command[];
+}
+/**
+ * Command is a slash command an agent offers (the composer's palette), without its slash.
+ */
+export interface Command {
+  name: string;
+  description?: string;
+  argumentHint?: string;
 }
 /**
  * Ask is a question, a plan to confirm or a tool to approve, open until answered or withdrawn.
@@ -210,8 +222,10 @@ export interface Block {
   length?: number /* int */;
   /**
    * user: From is the source Iridium wrote the message with, its prefix taken off; ID its uuid.
+   * FromTerminal is the ID of the interactive terminal that sent it (its avatar, its kind).
    */
   from?: string;
+  fromTerminal?: string;
   id?: string; // tool, result: the call's id
   /**
    * tool: Name, Input as JSON, and Result when it is on the same page.
@@ -344,6 +358,11 @@ export interface Error {
 export interface StateEvent {
   key: string;
   value: unknown;
+  /**
+   * Ignored: the stream does not carry Key, and says why once, as it opens: "unknown" (no such
+   * state) or "forbidden" (not for this terminal). The rest of the stream goes on.
+   */
+  ignored?: string;
 }
 /**
  * DraftEvent is the event stream's "draft" event: text the agent is writing, appended to draft N
@@ -450,7 +469,11 @@ export interface ChatEvent {
 export interface Queued {
   id: string;
   text: string;
-  from: string;
+  from: string; // the sender's name, as the agent saw it
+  /**
+   * FromTerminal is the sending terminal's ID.
+   */
+  fromTerminal?: string;
   paused?: boolean;
   at: number /* int64 */;
 }
@@ -534,12 +557,14 @@ export interface CardOption {
 }
 /**
  * CardAnswer answers a card: Option, or Choices (one option id per group, more for a Multi
- * group); Message goes with a denial or rejection.
+ * group); Message goes with a denial or rejection. Words: a question's own answers, by group
+ * ("" for none), each in place of that group's choice.
  */
 export interface CardAnswer {
   card: string;
   option?: string;
   choices?: string[];
+  words?: string[];
   message?: string;
 }
 /**
@@ -756,4 +781,275 @@ export interface PushMessage {
   title: string;
   body: string;
   tag?: string;
+}
+
+//////////
+// source: settings.go
+
+/**
+ * Settings is GET /api/settings: the config file's fields the settings page edits (plan "运行",
+ * "推送", "网页"). PUT /api/settings takes a SettingsPatch and answers the whole again.
+ */
+export interface Settings {
+  /**
+   * IdleReap: a hosted agent idle this long is stopped (its session stays), as "1h"; "0" never.
+   */
+  idleReap: string;
+  /**
+   * CrashResume and QuotaResume: go on with a turn after the agent crashed, or its quota came back.
+   */
+  crashResume: boolean;
+  quotaResume: boolean;
+  /**
+   * QuotaHidden: the quota bars not shown, each "<agent>:<account>:<group>:<model>".
+   */
+  quotaHidden: string[];
+  /**
+   * Modes: the approval mode a new session of each agent starts in; an agent left out starts in
+   * its own default.
+   */
+  modes: { [key: string]: string};
+  /**
+   * Push: Web Push's total switch (off by default); GET /api/push has the rest.
+   */
+  push: boolean;
+}
+/**
+ * SettingsPatch changes what it gives and nothing else. A mode "" goes back to the agent's own.
+ */
+export interface SettingsPatch {
+  idleReap?: string;
+  crashResume?: boolean;
+  quotaResume?: boolean;
+  quotaHidden?: string[];
+  modes?: { [key: string]: string};
+  push?: boolean;
+}
+
+//////////
+// source: terminals.go
+
+/**
+ * TerminalKind: panel (a web panel, passkey) or channel (a plugin or peer, token; also 本机).
+ */
+export type TerminalKind = string;
+export const TerminalPanel: TerminalKind = "panel";
+export const TerminalChannel: TerminalKind = "channel";
+/**
+ * LocalTerminal is the built-in terminal's ID: the local ir, and the web page while no public
+ * origin is set.
+ */
+export const LocalTerminal = "local";
+/**
+ * Rules is a terminal's permission table. The built-in 本机's is all of it and cannot change.
+ */
+export interface Rules {
+  /**
+   * Agents it may use (and whose sessions it sees). claude needs ClaudeOwner.
+   */
+  agents: Agent[];
+  /**
+   * ClaudeOwner: a panel confirmed that this terminal is the owner's own (Claude's terms).
+   */
+  claudeOwner?: OwnerConfirm;
+  /**
+   * AllDirs: every directory; else only under Dirs or in Workspaces.
+   */
+  allDirs: boolean;
+  dirs: string[];
+  workspaces: number /* int64 */[];
+  /**
+   * SeeOthers: it sees the sessions other terminals opened, not only its own.
+   */
+  seeOthers: boolean;
+  filesIn: boolean; // may copy files in (uploads)
+  filesOut: boolean; // may copy files out (downloads)
+  answer: boolean; // may answer questions and approvals
+  /**
+   * MustApprove: what it starts runs in an approving mode; it cannot send to a session that
+   * skips approvals.
+   */
+  mustApprove: boolean;
+  /**
+   * DailyTokens caps the tokens (input, output and cache, all models) of the turns it starts in a
+   * day, local time; 0 is no cap.
+   */
+  dailyTokens: number /* int64 */;
+  /**
+   * AllCommands: every slash command; else only Commands (e.g. "/compact").
+   */
+  allCommands: boolean;
+  commands: string[];
+}
+/**
+ * OwnerConfirm is who confirmed, and when (ms), that a terminal is the owner's own.
+ */
+export interface OwnerConfirm {
+  by: string; // the confirming panel's ID
+  at: number /* int64 */;
+}
+/**
+ * Terminal is an interactive terminal as listed. No secrets.
+ */
+export interface Terminal {
+  id: string;
+  name: string;
+  kind: TerminalKind;
+  avatar?: string; // URL for <img src>
+  local?: boolean; // the built-in 本机
+  passkeys?: number /* int */;
+  logins?: number /* int */; // logged-in browsers
+  online?: number /* int */; // live connections
+  createdAt?: number /* int64 */;
+  lastSeenAt?: number /* int64 */;
+  rules: Rules;
+  usedToday: number /* int64 */; // tokens of the turns it started today
+}
+/**
+ * PendingInvite is a panel invite not used yet.
+ */
+export interface PendingInvite {
+  id: string;
+  name?: string;
+  setup?: boolean; // the first-run link in the state directory
+  createdAt: number /* int64 */;
+  expiresAt?: number /* int64 */;
+}
+/**
+ * Terminals is GET /api/terminals (ir access).
+ */
+export interface Terminals {
+  terminals: Terminal[];
+  invites: PendingInvite[];
+}
+/**
+ * Me is GET /api/me: the calling terminal. Panel: it may approve, widen and see tokens.
+ */
+export interface Me extends Terminal {
+  panel: boolean;
+  public: boolean; // a public origin is set: passkeys are on
+}
+/**
+ * NewInvite asks for a panel invite (ir invite [name]) or a channel token (ir token <name>).
+ */
+export interface NewInvite {
+  name?: string;
+}
+/**
+ * Invite is a new panel invite. URL holds the secret: only a panel (or ir at a terminal) sees it.
+ */
+export interface Invite {
+  id: string;
+  name?: string;
+  url: string;
+  expiresAt: number /* int64 */;
+  /**
+   * QR is URL as a QR code, an SVG data URL for <img src>.
+   */
+  qr?: string;
+}
+/**
+ * Token is a channel's new token: shown once. Asking again replaces it.
+ */
+export interface Token {
+  terminal: Terminal;
+  token: string;
+}
+/**
+ * SetRules changes a terminal's permission table. OwnerConfirmed: the panel says the terminal is
+ * the owner's own, which adding claude needs.
+ */
+export interface SetRules {
+  rules: Rules;
+  ownerConfirmed?: boolean;
+}
+/**
+ * Confirm is what an agent's ir asked for that only a panel may give (an invite link, a token):
+ * it waits in the carried state "confirms" until a panel answers it. No secrets.
+ */
+export interface Confirm {
+  id: string;
+  kind: string; // invite | token
+  name?: string;
+  asker: string; // the terminal that asked (本机)
+  session?: string; // the session whose agent asked, if known
+  createdAt: number /* int64 */;
+  expiresAt: number /* int64 */;
+}
+/**
+ * Confirms is the carried state "confirms": the pending ones, oldest first. Panels only.
+ */
+export interface Confirms {
+  pending: Confirm[];
+}
+/**
+ * ConfirmAnswer is a panel's answer to a Confirm.
+ */
+export interface ConfirmAnswer {
+  allow: boolean;
+}
+/**
+ * ConfirmState is how a Confirm went, as the asker sees it: never a secret.
+ */
+export interface ConfirmState {
+  id: string;
+  kind: string;
+  state: string; // pending | allowed | denied | expired | failed
+  name?: string;
+  expiresAt?: number /* int64 */; // allowed invite: until when the link works
+  error?: string;
+}
+/**
+ * ConfirmReply answers the panel that allowed a Confirm: the secret is for it alone.
+ */
+export interface ConfirmReply extends ConfirmState {
+  invite?: Invite;
+  token?: Token;
+}
+/**
+ * Pending is the reply to an agent's ir invite or ir token: a panel must allow it.
+ */
+export interface Pending {
+  confirm: Confirm;
+}
+/**
+ * SetPublic sets public.origin ("" turns the public way in off). The gate restarts with it.
+ */
+export interface SetPublic {
+  origin: string;
+}
+/**
+ * PublicState is GET /api/public.
+ */
+export interface PublicState {
+  origin?: string;
+  passkeys: boolean; // some panel has a passkey
+}
+
+//////////
+// source: update.go
+
+/**
+ * UpdateState is the carried state "update" and GET /api/update: whether a newer Iridium is out
+ * (plan "更新"). The page puts a dot on the settings gear while Available.
+ */
+export interface UpdateState {
+  current: string;
+  latest?: string;
+  notes?: string;
+  available: boolean;
+  source: boolean; // an update source is configured
+  checkedAt?: number /* int64 */; // ms
+  /**
+   * Phase: idle, checking, downloading, restarting or failed (Error says why).
+   */
+  phase: string;
+  error?: string;
+}
+/**
+ * ApplyUpdate is POST /api/update. Force installs the latest even when it is not newer (a dev
+ * build is never older than anything).
+ */
+export interface ApplyUpdate {
+  force?: boolean;
 }

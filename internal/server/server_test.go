@@ -142,11 +142,8 @@ func TestTurnOverHTTP(t *testing.T) {
 	if code := call(t, c, "GET", base+"/api/sessions/nope", nil, nil); code != 404 {
 		t.Errorf("unknown session: %d", code)
 	}
-	if code := call(t, c, "GET", base+"/api/events?sub=bad", nil, nil); code != 400 {
-		t.Errorf("bad sub: %d", code)
-	}
-
-	resp, err := http.Get(base + "/api/events?sub=list&sub=session:" + id)
+	// A key the daemon does not know is left out, and the stream says so; the rest goes on.
+	resp, err := http.Get(base + "/api/events?sub=list&sub=bad&sub=session:" + id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +171,7 @@ func TestTurnOverHTTP(t *testing.T) {
 	}
 	var draft strings.Builder
 	var last api.SessionState
-	gotList := false
+	gotList, gotBad := false, false
 	for deadline := time.After(10 * time.Second); last.Last == nil || last.Last.Text != "ok: hello" || last.Status != api.StatusIdle; {
 		select {
 		case e := <-events:
@@ -185,11 +182,14 @@ func TestTurnOverHTTP(t *testing.T) {
 				draft.WriteString(d.Text)
 			case "state":
 				var se struct {
-					Key   string          `json:"key"`
-					Value json.RawMessage `json:"value"`
+					Key     string          `json:"key"`
+					Value   json.RawMessage `json:"value"`
+					Ignored string          `json:"ignored"`
 				}
 				json.Unmarshal([]byte(e[1]), &se)
-				if se.Key == "list" {
+				if se.Key == "bad" {
+					gotBad = se.Ignored == "unknown"
+				} else if se.Key == "list" {
 					gotList = true
 				} else {
 					last = api.SessionState{}
@@ -200,8 +200,8 @@ func TestTurnOverHTTP(t *testing.T) {
 			t.Fatalf("no reply on the stream; last state %+v", last)
 		}
 	}
-	if draft.String() != "ok: hello" || !gotList || last.End == 0 {
-		t.Errorf("draft %q, list %v, end %d", draft.String(), gotList, last.End)
+	if draft.String() != "ok: hello" || !gotList || !gotBad || last.End == 0 {
+		t.Errorf("draft %q, list %v, bad key told %v, end %d", draft.String(), gotList, gotBad, last.End)
 	}
 
 	var page api.MessagePage

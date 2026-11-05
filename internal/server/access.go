@@ -18,6 +18,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/chat"
 	"github.com/kumoSleeping/iridium/internal/gate"
 	"github.com/kumoSleeping/iridium/internal/session"
+	"github.com/kumoSleeping/iridium/internal/webui"
 )
 
 // Headers the local ir sends over the unix socket. HeaderAgent: an agent ran it (its environment
@@ -72,10 +73,17 @@ func (s *Server) socketHandler(mux http.Handler) http.Handler {
 	})
 }
 
-// webHandler serves the TCP address behind the gate, whichever is in place now.
+// webHandler serves the TCP address behind the gate, whichever is in place now: the API under
+// /api/, the gate's own pages under /_ir/, and the web app (package webui, or Server.App) for the
+// rest. The gate stands in front of the app too: with a public origin even its files need a login.
 func (s *Server) webHandler(mux http.Handler) http.Handler {
+	app := s.App
+	if app == nil {
+		app = webui.Handler()
+	}
+	site := webui.WrapApp(mux, app)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		s.gate().Wrap(mux).ServeHTTP(w, r)
+		s.gate().Wrap(site).ServeHTTP(w, r)
 	})
 }
 

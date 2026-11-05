@@ -96,6 +96,8 @@ type Invite struct {
 	Name      string `json:"name,omitempty"`
 	URL       string `json:"url"`
 	ExpiresAt int64  `json:"expiresAt"`
+	// QR is URL as a QR code, an SVG data URL for <img src>.
+	QR string `json:"qr,omitempty"`
 }
 
 // Token is a channel's new token: shown once. Asking again replaces it.
