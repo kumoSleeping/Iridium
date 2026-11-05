@@ -4,6 +4,7 @@ import (
 	"maps"
 	"time"
 
+	"github.com/kumoSleeping/iridium/internal/agents"
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/config"
 )
@@ -39,5 +40,14 @@ func (m *Manager) Tuned() Tunables {
 
 func (m *Manager) tuned() *Tunables { return m.tune.Load() }
 
-// defaultMode is the mode a new process of agent a starts in when its session has none.
-func (m *Manager) defaultMode(a api.Agent) string { return m.tuned().Modes[string(a)] }
+// defaultMode is the mode a new process of agent a starts in when its session has none: the
+// config's for a, else the agent's own default (agents.Info.DefaultMode).
+func (m *Manager) defaultMode(a api.Agent) string {
+	if mode := m.tuned().Modes[string(a)]; mode != "" {
+		return mode
+	}
+	if info, ok := agents.Get(a); ok {
+		return info.DefaultMode
+	}
+	return ""
+}

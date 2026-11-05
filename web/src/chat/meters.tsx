@@ -148,7 +148,7 @@ export function QuotaBars({ agent, live }: { agent: Agent; live: boolean }) {
 
 /** An agent's approval modes, in the order the key cycles them: as GET /api/agents lists them, else
  *  Claude's own. */
-const MODES: Partial<Record<Agent, string[]>> = { claude: ["default", "acceptEdits", "plan", "bypassPermissions"] };
+const MODES: Partial<Record<Agent, string[]>> = { claude: ["manual", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"], codex: ["untrusted", "on-request", "granular", "auto"], pi: ["auto", "ask"] };
 type Mode = { id: string };
 
 const MODE_ICON: Record<string, ReactNode> = {

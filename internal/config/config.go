@@ -79,7 +79,9 @@ func Default() Config {
 		CrashResume: true,
 		QuotaResume: true,
 		Programs:    map[string]string{"claude": "claude", "codex": "codex", "pi": "pi", "dsh": "dsh"},
-		Uploads:     Uploads{Keep: Duration(30 * 24 * time.Hour), MaxFile: 2 << 30},
+		// Every agent approves by itself unless a session picks a mode that asks (2026-11-05).
+		Modes:   map[string]string{"claude": "auto", "codex": "auto", "pi": "auto"},
+		Uploads: Uploads{Keep: Duration(30 * 24 * time.Hour), MaxFile: 2 << 30},
 	}
 }
 

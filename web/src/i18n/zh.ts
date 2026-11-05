@@ -122,7 +122,7 @@ export const zh = {
   "mode.acceptEdits": "自动接受编辑",
   "mode.plan": "只做计划",
   "mode.bypass": "跳过审批",
-  "mode.auto": "自动判断",
+  "mode.auto": "自动批准",
   "mode.dontAsk": "不问，没许可的拒绝",
   "mode.granular": "按规则询问",
   "mode.nextTurn": "下一回合起生效",

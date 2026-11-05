@@ -122,7 +122,7 @@ export const en: Dict = {
   "mode.acceptEdits": "Accept edits",
   "mode.plan": "Plan only",
   "mode.bypass": "Skip approvals",
-  "mode.auto": "Auto",
+  "mode.auto": "Auto-approve",
   "mode.dontAsk": "Don't ask, deny the rest",
   "mode.granular": "Ask by rule",
   "mode.nextTurn": "Takes effect from the next turn",
