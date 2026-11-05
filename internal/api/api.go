@@ -133,8 +133,10 @@ type Block struct {
 	// Length: the whole text's length in characters, where Text (or Input) is cut.
 	Length int `json:"length,omitempty"`
 	// user: From is the source Iridium wrote the message with, its prefix taken off; ID its uuid.
-	From string `json:"from,omitempty"`
-	ID   string `json:"id,omitempty"` // tool, result: the call's id
+	// FromTerminal is the ID of the interactive terminal that sent it (its avatar, its kind).
+	From         string `json:"from,omitempty"`
+	FromTerminal string `json:"fromTerminal,omitempty"`
+	ID           string `json:"id,omitempty"` // tool, result: the call's id
 	// tool: Name, Input as JSON, and Result when it is on the same page.
 	Name   string  `json:"name,omitempty"`
 	Input  string  `json:"input,omitempty"`

@@ -81,12 +81,15 @@ func TestOverlays(t *testing.T) {
 
 func TestInputsUsageOutbox(t *testing.T) {
 	s, _ := open(t)
-	must(t, s.AddInput(Input{ID: "u1", Session: "a", Terminal: "网页", Text: "hi", State: "sent"}))
-	must(t, s.AddInput(Input{ID: "u2", Session: "a", Terminal: "本机", Text: "later", State: "queued"}))
-	if from, ok := s.Source("u1"); !ok || from != "网页" {
-		t.Fatalf("source %q %v", from, ok)
+	must(t, s.AddInput(Input{ID: "u1", Session: "a", Terminal: "abcdefghijklmnop", Tag: "mac", Text: "hi", State: "sent"}))
+	must(t, s.AddInput(Input{ID: "u2", Session: "a", Terminal: "local", Text: "later", State: "queued"}))
+	if id, tag, ok := s.Source("u1"); !ok || id != "abcdefghijklmnop" || tag != "mac" {
+		t.Fatalf("source %q %q %v", id, tag, ok)
 	}
-	if _, ok := s.Source("nope"); ok {
+	if id, tag, ok := s.Source("u2"); !ok || id != "local" || tag != "local" {
+		t.Fatalf("source without a tag %q %q %v", id, tag, ok)
+	}
+	if _, _, ok := s.Source("nope"); ok {
 		t.Fatal("source of an input never written")
 	}
 	q, _ := s.Queued("a")

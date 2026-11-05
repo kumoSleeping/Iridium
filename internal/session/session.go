@@ -52,6 +52,8 @@ type Options struct {
 	Logf       func(string, ...any)
 	ReapEvery  time.Duration // how often idle agents are looked for; 0 is 30s
 	Poll       time.Duration // how often a live agent's out.log is read; 0 is 50ms
+	// Tag names an interactive terminal (by ID) in the source tag "[name] "; nil or "" is the ID.
+	Tag func(terminal string) string
 }
 
 var (
@@ -97,6 +99,9 @@ func New(o Options) (*Manager, error) {
 }
 
 func (m *Manager) holdRoot() string { return filepath.Join(m.o.Config.StatePath(), "hold") }
+
+// Store is the database the manager keeps its inputs and usage in.
+func (m *Manager) Store() *store.Store { return m.o.Store }
 
 // Start takes up the sessions an earlier daemon hosted, whose holders may still run, and starts
 // reaping idle agents.
@@ -180,9 +185,10 @@ func (m *Manager) Create(ctx context.Context, req api.NewSession, from string) (
 	return mt.ID, nil
 }
 
-// Send gives the session a message from `from` (an interactive terminal's name), starting its
+// Send gives the session a message from `from` (an interactive terminal's ID), starting its
 // agent if it is not running: a new turn when idle, else it joins the running one. The agent sees
-// "[from] " before it, unless it is a slash command, which must reach the agent as typed.
+// "[name] " before it (the terminal's name, Options.Tag), unless it is a slash command, which must
+// reach the agent as typed.
 func (m *Manager) Send(ctx context.Context, id, text, from string) (string, error) {
 	h, err := m.get(id)
 	if err != nil {
@@ -191,8 +197,14 @@ func (m *Manager) Send(ctx context.Context, id, text, from string) (string, erro
 	if strings.TrimSpace(text) == "" {
 		return "", errors.New("an empty message")
 	}
+	tag := from
+	if m.o.Tag != nil {
+		if t := m.o.Tag(from); t != "" {
+			tag = t
+		}
+	}
 	input := newUUID()
-	if err := m.o.Store.AddInput(store.Input{ID: input, Session: id, Terminal: from, Text: text, State: "sent"}); err != nil {
+	if err := m.o.Store.AddInput(store.Input{ID: input, Session: id, Terminal: from, Tag: tag, Text: text, State: "sent"}); err != nil {
 		return "", err
 	}
 	if err := h.start(ctx); err != nil {
@@ -200,7 +212,7 @@ func (m *Manager) Send(ctx context.Context, id, text, from string) (string, erro
 	}
 	line := text
 	if !strings.HasPrefix(text, "/") {
-		line = "[" + from + "] " + text
+		line = "[" + tag + "] " + text
 	}
 	h.mu.Lock()
 	h.lastFrom = from

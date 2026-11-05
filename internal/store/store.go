@@ -101,6 +101,9 @@ var schema = []string{
 		at INTEGER NOT NULL
 	);
 	CREATE INDEX outbox_plugin ON outbox(plugin, seq);`,
+	// 2: interactive terminals for real (the gate's endpoints, invites and logins; see
+	// terminals.go), who opened which session, and the tag an input was written with.
+	terminalsSchema,
 }
 
 type Store struct{ db *sql.DB }
@@ -323,7 +326,8 @@ func nullable(s string) any {
 type Input struct {
 	ID       string
 	Session  string
-	Terminal string // who sent it: the source it is prefixed with
+	Terminal string // who sent it: the interactive terminal's ID
+	Tag      string // the source it is prefixed with, "[Tag] ": the terminal's name then; "" is Terminal
 	Text     string
 	State    string // queued, paused, sent
 	Created  int64
@@ -337,8 +341,8 @@ func (s *Store) AddInput(in Input) error {
 	if in.State == "sent" {
 		sent = in.Created
 	}
-	_, err := s.db.Exec(`INSERT INTO inputs (id, session, terminal, text, state, created_at, sent_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		in.ID, in.Session, in.Terminal, in.Text, in.State, in.Created, sent)
+	_, err := s.db.Exec(`INSERT INTO inputs (id, session, terminal, tag, text, state, created_at, sent_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		in.ID, in.Session, in.Terminal, in.Tag, in.Text, in.State, in.Created, sent)
 	return err
 }
 
@@ -351,18 +355,18 @@ func (s *Store) SetInputState(id, state string) error {
 	return err
 }
 
-// Source is who sent input id, if Iridium wrote it.
-func (s *Store) Source(id string) (string, bool) {
-	var t string
-	if s.db.QueryRow(`SELECT terminal FROM inputs WHERE id = ?`, id).Scan(&t) != nil {
-		return "", false
+// Source is who sent input id, if Iridium wrote it: the terminal's ID and the tag the message was
+// prefixed with.
+func (s *Store) Source(id string) (terminal, tag string, ok bool) {
+	if s.db.QueryRow(`SELECT terminal, IIF(tag = '', terminal, tag) FROM inputs WHERE id = ?`, id).Scan(&terminal, &tag) != nil {
+		return "", "", false
 	}
-	return t, true
+	return terminal, tag, true
 }
 
 // Queued is the session's inputs not sent yet, oldest first.
 func (s *Store) Queued(session string) ([]Input, error) {
-	rows, err := s.db.Query(`SELECT id, session, terminal, text, state, created_at FROM inputs WHERE session = ? AND state != 'sent' ORDER BY created_at, rowid`, session)
+	rows, err := s.db.Query(`SELECT id, session, terminal, tag, text, state, created_at FROM inputs WHERE session = ? AND state != 'sent' ORDER BY created_at, rowid`, session)
 	if err != nil {
 		return nil, err
 	}
@@ -370,7 +374,7 @@ func (s *Store) Queued(session string) ([]Input, error) {
 	var out []Input
 	for rows.Next() {
 		var in Input
-		if err := rows.Scan(&in.ID, &in.Session, &in.Terminal, &in.Text, &in.State, &in.Created); err != nil {
+		if err := rows.Scan(&in.ID, &in.Session, &in.Terminal, &in.Tag, &in.Text, &in.State, &in.Created); err != nil {
 			return nil, err
 		}
 		out = append(out, in)
@@ -382,7 +386,7 @@ func (s *Store) Queued(session string) ([]Input, error) {
 
 type Usage struct {
 	At         int64
-	Terminal   string
+	Terminal   string // the interactive terminal's ID
 	Session    string
 	Agent      string
 	Model      string

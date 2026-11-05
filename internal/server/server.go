@@ -11,46 +11,65 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"strconv"
-	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/config"
+	"github.com/kumoSleeping/iridium/internal/gate"
 	"github.com/kumoSleeping/iridium/internal/hub"
 	"github.com/kumoSleeping/iridium/internal/session"
+	"github.com/kumoSleeping/iridium/internal/store"
 	"github.com/kumoSleeping/iridium/internal/transcript"
+	"github.com/kumoSleeping/iridium/internal/update"
 )
 
-// Terminal names until interactive terminals exist: the page on the loopback address, and the
-// built-in channel terminal of the local ir.
-const (
-	TerminalWeb   = "网页"
-	TerminalLocal = "本机"
-)
+// TerminalLocal is the built-in channel terminal of the local ir (and of the web page while no
+// public origin is set).
+const TerminalLocal = gate.LocalName
 
 type Server struct {
 	cfg  config.Config
 	m    *session.Manager
 	hub  *hub.Hub
+	st   *store.Store
 	logf func(string, ...any)
+	// ConfigPath is where PUT /api/public saves public.origin; "" saves it nowhere.
+	ConfigPath string
+	// Updater, if set, serves /api/update and carries the state "update".
+	Updater *update.Updater
+
+	gmu     sync.Mutex // one gate change at a time
+	g       atomic.Pointer[gate.Gate]
+	initErr error // the gate for cfg.Public.Origin would not open; Listen gives it
+	asks    *confirms
 }
 
+// New is the API over m. The interactive terminals live in m's store, behind the Passkey gate
+// (package gate) in front of the TCP address; the unix socket is 本机.
 func New(cfg config.Config, m *session.Manager, h *hub.Hub, logf func(string, ...any)) *Server {
 	if logf == nil {
 		logf = log.Printf
 	}
-	return &Server{cfg: cfg, m: m, hub: h, logf: logf}
+	s := &Server{cfg: cfg, m: m, hub: h, st: m.Store(), logf: logf}
+	s.asks = newConfirms(h)
+	g, err := s.newGate(cfg.Public.Origin)
+	if err != nil {
+		s.initErr = err
+		g, _ = s.newGate("")
+	}
+	s.g.Store(g)
+	h.Set("update", s.updateState())
+	return s
 }
 
-type ctxKey struct{}
-
-func terminal(r *http.Request) string { return r.Context().Value(ctxKey{}).(string) }
+// Close closes the gate.
+func (s *Server) Close() { s.gate().Close() }
 
 // Handler is the API. local: requests come from the unix socket, from the local ir.
 func (s *Server) Handler(local bool) http.Handler {
@@ -60,59 +79,28 @@ func (s *Server) Handler(local bool) http.Handler {
 	})
 	mux.HandleFunc("GET /api/sessions", s.list)
 	mux.HandleFunc("POST /api/sessions", s.create)
-	mux.HandleFunc("GET /api/sessions/{id}", s.get)
-	mux.HandleFunc("GET /api/sessions/{id}/messages", s.messages)
-	mux.HandleFunc("GET /api/sessions/{id}/block", s.block)
+	mux.HandleFunc("GET /api/sessions/{id}", s.see(s.get))
+	mux.HandleFunc("GET /api/sessions/{id}/messages", s.see(s.messages))
+	mux.HandleFunc("GET /api/sessions/{id}/block", s.see(s.block))
 	mux.HandleFunc("POST /api/sessions/{id}/send", s.send)
-	mux.HandleFunc("POST /api/sessions/{id}/interrupt", s.interrupt)
-	mux.HandleFunc("POST /api/sessions/{id}/stop", s.stop)
-	mux.HandleFunc("POST /api/sessions/{id}/answer", s.answer)
+	mux.HandleFunc("POST /api/sessions/{id}/interrupt", s.use(s.interrupt))
+	mux.HandleFunc("POST /api/sessions/{id}/stop", s.use(s.stop))
+	mux.HandleFunc("POST /api/sessions/{id}/answer", s.answering(s.answer))
 	mux.HandleFunc("GET /api/events", s.events)
-	name := TerminalWeb
+	s.terminalRoutes(mux)
+	s.updateRoutes(mux)
 	if local {
-		name = TerminalLocal
+		return s.socketHandler(mux)
 	}
-	var h http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mux.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, name)))
-	})
-	if !local {
-		h = s.guard(h)
-	}
-	return h
-}
-
-// guard keeps the loopback address for this machine's own pages: only known Host names (no DNS
-// rebinding), and no writes from another origin.
-func (s *Server) guard(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		host := r.Host
-		if h, _, err := net.SplitHostPort(host); err == nil {
-			host = h
-		}
-		host = strings.Trim(host, "[]")
-		if !slices.Contains(append([]string{"localhost", "127.0.0.1", "::1"}, s.cfg.Hosts...), strings.ToLower(host)) {
-			fail(w, http.StatusMisdirectedRequest, "unknown host")
-			return
-		}
-		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			if o := r.Header.Get("Origin"); o != "" {
-				if u, err := url.Parse(o); err != nil || u.Host != r.Host {
-					fail(w, http.StatusForbidden, "cross-origin request")
-					return
-				}
-			}
-			if r.Header.Get("Sec-Fetch-Site") == "cross-site" {
-				fail(w, http.StatusForbidden, "cross-site request")
-				return
-			}
-		}
-		next.ServeHTTP(w, r)
-	})
+	return s.webHandler(mux)
 }
 
 // Listen opens the TCP address and the unix socket. A socket file left by a daemon that is gone
 // is replaced; one a running daemon answers on is an error.
 func (s *Server) Listen() (tcp, unix net.Listener, err error) {
+	if s.initErr != nil {
+		return nil, nil, s.initErr
+	}
 	tcp, err = net.Listen("tcp", s.cfg.Listen)
 	if err != nil {
 		return nil, nil, err
@@ -172,7 +160,7 @@ func (s *Server) list(w http.ResponseWriter, r *http.Request) {
 		s.error(w, err)
 		return
 	}
-	reply(w, http.StatusOK, l)
+	reply(w, http.StatusOK, s.visible(callerOf(r), l))
 }
 
 func (s *Server) create(w http.ResponseWriter, r *http.Request) {
@@ -180,7 +168,16 @@ func (s *Server) create(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &req) {
 		return
 	}
-	id, err := s.m.Create(r.Context(), req, terminal(r))
+	c := callerOf(r)
+	if !s.mayCreate(w, c, &req) {
+		return
+	}
+	id, err := s.m.Create(r.Context(), req, c.EndpointID)
+	if id != "" {
+		if err := s.st.SetOpener(id, c.EndpointID); err != nil {
+			s.logf("server: opener of %s: %v", id, err)
+		}
+	}
 	if err != nil && id == "" {
 		fail(w, http.StatusBadRequest, err.Error())
 		return
@@ -236,7 +233,11 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &req) {
 		return
 	}
-	input, err := s.m.Send(r.Context(), r.PathValue("id"), req.Text, terminal(r))
+	c := callerOf(r)
+	if !s.maySend(w, c, r.PathValue("id"), req.Text) {
+		return
+	}
+	input, err := s.m.Send(r.Context(), r.PathValue("id"), req.Text, c.EndpointID)
 	if err != nil {
 		s.error(w, err)
 		return
@@ -262,10 +263,10 @@ func (s *Server) answer(w http.ResponseWriter, r *http.Request) {
 	s.done(w, s.m.Answer(r.Context(), r.PathValue("id"), a))
 }
 
-var stateKey = regexp.MustCompile(`^(list|quota|(session|context):[0-9a-fA-F-]{1,64})$`)
+var stateKey = regexp.MustCompile(`^(list|quota|confirms|update|(session|context):[0-9a-fA-F-]{1,64})$`)
 
 // events is the page's one event stream: ?sub=<key> for each state it wants (list, quota,
-// session:<id>, context:<id>). See package hub.
+// session:<id>, context:<id>, confirms, update). See package hub.
 func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	keys := r.URL.Query()["sub"]
 	if len(keys) == 0 || len(keys) > 16 {
@@ -278,6 +279,14 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	c := callerOf(r)
+	if !s.mayWatch(w, c, keys) {
+		return
+	}
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	defer s.gate().Track(r, cancel)() // the stream ends when its terminal is revoked or logs out
+	r = r.WithContext(ctx)
 	rc := http.NewResponseController(w)
 	_ = rc.SetWriteDeadline(time.Time{})
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -288,6 +297,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	_ = rc.Flush()
 	sub := s.hub.Subscribe(keys)
 	defer sub.Close()
+	sub.Filter = s.filter(c)
 	_ = sub.Serve(r.Context(), w, func() { _ = rc.Flush() })
 }
 

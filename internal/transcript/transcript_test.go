@@ -106,7 +106,7 @@ func TestRules(t *testing.T) {
 	w.WriteString("not json at all\n{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"half")
 	w.Close()
 
-	ours := func(uuid string) (string, bool) { return "网页", uuid == "u1" }
+	ours := func(uuid string) (string, string, bool) { return "pppppppppppppppp", "网页", uuid == "u1" }
 	page, err := Open(path, ours).Latest()
 	if err != nil {
 		t.Fatal(err)
@@ -117,6 +117,9 @@ func TestRules(t *testing.T) {
 		switch b.Kind {
 		case api.BlockKindUser:
 			s += fmt.Sprintf("(%s|%s|%s)", b.Text, b.From, b.ID)
+			if b.From != "" && b.FromTerminal != "pppppppppppppppp" {
+				t.Errorf("from terminal %q", b.FromTerminal)
+			}
 		case api.BlockKindAssistant:
 			s += "(" + b.Text + ")"
 		case api.BlockKindSystem:

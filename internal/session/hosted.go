@@ -395,7 +395,7 @@ func (h *Hosted) onEvent(e agent.Event) {
 	case agent.TurnStart:
 		h.turnFrom = h.lastFrom
 		if e.Input != "" {
-			if from, ok := h.m.o.Store.Source(e.Input); ok {
+			if from, _, ok := h.m.o.Store.Source(e.Input); ok {
 				h.turnFrom = from
 			}
 		}
