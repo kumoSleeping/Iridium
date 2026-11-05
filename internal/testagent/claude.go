@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -33,6 +34,8 @@ func Main() (code int, ok bool) {
 //
 //   - ASK asks to run `ls` first and goes on once answered; ASKASK then asks for `ls -la` too.
 //     Both suggest the rule "ls *".
+//   - QUESTION asks two questions (AskUserQuestion: a color, one of Red or Blue; sizes, any of S,
+//     M, L) and answers "ok: answers <question>=<answer>; ...", by question.
 //   - WAIT runs for half a second (an interrupt ends it at once); messages that come meanwhile
 //     join it, each answered "ok: <text>" in the same turn.
 //   - crash begins the turn, then exits 3. Resumed with CLAUDE_CODE_RESUME_INTERRUPTED_TURN=1, it
@@ -129,6 +132,15 @@ func Claude() int {
 		open = []any{req}
 		say(req)
 	}
+	question := func(id string) {
+		qs := []any{
+			map[string]any{"question": "Which color?", "header": "Color", "multiSelect": false, "options": []any{map[string]any{"label": "Red"}, map[string]any{"label": "Blue", "description": "the sea"}}},
+			map[string]any{"question": "Which sizes?", "header": "Sizes", "multiSelect": true, "options": []any{map[string]any{"label": "S"}, map[string]any{"label": "M"}, map[string]any{"label": "L"}}},
+		}
+		req := map[string]any{"type": "control_request", "request_id": id, "request": map[string]any{"subtype": "can_use_tool", "tool_name": "AskUserQuestion", "input": map[string]any{"questions": qs}, "tool_use_id": "toolu_" + id, "requires_user_interaction": true}}
+		open = []any{req}
+		say(req)
+	}
 
 	// Run the interrupted turn again by itself, before initialize's answer, as Claude does.
 	if os.Getenv("CLAUDE_CODE_RESUME_INTERRUPTED_TURN") == "1" && (strings.HasSuffix(lastUser, "crash") || strings.HasSuffix(lastUser, "crashloop")) {
@@ -208,6 +220,27 @@ func Claude() int {
 			if pending != nil {
 				open = []any{}
 				text := textOf(pending)
+				if strings.HasSuffix(text, "QUESTION") {
+					var r struct {
+						Response struct {
+							Response struct {
+								UpdatedInput struct {
+									Answers map[string]string `json:"answers"`
+								} `json:"updatedInput"`
+							} `json:"response"`
+						} `json:"response"`
+					}
+					json.Unmarshal(line, &r)
+					var said []string
+					for q, a := range r.Response.Response.UpdatedInput.Answers {
+						said = append(said, q+"="+a)
+					}
+					sort.Strings(said)
+					assistant("ok: answers " + strings.Join(said, "; "))
+					end(pending, "success")
+					pending = nil
+					continue
+				}
 				if strings.HasSuffix(text, "ASKASK") && asked == 1 {
 					asked++
 					ask("ask-2", "ls -la")
@@ -230,6 +263,10 @@ func Claude() int {
 			case strings.HasSuffix(text, "crash"), strings.HasSuffix(text, "crash!"), strings.HasSuffix(text, "crashloop"):
 				record.Close()
 				return 3
+			case strings.HasSuffix(text, "QUESTION"):
+				pending, asked = f, 1
+				question("ask-q")
+				continue
 			case strings.HasSuffix(text, "ASK"):
 				pending, asked = f, 1
 				ask("ask-1", "ls")
