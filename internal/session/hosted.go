@@ -110,6 +110,9 @@ type Hosted struct {
 	queue   []api.Queued // under mu
 	qimages map[string][]agent.Image
 
+	restartDue bool // restart the agent at the turn's end, for its new mode
+	restarting bool // stopped to start again: no pause, no crash
+
 	effort        string
 	models        []agent.Model
 	commands      []agent.Command
@@ -421,8 +424,11 @@ func (h *Hosted) ended(e *hold.Exit) {
 		h.errText, h.failed = h.failed, ""
 	}
 	errText := h.errText
+	restarting := h.restarting
 	h.mu.Unlock()
-	h.pause()
+	if !restarting {
+		h.pause()
+	}
 	h.readTranscript()
 	h.publish()
 	h.m.publishQuota()
@@ -518,7 +524,11 @@ func (h *Hosted) onEvent(e agent.Event) {
 		list = true
 		later(h.refreshContext)
 		later(h.refreshQuota)
-		if !replay && h.quotaUntil == 0 {
+		if !replay && h.restartDue {
+			// A mode that switches only with a restart (pi): now, then what waited goes.
+			h.restartDue = false
+			later(h.restart)
+		} else if !replay && h.quotaUntil == 0 {
 			// What waited goes as the next turn; paused ones stay.
 			later(func() {
 				ctx, cancel := context.WithTimeout(h.m.ctx, time.Minute)
@@ -745,8 +755,11 @@ func (h *Hosted) state(o store.Overlay) api.SessionState {
 	for _, m := range h.models {
 		s.Models = append(s.Models, api.Model{Value: m.Value, Name: m.Name, Description: m.Description})
 	}
-	if opts, ok := h.drv.(agent.Options); ok {
-		s.Modes, s.Efforts = opts.Modes(), opts.Efforts()
+	if info, ok := agents.Get(h.meta.Agent); ok {
+		s.Modes = info.Modes
+		if _, ok := h.drv.(agent.Efforter); ok {
+			s.Efforts = info.Efforts
+		}
 	}
 	for i := range s.Asks {
 		s.Asks[i].Card = CardOf(h.id, s.Asks[i])

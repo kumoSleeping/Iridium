@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -51,9 +52,10 @@ func cmdNew(e *env, args []string) int {
 	return e.waitTaken(created.ID, anyInput)
 }
 
-// ir send <id> "message" [-a file]...
+// ir send <id> "message" [-a file]... [--steer]: while a turn runs the message waits in the
+// queue for it to end, unless --steer, which joins the running turn.
 func cmdSend(e *env, args []string) int {
-	o, err := parse(args, "wait attach")
+	o, err := parse(args, "wait attach steer")
 	if err != nil {
 		return e.fail(err)
 	}
@@ -64,7 +66,7 @@ func cmdSend(e *env, args []string) int {
 	if err != nil {
 		return e.fail(err)
 	}
-	req := api.Send{Caller: caller()}
+	req := api.Send{Caller: caller(), Steer: o.steer}
 	if len(o.pos) == 2 {
 		req.Text = o.pos[1]
 	}
@@ -83,10 +85,38 @@ func cmdSend(e *env, args []string) int {
 	if err := e.do("POST", "/api/sessions/"+id+"/send", req, &sent); err != nil {
 		return e.fail(err)
 	}
+	if sent.Queued {
+		if !o.wait {
+			return exitDone // it goes when the running turn ends
+		}
+		if code := e.waitQueued(id, sent.Input); code >= 0 {
+			return code
+		}
+	}
 	if o.wait {
 		return e.waitTurn(id, sent.Input)
 	}
 	return e.waitTaken(id, sent.Input)
+}
+
+// waitQueued waits for a queued message to leave the queue: -1 once it went to the agent, else
+// the exit code (paused: it needs you to continue).
+func (e *env) waitQueued(id, input string) int {
+	for {
+		var st api.SessionState
+		if err := e.do("GET", "/api/sessions/"+id, nil, &st); err != nil {
+			return e.fail(err)
+		}
+		i := slices.IndexFunc(st.Queue, func(q api.Queued) bool { return q.ID == input })
+		if i < 0 {
+			return -1
+		}
+		if st.Queue[i].Paused {
+			fmt.Fprintln(e.out, "需要你：消息在暂停的队列里，继续后才发")
+			return exitNeeds
+		}
+		time.Sleep(poll)
+	}
 }
 
 // ir wait <id>

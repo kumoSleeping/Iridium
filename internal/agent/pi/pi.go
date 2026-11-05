@@ -173,6 +173,9 @@ func (d *Driver) Spawn(o agent.SpawnOptions) (hold.Spec, error) {
 		argv = append(argv, "--append-system-prompt", o.SystemPromptFile)
 	}
 	model, level := SplitLevel(o.Model)
+	if level == "" {
+		level = o.Effort
+	}
 	if model != "" {
 		argv = append(argv, "--model", model)
 	}
@@ -484,6 +487,14 @@ func (d *Driver) SetModel(ctx context.Context, model string) error {
 	if level == "" {
 		return nil
 	}
+	return d.SetEffort(ctx, level)
+}
+
+// SetEffort sets the thinking level of this process, if its model takes it.
+func (d *Driver) SetEffort(ctx context.Context, level string) error {
+	d.mu.Lock()
+	name := d.model
+	d.mu.Unlock()
 	// Checked first: pi takes a level it does not know as off, without a word.
 	r, err := d.rpc(ctx, "get_available_thinking_levels", nil)
 	if err != nil {

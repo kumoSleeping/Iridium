@@ -135,6 +135,7 @@ func (e *env) failf(format string, a ...any) int {
 
 type opts struct {
 	wait    bool
+	steer   bool
 	model   string
 	approve string
 	attach  []string
@@ -161,11 +162,12 @@ func parse(args []string, allowed string) (opts, error) {
 		if !strings.Contains(" "+allowed+" ", " "+name+" ") {
 			return o, fmt.Errorf("no flag %s here", a)
 		}
-		if name == "wait" {
+		if name == "wait" || name == "steer" {
 			if hasVal {
 				return o, fmt.Errorf("%s takes no value", a)
 			}
-			o.wait = true
+			o.wait = o.wait || name == "wait"
+			o.steer = o.steer || name == "steer"
 			continue
 		}
 		if !hasVal {

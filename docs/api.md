@@ -134,6 +134,7 @@
 - `<id>` 可只写开头（唯一即可）；`ir new`、`ir ls` 打印至少 8 位的短 ID。`机器:路径`、`机器/<id>` 现在报 `peer not connected`。
 - 输出给 agent 看：只打最后一段回复（`new --wait` 先一行 ID）；`cp` 一行 `路径 大小 sha256`；需要你时每个提问一行 `需要你：…`。进度只在 stderr 是终端时画。
 - `send`、`new` 不带 `--wait` 时等到 agent 接了这条消息（最多 15 秒）再返回，所以紧接着的 `ir wait` 等的是这一回合。
+- 回合在跑时 `ir send` 的话进待发队列：不带 `--wait` 马上返回；带 `--wait` 等它发出去、再等它那一回合（队列暂停了就退出码 2）。`--steer` 插进正在跑的回合。
 - 退出码：0 结束，2 需要你，1 出错（agent 出错退出、回合中被停、`ir` 自己出错）。
 
 - `NewSession.caller`、`Send.caller`：`ir` 从环境变量（`IRIDIUM_SESSION`、`CLAUDE_CODE_SESSION_ID`、`CODEX_THREAD_ID`…）读到的调用者会话，没给 `workspace` 时新会话进它的工作区（它在未归类时交给自动发现）。
@@ -169,6 +170,7 @@
 | `DELETE /api/sessions/{id}/rules` | → `{ok}` | 清掉 |
 
 - 新会话的审批模式：`NewSession.mode`，没给就用配置 `modes.<agent>`，再没有就是 agent 自己的。
+- 模式和强度按 agent 登记表（`GET /api/agents`）：Codex 从下一回合起生效（`turn/start` 带上）；pi 的模式只在启动时装（`modeSwitch: restart`），在跑时改了就重启它（空闲时马上，否则等这个回合结束；接着 `--session-id` 续上，队列照常发）。强度：Codex `effort`、pi `set_thinking_level`，启动时 pi 用 `--thinking`；模型自己带 `:级别` 的以模型的为准。
 - 本会话一直允许：`answer` 带 `always: true`（或卡片选 `always`）。记下工具和 `Ask.pattern`（Claude 自己建议的规则，例如 `ls *`；没有时 shell 命令取第一个词加 ` *`，别的工具不带模式＝这个工具全部）。之后这个会话里匹配的审批自动允许，不通知、不出卡片。
 - 匹配：`*` 是任意一段字；`前缀:*` 同 `前缀*`。shell 命令里有 `;`、`&&`、`||`、`|`、`` ` ``、`$(`、换行的，一律不按模式放行。
 

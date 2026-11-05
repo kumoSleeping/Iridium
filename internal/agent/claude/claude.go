@@ -289,14 +289,6 @@ func (d *Driver) SetMode(ctx context.Context, mode string) error {
 	return err
 }
 
-// Modes are the approval modes Iridium offers for Claude; bypassPermissions works because every
-// process starts with --allow-dangerously-skip-permissions.
-func (d *Driver) Modes() []string {
-	return []string{"default", "acceptEdits", "plan", "bypassPermissions"}
-}
-
-func (d *Driver) Efforts() []string { return []string{"low", "medium", "high", "xhigh", "max"} }
-
 // SetEffort sets effortLevel with apply_flag_settings. Setting it alone turns ultracode off, so
 // get_settings first says whether it was asked for, and it goes along as it was (Rhodium §6.2).
 // A CLI without get_settings reads as ultracode off.

@@ -9,9 +9,3 @@ import "context"
 type Efforter interface {
 	SetEffort(ctx context.Context, level string) error
 }
-
-// Options are the approval modes and thinking efforts an agent offers, as its own names.
-type Options interface {
-	Modes() []string
-	Efforts() []string
-}

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kumoSleeping/iridium/internal/agent"
+	"github.com/kumoSleeping/iridium/internal/agents"
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/store"
 )
@@ -48,11 +49,17 @@ func (m *Manager) SetMode(ctx context.Context, id, mode string) error {
 	if err != nil {
 		return err
 	}
-	if o, ok := h.drv.(agent.Options); ok && mode != "" && !slices.Contains(o.Modes(), mode) {
-		return fmt.Errorf("%w: no mode %q", ErrBadRequest, mode)
+	info, _ := agents.Get(h.meta.Agent)
+	if mode != "" && !slices.Contains(info.Modes, mode) {
+		return fmt.Errorf("%w: no mode %q (%s)", ErrBadRequest, mode, strings.Join(info.Modes, ", "))
 	}
+	restart := false
 	if h.isLive() {
-		if err := h.drv.SetMode(ctx, mode); err != nil {
+		if info.ModeSwitch == "restart" {
+			h.mu.Lock()
+			restart = mode != h.mode
+			h.mu.Unlock()
+		} else if err := h.drv.SetMode(ctx, mode); err != nil {
 			return err
 		}
 	}
@@ -64,7 +71,58 @@ func (m *Manager) SetMode(ctx context.Context, id, mode string) error {
 	h.mode = mode
 	h.mu.Unlock()
 	h.publish()
+	if restart {
+		h.restartForMode()
+	}
 	return nil
+}
+
+// restartForMode restarts the agent for a mode it takes only at launch (pi): now if it is idle,
+// else when the turn ends. The session resumes; what waits in the queue goes after.
+func (h *Hosted) restartForMode() {
+	h.mu.Lock()
+	idle := h.live && h.turn == agent.Idle && len(h.asks) == 0
+	if !idle {
+		h.restartDue = true
+	}
+	h.mu.Unlock()
+	if idle {
+		go h.restart()
+	}
+}
+
+func (h *Hosted) restart() {
+	ctx, cancel := context.WithTimeout(h.m.ctx, 2*h.m.o.Config.StopGrace.D()+30*time.Second)
+	defer cancel()
+	h.mu.Lock()
+	h.restarting = true
+	h.mu.Unlock()
+	defer func() {
+		h.mu.Lock()
+		h.restarting = false
+		h.mu.Unlock()
+	}()
+	if err := h.stop(ctx); err != nil {
+		h.logf("restarting: %v", err)
+		return
+	}
+	for h.isLive() {
+		select {
+		case <-ctx.Done():
+			h.logf("restarting: the agent did not stop")
+			return
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+	h.mu.Lock()
+	h.restarting = false
+	h.mu.Unlock()
+	if err := h.start(ctx); err != nil {
+		h.logf("restarting: %v", err)
+		return
+	}
+	h.logf("restarted for its approval mode")
+	h.release(ctx, false)
 }
 
 // SetEffort sets the session's thinking effort.
@@ -77,8 +135,8 @@ func (m *Manager) SetEffort(ctx context.Context, id, effort string) error {
 	if !ok {
 		return fmt.Errorf("%w: %s has no thinking effort", ErrBadRequest, h.meta.Agent)
 	}
-	if o, ok := h.drv.(agent.Options); ok && effort != "" && !slices.Contains(o.Efforts(), effort) {
-		return fmt.Errorf("%w: no effort %q", ErrBadRequest, effort)
+	if info, _ := agents.Get(h.meta.Agent); effort != "" && !slices.Contains(info.Efforts, effort) {
+		return fmt.Errorf("%w: no effort %q (%s)", ErrBadRequest, effort, strings.Join(info.Efforts, ", "))
 	}
 	if h.isLive() && effort != "" {
 		if err := e.SetEffort(ctx, effort); err != nil {

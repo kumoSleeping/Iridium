@@ -68,13 +68,18 @@ func TestQueue(t *testing.T) {
 	if strings.Contains(r.inLog(id), "gone") {
 		t.Error("a deleted message was sent")
 	}
-	// Steer: true joins at once, like a steer.
-	r.m.SendWith(bg, id, "four WAIT", "网页", false)
+	// Steer: true joins at once. "four WAIT" goes straight too: the fake writes its transcript
+	// ahead of out.log, so the turn above may not have ended for the driver yet, and a plain send
+	// would wait in the queue behind it.
+	r.m.SendWith(bg, id, "four WAIT", "网页", true)
 	r.waitState(id, "the turn", func(s *api.SessionState) bool { return s.Status == api.StatusRunning })
-	if _, queued, _ := r.m.SendWith(bg, id, "five", "网页", true); queued {
-		t.Error("a steer was queued")
+	if _, queued, err := r.m.SendWith(bg, id, "five", "网页", true); queued || err != nil {
+		t.Errorf("steer: queued %v, %v", queued, err)
 	}
 	r.waitState(id, "the joined reply", func(s *api.SessionState) bool { return said(s, "ok: five") })
+	if b := r.messages(id); b[len(b)-2].Text != "ok: four WAIT" {
+		t.Errorf("five did not join four's turn: %+v", b[len(b)-4:])
+	}
 }
 
 // An interrupt pauses the queue: it goes only on continue.
@@ -109,7 +114,7 @@ func TestSettings(t *testing.T) {
 	r := newRig(t, func(c *config.Config, _ *Options) { c.Modes = map[string]string{"claude": "acceptEdits"} })
 	id, _ := r.m.Create(bg, api.NewSession{Cwd: r.cwd, Text: "hi"}, "网页")
 	s := r.waitState(id, "the reply", func(s *api.SessionState) bool { return said(s, "ok: hi") })
-	if s.Mode != "acceptEdits" || len(s.Models) != 2 || len(s.Modes) != 4 || len(s.Efforts) != 5 {
+	if s.Mode != "acceptEdits" || len(s.Models) != 2 || len(s.Modes) != 6 || len(s.Efforts) != 5 {
 		t.Fatalf("state: mode %q models %v modes %v efforts %v", s.Mode, s.Models, s.Modes, s.Efforts)
 	}
 	if err := r.m.SetModel(bg, id, "haiku"); err != nil {

@@ -37,6 +37,9 @@ type Info struct {
 	// ModeSwitch: when a mode set on a running agent takes effect: "now", "next turn", or
 	// "restart" (SetMode fails; the agent takes it at its next start).
 	ModeSwitch string
+	// Efforts are the thinking efforts SetEffort and SpawnOptions.Effort take (a model may take
+	// fewer; the driver says so).
+	Efforts []string
 	// ContextBreakdown: Context gives categories, not only a total. Quota: Quota gives quota
 	// windows (an account's limits).
 	ContextBreakdown bool
@@ -56,6 +59,7 @@ var all = []Info{
 		// claude --help (2.1.318); "default" is still taken as manual's old name.
 		Modes:       []string{"manual", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"},
 		DefaultMode: "manual", ModeSwitch: "now", ContextBreakdown: true, Quota: true,
+		Efforts: []string{"low", "medium", "high", "xhigh", "max"},
 		New: func(emit func(agent.Event), logf func(string, ...any)) agent.Driver {
 			return claude.New(claude.Options{Emit: emit, Logf: logf})
 		},
@@ -65,6 +69,7 @@ var all = []Info{
 	{
 		Agent: api.AgentCodex, Name: "Codex",
 		Modes: codex.Modes, DefaultMode: codex.DefaultMode, ModeSwitch: "next turn", Quota: true, OwnID: true,
+		Efforts: []string{"minimal", "low", "medium", "high", "xhigh"},
 		New: func(emit func(agent.Event), logf func(string, ...any)) agent.Driver {
 			return codex.New(codex.Options{Emit: emit, Logf: logf})
 		},
@@ -78,7 +83,7 @@ var all = []Info{
 	},
 	{
 		Agent: api.AgentPi, Name: "pi",
-		Modes: pi.Modes, DefaultMode: pi.DefaultMode, ModeSwitch: "restart",
+		Modes: pi.Modes, DefaultMode: pi.DefaultMode, ModeSwitch: "restart", Efforts: pi.Levels,
 		New: func(emit func(agent.Event), logf func(string, ...any)) agent.Driver {
 			return pi.New(pi.Options{Emit: emit, Logf: logf})
 		},

@@ -236,6 +236,9 @@ func (d *Driver) Spawn(o agent.SpawnOptions) (hold.Spec, error) {
 		w.thread = o.AgentSession
 	}
 	model, effort := SplitEffort(o.Model)
+	if effort == "" {
+		effort = o.Effort
+	}
 	d.mu.Lock()
 	d.want, d.mode = w, mode
 	d.pick.model, d.pick.effort = model, effort
@@ -736,6 +739,33 @@ func (d *Driver) SetModel(ctx context.Context, model string) error {
 	evs := d.take()
 	d.mu.Unlock()
 	d.flush(evs)
+	return nil
+}
+
+// SetEffort sets the reasoning effort from the next turn/start on, which carries it, if the model
+// takes it.
+func (d *Driver) SetEffort(ctx context.Context, level string) error {
+	if err := d.waitReady(ctx); err != nil {
+		return err
+	}
+	d.mu.Lock()
+	name := d.pick.model
+	if name == "" {
+		name = d.model
+	}
+	d.mu.Unlock()
+	if name != "" {
+		models, err := d.listModels(ctx)
+		if err != nil {
+			return err
+		}
+		if m, ok := findModel(models, name); ok && len(m.Efforts) > 0 && !m.takes(level) {
+			return fmt.Errorf("codex: %s takes no effort %q", m.ID, level)
+		}
+	}
+	d.mu.Lock()
+	d.pick.effort = level
+	d.mu.Unlock()
 	return nil
 }
 
