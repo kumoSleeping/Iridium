@@ -16,6 +16,9 @@ import (
 // ErrElsewhere: another process runs the session, so it is read-only here.
 var ErrElsewhere = errors.New("the session runs elsewhere")
 
+// ErrSubagent: the session is a subagent's, which only its parent talks to: read-only here.
+var ErrSubagent = errors.New("a subagent's session is read-only; talk to its parent")
+
 // Finder is what a Discovery may do besides listing: give one session it found, with its
 // transcript where it can be read; and say whether a session is free to resume, that is no
 // process but Iridium's own uses it.
@@ -73,6 +76,9 @@ func (m *Manager) take(ctx context.Context, id string) (*Hosted, error) {
 	s, _, ok := f.Found(id)
 	if !ok {
 		return nil, ErrNotFound
+	}
+	if s.Subagent {
+		return nil, ErrSubagent
 	}
 	if err := f.Free(id); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrElsewhere, err)
@@ -136,11 +142,22 @@ func (m *Manager) foreignState(id string, over map[string]store.Overlay) (*api.S
 	o := over[id]
 	s.Name, s.Pinned, s.Workspace = o.Name, o.Pinned, o.Workspace
 	s.Archived = !m.visibility().Shown(string(s.Agent), s.ID)
+	m.parentOf(&s)
 	st := &api.SessionState{Session: s, Asks: []api.Ask{}, Tasks: []api.Task{}}
 	if f != nil {
 		st.End, _ = f.Size()
 	}
 	return st, nil
+}
+
+// parentOf names a subagent's parent by Iridium's id: a hosted Codex session's thread is not.
+func (m *Manager) parentOf(s *api.Session) {
+	if !s.Subagent || s.Parent == "" {
+		return
+	}
+	if h := m.byAgentID(s.Parent); h != nil {
+		s.Parent, s.Launcher = h.id, h.id
+	}
 }
 
 // readable is the session's transcript, hosted or found on disk; nil if there is none (yet) or

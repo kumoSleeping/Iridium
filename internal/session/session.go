@@ -363,6 +363,7 @@ func (m *Manager) List(ctx context.Context) ([]api.Session, error) {
 				o := over[s.ID]
 				s.Name, s.Pinned, s.Workspace = o.Name, o.Pinned, o.Workspace
 				s.Archived = !vis.Shown(string(s.Agent), s.ID)
+				m.parentOf(&s)
 				out = append(out, s)
 			}
 		}

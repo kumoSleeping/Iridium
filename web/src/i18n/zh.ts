@@ -47,6 +47,9 @@ export const zh = {
   "chat.empty": "还没有消息",
   "chat.gone": "没有这个会话",
   "chat.elsewhere": "在别处运行，只读",
+  "chat.subagent": "子代理，只读 ·",
+  "chat.subagentParent": "回到父会话",
+  "row.subagent": "子代理",
   "chat.crashed": "上次进程出错退出",
 
   "msg.fromPanel": "来自 {name}",

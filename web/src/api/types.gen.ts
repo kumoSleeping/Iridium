@@ -72,6 +72,12 @@ export interface Session {
    * Launcher: the session that started this one, if discovery saw it.
    */
   launcher?: string;
+  /**
+   * Subagent: an Agent tool's subtask (Claude) or a subagent's thread (Codex), listed as a
+   * session of its own, read-only; Parent: the session that started it.
+   */
+  subagent?: boolean;
+  parent?: string;
   last?: LastSaid;
   updatedAt: number /* int64 */; // ms since the epoch
 }

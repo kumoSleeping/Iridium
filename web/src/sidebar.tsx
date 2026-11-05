@@ -287,7 +287,18 @@ function SessionRow({ s, depth, flip, selected, onSelect, chatCode }: { s: Sessi
             </span>
           </Tip>
         }
-        label={renaming ? <Rename s={s} done={() => setRenaming(false)} /> : title}
+        label={
+          renaming ? (
+            <Rename s={s} done={() => setRenaming(false)} />
+          ) : s.subagent ? (
+            <>
+              <span className="mr-1.5 text-sm text-ink-4">{t("row.subagent")}</span>
+              {title}
+            </>
+          ) : (
+            title
+          )
+        }
         end={end}
         extra={{ ...lp, ...hover, onClickCapture: lp.onClickCapture }}
       />

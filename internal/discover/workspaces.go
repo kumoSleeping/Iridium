@@ -42,7 +42,7 @@ func (x *Index) classify() {
 	for id, e := range x.entries {
 		cwds[id] = e.cwd
 		if _, ok := assigned[id]; !ok && vis.Shown(string(e.agent), id) {
-			news = append(news, fresh{id, e.cwd, x.launchers[id], e.mtime})
+			news = append(news, fresh{id, e.cwd, x.launcherOf(e), e.mtime})
 		}
 	}
 	x.mu.Unlock()

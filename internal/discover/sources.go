@@ -1,6 +1,7 @@
 package discover
 
 import (
+	"cmp"
 	"encoding/json"
 	"io"
 	"os"
@@ -21,13 +22,14 @@ type onDisk struct {
 	path  string
 }
 
-// glimpse is what the list needs of one transcript. skip: not a session of its own (an Agent
-// tool's subtask, a Codex subagent's thread).
+// glimpse is what the list needs of one transcript. sub: a subagent's (an Agent tool's
+// subtask, a Codex subagent's thread); parent: the agent's id of the session that started it.
 type glimpse struct {
-	cwd   string
-	title string
-	last  *api.LastSaid
-	skip  bool
+	cwd    string
+	title  string
+	last   *api.LastSaid
+	sub    bool
+	parent string
 }
 
 var (
@@ -75,20 +77,59 @@ func filesIn(dir, suffix string) []string {
 	return out
 }
 
-// Claude: projects/<folder>/<id>.jsonl. Agent tool subtasks are in <id>/subagents/, never
-// listed; older ones were agent-<id>.jsonl beside the sessions.
-func (x *Index) claudeDirs() []string { return subdirs(filepath.Join(x.o.ClaudeDir, "projects")) }
+// Claude: projects/<folder>/<id>.jsonl. Agent tool subtasks are <id>/subagents/agent-<agent
+// id>.jsonl, listed as sessions of their own by that file's name; older ones were
+// agent-<agent id>.jsonl beside the sessions. A session's directory <id>/ is looked at too, for
+// its subagents/ to be watched as soon as it is made.
+func (x *Index) claudeDirs() []string {
+	var out []string
+	for _, p := range subdirs(filepath.Join(x.o.ClaudeDir, "projects")) {
+		out = append(out, p)
+		for _, s := range subdirs(p) {
+			if !validID(filepath.Base(s)) {
+				continue
+			}
+			out = append(out, s)
+			if sub := filepath.Join(s, "subagents"); isDir(sub) {
+				out = append(out, sub)
+			}
+		}
+	}
+	return out
+}
 
 func (x *Index) claudeIn(dir string) []onDisk {
 	var out []onDisk
+	sub := filepath.Base(dir) == "subagents"
 	for _, p := range filesIn(dir, ".jsonl") {
 		id := strings.TrimSuffix(filepath.Base(p), ".jsonl")
-		if strings.HasPrefix(id, "agent-") || !validID(id) {
+		if !validID(id) || sub && !strings.HasPrefix(id, "agent-") {
 			continue
 		}
 		out = append(out, onDisk{id: id, agent: api.AgentClaude, path: p})
 	}
 	return out
+}
+
+func isDir(p string) bool {
+	st, err := os.Stat(p)
+	return err == nil && st.IsDir()
+}
+
+// claudeMeta is what Claude writes beside a subagent's transcript (agent-<id>.meta.json): the
+// description its parent gave the Agent tool.
+func claudeMeta(transcript string) (description string) {
+	b, err := os.ReadFile(strings.TrimSuffix(transcript, ".jsonl") + ".meta.json")
+	if err != nil {
+		return ""
+	}
+	var m struct {
+		Description string `json:"description"`
+	}
+	if json.Unmarshal(b, &m) != nil {
+		return ""
+	}
+	return oneLine(m.Description)
 }
 
 // Codex: sessions/YYYY/MM/DD/rollout-<time>-<thread id>.jsonl.
@@ -173,7 +214,13 @@ func (x *Index) glance(d onDisk) glimpse {
 		if err != nil {
 			return glimpse{}
 		}
-		return glimpse{cwd: g.Cwd, title: g.Title, last: g.Last, skip: g.Sidechain}
+		out := glimpse{cwd: g.Cwd, title: g.Title, last: g.Last, sub: g.Sidechain, parent: g.Parent}
+		if out.sub {
+			if d := claudeMeta(d.path); d != "" {
+				out.title = cut(d, transcript.TitleLen)
+			}
+		}
+		return out
 	case api.AgentCodex:
 		return x.glanceCodex(d)
 	case api.AgentPi:
@@ -192,7 +239,9 @@ type codexLine struct {
 		ID     string          `json:"id"`
 		Cwd    string          `json:"cwd"`
 		Source json.RawMessage `json:"source"`
-		Item   *struct {
+		// ParentThread: a subagent's, also in its source.
+		ParentThread string `json:"parent_thread_id"`
+		Item         *struct {
 			Type     string          `json:"type"`
 			ClientID string          `json:"client_id"`
 			Content  json.RawMessage `json:"content"`
@@ -241,23 +290,33 @@ func (x *Index) glanceCodex(d onDisk) glimpse {
 				return false
 			}
 			g.cwd = l.Payload.Cwd
-			// A subagent's thread is its parent's: {"subagent": …}.
-			var src map[string]json.RawMessage
-			if json.Unmarshal(l.Payload.Source, &src) == nil && src["subagent"] != nil {
-				g.skip = true
-				return false
+			// A subagent's thread: {"subagent": {"thread_spawn": {parent_thread_id, agent_path,
+			// agent_nickname}}}. Its task is the parent's message, not yours: its title is its
+			// path, else its nickname.
+			var src struct {
+				Subagent *struct {
+					Spawn *struct {
+						Parent   string `json:"parent_thread_id"`
+						Path     string `json:"agent_path"`
+						Nickname string `json:"agent_nickname"`
+					} `json:"thread_spawn"`
+				} `json:"subagent"`
+			}
+			if json.Unmarshal(l.Payload.Source, &src) == nil && src.Subagent != nil {
+				g.sub, g.parent = true, l.Payload.ParentThread
+				if sp := src.Subagent.Spawn; sp != nil {
+					g.parent = cmp.Or(sp.Parent, g.parent)
+					g.title = cmp.Or(oneLine(sp.Path), oneLine(sp.Nickname))
+				}
 			}
 			return true
 		}
-		if s := x.codexSaid(&l); s != nil && s.Role == "user" {
+		if s := x.codexSaid(&l); s != nil && s.Role == "user" && g.title == "" {
 			g.title = cut(s.Text, transcript.TitleLen)
 			return false
 		}
-		return true
+		return g.title == ""
 	})
-	if g.skip {
-		return g
-	}
 	if name := x.codexNames()[d.id]; name != "" {
 		g.title = name
 	}

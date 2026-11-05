@@ -369,7 +369,7 @@ func (s *Server) error(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, session.ErrNotFound), errors.Is(err, transcript.ErrNoBlock):
 		fail(w, http.StatusNotFound, err.Error())
-	case errors.Is(err, session.ErrNotLive), errors.Is(err, session.ErrElsewhere):
+	case errors.Is(err, session.ErrNotLive), errors.Is(err, session.ErrElsewhere), errors.Is(err, session.ErrSubagent):
 		fail(w, http.StatusConflict, err.Error())
 	case errors.Is(err, context.DeadlineExceeded):
 		fail(w, http.StatusGatewayTimeout, "the agent did not answer in time")

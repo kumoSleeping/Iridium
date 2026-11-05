@@ -171,7 +171,16 @@ export function ChatPage({ id, phone, onBack }: { id: string; phone: boolean; on
         <div className="mx-auto max-w-[760px]">
           <Queue session={id} queue={s.queue ?? []} />
           <Asks session={id} asks={s.asks} cwd={cwd} confirms={confirms.filter((c) => c.session === id)} />
-          {elsewhere ? (
+          {s.subagent ? (
+            <div className="glass float flex h-12 items-center justify-center gap-1 rounded-xl text-sm text-ink-3">
+              {t("chat.subagent")}
+              {s.parent && (
+                <button type="button" className="cursor-pointer text-ink-2 underline-offset-2 hover:underline" onClick={() => openChat(s.parent!)}>
+                  {t("chat.subagentParent")}
+                </button>
+              )}
+            </div>
+          ) : elsewhere ? (
             <div className="glass float flex h-12 items-center justify-center rounded-xl text-sm text-ink-3">{t("chat.elsewhere")}</div>
           ) : (
             <Under s={s} composer={composer} onSent={onSent} onSentDone={(x) => ((log.sent = log.sent.filter((y) => y !== x || !x.queued)), changed())} modelOpen={modelOpen} setModelOpen={setModelOpen} modeOpen={modeOpen} setModeOpen={setModeOpen} />

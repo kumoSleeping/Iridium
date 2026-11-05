@@ -47,6 +47,9 @@ export const en: Dict = {
   "chat.empty": "No messages yet",
   "chat.gone": "No such session",
   "chat.elsewhere": "Running elsewhere, read only",
+  "chat.subagent": "Subagent, read only ·",
+  "chat.subagentParent": "Open its parent",
+  "row.subagent": "Subagent",
   "chat.crashed": "Its last process ended badly",
 
   "msg.fromPanel": "From {name}",
