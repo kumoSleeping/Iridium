@@ -243,8 +243,13 @@ func (s *Service) files(session, cwd string, b api.Block) []api.FileRef {
 // Annotate fills in each block's Files: what it names that exists, with references.
 func (s *Service) Annotate(session string, page *api.MessagePage) {
 	cwd, _ := s.o.Sessions.Cwd(session)
-	for i := range page.Blocks {
-		page.Blocks[i].Files = s.files(session, cwd, page.Blocks[i])
+	s.AnnotateBlocks(session, cwd, page.Blocks)
+}
+
+// AnnotateBlocks is Annotate for blocks of session, whose folder is cwd (a state's tail).
+func (s *Service) AnnotateBlocks(session, cwd string, blocks []api.Block) {
+	for i := range blocks {
+		blocks[i].Files = s.files(session, cwd, blocks[i])
 	}
 }
 

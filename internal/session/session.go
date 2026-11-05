@@ -80,7 +80,8 @@ type Manager struct {
 	wmu      sync.Mutex
 	watchers []func(Notice)
 
-	tune atomic.Pointer[Tunables] // tune.go
+	tune     atomic.Pointer[Tunables] // tune.go
+	annotate atomic.Pointer[Annotate] // carry.go
 }
 
 func New(o Options) (*Manager, error) {

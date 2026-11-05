@@ -78,6 +78,7 @@ func New(cfg config.Config, m *session.Manager, h *hub.Hub, logf func(string, ..
 	}
 	s := &Server{cfg: cfg, m: m, hub: h, st: m.Store(), files: newFiles(cfg, m, logf), logf: logf}
 	s.asks = newConfirms(h)
+	m.SetAnnotate(s.files.AnnotateBlocks) // a state's tail names files as a page of messages does
 	g, err := s.newGate(cfg.Public.Origin)
 	if err != nil {
 		s.initErr = err
