@@ -272,7 +272,7 @@ export const zh = {
 
   "confirm.invite": "邀请新面板",
   "confirm.token": "插件 TOKEN",
-  "confirm.asked": "{who} 要的；同意后只在这里显示",
+  "confirm.asked": "来自 {who}",
   "confirm.allow": "同意",
   "confirm.asker": "谁要的",
   "confirm.session": "会话",
@@ -299,6 +299,7 @@ export const zh = {
   "term.panel": "面板",
   "term.channel": "通道",
   "term.local": "本机",
+  "term.localShort": "本机的 ir 和网页",
   "term.this": "这一台",
   "term.online": "在线",
   "term.never": "没用过",

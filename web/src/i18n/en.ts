@@ -272,7 +272,7 @@ export const en: Dict = {
 
   "confirm.invite": "Invite a panel",
   "confirm.token": "Plugin token",
-  "confirm.asked": "Asked by {who}; allowed, it shows only here",
+  "confirm.asked": "From {who}",
   "confirm.allow": "Allow",
   "confirm.asker": "Asked by",
   "confirm.session": "Session",
@@ -299,6 +299,7 @@ export const en: Dict = {
   "term.panel": "Panel",
   "term.channel": "Channel",
   "term.local": "Local",
+  "term.localShort": "the local ir and page",
   "term.this": "this one",
   "term.online": "Online",
   "term.never": "Never used",

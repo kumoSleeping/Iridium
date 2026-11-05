@@ -89,7 +89,7 @@ export function TerminalsPage({ phone, onBack }: { phone: boolean; onBack: () =>
   );
 }
 
-const clock = (ms: number) => new Date(ms).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+const clock = (ms: number) => new Date(ms).toLocaleTimeString(document.documentElement.lang || undefined, { hour: "2-digit", minute: "2-digit" });
 
 /** Revokes terminal or invite id, then lists them again. */
 async function revoke(qc: QueryClient, id: string, name: string) {
@@ -105,9 +105,9 @@ async function revoke(qc: QueryClient, id: string, name: string) {
 /** One terminal's row, and opened, its page: name, permissions, revoke. */
 function TerminalRow({ x, open, toggle }: { x: Terminal; open: boolean; toggle: () => void }) {
   const me = useMe().data;
-  const used = x.online ? t("term.online") : ago(x.lastSeenAt || x.createdAt);
+  const used = x.online ? t("term.online") : x.local ? t("term.localShort") : ago(x.lastSeenAt || x.createdAt);
   return (
-    <div className={cn("flex flex-col rounded-lg", open && "bg-fill/50 pb-3")}>
+    <div className={cn("flex flex-col", open && "pb-4")}>
       <button type="button" onClick={toggle} aria-expanded={open} className="g-press flex min-h-14 items-center gap-3 rounded-lg px-2 text-left hover:bg-fill">
         {x.local ? <LocalMark size={32} /> : <Avatar src={x.avatar} name={x.name} size={32} channel={x.kind === "channel"} />}
         <span className="min-w-0 flex-1">
@@ -130,7 +130,7 @@ function TerminalRow({ x, open, toggle }: { x: Terminal; open: boolean; toggle: 
         </span>
         <ChevronRight size={15} className="shrink-0 text-ink-4 transition-transform duration-(--dur-2)" style={{ transform: open ? "rotate(90deg)" : undefined }} />
       </button>
-      {open && (x.local ? <p className="g-fade m-0 px-3 pt-1 text-sm text-ink-3">{t("term.localHint")}</p> : <Detail x={x} />)}
+      {open && (x.local ? <p className="g-fade m-0 pt-1 pr-2 pl-[52px] text-sm text-ink-3">{t("term.localHint")}</p> : <Detail x={x} />)}
     </div>
   );
 }
@@ -155,7 +155,7 @@ function Detail({ x }: { x: Terminal }) {
     }
   };
   return (
-    <div className="g-fade flex flex-col gap-5 px-3 pt-2">
+    <div className="g-fade flex flex-col gap-5 pt-2 pr-2 pl-2 sm:pl-[52px]">
       <Item label={t("term.rename")}>
         <input
           value={name}
