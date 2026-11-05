@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -33,6 +34,8 @@ func Main() (code int, ok bool) {
 //
 //   - ASK asks to run `ls` first and goes on once answered; ASKASK then asks for `ls -la` too.
 //     Both suggest the rule "ls *".
+//   - QUESTION asks two questions (AskUserQuestion: a color, one of Red or Blue; sizes, any of S,
+//     M, L) and answers "ok: answers <question>=<answer>; ...", by question.
 //   - WAIT runs for half a second (an interrupt ends it at once); messages that come meanwhile
 //     join it, each answered "ok: <text>" in the same turn.
 //   - crash begins the turn, then exits 3. Resumed with CLAUDE_CODE_RESUME_INTERRUPTED_TURN=1, it
@@ -120,9 +123,23 @@ func Claude() int {
 		}
 		end(f, "success")
 	}
+	// open: the asks waiting for an answer, as their requests went; initialize names them again
+	// (pending_permission_requests), as the CLI does for a daemon that comes back.
+	open := []any{}
 	ask := func(id, command string) {
-		say(map[string]any{"type": "control_request", "request_id": id, "request": map[string]any{"subtype": "can_use_tool", "tool_name": "Bash", "input": map[string]any{"command": command}, "tool_use_id": "toolu_" + id,
-			"permission_suggestions": []any{map[string]any{"type": "addRules", "rules": []any{map[string]any{"toolName": "Bash", "ruleContent": "ls *"}}, "behavior": "allow", "destination": "localSettings"}}}})
+		req := map[string]any{"type": "control_request", "request_id": id, "request": map[string]any{"subtype": "can_use_tool", "tool_name": "Bash", "input": map[string]any{"command": command}, "tool_use_id": "toolu_" + id,
+			"permission_suggestions": []any{map[string]any{"type": "addRules", "rules": []any{map[string]any{"toolName": "Bash", "ruleContent": "ls *"}}, "behavior": "allow", "destination": "localSettings"}}}}
+		open = []any{req}
+		say(req)
+	}
+	question := func(id string) {
+		qs := []any{
+			map[string]any{"question": "Which color?", "header": "Color", "multiSelect": false, "options": []any{map[string]any{"label": "Red"}, map[string]any{"label": "Blue", "description": "the sea"}}},
+			map[string]any{"question": "Which sizes?", "header": "Sizes", "multiSelect": true, "options": []any{map[string]any{"label": "S"}, map[string]any{"label": "M"}, map[string]any{"label": "L"}}},
+		}
+		req := map[string]any{"type": "control_request", "request_id": id, "request": map[string]any{"subtype": "can_use_tool", "tool_name": "AskUserQuestion", "input": map[string]any{"questions": qs}, "tool_use_id": "toolu_" + id, "requires_user_interaction": true}}
+		open = []any{req}
+		say(req)
 	}
 
 	// Run the interrupted turn again by itself, before initialize's answer, as Claude does.
@@ -176,8 +193,8 @@ func Claude() int {
 			req := f["request"].(map[string]any)
 			switch req["subtype"] {
 			case "initialize":
-				say(map[string]any{"type": "control_response", "response": map[string]any{"subtype": "success", "request_id": id, "pending_permission_requests": []any{},
-					"response": map[string]any{"claude_code_version": "fake", "current_permission_mode": modeOf(os.Args), "models": []any{map[string]any{"value": "default", "displayName": "Default"}, map[string]any{"value": "haiku", "displayName": "Haiku"}}, "commands": []any{map[string]any{"name": "compact", "description": "Compact the conversation"}},
+				say(map[string]any{"type": "control_response", "response": map[string]any{"subtype": "success", "request_id": id, "pending_permission_requests": open,
+					"response": map[string]any{"claude_code_version": "fake", "current_permission_mode": modeOf(os.Args), "models": []any{map[string]any{"value": "default", "displayName": "Default"}, map[string]any{"value": "haiku", "displayName": "Haiku"}}, "commands": []any{map[string]any{"name": "compact", "description": "Compact the conversation", "argumentHint": "<instructions>"}},
 						"account": map[string]any{"email": "user@example.com", "subscriptionType": "Claude Pro"}}}})
 			case "get_usage":
 				answer(id, map[string]any{"session": map[string]any{"total_cost_usd": cost, "model_usage": usage()}, "rate_limits": map[string]any{"limits": []any{map[string]any{"group": "session", "percent": 10, "resets_at": "2026-01-01T00:00:00Z"}}}})
@@ -201,7 +218,29 @@ func Claude() int {
 			}
 		case "control_response":
 			if pending != nil {
+				open = []any{}
 				text := textOf(pending)
+				if strings.HasSuffix(text, "QUESTION") {
+					var r struct {
+						Response struct {
+							Response struct {
+								UpdatedInput struct {
+									Answers map[string]string `json:"answers"`
+								} `json:"updatedInput"`
+							} `json:"response"`
+						} `json:"response"`
+					}
+					json.Unmarshal(line, &r)
+					var said []string
+					for q, a := range r.Response.Response.UpdatedInput.Answers {
+						said = append(said, q+"="+a)
+					}
+					sort.Strings(said)
+					assistant("ok: answers " + strings.Join(said, "; "))
+					end(pending, "success")
+					pending = nil
+					continue
+				}
 				if strings.HasSuffix(text, "ASKASK") && asked == 1 {
 					asked++
 					ask("ask-2", "ls -la")
@@ -224,6 +263,10 @@ func Claude() int {
 			case strings.HasSuffix(text, "crash"), strings.HasSuffix(text, "crash!"), strings.HasSuffix(text, "crashloop"):
 				record.Close()
 				return 3
+			case strings.HasSuffix(text, "QUESTION"):
+				pending, asked = f, 1
+				question("ask-q")
+				continue
 			case strings.HasSuffix(text, "ASK"):
 				pending, asked = f, 1
 				ask("ask-1", "ls")

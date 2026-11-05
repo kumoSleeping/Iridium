@@ -103,8 +103,9 @@ func (x *Index) Workspaces() ([]api.Workspace, error) {
 
 // CreateWorkspace makes a workspace of folder path (absolute, checked by the caller); name ""
 // is the folder's name. The sessions of that folder and below that are in none and were never
-// moved by the user go in it.
-func (x *Index) CreateWorkspace(path, name string) (api.Workspace, error) {
+// moved by the user go in it: those discovery found, and also, the rest of the list (hosted
+// sessions it has no transcript of yet, or lists under the agent's own id).
+func (x *Index) CreateWorkspace(path, name string, also ...api.Session) (api.Workspace, error) {
 	path = filepath.Clean(path)
 	if name = oneLine(name); name == "" {
 		name = filepath.Base(path)
@@ -121,6 +122,11 @@ func (x *Index) CreateWorkspace(path, name string) (api.Workspace, error) {
 		}
 	}
 	x.mu.Unlock()
+	for _, s := range also {
+		if s.Cwd != "" && within(filepath.Clean(s.Cwd), path) && !slices.Contains(ids, s.ID) {
+			ids = append(ids, s.ID)
+		}
+	}
 	if _, err := x.o.Store.Adopt(id, ids); err != nil {
 		return api.Workspace{}, err
 	}

@@ -184,8 +184,9 @@ type Model struct {
 }
 
 type Command struct {
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
+	Name         string `json:"name"`
+	Description  string `json:"description,omitempty"`
+	ArgumentHint string `json:"argumentHint,omitempty"`
 }
 
 type Tokens struct {

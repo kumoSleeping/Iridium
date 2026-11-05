@@ -30,6 +30,7 @@ const (
 	fileProc   = "proc.json"        // procMeta: the agent process last started
 	filePrompt = "system-prompt.md" // appended to the agent's system prompt
 	fileStop   = "stop"             // the daemon asked the agent to stop: its exit is no crash
+	fileSeen   = "seen.json"        // seenMeta: how far the daemon had read the agent's output
 )
 
 type meta struct {
@@ -61,6 +62,13 @@ func (h *Hosted) findTranscript() (string, error) {
 		return "", fmt.Errorf("no agent %s", mt.Agent)
 	}
 	return info.Find(agents.Where{ID: mt.agentID(), Cwd: mt.Cwd, Env: h.m.agentEnv(), ClaudeHome: h.m.o.Config.ClaudeDir()})
+}
+
+// seenMeta: the daemon had read process Proc's output up to Offset in out.log. What comes after
+// it a daemon taken up there has not seen: it is handled as it comes, not replayed.
+type seenMeta struct {
+	Proc   int   `json:"proc"`
+	Offset int64 `json:"offset"`
 }
 
 // procMeta: proc goes up by one each start; outStart is where its output begins in out.log.
@@ -222,7 +230,7 @@ func (h *Hosted) launch(ctx context.Context, proc int) error {
 	}
 	h.mu.Lock()
 	o := agent.SpawnOptions{Session: h.id, Resume: found != "", AgentSession: h.meta.agentID(), Cwd: h.meta.Cwd, Env: m.agentEnv(), Program: m.o.Config.Programs[string(h.meta.Agent)], SystemPromptFile: prompt,
-		Model: h.meta.Model, Mode: cmp.Or(h.meta.Mode, m.o.Config.Modes[string(h.meta.Agent)]), Effort: h.effort, CrashResume: h.crashResume && found != ""}
+		Model: h.meta.Model, Mode: cmp.Or(h.meta.Mode, m.defaultMode(h.meta.Agent)), Effort: h.effort, CrashResume: h.crashResume && found != ""}
 	h.resuming, h.crashResume, h.turnSeen = o.CrashResume, false, false
 	h.mu.Unlock()
 	// An agent updating itself is gone for a few seconds: wait for it (Rhodium §4.2).
@@ -300,8 +308,17 @@ func (h *Hosted) adopt() error {
 	h.in, h.live, h.lastActive, h.ready = in, true, time.Now(), ready
 	h.mu.Unlock()
 	h.drv.Attach(in.WriteLine, pm.Proc)
+	// The output before where the last daemon had read is replayed to bring the driver's state
+	// back; what it wrote while no daemon read it (a turn's end, its usage) is new. A daemon
+	// that saved no offset is taken to have read it all.
+	replay := hold.OutSize(h.dir)
+	var seen seenMeta
+	if b, err := os.ReadFile(filepath.Join(h.dir, fileSeen)); err == nil && json.Unmarshal(b, &seen) == nil &&
+		seen.Proc == pm.Proc && seen.Offset >= pm.OutStart && seen.Offset <= replay {
+		replay = seen.Offset
+	}
 	h.m.wg.Add(1)
-	go h.loop(pm.Proc, pm.OutStart, hold.OutSize(h.dir))
+	go h.loop(pm.Proc, pm.OutStart, replay)
 	go h.attached(ready)
 	h.logf("taken up (process %d)", pm.Proc)
 	return nil
@@ -351,6 +368,14 @@ func (h *Hosted) loop(proc int, outStart, replay int64) {
 		h.replaying.Store(false)
 		return len(lines)
 	}
+	// How far the output was read, saved now and then and as the daemon goes (seenMeta).
+	var saved time.Time
+	save := func() {
+		if err := writeJSON(filepath.Join(h.dir, fileSeen), seenMeta{Proc: proc, Offset: tail.Offset()}); err != nil {
+			h.logf("saving how far out.log was read: %v", err)
+		}
+		saved = time.Now()
+	}
 	var looked, read time.Time
 	for {
 		n := feed()
@@ -359,6 +384,9 @@ func (h *Hosted) loop(proc int, outStart, replay int64) {
 			read = time.Now()
 		}
 		if n > 0 {
+			if time.Since(saved) > time.Second {
+				save()
+			}
 			continue
 		}
 		e, _ := hold.ReadExit(h.dir)
@@ -378,6 +406,7 @@ func (h *Hosted) loop(proc int, outStart, replay int64) {
 		}
 		select {
 		case <-h.m.ctx.Done():
+			save()
 			return
 		case <-time.After(h.m.o.Poll):
 		}
@@ -754,6 +783,9 @@ func (h *Hosted) state(o store.Overlay) api.SessionState {
 		Effort: h.effort, Queue: slices.Clone(h.queue), Context: h.ctxSum, QuotaUntil: h.quotaUntil, Tail: h.tail}
 	for _, m := range h.models {
 		s.Models = append(s.Models, api.Model{Value: m.Value, Name: m.Name, Description: m.Description})
+	}
+	for _, c := range h.commands {
+		s.Commands = append(s.Commands, api.Command{Name: strings.TrimPrefix(c.Name, "/"), Description: c.Description, ArgumentHint: c.ArgumentHint})
 	}
 	if info, ok := agents.Get(h.meta.Agent); ok {
 		s.Modes = info.Modes

@@ -116,6 +116,15 @@ func (m *Manager) AnswerCard(ctx context.Context, ans api.CardAnswer) error {
 				a.Answers[q] = o.Text
 			}
 		}
+		// Own words answer their question in place of a choice.
+		if len(ans.Words) > len(card.Summary) {
+			return fmt.Errorf("%w: words for %d questions, there are %d", ErrBadRequest, len(ans.Words), len(card.Summary))
+		}
+		for g, w := range ans.Words {
+			if w = strings.TrimSpace(w); w != "" {
+				a.Answers[card.Summary[g]] = w
+			}
+		}
 		if len(a.Answers) != len(card.Summary) {
 			return fmt.Errorf("%w: answer each of the %d questions", ErrBadRequest, len(card.Summary))
 		}
