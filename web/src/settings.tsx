@@ -2,11 +2,12 @@
 // reaping idle agents, going on after a crash or a quota, Web Push per workspace (off by default),
 // the quota bars shown; the update; and this device's own: reminders, appearance, language. Changed
 // is saved at once. A daemon that does not serve /api/settings yet leaves its part disabled.
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { BellRing, ChevronLeft, CircleAlert, FoldVertical, LoaderCircle, MessageSquareDot, Monitor, Moon, Sun } from "lucide-react";
 import { useState, type ReactNode } from "react";
-import type { PushRules, Settings } from "./api/assumed";
-import { api } from "./api/client";
+import type { Settings } from "./api/assumed";
+import { api, missing } from "./api/client";
+import type { PushEvents, PushState } from "./api/types.gen";
 import { useSettings, useUpdate, useWorkspaces } from "./data";
 import { t, useLang } from "./i18n";
 import { LangSwitch, Segmented, type ThemePref } from "./me";
@@ -17,13 +18,13 @@ import { cn, IconKey, Switch, Tip } from "./ui";
 import { remindBy, reminding } from "./unread";
 
 const REAP = ["0", "15m", "30m", "1h", "2h", "4h", "12h"];
-const RULES: { k: keyof PushRules; icon: ReactNode; label: Parameters<typeof t>[0] }[] = [
+const RULES: { k: keyof PushEvents; icon: ReactNode; label: Parameters<typeof t>[0] }[] = [
   { k: "needsYou", icon: <BellRing size={14} />, label: "push.needsYou" },
   { k: "error", icon: <CircleAlert size={14} />, label: "push.error" },
   { k: "turnEnd", icon: <MessageSquareDot size={14} />, label: "push.turnEnd" },
   { k: "compact", icon: <FoldVertical size={14} />, label: "push.compact" },
 ];
-const DEFAULT_RULES: PushRules = { needsYou: true, error: true, turnEnd: false, compact: false };
+const DEFAULT_RULES: PushEvents = { needsYou: true, error: true, turnEnd: false, compact: false };
 
 export function SettingsPage({ phone, onBack, theme, setTheme }: { phone: boolean; onBack: () => void; theme: ThemePref; setTheme: (v: ThemePref) => void }) {
   const lang = useLang();
@@ -43,16 +44,28 @@ export function SettingsPage({ phone, onBack, theme, setTheme }: { phone: boolea
       toast(t("err.settings"), { error: true, description: errText(e) });
     }
   };
-  const rules = (id: number) => ({ ...DEFAULT_RULES, ...s?.push.workspaces[String(id)] });
-  const setRule = (id: number, k: keyof PushRules, on: boolean) => s && void put({ push: { ...s.push, workspaces: { ...s.push.workspaces, [String(id)]: { ...rules(id), [k]: on } } } });
+  // Push is the daemon's own (GET /api/push): the switch, its key, each workspace's events.
+  const pq = useQuery({ queryKey: ["push"], queryFn: () => api.push().catch((e) => (missing(e) ? null : Promise.reject(e))), staleTime: 30_000 });
+  const push: PushState | null | undefined = pq.data;
+  const rules = (id: number): PushEvents => {
+    const w = push?.workspaces.find((x) => x.workspace === id);
+    return w ? { needsYou: w.needsYou, error: w.error, turnEnd: w.turnEnd, compact: w.compact } : DEFAULT_RULES;
+  };
+  const setRule = async (id: number, k: keyof PushEvents, on: boolean) => {
+    if (!push) return;
+    const next = { ...rules(id), [k]: on };
+    qc.setQueryData(["push"], { ...push, workspaces: [...push.workspaces.filter((x) => x.workspace !== id), { workspace: id, ...next }] });
+    await api.pushWorkspace(id, next).catch((e) => (qc.invalidateQueries({ queryKey: ["push"] }), toast(t("err.settings"), { error: true, description: errText(e) })));
+  };
   const [remind, setRemind] = useState(reminding);
   const [pushing, setPushing] = useState(false);
   const pushOn = async (on: boolean) => {
-    if (!s) return;
+    if (!push) return;
     setPushing(true);
     try {
-      if (on) await subscribe();
-      await put({ push: { ...s.push, enabled: on } });
+      if (on) await subscribe(push.publicKey);
+      await api.pushSwitch(on);
+      qc.setQueryData(["push"], { ...push, enabled: on });
     } catch (e) {
       toast(t("err.push"), { error: true, description: errText(e) });
     } finally {
@@ -97,9 +110,9 @@ export function SettingsPage({ phone, onBack, theme, setTheme }: { phone: boolea
 
           <Group title={t("settings.push")}>
             <Item label={t("settings.pushOn")} hint={t("settings.pushHint")}>
-              {pushing ? <LoaderCircle size={16} className="animate-spin text-ink-3" /> : <Switch label={t("settings.pushOn")} disabled={off || !("PushManager" in window)} on={!!s?.push.enabled} onChange={(v) => void pushOn(v)} />}
+              {pushing ? <LoaderCircle size={16} className="animate-spin text-ink-3" /> : <Switch label={t("settings.pushOn")} disabled={!push || !("PushManager" in window)} on={!!push?.enabled} onChange={(v) => void pushOn(v)} />}
             </Item>
-            {s?.push.enabled && ws.length > 0 && (
+            {push?.enabled && ws.length > 0 && (
               <div className="g-fade flex flex-col">
                 <div className="flex h-8 items-center justify-end gap-3 pr-0.5 text-ink-3">
                   {RULES.map((r) => (
@@ -115,7 +128,7 @@ export function SettingsPage({ phone, onBack, theme, setTheme }: { phone: boolea
                     <span className="min-w-0 flex-1 truncate text-base">{w.name}</span>
                     {RULES.map((r) => (
                       <span key={r.k} className="grid w-8 place-items-center">
-                        <input type="checkbox" checked={rules(w.id)[r.k]} onChange={(e) => setRule(w.id, r.k, e.target.checked)} aria-label={`${w.name} · ${t(r.label)}`} className="size-4 accent-[var(--ink)]" />
+                        <input type="checkbox" checked={rules(w.id)[r.k]} onChange={(e) => void setRule(w.id, r.k, e.target.checked)} aria-label={`${w.name} · ${t(r.label)}`} className="size-4 accent-[var(--ink)]" />
                       </span>
                     ))}
                   </div>
@@ -214,13 +227,13 @@ function UpdateRow() {
 }
 
 /** Push on: the worker, the browser's leave, a subscription with the daemon's key, sent to it. */
-async function subscribe() {
+async function subscribe(key: string) {
   if (!("serviceWorker" in navigator) || !("PushManager" in window)) throw new Error(t("err.noPush"));
   if ((await Notification.requestPermission()) !== "granted") throw new Error(t("err.pushDenied"));
   const reg = await navigator.serviceWorker.register("/sw.js");
   await navigator.serviceWorker.ready;
-  const { key } = await api.pushKey();
   const raw = atob(key.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(key.length / 4) * 4, "="));
   const sub = (await reg.pushManager.getSubscription()) ?? (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: Uint8Array.from(raw, (c) => c.charCodeAt(0)) }));
-  await api.pushSubscribe(sub.toJSON());
+  const j = sub.toJSON();
+  await api.pushSubscribe({ endpoint: j.endpoint ?? sub.endpoint, keys: { p256dh: j.keys?.p256dh ?? "", auth: j.keys?.auth ?? "" } });
 }

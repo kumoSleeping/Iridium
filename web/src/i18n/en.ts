@@ -40,6 +40,7 @@ export const en: Dict = {
   "menu.copyId": "Copy session ID",
   "menu.move": "Move to workspace",
   "menu.stop": "Stop the agent",
+  "menu.clearRules": "Forget this session's always-allows",
 
   "chat.log": "Conversation",
   "chat.newer": "New messages",
@@ -156,6 +157,7 @@ export const en: Dict = {
   "toast.copied": "Copied",
   "toast.stopped": "Stopped",
   "toast.archived": "Archived",
+  "toast.cleared": "Forgotten",
 
   "err.offline": "Can't reach Iridium",
   "err.notYet": "This Iridium doesn't support it yet",

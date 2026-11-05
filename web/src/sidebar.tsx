@@ -4,7 +4,7 @@
 // waits on you, 归档 folded at the bottom. A row's menu (right click, long-press): pin, rename, stop,
 // archive. The mouse resting on a row fetches its chat ahead.
 import { Menu } from "@base-ui/react/menu";
-import { Archive, ArchiveRestore, ChevronRight, Copy, Folder, Inbox, Network, Pencil, Pin, PinOff, Plus, Search, Settings, Square } from "lucide-react";
+import { Archive, ArchiveRestore, ChevronRight, Copy, Folder, Inbox, Network, Pencil, Pin, PinOff, Plus, Search, Settings, ShieldOff, Square } from "lucide-react";
 import { useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { api } from "./api/client";
 import type { Session } from "./api/types.gen";
@@ -298,6 +298,7 @@ export function sessionActions(s: Session, rename: () => void): { icon: ReactNod
     { icon: <Pencil size={15} />, label: t("menu.rename"), run: rename },
     { icon: <Copy size={15} />, label: t("menu.copyId"), run: run(() => navigator.clipboard.writeText(s.id), t("toast.copied")) },
     ...(s.live ? [{ icon: <Square size={14} />, label: t("menu.stop"), run: run(() => api.stop(s.id), t("toast.stopped")) }] : []),
+    ...(s.hosted ? [{ icon: <ShieldOff size={15} />, label: t("menu.clearRules"), run: run(() => api.clearRules(s.id), t("toast.cleared")) }] : []),
     s.archived
       ? { icon: <ArchiveRestore size={15} />, label: t("menu.unarchive"), run: run(() => api.patch(s.id, { archived: false })) }
       : { icon: <Archive size={15} />, label: t("menu.archive"), run: run(() => api.patch(s.id, { archived: true }), t("toast.archived")) },

@@ -51,11 +51,6 @@ describe("api", () => {
     answer = () => json({ error: "the session's agent is not running" }, 409);
     await expect(api.interrupt("s1")).rejects.toMatchObject({ status: 409, message: "the session's agent is not running" });
   });
-  test("steering a server that has no steer yet sends again without it, which joins the turn", async () => {
-    answer = (c) => ((c.body as { steer?: boolean }).steer ? json({ error: 'bad request body: json: unknown field "steer"' }, 400) : json({ input: "u" }));
-    expect(await api.send("s1", "now", undefined, true)).toEqual({ input: "u" });
-    expect(calls.map((c) => c.body)).toEqual([{ text: "now", steer: true }, { text: "now" }]);
-  });
   test("files and uploads by the session", () => {
     expect(api.fileURL("s 1", "r/1")).toBe("/api/sessions/s%201/files/r%2F1");
     expect(api.fileURL("s", "r", true)).toBe("/api/sessions/s/files/r?download");
@@ -142,6 +137,19 @@ describe("Messages", () => {
     m.dropDrafts();
     m.wrote({ session: "s", proc: 1, n: 5, text: " late" });
     expect(m.drafts).toEqual([]);
+  });
+  test("the state's tail brings the blocks since without a fetch, when it reaches back far enough", async () => {
+    const m = new Messages("s", async () => ({ blocks: [blk(0, "user", "a"), blk(10, "tool", undefined, { id: "t" })], start: 0, end: 20, more: false }));
+    await m.newer();
+    expect(m.fromTail({ start: 30, end: 40, blocks: [] })).toBe(false); // a gap: fetch
+    expect(m.fromTail({ start: 5, end: 40, blocks: [blk(10, "tool", undefined, { id: "t", result: { at: "25.0", text: "ok" } }), blk(30, "assistant", "b")] })).toEqual({ said: 20 });
+    expect(m.blocks.map((b) => [b.at, b.result?.text ?? b.text])).toEqual([
+      ["0.0", "a"],
+      ["10.0", "ok"],
+      ["30.0", "b"],
+    ]);
+    expect(m.end).toBe(40);
+    expect(m.fromTail({ start: 5, end: 40, blocks: null as never })).toBe(false);
   });
   test("what you sent finds its block by its input id, else its words; a failed one stays", () => {
     const sent: Sent[] = [

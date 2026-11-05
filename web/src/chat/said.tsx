@@ -146,8 +146,11 @@ export function Said({ b, session, cwd, source, onJump }: { b: Shown; session: s
       const text = b.text ?? "";
       if (src.kind === "iridium") return <Line icon={<RotateCcw size={12} />}>{text}</Line>;
       if (src.kind === "letter") return <Letter src={src} text={text} onJump={onJump} />;
+      // The server writes each attachment as a line "[附件] `path`": the file shows as itself instead.
+      const paths = new Set(b.files?.map((f) => f.path));
+      const words = paths.size ? text.replace(/\n*^\[附件\] `([^`]+)`$/gm, (all, p: string) => (paths.has(p) ? "" : all)).trim() : text;
       return (
-        <YouBubble text={text} panel={src.panel} time={b.time}>
+        <YouBubble text={words} panel={src.panel} time={b.time}>
           {b.files?.map((f) => <Attached key={f.ref} session={session} f={f} />)}
         </YouBubble>
       );
@@ -155,6 +158,7 @@ export function Said({ b, session, cwd, source, onJump }: { b: Shown; session: s
     case "assistant":
       return <Assistant b={b} session={session} cwd={cwd} />;
     case "system":
+      if (b.event === "iridium") return <Line icon={<RotateCcw size={12} />} title={b.text}>{b.text}</Line>;
       return b.event === "api_error" || b.event === "local_command" || b.event === "unreadable" ? (
         <SystemFold b={b} session={session} />
       ) : (

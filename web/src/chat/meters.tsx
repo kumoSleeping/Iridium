@@ -6,9 +6,9 @@ import { Menu } from "@base-ui/react/menu";
 import { Popover } from "@base-ui/react/popover";
 import { Check, ChevronDown, FilePen, ListChecks, ShieldCheck, ShieldOff, ShieldQuestion, ShieldX, SlidersHorizontal, Sparkles } from "lucide-react";
 import { useState, type CSSProperties, type ReactNode } from "react";
-import type { AccountQuota, LiveSession, Model } from "../api/assumed";
+import type { LiveSession } from "../api/assumed";
 import { api } from "../api/client";
-import type { Agent, Context, ContextCategory } from "../api/types.gen";
+import type { Agent, AgentQuota, Context, ContextCategory, Model } from "../api/types.gen";
 import { useAgent, useSettings } from "../data";
 import { t, useLang } from "../i18n";
 import { useContextState, useQuota } from "../store";
@@ -48,9 +48,10 @@ export function ctxParts(c: Context): Part[] {
   return parts;
 }
 
-export function ContextRing({ session, open, onOpenChange }: { session: string; open?: boolean; onOpenChange?: (o: boolean) => void }) {
+export function ContextRing({ session, summary, open, onOpenChange }: { session: string; summary?: Context; open?: boolean; onOpenChange?: (o: boolean) => void }) {
   useLang();
-  const c = useContextState(session);
+  // The breakdown when the stream carries one; the total the session's state has, else.
+  const c = useContextState(session) ?? summary;
   if (!c || !c.max) return null;
   const pct = Math.min(100, Math.round((c.used / c.max) * 100));
   const r = 7;
@@ -119,10 +120,11 @@ export function QuotaBars({ agent, live }: { agent: Agent; live: boolean }) {
   const lang = useLang();
   const quota = useQuota();
   const hidden = useSettings().data?.quotaHidden ?? [];
-  const q: AccountQuota | undefined = quota?.agents.filter((a) => a.agent === agent).sort((a, b) => b.at - a.at)[0];
+  const q: AgentQuota | undefined = quota?.agents.filter((a) => a.agent === agent).sort((a, b) => b.at - a.at)[0];
   const windows = (q?.windows ?? []).filter((w) => !hidden.includes(quotaKey(q!, w)));
   if (!q || !windows.length) return null;
-  const stale = !live || Date.now() - q.at > STALE;
+  // Faded once no process of the agent runs (the daemon says, else this session), or read long ago.
+  const stale = !(q.live ?? live) || Date.now() - q.at > STALE;
   return (
     <div className={cn("absolute top-[3px] right-4 flex gap-1 transition-opacity", stale && "opacity-50")}>
       {windows.map((w) => {
@@ -182,7 +184,7 @@ export const modeName = (m: Mode) => (MODE_KEY[m.id] ? t(MODE_KEY[m.id]!) : m.id
 export function useMode(s: LiveSession) {
   const [want, setWant] = useState<string | null>(null);
   const info = useAgent(s.agent);
-  const modes: Mode[] = (info?.modes ?? MODES[s.agent] ?? []).map((id) => ({ id }));
+  const modes: Mode[] = (s.modes ?? info?.modes ?? MODES[s.agent] ?? []).map((id) => ({ id }));
   const now = want ?? s.mode ?? info?.defaultMode ?? modes[0]?.id ?? "default";
   if (want !== null && s.mode === want) setWant(null);
   const set = async (m: string) => {
@@ -259,12 +261,13 @@ export function ModelKey({ s, open, onOpenChange }: { s: LiveSession; open?: boo
   if (want !== null && s.model === want) setWant(null);
   const now = want ?? s.model ?? "";
   const cur = models.find((m) => m.value === now || m.name === now);
-  const efforts = cur?.efforts ?? [];
+  const efforts = s.efforts ?? [];
   if (!models.length && !now) return null;
   const set = async (p: { model?: string; effort?: string }) => {
     if (p.model) setWant(p.model);
     try {
-      await api.model(s.id, p);
+      if (p.model !== undefined) await api.model(s.id, p.model);
+      if (p.effort !== undefined) await api.effort(s.id, p.effort);
     } catch (e) {
       setWant(null);
       toast(t("err.model"), { error: true, description: errText(e) });

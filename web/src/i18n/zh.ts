@@ -40,6 +40,7 @@ export const zh = {
   "menu.copyId": "复制会话 ID",
   "menu.move": "移到工作区",
   "menu.stop": "停掉 agent",
+  "menu.clearRules": "清掉本会话的一直允许",
 
   "chat.log": "对话",
   "chat.newer": "新消息",
@@ -156,6 +157,7 @@ export const zh = {
   "toast.copied": "已复制",
   "toast.stopped": "已停掉",
   "toast.archived": "已归档",
+  "toast.cleared": "已清掉",
 
   "err.offline": "连不上 Iridium",
   "err.notYet": "这一版的 Iridium 还不支持",

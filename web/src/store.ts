@@ -2,8 +2,8 @@
 // stream last brought it, and what else the page keeps live in memory (the stream's own state, the
 // round trip). Components read them with useCarried; nothing is a patch.
 import { useSyncExternalStore } from "react";
-import type { AccountQuota, LiveSession } from "./api/assumed";
-import type { Context, Session } from "./api/types.gen";
+import type { LiveSession } from "./api/assumed";
+import type { Context, Quota, Session } from "./api/types.gen";
 
 const states = new Map<string, unknown>();
 const subs = new Map<string, Set<() => void>>();
@@ -62,7 +62,7 @@ const noop = () => () => {};
 export const useList = () => useCarried<Session[]>("list");
 export const useSession = (id: string | null) => useCarried<LiveSession>(id ? `session:${id}` : null);
 export const useContextState = (id: string | null) => useCarried<Context>(id ? `context:${id}` : null);
-export const useQuota = () => useCarried<{ agents: AccountQuota[] }>("quota");
+export const useQuota = () => useCarried<Quota>("quota");
 
 /** The stream: null before it first opens, then whether it is open; rtt, the last round trip in ms. */
 export type Link = { live: boolean | null; rtt: number | null };

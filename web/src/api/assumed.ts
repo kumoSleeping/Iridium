@@ -1,37 +1,19 @@
 // Types of the routes and fields the page uses that internal/api does not have yet (docs/plan.md
 // describes them; other work adds them). Each is written against the plan's shape and used only
 // through src/api/client.ts; once the Go side has it, its generated type replaces the one here.
-import type { Agent, AgentQuota, SessionState } from "./types.gen";
+import type { Agent, SessionState } from "./types.gen";
 
-/** A message waiting to go (the queue above the composer): held, why the server holds it, when it does. */
-export type QueuedInput = { id: string; text: string; files?: number; held?: string };
-
-export type Model = { value: string; name: string; description?: string; efforts?: string[] };
 export type Command = { name: string; description?: string; argumentHint?: string };
 
-/** The fields of the carried "session:<id>" the page reads beyond internal/api's SessionState. */
-export type SessionExtra = {
-  queue?: QueuedInput[];
-  queuePaused?: boolean;
-  models?: Model[];
-  effort?: string;
-  commands?: Command[];
-};
-export type LiveSession = SessionState & SessionExtra;
-
-/** The carried "quota", per agent and the account it is logged in with. */
-export type AccountQuota = AgentQuota & { account?: string; plan?: string };
-
-/** Web Push per workspace (plan "推送"): what is pushed. Off by default as a whole. */
-export type PushRules = { needsYou: boolean; error: boolean; turnEnd: boolean; compact: boolean };
+/** The fields of the carried "session:<id>" the page reads beyond internal/api's SessionState: the
+ *  agent's own commands, for the palette. */
+export type LiveSession = SessionState & { commands?: Command[] };
 
 /** GET/PUT /api/settings: the config file's fields the settings page edits. PUT takes a part. */
 export type Settings = {
   idleReap: string; // "1h", "0" for never
   crashResume: boolean;
   quotaResume: boolean;
-  defaultMode?: Partial<Record<Agent, string>>;
-  push: { enabled: boolean; workspaces: Record<string, PushRules> };
   /** Quota bars hidden, by quotaKey(). */
   quotaHidden: string[];
 };

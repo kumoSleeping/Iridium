@@ -148,7 +148,7 @@ describe("composer", () => {
     expect(matching(cs, "co").map((c) => c.name)).toEqual(["context", "compact", "cost"]);
     expect(matching(cs, "压缩").map((c) => c.name)).toEqual(["compact"]);
     expect(matching(cs, "ntex").map((c) => c.name)).toEqual(["context"]);
-    expect(commandsOf({ ...S("a", "/w"), agent: "pi", asks: [], tasks: [], end: 0, proc: 0 })).toEqual([]);
+    expect(commandsOf({ ...S("a", "/w"), agent: "pi", asks: [], tasks: [], queue: [], end: 0, proc: 0 })).toEqual([]);
   });
 });
 

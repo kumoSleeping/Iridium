@@ -9,7 +9,7 @@ import type { Block, DraftEvent, MessagePage, Session } from "./api/types.gen";
 /** A message of yours sent from this page, till the transcript has it: input, the id the server gave
  *  it (Claude's uuid, which the user block carries); text, as typed; files, upload refs with their
  *  names; from, where the transcript ended as it was sent. failed: why it did not go. */
-export type Sent = { key: string; text: string; files: { ref: string; name: string; type: string }[]; from: number; input?: string; failed?: string };
+export type Sent = { key: string; text: string; files: { ref: string; name: string; type: string }[]; from: number; input?: string; failed?: string; queued?: boolean };
 
 /** Where a block's transcript line begins: its at up to the dot. */
 export const lineOf = (b: { at: string }) => parseInt(b.at);
@@ -90,6 +90,32 @@ export class Messages {
       if (d.whole || (b.text ?? "").trim().startsWith(head(d.text)) || d.text.trim().startsWith(head(b.text ?? ""))) this.forget(this.drafts.shift()!);
     }
     this.sent = unsent(this.sent, this.blocks);
+    this.version++;
+  }
+
+  /** The blocks the session's state carries (SessionState.tail), when they reach back to what is
+   *  shown: those after it go on, those already shown are replaced (a tool's result came). Says
+   *  whether it could; else the page asks for them. said: where what was said came from, when the
+   *  tail brought any: the tail has no Block.files, which the page then asks for (filesFrom). */
+  fromTail(t: { start: number; end: number; blocks: Block[] | null } | undefined): { said?: number } | false {
+    if (!t?.blocks || !this.loaded || this.end < t.start || this.end > t.end) return false;
+    if (t.end <= this.end) return {};
+    const from = this.end;
+    const byAt = new Map(t.blocks.map((b) => [b.at, b]));
+    this.blocks = this.blocks.map((b) => byAt.get(b.at) ?? b);
+    const added = t.blocks.filter((b) => lineOf(b) >= this.end);
+    this.blocks = [...this.blocks, ...added];
+    this.end = t.end;
+    this.took(added);
+    return added.some((b) => b.kind === "user" || b.kind === "assistant") ? { said: from } : {};
+  }
+
+  /** The blocks from from again, as the messages page gives them: with the files they name. */
+  async filesFrom(from: number): Promise<void> {
+    const p = await this.get(this.id, { after: from });
+    const byAt = new Map(p.blocks.filter((b) => b.files?.length).map((b) => [b.at, b]));
+    if (!byAt.size) return;
+    this.blocks = this.blocks.map((b) => (byAt.has(b.at) ? { ...b, files: byAt.get(b.at)!.files } : b));
     this.version++;
   }
 

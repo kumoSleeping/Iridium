@@ -73,9 +73,17 @@ await step("a permission ask shows its card; Allow answers it and the turn goes 
   await page.waitForSelector('[role="alertdialog"]', { timeout: 10000 });
   const card = await text('[role="alertdialog"]');
   if (!card.includes("Run command") || !card.includes("ls")) throw new Error(`card: ${card}`);
+});
+
+await step("words sent while a turn runs wait in the queue, and go once it ends", async () => {
+  await page.type("textarea", "while it waits");
+  await page.keyboard.press("Enter");
+  await page.waitForFunction(() => document.querySelector('section[aria-label="Queue"]')?.textContent.includes("while it waits"), { timeout: 5000 });
   await clickText("Allow", "button");
   await page.waitForFunction(() => !document.querySelector('[role="alertdialog"]'), { timeout: 8000 });
   await waitText("ok: please ASK", 10000);
+  await waitText("ok: while it waits", 10000);
+  await page.waitForFunction(() => !document.querySelector('section[aria-label="Queue"]'), { timeout: 5000 });
 });
 
 await step("a file attached goes up in chunks and is sent with the message", async () => {

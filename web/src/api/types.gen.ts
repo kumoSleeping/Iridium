@@ -101,6 +101,29 @@ export interface SessionState extends Session {
    */
   proc: number /* int */;
   error?: string; // why its last process ended badly
+  /**
+   * Effort: the thinking effort set for it; Models, Modes, Efforts: what the agent offers.
+   */
+  effort?: string;
+  models?: Model[];
+  modes?: string[];
+  efforts?: string[];
+  /**
+   * Queue: messages waiting for the turn to end, oldest first (docs/api.md "待发队列").
+   */
+  queue: Queued[];
+  /**
+   * Context: how full its context window was when last read; context:<id> has the parts.
+   */
+  context?: ContextSummary;
+  /**
+   * QuotaUntil: the agent's quota ran out; Iridium goes on at this time (ms).
+   */
+  quotaUntil?: number /* int64 */;
+  /**
+   * Tail: the newest blocks, when they are few and small; else the page fetches after its end.
+   */
+  tail?: BlockTail;
 }
 /**
  * Ask is a question, a plan to confirm or a tool to approve, open until answered or withdrawn.
@@ -112,6 +135,15 @@ export interface Ask {
   input: unknown;
   toolUseId?: string;
   description?: string;
+  /**
+   * Pattern: what "always allow for this session" allows (Claude: its own rule suggestion,
+   * such as "git status *"); empty: every call of Tool.
+   */
+  pattern?: string;
+  /**
+   * Card: the ask as the confirmation panel and plugins show it.
+   */
+  card?: Card;
 }
 /**
  * Task is a background task of the agent's. While one runs the session is not reaped.
@@ -142,10 +174,17 @@ export interface ContextCategory {
 export interface Quota {
   agents: AgentQuota[];
 }
+/**
+ * AgentQuota is one agent and account's windows. Live: a process of that agent and account runs,
+ * so they are kept fresh; else they are the last read, and At says how old.
+ */
 export interface AgentQuota {
   agent: Agent;
+  account?: string; // the login the agent reports (Claude: e-mail)
+  plan?: string; // Claude: subscriptionType
   windows: QuotaWindow[];
   at: number /* int64 */; // when they were read
+  live: boolean;
 }
 export interface QuotaWindow {
   group: string; // Claude: session (5 hours) | weekly (7 days)
@@ -202,7 +241,13 @@ export const SystemEventAPIError = "api_error";
 export const SystemEventLocalCommand = "local_command";
 export const SystemEventInterrupted = "interrupted"; // you stopped the turn
 export const SystemEventUnreadable = "unreadable"; // a line that is not a JSON object
-export type SystemEvent = typeof SystemEventCompact | typeof SystemEventAPIError | typeof SystemEventLocalCommand | typeof SystemEventInterrupted | typeof SystemEventUnreadable;
+export const SystemEventIridium = "iridium"; // Iridium's own line, such as a recovery prompt
+export type SystemEvent = typeof SystemEventCompact | typeof SystemEventAPIError | typeof SystemEventLocalCommand | typeof SystemEventInterrupted | typeof SystemEventUnreadable | typeof SystemEventIridium;
+/**
+ * SourceIridium is the source of what Iridium itself writes to an agent (recovery prompts,
+ * "继续"): the page shows those as a faint line of its own, not as your words.
+ */
+export const SourceIridium = "Iridium";
 /**
  * Result is a tool call's result.
  */
@@ -239,6 +284,7 @@ export interface NewSession {
   text?: string;
   model?: string;
   mode?: string;
+  effort?: string;
   /**
    * Workspace: the workspace it goes in (0: the caller's, else as discovery classifies it).
    */
@@ -253,10 +299,12 @@ export interface NewSessionReply {
   id: string;
 }
 /**
- * Send gives the session a message: a new turn when idle, else it joins the running one.
+ * Send gives the session a message: a new turn when idle; while a turn runs it waits in the
+ * queue for the turn to end, unless Steer, which joins the running turn.
  */
 export interface Send {
   text: string;
+  steer?: boolean;
   /**
    * Attachments are file refs of the session (uploads, attached paths): their paths are written
    * into the message, and images go to the agent as images too.
@@ -266,6 +314,7 @@ export interface Send {
 }
 export interface SendReply {
   input: string; // the message's id (Claude: its uuid)
+  queued?: boolean; // it waits in the queue
 }
 /**
  * Answer answers an ask. permission: Allow (and Message if not); question: Answers, by question
@@ -277,6 +326,10 @@ export interface Answer {
   allow?: boolean;
   message?: string;
   answers?: { [key: string]: string};
+  /**
+   * Always: allow, and from now on allow the ask's Pattern of its tool in this session.
+   */
+  always?: boolean;
 }
 /**
  * Error is every failed request's body.
@@ -302,6 +355,200 @@ export interface DraftEvent {
   proc: number /* int */;
   n: number /* int */;
   text: string;
+}
+
+//////////
+// source: chat.go
+
+/**
+ * ChatInput is a message from a plugin's chat window (plan "插件"). Sender, if given, is who in
+ * the chat sent it: the agent sees "[plugin·sender] ".
+ */
+export interface ChatInput {
+  text: string;
+  sender?: string;
+}
+/**
+ * ChatInputReply: Session is where the message went (or the command ran). An Iridium command
+ * answers here, with Reply or Card; what the agent says comes on the plugin's event stream.
+ */
+export interface ChatInputReply {
+  session?: string;
+  queued?: boolean;
+  reply?: ChatReply;
+  card?: Card;
+}
+/**
+ * ChatPointer is what a chat window points at: its session, and what /new opens.
+ */
+export interface ChatPointer {
+  chat: string;
+  session?: string;
+  agent?: Agent;
+  cwd?: string;
+}
+/**
+ * ChatCommand is a command a chat window can send. Iridium: Iridium runs it; else it goes to the
+ * agent as typed.
+ */
+export interface ChatCommand {
+  name: string;
+  description?: string;
+  iridium?: boolean;
+}
+/**
+ * ChatReply is a reply in both forms: Markdown as written, Text with the marks taken off.
+ */
+export interface ChatReply {
+  markdown: string;
+  text: string;
+  files?: ChatFile[];
+}
+/**
+ * ChatFile is a file a reply names. GET /api/chat/files/<ref> gives it (Range works); the ref is
+ * good only for the plugin it was given to.
+ */
+export interface ChatFile {
+  name: string;
+  size: number /* int64 */;
+  type: string; // a MIME type
+  ref: string;
+}
+/**
+ * ChatEvent is the data of a plugin event (SSE event types progress, reply, card, card_done,
+ * error, status). Every event is for one chat window.
+ */
+export interface ChatEvent {
+  chat: string;
+  session?: string;
+  /**
+   * progress, error: Text.
+   */
+  text?: string;
+  /**
+   * reply
+   */
+  reply?: ChatReply;
+  /**
+   * card; card_done: CardID.
+   */
+  card?: Card;
+  cardId?: string;
+  /**
+   * status
+   */
+  status?: Status;
+}
+
+//////////
+// source: control.go
+
+/**
+ * Queued is a message waiting in a session's queue (docs/api.md "待发队列"). Paused: it waits for
+ * "continue" (POST continue) or its own steer, not for the turn to end.
+ */
+export interface Queued {
+  id: string;
+  text: string;
+  from: string;
+  paused?: boolean;
+  at: number /* int64 */;
+}
+/**
+ * EditQueued changes a queued message's text.
+ */
+export interface EditQueued {
+  text: string;
+}
+/**
+ * ContextSummary is how full a session's context window was, without the parts.
+ */
+export interface ContextSummary {
+  used: number /* int */;
+  max?: number /* int */;
+  at: number /* int64 */;
+}
+/**
+ * BlockTail is the blocks from Start to End of the transcript. Blocks nil: too many or too
+ * large to carry, GET messages?after=<your end>. A page whose end is in [Start, End] takes the
+ * blocks at or after its end, and replaces a block it has at the same At (a tool whose result
+ * came).
+ */
+export interface BlockTail {
+  start: number /* int64 */;
+  end: number /* int64 */;
+  blocks: Block[];
+}
+/**
+ * Model is a model the agent offers. Value is what SetModel takes.
+ */
+export interface Model {
+  value: string;
+  name: string;
+  description?: string;
+}
+/**
+ * SetModel, SetMode and SetEffort change a session's model, approval mode and thinking effort,
+ * at once if its agent runs, and for every later start. Model "" is the agent's default.
+ */
+export interface SetModel {
+  model: string;
+}
+export interface SetMode {
+  mode: string;
+}
+export interface SetEffort {
+  effort: string;
+}
+/**
+ * AllowRule is a session's "always allow": asks for Tool whose subject (a command, a file path)
+ * matches Pattern are allowed without asking; '*' is any run of characters, "" any call.
+ */
+export interface AllowRule {
+  tool: string;
+  pattern: string;
+}
+/**
+ * Card is a choice to make, as the web's confirmation panel and plugins show it: an ask
+ * (permission, question, plan) or a command's pick (/use, /model, /mode). Options with the same
+ * Group are one question's; pick one per group.
+ */
+export interface Card {
+  id: string;
+  kind: string; // permission | question | plan | pick
+  session?: string;
+  title: string;
+  summary: string[];
+  options: CardOption[];
+  /**
+   * Multi: the groups that take more than one option (a multiSelect question).
+   */
+  multi?: number /* int */[];
+}
+export interface CardOption {
+  id: string;
+  text: string;
+  description?: string;
+  primary?: boolean;
+  group?: number /* int */;
+}
+/**
+ * CardAnswer answers a card: Option, or Choices (one option id per group, more for a Multi
+ * group); Message goes with a denial or rejection.
+ */
+export interface CardAnswer {
+  card: string;
+  option?: string;
+  choices?: string[];
+  message?: string;
+}
+/**
+ * CardReply is what answering a card did: for a pick, the command's reply or a next card.
+ */
+export interface CardReply {
+  ok: boolean;
+  reply?: ChatReply;
+  card?: Card;
 }
 
 //////////
@@ -455,4 +702,58 @@ export interface CopyProgress {
   path?: string;
   sha256?: string;
   error?: string;
+}
+
+//////////
+// source: push.go
+
+/**
+ * PushState is the Web Push settings: the total switch (off by default), the VAPID public key a
+ * page subscribes with, and each workspace's events (workspace 0: sessions in none).
+ */
+export interface PushState {
+  enabled: boolean;
+  publicKey: string; // base64url, uncompressed P-256 point
+  workspaces: PushWorkspace[];
+}
+/**
+ * PushEvents are the events a workspace pushes. Default: NeedsYou and Error on, the rest off.
+ */
+export interface PushEvents {
+  needsYou: boolean;
+  error: boolean;
+  turnEnd: boolean;
+  compact: boolean;
+}
+export interface PushWorkspace extends PushEvents {
+  workspace: number /* int64 */;
+}
+export interface PushSwitch {
+  enabled: boolean;
+}
+/**
+ * PushSubscription is a browser's PushSubscription.toJSON().
+ */
+export interface PushSubscription {
+  endpoint: string;
+  keys: {
+    p256dh: string;
+    auth: string;
+  };
+}
+/**
+ * PushUnsubscribe drops the subscription at Endpoint.
+ */
+export interface PushUnsubscribe {
+  endpoint: string;
+}
+/**
+ * PushMessage is a push's payload, as the service worker gets it.
+ */
+export interface PushMessage {
+  kind: string; // needs_you | error | turn_end | compact | test
+  session?: string;
+  title: string;
+  body: string;
+  tag?: string;
 }

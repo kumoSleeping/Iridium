@@ -58,10 +58,15 @@ export function ChatPage({ id, phone, onBack }: { id: string; phone: boolean; on
       opened.delete(back);
     };
   }, [id]);
-  // The transcript grew past what is shown: bring the blocks since.
+  // The transcript grew past what is shown: the blocks since, from the state's tail when it has
+  // them, else fetched.
   const end = s?.end ?? 0;
   useEffect(() => {
-    if (log.loaded && end > log.end) void log.newer().then(changed, () => {});
+    if (!log.loaded || end <= log.end) return;
+    const took = log.fromTail(s?.tail);
+    if (!took) return void log.newer().then(changed, () => {});
+    changed();
+    if (took.said !== undefined) void log.filesFrom(took.said).then(changed, () => {});
   }, [end]);
   useEffect(() => void (s && log.procIs(s.proc), changed()), [s?.proc]);
   // The turn ended: what was drafted is in the transcript now.
@@ -166,12 +171,12 @@ export function ChatPage({ id, phone, onBack }: { id: string; phone: boolean; on
       <Bar phone={phone} onBack={onBack} s={s} />
       <div ref={stack} className="absolute inset-x-0 bottom-0 z-10 px-2.5 pb-[max(6px,env(safe-area-inset-bottom))] sm:px-5">
         <div className="mx-auto max-w-[760px]">
-          <Queue session={id} queue={s.queue ?? []} paused={!!s.queuePaused} edit={(text) => composer.current?.put(text)} />
+          <Queue session={id} queue={s.queue ?? []} edit={(text) => composer.current?.put(text)} />
           <Asks session={id} asks={s.asks} cwd={cwd} />
           {elsewhere ? (
             <div className="glass float flex h-12 items-center justify-center rounded-xl text-sm text-ink-3">{t("chat.elsewhere")}</div>
           ) : (
-            <Under s={s} composer={composer} onSent={onSent} onSentDone={changed} modelOpen={modelOpen} setModelOpen={setModelOpen} modeOpen={modeOpen} setModeOpen={setModeOpen} />
+            <Under s={s} composer={composer} onSent={onSent} onSentDone={(x) => ((log.sent = log.sent.filter((y) => y !== x || !x.queued)), changed())} modelOpen={modelOpen} setModelOpen={setModelOpen} modeOpen={modeOpen} setModeOpen={setModeOpen} />
           )}
         </div>
       </div>
@@ -180,7 +185,7 @@ export function ChatPage({ id, phone, onBack }: { id: string; phone: boolean; on
 }
 
 /** The composer and, under it, the approval-mode key and the model key. */
-function Under({ s, composer, onSent, onSentDone, modelOpen, setModelOpen, modeOpen, setModeOpen }: { s: LiveSession; composer: React.RefObject<ComposerHandle | null>; onSent: (x: Sent, from: { x: number; y: number }) => void; onSentDone: () => void; modelOpen: boolean; setModelOpen: (o: boolean) => void; modeOpen: boolean; setModeOpen: (o: boolean) => void }) {
+function Under({ s, composer, onSent, onSentDone, modelOpen, setModelOpen, modeOpen, setModeOpen }: { s: LiveSession; composer: React.RefObject<ComposerHandle | null>; onSent: (x: Sent, from: { x: number; y: number }) => void; onSentDone: (x: Sent) => void; modelOpen: boolean; setModelOpen: (o: boolean) => void; modeOpen: boolean; setModeOpen: (o: boolean) => void }) {
   const mode = useMode(s);
   return (
     <>

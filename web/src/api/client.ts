@@ -2,7 +2,7 @@
 // marked "assumed" are not served yet and follow docs/plan.md (their types are in ./assumed.ts).
 import { QueryClient } from "@tanstack/react-query";
 import type { Endpoint, Me, Settings, UpdateState } from "./assumed";
-import type { AgentInfo, Answer, CompleteUpload, FolderReply, Folders, FullText, MessagePage, NewFolder, NewSession, NewSessionReply, NewUpload, NewWorkspace, Send, SendReply, Session, SessionPatch, SessionState, Upload, Workspace, WorkspacePatch } from "./types.gen";
+import type { AgentInfo, AllowRule, Answer, CompleteUpload, EditQueued, FolderReply, Folders, FullText, MessagePage, NewFolder, NewSession, NewSessionReply, NewUpload, NewWorkspace, PushEvents, PushState, PushSubscription, PushSwitch, Send, SendReply, Session, SessionPatch, SessionState, SetMode, SetModel, Upload, Workspace, WorkspacePatch } from "./types.gen";
 
 /** The answers shown. A failed one is not retried: the next state or the clock asks again. */
 export const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 5_000, refetchOnWindowFocus: false } } });
@@ -102,21 +102,14 @@ export const api = {
     get<MessagePage>(`${S(id)}/messages${q.before !== undefined ? `?before=${q.before}` : q.after !== undefined ? `?after=${q.after}` : ""}`, init),
   block: (id: string, at: string) => get<FullText>(`${S(id)}/block?at=${enc(at)}`),
   create: (s: NewSession) => write<NewSessionReply>("POST", "/api/sessions", s),
-  /** A message: queued while a turn runs, or joining it with steer (assumed: Send.steer; a server
-   *  without it joins the turn anyway, so it is sent again without). attachments: upload refs. */
-  send: async (id: string, text: string, attachments?: string[], steer = false): Promise<SendReply> => {
-    const body: Send & { steer?: boolean } = { text, ...(attachments?.length ? { attachments } : {}), ...(steer ? { steer } : {}) };
-    try {
-      return await write<SendReply>("POST", `${S(id)}/send`, body);
-    } catch (e) {
-      if (steer && e instanceof ApiError && e.status === 400 && /steer/.test(e.message)) return write<SendReply>("POST", `${S(id)}/send`, { ...body, steer: undefined });
-      throw e;
-    }
-  },
+  /** A message: queued while a turn runs (queued in the reply), or joining it with steer.
+   *  attachments: upload refs. */
+  send: (id: string, text: string, attachments?: string[], steer = false) =>
+    write<SendReply>("POST", `${S(id)}/send`, { text, ...(attachments?.length ? { attachments } : {}), ...(steer ? { steer } : {}) } satisfies Send),
   interrupt: (id: string) => write<{ ok: boolean }>("POST", `${S(id)}/interrupt`),
   stop: (id: string) => write<{ ok: boolean }>("POST", `${S(id)}/stop`),
-  /** always: allow this tool for the rest of the session (assumed: Answer.always). */
-  answer: (id: string, a: Answer & { always?: boolean }) => write<{ ok: boolean }>("POST", `${S(id)}/answer`, a.always ? a : stripAlways(a)),
+  /** always: allow this tool, as the ask's pattern says, for the rest of the session. */
+  answer: (id: string, a: Answer) => write<{ ok: boolean }>("POST", `${S(id)}/answer`, a),
   health: (init?: RequestInit) => get<{ ok: boolean }>("/api/health", init),
   agents: () => get<AgentInfo[]>("/api/agents"),
 
@@ -139,20 +132,29 @@ export const api = {
   uploadDone: (up: string, sha256: string) => write<Upload>("POST", `/api/uploads/${enc(up)}/complete`, { sha256 } satisfies CompleteUpload),
   uploadCancel: (up: string) => write<{ ok: boolean }>("DELETE", `/api/uploads/${enc(up)}`),
 
-  // --- assumed: queue, mode, model ---
+  // --- the queue, the session's settings ---
   steer: (id: string, input: string) => write<{ ok: boolean }>("POST", `${S(id)}/queue/${enc(input)}/steer`),
+  editQueued: (id: string, input: string, text: string) => write<{ ok: boolean }>("PUT", `${S(id)}/queue/${enc(input)}`, { text } satisfies EditQueued),
   unqueue: (id: string, input: string) => write<{ ok: boolean }>("DELETE", `${S(id)}/queue/${enc(input)}`),
-  pauseQueue: (id: string, paused: boolean) => writeAgain<{ ok: boolean }>("POST", `${S(id)}/queue/pause`, { paused }),
-  mode: (id: string, mode: string) => writeAgain<{ ok: boolean }>("POST", `${S(id)}/mode`, { mode }),
-  model: (id: string, p: { model?: string; effort?: string }) => writeAgain<{ ok: boolean }>("POST", `${S(id)}/model`, p),
+  continueQueue: (id: string) => write<{ ok: boolean }>("POST", `${S(id)}/continue`),
+  mode: (id: string, mode: string) => writeAgain<{ ok: boolean }>("PUT", `${S(id)}/mode`, { mode } satisfies SetMode),
+  model: (id: string, model: string) => writeAgain<{ ok: boolean }>("PUT", `${S(id)}/model`, { model } satisfies SetModel),
+  effort: (id: string, effort: string) => writeAgain<{ ok: boolean }>("PUT", `${S(id)}/effort`, { effort }),
+  rules: (id: string) => get<AllowRule[]>(`${S(id)}/rules`),
+  clearRules: (id: string) => write<{ ok: boolean }>("DELETE", `${S(id)}/rules`),
 
-  // --- assumed: settings, update, push ---
+  // --- push ---
+  push: () => get<PushState>("/api/push"),
+  pushSwitch: (enabled: boolean) => writeAgain<{ ok: boolean }>("PUT", "/api/push", { enabled } satisfies PushSwitch),
+  pushWorkspace: (ws: number, e: PushEvents) => writeAgain<{ ok: boolean }>("PUT", `/api/push/workspaces/${ws}`, e),
+  pushSubscribe: (sub: PushSubscription) => write<{ ok: boolean }>("POST", "/api/push/subscriptions", sub),
+  pushUnsubscribe: (endpoint: string) => write<{ ok: boolean }>("DELETE", "/api/push/subscriptions", { endpoint }),
+
+  // --- assumed: settings, update ---
   settings: () => get<Settings>("/api/settings"),
   putSettings: (s: Partial<Settings>) => writeAgain<Settings>("PUT", "/api/settings", s),
   update: () => get<UpdateState>("/api/update"),
   applyUpdate: () => write<{ ok: boolean }>("POST", "/api/update"),
-  pushKey: () => get<{ key: string }>("/api/push/key"),
-  pushSubscribe: (sub: PushSubscriptionJSON) => write<{ ok: boolean }>("POST", "/api/push/subscribe", sub),
 
   // --- this terminal: /api/me is assumed; the gate's own routes are served once it is mounted ---
   me: () => get<Me>("/api/me"),
@@ -168,11 +170,6 @@ export const api = {
   logout: () => write<{ ok: boolean }>("POST", "/_ir/api/logout"),
   endpoints: () => get<Endpoint[]>("/api/endpoints"),
 };
-
-function stripAlways(a: Answer & { always?: boolean }): Answer {
-  const { always: _, ...rest } = a;
-  return rest;
-}
 
 /** Whether an error is the route not being served yet: the page then shows what it can without it. */
 export const missing = (e: unknown) => e instanceof ApiError && (e.status === 404 || e.status === 405 || e.status === 501);

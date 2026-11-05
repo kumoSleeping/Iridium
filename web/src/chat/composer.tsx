@@ -171,8 +171,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
     sentFromHere(s.id);
     onSent(sent, { x: r.left + parseFloat(cs.paddingLeft), y: r.top + parseFloat(cs.paddingTop) });
     try {
-      const { input } = await api.send(s.id, words, files.map((f) => f.ref), mode === "steer");
-      sent.input = input;
+      const r = await api.send(s.id, words, files.map((f) => f.ref), mode === "steer");
+      sent.input = r.input;
+      // A turn began meanwhile: it waits in the queue, which shows it.
+      sent.queued = r.queued;
     } catch (e) {
       sent.failed = errText(e);
     }
@@ -264,7 +266,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
           }}
           className="no-ring max-h-[180px] min-h-8 min-w-0 flex-1 resize-none bg-transparent px-1.5 py-[5.5px] text-md leading-[21px] placeholder:text-ink-3"
         />
-        <ContextRing session={s.id} />
+        <ContextRing session={s.id} summary={s.context} />
         <Tip label={label}>
           <button
             type="button"
