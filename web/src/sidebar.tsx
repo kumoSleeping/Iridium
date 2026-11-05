@@ -71,7 +71,8 @@ export function Sidebar(p: Props) {
   );
 
   return (
-    <aside className={cn("relative flex h-full flex-col", p.phone ? "w-full" : "w-[288px] shrink-0")}>
+    <aside className={cn("relative flex h-full flex-col", p.phone ? "w-full" : "w-[292px] shrink-0 gap-2 py-2 pr-1 pl-2")}>
+      <div className={cn("relative flex min-h-0 flex-1 flex-col", !p.phone && "slab overflow-hidden rounded-xl")}>
       {head}
       <div ref={list} className={cn("relative min-h-0 flex-1 overflow-y-auto px-2 pb-3", p.phone && "pt-15")} role="tree" aria-label={t("nav.sessions")}>
         {needs > 0 && (
@@ -156,7 +157,8 @@ export function Sidebar(p: Props) {
         )}
         {!p.tree.workspaces.length && !needs && <div className="g-fade px-2 pt-10 text-center text-sm text-ink-3">{t("nav.empty")}</div>}
       </div>
-      <div className="flex shrink-0 items-center justify-between gap-2 px-2 pt-1 pb-[max(8px,env(safe-area-inset-bottom))]">
+      </div>
+      <div className={cn("slab flex h-12 shrink-0 items-center justify-between gap-2 rounded-xl px-2 pointer-coarse:h-14", p.phone && "mx-2 mt-1 mb-[max(8px,env(safe-area-inset-bottom))]")}>
         <div className="min-w-0">{p.me}</div>
         <span className="relative shrink-0">
           <IconKey label={p.updateDot ? `${t("nav.settings")} · ${t("settings.updateReady")}` : t("nav.settings")} onClick={p.onSettings} aria-pressed={p.settings} className={p.settings ? "bg-fill text-ink" : undefined}>

@@ -20,6 +20,11 @@
   --glass-thick: oklch(0.995 0 0 / 0.86);
   --glass-solid: oklch(0.985 0 0);
   --glass-blur: 22px;
+  /* the sidebar's slabs: a step off the paper, their own hover fills, a hairline lit from above */
+  --slab: oklch(0.97 0 0);
+  --slab-fill: oklch(0.935 0 0);
+  --slab-fill-2: oklch(0.9 0 0);
+  --slab-ring: 0 0 0 0.5px oklch(0 0 0 / 0.06), 0 1px 2px oklch(0 0 0 / 0.04), inset 0 0.5px 0 oklch(1 0 0 / 0.7);
   --shadow-float: 0 0 0 0.5px oklch(0 0 0 / 0.05), 0 2px 6px oklch(0 0 0 / 0.05), 0 12px 32px oklch(0 0 0 / 0.08);
   --on-ink: oklch(0.99 0 0);
 
@@ -57,6 +62,10 @@
   --glass: oklch(0.225 0 0 / 0.72);
   --glass-thick: oklch(0.235 0 0 / 0.84);
   --glass-solid: oklch(0.225 0 0);
+  --slab: oklch(0.21 0 0);
+  --slab-fill: oklch(0.255 0 0);
+  --slab-fill-2: oklch(0.3 0 0);
+  --slab-ring: 0 0 0 0.5px oklch(1 0 0 / 0.07), 0 1px 3px oklch(0 0 0 / 0.3), inset 0 0.5px 0 oklch(1 0 0 / 0.06);
   --shadow-float: 0 0 0 0.5px oklch(0 0 0 / 0.4), 0 2px 6px oklch(0 0 0 / 0.25), 0 12px 32px oklch(0 0 0 / 0.35);
   --on-ink: oklch(0.18 0 0);
   --run: oklch(0.68 0.15 252);
@@ -155,6 +164,17 @@ body {
 }
 .float {
   box-shadow: var(--shadow-float);
+}
+/* The sidebar's slabs (the list, the footer): what is paper inside them is the slab. */
+.slab {
+  --paper: var(--slab);
+  --fill: var(--slab-fill);
+  --fill-2: var(--slab-fill-2);
+  --color-paper: var(--slab);
+  --color-fill: var(--slab-fill);
+  --color-fill-2: var(--slab-fill-2);
+  background: var(--slab);
+  box-shadow: var(--slab-ring);
 }
 @media (prefers-reduced-transparency: reduce) {
   .glass {
