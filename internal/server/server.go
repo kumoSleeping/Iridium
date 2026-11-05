@@ -51,6 +51,7 @@ type Server struct {
 	// Updater, if set, serves /api/update and carries the state "update".
 	Updater *update.Updater
 
+	cmu     sync.Mutex // one config change at a time (SaveConfig); guards cfg's settings
 	gmu     sync.Mutex // one gate change at a time
 	g       atomic.Pointer[gate.Gate]
 	initErr error // the gate for cfg.Public.Origin would not open; Listen gives it
@@ -111,6 +112,7 @@ func (s *Server) Handler(local bool) http.Handler {
 	mux.HandleFunc("GET /api/events", s.events)
 	s.terminalRoutes(mux)
 	s.updateRoutes(mux)
+	s.settingsRoutes(mux)
 	s.sessionRoutes(mux)
 	s.pushRoutes(mux)
 	s.pluginRoutes(mux)

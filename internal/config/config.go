@@ -32,6 +32,8 @@ type Config struct {
 	Modes map[string]string `json:"modes,omitempty"`
 	// Push is Web Push's total switch, off by default.
 	Push bool `json:"push"`
+	// QuotaHidden are the quota bars the page does not show, each "<agent>:<account>:<group>:<model>".
+	QuotaHidden []string `json:"quotaHidden,omitempty"`
 	// ChatDir is where a plugin's chat opens a session before it set one with /new; "" is home.
 	ChatDir string `json:"chatDir,omitempty"`
 	// Path is the PATH agents run with; "" is the daemon's own.

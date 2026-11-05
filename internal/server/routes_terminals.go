@@ -308,18 +308,10 @@ func (s *Server) SetPublicOrigin(origin string) error {
 	if err != nil {
 		return err
 	}
-	if s.ConfigPath != "" {
-		cfg, err := config.Load(s.ConfigPath)
-		if err == nil {
-			cfg.Public.Origin = origin
-			err = cfg.Save(s.ConfigPath)
-		}
-		if err != nil {
-			g.Close()
-			return err
-		}
+	if err := s.SaveConfig(func(c *config.Config) { c.Public.Origin = origin }); err != nil {
+		g.Close()
+		return err
 	}
-	s.cfg.Public.Origin = origin
 	old := s.g.Swap(g)
 	old.CloseAll()
 	old.Close()

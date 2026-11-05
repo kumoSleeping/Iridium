@@ -222,7 +222,7 @@ func (h *Hosted) launch(ctx context.Context, proc int) error {
 	}
 	h.mu.Lock()
 	o := agent.SpawnOptions{Session: h.id, Resume: found != "", AgentSession: h.meta.agentID(), Cwd: h.meta.Cwd, Env: m.agentEnv(), Program: m.o.Config.Programs[string(h.meta.Agent)], SystemPromptFile: prompt,
-		Model: h.meta.Model, Mode: cmp.Or(h.meta.Mode, m.o.Config.Modes[string(h.meta.Agent)]), Effort: h.effort, CrashResume: h.crashResume && found != ""}
+		Model: h.meta.Model, Mode: cmp.Or(h.meta.Mode, m.defaultMode(h.meta.Agent)), Effort: h.effort, CrashResume: h.crashResume && found != ""}
 	h.resuming, h.crashResume, h.turnSeen = o.CrashResume, false, false
 	h.mu.Unlock()
 	// An agent updating itself is gone for a few seconds: wait for it (Rhodium §4.2).

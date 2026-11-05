@@ -36,7 +36,7 @@ func (h *Hosted) crashedLocked(hadTurn bool) bool {
 		}
 	}
 	h.crashes = append(kept, now)
-	if !h.m.o.Config.CrashResume || !hadTurn {
+	if !h.m.tuned().CrashResume || !hadTurn {
 		return false
 	}
 	if len(h.crashes) >= BreakerCrashes {
@@ -90,7 +90,7 @@ func (h *Hosted) say(text string) {
 // messages queue meanwhile, and then the queue goes, or "继续" if nothing waits. Called with h.mu
 // held.
 func (h *Hosted) quotaOutLocked(resetsAt int64) {
-	if !h.m.o.Config.QuotaResume {
+	if !h.m.tuned().QuotaResume {
 		return
 	}
 	until := time.UnixMilli(resetsAt)

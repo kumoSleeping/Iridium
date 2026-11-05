@@ -18,6 +18,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kumoSleeping/iridium/internal/agent"
@@ -78,6 +79,8 @@ type Manager struct {
 
 	wmu      sync.Mutex
 	watchers []func(Notice)
+
+	tune atomic.Pointer[Tunables] // tune.go
 }
 
 func New(o Options) (*Manager, error) {
@@ -108,6 +111,7 @@ func New(o Options) (*Manager, error) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	m := &Manager{o: o, ctx: ctx, cancel: cancel, hosted: map[string]*Hosted{}, quota: map[string]api.AgentQuota{}}
+	m.Tune(TunablesOf(o.Config))
 	o.Hub.Provide = m.provide
 	return m, nil
 }
@@ -463,7 +467,7 @@ func (m *Manager) reap() {
 		}
 		m.mu.Unlock()
 		for _, h := range hosted {
-			after := m.o.Config.IdleReap.D()
+			after := m.tuned().IdleReap
 			if st, err := m.o.Store.Settings(h.id); err == nil && st.IdleReap != nil {
 				after = *st.IdleReap
 			}
