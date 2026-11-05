@@ -1,0 +1,243 @@
+@import "tailwindcss";
+@import "./motion.css";
+
+/* Iridium design tokens. Neutral only: ink on paper. Colour belongs to agent logos, status lamps and
+   the quota bars' near-full states; nothing else is tinted. Frosted glass only on floating layers. */
+
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+:root {
+  color-scheme: light;
+  --paper: oklch(0.993 0 0);
+  --ink: oklch(0.22 0 0);
+  --ink-2: oklch(0.46 0 0);
+  --ink-3: oklch(0.6 0 0);
+  --ink-4: oklch(0.76 0 0);
+  --fill: oklch(0.955 0 0);
+  --fill-2: oklch(0.92 0 0);
+  --edge: oklch(0 0 0 / 0.08);
+  --glass: oklch(0.995 0 0 / 0.76);
+  --glass-thick: oklch(0.995 0 0 / 0.86);
+  --glass-solid: oklch(0.985 0 0);
+  --glass-blur: 22px;
+  --shadow-float: 0 0 0 0.5px oklch(0 0 0 / 0.05), 0 2px 6px oklch(0 0 0 / 0.05), 0 12px 32px oklch(0 0 0 / 0.08);
+  --on-ink: oklch(0.99 0 0);
+
+  /* status */
+  --run: oklch(0.62 0.17 252);
+  --need: oklch(0.78 0.15 72);
+  --err: oklch(0.62 0.21 27);
+  --start: oklch(0.66 0 0);
+  --compact-to: oklch(0.86 0.16 96);
+
+  /* context breakdown: one neutral ramp, darkest = largest share */
+  --ctx-1: oklch(0.32 0 0);
+  --ctx-2: oklch(0.46 0 0);
+  --ctx-3: oklch(0.58 0 0);
+  --ctx-4: oklch(0.69 0 0);
+  --ctx-5: oklch(0.79 0 0);
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --paper: oklch(0.18 0 0);
+  --ink: oklch(0.94 0 0);
+  --ink-2: oklch(0.73 0 0);
+  --ink-3: oklch(0.57 0 0);
+  --ink-4: oklch(0.42 0 0);
+  --fill: oklch(0.235 0 0);
+  --fill-2: oklch(0.285 0 0);
+  --edge: oklch(1 0 0 / 0.09);
+  --glass: oklch(0.225 0 0 / 0.72);
+  --glass-thick: oklch(0.235 0 0 / 0.84);
+  --glass-solid: oklch(0.225 0 0);
+  --shadow-float: 0 0 0 0.5px oklch(0 0 0 / 0.4), 0 2px 6px oklch(0 0 0 / 0.25), 0 12px 32px oklch(0 0 0 / 0.35);
+  --on-ink: oklch(0.18 0 0);
+  --run: oklch(0.68 0.15 252);
+  --need: oklch(0.8 0.14 72);
+  --err: oklch(0.67 0.19 27);
+  --start: oklch(0.6 0 0);
+  --ctx-1: oklch(0.92 0 0);
+  --ctx-2: oklch(0.79 0 0);
+  --ctx-3: oklch(0.66 0 0);
+  --ctx-4: oklch(0.55 0 0);
+  --ctx-5: oklch(0.45 0 0);
+}
+
+@theme {
+  --color-*: initial;
+  --color-transparent: transparent;
+  --color-paper: var(--paper);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-ink-4: var(--ink-4);
+  --color-fill: var(--fill);
+  --color-fill-2: var(--fill-2);
+  --color-edge: var(--edge);
+  --color-on-ink: var(--on-ink);
+  --color-run: var(--run);
+  --color-need: var(--need);
+  --color-err: var(--err);
+
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, "JetBrains Mono", "Cascadia Mono", "DejaVu Sans Mono", monospace;
+
+  --text-xs: 11.5px;
+  --text-xs--line-height: 16px;
+  --text-sm: 13px;
+  --text-sm--line-height: 18px;
+  --text-base: 14px;
+  --text-base--line-height: 21px;
+  --text-md: 15px;
+  --text-md--line-height: 23px;
+
+  --radius-sm: 6px;
+  --radius-md: 9px;
+  --radius-lg: 13px;
+  --radius-xl: 18px;
+}
+
+@layer base {
+html,
+body,
+#root {
+  height: 100%;
+}
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  text-rendering: optimizeLegibility;
+}
+::selection {
+  background: color-mix(in oklch, var(--ink) 18%, transparent);
+}
+
+/* Focus ring for the keyboard only; the composer never shows one. */
+:focus {
+  outline: none;
+}
+:focus-visible {
+  outline: 2px solid var(--ink-3);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+.no-ring:focus-visible {
+  outline: none;
+}
+}
+
+/* Frosted: only for floating layers (top bar, composer, popovers, toasts). */
+.glass {
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.6);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.6);
+}
+.glass.thick {
+  background: var(--glass-thick);
+}
+.float {
+  box-shadow: var(--shadow-float);
+}
+@media (prefers-reduced-transparency: reduce) {
+  .glass {
+    background: var(--glass-solid);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+/* Thin, quiet scrollbars. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--fill-2) transparent;
+}
+
+/* ---- status lamps on the logo's corner ---- */
+.lamp {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--row-bg, var(--paper));
+  display: grid;
+  place-items: center;
+}
+.lamp > i {
+  display: block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+.lamp[data-s="running"] > i {
+  background: var(--run);
+  animation: lamp-breathe 1.8s ease-in-out infinite;
+}
+.lamp[data-s="starting"] > i {
+  background: var(--start);
+  animation: lamp-breathe 1.4s ease-in-out infinite;
+}
+.lamp[data-s="needs"] > i {
+  background: var(--need);
+}
+.lamp[data-s="error"] > i {
+  background: var(--err);
+}
+.lamp[data-s="elsewhere"] > i {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--run);
+}
+.lamp[data-s="compacting"] > i {
+  background: conic-gradient(var(--run), var(--compact-to), var(--run));
+  animation: lamp-spin 1.1s linear infinite;
+}
+@keyframes lamp-breathe {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(0.78);
+  }
+}
+@keyframes lamp-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+.unread {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ink-3);
+}
+
+/* Agent text: quiet markdown. */
+.prose-ir p {
+  margin: 0 0 10px;
+}
+.prose-ir p:last-child {
+  margin-bottom: 0;
+}
+.prose-ir code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: var(--fill);
+  border-radius: 5px;
+  padding: 1px 5px;
+}
+
+/* Sample-only: freeze the infinite lamp animations for still screenshots (?still=1). */
+[data-still] .lamp > i {
+  animation-play-state: paused;
+  animation-delay: -0.2s;
+}

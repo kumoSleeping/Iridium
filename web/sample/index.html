@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Iridium · 样张</title>
+    <script>
+      // Theme before first paint: ?theme=, then the saved choice, then the system's.
+      (function () {
+        var q = new URLSearchParams(location.search).get("theme");
+        var s = null;
+        try { s = localStorage.getItem("theme"); } catch (e) {}
+        var pick = q || s || "auto";
+        var dark = pick === "dark" || (pick === "auto" && matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.dataset.theme = dark ? "dark" : "light";
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
