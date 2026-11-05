@@ -1,8 +1,7 @@
 // Two readings of what a chat shows, pure for tests: who a message of the user's is from (plan
 // "消息来源"), and the files a reply names (plan "网页": `![](路径)`, `[名](路径)` and absolute paths
 // in inline code).
-import type { Endpoint } from "../api/assumed";
-import type { Agent, Session } from "../api/types.gen";
+import type { Agent, Session, Terminal } from "../api/types.gen";
 
 /** A user block's source as the page draws it: your words (typed here, on another panel, or in a
  *  terminal), a letter (from another session's ir, a plugin, a peer), or Iridium's own line. */
@@ -11,16 +10,22 @@ export type Source =
   | { kind: "letter"; name: string; avatar?: string; channel: boolean; agent?: Agent; session?: string }
   | { kind: "iridium" };
 
-/** mine: the names this panel writes as ("网页" while there is no gate). */
-export function sourceOf(from: string | undefined, mine: string[], endpoints: Endpoint[], sessions: Session[]): Source {
-  if (!from || mine.includes(from)) return { kind: "you" };
+/** Who wrote a message: from, the tag Iridium wrote it with, and terminal, the sending terminal's ID
+ *  (Block.from, fromTerminal). me: this panel's ID ("local" with no gate). An agent's ir from
+ *  another session is tagged "ir:<session>". */
+export function sourceOf(from: string | undefined, terminal: string | undefined, me: string, terminals: Terminal[], sessions: Session[]): Source {
   if (from === "Iridium") return { kind: "iridium" };
-  const e = endpoints.find((e) => e.name.toLowerCase() === from.toLowerCase());
+  // Another session's ir: that session, its agent's logo, a key to go there.
+  const id = from && /^(?:ir|session):(.+)$/.exec(from)?.[1];
+  if (id) {
+    const s = sessions.find((s) => s.id === id || s.id.startsWith(id));
+    return s ? { kind: "letter", name: sessionName(s), channel: false, agent: s.agent, session: s.id } : { kind: "letter", name: id.slice(0, 8), channel: false };
+  }
+  if (!from || (terminal ?? "") === me) return { kind: "you" };
+  const e = terminals.find((x) => x.id === terminal) ?? terminals.find((x) => x.name.toLowerCase() === from.toLowerCase());
+  if (e?.id === me) return { kind: "you" };
   if (e?.kind === "panel") return { kind: "you", panel: { name: e.name, avatar: e.avatar } };
-  // Another session's ir: the session by id or name, its agent's logo, a key to go there.
-  const id = /^(?:ir|session):(.+)$/.exec(from)?.[1];
-  const s = sessions.find((s) => s.id === (id ?? e?.session) || (!id && !e && s.name === from));
-  if (s) return { kind: "letter", name: sessionName(s), channel: false, agent: s.agent, session: s.id };
+  // A plugin writes "[name·sender]": the plugin's avatar, the whole tag as the name.
   return { kind: "letter", name: from, avatar: e?.avatar, channel: true };
 }
 

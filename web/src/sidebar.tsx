@@ -4,10 +4,10 @@
 // waits on you, 归档 folded at the bottom. A row's menu (right click, long-press): pin, rename, stop,
 // archive. The mouse resting on a row fetches its chat ahead.
 import { Menu } from "@base-ui/react/menu";
-import { Archive, ArchiveRestore, ChevronRight, Copy, Folder, Inbox, Network, Pencil, Pin, PinOff, Plus, Search, Settings, ShieldOff, Square } from "lucide-react";
+import { Archive, ArchiveRestore, ChevronRight, Copy, Folder, Inbox, KeyRound, Link2, Network, Pencil, Pin, PinOff, Plus, Search, Settings, ShieldOff, Square } from "lucide-react";
 import { useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { api } from "./api/client";
-import type { Session } from "./api/types.gen";
+import type { Confirm, Session } from "./api/types.gen";
 import { ahead, behind } from "./chats";
 import { t } from "./i18n";
 import { useFlip } from "./motion";
@@ -31,6 +31,9 @@ type Props = {
   settings: boolean;
   onSettings: () => void;
   updateDot: boolean;
+  /** What agents' ir asked this panel for (invites, tokens): under 需要你 too. */
+  confirms: Confirm[];
+  onConfirm: (c: Confirm) => void;
   createKey: (trigger: ReactElement) => ReactNode;
   wsPlus: (ws: WsNode, trigger: ReactElement, open: boolean, setOpen: (o: boolean) => void) => ReactNode;
   me: ReactNode;
@@ -42,7 +45,8 @@ export function Sidebar(p: Props) {
   const list = useRef<HTMLDivElement>(null);
   const [hoverWs, setHoverWs] = useState<string | null>(null);
   const [plusOpen, setPlusOpen] = useState<string | null>(null);
-  const shape = [p.tree.needs.length, ...p.tree.workspaces.map((w) => `${w.key}:${p.expanded(w.key)}:${w.rows.map((r) => (r.kind === "session" ? r.s.id : `${r.f.key}${p.expanded(r.f.key)}${r.f.sessions.length}`)).join(",")}`), p.expanded("archive"), p.tree.archived.length].join("|");
+  const needs = p.tree.needs.length + p.confirms.length;
+  const shape = [needs, ...p.tree.workspaces.map((w) => `${w.key}:${p.expanded(w.key)}:${w.rows.map((r) => (r.kind === "session" ? r.s.id : `${r.f.key}${p.expanded(r.f.key)}${r.f.sessions.length}`)).join(",")}`), p.expanded("archive"), p.tree.archived.length].join("|");
   useFlip(list, shape);
   const row = (s: Session, depth: number, flip = `s:${s.id}`) => <SessionRow key={flip} s={s} depth={depth} flip={flip} selected={p.selected === s.id} onSelect={p.onSelect} chatCode={p.chatCode} />;
 
@@ -66,17 +70,37 @@ export function Sidebar(p: Props) {
     <aside className={cn("relative flex h-full flex-col", p.phone ? "w-full" : "w-[288px] shrink-0")}>
       {head}
       <div ref={list} className={cn("relative min-h-0 flex-1 overflow-y-auto px-2 pb-3", p.phone && "pt-15")} role="tree" aria-label={t("nav.sessions")}>
-        {p.tree.needs.length > 0 && (
+        {needs > 0 && (
           <div role="group">
-            <Row depth={0} flip="needs" chevron={p.expanded("needs") ? "open" : "closed"} onClick={() => p.toggle("needs")} icon={<Inbox size={16} className="text-ink-2" />} label={t("nav.needsYou")} end={<Count n={p.tree.needs.length} />} />
-            {p.expanded("needs") && p.tree.needs.map((s) => row(s, 1, `n:${s.id}`))}
+            <Row depth={0} flip="needs" chevron={p.expanded("needs") ? "open" : "closed"} onClick={() => p.toggle("needs")} icon={<Inbox size={16} className="text-ink-2" />} label={t("nav.needsYou")} end={<Count n={needs} />} />
+            {p.expanded("needs") && (
+              <>
+                {p.confirms.map((c) => (
+                  <Row
+                    key={`c:${c.id}`}
+                    depth={1}
+                    flip={`c:${c.id}`}
+                    onClick={() => p.onConfirm(c)}
+                    icon={c.kind === "invite" ? <Link2 size={15} className="text-need" /> : <KeyRound size={15} className="text-need" />}
+                    label={
+                      <>
+                        {c.kind === "invite" ? t("confirm.invite") : t("confirm.token")}
+                        {c.name && <span className="ml-1.5 text-ink-3">{c.name}</span>}
+                      </>
+                    }
+                    aria={`${c.kind === "invite" ? t("confirm.invite") : t("confirm.token")} ${c.name ?? ""}, ${t("status.needs")}`}
+                  />
+                ))}
+                {p.tree.needs.map((s) => row(s, 1, `n:${s.id}`))}
+              </>
+            )}
           </div>
         )}
         {p.tree.workspaces.map((w, i) => {
           const open = p.expanded(w.key);
           const shown = hoverWs === w.key || plusOpen === w.key;
           return (
-            <div key={w.key} className={i > 0 || p.tree.needs.length ? "mt-4" : "mt-1"} role="group">
+            <div key={w.key} className={i > 0 || needs ? "mt-4" : "mt-1"} role="group">
               <WsRow
                 flip={`w:${w.key}`}
                 name={w.name}
@@ -126,7 +150,7 @@ export function Sidebar(p: Props) {
             {p.expanded("archive") && p.tree.archived.map((s) => row(s, 1))}
           </div>
         )}
-        {!p.tree.workspaces.length && !p.tree.needs.length && <div className="g-fade px-2 pt-10 text-center text-sm text-ink-3">{t("nav.empty")}</div>}
+        {!p.tree.workspaces.length && !needs && <div className="g-fade px-2 pt-10 text-center text-sm text-ink-3">{t("nav.empty")}</div>}
       </div>
       <div className="flex shrink-0 items-center justify-between gap-2 px-2 pt-1 pb-[max(8px,env(safe-area-inset-bottom))]">
         <span className="relative">

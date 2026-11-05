@@ -5,17 +5,17 @@
 // drafts from the stream. Loaded only once a chat opens or the page is idle.
 import { Menu } from "@base-ui/react/menu";
 import { ChevronLeft, ChevronRight, Ellipsis, FolderInput } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent } from "react";
-import type { LiveSession } from "../api/assumed";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DragEvent } from "react";
+import type { SessionState as LiveSession } from "../api/types.gen";
 import { api } from "../api/client";
 import type { Session } from "../api/types.gen";
 import { chatOf, type Sent } from "../chats";
-import { useEndpoints, useMe, useWorkspaces } from "../data";
+import { useMe, useTerminalList, useWorkspaces } from "../data";
 import { t, useLang } from "../i18n";
 import { flySend } from "../motion";
 import { openChat } from "../route";
 import { MenuItems, Rename, sessionActions } from "../sidebar";
-import { useLink, useList, useSession } from "../store";
+import { useConfirms, useLink, useList, useSession } from "../store";
 import { drafts, opened } from "../stream";
 import { errText, toast } from "../toast";
 import { agentName, cn, IconKey, LogoLamp, statusText, tilde, Tip, titleOf } from "../ui";
@@ -41,7 +41,8 @@ export function ChatPage({ id, phone, onBack }: { id: string; phone: boolean; on
   const [, redraw] = useState(0);
   const changed = () => redraw((n) => n + 1);
   const me = useMe().data;
-  const endpoints = useEndpoints().data ?? [];
+  const terminals = useTerminalList();
+  const confirms = useConfirms();
 
   // The newest page, or what was kept; then what came since.
   useEffect(() => {
@@ -63,10 +64,8 @@ export function ChatPage({ id, phone, onBack }: { id: string; phone: boolean; on
   const end = s?.end ?? 0;
   useEffect(() => {
     if (!log.loaded || end <= log.end) return;
-    const took = log.fromTail(s?.tail);
-    if (!took) return void log.newer().then(changed, () => {});
+    if (!log.fromTail(s?.tail)) return void log.newer().then(changed, () => {});
     changed();
-    if (took.said !== undefined) void log.filesFrom(took.said).then(changed, () => {});
   }, [end]);
   useEffect(() => void (s && log.procIs(s.proc), changed()), [s?.proc]);
   // The turn ended: what was drafted is in the transcript now.
@@ -77,8 +76,7 @@ export function ChatPage({ id, phone, onBack }: { id: string; phone: boolean; on
     wasBusy.current = busy;
   }, [busy]);
 
-  const mine = useMemo(() => (me?.local || !me ? ["网页"] : [me.name, "网页"]), [me]);
-  const source = (from?: string) => sourceOf(from, mine, endpoints, list ?? []);
+  const source = (b: { from?: string; fromTerminal?: string }) => sourceOf(b.from, b.fromTerminal, me?.id ?? "local", terminals, list ?? []);
 
   // The bottom stack's height pads the conversation's end.
   const stack = useRef<HTMLDivElement>(null);
@@ -171,8 +169,8 @@ export function ChatPage({ id, phone, onBack }: { id: string; phone: boolean; on
       <Bar phone={phone} onBack={onBack} s={s} />
       <div ref={stack} className="absolute inset-x-0 bottom-0 z-10 px-2.5 pb-[max(6px,env(safe-area-inset-bottom))] sm:px-5">
         <div className="mx-auto max-w-[760px]">
-          <Queue session={id} queue={s.queue ?? []} edit={(text) => composer.current?.put(text)} />
-          <Asks session={id} asks={s.asks} cwd={cwd} />
+          <Queue session={id} queue={s.queue ?? []} />
+          <Asks session={id} asks={s.asks} cwd={cwd} confirms={confirms.filter((c) => c.session === id)} />
           {elsewhere ? (
             <div className="glass float flex h-12 items-center justify-center rounded-xl text-sm text-ink-3">{t("chat.elsewhere")}</div>
           ) : (

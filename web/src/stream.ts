@@ -20,9 +20,11 @@ let started = false;
 
 const link = (l: Partial<Link>) => setCarried("link", { ...(getCarried<Link>("link") ?? { live: null, rtt: null }), ...l });
 
-// The states every page carries. update and confirms join these once the daemon serves them: a key it
-// does not know fails the whole stream.
-const ALWAYS = ["list", "workspaces", "quota"];
+// The states every page carries. A key the daemon does not carry for this terminal (confirms, but
+// for panels) is said to be ignored as the stream opens; the rest goes on.
+const ALWAYS = ["list", "workspaces", "quota", "update", "confirms"];
+/** The keys the daemon said it does not carry, and why ("unknown", "forbidden"). */
+export const ignored = new Map<string, string>();
 export const keysFor = (s: string | null) => [...ALWAYS, ...(s ? [`session:${s}`, `context:${s}`] : [])];
 export const streamURL = (s: string | null) => `/api/events?${keysFor(s).map((k) => `sub=${encodeURIComponent(k)}`).join("&")}`;
 
@@ -39,7 +41,9 @@ function connect() {
   };
   src.addEventListener("state", (m) => {
     const e = JSON.parse((m as MessageEvent<string>).data) as StateEvent;
-    setCarried(e.key, e.value);
+    if (e.ignored) ignored.set(e.key, e.ignored);
+    else ignored.delete(e.key);
+    setCarried(e.key, e.ignored ? null : e.value);
   });
   src.addEventListener("draft", (m) => {
     const d = JSON.parse((m as MessageEvent<string>).data) as DraftEvent;

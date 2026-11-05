@@ -8,13 +8,14 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ComponentPro
 import type { Workspace } from "./api/types.gen";
 import { watchTurns } from "./chats";
 import { CreatePopover, WsPlus } from "./create";
-import { useHome, useSettings, useUpdate, useWorkspaces } from "./data";
+import { useHome, useMe, useSettings, useTerminals, useUpdate, useWorkspaces } from "./data";
 import { t, useLang } from "./i18n";
 import { applyTheme, initialTheme, keepTheme, MeChip, type ThemePref } from "./me";
 import { prefetch } from "./prefetch";
 import { back, go, openChat, useRoute, type Route } from "./route";
 import { Sidebar } from "./sidebar";
-import { useList } from "./store";
+import { useSecret } from "./secrets";
+import { useConfirms, useList } from "./store";
 import { follow } from "./stream";
 import { ToastList, toasts } from "./toast";
 import { buildTree, flat } from "./tree";
@@ -34,6 +35,8 @@ function ChatPage(p: ComponentProps<ChatCode["ChatPage"]>) {
 }
 const Topology = lazy(() => import("./topology/topology").then((m) => ({ default: m.TopologyView })));
 const SettingsPage = lazy(() => import("./settings").then((m) => ({ default: m.SettingsPage })));
+const TerminalsPage = lazy(() => import("./terminals").then((m) => ({ default: m.TerminalsPage })));
+const SecretDialog = lazy(() => import("./secret").then((m) => ({ default: m.SecretDialog })));
 const Jump = lazy(() => import("./jump").then((m) => ({ default: m.Jump })));
 
 // Once idle, the later parts' files into the cache; then the chat's code runs from it, so a turn
@@ -73,6 +76,10 @@ export function App() {
   const update = useUpdate();
   useSettings(); // asked early: the chat's quota bars read it
   useHome(); // paths show ~ for it
+  useMe();
+  useTerminals(); // a message's source shows its terminal's avatar
+  const confirms = useConfirms();
+  const secret = useSecret();
   const { expanded, toggle } = useExpanded();
   const tree = useMemo(() => buildTree(list ?? [], ws.data ?? [], t("nav.unsorted")), [list, ws.data, t("nav.unsorted")]);
 
@@ -126,9 +133,11 @@ export function App() {
       topology={r.name === "topology"}
       onTopology={() => (r.name === "topology" ? back() : go({ name: "topology" }, r.name !== "home"))}
       onSearch={() => setJumping(true)}
-      settings={r.name === "settings"}
+      settings={r.name === "settings" || r.name === "terminals"}
       onSettings={() => (r.name === "settings" ? back() : go({ name: "settings" }, r.name !== "home"))}
       updateDot={!!update.data?.available}
+      confirms={confirms}
+      onConfirm={(c) => (c.session && list?.some((s) => s.id === c.session) ? openChat(c.session) : go({ name: "terminals" }, r.name !== "home"))}
       chatCode={() => void loadChat().catch(() => {})}
       createKey={(trigger) => <CreatePopover trigger={trigger} ws={curWs} fallbackDir={fallbackDir} opened={(id) => openChat(id)} />}
       wsPlus={(w, trigger, o, setO) => <WsPlus key={w.key} w={{ id: w.id, name: w.name, path: w.root }} trigger={trigger} open={o} setOpen={setO} opened={(id) => openChat(id)} />}
@@ -145,6 +154,8 @@ export function App() {
           <Topology phone={phone} onBack={back} tree={tree} />
         ) : at.name === "settings" ? (
           <SettingsPage phone={phone} onBack={back} theme={theme} setTheme={(v: ThemePref) => (setTheme(v), keepTheme(v))} />
+        ) : at.name === "terminals" ? (
+          <TerminalsPage phone={phone} onBack={() => (history.state?.ir ? back() : go({ name: "settings" }, true))} />
         ) : (
           <Empty />
         )}
@@ -172,6 +183,11 @@ export function App() {
             </>
           )}
         </div>
+        {secret && (
+          <Suspense>
+            <SecretDialog secret={secret} />
+          </Suspense>
+        )}
         {jumping && (
           <Suspense>
             <Jump close={() => setJumping(false)} tree={tree} open={open} />
