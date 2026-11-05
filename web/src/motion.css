@@ -1,0 +1,182 @@
+/* Iridium motion system. One set of tokens, a handful of gestures; everything moves only transform
+   and opacity. Use a gesture class (or motion.ts for FLIP and the send flight); never write one-off
+   keyframes or timings for a surface.
+
+   Gestures
+     g-unfold   popover / menu / tooltip grows out of its anchor (Base UI's --transform-origin)
+     g-pop      a small surface appears in place (toast, approval card, lamp change)
+     g-slide    a panel's content arrives from the side (popover pages)
+     g-push     phone pages: the chat slides over the list, the list slides back out from under it
+     g-fade     plain cross-fade
+     g-stagger  children of an unfolded menu rise one after another
+     reorder    FLIP of rows that moved (motion.ts useFlip)
+     send       the sent message flies from the composer into the chat (motion.ts flySend)
+*/
+
+:root {
+  --dur-1: 120ms; /* fold, fade, press */
+  --dur-2: 200ms; /* unfold, pop */
+  --dur-3: 280ms; /* slide, reorder */
+  --dur-4: 420ms; /* send flight */
+  --stagger: 18ms;
+
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in: cubic-bezier(0.55, 0, 1, 0.45);
+  --ease-spring: cubic-bezier(0.34, 1.32, 0.64, 1); /* slight overshoot */
+
+  --unfold-from: scale(0.9);
+  --pop-from: scale(0.92) translateY(4px);
+  --slide-x: 24px;
+}
+
+/* --- unfold / fold: Base UI popups (data-starting-style / data-ending-style) --- */
+.g-unfold {
+  transform-origin: var(--transform-origin, center);
+  transition:
+    transform var(--dur-2) var(--ease-spring),
+    opacity var(--dur-2) var(--ease-out);
+}
+.g-unfold[data-starting-style],
+.g-unfold[data-ending-style] {
+  opacity: 0;
+  transform: var(--unfold-from);
+}
+.g-unfold[data-ending-style] {
+  transition-duration: var(--dur-1);
+  transition-timing-function: var(--ease-in);
+}
+
+/* --- pop: own elements; enter on mount, leave with [data-leaving] --- */
+.g-pop {
+  animation: g-pop-in var(--dur-2) var(--ease-spring) both;
+}
+.g-pop[data-leaving] {
+  animation: g-pop-out var(--dur-1) var(--ease-in) both;
+}
+/* Base UI surfaces (toasts) that pop */
+.g-pop-t {
+  transition:
+    transform var(--dur-2) var(--ease-spring),
+    opacity var(--dur-2) var(--ease-out);
+}
+.g-pop-t[data-starting-style],
+.g-pop-t[data-ending-style] {
+  opacity: 0;
+  transform: var(--pop-from);
+}
+.g-pop-t[data-ending-style] {
+  transition-duration: var(--dur-1);
+  transition-timing-function: var(--ease-in);
+}
+@keyframes g-pop-in {
+  from {
+    opacity: 0;
+    transform: var(--pop-from);
+  }
+}
+@keyframes g-pop-out {
+  to {
+    opacity: 0;
+    transform: var(--pop-from);
+  }
+}
+
+/* --- slide: forward (default) or back ([data-dir=back]) --- */
+.g-slide {
+  animation: g-slide-in var(--dur-3) var(--ease-out) both;
+}
+.g-slide[data-dir="back"] {
+  --slide-x: -24px;
+}
+@keyframes g-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(var(--slide-x));
+  }
+}
+
+/* --- push: two mounted layers; data-at = here | off (to the right) | under (behind, a little left) --- */
+.g-push {
+  transition: transform var(--dur-3) var(--ease-out);
+}
+.g-push[data-at="off"] {
+  transform: translateX(100%);
+}
+.g-push[data-at="under"] {
+  transform: translateX(-22%);
+}
+
+/* --- fade --- */
+.g-fade {
+  animation: g-fade-in var(--dur-2) var(--ease-out) both;
+}
+@keyframes g-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* --- stagger: children of an opening popup rise in turn (set --i on each) --- */
+.g-stagger > * {
+  animation: g-rise var(--dur-2) var(--ease-out) both;
+  animation-delay: calc(min(var(--i, 0), 8) * var(--stagger));
+}
+@keyframes g-rise {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}
+
+/* --- press: buttons give a little --- */
+.g-press {
+  transition: transform var(--dur-1) var(--ease-out), opacity var(--dur-1) var(--ease-out);
+}
+.g-press:active {
+  transform: scale(0.94);
+}
+
+/* Reduced motion: no movement anywhere, only short fades. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-2: 120ms;
+    --dur-3: 120ms;
+    --dur-4: 0ms;
+    --stagger: 0ms;
+    --unfold-from: none;
+    --pop-from: none;
+    --slide-x: 0px;
+  }
+  .g-stagger > * {
+    animation: none;
+  }
+  .g-push {
+    transition: opacity var(--dur-1) var(--ease-out);
+  }
+  .g-push[data-at="off"],
+  .g-push[data-at="under"] {
+    transform: none;
+    opacity: 0;
+  }
+  .g-press:active {
+    transform: none;
+  }
+  .lamp[data-s="running"] > i,
+  .lamp[data-s="starting"] > i {
+    animation-name: lamp-fade !important;
+    animation-duration: 2.4s !important;
+  }
+  @keyframes lamp-fade {
+    50% {
+      opacity: 0.45;
+    }
+  }
+  .lamp[data-s="compacting"] > i {
+    animation: none !important;
+  }
+  @keyframes g-rise {
+    from {
+      opacity: 0;
+    }
+  }
+}

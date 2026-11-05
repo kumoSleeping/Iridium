@@ -1,0 +1,193 @@
+// The page's data against a mocked daemon: the API module's requests, a chat's pages and drafts,
+// what you sent finding its block, uploads in chunks that resume, the carried-state store.
+import { createHash } from "node:crypto";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { api } from "../src/api/client";
+import type { Block, MessagePage } from "../src/api/types.gen";
+import { chatOf, KEPT_BLOCKS, Messages, unsent, watchTurns, type Sent } from "../src/chats";
+import { Sha256 } from "../src/chat/sha256";
+import { nextChunk, upload } from "../src/chat/upload";
+import { getCarried, onCarried, setCarried } from "../src/store";
+import { keysFor, streamURL } from "../src/stream";
+
+type Call = { method: string; url: string; body?: unknown; headers: Headers };
+let calls: Call[] = [];
+let answer: (c: Call) => Response | Promise<Response>;
+const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { "content-type": "application/json" } });
+
+beforeEach(() => {
+  calls = [];
+  answer = () => json({ ok: true });
+  vi.stubGlobal("fetch", async (url: string, init: RequestInit = {}) => {
+    const body = typeof init.body === "string" ? JSON.parse(init.body) : init.body;
+    const c = { method: init.method ?? "GET", url, body, headers: new Headers(init.headers) };
+    calls.push(c);
+    return answer(c);
+  });
+  localStorage.clear();
+});
+afterEach(() => vi.unstubAllGlobals());
+
+describe("api", () => {
+  test("send carries files only when there are some; answer carries always only when set", async () => {
+    await api.send("s1", "hi");
+    await api.send("s1", "hi", ["r1"]);
+    await api.answer("s1", { requestId: "q", kind: "permission", allow: true });
+    await api.answer("s1", { requestId: "q", kind: "permission", allow: true, always: true });
+    expect(calls.map((c) => [c.method, c.url, c.body])).toEqual([
+      ["POST", "/api/sessions/s1/send", { text: "hi" }],
+      ["POST", "/api/sessions/s1/send", { text: "hi", files: ["r1"] }],
+      ["POST", "/api/sessions/s1/answer", { requestId: "q", kind: "permission", allow: true }],
+      ["POST", "/api/sessions/s1/answer", { requestId: "q", kind: "permission", allow: true, always: true }],
+    ]);
+    expect(calls.every((c) => c.headers.get("x-requested-with") === "XMLHttpRequest")).toBe(true);
+  });
+  test("pages: newest, before=, after=; a refusal throws with its error", async () => {
+    answer = () => json({ blocks: [], start: 0, end: 0, more: false });
+    await api.messages("s 1");
+    await api.messages("s1", { before: 10 });
+    await api.messages("s1", { after: 20 });
+    expect(calls.map((c) => c.url)).toEqual(["/api/sessions/s%201/messages", "/api/sessions/s1/messages?before=10", "/api/sessions/s1/messages?after=20"]);
+    answer = () => json({ error: "the session's agent is not running" }, 409);
+    await expect(api.interrupt("s1")).rejects.toMatchObject({ status: 409, message: "the session's agent is not running" });
+  });
+  test("writes that may go twice go again after a 502", async () => {
+    let n = 0;
+    answer = () => (n++ === 0 ? json({ error: "bad gateway" }, 502) : json({ ok: true }));
+    await api.mode("s1", "plan");
+    expect(calls.length).toBe(2);
+  }, 10_000);
+});
+
+describe("the event stream", () => {
+  test("names the list, the quota and the open session with its context", () => {
+    expect(keysFor(null)).toEqual(["list", "quota"]);
+    expect(streamURL("a")).toBe("/api/events?sub=list&sub=quota&sub=session%3Aa&sub=context%3Aa");
+  });
+  test("the store: whole values, null drops, listeners told", () => {
+    const told: string[] = [];
+    const stop = onCarried((k) => told.push(k));
+    setCarried("x", { a: 1 });
+    setCarried("x", null);
+    setCarried("x", null);
+    stop();
+    expect(told).toEqual(["x", "x"]);
+    expect(getCarried("x")).toBeUndefined();
+  });
+});
+
+const blk = (line: number, kind: Block["kind"], text?: string, more: Partial<Block> = {}): Block => ({ at: `${line}.0`, kind, text, ...more });
+
+describe("Messages", () => {
+  test("the newest page, then what came after till nothing new; older pages before", async () => {
+    const pages: Record<string, MessagePage> = {
+      "": { blocks: [blk(100, "user", "a"), blk(200, "assistant", "b")], start: 100, end: 300, more: true },
+      "after=300": { blocks: [blk(300, "user", "c")], start: 300, end: 400, more: false },
+      "after=400": { blocks: [], start: 400, end: 400, more: false },
+      "before=100": { blocks: [blk(0, "user", "z")], start: 0, end: 100, more: false },
+    };
+    const m = new Messages("s", async (_, q) => pages[q.after !== undefined ? `after=${q.after}` : q.before !== undefined ? `before=${q.before}` : ""]!);
+    await m.newer();
+    expect(m.blocks.map((b) => b.text)).toEqual(["a", "b"]);
+    await m.newer();
+    expect(m.blocks.map((b) => b.text)).toEqual(["a", "b", "c"]);
+    expect(m.end).toBe(400);
+    expect(await m.older()).toBe(true);
+    expect(m.blocks.map((b) => b.text)).toEqual(["z", "a", "b", "c"]);
+    expect(await m.older()).toBe(false);
+  });
+  test("drafts: same n joins, another n seals, another proc drops; the transcript's words take a draft's place", async () => {
+    let page: MessagePage = { blocks: [], start: 0, end: 0, more: false };
+    const m = new Messages("s", async () => page);
+    await m.newer();
+    m.wrote({ session: "s", proc: 1, n: 1, text: "Hel" });
+    m.wrote({ session: "s", proc: 1, n: 1, text: "lo" });
+    m.wrote({ session: "s", proc: 1, n: 2, text: "Next" });
+    expect(m.drafts.map((d) => [d.text, d.whole])).toEqual([
+      ["Hello", true],
+      ["Next", false],
+    ]);
+    page = { blocks: [blk(0, "assistant", "Hello")], start: 0, end: 50, more: false };
+    await m.newer();
+    expect(m.drafts.map((d) => d.text)).toEqual(["Next"]);
+    page = { blocks: [blk(0, "assistant", "Hello"), blk(50, "assistant", "Next, and more")], start: 0, end: 90, more: false };
+    await m.newer();
+    expect(m.drafts).toEqual([]);
+    m.wrote({ session: "s", proc: 1, n: 3, text: "x" });
+    m.wrote({ session: "s", proc: 2, n: 1, text: "y" });
+    expect(m.drafts.map((d) => d.text)).toEqual(["y"]);
+  });
+  test("what you sent finds its block by its input id, else its words; a failed one stays", () => {
+    const sent: Sent[] = [
+      { key: "1", text: "hello", files: [], from: 0, input: "u1" },
+      { key: "2", text: "second", files: [], from: 0 },
+      { key: "3", text: "third", files: [], from: 0, failed: "no" },
+    ];
+    expect(unsent(sent, [blk(10, "user", "different", { id: "u1" }), blk(20, "user", "second")]).map((s) => s.key)).toEqual(["3"]);
+    expect(unsent(sent.slice(1, 2), [blk(10, "user", "nope")]).map((s) => s.key)).toEqual(["2"]);
+  });
+  test("chats kept lately: up to KEPT_BLOCKS blocks in all, the one asked for always", () => {
+    const a = chatOf("keep-a");
+    a.log.blocks = Array.from({ length: KEPT_BLOCKS }, (_, i) => blk(i, "user", "x"));
+    const b = chatOf("keep-b");
+    b.log.blocks = [blk(0, "user", "y")];
+    chatOf("keep-c");
+    expect(chatOf("keep-a")).not.toBe(a); // pushed out: a fresh one
+    expect(chatOf("keep-c").log).toBeInstanceOf(Messages);
+  });
+  test("a turn that ends is told once, as running goes idle", () => {
+    const was = new Map<string, string>();
+    const base = { agent: "claude" as const, cwd: "/w", hosted: true, live: true, updatedAt: 0 };
+    watchTurns([{ ...base, id: "t", status: "running" }], was, null);
+    watchTurns([{ ...base, id: "t", status: "idle" }], was, null);
+    expect(was.get("t")).toBe("idle");
+  });
+});
+
+describe("uploads", () => {
+  test("sha256 fed in pieces is the whole's", () => {
+    const data = new Uint8Array(200_003).map((_, i) => (i * 31) % 251);
+    const h = new Sha256();
+    for (let at = 0; at < data.length; at += 7_777) h.update(data.subarray(at, at + 7_777));
+    expect(h.hex()).toBe(createHash("sha256").update(data).digest("hex"));
+    expect(new Sha256().hex()).toBe(createHash("sha256").digest("hex"));
+  });
+  test("chunks are sized from the speed, 1MB to 50MB", () => {
+    expect(nextChunk(8 << 20, 1000)).toBe(50 << 20);
+    expect(nextChunk(8 << 20, 120_000)).toBe(1 << 20);
+    expect(nextChunk(8 << 20, 15_000)).toBe(8 << 20);
+  });
+  test("an upload goes in chunks, then resumes from what the server has", async () => {
+    const size = 3 * 1024 * 1024 + 5;
+    const file = new File([new Uint8Array(size).map((_, i) => i % 256)], "big.bin", { lastModified: 1 });
+    let received = 0;
+    let fail = true;
+    answer = async (c) => {
+      if (c.method === "POST" && c.url === "/api/uploads") return json({ id: "up1", size, received: 0 });
+      if (c.method === "GET" && c.url === "/api/uploads/up1") return json({ id: "up1", size, received });
+      if (c.method === "PUT") {
+        const offset = Number(new URL(c.url, "http://x").searchParams.get("offset"));
+        expect(offset).toBe(received);
+        const n = (c.body as Blob).size;
+        // The first chunk lands, its answer lost.
+        received = offset + n;
+        if (fail) {
+          fail = false;
+          throw new TypeError("network");
+        }
+        return json({ id: "up1", size, received });
+      }
+      if (c.url === "/api/uploads/up1/done") {
+        expect((c.body as { sha256: string }).sha256).toBe(createHash("sha256").update(new Uint8Array(await file.arrayBuffer())).digest("hex"));
+        return json({ ref: "r1", path: "/w/.iridium/uploads/big.bin", name: "big.bin", size });
+      }
+      return json({ error: "?" }, 404);
+    };
+    const seen: number[] = [];
+    const done = await upload("s1", file, (sent) => seen.push(sent));
+    expect(done.ref).toBe("r1");
+    expect(seen.at(-1)).toBe(size);
+    // The task is gone once done.
+    expect(Object.keys(localStorage).filter((k) => k.startsWith("upload:"))).toEqual([]);
+  }, 20_000);
+});
