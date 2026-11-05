@@ -11,14 +11,26 @@ import (
 	"github.com/kumoSleeping/iridium/internal/store"
 )
 
-// classify puts each session never seen before in a workspace, once: its launcher's; else the
-// one holding a session of its folder or of the nearest folder above it; else none. Oldest
+// classify puts each session shown for the first time in a workspace, once: its launcher's;
+// else the one holding a session of its folder or of the nearest folder above it, or whose own
+// folder that is; else none. Hidden ones (the archive) wait for their first activity. Oldest
 // first, so a launcher seen in the same look is put somewhere before the sessions it started.
 func (x *Index) classify() {
 	assigned, err := x.o.Store.Assignments()
 	if err != nil {
 		x.o.Logf("discover: %v", err)
 		return
+	}
+	vis, err := x.o.Store.Visibility()
+	if err != nil {
+		x.o.Logf("discover: %v", err)
+		return
+	}
+	roots := map[int64]string{}
+	if ws, err := x.o.Store.Workspaces(); err == nil {
+		for _, w := range ws {
+			roots[w.ID] = w.Path
+		}
 	}
 	type fresh struct {
 		id, cwd, launcher string
@@ -29,7 +41,7 @@ func (x *Index) classify() {
 	x.mu.Lock()
 	for id, e := range x.entries {
 		cwds[id] = e.cwd
-		if _, ok := assigned[id]; !ok {
+		if _, ok := assigned[id]; !ok && vis.Shown(string(e.agent), id) {
 			news = append(news, fresh{id, e.cwd, x.launchers[id], e.mtime})
 		}
 	}
@@ -41,7 +53,7 @@ func (x *Index) classify() {
 			ws = a.Workspace
 		}
 		if ws == 0 {
-			ws = nearest(n.cwd, cwds, assigned)
+			ws = nearest(n.cwd, cwds, assigned, roots)
 		}
 		ok, err := x.o.Store.AssignIfNew(n.id, ws)
 		if err != nil {
@@ -57,9 +69,9 @@ func (x *Index) classify() {
 	}
 }
 
-// nearest is the workspace of the session whose folder is cwd, or the nearest folder above it;
-// 0 if none is in one.
-func nearest(cwd string, cwds map[string]string, assigned map[string]store.Assignment) int64 {
+// nearest is the workspace of the session whose folder is cwd, or the nearest folder above it,
+// a workspace's own folder (roots) counting as one of its sessions'; 0 if none is in one.
+func nearest(cwd string, cwds map[string]string, assigned map[string]store.Assignment, roots map[int64]string) int64 {
 	if cwd == "" {
 		return 0
 	}
@@ -71,6 +83,11 @@ func nearest(cwd string, cwds map[string]string, assigned map[string]store.Assig
 		}
 		if len(c) > depth {
 			best, depth = a.Workspace, len(c)
+		}
+	}
+	for ws, root := range roots {
+		if root != "" && within(cwd, root) && len(root) > depth {
+			best, depth = ws, len(root)
 		}
 	}
 	return best
@@ -102,10 +119,9 @@ func (x *Index) Workspaces() ([]api.Workspace, error) {
 }
 
 // CreateWorkspace makes a workspace of folder path (absolute, checked by the caller); name ""
-// is the folder's name. The sessions of that folder and below that are in none and were never
-// moved by the user go in it: those discovery found, and also, the rest of the list (hosted
-// sessions it has no transcript of yet, or lists under the agent's own id).
-func (x *Index) CreateWorkspace(path, name string, also ...api.Session) (api.Workspace, error) {
+// is the folder's name. It takes no session already classified: those shown from now on in its
+// folder go in it by the first-sight rule (classify), as the user decided (2026-11-05).
+func (x *Index) CreateWorkspace(path, name string) (api.Workspace, error) {
 	path = filepath.Clean(path)
 	if name = oneLine(name); name == "" {
 		name = filepath.Base(path)
@@ -114,23 +130,6 @@ func (x *Index) CreateWorkspace(path, name string, also ...api.Session) (api.Wor
 	if err != nil {
 		return api.Workspace{}, err
 	}
-	var ids []string
-	x.mu.Lock()
-	for sid, e := range x.entries {
-		if e.cwd != "" && within(e.cwd, path) {
-			ids = append(ids, sid)
-		}
-	}
-	x.mu.Unlock()
-	for _, s := range also {
-		if s.Cwd != "" && within(filepath.Clean(s.Cwd), path) && !slices.Contains(ids, s.ID) {
-			ids = append(ids, s.ID)
-		}
-	}
-	if _, err := x.o.Store.Adopt(id, ids); err != nil {
-		return api.Workspace{}, err
-	}
-	x.Changed(ids...)
 	x.Changed()
 	return api.Workspace{ID: id, Name: name, Path: path}, nil
 }
@@ -166,7 +165,8 @@ func (x *Index) DeleteWorkspace(id int64) error {
 	return nil
 }
 
-// Patch changes what lies over session id: its name, pin, archive, workspace. A move sticks.
+// Patch changes what lies over session id: its name, pin, workspace (archiving is the session
+// manager's: it is the shown marker's, and stops a hosted agent). A move sticks.
 func (x *Index) Patch(id string, p api.SessionPatch) error {
 	st := x.o.Store
 	if p.Workspace != nil {
@@ -181,11 +181,6 @@ func (x *Index) Patch(id string, p api.SessionPatch) error {
 	}
 	if p.Pinned != nil {
 		if err := st.SetPinned(id, *p.Pinned); err != nil {
-			return err
-		}
-	}
-	if p.Archived != nil {
-		if err := st.SetArchived(id, *p.Archived); err != nil {
 			return err
 		}
 	}

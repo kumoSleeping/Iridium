@@ -47,13 +47,7 @@ func (s *Server) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		s.discoverError(w, err)
 		return
 	}
-	// Hosted sessions too, those discovery has not listed (no transcript yet, the agent's own id).
-	all, err := s.m.List(r.Context())
-	if err != nil {
-		s.error(w, err)
-		return
-	}
-	ws, err := s.Discover.CreateWorkspace(path, req.Name, all...)
+	ws, err := s.Discover.CreateWorkspace(path, req.Name)
 	if err != nil {
 		s.discoverError(w, err)
 		return
@@ -103,6 +97,14 @@ func (s *Server) patchSession(w http.ResponseWriter, r *http.Request) {
 	if req.Workspace != nil && *req.Workspace < 0 {
 		fail(w, http.StatusBadRequest, "bad workspace")
 		return
+	}
+	// Archiving is the shown marker's, and stops a hosted agent: the session manager's.
+	if req.Archived != nil {
+		if err := s.m.SetArchived(r.Context(), id, *req.Archived); err != nil {
+			s.error(w, err)
+			return
+		}
+		req.Archived = nil
 	}
 	s.discoverDone(w, s.Discover.Patch(id, req))
 }

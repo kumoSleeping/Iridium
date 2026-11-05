@@ -33,6 +33,12 @@ func TestMain(m *testing.M) {
 
 func setup(t *testing.T) (*Server, config.Config, string) {
 	t.Helper()
+	return setupWith(t, nil)
+}
+
+// setupWith is setup with the session manager's options changed by edit first.
+func setupWith(t *testing.T, edit func(*session.Options)) (*Server, config.Config, string) {
+	t.Helper()
 	root := t.TempDir()
 	bin := filepath.Join(root, "bin")
 	os.MkdirAll(bin, 0o700)
@@ -53,7 +59,11 @@ func setup(t *testing.T) (*Server, config.Config, string) {
 	l := &platform.Direct{}
 	var srv *Server
 	tag := func(id string) string { return srv.Tag(id) }
-	m, err := session.New(session.Options{Config: cfg, Store: st, Hub: h, Launcher: l, Exe: os.Args[0], UnitPrefix: "iridium-test-", Logf: t.Logf, Poll: 10 * time.Millisecond, Tag: tag})
+	o := session.Options{Config: cfg, Store: st, Hub: h, Launcher: l, Exe: os.Args[0], UnitPrefix: "iridium-test-", Logf: t.Logf, Poll: 10 * time.Millisecond, Tag: tag}
+	if edit != nil {
+		edit(&o)
+	}
+	m, err := session.New(o)
 	if err != nil {
 		t.Fatal(err)
 	}

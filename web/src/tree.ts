@@ -2,7 +2,8 @@
 // directory under its workspace's root; one with a single session is not shown, the session sitting
 // in its place. Sessions keep the list's order (pinned first, then the latest); folders follow the
 // sessions at the root, by their latest session. Sessions in no workspace go under 未归类; archived
-// ones only under 归档; those that wait on you are also in 需要你.
+// ones (no shown marker) only under 归档; those that wait on you only in 需要你, back in their place
+// once answered (the user's decision, 2026-11-05).
 import type { Workspace } from "./api/types.gen";
 import type { Session } from "./api/types.gen";
 
@@ -16,8 +17,10 @@ const rel = (path: string, root: string) => (path === root ? "" : path.slice(roo
 
 export function buildTree(list: Session[], workspaces: Workspace[], unsorted: string): Tree {
   const live = list.filter((s) => !s.archived);
+  const needs = live.filter((s) => s.status === "waiting");
   const byWs = new Map<number, Session[]>();
   for (const s of live) {
+    if (s.status === "waiting") continue;
     const ws = workspaces.some((w) => w.id === s.workspace) ? s.workspace! : 0;
     byWs.set(ws, [...(byWs.get(ws) ?? []), s]);
   }
@@ -49,7 +52,7 @@ export function buildTree(list: Session[], workspaces: Workspace[], unsorted: st
   const none = byWs.get(0);
   if (none?.length) nodes.push(node("w0", 0, unsorted, commonDir(none.map((s) => s.cwd)), none));
   return {
-    needs: live.filter((s) => s.status === "waiting"),
+    needs,
     workspaces: nodes,
     archived: list.filter((s) => s.archived),
   };
@@ -69,5 +72,6 @@ export function commonDir(paths: string[]): string {
 
 const latest = (f: Folder) => Math.max(...f.sessions.map((s) => s.updatedAt));
 
-/** The sessions as the sidebar shows them from top to bottom, for Alt+↑↓ and the jump box. */
-export const flat = (t: Tree) => t.workspaces.flatMap((w) => w.rows.flatMap((r) => (r.kind === "session" ? [r.s] : r.f.sessions)));
+/** The sessions as the sidebar shows them from top to bottom, 需要你 first, for Alt+↑↓ and the jump
+ *  box. */
+export const flat = (t: Tree) => [...t.needs, ...t.workspaces.flatMap((w) => w.rows.flatMap((r) => (r.kind === "session" ? [r.s] : r.f.sessions)))];

@@ -1,7 +1,8 @@
 // The jump box (⌘K, Ctrl+K, or the sidebar's search key; Rhodium spec web-maximize "跳转框"): type to
 // go to a session by its name, its folder or what was said last. Nothing typed: those opened lately
-// in this tab, then the rest as the sidebar lists them. Loaded only once it first opens.
-import { Search } from "lucide-react";
+// in this tab, then the rest as the sidebar lists them. The archive (sessions with no shown marker)
+// is found too, last and faint. Loaded only once it first opens.
+import { Archive, Search } from "lucide-react";
 import { useState } from "react";
 import type { Session } from "./api/types.gen";
 import { t } from "./i18n";
@@ -82,6 +83,7 @@ export function Jump({ close, tree, open }: { close: () => void; tree: Tree; ope
               <LogoLamp agent={s.agent} status={s.status} />
               <span className="min-w-0 shrink truncate text-base">{titleOf(s)}</span>
               <span className="min-w-0 flex-1 truncate text-xs text-ink-3">{s.last ? `${s.last.role === "user" ? (s.last.from && s.last.from !== "网页" ? `${s.last.from}: ` : t("jump.you")) : ""}${s.last.text}` : tilde(s.cwd)}</span>
+              {s.archived && <Archive size={13} className="shrink-0 text-ink-4" aria-label={t("nav.archive")} />}
             </button>
           ))}
           {!list.length && <p className="m-0 px-3 py-2.5 text-sm text-ink-3">{t("jump.none")}</p>}

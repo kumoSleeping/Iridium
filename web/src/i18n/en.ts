@@ -158,6 +158,7 @@ export const en: Dict = {
   "toast.copied": "Copied",
   "toast.stopped": "Stopped",
   "toast.archived": "Archived",
+  "toast.restored": "Restored",
   "toast.cleared": "Forgotten",
 
   "err.offline": "Can't reach Iridium",

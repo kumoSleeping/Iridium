@@ -46,6 +46,7 @@ func (m *Manager) SendWith(ctx context.Context, id, text, from string, steer boo
 	}
 	h.qmu.Lock()
 	defer h.qmu.Unlock()
+	h.shownLater() // a message for it: out of the archive
 	terminal, tag := m.source(from)
 	in := store.Input{ID: newUUID(), Session: h.id, Terminal: terminal, Tag: tag, Text: text, State: "sent"}
 	if !steer && h.busy() {

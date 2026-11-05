@@ -1,6 +1,6 @@
 // Package store is Iridium's database: SQLite through a pure-Go driver, WAL, writes in BEGIN
 // IMMEDIATE transactions. It holds only what lies over the sessions found on disk (plan "数据"):
-// workspaces and who belongs where, pins, the archive, names, the queue of messages to send, push
+// workspaces and who belongs where, pins, which sessions are shown, names, the queue of messages to send, push
 // subscriptions, interactive terminals and their permissions, usage, and the plugin event outbox.
 // Never the conversations themselves, nor asks.
 package store
@@ -132,6 +132,8 @@ var schema = []string{
 	// 3: interactive terminals for real (the gate's endpoints, invites and logins; see
 	// terminals.go), who opened which session, and the tag an input was written with.
 	terminalsSchema,
+	// 4: the shown marker in place of the archive flag (shown.go).
+	shownSchema,
 }
 
 type Store struct{ db *sql.DB }
@@ -197,11 +199,11 @@ func now() int64 { return time.Now().UnixMilli() }
 
 // ---- what lies over a session ----
 
-// Overlay is what the database says of a session.
+// Overlay is what the database says of a session. Whether it is shown is its marker's
+// (shown.go), by its agent.
 type Overlay struct {
 	Name      string
 	Pinned    bool
-	Archived  bool
 	Workspace int64
 	Manual    bool
 }
@@ -209,11 +211,10 @@ type Overlay struct {
 // Overlays is every session's overlay, by session id.
 func (s *Store) Overlays() (map[string]Overlay, error) {
 	rows, err := s.db.Query(`
-		SELECT session, MAX(name), MAX(pinned), MAX(archived), MAX(workspace), MAX(manual) FROM (
-			SELECT session, name, 0 AS pinned, 0 AS archived, 0 AS workspace, 0 AS manual FROM names
-			UNION ALL SELECT session, '', 1, 0, 0, 0 FROM pins
-			UNION ALL SELECT session, '', 0, 1, 0, 0 FROM archive
-			UNION ALL SELECT session, '', 0, 0, IFNULL(workspace, 0), manual FROM assignments
+		SELECT session, MAX(name), MAX(pinned), MAX(workspace), MAX(manual) FROM (
+			SELECT session, name, 0 AS pinned, 0 AS workspace, 0 AS manual FROM names
+			UNION ALL SELECT session, '', 1, 0, 0 FROM pins
+			UNION ALL SELECT session, '', 0, IFNULL(workspace, 0), manual FROM assignments
 		) GROUP BY session`)
 	if err != nil {
 		return nil, err
@@ -223,7 +224,7 @@ func (s *Store) Overlays() (map[string]Overlay, error) {
 	for rows.Next() {
 		var id string
 		var o Overlay
-		if err := rows.Scan(&id, &o.Name, &o.Pinned, &o.Archived, &o.Workspace, &o.Manual); err != nil {
+		if err := rows.Scan(&id, &o.Name, &o.Pinned, &o.Workspace, &o.Manual); err != nil {
 			return nil, err
 		}
 		out[id] = o
@@ -242,8 +243,6 @@ func (s *Store) SetName(session, name string) error {
 }
 
 func (s *Store) SetPinned(session string, on bool) error { return s.flag("pins", session, on) }
-
-func (s *Store) SetArchived(session string, on bool) error { return s.flag("archive", session, on) }
 
 func (s *Store) flag(table, session string, on bool) error {
 	q := `DELETE FROM ` + table + ` WHERE session = ?`

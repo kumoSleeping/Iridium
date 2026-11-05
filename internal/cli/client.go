@@ -140,6 +140,7 @@ func (e *env) failf(format string, a ...any) int {
 type opts struct {
 	wait    bool
 	steer   bool
+	all     bool // ir ls --all: the archive too
 	model   string
 	approve string
 	attach  []string
@@ -166,12 +167,13 @@ func parse(args []string, allowed string) (opts, error) {
 		if !strings.Contains(" "+allowed+" ", " "+name+" ") {
 			return o, fmt.Errorf("no flag %s here", a)
 		}
-		if name == "wait" || name == "steer" {
+		if name == "wait" || name == "steer" || name == "all" {
 			if hasVal {
 				return o, fmt.Errorf("%s takes no value", a)
 			}
 			o.wait = o.wait || name == "wait"
 			o.steer = o.steer || name == "steer"
+			o.all = o.all || name == "all"
 			continue
 		}
 		if !hasVal {

@@ -16,7 +16,7 @@ const Help = `ir：本机 Iridium 的命令行（经 unix socket）。<id> 写�
   ir send <id> "消息" [-a 文件]...   发消息，可带附件
   ir wait <id>                       等回合结束，打印最后一段回复
   ir read <id>                       读最近一页对话
-  ir ls / ir stop <id>               列会话 / 停掉 agent
+  ir ls [--all] / ir stop <id>       列会话（--all 连归档）/ 停掉 agent
   ir cp <源> <目标>                  拷文件，打印路径、大小、sha256
   ir files <目录>                    列一层：名字、大小、时间、类型
   new、send 加 --wait 等到回复；send 加 --steer 插进正在跑的回合（不加就排队）

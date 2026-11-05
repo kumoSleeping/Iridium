@@ -459,6 +459,7 @@ func (h *Hosted) ended(e *hold.Exit) {
 		h.pause()
 	}
 	h.readTranscript()
+	h.endedHidden()
 	h.publish()
 	h.m.publishQuota()
 	if errText != "" {
@@ -539,6 +540,9 @@ func (h *Hosted) onEvent(e agent.Event) {
 		h.hadTurn, h.turnSeen = true, true
 		if !replay && h.quotaUntil != 0 {
 			h.quotaEndLocked() // it went on by itself, or the queue did
+		}
+		if !replay {
+			h.shownLater() // activity: out of the archive
 		}
 		note(Notice{Kind: NoticeTurnStart})
 	case agent.Taken:
@@ -761,25 +765,26 @@ func (h *Hosted) status() api.Status {
 	return api.StatusIdle
 }
 
-func (h *Hosted) summary(o store.Overlay) api.Session {
+// summary is h's row; archived: it carries no shown marker.
+func (h *Hosted) summary(o store.Overlay, archived bool) api.Session {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return h.summaryLocked(o)
+	return h.summaryLocked(o, archived)
 }
 
-func (h *Hosted) summaryLocked(o store.Overlay) api.Session {
+func (h *Hosted) summaryLocked(o store.Overlay, archived bool) api.Session {
 	return api.Session{
 		ID: h.id, Agent: h.meta.Agent, Cwd: h.meta.Cwd, Name: o.Name, Title: h.said.title,
 		Status: h.status(), Hosted: true, Live: h.live,
-		Pinned: o.Pinned, Archived: o.Archived, Workspace: o.Workspace,
+		Pinned: o.Pinned, Archived: archived, Workspace: o.Workspace,
 		Last: h.said.last, UpdatedAt: h.lastActive.UnixMilli(),
 	}
 }
 
-func (h *Hosted) state(o store.Overlay) api.SessionState {
+func (h *Hosted) state(o store.Overlay, archived bool) api.SessionState {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	s := api.SessionState{Session: h.summaryLocked(o), Asks: slices.Clone(h.asks), Tasks: slices.Clone(h.tasks), Model: h.model, Mode: h.mode, End: h.end, Proc: h.proc, Error: h.errText,
+	s := api.SessionState{Session: h.summaryLocked(o, archived), Asks: slices.Clone(h.asks), Tasks: slices.Clone(h.tasks), Model: h.model, Mode: h.mode, End: h.end, Proc: h.proc, Error: h.errText,
 		Effort: h.effort, Queue: slices.Clone(h.queue), Context: h.ctxSum, QuotaUntil: h.quotaUntil, Tail: h.tail}
 	for _, m := range h.models {
 		s.Models = append(s.Models, api.Model{Value: m.Value, Name: m.Name, Description: m.Description})
@@ -810,7 +815,7 @@ func (h *Hosted) state(o store.Overlay) api.SessionState {
 
 func (h *Hosted) publish() {
 	over, _ := h.m.o.Store.Overlays()
-	s := h.state(over[h.id])
+	s := h.state(over[h.id], !h.shown())
 	h.m.o.Hub.Set("session:"+h.id, s)
 	h.mu.Lock()
 	changed := s.Status != h.lamp
