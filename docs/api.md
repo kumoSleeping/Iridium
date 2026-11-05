@@ -1,0 +1,69 @@
+# Iridium 接口
+
+一套接口，两个入口：
+
+- HTTP：`127.0.0.1:7810`（配置 `listen`），给网页。只认本机的主机名（`localhost`、`127.0.0.1`、`::1` 和配置 `hosts`）；非 GET 请求带了别的 `Origin` 就拒绝。
+- unix socket：`$XDG_RUNTIME_DIR/iridium/ir.sock`（0600），给本机 `ir`。
+
+来源名：HTTP 来的消息记作 `网页`，socket 来的记作 `本机`（交互终端做好后换成终端名）。agent 看到的消息开头是 `[来源名] `（`/` 开头的命令除外），读记录时服务端去掉它，放进消息块的 `from`。
+
+类型都在 `internal/api`。`go generate ./internal/api` 用 tygo 生成 `web/src/api/types.gen.ts`，前端只用它。
+
+出错时状态码非 2xx，正文 `{"error": "…"}`：400 请求不对，404 没有这个会话或位置，409 agent 没在运行，504 agent 没按时回。
+
+## 请求
+
+| 请求 | 正文 → 回答 | 说明 |
+|---|---|---|
+| `GET /api/sessions` | → `Session[]` | 会话列表（现在只有托管的；自动发现以后并进来）。置顶在前，再按最近 |
+| `POST /api/sessions` | `NewSession` → `{id}` | 在 `cwd` 开一个托管会话，带 `text` 就作为第一条消息。`agent` 现在只有 `claude` |
+| `GET /api/sessions/{id}` | → `SessionState` | 打开的会话的状态，和事件流里的同一份 |
+| `GET /api/sessions/{id}/messages` | → `MessagePage` | 不带参数：最新一页。`before=<start>`：往回一页。`after=<end>`：之后新写的 |
+| `GET /api/sessions/{id}/block?at=<at>` | → `{text}` | 截短的块（工具参数、结果、思考、系统行）的全文 |
+| `POST /api/sessions/{id}/send` | `{text}` → `{input}` | 发消息。agent 没在跑就先拉起（有记录就 `--resume`）。回合进行中发的并进当前回合 |
+| `POST /api/sessions/{id}/interrupt` | → `{ok}` | 停掉当前回合（Esc），agent 留着 |
+| `POST /api/sessions/{id}/stop` | → `{ok}` | 停掉 agent 进程（关 stdin，写完记录自己退出）。会话还在，下一条消息再拉起 |
+| `POST /api/sessions/{id}/answer` | `Answer` → `{ok}` | 回答提问：审批 `allow`（不许时可带 `message`）；选择题 `answers`（问题原文 → 选项 `label`）；计划确认 `allow` |
+| `GET /api/events?sub=…` | SSE | 见下 |
+| `GET /api/health` | → `{ok}` | |
+
+## 消息页
+
+- 一页最多 20 条消息（你的话、agent 的话），中间的块跟着走，最多 200 块。
+- `start`：这页第一行的字节位置，往回翻用 `before=<start>`。`end`：这页覆盖到哪，取新的用 `after=<end>`。`more`：前面还有。
+- 块（`Block.kind`）：`user`、`assistant`、`thinking`、`tool`（同页的结果在 `result` 里）、`result`（调用在别的页，按 `id` 拼）、`system`（`event`：`compact`、`api_error`、`local_command`、`interrupted`、`unreadable`）。
+- 工具参数、结果、思考、系统行超过 2000 字只给开头，`length` 是全长，全文按 `at` 取。你的话和 agent 的话不截。
+
+## 事件流（携带）
+
+每个页面一条：`GET /api/events?sub=list&sub=session:<id>&sub=context:<id>&sub=quota`。换了打开的会话就关掉重开。
+
+订阅的东西：
+
+| 键 | 值 |
+|---|---|
+| `list` | `Session[]` |
+| `session:<id>` | `SessionState`：状态、提问、后台任务、模型、审批模式、`end`、`proc`、出错原因 |
+| `context:<id>` | `Context`：上下文用了多少、分项。回合结束和压缩后更新 |
+| `quota` | `Quota`：各 agent 的额度窗口和读到的时间 |
+
+事件：
+
+- `state`：`{key, value}`，一样东西的整份。不存在时 `value` 是 `null`。
+- `draft`：`{session, proc, n, text}`，agent 正在打的字，接在第 `n` 段草稿后面。
+- 每 15 秒一行注释（`: ping`）保活。
+
+规则：
+
+- 开流（含断线重连）先发每样的整份；之后变了再发整份，不发补丁。同一样 250ms 内最多一次，发的是最新的。
+- 读得慢时中间的状态直接丢掉，只送最新的。
+- 草稿每 100ms 攒一包，只拼接不丢。
+
+页面怎么用：
+
+- 打开会话：取最新一页，记下 `end`。`session:<id>` 的 `end` 比自己的大，就 `after=<自己的 end>` 取新块。
+- 草稿：同一 `proc`、同一 `n` 的 `text` 接起来；`n` 变了，上一段封口（记录里马上会有这段话）；`proc` 变了，丢掉所有草稿。记录里来了 agent 的话，就换掉最早封口的那段。重连后清掉草稿，照 `end` 取新块。
+
+## 状态灯（`Status`）
+
+`idle` 无灯，`starting` 启动中，`running` 运行中，`compacting` 压缩中，`waiting` 需要你（有提问），`error` 上次进程出错退出（原因在 `SessionState.error`），`elsewhere` 在别处运行（自动发现做好后才有）。`live` 说 agent 进程在不在跑。

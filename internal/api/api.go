@@ -57,11 +57,11 @@ type LastSaid struct {
 
 // SessionState is the carried state "session:<id>": the open session.
 type SessionState struct {
-	Session
-	Asks  []Ask  `json:"asks"`
-	Tasks []Task `json:"tasks"`
-	Model string `json:"model,omitempty"`
-	Mode  string `json:"mode,omitempty"` // the approval (permission) mode
+	Session `tstype:",extends"`
+	Asks    []Ask  `json:"asks"`
+	Tasks   []Task `json:"tasks"`
+	Model   string `json:"model,omitempty"`
+	Mode    string `json:"mode,omitempty"` // the approval (permission) mode
 	// End: how far the transcript has been read; GET messages?after=<your end> for new blocks.
 	End int64 `json:"end"`
 	// Proc: the agent process's number, up by one at each start; drafts of another are stale.
@@ -147,22 +147,22 @@ type Block struct {
 type BlockKind string
 
 const (
-	BlockUser      BlockKind = "user"
-	BlockAssistant BlockKind = "assistant"
-	BlockThinking  BlockKind = "thinking"
-	BlockTool      BlockKind = "tool"
-	BlockResult    BlockKind = "result" // a result whose call is on another page
-	BlockSystem    BlockKind = "system"
+	BlockKindUser      BlockKind = "user"
+	BlockKindAssistant BlockKind = "assistant"
+	BlockKindThinking  BlockKind = "thinking"
+	BlockKindTool      BlockKind = "tool"
+	BlockKindResult    BlockKind = "result" // a result whose call is on another page
+	BlockKindSystem    BlockKind = "system"
 )
 
 type SystemEvent string
 
 const (
-	EventCompact      SystemEvent = "compact"
-	EventAPIError     SystemEvent = "api_error"
-	EventLocalCommand SystemEvent = "local_command"
-	EventInterrupted  SystemEvent = "interrupted" // you stopped the turn
-	EventUnreadable   SystemEvent = "unreadable"  // a line that is not a JSON object
+	SystemEventCompact      SystemEvent = "compact"
+	SystemEventAPIError     SystemEvent = "api_error"
+	SystemEventLocalCommand SystemEvent = "local_command"
+	SystemEventInterrupted  SystemEvent = "interrupted" // you stopped the turn
+	SystemEventUnreadable   SystemEvent = "unreadable"  // a line that is not a JSON object
 )
 
 // Result is a tool call's result.

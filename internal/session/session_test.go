@@ -126,7 +126,7 @@ func TestHostedTurn(t *testing.T) {
 		t.Errorf("state: %+v", s)
 	}
 	b := r.messages(id)
-	if len(b) != 2 || b[0].Kind != api.BlockUser || b[0].Text != "hello" || b[0].From != "网页" || b[1].Text != "ok: hello" {
+	if len(b) != 2 || b[0].Kind != api.BlockKindUser || b[0].Text != "hello" || b[0].From != "网页" || b[1].Text != "ok: hello" {
 		t.Fatalf("blocks: %+v", b)
 	}
 	// Each turn's share of the session's running totals.

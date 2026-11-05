@@ -118,7 +118,7 @@ func (f *File) refresh() error {
 func messages(blocks []api.Block) int {
 	n := 0
 	for _, b := range blocks {
-		if b.Kind == api.BlockUser || b.Kind == api.BlockAssistant {
+		if b.Kind == api.BlockKindUser || b.Kind == api.BlockKindAssistant {
 			n++
 		}
 	}
@@ -210,13 +210,13 @@ func paired(blocks []api.Block) []api.Block {
 	calls := map[string]int{}
 	out := blocks[:0]
 	for _, b := range blocks {
-		if b.Kind == api.BlockResult {
+		if b.Kind == api.BlockKindResult {
 			if i, ok := calls[b.ID]; ok && out[i].Result == nil {
 				out[i].Result = &api.Result{At: b.At, Time: b.Time, Text: b.Text, Length: b.Length, Error: b.Error}
 				continue
 			}
 		}
-		if b.Kind == api.BlockTool {
+		if b.Kind == api.BlockKindTool {
 			calls[b.ID] = len(out)
 		}
 		out = append(out, b)
@@ -261,7 +261,7 @@ func (f *File) Full(at string) (string, error) {
 	if idx < 0 || idx >= len(blocks) {
 		return "", ErrNoBlock
 	}
-	if blocks[idx].Kind == api.BlockTool {
+	if blocks[idx].Kind == api.BlockKindTool {
 		return blocks[idx].Input, nil
 	}
 	return blocks[idx].Text, nil
@@ -276,7 +276,7 @@ var (
 // LastSaid is the last thing you or the agent said, on one line, Markdown's marks for headings,
 // bold, code and links taken off; nil if nothing was said.
 func (f *File) LastSaid() (*api.LastSaid, error) {
-	b, err := f.walk(true, func(b api.Block) bool { return b.Kind == api.BlockUser || b.Kind == api.BlockAssistant })
+	b, err := f.walk(true, func(b api.Block) bool { return b.Kind == api.BlockKindUser || b.Kind == api.BlockKindAssistant })
 	if b == nil || err != nil {
 		return nil, err
 	}
@@ -288,7 +288,7 @@ func (f *File) LastSaid() (*api.LastSaid, error) {
 
 // Title is the opening of the first thing you said, on one line; "" if you said nothing.
 func (f *File) Title() (string, error) {
-	b, err := f.walk(false, func(b api.Block) bool { return b.Kind == api.BlockUser })
+	b, err := f.walk(false, func(b api.Block) bool { return b.Kind == api.BlockKindUser })
 	if b == nil || err != nil {
 		return "", err
 	}
@@ -427,7 +427,7 @@ func blocksOf(off int64, raw []byte, max int, sources Sources) []api.Block {
 	}
 	if trimmed[0] != '{' || json.Unmarshal(raw, &l) != nil {
 		text, n := clip(string(raw), max)
-		return []api.Block{{At: fmt.Sprintf("%d.0", off), Kind: api.BlockSystem, Event: api.EventUnreadable, Text: text, Length: n}}
+		return []api.Block{{At: fmt.Sprintf("%d.0", off), Kind: api.BlockKindSystem, Event: api.SystemEventUnreadable, Text: text, Length: n}}
 	}
 	var t int64
 	if ts, err := time.Parse(time.RFC3339Nano, l.Timestamp); err == nil {
@@ -458,12 +458,12 @@ func blocksOf(off int64, raw []byte, max int, sources Sources) []api.Block {
 		for _, r := range items {
 			if r.Type == "tool_result" {
 				text, n := clip(joined(r.Content), max)
-				add(api.Block{Kind: api.BlockResult, ID: r.ToolUseID, Text: text, Length: n, Error: r.IsError})
+				add(api.Block{Kind: api.BlockKindResult, ID: r.ToolUseID, Text: text, Length: n, Error: r.IsError})
 			}
 		}
 		all := texts(l.Message.Content)
 		if len(all) == 1 && interrupted.MatchString(all[0]) {
-			add(api.Block{Kind: api.BlockSystem, Event: api.EventInterrupted})
+			add(api.Block{Kind: api.BlockKindSystem, Event: api.SystemEventInterrupted})
 			break
 		}
 		var said []string
@@ -476,7 +476,7 @@ func blocksOf(off int64, raw []byte, max int, sources Sources) []api.Block {
 		if strings.TrimSpace(text) == "" {
 			break
 		}
-		b := api.Block{Kind: api.BlockUser, Text: text, ID: l.UUID}
+		b := api.Block{Kind: api.BlockKindUser, Text: text, ID: l.UUID}
 		if sources != nil && l.UUID != "" {
 			if from, ok := sources(l.UUID); ok {
 				b.From = from
@@ -489,12 +489,12 @@ func blocksOf(off int64, raw []byte, max int, sources Sources) []api.Block {
 			switch i.Type {
 			case "text":
 				if strings.TrimSpace(i.Text) != "" {
-					add(api.Block{Kind: api.BlockAssistant, Text: i.Text})
+					add(api.Block{Kind: api.BlockKindAssistant, Text: i.Text})
 				}
 			case "thinking": // Claude's are mostly empty
 				if strings.TrimSpace(i.Thinking) != "" {
 					text, n := clip(i.Thinking, max)
-					add(api.Block{Kind: api.BlockThinking, Text: text, Length: n})
+					add(api.Block{Kind: api.BlockKindThinking, Text: text, Length: n})
 				}
 			case "tool_use":
 				input := "{}"
@@ -503,13 +503,13 @@ func blocksOf(off int64, raw []byte, max int, sources Sources) []api.Block {
 					input = buf.String()
 				}
 				text, n := clip(input, max)
-				add(api.Block{Kind: api.BlockTool, ID: i.ID, Name: i.Name, Input: text, Length: n})
+				add(api.Block{Kind: api.BlockKindTool, ID: i.ID, Name: i.Name, Input: text, Length: n})
 			}
 		}
 	case "system":
 		switch l.Subtype {
 		case "compact_boundary":
-			add(api.Block{Kind: api.BlockSystem, Event: api.EventCompact})
+			add(api.Block{Kind: api.BlockKindSystem, Event: api.SystemEventCompact})
 		case "api_error":
 			var e struct {
 				Formatted string `json:"formatted"`
@@ -517,12 +517,12 @@ func blocksOf(off int64, raw []byte, max int, sources Sources) []api.Block {
 			}
 			_ = json.Unmarshal(l.Error, &e)
 			text, n := clip(cmpOr(e.Formatted, e.Message), max)
-			add(api.Block{Kind: api.BlockSystem, Event: api.EventAPIError, Text: text, Length: n})
+			add(api.Block{Kind: api.BlockKindSystem, Event: api.SystemEventAPIError, Text: text, Length: n})
 		case "local_command":
 			var s string
 			_ = json.Unmarshal(l.Content, &s)
 			text, n := clip(s, max)
-			add(api.Block{Kind: api.BlockSystem, Event: api.EventLocalCommand, Text: text, Length: n})
+			add(api.Block{Kind: api.BlockKindSystem, Event: api.SystemEventLocalCommand, Text: text, Length: n})
 		}
 	}
 	return blocks

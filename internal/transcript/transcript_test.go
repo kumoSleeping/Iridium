@@ -115,15 +115,15 @@ func TestRules(t *testing.T) {
 	for _, b := range page.Blocks {
 		s := string(b.Kind)
 		switch b.Kind {
-		case api.BlockUser:
+		case api.BlockKindUser:
 			s += fmt.Sprintf("(%s|%s|%s)", b.Text, b.From, b.ID)
-		case api.BlockAssistant:
+		case api.BlockKindAssistant:
 			s += "(" + b.Text + ")"
-		case api.BlockSystem:
+		case api.BlockKindSystem:
 			s += "(" + string(b.Event) + ")"
-		case api.BlockThinking:
+		case api.BlockKindThinking:
 			s += fmt.Sprintf("(%d/%d)", len([]rune(b.Text)), b.Length)
-		case api.BlockTool:
+		case api.BlockKindTool:
 			s += fmt.Sprintf("(%s %d result %v %d)", b.Name, b.Length, b.Result != nil && b.Result.Error, b.Result.Length)
 		}
 		got = append(got, s)
@@ -246,7 +246,7 @@ func TestResultOnAnotherPage(t *testing.T) {
 	ls = append(ls, assistant(text("last")))
 	ls.write(t, path, false)
 	p, _ := Open(path, nil).Latest()
-	if p.Blocks[0].Kind != api.BlockResult || p.Blocks[0].ID != "t1" || !p.More {
+	if p.Blocks[0].Kind != api.BlockKindResult || p.Blocks[0].ID != "t1" || !p.More {
 		t.Fatalf("first block: %+v", p.Blocks[0])
 	}
 }
