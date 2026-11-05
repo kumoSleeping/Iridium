@@ -204,6 +204,9 @@ func (x *Index) Close() {
 func (x *Index) Scan() {
 	x.scanMu.Lock()
 	defer x.scanMu.Unlock()
+	// Watching begins with the first look, whether or not it finds anything: a transcript
+	// written after it is activity, however long until a look finds it.
+	x.watchingSince()
 	x.scanDisk()
 	x.scanProcs()
 	x.classify()

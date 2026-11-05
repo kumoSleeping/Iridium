@@ -64,7 +64,9 @@ func Claude() int {
 		out.Write(append(b, '\n'))
 		out.Flush()
 	}
-	note := func(v any) {
+	note := func(v map[string]any) {
+		// Each line says where and which session, as Claude's own do.
+		v["cwd"], v["sessionId"] = cwd, session
 		b, _ := json.Marshal(v)
 		record.Write(append(b, '\n'))
 	}
