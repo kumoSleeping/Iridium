@@ -80,7 +80,7 @@ func (h *Hosted) say(text string) {
 		h.logf("%v", err)
 		return
 	}
-	if err := h.write(ctx, in); err != nil {
+	if err := h.write(ctx, in, nil); err != nil {
 		h.logf("writing %q: %v", text, err)
 	}
 }

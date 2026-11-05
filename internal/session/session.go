@@ -21,7 +21,7 @@ import (
 	"time"
 
 	"github.com/kumoSleeping/iridium/internal/agent"
-	"github.com/kumoSleeping/iridium/internal/agent/claude"
+	"github.com/kumoSleeping/iridium/internal/agents"
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/config"
 	"github.com/kumoSleeping/iridium/internal/hub"
@@ -161,17 +161,68 @@ func (m *Manager) get(id string) (*Hosted, error) {
 	return h, nil
 }
 
+// AgentID is the agent's own id for hosted session id where it is another (Codex's thread, made
+// after Iridium's id); "" otherwise. Discovery lists the session under it.
+func (m *Manager) AgentID(id string) string {
+	h, err := m.get(id)
+	if err != nil {
+		return ""
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if a := h.meta.agentID(); a != id {
+		return a
+	}
+	return ""
+}
+
+// byAgentID is the hosted session whose agent knows it as id under another id of Iridium's.
+func (m *Manager) byAgentID(id string) *Hosted {
+	m.mu.Lock()
+	hosted := make([]*Hosted, 0, len(m.hosted))
+	for _, h := range m.hosted {
+		hosted = append(hosted, h)
+	}
+	m.mu.Unlock()
+	for _, h := range hosted {
+		h.mu.Lock()
+		a := h.meta.agentID()
+		h.mu.Unlock()
+		if a == id && h.id != id {
+			return h
+		}
+	}
+	return nil
+}
+
+// discoveredAs is the id discovery lists hosted session h under: the agent's own.
+func (h *Hosted) discoveredAs() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if a := h.meta.agentID(); a != "" {
+		return a
+	}
+	return h.id
+}
+
 // Create starts a hosted session in req.Cwd and, if req.Text is given, sends it as the first
 // message from `from`. The id is the agent's own session id.
 func (m *Manager) Create(ctx context.Context, req api.NewSession, from string) (string, error) {
 	if req.Agent == "" {
 		req.Agent = api.AgentClaude
 	}
-	if req.Agent != api.AgentClaude {
+	info, ok := agents.Get(req.Agent)
+	if !ok {
 		return "", fmt.Errorf("agent %s is not supported yet", req.Agent)
+	}
+	if req.Mode != "" && !slices.Contains(info.Modes, req.Mode) {
+		return "", fmt.Errorf("%s has no approval mode %q (%s)", info.Name, req.Mode, strings.Join(info.Modes, ", "))
 	}
 	if st, err := os.Stat(req.Cwd); err != nil || !st.IsDir() || !filepath.IsAbs(req.Cwd) {
 		return "", fmt.Errorf("not a directory: %q", req.Cwd)
+	}
+	if _, err := m.o.Store.Workspace(req.Workspace); req.Workspace != 0 && err != nil {
+		return "", err
 	}
 	mt := meta{ID: newUUID(), Agent: req.Agent, Cwd: filepath.Clean(req.Cwd), Created: time.Now().UnixMilli(), Model: req.Model, Mode: req.Mode}
 	h := m.newHosted(mt)
@@ -185,6 +236,13 @@ func (m *Manager) Create(ctx context.Context, req api.NewSession, from string) (
 	m.hosted[mt.ID] = h
 	m.mu.Unlock()
 	h.newSession = true
+	if req.Workspace != 0 {
+		if err := m.o.Store.Move(mt.ID, req.Workspace); err != nil {
+			return mt.ID, err
+		}
+	} else if req.Caller != "" {
+		m.intoCallers(mt.ID, req.Caller)
+	}
 	if err := h.start(ctx); err != nil {
 		return mt.ID, err
 	}
@@ -247,8 +305,10 @@ func (m *Manager) List(ctx context.Context) ([]api.Session, error) {
 	out := make([]api.Session, 0, len(hosted))
 	seen := map[string]bool{}
 	for _, h := range hosted {
-		out = append(out, h.summary(over[h.id]))
-		seen[h.id] = true
+		as := h.discoveredAs()
+		out = append(out, m.elsewhere(h.summary(over[h.id]), as))
+		// A hosted Codex session is on disk under its thread: listed once, as hosted.
+		seen[h.id], seen[as] = true, true
 	}
 	if m.o.Discovery != nil {
 		found, err := m.o.Discovery.Sessions(ctx)
@@ -279,7 +339,7 @@ func (m *Manager) List(ctx context.Context) ([]api.Session, error) {
 func (m *Manager) State(id string) (*api.SessionState, error) {
 	h, err := m.get(id)
 	if err != nil {
-		return nil, err
+		return m.foreignState(id, nil)
 	}
 	over, _ := m.o.Store.Overlays()
 	s := h.state(over[id])
@@ -289,11 +349,10 @@ func (m *Manager) State(id string) (*api.SessionState, error) {
 // Messages is a page of the session's transcript: the latest (before and after < 0), the one
 // before an offset, or what came after one.
 func (m *Manager) Messages(id string, before, after int64) (api.MessagePage, error) {
-	h, err := m.get(id)
+	f, err := m.readable(id)
 	if err != nil {
 		return api.MessagePage{}, err
 	}
-	f := h.transcript()
 	if f == nil {
 		return api.MessagePage{Blocks: []api.Block{}}, nil
 	}
@@ -308,11 +367,10 @@ func (m *Manager) Messages(id string, before, after int64) (api.MessagePage, err
 
 // Full is the whole text of the block at at.
 func (m *Manager) Full(id, at string) (string, error) {
-	h, err := m.get(id)
+	f, err := m.readable(id)
 	if err != nil {
 		return "", err
 	}
-	f := h.transcript()
 	if f == nil {
 		return "", ErrNotFound
 	}
@@ -400,8 +458,7 @@ func (m *Manager) agentEnv() []string {
 }
 
 func (m *Manager) newDriver(a api.Agent, emit func(agent.Event)) agent.Driver {
-	// One kind for now; the others come with their drivers.
-	return claude.New(claude.Options{Emit: emit, Logf: m.o.Logf})
+	return agents.NewDriver(a, emit, m.o.Logf)
 }
 
 func newUUID() string {

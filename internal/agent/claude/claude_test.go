@@ -536,3 +536,26 @@ func TestPatternAndAccount(t *testing.T) {
 		t.Errorf("hello: %+v", hello)
 	}
 }
+
+// Images go after the text as base64 image blocks.
+func TestSendImages(t *testing.T) {
+	var lines [][]byte
+	d := New(Options{Logf: func(string, ...any) {}})
+	d.Attach(func(l []byte) error { lines = append(lines, l); return nil }, 1)
+	err := d.Send(context.Background(), agent.Message{ID: "u1", Text: "[本机] look\n\n[附件] `/w/a.png`", Human: true, Images: []agent.Image{{MediaType: "image/png", Data: []byte{0x89, 'P', 'N', 'G'}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var f struct {
+		Message struct {
+			Content []map[string]any `json:"content"`
+		} `json:"message"`
+	}
+	if err := json.Unmarshal(lines[len(lines)-1], &f); err != nil || len(f.Message.Content) != 2 {
+		t.Fatalf("frame %s: %v", lines[len(lines)-1], err)
+	}
+	src, _ := f.Message.Content[1]["source"].(map[string]any)
+	if f.Message.Content[0]["type"] != "text" || f.Message.Content[1]["type"] != "image" || src["type"] != "base64" || src["media_type"] != "image/png" || src["data"] != "iVBORw==" {
+		t.Errorf("content %v", f.Message.Content)
+	}
+}

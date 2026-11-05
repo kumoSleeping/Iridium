@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/kumoSleeping/iridium/internal/agent"
-	"github.com/kumoSleeping/iridium/internal/agent/claude"
+	"github.com/kumoSleeping/iridium/internal/agents"
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/hold"
 	"github.com/kumoSleeping/iridium/internal/platform"
@@ -39,6 +39,28 @@ type meta struct {
 	Created int64     `json:"created"`
 	Model   string    `json:"model,omitempty"`
 	Mode    string    `json:"mode,omitempty"`
+	// AgentID: the agent's own id for the session, where the agent makes it (Codex's thread).
+	AgentID string `json:"agentId,omitempty"`
+}
+
+// agentID is the id the agent's records name the session by.
+func (mt meta) agentID() string {
+	if info, ok := agents.Get(mt.Agent); ok && info.OwnID {
+		return mt.AgentID
+	}
+	return mt.ID
+}
+
+// findTranscript is the session's transcript file, "" if the agent wrote none yet.
+func (h *Hosted) findTranscript() (string, error) {
+	h.mu.Lock()
+	mt := h.meta
+	h.mu.Unlock()
+	info, ok := agents.Get(mt.Agent)
+	if !ok {
+		return "", fmt.Errorf("no agent %s", mt.Agent)
+	}
+	return info.Find(agents.Where{ID: mt.agentID(), Cwd: mt.Cwd, Env: h.m.agentEnv(), ClaudeHome: h.m.o.Config.ClaudeDir()})
 }
 
 // procMeta: proc goes up by one each start; outStart is where its output begins in out.log.
@@ -73,6 +95,7 @@ type Hosted struct {
 	model      string
 	mode       string
 	errText    string
+	failed     string // why the driver gave the process up: the error once it has ended
 	lastActive time.Time
 	lastFrom   string // who sent the last message: whose turn an agent's own turn is counted to
 	turnFrom   string // who began the running turn
@@ -83,8 +106,9 @@ type Hosted struct {
 	end        int64
 	said       cached
 
-	qmu   sync.Mutex   // one queue decision or release at a time; before mu
-	queue []api.Queued // under mu
+	qmu     sync.Mutex   // one queue decision or release at a time; before mu
+	queue   []api.Queued // under mu
+	qimages map[string][]agent.Image
 
 	effort        string
 	models        []agent.Model
@@ -118,6 +142,7 @@ type cached struct {
 func (m *Manager) newHosted(mt meta) *Hosted {
 	h := &Hosted{m: m, meta: mt, id: mt.ID, dir: filepath.Join(m.holdRoot(), mt.ID), unit: m.o.UnitPrefix + mt.ID, model: mt.Model, mode: mt.Mode, lastActive: time.UnixMilli(mt.Created), turn: agent.Idle}
 	h.drv = m.newDriver(mt.Agent, h.onEvent)
+	h.qimages = map[string][]agent.Image{}
 	h.loadQueue()
 	if st, err := m.o.Store.Settings(mt.ID); err == nil {
 		h.effort = st.Effort
@@ -184,7 +209,7 @@ func (h *Hosted) launch(ctx context.Context, proc int) error {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	found, err := transcript.Find(m.o.Config.ClaudeDir(), h.id)
+	found, err := h.findTranscript()
 	if err != nil {
 		return err
 	}
@@ -193,7 +218,7 @@ func (h *Hosted) launch(ctx context.Context, proc int) error {
 		return err
 	}
 	h.mu.Lock()
-	o := agent.SpawnOptions{Session: h.id, Resume: found != "", Cwd: h.meta.Cwd, Env: m.agentEnv(), Program: m.o.Config.Programs[string(h.meta.Agent)], SystemPromptFile: prompt,
+	o := agent.SpawnOptions{Session: h.id, Resume: found != "", AgentSession: h.meta.agentID(), Cwd: h.meta.Cwd, Env: m.agentEnv(), Program: m.o.Config.Programs[string(h.meta.Agent)], SystemPromptFile: prompt,
 		Model: h.meta.Model, Mode: cmp.Or(h.meta.Mode, m.o.Config.Modes[string(h.meta.Agent)]), Effort: h.effort, CrashResume: h.crashResume && found != ""}
 	h.resuming, h.crashResume, h.turnSeen = o.CrashResume, false, false
 	h.mu.Unlock()
@@ -305,7 +330,7 @@ func (h *Hosted) attached(ready chan struct{}) {
 // an earlier daemon saw. It ends with the process.
 func (h *Hosted) loop(proc int, outStart, replay int64) {
 	defer h.m.wg.Done()
-	tail := hold.NewTail(filepath.Join(h.dir, hold.FileOutLog), outStart, claude.MaxLine)
+	tail := hold.NewTail(filepath.Join(h.dir, hold.FileOutLog), outStart, agents.MaxLine)
 	defer tail.Close()
 	feed := func() int {
 		lines, err := tail.Read()
@@ -391,6 +416,9 @@ func (h *Hosted) ended(e *hold.Exit) {
 	if e != nil && !asked && (e.From == "holder" || e.Signal != nil || (e.Code != nil && *e.Code != 0)) {
 		h.errText = describe(e) + errTail(h.dir)
 		resume = h.crashedLocked(hadTurn)
+	}
+	if h.failed != "" {
+		h.errText, h.failed = h.failed, ""
 	}
 	errText := h.errText
 	h.mu.Unlock()
@@ -525,6 +553,15 @@ func (h *Hosted) onEvent(e agent.Event) {
 		h.tasks = e.Tasks
 	case agent.Started:
 		h.model = e.Model
+		// An agent that makes the session's id (Codex's thread) names it here: kept, so the next
+		// start resumes it and its transcript is found.
+		if info, ok := agents.Get(h.meta.Agent); ok && info.OwnID && e.Session != "" && e.Session != h.meta.AgentID {
+			h.meta.AgentID = e.Session
+			h.file, h.end, h.said = nil, 0, cached{}
+			if err := writeJSON(filepath.Join(h.dir, fileMeta), h.meta); err != nil {
+				h.logf("saving the agent's id: %v", err)
+			}
+		}
 	case agent.Hello:
 		h.starting = false
 		h.mode = e.Mode
@@ -565,6 +602,16 @@ func (h *Hosted) onEvent(e agent.Event) {
 		}
 	case agent.ProtocolError:
 		h.logf("protocol: %s: %s", e.Reason, e.Detail)
+	case agent.GiveUp:
+		if !replay {
+			h.failed = e.Why
+			h.logf("stopping its agent: %s", e.Why)
+			go func() {
+				if err := h.stop(h.m.ctx); err != nil {
+					h.logf("stopping: %v", err)
+				}
+			}()
+		}
 	}
 	h.mu.Unlock()
 	h.publish()
@@ -598,7 +645,7 @@ func (h *Hosted) recordUsage(e agent.TurnUsage, base *agent.Usage, from, model s
 		return
 	}
 	if e.Tokens != (agent.Tokens{}) {
-		add(model, e.Tokens, nil)
+		add(model, e.Tokens, e.CostUSD)
 	}
 }
 
@@ -610,11 +657,12 @@ func (h *Hosted) transcript() *transcript.File {
 	if f != nil {
 		return f
 	}
-	path, err := transcript.Find(h.m.o.Config.ClaudeDir(), h.id)
+	path, err := h.findTranscript()
 	if err != nil || path == "" {
 		return nil
 	}
-	f = transcript.Open(path, h.m.o.Store.Source)
+	info, _ := agents.Get(h.meta.Agent)
+	f = transcript.OpenAs(path, info.Format, h.m.o.Store.Source)
 	h.mu.Lock()
 	if h.file == nil {
 		h.file = f

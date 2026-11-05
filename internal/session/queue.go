@@ -27,18 +27,26 @@ func (m *Manager) Send(ctx context.Context, id, text, from string) (string, erro
 	return input, err
 }
 
+// SendImages is Send with images for the agent to see; the text names their files.
+func (m *Manager) SendImages(ctx context.Context, id, text, from string, images []agent.Image) (string, error) {
+	input, _, err := m.SendWith(ctx, id, text, from, false, images...)
+	return input, err
+}
+
 // SendWith is Send; steer: join the running turn rather than wait for it. queued: it waits.
-func (m *Manager) SendWith(ctx context.Context, id, text, from string, steer bool) (input string, queued bool, err error) {
-	h, err := m.get(id)
-	if err != nil {
-		return "", false, err
-	}
+// A session found on disk is taken up first. A queued message's images wait in memory only: after
+// a restart it goes with its text, which names their files.
+func (m *Manager) SendWith(ctx context.Context, id, text, from string, steer bool, images ...agent.Image) (input string, queued bool, err error) {
 	if strings.TrimSpace(text) == "" {
 		return "", false, errors.New("an empty message")
 	}
+	h, err := m.take(ctx, id)
+	if err != nil {
+		return "", false, err
+	}
 	h.qmu.Lock()
 	defer h.qmu.Unlock()
-	in := store.Input{ID: newUUID(), Session: id, Terminal: from, Text: text, State: "sent"}
+	in := store.Input{ID: newUUID(), Session: h.id, Terminal: from, Text: text, State: "sent"}
 	if !steer && h.busy() {
 		in.State = "queued"
 		if err := m.o.Store.AddInput(in); err != nil {
@@ -46,6 +54,9 @@ func (m *Manager) SendWith(ctx context.Context, id, text, from string, steer boo
 		}
 		h.mu.Lock()
 		h.queue = append(h.queue, api.Queued{ID: in.ID, Text: text, From: from, At: time.Now().UnixMilli()})
+		if len(images) > 0 {
+			h.qimages[in.ID] = images
+		}
 		h.mu.Unlock()
 		h.publish()
 		return in.ID, true, nil
@@ -53,7 +64,16 @@ func (m *Manager) SendWith(ctx context.Context, id, text, from string, steer boo
 	if err := m.o.Store.AddInput(in); err != nil {
 		return "", false, err
 	}
-	return in.ID, false, h.write(ctx, in)
+	return in.ID, false, h.write(ctx, in, images)
+}
+
+// queuedImages takes the images waiting with queued message id.
+func (h *Hosted) queuedImages(id string) []agent.Image {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	im := h.qimages[id]
+	delete(h.qimages, id)
+	return im
 }
 
 // busy: a message now would join a running turn, or wait behind others or for the quota.
@@ -67,7 +87,7 @@ func (h *Hosted) busy() bool {
 }
 
 // write gives the agent an input already in the store, starting the agent if need be.
-func (h *Hosted) write(ctx context.Context, in store.Input) error {
+func (h *Hosted) write(ctx context.Context, in store.Input, images []agent.Image) error {
 	if err := h.start(ctx); err != nil {
 		return err
 	}
@@ -86,7 +106,7 @@ func (h *Hosted) write(ctx context.Context, in store.Input) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-	return h.drv.Send(ctx, agent.Message{ID: in.ID, Text: line, Human: true})
+	return h.drv.Send(ctx, agent.Message{ID: in.ID, Text: line, Human: true, Images: images})
 }
 
 // release sends what waits in the queue, in order, as one turn: the queued ones, and the paused
@@ -107,7 +127,10 @@ func (h *Hosted) releaseLocked(ctx context.Context, all bool) {
 	}
 	h.mu.Unlock()
 	for i, q := range due {
-		err := h.write(ctx, store.Input{ID: q.ID, Session: h.id, Terminal: q.From, Text: q.Text})
+		h.mu.Lock()
+		images := h.qimages[q.ID]
+		h.mu.Unlock()
+		err := h.write(ctx, store.Input{ID: q.ID, Session: h.id, Terminal: q.From, Text: q.Text}, images)
 		if err == nil {
 			err = h.m.o.Store.SetInputState(q.ID, "sent")
 		}
@@ -118,6 +141,7 @@ func (h *Hosted) releaseLocked(ctx context.Context, all bool) {
 		}
 		h.mu.Lock()
 		h.queue = slices.DeleteFunc(h.queue, func(x api.Queued) bool { return x.ID == q.ID })
+		delete(h.qimages, q.ID)
 		h.mu.Unlock()
 	}
 	if len(due) > 0 {
@@ -202,7 +226,7 @@ func (m *Manager) Steer(ctx context.Context, id, input string) error {
 	if i < 0 {
 		return store.ErrNoInput
 	}
-	if err := h.write(ctx, store.Input{ID: q.ID, Session: id, Terminal: q.From, Text: q.Text}); err != nil {
+	if err := h.write(ctx, store.Input{ID: q.ID, Session: id, Terminal: q.From, Text: q.Text}, h.queuedImages(q.ID)); err != nil {
 		return err
 	}
 	if err := m.o.Store.SetInputState(q.ID, "sent"); err != nil {
@@ -236,6 +260,7 @@ func (m *Manager) DeleteQueued(id, input string) error {
 			return err
 		}
 		h.queue = slices.Delete(h.queue, i, i+1)
+		delete(h.qimages, input)
 		return nil
 	})
 }

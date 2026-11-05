@@ -193,7 +193,11 @@ func (d *Driver) Send(ctx context.Context, m agent.Message) error {
 		d.sent = "other"
 	}
 	d.mu.Unlock()
-	f := userFrame{Type: "user", UUID: m.ID, Message: userMessage{Role: "user", Content: []textBlock{{Type: "text", Text: m.Text}}}}
+	content := []textBlock{{Type: "text", Text: m.Text}}
+	for _, img := range m.Images {
+		content = append(content, textBlock{Type: "image", Source: &imageSource{Type: "base64", MediaType: img.MediaType, Data: img.Data}})
+	}
+	f := userFrame{Type: "user", UUID: m.ID, Message: userMessage{Role: "user", Content: content}}
 	if m.Human {
 		f.Origin = &origin{Kind: "human"}
 	}
@@ -1022,7 +1026,15 @@ type userMessage struct {
 	Content []textBlock `json:"content"`
 }
 
+// textBlock is a text block, or an image one with Source.
 type textBlock struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
+	Type   string       `json:"type"`
+	Text   string       `json:"text,omitempty"`
+	Source *imageSource `json:"source,omitempty"`
+}
+
+type imageSource struct {
+	Type      string `json:"type"` // base64
+	MediaType string `json:"media_type"`
+	Data      []byte `json:"data"` // base64 in JSON
 }
