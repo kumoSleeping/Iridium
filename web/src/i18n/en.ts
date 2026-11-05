@@ -301,7 +301,7 @@ export const en: Dict = {
   "term.panel": "Panel",
   "term.channel": "Channel",
   "term.local": "Local",
-  "term.localShort": "the local ir and page",
+  "term.localShort": "The local ir and page",
   "term.this": "this one",
   "term.online": "Online",
   "term.never": "Never used",
