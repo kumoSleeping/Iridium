@@ -4,8 +4,8 @@
 // from the transcript (GET messages, after= what the open session's state says was written); its
 // drafts from the stream. Loaded only once a chat opens or the page is idle.
 import { Menu } from "@base-ui/react/menu";
-import { ChevronLeft, ChevronRight, Ellipsis, FolderInput } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DragEvent } from "react";
+import { ChevronRight, Ellipsis, FolderInput } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DragEvent, type ReactNode } from "react";
 import type { SessionState as LiveSession } from "../api/types.gen";
 import { api } from "../api/client";
 import type { Session } from "../api/types.gen";
@@ -18,7 +18,7 @@ import { MenuItems, Rename, sessionActions } from "../sidebar";
 import { useConfirms, useList, useSession } from "../store";
 import { drafts, opened } from "../stream";
 import { errText, toast } from "../toast";
-import { agentName, cn, IconKey, LogoLamp, statusText, tilde, Tip, titleOf } from "../ui";
+import { agentName, LogoLamp, statusText, tilde, Tip, titleOf } from "../ui";
 import { Asks } from "./asks";
 import { Composer, type ComposerHandle } from "./composer";
 import { folded, type Tool } from "./fold";
@@ -28,11 +28,13 @@ import { ContextRing, ModeKey, ModelKey, QuotaBars, useMode } from "./meters";
 import { Queue } from "./queue";
 import { sourceOf, yours } from "./refs";
 import { Pending, Running, Said } from "./said";
-import { Stick } from "./stick";
+import { Stick, toEnd } from "./stick";
 
 const BUSY = new Set(["running", "compacting", "starting", "waiting"]);
 
-export function ChatPage({ id, phone, onBack }: { id: string; phone: boolean; onBack: () => void }) {
+/** drawerKey: what brings the sidebar, when it is a drawer (drawer.tsx DrawerKey); above: in the
+ *  composer's stack. */
+export function ChatPage({ id, phone, drawerKey }: { id: string; phone: boolean; drawerKey?: (above: boolean) => ReactNode }) {
   useLang();
   const s = useSession(id);
   const list = useList();
@@ -95,20 +97,18 @@ export function ChatPage({ id, phone, onBack }: { id: string; phone: boolean; on
     const ro = new ResizeObserver(() => setStackH(el.offsetHeight));
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [!!s]); // the stack is drawn only once the session's state has come
 
-  // A message sent: at the bottom, the conversation pushed up by it as it fades in.
+  // A message sent: at the bottom, the conversation pushed up by it (the chat's glide) as it fades in.
   const bubbles = useRef(new Map<string, HTMLDivElement>());
   const fly = useRef<string | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
-  const column = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const el = fly.current && bubbles.current.get(fly.current);
     if (!el) return;
     fly.current = null;
-    const sc = scroller.current;
-    if (sc) sc.scrollTop = sc.scrollHeight;
-    if (column.current) pushIn(el, column.current);
+    toEnd(scroller.current);
+    pushIn(el);
   });
 
   const composer = useRef<ComposerHandle>(null);
@@ -140,8 +140,9 @@ export function ChatPage({ id, phone, onBack }: { id: string; phone: boolean; on
     const gone = list !== undefined && !row;
     return (
       <div className="relative h-full">
-        <Bar phone={phone} onBack={onBack} s={row} />
+        <Bar phone={phone} s={row} />
         {gone && <p className="g-fade m-0 pt-24 text-center text-sm text-ink-3">{t("chat.gone")}</p>}
+        {drawerKey?.(false)}
       </div>
     );
   }
@@ -150,8 +151,8 @@ export function ChatPage({ id, phone, onBack }: { id: string; phone: boolean; on
   const grew = `${log.blocks.at(-1)?.at} ${log.drafts.length} ${log.drafts.at(-1)?.text.length} ${log.drafts.at(-1)?.whole} ${log.sent.length}`;
   return (
     <div className="relative h-full" onDragOver={files} onDrop={(e) => files(e) && composer.current?.attach([...e.dataTransfer.files])}>
-      <Stick scroller={scroller} tail={grew} older={() => log.older()} place={chat.place} bottom={stackH} style={{ paddingTop: 64, paddingBottom: stackH + 16 }}>
-        <div ref={column} className="mx-auto flex max-w-[760px] flex-col gap-5 px-4 sm:px-6">
+      <Stick scroller={scroller} tail={grew} older={() => log.older()} place={chat.place} bottom={stackH} style={{ paddingTop: 64, paddingBottom: stackH + 20 }}>
+        <div className="mx-auto flex max-w-[760px] flex-col gap-5 px-4 sm:px-6">
           {log.loaded && !log.blocks.length && !log.drafts.length && !log.sent.length && <p className="g-fade m-0 pt-16 text-center text-sm text-ink-4">{t("chat.empty")}</p>}
           {/* In a turn, the calls being written or run and the dots share one row at the end, as
               high whatever it shows: the conversation does not jump as a call is drafted, runs and
@@ -170,7 +171,6 @@ export function ChatPage({ id, phone, onBack }: { id: string; phone: boolean; on
                 </div>
               ),
             )}
-          {busy && <Activity calls={log.drafts.filter((d) => d.tool)} running={shown.flatMap((b) => (b.kind === "running" ? [b.tool] : []))} cwd={cwd} quiet={s.status !== "waiting" && !log.drafts.some((d) => !d.whole && !d.tool)} grew={grew} />}
           {log.sent.map((x) => (
             <Pending
               key={x.key}
@@ -181,6 +181,10 @@ export function ChatPage({ id, phone, onBack }: { id: string; phone: boolean; on
               drop={() => ((log.sent = log.sent.filter((y) => y !== x)), changed())}
             />
           ))}
+          {/* The turn's row, after what you sent: kept, one line high, even out of a turn, so a
+              message sent or the dots coming do not move the conversation (the user, 2026-11-06). */}
+          {/* Close under what is above it (the user, 2026-11-06): a call's line by the calls before. */}
+          {log.loaded && (busy ? <Activity calls={log.drafts.filter((d) => d.tool)} running={shown.flatMap((b) => (b.kind === "running" ? [b.tool] : []))} cwd={cwd} quiet={s.status !== "waiting" && !log.drafts.some((d) => !d.whole && !d.tool)} grew={grew} /> : <div aria-hidden className="-mt-3 h-7 pointer-coarse:h-9" />)}
           {s.status === "error" && s.error && (
             <p className="m-0 text-center text-xs text-err" title={s.error}>
               {t("chat.crashed")} · <span className="font-mono">{s.error.slice(0, 160)}</span>
@@ -188,8 +192,9 @@ export function ChatPage({ id, phone, onBack }: { id: string; phone: boolean; on
           )}
         </div>
       </Stick>
-      <Bar phone={phone} onBack={onBack} s={s} />
+      <Bar phone={phone} s={s} />
       <div ref={stack} className="g-turn-stay vt-stack absolute inset-x-0 bottom-0 z-10 px-2.5 pb-[max(14px,calc(env(safe-area-inset-bottom)+6px))] sm:px-5">
+        {drawerKey?.(true)}
         {/* Paper from the composer's middle down: the conversation scrolled under it stops there. */}
         {!elsewhere && !s.subagent && <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-[calc(44px+max(14px,calc(env(safe-area-inset-bottom)+6px)))] bg-[linear-gradient(to_bottom,transparent,var(--paper)_14px)]" />}
         <div className="relative mx-auto max-w-[760px]">
@@ -244,19 +249,14 @@ function Under({ s, composer, onSent, onSentDone, modelOpen, setModelOpen, modeO
   );
 }
 
-/** The top bar: back (phone), the logo with its lamp, the name, the folder; more. The link's dot is
- *  the sidebar's (sidebar.tsx LinkDot). */
-function Bar({ s, phone, onBack }: { s?: Session; phone: boolean; onBack: () => void }) {
+/** The top bar: the logo with its lamp, the name, the folder; more. The link's dot is the
+ *  sidebar's (sidebar.tsx LinkDot). */
+function Bar({ s, phone }: { s?: Session; phone: boolean }) {
   const ws = useWorkspaces().data ?? [];
   const [renaming, setRenaming] = useState(false);
   return (
     <header className="g-turn-stay vt-bar glass absolute inset-x-0 top-0 z-20 flex h-12 items-center gap-1 pr-2 pl-2 shadow-[0_0.5px_0_var(--edge)] pointer-coarse:h-13">
-      {phone && (
-        <IconKey label={t("nav.back")} onClick={onBack} tipSide="bottom" className="-mr-1">
-          <ChevronLeft size={20} />
-        </IconKey>
-      )}
-      <div className={cn("flex min-w-0 flex-1 items-center gap-2.5", !phone && "pl-2")}>
+      <div className="flex min-w-0 flex-1 items-center gap-2.5 pl-2">
         {s && (
           <>
             <Tip label={`${agentName(s.agent)} · ${statusText(s.status)}`} side="bottom">
@@ -343,7 +343,7 @@ function Activity({ calls, running, cwd, quiet, grew }: { calls: Drafted[]; runn
   const writing = calls.at(-1);
   const run = running.at(-1);
   return (
-    <div className="flex h-7 min-w-0 items-center pointer-coarse:h-9">
+    <div className="-mt-3 flex h-7 min-w-0 items-center pointer-coarse:h-9">
       {writing?.tool ? (
         <div key={writing.tool.id} className="min-w-0 flex-1">
           <ToolDraft name={writing.tool.name} input={writing.text} whole={writing.whole} />

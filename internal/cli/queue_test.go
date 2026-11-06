@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +21,10 @@ func TestSendQueueAndSteer(t *testing.T) {
 	}
 	ir("send", sid, "three WAIT")
 	time.Sleep(100 * time.Millisecond)
+	// A person's --queue waits for the turn to end.
+	for _, k := range []string{"IRIDIUM_SESSION", "CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "CODEX_SESSION_ID", "PI_SESSION_ID"} {
+		t.Setenv(k, "")
+	}
 	if r := ir("send", sid, "four", "--queue", "--wait"); r.code != 0 || r.out != "ok: four\n" {
 		t.Errorf("queued: %+v", r)
 	}
@@ -31,5 +36,24 @@ func TestSendQueueAndSteer(t *testing.T) {
 	}
 	if r := ir("send", sid, "six", "--steer", "--queue"); r.code != 1 {
 		t.Errorf("both: %+v", r)
+	}
+	// An agent's --queue joins the turn all the same: queued, it would wait for a person to press
+	// it in (the user, 2026-11-06).
+	ir("send", sid, "seven WAIT")
+	time.Sleep(100 * time.Millisecond)
+	t.Setenv("IRIDIUM_SESSION", "caller-session")
+	if r := ir("send", sid, "eight", "--queue"); r.code != 0 {
+		t.Errorf("agent --queue: %+v", r)
+	}
+	var st struct {
+		Queue []struct{ Text string } `json:"queue"`
+	}
+	e := newEnv(io.Discard, io.Discard)
+	full, err := e.resolve(sid)
+	if err == nil {
+		err = e.do("GET", "/api/sessions/"+full, nil, &st)
+	}
+	if err != nil || len(st.Queue) != 0 {
+		t.Errorf("agent --queue queued: %+v %v", st, err)
 	}
 }

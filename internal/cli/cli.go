@@ -19,7 +19,7 @@ const Help = `ir：本机 Iridium 的命令行（经 unix socket）。<id> 写�
   ir ls | find <词> [--all]          列会话 | 按名字、标题、最后一句找（--all 连归档、做完的子代理）
   ir stop | archive | unarchive <id> 停掉 agent | 归档 | 取消归档
   ir cp <源> <目标> | files <目录>   拷文件，打印路径、大小、sha256 | 列一层：名字、大小、时间、类型
-  new、send 加 --wait 等到回复；send 在回合进行中默认插进这一回合，加 --queue 排到回合结束后
+  new、send 加 --wait 等到回复；send 在回合进行中插进这一回合（agent 发的总是插进；人在终端发可加 --queue 排到回合结束后）
   new 可加 --model <模型>、--approve <审批模式>
   退出码：0 结束，2 需要你（提问、审批），1 出错或已退出。路径可写 机器:路径
 管理（agent 调用时 TOKEN 不进对话，由网页面板确认）：

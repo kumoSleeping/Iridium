@@ -7,7 +7,7 @@
 // under the mouse, a faint "+" at its end for a new session there. A row's menu (right click,
 // long-press): pin, rename, stop, archive. The mouse resting on a row fetches its chat ahead.
 import { Menu } from "@base-ui/react/menu";
-import { Archive, ArchiveRestore, Bot, ChevronRight, Copy, Folder, FolderOpen, Inbox, KeyRound, Link2, Pencil, Pin, PinOff, Plus, Search, Settings, ShieldOff, Square, Workflow as WorkflowIcon } from "lucide-react";
+import { Archive, ArchiveRestore, Bot, ChevronRight, Copy, Folder, FolderOpen, Inbox, KeyRound, Link2, PanelLeft, PanelLeftClose, Pencil, Pin, PinOff, Plus, Search, Settings, ShieldOff, Square, Workflow as WorkflowIcon } from "lucide-react";
 import { Fragment, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { api } from "./api/client";
 import type { Confirm, Session } from "./api/types.gen";
@@ -46,12 +46,16 @@ type Props = {
   me: ReactNode;
   /** The chat's code, fetched as a row is pressed. */
   chatCode: () => void;
+  /** On a computer: put the sidebar away (docked) or dock it again (a drawer). None on a phone. */
+  onDock?: () => void;
+  drawer: boolean;
 };
 
-/** How wide the sidebar may be dragged, and at first (the user, 2026-11-06). */
-const WIDTH = { min: 232, max: 440, start: 292 };
+/** How wide the sidebar may be dragged, and at first: freely, to 640px or 60% of the window (the
+ *  user, 2026-11-06). The width is --sidebar-w on the page too: the settings dialog sizes by it. */
+const WIDTH = { min: 220, max: 640, start: 292 };
 const WIDTH_KEY = "ir.sidebarWidth";
-const clampWidth = (w: number) => Math.round(Math.min(WIDTH.max, Math.max(WIDTH.min, w)));
+const clampWidth = (w: number) => Math.round(Math.min(WIDTH.max, innerWidth * 0.6, Math.max(WIDTH.min, w)));
 
 /** The line to the main pane, fading out toward its top and its foot; dragged, it sets how wide
  *  the sidebar is, within WIDTH; a double click puts it back; ← → by a step on the keyboard. */
@@ -108,6 +112,7 @@ function Divider({ width, setWidth }: { width: number; setWidth: (w: number) => 
 export function Sidebar(p: Props) {
   const list = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(() => clampWidth(Number(kept(WIDTH_KEY)) || WIDTH.start));
+  useLayoutEffect(() => void document.documentElement.style.setProperty("--sidebar-w", `${p.phone ? 0 : width}px`), [width, p.phone]);
   const [plusOpen, setPlusOpen] = useState<string | null>(null);
   const needs = p.tree.needs.length + p.confirms.length;
   const shape = [needs, ...p.tree.workspaces.map((w) => `${w.key}:${p.expanded(w.key)}:${w.rows.map((r) => (r.kind === "session" ? r.s.id : `${r.f.key}${p.expanded(r.f.key)}${r.f.sessions.length}`)).join(",")}`), p.expanded("archive"), p.tree.archived.length, [...p.tree.kids.values()].flat().map((s) => s.id).join(","), [...p.tree.runs.values()].flat().map((r) => `${r.id}${p.expanded(`run:${r.id}`)}${r.working.map((s) => s.id)}`).join(",")].join("|");
@@ -160,6 +165,11 @@ export function Sidebar(p: Props) {
         <Search size={16} />
       </IconKey>
       <LinkDot />
+      {p.onDock && (
+        <IconKey label={p.drawer ? t("nav.dockSidebar") : `${t("nav.hideSidebar")} · ${t("nav.sidebarKey")}`} tipSide="bottom" onClick={p.onDock}>
+          {p.drawer ? <PanelLeft size={16} /> : <PanelLeftClose size={16} />}
+        </IconKey>
+      )}
     </div>
   );
 
@@ -179,7 +189,7 @@ export function Sidebar(p: Props) {
                 {p.confirms.map((c) => (
                   <Row
                     key={`c:${c.id}`}
-                    depth={1}
+                    depth={0}
                     flip={`c:${c.id}`}
                     onClick={() => p.onConfirm(c)}
                     icon={c.kind === "invite" ? <Link2 size={15} className="text-need" /> : <KeyRound size={15} className="text-need" />}
@@ -192,7 +202,7 @@ export function Sidebar(p: Props) {
                     aria={`${c.kind === "invite" ? t("confirm.invite") : t("confirm.token")} ${c.name ?? ""}, ${t("status.needs")}`}
                   />
                 ))}
-                {p.tree.needs.map((s) => row(s, 1, `n:${s.id}`))}
+                {p.tree.needs.map((s) => row(s, 0, `n:${s.id}`))}
               </>
             )}
           </div>
@@ -223,7 +233,7 @@ export function Sidebar(p: Props) {
               {open &&
                 w.rows.map((r) =>
                   r.kind === "session" ? (
-                    row(r.s, 1)
+                    row(r.s, 0)
                   ) : (
                     <div key={r.f.key} role="group">
                       <FolderRow
@@ -243,7 +253,7 @@ export function Sidebar(p: Props) {
                           (o) => setPlusOpen(o ? r.f.key : null),
                         )}
                       />
-                      {p.expanded(r.f.key) && r.f.sessions.map((s) => row(s, 2))}
+                      {p.expanded(r.f.key) && r.f.sessions.map((s) => row(s, 1))}
                     </div>
                   ),
                 )}
@@ -253,7 +263,7 @@ export function Sidebar(p: Props) {
         {p.tree.archived.length > 0 && (
           <div className="mt-4" role="group">
             <Row depth={0} flip="archive" expanded={p.expanded("archive")} onClick={() => p.toggle("archive")} icon={<TrashLid open={p.expanded("archive")} />} label={<span className="text-ink-2">{t("nav.archive")}</span>} end={<Count n={p.tree.archived.length} faint />} />
-            {p.expanded("archive") && p.tree.archived.map((s) => row(s, 1))}
+            {p.expanded("archive") && p.tree.archived.map((s) => row(s, 0))}
           </div>
         )}
         {!p.tree.workspaces.length && !needs && <div className="g-fade px-2 pt-10 text-center text-sm text-ink-3">{t("nav.empty")}</div>}
@@ -576,7 +586,7 @@ function FolderRow({ f, label, open, onToggle, newHere, plus }: { f: FolderNode;
   return (
     <>
       <Row
-        depth={1}
+        depth={0}
         flip={`f:${f.key}`}
         expanded={open}
         onClick={onToggle}

@@ -2,7 +2,8 @@
 // the track or moved with the keys, it snaps to a level; only a level let go of is sent. A thick
 // track, the knob inside it, the fill a flowing liquid of orange, pink and fire (chat/liquid.ts; the
 // user, 2026-11-06). The knob pulls the liquid after it (chat/goo.ts): springs move the knob, the
-// fill's front and the blobs between, all drawn through the goo filter, so they run together.
+// fill's front and the blobs between, the blobs drawn through the goo filter, so they run together
+// under the liquid. The knob is frosted white balls run together through a goo of its own.
 import { Slider } from "@base-ui/react/slider";
 import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { t, useLang } from "../i18n";
@@ -23,26 +24,45 @@ export function restAt(levels: string[], level?: string): { i: number; known: bo
   return { i: m >= 0 ? m : Math.floor((levels.length - 1) / 2), known: false };
 }
 
-/** The blobs between the front and the knob, by size (px); the last sits under the knob itself. */
+/** The blobs between the front and the knob, by size (px). */
 const BLOBS = [15, 12, 10];
 
-/** The goo: blurred, then the alpha pulled hard, so shapes near one another run together with round
- *  edges; drawn only where the fill itself is not (out), the fill sharp over it. */
+/** The goo: blurred, then the alpha pulled hard, so the blobs near one another run together with
+ *  round edges. Only the blobs go through it (a cap at the fill's front, those between, one under
+ *  the knob); the fill itself is drawn sharp over them. */
 function GooFilter({ id }: { id: string }) {
   return (
     <svg aria-hidden width="0" height="0" className="absolute">
       <filter id={id} x="-10%" y="-60%" width="120%" height="220%" colorInterpolationFilters="sRGB">
         <feGaussianBlur in="SourceGraphic" stdDeviation="3.5" result="blur" />
-        <feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 16 -6" result="goo" />
-        <feComposite in="goo" in2="SourceAlpha" operator="out" result="neck" />
+        <feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 16 -6" />
+      </filter>
+      {/* The knob's own goo (the user, 2026-11-06): its white balls run into one shape, half clear,
+          a soft shadow only outside it. */}
+      <filter id={`${id}k`} x="-10%" y="-100%" width="120%" height="300%" colorInterpolationFilters="sRGB">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="blur" />
+        <feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 18 -7" result="goo" />
+        <feGaussianBlur in="goo" stdDeviation="1.5" result="soft" />
+        <feColorMatrix in="soft" mode="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.22 0" result="dark" />
+        <feOffset in="dark" dy="1" result="drop" />
+        <feComposite in="drop" in2="goo" operator="out" result="shadow" />
+        <feColorMatrix in="goo" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 0.6 0" result="frost" />
         <feMerge>
-          <feMergeNode in="neck" />
-          <feMergeNode in="SourceGraphic" />
+          <feMergeNode in="shadow" />
+          <feMergeNode in="frost" />
         </feMerge>
       </filter>
     </svg>
   );
 }
+
+/** The knob's balls, by size (px), and the spring each follows: the knob itself, then two trailing
+ *  it, looser (goo.ts --k1, --k2), as the code the user brought had them. */
+const KNOB = [
+  [28, "--knob"],
+  [23, "--k1"],
+  [19, "--k2"],
+] as const;
 
 /** The keys the slider moves by: kept from the menu around it, whose list would move on them too. */
 const SLIDER_KEY = /^(Arrow|Page|Home$|End$)/;
@@ -83,44 +103,51 @@ export function EffortSlider({ levels, value, set, aside, tag }: { levels: strin
     void set(level).then((ok) => ok || setWant(null));
   };
   return (
-    <div ref={root} className="effort-slider px-2.5 pt-1.5 pb-2" onKeyDown={(e) => SLIDER_KEY.test(e.key) && e.stopPropagation()} style={{ "--frac": frac } as CSSProperties}>
-      <div className="flex h-6 items-center justify-between text-xs">
-        <span className="text-ink-3">{t("composer.effort")}</span>
-        <span className="flex min-w-0 items-baseline gap-1.5">
+    <div ref={root} className="effort-slider px-2.5 pt-1.5 pb-2 select-none [-webkit-touch-callout:none]" onKeyDown={(e) => SLIDER_KEY.test(e.key) && e.stopPropagation()} style={{ "--frac": frac } as CSSProperties}>
+      {/* Two columns: the track and, at its right, the key beside it (UltraCode); the level's name
+          stands over that key, centred on it (the user, 2026-11-06), the tag before it. */}
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3">
+        <div className="flex h-6 min-w-0 items-center justify-between gap-2 text-xs">
+          <span className="text-ink-3">{t("composer.effort")}</span>
           {tag}
-          <span key={known ? levels[i] : ""} className={cn("g-fade text-sm font-medium", known ? "liquid-text" : "text-ink-3")}>
-            {known ? levelName(levels[i]!) : t("composer.effortDefault")}
-          </span>
+        </div>
+        <span key={known ? levels[i] : ""} className={cn("g-fade text-sm font-medium whitespace-nowrap", aside ? "justify-self-center" : "justify-self-end", known ? "text-ink-2" : "text-ink-3")}>
+          {known ? levelName(levels[i]!) : t("composer.effortDefault")}
         </span>
-      </div>
-      <div className="flex items-center gap-3">
-        <Slider.Root value={i} min={0} max={n - 1} step={1} onValueChange={(v) => setDrag(v as number)} onValueCommitted={(v) => commit(v as number)} aria-label={t("composer.effort")} data-unknown={known ? undefined : ""} className="group/effort min-w-0 flex-1">
+        <Slider.Root value={i} min={0} max={n - 1} step={1} onValueChange={(v) => setDrag(v as number)} onValueCommitted={(v) => commit(v as number)} aria-label={t("composer.effort")} data-unknown={known ? undefined : ""} className="group/effort min-w-0">
           <Slider.Control className="relative flex h-7 cursor-grab touch-none items-center data-dragging:cursor-grabbing pointer-coarse:h-10">
-            <Slider.Track className="relative h-6 w-full overflow-hidden rounded-full bg-fill-2 shadow-[inset_0_1px_2px_oklch(0_0_0/0.12)]">
-              <span aria-hidden className="effort-tone absolute inset-0">
-                <span className="effort-fill absolute inset-0" style={{ filter: `url(#${goo})` }}>
-                  <span className="effort-body absolute inset-0">
-                    <canvas ref={canvas} className="absolute inset-0 size-full" />
-                  </span>
+            <Slider.Track className="relative h-6 w-full rounded-full bg-fill-2 shadow-[inset_0_1px_2px_oklch(0_0_0/0.12)]">
+              <span aria-hidden className="effort-tone absolute inset-0 overflow-hidden rounded-full">
+                {/* Under: the neck the knob draws out, the blobs run together; over: the liquid. */}
+                <span className="absolute inset-0" style={{ filter: `url(#${goo})` }}>
+                  <span className="effort-blob" style={{ "--b": "var(--front)", "--s": "24px" } as CSSProperties} />
                   {BLOBS.map((size, k) => (
                     <span key={k} className="effort-blob" style={{ "--b": `var(--b${k})`, "--s": `${size}px` } as CSSProperties} />
                   ))}
                   <span className="effort-blob" style={{ "--b": "var(--knob)", "--s": "18px" } as CSSProperties} />
                 </span>
+                <span className="effort-body absolute inset-0">
+                  <canvas ref={canvas} className="absolute inset-0 size-full" />
+                </span>
               </span>
               {/* The stops: notches on the line the knob's middle runs along (12px in from each end). */}
               {levels.map((l, k) => (
-                <span key={l} aria-hidden className={cn("absolute top-1/2 size-1 -translate-1/2 rounded-full transition-colors duration-(--dur-2)", k <= i ? "bg-white/70" : "bg-ink-4")} style={{ left: `calc(12px + (100% - 24px) * ${n > 1 ? k / (n - 1) : 0})` }} />
+                <span key={l} aria-hidden className={cn("absolute top-1/2 size-1 -translate-1/2 rounded-full transition-colors duration-(--dur-2)", k === i ? "bg-white/0" : k < i ? "bg-white/70" : "bg-ink-4")} style={{ left: `calc(12px + (100% - 24px) * ${n > 1 ? k / (n - 1) : 0})` }} />
               ))}
-              <span aria-hidden className="effort-knob pointer-events-none absolute inset-y-0 right-[22px] left-0.5">
-                <span className="absolute top-0.5 left-0 size-5 rounded-full bg-white effort-knob-face transition-transform duration-(--dur-1) group-has-[:focus-visible]/effort:outline-2 group-has-[:focus-visible]/effort:outline-offset-1 group-has-[:focus-visible]/effort:outline-ink-3 group-data-dragging/effort:scale-90" />
+              {/* The knob: the liquid frosted under it, and over that its white balls through the goo, so it
+                  stretches and wobbles as it moves. */}
+              <span aria-hidden className="effort-frost pointer-events-none group-has-[:focus-visible]/effort:outline-2 group-has-[:focus-visible]/effort:outline-offset-1 group-has-[:focus-visible]/effort:outline-ink-3" />
+              <span aria-hidden className="pointer-events-none absolute inset-0" style={{ filter: `url(#${goo}k)` }}>
+                {KNOB.map(([size, v]) => (
+                  <span key={v} className="effort-blob effort-ball" style={{ "--b": `var(${v})`, "--s": `${size}px` } as CSSProperties} />
+                ))}
               </span>
               {/* What the keys and a screen reader take; drawn by the knob above, which glides. */}
               <Slider.Thumb getAriaValueText={(_, v) => (known ? levelName(levels[v] ?? "") : t("composer.effortDefault"))} aria-label={t("composer.effort")} className="size-5 opacity-0 outline-none" />
             </Slider.Track>
           </Slider.Control>
         </Slider.Root>
-        {aside}
+        {aside ? <span className="justify-self-center">{aside}</span> : <span />}
       </div>
       <GooFilter id={goo} />
     </div>

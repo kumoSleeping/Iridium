@@ -208,9 +208,9 @@ func TestDraftTool(t *testing.T) {
 	h := New()
 	ch, _ := stream(t, h.Subscribe([]string{"session:a"}))
 	next(t, ch, time.Second) // the snapshot
-	h.DraftTool("a", 1, 2, "toolu_1", "Bash")
-	h.Draft("a", 1, 2, `{"command":"ir se`)
-	h.Draft("a", 1, 2, `nd ab \"hi\""}`)
+	h.DraftTool("a", 1, 2, "toolu_1", "Bash", "")
+	h.DraftTool("a", 1, 2, "toolu_1", "Bash", `{"command":"ir se`)
+	h.DraftTool("a", 1, 2, "toolu_1", "Bash", `nd ab \"hi\""}`)
 	h.Seal("a", 1, 2)
 	e, ok := next(t, ch, time.Second)
 	if !ok {
@@ -218,6 +218,22 @@ func TestDraftTool(t *testing.T) {
 	}
 	if d := draftOf(t, e); d.N != 2 || d.Tool == nil || d.Tool.ID != "toolu_1" || d.Tool.Name != "Bash" || d.Text != `{"command":"ir send ab \"hi\""}` || !d.Done {
 		t.Fatalf("tool draft %+v", d)
+	}
+}
+
+// A stream that opens after a call's first piece still hears its pieces as the call's, not words.
+func TestDraftToolMidway(t *testing.T) {
+	h := New()
+	h.DraftTool("a", 1, 2, "toolu_1", "Bash", `{"command":"ir se`)
+	ch, _ := stream(t, h.Subscribe([]string{"session:a"}))
+	next(t, ch, time.Second) // the snapshot
+	h.DraftTool("a", 1, 2, "toolu_1", "Bash", `nd ab"}`)
+	e, ok := next(t, ch, time.Second)
+	if !ok {
+		t.Fatal("no draft")
+	}
+	if d := draftOf(t, e); d.Tool == nil || d.Tool.ID != "toolu_1" || d.Text != `nd ab"}` {
+		t.Fatalf("midway draft %+v", d)
 	}
 }
 

@@ -54,8 +54,9 @@ func cmdNew(e *env, args []string) int {
 
 // ir send <id> "message" [-a file]... [--queue]: while a turn runs the message joins it (steers),
 // as Enter does on the page (user 2026-11-06): what agents tell each other is wanted now, and
-// steering does not stop the turn. --queue waits in the queue for the turn to end instead.
-// --steer, the old way to ask for it, is still taken.
+// steering does not stop the turn. --queue waits in the queue for the turn to end instead, for a
+// person at a terminal only: an agent's message always joins (the daemon's send). --steer, the old
+// way to ask for it, is still taken.
 func cmdSend(e *env, args []string) int {
 	o, err := parse(args, "wait attach steer queue")
 	if err != nil {

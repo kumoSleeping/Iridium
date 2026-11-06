@@ -176,18 +176,6 @@ body {
 :root {
   --liquid: linear-gradient(90deg, #e9822f, #ff4a17 45%, #ff2f82);
 }
-.liquid-text {
-  background: var(--liquid) 0 0 / 200% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  animation: liquid-drift 7s ease-in-out infinite alternate;
-}
-@keyframes liquid-drift {
-  to {
-    background-position: 100% 0;
-  }
-}
 .switch.liquid[aria-checked="true"] {
   background: linear-gradient(to bottom, oklch(1 0 0 / 0.22), oklch(1 0 0 / 0) 55%), var(--liquid);
 }

@@ -267,6 +267,12 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c := callerOf(r)
+	// What an agent tells another session joins its turn at once, --queue or not: queued, it would
+	// wait for a person to press it in (the user, 2026-11-06).
+	// (An agent's ir on the socket names the session it runs in.)
+	if c.socket && (c.agent || c.session != "") {
+		req.Steer = true
+	}
 	if err := s.checkSend(c, r.PathValue("id"), req.Text, len(req.Attachments) > 0); err != nil {
 		s.error(w, err)
 		return

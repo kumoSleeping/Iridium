@@ -1,6 +1,6 @@
 // Where the page is, after the address's #: "#/" nothing open, "#/s/<id>" a session's chat,
-// "#/settings" the settings. One sidebar either way; on a phone anything but "#/" covers it, its
-// back key going back.
+// "#/settings" the settings. One main pane either way, the chat; the settings and the terminals are
+// a dialog over it (the user, 2026-11-06), the chat under it the one open before.
 import { useSyncExternalStore } from "react";
 
 export type Route = { name: "home" } | { name: "chat"; id: string } | { name: "settings" } | { name: "terminals" };
@@ -49,6 +49,8 @@ addEventListener("hashchange", () => {
 });
 
 export const route = () => current;
+/** The settings and the terminals: a dialog over the chat, not a page of their own. */
+export const over = (r: Route) => r.name === "settings" || r.name === "terminals";
 export const useRoute = () =>
   useSyncExternalStore(
     (f) => (subs.add(f), () => void subs.delete(f)),
@@ -60,8 +62,10 @@ export const useRoute = () =>
 export function go(r: Route, replace = false) {
   const hash = hashOf(r);
   if (hash === location.hash || (hash === "#/" && location.hash === "")) return;
-  if (replace) history.replaceState({ ir: true }, "", hash);
-  else history.pushState({ ir: true }, "", hash);
+  // depth: how many of the dialog's steps lie above the page under it, for closing it at once.
+  const depth = !over(r) ? 0 : replace ? (history.state?.depth ?? 0) : over(current) ? (history.state?.depth ?? 0) + 1 : 1;
+  if (replace) history.replaceState({ ir: true, depth }, "", hash);
+  else history.pushState({ ir: true, depth }, "", hash);
   const from = current;
   current = parse(hash);
   moved(from);
@@ -71,6 +75,13 @@ export function go(r: Route, replace = false) {
 export function back() {
   if (history.state?.ir) history.back();
   else go({ name: "home" }, true);
+}
+
+/** The dialog closed: back past its steps to the page under it, else that page in its place. */
+export function close(under: Route) {
+  const d = history.state?.ir ? (history.state.depth ?? 0) : 0;
+  if (d > 0) history.go(-d);
+  else go(under, true);
 }
 
 export const openChat = (id: string) => go({ name: "chat", id }, route().name === "chat");

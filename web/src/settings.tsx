@@ -4,7 +4,7 @@
 // bars shown; the update; the way to the 终端 page; and this device's own: reminders, appearance,
 // language. Changed is saved at once.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { BellRing, ChevronLeft, ChevronRight, CircleAlert, FoldVertical, LoaderCircle, MessageSquareDot, Monitor, Moon, MonitorSmartphone, RefreshCw, Sun } from "lucide-react";
+import { BellRing, ChevronRight, CircleAlert, FoldVertical, LoaderCircle, MessageSquareDot, Monitor, Moon, MonitorSmartphone, RefreshCw, Sun, X } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { api, missing } from "./api/client";
 import type { PushEvents, PushState, Settings, SettingsPatch } from "./api/types.gen";
@@ -16,7 +16,7 @@ import { quotaKey, windowName } from "./quota";
 import { go } from "./route";
 import { useConfirms, useQuota } from "./store";
 import { errText, toast } from "./toast";
-import { agentName, cn, IconKey, Logo, steerKey, Switch, Tip } from "./ui";
+import { agentName, IconKey, Logo, steerKey, Switch, Tip } from "./ui";
 import { remindBy, reminding } from "./unread";
 
 const REAP = ["0", "15m", "30m", "1h", "2h", "4h", "12h"];
@@ -31,7 +31,8 @@ const DEFAULT_RULES: PushEvents = { needsYou: true, error: true, turnEnd: false,
 /** A duration as Go writes it ("1h0m0s"), as short as it goes ("1h"). */
 export const shortDuration = (d: string) => d.replace(/([hm])0s$/, "$1").replace(/h0m$/, "h");
 
-export function SettingsPage({ phone, onBack, theme, setTheme }: { phone: boolean; onBack: () => void; theme: ThemePref; setTheme: (v: ThemePref) => void }) {
+/** In a dialog over the chat (app.tsx), its close key at the top right. */
+export function SettingsPage({ onClose, theme, setTheme }: { onClose: () => void; theme: ThemePref; setTheme: (v: ThemePref) => void }) {
   const lang = useLang();
   const qc = useQueryClient();
   const q = useSettings();
@@ -91,13 +92,11 @@ export function SettingsPage({ phone, onBack, theme, setTheme }: { phone: boolea
   return (
     <div className="relative h-full">
       <header className="glass absolute inset-x-0 top-0 z-20 flex h-12 items-center gap-1 pr-2 pl-2 shadow-[0_0.5px_0_var(--edge)] pointer-coarse:h-13">
-        {phone && (
-          <IconKey label={t("nav.back")} onClick={onBack} tipSide="bottom" className="-mr-1">
-            <ChevronLeft size={20} />
-          </IconKey>
-        )}
-        <h1 className={cn("m-0 text-base font-semibold", !phone && "pl-2")}>{t("nav.settings")}</h1>
+        <h1 className="m-0 pl-2 text-base font-semibold">{t("nav.settings")}</h1>
         {q.isFetching && <LoaderCircle size={14} className="ml-1 animate-spin text-ink-4" />}
+        <IconKey label={t("nav.close")} onClick={onClose} tipSide="bottom" className="ml-auto">
+          <X size={18} />
+        </IconKey>
       </header>
       <div className="absolute inset-0 overflow-y-auto pt-16 pb-10">
         <div className="mx-auto flex max-w-[620px] flex-col gap-7 px-4 sm:px-6">

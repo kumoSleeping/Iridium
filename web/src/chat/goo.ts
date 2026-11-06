@@ -12,12 +12,15 @@ export type Spring = { x: number; v: number; k: number; c: number };
  *  blobs between, looser and looser (they wobble). */
 export const SPRINGS: Pick<Spring, "k" | "c">[] = [
   { k: 260, c: 24 },
-  { k: 70, c: 15 },
+  { k: 48, c: 12.5 }, // the front: a little slower still (the user, 2026-11-06)
   { k: 190, c: 14 },
   { k: 130, c: 13 },
   { k: 95, c: 11 },
+  // the knob's two trailing balls: elastic, lagging, as in the code the user brought (2026-11-06)
+  { k: 150, c: 9 },
+  { k: 100, c: 8 },
 ];
-export const VARS = ["--knob", "--front", "--b0", "--b1", "--b2"];
+export const VARS = ["--knob", "--front", "--b0", "--b1", "--b2", "--k1", "--k2"];
 
 /** Moves s toward to by dt seconds, in steps short enough to stay stable for the stiffest. */
 export function step(s: Spring, to: number, dt: number) {

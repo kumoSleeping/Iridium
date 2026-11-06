@@ -6,7 +6,8 @@
      g-unfold   popover / menu / tooltip grows out of its anchor (Base UI's --transform-origin)
      g-pop      a small surface appears in place (toast, approval card, lamp change)
      g-slide    a panel's content arrives from the side (popover pages)
-     g-push     phone pages: the chat slides over the list, the list slides back out from under it
+     g-drawer   the sidebar as a drawer slides out from the left, or follows the finger (drawer.tsx)
+     g-dialog   the settings rise out of their key at the sidebar's foot (app.tsx)
      g-fade     plain cross-fade
      g-swap     one icon for another in place, both drawn, cross-faded (a folder shut / open)
      g-lid      the archive bin's lid, hinged at its right end, springs up as it opens
@@ -108,15 +109,35 @@
   }
 }
 
-/* --- push: two mounted layers; data-at = here | off (to the right) | under (behind, a little left) --- */
-.g-push {
-  transition: transform var(--dur-3) var(--ease-out);
+/* --- drawer: out or in by its inline transform; dragged, no transition --- */
+.g-drawer {
+  transition:
+    transform var(--dur-3) var(--ease-out),
+    box-shadow var(--dur-3) var(--ease-out);
 }
-.g-push[data-at="off"] {
-  transform: translateX(100%);
+
+/* --- dialog: Base UI Dialog's popup and backdrop (data-starting-style / data-ending-style) --- */
+.g-dialog {
+  transform-origin: 28px calc(100% - 24px);
+  transition:
+    transform var(--dur-3) var(--ease-spring),
+    opacity var(--dur-2) var(--ease-out);
 }
-.g-push[data-at="under"] {
-  transform: translateX(-22%);
+.g-dialog[data-starting-style],
+.g-dialog[data-ending-style] {
+  opacity: 0;
+  transform: scale(0.94) translateY(8px);
+}
+.g-dialog[data-ending-style] {
+  transition-duration: var(--dur-1);
+  transition-timing-function: var(--ease-in);
+}
+.g-backdrop {
+  transition: opacity var(--dur-2) var(--ease-out);
+}
+.g-backdrop[data-starting-style],
+.g-backdrop[data-ending-style] {
+  opacity: 0;
 }
 
 /* --- fade --- */
@@ -262,7 +283,7 @@ html[data-turn] .g-turn-stay .glass {
    blobs' --b0.., 0 to 1 of the track; --frac is where they are going), so no transitions here. The
    fill (a canvas, chat/liquid.ts) is clipped at the front, not scaled, so its colours stay put along
    the track; the blobs between the front and the knob are drawn with it through the goo filter.
-   The knob (20px) sits 2px inside the 24px track, its middle 12px in from each end; it glows warmer
+   The knob (28px) is a little larger than the 24px track, its middle 12px in from each end; it glows warmer
    the higher the level. A soft light from above over the liquid, no sweeping shine. Not while a
    still screenshot is taken: the popup is portaled out of [data-still], so asked from the root. --- */
 .effort-body {
@@ -291,19 +312,26 @@ html[data-turn] .g-turn-stay .glass {
 [data-unknown] .effort-tone {
   filter: saturate(0.1) opacity(0.5);
 }
-.effort-knob {
-  transform: translateX(calc(var(--knob, var(--frac)) * 100%));
+/* The knob: white balls (.effort-ball, on the knob's springs) through the knob's goo, half clear;
+   under them the liquid frosted (.effort-frost, round, at the knob), the glow round it warmer the
+   higher the level (the user, 2026-11-06). */
+.effort-ball {
+  background: #fff;
 }
-.effort-knob-face {
-  box-shadow:
-    0 0 0 0.5px oklch(0 0 0 / 0.1),
-    0 1px 3px oklch(0 0 0 / 0.25),
-    0 0 calc(3px + var(--frac) * 9px) oklch(0.7 0.22 25 / calc(0.12 + var(--frac) * 0.33));
-  transition:
-    box-shadow var(--dur-3) var(--ease-out),
-    transform var(--dur-1) var(--ease-out);
+.effort-frost {
+  position: absolute;
+  top: 50%;
+  left: calc(12px + (100% - 24px) * var(--knob, var(--frac)));
+  width: 26px;
+  height: 26px;
+  translate: -50% -50%;
+  border-radius: 50%;
+  -webkit-backdrop-filter: blur(4px) saturate(1.2);
+  backdrop-filter: blur(4px) saturate(1.2);
+  box-shadow: 0 0 calc(3px + var(--frac) * 9px) oklch(0.7 0.22 25 / calc(0.12 + var(--frac) * 0.33));
+  transition: box-shadow var(--dur-3) var(--ease-out);
 }
-:root:has([data-still]) :is(.effort-tone, .effort-knob-face, .liquid-text) {
+:root:has([data-still]) :is(.effort-tone, .effort-frost) {
   transition: none;
   animation: none;
 }
@@ -324,18 +352,16 @@ html[data-turn] .g-turn-stay .glass {
   .g-swap > * {
     transform: none !important;
   }
-  .effort-tone,
-  .liquid-text {
+  .effort-tone {
     transition: none;
     animation: none;
   }
-  .g-push {
-    transition: opacity var(--dur-1) var(--ease-out);
+  .g-drawer {
+    transition-duration: var(--dur-1);
   }
-  .g-push[data-at="off"],
-  .g-push[data-at="under"] {
+  .g-dialog[data-starting-style],
+  .g-dialog[data-ending-style] {
     transform: none;
-    opacity: 0;
   }
   html[data-turn] {
     --turn-in: 0px;

@@ -2,7 +2,8 @@
 // blocks as fetched, paged back as you scroll up, the drafts after them, and what you sent that the
 // transcript has yet to bring. Those seen lately stay in memory, up to KEPT_BLOCKS blocks in all, so
 // going back to one draws it at once and fetches only what came since. Also what is fetched ahead
-// (plan "弱网"): a row the mouse rests on, and a session whose turn ends off screen.
+// (plan "弱网"): a row the mouse rests on, a session whose turn ends off screen, and those the page
+// warms of its own (src/warm.ts picks them): each one's newest page, held apart till it is visited.
 import { api } from "./api/client";
 import type { Block, DraftEvent, MessagePage, Session } from "./api/types.gen";
 
@@ -72,6 +73,9 @@ export class Messages {
   /** The last draft the transcript has: a piece of it that comes late (the stream batches drafts,
    *  the transcript may be read first) is not a new draft. */
   private gone = { proc: -1, n: -1 };
+  /** Whether the page before the newest is asked for ahead as it comes: not for a chat warmed
+   *  that may never be opened; once it is, scrolling up asks (older). */
+  back = true;
   /** The page before the one shown, asked for ahead, so scrolling up does not wait on it. */
   private ahead: { before: number; page: Promise<MessagePage> } | null = null;
   private prefetch() {
@@ -104,7 +108,7 @@ export class Messages {
       if (this.loaded) return this.newer(); // another came first
       Object.assign(this, { blocks: p.blocks, start: p.start, end: p.end, more: p.more, loaded: true });
       this.took(p.blocks, false);
-      this.prefetch();
+      if (this.back) this.prefetch();
       return;
     }
     for (;;) {
@@ -283,6 +287,13 @@ export function chatOf(id: string): Chat {
     it = early.it;
     early = undefined;
   }
+  const w = !it ? warm.get(id) : undefined;
+  if (w) {
+    it = w.it;
+    warm.delete(id);
+    w.mine = true;
+    it.log.back = true;
+  }
   it ??= newChat(id);
   kept.delete(id);
   kept.set(id, it);
@@ -296,7 +307,7 @@ export function chatOf(id: string): Chat {
   return it;
 }
 
-export const peekChat = (id: string) => kept.get(id) ?? (early?.id === id ? early.it : undefined);
+export const peekChat = (id: string) => kept.get(id) ?? (early?.id === id ? early.it : undefined) ?? warm.get(id)?.it;
 export const keptChats = () => [...kept.values()];
 
 /** Whether the browser asks to save data: then nothing is fetched ahead. */
@@ -308,7 +319,7 @@ export const mayPrefetch = (nav: Navigator = navigator) => !(nav as Navigator & 
 let pressed: Promise<void> | undefined;
 export function ahead(id: string, press = false): void {
   if (!mayPrefetch() || pressed) return;
-  if (!kept.has(id) && early?.id !== id) {
+  if (!kept.has(id) && early?.id !== id && !warm.has(id)) {
     behind();
     const stop = new AbortController();
     let signal: AbortSignal | undefined = stop.signal;
@@ -354,3 +365,61 @@ export function watchTurns(list: Session[] | undefined, was: Map<string, string>
 /** Whether a message you sent failed and waits to be tried again, in any chat kept: one loading the
  *  page again would lose (src/upgrade.ts). */
 export const anyUnsent = () => [...kept.values()].some((c) => c.log.sent.some((s) => s.failed !== undefined));
+
+/** A chat the page warms of its own (src/warm.ts): seen, the session's updatedAt as its page was
+ *  last asked for (a later one: more to fetch); mine, visited (kept now): its fetches are no longer
+ *  low and stop with nothing. */
+type Warm = { it: Chat; stop: AbortController; seen: number; mine: boolean };
+const warm = new Map<string, Warm>();
+/** The sessions to warm, first first, with their updatedAt. */
+let wanted: [string, number][] = [];
+let pumping = false;
+
+/** The chats warmed now, first first (for tests). */
+export const warmed = () => [...warm.keys()];
+
+/** Warms these sessions' chats (id → updatedAt), first first, one fetch at a time, low: the newest
+ *  page of one not yet held, what came since of one held whose session changed. Those warmed and
+ *  not wanted go, stopped if still coming; those kept or fetched ahead are left as they are. */
+export function warmTo(want: Map<string, number>): void {
+  wanted = [...want];
+  for (const [id, w] of warm) {
+    if (want.has(id)) continue;
+    w.stop.abort();
+    warm.delete(id);
+  }
+  for (const [id] of wanted) {
+    if (warm.has(id) || kept.has(id) || early?.id === id) continue;
+    const w = { stop: new AbortController(), seen: -1, mine: false } as Warm;
+    w.it = newChat(id, (sid, q) => api.messages(sid, q, w.mine ? undefined : ({ signal: w.stop.signal, priority: "low" } as RequestInit)));
+    w.it.log.back = false;
+    warm.set(id, w);
+  }
+  void pump();
+}
+
+async function pump() {
+  if (pumping) return;
+  pumping = true;
+  try {
+    for (;;) {
+      if (!mayPrefetch() || (typeof document !== "undefined" && document.hidden)) return;
+      const next = wanted.find(([id, at]) => {
+        const w = warm.get(id);
+        return w && !w.it.coming && at > w.seen;
+      });
+      if (!next) return;
+      const [id, at] = next;
+      const w = warm.get(id)!;
+      w.seen = at;
+      const it = w.it;
+      it.coming = it.log
+        .newer()
+        .catch(() => {})
+        .finally(() => (it.coming = undefined));
+      await it.coming;
+    }
+  } finally {
+    pumping = false;
+  }
+}

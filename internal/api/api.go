@@ -356,8 +356,8 @@ type DraftEvent struct {
 	// Done: the draft is whole, no more text comes to it; its words come in the transcript.
 	Done bool `json:"done,omitempty"`
 	// Tool: a tool call being written, not words (user 2026-11-06: no blank while a long command
-	// is written): Text is its input's JSON so far, cut anywhere. Sent with the draft's first
-	// piece; sealed as the call is whole, the transcript then has it by its ID.
+	// is written): Text is its input's JSON so far, cut anywhere. Sent with every piece, so a
+	// stream opened mid-call knows it; sealed as the call is whole, the transcript then has it by its ID.
 	Tool *DraftTool `json:"tool,omitempty"`
 }
 

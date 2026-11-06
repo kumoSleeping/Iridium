@@ -13,7 +13,7 @@ import { useAgent, useSettings } from "../data";
 import { t, useLang } from "../i18n";
 import { useContextState, useQuota } from "../store";
 import { errText, toast } from "../toast";
-import { ago, cn, PopSurface, Switch, Tip, useMinute } from "../ui";
+import { ago, cn, PopSurface, Tip, useMinute } from "../ui";
 import { EffortSlider, levelName } from "./effort";
 import { modeName } from "../modes";
 import { quotaKey, windowName } from "../quota";
@@ -405,21 +405,25 @@ export function ModelKey({ s, open, onOpenChange }: { s: LiveSession; open?: boo
     }
   };
   const ultraTip = ultra && `UltraCode · ${!ultra.available ? t(ultraOn ? "composer.ultracodeIdle" : "composer.ultracodeUnavailable") : t("composer.ultracodeHint")}`;
+  // UltraCode: one key, its mark, pressed or not (the user, 2026-11-06); lit warm when on.
   const ultraKey = ultra && (
     <Tip label={ultraTip}>
-      <span className="flex shrink-0 items-center gap-1.5">
-        <Workflow size={14} aria-hidden className={cn("shrink-0", ultraOn ? "text-ink-2" : "text-ink-4")} />
-        <Switch on={ultraOn} disabled={!ultra.available && !ultraOn} label={t("composer.ultracode")} onChange={(on) => void flip(on)} className="liquid" />
-      </span>
+      <button
+        type="button"
+        aria-pressed={ultraOn}
+        aria-label={t("composer.ultracode")}
+        disabled={!ultra.available && !ultraOn}
+        onClick={() => void flip(!ultraOn)}
+        className={cn("g-press grid size-7 shrink-0 place-items-center rounded-md transition-colors duration-(--dur-2) disabled:opacity-40 pointer-coarse:size-10", ultraOn ? "bg-fill text-[#ff4a17] hover:bg-fill-2" : "text-ink-4 hover:bg-fill hover:text-ink-2")}
+      >
+        <Workflow size={16} aria-hidden className={cn("transition-transform duration-(--dur-2) ease-(--ease-spring)", ultraOn && "scale-110")} />
+      </button>
     </Tip>
   );
   // UltraCode on: said in words beside the level too (the user, 2026-11-06); on but not in effect
   // (this model cannot run it), muted.
   const ultraTag = ultraOn && (
-    <span className="g-fade flex items-baseline gap-1.5 text-xs font-medium">
-      <span className={ultra?.active || ultra?.available ? "liquid-text" : "text-ink-4"}>UltraCode</span>
-      <span aria-hidden className="text-ink-4">·</span>
-    </span>
+    <span className={cn("g-fade text-xs font-medium", ultra?.active || ultra?.available ? "text-[#ff4a17]" : "text-ink-4")}>UltraCode</span>
   );
   return (
     <Menu.Root open={open} onOpenChange={onOpenChange}>

@@ -1,5 +1,5 @@
 // The script half of the motion system (motion.css has the tokens and the CSS gestures): FLIP for rows
-// that move or appear, the push of a sent message, and the quick swap between two chats. All read
+// that move or appear, a sent message rising in, and the quick swap between two chats. All read
 // their timings from the CSS tokens and move only transform and opacity; with reduced motion they
 // fall back to a short fade.
 import { useLayoutEffect, useRef, type RefObject } from "react";
@@ -88,19 +88,14 @@ export function useGlide(ref: RefObject<HTMLElement | null>) {
   }, [ref]);
 }
 
-/** Send: the new bubble at the bottom, the conversation pushed up by it, as a chat app does; the
- *  bubble fades in as it comes up. column: what holds the conversation, the bubble in it. */
-export function pushIn(bubble: HTMLElement, column: HTMLElement) {
+/** Send: the new bubble fades in as it comes up; the conversation pushed up by it, as a chat app
+ *  does, is the chat's glide (chat/stick.tsx), as for anything else that comes at the end. */
+export function pushIn(bubble: HTMLElement) {
   if (reduced()) {
     bubble.animate([{ opacity: 0 }, { opacity: 1 }], { duration: motion.dur(1) });
     return;
   }
-  const gap = parseFloat(getComputedStyle(column).rowGap) || 0;
-  const by = bubble.offsetHeight + gap;
-  const dur = motion.dur(3);
-  const ease = motion.ease("out");
-  column.animate([{ transform: `translateY(${by}px)` }, { transform: "none" }], { duration: dur, easing: ease });
-  bubble.animate([{ opacity: 0, transform: "translateY(6px) scale(0.98)" }, { opacity: 1, transform: "none" }], { duration: dur, easing: ease, delay: motion.dur(1) / 2, fill: "backwards" });
+  bubble.animate([{ opacity: 0, transform: "translateY(6px) scale(0.98)" }, { opacity: 1, transform: "none" }], { duration: motion.dur(3), easing: motion.ease("out"), delay: motion.dur(1) / 2, fill: "backwards" });
 }
 
 /** How long a turn waits for the next chat's newest page, if it has not come yet: its page is drawn

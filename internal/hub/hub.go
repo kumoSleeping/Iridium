@@ -97,15 +97,16 @@ func (h *Hub) Draft(session string, proc, n int, text string) {
 	}
 }
 
-// DraftTool starts draft n of session's process proc as the tool call id, name being written;
-// its input comes in Draft pieces.
-func (h *Hub) DraftTool(session string, proc, n int, id, name string) {
+// DraftTool appends text, a piece of its input's JSON, to draft n of session's process proc, the
+// tool call id, name being written (text "" as it starts). Every piece says its call: a stream
+// opened mid-call, or a chat opened then, would take the rest for the agent's words.
+func (h *Hub) DraftTool(session string, proc, n int, id, name, text string) {
 	key := "session:" + session
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	for s := range h.subs {
 		if s.wants[key] {
-			s.draft(api.DraftEvent{Session: session, Proc: proc, N: n, Tool: &api.DraftTool{ID: id, Name: name}})
+			s.draft(api.DraftEvent{Session: session, Proc: proc, N: n, Text: text, Tool: &api.DraftTool{ID: id, Name: name}})
 		}
 	}
 }

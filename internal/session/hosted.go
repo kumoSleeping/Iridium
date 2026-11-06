@@ -113,6 +113,7 @@ type Hosted struct {
 	turnFrom  string // who began the running turn
 	draftN    int
 	toolDraft string        // the tool call draft draftN is being written as, if one is
+	toolName  string        // its tool's name
 	ready     chan struct{} // closed once the process said its use so far (attached)
 	base      *agent.Usage  // the session's use as of the last result, for each turn's share
 	file      *transcript.File
@@ -553,17 +554,17 @@ func (h *Hosted) onEvent(e agent.Event) {
 	case agent.ToolDraft:
 		// A call being written: a draft of its own, its input JSON as the text.
 		n := h.draftN
-		h.toolDraft = e.ID
+		h.toolDraft, h.toolName = e.ID, e.Name
 		h.mu.Unlock()
 		if !replay {
-			h.m.o.Hub.DraftTool(h.id, proc, n, e.ID, e.Name)
+			h.m.o.Hub.DraftTool(h.id, proc, n, e.ID, e.Name, "")
 		}
 		return
 	case agent.ToolDraftDelta:
-		n, open := h.draftN, h.toolDraft != ""
+		n, id, name := h.draftN, h.toolDraft, h.toolName
 		h.mu.Unlock()
-		if open && !replay {
-			h.m.o.Hub.Draft(h.id, proc, n, e.JSON)
+		if id != "" && !replay {
+			h.m.o.Hub.DraftTool(h.id, proc, n, id, name, e.JSON)
 		}
 		return
 	case agent.ToolStart:
