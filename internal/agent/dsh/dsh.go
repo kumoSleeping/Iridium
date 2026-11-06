@@ -56,7 +56,7 @@ const (
 // Models are the official models dsh-llm-deepseek's catalog names (DEFAULT_MODELS).
 var Models = []agent.Model{
 	{Value: "deepseek-flash", Name: "DeepSeek-V4.1-Flash", Efforts: Efforts},
-	{Value: "deepseek-v4-pro", Name: "DeepSeek-V4-Pro", Description: "Stronger agentic coding, knowledge, and difficult reasoning; higher cost.", Efforts: Efforts},
+	{Value: "deepseek-v4-pro", Name: "DeepSeek-V4-Pro", Efforts: Efforts},
 }
 
 // Commands are the slash commands the sdk server runs itself (session/query).

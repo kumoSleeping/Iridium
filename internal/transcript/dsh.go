@@ -119,10 +119,14 @@ func dshBlocks(off int64, raw []byte, max int, sources Sources) []api.Block {
 			return
 		}
 		b := api.Block{Kind: api.BlockKindUser, Text: text, ID: id}
-		if sources != nil && id != "" {
-			if terminal, tag, ok := sources(id); ok {
+		if sources != nil {
+			if terminal, tag, ok := sources(id); ok && id != "" {
 				b.From, b.FromTerminal = tag, terminal
 				b.Text = strings.TrimPrefix(text, "["+tag+"] ")
+			} else if s := piSource.FindStringSubmatch(text); s != nil {
+				// dsh gives a prompt an id of its own (session/prompt takes none), so an id of
+				// Iridium's is seldom here: the tag Iridium wrote before it tells, as with pi.
+				b.From, b.Text = s[1], text[len(s[0]):]
 			}
 		}
 		if b.From == api.SourceIridium {
@@ -150,8 +154,7 @@ func dshBlocks(off int64, raw []byte, max int, sources Sources) []api.Block {
 		}
 		user(line, d.CommandID)
 	case "command/done":
-		// The answers of the mode commands left out above (dsh 0.2.2: "preset <name>", "Plan mode
-		// on. ...", "Plan mode off.").
+		// The answers of the mode commands left out above (modeAnswer).
 		if modeAnswer.MatchString(d.Text) {
 			break
 		}
@@ -231,8 +234,10 @@ func dshArguments(raw json.RawMessage) string {
 	return s
 }
 
-// modeAnswer: what dsh answers /permission and /plan with.
-var modeAnswer = regexp.MustCompile(`^(preset (read-only|workspace-write|danger-full-access)|Plan mode (on|off)\b.*)$`)
+// modeAnswer: what dsh answers /permission and /plan with (dsh 0.2.2: "preset <name>", "Plan mode
+// on. ...", "Plan mode off.", "Plan mode is already inactive.", "Plan mode entry cancelled.",
+// "Entering plan mode ...", "Leaving plan mode ...").
+var modeAnswer = regexp.MustCompile(`^(preset (read-only|workspace-write|danger-full-access)|(Plan mode|Entering plan mode|Leaving plan mode)\b.*)$`)
 
 // leadTag: Iridium's "[tag] " at the head of a message, which dsh's fallback title (the first
 // message as written) keeps.

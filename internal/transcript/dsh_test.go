@@ -149,6 +149,25 @@ func TestDshEvents(t *testing.T) {
 	}
 }
 
+// What Iridium sent: dsh gives a prompt an id of its own, so its tag tells who sent it; and the
+// answers to the mode commands the driver runs at every start are not shown.
+func TestDshSourceAndModes(t *testing.T) {
+	none := func(string) (string, string, bool) { return "", "", false }
+	b := Dsh(1, []byte(`{"type":"user/message","seq":1,"time":5,"data":{"content":[{"text":"[kumo] 你好","type":"text"}],"source":{"kind":"user"},"role":"user","id":"f4771296"}}`), Clip, none)
+	if len(b) != 1 || b[0].From != "kumo" || b[0].Text != "你好" {
+		t.Errorf("tagged: %+v", b)
+	}
+	for _, text := range []string{"preset danger-full-access", "Plan mode off.", "Plan mode is already inactive.", "Plan mode entry cancelled.", "Leaving plan mode (applies from the next step).", "Entering plan mode (applies from the next step). Use /plan off to leave."} {
+		line := `{"type":"command/done","seq":1,"time":5,"data":{"commandId":"c","kind":"success","text":"` + text + `"}}`
+		if b := Dsh(1, []byte(line), Clip, nil); len(b) != 0 {
+			t.Errorf("%q: %+v", text, b)
+		}
+	}
+	if b := Dsh(1, []byte(`{"type":"command/done","seq":1,"time":5,"data":{"commandId":"c","kind":"success","text":"Goal set."}}`), Clip, nil); kindsOf(b) != "system:local_command" {
+		t.Errorf("another answer: %+v", b)
+	}
+}
+
 // A dsh file is read as dsh writes it: frame by frame, the last one possibly half there.
 func TestDshIncremental(t *testing.T) {
 	src, _ := FindDsh(dshHome, "sess-allow")

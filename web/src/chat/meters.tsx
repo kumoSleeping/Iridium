@@ -425,10 +425,8 @@ export function ModelKey({ s, open, onOpenChange }: { s: LiveSession; open?: boo
                 {models.map((m, i) => (
                   // A pick closes the menu (Base UI keeps a radio item's open by default).
                   <Menu.RadioItem key={m.value} value={m.value} closeOnClick style={{ "--i": i } as CSSProperties} className="flex min-h-8 cursor-default items-center gap-2.5 rounded-md pr-2 pl-2.5 text-base outline-none select-none data-highlighted:bg-fill pointer-coarse:min-h-11">
-                    <span className="flex min-w-0 flex-1 flex-col py-1">
-                      <span className="truncate">{m.name}</span>
-                      {m.description && <span className="truncate text-xs text-ink-3">{m.description}</span>}
-                    </span>
+                    {/* The name alone: no model's blurb under it (the user, 2026-11-06). */}
+                    <span className="min-w-0 flex-1 truncate py-1">{m.name}</span>
                     <Menu.RadioItemIndicator className="text-ink">
                       <Check size={14} />
                     </Menu.RadioItemIndicator>
