@@ -97,36 +97,46 @@ export function Sheet({ open, setOpen, size, from: zone, label, onHeight, childr
     const height = () => panel.current?.offsetHeight || innerHeight / 2;
     // The least it may be made: its grip and the sidebar's head, over the window's safe foot.
     const minH = () => HEAD + (panel.current ? parseFloat(getComputedStyle(panel.current).paddingBottom) || 0 : 0);
-    const start = (e: TouchEvent) => {
-      const p = e.touches[0];
-      const el = e.target as Element | null;
-      if (e.touches.length !== 1 || !p || !el?.closest) return;
+    // A finger, or a mouse (a computer's window as narrow as a phone's): the mouse only drags the
+    // grip or the head of a sheet that is out, not a swipe up to bring one.
+    const begin = (x: number, y: number, t: number, el: Element | null, mouse: boolean) => {
+      if (!el?.closest) return;
       const { open } = now.current;
       if (open) {
         const box = panel.current?.getBoundingClientRect();
-        if (!box || !panel.current!.contains(el) || p.clientY - box.top > HEAD) return;
+        if (!box || !panel.current!.contains(el) || y - box.top > HEAD) return;
       } else {
-        if (el.closest("textarea, input, [role=listbox], [role=dialog], [role=menu]") || !now.current.zone(p.clientX)) return;
+        if (mouse || el.closest("textarea, input, [role=listbox], [role=dialog], [role=menu]") || !now.current.zone(x)) return;
         // In the conversation: only at rest at its newest, no words chosen.
         const log = el.closest<HTMLElement>("[role=log]");
         if (log ? !restsAtEnd(log) || !getSelection()?.isCollapsed : !el.closest(`[${PULL}]`)) return;
       }
-      from = { x: p.clientX, y: p.clientY, t: e.timeStamp, open, h: height(), log: !open && !!el.closest("[role=log]") };
+      from = { x, y, t, open, h: height(), log: !open && !!el.closest("[role=log]") };
       mine = false;
-      last = { y: p.clientY, t: e.timeStamp, v: 0 };
+      last = { y, t, v: 0 };
     };
-    const move = (e: TouchEvent) => {
+    const start = (e: TouchEvent) => {
       const p = e.touches[0];
-      if (!from || !p) return;
-      const dy = p.clientY - from.y;
+      if (e.touches.length !== 1 || !p) return;
+      begin(p.clientX, p.clientY, e.timeStamp, e.target as Element | null, false);
+    };
+    // Whether it went the sheet's way: then the event is its own (no scroll, no words chosen).
+    const step = (x: number, y: number, t: number) => {
+      if (!from) return false;
+      const dy = y - from.y;
       if (!mine) {
-        const dx = Math.abs(p.clientX - from.x);
-        if (from.log && e.timeStamp - from.t > LOG.HOLD) return void (from = null);
-        if (Math.abs(dy) < 8) return;
-        if (Math.abs(dy) < dx * (from.log ? 1.5 : 1.2) || (from.open ? dy < 0 && now.current.size !== "half" : dy > 0)) return void (from = null);
+        const dx = Math.abs(x - from.x);
+        if (from.log && t - from.t > LOG.HOLD) {
+          from = null;
+          return false;
+        }
+        if (Math.abs(dy) < 8) return false;
+        if (Math.abs(dy) < dx * (from.log ? 1.5 : 1.2) || (from.open ? dy < 0 && now.current.size !== "half" : dy > 0)) {
+          from = null;
+          return false;
+        }
         mine = true;
       }
-      if (e.cancelable) e.preventDefault();
       if (from.log) {
         travel = Math.max(0, -dy - LOG.DEAD);
         at = Math.min(1, (travel * LOG.RESIST) / from.h);
@@ -139,8 +149,13 @@ export function Sheet({ open, setOpen, size, from: zone, label, onHeight, childr
         setLive(tall);
         at = Math.min(1, Math.max(0, want / base));
       } else at = Math.min(1, Math.max(0, (from.open ? from.h - dy : -dy) / from.h));
-      last = { y: p.clientY, t: e.timeStamp, v: (p.clientY - last.y) / Math.max(1, e.timeStamp - last.t) };
+      last = { y, t, v: (y - last.y) / Math.max(1, t - last.t) };
       setDrag(at);
+      return true;
+    };
+    const move = (e: TouchEvent) => {
+      const p = e.touches[0];
+      if (p && step(p.clientX, p.clientY, e.timeStamp) && e.cancelable) e.preventDefault();
     };
     const end = () => {
       if (from && mine) {
@@ -171,15 +186,51 @@ export function Sheet({ open, setOpen, size, from: zone, label, onHeight, childr
       from = null;
       mine = false;
     };
+    // The mouse: no words chosen while it drags, and no click where it is let go.
+    let pressed = false;
+    const mdown = (e: PointerEvent) => {
+      if (e.pointerType !== "mouse" || e.button !== 0) return;
+      begin(e.clientX, e.clientY, e.timeStamp, e.target as Element | null, true);
+      pressed = !!from;
+    };
+    const mmove = (e: PointerEvent) => {
+      if (!pressed) return;
+      if (step(e.clientX, e.clientY, e.timeStamp)) {
+        e.preventDefault();
+        getSelection()?.removeAllRanges();
+        document.documentElement.style.userSelect = "none";
+      } else if (!from) pressed = false;
+    };
+    const noClick = (e: MouseEvent) => (e.stopPropagation(), e.preventDefault());
+    const mup = () => {
+      if (!pressed) return;
+      pressed = false;
+      if (mine) {
+        addEventListener("click", noClick, { capture: true, once: true });
+        setTimeout(() => removeEventListener("click", noClick, true), 0);
+      }
+      document.documentElement.style.userSelect = "";
+      end();
+    };
     addEventListener("touchstart", start, { passive: true });
     addEventListener("touchmove", move, { passive: false });
     addEventListener("touchend", end);
     addEventListener("touchcancel", end);
+    addEventListener("pointerdown", mdown);
+    addEventListener("pointermove", mmove);
+    addEventListener("pointerup", mup);
+    addEventListener("pointercancel", mup);
     return () => {
       removeEventListener("touchstart", start);
       removeEventListener("touchmove", move);
       removeEventListener("touchend", end);
       removeEventListener("touchcancel", end);
+      removeEventListener("pointerdown", mdown);
+      removeEventListener("pointermove", mmove);
+      removeEventListener("pointerup", mup);
+      removeEventListener("pointercancel", mup);
+      removeEventListener("click", noClick, true);
+      document.documentElement.style.userSelect = "";
     };
   }, []);
 
