@@ -21,7 +21,7 @@ import { folderLevels, sessionLevels, usePushMenus, wsLevels, type PushLevel } f
 import type { Folder as FolderNode, Tree, WsNode } from "./tree";
 import { errText, toast } from "./toast";
 import { useMe, useSaidLine, useUpdate } from "./data";
-import { agentName, ago, cn, fine, IconKey, keep, kept, Lamp, lampOf, Logo, sessionStatusText, statusText, tilde, Tip, titleOf, useLongPress, useMinute } from "./ui";
+import { agentName, ago, cn, fine, IconKey, IrMark, keep, kept, Lamp, lampOf, Logo, sessionStatusText, statusText, tilde, Tip, titleOf, useLongPress, useMinute } from "./ui";
 import { SESSION_DRAG } from "./chat/refs";
 import { useUnread } from "./unread";
 
@@ -163,6 +163,11 @@ export function Sidebar(p: Props) {
 
   const head = (
     <div className={cn("flex shrink-0 items-center gap-0.5 px-2", p.phone ? "glass absolute inset-x-0 top-0 z-20 h-11 shadow-[0_0.5px_0_var(--edge)]" : "h-12")}>
+      {/* The name at the left, the keys at the right (the user, 2026-11-06). */}
+      <span className="flex min-w-0 flex-1 items-center gap-2 pl-2 select-none">
+        <IrMark size={18} className="text-ink" />
+        <span className="truncate text-base font-semibold tracking-[-0.01em]">Iridium</span>
+      </span>
       {p.createKey(
         <button type="button" aria-label={t("nav.newWorkspace")} className="g-press grid size-8 place-items-center rounded-md text-ink-2 hover:bg-fill hover:text-ink data-popup-open:bg-fill pointer-coarse:size-10">
           <Plus size={18} />

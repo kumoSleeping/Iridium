@@ -328,7 +328,8 @@ function Bar({ s, phone, onSheet, onMe }: { s?: Session; phone: boolean; onSheet
                   user, 2026-11-06). Its tap area wider than it, the bar not moved. */}
               {onSheet ? (
                 <button type="button" aria-label={t("nav.sidebar")} onClick={onSheet} className="g-press -m-2 grid place-items-center rounded-md p-2 hover:bg-fill">
-                  <LogoLamp agent={s.agent} status={lampOf(s)} size={18} />
+                  {/* Iridium's mark, not the agent's (the user, 2026-11-06): it opens the list. */}
+                  <LogoLamp agent={s.agent} status={lampOf(s)} size={18} ir />
                 </button>
               ) : (
                 <span className="grid">

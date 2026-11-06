@@ -25,7 +25,7 @@ import { useConfirms, useList } from "./store";
 import { follow } from "./stream";
 import { ToastList, toasts } from "./toast";
 import { buildTree, flat } from "./tree";
-import { cn, kept, keep, params, PHONE, useMedia, useMinute } from "./ui";
+import { cn, IrMark, kept, keep, params, PHONE, useMedia, useMinute } from "./ui";
 import { watchUnread } from "./unread";
 import { warmUp } from "./warm";
 
@@ -316,10 +316,7 @@ export function App() {
 function Empty({ below }: { below: number }) {
   return (
     <div className="grid h-full place-items-center transition-[padding] duration-(--dur-3) ease-(--ease-out)" style={{ paddingBottom: below }} aria-hidden>
-      <svg viewBox="0 0 64 64" width="44" height="44" className="text-fill-2">
-        <rect width="64" height="64" rx="14" fill="currentColor" />
-        <path d="M20 18h6v28h-6zM32 28h5.6v3.2c1.4-2.4 3.6-3.6 6.4-3.6v5.8c-3.8 0-6.2 1.6-6.2 6V46H32z" fill="var(--paper)" />
-      </svg>
+      <IrMark size={44} className="text-fill-2" />
     </div>
   );
 }

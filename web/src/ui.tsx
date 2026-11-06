@@ -230,11 +230,22 @@ export function Lamp({ status }: { status: Status }) {
   return <span key={status} className="row-lamp g-pop" data-s={LAMP[status]} role="img" aria-label={statusText(status)} />;
 }
 
-/** A logo with its status lamp on the bottom-right corner; idle has none. */
-export function LogoLamp({ agent, status, size = 16 }: { agent: Agent; status: Status; size?: number }) {
+/** Iridium's own mark: "Ir" on a rounded square, in ink (or the colour given). */
+export function IrMark({ size = 16, className, ground = "currentColor" }: { size?: number; className?: string; ground?: string }) {
+  return (
+    <svg viewBox="0 0 64 64" width={size} height={size} className={cn("shrink-0", className)} aria-hidden>
+      <rect width="64" height="64" rx="14" fill={ground} />
+      <path d="M20 18h6v28h-6zM32 28h5.6v3.2c1.4-2.4 3.6-3.6 6.4-3.6v5.8c-3.8 0-6.2 1.6-6.2 6V46H32z" fill="var(--paper)" />
+    </svg>
+  );
+}
+
+/** A logo with its status lamp on the bottom-right corner; idle has none. ir: Iridium's mark in
+ *  the agent's place (the phone's key to the session list). */
+export function LogoLamp({ agent, status, size = 16, ir }: { agent: Agent; status: Status; size?: number; ir?: boolean }) {
   return (
     <span className="relative inline-grid shrink-0 place-items-center" style={{ width: size, height: size }}>
-      <Logo agent={agent} size={size} />
+      {ir ? <IrMark size={size} className="text-ink" /> : <Logo agent={agent} size={size} />}
       {status !== "idle" && (
         <span key={status} className="lamp g-pop" data-s={LAMP[status]} role="img" aria-label={statusText(status)}>
           <i />
