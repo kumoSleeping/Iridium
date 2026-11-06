@@ -1,10 +1,10 @@
 // The sidebar's shape (plan "会话", "网页"): workspace → folder → session. A folder is a session's
-// directory under its workspace's root; one with a single session is not shown, the session sitting
-// in its place. Sessions keep the list's order (pinned first, then the latest); folders follow the
-// sessions at the root, by their latest session. Sessions in no workspace go under 未归类; archived
+// directory under its workspace's root, shown even with one session in it: only those at the root
+// sit right under the workspace (the user, 2026-11-06). Sessions keep the list's order (pinned
+// first, then the latest); folders follow the sessions at the root, by their latest session. Sessions in no workspace go under 未归类; archived
 // ones (no shown marker) only under 归档; those that wait on you only in 需要你, back in their place
 // once answered (the user's decision, 2026-11-05). A session's row says its folder where the tree does
-// not: one in a folder of one, and those under 需要你 and 归档, out of their place (2026-11-05).
+// not: those under 需要你 and 归档, out of their place (2026-11-05).
 // A subagent is no row of its own, nor in any folder: it sits under the session that started it,
 // and only while it works; done, it is gone, as Claude Code lets it go (the user, 2026-11-06).
 import type { Workspace } from "./api/types.gen";
@@ -83,14 +83,8 @@ export function buildTree(all: Session[], workspaces: Workspace[], unsorted: str
       if (!f) folders.set(r, (f = { key: `${key}/${r}`, name: r, path: under(s.cwd, root) ? s.cwd : r, sessions: [] }));
       f.sessions.push(s);
     }
-    const multi: Folder[] = [];
-    // A folder of one: its session in the list's order among the root's.
-    const single = new Set<string>();
-    for (const f of folders.values()) if (f.sessions.length === 1) (single.add(f.sessions[0]!.id), where.set(f.sessions[0]!.id, id === 0 ? f.path : f.name));
-    const ordered = sessions.filter((s) => rows.some((r) => r.kind === "session" && r.s === s) || single.has(s.id)).map((s): Row => ({ kind: "session", s }));
-    for (const f of folders.values()) if (f.sessions.length > 1) multi.push(f);
-    multi.sort((a, b) => latest(b) - latest(a));
-    return { key, id, name, root, rows: [...ordered, ...multi.map((f): Row => ({ kind: "folder", f }))], count: sessions.length };
+    const sub = [...folders.values()].sort((a, b) => latest(b) - latest(a));
+    return { key, id, name, root, rows: [...rows, ...sub.map((f): Row => ({ kind: "folder", f }))], count: sessions.length };
   };
   // A workspace with no session yet shows too: one was just made.
   const nodes = workspaces.map((w) =>node(`w${w.id}`, w.id, w.name, w.path, byWs.get(w.id) ?? []));

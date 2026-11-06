@@ -127,26 +127,27 @@ describe("buildTree", () => {
     { id: 1, name: "Iridium", path: "/w/ir" },
     { id: 2, name: "Empty", path: "/w/empty" },
   ];
-  test("workspace → folder → session; a folder of one is not shown; 未归类 named from its common folder; one that needs you only in 需要你", () => {
+  test("workspace → folder → session; a folder of one shown too; 未归类 named from its common folder; one that needs you only in 需要你", () => {
     const list = [S("a", "/w/ir", { workspace: 1 }), S("b", "/w/ir/web", { workspace: 1, updatedAt: 5 }), S("c", "/w/ir/web", { workspace: 1 }), S("d", "/w/ir/docs", { workspace: 1 }), S("e", "/w/x/one"), S("f", "/w/x/two"), S("g", "/w/x/two", { archived: true }), S("h", "/w/ir", { workspace: 1, status: "waiting" })];
     const t = buildTree(list, ws, "未归类");
     expect(t.workspaces.map((w) => w.name)).toEqual(["Iridium", "Empty", "未归类"]);
     const ir = t.workspaces[0]!;
-    expect(ir.rows.map((r) => (r.kind === "session" ? r.s.id : `[${r.f.name}:${r.f.sessions.map((s) => s.id)}]`))).toEqual(["a", "d", "[web:b,c]"]);
+    expect(ir.rows.map((r) => (r.kind === "session" ? r.s.id : `[${r.f.name}:${r.f.sessions.map((s) => s.id)}]`))).toEqual(["a", "[web:b,c]", "[docs:d]"]);
     expect(t.workspaces[1]!.rows).toEqual([]);
     expect(t.workspaces[2]!.root).toBe("/w/x");
     expect(t.archived.map((s) => s.id)).toEqual(["g"]);
     expect(t.needs.map((s) => s.id)).toEqual(["h"]);
-    expect(flat(t).map((s) => s.id)).toEqual(["h", "a", "d", "b", "c", "e", "f"]);
+    expect(t.workspaces[2]!.rows.map((r) => (r.kind === "session" ? r.s.id : `[${r.f.name}:${r.f.sessions.map((s) => s.id)}]`))).toEqual(["[one:e]", "[two:f]"]);
+    expect(flat(t).map((s) => s.id)).toEqual(["h", "a", "b", "c", "d", "e", "f"]);
     // Answered, it is back in its place.
     const back = buildTree(list.map((s) => (s.id === "h" ? { ...s, status: "idle" as const } : s)), ws, "未归类");
     expect(back.needs).toEqual([]);
-    expect(back.workspaces[0]!.rows.map((r) => (r.kind === "session" ? r.s.id : r.f.name))).toEqual(["a", "d", "h", "web"]);
+    expect(back.workspaces[0]!.rows.map((r) => (r.kind === "session" ? r.s.id : r.f.name))).toEqual(["a", "h", "web", "docs"]);
   });
   test("where: the folder a row says, where the tree does not", () => {
     const list = [S("a", "/w/ir", { workspace: 1 }), S("b", "/w/ir/web", { workspace: 1 }), S("c", "/w/ir/web", { workspace: 1 }), S("d", "/w/ir/docs", { workspace: 1 }), S("e", "/w/x/one"), S("f", "/w/x/two"), S("g", "/w/x/two", { archived: true }), S("h", "/w/ir/web", { workspace: 1, status: "waiting" }), S("i", "/w/ir", { workspace: 1, archived: true })];
     const t = buildTree(list, ws, "未归类");
-    expect(Object.fromEntries(t.where)).toEqual({ d: "docs", e: "/w/x/one", f: "/w/x/two", g: "two", h: "Iridium/web", i: "Iridium" });
+    expect(Object.fromEntries(t.where)).toEqual({ g: "two", h: "Iridium/web", i: "Iridium" });
   });
   test("a subagent: no row of its own, under the session that started it, and only at work", () => {
     const now = 10 * 60_000;
