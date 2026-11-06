@@ -257,7 +257,7 @@ ir revoke <名字>
 
 - 两个节点，同一台机器、两个账号（2026-11-06）：
   - 主节点（现在这个账号）：只跑 Release 版，`https://ir.kumo.ltd`、`127.0.0.1:7810`；只靠发版和设置里的“更新”升级，不推开发版。Claude（你本人的登录）只在这里。
-  - 测试节点（账号 `ir`）：`https://ir-test.kumo.ltd`、`127.0.0.1:7811`；`scripts/push-test.sh` 只构建工作区，第一次用 `iridium node new ir` 建好，之后 `iridium push` 推过去、重启。没有真的 Claude：Claude Code 接 DeepSeek；Codex 你自己登录。也用来开发节点功能。
+  - 测试节点（账号 `ir`）：`https://ir-test.kumo.ltd`、`127.0.0.1:7811`；`scripts/push-test.sh` 只构建工作区，第一次用 `iridium node new ir` 建好，之后 `iridium push` 推过去、重启。没有真的 Claude：Claude Code 接 DeepSeek（`deepseek-flash`，密钥在那边 `~/.config/deepseek/api-key`，由 `apiKeyHelper` 读）；Codex 你自己登录。`ir-test.kumo.ltd` 走主节点的隧道转到 7811，Passkey 门开着；测试由 agent 用无头浏览器和虚拟认证器登录，你不用去测。也用来开发节点功能。
 - 上公网前 Passkey 必须先做好。
 
 ## 开发
