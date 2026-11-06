@@ -10,20 +10,13 @@ import (
 // A subagent its parent starts while Iridium watches is listed at once, though Claude makes
 // <id>/subagents/ in one go, and goes in its parent's workspace wherever it works.
 func TestSubagentWatchedIntoItsParentsWorkspace(t *testing.T) {
+	t.Parallel()
 	r := newRig(t)
 	if err := r.x.Start(); err != nil {
 		t.Fatal(err)
 	}
 	defer r.x.Close()
-	wait := func(what string, ok func() bool) {
-		t.Helper()
-		for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
-			if ok() {
-				return
-			}
-		}
-		t.Fatalf("timed out: %s", what)
-	}
+	wait := r.wait
 	ws, err := r.x.CreateWorkspace("/w/c", "")
 	if err != nil {
 		t.Fatal(err)
@@ -50,20 +43,13 @@ func TestSubagentWatchedIntoItsParentsWorkspace(t *testing.T) {
 // whether Claude makes those directories in one go or one at a time, and the run's journal is
 // no session.
 func TestWorkflowAgentsWatched(t *testing.T) {
+	t.Parallel()
 	r := newRig(t)
 	if err := r.x.Start(); err != nil {
 		t.Fatal(err)
 	}
 	defer r.x.Close()
-	wait := func(what string, ok func() bool) {
-		t.Helper()
-		for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
-			if ok() {
-				return
-			}
-		}
-		t.Fatalf("timed out: %s", what)
-	}
+	wait := r.wait
 	r.grow(idC)
 	wait("C listed", func() bool { _, ok := r.sessions()[idC]; return ok })
 
@@ -116,6 +102,7 @@ func TestWorkflowAgentsWatched(t *testing.T) {
 
 // With subagents/workflows/ made empty first (no run yet), a run made in it later is still seen.
 func TestWorkflowDirMadeEmptyFirst(t *testing.T) {
+	t.Parallel()
 	r := newRig(t)
 	if err := r.x.Start(); err != nil {
 		t.Fatal(err)
@@ -136,10 +123,5 @@ func TestWorkflowDirMadeEmptyFirst(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(run, "agent-w3.jsonl"), b, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
-		if s := r.sessions()["agent-w3"]; s.Subagent && s.Parent == idC {
-			return
-		}
-	}
-	t.Fatal("timed out: the late run's agent")
+	r.wait("the late run's agent", func() bool { s := r.sessions()["agent-w3"]; return s.Subagent && s.Parent == idC })
 }

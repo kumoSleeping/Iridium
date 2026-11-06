@@ -64,7 +64,7 @@ func (cs *confirms) pruneLocked(now time.Time) bool {
 			c.state.State, c.ended = "expired", now
 			close(c.done)
 			changed = true
-		case c.state.State != "pending" && now.Sub(c.ended) > KeepAnswered:
+		case c.state.State != "pending" && c.state.State != "answering" && now.Sub(c.ended) > KeepAnswered:
 			delete(cs.all, id)
 		}
 	}

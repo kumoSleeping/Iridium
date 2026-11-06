@@ -179,6 +179,11 @@ export interface SessionState extends Session {
    * Ultracode: Claude's ultracode; absent for an agent without it.
    */
   ultracode?: Ultracode;
+  /**
+   * Next: its agent cleared itself (Claude's own /clear) and the conversation goes on in this
+   * session; this one is archived, as it was before. The page open on it follows.
+   */
+  next?: string;
 }
 /**
  * Ultracode is a Claude session's ultracode. On: asked for (what the switch shows); Active: asked
@@ -949,6 +954,10 @@ export interface Settings {
    * into the turn, Ctrl or ⌘+Enter queues them; "queue" the other way round.
    */
   enterInTurn: string;
+  /**
+   * UpdateAuto: a newer Iridium is downloaded as soon as it is seen, so 更新 only restarts.
+   */
+  updateAuto: boolean;
 }
 /**
  * SettingsPatch changes what it gives and nothing else. A mode "" goes back to the agent's own.
@@ -961,6 +970,7 @@ export interface SettingsPatch {
   modes?: { [key: string]: string};
   push?: boolean;
   enterInTurn?: string;
+  updateAuto?: boolean;
 }
 
 //////////
@@ -1207,6 +1217,19 @@ export interface UpdateState {
   notes?: string;
   available: boolean;
   source: boolean; // an update source is configured
+  /**
+   * Auto: a newer version is downloaded as soon as it is seen (settings 自动下载更新).
+   */
+  auto: boolean;
+  /**
+   * Ready: Latest is downloaded and checked; 更新 only swaps it in and restarts.
+   */
+  ready?: boolean;
+  /**
+   * Size is Latest's download in bytes (0 unknown); Got how much of it came, while downloading.
+   */
+  size?: number /* int64 */;
+  got?: number /* int64 */;
   checkedAt?: number /* int64 */; // ms
   /**
    * Phase: idle, checking, downloading, restarting or failed (Error says why).

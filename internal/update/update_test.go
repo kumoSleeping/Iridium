@@ -1,11 +1,15 @@
 package update
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -122,3 +126,66 @@ func TestApply(t *testing.T) {
 }
 
 func platform() string { return runtime.GOOS + "-" + runtime.GOARCH }
+
+// A GitHub release: the archive found by its name, its sum in SHA256SUMS, downloaded ahead with
+// auto on, so Apply only swaps it in.
+func TestGitHubAuto(t *testing.T) {
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "iridium")
+	os.WriteFile(exe, []byte("old"), 0o755)
+	archive := tarGz(t, "iridium", script("v1.3.0"))
+	name := "iridium-" + platform() + ".tar.gz"
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/o/r/releases/latest":
+			fmt.Fprintf(w, `{"tag_name":"v1.3.0","body":"notes\n<!-- iridium:assets -->\n| sizes |","assets":[
+				{"name":"%s","browser_download_url":"%s/dl/%s","size":%d},
+				{"name":"iridium-plan9-mips","browser_download_url":"%s/dl/x","size":1},
+				{"name":"SHA256SUMS","browser_download_url":"%s/dl/SHA256SUMS","size":1}]}`,
+				name, srv.URL, name, len(archive), srv.URL, srv.URL)
+		case "/dl/SHA256SUMS":
+			fmt.Fprintf(w, "%s  %s\n", sum(archive), name)
+		case "/dl/" + name:
+			w.Write(archive)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	if repo, ok := GitHubRepo("https://github.com/o/r/releases"); !ok || repo != "o/r" {
+		t.Fatalf("repo %q", repo)
+	}
+	restarts := 0
+	u := New(Options{Source: "github:o/r", GitHubAPI: srv.URL, Current: "v1.2.0", Auto: true, Exe: exe, Restart: func() error { restarts++; return nil }, Logf: t.Logf})
+	ctx := context.Background()
+	st, err := u.Check(ctx)
+	if err != nil || !st.Available || st.Latest != "v1.3.0" || st.Notes != "notes" || st.Size != int64(len(archive)) {
+		t.Fatalf("check: %+v %v", st, err)
+	}
+	u.prep.Lock() // the download ahead is done
+	u.prep.Unlock()
+	if st := u.State(); !st.Ready || st.Phase != "idle" {
+		t.Fatalf("not ready: %+v", st)
+	}
+	if st, err := u.Apply(ctx, false); err != nil || st.Phase != "restarting" || restarts != 1 {
+		t.Fatalf("apply: %+v %v", st, err)
+	}
+	if b, _ := os.ReadFile(exe); string(b) != string(script("v1.3.0")) {
+		t.Fatalf("not replaced: %q", b)
+	}
+	if left, _ := filepath.Glob(filepath.Join(dir, ".iridium-update-*")); len(left) != 0 {
+		t.Fatalf("left %v", left)
+	}
+}
+
+func tarGz(t *testing.T, name string, b []byte) []byte {
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(zw)
+	tw.WriteHeader(&tar.Header{Name: name, Mode: 0o755, Size: int64(len(b)), Typeflag: tar.TypeReg})
+	tw.Write(b)
+	tw.Close()
+	zw.Close()
+	return buf.Bytes()
+}

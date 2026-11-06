@@ -136,3 +136,68 @@ func Install(o Options) error {
 	}
 	return nil
 }
+
+// Place keeps the binary at prefix/iridium, copying exe there when it runs from elsewhere (a
+// release just unpacked), and links bin/ir to it; bin "" links nothing. It gives where the binary
+// is now. An ir that is a file of its own (not a link) is left alone.
+func Place(exe, prefix, bin string) (string, error) {
+	dst := filepath.Join(prefix, "iridium")
+	if same(exe, dst) {
+		return dst, link(dst, bin)
+	}
+	if err := os.MkdirAll(prefix, 0o755); err != nil {
+		return "", err
+	}
+	in, err := os.Open(exe)
+	if err != nil {
+		return "", err
+	}
+	defer in.Close()
+	tmp, err := os.CreateTemp(prefix, ".iridium-install-*")
+	if err != nil {
+		return "", err
+	}
+	_, err = io.Copy(tmp, in)
+	if err == nil {
+		err = tmp.Chmod(0o755)
+	}
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Rename(tmp.Name(), dst)
+	}
+	if err != nil {
+		os.Remove(tmp.Name())
+		return "", err
+	}
+	return dst, link(dst, bin)
+}
+
+func same(a, b string) bool {
+	fa, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	fb, err := os.Stat(b)
+	return err == nil && os.SameFile(fa, fb)
+}
+
+func link(dst, bin string) error {
+	if bin == "" {
+		return nil
+	}
+	ir := filepath.Join(bin, "ir")
+	if fi, err := os.Lstat(ir); err == nil && fi.Mode()&os.ModeSymlink == 0 {
+		return nil
+	}
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		return err
+	}
+	tmp := ir + ".new"
+	os.Remove(tmp)
+	if err := os.Symlink(dst, tmp); err != nil {
+		return err
+	}
+	return os.Rename(tmp, ir)
+}

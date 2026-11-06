@@ -15,12 +15,12 @@ import { watchTurns } from "./chats";
 import { CreatePopover, WsPlus } from "./create";
 import { agentsQ, pushQ, useHome, useMe, useSettings, useTerminals, useUpdate, useWorkspaces } from "./data";
 import { t, useLang } from "./i18n";
-import { applyTheme, initialTheme, keepTheme, MeChip, type ThemePref } from "./me";
-import { pageTurn } from "./motion";
+import { applyTheme, initialTheme, keepTheme, MeChip, MePanel, type ThemePref } from "./me";
+import { motion, pageTurn } from "./motion";
 import { prefetch } from "./prefetch";
 import { close, go, onTurn, openChat, over, route, useRoute, type Route } from "./route";
 import { atLeft, Sheet } from "./sheet";
-import { Foot, Sidebar } from "./sidebar";
+import { Sidebar } from "./sidebar";
 import { useSecret } from "./secrets";
 import { useConfirms, useList } from "./store";
 import { follow } from "./stream";
@@ -106,7 +106,13 @@ export function App() {
   const [under, setUnder] = useState<Route>(over(r) ? { name: "home" } : r);
   if (!over(r) && r !== under) setUnder(r);
   const open = under.name === "chat" ? under.id : null;
-  const below = !phone ? 0 : sheetOut ? sheetH : footOut && open ? footH : 0;
+  // On a phone the settings are a sheet too, as the me sheet is (the user, 2026-11-06): their page
+  // drawn still as it goes down, once they have been open.
+  const setsOut = phone && over(r);
+  const [setsH, setSetsH] = useState(0);
+  const [setsPage, setSetsPage] = useState<"settings" | "terminals" | null>(null);
+  if (over(r) && setsPage !== (r.name === "terminals" ? "terminals" : "settings")) setSetsPage(r.name === "terminals" ? "terminals" : "settings");
+  const below = !phone ? 0 : setsOut ? setsH : sheetOut ? sheetH : footOut && open ? footH : 0;
   const list = useList();
   const ws = useWorkspaces();
   const update = useUpdate();
@@ -145,6 +151,13 @@ export function App() {
   }, [open, phone]);
   const setSheet = (o: boolean) => (setSheetOut(o || !open), o && setFootOut(false));
   const setFoot = (o: boolean) => (setFootOut(o), o && setSheetOut(false));
+  // Put away, the me sheet is drawn afresh once it is down: its first page, not renaming.
+  const [footRound, setFootRound] = useState(0);
+  useEffect(() => {
+    if (footOut) return;
+    const t = setTimeout(() => setFootRound((n) => n + 1), motion.dur(3));
+    return () => clearTimeout(t);
+  }, [footOut]);
 
   // Chat to chat on a computer, the main pane swaps quickly, drifting the way the sidebar lists them.
   const now = useRef({ tree, phone });
@@ -212,11 +225,12 @@ export function App() {
   );
 
   const main = (
-    // On a phone a tap on the chat puts the sheet away, the composer back (the user, 2026-11-06).
-    <main className={cn("relative h-full min-w-0 flex-1 bg-paper", !phone && "g-turn")} onClickCapture={phone && (sheetOut || footOut) && open ? () => (setSheetOut(false), setFootOut(false)) : undefined}>
+    // On a phone a tap on the chat puts the sheet away, the composer back (the user, 2026-11-06);
+    // not one on its top bar: its ⋯ opens over the sheet (the user, 2026-11-06).
+    <main className={cn("relative h-full min-w-0 flex-1 bg-paper", !phone && "g-turn")} onClickCapture={phone && (((sheetOut || footOut) && open) || setsOut) ? (e) => !(e.target as Element).closest?.("header") && (setsOut ? close(under) : (setSheetOut(false), setFootOut(false))) : undefined}>
       <Suspense fallback={<Waiting />}>
         {under.name === "chat" ? (
-          <ChatPage key={under.id} id={under.id} phone={phone} sheet={below} onSheet={phone ? () => setSheet(true) : undefined} />
+          <ChatPage key={under.id} id={under.id} phone={phone} sheet={below} onSheet={phone ? () => setSheet(true) : undefined} onMe={phone ? () => setFoot(true) : undefined} />
         ) : (
           <Empty below={below} />
         )}
@@ -228,8 +242,25 @@ export function App() {
   // foot, its right edge on the key's, rising out of it (the user, 2026-11-06); the terminals its page.
   // As the me popover is (the user, 2026-11-06): no shade over the page, which stays live; a press
   // outside puts it away, but one on its own key, which does that itself.
-  const settingsAt = useSettingsAt(over(r));
-  const settings = (
+  const settingsAt = useSettingsAt(over(r) && !phone);
+  const setsBody = (page: "settings" | "terminals") => (
+    <Suspense fallback={<Waiting />}>
+      {page === "terminals" ? (
+        <div key="terminals" className="g-slide h-full">
+          <TerminalsPage onBack={() => (history.state?.depth > 1 ? history.back() : go({ name: "settings" }, true))} />
+        </div>
+      ) : (
+        <div key="settings" className="g-slide h-full" data-dir="back">
+          <SettingsPage theme={theme} setTheme={setThemeKept} />
+        </div>
+      )}
+    </Suspense>
+  );
+  const settings = phone ? (
+    <Sheet open={setsOut} setOpen={(o) => !o && over(route()) && close(under)} size="tall" from={() => false} label={t("nav.settings")} onHeight={setSetsH}>
+      <div className="absolute inset-0">{setsPage && setsBody(setsPage)}</div>
+    </Sheet>
+  ) : (
     <Dialog.Root
       open={over(r)}
       modal={false}
@@ -247,17 +278,7 @@ export function App() {
           style={settingsAt}
           className="g-dialog glass thick float fixed z-50 w-[min(288px,calc(100vw-16px))] overflow-hidden rounded-lg text-ink outline-none"
         >
-          <Suspense fallback={<Waiting />}>
-            {r.name === "terminals" ? (
-              <div key="terminals" className="g-slide h-full">
-                <TerminalsPage onBack={() => (history.state?.depth > 1 ? history.back() : go({ name: "settings" }, true))} />
-              </div>
-            ) : (
-              <div key="settings" className="g-slide h-full" data-dir="back">
-                <SettingsPage onClose={() => close(under)} theme={theme} setTheme={setThemeKept} />
-              </div>
-            )}
-          </Suspense>
+          {setsBody(r.name === "terminals" ? "terminals" : "settings")}
         </Dialog.Popup>
       </Dialog.Portal>
     </Dialog.Root>
@@ -270,13 +291,16 @@ export function App() {
           {!phone && sidebar}
           {main}
           {phone && (
-            <Sheet open={sheetOut} setOpen={setSheet} size={jumping ? "tall" : "half"} from={(x) => !atLeft(x)} label={t("nav.sessions")} onHeight={setSheetH}>
+            <Sheet open={sheetOut} setOpen={setSheet} size={!open ? "full" : jumping ? "tall" : "half"} from={(x) => !atLeft(x)} label={t("nav.sessions")} onHeight={setSheetH}>
               {sidebar}
             </Sheet>
           )}
           {phone && open && (
             <Sheet open={footOut} setOpen={setFoot} size="fit" from={atLeft} label={t("me.title")} onHeight={setFootH}>
-              <Foot me={me} settings={over(r)} onSettings={onSettings} updateDot={!!update.data?.available} panelsCode={loadPanels} />
+              {/* The me popover's body, not the sidebar's foot: the settings a row in it (the user, 2026-11-06). */}
+              <div className="px-2 pb-2" onPointerEnter={loadPanels}>
+                <MePanel key={footRound} wide theme={theme} setTheme={setThemeKept} onSettings={() => (setFootOut(false), onSettings())} updateDot={!!update.data?.available} />
+              </div>
             </Sheet>
           )}
         </div>

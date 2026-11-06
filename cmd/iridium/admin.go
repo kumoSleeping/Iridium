@@ -29,6 +29,9 @@ func installCmd(args []string) int {
 	now := fs.Bool("now", false, "enable and start the service too")
 	reload := fs.Bool("reload", true, "run systemctl --user daemon-reload")
 	unit := fs.String("unit", "iridium", "the unit's name (tests: iridium-test-*)")
+	home, _ := os.UserHomeDir()
+	prefix := fs.String("prefix", filepath.Join(home, ".local", "opt", "iridium"), "where the binary is kept (copied there when it runs from elsewhere)")
+	bin := fs.String("bin", filepath.Join(home, ".local", "bin"), `where the ir link goes; "" none`)
 	var env envFlag
 	fs.Var(&env, "env", "NAME=VALUE the service runs with too (repeatable)")
 	fs.Parse(args)
@@ -36,12 +39,14 @@ func installCmd(args []string) int {
 	if err == nil {
 		exe, err = filepath.EvalSymlinks(exe)
 	}
+	if err == nil {
+		exe, err = install.Place(exe, *prefix, *bin)
+	}
 	if err != nil {
 		log.Print(err)
 		return 1
 	}
 	cfgPath, _ := filepath.Abs(*path)
-	home, _ := os.UserHomeDir()
 	unitDir := filepath.Join(home, ".config", "systemd", "user")
 	if d := os.Getenv("XDG_CONFIG_HOME"); d != "" {
 		unitDir = filepath.Join(d, "systemd", "user")
@@ -70,9 +75,10 @@ func (e *envFlag) Set(v string) error { *e = append(*e, v); return nil }
 // newUpdater looks for new versions where the config says, carrying its state on h.
 func newUpdater(cfg config.Config, h *hub.Hub) *update.Updater {
 	return update.New(update.Options{
-		Source:  cfg.Update.URL,
+		Source:  cfg.Update.Source(update.DefaultSource),
 		Every:   cfg.Update.Every.D(),
 		Current: version.Version,
+		Auto:    !cfg.Update.Manual,
 		Publish: func(s api.UpdateState) { h.Set("update", s) },
 		Restart: func() error {
 			// After the reply that says so has gone out.

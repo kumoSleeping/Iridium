@@ -14,15 +14,32 @@
 
 ## 装和升级
 
+从 Release 装（一个二进制，网页在里面）：
+
 ```sh
-git clone <仓库> && cd Iridium
+curl -fLO https://github.com/kumoSleeping/Iridium/releases/latest/download/iridium-linux-amd64.tar.gz
+tar xzf iridium-linux-amd64.tar.gz
+./iridium install -now     # 复制到 ~/.local/opt/iridium、链 ~/.local/bin/ir、写服务并启动
+```
+
+- ARM 机器换成 `iridium-linux-arm64.tar.gz`。`-prefix`、`-bin` 改位置。
+- 之后升级：设置里“更新”（默认自动在后台下好），或 `ir update`。
+
+从源码装：
+
+```sh
+git clone https://github.com/kumoSleeping/Iridium && cd Iridium
 scripts/deploy.sh                          # 构建网页和程序、装好、写服务单元
 systemctl --user enable --now iridium.service
 ```
 
 - 要 Go 1.27 和 Node 24（npm）。
 - `deploy.sh` 不启动没在跑的服务；在跑的会重启到新版本。托管的 agent 不受影响。
-- 之后升级：拉代码，再跑一次 `scripts/deploy.sh`；或者 `ir update`。
+- 之后升级：拉代码，再跑一次 `scripts/deploy.sh`；或者 `ir update`（装 Release 里的版本）。
+
+## 发版
+
+推一个 `v*` 标签，`.github/workflows/release.yml` 构建网页、跑测试，`scripts/release.sh` 出 `iridium-linux-{amd64,arm64}.tar.gz`（静态、去符号）和 `SHA256SUMS`，Release 说明里带大小表。本地试：`scripts/release.sh v0.0.0 /tmp/rel`（先 `npm run build`）。
 
 ## linger：必须开
 

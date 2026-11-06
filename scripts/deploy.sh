@@ -38,7 +38,7 @@ mv -f "$PREFIX/iridium.new" "$PREFIX/iridium"
 ln -sfn "$PREFIX/iridium" "$BIN/ir"
 echo "installed $("$PREFIX/iridium" version) at $PREFIX/iridium; $BIN/ir -> it"
 
-set -- -unit "$UNIT"
+set -- -unit "$UNIT" -prefix "$PREFIX" -bin "$BIN"
 if [ -n "${CONFIG:-}" ]; then
 	set -- "$@" -config "$CONFIG"
 fi

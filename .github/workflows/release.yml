@@ -1,0 +1,51 @@
+# A tag v* builds the release: the web app embedded, one static binary per platform packed as
+# iridium-<os>-<arch>.tar.gz, SHA256SUMS, and the notes: the commits, then the sizes. `ir update` and the
+# settings page read the latest release (internal/update).
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the notes are the commits since the last tag
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: web
+        working-directory: web
+        run: |
+          npm ci --no-audit --no-fund
+          npm run check
+          npm run build
+      - name: test
+        run: |
+          go vet ./...
+          go test ./...
+      - name: build
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: scripts/release.sh "$VERSION" dist
+      - name: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          pre=""
+          case "$VERSION" in *-*) pre="--prerelease" ;; esac
+          gh release create "$VERSION" dist/*.tar.gz dist/SHA256SUMS \
+            --title "$VERSION" --notes-file dist/notes.md $pre

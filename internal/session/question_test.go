@@ -11,6 +11,7 @@ import (
 // A question's card: one group per question, multiple choice where the question says; own words
 // answer a question in place of a choice, and every question must be answered.
 func TestQuestionCard(t *testing.T) {
+	t.Parallel()
 	r := newRig(t, nil)
 	bg := context.Background()
 	ask := func() *api.Card {

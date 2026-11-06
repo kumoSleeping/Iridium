@@ -500,6 +500,8 @@ func (d *Driver) feed(line []byte, replay bool) []byte {
 		}
 	case "system":
 		d.system(&f)
+	case "conversation_reset":
+		// Its /clear: the init after it names the new id (Cleared).
 	case "stream_event":
 		var ev struct {
 			Type  string `json:"type"`
@@ -652,9 +654,16 @@ func (d *Driver) system(f *frame) {
 		for _, c := range f.Capabilities {
 			d.caps[c] = true
 		}
-		if f.Model != d.model || f.SessionID != d.session {
+		// The main conversation's: one of a subagent's, if any, names neither.
+		if f.ParentToolUseID == nil && (f.Model != d.model || f.SessionID != d.session) {
+			// Another id than the process had: its own /clear (conversation_reset comes first)
+			// began a conversation of that id.
+			moved := d.session != "" && f.SessionID != "" && f.SessionID != d.session
 			d.model, d.session = f.Model, f.SessionID
 			d.emitLocked(agent.Started{Session: f.SessionID, Model: f.Model})
+			if moved {
+				d.emitLocked(agent.Cleared{Session: f.SessionID})
+			}
 		}
 	case "session_state_changed":
 		var s agent.State

@@ -29,6 +29,7 @@ func said(s *api.SessionState, text string) bool { return s.Last != nil && s.Las
 // A message sent while a turn runs waits for it, then goes as the next turn; one can be steered
 // into the running turn, edited or deleted meanwhile.
 func TestQueue(t *testing.T) {
+	t.Parallel()
 	r := newRig(t, nil)
 	id, _ := r.m.Create(bg, api.NewSession{Cwd: r.cwd, Text: "one WAIT"}, "网页")
 	r.waitState(id, "the turn", func(s *api.SessionState) bool { return s.Status == api.StatusRunning })
@@ -85,6 +86,7 @@ func TestQueue(t *testing.T) {
 
 // An interrupt pauses the queue: it goes only on continue.
 func TestQueuePaused(t *testing.T) {
+	t.Parallel()
 	r := newRig(t, nil)
 	id, _ := r.m.Create(bg, api.NewSession{Cwd: r.cwd, Text: "one WAIT"}, "网页")
 	r.waitState(id, "the turn", func(s *api.SessionState) bool { return s.Status == api.StatusRunning })
@@ -112,6 +114,7 @@ func TestQueuePaused(t *testing.T) {
 }
 
 func TestSettings(t *testing.T) {
+	t.Parallel()
 	r := newRig(t, func(c *config.Config, _ *Options) { c.Modes = map[string]string{"claude": "acceptEdits"} })
 	id, _ := r.m.Create(bg, api.NewSession{Cwd: r.cwd, Text: "hi"}, "网页")
 	s := r.waitState(id, "the reply", func(s *api.SessionState) bool { return said(s, "ok: hi") })
@@ -178,6 +181,7 @@ func TestSettings(t *testing.T) {
 // ultracode is set alone, remembered, given to the next start, and refused where the model cannot
 // take it.
 func TestAppliedAndUltracode(t *testing.T) {
+	t.Parallel()
 	r := newRig(t, nil)
 	id, err := r.m.Create(bg, api.NewSession{Cwd: r.cwd}, "网页")
 	if err != nil {
@@ -235,6 +239,7 @@ func TestAppliedAndUltracode(t *testing.T) {
 
 // "Always allow" remembers the tool and pattern; the next matching ask is answered by itself.
 func TestAlwaysAllow(t *testing.T) {
+	t.Parallel()
 	r := newRig(t, nil)
 	var mu sync.Mutex
 	var notes []Notice
@@ -295,6 +300,7 @@ func TestRuleMatches(t *testing.T) {
 // A crash mid-turn: Claude is started again with CLAUDE_CODE_RESUME_INTERRUPTED_TURN and runs the
 // turn again itself; no recovery prompt.
 func TestCrashResumed(t *testing.T) {
+	t.Parallel()
 	r := newRig(t, nil)
 	id, _ := r.m.Create(bg, api.NewSession{Cwd: r.cwd, Text: "please crash"}, "网页")
 	s := r.waitState(id, "the turn run again", func(s *api.SessionState) bool { return said(s, "ok: continued") && s.Status == api.StatusIdle })
@@ -313,6 +319,7 @@ func TestCrashResumed(t *testing.T) {
 // An agent that does not run the turn again gets Iridium's recovery prompt, shown as Iridium's
 // own line.
 func TestCrashRecoveryPrompt(t *testing.T) {
+	t.Parallel()
 	r := newRig(t, nil)
 	id, _ := r.m.Create(bg, api.NewSession{Cwd: r.cwd, Text: "please crash!"}, "网页")
 	r.waitState(id, "the recovery", func(s *api.SessionState) bool { return said(s, "ok: "+RecoveryPrompt) })
@@ -333,6 +340,7 @@ func TestCrashRecoveryPrompt(t *testing.T) {
 
 // Three crashes in ten minutes and it is not continued again.
 func TestCrashBreaker(t *testing.T) {
+	t.Parallel()
 	r := newRig(t, nil)
 	id, _ := r.m.Create(bg, api.NewSession{Cwd: r.cwd, Text: "please crashloop"}, "网页")
 	s := r.waitState(id, "the breaker", func(s *api.SessionState) bool { return s.Proc == 3 && !s.Live && s.Status == api.StatusError })
@@ -342,40 +350,31 @@ func TestCrashBreaker(t *testing.T) {
 	}
 }
 
-// Refused for the quota: Iridium waits for it to come back, then says "继续".
+// Refused for the quota: Iridium waits for it to come back, then says "继续"; in a second session
+// a message meanwhile waits, and goes instead of "继续".
 func TestQuotaResume(t *testing.T) {
+	t.Parallel()
 	r := newRig(t, func(_ *config.Config, o *Options) { o.QuotaStagger = -1 })
 	id, _ := r.m.Create(bg, api.NewSession{Cwd: r.cwd, Text: "QUOTA"}, "网页")
+	queued, _ := r.m.Create(bg, api.NewSession{Cwd: r.cwd, Text: "QUOTA"}, "网页")
 	s := r.waitState(id, "the wait", func(s *api.SessionState) bool { return s.QuotaUntil != 0 })
 	if s.QuotaUntil < time.Now().UnixMilli() {
 		t.Errorf("until %d", s.QuotaUntil)
 	}
-	r.waitState(id, "going on", func(s *api.SessionState) bool { return said(s, "ok: "+QuotaPrompt) && s.QuotaUntil == 0 })
-
-	// A message meanwhile waits, and goes instead of "继续".
-	id, _ = r.m.Create(bg, api.NewSession{Cwd: r.cwd, Text: "QUOTA"}, "网页")
-	r.waitState(id, "the wait", func(s *api.SessionState) bool { return s.QuotaUntil != 0 })
-	if _, queued, _ := r.m.SendWith(bg, id, "later", "网页", false); !queued {
+	r.waitState(queued, "the wait", func(s *api.SessionState) bool { return s.QuotaUntil != 0 })
+	if _, queued, _ := r.m.SendWith(bg, queued, "later", "网页", false); !queued {
 		t.Error("not queued while out of quota")
 	}
-	r.waitState(id, "the queue sent", func(s *api.SessionState) bool { return said(s, "ok: later") })
-	if strings.Contains(r.inLog(id), QuotaPrompt) {
+	r.waitState(id, "going on", func(s *api.SessionState) bool { return said(s, "ok: "+QuotaPrompt) && s.QuotaUntil == 0 })
+	r.waitState(queued, "the queue sent", func(s *api.SessionState) bool { return said(s, "ok: later") })
+	if strings.Contains(r.inLog(queued), QuotaPrompt) {
 		t.Error("继续 went though a message waited")
-	}
-}
-
-// Within a turn that waits on a tool call, the context is read already, not only at the turn's end.
-func TestContextInTurn(t *testing.T) {
-	r := newRig(t, nil)
-	id, _ := r.m.Create(bg, api.NewSession{Cwd: r.cwd, Text: "please ASK"}, "网页")
-	s := r.waitState(id, "the ask, with the context", func(s *api.SessionState) bool { return len(s.Asks) == 1 && s.Context != nil })
-	if s.Status != api.StatusWaiting || s.Context.Used != 100 {
-		t.Errorf("status %s context %+v", s.Status, s.Context)
 	}
 }
 
 // The tail carries the newest small blocks; context and quota are kept, quota per account.
 func TestCarried(t *testing.T) {
+	t.Parallel()
 	r := newRig(t, nil)
 	id, _ := r.m.Create(bg, api.NewSession{Cwd: r.cwd, Text: "hello"}, "网页")
 	s := r.waitState(id, "the tail", func(s *api.SessionState) bool {
@@ -396,13 +395,5 @@ func TestCarried(t *testing.T) {
 		json.Unmarshal(r.hub.Get("quota"), &q)
 		return len(q.Agents) == 1 && !q.Agents[0].Live && len(q.Agents[0].Windows) == 1
 	})
-	// A new daemon has both from the disk.
-	r.m.Close()
-	r.start(Options{Config: r.cfg, Store: r.store, Launcher: r.l, Exe: os.Args[0], UnitPrefix: "iridium-test-", Logf: t.Logf, Poll: 10 * time.Millisecond})
-	if c := string(r.hub.Get("context:" + id)); !strings.Contains(c, `"used":100`) {
-		t.Errorf("context after restart: %s", c)
-	}
-	if q := string(r.hub.Get("quota")); !strings.Contains(q, "user@example.com") {
-		t.Errorf("quota after restart: %s", q)
-	}
+	// A new daemon has both from the disk: TestContextAndQuotaAfterRestart.
 }

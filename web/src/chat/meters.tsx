@@ -1,7 +1,8 @@
 // The composer's meters (plan "网页"), in a row under it: the model key, the
 // quota bars after it, a bar and its percent per window, amber nearly full, red full, faded when
 // last read long ago or no process runs, each window in a popover; at the right the context ring,
-// its breakdown in a popover.
+// its breakdown in a popover. On a phone no percents in the row, and the bars stacked in one place,
+// one over another (the user, 2026-11-06); the popovers still say them.
 import { Menu } from "@base-ui/react/menu";
 import { Popover } from "@base-ui/react/popover";
 import { Check, ChevronDown, Workflow } from "lucide-react";
@@ -9,11 +10,11 @@ import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode }
 import type { SessionState as LiveSession } from "../api/types.gen";
 import { api } from "../api/client";
 import type { Agent, AgentQuota, Context, ContextCategory, Model } from "../api/types.gen";
-import { useAgent, useSettings } from "../data";
+import { useAgent } from "../data";
 import { t, useLang } from "../i18n";
 import { useContextState, useQuota } from "../store";
 import { errText, toast } from "../toast";
-import { ago, cn, PopSurface, Tip, useMinute } from "../ui";
+import { ago, cn, PHONE, PopSurface, Tip, useMedia, useMinute } from "../ui";
 import { EffortSlider, levelName } from "./effort";
 import { modeName } from "../modes";
 import { quotaKey, windowFor, windowName } from "../quota";
@@ -52,6 +53,7 @@ export function ctxParts(c: Context): Part[] {
 
 export function ContextRing({ session, summary, open, onOpenChange }: { session: string; summary?: Context; open?: boolean; onOpenChange?: (o: boolean) => void }) {
   useLang();
+  const phone = useMedia(PHONE);
   // The breakdown when the stream carries one; the total the session's state has, else.
   const c = useContextState(session) ?? summary;
   if (!c || !c.max) return null;
@@ -70,7 +72,7 @@ export function ContextRing({ session, summary, open, onOpenChange }: { session:
                 <circle cx="9" cy="9" r={r} fill="none" stroke="var(--fill-2)" strokeWidth="2.25" />
                 <circle cx="9" cy="9" r={r} fill="none" stroke={pct >= 90 ? "var(--need)" : "var(--ink-2)"} strokeWidth="2.25" strokeLinecap="round" strokeDasharray={`${(circ * pct) / 100} ${circ}`} />
               </svg>
-              {pct}%
+              {!phone && `${pct}%`}
             </button>
           }
         />
@@ -127,11 +129,11 @@ const quotaTone = (pct: number) => (pct >= 95 ? ["bg-err", "text-err"] : pct >= 
  *  where that model is in use. */
 export function QuotaBars({ agent, live, using, open, onOpenChange }: { agent: Agent; live: boolean; using: (string | undefined)[]; open?: boolean; onOpenChange?: (o: boolean) => void }) {
   const lang = useLang();
+  const phone = useMedia(PHONE);
   useMinute(); // "read 5 min ago" and the fading, again each minute
   const quota = useQuota();
-  const hidden = useSettings().data?.quotaHidden ?? [];
   const q: AgentQuota | undefined = quota?.agents.filter((a) => a.agent === agent).sort((a, b) => b.at - a.at)[0];
-  const windows = (q?.windows ?? []).filter((w) => !hidden.includes(quotaKey(q!, w)) && windowFor(w, using));
+  const windows = (q?.windows ?? []).filter((w) => windowFor(w, using)); // all shown: no setting hides one (the user, 2026-11-06)
   if (!q || !windows.length)
     // No bars, but /usage still opens the popover, from where they would be.
     return (
@@ -153,21 +155,34 @@ export function QuotaBars({ agent, live, using, open, onOpenChange }: { agent: A
         <Popover.Trigger
           render={
             <button type="button" aria-label={label} className="g-press flex h-7 shrink-0 items-center rounded-md px-1.5 hover:bg-fill data-popup-open:bg-fill pointer-coarse:h-9">
-              <span className={cn("flex items-center gap-3 transition-opacity @max-md:gap-2", stale && "opacity-50")}>
-                {windows.map((w) => {
-                  const pct = Math.round(w.percent);
-                  const [fill, text] = quotaTone(pct);
-                  return (
-                    <span key={quotaKey(q, w)} className="flex items-center gap-1.5 @max-md:gap-1">
-                      {/* Shorter as the composer narrows (its @container): the row fits, not scrolled. */}
-                      <span className="relative h-1 w-9 overflow-hidden rounded-full bg-fill-2 @max-lg:w-6 @max-md:w-4">
-                        <span className={cn("absolute inset-y-0 left-0 w-full origin-left rounded-full transition-transform duration-(--dur-3)", fill)} style={{ transform: `scaleX(${Math.min(100, pct) / 100})` }} />
+              {phone ? (
+                <span className={cn("flex w-9 flex-col gap-[3px] transition-opacity", stale && "opacity-50")}>
+                  {windows.map((w) => {
+                    const pct = Math.round(w.percent);
+                    return (
+                      <span key={quotaKey(q, w)} className="relative block h-[3px] overflow-hidden rounded-full bg-fill-2">
+                        <span className={cn("absolute inset-y-0 left-0 w-full origin-left rounded-full transition-transform duration-(--dur-3)", quotaTone(pct)[0])} style={{ transform: `scaleX(${Math.min(100, pct) / 100})` }} />
                       </span>
-                      <span className={cn("text-xs tabular-nums", text)}>{pct}%</span>
-                    </span>
-                  );
-                })}
-              </span>
+                    );
+                  })}
+                </span>
+              ) : (
+                <span className={cn("flex items-center gap-3 transition-opacity @max-md:gap-2", stale && "opacity-50")}>
+                  {windows.map((w) => {
+                    const pct = Math.round(w.percent);
+                    const [fill, text] = quotaTone(pct);
+                    return (
+                      <span key={quotaKey(q, w)} className="flex items-center gap-1.5 @max-md:gap-1">
+                        {/* Shorter as the composer narrows (its @container): the row fits, not scrolled. */}
+                        <span className="relative h-1 w-9 overflow-hidden rounded-full bg-fill-2 @max-lg:w-6 @max-md:w-4">
+                          <span className={cn("absolute inset-y-0 left-0 w-full origin-left rounded-full transition-transform duration-(--dur-3)", fill)} style={{ transform: `scaleX(${Math.min(100, pct) / 100})` }} />
+                        </span>
+                        <span className={cn("text-xs tabular-nums", text)}>{pct}%</span>
+                      </span>
+                    );
+                  })}
+                </span>
+              )}
             </button>
           }
         />
@@ -277,7 +292,7 @@ function Scrolled({ className, children }: { className?: string; children: React
   }, []);
   const mask = `linear-gradient(to bottom, ${edge.top ? "transparent" : "#000"}, #000 24px, #000 calc(100% - 24px), ${edge.bottom ? "transparent" : "#000"})`;
   return (
-    <div ref={ref} onScroll={look} className={cn("relative overflow-y-auto overscroll-contain", className)} style={{ maskImage: mask, WebkitMaskImage: mask }}>
+    <div ref={ref} onScroll={look} className={cn("no-bar relative overflow-y-auto overscroll-contain", className)} style={{ maskImage: mask, WebkitMaskImage: mask }}>
       {children}
     </div>
   );

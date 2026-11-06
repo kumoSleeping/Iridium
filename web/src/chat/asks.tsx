@@ -5,7 +5,7 @@
 // Markdown, approve or keep planning. A question: its options as keys, or your own words. Every
 // answer goes to the ask's card (POST /api/answer), as a plugin's does.
 import { Menu } from "@base-ui/react/menu";
-import { ChevronDown, ClipboardList, FilePen, Globe, LoaderCircle, MessageCircleQuestionMark, ShieldQuestion, SquareCheck, Square as SquareIcon, SquareTerminal } from "lucide-react";
+import { ChevronDown, ChevronRight, Circle, CircleDot, ClipboardList, FilePen, Globe, LoaderCircle, MessageCircleQuestionMark, PenLine, ShieldQuestion, SquareCheck, Square as SquareIcon, SquareTerminal } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { api } from "../api/client";
 import type { Ask, CardAnswer, Confirm } from "../api/types.gen";
@@ -178,47 +178,72 @@ function Question({ a, busy, send }: { a: Ask; busy: boolean; send: (r: Reply) =
         e.preventDefault();
         if (ready && !busy) send(reply());
       }}
-      className="flex flex-col gap-3"
+      className="flex flex-col gap-4"
     >
-      {qs.map((q, i) => (
-        <fieldset key={i} disabled={busy} className="m-0 flex min-w-0 flex-col gap-2 border-0 p-0">
-          <legend className="mb-2 flex items-start gap-2.5 p-0 text-sm font-semibold">
-            <MessageCircleQuestionMark size={16} className="mt-0.5 shrink-0 text-ink-2" />
-            <span className="whitespace-pre-wrap [overflow-wrap:anywhere]">{q.question}</span>
-          </legend>
-          <div className="flex flex-wrap gap-1.5 pl-[26px]">
-            {q.options.map((o, j) => {
-              const on = picked[i]!.includes(j);
-              const Box = on ? SquareCheck : SquareIcon;
-              return (
-                <button
-                  key={j}
-                  type="button"
-                  aria-pressed={tap ? undefined : on}
-                  onClick={() => pick(i, j)}
-                  title={o.description}
-                  className={cn("g-press flex min-h-8 max-w-full items-start gap-1.5 rounded-md px-3 py-1.5 text-left text-sm pointer-coarse:min-h-10", on ? "bg-ink text-on-ink" : "bg-fill hover:bg-fill-2")}
-                >
-                  {q.multiSelect && <Box size={14} className="mt-0.5 shrink-0" />}
-                  <span className="flex min-w-0 flex-col">
-                    <span className="font-medium">{o.label}</span>
-                    {o.description && <span className={cn("text-xs", on ? "text-on-ink/75" : "text-ink-3")}>{o.description}</span>}
+      {qs.map((q, i) => {
+        const last = i === qs.length - 1;
+        const typed = !!own[i]!.trim();
+        return (
+          <fieldset key={i} disabled={busy} className="m-0 flex min-w-0 flex-col gap-2.5 border-0 p-0">
+            <legend className="mb-2.5 flex w-full items-start gap-2.5 p-0">
+              <MessageCircleQuestionMark size={16} className="mt-0.5 shrink-0 text-ink-2" />
+              {/* The header a faint word before the question, on its line. */}
+              <span className="min-w-0 text-sm leading-[21px] whitespace-pre-wrap [overflow-wrap:anywhere]">
+                {(q.header || q.multiSelect) && (
+                  <span className="mr-2 text-ink-3">
+                    {q.header}
+                    {q.multiSelect && `${q.header ? " · " : ""}${t("ask.multi")}`}
                   </span>
-                </button>
-              );
-            })}
-          </div>
-          <div className="flex items-center gap-1.5 pl-[26px]">
-            <input value={own[i]} onChange={(e) => setOwn((w) => w.map((x, j) => (j === i ? e.target.value : x)))} placeholder={t("ask.own")} aria-label={t("ask.own")} className="no-ring h-8 min-w-0 flex-1 rounded-md bg-fill px-2.5 text-sm placeholder:text-ink-3" />
-            {i === qs.length - 1 && (!tap || own[i]!.trim()) && (
-              <button type="submit" disabled={busy || !ready} className="g-press flex h-8 items-center gap-1.5 rounded-md bg-ink px-3 text-sm font-medium text-on-ink disabled:opacity-30">
-                {busy && <LoaderCircle size={13} className="animate-spin" />}
-                {t("ask.send")}
-              </button>
-            )}
-          </div>
-        </fieldset>
-      ))}
+                )}
+                {q.question}
+              </span>
+            </legend>
+            {/* The options, plain rows lined up with the question, a soft ground under the one you
+                point at or picked; your own words the last row. */}
+            <div className="ml-4 flex flex-col gap-px">
+              {q.options.map((o, j) => {
+                const on = picked[i]!.includes(j) && !typed;
+                const Box = q.multiSelect ? (on ? SquareCheck : SquareIcon) : on ? CircleDot : Circle;
+                return (
+                  <button
+                    key={j}
+                    type="button"
+                    aria-pressed={tap ? undefined : on}
+                    onClick={() => pick(i, j)}
+                    className={cn(
+                      "group flex w-full items-center gap-2.5 rounded-md border-0 px-2.5 py-1.5 text-left text-sm transition-colors duration-(--dur-1) pointer-coarse:py-2.5",
+                      on ? "bg-fill" : "hover:bg-fill/70",
+                    )}
+                  >
+                    {!tap && <Box size={15} className={cn("shrink-0", on ? "text-ink" : "text-ink-4")} />}
+                    <span className="flex min-w-0 flex-1 flex-col">
+                      <span>{o.label}</span>
+                      {o.description && <span className="text-xs leading-[18px] text-ink-3">{o.description}</span>}
+                    </span>
+                    {tap && <ChevronRight size={14} className="shrink-0 text-ink-4 opacity-0 transition-opacity group-hover:opacity-100 pointer-coarse:opacity-100" />}
+                  </button>
+                );
+              })}
+              <label className="flex items-center gap-2.5 rounded-md py-0.5 pr-0.5 pl-2.5 focus-within:bg-fill/70">
+                <PenLine size={13} className="shrink-0 text-ink-4" />
+                <input
+                  value={own[i]}
+                  onChange={(e) => setOwn((w) => w.map((x, j) => (j === i ? e.target.value : x)))}
+                  placeholder={t("ask.own")}
+                  aria-label={t("ask.own")}
+                  className="no-ring h-8 min-w-0 flex-1 bg-transparent text-sm placeholder:text-ink-3"
+                />
+                {last && (!tap || typed) && (
+                  <button type="submit" disabled={busy || !ready} className="g-press flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-ink px-2.5 text-sm text-on-ink disabled:opacity-25 pointer-coarse:h-9">
+                    {busy && <LoaderCircle size={13} className="animate-spin" />}
+                    {t("ask.send")}
+                  </button>
+                )}
+              </label>
+            </div>
+          </fieldset>
+        );
+      })}
     </form>
   );
 }

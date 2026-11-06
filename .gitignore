@@ -6,3 +6,4 @@ node_modules/
 /bin/
 /internal/webui/dist/*
 !/internal/webui/dist/.gitkeep
+.iridium/

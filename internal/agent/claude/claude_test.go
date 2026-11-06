@@ -668,3 +668,39 @@ func TestSendImages(t *testing.T) {
 		t.Errorf("content %v", f.Message.Content)
 	}
 }
+
+// Claude's own /clear goes on in a conversation of a new id in the same process: the init after
+// conversation_reset names it, and the driver says the session was cleared. A subagent's init, or
+// the first one, does not.
+func TestClearedInProcess(t *testing.T) {
+	h := &harness{t: t, writes: make(chan []byte, 16), ids: map[string]string{}, result: map[string]any{}}
+	h.d = New(Options{Emit: h.record, IDPrefix: "ir-test-", Logf: t.Logf})
+	h.d.Attach(func([]byte) error { return nil }, 1)
+	const old, next = "00000000-0000-4000-8000-00000000000a", "00000000-0000-4000-8000-00000000000b"
+	init := func(session, parent string) []byte {
+		p := "null"
+		if parent != "" {
+			p = `"` + parent + `"`
+		}
+		return []byte(`{"type":"system","subtype":"init","model":"claude-haiku-5-5","session_id":"` + session + `","parent_tool_use_id":` + p + `}`)
+	}
+	h.d.Feed(init(old, ""), false)
+	h.d.Feed(init(next, "toolu_1"), false) // a subagent's
+	if c := find[agent.Cleared](h); len(c) != 0 {
+		t.Fatalf("cleared by a first or a subagent's init: %+v", c)
+	}
+	h.d.Feed(init(old, ""), false)
+	h.d.Feed([]byte(`{"type":"conversation_reset","new_conversation_id":"x","trigger":"clear","session_id":"`+old+`"}`), false)
+	h.d.Feed(init(next, ""), false)
+	if c := find[agent.Cleared](h); len(c) != 1 || c[0].Session != next {
+		t.Fatalf("cleared: %+v", c)
+	}
+	if u := h.d.Unknown(); u["conversation_reset"] != 0 {
+		t.Errorf("conversation_reset taken as unknown: %v", u)
+	}
+	// Its next turns, of the new id, are no news.
+	h.d.Feed(init(next, ""), false)
+	if c := find[agent.Cleared](h); len(c) != 1 {
+		t.Errorf("cleared again by the same id: %+v", c)
+	}
+}

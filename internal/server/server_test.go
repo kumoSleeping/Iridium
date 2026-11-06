@@ -59,7 +59,7 @@ func setupWith(t *testing.T, edit func(*session.Options)) (*Server, config.Confi
 	l := &platform.Direct{}
 	var srv *Server
 	tag := func(id string) string { return srv.Tag(id) }
-	o := session.Options{Config: cfg, Store: st, Hub: h, Launcher: l, Exe: os.Args[0], UnitPrefix: "iridium-test-", Logf: t.Logf, Poll: 10 * time.Millisecond, Tag: tag}
+	o := session.Options{Config: cfg, Store: st, Hub: h, Launcher: l, Exe: os.Args[0], UnitPrefix: "iridium-test-", Logf: t.Logf, Poll: 10 * time.Millisecond, ReadEvery: 20 * time.Millisecond, Tag: tag}
 	if edit != nil {
 		edit(&o)
 	}
@@ -72,10 +72,7 @@ func setupWith(t *testing.T, edit func(*session.Options)) (*Server, config.Confi
 	}
 	t.Cleanup(func() {
 		m.Close()
-		names, _ := l.List(context.Background(), "iridium-test-")
-		for _, n := range names {
-			l.Kill(context.Background(), n, "KILL", true)
-		}
+		testagent.KillAll(l, "iridium-test-")
 	})
 	work := filepath.Join(root, "work")
 	os.MkdirAll(work, 0o700)
@@ -294,10 +291,15 @@ func TestTurnOverHTTP(t *testing.T) {
 	if call(t, c, "GET", base+"/api/sessions/"+cleared.Session+"/messages", nil, &again); len(again.Blocks) != 0 {
 		t.Errorf("the cleared session has words: %+v", again.Blocks)
 	}
-	if code := call(t, c, "POST", base+"/api/sessions/"+id+"/stop", nil, nil); code != 200 {
+	// The old one's agent is stopping already (archived): stop the new one.
+	if code := call(t, c, "POST", base+"/api/sessions/"+cleared.Session+"/stop", nil, nil); code != 200 {
 		t.Errorf("stop: %d", code)
 	}
-	// Shutting down with the event stream still open ends it at once, and the socket goes.
+	// Shutting down with the event stream still open ends it at once, and the socket goes. The
+	// clients' spare connections go first: one dialed but never used would hold the shutdown.
+	c.CloseIdleConnections()
+	uc.CloseIdleConnections()
+	http.DefaultClient.CloseIdleConnections()
 	start := time.Now()
 	cancel()
 	if err := <-served; err != nil || time.Since(start) > time.Second {

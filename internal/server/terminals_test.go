@@ -317,8 +317,6 @@ func firstState(t *testing.T, resp *http.Response) string {
 	return ""
 }
 
-// An agent's ir asks for a token: no secret comes back to it, a panel sees the ask, allows it
-// and alone gets the token; the agent learns only that it was allowed.
 // A terminal's device: a computer until set; its own by /api/me/device, another's only from a
 // panel or 本机; by ID or name.
 func TestDevice(t *testing.T) {
@@ -351,6 +349,8 @@ func TestDevice(t *testing.T) {
 	}
 }
 
+// An agent's ir asks for a token: no secret comes back to it, a panel sees the ask, allows it
+// and alone gets the token; the agent learns only that it was allowed.
 func TestConfirmations(t *testing.T) {
 	l := start(t)
 	var p api.Pending

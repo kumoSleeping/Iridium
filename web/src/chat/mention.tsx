@@ -75,9 +75,9 @@ function Chip({ m, s }: { m: Mention; s?: Session }) {
         type="button"
         disabled={!s}
         onClick={() => s && openChat(s.id)}
-        className="g-press mx-0.5 inline-flex max-w-[min(100%,20em)] items-center gap-1 rounded-md bg-paper px-1.5 align-[-4px] text-[0.94em] leading-[20px] text-ink shadow-[0_0_0_0.5px_var(--edge)] enabled:hover:bg-fill-2 disabled:opacity-60"
+        className="g-press mx-[3px] inline-flex max-w-[min(100%,14em)] items-center gap-[5px] rounded-[5px] bg-paper/85 py-px pr-1.5 pl-[5px] align-[-2px] text-[0.86em] leading-[17px] text-ink-2 shadow-[0_0_0_0.5px_var(--edge)] enabled:hover:bg-paper enabled:hover:text-ink disabled:opacity-60"
       >
-        {agent && <Logo agent={agent} size={13} className="shrink-0" />}
+        {agent && <Logo agent={agent} size={12} className="shrink-0" />}
         <span className="truncate">{title}</span>
       </button>
     </Tip>

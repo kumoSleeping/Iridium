@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -127,20 +128,20 @@ func (p *pluginRig) stream(who, last string) (<-chan sse, func()) {
 	return ch, func() { resp.Body.Close() }
 }
 
-// next is the next event of type typ, skipping the rest.
-func (p *pluginRig) next(ch <-chan sse, typ string) (sse, api.ChatEvent) {
+// next is the next event of one of the types, skipping the rest.
+func (p *pluginRig) next(ch <-chan sse, types ...string) (sse, api.ChatEvent) {
 	p.t.Helper()
 	deadline := time.After(10 * time.Second)
 	for {
 		select {
 		case e := <-ch:
-			if e.event == typ {
+			if slices.Contains(types, e.event) {
 				var ce api.ChatEvent
 				json.Unmarshal([]byte(e.data), &ce)
 				return e, ce
 			}
 		case <-deadline:
-			p.t.Fatalf("no %s event", typ)
+			p.t.Fatalf("no %s event", strings.Join(types, "/"))
 		}
 	}
 }
@@ -215,10 +216,16 @@ func TestPluginChat(t *testing.T) {
 	if code := p.do("qq", "POST", "/api/answer", api.CardAnswer{Card: c.Card.ID, Option: "allow"}, nil); code != 200 {
 		t.Fatalf("answer: %d", code)
 	}
-	if _, d := p.next(events, "card_done"); d.CardID != c.Card.ID {
+	// The card done and the reply, in either order: the driver says the ask is done after it
+	// wrote the answer, by when the turn may have ended.
+	done := map[string]api.ChatEvent{}
+	for len(done) < 2 {
+		e, ce := p.next(events, "card_done", "reply")
+		done[e.event] = ce
+	}
+	if d := done["card_done"]; d.CardID != c.Card.ID {
 		t.Errorf("card_done: %+v", d)
 	}
-	p.next(events, "reply")
 
 	// A file the reply names comes with a ref, good for this plugin only.
 	file := filepath.Join(p.work, "notes.txt")

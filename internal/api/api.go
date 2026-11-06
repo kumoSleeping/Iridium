@@ -138,6 +138,9 @@ type SessionState struct {
 	Commands []Command `json:"commands,omitempty"`
 	// Ultracode: Claude's ultracode; absent for an agent without it.
 	Ultracode *Ultracode `json:"ultracode,omitempty"`
+	// Next: its agent cleared itself (Claude's own /clear) and the conversation goes on in this
+	// session; this one is archived, as it was before. The page open on it follows.
+	Next string `json:"next,omitempty"`
 }
 
 // Ultracode is a Claude session's ultracode. On: asked for (what the switch shows); Active: asked

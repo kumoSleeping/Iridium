@@ -6,7 +6,7 @@
 import { Popover } from "@base-ui/react/popover";
 import { Slider } from "@base-ui/react/slider";
 import { useQueryClient } from "@tanstack/react-query";
-import { Camera, Check, ChevronLeft, ChevronRight, EyeOff, Laptop, LogOut, Minus, Monitor, Moon, PencilLine, ShieldCheck, Smartphone, Sun } from "lucide-react";
+import { Camera, Check, ChevronLeft, ChevronRight, EyeOff, Laptop, LogOut, Minus, Monitor, Moon, PencilLine, Settings, ShieldCheck, Smartphone, Sun } from "lucide-react";
 import { useRef, useState, type ReactNode } from "react";
 import { ApiError, api } from "./api/client";
 import type { Device, Me, Rules } from "./api/types.gen";
@@ -43,13 +43,47 @@ const nameError = (e: unknown) => {
 };
 
 export function MeChip({ theme, setTheme, initialPage = "main", defaultOpen = false }: { theme: ThemePref; setTheme: (t: ThemePref) => void; initialPage?: Page; defaultOpen?: boolean }) {
+  const { data } = useMe();
+  const me: Me = data ?? LOCAL_ME;
+  const name = me.local ? t("me.local") : me.name;
+  const [open, setOpen] = useState(defaultOpen);
+  // Each time it is put away, its body is drawn afresh next time: its first page, not renaming.
+  const [round, setRound] = useState(0);
+  return (
+    <Popover.Root
+      open={open}
+      onOpenChange={(o) => {
+        setOpen(o);
+        if (!o) setTimeout(() => setRound((n) => n + 1), 150);
+      }}
+    >
+      <Tip label={t("me.title")}>
+        <Popover.Trigger
+          render={
+            <button type="button" className="g-press flex h-11 min-w-0 items-center gap-2.5 rounded-full py-1 pr-3 pl-1 hover:bg-fill data-popup-open:bg-fill pointer-coarse:h-12">
+              {me.local ? <LocalMark size={32} /> : <Avatar src={me.avatar} name={name} size={32} />}
+              <span className="truncate text-md text-ink">{name}</span>
+            </button>
+          }
+        />
+      </Tip>
+      <PopSurface side="top" align="start">
+        <MePanel key={round} theme={theme} setTheme={setTheme} initialPage={initialPage} />
+      </PopSurface>
+    </Popover.Root>
+  );
+}
+
+/** The me popover's body. On a phone with a chat open it is a sheet of its own (a swipe up from the
+ *  composer's left quarter, or 个人 in the chat bar's ⋯), the window's width, the settings key a row
+ *  in it, not the sidebar's foot (the user, 2026-11-06). */
+export function MePanel({ theme, setTheme, initialPage = "main", wide, onSettings, updateDot }: { theme: ThemePref; setTheme: (t: ThemePref) => void; initialPage?: Page; wide?: boolean; onSettings?: () => void; updateDot?: boolean }) {
   const lang = useLang();
   const qc = useQueryClient();
   const { data } = useMe();
   const me: Me = data ?? LOCAL_ME;
   const local = !!me.local;
   const name = me.local ? t("me.local") : me.name;
-  const [open, setOpen] = useState(defaultOpen);
   const [page, setPage] = useState<Page>(initialPage);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(me.name);
@@ -79,131 +113,127 @@ export function MeChip({ theme, setTheme, initialPage = "main", defaultOpen = fa
     }
   };
   return (
-    <Popover.Root
-      open={open}
-      onOpenChange={(o) => {
-        setOpen(o);
-        if (!o) setTimeout(() => (setPage("main"), setEditing(false)), 150);
-      }}
-    >
-      <Tip label={t("me.title")}>
-        <Popover.Trigger
-          render={
-            <button type="button" className="g-press flex h-11 min-w-0 items-center gap-2.5 rounded-full py-1 pr-3 pl-1 hover:bg-fill data-popup-open:bg-fill pointer-coarse:h-12">
-              {me.local ? <LocalMark size={32} /> : <Avatar src={me.avatar} name={name} size={32} />}
-              <span className="truncate text-md text-ink">{name}</span>
-            </button>
-          }
-        />
-      </Tip>
-      <PopSurface side="top" align="start">
-        <input
-          ref={file}
-          type="file"
-          accept="image/png,image/jpeg,image/webp"
-          hidden
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (!f) return;
-            setImg(URL.createObjectURL(f));
-            setPage("crop");
-            e.target.value = "";
-          }}
-        />
-        <div key={page} className={cn("w-[min(288px,calc(100vw-16px))]", page !== "main" && "g-slide")}>
-          {page === "main" && (
-            <div className="flex flex-col p-1.5">
-              <div className="flex items-center gap-3 px-1.5 pt-1.5 pb-2.5">
-                {me.local ? (
-                  <LocalMark size={44} />
-                ) : (
-                  <Tip label={t("me.avatar")}>
-                    <button type="button" aria-label={t("me.avatar")} onClick={() => file.current?.click()} className="group g-press relative shrink-0 rounded-full">
-                      <Avatar src={me.avatar} name={name} size={44} />
-                      <span className="absolute inset-0 grid place-items-center rounded-full bg-ink/35 text-paper opacity-0 transition-opacity duration-(--dur-1) group-hover:opacity-100">
-                        <Camera size={16} />
-                      </span>
-                    </button>
-                  </Tip>
-                )}
-                {editing ? (
-                  <input
-                    autoFocus
-                    aria-label={t("me.rename")}
-                    value={draft}
-                    maxLength={12}
-                    onChange={(e) => setDraft(e.target.value)}
-                    onBlur={() => setEditing(false)}
-                    onKeyDown={(e) => {
-                      if (e.nativeEvent.isComposing) return;
-                      if (e.key === "Enter" && draft.trim()) void save({ name: draft.trim() }).then((ok) => ok && setEditing(false));
-                      if (e.key === "Escape") {
-                        e.stopPropagation();
-                        setEditing(false);
-                      }
-                    }}
-                    className="no-ring h-8 min-w-0 flex-1 rounded-md bg-fill px-2 text-base font-semibold"
-                  />
-                ) : (
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-base font-semibold">{name}</span>
-                    {me.local && <span className="block truncate text-xs text-ink-3">{t("me.localHint")}</span>}
-                  </span>
-                )}
-                {!editing && !me.local && (
-                  <IconKey label={t("me.rename")} onClick={() => (setDraft(me.name), setEditing(true))} className="size-7">
-                    <PencilLine size={15} />
-                  </IconKey>
-                )}
-              </div>
-              <Row icon={<ShieldCheck size={16} />} onClick={() => setPage("perms")} end={<ChevronRight size={14} className="text-ink-4" />}>
-                {t("me.perms")}
-              </Row>
-              <div className="flex items-center justify-between gap-2 py-1.5 pr-1.5 pl-2">
-                <span className="flex min-w-0 items-center gap-2.5 text-base">
-                  <span className="text-ink-2">{DEVICE_ICON[device]?.(16) ?? <Monitor size={16} />}</span>
-                  <span className="truncate">{t("me.device")}</span>
+    <>
+      <input
+        ref={file}
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        hidden
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (!f) return;
+          setImg(URL.createObjectURL(f));
+          setPage("crop");
+          e.target.value = "";
+        }}
+      />
+      <div key={page} className={cn(wide ? "w-full" : "w-[min(288px,calc(100vw-16px))]", page !== "main" && "g-slide")}>
+        {page === "main" && (
+          <div className="flex flex-col p-1.5">
+            <div className="flex items-center gap-3 px-1.5 pt-1.5 pb-2.5">
+              {me.local ? (
+                <LocalMark size={44} />
+              ) : (
+                <Tip label={t("me.avatar")}>
+                  <button type="button" aria-label={t("me.avatar")} onClick={() => file.current?.click()} className="group g-press relative shrink-0 rounded-full">
+                    <Avatar src={me.avatar} name={name} size={44} />
+                    <span className="absolute inset-0 grid place-items-center rounded-full bg-ink/35 text-paper opacity-0 transition-opacity duration-(--dur-1) group-hover:opacity-100">
+                      <Camera size={16} />
+                    </span>
+                  </button>
+                </Tip>
+              )}
+              {editing ? (
+                <input
+                  autoFocus
+                  aria-label={t("me.rename")}
+                  value={draft}
+                  maxLength={12}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onBlur={() => setEditing(false)}
+                  onKeyDown={(e) => {
+                    if (e.nativeEvent.isComposing) return;
+                    if (e.key === "Enter" && draft.trim()) void save({ name: draft.trim() }).then((ok) => ok && setEditing(false));
+                    if (e.key === "Escape") {
+                      e.stopPropagation();
+                      setEditing(false);
+                    }
+                  }}
+                  className="no-ring h-8 min-w-0 flex-1 rounded-md bg-fill px-2 text-base font-semibold"
+                />
+              ) : (
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-base font-semibold">{name}</span>
+                  {me.local && <span className="block truncate text-xs text-ink-3">{t("me.localHint")}</span>}
                 </span>
-                <Segmented
-                  label={t("me.device")}
-                  value={device}
-                  onChange={(v) => void setDevice(v as Device)}
-                  items={[
-                    ...DEVICES.map((d) => ({ v: d, label: t(`device.${d}`), icon: DEVICE_ICON[d](15) })),
-                  ]}
-                />
-              </div>
-              <div className="flex items-center justify-between gap-2 px-1.5 py-1.5">
-                <Segmented
-                  label={t("me.theme")}
-                  value={theme}
-                  onChange={(v) => setTheme(v as ThemePref)}
-                  items={[
-                    { v: "light", label: t("me.light"), icon: <Sun size={15} /> },
-                    { v: "dark", label: t("me.dark"), icon: <Moon size={15} /> },
-                    { v: "auto", label: t("me.auto"), icon: <Monitor size={15} /> },
-                  ]}
-                />
-                <LangSwitch lang={lang} />
-              </div>
-              {!me.local && (
-                <Row icon={<LogOut size={16} />} onClick={() => void api.logout().then(() => location.assign("/_ir/login"), (e) => toast(t("me.logout"), { error: true, description: errText(e) }))} muted>
-                  {t("me.logout")}
-                </Row>
+              )}
+              {!editing && !me.local && (
+                <IconKey label={t("me.rename")} onClick={() => (setDraft(me.name), setEditing(true))} className="size-7">
+                  <PencilLine size={15} />
+                </IconKey>
               )}
             </div>
-          )}
-          {page === "perms" && <Perms p={me.rules} local={local} onBack={() => setPage("main")} />}
-          {page === "crop" && img && (
-            <Crop
-              src={img}
-              onCancel={() => setPage("main")}
-              onDone={(blob) => void save({ avatar: blob }).then((ok) => ok && setPage("main"))}
-            />
-          )}
-        </div>
-      </PopSurface>
-    </Popover.Root>
+            <Row icon={<ShieldCheck size={16} />} onClick={() => setPage("perms")} end={<ChevronRight size={14} className="text-ink-4" />}>
+              {t("me.perms")}
+            </Row>
+            {onSettings && (
+              <Row
+                icon={<Settings size={16} />}
+                onClick={onSettings}
+                end={
+                  <span className="flex items-center gap-1.5">
+                    {updateDot && <span className="g-pop size-2 rounded-full bg-err" aria-label={t("settings.updateReady")} />}
+                    <ChevronRight size={14} className="text-ink-4" />
+                  </span>
+                }
+              >
+                {t("nav.settings")}
+              </Row>
+            )}
+            <div className="flex items-center justify-between gap-2 py-1.5 pr-1.5 pl-2">
+              <span className="flex min-w-0 items-center gap-2.5 text-base">
+                <span className="text-ink-2">{DEVICE_ICON[device]?.(16) ?? <Monitor size={16} />}</span>
+                <span className="truncate">{t("me.device")}</span>
+              </span>
+              <Segmented
+                label={t("me.device")}
+                value={device}
+                onChange={(v) => void setDevice(v as Device)}
+                items={[
+                  ...DEVICES.map((d) => ({ v: d, label: t(`device.${d}`), icon: DEVICE_ICON[d](15) })),
+                ]}
+              />
+            </div>
+            <div className="flex items-center justify-between gap-2 px-1.5 py-1.5">
+              <Segmented
+                label={t("me.theme")}
+                value={theme}
+                onChange={(v) => setTheme(v as ThemePref)}
+                items={[
+                  { v: "light", label: t("me.light"), icon: <Sun size={15} /> },
+                  { v: "dark", label: t("me.dark"), icon: <Moon size={15} /> },
+                  { v: "auto", label: t("me.auto"), icon: <Monitor size={15} /> },
+                ]}
+              />
+              <LangSwitch lang={lang} />
+            </div>
+            {!me.local && (
+              <Row icon={<LogOut size={16} />} onClick={() => void api.logout().then(() => location.assign("/_ir/login"), (e) => toast(t("me.logout"), { error: true, description: errText(e) }))} muted>
+                {t("me.logout")}
+              </Row>
+            )}
+          </div>
+        )}
+        {page === "perms" && <Perms p={me.rules} local={local} onBack={() => setPage("main")} />}
+        {page === "crop" && img && (
+          <Crop
+            src={img}
+            onCancel={() => setPage("main")}
+            onDone={(blob) => void save({ avatar: blob }).then((ok) => ok && setPage("main"))}
+          />
+        )}
+      </div>
+    </>
   );
 }
 

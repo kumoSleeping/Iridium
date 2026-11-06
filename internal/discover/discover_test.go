@@ -141,6 +141,17 @@ type rig struct {
 	changed []string
 }
 
+// wait waits up to five seconds for ok.
+func (r *rig) wait(what string, ok func() bool) {
+	r.t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		if ok() {
+			return
+		}
+	}
+	r.t.Fatalf("timed out: %s", what)
+}
+
 // newRig copies testdata/home into a temporary home and makes an index of it.
 func newRig(t *testing.T) *rig {
 	t.Helper()
@@ -595,20 +606,13 @@ func TestFree(t *testing.T) {
 }
 
 func TestWatches(t *testing.T) {
+	t.Parallel()
 	r := newRig(t)
 	if err := r.x.Start(); err != nil {
 		t.Fatal(err)
 	}
 	defer r.x.Close()
-	wait := func(what string, ok func() bool) {
-		t.Helper()
-		for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
-			if ok() {
-				return
-			}
-		}
-		t.Fatalf("timed out: %s", what)
-	}
+	wait := r.wait
 	told := func(id string) bool {
 		r.mu.Lock()
 		defer r.mu.Unlock()
@@ -643,7 +647,10 @@ func TestWatches(t *testing.T) {
 
 	// It asks in its terminal, and is answered.
 	r.register(700, id, "/w/new", "waiting", "approve Bash")
-	wait("it needs you", func() bool { s := r.sessions()[id]; return s.Status == api.StatusElsewhere && s.Needs == "approve Bash" })
+	wait("it needs you", func() bool {
+		s := r.sessions()[id]
+		return s.Status == api.StatusElsewhere && s.Needs == "approve Bash"
+	})
 	r.register(700, id, "/w/new", "waiting")
 	wait("a word for it", func() bool { return r.sessions()[id].Needs == "input needed" })
 	r.register(700, id, "/w/new", "busy")

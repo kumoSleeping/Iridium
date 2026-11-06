@@ -17,6 +17,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/platform"
 	"github.com/kumoSleeping/iridium/internal/session"
 	"github.com/kumoSleeping/iridium/internal/store"
+	"github.com/kumoSleeping/iridium/internal/testagent"
 )
 
 // daemon is one run of the daemon on a state that outlives it.
@@ -29,7 +30,7 @@ func runDaemon(t *testing.T, cfg config.Config, st *store.Store, l *platform.Dir
 	t.Helper()
 	h := hub.New()
 	var srv *Server
-	m, err := session.New(session.Options{Config: cfg, Store: st, Hub: h, Launcher: l, Exe: os.Args[0], UnitPrefix: "iridium-test-", Logf: t.Logf, Poll: 10 * time.Millisecond, Tag: func(id string) string { return srv.Tag(id) }})
+	m, err := session.New(session.Options{Config: cfg, Store: st, Hub: h, Launcher: l, Exe: os.Args[0], UnitPrefix: "iridium-test-", Logf: t.Logf, Poll: 10 * time.Millisecond, ReadEvery: 20 * time.Millisecond, Tag: func(id string) string { return srv.Tag(id) }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,12 +72,7 @@ func TestRestartOverHTTP(t *testing.T) {
 	}
 	defer st.Close()
 	l := &platform.Direct{}
-	t.Cleanup(func() {
-		names, _ := l.List(context.Background(), "iridium-test-")
-		for _, n := range names {
-			l.Kill(context.Background(), n, "KILL", true)
-		}
-	})
+	t.Cleanup(func() { testagent.KillAll(l, "iridium-test-") })
 	c := &http.Client{Timeout: 10 * time.Second}
 	state := func(base, id string) api.SessionState {
 		var s api.SessionState
@@ -108,6 +104,9 @@ func TestRestartOverHTTP(t *testing.T) {
 
 	d = runDaemon(t, cfg, st, l)
 	defer d.stop()
+	// Past the replayed output and the new handshake both: an ask answered before the handshake
+	// is told open again by it (session.TestAskAfterRestart waits the same).
+	time.Sleep(300 * time.Millisecond)
 	s := wait(d.base, id, "the ask again", func(s api.SessionState) bool { return s.Live && len(s.Asks) == 1 && s.Asks[0].Card != nil })
 	if s.Context == nil || s.Context.At != before.Context.At || s.Context.Used != before.Context.Used {
 		t.Errorf("context after the restart: %+v, before %+v", s.Context, before.Context)

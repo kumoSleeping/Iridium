@@ -130,6 +130,9 @@ type (
 	// Started: the agent named its session and model (Claude: system/init, each turn), and the
 	// effort level it runs at, if it says (Codex, pi; "" for Claude, read with Applier).
 	Started struct{ Session, Model, Effort string }
+	// Cleared: the agent went on in a conversation of a new id, Session, in the same process
+	// (Claude's own /clear, /reset, /new): what it says from then on is not the session's.
+	Cleared struct{ Session string }
 	// Hello: the handshake's answer.
 	Hello struct {
 		Version  string
@@ -178,6 +181,7 @@ func (PendingAsks) event()    {}
 func (Tasks) event()          {}
 func (Taken) event()          {}
 func (Started) event()        {}
+func (Cleared) event()        {}
 func (Hello) event()          {}
 func (TurnUsage) event()      {}
 func (QuotaHit) event()       {}

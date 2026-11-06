@@ -16,7 +16,6 @@ import { colorVar, COLORS, useFolderColors } from "./colors";
 import { ahead, behind } from "./chats";
 import { t } from "./i18n";
 import { useFlip } from "./motion";
-import { useLink } from "./store";
 import type { Folder as FolderNode, Tree, WsNode } from "./tree";
 import { errText, toast } from "./toast";
 import { useSaidLine } from "./data";
@@ -170,7 +169,6 @@ export function Sidebar(p: Props) {
       <IconKey label={`${t("nav.search")} · ${t("nav.searchKey")}`} tipSide="bottom" onClick={p.onSearch} onPointerEnter={p.panelsCode} onFocus={p.panelsCode} aria-pressed={p.searching} className={p.searching ? "bg-fill text-ink" : undefined}>
         <Search size={16} />
       </IconKey>
-      <LinkDot />
     </div>
   );
 
@@ -181,7 +179,7 @@ export function Sidebar(p: Props) {
       {/* While searching, the jump box in the tree's place; the tree stays mounted, hidden, and
           comes back scrolled as it was. */}
       {p.searching && <div className={cn("flex min-h-0 flex-1 flex-col", p.phone && "pt-13")}>{p.search}</div>}
-      <div ref={list} hidden={p.searching} onScroll={(e) => void (scrolled.current = e.currentTarget.scrollTop)} className={cn("relative min-h-0 flex-1 overflow-y-auto px-2 pb-3 [scrollbar-gutter:stable]", p.phone && "pt-13")} role="tree" aria-label={t("nav.sessions")}>
+      <div ref={list} hidden={p.searching} onScroll={(e) => void (scrolled.current = e.currentTarget.scrollTop)} className={cn("relative min-h-0 flex-1 no-bar overflow-y-auto px-2 pb-3", p.phone && "pt-13")} role="tree" aria-label={t("nav.sessions")}>
         {needs > 0 && (
           <div role="group">
             <Row depth={0} flip="needs" chevron={p.expanded("needs") ? "open" : "closed"} onClick={() => p.toggle("needs")} icon={<Inbox size={16} className="text-ink-2" />} label={t("nav.needsYou")} end={<Count n={needs} />} />
@@ -275,8 +273,9 @@ export function Sidebar(p: Props) {
 }
 
 /** Me and the settings key, right on the sidebar's ground at its foot: no card around them (the
- *  user, 2026-11-06). On a phone with a chat open, a sheet of its own (sheet.tsx). */
-export function Foot(p: Pick<Props, "me" | "settings" | "onSettings" | "updateDot" | "panelsCode">) {
+ *  user, 2026-11-06). Not on a phone with a chat open: there the me popover's body is a sheet of
+ *  its own, the settings a row in it (app.tsx, me.tsx MePanel). */
+function Foot(p: Pick<Props, "me" | "settings" | "onSettings" | "updateDot" | "panelsCode">) {
   return (
     <div className="flex h-14 shrink-0 items-center justify-between gap-2 px-2 pointer-coarse:h-16">
       <div className="min-w-0">{p.me}</div>
@@ -396,22 +395,6 @@ function Row({ depth, flip, chevron, expanded, icon, label, end, selected, onCli
         {two && <span className="block truncate text-sm text-ink-3">{sub}</span>}
       </span>
     </div>
-  );
-}
-
-/** The link to the daemon, at the top right of the sidebar (the user, 2026-11-06): a dot green under
- *  0.5 s round trip, amber to 2 s, red beyond or cut off; the time beside it in ink. */
-function LinkDot() {
-  const link = useLink();
-  const label = link.live === false ? t("top.offline") : link.rtt !== null ? t("top.online", { ms: link.rtt }) : t("top.connecting");
-  const tone = link.live === false ? "bg-err" : link.rtt === null ? "bg-ink-4" : link.rtt < 500 ? "bg-run" : link.rtt <= 2000 ? "bg-need" : "bg-err";
-  return (
-    <Tip label={label} side="bottom">
-      <span className="mr-1.5 ml-auto flex items-center gap-1.5 text-xs text-ink tabular-nums" role="status" aria-label={label}>
-        <span className={cn("size-1.5 rounded-full transition-colors duration-(--dur-2)", tone)} />
-        {link.live === false ? t("top.offlineShort") : link.rtt !== null ? `${link.rtt} ms` : ""}
-      </span>
-    </Tip>
   );
 }
 
@@ -580,14 +563,15 @@ export function sessionActions(s: Session, rename: () => void): { icon: ReactNod
       () => done && toast(done),
       (e) => toast(t("err.action"), { error: true, description: errText(e) }),
     );
+  // Archive first, the one most used (the user, 2026-11-06).
   return [
+    s.archived
+      ? { icon: <ArchiveRestore size={15} />, label: t("menu.unarchive"), run: run(() => api.patch(s.id, { archived: false })) }
+      : { icon: <Archive size={15} />, label: t("menu.archive"), run: run(() => api.patch(s.id, { archived: true }), t("toast.archived")) },
     s.pinned ? { icon: <PinOff size={15} />, label: t("menu.unpin"), run: run(() => api.patch(s.id, { pinned: false })) } : { icon: <Pin size={15} />, label: t("menu.pin"), run: run(() => api.patch(s.id, { pinned: true })) },
     { icon: <Pencil size={15} />, label: t("menu.rename"), run: rename },
     { icon: <Copy size={15} />, label: t("menu.copyId"), run: run(() => navigator.clipboard.writeText(s.id), t("toast.copied")) },
     ...(s.live && WORKING.has(s.status) ? [{ icon: <Square size={14} />, label: t("menu.stop"), run: run(() => api.stop(s.id), t("toast.stopped")) }] : []),
-    s.archived
-      ? { icon: <ArchiveRestore size={15} />, label: t("menu.unarchive"), run: run(() => api.patch(s.id, { archived: false })) }
-      : { icon: <Archive size={15} />, label: t("menu.archive"), run: run(() => api.patch(s.id, { archived: true }), t("toast.archived")) },
   ];
 }
 
@@ -609,13 +593,14 @@ function FolderRow({ f, label, open, onToggle, newHere, plus }: { f: FolderNode;
   const failed = (e: unknown) => toast(t("err.action"), { error: true, description: errText(e) });
   const color = useFolderColors()[f.path];
   const tags: Tags = { value: color, set: (c) => void api.folderColor({ path: f.path, color: c as Color }).catch(failed) };
+  // Archive first, as in a session's menu (the user, 2026-11-06).
   const items = [
-    { icon: <Plus size={15} />, label: t("menu.newHere"), run: newHere },
-    { icon: <Copy size={15} />, label: t("menu.copyPath"), run: () => void navigator.clipboard.writeText(f.path).then(done(t("toast.copied")), failed) },
-    { icon: open ? <Folder size={15} /> : <FolderOpen size={15} />, label: open ? t("menu.fold") : t("menu.unfold"), run: onToggle },
     ...(f.sessions.length
       ? [{ icon: <Archive size={15} />, label: t("menu.archiveHere", { n: f.sessions.length }), run: () => void Promise.all(f.sessions.map((s) => api.patch(s.id, { archived: true }))).then(done(t("toast.archived")), failed) }]
       : []),
+    { icon: <Plus size={15} />, label: t("menu.newHere"), run: newHere },
+    { icon: <Copy size={15} />, label: t("menu.copyPath"), run: () => void navigator.clipboard.writeText(f.path).then(done(t("toast.copied")), failed) },
+    { icon: open ? <Folder size={15} /> : <FolderOpen size={15} />, label: open ? t("menu.fold") : t("menu.unfold"), run: onToggle },
   ];
   const anchor = at && { getBoundingClientRect: () => DOMRect.fromRect({ x: at.x, y: at.y, width: 0, height: 0 }) };
   return (

@@ -64,6 +64,7 @@ func state(t *testing.T, e event) api.StateEvent {
 }
 
 func TestSnapshotThenChanges(t *testing.T) {
+	t.Parallel()
 	h := New()
 	h.Set("list", []int{1})
 	h.Provide = func(key string) (any, bool) { return map[string]string{"made": key}, key == "quota" }
@@ -81,10 +82,11 @@ func TestSnapshotThenChanges(t *testing.T) {
 	if got["list"] != "[1]" || got["session:x"] != "null" || got["quota"] != `{"made":"quota"}` {
 		t.Fatalf("snapshot: %v", got)
 	}
-	// The same value again is no change.
+	// The same value again is no change; changes to states not wanted are not sent.
 	h.Set("list", []int{1})
+	h.Set("session:y", 1)
 	if e, ok := next(t, ch, 400*time.Millisecond); ok {
-		t.Fatalf("sent an unchanged state: %+v", e)
+		t.Fatalf("sent an unchanged state or one not wanted: %+v", e)
 	}
 	// Ten changes in a burst: the first at once, then only the last.
 	for i := range 10 {
@@ -106,15 +108,11 @@ func TestSnapshotThenChanges(t *testing.T) {
 	if b, _ := json.Marshal(last.Value); string(b) != "[9]" {
 		t.Errorf("last value %s", b)
 	}
-	// Changes to states not wanted are not sent.
-	h.Set("session:y", 1)
-	if e, ok := next(t, ch, 300*time.Millisecond); ok {
-		t.Fatalf("sent a state not wanted: %+v", e)
-	}
 }
 
 // A reader that does not read gets, once it does, only the latest state, not all in between.
 func TestSlowReaderSkipsStaleStates(t *testing.T) {
+	t.Parallel()
 	h := New()
 	r, w := io.Pipe()
 	s := h.Subscribe([]string{"list"})
@@ -154,6 +152,7 @@ func TestSlowReaderSkipsStaleStates(t *testing.T) {
 }
 
 func TestDraftsBatched(t *testing.T) {
+	t.Parallel()
 	h := New()
 	ch, _ := stream(t, h.Subscribe([]string{"session:a"}))
 	next(t, ch, time.Second) // the snapshot
@@ -202,7 +201,6 @@ func draftOf(t *testing.T, e event) api.DraftEvent {
 	return d
 }
 
-// A seal joins the draft's last piece; a later draft is another event.
 // A tool call being written: its draft starts with the call, its input JSON joined as it comes.
 func TestDraftTool(t *testing.T) {
 	h := New()
@@ -237,6 +235,7 @@ func TestDraftToolMidway(t *testing.T) {
 	}
 }
 
+// A seal joins the draft's last piece; a later draft is another event.
 func TestDraftSeal(t *testing.T) {
 	h := New()
 	ch, _ := stream(t, h.Subscribe([]string{"session:a"}))
@@ -271,6 +270,7 @@ func TestDraftSeal(t *testing.T) {
 
 // A state due takes the drafts pending with it, ahead of it, even within DraftEvery.
 func TestDraftsBeforeState(t *testing.T) {
+	t.Parallel()
 	h := New()
 	ch, _ := stream(t, h.Subscribe([]string{"session:a"}))
 	next(t, ch, time.Second) // the snapshot

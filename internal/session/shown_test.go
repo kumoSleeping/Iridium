@@ -10,6 +10,7 @@ import (
 // A hosted session is shown from the start. Archived, its agent stops as idle reaping does, and
 // what it writes ending does not bring it back; a message for it does.
 func TestArchiveHosted(t *testing.T) {
+	t.Parallel()
 	r := newRig(t, nil)
 	ctx := context.Background()
 	id, err := r.m.Create(ctx, api.NewSession{Cwd: r.cwd, Text: "hello"}, "网页")

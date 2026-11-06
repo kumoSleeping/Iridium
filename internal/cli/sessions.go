@@ -149,7 +149,8 @@ func busy(s api.Status) bool {
 	return s == api.StatusStarting || s == api.StatusRunning || s == api.StatusCompacting
 }
 
-const poll = 200 * time.Millisecond
+// poll: how often ir looks at a session it waits on; a var for the tests.
+var poll = 200 * time.Millisecond
 
 // waitTurn waits for the turn to end and prints its last reply. input: the message whose turn it
 // is, which the agent may not have taken yet ("" for whatever turn runs, anyInput for the first).

@@ -67,10 +67,24 @@ type Public struct {
 }
 
 type Update struct {
-	// URL answers {version, sha256, url, notes} (package update); "" looks for none.
+	// URL is where new versions are looked for: a GitHub repository ("github:owner/repo") or a
+	// manifest's URL (package update); "" is Iridium's own releases, "off" looks nowhere.
 	URL string `json:"url,omitempty"`
 	// Every is how often to look; "" or "0" is once a day.
 	Every Duration `json:"every,omitzero"`
+	// Manual: a newer version is only downloaded when 更新 is pressed (settings 自动下载更新 off).
+	Manual bool `json:"manual,omitempty"`
+}
+
+// Source is where to look for new versions, "" for nowhere.
+func (u Update) Source(fallback string) string {
+	switch u.URL {
+	case "":
+		return fallback
+	case "off", "none":
+		return ""
+	}
+	return u.URL
 }
 
 func Default() Config {

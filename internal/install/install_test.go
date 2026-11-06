@@ -60,3 +60,26 @@ func TestInstall(t *testing.T) {
 		t.Errorf("quote: %s", q)
 	}
 }
+
+// A binary run from where it was unpacked is copied into the prefix and ir links to it; run from
+// there, it stays.
+func TestPlace(t *testing.T) {
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "dl", "iridium")
+	os.MkdirAll(filepath.Dir(exe), 0o755)
+	os.WriteFile(exe, []byte("bin"), 0o755)
+	prefix, bin := filepath.Join(dir, "opt"), filepath.Join(dir, "bin")
+	got, err := Place(exe, prefix, bin)
+	if err != nil || got != filepath.Join(prefix, "iridium") {
+		t.Fatalf("place: %q %v", got, err)
+	}
+	if b, _ := os.ReadFile(got); string(b) != "bin" {
+		t.Fatalf("copied %q", b)
+	}
+	if to, _ := os.Readlink(filepath.Join(bin, "ir")); to != got {
+		t.Fatalf("ir -> %q", to)
+	}
+	if again, err := Place(got, prefix, bin); err != nil || again != got {
+		t.Fatalf("again: %q %v", again, err)
+	}
+}

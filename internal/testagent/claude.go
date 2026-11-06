@@ -5,6 +5,7 @@ package testagent
 import (
 	"bufio"
 	"cmp"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -44,7 +45,11 @@ func Main() (code int, ok bool) {
 //   - crash begins the turn, then exits 3. Resumed with CLAUDE_CODE_RESUME_INTERRUPTED_TURN=1, it
 //     runs that turn again by itself, saying "ok: continued". crash! exits the same way but is
 //     never run again by itself; crashloop crashes again each time it is run again.
-//   - QUOTA is refused for the quota, which comes back in one to two seconds.
+//   - QUOTA is refused for the quota, which comes back in half a second to one and a half.
+//
+// /clear (as the whole message, its source prefix aside) clears it as Claude's own does: a
+// conversation_reset, then it goes on in the same process as a conversation of a new id, the
+// command its first lines.
 func Claude() int {
 	session := ""
 	for _, a := range os.Args[1:] {
@@ -294,6 +299,22 @@ func Claude() int {
 				steered = append(steered, f)
 				continue
 			}
+			if unprefixed(text) == "/clear" {
+				say(map[string]any{"type": "system", "subtype": "session_state_changed", "state": "running"})
+				say(map[string]any{"type": "command_lifecycle", "command_uuid": f["uuid"], "state": "started"})
+				say(map[string]any{"type": "conversation_reset", "new_conversation_id": f["uuid"], "trigger": "clear", "session_id": session})
+				b := make([]byte, 16)
+				rand.Read(b)
+				b[6], b[8] = b[6]&0x0f|0x40, b[8]&0x3f|0x80
+				session = fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
+				record.Close()
+				recordPath = filepath.Join(dir, session+".jsonl")
+				record, _ = os.OpenFile(recordPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+				say(map[string]any{"type": "system", "subtype": "init", "session_id": session, "model": resolved()})
+				note(map[string]any{"type": "user", "uuid": f["uuid"], "timestamp": stamp(), "message": map[string]any{"role": "user", "content": "<command-name>/clear</command-name>\n<command-message>clear</command-message>\n<command-args></command-args>"}})
+				end(f, "success")
+				continue
+			}
 			begin(f)
 			switch {
 			case strings.HasSuffix(text, "crash"), strings.HasSuffix(text, "crash!"), strings.HasSuffix(text, "crashloop"):
@@ -312,7 +333,7 @@ func Claude() int {
 				timer = time.After(500 * time.Millisecond)
 				continue
 			case strings.HasSuffix(text, "QUOTA"):
-				back := time.Now().Add(2 * time.Second).Unix() // whole seconds: back in one to two
+				back := time.Now().Add(1500 * time.Millisecond).Unix() // whole seconds: back in 0.5 to 1.5
 				say(map[string]any{"type": "rate_limit_event", "rate_limit_info": map[string]any{"status": "rejected", "resetsAt": back, "rateLimitType": "five_hour"}})
 				assistant("You've hit your limit")
 				end(f, "error_during_execution")

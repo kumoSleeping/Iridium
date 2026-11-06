@@ -223,6 +223,13 @@ body {
   scrollbar-width: thin;
   scrollbar-color: var(--fill-2) transparent;
 }
+/* No bar at all, still scrolling: the session list, the model picker (the user, 2026-11-06). */
+.no-bar {
+  scrollbar-width: none;
+}
+.no-bar::-webkit-scrollbar {
+  display: none;
+}
 
 /* a tool kind's icon in the chat */
 .k-tint {

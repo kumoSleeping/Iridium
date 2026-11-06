@@ -277,7 +277,8 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 		s.error(w, err)
 		return
 	}
-	if session.IsClear(req.Text) && len(req.Attachments) == 0 {
+	// Attachments and all: Claude would clear itself just the same.
+	if session.IsClear(req.Text) {
 		id, err := s.m.Clear(r.Context(), r.PathValue("id"), s.fromOf(c, req.Caller))
 		if id != "" && id != r.PathValue("id") {
 			if err := s.st.SetOpener(id, c.EndpointID); err != nil {

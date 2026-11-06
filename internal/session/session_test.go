@@ -56,20 +56,20 @@ func newRig(t *testing.T, edit func(*config.Config, *Options)) *rig {
 	t.Cleanup(func() { st.Close() })
 	r := &rig{t: t, store: st, cfg: cfg, l: &platform.Direct{}, cwd: filepath.Join(root, "work")}
 	os.MkdirAll(r.cwd, 0o700)
-	o := Options{Config: cfg, Store: st, Launcher: r.l, Exe: os.Args[0], UnitPrefix: "iridium-test-", Logf: t.Logf, Poll: 10 * time.Millisecond}
+	o := r.options()
 	if edit != nil {
 		edit(&o.Config, &o)
 	}
 	r.cfg = o.Config
+	// Every agent this test started, once its managers closed (cleanups run last first).
+	t.Cleanup(func() { testagent.KillAll(r.l, "iridium-test-") })
 	r.start(o)
-	t.Cleanup(func() {
-		// Stop every agent this test started.
-		names, _ := r.l.List(context.Background(), "iridium-test-")
-		for _, n := range names {
-			r.l.Kill(context.Background(), n, "KILL", true)
-		}
-	})
 	return r
+}
+
+// options are a manager's on this rig's state: the test's units, quick polls.
+func (r *rig) options() Options {
+	return Options{Config: r.cfg, Store: r.store, Launcher: r.l, Exe: os.Args[0], UnitPrefix: "iridium-test-", Logf: r.t.Logf, Poll: 10 * time.Millisecond, ReadEvery: 20 * time.Millisecond}
 }
 
 func (r *rig) start(o Options) {
@@ -112,6 +112,7 @@ func (r *rig) messages(id string) []api.Block {
 }
 
 func TestHostedTurn(t *testing.T) {
+	t.Parallel()
 	r := newRig(t, nil)
 	sub := r.hub.Subscribe([]string{"list"})
 	defer sub.Close()
@@ -159,15 +160,21 @@ func TestHostedTurn(t *testing.T) {
 	}
 }
 
+// An ask answered ends the turn. Within the turn, waiting on the tool call, the context is read
+// already, not only at the turn's end.
 func TestAskAnswered(t *testing.T) {
+	t.Parallel()
 	r := newRig(t, nil)
 	id, err := r.m.Create(context.Background(), api.NewSession{Cwd: r.cwd, Text: "please ASK"}, "网页")
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := r.waitState(id, "the ask", func(s *api.SessionState) bool { return s.Status == api.StatusWaiting })
+	s := r.waitState(id, "the ask, with the context", func(s *api.SessionState) bool { return s.Status == api.StatusWaiting && s.Context != nil })
 	if len(s.Asks) != 1 || s.Asks[0].Kind != "permission" || s.Asks[0].Tool != "Bash" {
 		t.Fatalf("asks: %+v", s.Asks)
+	}
+	if s.Context.Used != 100 {
+		t.Errorf("context in the turn: %+v", s.Context)
 	}
 	if err := r.m.Answer(context.Background(), id, api.Answer{RequestID: s.Asks[0].RequestID, Allow: true}); err != nil {
 		t.Fatal(err)
@@ -180,6 +187,7 @@ func TestAskAnswered(t *testing.T) {
 
 // Stopped, the session stays; the next message starts the agent again, resuming the session.
 func TestStopAndResume(t *testing.T) {
+	t.Parallel()
 	r := newRig(t, nil)
 	id, _ := r.m.Create(context.Background(), api.NewSession{Cwd: r.cwd, Text: "one"}, "网页")
 	r.waitState(id, "the reply", func(s *api.SessionState) bool {
@@ -216,6 +224,7 @@ func TestStopAndResume(t *testing.T) {
 }
 
 func TestCrash(t *testing.T) {
+	t.Parallel()
 	r := newRig(t, func(c *config.Config, _ *Options) { c.CrashResume = false })
 	id, _ := r.m.Create(context.Background(), api.NewSession{Cwd: r.cwd, Text: "crash"}, "网页")
 	s := r.waitState(id, "the crash", func(s *api.SessionState) bool { return !s.Live && s.Status == api.StatusError })
@@ -225,6 +234,7 @@ func TestCrash(t *testing.T) {
 }
 
 func TestIdleReap(t *testing.T) {
+	t.Parallel()
 	r := newRig(t, func(c *config.Config, o *Options) {
 		c.IdleReap = config.Duration(200 * time.Millisecond)
 		o.ReapEvery = 50 * time.Millisecond
@@ -240,7 +250,7 @@ func TestIdleReap(t *testing.T) {
 	r.store.SetSettings(id, store.Settings{IdleReap: &off})
 	r.m.Send(context.Background(), id, "again", "网页")
 	r.waitState(id, "the reply", func(s *api.SessionState) bool { return s.Last != nil && s.Last.Text == "ok: again" })
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(400 * time.Millisecond) // two idle spans, a few looks
 	if s, _ := r.m.State(id); !s.Live {
 		t.Error("reaped a session set never to be")
 	}
@@ -249,6 +259,7 @@ func TestIdleReap(t *testing.T) {
 // A new daemon takes up a holder the last one started: its state comes back from out.log, the
 // turns it saw are not counted twice, and it goes on taking messages.
 func TestDaemonRestart(t *testing.T) {
+	t.Parallel()
 	r := newRig(t, nil)
 	id, _ := r.m.Create(context.Background(), api.NewSession{Cwd: r.cwd, Text: "before"}, "网页")
 	before := r.waitState(id, "the reply", func(s *api.SessionState) bool {
@@ -256,17 +267,16 @@ func TestDaemonRestart(t *testing.T) {
 	})
 	waitFor(t, "the usage row", func() bool { u, _ := r.store.UsageSince(0); return len(u) == 1 })
 	r.m.Close() // the daemon goes; the holder and the agent stay
-	time.Sleep(1200 * time.Millisecond)
+	time.Sleep(300 * time.Millisecond)
 
-	o := Options{Config: r.cfg, Store: r.store, Launcher: r.l, Exe: os.Args[0], UnitPrefix: "iridium-test-", Logf: t.Logf, Poll: 10 * time.Millisecond}
-	r.start(o)
+	r.start(r.options())
 	s := r.waitState(id, "the session taken up", func(s *api.SessionState) bool { return s.Live && s.Mode == "auto" })
 	if s.Proc != 1 || s.Model != "fake-model" {
 		t.Errorf("taken up: %+v", s)
 	}
 	// Taken up is not activity: the list's time stays when its turn was, not the restart's.
 	time.Sleep(100 * time.Millisecond)
-	if got, err := r.m.State(id); err != nil || got.UpdatedAt > before.UpdatedAt+500 {
+	if got, err := r.m.State(id); err != nil || got.UpdatedAt > before.UpdatedAt+150 {
 		t.Errorf("updated at %d after the restart, %d before (%v)", got.UpdatedAt, before.UpdatedAt, err)
 	}
 	if _, err := r.m.Send(context.Background(), id, "after", "网页"); err != nil {

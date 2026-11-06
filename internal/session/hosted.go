@@ -126,6 +126,9 @@ type Hosted struct {
 
 	restartDue bool // restart the agent at the turn's end, for its new mode
 	restarting bool // stopped to start again: no pause, no crash
+	// clearedTo: its agent cleared itself and went on as this conversation (clearedInside);
+	// next: the session it goes on in, once taken up, for the open page to follow.
+	clearedTo, next string
 
 	effort        string
 	effortNow     string        // the level the agent says it runs at
@@ -201,6 +204,7 @@ func (h *Hosted) start(ctx context.Context) error {
 		return nil
 	}
 	h.starting, h.errText = true, ""
+	h.next = "" // its own conversation again, resumed
 	h.proc++
 	proc := h.proc
 	h.mu.Unlock()
@@ -401,7 +405,7 @@ func (h *Hosted) loop(proc int, outStart, replay int64) {
 	var looked, read time.Time
 	for {
 		n := feed()
-		if time.Since(read) > 500*time.Millisecond {
+		if time.Since(read) > h.m.o.ReadEvery {
 			h.readTranscript()
 			read = time.Now()
 		}
@@ -682,6 +686,12 @@ func (h *Hosted) onEvent(e agent.Event) {
 				h.logf("saving the agent's id: %v", err)
 			}
 		}
+	case agent.Cleared:
+		// Replayed too: a process taken up that cleared itself is still split from its session.
+		if e.Session != h.clearedTo {
+			h.clearedTo = e.Session
+			go h.m.clearedInside(h, h.proc, e.Session)
+		}
 	case agent.Hello:
 		h.starting = false
 		h.mode = e.Mode
@@ -865,7 +875,7 @@ func (h *Hosted) state(o store.Overlay, archived bool) api.SessionState {
 	defer h.mu.Unlock()
 	s := api.SessionState{Session: h.summaryLocked(o, archived), Asks: slices.Clone(h.asks), Tasks: slices.Clone(h.tasks), Model: h.model, Mode: h.mode, End: h.end, Proc: h.proc, Error: h.errText,
 		Effort: h.effort, Queue: slices.Clone(h.queue), Context: h.ctxSum, QuotaUntil: h.quotaUntil, Tail: h.tail}
-	s.Pick, s.EffortNow = h.meta.Model, h.effortNow
+	s.Pick, s.EffortNow, s.Next = h.meta.Model, h.effortNow, h.next
 	for _, m := range h.models {
 		s.Models = append(s.Models, api.Model{Value: m.Value, Name: m.Name, Description: m.Description, Resolved: m.Resolved, Efforts: slices.Clone(m.Efforts), NoEffort: m.NoEffort})
 	}

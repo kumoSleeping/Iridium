@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/kumoSleeping/iridium/internal/api"
+	"github.com/kumoSleeping/iridium/internal/hold"
 )
 
 // again closes the manager, as the daemon goes (the holders and agents stay), and starts a new
@@ -15,14 +18,14 @@ import (
 func (r *rig) again() {
 	r.t.Helper()
 	r.m.Close()
-	o := Options{Config: r.cfg, Store: r.store, Launcher: r.l, Exe: os.Args[0], UnitPrefix: "iridium-test-", Logf: r.t.Logf, Poll: 10 * time.Millisecond}
-	r.start(o)
+	r.start(r.options())
 }
 
 // An ask open when the daemon goes is open after it comes back: the agent says so when it is
 // asked again (Claude: initialize's pending_permission_requests), and answering its card ends
 // the turn.
 func TestAskAfterRestart(t *testing.T) {
+	t.Parallel()
 	r := newRig(t, nil)
 	id, err := r.m.Create(context.Background(), api.NewSession{Cwd: r.cwd, Text: "please ASK"}, "网页")
 	if err != nil {
@@ -50,6 +53,7 @@ func TestAskAfterRestart(t *testing.T) {
 // An ask answered before the daemon went is not open after it comes back, though its request is
 // in the output the new daemon reads again.
 func TestAnsweredAskAfterRestart(t *testing.T) {
+	t.Parallel()
 	r := newRig(t, nil)
 	id, _ := r.m.Create(context.Background(), api.NewSession{Cwd: r.cwd, Text: "please ASK"}, "网页")
 	s := r.waitState(id, "the ask", func(s *api.SessionState) bool { return s.Status == api.StatusWaiting })
@@ -70,6 +74,7 @@ func TestAnsweredAskAfterRestart(t *testing.T) {
 // The context and the quota as last read come back after a restart, with their age: for a
 // session whose agent was stopped, and for one taken up running.
 func TestContextAndQuotaAfterRestart(t *testing.T) {
+	t.Parallel()
 	r := newRig(t, nil)
 	stopped, _ := r.m.Create(context.Background(), api.NewSession{Cwd: r.cwd, Text: "one"}, "网页")
 	running, _ := r.m.Create(context.Background(), api.NewSession{Cwd: r.cwd, Text: "two"}, "网页")
@@ -95,8 +100,7 @@ func TestContextAndQuotaAfterRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitFor(t, "the agent gone", func() bool { st, _ := r.l.State(context.Background(), "iridium-test-"+running); return !st.Exists })
-	o := Options{Config: r.cfg, Store: r.store, Launcher: r.l, Exe: os.Args[0], UnitPrefix: "iridium-test-", Logf: t.Logf, Poll: 10 * time.Millisecond}
-	r.start(o)
+	r.start(r.options())
 
 	for _, id := range []string{stopped, running} {
 		s, err := r.m.State(id)
@@ -136,6 +140,7 @@ func TestContextAndQuotaAfterRestart(t *testing.T) {
 
 // A session taken up running keeps its context and the quota stays live.
 func TestContextTakenUpRunning(t *testing.T) {
+	t.Parallel()
 	r := newRig(t, nil)
 	id, _ := r.m.Create(context.Background(), api.NewSession{Cwd: r.cwd, Text: "one"}, "网页")
 	r.waitState(id, "the context", func(s *api.SessionState) bool {
@@ -161,6 +166,7 @@ func TestContextTakenUpRunning(t *testing.T) {
 // from where the last one had read, so the turn's end counts (its usage, its context, its quota),
 // not replayed as seen.
 func TestTurnEndWhileDown(t *testing.T) {
+	t.Parallel()
 	r := newRig(t, nil)
 	id, _ := r.m.Create(context.Background(), api.NewSession{Cwd: r.cwd, Text: "first"}, "网页")
 	first := r.waitState(id, "the context", func(s *api.SessionState) bool { return s.Context != nil && s.Status == api.StatusIdle })
@@ -171,9 +177,12 @@ func TestTurnEndWhileDown(t *testing.T) {
 	}
 	r.waitState(id, "the turn", func(s *api.SessionState) bool { return s.Status == api.StatusRunning })
 	r.m.Close()
-	time.Sleep(800 * time.Millisecond) // the turn ends meanwhile
-	o := Options{Config: r.cfg, Store: r.store, Launcher: r.l, Exe: os.Args[0], UnitPrefix: "iridium-test-", Logf: t.Logf, Poll: 10 * time.Millisecond}
-	r.start(o)
+	// The turn ends meanwhile.
+	waitFor(t, "the turn's end in out.log", func() bool {
+		b, _ := os.ReadFile(filepath.Join(r.cfg.StatePath(), "hold", id, hold.FileOutLog))
+		return strings.Count(string(b), `"type":"result"`) == 2
+	})
+	r.start(r.options())
 	r.waitState(id, "the reply", func(s *api.SessionState) bool {
 		return s.Last != nil && s.Last.Text == "ok: slow WAIT" && s.Status == api.StatusIdle
 	})

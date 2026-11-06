@@ -16,6 +16,7 @@ import (
 // text alone, the name and the terminal's ID; the turn's usage row is the terminal's, by ID, so a
 // rename keeps its usage.
 func TestSourceTags(t *testing.T) {
+	t.Parallel()
 	names := map[string]string{"pppppppppppppppp": "mac", "local": "本机"}
 	r := newRig(t, func(_ *config.Config, o *Options) { o.Tag = func(id string) string { return names[id] } })
 	id, err := r.m.Create(context.Background(), api.NewSession{Agent: api.AgentClaude, Cwd: r.cwd, Text: "hello"}, "pppppppppppppppp")

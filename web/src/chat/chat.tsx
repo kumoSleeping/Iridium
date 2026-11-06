@@ -4,11 +4,13 @@
 // from the transcript (GET messages, after= what the open session's state says was written); its
 // drafts from the stream. Loaded only once a chat opens or the page is idle.
 import { Menu } from "@base-ui/react/menu";
-import { ChevronRight, Ellipsis, FolderInput, PanelBottomOpen } from "lucide-react";
+import { ChevronRight, Ellipsis, FolderInput, PanelBottomOpen, Plus, UserRound } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent } from "react";
 import type { SessionState as LiveSession } from "../api/types.gen";
 import { api } from "../api/client";
+import { LinkDot } from "../link";
 import type { Session } from "../api/types.gen";
+import { WsPlus } from "../create";
 import { chatOf, stateAhead, type Draft as Drafted, type Sent } from "../chats";
 import { LOCAL_ME, useMe, useTerminalList, useWorkspaces } from "../data";
 import { t, useLang } from "../i18n";
@@ -43,9 +45,9 @@ let lastStackH = 140;
 const ghostOf = (row: Session): LiveSession => ({ ...row, asks: [], tasks: [], queue: [], end: 0, proc: -1 });
 
 /** sheet: on a phone, the sidebar's sheet is out this tall (sheet.tsx): the bottom stack sinks out
- *  under it, and the conversation keeps its newest above it. onSheet: on a phone, brings it out,
- *  from the bar's ⋯ menu. */
-export function ChatPage({ id, phone, sheet = 0, onSheet }: { id: string; phone: boolean; sheet?: number; onSheet?: () => void }) {
+ *  under it; the conversation stays where it is, not pushed up with it (the user, 2026-11-06). onSheet: on a phone, brings it out,
+ *  from the bar's ⋯ menu; onMe, there too, this terminal's own sheet (个人). */
+export function ChatPage({ id, phone, sheet = 0, onSheet, onMe }: { id: string; phone: boolean; sheet?: number; onSheet?: () => void; onMe?: () => void }) {
   useLang();
   const real = useSession(id);
   const list = useList();
@@ -107,6 +109,16 @@ export function ChatPage({ id, phone, sheet = 0, onSheet }: { id: string; phone:
     }
     wasBusy.current = busy;
   }, [busy]);
+  // Its agent cleared itself (Claude's own /clear): the conversation goes on in another session,
+  // and the page with it, as after Iridium's /clear. Only as it happens here, not on opening one
+  // that went on before.
+  const seenNext = useRef<{ id: string; next?: string } | null>(null);
+  useEffect(() => {
+    if (!s) return;
+    const was = seenNext.current;
+    seenNext.current = { id, next: s.next };
+    if (was?.id === id && s.next && s.next !== was.next) openChat(s.next);
+  }, [id, !!s, s?.next]);
 
   // Who sent what; this panel as /api/me has it (its name, avatar, device).
   const self = me ?? LOCAL_ME;
@@ -176,7 +188,7 @@ export function ChatPage({ id, phone, sheet = 0, onSheet }: { id: string; phone:
     const gone = lost && list !== undefined && !row;
     return (
       <div className="relative h-full">
-        <Bar phone={phone} s={row} onSheet={onSheet} />
+        <Bar phone={phone} s={row} onSheet={onSheet} onMe={onMe} />
         {gone && <p className="g-fade m-0 pt-24 text-center text-sm text-ink-3">{t("chat.gone")}</p>}
       </div>
     );
@@ -186,7 +198,7 @@ export function ChatPage({ id, phone, sheet = 0, onSheet }: { id: string; phone:
   const grew = `${log.blocks.at(-1)?.at} ${log.drafts.length} ${log.drafts.at(-1)?.text.length} ${log.drafts.at(-1)?.whole} ${log.sent.length}`;
   return (
     <div className="relative h-full" onDragOver={(e) => files(e) || session(e)} onDrop={drop}>
-      <Stick scroller={scroller} tail={grew} older={() => log.older()} place={chat.place} bottom={sheet || stackH} style={{ paddingTop: 64, paddingBottom: (sheet || stackH) + 20 }}>
+      <Stick scroller={scroller} tail={grew} older={() => log.older()} place={chat.place} bottom={stackH} style={{ paddingTop: 64, paddingBottom: stackH + 20 }}>
         <div className="mx-auto flex max-w-[760px] flex-col gap-5 px-4 sm:px-6">
           {log.loaded && !log.blocks.length && !log.drafts.length && !log.sent.length && <p className="g-fade m-0 pt-16 text-center text-sm text-ink-4">{t("chat.empty")}</p>}
           {/* In a turn, the calls being written or run and the dots share one row at the end, as
@@ -227,8 +239,11 @@ export function ChatPage({ id, phone, sheet = 0, onSheet }: { id: string; phone:
           )}
         </div>
       </Stick>
-      <Bar phone={phone} s={s} onSheet={onSheet} />
-      <div ref={stack} {...{ [PULL]: "" }} data-sunk={sheet > 0 || undefined} inert={sheet > 0} className="g-turn-stay g-sink vt-stack absolute inset-x-0 bottom-0 z-10 px-2.5 pb-[max(14px,calc(env(safe-area-inset-bottom)+6px))] sm:px-5">
+      <Bar phone={phone} s={s} onSheet={onSheet} onMe={onMe} />
+      {/* Under the phone's sheet the stack stays where it is, covered, and is hidden once the sheet is
+          up (its glass not drawn again as the chat moves under it); only one taller than the sheet,
+          which would show over it or at its round corners, sinks (the user, 2026-11-06). */}
+      <div ref={stack} {...{ [PULL]: "" }} data-covered={sheet > 0 || undefined} data-sunk={(sheet > 0 && stackH > sheet - 16) || undefined} inert={sheet > 0} className="g-turn-stay g-sink vt-stack absolute inset-x-0 bottom-0 z-10 px-2.5 pb-[max(14px,calc(env(safe-area-inset-bottom)+6px))] sm:px-5">
         {/* Paper from the composer's middle down: the conversation scrolled under it stops there. */}
         {!elsewhere && !s.subagent && <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-[calc(44px+max(14px,calc(env(safe-area-inset-bottom)+6px)))] bg-[linear-gradient(to_bottom,transparent,var(--paper)_14px)]" />}
         <div className="relative mx-auto max-w-[760px]">
@@ -288,19 +303,29 @@ function Under({ s, ghost, composer, onSent, onSentDone, modelOpen, setModelOpen
 }
 
 /** The top bar: the logo with its lamp, the name, the folder; more. The link's dot is the
- *  sidebar's (sidebar.tsx LinkDot). */
-function Bar({ s, phone, onSheet }: { s?: Session; phone: boolean; onSheet?: () => void }) {
+ *  bar's own, left of ⋯ (link.tsx). */
+function Bar({ s, phone, onSheet, onMe }: { s?: Session; phone: boolean; onSheet?: () => void; onMe?: () => void }) {
   const ws = useWorkspaces().data ?? [];
   const [renaming, setRenaming] = useState(false);
+  // ⋯'s "new session": the "+" of the session's workspace, its folder already this one's, under ⋯.
+  const [making, setMaking] = useState(false);
   return (
     <header className="g-turn-stay vt-bar glass absolute inset-x-0 top-0 z-20 flex h-12 items-center gap-1 pr-2 pl-2 shadow-[0_0.5px_0_var(--edge)] pointer-coarse:h-13">
       <div className="flex min-w-0 flex-1 items-center gap-2.5 pl-2">
         {s && (
           <>
             <Tip label={`${agentName(s.agent)} · ${sessionStatusText(s)}`} side="bottom">
-              <span className="grid">
-                <LogoLamp agent={s.agent} status={lampOf(s)} size={18} />
-              </span>
+              {/* On a phone the logo is a key too: the session list's sheet, as ⋯'s first item (the
+                  user, 2026-11-06). Its tap area wider than it, the bar not moved. */}
+              {onSheet ? (
+                <button type="button" aria-label={t("nav.sidebar")} onClick={onSheet} className="g-press -m-2 grid place-items-center rounded-md p-2 hover:bg-fill">
+                  <LogoLamp agent={s.agent} status={lampOf(s)} size={18} />
+                </button>
+              ) : (
+                <span className="grid">
+                  <LogoLamp agent={s.agent} status={lampOf(s)} size={18} />
+                </span>
+              )}
             </Tip>
             {renaming ? (
               <span className="min-w-0 flex-1">
@@ -320,23 +345,35 @@ function Bar({ s, phone, onSheet }: { s?: Session; phone: boolean; onSheet?: () 
           </>
         )}
       </div>
+      <LinkDot />
       {s && (
-        <Menu.Root>
-          <Tip label={t("top.more")} side="bottom">
-            <Menu.Trigger
-              render={
-                <button type="button" aria-label={t("top.more")} className="g-press grid size-8 place-items-center rounded-md text-ink-2 hover:bg-fill hover:text-ink data-popup-open:bg-fill pointer-coarse:size-10">
-                  <Ellipsis size={17} />
-                </button>
-              }
-            />
-          </Tip>
-          <Menu.Portal>
-            <Menu.Positioner side="bottom" align="end" sideOffset={6} collisionPadding={8} className="z-50">
-              <MenuItems lead={onSheet ? [{ icon: <PanelBottomOpen size={15} />, label: t("nav.sidebar"), run: onSheet }] : []} items={sessionActions(s, () => setRenaming(true))} tags={sessionTags(s)}>{ws.length > 1 && <MoveTo s={s} ws={ws} />}</MenuItems>
-            </Menu.Positioner>
-          </Menu.Portal>
-        </Menu.Root>
+        <span className="relative grid">
+          {/* Anchored on ⋯ itself, under it: clicks go through to ⋯. */}
+          <WsPlus
+            key={s.id}
+            w={{ id: s.workspace ?? 0, name: ws.find((w) => w.id === s.workspace)?.name ?? "", path: s.cwd }}
+            trigger={<span aria-hidden className="pointer-events-none absolute inset-0" />}
+            open={making}
+            setOpen={setMaking}
+            opened={(id) => openChat(id)}
+          />
+          <Menu.Root>
+            <Tip label={t("top.more")} side="bottom">
+              <Menu.Trigger
+                render={
+                  <button type="button" aria-label={t("top.more")} className="g-press grid size-8 place-items-center rounded-md text-ink-2 hover:bg-fill hover:text-ink data-popup-open:bg-fill pointer-coarse:size-10">
+                    <Ellipsis size={17} />
+                  </button>
+                }
+              />
+            </Tip>
+            <Menu.Portal>
+              <Menu.Positioner side="bottom" align="end" sideOffset={6} collisionPadding={8} className="z-50">
+                <MenuItems lead={[{ icon: <Plus size={15} />, label: t("menu.new"), run: () => requestAnimationFrame(() => setMaking(true)) }, ...(onSheet ? [{ icon: <PanelBottomOpen size={15} />, label: t("nav.sidebar"), run: onSheet }] : []), ...(onMe ? [{ icon: <UserRound size={15} />, label: t("nav.me"), run: onMe }] : [])]} items={sessionActions(s, () => setRenaming(true))} tags={sessionTags(s)}>{ws.length > 1 && <MoveTo s={s} ws={ws} />}</MenuItems>
+              </Menu.Positioner>
+            </Menu.Portal>
+          </Menu.Root>
+        </span>
       )}
     </header>
   );

@@ -51,7 +51,16 @@ func TestPushOnAsk(t *testing.T) {
 	}
 	var created api.NewSessionReply
 	p.do("", "POST", "/api/sessions", api.NewSession{Cwd: p.work, Text: "hi"}, &created)
-	time.Sleep(500 * time.Millisecond) // a turn's end with the switch off: nothing
+	// A turn's end with the switch off: nothing (a push meanwhile would be the first got below).
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		var s api.SessionState
+		if p.do("", "GET", "/api/sessions/"+created.ID, nil, &s); s.Status == api.StatusIdle && s.Last != nil && s.Last.Text == "ok: hi" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("no turn's end")
+		}
+	}
 	p.do("", "PUT", "/api/push", api.PushSwitch{Enabled: true}, nil)
 	p.do("", "POST", "/api/sessions/"+created.ID+"/send", api.Send{Text: "please ASK"}, nil)
 	select {

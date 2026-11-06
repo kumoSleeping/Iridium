@@ -51,6 +51,7 @@ func (p *procs) Environ(int) []string { return nil }
 func (p *procs) Files(int) []string   { return nil }
 
 func TestResumeAfterItExitsElsewhere(t *testing.T) {
+	t.Parallel()
 	var d *discover.Index
 	fake := &procs{}
 	var logMu sync.Mutex
@@ -143,6 +144,7 @@ func TestResumeAfterItExitsElsewhere(t *testing.T) {
 }
 
 func TestCreateInWorkspace(t *testing.T) {
+	t.Parallel()
 	r := newRig(t, nil)
 	ws, err := r.store.CreateWorkspace("w", r.cwd)
 	if err != nil {
@@ -170,6 +172,7 @@ func TestCreateInWorkspace(t *testing.T) {
 
 // A subagent's session is listed and read, never resumed: only its parent talks to it.
 func TestSubagentReadOnly(t *testing.T) {
+	t.Parallel()
 	var d *discover.Index
 	r := newRig(t, func(c *config.Config, o *Options) {
 		d = discover.New(discover.Options{ClaudeDir: c.ClaudeHome, CodexHome: t.TempDir(), PiSessions: t.TempDir(), DshHome: t.TempDir(), Store: o.Store, Procs: &procs{}, UID: os.Getuid(), Logf: t.Logf})

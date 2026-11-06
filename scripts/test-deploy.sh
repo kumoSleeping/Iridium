@@ -61,6 +61,7 @@ cat >"$ROOT/config/config.json" <<EOF
   "stateDir": "$ROOT/state",
   "claudeHome": "$ROOT/claude",
   "unitPrefix": "iridium-test-hold-$n-",
+  "update": {"url": "off"},
   "programs": {"claude": "$ROOT/fake/claude"}
 }
 EOF

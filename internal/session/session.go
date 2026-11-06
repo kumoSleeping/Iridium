@@ -53,6 +53,10 @@ type Options struct {
 	Logf       func(string, ...any)
 	ReapEvery  time.Duration // how often idle agents are looked for; 0 is 30s
 	Poll       time.Duration // how often a live agent's out.log is read; 0 is 50ms
+	ReadEvery  time.Duration // how often a live agent's transcript is looked at; 0 is 500ms
+	// ClearPoll: how often a session whose agent cleared itself is looked at, for its process
+	// quiet and then gone (clearedInside); 0 is half a second.
+	ClearPoll time.Duration
 	// Tag names an interactive terminal (by ID) in the source tag "[name] "; nil or "" is the ID.
 	Tag func(terminal string) string
 	// QuotaEvery: how often running agents' quota windows are read, on their own, not with a turn
@@ -81,6 +85,8 @@ type Manager struct {
 	wmu      sync.Mutex
 	watchers []func(Notice)
 
+	nmu sync.Mutex // a new session's name (name.go)
+
 	tune     atomic.Pointer[Tunables] // tune.go
 	annotate atomic.Pointer[Annotate] // carry.go
 }
@@ -102,8 +108,14 @@ func New(o Options) (*Manager, error) {
 	if o.ReapEvery == 0 {
 		o.ReapEvery = 30 * time.Second
 	}
+	if o.ClearPoll == 0 {
+		o.ClearPoll = 500 * time.Millisecond
+	}
 	if o.Poll == 0 {
 		o.Poll = 50 * time.Millisecond
+	}
+	if o.ReadEvery == 0 {
+		o.ReadEvery = 500 * time.Millisecond
 	}
 	if o.QuotaEvery == 0 {
 		o.QuotaEvery = time.Minute
@@ -221,11 +233,12 @@ func (h *Hosted) discoveredAs() string {
 // Create starts a hosted session in req.Cwd and, if req.Text is given, sends it as the first
 // message from `from`. The id is the agent's own session id.
 func (m *Manager) Create(ctx context.Context, req api.NewSession, from string) (string, error) {
-	return m.create(ctx, req, from, nil)
+	return m.create(ctx, req, from, "", nil)
 }
 
-// create is Create; prep, if any, runs on the new id before its agent starts.
-func (m *Manager) create(ctx context.Context, req api.NewSession, from string, prep func(id string) error) (string, error) {
+// create is Create, the session named name (else after its folder); prep, if any, runs on the
+// new id before its agent starts.
+func (m *Manager) create(ctx context.Context, req api.NewSession, from, name string, prep func(id string) error) (string, error) {
 	if req.Agent == "" {
 		req.Agent = api.AgentClaude
 	}
@@ -263,6 +276,7 @@ func (m *Manager) create(ctx context.Context, req api.NewSession, from string, p
 	if err := writeJSON(filepath.Join(h.dir, fileMeta), mt); err != nil {
 		return "", err
 	}
+	m.nameNew(mt.ID, mt.Cwd, name)
 	m.mu.Lock()
 	m.hosted[mt.ID] = h
 	m.mu.Unlock()

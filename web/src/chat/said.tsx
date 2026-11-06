@@ -1,7 +1,8 @@
 // The blocks of a chat by source (plan "消息来源", web/sample), QQ-like: each of the user's side with
 // its sender's face, name and badge. Your words (from any of your panels or terminals) a bubble on
-// the right, the terminal's avatar and its device; a letter on the left for what another session's
-// ir (its agent's logo, a bot badge, a key to go there), a plugin or a peer sent; Iridium's own lines
+// the right, the terminal's avatar and its device; a letter on the right too (the user, 2026-11-06),
+// for what another session's ir (its agent's logo, a bot badge, a key to go there), a plugin or a
+// peer sent; Iridium's own lines
 // centred and faint; the agent's words as Markdown with the files they name; tool calls and
 // thoughts folded to a line.
 import { Archive, ArchiveRestore, ArrowUpRight, BookOpen, Bot, Brain, Check, ChevronRight, Clock, CircleStop, CircleX, CloudDownload, CloudUpload, Earth, FileCode, FileDiff, FilePen, Files as FilesIcon, FileText, FolderGit2, FlaskConical, FolderOpen, GitBranch, GitCommitHorizontal, GitPullRequest, Globe, Hammer, History, Hourglass, KeyRound, Laptop, List, ListChecks, LoaderCircle, MessageCircleQuestionMark, MessageSquarePlus, Monitor, Network, Package, Plug, RotateCcw, RotateCw, Search, Send, ServerCog, Smartphone, SquareTerminal, Trash2, UserRound, Workflow as WorkflowIcon, Wrench, X, type LucideIcon } from "lucide-react";
@@ -73,8 +74,10 @@ const Sender = forwardRef<HTMLDivElement, { who: You | From; title?: string; jum
   const whole = !mine && who.where ? `${name} · ${tilde(who.where)}` : name;
   const tip = mine ? t("msg.fromPanel", { name: deviceOf(who) ? `${name} · ${t(deviceOf(who)![1])}` : name }) : jump ? t("msg.jump", { name: whole }) : who.channel ? t("msg.viaChannel", { name }) : whole;
   const face = <Face who={who} />;
+  // Every sender on the right, a letter as your words are: on the left it read as the agent's own
+  // (the user, 2026-11-06).
   return (
-    <div ref={ref} className={cn("flex items-start gap-2.5", mine ? "flex-row-reverse pl-6 sm:pl-10" : "pr-6 sm:pr-10")} title={title}>
+    <div ref={ref} className="flex flex-row-reverse items-start gap-2.5 pl-6 sm:pl-10" title={title}>
       <Tip label={tip}>
         {jump ? (
           <button type="button" onClick={jump} aria-label={tip} className="g-press grid shrink-0 rounded-full">
@@ -86,7 +89,7 @@ const Sender = forwardRef<HTMLDivElement, { who: You | From; title?: string; jum
           </span>
         )}
       </Tip>
-      <div className={cn("flex min-w-0 flex-col gap-1", mine ? "items-end" : "items-start")}>
+      <div className="flex min-w-0 flex-col items-end gap-1">
         {jump ? (
           <button type="button" onClick={jump} className="group flex max-w-full items-center gap-0.5 rounded-sm px-0.5 text-xs leading-4 text-ink-3 hover:text-ink-2">
             <span className="min-w-0 truncate">{name}</span>
@@ -183,7 +186,7 @@ export function Pending({ s, who, retry, drop, bubbleRef }: { s: Sent; who: You;
 function Letter({ src, text, time, onJump }: { src: From; text: string; time?: number; onJump: (id: string) => void }) {
   return (
     <Sender who={src} title={time ? clock(time) : undefined} jump={src.session ? () => onJump(src.session!) : undefined}>
-      <p className="m-0 max-w-[min(560px,100%)] min-w-0 rounded-xl rounded-tl-sm bg-fill px-3.5 py-2 text-md whitespace-pre-wrap [overflow-wrap:anywhere]"><Mentioned text={text} /></p>
+      <p className="m-0 max-w-[min(560px,100%)] min-w-0 rounded-xl rounded-tr-sm bg-fill px-3.5 py-2 text-md whitespace-pre-wrap [overflow-wrap:anywhere]"><Mentioned text={text} /></p>
     </Sender>
   );
 }

@@ -30,6 +30,7 @@ func TestMain(m *testing.M) {
 	if code, ok := testagent.Main(); ok {
 		os.Exit(code)
 	}
+	poll = 50 * time.Millisecond
 	os.Exit(m.Run())
 }
 
@@ -126,7 +127,7 @@ func rig(t *testing.T) (config.Config, string) {
 	// Discovery too: what lies over a session (ir archive) is its routes'.
 	empty := t.TempDir()
 	d := discover.New(discover.Options{ClaudeDir: cfg.ClaudeHome, CodexHome: empty, PiSessions: empty, DshHome: empty, Store: st, Hub: h, Procs: discover.ProcFS{Root: empty}, Logf: t.Logf, Settle: 10 * time.Millisecond})
-	m, err := session.New(session.Options{Config: cfg, Store: st, Hub: h, Launcher: l, Exe: os.Args[0], UnitPrefix: "iridium-test-", Logf: t.Logf, Poll: 10 * time.Millisecond, Discovery: d, Tag: func(id string) string { return s.Tag(id) }})
+	m, err := session.New(session.Options{Config: cfg, Store: st, Hub: h, Launcher: l, Exe: os.Args[0], UnitPrefix: "iridium-test-", Logf: t.Logf, Poll: 10 * time.Millisecond, ReadEvery: 20 * time.Millisecond, Discovery: d, Tag: func(id string) string { return s.Tag(id) }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,10 +153,7 @@ func rig(t *testing.T) (config.Config, string) {
 		cancel()
 		<-done
 		m.Close()
-		names, _ := l.List(context.Background(), "iridium-test-")
-		for _, n := range names {
-			l.Kill(context.Background(), n, "KILL", true)
-		}
+		testagent.KillAll(l, "iridium-test-")
 	})
 	t.Setenv("IRIDIUM_SOCKET", cfg.SocketPath())
 	t.Setenv("IRIDIUM_SESSION", "caller-session")
@@ -231,7 +229,7 @@ func TestAgentCommands(t *testing.T) {
 		t.Errorf("send -a: %+v", r)
 	}
 
-	if r := ir("ls"); r.code != 0 || !strings.HasPrefix(r.out, sid+"\tclaude\tidle\t") || !strings.Contains(r.out, "hello") {
+	if r := ir("ls"); r.code != 0 || !strings.HasPrefix(r.out, sid+"\tclaude\tidle\t") || !strings.HasSuffix(r.out, "\twork\n") { // named after its folder
 		t.Errorf("ls: %+v", r)
 	}
 	// Archived (no shown marker): only ir ls --all lists it.
@@ -279,6 +277,16 @@ func TestAgentCommands(t *testing.T) {
 	}
 	if r := ir("find", "hello"); r.code != 0 || !strings.Contains(r.out, "[归档]") {
 		t.Errorf("find archived: %+v", r)
+	}
+	// Archived, its agent stops: a send while it is still stopping meets no holder.
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		var st api.SessionState
+		if err := (&env{}).client(cfg).do("GET", "/api/sessions/"+full, nil, &st); err == nil && !st.Live {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the archived session's agent still runs")
+		}
 	}
 	if r := ir("unarchive", sid); r.code != 0 {
 		t.Errorf("unarchive: %+v", r)

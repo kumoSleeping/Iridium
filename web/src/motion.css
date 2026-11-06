@@ -6,7 +6,7 @@
      g-unfold   popover / menu / tooltip grows out of its anchor (Base UI's --transform-origin)
      g-pop      a small surface appears in place (toast, approval card, lamp change)
      g-slide    a panel's content arrives from the side (popover pages)
-     g-sheet    on a phone, the sidebar rises from the foot as the composer sinks (sheet.tsx, g-sink)
+     g-sheet    on a phone, the sidebar rises from the foot over the composer (sheet.tsx, g-sink)
      g-dialog   the settings rise out of their key at the sidebar's foot (app.tsx)
      g-fade     plain cross-fade
      g-swap     one icon for another in place, both drawn, cross-faded (a folder shut / open)
@@ -111,8 +111,15 @@
 }
 
 /* --- sheet: the phone's sidebar from the foot (sheet.tsx), out or in by its inline transform, its height eased as it
-   grows for the jump box; the composer it takes the place of sinks as it rises (.g-sink) --- */
+   grows for the jump box; the composer under it stays, covered, hidden once it is up, and sinks only when taller
+   than it (.g-sink) --- */
 .g-sheet {
+  transition:
+    transform var(--dur-3) var(--ease-out),
+    box-shadow var(--dur-3) var(--ease-out);
+}
+/* Its height only as it is made another size (sheet.tsx), not as the keyboard moves dvh. */
+.g-sheet.g-sizing {
   transition:
     transform var(--dur-3) var(--ease-out),
     height var(--dur-3) var(--ease-out),
@@ -122,6 +129,12 @@
   transition:
     transform var(--dur-3) var(--ease-out),
     opacity var(--dur-2) var(--ease-out);
+}
+.g-sink[data-covered] {
+  visibility: hidden;
+  transition-property: transform, opacity, visibility;
+  transition-duration: var(--dur-3), var(--dur-2), 0s;
+  transition-delay: 0s, 0s, var(--dur-3);
 }
 .g-sink[data-sunk] {
   transform: translateY(calc(100% + 12px));
