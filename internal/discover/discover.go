@@ -185,6 +185,7 @@ func (x *Index) Start() error {
 		x.o.Logf("discover: no inotify, looking every %s: %v", x.o.Rescan, err)
 	}
 	x.w = w
+	x.dropStaleColors()
 	x.Scan()
 	x.publishWorkspaces()
 	x.publishColors()

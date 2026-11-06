@@ -49,7 +49,6 @@
   --tag-green: oklch(0.66 0.16 150);
   --tag-blue: oklch(0.62 0.16 250);
   --tag-purple: oklch(0.6 0.17 305);
-  --tag-gray: oklch(0.62 0 0);
 
   /* an edit's lines added and taken; a tool kind's icon: its own hue (--k-h), muted */
   --plus: oklch(0.55 0.13 150);
@@ -92,7 +91,6 @@
   --tag-green: oklch(0.72 0.15 150);
   --tag-blue: oklch(0.68 0.14 250);
   --tag-purple: oklch(0.68 0.15 305);
-  --tag-gray: oklch(0.66 0 0);
   --plus: oklch(0.72 0.13 150);
   --minus: oklch(0.7 0.14 25);
   --k-l: 0.64;
@@ -234,6 +232,15 @@ body {
 /* a tool kind's icon in the chat */
 .k-tint {
   color: oklch(var(--k-l) var(--k-c) var(--k-h));
+}
+
+/* ---- a session's colour tag: a highlighter's stroke over its name (sidebar.tsx Marked), the
+   height of the letters, light; drawn from the left as it is given, wiped back as it is taken off ---- */
+.tag-mark {
+  background: linear-gradient(var(--mark) 0 0) 0 55% / 0 82% no-repeat;
+}
+.tag-mark[data-on] {
+  background-size: 100% 82%;
 }
 
 /* ---- status lamps on the logo's corner ---- */

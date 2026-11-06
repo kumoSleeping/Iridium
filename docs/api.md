@@ -118,7 +118,7 @@
 | `POST /api/workspaces` | `NewWorkspace` → `Workspace` | 用一个文件夹建（要在选择器能去的范围里）；`name` 不给就用文件夹名。同一文件夹已有工作区回 409 |
 | `PATCH /api/workspaces/{id}` | `{name}` → `{ok}` | 改名 |
 | `DELETE /api/workspaces/{id}` | → `{ok}` | 删掉；里面的会话变成未归类 |
-| `PUT /api/colors` | `FolderColor` → `{ok}` | 给文件夹打颜色标签（`red`、`orange`、`yellow`、`green`、`blue`、`purple`、`gray`），`color` 为空就去掉；事件流 `colors`（只给面板）是全部。会话的标签用 `PATCH /api/sessions/{id}` 的 `color` |
+| `PUT /api/colors` | `FolderColor` → `{ok}` | 给文件夹打颜色标签（`red`、`orange`、`yellow`、`green`、`blue`、`purple`），`color` 为空就去掉；事件流 `colors`（只给面板）是全部。会话的标签用 `PATCH /api/sessions/{id}` 的 `color` |
 | `PATCH /api/sessions/{id}` | `SessionPatch` → `{ok}` | 只改覆盖层，不碰 agent 的文件：`name`（空串去掉）、`pinned`、`archived`（归档或恢复，见上面的显示标记）、`workspace`（移动，0 为未归类；移过就不再自动归类） |
 | `GET /api/folders?path=` | → `Folders` | 选择器：只列文件夹，不列隐藏的，按名字排；`path` 为空或 `~` 是家目录。`parent` 为空表示到顶了 |
 | `POST /api/folders` | `NewFolder` → `{path}` | 在 `path` 里新建文件夹 `name`（不能以 `.` 开头、不能带 `/`）。已有回 409 |

@@ -1,6 +1,6 @@
 package store
 
-
+import "strings"
 
 // colorsSchema is migration 8: the colour tags given from a row's menu (api.Color), a session's by
 // its id, a folder's by its absolute path.
@@ -26,6 +26,21 @@ func (s *Store) setColor(table, key, at, color string) error {
 	return err
 }
 
+// KeepColors takes off every tag, a session's or a folder's, in none of colors.
+func (s *Store) KeepColors(colors []string) error {
+	in := strings.TrimSuffix(strings.Repeat("?,", len(colors)), ",")
+	args := make([]any, len(colors))
+	for i, c := range colors {
+		args[i] = c
+	}
+	for _, table := range []string{"session_colors", "folder_colors"} {
+		if _, err := s.db.Exec(`DELETE FROM `+table+` WHERE color NOT IN (`+in+`)`, args...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // FolderColors is every folder's colour tag, by path.
 func (s *Store) FolderColors() (map[string]string, error) {
 	rows, err := s.db.Query(`SELECT path, color FROM folder_colors`)
@@ -43,4 +58,3 @@ func (s *Store) FolderColors() (map[string]string, error) {
 	}
 	return out, rows.Err()
 }
-

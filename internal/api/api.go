@@ -41,11 +41,10 @@ const (
 	ColorGreen  Color = "green"
 	ColorBlue   Color = "blue"
 	ColorPurple Color = "purple"
-	ColorGray   Color = "gray"
 )
 
 // Colors is every colour tag, in the menu's order.
-var Colors = []Color{ColorRed, ColorOrange, ColorYellow, ColorGreen, ColorBlue, ColorPurple, ColorGray}
+var Colors = []Color{ColorRed, ColorOrange, ColorYellow, ColorGreen, ColorBlue, ColorPurple}
 
 // Status is a session's lamp (plan "风格"). idle shows none.
 type Status string

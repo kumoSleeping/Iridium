@@ -545,7 +545,7 @@ function SessionRow({ s, where, depth, flip, selected, onSelect, chatCode, worki
         selected={selected}
         onClick={() => !renaming && onSelect(s.id)}
         faded={s.archived}
-        aria={`${title}, ${told}${unread ? `, ${t("status.unread")}` : ""}`}
+        aria={`${title}, ${told}${s.color ? `, ${t("color.tagged", { color: t(`color.${s.color}`) })}` : ""}${unread ? `, ${t("status.unread")}` : ""}`}
         icon={
           <Tip label={[agentName(s.agent), s.subagent && t("row.subagent"), status !== "idle" && told].filter(Boolean).join(" · ")} side="bottom">
             <span className="relative grid">
@@ -564,8 +564,7 @@ function SessionRow({ s, where, depth, flip, selected, onSelect, chatCode, worki
             <Rename s={s} done={() => setRenaming(false)} />
           ) : (
             <>
-              <span className="min-w-0 truncate">{title}</span>
-              {s.color && <TagDot color={s.color} />}
+              <Marked color={s.color}>{title}</Marked>
               {where && (
                 <Tip label={tilde(s.cwd)} side="bottom">
                   <span className="ml-1.5 max-w-[35%] shrink-0 truncate text-xs font-normal text-ink-3">{where.startsWith("/") ? tilde(where) : where}</span>
@@ -762,7 +761,16 @@ function TagDots({ tags, i }: { tags: Tags; i: number }) {
   );
 }
 
-/** A session's colour tag, after its name: a small dot that pops in. */
-function TagDot({ color }: { color: Color }) {
-  return <span role="img" aria-label={t("color.tagged", { color: t(`color.${color}`) })} className="g-pop ml-1.5 size-2 shrink-0 self-center rounded-full" style={{ background: colorVar(color) }} />;
+/** A session's name, its colour tag a highlighter's stroke over it, the whole height of the
+ *  letters, light (the user, 2026-11-06): drawn left to right as it is given, wiped back off in its
+ *  colour as it is taken off (styles.css .tag-mark). */
+function Marked({ color, children }: { color?: Color; children: ReactNode }) {
+  const last = useRef(color);
+  if (color) last.current = color;
+  const shown = color ?? last.current;
+  return (
+    <span data-on={color ? "" : undefined} className="tag-mark -mx-1 min-w-0 truncate rounded-sm px-1 transition-[background] duration-(--dur-3) ease-(--ease-out)" style={shown ? ({ "--mark": `color-mix(in oklch,${colorVar(shown)} 26%,#0000)` } as CSSProperties) : undefined}>
+      {children}
+    </span>
+  );
 }

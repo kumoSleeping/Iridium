@@ -49,8 +49,7 @@ export const ColorYellow = "yellow";
 export const ColorGreen = "green";
 export const ColorBlue = "blue";
 export const ColorPurple = "purple";
-export const ColorGray = "gray";
-export type Color = typeof ColorRed | typeof ColorOrange | typeof ColorYellow | typeof ColorGreen | typeof ColorBlue | typeof ColorPurple | typeof ColorGray;
+export type Color = typeof ColorRed | typeof ColorOrange | typeof ColorYellow | typeof ColorGreen | typeof ColorBlue | typeof ColorPurple;
 /**
  * Status is a session's lamp (plan "风格"). idle shows none.
  */
