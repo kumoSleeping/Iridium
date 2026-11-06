@@ -66,7 +66,14 @@ export const steerKey = () => (mac() ? "⌘↩" : "Ctrl+Enter");
 export const enterKey = () => (mac() ? "↩" : "Enter");
 export const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
 
-/** Long-press on touch: fires after 450 ms held still, and swallows the click that follows. */
+/** Whether an event's target is in the element's own DOM, not in a portal of its children (a
+ *  popover's, a menu's): React events bubble out of those too. */
+export const own = (e: React.SyntheticEvent) => e.currentTarget.contains(e.target as Node);
+
+/** Long-press on touch: fires after 450 ms held still, and swallows the click that follows. Not for
+ *  a press in a portal of its children (a row's "+" popover): React may hand one pointerdown to a
+ *  row twice from there, from the portal's container and from <body>, and the first timer would be
+ *  lost, never cleared, opening the row's menu after a plain tap (the user, 2026-11-06). */
 export function useLongPress(onLong: () => void) {
   const timer = useRef<number | undefined>(undefined);
   const fired = useRef(false);
@@ -74,7 +81,8 @@ export function useLongPress(onLong: () => void) {
   const clear = () => window.clearTimeout(timer.current);
   return {
     onPointerDown: (e: React.PointerEvent) => {
-      if (e.pointerType !== "touch") return;
+      if (e.pointerType !== "touch" || !own(e)) return;
+      clear();
       fired.current = false;
       start.current = { x: e.clientX, y: e.clientY };
       timer.current = window.setTimeout(() => {

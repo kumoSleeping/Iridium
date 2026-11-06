@@ -22,7 +22,7 @@ import { folderLevels, sessionLevels, usePushMenus, wsLevels, type PushLevel } f
 import type { Folder as FolderNode, Tree, WsNode } from "./tree";
 import { errText, toast } from "./toast";
 import { useMe, useSaidLine, useUpdate } from "./data";
-import { agentName, ago, cn, fine, IconKey, IrMark, keep, kept, Lamp, lampOf, Logo, sessionStatusText, statusText, tilde, Tip, titleOf, useLongPress, useMinute } from "./ui";
+import { agentName, ago, cn, fine, IconKey, IrMark, keep, kept, Lamp, lampOf, Logo, own, sessionStatusText, statusText, tilde, Tip, titleOf, useLongPress, useMinute } from "./ui";
 import { SESSION_DRAG } from "./chat/refs";
 import { useUnread } from "./unread";
 
@@ -443,7 +443,7 @@ function WsRow({ flip, id, name, open, onToggle, end }: { flip: string; id: numb
         onClick={onToggle}
         label={<span className="font-medium">{name}</span>}
         end={end && <span className="flex items-center" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>{end}</span>}
-        extra={push ? { ...lp, onContextMenu: (e: React.MouseEvent) => (e.preventDefault(), setAt({ x: e.clientX, y: e.clientY })), onClickCapture: lp.onClickCapture } : undefined}
+        extra={push ? { ...lp, onContextMenu: (e: React.MouseEvent) => own(e) && (e.preventDefault(), setAt({ x: e.clientX, y: e.clientY })), onClickCapture: lp.onClickCapture } : undefined}
       />
       {push && (
         <Menu.Root open={at !== null} onOpenChange={(o) => !o && setAt(null)}>
@@ -499,6 +499,7 @@ function SessionRow({ s, where, depth, flip, selected, onSelect, chatCode, worki
       if (e.pointerType === "mouse") ahead(s.id, true);
     },
     onContextMenu: (e: React.MouseEvent) => {
+      if (!own(e)) return;
       e.preventDefault();
       setMenuAt({ x: e.clientX, y: e.clientY });
     },
@@ -672,7 +673,7 @@ function FolderRow({ f, ws, label, open, onToggle, newHere, plus }: { f: FolderN
         icon={<FolderMark open={open} color={color} />}
         label={label}
         end={plus && <span className="flex items-center" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>{plus}</span>}
-        extra={{ ...lp, onContextMenu: (e: React.MouseEvent) => (e.preventDefault(), setAt({ x: e.clientX, y: e.clientY })), onClickCapture: lp.onClickCapture }}
+        extra={{ ...lp, onContextMenu: (e: React.MouseEvent) => own(e) && (e.preventDefault(), setAt({ x: e.clientX, y: e.clientY })), onClickCapture: lp.onClickCapture }}
       />
       <Menu.Root open={at !== null} onOpenChange={(o) => !o && setAt(null)}>
         <Menu.Portal>
