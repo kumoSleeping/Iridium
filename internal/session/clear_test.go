@@ -25,7 +25,9 @@ func TestCommandWaitsForTurn(t *testing.T) {
 	if len(s.Queue) != 1 || s.Queue[0].Text != "/compact" {
 		t.Fatalf("queue: %+v", s.Queue)
 	}
-	r.waitState(id, "the command's turn", func(s *api.SessionState) bool { return said(s, "ok: /compact") && len(s.Queue) == 0 })
+	// Its own turn: the fake compacts, then is idle again.
+	r.waitState(id, "the command's turn", func(s *api.SessionState) bool { return s.Status == api.StatusCompacting && len(s.Queue) == 0 })
+	r.waitState(id, "the compaction's end", func(s *api.SessionState) bool { return s.Status == api.StatusIdle })
 }
 
 // /clear goes on in a new session in the same place with the same settings; the old one, idle,

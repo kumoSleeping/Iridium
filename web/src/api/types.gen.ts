@@ -300,13 +300,24 @@ export interface Block {
   result?: Result;
   error?: boolean; // result
   /**
-   * system: what happened.
+   * system: what happened. Compact: a compaction's figures, as far as the agent records them.
    */
   event?: SystemEvent;
+  compact?: Compaction;
   /**
    * Files the block names that exist: user and assistant text, a Write call's file.
    */
   files?: FileRef[];
+}
+/**
+ * Compaction is what a compaction did: Auto, the agent's own (the context ran full) rather than
+ * a /compact; the context before and after it in tokens, and how long it took; 0 is not recorded.
+ */
+export interface Compaction {
+  auto?: boolean;
+  before?: number /* int */;
+  after?: number /* int */;
+  ms?: number /* int64 */;
 }
 export const BlockKindUser = "user";
 export const BlockKindAssistant = "assistant";

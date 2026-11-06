@@ -56,11 +56,11 @@ export const Markdown = memo(function Markdown({ text, className }: { text: stri
   );
 });
 
-/** What the agent is writing: Markdown half written shows as it will be. live: words still come,
- *  the caret shows after them; a draft whole, or its turn over, has none. */
+/** What the agent is writing: Markdown half written shows as it will be. live: words still come.
+ *  No caret after them (the user, 2026-11-06). */
 export function Draft({ text, live }: { text: string; live: boolean }) {
   return (
-    <Streamdown {...MARKDOWN} isAnimating={live} className={cn("prose-ir min-w-0 text-md", live && "caret-last")}>
+    <Streamdown {...MARKDOWN} isAnimating={live} className="prose-ir min-w-0 text-md">
       {text}
     </Streamdown>
   );

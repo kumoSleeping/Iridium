@@ -28,7 +28,9 @@ type piLine struct {
 	Type      string `json:"type"`
 	Timestamp string `json:"timestamp"`
 	Summary   string `json:"summary"`
-	Message   *struct {
+	// TokensBefore: a compaction's context before it.
+	TokensBefore int `json:"tokensBefore"`
+	Message      *struct {
 		Role       string          `json:"role"`
 		Content    json.RawMessage `json:"content"`
 		ToolCallID string          `json:"toolCallId"`
@@ -47,6 +49,24 @@ type piContent struct {
 	ID        string          `json:"id"`
 	Name      string          `json:"name"`
 	Arguments json.RawMessage `json:"arguments"`
+}
+
+// imageRef is a line an extension of pi's adds for each picture it sends along ("[Image #1]: path"),
+// the path in your words become "[Image #1]".
+var imageRef = regexp.MustCompile(`(?m)^\[Image #(\d+)\]: (\S.*)$\n?`)
+
+// unImage gives your words back as you wrote them: each [Image #n] its path again, the lines that
+// named them gone (the user's pi turns the paths Iridium writes into these; 2026-11-06).
+func unImage(text string) string {
+	refs := imageRef.FindAllStringSubmatch(text, -1)
+	if refs == nil {
+		return text
+	}
+	text = imageRef.ReplaceAllString(text, "")
+	for _, r := range refs {
+		text = strings.ReplaceAll(text, "[Image #"+r[1]+"]", strings.TrimSpace(r[2]))
+	}
+	return strings.TrimRight(text, "\n")
 }
 
 func piBlocks(off int64, raw []byte, max int, sources Sources) []api.Block {
@@ -72,7 +92,11 @@ func piBlocks(off int64, raw []byte, max int, sources Sources) []api.Block {
 	switch l.Type {
 	case "compaction":
 		text, n := clip(l.Summary, max)
-		add(api.Block{Kind: api.BlockKindSystem, Event: api.SystemEventCompact, Text: text, Length: n})
+		b := api.Block{Kind: api.BlockKindSystem, Event: api.SystemEventCompact, Text: text, Length: n}
+		if l.TokensBefore > 0 {
+			b.Compact = &api.Compaction{Before: l.TokensBefore}
+		}
+		add(b)
 		return blocks
 	case "message":
 	default:
@@ -84,7 +108,7 @@ func piBlocks(off int64, raw []byte, max int, sources Sources) []api.Block {
 	}
 	switch m.Role {
 	case "user":
-		text := strings.Join(texts(m.Content), "\n\n")
+		text := unImage(strings.Join(texts(m.Content), "\n\n"))
 		if strings.TrimSpace(text) == "" {
 			break
 		}

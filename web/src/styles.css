@@ -40,7 +40,7 @@
   --need: oklch(0.78 0.15 72);
   --err: oklch(0.62 0.21 27);
   --start: var(--run); /* no grey dot (the user, 2026-11-06): green, breathing quicker than at work */
-  --compact-to: oklch(0.86 0.16 96);
+  --compact: oklch(0.8 0.16 92); /* compacting: a yellow light, breathing (the user, 2026-11-06) */
 
   /* colour tags from a row's menu (colors.ts): one lightness and chroma, the hues apart */
   --tag-red: oklch(0.63 0.2 25);
@@ -273,8 +273,8 @@ body {
   box-shadow: inset 0 0 0 1.5px var(--run);
 }
 .lamp[data-s="compacting"] > i {
-  background: conic-gradient(var(--run), var(--compact-to), var(--run));
-  animation: lamp-spin 1.1s linear infinite;
+  background: var(--compact);
+  animation: lamp-breathe 1.8s ease-in-out infinite;
 }
 /* A session row's lamp, at its top right: bigger than the logo's, and at work it breathes, a soft
    halo coming and going (the user, 2026-11-06: a little plainer to see, not loud). */
@@ -302,18 +302,19 @@ body {
   box-shadow: inset 0 0 0 1.5px var(--run);
 }
 .row-lamp[data-s="compacting"] {
-  background: conic-gradient(var(--run), var(--compact-to), var(--run));
-  animation: lamp-spin 1.1s linear infinite;
+  --halo: var(--compact);
+  background: var(--compact);
+  animation: row-breathe 2s ease-in-out infinite;
 }
 @keyframes row-breathe {
   0%,
   100% {
     opacity: 1;
-    box-shadow: 0 0 0 3px color-mix(in oklch, var(--run) 26%, transparent);
+    box-shadow: 0 0 0 3px color-mix(in oklch, var(--halo, var(--run)) 26%, transparent);
   }
   50% {
     opacity: 0.55;
-    box-shadow: 0 0 0 0 color-mix(in oklch, var(--run) 0%, transparent);
+    box-shadow: 0 0 0 0 color-mix(in oklch, var(--halo, var(--run)) 0%, transparent);
   }
 }
 @keyframes lamp-breathe {
@@ -325,11 +326,6 @@ body {
   50% {
     opacity: 0.35;
     transform: scale(0.78);
-  }
-}
-@keyframes lamp-spin {
-  to {
-    transform: rotate(1turn);
   }
 }
 
@@ -421,25 +417,6 @@ body {
 .prose-ir th {
   font-weight: 600;
   color: var(--ink-2);
-}
-
-/* A streaming draft's caret, after its last words. */
-.caret::after,
-.caret-last > :last-child:not(ul, ol, div)::after,
-.caret-last > :is(ul, ol):last-child > li:last-child::after {
-  content: "";
-  display: inline-block;
-  width: 2px;
-  height: 1.05em;
-  margin-left: 2px;
-  transform: translateY(3px);
-  background: var(--ink-3);
-  animation: caret-blink 1s steps(2, start) infinite;
-}
-@keyframes caret-blink {
-  to {
-    visibility: hidden;
-  }
 }
 
 /* A message of yours on its way: a small ring breathing; taken, a check that shows and fades. */
@@ -584,9 +561,7 @@ body {
 [data-still] .row-lamp,
 [data-still] .wait-dot,
 [data-still] .send-ring,
-[data-still] .shine,
-[data-still] .caret::after,
-[data-still] .caret-last *::after {
+[data-still] .shine {
   animation-play-state: paused;
   animation-delay: -0.2s;
 }

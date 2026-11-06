@@ -5,12 +5,14 @@
 // Markdown, approve or keep planning. A question: its options as keys, or your own words. Every
 // answer goes to the ask's card (POST /api/answer), as a plugin's does.
 import { Menu } from "@base-ui/react/menu";
-import { ChevronDown, ChevronRight, Circle, CircleDot, ClipboardList, FilePen, Globe, LoaderCircle, MessageCircleQuestionMark, PenLine, ShieldQuestion, SquareCheck, Square as SquareIcon, SquareTerminal } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, ClipboardList, FilePen, Globe, LoaderCircle, MessageCircleQuestionMark, PenLine, ShieldQuestion, SquareTerminal } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { api } from "../api/client";
 import type { Ask, CardAnswer, Confirm } from "../api/types.gen";
 import { CardDetails, CardFrame, CardHead, SecondKey } from "../card";
 import { ConfirmCard } from "../confirms";
+import { SecretHere } from "../secret";
+import { useSecret } from "../secrets";
 import { t } from "../i18n";
 import { errText, toast } from "../toast";
 import { cn, tilde } from "../ui";
@@ -38,13 +40,16 @@ export function Asks({ session, asks, cwd, confirms = [] }: { session: string; a
       setBusy(null);
     }
   };
-  if (!asks.length && !confirms.length) return null;
+  const secretHere = useSecret()?.at === session;
+  if (!asks.length && !confirms.length && !secretHere) return null;
   return (
-    // Padded out under negative margins: the cards' shadows (12px down, 32px blur) are not cut where
-    // the list scrolls, nor over the meters row under it.
-    <div className="-mx-8 -mt-3 mb-[-36px] flex max-h-[55dvh] flex-col gap-2 overflow-y-auto px-8 pt-3 pb-11">
+    // Padded out under negative margins: the cards' shadows (12px down, 32px blur) are not cut, nor
+    // over the meters row under it. Whole, however long (the user, 2026-11-06): it scrolls only
+    // where it would go past the top bar.
+    <div className="-mx-8 -mt-3 mb-[-36px] flex max-h-[calc(100dvh-10rem)] flex-col gap-2 overflow-y-auto px-8 pt-3 pb-11">
+      <SecretHere at={session} />
       {confirms.map((c) => (
-        <ConfirmCard key={c.id} c={c} />
+        <ConfirmCard key={c.id} c={c} at={session} />
       ))}
       {asks.map((a) => (
         <CardFrame key={a.requestId} leaving={leaving === a.requestId} label={titleOf(a)}>
@@ -131,7 +136,7 @@ function Decide({ a, cwd, busy, send }: { a: Ask; cwd: string; busy: boolean; se
       {open && (
         <CardDetails>
           {plan ? (
-            <div className="max-h-[40dvh] overflow-y-auto rounded-md bg-fill/60 px-3 py-2">
+            <div className="rounded-md bg-fill/60 px-3 py-2">
               <Markdown text={plan} className="text-base" />
             </div>
           ) : (
@@ -145,13 +150,30 @@ function Decide({ a, cwd, busy, send }: { a: Ask; cwd: string; busy: boolean; se
                 </>
               )}
               <dt className="text-ink-3">{t("ask.input")}</dt>
-              <dd className="m-0 max-h-40 overflow-auto font-mono text-xs leading-5 break-all whitespace-pre-wrap text-ink-2">{details}</dd>
+              <dd className="m-0 font-mono text-xs leading-5 break-all whitespace-pre-wrap text-ink-2">{details}</dd>
             </dl>
           )}
           <input value={why} onChange={(e) => setWhy(e.target.value)} placeholder={t("ask.reason")} aria-label={t("ask.reason")} disabled={busy} className="no-ring h-8 rounded-md bg-fill px-2.5 text-sm placeholder:text-ink-3" />
         </CardDetails>
       )}
     </>
+  );
+}
+
+/** An option's mark, a solid disc (a rounded square for a multiple choice): grey with its number,
+ *  ink with a check once picked (the user, 2026-11-06: solid, not a small ring). */
+function Mark({ n, on, square, tap }: { n: number; on: boolean; square: boolean; tap: boolean }) {
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        "grid size-5 shrink-0 place-items-center text-[11px] font-semibold tabular-nums transition-[background-color,color,transform] duration-(--dur-2) ease-(--ease-out)",
+        square ? "rounded-[6px]" : "rounded-full",
+        on ? "scale-105 bg-ink text-on-ink" : cn("bg-ink/10 text-ink-2", tap ? "group-hover:bg-ink group-hover:text-on-ink" : "group-hover:text-ink-2"),
+      )}
+    >
+      {on ? <Check size={12} strokeWidth={3} /> : n}
+    </span>
   );
 }
 
@@ -203,7 +225,6 @@ function Question({ a, busy, send }: { a: Ask; busy: boolean; send: (r: Reply) =
             <div className="ml-4 flex flex-col gap-px">
               {q.options.map((o, j) => {
                 const on = picked[i]!.includes(j) && !typed;
-                const Box = q.multiSelect ? (on ? SquareCheck : SquareIcon) : on ? CircleDot : Circle;
                 return (
                   <button
                     key={j}
@@ -215,7 +236,7 @@ function Question({ a, busy, send }: { a: Ask; busy: boolean; send: (r: Reply) =
                       on ? "bg-fill" : "hover:bg-fill/70",
                     )}
                   >
-                    {!tap && <Box size={15} className={cn("shrink-0", on ? "text-ink" : "text-ink-4")} />}
+                    <Mark n={j + 1} on={on} square={!!q.multiSelect} tap={tap} />
                     <span className="flex min-w-0 flex-1 flex-col">
                       <span>{o.label}</span>
                       {o.description && <span className="text-xs leading-[18px] text-ink-3">{o.description}</span>}

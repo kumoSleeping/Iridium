@@ -11,7 +11,7 @@ import { api } from "../api/client";
 import { LinkDot } from "../link";
 import type { Session } from "../api/types.gen";
 import { WsPlus } from "../create";
-import { chatOf, stateAhead, type Draft as Drafted, type Sent } from "../chats";
+import { chatOf, compactSent, stateAhead, type Draft as Drafted, type Sent } from "../chats";
 import { LOCAL_ME, useMe, useTerminalList, useWorkspaces } from "../data";
 import { t, useLang } from "../i18n";
 import { pushIn } from "../motion";
@@ -31,7 +31,7 @@ import { ContextRing, ModelKey, modelView, QuotaBars, useMode } from "./meters";
 import { Queue } from "./queue";
 import { mentionOf } from "./mention";
 import { SESSION_DRAG, sourceOf, yours } from "./refs";
-import { Pending, Running, Said } from "./said";
+import { Compaction, Pending, Running, Said } from "./said";
 import { Stick, toEnd } from "./stick";
 
 const BUSY = new Set(["running", "compacting", "starting", "waiting"]);
@@ -105,10 +105,16 @@ export function ChatPage({ id, phone, sheet = 0, onSheet, onMe }: { id: string; 
   useEffect(() => {
     if (wasBusy.current && !busy) {
       const upTo = log.mark();
-      void log.newer().then(() => (log.dropDrafts(upTo), changed()), () => {});
+      // A /compact that wrote no compaction (it had nothing to compact) is done too.
+      void log.newer().then(() => (log.dropDrafts(upTo), (log.sent = log.sent.filter((x) => x.failed !== undefined || !compactSent(x))), changed()), () => {});
     }
     wasBusy.current = busy;
   }, [busy]);
+  // Compacting, or a /compact on its way: the compaction's line, since when.
+  const compacting = s?.status === "compacting" || log.sent.some((x) => x.failed === undefined && compactSent(x));
+  const compactSince = useRef(0);
+  if (!compacting) compactSince.current = 0;
+  else if (!compactSince.current) compactSince.current = Date.now();
   // Its agent cleared itself (Claude's own /clear): the conversation goes on in another session,
   // and the page with it, as after Iridium's /clear. Only as it happens here, not on opening one
   // that went on before.
@@ -200,7 +206,6 @@ export function ChatPage({ id, phone, sheet = 0, onSheet, onMe }: { id: string; 
     <div className="relative h-full" onDragOver={(e) => files(e) || session(e)} onDrop={drop}>
       <Stick scroller={scroller} tail={grew} older={() => log.older()} place={chat.place} bottom={stackH} style={{ paddingTop: 64, paddingBottom: stackH + 20 }}>
         <div className="mx-auto flex max-w-[760px] flex-col gap-5 px-4 sm:px-6">
-          {log.loaded && !log.blocks.length && !log.drafts.length && !log.sent.length && <p className="g-fade m-0 pt-16 text-center text-sm text-ink-4">{t("chat.empty")}</p>}
           {/* In a turn, the calls being written or run and the dots share one row at the end, as
               high whatever it shows: the conversation does not jump as a call is drafted, runs and
               folds into the line above (the user, 2026-11-06). */}
@@ -218,7 +223,7 @@ export function ChatPage({ id, phone, sheet = 0, onSheet, onMe }: { id: string; 
                 </div>
               ),
             )}
-          {log.sent.map((x) => (
+          {log.sent.filter((x) => x.failed !== undefined || !compactSent(x)).map((x) => (
             <Pending
               key={x.key}
               s={x}
@@ -231,7 +236,11 @@ export function ChatPage({ id, phone, sheet = 0, onSheet, onMe }: { id: string; 
           {/* The turn's row, after what you sent: kept, one line high, even out of a turn, so a
               message sent or the dots coming do not move the conversation (the user, 2026-11-06). */}
           {/* Close under what is above it (the user, 2026-11-06): a call's line by the calls before. */}
-          {log.loaded && (busy ? <Activity calls={log.drafts.filter((d) => d.tool)} running={shown.flatMap((b) => (b.kind === "running" ? [b.tool] : []))} cwd={cwd} quiet={s.status !== "waiting" && !log.drafts.some((d) => !d.whole && !d.tool)} grew={grew} /> : <div aria-hidden className="-mt-3 h-7 pointer-coarse:h-9" />)}
+          {log.loaded && compacting ? (
+            <div className="-mt-1">
+              <Compaction since={compactSince.current} />
+            </div>
+          ) : log.loaded && (busy ? <Activity calls={log.drafts.filter((d) => d.tool)} running={shown.flatMap((b) => (b.kind === "running" ? [b.tool] : []))} cwd={cwd} quiet={s.status !== "waiting" && !log.drafts.some((d) => !d.whole && !d.tool)} grew={grew} /> : <div aria-hidden className="-mt-3 h-7 pointer-coarse:h-9" />)}
           {s.status === "error" && s.error && (
             <p className="m-0 text-center text-xs text-err" title={s.error}>
               {t("chat.crashed")} · <span className="font-mono">{s.error.slice(0, 160)}</span>

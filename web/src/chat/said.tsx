@@ -5,7 +5,7 @@
 // peer sent; Iridium's own lines
 // centred and faint; the agent's words as Markdown with the files they name; tool calls and
 // thoughts folded to a line.
-import { Archive, ArchiveRestore, ArrowUpRight, BookOpen, Bot, Brain, Check, ChevronRight, Clock, CircleStop, CircleX, CloudDownload, CloudUpload, Earth, FileCode, FileDiff, FilePen, Files as FilesIcon, FileText, FolderGit2, FlaskConical, FolderOpen, GitBranch, GitCommitHorizontal, GitPullRequest, Globe, Hammer, History, Hourglass, KeyRound, Laptop, List, ListChecks, LoaderCircle, MessageCircleQuestionMark, MessageSquarePlus, Monitor, Network, Package, Plug, RotateCcw, RotateCw, Search, Send, ServerCog, Smartphone, SquareTerminal, Trash2, UserRound, Workflow as WorkflowIcon, Wrench, X, type LucideIcon } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowUpRight, BookOpen, Bot, Check, ChevronRight, Clock, Cpu, FoldVertical, CircleStop, CircleX, CloudDownload, CloudUpload, Earth, FileCode, FileDiff, FilePen, Files as FilesIcon, FileText, FolderGit2, FlaskConical, FolderOpen, GitBranch, GitCommitHorizontal, GitPullRequest, Globe, Hammer, History, Hourglass, KeyRound, Laptop, List, ListChecks, LoaderCircle, MessageCircleQuestionMark, MessageSquarePlus, Monitor, Network, Package, Plug, RotateCcw, RotateCw, Search, Send, ServerCog, Smartphone, SquareTerminal, Trash2, UserRound, Workflow as WorkflowIcon, Wrench, X, type LucideIcon } from "lucide-react";
 import { Children, forwardRef, memo, useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { api } from "../api/client";
 import type { Block, FileRef, Result } from "../api/types.gen";
@@ -201,6 +201,43 @@ function Line({ icon, children, error, title }: { icon?: ReactNode; children: Re
   );
 }
 
+const tok = (n: number) => (n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : `${n}`);
+const took = (ms: number) => (ms >= 60_000 ? t("sys.compactMin", { m: Math.floor(ms / 60_000), s: Math.round((ms % 60_000) / 1000) }) : t("sys.compactSec", { s: Math.max(1, Math.round(ms / 1000)) }));
+
+/** A compaction, as a rule across the chat: the light and the words between two hairlines. Live,
+ *  while it runs: a yellow light breathing and the seconds so far; done, the context before and
+ *  after it, how long it took and when (the user, 2026-11-06: a message of its own, not your
+ *  /compact, not the dots). The same height either way, the one taking the other's place. */
+export function Compaction({ b, since }: { b?: Block; since?: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (b) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [!!b]);
+  const c = b?.compact;
+  const parts: string[] = [];
+  if (b) {
+    parts.push(t(c?.auto ? "sys.compactAuto" : "sys.compact"));
+    if (c?.before) parts.push(c.after ? `${tok(c.before)} → ${tok(c.after)}` : t("sys.compactFrom", { n: tok(c.before) }));
+    if (c?.ms) parts.push(took(c.ms));
+    if (b.time) parts.push(clock(b.time));
+  } else {
+    parts.push(t("sys.compacting"));
+    if (since && now - since >= 3000) parts.push(took(now - since));
+  }
+  return (
+    <div className="g-fade flex items-center gap-3 py-1 text-xs text-ink-3" role={b ? undefined : "status"} title={b?.text ? b.text.slice(0, 600) : undefined}>
+      <span aria-hidden className="h-px flex-1 bg-edge" />
+      <span className="flex min-w-0 items-center gap-2">
+        {b ? <FoldVertical size={13} className="shrink-0 text-ink-4" /> : <span aria-hidden className="row-lamp shrink-0" data-s="compacting" />}
+        <span className="truncate tabular-nums">{parts.join(" · ")}</span>
+      </span>
+      <span aria-hidden className="h-px flex-1 bg-edge" />
+    </div>
+  );
+}
+
 const SYSTEM: Record<string, Parameters<typeof t>[0]> = { compact: "sys.compact", interrupted: "sys.interrupted", unreadable: "sys.unreadable", api_error: "sys.apiError", local_command: "sys.localCommand" };
 
 /** What the agent said: Markdown, then the files it names. */
@@ -235,6 +272,7 @@ export function Said({ b, session, cwd, source, onJump }: { b: Shown; session: s
       return <Assistant b={b} session={session} cwd={cwd} />;
     case "system":
       if (b.event === "iridium") return <Line icon={<RotateCcw size={12} />} title={b.text}>{b.text}</Line>;
+      if (b.event === "compact") return <Compaction b={b} />;
       // A background task ended (a workflow, a background agent): its summary as Claude Code says it.
       if (b.event === "task")
         return (
@@ -283,7 +321,7 @@ const KINDS: Record<Kind, [LucideIcon, number?]> = {
   ask: [MessageCircleQuestionMark, 85],
   mcp: [Plug, 110],
   other: [Wrench],
-  thinking: [Brain, 320],
+  thinking: [Cpu, 320],
 };
 /** A shell call's icon by what its command does; in the command kind's hue. */
 const CMDS: Record<Cmd, LucideIcon> = {

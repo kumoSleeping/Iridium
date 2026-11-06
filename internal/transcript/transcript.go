@@ -390,6 +390,13 @@ type claudeLine struct {
 	} `json:"origin"`
 	Error   json.RawMessage `json:"error"`
 	Content json.RawMessage `json:"content"`
+	// CompactMetadata: a compact_boundary's figures.
+	CompactMetadata *struct {
+		Trigger    string `json:"trigger"`
+		PreTokens  int    `json:"preTokens"`
+		PostTokens int    `json:"postTokens"`
+		DurationMs int64  `json:"durationMs"`
+	} `json:"compactMetadata"`
 }
 
 type claudeMessage struct {
@@ -512,6 +519,10 @@ func blocksOf(off int64, raw []byte, max int, sources Sources) []api.Block {
 					line += " " + strings.TrimSpace(a[1])
 				}
 				all = []string{line}
+				// /compact: the compaction's own line, just before, says it (the user, 2026-11-06).
+				if c[1] == "/compact" {
+					break
+				}
 			}
 		}
 		var said []string
@@ -561,7 +572,11 @@ func blocksOf(off int64, raw []byte, max int, sources Sources) []api.Block {
 	case "system":
 		switch l.Subtype {
 		case "compact_boundary":
-			add(api.Block{Kind: api.BlockKindSystem, Event: api.SystemEventCompact})
+			b := api.Block{Kind: api.BlockKindSystem, Event: api.SystemEventCompact}
+			if m := l.CompactMetadata; m != nil {
+				b.Compact = &api.Compaction{Auto: m.Trigger == "auto", Before: m.PreTokens, After: m.PostTokens, Ms: m.DurationMs}
+			}
+			add(b)
 		case "api_error":
 			var e struct {
 				Formatted string `json:"formatted"`

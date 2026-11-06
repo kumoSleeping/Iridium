@@ -241,10 +241,20 @@ type Block struct {
 	Input  string  `json:"input,omitempty"`
 	Result *Result `json:"result,omitempty"`
 	Error  bool    `json:"error,omitempty"` // result
-	// system: what happened.
-	Event SystemEvent `json:"event,omitempty"`
+	// system: what happened. Compact: a compaction's figures, as far as the agent records them.
+	Event   SystemEvent `json:"event,omitempty"`
+	Compact *Compaction `json:"compact,omitempty"`
 	// Files the block names that exist: user and assistant text, a Write call's file.
 	Files []FileRef `json:"files,omitempty"`
+}
+
+// Compaction is what a compaction did: Auto, the agent's own (the context ran full) rather than
+// a /compact; the context before and after it in tokens, and how long it took; 0 is not recorded.
+type Compaction struct {
+	Auto   bool  `json:"auto,omitempty"`
+	Before int   `json:"before,omitempty"`
+	After  int   `json:"after,omitempty"`
+	Ms     int64 `json:"ms,omitempty"`
 }
 
 type BlockKind string

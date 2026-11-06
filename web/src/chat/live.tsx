@@ -10,8 +10,8 @@ import { partialInput, tail } from "./partial";
 import { KindIcon } from "./said";
 
 /** A tool call being written: its icon and name at once, a light sweeping across them, then what
- *  it is about typed out as it comes, with a caret; written whole, it waits for its block. */
-export function ToolDraft({ name, input, whole }: { name: string; input: string; whole: boolean }) {
+ *  it is about typed out as it comes (no caret: the user, 2026-11-06); written whole, it waits for its block. */
+export function ToolDraft({ name, input }: { name: string; input: string; whole?: boolean }) {
   const call = { name, input: JSON.stringify(partialInput(input)) };
   const a = argOf(call);
   return (
@@ -19,7 +19,7 @@ export function ToolDraft({ name, input, whole }: { name: string; input: string;
       <KindIcon kind={kindOf(name)} cmd={cmdOfCall(call)} />
       <span className="shine shrink-0">{name}</span>
       {a.arg ? (
-        <span className={cn("min-w-0 truncate text-ink-3", a.code ? "font-mono text-xs" : "text-xs", !whole && "caret")}>{tail(a.arg)}</span>
+        <span className={cn("min-w-0 truncate text-ink-3", a.code ? "font-mono text-xs" : "text-xs")}>{tail(a.arg)}</span>
       ) : (
         <span className="shine min-w-0 truncate text-xs">{t("chat.writingCall")}</span>
       )}

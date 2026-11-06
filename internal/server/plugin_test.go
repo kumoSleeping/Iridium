@@ -188,8 +188,8 @@ func TestPluginChat(t *testing.T) {
 	if st.Reply == nil || !strings.Contains(st.Reply.Text, in.Session[:8]) || strings.Contains(st.Reply.Text, "**") {
 		t.Errorf("status: %+v", st.Reply)
 	}
-	p.do("qq", "POST", key+"/input", api.ChatInput{Text: "/compact"}, nil)
-	if _, r := p.next(events, "reply"); r.Reply.Markdown != "ok: /compact" {
+	p.do("qq", "POST", key+"/input", api.ChatInput{Text: "/review"}, nil)
+	if _, r := p.next(events, "reply"); r.Reply.Markdown != "ok: /review" {
 		t.Errorf("passed through: %+v", r.Reply)
 	}
 
@@ -255,7 +255,7 @@ func TestPluginChat(t *testing.T) {
 	closeEvents()
 	again, closeAgain := p.stream("qq", first.id)
 	defer closeAgain()
-	if _, r := p.next(again, "reply"); r.Reply.Markdown != "ok: /compact" {
+	if _, r := p.next(again, "reply"); r.Reply.Markdown != "ok: /review" {
 		t.Errorf("after reconnect: %+v", r.Reply)
 	}
 }

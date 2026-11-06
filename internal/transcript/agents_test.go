@@ -129,6 +129,11 @@ func TestPiTranscript(t *testing.T) {
 	if len(b) != 1 || b[0].From != "网页" || b[0].Text != "hi" {
 		t.Errorf("source: %+v", b)
 	}
+	// An extension's [Image #n]: the paths again, as written.
+	b = Pi(0, []byte(`{"type":"message","message":{"role":"user","content":[{"type":"text","text":"songs\n\n[附件] `+"`[Image #1]`"+`\n[附件] `+"`[Image #2]`"+`\n\n[Image #1]: /u/a.png\n[Image #2]: /u/b.png"},{"type":"image","data":"x"}]}}`), Clip, nil)
+	if len(b) != 1 || b[0].Text != "songs\n\n[附件] `/u/a.png`\n[附件] `/u/b.png`" {
+		t.Errorf("images: %+v", b)
+	}
 	b = Pi(0, []byte(`{"type":"message","message":{"role":"bashExecution","command":"ls","output":"a\n","exitCode":0}}`), Clip, nil)
 	if kindsOf(b) != "system:local_command" || b[0].Text != "$ ls\na\n" {
 		t.Errorf("bash: %+v", b)

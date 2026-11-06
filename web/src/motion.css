@@ -429,10 +429,11 @@ html[data-turn] .vt-drawer {
       opacity: 0.45;
     }
   }
-  .lamp[data-s="compacting"] > i,
-  .row-lamp[data-s="compacting"] {
-    animation: none !important;
+  .lamp[data-s="compacting"] > i {
+    animation-name: lamp-fade !important;
+    animation-duration: 2.4s !important;
   }
+  .row-lamp[data-s="compacting"],
   .row-lamp[data-s="running"],
   .row-lamp[data-s="starting"] {
     animation-name: lamp-fade !important;

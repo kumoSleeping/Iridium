@@ -47,9 +47,13 @@ func Main() (code int, ok bool) {
 //     never run again by itself; crashloop crashes again each time it is run again.
 //   - QUOTA is refused for the quota, which comes back in half a second to one and a half.
 //
+// /compact compacts for three seconds (a compacting status, then the boundary with its figures).
 // /clear (as the whole message, its source prefix aside) clears it as Claude's own does: a
 // conversation_reset, then it goes on in the same process as a conversation of a new id, the
 // command its first lines.
+// compactFor is how long a /compact takes.
+var compactFor = 3 * time.Second
+
 func Claude() int {
 	session := ""
 	for _, a := range os.Args[1:] {
@@ -195,6 +199,8 @@ func Claude() int {
 	var waiting map[string]any // a WAIT turn
 	var steered []map[string]any
 	var timer <-chan time.Time
+	var compacting map[string]any // a /compact running
+	var compacted <-chan time.Time
 	for {
 		var line []byte
 		select {
@@ -207,6 +213,17 @@ func Claude() int {
 			timer = nil
 			finish(waiting, steered)
 			waiting, steered = nil, nil
+			continue
+		case <-compacted:
+			compacted = nil
+			pre, post := 120000, 9000
+			note(map[string]any{"type": "system", "subtype": "compact_boundary", "timestamp": stamp(), "content": "Conversation compacted", "compactMetadata": map[string]any{"trigger": "manual", "preTokens": pre, "postTokens": post, "durationMs": compactFor.Milliseconds()}})
+			note(map[string]any{"type": "user", "isCompactSummary": true, "timestamp": stamp(), "message": map[string]any{"role": "user", "content": "This session is being continued from a previous conversation."}})
+			note(map[string]any{"type": "user", "uuid": compacting["uuid"], "timestamp": stamp(), "message": map[string]any{"role": "user", "content": "<command-name>/compact</command-name>\n<command-message>compact</command-message>\n<command-args></command-args>"}})
+			say(map[string]any{"type": "system", "subtype": "compact_boundary", "compact_metadata": map[string]any{"trigger": "manual", "pre_tokens": pre, "post_tokens": post}})
+			say(map[string]any{"type": "system", "subtype": "status", "status": nil, "compact_result": "success"})
+			end(compacting, "success")
+			compacting = nil
 			continue
 		}
 		var f map[string]any
@@ -297,6 +314,15 @@ func Claude() int {
 				say(map[string]any{"type": "command_lifecycle", "command_uuid": f["uuid"], "state": "started"})
 				note(map[string]any{"type": "user", "uuid": f["uuid"], "timestamp": stamp(), "message": map[string]any{"role": "user", "content": text}})
 				steered = append(steered, f)
+				continue
+			}
+			if unprefixed(text) == "/compact" {
+				// Compacts for compactFor, as Claude's does: a status, then the boundary and the
+				// command's line in the record.
+				say(map[string]any{"type": "system", "subtype": "session_state_changed", "state": "running"})
+				say(map[string]any{"type": "command_lifecycle", "command_uuid": f["uuid"], "state": "started"})
+				say(map[string]any{"type": "system", "subtype": "status", "status": "compacting"})
+				compacting, compacted = f, time.After(compactFor)
 				continue
 			}
 			if unprefixed(text) == "/clear" {

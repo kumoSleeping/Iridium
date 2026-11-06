@@ -99,7 +99,7 @@ func TestRules(t *testing.T) {
 		{"type": "attachment", "attachment": map[string]any{"type": "date"}},
 		assistant(map[string]any{"type": "thinking", "thinking": ""}, map[string]any{"type": "thinking", "thinking": long}, text("ok"), map[string]any{"type": "tool_use", "id": "t1", "name": "Bash", "input": map[string]any{"command": long}}),
 		user("r1", []any{map[string]any{"type": "tool_result", "tool_use_id": "t1", "content": []any{text(long)}, "is_error": true}}),
-		{"type": "system", "subtype": "compact_boundary"},
+		{"type": "system", "subtype": "compact_boundary", "compactMetadata": map[string]any{"trigger": "manual", "preTokens": 353095, "postTokens": 15600, "durationMs": 117301}},
 		{"type": "system", "subtype": "api_error", "error": map[string]any{"message": "overloaded"}},
 		{"type": "system", "subtype": "local_command", "content": "<local-command-stdout>hi</local-command-stdout>"},
 		{"type": "file-history-snapshot"},
@@ -126,6 +126,9 @@ func TestRules(t *testing.T) {
 			s += "(" + b.Text + ")"
 		case api.BlockKindSystem:
 			s += "(" + string(b.Event) + ")"
+			if c := b.Compact; b.Event == api.SystemEventCompact && (c == nil || c.Auto || c.Before != 353095 || c.After != 15600 || c.Ms != 117301) {
+				t.Errorf("compaction %+v", c)
+			}
 			if b.Event == api.SystemEventLocalCommand && b.Text != "hi" {
 				t.Errorf("local command %q", b.Text)
 			}
@@ -141,7 +144,6 @@ func TestRules(t *testing.T) {
 		"user([网页] typed in a terminal||u2)",
 		"user(real words\n\n<pasted_content id=\"1\">x</pasted_content id=\"1\">||u3)",
 		"system(interrupted)",
-		"user(/compact keep the tests||u6)",
 		"user(said mid-turn||q1)",
 		"thinking(2000/2500)",
 		"assistant(ok)",
@@ -164,14 +166,14 @@ func TestRules(t *testing.T) {
 
 	// The whole text by position: the call's input, its result, the thought.
 	f := Open(path, ours)
-	tool := page.Blocks[8]
+	tool := page.Blocks[7]
 	if full, err := f.Full(tool.At); err != nil || !strings.Contains(full, long) {
 		t.Errorf("full input: %v", err)
 	}
 	if full, err := f.Full(tool.Result.At); err != nil || full != long {
 		t.Errorf("full result: %d %v", len(full), err)
 	}
-	if full, err := f.Full(page.Blocks[6].At); err != nil || full != long {
+	if full, err := f.Full(page.Blocks[5].At); err != nil || full != long {
 		t.Errorf("full thought: %v", err)
 	}
 	if _, err := f.Full("1.0"); err != ErrNoBlock {

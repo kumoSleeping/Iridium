@@ -20,13 +20,18 @@ export const lineOf = (b: { at: string }) => parseInt(b.at);
  *  shows a check a moment (chat/said.tsx SendState). */
 export const landed = new Map<string, number>();
 
+/** A /compact you sent: no bubble, the chat's compaction line says it (chat/said.tsx Compaction). */
+export const compactSent = (s: Sent) => /^\/compact(\s|$)/.test(s.text.trim());
+
 /** Those sent not yet in the transcript: each finds its own among the user blocks written since it
- *  was sent, by its input id, else by its words. A failed one stays. */
+ *  was sent, by its input id, else by its words; a /compact, the compaction written since. A
+ *  failed one stays. */
 export function unsent(sent: Sent[], blocks: Block[]): Sent[] {
   let past = 0;
   return sent.filter((s) => {
     s.from = Math.max(s.from, past);
     if (s.failed !== undefined) return true;
+    if (compactSent(s)) return !blocks.some((b) => b.kind === "system" && b.event === "compact" && lineOf(b) >= s.from);
     const b = blocks.find((b) => b.kind === "user" && ((s.input && b.id === s.input) || (lineOf(b) >= s.from && b.text !== undefined && s.text && b.text.trim().startsWith(s.text.trim().slice(0, 200)))));
     if (!b) return true;
     past = lineOf(b) + 1;
