@@ -1,45 +1,135 @@
-// The blocks of a chat by source (plan "消息来源", web/sample): your words a bubble (another panel's
-// avatar on its corner when from there); a letter card for what another session's ir, a plugin or a
-// peer sent, its logo or avatar and name, a key to go there; Iridium's own lines centred and faint;
-// the agent's words as Markdown with the files they name; tool calls and thoughts folded to a line.
-import { ArrowUpRight, Bot, Brain, ChevronRight, CircleX, FilePen, FileText, Globe, ListChecks, LoaderCircle, MessageCircleQuestionMark, Plug, RotateCcw, RotateCw, Search, SquareTerminal, Wrench, X, type LucideIcon } from "lucide-react";
+// The blocks of a chat by source (plan "消息来源", web/sample), QQ-like: each of the user's side with
+// its sender's face, name and badge. Your words (from any of your panels or terminals) a bubble on
+// the right, the terminal's avatar and its device; a letter on the left for what another session's
+// ir (its agent's logo, a bot badge, a key to go there), a plugin or a peer sent; Iridium's own lines
+// centred and faint; the agent's words as Markdown with the files they name; tool calls and
+// thoughts folded to a line.
+import { Archive, ArchiveRestore, ArrowUpRight, BookOpen, Bot, Brain, Check, ChevronRight, Clock, CircleStop, CircleX, CloudDownload, CloudUpload, Earth, FileCode, FileDiff, FilePen, Files as FilesIcon, FileText, FolderGit2, FlaskConical, FolderOpen, GitBranch, GitCommitHorizontal, GitPullRequest, Globe, Hammer, History, Hourglass, KeyRound, List, ListChecks, LoaderCircle, MessageCircleQuestionMark, MessageSquarePlus, Monitor, Network, Package, Plug, RotateCcw, RotateCw, Search, Send, ServerCog, Smartphone, SquareTerminal, Trash2, UserRound, Workflow as WorkflowIcon, Wrench, X, type LucideIcon } from "lucide-react";
 import { forwardRef, memo, useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { api } from "../api/client";
 import type { Block, FileRef, Result } from "../api/types.gen";
-import type { Sent } from "../chats";
+import { landed, type Sent } from "../chats";
 import { t } from "../i18n";
-import { Avatar, cn, IconKey, Logo, Tip } from "../ui";
+import { Avatar, Badge, cn, IconKey, Logo, Tip } from "../ui";
 import { useHome } from "../data";
-import { Files, Picture, size } from "./files";
-import { argOf, diffSum, foldLine, foldSaid, kindOf, type Diff, type Kind, type Shown, type Step, type Tool } from "./fold";
+import { LocalMark } from "../me";
+import { Files, Picture, previews, size } from "./files";
+import { cmdOfCall, type Cmd } from "./cmd";
+import { argOf, diffSum, foldLine, foldSaid, kindOf, runCmd, type Diff, type Kind, type Shown, type Step, type Tool } from "./fold";
 import { Markdown } from "./markdown";
 import { filesIn, type Source } from "./refs";
 
+type You = Extract<Source, { kind: "you" }>;
+type From = Extract<Source, { kind: "letter" }>;
+
 const clock = (ms?: number) => (ms ? new Date(ms).toLocaleTimeString(document.documentElement.lang === "en" ? "en" : "zh-CN", { hour: "2-digit", minute: "2-digit" }) : "");
 
-/** Your words: a bubble; from another panel, its avatar on the corner. */
-export const YouBubble = forwardRef<HTMLDivElement, { text: string; panel?: { name: string; avatar?: string }; faint?: boolean; failed?: boolean; children?: ReactNode; time?: number }>(function YouBubble({ text, panel, faint, failed, children, time }, ref) {
+const FACE = 28;
+const BADGE = 12;
+const DEVICES: Record<You["device"], [LucideIcon, Parameters<typeof t>[0]]> = { computer: [Monitor, "device.computer"], phone: [Smartphone, "device.phone"] };
+const youName = (who: You) => (who.local ? t("me.local") : who.name);
+
+/** A sender's face: a terminal's avatar (本机 its mark) with its device on the corner; a session's
+ *  agent logo on a disc with a bot (a workflow's mark when it is a workflow's prompt); a plugin's or
+ *  peer's avatar with its plug. */
+function Face({ who }: { who: You | From }) {
+  if (who.kind === "you") {
+    const [icon, label] = DEVICES[who.device] ?? DEVICES.computer;
+    if (!who.local) return <Avatar src={who.avatar} name={who.name} size={FACE} badge={icon} badgeSize={BADGE} badgeLabel={t(label)} />;
+    return (
+      <span className="relative inline-block shrink-0" style={{ width: FACE, height: FACE }}>
+        <LocalMark size={FACE} />
+        <Badge icon={icon} size={BADGE} label={t(label)} />
+      </span>
+    );
+  }
+  const badge = who.workflow ? <Badge icon={WorkflowIcon} size={BADGE} label={t("msg.workflow")} /> : <Badge icon={Bot} size={BADGE} label={t("msg.agent")} />;
+  if (who.agent)
+    return (
+      <span className="relative grid shrink-0 place-items-center rounded-full bg-fill-2" style={{ width: FACE, height: FACE }}>
+        <Logo agent={who.agent} size={16} />
+        {badge}
+      </span>
+    );
+  if (!who.channel)
+    // A session not in the list: a terminal-like mark and the bot.
+    return (
+      <span className="relative grid shrink-0 place-items-center rounded-full bg-fill-2 text-ink-2" style={{ width: FACE, height: FACE }}>
+        <SquareTerminal size={14} strokeWidth={2} aria-hidden />
+        {badge}
+      </span>
+    );
+  return <Avatar src={who.avatar} name={who.name} size={FACE} channel badgeSize={BADGE} />;
+}
+
+/** One message of the user's side, QQ-like: the face beside it, the name above, yours on the right.
+ *  jump: a key to the sending session, on the face and the name. */
+const Sender = forwardRef<HTMLDivElement, { who: You | From; title?: string; jump?: () => void; children: ReactNode }>(function Sender({ who, title, jump, children }, ref) {
+  const mine = who.kind === "you";
+  const name = mine ? youName(who) : who.name;
+  const tip = mine ? t("msg.fromPanel", { name: `${name} · ${t((DEVICES[who.device] ?? DEVICES.computer)[1])}` }) : jump ? t("msg.jump", { name }) : who.channel ? t("msg.viaChannel", { name }) : name;
+  const face = <Face who={who} />;
   return (
-    <div className="group/you flex justify-end pl-10">
-      <div ref={ref} className={cn("relative max-w-[min(560px,100%)] px-3.5 py-2", faint && "opacity-60")} title={time ? clock(time) : undefined}>
-        <span data-bubble-bg className={cn("absolute inset-0 rounded-xl bg-fill", failed && "shadow-[inset_0_0_0_1px_var(--err)]")} aria-hidden />
-        {text && <span className="relative block text-md whitespace-pre-wrap [overflow-wrap:anywhere]">{text}</span>}
-        {children && <span className="relative mt-1 flex flex-wrap gap-1.5">{children}</span>}
-        {panel && (
-          <Tip label={t("msg.fromPanel", { name: panel.name })}>
-            <span className="absolute -top-1.5 -left-1.5 grid rounded-full" style={{ boxShadow: "0 0 0 2px var(--paper)" }} aria-label={t("msg.fromPanel", { name: panel.name })}>
-              <Avatar src={panel.avatar} name={panel.name} size={18} />
-            </span>
-          </Tip>
+    <div ref={ref} className={cn("flex items-start gap-2.5", mine ? "flex-row-reverse pl-6 sm:pl-10" : "pr-6 sm:pr-10")} title={title}>
+      <Tip label={tip}>
+        {jump ? (
+          <button type="button" onClick={jump} aria-label={tip} className="g-press grid shrink-0 rounded-full">
+            {face}
+          </button>
+        ) : (
+          <span className="grid shrink-0" aria-label={tip}>
+            {face}
+          </span>
         )}
+      </Tip>
+      <div className={cn("flex min-w-0 flex-col gap-1", mine ? "items-end" : "items-start")}>
+        {jump ? (
+          <button type="button" onClick={jump} className="group flex max-w-full items-center gap-0.5 rounded-sm px-0.5 text-xs leading-4 text-ink-3 hover:text-ink-2">
+            <span className="min-w-0 truncate">{name}</span>
+            <ArrowUpRight size={11} className="shrink-0 text-ink-4 group-hover:text-ink-2" />
+          </button>
+        ) : (
+          <span className="max-w-full truncate px-0.5 text-xs leading-4 text-ink-3">{name}</span>
+        )}
+        {children}
       </div>
     </div>
   );
 });
 
+/** Your words: a bubble on the right, under your terminal's name, its face beside. */
+/** Where a message of yours is, as a small mark outside its bubble's lower left corner, no words (the
+ *  user, 2026-11-06; its tip says): going, a ring breathing; waiting in the queue, a clock; just
+ *  taken, a green check that fades. The bubble itself is drawn as it will stay, not faint. */
+type Going = "sending" | "steering" | "queued" | "landed";
+const GOING: Record<Going, string> = { sending: "msg.sending", steering: "msg.steering", queued: "msg.queued", landed: "msg.landed" };
+function SendState({ state }: { state: Going }) {
+  const label = t(GOING[state] as "msg.sending");
+  return (
+    <span role="status" aria-label={label} title={label} className="absolute bottom-2 -left-[18px] grid size-3 place-items-center text-ink-3">
+      {state === "queued" ? <Clock size={10} strokeWidth={2.25} className="g-fade" /> : state === "landed" ? <Check size={11} strokeWidth={2.5} className="sent-check text-run" /> : <span className="send-ring" />}
+    </span>
+  );
+}
+/** How long after it landed a message still shows its check. */
+const CHECK_FOR = 1600;
+
+export const YouBubble = forwardRef<HTMLDivElement, { text: string; who: You; failed?: boolean; children?: ReactNode; time?: number; going?: Going }>(function YouBubble({ text, who, failed, children, time, going }, ref) {
+  return (
+    <Sender ref={ref} who={who} title={time ? clock(time) : undefined}>
+      <div className="relative max-w-[min(560px,100%)] px-3.5 py-2">
+        {going && <SendState state={going} />}
+        <span data-bubble-bg className={cn("absolute inset-0 rounded-xl rounded-tr-sm bg-fill", failed && "shadow-[inset_0_0_0_1px_var(--err)]")} aria-hidden />
+        {text && <span className="relative block text-md whitespace-pre-wrap [overflow-wrap:anywhere]">{text}</span>}
+        {children && <span className="relative mt-1 flex flex-wrap gap-1.5">{children}</span>}
+      </div>
+    </Sender>
+  );
+});
+
 /** A file in your words: a picture small, opening the original; any other its name and size. */
 function Attached({ session, f }: { session: string; f: FileRef }) {
-  if (f.kind === "image") return <Picture src={f.thumb ? api.thumbURL(session, f.ref, 256) : api.fileURL(session, f.ref)} full={api.fileURL(session, f.ref)} name={f.name} small />;
+  if (f.kind === "image") return <Picture src={f.thumb ? api.thumbURL(session, f.ref, 256) : api.fileURL(session, f.ref)} full={api.fileURL(session, f.ref)} name={f.name} small under={previews.get(f.path)} />;
   return (
     <a href={api.fileURL(session, f.ref, true)} download={f.name} className="flex max-w-full items-center gap-1 rounded-md bg-paper/60 px-1.5 py-0.5 text-xs text-ink-2 hover:text-ink">
       <FileText size={12} className="shrink-0" />
@@ -49,27 +139,26 @@ function Attached({ session, f }: { session: string; f: FileRef }) {
   );
 }
 
-/** A message sent from here the transcript has yet to bring: faint; not taken, red with a retry. */
-export function Pending({ s, retry, drop, bubbleRef }: { s: Sent; retry: () => Promise<void>; drop: () => void; bubbleRef?: (el: HTMLDivElement | null) => void }) {
+/** A message sent from here the transcript has yet to bring: its mark says where it is; not taken,
+ *  red with a retry. */
+export function Pending({ s, who, retry, drop, bubbleRef }: { s: Sent; who: You; retry: () => Promise<void>; drop: () => void; bubbleRef?: (el: HTMLDivElement | null) => void }) {
   const [busy, setBusy] = useState(false);
   return (
     <div className="flex flex-col items-end gap-0.5">
-      <YouBubble ref={bubbleRef} text={s.text} faint={s.failed === undefined} failed={s.failed !== undefined}>
-        {s.files.map((f) => (
+      <YouBubble ref={bubbleRef} text={s.text} who={who} failed={s.failed !== undefined} going={s.failed !== undefined ? undefined : s.queued ? "queued" : s.steer ? "steering" : "sending"}>
+        {s.files.map((f) =>
+          f.url ? (
+            <Picture key={f.ref} src={f.url} full={f.url} name={f.name} small />
+          ) : (
           <span key={f.ref} className="flex items-center gap-1 rounded-md bg-paper/60 px-1.5 py-0.5 text-xs text-ink-2">
             <FileText size={12} />
             {f.name}
           </span>
-        ))}
+          ),
+        )}
       </YouBubble>
-      {s.steer && s.failed === undefined && (
-        <span role="status" className="g-fade flex items-center gap-1 text-xs text-ink-3">
-          <LoaderCircle size={11} className="animate-spin" />
-          {t("msg.steering")}
-        </span>
-      )}
       {s.failed !== undefined && (
-        <div className="-mr-1 flex items-center gap-0.5">
+        <div className="mr-[34px] flex items-center gap-0.5">
           <span className="max-w-[280px] truncate text-xs text-err">{s.failed || t("err.send")}</span>
           <IconKey label={t("msg.dropUnsent")} onClick={drop} className="size-7">
             <X size={14} />
@@ -83,41 +172,12 @@ export function Pending({ s, retry, drop, bubbleRef }: { s: Sent; retry: () => P
   );
 }
 
-/** A letter: from another session's ir, a plugin or a peer. Not your words. */
-function Letter({ src, text, onJump }: { src: Extract<Source, { kind: "letter" }>; text: string; onJump: (id: string) => void }) {
-  const head = (
-    <>
-      {src.agent ? (
-        <Logo agent={src.agent} size={15} />
-      ) : !src.avatar && src.name === "本机" ? (
-        // The local ir, from a terminal: the terminal's mark.
-        <span className="grid size-[18px] shrink-0 place-items-center rounded-full bg-fill-2 text-ink-2">
-          <SquareTerminal size={11} strokeWidth={2.25} />
-        </span>
-      ) : (
-        <Avatar src={src.avatar} name={src.name} size={18} channel={src.channel} />
-      )}
-      <span className="min-w-0 truncate text-sm font-medium text-ink-2">{src.name}</span>
-    </>
-  );
+/** A letter: from another session's ir, a plugin or a peer. Not your words: on the left, in a card. */
+function Letter({ src, text, time, onJump }: { src: From; text: string; time?: number; onJump: (id: string) => void }) {
   return (
-    <div className="flex pr-10">
-      <div className="max-w-[min(560px,100%)] min-w-0 rounded-lg px-3.5 pt-2.5 pb-2.5 shadow-[0_0_0_1px_var(--edge)]">
-        {src.session ? (
-          <Tip label={t("msg.jump", { name: src.name })}>
-            <button type="button" onClick={() => onJump(src.session!)} className="group -mx-1 flex max-w-full items-center gap-2 rounded-sm px-1 hover:bg-fill">
-              {head}
-              <ArrowUpRight size={13} className="shrink-0 text-ink-4 group-hover:text-ink-2" />
-            </button>
-          </Tip>
-        ) : (
-          <Tip label={src.channel ? t("msg.viaChannel", { name: src.name }) : src.name}>
-            <span className="flex max-w-full items-center gap-2">{head}</span>
-          </Tip>
-        )}
-        <p className="m-0 mt-1.5 text-md whitespace-pre-wrap [overflow-wrap:anywhere]">{text}</p>
-      </div>
-    </div>
+    <Sender who={src} title={time ? clock(time) : undefined} jump={src.session ? () => onJump(src.session!) : undefined}>
+      <p className="m-0 max-w-[min(560px,100%)] min-w-0 rounded-xl rounded-tl-sm px-3.5 py-2 text-md whitespace-pre-wrap shadow-[inset_0_0_0_1px_var(--edge)] [overflow-wrap:anywhere]">{text}</p>
+    </Sender>
   );
 }
 
@@ -151,12 +211,12 @@ export function Said({ b, session, cwd, source, onJump }: { b: Shown; session: s
       const src = source(b);
       const text = b.text ?? "";
       if (src.kind === "iridium") return <Line icon={<RotateCcw size={12} />}>{text}</Line>;
-      if (src.kind === "letter") return <Letter src={src} text={text} onJump={onJump} />;
+      if (src.kind === "letter") return <Letter src={src} text={text} time={b.time} onJump={onJump} />;
       // The server writes each attachment as a line "[附件] `path`": the file shows as itself instead.
       const paths = new Set(b.files?.map((f) => f.path));
       const words = paths.size ? text.replace(/\n*^\[附件\] `([^`]+)`$/gm, (all, p: string) => (paths.has(p) ? "" : all)).trim() : text;
       return (
-        <YouBubble text={words} panel={src.panel} time={b.time}>
+        <YouBubble text={words} who={src} time={b.time} going={Date.now() - (landed.get(b.at) ?? 0) < CHECK_FOR ? "landed" : undefined}>
           {b.files?.map((f) => <Attached key={f.ref} session={session} f={f} />)}
         </YouBubble>
       );
@@ -165,6 +225,14 @@ export function Said({ b, session, cwd, source, onJump }: { b: Shown; session: s
       return <Assistant b={b} session={session} cwd={cwd} />;
     case "system":
       if (b.event === "iridium") return <Line icon={<RotateCcw size={12} />} title={b.text}>{b.text}</Line>;
+      // A background task ended (a workflow, a background agent): its summary as Claude Code says it.
+      if (b.event === "task")
+        return (
+          <Line icon={<WorkflowIcon size={12} />} title={b.text}>
+            <span className="max-w-[min(560px,100%)] truncate">{b.text}</span>
+            {b.time ? ` · ${clock(b.time)}` : ""}
+          </Line>
+        );
       return b.event === "api_error" || b.event === "local_command" || b.event === "unreadable" ? (
         <SystemFold b={b} session={session} />
       ) : (
@@ -207,8 +275,47 @@ const KINDS: Record<Kind, [LucideIcon, number?]> = {
   other: [Wrench],
   thinking: [Brain, 320],
 };
-const KindIcon = ({ kind, failed, size = 14, className }: { kind: Kind; failed?: boolean; size?: number; className?: string }) => {
-  const [Icon, hue] = KINDS[kind];
+/** A shell call's icon by what its command does; in the command kind's hue. */
+const CMDS: Record<Cmd, LucideIcon> = {
+  "ir-send": Send,
+  "ir-archive": Archive,
+  "ir-unarchive": ArchiveRestore,
+  "ir-new": MessageSquarePlus,
+  "ir-wait": Hourglass,
+  "ir-read": BookOpen,
+  "ir-list": List,
+  "ir-find": Search,
+  "ir-stop": CircleStop,
+  "ir-files": FilesIcon,
+  "ir-access": KeyRound,
+  "ir-profile": UserRound,
+  git: GitBranch,
+  "git-commit": GitCommitHorizontal,
+  "git-push": CloudUpload,
+  "git-pull": CloudDownload,
+  "git-diff": FileDiff,
+  "git-log": History,
+  "git-status": FolderGit2,
+  "git-branch": GitBranch,
+  gh: GitPullRequest,
+  test: FlaskConical,
+  build: Hammer,
+  install: Package,
+  net: Earth,
+  remote: Network,
+  search: Search,
+  read: FileText,
+  list: FolderOpen,
+  file: FilesIcon,
+  delete: Trash2,
+  script: FileCode,
+  service: ServerCog,
+  wait: Hourglass,
+  stop: CircleStop,
+};
+export const KindIcon = ({ kind, cmd, failed, size = 14, className }: { kind: Kind; cmd?: Cmd; failed?: boolean; size?: number; className?: string }) => {
+  const [KindGlyph, hue] = KINDS[kind];
+  const Icon = (kind === "command" && cmd && CMDS[cmd]) || KindGlyph;
   const tint = !failed && hue !== undefined;
   return <Icon size={size} className={cn("shrink-0", failed ? "text-err" : tint ? "k-tint" : "text-ink-3", className)} style={tint ? ({ "--k-h": hue } as CSSProperties) : undefined} aria-hidden />;
 };
@@ -235,7 +342,7 @@ function StepLine({ s, cwd }: { s: Step; cwd?: string }) {
   const a = argOf(s, cwd);
   return (
     <>
-      <KindIcon kind={kindOf(s.name)} failed={failed(s)} />
+      <KindIcon kind={kindOf(s.name)} cmd={cmdOfCall(s)} failed={failed(s)} />
       <span className="shrink-0 text-ink-2">{s.name}</span>
       <span className={cn("min-w-0 truncate", a.code ? "font-mono text-xs" : "text-xs")}>{a.arg}</span>
       {a.diff && !failed(s) && <DiffStat d={a.diff} />}
@@ -260,7 +367,7 @@ function Fold({ steps, session, cwd }: { steps: Step[]; session: string; cwd: st
         <span className="min-w-0 truncate">
           {runs.map((r, i) => (
             <span key={i} className={cn(i > 0 && "ml-3")}>
-              <KindIcon kind={r.name ? kindOf(r.name) : "thinking"} className="mr-2 inline-block align-[-2.5px]" />
+              <KindIcon kind={r.name ? kindOf(r.name) : "thinking"} cmd={r.name ? runCmd(steps, r.name) : undefined} className="mr-2 inline-block align-[-2.5px]" />
               <span className="text-ink-2">{r.name || t("msg.thinking")}</span>
               {r.n > 1 && <span className="tabular-nums"> ×{r.n}</span>}
             </span>
@@ -349,7 +456,7 @@ function pretty(s: string) {
 }
 
 /** A call still running: a light sweeping across it, how long it has run. */
-function Running({ tool, cwd }: { tool: Tool; cwd: string }) {
+export function Running({ tool, cwd }: { tool: Tool; cwd: string }) {
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
     const tick = setInterval(() => setNow(Date.now()), 1000);
@@ -359,7 +466,7 @@ function Running({ tool, cwd }: { tool: Tool; cwd: string }) {
   const secs = tool.time ? Math.max(0, Math.round((now - tool.time) / 1000)) : null;
   return (
     <div className="flex h-7 min-w-0 items-center gap-2 text-sm" aria-live="off">
-      <KindIcon kind={kindOf(tool.name)} />
+      <KindIcon kind={kindOf(tool.name)} cmd={cmdOfCall(tool)} />
       <span className="shine shrink-0">{tool.name}</span>
       <span className={cn("shine min-w-0 truncate", a.code ? "font-mono text-xs" : "text-xs")}>{a.arg}</span>
       {secs !== null && <span className="ml-auto shrink-0 text-xs text-ink-3 tabular-nums">{secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m${secs % 60}s`}</span>}

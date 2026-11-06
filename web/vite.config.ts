@@ -30,8 +30,8 @@ function precompress(): Plugin {
   };
 }
 
-/** The files of the chat and of the topology view that the first screen does not load, in that
- *  order, in a <meta name="later"> the page fetches ahead once idle (src/prefetch.ts). */
+/** The files of the chat that the first screen does not load, in a <meta name="later"> the page
+ *  fetches ahead once idle (src/prefetch.ts). */
 function later(): Plugin {
   return {
     name: "iridium-later",
@@ -52,7 +52,7 @@ function later(): Plugin {
         const chunks = Object.values(bundle!).flatMap((c) => (c.type === "chunk" ? [c] : []));
         const part = (...ends: string[]) => ends.flatMap((p) => chunks.filter((c) => c.facadeModuleId?.endsWith(p)).map((c) => c.fileName));
         const loaded = files(chunks.filter((c) => c.isEntry).map((c) => c.fileName));
-        const content = [...files(part("/src/chat/chat.tsx", "/src/topology/topology.tsx"))]
+        const content = [...files(part("/src/chat/chat.tsx"))]
           .filter((f) => !loaded.has(f))
           .map((f) => `/${f}`)
           .join(" ");

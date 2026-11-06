@@ -1,10 +1,11 @@
 // The page's pure logic: folding tool calls, reading sources and file references, the sidebar's
 // tree, the composer's key, the upgrade rules, the i18n dictionaries.
 import { describe, expect, test } from "vitest";
-import type { Block, Session, Terminal } from "../src/api/types.gen";
+import type { Block, Model, Session, Terminal } from "../src/api/types.gen";
 import { argOf, folded, foldLine, inputOf } from "../src/chat/fold";
 import { commandsOf, keyMode, matching } from "../src/chat/composer";
-import { ctxParts } from "../src/chat/meters";
+import { levelName, restAt } from "../src/chat/effort";
+import { ctxParts, modelView } from "../src/chat/meters";
 import { filesIn, resolve, sourceOf } from "../src/chat/refs";
 import { en } from "../src/i18n/en";
 import { zh } from "../src/i18n/zh";
@@ -75,25 +76,47 @@ describe("filesIn", () => {
 });
 
 describe("sourceOf", () => {
-  const sessions = [{ id: "s1", agent: "codex", cwd: "/w", name: "holder", status: "idle", hosted: true, live: false, updatedAt: 0 } as Session];
+  const sessions = [
+    { id: "s1", agent: "codex", cwd: "/w", name: "holder", status: "idle", hosted: true, live: false, updatedAt: 0 } as Session,
+    { id: "s2", agent: "claude", cwd: "/home/k/Iridium", status: "idle", hosted: true, live: false, workspace: 3, updatedAt: 0 } as Session,
+    { id: "s3", agent: "claude", cwd: "/home/k/notes/", title: "hi there", status: "idle", hosted: false, live: false, updatedAt: 0 } as Session,
+  ];
+  const ws = [{ id: 3, name: "Iri" }];
   const rules = {} as Terminal["rules"];
   const terminals: Terminal[] = [
-    { id: "local", name: "本机", kind: "channel", local: true, rules, usedToday: 0 },
-    { id: "me", name: "kumo-mac", kind: "panel", rules, usedToday: 0 },
-    { id: "p", name: "kumo-phone", kind: "panel", avatar: "/a.png", rules, usedToday: 0 },
+    { id: "local", name: "本机", kind: "channel", local: true, rules, usedToday: 0, device: "computer" },
+    { id: "me", name: "kumo-mac", kind: "panel", rules, usedToday: 0, device: "computer" },
+    { id: "p", name: "kumo-phone", kind: "panel", avatar: "/a.png", rules, usedToday: 0, device: "phone" },
     { id: "q", name: "QQ", kind: "channel", avatar: "/q.png", rules, usedToday: 0 },
   ];
-  test("your words: typed here, in a terminal, or on another panel with its avatar", () => {
-    expect(sourceOf("kumo-mac", "me", "me", terminals, sessions)).toEqual({ kind: "you" });
-    expect(sourceOf(undefined, undefined, "me", terminals, sessions)).toEqual({ kind: "you" });
-    expect(sourceOf("本机", "local", "local", terminals, sessions)).toEqual({ kind: "you" }); // the page with no gate
-    expect(sourceOf("kumo-phone", "p", "me", terminals, sessions)).toEqual({ kind: "you", panel: { name: "kumo-phone", avatar: "/a.png" } });
+  const me = terminals[1];
+  const local = terminals[0];
+  test("your words: typed here, in a terminal, or on another panel, with its avatar and device", () => {
+    expect(sourceOf("kumo-mac", "me", me, terminals, sessions)).toEqual({ kind: "you", name: "kumo-mac", device: "computer" });
+    expect(sourceOf(undefined, undefined, me, terminals, sessions)).toEqual({ kind: "you", name: "本机", device: "computer", local: true }); // typed in the agent's own terminal
+    expect(sourceOf("本机", "local", local, terminals, sessions)).toEqual({ kind: "you", name: "本机", device: "computer", local: true }); // the page with no gate
+    expect(sourceOf("kumo-phone", "p", me, terminals, sessions)).toEqual({ kind: "you", name: "kumo-phone", avatar: "/a.png", device: "phone" });
+    expect(sourceOf("本机", "local", me, terminals, sessions)).toEqual({ kind: "you", name: "本机", device: "computer", local: true });
+    // No terminals list (yet): 本机 is still yours; no device is a computer.
+    expect(sourceOf("本机", "local", { id: "x", name: "x" }, [], sessions)).toEqual({ kind: "you", name: "本机", device: "computer", local: true });
+    expect(sourceOf("x", "x", { id: "x", name: "x" }, [], sessions)).toMatchObject({ kind: "you", device: "computer" });
   });
-  test("letters: a plugin with its sender, another session's ir; 本机 is yours; Iridium's own line", () => {
-    expect(sourceOf("QQ·张三", "q", "me", terminals, sessions)).toMatchObject({ kind: "letter", name: "QQ·张三", avatar: "/q.png", channel: true });
-    expect(sourceOf("ir:s1", "local", "local", terminals, sessions)).toMatchObject({ kind: "letter", name: "holder", agent: "codex", session: "s1" });
-    expect(sourceOf("本机", "local", "me", terminals, sessions)).toEqual({ kind: "you", panel: { name: "本机", avatar: undefined } });
-    expect(sourceOf("Iridium", "Iridium", "me", terminals, sessions)).toEqual({ kind: "iridium" });
+  test("letters: a plugin with its sender, another session's ir by its name or agent and place; Iridium's own line", () => {
+    expect(sourceOf("QQ·张三", "q", me, terminals, sessions)).toMatchObject({ kind: "letter", name: "QQ·张三", avatar: "/q.png", channel: true });
+    expect(sourceOf("ir:s1", "local", local, terminals, sessions)).toMatchObject({ kind: "letter", name: "holder", agent: "codex", session: "s1", channel: false });
+    expect(sourceOf("ir:s2", "p", me, terminals, sessions, ws)).toMatchObject({ kind: "letter", name: "Claude · Iri", agent: "claude", session: "s2" });
+    expect(sourceOf("ir:s2", "p", me, terminals, sessions)).toMatchObject({ name: "Claude · Iridium" }); // no workspaces known: its folder
+    expect(sourceOf("ir:s3", "local", me, terminals, sessions, ws)).toMatchObject({ name: "Claude · notes" }); // a title is no name
+    expect(sourceOf("ir:gone1234567", "local", me, terminals, sessions)).toEqual({ kind: "letter", name: "gone1234", channel: false });
+    expect(sourceOf("Iridium", "Iridium", me, terminals, sessions)).toEqual({ kind: "iridium" });
+  });
+  test("a subagent's prompt is its parent's: by the parent's name, a workflow's with its name", () => {
+    expect(sourceOf(undefined, undefined, me, terminals, sessions, ws, { subagent: true, parent: "s2" })).toEqual({ kind: "letter", name: "Claude · Iri", channel: false, agent: "claude", session: "s2" });
+    expect(sourceOf(undefined, undefined, me, terminals, sessions, ws, { subagent: true, parent: "s1", workflow: { run: "r", name: "review" } })).toEqual({ kind: "letter", name: "holder · review", channel: false, agent: "codex", session: "s1", workflow: true });
+    expect(sourceOf(undefined, undefined, me, terminals, sessions, ws, { subagent: true, parent: "gone1234567" })).toEqual({ kind: "letter", name: "gone1234", channel: false, session: "gone1234567" });
+    // Not a subagent, or tagged: as before.
+    expect(sourceOf(undefined, undefined, me, terminals, sessions, ws, { parent: "s2" })).toMatchObject({ kind: "you", local: true });
+    expect(sourceOf("Iridium", undefined, me, terminals, sessions, ws, { subagent: true, parent: "s2" })).toEqual({ kind: "iridium" });
   });
 });
 
@@ -124,6 +147,36 @@ describe("buildTree", () => {
     const list = [S("a", "/w/ir", { workspace: 1 }), S("b", "/w/ir/web", { workspace: 1 }), S("c", "/w/ir/web", { workspace: 1 }), S("d", "/w/ir/docs", { workspace: 1 }), S("e", "/w/x/one"), S("f", "/w/x/two"), S("g", "/w/x/two", { archived: true }), S("h", "/w/ir/web", { workspace: 1, status: "waiting" }), S("i", "/w/ir", { workspace: 1, archived: true })];
     const t = buildTree(list, ws, "未归类");
     expect(Object.fromEntries(t.where)).toEqual({ d: "docs", e: "/w/x/one", f: "/w/x/two", g: "two", h: "Iridium/web", i: "Iridium" });
+  });
+  test("a subagent: no row of its own, under the session that started it, and only at work", () => {
+    const now = 10 * 60_000;
+    const list = [
+      S("p", "/w/ir", { workspace: 1, status: "running" }),
+      S("q", "/w/ir", { workspace: 1, live: false }),
+      S("k1", "/w/ir/web", { subagent: true, parent: "p", updatedAt: now - 1000 }),
+      S("k2", "/w/ir/web", { subagent: true, parent: "p", updatedAt: now - 1000, done: true }),
+      S("k3", "/w/ir/web", { subagent: true, parent: "p", updatedAt: now - 6 * 60_000 }),
+      S("k4", "/w/ir/web", { subagent: true, parent: "q", updatedAt: now - 1000 }),
+      S("k5", "/w/ir/web", { subagent: true, parent: "gone", updatedAt: now - 1000 }),
+    ];
+    const t = buildTree(list, ws, "未归类", now);
+    expect(t.workspaces[0]!.rows.map((r) => (r.kind === "session" ? r.s.id : r.f.name))).toEqual(["p", "q"]);
+    expect(Object.fromEntries([...t.kids].map(([k, v]) => [k, v.map((s) => s.id)]))).toEqual({ p: ["k1"] });
+    expect(flat(t).map((s) => s.id)).toEqual(["p", "k1", "q"]);
+    // Its parent's turn over, it works on (a background agent, a workflow); its process gone, so is it.
+    expect(buildTree(list.map((s) => (s.id === "p" ? { ...s, status: "idle" as const } : s)), ws, "未归类", now).kids.get("p")?.map((s) => s.id)).toEqual(["k1"]);
+    expect(buildTree(list.map((s) => (s.id === "p" ? { ...s, live: false } : s)), ws, "未归类", now).kids.size).toBe(0);
+  });
+  test("a workflow's agents: one row a run under its session, its phase the latest one's at work, done of those seen", () => {
+    const now = 10 * 60_000;
+    const run = (id: string, phase: string, more: Partial<Session> = {}) => S(id, "/w/ir", { subagent: true, parent: "p", updatedAt: now - 1000, workflow: { run: "wf_1", name: "fix-caret", phase }, ...more });
+    const list = [S("p", "/w/ir", { workspace: 1 }), run("a1", "Investigate", { done: true }), run("a2", "Implement", { updatedAt: now - 500 }), run("a3", "Implement", { updatedAt: now - 900 }), S("k", "/w/ir", { subagent: true, parent: "p", updatedAt: now - 1000 })];
+    const t = buildTree(list, ws, "未归类", now);
+    expect(t.kids.get("p")?.map((s) => s.id)).toEqual(["k"]);
+    expect(t.runs.get("p")?.map((r) => ({ ...r, working: r.working.map((s) => s.id) }))).toEqual([{ id: "wf_1", name: "fix-caret", phase: "Implement", done: 1, total: 3, working: ["a2", "a3"] }]);
+    expect(flat(t).map((s) => s.id)).toEqual(["p", "k", "a2", "a3"]);
+    // Its last agent done, the run is gone.
+    expect(buildTree(list.map((s) => (s.workflow ? { ...s, done: true } : s)), ws, "未归类", now).runs.size).toBe(0);
   });
   test("commonDir", () => {
     expect(commonDir(["/a/b/c", "/a/b/d"])).toBe("/a/b");
@@ -227,5 +280,71 @@ describe("names", () => {
     expect(titleOf({ cwd: "/w/x/" })).toBe("x");
     expect(tilde("/home/kumo/a")).toBe("~/a");
     expect(tilde("/tmp/a")).toBe("/tmp/a");
+  });
+});
+
+describe("model key", () => {
+  const claude: Model[] = [
+    { value: "default", name: "Default (recommended)", description: "Opus 5.5 · Best for everyday, complex tasks", resolved: "claude-opus-5-5", efforts: ["low", "medium", "high", "xhigh", "max"] },
+    { value: "opus", name: "Opus 5.5", resolved: "claude-opus-5-5", efforts: ["low", "medium", "high", "xhigh", "max"] },
+    { value: "haiku", name: "Haiku 5.5", resolved: "claude-haiku-5-5", efforts: ["low", "medium", "high", "xhigh", "max"] },
+    { value: "claude-opus-4-6", name: "Opus 4.6", resolved: "claude-opus-4-6", efforts: ["low", "medium", "high", "max"] },
+    { value: "claude-haiku-4-5", name: "Haiku 4.5", resolved: "claude-haiku-4-5", noEffort: true },
+  ];
+  const base = { agent: "claude" as const, models: claude, efforts: ["low", "medium", "high", "xhigh", "max"] };
+  test("a new session names the concrete model and the level in use, not just Default", () => {
+    // Before get_settings says: the default entry's alias.
+    expect(modelView({ ...base }).name).toBe("Opus 5.5");
+    const v = modelView({ ...base, model: "claude-opus-5-5", effortNow: "medium" });
+    expect([v.name, v.value, v.level, v.isDefault]).toEqual(["Opus 5.5", "default", "medium", true]);
+    // No alias: the description's head; nothing: the id as the agent named it.
+    expect(modelView({ ...base, models: [{ value: "default", name: "Default", description: "Opus 9 · x" }] }).name).toBe("Opus 9");
+    expect(modelView({ ...base, model: "claude-new-1" }).name).toBe("claude-new-1");
+    // Without the session's list (the fallback), nothing is known yet.
+    expect(modelView({ agent: "claude" }).name).toBe("");
+  });
+  test("a model set: ticked by its value, its own levels; one that takes none has no slider", () => {
+    const v = modelView({ ...base, pick: "opus", model: "claude-opus-5-5", effort: "high", effortNow: "low" });
+    expect([v.name, v.value, v.level]).toEqual(["Opus 5.5", "opus", "high"]);
+    // Two aliases of one id: the one set is ticked.
+    const two = [...claude, { value: "best", name: "Best", resolved: "claude-opus-5-5" }];
+    expect(modelView({ ...base, models: two, pick: "best", model: "claude-opus-5-5" }).value).toBe("best");
+    expect(modelView({ ...base, pick: "claude-opus-4-6", model: "claude-opus-4-6" }).levels).toEqual(["low", "medium", "high", "max"]);
+    expect(modelView({ ...base, pick: "claude-haiku-4-5", model: "claude-haiku-4-5" }).levels).toEqual([]);
+    // A level set that this model does not take: the one the agent says it runs at.
+    expect(modelView({ ...base, pick: "claude-opus-4-6", model: "claude-opus-4-6", effort: "xhigh", effortNow: "high" }).level).toBe("high");
+    expect(modelView({ ...base, pick: "claude-opus-4-6", model: "claude-opus-4-6", effort: "xhigh" }).level).toBe("");
+    // Just picked: shown before the state says so.
+    expect(modelView({ ...base, model: "claude-opus-5-5" }, "haiku").name).toBe("Haiku 5.5");
+    // Codex: every entry its own id.
+    const codex = modelView({ agent: "codex", model: "gpt-6-luna", models: [{ value: "gpt-6-luna", name: "Luna", resolved: "gpt-6-luna", efforts: ["low", "high"] }], efforts: ["minimal", "low"], effortNow: "low" });
+    expect([codex.name, codex.value, codex.levels, codex.level]).toEqual(["Luna", "gpt-6-luna", ["low", "high"], "low"]);
+  });
+  test("the effort slider rests on the level's stop; with none, on medium's, muted", () => {
+    const l = ["low", "medium", "high", "xhigh", "max"];
+    expect(restAt(l, "xhigh")).toEqual({ i: 3, known: true });
+    expect(restAt(l)).toEqual({ i: 1, known: false });
+    expect(restAt(["low", "high"], "medium")).toEqual({ i: 0, known: false });
+    expect(restAt(["off", "minimal", "low", "medium", "high", "xhigh", "max"], "off")).toEqual({ i: 0, known: true });
+    expect([en["effort.xhigh"], zh["effort.xhigh"]]).toContain(levelName("xhigh"));
+    expect(levelName("weird")).toBe("weird");
+  });
+});
+
+describe("liquid", () => {
+  test("draws the whole track, the same for the same time; flows faster the higher the level", async () => {
+    const { frame, rate, slosh, W, H } = await import("../src/chat/liquid");
+    const a = new Uint8ClampedArray(W * H * 4);
+    const b = new Uint8ClampedArray(W * H * 4);
+    frame(a, 3.7, 0.5, 0.1);
+    frame(b, 3.7, 0.5, 0.1);
+    expect(a).toEqual(b);
+    for (let o = 3; o < a.length; o += 4) expect(a[o]).toBeGreaterThan(190);
+    expect(rate(0)).toBeLessThan(rate(0.5));
+    expect(rate(0.5)).toBeLessThan(rate(1));
+    // The slosh swings and settles.
+    const s = { push: 0, vel: 1 };
+    for (let i = 0; i < 300; i++) slosh(s, 1 / 60);
+    expect(Math.abs(s.push) + Math.abs(s.vel)).toBeLessThan(0.01);
   });
 });

@@ -499,7 +499,7 @@ func (x *Index) row(e *entry) api.Session {
 	s := api.Session{
 		ID: e.id, Agent: e.agent, Cwd: e.cwd, Title: e.title, Status: api.StatusIdle,
 		Last: e.last, UpdatedAt: e.mtime.UnixMilli(), Launcher: x.launcherOf(e),
-		Subagent: e.sub, Parent: e.parent,
+		Subagent: e.sub, Parent: e.parent, Done: e.sub && e.done, Workflow: e.flow,
 	}
 	if r, ok := x.running[e.id]; ok && !r.ours {
 		s.Status, s.Live = api.StatusElsewhere, true

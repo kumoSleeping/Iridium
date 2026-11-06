@@ -35,6 +35,10 @@ export interface AgentInfo {
    */
   contextBreakdown: boolean;
   quota: boolean;
+  /**
+   * Ultracode: its sessions can turn ultracode on (Claude).
+   */
+  ultracode: boolean;
 }
 /**
  * Status is a session's lamp (plan "风格"). idle shows none.
@@ -78,6 +82,16 @@ export interface Session {
    */
   subagent?: boolean;
   parent?: string;
+  /**
+   * Done: a subagent that has finished (Claude: its transcript ends with its final answer); the
+   * sidebar shows a subagent only while it works.
+   */
+  done?: boolean;
+  /**
+   * Workflow: the run a workflow's agent is of (Claude's subagents/workflows/<run>/), the
+   * workflow's name and the agent's phase in it, as far as they are known.
+   */
+  workflow?: SessionWorkflow;
   last?: LastSaid;
   updatedAt: number /* int64 */; // ms since the epoch
 }
@@ -108,9 +122,16 @@ export interface SessionState extends Session {
   proc: number /* int */;
   error?: string; // why its last process ended badly
   /**
-   * Effort: the thinking effort set for it; Models, Modes, Efforts: what the agent offers.
+   * Pick: the model set for it ("" or "default": the agent's own); Model is the one in use, often
+   * a full id (Claude: as get_settings or the turn's init name it).
+   */
+  pick?: string;
+  /**
+   * Effort: the thinking effort set for it; EffortNow: the level the agent says it runs at (set
+   * or not). Models, Modes, Efforts: what the agent offers.
    */
   effort?: string;
+  effortNow?: string;
   models?: Model[];
   modes?: string[];
   efforts?: string[];
@@ -134,6 +155,19 @@ export interface SessionState extends Session {
    * Commands: the slash commands its agent offers, as its last handshake named them.
    */
   commands?: Command[];
+  /**
+   * Ultracode: Claude's ultracode; absent for an agent without it.
+   */
+  ultracode?: Ultracode;
+}
+/**
+ * Ultracode is a Claude session's ultracode. On: asked for (what the switch shows); Active: asked
+ * for and in effect; Available: its model can take it (true till the process says).
+ */
+export interface Ultracode {
+  on: boolean;
+  active: boolean;
+  available: boolean;
 }
 /**
  * Command is a slash command an agent offers (the composer's palette), without its slash.
@@ -262,7 +296,20 @@ export const SystemEventLocalCommand = "local_command";
 export const SystemEventInterrupted = "interrupted"; // you stopped the turn
 export const SystemEventUnreadable = "unreadable"; // a line that is not a JSON object
 export const SystemEventIridium = "iridium"; // Iridium's own line, such as a recovery prompt
-export type SystemEvent = typeof SystemEventCompact | typeof SystemEventAPIError | typeof SystemEventLocalCommand | typeof SystemEventInterrupted | typeof SystemEventUnreadable | typeof SystemEventIridium;
+/**
+ * SystemEventTask: a background task told the session it ended (Claude's task-notification:
+ * a workflow, a background agent); Text is its summary, with how many agents and how long.
+ */
+export const SystemEventTask = "task";
+export type SystemEvent = typeof SystemEventCompact | typeof SystemEventAPIError | typeof SystemEventLocalCommand | typeof SystemEventInterrupted | typeof SystemEventUnreadable | typeof SystemEventIridium | typeof SystemEventTask;
+/**
+ * SessionWorkflow is the workflow run a subagent works in.
+ */
+export interface SessionWorkflow {
+  run: string;
+  name?: string;
+  phase?: string;
+}
 /**
  * SourceIridium is the source of what Iridium itself writes to an agent (recovery prompts,
  * "继续"): the page shows those as a faint line of its own, not as your words.
@@ -380,6 +427,24 @@ export interface DraftEvent {
   proc: number /* int */;
   n: number /* int */;
   text: string;
+  /**
+   * Done: the draft is whole, no more text comes to it; its words come in the transcript.
+   */
+  done?: boolean;
+  /**
+   * Tool: a tool call being written, not words (user 2026-11-06: no blank while a long command
+   * is written): Text is its input's JSON so far, cut anywhere. Sent with the draft's first
+   * piece; sealed as the call is whole, the transcript then has it by its ID.
+   */
+  tool?: DraftTool;
+}
+/**
+ * DraftTool is the call a tool draft is: its ID, as the transcript's tool block has it, and the
+ * tool's name.
+ */
+export interface DraftTool {
+  id: string;
+  name: string;
 }
 
 //////////
@@ -509,12 +574,17 @@ export interface BlockTail {
   blocks: Block[];
 }
 /**
- * Model is a model the agent offers. Value is what SetModel takes.
+ * Model is a model the agent offers. Value is what SetModel takes. Resolved: the full model id
+ * this value runs (Claude's resolvedModel, Codex's id). Efforts: the thinking levels this model
+ * takes; NoEffort: it takes none; neither: the agent does not say (SessionState.efforts holds).
  */
 export interface Model {
   value: string;
   name: string;
   description?: string;
+  resolved?: string;
+  efforts?: string[];
+  noEffort?: boolean;
 }
 /**
  * SetModel, SetMode and SetEffort change a session's model, approval mode and thinking effort,
@@ -528,6 +598,12 @@ export interface SetMode {
 }
 export interface SetEffort {
   effort: string;
+}
+/**
+ * SetUltracode turns a Claude session's ultracode on or off, now and for every later start.
+ */
+export interface SetUltracode {
+  ultracode: boolean;
 }
 /**
  * AllowRule is a session's "always allow": asks for Tool whose subject (a command, a file path)
@@ -921,6 +997,23 @@ export interface Terminal {
   lastSeenAt?: number /* int64 */;
   rules: Rules;
   usedToday: number /* int64 */; // tokens of the turns it started today
+  /**
+   * Device: what it runs on, as the badge on its messages' avatar shows; the server always sets it.
+   */
+  device?: Device;
+}
+/**
+ * Device is what a terminal runs on, set in its settings (PUT /api/me/device, ir profile
+ * --device): a computer, the default, or a phone.
+ */
+export const DeviceComputer = "computer";
+export const DevicePhone = "phone";
+export type Device = typeof DeviceComputer | typeof DevicePhone;
+/**
+ * SetDevice is PUT /api/me/device and PUT /api/terminals/{id}/device.
+ */
+export interface SetDevice {
+  device: Device;
 }
 /**
  * PendingInvite is a panel invite not used yet.

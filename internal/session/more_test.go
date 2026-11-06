@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -153,7 +154,11 @@ func TestSettings(t *testing.T) {
 	}
 	// Remembered: the next process starts with them.
 	r.m.Stop(bg, id)
-	r.waitState(id, "the stop", func(s *api.SessionState) bool { return !s.Live })
+	s = r.waitState(id, "the stop", func(s *api.SessionState) bool { return !s.Live })
+	// What the process applied went with it: haiku's "cannot" no longer holds the switch.
+	if s.Ultracode == nil || !s.Ultracode.Available || s.Ultracode.Active || s.Ultracode.On {
+		t.Errorf("stopped: %+v", s.Ultracode)
+	}
 	r.m.Send(bg, id, "again", "网页")
 	r.waitState(id, "the second reply", func(s *api.SessionState) bool { return said(s, "ok: again") })
 	spec, _ := os.ReadFile(filepath.Join(r.cfg.StatePath(), "hold", id, hold.FileSpec))
@@ -161,6 +166,65 @@ func TestSettings(t *testing.T) {
 		if !strings.Contains(string(spec), want) {
 			t.Errorf("spec lacks %s: %s", want, spec)
 		}
+	}
+}
+
+// A new Claude session says the model and the level in use before any turn (get_settings);
+// ultracode is set alone, remembered, given to the next start, and refused where the model cannot
+// take it.
+func TestAppliedAndUltracode(t *testing.T) {
+	r := newRig(t, nil)
+	id, err := r.m.Create(bg, api.NewSession{Cwd: r.cwd}, "网页")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := r.waitState(id, "the settings applied", func(s *api.SessionState) bool { return s.EffortNow != "" })
+	if s.Model != "fake-model" || s.EffortNow != "medium" || s.Effort != "" || s.Pick != "" || s.Ultracode == nil || s.Ultracode.On || !s.Ultracode.Available {
+		t.Fatalf("state: model %q effortNow %q effort %q pick %q ultracode %+v", s.Model, s.EffortNow, s.Effort, s.Pick, s.Ultracode)
+	}
+	if len(s.Models) != 2 || s.Models[0].Resolved != "fake-model" || len(s.Models[0].Efforts) != 5 || !s.Models[1].NoEffort {
+		t.Fatalf("models: %+v", s.Models)
+	}
+	if err := r.m.SetUltracode(bg, id, true); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(r.inLog(id), `"settings":{"ultracode":true},"subtype":"apply_flag_settings"`) {
+		t.Errorf("in.log: %s", r.inLog(id))
+	}
+	s = r.waitState(id, "ultracode on", func(s *api.SessionState) bool { return s.Ultracode.On && s.Ultracode.Active })
+	// The level set keeps ultracode as it was.
+	if err := r.m.SetEffort(bg, id, "high"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(r.inLog(id), `"settings":{"effortLevel":"high","ultracode":true}`) {
+		t.Errorf("in.log: %s", r.inLog(id))
+	}
+	s = r.waitState(id, "the level applied", func(s *api.SessionState) bool { return s.EffortNow == "high" })
+	// A model switch: what it applies is read again; it cannot take ultracode.
+	if err := r.m.SetModel(bg, id, "haiku"); err != nil {
+		t.Fatal(err)
+	}
+	s = r.waitState(id, "haiku applied", func(s *api.SessionState) bool { return s.Model == "fake-haiku" })
+	if s.Pick != "haiku" || s.Ultracode.Available || s.Ultracode.Active || !s.Ultracode.On {
+		t.Errorf("after the switch: pick %q ultracode %+v", s.Pick, s.Ultracode)
+	}
+	if err := r.m.SetUltracode(bg, id, true); !errors.Is(err, ErrBadRequest) {
+		t.Errorf("ultracode on haiku: %v", err)
+	}
+	if err := r.m.SetUltracode(bg, id, false); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := r.store.Settings(id); st.Ultracode == nil || *st.Ultracode {
+		t.Errorf("stored: %+v", st)
+	}
+	// Remembered: the next process starts with it, off over the user's own settings.
+	r.m.Stop(bg, id)
+	r.waitState(id, "the stop", func(s *api.SessionState) bool { return !s.Live })
+	r.m.Send(bg, id, "again", "网页")
+	r.waitState(id, "the reply", func(s *api.SessionState) bool { return said(s, "ok: again") })
+	spec, _ := os.ReadFile(filepath.Join(r.cfg.StatePath(), "hold", id, hold.FileSpec))
+	if !strings.Contains(string(spec), `"--settings","{\"ultracode\":false}"`) {
+		t.Errorf("spec: %s", spec)
 	}
 }
 

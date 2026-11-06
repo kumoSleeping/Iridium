@@ -2,6 +2,7 @@
 // error, a turn done elsewhere with a key to open it.
 import { Toast } from "@base-ui/react/toast";
 import { CircleAlert } from "lucide-react";
+import { ApiError } from "./api/client";
 import type { Agent } from "./api/types.gen";
 import { t } from "./i18n";
 import { Logo } from "./ui";
@@ -16,7 +17,13 @@ export function toast(title: string, opts: { description?: string; error?: boole
 }
 
 /** An error's words for a toast. */
-export const errText = (e: unknown) => (e instanceof TypeError ? t("err.offline") : e instanceof Error ? e.message : String(e));
+/** What went wrong, for people: the network gone, the service down a moment (a gateway's 502-504,
+ *  as while it restarts), a bare status said as one; else the server's own words. */
+export const errText = (e: unknown) => {
+  if (e instanceof TypeError) return t("err.offline");
+  if (e instanceof ApiError && /^\d+$/.test(e.message)) return e.status >= 502 && e.status <= 504 ? t("err.unavailable") : t("err.status", { code: e.status });
+  return e instanceof Error ? e.message : String(e);
+};
 
 export function ToastList({ onJump }: { onJump: (id: string) => void }) {
   const { toasts: list } = Toast.useToastManager();

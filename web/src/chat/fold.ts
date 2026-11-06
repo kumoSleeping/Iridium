@@ -2,6 +2,7 @@
 // said fold into one line; the calls still running at the end show on their own. Pure, for tests.
 import type { Block } from "../api/types.gen";
 import { t } from "../i18n";
+import { cmdOfCall, type Cmd } from "./cmd";
 
 export type Tool = Block & { kind: "tool" };
 export type Step = Block & { kind: "tool" | "thinking" };
@@ -64,6 +65,7 @@ const NAMES: Record<string, Kind> = {
   task: "agent",
   sendmessage: "agent",
   spawn_agent: "agent",
+  workflow: "agent", // a run of agents in the background
   todowrite: "todo",
   update_plan: "todo",
   askuserquestion: "ask",
@@ -211,6 +213,12 @@ export function foldLine(steps: Step[]): Run[] {
     }
   }
   return runs;
+}
+
+/** The sort of shell command every call by this name in a fold runs; none if they differ. */
+export function runCmd(steps: Step[], name: string): Cmd | undefined {
+  const cs = new Set(steps.filter((s) => s.kind === "tool" && s.name === name).map(cmdOfCall));
+  return cs.size === 1 ? [...cs][0] : undefined;
 }
 
 /** All the lines a fold's runs changed; undefined for none. */

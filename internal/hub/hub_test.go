@@ -192,3 +192,88 @@ func TestDraftsBatched(t *testing.T) {
 		t.Errorf("%d draft events for 50 deltas within ~60ms", events)
 	}
 }
+
+func draftOf(t *testing.T, e event) api.DraftEvent {
+	t.Helper()
+	var d api.DraftEvent
+	if e.name != "draft" || json.Unmarshal([]byte(e.data), &d) != nil {
+		t.Fatalf("not a draft event: %+v", e)
+	}
+	return d
+}
+
+// A seal joins the draft's last piece; a later draft is another event.
+// A tool call being written: its draft starts with the call, its input JSON joined as it comes.
+func TestDraftTool(t *testing.T) {
+	h := New()
+	ch, _ := stream(t, h.Subscribe([]string{"session:a"}))
+	next(t, ch, time.Second) // the snapshot
+	h.DraftTool("a", 1, 2, "toolu_1", "Bash")
+	h.Draft("a", 1, 2, `{"command":"ir se`)
+	h.Draft("a", 1, 2, `nd ab \"hi\""}`)
+	h.Seal("a", 1, 2)
+	e, ok := next(t, ch, time.Second)
+	if !ok {
+		t.Fatal("no draft")
+	}
+	if d := draftOf(t, e); d.N != 2 || d.Tool == nil || d.Tool.ID != "toolu_1" || d.Tool.Name != "Bash" || d.Text != `{"command":"ir send ab \"hi\""}` || !d.Done {
+		t.Fatalf("tool draft %+v", d)
+	}
+}
+
+func TestDraftSeal(t *testing.T) {
+	h := New()
+	ch, _ := stream(t, h.Subscribe([]string{"session:a"}))
+	next(t, ch, time.Second) // the snapshot
+	h.Draft("a", 1, 0, "x")
+	h.Seal("a", 1, 0)
+	h.Draft("a", 1, 1, "y")
+	e, ok := next(t, ch, time.Second)
+	if !ok {
+		t.Fatal("no draft")
+	}
+	if d := draftOf(t, e); d.N != 0 || d.Text != "x" || !d.Done {
+		t.Fatalf("first %+v", d)
+	}
+	e, ok = next(t, ch, time.Second)
+	if !ok {
+		t.Fatal("no second draft")
+	}
+	if d := draftOf(t, e); d.N != 1 || d.Text != "y" || d.Done {
+		t.Fatalf("second %+v", d)
+	}
+	// A seal alone, its pieces sent before.
+	h.Seal("a", 1, 1)
+	e, ok = next(t, ch, time.Second)
+	if !ok {
+		t.Fatal("no seal")
+	}
+	if d := draftOf(t, e); d.N != 1 || d.Text != "" || !d.Done {
+		t.Fatalf("seal %+v", d)
+	}
+}
+
+// A state due takes the drafts pending with it, ahead of it, even within DraftEvery.
+func TestDraftsBeforeState(t *testing.T) {
+	h := New()
+	ch, _ := stream(t, h.Subscribe([]string{"session:a"}))
+	next(t, ch, time.Second) // the snapshot
+	time.Sleep(Coalesce)
+	h.Draft("a", 1, 0, "one")
+	if e, ok := next(t, ch, time.Second); !ok || draftOf(t, e).Text != "one" {
+		t.Fatalf("first draft %+v", e)
+	}
+	h.Draft("a", 1, 0, " two")
+	h.Set("session:a", map[string]int{"end": 1})
+	e, ok := next(t, ch, time.Second)
+	if !ok {
+		t.Fatal("nothing")
+	}
+	if d := draftOf(t, e); d.Text != " two" {
+		t.Fatalf("draft %+v", d)
+	}
+	e, ok = next(t, ch, time.Second)
+	if !ok || state(t, e).Key != "session:a" {
+		t.Fatalf("state %+v", e)
+	}
+}

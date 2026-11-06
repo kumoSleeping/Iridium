@@ -110,6 +110,10 @@ func (d *Driver) Spawn(o agent.SpawnOptions) (hold.Spec, error) {
 		// Not --settings effortLevel, which drops max (Rhodium §6.2, 2.1.309).
 		argv = append(argv, "--effort", o.Effort)
 	}
+	if o.Ultracode != nil {
+		// Not --effort ultracode, which pins xhigh; false too, over the user's own settings.
+		argv = append(argv, "--settings", fmt.Sprintf(`{"ultracode":%t}`, *o.Ultracode))
+	}
 	argv = append(argv, "--allow-dangerously-skip-permissions")
 	if o.Resume {
 		argv = append(argv, "--resume="+o.Session)
@@ -293,38 +297,55 @@ func (d *Driver) SetMode(ctx context.Context, mode string) error {
 // get_settings first says whether it was asked for, and it goes along as it was (Rhodium §6.2).
 // A CLI without get_settings reads as ultracode off.
 func (d *Driver) SetEffort(ctx context.Context, level string) error {
-	ultracode := false
-	r, err := d.request(ctx, "get_settings", nil, true)
-	switch {
-	case err == nil:
-		var body struct {
-			Applied struct {
-				UltracodeRequested bool `json:"ultracodeRequested"`
-			} `json:"applied"`
-		}
-		_ = json.Unmarshal(r.raw(), &body)
-		ultracode = body.Applied.UltracodeRequested
-	case !strings.HasPrefix(err.Error(), "Unsupported control request subtype"):
+	a, err := d.Applied(ctx)
+	if err != nil {
 		return err
 	}
-	_, err = d.request(ctx, "apply_flag_settings", map[string]any{"settings": map[string]any{"effortLevel": level, "ultracode": ultracode}}, true)
+	_, err = d.request(ctx, "apply_flag_settings", map[string]any{"settings": map[string]any{"effortLevel": level, "ultracode": a.Ultracode}}, true)
 	return err
 }
 
-// Effort is the effort level the process applies (get_settings' applied.effort), "" if it does
-// not say.
-func (d *Driver) Effort(ctx context.Context) (string, error) {
+// SetUltracode asks for ultracode or not, alone in apply_flag_settings: the effort level stays.
+// Turning it on for a model that cannot take it (ultracodeAvailable false: no xhigh, or workflows
+// off), or on a CLI without get_settings, is agent.ErrNoUltracode; get_settings says first
+// (Rhodium §6.2: an unsupported get_settings reads as unavailable).
+func (d *Driver) SetUltracode(ctx context.Context, on bool) error {
+	a, err := d.Applied(ctx)
+	if err != nil {
+		return err
+	}
+	if on && (!a.Known || !a.UltracodeAvailable) {
+		return agent.ErrNoUltracode
+	}
+	_, err = d.request(ctx, "apply_flag_settings", map[string]any{"settings": map[string]any{"ultracode": on}}, true)
+	return err
+}
+
+// Applied reads get_settings' applied: the model, the effort level, ultracode. A CLI without
+// get_settings says nothing (Known false), which is no error.
+func (d *Driver) Applied(ctx context.Context) (agent.Applied, error) {
 	r, err := d.request(ctx, "get_settings", nil, true)
 	if err != nil {
-		return "", err
+		if strings.HasPrefix(err.Error(), "Unsupported control request subtype") {
+			return agent.Applied{}, nil
+		}
+		return agent.Applied{}, err
 	}
 	var body struct {
-		Applied struct {
-			Effort string `json:"effort"`
+		Applied *struct {
+			Model              string `json:"model"`
+			Effort             string `json:"effort"`
+			Ultracode          bool   `json:"ultracode"`
+			UltracodeRequested bool   `json:"ultracodeRequested"`
+			UltracodeAvailable bool   `json:"ultracodeAvailable"`
 		} `json:"applied"`
 	}
 	_ = json.Unmarshal(r.raw(), &body)
-	return body.Applied.Effort, nil
+	if body.Applied == nil {
+		return agent.Applied{}, nil
+	}
+	a := body.Applied
+	return agent.Applied{Model: a.Model, Effort: a.Effort, Ultracode: a.UltracodeRequested, UltracodeOn: a.Ultracode, UltracodeAvailable: a.UltracodeAvailable, Known: true}, nil
 }
 
 // Context asks get_context_usage, from the last answer's usage (summary: no count call per part).
@@ -483,22 +504,38 @@ func (d *Driver) feed(line []byte, replay bool) []byte {
 		var ev struct {
 			Type  string `json:"type"`
 			Delta struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
+				Type        string `json:"type"`
+				Text        string `json:"text"`
+				PartialJSON string `json:"partial_json"`
 			} `json:"delta"`
+			Block struct {
+				Type string `json:"type"`
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			} `json:"content_block"`
 		}
 		_ = json.Unmarshal(f.Event, &ev)
+		// A subagent's text is its own; only the main conversation's is drafted: its words, and
+		// the tool calls it writes, from their start (the call's frame comes only once it is whole).
+		main := f.ParentToolUseID == nil
 		switch ev.Type {
+		case "content_block_start":
+			if main && ev.Block.Type == "tool_use" && ev.Block.ID != "" {
+				d.emitLocked(agent.ToolDraft{ID: ev.Block.ID, Name: ev.Block.Name})
+			}
+			return nil
 		case "content_block_delta":
-		case "message_start", "message_delta", "message_stop", "content_block_start", "content_block_stop":
+		case "message_start", "message_delta", "message_stop", "content_block_stop":
 			return nil
 		default:
 			d.note("stream_event/" + ev.Type)
 			return nil
 		}
-		// A subagent's text is its own; only the main conversation's is drafted.
-		if f.ParentToolUseID == nil && ev.Delta.Type == "text_delta" {
+		switch {
+		case main && ev.Delta.Type == "text_delta":
 			d.emitLocked(agent.TextDelta{Text: ev.Delta.Text})
+		case main && ev.Delta.Type == "input_json_delta" && ev.Delta.PartialJSON != "":
+			d.emitLocked(agent.ToolDraftDelta{JSON: ev.Delta.PartialJSON})
 		}
 	case "assistant":
 		d.assistant(&f)
@@ -556,9 +593,12 @@ func (d *Driver) hello(r ctlResponse) {
 			ArgumentHint string `json:"argumentHint"`
 		} `json:"commands"`
 		Models []struct {
-			Value       string `json:"value"`
-			DisplayName string `json:"displayName"`
-			Description string `json:"description"`
+			Value          string   `json:"value"`
+			Resolved       string   `json:"resolvedModel"`
+			DisplayName    string   `json:"displayName"`
+			Description    string   `json:"description"`
+			SupportsEffort *bool    `json:"supportsEffort"`
+			Efforts        []string `json:"supportedEffortLevels"`
 		} `json:"models"`
 		Version      string   `json:"claude_code_version"`
 		Mode         string   `json:"current_permission_mode"`
@@ -574,7 +614,13 @@ func (d *Driver) hello(r ctlResponse) {
 	}
 	h := agent.Hello{Version: body.Version, Mode: body.Mode, Account: body.Account.Email, Plan: body.Account.SubscriptionType}
 	for _, m := range body.Models {
-		h.Models = append(h.Models, agent.Model{Value: m.Value, Name: m.DisplayName, Description: m.Description})
+		mm := agent.Model{Value: m.Value, Name: m.DisplayName, Description: m.Description, Resolved: m.Resolved, Efforts: m.Efforts}
+		// A CLI that names the resolved model says supportsEffort for each that takes any: one
+		// without it (Haiku 4.5) takes none. An older one says neither.
+		if len(m.Efforts) == 0 && (m.SupportsEffort != nil && !*m.SupportsEffort || m.SupportsEffort == nil && m.Resolved != "") {
+			mm.NoEffort = true
+		}
+		h.Models = append(h.Models, mm)
 	}
 	for _, c := range body.Commands {
 		h.Commands = append(h.Commands, agent.Command{Name: c.Name, Description: c.Description, ArgumentHint: c.ArgumentHint})

@@ -16,6 +16,7 @@ import (
 
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/config"
+	"github.com/kumoSleeping/iridium/internal/discover"
 	"github.com/kumoSleeping/iridium/internal/hub"
 	"github.com/kumoSleeping/iridium/internal/platform"
 	"github.com/kumoSleeping/iridium/internal/server"
@@ -42,6 +43,38 @@ func TestHelp(t *testing.T) {
 	}
 	if code := run([]string{"nope"}, &out, &errs); code != 1 || !strings.Contains(errs.String(), "no command") {
 		t.Errorf("nope: %d %q", code, errs.String())
+	}
+}
+
+// ir ls shows a subagent only while it works, as the sidebar does.
+func TestAtWork(t *testing.T) {
+	now := time.UnixMilli(10 * 60_000)
+	byID := map[string]api.Session{"p": {ID: "p", Status: api.StatusIdle, Live: true}, "q": {ID: "q", Status: api.StatusIdle}}
+	recent := now.Add(-time.Second).UnixMilli()
+	for _, c := range []struct {
+		s    api.Session
+		want bool
+	}{
+		{api.Session{Subagent: true, Parent: "p", UpdatedAt: recent}, true},
+		{api.Session{Subagent: true, Parent: "p", UpdatedAt: recent, Done: true}, false},
+		{api.Session{Subagent: true, Parent: "p", UpdatedAt: now.Add(-6 * time.Minute).UnixMilli()}, false},
+		{api.Session{Subagent: true, Parent: "q", UpdatedAt: recent}, false},
+		{api.Session{Subagent: true, Parent: "gone", UpdatedAt: recent}, false},
+	} {
+		if got := atWork(c.s, byID, now); got != c.want {
+			t.Errorf("%+v: %v", c.s, got)
+		}
+	}
+	ts := turns([]api.Block{{Kind: api.BlockKindAssistant, Text: "carried on"}, {Kind: api.BlockKindUser, Text: "hi"}, {Kind: api.BlockKindAssistant, Text: "a"}, {Kind: api.BlockKindTool}, {Kind: api.BlockKindAssistant, Text: "final"}, {Kind: api.BlockKindUser, Text: "next"}})
+	if len(ts) != 3 || ts[0].asked != "" || ts[0].reply != "carried on" || ts[1].reply != "final" || ts[2].reply != "" {
+		t.Errorf("turns: %+v", ts)
+	}
+	order := underParents([]api.Session{{ID: "k", Subagent: true, Parent: "p"}, {ID: "x"}, {ID: "p"}, {ID: "o", Subagent: true, Parent: "gone"}})
+	if got := []string{order[0].ID, order[1].ID, order[2].ID, order[3].ID}; !reflect.DeepEqual(got, []string{"x", "p", "k", "o"}) {
+		t.Errorf("underParents: %v", got)
+	}
+	if clip("a\n b  c", 3) != "a b…" {
+		t.Errorf("clip: %q", clip("a\n b  c", 3))
 	}
 }
 
@@ -90,14 +123,23 @@ func rig(t *testing.T) (config.Config, string) {
 	h := hub.New()
 	l := &platform.Direct{}
 	var s *server.Server
-	m, err := session.New(session.Options{Config: cfg, Store: st, Hub: h, Launcher: l, Exe: os.Args[0], UnitPrefix: "iridium-test-", Logf: t.Logf, Poll: 10 * time.Millisecond, Tag: func(id string) string { return s.Tag(id) }})
+	// Discovery too: what lies over a session (ir archive) is its routes'.
+	empty := t.TempDir()
+	d := discover.New(discover.Options{ClaudeDir: cfg.ClaudeHome, CodexHome: empty, PiSessions: empty, DshHome: empty, Store: st, Hub: h, Procs: discover.ProcFS{Root: empty}, Logf: t.Logf, Settle: 10 * time.Millisecond})
+	m, err := session.New(session.Options{Config: cfg, Store: st, Hub: h, Launcher: l, Exe: os.Args[0], UnitPrefix: "iridium-test-", Logf: t.Logf, Poll: 10 * time.Millisecond, Discovery: d, Tag: func(id string) string { return s.Tag(id) }})
 	if err != nil {
 		t.Fatal(err)
 	}
+	d.SetOnChange(m.Refresh)
+	if err := d.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(d.Close)
 	if err := m.Start(); err != nil {
 		t.Fatal(err)
 	}
 	s = server.New(cfg, m, h, t.Logf)
+	s.Discover = d
 	t.Cleanup(s.Close)
 	tcp, unix, err := s.Listen()
 	if err != nil {
@@ -207,8 +249,42 @@ func TestAgentCommands(t *testing.T) {
 		st.Show("claude", full)
 		st.Close()
 	}
-	if r := ir("read", sid[:6]); r.code != 0 || !strings.Contains(r.out, "> [本机] hello\n") || !strings.Contains(r.out, "ok: again") {
+	// read: each message and its final reply, cut short; -n the last ones; --full the page. ir runs
+	// in caller-session here, so what it sent is a letter from there.
+	if r := ir("read", sid[:6]); r.code != 0 || !strings.Contains(r.out, "> [ir:caller-session] hello\n  ok: hello\n") || !strings.Contains(r.out, "  ok: again\n") {
 		t.Errorf("read: %+v", r)
+	}
+	if r := ir("read", sid, "-n", "1"); r.code != 0 || strings.Contains(r.out, "hello") || !strings.HasPrefix(r.out, "> ") || strings.Count(r.out, "> ") != 1 {
+		t.Errorf("read -n 1: %+v", r)
+	}
+	if r := ir("read", sid, "--full"); r.code != 0 || !strings.Contains(r.out, "> [ir:caller-session] hello\n\nok: hello\n\n") {
+		t.Errorf("read --full: %+v", r)
+	}
+	if r := ir("read", sid, "-n", "0"); r.code != 1 {
+		t.Errorf("read -n 0: %+v", r)
+	}
+	// find: by its words, case aside; nothing found is an error.
+	if r := ir("find", "OK:", "SEE"); r.code != 0 || !strings.HasPrefix(r.out, sid+"\t") {
+		t.Errorf("find: %+v", r)
+	}
+	if r := ir("find", "no-such-words"); r.code != 1 || !strings.Contains(r.err, "没找到") {
+		t.Errorf("find nothing: %+v", r)
+	}
+	// archive and unarchive, as the sidebar's menu: out of ls, still found, back.
+	if r := ir("archive", sid); r.code != 0 {
+		t.Errorf("archive: %+v", r)
+	}
+	if r := ir("ls"); strings.Contains(r.out, sid) {
+		t.Errorf("ls after archive: %+v", r)
+	}
+	if r := ir("find", "hello"); r.code != 0 || !strings.Contains(r.out, "[归档]") {
+		t.Errorf("find archived: %+v", r)
+	}
+	if r := ir("unarchive", sid); r.code != 0 {
+		t.Errorf("unarchive: %+v", r)
+	}
+	if r := ir("ls"); !strings.Contains(r.out, sid) {
+		t.Errorf("ls after unarchive: %+v", r)
 	}
 	if r := ir("wait", "ffffffff"); r.code != 1 || !strings.Contains(r.err, "no session") {
 		t.Errorf("unknown id: %+v", r)

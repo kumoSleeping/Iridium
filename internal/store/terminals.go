@@ -61,6 +61,13 @@ const terminalsSchema = `DROP TABLE permissions;
 	ALTER TABLE inputs ADD COLUMN tag TEXT NOT NULL DEFAULT '';
 	CREATE INDEX usage_terminal ON usage(terminal, at);`
 
+// devicesSchema is migration 7: the device each terminal is on, "computer" or "phone"; none is a
+// computer. No foreign key, like permissions: 本机 is no row.
+const devicesSchema = `CREATE TABLE devices (
+		terminal TEXT PRIMARY KEY,
+		device TEXT NOT NULL
+	);`
+
 // ownerSchema is migration 5: an invite made with ir invite --owner says so. Its step,
 // claudeForFirstPanel, gives the first panel Claude.
 const ownerSchema = `ALTER TABLE invites ADD COLUMN owner INTEGER NOT NULL DEFAULT 0;`
@@ -202,6 +209,9 @@ func (g gateStore) Apply(c gate.Change) error {
 			if _, err := tx.Exec(`DELETE FROM permissions WHERE terminal = ?`, id); err != nil {
 				return err
 			}
+			if _, err := tx.Exec(`DELETE FROM devices WHERE terminal = ?`, id); err != nil {
+				return err
+			}
 		}
 		for _, id := range c.DeleteInvites {
 			if _, err := tx.Exec(`DELETE FROM invites WHERE id = ?`, id); err != nil {
@@ -269,6 +279,40 @@ func (s *Store) TerminalRules(terminal string) (rules []byte, ok bool, err error
 // SetTerminalRules stores terminal's permission table (JSON).
 func (s *Store) SetTerminalRules(terminal string, rules []byte) error {
 	_, err := s.db.Exec(`INSERT INTO permissions (terminal, rules) VALUES (?, ?) ON CONFLICT (terminal) DO UPDATE SET rules = excluded.rules`, terminal, string(rules))
+	return err
+}
+
+// Devices is the device each terminal set (SetDevice), by terminal ID.
+func (s *Store) Devices() (map[string]string, error) {
+	rows, err := s.db.Query(`SELECT terminal, device FROM devices`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var id, d string
+		if err := rows.Scan(&id, &d); err != nil {
+			return nil, err
+		}
+		out[id] = d
+	}
+	return out, rows.Err()
+}
+
+// Device is the device terminal set, "" for none.
+func (s *Store) Device(terminal string) (string, error) {
+	var d string
+	err := s.db.QueryRow(`SELECT device FROM devices WHERE terminal = ?`, terminal).Scan(&d)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return d, err
+}
+
+// SetDevice stores the device terminal is on.
+func (s *Store) SetDevice(terminal, device string) error {
+	_, err := s.db.Exec(`INSERT INTO devices (terminal, device) VALUES (?, ?) ON CONFLICT (terminal) DO UPDATE SET device = excluded.device`, terminal, device)
 	return err
 }
 

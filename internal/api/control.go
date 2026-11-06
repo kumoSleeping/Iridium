@@ -34,11 +34,16 @@ type BlockTail struct {
 	Blocks []Block `json:"blocks"`
 }
 
-// Model is a model the agent offers. Value is what SetModel takes.
+// Model is a model the agent offers. Value is what SetModel takes. Resolved: the full model id
+// this value runs (Claude's resolvedModel, Codex's id). Efforts: the thinking levels this model
+// takes; NoEffort: it takes none; neither: the agent does not say (SessionState.efforts holds).
 type Model struct {
-	Value       string `json:"value"`
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
+	Value       string   `json:"value"`
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	Resolved    string   `json:"resolved,omitempty"`
+	Efforts     []string `json:"efforts,omitempty"`
+	NoEffort    bool     `json:"noEffort,omitempty"`
 }
 
 // SetModel, SetMode and SetEffort change a session's model, approval mode and thinking effort,
@@ -53,6 +58,11 @@ type SetMode struct {
 
 type SetEffort struct {
 	Effort string `json:"effort"`
+}
+
+// SetUltracode turns a Claude session's ultracode on or off, now and for every later start.
+type SetUltracode struct {
+	Ultracode bool `json:"ultracode"`
 }
 
 // AllowRule is a session's "always allow": asks for Tool whose subject (a command, a file path)

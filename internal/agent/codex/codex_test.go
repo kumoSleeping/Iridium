@@ -349,10 +349,11 @@ func TestTurn(t *testing.T) {
 	if got := h.kinds(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("events\n  %v\nwant\n  %v", got, want)
 	}
-	if s := find[agent.Started](h)[0]; s.Session != "00000000-0000-7000-8000-8d5c554c3185" || s.Model != "gpt-6-luna" {
+	// The effort it runs at: the one picked, over thread/start's reasoningEffort (high).
+	if s := find[agent.Started](h)[0]; s.Session != "00000000-0000-7000-8000-8d5c554c3185" || s.Model != "gpt-6-luna" || s.Effort != "low" {
 		t.Errorf("started %+v", s)
 	}
-	if hello := find[agent.Hello](h)[0]; hello.Version != "0.162.1" || hello.Mode != "auto" || len(hello.Models) != 8 {
+	if hello := find[agent.Hello](h)[0]; hello.Version != "0.162.1" || hello.Mode != "auto" || len(hello.Models) != 8 || hello.Models[0].Resolved != hello.Models[0].Value || len(hello.Models[0].Efforts) == 0 {
 		t.Errorf("hello %+v", hello)
 	}
 	ts := find[agent.ToolStart](h)

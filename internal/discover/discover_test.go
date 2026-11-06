@@ -27,6 +27,7 @@ const (
 	idSub   = "00000000-0000-7000-8000-00000000aaaa" // its subagent's thread
 	idTask  = "agent-a0be53fc45406abf7"              // an Agent tool subtask of idA, in idA/subagents/
 	idOld   = "agent-ab6082737f86b4771"              // an older one, beside idA
+	idStep  = "agent-a5f00000000000001"              // a Workflow run's agent, in idA/subagents/workflows/<run>/
 	idPi    = "00000000-0000-4000-8000-4c4a2a950dc8"
 	idDsh   = "session-0123abcd"
 	me      = 1000
@@ -244,7 +245,7 @@ func TestListsEveryAgent(t *testing.T) {
 		ids = append(ids, id)
 	}
 	slices.Sort(ids)
-	want := []string{idCodex, idSub, idPi, idA, idB, idC, idDsh, idTask, idOld}
+	want := []string{idCodex, idSub, idPi, idA, idB, idC, idDsh, idTask, idOld, idStep}
 	slices.Sort(want)
 	if !slices.Equal(ids, want) {
 		t.Fatalf("sessions %v, want %v (subagents too)", ids, want)
@@ -252,6 +253,16 @@ func TestListsEveryAgent(t *testing.T) {
 	// Subagents are sessions of their own, read-only, started by their parent.
 	if s := got[idTask]; !s.Subagent || s.Parent != idA || s.Launcher != idA || s.Agent != api.AgentClaude || s.Cwd != "/w/a" || s.Title != "Look up the weekday" {
 		t.Errorf("claude subagent: %+v", s)
+	}
+	if s := got[idStep]; !s.Subagent || s.Parent != idA || s.Launcher != idA || s.Cwd != "/w/a" || s.Title != "review:caret" {
+		t.Errorf("workflow agent: %+v", s)
+	}
+	// Its run, by its folder; the workflow's name, by its script's; its phase, by its meta.
+	if w := got[idStep].Workflow; w == nil || *w != (api.SessionWorkflow{Run: "wf_0123abcd-ef0", Name: "fix-caret", Phase: "Review"}) {
+		t.Errorf("workflow agent's run: %+v", w)
+	}
+	if w := got[idOld].Workflow; w != nil {
+		t.Errorf("a plain subagent in a run: %+v", w)
 	}
 	if s := got[idOld]; !s.Subagent || s.Parent != idA || s.Title != "an old subtask" {
 		t.Errorf("older claude subagent: %+v", s)

@@ -2,7 +2,9 @@
 // opens one stream and names the states it wants; it gets each whole at once, then whole again
 // whenever it changes, never a patch, at most once per Coalesce per state. A slow reader skips
 // the states in between: it is sent only the latest. Drafts, the text an agent is writing, are the
-// one thing sent as deltas, batched per DraftEvery; they are never dropped, only joined.
+// one thing sent as deltas, batched per DraftEvery; they are never dropped, only joined. A draft's
+// seal (done) follows its last piece. When a state is due the drafts pending go first, ahead of it:
+// a state that carries a block never overtakes the text drafted before it.
 package hub
 
 import (
@@ -95,6 +97,31 @@ func (h *Hub) Draft(session string, proc, n int, text string) {
 	}
 }
 
+// DraftTool starts draft n of session's process proc as the tool call id, name being written;
+// its input comes in Draft pieces.
+func (h *Hub) DraftTool(session string, proc, n int, id, name string) {
+	key := "session:" + session
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for s := range h.subs {
+		if s.wants[key] {
+			s.draft(api.DraftEvent{Session: session, Proc: proc, N: n, Tool: &api.DraftTool{ID: id, Name: name}})
+		}
+	}
+}
+
+// Seal says draft n of session's process proc is whole: no more text comes to it.
+func (h *Hub) Seal(session string, proc, n int) {
+	key := "session:" + session
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for s := range h.subs {
+		if s.wants[key] {
+			s.draft(api.DraftEvent{Session: session, Proc: proc, N: n, Done: true})
+		}
+	}
+}
+
 // Sub is one stream.
 type Sub struct {
 	h      *Hub
@@ -144,6 +171,10 @@ func (s *Sub) draft(d api.DraftEvent) {
 	s.mu.Lock()
 	if n := len(s.drafts); n > 0 && s.drafts[n-1].Session == d.Session && s.drafts[n-1].Proc == d.Proc && s.drafts[n-1].N == d.N {
 		s.drafts[n-1].Text += d.Text
+		s.drafts[n-1].Done = s.drafts[n-1].Done || d.Done
+		if d.Tool != nil {
+			s.drafts[n-1].Tool = d.Tool
+		}
 	} else {
 		s.drafts = append(s.drafts, d)
 	}
@@ -190,7 +221,7 @@ func (s *Sub) Serve(ctx context.Context, w io.Writer, flush func()) error {
 			due = append(due, k)
 		}
 		if len(s.drafts) > 0 {
-			if wait := drafted.Add(DraftEvery).Sub(now); wait > 0 {
+			if wait := drafted.Add(DraftEvery).Sub(now); wait > 0 && len(due) == 0 {
 				soonest(wait)
 			} else {
 				drafts, s.drafts, drafted = s.drafts, nil, now
@@ -199,6 +230,10 @@ func (s *Sub) Serve(ctx context.Context, w io.Writer, flush func()) error {
 		s.mu.Unlock()
 
 		buf.Reset()
+		for _, d := range drafts {
+			b, _ := json.Marshal(d)
+			fmt.Fprintf(&buf, "event: draft\ndata: %s\n\n", b)
+		}
 		for _, k := range due {
 			// The value now, not when it was marked: anything set since is in it.
 			v := s.h.Get(k)
@@ -207,10 +242,6 @@ func (s *Sub) Serve(ctx context.Context, w io.Writer, flush func()) error {
 			}
 			fmt.Fprintf(&buf, "event: state\ndata: {\"key\":%q,\"value\":%s}\n\n", k, v)
 			sent[k] = now
-		}
-		for _, d := range drafts {
-			b, _ := json.Marshal(d)
-			fmt.Fprintf(&buf, "event: draft\ndata: %s\n\n", b)
 		}
 		if buf.Len() > 0 {
 			if _, err := io.WriteString(w, buf.String()); err != nil {

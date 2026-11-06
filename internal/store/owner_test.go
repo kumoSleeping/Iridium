@@ -22,7 +22,7 @@ func downTo4(t *testing.T, path string) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	for _, q := range []string{`ALTER TABLE invites DROP COLUMN owner`, `PRAGMA user_version = 4`} {
+	for _, q := range []string{`ALTER TABLE invites DROP COLUMN owner`, `ALTER TABLE session_settings DROP COLUMN ultracode`, `DROP TABLE devices`, `PRAGMA user_version = 4`} {
 		if _, err := db.Exec(q); err != nil {
 			t.Fatal(err)
 		}

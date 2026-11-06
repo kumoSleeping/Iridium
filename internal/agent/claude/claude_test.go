@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -186,14 +187,18 @@ func (h *harness) act(line []byte) {
 				} `json:"request"`
 			}
 			_ = json.Unmarshal(h.next, &next)
-			if next.Request.Subtype == "apply_flag_settings" {
-				level := next.Request.Settings["effortLevel"].(string)
+			level, isLevel := next.Request.Settings["effortLevel"].(string)
+			on, isUltra := next.Request.Settings["ultracode"].(bool)
+			switch {
+			case next.Request.Subtype == "apply_flag_settings" && isLevel:
 				h.op("set_effort", func() (any, error) { return nil, h.d.SetEffort(ctx, level) })
-			} else {
-				h.op(sub, func() (any, error) { return h.d.Effort(ctx) })
+			case next.Request.Subtype == "apply_flag_settings" && isUltra:
+				h.op("set_ultracode", func() (any, error) { return on, h.d.SetUltracode(ctx, on) })
+			default:
+				h.op(sub, func() (any, error) { return h.d.Applied(ctx) })
 			}
 		case "apply_flag_settings":
-			// written by the SetEffort begun at the get_settings before
+			// written by the SetEffort or SetUltracode begun at the get_settings before
 		default:
 			h.t.Fatalf("no operation writes %s", sub)
 		}
@@ -250,8 +255,8 @@ func (h *harness) kinds() []string {
 		switch e := e.(type) {
 		case agent.StateChange:
 			s += ":" + string(e.State)
-		case agent.TextDelta:
-			if len(out) > 0 && out[len(out)-1] == "TextDelta" {
+		case agent.TextDelta, agent.ToolDraftDelta:
+			if len(out) > 0 && out[len(out)-1] == s {
 				continue
 			}
 		}
@@ -283,9 +288,26 @@ func deltas(h *harness) string {
 func TestBasicTurn(t *testing.T) {
 	h := replay(t, "basic-turn")
 	const input = "00000000-0000-4000-8000-ee09bd398767"
-	want := []string{"Hello", "PendingAsks", "TurnStart", "StateChange:running", "Taken", "Started", "ToolStart", "QuotaHit", "ToolDone", "TextDelta", "MessageDone", "TurnUsage", "StateChange:idle", "TurnEnd"}
+	want := []string{"Hello", "PendingAsks", "TurnStart", "StateChange:running", "Taken", "Started", "ToolDraft", "ToolDraftDelta", "ToolStart", "QuotaHit", "ToolDone", "TextDelta", "MessageDone", "TurnUsage", "StateChange:idle", "TurnEnd"}
 	if got := h.kinds(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("events\n  %v\nwant\n  %v", got, want)
+	}
+	// The call is drafted from its start: its id and name, then its input as it is written, the
+	// pieces joined the input the whole call has.
+	draft, start := find[agent.ToolDraft](h)[0], find[agent.ToolStart](h)[0]
+	if draft.ID != start.ID || draft.Name != start.Name {
+		t.Errorf("tool draft %+v, call %+v", draft, start)
+	}
+	var in strings.Builder
+	for _, d := range find[agent.ToolDraftDelta](h) {
+		in.WriteString(d.JSON)
+	}
+	var drafted, whole any
+	if err := json.Unmarshal([]byte(in.String()), &drafted); err != nil {
+		t.Fatalf("drafted input %q: %v", in.String(), err)
+	}
+	if b, _ := json.Marshal(start.Input); json.Unmarshal(b, &whole) != nil || !reflect.DeepEqual(drafted, whole) {
+		t.Errorf("drafted input %v, call's %v", drafted, whole)
 	}
 	if s := find[agent.TurnStart](h); s[0].Input != input {
 		t.Errorf("turn began by %q", s[0].Input)
@@ -509,8 +531,8 @@ func TestSpawn(t *testing.T) {
 // /effort lists (get_settings' applied.effort), then sets a level with ultracode as it was.
 func TestEffort(t *testing.T) {
 	h := replay(t, "cmd-effort")
-	if got := h.result["get_settings"]; got != "medium" {
-		t.Errorf("effort: %v", got)
+	if got, _ := h.result["get_settings"].(agent.Applied); got.Effort != "medium" || got.Model != "claude-haiku-5-5" || !got.Known || !got.UltracodeAvailable || got.Ultracode {
+		t.Errorf("applied: %+v", h.result["get_settings"])
 	}
 	if _, ok := h.result["set_effort"]; !ok {
 		t.Error("set_effort did not return")
@@ -521,6 +543,93 @@ func TestEffort(t *testing.T) {
 	spec, err := d.Spawn(agent.SpawnOptions{Session: "s", Env: []string{"PATH=" + bin}, Program: "claude", SystemPromptFile: "/p", Effort: "high"})
 	if err != nil || !strings.Contains(strings.Join(spec.Argv, " "), " --effort high ") {
 		t.Errorf("spawn: %v %v", spec.Argv, err)
+	}
+}
+
+// Ultracode goes alone in apply_flag_settings, the effort level as it was; get_settings says what
+// is asked for and whether the model takes it. At launch it is --settings, never --effort.
+func TestUltracode(t *testing.T) {
+	h := replay(t, "cmd-ultracode")
+	if _, ok := h.result["set_ultracode"]; !ok {
+		t.Error("set_ultracode did not return")
+	}
+	if got, _ := h.result["get_settings"].(agent.Applied); !got.Ultracode || !got.UltracodeOn || !got.UltracodeAvailable || got.Effort != "low" {
+		t.Errorf("applied: %+v", h.result["get_settings"])
+	}
+	d := New(Options{})
+	bin := t.TempDir()
+	os.WriteFile(filepath.Join(bin, "claude"), []byte("#!/bin/sh\n"), 0o755)
+	on := true
+	spec, err := d.Spawn(agent.SpawnOptions{Session: "s", Env: []string{"PATH=" + bin}, Program: "claude", SystemPromptFile: "/p", Effort: "high", Ultracode: &on})
+	if argv := strings.Join(spec.Argv, " "); err != nil || !strings.Contains(argv, ` --effort high --settings {"ultracode":true} `) {
+		t.Errorf("spawn: %v %v", spec.Argv, err)
+	}
+	spec, _ = d.Spawn(agent.SpawnOptions{Session: "s", Env: []string{"PATH=" + bin}, Program: "claude", SystemPromptFile: "/p"})
+	if slices.Contains(spec.Argv, "--settings") {
+		t.Errorf("spawn, never set: %v", spec.Argv)
+	}
+	// A model that cannot take it: refused before anything is written.
+	d = New(Options{Logf: t.Logf})
+	var wrote []string
+	d.Attach(func(l []byte) error {
+		var f struct {
+			ID  string         `json:"request_id"`
+			Req map[string]any `json:"request"`
+		}
+		json.Unmarshal(l, &f)
+		wrote = append(wrote, fmt.Sprint(f.Req["subtype"]))
+		if f.Req["subtype"] == "get_settings" {
+			go d.Feed([]byte(`{"type":"control_response","response":{"subtype":"success","request_id":"`+f.ID+`","response":{"applied":{"model":"claude-haiku-4-5","ultracodeAvailable":false}}}}`), false)
+		}
+		return nil
+	}, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := d.SetUltracode(ctx, true); !errors.Is(err, agent.ErrNoUltracode) || !slices.Equal(wrote, []string{"initialize", "get_settings"}) {
+		t.Errorf("unavailable: %v, wrote %v", err, wrote)
+	}
+	// A CLI without get_settings: unknown is unavailable (Rhodium §6.2), off still goes.
+	d = New(Options{Logf: t.Logf})
+	wrote = nil
+	d.Attach(func(l []byte) error {
+		var f struct {
+			ID  string         `json:"request_id"`
+			Req map[string]any `json:"request"`
+		}
+		json.Unmarshal(l, &f)
+		wrote = append(wrote, fmt.Sprint(f.Req["subtype"]))
+		switch f.Req["subtype"] {
+		case "get_settings":
+			go d.Feed([]byte(`{"type":"control_response","response":{"subtype":"error","request_id":"`+f.ID+`","error":"Unsupported control request subtype: get_settings"}}`), false)
+		case "apply_flag_settings":
+			go d.Feed([]byte(`{"type":"control_response","response":{"subtype":"success","request_id":"`+f.ID+`","response":{}}}`), false)
+		}
+		return nil
+	}, 1)
+	if err := d.SetUltracode(ctx, true); !errors.Is(err, agent.ErrNoUltracode) || !slices.Equal(wrote, []string{"initialize", "get_settings"}) {
+		t.Errorf("no get_settings: %v, wrote %v", err, wrote)
+	}
+	if err := d.SetUltracode(ctx, false); err != nil || wrote[len(wrote)-1] != "apply_flag_settings" {
+		t.Errorf("no get_settings, off: %v, wrote %v", err, wrote)
+	}
+}
+
+// Each model says what it resolves to and the levels it takes; Haiku 4.5 takes none.
+func TestModelsResolved(t *testing.T) {
+	h := replay(t, "basic-turn")
+	ms := find[agent.Hello](h)[0].Models
+	byValue := map[string]agent.Model{}
+	for _, m := range ms {
+		byValue[m.Value] = m
+	}
+	if d := byValue["default"]; d.Resolved != "claude-opus-5-5" || len(d.Efforts) != 5 || d.NoEffort {
+		t.Errorf("default: %+v", d)
+	}
+	if m := byValue["claude-haiku-4-5-20251001"]; !m.NoEffort || len(m.Efforts) != 0 {
+		t.Errorf("haiku 4.5: %+v", m)
+	}
+	if m := byValue["claude-opus-4-6"]; slices.Contains(m.Efforts, "xhigh") || !slices.Contains(m.Efforts, "max") {
+		t.Errorf("opus 4.6: %+v", m)
 	}
 }
 

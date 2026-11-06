@@ -49,7 +49,8 @@ func (m *Manager) SendWith(ctx context.Context, id, text, from string, steer boo
 	h.shownLater() // a message for it: out of the archive
 	terminal, tag := m.source(from)
 	in := store.Input{ID: newUUID(), Session: h.id, Terminal: terminal, Tag: tag, Text: text, State: "sent"}
-	if !steer && h.busy() {
+	// Steering joins a running turn; while it waits for the quota there is none to join, so it waits too.
+	if (!steer && h.busy()) || h.quotaWait() {
 		in.State = "queued"
 		if err := m.o.Store.AddInput(in); err != nil {
 			return "", false, err
@@ -76,6 +77,13 @@ func (h *Hosted) queuedImages(id string) []agent.Image {
 	im := h.qimages[id]
 	delete(h.qimages, id)
 	return im
+}
+
+// quotaWait: the agent's quota ran out and Iridium goes on later.
+func (h *Hosted) quotaWait() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.quotaUntil != 0
 }
 
 // busy: a message now would join a running turn, or wait behind others or for the quota.

@@ -1,9 +1,11 @@
 // The jump box (⌘K, Ctrl+K, or the sidebar's search key; Rhodium spec web-maximize "跳转框"): type to
 // go to a session by its name, its folder or what was said last. Nothing typed: those opened lately
 // in this tab, then the rest as the sidebar lists them. The archive (sessions with no shown marker)
-// is found too, last and faint. Loaded only once it first opens.
+// is found too, last and faint. In the sidebar only, under its head, its list in the tree's place;
+// the page beside it stays as it is (the user, 2026-11-06). A press outside the sidebar or Esc
+// closes it. Loaded only once it first opens.
 import { Archive, Search } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { Session } from "./api/types.gen";
 import { t } from "./i18n";
 import { openChat, recent } from "./route";
@@ -41,55 +43,63 @@ export function Jump({ close, tree, open }: { close: () => void; tree: Tree; ope
   const list = jumpList(all, flat(tree), typed, open, recent());
   const sel = Math.min(pick, list.length - 1);
   const go = (id: string) => (close(), id !== open && openChat(id));
+  const root = useRef<HTMLDivElement>(null);
+  const shut = useRef(close);
+  shut.current = close;
+  // A press anywhere outside the sidebar it sits in closes it.
+  useEffect(() => {
+    const box = root.current?.closest("aside") ?? root.current;
+    const down = (e: PointerEvent) => box && !box.contains(e.target as Node) && shut.current();
+    document.addEventListener("pointerdown", down, true);
+    return () => document.removeEventListener("pointerdown", down, true);
+  }, []);
   return (
-    <div className="g-fade fixed inset-0 z-80 bg-ink/10" onMouseDown={(e) => e.target === e.currentTarget && (e.preventDefault(), close())}>
-      <div role="dialog" aria-label={t("nav.search")} onMouseDown={(e) => e.target instanceof HTMLInputElement || e.preventDefault()} className="g-unfold glass thick float mx-auto mt-[12vh] w-[min(36rem,calc(100%-1.5rem))] overflow-hidden rounded-xl text-ink" style={{ transformOrigin: "top center" }}>
-        <label className="flex items-center gap-2.5 px-3.5 shadow-[0_0.5px_0_var(--edge)]">
-          <Search size={16} className="shrink-0 text-ink-3" />
-          <input
-            autoFocus
-            role="combobox"
-            aria-expanded
-            aria-controls="jump-list"
-            aria-activedescendant={list[sel] && `jump-${list[sel].id}`}
-            aria-label={t("nav.search")}
-            placeholder={t("jump.placeholder")}
-            value={typed}
-            onChange={(e) => (setTyped(e.target.value), setPick(0))}
-            onKeyDown={(e) => {
-              if (e.nativeEvent.isComposing || e.keyCode === 229) return;
-              const by = { ArrowDown: 1, ArrowUp: -1 }[e.key];
-              if (by && list.length) setPick((sel + by + list.length) % list.length);
-              else if (e.key === "Enter" && list[sel]) go(list[sel].id);
-              else if (e.key === "Escape") (e.stopPropagation(), close());
-              else if (e.key !== "Tab") return;
-              e.preventDefault();
-            }}
-            className="no-ring h-12 min-w-0 flex-1 bg-transparent text-md placeholder:text-ink-3"
-          />
-        </label>
-        <div id="jump-list" role="listbox" aria-label={t("nav.sessions")} className="max-h-[22rem] overflow-y-auto p-1.5">
-          {list.map((s, i) => (
-            <button
-              key={s.id}
-              id={`jump-${s.id}`}
-              type="button"
-              role="option"
-              aria-selected={i === sel}
-              tabIndex={-1}
-              ref={(el) => void (i === sel && el?.scrollIntoView({ block: "nearest" }))}
-              onPointerMove={() => i === sel || setPick(i)}
-              onClick={() => go(s.id)}
-              className={cn("flex h-10 w-full items-center gap-2.5 rounded-md px-2.5 text-left", i === sel && "bg-fill", s.archived && "opacity-55")}
-            >
-              <LogoLamp agent={s.agent} status={s.status} />
-              <span className="min-w-0 shrink truncate text-base">{titleOf(s)}</span>
-              <span className="min-w-0 flex-1 truncate text-xs text-ink-3">{said(s.last) ?? tilde(s.cwd)}</span>
-              {s.archived && <Archive size={13} className="shrink-0 text-ink-4" aria-label={t("nav.archive")} />}
-            </button>
-          ))}
-          {!list.length && <p className="m-0 px-3 py-2.5 text-sm text-ink-3">{t("jump.none")}</p>}
-        </div>
+    <div ref={root} role="search" onMouseDown={(e) => e.target instanceof HTMLInputElement || e.preventDefault()} className="g-stagger flex min-h-0 flex-1 flex-col text-ink">
+      <label className="mx-2 flex h-8 shrink-0 items-center gap-2 rounded-md bg-fill px-2.5 pointer-coarse:h-10" style={{ "--i": 0 } as CSSProperties}>
+        <Search size={15} className="shrink-0 text-ink-3" />
+        <input
+          autoFocus
+          role="combobox"
+          aria-expanded
+          aria-controls="jump-list"
+          aria-activedescendant={list[sel] && `jump-${list[sel].id}`}
+          aria-label={t("nav.search")}
+          placeholder={t("jump.placeholder")}
+          value={typed}
+          onChange={(e) => (setTyped(e.target.value), setPick(0))}
+          onKeyDown={(e) => {
+            if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+            const by = { ArrowDown: 1, ArrowUp: -1 }[e.key];
+            if (by && list.length) setPick((sel + by + list.length) % list.length);
+            else if (e.key === "Enter" && list[sel]) go(list[sel].id);
+            else if (e.key === "Escape") (e.stopPropagation(), close());
+            else if (e.key !== "Tab") return;
+            e.preventDefault();
+          }}
+          className="no-ring h-full min-w-0 flex-1 bg-transparent text-base placeholder:text-ink-3 pointer-coarse:text-md"
+        />
+      </label>
+      <div id="jump-list" role="listbox" aria-label={t("nav.sessions")} className="mt-1.5 min-h-0 flex-1 overflow-y-auto px-2 pb-3" style={{ "--i": 1 } as CSSProperties}>
+        {list.map((s, i) => (
+          <button
+            key={s.id}
+            id={`jump-${s.id}`}
+            type="button"
+            role="option"
+            aria-selected={i === sel}
+            tabIndex={-1}
+            ref={(el) => void (i === sel && el?.scrollIntoView({ block: "nearest" }))}
+            onPointerMove={() => i === sel || setPick(i)}
+            onClick={() => go(s.id)}
+            className={cn("flex h-[30px] w-full cursor-default items-center gap-2 rounded-md px-2 text-left pointer-coarse:h-10", i === sel && "bg-fill", s.archived && "opacity-55")}
+          >
+            <LogoLamp agent={s.agent} status={s.status} />
+            <span className="min-w-0 shrink truncate text-base">{titleOf(s)}</span>
+            <span className="min-w-0 flex-1 truncate text-xs text-ink-3">{said(s.last) ?? tilde(s.cwd)}</span>
+            {s.archived && <Archive size={13} className="shrink-0 text-ink-4" aria-label={t("nav.archive")} />}
+          </button>
+        ))}
+        {!list.length && <p className="m-0 px-2 py-2 text-sm text-ink-3">{t("jump.none")}</p>}
       </div>
     </div>
   );

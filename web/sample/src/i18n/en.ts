@@ -6,7 +6,6 @@ export const en: Dict = {
   "nav.newSession": "New session",
   "nav.newWorkspace": "New workspace",
   "nav.search": "Search",
-  "nav.topology": "Topology",
   "nav.settings": "Settings",
   "nav.needsYou": "Needs you",
   "nav.expand": "Expand",

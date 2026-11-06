@@ -28,6 +28,10 @@ type Glimpse struct {
 	// Sidechain: an Agent tool's subtask, started by session Parent.
 	Sidechain bool
 	Parent    string
+	// Ended: a sidechain whose last message is its final answer: an assistant reply that calls no
+	// tool, or the tool result that ends the turn (toolEndsTurn, as a workflow agent's
+	// StructuredOutput). One still at work ends on a tool call or its result.
+	Ended bool
 }
 
 // Glance reads the start of the Claude transcript at path for where it was started and its
@@ -75,6 +79,13 @@ func Glance(path string, sources Sources) (Glimpse, error) {
 	if err != nil {
 		return g, err
 	}
+	if g.Sidechain {
+		end, err := Tail(f, ended)
+		if err != nil {
+			return g, err
+		}
+		g.Ended = end != nil && *end
+	}
 	g.Last, err = Tail(f, func(off int64, raw []byte) *api.LastSaid {
 		blocks := blocksOf(off, raw, Clip, sources)
 		for j := len(blocks) - 1; j >= 0; j-- {
@@ -85,6 +96,44 @@ func Glance(path string, sources Sources) (Glimpse, error) {
 		return nil
 	})
 	return g, err
+}
+
+// ended reads a sidechain's line from the end: nil for one that is not a message (progress,
+// attachments, API requests), else whether it ends the subagent's work.
+func ended(_ int64, raw []byte) *bool {
+	if bytes.HasPrefix(raw, blobPrefix) {
+		return nil
+	}
+	var l struct {
+		Type         string `json:"type"`
+		ToolEndsTurn bool   `json:"toolEndsTurn"`
+		Message      struct {
+			StopReason string          `json:"stop_reason"`
+			Content    json.RawMessage `json:"content"`
+		} `json:"message"`
+	}
+	if json.Unmarshal(raw, &l) != nil {
+		return nil
+	}
+	var done bool
+	switch l.Type {
+	case "user":
+		done = l.ToolEndsTurn
+	case "assistant":
+		var blocks []struct {
+			Type string `json:"type"`
+		}
+		_ = json.Unmarshal(l.Message.Content, &blocks)
+		done = l.Message.StopReason == "end_turn" || l.Message.StopReason == "stop_sequence"
+		for _, b := range blocks {
+			if b.Type == "tool_use" {
+				done = false
+			}
+		}
+	default:
+		return nil
+	}
+	return &done
 }
 
 // Said is a LastSaid of text: on one line, Markdown's marks for headings, bold, code and links

@@ -43,6 +43,11 @@ func TestArchiveHosted(t *testing.T) {
 	if !s.Archived || !listed().Archived || s.Status == api.StatusError {
 		t.Fatalf("archived: %+v", s)
 	}
+	// Noted just after the state says it ended.
+	waitFor(t, "its marker once it ended", func() bool {
+		row, ok, _ := r.store.ShownRow(string(api.AgentClaude), id)
+		return ok && row.QuietUntil == 0
+	})
 	row, ok, _ := r.store.ShownRow(string(api.AgentClaude), id)
 	if !ok || row.Shown || row.Size == 0 || row.QuietUntil != 0 {
 		t.Fatalf("its marker once it ended: %+v %v", row, ok)

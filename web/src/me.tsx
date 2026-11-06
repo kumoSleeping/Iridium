@@ -1,14 +1,15 @@
 // This panel's identity at the sidebar's bottom-left (plan "网页"): a terminal, not a person, shown
 // like a signed-in account. Its popover: avatar (upload, cropped round, stored at 128px by the gate),
-// rename, the read-only permissions, appearance and language, sign out. Local-only with no Passkey,
+// rename, the read-only permissions, the device it runs on (its messages' badge), appearance and
+// language, sign out. Local-only with no Passkey,
 // it is 本机, which has nothing to rename or sign out of.
 import { Popover } from "@base-ui/react/popover";
 import { Slider } from "@base-ui/react/slider";
 import { useQueryClient } from "@tanstack/react-query";
-import { Camera, Check, ChevronLeft, ChevronRight, Laptop, LogOut, Minus, Monitor, Moon, PencilLine, ShieldCheck, Sun } from "lucide-react";
+import { Camera, Check, ChevronLeft, ChevronRight, Laptop, LogOut, Minus, Monitor, Moon, PencilLine, ShieldCheck, Smartphone, Sun } from "lucide-react";
 import { useRef, useState, type ReactNode } from "react";
 import { ApiError, api } from "./api/client";
-import type { Me, Rules } from "./api/types.gen";
+import type { Device, Me, Rules } from "./api/types.gen";
 import { LOCAL_ME, useMe, useWorkspaces } from "./data";
 import { setLang, t, useLang, type Lang } from "./i18n";
 import { errText, toast } from "./toast";
@@ -54,6 +55,18 @@ export function MeChip({ theme, setTheme, initialPage = "main", defaultOpen = fa
     } catch (e) {
       toast(p.name ? t("me.rename") : t("me.avatar"), { error: true, description: nameError(e) });
       return false;
+    }
+  };
+  // The device this terminal runs on, for every panel to see: the badge on its messages' avatar.
+  const device: Device = me.device ?? "computer";
+  const setDevice = async (d: Device) => {
+    if (d === device) return;
+    try {
+      const next = await api.device(d);
+      qc.setQueryData(["me"], { ...me, device: next.device } satisfies Me);
+      void qc.invalidateQueries({ queryKey: ["terminals"] });
+    } catch (e) {
+      toast(t("me.device"), { error: true, description: errText(e) });
     }
   };
   return (
@@ -137,6 +150,21 @@ export function MeChip({ theme, setTheme, initialPage = "main", defaultOpen = fa
               <Row icon={<ShieldCheck size={16} />} onClick={() => setPage("perms")} end={<ChevronRight size={14} className="text-ink-4" />}>
                 {t("me.perms")}
               </Row>
+              <div className="flex items-center justify-between gap-2 py-1.5 pr-1.5 pl-2">
+                <span className="flex min-w-0 items-center gap-2.5 text-base">
+                  <span className="text-ink-2">{device === "phone" ? <Smartphone size={16} /> : <Monitor size={16} />}</span>
+                  <span className="truncate">{t("me.device")}</span>
+                </span>
+                <Segmented
+                  label={t("me.device")}
+                  value={device}
+                  onChange={(v) => void setDevice(v as Device)}
+                  items={[
+                    { v: "computer", label: t("device.computer"), icon: <Monitor size={15} /> },
+                    { v: "phone", label: t("device.phone"), icon: <Smartphone size={15} /> },
+                  ]}
+                />
+              </div>
               <div className="flex items-center justify-between gap-2 px-1.5 py-1.5">
                 <Segmented
                   label={t("me.theme")}

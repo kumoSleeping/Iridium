@@ -60,7 +60,7 @@ export const workspaces: Workspace[] = [
     id: "w-rh",
     name: "Rhodium",
     root: "~/kumo/rhodium-src/Rhodium",
-    sessions: [s("s-rh1", "claude", { zh: "网关限速", en: "Gateway rate limits" }), s("s-rh2", "codex", "topology layout")],
+    sessions: [s("s-rh1", "claude", { zh: "网关限速", en: "Gateway rate limits" }), s("s-rh2", "codex", "holder restart")],
     folders: [],
   },
   {

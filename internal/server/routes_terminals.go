@@ -24,6 +24,9 @@ func (s *Server) terminalRoutes(mux *http.ServeMux) {
 	profile := func(w http.ResponseWriter, r *http.Request) { s.gate().ServeProfile(w, r, r.PathValue("id")) }
 	mux.HandleFunc("PUT /api/endpoints/{id}/profile", profile)
 	mux.HandleFunc("PUT /api/terminals/{id}/profile", profile)
+	// The device it runs on: its own, or (panels and 本机) another's.
+	mux.HandleFunc("PUT /api/me/device", func(w http.ResponseWriter, r *http.Request) { s.setDevice(w, r, "") })
+	mux.HandleFunc("PUT /api/terminals/{id}/device", func(w http.ResponseWriter, r *http.Request) { s.setDevice(w, r, r.PathValue("id")) })
 	mux.HandleFunc("GET /api/terminals", s.manage(s.terminals))
 	mux.HandleFunc("DELETE /api/terminals/{id}", s.manage(s.revoke))
 	mux.HandleFunc("PUT /api/terminals/{id}/rules", s.manage(s.setRules))
@@ -131,6 +134,40 @@ func (s *Server) setRules(w http.ResponseWriter, r *http.Request) {
 	s.logf("server: %s set the permissions of %s (%s)", c.Name, info.Name, id)
 	s.publishList()
 	reply(w, http.StatusOK, s.terminalOf(info))
+}
+
+// setDevice sets the device terminal ref (ID or name; "" the caller) runs on.
+func (s *Server) setDevice(w http.ResponseWriter, r *http.Request, ref string) {
+	var req api.SetDevice
+	if !readJSON(w, r, &req) {
+		return
+	}
+	if req.Device != api.DeviceComputer && req.Device != api.DevicePhone {
+		fail(w, http.StatusBadRequest, `device is "computer" or "phone"`)
+		return
+	}
+	c := callerOf(r)
+	if ref == "" {
+		ref = c.EndpointID
+	}
+	info, ok := s.gate().Find(ref)
+	if !ok {
+		fail(w, http.StatusNotFound, "no such terminal")
+		return
+	}
+	if info.ID != c.EndpointID && !c.CanManage() {
+		forbid(w, errors.New("only a web panel or 本机 sets another terminal's device"))
+		return
+	}
+	if err := s.st.SetDevice(info.ID, string(req.Device)); err != nil {
+		s.error(w, err)
+		return
+	}
+	t := s.terminalOf(info)
+	if info.ID == gate.LocalEndpointID {
+		t.Rules = access.Full()
+	}
+	reply(w, http.StatusOK, t)
 }
 
 // publishList makes every stream's list again: what a terminal sees may have changed.

@@ -2,7 +2,7 @@
 // popover shell, icon keys, agent logos with their status lamp, terminal avatars, switches.
 import { Popover } from "@base-ui/react/popover";
 import { Tooltip } from "@base-ui/react/tooltip";
-import { Plug } from "lucide-react";
+import { Plug, type LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState, useSyncExternalStore, type ComponentProps, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import type { Agent, Status } from "./api/types.gen";
 import { t } from "./i18n";
@@ -166,8 +166,8 @@ export function PopSurface({
 }
 
 /** A switch: role switch, ink when on. */
-export function Switch({ on, onChange, label, disabled }: { on: boolean; onChange: (on: boolean) => void; label: string; disabled?: boolean }) {
-  return <button type="button" role="switch" aria-checked={on} aria-label={label} disabled={disabled} onClick={() => onChange(!on)} className="switch g-press" />;
+export function Switch({ on, onChange, label, disabled, className }: { on: boolean; onChange: (on: boolean) => void; label: string; disabled?: boolean; className?: string }) {
+  return <button type="button" role="switch" aria-checked={on} aria-label={label} disabled={disabled} onClick={() => onChange(!on)} className={cn("switch g-press", className)} />;
 }
 
 const AGENT_NAME: Record<Agent, string> = { claude: "Claude", codex: "Codex", pi: "pi", dsh: "DeepSeek Harness" };
@@ -215,6 +215,13 @@ export const statusText = (s: Status) => t(STATUS_KEY[s] ?? "status.idle");
 /** The lamp's look: waiting shows as needs (amber). */
 const LAMP: Record<Status, string> = { running: "running", compacting: "compacting", waiting: "needs", error: "error", starting: "starting", elsewhere: "elsewhere", idle: "idle" };
 
+/** A session row's status lamp, at the row's top right (the user, 2026-11-06): green, breathing, as
+ *  it works; idle has none. */
+export function Lamp({ status }: { status: Status }) {
+  if (status === "idle") return null;
+  return <span key={status} className="row-lamp g-pop" data-s={LAMP[status]} role="img" aria-label={statusText(status)} />;
+}
+
 /** A logo with its status lamp on the bottom-right corner; idle has none. */
 export function LogoLamp({ agent, status, size = 16 }: { agent: Agent; status: Status; size?: number }) {
   return (
@@ -230,10 +237,10 @@ export function LogoLamp({ agent, status, size = 16 }: { agent: Agent; status: S
 }
 
 /** A terminal's avatar, or its initial on a neutral disc; channel-type terminals (plugins, peers)
- *  carry a small plug on the corner. */
-export function Avatar({ src, name, size = 20, channel, className }: { src?: string; name?: string; size?: number; channel?: boolean; className?: string }) {
-  const badge = Math.max(10, Math.round(size * 0.5));
+ *  carry a small plug on the corner, or badge another mark (a device: Monitor, Smartphone). */
+export function Avatar({ src, name, size = 20, channel, badge, badgeSize, badgeLabel, className }: { src?: string; name?: string; size?: number; channel?: boolean; badge?: LucideIcon; badgeSize?: number; badgeLabel?: string; className?: string }) {
   const [broken, setBroken] = useState<string | null>(null);
+  const mark = badge ?? (channel ? Plug : undefined);
   return (
     <span className={cn("relative inline-block shrink-0", className)} style={{ width: size, height: size }}>
       {src && broken !== src ? (
@@ -243,11 +250,23 @@ export function Avatar({ src, name, size = 20, channel, className }: { src?: str
           {[...(name ?? "?")][0]?.toUpperCase()}
         </span>
       )}
-      {channel && (
-        <span className="absolute grid place-items-center rounded-full bg-fill-2 text-ink-2" style={{ width: badge, height: badge, right: -3, bottom: -3, boxShadow: "0 0 0 1.5px var(--row-bg, var(--paper))" }}>
-          <Plug strokeWidth={2.5} style={{ width: badge * 0.66, height: badge * 0.66 }} />
-        </span>
-      )}
+      {mark && <Badge icon={mark} size={badgeSize ?? Math.max(10, Math.round(size * 0.5))} label={badgeLabel} />}
+    </span>
+  );
+}
+
+/** A small mark on a face's bottom-right corner (a plug, a device, an agent), ringed in the colour
+ *  under it so it reads apart from the face. Its parent is positioned. */
+export function Badge({ icon: Icon, size, label }: { icon: LucideIcon; size: number; label?: string }) {
+  return (
+    <span
+      role={label ? "img" : undefined}
+      aria-label={label}
+      aria-hidden={label ? undefined : true}
+      className="absolute grid place-items-center rounded-full bg-fill-2 text-ink-2"
+      style={{ width: size, height: size, right: -3, bottom: -3, boxShadow: "0 0 0 1.5px var(--row-bg, var(--paper))" }}
+    >
+      <Icon strokeWidth={2.5} style={{ width: size * 0.66, height: size * 0.66 }} />
     </span>
   );
 }

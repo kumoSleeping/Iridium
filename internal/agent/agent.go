@@ -59,6 +59,7 @@ type SpawnOptions struct {
 	Model            string
 	Mode             string // the approval mode; empty: the agent's default
 	Effort           string // the thinking effort; empty: the agent's default
+	Ultracode        *bool  // Claude's ultracode; nil: never set, the user's own settings hold
 	// CrashResume: the last process died mid-turn; an agent that can run that turn again by itself
 	// is told to.
 	CrashResume bool
@@ -108,7 +109,11 @@ type (
 	// TextDelta is text the agent is writing; MessageDone seals the draft with the whole message.
 	TextDelta   struct{ Text string }
 	MessageDone struct{ Text string }
-	ToolStart   struct {
+	// ToolDraft: the agent began to write tool call ID (Name); ToolDraftDelta is its input's JSON
+	// as it comes, in pieces. ToolStart follows with the whole call.
+	ToolDraft      struct{ ID, Name string }
+	ToolDraftDelta struct{ JSON string }
+	ToolStart      struct {
 		ID, Name string
 		Input    any
 	}
@@ -122,8 +127,9 @@ type (
 	Tasks struct{ Tasks []api.Task }
 	// Taken: the agent took the input into its conversation (or turned it down for good).
 	Taken struct{ InputID string }
-	// Started: the agent named its session and model (Claude: system/init, each turn).
-	Started struct{ Session, Model string }
+	// Started: the agent named its session and model (Claude: system/init, each turn), and the
+	// effort level it runs at, if it says (Codex, pi; "" for Claude, read with Applier).
+	Started struct{ Session, Model, Effort string }
 	// Hello: the handshake's answer.
 	Hello struct {
 		Version  string
@@ -157,30 +163,37 @@ type (
 	GiveUp struct{ Why string }
 )
 
-func (TurnStart) event()     {}
-func (TurnEnd) event()       {}
-func (StateChange) event()   {}
-func (TextDelta) event()     {}
-func (MessageDone) event()   {}
-func (ToolStart) event()     {}
-func (ToolDone) event()      {}
-func (AskOpen) event()       {}
-func (AskCancel) event()     {}
-func (PendingAsks) event()   {}
-func (Tasks) event()         {}
-func (Taken) event()         {}
-func (Started) event()       {}
-func (Hello) event()         {}
-func (TurnUsage) event()     {}
-func (QuotaHit) event()      {}
-func (Compacted) event()     {}
-func (ProtocolError) event() {}
-func (GiveUp) event()        {}
+func (TurnStart) event()      {}
+func (TurnEnd) event()        {}
+func (StateChange) event()    {}
+func (TextDelta) event()      {}
+func (MessageDone) event()    {}
+func (ToolDraft) event()      {}
+func (ToolDraftDelta) event() {}
+func (ToolStart) event()      {}
+func (ToolDone) event()       {}
+func (AskOpen) event()        {}
+func (AskCancel) event()      {}
+func (PendingAsks) event()    {}
+func (Tasks) event()          {}
+func (Taken) event()          {}
+func (Started) event()        {}
+func (Hello) event()          {}
+func (TurnUsage) event()      {}
+func (QuotaHit) event()       {}
+func (Compacted) event()      {}
+func (ProtocolError) event()  {}
+func (GiveUp) event()         {}
 
+// Model is a model the agent offers. Resolved: the full id Value runs (Claude's resolvedModel);
+// Efforts: the effort levels it takes; NoEffort: it takes none. Neither: the agent does not say.
 type Model struct {
-	Value       string `json:"value"`
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
+	Value       string   `json:"value"`
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	Resolved    string   `json:"resolved,omitempty"`
+	Efforts     []string `json:"efforts,omitempty"`
+	NoEffort    bool     `json:"noEffort,omitempty"`
 }
 
 type Command struct {

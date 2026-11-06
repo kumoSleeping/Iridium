@@ -425,10 +425,10 @@ type multipartBody struct {
 	ct  string
 }
 
-// profile: ir profile <名字> [--name 新名] [--avatar 图片] [--no-avatar].
+// profile: ir profile <名字> [--name 新名] [--avatar 图片] [--no-avatar] [--device computer|phone].
 func profile(e adminEnv, args []string, stdout, stderr io.Writer) int {
 	usage := func() int {
-		fmt.Fprintln(stderr, "用法：ir profile <名字> [--name 新名] [--avatar 图片] [--no-avatar]")
+		fmt.Fprintln(stderr, "用法：ir profile <名字> [--name 新名] [--avatar 图片] [--no-avatar] [--device computer|phone]")
 		return 2
 	}
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
@@ -437,7 +437,7 @@ func profile(e adminEnv, args []string, stdout, stderr io.Writer) int {
 	ref, rest := args[0], args[1:]
 	body := &multipartBody{}
 	mw := multipart.NewWriter(&body.buf)
-	changed := false
+	changed, device := false, ""
 	for i := 0; i < len(rest); i++ {
 		flag, val, hasVal := strings.Cut(rest[i], "=")
 		next := func() (string, bool) {
@@ -470,13 +470,30 @@ func profile(e adminEnv, args []string, stdout, stderr io.Writer) int {
 			w.Write(data)
 		case "--no-avatar":
 			mw.WriteField("removeAvatar", "1")
+		case "--device":
+			v, ok := next()
+			if !ok || (v != string(api.DeviceComputer) && v != string(api.DevicePhone)) {
+				return usage()
+			}
+			device = v
+			continue
 		default:
 			return usage()
 		}
 		changed = true
 	}
-	if !changed {
+	if !changed && device == "" {
 		return usage()
+	}
+	if device != "" {
+		var t api.Terminal
+		if _, err := e.call("PUT", "/api/terminals/"+url.PathEscape(ref)+"/device", api.SetDevice{Device: api.Device(device)}, &t); err != nil {
+			return failed(stderr, "profile", err)
+		}
+		if !changed {
+			fmt.Fprintf(stdout, "改好了：%s（%s）\n", t.Name, deviceName(t.Device))
+			return 0
+		}
 	}
 	mw.Close()
 	body.ct = mw.FormDataContentType()
@@ -489,6 +506,13 @@ func profile(e adminEnv, args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stdout, "改好了：%s%s\n", info.Name, map[bool]string{true: "（有头像）", false: ""}[info.Avatar != ""])
 	return 0
+}
+
+func deviceName(d api.Device) string {
+	if d == api.DevicePhone {
+		return "手机"
+	}
+	return "电脑"
 }
 
 // revoke: ir revoke <名字>, a terminal or an unused invite.

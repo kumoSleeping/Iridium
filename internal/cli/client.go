@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -140,7 +141,10 @@ func (e *env) failf(format string, a ...any) int {
 type opts struct {
 	wait    bool
 	steer   bool
-	all     bool // ir ls --all: the archive too
+	queue   bool // ir send --queue: wait for the running turn to end instead of joining it
+	all     bool // ir ls, find --all: the archive and the subagents done too
+	full    bool // ir read --full: the whole page as written
+	n       int  // ir read -n: how many messages
 	model   string
 	approve string
 	attach  []string
@@ -167,13 +171,15 @@ func parse(args []string, allowed string) (opts, error) {
 		if !strings.Contains(" "+allowed+" ", " "+name+" ") {
 			return o, fmt.Errorf("no flag %s here", a)
 		}
-		if name == "wait" || name == "steer" || name == "all" {
+		if name == "wait" || name == "steer" || name == "queue" || name == "all" || name == "full" {
 			if hasVal {
 				return o, fmt.Errorf("%s takes no value", a)
 			}
 			o.wait = o.wait || name == "wait"
 			o.steer = o.steer || name == "steer"
+			o.queue = o.queue || name == "queue"
 			o.all = o.all || name == "all"
+			o.full = o.full || name == "full"
 			continue
 		}
 		if !hasVal {
@@ -190,6 +196,12 @@ func parse(args []string, allowed string) (opts, error) {
 			o.approve = val
 		case "attach":
 			o.attach = append(o.attach, val)
+		case "n":
+			n, err := strconv.Atoi(val)
+			if err != nil || n < 1 {
+				return o, fmt.Errorf("-n takes a count, not %q", val)
+			}
+			o.n = n
 		}
 	}
 	return o, nil

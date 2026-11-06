@@ -5,6 +5,7 @@
 package codex
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -355,7 +356,11 @@ func (d *Driver) open(proc int, w *open, ready chan struct{}) {
 	h := agent.Hello{Version: d.version, Mode: d.mode}
 	for _, m := range d.models {
 		if !m.Hidden {
-			h.Models = append(h.Models, agent.Model{Value: m.ID, Name: m.DisplayName, Description: m.Description})
+			mm := agent.Model{Value: m.ID, Name: m.DisplayName, Description: m.Description, Resolved: m.ID}
+			for _, e := range m.Efforts {
+				mm.Efforts = append(mm.Efforts, e.Effort)
+			}
+			h.Models = append(h.Models, mm)
 		}
 	}
 	d.emitLocked(h)
@@ -748,7 +753,7 @@ func (d *Driver) SetModel(ctx context.Context, model string) error {
 	}
 	d.pick.model, d.pick.effort = m.ID, effort
 	d.model = m.ID
-	d.emitLocked(agent.Started{Session: d.thread, Model: m.ID})
+	d.emitLocked(agent.Started{Session: d.thread, Model: m.ID, Effort: cmp.Or(effort, m.DefaultEffort)})
 	evs := d.take()
 	d.mu.Unlock()
 	d.flush(evs)
@@ -1204,7 +1209,7 @@ func (d *Driver) response(m *message) {
 		if d.pick.model != "" {
 			d.model = d.pick.model
 		}
-		d.emitLocked(agent.Started{Session: d.thread, Model: d.model})
+		d.emitLocked(agent.Started{Session: d.thread, Model: d.model, Effort: cmp.Or(d.pick.effort, d.effort)})
 	}
 	// A turn/start's id is its input's (never the driver's own prefix "ir-"): the turn it starts
 	// begins with it; one that joins the running turn names that one. One refused never joins.

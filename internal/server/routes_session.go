@@ -8,13 +8,14 @@ import (
 	"github.com/kumoSleeping/iridium/internal/api"
 )
 
-// sessionRoutes: a session's model, mode, effort, its queue and its "always allow" rules
+// sessionRoutes: a session's model, mode, effort, ultracode, its queue and its "always allow" rules
 // (docs/api.md "会话设置", "待发队列").
 func (s *Server) sessionRoutes(mux *http.ServeMux) {
 	// The permission table (access.go): what a terminal may see and use.
 	mux.HandleFunc("PUT /api/sessions/{id}/model", s.use(s.setModel))
 	mux.HandleFunc("PUT /api/sessions/{id}/mode", s.use(s.setMode))
 	mux.HandleFunc("PUT /api/sessions/{id}/effort", s.use(s.setEffort))
+	mux.HandleFunc("PUT /api/sessions/{id}/ultracode", s.use(s.setUltracode))
 	mux.HandleFunc("POST /api/sessions/{id}/continue", s.use(s.continueQueue))
 	mux.HandleFunc("POST /api/sessions/{id}/queue/{input}/steer", s.use(s.steer))
 	mux.HandleFunc("PUT /api/sessions/{id}/queue/{input}", s.use(s.editQueued))
@@ -67,6 +68,16 @@ func (s *Server) setEffort(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := agentCtx(r)
 	defer cancel()
 	s.settle(w, s.m.SetEffort(ctx, r.PathValue("id"), req.Effort))
+}
+
+func (s *Server) setUltracode(w http.ResponseWriter, r *http.Request) {
+	var req api.SetUltracode
+	if !readJSON(w, r, &req) {
+		return
+	}
+	ctx, cancel := agentCtx(r)
+	defer cancel()
+	s.settle(w, s.m.SetUltracode(ctx, r.PathValue("id"), req.Ultracode))
 }
 
 func (s *Server) continueQueue(w http.ResponseWriter, r *http.Request) {

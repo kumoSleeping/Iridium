@@ -5,8 +5,8 @@
 // the start lists the session's commands.
 // Shift+Tab cycles the approval mode; Esc stops the turn. The draft is kept on this device; files
 // pasted, dropped or attached go up in chunks while you type.
-import { ArrowUp, CornerUpRight, FileText, ListPlus, LoaderCircle, Paperclip, Slash, Square, X } from "lucide-react";
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type CSSProperties } from "react";
+import { ArrowUp, FileText, LoaderCircle, Paperclip, Slash, Square, X } from "lucide-react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { Command, SessionState as LiveSession } from "../api/types.gen";
 import { api, missing } from "../api/client";
 import type { Sent } from "../chats";
@@ -15,6 +15,8 @@ import { errText, toast } from "../toast";
 import { cn, fine, IconKey, keep, kept, steerKey, Tip } from "../ui";
 import { useSettings } from "../data";
 import { askOnce, sentFromHere } from "../unread";
+import { useGlide } from "../motion";
+import { previews } from "./files";
 import { upload } from "./upload";
 
 export const draftKey = (id: string) => `draft:${id}`;
@@ -50,7 +52,7 @@ export function commandsOf(s: LiveSession): Command[] {
   return ["compact", "context", "usage", "cost", "model", "mode", "clear"].map((name) => ({ name, description: t(`cmd.${name}` as Parameters<typeof t>[0]) }));
 }
 
-type Att = { key: string; file: File; sent: number; ref?: string; error?: string; url?: string; stop: AbortController };
+type Att = { key: string; file: File; sent: number; ref?: string; path?: string; error?: string; url?: string; stop: AbortController };
 
 export type ComposerHandle = { focus: () => void; put: (text: string) => void; attach: (files: File[]) => void; box: () => HTMLTextAreaElement | null };
 
@@ -63,9 +65,15 @@ type Props = {
   cycleMode: () => void;
   openModel: () => void;
   openMode: () => void;
+  /** /usage: the quota popover, not the agent's (the user, 2026-11-06). */
+  openUsage: () => void;
+  /** The keys in the composer's foot, between attach and send: mode, model, quota, context. */
+  tools?: ReactNode;
+  /** The key at the far right, before send: the context ring. */
+  end?: ReactNode;
 };
 
-export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s, turn, onSent, onSentDone, cycleMode, openModel, openMode }, ref) {
+export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s, turn, onSent, onSentDone, cycleMode, openModel, openMode, openUsage, tools, end }, ref) {
   const [text, setText] = useState(() => kept(draftKey(s.id)) ?? "");
   const [atts, setAtts] = useState<Att[]>([]);
   const [busy, setBusy] = useState(false);
@@ -87,7 +95,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
     const el = box.current;
     if (!el) return;
     el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 180)}px`;
+    el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
   };
   useEffect(grow, [text]);
   // On a computer the caret is here as a chat opens; a phone would bring up its keyboard.
@@ -99,7 +107,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
     for (const a of add) {
       const set = (p: Partial<Att>) => setAtts((all) => all.map((x) => (x.key === a.key ? { ...x, ...p } : x)));
       upload(s.id, a.file, (sent) => set({ sent }), a.stop.signal).then(
-        (d) => set({ ref: d.ref, sent: a.file.size }),
+        (d) => set({ ref: d.ref, path: d.path, sent: a.file.size }),
         (e) => a.stop.signal.aborted || set({ error: missing(e) ? t("err.notYet") : errText(e) }),
       );
     }
@@ -113,6 +121,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
         return false;
       }),
     );
+  // The keys under it glide as one changes width (UltraCode's mark, a longer name), never jump.
+  const toolRow = useRef<HTMLDivElement>(null);
+  useGlide(toolRow);
   useImperativeHandle(ref, () => ({
     focus: () => box.current?.focus(),
     put: (words) => (type([textNow.current, words].filter(Boolean).join("\n")), box.current?.focus()),
@@ -133,6 +144,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
     const w = words.trim();
     if (w === "/model") return (type(""), openModel(), true);
     if (w === "/mode") return (type(""), openMode(), true);
+    if (w === "/usage") return (type(""), openUsage(), true);
     if (w === "/stop") return (type(""), void stop(), true);
     return false;
   };
@@ -153,7 +165,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
     if (atts.some((a) => a.error)) return toast(t("err.upload"), { error: true });
     const words = text.trim().replace(/^[!！]\s*/, "");
     if (!atts.length && own(words)) return;
-    const files = atts.map((a) => ({ ref: a.ref!, name: a.file.name, type: a.file.type }));
+    // A picture's copy here stays: the bubble shows it while sending, and once landed till the
+    // server's thumbnail has come (chat/files.tsx previews).
+    for (const a of atts) if (a.url && a.path) previews.set(a.path, a.url);
+    const files = atts.map((a) => ({ ref: a.ref!, name: a.file.name, type: a.file.type, url: a.url }));
     const sent: Sent = { key: crypto.randomUUID(), text: words, files, from: 0, steer: mode === "steer" };
     type("");
     setAtts([]);
@@ -185,8 +200,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
   const KEYS: Record<KeyMode, [string, React.ReactNode]> = {
     send: [t("composer.send"), <ArrowUp size={17} strokeWidth={2.25} />],
     stop: [t("composer.stop"), <Square size={12} fill="currentColor" />],
-    queue: [t("composer.queue", { key: steerKey() }), <ListPlus size={17} />],
-    steer: [steers && queues && !/^[!！]/.test(text.trim()) ? t("composer.steerOr", { key: steerKey() }) : t("composer.steer"), <CornerUpRight size={16} />],
+    queue: [t("composer.queue", { key: steerKey() }), <ArrowUp size={17} strokeWidth={2.25} />], // one send key for all: what it does in its tip (the user, 2026-11-06)
+    steer: [steers && queues && !/^[!！]/.test(text.trim()) ? t("composer.steerOr", { key: steerKey() }) : t("composer.steer"), <ArrowUp size={17} strokeWidth={2.25} />],
   };
   const [label, icon] = KEYS[mode];
 
@@ -194,9 +209,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
   return (
     <div className="relative">
       {list.length > 0 && <Palette list={list} at={Math.min(at, list.length - 1)} point={setAt} pick={(c) => (own(`/${c.name}`) ? undefined : (type(`/${c.name} `), box.current?.focus()))} />}
-    <div className="glass float relative rounded-xl">
+    <div className="glass float rest relative @container rounded-[20px]">
       {atts.length > 0 && (
-        <ul data-attachments className="m-0 flex list-none gap-2 overflow-x-auto px-3 pt-3 pb-0">
+        <ul data-attachments className="m-0 flex list-none gap-2 overflow-x-auto px-3.5 pt-3 pb-0">
           {atts.map((a) => (
             <li key={a.key} className="relative shrink-0 pt-1.5 pr-1.5">
               {a.url ? <img src={a.url} alt={a.file.name} className={cn("size-14 rounded-lg object-cover shadow-[0_0_0_0.5px_var(--edge)]", a.error && "opacity-50")} /> : (
@@ -218,7 +233,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
           ))}
         </ul>
       )}
-      <div className="flex items-end gap-0.5 p-1.5">
+      {/* The words first, at least two lines high; then the foot: attach, the meters, the context
+          ring, send at the far right (the user, 2026-11-06). */}
+      <div className="px-3.5 pt-3">
         <input
           ref={picker}
           type="file"
@@ -229,9 +246,6 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
             e.target.value = "";
           }}
         />
-        <IconKey label={t("composer.attach")} onClick={() => picker.current?.click()}>
-          <Paperclip size={17} />
-        </IconKey>
         <textarea
           ref={box}
           rows={1}
@@ -266,8 +280,17 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
             else return;
             e.preventDefault();
           }}
-          className="no-ring max-h-[180px] min-h-8 min-w-0 flex-1 resize-none bg-transparent px-1.5 py-[5.5px] text-md leading-[21px] placeholder:text-ink-3"
+          className="no-ring block max-h-[220px] min-h-[52px] w-full resize-none bg-transparent px-0.5 py-1 text-md leading-[21px] placeholder:text-ink-3"
         />
+      </div>
+      <div className="flex min-w-0 items-center gap-0.5 px-2 pt-0.5 pb-2">
+        <IconKey label={t("composer.attach")} onClick={() => picker.current?.click()}>
+          <Paperclip size={17} />
+        </IconKey>
+        <div ref={toolRow} className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto [scrollbar-width:none]">
+          {tools}
+        </div>
+        {end && <span className="flex shrink-0">{end}</span>}
         <Tip label={label}>
           <button
             type="button"

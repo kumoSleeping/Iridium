@@ -162,6 +162,16 @@ func TestAdmin(t *testing.T) {
 	if code, _, _ := runAs(agent, "profile", "robot"); code != 2 {
 		t.Fatal("profile with nothing to change")
 	}
+	// The device: alone, or with a name.
+	if code, out, errs := runAs(agent, "profile", "robot", "--device", "phone"); code != 0 || !strings.Contains(out, "robot（手机）") {
+		t.Fatalf("device: %d %q %q", code, out, errs)
+	}
+	if code, _, _ := runAs(agent, "profile", "robot", "--device", "tablet"); code != 2 {
+		t.Fatal("a device that is none")
+	}
+	if code, out, errs := runAs(agent, "profile", "本机", "--device=computer"); code != 0 || !strings.Contains(out, "（电脑）") {
+		t.Fatalf("本机's device: %d %q %q", code, out, errs)
+	}
 
 	// Revoke.
 	if code, _, errs := runAs(agent, "revoke", "robot"); code != 0 {

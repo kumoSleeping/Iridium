@@ -137,6 +137,10 @@ var schema = []string{
 	shownSchema,
 	// 5: owner invites, and Claude for the first panel once (terminals.go).
 	ownerSchema,
+	// 6: a session's ultracode (Claude); NULL: never set, the user's own settings hold.
+	`ALTER TABLE session_settings ADD COLUMN ultracode INTEGER;`,
+	// 7: the device a terminal is on (terminals.go).
+	devicesSchema,
 }
 
 // steps run in Go after the migration of their version, in the same transaction.
@@ -338,19 +342,22 @@ func (s *Store) Assign(session string, workspace int64, manual bool) error {
 	})
 }
 
-// Settings are a session's own, over the config's. IdleReap nil: the config's.
+// Settings are a session's own, over the config's. IdleReap nil: the config's. Ultracode nil:
+// never set.
 type Settings struct {
-	IdleReap *time.Duration
-	Model    string
-	Mode     string
-	Effort   string
+	IdleReap  *time.Duration
+	Model     string
+	Mode      string
+	Effort    string
+	Ultracode *bool
 }
 
 func (s *Store) Settings(session string) (Settings, error) {
 	var st Settings
 	var reap sql.NullInt64
 	var model, mode, effort sql.NullString
-	err := s.db.QueryRow(`SELECT idle_reap, model, mode, effort FROM session_settings WHERE session = ?`, session).Scan(&reap, &model, &mode, &effort)
+	var ultra sql.NullBool
+	err := s.db.QueryRow(`SELECT idle_reap, model, mode, effort, ultracode FROM session_settings WHERE session = ?`, session).Scan(&reap, &model, &mode, &effort, &ultra)
 	if errors.Is(err, sql.ErrNoRows) {
 		return st, nil
 	}
@@ -359,6 +366,9 @@ func (s *Store) Settings(session string) (Settings, error) {
 		st.IdleReap = &d
 	}
 	st.Model, st.Mode, st.Effort = model.String, mode.String, effort.String
+	if ultra.Valid {
+		st.Ultracode = &ultra.Bool
+	}
 	return st, err
 }
 
@@ -367,9 +377,13 @@ func (s *Store) SetSettings(session string, st Settings) error {
 	if st.IdleReap != nil {
 		reap = int64(*st.IdleReap / time.Second)
 	}
-	_, err := s.db.Exec(`INSERT INTO session_settings (session, idle_reap, model, mode, effort) VALUES (?, ?, ?, ?, ?)
-		ON CONFLICT (session) DO UPDATE SET idle_reap = excluded.idle_reap, model = excluded.model, mode = excluded.mode, effort = excluded.effort`,
-		session, reap, nullable(st.Model), nullable(st.Mode), nullable(st.Effort))
+	var ultra any
+	if st.Ultracode != nil {
+		ultra = *st.Ultracode
+	}
+	_, err := s.db.Exec(`INSERT INTO session_settings (session, idle_reap, model, mode, effort, ultracode) VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT (session) DO UPDATE SET idle_reap = excluded.idle_reap, model = excluded.model, mode = excluded.mode, effort = excluded.effort, ultracode = excluded.ultracode`,
+		session, reap, nullable(st.Model), nullable(st.Mode), nullable(st.Effort), ultra)
 	return err
 }
 

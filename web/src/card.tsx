@@ -10,7 +10,7 @@ import { cn } from "./ui";
 /** A card's frame: frosted, popping in; leaving, it shrinks away. */
 export function CardFrame({ label, leaving, children, className }: { label: string; leaving?: boolean; children: ReactNode; className?: string }) {
   return (
-    <div data-leaving={leaving || undefined} className={cn("g-pop glass float @container rounded-lg p-2.5 pl-3", className)} role="alertdialog" aria-label={label}>
+    <div data-leaving={leaving || undefined} className={cn("g-pop glass float rest @container rounded-lg p-2.5 pl-3", className)} role="alertdialog" aria-label={label}>
       {children}
     </div>
   );

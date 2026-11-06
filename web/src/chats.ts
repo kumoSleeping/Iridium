@@ -9,10 +9,14 @@ import type { Block, DraftEvent, MessagePage, Session } from "./api/types.gen";
 /** A message of yours sent from this page, till the transcript has it: input, the id the server gave
  *  it (Claude's uuid, which the user block carries); text, as typed; files, upload refs with their
  *  names; from, where the transcript ended as it was sent. failed: why it did not go. */
-export type Sent = { key: string; text: string; files: { ref: string; name: string; type: string }[]; from: number; input?: string; failed?: string; queued?: boolean; steer?: boolean };
+export type Sent = { key: string; text: string; files: { ref: string; name: string; type: string; url?: string }[]; from: number; input?: string; failed?: string; queued?: boolean; steer?: boolean };
 
 /** Where a block's transcript line begins: its at up to the dot. */
 export const lineOf = (b: { at: string }) => parseInt(b.at);
+
+/** The blocks a message sent from this page just landed as, by their at, and when: its bubble
+ *  shows a check a moment (chat/said.tsx SendState). */
+export const landed = new Map<string, number>();
 
 /** Those sent not yet in the transcript: each finds its own among the user blocks written since it
  *  was sent, by its input id, else by its words. A failed one stays. */
@@ -24,14 +28,34 @@ export function unsent(sent: Sent[], blocks: Block[]): Sent[] {
     const b = blocks.find((b) => b.kind === "user" && ((s.input && b.id === s.input) || (lineOf(b) >= s.from && b.text !== undefined && s.text && b.text.trim().startsWith(s.text.trim().slice(0, 200)))));
     if (!b) return true;
     past = lineOf(b) + 1;
+    if (landed.size > 50) landed.clear();
+    landed.set(b.at, Date.now());
     return false;
   });
 }
 
 type Get = (id: string, q: { before?: number; after?: number }) => Promise<MessagePage>;
 
-/** A draft: what the agent writes ahead of its transcript, message n of process proc. */
-export type Draft = { proc: number; n: number; text: string; whole: boolean };
+/** A draft: what the agent writes ahead of its transcript, message n of process proc. whole: no
+ *  more text comes to it. */
+export type Draft = { proc: number; n: number; text: string; whole: boolean; tool?: { id: string; name: string } };
+
+/** How many letters a draft and a block must share at the head to be taken as one. */
+const HEAD = 32;
+
+/** Whether draft d and a block are the same words, never empty: the same; or one begins with the
+ *  other's first HEAD letters, the shorter having that many (a few, as "Let me", begin too many
+ *  blocks); or, d sealed, the block ends with it (the page joined it partway). */
+const same = (d: Draft, block: string) => {
+  if (d.tool) return false; // a call's input, not words
+  const a = d.text.trim(),
+    b = block.trim();
+  if (!a || !b) return false;
+  if (a === b) return true;
+  if (a.length >= HEAD && b.startsWith(a.slice(0, HEAD))) return true;
+  if (b.length >= HEAD && a.startsWith(b.slice(0, HEAD))) return true;
+  return d.whole && a.length >= HEAD && b.endsWith(a);
+};
 
 export class Messages {
   blocks: Block[] = [];
@@ -56,7 +80,13 @@ export class Messages {
     page.catch(() => {});
     this.ahead = { before: this.start, page };
   }
-  private forget(d: Draft) {
+  /** What the agent said that the transcript brought, in this turn, with no draft for it yet (its
+   *  pieces were still on the way, or too few to tell): the draft with the same words goes once it
+   *  has them. */
+  private loose: string[] = [];
+  /** The tool calls the transcript brought in this turn: a call's draft that comes later goes. */
+  private looseCalls = new Set<string>();
+  private forget(d: { proc: number; n: number }) {
     if (d.proc !== this.gone.proc) this.gone = { proc: d.proc, n: -1 };
     this.gone.n = Math.max(this.gone.n, d.n);
   }
@@ -73,7 +103,7 @@ export class Messages {
       const p = await this.get(this.id, {});
       if (this.loaded) return this.newer(); // another came first
       Object.assign(this, { blocks: p.blocks, start: p.start, end: p.end, more: p.more, loaded: true });
-      this.took(p.blocks);
+      this.took(p.blocks, false);
       this.prefetch();
       return;
     }
@@ -85,18 +115,33 @@ export class Messages {
       const added = p.blocks.filter((b) => lineOf(b) >= this.end);
       this.blocks = [...this.blocks, ...added];
       this.end = p.end;
-      this.took(added);
+      this.took(added, true);
     }
   }
 
-  /** New blocks: each thing the agent said takes the place of the first draft it is. */
-  private took(added: Block[]) {
-    for (const b of added) {
+  /** New blocks: each thing the agent said takes the place of the draft it is, by its words, and of
+   *  the drafts before it, which the transcript went past (their blocks were missed, or never come).
+   *  One no draft is: new (live), it takes the first draft if that is sealed, by place (one joined
+   *  partway has words that tell nothing), else waits in loose for its own. The first page (not
+   *  live): only the turn now, after the last thing you said, and none is taken by place (what it
+   *  brought may be from before the drafts seen). */
+  private took(added: Block[], live: boolean) {
+    const from = live ? 0 : added.findLastIndex((b) => b.kind === "user") + 1;
+    for (const b of added.slice(from)) {
+      // A call: its draft, by its id, and the drafts before it, which the transcript went past.
+      if (b.kind === "tool" && b.id) {
+        const i = this.drafts.findIndex((d) => d.tool?.id === b.id);
+        if (i >= 0) this.drafts.splice(0, i + 1).forEach((d) => this.forget(d));
+        else if (live) this.looseCalls.add(b.id);
+        continue;
+      }
       if (b.kind !== "assistant") continue;
-      const d = this.drafts[0];
-      if (!d) continue;
-      const head = (s: string) => s.trim().slice(0, 32);
-      if (d.whole || (b.text ?? "").trim().startsWith(head(d.text)) || d.text.trim().startsWith(head(b.text ?? ""))) this.forget(this.drafts.shift()!);
+      const text = (b.text ?? "").trim();
+      if (!text) continue;
+      const i = this.drafts.findIndex((d) => same(d, text));
+      if (i >= 0) this.drafts.splice(0, i + 1).forEach((d) => this.forget(d));
+      else if (live && this.drafts[0]?.whole && !this.drafts[0].tool) this.forget(this.drafts.shift()!);
+      else this.loose.push(text);
     }
     this.sent = unsent(this.sent, this.blocks);
     this.version++;
@@ -113,7 +158,7 @@ export class Messages {
     const added = t.blocks.filter((b) => lineOf(b) >= this.end);
     this.blocks = [...this.blocks, ...added];
     this.end = t.end;
-    this.took(added);
+    this.took(added, true);
     return true;
   }
 
@@ -139,8 +184,8 @@ export class Messages {
     return p.blocks.length > 0;
   }
 
-  /** A draft event (docs/api.md): the same proc and n join; another n seals the one before; another
-   *  proc drops them all. */
+  /** A draft event (docs/api.md): the same proc and n join; another n seals the one before; done
+   *  seals its own; another proc drops them all. */
   wrote(d: DraftEvent) {
     if (d.proc === this.gone.proc && d.n <= this.gone.n) return;
     if (d.proc !== this.proc) {
@@ -150,10 +195,41 @@ export class Messages {
     const last = this.drafts.at(-1);
     if (last && last.n === d.n) last.text += d.text;
     else {
-      if (last) last.whole = true;
-      this.drafts.push({ proc: d.proc, n: d.n, text: d.text, whole: false });
+      if (last) this.seal(last);
+      // Sealed with none of its pieces seen (the stream opened since): late ones are not a draft.
+      // A call the transcript has already: none either.
+      if ((d.done && !d.text && !d.tool) || (d.tool && this.looseCalls.has(d.tool.id))) this.forget(d);
+      else this.drafts.push({ proc: d.proc, n: d.n, text: d.text, whole: false, ...(d.tool && { tool: { id: d.tool.id, name: d.tool.name } }) });
+    }
+    if (last && last.n === d.n && d.tool && !last.tool) last.tool = { id: d.tool.id, name: d.tool.name };
+    const it = this.drafts.at(-1);
+    if (it?.n === d.n) {
+      if (d.done) this.seal(it);
+      else this.settle(it);
     }
     this.version++;
+  }
+
+  /** Draft d is whole: it goes now if it has no words (the transcript keeps none for it) or the
+   *  transcript brought them already. */
+  private seal(d: Draft) {
+    d.whole = true;
+    if (d.tool) return; // its block takes it, by its id
+    if (d.text.trim()) this.settle(d);
+    else this.drop(d);
+  }
+
+  /** Draft d goes if the transcript brought its words already (loose). */
+  private settle(d: Draft) {
+    const i = this.loose.findIndex((l) => same(d, l));
+    if (i < 0) return;
+    this.loose.splice(i, 1);
+    this.drop(d);
+  }
+
+  private drop(d: Draft) {
+    this.drafts = this.drafts.filter((x) => x !== d);
+    this.forget(d);
   }
 
   /** The session's process is another now: the drafts of the one before go. */
@@ -161,14 +237,29 @@ export class Messages {
     if (proc === this.proc) return;
     if (this.drafts.length) this.version++;
     this.drafts = [];
+    this.loose = [];
+    this.looseCalls.clear();
     this.proc = proc;
   }
 
-  /** The stream opened again, or the turn ended: drafts go, the transcript has them. */
-  dropDrafts() {
-    if (!this.drafts.length) return;
-    this.drafts.forEach((d) => this.forget(d));
-    this.drafts = [];
+  /** Where the drafts are now: given to dropDrafts later, those that came since stay. */
+  mark(): { proc: number; n: number } {
+    return { proc: this.proc, n: this.drafts.at(-1)?.n ?? (this.gone.proc === this.proc ? this.gone.n : -1) };
+  }
+
+  /** The stream opened again, or the turn ended: drafts go, the transcript has them. upTo: only
+   *  those up to a mark (the turn that ended; the next one may have begun to write). */
+  dropDrafts(upTo?: { proc: number; n: number }) {
+    const old = upTo ? this.drafts.filter((d) => d.proc === upTo.proc && d.n <= upTo.n) : this.drafts;
+    const rest = this.drafts.filter((d) => !old.includes(d));
+    // What waits for a draft is the turn's that ended, unless the next one wrote some already.
+    if (!rest.length) {
+      this.loose = [];
+      this.looseCalls.clear();
+    }
+    if (!old.length) return;
+    old.forEach((d) => this.forget(d));
+    this.drafts = rest;
     this.version++;
   }
 }

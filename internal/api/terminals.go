@@ -64,6 +64,22 @@ type Terminal struct {
 	LastSeenAt int64        `json:"lastSeenAt,omitempty"`
 	Rules      Rules        `json:"rules"`
 	UsedToday  int64        `json:"usedToday"` // tokens of the turns it started today
+	// Device: what it runs on, as the badge on its messages' avatar shows; the server always sets it.
+	Device Device `json:"device,omitempty"`
+}
+
+// Device is what a terminal runs on, set in its settings (PUT /api/me/device, ir profile
+// --device): a computer, the default, or a phone.
+type Device string
+
+const (
+	DeviceComputer Device = "computer"
+	DevicePhone    Device = "phone"
+)
+
+// SetDevice is PUT /api/me/device and PUT /api/terminals/{id}/device.
+type SetDevice struct {
+	Device Device `json:"device"`
 }
 
 // PendingInvite is a panel invite not used yet.

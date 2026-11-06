@@ -90,6 +90,32 @@ await step("a workspace's + → new session in a folder picked → the chat open
   await stillOpen("Claude");
 });
 
+await step("a new session's model key names the model and level in use; a model or mode picked closes its menu, the effort slider and UltraCode keep it open", async () => {
+  const key = 'button[aria-label^="Model:"]';
+  const label = () => page.$eval(key, (e) => e.getAttribute("aria-label"));
+  await page.waitForFunction((k) => /Fake 1 · Medium/.test(document.querySelector(k)?.getAttribute("aria-label") ?? ""), { timeout: 8000 }, key);
+  const menu = () => page.$('[role="menu"]');
+  await page.click(key);
+  await page.waitForSelector('[role="menu"] [role="slider"]', { timeout: 5000 });
+  await clickText("High", "*[@role='menu']//button");
+  await page.waitForFunction((k) => /· High/.test(document.querySelector(k)?.getAttribute("aria-label") ?? ""), { timeout: 5000 }, key);
+  if (!(await menu())) throw new Error("a level closed the menu");
+  await page.click('[role="menu"] [role="switch"][aria-label="UltraCode"]');
+  await page.waitForFunction(() => document.querySelector('[role="switch"][aria-label="UltraCode"]')?.getAttribute("aria-checked") === "true", { timeout: 5000 });
+  if (!(await menu())) throw new Error("UltraCode closed the menu");
+  await clickText("Haiku", "*[@role='menuitemradio']");
+  await page.waitForFunction(() => !document.querySelector('[role="menu"]'), { timeout: 3000 });
+  await page.waitForFunction((k) => /Model: Haiku/.test(document.querySelector(k)?.getAttribute("aria-label") ?? ""), { timeout: 5000 }, key);
+  const mode = 'button[aria-label^="Approval mode"]';
+  const was = await page.$eval(mode, (e) => e.textContent.trim());
+  for (const pick of ["Accept edits", was]) {
+    await page.click(mode);
+    await clickText(pick, "*[@role='menuitemradio']");
+    await page.waitForFunction(() => !document.querySelector('[role="menu"]'), { timeout: 3000 });
+  }
+  if (!(await label()).startsWith("Model: Haiku")) throw new Error(`key: ${await label()}`);
+});
+
 await step("send: a faint bubble at once, then the transcript's, then the reply", async () => {
   await page.type("textarea", "hello from e2e");
   await page.keyboard.press("Enter");
@@ -244,13 +270,6 @@ await step("terminals: a plugin token made (shown once), its permissions narrowe
   await clickText("Revoke");
   await clickText("Revoke", "*[@role='alertdialog']//button");
   await page.waitForFunction(() => ![...document.querySelectorAll("button")].some((b) => b.textContent.includes("e2e-bot")), { timeout: 8000 });
-});
-
-await step("the topology view draws the workspaces, folders and sessions", async () => {
-  await page.click('button[aria-label="Topology"]');
-  await page.waitForSelector(".react-flow__node", { timeout: 8000 });
-  const n = await page.$$eval(".react-flow__node", (es) => es.length);
-  if (n < 5) throw new Error(`${n} nodes`);
 });
 
 await step("⌘K jumps to a session by name", async () => {

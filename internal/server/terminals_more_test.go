@@ -80,8 +80,19 @@ func TestChatFilesAndAgents(t *testing.T) {
 	as := "agent-in:" + in.Session
 	var sent api.SendReply
 	l.want(200, as, "POST", "/api/sessions/"+in.Session+"/send", api.Send{Text: "from inside"}, &sent)
-	if id, tag, ok := l.s.st.Source(sent.Input); !ok || id != botID || tag != "bot" {
+	if id, tag, ok := l.s.st.Source(sent.Input); !ok || id != botID || tag != "ir:"+in.Session {
 		t.Errorf("the agent's message: %q %q %v", id, tag, ok)
+	}
+	// ir send names the session it runs in but no agent flag: still a letter from that session,
+	// still the plugin's to count.
+	l.want(200, "ir-in:"+in.Session, "POST", "/api/sessions/"+in.Session+"/send", api.Send{Text: "by ir send"}, &sent)
+	if id, tag, ok := l.s.st.Source(sent.Input); !ok || id != botID || tag != "ir:"+in.Session {
+		t.Errorf("ir send's message: %q %q %v", id, tag, ok)
+	}
+	l.waitReply(bot, in.Session, "ok: by ir send")
+	l.want(200, bot, "GET", "/api/sessions/"+in.Session+"/messages", nil, &page)
+	if b := page.Blocks[len(page.Blocks)-2]; b.From != "ir:"+in.Session || b.FromTerminal != botID {
+		t.Errorf("ir send's block: %+v", b)
 	}
 	l.want(403, as, "GET", "/api/terminals", nil, nil)
 	l.want(403, as, "POST", "/api/terminals/tokens", api.NewInvite{Name: "x"}, nil)
@@ -100,8 +111,8 @@ func TestChatFilesAndAgents(t *testing.T) {
 	l.want(200, "socket", "POST", "/api/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "mine"}, &mine)
 	l.waitReply("socket", mine.ID, "ok: mine")
 	l.want(200, "agent-in:"+mine.ID, "POST", "/api/sessions/"+mine.ID+"/send", api.Send{Text: "again"}, &sent)
-	if id, _, _ := l.s.st.Source(sent.Input); id != "local" {
-		t.Errorf("本机's session's agent: %q", id)
+	if id, tag, _ := l.s.st.Source(sent.Input); id != "local" || tag != "ir:"+mine.ID {
+		t.Errorf("本机's session's agent: %q %q", id, tag)
 	}
 	l.want(200, "agent-in:"+mine.ID, "GET", "/api/terminals", nil, nil)
 }

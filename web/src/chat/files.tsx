@@ -3,6 +3,7 @@
 // server says the conversation named, and that exist, show; it serves them by the session.
 import { Dialog } from "@base-ui/react/dialog";
 import { Download, FileCode2, FileText, X } from "lucide-react";
+import { useCallback, useState } from "react";
 import { api } from "../api/client";
 import type { FileRef } from "../api/types.gen";
 import { t } from "../i18n";
@@ -33,15 +34,31 @@ function One({ session, f, label }: { session: string; f: FileRef; label?: strin
   return <FileCard name={name} detail={size(f.size)} href={api.fileURL(session, f.ref, true)} code={CODE.test(f.name)} />;
 }
 
-/** A picture: its thumbnail, opening the original over the page. */
-export function Picture({ src, full, name, small }: { src: string; full: string; name: string; small?: boolean }) {
+/** The pictures sent from this page, by the path they were uploaded to: what the copy on this device
+ *  shows (a blob URL) until the server's thumbnail has come, so a sent picture does not blink out. */
+export const previews = new Map<string, string>();
+
+/** An image that fades in once it has loaded (at once if it already has), over under if given. */
+function Shown({ src, under, alt, className }: { src: string; under?: string; alt: string; className: string }) {
+  const [ready, setReady] = useState(false);
+  const done = useCallback((el: HTMLImageElement | null) => void (el?.complete && el.naturalWidth && setReady(true)), []);
+  return (
+    <>
+      {under && <img src={under} alt="" aria-hidden className={cn(className, "absolute inset-0 size-full")} />}
+      <img ref={done} src={src} alt={alt} loading="lazy" onLoad={() => setReady(true)} className={cn(className, "relative transition-opacity duration-(--dur-2) ease-(--ease-out)", ready ? "opacity-100" : "opacity-0")} />
+    </>
+  );
+}
+
+/** A picture: its thumbnail, opening the original over the page. under: what shows till it has come. */
+export function Picture({ src, full, name, small, under }: { src: string; full: string; name: string; small?: boolean; under?: string }) {
   return (
     <Dialog.Root>
       <Tip label={t("msg.openImage")}>
         <Dialog.Trigger
           render={
-            <button type="button" aria-label={`${name} · ${t("msg.openImage")}`} className={cn("g-press block overflow-hidden rounded-lg bg-fill shadow-[0_0_0_0.5px_var(--edge)]", small ? "size-16" : "w-full max-w-[340px]")}>
-              <img src={src} alt={name} loading="lazy" className={cn("block w-full object-cover", small ? "h-full" : "max-h-[420px]")} />
+            <button type="button" aria-label={`${name} · ${t("msg.openImage")}`} className={cn("g-press relative block overflow-hidden rounded-lg bg-fill shadow-[0_0_0_0.5px_var(--edge)]", small ? "size-16" : "w-full max-w-[340px]")}>
+              <Shown src={src} under={under} alt={name} className={cn("block w-full object-cover", small ? "h-full" : "max-h-[420px]")} />
             </button>
           }
         />

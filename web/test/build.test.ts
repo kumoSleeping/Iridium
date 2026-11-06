@@ -1,6 +1,6 @@
-// The build's sizes (plan "弱网"): the first screen at most 200KB gzipped; the chat and the topology
-// view loaded only when opened, each under its own limit, their libraries apart from the first
-// screen's; a brotli and a gzip beside each script and style; the later files listed for idle prefetch.
+// The build's sizes (plan "弱网"): the first screen at most 200KB gzipped; the chat loaded only when
+// opened, under its own limit, its libraries apart from the first screen's; a brotli and a gzip
+// beside each script and style; the later files listed for idle prefetch.
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -34,35 +34,27 @@ function files(key: string, into = new Set<string>()): Set<string> {
 const text = (fs: Iterable<string>) => [...fs].map((f) => readFileSync(join(out, f), "utf8")).join("\n");
 const kb = (fs: Iterable<string>) => [...fs].reduce((n, f) => n + gz(f), 0) / 1024;
 
-test("the first screen is at most 200KB gzipped, with neither the chat's Markdown nor the graph's library", () => {
+test("the first screen is at most 200KB gzipped, without the chat's Markdown", () => {
   const first = files("index.html");
   const size = kb(first) + gz("index.html") / 1024 + gz("favicon.svg") / 1024 + gz("theme.js") / 1024;
   console.log(`first screen ${size.toFixed(1)}KB gzipped`);
   expect(size).toBeLessThanOrEqual(200);
   const js = text(first);
   expect(js).not.toContain("data-streamdown");
-  expect(js).not.toContain("react-flow__");
   // React's production build.
   expect(js).not.toContain('unique "key" prop');
 });
 
-test("the chat and the topology come apart, each under its limit", () => {
+test("the chat comes apart, under its limit", () => {
   const first = files("index.html");
-  const part = (key: string) => [...files(key)].filter((f) => !first.has(f));
-  const chat = part("src/chat/chat.tsx");
-  const topology = part("src/topology/topology.tsx");
-  console.log(`chat ${kb(chat).toFixed(1)}KB, topology ${kb(topology).toFixed(1)}KB gzipped`);
+  const chat = [...files("src/chat/chat.tsx")].filter((f) => !first.has(f));
+  console.log(`chat ${kb(chat).toFixed(1)}KB gzipped`);
   expect(manifest["src/chat/chat.tsx"]!.isDynamicEntry).toBe(true);
-  expect(manifest["src/topology/topology.tsx"]!.isDynamicEntry).toBe(true);
   expect(kb(chat)).toBeLessThanOrEqual(200);
-  expect(kb(topology)).toBeLessThanOrEqual(120);
   expect(text(chat)).toContain("data-streamdown");
-  expect(text(chat)).not.toContain("react-flow__");
-  expect(text(topology)).toContain("react-flow");
-  expect(text(topology)).not.toContain("data-streamdown");
   // The page fetches them ahead once idle: the HTML lists them.
   const later = /<meta name="later" content="([^"]*)"/.exec(readFileSync(join(out, "index.html"), "utf8"))![1]!.split(" ");
-  for (const f of [...chat, ...topology]) expect(later).toContain(`/${f}`);
+  for (const f of chat) expect(later).toContain(`/${f}`);
   for (const f of first) expect(later).not.toContain(`/${f}`);
 });
 

@@ -30,6 +30,8 @@ type glimpse struct {
 	last   *api.LastSaid
 	sub    bool
 	parent string
+	done   bool // a subagent that has finished
+	flow   *api.SessionWorkflow
 }
 
 var (
@@ -79,8 +81,10 @@ func filesIn(dir, suffix string) []string {
 
 // Claude: projects/<folder>/<id>.jsonl. Agent tool subtasks are <id>/subagents/agent-<agent
 // id>.jsonl, listed as sessions of their own by that file's name; older ones were
-// agent-<agent id>.jsonl beside the sessions. A session's directory <id>/ is looked at too, for
-// its subagents/ to be watched as soon as it is made.
+// agent-<agent id>.jsonl beside the sessions. A Workflow run's agents are
+// <id>/subagents/workflows/<run id>/agent-<agent id>.jsonl, beside the run's journal.jsonl.
+// A session's directory <id>/, its subagents/ and subagents/workflows/ are looked at too, for
+// what is made in them to be watched as soon as it is.
 func (x *Index) claudeDirs() []string {
 	var out []string
 	for _, p := range subdirs(filepath.Join(x.o.ClaudeDir, "projects")) {
@@ -90,17 +94,37 @@ func (x *Index) claudeDirs() []string {
 				continue
 			}
 			out = append(out, s)
-			if sub := filepath.Join(s, "subagents"); isDir(sub) {
-				out = append(out, sub)
+			sub := filepath.Join(s, "subagents")
+			if !isDir(sub) {
+				continue
+			}
+			out = append(out, sub)
+			if wf := filepath.Join(sub, "workflows"); isDir(wf) {
+				out = append(out, wf)
+				for _, run := range subdirs(wf) {
+					if validID(filepath.Base(run)) {
+						out = append(out, run)
+					}
+				}
 			}
 		}
 	}
 	return out
 }
 
+// claudeSubDir: dir holds subagents' transcripts only (<id>/subagents/ and below).
+func (x *Index) claudeSubDir(dir string) bool {
+	rel, err := filepath.Rel(filepath.Join(x.o.ClaudeDir, "projects"), dir)
+	if err != nil {
+		return false
+	}
+	parts := strings.Split(filepath.ToSlash(rel), "/")
+	return len(parts) >= 3 && parts[2] == "subagents"
+}
+
 func (x *Index) claudeIn(dir string) []onDisk {
 	var out []onDisk
-	sub := filepath.Base(dir) == "subagents"
+	sub := x.claudeSubDir(dir)
 	for _, p := range filesIn(dir, ".jsonl") {
 		id := strings.TrimSuffix(filepath.Base(p), ".jsonl")
 		if !validID(id) || sub && !strings.HasPrefix(id, "agent-") {
@@ -118,18 +142,37 @@ func isDir(p string) bool {
 
 // claudeMeta is what Claude writes beside a subagent's transcript (agent-<id>.meta.json): the
 // description its parent gave the Agent tool.
-func claudeMeta(transcript string) (description string) {
+func claudeMeta(transcript string) (description, phase string) {
 	b, err := os.ReadFile(strings.TrimSuffix(transcript, ".jsonl") + ".meta.json")
 	if err != nil {
-		return ""
+		return "", ""
 	}
 	var m struct {
-		Description string `json:"description"`
+		Description   string `json:"description"`
+		WorkflowPhase string `json:"workflowPhase"`
 	}
 	if json.Unmarshal(b, &m) != nil {
-		return ""
+		return "", ""
 	}
-	return oneLine(m.Description)
+	return oneLine(m.Description), oneLine(m.WorkflowPhase)
+}
+
+// workflowOf is the run a workflow's agent is of, from where its transcript lies
+// (<session>/subagents/workflows/<run>/agent-*.jsonl), with the workflow's name, which its script
+// is named by (<session>/workflows/scripts/<name>-<run>.js); nil for any other subagent.
+func workflowOf(transcript, phase string) *api.SessionWorkflow {
+	runDir := filepath.Dir(transcript)
+	flows := filepath.Dir(runDir)
+	if filepath.Base(flows) != "workflows" || filepath.Base(filepath.Dir(flows)) != "subagents" {
+		return nil
+	}
+	run := filepath.Base(runDir)
+	w := &api.SessionWorkflow{Run: run, Phase: phase}
+	scripts := filepath.Join(filepath.Dir(filepath.Dir(flows)), "workflows", "scripts")
+	if names, err := filepath.Glob(filepath.Join(scripts, "*-"+run+".js")); err == nil && len(names) > 0 {
+		w.Name = strings.TrimSuffix(filepath.Base(names[0]), "-"+run+".js")
+	}
+	return w
 }
 
 // Codex: sessions/YYYY/MM/DD/rollout-<time>-<thread id>.jsonl.
@@ -214,11 +257,13 @@ func (x *Index) glance(d onDisk) glimpse {
 		if err != nil {
 			return glimpse{}
 		}
-		out := glimpse{cwd: g.Cwd, title: g.Title, last: g.Last, sub: g.Sidechain, parent: g.Parent}
+		out := glimpse{cwd: g.Cwd, title: g.Title, last: g.Last, sub: g.Sidechain, parent: g.Parent, done: g.Ended}
 		if out.sub {
-			if d := claudeMeta(d.path); d != "" {
-				out.title = cut(d, transcript.TitleLen)
+			desc, phase := claudeMeta(d.path)
+			if desc != "" {
+				out.title = cut(desc, transcript.TitleLen)
 			}
+			out.flow = workflowOf(d.path, phase)
 		}
 		return out
 	case api.AgentCodex:

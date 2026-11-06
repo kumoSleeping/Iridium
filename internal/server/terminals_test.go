@@ -53,7 +53,9 @@ func startWith(t *testing.T, ready func(*Server, config.Config, string)) *live {
 }
 
 // do sends a request; as is "web" (the page, 本机 while no public origin), "socket" (a person's
-// ir), "agent" (an agent's ir) or a channel token.
+// ir), "agent" (an agent's ir), "agent-in:<session>" (an agent's ir in that session),
+// "ir-in:<session>" (ir send in that session, which names the session but sets no agent flag) or a
+// channel token.
 func (l *live) do(as, method, path string, body any, out any) int {
 	l.t.Helper()
 	var r io.Reader
@@ -75,6 +77,10 @@ func (l *live) do(as, method, path string, body any, out any) int {
 		req, _ = http.NewRequest(method, url, r)
 		req.Header.Set(HeaderAgent, "1")
 		req.Header.Set(HeaderSession, strings.TrimPrefix(as, "agent-in:"))
+	case strings.HasPrefix(as, "ir-in:"): // ir send in that session: the session, no agent flag
+		c, url = l.sock, "http://ir"+path
+		req, _ = http.NewRequest(method, url, r)
+		req.Header.Set(HeaderSession, strings.TrimPrefix(as, "ir-in:"))
 	case strings.HasPrefix(as, "ir_"):
 		req.Header.Set("Authorization", "Bearer "+as)
 	}
@@ -313,6 +319,38 @@ func firstState(t *testing.T, resp *http.Response) string {
 
 // An agent's ir asks for a token: no secret comes back to it, a panel sees the ask, allows it
 // and alone gets the token; the agent learns only that it was allowed.
+// A terminal's device: a computer until set; its own by /api/me/device, another's only from a
+// panel or 本机; by ID or name.
+func TestDevice(t *testing.T) {
+	l := start(t)
+	var tok api.Token
+	l.want(200, "socket", "POST", "/api/terminals/tokens", api.NewInvite{Name: "bot"}, &tok)
+	bot, botID := tok.Token, tok.Terminal.ID
+	var me api.Me
+	l.want(200, bot, "GET", "/api/me", nil, &me)
+	if me.Device != api.DeviceComputer {
+		t.Fatalf("default device: %q", me.Device)
+	}
+	var got api.Terminal
+	l.want(200, bot, "PUT", "/api/me/device", api.SetDevice{Device: api.DevicePhone}, &got)
+	if got.ID != botID || got.Device != api.DevicePhone {
+		t.Fatalf("own device: %+v", got)
+	}
+	l.want(400, bot, "PUT", "/api/me/device", api.SetDevice{Device: "tablet"}, nil)
+	l.want(403, bot, "PUT", "/api/terminals/local/device", api.SetDevice{Device: api.DevicePhone}, nil)
+	l.want(404, "socket", "PUT", "/api/terminals/nobody/device", api.SetDevice{Device: api.DevicePhone}, nil)
+	l.want(200, "socket", "PUT", "/api/terminals/bot/device", api.SetDevice{Device: api.DeviceComputer}, &got)
+	l.want(200, "web", "PUT", "/api/me/device", api.SetDevice{Device: api.DevicePhone}, &got)
+	if got.ID != "local" || got.Device != api.DevicePhone || !got.Local {
+		t.Fatalf("本机's device: %+v", got)
+	}
+	var ts api.Terminals
+	l.want(200, "socket", "GET", "/api/terminals", nil, &ts)
+	if len(ts.Terminals) != 2 || ts.Terminals[0].Device != api.DevicePhone || ts.Terminals[1].Device != api.DeviceComputer {
+		t.Fatalf("listed: %+v", ts.Terminals)
+	}
+}
+
 func TestConfirmations(t *testing.T) {
 	l := start(t)
 	var p api.Pending

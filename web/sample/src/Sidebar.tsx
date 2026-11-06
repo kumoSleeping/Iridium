@@ -1,7 +1,7 @@
 // The one list: workspace → folder → session. No panel, no cards, no headings; groups split by space,
 // chevrons in their own column, one truncated line per row, colour only in logos and lamps, the
 // selected row only bolder. A folder with one session is not shown; the session sits in its place.
-import { ChevronRight, Folder, Inbox, Network, Plus, Search, Settings } from "lucide-react";
+import { ChevronRight, Folder, Inbox, Plus, Search, Settings } from "lucide-react";
 import { useRef, type CSSProperties, type ReactNode } from "react";
 import { pick, type Session, type Workspace } from "./data";
 import { t, useLang } from "./i18n";
@@ -40,9 +40,6 @@ export function Sidebar(p: Props) {
       )}
       <IconKey label={t("nav.search")} tipSide="bottom">
         <Search size={16} />
-      </IconKey>
-      <IconKey label={t("nav.topology")} tipSide="bottom">
-        <Network size={16} />
       </IconKey>
     </div>
   );

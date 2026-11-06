@@ -59,10 +59,14 @@ func TestGateStore(t *testing.T) {
 
 	// An update, a deletion with its rules, all in one change; then from a new connection.
 	must(t, s.SetTerminalRules(bot.ID, []byte(`{"agents":["pi"]}`)))
+	must(t, s.SetDevice(bot.ID, "phone"))
 	bot.Name, bot.TokenHash = "bot2", "def"
 	must(t, g.Apply(gate.Change{DeleteEndpoints: []string{bot.ID}, DeleteInvites: []string{inv.ID}, DeleteSessions: []string{"s1"}, Endpoints: []gate.Endpoint{other}}))
 	if _, ok, _ := s.TerminalRules(bot.ID); ok {
 		t.Error("rules outlived their terminal")
+	}
+	if d, _ := s.Device(bot.ID); d != "" {
+		t.Errorf("the device outlived its terminal: %q", d)
 	}
 	// Two channels without a token are fine; two with the same are not.
 	other2 := gate.Endpoint{ID: "dddddddddddddddd", Name: "o2", Kind: gate.KindChannel, CreatedAt: t0}
@@ -93,6 +97,16 @@ func TestRulesOpenersTokens(t *testing.T) {
 	must(t, s.SetTerminalRules("x", []byte(`{"a":2}`)))
 	if r, ok, err := s.TerminalRules("x"); !ok || err != nil || string(r) != `{"a":2}` {
 		t.Fatalf("rules %s %v %v", r, ok, err)
+	}
+	// Devices: none, then set and set again.
+	if d, err := s.Device("x"); d != "" || err != nil {
+		t.Fatalf("no device: %q %v", d, err)
+	}
+	must(t, s.SetDevice("x", "phone"))
+	must(t, s.SetDevice("local", "phone"))
+	must(t, s.SetDevice("x", "computer"))
+	if d, _ := s.Devices(); len(d) != 2 || d["x"] != "computer" || d["local"] != "phone" {
+		t.Fatalf("devices %v", d)
 	}
 	must(t, s.SetOpener("s1", "x"))
 	must(t, s.SetOpener("s1", "y")) // the first stays

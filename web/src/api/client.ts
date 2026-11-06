@@ -33,9 +33,11 @@ import type {
   Session,
   SessionPatch,
   SessionState,
+  SetDevice,
   SetMode,
   SetModel,
   SetRules,
+  SetUltracode,
   Settings,
   SettingsPatch,
   Terminal,
@@ -188,6 +190,7 @@ export const api = {
   mode: (id: string, mode: string) => writeAgain<{ ok: boolean }>("PUT", `${S(id)}/mode`, { mode } satisfies SetMode),
   model: (id: string, model: string) => writeAgain<{ ok: boolean }>("PUT", `${S(id)}/model`, { model } satisfies SetModel),
   effort: (id: string, effort: string) => writeAgain<{ ok: boolean }>("PUT", `${S(id)}/effort`, { effort }),
+  ultracode: (id: string, on: boolean) => writeAgain<{ ok: boolean }>("PUT", `${S(id)}/ultracode`, { ultracode: on } satisfies SetUltracode),
   rules: (id: string) => get<AllowRule[]>(`${S(id)}/rules`),
   clearRules: (id: string) => write<{ ok: boolean }>("DELETE", `${S(id)}/rules`),
 
@@ -216,6 +219,8 @@ export const api = {
     if (p.removeAvatar) f.set("removeAvatar", "1");
     return write<Profile>("PUT", of ? `/api/terminals/${enc(of)}/profile` : "/api/me/profile", f);
   },
+  /** PUT /api/me/device, or another terminal's: the device it runs on. */
+  device: (device: SetDevice["device"], of?: string) => write<Terminal>("PUT", of ? `/api/terminals/${enc(of)}/device` : "/api/me/device", { device } satisfies SetDevice),
   logout: () => write<{ ok: boolean }>("POST", "/_ir/api/logout"),
 
   // --- the interactive terminals (docs/api.md "交互终端"), the confirmations agents ask for ---

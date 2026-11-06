@@ -111,6 +111,7 @@ func (m *Manager) take(ctx context.Context, id string) (*Hosted, error) {
 	h.said = cached{title: s.Title, last: s.Last}
 	if s.UpdatedAt > 0 {
 		h.lastActive = time.UnixMilli(s.UpdatedAt)
+		h.shownAt = h.lastActive
 	}
 	m.hosted[id] = h
 	m.o.Logf("session %s: taken up from disk", id)

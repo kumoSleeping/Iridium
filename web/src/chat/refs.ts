@@ -1,36 +1,65 @@
 // Two readings of what a chat shows, pure for tests: who a message of the user's is from (plan
 // "消息来源"), and the files a reply names (plan "网页": `![](路径)`, `[名](路径)` and absolute paths
 // in inline code).
-import type { Agent, Session, Terminal } from "../api/types.gen";
+import type { Agent, Device, Session, Terminal } from "../api/types.gen";
+import { agentName } from "../ui";
 
-/** A user block's source as the page draws it: your words (typed here, on another panel, or in a
- *  terminal), a letter (from another session's ir, a plugin, a peer), or Iridium's own line. */
+/** A user block's source as the page draws it (QQ-like: a face, a name, a badge on the face):
+ *  your words (typed here, on another panel, or in a terminal: that terminal's name, avatar and
+ *  device), a letter (from another session's ir: its agent and session; from a plugin or peer), or
+ *  Iridium's own line. local: 本机 (the machine's terminal, or this page with no gate). */
 export type Source =
-  | { kind: "you"; panel?: { name: string; avatar?: string } }
-  | { kind: "letter"; name: string; avatar?: string; channel: boolean; agent?: Agent; session?: string }
+  | { kind: "you"; name: string; avatar?: string; device: Device; local?: boolean }
+  | { kind: "letter"; name: string; avatar?: string; channel: boolean; agent?: Agent; session?: string; workflow?: boolean }
   | { kind: "iridium" };
 
+/** What sourceOf needs to know of a terminal. */
+export type Who = Pick<Terminal, "id" | "name" | "avatar" | "device" | "local">;
+
+const LOCAL_TERMINAL: Who = { id: "local", name: "本机", local: true };
+
+/** Your words from terminal x. */
+export const yours = (x: Who): Extract<Source, { kind: "you" }> => ({ kind: "you", name: x.name, avatar: x.avatar, device: x.device ?? "computer", ...(x.local ? { local: true } : {}) });
+
 /** Who wrote a message: from, the tag Iridium wrote it with, and terminal, the sending terminal's ID
- *  (Block.from, fromTerminal). me: this panel's ID ("local" with no gate). An agent's ir from
- *  another session is tagged "ir:<session>". */
-export function sourceOf(from: string | undefined, terminal: string | undefined, me: string, terminals: Terminal[], sessions: Session[]): Source {
+ *  (Block.from, fromTerminal). me: this panel ("local" with no gate). An agent's ir from another
+ *  session is tagged "ir:<session>"; a block with no tag was typed in the agent's own terminal, on
+ *  the machine (本机) — except in a subagent, where it is its parent's prompt (of: the session shown). */
+export function sourceOf(from: string | undefined, terminal: string | undefined, me: Who, terminals: Terminal[], sessions: Session[], workspaces: { id: number; name: string }[] = [], of?: Pick<Session, "subagent" | "parent" | "workflow">): Source {
   if (from === "Iridium") return { kind: "iridium" };
+  // A subagent's prompt is written by the session that started it (an Agent tool call, a workflow).
+  if (!from && of?.subagent) {
+    const p = of.parent ? sessions.find((s) => s.id === of.parent) : undefined;
+    const wf = of.workflow ? { workflow: true } : {};
+    const name = p ? senderName(p, workspaces) : (of.parent?.slice(0, 8) ?? "");
+    const named = of.workflow?.name ? (name ? `${name} · ${of.workflow.name}` : of.workflow.name) : name;
+    return { kind: "letter", name: named, channel: false, ...(p ? { agent: p.agent, session: p.id } : of.parent ? { session: of.parent } : {}), ...wf };
+  }
   // Another session's ir: that session, its agent's logo, a key to go there.
   const id = from && /^(?:ir|session):(.+)$/.exec(from)?.[1];
   if (id) {
     const s = sessions.find((s) => s.id === id || s.id.startsWith(id));
-    return s ? { kind: "letter", name: sessionName(s), channel: false, agent: s.agent, session: s.id } : { kind: "letter", name: id.slice(0, 8), channel: false };
+    return s ? { kind: "letter", name: senderName(s, workspaces), channel: false, agent: s.agent, session: s.id } : { kind: "letter", name: id.slice(0, 8), channel: false };
   }
-  if (!from || (terminal ?? "") === me) return { kind: "you" };
+  const local = terminals.find((x) => x.local) ?? (me.local ? me : LOCAL_TERMINAL);
+  if (!from) return yours(local);
+  if ((terminal ?? "") === me.id) return yours(me);
   const e = terminals.find((x) => x.id === terminal) ?? terminals.find((x) => x.name.toLowerCase() === from.toLowerCase());
-  if (e?.id === me) return { kind: "you" };
+  if (e?.id === me.id) return yours(me);
   // Another panel, or 本机 (this machine: its page with no gate, a person's ir): your words too.
-  if (e?.kind === "panel" || e?.local) return { kind: "you", panel: { name: e.name, avatar: e.avatar } };
+  if (e?.kind === "panel" || e?.local) return yours(e);
+  if (!e && (terminal === "local" || from === "本机")) return yours(local);
   // A plugin writes "[name·sender]": the plugin's avatar, the whole tag as the name.
   return { kind: "letter", name: from, avatar: e?.avatar, channel: true };
 }
 
-const sessionName = (s: Session) => s.name || s.title || s.cwd.split("/").pop() || s.id.slice(0, 8);
+/** A session as the sender of a letter: its given name, else its agent and where it works (its
+ *  workspace, else its folder): "Claude · Iridium". */
+export function senderName(s: Pick<Session, "id" | "agent" | "name" | "cwd" | "workspace">, workspaces: { id: number; name: string }[] = []): string {
+  if (s.name) return s.name;
+  const where = (s.workspace && workspaces.find((w) => w.id === s.workspace)?.name) || s.cwd.split("/").filter(Boolean).pop() || s.id.slice(0, 8);
+  return `${agentName(s.agent)} · ${where}`;
+}
 
 /** A path as a message writes it, made absolute the way the server reads it (docs/api.md "认文件"):
  *  file:// and a #line or :line:col dropped, ~/ the home folder, the rest from the session's folder. */

@@ -15,8 +15,8 @@ import (
 	"github.com/kumoSleeping/iridium/internal/store"
 )
 
-// A session's model, approval mode and thinking effort are its own, remembered in the store: set
-// on the running agent at once, and given to every later start. A new session's mode is the
+// A session's model, approval mode, thinking effort and ultracode are its own, remembered in the
+// store: set on the running agent at once, and given to every later start. A new session's mode is the
 // config's for its agent.
 
 // SetModel sets the session's model; "" is the agent's default.
@@ -38,8 +38,13 @@ func (m *Manager) SetModel(ctx context.Context, id, model string) error {
 	if model != "" {
 		h.model = model // the next turn's init names it as the agent resolved it
 	}
+	proc := h.proc
 	h.mu.Unlock()
 	h.publish()
+	if h.isLive() {
+		// A model switch may change the level in use and whether ultracode can be had.
+		go h.readApplied(proc)
+	}
 	return nil
 }
 
@@ -138,7 +143,10 @@ func (m *Manager) SetEffort(ctx context.Context, id, effort string) error {
 	if info, _ := agents.Get(h.meta.Agent); effort != "" && !slices.Contains(info.Efforts, effort) {
 		return fmt.Errorf("%w: no effort %q (%s)", ErrBadRequest, effort, strings.Join(info.Efforts, ", "))
 	}
-	if h.isLive() && effort != "" {
+	h.setMu.Lock()
+	defer h.setMu.Unlock()
+	live := h.isLive()
+	if live && effort != "" {
 		if err := e.SetEffort(ctx, effort); err != nil {
 			return err
 		}
@@ -148,8 +156,48 @@ func (m *Manager) SetEffort(ctx context.Context, id, effort string) error {
 	}
 	h.mu.Lock()
 	h.effort = effort
+	proc := h.proc
 	h.mu.Unlock()
 	h.publish()
+	if live {
+		h.readApplied(proc)
+	}
+	return nil
+}
+
+// SetUltracode turns the session's ultracode on or off (Claude): on the running process, the level
+// as it was, and at every later start. On is refused while its model cannot take it.
+func (m *Manager) SetUltracode(ctx context.Context, id string, on bool) error {
+	h, err := m.get(id)
+	if err != nil {
+		return err
+	}
+	u, ok := h.drv.(agent.Ultracoder)
+	if !ok {
+		return fmt.Errorf("%w: %s has no ultracode", ErrBadRequest, h.meta.Agent)
+	}
+	h.setMu.Lock()
+	defer h.setMu.Unlock()
+	live := h.isLive()
+	if live {
+		if err := u.SetUltracode(ctx, on); errors.Is(err, agent.ErrNoUltracode) {
+			return fmt.Errorf("%w: %v", ErrBadRequest, err)
+		} else if err != nil {
+			return err
+		}
+	}
+	if err := m.o.Store.UpdateSettings(id, func(s *store.Settings) { s.Ultracode = &on }); err != nil {
+		return err
+	}
+	h.mu.Lock()
+	h.ultracode = &on
+	h.applied.Ultracode = on
+	proc := h.proc
+	h.mu.Unlock()
+	h.publish()
+	if live {
+		h.readApplied(proc)
+	}
 	return nil
 }
 

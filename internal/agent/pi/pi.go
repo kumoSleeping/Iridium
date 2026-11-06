@@ -268,7 +268,7 @@ func (d *Driver) hello(proc int, spawned bool) {
 		d.effort = st.Thinking
 	}
 	if d.model != "" || d.session != "" {
-		d.emitLocked(agent.Started{Session: d.session, Model: d.model})
+		d.emitLocked(agent.Started{Session: d.session, Model: d.model, Effort: d.effort})
 	}
 	evs := d.take()
 	d.mu.Unlock()
@@ -480,7 +480,7 @@ func (d *Driver) SetModel(ctx context.Context, model string) error {
 		level = d.effort
 	}
 	d.model = name
-	d.emitLocked(agent.Started{Session: d.session, Model: name})
+	d.emitLocked(agent.Started{Session: d.session, Model: name, Effort: level})
 	evs := d.take()
 	d.mu.Unlock()
 	d.flush(evs)

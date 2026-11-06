@@ -34,7 +34,7 @@ func build() fstest.MapFS {
 		"assets/chat-xyz.js.br":      {Data: []byte("CHATBR")},
 		"assets/lib~chat-qqq.js":     {Data: []byte("lib")},
 		"assets/lib~chat-qqq.js.br":  {Data: []byte("LIBBR")},
-		"assets/topology-abc.css.br": {Data: []byte("orphan")}, // a twin with no file: not served
+		"assets/settings-abc.css.br": {Data: []byte("orphan")}, // a twin with no file: not served
 	}
 }
 
@@ -89,7 +89,7 @@ func TestServe(t *testing.T) {
 		t.Errorf("svg: %v", w.Header())
 	}
 	// Never the build's own records, the twins alone, or what is not there.
-	for _, p := range []string{"/.vite/manifest.json", "/.gitkeep", "/assets/index-abc.js.br", "/assets/topology-abc.css.br", "/nothing", "/assets/none.js"} {
+	for _, p := range []string{"/.vite/manifest.json", "/.gitkeep", "/assets/index-abc.js.br", "/assets/settings-abc.css.br", "/nothing", "/assets/none.js"} {
 		if w := get(t, app, p, nil); w.Code != 404 {
 			t.Errorf("%s: %d", p, w.Code)
 		}

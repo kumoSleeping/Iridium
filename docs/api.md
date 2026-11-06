@@ -5,7 +5,7 @@
 - HTTP：`127.0.0.1:7810`（配置 `listen`），给网页，前面是 Passkey 门（`docs/gate.md`）。没配 `public.origin` 时只认本机的主机名（`localhost`、回环地址和配置 `hosts`），非 GET 请求带了别的 `Origin` 就拒绝，请求都算内置终端“本机”（带插件 TOKEN 的算那个插件）。配了以后每个请求都要面板登录或 TOKEN。
 - unix socket：`$XDG_RUNTIME_DIR/iridium/ir.sock`（0600），给本机 `ir`，不经过门，算“本机”。`ir` 认出是 agent 在调（环境里有 `CLAUDECODE`、`CODEX_THREAD_ID`、`IRIDIUM_SESSION`，或者没有终端）时带头 `X-Iridium-Agent: 1`，这时不回任何秘密（见“确认”）。`ir` 还带 `X-Iridium-Session`（它所在的会话：`IRIDIUM_SESSION` 或 agent 自己的会话变量）；那个会话是别的终端经 Iridium 开的，这个请求就算那个终端的：用它的权限表，记它的用量和来源（agent 在插件的会话里调 `ir`，等于插件自己做）。
 
-来源：每条交给 agent 的消息开头是 `[终端名] `（`/` 开头的命令除外），名字取发送时终端的名字。库里记下这条输入是哪个终端（ID）发的、用的什么名字；读记录时服务端按 Iridium 自己写进去的输入认（Claude：发消息时给的 uuid；没有 ID 的 agent：`store.SourceByText` 比对输入记录），去掉前缀，消息块带 `from`（名字）和 `fromTerminal`（终端 ID，取头像用）。用量行按终端 ID 记，改名不丢。agent 以“本机”调 `ir send`、`ir new`（带 `X-Iridium-Agent` 和它所在的会话）时前缀是 `[ir:<会话 ID>] `，`from` 也是它，页面画成那个会话的来信；终端仍是本机。
+来源：每条交给 agent 的消息开头是 `[终端名] `（`/` 开头的命令除外），名字取发送时终端的名字。库里记下这条输入是哪个终端（ID）发的、用的什么名字；读记录时服务端按 Iridium 自己写进去的输入认（Claude：发消息时给的 uuid；没有 ID 的 agent：`store.SourceByText` 比对输入记录），去掉前缀，消息块带 `from`（名字）和 `fromTerminal`（终端 ID，取头像用）。用量行按终端 ID 记，改名不丢。经 unix socket 的 `ir send`、`ir new` 只要带着它所在的会话（`X-Iridium-Session` 头，取自 `IRIDIUM_SESSION`、`CLAUDE_CODE_SESSION_ID` 等环境变量，或正文的 `caller`），前缀就是 `[ir:<会话 ID>] `，`from` 也是它，页面画成那个会话的来信（名字：会话改过的名字，否则“Claude · 工作区名或文件夹名”）；有没有 `X-Iridium-Agent` 都一样。终端（`fromTerminal`，记用量的）照旧：开那个会话的终端，否则本机。网页和 TOKEN 来的请求不认 `caller`。
 
 类型都在 `internal/api`。`go generate ./internal/api` 用 tygo 生成 `web/src/api/types.gen.ts`，前端只用它（生成的文件不进库）。
 
@@ -25,7 +25,7 @@
 | `POST /api/sessions/{id}/stop` | → `{ok}` | 停掉 agent 进程（关 stdin，写完记录自己退出）。会话还在，下一条消息再拉起。队列暂停 |
 | `POST /api/sessions/{id}/answer` | `Answer` → `{ok}` | 回答提问：审批 `allow`（不许时可带 `message`；`always` 见“会话设置”）；选择题 `answers`（问题原文 → 选项 `label`）；计划确认 `allow` |
 | `GET /api/events?sub=…` | SSE | 见下。不带 `sub`：插件的事件流，见“插件” |
-| `GET /api/agents` | → `AgentInfo[]` | 能开的 agent：审批模式（`modes`、`defaultMode`、`modeSwitch`：now / next turn / restart）、有没有上下文分项、有没有额度窗口 |
+| `GET /api/agents` | → `AgentInfo[]` | 能开的 agent：审批模式（`modes`、`defaultMode`、`modeSwitch`：now / next turn / restart）、有没有上下文分项、有没有额度窗口、能不能开 ultracode（`ultracode`） |
 | `GET /api/health` | → `{ok}` | |
 | `GET /api/settings` | → `Settings` | 设置页改的配置项：空闲回收、崩溃续跑、额度续跑、隐藏的额度条、各 agent 新会话的审批模式、推送总开关。管理权 |
 | `PUT /api/settings` | `SettingsPatch` → `Settings` | 只改给了的项，写进配置文件，马上生效。面板权 |
@@ -47,7 +47,7 @@
 |---|---|
 | `list` | `Session[]` |
 | `workspaces` | `Workspace[]` |
-| `session:<id>` | `SessionState`：状态、提问（带 `card`）、后台任务、模型、审批模式、思考强度、可选的模型/模式/强度、待发队列、上下文总数、等额度到几点、`tail`（块带 `files`）、`end`、`proc`、出错原因、`commands`（agent 自己的命令，给输入框的命令面板） |
+| `session:<id>` | `SessionState`：状态、提问（带 `card`）、后台任务、模型（`model` 在用的，`pick` 设的）、审批模式、思考强度（`effort` 设的，`effortNow` agent 说在用的）、可选的模型/模式/强度、`ultracode`（只 Claude）、待发队列、上下文总数、等额度到几点、`tail`（块带 `files`）、`end`、`proc`、出错原因、`commands`（agent 自己的命令，给输入框的命令面板） |
 | `context:<id>` | `Context`：上下文用了多少、分项。回合结束、压缩后，回合中调用工具时最多 30 秒一次更新；存在托管目录，没进程时也有 |
 | `quota` | `Quota`：按 agent + 账号（Claude：邮箱和套餐）的额度窗口、读到的时间、`live` |
 | `confirms` | `Confirms`：等面板确认的事（只有面板能订） |
@@ -60,14 +60,14 @@
 事件：
 
 - `state`：`{key, value}`，一样东西的整份。不存在时 `value` 是 `null`。
-- `draft`：`{session, proc, n, text}`，agent 正在打的字，接在第 `n` 段草稿后面。
+- `draft`：`{session, proc, n, text, done?}`，agent 正在打的字，接在第 `n` 段草稿后面。`done: true`：这段写完了，不会再有字（开始调工具、写下一段），页面去掉光标；它的话随后在记录里来。
 - 每 15 秒一行注释（`: ping`）保活。
 
 规则：
 
 - 开流（含断线重连）先发每样的整份；之后变了再发整份，不发补丁。同一样 250ms 内最多一次，发的是最新的。
 - 读得慢时中间的状态直接丢掉，只送最新的。
-- 草稿每 100ms 攒一包，只拼接不丢。
+- 草稿每 100ms 攒一包，只拼接不丢。有状态要发时，攒着的草稿先发、排在它前面：带了块的状态不会抢在这段话的草稿之前。
 
 页面怎么用：
 
@@ -75,7 +75,9 @@
   - `tail.blocks` 不是 `null`，且自己的 `end` 在 `[tail.start, tail.end]` 里：直接用。位置在自己 `end` 之后的追加；`at` 已有的换掉（工具的结果来了）。`end` 记成 `tail.end`。
   - 否则（块大、块多、中间丢过状态）`after=<自己的 end>` 取新块。
   - `tail` 至少往回盖 1 秒；只装没截短的块，JSON 不超过 16KB。
-- 草稿：同一 `proc`、同一 `n` 的 `text` 接起来；`n` 变了，上一段封口（记录里马上会有这段话）；`proc` 变了，丢掉所有草稿。记录里来了 agent 的话，就换掉最早封口的那段。重连后清掉草稿，照 `end` 取新块。
+- 草稿：同一 `proc`、同一 `n` 的 `text` 接起来；`n` 变了或来了 `done`，这段封口（记录里马上会有这段话）；`proc` 变了，丢掉所有草稿。只有空白的草稿封口就丢（记录不收空白）。
+  - 记录里来了 agent 的话，按字找它的草稿（开头 32 个字一样），换掉它和它前面的；找不到（字先到、草稿后到），记下，等那段草稿封口时字一样就丢掉。
+  - 光标只画在没封口的最后一段，会话不在忙时不画。重连后清掉草稿，照 `end` 取新块。
 
 ## Iridium 重启后
 
@@ -83,7 +85,7 @@
 
 - 托管目录 `seen.json` 记着上一个 Iridium 读 `out.log` 读到哪（每秒最多写一次，退出时写一次）。那之前的输出重放，只为恢复驱动的状态；之后的（停机期间回合结束、用量、提问）照新来的处理。没有这个文件的（旧版）当全读过。
 - 再发一次握手。Claude 回 `initialize` 时带 `pending_permission_requests`（还在等答复的提问，原样的 `control_request`），挂着的提问以它为准：没答的回来，带卡片，照常能答；答过的不再出现。
-- 上下文（托管目录 `context.json`）和额度（状态目录 `quota.json`）是上次读到的值和读的时间（`at`）；额度的 `live` 要等这个 agent 和账号又有进程在跑。
+- 上下文（托管目录 `context.json`）和额度（状态目录 `quota.json`）是上次读到的值和读的时间（`at`）。上下文随回合读（回合结束、长回合里每隔一阵）；额度不随回合，每分钟单独读一次：每个 agent 和账号找一个在跑的进程问（Claude `get_usage`，Codex `account/rateLimits/read`，都不花额度），没有在跑的进程就不读（2026-11-06 定）；额度的 `live` 要等这个 agent 和账号又有进程在跑。
 - 托管进程在停机期间已经退出的：不补读它的输出，按它的退出处理。
 
 ## 状态灯（`Status`）
@@ -96,7 +98,7 @@
 
 - 来源：Claude `~/.claude/projects/<目录>/<id>.jsonl`；Codex `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-*.jsonl`（标题用 `session_index.jsonl` 的线程名）；pi `~/.pi/agent/sessions/*/*.jsonl`（标题用最后一个 `session_info` 名字）；dsh `~/.dsh/sessions/--<键>--/<id>/session.v<N>.jsonl.zstd`（现在只看路径和时间，目录由键反推）。标题、最近一句话只读文件开头 8MB 和末尾 4MB。
 - 子代理也列（用户定的，2026-11-06）：`subagent: true`，`parent` 是父会话（托管的 Codex 换成 Iridium 的 ID），`launcher` 同 `parent`，所以归父会话的工作区。只读：发消息回 409，只有父会话能和它说话。
-  - Claude：Agent 工具的子任务 `<目录>/<id>/subagents/agent-<agentId>.jsonl`（旧版是 `<目录>/agent-*.jsonl`），会话 ID 就是文件名 `agent-<agentId>`；首行 `isSidechain` 的 `sessionId` 是父会话；标题用旁边 `.meta.json` 的 `description`，没有就用任务的开头。
+  - Claude：Agent 工具的子任务 `<目录>/<id>/subagents/agent-<agentId>.jsonl`（旧版是 `<目录>/agent-*.jsonl`），Workflow 跑出来的 agent 在 `<目录>/<id>/subagents/workflows/<runId>/agent-<agentId>.jsonl`（旁边的 `journal.jsonl` 不算会话），会话 ID 就是文件名 `agent-<agentId>`；首行 `isSidechain` 的 `sessionId` 是父会话；标题用旁边 `.meta.json` 的 `description`，没有就用任务的开头。
   - Codex：`session_meta.source.subagent.thread_spawn` 的 `parent_thread_id` 是父线程，标题用 `agent_path`（没有就 `agent_nickname`）。
 - 在跑的：`~/.claude/sessions/<pid>.json`（核对 `procStart`），`/proc` 里本人的 codex、pi、dsh 进程（打开的记录文件或锁、命令行；pi 用工作目录里进程起来后最新写的那份）。环境变量只读本人进程的，只取下面几个，不记日志。
 - 拉起者：子进程环境里依次看 `IRIDIUM_SESSION`、`CLAUDE_CODE_SESSION_ID`、`CODEX_THREAD_ID`、`CODEX_SESSION_ID`、`DSH_SESSION_ID`、`PI_SESSION_ID`；都没有就往上找第一个只跑一个会话的 agent 进程。`IRIDIUM_SESSION` 等于自己的 ID 是 Iridium 托管的，不算在别处。
@@ -156,10 +158,10 @@
 ## `ir`（agent 用的部分）
 
 - 代码在 `internal/cli`，走上面这套接口；socket 用 `IRIDIUM_SOCKET`，没有就读配置（`IRIDIUM_CONFIG` 或默认位置）。
-- `<id>` 可只写开头（唯一即可）；`ir new`、`ir ls` 打印至少 8 位的短 ID。`ir ls` 只列有显示标记的，`ir ls --all` 连归档一起列。`机器:路径`、`机器/<id>` 现在报 `peer not connected`。
+- `<id>` 可只写开头（唯一即可）；`ir new`、`ir ls` 打印至少 8 位的短 ID。`ir ls` 只列有显示标记的，子代理只列还在工作的（没做完、父会话进程还在、5 分钟内写过），排在父会话下面；`ir ls --all` 连归档和做完的子代理一起列。`ir find <词>...` 在 ID、名字、标题、目录、最后一句里找（每个词都要有，不分大小写），归档的也找、标 `[归档]`。`ir archive`、`ir unarchive` 同侧栏菜单（`PATCH /api/sessions/{id}`）。`ir read` 默认每条消息一行（截 80 字）加它的最终回复（截 300 字），最近 10 条，`-n` 改条数，`--full` 打整页原文。`机器:路径`、`机器/<id>` 现在报 `peer not connected`。
 - 输出给 agent 看：只打最后一段回复（`new --wait` 先一行 ID）；`cp` 一行 `路径 大小 sha256`；需要你时每个提问一行 `需要你：…`。进度只在 stderr 是终端时画。
 - `send`、`new` 不带 `--wait` 时等到 agent 接了这条消息（最多 15 秒）再返回，所以紧接着的 `ir wait` 等的是这一回合。
-- 回合在跑时 `ir send` 的话进待发队列：不带 `--wait` 马上返回；带 `--wait` 等它发出去、再等它那一回合（队列暂停了就退出码 2）。`--steer` 插进正在跑的回合。
+- 回合在跑时 `ir send` 的话默认插进这一回合（和网页回车一样，2026-11-06 定）；`--wait` 等到这一回合结束，打印最后一段回复（可能还在说别的事）。加 `--queue` 进待发队列：不带 `--wait` 马上返回，带 `--wait` 等它发出去、再等它那一回合（队列暂停了就退出码 2）。`--steer` 还认，和默认一样。agent 在等额度时插话也进队列。
 - 退出码：0 结束，2 需要你，1 出错（agent 出错退出、回合中被停、`ir` 自己出错）。
 
 - `NewSession.caller`、`Send.caller`：`ir` 从环境变量（`IRIDIUM_SESSION`、`CLAUDE_CODE_SESSION_ID`、`CODEX_THREAD_ID`…）读到的调用者会话，没给 `workspace` 时新会话进它的工作区（它在未归类时交给自动发现）。
@@ -184,18 +186,25 @@
 
 ## 会话设置
 
-按会话记在库里：马上设给在跑的 agent，之后每次拉起都带上（Claude：`--model`、`--permission-mode`、`--effort`）。
+按会话记在库里：马上设给在跑的 agent，之后每次拉起都带上（Claude：`--model`、`--permission-mode`、`--effort`，设过 ultracode 带 `--settings '{"ultracode":…}'`，关也带，压过你自己设置里的）。
 
 | 请求 | 正文 | 说明 |
 |---|---|---|
 | `PUT /api/sessions/{id}/model` | `{model}` | `""` 是 agent 的默认。Claude：`set_model` |
 | `PUT /api/sessions/{id}/mode` | `{mode}` | 审批模式，只收 `SessionState.modes` 里的。Claude：`set_permission_mode` |
 | `PUT /api/sessions/{id}/effort` | `{effort}` | 思考强度，只收 `SessionState.efforts` 里的。Claude：先 `get_settings` 问 ultracode 开没开，再 `apply_flag_settings` 照原样带上 |
+| `PUT /api/sessions/{id}/ultracode` | `{ultracode}` | 只 Claude（`GET /api/agents` 的 `ultracode`），别的 400。在跑时先 `get_settings`，要开而 `ultracodeAvailable` 不为真（CLI 不认 `get_settings` 也算）就 400；只发 `apply_flag_settings {ultracode}`，强度不变。没在跑时不查，只记下，下次拉起带上 |
 | `GET /api/sessions/{id}/rules` | → `AllowRule[]` | “本会话一直允许”记下的规则 |
 | `DELETE /api/sessions/{id}/rules` | → `{ok}` | 清掉 |
 
 - 新会话的审批模式：`NewSession.mode`，没给就用配置 `modes.<agent>`，再没有就是 agent 的默认（`GET /api/agents` 的 `defaultMode`）。默认一律自动批准（用户定的，2026-11-05）：Claude `auto`；Codex `auto`（Codex 的 `approvalPolicy: never`，`never` 也认），更严的 `untrusted`、`on-request`、`granular` 照样能选；pi `auto`，不装审批扩展，选了 `ask` 才装。配置默认就写着这三项。
 - 模式和强度按 agent 登记表（`GET /api/agents`）：Codex 从下一回合起生效（`turn/start` 带上）；pi 的模式只在启动时装（`modeSwitch: restart`），在跑时改了就重启它（空闲时马上，否则等这个回合结束；接着 `--session-id` 续上，队列照常发）。强度：Codex `effort`、pi `set_thinking_level`，启动时 pi 用 `--thinking`；模型自己带 `:级别` 的以模型的为准。
+- 模型和强度怎么显示：
+  - `models[]` 带 `resolved`（这个值实际跑的完整 id，Claude 的 `resolvedModel`）和 `efforts`（这个模型收的强度）；`noEffort` 是不收强度（Haiku 4.5）。两样都没有就是 agent 没说，用 `SessionState.efforts`。
+  - `model` 是在用的模型，常是完整 id；`pick` 是设的值，空或 `default` 是 agent 的默认。默认时模型键显示具体的模型（`resolved` 对上的别名，再不行取默认项描述 ` · ` 前那段），不只写“默认”。
+  - `effortNow`：Claude 握手后、换模型或强度后读 `get_settings` 的 `applied`（也拿到 `applied.model`，第一回合前就有）；Codex 取 `thread/start` 的 `reasoningEffort`；pi 取 `get_state` 的 `thinkingLevel`。没设过强度时显示它，但不记进库。
+  - `ultracode`：`{on, active, available}`，`on` 是开没开（`ultracodeRequested`），`active` 是开了且生效，`available` 是这个模型能不能开（读到之前、进程没在跑时算能；CLI 不认 `get_settings` 算不能）。进程一结束，读到的就作废，下个进程再问。
+  - 面板里选了模型就收起；强度滑条和 UltraCode 开关在面板底下，调了不收。
 - 本会话一直允许：`answer` 带 `always: true`（或卡片选 `always`）。记下工具和 `Ask.pattern`（Claude 自己建议的规则，例如 `ls *`；没有时 shell 命令取第一个词加 ` *`，别的工具不带模式＝这个工具全部）。之后这个会话里匹配的审批自动允许，不通知、不出卡片。
 - 匹配：`*` 是任意一段字；`前缀:*` 同 `前缀*`。shell 命令里有 `;`、`&&`、`||`、`|`、`` ` ``、`$(`、换行的，一律不按模式放行。
 
@@ -280,7 +289,7 @@ Web Push，总开关在配置 `push`，默认关。VAPID 密钥存在状态目�
 
 ## 交互终端
 
-“本机”是内置终端（ID `local`），不在库里，权限全开，不能改、不能撤销。其余的是门里登记的面板（`panel`）和通道（`channel`），表在 SQLite（`terminals`、`invites`、`logins`、`permissions`）。
+“本机”是内置终端（ID `local`），不在库里，权限全开，不能改、不能撤销。其余的是门里登记的面板（`panel`）和通道（`channel`），表在 SQLite（`terminals`、`invites`、`logins`、`permissions`、`devices`）。每个终端有个设备 `device`：`computer`（默认）或 `phone`，消息头像右下角的小标就是它。
 
 谁能做什么：
 
@@ -293,6 +302,8 @@ Web Push，总开关在配置 `push`，默认关。VAPID 密钥存在状态目�
 | `GET /api/me` | → `Me` | 调用者自己：终端、权限表、`panel`（有没有面板权）、`public` |
 | `PUT /api/me/profile` | 资料 → `EndpointInfo` | 改自己的名字、头像（见 `docs/gate.md`）；本机回 409 |
 | `PUT /api/endpoints/{id}/profile` | 同上 | 改别的终端的（`id` 也可以是名字）；`/api/terminals/{id}/profile` 同 |
+| `PUT /api/me/device` | `SetDevice` → `Terminal` | 改自己的设备（`computer`/`phone`，别的回 400）；本机也行。网页在“这个终端”弹窗里改 |
+| `PUT /api/terminals/{id}/device` | 同上 | 改别的终端的（`id` 也可以是名字，`本机`/`local` 也行），要管理权；`ir profile <名字> --device phone` |
 | `GET /api/terminals` | → `Terminals` | `ir access`：所有终端（本机在最前）、权限表、今天的用量，和未用的邀请。没有秘密 |
 | `POST /api/terminals/invites` | `NewInvite` → `Invite` | `ir invite [名字]`：新面板的一次性链接（10 分钟），`qr` 是同一链接的二维码（SVG data URL）。要先有 `public.origin`（否则 409）。没有面板权时回 202 `Pending`。`owner: true`（`--owner`）：加入的面板带 Claude，只认本机由人跑的 `ir`，否则 403 |
 | `POST /api/terminals/tokens` | `NewInvite` → `Token` | `ir token <名字>`：插件 TOKEN，只给这一次；已有的通道换新 TOKEN，旧的作废。没有面板权时回 202 `Pending`。`owner: true` 同上：给它开 Claude |

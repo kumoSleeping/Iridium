@@ -8,9 +8,16 @@
      g-slide    a panel's content arrives from the side (popover pages)
      g-push     phone pages: the chat slides over the list, the list slides back out from under it
      g-fade     plain cross-fade
+     g-swap     one icon for another in place, both drawn, cross-faded (a folder shut / open)
+     g-lid      the archive bin's lid, hinged at its right end, springs up as it opens
      g-stagger  children of an unfolded menu rise one after another
      reorder    FLIP of rows that moved (motion.ts useFlip)
      send       the sent message pushes the chat up and fades in (motion.ts pushIn)
+     snap       a slider's knob and fill glide to the stop it snapped to (chat/effort.tsx); the
+                liquid in the fill flows on (chat/liquid.ts)
+     turn       chat to chat on a computer: the main pane swaps in a blink, the new one drifting in
+                from the way you went (motion.ts pageTurn, a view transition of .g-turn;
+                html[data-turn] = next | prev). No page flip (the user, 2026-11-06).
 */
 
 :root {
@@ -27,6 +34,12 @@
   --unfold-from: scale(0.9);
   --pop-from: scale(0.92) translateY(4px);
   --slide-x: 24px;
+
+  /* turn: how far the chats drift as they swap, down the sidebar or up */
+  --turn-dur: 170ms; /* the next coming in */
+  --turn-out-dur: 90ms; /* the one before going, first */
+  --turn-in: 8px;
+  --turn-out: 4px;
 }
 
 /* --- unfold / fold: Base UI popups (data-starting-style / data-ending-style) --- */
@@ -116,6 +129,116 @@
   }
 }
 
+/* --- swap: the first child shown, or with data-on the last; both stay drawn, one fading and
+   shrinking a little as the other grows in, so nothing is cut. --- */
+.g-swap {
+  display: grid;
+}
+.g-swap > * {
+  grid-area: 1 / 1;
+  transition:
+    opacity var(--dur-2) var(--ease-out),
+    transform var(--dur-2) var(--ease-spring);
+}
+.g-swap > :last-child,
+.g-swap[data-on] > :first-child {
+  opacity: 0;
+  transform: scale(0.75);
+}
+.g-swap[data-on] > :last-child {
+  opacity: 1;
+  transform: none;
+}
+
+/* --- lid: an svg group in a 24-unit view box, hinged at (21, 6); open, it lifts and tilts its left
+   end up with a little overshoot, and settles shut without one. --- */
+.g-lid {
+  transform-box: view-box;
+  transform-origin: 21px 6px;
+  transition: transform var(--dur-2) var(--ease-out);
+}
+[data-open] > .g-lid {
+  transform: translateY(-1px) rotate(18deg);
+  transition: transform var(--dur-3) var(--ease-spring);
+}
+
+/* --- turn: html[data-turn=next] the chat goes up and out, then the next comes up into its place;
+   prev, the other way. One after the other, never both at once: two pages half seen over each
+   other read as a blur of doubled words (the user, 2026-11-06). The top bar and the composer stay
+   put, their words changed at once (.g-turn-stay: .vt-bar, .vt-stack); the rest of the window
+   changes at once too. --- */
+/* Named only while a turn runs: a named element is a backdrop root, and the glass in it (the
+   composer, the bar) would frost nothing behind it, looking see-through (the user, 2026-11-06). */
+html[data-turn] .g-turn {
+  view-transition-name: page;
+}
+html[data-turn] .vt-bar {
+  view-transition-name: chat-bar;
+}
+html[data-turn] .vt-stack {
+  view-transition-name: chat-stack;
+}
+::view-transition {
+  pointer-events: none; /* clicks go on to the page itself */
+}
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+}
+::view-transition-group(page) {
+  animation-duration: var(--turn-dur);
+  overflow: clip;
+}
+::view-transition-old(page),
+::view-transition-new(page) {
+  mix-blend-mode: normal;
+}
+html[data-turn]::view-transition-old(page) {
+  animation: turn-out var(--turn-out-dur) var(--ease-in) both;
+}
+html[data-turn]::view-transition-new(page) {
+  animation: turn-in var(--turn-dur) var(--ease-out) var(--turn-out-dur) both;
+}
+html[data-turn="next"] {
+  --turn-from: var(--turn-in);
+  --turn-to: calc(var(--turn-out) * -1);
+}
+html[data-turn="prev"] {
+  --turn-from: calc(var(--turn-in) * -1);
+  --turn-to: var(--turn-out);
+}
+@keyframes turn-out {
+  to {
+    opacity: 0;
+    transform: translateY(var(--turn-to));
+  }
+}
+@keyframes turn-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--turn-from));
+  }
+}
+/* What stays: the new one at once, the old one not at all, no move. A snapshot has no backdrop
+   to blur, so the glass is solid while the turn runs; it is frosted again as it ends. */
+::view-transition-group(chat-bar),
+::view-transition-group(chat-stack) {
+  animation: none;
+}
+::view-transition-old(chat-bar),
+::view-transition-old(chat-stack) {
+  animation: none;
+  opacity: 0;
+}
+::view-transition-new(chat-bar),
+::view-transition-new(chat-stack) {
+  animation: none;
+}
+html[data-turn] .g-turn-stay.glass,
+html[data-turn] .g-turn-stay .glass {
+  background: var(--glass-solid);
+}
+
 /* --- stagger: children of an opening popup rise in turn (set --i on each) --- */
 .g-stagger > * {
   animation: g-rise var(--dur-2) var(--ease-out) both;
@@ -128,15 +251,51 @@
   }
 }
 
-/* --- press: buttons give a little --- */
+/* --- press: a key stays where it is when pressed (the user, 2026-11-06); its hover fill is the
+   feedback. Kept as a hook for keys. --- */
 .g-press {
-  transition: transform var(--dur-1) var(--ease-out), opacity var(--dur-1) var(--ease-out);
-}
-.g-press:active {
-  transform: scale(0.94);
+  transition: background-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out);
 }
 
 /* Reduced motion: no movement anywhere, only short fades. */
+/* --- snap: the effort slider's knob and fill, by --frac (0 to 1) of the track. The fill (a canvas,
+   chat/liquid.ts) is clipped, not scaled, so its colours stay put along the track. The knob (20px)
+   sits 2px inside the 24px track, its middle 12px in from each end; it glows warmer the higher the
+   level. A soft light from above over the liquid, no sweeping shine. Not while a still screenshot
+   is taken: the popup is portaled out of [data-still], so asked from the root. --- */
+.effort-fill {
+  clip-path: inset(0 calc((1 - var(--frac)) * (100% - 24px)) 0 0 round 999px);
+  transition: clip-path var(--dur-3) var(--ease-spring), filter var(--dur-2) var(--ease-out);
+}
+.effort-fill::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(to bottom, oklch(1 0 0 / 0.28), oklch(1 0 0 / 0) 50%, oklch(0 0 0 / 0.08));
+  box-shadow: inset 0 0 0 0.5px oklch(1 0 0 / 0.18);
+}
+[data-unknown] .effort-fill {
+  filter: saturate(0.1) opacity(0.5);
+}
+.effort-knob {
+  transform: translateX(calc(var(--frac) * 100%));
+  transition: transform var(--dur-3) var(--ease-spring);
+}
+.effort-knob-face {
+  box-shadow:
+    0 0 0 0.5px oklch(0 0 0 / 0.1),
+    0 1px 3px oklch(0 0 0 / 0.25),
+    0 0 calc(3px + var(--frac) * 9px) oklch(0.7 0.22 25 / calc(0.12 + var(--frac) * 0.33));
+  transition:
+    box-shadow var(--dur-3) var(--ease-out),
+    transform var(--dur-1) var(--ease-out);
+}
+:root:has([data-still]) :is(.effort-fill, .effort-knob, .effort-knob-face, .liquid-text) {
+  transition: none;
+  animation: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   :root {
     --dur-2: 120ms;
@@ -150,6 +309,15 @@
   .g-stagger > * {
     animation: none;
   }
+  .g-swap > * {
+    transform: none !important;
+  }
+  .effort-fill,
+  .effort-knob,
+  .liquid-text {
+    transition: none;
+    animation: none;
+  }
   .g-push {
     transition: opacity var(--dur-1) var(--ease-out);
   }
@@ -158,8 +326,9 @@
     transform: none;
     opacity: 0;
   }
-  .g-press:active {
-    transform: none;
+  html[data-turn] {
+    --turn-in: 0px;
+    --turn-out: 0px;
   }
   .lamp[data-s="running"] > i,
   .lamp[data-s="starting"] > i {
@@ -171,8 +340,14 @@
       opacity: 0.45;
     }
   }
-  .lamp[data-s="compacting"] > i {
+  .lamp[data-s="compacting"] > i,
+  .row-lamp[data-s="compacting"] {
     animation: none !important;
+  }
+  .row-lamp[data-s="running"],
+  .row-lamp[data-s="starting"] {
+    animation-name: lamp-fade !important;
+    animation-duration: 2.4s !important;
   }
   @keyframes g-rise {
     from {

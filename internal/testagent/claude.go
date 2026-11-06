@@ -4,6 +4,7 @@ package testagent
 
 import (
 	"bufio"
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -28,7 +29,9 @@ func Main() (code int, ok bool) {
 }
 
 // Claude is a fake claude -p. It answers initialize, get_usage, get_context_usage, interrupt,
-// get_settings, apply_flag_settings, set_model and set_permission_mode. A message runs a turn
+// get_settings, apply_flag_settings, set_model and set_permission_mode; the model, the effort level
+// and ultracode are kept as --model, --effort, --settings and those set them (default runs
+// fake-model, haiku fake-haiku, which takes no effort level and no ultracode). A message runs a turn
 // that says "ok: <text>" (its source prefix taken off), costs $0.01 more, and goes into a
 // transcript under $CLAUDE_CONFIG_DIR. By how the message ends:
 //
@@ -51,6 +54,20 @@ func Claude() int {
 		if v, ok := strings.CutPrefix(a, "--resume="); ok {
 			session = v
 		}
+	}
+	model, effort, ultra := cmp.Or(argOf(os.Args, "--model"), "default"), cmp.Or(argOf(os.Args, "--effort"), "medium"), false
+	if v := argOf(os.Args, "--settings"); v != "" {
+		var st struct {
+			Ultracode bool `json:"ultracode"`
+		}
+		json.Unmarshal([]byte(v), &st)
+		ultra = st.Ultracode
+	}
+	resolved := func() string {
+		if model == "haiku" {
+			return "fake-haiku"
+		}
+		return "fake-model"
 	}
 	cwd, _ := os.Getwd()
 	dir := filepath.Join(os.Getenv("CLAUDE_CONFIG_DIR"), "projects", strings.ReplaceAll(cwd, "/", "-"))
@@ -103,7 +120,7 @@ func Claude() int {
 		if f != nil {
 			say(map[string]any{"type": "command_lifecycle", "command_uuid": f["uuid"], "state": "started"})
 		}
-		say(map[string]any{"type": "system", "subtype": "init", "session_id": session, "model": "fake-model"})
+		say(map[string]any{"type": "system", "subtype": "init", "session_id": session, "model": resolved()})
 		if f != nil {
 			note(map[string]any{"type": "user", "uuid": f["uuid"], "timestamp": stamp(), "message": map[string]any{"role": "user", "content": textOf(f)}})
 		}
@@ -198,15 +215,30 @@ func Claude() int {
 			switch req["subtype"] {
 			case "initialize":
 				say(map[string]any{"type": "control_response", "response": map[string]any{"subtype": "success", "request_id": id, "pending_permission_requests": open,
-					"response": map[string]any{"claude_code_version": "fake", "current_permission_mode": modeOf(os.Args), "models": []any{map[string]any{"value": "default", "displayName": "Default"}, map[string]any{"value": "haiku", "displayName": "Haiku"}}, "commands": []any{map[string]any{"name": "compact", "description": "Compact the conversation", "argumentHint": "<instructions>"}},
+					"response": map[string]any{"claude_code_version": "fake", "current_permission_mode": modeOf(os.Args), "models": []any{
+						map[string]any{"value": "default", "resolvedModel": "fake-model", "displayName": "Default (recommended)", "description": "Fake 1 · For tests", "supportsEffort": true, "supportedEffortLevels": []string{"low", "medium", "high", "xhigh", "max"}},
+						map[string]any{"value": "haiku", "resolvedModel": "fake-haiku", "displayName": "Haiku"}}, "commands": []any{map[string]any{"name": "compact", "description": "Compact the conversation", "argumentHint": "<instructions>"}},
 						"account": map[string]any{"email": "user@example.com", "subscriptionType": "Claude Pro"}}}})
 			case "get_usage":
 				answer(id, map[string]any{"session": map[string]any{"total_cost_usd": cost, "model_usage": usage()}, "rate_limits": map[string]any{"limits": []any{map[string]any{"group": "session", "percent": 10, "resets_at": "2026-01-01T00:00:00Z"}}}})
 			case "get_context_usage":
 				answer(id, map[string]any{"totalTokens": 100, "maxTokens": 1000, "categories": []any{map[string]any{"id": "messages", "name": "Messages", "tokens": 100, "kind": "used"}}})
 			case "get_settings":
-				answer(id, map[string]any{"applied": map[string]any{"effort": "medium", "ultracodeRequested": false}})
-			case "apply_flag_settings", "set_model", "set_permission_mode":
+				avail := model != "haiku"
+				answer(id, map[string]any{"applied": map[string]any{"model": resolved(), "effort": effort, "ultracode": ultra && avail, "ultracodeRequested": ultra, "ultracodeAvailable": avail}})
+			case "apply_flag_settings":
+				st, _ := req["settings"].(map[string]any)
+				if v, ok := st["effortLevel"].(string); ok {
+					effort = v
+				}
+				if v, ok := st["ultracode"].(bool); ok {
+					ultra = v
+				}
+				answer(id, map[string]any{})
+			case "set_model":
+				model, _ = req["model"].(string)
+				answer(id, map[string]any{})
+			case "set_permission_mode":
 				answer(id, map[string]any{})
 			case "interrupt":
 				answer(id, map[string]any{"still_queued": []any{}})
@@ -289,6 +321,16 @@ func Claude() int {
 			finish(f, nil)
 		}
 	}
+}
+
+// argOf is the value after flag name in args, "" if none.
+func argOf(args []string, name string) string {
+	for i, a := range args {
+		if a == name && i+1 < len(args) {
+			return args[i+1]
+		}
+	}
+	return ""
 }
 
 func modeOf(args []string) string {

@@ -5,7 +5,6 @@ export const zh = {
   "nav.newSession": "新会话",
   "nav.newWorkspace": "新工作区",
   "nav.search": "搜索",
-  "nav.topology": "拓扑图",
   "nav.settings": "设置",
   "nav.needsYou": "需要你",
   "nav.expand": "展开",

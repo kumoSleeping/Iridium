@@ -113,11 +113,13 @@ func (l logWriter) Write(b []byte) (int, error) {
 }
 
 // fromOf is who a message is from, for session.Manager's Send and Create: the caller's terminal;
-// for an agent's ir as 本机, the terminal and the session it runs in (the X-Iridium-Session header,
-// else the request's caller), which the agent sees as "[ir:<session>]" and the page draws as a
-// letter from that session.
+// for ir on the socket run inside a session (the X-Iridium-Session header, else the request's
+// caller), the terminal and that session, which the agent sees as "[ir:<session>]" and the page
+// draws as a letter from that session. The terminal (本机, or the one that opened the session)
+// still counts the message and its usage. Whether the agent flag is set does not matter: ir send
+// does not send it, and a session in the environment is an agent's.
 func (s *Server) fromOf(c caller, callerSession string) string {
-	if !c.socket || !c.agent || !c.Local {
+	if !c.socket {
 		return c.EndpointID
 	}
 	from := c.session
@@ -481,6 +483,10 @@ func (s *Server) terminalOf(info gate.EndpointInfo) api.Terminal {
 	}
 	if info.ID == gate.LocalEndpointID {
 		t.Local = true
+	}
+	t.Device = api.DeviceComputer
+	if d, _ := s.st.Device(info.ID); d == string(api.DevicePhone) {
+		t.Device = api.DevicePhone
 	}
 	return t
 }

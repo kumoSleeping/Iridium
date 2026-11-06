@@ -1,7 +1,7 @@
 // The layout (plan "网页"): one sidebar. On a computer the sidebar and the main pane side by side;
-// on a phone the sidebar is the first screen and a chat, the topology or the settings slide over
-// it, with a back key. The chat, the topology, the settings and the jump box (⌘K) come only as
-// they are opened, or the page is idle: the first screen stays light.
+// on a phone the sidebar is the first screen and a chat or the settings slide over it, with a back
+// key. The jump box (⌘K) opens in the sidebar, not over the page. The chat, the settings and the
+// jump box come only as they are opened, or the page is idle: the first screen stays light.
 import { Toast } from "@base-ui/react/toast";
 import { Tooltip } from "@base-ui/react/tooltip";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
@@ -10,15 +10,16 @@ import { CreatePopover, WsPlus } from "./create";
 import { useHome, useMe, useSettings, useTerminals, useUpdate, useWorkspaces } from "./data";
 import { t, useLang } from "./i18n";
 import { applyTheme, initialTheme, keepTheme, MeChip, type ThemePref } from "./me";
+import { pageTurn } from "./motion";
 import { prefetch } from "./prefetch";
-import { back, go, openChat, useRoute, type Route } from "./route";
+import { back, go, onTurn, openChat, route, useRoute, type Route } from "./route";
 import { Sidebar } from "./sidebar";
 import { useSecret } from "./secrets";
 import { useConfirms, useList } from "./store";
 import { follow } from "./stream";
 import { ToastList, toasts } from "./toast";
 import { buildTree, flat } from "./tree";
-import { cn, kept, keep, params, PHONE, useMedia } from "./ui";
+import { cn, kept, keep, params, PHONE, useMedia, useMinute } from "./ui";
 import { watchUnread } from "./unread";
 
 // The chat's code, once it came, is drawn straight, not through lazy, whose first draw shows the
@@ -32,7 +33,6 @@ function ChatPage(p: ComponentProps<ChatCode["ChatPage"]>) {
   const [Page] = useState(() => chatCode?.ChatPage ?? LazyChat);
   return <Page {...p} />;
 }
-const Topology = lazy(() => import("./topology/topology").then((m) => ({ default: m.TopologyView })));
 const SettingsPage = lazy(() => import("./settings").then((m) => ({ default: m.SettingsPage })));
 const TerminalsPage = lazy(() => import("./terminals").then((m) => ({ default: m.TerminalsPage })));
 const SecretDialog = lazy(() => import("./secret").then((m) => ({ default: m.SecretDialog })));
@@ -52,7 +52,8 @@ function useExpanded() {
       return {};
     }
   });
-  const expanded = (k: string) => over[k] ?? k !== "archive";
+  // Open unless folded, but the archive and a workflow run's agents: those wait to be opened.
+  const expanded = (k: string) => over[k] ?? (k !== "archive" && !k.startsWith("run:"));
   const toggle = (k: string) =>
     setOver((o) => {
       const n = { ...o, [k]: !(o[k] ?? k !== "archive") };
@@ -80,7 +81,9 @@ export function App() {
   const confirms = useConfirms();
   const secret = useSecret();
   const { expanded, toggle } = useExpanded();
-  const tree = useMemo(() => buildTree(list ?? [], ws.data ?? [], t("nav.unsorted")), [list, ws.data, t("nav.unsorted")]);
+  // Each minute too: a subagent long quiet is let go.
+  const minute = useMinute();
+  const tree = useMemo(() => buildTree(list ?? [], ws.data ?? [], t("nav.unsorted"), Math.max(minute, Date.now())), [list, ws.data, t("nav.unsorted"), minute]);
 
   useEffect(() => follow(open), [open]);
   // Unread, the done reminder, and the chats of turns that end off screen.
@@ -100,12 +103,19 @@ export function App() {
   const [shown, setShown] = useState<Route>(r.name === "home" ? { name: "home" } : r);
   if (r.name !== "home" && r !== shown) setShown(r);
 
+  // Chat to chat on a computer, the main pane swaps quickly, drifting the way the sidebar lists them.
+  const now = useRef({ tree, phone });
+  now.current = { tree, phone };
+  useEffect(() => onTurn(pageTurn(() => flat(now.current.tree).map((s) => s.id), () => !now.current.phone)), []);
+
+  // The jump box, in the sidebar (the user, 2026-11-06). A phone shows the sidebar only at home:
+  // there ⌘K does nothing while something else covers it.
   const [jumping, setJumping] = useState(params.get("open") === "jump");
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "k") {
         e.preventDefault();
-        setJumping((j) => !j);
+        if (!now.current.phone || route().name === "home") setJumping((j) => !j);
       } else if (e.altKey && !e.metaKey && !e.ctrlKey && (e.key === "ArrowUp" || e.key === "ArrowDown") && open && !e.defaultPrevented) {
         const all = flat(tree);
         const i = all.findIndex((s) => s.id === open);
@@ -126,9 +136,13 @@ export function App() {
       selected={phone && r.name === "home" ? "" : (open ?? "")}
       onSelect={openChat}
       phone={phone}
-      topology={r.name === "topology"}
-      onTopology={() => (r.name === "topology" ? back() : go({ name: "topology" }, r.name !== "home"))}
-      onSearch={() => setJumping(true)}
+      searching={jumping}
+      search={
+        <Suspense>
+          <Jump close={() => setJumping(false)} tree={tree} open={open} />
+        </Suspense>
+      }
+      onSearch={() => setJumping((j) => !j)}
       settings={r.name === "settings" || r.name === "terminals"}
       onSettings={() => (r.name === "settings" ? back() : go({ name: "settings" }, r.name !== "home"))}
       updateDot={!!update.data?.available}
@@ -142,12 +156,10 @@ export function App() {
   );
 
   const main = (at: Route) => (
-    <main className="relative h-full min-w-0 flex-1">
+    <main className={cn("relative h-full min-w-0 flex-1", !phone && "g-turn bg-paper")}>
       <Suspense fallback={<Waiting />}>
         {at.name === "chat" ? (
           <ChatPage key={at.id} id={at.id} phone={phone} onBack={back} />
-        ) : at.name === "topology" ? (
-          <Topology phone={phone} onBack={back} tree={tree} />
         ) : at.name === "settings" ? (
           <SettingsPage phone={phone} onBack={back} theme={theme} setTheme={(v: ThemePref) => (setTheme(v), keepTheme(v))} />
         ) : at.name === "terminals" ? (
@@ -182,11 +194,6 @@ export function App() {
         {secret && (
           <Suspense>
             <SecretDialog secret={secret} />
-          </Suspense>
-        )}
-        {jumping && (
-          <Suspense>
-            <Jump close={() => setJumping(false)} tree={tree} open={open} />
           </Suspense>
         )}
         <Toast.Portal>

@@ -1,7 +1,9 @@
+import { partialInput, tail } from "../src/chat/partial";
 // A fold's line: the lines each kind of edit adds and takes, and the line read out.
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import type { Block } from "../src/api/types.gen";
-import { argOf, diffOf, diffSum, diffText, foldLine, foldSaid, lineDiff, patchDiff, type Step } from "../src/chat/fold";
+import { cmdOf, cmdOfCall } from "../src/chat/cmd";
+import { argOf, diffOf, diffSum, diffText, foldLine, foldSaid, lineDiff, patchDiff, runCmd, type Step } from "../src/chat/fold";
 import { setLang } from "../src/i18n";
 
 const call = (name: string, input: unknown, more: Partial<Omit<Block, "kind">> = {}): Step => ({ at: `${name}.${Math.random()}`, kind: "tool", name, input: typeof input === "string" ? input : JSON.stringify(input), result: { at: "r", text: "ok" }, ...more });
@@ -89,5 +91,123 @@ describe("a fold's line", () => {
       setLang("zh");
       expect(foldSaid(foldLine(steps))).toBe("工具调用：Bash ×2、思考、Edit ×3 +2 −3、Write +10、2 个出错");
     });
+  });
+});
+
+describe("a shell call's sort", () => {
+  test("ir's commands", () => {
+    expect(cmdOf('ir send abc "hi"')).toBe("ir-send");
+    expect(cmdOf('cd ~/x && ir send abc "hi"')).toBe("ir-send");
+    expect(cmdOf("IRIDIUM_X=1 ir archive ab")).toBe("ir-archive");
+    expect(cmdOf("ir unarchive ab")).toBe("ir-unarchive");
+    expect(cmdOf("ir new claude --cwd ~/x 'go'")).toBe("ir-new");
+    expect(cmdOf("ir wait ab --timeout 60")).toBe("ir-wait");
+    expect(cmdOf("ir read ab | tail -20")).toBe("ir-read");
+    expect(cmdOf("ir ls --all")).toBe("ir-list");
+    expect(cmdOf("ir find holder")).toBe("ir-find");
+    expect(cmdOf("ir stop ab")).toBe("ir-stop");
+    expect(cmdOf("ir cp a.txt kumo-mac:~/")).toBe("ir-files");
+    expect(cmdOf("ir files ab")).toBe("ir-files");
+    expect(cmdOf("~/.local/bin/iridium send ab x")).toBe("ir-send");
+    expect(cmdOf("ir invite --ttl 1h")).toBe("ir-access");
+    expect(cmdOf("ir access --claude off")).toBe("ir-access");
+    expect(cmdOf("ir revoke ab")).toBe("ir-access");
+    expect(cmdOf("ir profile kumo --name K")).toBe("ir-profile");
+    expect(cmdOf("ir public off")).toBe("net");
+    expect(cmdOf("ir update --check")).toBe("install");
+    expect(cmdOf("ir --help")).toBeUndefined();
+  });
+  test("git, past its own options", () => {
+    expect(cmdOf("git -C repo commit -m x")).toBe("git-commit");
+    expect(cmdOf("git -c user.name=x --no-pager log --oneline -5")).toBe("git-log");
+    expect(cmdOf("git push origin main")).toBe("git-push");
+    expect(cmdOf("git diff --stat | head")).toBe("git-diff");
+    expect(cmdOf("git status --short")).toBe("git-status");
+    expect(cmdOf("git pull --rebase")).toBe("git-pull");
+    expect(cmdOf("git grep -n foo")).toBe("search");
+    expect(cmdOf("git stash list")).toBe("git");
+  });
+  test("tests, builds, installs", () => {
+    expect(cmdOf("go test ./...")).toBe("test");
+    expect(cmdOf("~/.local/bin/go vet ./...")).toBe("test");
+    expect(cmdOf("npm test")).toBe("test");
+    expect(cmdOf("cd web && npm run check 2>&1 | tail -30")).toBe("test");
+    expect(cmdOf("npx vitest run test/fold.test.ts")).toBe("test");
+    expect(cmdOf("go build -o /tmp/ir ./cmd/iridium")).toBe("build");
+    expect(cmdOf("npm --prefix web run build")).toBe("build");
+    expect(cmdOf("npm ci")).toBe("install");
+    expect(cmdOf("make")).toBe("build");
+  });
+  test("the network, other machines, services", () => {
+    expect(cmdOf("curl -s http://127.0.0.1:7810/api/home | jq .")).toBe("net");
+    expect(cmdOf("wget -q https://x/y")).toBe("net");
+    expect(cmdOf("ssh kumo-mac 'ls ~'")).toBe("remote");
+    expect(cmdOf("scp a kumo-mac:/tmp")).toBe("remote");
+    expect(cmdOf("rsync -av a/ b/")).toBe("remote");
+    expect(cmdOf("sudo systemctl --user status iridium-test-x")).toBe("service");
+    expect(cmdOf("docker ps")).toBe("service");
+  });
+  test("searching, reading, files, scripts", () => {
+    expect(cmdOf('rg -n "kindOf" src')).toBe("search");
+    expect(cmdOf("grep -rn foo . | head")).toBe("search");
+    expect(cmdOf("find . -name '*.ts'")).toBe("search");
+    expect(cmdOf("cat a.txt")).toBe("read");
+    expect(cmdOf("sed -n 1,40p src/a.ts")).toBe("read");
+    expect(cmdOf("head -5 a; tail b")).toBe("read");
+    expect(cmdOf("ls -la src")).toBe("list");
+    expect(cmdOf("sed -i 's/a/b/' x")).toBe("file");
+    expect(cmdOf("cat > out.txt <<'EOF'\nhi\nEOF")).toBe("file");
+    expect(cmdOf("echo x 2>/dev/null")).toBeUndefined();
+    expect(cmdOf("mkdir -p a/b && mv x a/b")).toBe("file");
+    expect(cmdOf("rm -rf /tmp/x")).toBe("delete");
+    expect(cmdOf("python3 - <<'EOF'\nprint(1)\nEOF")).toBe("script");
+    expect(cmdOf("node scripts/seed.mjs")).toBe("script");
+  });
+  test("past cd, variables, sudo, env, wrappers and comments; through pipes and bash -c", () => {
+    expect(cmdOf("env -u X FOO=1 BAR='a b' git status")).toBe("git-status");
+    expect(cmdOf("export X=1; cd /tmp && timeout 30 go test ./...")).toBe("test");
+    expect(cmdOf("echo hi | ir send ab -")).toBe("ir-send");
+    expect(cmdOf("cat log | grep err")).toBe("read");
+    expect(cmdOf("X=$(git rev-parse HEAD) && git show $X")).toBe("git-diff");
+    expect(cmdOf("(cd web && npm test)")).toBe("test");
+    expect(cmdOf("# look\nls")).toBe("list");
+    expect(cmdOf("bash -lc 'cd /x && git log -1'")).toBe("git-log");
+    expect(cmdOf("for f in *.ts; do wc -l $f; done")).toBe("read");
+  });
+  test("a command we don't know falls to its description, then to none", () => {
+    expect(cmdOf("./scripts/check.sh", "Run the test suite")).toBe("test");
+    expect(cmdOf("frobnicate", "构建前端")).toBe("build");
+    expect(cmdOf("frobnicate")).toBeUndefined();
+    expect(cmdOf("", "")).toBeUndefined();
+    expect(cmdOf("go test ./...", "Build it")).toBe("test");
+  });
+  test("from a call: Bash, pi's bash and Codex's exec_command and shell; other tools have none", () => {
+    expect(cmdOfCall({ name: "Bash", input: JSON.stringify({ command: "git -C r commit -m x", description: "Commit" }) })).toBe("git-commit");
+    expect(cmdOfCall({ name: "bash", input: JSON.stringify({ command: "ir wait ab" }) })).toBe("ir-wait");
+    expect(cmdOfCall({ name: "exec_command", input: JSON.stringify({ cmd: "rg foo" }) })).toBe("search");
+    expect(cmdOfCall({ name: "shell", input: JSON.stringify({ command: ["bash", "-lc", "go test ./..."] }) })).toBe("test");
+    expect(cmdOfCall({ name: "Bash", input: '{"command":"curl -s http://x/a?q=1 | jq' })).toBe("net");
+    expect(cmdOfCall({ name: "Grep", input: JSON.stringify({ pattern: "x" }) })).toBeUndefined();
+    expect(cmdOfCall({ name: "Bash", input: JSON.stringify({ command: "frobnicate" }) })).toBeUndefined();
+  });
+  test("a fold's run of one name keeps a sort only all its calls share", () => {
+    const think: Step = { at: "t", kind: "thinking", text: "hmm" };
+    expect(runCmd([call("Bash", { command: "ir send a x" }), think, call("Read", { file_path: "/a" }), call("Bash", { command: "cd ~ && ir send b y" })], "Bash")).toBe("ir-send");
+    expect(runCmd([call("Bash", { command: "ir send a x" }), call("Bash", { command: "git status" }), call("Bash", { command: "ir send a x" })], "Bash")).toBeUndefined();
+    expect(runCmd([call("Bash", { command: "ir send a x" }), call("Bash", { command: "frobnicate" })], "Bash")).toBeUndefined();
+    expect(runCmd([call("Read", { file_path: "/a" })], "Read")).toBeUndefined();
+  });
+});
+
+describe("a call's input as it is written", () => {
+  test("the string fields so far, escapes read, one cut in an escape as written", () => {
+    expect(partialInput('{"command":"ir send ab \\"hi')).toEqual({ command: 'ir send ab "hi' });
+    expect(partialInput('{"file_path":"/a/b.ts","old_string":"x\\ny","new')).toEqual({ file_path: "/a/b.ts", old_string: "x\ny" });
+    expect(partialInput('{"command":"echo \\')).toEqual({ command: "echo " });
+    expect(partialInput("")).toEqual({});
+  });
+  test("the tail shows what is being typed", () => {
+    expect(tail("a\n  b", 90)).toBe("a b");
+    expect(tail("x".repeat(100), 10)).toBe("…" + "x".repeat(10));
   });
 });

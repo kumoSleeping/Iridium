@@ -66,7 +66,7 @@ export function Queue({ session, queue, steered }: { session: string; queue: Que
     void run(`${q.id} edit`, () => api.editQueued(session, q.id, to), () => setEditing(null));
   };
   return (
-    <section ref={box} aria-label={t("queue.title")} className="g-pop glass float mb-2 overflow-hidden rounded-lg text-sm">
+    <section ref={box} aria-label={t("queue.title")} className="g-pop glass float rest mb-2 overflow-hidden rounded-lg text-sm">
       <div className="flex h-8 items-center gap-1.5 pr-1 pl-3 text-ink-3">
         <span role="img" aria-label={paused ? t("queue.paused") : t("queue.title")}>
           {paused ? <Pause size={14} /> : <List size={14} />}

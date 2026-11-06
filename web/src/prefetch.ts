@@ -1,5 +1,5 @@
-// Fetching ahead (plan "弱网"): once the page is idle, the chat's and the topology's files the first
-// screen did not load, one at a time at low priority, as the HTML's <meta name="later"> lists them
+// Fetching ahead (plan "弱网"): once the page is idle, the chat's files the first screen did not
+// load, one at a time at low priority, as the HTML's <meta name="later"> lists them
 // (vite.config.ts); then the chat's code runs from the cache. Nothing while the browser saves data.
 import { queryClient, request } from "./api/client";
 import { mayPrefetch } from "./chats";

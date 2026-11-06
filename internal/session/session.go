@@ -55,7 +55,8 @@ type Options struct {
 	Poll       time.Duration // how often a live agent's out.log is read; 0 is 50ms
 	// Tag names an interactive terminal (by ID) in the source tag "[name] "; nil or "" is the ID.
 	Tag func(terminal string) string
-	// QuotaEvery: how often running agents' quota windows are read again; 0 is 5 minutes.
+	// QuotaEvery: how often running agents' quota windows are read, on their own, not with a turn
+	// (the user, 2026-11-06); 0 is a minute.
 	QuotaEvery time.Duration
 	// QuotaStagger: sessions going on after the quota came back wait up to this much more, so
 	// they do not all go at once; 0 is a minute, below 0 none.
@@ -105,7 +106,7 @@ func New(o Options) (*Manager, error) {
 		o.Poll = 50 * time.Millisecond
 	}
 	if o.QuotaEvery == 0 {
-		o.QuotaEvery = 5 * time.Minute
+		o.QuotaEvery = time.Minute
 	}
 	if o.QuotaStagger == 0 {
 		o.QuotaStagger = time.Minute

@@ -105,14 +105,19 @@ type Hosted struct {
 	errText    string
 	failed     string // why the driver gave the process up: the error once it has ended
 	lastActive time.Time
-	lastFrom   string // who sent the last message: whose turn an agent's own turn is counted to
-	turnFrom   string // who began the running turn
-	draftN     int
-	ready      chan struct{} // closed once the process said its use so far (attached)
-	base       *agent.Usage  // the session's use as of the last result, for each turn's share
-	file       *transcript.File
-	end        int64
-	said       cached
+	// shownAt: when the session last did something, as the list says (UpdatedAt): a turn begun or
+	// ended, a process started. Unlike lastActive, not a daemon's restart taking it up, nor the
+	// output replayed then (the user, 2026-11-06: every session read "just now" after a deploy).
+	shownAt   time.Time
+	lastFrom  string // who sent the last message: whose turn an agent's own turn is counted to
+	turnFrom  string // who began the running turn
+	draftN    int
+	toolDraft string        // the tool call draft draftN is being written as, if one is
+	ready     chan struct{} // closed once the process said its use so far (attached)
+	base      *agent.Usage  // the session's use as of the last result, for each turn's share
+	file      *transcript.File
+	end       int64
+	said      cached
 
 	qmu     sync.Mutex   // one queue decision or release at a time; before mu
 	queue   []api.Queued // under mu
@@ -122,6 +127,11 @@ type Hosted struct {
 	restarting bool // stopped to start again: no pause, no crash
 
 	effort        string
+	effortNow     string        // the level the agent says it runs at
+	ultracode     *bool         // set for it (Claude); nil: never set
+	applied       agent.Applied // what the process said it applies, last read; none once it ends
+	appliedRead   bool          // the process answered get_settings, Known or not (none: ultracode cannot be had)
+	setMu         sync.Mutex    // one effort or ultracode change at a time: each writes back the other
 	models        []agent.Model
 	commands      []agent.Command
 	account, plan string
@@ -152,12 +162,12 @@ type cached struct {
 }
 
 func (m *Manager) newHosted(mt meta) *Hosted {
-	h := &Hosted{m: m, meta: mt, id: mt.ID, dir: filepath.Join(m.holdRoot(), mt.ID), unit: m.o.UnitPrefix + mt.ID, model: mt.Model, mode: mt.Mode, lastActive: time.UnixMilli(mt.Created), turn: agent.Idle}
+	h := &Hosted{m: m, meta: mt, id: mt.ID, dir: filepath.Join(m.holdRoot(), mt.ID), unit: m.o.UnitPrefix + mt.ID, model: mt.Model, mode: mt.Mode, lastActive: time.UnixMilli(mt.Created), shownAt: time.UnixMilli(mt.Created), turn: agent.Idle}
 	h.drv = m.newDriver(mt.Agent, h.onEvent)
 	h.qimages = map[string][]agent.Image{}
 	h.loadQueue()
 	if st, err := m.o.Store.Settings(mt.ID); err == nil {
-		h.effort = st.Effort
+		h.effort, h.ultracode = st.Effort, st.Ultracode
 		h.meta.Model = cmp.Or(st.Model, h.meta.Model)
 		h.meta.Mode = cmp.Or(st.Mode, h.meta.Mode)
 		h.model, h.mode = h.meta.Model, h.meta.Mode
@@ -231,7 +241,7 @@ func (h *Hosted) launch(ctx context.Context, proc int) error {
 	}
 	h.mu.Lock()
 	o := agent.SpawnOptions{Session: h.id, Resume: found != "", AgentSession: h.meta.agentID(), Cwd: h.meta.Cwd, Env: m.agentEnv(), Program: m.o.Config.Programs[string(h.meta.Agent)], SystemPromptFile: prompt,
-		Model: h.meta.Model, Mode: cmp.Or(h.meta.Mode, m.defaultMode(h.meta.Agent)), Effort: h.effort, CrashResume: h.crashResume && found != ""}
+		Model: h.meta.Model, Mode: cmp.Or(h.meta.Mode, m.defaultMode(h.meta.Agent)), Effort: h.effort, Ultracode: h.ultracode, CrashResume: h.crashResume && found != ""}
 	h.resuming, h.crashResume, h.turnSeen = o.CrashResume, false, false
 	h.mu.Unlock()
 	// An agent updating itself is gone for a few seconds: wait for it (Rhodium §4.2).
@@ -273,6 +283,7 @@ func (h *Hosted) launch(ctx context.Context, proc int) error {
 	ready := make(chan struct{})
 	h.mu.Lock()
 	h.in, h.live, h.lastActive, h.stopAsked, h.ready = in, true, time.Now(), false, ready
+	h.shownAt = h.lastActive
 	h.mu.Unlock()
 	h.drv.Attach(in.WriteLine, proc)
 	m.wg.Add(1)
@@ -305,8 +316,17 @@ func (h *Hosted) adopt() error {
 	}
 	in := hold.NewInput(h.dir)
 	ready := make(chan struct{})
+	// Taken up, not active: the list's time is when its transcript was last written, which only
+	// the conversation does (not out.log: the handshake taking it up writes there).
+	shown := h.shownAt
+	if path, err := h.findTranscript(); err == nil && path != "" {
+		if st, err := os.Stat(path); err == nil && st.ModTime().After(shown) {
+			shown = st.ModTime()
+		}
+	}
 	h.mu.Lock()
 	h.in, h.live, h.lastActive, h.ready = in, true, time.Now(), ready
+	h.shownAt = shown
 	h.mu.Unlock()
 	h.drv.Attach(in.WriteLine, pm.Proc)
 	// The output before where the last daemon had read is replayed to bring the driver's state
@@ -441,6 +461,8 @@ func (h *Hosted) ended(e *hold.Exit) {
 	h.live, h.starting, h.stopAsked, h.resuming = false, false, false, false
 	h.turn, h.asks, h.tasks = agent.Idle, nil, nil
 	h.errText = ""
+	// What the process applied went with it: the next one is asked again.
+	h.applied, h.appliedRead = agent.Applied{}, false
 	// The next process says the session's use so far when it attaches.
 	h.newSession, h.base = false, nil
 	hadTurn := h.hadTurn
@@ -519,18 +541,48 @@ func (h *Hosted) onEvent(e agent.Event) {
 		}
 		return
 	case agent.MessageDone:
+		n := h.draftN
 		h.draftN++ // seals the draft: the transcript has it now
 		h.mu.Unlock()
+		if !replay {
+			h.m.o.Hub.Seal(h.id, proc, n)
+		}
 		note(Notice{Kind: NoticeMessage, Text: e.Text})
 		h.m.notify(notes...)
 		return
+	case agent.ToolDraft:
+		// A call being written: a draft of its own, its input JSON as the text.
+		n := h.draftN
+		h.toolDraft = e.ID
+		h.mu.Unlock()
+		if !replay {
+			h.m.o.Hub.DraftTool(h.id, proc, n, e.ID, e.Name)
+		}
+		return
+	case agent.ToolDraftDelta:
+		n, open := h.draftN, h.toolDraft != ""
+		h.mu.Unlock()
+		if open && !replay {
+			h.m.o.Hub.Draft(h.id, proc, n, e.JSON)
+		}
+		return
 	case agent.ToolStart:
+		// The call whole: its draft is sealed, the transcript has it now.
+		sealed := -1
+		if h.toolDraft != "" {
+			sealed = h.draftN
+			h.draftN++
+			h.toolDraft = ""
+		}
 		// A long turn's context grows with each call: read it in the turn too, not only at its end.
 		due := !replay && time.Since(h.ctxAsked) >= ctxEvery
 		if due {
 			h.ctxAsked = time.Now()
 		}
 		h.mu.Unlock()
+		if sealed >= 0 && !replay {
+			h.m.o.Hub.Seal(h.id, proc, sealed)
+		}
 		if due {
 			later(h.refreshContext)
 		}
@@ -545,7 +597,11 @@ func (h *Hosted) onEvent(e agent.Event) {
 			}
 		}
 		h.draftN++
+		h.toolDraft = ""
 		h.lastActive = time.Now()
+		if !replay {
+			h.shownAt = h.lastActive
+		}
 		h.hadTurn, h.turnSeen = true, true
 		if !replay && h.quotaUntil != 0 {
 			h.quotaEndLocked() // it went on by itself, or the queue did
@@ -559,14 +615,21 @@ func (h *Hosted) onEvent(e agent.Event) {
 	case agent.StateChange:
 		h.turn = e.State
 		h.lastActive = time.Now()
+		if !replay {
+			h.shownAt = h.lastActive
+		}
 		list = true
 	case agent.TurnEnd:
 		h.lastActive = time.Now()
+		if !replay {
+			h.shownAt = h.lastActive
+		}
 		h.hadTurn = false
 		list = true
 		h.ctxAsked = time.Now()
 		later(h.refreshContext)
-		later(h.refreshQuota)
+		// The quota is not read with the turn: quotaLoop reads it on its own, each minute (the user,
+		// 2026-11-06).
 		if !replay && h.restartDue {
 			// A mode that switches only with a restart (pi): now, then what waited goes.
 			h.restartDue = false
@@ -606,6 +669,9 @@ func (h *Hosted) onEvent(e agent.Event) {
 		h.tasks = e.Tasks
 	case agent.Started:
 		h.model = e.Model
+		if e.Effort != "" {
+			h.effortNow = e.Effort
+		}
 		// An agent that makes the session's id (Codex's thread) names it here: kept, so the next
 		// start resumes it and its transcript is found.
 		if info, ok := agents.Get(h.meta.Agent); ok && info.OwnID && e.Session != "" && e.Session != h.meta.AgentID {
@@ -621,6 +687,8 @@ func (h *Hosted) onEvent(e agent.Event) {
 		h.models, h.commands = e.Models, e.Commands
 		h.account, h.plan = e.Account, e.Plan
 		list = true
+		// The model and the level in use, before a turn names them (Claude).
+		later(func() { h.readApplied(proc) })
 		if h.resuming && !replay {
 			seen := h.turnSeen
 			later(func() { h.helloAfterResume(seen) })
@@ -787,7 +855,7 @@ func (h *Hosted) summaryLocked(o store.Overlay, archived bool) api.Session {
 		ID: h.id, Agent: h.meta.Agent, Cwd: h.meta.Cwd, Name: o.Name, Title: h.said.title,
 		Status: h.status(), Hosted: true, Live: h.live,
 		Pinned: o.Pinned, Archived: archived, Workspace: o.Workspace,
-		Last: h.said.last, UpdatedAt: h.lastActive.UnixMilli(),
+		Last: h.said.last, UpdatedAt: h.shownAt.UnixMilli(),
 	}
 }
 
@@ -796,8 +864,21 @@ func (h *Hosted) state(o store.Overlay, archived bool) api.SessionState {
 	defer h.mu.Unlock()
 	s := api.SessionState{Session: h.summaryLocked(o, archived), Asks: slices.Clone(h.asks), Tasks: slices.Clone(h.tasks), Model: h.model, Mode: h.mode, End: h.end, Proc: h.proc, Error: h.errText,
 		Effort: h.effort, Queue: slices.Clone(h.queue), Context: h.ctxSum, QuotaUntil: h.quotaUntil, Tail: h.tail}
+	s.Pick, s.EffortNow = h.meta.Model, h.effortNow
 	for _, m := range h.models {
-		s.Models = append(s.Models, api.Model{Value: m.Value, Name: m.Name, Description: m.Description})
+		s.Models = append(s.Models, api.Model{Value: m.Value, Name: m.Name, Description: m.Description, Resolved: m.Resolved, Efforts: slices.Clone(m.Efforts), NoEffort: m.NoEffort})
+	}
+	if _, ok := h.drv.(agent.Ultracoder); ok {
+		u := &api.Ultracode{Available: true}
+		if h.ultracode != nil {
+			u.On = *h.ultracode
+		}
+		if a := h.applied; a.Known {
+			u.On, u.Active, u.Available = a.Ultracode, a.UltracodeOn, a.UltracodeAvailable
+		} else if h.appliedRead {
+			u.Available = false // a CLI without get_settings: the driver refuses it
+		}
+		s.Ultracode = u
 	}
 	for _, c := range h.commands {
 		s.Commands = append(s.Commands, api.Command{Name: strings.TrimPrefix(c.Name, "/"), Description: c.Description, ArgumentHint: c.ArgumentHint})
@@ -875,4 +956,40 @@ func errTail(dir string) string {
 		lines = lines[len(lines)-5:]
 	}
 	return ": " + strings.Join(lines, " / ")
+}
+
+// readApplied asks process proc what it applies (agent.Applier: Claude's get_settings) and keeps
+// it: the model in use, as a full id, the level, ultracode. Not on replay: it writes a request.
+func (h *Hosted) readApplied(proc int) {
+	r, ok := h.drv.(agent.Applier)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(h.m.ctx, 15*time.Second)
+	defer cancel()
+	a, err := r.Applied(ctx)
+	if err != nil {
+		h.logf("reading the settings applied: %v", err)
+		return
+	}
+	h.mu.Lock()
+	if h.proc != proc {
+		h.mu.Unlock()
+		return
+	}
+	h.appliedRead = true
+	if !a.Known {
+		h.mu.Unlock()
+		h.publish()
+		return
+	}
+	h.applied = a
+	if a.Model != "" {
+		h.model = a.Model
+	}
+	if a.Effort != "" {
+		h.effortNow = a.Effort
+	}
+	h.mu.Unlock()
+	h.publish()
 }

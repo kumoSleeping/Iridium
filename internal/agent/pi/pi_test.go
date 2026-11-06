@@ -306,7 +306,7 @@ func TestTurn(t *testing.T) {
 	if len(hello) != 1 || hello[0].Mode != "auto" || len(hello[0].Models) != 2 || hello[0].Models[0].Value != "deepseek/deepseek-flash" {
 		t.Errorf("hello %+v", hello)
 	}
-	if s := find[agent.Started](h); len(s) == 0 || s[0].Model != "deepseek/deepseek-flash" {
+	if s := find[agent.Started](h); len(s) == 0 || s[0].Model != "deepseek/deepseek-flash" || s[0].Effort != "high" {
 		t.Errorf("started %+v", s)
 	}
 }

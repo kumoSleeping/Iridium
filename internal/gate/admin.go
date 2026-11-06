@@ -179,6 +179,17 @@ func (g *Gate) Endpoint(id string) (EndpointInfo, bool) {
 	return infoOf(e), ok
 }
 
+// Find returns one endpoint by ID or name, including the built-in 本机.
+func (g *Gate) Find(ref string) (EndpointInfo, bool) {
+	if ref == LocalEndpointID || nameKey(ref) == nameKey(LocalName) {
+		return g.Endpoint(LocalEndpointID)
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	e, ok := g.findLocked(ref)
+	return infoOf(e), ok
+}
+
 // CheckName returns the stored form of name if a new endpoint could take it.
 func (g *Gate) CheckName(name string) (string, error) {
 	g.mu.Lock()

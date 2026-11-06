@@ -268,9 +268,12 @@ func cmdStatus(s *Service, ctx context.Context, c Caller, p *store.ChatPointer, 
 	if st.QuotaUntil != 0 {
 		fmt.Fprintf(&b, "（等额度，%s 恢复）", time.UnixMilli(st.QuotaUntil).Format("01-02 15:04"))
 	}
-	fmt.Fprintf(&b, "\n- 模型：%s · 审批：%s", cmp.Or(st.Model, "默认"), cmp.Or(st.Mode, "默认"))
-	if st.Effort != "" {
-		fmt.Fprintf(&b, " · 思考：%s", st.Effort)
+	fmt.Fprintf(&b, "\n- 模型：%s · 审批：%s", cmp.Or(modelName(st), "默认"), cmp.Or(st.Mode, "默认"))
+	if e := cmp.Or(st.Effort, st.EffortNow); e != "" {
+		fmt.Fprintf(&b, " · 思考：%s", e)
+	}
+	if st.Ultracode != nil && st.Ultracode.On {
+		b.WriteString(" · UltraCode")
 	}
 	if st.Context != nil {
 		fmt.Fprintf(&b, "\n- 上下文：%s", contextLine(st.Context.Used, st.Context.Max))
@@ -343,4 +346,21 @@ func cmdContext(s *Service, ctx context.Context, c Caller, p *store.ChatPointer,
 		fmt.Fprintf(&b, "\n- %s：%d", k.Name, k.Tokens)
 	}
 	return reply(st.ID, b.String())
+}
+
+// modelName is the model in use by its name in the agent's list (by value, else by the full id a
+// value resolves to, an alias over the default entry), else as the agent named it.
+func modelName(st *api.SessionState) string {
+	for _, m := range st.Models {
+		if m.Value == st.Model {
+			return m.Name
+		}
+	}
+	name := ""
+	for _, m := range st.Models {
+		if m.Resolved != "" && m.Resolved == st.Model && (name == "" || m.Value != "default") {
+			name = m.Name
+		}
+	}
+	return cmp.Or(name, st.Model)
 }

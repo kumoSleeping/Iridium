@@ -76,6 +76,14 @@ func TestOverlays(t *testing.T) {
 	if st, err := s.Settings("none"); err != nil || st.IdleReap != nil {
 		t.Fatalf("no settings: %+v %v", st, err)
 	}
+	// Ultracode: never set, then off (which is not never set).
+	if st, _ := s.Settings("a"); st.Ultracode != nil {
+		t.Fatalf("ultracode never set: %v", *st.Ultracode)
+	}
+	must(t, s.UpdateSettings("a", func(st *Settings) { off := false; st.Ultracode = &off }))
+	if st, _ := s.Settings("a"); st.Ultracode == nil || *st.Ultracode || st.Model != "haiku" {
+		t.Fatalf("ultracode off: %+v", st)
+	}
 }
 
 func TestInputsUsageOutbox(t *testing.T) {

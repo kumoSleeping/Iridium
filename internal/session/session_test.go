@@ -251,17 +251,23 @@ func TestIdleReap(t *testing.T) {
 func TestDaemonRestart(t *testing.T) {
 	r := newRig(t, nil)
 	id, _ := r.m.Create(context.Background(), api.NewSession{Cwd: r.cwd, Text: "before"}, "网页")
-	r.waitState(id, "the reply", func(s *api.SessionState) bool {
+	before := r.waitState(id, "the reply", func(s *api.SessionState) bool {
 		return s.Last != nil && s.Last.Text == "ok: before" && s.Status == api.StatusIdle
 	})
 	waitFor(t, "the usage row", func() bool { u, _ := r.store.UsageSince(0); return len(u) == 1 })
 	r.m.Close() // the daemon goes; the holder and the agent stay
+	time.Sleep(1200 * time.Millisecond)
 
 	o := Options{Config: r.cfg, Store: r.store, Launcher: r.l, Exe: os.Args[0], UnitPrefix: "iridium-test-", Logf: t.Logf, Poll: 10 * time.Millisecond}
 	r.start(o)
 	s := r.waitState(id, "the session taken up", func(s *api.SessionState) bool { return s.Live && s.Mode == "auto" })
 	if s.Proc != 1 || s.Model != "fake-model" {
 		t.Errorf("taken up: %+v", s)
+	}
+	// Taken up is not activity: the list's time stays when its turn was, not the restart's.
+	time.Sleep(100 * time.Millisecond)
+	if got, err := r.m.State(id); err != nil || got.UpdatedAt > before.UpdatedAt+500 {
+		t.Errorf("updated at %d after the restart, %d before (%v)", got.UpdatedAt, before.UpdatedAt, err)
 	}
 	if _, err := r.m.Send(context.Background(), id, "after", "网页"); err != nil {
 		t.Fatal(err)

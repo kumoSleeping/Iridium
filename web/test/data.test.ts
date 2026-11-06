@@ -148,6 +148,9 @@ describe("Messages", () => {
     expect(m.drafts.map((d) => d.text)).toEqual(["Next"]);
     page = { blocks: [blk(0, "assistant", "Hello"), blk(50, "assistant", "Next, and more")], start: 0, end: 90, more: false };
     await m.newer();
+    // Too few words to tell: it waits till it has the block's.
+    expect(m.drafts.map((d) => d.text)).toEqual(["Next"]);
+    m.wrote({ session: "s", proc: 1, n: 2, text: ", and more" });
     expect(m.drafts).toEqual([]);
     m.wrote({ session: "s", proc: 1, n: 3, text: "x" });
     m.wrote({ session: "s", proc: 2, n: 1, text: "y" });
@@ -157,17 +160,153 @@ describe("Messages", () => {
     let page: MessagePage = { blocks: [], start: 0, end: 0, more: false };
     const m = new Messages("s", async () => page);
     await m.newer();
-    m.wrote({ session: "s", proc: 1, n: 4, text: "Rivers carve " });
-    page = { blocks: [blk(0, "assistant", "Rivers carve valleys.")], start: 0, end: 50, more: false };
+    m.wrote({ session: "s", proc: 1, n: 4, text: "Rivers carve their valleys over many " });
+    page = { blocks: [blk(0, "assistant", "Rivers carve their valleys over many years.")], start: 0, end: 50, more: false };
     await m.newer();
     expect(m.drafts).toEqual([]);
-    m.wrote({ session: "s", proc: 1, n: 4, text: "valleys." });
+    m.wrote({ session: "s", proc: 1, n: 4, text: "years." });
     expect(m.drafts).toEqual([]);
     m.wrote({ session: "s", proc: 1, n: 5, text: "Next" });
     expect(m.drafts.map((d) => d.text)).toEqual(["Next"]);
     m.dropDrafts();
     m.wrote({ session: "s", proc: 1, n: 5, text: " late" });
     expect(m.drafts).toEqual([]);
+  });
+  test("done seals a draft; one of only blanks goes at once, the transcript keeps none", async () => {
+    const m = new Messages("s", async () => ({ blocks: [], start: 0, end: 0, more: false }));
+    await m.newer();
+    m.wrote({ session: "s", proc: 1, n: 1, text: "Hi" });
+    m.wrote({ session: "s", proc: 1, n: 1, text: "", done: true });
+    expect(m.drafts.map((d) => [d.text, d.whole])).toEqual([["Hi", true]]);
+    m.wrote({ session: "s", proc: 1, n: 2, text: "\n\n", done: true });
+    expect(m.drafts.map((d) => d.text)).toEqual(["Hi"]);
+  });
+  test("words that end on a colon, then a tool call: sealed at once, no caret while the tool runs", async () => {
+    let page: MessagePage = { blocks: [], start: 0, end: 0, more: false };
+    const m = new Messages("s", async () => page);
+    await m.newer();
+    m.wrote({ session: "s", proc: 1, n: 1, text: "记好了。接着处理按钮和侧栏：" });
+    expect(m.drafts.map((d) => d.whole)).toEqual([false]); // being written: the caret shows
+    // The text block's end (MessageDone), before the tool_use streams: the draft is whole, the
+    // caret (chat.tsx: live = !whole && busy) goes though the turn runs on.
+    m.wrote({ session: "s", proc: 1, n: 1, text: "", done: true });
+    expect(m.drafts.map((d) => [d.text, d.whole])).toEqual([["记好了。接着处理按钮和侧栏：", true]]);
+    // Its block lands with the tool call: the draft gives way to it, its words not shown twice.
+    page = { blocks: [blk(0, "assistant", "记好了。接着处理按钮和侧栏："), blk(10, "tool", undefined, { id: "t" })], start: 0, end: 20, more: false };
+    await m.newer();
+    expect(m.drafts).toEqual([]);
+  });
+  test("a tool call drafted as it is written: its block takes it by its id, and the words before it", async () => {
+    let page: MessagePage = { blocks: [], start: 0, end: 0, more: false };
+    const m = new Messages("s", async () => page);
+    await m.newer();
+    m.wrote({ session: "s", proc: 1, n: 1, text: "Let me look at the tree first, then the rest:" });
+    m.wrote({ session: "s", proc: 1, n: 1, text: "", done: true });
+    m.wrote({ session: "s", proc: 1, n: 2, text: "", tool: { id: "t1", name: "Bash" } });
+    m.wrote({ session: "s", proc: 1, n: 2, text: '{"command":"ls -l' });
+    expect(m.drafts.map((d) => [d.tool?.id, d.text, d.whole])).toEqual([
+      [undefined, "Let me look at the tree first, then the rest:", true],
+      ["t1", '{"command":"ls -l', false],
+    ]);
+    m.wrote({ session: "s", proc: 1, n: 2, text: '"}', done: true });
+    expect(m.drafts.at(-1)).toMatchObject({ whole: true, text: '{"command":"ls -l"}' }); // sealed, still shown
+    // An assistant block never takes a call's draft by its words or its place.
+    page = { blocks: [blk(0, "assistant", "Let me look at the tree first, then the rest:")], start: 0, end: 5, more: false };
+    await m.newer();
+    expect(m.drafts.map((d) => d.tool?.id)).toEqual(["t1"]);
+    page = { blocks: [blk(0, "assistant", "Let me look at the tree first, then the rest:"), blk(5, "tool", undefined, { id: "t1", name: "Bash" })], start: 0, end: 20, more: false };
+    await m.newer();
+    expect(m.drafts).toEqual([]);
+  });
+  test("a call the transcript brought before its draft: the draft that comes late is none", async () => {
+    let page: MessagePage = { blocks: [], start: 0, end: 0, more: false };
+    const m = new Messages("s", async () => page);
+    await m.newer();
+    page = { blocks: [blk(5, "tool", undefined, { id: "t9", name: "Read" })], start: 0, end: 20, more: false };
+    await m.newer();
+    m.wrote({ session: "s", proc: 1, n: 4, text: "", tool: { id: "t9", name: "Read" } });
+    m.wrote({ session: "s", proc: 1, n: 4, text: '{"file_path":"/a"}' });
+    expect(m.drafts).toEqual([]);
+  });
+  test("a blank draft before a tool call shifts no pairing", async () => {
+    let page: MessagePage = { blocks: [], start: 0, end: 0, more: false };
+    const m = new Messages("s", async () => page);
+    await m.newer();
+    m.wrote({ session: "s", proc: 1, n: 1, text: "\n\n" });
+    m.wrote({ session: "s", proc: 1, n: 2, text: "Let me look" });
+    m.wrote({ session: "s", proc: 1, n: 2, text: "", done: true });
+    page = { blocks: [blk(0, "assistant", "Let me look"), blk(10, "tool", undefined, { id: "t" })], start: 0, end: 20, more: false };
+    await m.newer();
+    expect(m.drafts).toEqual([]);
+  });
+  test("a block that comes before its draft takes the draft as it is sealed", async () => {
+    let page: MessagePage = { blocks: [], start: 0, end: 0, more: false };
+    const m = new Messages("s", async () => page);
+    await m.newer();
+    expect(m.fromTail({ start: 0, end: 20, blocks: [blk(0, "assistant", "Checking.")] })).toBe(true);
+    m.wrote({ session: "s", proc: 1, n: 3, text: "Checking.", done: true });
+    expect(m.drafts).toEqual([]);
+    m.wrote({ session: "s", proc: 1, n: 3, text: " late" });
+    expect(m.drafts).toEqual([]);
+  });
+  test("a block takes its own draft by its words and the stale ones before it", async () => {
+    let page: MessagePage = { blocks: [], start: 0, end: 0, more: false };
+    const m = new Messages("s", async () => page);
+    await m.newer();
+    m.wrote({ session: "s", proc: 1, n: 1, text: "Alpha says", done: true });
+    m.wrote({ session: "s", proc: 1, n: 2, text: "Beta is writing a longer message, more " });
+    page = { blocks: [blk(0, "assistant", "Beta is writing a longer message, more than a head.")], start: 0, end: 20, more: false };
+    await m.newer();
+    expect(m.drafts).toEqual([]);
+  });
+  test("a draft joined partway goes with the next block, by place", async () => {
+    const m = new Messages("s", async () => ({ blocks: [], start: 0, end: 0, more: false }));
+    await m.newer();
+    m.wrote({ session: "s", proc: 1, n: 3, text: "the middle and end of it.", done: true });
+    expect(m.fromTail({ start: 0, end: 30, blocks: [blk(0, "assistant", "Here is the start, the middle and end of it."), blk(10, "tool", undefined, { id: "t" })] })).toBe(true);
+    expect(m.drafts).toEqual([]);
+    // A long one, by its tail, even with a draft after it.
+    m.wrote({ session: "s", proc: 1, n: 4, text: "and that is how the long message ends, at last.", done: true });
+    m.wrote({ session: "s", proc: 1, n: 5, text: "Next" });
+    expect(m.fromTail({ start: 0, end: 50, blocks: [blk(30, "assistant", "Started before: and that is how the long message ends, at last.")] })).toBe(true);
+    expect(m.drafts.map((d) => d.text)).toEqual(["Next"]);
+  });
+  test("a few words of a draft are not taken by a block that begins with them", async () => {
+    let page: MessagePage = { blocks: [blk(0, "user", "go"), blk(10, "assistant", "I'll start by reading the README.")], start: 0, end: 20, more: false };
+    const m = new Messages("s", async () => page);
+    // Before the first page: an older block of the turn begins the same.
+    m.wrote({ session: "s", proc: 1, n: 1, text: "I'll" });
+    await m.newer();
+    m.wrote({ session: "s", proc: 1, n: 1, text: " check the tests." });
+    expect(m.drafts.map((d) => d.text)).toEqual(["I'll check the tests."]);
+    // A new block, the one before (its draft missed), while the next begins.
+    m.wrote({ session: "s", proc: 1, n: 1, text: "", done: true });
+    m.wrote({ session: "s", proc: 1, n: 2, text: "Let me" });
+    page = { blocks: [blk(20, "assistant", "I'll check the tests."), blk(30, "assistant", "Let me look at the config file first.")], start: 20, end: 40, more: false };
+    await m.newer();
+    m.wrote({ session: "s", proc: 1, n: 2, text: " run the tests now." });
+    expect(m.drafts.map((d) => d.text)).toEqual(["Let me run the tests now."]);
+  });
+  test("the turn's end drops the drafts it had, not the next turn's", async () => {
+    const m = new Messages("s", async () => ({ blocks: [], start: 0, end: 0, more: false }));
+    await m.newer();
+    m.wrote({ session: "s", proc: 1, n: 1, text: "Last words of the turn", done: true });
+    const upTo = m.mark();
+    m.wrote({ session: "s", proc: 1, n: 2, text: "Next turn" });
+    m.dropDrafts(upTo);
+    m.wrote({ session: "s", proc: 1, n: 2, text: " goes on" });
+    expect(m.drafts.map((d) => d.text)).toEqual(["Next turn goes on"]);
+    m.wrote({ session: "s", proc: 1, n: 1, text: " late" });
+    expect(m.drafts.map((d) => d.text)).toEqual(["Next turn goes on"]);
+  });
+  test("done for a draft never seen: its late pieces start none", async () => {
+    const m = new Messages("s", async () => ({ blocks: [], start: 0, end: 0, more: false }));
+    await m.newer();
+    m.wrote({ session: "s", proc: 1, n: 7, text: "", done: true });
+    m.wrote({ session: "s", proc: 1, n: 7, text: "tail" });
+    expect(m.drafts).toEqual([]);
+    m.wrote({ session: "s", proc: 1, n: 8, text: "new" });
+    expect(m.drafts.map((d) => d.text)).toEqual(["new"]);
   });
   test("the state's tail brings the blocks since without a fetch, when it reaches back far enough", async () => {
     const m = new Messages("s", async () => ({ blocks: [blk(0, "user", "a"), blk(10, "tool", undefined, { id: "t" })], start: 0, end: 20, more: false }));

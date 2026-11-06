@@ -1,15 +1,14 @@
 // Where the page is, after the address's #: "#/" nothing open, "#/s/<id>" a session's chat,
-// "#/topology" the topology view, "#/settings" the settings. One sidebar either way; on a phone
-// anything but "#/" covers it, its back key going back.
+// "#/settings" the settings. One sidebar either way; on a phone anything but "#/" covers it, its
+// back key going back.
 import { useSyncExternalStore } from "react";
 
-export type Route = { name: "home" } | { name: "chat"; id: string } | { name: "topology" } | { name: "settings" } | { name: "terminals" };
+export type Route = { name: "home" } | { name: "chat"; id: string } | { name: "settings" } | { name: "terminals" };
 
 export function parse(hash: string): Route {
   const h = hash.replace(/^#/, "");
   const chat = /^\/s\/([^/?]+)/.exec(h);
   if (chat) return { name: "chat", id: decodeURIComponent(chat[1]!) };
-  if (h.startsWith("/topology")) return { name: "topology" };
   if (h.startsWith("/settings/terminals")) return { name: "terminals" };
   if (h.startsWith("/settings")) return { name: "settings" };
   return { name: "home" };
@@ -35,10 +34,18 @@ function visited(r: Route) {
 let current = parse(location.hash);
 visited(current);
 const subs = new Set<() => void>();
-const moved = () => (visited(current), subs.forEach((f) => f()));
+
+/** How the page goes from one place to the next: draw is what shows the new one (the views told,
+ *  synchronously). The app sets a page turn here; by default it is drawn at once. */
+export type Turn = (from: Route, to: Route, draw: () => void) => void;
+let turn: Turn = (_from, _to, draw) => draw();
+export const onTurn = (t: Turn) => void (turn = t);
+
+const moved = (from: Route) => (visited(current), turn(from, current, () => subs.forEach((f) => f())));
 addEventListener("hashchange", () => {
+  const from = current;
   current = parse(location.hash);
-  moved();
+  moved(from);
 });
 
 export const route = () => current;
@@ -55,8 +62,9 @@ export function go(r: Route, replace = false) {
   if (hash === location.hash || (hash === "#/" && location.hash === "")) return;
   if (replace) history.replaceState({ ir: true }, "", hash);
   else history.pushState({ ir: true }, "", hash);
+  const from = current;
   current = parse(hash);
-  moved();
+  moved(from);
 }
 
 /** Back to the list: the step before if this page made it, else in place. */

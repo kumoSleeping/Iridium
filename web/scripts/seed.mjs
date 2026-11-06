@@ -127,8 +127,8 @@ transcript(`${iridium}/web`, [
   [179, "assistant", [text("Moved it: the switch first, the events per workspace under it, shown only once push is on.")]],
 ]);
 transcript(`${iridium}/web`, [
-  [300, "user", "Topology view: lay it out with dagre, workspace → folder → session"],
-  [299, "assistant", [text("Done: dagre lays it out left to right, the folder level dropped where a folder has one session.")]],
+  [300, "user", "Sidebar: drop the folder level where a folder has one session"],
+  [299, "assistant", [text("Done: a folder with one session is not shown; the session sits in its place.")]],
 ]);
 transcript(kdj, [
   [600, "user", "Mini player: pop it out of the corner instead of flying"],

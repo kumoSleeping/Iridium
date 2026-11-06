@@ -180,6 +180,7 @@ func TestTurnOverHTTP(t *testing.T) {
 		t.Fatalf("send: %d", code)
 	}
 	var draft strings.Builder
+	sealed := ""
 	var last api.SessionState
 	gotList, gotBad := false, false
 	for deadline := time.After(10 * time.Second); last.Last == nil || last.Last.Text != "ok: hello" || last.Status != api.StatusIdle; {
@@ -190,6 +191,9 @@ func TestTurnOverHTTP(t *testing.T) {
 				var d api.DraftEvent
 				json.Unmarshal([]byte(e[1]), &d)
 				draft.WriteString(d.Text)
+				if d.Done {
+					sealed = draft.String()
+				}
 			case "state":
 				var se struct {
 					Key     string          `json:"key"`
@@ -212,6 +216,10 @@ func TestTurnOverHTTP(t *testing.T) {
 	}
 	if draft.String() != "ok: hello" || !gotList || !gotBad || last.End == 0 {
 		t.Errorf("draft %q, list %v, bad key told %v, end %d", draft.String(), gotList, gotBad, last.End)
+	}
+	// The draft is sealed after its text, before the turn's end is told.
+	if sealed != "ok: hello" {
+		t.Errorf("draft sealed at %q", sealed)
 	}
 
 	var page api.MessagePage
@@ -264,6 +272,15 @@ func TestTurnOverHTTP(t *testing.T) {
 	}
 	if b := waitAfter(after.End).Blocks; b[0].From != "ir:caller-1" || b[0].FromTerminal != "local" || b[0].Text != "from a session" || b[1].Text != "ok: from a session" {
 		t.Errorf("an agent's send: %+v", b)
+	}
+	// Ultracode, on the running agent (the fake Claude's model takes it).
+	if code := call(t, c, "PUT", base+"/api/sessions/"+id+"/ultracode", api.SetUltracode{Ultracode: true}, nil); code != 200 {
+		t.Errorf("ultracode: %d", code)
+	}
+	var live api.SessionState
+	call(t, c, "GET", base+"/api/sessions/"+id, nil, &live)
+	if live.Ultracode == nil || !live.Ultracode.On {
+		t.Errorf("ultracode state: %+v", live.Ultracode)
 	}
 	// A second daemon on the same socket is refused.
 	if _, _, err := s.Listen(); err == nil {

@@ -376,16 +376,20 @@ func validID(id string) bool {
 // ---- Claude's lines as blocks ----
 
 type claudeLine struct {
-	Type             string          `json:"type"`
-	Subtype          string          `json:"subtype"`
-	UUID             string          `json:"uuid"`
-	Timestamp        string          `json:"timestamp"`
-	IsMeta           bool            `json:"isMeta"`
-	IsCompactSummary bool            `json:"isCompactSummary"`
-	Message          *claudeMessage  `json:"message"`
-	Attachment       *attachment     `json:"attachment"`
-	Error            json.RawMessage `json:"error"`
-	Content          json.RawMessage `json:"content"`
+	Type             string         `json:"type"`
+	Subtype          string         `json:"subtype"`
+	UUID             string         `json:"uuid"`
+	Timestamp        string         `json:"timestamp"`
+	IsMeta           bool           `json:"isMeta"`
+	IsCompactSummary bool           `json:"isCompactSummary"`
+	Message          *claudeMessage `json:"message"`
+	Attachment       *attachment    `json:"attachment"`
+	// Origin: who wrote a user line, when not you (a task-notification, as one comes while idle).
+	Origin *struct {
+		Kind string `json:"kind"`
+	} `json:"origin"`
+	Error   json.RawMessage `json:"error"`
+	Content json.RawMessage `json:"content"`
 }
 
 type claudeMessage struct {
@@ -455,6 +459,13 @@ func blocksOf(off int64, raw []byte, max int, sources Sources) []api.Block {
 	// What you send mid-turn Claude records as an attachment once it takes it in. Yours: origin
 	// human, or none on a line an older CLI wrote; a task's notice or another session's message is not.
 	if a := l.Attachment; l.Type == "attachment" && a != nil {
+		// A background task's end (a workflow, a background agent): a quiet line, not its XML.
+		if a.Type == "queued_command" && a.Origin != nil && a.Origin.Kind == "task-notification" {
+			if text := taskLine(texts(a.Prompt)); text != "" {
+				add(api.Block{Kind: api.BlockKindSystem, Event: api.SystemEventTask, Text: text})
+			}
+			return blocks
+		}
 		if a.Type != "queued_command" || a.IsMeta || l.IsMeta || (a.Origin != nil && a.Origin.Kind != "human") {
 			return nil
 		}
@@ -467,6 +478,14 @@ func blocksOf(off int64, raw []byte, max int, sources Sources) []api.Block {
 	switch l.Type {
 	case "user":
 		if l.IsMeta || l.IsCompactSummary || l.Message == nil {
+			break
+		}
+		// A background task's end that came while the session was idle: a user line of its own,
+		// marked by its origin (mid-turn it is an attachment, above). The same quiet line.
+		if l.Origin != nil && l.Origin.Kind == "task-notification" {
+			if text := taskLine(texts(l.Message.Content)); text != "" {
+				add(api.Block{Kind: api.BlockKindSystem, Event: api.SystemEventTask, Text: text})
+			}
 			break
 		}
 		for _, r := range items {
@@ -596,4 +615,49 @@ func cmpOr(a, b string) string {
 		return a
 	}
 	return b
+}
+
+var (
+	taskTag   = regexp.MustCompile(`(?s)<(summary|status|agent_count|duration_ms)>(.*?)</`)
+	workflowW = regexp.MustCompile(`^Dynamic workflow\b`)
+)
+
+// taskLine is a task-notification as one line: its summary ("Dynamic workflow" said Workflow),
+// then how many agents it ran and for how long; "" when it says nothing.
+func taskLine(parts []string) string {
+	tags := map[string]string{}
+	for _, m := range taskTag.FindAllStringSubmatch(strings.Join(parts, "\n"), -1) {
+		if _, ok := tags[m[1]]; !ok {
+			tags[m[1]] = strings.TrimSpace(m[2])
+		}
+	}
+	line := workflowW.ReplaceAllString(oneLine(tags["summary"]), "Workflow")
+	if line == "" {
+		if tags["status"] == "" {
+			return ""
+		}
+		line = "Task " + tags["status"]
+	}
+	if n, err := strconv.Atoi(tags["agent_count"]); err == nil && n > 0 {
+		line += fmt.Sprintf(" · %d agent", n)
+		if n > 1 {
+			line += "s"
+		}
+	}
+	if ms, err := strconv.ParseInt(tags["duration_ms"], 10, 64); err == nil && ms > 0 {
+		line += " · " + took(time.Duration(ms)*time.Millisecond)
+	}
+	return line
+}
+
+// took is a span as people say it: 45s, 3m, 1h 12m.
+func took(d time.Duration) string {
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(d.Seconds()+0.5))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	default:
+		return fmt.Sprintf("%dh %dm", int(d.Hours()), int(d.Minutes())%60)
+	}
 }

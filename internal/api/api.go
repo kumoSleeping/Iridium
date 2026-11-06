@@ -27,6 +27,8 @@ type AgentInfo struct {
 	// ContextBreakdown: its context comes in categories. Quota: it reports quota windows.
 	ContextBreakdown bool `json:"contextBreakdown"`
 	Quota            bool `json:"quota"`
+	// Ultracode: its sessions can turn ultracode on (Claude).
+	Ultracode bool `json:"ultracode"`
 }
 
 // Status is a session's lamp (plan "风格"). idle shows none.
@@ -61,10 +63,16 @@ type Session struct {
 	Launcher string `json:"launcher,omitempty"`
 	// Subagent: an Agent tool's subtask (Claude) or a subagent's thread (Codex), listed as a
 	// session of its own, read-only; Parent: the session that started it.
-	Subagent  bool      `json:"subagent,omitempty"`
-	Parent    string    `json:"parent,omitempty"`
-	Last      *LastSaid `json:"last,omitempty"`
-	UpdatedAt int64     `json:"updatedAt"` // ms since the epoch
+	Subagent bool   `json:"subagent,omitempty"`
+	Parent   string `json:"parent,omitempty"`
+	// Done: a subagent that has finished (Claude: its transcript ends with its final answer); the
+	// sidebar shows a subagent only while it works.
+	Done bool `json:"done,omitempty"`
+	// Workflow: the run a workflow's agent is of (Claude's subagents/workflows/<run>/), the
+	// workflow's name and the agent's phase in it, as far as they are known.
+	Workflow  *SessionWorkflow `json:"workflow,omitempty"`
+	Last      *LastSaid        `json:"last,omitempty"`
+	UpdatedAt int64            `json:"updatedAt"` // ms since the epoch
 }
 
 // LastSaid is the last thing said in a session, on one line, at most 200 characters.
@@ -87,11 +95,16 @@ type SessionState struct {
 	// Proc: the agent process's number, up by one at each start; drafts of another are stale.
 	Proc  int    `json:"proc"`
 	Error string `json:"error,omitempty"` // why its last process ended badly
-	// Effort: the thinking effort set for it; Models, Modes, Efforts: what the agent offers.
-	Effort  string   `json:"effort,omitempty"`
-	Models  []Model  `json:"models,omitempty"`
-	Modes   []string `json:"modes,omitempty"`
-	Efforts []string `json:"efforts,omitempty"`
+	// Pick: the model set for it ("" or "default": the agent's own); Model is the one in use, often
+	// a full id (Claude: as get_settings or the turn's init name it).
+	Pick string `json:"pick,omitempty"`
+	// Effort: the thinking effort set for it; EffortNow: the level the agent says it runs at (set
+	// or not). Models, Modes, Efforts: what the agent offers.
+	Effort    string   `json:"effort,omitempty"`
+	EffortNow string   `json:"effortNow,omitempty"`
+	Models    []Model  `json:"models,omitempty"`
+	Modes     []string `json:"modes,omitempty"`
+	Efforts   []string `json:"efforts,omitempty"`
 	// Queue: messages waiting for the turn to end, oldest first (docs/api.md "待发队列").
 	Queue []Queued `json:"queue"`
 	// Context: how full its context window was when last read; context:<id> has the parts.
@@ -102,6 +115,16 @@ type SessionState struct {
 	Tail *BlockTail `json:"tail,omitempty"`
 	// Commands: the slash commands its agent offers, as its last handshake named them.
 	Commands []Command `json:"commands,omitempty"`
+	// Ultracode: Claude's ultracode; absent for an agent without it.
+	Ultracode *Ultracode `json:"ultracode,omitempty"`
+}
+
+// Ultracode is a Claude session's ultracode. On: asked for (what the switch shows); Active: asked
+// for and in effect; Available: its model can take it (true till the process says).
+type Ultracode struct {
+	On        bool `json:"on"`
+	Active    bool `json:"active"`
+	Available bool `json:"available"`
 }
 
 // Command is a slash command an agent offers (the composer's palette), without its slash.
@@ -220,7 +243,17 @@ const (
 	SystemEventInterrupted  SystemEvent = "interrupted" // you stopped the turn
 	SystemEventUnreadable   SystemEvent = "unreadable"  // a line that is not a JSON object
 	SystemEventIridium      SystemEvent = "iridium"     // Iridium's own line, such as a recovery prompt
+	// SystemEventTask: a background task told the session it ended (Claude's task-notification:
+	// a workflow, a background agent); Text is its summary, with how many agents and how long.
+	SystemEventTask SystemEvent = "task"
 )
+
+// SessionWorkflow is the workflow run a subagent works in.
+type SessionWorkflow struct {
+	Run   string `json:"run"`
+	Name  string `json:"name,omitempty"`
+	Phase string `json:"phase,omitempty"`
+}
 
 // SourceIridium is the source of what Iridium itself writes to an agent (recovery prompts,
 // "继续"): the page shows those as a faint line of its own, not as your words.
@@ -320,4 +353,17 @@ type DraftEvent struct {
 	Proc    int    `json:"proc"`
 	N       int    `json:"n"`
 	Text    string `json:"text"`
+	// Done: the draft is whole, no more text comes to it; its words come in the transcript.
+	Done bool `json:"done,omitempty"`
+	// Tool: a tool call being written, not words (user 2026-11-06: no blank while a long command
+	// is written): Text is its input's JSON so far, cut anywhere. Sent with the draft's first
+	// piece; sealed as the call is whole, the transcript then has it by its ID.
+	Tool *DraftTool `json:"tool,omitempty"`
+}
+
+// DraftTool is the call a tool draft is: its ID, as the transcript's tool block has it, and the
+// tool's name.
+type DraftTool struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
