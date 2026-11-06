@@ -573,7 +573,7 @@ function SessionRow({ s, where, depth, flip, selected, onSelect, chatCode, worki
             </>
           )
         }
-        sub={status === "error" ? <span className="text-err">{statusText(s.status)}</span> : (said(s.last) ?? tilde(s.cwd))}
+        sub={status === "error" ? <span className="text-err">{statusText(s.status)}</span> : (said(s.last, s) ?? tilde(s.cwd))}
         end={end}
         extra={{ ...lp, ...hover, ...drag, onClickCapture: lp.onClickCapture }}
       />

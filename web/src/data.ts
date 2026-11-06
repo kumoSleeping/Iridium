@@ -4,9 +4,10 @@
 // asked for once at first.
 import { useQuery } from "@tanstack/react-query";
 import { api, missing } from "./api/client";
-import type { AgentInfo, LastSaid, Me, Settings, Terminal, UpdateState, Workspace } from "./api/types.gen";
+import type { AgentInfo, LastSaid, Me, Session, Settings, Terminal, UpdateState, Workspace } from "./api/types.gen";
+import { sourceOf } from "./chat/refs";
 import { t } from "./i18n";
-import { useCarried, useUpdateState } from "./store";
+import { useCarried, useList, useUpdateState } from "./store";
 import { setHome } from "./ui";
 
 /** null on a 404: the route is not there. */
@@ -68,12 +69,21 @@ export function useTerminals() {
 }
 export const useTerminalList = (): Terminal[] => useTerminals().data?.terminals ?? [];
 
-/** The last thing said, on one line: yours after 你：, another terminal's after its name. Yours: none
- *  tagged, or a panel's or 本机's. */
+/** The last thing said, on one line: yours after 你：, another's after its name. Yours: none tagged
+ *  (but in a subagent), or a panel's or 本机's. An agent's (a subagent's prompt, another session's
+ *  ir) goes by that session's name, as the chat's letter does (sourceOf). of: the session it is in. */
 export function useSaidLine() {
   const terminals = useTerminalList();
+  const sessions = useList() ?? [];
   const yours = (from?: string) => !from || from === "本机" || terminals.some((x) => x.name === from && (x.kind === "panel" || x.local));
-  return (l?: LastSaid) => l && `${l.role === "user" ? (yours(l.from) ? t("jump.you") : `${l.from}: `) : ""}${l.text}`;
+  const by = (l: LastSaid, of?: Pick<Session, "subagent" | "parent" | "workflow">) => {
+    if ((!l.from && of?.subagent) || /^(?:ir|session):/.test(l.from ?? "")) {
+      const src = sourceOf(l.from, undefined, LOCAL_ME, terminals, sessions, [], of);
+      return src.kind === "letter" && src.name ? `${src.name}: ` : "";
+    }
+    return yours(l.from) ? t("jump.you") : `${l.from}: `;
+  };
+  return (l?: LastSaid, of?: Pick<Session, "subagent" | "parent" | "workflow">) => l && `${l.role === "user" ? by(l, of) : ""}${l.text}`;
 }
 
 export type { Me, Settings, UpdateState, Workspace };

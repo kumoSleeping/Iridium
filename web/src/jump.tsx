@@ -95,7 +95,7 @@ export function Jump({ close, tree, open }: { close: () => void; tree: Tree; ope
           >
             <LogoLamp agent={s.agent} status={lampOf(s)} />
             <span className="min-w-0 shrink truncate text-base">{titleOf(s)}</span>
-            <span className="min-w-0 flex-1 truncate text-xs text-ink-3">{said(s.last) ?? tilde(s.cwd)}</span>
+            <span className="min-w-0 flex-1 truncate text-xs text-ink-3">{said(s.last, s) ?? tilde(s.cwd)}</span>
             {s.archived && <Archive size={13} className="shrink-0 text-ink-4" aria-label={t("nav.archive")} />}
           </button>
         ))}
