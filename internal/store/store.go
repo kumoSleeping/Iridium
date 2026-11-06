@@ -152,6 +152,8 @@ var schema = []string{
 	secretsSchema,
 	// 11: auto: a name Iridium gave (the folder's), standing only till the session has a title.
 	`ALTER TABLE names ADD COLUMN auto INTEGER NOT NULL DEFAULT 0;`,
+	// 12: a session's agent preset (dsh's tools and prompt); NULL: the agent's default.
+	`ALTER TABLE session_settings ADD COLUMN preset TEXT;`,
 }
 
 // steps run in Go after the migration of their version, in the same transaction.
@@ -379,21 +381,22 @@ func (s *Store) Assign(session string, workspace int64, manual bool) error {
 }
 
 // Settings are a session's own, over the config's. IdleReap nil: the config's. Ultracode nil:
-// never set.
+// never set. Preset: the agent preset (dsh); empty: the agent's default.
 type Settings struct {
 	IdleReap  *time.Duration
 	Model     string
 	Mode      string
 	Effort    string
 	Ultracode *bool
+	Preset    string
 }
 
 func (s *Store) Settings(session string) (Settings, error) {
 	var st Settings
 	var reap sql.NullInt64
-	var model, mode, effort sql.NullString
+	var model, mode, effort, preset sql.NullString
 	var ultra sql.NullBool
-	err := s.db.QueryRow(`SELECT idle_reap, model, mode, effort, ultracode FROM session_settings WHERE session = ?`, session).Scan(&reap, &model, &mode, &effort, &ultra)
+	err := s.db.QueryRow(`SELECT idle_reap, model, mode, effort, ultracode, preset FROM session_settings WHERE session = ?`, session).Scan(&reap, &model, &mode, &effort, &ultra, &preset)
 	if errors.Is(err, sql.ErrNoRows) {
 		return st, nil
 	}
@@ -401,7 +404,7 @@ func (s *Store) Settings(session string) (Settings, error) {
 		d := time.Duration(reap.Int64) * time.Second
 		st.IdleReap = &d
 	}
-	st.Model, st.Mode, st.Effort = model.String, mode.String, effort.String
+	st.Model, st.Mode, st.Effort, st.Preset = model.String, mode.String, effort.String, preset.String
 	if ultra.Valid {
 		st.Ultracode = &ultra.Bool
 	}
@@ -417,9 +420,9 @@ func (s *Store) SetSettings(session string, st Settings) error {
 	if st.Ultracode != nil {
 		ultra = *st.Ultracode
 	}
-	_, err := s.db.Exec(`INSERT INTO session_settings (session, idle_reap, model, mode, effort, ultracode) VALUES (?, ?, ?, ?, ?, ?)
-		ON CONFLICT (session) DO UPDATE SET idle_reap = excluded.idle_reap, model = excluded.model, mode = excluded.mode, effort = excluded.effort, ultracode = excluded.ultracode`,
-		session, reap, nullable(st.Model), nullable(st.Mode), nullable(st.Effort), ultra)
+	_, err := s.db.Exec(`INSERT INTO session_settings (session, idle_reap, model, mode, effort, ultracode, preset) VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT (session) DO UPDATE SET idle_reap = excluded.idle_reap, model = excluded.model, mode = excluded.mode, effort = excluded.effort, ultracode = excluded.ultracode, preset = excluded.preset`,
+		session, reap, nullable(st.Model), nullable(st.Mode), nullable(st.Effort), ultra, nullable(st.Preset))
 	return err
 }
 

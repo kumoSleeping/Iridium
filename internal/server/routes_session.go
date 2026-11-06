@@ -8,7 +8,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/api"
 )
 
-// sessionRoutes: a session's model, mode, effort, ultracode, its queue and its "always allow" rules
+// sessionRoutes: a session's model, mode, effort, ultracode, preset, its queue and its "always allow" rules
 // (docs/api.md "会话设置", "待发队列").
 func (s *Server) sessionRoutes(mux *http.ServeMux) {
 	// The permission table (access.go): what a terminal may see and use.
@@ -16,6 +16,7 @@ func (s *Server) sessionRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/sessions/{id}/mode", s.use(s.setMode))
 	mux.HandleFunc("PUT /api/sessions/{id}/effort", s.use(s.setEffort))
 	mux.HandleFunc("PUT /api/sessions/{id}/ultracode", s.use(s.setUltracode))
+	mux.HandleFunc("PUT /api/sessions/{id}/preset", s.use(s.setPreset))
 	mux.HandleFunc("POST /api/sessions/{id}/continue", s.use(s.continueQueue))
 	mux.HandleFunc("POST /api/sessions/{id}/queue/{input}/steer", s.use(s.steer))
 	mux.HandleFunc("PUT /api/sessions/{id}/queue/{input}", s.use(s.editQueued))
@@ -58,6 +59,16 @@ func (s *Server) setMode(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := agentCtx(r)
 	defer cancel()
 	s.settle(w, s.m.SetMode(ctx, r.PathValue("id"), req.Mode))
+}
+
+func (s *Server) setPreset(w http.ResponseWriter, r *http.Request) {
+	var req api.SetPreset
+	if !readJSON(w, r, &req) {
+		return
+	}
+	ctx, cancel := agentCtx(r)
+	defer cancel()
+	s.settle(w, s.m.SetPreset(ctx, r.PathValue("id"), req.Preset))
 }
 
 func (s *Server) setEffort(w http.ResponseWriter, r *http.Request) {

@@ -1,5 +1,5 @@
 // Package transcript reads an agent's own transcript file as message blocks (Rhodium §7.7):
-// Claude's, Codex's and pi's JSONL, each by its Format. Read-only. It keeps a byte-offset index of the lines that give blocks,
+// Claude's, Codex's, pi's and dsh's JSONL (dsh's zstd-compressed), each by its Format. Read-only. It keeps a byte-offset index of the lines that give blocks,
 // read once and then only the new bytes, so a page of a 100 MB file reads only that page.
 package transcript
 
@@ -41,7 +41,7 @@ type Sources func(uuid string) (terminal, tag string, ok bool)
 // texts to (-1: none); sources names the user messages Iridium wrote (may be nil).
 type Format func(off int64, raw []byte, max int, sources Sources) []api.Block
 
-// Claude is Claude Code's format; Codex (codex.go) and Pi (pi.go) the others.
+// Claude is Claude Code's format; Codex (codex.go), Pi (pi.go) and Dsh (dsh.go) the others.
 var Claude Format = blocksOf
 
 // File is one transcript file and its index. Safe for concurrent use.
@@ -54,6 +54,11 @@ type File struct {
 	ino   uint64
 	size  int64 // indexed up to here: where the first line not yet read whole starts
 	lines []entry
+	// zst: a zstd file's frames (offsets are then in its decoded text); nil for a plain one.
+	zst *frames
+	// dsh: a dsh session file, whose title is its last session/title event, kept in title.
+	dsh   bool
+	title string
 }
 
 // entry is a line that gives blocks.
@@ -67,9 +72,13 @@ type entry struct {
 // Open is Claude's transcript at path; it need not exist yet. sources may be nil.
 func Open(path string, sources Sources) *File { return OpenAs(path, Claude, sources) }
 
-// OpenAs is the transcript at path, in format f.
+// OpenAs is the transcript at path, in format f. A path ending .zstd or .zst is read as zstd.
 func OpenAs(path string, f Format, sources Sources) *File {
-	return &File{path: path, sources: sources, format: f}
+	file := &File{path: path, sources: sources, format: f, dsh: dshName.MatchString(filepath.Base(path))}
+	if strings.HasSuffix(path, ".zstd") || strings.HasSuffix(path, ".zst") {
+		file.zst = &frames{}
+	}
+	return file
 }
 
 func (f *File) Path() string { return f.path }
@@ -93,10 +102,17 @@ func (f *File) refresh() error {
 	if s, ok := st.Sys().(*syscall.Stat_t); ok {
 		ino = s.Ino
 	}
-	if ino != f.ino || st.Size() < f.size {
-		f.ino, f.size, f.lines = ino, 0, nil
+	end := f.size // in the file
+	if f.zst != nil {
+		end = f.zst.end
 	}
-	if st.Size() == f.size {
+	if ino != f.ino || st.Size() < end {
+		f.ino, f.size, f.lines, f.title, end = ino, 0, nil, "", 0
+		if f.zst != nil {
+			f.zst = &frames{}
+		}
+	}
+	if st.Size() == end {
 		return nil
 	}
 	r, err := os.Open(f.path)
@@ -104,7 +120,13 @@ func (f *File) refresh() error {
 		return err
 	}
 	defer r.Close()
-	br := bufio.NewReaderSize(io.NewSectionReader(r, f.size, st.Size()-f.size), 256<<10)
+	var src io.Reader = io.NewSectionReader(r, f.size, st.Size()-f.size)
+	if f.zst != nil {
+		if src, err = f.zst.from(r, st.Size(), f.size); err != nil {
+			return err
+		}
+	}
+	br := bufio.NewReaderSize(src, 256<<10)
 	off := f.size
 	var long []byte
 	for {
@@ -120,6 +142,11 @@ func (f *File) refresh() error {
 		if long != nil {
 			line = append(long, line...)
 			long = nil
+		}
+		if f.dsh {
+			if t, ok := dshTitle(line); ok {
+				f.title = t
+			}
 		}
 		if blocks := f.format(off, line, Clip, nil); len(blocks) > 0 {
 			f.lines = append(f.lines, entry{off: off, n: int32(len(line)), msgs: uint16(messages(blocks)), blocks: uint16(min(len(blocks), 65535))})
@@ -204,11 +231,11 @@ func (f *File) read(lines []entry) []api.Block {
 	if len(lines) == 0 {
 		return out
 	}
-	r, err := os.Open(f.path)
+	r, done, err := f.text()
 	if err != nil {
 		return out
 	}
-	defer r.Close()
+	defer done()
 	for _, e := range lines {
 		buf := make([]byte, e.n)
 		if _, err := r.ReadAt(buf, e.off); err != nil {
@@ -217,6 +244,19 @@ func (f *File) read(lines []entry) []api.Block {
 		out = append(out, f.format(e.off, buf, Clip, f.sources)...)
 	}
 	return paired(out)
+}
+
+// text opens what the lines are read from at their offsets: the file, or a zstd file's decoded
+// text. f.mu is held.
+func (f *File) text() (io.ReaderAt, func() error, error) {
+	r, err := os.Open(f.path)
+	if err != nil {
+		return nil, nil, err
+	}
+	if f.zst == nil {
+		return r, r.Close, nil
+	}
+	return &zReader{r: r, list: f.zst.list}, r.Close, nil
 }
 
 // paired puts each result into its call's block, where the call is on the page.
@@ -261,12 +301,12 @@ func (f *File) Full(at string) (string, error) {
 		return "", ErrNoBlock
 	}
 	e := f.lines[k]
+	r, done, err := f.text()
 	f.mu.Unlock()
-	r, err := os.Open(f.path)
 	if err != nil {
 		return "", err
 	}
-	defer r.Close()
+	defer done()
 	buf := make([]byte, e.n)
 	if _, err := r.ReadAt(buf, e.off); err != nil {
 		return "", err
@@ -300,8 +340,18 @@ func (f *File) LastSaid() (*api.LastSaid, error) {
 	return &api.LastSaid{Role: string(b.Kind), Text: cut(oneLine(text), LastLen), From: b.From, At: b.Time}, nil
 }
 
-// Title is the opening of the first thing you said, on one line; "" if you said nothing.
+// Title is the opening of the first thing you said, on one line; "" if you said nothing. A dsh
+// session's is the title dsh gave it, where it did.
 func (f *File) Title() (string, error) {
+	if f.dsh {
+		f.mu.Lock()
+		err := f.refresh()
+		t := f.title
+		f.mu.Unlock()
+		if err != nil || t != "" {
+			return cut(oneLine(t), TitleLen), err
+		}
+	}
 	b, err := f.walk(false, func(b api.Block) bool { return b.Kind == api.BlockKindUser })
 	if b == nil || err != nil {
 		return "", err
@@ -317,12 +367,12 @@ func (f *File) walk(back bool, ok func(api.Block) bool) (*api.Block, error) {
 		return nil, err
 	}
 	lines := f.lines
+	r, done, err := f.text()
 	f.mu.Unlock()
-	r, err := os.Open(f.path)
 	if err != nil {
 		return nil, err
 	}
-	defer r.Close()
+	defer done()
 	for k := range lines {
 		if back {
 			k = len(lines) - 1 - k

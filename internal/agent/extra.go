@@ -40,3 +40,8 @@ type Ultracoder interface {
 
 // ErrNoUltracode: the process's model cannot take ultracode now.
 var ErrNoUltracode = errors.New("the model cannot use ultracode")
+
+// ErrRestart: the running process cannot take the change (dsh's model and effort are its
+// process's); the host keeps the setting and restarts the agent with it, now if idle, else when
+// the turn ends.
+var ErrRestart = errors.New("the change takes effect only with a restart")

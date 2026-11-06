@@ -456,3 +456,73 @@ export function ModelKey({ s, open, onOpenChange }: { s: LiveSession; open?: boo
     </Menu.Root>
   );
 }
+
+/** The presets Iridium knows (dsh's): a name and what it gives, in the page's language; another
+ *  shows as the agent calls it. */
+const PRESET_KEY: Record<string, [Parameters<typeof t>[0], Parameters<typeof t>[0]]> = {
+  standard: ["preset.standard", "preset.standardHint"],
+  ptc: ["preset.ptc", "preset.ptcHint"],
+  minimal: ["preset.minimal", "preset.minimalHint"],
+};
+export const presetName = (p: string) => (PRESET_KEY[p] ? t(PRESET_KEY[p][0]) : p);
+const presetHint = (p: string) => (PRESET_KEY[p] ? t(PRESET_KEY[p][1]) : undefined);
+
+/** The agent preset (dsh: the tools and prompt it runs with), where the quota bars would be: dsh
+ *  has no quota (the user, 2026-11-06). Taken at launch: picked on a running agent, it restarts
+ *  and the session goes on. */
+export function PresetKey({ s }: { s: LiveSession }) {
+  useLang();
+  const info = useAgent(s.agent);
+  const [want, setWant] = useState<string | null>(null);
+  const presets = info?.presets ?? [];
+  const now = want ?? (s.preset || info?.defaultPreset || presets[0] || "");
+  if (want !== null && (s.preset || info?.defaultPreset) === want) setWant(null);
+  if (!presets.length) return null;
+  const pick = async (p: string) => {
+    if (p === now) return;
+    setWant(p);
+    try {
+      await api.preset(s.id, p === info?.defaultPreset ? "" : p);
+      if (s.live) toast(t("preset.restart"));
+    } catch (e) {
+      setWant(null);
+      toast(t("err.preset"), { error: true, description: errText(e) });
+    }
+  };
+  const label = presetName(now);
+  return (
+    <Menu.Root>
+      <Tip label={t("composer.preset")}>
+        <Menu.Trigger
+          render={
+            <button type="button" aria-label={`${t("composer.preset")}: ${label}`} className="g-press flex h-7 min-w-0 shrink-0 items-center gap-1 rounded-md px-2 text-xs text-ink-3 hover:bg-fill hover:text-ink data-popup-open:bg-fill pointer-coarse:h-9">
+              <span key={label} className="g-fade truncate">
+                {label}
+              </span>
+              <ChevronDown size={12} className="shrink-0 text-ink-4" />
+            </button>
+          }
+        />
+      </Tip>
+      <Menu.Portal>
+        <Menu.Positioner side="top" align="start" sideOffset={6} collisionPadding={8} className="z-50">
+          <Menu.Popup finalFocus={false} className="g-unfold glass thick float flex w-72 max-w-[calc(100vw-16px)] flex-col rounded-lg p-1.5 text-ink outline-none">
+            <Menu.RadioGroup value={now} onValueChange={(x) => void pick(x as string)} className="g-stagger flex flex-col">
+              {presets.map((p, i) => (
+                <Menu.RadioItem key={p} value={p} closeOnClick style={{ "--i": i } as CSSProperties} className="flex min-h-8 cursor-default items-center gap-2.5 rounded-md pr-2 pl-2.5 text-base outline-none select-none data-highlighted:bg-fill pointer-coarse:min-h-11">
+                  <span className="flex min-w-0 flex-1 flex-col py-1">
+                    <span className="truncate">{presetName(p)}</span>
+                    {presetHint(p) && <span className="text-xs text-ink-3">{presetHint(p)}</span>}
+                  </span>
+                  <Menu.RadioItemIndicator className="text-ink">
+                    <Check size={14} />
+                  </Menu.RadioItemIndicator>
+                </Menu.RadioItem>
+              ))}
+            </Menu.RadioGroup>
+          </Menu.Popup>
+        </Menu.Positioner>
+      </Menu.Portal>
+    </Menu.Root>
+  );
+}

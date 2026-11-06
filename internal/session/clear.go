@@ -28,7 +28,7 @@ func IsClear(text string) bool {
 }
 
 // Clear starts the session over (/clear, as Claude Code's): a new session of the same agent, in
-// the same folder and workspace, with the same model, mode, effort and ultracode. The old one
+// the same folder and workspace, with the same model, mode, effort, ultracode and preset. The old one
 // stays on record; idle, it goes to the archive and its agent stops; in a turn it is left to
 // finish. A session that has said nothing yet is already clear: its own id comes back.
 func (m *Manager) Clear(ctx context.Context, id, from string) (string, error) {
@@ -40,9 +40,9 @@ func (m *Manager) Clear(ctx context.Context, id, from string) (string, error) {
 		return h.id, nil
 	}
 	h.mu.Lock()
-	mt, effort, ultracode := h.meta, h.effort, h.ultracode
+	mt, effort, ultracode, preset := h.meta, h.effort, h.ultracode, h.preset
 	h.mu.Unlock()
-	req := api.NewSession{Agent: mt.Agent, Cwd: mt.Cwd, Model: mt.Model, Mode: mt.Mode, Caller: mt.Launcher}
+	req := api.NewSession{Agent: mt.Agent, Cwd: mt.Cwd, Model: mt.Model, Mode: mt.Mode, Preset: preset, Caller: mt.Launcher}
 	var name string // the one the old was given, if it is to go to the archive
 	if over, err := m.o.Store.Overlays(); err == nil {
 		if o := over[h.id]; !o.AutoName && !h.busy() && len(h.asksNow()) == 0 {
@@ -148,7 +148,7 @@ func (m *Manager) clearedInside(h *Hosted, proc int, nid string) {
 	}
 	n.mu.Lock()
 	n.meta.Model, n.meta.Mode = mt.Model, mt.Mode
-	n.effort, n.ultracode = h.effort, h.ultracode
+	n.effort, n.ultracode, n.preset = h.effort, h.ultracode, h.preset
 	nmeta := n.meta
 	n.mu.Unlock()
 	if err := writeJSON(filepath.Join(n.dir, fileMeta), nmeta); err != nil {

@@ -1,0 +1,78 @@
+{
+ "steps": [
+  {
+   "send": {
+    "method": "initialize",
+    "params": {
+     "cwd": "/tmp/dsh-drv/w1",
+     "provider": "deepseek-official",
+     "model": "deepseek-flash",
+     "approvalRequests": true,
+     "capabilities": {
+      "userQuestions": true
+     }
+    }
+   }
+  },
+  {
+   "send": {
+    "method": "session/working-directory/get",
+    "params": {
+     "sessionId": "5f0c1d2e-0002-4000-8000-000000000002"
+    }
+   }
+  },
+  {
+   "send": {
+    "method": "session/query",
+    "params": {
+     "sessionId": "5f0c1d2e-0002-4000-8000-000000000002",
+     "contentBlocks": [
+      {
+       "type": "text",
+       "text": "/permission danger-full-access"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "send": {
+    "method": "session/prompt",
+    "params": {
+     "sessionId": "5f0c1d2e-0002-4000-8000-000000000002",
+     "contentBlocks": [
+      {
+       "type": "text",
+       "text": "[web] SLOW first message"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "wait": 1500
+  },
+  {
+   "send": {
+    "method": "session/prompt",
+    "params": {
+     "sessionId": "5f0c1d2e-0002-4000-8000-000000000002",
+     "contentBlocks": [
+      {
+       "type": "text",
+       "text": "[web] steered in"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "until": "idle",
+   "ms": 30000
+  },
+  {
+   "wait": 300
+  }
+ ]
+}

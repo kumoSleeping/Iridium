@@ -29,6 +29,10 @@ type AgentInfo struct {
 	Quota            bool `json:"quota"`
 	// Ultracode: its sessions can turn ultracode on (Claude).
 	Ultracode bool `json:"ultracode"`
+	// Presets: its agent presets (dsh: the tools and prompt a session runs with), taken at launch:
+	// a switch restarts the agent. DefaultPreset is an empty preset's. None: it has no presets.
+	Presets       []string `json:"presets,omitempty"`
+	DefaultPreset string   `json:"defaultPreset,omitempty"`
 }
 
 // Color is a colour tag a session or a folder is given from its menu (the user, 2026-11-06).
@@ -125,6 +129,8 @@ type SessionState struct {
 	Models    []Model  `json:"models,omitempty"`
 	Modes     []string `json:"modes,omitempty"`
 	Efforts   []string `json:"efforts,omitempty"`
+	// Preset: the agent preset set for it ("": the agent's default; see AgentInfo.Presets).
+	Preset string `json:"preset,omitempty"`
 	// Queue: messages waiting for the turn to end, oldest first (docs/api.md "待发队列").
 	Queue []Queued `json:"queue"`
 	// Context: how full its context window was when last read; context:<id> has the parts.
@@ -324,6 +330,7 @@ type NewSession struct {
 	Model  string `json:"model,omitempty"`
 	Mode   string `json:"mode,omitempty"`
 	Effort string `json:"effort,omitempty"`
+	Preset string `json:"preset,omitempty"`
 	// Workspace: the workspace it goes in (0: the caller's, else as discovery classifies it).
 	Workspace int64 `json:"workspace,omitempty"`
 	// Caller is the session that ran ir new (from IRIDIUM_SESSION, CLAUDE_CODE_SESSION_ID,

@@ -311,14 +311,15 @@ func TestListsEveryAgent(t *testing.T) {
 		t.Errorf("pi: %+v %+v", p, p.Last)
 	}
 	d := got[idDsh]
-	if d.Agent != api.AgentDsh || d.UpdatedAt == 0 {
-		t.Errorf("dsh: %+v", d)
+	if d.Agent != api.AgentDsh || d.UpdatedAt == 0 || d.Cwd != "/w/d" || d.Title != "Probe dsh" || d.Last == nil || d.Last.Text != "Looked." {
+		t.Errorf("dsh: %+v %+v", d, d.Last)
 	}
 	if _, f, ok := r.x.Found(idA); !ok || f == nil || filepath.Base(f.Path()) != idA+".jsonl" {
 		t.Errorf("found: %v %v", ok, f)
 	}
-	if _, f, ok := r.x.Found(idDsh); !ok || f != nil {
-		t.Errorf("dsh is listed, not read: %v %v", ok, f)
+	// dsh's transcript, once its agents row has a Format.
+	if _, f, ok := r.x.Found(idDsh); !ok || f != nil && filepath.Base(f.Path()) != "session.v4.jsonl.zstd" {
+		t.Errorf("dsh found: %v %v", ok, f)
 	}
 }
 

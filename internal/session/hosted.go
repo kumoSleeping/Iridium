@@ -133,6 +133,7 @@ type Hosted struct {
 	clearedTo, next string
 
 	effort        string
+	preset        string        // the agent preset set for it (dsh); "": the agent's default
 	effortNow     string        // the level the agent says it runs at
 	ultracode     *bool         // set for it (Claude); nil: never set
 	applied       agent.Applied // what the process said it applies, last read; none once it ends
@@ -173,7 +174,7 @@ func (m *Manager) newHosted(mt meta) *Hosted {
 	h.qimages = map[string][]agent.Image{}
 	h.loadQueue()
 	if st, err := m.o.Store.Settings(mt.ID); err == nil {
-		h.effort, h.ultracode = st.Effort, st.Ultracode
+		h.effort, h.ultracode, h.preset = st.Effort, st.Ultracode, st.Preset
 		h.meta.Model = cmp.Or(st.Model, h.meta.Model)
 		h.meta.Mode = cmp.Or(st.Mode, h.meta.Mode)
 		h.model, h.mode = h.meta.Model, h.meta.Mode
@@ -248,7 +249,7 @@ func (h *Hosted) launch(ctx context.Context, proc int) error {
 	}
 	h.mu.Lock()
 	o := agent.SpawnOptions{Session: h.id, Resume: found != "", AgentSession: h.meta.agentID(), Cwd: h.meta.Cwd, Env: m.agentEnv(), Program: m.o.Config.Programs[string(h.meta.Agent)], SystemPromptFile: prompt,
-		Model: h.meta.Model, Mode: cmp.Or(h.meta.Mode, m.defaultMode(h.meta.Agent)), Effort: h.effort, Ultracode: h.ultracode, CrashResume: h.crashResume && found != ""}
+		Model: h.meta.Model, Mode: cmp.Or(h.meta.Mode, m.defaultMode(h.meta.Agent)), Effort: h.effort, Ultracode: h.ultracode, Preset: h.preset, CrashResume: h.crashResume && found != ""}
 	h.resuming, h.crashResume, h.turnSeen = o.CrashResume, false, false
 	h.mu.Unlock()
 	// An agent updating itself is gone for a few seconds: wait for it (Rhodium §4.2).
@@ -877,7 +878,7 @@ func (h *Hosted) state(o store.Overlay, archived bool) api.SessionState {
 	defer h.mu.Unlock()
 	s := api.SessionState{Session: h.summaryLocked(o, archived), Asks: slices.Clone(h.asks), Tasks: slices.Clone(h.tasks), Model: h.model, Mode: h.mode, End: h.end, Proc: h.proc, Error: h.errText,
 		Effort: h.effort, Queue: slices.Clone(h.queue), Context: h.ctxSum, QuotaUntil: h.quotaUntil, Tail: h.tail}
-	s.Pick, s.EffortNow, s.Next = h.meta.Model, h.effortNow, h.next
+	s.Pick, s.EffortNow, s.Next, s.Preset = h.meta.Model, h.effortNow, h.next, h.preset
 	for _, m := range h.models {
 		s.Models = append(s.Models, api.Model{Value: m.Value, Name: m.Name, Description: m.Description, Resolved: m.Resolved, Efforts: slices.Clone(m.Efforts), NoEffort: m.NoEffort})
 	}

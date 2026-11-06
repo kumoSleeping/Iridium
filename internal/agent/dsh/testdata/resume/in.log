@@ -1,0 +1,5 @@
+0 {"jsonrpc":"2.0","id":"p-1","method":"initialize","params":{"cwd":"/tmp/dsh-drv/w1","provider":"deepseek-official","model":"deepseek-v4-pro","approvalRequests":true,"capabilities":{"userQuestions":true},"reasoningEffort":"max"}}
+111 {"jsonrpc":"2.0","id":"p-2","method":"session/resume","params":{"sessionId":"5f0c1d2e-0007-4000-8000-000000000007"}}
+412 {"jsonrpc":"2.0","id":"p-3","method":"session/query","params":{"sessionId":"5f0c1d2e-0007-4000-8000-000000000007","contentBlocks":[{"type":"text","text":"/plan off"}]}}
+1319 {"jsonrpc":"2.0","id":"p-4","method":"session/query","params":{"sessionId":"5f0c1d2e-0007-4000-8000-000000000007","contentBlocks":[{"type":"text","text":"/permission workspace-write"}]}}
+3293 {"jsonrpc":"2.0","id":"p-5","method":"session/prompt","params":{"sessionId":"5f0c1d2e-0007-4000-8000-000000000007","contentBlocks":[{"type":"text","text":"[web] after"}]}}

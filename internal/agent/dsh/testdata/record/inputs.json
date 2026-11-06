@@ -1,0 +1,55 @@
+{
+ "exit_plan_mode": {
+  "plan": "# Plan\n\n1. Do a thing.\n2. Do another."
+ },
+ "bash": {
+  "command": "echo hi",
+  "description": "Say hi"
+ },
+ "write": {
+  "file_path": "/tmp/dsh-drv/w1/out.txt",
+  "content": "hi\n"
+ },
+ "ask_user_question": {
+  "questions": [
+   {
+    "id": "q1",
+    "question": "Which colour?",
+    "options": [
+     {
+      "label": "Blue"
+     },
+     {
+      "label": "Red"
+     }
+    ]
+   },
+   {
+    "id": "q2",
+    "question": "Which sizes?",
+    "multi_select": true,
+    "options": [
+     {
+      "label": "S"
+     },
+     {
+      "label": "M"
+     },
+     {
+      "label": "L"
+     }
+    ]
+   }
+  ]
+ },
+ "slowbash": {
+  "command": "sleep 20; echo late",
+  "description": "Sleep a while"
+ },
+ "escwrite": {
+  "file_path": "/tmp/dsh-drv/w1/out.txt",
+  "content": "hi\n",
+  "sandbox_permissions": "workspace-write",
+  "justification": "The user asked for the file."
+ }
+}

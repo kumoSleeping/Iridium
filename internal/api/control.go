@@ -60,6 +60,12 @@ type SetEffort struct {
 	Effort string `json:"effort"`
 }
 
+// SetPreset sets a session's agent preset ("": the agent's default), for this and every later
+// start: a running agent restarts with it, now if idle, else when its turn ends.
+type SetPreset struct {
+	Preset string `json:"preset"`
+}
+
 // SetUltracode turns a Claude session's ultracode on or off, now and for every later start.
 type SetUltracode struct {
 	Ultracode bool `json:"ultracode"`

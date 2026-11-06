@@ -39,6 +39,12 @@ export interface AgentInfo {
    * Ultracode: its sessions can turn ultracode on (Claude).
    */
   ultracode: boolean;
+  /**
+   * Presets: its agent presets (dsh: the tools and prompt a session runs with), taken at launch:
+   * a switch restarts the agent. DefaultPreset is an empty preset's. None: it has no presets.
+   */
+  presets?: string[];
+  defaultPreset?: string;
 }
 /**
  * Color is a colour tag a session or a folder is given from its menu (the user, 2026-11-06).
@@ -154,6 +160,10 @@ export interface SessionState extends Session {
   models?: Model[];
   modes?: string[];
   efforts?: string[];
+  /**
+   * Preset: the agent preset set for it ("": the agent's default; see AgentInfo.Presets).
+   */
+  preset?: string;
   /**
    * Queue: messages waiting for the turn to end, oldest first (docs/api.md "待发队列").
    */
@@ -387,6 +397,7 @@ export interface NewSession {
   model?: string;
   mode?: string;
   effort?: string;
+  preset?: string;
   /**
    * Workspace: the workspace it goes in (0: the caller's, else as discovery classifies it).
    */
@@ -642,6 +653,13 @@ export interface SetMode {
 }
 export interface SetEffort {
   effort: string;
+}
+/**
+ * SetPreset sets a session's agent preset ("": the agent's default), for this and every later
+ * start: a running agent restarts with it, now if idle, else when its turn ends.
+ */
+export interface SetPreset {
+  preset: string;
 }
 /**
  * SetUltracode turns a Claude session's ultracode on or off, now and for every later start.

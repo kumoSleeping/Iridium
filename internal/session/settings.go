@@ -25,8 +25,11 @@ func (m *Manager) SetModel(ctx context.Context, id, model string) error {
 	if err != nil {
 		return err
 	}
+	restart := false // the agent takes it only at launch (dsh): it restarts with it
 	if h.isLive() {
-		if err := h.drv.SetModel(ctx, cmp.Or(model, "default")); err != nil {
+		if err := h.drv.SetModel(ctx, cmp.Or(model, "default")); errors.Is(err, agent.ErrRestart) {
+			restart = true
+		} else if err != nil {
 			return err
 		}
 	}
@@ -41,7 +44,9 @@ func (m *Manager) SetModel(ctx context.Context, id, model string) error {
 	proc := h.proc
 	h.mu.Unlock()
 	h.publish()
-	if h.isLive() {
+	if restart {
+		h.restartForMode()
+	} else if h.isLive() {
 		// A model switch may change the level in use and whether ultracode can be had.
 		go h.readApplied(proc)
 	}
@@ -82,7 +87,8 @@ func (m *Manager) SetMode(ctx context.Context, id, mode string) error {
 	return nil
 }
 
-// restartForMode restarts the agent for a mode it takes only at launch (pi): now if it is idle,
+// restartForMode restarts the agent for a mode or preset it takes only at launch (pi's mode, dsh's
+// preset): now if it is idle,
 // else when the turn ends. The session resumes; what waits in the queue goes after.
 func (h *Hosted) restartForMode() {
 	h.mu.Lock()
@@ -126,8 +132,37 @@ func (h *Hosted) restart() {
 		h.logf("restarting: %v", err)
 		return
 	}
-	h.logf("restarted for its approval mode")
+	h.logf("restarted for its approval mode or preset")
 	h.release(ctx, false)
+}
+
+// SetPreset sets the session's agent preset (dsh's tools and prompt); "" is the agent's default.
+// The agent takes it only at launch: a running one restarts with it, now if idle, else when its
+// turn ends, and the session resumes.
+func (m *Manager) SetPreset(ctx context.Context, id, preset string) error {
+	h, err := m.get(id)
+	if err != nil {
+		return err
+	}
+	info, _ := agents.Get(h.meta.Agent)
+	if len(info.Presets) == 0 {
+		return fmt.Errorf("%w: %s has no presets", ErrBadRequest, info.Name)
+	}
+	if preset != "" && !slices.Contains(info.Presets, preset) {
+		return fmt.Errorf("%w: no preset %q (%s)", ErrBadRequest, preset, strings.Join(info.Presets, ", "))
+	}
+	if err := m.o.Store.UpdateSettings(id, func(s *store.Settings) { s.Preset = preset }); err != nil {
+		return err
+	}
+	h.mu.Lock()
+	changed := cmp.Or(h.preset, info.DefaultPreset) != cmp.Or(preset, info.DefaultPreset)
+	h.preset = preset
+	h.mu.Unlock()
+	h.publish()
+	if changed && h.isLive() {
+		h.restartForMode()
+	}
+	return nil
 }
 
 // SetEffort sets the session's thinking effort.
@@ -145,9 +180,11 @@ func (m *Manager) SetEffort(ctx context.Context, id, effort string) error {
 	}
 	h.setMu.Lock()
 	defer h.setMu.Unlock()
-	live := h.isLive()
+	live, restart := h.isLive(), false
 	if live && effort != "" {
-		if err := e.SetEffort(ctx, effort); err != nil {
+		if err := e.SetEffort(ctx, effort); errors.Is(err, agent.ErrRestart) {
+			restart = true // as for SetModel
+		} else if err != nil {
 			return err
 		}
 	}
@@ -159,7 +196,9 @@ func (m *Manager) SetEffort(ctx context.Context, id, effort string) error {
 	proc := h.proc
 	h.mu.Unlock()
 	h.publish()
-	if live {
+	if restart {
+		h.restartForMode()
+	} else if live {
 		h.readApplied(proc)
 	}
 	return nil

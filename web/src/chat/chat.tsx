@@ -12,7 +12,7 @@ import { LinkDot } from "../link";
 import type { Session } from "../api/types.gen";
 import { WsPlus } from "../create";
 import { chatOf, compactSent, stateAhead, type Draft as Drafted, type Sent } from "../chats";
-import { LOCAL_ME, useMe, useTerminalList, useWorkspaces } from "../data";
+import { LOCAL_ME, useAgent, useMe, useTerminalList, useWorkspaces } from "../data";
 import { t, useLang } from "../i18n";
 import { pushIn } from "../motion";
 import { openChat } from "../route";
@@ -27,7 +27,7 @@ import { Composer, type ComposerHandle } from "./composer";
 import { folded, type Tool } from "./fold";
 import { ToolDraft, Waiting } from "./live";
 import { Draft } from "./markdown";
-import { ContextRing, ModelKey, modelView, QuotaBars, useMode } from "./meters";
+import { ContextRing, ModelKey, modelView, PresetKey, QuotaBars, useMode } from "./meters";
 import { Queue } from "./queue";
 import { mentionOf } from "./mention";
 import { SESSION_DRAG, sourceOf, yours } from "./refs";
@@ -283,6 +283,7 @@ export function ChatPage({ id, phone, sheet = 0, onSheet, onMe }: { id: string; 
  *  /mode still step it, saying where they left it. */
 function Under({ s, ghost, composer, onSent, onSentDone, modelOpen, setModelOpen, usageOpen, setUsageOpen }: { s: LiveSession; ghost: boolean; composer: React.RefObject<ComposerHandle | null>; onSent: (x: Sent) => void; onSentDone: (x: Sent) => void; modelOpen: boolean; setModelOpen: (o: boolean) => void; usageOpen: boolean; setUsageOpen: (o: boolean) => void }) {
   const mode = useMode(s);
+  const agentInfo = useAgent(s.agent);
   const [ctxOpen, setCtxOpen] = useState(false);
   return (
     <>
@@ -302,7 +303,8 @@ function Under({ s, ghost, composer, onSent, onSentDone, modelOpen, setModelOpen
           <>
             {/* Not guessed from the row: the model comes with the state, gliding in. */}
             {!ghost && <ModelKey s={s} open={modelOpen} onOpenChange={setModelOpen} />}
-            <QuotaBars agent={s.agent} live={s.live} using={[s.model, s.pick, modelView(s).name]} open={usageOpen} onOpenChange={setUsageOpen} />
+            {/* dsh has no quota: its preset goes where the bars would be (the user, 2026-11-06). */}
+            {agentInfo?.presets?.length ? <PresetKey s={s} /> : <QuotaBars agent={s.agent} live={s.live} using={[s.model, s.pick, modelView(s).name]} open={usageOpen} onOpenChange={setUsageOpen} />}
           </>
         }
         end={<ContextRing session={s.id} summary={s.context} open={ctxOpen} onOpenChange={setCtxOpen} />}

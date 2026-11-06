@@ -267,6 +267,14 @@ func (m *Manager) create(ctx context.Context, req api.NewSession, from, name str
 			return "", err
 		}
 	}
+	if req.Preset != "" {
+		if !slices.Contains(info.Presets, req.Preset) {
+			return "", fmt.Errorf("%s has no preset %q (%s)", info.Name, req.Preset, strings.Join(info.Presets, ", "))
+		}
+		if err := m.o.Store.UpdateSettings(mt.ID, func(s *store.Settings) { s.Preset = req.Preset }); err != nil {
+			return "", err
+		}
+	}
 	if prep != nil {
 		if err := prep(mt.ID); err != nil {
 			return "", err

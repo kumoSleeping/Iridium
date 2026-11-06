@@ -218,8 +218,7 @@ func (x *Index) piIn(dir string) []onDisk {
 	return out
 }
 
-// dsh: sessions/--<projectKey>--/<id>/session.v<N>.jsonl.zstd, the highest N counting. zstd: for
-// now only its path and time are read.
+// dsh: sessions/--<projectKey>--/<id>/session.v<N>.jsonl.zstd, the highest N counting.
 func (x *Index) dshDirs() []string { return subdirs(filepath.Join(x.o.DshHome, "sessions")) }
 
 func (x *Index) dshIn(dir string) []onDisk {
@@ -271,7 +270,12 @@ func (x *Index) glance(d onDisk) glimpse {
 	case api.AgentPi:
 		return x.glancePi(d)
 	case api.AgentDsh:
-		return glimpse{cwd: x.dshCwd(filepath.Base(filepath.Dir(filepath.Dir(d.path))))}
+		g, _ := transcript.GlanceDsh(d.path, x.o.Store.Source)
+		out := glimpse{cwd: g.Cwd, title: g.Title, last: g.Last, sub: g.Sidechain, parent: g.Parent}
+		if out.cwd == "" {
+			out.cwd = x.dshCwd(filepath.Base(filepath.Dir(filepath.Dir(d.path))))
+		}
+		return out
 	}
 	return glimpse{}
 }

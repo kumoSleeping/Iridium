@@ -1,0 +1,4 @@
+0 {"jsonrpc":"2.0","id":"p-1","method":"initialize","params":{"cwd":"/tmp/dsh-drv/w1","provider":"deepseek-official","model":"deepseek-flash","approvalRequests":true,"capabilities":{"userQuestions":true}}}
+111 {"jsonrpc":"2.0","id":"p-2","method":"session/working-directory/get","params":{"sessionId":"5f0c1d2e-0001-4000-8000-000000000001"}}
+775 {"jsonrpc":"2.0","id":"p-3","method":"session/query","params":{"sessionId":"5f0c1d2e-0001-4000-8000-000000000001","contentBlocks":[{"type":"text","text":"/permission danger-full-access"}]}}
+2763 {"jsonrpc":"2.0","id":"p-4","method":"session/prompt","params":{"sessionId":"5f0c1d2e-0001-4000-8000-000000000001","contentBlocks":[{"type":"text","text":"[web] RUNTOOL:bash say hi"}]}}

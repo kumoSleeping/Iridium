@@ -1,0 +1,8 @@
+0 {"jsonrpc":"2.0","id":"p-1","method":"initialize","params":{"cwd":"/tmp/dsh-drv/w1","provider":"deepseek-official","model":"deepseek-flash","approvalRequests":true,"capabilities":{"userQuestions":true}}}
+111 {"jsonrpc":"2.0","id":"p-2","method":"session/working-directory/get","params":{"sessionId":"5f0c1d2e-0005-4000-8000-000000000005"}}
+775 {"jsonrpc":"2.0","id":"p-3","method":"session/query","params":{"sessionId":"5f0c1d2e-0005-4000-8000-000000000005","contentBlocks":[{"type":"text","text":"/permission danger-full-access"}]}}
+2763 {"jsonrpc":"2.0","id":"p-4","method":"session/query","params":{"sessionId":"5f0c1d2e-0005-4000-8000-000000000005","contentBlocks":[{"type":"text","text":"/plan"}]}}
+3873 {"jsonrpc":"2.0","id":"p-5","method":"session/prompt","params":{"sessionId":"5f0c1d2e-0005-4000-8000-000000000005","contentBlocks":[{"type":"text","text":"[web] RUNTOOL:exit_plan_mode plan it"}]}}
+50467 {"jsonrpc":"2.0","id":"req_b6cb4e6ef94c4b0fba2f7d819000c90f","result":{"answers":[{"id":"plan-review","selected":[],"custom":"Add a step 3."}]}}
+53514 {"jsonrpc":"2.0","id":"p-6","method":"session/prompt","params":{"sessionId":"5f0c1d2e-0005-4000-8000-000000000005","contentBlocks":[{"type":"text","text":"[web] once more"}]}}
+58375 {"jsonrpc":"2.0","id":"req_5b34533a80454e0588665631fb56eae1","result":{"answers":[{"id":"plan-review","selected":["Approve"]}]}}

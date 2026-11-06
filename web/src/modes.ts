@@ -15,6 +15,9 @@ const MODE_KEY: Record<string, Parameters<typeof t>[0]> = {
   "on-request": "mode.onRequest",
   granular: "mode.granular",
   never: "mode.never",
+  "read-only": "mode.readOnly",
+  "workspace-write": "mode.workspaceWrite",
+  "danger-full-access": "mode.fullAccess",
 };
 
 export const modeName = (m: { id: string }) => (MODE_KEY[m.id] ? t(MODE_KEY[m.id]!) : m.id);

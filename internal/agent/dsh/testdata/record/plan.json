@@ -1,0 +1,114 @@
+{
+ "answers": [
+  {
+   "answers": [
+    {
+     "id": "plan-review",
+     "selected": [],
+     "custom": "Add a step 3."
+    }
+   ]
+  },
+  {
+   "answers": [
+    {
+     "id": "plan-review",
+     "selected": [
+      "Approve"
+     ]
+    }
+   ]
+  }
+ ],
+ "steps": [
+  {
+   "send": {
+    "method": "initialize",
+    "params": {
+     "cwd": "/tmp/dsh-drv/w1",
+     "provider": "deepseek-official",
+     "model": "deepseek-flash",
+     "approvalRequests": true,
+     "capabilities": {
+      "userQuestions": true
+     }
+    }
+   }
+  },
+  {
+   "send": {
+    "method": "session/working-directory/get",
+    "params": {
+     "sessionId": "5f0c1d2e-0005-4000-8000-000000000005"
+    }
+   }
+  },
+  {
+   "send": {
+    "method": "session/query",
+    "params": {
+     "sessionId": "5f0c1d2e-0005-4000-8000-000000000005",
+     "contentBlocks": [
+      {
+       "type": "text",
+       "text": "/permission danger-full-access"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "send": {
+    "method": "session/query",
+    "params": {
+     "sessionId": "5f0c1d2e-0005-4000-8000-000000000005",
+     "contentBlocks": [
+      {
+       "type": "text",
+       "text": "/plan"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "send": {
+    "method": "session/prompt",
+    "params": {
+     "sessionId": "5f0c1d2e-0005-4000-8000-000000000005",
+     "contentBlocks": [
+      {
+       "type": "text",
+       "text": "[web] RUNTOOL:exit_plan_mode plan it"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "until": "idle",
+   "ms": 30000
+  },
+  {
+   "send": {
+    "method": "session/prompt",
+    "params": {
+     "sessionId": "5f0c1d2e-0005-4000-8000-000000000005",
+     "contentBlocks": [
+      {
+       "type": "text",
+       "text": "[web] once more"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "until": "idle",
+   "ms": 30000
+  },
+  {
+   "wait": 300
+  }
+ ]
+}

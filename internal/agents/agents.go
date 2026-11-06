@@ -10,6 +10,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/agent"
 	"github.com/kumoSleeping/iridium/internal/agent/claude"
 	"github.com/kumoSleeping/iridium/internal/agent/codex"
+	"github.com/kumoSleeping/iridium/internal/agent/dsh"
 	"github.com/kumoSleeping/iridium/internal/agent/pi"
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/transcript"
@@ -47,6 +48,10 @@ type Info struct {
 	Quota            bool
 	// Ultracode: its sessions can turn ultracode on (Claude; the driver is an agent.Ultracoder).
 	Ultracode bool
+	// Presets are the agent presets SpawnOptions.Preset takes, at launch only (dsh's tools and
+	// prompt); DefaultPreset is an empty preset's.
+	Presets       []string
+	DefaultPreset string
 	// OwnID: the agent makes the session's id itself (Codex's thread) and reports it with
 	// Started; the session keeps it as the agent's id, beside its own.
 	OwnID bool
@@ -94,6 +99,18 @@ var all = []Info{
 		Find:   func(w Where) (string, error) { return transcript.FindPi(transcript.PiSessions(w.Env, w.Cwd), w.ID) },
 		Format: transcript.Pi,
 	},
+	{
+		// dsh --profile sdk (0.2.2-rc.1): mode at once (/permission, /plan); model, effort and
+		// preset only at launch (the driver says agent.ErrRestart, the host restarts it).
+		Agent: api.AgentDsh, Name: "DeepSeek Harness",
+		Modes: dsh.Modes, DefaultMode: dsh.DefaultMode, ModeSwitch: "now", Efforts: dsh.Efforts,
+		Presets: dsh.Presets, DefaultPreset: dsh.DefaultPreset,
+		New: func(emit func(agent.Event), logf func(string, ...any)) agent.Driver {
+			return dsh.New(dsh.Options{Emit: emit, Logf: logf})
+		},
+		Find:   func(w Where) (string, error) { return transcript.FindDsh(transcript.DshHome(w.Env), w.ID) },
+		Format: transcript.Dsh,
+	},
 }
 
 // Get is agent a's row.
@@ -112,7 +129,7 @@ func All() []Info { return slices.Clone(all) }
 func Describe() []api.AgentInfo {
 	out := make([]api.AgentInfo, 0, len(all))
 	for _, i := range all {
-		out = append(out, api.AgentInfo{Agent: i.Agent, Name: i.Name, Modes: slices.Clone(i.Modes), DefaultMode: i.DefaultMode, ModeSwitch: i.ModeSwitch, ContextBreakdown: i.ContextBreakdown, Quota: i.Quota, Ultracode: i.Ultracode})
+		out = append(out, api.AgentInfo{Agent: i.Agent, Name: i.Name, Modes: slices.Clone(i.Modes), DefaultMode: i.DefaultMode, ModeSwitch: i.ModeSwitch, ContextBreakdown: i.ContextBreakdown, Quota: i.Quota, Ultracode: i.Ultracode, Presets: slices.Clone(i.Presets), DefaultPreset: i.DefaultPreset})
 	}
 	return out
 }

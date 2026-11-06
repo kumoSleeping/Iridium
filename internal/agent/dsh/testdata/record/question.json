@@ -1,0 +1,80 @@
+{
+ "answers": [
+  {
+   "answers": [
+    {
+     "id": "q1",
+     "selected": [],
+     "custom": "Green"
+    },
+    {
+     "id": "q2",
+     "selected": [
+      "S",
+      "L"
+     ],
+     "custom": "XL too"
+    }
+   ]
+  }
+ ],
+ "steps": [
+  {
+   "send": {
+    "method": "initialize",
+    "params": {
+     "cwd": "/tmp/dsh-drv/w1",
+     "provider": "deepseek-official",
+     "model": "deepseek-flash",
+     "approvalRequests": true,
+     "capabilities": {
+      "userQuestions": true
+     }
+    }
+   }
+  },
+  {
+   "send": {
+    "method": "session/working-directory/get",
+    "params": {
+     "sessionId": "5f0c1d2e-0004-4000-8000-000000000004"
+    }
+   }
+  },
+  {
+   "send": {
+    "method": "session/query",
+    "params": {
+     "sessionId": "5f0c1d2e-0004-4000-8000-000000000004",
+     "contentBlocks": [
+      {
+       "type": "text",
+       "text": "/permission danger-full-access"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "send": {
+    "method": "session/prompt",
+    "params": {
+     "sessionId": "5f0c1d2e-0004-4000-8000-000000000004",
+     "contentBlocks": [
+      {
+       "type": "text",
+       "text": "[web] RUNTOOL:ask_user_question"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "until": "idle",
+   "ms": 30000
+  },
+  {
+   "wait": 300
+  }
+ ]
+}
