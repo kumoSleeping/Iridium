@@ -30,6 +30,8 @@ func TestNewer(t *testing.T) {
 		{"1.2.0", "1.2.0-rc.1", true}, {"1.2.0-rc.2", "1.2.0-rc.1", true}, {"1.2.0-rc.10", "1.2.0-rc.9", true},
 		{"1.2.0-rc.1", "1.2.0", false}, {"1.1.0", "1.2.0", false}, {"1.0.0", "dev", false}, {"dev", "1.0.0", false},
 		{"1.0.0+build", "0.9", true},
+		// A build from source (scripts/version.sh) is newer than the release before it, older than the next.
+		{"v0.1.0", "v0.1.1-dev.3+g1db5968.dirty", false}, {"v0.1.1", "v0.1.1-dev.3+g1db5968", true},
 	} {
 		if got := Newer(c.a, c.b); got != c.want {
 			t.Errorf("Newer(%q, %q) = %v", c.a, c.b, got)

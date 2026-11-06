@@ -81,6 +81,10 @@ rm -r ~/.local/opt/iridium ~/.local/bin/ir ~/.config/systemd/user/iridium.servic
 
 配置和状态目录留着，要彻底删再手动删 `~/.config/iridium` 和 `~/.local/state/iridium`。agent 自己的对话记录不动。
 
+## 测试节点
+
+`scripts/push-test.sh`：构建工作区（版本由 `scripts/version.sh` 算，比上一个 Release 新、比下一个旧），经 `ssh ir@localhost` 放到测试节点的 `~/.local/opt/iridium`，跑一次 `version`，重启服务；第一次推时写配置（`127.0.0.1:7811`）、装单元。`TARGET`、`KEY`、`PORT`、`NO_WEB=1` 可改。主节点不推。
+
 ## 测试部署
 
 `scripts/test-deploy.sh up|down`：装到临时目录、临时状态，用假 agent，单元名 `iridium-test-deploy-*`，随机端口。不碰正式服务。

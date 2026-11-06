@@ -254,7 +254,9 @@ ir revoke <名字>
 
 ## 测试部署
 
-- 真实测试地址：`https://ir-test.kumo.ltd`，本机 `127.0.0.1:7810`，用户级 systemd 服务。`https://ir.kumo.ltd` 留给从 Release 装的单二进制正式版（2026-11-06）。
+- 两个节点，同一台机器、两个账号（2026-11-06）：
+  - 主节点（现在这个账号）：只跑 Release 版，`https://ir.kumo.ltd`、`127.0.0.1:7810`；只靠发版和设置里的“更新”升级，不推开发版。Claude（你本人的登录）只在这里。
+  - 测试节点（账号 `ir`）：`https://ir-test.kumo.ltd`、`127.0.0.1:7811`；`scripts/push-test.sh` 把工作区构建好推过去、重启。没有真的 Claude：Claude Code 接 DeepSeek；Codex 你自己登录。也用来开发节点功能。
 - 上公网前 Passkey 必须先做好。
 
 ## 开发

@@ -20,7 +20,7 @@ command -v "$GO" >/dev/null 2>&1 || GO=$HOME/.local/bin/go
 PREFIX=${PREFIX:-$HOME/.local/opt/iridium}
 BIN=${BIN:-$HOME/.local/bin}
 UNIT=${UNIT:-iridium}
-version=$(git describe --tags --always --dirty 2>/dev/null || echo dev)
+version=$(sh scripts/version.sh)
 
 if [ "${NO_WEB:-}" != 1 ] && [ -f web/package.json ]; then
 	(cd web && npm ci --no-audit --no-fund && npm run build)
