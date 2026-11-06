@@ -9,7 +9,8 @@
 // colour tags (colors.ts); a workspace's, its 通知 only. The mouse resting on a row fetches its
 // chat ahead.
 import { Menu } from "@base-ui/react/menu";
-import { Archive, ArchiveRestore, Bot, Check, ChevronRight, Copy, Folder, FolderOpen, Inbox, KeyRound, Link2, Pencil, Pin, PinOff, Plus, Search, Settings, Square, Workflow as WorkflowIcon } from "lucide-react";
+import { Archive, ArchiveRestore, Bot, Check, ChevronRight, Copy, Folder, FolderOpen, Inbox, Pencil, Pin, PinOff, Plus, Search, Settings, Square, Workflow as WorkflowIcon } from "lucide-react";
+import { ConfirmIcon, confirmName, confirmTitle } from "./confirmname";
 import { Fragment, lazy, Suspense, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { api } from "./api/client";
 import type { Color, Confirm, Session } from "./api/types.gen";
@@ -198,14 +199,14 @@ export function Sidebar(p: Props) {
                     depth={0}
                     flip={`c:${c.id}`}
                     onClick={() => p.onConfirm(c)}
-                    icon={c.kind === "invite" ? <Link2 size={15} className="text-need" /> : <KeyRound size={15} className="text-need" />}
+                    icon={<ConfirmIcon c={c} size={15} className="text-need" />}
                     label={
                       <>
-                        {c.kind === "invite" ? t("confirm.invite") : t("confirm.token")}
-                        {c.name && <span className="ml-1.5 text-ink-3">{c.name}</span>}
+                        {confirmTitle(c)}
+                        {confirmName(c) && <span className="ml-1.5 text-ink-3">{confirmName(c)}</span>}
                       </>
                     }
-                    aria={`${c.kind === "invite" ? t("confirm.invite") : t("confirm.token")} ${c.name ?? ""}, ${t("status.needs")}`}
+                    aria={`${confirmTitle(c)} ${confirmName(c) ?? ""}, ${t("status.needs")}`}
                   />
                 ))}
                 {p.tree.needs.map((s) => row(s, 0, `n:${s.id}`))}

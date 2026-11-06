@@ -44,7 +44,7 @@ export function useUpdate(): { data: UpdateState | null | undefined } {
 export const useHome = () => useQuery({ queryKey: ["folders", "~"], queryFn: () => api.folders("~"), staleTime: 60_000, select: (f) => (setHome(f.path), f.path) });
 
 /** 本机, as the page is with no gate in front (and while /api/me has not answered). */
-export const LOCAL_ME: Me = { id: "local", name: "本机", kind: "channel", local: true, panel: true, public: false, usedToday: 0, rules: { agents: ["claude", "codex", "pi", "dsh"], allDirs: true, dirs: [], workspaces: [], seeOthers: true, filesIn: true, filesOut: true, answer: true, mustApprove: false, dailyTokens: 0, allCommands: true, commands: [] } };
+export const LOCAL_ME: Me = { id: "local", name: "本机", kind: "channel", local: true, panel: true, public: false, usedToday: 0, rules: { agents: ["claude", "codex", "pi", "dsh"], allDirs: true, dirs: [], workspaces: [], seeOthers: true, filesIn: true, filesOut: true, answer: true, mustApprove: false, dailyTokens: 0, allCommands: true, commands: [], secretsSet: true } };
 
 /** This terminal: GET /api/me, else the gate's session, else 本机. */
 export const useMe = () =>

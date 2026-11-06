@@ -953,6 +953,82 @@ export interface PushMessage {
 }
 
 //////////
+// source: secrets.go
+
+/**
+ * SecretScope is which sessions may use a secret: all, those in some workspaces, or only those the
+ * owner's own terminals (本机, those that have Claude) opened.
+ */
+export type SecretScope = string;
+export const ScopeAll: SecretScope = "all";
+export const ScopeWorkspaces: SecretScope = "workspaces";
+export const ScopeOwner: SecretScope = "owner";
+/**
+ * SecretInfo is a secret as listed: never its value.
+ */
+export interface SecretInfo {
+  name: string;
+  note?: string;
+  scope: SecretScope;
+  workspaces: number /* int64 */[]; // scope workspaces: which
+  /**
+   * Always: every use is confirmed on a panel, the owner's own sessions' too.
+   */
+  always?: boolean;
+  by?: string; // the terminal that stored it, by name
+  createdAt: number /* int64 */;
+  updatedAt: number /* int64 */;
+  uses: number /* int */;
+  lastUse?: SecretUse;
+}
+/**
+ * SecretUse is one use by ir run: which session, from which terminal, what command (its opening,
+ * as written: {{NAME}}, never the value).
+ */
+export interface SecretUse {
+  secret: string;
+  session?: string;
+  terminal: string; // by name
+  command: string;
+  at: number /* int64 */;
+}
+/**
+ * Secrets is GET /api/secrets: every secret by name, and the newest uses, newest first.
+ */
+export interface Secrets {
+  secrets: SecretInfo[];
+  uses: SecretUse[];
+}
+/**
+ * SetSecret is PUT /api/secrets/{name}. Value "": one stored keeps its value (only what is said of
+ * it changes); from an agent, a panel types it (202 Pending). Note, Scope, Always nil or "": as
+ * they were (a new one: no note, all, false). Only a panel changes Scope and Always.
+ */
+export interface SetSecret {
+  value?: string;
+  note?: string;
+  scope?: SecretScope;
+  workspaces?: number /* int64 */[];
+  always?: boolean;
+}
+/**
+ * UseSecrets is POST /api/secrets/use, for ir run alone: the session it runs in, the secrets it
+ * wants and the command's opening. Confirm: a secret-use confirmation that was allowed, to use it.
+ */
+export interface UseSecrets {
+  session?: string;
+  names: string[];
+  command: string;
+  confirm?: string;
+}
+/**
+ * SecretValues is the reply to UseSecrets: the values, by name, for the ir process alone.
+ */
+export interface SecretValues {
+  values: { [key: string]: string};
+}
+
+//////////
 // source: settings.go
 
 /**
@@ -1061,6 +1137,10 @@ export interface Rules {
    */
   allCommands: boolean;
   commands: string[];
+  /**
+   * SecretsSet: it may store and replace credentials (never read them; deleting is a manager's).
+   */
+  secretsSet: boolean;
 }
 /**
  * OwnerConfirm is how, and when (ms), a terminal was found the owner's own.
@@ -1173,18 +1253,35 @@ export interface SetRules {
   rules: Rules;
 }
 /**
- * Confirm is what an agent's ir asked for that only a panel may give (an invite link, a token):
- * it waits in the carried state "confirms" until a panel answers it. No secrets.
+ * Confirm is what an agent's ir asked for that only a panel may give (an invite link, a token, a
+ * credential's value, the use of credentials): it waits in the carried state "confirms" until a
+ * panel answers it. No secrets.
  */
 export interface Confirm {
   id: string;
-  kind: string; // invite | token
+  kind: string; // invite | token | secret-set | secret-use
+  /**
+   * Name: the invite's or token's name; secret-set: the secret's.
+   */
   name?: string;
   owner?: boolean; // --owner: it gets Claude; only a panel that has Claude allows it
   asker: string; // the terminal that asked (本机)
   session?: string; // the session whose agent asked, if known
   createdAt: number /* int64 */;
   expiresAt: number /* int64 */;
+  /**
+   * secret-set: the note it was asked with (else the stored one's), and whether one by that
+   * name is stored (it is replaced).
+   */
+  note?: string;
+  replace?: boolean;
+  /**
+   * secret-use: the secrets, the command's opening (as written: {{NAME}}), and whether one of
+   * them is confirmed every time (no "this session").
+   */
+  secrets?: string[];
+  command?: string;
+  always?: boolean;
 }
 /**
  * Confirms is the carried state "confirms": the pending ones, oldest first. Panels only.
@@ -1197,6 +1294,14 @@ export interface Confirms {
  */
 export interface ConfirmAnswer {
   allow: boolean;
+  /**
+   * Value: secret-set's value, typed on the panel; stored, never given back.
+   */
+  value?: string;
+  /**
+   * ForSession: secret-use allowed for the rest of the session (till it stops).
+   */
+  forSession?: boolean;
 }
 /**
  * ConfirmState is how a Confirm went, as the asker sees it: never a secret.

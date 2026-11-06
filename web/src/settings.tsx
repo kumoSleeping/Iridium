@@ -6,7 +6,7 @@
 // language. Each a title and its control, no line explaining it; the version at the foot (the user,
 // 2026-11-06). Every quota bar shows: nothing here hides one. Changed is saved at once.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, LoaderCircle, Monitor, Moon, MonitorSmartphone, RefreshCw, Sun } from "lucide-react";
+import { ChevronRight, LoaderCircle, LockKeyhole, Monitor, Moon, MonitorSmartphone, RefreshCw, Sun } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { api } from "./api/client";
 import type { PushEvents, PushState, Settings, SettingsPatch } from "./api/types.gen";
@@ -149,6 +149,11 @@ export function SettingsPage({ theme, setTheme }: { theme: ThemePref; setTheme: 
                 <span className="min-w-0 flex-1 text-sm">{t("settings.terminalsRow")}</span>
                 {confirms.length > 0 && <span className="size-2 shrink-0 rounded-full bg-need" aria-label={t("nav.needsYou")} />}
                 {terminals.length > 0 && <span className="text-xs text-ink-3 tabular-nums">{terminals.length}</span>}
+                <ChevronRight size={15} className="shrink-0 text-ink-4" />
+              </button>
+              <button type="button" onClick={() => go({ name: "secrets" })} className="g-press -mx-1.5 flex min-h-11 items-center gap-2.5 rounded-md px-1.5 text-left hover:bg-fill">
+                <LockKeyhole size={17} className="shrink-0 text-ink-2" />
+                <span className="min-w-0 flex-1 text-sm">{t("secrets.title")}</span>
                 <ChevronRight size={15} className="shrink-0 text-ink-4" />
               </button>
             </Group>

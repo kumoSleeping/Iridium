@@ -227,7 +227,7 @@ function RulesEditor({ x }: { x: Terminal }) {
   const agents = r.agents ?? [];
   const claude = hasClaude(r);
   const toggleAgent = (a: Agent) => void put({ ...r, agents: agents.includes(a) ? agents.filter((y) => y !== a) : [...agents, a] });
-  const flag = (k: "seeOthers" | "filesIn" | "filesOut" | "answer" | "mustApprove", label: string, hint?: string) => (
+  const flag = (k: "seeOthers" | "filesIn" | "filesOut" | "answer" | "mustApprove" | "secretsSet", label: string, hint?: string) => (
     <Item label={label} hint={hint}>
       <Switch label={label} on={!!r[k]} onChange={(v) => void put({ ...r, [k]: v })} />
     </Item>
@@ -299,6 +299,7 @@ function RulesEditor({ x }: { x: Terminal }) {
       {flag("filesOut", t("perm.copyOut"))}
       {flag("answer", t("perm.answer"))}
       {flag("mustApprove", t("perm.mustApprove"), t("term.mustApproveHint"))}
+      {x.kind !== "panel" && flag("secretsSet", t("perm.secretsSet"), t("secrets.permHint"))}
       <Item label={t("perm.daily")} hint={t("term.dailyHint")}>
         <NumberIn value={Math.round((r.dailyTokens ?? 0) / 1000)} save={(k) => void put({ ...r, dailyTokens: k * 1000 })} label={t("perm.daily")} />
       </Item>

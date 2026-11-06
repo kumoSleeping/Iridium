@@ -50,6 +50,7 @@ import type {
   Workspace,
   WorkspacePatch,
 } from "./types.gen";
+import type { SecretInfo, Secrets, SetSecret } from "./types.gen";
 
 /** The gate's GET /_ir/api/session (docs/gate.md). */
 export type GateSession = { authenticated: boolean; name?: string; local?: boolean; setup?: boolean };
@@ -235,7 +236,13 @@ export const api = {
   token: (name: string, owner?: boolean) => write<Token>("POST", "/api/terminals/tokens", { name, ...(owner ? { owner } : {}) } satisfies NewInvite),
   revoke: (id: string) => write<{ ok: boolean }>("DELETE", `/api/terminals/${enc(id)}`),
   confirms: () => get<Confirms>("/api/confirms"),
-  answerConfirm: (id: string, allow: boolean) => write<ConfirmReply>("POST", `/api/confirms/${enc(id)}`, { allow } satisfies ConfirmAnswer),
+  /** extra: a secret-set's value, a secret-use's "this session". */
+  answerConfirm: (id: string, allow: boolean, extra?: Omit<ConfirmAnswer, "allow">) => write<ConfirmReply>("POST", `/api/confirms/${enc(id)}`, { allow, ...extra } satisfies ConfirmAnswer),
+
+  // --- the credentials (docs/api.md "凭据"): never a value back ---
+  secrets: () => get<Secrets>("/api/secrets"),
+  putSecret: (name: string, s: SetSecret) => write<SecretInfo>("PUT", `/api/secrets/${enc(name)}`, s),
+  deleteSecret: (name: string) => write<{ ok: boolean }>("DELETE", `/api/secrets/${enc(name)}`),
 };
 
 /** Whether an error is the route not being there (an older daemon, a part turned off): the page

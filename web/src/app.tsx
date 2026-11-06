@@ -46,12 +46,16 @@ function part<P extends object>(get: () => Promise<ComponentType<P>>) {
 const ChatPage = part(() => import("./chat/chat").then((m) => m.ChatPage));
 const SettingsPage = part(() => import("./settings").then((m) => m.SettingsPage));
 const TerminalsPage = part(() => import("./terminals").then((m) => m.TerminalsPage));
+const SecretsPage = part(() => import("./credentials").then((m) => m.SecretsPage));
+/** The page of the settings' dialog a route is: the settings, or one of their own pages. */
+type SetsPage = "settings" | "terminals" | "secrets";
+const setsPageOf = (r: Route): SetsPage => (r.name === "terminals" || r.name === "secrets" ? r.name : "settings");
 const Jump = part(() => import("./jump").then((m) => m.Jump));
 export const loadChat = ChatPage.load;
 /** The settings and the jump box, their code run, the settings' answers asked: once idle, or a
  *  pointer on their key. */
 const loadPanels = () => {
-  for (const p of [SettingsPage, TerminalsPage, Jump]) void p.load().catch(() => {});
+  for (const p of [SettingsPage, TerminalsPage, SecretsPage, Jump]) void p.load().catch(() => {});
   void queryClient.prefetchQuery(agentsQ);
   void queryClient.prefetchQuery(pushQ);
 };
@@ -107,8 +111,8 @@ export function App() {
   // drawn still as it goes down, once they have been open.
   const setsOut = phone && over(r);
   const [setsH, setSetsH] = useState(0);
-  const [setsPage, setSetsPage] = useState<"settings" | "terminals" | null>(null);
-  if (over(r) && setsPage !== (r.name === "terminals" ? "terminals" : "settings")) setSetsPage(r.name === "terminals" ? "terminals" : "settings");
+  const [setsPage, setSetsPage] = useState<SetsPage | null>(null);
+  if (over(r) && setsPage !== setsPageOf(r)) setSetsPage(setsPageOf(r));
   const below = !phone ? 0 : setsOut ? setsH : sheetOut ? sheetH : footOut && open ? footH : 0;
   const list = useList();
   const ws = useWorkspaces();
@@ -211,7 +215,7 @@ export function App() {
       onSettings={onSettings}
       updateDot={!!update.data?.available}
       confirms={confirms}
-      onConfirm={(c) => (c.session && list?.some((s) => s.id === c.session) ? openChat(c.session) : go({ name: "terminals" }, over(r)))}
+      onConfirm={(c) => (c.session && list?.some((s) => s.id === c.session) ? openChat(c.session) : go({ name: c.kind.startsWith("secret-") ? "secrets" : "terminals" }, over(r)))}
       chatCode={() => void loadChat().catch(() => {})}
       panelsCode={loadPanels}
       createKey={(trigger) => <CreatePopover trigger={trigger} />}
@@ -239,11 +243,16 @@ export function App() {
   // As the me popover is (the user, 2026-11-06): no shade over the page, which stays live; a press
   // outside puts it away, but one on its own key, which does that itself.
   const settingsAt = useSettingsAt(over(r) && !phone);
-  const setsBody = (page: "settings" | "terminals") => (
+  const back = () => (history.state?.depth > 1 ? history.back() : go({ name: "settings" }, true));
+  const setsBody = (page: SetsPage) => (
     <Suspense fallback={<Waiting />}>
       {page === "terminals" ? (
         <div key="terminals" className="g-slide h-full">
-          <TerminalsPage onBack={() => (history.state?.depth > 1 ? history.back() : go({ name: "settings" }, true))} />
+          <TerminalsPage onBack={back} />
+        </div>
+      ) : page === "secrets" ? (
+        <div key="secrets" className="g-slide h-full">
+          <SecretsPage onBack={back} />
         </div>
       ) : (
         <div key="settings" className="g-slide h-full" data-dir="back">
@@ -274,7 +283,7 @@ export function App() {
           style={settingsAt}
           className="g-dialog glass thick float fixed z-50 w-[min(288px,calc(100vw-16px))] overflow-hidden rounded-lg text-ink outline-none"
         >
-          {setsBody(r.name === "terminals" ? "terminals" : "settings")}
+          {setsBody(setsPageOf(r))}
         </Dialog.Popup>
       </Dialog.Portal>
     </Dialog.Root>

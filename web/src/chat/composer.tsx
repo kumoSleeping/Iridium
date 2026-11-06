@@ -22,6 +22,8 @@ import { askOnce, sentFromHere } from "../unread";
 import { useGlide } from "../motion";
 import { previews } from "./files";
 import { upload } from "./upload";
+import { findSecretish } from "./secretish";
+import { SaveSecret } from "./savesecret";
 
 /** The words' box, as MentionMarks draws them under it too. */
 const BOX = "px-0.5 py-1 text-md leading-[21px]";
@@ -189,6 +191,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
     requestAnimationFrame(() => (box.current?.focus(), box.current?.setSelectionRange(at, at)));
   };
   const shown = list.length || named.length;
+  // What looks like a key: store it as a credential and say {{NAME}} instead (savesecret.tsx).
+  const [notSecret, setNotSecret] = useState<ReadonlySet<string>>(new Set());
+  const secretish = shown ? null : findSecretish(text, notSecret);
   const uploading = atts.some((a) => !a.ref && !a.error);
   const empty = !text.trim() && !atts.length;
   const queues = s.queue !== undefined;
@@ -284,6 +289,18 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
     <div className="relative">
       {list.length > 0 && <Palette list={list} at={Math.min(at, list.length - 1)} point={setAt} pick={(c) => (own(`/${c.name}`) ? undefined : (type(`/${c.name} `), box.current?.focus()))} />}
       {named.length > 0 && <AtList list={named} at={Math.min(at, named.length - 1)} point={setAt} pick={name} />}
+      {secretish && (
+        <SaveSecret
+          key={secretish.value}
+          found={secretish}
+          skip={() => setNotSecret(new Set([...notSecret, secretish.value]))}
+          saved={(n) => {
+            const words = `{{${n}}}`;
+            type(text.slice(0, secretish.start) + words + text.slice(secretish.end));
+            requestAnimationFrame(() => box.current?.focus());
+          }}
+        />
+      )}
     <div className="glass float rest relative @container rounded-[20px]">
       <div aria-hidden={!atts.length || undefined} className={cn("grid transition-[grid-template-rows,opacity] duration-(--dur-3) ease-(--ease-out)", atts.length ? "grid-rows-[1fr]" : "grid-rows-[0fr] opacity-0")}>
         <div className="min-h-0 overflow-hidden">

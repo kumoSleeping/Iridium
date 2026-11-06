@@ -3,8 +3,11 @@
 // composer and on the settings' 终端 page, and the sidebar lists it under 需要你. Allowed, the
 // secret goes to this panel alone, in a card where this one was (secret.tsx); the agent only learns how it went. One
 // asked with --owner (the new terminal gets Claude) only a panel that has Claude allows.
-import { KeyRound, Link2 } from "lucide-react";
-import { useState } from "react";
+// A credential's (plan "凭据"): secret-set has a password box, whose value goes to the daemon and
+// nowhere else; secret-use is allow, this session, or deny, and only the owner's own allows it.
+import { KeyRound, Link2, LockKeyhole, Terminal as TermIcon } from "lucide-react";
+import { ConfirmIcon, confirmName, confirmTitle } from "./confirmname";
+import { useRef, useState, type ReactNode } from "react";
 import { api } from "./api/client";
 import type { Confirm, Me } from "./api/types.gen";
 import { CardDetails, CardFrame, CardHead, Facts, MainKey, SecondKey } from "./card";
@@ -16,7 +19,7 @@ import { useList } from "./store";
 import { errText, toast } from "./toast";
 import { titleOf } from "./ui";
 
-export const confirmTitle = (c: Confirm) => (c.kind === "invite" ? t("confirm.invite") : t("confirm.token"));
+export { confirmTitle, confirmName, ConfirmIcon };
 
 /** This terminal may say another is the owner's own (--owner, Claude on): a passkey panel that
  *  has Claude itself. The server checks the same (ownerSays); 本机's ir may too. */
@@ -24,6 +27,12 @@ export const saysOwner = (me?: Me) => !!me && me.kind === "panel" && !me.local &
 
 /** at: where it is drawn (the asking session's id, or "terminals"): the secret shows there. */
 export function ConfirmCard({ c, at: here }: { c: Confirm; at: string }) {
+  if (c.kind === "secret-set") return <SecretSetCard c={c} />;
+  if (c.kind === "secret-use") return <SecretUseCard c={c} />;
+  return <SecretGiveCard c={c} at={here} />;
+}
+
+function SecretGiveCard({ c, at: here }: { c: Confirm; at: string }) {
   const lang = useLang();
   const list = useList();
   const me = useMe().data;
@@ -80,6 +89,154 @@ export function ConfirmCard({ c, at: here }: { c: Confirm; at: string }) {
           />
           <p className="m-0 text-xs text-ink-3">{c.kind === "invite" ? t("confirm.inviteHint") : t("confirm.tokenHint")}</p>
           {c.owner && <p className="m-0 text-xs text-ink-3">{blocked ? t("confirm.ownerElsewhere") : t("confirm.ownerHint")}</p>}
+        </CardDetails>
+      )}
+    </CardFrame>
+  );
+}
+
+/** Who asked, and the card's time: the asking session's title (or the terminal), and until when. */
+function useAsked(c: Confirm) {
+  const lang = useLang();
+  const list = useList();
+  const from = list?.find((s) => s.id === c.session);
+  const who = from ? titleOf(from) : c.asker;
+  const until = new Date(c.expiresAt).toLocaleTimeString(lang === "zh" ? "zh-CN" : "en", { hour: "2-digit", minute: "2-digit" });
+  const facts: [string, ReactNode][] = [
+    [t("confirm.asker"), c.asker],
+    ...(from ? ([[t("confirm.session"), <button type="button" onClick={() => openChat(from.id)} className="text-left text-ink underline decoration-ink-4 underline-offset-2">{titleOf(from)}</button>]] as [string, ReactNode][]) : []),
+    [t("confirm.until"), until],
+  ];
+  return { who, facts };
+}
+
+/** An agent's ir secret set: the value is typed here, goes to the daemon, and is never shown again;
+ *  the agent learns only that it is stored. Enter stores it. */
+function SecretSetCard({ c }: { c: Confirm }) {
+  const { who, facts } = useAsked(c);
+  const [value, setValue] = useState("");
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState<"allow" | "deny" | null>(null);
+  const [leaving, setLeaving] = useState(false);
+  const box = useRef<HTMLInputElement>(null);
+  const answer = async (allow: boolean) => {
+    if (allow && !value) return box.current?.focus();
+    setBusy(allow ? "allow" : "deny");
+    try {
+      const r = await api.answerConfirm(c.id, allow, allow ? { value } : undefined);
+      setValue("");
+      setLeaving(true);
+      if (r.state === "failed") toast(t("err.confirm"), { error: true, description: r.error });
+      else toast(allow ? t("secrets.stored", { name: c.name ?? "" }) : t("toast.denied"));
+    } catch (e) {
+      toast(t("err.confirm"), { error: true, description: errText(e) });
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <CardFrame label={confirmTitle(c)} leaving={leaving}>
+      <CardHead
+        icon={<LockKeyhole size={16} />}
+        title={c.replace ? t("secrets.replaceTitle") : confirmTitle(c)}
+        tag={c.name}
+        summary={c.note ? t("secrets.askedFor", { who, note: c.note }) : t("confirm.asked", { who })}
+        open={open}
+        setOpen={setOpen}
+        keys={
+          <>
+            <SecondKey disabled={!!busy} onClick={() => void answer(false)}>
+              {t("ask.deny")}
+            </SecondKey>
+            <MainKey busy={busy === "allow"} disabled={!!busy || !value} onClick={() => void answer(true)}>
+              {t("secrets.store")}
+            </MainKey>
+          </>
+        }
+      />
+      <form
+        className="mt-2.5 pl-[26px]"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void answer(true);
+        }}
+      >
+        <input
+          ref={box}
+          type="password"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          autoComplete="new-password"
+          spellCheck={false}
+          name={`secret-${c.name}`}
+          placeholder={t("secrets.valueOf", { name: c.name ?? "" })}
+          aria-label={t("secrets.valueOf", { name: c.name ?? "" })}
+          className="h-9 w-full rounded-md bg-fill px-2.5 font-mono text-sm outline-none placeholder:font-sans placeholder:text-ink-3 focus:bg-fill-2 pointer-coarse:h-11"
+        />
+      </form>
+      {open && (
+        <CardDetails>
+          <Facts rows={facts} />
+          <p className="m-0 text-xs text-ink-3">{t("secrets.setHint")}</p>
+        </CardDetails>
+      )}
+    </CardFrame>
+  );
+}
+
+/** ir run in a session another terminal opened (or of a secret confirmed every time): allow it
+ *  once, for the rest of the session, or not. Only the owner's own allows it. */
+function SecretUseCard({ c }: { c: Confirm }) {
+  const me = useMe().data;
+  const blocked = !saysOwner(me);
+  const { who, facts } = useAsked(c);
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState<"allow" | "session" | "deny" | null>(null);
+  const [leaving, setLeaving] = useState(false);
+  const answer = async (allow: boolean, forSession = false) => {
+    setBusy(!allow ? "deny" : forSession ? "session" : "allow");
+    try {
+      const r = await api.answerConfirm(c.id, allow, forSession ? { forSession } : undefined);
+      setLeaving(true);
+      if (r.state === "failed") toast(t("err.confirm"), { error: true, description: r.error });
+      else toast(allow ? t("toast.allowed") : t("toast.denied"));
+    } catch (e) {
+      toast(t("err.confirm"), { error: true, description: errText(e) });
+    } finally {
+      setBusy(null);
+    }
+  };
+  const names = confirmName(c);
+  return (
+    <CardFrame label={confirmTitle(c)} leaving={leaving}>
+      <CardHead
+        icon={<TermIcon size={16} />}
+        title={confirmTitle(c)}
+        tag={names}
+        mono={!blocked}
+        summary={blocked ? t("secrets.ownerElsewhere") : c.command || t("confirm.asked", { who })}
+        open={open}
+        setOpen={setOpen}
+        keys={
+          <>
+            <SecondKey disabled={!!busy} onClick={() => void answer(false)}>
+              {t("ask.deny")}
+            </SecondKey>
+            {!c.always && (
+              <SecondKey disabled={!!busy || blocked} onClick={() => void answer(true, true)}>
+                {t("secrets.forSession")}
+              </SecondKey>
+            )}
+            <MainKey busy={busy === "allow"} disabled={!!busy || blocked} onClick={() => void answer(true)}>
+              {t("secrets.allowOnce")}
+            </MainKey>
+          </>
+        }
+      />
+      {open && (
+        <CardDetails>
+          <Facts rows={[[t("secrets.names"), names], ...(c.command ? ([[t("secrets.command"), <code className="font-mono text-xs">{c.command}</code>]] as [string, ReactNode][]) : []), ...facts]} />
+          <p className="m-0 text-xs text-ink-3">{c.always ? t("secrets.alwaysHint") : t("secrets.useHint")}</p>
         </CardDetails>
       )}
     </CardFrame>
