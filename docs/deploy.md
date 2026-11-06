@@ -83,7 +83,7 @@ rm -r ~/.local/opt/iridium ~/.local/bin/ir ~/.config/systemd/user/iridium.servic
 
 ## 另一个节点
 
-- 本机另一个账号：`iridium node new <账号>`（sudo 问一次密码），建账号、开 linger、放 ssh 密钥、装好启动；之后 `iridium push -i ~/.ssh/iridium_<账号>_ed25519 <账号>@localhost` 换成这个二进制。
+- 本机另一个账号：`iridium node new <账号>`（要 root 一次：能 sudo 用 sudo，否则 su 问 root 密码），建账号、开 linger、放 ssh 密钥、装好启动；之后 `iridium push -i ~/.ssh/iridium_<账号>_ed25519 <账号>@localhost` 换成这个二进制。
 - 别的机器：`iridium push <用户@主机>`（那边能 ssh 进去、平台一样）。
 
 ## 测试节点

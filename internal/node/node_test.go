@@ -5,7 +5,7 @@ import (
 	"errors"
 	"io"
 	"os"
-	"os/user"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -88,48 +88,83 @@ func TestPush(t *testing.T) {
 func TestNew(t *testing.T) {
 	key := filepath.Join(t.TempDir(), "key")
 	os.WriteFile(key+".pub", []byte("ssh-ed25519 AAAA test\n"), 0o600)
-	var ran []string
-	made := false
+	var ran [][]string
 	var pushed PushOptions
 	o := NewOptions{
-		User: "irtest", Listen: "127.0.0.1:7899", Key: key,
-		Run: func(_ context.Context, _ io.Reader, name string, args ...string) error {
-			ran = append(ran, name+" "+strings.Join(args, " "))
-			if len(args) > 0 && args[0] == "useradd" {
-				made = true
-			}
+		User: "irtest", Listen: "127.0.0.1:7899", Key: key, Elevate: "sudo",
+		Run: func(_ context.Context, name string, args ...string) error {
+			ran = append(ran, append([]string{name}, args...))
 			return nil
-		},
-		Lookup: func(name string) (*user.User, error) {
-			if !made {
-				return nil, user.UnknownUserError(name)
-			}
-			return &user.User{Username: name, HomeDir: "/home/" + name}, nil
 		},
 		Push: func(_ context.Context, p PushOptions) error { pushed = p; return nil },
 	}
 	if err := New(context.Background(), o); err != nil {
 		t.Fatal(err)
 	}
-	if len(ran) != 3 || ran[0] != "sudo useradd -m -s /bin/bash irtest" || ran[1] != "sudo loginctl enable-linger irtest" ||
-		!strings.HasPrefix(ran[2], "sudo sh -c") || !strings.HasSuffix(ran[2], "sh /home/irtest irtest ssh-ed25519 AAAA test") {
+	// One sudo for all of the root part, the account and the key as its arguments.
+	if len(ran) != 1 || strings.Join(ran[0][:3], " ") != "sudo sh -c" || ran[0][3] != rootPart || strings.Join(ran[0][4:], "|") != "sh|irtest|ssh-ed25519 AAAA test" {
 		t.Fatalf("ran %q", ran)
 	}
 	if pushed.Target != "irtest@localhost" || pushed.Key != key || pushed.Listen != "127.0.0.1:7899" {
 		t.Fatalf("pushed %+v", pushed)
 	}
-	// An account that is there is not made again.
+	// Without sudo: su with one quoted command, which a shell reads back as the same words.
 	ran = nil
-	if err := New(context.Background(), o); err != nil || len(ran) != 2 {
-		t.Fatalf("again: %q %v", ran, err)
+	o.Elevate = "su"
+	if err := New(context.Background(), o); err != nil {
+		t.Fatal(err)
 	}
-	// A failing sudo stops it before anything is pushed.
+	if len(ran) != 1 || ran[0][0] != "su" || ran[0][1] != "-c" || ran[0][3] != "root" {
+		t.Fatalf("su %q", ran)
+	}
+	words, err := exec.Command("sh", "-c", "set -- "+ran[0][2]+`; printf '%s\036' "$@"`).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Split(strings.TrimSuffix(string(words), "\x1e"), "\x1e"); len(got) != 6 || got[0] != "sh" || got[2] != rootPart || got[4] != "irtest" || got[5] != "ssh-ed25519 AAAA test" {
+		t.Fatalf("su words %q", got)
+	}
+	// A failing root part stops it before anything is pushed.
 	pushed = PushOptions{}
-	o.Run = func(context.Context, io.Reader, string, ...string) error { return errors.New("no") }
+	o.Run = func(context.Context, string, ...string) error { return errors.New("no") }
 	if err := New(context.Background(), o); err == nil || pushed.Target != "" {
-		t.Fatalf("sudo failed: %v %+v", err, pushed)
+		t.Fatalf("root part failed: %v %+v", err, pushed)
 	}
 	if err := New(context.Background(), NewOptions{User: "Bad Name"}); err == nil {
 		t.Error("a bad name")
+	}
+}
+
+// The root part itself, run as a shell script against stand-ins for the root commands.
+func TestRootPart(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "bin")
+	home := filepath.Join(dir, "home")
+	os.MkdirAll(bin, 0o755)
+	for name, body := range map[string]string{
+		"id":       `[ -f "$LOG.made" ]`,
+		"useradd":  `touch "$LOG.made"; echo "useradd $*" >>"$LOG"`,
+		"loginctl": `echo "loginctl $*" >>"$LOG"`,
+		"getent":   `echo "irtest:x:1:1::$HOME_DIR:/bin/bash"`,
+		"install":  `shift 7; mkdir -p "$1"`,
+		"chown":    `true`,
+	} {
+		os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\n"+body+"\n"), 0o755)
+	}
+	log := filepath.Join(dir, "log")
+	run := func() {
+		c := exec.Command("sh", "-c", rootPart, "sh", "irtest", "ssh-ed25519 AAAA test")
+		c.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "LOG="+log, "HOME_DIR="+home)
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %s", err, out)
+		}
+	}
+	run()
+	run() // again: not made twice, the key in once
+	if got := read(log); got != "useradd -m -s /bin/bash irtest\nloginctl enable-linger irtest\nloginctl enable-linger irtest\n" {
+		t.Fatalf("log %q", got)
+	}
+	if got := read(filepath.Join(home, ".ssh", "authorized_keys")); got != "ssh-ed25519 AAAA test\n" {
+		t.Fatalf("authorized_keys %q", got)
 	}
 }

@@ -134,19 +134,35 @@ type NewOptions struct {
 	Exe string
 	SSH string
 	Out io.Writer
-	// Run runs a command with this terminal (sudo asks for the password there); nil runs it.
-	Run func(ctx context.Context, stdin io.Reader, name string, args ...string) error
-	// Lookup finds an account; nil is os/user.
-	Lookup func(name string) (*user.User, error)
+	// Elevate is how the root part runs: "root" (this is root), "sudo", or "su" (root's
+	// password); "" picks: root, sudo for a member of sudo, wheel or admin, else su.
+	Elevate string
+	// Run runs a command with this terminal (sudo or su asks for the password there); nil runs it.
+	Run func(ctx context.Context, name string, args ...string) error
 	// Push is the push at the end; nil is Push.
 	Push func(context.Context, PushOptions) error
 }
 
 var userName = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
 
-// New makes the account o.User on this machine a node: the account (sudo useradd) unless it is
-// there, linger so its services run without a login, this account's ssh key let in, then a push,
-// which installs and starts Iridium there. Logging in to its agents and ir public are done in it.
+// rootPart is all New needs root for, run once ($1 the account, $2 the key): the account unless
+// it is there, linger so its services run without a login, the key let in (~/.ssh 0700,
+// authorized_keys 0600, the account's).
+const rootPart = `set -eu
+u=$1 pub=$2
+id "$u" >/dev/null 2>&1 || useradd -m -s /bin/bash "$u"
+loginctl enable-linger "$u"
+home=$(getent passwd "$u" | cut -d: -f6)
+install -d -m 700 -o "$u" -g "$u" "$home/.ssh"
+f=$home/.ssh/authorized_keys
+grep -qxF "$pub" "$f" 2>/dev/null || printf '%s\n' "$pub" >>"$f"
+chown "$u:$u" "$f"
+chmod 600 "$f"
+echo "账号 $u 好了（$home）。"`
+
+// New makes the account o.User on this machine a node: its root part (rootPart) with one
+// password, then a push, which installs and starts Iridium there. Logging in to its agents and
+// ir public are done in it.
 func New(ctx context.Context, o NewOptions) error {
 	if o.Out == nil {
 		o.Out = io.Discard
@@ -154,17 +170,21 @@ func New(ctx context.Context, o NewOptions) error {
 	if o.Run == nil {
 		o.Run = run
 	}
-	if o.Lookup == nil {
-		o.Lookup = user.Lookup
-	}
 	if o.Push == nil {
 		o.Push = Push
 	}
 	if !userName.MatchString(o.User) {
 		return fmt.Errorf("node new: %q is not an account name (a-z, 0-9, _ and -)", o.User)
 	}
-	if me, err := user.Current(); err == nil && me.Username == o.User {
+	me, err := user.Current()
+	if err != nil {
+		return err
+	}
+	if me.Username == o.User {
 		return errors.New("node new: that is this account; a node is another one")
+	}
+	if o.Elevate == "" {
+		o.Elevate = elevation(me)
 	}
 	if o.Listen == "" {
 		port, err := freePort(7811)
@@ -173,35 +193,15 @@ func New(ctx context.Context, o NewOptions) error {
 		}
 		o.Listen = fmt.Sprintf("127.0.0.1:%d", port)
 	}
-	home, _ := os.UserHomeDir()
 	if o.Key == "" {
-		o.Key = filepath.Join(home, ".ssh", "iridium_"+o.User+"_ed25519")
-	}
-	sudo := func(args ...string) error { return o.Run(ctx, nil, "sudo", args...) }
-	fmt.Fprintf(o.Out, "把账号 %s 做成一个节点（sudo 会问一次你的密码）。\n", o.User)
-	u, err := o.Lookup(o.User)
-	if err != nil {
-		if err := sudo("useradd", "-m", "-s", "/bin/bash", o.User); err != nil {
-			return fmt.Errorf("node new: useradd: %w", err)
-		}
-		if u, err = o.Lookup(o.User); err != nil {
-			return err
-		}
-		fmt.Fprintf(o.Out, "建了账号 %s（%s）。\n", o.User, u.HomeDir)
-	}
-	if err := sudo("loginctl", "enable-linger", o.User); err != nil {
-		return fmt.Errorf("node new: linger: %w", err)
+		o.Key = filepath.Join(me.HomeDir, ".ssh", "iridium_"+o.User+"_ed25519")
 	}
 	if _, err := os.Stat(o.Key + ".pub"); err != nil {
 		if err := os.MkdirAll(filepath.Dir(o.Key), 0o700); err != nil {
 			return err
 		}
 		host, _ := os.Hostname()
-		me := "me"
-		if cu, err := user.Current(); err == nil {
-			me = cu.Username
-		}
-		if err := o.Run(ctx, nil, "ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", me+"@"+host+" -> "+o.User, "-f", o.Key); err != nil {
+		if err := o.Run(ctx, "ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", me.Username+"@"+host+" -> "+o.User, "-f", o.Key); err != nil {
 			return fmt.Errorf("node new: ssh-keygen: %w", err)
 		}
 	}
@@ -209,15 +209,25 @@ func New(ctx context.Context, o NewOptions) error {
 	if err != nil {
 		return err
 	}
-	// Let the key in, once: ~/.ssh 0700, authorized_keys 0600, both the account's.
-	const letIn = `set -eu
-d=$1/.ssh f=$1/.ssh/authorized_keys
-install -d -m 700 -o "$2" -g "$2" "$d"
-grep -qxF "$3" "$f" 2>/dev/null || printf '%s\n' "$3" >>"$f"
-chown "$2:$2" "$f"
-chmod 600 "$f"`
-	if err := sudo("sh", "-c", letIn, "sh", u.HomeDir, o.User, strings.TrimSpace(string(pub))); err != nil {
-		return fmt.Errorf("node new: the ssh key: %w", err)
+	args := []string{"sh", "-c", rootPart, "sh", o.User, strings.TrimSpace(string(pub))}
+	switch o.Elevate {
+	case "root":
+		err = o.Run(ctx, args[0], args[1:]...)
+	case "sudo":
+		fmt.Fprintf(o.Out, "把账号 %s 做成一个节点：要 root，sudo 会问你的密码。\n", o.User)
+		err = o.Run(ctx, "sudo", args...)
+	case "su":
+		fmt.Fprintf(o.Out, "把账号 %s 做成一个节点：要 root，这个账号不能 sudo，su 会问 root 的密码。\n", o.User)
+		q := make([]string, len(args))
+		for i, a := range args {
+			q[i] = shellQuote(a)
+		}
+		err = o.Run(ctx, "su", "-c", strings.Join(q, " "), "root")
+	default:
+		return fmt.Errorf("node new: no way %q to root", o.Elevate)
+	}
+	if err != nil {
+		return fmt.Errorf("node new: the root part (%s): %w", o.Elevate, err)
 	}
 	if err := o.Push(ctx, PushOptions{Target: o.User + "@localhost", Key: o.Key, Listen: o.Listen, Exe: o.Exe, SSH: o.SSH, Out: o.Out}); err != nil {
 		return err
@@ -231,12 +241,23 @@ chmod 600 "$f"`
 	return nil
 }
 
-func run(ctx context.Context, stdin io.Reader, name string, args ...string) error {
+// elevation is how this account gets root: it is root, it may sudo (in sudo, wheel or admin), or su.
+func elevation(me *user.User) string {
+	if me.Uid == "0" {
+		return "root"
+	}
+	ids, _ := me.GroupIds()
+	for _, id := range ids {
+		if g, err := user.LookupGroupId(id); err == nil && (g.Name == "sudo" || g.Name == "wheel" || g.Name == "admin") {
+			return "sudo"
+		}
+	}
+	return "su"
+}
+
+func run(ctx context.Context, name string, args ...string) error {
 	c := exec.CommandContext(ctx, name, args...)
 	c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
-	if stdin != nil {
-		c.Stdin = stdin
-	}
 	return c.Run()
 }
 

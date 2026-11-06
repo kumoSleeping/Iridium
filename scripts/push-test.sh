@@ -1,8 +1,8 @@
 #!/bin/sh
 # Builds this tree and puts it on the test node (by default the account ir on this machine,
 # https://ir-test.kumo.ltd, 127.0.0.1:7811). The building is all this script does; the binary
-# does the rest: iridium node new makes the account a node the first time (sudo asks for your
-# password once), iridium push sends the binary there and restarts it after. The main node runs
+# does the rest: iridium node new makes the account a node the first time (root once: sudo, or su
+# with the root password), iridium push sends the binary there and restarts it after. The main node runs
 # releases only and is never pushed to.
 #
 #   NODE     the test account (default ir)
