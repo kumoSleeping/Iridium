@@ -204,13 +204,9 @@ export function Logo({ agent, size = 16, className }: { agent: Agent; size?: num
         ))}
       </svg>
     );
-  // dsh: placeholder whale until DeepSeek's mark is checked.
-  return (
-    <svg role="img" aria-label="DeepSeek Harness" viewBox="0 0 24 24" className={cn("shrink-0", className)} style={style}>
-      <path fill="#4D6BFE" d="M2.5 12.6c0-4.2 3.7-7.3 8.6-7.3 4.3 0 7.4 2.3 8.4 5.5l1.8-1.9c.4-.4 1.1-.1 1 .5l-.6 3.3.9 2.7c.2.6-.4 1-.9.7l-2-1.3c-1.4 3.2-4.6 5.2-8.6 5.2-5 0-8.6-3.1-8.6-7.4z" />
-      <circle cx="7.6" cy="11.2" r="1.15" fill="var(--paper)" />
-    </svg>
-  );
+  // dsh: its own mark, the black whale of its web app's favicon (dsh-web-frontend), as a mask like
+  // Codex's: black on light, white on dark, as dsh draws it.
+  return <span role="img" aria-label="DeepSeek Harness" className={cn("inline-block shrink-0 bg-ink", className)} style={{ ...style, mask: "url(/logos/dsh.svg) center / contain no-repeat", WebkitMask: "url(/logos/dsh.svg) center / contain no-repeat" }} />;
 }
 
 const STATUS_KEY = {
