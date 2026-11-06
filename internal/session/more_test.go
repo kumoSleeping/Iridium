@@ -118,8 +118,13 @@ func TestSettings(t *testing.T) {
 	if s.Mode != "acceptEdits" || len(s.Models) != 2 || len(s.Modes) != 6 || len(s.Efforts) != 5 {
 		t.Fatalf("state: mode %q models %v modes %v efforts %v", s.Mode, s.Models, s.Modes, s.Efforts)
 	}
-	// The agent's own commands, for the palette, as its handshake named them.
-	if len(s.Commands) != 1 || s.Commands[0] != (api.Command{Name: "compact", Description: "Compact the conversation", ArgumentHint: "<instructions>"}) {
+	// The commands every session has, for the palette, without words (the page says them in its
+	// language); the agent's argument hint kept.
+	var names []string
+	for _, c := range s.Commands {
+		names = append(names, c.Name)
+	}
+	if strings.Join(names, " ") != "clear compact context usage model effort mode" || s.Commands[1] != (api.Command{Name: "compact", ArgumentHint: "<instructions>"}) {
 		t.Fatalf("commands: %+v", s.Commands)
 	}
 	// The default mode changed while it runs: the next new session takes it.

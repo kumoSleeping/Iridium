@@ -58,6 +58,16 @@ test("the chat comes apart, under its limit", () => {
   for (const f of first) expect(later).not.toContain(`/${f}`);
 });
 
+test("the settings and the jump box are fetched ahead too, after the chat", () => {
+  const first = files("index.html");
+  const later = /<meta name="later" content="([^"]*)"/.exec(readFileSync(join(out, "index.html"), "utf8"))![1]!.split(" ");
+  for (const key of ["src/settings.tsx", "src/terminals.tsx", "src/jump.tsx", "src/secret.tsx"]) {
+    expect(manifest[key]!.isDynamicEntry).toBe(true);
+    for (const f of files(key)) if (!first.has(f)) expect(later).toContain(`/${f}`);
+  }
+  expect(later[0]).toBe(`/${manifest["src/chat/chat.tsx"]!.file}`);
+});
+
 test("each script and style has a brotli and a gzip twin; the libraries apart from our code", () => {
   for (const c of Object.values(manifest)) for (const f of [c.file, ...(c.css ?? [])]) for (const ext of [".br", ".gz"]) expect([f + ext, existsSync(join(out, f + ext))]).toEqual([f + ext, true]);
   const names = Object.values(manifest).map((c) => c.file);

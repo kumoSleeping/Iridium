@@ -9,11 +9,12 @@
 import { Dialog } from "@base-ui/react/dialog";
 import { Toast } from "@base-ui/react/toast";
 import { Tooltip } from "@base-ui/react/tooltip";
-import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ComponentProps } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties } from "react";
+import { queryClient } from "./api/client";
 import { watchTurns } from "./chats";
 import { CreatePopover, WsPlus } from "./create";
 import { Drawer, SideKey } from "./drawer";
-import { useHome, useMe, useSettings, useTerminals, useUpdate, useWorkspaces } from "./data";
+import { agentsQ, pushQ, useHome, useMe, useSettings, useTerminals, useUpdate, useWorkspaces } from "./data";
 import { t, useLang } from "./i18n";
 import { applyTheme, initialTheme, keepTheme, MeChip, type ThemePref } from "./me";
 import { pageTurn } from "./motion";
@@ -30,26 +31,43 @@ import { cn, kept, keep, params, PHONE, useMedia, useMinute } from "./ui";
 import { watchUnread } from "./unread";
 import { warmUp } from "./warm";
 
-// The chat's code, once it came, is drawn straight, not through lazy, whose first draw shows the
-// fallback (Rhodium #386). Which of the two is picked as it mounts, for good.
-type ChatCode = typeof import("./chat/chat");
-let chatCode: ChatCode | undefined;
-let chatComing: Promise<ChatCode> | undefined;
-export const loadChat = () => (chatComing ??= import("./chat/chat").then((m) => (chatCode = m)).catch((e) => ((chatComing = undefined), Promise.reject(e))));
-const LazyChat = lazy(() => loadChat().then((m) => ({ default: m.ChatPage })));
-function ChatPage(p: ComponentProps<ChatCode["ChatPage"]>) {
-  const [Page] = useState(() => chatCode?.ChatPage ?? LazyChat);
-  return <Page {...p} />;
+/** A part that comes only as it is opened, or the page is idle. Once its code came it is drawn
+ *  straight, not through lazy, whose first draw shows the fallback even with the code at hand
+ *  (Rhodium #386); which of the two is picked as it mounts, for good. load fetches and runs it. */
+function part<P extends object>(get: () => Promise<ComponentType<P>>) {
+  let code: ComponentType<P> | undefined;
+  let coming: Promise<ComponentType<P>> | undefined;
+  const load = () => (coming ??= get().then((c) => (code = c)).catch((e) => ((coming = undefined), Promise.reject(e))));
+  const Lazy = lazy(() => load().then((c) => ({ default: c })));
+  function Part(p: P) {
+    const [C] = useState(() => code ?? Lazy);
+    return <C {...p} />;
+  }
+  return Object.assign(Part, { load });
 }
-const SettingsPage = lazy(() => import("./settings").then((m) => ({ default: m.SettingsPage })));
-const TerminalsPage = lazy(() => import("./terminals").then((m) => ({ default: m.TerminalsPage })));
-const SecretDialog = lazy(() => import("./secret").then((m) => ({ default: m.SecretDialog })));
-const Jump = lazy(() => import("./jump").then((m) => ({ default: m.Jump })));
+const ChatPage = part(() => import("./chat/chat").then((m) => m.ChatPage));
+const SettingsPage = part(() => import("./settings").then((m) => m.SettingsPage));
+const TerminalsPage = part(() => import("./terminals").then((m) => m.TerminalsPage));
+const SecretDialog = part(() => import("./secret").then((m) => m.SecretDialog));
+const Jump = part(() => import("./jump").then((m) => m.Jump));
+export const loadChat = ChatPage.load;
+/** The settings and the jump box, their code run, the settings' answers asked: once idle, or a
+ *  pointer on their key. */
+const loadPanels = () => {
+  for (const p of [SettingsPage, TerminalsPage, Jump]) void p.load().catch(() => {});
+  void queryClient.prefetchQuery(agentsQ);
+  void queryClient.prefetchQuery(pushQ);
+};
 
-// Once idle, the later parts' files into the cache; then the chat's code runs from it, so a turn
-// that ends fetches its chat on the list too. Not after one failed: a module that failed to load
-// stays failed in the browser.
-void prefetch().then((all) => void (all && loadChat().catch(() => {})));
+// Once idle, the later parts' files into the cache (vite.config.ts LATER); then their code runs from
+// it, so a turn that ends fetches its chat on the list too, and the settings and the jump box open at
+// once. Not after one failed: a module that failed to load stays failed in the browser.
+void prefetch().then((all) => {
+  if (!all) return;
+  void loadChat().catch(() => {});
+  void SecretDialog.load().catch(() => {});
+  loadPanels();
+});
 
 /** Whether a sidebar group is open, as this device left it: all are, but 归档. */
 function useExpanded() {
@@ -187,6 +205,7 @@ export function App() {
       confirms={confirms}
       onConfirm={(c) => (c.session && list?.some((s) => s.id === c.session) ? openChat(c.session) : go({ name: "terminals" }, over(r)))}
       chatCode={() => void loadChat().catch(() => {})}
+      panelsCode={loadPanels}
       createKey={(trigger) => <CreatePopover trigger={trigger} />}
       wsPlus={(w, trigger, o, setO) => <WsPlus key={w.key} w={{ id: w.id, name: w.name, path: w.root }} trigger={trigger} open={o} setOpen={setO} opened={(id) => openChat(id)} />}
       me={<MeChip theme={theme} setTheme={setThemeKept} defaultOpen={params.get("open") === "me"} initialPage={params.get("open") === "perms" ? "perms" : "main"} />}
@@ -210,6 +229,8 @@ export function App() {
 
   // The settings: a small dialog as wide as the me popover, right above their key at the sidebar's
   // foot, its right edge on the key's, rising out of it (the user, 2026-11-06); the terminals its page.
+  // As the me popover is (the user, 2026-11-06): no shade over the page, which stays live; a press
+  // outside puts it away, but one on its own key, which does that itself.
   const settingsAt = useSettingsAt(over(r));
   const settings = (
     <Dialog.Root
@@ -238,8 +259,6 @@ export function App() {
               <div key="settings" className="g-slide h-full" data-dir="back">
                 <SettingsPage onClose={() => close(under)} theme={theme} setTheme={setThemeKept} />
               </div>
-  // As the me popover is (the user, 2026-11-06): no shade over the page, which stays live; a press
-  // outside puts it away, but one on its own key, which does that itself.
             )}
           </Suspense>
         </Dialog.Popup>

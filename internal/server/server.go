@@ -277,6 +277,20 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 		s.error(w, err)
 		return
 	}
+	if session.IsClear(req.Text) && len(req.Attachments) == 0 {
+		id, err := s.m.Clear(r.Context(), r.PathValue("id"), s.fromOf(c, req.Caller))
+		if id != "" && id != r.PathValue("id") {
+			if err := s.st.SetOpener(id, c.EndpointID); err != nil {
+				s.logf("server: opener of %s: %v", id, err)
+			}
+		}
+		if err != nil {
+			s.error(w, err)
+			return
+		}
+		reply(w, http.StatusOK, api.SendReply{Session: id})
+		return
+	}
 	text, images, err := s.files.Message(r.PathValue("id"), req.Text, req.Attachments)
 	if err != nil {
 		s.fileError(w, err)
@@ -287,7 +301,7 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 		s.error(w, err)
 		return
 	}
-	reply(w, http.StatusOK, api.SendReply{Input: input, Queued: queued})
+	reply(w, http.StatusOK, api.SendReply{Input: input, Queued: queued, Command: s.m.RunsItself(r.PathValue("id"), text)})
 }
 
 func (s *Server) interrupt(w http.ResponseWriter, r *http.Request) {
@@ -308,12 +322,12 @@ func (s *Server) answer(w http.ResponseWriter, r *http.Request) {
 	s.done(w, s.m.Answer(r.Context(), r.PathValue("id"), a))
 }
 
-var stateKey = regexp.MustCompile(`^(list|quota|workspaces|confirms|update|(session|context):[0-9a-zA-Z_-]{1,128})$`)
+var stateKey = regexp.MustCompile(`^(list|quota|workspaces|colors|confirms|update|(session|context):[0-9a-zA-Z_-]{1,128})$`)
 
 // events is the page's one event stream: ?sub=<key> for each state it wants (list, quota,
-// workspaces, session:<id>, context:<id>, confirms, update). See package hub. A key it does not
-// know, or one not for this terminal (confirms, but for panels), does not fail the stream: it is
-// left out, and the stream's first events say so (StateEvent.Ignored).
+// workspaces, colors, session:<id>, context:<id>, confirms, update). See package hub. A key it does
+// not know, or one not for this terminal (confirms and colors, but for panels), does not fail the
+// stream: it is left out, and the stream's first events say so (StateEvent.Ignored).
 func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	keys := r.URL.Query()["sub"]
 	if len(keys) == 0 && s.Chat != nil {
@@ -331,7 +345,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case !stateKey.MatchString(k):
 			ignored = append(ignored, api.StateEvent{Key: k, Ignored: "unknown"})
-		case k == "confirms" && !c.panel():
+		case (k == "confirms" || k == "colors") && !c.panel():
 			ignored = append(ignored, api.StateEvent{Key: k, Ignored: "forbidden"})
 		case !slices.Contains(carried, k):
 			carried = append(carried, k)

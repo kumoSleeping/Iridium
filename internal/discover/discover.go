@@ -94,6 +94,7 @@ type running struct {
 	launcher string // the session that started it, if known
 	ours     bool   // Iridium hosts it: IRIDIUM_SESSION is its own id
 	name     string // Claude: the name the user gave it
+	needs    string // Claude: what it waits on you for in its terminal, if it does
 }
 
 type Index struct {
@@ -186,6 +187,7 @@ func (x *Index) Start() error {
 	x.w = w
 	x.Scan()
 	x.publishWorkspaces()
+	x.publishColors()
 	x.wg.Add(2)
 	go x.loop()
 	go x.settle()
@@ -502,7 +504,7 @@ func (x *Index) row(e *entry) api.Session {
 		Subagent: e.sub, Parent: e.parent, Done: e.sub && e.done, Workflow: e.flow,
 	}
 	if r, ok := x.running[e.id]; ok && !r.ours {
-		s.Status, s.Live = api.StatusElsewhere, true
+		s.Status, s.Live, s.Needs = api.StatusElsewhere, true, r.needs
 		if r.name != "" {
 			s.Title = r.name
 		}

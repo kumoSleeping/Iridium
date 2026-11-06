@@ -12,6 +12,7 @@ import type {
   ConfirmReply,
   Confirms,
   EditQueued,
+  FolderColor,
   FolderReply,
   Folders,
   FullText,
@@ -171,6 +172,8 @@ export const api = {
   folders: (path: string) => get<Folders>(`/api/folders?path=${enc(path)}`),
   mkdir: (f: NewFolder) => write<FolderReply>("POST", "/api/folders", f),
   patch: (id: string, p: SessionPatch) => writeAgain<{ ok: boolean }>("PATCH", S(id), p),
+  /** A folder's colour tag; "" takes it off. The carried state "colors" has them all. */
+  folderColor: (f: FolderColor) => writeAgain<{ ok: boolean }>("PUT", "/api/colors", f),
 
   // --- files in messages, uploads ---
   fileURL: (id: string, ref: string, download = false) => `${S(id)}/files/${enc(ref)}${download ? "?download" : ""}`,

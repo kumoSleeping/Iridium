@@ -12,7 +12,7 @@ import { openChat, recent } from "./route";
 import { useSaidLine } from "./data";
 import { useList } from "./store";
 import { flat, type Tree } from "./tree";
-import { cn, LogoLamp, tilde, titleOf } from "./ui";
+import { cn, lampOf, LogoLamp, tilde, titleOf } from "./ui";
 
 /** The sessions for what was typed: names that start with it, then names or folders that have it,
  *  then those whose last words do; archived last. */
@@ -93,7 +93,7 @@ export function Jump({ close, tree, open }: { close: () => void; tree: Tree; ope
             onClick={() => go(s.id)}
             className={cn("flex h-[30px] w-full cursor-default items-center gap-2 rounded-md px-2 text-left pointer-coarse:h-10", i === sel && "bg-fill", s.archived && "opacity-55")}
           >
-            <LogoLamp agent={s.agent} status={s.status} />
+            <LogoLamp agent={s.agent} status={lampOf(s)} />
             <span className="min-w-0 shrink truncate text-base">{titleOf(s)}</span>
             <span className="min-w-0 flex-1 truncate text-xs text-ink-3">{said(s.last) ?? tilde(s.cwd)}</span>
             {s.archived && <Archive size={13} className="shrink-0 text-ink-4" aria-label={t("nav.archive")} />}

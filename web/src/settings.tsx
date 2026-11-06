@@ -6,9 +6,9 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { BellRing, ChevronRight, CircleAlert, FoldVertical, LoaderCircle, MessageSquareDot, Monitor, Moon, MonitorSmartphone, RefreshCw, Sun, X } from "lucide-react";
 import { useState, type ReactNode } from "react";
-import { api, missing } from "./api/client";
+import { api } from "./api/client";
 import type { PushEvents, PushState, Settings, SettingsPatch } from "./api/types.gen";
-import { useAgents, useMe, useSettings, useTerminals, useUpdate, useWorkspaces } from "./data";
+import { pushQ, useAgents, useMe, useSettings, useTerminals, useUpdate, useWorkspaces } from "./data";
 import { t, useLang } from "./i18n";
 import { LangSwitch, Segmented, type ThemePref } from "./me";
 import { modeName } from "./modes";
@@ -56,8 +56,7 @@ export function SettingsPage({ onClose, theme, setTheme }: { onClose: () => void
       toast(t("err.settings"), { error: true, description: errText(e) });
     }
   };
-  // Push's keys and each workspace's events are the daemon's own (GET /api/push).
-  const pq = useQuery({ queryKey: ["push"], queryFn: () => api.push().catch((e) => (missing(e) ? null : Promise.reject(e))), staleTime: 30_000 });
+  const pq = useQuery(pushQ);
   const push: PushState | null | undefined = pq.data;
   const rules = (id: number): PushEvents => {
     const w = push?.workspaces.find((x) => x.workspace === id);

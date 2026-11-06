@@ -62,11 +62,13 @@ export function buildTree(all: Session[], workspaces: Workspace[], unsorted: str
     else runs.delete(parent);
   }
   const live = list.filter((s) => !s.archived);
-  const needs = live.filter((s) => s.status === "waiting");
+  // One running elsewhere that waits on you there counts too: you answer it in its terminal.
+  const waits = (s: Session) => s.status === "waiting" || (s.status === "elsewhere" && !!s.needs);
+  const needs = live.filter(waits);
   const byWs = new Map<number, Session[]>();
   const where = new Map<string, string>();
   for (const s of live) {
-    if (s.status === "waiting") continue;
+    if (waits(s)) continue;
     const ws = workspaces.some((w) => w.id === s.workspace) ? s.workspace! : 0;
     byWs.set(ws, [...(byWs.get(ws) ?? []), s]);
   }

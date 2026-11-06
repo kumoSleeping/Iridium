@@ -40,6 +40,11 @@ func (m *Manager) SendWith(ctx context.Context, id, text, from string, steer boo
 	if strings.TrimSpace(text) == "" {
 		return "", false, errors.New("an empty message")
 	}
+	// A command (/compact, /context…) waits for the turn's end: written into a running turn the
+	// agent may take it as words, and Codex and pi cannot compact mid-turn.
+	if strings.HasPrefix(strings.TrimSpace(text), "/") {
+		text, steer = strings.TrimSpace(text), false
+	}
 	h, err := m.take(ctx, id)
 	if err != nil {
 		return "", false, err

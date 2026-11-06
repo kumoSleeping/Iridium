@@ -42,6 +42,15 @@
   --start: var(--run); /* no grey dot (the user, 2026-11-06): green, breathing quicker than at work */
   --compact-to: oklch(0.86 0.16 96);
 
+  /* colour tags from a row's menu (colors.ts): one lightness and chroma, the hues apart */
+  --tag-red: oklch(0.63 0.2 25);
+  --tag-orange: oklch(0.7 0.17 55);
+  --tag-yellow: oklch(0.8 0.15 90);
+  --tag-green: oklch(0.66 0.16 150);
+  --tag-blue: oklch(0.62 0.16 250);
+  --tag-purple: oklch(0.6 0.17 305);
+  --tag-gray: oklch(0.62 0 0);
+
   /* an edit's lines added and taken; a tool kind's icon: its own hue (--k-h), muted */
   --plus: oklch(0.55 0.13 150);
   --minus: oklch(0.57 0.15 25);
@@ -77,6 +86,13 @@
   --need: oklch(0.8 0.14 72);
   --err: oklch(0.67 0.19 27);
   --start: var(--run);
+  --tag-red: oklch(0.68 0.19 25);
+  --tag-orange: oklch(0.74 0.16 55);
+  --tag-yellow: oklch(0.83 0.14 90);
+  --tag-green: oklch(0.72 0.15 150);
+  --tag-blue: oklch(0.68 0.14 250);
+  --tag-purple: oklch(0.68 0.15 305);
+  --tag-gray: oklch(0.66 0 0);
   --plus: oklch(0.72 0.13 150);
   --minus: oklch(0.7 0.14 25);
   --k-l: 0.64;
@@ -173,20 +189,14 @@ body {
 .float.rest {
   box-shadow: var(--shadow-rest);
 }
-/* A session's row dragged from the sidebar (sidebar.tsx): the composer, where it may be dropped to
-   be named, rings faintly; the ring fades in and out, nothing moves. */
-.drop-to::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  box-shadow: inset 0 0 0 1.5px var(--ink-3);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--dur-2) var(--ease-out);
-}
-html[data-drag="session"] .drop-to::after {
-  opacity: 1;
+/* A session named in the composer (chat/mention.tsx): a soft ground under its words, a little wider
+   than them by a shadow, so no letter moves. */
+.mention-mark {
+  border-radius: 5px;
+  background: var(--fill-2);
+  box-shadow: 0 0 0 2px var(--fill-2);
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
 }
 @media (prefers-reduced-transparency: reduce) {
   .glass {

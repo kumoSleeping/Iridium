@@ -17,6 +17,7 @@ import { Files, Picture, previews, size } from "./files";
 import { cmdOfCall, type Cmd } from "./cmd";
 import { argOf, diffSum, foldLine, foldSaid, kindOf, runCmd, type Diff, type Kind, type Shown, type Step, type Tool } from "./fold";
 import { Markdown } from "./markdown";
+import { Mentioned } from "./mention";
 import { filesIn, type Source } from "./refs";
 
 type You = Extract<Source, { kind: "you" }>;
@@ -121,7 +122,7 @@ export const YouBubble = forwardRef<HTMLDivElement, { text: string; who: You; fa
       <div className="relative max-w-[min(560px,100%)] px-3.5 py-2">
         {going && <SendState state={going} />}
         <span data-bubble-bg className={cn("absolute inset-0 rounded-xl rounded-tr-sm bg-fill", failed && "shadow-[inset_0_0_0_1px_var(--err)]")} aria-hidden />
-        {text && <span className="relative block text-md whitespace-pre-wrap [overflow-wrap:anywhere]">{text}</span>}
+        {text && <span className="relative block text-md whitespace-pre-wrap [overflow-wrap:anywhere]"><Mentioned text={text} /></span>}
         {/* Not for no files: a message sent and the same one landed are as high (an empty list was
             a row of its own, the bubble shrinking as it landed). */}
         {Children.count(children) > 0 && <span className="relative mt-1 flex flex-wrap gap-1.5">{children}</span>}
@@ -180,7 +181,7 @@ export function Pending({ s, who, retry, drop, bubbleRef }: { s: Sent; who: You;
 function Letter({ src, text, time, onJump }: { src: From; text: string; time?: number; onJump: (id: string) => void }) {
   return (
     <Sender who={src} title={time ? clock(time) : undefined} jump={src.session ? () => onJump(src.session!) : undefined}>
-      <p className="m-0 max-w-[min(560px,100%)] min-w-0 rounded-xl rounded-tl-sm bg-fill px-3.5 py-2 text-md whitespace-pre-wrap [overflow-wrap:anywhere]">{text}</p>
+      <p className="m-0 max-w-[min(560px,100%)] min-w-0 rounded-xl rounded-tl-sm bg-fill px-3.5 py-2 text-md whitespace-pre-wrap [overflow-wrap:anywhere]"><Mentioned text={text} /></p>
     </Sender>
   );
 }

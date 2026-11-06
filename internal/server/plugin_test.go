@@ -149,7 +149,7 @@ func TestPluginChat(t *testing.T) {
 	p := newPluginRig(t)
 	const key = "/api/chat/qq:private:1"
 	var cmds []api.ChatCommand
-	if p.do("qq", "GET", key+"/commands", nil, &cmds); len(cmds) != 9 || cmds[0].Name != "new" || !cmds[0].Iridium {
+	if p.do("qq", "GET", key+"/commands", nil, &cmds); len(cmds) != 10 || cmds[0].Name != "new" || !cmds[0].Iridium {
 		t.Fatalf("commands: %+v", cmds)
 	}
 	if code := p.do("nobody", "GET", key+"/commands", nil, nil); code != http.StatusUnauthorized {

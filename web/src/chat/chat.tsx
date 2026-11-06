@@ -15,11 +15,11 @@ import { t, useLang } from "../i18n";
 import { pushIn } from "../motion";
 import { openChat } from "../route";
 import { PULL } from "../sheet";
-import { MenuItems, Rename, sessionActions } from "../sidebar";
+import { MenuItems, Rename, sessionActions, sessionTags } from "../sidebar";
 import { useConfirms, useList, useSession } from "../store";
 import { drafts, opened } from "../stream";
 import { errText, toast } from "../toast";
-import { agentName, cn, LogoLamp, statusText, tilde, Tip, titleOf } from "../ui";
+import { agentName, cn, lampOf, LogoLamp, sessionStatusText, tilde, Tip, titleOf } from "../ui";
 import { Asks } from "./asks";
 import { Composer, type ComposerHandle } from "./composer";
 import { folded, type Tool } from "./fold";
@@ -167,7 +167,6 @@ export function ChatPage({ id, phone, slot, sheet = 0 }: { id: string; phone: bo
   const drop = (e: DragEvent) => {
     if (files(e)) return composer.current?.attach([...e.dataTransfer.files]);
     if (!session(e)) return;
-    delete document.documentElement.dataset.drag;
     const to = list?.find((x) => x.id === e.dataTransfer.getData(SESSION_DRAG));
     if (!to || to.id === id) return;
     composer.current?.insert(t("composer.mention", { title: titleOf(to) || tilde(to.cwd), agent: agentName(to.agent), id: shortId(to.id, list!.map((x) => x.id)) }));
@@ -259,6 +258,7 @@ export function ChatPage({ id, phone, slot, sheet = 0 }: { id: string; phone: bo
  *  right the context ring, then send (the user, 2026-11-06). */
 function Under({ s, ghost, composer, onSent, onSentDone, modelOpen, setModelOpen, modeOpen, setModeOpen, usageOpen, setUsageOpen }: { s: LiveSession; ghost: boolean; composer: React.RefObject<ComposerHandle | null>; onSent: (x: Sent) => void; onSentDone: (x: Sent) => void; modelOpen: boolean; setModelOpen: (o: boolean) => void; modeOpen: boolean; setModeOpen: (o: boolean) => void; usageOpen: boolean; setUsageOpen: (o: boolean) => void }) {
   const mode = useMode(s);
+  const [ctxOpen, setCtxOpen] = useState(false);
   return (
     <>
       <Composer
@@ -271,6 +271,8 @@ function Under({ s, ghost, composer, onSent, onSentDone, modelOpen, setModelOpen
         openModel={() => setModelOpen(true)}
         openMode={() => setModeOpen(true)}
         openUsage={() => setUsageOpen(true)}
+        openContext={() => !!s.context?.max && (setCtxOpen(true), true)}
+        cleared={openChat}
         tools={
           <>
             {/* Not guessed from the row: the mode and the model come with the state, gliding in. */}
@@ -279,7 +281,7 @@ function Under({ s, ghost, composer, onSent, onSentDone, modelOpen, setModelOpen
             <QuotaBars agent={s.agent} live={s.live} using={[s.model, s.pick, modelView(s).name]} open={usageOpen} onOpenChange={setUsageOpen} />
           </>
         }
-        end={<ContextRing session={s.id} summary={s.context} />}
+        end={<ContextRing session={s.id} summary={s.context} open={ctxOpen} onOpenChange={setCtxOpen} />}
       />
     </>
   );
@@ -295,9 +297,9 @@ function Bar({ s, phone, slot }: { s?: Session; phone: boolean; slot: boolean })
       <div className={cn("flex min-w-0 flex-1 items-center gap-2.5", slot ? "pl-10 pointer-coarse:pl-12" : "pl-2")}>
         {s && (
           <>
-            <Tip label={`${agentName(s.agent)} · ${statusText(s.status)}`} side="bottom">
+            <Tip label={`${agentName(s.agent)} · ${sessionStatusText(s)}`} side="bottom">
               <span className="grid">
-                <LogoLamp agent={s.agent} status={s.status} size={18} />
+                <LogoLamp agent={s.agent} status={lampOf(s)} size={18} />
               </span>
             </Tip>
             {renaming ? (
@@ -331,7 +333,7 @@ function Bar({ s, phone, slot }: { s?: Session; phone: boolean; slot: boolean })
           </Tip>
           <Menu.Portal>
             <Menu.Positioner side="bottom" align="end" sideOffset={6} collisionPadding={8} className="z-50">
-              <MenuItems items={sessionActions(s, () => setRenaming(true))}>{ws.length > 1 && <MoveTo s={s} ws={ws} />}</MenuItems>
+              <MenuItems items={sessionActions(s, () => setRenaming(true))} tags={sessionTags(s)}>{ws.length > 1 && <MoveTo s={s} ws={ws} />}</MenuItems>
             </Menu.Positioner>
           </Menu.Portal>
         </Menu.Root>

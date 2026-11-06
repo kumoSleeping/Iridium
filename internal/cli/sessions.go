@@ -91,6 +91,10 @@ func cmdSend(e *env, args []string) int {
 	if err := e.do("POST", "/api/sessions/"+id+"/send", req, &sent); err != nil {
 		return e.fail(err)
 	}
+	if sent.Session != "" { // /clear: it goes on in a new session
+		fmt.Fprintln(e.out, short(sent.Session, e.ids()))
+		return exitDone
+	}
 	if sent.Queued {
 		if !o.wait {
 			return exitDone // it goes when the running turn ends

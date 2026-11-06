@@ -5,12 +5,14 @@
 // (the user's decision, 2026-11-05); out of a turn, the first line ends with how long ago it was. 需要你 on top when anything
 // waits on you, 归档 folded at the bottom. A workspace's row: its name a size up, its chevron only
 // under the mouse, a faint "+" at its end for a new session there. A row's menu (right click,
-// long-press): pin, rename, stop, archive. The mouse resting on a row fetches its chat ahead.
+// long-press): pin, rename, stop, archive, and at its foot the colour tags (colors.ts). The mouse
+// resting on a row fetches its chat ahead.
 import { Menu } from "@base-ui/react/menu";
-import { Archive, ArchiveRestore, Bot, ChevronRight, Copy, Folder, FolderOpen, Inbox, KeyRound, Link2, Maximize2, Pencil, Pin, PinOff, Plus, Search, Settings, ShieldOff, Square, Workflow as WorkflowIcon } from "lucide-react";
+import { Archive, ArchiveRestore, Bot, Check, ChevronRight, Copy, Folder, FolderOpen, Inbox, KeyRound, Link2, Maximize2, Pencil, Pin, PinOff, Plus, Search, Settings, ShieldOff, Square, Workflow as WorkflowIcon } from "lucide-react";
 import { Fragment, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { api } from "./api/client";
-import type { Confirm, Session } from "./api/types.gen";
+import type { Color, Confirm, Session } from "./api/types.gen";
+import { colorVar, COLORS, useFolderColors } from "./colors";
 import { ahead, behind } from "./chats";
 import { t } from "./i18n";
 import { useFlip } from "./motion";
@@ -18,7 +20,7 @@ import { useLink } from "./store";
 import type { Folder as FolderNode, Tree, WsNode } from "./tree";
 import { errText, toast } from "./toast";
 import { useSaidLine } from "./data";
-import { agentName, ago, cn, fine, IconKey, keep, kept, Lamp, Logo, statusText, tilde, Tip, titleOf, useLongPress, useMinute } from "./ui";
+import { agentName, ago, cn, fine, IconKey, keep, kept, Lamp, lampOf, Logo, sessionStatusText, statusText, tilde, Tip, titleOf, useLongPress, useMinute } from "./ui";
 import { SESSION_DRAG } from "./chat/refs";
 import { useUnread } from "./unread";
 import { KEY_SLOT } from "./drawer";
@@ -48,6 +50,8 @@ type Props = {
   me: ReactNode;
   /** The chat's code, fetched as a row is pressed. */
   chatCode: () => void;
+  /** The settings' and the jump box's code and answers, fetched as a pointer comes on their keys. */
+  panelsCode: () => void;
   /** On a computer: put the sidebar away (docked) or dock it again (a drawer). None on a phone. */
   onDock?: () => void;
   drawer: boolean;
@@ -166,7 +170,7 @@ export function Sidebar(p: Props) {
           <Plus size={18} />
         </button>,
       )}
-      <IconKey label={`${t("nav.search")} · ${t("nav.searchKey")}`} tipSide="bottom" onClick={p.onSearch} aria-pressed={p.searching} className={p.searching ? "bg-fill text-ink" : undefined}>
+      <IconKey label={`${t("nav.search")} · ${t("nav.searchKey")}`} tipSide="bottom" onClick={p.onSearch} onPointerEnter={p.panelsCode} onFocus={p.panelsCode} aria-pressed={p.searching} className={p.searching ? "bg-fill text-ink" : undefined}>
         <Search size={16} />
       </IconKey>
       <LinkDot />
@@ -278,7 +282,7 @@ export function Sidebar(p: Props) {
       <div className="flex h-14 shrink-0 items-center justify-between gap-2 px-2 pointer-coarse:h-16">
         <div className="min-w-0">{p.me}</div>
         <span className="relative shrink-0">
-          <IconKey label={p.updateDot ? `${t("nav.settings")} · ${t("settings.updateReady")}` : t("nav.settings")} onClick={p.onSettings} aria-pressed={p.settings} data-settings-key className={cn("size-10 pointer-coarse:size-11", p.settings && "bg-fill text-ink")}>
+          <IconKey label={p.updateDot ? `${t("nav.settings")} · ${t("settings.updateReady")}` : t("nav.settings")} onClick={p.onSettings} onPointerEnter={p.panelsCode} onFocus={p.panelsCode} aria-pressed={p.settings} data-settings-key className={cn("size-10 pointer-coarse:size-11", p.settings && "bg-fill text-ink")}>
             <Settings size={19} />
           </IconKey>
           {p.updateDot && <span className="g-pop pointer-events-none absolute top-1.5 right-1.5 size-2 rounded-full bg-err shadow-[0_0_0_1.5px_var(--paper)]" aria-hidden />}
@@ -308,10 +312,16 @@ function TrashLid({ open }: { open: boolean }) {
   );
 }
 
-/** A folder shut or open: both drawn, cross-faded (motion.css "swap"). */
-function FolderMark({ open }: { open: boolean }) {
+/** A folder shut or open: both drawn, cross-faded (motion.css "swap"); tagged, in its colour and
+ *  faintly filled with it. */
+function FolderMark({ open, color }: { open: boolean; color?: Color }) {
   return (
-    <span data-on={open || undefined} className="g-swap text-ink-3" aria-hidden>
+    <span
+      data-on={open || undefined}
+      className={cn("g-swap transition-colors duration-(--dur-2)", color ? "[&_svg]:[fill:color-mix(in_oklch,currentColor_24%,transparent)]" : "text-ink-3")}
+      style={color ? { color: colorVar(color) } : undefined}
+      aria-hidden
+    >
       <Folder size={15} />
       <FolderOpen size={15} />
     </span>
@@ -421,7 +431,8 @@ function SessionRow({ s, where, depth, flip, selected, onSelect, chatCode, worki
   const now = useMinute();
   const title = titleOf(s);
   // A subagent shown is at work, whatever discovery says of its process.
-  const status = working ? "running" : s.status;
+  const status = working ? "running" : lampOf(s);
+  const told = working ? statusText("running") : sessionStatusText(s);
   // How long ago it was last active (its turn ended, it was last written to), but in a turn. Unread,
   // it is in ink: no grey dot for it (the user, 2026-11-06).
   const fresh = unread && status === "idle";
@@ -453,7 +464,7 @@ function SessionRow({ s, where, depth, flip, selected, onSelect, chatCode, worki
     },
   };
   // Dragged to a chat, it is named in that chat's composer (chat.tsx): with a mouse, as a finger's
-  // long press is the menu. While it is dragged, html[data-drag] lights the composer (styles.css).
+  // long press is the menu. Nothing changes as it is dragged (the user, 2026-11-06).
   const drag = fine() && !renaming
     ? {
         draggable: true,
@@ -461,9 +472,7 @@ function SessionRow({ s, where, depth, flip, selected, onSelect, chatCode, worki
           e.dataTransfer.setData(SESSION_DRAG, s.id);
           e.dataTransfer.setData("text/plain", s.id);
           e.dataTransfer.effectAllowed = "copyLink";
-          document.documentElement.dataset.drag = "session";
         },
-        onDragEnd: () => delete document.documentElement.dataset.drag,
       }
     : {};
   // An archived one (no shown marker): one press brings it back.
@@ -497,9 +506,9 @@ function SessionRow({ s, where, depth, flip, selected, onSelect, chatCode, worki
         selected={selected}
         onClick={() => !renaming && onSelect(s.id)}
         faded={s.archived}
-        aria={`${title}, ${statusText(status)}${unread ? `, ${t("status.unread")}` : ""}`}
+        aria={`${title}, ${told}${unread ? `, ${t("status.unread")}` : ""}`}
         icon={
-          <Tip label={[agentName(s.agent), s.subagent && t("row.subagent"), status !== "idle" && statusText(status)].filter(Boolean).join(" · ")} side="bottom">
+          <Tip label={[agentName(s.agent), s.subagent && t("row.subagent"), status !== "idle" && told].filter(Boolean).join(" · ")} side="bottom">
             <span className="relative grid">
               <Logo agent={s.agent} />
               {/* A subagent: no word for it, a small agent badge on the logo's corner (the user, 2026-11-06). */}
@@ -517,6 +526,7 @@ function SessionRow({ s, where, depth, flip, selected, onSelect, chatCode, worki
           ) : (
             <>
               <span className="min-w-0 truncate">{title}</span>
+              {s.color && <TagDot color={s.color} />}
               {where && (
                 <Tip label={tilde(s.cwd)} side="bottom">
                   <span className="ml-1.5 max-w-[35%] shrink-0 truncate text-xs font-normal text-ink-3">{where.startsWith("/") ? tilde(where) : where}</span>
@@ -583,8 +593,14 @@ export function sessionActions(s: Session, rename: () => void): { icon: ReactNod
   ];
 }
 
+/** A session's colour tag, set from its menu. */
+export function sessionTags(s: Session): Tags {
+  return { value: s.color, set: (c) => void api.patch(s.id, { color: c as Color }).catch((e) => toast(t("err.action"), { error: true, description: errText(e) })) };
+}
+
 /** A folder's row in a workspace: its name, the "+" for a session in it; its menu (right click,
- *  long-press): a session here, its path copied, open or folded, its sessions archived. */
+ *  long-press): a session here, its path copied, open or folded, its sessions archived, its colour
+ *  tag. */
 function FolderRow({ f, label, open, onToggle, newHere, plus }: { f: FolderNode; label: ReactNode; open: boolean; onToggle: () => void; newHere: () => void; plus: ReactNode }) {
   const [at, setAt] = useState<{ x: number; y: number } | null>(null);
   const lp = useLongPress(() => {
@@ -593,6 +609,8 @@ function FolderRow({ f, label, open, onToggle, newHere, plus }: { f: FolderNode;
   });
   const done = (what: string) => () => toast(what);
   const failed = (e: unknown) => toast(t("err.action"), { error: true, description: errText(e) });
+  const color = useFolderColors()[f.path];
+  const tags: Tags = { value: color, set: (c) => void api.folderColor({ path: f.path, color: c as Color }).catch(failed) };
   const items = [
     { icon: <Plus size={15} />, label: t("menu.newHere"), run: newHere },
     { icon: <Copy size={15} />, label: t("menu.copyPath"), run: () => void navigator.clipboard.writeText(f.path).then(done(t("toast.copied")), failed) },
@@ -610,7 +628,7 @@ function FolderRow({ f, label, open, onToggle, newHere, plus }: { f: FolderNode;
         expanded={open}
         onClick={onToggle}
         // No chevron: the folder itself is open or shut (the user, 2026-11-06).
-        icon={<FolderMark open={open} />}
+        icon={<FolderMark open={open} color={color} />}
         label={label}
         end={plus && <span className="flex items-center" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>{plus}</span>}
         extra={{ ...lp, onContextMenu: (e: React.MouseEvent) => (e.preventDefault(), setAt({ x: e.clientX, y: e.clientY })), onClickCapture: lp.onClickCapture }}
@@ -618,7 +636,7 @@ function FolderRow({ f, label, open, onToggle, newHere, plus }: { f: FolderNode;
       <Menu.Root open={at !== null} onOpenChange={(o) => !o && setAt(null)}>
         <Menu.Portal>
           <Menu.Positioner anchor={anchor} side="bottom" align="start" sideOffset={4} collisionPadding={8} className="z-50">
-            <MenuItems items={items} />
+            <MenuItems items={items} tags={tags} />
           </Menu.Positioner>
         </Menu.Portal>
       </Menu.Root>
@@ -632,14 +650,17 @@ function SessionMenu({ s, at, close, rename }: { s: Session; at: { x: number; y:
     <Menu.Root open={at !== null} onOpenChange={(o) => !o && close()}>
       <Menu.Portal>
         <Menu.Positioner anchor={anchor} side="bottom" align="start" sideOffset={4} collisionPadding={8} className="z-50">
-          <MenuItems items={sessionActions(s, rename)} />
+          <MenuItems items={sessionActions(s, rename)} tags={sessionTags(s)} />
         </Menu.Positioner>
       </Menu.Portal>
     </Menu.Root>
   );
 }
 
-export function MenuItems({ items, children }: { items: { icon: ReactNode; label: string; run: () => void }[]; children?: ReactNode }) {
+/** A colour tag and how to set it ("" takes it off). */
+export type Tags = { value?: Color; set: (c: Color | "") => void };
+
+export function MenuItems({ items, tags, children }: { items: { icon: ReactNode; label: string; run: () => void }[]; tags?: Tags; children?: ReactNode }) {
   return (
     <Menu.Popup finalFocus={false} className="g-unfold glass thick float min-w-48 rounded-lg p-1.5 text-ink outline-none">
       <div className="g-stagger flex flex-col">
@@ -650,7 +671,44 @@ export function MenuItems({ items, children }: { items: { icon: ReactNode; label
             {it.label}
           </Menu.Item>
         ))}
+        {tags && <TagDots tags={tags} i={items.length} />}
       </div>
     </Menu.Popup>
   );
+}
+
+/** The menu's foot: a hairline, then the seven colour dots in a row. One press tags it and shuts
+ *  the menu; the dot of its own colour is ringed and checked, and a press on it takes the tag off. */
+function TagDots({ tags, i }: { tags: Tags; i: number }) {
+  return (
+    <div role="group" aria-label={t("color.tags")} style={{ "--i": i } as CSSProperties} className="mt-1.5 flex items-center justify-between gap-0.5 border-t border-edge px-1 pt-1.5">
+      {COLORS.map((c) => {
+        const on = tags.value === c;
+        const name = t(`color.${c}`);
+        return (
+          <Menu.Item
+            key={c}
+            onClick={() => tags.set(on ? "" : c)}
+            aria-label={on ? t("color.off", { color: name }) : t("color.tagged", { color: name })}
+            className="group/tag grid size-7 cursor-default place-items-center rounded-full outline-none select-none data-highlighted:bg-fill pointer-coarse:size-9"
+          >
+            <span
+              className={cn(
+                "grid size-3.5 place-items-center rounded-full transition-[scale,box-shadow] duration-(--dur-2) ease-(--ease-spring) group-active/tag:scale-90 motion-safe:group-data-highlighted/tag:scale-115 pointer-coarse:size-4.5",
+                on && "shadow-[0_0_0_1.5px_var(--paper),0_0_0_3px_currentColor]",
+              )}
+              style={{ background: colorVar(c), color: colorVar(c) }}
+            >
+              {on && <Check size={10} strokeWidth={3.5} className="g-pop text-on-ink" />}
+            </span>
+          </Menu.Item>
+        );
+      })}
+    </div>
+  );
+}
+
+/** A session's colour tag, after its name: a small dot that pops in. */
+function TagDot({ color }: { color: Color }) {
+  return <span role="img" aria-label={t("color.tagged", { color: t(`color.${color}`) })} className="g-pop ml-1.5 size-2 shrink-0 self-center rounded-full" style={{ background: colorVar(color) }} />;
 }

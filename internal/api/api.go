@@ -31,6 +31,22 @@ type AgentInfo struct {
 	Ultracode bool `json:"ultracode"`
 }
 
+// Color is a colour tag a session or a folder is given from its menu (the user, 2026-11-06).
+type Color string
+
+const (
+	ColorRed    Color = "red"
+	ColorOrange Color = "orange"
+	ColorYellow Color = "yellow"
+	ColorGreen  Color = "green"
+	ColorBlue   Color = "blue"
+	ColorPurple Color = "purple"
+	ColorGray   Color = "gray"
+)
+
+// Colors is every colour tag, in the menu's order.
+var Colors = []Color{ColorRed, ColorOrange, ColorYellow, ColorGreen, ColorBlue, ColorPurple, ColorGray}
+
 // Status is a session's lamp (plan "风格"). idle shows none.
 type Status string
 
@@ -59,6 +75,8 @@ type Session struct {
 	Pinned    bool  `json:"pinned,omitempty"`
 	Archived  bool  `json:"archived,omitempty"`
 	Workspace int64 `json:"workspace,omitempty"` // 0: none
+	// Color: the colour tag it was given in its menu, if any.
+	Color Color `json:"color,omitempty"`
 	// Launcher: the session that started this one, if discovery saw it.
 	Launcher string `json:"launcher,omitempty"`
 	// Subagent: an Agent tool's subtask (Claude) or a subagent's thread (Codex), listed as a
@@ -68,6 +86,9 @@ type Session struct {
 	// Done: a subagent that has finished (Claude: its transcript ends with its final answer); the
 	// sidebar shows a subagent only while it works.
 	Done bool `json:"done,omitempty"`
+	// Needs: elsewhere, and its agent waits on you there (Claude: an ask or a question open in its
+	// terminal), what for in the agent's words; the lamp is amber.
+	Needs string `json:"needs,omitempty"`
 	// Workflow: the run a workflow's agent is of (Claude's subagents/workflows/<run>/), the
 	// workflow's name and the agent's phase in it, as far as they are known.
 	Workflow  *SessionWorkflow `json:"workflow,omitempty"`
@@ -316,6 +337,11 @@ type Send struct {
 type SendReply struct {
 	Input  string `json:"input"`            // the message's id (Claude: its uuid)
 	Queued bool   `json:"queued,omitempty"` // it waits in the queue
+	// Session: /clear went on in this session, the old one left as it was (no input then).
+	Session string `json:"session,omitempty"`
+	// Command: the agent runs it as a command of its own (Codex's, pi's /compact): no words of
+	// it come in the transcript.
+	Command bool `json:"command,omitempty"`
 }
 
 // Answer answers an ask. permission: Allow (and Message if not); question: Answers, by question

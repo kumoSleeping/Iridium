@@ -41,6 +41,17 @@ export interface AgentInfo {
   ultracode: boolean;
 }
 /**
+ * Color is a colour tag a session or a folder is given from its menu (the user, 2026-11-06).
+ */
+export const ColorRed = "red";
+export const ColorOrange = "orange";
+export const ColorYellow = "yellow";
+export const ColorGreen = "green";
+export const ColorBlue = "blue";
+export const ColorPurple = "purple";
+export const ColorGray = "gray";
+export type Color = typeof ColorRed | typeof ColorOrange | typeof ColorYellow | typeof ColorGreen | typeof ColorBlue | typeof ColorPurple | typeof ColorGray;
+/**
  * Status is a session's lamp (plan "风格"). idle shows none.
  */
 export const StatusIdle = "idle";
@@ -73,6 +84,10 @@ export interface Session {
   archived?: boolean;
   workspace?: number /* int64 */; // 0: none
   /**
+   * Color: the colour tag it was given in its menu, if any.
+   */
+  color?: Color;
+  /**
    * Launcher: the session that started this one, if discovery saw it.
    */
   launcher?: string;
@@ -87,6 +102,11 @@ export interface Session {
    * sidebar shows a subagent only while it works.
    */
   done?: boolean;
+  /**
+   * Needs: elsewhere, and its agent waits on you there (Claude: an ask or a question open in its
+   * terminal), what for in the agent's words; the lamp is amber.
+   */
+  needs?: string;
   /**
    * Workflow: the run a workflow's agent is of (Claude's subagents/workflows/<run>/), the
    * workflow's name and the agent's phase in it, as far as they are known.
@@ -382,6 +402,15 @@ export interface Send {
 export interface SendReply {
   input: string; // the message's id (Claude: its uuid)
   queued?: boolean; // it waits in the queue
+  /**
+   * Session: /clear went on in this session, the old one left as it was (no input then).
+   */
+  session?: string;
+  /**
+   * Command: the agent runs it as a command of its own (Codex's, pi's /compact): no words of
+   * it come in the transcript.
+   */
+  command?: boolean;
 }
 /**
  * Answer answers an ask. permission: Allow (and Message if not); question: Answers, by question
@@ -685,14 +714,28 @@ export interface WorkspacePatch {
 }
 /**
  * SessionPatch changes what lies over a session; a field left out stays. Name "" takes the name
- * off. Workspace moves it (0: none), and it is never moved by discovery again.
+ * off. Workspace moves it (0: none), and it is never moved by discovery again. Color "" takes the
+ * colour tag off.
  */
 export interface SessionPatch {
   name?: string;
   pinned?: boolean;
   archived?: boolean;
   workspace?: number /* int64 */;
+  color?: Color;
 }
+/**
+ * FolderColor tags folder Path (absolute) with a colour; Color "" takes it off. The carried state
+ * "colors" is every folder's, by path (FolderColors).
+ */
+export interface FolderColor {
+  path: string;
+  color: Color;
+}
+/**
+ * FolderColors is the colour tags of folders, by absolute path.
+ */
+export type FolderColors = { [key: string]: Color};
 /**
  * Folders is one folder's subfolders for the picker: names only, no hidden ones, sorted. Parent
  * is "" at the top of what may be listed.

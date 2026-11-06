@@ -165,10 +165,13 @@ func (x *Index) DeleteWorkspace(id int64) error {
 	return nil
 }
 
-// Patch changes what lies over session id: its name, pin, workspace (archiving is the session
+// Patch changes what lies over session id: its name, pin, colour, workspace (archiving is the session
 // manager's: it is the shown marker's, and stops a hosted agent). A move sticks.
 func (x *Index) Patch(id string, p api.SessionPatch) error {
 	st := x.o.Store
+	if p.Color != nil && !validColor(*p.Color) {
+		return ErrColor
+	}
 	if p.Workspace != nil {
 		if err := st.Move(id, *p.Workspace); err != nil {
 			return err
@@ -181,6 +184,11 @@ func (x *Index) Patch(id string, p api.SessionPatch) error {
 	}
 	if p.Pinned != nil {
 		if err := st.SetPinned(id, *p.Pinned); err != nil {
+			return err
+		}
+	}
+	if p.Color != nil {
+		if err := st.SetColor(id, string(*p.Color)); err != nil {
 			return err
 		}
 	}

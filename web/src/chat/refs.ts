@@ -76,6 +76,24 @@ export function shortId(id: string, ids: string[]): string {
   return id;
 }
 
+/** A session named in a message, as a row dropped on the composer writes it (i18n
+ *  composer.mention): 「title」（Claude 会话 1a2b3c4d）, or "title" (Claude session 1a2b3c4d). */
+export type Mention = { title: string; agent: string; id: string; text: string };
+const MENTION = /「([^」\n]{1,200})」（([^（）\n]{1,40}?) 会话 ([0-9A-Za-z_-]{8,64})）|"([^"\n]{1,200})" \(([^()\n]{1,40}?) session ([0-9A-Za-z_-]{8,64})\)/g;
+
+/** A message's text cut at the sessions it names: plain runs and mentions, in order. */
+export function mentions(text: string): (string | Mention)[] {
+  const out: (string | Mention)[] = [];
+  let at = 0;
+  for (const m of text.matchAll(MENTION)) {
+    if (m.index > at) out.push(text.slice(at, m.index));
+    out.push({ title: m[1] ?? m[4]!, agent: m[2] ?? m[5]!, id: m[3] ?? m[6]!, text: m[0] });
+    at = m.index + m[0].length;
+  }
+  if (at < text.length) out.push(text.slice(at));
+  return out;
+}
+
 /** A path as a message writes it, made absolute the way the server reads it (docs/api.md "认文件"):
  *  file:// and a #line or :line:col dropped, ~/ the home folder, the rest from the session's folder. */
 export function resolve(p: string, cwd: string, home?: string): string {

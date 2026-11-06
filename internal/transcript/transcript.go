@@ -424,6 +424,10 @@ var (
 	interrupted = regexp.MustCompile(`^\[Request interrupted by user( for tool use)?\]$`)
 	tagged      = regexp.MustCompile(`^\s*<`)
 	pasted      = regexp.MustCompile(`^\s*<pasted_content\b`)
+	commandLine = regexp.MustCompile(`^\s*<command-(?:name|message|args)>`)
+	commandName = regexp.MustCompile(`<command-name>(/[^<\s]+)</command-name>`)
+	commandArgs = regexp.MustCompile(`(?s)<command-args>(.*?)</command-args>`)
+	commandOut  = regexp.MustCompile(`(?s)<local-command-std(?:out|err)>(.*?)</local-command-std(?:out|err)>`)
 )
 
 // blocksOf is the blocks of one transcript line (Rhodium §7.7's table). Kept: what you said
@@ -499,6 +503,17 @@ func blocksOf(off int64, raw []byte, max int, sources Sources) []api.Block {
 			add(api.Block{Kind: api.BlockKindSystem, Event: api.SystemEventInterrupted})
 			break
 		}
+		// A slash command as Claude records it, a line of its own: what was typed, under the
+		// input's uuid.
+		if len(all) == 1 && commandLine.MatchString(all[0]) {
+			if c := commandName.FindStringSubmatch(all[0]); c != nil {
+				line := c[1]
+				if a := commandArgs.FindStringSubmatch(all[0]); a != nil && strings.TrimSpace(a[1]) != "" {
+					line += " " + strings.TrimSpace(a[1])
+				}
+				all = []string{line}
+			}
+		}
 		var said []string
 		for _, s := range all {
 			if !tagged.MatchString(s) || pasted.MatchString(s) {
@@ -558,6 +573,19 @@ func blocksOf(off int64, raw []byte, max int, sources Sources) []api.Block {
 		case "local_command":
 			var s string
 			_ = json.Unmarshal(l.Content, &s)
+			// Its output in tags: the words only; none (/clear's), no line.
+			if m := commandOut.FindAllStringSubmatch(s, -1); m != nil {
+				var outs []string
+				for _, o := range m {
+					if o := strings.TrimSpace(o[1]); o != "" {
+						outs = append(outs, o)
+					}
+				}
+				s = strings.Join(outs, "\n\n")
+			}
+			if strings.TrimSpace(s) == "" {
+				break
+			}
 			text, n := clip(s, max)
 			add(api.Block{Kind: api.BlockKindSystem, Event: api.SystemEventLocalCommand, Text: text, Length: n})
 		}

@@ -13,12 +13,15 @@ import type { Sent } from "../chats";
 import { t } from "../i18n";
 import { errText, toast } from "../toast";
 import { cn, fine, IconKey, keep, kept, steerKey, Tip } from "../ui";
+import { hasMention, MentionMarks } from "./mention";
 import { useSettings } from "../data";
 import { askOnce, sentFromHere } from "../unread";
 import { useGlide } from "../motion";
 import { previews } from "./files";
 import { upload } from "./upload";
 
+/** The words' box, as MentionMarks draws them under it too. */
+const BOX = "px-0.5 py-1 text-md leading-[21px]";
 export const draftKey = (id: string) => `draft:${id}`;
 
 /** What the key does now. steers: Enter puts words into a running turn (the setting enterInTurn,
@@ -28,6 +31,8 @@ export function keyMode(turn: boolean, text: string, files: number, queues: bool
   if (!turn) return "send";
   const words = text.trim();
   if (!words && !files) return "stop";
+  // A command waits for the turn's end: the server never steers one in.
+  if (words.startsWith("/") && queues) return "queue";
   if (/^[!！]/.test(words) || !queues) return "steer";
   return steers !== other ? "steer" : "queue";
 }
@@ -44,12 +49,16 @@ export function matching(commands: Command[], typed: string): Command[] {
     .map(([, c]) => c);
 }
 
-/** A session's commands, or its agent's usual ones. Those the page does itself (model, mode) open
- *  their keys. */
+/** What the page says of the commands every session has (the server sends them without words). */
+const COMMON = ["clear", "compact", "context", "usage", "model", "effort", "mode"] as const;
+const describe = (c: Command): Command => (c.description || !COMMON.includes(c.name as (typeof COMMON)[number]) ? c : { ...c, description: t(`cmd.${c.name as (typeof COMMON)[number]}`) });
+
+/** A session's commands (the server's list: the common ones, then its agent's own), or the common
+ *  ones before its state has come. Those the page does itself (model, mode…) open their keys;
+ *  /clear goes on in a new session. */
 export function commandsOf(s: LiveSession): Command[] {
-  if (s.commands?.length) return s.commands;
-  if (s.agent !== "claude") return [];
-  return ["compact", "context", "usage", "cost", "model", "mode", "clear"].map((name) => ({ name, description: t(`cmd.${name}` as Parameters<typeof t>[0]) }));
+  if (s.commands?.length) return s.commands.map(describe);
+  return COMMON.filter((n) => n !== "effort" && (n !== "usage" || s.agent !== "pi")).map((name) => describe({ name }));
 }
 
 type Att = { key: string; file: File; sent: number; ref?: string; path?: string; error?: string; url?: string; stop: AbortController };
@@ -68,13 +77,17 @@ type Props = {
   openMode: () => void;
   /** /usage: the quota popover, not the agent's (the user, 2026-11-06). */
   openUsage: () => void;
+  /** /context: the context ring's popover; false if there is none yet. */
+  openContext: () => boolean;
+  /** /clear went on in session id. */
+  cleared: (id: string) => void;
   /** The keys in the composer's foot, between attach and send: mode, model, quota, context. */
   tools?: ReactNode;
   /** The key at the far right, before send: the context ring. */
   end?: ReactNode;
 };
 
-export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s, turn, onSent, onSentDone, cycleMode, openModel, openMode, openUsage, tools, end }, ref) {
+export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s, turn, onSent, onSentDone, cycleMode, openModel, openMode, openUsage, openContext, cleared, tools, end }, ref) {
   const [text, setText] = useState(() => kept(draftKey(s.id)) ?? "");
   const [atts, setAtts] = useState<Att[]>([]);
   const [busy, setBusy] = useState(false);
@@ -83,6 +96,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
   const [composing, setComposing] = useState(false);
   const box = useRef<HTMLTextAreaElement>(null);
   const picker = useRef<HTMLInputElement>(null);
+  const marked = hasMention(text);
   const textNow = useRef(text);
   textNow.current = text;
 
@@ -163,12 +177,29 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
 
   /** Page-handled commands: true when done here. */
   const own = (words: string) => {
-    const w = words.trim();
-    if (w === "/model") return (type(""), openModel(), true);
+    const w = words.trim().toLowerCase();
+    if (w === "/model" || w === "/effort") return (type(""), openModel(), true);
     if (w === "/mode") return (type(""), openMode(), true);
     if (w === "/usage") return (type(""), openUsage(), true);
     if (w === "/stop") return (type(""), void stop(), true);
+    if (w === "/clear" || w === "/new") return (type(""), void clear(), true);
+    if (w === "/context") {
+      if (openContext()) return (type(""), true);
+      // Claude says it itself; the others have nothing to say before a turn.
+      if (s.agent !== "claude") return (type(""), toast(t("cmd.noContext")), true);
+    }
     return false;
+  };
+  const clear = async () => {
+    setBusy(true);
+    try {
+      const r = await api.send(s.id, "/clear");
+      if (r.session && r.session !== s.id) cleared(r.session);
+    } catch (e) {
+      toast(t("err.clear"), { error: true, description: errText(e) });
+    } finally {
+      setBusy(false);
+    }
   };
   const stop = async () => {
     setBusy(true);
@@ -211,8 +242,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
     try {
       const r = await api.send(s.id, words, files.map((f) => f.ref), mode === "steer");
       sent.input = r.input;
-      // A turn began meanwhile: it waits in the queue, which shows it.
-      sent.queued = r.queued;
+      // A turn began meanwhile: it waits in the queue, which shows it. A command the agent runs
+      // itself (Codex's /compact) never comes in the transcript: the turn's lamp says it.
+      sent.queued = r.queued || r.command;
     } catch (e) {
       sent.failed = errText(e);
     }
@@ -231,7 +263,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
   return (
     <div className="relative">
       {list.length > 0 && <Palette list={list} at={Math.min(at, list.length - 1)} point={setAt} pick={(c) => (own(`/${c.name}`) ? undefined : (type(`/${c.name} `), box.current?.focus()))} />}
-    <div className="glass float rest drop-to relative @container rounded-[20px]">
+    <div className="glass float rest relative @container rounded-[20px]">
       <div aria-hidden={!atts.length || undefined} className={cn("grid transition-[grid-template-rows,opacity] duration-(--dur-3) ease-(--ease-out)", atts.length ? "grid-rows-[1fr]" : "grid-rows-[0fr] opacity-0")}>
         <div className="min-h-0 overflow-hidden">
         <ul data-attachments className="m-0 flex list-none gap-2 overflow-x-auto px-3.5 pt-3 pb-0">
@@ -270,6 +302,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
             e.target.value = "";
           }}
         />
+        {/* A session named (dropped here) lies on a soft mark: the box's own letters clear over it. */}
+        <div className="relative">
+        {marked && <MentionMarks text={text} box={box} className={BOX} />}
         <textarea
           ref={box}
           rows={1}
@@ -304,8 +339,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
             else return;
             e.preventDefault();
           }}
-          className="no-ring block max-h-[220px] min-h-[52px] w-full resize-none bg-transparent px-0.5 py-1 text-md leading-[21px] placeholder:text-ink-3"
+          className={cn("no-ring relative block max-h-[220px] min-h-[52px] w-full resize-none bg-transparent placeholder:text-ink-3", BOX, marked && "text-transparent [caret-color:var(--ink)]")}
         />
+        </div>
       </div>
       <div className="flex min-w-0 items-center gap-0.5 px-2 pt-0.5 pb-2">
         <IconKey label={t("composer.attach")} onClick={() => picker.current?.click()}>

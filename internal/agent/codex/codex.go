@@ -515,7 +515,7 @@ func (d *Driver) Send(ctx context.Context, m agent.Message) error {
 	if err := d.waitReady(ctx); err != nil {
 		return err
 	}
-	if strings.TrimSpace(m.Text) == "/compact" {
+	if d.RunsItself(m.Text) {
 		return d.startCompact(ctx, m.ID)
 	}
 	for {
@@ -1586,3 +1586,6 @@ func words(s string) ([]string, bool) {
 	}
 	return out, true
 }
+
+// RunsItself: /compact compacts the thread; the record keeps no line of it.
+func (d *Driver) RunsItself(text string) bool { return strings.TrimSpace(text) == "/compact" }

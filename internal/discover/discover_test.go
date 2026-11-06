@@ -192,10 +192,18 @@ func (r *rig) sessions() map[string]api.Session {
 	return out
 }
 
-// register writes Claude's registry file of a live claude process.
-func (r *rig) register(pid int, session, cwd string) {
+// register writes Claude's registry file of a live claude process; state: its status and
+// waitingFor, idle if none.
+func (r *rig) register(pid int, session, cwd string, state ...string) {
 	r.t.Helper()
-	b, _ := json.Marshal(map[string]any{"pid": pid, "sessionId": session, "cwd": cwd, "procStart": strconv.Itoa(1000 + pid), "kind": "interactive", "status": "idle", "name": "made-up", "nameSource": "auto"})
+	m := map[string]any{"pid": pid, "sessionId": session, "cwd": cwd, "procStart": strconv.Itoa(1000 + pid), "kind": "interactive", "status": "idle", "name": "made-up", "nameSource": "auto"}
+	if len(state) > 0 {
+		m["status"] = state[0]
+	}
+	if len(state) > 1 {
+		m["waitingFor"] = state[1]
+	}
+	b, _ := json.Marshal(m)
 	if err := os.WriteFile(filepath.Join(r.home, ".claude", "sessions", strconv.Itoa(pid)+".json"), b, 0o600); err != nil {
 		r.t.Fatal(err)
 	}
@@ -632,6 +640,14 @@ func TestWatches(t *testing.T) {
 	r.procs.set(700, &fakeProc{Stat: Stat{PPid: 1}, argv: []string{"claude"}})
 	r.register(700, id, "/w/new")
 	wait("it runs", func() bool { return r.sessions()[id].Status == api.StatusElsewhere })
+
+	// It asks in its terminal, and is answered.
+	r.register(700, id, "/w/new", "waiting", "approve Bash")
+	wait("it needs you", func() bool { s := r.sessions()[id]; return s.Status == api.StatusElsewhere && s.Needs == "approve Bash" })
+	r.register(700, id, "/w/new", "waiting")
+	wait("a word for it", func() bool { return r.sessions()[id].Needs == "input needed" })
+	r.register(700, id, "/w/new", "busy")
+	wait("answered", func() bool { s := r.sessions()[id]; return s.Status == api.StatusElsewhere && s.Needs == "" })
 
 	// Deleted.
 	os.Remove(filepath.Join(dir, id+".jsonl"))

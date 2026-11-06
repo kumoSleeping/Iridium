@@ -6,7 +6,7 @@
 import { useSyncExternalStore } from "react";
 import type { Session } from "./api/types.gen";
 import { route } from "./route";
-import { titleOf } from "./ui";
+import { lampOf, titleOf } from "./ui";
 
 export type Here = { chat: string; visible: boolean; focused: boolean };
 const page = (): Here => {
@@ -66,11 +66,13 @@ export function watchUnread(here: () => Here = page, open: (id: string) => void 
     const away = !h.visible || !h.focused;
     for (const s of list) {
       const was = states.get(s.id);
-      states.set(s.id, s.status);
-      if (was === undefined || was === s.status) continue;
+      // One elsewhere that waits on you there reminds you as one here does.
+      const now = lampOf(s);
+      states.set(s.id, now);
+      if (was === undefined || was === now) continue;
       if (was === "waiting") close(s.id);
-      if (s.status === "waiting" && away) void remind(s, open, true);
-      if (!BUSY.has(was) || (s.status !== "idle" && s.status !== "error")) continue;
+      if (now === "waiting" && away) void remind(s, open, true);
+      if (!BUSY.has(was) || (now !== "idle" && now !== "error")) continue;
       const yours = mine.delete(s.id);
       if (!(h.visible && h.chat === s.id) && !unread.has(s.id)) (unread.add(s.id), changed());
       if (yours && away) void remind(s, open);

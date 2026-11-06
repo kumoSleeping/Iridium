@@ -91,6 +91,8 @@ func TestRules(t *testing.T) {
 		{"type": "user", "isMeta": true, "message": map[string]any{"role": "user", "content": "skill text"}},
 		{"type": "user", "isCompactSummary": true, "message": map[string]any{"role": "user", "content": "summary"}},
 		user("u5", []any{text("[Request interrupted by user for tool use]")}),
+		user("u6", "<command-name>/compact</command-name>\n            <command-message>compact</command-message>\n            <command-args>keep the tests</command-args>"),
+		{"type": "system", "subtype": "local_command", "content": "<local-command-stdout></local-command-stdout>"},
 		{"type": "attachment", "attachment": map[string]any{"type": "queued_command", "prompt": "said mid-turn", "source_uuid": "q1", "origin": map[string]any{"kind": "human"}}},
 		{"type": "attachment", "attachment": map[string]any{"type": "queued_command", "prompt": "from another session", "source_uuid": "q2", "isMeta": true}},
 		{"type": "attachment", "attachment": map[string]any{"type": "queued_command", "prompt": "a task", "source_uuid": "q3", "origin": map[string]any{"kind": "task"}}},
@@ -124,6 +126,9 @@ func TestRules(t *testing.T) {
 			s += "(" + b.Text + ")"
 		case api.BlockKindSystem:
 			s += "(" + string(b.Event) + ")"
+			if b.Event == api.SystemEventLocalCommand && b.Text != "hi" {
+				t.Errorf("local command %q", b.Text)
+			}
 		case api.BlockKindThinking:
 			s += fmt.Sprintf("(%d/%d)", len([]rune(b.Text)), b.Length)
 		case api.BlockKindTool:
@@ -136,6 +141,7 @@ func TestRules(t *testing.T) {
 		"user([网页] typed in a terminal||u2)",
 		"user(real words\n\n<pasted_content id=\"1\">x</pasted_content id=\"1\">||u3)",
 		"system(interrupted)",
+		"user(/compact keep the tests||u6)",
 		"user(said mid-turn||q1)",
 		"thinking(2000/2500)",
 		"assistant(ok)",
@@ -158,14 +164,14 @@ func TestRules(t *testing.T) {
 
 	// The whole text by position: the call's input, its result, the thought.
 	f := Open(path, ours)
-	tool := page.Blocks[7]
+	tool := page.Blocks[8]
 	if full, err := f.Full(tool.At); err != nil || !strings.Contains(full, long) {
 		t.Errorf("full input: %v", err)
 	}
 	if full, err := f.Full(tool.Result.At); err != nil || full != long {
 		t.Errorf("full result: %d %v", len(full), err)
 	}
-	if full, err := f.Full(page.Blocks[5].At); err != nil || full != long {
+	if full, err := f.Full(page.Blocks[6].At); err != nil || full != long {
 		t.Errorf("full thought: %v", err)
 	}
 	if _, err := f.Full("1.0"); err != ErrNoBlock {

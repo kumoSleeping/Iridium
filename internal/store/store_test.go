@@ -53,6 +53,8 @@ func TestOverlays(t *testing.T) {
 	must(t, s.SetName("a", "first"))
 	must(t, s.SetPinned("a", true))
 	must(t, s.SetPinned("a", true))
+	must(t, s.SetColor("a", "blue"))
+	must(t, s.SetColor("a", "red"))
 	must(t, s.Assign("b", ws, true))
 	must(t, s.Assign("b", 0, false)) // discovery does not move what was dragged
 	must(t, s.Assign("c", ws, false))
@@ -60,11 +62,12 @@ func TestOverlays(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if o["a"] != (Overlay{Name: "first", Pinned: true}) || o["b"] != (Overlay{Workspace: ws, Manual: true}) || o["c"].Workspace != ws {
+	if o["a"] != (Overlay{Name: "first", Pinned: true, Color: "red"}) || o["b"] != (Overlay{Workspace: ws, Manual: true}) || o["c"].Workspace != ws {
 		t.Fatalf("overlays: %+v", o)
 	}
 	must(t, s.SetName("a", ""))
 	must(t, s.SetPinned("a", false))
+	must(t, s.SetColor("a", ""))
 	if o, _ := s.Overlays(); o["a"] != (Overlay{}) {
 		t.Fatalf("a: %+v", o["a"])
 	}

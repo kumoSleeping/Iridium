@@ -8,6 +8,12 @@ import (
 // What only some drivers can do. The host asks with a type assertion, so a driver that cannot
 // leaves these out.
 
+// Commander says which texts the driver runs itself rather than writes as words (Codex's and
+// pi's /compact): the agent's record keeps no line of them.
+type Commander interface {
+	RunsItself(text string) bool
+}
+
 // Efforter sets the thinking effort of the running process.
 type Efforter interface {
 	SetEffort(ctx context.Context, level string) error

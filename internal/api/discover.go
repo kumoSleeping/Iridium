@@ -20,13 +20,25 @@ type WorkspacePatch struct {
 }
 
 // SessionPatch changes what lies over a session; a field left out stays. Name "" takes the name
-// off. Workspace moves it (0: none), and it is never moved by discovery again.
+// off. Workspace moves it (0: none), and it is never moved by discovery again. Color "" takes the
+// colour tag off.
 type SessionPatch struct {
 	Name      *string `json:"name,omitempty"`
 	Pinned    *bool   `json:"pinned,omitempty"`
 	Archived  *bool   `json:"archived,omitempty"`
 	Workspace *int64  `json:"workspace,omitempty"`
+	Color     *Color  `json:"color,omitempty"`
 }
+
+// FolderColor tags folder Path (absolute) with a colour; Color "" takes it off. The carried state
+// "colors" is every folder's, by path (FolderColors).
+type FolderColor struct {
+	Path  string `json:"path"`
+	Color Color  `json:"color"`
+}
+
+// FolderColors is the colour tags of folders, by absolute path.
+type FolderColors map[string]Color
 
 // Folders is one folder's subfolders for the picker: names only, no hidden ones, sorted. Parent
 // is "" at the top of what may be listed.

@@ -23,9 +23,9 @@ let missed = 0;
 
 const link = (l: Partial<Link>) => setCarried("link", { ...(getCarried<Link>("link") ?? { live: null, rtt: null }), ...l });
 
-// The states every page carries. A key the daemon does not carry for this terminal (confirms, but
-// for panels) is said to be ignored as the stream opens; the rest goes on.
-const ALWAYS = ["list", "workspaces", "quota", "update", "confirms"];
+// The states every page carries. A key the daemon does not carry for this terminal (confirms and
+// colors, but for panels) is said to be ignored as the stream opens; the rest goes on.
+const ALWAYS = ["list", "workspaces", "colors", "quota", "update", "confirms"];
 /** What the stream last brought of each state every page carries, as it came: a stream opened
  *  again (each chat opened opens one) brings them all whole again, and one unchanged is not set
  *  again, the sidebar and the rest drawn again for nothing. Not the open session's: chats.ts

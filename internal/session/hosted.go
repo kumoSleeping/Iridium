@@ -855,7 +855,7 @@ func (h *Hosted) summaryLocked(o store.Overlay, archived bool) api.Session {
 	return api.Session{
 		ID: h.id, Agent: h.meta.Agent, Cwd: h.meta.Cwd, Name: o.Name, Title: h.said.title,
 		Status: h.status(), Hosted: true, Live: h.live,
-		Pinned: o.Pinned, Archived: archived, Workspace: o.Workspace,
+		Pinned: o.Pinned, Archived: archived, Workspace: o.Workspace, Color: api.Color(o.Color),
 		Last: h.said.last, UpdatedAt: h.shownAt.UnixMilli(),
 	}
 }
@@ -881,8 +881,8 @@ func (h *Hosted) state(o store.Overlay, archived bool) api.SessionState {
 		}
 		s.Ultracode = u
 	}
-	for _, c := range h.commands {
-		s.Commands = append(s.Commands, api.Command{Name: strings.TrimPrefix(c.Name, "/"), Description: c.Description, ArgumentHint: c.ArgumentHint})
+	for _, c := range h.commandsLocked() {
+		s.Commands = append(s.Commands, api.Command{Name: c.Name, Description: c.Description, ArgumentHint: c.ArgumentHint})
 	}
 	if info, ok := agents.Get(h.meta.Agent); ok {
 		s.Modes = info.Modes
@@ -918,7 +918,9 @@ func (h *Hosted) publish() {
 	}
 }
 
-// Commands are the commands the session's agent offers, as its last handshake named them.
+// Commands are the session's commands: those every agent has here (Iridium's /clear, and what
+// the page or the driver does for any agent), then the others its agent's last handshake named.
+// The common ones have no description: who shows them says it in its own language.
 func (m *Manager) Commands(id string) ([]agent.Command, error) {
 	h, err := m.get(id)
 	if err != nil {
@@ -926,7 +928,36 @@ func (m *Manager) Commands(id string) ([]agent.Command, error) {
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return slices.Clone(h.commands), nil
+	return h.commandsLocked(), nil
+}
+
+// commandsLocked is Commands; h.mu held.
+func (h *Hosted) commandsLocked() []agent.Command {
+	info, _ := agents.Get(h.meta.Agent)
+	names := []string{"clear", "compact", "context"}
+	if info.Quota {
+		names = append(names, "usage")
+	}
+	names = append(names, "model")
+	if _, ok := h.drv.(agent.Efforter); ok && len(info.Efforts) > 0 {
+		names = append(names, "effort")
+	}
+	names = append(names, "mode")
+	var out []agent.Command
+	for _, n := range names {
+		c := agent.Command{Name: n}
+		if i := slices.IndexFunc(h.commands, func(a agent.Command) bool { return strings.TrimPrefix(a.Name, "/") == n }); i >= 0 && n != "clear" {
+			c.ArgumentHint = h.commands[i].ArgumentHint
+		}
+		out = append(out, c)
+	}
+	for _, c := range h.commands {
+		c.Name = strings.TrimPrefix(c.Name, "/")
+		if !slices.Contains(names, c.Name) {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 func describe(e *hold.Exit) string {

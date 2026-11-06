@@ -1,6 +1,6 @@
 // Package store is Iridium's database: SQLite through a pure-Go driver, WAL, writes in BEGIN
 // IMMEDIATE transactions. It holds only what lies over the sessions found on disk (plan "数据"):
-// workspaces and who belongs where, pins, which sessions are shown, names, the queue of messages to send, push
+// workspaces and who belongs where, pins, colour tags, which sessions are shown, names, the queue of messages to send, push
 // subscriptions, interactive terminals and their permissions, usage, and the plugin event outbox.
 // Never the conversations themselves, nor asks.
 package store
@@ -141,6 +141,8 @@ var schema = []string{
 	`ALTER TABLE session_settings ADD COLUMN ultracode INTEGER;`,
 	// 7: the device a terminal is on (terminals.go).
 	devicesSchema,
+	// 8: colour tags on sessions and folders (colors.go).
+	colorsSchema,
 }
 
 // steps run in Go after the migration of their version, in the same transaction.
@@ -241,15 +243,17 @@ type Overlay struct {
 	Pinned    bool
 	Workspace int64
 	Manual    bool
+	Color     string
 }
 
 // Overlays is every session's overlay, by session id.
 func (s *Store) Overlays() (map[string]Overlay, error) {
 	rows, err := s.db.Query(`
-		SELECT session, MAX(name), MAX(pinned), MAX(workspace), MAX(manual) FROM (
-			SELECT session, name, 0 AS pinned, 0 AS workspace, 0 AS manual FROM names
-			UNION ALL SELECT session, '', 1, 0, 0 FROM pins
-			UNION ALL SELECT session, '', 0, IFNULL(workspace, 0), manual FROM assignments
+		SELECT session, MAX(name), MAX(pinned), MAX(workspace), MAX(manual), MAX(color) FROM (
+			SELECT session, name, 0 AS pinned, 0 AS workspace, 0 AS manual, '' AS color FROM names
+			UNION ALL SELECT session, '', 1, 0, 0, '' FROM pins
+			UNION ALL SELECT session, '', 0, IFNULL(workspace, 0), manual, '' FROM assignments
+			UNION ALL SELECT session, '', 0, 0, 0, color FROM session_colors
 		) GROUP BY session`)
 	if err != nil {
 		return nil, err
@@ -259,7 +263,7 @@ func (s *Store) Overlays() (map[string]Overlay, error) {
 	for rows.Next() {
 		var id string
 		var o Overlay
-		if err := rows.Scan(&id, &o.Name, &o.Pinned, &o.Workspace, &o.Manual); err != nil {
+		if err := rows.Scan(&id, &o.Name, &o.Pinned, &o.Workspace, &o.Manual, &o.Color); err != nil {
 			return nil, err
 		}
 		out[id] = o

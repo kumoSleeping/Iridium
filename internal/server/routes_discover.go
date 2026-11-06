@@ -24,6 +24,7 @@ func (s *Server) discoverRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /api/workspaces/{id}", s.manages(s.renameWorkspace))
 	mux.HandleFunc("DELETE /api/workspaces/{id}", s.manages(s.deleteWorkspace))
 	mux.HandleFunc("PATCH /api/sessions/{id}", s.use(s.patchSession))
+	mux.HandleFunc("PUT /api/colors", s.manages(s.folderColor))
 	mux.HandleFunc("GET /api/folders", s.pathRoute("path", nil, false, false, s.folders))
 	mux.HandleFunc("POST /api/folders", s.pathRoute("", []string{"path"}, false, false, s.makeFolder))
 }
@@ -107,6 +108,15 @@ func (s *Server) patchSession(w http.ResponseWriter, r *http.Request) {
 		req.Archived = nil
 	}
 	s.discoverDone(w, s.Discover.Patch(id, req))
+}
+
+// folderColor tags a folder with a colour from its menu, or takes the tag off.
+func (s *Server) folderColor(w http.ResponseWriter, r *http.Request) {
+	var req api.FolderColor
+	if !readJSON(w, r, &req) {
+		return
+	}
+	s.discoverDone(w, s.Discover.SetFolderColor(req.Path, req.Color))
 }
 
 func (s *Server) folders(w http.ResponseWriter, r *http.Request) {

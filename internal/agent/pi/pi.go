@@ -367,7 +367,7 @@ func (d *Driver) Send(ctx context.Context, m agent.Message) error {
 		return ErrNotAttached
 	}
 	cmd := map[string]any{"id": m.ID, "type": "prompt", "message": m.Text}
-	compact := strings.TrimSpace(m.Text) == "/compact"
+	compact := d.RunsItself(m.Text)
 	steer := d.busy()
 	switch {
 	case compact && steer:
@@ -994,3 +994,6 @@ func cmpOr(a, b string) string {
 	}
 	return b
 }
+
+// RunsItself: /compact compacts the thread; the record keeps no line of it.
+func (d *Driver) RunsItself(text string) bool { return strings.TrimSpace(text) == "/compact" }

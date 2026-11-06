@@ -221,6 +221,11 @@ func (h *Hosted) discoveredAs() string {
 // Create starts a hosted session in req.Cwd and, if req.Text is given, sends it as the first
 // message from `from`. The id is the agent's own session id.
 func (m *Manager) Create(ctx context.Context, req api.NewSession, from string) (string, error) {
+	return m.create(ctx, req, from, nil)
+}
+
+// create is Create; prep, if any, runs on the new id before its agent starts.
+func (m *Manager) create(ctx context.Context, req api.NewSession, from string, prep func(id string) error) (string, error) {
 	if req.Agent == "" {
 		req.Agent = api.AgentClaude
 	}
@@ -238,6 +243,19 @@ func (m *Manager) Create(ctx context.Context, req api.NewSession, from string) (
 		return "", err
 	}
 	mt := meta{ID: newUUID(), Agent: req.Agent, Cwd: filepath.Clean(req.Cwd), Created: time.Now().UnixMilli(), Model: req.Model, Mode: req.Mode}
+	if req.Effort != "" {
+		if !slices.Contains(info.Efforts, req.Effort) {
+			return "", fmt.Errorf("%s has no effort %q (%s)", info.Name, req.Effort, strings.Join(info.Efforts, ", "))
+		}
+		if err := m.o.Store.UpdateSettings(mt.ID, func(s *store.Settings) { s.Effort = req.Effort }); err != nil {
+			return "", err
+		}
+	}
+	if prep != nil {
+		if err := prep(mt.ID); err != nil {
+			return "", err
+		}
+	}
 	h := m.newHosted(mt)
 	if err := os.MkdirAll(h.dir, 0o700); err != nil {
 		return "", err
@@ -362,7 +380,7 @@ func (m *Manager) List(ctx context.Context) ([]api.Session, error) {
 		for _, s := range found {
 			if !seen[s.ID] {
 				o := over[s.ID]
-				s.Name, s.Pinned, s.Workspace = o.Name, o.Pinned, o.Workspace
+				s.Name, s.Pinned, s.Workspace, s.Color = o.Name, o.Pinned, o.Workspace, api.Color(o.Color)
 				s.Archived = !vis.Shown(string(s.Agent), s.ID)
 				m.parentOf(&s)
 				out = append(out, s)

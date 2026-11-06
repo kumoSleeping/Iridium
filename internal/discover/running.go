@@ -23,6 +23,10 @@ type claudeReg struct {
 	ProcStart  string `json:"procStart"`
 	Name       string `json:"name"`
 	NameSource string `json:"nameSource"`
+	// Status is idle, busy or waiting (an ask, a dialog, a question open in its terminal);
+	// WaitingFor says what for ("input needed", ...). Claude 2.1.318 writes them as they change.
+	Status     string `json:"status"`
+	WaitingFor string `json:"waitingFor"`
 }
 
 func (x *Index) claudeRegistry() []claudeReg {
@@ -60,11 +64,24 @@ func userNamed(c claudeReg) string {
 	return oneLine(c.Name)
 }
 
+// needsOf is what a Claude process waits on you for, "" if it does not: its registry's
+// waitingFor, else a word for it.
+func needsOf(c claudeReg) string {
+	if c.Status != "waiting" {
+		return ""
+	}
+	if w := oneLine(c.WaitingFor); w != "" {
+		return w
+	}
+	return "input needed"
+}
+
 type proc struct {
 	st       Stat
 	agent    string
 	sessions []string // the sessions it runs: Codex's app-server can run several
 	name     string
+	needs    string // Claude: what it waits on you for, as its registry says
 }
 
 // scanProcs looks at the user's processes: which run an agent, of which session, and which
@@ -88,7 +105,7 @@ func (x *Index) scanProcs() {
 		p := &proc{st: st}
 		all[pid] = p
 		if c, ok := reg[pid]; ok && (c.ProcStart == "" || c.ProcStart == strconv.FormatUint(st.Start, 10)) {
-			p.agent, p.sessions, p.name = "claude", []string{c.SessionID}, userNamed(c)
+			p.agent, p.sessions, p.name, p.needs = "claude", []string{c.SessionID}, userNamed(c), needsOf(c)
 			continue
 		}
 		argv := x.o.Procs.Cmdline(pid)
@@ -99,7 +116,7 @@ func (x *Index) scanProcs() {
 	found := map[string]running{}
 	for pid, p := range all {
 		for _, s := range p.sessions {
-			r := running{pid: pid, start: p.st.Start, agent: api.Agent(p.agent), name: p.name}
+			r := running{pid: pid, start: p.st.Start, agent: api.Agent(p.agent), name: p.name, needs: p.needs}
 			env := launchEnv(x.o.Procs.Environ(pid))
 			own := env["IRIDIUM_SESSION"]
 			// A hosted Codex runs its thread under Iridium's id for the session.

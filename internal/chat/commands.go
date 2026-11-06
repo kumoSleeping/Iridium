@@ -31,6 +31,7 @@ var commands map[string]cmd
 func init() {
 	commands = map[string]cmd{
 		"new":     {"开新会话：/new [agent] [目录]", cmdNew},
+		"clear":   {"清空对话：同一处开新会话，旧的归档", cmdClear},
 		"use":     {"换到别的会话", cmdUse},
 		"ls":      {"列出会话", cmdLs},
 		"stop":    {"停掉当前回合", cmdStop},
@@ -42,8 +43,34 @@ func init() {
 	}
 }
 
+// common describes the agent commands every session has (session.Manager.Commands), which come
+// without a description.
+var common = map[string]string{"compact": "压缩上下文", "effort": "思考强度"}
+
+// cmdClear starts the chat's session over: a new one in its place (session.Manager.Clear).
+func cmdClear(s *Service, ctx context.Context, c Caller, p *store.ChatPointer, args string) (api.ChatInputReply, error) {
+	if p.Session == "" {
+		return reply("", "还没有会话")
+	}
+	if err := s.guard().Use(c, p.Session); err != nil {
+		return api.ChatInputReply{}, err
+	}
+	id, err := s.o.Manager.Clear(ctx, p.Session, source(c, ""))
+	if id != "" && id != p.Session {
+		s.guard().Opened(c, id)
+		p.Session = id
+		if err := s.o.Store.SetPointer(*p); err != nil {
+			return api.ChatInputReply{}, err
+		}
+	}
+	if err != nil {
+		return api.ChatInputReply{}, err
+	}
+	return reply(id, fmt.Sprintf("已清空，新会话 `%s`", short(id)))
+}
+
 // Order is the commands' order in a menu.
-var Order = []string{"new", "use", "ls", "stop", "model", "mode", "status", "usage", "context"}
+var Order = []string{"new", "clear", "use", "ls", "stop", "model", "mode", "status", "usage", "context"}
 
 // Commands is what the chat can send: Iridium's, then its session's agent's own.
 func (s *Service) Commands(c Caller, chat string) ([]api.ChatCommand, error) {
@@ -61,7 +88,7 @@ func (s *Service) Commands(c Caller, chat string) ([]api.ChatCommand, error) {
 	}
 	for _, a := range agentCmds {
 		if _, ours := commands[a.Name]; !ours {
-			out = append(out, api.ChatCommand{Name: a.Name, Description: a.Description})
+			out = append(out, api.ChatCommand{Name: a.Name, Description: cmp.Or(a.Description, common[a.Name], a.Name)})
 		}
 	}
 	return out, nil

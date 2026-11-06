@@ -212,6 +212,11 @@ const STATUS_KEY = {
   idle: "status.idle",
 } as const;
 export const statusText = (s: Status) => t(STATUS_KEY[s] ?? "status.idle");
+/** The lamp a session shows: one running elsewhere that waits on you there (Claude says so in its
+ *  registry) is amber as one here would be, though still read-only here. */
+export const lampOf = (s: { status: Status; needs?: string }): Status => (s.status === "elsewhere" && s.needs ? "waiting" : s.status);
+/** What a session's lamp says: elsewhere and waiting, that it waits on you there. */
+export const sessionStatusText = (s: { status: Status; needs?: string }) => (s.status === "elsewhere" && s.needs ? t("status.needsElsewhere") : statusText(s.status));
 /** The lamp's look: waiting shows as needs (amber). */
 const LAMP: Record<Status, string> = { running: "running", compacting: "compacting", waiting: "needs", error: "error", starting: "starting", elsewhere: "elsewhere", idle: "idle" };
 

@@ -125,7 +125,7 @@ func (m *Manager) elsewhere(s api.Session, as string) api.Session {
 		return s
 	}
 	if f, _, ok := m.found(as); ok && f.Status == api.StatusElsewhere {
-		s.Status, s.Live = api.StatusElsewhere, true
+		s.Status, s.Live, s.Needs = api.StatusElsewhere, true, f.Needs
 	}
 	return s
 }
@@ -141,7 +141,7 @@ func (m *Manager) foreignState(id string, over map[string]store.Overlay) (*api.S
 		over, _ = m.o.Store.Overlays()
 	}
 	o := over[id]
-	s.Name, s.Pinned, s.Workspace = o.Name, o.Pinned, o.Workspace
+	s.Name, s.Pinned, s.Workspace, s.Color = o.Name, o.Pinned, o.Workspace, api.Color(o.Color)
 	s.Archived = !m.visibility().Shown(string(s.Agent), s.ID)
 	m.parentOf(&s)
 	st := &api.SessionState{Session: s, Asks: []api.Ask{}, Tasks: []api.Task{}}

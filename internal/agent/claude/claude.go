@@ -191,7 +191,7 @@ func (d *Driver) Send(ctx context.Context, m agent.Message) error {
 	}
 	// Counted before it is written: the turn it starts may show before the write returns.
 	d.waiting = append(d.waiting, m.ID)
-	if m.Text == "/compact" && d.sent != "other" {
+	if t := strings.TrimSpace(m.Text); (t == "/compact" || strings.HasPrefix(t, "/compact ")) && d.sent != "other" {
 		d.sent = "compact"
 	} else {
 		d.sent = "other"

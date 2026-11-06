@@ -7,7 +7,7 @@ import { argOf, folded, foldLine, inputOf } from "../src/chat/fold";
 import { commandsOf, keyMode, matching } from "../src/chat/composer";
 import { levelName, restAt } from "../src/chat/effort";
 import { ctxParts, modelView } from "../src/chat/meters";
-import { filesIn, resolve, shortId, sourceOf } from "../src/chat/refs";
+import { filesIn, mentions, resolve, shortId, sourceOf } from "../src/chat/refs";
 import { en } from "../src/i18n/en";
 import { zh } from "../src/i18n/zh";
 import { jumpList } from "../src/jump";
@@ -149,6 +149,10 @@ describe("buildTree", () => {
     const back = buildTree(list.map((s) => (s.id === "h" ? { ...s, status: "idle" as const } : s)), ws, "未归类");
     expect(back.needs).toEqual([]);
     expect(back.workspaces[0]!.rows.map((r) => (r.kind === "session" ? r.s.id : r.f.name))).toEqual(["a", "h", "web", "docs"]);
+    // Running elsewhere and waiting on you there (Claude says so): in 需要你 too; only running, not.
+    const there = buildTree([S("x", "/w/ir", { workspace: 1, status: "elsewhere", needs: "approve Bash" }), S("y", "/w/ir", { workspace: 1, status: "elsewhere" })], ws, "未归类");
+    expect(there.needs.map((s) => s.id)).toEqual(["x"]);
+    expect(there.workspaces[0]!.rows.map((r) => (r.kind === "session" ? r.s.id : r.f.name))).toEqual(["y"]);
   });
   test("where: the folder a row says, where the tree does not", () => {
     const list = [S("a", "/w/ir", { workspace: 1 }), S("b", "/w/ir/web", { workspace: 1 }), S("c", "/w/ir/web", { workspace: 1 }), S("d", "/w/ir/docs", { workspace: 1 }), S("e", "/w/x/one"), S("f", "/w/x/two"), S("g", "/w/x/two", { archived: true }), S("h", "/w/ir/web", { workspace: 1, status: "waiting" }), S("i", "/w/ir", { workspace: 1, archived: true })];
@@ -215,6 +219,8 @@ describe("composer", () => {
     expect(keyMode(true, "!hi", 0, true, false)).toBe("steer");
     expect(keyMode(true, "!hi", 0, true, true, true)).toBe("steer");
     expect(keyMode(true, "hi", 0, false, false)).toBe("steer");
+    expect(keyMode(true, "/compact", 0, true)).toBe("queue"); // a command waits for the turn's end
+    expect(keyMode(true, "/compact", 0, true, true, true)).toBe("queue");
   });
   test("commands: name start, name, description", () => {
     const cs = [
@@ -225,7 +231,11 @@ describe("composer", () => {
     expect(matching(cs, "co").map((c) => c.name)).toEqual(["context", "compact", "cost"]);
     expect(matching(cs, "压缩").map((c) => c.name)).toEqual(["compact"]);
     expect(matching(cs, "ntex").map((c) => c.name)).toEqual(["context"]);
-    expect(commandsOf({ ...S("a", "/w"), agent: "pi", asks: [], tasks: [], queue: [], end: 0, proc: 0 })).toEqual([]);
+    // Every agent has the common ones (the user, 2026-11-06: Codex had none); described here.
+    const pi = { ...S("a", "/w"), agent: "pi" as const, asks: [], tasks: [], queue: [], end: 0, proc: 0 };
+    expect(commandsOf(pi).map((c) => c.name)).toEqual(["clear", "compact", "context", "model", "mode"]);
+    const codex = commandsOf({ ...pi, agent: "codex", commands: [{ name: "clear" }, { name: "compact" }, { name: "effort" }, { name: "review", description: "own" }] });
+    expect(codex.map((c) => [c.name, !!c.description])).toEqual([["clear", true], ["compact", true], ["effort", true], ["review", true]]);
   });
 });
 
@@ -387,5 +397,13 @@ describe("shortId", () => {
     expect(shortId(a, [a])).toBe("1a2b3c4d");
     expect(shortId(a, [a, b])).toBe("1a2b3c4d-0");
     expect(shortId("abc", ["abc"])).toBe("abc");
+  });
+});
+
+describe("mentions", () => {
+  test("a dropped session's words, in either language, cut out of the text", () => {
+    expect(mentions("ask 「Fix the login」（Claude 会话 ca5187d2） now")).toEqual(["ask ", { title: "Fix the login", agent: "Claude", id: "ca5187d2", text: "「Fix the login」（Claude 会话 ca5187d2）" }, " now"]);
+    expect(mentions('"Run tests" (DeepSeek Harness session 1a2b3c4d-9)')).toEqual([{ title: "Run tests", agent: "DeepSeek Harness", id: "1a2b3c4d-9", text: '"Run tests" (DeepSeek Harness session 1a2b3c4d-9)' }]);
+    expect(mentions("plain 「quoted」 words (session 12)")).toEqual(["plain 「quoted」 words (session 12)"]);
   });
 });

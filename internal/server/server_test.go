@@ -234,7 +234,6 @@ func TestTurnOverHTTP(t *testing.T) {
 	if code := call(t, c, "GET", base+"/api/sessions/"+id+"/block?at=1.0", nil, nil); code != 404 {
 		t.Errorf("full at nothing: %d", code)
 	}
-
 	// The same API on the unix socket, as the local terminal.
 	st, err := os.Stat(cfg.SocketPath())
 	if err != nil || st.Mode().Perm() != 0o600 {
@@ -285,6 +284,15 @@ func TestTurnOverHTTP(t *testing.T) {
 	// A second daemon on the same socket is refused.
 	if _, _, err := s.Listen(); err == nil {
 		t.Error("listened twice on one socket")
+	}
+	// /clear is Iridium's: the reply names the session it goes on in, no input written.
+	var cleared api.SendReply
+	if code := call(t, c, "POST", base+"/api/sessions/"+id+"/send", api.Send{Text: "/clear"}, &cleared); code != 200 || cleared.Session == "" || cleared.Session == id || cleared.Input != "" {
+		t.Fatalf("clear: %d %+v", code, cleared)
+	}
+	var again api.MessagePage
+	if call(t, c, "GET", base+"/api/sessions/"+cleared.Session+"/messages", nil, &again); len(again.Blocks) != 0 {
+		t.Errorf("the cleared session has words: %+v", again.Blocks)
 	}
 	if code := call(t, c, "POST", base+"/api/sessions/"+id+"/stop", nil, nil); code != 200 {
 		t.Errorf("stop: %d", code)
