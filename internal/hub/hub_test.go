@@ -210,12 +210,25 @@ func TestDraftTool(t *testing.T) {
 	h.DraftTool("a", 1, 2, "toolu_1", "Bash", `{"command":"ir se`)
 	h.DraftTool("a", 1, 2, "toolu_1", "Bash", `nd ab \"hi\""}`)
 	h.Seal("a", 1, 2)
-	e, ok := next(t, ch, time.Second)
-	if !ok {
-		t.Fatal("no draft")
+	// The pieces come in one event or several (a slow stream sends as they come): together they
+	// are the call's arguments, the last one done.
+	var text string
+	for {
+		e, ok := next(t, ch, time.Second)
+		if !ok {
+			t.Fatalf("no draft after %q", text)
+		}
+		d := draftOf(t, e)
+		if d.N != 2 || d.Tool == nil || d.Tool.ID != "toolu_1" || d.Tool.Name != "Bash" {
+			t.Fatalf("tool draft %+v", d)
+		}
+		text += d.Text
+		if d.Done {
+			break
+		}
 	}
-	if d := draftOf(t, e); d.N != 2 || d.Tool == nil || d.Tool.ID != "toolu_1" || d.Tool.Name != "Bash" || d.Text != `{"command":"ir send ab \"hi\""}` || !d.Done {
-		t.Fatalf("tool draft %+v", d)
+	if text != `{"command":"ir send ab \"hi\""}` {
+		t.Fatalf("tool draft text %q", text)
 	}
 }
 
