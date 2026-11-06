@@ -1,8 +1,8 @@
 // Package store is Iridium's database: SQLite through a pure-Go driver, WAL, writes in BEGIN
 // IMMEDIATE transactions. It holds only what lies over the sessions found on disk (plan "数据"):
 // workspaces and who belongs where, pins, colour tags, which sessions are shown, names, the queue of messages to send, push
-// subscriptions, interactive terminals and their permissions, usage, and the plugin event outbox.
-// Never the conversations themselves, nor asks.
+// subscriptions, interactive terminals and their permissions, usage, the plugin event outbox, and
+// the credentials, sealed (secrets.go). Never the conversations themselves, nor asks.
 package store
 
 import (
@@ -11,6 +11,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -146,12 +148,20 @@ var schema = []string{
 	// 9: push rules on workspaces, folders and sessions in place of push settings by workspace
 	// (pushrules.go).
 	pushRulesSchema,
+	// 10: credentials and their uses (secrets.go).
+	secretsSchema,
 }
 
 // steps run in Go after the migration of their version, in the same transaction.
 var steps = map[int]func(*sql.Tx) error{5: claudeForFirstPanel}
 
-type Store struct{ db *sql.DB }
+type Store struct {
+	db *sql.DB
+	// keyPath is the secrets' key file, by the database (secrets.go); key, once read or made.
+	keyPath string
+	kmu     sync.Mutex
+	key     []byte
+}
 
 // Open opens (and makes, or migrates) the database at path. The file and its -wal and -shm are
 // the owner's alone (0600): they hold the terminals' token hashes and passkeys.
@@ -164,7 +174,7 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Store{db: db}
+	s := &Store{db: db, keyPath: filepath.Join(filepath.Dir(path), "secrets.key")}
 	if err := s.migrate(); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("store %s: %w", path, err)
