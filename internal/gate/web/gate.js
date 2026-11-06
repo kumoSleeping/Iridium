@@ -19,8 +19,6 @@ const S = {
   name_reserved: ['这个名字保留给系统', 'Reserved name'],
   name_invalid: ['只能用文字、数字、空格和 - _ .', 'Letters, digits, spaces and - _ . only'],
   name_too_long: ['最多 12 个字', '12 characters at most'],
-  waiting: ['等待 Passkey…', 'Waiting for passkey…'],
-  verifying: ['正在验证…', 'Verifying…'],
   noSupport: ['这个浏览器不支持 Passkey', 'This browser does not support passkeys'],
   offline: ['连不上，请检查网络', "Can't connect. Check the network."],
   tooMany: ['尝试太多次，请 15 分钟后再试', 'Too many attempts. Try again in 15 minutes.'],
@@ -135,7 +133,7 @@ async function busy(btn, fn) {
 }
 
 async function login() {
-  status(t('waiting'));
+  status(''); // the spinner in the key says it
   const opt = await api('/_ir/api/login/options', {});
   if (opt.status !== 200) {
     status(opt.data.error === 'no_passkey' ? t('noPasskey') : requestError(opt), true);
@@ -152,7 +150,7 @@ async function login() {
     status(ceremonyError(err, startedAt), true);
     return;
   }
-  status(t('verifying'));
+  status('');
   const v = await api('/_ir/api/login/verify', { flow: opt.data.flow, response: encodeCredential(cred) });
   if (v.status === 200) location.replace(nextUrl());
   else status(v.status === 429 ? t('tooMany') : t('loginFailed'), true);
@@ -192,7 +190,7 @@ function badLink() {
 
 async function join() {
   const name = $('name').value;
-  status(t('waiting'));
+  status(''); // the spinner in the key says it
   const opt = await api('/_ir/api/join/options', { token, name });
   if (opt.status === 403) return badLink();
   if (opt.status === 409) {
@@ -213,7 +211,7 @@ async function join() {
     status(ceremonyError(err, startedAt), true);
     return;
   }
-  status(t('verifying'));
+  status('');
   const v = await api('/_ir/api/join/verify', { flow: opt.data.flow, response: encodeCredential(cred) });
   if (v.status === 200) {
     try { sessionStorage.removeItem(TOKEN_KEY); } catch { /* ignore */ }
