@@ -7,7 +7,7 @@
 // under the mouse, a faint "+" at its end for a new session there. A row's menu (right click,
 // long-press): pin, rename, stop, archive. The mouse resting on a row fetches its chat ahead.
 import { Menu } from "@base-ui/react/menu";
-import { Archive, ArchiveRestore, Bot, ChevronRight, Copy, Folder, FolderOpen, Inbox, KeyRound, Link2, PanelLeft, PanelLeftClose, Pencil, Pin, PinOff, Plus, Search, Settings, ShieldOff, Square, Workflow as WorkflowIcon } from "lucide-react";
+import { Archive, ArchiveRestore, Bot, ChevronRight, Copy, Folder, FolderOpen, Inbox, KeyRound, Link2, Maximize2, Minimize2, Pencil, Pin, PinOff, Plus, Search, Settings, ShieldOff, Square, Workflow as WorkflowIcon } from "lucide-react";
 import { Fragment, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { api } from "./api/client";
 import type { Confirm, Session } from "./api/types.gen";
@@ -155,7 +155,7 @@ export function Sidebar(p: Props) {
   );
 
   const head = (
-    <div className={cn("flex shrink-0 items-center gap-0.5 px-2", p.phone ? "glass absolute inset-x-0 top-0 z-20 h-13 pt-[env(safe-area-inset-top)] shadow-[0_0.5px_0_var(--edge)]" : "h-12")}>
+    <div className={cn("flex shrink-0 items-center gap-0.5 px-2", p.phone ? "glass absolute inset-x-0 top-0 z-20 h-13 shadow-[0_0.5px_0_var(--edge)]" : "h-12")}>
       {p.createKey(
         <button type="button" aria-label={t("nav.newWorkspace")} className="g-press grid size-8 place-items-center rounded-md text-ink-2 hover:bg-fill hover:text-ink data-popup-open:bg-fill pointer-coarse:size-10">
           <Plus size={18} />
@@ -167,7 +167,7 @@ export function Sidebar(p: Props) {
       <LinkDot />
       {p.onDock && (
         <IconKey label={p.drawer ? t("nav.dockSidebar") : `${t("nav.hideSidebar")} · ${t("nav.sidebarKey")}`} tipSide="bottom" onClick={p.onDock}>
-          {p.drawer ? <PanelLeft size={16} /> : <PanelLeftClose size={16} />}
+          {p.drawer ? <Maximize2 size={15} /> : <Minimize2 size={15} />}
         </IconKey>
       )}
     </div>
@@ -270,13 +270,13 @@ export function Sidebar(p: Props) {
       </div>
       {/* Me and the settings key, right on the sidebar's ground at its foot: no card around them (the
           user, 2026-11-06). */}
-      <div className={cn("flex h-12 shrink-0 items-center justify-between gap-2 px-2 pointer-coarse:h-14", p.phone && "mb-[env(safe-area-inset-bottom)]")}>
+      <div className="flex h-14 shrink-0 items-center justify-between gap-2 px-2 pointer-coarse:h-16">
         <div className="min-w-0">{p.me}</div>
         <span className="relative shrink-0">
-          <IconKey label={p.updateDot ? `${t("nav.settings")} · ${t("settings.updateReady")}` : t("nav.settings")} onClick={p.onSettings} aria-pressed={p.settings} className={p.settings ? "bg-fill text-ink" : undefined}>
-            <Settings size={16} />
+          <IconKey label={p.updateDot ? `${t("nav.settings")} · ${t("settings.updateReady")}` : t("nav.settings")} onClick={p.onSettings} aria-pressed={p.settings} className={cn("size-10 pointer-coarse:size-11", p.settings && "bg-fill text-ink")}>
+            <Settings size={19} />
           </IconKey>
-          {p.updateDot && <span className="g-pop pointer-events-none absolute top-1 right-1 size-2 rounded-full bg-err shadow-[0_0_0_1.5px_var(--paper)]" aria-hidden />}
+          {p.updateDot && <span className="g-pop pointer-events-none absolute top-1.5 right-1.5 size-2 rounded-full bg-err shadow-[0_0_0_1.5px_var(--paper)]" aria-hidden />}
         </span>
       </div>
     </aside>

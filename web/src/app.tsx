@@ -119,9 +119,10 @@ export function App() {
   // The chats you may open next, warmed (src/warm.ts).
   useEffect(() => warmUp(list, tree, open), [tree, open]);
 
-  // A chat opened from the drawer puts it away; back at nothing open, a phone brings it out.
+  // On a phone a chat opened from the drawer puts it away, and back at nothing open it comes out;
+  // on a computer it stays beside the chat till put away.
   useEffect(() => {
-    if (drawer) setDrawerOpen(narrow && !open);
+    if (narrow) setDrawerOpen(!open);
   }, [open]);
 
   // Chat to chat on a computer, the main pane swaps quickly, drifting the way the sidebar lists them.
@@ -189,10 +190,13 @@ export function App() {
       onDock={narrow ? undefined : () => dock(drawer)}
     />
   );
-  const drawerKey = drawer ? (above: boolean) => <DrawerKey above={above} onClick={() => setDrawerOpen(true)} /> : undefined;
+  // On a computer the small sidebar, out, lives beside the chat: the main pane makes room for it,
+  // nothing covered, and its key is not needed meanwhile.
+  const beside = drawer && !narrow && drawerOpen;
+  const drawerKey = drawer && !beside ? (above: boolean) => <DrawerKey above={above} onClick={() => setDrawerOpen(true)} /> : undefined;
 
   const main = (
-    <main className={cn("relative h-full min-w-0 flex-1 bg-paper", !phone && "g-turn")}>
+    <main className={cn("relative h-full min-w-0 flex-1 bg-paper", !phone && "g-turn", drawer && !narrow && "g-make-room")} style={beside ? { marginLeft: "calc(var(--sidebar-w) + 16px)" } : undefined}>
       <Suspense fallback={<Waiting />}>
         {under.name === "chat" ? (
           <ChatPage key={under.id} id={under.id} phone={phone} drawerKey={drawerKey} />
@@ -239,7 +243,7 @@ export function App() {
           {!drawer && sidebar}
           {main}
           {drawer && (
-            <Drawer open={drawerOpen} setOpen={setDrawerOpen} phone={phone}>
+            <Drawer open={drawerOpen} setOpen={setDrawerOpen} phone={phone} modal={narrow}>
               {sidebar}
             </Drawer>
           )}

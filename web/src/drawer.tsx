@@ -1,8 +1,10 @@
 // The sidebar as a drawer (the user, 2026-11-06): on a phone or a portrait screen always, on a
-// computer once the sidebar is put away. The chat is the one main pane; the drawer slides out over
-// it from the left, the whole height, two thirds of a phone's width; a key at the bottom left
-// brings it, and on a touch screen so does a swipe from the left edge, the drawer following the
-// finger; a swipe back, a tap beside it or Esc puts it away.
+// computer once the sidebar is made small. The chat is the one main pane; the drawer, a whole
+// rounded card a little off the window's edges, slides out over it from the left, two thirds of a
+// phone's width; a key at the bottom left brings it. On a phone it is modal: the chat dims under
+// it, a swipe from the left edge brings it following the finger, a swipe back or a tap beside it
+// puts it away. On a computer it lives beside the chat (the user, 2026-11-06): nothing dims, the
+// chat is used as ever, and it stays till put away (its key, ⌘\, Esc).
 import { PanelLeft } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { t } from "./i18n";
@@ -10,7 +12,7 @@ import { cn, IconKey } from "./ui";
 
 const EDGE = 24; // px from the left edge where a swipe may begin
 
-export function Drawer({ open, setOpen, phone, children }: { open: boolean; setOpen: (o: boolean) => void; phone: boolean; children: ReactNode }) {
+export function Drawer({ open, setOpen, phone, modal, children }: { open: boolean; setOpen: (o: boolean) => void; phone: boolean; modal: boolean; children: ReactNode }) {
   const panel = useRef<HTMLDivElement>(null);
   // While a finger drags it: how far it is out, 0..1; null when it is not dragged.
   const [drag, setDrag] = useState<number | null>(null);
@@ -27,6 +29,7 @@ export function Drawer({ open, setOpen, phone, children }: { open: boolean; setO
   // A horizontal swipe: from the left edge while shut, anywhere while open. Undecided till it has
   // moved 8px; then it is the drawer's only if it went more across than down.
   useEffect(() => {
+    if (!modal) return;
     let from: { x: number; y: number; t: number; open: boolean } | null = null;
     let mine = false;
     let at = 0;
@@ -77,30 +80,31 @@ export function Drawer({ open, setOpen, phone, children }: { open: boolean; setO
       removeEventListener("touchend", end);
       removeEventListener("touchcancel", end);
     };
-  }, []);
+  }, [modal]);
 
   const out = drag ?? (open ? 1 : 0);
   return (
     <>
-      <div
+      {modal && <div
         aria-hidden
         onClick={() => setOpen(false)}
         className={cn("fixed inset-0 z-40 bg-[oklch(0_0_0/0.22)] dark:bg-[oklch(0_0_0/0.45)]", drag === null && "transition-opacity duration-(--dur-3) ease-(--ease-out)", out === 0 && "pointer-events-none")}
         style={{ opacity: out }}
-      />
+      />}
       <div
         ref={panel}
         role="dialog"
-        aria-modal={open}
+        aria-modal={modal && open}
         aria-label={t("nav.sessions")}
         inert={!open && drag === null}
         className={cn(
-          "g-drawer fixed inset-y-0 left-0 z-40 flex bg-paper shadow-[var(--shadow-float)]",
-          phone ? "w-[min(max(66.667vw,264px),calc(100vw-40px))] rounded-r-xl" : "rounded-r-xl",
+          "g-drawer fixed top-[max(8px,env(safe-area-inset-top))] bottom-[max(8px,env(safe-area-inset-bottom))] left-2 z-40 flex overflow-hidden rounded-xl bg-paper shadow-[var(--shadow-float)]",
+          phone && "w-[min(max(66.667vw,264px),calc(100vw-48px))]",
           drag !== null && "[transition:none]",
           out === 0 && "shadow-none",
         )}
-        style={{ transform: `translateX(${(out - 1) * 100}%)` }}
+        // Shut, past its own width and the gap to the edge, its shadow too.
+        style={{ transform: `translateX(calc(${(out - 1) * 100}% - ${(1 - out) * 24}px))` }}
       >
         {children}
       </div>

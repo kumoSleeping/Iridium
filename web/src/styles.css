@@ -51,9 +51,9 @@
   color-scheme: dark;
   --paper: oklch(0.18 0 0);
   --ink: oklch(0.94 0 0);
-  --ink-2: oklch(0.73 0 0);
-  --ink-3: oklch(0.57 0 0);
-  --ink-4: oklch(0.42 0 0);
+  --ink-2: oklch(0.78 0 0);
+  --ink-3: oklch(0.65 0 0);
+  --ink-4: oklch(0.53 0 0);
   --fill: oklch(0.235 0 0);
   --fill-2: oklch(0.285 0 0);
   --edge: oklch(1 0 0 / 0.09);

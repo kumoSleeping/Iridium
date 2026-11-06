@@ -80,9 +80,9 @@ export function MeChip({ theme, setTheme, initialPage = "main", defaultOpen = fa
       <Tip label={t("me.title")}>
         <Popover.Trigger
           render={
-            <button type="button" className="g-press flex h-9 min-w-0 items-center gap-2 rounded-full py-1 pr-2.5 pl-1 hover:bg-fill data-popup-open:bg-fill pointer-coarse:h-11">
-              {me.local ? <LocalMark size={24} /> : <Avatar src={me.avatar} name={name} size={24} />}
-              <span className="truncate text-sm text-ink-2">{name}</span>
+            <button type="button" className="g-press flex h-11 min-w-0 items-center gap-2.5 rounded-full py-1 pr-3 pl-1 hover:bg-fill data-popup-open:bg-fill pointer-coarse:h-12">
+              {me.local ? <LocalMark size={32} /> : <Avatar src={me.avatar} name={name} size={32} />}
+              <span className="truncate text-md text-ink">{name}</span>
             </button>
           }
         />

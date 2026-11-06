@@ -116,6 +116,12 @@
     box-shadow var(--dur-3) var(--ease-out);
 }
 
+/* The main pane making room for the small sidebar beside it, in step with the drawer's slide: a
+   width that changes, the one move here that is not a transform. */
+.g-make-room {
+  transition: margin-left var(--dur-3) var(--ease-out);
+}
+
 /* --- dialog: Base UI Dialog's popup and backdrop (data-starting-style / data-ending-style) --- */
 .g-dialog {
   transform-origin: 28px calc(100% - 24px);
