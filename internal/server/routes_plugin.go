@@ -195,7 +195,7 @@ func (s *Server) pluginEvents(w http.ResponseWriter, r *http.Request) {
 // the rest as s.error does.
 func (s *Server) fault(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, session.ErrBadRequest), errors.Is(err, chat.ErrBadRequest), errors.Is(err, push.ErrBadSubscription):
+	case errors.Is(err, session.ErrBadRequest), errors.Is(err, chat.ErrBadRequest), errors.Is(err, push.ErrBadSubscription), errors.Is(err, push.ErrBadRule):
 		fail(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, store.ErrNoInput), errors.Is(err, chat.ErrNotFound):
 		fail(w, http.StatusNotFound, err.Error())

@@ -26,6 +26,7 @@ import type {
   NewUpload,
   NewWorkspace,
   PushEvents,
+  PushRule,
   PushState,
   PushSubscription,
   PushSwitch,
@@ -200,7 +201,8 @@ export const api = {
   // --- push ---
   push: () => get<PushState>("/api/push"),
   pushSwitch: (enabled: boolean) => writeAgain<{ ok: boolean }>("PUT", "/api/push", { enabled } satisfies PushSwitch),
-  pushWorkspace: (ws: number, e: PushEvents) => writeAgain<{ ok: boolean }>("PUT", `/api/push/workspaces/${ws}`, e),
+  pushDefaults: (e: PushEvents) => writeAgain<PushState>("PUT", "/api/push/defaults", e),
+  pushRule: (r: PushRule) => writeAgain<PushState>("PUT", "/api/push/rules", r),
   pushSubscribe: (sub: PushSubscription) => write<{ ok: boolean }>("POST", "/api/push/subscriptions", sub),
   pushUnsubscribe: (endpoint: string) => write<{ ok: boolean }>("DELETE", "/api/push/subscriptions", { endpoint }),
 

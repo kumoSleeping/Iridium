@@ -5,8 +5,9 @@
 // (the user's decision, 2026-11-05); out of a turn, the first line ends with how long ago it was. 需要你 on top when anything
 // waits on you, 归档 folded at the bottom. A workspace's row: its name a size up, its chevron only
 // under the mouse, a faint "+" at its end for a new session there. A row's menu (right click,
-// long-press): pin, rename, stop, archive, and at its foot the colour tags (colors.ts). The mouse
-// resting on a row fetches its chat ahead.
+// long-press): pin, rename, stop, archive, 通知 while push is on (push.ts), and at its foot the
+// colour tags (colors.ts); a workspace's, its 通知 only. The mouse resting on a row fetches its
+// chat ahead.
 import { Menu } from "@base-ui/react/menu";
 import { Archive, ArchiveRestore, Bot, Check, ChevronRight, Copy, Folder, FolderOpen, Inbox, KeyRound, Link2, Pencil, Pin, PinOff, Plus, Search, Settings, Square, Workflow as WorkflowIcon } from "lucide-react";
 import { Fragment, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
@@ -16,6 +17,7 @@ import { colorVar, COLORS, useFolderColors } from "./colors";
 import { ahead, behind } from "./chats";
 import { t } from "./i18n";
 import { useFlip } from "./motion";
+import { folderLevels, sessionLevels, usePushMenus, wsLevels, type PushLevel } from "./push";
 import type { Folder as FolderNode, Tree, WsNode } from "./tree";
 import { errText, toast } from "./toast";
 import { useSaidLine } from "./data";
@@ -212,6 +214,7 @@ export function Sidebar(p: Props) {
             <div key={w.key} className={i > 0 || needs ? "mt-4" : "mt-1"} role="group">
               <WsRow
                 flip={`w:${w.key}`}
+                id={w.id}
                 name={w.name}
                 open={open}
                 onToggle={() => p.toggle(w.key)}
@@ -237,6 +240,7 @@ export function Sidebar(p: Props) {
                     <div key={r.f.key} role="group">
                       <FolderRow
                         f={r.f}
+                        ws={w.id}
                         label={w.id === 0 ? tilde(r.f.path) : r.f.name}
                         open={p.expanded(r.f.key)}
                         onToggle={() => p.toggle(r.f.key)}
@@ -398,10 +402,45 @@ function Row({ depth, flip, chevron, expanded, icon, label, end, selected, onCli
   );
 }
 
-function WsRow({ flip, name, open, onToggle, end }: { flip: string; name: string; open: boolean; onToggle: () => void; end: ReactNode }) {
+/** A workspace's row; its menu (right click, long-press), while push is on: its 通知, inline. */
+function WsRow({ flip, id, name, open, onToggle, end }: { flip: string; id: number; name: string; open: boolean; onToggle: () => void; end: ReactNode }) {
+  const push = usePushMenus();
+  const [at, setAt] = useState<{ x: number; y: number } | null>(null);
+  const lp = useLongPress(() => {
+    const r = document.activeElement?.closest?.("[role=treeitem]")?.getBoundingClientRect();
+    setAt(r ? { x: r.left + 40, y: r.bottom } : { x: 40, y: 40 });
+  });
+  const anchor = at && { getBoundingClientRect: () => DOMRect.fromRect({ x: at.x, y: at.y, width: 0, height: 0 }) };
   // Its "+" popover is a portal, but React events bubble through it: a press in it must not fold
   // the workspace (the user's, 2026-11-05: only you fold or unfold).
-  return <Row depth={0} flip={flip} chevron={open ? "open" : "closed"} reveal onClick={onToggle} label={<span className="font-medium">{name}</span>} end={end && <span className="flex items-center" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>{end}</span>} />;
+  return (
+    <>
+      <Row
+        depth={0}
+        flip={flip}
+        chevron={open ? "open" : "closed"}
+        reveal
+        onClick={onToggle}
+        label={<span className="font-medium">{name}</span>}
+        end={end && <span className="flex items-center" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>{end}</span>}
+        extra={push ? { ...lp, onContextMenu: (e: React.MouseEvent) => (e.preventDefault(), setAt({ x: e.clientX, y: e.clientY })), onClickCapture: lp.onClickCapture } : undefined}
+      />
+      {push && (
+        <Menu.Root open={at !== null} onOpenChange={(o) => !o && setAt(null)}>
+          <Menu.Portal>
+            <Menu.Positioner anchor={anchor} side="bottom" align="start" sideOffset={4} collisionPadding={8} className="z-50">
+              <Menu.Popup finalFocus={false} className="g-unfold glass thick float min-w-52 rounded-lg p-1.5 text-ink outline-none">
+                <div className="g-stagger flex flex-col">
+                  <div className="flex h-7 items-center px-2.5 text-xs font-medium text-ink-3">{t("push.menu")}</div>
+                  <push.m.PushItems st={push.st} levels={wsLevels(id)} i={1} />
+                </div>
+              </Menu.Popup>
+            </Menu.Positioner>
+          </Menu.Portal>
+        </Menu.Root>
+      )}
+    </>
+  );
 }
 
 /** A session's row: its logo and lamp, its name, unread or pinned at the end. The mouse resting on
@@ -583,7 +622,7 @@ export function sessionTags(s: Session): Tags {
 /** A folder's row in a workspace: its name, the "+" for a session in it; its menu (right click,
  *  long-press): a session here, its path copied, open or folded, its sessions archived, its colour
  *  tag. */
-function FolderRow({ f, label, open, onToggle, newHere, plus }: { f: FolderNode; label: ReactNode; open: boolean; onToggle: () => void; newHere: () => void; plus: ReactNode }) {
+function FolderRow({ f, ws, label, open, onToggle, newHere, plus }: { f: FolderNode; ws: number; label: ReactNode; open: boolean; onToggle: () => void; newHere: () => void; plus: ReactNode }) {
   const [at, setAt] = useState<{ x: number; y: number } | null>(null);
   const lp = useLongPress(() => {
     const r = document.activeElement?.closest?.("[role=treeitem]")?.getBoundingClientRect();
@@ -619,7 +658,7 @@ function FolderRow({ f, label, open, onToggle, newHere, plus }: { f: FolderNode;
       <Menu.Root open={at !== null} onOpenChange={(o) => !o && setAt(null)}>
         <Menu.Portal>
           <Menu.Positioner anchor={anchor} side="bottom" align="start" sideOffset={4} collisionPadding={8} className="z-50">
-            <MenuItems items={items} tags={tags} />
+            <MenuItems items={items} tags={tags} foot={<PushFoot levels={folderLevels(f.path, ws)} i={items.length} />} />
           </Menu.Positioner>
         </Menu.Portal>
       </Menu.Root>
@@ -628,16 +667,23 @@ function FolderRow({ f, label, open, onToggle, newHere, plus }: { f: FolderNode;
 }
 
 function SessionMenu({ s, at, close, rename }: { s: Session; at: { x: number; y: number } | null; close: () => void; rename: () => void }) {
+  const items = sessionActions(s, rename);
   const anchor = at && { getBoundingClientRect: () => DOMRect.fromRect({ x: at.x, y: at.y, width: 0, height: 0 }) };
   return (
     <Menu.Root open={at !== null} onOpenChange={(o) => !o && close()}>
       <Menu.Portal>
         <Menu.Positioner anchor={anchor} side="bottom" align="start" sideOffset={4} collisionPadding={8} className="z-50">
-          <MenuItems items={sessionActions(s, rename)} tags={sessionTags(s)} />
+          <MenuItems items={items} tags={sessionTags(s)} foot={<PushFoot levels={sessionLevels(s)} i={items.length} />} />
         </Menu.Positioner>
       </Menu.Portal>
     </Menu.Root>
   );
+}
+
+/** 通知 at a menu's foot, while push is on (push.ts). */
+function PushFoot({ levels, i }: { levels: PushLevel[]; i: number }) {
+  const push = usePushMenus();
+  return push && <push.m.PushSubmenu st={push.st} levels={levels} i={i} />;
 }
 
 /** A colour tag and how to set it ("" takes it off). */
@@ -645,8 +691,8 @@ export type Tags = { value?: Color; set: (c: Color | "") => void };
 
 type MenuItem = { icon: ReactNode; label: string; run: () => void };
 
-/** A menu's items; lead: before the children, at its top. */
-export function MenuItems({ lead = [], items, tags, children }: { lead?: MenuItem[]; items: MenuItem[]; tags?: Tags; children?: ReactNode }) {
+/** A menu's items; lead: before the children, at its top; foot: after the items, over the tags. */
+export function MenuItems({ lead = [], items, tags, children, foot }: { lead?: MenuItem[]; items: MenuItem[]; tags?: Tags; children?: ReactNode; foot?: ReactNode }) {
   const item = (it: MenuItem, i: number) => (
     <Menu.Item key={it.label} onClick={it.run} style={{ "--i": i } as CSSProperties} className="flex h-8 cursor-default items-center gap-2.5 rounded-md px-2.5 text-base outline-none select-none data-highlighted:bg-fill pointer-coarse:h-11">
       <span className="text-ink-2">{it.icon}</span>
@@ -659,7 +705,8 @@ export function MenuItems({ lead = [], items, tags, children }: { lead?: MenuIte
         {lead.map(item)}
         {children}
         {items.map((it, i) => item(it, lead.length + i))}
-        {tags && <TagDots tags={tags} i={lead.length + items.length} />}
+        {foot}
+        {tags && <TagDots tags={tags} i={lead.length + items.length + (foot ? 1 : 0)} />}
       </div>
     </Menu.Popup>
   );

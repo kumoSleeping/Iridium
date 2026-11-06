@@ -143,6 +143,9 @@ var schema = []string{
 	devicesSchema,
 	// 8: colour tags on sessions and folders (colors.go).
 	colorsSchema,
+	// 9: push rules on workspaces, folders and sessions in place of push settings by workspace
+	// (pushrules.go).
+	pushRulesSchema,
 }
 
 // steps run in Go after the migration of their version, in the same transaction.

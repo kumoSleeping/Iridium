@@ -1,14 +1,15 @@
 package api
 
 // PushState is the Web Push settings: the total switch (off by default), the VAPID public key a
-// page subscribes with, and each workspace's events (workspace 0: sessions in none).
+// page subscribes with, the events pushed where no rule says otherwise, and the rules.
 type PushState struct {
-	Enabled    bool            `json:"enabled"`
-	PublicKey  string          `json:"publicKey"` // base64url, uncompressed P-256 point
-	Workspaces []PushWorkspace `json:"workspaces"`
+	Enabled   bool       `json:"enabled"`
+	PublicKey string     `json:"publicKey"` // base64url, uncompressed P-256 point
+	Defaults  PushEvents `json:"defaults"`
+	Rules     []PushRule `json:"rules"`
 }
 
-// PushEvents are the events a workspace pushes. Default: NeedsYou and Error on, the rest off.
+// PushEvents are the events pushed. Default: NeedsYou and Error on, the rest off.
 type PushEvents struct {
 	NeedsYou bool `json:"needsYou"`
 	Error    bool `json:"error"`
@@ -16,9 +17,32 @@ type PushEvents struct {
 	Compact  bool `json:"compact"`
 }
 
-type PushWorkspace struct {
-	Workspace  int64 `json:"workspace"`
-	PushEvents `tstype:",extends"`
+// PushScope is what a push rule is on.
+type PushScope string
+
+const (
+	PushScopeWorkspace PushScope = "workspace"
+	PushScopeFolder    PushScope = "folder"
+	PushScopeSession   PushScope = "session"
+)
+
+// PushMode is a push rule's say: on or off; inherit (PUT, or ""): as above, the rule dropped.
+type PushMode string
+
+const (
+	PushModeOn      PushMode = "on"
+	PushModeOff     PushMode = "off"
+	PushModeInherit PushMode = "inherit"
+)
+
+// PushRule is what a workspace, a folder or a session says over the defaults. A session's event
+// goes by the nearest rule of its session, its folder (its cwd), its workspace: off pushes nothing;
+// on pushes the events of the nearest of them with events of their own, else the defaults.
+type PushRule struct {
+	Scope  PushScope   `json:"scope"`
+	Target string      `json:"target"` // workspace: its id ("0": sessions in none); folder: its absolute path; session: its id
+	Mode   PushMode    `json:"mode"`
+	Events *PushEvents `json:"events,omitempty"` // with on: its own; none: the ones from above
 }
 
 type PushSwitch struct {

@@ -870,15 +870,16 @@ export interface CopyProgress {
 
 /**
  * PushState is the Web Push settings: the total switch (off by default), the VAPID public key a
- * page subscribes with, and each workspace's events (workspace 0: sessions in none).
+ * page subscribes with, the events pushed where no rule says otherwise, and the rules.
  */
 export interface PushState {
   enabled: boolean;
   publicKey: string; // base64url, uncompressed P-256 point
-  workspaces: PushWorkspace[];
+  defaults: PushEvents;
+  rules: PushRule[];
 }
 /**
- * PushEvents are the events a workspace pushes. Default: NeedsYou and Error on, the rest off.
+ * PushEvents are the events pushed. Default: NeedsYou and Error on, the rest off.
  */
 export interface PushEvents {
   needsYou: boolean;
@@ -886,8 +887,30 @@ export interface PushEvents {
   turnEnd: boolean;
   compact: boolean;
 }
-export interface PushWorkspace extends PushEvents {
-  workspace: number /* int64 */;
+/**
+ * PushScope is what a push rule is on.
+ */
+export const PushScopeWorkspace = "workspace";
+export const PushScopeFolder = "folder";
+export const PushScopeSession = "session";
+export type PushScope = typeof PushScopeWorkspace | typeof PushScopeFolder | typeof PushScopeSession;
+/**
+ * PushMode is a push rule's say: on or off; inherit (PUT, or ""): as above, the rule dropped.
+ */
+export const PushModeOn = "on";
+export const PushModeOff = "off";
+export const PushModeInherit = "inherit";
+export type PushMode = typeof PushModeOn | typeof PushModeOff | typeof PushModeInherit;
+/**
+ * PushRule is what a workspace, a folder or a session says over the defaults. A session's event
+ * goes by the nearest rule of its session, its folder (its cwd), its workspace: off pushes nothing;
+ * on pushes the events of the nearest of them with events of their own, else the defaults.
+ */
+export interface PushRule {
+  scope: PushScope;
+  target: string; // workspace: its id ("0": sessions in none); folder: its absolute path; session: its id
+  mode: PushMode;
+  events?: PushEvents; // with on: its own; none: the ones from above
 }
 export interface PushSwitch {
   enabled: boolean;

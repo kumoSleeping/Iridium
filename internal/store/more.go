@@ -116,40 +116,6 @@ func (s *Store) PushSubscriptions() ([]PushSubscription, error) {
 	return out, rows.Err()
 }
 
-// PushEvents is what a workspace pushes.
-type PushEvents struct {
-	NeedsYou, Error, TurnEnd, Compact bool
-}
-
-// DefaultPushEvents: needs you and errors on, turn ends and compactions off.
-var DefaultPushEvents = PushEvents{NeedsYou: true, Error: true}
-
-// PushSettings is every workspace's that has its own.
-func (s *Store) PushSettings() (map[int64]PushEvents, error) {
-	rows, err := s.db.Query(`SELECT workspace, needs_you, error, turn_end, compact FROM push_settings`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := map[int64]PushEvents{}
-	for rows.Next() {
-		var ws int64
-		var e PushEvents
-		if err := rows.Scan(&ws, &e.NeedsYou, &e.Error, &e.TurnEnd, &e.Compact); err != nil {
-			return nil, err
-		}
-		out[ws] = e
-	}
-	return out, rows.Err()
-}
-
-func (s *Store) SetPushSettings(workspace int64, e PushEvents) error {
-	_, err := s.db.Exec(`INSERT INTO push_settings (workspace, needs_you, error, turn_end, compact) VALUES (?, ?, ?, ?, ?)
-		ON CONFLICT (workspace) DO UPDATE SET needs_you = excluded.needs_you, error = excluded.error, turn_end = excluded.turn_end, compact = excluded.compact`,
-		workspace, e.NeedsYou, e.Error, e.TurnEnd, e.Compact)
-	return err
-}
-
 // ---- plugin chats ----
 
 // ChatPointer is what a plugin's chat window points at.
