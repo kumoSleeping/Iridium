@@ -11,7 +11,7 @@ const ZH = /^zh\b/i.test(navigator.language || '');
 const S = {
   wait: ['正在检查', 'Checking'],
   signIn: ['用 Passkey 登录', 'Sign in with passkey'],
-  setup: ['还没有 Passkey：在运行它的那个账号里跑 ir invite', 'No passkey yet: run ir invite in the account that runs it'],
+  setup: ['还没有 Passkey：在运行它的那个账号里跑 ir\u00a0invite', 'No passkey yet: run ir\u00a0invite in the account that runs it'],
   namePh: ['给这台设备起个名字', 'Name this device'],
   create: ['创建 Passkey', 'Create passkey'],
   badLink: ['链接无效或已过期，请重新生成', 'This link is invalid or expired. Ask for a new one.'],
