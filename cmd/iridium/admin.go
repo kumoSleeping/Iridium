@@ -17,6 +17,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/config"
 	"github.com/kumoSleeping/iridium/internal/hub"
 	"github.com/kumoSleeping/iridium/internal/install"
+	"github.com/kumoSleeping/iridium/internal/node"
 	"github.com/kumoSleeping/iridium/internal/update"
 	"github.com/kumoSleeping/iridium/internal/version"
 )
@@ -27,6 +28,7 @@ func installCmd(args []string) int {
 	fs := flag.NewFlagSet("install", flag.ExitOnError)
 	path := fs.String("config", config.DefaultPath(), "the config file the service reads")
 	now := fs.Bool("now", false, "enable and start the service too")
+	listen := fs.String("listen", "", "the address a config made now listens on (default 127.0.0.1:7810)")
 	reload := fs.Bool("reload", true, "run systemctl --user daemon-reload")
 	unit := fs.String("unit", "iridium", "the unit's name (tests: iridium-test-*)")
 	home, _ := os.UserHomeDir()
@@ -51,7 +53,7 @@ func installCmd(args []string) int {
 	if d := os.Getenv("XDG_CONFIG_HOME"); d != "" {
 		unitDir = filepath.Join(d, "systemd", "user")
 	}
-	o := install.Options{Exe: exe, ConfigPath: cfgPath, UnitDir: unitDir, Unit: *unit, Path: os.Getenv("PATH"), Env: env, Now: *now, Out: os.Stdout}
+	o := install.Options{Exe: exe, ConfigPath: cfgPath, Listen: *listen, UnitDir: unitDir, Unit: *unit, Path: os.Getenv("PATH"), Env: env, Now: *now, Out: os.Stdout}
 	if *reload || *now {
 		o.Systemctl = func(args ...string) error {
 			cmd := exec.Command("systemctl", append([]string{"--user"}, args...)...)
@@ -60,6 +62,43 @@ func installCmd(args []string) int {
 		}
 	}
 	if err := install.Install(o); err != nil {
+		log.Print(err)
+		return 1
+	}
+	return 0
+}
+
+// pushCmd is `iridium push [-i key] [-listen addr] <user@host>`.
+func pushCmd(args []string) int {
+	fs := flag.NewFlagSet("push", flag.ExitOnError)
+	key := fs.String("i", "", "the ssh identity")
+	listen := fs.String("listen", "", "the address a first install there listens on")
+	fs.Parse(args)
+	if fs.NArg() != 1 {
+		fmt.Fprintln(os.Stderr, "usage: iridium push [-i <key>] [-listen <addr>] <user@host>")
+		return 2
+	}
+	if err := node.Push(context.Background(), node.PushOptions{Target: fs.Arg(0), Key: *key, Listen: *listen, Out: os.Stdout}); err != nil {
+		log.Print(err)
+		return 1
+	}
+	return 0
+}
+
+// nodeCmd is `iridium node new <account> [-listen addr]`.
+func nodeCmd(args []string) int {
+	if len(args) < 2 || args[0] != "new" {
+		fmt.Fprintln(os.Stderr, "usage: iridium node new <account> [-listen <addr>]")
+		return 2
+	}
+	fs := flag.NewFlagSet("node new", flag.ExitOnError)
+	listen := fs.String("listen", "", "its address (default the first free 127.0.0.1 port from 7811)")
+	fs.Parse(args[2:])
+	if fs.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "usage: iridium node new <account> [-listen <addr>]")
+		return 2
+	}
+	if err := node.New(context.Background(), node.NewOptions{User: args[1], Listen: *listen, Out: os.Stdout}); err != nil {
 		log.Print(err)
 		return 1
 	}

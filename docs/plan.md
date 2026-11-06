@@ -194,6 +194,7 @@ ir revoke <名字>
 - 节点是通道型交互终端，用同一张权限表，另加“列目录”。默认要求审批。
 - 双方直接 HTTPS（签名请求）；没有公网地址的一方以后用出站 WebSocket。
 - 不做网页上的汇总视图。
+- 用户要用的都在这一个二进制里（2026-11-06）：`iridium install`、`ir update`、`ir public`，以及 `iridium push <用户@主机>`（经 ssh 把自己装到另一个账号或机器、或换成新版）和 `iridium node new <账号>`（在本机建账号做成节点，sudo 一次）。脚本只给从源码构建的开发者用。
 
 ## 文件传输（网页、插件、节点共用）
 
@@ -256,7 +257,7 @@ ir revoke <名字>
 
 - 两个节点，同一台机器、两个账号（2026-11-06）：
   - 主节点（现在这个账号）：只跑 Release 版，`https://ir.kumo.ltd`、`127.0.0.1:7810`；只靠发版和设置里的“更新”升级，不推开发版。Claude（你本人的登录）只在这里。
-  - 测试节点（账号 `ir`）：`https://ir-test.kumo.ltd`、`127.0.0.1:7811`；`scripts/push-test.sh` 把工作区构建好推过去、重启。没有真的 Claude：Claude Code 接 DeepSeek；Codex 你自己登录。也用来开发节点功能。
+  - 测试节点（账号 `ir`）：`https://ir-test.kumo.ltd`、`127.0.0.1:7811`；`scripts/push-test.sh` 只构建工作区，第一次用 `iridium node new ir` 建好，之后 `iridium push` 推过去、重启。没有真的 Claude：Claude Code 接 DeepSeek；Codex 你自己登录。也用来开发节点功能。
 - 上公网前 Passkey 必须先做好。
 
 ## 开发

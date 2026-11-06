@@ -81,9 +81,14 @@ rm -r ~/.local/opt/iridium ~/.local/bin/ir ~/.config/systemd/user/iridium.servic
 
 配置和状态目录留着，要彻底删再手动删 `~/.config/iridium` 和 `~/.local/state/iridium`。agent 自己的对话记录不动。
 
+## 另一个节点
+
+- 本机另一个账号：`iridium node new <账号>`（sudo 问一次密码），建账号、开 linger、放 ssh 密钥、装好启动；之后 `iridium push -i ~/.ssh/iridium_<账号>_ed25519 <账号>@localhost` 换成这个二进制。
+- 别的机器：`iridium push <用户@主机>`（那边能 ssh 进去、平台一样）。
+
 ## 测试节点
 
-`scripts/push-test.sh`：构建工作区（版本由 `scripts/version.sh` 算，比上一个 Release 新、比下一个旧），经 `ssh ir@localhost` 放到测试节点的 `~/.local/opt/iridium`，跑一次 `version`，重启服务；第一次推时写配置（`127.0.0.1:7811`）、装单元。`TARGET`、`KEY`、`PORT`、`NO_WEB=1` 可改。主节点不推。
+`scripts/push-test.sh`：构建工作区（版本由 `scripts/version.sh` 算，比上一个 Release 新、比下一个旧），第一次用 `iridium node new ir -listen 127.0.0.1:7811`，之后 `iridium push`。`NODE`、`PORT`、`NO_WEB=1` 可改。主节点不推。
 
 ## 测试部署
 

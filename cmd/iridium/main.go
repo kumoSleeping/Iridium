@@ -32,8 +32,12 @@ const usage = `usage:
   iridium serve [-config <file>]   the daemon
   iridium hold <dir>               the holder of one agent process (the daemon starts it)
   iridium ir ...                   the CLI, as when run as ir
-  iridium install [-config <file>] [-unit <name>] [-env NAME=VALUE]... [-now]
+  iridium install [-config <file>] [-unit <name>] [-listen <addr>] [-env NAME=VALUE]... [-now]
                                    the user unit iridium.service (started only with -now)
+  iridium push [-i <key>] [-listen <addr>] <user@host>
+                                   this binary onto another account or machine, installed or restarted
+  iridium node new <account> [-listen <addr>]
+                                   a new account on this machine as a node of its own (sudo once)
   iridium version
 `
 
@@ -54,6 +58,10 @@ func main() {
 		os.Exit(cli.Main(os.Args[2:]))
 	case "install":
 		os.Exit(installCmd(os.Args[2:]))
+	case "push":
+		os.Exit(pushCmd(os.Args[2:]))
+	case "node":
+		os.Exit(nodeCmd(os.Args[2:]))
 	case "version", "--version":
 		os.Exit(versionCmd())
 	}

@@ -21,6 +21,7 @@ var unitName = regexp.MustCompile(`^[a-zA-Z0-9_.@-]{1,200}$`)
 type Options struct {
 	Exe        string // the binary the unit runs
 	ConfigPath string // the daemon's config file; made with the defaults if missing
+	Listen     string // the address a config made now listens on; "" is the default
 	UnitDir    string // user units: ~/.config/systemd/user
 	Unit       string // "" is iridium
 	Path       string // the PATH the daemon and its agents run with; "" is none set
@@ -91,6 +92,9 @@ func Install(o Options) error {
 		return err
 	}
 	if _, err := os.Stat(o.ConfigPath); errors.Is(err, os.ErrNotExist) {
+		if o.Listen != "" {
+			cfg.Listen = o.Listen
+		}
 		if err := cfg.Save(o.ConfigPath); err != nil {
 			return err
 		}
