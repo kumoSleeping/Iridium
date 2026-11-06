@@ -1,7 +1,8 @@
 // The layout (plan "网页"): one main pane, the chat, on a computer and on a phone alike (the user,
 // 2026-11-06). On a computer the sidebar stands beside it, as wide as it is dragged, or is put away
-// (⌘\) for the chat the whole window; on a phone or a portrait screen it is a drawer from the left
-// (drawer.tsx), brought by the key at the bottom left or a swipe from the edge. The settings are a
+// (⌘\) for the chat the whole window; on a portrait touch screen it is a drawer from the left
+// (drawer.tsx), and on a phone a sheet from the foot in the composer's place (sheet.tsx), brought by
+// the key at the top left. The settings are a
 // dialog rising from their key, over the sidebar mostly, the chat staying under it. The jump box
 // (⌘K) opens in the sidebar, not over the page. The chat, the settings and the jump box come only as
 // they are opened, or the page is idle: the first screen stays light.
@@ -18,6 +19,7 @@ import { applyTheme, initialTheme, keepTheme, MeChip, type ThemePref } from "./m
 import { pageTurn } from "./motion";
 import { prefetch } from "./prefetch";
 import { close, go, onTurn, openChat, over, route, useRoute, type Route } from "./route";
+import { Sheet } from "./sheet";
 import { Sidebar } from "./sidebar";
 import { useSecret } from "./secrets";
 import { useConfirms, useList } from "./store";
@@ -80,6 +82,8 @@ export function App() {
   const [docked, setDocked] = useState(() => kept("sidebar") !== "away");
   const drawer = narrow || !docked;
   const [drawerOpen, setDrawerOpen] = useState(() => narrow && route().name !== "chat");
+  // On a phone, how tall the sheet is: the chat keeps its newest above it while it is out.
+  const [sheetH, setSheetH] = useState(0);
   const dock = (on: boolean) => (setDocked(on), keep("sidebar", on ? "" : "away"), setDrawerOpen(false));
   const systemDark = useMedia("(prefers-color-scheme: dark)");
   const [theme, setTheme] = useState<ThemePref>(initialTheme);
@@ -168,7 +172,7 @@ export function App() {
       expanded={expanded}
       toggle={toggle}
       selected={open ?? ""}
-      onSelect={openChat}
+      onSelect={(id) => (openChat(id), narrow && setDrawerOpen(false))}
       phone={phone}
       searching={jumping}
       search={
@@ -192,12 +196,13 @@ export function App() {
   );
 
   const main = (
-    <main className={cn("relative h-full min-w-0 flex-1 bg-paper", !phone && "g-turn")}>
+    // On a phone a tap on the chat puts the sheet away, the composer back (the user, 2026-11-06).
+    <main className={cn("relative h-full min-w-0 flex-1 bg-paper", !phone && "g-turn")} onClickCapture={phone && drawerOpen && open ? () => setDrawerOpen(false) : undefined}>
       <Suspense fallback={<Waiting />}>
         {under.name === "chat" ? (
-          <ChatPage key={under.id} id={under.id} phone={phone} slot={drawer} />
+          <ChatPage key={under.id} id={under.id} phone={phone} slot={drawer} sheet={phone && drawerOpen ? sheetH : 0} />
         ) : (
-          <Empty />
+          <Empty below={phone && drawerOpen ? sheetH : 0} />
         )}
       </Suspense>
     </main>
@@ -248,11 +253,16 @@ export function App() {
         <div className="flex h-full overflow-hidden" data-still={params.get("still") === "1" || undefined}>
           {!drawer && sidebar}
           {main}
-          {drawer && (
-            <Drawer open={drawerOpen} setOpen={setDrawerOpen} phone={phone}>
-              {sidebar}
-            </Drawer>
-          )}
+          {drawer &&
+            (phone ? (
+              <Sheet open={drawerOpen} setOpen={setDrawerOpen} tall={jumping} onHeight={setSheetH}>
+                {sidebar}
+              </Sheet>
+            ) : (
+              <Drawer open={drawerOpen} setOpen={setDrawerOpen}>
+                {sidebar}
+              </Drawer>
+            ))}
           <SideKey state={!drawer ? "docked" : drawerOpen ? "out" : "in"} onClick={() => (!drawer ? dock(false) : setDrawerOpen((o) => !o))} />
         </div>
         {settings}
@@ -271,10 +281,11 @@ export function App() {
   );
 }
 
-/** The main pane with nothing open: the faint mark alone. */
-function Empty() {
+/** The main pane with nothing open: the faint mark alone, in the middle of what the phone's sheet
+ *  leaves free. */
+function Empty({ below }: { below: number }) {
   return (
-    <div className="grid h-full place-items-center" aria-hidden>
+    <div className="grid h-full place-items-center transition-[padding] duration-(--dur-3) ease-(--ease-out)" style={{ paddingBottom: below }} aria-hidden>
       <svg viewBox="0 0 64 64" width="44" height="44" className="text-fill-2">
         <rect width="64" height="64" rx="14" fill="currentColor" />
         <path d="M20 18h6v28h-6zM32 28h5.6v3.2c1.4-2.4 3.6-3.6 6.4-3.6v5.8c-3.8 0-6.2 1.6-6.2 6V46H32z" fill="var(--paper)" />

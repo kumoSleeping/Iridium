@@ -158,8 +158,9 @@ export function Sidebar(p: Props) {
 
   const head = (
     // Its left kept free for the sidebar's key (drawer.tsx SideKey), fixed there; in the card, a
-    // little lower so the key sits on its middle as on the docked head's.
-    <div className={cn("flex shrink-0 items-center gap-0.5 pr-2", KEY_SLOT, p.phone ? "glass absolute inset-x-0 top-0 z-20 h-11 shadow-[0_0.5px_0_var(--edge)]" : p.drawer ? "h-10" : "h-12")}>
+    // little lower so the key sits on its middle as on the docked head's. In a phone's sheet the
+    // key is far above it (sheet.tsx).
+    <div className={cn("flex shrink-0 items-center gap-0.5 pr-2", p.phone ? "pl-2" : KEY_SLOT, p.phone ? "glass absolute inset-x-0 top-0 z-20 h-11 shadow-[0_0.5px_0_var(--edge)]" : p.drawer ? "h-10" : "h-12")}>
       {p.createKey(
         <button type="button" aria-label={t("nav.newWorkspace")} className="g-press grid size-8 place-items-center rounded-md text-ink-2 hover:bg-fill hover:text-ink data-popup-open:bg-fill pointer-coarse:size-10">
           <Plus size={18} />

@@ -7,6 +7,7 @@
      g-pop      a small surface appears in place (toast, approval card, lamp change)
      g-slide    a panel's content arrives from the side (popover pages)
      g-drawer   the sidebar as a drawer slides out from the left, or follows the finger (drawer.tsx)
+     g-sheet    on a phone, the sidebar rises from the foot as the composer sinks (sheet.tsx, g-sink)
      g-dialog   the settings rise out of their key at the sidebar's foot (app.tsx)
      g-fade     plain cross-fade
      g-swap     one icon for another in place, both drawn, cross-faded (a folder shut / open)
@@ -115,6 +116,24 @@
   transition:
     transform var(--dur-3) var(--ease-out),
     box-shadow var(--dur-3) var(--ease-out);
+}
+/* --- sheet: the phone's sidebar from the foot (sheet.tsx), as the drawer, its height eased as it
+   grows for the jump box; the composer it takes the place of sinks as it rises (.g-sink) --- */
+.g-sheet {
+  transition:
+    transform var(--dur-3) var(--ease-out),
+    height var(--dur-3) var(--ease-out),
+    box-shadow var(--dur-3) var(--ease-out);
+}
+.g-sink {
+  transition:
+    transform var(--dur-3) var(--ease-out),
+    opacity var(--dur-2) var(--ease-out);
+}
+.g-sink[data-sunk] {
+  transform: translateY(calc(100% + 12px));
+  opacity: 0;
+  pointer-events: none;
 }
 
 /* --- dialog: Base UI Dialog's popup and backdrop (data-starting-style / data-ending-style) --- */
@@ -385,8 +404,13 @@ html[data-turn] .vt-side-key {
     transition: none;
     animation: none;
   }
-  .g-drawer {
+  .g-drawer,
+  .g-sheet,
+  .g-sink {
     transition-duration: var(--dur-1);
+  }
+  .g-sink[data-sunk] {
+    transform: none;
   }
   .g-dialog[data-starting-style],
   .g-dialog[data-ending-style] {

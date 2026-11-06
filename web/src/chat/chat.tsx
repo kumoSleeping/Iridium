@@ -14,6 +14,7 @@ import { LOCAL_ME, useMe, useTerminalList, useWorkspaces } from "../data";
 import { t, useLang } from "../i18n";
 import { pushIn } from "../motion";
 import { openChat } from "../route";
+import { PULL } from "../sheet";
 import { MenuItems, Rename, sessionActions } from "../sidebar";
 import { useConfirms, useList, useSession } from "../store";
 import { drafts, opened } from "../stream";
@@ -41,8 +42,9 @@ let lastStackH = 140;
 const ghostOf = (row: Session): LiveSession => ({ ...row, asks: [], tasks: [], queue: [], end: 0, proc: -1 });
 
 /** slot: the bar keeps its left free for the sidebar's key (drawer.tsx SideKey), the sidebar not
- *  beside it. */
-export function ChatPage({ id, phone, slot }: { id: string; phone: boolean; slot: boolean }) {
+ *  beside it. sheet: on a phone, the sidebar's sheet is out this tall (sheet.tsx): the bottom stack
+ *  sinks out under it, and the conversation keeps its newest above it. */
+export function ChatPage({ id, phone, slot, sheet = 0 }: { id: string; phone: boolean; slot: boolean; sheet?: number }) {
   useLang();
   const real = useSession(id);
   const list = useList();
@@ -185,7 +187,7 @@ export function ChatPage({ id, phone, slot }: { id: string; phone: boolean; slot
   const grew = `${log.blocks.at(-1)?.at} ${log.drafts.length} ${log.drafts.at(-1)?.text.length} ${log.drafts.at(-1)?.whole} ${log.sent.length}`;
   return (
     <div className="relative h-full" onDragOver={(e) => files(e) || session(e)} onDrop={drop}>
-      <Stick scroller={scroller} tail={grew} older={() => log.older()} place={chat.place} bottom={stackH} style={{ paddingTop: 64, paddingBottom: stackH + 20 }}>
+      <Stick scroller={scroller} tail={grew} older={() => log.older()} place={chat.place} bottom={sheet || stackH} style={{ paddingTop: 64, paddingBottom: (sheet || stackH) + 20 }}>
         <div className="mx-auto flex max-w-[760px] flex-col gap-5 px-4 sm:px-6">
           {log.loaded && !log.blocks.length && !log.drafts.length && !log.sent.length && <p className="g-fade m-0 pt-16 text-center text-sm text-ink-4">{t("chat.empty")}</p>}
           {/* In a turn, the calls being written or run and the dots share one row at the end, as
@@ -227,7 +229,7 @@ export function ChatPage({ id, phone, slot }: { id: string; phone: boolean; slot
         </div>
       </Stick>
       <Bar phone={phone} s={s} slot={slot} />
-      <div ref={stack} className="g-turn-stay vt-stack absolute inset-x-0 bottom-0 z-10 px-2.5 pb-[max(14px,calc(env(safe-area-inset-bottom)+6px))] sm:px-5">
+      <div ref={stack} {...{ [PULL]: "" }} data-sunk={sheet > 0 || undefined} inert={sheet > 0} className="g-turn-stay g-sink vt-stack absolute inset-x-0 bottom-0 z-10 px-2.5 pb-[max(14px,calc(env(safe-area-inset-bottom)+6px))] sm:px-5">
         {/* Paper from the composer's middle down: the conversation scrolled under it stops there. */}
         {!elsewhere && !s.subagent && <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-[calc(44px+max(14px,calc(env(safe-area-inset-bottom)+6px)))] bg-[linear-gradient(to_bottom,transparent,var(--paper)_14px)]" />}
         <div className="relative mx-auto max-w-[760px]">
