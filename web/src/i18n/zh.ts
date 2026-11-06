@@ -233,7 +233,7 @@ export const zh = {
   "err.invite": "生成失败",
   "err.revoke": "撤销失败",
 
-  "pick.choose": "选这个目录",
+  "pick.choose": "选择",
   "pick.newFolder": "新建文件夹",
   "pick.folderName": "文件夹名",
   "pick.typePath": "输入路径",

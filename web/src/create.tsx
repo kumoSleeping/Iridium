@@ -4,7 +4,7 @@
 import { Popover } from "@base-ui/react/popover";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, Folder, FolderPlus, LoaderCircle, PencilLine } from "lucide-react";
-import { useState, type CSSProperties, type ReactElement } from "react";
+import { useEffect, useState, type CSSProperties, type ReactElement } from "react";
 import type { Workspace } from "./api/types.gen";
 import { api, missing } from "./api/client";
 import type { Agent } from "./api/types.gen";
@@ -15,6 +15,9 @@ import { AGENTS, agentName, cn, homeOf, IconKey, Logo, PopSurface, tilde, Tip } 
 
 const base = (p: string) => p.split("/").filter(Boolean).pop() ?? p;
 const join = (dir: string, name: string) => (dir.endsWith("/") ? dir + name : `${dir}/${name}`);
+/** One folder's listing; prefetched before it is shown (the popover opening, a row hovered), so the
+ *  picker opens and steps at its full height instead of a spinner springing open into the list. */
+const foldersQ = (path: string) => ({ queryKey: ["folders", path], queryFn: () => api.folders(path), retry: false, staleTime: 10_000 });
 
 /** The folder picker. initial: where it opens; onChoose: the folder chosen, absolute. */
 export function FolderPicker({ initial, onChoose, startNew = false, busy }: { initial: string; onChoose: (path: string) => void; startNew?: boolean; busy?: boolean }) {
@@ -23,7 +26,7 @@ export function FolderPicker({ initial, onChoose, startNew = false, busy }: { in
   const [dir, setDir] = useState<"fwd" | "back">("fwd");
   const [typing, setTyping] = useState<string | null>(null);
   const [newName, setNewName] = useState<string | null>(startNew ? "" : null);
-  const q = useQuery({ queryKey: ["folders", path], queryFn: () => api.folders(path), retry: false, staleTime: 10_000 });
+  const q = useQuery(foldersQ(path));
   const here = q.data?.path ?? path;
   const home = useHome().data ?? homeOf(here);
   const gone = q.error && missing(q.error); // the route is not served yet: only typing a path works
@@ -123,7 +126,7 @@ export function FolderPicker({ initial, onChoose, startNew = false, busy }: { in
         )}
         {q.isPending && <LoaderCircle size={15} className="mx-auto my-2.5 animate-spin text-ink-4" />}
         {q.data?.folders.map((f) => (
-          <button key={f} type="button" onClick={() => go(join(here, f), "fwd")} className="flex h-9 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-base hover:bg-fill pointer-coarse:h-11">
+          <button key={f} type="button" onPointerEnter={() => void qc.prefetchQuery(foldersQ(join(here, f)))} onFocus={() => void qc.prefetchQuery(foldersQ(join(here, f)))} onClick={() => go(join(here, f), "fwd")} className="flex h-9 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-base hover:bg-fill pointer-coarse:h-11">
             <Folder size={16} className="shrink-0 text-ink-3" />
             <span className="truncate">{f}</span>
           </button>
@@ -213,9 +216,14 @@ export function CreatePopover({ trigger }: { trigger: ReactElement }) {
 
 /** The "+" on a workspace row: a new session there. */
 export function WsPlus({ w, trigger, open, setOpen, opened }: { w: Workspace; trigger: ReactElement; open: boolean; setOpen: (o: boolean) => void; opened: (id: string) => void }) {
+  const qc = useQueryClient();
   const [page, setPage] = useState<"session" | "folder">("session");
   const [folder, setFolder] = useState(w.path);
   const { busy, start } = useStart((id) => (setOpen(false), opened(id)));
+  // the folder page, ready before its line is tapped (opened by the "+" or by the row's menu)
+  useEffect(() => {
+    if (open) void qc.prefetchQuery(foldersQ(folder));
+  }, [open, folder, qc]);
   return (
     <Popover.Root
       open={open}
