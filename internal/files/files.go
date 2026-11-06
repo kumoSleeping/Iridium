@@ -194,8 +194,7 @@ func (s *Service) scan(session string) error {
 	s.mu.Unlock()
 	mu.Lock()
 	defer mu.Unlock()
-	cwd, err := s.o.Sessions.Cwd(session)
-	if err != nil {
+	if _, err := s.o.Sessions.Cwd(session); err != nil {
 		return err
 	}
 	s.mu.Lock()
@@ -207,7 +206,7 @@ func (s *Service) scan(session string) error {
 			return err
 		}
 		for _, b := range p.Blocks {
-			s.files(session, cwd, b)
+			s.files(session, b)
 		}
 		if p.End <= at {
 			break
@@ -221,10 +220,10 @@ func (s *Service) scan(session string) error {
 }
 
 // files is the files block b names that exist and may be served, each given a reference.
-func (s *Service) files(session, cwd string, b api.Block) []api.FileRef {
+func (s *Service) files(session string, b api.Block) []api.FileRef {
 	var out []api.FileRef
 	for _, m := range Detect(b) {
-		p, ok := Locate(m, cwd)
+		p, ok := Locate(m)
 		if !ok {
 			continue
 		}
@@ -243,14 +242,14 @@ func (s *Service) files(session, cwd string, b api.Block) []api.FileRef {
 
 // Annotate fills in each block's Files: what it names that exists, with references.
 func (s *Service) Annotate(session string, page *api.MessagePage) {
-	cwd, _ := s.o.Sessions.Cwd(session)
-	s.AnnotateBlocks(session, cwd, page.Blocks)
+	s.AnnotateBlocks(session, "", page.Blocks)
 }
 
-// AnnotateBlocks is Annotate for blocks of session, whose folder is cwd (a state's tail).
-func (s *Service) AnnotateBlocks(session, cwd string, blocks []api.Block) {
+// AnnotateBlocks is Annotate for blocks of session (a state's tail). The folder is not needed:
+// a file line's path is absolute.
+func (s *Service) AnnotateBlocks(session, _ string, blocks []api.Block) {
 	for i := range blocks {
-		blocks[i].Files = s.files(session, cwd, blocks[i])
+		blocks[i].Files = s.files(session, blocks[i])
 	}
 }
 

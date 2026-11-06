@@ -7,7 +7,7 @@ import { argOf, folded, foldLine, inputOf } from "../src/chat/fold";
 import { commandsOf, keyMode, matching } from "../src/chat/composer";
 import { levelName, restAt } from "../src/chat/effort";
 import { ctxParts, modelView } from "../src/chat/meters";
-import { atSessions, atWord, filesIn, mentions, resolve, shortId, sourceOf } from "../src/chat/refs";
+import { atSessions, atWord, mentions, shortId, sourceOf, withoutFiles } from "../src/chat/refs";
 import { en } from "../src/i18n/en";
 import { zh } from "../src/i18n/zh";
 import { jumpList } from "../src/jump";
@@ -54,25 +54,17 @@ describe("argOf", () => {
   });
 });
 
-describe("filesIn", () => {
-  test("pictures out of the text, file links as their names by their absolute paths; fenced code as it is", () => {
-    const r = filesIn("See ![](a.png) and [the log](./logs/run.log#L3), [home](~/x.txt), `/w/b.mp4`.\n\n```\n![](/w/c.png)\n```", "/w", "/home/k");
-    expect(r.text).toContain("See  and the log, home, `/w/b.mp4`.");
-    expect(r.text).toContain("![](/w/c.png)");
-    expect([...r.labels]).toEqual([
-      ["/w/logs/run.log", "the log"],
-      ["/home/k/x.txt", "home"],
-    ]);
+describe("withoutFiles", () => {
+  test("the file lines that gave a file out; others, prose paths and fenced code as they are", () => {
+    const text = "Done.\n\n[文件] `/w/a.pdf`\n[文件] `~/b.png`\n[文件] `/w/gone.txt`\nsee `/w/c.go:3` and [log](./run.log)\n\n```\n[文件] `/w/a.pdf`\n```";
+    const r = withoutFiles(text, new Set(["/w/a.pdf", "/home/k/b.png"]), "/home/k");
+    expect(r).toBe("Done.\n\n[文件] `/w/gone.txt`\nsee `/w/c.go:3` and [log](./run.log)\n\n```\n[文件] `/w/a.pdf`\n```");
   });
-  test("web links and pictures stay", () => {
-    const r = filesIn("[x](https://example.com) ![y](https://example.com/a.png)");
-    expect(r.labels.size).toBe(0);
-    expect(r.text).toBe("[x](https://example.com) ![y](https://example.com/a.png)");
+  test("a local picture as its path; web pictures stay", () => {
+    expect(withoutFiles("![a](/w/a.png) ![y](https://example.com/a.png)", new Set())).toBe("`/w/a.png` ![y](https://example.com/a.png)");
   });
-  test("resolve: file://, a line, ~/ and the session's folder", () => {
-    expect(resolve("file:///w/a.go:10:2", "/s")).toBe("/w/a.go");
-    expect(resolve("b/c.md", "/s/")).toBe("/s/b/c.md");
-    expect(resolve("~/d", "/s", "/home/k")).toBe("/home/k/d");
+  test("attachment lines in what you sent", () => {
+    expect(withoutFiles("look\n\n[附件] `/w/up/a.png`", new Set(["/w/up/a.png"]))).toBe("look");
   });
 });
 

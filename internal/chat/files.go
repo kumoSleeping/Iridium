@@ -15,10 +15,11 @@ import (
 	"strings"
 
 	"github.com/kumoSleeping/iridium/internal/api"
+	"github.com/kumoSleeping/iridium/internal/files"
 )
 
-// A reply's files (plan "回复里认…"): `![](path)`, `[name](path)`, and absolute paths in inline
-// code that exist. Each goes to the plugin as a ref good only for that plugin and session,
+// A reply's files (plan "回复里交文件"): its lines [文件] `/absolute/path` (files.FileLines) that
+// exist; they leave the reply's words, the files going as themselves. Each goes to the plugin as a ref good only for that plugin and session,
 // signed with a key kept in the state directory, so refs outlive a restart, and only paths a
 // reply named ever get one.
 
@@ -58,35 +59,27 @@ func plain(md string) string {
 	return strings.TrimSpace(s)
 }
 
-// reply is md as a plugin gets it, with the files it names.
+// reply is md as a plugin gets it, with the files it gives.
 func (s *Service) reply(plugin, session, md string) api.ChatReply {
-	r := api.ChatReply{Markdown: md, Text: plain(md)}
-	seen := map[string]bool{}
-	add := func(name, path string) {
-		if !filepath.IsAbs(path) || seen[path] || denied(path) {
-			return
+	var out []api.ChatFile
+	given := map[string]bool{}
+	for _, path := range files.FileLines(md, false) {
+		if !filepath.IsAbs(path) || denied(path) {
+			continue
 		}
 		st, err := os.Stat(path)
 		if err != nil || !st.Mode().IsRegular() {
-			return
+			continue
 		}
-		seen[path] = true
-		if name == "" {
-			name = filepath.Base(path)
-		}
+		given[path] = true
 		typ := mime.TypeByExtension(filepath.Ext(path))
 		if typ == "" {
 			typ = "application/octet-stream"
 		}
-		r.Files = append(r.Files, api.ChatFile{Name: name, Size: st.Size(), Type: typ, Ref: s.ref(plugin, session, path)})
+		out = append(out, api.ChatFile{Name: filepath.Base(path), Size: st.Size(), Type: typ, Ref: s.ref(plugin, session, path)})
 	}
-	for _, m := range mdLink.FindAllStringSubmatch(md, -1) {
-		add(m[1], m[2])
-	}
-	for _, m := range inlineCode.FindAllStringSubmatch(md, -1) {
-		add("", m[1])
-	}
-	return r
+	md = files.DropFileLines(md, given)
+	return api.ChatReply{Markdown: md, Text: plain(md), Files: out}
 }
 
 type refBody struct {

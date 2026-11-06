@@ -1,4 +1,4 @@
-// The files a reply names (plan "网页"): a picture as a thumbnail (about 1024px) that opens the
+// The files a message gives (plan "网页": [文件] `path` lines, attachments): a picture as a thumbnail (about 1024px) that opens the
 // original, a video or a sound to play in place, anything else a card to download. Only paths the
 // server says the conversation named, and that exist, show; it serves them by the session.
 import { Dialog } from "@base-ui/react/dialog";
@@ -12,12 +12,12 @@ import { cn, IconKey, Tip } from "../ui";
 export const size = (n: number) => (n < 1024 ? `${n} B` : n < 1 << 20 ? `${(n / 1024).toFixed(1)} KB` : n < 1 << 30 ? `${(n / (1 << 20)).toFixed(1)} MB` : `${(n / (1 << 30)).toFixed(2)} GB`);
 
 /** The files a message names, as the server found them (Block.files): only those that exist. */
-export function Files({ session, files, labels }: { session: string; files: FileRef[]; labels?: Map<string, string> }) {
+export function Files({ session, files }: { session: string; files: FileRef[] }) {
   if (!files.length) return null;
   return (
     <div className="flex w-full flex-col items-start gap-2">
       {files.map((f) => (
-        <One key={f.ref} session={session} f={f} label={labels?.get(f.path)} />
+        <One key={f.ref} session={session} f={f} />
       ))}
     </div>
   );
@@ -25,9 +25,9 @@ export function Files({ session, files, labels }: { session: string; files: File
 
 const CODE = /\.(tsx?|jsx?|go|rs|py|css|json|ya?ml|toml|sh|md)$/i;
 
-function One({ session, f, label }: { session: string; f: FileRef; label?: string }) {
+function One({ session, f }: { session: string; f: FileRef }) {
   const url = api.fileURL(session, f.ref);
-  const name = label ?? f.name;
+  const name = f.name;
   if (f.kind === "image") return <Picture src={f.thumb ? api.thumbURL(session, f.ref) : url} full={url} name={name} w={f.w} h={f.h} />;
   if (f.kind === "video") return <video controls preload="metadata" src={url} className="block w-full max-w-[480px] rounded-lg bg-fill shadow-[0_0_0_0.5px_var(--edge)]" aria-label={name} />;
   if (f.kind === "audio") return <audio controls preload="metadata" src={url} className="w-full max-w-[340px]" aria-label={name} />;

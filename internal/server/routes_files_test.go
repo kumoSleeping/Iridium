@@ -102,16 +102,19 @@ func TestUploadSendAndFetch(t *testing.T) {
 	if !strings.Contains(page.Blocks[0].Text, "[附件] `"+placed+"`") {
 		t.Errorf("message %q", page.Blocks[0].Text)
 	}
-	reply := page.Blocks[1]
-	if len(reply.Files) != 1 || reply.Files[0].Ref != got.File.Ref || !reply.Files[0].Thumb {
-		t.Fatalf("reply files %+v", reply.Files)
+	if sent := page.Blocks[0]; len(sent.Files) != 1 || sent.Files[0].Ref != got.File.Ref || !sent.Files[0].Thumb {
+		t.Fatalf("message files %+v", sent.Files)
+	}
+	// The fake agent says the message back, attachment line and all: quoted, it gives no file.
+	if reply := page.Blocks[1]; len(reply.Files) != 0 {
+		t.Errorf("reply files %+v", reply.Files)
 	}
 	in, _ := os.ReadFile(filepath.Join(cfg.StatePath(), "hold", id, "in.log"))
 	if !bytes.Contains(in, []byte(`"type":"image"`)) || !bytes.Contains(in, []byte(`"media_type":"image/png"`)) {
 		t.Errorf("no image block went to the agent")
 	}
 
-	resp, err := c.Get(base + "/api/sessions/" + id + "/files/" + reply.Files[0].Ref)
+	resp, err := c.Get(base + "/api/sessions/" + id + "/files/" + got.File.Ref)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,10 +124,10 @@ func TestUploadSendAndFetch(t *testing.T) {
 		t.Errorf("fetch: %d %v", resp.StatusCode, resp.Header)
 	}
 	var info api.FileRef
-	if code := call(t, c, "GET", base+"/api/sessions/"+id+"/files/"+reply.Files[0].Ref+"/info", nil, &info); code != 200 || info.Sha256 != hex.EncodeToString(sum[:]) {
+	if code := call(t, c, "GET", base+"/api/sessions/"+id+"/files/"+got.File.Ref+"/info", nil, &info); code != 200 || info.Sha256 != hex.EncodeToString(sum[:]) {
 		t.Errorf("info: %d %+v", code, info)
 	}
-	if code := call(t, c, "GET", base+"/api/sessions/"+id+"/files/"+reply.Files[0].Ref+"/thumb", nil, nil); code != 200 {
+	if code := call(t, c, "GET", base+"/api/sessions/"+id+"/files/"+got.File.Ref+"/thumb", nil, nil); code != 200 {
 		t.Errorf("thumb: %d", code)
 	}
 	if code := call(t, c, "GET", base+"/api/sessions/"+id+"/files/aaaaaaaaaaaaaaaa", nil, nil); code != 404 {

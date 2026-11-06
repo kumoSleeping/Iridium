@@ -94,30 +94,25 @@ export function mentions(text: string): (string | Mention)[] {
   return out;
 }
 
-/** A path as a message writes it, made absolute the way the server reads it (docs/api.md "认文件"):
- *  file:// and a #line or :line:col dropped, ~/ the home folder, the rest from the session's folder. */
-export function resolve(p: string, cwd: string, home?: string): string {
-  let x = p.replace(/^file:\/\//, "").replace(/#.*$/, "").replace(/(:\d+){1,2}$/, "");
-  if (x.startsWith("~/") && home) x = home + x.slice(1);
-  else if (!x.startsWith("/")) x = `${cwd.replace(/\/+$/, "")}/${x.replace(/^\.\//, "")}`;
-  return x;
-}
-
 const LOCAL = (u: string) => !/^[a-z][a-z0-9+.-]*:/i.test(u) || u.startsWith("file:");
+const FILE_LINE = /^[ \t]*\[(文件|附件)\] `([^`\n]+)`[ \t]*$/gm;
 
-/** A message's text as the page shows it beside its files: pictures taken out (they show under it,
- *  from the server's list), file links left as their names. labels: what a link called each file,
- *  by its absolute path. Fenced code stays as it is. */
-export function filesIn(text: string, cwd = "", home?: string): { text: string; labels: Map<string, string> } {
-  const labels = new Map<string, string>();
+/** A message's text as the page shows it beside its files (docs/api.md "认文件"): each line
+ *  [文件] `path` (and [附件] `path` in what you sent) that gave a file the server found, by its
+ *  absolute path in paths, left out, the file showing as itself; a picture of a local path, which
+ *  the page cannot load, as that path in code. Fenced code stays as it is. */
+export function withoutFiles(text: string, paths: ReadonlySet<string>, home?: string): string {
   const parts = text.split(/(```[\s\S]*?(?:```|$))/);
   const out = parts.map((part) => {
     if (part.startsWith("```")) return part;
-    let p = part.replace(/!\[([^\]]*)\]\(<?([^)\s>]+)>?\)/g, (all, _alt: string, path: string) => (LOCAL(path) ? "" : all));
-    p = p.replace(/(?<!!)\[([^\]]+)\]\(<?([^)\s>]+)>?\)/g, (all, label: string, path: string) => (LOCAL(path) ? (labels.set(resolve(path, cwd, home), label), label) : all));
+    let p = part.replace(FILE_LINE, (all, _word: string, raw: string) => {
+      const x = raw.trim();
+      return paths.has(x.startsWith("~/") && home ? home + x.slice(1) : x) ? "" : all;
+    });
+    p = p.replace(/!\[([^\]]*)\]\(<?([^)\s>]+)>?\)/g, (all, _alt: string, path: string) => (LOCAL(path) ? `\`${path.replace(/^file:\/\//, "")}\`` : all));
     return p;
   });
-  return { text: out.join("").replace(/\n{3,}/g, "\n\n").trim(), labels };
+  return out.join("").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 /** The @word the caret ends, to name a session by (the composer's @ list): where its @ is and what

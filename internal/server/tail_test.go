@@ -18,7 +18,7 @@ func TestTailFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	var created api.NewSessionReply
-	l.want(200, "web", "POST", "/api/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "see `" + note + "`"}, &created)
+	l.want(200, "web", "POST", "/api/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "see\n[文件] `" + note + "`"}, &created)
 	var ref string
 	for deadline := time.Now().Add(10 * time.Second); ref == ""; time.Sleep(20 * time.Millisecond) {
 		var st api.SessionState

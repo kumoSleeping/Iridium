@@ -25,17 +25,23 @@ import (
 )
 
 func TestDetect(t *testing.T) {
-	text := "See ![shot](shots/a.png) and [the log](</w/my log.txt> \"title\"), [site](https://x.example/a.png),\n" +
-		"[anchor](#top), `/w/b.go:12`, `relative/c.go`, `~/notes.md`, `ls -la`.\n" +
-		"```\n![in fence](/w/fenced.png) `/w/fenced.txt`\n```\n" +
-		"After the fence: [a](a.md#L3) `/w/b.go:12`"
+	// Only a line of its own gives a file: links, pictures and paths in prose are words.
+	text := "See ![shot](/w/a.png) and [the log](/w/log.txt), `/w/b.go:12`, `~/notes.md`.\n" +
+		"[文件] `/w/report.pdf`\n" +
+		"  [文件] `~/out/c.png`  \n" +
+		"inline [文件] `/w/not-alone.txt` is words\n" +
+		"[附件] `/w/quoted.png`\n" +
+		"```\n[文件] `/w/fenced.txt`\n```\n" +
+		"[文件] `/w/report.pdf`"
 	got := Detect(api.Block{Kind: api.BlockKindAssistant, Text: text})
-	want := []Mention{
-		{"shots/a.png", MentionImage}, {"/w/my log.txt", MentionLink}, {"https://x.example/a.png", MentionLink},
-		{"#top", MentionLink}, {"a.md#L3", MentionLink}, {"/w/b.go:12", MentionCode}, {"~/notes.md", MentionCode},
-	}
+	want := []Mention{{"/w/report.pdf", MentionFile}, {"~/out/c.png", MentionFile}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("detect:\n got %v\nwant %v", got, want)
+	}
+	// What you sent: the attachment lines Iridium writes count too.
+	you := Detect(api.Block{Kind: api.BlockKindUser, Text: "look\n\n[附件] `/w/a.png`\n[文件] `/w/b.txt`"})
+	if !reflect.DeepEqual(you, []Mention{{"/w/a.png", MentionFile}, {"/w/b.txt", MentionFile}}) {
+		t.Errorf("user: %v", you)
 	}
 	w := Detect(api.Block{Kind: api.BlockKindTool, Name: "Write", Input: "{\n  \"file_path\": \"/w/out \\\"q\\\".txt\",\n  \"content\": \"cut sho"})
 	if len(w) != 1 || w[0] != (Mention{`/w/out "q".txt`, MentionWrite}) {
@@ -44,32 +50,37 @@ func TestDetect(t *testing.T) {
 	if m := Detect(api.Block{Kind: api.BlockKindTool, Name: "Bash", Input: `{"file_path": "/w/x"}`}); m != nil {
 		t.Errorf("other tools: %v", m)
 	}
-	if m := Detect(api.Block{Kind: api.BlockKindThinking, Text: "`/w/x`"}); m != nil {
+	if m := Detect(api.Block{Kind: api.BlockKindThinking, Text: "[文件] `/w/x`"}); m != nil {
 		t.Errorf("thinking: %v", m)
 	}
 }
 
+func TestDropFileLines(t *testing.T) {
+	text := "Here it is.\n\n[文件] `/w/a.pdf`\n[文件] `/w/gone.txt`\n\n```\n[文件] `/w/a.pdf`\n```\n\nDone."
+	got := DropFileLines(text, map[string]bool{"/w/a.pdf": true})
+	want := "Here it is.\n\n[文件] `/w/gone.txt`\n\n```\n[文件] `/w/a.pdf`\n```\n\nDone."
+	if got != want {
+		t.Errorf("got %q\nwant %q", got, want)
+	}
+}
+
 func TestLocate(t *testing.T) {
-	cwd := t.TempDir()
-	os.MkdirAll(filepath.Join(cwd, "shots"), 0o700)
-	os.WriteFile(filepath.Join(cwd, "shots", "a b.png"), []byte("x"), 0o600)
-	os.WriteFile(filepath.Join(cwd, "b.go"), []byte("x"), 0o600)
-	os.Mkdir(filepath.Join(cwd, "dir"), 0o700)
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "a b.png"), []byte("x"), 0o600)
+	os.Mkdir(filepath.Join(dir, "sub"), 0o700)
 	for _, c := range []struct {
 		m    Mention
 		want string
 	}{
-		{Mention{"shots/a b.png", MentionImage}, filepath.Join(cwd, "shots", "a b.png")},
-		{Mention{"shots/a%20b.png", MentionImage}, filepath.Join(cwd, "shots", "a b.png")},
-		{Mention{"file://" + filepath.Join(cwd, "b.go"), MentionLink}, filepath.Join(cwd, "b.go")},
-		{Mention{"b.go#L3", MentionLink}, filepath.Join(cwd, "b.go")},
-		{Mention{filepath.Join(cwd, "b.go") + ":12:3", MentionCode}, filepath.Join(cwd, "b.go")},
-		{Mention{"https://x/b.go", MentionLink}, ""},
-		{Mention{filepath.Join(cwd, "dir"), MentionCode}, ""}, // not a file
-		{Mention{filepath.Join(cwd, "gone.txt"), MentionCode}, ""},
-		{Mention{"b.go", MentionWrite}, ""}, // a Write path is absolute
+		{Mention{filepath.Join(dir, "a b.png"), MentionFile}, filepath.Join(dir, "a b.png")},
+		{Mention{filepath.Join(dir, "sub", "..", "a b.png"), MentionFile}, filepath.Join(dir, "a b.png")},
+		{Mention{"a b.png", MentionFile}, ""},                      // a file line's path is absolute
+		{Mention{filepath.Join(dir, "sub"), MentionFile}, ""},      // not a file
+		{Mention{filepath.Join(dir, "gone.txt"), MentionFile}, ""}, // not there
+		{Mention{"b.go", MentionWrite}, ""},                        // a Write path is absolute
+		{Mention{filepath.Join(dir, "a b.png"), MentionWrite}, filepath.Join(dir, "a b.png")},
 	} {
-		got, _ := Locate(c.m, cwd)
+		got, _ := Locate(c.m)
 		if got != c.want {
 			t.Errorf("%v: %q, want %q", c.m, got, c.want)
 		}
@@ -133,7 +144,7 @@ func TestRefsOnlyForTranscriptPaths(t *testing.T) {
 	os.Symlink(filepath.Join(r.root, "secret", "key"), filepath.Join(r.work, "escape.txt"))
 	r.fs.blocks["s1"] = []api.Block{
 		{Kind: api.BlockKindUser, Text: "hi"},
-		{Kind: api.BlockKindAssistant, Text: "wrote `" + named + "` and [x](escape.txt)"},
+		{Kind: api.BlockKindAssistant, Text: "wrote it\n[文件] `" + named + "`\n[文件] `" + filepath.Join(r.work, "escape.txt") + "`"},
 	}
 	// A fresh daemon has seen no page: the transcript is read for the ref.
 	ref := r.s.ref("s1", named)

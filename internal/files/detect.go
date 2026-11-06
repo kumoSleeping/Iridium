@@ -2,7 +2,6 @@ package files
 
 import (
 	"encoding/json"
-	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -20,50 +19,44 @@ type Mention struct {
 type MentionKind int
 
 const (
-	MentionImage MentionKind = iota // ![](path)
-	MentionLink                     // [name](path)
-	MentionCode                     // `/absolute/path`
+	MentionFile  MentionKind = iota // a line [文件] `path` (or, in what you sent, [附件] `path`)
 	MentionWrite                    // a Write call's file_path
 )
 
 var (
-	// Fenced code is not prose: links and paths inside it are examples, not files.
+	// Fenced code is not prose: what is inside it is an example, not a file.
 	fence = regexp.MustCompile("(?ms)^ {0,3}(```|~~~).*?(^ {0,3}(```|~~~)[^\\n]*$|\\z)")
-	// [text](target "title"), the target bare or in <>.
-	mdLink   = regexp.MustCompile(`(!?)\[((?:[^\[\]\n]|\[[^\[\]\n]*\])*)\]\(\s*(<[^>\n]+>|[^()\s]+)(?:\s+(?:"[^"\n]*"|'[^'\n]*'))?\s*\)`)
-	code     = regexp.MustCompile("`([^`\n]+)`")
-	scheme   = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.-]*:`)
-	lineSuf  = regexp.MustCompile(`:\d+(?::\d+)?$`)
+	// A line that gives a file, and nothing else: its word and the path in inline code.
+	fileLine = regexp.MustCompile("(?m)^[ \\t]*\\[(文件|附件)\\] `([^`\\n]+)`[ \\t]*$")
 	filePath = regexp.MustCompile(`"file_path"\s*:\s*("(?:[^"\\]|\\.)*")`)
 )
 
-// Detect is the files a block names, in order, each once: in what you or the agent said,
-// Markdown images and links and inline code that is an absolute path (outside fenced code); in a
-// Write call, its file_path. Nothing is looked up here.
+// FileLines is the paths text gives as files, in order, each once (plan "回复里交文件"): the lines
+// [文件] `path` outside fenced code, which the agent writes to hand you a file; in what you sent
+// (user), also [附件] `path`, which Iridium writes for an attachment (attach.go). Anything else
+// that looks like a path, a link or a picture is only words.
+func FileLines(text string, user bool) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, m := range fileLine.FindAllStringSubmatch(fence.ReplaceAllString(text, ""), -1) {
+		p := strings.TrimSpace(m[2])
+		if (m[1] == "附件" && !user) || p == "" || seen[p] {
+			continue
+		}
+		seen[p] = true
+		out = append(out, p)
+	}
+	return out
+}
+
+// Detect is the files a block names, in order, each once: in what you or the agent said, its
+// FileLines; in a Write call, its file_path (a ref only, not shown). Nothing is looked up here.
 func Detect(b api.Block) []Mention {
 	var out []Mention
-	seen := map[string]bool{}
-	add := func(raw string, k MentionKind) {
-		if raw != "" && !seen[raw] {
-			seen[raw] = true
-			out = append(out, Mention{Raw: raw, Kind: k})
-		}
-	}
 	switch b.Kind {
 	case api.BlockKindUser, api.BlockKindAssistant:
-		text := fence.ReplaceAllString(b.Text, "")
-		for _, m := range mdLink.FindAllStringSubmatch(text, -1) {
-			k := MentionLink
-			if m[1] == "!" {
-				k = MentionImage
-			}
-			add(strings.TrimSuffix(strings.TrimPrefix(m[3], "<"), ">"), k)
-		}
-		for _, m := range code.FindAllStringSubmatch(text, -1) {
-			p := strings.TrimSpace(m[1])
-			if strings.HasPrefix(p, "/") || strings.HasPrefix(p, "~/") {
-				add(p, MentionCode)
-			}
+		for _, p := range FileLines(b.Text, b.Kind == api.BlockKindUser) {
+			out = append(out, Mention{Raw: p, Kind: MentionFile})
 		}
 	case api.BlockKindTool:
 		if b.Name != "Write" {
@@ -72,72 +65,58 @@ func Detect(b api.Block) []Mention {
 		// The input may be cut short; file_path comes first.
 		if m := filePath.FindStringSubmatch(b.Input); m != nil {
 			var p string
-			if json.Unmarshal([]byte(m[1]), &p) == nil {
-				add(p, MentionWrite)
+			if json.Unmarshal([]byte(m[1]), &p) == nil && p != "" {
+				out = append(out, Mention{Raw: p, Kind: MentionWrite})
 			}
 		}
 	}
 	return out
 }
 
-// Locate is the absolute path a mention means, if it is a regular file that exists: links may
-// be relative to cwd (and have a #fragment), file:// URLs are paths, other URLs are not files;
-// inline code must be absolute (or ~/), and may end in :line[:column].
-func Locate(m Mention, cwd string) (string, bool) {
-	home, _ := os.UserHomeDir()
-	abs := func(p string) string {
-		if rest, ok := strings.CutPrefix(p, "~/"); ok && home != "" {
-			p = filepath.Join(home, rest)
-		}
-		if !filepath.IsAbs(p) {
-			if cwd == "" {
-				return ""
-			}
-			p = filepath.Join(cwd, p)
-		}
-		return filepath.Clean(p)
-	}
-	var tries []string
-	switch m.Kind {
-	case MentionImage, MentionLink:
-		raw := m.Raw
-		if rest, ok := strings.CutPrefix(raw, "file://"); ok {
-			raw = rest
-		} else if scheme.MatchString(raw) || strings.HasPrefix(raw, "#") || strings.HasPrefix(raw, "//") {
+// Locate is the absolute path a mention means, if it is a regular file that exists: a file line's
+// path is absolute or ~/, a Write's absolute.
+func Locate(m Mention) (string, bool) {
+	p := m.Raw
+	if rest, ok := strings.CutPrefix(p, "~/"); ok && m.Kind == MentionFile {
+		home, _ := os.UserHomeDir()
+		if home == "" {
 			return "", false
 		}
-		if i := strings.IndexAny(raw, "#?"); i >= 0 {
-			tries = append(tries, raw)
-			raw = raw[:i]
-		}
-		tries = append(tries, raw)
-		if strings.Contains(raw, "%") {
-			if u, err := url.PathUnescape(raw); err == nil {
-				tries = append(tries, u)
-			}
-		}
-	case MentionCode:
-		tries = append(tries, m.Raw)
-		if lineSuf.MatchString(m.Raw) {
-			tries = append(tries, lineSuf.ReplaceAllString(m.Raw, ""))
-		}
-	case MentionWrite:
-		if !filepath.IsAbs(m.Raw) {
-			return "", false
-		}
-		tries = append(tries, m.Raw)
+		p = filepath.Join(home, rest)
 	}
-	for _, t := range tries {
-		if t == "" {
-			continue
-		}
-		p := abs(t)
-		if p == "" {
-			continue
-		}
-		if st, err := os.Stat(p); err == nil && st.Mode().IsRegular() {
-			return p, true
-		}
+	if !filepath.IsAbs(p) {
+		return "", false
+	}
+	p = filepath.Clean(p)
+	if st, err := os.Stat(p); err == nil && st.Mode().IsRegular() {
+		return p, true
 	}
 	return "", false
 }
+
+// DropFileLines is text without the file lines given (by their path as written), outside fenced
+// code: what shows beside the files, which show as themselves.
+func DropFileLines(text string, paths map[string]bool) string {
+	if len(paths) == 0 {
+		return text
+	}
+	drop := func(s string) string {
+		return fileLine.ReplaceAllStringFunc(s, func(line string) string {
+			if m := fileLine.FindStringSubmatch(line); m != nil && paths[strings.TrimSpace(m[2])] {
+				return ""
+			}
+			return line
+		})
+	}
+	var b strings.Builder
+	at := 0
+	for _, f := range fence.FindAllStringIndex(text, -1) {
+		b.WriteString(drop(text[at:f[0]]))
+		b.WriteString(text[f[0]:f[1]])
+		at = f[1]
+	}
+	b.WriteString(drop(text[at:]))
+	return strings.TrimSpace(blankRun.ReplaceAllString(b.String(), "\n\n"))
+}
+
+var blankRun = regexp.MustCompile(`\n{3,}`)

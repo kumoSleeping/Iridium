@@ -19,7 +19,7 @@ import { cmdOfCall, type Cmd } from "./cmd";
 import { argOf, diffSum, foldLine, foldSaid, kindOf, runCmd, type Diff, type Kind, type Shown, type Step, type Tool } from "./fold";
 import { Markdown } from "./markdown";
 import { Mentioned } from "./mention";
-import { filesIn, type Source } from "./refs";
+import { type Source, withoutFiles } from "./refs";
 
 type You = Extract<Source, { kind: "you" }>;
 type From = Extract<Source, { kind: "letter" }>;
@@ -240,14 +240,14 @@ export function Compaction({ b, since }: { b?: Block; since?: number }) {
 
 const SYSTEM: Record<string, Parameters<typeof t>[0]> = { compact: "sys.compact", interrupted: "sys.interrupted", unreadable: "sys.unreadable", api_error: "sys.apiError", local_command: "sys.localCommand" };
 
-/** What the agent said: Markdown, then the files it names. */
-const Assistant = memo(function Assistant({ b, session, cwd }: { b: Block; session: string; cwd: string }) {
+/** What the agent said: Markdown, then the files it gives ([文件] `path` lines). */
+const Assistant = memo(function Assistant({ b, session }: { b: Block; session: string }) {
   const home = useHome().data;
-  const f = filesIn(b.text ?? "", cwd, home);
+  const text = withoutFiles(b.text ?? "", new Set(b.files?.map((f) => f.path)), home);
   return (
     <div className="flex min-w-0 flex-col items-start gap-2 pr-6">
-      {f.text && <Markdown text={f.text} className="w-full" />}
-      {!!b.files?.length && <Files session={session} files={b.files} labels={f.labels} />}
+      {text && <Markdown text={text} className="w-full" />}
+      {!!b.files?.length && <Files session={session} files={b.files} />}
     </div>
   );
 });
@@ -259,9 +259,9 @@ export function Said({ b, session, cwd, source, onJump }: { b: Shown; session: s
       const text = b.text ?? "";
       if (src.kind === "iridium") return <Line icon={<RotateCcw size={12} />}>{text}</Line>;
       if (src.kind === "letter") return <Letter src={src} text={text} time={b.time} onJump={onJump} />;
-      // The server writes each attachment as a line "[附件] `path`": the file shows as itself instead.
+      // The server writes each attachment as a line "[附件] `path`" (absolute): the file shows as itself instead.
       const paths = new Set(b.files?.map((f) => f.path));
-      const words = paths.size ? text.replace(/\n*^\[附件\] `([^`]+)`$/gm, (all, p: string) => (paths.has(p) ? "" : all)).trim() : text;
+      const words = paths.size ? withoutFiles(text, paths) : text;
       return (
         <YouBubble text={words} who={src} time={b.time} going={Date.now() - (landed.get(b.at) ?? 0) < CHECK_FOR ? "landed" : undefined}>
           {b.files?.map((f) => <Attached key={f.ref} session={session} f={f} />)}
@@ -269,7 +269,7 @@ export function Said({ b, session, cwd, source, onJump }: { b: Shown; session: s
       );
     }
     case "assistant":
-      return <Assistant b={b} session={session} cwd={cwd} />;
+      return <Assistant b={b} session={session} />;
     case "system":
       if (b.event === "iridium") return <Line icon={<RotateCcw size={12} />} title={b.text}>{b.text}</Line>;
       if (b.event === "compact") return <Compaction b={b} />;

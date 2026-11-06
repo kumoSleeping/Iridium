@@ -230,9 +230,9 @@ func TestPluginChat(t *testing.T) {
 	// A file the reply names comes with a ref, good for this plugin only.
 	file := filepath.Join(p.work, "notes.txt")
 	os.WriteFile(file, []byte("the notes"), 0o600)
-	p.do("qq", "POST", key+"/input", api.ChatInput{Text: "see `" + file + "`"}, nil)
+	p.do("qq", "POST", key+"/input", api.ChatInput{Text: "see\n[文件] `" + file + "`"}, nil)
 	_, r = p.next(events, "reply")
-	if len(r.Reply.Files) != 1 || r.Reply.Files[0].Name != "notes.txt" || r.Reply.Files[0].Size != 9 || r.Reply.Text != "ok: see "+file {
+	if len(r.Reply.Files) != 1 || r.Reply.Files[0].Name != "notes.txt" || r.Reply.Files[0].Size != 9 || r.Reply.Text != "ok: see" {
 		t.Fatalf("files: %+v", r.Reply)
 	}
 	req, _ := http.NewRequest("GET", p.base+key+"/files/"+r.Reply.Files[0].Ref, nil)
