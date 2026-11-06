@@ -283,12 +283,12 @@ export function Sidebar(p: Props) {
 }
 
 /** Me and the settings key, right on the sidebar's ground at its foot: no card around them (the
- *  user, 2026-11-06). Not on a phone with a chat open: there the me popover's body is a sheet of
+ *  user, 2026-11-06). Me is all of it up to the settings key, not only its name (the user, 2026-11-06). Not on a phone with a chat open: there the me popover's body is a sheet of
  *  its own, the settings a row in it (app.tsx, me.tsx MePanel). */
 function Foot(p: Pick<Props, "me" | "settings" | "onSettings" | "updateDot" | "panelsCode">) {
   return (
     <div className="flex h-14 shrink-0 items-center justify-between gap-2 px-2 pointer-coarse:h-16">
-      <div className="min-w-0">{p.me}</div>
+      <div className="flex min-w-0 flex-1">{p.me}</div>
       <span className="relative flex shrink-0 items-center gap-1">
         <UpdateKey />
         <IconKey label={p.updateDot ? `${t("nav.settings")} · ${t("settings.updateReady")}` : t("nav.settings")} onClick={p.onSettings} onPointerEnter={p.panelsCode} onFocus={p.panelsCode} aria-pressed={p.settings} data-settings-key className={cn("size-10 pointer-coarse:size-11", p.settings && "bg-fill text-ink")}>
