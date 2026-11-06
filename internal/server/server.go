@@ -56,6 +56,7 @@ type Server struct {
 	g       atomic.Pointer[gate.Gate]
 	initErr error // the gate for cfg.Public.Origin would not open; Listen gives it
 	asks    *confirms
+	vault   *vault // the credentials' masks and allowed uses (routes_secrets.go)
 
 	// Set before Handler, if at all: the plugin chat layer, Web Push, and who a request is from.
 	Chat *chat.Service
@@ -78,6 +79,8 @@ func New(cfg config.Config, m *session.Manager, h *hub.Hub, logf func(string, ..
 	}
 	s := &Server{cfg: cfg, m: m, hub: h, st: m.Store(), files: newFiles(cfg, m, logf), logf: logf}
 	s.asks = newConfirms(h)
+	s.vault = newVault()
+	s.reloadSecrets()
 	m.SetAnnotate(s.files.AnnotateBlocks) // a state's tail names files as a page of messages does
 	g, err := s.newGate(cfg.Public.Origin)
 	if err != nil {
@@ -101,17 +104,19 @@ func (s *Server) Handler(local bool) http.Handler {
 	mux.HandleFunc("GET /api/agents", func(w http.ResponseWriter, r *http.Request) {
 		reply(w, http.StatusOK, agents.Describe())
 	})
-	mux.HandleFunc("GET /api/sessions", s.list)
+	// What carries transcripts goes out with the credentials' values masked (routes_secrets.go).
+	mux.HandleFunc("GET /api/sessions", s.masked(s.list))
 	mux.HandleFunc("POST /api/sessions", s.create)
-	mux.HandleFunc("GET /api/sessions/{id}", s.see(s.get))
-	mux.HandleFunc("GET /api/sessions/{id}/messages", s.see(s.messages))
-	mux.HandleFunc("GET /api/sessions/{id}/block", s.see(s.block))
+	mux.HandleFunc("GET /api/sessions/{id}", s.see(s.masked(s.get)))
+	mux.HandleFunc("GET /api/sessions/{id}/messages", s.see(s.masked(s.messages)))
+	mux.HandleFunc("GET /api/sessions/{id}/block", s.see(s.masked(s.block)))
 	mux.HandleFunc("POST /api/sessions/{id}/send", s.send)
 	mux.HandleFunc("POST /api/sessions/{id}/interrupt", s.use(s.interrupt))
 	mux.HandleFunc("POST /api/sessions/{id}/stop", s.use(s.stop))
 	mux.HandleFunc("POST /api/sessions/{id}/answer", s.answering(s.answer))
-	mux.HandleFunc("GET /api/events", s.events)
+	mux.HandleFunc("GET /api/events", s.masked(s.events))
 	s.terminalRoutes(mux)
+	s.secretRoutes(mux)
 	s.updateRoutes(mux)
 	s.settingsRoutes(mux)
 	s.sessionRoutes(mux)

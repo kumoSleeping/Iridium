@@ -42,14 +42,18 @@ func newConfirms(h *hub.Hub) *confirms {
 }
 
 func (cs *confirms) add(kind, name string, owner bool, asker, session string) api.Confirm {
+	return cs.addConfirm(api.Confirm{Kind: kind, Name: name, Owner: owner, Asker: asker, Session: session})
+}
+
+// addConfirm adds c, given its ID and times.
+func (cs *confirms) addConfirm(c api.Confirm) api.Confirm {
 	b := make([]byte, 8)
 	_, _ = rand.Read(b)
 	now := time.Now()
-	c := api.Confirm{ID: hex.EncodeToString(b), Kind: kind, Name: name, Owner: owner, Asker: asker, Session: session,
-		CreatedAt: now.UnixMilli(), ExpiresAt: now.Add(ConfirmTTL).UnixMilli()}
+	c.ID, c.CreatedAt, c.ExpiresAt = hex.EncodeToString(b), now.UnixMilli(), now.Add(ConfirmTTL).UnixMilli()
 	cs.mu.Lock()
 	cs.pruneLocked(now)
-	cs.all[c.ID] = &confirm{c: c, state: api.ConfirmState{ID: c.ID, Kind: kind, State: "pending", Name: name, Owner: owner}, done: make(chan struct{})}
+	cs.all[c.ID] = &confirm{c: c, state: api.ConfirmState{ID: c.ID, Kind: c.Kind, State: "pending", Name: c.Name, Owner: c.Owner}, done: make(chan struct{})}
 	cs.mu.Unlock()
 	cs.publish()
 	return c

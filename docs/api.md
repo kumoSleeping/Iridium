@@ -328,8 +328,9 @@ Web Push，总开关在配置 `push`，默认关。VAPID 密钥存在状态目�
 | `mustApprove` | 它开的会话一律要审批：不能用跳过审批的模式（`bypassPermissions`、`acceptEdits`、`auto`、`never`、`on-request`、`danger-full-access`），没给模式时用会询问的（Claude `manual`、Codex `untrusted`、pi `ask`）；不能往跳过审批的会话发消息 |
 | `dailyTokens` | 每天（本地时间）它起的回合用的 token 上限（输入、输出、缓存都算），0 不限；到了回 429 |
 | `allCommands`、`commands` | 能发哪些 `/` 命令：全部，或列出的（如 `/compact`） |
+| `secretsSet` | 能存、换凭据（不能读值，删要管理权） |
 
-默认：面板除 Claude 外全开（第一个面板连 Claude 也开）；通道除 Claude 外，只看自己开的会话、必须审批。没存过表的终端用默认。
+默认：面板除 Claude 外全开（第一个面板连 Claude 也开）；通道除 Claude 外，只看自己开的会话、必须审批、不能存凭据。没存过表的终端用默认。
 
 每个会话接口都查：列表（和事件流的 `list`）只给看得到的；看、读消息、取全文看不到就 404；发消息查 agent、命令、审批模式、上限（带附件另查 `filesIn`）；开会话查 agent、目录、模式、命令、上限，并记下是谁开的；停、中断、换模型和强度、待发队列、改名置顶查 agent；换审批模式另查 `mustApprove`；答提问（含 `POST /api/answer` 的卡片）另查 `answer`。
 
@@ -345,7 +346,23 @@ agent 调 `ir invite`、`ir token` 时，邀请链接和 TOKEN 不能进它的�
 |---|---|---|
 | `GET /api/confirms` | → `Confirms` | 等确认的（面板权）。事件流 `confirms` 是同一份 |
 | `POST /api/confirms/{id}` | `ConfirmAnswer` → `ConfirmReply` | 面板同意或拒绝；同意时回答里带 `invite` 或 `token`，只此一次。`owner: true` 的确认只有带 Claude 的面板或本机 `ir` 能同意（别的 403，确认继续等），谁都能拒绝 |
-| `GET /api/confirms/{id}?wait=<秒>` | → `ConfirmState` | 结果：`pending`、`allowed`、`denied`、`expired`、`failed`，从不带秘密。`wait` 最多 60 秒，有结果就回 |
+| `GET /api/confirms/{id}?wait=<秒>` | → `ConfirmState` | 管理权或本机 socket 上的 `ir`。结果：`pending`、`allowed`、`denied`、`expired`、`failed`，从不带秘密。`wait` 最多 60 秒，有结果就回 |
+
+## 凭据
+
+见 `docs/plan.md`“凭据”。表 `secrets`（名字、说明、范围、`always`（每次确认）、密文、谁存的、时间）、`secret_uses`（凭据、会话、终端、命令开头、时间）。值用 AES-256-GCM 加密，密钥 `<状态目录>/secrets.key`（0600，第一次用时生成）。名字：大写字母、数字、`_`，字母开头，≤64。
+
+| 请求 | 正文 → 回答 | 说明 |
+|---|---|---|
+| `GET /api/secrets` | → `Secrets` | 名字、说明、范围、谁存的、用量和最近 50 次使用。从不带值。管理权、socket 上的 `ir`、有 `secretsSet` 的通道 |
+| `PUT /api/secrets/{name}` | `SetSecret` → `SecretInfo` | 存或换（值、说明、范围、`always`）。不带值：已有的只改说明和范围。面板、本机由人跑的 `ir`、有 `secretsSet` 的通道（通道只能存值和说明，范围、`always` 只有面板改）；agent 调的回 202 `Pending`（确认卡带密码框，值由点“存”的面板交上来，见下） |
+| `DELETE /api/secrets/{name}` | → `{ok}` | 要管理权；agent 调的也行 |
+| `POST /api/secrets/use` | `UseSecrets` → `SecretValues` | 只给 `ir run`，只走 unix socket：会话、名字、命令开头。查范围；要确认时回 202 `Pending`，`ir run` 等到同意后带 `confirm`（确认的 ID）再取，一个确认只能用一次。值只交给 `ir` 进程，它不打印 |
+
+- 确认（`/api/confirms`）多两种：`secret-set`（`Confirm.note`、`replace`；同意时 `ConfirmAnswer.value` 带值，服务端存好，谁存的记点“存”的面板；回答和 `ConfirmState` 不带值）、`secret-use`（`Confirm.secrets`、`command`；允许 / 本会话一直允许（`ConfirmAnswer.forSession`）/ 拒绝，记在内存里，会话的进程停了就忘；`owner: true`，只有带 Claude 的面板或本机 `ir` 能允许；有 `always` 的凭据不给“本会话一直允许”）。
+- 要不要确认：本机由人跑的 `ir run` 直接用；agent 的，会话由本机、带 Claude 的终端开的（或不经 Iridium 开的）直接用，别的终端开的要确认；`always` 的每次都确认。范围不对直接 403，不弹确认。
+- 对话记录出接口前（会话列表、会话状态、消息页、整段原文、事件流、插件的聊天指针、推送；`ir read`、`ir wait` 走的就是这些），已知的值（原样、URL 编码、base64）换成 `[secret:名]`；短于 6 个字符的不换（误伤太多）。
+- `ir run` 自己起子进程（同目录、同环境，加上凭据），stdout/stderr 照转，按最长值的长度留尾巴再打码；退出码照子进程。
 
 ## 公网入口
 

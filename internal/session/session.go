@@ -34,7 +34,7 @@ import (
 const UnitPrefix = "iridium-hold-"
 
 // SystemPrompt is appended to every hosted agent's system prompt (plan "ir").
-const SystemPrompt = "在需要时用 ir 开别的 agent 会话、发消息、等结果、跨机器拷文件；见 ir --help\n"
+const SystemPrompt = "在需要时用 ir 开别的 agent 会话、发消息、等结果、跨机器拷文件；见 ir --help。要密码、API key 时用 ir secret set 让人在网页填，用 ir run 带进命令，别让人贴进对话\n"
 
 // Discovery finds the sessions on disk that agents started by themselves (agents' record
 // directories, ~/.claude/sessions/, /proc). Another package implements it.

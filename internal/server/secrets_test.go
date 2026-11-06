@@ -1,0 +1,157 @@
+package server
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/kumoSleeping/iridium/internal/api"
+)
+
+func ptr[T any](v T) *T { return &v }
+
+// The credentials: stored from the page, a person's ir, an agent's ir through a panel; used by ir
+// run alone, as their scopes and confirmations say; masked in what carries transcripts.
+func TestSecrets(t *testing.T) {
+	l := start(t)
+	const val = "ghp_s3cretvalue42"
+
+	// The page (本机 here) stores one; listing never gives the value.
+	var info api.SecretInfo
+	l.want(200, "web", "PUT", "/api/secrets/GITHUB_TOKEN", api.SetSecret{Value: val, Note: ptr("push to kumo/foo")}, &info)
+	if info.Name != "GITHUB_TOKEN" || info.Scope != api.ScopeAll || info.Note != "push to kumo/foo" {
+		t.Fatalf("stored: %+v", info)
+	}
+	l.want(400, "web", "PUT", "/api/secrets/lower", api.SetSecret{Value: "x"}, nil)
+	l.want(400, "web", "PUT", "/api/secrets/NEW_ONE", api.SetSecret{}, nil) // no value
+	var raw string
+	raw = l.wantRaw(200, "agent", "GET", "/api/secrets", nil)
+	if strings.Contains(raw, val) || !strings.Contains(raw, "GITHUB_TOKEN") {
+		t.Fatalf("list: %s", raw)
+	}
+
+	// A plugin may not store one by default, nor list them.
+	var tok api.Token
+	l.want(200, "socket", "POST", "/api/terminals/tokens", api.NewInvite{Name: "bot"}, &tok)
+	bot := tok.Token
+	l.want(403, bot, "PUT", "/api/secrets/BOT_KEY", api.SetSecret{Value: "abcdefgh"}, nil)
+	l.want(403, bot, "GET", "/api/secrets", nil, nil)
+	l.want(403, bot, "DELETE", "/api/secrets/GITHUB_TOKEN", nil, nil)
+
+	// An agent's ir: a confirmation, whose panel types the value; the agent learns only the outcome.
+	var p api.Pending
+	l.want(202, "agent", "PUT", "/api/secrets/NAS_PASSWORD", api.SetSecret{Note: ptr("mount the NAS"), Value: "ignored"}, &p)
+	if p.Confirm.Kind != "secret-set" || p.Confirm.Name != "NAS_PASSWORD" || p.Confirm.Note != "mount the NAS" || p.Confirm.Session != "caller-session" || p.Confirm.Replace {
+		t.Fatalf("pending: %+v", p.Confirm)
+	}
+	l.want(400, "web", "POST", "/api/confirms/"+p.Confirm.ID, api.ConfirmAnswer{Allow: true}, nil) // no value typed
+	var rep string
+	rep = l.wantRaw(200, "web", "POST", "/api/confirms/"+p.Confirm.ID, api.ConfirmAnswer{Allow: true, Value: "nas-pass-123"})
+	if strings.Contains(rep, "nas-pass-123") || !strings.Contains(rep, `"allowed"`) {
+		t.Fatalf("answer: %s", rep)
+	}
+	rep = l.wantRaw(200, "agent", "GET", "/api/confirms/"+p.Confirm.ID, nil)
+	if strings.Contains(rep, "nas-pass-123") || !strings.Contains(rep, `"allowed"`) {
+		t.Fatalf("state: %s", rep)
+	}
+
+	// Values over the socket only.
+	use := api.UseSecrets{Names: []string{"GITHUB_TOKEN", "NAS_PASSWORD"}, Command: "git push {{GITHUB_TOKEN}}"}
+	l.want(403, "web", "POST", "/api/secrets/use", use, nil)
+	var vals api.SecretValues
+	l.want(200, "socket", "POST", "/api/secrets/use", use, &vals)
+	if vals.Values["GITHUB_TOKEN"] != val || vals.Values["NAS_PASSWORD"] != "nas-pass-123" {
+		t.Fatalf("values: %+v", vals)
+	}
+	// An agent in a session 本机 opened: at once.
+	l.want(200, "agent", "POST", "/api/secrets/use", use, &vals)
+	var list api.Secrets
+	l.want(200, "web", "GET", "/api/secrets", nil, &list)
+	if len(list.Uses) != 4 || list.Uses[0].Command != "git push {{GITHUB_TOKEN}}" || list.Secrets[0].Uses != 2 || list.Secrets[0].LastUse == nil {
+		t.Fatalf("uses: %+v", list)
+	}
+
+	// A session a channel without Claude opened: a confirmation only the owner's own may allow.
+	// (Claude for the fake agent while it opens the session, then off again.)
+	withClaude := tok.Terminal.Rules
+	withClaude.Agents = append(withClaude.Agents, api.AgentClaude)
+	withClaude.ClaudeOwner = &api.OwnerConfirm{By: "local"}
+	if code := l.rules("socket", tok.Terminal.ID, withClaude); code != 200 {
+		t.Fatalf("claude for the bot: %d", code)
+	}
+	var its api.NewSessionReply
+	l.want(200, bot, "POST", "/api/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "token " + val + " here"}, &its)
+	l.waitReply("web", its.ID, "ok: token [secret:GITHUB_TOKEN] here") // masked already
+	if code := l.rules("web", tok.Terminal.ID, tok.Terminal.Rules); code != 200 {
+		t.Fatalf("claude off: %d", code)
+	}
+	in := "agent-in:" + its.ID
+	one := api.UseSecrets{Names: []string{"GITHUB_TOKEN"}, Command: "gh auth"}
+	l.want(202, in, "POST", "/api/secrets/use", one, &p)
+	if p.Confirm.Kind != "secret-use" || !p.Confirm.Owner || p.Confirm.Session != its.ID || p.Confirm.Command != "gh auth" || len(p.Confirm.Secrets) != 1 {
+		t.Fatalf("use pending: %+v", p.Confirm)
+	}
+	l.want(403, "web", "POST", "/api/confirms/"+p.Confirm.ID, api.ConfirmAnswer{Allow: true}, nil) // the local page is not the owner's say
+	l.want(200, "socket", "POST", "/api/confirms/"+p.Confirm.ID, api.ConfirmAnswer{Allow: true}, nil)
+	once := one
+	once.Confirm = p.Confirm.ID
+	l.want(200, in, "POST", "/api/secrets/use", once, &vals)
+	l.want(202, in, "POST", "/api/secrets/use", once, &p) // spent
+	l.want(200, "socket", "POST", "/api/confirms/"+p.Confirm.ID, api.ConfirmAnswer{Allow: true, ForSession: true}, nil)
+	l.want(200, in, "POST", "/api/secrets/use", one, nil) // for the rest of the session
+	l.want(200, in, "POST", "/api/secrets/use", one, nil)
+
+	// Every time: the owner's own session asks too, and "this session" does not hold.
+	l.want(200, "web", "PUT", "/api/secrets/GITHUB_TOKEN", api.SetSecret{Always: ptr(true)}, nil)
+	l.want(202, "agent", "POST", "/api/secrets/use", one, &p)
+	if !p.Confirm.Always {
+		t.Fatalf("always: %+v", p.Confirm)
+	}
+	l.want(200, "socket", "POST", "/api/confirms/"+p.Confirm.ID, api.ConfirmAnswer{Allow: true, ForSession: true}, nil)
+	l.want(202, "agent", "POST", "/api/secrets/use", one, nil)
+	l.want(200, "socket", "POST", "/api/secrets/use", one, nil) // a person at the machine: at once
+
+	// Owner only: the channel's session may not, not even through a confirmation.
+	l.want(200, "web", "PUT", "/api/secrets/NAS_PASSWORD", api.SetSecret{Scope: api.ScopeOwner}, nil)
+	l.want(403, in, "POST", "/api/secrets/use", api.UseSecrets{Names: []string{"NAS_PASSWORD"}}, nil)
+	l.want(200, "agent", "POST", "/api/secrets/use", api.UseSecrets{Names: []string{"NAS_PASSWORD"}}, nil)
+	// Some workspaces: the session is in none.
+	l.want(200, "web", "PUT", "/api/secrets/NAS_PASSWORD", api.SetSecret{Scope: api.ScopeWorkspaces, Workspaces: []int64{99}}, nil)
+	l.want(403, "agent-in:"+its.ID, "POST", "/api/secrets/use", api.UseSecrets{Names: []string{"NAS_PASSWORD"}}, nil)
+	l.want(404, "agent", "POST", "/api/secrets/use", api.UseSecrets{Names: []string{"NOPE"}}, nil)
+	// A channel's secretsSet is not who may use them.
+	l.want(403, bot, "PUT", "/api/secrets/NAS_PASSWORD", api.SetSecret{Scope: api.ScopeAll}, nil)
+
+	// What carries the transcript masks the value: the page of messages, the state, the list, the
+	// stream.
+	for _, path := range []string{"/api/sessions/" + its.ID + "/messages", "/api/sessions/" + its.ID, "/api/sessions"} {
+		raw = l.wantRaw(200, "web", "GET", path, nil)
+		if strings.Contains(raw, val) || !strings.Contains(raw, "[secret:GITHUB_TOKEN]") {
+			t.Fatalf("%s not masked: %.400s", path, raw)
+		}
+	}
+	resp, err := l.web.Get(l.base + "/api/events?sub=session:" + its.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ev := firstState(t, resp); strings.Contains(ev, val) || !strings.Contains(ev, "[secret:GITHUB_TOKEN]") {
+		t.Fatalf("stream not masked: %.400s", ev)
+	}
+
+	// Deleting is a manager's, an agent's ir's too; then it is masked no more (no longer known).
+	l.want(200, "agent", "DELETE", "/api/secrets/GITHUB_TOKEN", nil, nil)
+	l.want(404, "agent", "DELETE", "/api/secrets/GITHUB_TOKEN", nil, nil)
+	raw = l.wantRaw(200, "web", "GET", "/api/sessions/"+its.ID+"/messages", nil)
+	if !strings.Contains(raw, val) {
+		t.Fatalf("still masked after delete: %.300s", raw)
+	}
+}
+
+// wantRaw is want, giving the reply's body as is.
+func (l *live) wantRaw(code int, as, method, path string, body any) string {
+	l.t.Helper()
+	var raw string
+	if got := l.do(as, method, path, body, &raw); got != code {
+		l.t.Fatalf("%s %s as %.8s: %d, want %d: %s", method, path, as, got, code, raw)
+	}
+	return raw
+}

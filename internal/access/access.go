@@ -43,7 +43,7 @@ func Full() api.Rules {
 	return api.Rules{
 		Agents:      []api.Agent{api.AgentClaude, api.AgentCodex, api.AgentDsh, api.AgentPi},
 		ClaudeOwner: &api.OwnerConfirm{By: api.LocalTerminal},
-		AllDirs:     true, SeeOthers: true, FilesIn: true, FilesOut: true, Answer: true, AllCommands: true,
+		AllDirs:     true, SeeOthers: true, FilesIn: true, FilesOut: true, Answer: true, AllCommands: true, SecretsSet: true,
 		Dirs: []string{}, Workspaces: []int64{}, Commands: []string{},
 	}
 }
@@ -51,13 +51,14 @@ func Full() api.Rules {
 // Default is a new terminal's table. Claude is off: only the first panel, an ir invite --owner or
 // ir token --owner, or ir access --claude on, each from a person at the machine or on a panel that
 // has Claude (an agent's only once such a panel confirms it), give it (WithClaude). A channel
-// (a plugin or a peer) sees only what it opened and runs with approvals.
+// (a plugin or a peer) sees only what it opened, runs with approvals and stores no credentials.
 func Default(kind api.TerminalKind) api.Rules {
 	r := Full()
 	r.Agents, r.ClaudeOwner = []api.Agent{api.AgentCodex, api.AgentDsh, api.AgentPi}, nil
 	if kind == api.TerminalChannel {
 		r.SeeOthers = false
 		r.MustApprove = true
+		r.SecretsSet = false
 	}
 	return r
 }
@@ -191,7 +192,7 @@ func Widens(old, next api.Rules) bool {
 		}
 	}
 	if (next.SeeOthers && !old.SeeOthers) || (next.FilesIn && !old.FilesIn) || (next.FilesOut && !old.FilesOut) ||
-		(next.Answer && !old.Answer) || (!next.MustApprove && old.MustApprove) {
+		(next.Answer && !old.Answer) || (!next.MustApprove && old.MustApprove) || (next.SecretsSet && !old.SecretsSet) {
 		return true
 	}
 	if old.DailyTokens > 0 && (next.DailyTokens == 0 || next.DailyTokens > old.DailyTokens) {

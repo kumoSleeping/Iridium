@@ -40,6 +40,8 @@ type Rules struct {
 	// AllCommands: every slash command; else only Commands (e.g. "/compact").
 	AllCommands bool     `json:"allCommands"`
 	Commands    []string `json:"commands"`
+	// SecretsSet: it may store and replace credentials (never read them; deleting is a manager's).
+	SecretsSet bool `json:"secretsSet"`
 }
 
 // OwnerConfirm is how, and when (ms), a terminal was found the owner's own.
@@ -148,17 +150,28 @@ type SetRules struct {
 	Rules Rules `json:"rules"`
 }
 
-// Confirm is what an agent's ir asked for that only a panel may give (an invite link, a token):
-// it waits in the carried state "confirms" until a panel answers it. No secrets.
+// Confirm is what an agent's ir asked for that only a panel may give (an invite link, a token, a
+// credential's value, the use of credentials): it waits in the carried state "confirms" until a
+// panel answers it. No secrets.
 type Confirm struct {
-	ID        string `json:"id"`
-	Kind      string `json:"kind"` // invite | token
+	ID   string `json:"id"`
+	Kind string `json:"kind"` // invite | token | secret-set | secret-use
+	// Name: the invite's or token's name; secret-set: the secret's.
 	Name      string `json:"name,omitempty"`
 	Owner     bool   `json:"owner,omitempty"`   // --owner: it gets Claude; only a panel that has Claude allows it
 	Asker     string `json:"asker"`             // the terminal that asked (本机)
 	Session   string `json:"session,omitempty"` // the session whose agent asked, if known
 	CreatedAt int64  `json:"createdAt"`
 	ExpiresAt int64  `json:"expiresAt"`
+	// secret-set: the note it was asked with (else the stored one's), and whether one by that
+	// name is stored (it is replaced).
+	Note    string `json:"note,omitempty"`
+	Replace bool   `json:"replace,omitempty"`
+	// secret-use: the secrets, the command's opening (as written: {{NAME}}), and whether one of
+	// them is confirmed every time (no "this session").
+	Secrets []string `json:"secrets,omitempty"`
+	Command string   `json:"command,omitempty"`
+	Always  bool     `json:"always,omitempty"`
 }
 
 // Confirms is the carried state "confirms": the pending ones, oldest first. Panels only.
@@ -169,6 +182,10 @@ type Confirms struct {
 // ConfirmAnswer is a panel's answer to a Confirm.
 type ConfirmAnswer struct {
 	Allow bool `json:"allow"`
+	// Value: secret-set's value, typed on the panel; stored, never given back.
+	Value string `json:"value,omitempty"`
+	// ForSession: secret-use allowed for the rest of the session (till it stops).
+	ForSession bool `json:"forSession,omitempty"`
 }
 
 // ConfirmState is how a Confirm went, as the asker sees it: never a secret.

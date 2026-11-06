@@ -55,6 +55,8 @@ type Options struct {
 	// AllowHTTP takes plain http endpoints (tests); push services are https.
 	AllowHTTP bool
 	Logf      func(string, ...any)
+	// Mask, if set, takes the credentials' values out of what is pushed (plan "凭据").
+	Mask func(string) string
 }
 
 type Service struct {
@@ -329,6 +331,9 @@ func (s *Service) notice(kind string, n session.Notice) {
 		msg.Body = n.Text
 	case "compact":
 		msg.Body = "压缩完成"
+	}
+	if s.o.Mask != nil {
+		msg.Title, msg.Body = s.o.Mask(msg.Title), s.o.Mask(msg.Body)
 	}
 	msg.Body = cut(msg.Body, 200)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)

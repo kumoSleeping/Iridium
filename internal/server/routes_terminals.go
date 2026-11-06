@@ -12,6 +12,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/config"
 	"github.com/kumoSleeping/iridium/internal/gate"
+	"github.com/kumoSleeping/iridium/internal/secrets"
 )
 
 // terminalRoutes are the interactive terminals' (docs/api.md "交互终端"): who is calling, the
@@ -34,7 +35,15 @@ func (s *Server) terminalRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/terminals/tokens", s.manage(s.token))
 	mux.HandleFunc("GET /api/confirms", s.panelOnly(func(w http.ResponseWriter, r *http.Request) { reply(w, http.StatusOK, s.asks.pending()) }))
 	mux.HandleFunc("POST /api/confirms/{id}", s.panelOnly(s.answerConfirm))
-	mux.HandleFunc("GET /api/confirms/{id}", s.manage(s.confirmState))
+	// How one went, never a secret: for whoever manages, and any ir on the socket (an agent's in a
+	// session a channel opened waits for its ir run's too).
+	mux.HandleFunc("GET /api/confirms/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if c := callerOf(r); !c.CanManage() && !c.socket {
+			forbid(w, errors.New("only a web panel or 本机 manages terminals"))
+			return
+		}
+		s.confirmState(w, r)
+	})
 	mux.HandleFunc("GET /api/public", s.manage(s.publicState))
 	mux.HandleFunc("PUT /api/public", s.panelOnly(s.setPublic))
 }
@@ -245,6 +254,9 @@ func (s *Server) ask(w http.ResponseWriter, c caller, kind, name string, owner b
 	reply(w, http.StatusAccepted, api.Pending{Confirm: cf})
 }
 
+// errOwnerSecret answers allowing a secret-use from a panel that has no Claude itself.
+var errOwnerSecret = errors.New("only a person at the machine or on a panel that has Claude lets a session use the credentials")
+
 // errOwnerFlag answers --owner from a panel that has no Claude itself.
 var errOwnerFlag = errors.New("only a person at the machine or on a panel that has Claude says a terminal is the owner's own (--owner)")
 
@@ -322,7 +334,14 @@ func (s *Server) answerConfirm(w http.ResponseWriter, r *http.Request) {
 	// An --owner ask is allowed only by one that may say so; it stays waiting for one that may.
 	// Denying it is any panel's.
 	if cf, ok := s.asks.peek(id); ok && cf.Owner && a.Allow && by == "" {
-		forbid(w, errOwnerFlag)
+		if cf.Kind == "secret-use" {
+			forbid(w, errOwnerSecret)
+		} else {
+			forbid(w, errOwnerFlag)
+		}
+		return
+	} else if ok && cf.Kind == "secret-set" && a.Allow && (a.Value == "" || len(a.Value) > secrets.MaxValue) {
+		fail(w, http.StatusBadRequest, "type the value (64 KiB at most)")
 		return
 	}
 	cf, ok := s.asks.take(id)
@@ -348,6 +367,10 @@ func (s *Server) answerConfirm(w http.ResponseWriter, r *http.Request) {
 			if err == nil {
 				st.Name = out.Token.Terminal.Name
 			}
+		case "secret-set":
+			err = s.storeAsked(cf, a.Value, c)
+		case "secret-use":
+			s.allowSecretUse(cf, a.ForSession)
 		}
 		st.State = "allowed"
 		if err != nil {

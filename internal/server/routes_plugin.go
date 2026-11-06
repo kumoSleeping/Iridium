@@ -48,7 +48,7 @@ func (s *Server) pluginRoutes(mux *http.ServeMux) {
 	if s.Chat == nil {
 		return
 	}
-	mux.HandleFunc("GET /api/chat/{key}", s.chatPointer)
+	mux.HandleFunc("GET /api/chat/{key}", s.masked(s.chatPointer))
 	mux.HandleFunc("POST /api/chat/{key}/input", s.chatInput)
 	mux.HandleFunc("GET /api/chat/{key}/commands", s.chatCommands)
 	mux.HandleFunc("GET /api/chat/{key}/files/{ref}", s.chatFile)

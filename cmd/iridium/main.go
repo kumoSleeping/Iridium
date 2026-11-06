@@ -129,7 +129,7 @@ func serve(args []string) int {
 	srv.Updater = newUpdater(cfg, h)
 	h.Set("update", srv.Updater.State())
 	// Web Push's total switch is the config's: turning it writes the file (with the settings').
-	srv.Push, err = push.Open(push.Options{StateDir: state, Store: st, Manager: m, Enabled: cfg.Push, Save: func(on bool) error {
+	srv.Push, err = push.Open(push.Options{StateDir: state, Store: st, Manager: m, Enabled: cfg.Push, Mask: srv.MaskText, Save: func(on bool) error {
 		return srv.SaveConfig(func(c *config.Config) { c.Push = on })
 	}})
 	if err != nil {
