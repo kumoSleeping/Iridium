@@ -15,6 +15,7 @@ export const zh = {
   "nav.sidebarKey": "⌘\\",
   "nav.hideSidebar": "缩小侧栏",
   "nav.dockSidebar": "还原侧栏",
+  "nav.closeSidebar": "收起侧栏",
   "nav.resize": "拖动调整侧栏宽度（双击复原）",
   "nav.sessions": "会话",
   "nav.unsorted": "未归类",

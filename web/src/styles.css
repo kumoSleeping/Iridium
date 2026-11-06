@@ -16,9 +16,18 @@
   --fill: oklch(0.955 0 0);
   --fill-2: oklch(0.92 0 0);
   --edge: oklch(0 0 0 / 0.08);
-  --glass: oklch(0.995 0 0 / 0.76);
-  --glass-thick: oklch(0.995 0 0 / 0.86);
-  --glass-solid: oklch(0.985 0 0);
+  /* Glass: a tint and how much of it; frosted, it lets the rest through. Solid (a view
+     transition's snapshot, reduced transparency) is that same tint laid on paper, worked out from
+     it, never written apart: two values for one surface drift, and the bar went a shade darker for
+     a blink as chats swapped (the user, 2026-11-06). */
+  --glass-tint: oklch(0.995 0 0);
+  --glass-thick-tint: oklch(0.995 0 0);
+  --glass-a: 76%;
+  --glass-thick-a: 86%;
+  --glass: color-mix(in srgb, var(--glass-tint) var(--glass-a), transparent);
+  --glass-thick: color-mix(in srgb, var(--glass-thick-tint) var(--glass-thick-a), transparent);
+  --glass-solid: color-mix(in srgb, var(--glass-tint) var(--glass-a), var(--paper));
+  --glass-thick-solid: color-mix(in srgb, var(--glass-thick-tint) var(--glass-thick-a), var(--paper));
   --glass-blur: 22px;
   --shadow-float: 0 0 0 0.5px oklch(0 0 0 / 0.05), 0 2px 6px oklch(0 0 0 / 0.05), 0 12px 32px oklch(0 0 0 / 0.08);
   /* what stays on the page (the composer and its cards): a hairline and a soft shadow, half way
@@ -57,9 +66,10 @@
   --fill: oklch(0.235 0 0);
   --fill-2: oklch(0.285 0 0);
   --edge: oklch(1 0 0 / 0.09);
-  --glass: oklch(0.225 0 0 / 0.72);
-  --glass-thick: oklch(0.235 0 0 / 0.84);
-  --glass-solid: oklch(0.225 0 0);
+  --glass-tint: oklch(0.225 0 0);
+  --glass-thick-tint: oklch(0.235 0 0);
+  --glass-a: 72%;
+  --glass-thick-a: 84%;
   --shadow-float: 0 0 0 0.5px oklch(0 0 0 / 0.4), 0 2px 6px oklch(0 0 0 / 0.25), 0 12px 32px oklch(0 0 0 / 0.35);
   --shadow-rest: 0 0 0 0.5px oklch(1 0 0 / 0.11), 0 1px 3px oklch(0 0 0 / 0.25), 0 6px 18px oklch(0 0 0 / 0.25);
   --on-ink: oklch(0.18 0 0);
@@ -166,6 +176,9 @@ body {
 @media (prefers-reduced-transparency: reduce) {
   .glass {
     background: var(--glass-solid);
+  }
+  .glass.thick {
+    background: var(--glass-thick-solid);
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }

@@ -5,7 +5,7 @@
 // drafts from the stream. Loaded only once a chat opens or the page is idle.
 import { Menu } from "@base-ui/react/menu";
 import { ChevronRight, Ellipsis, FolderInput } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DragEvent, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DragEvent } from "react";
 import type { SessionState as LiveSession } from "../api/types.gen";
 import { api } from "../api/client";
 import type { Session } from "../api/types.gen";
@@ -18,7 +18,7 @@ import { MenuItems, Rename, sessionActions } from "../sidebar";
 import { useConfirms, useList, useSession } from "../store";
 import { drafts, opened } from "../stream";
 import { errText, toast } from "../toast";
-import { agentName, LogoLamp, statusText, tilde, Tip, titleOf } from "../ui";
+import { agentName, cn, LogoLamp, statusText, tilde, Tip, titleOf } from "../ui";
 import { Asks } from "./asks";
 import { Composer, type ComposerHandle } from "./composer";
 import { folded, type Tool } from "./fold";
@@ -32,9 +32,9 @@ import { Stick, toEnd } from "./stick";
 
 const BUSY = new Set(["running", "compacting", "starting", "waiting"]);
 
-/** drawerKey: what brings the sidebar, when it is a drawer (drawer.tsx DrawerKey); above: in the
- *  composer's stack. */
-export function ChatPage({ id, phone, drawerKey }: { id: string; phone: boolean; drawerKey?: (above: boolean) => ReactNode }) {
+/** slot: the bar keeps its left free for the sidebar's key (drawer.tsx SideKey), the sidebar not
+ *  beside it. */
+export function ChatPage({ id, phone, slot }: { id: string; phone: boolean; slot: boolean }) {
   useLang();
   const s = useSession(id);
   const list = useList();
@@ -140,9 +140,8 @@ export function ChatPage({ id, phone, drawerKey }: { id: string; phone: boolean;
     const gone = list !== undefined && !row;
     return (
       <div className="relative h-full">
-        <Bar phone={phone} s={row} />
+        <Bar phone={phone} s={row} slot={slot} />
         {gone && <p className="g-fade m-0 pt-24 text-center text-sm text-ink-3">{t("chat.gone")}</p>}
-        {drawerKey?.(false)}
       </div>
     );
   }
@@ -192,9 +191,8 @@ export function ChatPage({ id, phone, drawerKey }: { id: string; phone: boolean;
           )}
         </div>
       </Stick>
-      <Bar phone={phone} s={s} />
+      <Bar phone={phone} s={s} slot={slot} />
       <div ref={stack} className="g-turn-stay vt-stack absolute inset-x-0 bottom-0 z-10 px-2.5 pb-[max(14px,calc(env(safe-area-inset-bottom)+6px))] sm:px-5">
-        {drawerKey?.(true)}
         {/* Paper from the composer's middle down: the conversation scrolled under it stops there. */}
         {!elsewhere && !s.subagent && <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-[calc(44px+max(14px,calc(env(safe-area-inset-bottom)+6px)))] bg-[linear-gradient(to_bottom,transparent,var(--paper)_14px)]" />}
         <div className="relative mx-auto max-w-[760px]">
@@ -251,12 +249,12 @@ function Under({ s, composer, onSent, onSentDone, modelOpen, setModelOpen, modeO
 
 /** The top bar: the logo with its lamp, the name, the folder; more. The link's dot is the
  *  sidebar's (sidebar.tsx LinkDot). */
-function Bar({ s, phone }: { s?: Session; phone: boolean }) {
+function Bar({ s, phone, slot }: { s?: Session; phone: boolean; slot: boolean }) {
   const ws = useWorkspaces().data ?? [];
   const [renaming, setRenaming] = useState(false);
   return (
     <header className="g-turn-stay vt-bar glass absolute inset-x-0 top-0 z-20 flex h-12 items-center gap-1 pr-2 pl-2 shadow-[0_0.5px_0_var(--edge)] pointer-coarse:h-13">
-      <div className="flex min-w-0 flex-1 items-center gap-2.5 pl-2">
+      <div className={cn("flex min-w-0 flex-1 items-center gap-2.5", slot ? "pl-10 pointer-coarse:pl-12" : "pl-2")}>
         {s && (
           <>
             <Tip label={`${agentName(s.agent)} · ${statusText(s.status)}`} side="bottom">

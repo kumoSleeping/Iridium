@@ -7,7 +7,7 @@
 // under the mouse, a faint "+" at its end for a new session there. A row's menu (right click,
 // long-press): pin, rename, stop, archive. The mouse resting on a row fetches its chat ahead.
 import { Menu } from "@base-ui/react/menu";
-import { Archive, ArchiveRestore, Bot, ChevronRight, Copy, Folder, FolderOpen, Inbox, KeyRound, Link2, Maximize2, Minimize2, Pencil, Pin, PinOff, Plus, Search, Settings, ShieldOff, Square, Workflow as WorkflowIcon } from "lucide-react";
+import { Archive, ArchiveRestore, Bot, ChevronRight, Copy, Folder, FolderOpen, Inbox, KeyRound, Link2, Maximize2, Pencil, Pin, PinOff, Plus, Search, Settings, ShieldOff, Square, Workflow as WorkflowIcon } from "lucide-react";
 import { Fragment, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { api } from "./api/client";
 import type { Confirm, Session } from "./api/types.gen";
@@ -20,6 +20,7 @@ import { errText, toast } from "./toast";
 import { useSaidLine } from "./data";
 import { agentName, ago, cn, IconKey, keep, kept, Lamp, Logo, statusText, tilde, Tip, titleOf, useLongPress, useMinute } from "./ui";
 import { useUnread } from "./unread";
+import { KEY_SLOT } from "./drawer";
 
 const STEP = 18;
 const BUSY = new Set(["running", "compacting", "starting"]);
@@ -155,7 +156,9 @@ export function Sidebar(p: Props) {
   );
 
   const head = (
-    <div className={cn("flex shrink-0 items-center gap-0.5 px-2", p.phone ? "glass absolute inset-x-0 top-0 z-20 h-13 shadow-[0_0.5px_0_var(--edge)]" : "h-12")}>
+    // Its left kept free for the sidebar's key (drawer.tsx SideKey), fixed there; in the card, a
+    // little lower so the key sits on its middle as on the docked head's.
+    <div className={cn("flex shrink-0 items-center gap-0.5 pr-2", KEY_SLOT, p.phone ? "glass absolute inset-x-0 top-0 z-20 h-11 shadow-[0_0.5px_0_var(--edge)]" : p.drawer ? "h-10" : "h-12")}>
       {p.createKey(
         <button type="button" aria-label={t("nav.newWorkspace")} className="g-press grid size-8 place-items-center rounded-md text-ink-2 hover:bg-fill hover:text-ink data-popup-open:bg-fill pointer-coarse:size-10">
           <Plus size={18} />
@@ -165,9 +168,9 @@ export function Sidebar(p: Props) {
         <Search size={16} />
       </IconKey>
       <LinkDot />
-      {p.onDock && (
-        <IconKey label={p.drawer ? t("nav.dockSidebar") : `${t("nav.hideSidebar")} · ${t("nav.sidebarKey")}`} tipSide="bottom" onClick={p.onDock}>
-          {p.drawer ? <Maximize2 size={15} /> : <Minimize2 size={15} />}
+      {p.onDock && p.drawer && (
+        <IconKey label={`${t("nav.dockSidebar")} · ${t("nav.sidebarKey")}`} tipSide="bottom" onClick={p.onDock}>
+          <Maximize2 size={15} />
         </IconKey>
       )}
     </div>
@@ -179,8 +182,8 @@ export function Sidebar(p: Props) {
       {head}
       {/* While searching, the jump box in the tree's place; the tree stays mounted, hidden, and
           comes back scrolled as it was. */}
-      {p.searching && <div className={cn("flex min-h-0 flex-1 flex-col", p.phone && "pt-15")}>{p.search}</div>}
-      <div ref={list} hidden={p.searching} onScroll={(e) => void (scrolled.current = e.currentTarget.scrollTop)} className={cn("relative min-h-0 flex-1 overflow-y-auto px-2 pb-3 [scrollbar-gutter:stable]", p.phone && "pt-15")} role="tree" aria-label={t("nav.sessions")}>
+      {p.searching && <div className={cn("flex min-h-0 flex-1 flex-col", p.phone && "pt-13")}>{p.search}</div>}
+      <div ref={list} hidden={p.searching} onScroll={(e) => void (scrolled.current = e.currentTarget.scrollTop)} className={cn("relative min-h-0 flex-1 overflow-y-auto px-2 pb-3 [scrollbar-gutter:stable]", p.phone && "pt-13")} role="tree" aria-label={t("nav.sessions")}>
         {needs > 0 && (
           <div role="group">
             <Row depth={0} flip="needs" chevron={p.expanded("needs") ? "open" : "closed"} onClick={() => p.toggle("needs")} icon={<Inbox size={16} className="text-ink-2" />} label={t("nav.needsYou")} end={<Count n={needs} />} />

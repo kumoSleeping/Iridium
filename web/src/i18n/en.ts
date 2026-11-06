@@ -15,6 +15,7 @@ export const en: Dict = {
   "nav.sidebarKey": "⌘\\",
   "nav.hideSidebar": "Make the sidebar small",
   "nav.dockSidebar": "Restore the sidebar",
+  "nav.closeSidebar": "Put the sidebar away",
   "nav.resize": "Drag to resize the sidebar (double-click to reset)",
   "nav.sessions": "Sessions",
   "nav.unsorted": "Unsorted",

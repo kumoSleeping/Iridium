@@ -11,7 +11,7 @@ import { Tooltip } from "@base-ui/react/tooltip";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import { watchTurns } from "./chats";
 import { CreatePopover, WsPlus } from "./create";
-import { Drawer, DrawerKey } from "./drawer";
+import { Drawer, SideKey } from "./drawer";
 import { useHome, useMe, useSettings, useTerminals, useUpdate, useWorkspaces } from "./data";
 import { t, useLang } from "./i18n";
 import { applyTheme, initialTheme, keepTheme, MeChip, type ThemePref } from "./me";
@@ -187,24 +187,17 @@ export function App() {
       wsPlus={(w, trigger, o, setO) => <WsPlus key={w.key} w={{ id: w.id, name: w.name, path: w.root }} trigger={trigger} open={o} setOpen={setO} opened={(id) => openChat(id)} />}
       me={<MeChip theme={theme} setTheme={setThemeKept} defaultOpen={params.get("open") === "me"} initialPage={params.get("open") === "perms" ? "perms" : "main"} />}
       drawer={drawer}
-      onDock={narrow ? undefined : () => dock(drawer)}
+      onDock={narrow ? undefined : () => dock(true)}
     />
   );
-  // On a computer the small sidebar, out, lives beside the chat: the main pane makes room for it,
-  // nothing covered, and its key is not needed meanwhile.
-  const beside = drawer && !narrow && drawerOpen;
-  const drawerKey = drawer && !beside ? (above: boolean) => <DrawerKey above={above} onClick={() => setDrawerOpen(true)} /> : undefined;
 
   const main = (
-    <main className={cn("relative h-full min-w-0 flex-1 bg-paper", !phone && "g-turn", drawer && !narrow && "g-make-room")} style={beside ? { marginLeft: "calc(var(--sidebar-w) + 16px)" } : undefined}>
+    <main className={cn("relative h-full min-w-0 flex-1 bg-paper", !phone && "g-turn")}>
       <Suspense fallback={<Waiting />}>
         {under.name === "chat" ? (
-          <ChatPage key={under.id} id={under.id} phone={phone} drawerKey={drawerKey} />
+          <ChatPage key={under.id} id={under.id} phone={phone} slot={drawer} />
         ) : (
-          <>
-            <Empty />
-            {drawerKey?.(false)}
-          </>
+          <Empty />
         )}
       </Suspense>
     </main>
@@ -243,10 +236,11 @@ export function App() {
           {!drawer && sidebar}
           {main}
           {drawer && (
-            <Drawer open={drawerOpen} setOpen={setDrawerOpen} phone={phone} modal={narrow}>
+            <Drawer open={drawerOpen} setOpen={setDrawerOpen} phone={phone}>
               {sidebar}
             </Drawer>
           )}
+          <SideKey state={!drawer ? "docked" : drawerOpen ? "out" : "in"} onClick={() => (!drawer ? dock(false) : setDrawerOpen((o) => !o))} />
         </div>
         {settings}
         {secret && (
