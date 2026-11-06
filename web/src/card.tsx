@@ -18,7 +18,7 @@ export function CardFrame({ label, leaving, children, className }: { label: stri
 
 /** A card's top line: the icon, the title (a faint tag after it), the summary under it, cut to one
  *  line till the details open; the keys at the end, under it on a narrow card. */
-export function CardHead({ icon, title, tag, summary, mono, open, setOpen, keys }: { icon: ReactNode; title: string; tag?: string; summary: ReactNode; mono?: boolean; open?: boolean; setOpen?: (o: boolean) => void; keys: ReactNode }) {
+export function CardHead({ icon, title, tag, summary, mono, open, setOpen, keys }: { icon: ReactNode; title: string; tag?: string; summary?: ReactNode; mono?: boolean; open?: boolean; setOpen?: (o: boolean) => void; keys: ReactNode }) {
   const body = (
     <>
       <span className="mt-0.5 shrink-0 text-ink-2">{icon}</span>
@@ -28,7 +28,7 @@ export function CardHead({ icon, title, tag, summary, mono, open, setOpen, keys 
           {tag && <span className="truncate font-normal text-ink-3">{tag}</span>}
           {setOpen && <ChevronDown size={13} className="shrink-0 text-ink-4 transition-transform duration-(--dur-2) ease-(--ease-out)" style={{ transform: open ? "rotate(180deg)" : undefined }} aria-label={t("ask.details")} />}
         </span>
-        <span className={cn("block text-xs leading-5 text-ink-2", mono && "font-mono", open ? "break-all whitespace-pre-wrap" : "truncate")}>{summary}</span>
+        {summary && <span className={cn("block text-xs leading-5 text-ink-2", mono && "font-mono", open ? "break-all whitespace-pre-wrap" : "truncate")}>{summary}</span>}
       </span>
     </>
   );

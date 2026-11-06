@@ -440,7 +440,6 @@ export const zh = {
   "secrets.setTitle": "存凭据",
   "secrets.replaceTitle": "换凭据",
   "secrets.useTitle": "用凭据",
-  "secrets.askedFor": "{who} 要：{note}",
   "secrets.store": "存",
   "secrets.stored": "已存 {name}",
   "secrets.valueOf": "{name} 的值",

@@ -440,7 +440,6 @@ export const en: Dict = {
   "secrets.setTitle": "Store a credential",
   "secrets.replaceTitle": "Replace a credential",
   "secrets.useTitle": "Use credentials",
-  "secrets.askedFor": "{who} wants it: {note}",
   "secrets.store": "Store",
   "secrets.stored": "Stored {name}",
   "secrets.valueOf": "Value of {name}",

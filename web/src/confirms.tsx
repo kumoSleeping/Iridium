@@ -113,7 +113,7 @@ function useAsked(c: Confirm) {
 /** An agent's ir secret set: the value is typed here, goes to the daemon, and is never shown again;
  *  the agent learns only that it is stored. Enter stores it. */
 function SecretSetCard({ c }: { c: Confirm }) {
-  const { who, facts } = useAsked(c);
+  const { facts } = useAsked(c);
   const [value, setValue] = useState("");
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<"allow" | "deny" | null>(null);
@@ -140,7 +140,8 @@ function SecretSetCard({ c }: { c: Confirm }) {
         icon={<LockKeyhole size={16} />}
         title={c.replace ? t("secrets.replaceTitle") : confirmTitle(c)}
         tag={c.name}
-        summary={c.note ? t("secrets.askedFor", { who, note: c.note }) : t("confirm.asked", { who })}
+        // What it is for, alone: who asked is in the details (the user, 2026-11-06).
+        summary={c.note}
         open={open}
         setOpen={setOpen}
         keys={
