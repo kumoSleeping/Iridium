@@ -10,7 +10,7 @@ import { api } from "../api/client";
 import type { Block, FileRef, Result } from "../api/types.gen";
 import { landed, type Sent } from "../chats";
 import { t } from "../i18n";
-import { Avatar, Badge, cn, IconKey, Logo, Tip } from "../ui";
+import { Avatar, Badge, cn, IconKey, Logo, tilde, Tip } from "../ui";
 import { useHome } from "../data";
 import { LocalMark } from "../me";
 import { Files, Picture, previews, size } from "./files";
@@ -66,7 +66,9 @@ function Face({ who }: { who: You | From }) {
 const Sender = forwardRef<HTMLDivElement, { who: You | From; title?: string; jump?: () => void; children: ReactNode }>(function Sender({ who, title, jump, children }, ref) {
   const mine = who.kind === "you";
   const name = mine ? youName(who) : who.name;
-  const tip = mine ? t("msg.fromPanel", { name: `${name} · ${t((DEVICES[who.device] ?? DEVICES.computer)[1])}` }) : jump ? t("msg.jump", { name }) : who.channel ? t("msg.viaChannel", { name }) : name;
+  // A session's letter: its folder too, in the tip; the name is its title alone.
+  const whole = !mine && who.where ? `${name} · ${tilde(who.where)}` : name;
+  const tip = mine ? t("msg.fromPanel", { name: `${name} · ${t((DEVICES[who.device] ?? DEVICES.computer)[1])}` }) : jump ? t("msg.jump", { name: whole }) : who.channel ? t("msg.viaChannel", { name }) : whole;
   const face = <Face who={who} />;
   return (
     <div ref={ref} className={cn("flex items-start gap-2.5", mine ? "flex-row-reverse pl-6 sm:pl-10" : "pr-6 sm:pr-10")} title={title}>

@@ -102,18 +102,23 @@ describe("sourceOf", () => {
     expect(sourceOf("本机", "local", { id: "x", name: "x" }, [], sessions)).toEqual({ kind: "you", name: "本机", device: "computer", local: true });
     expect(sourceOf("x", "x", { id: "x", name: "x" }, [], sessions)).toMatchObject({ kind: "you", device: "computer" });
   });
-  test("letters: a plugin with its sender, another session's ir by its name or agent and place; Iridium's own line", () => {
+  test("letters: a plugin with its sender, another session's ir by its title as the sidebar has it, its workspace only when not this one's; Iridium's own line", () => {
     expect(sourceOf("QQ·张三", "q", me, terminals, sessions)).toMatchObject({ kind: "letter", name: "QQ·张三", avatar: "/q.png", channel: true });
-    expect(sourceOf("ir:s1", "local", local, terminals, sessions)).toMatchObject({ kind: "letter", name: "holder", agent: "codex", session: "s1", channel: false });
-    expect(sourceOf("ir:s2", "p", me, terminals, sessions, ws)).toMatchObject({ kind: "letter", name: "Claude · Iri", agent: "claude", session: "s2" });
-    expect(sourceOf("ir:s2", "p", me, terminals, sessions)).toMatchObject({ name: "Claude · Iridium" }); // no workspaces known: its folder
-    expect(sourceOf("ir:s3", "local", me, terminals, sessions, ws)).toMatchObject({ name: "Claude · notes" }); // a title is no name
+    expect(sourceOf("ir:s1", "local", local, terminals, sessions)).toMatchObject({ kind: "letter", name: "holder", agent: "codex", session: "s1", channel: false, where: "/w" });
+    expect(sourceOf("ir:s2", "p", me, terminals, sessions, ws)).toMatchObject({ kind: "letter", name: "Iridium", agent: "claude", session: "s2" }); // no title: its folder
+    expect(sourceOf("ir:s3", "local", me, terminals, sessions, ws)).toMatchObject({ name: "hi there" }); // its first message's opening
+    // Here: the chat shown is in workspace 3. One in it is its title alone; one elsewhere adds where it is.
+    expect(sourceOf("ir:s2", "p", me, terminals, sessions, ws, { workspace: 3 })).toMatchObject({ name: "Iridium" });
+    expect(sourceOf("ir:s3", "p", me, terminals, sessions, ws, { workspace: 3 })).toMatchObject({ name: "hi there · notes" });
+    expect(sourceOf("ir:s3", "p", me, terminals, sessions, ws, {})).toMatchObject({ name: "hi there" }); // both unsorted
+    expect(sourceOf("ir:s2", "p", me, terminals, sessions, ws, { workspace: 0 })).toMatchObject({ name: "Iridium · Iri" });
+    expect(sourceOf("ir:s2", "p", me, terminals, sessions, ws, { parent: undefined })).toMatchObject({ name: "Iridium · Iri" }); // here unsorted, its field left out
     expect(sourceOf("ir:gone1234567", "local", me, terminals, sessions)).toEqual({ kind: "letter", name: "gone1234", channel: false });
     expect(sourceOf("Iridium", "Iridium", me, terminals, sessions)).toEqual({ kind: "iridium" });
   });
   test("a subagent's prompt is its parent's: by the parent's name, a workflow's with its name", () => {
-    expect(sourceOf(undefined, undefined, me, terminals, sessions, ws, { subagent: true, parent: "s2" })).toEqual({ kind: "letter", name: "Claude · Iri", channel: false, agent: "claude", session: "s2" });
-    expect(sourceOf(undefined, undefined, me, terminals, sessions, ws, { subagent: true, parent: "s1", workflow: { run: "r", name: "review" } })).toEqual({ kind: "letter", name: "holder · review", channel: false, agent: "codex", session: "s1", workflow: true });
+    expect(sourceOf(undefined, undefined, me, terminals, sessions, ws, { subagent: true, parent: "s2", workspace: 3 })).toEqual({ kind: "letter", name: "Iridium", channel: false, agent: "claude", session: "s2", where: "/home/k/Iridium" });
+    expect(sourceOf(undefined, undefined, me, terminals, sessions, ws, { subagent: true, parent: "s1", workflow: { run: "r", name: "review" } })).toEqual({ kind: "letter", name: "holder · review", channel: false, agent: "codex", session: "s1", workflow: true, where: "/w" });
     expect(sourceOf(undefined, undefined, me, terminals, sessions, ws, { subagent: true, parent: "gone1234567" })).toEqual({ kind: "letter", name: "gone1234", channel: false, session: "gone1234567" });
     // Not a subagent, or tagged: as before.
     expect(sourceOf(undefined, undefined, me, terminals, sessions, ws, { parent: "s2" })).toMatchObject({ kind: "you", local: true });
