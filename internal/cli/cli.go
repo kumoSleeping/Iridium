@@ -9,18 +9,19 @@ import (
 	"os"
 )
 
-// Help is ir --help: at most 20 lines (plan "ir"). The agent part is the first 11.
+// Help is ir --help: at most 20 lines (plan "ir"). The agent part is the first 12.
 const Help = `ir：本机 Iridium 的命令行（经 unix socket）。<id> 写开头几位就行。
 
-  ir new <agent> [目录] "任务"       开会话，打印 ID
+  ir new <agent> [目录] "任务"       开会话，打印 ID（可加 --model <模型>、--approve <审批模式>）
   ir send <id> "消息" [-a 文件]...   发消息，可带附件
   ir wait <id>                       等回合结束，打印最后一段回复
   ir read <id> [-n 条数] [--full]    每条消息和它的最终回复，截短（默认最近 10 条；--full 整页原文）
   ir ls | find <词> [--all]          列会话 | 按名字、标题、最后一句找（--all 连归档、做完的子代理）
   ir stop | archive | unarchive <id> 停掉 agent | 归档 | 取消归档
   ir cp <源> <目标> | files <目录>   拷文件，打印路径、大小、sha256 | 列一层：名字、大小、时间、类型
+  ir secret ls | set <名> [--note 说明] | rm <名>   凭据：set 由人在网页填值（别让人贴进对话）
+  ir run [--secret 名,…] -- 命令 …   {{名}}、{{file:名}} 换成值、临时文件，也设成环境变量；输出里的值打码
   new、send 加 --wait 等到回复；send 在回合进行中插进这一回合（agent 发的总是插进；人在终端发可加 --queue 排到回合结束后）
-  new 可加 --model <模型>、--approve <审批模式>
   退出码：0 结束，2 需要你（提问、审批），1 出错或已退出。路径可写 机器:路径
 管理（agent 调用时 TOKEN 不进对话，由网页面板确认）：
   ir invite [名字] | token <名字>    新网页面板的链接 | 插件 TOKEN
@@ -28,8 +29,7 @@ const Help = `ir：本机 Iridium 的命令行（经 unix socket）。<id> 写�
   ir access | revoke <名字>          列出终端和邀请 | 撤销
   ir access <名字> --claude on|off   开关 Claude（开：只能你本人，本机或带 Claude 的面板）
   ir profile <名字> [--name 新名] [--avatar 图片] [--device computer|laptop|phone|none]
-  ir public [off]                    经 Cloudflare 上公网（在终端里跑）
-  ir update [--check]                更新 Iridium
+  ir public [off] | update [--check] 经 Cloudflare 上公网（在终端里跑）| 更新 Iridium
 `
 
 // Main runs ir with args, giving the exit code.

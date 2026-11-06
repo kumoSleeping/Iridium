@@ -40,8 +40,12 @@ type adminEnv struct {
 	agent   bool
 	session string // IRIDIUM_SESSION
 	tty     bool   // a person at a terminal: stdin and stdout are terminals
-	stdin   io.Reader
-	client  *http.Client // to the unix socket
+	// envAgent: the environment says an agent runs ir (not only that it has no terminal); outTTY:
+	// stdout or stderr is a terminal (a person may pipe a value in).
+	envAgent bool
+	outTTY   bool
+	stdin    io.Reader
+	client   *http.Client // to the unix socket
 }
 
 // detect reads the config and the environment.
@@ -56,7 +60,9 @@ func detect() (adminEnv, error) {
 	}
 	tty := isTerminal(os.Stdin) && isTerminal(os.Stdout)
 	e := adminEnv{cfg: cfg, cfgPath: path, session: caller(), tty: tty, stdin: os.Stdin}
-	e.agent = !tty || os.Getenv("CLAUDECODE") != "" || os.Getenv("CODEX_THREAD_ID") != "" || os.Getenv("IRIDIUM_SESSION") != ""
+	e.envAgent = os.Getenv("CLAUDECODE") != "" || os.Getenv("CODEX_THREAD_ID") != "" || os.Getenv("IRIDIUM_SESSION") != ""
+	e.agent = !tty || e.envAgent
+	e.outTTY = isTerminal(os.Stdout) || isTerminal(os.Stderr)
 	e.client = socketClient(cfg.SocketPath())
 	return e, nil
 }
@@ -81,6 +87,8 @@ var adminCommands = map[string]func(adminEnv, []string, io.Writer, io.Writer) in
 	"revoke":  revoke,
 	"public":  publicCmd,
 	"update":  updateCmd,
+	"secret":  secretCmd, // secrets.go
+	"run":     runCmd,
 }
 
 // call sends one request to the daemon and decodes its JSON reply into out; it gives the status.
@@ -240,6 +248,19 @@ func waitConfirm(e adminEnv, raw json.RawMessage, stdout, stderr io.Writer) int 
 	var p api.Pending
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return failed(stderr, "confirm", err)
+	}
+	if p.Confirm.Kind == "secret-set" {
+		fmt.Fprintf(stdout, "%s 的值要人在网页面板上填：已发到“需要你”，%s 前有效。等人填……\n", p.Confirm.Name, hhmm(p.Confirm.ExpiresAt))
+		st, err := waitState(e, p.Confirm.ID)
+		if err != nil {
+			return failed(stderr, "secret set", err)
+		}
+		if st.State == "allowed" {
+			fmt.Fprintf(stdout, "已存 %s。用法：ir run -- 命令 …{{%s}}…\n", st.Name, st.Name)
+			return 0
+		}
+		fmt.Fprintln(stdout, outcome(st))
+		return 1
 	}
 	what := map[string]string{"invite": "新网页面板的邀请", "token": "插件 TOKEN"}[p.Confirm.Kind]
 	if p.Confirm.Name != "" {
