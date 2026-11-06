@@ -351,22 +351,33 @@ function Perms({ p, local, onBack }: { p?: Rules; local: boolean; onBack: () => 
   );
 }
 
-/** Round crop: drag to place, slide to zoom. Sent as a 256px PNG; the gate stores 128px. */
+/** Round crop: drag to place, slide to zoom. Sent as a 256px PNG; the gate stores 128px. The picture
+ *  always covers the circle: it cannot be dragged, nor zoomed back, to leave a gap (the user,
+ *  2026-11-06). The preview is the picture whole, as drawn into the PNG. */
 function Crop({ src, onCancel, onDone }: { src: string; onCancel: () => void; onDone: (b: Blob) => void }) {
   const [zoom, setZoom] = useState(1);
   const [pos, setPos] = useState({ x: 0, y: 0 });
+  const [nat, setNat] = useState<{ w: number; h: number } | null>(null);
   const drag = useRef<{ x: number; y: number } | null>(null);
   const im = useRef<HTMLImageElement>(null);
   const S = 176;
+  // Its size at zoom 1, covering the circle; how far it may go each way at a zoom.
+  const base = nat ? Math.max(S / nat.w, S / nat.h) : 1;
+  const w0 = nat ? nat.w * base : S;
+  const h0 = nat ? nat.h * base : S;
+  const clamp = (p: { x: number; y: number }, z = zoom) => {
+    const mx = Math.max(0, (w0 * z - S) / 2);
+    const my = Math.max(0, (h0 * z - S) / 2);
+    return { x: Math.min(mx, Math.max(-mx, p.x)), y: Math.min(my, Math.max(-my, p.y)) };
+  };
   const done = () => {
     const img = im.current!;
     const c = document.createElement("canvas");
     c.width = c.height = 256;
     const g = c.getContext("2d")!;
     const k = 256 / S;
-    const cover = Math.max(S / img.naturalWidth, S / img.naturalHeight) * zoom;
-    const w = img.naturalWidth * cover;
-    const h = img.naturalHeight * cover;
+    const w = w0 * zoom;
+    const h = h0 * zoom;
     g.drawImage(img, ((S - w) / 2 + pos.x) * k, ((S - h) / 2 + pos.y) * k, w * k, h * k);
     c.toBlob((b) => b && onDone(b), "image/png");
   };
@@ -379,12 +390,20 @@ function Crop({ src, onCancel, onDone }: { src: string; onCancel: () => void; on
           (e.target as HTMLElement).setPointerCapture(e.pointerId);
           drag.current = { x: e.clientX - pos.x, y: e.clientY - pos.y };
         }}
-        onPointerMove={(e) => drag.current && setPos({ x: e.clientX - drag.current.x, y: e.clientY - drag.current.y })}
+        onPointerMove={(e) => drag.current && setPos(clamp({ x: e.clientX - drag.current.x, y: e.clientY - drag.current.y }))}
         onPointerUp={() => (drag.current = null)}
       >
-        <img ref={im} src={src} alt="" draggable={false} className="absolute inset-0 size-full object-cover select-none" style={{ transform: `translate(${pos.x}px, ${pos.y}px) scale(${zoom})` }} />
+        <img
+          ref={im}
+          src={src}
+          alt=""
+          draggable={false}
+          onLoad={(e) => setNat({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
+          className="absolute top-1/2 left-1/2 max-w-none select-none"
+          style={{ width: w0, height: h0, transform: `translate(-50%, -50%) translate(${pos.x}px, ${pos.y}px) scale(${zoom})` }}
+        />
       </div>
-      <Slider.Root value={zoom} min={1} max={3} step={0.01} onValueChange={(v) => setZoom(v as number)} aria-label={t("me.zoom")} className="w-44">
+      <Slider.Root value={zoom} min={1} max={3} step={0.01} onValueChange={(v) => (setZoom(v as number), setPos((p) => clamp(p, v as number)))} aria-label={t("me.zoom")} className="w-44">
         <Slider.Control className="flex h-6 items-center">
           <Slider.Track className="h-1 w-full rounded-full bg-fill-2">
             <Slider.Indicator className="rounded-full bg-ink-3" />

@@ -102,18 +102,25 @@ export function EffortSlider({ levels, value, set, aside, tag }: { levels: strin
     setWant(level);
     void set(level).then((ok) => ok || setWant(null));
   };
+  const name = (
+    <span key={known ? levels[i] : ""} className={cn("g-fade text-sm font-medium whitespace-nowrap", !!aside && "justify-self-center", known ? "text-ink-2" : "text-ink-3")}>
+      {known ? levelName(levels[i]!) : t("composer.effortDefault")}
+    </span>
+  );
   return (
     <div ref={root} className="effort-slider px-2.5 pt-1.5 pb-2 select-none [-webkit-touch-callout:none]" onKeyDown={(e) => SLIDER_KEY.test(e.key) && e.stopPropagation()} style={{ "--frac": frac } as CSSProperties}>
-      {/* Two columns: the track and, at its right, the key beside it (UltraCode); the level's name
-          stands over that key, centred on it (the user, 2026-11-06), the tag before it. */}
-      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3">
+      {/* With a key beside it (UltraCode), two columns: the track and that key, the level's name over
+          the key, centred on it (the user, 2026-11-06). Without one, the track the whole width, the
+          name at the end of the line over it: nothing left empty at its right (the user, 2026-11-06). */}
+      <div className={cn("grid items-center gap-x-3", aside ? "grid-cols-[minmax(0,1fr)_auto]" : "grid-cols-1")}>
         <div className="flex h-6 min-w-0 items-center justify-between gap-2 text-xs">
           <span className="text-ink-3">{t("composer.effort")}</span>
-          {tag}
+          <span className="flex min-w-0 items-center gap-2">
+            {tag}
+            {!aside && name}
+          </span>
         </div>
-        <span key={known ? levels[i] : ""} className={cn("g-fade text-sm font-medium whitespace-nowrap", aside ? "justify-self-center" : "justify-self-end", known ? "text-ink-2" : "text-ink-3")}>
-          {known ? levelName(levels[i]!) : t("composer.effortDefault")}
-        </span>
+        {aside && name}
         <Slider.Root value={i} min={0} max={n - 1} step={1} onValueChange={(v) => setDrag(v as number)} onValueCommitted={(v) => commit(v as number)} aria-label={t("composer.effort")} data-unknown={known ? undefined : ""} className="group/effort min-w-0">
           <Slider.Control className="relative flex h-7 cursor-grab touch-none items-center data-dragging:cursor-grabbing pointer-coarse:h-10">
             <Slider.Track className="relative h-6 w-full rounded-full bg-fill-2 shadow-[inset_0_1px_2px_oklch(0_0_0/0.12)]">
@@ -147,7 +154,7 @@ export function EffortSlider({ levels, value, set, aside, tag }: { levels: strin
             </Slider.Track>
           </Slider.Control>
         </Slider.Root>
-        {aside ? <span className="justify-self-center">{aside}</span> : <span />}
+        {aside && <span className="justify-self-center">{aside}</span>}
       </div>
       <GooFilter id={goo} />
     </div>

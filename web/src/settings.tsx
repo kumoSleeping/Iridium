@@ -16,6 +16,7 @@ import { modeName } from "./modes";
 import { go } from "./route";
 import { useConfirms } from "./store";
 import { errText, toast } from "./toast";
+import { Choose } from "./choose";
 import { agentName, IconKey, Logo, steerKey, Switch, Tip } from "./ui";
 import { remindBy, reminding } from "./unread";
 
@@ -101,13 +102,7 @@ export function SettingsPage({ theme, setTheme }: { theme: ThemePref; setTheme: 
 
           <Group title={t("settings.agents")}>
             <Item label={t("settings.idleReap")}>
-              <select disabled={off} value={reap} onChange={(e) => void put({ idleReap: e.target.value })} aria-label={t("settings.idleReap")} className="no-ring h-7 rounded-md bg-fill px-1.5 text-sm disabled:opacity-40">
-                {[...new Set([...REAP, reap])].map((v) => (
-                  <option key={v} value={v}>
-                    {v === "0" ? t("settings.never") : v}
-                  </option>
-                ))}
-              </select>
+              <Choose disabled={off} value={reap} onChange={(v) => void put({ idleReap: v })} label={t("settings.idleReap")} options={[...new Set([...REAP, reap])].map((v) => ({ value: v, label: v === "0" ? t("settings.never") : v }))} />
             </Item>
             <Item label={t("settings.crashResume")}>
               <Switch label={t("settings.crashResume")} disabled={off} on={!!s?.crashResume} onChange={(v) => void put({ crashResume: v })} />
@@ -115,11 +110,18 @@ export function SettingsPage({ theme, setTheme }: { theme: ThemePref; setTheme: 
             <Item label={t("settings.quotaResume")}>
               <Switch label={t("settings.quotaResume")} disabled={off} on={!!s?.quotaResume} onChange={(v) => void put({ quotaResume: v })} />
             </Item>
-            <Item label={t("settings.enter")} below>
-              <select disabled={off} value={s?.enterInTurn || "steer"} onChange={(e) => void put({ enterInTurn: e.target.value })} aria-label={t("settings.enter")} className="no-ring h-7 w-full rounded-md bg-fill px-1.5 text-sm disabled:opacity-40">
-                <option value="steer">{t("settings.enterSteer", { key: steerKey() })}</option>
-                <option value="queue">{t("settings.enterQueue", { key: steerKey() })}</option>
-              </select>
+            {/* One line, as the rows above (the user, 2026-11-06): the key's short word; the other key in the list's hint. */}
+            <Item label={t("settings.enter")}>
+              <Choose
+                disabled={off}
+                value={s?.enterInTurn || "steer"}
+                onChange={(v) => void put({ enterInTurn: v })}
+                label={t("settings.enter")}
+                options={[
+                  { value: "steer", label: t("settings.enterSteer"), hint: t("settings.enterSteerHint", { key: steerKey() }) },
+                  { value: "queue", label: t("settings.enterQueue"), hint: t("settings.enterQueueHint", { key: steerKey() }) },
+                ]}
+              />
             </Item>
           </Group>
 
@@ -135,14 +137,13 @@ export function SettingsPage({ theme, setTheme }: { theme: ThemePref; setTheme: 
                     </span>
                   }
                 >
-                  <select disabled={off} value={s?.modes?.[a.agent] ?? ""} onChange={(e) => void put({ modes: { [a.agent]: e.target.value } })} aria-label={`${t("settings.modes")} · ${agentName(a.agent)}`} className="no-ring h-7 max-w-40 rounded-md bg-fill px-1.5 text-sm disabled:opacity-40">
-                    <option value="">{t("settings.agentDefault", { mode: modeName({ id: a.defaultMode }) })}</option>
-                    {a.modes.map((m) => (
-                      <option key={m} value={m}>
-                        {modeName({ id: m })}
-                      </option>
-                    ))}
-                  </select>
+                  <Choose
+                    disabled={off}
+                    value={s?.modes?.[a.agent] ?? ""}
+                    onChange={(v) => void put({ modes: { [a.agent]: v } })}
+                    label={`${t("settings.modes")} · ${agentName(a.agent)}`}
+                    options={[{ value: "", label: t("settings.agentDefault", { mode: modeName({ id: a.defaultMode }) }) }, ...a.modes.map((m) => ({ value: m, label: modeName({ id: m }) }))]}
+                  />
                 </Item>
               ))}
             </Group>

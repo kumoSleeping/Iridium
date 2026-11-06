@@ -1,7 +1,7 @@
 // A confirmation an agent's ir asked a panel for (docs/api.md "确认"): a new panel's invite or a
 // plugin's token, which must not reach the agent. Its card sits above the asking session's
 // composer and on the settings' 终端 page, and the sidebar lists it under 需要你. Allowed, the
-// secret goes to this panel alone, in the secret's dialog; the agent only learns how it went. One
+// secret goes to this panel alone, in a card where this one was (secret.tsx); the agent only learns how it went. One
 // asked with --owner (the new terminal gets Claude) only a panel that has Claude allows.
 import { KeyRound, Link2 } from "lucide-react";
 import { useState } from "react";
@@ -22,7 +22,8 @@ export const confirmTitle = (c: Confirm) => (c.kind === "invite" ? t("confirm.in
  *  has Claude itself. The server checks the same (ownerSays); 本机's ir may too. */
 export const saysOwner = (me?: Me) => !!me && me.kind === "panel" && !me.local && !!me.rules.claudeOwner && (me.rules.agents ?? []).includes("claude");
 
-export function ConfirmCard({ c }: { c: Confirm }) {
+/** at: where it is drawn (the asking session's id, or "terminals"): the secret shows there. */
+export function ConfirmCard({ c, at: here }: { c: Confirm; at: string }) {
   const lang = useLang();
   const list = useList();
   const me = useMe().data;
@@ -37,8 +38,8 @@ export function ConfirmCard({ c }: { c: Confirm }) {
     try {
       const r = await api.answerConfirm(c.id, allow);
       setLeaving(true);
-      if (r.invite) showSecret({ invite: r.invite });
-      else if (r.token) showSecret({ token: r.token });
+      if (r.invite) showSecret({ invite: r.invite, at: here });
+      else if (r.token) showSecret({ token: r.token, at: here });
       else if (r.state === "failed") toast(t("err.confirm"), { error: true, description: r.error });
       else toast(allow ? t("toast.allowed") : t("toast.denied"));
     } catch (e) {

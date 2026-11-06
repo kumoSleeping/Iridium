@@ -15,7 +15,8 @@ import { ConfirmCard, saysOwner } from "./confirms";
 import { useMe, useTerminals, useWorkspaces } from "./data";
 import { t, useLang } from "./i18n";
 import { LocalMark, Segmented } from "./me";
-import { showSecret } from "./secrets";
+import { SecretHere } from "./secret";
+import { showSecret, useSecret } from "./secrets";
 import { Group, Item } from "./settings";
 import { useConfirms } from "./store";
 import { errText, toast } from "./toast";
@@ -31,6 +32,7 @@ export function TerminalsPage({ onBack }: { onBack: () => void }) {
   const qc = useQueryClient();
   const q = useTerminals();
   const confirms = useConfirms();
+  const secretHere = useSecret()?.at === "terminals";
   const [open, setOpen] = useState<string | null>(null);
   const list = q.data?.terminals ?? [];
   const invites = q.data?.invites ?? [];
@@ -46,10 +48,11 @@ export function TerminalsPage({ onBack }: { onBack: () => void }) {
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto pt-2 pb-4">
         <div className="flex flex-col gap-5 px-3">
-          {confirms.length > 0 && (
+          {(confirms.length > 0 || secretHere) && (
             <div className="flex flex-col gap-2">
+              <SecretHere at="terminals" />
               {confirms.map((c) => (
-                <ConfirmCard key={c.id} c={c} />
+                <ConfirmCard key={c.id} c={c} at="terminals" />
               ))}
             </div>
           )}
@@ -107,11 +110,12 @@ function TerminalRow({ x, open, toggle }: { x: Terminal; open: boolean; toggle: 
             <span className="shrink-0 rounded-sm bg-fill-2 px-1.5 text-[11px] leading-[18px] text-ink-2">{kindName(x)}</span>
             {x.id === me?.id && !x.local && <span className="shrink-0 text-xs text-ink-3">{t("term.this")}</span>}
           </span>
-          <span className="flex items-center gap-1.5 text-xs text-ink-3 tabular-nums">
-            {x.online ? <span className="size-1.5 rounded-full bg-run" aria-hidden /> : null}
-            <span>{used}</span>
-            <span aria-hidden>·</span>
-            <span>{t("term.today", { n: tokens(x.usedToday) })}</span>
+          {/* One line, cut at its end, never wrapped into columns (the panel is narrow). */}
+          <span className="flex min-w-0 items-center gap-1.5 text-xs text-ink-3 tabular-nums">
+            {x.online ? <span className="size-1.5 shrink-0 rounded-full bg-run" aria-hidden /> : null}
+            <span className="min-w-0 truncate">
+              {used} · {t("term.today", { n: tokens(x.usedToday) })}
+            </span>
           </span>
         </span>
         <span className="hidden shrink-0 gap-1 sm:flex">
@@ -351,8 +355,8 @@ function NewTerminal() {
     setBusy(true);
     try {
       const owner = canClaude && withClaude;
-      if (kind === "invite") showSecret({ invite: await api.invite(name.trim(), owner) });
-      else showSecret({ token: await api.token(name.trim(), owner) });
+      if (kind === "invite") showSecret({ invite: await api.invite(name.trim(), owner), at: "terminals" });
+      else showSecret({ token: await api.token(name.trim(), owner), at: "terminals" });
       setOpen(false);
       void qc.invalidateQueries({ queryKey: ["terminals"] });
     } catch (e) {

@@ -21,7 +21,6 @@ import { prefetch } from "./prefetch";
 import { close, go, onTurn, openChat, over, route, useRoute, type Route } from "./route";
 import { atLeft, Sheet } from "./sheet";
 import { Sidebar } from "./sidebar";
-import { useSecret } from "./secrets";
 import { useConfirms, useList } from "./store";
 import { follow } from "./stream";
 import { ToastList, toasts } from "./toast";
@@ -47,7 +46,6 @@ function part<P extends object>(get: () => Promise<ComponentType<P>>) {
 const ChatPage = part(() => import("./chat/chat").then((m) => m.ChatPage));
 const SettingsPage = part(() => import("./settings").then((m) => m.SettingsPage));
 const TerminalsPage = part(() => import("./terminals").then((m) => m.TerminalsPage));
-const SecretDialog = part(() => import("./secret").then((m) => m.SecretDialog));
 const Jump = part(() => import("./jump").then((m) => m.Jump));
 export const loadChat = ChatPage.load;
 /** The settings and the jump box, their code run, the settings' answers asked: once idle, or a
@@ -64,7 +62,6 @@ const loadPanels = () => {
 void prefetch().then((all) => {
   if (!all) return;
   void loadChat().catch(() => {});
-  void SecretDialog.load().catch(() => {});
   loadPanels();
 });
 
@@ -121,7 +118,6 @@ export function App() {
   useMe();
   useTerminals(); // a message's source shows its terminal's avatar
   const confirms = useConfirms();
-  const secret = useSecret();
   const { expanded, toggle } = useExpanded();
   // Each minute too: a subagent long quiet is let go.
   const minute = useMinute();
@@ -305,11 +301,6 @@ export function App() {
           )}
         </div>
         {settings}
-        {secret && (
-          <Suspense>
-            <SecretDialog secret={secret} />
-          </Suspense>
-        )}
         <Toast.Portal>
           <Toast.Viewport className={cn("fixed top-[60px] left-1/2 z-60 flex w-[min(400px,calc(100vw-24px))] -translate-x-1/2 flex-col items-center gap-2 outline-none")}>
             <ToastList onJump={(id) => openChat(id)} />

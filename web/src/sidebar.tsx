@@ -8,7 +8,7 @@
 // long-press): pin, rename, stop, archive, and at its foot the colour tags (colors.ts). The mouse
 // resting on a row fetches its chat ahead.
 import { Menu } from "@base-ui/react/menu";
-import { Archive, ArchiveRestore, Bot, Check, ChevronRight, Copy, Folder, FolderOpen, Inbox, KeyRound, Link2, Pencil, Pin, PinOff, Plus, Search, Settings, Square, Workflow as WorkflowIcon } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowUpCircle, Bot, Check, ChevronRight, Copy, Folder, FolderOpen, Inbox, KeyRound, Link2, LoaderCircle, Pencil, Pin, PinOff, Plus, Search, Settings, Square, Workflow as WorkflowIcon } from "lucide-react";
 import { Fragment, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { api } from "./api/client";
 import type { Color, Confirm, Session } from "./api/types.gen";
@@ -18,7 +18,7 @@ import { t } from "./i18n";
 import { useFlip } from "./motion";
 import type { Folder as FolderNode, Tree, WsNode } from "./tree";
 import { errText, toast } from "./toast";
-import { useSaidLine } from "./data";
+import { useMe, useSaidLine, useUpdate } from "./data";
 import { agentName, ago, cn, fine, IconKey, keep, kept, Lamp, lampOf, Logo, sessionStatusText, statusText, tilde, Tip, titleOf, useLongPress, useMinute } from "./ui";
 import { SESSION_DRAG } from "./chat/refs";
 import { useUnread } from "./unread";
@@ -279,13 +279,41 @@ function Foot(p: Pick<Props, "me" | "settings" | "onSettings" | "updateDot" | "p
   return (
     <div className="flex h-14 shrink-0 items-center justify-between gap-2 px-2 pointer-coarse:h-16">
       <div className="min-w-0">{p.me}</div>
-      <span className="relative shrink-0">
+      <span className="relative flex shrink-0 items-center gap-1">
+        <UpdateKey />
         <IconKey label={p.updateDot ? `${t("nav.settings")} · ${t("settings.updateReady")}` : t("nav.settings")} onClick={p.onSettings} onPointerEnter={p.panelsCode} onFocus={p.panelsCode} aria-pressed={p.settings} data-settings-key className={cn("size-10 pointer-coarse:size-11", p.settings && "bg-fill text-ink")}>
           <Settings size={19} />
         </IconKey>
         {p.updateDot && <span className="g-pop pointer-events-none absolute top-1.5 right-1.5 size-2 rounded-full bg-err shadow-[0_0_0_1.5px_var(--paper)]" aria-hidden />}
       </span>
     </div>
+  );
+}
+
+/** A newer release found (the daemon looks by itself): 更新, left of the settings key, for those who
+ *  may update (the user, 2026-11-06). Pressed, the daemon puts it in place and restarts; downloading
+ *  still, it says how far. */
+function UpdateKey() {
+  const u = useUpdate().data;
+  const me = useMe().data;
+  const [busy, setBusy] = useState(false);
+  if (!u?.available || !me || !(me.local || me.kind === "panel")) return null;
+  const pct = u.phase === "downloading" && u.size ? Math.min(99, Math.floor(((u.got ?? 0) * 100) / u.size)) : null;
+  const going = busy || u.phase === "restarting";
+  const apply = () => {
+    setBusy(true);
+    void api.applyUpdate().then(
+      () => (setBusy(false), toast(t("settings.updating"))),
+      (e) => (setBusy(false), toast(t("err.update"), { error: true, description: errText(e) })),
+    );
+  };
+  return (
+    <Tip label={t("settings.updateTo", { v: u.latest ?? "" })}>
+      <button type="button" disabled={going || u.phase === "checking"} onClick={apply} className="g-pop g-press flex h-7 items-center gap-1.5 rounded-full bg-ink px-3 text-sm font-medium text-on-ink tabular-nums disabled:opacity-60">
+        {going ? <LoaderCircle size={13} className="animate-spin" /> : <ArrowUpCircle size={14} />}
+        {pct !== null ? `${pct}%` : t("settings.update")}
+      </button>
+    </Tip>
   );
 }
 
