@@ -140,6 +140,10 @@ input[aria-invalid=true] { color: var(--danger); }
 
 .note { font-size: .8125rem; color: var(--muted); text-align: center; }
 #setup { margin-top: .875rem; }
+/* No passkey yet: only the title and one line, read left to right, close together. */
+.card:has(#setup:not([hidden])) { padding: 1.5rem; }
+.card:has(#setup:not([hidden])) .brand { text-align: left; margin-bottom: .5rem; }
+#login[hidden] + #setup { margin-top: 0; text-align: left; font-size: .875rem; }
 .field-note { min-height: 1.25rem; margin: .375rem 0 .5rem; text-align: left; padding-left: .875rem; color: var(--danger); }
 
 .status { min-height: 1.25rem; margin-top: .875rem; font-size: .8125rem; text-align: center; color: var(--muted); }
