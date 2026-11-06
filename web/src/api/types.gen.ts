@@ -1054,11 +1054,13 @@ export interface Terminal {
 }
 /**
  * Device is what a terminal runs on, set in its settings (PUT /api/me/device, ir profile
- * --device): a computer, the default, or a phone.
+ * --device): a computer, the default, a laptop, a phone, or none shown (no badge).
  */
 export const DeviceComputer = "computer";
+export const DeviceLaptop = "laptop";
 export const DevicePhone = "phone";
-export type Device = typeof DeviceComputer | typeof DevicePhone;
+export const DeviceNone = "none";
+export type Device = typeof DeviceComputer | typeof DeviceLaptop | typeof DevicePhone | typeof DeviceNone;
 /**
  * SetDevice is PUT /api/me/device and PUT /api/terminals/{id}/device.
  */

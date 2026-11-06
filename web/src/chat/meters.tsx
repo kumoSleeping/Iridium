@@ -1,10 +1,10 @@
-// The composer's meters (plan "网页"), in a row under it: the approval-mode key, the model key, the
-// quota bars after them, a bar and its percent per window, amber nearly full, red full, faded when
+// The composer's meters (plan "网页"), in a row under it: the model key, the
+// quota bars after it, a bar and its percent per window, amber nearly full, red full, faded when
 // last read long ago or no process runs, each window in a popover; at the right the context ring,
 // its breakdown in a popover.
 import { Menu } from "@base-ui/react/menu";
 import { Popover } from "@base-ui/react/popover";
-import { Check, ChevronDown, FilePen, ListChecks, ShieldCheck, ShieldOff, ShieldQuestion, ShieldX, SlidersHorizontal, Sparkles, Workflow } from "lucide-react";
+import { Check, ChevronDown, Workflow } from "lucide-react";
 import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { SessionState as LiveSession } from "../api/types.gen";
 import { api } from "../api/client";
@@ -211,20 +211,6 @@ export function QuotaBars({ agent, live, using, open, onOpenChange }: { agent: A
 const MODES: Partial<Record<Agent, string[]>> = { claude: ["manual", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"], codex: ["untrusted", "on-request", "granular", "auto"], pi: ["auto", "ask"] };
 type Mode = { id: string };
 
-const MODE_ICON: Record<string, ReactNode> = {
-  default: <ShieldQuestion size={14} />,
-  manual: <ShieldQuestion size={14} />,
-  ask: <ShieldQuestion size={14} />,
-  untrusted: <ShieldQuestion size={14} />,
-  "on-request": <ShieldCheck size={14} />,
-  granular: <SlidersHorizontal size={14} />,
-  acceptEdits: <FilePen size={14} />,
-  plan: <ListChecks size={14} />,
-  auto: <Sparkles size={14} />,
-  dontAsk: <ShieldX size={14} />,
-  bypassPermissions: <ShieldOff size={14} />,
-  never: <ShieldOff size={14} />,
-};
 export { modeName };
 
 /** Sets the mode; what it shows meanwhile is the one picked. */
@@ -247,50 +233,14 @@ export function useMode(s: LiveSession) {
       toast(t("err.mode"), { error: true, description: errText(e) });
     }
   };
-  const cycle = () => modes.length > 1 && void set(modes[(modes.findIndex((m) => m.id === now) + 1) % modes.length]!.id);
+  // With no key showing it (the user, 2026-11-06), a step says where it left the mode.
+  const cycle = () => {
+    if (modes.length < 2) return;
+    const next = modes[(modes.findIndex((m) => m.id === now) + 1) % modes.length]!;
+    toast(t("mode.now", { mode: modeName(next) }));
+    void set(next.id);
+  };
   return { modes, now, set, cycle };
-}
-
-/** The approval mode, under the composer; a mode picked closes the menu. */
-export function ModeKey({ mode, open, onOpenChange }: { mode: ReturnType<typeof useMode>; open?: boolean; onOpenChange?: (o: boolean) => void }) {
-  useLang();
-  if (!mode.modes.length) return null;
-  const cur = mode.modes.find((m) => m.id === mode.now) ?? { id: mode.now };
-  return (
-    <Menu.Root open={open} onOpenChange={onOpenChange}>
-      <Tip label={`${t("composer.mode")}: ${modeName(cur)}`}>
-        <Menu.Trigger
-          render={
-            <button type="button" aria-label={`${t("composer.mode")}: ${modeName(cur)}`} className="g-press flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs whitespace-nowrap text-ink-2 hover:bg-fill hover:text-ink data-popup-open:bg-fill pointer-coarse:h-9">
-              {MODE_ICON[cur.id] ?? <ShieldQuestion size={14} />}
-              {/* Its name only where the composer has room; narrow, the icon says it, the tip names it
-                  (the user, 2026-11-06). */}
-              <span key={cur.id} className="g-fade hidden @min-[640px]:inline">
-                {modeName(cur)}
-              </span>
-            </button>
-          }
-        />
-      </Tip>
-      <Menu.Portal>
-        <Menu.Positioner side="top" align="start" sideOffset={6} collisionPadding={8} className="z-50">
-          <Menu.Popup finalFocus={false} className="g-unfold glass thick float min-w-52 rounded-lg p-1.5 text-ink outline-none">
-            <Menu.RadioGroup value={mode.now} onValueChange={(v) => void mode.set(v as string)} className="g-stagger flex flex-col">
-              {mode.modes.map((m, i) => (
-                <Menu.RadioItem key={m.id} value={m.id} closeOnClick style={{ "--i": i } as CSSProperties} className="flex h-8 cursor-default items-center gap-2.5 rounded-md pr-2 pl-2.5 text-base outline-none select-none data-highlighted:bg-fill pointer-coarse:h-11">
-                  <span className="text-ink-2">{MODE_ICON[m.id] ?? <ShieldQuestion size={14} />}</span>
-                  <span className="flex-1">{modeName(m)}</span>
-                  <Menu.RadioItemIndicator className="text-ink">
-                    <Check size={14} />
-                  </Menu.RadioItemIndicator>
-                </Menu.RadioItem>
-              ))}
-            </Menu.RadioGroup>
-          </Menu.Popup>
-        </Menu.Positioner>
-      </Menu.Portal>
-    </Menu.Root>
-  );
 }
 
 /** The models an agent offers when the session does not list them. */

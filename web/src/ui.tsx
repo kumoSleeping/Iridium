@@ -23,7 +23,10 @@ export function useMedia(q: string) {
     () => false,
   );
 }
-export const PHONE = "(max-width: 767px)";
+/** The phone's layout (the sidebar a sheet from the foot): by the window's shape, not the device
+ *  (the user, 2026-11-06). Under 520px wide always; under 768px only held tall, taller than 5:4,
+ *  so an unfolded foldable, near square, has the computer's. */
+export const PHONE = "(max-width: 519px), (max-width: 767px) and (max-aspect-ratio: 4/5)";
 /** A keyboard and a pointer, not a phone: Enter sends, the caret goes to the composer. Only a
  *  touch screen alone says no (a headless browser has no pointer at all). */
 /** How long ago, in words: just now, minutes, hours, days. */

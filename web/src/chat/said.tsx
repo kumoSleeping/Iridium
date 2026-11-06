@@ -4,7 +4,7 @@
 // ir (its agent's logo, a bot badge, a key to go there), a plugin or a peer sent; Iridium's own lines
 // centred and faint; the agent's words as Markdown with the files they name; tool calls and
 // thoughts folded to a line.
-import { Archive, ArchiveRestore, ArrowUpRight, BookOpen, Bot, Brain, Check, ChevronRight, Clock, CircleStop, CircleX, CloudDownload, CloudUpload, Earth, FileCode, FileDiff, FilePen, Files as FilesIcon, FileText, FolderGit2, FlaskConical, FolderOpen, GitBranch, GitCommitHorizontal, GitPullRequest, Globe, Hammer, History, Hourglass, KeyRound, List, ListChecks, LoaderCircle, MessageCircleQuestionMark, MessageSquarePlus, Monitor, Network, Package, Plug, RotateCcw, RotateCw, Search, Send, ServerCog, Smartphone, SquareTerminal, Trash2, UserRound, Workflow as WorkflowIcon, Wrench, X, type LucideIcon } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowUpRight, BookOpen, Bot, Brain, Check, ChevronRight, Clock, CircleStop, CircleX, CloudDownload, CloudUpload, Earth, FileCode, FileDiff, FilePen, Files as FilesIcon, FileText, FolderGit2, FlaskConical, FolderOpen, GitBranch, GitCommitHorizontal, GitPullRequest, Globe, Hammer, History, Hourglass, KeyRound, Laptop, List, ListChecks, LoaderCircle, MessageCircleQuestionMark, MessageSquarePlus, Monitor, Network, Package, Plug, RotateCcw, RotateCw, Search, Send, ServerCog, Smartphone, SquareTerminal, Trash2, UserRound, Workflow as WorkflowIcon, Wrench, X, type LucideIcon } from "lucide-react";
 import { Children, forwardRef, memo, useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { api } from "../api/client";
 import type { Block, FileRef, Result } from "../api/types.gen";
@@ -27,7 +27,9 @@ const clock = (ms?: number) => (ms ? new Date(ms).toLocaleTimeString(document.do
 
 const FACE = 28;
 const BADGE = 12;
-const DEVICES: Record<You["device"], [LucideIcon, Parameters<typeof t>[0]]> = { computer: [Monitor, "device.computer"], phone: [Smartphone, "device.phone"] };
+const DEVICES: Record<Exclude<You["device"], "none">, [LucideIcon, Parameters<typeof t>[0]]> = { computer: [Monitor, "device.computer"], laptop: [Laptop, "device.laptop"], phone: [Smartphone, "device.phone"] };
+/** A sender's device mark and its name; none for a terminal that shows none. */
+const deviceOf = (who: You) => (who.device === "none" ? undefined : (DEVICES[who.device] ?? DEVICES.computer));
 const youName = (who: You) => (who.local ? t("me.local") : who.name);
 
 /** A sender's face: a terminal's avatar (本机 its mark) with its device on the corner; a session's
@@ -35,12 +37,12 @@ const youName = (who: You) => (who.local ? t("me.local") : who.name);
  *  plug. */
 function Face({ who }: { who: You | From }) {
   if (who.kind === "you") {
-    const [icon, label] = DEVICES[who.device] ?? DEVICES.computer;
-    if (!who.local) return <Avatar src={who.avatar} name={who.name} size={FACE} badge={icon} badgeSize={BADGE} badgeLabel={t(label)} />;
+    const d = deviceOf(who);
+    if (!who.local) return <Avatar src={who.avatar} name={who.name} size={FACE} badge={d?.[0]} badgeSize={BADGE} badgeLabel={d && t(d[1])} />;
     return (
       <span className="relative inline-block shrink-0" style={{ width: FACE, height: FACE }}>
         <LocalMark size={FACE} />
-        <Badge icon={icon} size={BADGE} label={t(label)} />
+        {d && <Badge icon={d[0]} size={BADGE} label={t(d[1])} />}
       </span>
     );
   }
@@ -69,7 +71,7 @@ const Sender = forwardRef<HTMLDivElement, { who: You | From; title?: string; jum
   const name = mine ? youName(who) : who.name;
   // A session's letter: its folder too, in the tip; the name is its title alone.
   const whole = !mine && who.where ? `${name} · ${tilde(who.where)}` : name;
-  const tip = mine ? t("msg.fromPanel", { name: `${name} · ${t((DEVICES[who.device] ?? DEVICES.computer)[1])}` }) : jump ? t("msg.jump", { name: whole }) : who.channel ? t("msg.viaChannel", { name }) : whole;
+  const tip = mine ? t("msg.fromPanel", { name: deviceOf(who) ? `${name} · ${t(deviceOf(who)![1])}` : name }) : jump ? t("msg.jump", { name: whole }) : who.channel ? t("msg.viaChannel", { name }) : whole;
   const face = <Face who={who} />;
   return (
     <div ref={ref} className={cn("flex items-start gap-2.5", mine ? "flex-row-reverse pl-6 sm:pl-10" : "pr-6 sm:pr-10")} title={title}>

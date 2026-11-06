@@ -6,7 +6,6 @@
      g-unfold   popover / menu / tooltip grows out of its anchor (Base UI's --transform-origin)
      g-pop      a small surface appears in place (toast, approval card, lamp change)
      g-slide    a panel's content arrives from the side (popover pages)
-     g-drawer   the sidebar as a drawer slides out from the left, or follows the finger (drawer.tsx)
      g-sheet    on a phone, the sidebar rises from the foot as the composer sinks (sheet.tsx, g-sink)
      g-dialog   the settings rise out of their key at the sidebar's foot (app.tsx)
      g-fade     plain cross-fade
@@ -111,13 +110,7 @@
   }
 }
 
-/* --- drawer: out or in by its inline transform; dragged, no transition --- */
-.g-drawer {
-  transition:
-    transform var(--dur-3) var(--ease-out),
-    box-shadow var(--dur-3) var(--ease-out);
-}
-/* --- sheet: the phone's sidebar from the foot (sheet.tsx), as the drawer, its height eased as it
+/* --- sheet: the phone's sidebar from the foot (sheet.tsx), out or in by its inline transform, its height eased as it
    grows for the jump box; the composer it takes the place of sinks as it rises (.g-sink) --- */
 .g-sheet {
   transition:
@@ -287,24 +280,18 @@ html[data-turn] .g-turn-stay .glass.thick {
 ::view-transition-new(root) {
   mix-blend-mode: normal;
 }
-/* What floats over the chat (the small sidebar's card, its key) is its own snapshot during a turn,
+/* What floats over the chat (the phone's sheet) is its own snapshot during a turn,
    drawn over the page's and left still: else the page's snapshot, the whole window wide, covers it
    for the turn. */
 html[data-turn] .vt-drawer {
   view-transition-name: drawer;
 }
-html[data-turn] .vt-side-key {
-  view-transition-name: side-key;
-}
 ::view-transition-group(drawer),
-::view-transition-group(side-key),
-::view-transition-new(drawer),
-::view-transition-new(side-key) {
+::view-transition-new(drawer) {
   animation: none;
   mix-blend-mode: normal;
 }
-::view-transition-old(drawer),
-::view-transition-old(side-key) {
+::view-transition-old(drawer) {
   display: none;
 }
 
@@ -404,7 +391,6 @@ html[data-turn] .vt-side-key {
     transition: none;
     animation: none;
   }
-  .g-drawer,
   .g-sheet,
   .g-sink {
     transition-duration: var(--dur-1);

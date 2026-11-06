@@ -2,18 +2,21 @@
 // one round key whose icon says what it does now; the meters are under it, not in it (chat.tsx). Idle it sends; in a turn with
 // nothing typed it stops the turn; with words it queues them (or steers them into the turn, with a
 // leading !, Ctrl or ⌘+Enter as Claude Code's send now, or where the server has no queue). / at
-// the start lists the session's commands.
+// the start lists the session's commands; @ lists the sessions to name, as a row dropped here
+// names one, on a phone too (the user, 2026-11-06).
 // Shift+Tab cycles the approval mode; Esc stops the turn. The draft is kept on this device; files
 // pasted, dropped or attached go up in chunks while you type.
 import { ArrowUp, FileText, LoaderCircle, Paperclip, Slash, Square, X } from "lucide-react";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import type { Command, SessionState as LiveSession } from "../api/types.gen";
+import type { Command, Session, SessionState as LiveSession } from "../api/types.gen";
 import { api, missing } from "../api/client";
 import type { Sent } from "../chats";
 import { t } from "../i18n";
 import { errText, toast } from "../toast";
-import { cn, fine, IconKey, keep, kept, steerKey, Tip } from "../ui";
-import { hasMention, MentionMarks } from "./mention";
+import { useList } from "../store";
+import { cn, fine, IconKey, keep, kept, Logo, steerKey, tilde, Tip, titleOf } from "../ui";
+import { hasMention, MentionMarks, mentionOf } from "./mention";
+import { atSessions, atWord } from "./refs";
 import { useSettings } from "../data";
 import { askOnce, sentFromHere } from "../unread";
 import { useGlide } from "../motion";
@@ -94,6 +97,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
   const [at, setAt] = useState(0);
   const [shut, setShut] = useState<string | null>(null);
   const [composing, setComposing] = useState(false);
+  // Where the caret is while the box has it: an @word there lists the sessions to name.
+  const [caret, setCaret] = useState<number | null>(null);
   const box = useRef<HTMLTextAreaElement>(null);
   const picker = useRef<HTMLInputElement>(null);
   const marked = hasMention(text);
@@ -169,6 +174,21 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
 
   const commands = commandsOf(s);
   const list = /^\/\S*$/.test(text) && text !== shut ? matching(commands, text.slice(1)) : [];
+  const sessions = useList();
+  const word = caret !== null && text !== shut && !list.length ? atWord(text, caret) : null;
+  const named = word && sessions ? atSessions(sessions, word.q, s.id) : [];
+  /** The @word made a mention of session to, the caret after it and a space. */
+  const name = (to: Session) => {
+    if (!word || !sessions) return;
+    const words = `${mentionOf(to, sessions)} `;
+    const end = caret ?? word.from;
+    const v = text.slice(0, word.from) + words + text.slice(end).replace(/^ /, "");
+    type(v);
+    const at = word.from + words.length;
+    setCaret(at);
+    requestAnimationFrame(() => (box.current?.focus(), box.current?.setSelectionRange(at, at)));
+  };
+  const shown = list.length || named.length;
   const uploading = atts.some((a) => !a.ref && !a.error);
   const empty = !text.trim() && !atts.length;
   const queues = s.queue !== undefined;
@@ -263,6 +283,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
   return (
     <div className="relative">
       {list.length > 0 && <Palette list={list} at={Math.min(at, list.length - 1)} point={setAt} pick={(c) => (own(`/${c.name}`) ? undefined : (type(`/${c.name} `), box.current?.focus()))} />}
+      {named.length > 0 && <AtList list={named} at={Math.min(at, named.length - 1)} point={setAt} pick={name} />}
     <div className="glass float rest relative @container rounded-[20px]">
       <div aria-hidden={!atts.length || undefined} className={cn("grid transition-[grid-template-rows,opacity] duration-(--dur-3) ease-(--ease-out)", atts.length ? "grid-rows-[1fr]" : "grid-rows-[0fr] opacity-0")}>
         <div className="min-h-0 overflow-hidden">
@@ -312,7 +333,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
           data-draft="1"
           placeholder={t("composer.placeholder")}
           aria-label={t("composer.placeholder")}
-          onChange={(e) => type(e.target.value)}
+          onChange={(e) => (type(e.target.value), setCaret(e.target.selectionStart))}
+          onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
+          onFocus={(e) => setCaret(e.currentTarget.selectionStart)}
+          onBlur={() => setCaret(null)}
           onCompositionStart={() => setComposing(true)}
           onCompositionEnd={() => setComposing(false)}
           onPaste={(e) => {
@@ -323,12 +347,13 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
           }}
           onKeyDown={(e) => {
             if (composing || e.nativeEvent.isComposing || e.keyCode === 229) return;
-            const move = list.length ? { ArrowDown: 1, ArrowUp: -1 }[e.key] : undefined;
-            if (move) setAt((Math.min(at, list.length - 1) + move + list.length) % list.length);
+            const move = shown ? { ArrowDown: 1, ArrowUp: -1 }[e.key] : undefined;
+            if (move) setAt((Math.min(at, shown - 1) + move + shown) % shown);
             else if (list.length && (e.key === "Enter" || e.key === "Tab") && !e.shiftKey) {
               const c = list[Math.min(at, list.length - 1)]!;
               if (!own(`/${c.name}`)) type(`/${c.name} `);
-            } else if (list.length && e.key === "Escape") setShut(text);
+            } else if (named.length && (e.key === "Enter" || e.key === "Tab") && !e.shiftKey) name(named[Math.min(at, named.length - 1)]!);
+            else if (shown && e.key === "Escape") setShut(text);
             else if (e.key === "Tab" && e.shiftKey) cycleMode();
             // In a turn, Ctrl or ⌘+Enter does what Enter does not: steer in (Claude Code's send now) or queue.
             else if (e.key === "Enter" && !e.shiftKey && (e.ctrlKey || e.metaKey) && turn) void (empty || go(true));
@@ -367,6 +392,35 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
     </div>
   );
 });
+
+/** The sessions an @ may name, over the composer as the commands are: each its logo, title and
+ *  folder; ↑↓ and Enter or Tab on a keyboard, a tap on a phone. */
+function AtList({ list, at, pick, point }: { list: Session[]; at: number; pick: (s: Session) => void; point: (i: number) => void }) {
+  return (
+    <div role="listbox" aria-label={t("composer.sessions")} className="g-pop glass thick float absolute inset-x-0 bottom-full z-10 mb-2 max-h-72 overflow-y-auto rounded-lg p-1.5">
+      {list.map((x, i) => (
+        <button
+          key={x.id}
+          type="button"
+          role="option"
+          aria-selected={i === at}
+          ref={(el) => void (i === at && el?.scrollIntoView({ block: "nearest" }))}
+          onPointerDown={(e) => e.preventDefault()}
+          onPointerMove={() => i === at || point(i)}
+          onClick={() => pick(x)}
+          style={{ "--i": i } as CSSProperties}
+          className={cn("flex h-8 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-base pointer-coarse:h-11", i === at && "bg-fill")}
+        >
+          <Logo agent={x.agent} size={14} className="shrink-0" />
+          <span className="min-w-0 shrink truncate">{titleOf(x)}</span>
+          <span className="ml-auto max-w-[40%] min-w-0 shrink-0 truncate font-mono text-xs text-ink-3 [direction:rtl]">
+            <bdi>{tilde(x.cwd)}</bdi>
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
 
 /** The commands over the composer, as wide: a row each, ↑↓ and Enter or Tab on a keyboard. */
 function Palette({ list, at, pick, point }: { list: Command[]; at: number; pick: (c: Command) => void; point: (i: number) => void }) {

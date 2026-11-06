@@ -142,8 +142,8 @@ func (s *Server) setDevice(w http.ResponseWriter, r *http.Request, ref string) {
 	if !readJSON(w, r, &req) {
 		return
 	}
-	if req.Device != api.DeviceComputer && req.Device != api.DevicePhone {
-		fail(w, http.StatusBadRequest, `device is "computer" or "phone"`)
+	if !req.Device.Valid() {
+		fail(w, http.StatusBadRequest, `device is "computer", "laptop", "phone" or "none"`)
 		return
 	}
 	c := callerOf(r)

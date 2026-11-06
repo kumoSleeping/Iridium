@@ -8,7 +8,7 @@
 // long-press): pin, rename, stop, archive, and at its foot the colour tags (colors.ts). The mouse
 // resting on a row fetches its chat ahead.
 import { Menu } from "@base-ui/react/menu";
-import { Archive, ArchiveRestore, Bot, Check, ChevronRight, Copy, Folder, FolderOpen, Inbox, KeyRound, Link2, Maximize2, Pencil, Pin, PinOff, Plus, Search, Settings, ShieldOff, Square, Workflow as WorkflowIcon } from "lucide-react";
+import { Archive, ArchiveRestore, Bot, Check, ChevronRight, Copy, Folder, FolderOpen, Inbox, KeyRound, Link2, Pencil, Pin, PinOff, Plus, Search, Settings, Square, Workflow as WorkflowIcon } from "lucide-react";
 import { Fragment, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { api } from "./api/client";
 import type { Color, Confirm, Session } from "./api/types.gen";
@@ -23,10 +23,11 @@ import { useSaidLine } from "./data";
 import { agentName, ago, cn, fine, IconKey, keep, kept, Lamp, lampOf, Logo, sessionStatusText, statusText, tilde, Tip, titleOf, useLongPress, useMinute } from "./ui";
 import { SESSION_DRAG } from "./chat/refs";
 import { useUnread } from "./unread";
-import { KEY_SLOT } from "./drawer";
 
 const STEP = 18;
 const BUSY = new Set(["running", "compacting", "starting"]);
+/** While its agent works, an approval awaited too: then it may be stopped (the user, 2026-11-06). */
+const WORKING = new Set([...BUSY, "waiting"]);
 
 type Props = {
   tree: Tree;
@@ -52,9 +53,8 @@ type Props = {
   chatCode: () => void;
   /** The settings' and the jump box's code and answers, fetched as a pointer comes on their keys. */
   panelsCode: () => void;
-  /** On a computer: put the sidebar away (docked) or dock it again (a drawer). None on a phone. */
-  onDock?: () => void;
-  drawer: boolean;
+  /** Without its foot, me and the settings key: on a phone they are a sheet of their own. */
+  noFoot?: boolean;
 };
 
 /** How wide the sidebar may be dragged, and at first: freely, to 640px or 60% of the window (the
@@ -161,10 +161,7 @@ export function Sidebar(p: Props) {
   );
 
   const head = (
-    // Its left kept free for the sidebar's key (drawer.tsx SideKey), fixed there; in the card, a
-    // little lower so the key sits on its middle as on the docked head's. In a phone's sheet the
-    // key is far above it (sheet.tsx).
-    <div className={cn("flex shrink-0 items-center gap-0.5 pr-2", p.phone ? "pl-2" : KEY_SLOT, p.phone ? "glass absolute inset-x-0 top-0 z-20 h-11 shadow-[0_0.5px_0_var(--edge)]" : p.drawer ? "h-10" : "h-12")}>
+    <div className={cn("flex shrink-0 items-center gap-0.5 px-2", p.phone ? "glass absolute inset-x-0 top-0 z-20 h-11 shadow-[0_0.5px_0_var(--edge)]" : "h-12")}>
       {p.createKey(
         <button type="button" aria-label={t("nav.newWorkspace")} className="g-press grid size-8 place-items-center rounded-md text-ink-2 hover:bg-fill hover:text-ink data-popup-open:bg-fill pointer-coarse:size-10">
           <Plus size={18} />
@@ -174,11 +171,6 @@ export function Sidebar(p: Props) {
         <Search size={16} />
       </IconKey>
       <LinkDot />
-      {p.onDock && p.drawer && (
-        <IconKey label={`${t("nav.dockSidebar")} · ${t("nav.sidebarKey")}`} tipSide="bottom" onClick={p.onDock}>
-          <Maximize2 size={15} />
-        </IconKey>
-      )}
     </div>
   );
 
@@ -277,18 +269,24 @@ export function Sidebar(p: Props) {
         )}
         {!p.tree.workspaces.length && !needs && <div className="g-fade px-2 pt-10 text-center text-sm text-ink-3">{t("nav.empty")}</div>}
       </div>
-      {/* Me and the settings key, right on the sidebar's ground at its foot: no card around them (the
-          user, 2026-11-06). */}
-      <div className="flex h-14 shrink-0 items-center justify-between gap-2 px-2 pointer-coarse:h-16">
-        <div className="min-w-0">{p.me}</div>
-        <span className="relative shrink-0">
-          <IconKey label={p.updateDot ? `${t("nav.settings")} · ${t("settings.updateReady")}` : t("nav.settings")} onClick={p.onSettings} onPointerEnter={p.panelsCode} onFocus={p.panelsCode} aria-pressed={p.settings} data-settings-key className={cn("size-10 pointer-coarse:size-11", p.settings && "bg-fill text-ink")}>
-            <Settings size={19} />
-          </IconKey>
-          {p.updateDot && <span className="g-pop pointer-events-none absolute top-1.5 right-1.5 size-2 rounded-full bg-err shadow-[0_0_0_1.5px_var(--paper)]" aria-hidden />}
-        </span>
-      </div>
+      {!p.noFoot && <Foot me={p.me} settings={p.settings} onSettings={p.onSettings} updateDot={p.updateDot} panelsCode={p.panelsCode} />}
     </aside>
+  );
+}
+
+/** Me and the settings key, right on the sidebar's ground at its foot: no card around them (the
+ *  user, 2026-11-06). On a phone with a chat open, a sheet of its own (sheet.tsx). */
+export function Foot(p: Pick<Props, "me" | "settings" | "onSettings" | "updateDot" | "panelsCode">) {
+  return (
+    <div className="flex h-14 shrink-0 items-center justify-between gap-2 px-2 pointer-coarse:h-16">
+      <div className="min-w-0">{p.me}</div>
+      <span className="relative shrink-0">
+        <IconKey label={p.updateDot ? `${t("nav.settings")} · ${t("settings.updateReady")}` : t("nav.settings")} onClick={p.onSettings} onPointerEnter={p.panelsCode} onFocus={p.panelsCode} aria-pressed={p.settings} data-settings-key className={cn("size-10 pointer-coarse:size-11", p.settings && "bg-fill text-ink")}>
+          <Settings size={19} />
+        </IconKey>
+        {p.updateDot && <span className="g-pop pointer-events-none absolute top-1.5 right-1.5 size-2 rounded-full bg-err shadow-[0_0_0_1.5px_var(--paper)]" aria-hidden />}
+      </span>
+    </div>
   );
 }
 
@@ -574,7 +572,8 @@ export function Rename({ s, done, className }: { s: Session; done: () => void; c
   );
 }
 
-/** A session's actions: pin, rename, stop its agent, archive; restore an archived one. */
+/** A session's actions: pin, rename, stop its agent while it works, archive; restore an archived
+ *  one. */
 export function sessionActions(s: Session, rename: () => void): { icon: ReactNode; label: string; run: () => void }[] {
   const run = (f: () => Promise<unknown>, done?: string) => () =>
     void f().then(
@@ -585,8 +584,7 @@ export function sessionActions(s: Session, rename: () => void): { icon: ReactNod
     s.pinned ? { icon: <PinOff size={15} />, label: t("menu.unpin"), run: run(() => api.patch(s.id, { pinned: false })) } : { icon: <Pin size={15} />, label: t("menu.pin"), run: run(() => api.patch(s.id, { pinned: true })) },
     { icon: <Pencil size={15} />, label: t("menu.rename"), run: rename },
     { icon: <Copy size={15} />, label: t("menu.copyId"), run: run(() => navigator.clipboard.writeText(s.id), t("toast.copied")) },
-    ...(s.live ? [{ icon: <Square size={14} />, label: t("menu.stop"), run: run(() => api.stop(s.id), t("toast.stopped")) }] : []),
-    ...(s.hosted ? [{ icon: <ShieldOff size={15} />, label: t("menu.clearRules"), run: run(() => api.clearRules(s.id), t("toast.cleared")) }] : []),
+    ...(s.live && WORKING.has(s.status) ? [{ icon: <Square size={14} />, label: t("menu.stop"), run: run(() => api.stop(s.id), t("toast.stopped")) }] : []),
     s.archived
       ? { icon: <ArchiveRestore size={15} />, label: t("menu.unarchive"), run: run(() => api.patch(s.id, { archived: false })) }
       : { icon: <Archive size={15} />, label: t("menu.archive"), run: run(() => api.patch(s.id, { archived: true }), t("toast.archived")) },
@@ -660,18 +658,23 @@ function SessionMenu({ s, at, close, rename }: { s: Session; at: { x: number; y:
 /** A colour tag and how to set it ("" takes it off). */
 export type Tags = { value?: Color; set: (c: Color | "") => void };
 
-export function MenuItems({ items, tags, children }: { items: { icon: ReactNode; label: string; run: () => void }[]; tags?: Tags; children?: ReactNode }) {
+type MenuItem = { icon: ReactNode; label: string; run: () => void };
+
+/** A menu's items; lead: before the children, at its top. */
+export function MenuItems({ lead = [], items, tags, children }: { lead?: MenuItem[]; items: MenuItem[]; tags?: Tags; children?: ReactNode }) {
+  const item = (it: MenuItem, i: number) => (
+    <Menu.Item key={it.label} onClick={it.run} style={{ "--i": i } as CSSProperties} className="flex h-8 cursor-default items-center gap-2.5 rounded-md px-2.5 text-base outline-none select-none data-highlighted:bg-fill pointer-coarse:h-11">
+      <span className="text-ink-2">{it.icon}</span>
+      {it.label}
+    </Menu.Item>
+  );
   return (
     <Menu.Popup finalFocus={false} className="g-unfold glass thick float min-w-48 rounded-lg p-1.5 text-ink outline-none">
       <div className="g-stagger flex flex-col">
+        {lead.map(item)}
         {children}
-        {items.map((it, i) => (
-          <Menu.Item key={it.label} onClick={it.run} style={{ "--i": i } as CSSProperties} className="flex h-8 cursor-default items-center gap-2.5 rounded-md px-2.5 text-base outline-none select-none data-highlighted:bg-fill pointer-coarse:h-11">
-            <span className="text-ink-2">{it.icon}</span>
-            {it.label}
-          </Menu.Item>
-        ))}
-        {tags && <TagDots tags={tags} i={items.length} />}
+        {items.map((it, i) => item(it, lead.length + i))}
+        {tags && <TagDots tags={tags} i={lead.length + items.length} />}
       </div>
     </Menu.Popup>
   );

@@ -4,7 +4,7 @@
 // from the transcript (GET messages, after= what the open session's state says was written); its
 // drafts from the stream. Loaded only once a chat opens or the page is idle.
 import { Menu } from "@base-ui/react/menu";
-import { ChevronRight, Ellipsis, FolderInput } from "lucide-react";
+import { ChevronRight, Ellipsis, FolderInput, PanelBottomOpen } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent } from "react";
 import type { SessionState as LiveSession } from "../api/types.gen";
 import { api } from "../api/client";
@@ -19,15 +19,16 @@ import { MenuItems, Rename, sessionActions, sessionTags } from "../sidebar";
 import { useConfirms, useList, useSession } from "../store";
 import { drafts, opened } from "../stream";
 import { errText, toast } from "../toast";
-import { agentName, cn, lampOf, LogoLamp, sessionStatusText, tilde, Tip, titleOf } from "../ui";
+import { agentName, lampOf, LogoLamp, sessionStatusText, tilde, Tip, titleOf } from "../ui";
 import { Asks } from "./asks";
 import { Composer, type ComposerHandle } from "./composer";
 import { folded, type Tool } from "./fold";
 import { ToolDraft, Waiting } from "./live";
 import { Draft } from "./markdown";
-import { ContextRing, ModeKey, ModelKey, modelView, QuotaBars, useMode } from "./meters";
+import { ContextRing, ModelKey, modelView, QuotaBars, useMode } from "./meters";
 import { Queue } from "./queue";
-import { SESSION_DRAG, shortId, sourceOf, yours } from "./refs";
+import { mentionOf } from "./mention";
+import { SESSION_DRAG, sourceOf, yours } from "./refs";
 import { Pending, Running, Said } from "./said";
 import { Stick, toEnd } from "./stick";
 
@@ -41,10 +42,10 @@ let lastStackH = 140;
  *  drawn whole at once, its composer and conversation, its keys after (ghost). */
 const ghostOf = (row: Session): LiveSession => ({ ...row, asks: [], tasks: [], queue: [], end: 0, proc: -1 });
 
-/** slot: the bar keeps its left free for the sidebar's key (drawer.tsx SideKey), the sidebar not
- *  beside it. sheet: on a phone, the sidebar's sheet is out this tall (sheet.tsx): the bottom stack
- *  sinks out under it, and the conversation keeps its newest above it. */
-export function ChatPage({ id, phone, slot, sheet = 0 }: { id: string; phone: boolean; slot: boolean; sheet?: number }) {
+/** sheet: on a phone, the sidebar's sheet is out this tall (sheet.tsx): the bottom stack sinks out
+ *  under it, and the conversation keeps its newest above it. onSheet: on a phone, brings it out,
+ *  from the bar's ⋯ menu. */
+export function ChatPage({ id, phone, sheet = 0, onSheet }: { id: string; phone: boolean; sheet?: number; onSheet?: () => void }) {
   useLang();
   const real = useSession(id);
   const list = useList();
@@ -139,7 +140,6 @@ export function ChatPage({ id, phone, slot, sheet = 0 }: { id: string; phone: bo
 
   const composer = useRef<ComposerHandle>(null);
   const [modelOpen, setModelOpen] = useState(false);
-  const [modeOpen, setModeOpen] = useState(false);
   const [usageOpen, setUsageOpen] = useState(false);
   const shown = folded(log.blocks);
   const cwd = s?.cwd ?? row?.cwd ?? "";
@@ -169,14 +169,14 @@ export function ChatPage({ id, phone, slot, sheet = 0 }: { id: string; phone: bo
     if (!session(e)) return;
     const to = list?.find((x) => x.id === e.dataTransfer.getData(SESSION_DRAG));
     if (!to || to.id === id) return;
-    composer.current?.insert(t("composer.mention", { title: titleOf(to) || tilde(to.cwd), agent: agentName(to.agent), id: shortId(to.id, list!.map((x) => x.id)) }));
+    composer.current?.insert(mentionOf(to, list!));
   };
 
   if (!s) {
     const gone = lost && list !== undefined && !row;
     return (
       <div className="relative h-full">
-        <Bar phone={phone} s={row} slot={slot} />
+        <Bar phone={phone} s={row} onSheet={onSheet} />
         {gone && <p className="g-fade m-0 pt-24 text-center text-sm text-ink-3">{t("chat.gone")}</p>}
       </div>
     );
@@ -227,7 +227,7 @@ export function ChatPage({ id, phone, slot, sheet = 0 }: { id: string; phone: bo
           )}
         </div>
       </Stick>
-      <Bar phone={phone} s={s} slot={slot} />
+      <Bar phone={phone} s={s} onSheet={onSheet} />
       <div ref={stack} {...{ [PULL]: "" }} data-sunk={sheet > 0 || undefined} inert={sheet > 0} className="g-turn-stay g-sink vt-stack absolute inset-x-0 bottom-0 z-10 px-2.5 pb-[max(14px,calc(env(safe-area-inset-bottom)+6px))] sm:px-5">
         {/* Paper from the composer's middle down: the conversation scrolled under it stops there. */}
         {!elsewhere && !s.subagent && <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-[calc(44px+max(14px,calc(env(safe-area-inset-bottom)+6px)))] bg-[linear-gradient(to_bottom,transparent,var(--paper)_14px)]" />}
@@ -246,7 +246,7 @@ export function ChatPage({ id, phone, slot, sheet = 0 }: { id: string; phone: bo
           ) : elsewhere ? (
             <div className="glass float rest flex h-12 items-center justify-center rounded-[20px] text-sm text-ink-3">{t("chat.elsewhere")}</div>
           ) : (
-            <Under s={s} ghost={ghost} composer={composer} onSent={onSent} onSentDone={(x) => ((log.sent = log.sent.filter((y) => y !== x || !x.queued)), changed())} modelOpen={modelOpen} setModelOpen={setModelOpen} modeOpen={modeOpen} setModeOpen={setModeOpen} usageOpen={usageOpen} setUsageOpen={setUsageOpen} />
+            <Under s={s} ghost={ghost} composer={composer} onSent={onSent} onSentDone={(x) => ((log.sent = log.sent.filter((y) => y !== x || !x.queued)), changed())} modelOpen={modelOpen} setModelOpen={setModelOpen} usageOpen={usageOpen} setUsageOpen={setUsageOpen} />
           )}
         </div>
       </div>
@@ -254,9 +254,10 @@ export function ChatPage({ id, phone, slot, sheet = 0 }: { id: string; phone: bo
   );
 }
 
-/** The composer, with in its foot the approval-mode key, the model key, the quota bars, and at the
- *  right the context ring, then send (the user, 2026-11-06). */
-function Under({ s, ghost, composer, onSent, onSentDone, modelOpen, setModelOpen, modeOpen, setModeOpen, usageOpen, setUsageOpen }: { s: LiveSession; ghost: boolean; composer: React.RefObject<ComposerHandle | null>; onSent: (x: Sent) => void; onSentDone: (x: Sent) => void; modelOpen: boolean; setModelOpen: (o: boolean) => void; modeOpen: boolean; setModeOpen: (o: boolean) => void; usageOpen: boolean; setUsageOpen: (o: boolean) => void }) {
+/** The composer, with in its foot the model key, the quota bars, and at the right the context ring,
+ *  then send (the user, 2026-11-06). No approval-mode key (the user, 2026-11-06): Shift+Tab and
+ *  /mode still step it, saying where they left it. */
+function Under({ s, ghost, composer, onSent, onSentDone, modelOpen, setModelOpen, usageOpen, setUsageOpen }: { s: LiveSession; ghost: boolean; composer: React.RefObject<ComposerHandle | null>; onSent: (x: Sent) => void; onSentDone: (x: Sent) => void; modelOpen: boolean; setModelOpen: (o: boolean) => void; usageOpen: boolean; setUsageOpen: (o: boolean) => void }) {
   const mode = useMode(s);
   const [ctxOpen, setCtxOpen] = useState(false);
   return (
@@ -269,14 +270,13 @@ function Under({ s, ghost, composer, onSent, onSentDone, modelOpen, setModelOpen
         onSentDone={onSentDone}
         cycleMode={mode.cycle}
         openModel={() => setModelOpen(true)}
-        openMode={() => setModeOpen(true)}
+        openMode={mode.cycle}
         openUsage={() => setUsageOpen(true)}
         openContext={() => !!s.context?.max && (setCtxOpen(true), true)}
         cleared={openChat}
         tools={
           <>
-            {/* Not guessed from the row: the mode and the model come with the state, gliding in. */}
-            {!ghost && <ModeKey mode={mode} open={modeOpen} onOpenChange={setModeOpen} />}
+            {/* Not guessed from the row: the model comes with the state, gliding in. */}
             {!ghost && <ModelKey s={s} open={modelOpen} onOpenChange={setModelOpen} />}
             <QuotaBars agent={s.agent} live={s.live} using={[s.model, s.pick, modelView(s).name]} open={usageOpen} onOpenChange={setUsageOpen} />
           </>
@@ -289,12 +289,12 @@ function Under({ s, ghost, composer, onSent, onSentDone, modelOpen, setModelOpen
 
 /** The top bar: the logo with its lamp, the name, the folder; more. The link's dot is the
  *  sidebar's (sidebar.tsx LinkDot). */
-function Bar({ s, phone, slot }: { s?: Session; phone: boolean; slot: boolean }) {
+function Bar({ s, phone, onSheet }: { s?: Session; phone: boolean; onSheet?: () => void }) {
   const ws = useWorkspaces().data ?? [];
   const [renaming, setRenaming] = useState(false);
   return (
     <header className="g-turn-stay vt-bar glass absolute inset-x-0 top-0 z-20 flex h-12 items-center gap-1 pr-2 pl-2 shadow-[0_0.5px_0_var(--edge)] pointer-coarse:h-13">
-      <div className={cn("flex min-w-0 flex-1 items-center gap-2.5", slot ? "pl-10 pointer-coarse:pl-12" : "pl-2")}>
+      <div className="flex min-w-0 flex-1 items-center gap-2.5 pl-2">
         {s && (
           <>
             <Tip label={`${agentName(s.agent)} · ${sessionStatusText(s)}`} side="bottom">
@@ -333,7 +333,7 @@ function Bar({ s, phone, slot }: { s?: Session; phone: boolean; slot: boolean })
           </Tip>
           <Menu.Portal>
             <Menu.Positioner side="bottom" align="end" sideOffset={6} collisionPadding={8} className="z-50">
-              <MenuItems items={sessionActions(s, () => setRenaming(true))} tags={sessionTags(s)}>{ws.length > 1 && <MoveTo s={s} ws={ws} />}</MenuItems>
+              <MenuItems lead={onSheet ? [{ icon: <PanelBottomOpen size={15} />, label: t("nav.sidebar"), run: onSheet }] : []} items={sessionActions(s, () => setRenaming(true))} tags={sessionTags(s)}>{ws.length > 1 && <MoveTo s={s} ws={ws} />}</MenuItems>
             </Menu.Positioner>
           </Menu.Portal>
         </Menu.Root>

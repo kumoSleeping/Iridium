@@ -6,7 +6,7 @@
 import { Popover } from "@base-ui/react/popover";
 import { Slider } from "@base-ui/react/slider";
 import { useQueryClient } from "@tanstack/react-query";
-import { Camera, Check, ChevronLeft, ChevronRight, Laptop, LogOut, Minus, Monitor, Moon, PencilLine, ShieldCheck, Smartphone, Sun } from "lucide-react";
+import { Camera, Check, ChevronLeft, ChevronRight, EyeOff, Laptop, LogOut, Minus, Monitor, Moon, PencilLine, ShieldCheck, Smartphone, Sun } from "lucide-react";
 import { useRef, useState, type ReactNode } from "react";
 import { ApiError, api } from "./api/client";
 import type { Device, Me, Rules } from "./api/types.gen";
@@ -16,6 +16,15 @@ import { errText, toast } from "./toast";
 import { AGENTS, Avatar, cn, IconKey, keep, kept, Logo, PopSurface, tilde, Tip } from "./ui";
 
 export type ThemePref = "light" | "dark" | "auto";
+
+/** The devices a terminal may say it runs on, in the picker's order; none: no badge shown. */
+const DEVICES = ["computer", "laptop", "phone", "none"] as const satisfies readonly Device[];
+const DEVICE_ICON: Record<Device, (size: number) => ReactNode> = {
+  computer: (n) => <Monitor size={n} />,
+  laptop: (n) => <Laptop size={n} />,
+  phone: (n) => <Smartphone size={n} />,
+  none: (n) => <EyeOff size={n} />,
+};
 type Page = "main" | "perms" | "crop";
 
 export function initialTheme(): ThemePref {
@@ -152,7 +161,7 @@ export function MeChip({ theme, setTheme, initialPage = "main", defaultOpen = fa
               </Row>
               <div className="flex items-center justify-between gap-2 py-1.5 pr-1.5 pl-2">
                 <span className="flex min-w-0 items-center gap-2.5 text-base">
-                  <span className="text-ink-2">{device === "phone" ? <Smartphone size={16} /> : <Monitor size={16} />}</span>
+                  <span className="text-ink-2">{DEVICE_ICON[device]?.(16) ?? <Monitor size={16} />}</span>
                   <span className="truncate">{t("me.device")}</span>
                 </span>
                 <Segmented
@@ -160,8 +169,7 @@ export function MeChip({ theme, setTheme, initialPage = "main", defaultOpen = fa
                   value={device}
                   onChange={(v) => void setDevice(v as Device)}
                   items={[
-                    { v: "computer", label: t("device.computer"), icon: <Monitor size={15} /> },
-                    { v: "phone", label: t("device.phone"), icon: <Smartphone size={15} /> },
+                    ...DEVICES.map((d) => ({ v: d, label: t(`device.${d}`), icon: DEVICE_ICON[d](15) })),
                   ]}
                 />
               </div>

@@ -1,12 +1,17 @@
-// Sessions named in what you write (a row dropped on the composer, chat.tsx): in the composer a
+// Sessions named in what you write (a row dropped on the composer, chat.tsx, or picked after @ in
+// it, composer.tsx): in the composer a
 // soft mark under the words, in a sent message a chip with the session's logo and title that goes
 // there (the user, 2026-11-06). The words themselves stay plain text, what the agent reads.
 import { useLayoutEffect, useRef, type RefObject } from "react";
 import type { Agent, Session } from "../api/types.gen";
 import { openChat } from "../route";
 import { useList } from "../store";
-import { AGENTS, agentName, cn, Logo, Tip, titleOf } from "../ui";
-import { mentions, type Mention } from "./refs";
+import { t } from "../i18n";
+import { AGENTS, agentName, cn, Logo, tilde, Tip, titleOf } from "../ui";
+import { mentions, shortId, type Mention } from "./refs";
+
+/** How the composer names session to, among list: what a row dropped or picked after @ puts in. */
+export const mentionOf = (to: Session, list: Session[]) => t("composer.mention", { title: titleOf(to) || tilde(to.cwd), agent: agentName(to.agent), id: shortId(to.id, list.map((x) => x.id)) });
 
 /** Whether the words name a session. */
 export const hasMention = (text: string) => mentions(text).some((p) => typeof p !== "string");

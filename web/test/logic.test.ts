@@ -7,7 +7,7 @@ import { argOf, folded, foldLine, inputOf } from "../src/chat/fold";
 import { commandsOf, keyMode, matching } from "../src/chat/composer";
 import { levelName, restAt } from "../src/chat/effort";
 import { ctxParts, modelView } from "../src/chat/meters";
-import { filesIn, mentions, resolve, shortId, sourceOf } from "../src/chat/refs";
+import { atSessions, atWord, filesIn, mentions, resolve, shortId, sourceOf } from "../src/chat/refs";
 import { en } from "../src/i18n/en";
 import { zh } from "../src/i18n/zh";
 import { jumpList } from "../src/jump";
@@ -405,5 +405,24 @@ describe("mentions", () => {
     expect(mentions("ask 「Fix the login」（Claude 会话 ca5187d2） now")).toEqual(["ask ", { title: "Fix the login", agent: "Claude", id: "ca5187d2", text: "「Fix the login」（Claude 会话 ca5187d2）" }, " now"]);
     expect(mentions('"Run tests" (DeepSeek Harness session 1a2b3c4d-9)')).toEqual([{ title: "Run tests", agent: "DeepSeek Harness", id: "1a2b3c4d-9", text: '"Run tests" (DeepSeek Harness session 1a2b3c4d-9)' }]);
     expect(mentions("plain 「quoted」 words (session 12)")).toEqual(["plain 「quoted」 words (session 12)"]);
+  });
+});
+
+describe("@ in the composer", () => {
+  test("the @word the caret ends", () => {
+    expect(atWord("@", 1)).toEqual({ from: 0, q: "" });
+    expect(atWord("ask @sid", 8)).toEqual({ from: 4, q: "sid" });
+    expect(atWord("ask @sid more", 8)).toEqual({ from: 4, q: "sid" });
+    expect(atWord("mail a@b", 8)).toBeNull();
+    expect(atWord("ask @sid more", 13)).toBeNull();
+    expect(atWord("ask @si d", 7)).toEqual({ from: 4, q: "si" });
+  });
+  test("the sessions it may name", () => {
+    const s = (id: string, title: string, updatedAt: number, more: Partial<Session> = {}) => ({ id, agent: "claude", cwd: "/home/k/" + id, title, status: "idle", hosted: true, live: false, updatedAt, ...more }) as Session;
+    const list = [s("a1", "Sidebar work", 1), s("b2", "the sidebar bug", 5), s("c3", "Notes", 9), s("d4", "Sidebar old", 3, { archived: true }), s("e5", "Sidebar sub", 4, { subagent: true }), s("here", "Sidebar here", 9)];
+    expect(atSessions(list, "", "here").map((x) => x.id)).toEqual(["c3", "b2", "a1"]);
+    expect(atSessions(list, "side", "here").map((x) => x.id)).toEqual(["a1", "b2"]);
+    expect(atSessions(list, "c3", "here").map((x) => x.id)).toEqual(["c3"]);
+    expect(atSessions(list, "nothing", "here")).toEqual([]);
   });
 });

@@ -119,3 +119,30 @@ export function filesIn(text: string, cwd = "", home?: string): { text: string; 
   });
   return { text: out.join("").replace(/\n{3,}/g, "\n\n").trim(), labels };
 }
+
+/** The @word the caret ends, to name a session by (the composer's @ list): where its @ is and what
+ *  follows it; none unless the @ starts the words or follows a space. */
+export function atWord(text: string, caret: number): { from: number; q: string } | null {
+  const m = /(?:^|\s)@([^\s@]*)$/.exec(text.slice(0, caret));
+  return m ? { from: caret - m[1]!.length - 1, q: m[1]! } : null;
+}
+
+/** The sessions @q may name, at most n: not here, not a subagent, not archived; titles that start
+ *  with it first, then titles, folders, agents and ids that have it; the newest first in each. */
+export function atSessions(list: Session[], q: string, here: string, n = 8): Session[] {
+  const w = q.toLowerCase();
+  const rank = (s: Session) => {
+    const title = titleOf(s).toLowerCase();
+    if (!w || title.startsWith(w)) return 0;
+    if (title.includes(w)) return 1;
+    if (s.cwd.toLowerCase().includes(w) || s.agent.includes(w) || s.id.startsWith(w)) return 2;
+    return 3;
+  };
+  return list
+    .filter((s) => s.id !== here && !s.subagent && !s.archived)
+    .map((s) => [rank(s), s] as const)
+    .filter(([r]) => r < 3)
+    .sort((a, b) => a[0] - b[0] || b[1].updatedAt - a[1].updatedAt)
+    .slice(0, n)
+    .map(([, s]) => s);
+}

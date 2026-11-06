@@ -502,8 +502,8 @@ func (s *Server) terminalOf(info gate.EndpointInfo) api.Terminal {
 		t.Local = true
 	}
 	t.Device = api.DeviceComputer
-	if d, _ := s.st.Device(info.ID); d == string(api.DevicePhone) {
-		t.Device = api.DevicePhone
+	if d, _ := s.st.Device(info.ID); api.Device(d).Valid() {
+		t.Device = api.Device(d)
 	}
 	return t
 }

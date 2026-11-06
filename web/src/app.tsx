@@ -1,8 +1,8 @@
 // The layout (plan "网页"): one main pane, the chat, on a computer and on a phone alike (the user,
-// 2026-11-06). On a computer the sidebar stands beside it, as wide as it is dragged, or is put away
-// (⌘\) for the chat the whole window; on a portrait touch screen it is a drawer from the left
-// (drawer.tsx), and on a phone a sheet from the foot in the composer's place (sheet.tsx), brought by
-// the key at the top left. The settings are a
+// 2026-11-06). On a computer the sidebar always stands beside it, as wide as it is dragged; a window
+// too narrow for both is a phone's, its sidebar a sheet from the foot in the composer's place
+// (sheet.tsx), brought from the chat's ⋯ menu or by a swipe up; its foot, me and the settings key, a
+// small sheet of its own, by a swipe up from the left quarter (the user, 2026-11-06). The settings are a
 // dialog rising from their key, over the sidebar mostly, the chat staying under it. The jump box
 // (⌘K) opens in the sidebar, not over the page. The chat, the settings and the jump box come only as
 // they are opened, or the page is idle: the first screen stays light.
@@ -13,15 +13,14 @@ import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, 
 import { queryClient } from "./api/client";
 import { watchTurns } from "./chats";
 import { CreatePopover, WsPlus } from "./create";
-import { Drawer, SideKey } from "./drawer";
 import { agentsQ, pushQ, useHome, useMe, useSettings, useTerminals, useUpdate, useWorkspaces } from "./data";
 import { t, useLang } from "./i18n";
 import { applyTheme, initialTheme, keepTheme, MeChip, type ThemePref } from "./me";
 import { pageTurn } from "./motion";
 import { prefetch } from "./prefetch";
 import { close, go, onTurn, openChat, over, route, useRoute, type Route } from "./route";
-import { Sheet } from "./sheet";
-import { Sidebar } from "./sidebar";
+import { atLeft, Sheet } from "./sheet";
+import { Foot, Sidebar } from "./sidebar";
 import { useSecret } from "./secrets";
 import { useConfirms, useList } from "./store";
 import { follow } from "./stream";
@@ -89,20 +88,16 @@ function useExpanded() {
   return { expanded, toggle };
 }
 
-/** Where the sidebar is always a drawer: a phone, or a touch screen held upright. */
-const NARROW = `${PHONE}, (orientation: portrait) and (pointer: coarse)`;
-
 export function App() {
   useLang();
   const phone = useMedia(PHONE);
-  const narrow = useMedia(NARROW);
-  // On a computer, the sidebar beside the chat or put away, as this device left it.
-  const [docked, setDocked] = useState(() => kept("sidebar") !== "away");
-  const drawer = narrow || !docked;
-  const [drawerOpen, setDrawerOpen] = useState(() => narrow && route().name !== "chat");
-  // On a phone, how tall the sheet is: the chat keeps its newest above it while it is out.
+  // On a phone, whether the sidebar's sheet is out, and how tall it is: the chat keeps its newest
+  // above it while it is out.
+  const [sheetOut, setSheetOut] = useState(() => phone && route().name !== "chat");
   const [sheetH, setSheetH] = useState(0);
-  const dock = (on: boolean) => (setDocked(on), keep("sidebar", on ? "" : "away"), setDrawerOpen(false));
+  // With a chat open, the sidebar's foot is a sheet of its own, one out at a time.
+  const [footOut, setFootOut] = useState(false);
+  const [footH, setFootH] = useState(0);
   const systemDark = useMedia("(prefers-color-scheme: dark)");
   const [theme, setTheme] = useState<ThemePref>(initialTheme);
   useEffect(() => applyTheme(theme, systemDark), [theme, systemDark]);
@@ -111,6 +106,7 @@ export function App() {
   const [under, setUnder] = useState<Route>(over(r) ? { name: "home" } : r);
   if (!over(r) && r !== under) setUnder(r);
   const open = under.name === "chat" ? under.id : null;
+  const below = !phone ? 0 : sheetOut ? sheetH : footOut && open ? footH : 0;
   const list = useList();
   const ws = useWorkspaces();
   const update = useUpdate();
@@ -141,19 +137,22 @@ export function App() {
   // The chats you may open next, warmed (src/warm.ts).
   useEffect(() => warmUp(list, tree, open), [tree, open]);
 
-  // On a phone a chat opened from the drawer puts it away, and back at nothing open it comes out;
-  // on a computer it stays beside the chat till put away.
+  // On a phone a chat opened from the sheet puts it away, and with nothing open it is out, to stay:
+  // there is nothing else to see.
   useEffect(() => {
-    if (narrow) setDrawerOpen(!open);
-  }, [open]);
+    if (phone) setSheetOut(!open);
+    setFootOut(false);
+  }, [open, phone]);
+  const setSheet = (o: boolean) => (setSheetOut(o || !open), o && setFootOut(false));
+  const setFoot = (o: boolean) => (setFootOut(o), o && setSheetOut(false));
 
   // Chat to chat on a computer, the main pane swaps quickly, drifting the way the sidebar lists them.
-  const now = useRef({ tree, phone, drawer });
-  now.current = { tree, phone, drawer };
+  const now = useRef({ tree, phone });
+  now.current = { tree, phone };
   useEffect(() => onTurn(pageTurn(() => flat(now.current.tree).map((s) => s.id), () => !now.current.phone)), []);
 
-  // The jump box, in the sidebar (the user, 2026-11-06); with the sidebar a drawer, ⌘K brings it
-  // out too. ⌘\ puts the sidebar away on a computer, or docks it again.
+  // The jump box, in the sidebar (the user, 2026-11-06); on a phone ⌘K brings the sheet out too, and
+  // ⌘\ brings it out or puts it away.
   const [jumping, setJumping] = useState(params.get("open") === "jump");
   const jumpingNow = useRef(jumping);
   jumpingNow.current = jumping;
@@ -163,11 +162,10 @@ export function App() {
         e.preventDefault();
         const to = !jumpingNow.current;
         setJumping(to);
-        if (to && now.current.drawer) setDrawerOpen(true);
-      } else if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key === "\\") {
+        if (to && now.current.phone) setSheet(true);
+      } else if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key === "\\" && now.current.phone) {
         e.preventDefault();
-        if (!narrowNow.current) dock(!dockedNow.current);
-        else setDrawerOpen((o) => !o);
+        setSheet(!sheetNow.current);
       } else if (e.altKey && !e.metaKey && !e.ctrlKey && (e.key === "ArrowUp" || e.key === "ArrowDown") && open && !e.defaultPrevented) {
         const all = flat(tree);
         const i = all.findIndex((s) => s.id === open);
@@ -178,19 +176,20 @@ export function App() {
     addEventListener("keydown", key);
     return () => removeEventListener("keydown", key);
   }, [tree, open]);
-  const narrowNow = useRef(narrow);
-  narrowNow.current = narrow;
-  const dockedNow = useRef(docked);
-  dockedNow.current = docked;
+  const sheetNow = useRef(sheetOut);
+  sheetNow.current = sheetOut;
   const setThemeKept = (v: ThemePref) => (setTheme(v), keepTheme(v));
 
+  const onSettings = () => (over(r) ? close(under) : go({ name: "settings" }));
+  const me = <MeChip theme={theme} setTheme={setThemeKept} defaultOpen={params.get("open") === "me"} initialPage={params.get("open") === "perms" ? "perms" : "main"} />;
   const sidebar = (
     <Sidebar
       tree={tree}
       expanded={expanded}
       toggle={toggle}
       selected={open ?? ""}
-      onSelect={(id) => (openChat(id), narrow && setDrawerOpen(false))}
+      onSelect={(id) => (openChat(id), phone && setSheetOut(false))}
+      noFoot={phone && !!open}
       phone={phone}
       searching={jumping}
       search={
@@ -200,7 +199,7 @@ export function App() {
       }
       onSearch={() => setJumping((j) => !j)}
       settings={over(r)}
-      onSettings={() => (over(r) ? close(under) : go({ name: "settings" }))}
+      onSettings={onSettings}
       updateDot={!!update.data?.available}
       confirms={confirms}
       onConfirm={(c) => (c.session && list?.some((s) => s.id === c.session) ? openChat(c.session) : go({ name: "terminals" }, over(r)))}
@@ -208,20 +207,18 @@ export function App() {
       panelsCode={loadPanels}
       createKey={(trigger) => <CreatePopover trigger={trigger} />}
       wsPlus={(w, trigger, o, setO) => <WsPlus key={w.key} w={{ id: w.id, name: w.name, path: w.root }} trigger={trigger} open={o} setOpen={setO} opened={(id) => openChat(id)} />}
-      me={<MeChip theme={theme} setTheme={setThemeKept} defaultOpen={params.get("open") === "me"} initialPage={params.get("open") === "perms" ? "perms" : "main"} />}
-      drawer={drawer}
-      onDock={narrow ? undefined : () => dock(true)}
+      me={me}
     />
   );
 
   const main = (
     // On a phone a tap on the chat puts the sheet away, the composer back (the user, 2026-11-06).
-    <main className={cn("relative h-full min-w-0 flex-1 bg-paper", !phone && "g-turn")} onClickCapture={phone && drawerOpen && open ? () => setDrawerOpen(false) : undefined}>
+    <main className={cn("relative h-full min-w-0 flex-1 bg-paper", !phone && "g-turn")} onClickCapture={phone && (sheetOut || footOut) && open ? () => (setSheetOut(false), setFootOut(false)) : undefined}>
       <Suspense fallback={<Waiting />}>
         {under.name === "chat" ? (
-          <ChatPage key={under.id} id={under.id} phone={phone} slot={drawer} sheet={phone && drawerOpen ? sheetH : 0} />
+          <ChatPage key={under.id} id={under.id} phone={phone} sheet={below} onSheet={phone ? () => setSheet(true) : undefined} />
         ) : (
-          <Empty below={phone && drawerOpen ? sheetH : 0} />
+          <Empty below={below} />
         )}
       </Suspense>
     </main>
@@ -270,19 +267,18 @@ export function App() {
     <Toast.Provider toastManager={toasts}>
       <Tooltip.Provider delay={450} closeDelay={60}>
         <div className="flex h-full overflow-hidden" data-still={params.get("still") === "1" || undefined}>
-          {!drawer && sidebar}
+          {!phone && sidebar}
           {main}
-          {drawer &&
-            (phone ? (
-              <Sheet open={drawerOpen} setOpen={setDrawerOpen} tall={jumping} onHeight={setSheetH}>
-                {sidebar}
-              </Sheet>
-            ) : (
-              <Drawer open={drawerOpen} setOpen={setDrawerOpen}>
-                {sidebar}
-              </Drawer>
-            ))}
-          <SideKey state={!drawer ? "docked" : drawerOpen ? "out" : "in"} onClick={() => (!drawer ? dock(false) : setDrawerOpen((o) => !o))} />
+          {phone && (
+            <Sheet open={sheetOut} setOpen={setSheet} size={jumping ? "tall" : "half"} from={(x) => !atLeft(x)} label={t("nav.sessions")} onHeight={setSheetH}>
+              {sidebar}
+            </Sheet>
+          )}
+          {phone && open && (
+            <Sheet open={footOut} setOpen={setFoot} size="fit" from={atLeft} label={t("me.title")} onHeight={setFootH}>
+              <Foot me={me} settings={over(r)} onSettings={onSettings} updateDot={!!update.data?.available} panelsCode={loadPanels} />
+            </Sheet>
+          )}
         </div>
         {settings}
         {secret && (
@@ -327,7 +323,7 @@ function useSettingsAt(open: boolean): CSSProperties | undefined {
     if (!open) return;
     const w = Math.min(288, innerWidth - 16);
     const b = document.querySelector("[data-settings-key]")?.getBoundingClientRect();
-    const seen = b && b.width > 0 && b.right > 0 && b.left < innerWidth;
+    const seen = b && b.width > 0 && b.right > 0 && b.left < innerWidth && b.bottom <= innerHeight;
     const room = seen ? b.top - 16 : 0;
     if (!seen || room < 360) {
       setAt({ left: 8, bottom: "max(8px, env(safe-area-inset-bottom))", height: "min(600px, calc(100dvh - 16px))" });

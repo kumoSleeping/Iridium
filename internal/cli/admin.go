@@ -430,10 +430,10 @@ type multipartBody struct {
 	ct  string
 }
 
-// profile: ir profile <名字> [--name 新名] [--avatar 图片] [--no-avatar] [--device computer|phone].
+// profile: ir profile <名字> [--name 新名] [--avatar 图片] [--no-avatar] [--device computer|laptop|phone|none].
 func profile(e adminEnv, args []string, stdout, stderr io.Writer) int {
 	usage := func() int {
-		fmt.Fprintln(stderr, "用法：ir profile <名字> [--name 新名] [--avatar 图片] [--no-avatar] [--device computer|phone]")
+		fmt.Fprintln(stderr, "用法：ir profile <名字> [--name 新名] [--avatar 图片] [--no-avatar] [--device computer|laptop|phone|none]")
 		return 2
 	}
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
@@ -477,7 +477,7 @@ func profile(e adminEnv, args []string, stdout, stderr io.Writer) int {
 			mw.WriteField("removeAvatar", "1")
 		case "--device":
 			v, ok := next()
-			if !ok || (v != string(api.DeviceComputer) && v != string(api.DevicePhone)) {
+			if !ok || !api.Device(v).Valid() {
 				return usage()
 			}
 			device = v
@@ -514,8 +514,13 @@ func profile(e adminEnv, args []string, stdout, stderr io.Writer) int {
 }
 
 func deviceName(d api.Device) string {
-	if d == api.DevicePhone {
+	switch d {
+	case api.DeviceLaptop:
+		return "笔记本"
+	case api.DevicePhone:
 		return "手机"
+	case api.DeviceNone:
+		return "不展示"
 	}
 	return "电脑"
 }

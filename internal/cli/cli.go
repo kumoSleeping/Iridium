@@ -27,7 +27,7 @@ const Help = `ir：本机 Iridium 的命令行（经 unix socket）。<id> 写�
     --owner：确认这是我本人用的终端，带 Claude（agent 跑的要带 Claude 的面板确认）
   ir access | revoke <名字>          列出终端和邀请 | 撤销
   ir access <名字> --claude on|off   开关 Claude（开：只能你本人，本机或带 Claude 的面板）
-  ir profile <名字> [--name 新名] [--avatar 图片] [--device computer|phone]
+  ir profile <名字> [--name 新名] [--avatar 图片] [--device computer|laptop|phone|none]
   ir public [off]                    经 Cloudflare 上公网（在终端里跑）
   ir update [--check]                更新 Iridium
 `

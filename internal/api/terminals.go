@@ -70,13 +70,24 @@ type Terminal struct {
 }
 
 // Device is what a terminal runs on, set in its settings (PUT /api/me/device, ir profile
-// --device): a computer, the default, or a phone.
+// --device): a computer, the default, a laptop, a phone, or none shown (no badge).
 type Device string
 
 const (
 	DeviceComputer Device = "computer"
+	DeviceLaptop   Device = "laptop"
 	DevicePhone    Device = "phone"
+	DeviceNone     Device = "none"
 )
+
+// Valid says whether d is one of the devices.
+func (d Device) Valid() bool {
+	switch d {
+	case DeviceComputer, DeviceLaptop, DevicePhone, DeviceNone:
+		return true
+	}
+	return false
+}
 
 // SetDevice is PUT /api/me/device and PUT /api/terminals/{id}/device.
 type SetDevice struct {

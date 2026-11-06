@@ -61,8 +61,8 @@ const terminalsSchema = `DROP TABLE permissions;
 	ALTER TABLE inputs ADD COLUMN tag TEXT NOT NULL DEFAULT '';
 	CREATE INDEX usage_terminal ON usage(terminal, at);`
 
-// devicesSchema is migration 7: the device each terminal is on, "computer" or "phone"; none is a
-// computer. No foreign key, like permissions: 本机 is no row.
+// devicesSchema is migration 7: the device each terminal is on, "computer", "laptop", "phone" or
+// "none" (no badge shown); no row is a computer. No foreign key, like permissions: 本机 is no row.
 const devicesSchema = `CREATE TABLE devices (
 		terminal TEXT PRIMARY KEY,
 		device TEXT NOT NULL
