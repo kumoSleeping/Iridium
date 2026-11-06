@@ -149,6 +149,8 @@ var userName = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
 // it is there, linger so its services run without a login, the key let in (~/.ssh 0700,
 // authorized_keys 0600, the account's).
 const rootPart = `set -eu
+# su -c keeps the caller's PATH, which often lacks the sbin directories.
+PATH=$PATH:/usr/local/sbin:/usr/sbin:/sbin
 u=$1 pub=$2
 id "$u" >/dev/null 2>&1 || useradd -m -s /bin/bash "$u"
 loginctl enable-linger "$u"
