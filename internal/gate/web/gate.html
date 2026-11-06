@@ -29,7 +29,6 @@
           <input id="name" name="name" type="text" autocomplete="off" spellcheck="false" autocapitalize="off"
                  enterkeyhint="go" maxlength="40" data-tp="namePh" aria-describedby="name-note">
           <button id="join" class="btn" type="submit" data-t="create" disabled></button>
-          <div class="field-note-box"><p id="name-note" class="note field-note" aria-live="polite"></p></div>
         </form>
       </section>
 
@@ -37,7 +36,12 @@
         <p class="note" data-t="badLink"></p>
       </section>
 
-      <p id="status" class="status" role="status" aria-live="polite"></p>
+      <!-- One line kept under the key whatever it says (the name's problem, an error, or nothing),
+           so the card never changes size. -->
+      <div class="msg">
+        <p id="name-note" class="note field-note" aria-live="polite"></p>
+        <p id="status" class="status" role="status" aria-live="polite"></p>
+      </div>
     </div>
   </main>
 </body>

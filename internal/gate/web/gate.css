@@ -144,18 +144,17 @@ input[aria-invalid=true] { color: var(--danger); }
 .card:has(#setup:not([hidden])) { padding: 1.5rem; }
 .card:has(#setup:not([hidden])) .brand { text-align: left; margin-bottom: .5rem; }
 #login[hidden] + #setup { margin-top: 0; text-align: left; font-size: .875rem; }
-/* The name's problem, under the key: it opens and closes by sliding, never jumps. */
 #join { margin-top: .5rem; }
-.field-note-box { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .2s cubic-bezier(.2, 0, 0, 1), margin-top .2s cubic-bezier(.2, 0, 0, 1); }
-.field-note-box:has(.field-note:not(:empty)) { grid-template-rows: 1fr; margin-top: .5rem; }
-.field-note { min-height: 0; overflow: hidden; text-align: left; padding: 0 .875rem; color: var(--danger); }
+/* The line under the key: always there, the name's problem and the status in the same place. */
+.msg { display: grid; min-height: 1.25rem; margin-top: .625rem; }
+.msg > p { grid-area: 1 / 1; }
+.card:has(#setup:not([hidden])) .msg, .card:has(#v-wait:not([hidden])) .msg { display: none; }
+.field-note { color: var(--danger); }
 
-.status { min-height: 1.25rem; margin-top: .875rem; font-size: .8125rem; text-align: center; color: var(--muted); }
-.status:empty { margin-top: 0; min-height: 0; }
+.status { font-size: .8125rem; text-align: center; color: var(--muted); }
 .status.error { color: var(--danger); }
 
 @media (prefers-reduced-motion: reduce) {
   .view { animation: none; }
-  .field-note-box { transition: none; }
   .btn[aria-busy=true]::before, .spinner { animation-duration: 2s; }
 }
