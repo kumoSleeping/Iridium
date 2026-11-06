@@ -258,29 +258,41 @@ html[data-turn] .g-turn-stay .glass {
 }
 
 /* Reduced motion: no movement anywhere, only short fades. */
-/* --- snap: the effort slider's knob and fill, by --frac (0 to 1) of the track. The fill (a canvas,
-   chat/liquid.ts) is clipped, not scaled, so its colours stay put along the track. The knob (20px)
-   sits 2px inside the 24px track, its middle 12px in from each end; it glows warmer the higher the
-   level. A soft light from above over the liquid, no sweeping shine. Not while a still screenshot
-   is taken: the popup is portaled out of [data-still], so asked from the root. --- */
-.effort-fill {
-  clip-path: inset(0 calc((1 - var(--frac)) * (100% - 24px)) 0 0 round 999px);
-  transition: clip-path var(--dur-3) var(--ease-spring), filter var(--dur-2) var(--ease-out);
+/* --- snap: the effort slider's knob and fill. chat/goo.ts springs them (--knob, --front and the
+   blobs' --b0.., 0 to 1 of the track; --frac is where they are going), so no transitions here. The
+   fill (a canvas, chat/liquid.ts) is clipped at the front, not scaled, so its colours stay put along
+   the track; the blobs between the front and the knob are drawn with it through the goo filter.
+   The knob (20px) sits 2px inside the 24px track, its middle 12px in from each end; it glows warmer
+   the higher the level. A soft light from above over the liquid, no sweeping shine. Not while a
+   still screenshot is taken: the popup is portaled out of [data-still], so asked from the root. --- */
+.effort-body {
+  clip-path: inset(0 calc((1 - var(--front, var(--frac))) * (100% - 24px)) 0 0 round 999px);
 }
-.effort-fill::after {
+.effort-body::after {
   content: "";
   position: absolute;
   inset: 0;
-  border-radius: inherit;
   background: linear-gradient(to bottom, oklch(1 0 0 / 0.28), oklch(1 0 0 / 0) 50%, oklch(0 0 0 / 0.08));
   box-shadow: inset 0 0 0 0.5px oklch(1 0 0 / 0.18);
 }
-[data-unknown] .effort-fill {
+.effort-blob {
+  position: absolute;
+  top: 50%;
+  left: calc(12px + (100% - 24px) * var(--b, var(--frac)));
+  width: var(--s);
+  height: var(--s);
+  translate: -50% -50%;
+  border-radius: 50%;
+  background: color-mix(in oklab, #ff4a17, #ff2f82 calc(var(--b, var(--frac)) * 70%));
+}
+.effort-tone {
+  transition: filter var(--dur-2) var(--ease-out);
+}
+[data-unknown] .effort-tone {
   filter: saturate(0.1) opacity(0.5);
 }
 .effort-knob {
-  transform: translateX(calc(var(--frac) * 100%));
-  transition: transform var(--dur-3) var(--ease-spring);
+  transform: translateX(calc(var(--knob, var(--frac)) * 100%));
 }
 .effort-knob-face {
   box-shadow:
@@ -291,7 +303,7 @@ html[data-turn] .g-turn-stay .glass {
     box-shadow var(--dur-3) var(--ease-out),
     transform var(--dur-1) var(--ease-out);
 }
-:root:has([data-still]) :is(.effort-fill, .effort-knob, .effort-knob-face, .liquid-text) {
+:root:has([data-still]) :is(.effort-tone, .effort-knob-face, .liquid-text) {
   transition: none;
   animation: none;
 }
@@ -312,8 +324,7 @@ html[data-turn] .g-turn-stay .glass {
   .g-swap > * {
     transform: none !important;
   }
-  .effort-fill,
-  .effort-knob,
+  .effort-tone,
   .liquid-text {
     transition: none;
     animation: none;

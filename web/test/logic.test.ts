@@ -332,19 +332,30 @@ describe("model key", () => {
 });
 
 describe("liquid", () => {
-  test("draws the whole track, the same for the same time; flows faster the higher the level", async () => {
-    const { frame, rate, slosh, W, H } = await import("../src/chat/liquid");
-    const a = new Uint8ClampedArray(W * H * 4);
-    const b = new Uint8ClampedArray(W * H * 4);
-    frame(a, 3.7, 0.5, 0.1);
-    frame(b, 3.7, 0.5, 0.1);
-    expect(a).toEqual(b);
-    for (let o = 3; o < a.length; o += 4) expect(a[o]).toBeGreaterThan(190);
-    expect(rate(0)).toBeLessThan(rate(0.5));
-    expect(rate(0.5)).toBeLessThan(rate(1));
+  test("shades every point in range, the same for the same time", async () => {
+    const { shade, slosh } = await import("../src/chat/liquid");
+    const a = new Uint8ClampedArray(4);
+    const b = new Uint8ClampedArray(4);
+    for (const [u, v, t] of [[0, 0, 0], [1, 1, 3.7], [0.5, 0.2, 42]] as const) {
+      shade(u, v, t, 0.5, 0.1, a, 0);
+      shade(u, v, t, 0.5, 0.1, b, 0);
+      expect([...a]).toEqual([...b]);
+      expect(a[3]).toBeGreaterThan(190);
+    }
     // The slosh swings and settles.
     const s = { push: 0, vel: 1 };
     for (let i = 0; i < 300; i++) slosh(s, 1 / 60);
     expect(Math.abs(s.push) + Math.abs(s.vel)).toBeLessThan(0.01);
+  });
+});
+
+describe("goo", () => {
+  test("the knob leads, the front lags, all come to rest where the knob is to be", async () => {
+    const { SPRINGS, step, still } = await import("../src/chat/goo");
+    const ss = SPRINGS.map((p) => ({ ...p, x: 0, v: 0 }));
+    for (let i = 0; i < 8; i++) for (const s of ss) step(s, 0.5, 1 / 60);
+    expect(ss[0]!.x).toBeGreaterThan(ss[1]!.x + 0.05);
+    for (let i = 0; i < 180; i++) for (const s of ss) step(s, 0.5, 1 / 60);
+    expect(ss.every((s) => still(s, 0.5) || Math.abs(s.x - 0.5) < 1e-3)).toBe(true);
   });
 });
