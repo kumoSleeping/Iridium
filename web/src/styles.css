@@ -377,13 +377,6 @@ body {
   border-radius: 5px;
   padding: 1px 5px;
 }
-/* In the agent's grey bubble (chat/said.tsx AgentBubble): code a shade apart from it, not lost in it. */
-.in-bubble .prose-ir :not(pre) > code {
-  background: var(--fill-2);
-}
-.in-bubble .code-block {
-  background: var(--paper);
-}
 .prose-ir pre {
   font-family: var(--font-mono);
   font-size: 12.5px;

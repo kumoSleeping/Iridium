@@ -27,7 +27,7 @@ import { Draft } from "./markdown";
 import { ContextRing, ModeKey, ModelKey, modelView, QuotaBars, useMode } from "./meters";
 import { Queue } from "./queue";
 import { sourceOf, yours } from "./refs";
-import { AgentBubble, Pending, Running, Said } from "./said";
+import { Pending, Running, Said } from "./said";
 import { Stick, toEnd } from "./stick";
 
 const BUSY = new Set(["running", "compacting", "starting", "waiting"]);
@@ -181,7 +181,7 @@ export function ChatPage({ id, phone, slot }: { id: string; phone: boolean; slot
               high whatever it shows: the conversation does not jump as a call is drafted, runs and
               folds into the line above (the user, 2026-11-06). */}
           {(busy ? shown.filter((b) => b.kind !== "running") : shown).map((b) => (
-            <Said key={b.at} b={b} session={id} cwd={cwd} agent={s.agent} source={source} onJump={openChat} />
+            <Said key={b.at} b={b} session={id} cwd={cwd} source={source} onJump={openChat} />
           ))}
           {log.drafts
             .filter((d) => !d.tool || !busy)
@@ -189,10 +189,8 @@ export function ChatPage({ id, phone, slot }: { id: string; phone: boolean; slot
               d.tool ? (
                 <ToolDraft key={`${d.proc}.${d.n}`} name={d.tool.name} input={d.text} whole />
               ) : (
-                <div key={`${d.proc}.${d.n}`} className="g-fade min-w-0">
-                  <AgentBubble agent={s.agent}>
-                    <Draft text={d.text} live={!d.whole && busy} />
-                  </AgentBubble>
+                <div key={`${d.proc}.${d.n}`} className="g-fade min-w-0 pr-6">
+                  <Draft text={d.text} live={!d.whole && busy} />
                 </div>
               ),
             )}

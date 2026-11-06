@@ -2,15 +2,15 @@
 // its sender's face, name and badge. Your words (from any of your panels or terminals) a bubble on
 // the right, the terminal's avatar and its device; a letter on the left for what another session's
 // ir (its agent's logo, a bot badge, a key to go there), a plugin or a peer sent; Iridium's own lines
-// centred and faint; the agent's words as Markdown with the files they name, in a bubble as yours
-// are, on the left, its logo beside (the user, 2026-11-06); tool calls and thoughts folded to a line.
+// centred and faint; the agent's words as Markdown with the files they name; tool calls and
+// thoughts folded to a line.
 import { Archive, ArchiveRestore, ArrowUpRight, BookOpen, Bot, Brain, Check, ChevronRight, Clock, CircleStop, CircleX, CloudDownload, CloudUpload, Earth, FileCode, FileDiff, FilePen, Files as FilesIcon, FileText, FolderGit2, FlaskConical, FolderOpen, GitBranch, GitCommitHorizontal, GitPullRequest, Globe, Hammer, History, Hourglass, KeyRound, List, ListChecks, LoaderCircle, MessageCircleQuestionMark, MessageSquarePlus, Monitor, Network, Package, Plug, RotateCcw, RotateCw, Search, Send, ServerCog, Smartphone, SquareTerminal, Trash2, UserRound, Workflow as WorkflowIcon, Wrench, X, type LucideIcon } from "lucide-react";
 import { Children, forwardRef, memo, useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { api } from "../api/client";
-import type { Agent, Block, FileRef, Result } from "../api/types.gen";
+import type { Block, FileRef, Result } from "../api/types.gen";
 import { landed, type Sent } from "../chats";
 import { t } from "../i18n";
-import { agentName, Avatar, Badge, cn, IconKey, Logo, Tip } from "../ui";
+import { Avatar, Badge, cn, IconKey, Logo, Tip } from "../ui";
 import { useHome } from "../data";
 import { LocalMark } from "../me";
 import { Files, Picture, previews, size } from "./files";
@@ -30,8 +30,8 @@ const DEVICES: Record<You["device"], [LucideIcon, Parameters<typeof t>[0]]> = { 
 const youName = (who: You) => (who.local ? t("me.local") : who.name);
 
 /** A sender's face: a terminal's avatar (本机 its mark) with its device on the corner; a session's
- *  agent logo on a disc with a bot (a workflow's mark when it is a workflow's prompt); a plugin's or
- *  peer's avatar with its plug. */
+ *  agent logo alone, no disc, no badge (the user, 2026-11-06); a plugin's or peer's avatar with its
+ *  plug. */
 function Face({ who }: { who: You | From }) {
   if (who.kind === "you") {
     const [icon, label] = DEVICES[who.device] ?? DEVICES.computer;
@@ -46,9 +46,8 @@ function Face({ who }: { who: You | From }) {
   const badge = who.workflow ? <Badge icon={WorkflowIcon} size={BADGE} label={t("msg.workflow")} /> : <Badge icon={Bot} size={BADGE} label={t("msg.agent")} />;
   if (who.agent)
     return (
-      <span className="relative grid shrink-0 place-items-center rounded-full bg-fill-2" style={{ width: FACE, height: FACE }}>
-        <Logo agent={who.agent} size={16} />
-        {badge}
+      <span className="grid shrink-0 place-items-center" style={{ width: FACE, height: FACE }} aria-label={t(who.workflow ? "msg.workflow" : "msg.agent")}>
+        <Logo agent={who.agent} size={24} />
       </span>
     );
   if (!who.channel)
@@ -174,11 +173,12 @@ export function Pending({ s, who, retry, drop, bubbleRef }: { s: Sent; who: You;
   );
 }
 
-/** A letter: from another session's ir, a plugin or a peer. Not your words: on the left, in a card. */
+/** A letter: from another session's ir, a plugin or a peer. Not your words: on the left, in a grey
+ *  bubble as yours are (the user, 2026-11-06). */
 function Letter({ src, text, time, onJump }: { src: From; text: string; time?: number; onJump: (id: string) => void }) {
   return (
     <Sender who={src} title={time ? clock(time) : undefined} jump={src.session ? () => onJump(src.session!) : undefined}>
-      <p className="m-0 max-w-[min(560px,100%)] min-w-0 rounded-xl rounded-tl-sm px-3.5 py-2 text-md whitespace-pre-wrap shadow-[inset_0_0_0_1px_var(--edge)] [overflow-wrap:anywhere]">{text}</p>
+      <p className="m-0 max-w-[min(560px,100%)] min-w-0 rounded-xl rounded-tl-sm bg-fill px-3.5 py-2 text-md whitespace-pre-wrap [overflow-wrap:anywhere]">{text}</p>
     </Sender>
   );
 }
@@ -195,38 +195,19 @@ function Line({ icon, children, error, title }: { icon?: ReactNode; children: Re
 
 const SYSTEM: Record<string, Parameters<typeof t>[0]> = { compact: "sys.compact", interrupted: "sys.interrupted", unreadable: "sys.unreadable", api_error: "sys.apiError", local_command: "sys.localCommand" };
 
-/** The agent's words, as yours are drawn (the user, 2026-11-06): a grey bubble, on the left, its
- *  name above; its face the agent's logo alone, no disc. What it is writing (chat.tsx's drafts) is
- *  in one too, so the words do not move as the transcript brings them. */
-export function AgentBubble({ agent, time, children }: { agent: Agent; time?: number; children: ReactNode }) {
-  const name = agentName(agent);
-  return (
-    <div className="flex min-w-0 items-start gap-2.5 pr-6 sm:pr-10" title={time ? clock(time) : undefined}>
-      <span className="grid shrink-0 place-items-center" style={{ width: FACE, height: FACE }} aria-hidden>
-        <Logo agent={agent} size={22} />
-      </span>
-      <div className="flex min-w-0 flex-col items-start gap-1">
-        <span className="max-w-full truncate px-0.5 text-xs leading-4 text-ink-3">{name}</span>
-        <div className="in-bubble flex max-w-full min-w-0 flex-col items-start gap-2 rounded-xl rounded-tl-sm bg-fill px-3.5 py-2">{children}</div>
-      </div>
-    </div>
-  );
-}
-
 /** What the agent said: Markdown, then the files it names. */
-const Assistant = memo(function Assistant({ b, session, cwd, agent }: { b: Block; session: string; cwd: string; agent: Agent }) {
+const Assistant = memo(function Assistant({ b, session, cwd }: { b: Block; session: string; cwd: string }) {
   const home = useHome().data;
   const f = filesIn(b.text ?? "", cwd, home);
-  if (!f.text && !b.files?.length) return null;
   return (
-    <AgentBubble agent={agent} time={b.time}>
-      {f.text && <Markdown text={f.text} className="max-w-full" />}
+    <div className="flex min-w-0 flex-col items-start gap-2 pr-6">
+      {f.text && <Markdown text={f.text} className="w-full" />}
       {!!b.files?.length && <Files session={session} files={b.files} labels={f.labels} />}
-    </AgentBubble>
+    </div>
   );
 });
 
-export function Said({ b, session, cwd, agent, source, onJump }: { b: Shown; session: string; cwd: string; agent: Agent; source: (b: { from?: string; fromTerminal?: string }) => Source; onJump: (id: string) => void }) {
+export function Said({ b, session, cwd, source, onJump }: { b: Shown; session: string; cwd: string; source: (b: { from?: string; fromTerminal?: string }) => Source; onJump: (id: string) => void }) {
   switch (b.kind) {
     case "user": {
       const src = source(b);
@@ -243,7 +224,7 @@ export function Said({ b, session, cwd, agent, source, onJump }: { b: Shown; ses
       );
     }
     case "assistant":
-      return <Assistant b={b} session={session} cwd={cwd} agent={agent} />;
+      return <Assistant b={b} session={session} cwd={cwd} />;
     case "system":
       if (b.event === "iridium") return <Line icon={<RotateCcw size={12} />} title={b.text}>{b.text}</Line>;
       // A background task ended (a workflow, a background agent): its summary as Claude Code says it.
