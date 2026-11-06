@@ -1,12 +1,14 @@
 // A confirmation an agent's ir asked a panel for (docs/api.md "确认"): a new panel's invite or a
 // plugin's token, which must not reach the agent. Its card sits above the asking session's
 // composer and on the settings' 终端 page, and the sidebar lists it under 需要你. Allowed, the
-// secret goes to this panel alone, in the secret's dialog; the agent only learns how it went.
+// secret goes to this panel alone, in the secret's dialog; the agent only learns how it went. One
+// asked with --owner (the new terminal gets Claude) only a panel that has Claude allows.
 import { KeyRound, Link2 } from "lucide-react";
 import { useState } from "react";
 import { api } from "./api/client";
-import type { Confirm } from "./api/types.gen";
+import type { Confirm, Me } from "./api/types.gen";
 import { CardDetails, CardFrame, CardHead, Facts, MainKey, SecondKey } from "./card";
+import { useMe } from "./data";
 import { t, useLang } from "./i18n";
 import { openChat } from "./route";
 import { showSecret } from "./secrets";
@@ -16,9 +18,15 @@ import { titleOf } from "./ui";
 
 export const confirmTitle = (c: Confirm) => (c.kind === "invite" ? t("confirm.invite") : t("confirm.token"));
 
+/** This terminal may say another is the owner's own (--owner, Claude on): a passkey panel that
+ *  has Claude itself. The server checks the same (ownerSays); 本机's ir may too. */
+export const saysOwner = (me?: Me) => !!me && me.kind === "panel" && !me.local && !!me.rules.claudeOwner && (me.rules.agents ?? []).includes("claude");
+
 export function ConfirmCard({ c }: { c: Confirm }) {
   const lang = useLang();
   const list = useList();
+  const me = useMe().data;
+  const blocked = !!c.owner && !saysOwner(me);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<"allow" | "deny" | null>(null);
   const [leaving, setLeaving] = useState(false);
@@ -45,8 +53,8 @@ export function ConfirmCard({ c }: { c: Confirm }) {
       <CardHead
         icon={c.kind === "invite" ? <Link2 size={16} /> : <KeyRound size={16} />}
         title={confirmTitle(c)}
-        tag={c.name}
-        summary={t("confirm.asked", { who })}
+        tag={c.owner ? [c.name, t("term.withClaude")].filter(Boolean).join(" · ") : c.name}
+        summary={blocked ? t("confirm.ownerElsewhere") : t("confirm.asked", { who })}
         open={open}
         setOpen={setOpen}
         keys={
@@ -54,7 +62,7 @@ export function ConfirmCard({ c }: { c: Confirm }) {
             <SecondKey disabled={!!busy} onClick={() => void answer(false)}>
               {t("ask.deny")}
             </SecondKey>
-            <MainKey busy={busy === "allow"} disabled={!!busy} onClick={() => void answer(true)}>
+            <MainKey busy={busy === "allow"} disabled={!!busy || blocked} onClick={() => void answer(true)}>
               {t("confirm.allow")}
             </MainKey>
           </>
@@ -70,6 +78,7 @@ export function ConfirmCard({ c }: { c: Confirm }) {
             ]}
           />
           <p className="m-0 text-xs text-ink-3">{c.kind === "invite" ? t("confirm.inviteHint") : t("confirm.tokenHint")}</p>
+          {c.owner && <p className="m-0 text-xs text-ink-3">{blocked ? t("confirm.ownerElsewhere") : t("confirm.ownerHint")}</p>}
         </CardDetails>
       )}
     </CardFrame>

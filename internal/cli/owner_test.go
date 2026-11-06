@@ -8,18 +8,17 @@ import (
 	"github.com/kumoSleeping/iridium/internal/api"
 )
 
-// Claude is given at the machine by a person only: ir token --owner, ir invite --owner and
-// ir access <名字> --claude on refuse an agent (and so does the daemon, should an agent's ir skip
-// the check); --claude off is anyone's.
+// Claude is given by a person only: ir access <名字> --claude on refuses an agent (and so does the
+// daemon, should an agent's ir skip the check); an agent's ir token --owner and ir invite --owner
+// only ask, for a panel that has Claude (or 本机) to allow; --claude off is anyone's.
 func TestOwnerOnlyFromAPerson(t *testing.T) {
 	person, agent := daemonFor(t)
-	for _, args := range [][]string{{"token", "bot", "--owner"}, {"invite", "--owner"}, {"invite", "pad", "--owner"}, {"access", "bot", "--claude", "on"}} {
-		if code, out, errs := runAs(agent, args...); code != 2 || !strings.Contains(errs, "agent 不能给终端 Claude") || out != "" {
-			t.Errorf("an agent's %v: %d %q %q", args, code, out, errs)
-		}
+	if code, out, errs := runAs(agent, "access", "bot", "--claude", "on"); code != 2 || !strings.Contains(errs, "agent 不能直接给终端 Claude") || out != "" {
+		t.Errorf("an agent's --claude on: %d %q %q", code, out, errs)
 	}
-	if code, err := agent.call("POST", "/api/terminals/tokens", api.NewInvite{Name: "bot", Owner: true}, nil); code != http.StatusForbidden {
-		t.Errorf("the daemon let an agent's --owner through: %d %v", code, err)
+	var p api.Pending
+	if code, err := agent.call("POST", "/api/terminals/tokens", api.NewInvite{Name: "bot", Owner: true}, &p); code != http.StatusAccepted || !p.Confirm.Owner {
+		t.Errorf("an agent's --owner did not ask: %d %v %+v", code, err, p)
 	}
 
 	code, out, errs := runAs(person, "token", "bot", "--owner")

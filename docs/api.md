@@ -307,9 +307,9 @@ Web Push，总开关在配置 `push`，默认关。VAPID 密钥存在状态目�
 | `PUT /api/me/device` | `SetDevice` → `Terminal` | 改自己的设备（`computer`/`phone`，别的回 400）；本机也行。网页在“这个终端”弹窗里改 |
 | `PUT /api/terminals/{id}/device` | 同上 | 改别的终端的（`id` 也可以是名字，`本机`/`local` 也行），要管理权；`ir profile <名字> --device phone` |
 | `GET /api/terminals` | → `Terminals` | `ir access`：所有终端（本机在最前）、权限表、今天的用量，和未用的邀请。没有秘密 |
-| `POST /api/terminals/invites` | `NewInvite` → `Invite` | `ir invite [名字]`：新面板的一次性链接（10 分钟），`qr` 是同一链接的二维码（SVG data URL）。要先有 `public.origin`（否则 409）。没有面板权时回 202 `Pending`。`owner: true`（`--owner`）：加入的面板带 Claude，只认本机由人跑的 `ir`，否则 403 |
+| `POST /api/terminals/invites` | `NewInvite` → `Invite` | `ir invite [名字]`：新面板的一次性链接（10 分钟），`qr` 是同一链接的二维码（SVG data URL）。要先有 `public.origin`（否则 409）。没有面板权时回 202 `Pending`。`owner: true`（`--owner`）：加入的面板带 Claude。本机由人跑的 `ir`、带 Claude 的面板（有 Passkey 的，不算没配 `public.origin` 的本机网页）直接给；agent 的回 202 `Pending`，只有带 Claude 的面板或本机 `ir` 能同意；别的 403 |
 | `POST /api/terminals/tokens` | `NewInvite` → `Token` | `ir token <名字>`：插件 TOKEN，只给这一次；已有的通道换新 TOKEN，旧的作废。没有面板权时回 202 `Pending`。`owner: true` 同上：给它开 Claude |
-| `PUT /api/terminals/{id}/rules` | `SetRules` → `Terminal` | 改权限表。放宽要面板权；加 Claude 只认本机由人跑的 `ir`（`ir access <名字> --claude on`），网页和 agent 一律 403；去掉 Claude 谁管都行 |
+| `PUT /api/terminals/{id}/rules` | `SetRules` → `Terminal` | 改权限表。放宽要面板权；加 Claude 只认本机由人跑的 `ir`（`ir access <名字> --claude on`）或带 Claude 的面板，别的面板、本机网页和 agent 一律 403；去掉 Claude 谁管都行 |
 | `DELETE /api/terminals/{id}` | → `{ok}` | `ir revoke`：终端（连同登录、权限、连接）或未用的邀请；最后一个有 Passkey 的面板删不了（409） |
 
 ## 权限表（`Rules`）
@@ -317,7 +317,7 @@ Web Push，总开关在配置 `push`，默认关。VAPID 密钥存在状态目�
 | 项 | 说明 |
 |---|---|
 | `agents` | 能用哪些 agent，也只看得到这些 agent 的会话。`claude` 另要 `claudeOwner` |
-| `claudeOwner` | 这是你本人的终端（Claude 用户协议）：`{by, at}`，`by` 是 `local`（本机 `ir` 的 `--owner`、`--claude on`）或 `first`（第一个面板）。服务端写，请求里带的不算。去掉 Claude 就清掉 |
+| `claudeOwner` | 这是你本人的终端（Claude 用户协议）：`{by, at}`，`by` 是 `local`（本机 `ir` 的 `--owner`、`--claude on`；`--owner` 邀请加入的面板也记这个）、`panel`（带 Claude 的面板开的或同意的）或 `first`（第一个面板）。服务端写，请求里带的不算。去掉 Claude 就清掉 |
 | `allDirs`、`dirs`、`workspaces` | 能用哪些目录：全部，或某些目录（含下层）和工作区 |
 | `seeOthers` | 看不看别的终端开的会话；不经 Iridium 开的算本机的 |
 | `filesIn`、`filesOut` | 拷入（上传、附件、按路径）、拷出（下载、缩略图、插件取文件） |
@@ -341,7 +341,7 @@ agent 调 `ir invite`、`ir token` 时，邀请链接和 TOKEN 不能进它的�
 | 请求 | 正文 → 回答 | 说明 |
 |---|---|---|
 | `GET /api/confirms` | → `Confirms` | 等确认的（面板权）。事件流 `confirms` 是同一份 |
-| `POST /api/confirms/{id}` | `ConfirmAnswer` → `ConfirmReply` | 面板同意或拒绝；同意时回答里带 `invite` 或 `token`，只此一次 |
+| `POST /api/confirms/{id}` | `ConfirmAnswer` → `ConfirmReply` | 面板同意或拒绝；同意时回答里带 `invite` 或 `token`，只此一次。`owner: true` 的确认只有带 Claude 的面板或本机 `ir` 能同意（别的 403，确认继续等），谁都能拒绝 |
 | `GET /api/confirms/{id}?wait=<秒>` | → `ConfirmState` | 结果：`pending`、`allowed`、`denied`、`expired`、`failed`，从不带秘密。`wait` 最多 60 秒，有结果就回 |
 
 ## 公网入口

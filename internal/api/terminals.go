@@ -45,7 +45,8 @@ type Rules struct {
 // OwnerConfirm is how, and when (ms), a terminal was found the owner's own.
 type OwnerConfirm struct {
 	// By: "local" (a person's ir on the machine: ir invite --owner, ir token --owner,
-	// ir access --claude on) or "first" (the first panel registered).
+	// ir access --claude on), "panel" (a person on a panel that has Claude, or one that
+	// confirmed an agent's ask) or "first" (the first panel registered).
 	By string `json:"by"`
 	At int64  `json:"at"`
 }
@@ -106,8 +107,9 @@ type Me struct {
 }
 
 // NewInvite asks for a panel invite (ir invite [name]) or a channel token (ir token <name>).
-// Owner (--owner): the terminal is the owner's own and gets Claude; only a person's ir on the
-// machine may say so.
+// Owner (--owner): the terminal is the owner's own and gets Claude; only a person at the machine
+// or on a panel that has Claude may say so. An agent's goes to a confirmation that only such a
+// panel (or 本机) may allow.
 type NewInvite struct {
 	Name  string `json:"name,omitempty"`
 	Owner bool   `json:"owner,omitempty"`
@@ -141,6 +143,7 @@ type Confirm struct {
 	ID        string `json:"id"`
 	Kind      string `json:"kind"` // invite | token
 	Name      string `json:"name,omitempty"`
+	Owner     bool   `json:"owner,omitempty"`   // --owner: it gets Claude; only a panel that has Claude allows it
 	Asker     string `json:"asker"`             // the terminal that asked (本机)
 	Session   string `json:"session,omitempty"` // the session whose agent asked, if known
 	CreatedAt int64  `json:"createdAt"`
@@ -163,6 +166,7 @@ type ConfirmState struct {
 	Kind      string `json:"kind"`
 	State     string `json:"state"` // pending | allowed | denied | expired | failed
 	Name      string `json:"name,omitempty"`
+	Owner     bool   `json:"owner,omitempty"`     // it was asked with --owner
 	ExpiresAt int64  `json:"expiresAt,omitempty"` // allowed invite: until when the link works
 	Error     string `json:"error,omitempty"`
 }

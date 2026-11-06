@@ -43,8 +43,25 @@ type caller struct {
 func (c caller) panel() bool { return !c.agent && (c.Kind == gate.KindPanel || c.Local) }
 
 // machine reports whether a person at the machine sent it: ir over the socket, as 本机, not run
-// by an agent. Only that gives a terminal Claude (Claude's terms: the owner's own terminals only).
+// by an agent.
 func (c caller) machine() bool { return c.socket && c.Local && !c.agent }
+
+// ownerSays is how the caller may say a terminal is the owner's own and give it Claude (Claude's
+// terms: the owner's own terminals only), "" if it may not: a person at the machine (ByLocal), or
+// a person on a passkey panel that has Claude, being the owner's own itself (ByPanel). Never an
+// agent, not even in a session such a panel opened: its --owner waits for one of these to confirm
+// it. Nor the local page (no public origin): anything on the machine reaches it, an agent too.
+func (s *Server) ownerSays(c caller) string {
+	switch {
+	case c.agent:
+		return ""
+	case c.machine():
+		return access.ByLocal
+	case c.panel() && !c.Local && c.Kind == gate.KindPanel && access.HasClaude(s.rulesFor(c)):
+		return access.ByPanel
+	}
+	return ""
+}
 
 type callerKey struct{}
 
@@ -498,20 +515,20 @@ func ms(t time.Time) int64 {
 	return t.UnixMilli()
 }
 
-// widened is the rules a change asks for, checked: only a panel widens, and only a person at the
-// machine adds claude (no panel, not for itself nor for others); taking it away is anyone's that
-// manages. The owner mark is the server's to write: one in the request counts for nothing.
-func widened(c caller, old api.Rules, req api.SetRules) (api.Rules, error) {
+// widened is the rules a change asks for, checked: only a panel widens, and only one that may say
+// a terminal is the owner's own (ownerBy, from ownerSays) adds claude; taking it away is anyone's
+// that manages. The owner mark is the server's to write: one in the request counts for nothing.
+func widened(c caller, ownerBy string, old api.Rules, req api.SetRules) (api.Rules, error) {
 	r := req.Rules
 	r.ClaudeOwner = nil
 	if slices.Contains(r.Agents, api.AgentClaude) {
 		switch {
 		case access.HasClaude(old):
 			r.ClaudeOwner = old.ClaudeOwner
-		case !c.machine():
+		case ownerBy == "":
 			return access.Clean(r), access.ErrOwner
 		default:
-			r.ClaudeOwner = &api.OwnerConfirm{By: access.ByLocal, At: time.Now().UnixMilli()}
+			r.ClaudeOwner = &api.OwnerConfirm{By: ownerBy, At: time.Now().UnixMilli()}
 		}
 	}
 	next := access.Clean(r)

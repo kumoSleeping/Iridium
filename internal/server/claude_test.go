@@ -22,16 +22,21 @@ func (l *live) terminal(as, id string) api.Terminal {
 	return api.Terminal{}
 }
 
-// Claude only for the owner's own terminals, said at the machine (plan "交互终端"): ir token
-// --owner gives it, a plain token does not; an agent's --owner, and the web's, are refused. The
-// web (a panel, or the local page) only takes it away; a person's ir gives it back.
+// Claude only for the owner's own terminals, said by a person (plan "交互终端"): ir token --owner
+// gives it, a plain token does not; the local page's --owner is refused, an agent's only asks
+// (TestOwnerFromPanels has panels that have Claude). The local page only takes it away; a
+// person's ir gives it back.
 func TestClaudeOnlyFromTheMachine(t *testing.T) {
 	l := start(t)
 
-	// --owner: only from a person's ir.
-	l.want(403, "agent", "POST", "/api/terminals/tokens", api.NewInvite{Name: "mine", Owner: true}, nil)
+	// --owner: from a person's ir; an agent's waits for a confirmation, the local page's is refused.
+	var p api.Pending
+	l.want(202, "agent", "POST", "/api/terminals/tokens", api.NewInvite{Name: "mine", Owner: true}, &p)
+	if !p.Confirm.Owner {
+		t.Fatalf("an agent's --owner ask: %+v", p.Confirm)
+	}
 	l.want(403, "web", "POST", "/api/terminals/tokens", api.NewInvite{Name: "mine", Owner: true}, nil)
-	l.want(403, "agent", "POST", "/api/terminals/invites", api.NewInvite{Owner: true}, nil)
+	l.want(409, "agent", "POST", "/api/terminals/invites", api.NewInvite{Owner: true}, nil) // no public origin
 	l.want(403, "web", "POST", "/api/terminals/invites", api.NewInvite{Owner: true}, nil)
 	var mine, other api.Token
 	l.want(200, "socket", "POST", "/api/terminals/tokens", api.NewInvite{Name: "mine", Owner: true}, &mine)

@@ -163,25 +163,23 @@ func ownerFlag(args []string) (rest []string, owner bool) {
 	return rest, owner
 }
 
-// personOnly refuses what only a person at the machine may do (give a terminal Claude) when an
+// personOnly refuses what only a person may do straight away (turn a terminal's Claude on) when an
 // agent runs ir, by the same signs that keep secrets from agents. The daemon refuses it too.
 func personOnly(e adminEnv, cmd, what string, stderr io.Writer) bool {
 	if !e.agent {
 		return true
 	}
-	fmt.Fprintf(stderr, "ir %s: %s只能你本人在本机的终端里跑；agent 不能给终端 Claude（Claude 只给本人的终端）。\n", cmd, what)
+	fmt.Fprintf(stderr, "ir %s: %s只能你本人跑（本机终端，或带 Claude 的网页面板）；agent 不能直接给终端 Claude（Claude 只给本人的终端）。要新终端带 Claude，用 ir invite --owner 或 ir token --owner，由带 Claude 的面板确认。\n", cmd, what)
 	return false
 }
 
 // invite: ir invite [名字] [--owner]. A person gets the link; an agent, only what the panel
-// decided. --owner (a person only): the panel is the owner's own and gets Claude.
+// decided. --owner: the panel is the owner's own and gets Claude; an agent's waits for a panel
+// that has Claude (or 本机) to allow it.
 func invite(e adminEnv, args []string, stdout, stderr io.Writer) int {
 	args, owner := ownerFlag(args)
 	if len(args) > 1 || (len(args) == 1 && strings.HasPrefix(args[0], "-")) {
 		fmt.Fprintln(stderr, "用法：ir invite [名字] [--owner]\n  --owner：确认这是我本人用的终端，带 Claude")
-		return 2
-	}
-	if owner && !personOnly(e, "invite", "--owner ", stderr) {
 		return 2
 	}
 	req := api.NewInvite{Owner: owner}
@@ -209,14 +207,12 @@ func invite(e adminEnv, args []string, stdout, stderr io.Writer) int {
 }
 
 // token: ir token <名字> [--owner]. A person gets the token; an agent, only what the panel
-// decided. --owner (a person only): the plugin is the owner's own and gets Claude.
+// decided. --owner: the plugin is the owner's own and gets Claude; an agent's waits for a panel
+// that has Claude (or 本机) to allow it.
 func token(e adminEnv, args []string, stdout, stderr io.Writer) int {
 	args, owner := ownerFlag(args)
 	if len(args) != 1 || strings.HasPrefix(args[0], "-") {
 		fmt.Fprintln(stderr, "用法：ir token <名字> [--owner]\n  --owner：确认这是我本人用的终端，带 Claude")
-		return 2
-	}
-	if owner && !personOnly(e, "token", "--owner ", stderr) {
 		return 2
 	}
 	var raw json.RawMessage
@@ -249,7 +245,12 @@ func waitConfirm(e adminEnv, raw json.RawMessage, stdout, stderr io.Writer) int 
 	if p.Confirm.Name != "" {
 		what += "（" + p.Confirm.Name + "）"
 	}
-	fmt.Fprintf(stdout, "%s要在网页面板上确认：已发到“需要你”，%s 前有效。等确认……\n", what, hhmm(p.Confirm.ExpiresAt))
+	who := "网页面板"
+	if p.Confirm.Owner {
+		what += "，带 Claude"
+		who = "带 Claude 的网页面板"
+	}
+	fmt.Fprintf(stdout, "%s要在%s上确认：已发到“需要你”，%s 前有效。等确认……\n", what, who, hhmm(p.Confirm.ExpiresAt))
 	for {
 		var st api.ConfirmState
 		if _, err := e.call("GET", "/api/confirms/"+url.PathEscape(p.Confirm.ID)+"?wait=60", nil, &st); err != nil {
@@ -259,10 +260,14 @@ func waitConfirm(e adminEnv, raw json.RawMessage, stdout, stderr io.Writer) int 
 		case "pending":
 			continue
 		case "allowed":
+			claude := ""
+			if st.Owner {
+				claude = "，带 Claude"
+			}
 			if st.Kind == "invite" {
-				fmt.Fprintf(stdout, "同意了：邀请链接只显示在确认的那个面板上（%s 前有效）。\n", hhmm(st.ExpiresAt))
+				fmt.Fprintf(stdout, "同意了%s：邀请链接只显示在确认的那个面板上（%s 前有效）。\n", claude, hhmm(st.ExpiresAt))
 			} else {
-				fmt.Fprintf(stdout, "同意了：%s 的 TOKEN 只显示在确认的那个面板上。\n", st.Name)
+				fmt.Fprintf(stdout, "同意了%s：%s 的 TOKEN 只显示在确认的那个面板上。\n", claude, st.Name)
 			}
 			return 0
 		case "denied":
@@ -372,7 +377,7 @@ func claudeSwitch(e adminEnv, ref string, on bool, stdout, stderr io.Writer) int
 	if on {
 		fmt.Fprintf(stdout, "给 %s 开了 Claude：确认它是你本人用的终端。\n", t.Name)
 	} else {
-		fmt.Fprintf(stdout, "关了 %s 的 Claude；要再开，在本机跑 ir access %s --claude on。\n", t.Name, t.Name)
+		fmt.Fprintf(stdout, "关了 %s 的 Claude；要再开，在本机跑 ir access %s --claude on，或在带 Claude 的面板上开。\n", t.Name, t.Name)
 	}
 	return 0
 }

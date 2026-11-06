@@ -32,7 +32,7 @@ var (
 	ErrFilesIn     = &Denied{"this terminal may not copy files in"}
 	ErrFilesOut    = &Denied{"this terminal may not copy files out"}
 	ErrCap         = &Denied{"this terminal used its tokens for today"}
-	ErrOwner       = &Denied{"claude is only for the owner's own terminals, and only a person at the machine turns it on (ir access <name> --claude on)"}
+	ErrOwner       = &Denied{"claude is only for the owner's own terminals, and only a person at the machine or on a panel that has Claude turns it on (ir access <name> --claude on)"}
 	ErrWiden       = &Denied{"only a web panel may widen a terminal's permissions"}
 	ErrManage      = &Denied{"only a web panel or 本机 manages this"}
 	ErrLocal       = errors.New("本机's permissions are all of them and do not change")
@@ -49,7 +49,8 @@ func Full() api.Rules {
 }
 
 // Default is a new terminal's table. Claude is off: only the first panel, an ir invite --owner or
-// ir token --owner, or ir access --claude on, all on the machine, give it (WithClaude). A channel
+// ir token --owner, or ir access --claude on, each from a person at the machine or on a panel that
+// has Claude (an agent's only once such a panel confirms it), give it (WithClaude). A channel
 // (a plugin or a peer) sees only what it opened and runs with approvals.
 func Default(kind api.TerminalKind) api.Rules {
 	r := Full()
@@ -65,6 +66,7 @@ func Default(kind api.TerminalKind) api.Rules {
 const (
 	ByLocal = api.LocalTerminal // a person's ir on the machine
 	ByFirst = "first"           // the first panel registered
+	ByPanel = "panel"           // a person on a panel that has Claude (or that confirmed an agent's ask)
 )
 
 // HasClaude reports whether r gives its terminal Claude.
@@ -72,7 +74,7 @@ func HasClaude(r api.Rules) bool {
 	return r.ClaudeOwner != nil && slices.Contains(r.Agents, api.AgentClaude)
 }
 
-// WithClaude is r with Claude on, found the owner's own by (ByLocal, ByFirst) at at (ms). One that
+// WithClaude is r with Claude on, found the owner's own by (ByLocal, ByFirst, ByPanel) at at (ms). One that
 // has it already keeps how it got it.
 func WithClaude(r api.Rules, by string, at int64) api.Rules {
 	if HasClaude(r) {

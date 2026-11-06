@@ -11,7 +11,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { ApiError, api } from "./api/client";
 import type { Agent, Rules, Terminal, Terminals } from "./api/types.gen";
 import { CardFrame, CardHead, MainKey, SecondKey } from "./card";
-import { ConfirmCard } from "./confirms";
+import { ConfirmCard, saysOwner } from "./confirms";
 import { useMe, useTerminals, useWorkspaces } from "./data";
 import { t, useLang } from "./i18n";
 import { LocalMark, Segmented } from "./me";
@@ -196,11 +196,12 @@ function Detail({ x }: { x: Terminal }) {
 /** Claude is on: the server marked the terminal the owner's own. */
 export const hasClaude = (r: Rules) => !!r.claudeOwner && (r.agents ?? []).includes("claude");
 
-/** A terminal's permission table (docs/api.md "权限表"), each change saved at once. Claude only
- *  shows, on or off, and may be turned off: only a person at the machine turns it on (Claude's
- *  terms: the owner's own terminals only), with ir. */
+/** A terminal's permission table (docs/api.md "权限表"), each change saved at once. Claude shows,
+ *  on or off, and may be turned off; only a person turns it on (Claude's terms: the owner's own
+ *  terminals only): here on a panel that has Claude, or with ir at the machine. */
 function RulesEditor({ x }: { x: Terminal }) {
   const qc = useQueryClient();
+  const owner = saysOwner(useMe().data);
   const ws = useWorkspaces().data ?? [];
   const [r, setR] = useState<Rules>(x.rules);
   const [saving, setSaving] = useState(false);
@@ -246,12 +247,17 @@ function RulesEditor({ x }: { x: Terminal }) {
           ))}
         </div>
       </Item>
-      <Item label={agentName("claude")} hint={claude ? t("term.claudeOnHint") : t("term.claudeOffHint", { name: /\s/.test(x.name) ? `"${x.name}"` : x.name })}>
+      <Item label={agentName("claude")} hint={claude ? (owner ? t("term.claudeOnHintPanel") : t("term.claudeOnHint")) : owner ? t("term.claudeOffHintPanel") : t("term.claudeOffHint", { name: /\s/.test(x.name) ? `"${x.name}"` : x.name })}>
         <span className="flex items-center gap-1">
           <span className={cn("px-1 text-sm", claude ? "text-ink-2" : "text-ink-3")}>{claude ? t("term.on") : t("term.off")}</span>
           {claude && (
             <button type="button" onClick={() => void put({ ...r, agents: agents.filter((y) => y !== "claude"), claudeOwner: undefined })} className="g-press h-8 rounded-md px-2.5 text-sm text-ink-2 hover:bg-fill">
               {t("term.claudeTurnOff")}
+            </button>
+          )}
+          {!claude && owner && (
+            <button type="button" onClick={() => void put({ ...r, agents: [...agents, "claude"] })} className="g-press h-8 rounded-md px-2.5 text-sm text-ink-2 hover:bg-fill">
+              {t("term.claudeTurnOn")}
             </button>
           )}
         </span>
@@ -337,13 +343,16 @@ function NewTerminal() {
   const [open, setOpen] = useState(false);
   const [kind, setKind] = useState<"invite" | "token" | null>(null);
   const [name, setName] = useState("");
+  const [withClaude, setWithClaude] = useState(false);
   const [busy, setBusy] = useState(false);
+  const canClaude = saysOwner(me);
   const make = async () => {
     if (kind === "token" && !name.trim()) return;
     setBusy(true);
     try {
-      if (kind === "invite") showSecret({ invite: await api.invite(name.trim()) });
-      else showSecret({ token: await api.token(name.trim()) });
+      const owner = canClaude && withClaude;
+      if (kind === "invite") showSecret({ invite: await api.invite(name.trim(), owner) });
+      else showSecret({ token: await api.token(name.trim(), owner) });
       setOpen(false);
       void qc.invalidateQueries({ queryKey: ["terminals"] });
     } catch (e) {
@@ -354,7 +363,7 @@ function NewTerminal() {
     }
   };
   const choice = (k: "invite" | "token", icon: ReactNode, label: string, hint: string, off?: boolean) => (
-    <button type="button" disabled={off} onClick={() => (setKind(k), setName(""))} className="flex min-h-11 items-start gap-2.5 rounded-md px-2 py-1.5 text-left hover:bg-fill disabled:opacity-45 disabled:hover:bg-transparent">
+    <button type="button" disabled={off} onClick={() => (setKind(k), setName(""), setWithClaude(false))} className="flex min-h-11 items-start gap-2.5 rounded-md px-2 py-1.5 text-left hover:bg-fill disabled:opacity-45 disabled:hover:bg-transparent">
       <span className="mt-0.5 text-ink-2">{icon}</span>
       <span className="min-w-0 flex-1">
         <span className="block text-base">{label}</span>
@@ -394,6 +403,15 @@ function NewTerminal() {
               <span className="text-sm font-semibold">{kind === "invite" ? t("term.invite") : t("term.token")}</span>
             </div>
             <input autoFocus value={name} maxLength={12} onChange={(e) => setName(e.target.value)} placeholder={kind === "invite" ? t("term.nameOptional") : t("term.name")} aria-label={t("term.name")} className="no-ring h-9 rounded-md bg-fill px-2.5 text-base placeholder:text-ink-3" />
+            {canClaude && (
+              <div className="flex items-center gap-2 px-0.5">
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm">{t("term.withClaude")}</span>
+                  <span className="block text-xs text-ink-3">{t("term.withClaudeHint")}</span>
+                </span>
+                <Switch label={t("term.withClaude")} on={withClaude} onChange={setWithClaude} />
+              </div>
+            )}
             <div className="flex justify-end">
               <MainKey type="submit" busy={busy} disabled={kind === "token" && !name.trim()}>
                 {t("term.make")}

@@ -41,15 +41,15 @@ func newConfirms(h *hub.Hub) *confirms {
 	return cs
 }
 
-func (cs *confirms) add(kind, name, asker, session string) api.Confirm {
+func (cs *confirms) add(kind, name string, owner bool, asker, session string) api.Confirm {
 	b := make([]byte, 8)
 	_, _ = rand.Read(b)
 	now := time.Now()
-	c := api.Confirm{ID: hex.EncodeToString(b), Kind: kind, Name: name, Asker: asker, Session: session,
+	c := api.Confirm{ID: hex.EncodeToString(b), Kind: kind, Name: name, Owner: owner, Asker: asker, Session: session,
 		CreatedAt: now.UnixMilli(), ExpiresAt: now.Add(ConfirmTTL).UnixMilli()}
 	cs.mu.Lock()
 	cs.pruneLocked(now)
-	cs.all[c.ID] = &confirm{c: c, state: api.ConfirmState{ID: c.ID, Kind: kind, State: "pending", Name: name}, done: make(chan struct{})}
+	cs.all[c.ID] = &confirm{c: c, state: api.ConfirmState{ID: c.ID, Kind: kind, State: "pending", Name: name, Owner: owner}, done: make(chan struct{})}
 	cs.mu.Unlock()
 	cs.publish()
 	return c
@@ -85,6 +85,17 @@ func (cs *confirms) pending() api.Confirms {
 }
 
 func (cs *confirms) publish() { cs.hub.Set("confirms", cs.pending()) }
+
+// peek is pending confirmation id, unclaimed.
+func (cs *confirms) peek(id string) (api.Confirm, bool) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	c := cs.all[id]
+	if c == nil || c.state.State != "pending" || time.Now().UnixMilli() >= c.c.ExpiresAt {
+		return api.Confirm{}, false
+	}
+	return c.c, true
+}
 
 // take claims pending confirmation id for answering: no one else answers it meanwhile.
 func (cs *confirms) take(id string) (api.Confirm, bool) {

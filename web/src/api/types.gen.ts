@@ -1025,7 +1025,8 @@ export interface Rules {
 export interface OwnerConfirm {
   /**
    * By: "local" (a person's ir on the machine: ir invite --owner, ir token --owner,
-   * ir access --claude on) or "first" (the first panel registered).
+   * ir access --claude on), "panel" (a person on a panel that has Claude, or one that
+   * confirmed an agent's ask) or "first" (the first panel registered).
    */
   by: string;
   at: number /* int64 */;
@@ -1091,8 +1092,9 @@ export interface Me extends Terminal {
 }
 /**
  * NewInvite asks for a panel invite (ir invite [name]) or a channel token (ir token <name>).
- * Owner (--owner): the terminal is the owner's own and gets Claude; only a person's ir on the
- * machine may say so.
+ * Owner (--owner): the terminal is the owner's own and gets Claude; only a person at the machine
+ * or on a panel that has Claude may say so. An agent's goes to a confirmation that only such a
+ * panel (or 本机) may allow.
  */
 export interface NewInvite {
   name?: string;
@@ -1133,6 +1135,7 @@ export interface Confirm {
   id: string;
   kind: string; // invite | token
   name?: string;
+  owner?: boolean; // --owner: it gets Claude; only a panel that has Claude allows it
   asker: string; // the terminal that asked (本机)
   session?: string; // the session whose agent asked, if known
   createdAt: number /* int64 */;
@@ -1158,6 +1161,7 @@ export interface ConfirmState {
   kind: string;
   state: string; // pending | allowed | denied | expired | failed
   name?: string;
+  owner?: boolean; // it was asked with --owner
   expiresAt?: number /* int64 */; // allowed invite: until when the link works
   error?: string;
 }

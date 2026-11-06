@@ -117,7 +117,7 @@ func (s *Server) setRules(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c := callerOf(r)
-	next, err := widened(c, s.rulesOf(id, info.Kind, false), req)
+	next, err := widened(c, s.ownerSays(c), s.rulesOf(id, info.Kind, false), req)
 	switch {
 	case access.IsDenied(err):
 		forbid(w, err)
@@ -183,7 +183,7 @@ func (s *Server) invite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c := callerOf(r)
-	if req.Owner && !c.machine() {
+	if req.Owner && c.panel() && s.ownerSays(c) == "" {
 		forbid(w, errOwnerFlag)
 		return
 	}
@@ -196,7 +196,7 @@ func (s *Server) invite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !c.panel() {
-		s.ask(w, c, "invite", req.Name)
+		s.ask(w, c, "invite", req.Name, req.Owner)
 		return
 	}
 	inv, err := s.makeInvite(req.Name, req.Owner)
@@ -217,15 +217,19 @@ func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c := callerOf(r)
-	if req.Owner && !c.machine() {
+	by := s.ownerSays(c)
+	if req.Owner && c.panel() && by == "" {
 		forbid(w, errOwnerFlag)
 		return
 	}
 	if !c.panel() {
-		s.ask(w, c, "token", req.Name)
+		s.ask(w, c, "token", req.Name, req.Owner)
 		return
 	}
-	tok, err := s.makeToken(req.Name, req.Owner)
+	if !req.Owner {
+		by = ""
+	}
+	tok, err := s.makeToken(req.Name, by)
 	if err != nil {
 		s.gateDone(w, err)
 		return
@@ -234,14 +238,15 @@ func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 }
 
 // ask turns an agent's request for a secret into a confirmation for the panels: 202 and no secret.
-func (s *Server) ask(w http.ResponseWriter, c caller, kind, name string) {
-	cf := s.asks.add(kind, name, c.Name, c.session)
-	s.logf("server: %s asks a panel for a %s (%s), confirmation %s", c.Name, kind, name, cf.ID)
+// owner (--owner): only a panel that has Claude, or 本机, may allow it (answerConfirm).
+func (s *Server) ask(w http.ResponseWriter, c caller, kind, name string, owner bool) {
+	cf := s.asks.add(kind, name, owner, c.Name, c.session)
+	s.logf("server: %s asks a panel for a %s (%s, owner %v), confirmation %s", c.Name, kind, name, owner, cf.ID)
 	reply(w, http.StatusAccepted, api.Pending{Confirm: cf})
 }
 
-// errOwnerFlag answers --owner from anyone but a person at the machine.
-var errOwnerFlag = errors.New("only a person at the machine says a terminal is the owner's own (--owner): not an agent, not the web")
+// errOwnerFlag answers --owner from a panel that has no Claude itself.
+var errOwnerFlag = errors.New("only a person at the machine or on a panel that has Claude says a terminal is the owner's own (--owner)")
 
 // makeInvite makes a panel invite; owner: the panel that joins gets Claude (joined).
 func (s *Server) makeInvite(name string, owner bool) (*api.Invite, error) {
@@ -257,15 +262,15 @@ func (s *Server) makeInvite(name string, owner bool) (*api.Invite, error) {
 	return out, nil
 }
 
-// makeToken gives channel name its token; owner (ir token --owner): it gets Claude too. Without
-// it, a channel that has Claude keeps it.
-func (s *Server) makeToken(name string, owner bool) (*api.Token, error) {
+// makeToken gives channel name its token; ownerBy (ir token --owner, as ownerSays found it): it
+// gets Claude too. Without it, a channel that has Claude keeps it.
+func (s *Server) makeToken(name, ownerBy string) (*api.Token, error) {
 	info, tok, err := s.gate().CreateToken(name)
 	if err != nil {
 		return nil, err
 	}
-	if owner {
-		if err := s.giveClaude(info, access.ByLocal); err != nil {
+	if ownerBy != "" {
+		if err := s.giveClaude(info, ownerBy); err != nil {
 			return nil, err
 		}
 	}
@@ -312,23 +317,34 @@ func (s *Server) answerConfirm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
+	c := callerOf(r)
+	by := s.ownerSays(c)
+	// An --owner ask is allowed only by one that may say so; it stays waiting for one that may.
+	// Denying it is any panel's.
+	if cf, ok := s.asks.peek(id); ok && cf.Owner && a.Allow && by == "" {
+		forbid(w, errOwnerFlag)
+		return
+	}
 	cf, ok := s.asks.take(id)
 	if !ok {
 		fail(w, http.StatusNotFound, "no such confirmation waiting")
 		return
 	}
-	st := api.ConfirmState{ID: id, Kind: cf.Kind, Name: cf.Name, State: "denied"}
+	if !cf.Owner {
+		by = ""
+	}
+	st := api.ConfirmState{ID: id, Kind: cf.Kind, Name: cf.Name, Owner: cf.Owner, State: "denied"}
 	out := api.ConfirmReply{}
 	if a.Allow {
 		var err error
 		switch cf.Kind {
 		case "invite":
-			out.Invite, err = s.makeInvite(cf.Name, false)
+			out.Invite, err = s.makeInvite(cf.Name, cf.Owner)
 			if err == nil {
 				st.Name, st.ExpiresAt = out.Invite.Name, out.Invite.ExpiresAt
 			}
 		case "token":
-			out.Token, err = s.makeToken(cf.Name, false)
+			out.Token, err = s.makeToken(cf.Name, by)
 			if err == nil {
 				st.Name = out.Token.Terminal.Name
 			}
@@ -339,7 +355,7 @@ func (s *Server) answerConfirm(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.asks.finish(id, st)
-	s.logf("server: %s answered confirmation %s: %s", callerOf(r).Name, id, st.State)
+	s.logf("server: %s answered confirmation %s: %s", c.Name, id, st.State)
 	out.ConfirmState = st
 	reply(w, http.StatusOK, out)
 }
