@@ -7,7 +7,7 @@ import { argOf, folded, foldLine, inputOf } from "../src/chat/fold";
 import { commandsOf, keyMode, matching } from "../src/chat/composer";
 import { levelName, restAt } from "../src/chat/effort";
 import { ctxParts, modelView } from "../src/chat/meters";
-import { filesIn, resolve, sourceOf } from "../src/chat/refs";
+import { filesIn, resolve, shortId, sourceOf } from "../src/chat/refs";
 import { en } from "../src/i18n/en";
 import { zh } from "../src/i18n/zh";
 import { jumpList } from "../src/jump";
@@ -377,5 +377,15 @@ describe("windowFor", () => {
     expect(windowFor(w("Fable"), [undefined, "", undefined])).toBe(false);
     expect(windowFor(w("GPT-5.3-Codex-Spark"), ["gpt-5.3-codex-spark"])).toBe(true);
     expect(windowFor(w("GPT-5.3-Codex-Spark"), ["gpt-5.3-codex"])).toBe(false);
+  });
+});
+
+describe("shortId", () => {
+  test("eight characters, more only while another id shares them", () => {
+    const a = "1a2b3c4d-0000-4000-8000-000000000001";
+    const b = "1a2b3c4d-9000-4000-8000-000000000002";
+    expect(shortId(a, [a])).toBe("1a2b3c4d");
+    expect(shortId(a, [a, b])).toBe("1a2b3c4d-0");
+    expect(shortId("abc", ["abc"])).toBe("abc");
   });
 });

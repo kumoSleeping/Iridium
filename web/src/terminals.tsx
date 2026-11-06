@@ -35,16 +35,16 @@ export function TerminalsPage({ onBack }: { onBack: () => void }) {
   const list = q.data?.terminals ?? [];
   const invites = q.data?.invites ?? [];
   return (
-    <div className="relative h-full">
-      <header className="glass absolute inset-x-0 top-0 z-20 flex h-11 items-center gap-1 pr-1.5 pl-1.5 shadow-[0_0.5px_0_var(--edge)] pointer-coarse:h-12">
-        <IconKey label={t("nav.settings")} onClick={onBack} tipSide="bottom" className="-mr-1">
-          <ChevronLeft size={20} />
+    <div className="flex h-full flex-col">
+      <header className="flex h-10.5 shrink-0 items-center gap-1 px-1.5 pt-1.5">
+        <IconKey label={t("nav.settings")} onClick={onBack} tipSide="bottom" className="size-7">
+          <ChevronLeft size={16} />
         </IconKey>
         <h1 className="m-0 min-w-0 flex-1 truncate text-base font-semibold">{t("settings.terminals")}</h1>
         {q.isFetching && <LoaderCircle size={14} className="animate-spin text-ink-4" />}
         <NewTerminal />
       </header>
-      <div className="absolute inset-0 overflow-y-auto pt-14 pb-4 pointer-coarse:pt-15">
+      <div className="min-h-0 flex-1 overflow-y-auto pt-2 pb-4">
         <div className="flex flex-col gap-5 px-3">
           {confirms.length > 0 && (
             <div className="flex flex-col gap-2">
@@ -108,7 +108,7 @@ function TerminalRow({ x, open, toggle }: { x: Terminal; open: boolean; toggle: 
             {x.id === me?.id && !x.local && <span className="shrink-0 text-xs text-ink-3">{t("term.this")}</span>}
           </span>
           <span className="flex items-center gap-1.5 text-xs text-ink-3 tabular-nums">
-            {x.online ? <span className="size-1.5 rounded-full bg-ink-3" aria-hidden /> : null}
+            {x.online ? <span className="size-1.5 rounded-full bg-run" aria-hidden /> : null}
             <span>{used}</span>
             <span aria-hidden>·</span>
             <span>{t("term.today", { n: tokens(x.usedToday) })}</span>
@@ -367,8 +367,8 @@ function NewTerminal() {
       <Tip label={t("term.new")} side="bottom">
         <Popover.Trigger
           render={
-            <button type="button" aria-label={t("term.new")} className="g-press grid size-8 place-items-center rounded-md text-ink-2 hover:bg-fill hover:text-ink data-popup-open:bg-fill pointer-coarse:size-10">
-              <Plus size={18} />
+            <button type="button" aria-label={t("term.new")} className="g-press grid size-7 place-items-center rounded-md text-ink-2 hover:bg-fill hover:text-ink data-popup-open:bg-fill pointer-coarse:size-10">
+              <Plus size={16} />
             </button>
           }
         />

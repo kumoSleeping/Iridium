@@ -207,9 +207,18 @@ export function App() {
   // foot, its right edge on the key's, rising out of it (the user, 2026-11-06); the terminals its page.
   const settingsAt = useSettingsAt(over(r));
   const settings = (
-    <Dialog.Root open={over(r)} onOpenChange={(o) => !o && over(route()) && close(under)}>
+    <Dialog.Root
+      open={over(r)}
+      modal={false}
+      onOpenChange={(o, d) => {
+        if (o || !over(route())) return;
+        const e = d.event as (Event & { relatedTarget?: EventTarget | null }) | undefined;
+        const key = (x?: EventTarget | null) => !!(x as Element | null)?.closest?.("[data-settings-key]");
+        if ((d.reason === "outside-press" || d.reason === "focus-out") && (key(e?.target) || key(e?.relatedTarget))) return d.cancel();
+        close(under);
+      }}
+    >
       <Dialog.Portal>
-        <Dialog.Backdrop className="g-backdrop fixed inset-0 z-50 bg-[oklch(0_0_0/0.12)] dark:bg-[oklch(0_0_0/0.35)]" />
         <Dialog.Popup
           aria-label={t("nav.settings")}
           style={settingsAt}
@@ -224,6 +233,8 @@ export function App() {
               <div key="settings" className="g-slide h-full" data-dir="back">
                 <SettingsPage onClose={() => close(under)} theme={theme} setTheme={setThemeKept} />
               </div>
+  // As the me popover is (the user, 2026-11-06): no shade over the page, which stays live; a press
+  // outside puts it away, but one on its own key, which does that itself.
             )}
           </Suspense>
         </Dialog.Popup>

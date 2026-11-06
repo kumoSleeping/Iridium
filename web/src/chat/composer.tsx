@@ -54,7 +54,8 @@ export function commandsOf(s: LiveSession): Command[] {
 
 type Att = { key: string; file: File; sent: number; ref?: string; path?: string; error?: string; url?: string; stop: AbortController };
 
-export type ComposerHandle = { focus: () => void; put: (text: string) => void; attach: (files: File[]) => void; box: () => HTMLTextAreaElement | null };
+/** put: words on a line of their own at the end; insert: at the caret, a space either side. */
+export type ComposerHandle = { focus: () => void; put: (text: string) => void; insert: (text: string) => void; attach: (files: File[]) => void; box: () => HTMLTextAreaElement | null };
 
 type Props = {
   s: LiveSession;
@@ -128,6 +129,20 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
   useImperativeHandle(ref, () => ({
     focus: () => box.current?.focus(),
     put: (words) => (type([textNow.current, words].filter(Boolean).join("\n")), box.current?.focus()),
+    insert: (words) => {
+      const el = box.current;
+      const v = textNow.current;
+      // Where the caret was: a box keeps its selection when it loses focus.
+      const a = el ? el.selectionStart : v.length;
+      const b = el ? el.selectionEnd : v.length;
+      const before = v.slice(0, a) + (a > 0 && !/\s$/.test(v.slice(0, a)) ? " " : "");
+      const after = (/^\s/.test(v.slice(b)) ? "" : " ") + v.slice(b);
+      type(before + words + after);
+      requestAnimationFrame(() => {
+        el?.focus();
+        el?.setSelectionRange(before.length + words.length + 1, before.length + words.length + 1);
+      });
+    },
     attach,
     box: () => box.current,
   }));
@@ -216,7 +231,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
   return (
     <div className="relative">
       {list.length > 0 && <Palette list={list} at={Math.min(at, list.length - 1)} point={setAt} pick={(c) => (own(`/${c.name}`) ? undefined : (type(`/${c.name} `), box.current?.focus()))} />}
-    <div className="glass float rest relative @container rounded-[20px]">
+    <div className="glass float rest drop-to relative @container rounded-[20px]">
       <div aria-hidden={!atts.length || undefined} className={cn("grid transition-[grid-template-rows,opacity] duration-(--dur-3) ease-(--ease-out)", atts.length ? "grid-rows-[1fr]" : "grid-rows-[0fr] opacity-0")}>
         <div className="min-h-0 overflow-hidden">
         <ul data-attachments className="m-0 flex list-none gap-2 overflow-x-auto px-3.5 pt-3 pb-0">

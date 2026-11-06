@@ -18,7 +18,8 @@ import { useLink } from "./store";
 import type { Folder as FolderNode, Tree, WsNode } from "./tree";
 import { errText, toast } from "./toast";
 import { useSaidLine } from "./data";
-import { agentName, ago, cn, IconKey, keep, kept, Lamp, Logo, statusText, tilde, Tip, titleOf, useLongPress, useMinute } from "./ui";
+import { agentName, ago, cn, fine, IconKey, keep, kept, Lamp, Logo, statusText, tilde, Tip, titleOf, useLongPress, useMinute } from "./ui";
+import { SESSION_DRAG } from "./chat/refs";
 import { useUnread } from "./unread";
 import { KEY_SLOT } from "./drawer";
 
@@ -420,8 +421,10 @@ function SessionRow({ s, where, depth, flip, selected, onSelect, chatCode, worki
   const title = titleOf(s);
   // A subagent shown is at work, whatever discovery says of its process.
   const status = working ? "running" : s.status;
-  // How long ago it was last active (its turn ended, it was last written to), but in a turn.
-  const when = !BUSY.has(status) && s.updatedAt > 0 && !s.archived && <span className="text-xs whitespace-nowrap text-ink-4 tabular-nums">{ago(s.updatedAt, now, true)}</span>;
+  // How long ago it was last active (its turn ended, it was last written to), but in a turn. Unread,
+  // it is in ink: no grey dot for it (the user, 2026-11-06).
+  const fresh = unread && status === "idle";
+  const when = !BUSY.has(status) && s.updatedAt > 0 && !s.archived && <span className={cn("text-xs whitespace-nowrap tabular-nums transition-colors duration-(--dur-2)", fresh ? "font-medium text-ink" : "text-ink-4")}>{ago(s.updatedAt, now, true)}</span>;
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
   const [renaming, setRenaming] = useState(false);
   const rest = useRef<number | undefined>(undefined);
@@ -448,6 +451,20 @@ function SessionRow({ s, where, depth, flip, selected, onSelect, chatCode, worki
       setMenuAt({ x: e.clientX, y: e.clientY });
     },
   };
+  // Dragged to a chat, it is named in that chat's composer (chat.tsx): with a mouse, as a finger's
+  // long press is the menu. While it is dragged, html[data-drag] lights the composer (styles.css).
+  const drag = fine() && !renaming
+    ? {
+        draggable: true,
+        onDragStart: (e: React.DragEvent) => {
+          e.dataTransfer.setData(SESSION_DRAG, s.id);
+          e.dataTransfer.setData("text/plain", s.id);
+          e.dataTransfer.effectAllowed = "copyLink";
+          document.documentElement.dataset.drag = "session";
+        },
+        onDragEnd: () => delete document.documentElement.dataset.drag,
+      }
+    : {};
   // An archived one (no shown marker): one press brings it back.
   const restore = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -460,10 +477,6 @@ function SessionRow({ s, where, depth, flip, selected, onSelect, chatCode, worki
     <IconKey label={t("menu.unarchive")} onClick={restore} className="-mr-1 size-6 text-ink-3 pointer-coarse:size-8">
       <ArchiveRestore size={14} />
     </IconKey>
-  ) : unread && status === "idle" ? (
-    // One dot at a time (the user, 2026-11-06): in a turn, or needing you, the lamp says it; the
-    // unread dot comes back as the turn ends, if it ends with you elsewhere.
-    <span className="unread g-pop" aria-hidden />
   ) : s.pinned ? (
     <Pin size={12} className="text-ink-4" aria-label={t("menu.pinned")} />
   ) : undefined;
@@ -513,7 +526,7 @@ function SessionRow({ s, where, depth, flip, selected, onSelect, chatCode, worki
         }
         sub={status === "error" ? <span className="text-err">{statusText(s.status)}</span> : (said(s.last) ?? tilde(s.cwd))}
         end={end}
-        extra={{ ...lp, ...hover, onClickCapture: lp.onClickCapture }}
+        extra={{ ...lp, ...hover, ...drag, onClickCapture: lp.onClickCapture }}
       />
       <SessionMenu s={s} at={menuAt} close={() => setMenuAt(null)} rename={() => setRenaming(true)} />
     </>

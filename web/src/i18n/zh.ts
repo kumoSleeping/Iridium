@@ -99,6 +99,7 @@ export const zh = {
   "sys.other": "系统",
 
   "composer.placeholder": "说点什么…",
+  "composer.mention": "「{title}」（{agent} 会话 {id}）",
   "composer.attach": "添加文件",
   "composer.remove": "移除",
   "composer.send": "发送",

@@ -90,15 +90,16 @@ export function SettingsPage({ onClose, theme, setTheme }: { onClose: () => void
   const reap = s ? shortDuration(s.idleReap) : "1h";
 
   return (
-    <div className="relative h-full">
-      <header className="glass absolute inset-x-0 top-0 z-20 flex h-11 items-center gap-1 pr-1.5 pl-1.5 shadow-[0_0.5px_0_var(--edge)] pointer-coarse:h-12">
+    <div className="flex h-full flex-col">
+      {/* A plain head, as the me popover's pages have (the user, 2026-11-06): no bar of its own. */}
+      <header className="flex h-10.5 shrink-0 items-center gap-1 px-1.5 pt-1.5">
         <h1 className="m-0 pl-1.5 text-base font-semibold">{t("nav.settings")}</h1>
         {q.isFetching && <LoaderCircle size={14} className="ml-1 animate-spin text-ink-4" />}
-        <IconKey label={t("nav.close")} onClick={onClose} tipSide="bottom" className="ml-auto">
-          <X size={17} />
+        <IconKey label={t("nav.close")} onClick={onClose} tipSide="bottom" className="ml-auto size-7">
+          <X size={16} />
         </IconKey>
       </header>
-      <div className="absolute inset-0 overflow-y-auto pt-14 pb-4 pointer-coarse:pt-15">
+      <div className="min-h-0 flex-1 overflow-y-auto pt-2 pb-4">
         <div className="flex flex-col gap-5 px-3">
           <UpdateRow />
 

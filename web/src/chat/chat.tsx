@@ -26,7 +26,7 @@ import { ToolDraft, Waiting } from "./live";
 import { Draft } from "./markdown";
 import { ContextRing, ModeKey, ModelKey, modelView, QuotaBars, useMode } from "./meters";
 import { Queue } from "./queue";
-import { sourceOf, yours } from "./refs";
+import { SESSION_DRAG, shortId, sourceOf, yours } from "./refs";
 import { Pending, Running, Said } from "./said";
 import { Stick, toEnd } from "./stick";
 
@@ -159,6 +159,17 @@ export function ChatPage({ id, phone, slot }: { id: string; phone: boolean; slot
     changed();
   };
   const files = (e: DragEvent) => e.dataTransfer.types.includes("Files") && (e.preventDefault(), true);
+  // A session's row dropped here (sidebar.tsx): named in the composer, for this one to write to it
+  // with ir (the user, 2026-11-06), as short as says what it is: its title, agent and id.
+  const session = (e: DragEvent) => e.dataTransfer.types.includes(SESSION_DRAG) && (e.preventDefault(), (e.dataTransfer.dropEffect = "copy"), true);
+  const drop = (e: DragEvent) => {
+    if (files(e)) return composer.current?.attach([...e.dataTransfer.files]);
+    if (!session(e)) return;
+    delete document.documentElement.dataset.drag;
+    const to = list?.find((x) => x.id === e.dataTransfer.getData(SESSION_DRAG));
+    if (!to || to.id === id) return;
+    composer.current?.insert(t("composer.mention", { title: titleOf(to) || tilde(to.cwd), agent: agentName(to.agent), id: shortId(to.id, list!.map((x) => x.id)) }));
+  };
 
   if (!s) {
     const gone = lost && list !== undefined && !row;
@@ -173,7 +184,7 @@ export function ChatPage({ id, phone, slot }: { id: string; phone: boolean; slot
   // What changes as the conversation grows: it keeps to the bottom, the dots wait again.
   const grew = `${log.blocks.at(-1)?.at} ${log.drafts.length} ${log.drafts.at(-1)?.text.length} ${log.drafts.at(-1)?.whole} ${log.sent.length}`;
   return (
-    <div className="relative h-full" onDragOver={files} onDrop={(e) => files(e) && composer.current?.attach([...e.dataTransfer.files])}>
+    <div className="relative h-full" onDragOver={(e) => files(e) || session(e)} onDrop={drop}>
       <Stick scroller={scroller} tail={grew} older={() => log.older()} place={chat.place} bottom={stackH} style={{ paddingTop: 64, paddingBottom: stackH + 20 }}>
         <div className="mx-auto flex max-w-[760px] flex-col gap-5 px-4 sm:px-6">
           {log.loaded && !log.blocks.length && !log.drafts.length && !log.sent.length && <p className="g-fade m-0 pt-16 text-center text-sm text-ink-4">{t("chat.empty")}</p>}

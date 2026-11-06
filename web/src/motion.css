@@ -118,27 +118,21 @@
 }
 
 /* --- dialog: Base UI Dialog's popup and backdrop (data-starting-style / data-ending-style) --- */
+/* As g-unfold, the me popover's (the user, 2026-11-06), out of the key under its right end. */
 .g-dialog {
   transform-origin: calc(100% - 20px) calc(100% + 28px);
   transition:
-    transform var(--dur-3) var(--ease-spring),
+    transform var(--dur-2) var(--ease-spring),
     opacity var(--dur-2) var(--ease-out);
 }
 .g-dialog[data-starting-style],
 .g-dialog[data-ending-style] {
   opacity: 0;
-  transform: scale(0.94) translateY(8px);
+  transform: var(--unfold-from);
 }
 .g-dialog[data-ending-style] {
   transition-duration: var(--dur-1);
   transition-timing-function: var(--ease-in);
-}
-.g-backdrop {
-  transition: opacity var(--dur-2) var(--ease-out);
-}
-.g-backdrop[data-starting-style],
-.g-backdrop[data-ending-style] {
-  opacity: 0;
 }
 
 /* --- fade --- */

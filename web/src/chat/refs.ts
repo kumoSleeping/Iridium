@@ -66,6 +66,16 @@ export function senderName(s: Pick<Session, "id" | "name" | "title" | "cwd" | "w
   return where ? `${name} · ${where}` : name;
 }
 
+/** The type a session's row is dragged with (sidebar.tsx), its id the data. */
+export const SESSION_DRAG = "application/x-iridium-session";
+
+/** The shortest start of id, at least 8 characters, no other of ids shares: what ir takes for a
+ *  session (internal/cli short). */
+export function shortId(id: string, ids: string[]): string {
+  for (let n = 8; n < id.length; n++) if (!ids.some((o) => o !== id && o.startsWith(id.slice(0, n)))) return id.slice(0, n);
+  return id;
+}
+
 /** A path as a message writes it, made absolute the way the server reads it (docs/api.md "认文件"):
  *  file:// and a #line or :line:col dropped, ~/ the home folder, the rest from the session's folder. */
 export function resolve(p: string, cwd: string, home?: string): string {

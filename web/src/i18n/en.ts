@@ -99,6 +99,7 @@ export const en: Dict = {
   "sys.other": "System",
 
   "composer.placeholder": "Say something…",
+  "composer.mention": "\"{title}\" ({agent} session {id})",
   "composer.attach": "Add files",
   "composer.remove": "Remove",
   "composer.send": "Send",
