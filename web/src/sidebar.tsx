@@ -9,7 +9,7 @@
 // colour tags (colors.ts); a workspace's, its 通知 only. The mouse resting on a row fetches its
 // chat ahead.
 import { Menu } from "@base-ui/react/menu";
-import { Archive, ArchiveRestore, Bot, Check, ChevronRight, Copy, Folder, FolderOpen, Inbox, Pencil, Pin, PinOff, Plus, Search, Settings, Square, Workflow as WorkflowIcon } from "lucide-react";
+import { Archive, ArchiveRestore, Bot, Check, ChevronRight, Copy, Folder, FolderOpen, FolderPlus, Inbox, Pencil, Pin, PinOff, Plus, Search, Settings, Square, Workflow as WorkflowIcon } from "lucide-react";
 import { ConfirmIcon, confirmName, confirmTitle } from "./confirmname";
 import { Fragment, lazy, Suspense, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { api } from "./api/client";
@@ -171,7 +171,8 @@ export function Sidebar(p: Props) {
       </span>
       {p.createKey(
         <button type="button" aria-label={t("nav.newWorkspace")} className="g-press grid size-8 place-items-center rounded-md text-ink-2 hover:bg-fill hover:text-ink data-popup-open:bg-fill pointer-coarse:size-10">
-          <Plus size={18} />
+          {/* A folder, not a "+": a "+" here was taken for a new session (the user, 2026-11-06). */}
+          <FolderPlus size={18} />
         </button>,
       )}
       <IconKey label={`${t("nav.search")} · ${t("nav.searchKey")}`} tipSide="bottom" onClick={p.onSearch} onPointerEnter={p.panelsCode} onFocus={p.panelsCode} aria-pressed={p.searching} className={p.searching ? "bg-fill text-ink" : undefined}>
@@ -224,13 +225,13 @@ export function Sidebar(p: Props) {
                 name={w.name}
                 open={open}
                 onToggle={() => p.toggle(w.key)}
-                // Not its count: the "+" that opens a session here, always at the row's end, faint
-                // till the row is hovered (the user, 2026-11-06).
+                // Not its count: the "+" that opens a session here, always at the row's end, plain to
+                // see, darker when the row is hovered (the user, 2026-11-06).
                 end={
                   w.id !== 0 &&
                   p.wsPlus(
                     w,
-                    <button type="button" onClick={(e) => e.stopPropagation()} aria-label={t("nav.newHere", { ws: w.name })} className="g-press -mr-1 grid size-6 place-items-center rounded-sm text-ink-4 group-hover:text-ink hover:bg-fill-2 data-popup-open:bg-fill-2 data-popup-open:text-ink pointer-coarse:size-8 pointer-coarse:text-ink-3">
+                    <button type="button" onClick={(e) => e.stopPropagation()} aria-label={t("nav.newHere", { ws: w.name })} className="g-press -mr-1 grid size-6 place-items-center rounded-sm text-ink-2 group-hover:text-ink hover:bg-fill-2 data-popup-open:bg-fill-2 data-popup-open:text-ink pointer-coarse:size-8">
                       <Plus size={15} />
                     </button>,
                     plusOpen === w.key,
@@ -255,7 +256,7 @@ export function Sidebar(p: Props) {
                         // (the user, 2026-11-06).
                         plus={p.wsPlus(
                           { ...w, key: r.f.key, root: r.f.path },
-                          <button type="button" onClick={(e) => e.stopPropagation()} aria-label={t("nav.newHere", { ws: r.f.name })} className="g-press -mr-1 grid size-6 place-items-center rounded-sm text-ink-4 group-hover:text-ink hover:bg-fill-2 data-popup-open:bg-fill-2 data-popup-open:text-ink pointer-coarse:size-8 pointer-coarse:text-ink-3">
+                          <button type="button" onClick={(e) => e.stopPropagation()} aria-label={t("nav.newHere", { ws: r.f.name })} className="g-press -mr-1 grid size-6 place-items-center rounded-sm text-ink-2 group-hover:text-ink hover:bg-fill-2 data-popup-open:bg-fill-2 data-popup-open:text-ink pointer-coarse:size-8">
                             <Plus size={15} />
                           </button>,
                           plusOpen === r.f.key,
