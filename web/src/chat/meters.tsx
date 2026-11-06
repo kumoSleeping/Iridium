@@ -467,7 +467,8 @@ const presetHint = (p: string) => (PRESET_KEY[p] ? t(PRESET_KEY[p][1]) : undefin
 
 /** The agent preset (dsh: the tools and prompt it runs with), where the quota bars would be: dsh
  *  has no quota (the user, 2026-11-06). Taken at launch: picked on a running agent, it restarts
- *  and the session goes on. */
+ *  and the session goes on. Picked before the first message only, as in dsh's own app: a started
+ *  session's preset is a label (the server refuses a switch; internal/session SetPreset). */
 export function PresetKey({ s }: { s: LiveSession }) {
   useLang();
   const info = useAgent(s.agent);
@@ -488,6 +489,14 @@ export function PresetKey({ s }: { s: LiveSession }) {
     }
   };
   const label = presetName(now);
+  if (s.last)
+    return (
+      <Tip label={t("preset.fixed")}>
+        <span className="flex h-7 min-w-0 shrink-0 cursor-default items-center rounded-md px-2 text-xs text-ink-3 select-none pointer-coarse:h-9">
+          <span className="truncate">{label}</span>
+        </span>
+      </Tip>
+    );
   return (
     <Menu.Root>
       <Tip label={t("composer.preset")}>

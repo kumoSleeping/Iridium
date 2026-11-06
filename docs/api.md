@@ -196,7 +196,7 @@
 | `PUT /api/sessions/{id}/mode` | `{mode}` | 审批模式，只收 `SessionState.modes` 里的。Claude：`set_permission_mode` |
 | `PUT /api/sessions/{id}/effort` | `{effort}` | 思考强度，只收 `SessionState.efforts` 里的。Claude：先 `get_settings` 问 ultracode 开没开，再 `apply_flag_settings` 照原样带上 |
 | `PUT /api/sessions/{id}/ultracode` | `{ultracode}` | 只 Claude（`GET /api/agents` 的 `ultracode`），别的 400。在跑时先 `get_settings`，要开而 `ultracodeAvailable` 不为真（CLI 不认 `get_settings` 也算）就 400；只发 `apply_flag_settings {ultracode}`，强度不变。没在跑时不查，只记下，下次拉起带上 |
-| `PUT /api/sessions/{id}/preset` | `{preset}` | Agent 预设（只 dsh：`GET /api/agents` 的 `presets`，`standard`、`ptc`、`minimal`，没有的 400），`""` 是 `defaultPreset`。只在启动时装：在跑时改了就重启（同 pi 的模式，空闲马上，否则等回合结束，接着续上）。网页放在额度条的位置（dsh 没额度，用户定的，2026-11-06）。新会话用 `NewSession.preset`，`/clear` 照原样带上 |
+| `PUT /api/sessions/{id}/preset` | `{preset}` | Agent 预设（只 dsh：`GET /api/agents` 的 `presets`，`standard`、`ptc`、`minimal`，没有的 400），`""` 是 `defaultPreset`。只在启动时装，也只在会话第一条消息前能改（同 dsh 自己的界面）：开始后改是 400，因为 dsh 会把新工具当成追加的延迟加载工具，PTC 那样全是延迟的，API 会拒绝。在跑时改就重启（空闲马上，否则等回合结束），重启时状态仍显示空闲。网页放在额度条的位置（dsh 没额度，用户定的，2026-11-06）。新会话用 `NewSession.preset`，`/clear` 照原样带上 |
 | `GET /api/sessions/{id}/rules` | → `AllowRule[]` | “本会话一直允许”记下的规则 |
 | `DELETE /api/sessions/{id}/rules` | → `{ok}` | 清掉 |
 

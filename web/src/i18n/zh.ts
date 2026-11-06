@@ -132,6 +132,7 @@ export const zh = {
   "preset.ptcHint": "模型写一段代码，在代码里调工具，一次做多步",
   "preset.minimal": "精简",
   "preset.minimalHint": "只有 shell 和读图，提示词最短",
+  "preset.fixed": "预设在会话开始前选，开始后不能换",
   "preset.restart": "agent 重启后用这个模式接着跑",
   "composer.ultracode": "UltraCode",
   "composer.ultracodeHint": "大任务先编排工作流再做",

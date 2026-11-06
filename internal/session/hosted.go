@@ -128,6 +128,9 @@ type Hosted struct {
 
 	restartDue bool // restart the agent at the turn's end, for its new mode
 	restarting bool // stopped to start again: no pause, no crash
+	// quiet: this start is a restart for a setting (model, effort, mode, preset), shown idle, not
+	// starting: nothing was sent (the user, 2026-11-06). quietNext: the next start is one.
+	quiet, quietNext bool
 	// clearedTo: its agent cleared itself and went on as this conversation (clearedInside);
 	// next: the session it goes on in, once taken up, for the open page to follow.
 	clearedTo, next string
@@ -207,6 +210,7 @@ func (h *Hosted) start(ctx context.Context) error {
 		return nil
 	}
 	h.starting, h.errText = true, ""
+	h.quiet, h.quietNext = h.quietNext, false
 	h.next = "" // its own conversation again, resumed
 	h.proc++
 	proc := h.proc
@@ -841,7 +845,7 @@ func (h *Hosted) readTranscript() {
 
 func (h *Hosted) status() api.Status {
 	switch {
-	case h.starting:
+	case h.starting && !h.quiet:
 		return api.StatusStarting
 	case !h.live && h.errText != "":
 		return api.StatusError

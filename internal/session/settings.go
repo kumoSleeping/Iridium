@@ -127,6 +127,7 @@ func (h *Hosted) restart() {
 	}
 	h.mu.Lock()
 	h.restarting = false
+	h.quietNext = true // a setting's restart, not a run: not shown as starting
 	h.mu.Unlock()
 	if err := h.start(ctx); err != nil {
 		h.logf("restarting: %v", err)
@@ -137,8 +138,10 @@ func (h *Hosted) restart() {
 }
 
 // SetPreset sets the session's agent preset (dsh's tools and prompt); "" is the agent's default.
-// The agent takes it only at launch: a running one restarts with it, now if idle, else when its
-// turn ends, and the session resumes.
+// The agent takes it only at launch: a running one restarts with it, now if idle. Only before the
+// session's first message: dsh keeps a started session's tools, a new set only as deferred
+// additions, and a set all deferred (PTC's one run_code) the API turns down (dsh's own app picks a
+// preset for a blank session alone).
 func (m *Manager) SetPreset(ctx context.Context, id, preset string) error {
 	h, err := m.get(id)
 	if err != nil {
@@ -150,6 +153,12 @@ func (m *Manager) SetPreset(ctx context.Context, id, preset string) error {
 	}
 	if preset != "" && !slices.Contains(info.Presets, preset) {
 		return fmt.Errorf("%w: no preset %q (%s)", ErrBadRequest, preset, strings.Join(info.Presets, ", "))
+	}
+	h.mu.Lock()
+	begun := h.said.last != nil || h.turnSeen
+	h.mu.Unlock()
+	if begun {
+		return fmt.Errorf("%w: the preset is fixed once the session has begun", ErrBadRequest)
 	}
 	if err := m.o.Store.UpdateSettings(id, func(s *store.Settings) { s.Preset = preset }); err != nil {
 		return err

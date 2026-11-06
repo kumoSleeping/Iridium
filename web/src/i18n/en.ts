@@ -132,6 +132,7 @@ export const en: Dict = {
   "preset.ptcHint": "The model writes code that calls the tools, many steps at once",
   "preset.minimal": "Minimal",
   "preset.minimalHint": "A shell and image reading only, the shortest prompt",
+  "preset.fixed": "The preset is picked before the session begins; it cannot change after",
   "preset.restart": "The agent restarts and goes on in this mode",
   "composer.ultracode": "UltraCode",
   "composer.ultracodeHint": "Plans a workflow before big tasks",
