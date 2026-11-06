@@ -1,7 +1,8 @@
 // Chats warmed ahead (src/warm.ts, src/chats.ts warmTo): which are picked, and how they are fetched.
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { Session } from "../src/api/types.gen";
-import { chatOf, peekChat, warmed, warmTo } from "../src/chats";
+import { chatOf, peekChat, stateAhead, warmed, warmTo } from "../src/chats";
+import { getCarried, setCarried } from "../src/store";
 import { buildTree } from "../src/tree";
 import { MADE_MAX, PER_WORKSPACE, pick, workspaceOf } from "../src/warm";
 
@@ -58,14 +59,39 @@ describe("warmTo", () => {
   afterEach(() => (warmTo(new Map()), vi.unstubAllGlobals()));
   const settle = () => new Promise((r) => setTimeout(r, 20));
 
-  test("the newest page of each, one at a time, not the page before; again only as it changes", async () => {
+  test("the newest page of each and its state, one at a time, not the page before; again only as it changes", async () => {
     warmTo(new Map([["w1", 1], ["w2", 1]]));
     await settle();
-    expect(asked).toEqual(["/api/sessions/w1/messages", "/api/sessions/w2/messages"]);
+    expect(asked).toEqual(["/api/sessions/w1/messages", "/api/sessions/w1", "/api/sessions/w2/messages", "/api/sessions/w2"]);
     expect(peekChat("w1")?.log.loaded).toBe(true);
     warmTo(new Map([["w1", 1], ["w2", 2]]));
     await settle();
-    expect(asked.slice(2)).toEqual(["/api/sessions/w2/messages?after=20"]);
+    expect(asked.slice(4)).toEqual(["/api/sessions/w2/messages?after=20"]);
+  });
+  test("a state the stream brought meanwhile is not put over; one asked for again only as it is not there", async () => {
+    let answer: () => void = () => {};
+    vi.stubGlobal("fetch", (url: string) => {
+      asked.push(url);
+      return new Promise<Response>((r) => (answer = () => r(new Response(JSON.stringify({ id: "z", status: "idle" }), { headers: { "content-type": "application/json" } }))));
+    });
+    const asking = stateAhead("z");
+    expect(stateAhead("z")).toBe(asking);
+    setCarried("session:z", { id: "z", status: "running" });
+    answer();
+    expect(await asking).toBe(true);
+    expect(getCarried<{ status: string }>("session:z")?.status).toBe("running");
+    setCarried("session:z", null);
+    const again = stateAhead("z");
+    answer();
+    expect(await again).toBe(true);
+    expect(getCarried<{ status: string }>("session:z")?.status).toBe("idle");
+    expect(asked).toEqual(["/api/sessions/z", "/api/sessions/z"]);
+    setCarried("session:z", null);
+  });
+  test("a session not there: stateAhead says so", async () => {
+    vi.stubGlobal("fetch", async () => new Response(JSON.stringify({ error: "no such session" }), { status: 404, headers: { "content-type": "application/json" } }));
+    expect(await stateAhead("gone")).toBe(false);
+    expect(getCarried("session:gone")).toBeUndefined();
   });
   test("one not wanted goes; one visited is kept, and asks for the page before as you scroll", async () => {
     warmTo(new Map([["v1", 1], ["v2", 1]]));

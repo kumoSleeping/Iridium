@@ -117,7 +117,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
       all.filter((a) => {
         if (a.key !== key) return true;
         a.stop.abort();
-        if (a.url) URL.revokeObjectURL(a.url);
+        // After the row has shut: the last one is drawn as it does.
+        if (a.url) setTimeout(() => URL.revokeObjectURL(a.url!), 1000);
         return false;
       }),
     );
@@ -130,6 +131,12 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
     attach,
     box: () => box.current,
   }));
+
+  // The pictures and files row opens and shuts (the user, 2026-11-06): the composer grows to it
+  // instead of jumping taller; the last ones stay drawn as it shuts.
+  const lastAtts = useRef(atts);
+  if (atts.length) lastAtts.current = atts;
+  const shownAtts = atts.length ? atts : lastAtts.current;
 
   const commands = commandsOf(s);
   const list = /^\/\S*$/.test(text) && text !== shut ? matching(commands, text.slice(1)) : [];
@@ -210,10 +217,11 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
     <div className="relative">
       {list.length > 0 && <Palette list={list} at={Math.min(at, list.length - 1)} point={setAt} pick={(c) => (own(`/${c.name}`) ? undefined : (type(`/${c.name} `), box.current?.focus()))} />}
     <div className="glass float rest relative @container rounded-[20px]">
-      {atts.length > 0 && (
+      <div aria-hidden={!atts.length || undefined} className={cn("grid transition-[grid-template-rows,opacity] duration-(--dur-3) ease-(--ease-out)", atts.length ? "grid-rows-[1fr]" : "grid-rows-[0fr] opacity-0")}>
+        <div className="min-h-0 overflow-hidden">
         <ul data-attachments className="m-0 flex list-none gap-2 overflow-x-auto px-3.5 pt-3 pb-0">
-          {atts.map((a) => (
-            <li key={a.key} className="relative shrink-0 pt-1.5 pr-1.5">
+          {shownAtts.map((a) => (
+            <li key={a.key} className="g-pop relative shrink-0 pt-1.5 pr-1.5">
               {a.url ? <img src={a.url} alt={a.file.name} className={cn("size-14 rounded-lg object-cover shadow-[0_0_0_0.5px_var(--edge)]", a.error && "opacity-50")} /> : (
                 <span className="flex h-14 w-36 items-center gap-1.5 rounded-lg bg-fill px-2 text-xs">
                   <FileText size={16} className="shrink-0 text-ink-3" />
@@ -232,7 +240,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
             </li>
           ))}
         </ul>
-      )}
+        </div>
+      </div>
       {/* The words first, at least two lines high; then the foot: attach, the meters, the context
           ring, send at the far right (the user, 2026-11-06). */}
       <div className="px-3.5 pt-3">
@@ -287,7 +296,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
         <IconKey label={t("composer.attach")} onClick={() => picker.current?.click()}>
           <Paperclip size={17} />
         </IconKey>
-        <div ref={toolRow} className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto [scrollbar-width:none]">
+        <div ref={toolRow} className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {tools}
         </div>
         {end && <span className="flex shrink-0">{end}</span>}

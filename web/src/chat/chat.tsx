@@ -5,11 +5,11 @@
 // drafts from the stream. Loaded only once a chat opens or the page is idle.
 import { Menu } from "@base-ui/react/menu";
 import { ChevronRight, Ellipsis, FolderInput } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DragEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent } from "react";
 import type { SessionState as LiveSession } from "../api/types.gen";
 import { api } from "../api/client";
 import type { Session } from "../api/types.gen";
-import { chatOf, type Draft as Drafted, type Sent } from "../chats";
+import { chatOf, stateAhead, type Draft as Drafted, type Sent } from "../chats";
 import { LOCAL_ME, useMe, useTerminalList, useWorkspaces } from "../data";
 import { t, useLang } from "../i18n";
 import { pushIn } from "../motion";
@@ -24,21 +24,42 @@ import { Composer, type ComposerHandle } from "./composer";
 import { folded, type Tool } from "./fold";
 import { ToolDraft, Waiting } from "./live";
 import { Draft } from "./markdown";
-import { ContextRing, ModeKey, ModelKey, QuotaBars, useMode } from "./meters";
+import { ContextRing, ModeKey, ModelKey, modelView, QuotaBars, useMode } from "./meters";
 import { Queue } from "./queue";
 import { sourceOf, yours } from "./refs";
-import { Pending, Running, Said } from "./said";
+import { AgentBubble, Pending, Running, Said } from "./said";
 import { Stick, toEnd } from "./stick";
 
 const BUSY = new Set(["running", "compacting", "starting", "waiting"]);
+
+/** The bottom stack's height as last measured: a chat opens padded by it, not by a guess and then
+ *  moved (one frame drawn short or long, the conversation jumping after). */
+let lastStackH = 140;
+
+/** A session's state before the stream (or chats.ts stateAhead) brings it, from its row: the chat is
+ *  drawn whole at once, its composer and conversation, its keys after (ghost). */
+const ghostOf = (row: Session): LiveSession => ({ ...row, asks: [], tasks: [], queue: [], end: 0, proc: -1 });
 
 /** slot: the bar keeps its left free for the sidebar's key (drawer.tsx SideKey), the sidebar not
  *  beside it. */
 export function ChatPage({ id, phone, slot }: { id: string; phone: boolean; slot: boolean }) {
   useLang();
-  const s = useSession(id);
+  const real = useSession(id);
   const list = useList();
   const row = list?.find((x) => x.id === id);
+  const ghost = !real && !!row;
+  const ghostS = useMemo(() => row && ghostOf(row), [row]);
+  const s = real ?? ghostS;
+  // Gone only once asked and not there, or there and then not: a session just made is in no list
+  // yet, and is not to show "no such session" as it opens.
+  const [lost, setLost] = useState(false);
+  useEffect(() => {
+    if (!real) void stateAhead(id).then((there) => !there && setLost(true));
+  }, [id]);
+  const had = useRef(false);
+  if (real) had.current = true;
+  else if (had.current && !lost) setLost(true);
+  if (real && lost) setLost(false);
   const [chat] = useState(() => chatOf(id));
   const log = chat.log;
   const [, redraw] = useState(0);
@@ -71,7 +92,7 @@ export function ChatPage({ id, phone, slot }: { id: string; phone: boolean; slot
     if (!log.fromTail(s?.tail)) return void log.newer().then(changed, () => {});
     changed();
   }, [end]);
-  useEffect(() => void (s && log.procIs(s.proc), changed()), [s?.proc]);
+  useEffect(() => void (real && log.procIs(real.proc), changed()), [real?.proc]);
   // The turn ended: what was drafted is in the transcript now. Only those drafted by then go: the
   // next turn (queued, sent at once) may begin to write while the page fetches.
   const busy = !!s && BUSY.has(s.status);
@@ -90,14 +111,17 @@ export function ChatPage({ id, phone, slot }: { id: string; phone: boolean; slot
 
   // The bottom stack's height pads the conversation's end.
   const stack = useRef<HTMLDivElement>(null);
-  const [stackH, setStackH] = useState(140);
+  const [stackH, setStackH] = useState(lastStackH);
   useLayoutEffect(() => {
     const el = stack.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => setStackH(el.offsetHeight));
+    // Measured now, before the first paint, then as it changes.
+    const measure = () => setStackH((lastStackH = el.offsetHeight));
+    measure();
+    const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [!!s]); // the stack is drawn only once the session's state has come
+  }, [!!s]); // the stack is drawn only once the session or its row has come
 
   // A message sent: at the bottom, the conversation pushed up by it (the chat's glide) as it fades in.
   const bubbles = useRef(new Map<string, HTMLDivElement>());
@@ -137,7 +161,7 @@ export function ChatPage({ id, phone, slot }: { id: string; phone: boolean; slot
   const files = (e: DragEvent) => e.dataTransfer.types.includes("Files") && (e.preventDefault(), true);
 
   if (!s) {
-    const gone = list !== undefined && !row;
+    const gone = lost && list !== undefined && !row;
     return (
       <div className="relative h-full">
         <Bar phone={phone} s={row} slot={slot} />
@@ -157,7 +181,7 @@ export function ChatPage({ id, phone, slot }: { id: string; phone: boolean; slot
               high whatever it shows: the conversation does not jump as a call is drafted, runs and
               folds into the line above (the user, 2026-11-06). */}
           {(busy ? shown.filter((b) => b.kind !== "running") : shown).map((b) => (
-            <Said key={b.at} b={b} session={id} cwd={cwd} source={source} onJump={openChat} />
+            <Said key={b.at} b={b} session={id} cwd={cwd} agent={s.agent} source={source} onJump={openChat} />
           ))}
           {log.drafts
             .filter((d) => !d.tool || !busy)
@@ -165,8 +189,10 @@ export function ChatPage({ id, phone, slot }: { id: string; phone: boolean; slot
               d.tool ? (
                 <ToolDraft key={`${d.proc}.${d.n}`} name={d.tool.name} input={d.text} whole />
               ) : (
-                <div key={`${d.proc}.${d.n}`} className="g-fade min-w-0 pr-6">
-                  <Draft text={d.text} live={!d.whole && busy} />
+                <div key={`${d.proc}.${d.n}`} className="g-fade min-w-0">
+                  <AgentBubble agent={s.agent}>
+                    <Draft text={d.text} live={!d.whole && busy} />
+                  </AgentBubble>
                 </div>
               ),
             )}
@@ -210,7 +236,7 @@ export function ChatPage({ id, phone, slot }: { id: string; phone: boolean; slot
           ) : elsewhere ? (
             <div className="glass float rest flex h-12 items-center justify-center rounded-[20px] text-sm text-ink-3">{t("chat.elsewhere")}</div>
           ) : (
-            <Under s={s} composer={composer} onSent={onSent} onSentDone={(x) => ((log.sent = log.sent.filter((y) => y !== x || !x.queued)), changed())} modelOpen={modelOpen} setModelOpen={setModelOpen} modeOpen={modeOpen} setModeOpen={setModeOpen} usageOpen={usageOpen} setUsageOpen={setUsageOpen} />
+            <Under s={s} ghost={ghost} composer={composer} onSent={onSent} onSentDone={(x) => ((log.sent = log.sent.filter((y) => y !== x || !x.queued)), changed())} modelOpen={modelOpen} setModelOpen={setModelOpen} modeOpen={modeOpen} setModeOpen={setModeOpen} usageOpen={usageOpen} setUsageOpen={setUsageOpen} />
           )}
         </div>
       </div>
@@ -220,7 +246,7 @@ export function ChatPage({ id, phone, slot }: { id: string; phone: boolean; slot
 
 /** The composer, with in its foot the approval-mode key, the model key, the quota bars, and at the
  *  right the context ring, then send (the user, 2026-11-06). */
-function Under({ s, composer, onSent, onSentDone, modelOpen, setModelOpen, modeOpen, setModeOpen, usageOpen, setUsageOpen }: { s: LiveSession; composer: React.RefObject<ComposerHandle | null>; onSent: (x: Sent) => void; onSentDone: (x: Sent) => void; modelOpen: boolean; setModelOpen: (o: boolean) => void; modeOpen: boolean; setModeOpen: (o: boolean) => void; usageOpen: boolean; setUsageOpen: (o: boolean) => void }) {
+function Under({ s, ghost, composer, onSent, onSentDone, modelOpen, setModelOpen, modeOpen, setModeOpen, usageOpen, setUsageOpen }: { s: LiveSession; ghost: boolean; composer: React.RefObject<ComposerHandle | null>; onSent: (x: Sent) => void; onSentDone: (x: Sent) => void; modelOpen: boolean; setModelOpen: (o: boolean) => void; modeOpen: boolean; setModeOpen: (o: boolean) => void; usageOpen: boolean; setUsageOpen: (o: boolean) => void }) {
   const mode = useMode(s);
   return (
     <>
@@ -236,9 +262,10 @@ function Under({ s, composer, onSent, onSentDone, modelOpen, setModelOpen, modeO
         openUsage={() => setUsageOpen(true)}
         tools={
           <>
-            <ModeKey mode={mode} open={modeOpen} onOpenChange={setModeOpen} />
-            <ModelKey s={s} open={modelOpen} onOpenChange={setModelOpen} />
-            <QuotaBars agent={s.agent} live={s.live} open={usageOpen} onOpenChange={setUsageOpen} />
+            {/* Not guessed from the row: the mode and the model come with the state, gliding in. */}
+            {!ghost && <ModeKey mode={mode} open={modeOpen} onOpenChange={setModeOpen} />}
+            {!ghost && <ModelKey s={s} open={modelOpen} onOpenChange={setModelOpen} />}
+            <QuotaBars agent={s.agent} live={s.live} using={[s.model, s.pick, modelView(s).name]} open={usageOpen} onOpenChange={setUsageOpen} />
           </>
         }
         end={<ContextRing session={s.id} summary={s.context} />}

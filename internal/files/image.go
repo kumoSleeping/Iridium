@@ -221,6 +221,29 @@ func orient(src *image.RGBA, o int) *image.RGBA {
 	return dst
 }
 
+// imageSize is the size of the image at path as its header says, upright (a JPEG's EXIF
+// orientation 5–8 turns it a quarter); 0, 0 when it does not tell. It reads the head of the file,
+// not the whole.
+func imageSize(path string) (int, int) {
+	f, err := os.Open(path)
+	if err != nil {
+		return 0, 0
+	}
+	defer f.Close()
+	// The EXIF segment is at most 64 KB, and comes first.
+	head := make([]byte, 72<<10)
+	n, _ := io.ReadFull(f, head)
+	head = head[:n]
+	cfg, format, err := image.DecodeConfig(io.MultiReader(bytes.NewReader(head), f))
+	if err != nil || cfg.Width <= 0 || cfg.Height <= 0 {
+		return 0, 0
+	}
+	if format == "jpeg" && jpegOrientation(head) >= 5 {
+		return cfg.Height, cfg.Width
+	}
+	return cfg.Width, cfg.Height
+}
+
 // jpegOrientation is a JPEG's EXIF orientation tag; 1 when there is none.
 func jpegOrientation(data []byte) int {
 	if len(data) < 4 || data[0] != 0xFF || data[1] != 0xD8 {

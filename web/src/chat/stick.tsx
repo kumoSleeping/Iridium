@@ -42,15 +42,17 @@ export function Stick({ tail, older, place, style, children, scroller, bottom }:
   const height = useRef(0);
   /** To the newest; push: the conversation glides up by as far as that scrolled it, so what was
    *  on screen does not jump (a short chat that does not scroll does not move at all). */
-  const toBottom = (el: HTMLElement, push = false) => {
+  const toBottom = (el: HTMLElement, push = false, settling = false) => {
     const was = el.scrollTop;
     el.scrollTop = bottomOf(el);
-    if (push) glide(el.scrollTop - was);
+    if (push) glide(el.scrollTop - was, settling);
   };
   const born = useRef(performance.now());
-  const glide = (by: number) => {
-    // A chat just opened settles in place (its pictures, the composer's cards): nothing glides.
-    if (performance.now() - born.current < SETTLE) return;
+  /** settling: a push even as the chat settles (new blocks or drafts, not a picture loading). */
+  const glide = (by: number, settling = false) => {
+    // A chat just opened settles in place (its pictures, the composer's cards): nothing glides. What
+    // came since it was last seen, brought as it opens, still does (the user, 2026-11-06).
+    if (!settling && performance.now() - born.current < SETTLE) return;
     const el = list.current;
     const col = el?.firstElementChild as HTMLElement | null;
     if (!el || !col || !by || reduced() || document.hidden) return;
@@ -91,7 +93,7 @@ export function Stick({ tail, older, place, style, children, scroller, bottom }:
     const was = drawn.current;
     drawn.current = tail;
     if (first && place.top !== null) el.scrollTop = place.top;
-    else if (first || atEnd.current) toBottom(el, !first && height.current > 0 && !paging.current);
+    else if (first || atEnd.current) toBottom(el, !first && height.current > 0 && !paging.current, was !== tail);
     else if (was !== tail) setFresh(true);
     void back().catch(() => {});
   });
@@ -129,7 +131,10 @@ export function Stick({ tail, older, place, style, children, scroller, bottom }:
 
   return (
     <>
-      <div ref={list} role="log" aria-label={t("chat.log")} onScroll={scrolled} className="absolute inset-0 overflow-y-auto [overflow-anchor:none]" style={style}>
+      {/* A scrollbar that takes room (not an overlay one) has its width kept on the left too: the
+          conversation stays centred in the pane, in line with the composer and the top bar under
+          and over it, not off to the left by half a scrollbar (the user, 2026-11-06). */}
+      <div ref={list} role="log" aria-label={t("chat.log")} onScroll={scrolled} className="absolute inset-0 overflow-y-auto [overflow-anchor:none] [scrollbar-gutter:stable_both-edges]" style={style}>
         {children}
       </div>
       {fresh && (

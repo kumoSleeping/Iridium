@@ -39,6 +39,7 @@
   /* turn: how far the chats drift as they swap, down the sidebar or up */
   --turn-dur: 170ms; /* the next coming in */
   --turn-out-dur: 90ms; /* the one before going, first */
+  --turn-gap: 40ms; /* the next begins as the one before is nearly gone: no blank pane between */
   --turn-in: 8px;
   --turn-out: 4px;
 }
@@ -185,9 +186,10 @@
 
 /* --- turn: html[data-turn=next] the chat goes up and out, then the next comes up into its place;
    prev, the other way. One after the other, never both at once: two pages half seen over each
-   other read as a blur of doubled words (the user, 2026-11-06). The top bar and the composer stay
-   put, their words changed at once (.g-turn-stay: .vt-bar, .vt-stack); the rest of the window
-   changes at once too. --- */
+   other read as a blur of doubled words (the user, 2026-11-06). Nor a blank pane between: the one
+   before is mostly gone at once (eased out), the next begins as it is nearly gone (--turn-gap).
+   The top bar and the composer stay put, their words changed at once (.g-turn-stay: .vt-bar,
+   .vt-stack); the rest of the window changes at once too. --- */
 /* Named only while a turn runs: a named element is a backdrop root, and the glass in it (the
    composer, the bar) would frost nothing behind it, looking see-through (the user, 2026-11-06). */
 html[data-turn] .g-turn {
@@ -215,10 +217,10 @@ html[data-turn] .vt-stack {
   mix-blend-mode: normal;
 }
 html[data-turn]::view-transition-old(page) {
-  animation: turn-out var(--turn-out-dur) var(--ease-in) both;
+  animation: turn-out var(--turn-out-dur) var(--ease-out) both;
 }
 html[data-turn]::view-transition-new(page) {
-  animation: turn-in var(--turn-dur) var(--ease-out) var(--turn-out-dur) both;
+  animation: turn-in var(--turn-dur) var(--ease-out) var(--turn-gap) both;
 }
 html[data-turn="next"] {
   --turn-from: var(--turn-in);

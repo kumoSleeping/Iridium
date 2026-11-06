@@ -26,6 +26,11 @@ const link = (l: Partial<Link>) => setCarried("link", { ...(getCarried<Link>("li
 // The states every page carries. A key the daemon does not carry for this terminal (confirms, but
 // for panels) is said to be ignored as the stream opens; the rest goes on.
 const ALWAYS = ["list", "workspaces", "quota", "update", "confirms"];
+/** What the stream last brought of each state every page carries, as it came: a stream opened
+ *  again (each chat opened opens one) brings them all whole again, and one unchanged is not set
+ *  again, the sidebar and the rest drawn again for nothing. Not the open session's: chats.ts
+ *  stateAhead sets those apart from the stream. */
+const lastRaw = new Map<string, string>();
 /** The keys the daemon said it does not carry, and why ("unknown", "forbidden"). */
 export const ignored = new Map<string, string>();
 export const keysFor = (s: string | null) => [...ALWAYS, ...(s ? [`session:${s}`, `context:${s}`] : [])];
@@ -45,7 +50,12 @@ function connect() {
     void measure();
   };
   src.addEventListener("state", (m) => {
-    const e = JSON.parse((m as MessageEvent<string>).data) as StateEvent;
+    const raw = (m as MessageEvent<string>).data;
+    const e = JSON.parse(raw) as StateEvent;
+    if (ALWAYS.includes(e.key)) {
+      if (lastRaw.get(e.key) === raw && getCarried(e.key) !== undefined) return;
+      lastRaw.set(e.key, raw);
+    }
     if (e.ignored) ignored.set(e.key, e.ignored);
     else ignored.delete(e.key);
     setCarried(e.key, e.ignored ? null : e.value);

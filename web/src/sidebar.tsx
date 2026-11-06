@@ -460,8 +460,10 @@ function SessionRow({ s, where, depth, flip, selected, onSelect, chatCode, worki
     <IconKey label={t("menu.unarchive")} onClick={restore} className="-mr-1 size-6 text-ink-3 pointer-coarse:size-8">
       <ArchiveRestore size={14} />
     </IconKey>
-  ) : unread ? (
-    <span className="unread" aria-hidden />
+  ) : unread && status === "idle" ? (
+    // One dot at a time (the user, 2026-11-06): in a turn, or needing you, the lamp says it; the
+    // unread dot comes back as the turn ends, if it ends with you elsewhere.
+    <span className="unread g-pop" aria-hidden />
   ) : s.pinned ? (
     <Pin size={12} className="text-ink-4" aria-label={t("menu.pinned")} />
   ) : undefined;

@@ -14,7 +14,7 @@ function CodeBlock({ className, children }: ComponentProps<"code"> & ExtraProps)
   const code = String(children ?? "").replace(/\n$/, "");
   const lang = /language-(\S+)/.exec(className ?? "")?.[1];
   return (
-    <div className="group/code relative my-1 rounded-md bg-fill">
+    <div className="code-block group/code relative my-1 rounded-md bg-fill">
       <button
         type="button"
         aria-label={copied ? t("msg.copied") : t("msg.copy")}

@@ -13,6 +13,10 @@ type FileRef struct {
 	Kind  FileKind `json:"kind"`
 	Thumb bool     `json:"thumb,omitempty"` // GET .../<ref>/thumb gives a thumbnail
 	Mtime int64    `json:"mtime"`           // ms since the epoch
+	// W, H: an image's size in pixels, upright (its EXIF orientation applied), where its header
+	// tells: the page keeps its place before it has loaded, nothing moving as it comes.
+	W int `json:"w,omitempty"`
+	H int `json:"h,omitempty"`
 	// Sha256 (hex) where it has been worked out: always from .../info and an upload's complete.
 	Sha256 string `json:"sha256,omitempty"`
 }

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"image"
 	"image/color"
+	"image/jpeg"
 	"image/png"
 	"io"
 	"net/http"
@@ -485,5 +486,34 @@ func TestMessageAttachments(t *testing.T) {
 	}
 	if _, err := r.s.Attach("s1", "rel.txt"); !errors.Is(err, ErrBad) {
 		t.Errorf("relative: %v", err)
+	}
+}
+
+// An image's size comes with its reference, upright, so the page keeps its place before it loads.
+func TestImageSize(t *testing.T) {
+	r := newRig(t)
+	p := filepath.Join(r.work, "wide.png")
+	writePNG(t, p, 300, 120)
+	if f, err := r.s.Info(p); err != nil || f.W != 300 || f.H != 120 {
+		t.Errorf("png: %+v %v", f, err)
+	}
+	// A JPEG 40×20 whose EXIF says it is turned a quarter (orientation 6): 20×40 upright.
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, image.NewRGBA(image.Rect(0, 0, 40, 20)), nil); err != nil {
+		t.Fatal(err)
+	}
+	tiff := []byte{'M', 'M', 0, 42, 0, 0, 0, 8, 0, 1, 0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 0, 0}
+	seg := append([]byte("Exif\x00\x00"), tiff...)
+	app1 := append([]byte{0xFF, 0xE1, byte((len(seg) + 2) >> 8), byte(len(seg) + 2)}, seg...)
+	data := append(append([]byte{0xFF, 0xD8}, app1...), buf.Bytes()[2:]...)
+	q := filepath.Join(r.work, "turned.jpg")
+	if err := os.WriteFile(q, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if f, err := r.s.Info(q); err != nil || f.W != 20 || f.H != 40 {
+		t.Errorf("jpeg turned: %+v %v", f, err)
+	}
+	if f, _ := r.s.Info(r.file("z.txt", "text")); f.W != 0 || f.H != 0 {
+		t.Errorf("text has a size: %+v", f)
 	}
 }

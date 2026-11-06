@@ -70,6 +70,7 @@ type Service struct {
 	scanned map[string]int64             // session → how far its transcript was scanned
 	scanMu  map[string]*sync.Mutex
 	sums    map[sumKey]string
+	dims    map[sumKey][2]int
 	uploads map[string]*upload
 	loaded  bool
 	copies  map[string]*copyJob
@@ -95,7 +96,7 @@ func New(o Options) *Service {
 	if o.Guard == nil {
 		o.Guard = pathsafe.New(nil, pathsafe.Deny(o.State, ""), []string{UploadsFallback(o.State)})
 	}
-	s := &Service{o: o, refs: map[string]map[string]string{}, scanned: map[string]int64{}, scanMu: map[string]*sync.Mutex{}, sums: map[sumKey]string{}, uploads: map[string]*upload{}, copies: map[string]*copyJob{}}
+	s := &Service{o: o, refs: map[string]map[string]string{}, scanned: map[string]int64{}, scanMu: map[string]*sync.Mutex{}, sums: map[sumKey]string{}, dims: map[sumKey][2]int{}, uploads: map[string]*upload{}, copies: map[string]*copyJob{}}
 	s.key = s.loadKey()
 	return s
 }
@@ -284,10 +285,32 @@ func (s *Service) Info(path string) (api.FileRef, error) {
 	}
 	typ := sniff(path)
 	k := kind(typ)
-	return api.FileRef{
+	ref := api.FileRef{
 		Name: filepath.Base(path), Path: path, Size: st.Size(), Mime: typ, Kind: k,
 		Thumb: thumbable(typ), Mtime: st.ModTime().UnixMilli(),
-	}, nil
+	}
+	if k == api.FileKindImage && baseType(typ) != "image/svg+xml" {
+		ref.W, ref.H = s.dimsOf(path, sumKey{path, st.Size(), st.ModTime().UnixNano()})
+	}
+	return ref, nil
+}
+
+// dimsOf is the image's upright size at path (0, 0 when its header does not tell), kept by path,
+// size and modification time: a page names the same pictures again and again.
+func (s *Service) dimsOf(path string, k sumKey) (int, int) {
+	s.mu.Lock()
+	d, ok := s.dims[k]
+	s.mu.Unlock()
+	if !ok {
+		d[0], d[1] = imageSize(path)
+		s.mu.Lock()
+		if len(s.dims) > 10000 {
+			clear(s.dims)
+		}
+		s.dims[k] = d
+		s.mu.Unlock()
+	}
+	return d[0], d[1]
 }
 
 // sniff is the file's media type: by its extension, else by its first 512 bytes.

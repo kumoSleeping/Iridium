@@ -5,7 +5,8 @@
 // (plan "弱网"): a row the mouse rests on, a session whose turn ends off screen, and those the page
 // warms of its own (src/warm.ts picks them): each one's newest page, held apart till it is visited.
 import { api } from "./api/client";
-import type { Block, DraftEvent, MessagePage, Session } from "./api/types.gen";
+import type { Block, DraftEvent, MessagePage, Session, SessionState } from "./api/types.gen";
+import { getCarried, setCarried } from "./store";
 
 /** A message of yours sent from this page, till the transcript has it: input, the id the server gave
  *  it (Claude's uuid, which the user block carries); text, as typed; files, upload refs with their
@@ -313,12 +314,36 @@ export const keptChats = () => [...kept.values()];
 /** Whether the browser asks to save data: then nothing is fetched ahead. */
 export const mayPrefetch = (nav: Navigator = navigator) => !(nav as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData;
 
+/** Session id's state, asked for ahead of the stream, which carries it only once its chat is open
+ *  and the stream opened again for it: the chat is drawn whole at once, its composer, keys and
+ *  conversation, not its top bar alone and the rest after. Never over what the stream brought
+ *  meanwhile. Says whether the session is there. One ask at a time per session; low: warming, or
+ *  only freshening one held from before. */
+const asking = new Map<string, Promise<boolean>>();
+export function stateAhead(id: string, low = false): Promise<boolean> {
+  let p = asking.get(id);
+  if (p) return p;
+  const key = `session:${id}`;
+  const was = getCarried<SessionState>(key);
+  p = api
+    .session(id, { priority: low || was ? "low" : "high" } as RequestInit)
+    .then(
+      (st) => (getCarried(key) === was && setCarried(key, st), true),
+      () => !!getCarried(key),
+    )
+    .finally(() => asking.delete(id));
+  asking.set(id, p);
+  return p;
+}
+
 /** Fetches session id's newest page ahead of its visit, as the mouse rests on its row (plan "弱网"),
  *  unless kept already or coming. One at a time: the one before, still coming, stops. pressed: the
  *  row is pressed, or the turn ended; it is not stopped till it came. */
 let pressed: Promise<void> | undefined;
 export function ahead(id: string, press = false): void {
-  if (!mayPrefetch() || pressed) return;
+  if (!mayPrefetch()) return;
+  if (!getCarried(`session:${id}`)) void stateAhead(id);
+  if (pressed) return;
   if (!kept.has(id) && early?.id !== id && !warm.has(id)) {
     behind();
     const stop = new AbortController();
@@ -346,6 +371,13 @@ export function turnEnded(id: string, open: string | null): void {
   if (id === open || !mayPrefetch()) return;
   const it = peekChat(id);
   if (!it) return void (early?.it.coming || ahead(id, true));
+  since(it);
+}
+
+/** Brings what chat it held has missed since, unless that is coming already: a turn ended off
+ *  screen, or the page turns to it (motion.ts pageTurn), which draws it with them, not without and
+ *  then jumping. */
+export function since(it: Chat): void {
   if (it.coming || !it.log.loaded) return;
   it.coming = it.log
     .newer()
@@ -418,6 +450,8 @@ async function pump() {
         .catch(() => {})
         .finally(() => (it.coming = undefined));
       await it.coming;
+      // Its state too, so opening it draws the composer and its keys at once.
+      if (!getCarried(`session:${id}`)) await stateAhead(id, true);
     }
   } finally {
     pumping = false;

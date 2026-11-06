@@ -1,6 +1,7 @@
 // The page's pure logic: folding tool calls, reading sources and file references, the sidebar's
 // tree, the composer's key, the upgrade rules, the i18n dictionaries.
 import { describe, expect, test } from "vitest";
+import { windowFor } from "../src/quota";
 import type { Block, Model, Session, Terminal } from "../src/api/types.gen";
 import { argOf, folded, foldLine, inputOf } from "../src/chat/fold";
 import { commandsOf, keyMode, matching } from "../src/chat/composer";
@@ -358,5 +359,18 @@ describe("goo", () => {
     expect(ss[0]!.x).toBeGreaterThan(ss[1]!.x + 0.05);
     for (let i = 0; i < 180; i++) for (const s of ss) step(s, 0.5, 1 / 60);
     expect(ss.every((s) => still(s, 0.5) || Math.abs(s.x - 0.5) < 1e-3)).toBe(true);
+  });
+});
+
+describe("windowFor", () => {
+  const w = (model?: string) => ({ group: "weekly", percent: 0, ...(model ? { model } : {}) });
+  test("a window of all models always; one model's only where it is in use", () => {
+    expect(windowFor(w(), [])).toBe(true);
+    expect(windowFor(w("Fable"), ["claude-fable-5-1"])).toBe(true);
+    expect(windowFor(w("Fable"), [undefined, "default", "Fable 5.1"])).toBe(true);
+    expect(windowFor(w("Fable"), ["claude-opus-5-5", "opus", "Opus"])).toBe(false);
+    expect(windowFor(w("Fable"), [undefined, "", undefined])).toBe(false);
+    expect(windowFor(w("GPT-5.3-Codex-Spark"), ["gpt-5.3-codex-spark"])).toBe(true);
+    expect(windowFor(w("GPT-5.3-Codex-Spark"), ["gpt-5.3-codex"])).toBe(false);
   });
 });

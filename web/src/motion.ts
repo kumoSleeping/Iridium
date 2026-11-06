@@ -4,7 +4,8 @@
 // fall back to a short fade.
 import { useLayoutEffect, useRef, type RefObject } from "react";
 import { flushSync } from "react-dom";
-import { ahead, peekChat } from "./chats";
+import { ahead, peekChat, since, stateAhead } from "./chats";
+import { getCarried } from "./store";
 import type { Turn } from "./route";
 
 export const reduced = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -98,35 +99,48 @@ export function pushIn(bubble: HTMLElement) {
   bubble.animate([{ opacity: 0, transform: "translateY(6px) scale(0.98)" }, { opacity: 1, transform: "none" }], { duration: motion.dur(3), easing: motion.ease("out"), delay: motion.dur(1) / 2, fill: "backwards" });
 }
 
-/** How long a turn waits for the next chat's newest page, if it has not come yet: its page is drawn
- *  whole as it turns, not empty and filled after. */
+/** How long a move to a chat waits for what it needs to be drawn whole, if that has not come yet:
+ *  its newest page (or what came since, in one held) and its state (the composer and its keys).
+ *  Its page is drawn whole as it turns, not empty and filled after. */
 const WAIT_FOR_PAGE = 160;
 
-/** Chat to chat on a computer: the main pane swaps quickly (motion.css "turn"), the old chat fading
- *  out as the next fades in with a short drift, up as you go down the sidebar, down as you go up.
- *  order: the sessions as the sidebar lists them; on: whether to turn at all (not on a phone, whose
- *  pages push). Anything else, or a browser without view transitions, is drawn at once. */
+/** Moves to a chat. Chat to chat, or from nothing open, on a computer: the main pane swaps quickly
+ *  (motion.css "turn"), the old one fading out as the next fades in with a short drift, up as you go
+ *  down the sidebar, down as you go up. order: the sessions as the sidebar lists them; on: whether
+ *  to turn at all (not on a phone, whose pages push). Without a turn (a phone, a browser without
+ *  view transitions) the chat is still drawn once it is whole, or the wait is over. Anything else
+ *  is drawn at once. */
 export function pageTurn(order: () => string[], on: () => boolean): Turn {
   let seq = 0;
   return (from, to, draw) => {
     const doc = document as Document & { startViewTransition?: (f: () => Promise<void> | void) => { finished: Promise<void> } };
     const root = document.documentElement;
     const mine = ++seq;
-    if (from.name !== "chat" || to.name !== "chat" || from.id === to.id || !on() || !doc.startViewTransition || document.hidden || document.querySelector("[data-still]")) return draw();
+    // Out of the settings: the chat under them is drawn already.
+    if (to.name !== "chat" || (from.name !== "chat" && from.name !== "home") || (from.name === "chat" && from.id === to.id) || document.hidden) return draw();
+    const still = !!document.querySelector("[data-still]");
+    const turns = on() && !!doc.startViewTransition && !still;
     const ids = order();
-    const a = ids.indexOf(from.id);
+    const a = from.name === "chat" ? ids.indexOf(from.id) : -1;
     const b = ids.indexOf(to.id);
     const dir = a < 0 || b < 0 || b > a ? "next" : "prev";
     const chat = peekChat(to.id);
+    // One held: what came since it was seen comes first, so it turns in as it is now.
     if (!chat) ahead(to.id, true);
+    else since(chat);
     const coming = peekChat(to.id)?.coming;
+    // Its state: waited for if none is held; one held from before is drawn, and freshened.
+    const held = !!getCarried(`session:${to.id}`);
+    const state = stateAhead(to.id, held);
+    const wait = held ? [coming] : [coming, state];
     const start = () => {
-      if (mine !== seq) return; // a later move turns instead
+      if (mine !== seq) return; // a later move draws instead
+      if (!turns) return draw();
       root.dataset.turn = dir;
       const vt = doc.startViewTransition!(() => flushSync(draw));
       void vt.finished.finally(() => mine === seq && delete root.dataset.turn).catch(() => {});
     };
-    if (!coming) return start();
-    void Promise.race([coming, new Promise((r) => setTimeout(r, WAIT_FOR_PAGE))]).then(start);
+    if (still || !wait.some(Boolean)) return start();
+    void Promise.race([Promise.all(wait), new Promise((r) => setTimeout(r, WAIT_FOR_PAGE))]).then(start);
   };
 }

@@ -16,7 +16,7 @@ import { errText, toast } from "../toast";
 import { ago, cn, PopSurface, Tip, useMinute } from "../ui";
 import { EffortSlider, levelName } from "./effort";
 import { modeName } from "../modes";
-import { quotaKey, windowName } from "../quota";
+import { quotaKey, windowFor, windowName } from "../quota";
 
 const k = (n: number) => (n >= 100_000 ? `${Math.round(n / 1000)}k` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`);
 
@@ -123,13 +123,15 @@ const quotaTone = (pct: number) => (pct >= 95 ? ["bg-err", "text-err"] : pct >= 
 /** The agent's quota bars, after the model key in the row under the composer; clicked, each window
  *  in a popover as Claude Code's /usage: its name, a wide bar, the percent and when it resets
  *  (the user, 2026-11-06). /usage in the composer opens it too, with nothing read yet as well. */
-export function QuotaBars({ agent, live, open, onOpenChange }: { agent: Agent; live: boolean; open?: boolean; onOpenChange?: (o: boolean) => void }) {
+/** using: what the session names the model it uses (chat.tsx): a window of one model shows only
+ *  where that model is in use. */
+export function QuotaBars({ agent, live, using, open, onOpenChange }: { agent: Agent; live: boolean; using: (string | undefined)[]; open?: boolean; onOpenChange?: (o: boolean) => void }) {
   const lang = useLang();
   useMinute(); // "read 5 min ago" and the fading, again each minute
   const quota = useQuota();
   const hidden = useSettings().data?.quotaHidden ?? [];
   const q: AgentQuota | undefined = quota?.agents.filter((a) => a.agent === agent).sort((a, b) => b.at - a.at)[0];
-  const windows = (q?.windows ?? []).filter((w) => !hidden.includes(quotaKey(q!, w)));
+  const windows = (q?.windows ?? []).filter((w) => !hidden.includes(quotaKey(q!, w)) && windowFor(w, using));
   if (!q || !windows.length)
     // No bars, but /usage still opens the popover, from where they would be.
     return (
@@ -151,13 +153,14 @@ export function QuotaBars({ agent, live, open, onOpenChange }: { agent: Agent; l
         <Popover.Trigger
           render={
             <button type="button" aria-label={label} className="g-press flex h-7 shrink-0 items-center rounded-md px-1.5 hover:bg-fill data-popup-open:bg-fill pointer-coarse:h-9">
-              <span className={cn("flex items-center gap-3 transition-opacity", stale && "opacity-50")}>
+              <span className={cn("flex items-center gap-3 transition-opacity @max-md:gap-2", stale && "opacity-50")}>
                 {windows.map((w) => {
                   const pct = Math.round(w.percent);
                   const [fill, text] = quotaTone(pct);
                   return (
-                    <span key={quotaKey(q, w)} className="flex items-center gap-1.5">
-                      <span className="relative h-1 w-9 overflow-hidden rounded-full bg-fill-2">
+                    <span key={quotaKey(q, w)} className="flex items-center gap-1.5 @max-md:gap-1">
+                      {/* Shorter as the composer narrows (its @container): the row fits, not scrolled. */}
+                      <span className="relative h-1 w-9 overflow-hidden rounded-full bg-fill-2 @max-lg:w-6 @max-md:w-4">
                         <span className={cn("absolute inset-y-0 left-0 w-full origin-left rounded-full transition-transform duration-(--dur-3)", fill)} style={{ transform: `scaleX(${Math.min(100, pct) / 100})` }} />
                       </span>
                       <span className={cn("text-xs tabular-nums", text)}>{pct}%</span>

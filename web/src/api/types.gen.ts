@@ -737,6 +737,12 @@ export interface FileRef {
   thumb?: boolean; // GET .../<ref>/thumb gives a thumbnail
   mtime: number /* int64 */; // ms since the epoch
   /**
+   * W, H: an image's size in pixels, upright (its EXIF orientation applied), where its header
+   * tells: the page keeps its place before it has loaded, nothing moving as it comes.
+   */
+  w?: number /* int */;
+  h?: number /* int */;
+  /**
    * Sha256 (hex) where it has been worked out: always from .../info and an upload's complete.
    */
   sha256?: string;
