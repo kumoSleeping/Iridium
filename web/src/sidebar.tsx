@@ -276,7 +276,7 @@ export function Sidebar(p: Props) {
       <div className="flex h-14 shrink-0 items-center justify-between gap-2 px-2 pointer-coarse:h-16">
         <div className="min-w-0">{p.me}</div>
         <span className="relative shrink-0">
-          <IconKey label={p.updateDot ? `${t("nav.settings")} · ${t("settings.updateReady")}` : t("nav.settings")} onClick={p.onSettings} aria-pressed={p.settings} className={cn("size-10 pointer-coarse:size-11", p.settings && "bg-fill text-ink")}>
+          <IconKey label={p.updateDot ? `${t("nav.settings")} · ${t("settings.updateReady")}` : t("nav.settings")} onClick={p.onSettings} aria-pressed={p.settings} data-settings-key className={cn("size-10 pointer-coarse:size-11", p.settings && "bg-fill text-ink")}>
             <Settings size={19} />
           </IconKey>
           {p.updateDot && <span className="g-pop pointer-events-none absolute top-1.5 right-1.5 size-2 rounded-full bg-err shadow-[0_0_0_1.5px_var(--paper)]" aria-hidden />}

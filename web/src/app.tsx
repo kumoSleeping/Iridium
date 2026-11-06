@@ -8,7 +8,7 @@
 import { Dialog } from "@base-ui/react/dialog";
 import { Toast } from "@base-ui/react/toast";
 import { Tooltip } from "@base-ui/react/tooltip";
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ComponentProps } from "react";
 import { watchTurns } from "./chats";
 import { CreatePopover, WsPlus } from "./create";
 import { Drawer, SideKey } from "./drawer";
@@ -203,20 +203,22 @@ export function App() {
     </main>
   );
 
-  // The settings: a dialog at the window's left, over the sidebar mostly and a little past it,
-  // rising from their key at the sidebar's foot (the user, 2026-11-06); the terminals its page.
+  // The settings: a small dialog as wide as the me popover, right above their key at the sidebar's
+  // foot, its right edge on the key's, rising out of it (the user, 2026-11-06); the terminals its page.
+  const settingsAt = useSettingsAt(over(r));
   const settings = (
     <Dialog.Root open={over(r)} onOpenChange={(o) => !o && over(route()) && close(under)}>
       <Dialog.Portal>
         <Dialog.Backdrop className="g-backdrop fixed inset-0 z-50 bg-[oklch(0_0_0/0.12)] dark:bg-[oklch(0_0_0/0.35)]" />
         <Dialog.Popup
           aria-label={t("nav.settings")}
-          className="g-dialog glass thick float fixed top-[max(8px,env(safe-area-inset-top))] bottom-[max(8px,env(safe-area-inset-bottom))] left-2 z-50 w-[min(calc(100vw-16px),640px,max(460px,calc(var(--sidebar-w,292px)+220px)))] overflow-hidden rounded-xl text-ink outline-none"
+          style={settingsAt}
+          className="g-dialog glass thick float fixed z-50 w-[min(288px,calc(100vw-16px))] overflow-hidden rounded-lg text-ink outline-none"
         >
           <Suspense fallback={<Waiting />}>
             {r.name === "terminals" ? (
               <div key="terminals" className="g-slide h-full">
-                <TerminalsPage phone={phone} onBack={() => (history.state?.depth > 1 ? history.back() : go({ name: "settings" }, true))} />
+                <TerminalsPage onBack={() => (history.state?.depth > 1 ? history.back() : go({ name: "settings" }, true))} />
               </div>
             ) : (
               <div key="settings" className="g-slide h-full" data-dir="back">
@@ -273,4 +275,24 @@ function Empty() {
 /** While a part's code comes: the top bar's place, frosted and empty. */
 function Waiting() {
   return <div className="glass absolute inset-x-0 top-0 h-12 shadow-[0_0.5px_0_var(--edge)] pointer-coarse:h-13" />;
+}
+
+/** Where the settings stand, open: above their key (sidebar.tsx data-settings-key), its right edge
+ *  on the key's, as tall as fits there up to 600px; with too little room or no key in sight, at the
+ *  window's bottom left. */
+function useSettingsAt(open: boolean): CSSProperties | undefined {
+  const [at, setAt] = useState<CSSProperties>();
+  useLayoutEffect(() => {
+    if (!open) return;
+    const w = Math.min(288, innerWidth - 16);
+    const b = document.querySelector("[data-settings-key]")?.getBoundingClientRect();
+    const seen = b && b.width > 0 && b.right > 0 && b.left < innerWidth;
+    const room = seen ? b.top - 16 : 0;
+    if (!seen || room < 360) {
+      setAt({ left: 8, bottom: "max(8px, env(safe-area-inset-bottom))", height: "min(600px, calc(100dvh - 16px))" });
+      return;
+    }
+    setAt({ left: Math.max(8, Math.min(innerWidth - w - 8, b.right - w)), bottom: innerHeight - b.top + 8, height: Math.min(600, room) });
+  }, [open]);
+  return at;
 }

@@ -31,7 +31,7 @@ const DEFAULT_RULES: PushEvents = { needsYou: true, error: true, turnEnd: false,
 /** A duration as Go writes it ("1h0m0s"), as short as it goes ("1h"). */
 export const shortDuration = (d: string) => d.replace(/([hm])0s$/, "$1").replace(/h0m$/, "h");
 
-/** In a dialog over the chat (app.tsx), its close key at the top right. */
+/** In a small dialog above its key (app.tsx), as wide as the me popover: its close key at the top right. */
 export function SettingsPage({ onClose, theme, setTheme }: { onClose: () => void; theme: ThemePref; setTheme: (v: ThemePref) => void }) {
   const lang = useLang();
   const qc = useQueryClient();
@@ -91,20 +91,20 @@ export function SettingsPage({ onClose, theme, setTheme }: { onClose: () => void
 
   return (
     <div className="relative h-full">
-      <header className="glass absolute inset-x-0 top-0 z-20 flex h-12 items-center gap-1 pr-2 pl-2 shadow-[0_0.5px_0_var(--edge)] pointer-coarse:h-13">
-        <h1 className="m-0 pl-2 text-base font-semibold">{t("nav.settings")}</h1>
+      <header className="glass absolute inset-x-0 top-0 z-20 flex h-11 items-center gap-1 pr-1.5 pl-1.5 shadow-[0_0.5px_0_var(--edge)] pointer-coarse:h-12">
+        <h1 className="m-0 pl-1.5 text-base font-semibold">{t("nav.settings")}</h1>
         {q.isFetching && <LoaderCircle size={14} className="ml-1 animate-spin text-ink-4" />}
         <IconKey label={t("nav.close")} onClick={onClose} tipSide="bottom" className="ml-auto">
-          <X size={18} />
+          <X size={17} />
         </IconKey>
       </header>
-      <div className="absolute inset-0 overflow-y-auto pt-16 pb-10">
-        <div className="mx-auto flex max-w-[620px] flex-col gap-7 px-4 sm:px-6">
+      <div className="absolute inset-0 overflow-y-auto pt-14 pb-4 pointer-coarse:pt-15">
+        <div className="flex flex-col gap-5 px-3">
           <UpdateRow />
 
           <Group title={t("settings.agents")}>
             <Item label={t("settings.idleReap")} hint={t("settings.idleReapHint")}>
-              <select disabled={off} value={reap} onChange={(e) => void put({ idleReap: e.target.value })} aria-label={t("settings.idleReap")} className="no-ring h-8 rounded-md bg-fill px-2 text-sm disabled:opacity-40">
+              <select disabled={off} value={reap} onChange={(e) => void put({ idleReap: e.target.value })} aria-label={t("settings.idleReap")} className="no-ring h-7 rounded-md bg-fill px-1.5 text-sm disabled:opacity-40">
                 {[...new Set([...REAP, reap])].map((v) => (
                   <option key={v} value={v}>
                     {v === "0" ? t("settings.never") : v}
@@ -118,8 +118,8 @@ export function SettingsPage({ onClose, theme, setTheme }: { onClose: () => void
             <Item label={t("settings.quotaResume")} hint={t("settings.quotaResumeHint")}>
               <Switch label={t("settings.quotaResume")} disabled={off} on={!!s?.quotaResume} onChange={(v) => void put({ quotaResume: v })} />
             </Item>
-            <Item label={t("settings.enter")} hint={t("settings.enterHint")}>
-              <select disabled={off} value={s?.enterInTurn || "steer"} onChange={(e) => void put({ enterInTurn: e.target.value })} aria-label={t("settings.enter")} className="no-ring h-8 max-w-56 rounded-md bg-fill px-2 text-sm disabled:opacity-40">
+            <Item label={t("settings.enter")} hint={t("settings.enterHint")} below>
+              <select disabled={off} value={s?.enterInTurn || "steer"} onChange={(e) => void put({ enterInTurn: e.target.value })} aria-label={t("settings.enter")} className="no-ring h-7 w-full rounded-md bg-fill px-1.5 text-sm disabled:opacity-40">
                 <option value="steer">{t("settings.enterSteer", { key: steerKey() })}</option>
                 <option value="queue">{t("settings.enterQueue", { key: steerKey() })}</option>
               </select>
@@ -138,7 +138,7 @@ export function SettingsPage({ onClose, theme, setTheme }: { onClose: () => void
                     </span>
                   }
                 >
-                  <select disabled={off} value={s?.modes?.[a.agent] ?? ""} onChange={(e) => void put({ modes: { [a.agent]: e.target.value } })} aria-label={`${t("settings.modes")} · ${agentName(a.agent)}`} className="no-ring h-8 max-w-48 rounded-md bg-fill px-2 text-sm disabled:opacity-40">
+                  <select disabled={off} value={s?.modes?.[a.agent] ?? ""} onChange={(e) => void put({ modes: { [a.agent]: e.target.value } })} aria-label={`${t("settings.modes")} · ${agentName(a.agent)}`} className="no-ring h-7 max-w-40 rounded-md bg-fill px-1.5 text-sm disabled:opacity-40">
                     <option value="">{t("settings.agentDefault", { mode: modeName({ id: a.defaultMode }) })}</option>
                     {a.modes.map((m) => (
                       <option key={m} value={m}>
@@ -153,10 +153,10 @@ export function SettingsPage({ onClose, theme, setTheme }: { onClose: () => void
 
           {manages && (
             <Group title={t("settings.terminals")}>
-              <button type="button" onClick={() => go({ name: "terminals" })} className="g-press -mx-2 flex min-h-12 items-center gap-3 rounded-lg px-2 text-left hover:bg-fill">
+              <button type="button" onClick={() => go({ name: "terminals" })} className="g-press -mx-1.5 flex min-h-11 items-center gap-2.5 rounded-md px-1.5 text-left hover:bg-fill">
                 <MonitorSmartphone size={17} className="shrink-0 text-ink-2" />
                 <span className="min-w-0 flex-1">
-                  <span className="block text-base">{t("settings.terminalsRow")}</span>
+                  <span className="block text-sm">{t("settings.terminalsRow")}</span>
                   <span className="block truncate text-xs text-ink-3">{t("settings.terminalsHint")}</span>
                 </span>
                 {confirms.length > 0 && <span className="size-2 shrink-0 rounded-full bg-need" aria-label={t("nav.needsYou")} />}
@@ -172,20 +172,20 @@ export function SettingsPage({ onClose, theme, setTheme }: { onClose: () => void
             </Item>
             {pushed && ws.length > 0 && (
               <div className="g-fade flex flex-col">
-                <div className="flex h-8 items-center justify-end gap-3 pr-0.5 text-ink-3">
+                <div className="flex h-7 items-center justify-end gap-1 text-ink-3">
                   {RULES.map((r) => (
                     <Tip key={r.k} label={t(r.label)}>
-                      <span className="grid w-8 place-items-center" aria-label={t(r.label)}>
+                      <span className="grid w-7 place-items-center" aria-label={t(r.label)}>
                         {r.icon}
                       </span>
                     </Tip>
                   ))}
                 </div>
                 {ws.map((w) => (
-                  <div key={w.id} className="flex min-h-9 items-center gap-3">
-                    <span className="min-w-0 flex-1 truncate text-base">{w.name}</span>
+                  <div key={w.id} className="flex min-h-8 items-center gap-1">
+                    <span className="min-w-0 flex-1 truncate text-sm">{w.name}</span>
                     {RULES.map((r) => (
-                      <span key={r.k} className="grid w-8 place-items-center">
+                      <span key={r.k} className="grid w-7 place-items-center">
                         <input type="checkbox" checked={rules(w.id)[r.k]} onChange={(e) => void setRule(w.id, r.k, e.target.checked)} aria-label={`${w.name} · ${t(r.label)}`} className="size-4 accent-[var(--ink)]" />
                       </span>
                     ))}
@@ -245,11 +245,22 @@ export function Group({ title, children }: { title: string; children: ReactNode 
   );
 }
 
-export function Item({ label, hint, children }: { label: ReactNode; hint?: ReactNode; children: ReactNode }) {
+/** below: its control under the words, the whole width (a select whose options are long). */
+export function Item({ label, hint, children, below }: { label: ReactNode; hint?: ReactNode; children: ReactNode; below?: boolean }) {
+  if (below)
+    return (
+      <div className="flex flex-col gap-1.5 py-1.5">
+        <div>
+          <div className="text-sm">{label}</div>
+          {hint && <div className="text-xs text-ink-3">{hint}</div>}
+        </div>
+        {children}
+      </div>
+    );
   return (
-    <div className="flex min-h-11 items-center gap-4 py-1">
+    <div className="flex min-h-10 items-center gap-3 py-1">
       <div className="min-w-0 flex-1">
-        <div className="text-base">{label}</div>
+        <div className="text-sm">{label}</div>
         {hint && <div className="text-xs text-ink-3">{hint}</div>}
       </div>
       <div className="flex shrink-0 items-center">{children}</div>
@@ -276,7 +287,7 @@ function UpdateRow() {
   const checked = u.checkedAt ? new Date(u.checkedAt).toLocaleString(lang === "zh" ? "zh-CN" : "en", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
   if (!u.available)
     return (
-      <div className="-mb-3 flex items-center gap-2 text-xs text-ink-3 tabular-nums">
+      <div className="-mb-2 flex items-center gap-1.5 text-xs text-ink-3 tabular-nums">
         <span>Iridium {u.current}</span>
         {u.source && (
           <>
@@ -290,16 +301,16 @@ function UpdateRow() {
       </div>
     );
   return (
-    <section className="g-pop flex flex-col gap-2 rounded-lg p-3 shadow-[0_0_0_1px_var(--edge)]" aria-label={t("settings.updateReady")}>
+    <section className="g-pop flex flex-col gap-2 rounded-md p-2.5 shadow-[0_0_0_1px_var(--edge)]" aria-label={t("settings.updateReady")}>
       <div className="flex items-center gap-3">
         <span className="size-2 shrink-0 rounded-full bg-err" aria-hidden />
-        <span className="min-w-0 flex-1 text-base font-semibold tabular-nums">{t("settings.updateTo", { v: u.latest ?? "" })}</span>
+        <span className="min-w-0 flex-1 text-sm font-semibold tabular-nums">{t("settings.updateTo", { v: u.latest ?? "" })}</span>
         {working && <span className="text-xs text-ink-3">{phase}</span>}
         <button
           type="button"
           disabled={busy !== null || working}
           onClick={() => run("apply", () => api.applyUpdate(), t("settings.updating"))}
-          className="g-press flex h-8 items-center gap-1.5 rounded-md bg-ink px-3.5 text-sm font-medium text-on-ink disabled:opacity-50"
+          className="g-press flex h-7 items-center gap-1.5 rounded-md bg-ink px-3 text-sm font-medium text-on-ink disabled:opacity-50"
         >
           {(busy === "apply" || working) && <LoaderCircle size={14} className="animate-spin" />}
           {t("settings.update")}

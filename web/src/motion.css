@@ -119,7 +119,7 @@
 
 /* --- dialog: Base UI Dialog's popup and backdrop (data-starting-style / data-ending-style) --- */
 .g-dialog {
-  transform-origin: 28px calc(100% - 24px);
+  transform-origin: calc(100% - 20px) calc(100% + 28px);
   transition:
     transform var(--dur-3) var(--ease-spring),
     opacity var(--dur-2) var(--ease-out);

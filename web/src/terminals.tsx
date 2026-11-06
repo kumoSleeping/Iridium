@@ -26,7 +26,7 @@ export const tokens = (n: number) => (n >= 1_000_000 ? `${(n / 1_000_000).toFixe
 
 const kindName = (x: Terminal) => (x.local ? t("term.local") : x.kind === "panel" ? t("term.panel") : t("term.channel"));
 
-export function TerminalsPage({ phone, onBack }: { phone: boolean; onBack: () => void }) {
+export function TerminalsPage({ onBack }: { onBack: () => void }) {
   useLang();
   const qc = useQueryClient();
   const q = useTerminals();
@@ -36,7 +36,7 @@ export function TerminalsPage({ phone, onBack }: { phone: boolean; onBack: () =>
   const invites = q.data?.invites ?? [];
   return (
     <div className="relative h-full">
-      <header className="glass absolute inset-x-0 top-0 z-20 flex h-12 items-center gap-1 pr-2 pl-2 shadow-[0_0.5px_0_var(--edge)] pointer-coarse:h-13">
+      <header className="glass absolute inset-x-0 top-0 z-20 flex h-11 items-center gap-1 pr-1.5 pl-1.5 shadow-[0_0.5px_0_var(--edge)] pointer-coarse:h-12">
         <IconKey label={t("nav.settings")} onClick={onBack} tipSide="bottom" className="-mr-1">
           <ChevronLeft size={20} />
         </IconKey>
@@ -44,8 +44,8 @@ export function TerminalsPage({ phone, onBack }: { phone: boolean; onBack: () =>
         {q.isFetching && <LoaderCircle size={14} className="animate-spin text-ink-4" />}
         <NewTerminal />
       </header>
-      <div className="absolute inset-0 overflow-y-auto pt-16 pb-10">
-        <div className={cn("mx-auto flex max-w-[620px] flex-col gap-7", phone ? "px-3" : "px-6")}>
+      <div className="absolute inset-0 overflow-y-auto pt-14 pb-4 pointer-coarse:pt-15">
+        <div className="flex flex-col gap-5 px-3">
           {confirms.length > 0 && (
             <div className="flex flex-col gap-2">
               {confirms.map((c) => (
