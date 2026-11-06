@@ -1,7 +1,7 @@
 // Package push is Web Push (plan "推送和插件接口"): VAPID keys kept in the state directory, the
-// browsers' subscriptions in the store, and each workspace's choice of events. Off until the
-// config's total switch is on. Messages are encrypted as RFC 8291 says (aes128gcm) and signed
-// with VAPID (RFC 8292).
+// browsers' subscriptions in the store, the default events and the rules of workspaces, folders
+// and sessions over them (Resolve). Off until the config's total switch is on. Messages are
+// encrypted as RFC 8291 says (aes128gcm) and signed with VAPID (RFC 8292).
 package push
 
 import (
@@ -27,6 +27,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -146,31 +147,109 @@ func (s *Service) SetEnabled(on bool) error {
 
 // State is the settings as the page shows them.
 func (s *Service) State() (api.PushState, error) {
-	st := api.PushState{Enabled: s.Enabled(), PublicKey: s.PublicKey(), Workspaces: []api.PushWorkspace{}}
-	set, err := s.o.Store.PushSettings()
+	st := api.PushState{Enabled: s.Enabled(), PublicKey: s.PublicKey(), Defaults: apiEvents(store.DefaultPushEvents), Rules: []api.PushRule{}}
+	rules, err := s.o.Store.PushRules()
 	if err != nil {
 		return st, err
 	}
-	ws, err := s.o.Store.Workspaces()
-	if err != nil {
-		return st, err
-	}
-	ids := []int64{0}
-	for _, w := range ws {
-		ids = append(ids, w.ID)
-	}
-	for _, id := range ids {
-		e, ok := set[id]
-		if !ok {
-			e = store.DefaultPushEvents
+	for _, r := range rules {
+		if r.Scope == store.PushDefault {
+			if r.Events != nil {
+				st.Defaults = apiEvents(*r.Events)
+			}
+			continue
 		}
-		st.Workspaces = append(st.Workspaces, api.PushWorkspace{Workspace: id, PushEvents: api.PushEvents{NeedsYou: e.NeedsYou, Error: e.Error, TurnEnd: e.TurnEnd, Compact: e.Compact}})
+		ar := api.PushRule{Scope: api.PushScope(r.Scope), Target: r.Target, Mode: api.PushModeOn}
+		if r.Off {
+			ar.Mode = api.PushModeOff
+		}
+		if r.Events != nil {
+			e := apiEvents(*r.Events)
+			ar.Events = &e
+		}
+		st.Rules = append(st.Rules, ar)
 	}
 	return st, nil
 }
 
-func (s *Service) SetWorkspace(ws int64, e api.PushEvents) error {
-	return s.o.Store.SetPushSettings(ws, store.PushEvents{NeedsYou: e.NeedsYou, Error: e.Error, TurnEnd: e.TurnEnd, Compact: e.Compact})
+func apiEvents(e store.PushEvents) api.PushEvents {
+	return api.PushEvents{NeedsYou: e.NeedsYou, Error: e.Error, TurnEnd: e.TurnEnd, Compact: e.Compact}
+}
+
+func storeEvents(e api.PushEvents) store.PushEvents {
+	return store.PushEvents{NeedsYou: e.NeedsYou, Error: e.Error, TurnEnd: e.TurnEnd, Compact: e.Compact}
+}
+
+// SetDefaults sets the events pushed where no rule says otherwise.
+func (s *Service) SetDefaults(e api.PushEvents) error {
+	ev := storeEvents(e)
+	return s.o.Store.SetPushRule(store.PushRule{Scope: store.PushDefault, Events: &ev})
+}
+
+var ErrBadRule = errors.New("bad push rule")
+
+// SetRule keeps r, or drops its scope's rule when its mode is inherit (as above). Off keeps no
+// events.
+func (s *Service) SetRule(r api.PushRule) error {
+	switch r.Scope {
+	case api.PushScopeWorkspace:
+		if id, err := strconv.ParseInt(r.Target, 10, 64); err != nil || id < 0 || strconv.FormatInt(id, 10) != r.Target {
+			return fmt.Errorf("%w: a workspace's target is its id", ErrBadRule)
+		}
+	case api.PushScopeFolder:
+		if !filepath.IsAbs(r.Target) {
+			return fmt.Errorf("%w: a folder's target is its absolute path", ErrBadRule)
+		}
+	case api.PushScopeSession:
+		if r.Target == "" {
+			return fmt.Errorf("%w: a session's target is its id", ErrBadRule)
+		}
+	default:
+		return fmt.Errorf("%w: scope %q", ErrBadRule, r.Scope)
+	}
+	switch r.Mode {
+	case api.PushModeInherit, "":
+		return s.o.Store.DeletePushRule(string(r.Scope), r.Target)
+	case api.PushModeOff:
+		return s.o.Store.SetPushRule(store.PushRule{Scope: string(r.Scope), Target: r.Target, Off: true})
+	case api.PushModeOn:
+		sr := store.PushRule{Scope: string(r.Scope), Target: r.Target}
+		if r.Events != nil {
+			e := storeEvents(*r.Events)
+			sr.Events = &e
+		}
+		return s.o.Store.SetPushRule(sr)
+	}
+	return fmt.Errorf("%w: mode %q", ErrBadRule, r.Mode)
+}
+
+// Resolve is what a session's events push (web/src/push.ts pushOf is the same): the nearest rule
+// of the session, its folder (cwd) and its workspace says on or off (none: on); the events are the
+// nearest of them on with events of their own, else the defaults.
+func Resolve(st api.PushState, workspace int64, cwd, session string) (api.PushEvents, bool) {
+	at := func(scope api.PushScope, target string) *api.PushRule {
+		for i := range st.Rules {
+			if r := &st.Rules[i]; r.Scope == scope && r.Target == target {
+				return r
+			}
+		}
+		return nil
+	}
+	levels := []*api.PushRule{at(api.PushScopeSession, session), at(api.PushScopeFolder, cwd), at(api.PushScopeWorkspace, strconv.FormatInt(workspace, 10))}
+	for _, r := range levels {
+		if r != nil {
+			if r.Mode == api.PushModeOff {
+				return api.PushEvents{}, false
+			}
+			break
+		}
+	}
+	for _, r := range levels {
+		if r != nil && r.Mode == api.PushModeOn && r.Events != nil {
+			return *r.Events, true
+		}
+	}
+	return st.Defaults, true
 }
 
 // Subscribe keeps a browser's subscription for terminal.
@@ -195,7 +274,7 @@ func (s *Service) Unsubscribe(endpoint string) error {
 
 var ErrBadSubscription = errors.New("bad subscription")
 
-// onNotice pushes what the session's workspace wants, while the switch is on.
+// onNotice pushes what the session's rules want (Resolve), while the switch is on.
 func (s *Service) onNotice(n session.Notice) {
 	if !s.Enabled() {
 		return
@@ -224,13 +303,13 @@ func (s *Service) notice(kind string, n session.Notice) {
 	if err != nil {
 		return
 	}
-	set, _ := s.o.Store.PushSettings()
-	e, ok := set[st.Workspace]
-	if !ok {
-		e = store.DefaultPushEvents
+	ps, err := s.State()
+	if err != nil {
+		s.o.Logf("push: %v", err)
+		return
 	}
-	on := map[string]bool{"needs_you": e.NeedsYou, "error": e.Error, "turn_end": e.TurnEnd, "compact": e.Compact}[kind]
-	if !on {
+	e, on := Resolve(ps, st.Workspace, st.Cwd, n.Session)
+	if !on || !map[string]bool{"needs_you": e.NeedsYou, "error": e.Error, "turn_end": e.TurnEnd, "compact": e.Compact}[kind] {
 		return
 	}
 	msg := api.PushMessage{Kind: kind, Session: n.Session, Title: titleOf(st), Tag: n.Session}

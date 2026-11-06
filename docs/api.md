@@ -245,12 +245,15 @@ Web Push，总开关在配置 `push`，默认关。VAPID 密钥存在状态目�
 
 | 请求 | 正文 → 回答 | 说明 |
 |---|---|---|
-| `GET /api/push` | → `PushState` | 总开关、VAPID 公钥（订阅时的 `applicationServerKey`）、各工作区的设置（`workspace: 0` 是没归类的会话） |
+| `GET /api/push` | → `PushState` | 总开关、VAPID 公钥（订阅时的 `applicationServerKey`）、默认事件 `defaults`、规则 `rules` |
 | `PUT /api/push` | `{enabled}` | 总开关，写进配置文件 |
-| `PUT /api/push/workspaces/{ws}` | `PushEvents` | 这个工作区推哪些：`needsYou`、`error` 默认开，`turnEnd`、`compact` 默认关 |
+| `PUT /api/push/defaults` | `PushEvents` → `PushState` | 没有规则管的地方推哪些：`needsYou`、`error` 默认开，`turnEnd`、`compact` 默认关 |
+| `PUT /api/push/rules` | `PushRule` → `PushState` | 一个工作区、文件夹或会话的规则；`mode: inherit`（或空）删掉它 |
 | `POST /api/push/subscriptions` | `PushSubscription` | 浏览器 `subscription.toJSON()`，记在这个交互终端名下；只收 https |
 | `DELETE /api/push/subscriptions` | `{endpoint}` | |
 | `POST /api/push/test` | → `{sent}` | 给本终端的订阅发一条测试，不看总开关 |
+
+`PushRule{scope, target, mode, events?}`：`scope` 是 `workspace`（`target` 是工作区 ID，`"0"` 是没归类的）、`folder`（会话目录的绝对路径，只管这一个目录，不含子目录）、`session`（会话 ID）；`mode` 是 `on` 或 `off`；`events` 只跟 `on`，是这一层自己的事件，不带就用上面的。一个会话的事件：会话、文件夹、工作区里最近的那条规则说开还是关（都没有就开）；开的话，事件取最近一条带 `events` 的 `on` 规则的，没有就用 `defaults`。旧的按工作区设置迁移成工作区规则（全关的是 `off`，和默认一样的不留）。
 
 推送的内容（service worker 收到的 JSON）：`PushMessage{kind, session, title, body, tag}`，`kind` 是 `needs_you`、`error`、`turn_end`、`compact`、`test`；`tag` 是会话 ID。推送服务回 404/410 的订阅删掉。
 

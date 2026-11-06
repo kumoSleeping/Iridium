@@ -1,33 +1,28 @@
 // The settings (plan "运行", "推送", "更新", "网页", "交互终端"): what the config file holds that
 // the page edits (GET/PUT /api/settings): reaping idle agents, going on after a crash or a quota,
-// each agent's approval mode for new sessions (folded till opened), Web Push (off by default) per
-// workspace; the update; the way to the 终端 page; and this device's own: reminders, appearance,
+// each agent's approval mode for new sessions (folded till opened), Web Push (off by default) and,
+// while it is on, the events it pushes where no workspace, folder or session says otherwise
+// (push.tsx: their menus); the update; the way to the 终端 page; and this device's own: reminders, appearance,
 // language. Each a title and its control, no line explaining it; the version at the foot (the user,
 // 2026-11-06). Every quota bar shows: nothing here hides one. Changed is saved at once.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { BellRing, ChevronRight, CircleAlert, FoldVertical, LoaderCircle, MessageSquareDot, Monitor, Moon, MonitorSmartphone, RefreshCw, Sun } from "lucide-react";
+import { ChevronRight, LoaderCircle, Monitor, Moon, MonitorSmartphone, RefreshCw, Sun } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { api } from "./api/client";
 import type { PushEvents, PushState, Settings, SettingsPatch } from "./api/types.gen";
-import { pushQ, useAgents, useMe, useSettings, useTerminals, useUpdate, useWorkspaces } from "./data";
+import { pushQ, useAgents, useMe, useSettings, useTerminals, useUpdate } from "./data";
 import { t, useLang } from "./i18n";
 import { LangSwitch, Segmented, type ThemePref } from "./me";
 import { modeName } from "./modes";
+import { PUSH_EVENTS } from "./pushmenu";
 import { go } from "./route";
 import { useConfirms } from "./store";
 import { errText, toast } from "./toast";
 import { Choose } from "./choose";
-import { agentName, IconKey, Logo, steerKey, Switch, Tip } from "./ui";
+import { agentName, cn, IconKey, Logo, steerKey, Switch, Tip } from "./ui";
 import { remindBy, reminding } from "./unread";
 
 const REAP = ["0", "15m", "30m", "1h", "2h", "4h", "12h"];
-const RULES: { k: keyof PushEvents; icon: ReactNode; label: Parameters<typeof t>[0] }[] = [
-  { k: "needsYou", icon: <BellRing size={14} />, label: "push.needsYou" },
-  { k: "error", icon: <CircleAlert size={14} />, label: "push.error" },
-  { k: "turnEnd", icon: <MessageSquareDot size={14} />, label: "push.turnEnd" },
-  { k: "compact", icon: <FoldVertical size={14} />, label: "push.compact" },
-];
-const DEFAULT_RULES: PushEvents = { needsYou: true, error: true, turnEnd: false, compact: false };
 
 /** A duration as Go writes it ("1h0m0s"), as short as it goes ("1h"). */
 export const shortDuration = (d: string) => d.replace(/([hm])0s$/, "$1").replace(/h0m$/, "h");
@@ -41,7 +36,6 @@ export function SettingsPage({ theme, setTheme }: { theme: ThemePref; setTheme: 
   const q = useSettings();
   const s = q.data ?? undefined;
   const off = !s; // not come yet, or an older daemon
-  const ws = useWorkspaces().data ?? [];
   const agents = (useAgents().data ?? []).filter((a) => a.modes.length > 1);
   const me = useMe().data;
   const manages = !!me && (me.local || me.kind === "panel");
@@ -60,15 +54,14 @@ export function SettingsPage({ theme, setTheme }: { theme: ThemePref; setTheme: 
   };
   const pq = useQuery(pushQ);
   const push: PushState | null | undefined = pq.data;
-  const rules = (id: number): PushEvents => {
-    const w = push?.workspaces.find((x) => x.workspace === id);
-    return w ? { needsYou: w.needsYou, error: w.error, turnEnd: w.turnEnd, compact: w.compact } : DEFAULT_RULES;
-  };
-  const setRule = async (id: number, k: keyof PushEvents, on: boolean) => {
+  const setDefault = (k: keyof PushEvents, on: boolean) => {
     if (!push) return;
-    const next = { ...rules(id), [k]: on };
-    qc.setQueryData(["push"], { ...push, workspaces: [...push.workspaces.filter((x) => x.workspace !== id), { workspace: id, ...next }] });
-    await api.pushWorkspace(id, next).catch((e) => (qc.invalidateQueries({ queryKey: ["push"] }), toast(t("err.settings"), { error: true, description: errText(e) })));
+    const next = { ...push.defaults, [k]: on };
+    qc.setQueryData(["push"], { ...push, defaults: next });
+    api.pushDefaults(next).then(
+      (st) => qc.setQueryData(["push"], st),
+      (e) => (qc.invalidateQueries({ queryKey: ["push"] }), toast(t("err.settings"), { error: true, description: errText(e) })),
+    );
   };
   const [remind, setRemind] = useState(reminding);
   const [pushing, setPushing] = useState(false);
@@ -165,29 +158,25 @@ export function SettingsPage({ theme, setTheme }: { theme: ThemePref; setTheme: 
             <Item label={t("settings.pushOn")}>
               {pushing ? <LoaderCircle size={16} className="animate-spin text-ink-3" /> : <Switch label={t("settings.pushOn")} disabled={!push || !("PushManager" in window)} on={pushed} onChange={(v) => void pushOn(v)} />}
             </Item>
-            {pushed && ws.length > 0 && (
-              <div className="g-fade flex flex-col">
-                <div className="flex h-7 items-center justify-end gap-1 text-ink-3">
-                  {RULES.map((r) => (
-                    <Tip key={r.k} label={t(r.label)}>
-                      <span className="grid w-7 place-items-center" aria-label={t(r.label)}>
-                        {r.icon}
-                      </span>
-                    </Tip>
+            {/* On, the default events slide open under it (off, shut): nothing below jumps. */}
+            <div aria-hidden={!pushed || undefined} inert={!pushed || undefined} className={cn("grid transition-[grid-template-rows,opacity] duration-(--dur-3) ease-(--ease-out)", pushed && push ? "grid-rows-[1fr]" : "grid-rows-[0fr] opacity-0")}>
+              <div className="min-h-0 overflow-hidden">
+                {push &&
+                  PUSH_EVENTS.map((e) => (
+                    <Item
+                      key={e.k}
+                      label={
+                        <span className="flex items-center gap-2">
+                          <span className="text-ink-3">{e.icon}</span>
+                          {t(e.label)}
+                        </span>
+                      }
+                    >
+                      <Switch label={t(e.label)} on={push.defaults[e.k]} onChange={(v) => setDefault(e.k, v)} />
+                    </Item>
                   ))}
-                </div>
-                {ws.map((w) => (
-                  <div key={w.id} className="flex min-h-8 items-center gap-1">
-                    <span className="min-w-0 flex-1 truncate text-sm">{w.name}</span>
-                    {RULES.map((r) => (
-                      <span key={r.k} className="grid w-7 place-items-center">
-                        <input type="checkbox" checked={rules(w.id)[r.k]} onChange={(e) => void setRule(w.id, r.k, e.target.checked)} aria-label={`${w.name} · ${t(r.label)}`} className="size-4 accent-[var(--ink)]" />
-                      </span>
-                    ))}
-                  </div>
-                ))}
               </div>
-            )}
+            </div>
             <Item label={t("settings.remind")}>
               <Switch
                 label={t("settings.remind")}

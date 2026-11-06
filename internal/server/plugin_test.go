@@ -301,12 +301,35 @@ func TestQueueAndPushRoutes(t *testing.T) {
 	}
 
 	var ps api.PushState
-	if p.do("", "GET", "/api/push", nil, &ps); ps.Enabled || len(ps.PublicKey) < 80 || len(ps.Workspaces) != 1 {
+	if p.do("", "GET", "/api/push", nil, &ps); ps.Enabled || len(ps.PublicKey) < 80 || len(ps.Rules) != 0 || !ps.Defaults.NeedsYou || !ps.Defaults.Error || ps.Defaults.TurnEnd {
 		t.Errorf("push: %+v", ps)
 	}
-	p.do("", "PUT", "/api/push/workspaces/0", api.PushEvents{NeedsYou: true, TurnEnd: true}, nil)
-	if p.do("", "GET", "/api/push", nil, &ps); !ps.Workspaces[0].TurnEnd || ps.Workspaces[0].Error {
-		t.Errorf("push after: %+v", ps)
+	ps = api.PushState{}
+	if code := p.do("", "PUT", "/api/push/defaults", api.PushEvents{NeedsYou: true, TurnEnd: true}, &ps); code != 200 || !ps.Defaults.TurnEnd || ps.Defaults.Error {
+		t.Errorf("defaults: %d %+v", code, ps)
+	}
+	if code := p.do("", "PUT", "/api/push/rules", api.PushRule{Scope: api.PushScopeWorkspace, Target: "0", Mode: api.PushModeOff}, nil); code != 200 {
+		t.Errorf("workspace rule: %d", code)
+	}
+	ps = api.PushState{}
+	p.do("", "PUT", "/api/push/rules", api.PushRule{Scope: api.PushScopeSession, Target: id, Mode: api.PushModeOn, Events: &api.PushEvents{Compact: true}}, &ps)
+	if len(ps.Rules) != 2 {
+		t.Fatalf("rules: %+v", ps.Rules)
+	}
+	if e, on := push.Resolve(ps, 0, p.work, id); !on || !e.Compact || e.NeedsYou {
+		t.Errorf("the session over its workspace: %v %+v", on, e)
+	}
+	if _, on := push.Resolve(ps, 0, p.work, "other"); on {
+		t.Error("another session of the workspace off")
+	}
+	p.do("", "PUT", "/api/push/rules", api.PushRule{Scope: api.PushScopeWorkspace, Target: "0"}, nil)
+	if p.do("", "GET", "/api/push", nil, &ps); len(ps.Rules) != 1 || ps.Rules[0].Scope != api.PushScopeSession {
+		t.Errorf("inherit drops the rule: %+v", ps.Rules)
+	}
+	for _, bad := range []api.PushRule{{Scope: "node", Target: "x", Mode: api.PushModeOn}, {Scope: api.PushScopeWorkspace, Target: "-1", Mode: api.PushModeOn}, {Scope: api.PushScopeFolder, Target: "rel/dir", Mode: api.PushModeOff}, {Scope: api.PushScopeSession, Mode: api.PushModeOn}, {Scope: api.PushScopeSession, Target: id, Mode: "maybe"}} {
+		if code := p.do("", "PUT", "/api/push/rules", bad, nil); code != 400 {
+			t.Errorf("%+v: %d", bad, code)
+		}
 	}
 	sub := api.PushSubscription{Endpoint: "http://insecure.example/x"}
 	if code := p.do("", "POST", "/api/push/subscriptions", sub, nil); code != 400 {

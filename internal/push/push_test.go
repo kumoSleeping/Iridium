@@ -112,7 +112,76 @@ func TestSend(t *testing.T) {
 		t.Errorf("the gone subscription stayed: %+v", subs)
 	}
 	ps, _ := s.State()
-	if len(ps.Workspaces) != 1 || !ps.Workspaces[0].NeedsYou || ps.Workspaces[0].TurnEnd {
+	if len(ps.Rules) != 0 || ps.Defaults != (api.PushEvents{NeedsYou: true, Error: true}) {
 		t.Errorf("defaults: %+v", ps)
+	}
+}
+
+// The nearest rule of the session, its folder and its workspace says on or off; the events are
+// the nearest rule's on with its own, else the defaults.
+func TestResolve(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "iridium.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	s, err := Open(Options{StateDir: t.TempDir(), Store: st, Logf: t.Logf})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn := &api.PushEvents{TurnEnd: true}
+	for _, r := range []api.PushRule{
+		{Scope: api.PushScopeWorkspace, Target: "1", Mode: api.PushModeOff},
+		{Scope: api.PushScopeFolder, Target: "/w1/loud", Mode: api.PushModeOn},
+		{Scope: api.PushScopeSession, Target: "quiet", Mode: api.PushModeOff},
+		{Scope: api.PushScopeWorkspace, Target: "2", Mode: api.PushModeOn, Events: turn},
+		{Scope: api.PushScopeFolder, Target: "/w2/hush", Mode: api.PushModeOff},
+		{Scope: api.PushScopeSession, Target: "back", Mode: api.PushModeOn},
+		{Scope: api.PushScopeSession, Target: "own", Mode: api.PushModeOn, Events: &api.PushEvents{Compact: true}},
+	} {
+		if err := s.SetRule(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.SetDefaults(api.PushEvents{NeedsYou: true}); err != nil {
+		t.Fatal(err)
+	}
+	ps, err := s.State()
+	if err != nil {
+		t.Fatal(err)
+	}
+	needs := api.PushEvents{NeedsYou: true}
+	for _, c := range []struct {
+		ws           int64
+		cwd, session string
+		on           bool
+		want         api.PushEvents
+	}{
+		{0, "/elsewhere", "a", true, needs},               // no rule: the defaults
+		{1, "/w1", "a", false, api.PushEvents{}},          // its workspace off
+		{1, "/w1/loud", "a", true, needs},                 // its folder on, in a workspace off
+		{1, "/w1/loud", "quiet", false, api.PushEvents{}}, // the session off, in a folder on
+		{2, "/w2", "a", true, *turn},                      // the workspace's own events
+		{2, "/w2/hush", "a", false, api.PushEvents{}},
+		{2, "/w2/hush", "back", true, *turn}, // on again: the events from above
+		{2, "/w2/hush", "own", true, api.PushEvents{Compact: true}},
+		{2, "/w2/hush/deeper", "a", true, *turn}, // a folder is its own path only
+	} {
+		got, on := Resolve(ps, c.ws, c.cwd, c.session)
+		if on != c.on || got != c.want {
+			t.Errorf("%d %s %s: %v %+v, want %v %+v", c.ws, c.cwd, c.session, on, got, c.on, c.want)
+		}
+	}
+	// Inherit drops the rule; off keeps no events.
+	s.SetRule(api.PushRule{Scope: api.PushScopeWorkspace, Target: "1"})
+	s.SetRule(api.PushRule{Scope: api.PushScopeWorkspace, Target: "2", Mode: api.PushModeOff, Events: turn})
+	ps, _ = s.State()
+	if _, on := Resolve(ps, 1, "/w1", "a"); !on {
+		t.Error("workspace 1 still off")
+	}
+	for _, r := range ps.Rules {
+		if r.Target == "2" && (r.Mode != api.PushModeOff || r.Events != nil) {
+			t.Errorf("off: %+v", r)
+		}
 	}
 }
