@@ -229,7 +229,7 @@ func TestAgentCommands(t *testing.T) {
 		t.Errorf("send -a: %+v", r)
 	}
 
-	if r := ir("ls"); r.code != 0 || !strings.HasPrefix(r.out, sid+"\tclaude\tidle\t") || !strings.HasSuffix(r.out, "\twork\n") { // named after its folder
+	if r := ir("ls"); r.code != 0 || !strings.HasPrefix(r.out, sid+"\tclaude\tidle\t") || !strings.HasSuffix(r.out, "\thello\n") { // its first message names it
 		t.Errorf("ls: %+v", r)
 	}
 	// Archived (no shown marker): only ir ls --all lists it.

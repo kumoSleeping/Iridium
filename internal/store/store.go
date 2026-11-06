@@ -150,6 +150,8 @@ var schema = []string{
 	pushRulesSchema,
 	// 10: credentials and their uses (secrets.go).
 	secretsSchema,
+	// 11: auto: a name Iridium gave (the folder's), standing only till the session has a title.
+	`ALTER TABLE names ADD COLUMN auto INTEGER NOT NULL DEFAULT 0;`,
 }
 
 // steps run in Go after the migration of their version, in the same transaction.
@@ -252,7 +254,9 @@ func now() int64 { return time.Now().UnixMilli() }
 // Overlay is what the database says of a session. Whether it is shown is its marker's
 // (shown.go), by its agent.
 type Overlay struct {
-	Name      string
+	Name string
+	// AutoName: Name is Iridium's placeholder (SetAutoName), not one the user gave.
+	AutoName  bool
 	Pinned    bool
 	Workspace int64
 	Manual    bool
@@ -262,11 +266,11 @@ type Overlay struct {
 // Overlays is every session's overlay, by session id.
 func (s *Store) Overlays() (map[string]Overlay, error) {
 	rows, err := s.db.Query(`
-		SELECT session, MAX(name), MAX(pinned), MAX(workspace), MAX(manual), MAX(color) FROM (
-			SELECT session, name, 0 AS pinned, 0 AS workspace, 0 AS manual, '' AS color FROM names
-			UNION ALL SELECT session, '', 1, 0, 0, '' FROM pins
-			UNION ALL SELECT session, '', 0, IFNULL(workspace, 0), manual, '' FROM assignments
-			UNION ALL SELECT session, '', 0, 0, 0, color FROM session_colors
+		SELECT session, MAX(name), MAX(auto), MAX(pinned), MAX(workspace), MAX(manual), MAX(color) FROM (
+			SELECT session, name, auto, 0 AS pinned, 0 AS workspace, 0 AS manual, '' AS color FROM names
+			UNION ALL SELECT session, '', 0, 1, 0, 0, '' FROM pins
+			UNION ALL SELECT session, '', 0, 0, IFNULL(workspace, 0), manual, '' FROM assignments
+			UNION ALL SELECT session, '', 0, 0, 0, 0, color FROM session_colors
 		) GROUP BY session`)
 	if err != nil {
 		return nil, err
@@ -276,7 +280,7 @@ func (s *Store) Overlays() (map[string]Overlay, error) {
 	for rows.Next() {
 		var id string
 		var o Overlay
-		if err := rows.Scan(&id, &o.Name, &o.Pinned, &o.Workspace, &o.Manual, &o.Color); err != nil {
+		if err := rows.Scan(&id, &o.Name, &o.AutoName, &o.Pinned, &o.Workspace, &o.Manual, &o.Color); err != nil {
 			return nil, err
 		}
 		out[id] = o
@@ -285,13 +289,28 @@ func (s *Store) Overlays() (map[string]Overlay, error) {
 }
 
 // SetName renames a session; "" takes the name off.
-func (s *Store) SetName(session, name string) error {
+func (s *Store) SetName(session, name string) error { return s.setName(session, name, false) }
+
+// SetAutoName gives a session Iridium's placeholder name, which its title replaces (NameOver).
+func (s *Store) SetAutoName(session, name string) error { return s.setName(session, name, true) }
+
+func (s *Store) setName(session, name string, auto bool) error {
 	if name == "" {
 		_, err := s.db.Exec(`DELETE FROM names WHERE session = ?`, session)
 		return err
 	}
-	_, err := s.db.Exec(`INSERT INTO names (session, name) VALUES (?, ?) ON CONFLICT (session) DO UPDATE SET name = excluded.name`, session, name)
+	_, err := s.db.Exec(`INSERT INTO names (session, name, auto) VALUES (?, ?, ?)
+		ON CONFLICT (session) DO UPDATE SET name = excluded.name, auto = excluded.auto`, session, name, auto)
 	return err
+}
+
+// NameOver is the name a session goes by over title, the opening of its first message: Name,
+// unless that is only Iridium's placeholder and there is a title now.
+func (o Overlay) NameOver(title string) string {
+	if o.AutoName && title != "" {
+		return ""
+	}
+	return o.Name
 }
 
 func (s *Store) SetPinned(session string, on bool) error { return s.flag("pins", session, on) }

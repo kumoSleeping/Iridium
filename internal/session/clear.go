@@ -42,11 +42,11 @@ func (m *Manager) Clear(ctx context.Context, id, from string) (string, error) {
 	h.mu.Lock()
 	mt, effort, ultracode := h.meta, h.effort, h.ultracode
 	h.mu.Unlock()
-	req := api.NewSession{Agent: mt.Agent, Cwd: mt.Cwd, Model: mt.Model, Mode: mt.Mode}
-	var name string // the old one's, if it is to go to the archive
+	req := api.NewSession{Agent: mt.Agent, Cwd: mt.Cwd, Model: mt.Model, Mode: mt.Mode, Caller: mt.Launcher}
+	var name string // the one the old was given, if it is to go to the archive
 	if over, err := m.o.Store.Overlays(); err == nil {
-		if !h.busy() && len(h.asksNow()) == 0 {
-			name = over[h.id].Name
+		if o := over[h.id]; !o.AutoName && !h.busy() && len(h.asksNow()) == 0 {
+			name = o.Name
 		}
 		req.Workspace = over[h.id].Workspace
 		if req.Workspace == 0 {
@@ -117,7 +117,9 @@ func (m *Manager) clearedInside(h *Hosted, proc int, nid string) {
 	var workspace int64
 	var name string
 	if over, err := m.o.Store.Overlays(); err == nil {
-		name = over[h.id].Name
+		if !over[h.id].AutoName {
+			name = over[h.id].Name // the one it was given; a placeholder stays behind
+		}
 		if workspace = over[h.id].Workspace; workspace == 0 {
 			workspace = over[h.discoveredAs()].Workspace
 		}

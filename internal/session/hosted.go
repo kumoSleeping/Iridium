@@ -42,6 +42,8 @@ type meta struct {
 	Mode    string    `json:"mode,omitempty"`
 	// AgentID: the agent's own id for the session, where the agent makes it (Codex's thread).
 	AgentID string `json:"agentId,omitempty"`
+	// Launcher: the session that opened it (ir new from inside one), by Iridium's id.
+	Launcher string `json:"launcher,omitempty"`
 }
 
 // agentID is the id the agent's records name the session by.
@@ -863,10 +865,10 @@ func (h *Hosted) summary(o store.Overlay, archived bool) api.Session {
 
 func (h *Hosted) summaryLocked(o store.Overlay, archived bool) api.Session {
 	return api.Session{
-		ID: h.id, Agent: h.meta.Agent, Cwd: h.meta.Cwd, Name: o.Name, Title: h.said.title,
+		ID: h.id, Agent: h.meta.Agent, Cwd: h.meta.Cwd, Name: o.NameOver(h.said.title), Title: h.said.title,
 		Status: h.status(), Hosted: true, Live: h.live,
 		Pinned: o.Pinned, Archived: archived, Workspace: o.Workspace, Color: api.Color(o.Color),
-		Last: h.said.last, UpdatedAt: h.shownAt.UnixMilli(),
+		Launcher: h.meta.Launcher, Last: h.said.last, UpdatedAt: h.shownAt.UnixMilli(),
 	}
 }
 

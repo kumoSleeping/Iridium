@@ -255,7 +255,10 @@ func (m *Manager) create(ctx context.Context, req api.NewSession, from, name str
 	if _, err := m.o.Store.Workspace(req.Workspace); req.Workspace != 0 && err != nil {
 		return "", err
 	}
-	mt := meta{ID: newUUID(), Agent: req.Agent, Cwd: filepath.Clean(req.Cwd), Created: time.Now().UnixMilli(), Model: req.Model, Mode: req.Mode}
+	mt := meta{ID: newUUID(), Agent: req.Agent, Cwd: filepath.Clean(req.Cwd), Created: time.Now().UnixMilli(), Model: req.Model, Mode: req.Mode, Launcher: req.Caller}
+	if h := m.byAgentID(req.Caller); req.Caller != "" && h != nil {
+		mt.Launcher = h.id // a hosted Codex session calls itself by its thread
+	}
 	if req.Effort != "" {
 		if !slices.Contains(info.Efforts, req.Effort) {
 			return "", fmt.Errorf("%s has no effort %q (%s)", info.Name, req.Effort, strings.Join(info.Efforts, ", "))
@@ -394,7 +397,7 @@ func (m *Manager) List(ctx context.Context) ([]api.Session, error) {
 		for _, s := range found {
 			if !seen[s.ID] {
 				o := over[s.ID]
-				s.Name, s.Pinned, s.Workspace, s.Color = o.Name, o.Pinned, o.Workspace, api.Color(o.Color)
+				s.Name, s.Pinned, s.Workspace, s.Color = o.NameOver(s.Title), o.Pinned, o.Workspace, api.Color(o.Color)
 				s.Archived = !vis.Shown(string(s.Agent), s.ID)
 				m.parentOf(&s)
 				out = append(out, s)
