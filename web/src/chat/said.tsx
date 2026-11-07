@@ -5,12 +5,13 @@
 // peer sent; Iridium's own lines
 // centred and faint; the agent's words as Markdown with the files they name; tool calls and
 // thoughts folded to a line.
-import { Archive, ArchiveRestore, ArrowUpRight, BookOpen, Bot, Check, ChevronRight, Clock, Cpu, FoldVertical, CircleStop, CircleX, CloudDownload, CloudUpload, Earth, FileCode, FileDiff, FilePen, Files as FilesIcon, FileText, FolderGit2, FlaskConical, FolderOpen, GitBranch, GitCommitHorizontal, GitPullRequest, Globe, Hammer, History, Hourglass, KeyRound, Laptop, List, ListChecks, LoaderCircle, MessageCircleQuestionMark, MessageSquarePlus, Monitor, Network, Package, Plug, RotateCcw, RotateCw, Search, Send, ServerCog, Smartphone, SquareTerminal, Trash2, UserRound, Workflow as WorkflowIcon, Wrench, X, type LucideIcon } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowUpRight, BookOpen, Bot, Check, ChevronRight, Clock, Cpu, FoldVertical, CircleStop, CircleX, CloudDownload, CloudUpload, Earth, FileCode, FileDiff, FilePen, Files as FilesIcon, FileText, FolderGit2, FlaskConical, FolderOpen, GitBranch, GitCommitHorizontal, GitPullRequest, Globe, Hammer, History, Hourglass, KeyRound, Laptop, List, ListChecks, LoaderCircle, MessageCircleQuestionMark, MessageSquarePlus, Monitor, Network, Package, Plug, RotateCcw, RotateCw, Search, Send, ServerCog, ShieldAlert, Smartphone, SquareTerminal, Trash2, UserRound, Workflow as WorkflowIcon, Wrench, X, type LucideIcon } from "lucide-react";
 import { Children, forwardRef, memo, useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { api } from "../api/client";
 import type { Block, FileRef, Result } from "../api/types.gen";
 import { landed, type Sent } from "../chats";
 import { t } from "../i18n";
+import { errText, toast } from "../toast";
 import { Avatar, Badge, cn, IconKey, Logo, tilde, Tip } from "../ui";
 import { useHome } from "../data";
 import { LocalMark } from "../me";
@@ -290,7 +291,14 @@ export function Said({ b, session, cwd, source, onJump }: { b: Shown; session: s
         </Line>
       );
     case "fold":
-      return <Fold steps={b.steps} session={session} cwd={cwd} />;
+      return (
+        <>
+          <Fold steps={b.steps} session={session} cwd={cwd} />
+          {b.steps.filter(denied).map((s) => (
+            <DeniedLine key={s.at} s={s} session={session} cwd={cwd} />
+          ))}
+        </>
+      );
     case "running":
       return <Running tool={b.tool} cwd={cwd} />;
   }
@@ -376,6 +384,50 @@ const DiffStat = ({ d }: { d: Diff }) => (
   </span>
 );
 const failed = (s: Step) => s.kind === "tool" && !!s.result?.error;
+
+/** Claude's auto mode classifier turned the call down: it never asked (internal/session/release.go). */
+const DENIED = "Permission for this action was denied by the Claude Code auto mode classifier";
+const denied = (s: Step) => failed(s) && !!s.id && !!s.result?.text.includes(DENIED);
+
+/** A step auto mode denied, out of its fold: what it was, why, and 放行 — Claude runs it again in
+ *  manual mode, that same call allowed, the rest asked; the mode back at the turn's end. */
+function DeniedLine({ s, session, cwd }: { s: Step; session: string; cwd: string }) {
+  const [state, setState] = useState<"idle" | "busy" | "done">("idle");
+  const why = /Reason: \[([^\]]+)\]/.exec(s.result?.text ?? "")?.[1];
+  const a = argOf(s, cwd);
+  const release = async () => {
+    setState("busy");
+    try {
+      await api.release(session, s.id!);
+      setState("done");
+      toast(t("denied.released"), { description: t("denied.releasedHint") });
+    } catch (e) {
+      setState("idle");
+      toast(t("err.action"), { error: true, description: errText(e) });
+    }
+  };
+  return (
+    <div className="flex min-h-8 w-full min-w-0 items-center gap-2 text-sm text-ink-3 pointer-coarse:min-h-10">
+      <ShieldAlert size={14} className="shrink-0 text-need" />
+      <span className="shrink-0 text-ink-2">{t("denied.title")}</span>
+      <span className={cn("min-w-0 flex-1 truncate", a.code ? "font-mono text-xs" : "text-xs")} title={why}>
+        {a.arg || s.name}
+        {why && <span className="ml-2 font-sans text-ink-4">{why}</span>}
+      </span>
+      {state === "done" ? (
+        <span className="g-fade flex shrink-0 items-center gap-1 text-xs text-ink-3">
+          <Check size={13} />
+          {t("denied.done")}
+        </span>
+      ) : (
+        <button type="button" disabled={state === "busy"} onClick={() => void release()} className="g-press flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-ink px-2.5 text-xs font-medium text-on-ink disabled:opacity-60 pointer-coarse:h-9">
+          {state === "busy" && <LoaderCircle size={12} className="animate-spin" />}
+          {t("denied.release")}
+        </button>
+      )}
+    </div>
+  );
+}
 
 /** A step's line: its icon, its name, what it is about in monospace, an edit's +/−. */
 function StepLine({ s, cwd }: { s: Step; cwd?: string }) {

@@ -182,6 +182,8 @@ export function Switch({ on, onChange, label, disabled, className }: { on: boole
 }
 
 const AGENT_NAME: Record<Agent, string> = { claude: "Claude", codex: "Codex", pi: "pi", dsh: "DeepSeek Harness" };
+/** A token count, short: 980, 12.3k, 4.5M. */
+export const tokens = (n: number) => (n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 100) / 10}k` : `${n}`);
 export const agentName = (a: Agent) => AGENT_NAME[a] ?? a;
 export const AGENTS: Agent[] = ["claude", "codex", "pi", "dsh"];
 

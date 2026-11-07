@@ -20,10 +20,9 @@ import { showSecret, useSecret } from "./secrets";
 import { Group, Item } from "./settings";
 import { useConfirms } from "./store";
 import { errText, toast } from "./toast";
-import { agentName, AGENTS, ago, Avatar, cn, IconKey, Logo, PopSurface, Switch, tilde, Tip } from "./ui";
+import { agentName, AGENTS, ago, Avatar, cn, IconKey, Logo, PopSurface, Switch, tilde, Tip, tokens } from "./ui";
+import { UsageGlance } from "./usage";
 
-
-export const tokens = (n: number) => (n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 100) / 10}k` : `${n}`);
 
 const kindName = (x: Terminal) => (x.local ? t("term.local") : x.kind === "panel" ? t("term.panel") : t("term.channel"));
 
@@ -57,6 +56,7 @@ export function TerminalsPage({ onBack }: { onBack: () => void }) {
             </div>
           )}
           {q.isError && <p className="m-0 text-sm text-ink-3">{errText(q.error)}</p>}
+          <UsageGlance label={t("usage.allRow")} />
           <section className="flex flex-col" aria-label={t("settings.terminals")}>
             {list.map((x) => (
               <TerminalRow key={x.id} x={x} open={open === x.id} toggle={() => setOpen(open === x.id ? null : x.id)} />
@@ -125,7 +125,15 @@ function TerminalRow({ x, open, toggle }: { x: Terminal; open: boolean; toggle: 
         </span>
         <ChevronRight size={15} className="shrink-0 text-ink-4 transition-transform duration-(--dur-2)" style={{ transform: open ? "rotate(90deg)" : undefined }} />
       </button>
-      {open && (x.local ? <p className="g-fade m-0 pt-1 pr-2 pl-[52px] text-sm text-ink-3">{t("term.localHint")}</p> : <Detail x={x} />)}
+      {open &&
+        (x.local ? (
+          <div className="g-fade flex flex-col gap-2 pt-1 pr-2 pl-2 sm:pl-[52px]">
+            <p className="m-0 text-sm text-ink-3">{t("term.localHint")}</p>
+            <UsageGlance terminal={x.id} label={t("usage.title")} />
+          </div>
+        ) : (
+          <Detail x={x} />
+        ))}
     </div>
   );
 }
@@ -162,6 +170,7 @@ function Detail({ x }: { x: Terminal }) {
           className="no-ring h-8 w-40 rounded-md bg-fill px-2 text-sm"
         />
       </Item>
+      <UsageGlance terminal={x.id} label={t("usage.title")} />
       <RulesEditor x={x} />
       <div className="flex flex-col gap-2">
         {sure ? (

@@ -79,6 +79,7 @@ func (m *Manager) SetMode(ctx context.Context, id, mode string) error {
 	h.mu.Lock()
 	h.meta.Mode = mode
 	h.mode = mode
+	h.rel = nil // yours now: a release does not put it back
 	h.mu.Unlock()
 	h.publish()
 	if restart {

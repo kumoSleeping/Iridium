@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -546,6 +547,67 @@ func (s *Store) UsageSince(at int64) ([]Usage, error) {
 			u.CostUSD = &cost.Float64
 		}
 		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
+// UsageDay is the usage of one local day, terminal, agent and model.
+type UsageDay struct {
+	Day        string // "2006-01-02", local time
+	Terminal   string // "" when who began the turns is not known
+	Agent      string
+	Model      string
+	Turns      int // rows: one per turn and model
+	Input      int64
+	Output     int64
+	CacheRead  int64
+	CacheWrite int64
+	CostUSD    float64 // of the rows that have one
+}
+
+// UsageByDay sums the usage since at (ms) by local day, terminal, agent and model, oldest day
+// first; terminals given, only theirs.
+func (s *Store) UsageByDay(at int64, terminals ...string) ([]UsageDay, error) {
+	q := `SELECT at, terminal, agent, model, input, output, cache_read, cache_write, cost_usd FROM usage WHERE at >= ?`
+	args := []any{at}
+	if len(terminals) > 0 {
+		q += ` AND terminal IN (?` + strings.Repeat(`, ?`, len(terminals)-1) + `)`
+		for _, t := range terminals {
+			args = append(args, t)
+		}
+	}
+	rows, err := s.db.Query(q+` ORDER BY at, id`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	type key struct{ day, terminal, agent, model string }
+	index := map[key]int{}
+	var out []UsageDay
+	for rows.Next() {
+		var ms int64
+		var k key
+		var in, o, cr, cw int64
+		var cost sql.NullFloat64
+		if err := rows.Scan(&ms, &k.terminal, &k.agent, &k.model, &in, &o, &cr, &cw, &cost); err != nil {
+			return nil, err
+		}
+		k.day = time.UnixMilli(ms).Format(time.DateOnly)
+		i, ok := index[k]
+		if !ok {
+			i = len(out)
+			index[k] = i
+			out = append(out, UsageDay{Day: k.day, Terminal: k.terminal, Agent: k.agent, Model: k.model})
+		}
+		d := &out[i]
+		d.Turns++
+		d.Input += in
+		d.Output += o
+		d.CacheRead += cr
+		d.CacheWrite += cw
+		if cost.Valid {
+			d.CostUSD += cost.Float64
+		}
 	}
 	return out, rows.Err()
 }

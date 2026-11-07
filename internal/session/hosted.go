@@ -146,6 +146,8 @@ type Hosted struct {
 	commands      []agent.Command
 	account, plan string
 	rules         []store.AllowRule
+	rel           *released // a step auto mode denied, allowed from the page (release.go)
+	turnAt        time.Time // when the running or last turn began
 
 	hadTurn     bool        // the agent has the running turn: a crash now is continued
 	crashes     []time.Time // within the breaker's window
@@ -615,6 +617,9 @@ func (h *Hosted) onEvent(e agent.Event) {
 			h.shownAt = h.lastActive
 		}
 		h.hadTurn, h.turnSeen = true, true
+		if !replay {
+			h.turnAt = time.Now()
+		}
 		if !replay && h.quotaUntil != 0 {
 			h.quotaEndLocked() // it went on by itself, or the queue did
 		}
@@ -654,8 +659,20 @@ func (h *Hosted) onEvent(e agent.Event) {
 				h.release(ctx, false)
 			})
 		}
+		if !replay {
+			if mode := h.releaseOverLocked(); mode != "" {
+				later(func() { h.restoreMode(mode) })
+			}
+		}
 		note(Notice{Kind: NoticeTurnEnd, Text: e.Reply, Background: e.Background})
 	case agent.AskOpen:
+		if !replay && h.rel != nil && !h.rel.used && sameCall(h.rel, e.Ask) {
+			// The step you released, run again: allowed once.
+			h.rel.used = true
+			id := e.Ask.RequestID
+			later(func() { h.allow(id) })
+			break
+		}
 		if !replay && e.Ask.Kind == "permission" && h.allowedLocked(e.Ask) {
 			id := e.Ask.RequestID
 			later(func() { h.allow(id) })
@@ -702,6 +719,7 @@ func (h *Hosted) onEvent(e agent.Event) {
 	case agent.Hello:
 		h.starting = false
 		h.mode = e.Mode
+		h.rel = nil // a new process: in the session's own mode
 		h.models, h.commands = e.Models, e.Commands
 		h.account, h.plan = e.Account, e.Plan
 		list = true

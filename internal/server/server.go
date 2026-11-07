@@ -114,6 +114,7 @@ func (s *Server) Handler(local bool) http.Handler {
 	mux.HandleFunc("POST /api/sessions/{id}/interrupt", s.use(s.interrupt))
 	mux.HandleFunc("POST /api/sessions/{id}/stop", s.use(s.stop))
 	mux.HandleFunc("POST /api/sessions/{id}/answer", s.answering(s.answer))
+	mux.HandleFunc("POST /api/sessions/{id}/release", s.answering(s.release))
 	mux.HandleFunc("GET /api/events", s.masked(s.events))
 	s.terminalRoutes(mux)
 	s.secretRoutes(mux)
@@ -326,6 +327,27 @@ func (s *Server) answer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.done(w, s.m.Answer(r.Context(), r.PathValue("id"), a))
+}
+
+// release allows a step auto mode denied (session/release.go). Only a person may: an agent's ir
+// releasing its own denied steps would undo what the classifier is for.
+func (s *Server) release(w http.ResponseWriter, r *http.Request) {
+	c := callerOf(r)
+	if c.agent || (c.socket && c.session != "") {
+		forbid(w, errors.New("only a person may release a step auto mode denied"))
+		return
+	}
+	var req api.Release
+	if !readJSON(w, r, &req) {
+		return
+	}
+	if req.ToolUseID == "" {
+		fail(w, http.StatusBadRequest, "name the call: toolUseId")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), time.Minute)
+	defer cancel()
+	s.done(w, s.m.Release(ctx, r.PathValue("id"), req.ToolUseID, s.fromOf(c, "")))
 }
 
 var stateKey = regexp.MustCompile(`^(list|quota|workspaces|colors|confirms|update|(session|context):[0-9a-zA-Z_-]{1,128})$`)

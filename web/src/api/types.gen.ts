@@ -439,6 +439,13 @@ export interface SendReply {
   command?: boolean;
 }
 /**
+ * Release lets Claude run again call ToolUseID, which its auto mode classifier denied: allowed
+ * once, in manual mode for the turn (docs/api.md "放行").
+ */
+export interface Release {
+  toolUseId: string;
+}
+/**
  * Answer answers an ask. permission: Allow (and Message if not); question: Answers, by question
  * text, the label chosen; plan: Allow (approve), Message if not.
  */
@@ -1399,4 +1406,49 @@ export interface UpdateState {
  */
 export interface ApplyUpdate {
   force?: boolean;
+}
+
+//////////
+// source: usage.go
+
+/**
+ * Usage is GET /api/usage (ir usage): the tokens used in the last days, today the last, one row
+ * per local day, terminal, agent and model that used any. A terminal that does not manage sees
+ * only its own.
+ */
+export interface Usage {
+  days: string[]; // "2006-01-02", oldest first, today last
+  rows: UsageRow[];
+  /**
+   * Terminals: the rows' terminals still there, by ID, to name them (a removed one is not).
+   */
+  terminals: { [key: string]: UsageTerminal};
+}
+/**
+ * UsageRow is one day's use by one terminal of one agent's model. Turns counts each turn once per
+ * model it used.
+ */
+export interface UsageRow {
+  day: string;
+  terminal: string; // its ID; "" when who began the turns is not known
+  agent: Agent;
+  model: string;
+  turns: number /* int */;
+  input: number /* int64 */;
+  output: number /* int64 */;
+  cacheRead: number /* int64 */;
+  cacheWrite: number /* int64 */;
+  /**
+   * CostUSD: what the agent said the turns cost (Claude's); 0 when it says nothing.
+   */
+  costUsd?: number /* float64 */;
+}
+/**
+ * UsageTerminal names a terminal in Usage.
+ */
+export interface UsageTerminal {
+  name: string;
+  kind: TerminalKind;
+  avatar?: string;
+  local?: boolean;
 }

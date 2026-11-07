@@ -6,14 +6,15 @@
 import { Popover } from "@base-ui/react/popover";
 import { Slider } from "@base-ui/react/slider";
 import { useQueryClient } from "@tanstack/react-query";
-import { Camera, Check, ChevronLeft, ChevronRight, EyeOff, Laptop, LogOut, Minus, Monitor, Moon, PencilLine, Settings, ShieldCheck, Smartphone, Sun } from "lucide-react";
+import { Camera, Check, ChevronLeft, ChevronRight, EyeOff, Laptop, LogOut, Minus, Monitor, MonitorSmartphone, Moon, PencilLine, Settings, ShieldCheck, Smartphone, Sun } from "lucide-react";
 import { useRef, useState, type ReactNode } from "react";
 import { ApiError, api } from "./api/client";
 import type { Device, Me, Rules } from "./api/types.gen";
 import { LOCAL_ME, useMe, useWorkspaces } from "./data";
 import { setLang, t, useLang, type Lang } from "./i18n";
+import { go } from "./route";
 import { errText, toast } from "./toast";
-import { AGENTS, Avatar, cn, IconKey, keep, kept, Logo, PopSurface, tilde, Tip } from "./ui";
+import { AGENTS, Avatar, cn, IconKey, keep, kept, Logo, PopSurface, tilde, Tip, tokens } from "./ui";
 
 export type ThemePref = "light" | "dark" | "auto";
 
@@ -68,7 +69,7 @@ export function MeChip({ theme, setTheme, initialPage = "main", defaultOpen = fa
         />
       </Tip>
       <PopSurface side="top" align="start">
-        <MePanel key={round} theme={theme} setTheme={setTheme} initialPage={initialPage} />
+        <MePanel key={round} theme={theme} setTheme={setTheme} initialPage={initialPage} onLeave={() => setOpen(false)} />
       </PopSurface>
     </Popover.Root>
   );
@@ -76,8 +77,10 @@ export function MeChip({ theme, setTheme, initialPage = "main", defaultOpen = fa
 
 /** The me popover's body. On a phone with a chat open it is a sheet of its own (a swipe up from the
  *  composer's left quarter, or 个人 in the chat bar's ⋯), the window's width, the settings key a row
- *  in it, not the sidebar's foot (the user, 2026-11-06). */
-export function MePanel({ theme, setTheme, initialPage = "main", wide, onSettings, updateDot }: { theme: ThemePref; setTheme: (t: ThemePref) => void; initialPage?: Page; wide?: boolean; onSettings?: () => void; updateDot?: boolean }) {
+ *  in it, not the sidebar's foot (the user, 2026-11-06). For those who manage, the panels, plugins
+ *  and peers a row too, with today's tokens: each one's usage is there (the user, 2026-11-07);
+ *  onLeave puts the popover or sheet away first. */
+export function MePanel({ theme, setTheme, initialPage = "main", wide, onSettings, updateDot, onLeave }: { theme: ThemePref; setTheme: (t: ThemePref) => void; initialPage?: Page; wide?: boolean; onSettings?: () => void; updateDot?: boolean; onLeave?: () => void }) {
   const lang = useLang();
   const qc = useQueryClient();
   const { data } = useMe();
@@ -176,6 +179,20 @@ export function MePanel({ theme, setTheme, initialPage = "main", wide, onSetting
             <Row icon={<ShieldCheck size={16} />} onClick={() => setPage("perms")} end={<ChevronRight size={14} className="text-ink-4" />}>
               {t("me.perms")}
             </Row>
+            {(local || me.kind === "panel") && (
+              <Row
+                icon={<MonitorSmartphone size={16} />}
+                onClick={() => (onLeave?.(), go({ name: "terminals" }))}
+                end={
+                  <span className="flex items-center gap-1.5">
+                    <span className="text-xs text-ink-3 tabular-nums">{t("term.today", { n: tokens(me.usedToday) })}</span>
+                    <ChevronRight size={14} className="text-ink-4" />
+                  </span>
+                }
+              >
+                {t("settings.terminalsRow")}
+              </Row>
+            )}
             {onSettings && (
               <Row
                 icon={<Settings size={16} />}

@@ -44,6 +44,7 @@ func (s *Server) terminalRoutes(mux *http.ServeMux) {
 		}
 		s.confirmState(w, r)
 	})
+	mux.HandleFunc("GET /api/usage", s.usage) // routes_usage.go
 	mux.HandleFunc("GET /api/public", s.manage(s.publicState))
 	mux.HandleFunc("PUT /api/public", s.panelOnly(s.setPublic))
 }

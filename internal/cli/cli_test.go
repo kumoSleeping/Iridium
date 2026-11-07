@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -140,7 +141,7 @@ func rig(t *testing.T) (config.Config, string) {
 		t.Fatal(err)
 	}
 	s = server.New(cfg, m, h, t.Logf)
-	s.Discover = d
+	s.Discover, s.Folders = d, discover.DefaultFolders(root)
 	t.Cleanup(s.Close)
 	tcp, unix, err := s.Listen()
 	if err != nil {
@@ -349,3 +350,70 @@ func (*env) client(cfg config.Config) *env {
 }
 
 func (e *env) idsFrom(t *testing.T, cfg config.Config) []string { return e.client(cfg).ids() }
+
+// ir ws: made, listed, renamed, a session moved in and out, deleted; named by id or name.
+func TestWorkspaceCommands(t *testing.T) {
+	cfg, work := rig(t)
+	a, b := filepath.Join(work, "a"), filepath.Join(work, "b")
+	os.MkdirAll(a, 0o700)
+	os.MkdirAll(b, 0o700)
+
+	r := ir("ws", "new", a)
+	if r.code != 0 || !strings.HasSuffix(r.out, "\ta\n") {
+		t.Fatalf("ws new: %+v", r)
+	}
+	idA := strings.Split(r.out, "\t")[0]
+	if r := ir("ws", "new", b, "--name", "Bee"); r.code != 0 || !strings.HasSuffix(r.out, "\tBee\n") {
+		t.Fatalf("ws new --name: %+v", r)
+	}
+	if r := ir("ws"); r.code != 0 || !strings.Contains(r.out, idA+"\ta\t"+a+"\t0\n") || !strings.Contains(r.out, "\tBee\t"+b+"\t0\n") {
+		t.Errorf("ws: %+v", r)
+	}
+	if r := ir("ws", "rename", "bee", "a"); r.code != 0 {
+		t.Errorf("ws rename by name: %+v", r)
+	}
+	// Two named a now: by name it is not known which.
+	if r := ir("ws", "rm", "a"); r.code != 1 || !strings.Contains(r.err, "2 workspaces") {
+		t.Errorf("ws rm of an ambiguous name: %+v", r)
+	}
+	if r := ir("ws", "nope"); r.code != 1 || !strings.Contains(r.err, "usage") {
+		t.Errorf("ws nope: %+v", r)
+	}
+
+	r = ir("new", "claude", work, "hello", "--wait")
+	sid := strings.Split(r.out, "\n")[0]
+	if r.code != 0 {
+		t.Fatalf("new: %+v", r)
+	}
+	in := func(want string) {
+		t.Helper()
+		var list []api.Session
+		if err := (&env{}).client(cfg).do("GET", "/api/sessions", nil, &list); err != nil {
+			t.Fatal(err)
+		}
+		for _, s := range list {
+			if strings.HasPrefix(s.ID, sid) && strconv.FormatInt(s.Workspace, 10) != want {
+				t.Errorf("session in workspace %d, want %s", s.Workspace, want)
+			}
+		}
+	}
+	if r := ir("ws", "mv", sid, idA); r.code != 0 {
+		t.Fatalf("ws mv: %+v", r)
+	}
+	in(idA)
+	if r := ir("ws"); !strings.Contains(r.out, idA+"\ta\t"+a+"\t1\n") {
+		t.Errorf("ws after mv: %+v", r)
+	}
+	if r := ir("ws", "mv", sid, "0"); r.code != 0 {
+		t.Fatalf("ws mv 0: %+v", r)
+	}
+	in("0")
+	ir("ws", "mv", sid, idA)
+	if r := ir("ws", "rm", idA); r.code != 0 || !strings.Contains(r.out, "未归类") {
+		t.Fatalf("ws rm: %+v", r)
+	}
+	in("0")
+	if r := ir("ws", "rm", idA); r.code != 1 {
+		t.Errorf("ws rm again: %+v", r)
+	}
+}

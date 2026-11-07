@@ -47,15 +47,16 @@ const ChatPage = part(() => import("./chat/chat").then((m) => m.ChatPage));
 const SettingsPage = part(() => import("./settings").then((m) => m.SettingsPage));
 const TerminalsPage = part(() => import("./terminals").then((m) => m.TerminalsPage));
 const SecretsPage = part(() => import("./credentials").then((m) => m.SecretsPage));
+const UsagePage = part(() => import("./usage").then((m) => m.UsagePage));
 /** The page of the settings' dialog a route is: the settings, or one of their own pages. */
-type SetsPage = "settings" | "terminals" | "secrets";
-const setsPageOf = (r: Route): SetsPage => (r.name === "terminals" || r.name === "secrets" ? r.name : "settings");
+type SetsPage = "settings" | "terminals" | "secrets" | "usage";
+const setsPageOf = (r: Route): SetsPage => (r.name === "terminals" || r.name === "secrets" || r.name === "usage" ? r.name : "settings");
 const Jump = part(() => import("./jump").then((m) => m.Jump));
 export const loadChat = ChatPage.load;
 /** The settings and the jump box, their code run, the settings' answers asked: once idle, or a
  *  pointer on their key. */
 const loadPanels = () => {
-  for (const p of [SettingsPage, TerminalsPage, SecretsPage, Jump]) void p.load().catch(() => {});
+  for (const p of [SettingsPage, TerminalsPage, SecretsPage, UsagePage, Jump]) void p.load().catch(() => {});
   void queryClient.prefetchQuery(agentsQ);
   void queryClient.prefetchQuery(pushQ);
 };
@@ -254,6 +255,10 @@ export function App() {
         <div key="secrets" className="g-slide h-full">
           <SecretsPage onBack={back} />
         </div>
+      ) : page === "usage" ? (
+        <div key="usage" className="g-slide h-full">
+          <UsagePage onBack={back} />
+        </div>
       ) : (
         <div key="settings" className="g-slide h-full" data-dir="back">
           <SettingsPage theme={theme} setTheme={setThemeKept} />
@@ -304,7 +309,7 @@ export function App() {
             <Sheet open={footOut} setOpen={setFoot} size="fit" from={atLeft} label={t("me.title")} onHeight={setFootH}>
               {/* The me popover's body, not the sidebar's foot: the settings a row in it (the user, 2026-11-06). */}
               <div className="px-2 pb-2" onPointerEnter={loadPanels}>
-                <MePanel key={footRound} wide theme={theme} setTheme={setThemeKept} onSettings={() => (setFootOut(false), onSettings())} updateDot={!!update.data?.available} />
+                <MePanel key={footRound} wide theme={theme} setTheme={setThemeKept} onSettings={() => (setFootOut(false), onSettings())} onLeave={() => setFootOut(false)} updateDot={!!update.data?.available} />
               </div>
             </Sheet>
           )}

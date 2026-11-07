@@ -2,7 +2,7 @@
 // over the composer, which stays where it is, covered (it sinks only if taller than the sheet; the
 // user, 2026-11-06). Nothing dims: the chat above is seen and scrolls as ever, and a tap on
 // it puts the sheet away, as picking a session does. The chat bar's ⋯ menu brings it out; a swipe
-// up from the composer does too, following the finger, and one down on its grip or head puts it
+// up from the composer, its box too, does too, following the finger, and one down on its grip or head puts it
 // away; Esc does too. With no chat open it stays out. While searching it stands taller, for the
 // keyboard. Its grip dragged makes it taller, up to the window's top, or shorter, down to its head
 // alone, and it stays so on this device; with no chat open it is the whole window, whatever was kept (the user, 2026-11-06). The sidebar's foot, me and the settings key, is a sheet of its own, only as tall as it:
@@ -83,12 +83,12 @@ export function Sheet({ open, setOpen, size, from: zone, label, onHeight, childr
     return () => removeEventListener("keydown", key);
   }, [open]);
 
-  // A vertical swipe: up from the composer while shut (not in its box, which scrolls its words), or
+  // A vertical swipe: up from the composer while shut (its box too while it has nothing to scroll), or
   // from the conversation resting at its newest; down from the grip or the head while out, or up
   // there to make the half sheet taller. Undecided till it has moved 8px; then it is the sheet's
   // only if it went more down or up than across, and a way it may go.
   useEffect(() => {
-    let from: { x: number; y: number; t: number; open: boolean; h: number; log: boolean } | null = null;
+    let from: { x: number; y: number; t: number; open: boolean; h: number; log: boolean; box: boolean } | null = null;
     let mine = false;
     let at = 0;
     let tall = 0; // the half sheet's height as dragged, px
@@ -106,12 +106,15 @@ export function Sheet({ open, setOpen, size, from: zone, label, onHeight, childr
         const box = panel.current?.getBoundingClientRect();
         if (!box || !panel.current!.contains(el) || y - box.top > HEAD) return;
       } else {
-        if (mouse || el.closest("textarea, input, [role=listbox], [role=dialog], [role=menu]") || !now.current.zone(x)) return;
+        // The composer's box too, while it has nothing to scroll: all of it, as it first is (the
+        // user, 2026-11-07); grown past its height, it scrolls its words.
+        const box = el.closest("textarea");
+        if (mouse || (box && box.scrollHeight > box.clientHeight + 1) || el.closest("input, [role=listbox], [role=dialog], [role=menu]") || !now.current.zone(x)) return;
         // In the conversation: only at rest at its newest, no words chosen.
         const log = el.closest<HTMLElement>("[role=log]");
         if (log ? !restsAtEnd(log) || !getSelection()?.isCollapsed : !el.closest(`[${PULL}]`)) return;
       }
-      from = { x, y, t, open, h: height(), log: !open && !!el.closest("[role=log]") };
+      from = { x, y, t, open, h: height(), log: !open && !!el.closest("[role=log]"), box: !open && !!el.closest("textarea") };
       mine = false;
       last = { y, t, v: 0 };
     };
@@ -126,7 +129,7 @@ export function Sheet({ open, setOpen, size, from: zone, label, onHeight, childr
       const dy = y - from.y;
       if (!mine) {
         const dx = Math.abs(x - from.x);
-        if (from.log && t - from.t > LOG.HOLD) {
+        if ((from.log || from.box) && t - from.t > LOG.HOLD) {
           from = null;
           return false;
         }

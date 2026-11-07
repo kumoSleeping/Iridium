@@ -89,6 +89,7 @@ var adminCommands = map[string]func(adminEnv, []string, io.Writer, io.Writer) in
 	"update":  updateCmd,
 	"secret":  secretCmd, // secrets.go
 	"run":     runCmd,
+	"usage":   usageCmd, // usage.go
 }
 
 // call sends one request to the daemon and decodes its JSON reply into out; it gives the status.

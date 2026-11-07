@@ -6,10 +6,10 @@
 // waits on you, 归档 folded at the bottom. A workspace's row: its name a size up, its chevron only
 // under the mouse, a faint "+" at its end for a new session there. A row's menu (right click,
 // long-press): pin, rename, stop, archive, 通知 while push is on (push.ts), and at its foot the
-// colour tags (colors.ts); a workspace's, its 通知 only. The mouse resting on a row fetches its
+// colour tags (colors.ts); a workspace's, rename, its path, 通知, and delete pressed twice. The mouse resting on a row fetches its
 // chat ahead.
 import { Menu } from "@base-ui/react/menu";
-import { Archive, ArchiveRestore, Bot, Check, ChevronRight, Copy, Folder, FolderOpen, FolderPlus, Inbox, Pencil, Pin, PinOff, Plus, Search, Settings, Square, Workflow as WorkflowIcon } from "lucide-react";
+import { Archive, ArchiveRestore, Bot, Check, ChevronRight, Copy, Folder, FolderOpen, FolderPlus, Inbox, Pencil, Pin, PinOff, Plus, Search, Settings, Square, Trash2, Workflow as WorkflowIcon } from "lucide-react";
 import { ConfirmIcon, confirmName, confirmTitle } from "./confirmname";
 import { Fragment, lazy, Suspense, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { api } from "./api/client";
@@ -223,6 +223,7 @@ export function Sidebar(p: Props) {
                 flip={`w:${w.key}`}
                 id={w.id}
                 name={w.name}
+                root={w.root}
                 open={open}
                 onToggle={() => p.toggle(w.key)}
                 // Not its count: the "+" that opens a session here, always at the row's end, plain to
@@ -423,15 +424,29 @@ function Row({ depth, flip, chevron, expanded, icon, label, end, selected, onCli
   );
 }
 
-/** A workspace's row; its menu (right click, long-press), while push is on: its 通知, inline. */
-function WsRow({ flip, id, name, open, onToggle, end }: { flip: string; id: number; name: string; open: boolean; onToggle: () => void; end: ReactNode }) {
+/** A workspace's row; its menu (right click, long-press): rename, its path copied, open or folded,
+ *  通知 while push is on, and at its foot delete (pressed twice: its sessions go to 未归类, kept).
+ *  未归类 itself (id 0): its 通知 only, inline. */
+function WsRow({ flip, id, name, root, open, onToggle, end }: { flip: string; id: number; name: string; root: string; open: boolean; onToggle: () => void; end: ReactNode }) {
   const push = usePushMenus();
+  const me = useMe().data;
+  const real = id !== 0 && !!me && (me.local || me.kind === "panel");
   const [at, setAt] = useState<{ x: number; y: number } | null>(null);
+  const [renaming, setRenaming] = useState(false);
+  const [sure, setSure] = useState(false);
   const lp = useLongPress(() => {
     const r = document.activeElement?.closest?.("[role=treeitem]")?.getBoundingClientRect();
     setAt(r ? { x: r.left + 40, y: r.bottom } : { x: 40, y: 40 });
   });
   const anchor = at && { getBoundingClientRect: () => DOMRect.fromRect({ x: at.x, y: at.y, width: 0, height: 0 }) };
+  const failed = (e: unknown) => toast(t("err.action"), { error: true, description: errText(e) });
+  const items = [
+    { icon: <Pencil size={15} />, label: t("menu.rename"), run: () => setRenaming(true) },
+    { icon: <Copy size={15} />, label: t("menu.copyPath"), run: () => void navigator.clipboard.writeText(root).then(() => toast(t("toast.copied")), failed) },
+    { icon: open ? <Folder size={15} /> : <FolderOpen size={15} />, label: open ? t("menu.fold") : t("menu.unfold"), run: onToggle },
+  ];
+  const remove = () => void api.deleteWorkspace(id).then(() => toast(t("toast.wsDeleted", { name })), failed);
+  const menu = real || push;
   // Its "+" popover is a portal, but React events bubble through it: a press in it must not fold
   // the workspace (the user's, 2026-11-05: only you fold or unfold).
   return (
@@ -441,26 +456,80 @@ function WsRow({ flip, id, name, open, onToggle, end }: { flip: string; id: numb
         flip={flip}
         chevron={open ? "open" : "closed"}
         reveal
-        onClick={onToggle}
-        label={<span className="font-medium">{name}</span>}
-        end={end && <span className="flex items-center" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>{end}</span>}
-        extra={push ? { ...lp, onContextMenu: (e: React.MouseEvent) => own(e) && (e.preventDefault(), setAt({ x: e.clientX, y: e.clientY })), onClickCapture: lp.onClickCapture } : undefined}
+        onClick={() => !renaming && onToggle()}
+        label={renaming ? <WsRename id={id} name={name} done={() => setRenaming(false)} /> : <span className="font-medium">{name}</span>}
+        end={end && !renaming && <span className="flex items-center" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>{end}</span>}
+        extra={menu ? { ...lp, onContextMenu: (e: React.MouseEvent) => own(e) && (e.preventDefault(), setAt({ x: e.clientX, y: e.clientY })), onClickCapture: lp.onClickCapture } : undefined}
       />
-      {push && (
-        <Menu.Root open={at !== null} onOpenChange={(o) => !o && setAt(null)}>
+      {menu && (
+        <Menu.Root open={at !== null} onOpenChange={(o) => !o && (setAt(null), setSure(false))}>
           <Menu.Portal>
             <Menu.Positioner anchor={anchor} side="bottom" align="start" sideOffset={4} collisionPadding={8} className="z-50">
-              <Menu.Popup finalFocus={false} className="g-unfold glass thick float min-w-52 rounded-lg p-1.5 text-ink outline-none">
-                <div className="g-stagger flex flex-col">
-                  <div className="flex h-7 items-center px-2.5 text-xs font-medium text-ink-3">{t("push.menu")}</div>
-                  <push.m.PushItems st={push.st} levels={wsLevels(id)} i={1} />
-                </div>
-              </Menu.Popup>
+              {real ? (
+                <MenuItems
+                  items={items}
+                  foot={
+                    <>
+                      <PushFoot levels={wsLevels(id)} i={items.length} />
+                      {/* Twice: the first press only asks (the user, 2026-11-07). */}
+                      <div style={{ "--i": items.length + 1 } as CSSProperties} className="mt-1.5 border-t border-edge pt-1.5">
+                        <Menu.Item
+                          closeOnClick={sure}
+                          onClick={() => (sure ? remove() : setSure(true))}
+                          className="flex h-8 cursor-default items-center gap-2.5 rounded-md px-2.5 text-base text-err outline-none select-none data-highlighted:bg-fill pointer-coarse:h-11"
+                        >
+                          <Trash2 size={15} />
+                          <span key={String(sure)} className="g-fade">{sure ? t("menu.wsDeleteSure") : t("menu.wsDelete")}</span>
+                        </Menu.Item>
+                      </div>
+                    </>
+                  }
+                />
+              ) : (
+                push && (
+                  <Menu.Popup finalFocus={false} className="g-unfold glass thick float min-w-52 rounded-lg p-1.5 text-ink outline-none">
+                    <div className="g-stagger flex flex-col">
+                      <div className="flex h-7 items-center px-2.5 text-xs font-medium text-ink-3">{t("push.menu")}</div>
+                      <push.m.PushItems st={push.st} levels={wsLevels(id)} i={1} />
+                    </div>
+                  </Menu.Popup>
+                )
+              )}
             </Menu.Positioner>
           </Menu.Portal>
         </Menu.Root>
       )}
     </>
+  );
+}
+
+/** A workspace's new name, in place of its row's: Enter or leaving it renames, Esc leaves it. */
+function WsRename({ id, name, done }: { id: number; name: string; done: () => void }) {
+  const over = useRef(false);
+  const end = async (value?: string) => {
+    if (over.current) return;
+    over.current = true;
+    const to = value?.trim();
+    done();
+    if (to && to !== name) await api.patchWorkspace(id, { name: to }).catch((e) => toast(t("err.rename"), { error: true, description: errText(e) }));
+  };
+  return (
+    <input
+      autoFocus
+      aria-label={t("menu.rename")}
+      defaultValue={name}
+      maxLength={80}
+      onFocus={(e) => e.currentTarget.select()}
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => {
+        e.stopPropagation();
+        if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+        if (e.key === "Enter") void end(e.currentTarget.value);
+        else if (e.key === "Escape") void end();
+      }}
+      onBlur={(e) => void end(e.currentTarget.value)}
+      className="no-ring h-6 w-full min-w-0 rounded-sm bg-fill px-1.5 text-md font-medium"
+    />
   );
 }
 

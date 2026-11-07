@@ -25,6 +25,7 @@ import type {
   NewSessionReply,
   NewUpload,
   NewWorkspace,
+  Release,
   PushEvents,
   PushRule,
   PushState,
@@ -51,7 +52,7 @@ import type {
   Workspace,
   WorkspacePatch,
 } from "./types.gen";
-import type { SecretInfo, Secrets, SetSecret } from "./types.gen";
+import type { SecretInfo, Secrets, SetSecret, Usage } from "./types.gen";
 
 /** The gate's GET /_ir/api/session (docs/gate.md). */
 export type GateSession = { authenticated: boolean; name?: string; local?: boolean; setup?: boolean };
@@ -164,6 +165,8 @@ export const api = {
   stop: (id: string) => write<{ ok: boolean }>("POST", `${S(id)}/stop`),
   /** An ask's card answered (docs/api.md "卡片"): an option, a choice per question, own words. */
   answer: (a: CardAnswer) => write<CardReply>("POST", "/api/answer", a),
+  /** A step Claude's auto mode denied, run again (session/release.go). */
+  release: (id: string, toolUseId: string) => write<{ ok: boolean }>("POST", `/api/sessions/${enc(id)}/release`, { toolUseId } satisfies Release),
   health: (init?: RequestInit) => get<{ ok: boolean }>("/api/health", init),
   agents: () => get<AgentInfo[]>("/api/agents"),
 
@@ -237,6 +240,8 @@ export const api = {
   invite: (name: string, owner?: boolean) => write<Invite>("POST", "/api/terminals/invites", { ...(name ? { name } : {}), ...(owner ? { owner } : {}) } satisfies NewInvite),
   token: (name: string, owner?: boolean) => write<Token>("POST", "/api/terminals/tokens", { name, ...(owner ? { owner } : {}) } satisfies NewInvite),
   revoke: (id: string) => write<{ ok: boolean }>("DELETE", `/api/terminals/${enc(id)}`),
+  /** GET /api/usage: the last days' tokens by day, terminal, agent and model; terminal: one only. */
+  usage: (days: number, terminal?: string) => get<Usage>(`/api/usage?days=${days}${terminal ? `&terminal=${enc(terminal)}` : ""}`),
   confirms: () => get<Confirms>("/api/confirms"),
   /** extra: a secret-set's value, a secret-use's "this session". */
   answerConfirm: (id: string, allow: boolean, extra?: Omit<ConfirmAnswer, "allow">) => write<ConfirmReply>("POST", `/api/confirms/${enc(id)}`, { allow, ...extra } satisfies ConfirmAnswer),

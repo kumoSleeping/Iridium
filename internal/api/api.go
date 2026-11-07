@@ -363,6 +363,12 @@ type SendReply struct {
 	Command bool `json:"command,omitempty"`
 }
 
+// Release lets Claude run again call ToolUseID, which its auto mode classifier denied: allowed
+// once, in manual mode for the turn (docs/api.md "放行").
+type Release struct {
+	ToolUseID string `json:"toolUseId"`
+}
+
 // Answer answers an ask. permission: Allow (and Message if not); question: Answers, by question
 // text, the label chosen; plan: Allow (approve), Message if not.
 type Answer struct {
