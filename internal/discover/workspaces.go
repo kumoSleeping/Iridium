@@ -113,7 +113,7 @@ func (x *Index) Workspaces() ([]api.Workspace, error) {
 	}
 	out := make([]api.Workspace, 0, len(ws))
 	for _, w := range ws {
-		out = append(out, api.Workspace{ID: w.ID, Name: w.Name, Path: w.Path})
+		out = append(out, api.Workspace{ID: w.ID, Name: w.Name, Path: w.Path, Creator: w.Creator})
 	}
 	return out, nil
 }
@@ -122,6 +122,11 @@ func (x *Index) Workspaces() ([]api.Workspace, error) {
 // is the folder's name. It takes no session already classified: those shown from now on in its
 // folder go in it by the first-sight rule (classify), as the user decided (2026-11-05).
 func (x *Index) CreateWorkspace(path, name string) (api.Workspace, error) {
+	return x.CreateWorkspaceBy(path, name, "")
+}
+
+// CreateWorkspaceBy is CreateWorkspace, made by terminal creator ("" not known).
+func (x *Index) CreateWorkspaceBy(path, name, creator string) (api.Workspace, error) {
 	path = filepath.Clean(path)
 	if name = oneLine(name); name == "" {
 		name = filepath.Base(path)
@@ -130,8 +135,22 @@ func (x *Index) CreateWorkspace(path, name string) (api.Workspace, error) {
 	if err != nil {
 		return api.Workspace{}, err
 	}
+	if creator != "" {
+		if err := x.o.Store.SetWorkspaceCreator(id, creator); err != nil {
+			return api.Workspace{}, err
+		}
+	}
 	x.Changed()
-	return api.Workspace{ID: id, Name: name, Path: path}, nil
+	return api.Workspace{ID: id, Name: name, Path: path, Creator: creator}, nil
+}
+
+// ClaimWorkspaces gives creator the workspaces with none (made before it was kept).
+func (x *Index) ClaimWorkspaces(creator string) error {
+	n, err := x.o.Store.ClaimWorkspaces(creator)
+	if err == nil && n > 0 {
+		x.Changed()
+	}
+	return err
 }
 
 func (x *Index) RenameWorkspace(id int64, name string) error {

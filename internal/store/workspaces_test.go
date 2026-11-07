@@ -48,3 +48,33 @@ func TestWorkspaces(t *testing.T) {
 		t.Errorf("rename gone: %v", err)
 	}
 }
+
+func TestWorkspaceCreator(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	a, _ := s.CreateWorkspace("a", "/a")
+	b, _ := s.CreateWorkspace("b", "/b")
+	if err := s.SetWorkspaceCreator(a, "panel-1"); err != nil {
+		t.Fatal(err)
+	}
+	ws, err := s.Workspaces()
+	if err != nil || len(ws) != 2 {
+		t.Fatalf("%v %+v", err, ws)
+	}
+	got := map[int64]string{ws[0].ID: ws[0].Creator, ws[1].ID: ws[1].Creator}
+	if got[a] != "panel-1" || got[b] != "" {
+		t.Errorf("creators %+v", got)
+	}
+	if n, err := s.ClaimWorkspaces("panel-2"); err != nil || n != 1 {
+		t.Fatalf("claimed %d: %v", n, err)
+	}
+	ws, _ = s.Workspaces()
+	for _, w := range ws {
+		if want := map[int64]string{a: "panel-1", b: "panel-2"}[w.ID]; w.Creator != want {
+			t.Errorf("%d: creator %q, want %q", w.ID, w.Creator, want)
+		}
+	}
+}

@@ -62,10 +62,29 @@
   --ctx-3: oklch(0.58 0 0);
   --ctx-4: oklch(0.69 0 0);
   --ctx-5: oklch(0.79 0 0);
+
+  /* usage: a terminal's colour (usage.tsx paint), eight hues in an order whose neighbours stay
+     apart for colour-blind eyes too; light and dark each stepped for their paper */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #6250d6;
+  --series-8: #e34948;
 }
 
 [data-theme="dark"] {
   color-scheme: dark;
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+  --series-7: #9085e9;
+  --series-8: #e66767;
   --paper: oklch(0.18 0 0);
   --ink: oklch(0.94 0 0);
   --ink-2: oklch(0.78 0 0);
@@ -289,6 +308,7 @@ body {
 }
 .lamp[data-s="needs"] > i {
   background: var(--need);
+  animation: lamp-breathe 1.6s ease-in-out infinite;
 }
 .lamp[data-s="error"] > i {
   background: var(--err);
@@ -317,8 +337,12 @@ body {
   background: var(--start);
   animation: row-breathe 1.6s ease-in-out infinite;
 }
+/* Waiting on you: amber, breathing, in its own place in the list (the user, 2026-11-08: no group
+   of its own; a light to come over). */
 .row-lamp[data-s="needs"] {
+  --halo: var(--need);
   background: var(--need);
+  animation: row-breathe 1.6s ease-in-out infinite;
 }
 .row-lamp[data-s="error"] {
   background: var(--err);
@@ -463,29 +487,9 @@ body {
     transform: scale(0.75);
   }
 }
-.sent-check {
-  animation: sent-check 1.6s var(--ease-out) both;
-}
-@keyframes sent-check {
-  0% {
-    opacity: 0;
-    transform: scale(0.6);
-  }
-  15%,
-  70% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  100% {
-    opacity: 0;
-  }
-}
 @media (prefers-reduced-motion: reduce) {
   .send-ring {
     animation-name: wait-fade;
-  }
-  .sent-check {
-    animation-timing-function: linear;
   }
 }
 

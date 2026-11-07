@@ -358,6 +358,21 @@ func Claude() int {
 				waiting = f
 				timer = time.After(500 * time.Millisecond)
 				continue
+			case strings.HasSuffix(text, "DENIED"):
+				// Auto mode's classifier turns the call down: the CLI answers the model itself.
+				call := map[string]any{"type": "tool_use", "id": "toolu_denied", "name": "Bash", "input": map[string]any{"command": "npx -y some-tool", "description": "fetch a tool"}}
+				say(map[string]any{"type": "assistant", "parent_tool_use_id": nil, "message": map[string]any{"role": "assistant", "content": []any{call}, "usage": map[string]any{"input_tokens": 10}}})
+				note(map[string]any{"type": "assistant", "timestamp": stamp(), "message": map[string]any{"role": "assistant", "content": []any{call}}})
+				result := map[string]any{"type": "tool_result", "tool_use_id": "toolu_denied", "is_error": true, "content": "Permission for this action was denied by the Claude Code auto mode classifier. Reason: [Code from External]. If you have other tasks that don't depend on this action, continue working on those."}
+				say(map[string]any{"type": "user", "parent_tool_use_id": nil, "message": map[string]any{"role": "user", "content": []any{result}}})
+				note(map[string]any{"type": "user", "timestamp": stamp(), "message": map[string]any{"role": "user", "content": []any{result}}})
+				finish(f, nil)
+				continue
+			case strings.Contains(text, "请原样再做一次"):
+				// Released: the same call again, asked now that the mode is manual.
+				pending, asked = f, 1
+				ask("again", "npx -y some-tool")
+				continue
 			case strings.HasSuffix(text, "QUOTA"):
 				back := time.Now().Add(1500 * time.Millisecond).Unix() // whole seconds: back in 0.5 to 1.5
 				say(map[string]any{"type": "rate_limit_event", "rate_limit_info": map[string]any{"status": "rejected", "resetsAt": back, "rateLimitType": "five_hour"}})

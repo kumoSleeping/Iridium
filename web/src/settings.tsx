@@ -5,7 +5,7 @@
 // sending does while a turn runs; the update; signing out. Not here (the user, 2026-11-08): its
 // permissions (the 终端 page shows each terminal's) and the approval mode of new sessions (the
 // config file's, else each agent's own). Each a title and its control, no line explaining it;
-// no version shown, no head, signing out small and asked once (the user, 2026-11-08). Every quota bar shows: nothing here hides one.
+// no version shown, no head, signing out a plain row, asked once (the user, 2026-11-08). Every quota bar shows: nothing here hides one.
 // Changed is saved at once (GET/PUT /api/settings). Reaping idle agents and going on after a crash
 // or a quota are not here: as the config file says, by default 1h and on (the user, 2026-11-07).
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -334,8 +334,8 @@ function UpdateRow() {
   );
 }
 
-/** 退出此终端: small, plain, never red; the first press only asks, the second signs out; left alone
- *  it asks no more (the user, 2026-11-08). */
+/** 退出此终端: a row like the others, no button (the user, 2026-11-08); never red; the first press
+ *  only asks, the second signs out; left alone it asks no more. */
 function SignOut() {
   const [sure, setSure] = useState(false);
   useEffect(() => {
@@ -345,11 +345,9 @@ function SignOut() {
   }, [sure]);
   const out = () => void api.logout().then(() => location.assign("/_ir/login"), (e) => toast(t("me.logout"), { error: true, description: errText(e) }));
   return (
-    <div className="mt-3 flex">
-      <button type="button" onClick={() => (sure ? out() : setSure(true))} onBlur={() => setSure(false)} className="g-press flex h-7 items-center gap-1.5 rounded-full bg-fill px-3 text-xs text-ink-2 hover:bg-fill-2 hover:text-ink">
-        <LogOut size={13} />
-        <span key={String(sure)} className="g-fade">{sure ? t("me.logoutSure") : t("me.logout")}</span>
-      </button>
-    </div>
+    <button type="button" onClick={() => (sure ? out() : setSure(true))} onBlur={() => setSure(false)} className="g-press -mx-1.5 flex min-h-10 items-center gap-3 rounded-md px-1.5 py-1 text-left hover:bg-fill">
+      <span key={String(sure)} className="g-fade min-w-0 flex-1 truncate text-sm">{sure ? t("me.logoutSure") : t("me.logout")}</span>
+      <LogOut size={15} className="shrink-0 text-ink-4" />
+    </button>
   );
 }

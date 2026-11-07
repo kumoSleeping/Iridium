@@ -277,7 +277,7 @@ func TestRegisterAndLogin(t *testing.T) {
 	if reply.Name != "" {
 		t.Fatalf("setup invite suggests %q", reply.Name)
 	}
-	for name, code := range map[string]string{"本机": "reserved", "UNKNOWN": "reserved", "a/b": "invalid", "1234567890123": "too_long", "Kumo Mac": ""} {
+	for name, code := range map[string]string{"本机": "reserved", "IR": "reserved", "UNKNOWN": "reserved", "a/b": "invalid", "1234567890123": "too_long", "Kumo Mac": ""} {
 		r := decode[joinReply](t, h.do(req{method: "POST", path: "/_ir/api/join/check", body: joinRequest{Token: setup, Name: ptr(name)}}))
 		if r.NameError != code {
 			t.Fatalf("name %q: %q, want %q", name, r.NameError, code)

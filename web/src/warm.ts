@@ -28,11 +28,9 @@ export function made(s: Session, byId: Map<string, Session>, now: number): boole
  *  made, then the other workspaces' five. lastWs: the workspace you were last in (0: 未归类). */
 export function pick(all: Session[], tree: Tree, open: string | null, lastWs: number | null, now = Date.now()): Map<string, number> {
   const byId = new Map(all.map((s) => [s.id, s]));
-  const known = new Set(tree.workspaces.map((w) => w.id));
-  const wsOf = (s: Session) => (s.workspace && known.has(s.workspace) ? s.workspace : 0);
   const places = tree.workspaces.map((w) => {
-    // As the sidebar lists them, those that wait on you (shown under 需要你) too.
-    const order = [...w.rows.flatMap((r) => (r.kind === "session" ? [r.s] : r.f.sessions)), ...tree.needs.filter((s) => wsOf(s) === w.id)];
+    // As the sidebar lists them.
+    const order = w.rows.flatMap((r) => (r.kind === "session" ? [r.s] : r.f.sessions));
     const at = order.findIndex((s) => s.id === open);
     const near = at < 0 ? [] : [order[at - 1], order[at + 1]].filter((s): s is Session => !!s);
     const rest = order.filter((s) => s.id !== open && !near.includes(s)).sort((a, b) => b.updatedAt - a.updatedAt);
@@ -49,9 +47,7 @@ export function pick(all: Session[], tree: Tree, open: string | null, lastWs: nu
 /** The workspace of session id as the sidebar has it (0: 未归类), if it is listed. */
 export function workspaceOf(tree: Tree, id: string): number | undefined {
   for (const w of tree.workspaces) if (w.rows.some((r) => (r.kind === "session" ? r.s.id === id : r.f.sessions.some((s) => s.id === id)))) return w.id;
-  const s = tree.needs.find((s) => s.id === id);
-  if (!s) return undefined;
-  return tree.workspaces.some((w) => w.id === s.workspace) ? s.workspace! : 0;
+  return undefined;
 }
 
 let lastWs: number | null = (() => {

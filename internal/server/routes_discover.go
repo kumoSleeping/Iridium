@@ -47,7 +47,7 @@ func (s *Server) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		s.discoverError(w, err)
 		return
 	}
-	ws, err := s.Discover.CreateWorkspace(path, req.Name)
+	ws, err := s.Discover.CreateWorkspaceBy(path, req.Name, callerOf(r).EndpointID)
 	if err != nil {
 		s.discoverError(w, err)
 		return

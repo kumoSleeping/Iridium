@@ -144,7 +144,7 @@ func (m *Manager) foreignState(id string, over map[string]store.Overlay) (*api.S
 	s.Name, s.Pinned, s.Workspace, s.Color = o.NameOver(s.Title), o.Pinned, o.Workspace, api.Color(o.Color)
 	s.Archived = !m.visibility().Shown(string(s.Agent), s.ID)
 	m.parentOf(&s)
-	st := &api.SessionState{Session: s, Asks: []api.Ask{}, Tasks: []api.Task{}}
+	st := &api.SessionState{Session: s, Asks: []api.Ask{}, Tasks: []api.Task{}, Denials: []api.Denial{}}
 	if f != nil {
 		st.End, _ = f.Size()
 	}

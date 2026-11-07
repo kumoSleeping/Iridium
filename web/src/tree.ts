@@ -20,7 +20,7 @@ export type Run = { id: string; name: string; phase: string; done: number; total
 
 /** kids: the subagents at work, by the session that started them, but a workflow's: those are in
  *  runs, one row a run (the user, 2026-11-06). */
-export type Tree = { needs: Session[]; workspaces: WsNode[]; archived: Session[]; where: Map<string, string>; kids: Map<string, Session[]>; runs: Map<string, Run[]> };
+export type Tree = { workspaces: WsNode[]; archived: Session[]; where: Map<string, string>; kids: Map<string, Session[]>; runs: Map<string, Run[]> };
 
 /** How long a subagent may write nothing and still count as at work: one its parent dropped (a
  *  stop, a crash) never writes its final answer. */
@@ -61,14 +61,12 @@ export function buildTree(all: Session[], workspaces: Workspace[], unsorted: str
     if (live.length) runs.set(parent, live);
     else runs.delete(parent);
   }
+  // One that waits on you stays in its place, its lamp breathing amber: no 需要你 group of its own
+  // (the user, 2026-11-08).
   const live = list.filter((s) => !s.archived);
-  // One running elsewhere that waits on you there counts too: you answer it in its terminal.
-  const waits = (s: Session) => s.status === "waiting" || (s.status === "elsewhere" && !!s.needs);
-  const needs = live.filter(waits);
   const byWs = new Map<number, Session[]>();
   const where = new Map<string, string>();
   for (const s of live) {
-    if (waits(s)) continue;
     const ws = workspaces.some((w) => w.id === s.workspace) ? s.workspace! : 0;
     byWs.set(ws, [...(byWs.get(ws) ?? []), s]);
   }
@@ -89,19 +87,19 @@ export function buildTree(all: Session[], workspaces: Workspace[], unsorted: str
     return { key, id, name, root, rows: [...rows, ...sub.map((f): Row => ({ kind: "folder", f }))], count: sessions.length };
   };
   // A workspace with no session yet shows too: one was just made.
-  const nodes = workspaces.map((w) =>node(`w${w.id}`, w.id, w.name, w.path, byWs.get(w.id) ?? []));
+  const nodes = workspaces.map((w) => node(`w${w.id}`, w.id, w.name, w.path, byWs.get(w.id) ?? []));
   // 未归类 has no root: its folders are grouped under the directory all its sessions share, and shown
   // by their whole path (~ for the home directory, not its bare name).
   const none = byWs.get(0);
   if (none?.length) nodes.push(node("w0", 0, unsorted, commonDir(none.map((s) => s.cwd)), none));
   const archived = list.filter((s) => s.archived);
   // Out of their place: the workspace and the folder in it, or the directory's name in none.
-  for (const s of [...needs, ...archived]) {
+  for (const s of archived) {
     const w = workspaces.find((w) => w.id === s.workspace && under(s.cwd, w.path));
     const r = w && rel(s.cwd, w.path);
     where.set(s.id, w ? (r ? `${w.name}/${r}` : w.name) : (s.cwd.split("/").filter(Boolean).pop() ?? s.cwd));
   }
-  return { needs, workspaces: nodes, archived, where, kids, runs };
+  return { workspaces: nodes, archived, where, kids, runs };
 }
 
 /** The deepest directory all paths are in ("" for none but the root). */
@@ -118,6 +116,5 @@ export function commonDir(paths: string[]): string {
 
 const latest = (f: Folder) => Math.max(...f.sessions.map((s) => s.updatedAt));
 
-/** The sessions as the sidebar shows them from top to bottom, 需要你 first, for Alt+↑↓ and the jump
- *  box. */
-export const flat = (t: Tree) => [...t.needs, ...t.workspaces.flatMap((w) => w.rows.flatMap((r) => (r.kind === "session" ? [r.s] : r.f.sessions)))].flatMap((s) => [s, ...(t.kids.get(s.id) ?? []), ...(t.runs.get(s.id) ?? []).flatMap((r) => r.working)]);
+/** The sessions as the sidebar shows them from top to bottom, for Alt+↑↓ and the jump box. */
+export const flat = (t: Tree) => [...t.workspaces.flatMap((w) => w.rows.flatMap((r) => (r.kind === "session" ? [r.s] : r.f.sessions)))].flatMap((s) => [s, ...(t.kids.get(s.id) ?? []), ...(t.runs.get(s.id) ?? []).flatMap((r) => r.working)]);

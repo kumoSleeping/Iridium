@@ -46,6 +46,8 @@ type Server struct {
 	hub  *hub.Hub
 	st   *store.Store
 	logf func(string, ...any)
+	// claimed: the workspaces made before their creator was kept have been given one (me).
+	claimed atomic.Bool
 	// ConfigPath is where PUT /api/public saves public.origin; "" saves it nowhere.
 	ConfigPath string
 	// Updater, if set, serves /api/update and carries the state "update".
@@ -347,7 +349,7 @@ func (s *Server) release(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), time.Minute)
 	defer cancel()
-	s.done(w, s.m.Release(ctx, r.PathValue("id"), req.ToolUseID, s.fromOf(c, "")))
+	s.done(w, s.m.Release(ctx, r.PathValue("id"), req.ToolUseID, s.fromOf(c, ""), req.Dismiss))
 }
 
 var stateKey = regexp.MustCompile(`^(list|quota|workspaces|colors|confirms|update|(session|context):[0-9a-zA-Z_-]{1,128})$`)

@@ -165,7 +165,7 @@ export const api = {
   /** An ask's card answered (docs/api.md "卡片"): an option, a choice per question, own words. */
   answer: (a: CardAnswer) => write<CardReply>("POST", "/api/answer", a),
   /** A step Claude's auto mode denied, run again (session/release.go). */
-  release: (id: string, toolUseId: string) => write<{ ok: boolean }>("POST", `/api/sessions/${enc(id)}/release`, { toolUseId } satisfies Release),
+  release: (id: string, toolUseId: string, dismiss?: boolean) => write<{ ok: boolean }>("POST", `/api/sessions/${enc(id)}/release`, { toolUseId, dismiss } satisfies Release),
   health: (init?: RequestInit) => get<{ ok: boolean }>("/api/health", init),
   agents: () => get<AgentInfo[]>("/api/agents"),
 

@@ -6,7 +6,7 @@ import { Plug, type LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ComponentProps, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import type { Agent, Status } from "./api/types.gen";
 import { t } from "./i18n";
-import { CLAUDE, PI, PI_VIEWBOX } from "./logos";
+import { CLAUDE, DSH, DSH_VIEWBOX, OPENAI, OPENAI_VIEWBOX, PI, PI_VIEWBOX } from "./logos";
 
 export const cn = (...xs: (string | false | null | undefined)[]) => xs.filter(Boolean).join(" ");
 
@@ -131,10 +131,27 @@ export function useLongPress(onLong: () => void) {
   };
 }
 
-/** The words behind an icon: on hover or keyboard focus, or on long-press on touch. */
+/** The last pointer pressed was a finger: a phone, or a tablet or an unfolded phone in the
+ *  computer's layout. */
+let touched = false;
+if (typeof window !== "undefined") {
+  addEventListener("pointerdown", (e) => (touched = e.pointerType === "touch"), { capture: true, passive: true });
+  // A long press in the list or a bar is ours (a row's menu) or nothing: never the browser's own
+  // download, print, share (the user's unfolded phone, 2026-11-08). Words being typed keep theirs.
+  addEventListener(
+    "contextmenu",
+    (e) => {
+      const el = e.target instanceof Element ? e.target : null;
+      if (touched && el?.closest("aside, header, [role=treeitem], [role=menu]") && !el.closest("input, textarea, [contenteditable]")) e.preventDefault();
+    },
+    { capture: true },
+  );
+}
+
+/** The words behind an icon: on hover or keyboard focus; never for a finger, whose long press is a
+ *  row's menu: the two came up together (the user, 2026-11-08). */
 export function Tip({ label, children, side = "top", align = "center" }: { label: ReactNode; children: ReactElement; side?: "top" | "bottom" | "left" | "right"; align?: "start" | "center" | "end" }) {
   const [open, setOpen] = useState(false);
-  const lp = useLongPress(() => setOpen(true));
   useEffect(() => {
     if (!open) return;
     const close = () => setOpen(false);
@@ -142,8 +159,8 @@ export function Tip({ label, children, side = "top", align = "center" }: { label
     return () => (window.clearTimeout(id), removeEventListener("pointerdown", close));
   }, [open]);
   return (
-    <Tooltip.Root open={open} onOpenChange={setOpen}>
-      <Tooltip.Trigger render={children} {...lp} />
+    <Tooltip.Root open={open} onOpenChange={(o) => setOpen(o && !touched)}>
+      <Tooltip.Trigger render={children} />
       <Tooltip.Portal>
         <Tooltip.Positioner side={side} align={align} sideOffset={6} collisionPadding={8} className="z-70">
           <Tooltip.Popup className="g-unfold glass thick float w-max max-w-80 rounded-md px-2 py-1 text-xs text-ink">{label}</Tooltip.Popup>
@@ -213,7 +230,11 @@ export const AGENTS: Agent[] = ["claude", "codex", "pi", "dsh"];
 export function Logo({ agent, size = 16, className }: { agent: Agent; size?: number; className?: string }) {
   const style: CSSProperties = { width: size, height: size };
   if (agent === "codex")
-    return <span role="img" aria-label="Codex" className={cn("inline-block shrink-0 bg-ink", className)} style={{ ...style, mask: "url(/logos/openai.svg) center / contain no-repeat", WebkitMask: "url(/logos/openai.svg) center / contain no-repeat" }} />;
+    return (
+      <svg role="img" aria-label="Codex" viewBox={OPENAI_VIEWBOX} className={cn("shrink-0 text-ink", className)} style={style}>
+        <path fill="currentColor" d={OPENAI} />
+      </svg>
+    );
   if (agent === "claude")
     return (
       <svg role="img" aria-label="Claude" viewBox="0 0 24 24" className={cn("shrink-0", className)} style={style}>
@@ -228,9 +249,13 @@ export function Logo({ agent, size = 16, className }: { agent: Agent; size?: num
         ))}
       </svg>
     );
-  // dsh: its own mark, the black whale of its web app's favicon (dsh-web-frontend), as a mask like
-  // Codex's: black on light, white on dark, as dsh draws it.
-  return <span role="img" aria-label="DeepSeek Harness" className={cn("inline-block shrink-0 bg-ink", className)} style={{ ...style, mask: "url(/logos/dsh.svg) center / contain no-repeat", WebkitMask: "url(/logos/dsh.svg) center / contain no-repeat" }} />;
+  // dsh: its own mark, the black whale of its web app's favicon (dsh-web-frontend), in the text colour
+  // like Codex's: black on light, white on dark, as dsh draws it.
+  return (
+    <svg role="img" aria-label="DeepSeek Harness" viewBox={DSH_VIEWBOX} className={cn("shrink-0 text-ink", className)} style={style}>
+      <path fill="currentColor" d={DSH} />
+    </svg>
+  );
 }
 
 const STATUS_KEY = {

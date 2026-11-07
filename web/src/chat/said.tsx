@@ -5,16 +5,16 @@
 // peer sent; Iridium's own lines
 // centred and faint; the agent's words as Markdown with the files they name; tool calls and
 // thoughts folded to a line.
-import { Archive, ArchiveRestore, ArrowUpRight, BookOpen, Bot, Check, ChevronRight, Clock, Cpu, FoldVertical, CircleStop, CircleX, CloudDownload, CloudUpload, Earth, FileCode, FileDiff, FilePen, Files as FilesIcon, FileText, FolderGit2, FlaskConical, FolderOpen, GitBranch, GitCommitHorizontal, GitPullRequest, Globe, Hammer, History, Hourglass, KeyRound, Laptop, List, ListChecks, LoaderCircle, MessageCircleQuestionMark, MessageSquarePlus, Monitor, Network, Package, Plug, RotateCcw, RotateCw, Search, Send, ServerCog, ShieldAlert, Smartphone, SquareTerminal, Trash2, UserRound, Workflow as WorkflowIcon, Wrench, X, type LucideIcon } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowUpRight, BookOpen, Bot, ChevronRight, Clock, Cpu, FoldVertical, CircleStop, CircleX, CloudDownload, CloudUpload, Earth, FileCode, FileDiff, FilePen, Files as FilesIcon, FileText, FolderGit2, FlaskConical, FolderOpen, GitBranch, GitCommitHorizontal, GitPullRequest, Globe, Hammer, History, Hourglass, KeyRound, Laptop, List, ListChecks, LoaderCircle, MessageCircleQuestionMark, MessageSquarePlus, Monitor, Network, Package, Plug, RotateCcw, RotateCw, Search, Send, ServerCog, Smartphone, SquareTerminal, Trash2, UserRound, Workflow as WorkflowIcon, Wrench, X, type LucideIcon } from "lucide-react";
 import { Children, forwardRef, memo, useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { api } from "../api/client";
 import type { Block, FileRef, Result } from "../api/types.gen";
-import { landed, type Sent } from "../chats";
+import type { Sent } from "../chats";
 import { t } from "../i18n";
-import { errText, toast } from "../toast";
 import { Avatar, Badge, cn, IconKey, Logo, tilde, Tip } from "../ui";
 import { useHome } from "../data";
 import { LocalMark } from "../me";
+import { go } from "../route";
 import { Files, Picture, previews, size } from "./files";
 import { cmdOfCall, type Cmd } from "./cmd";
 import { argOf, diffSum, foldLine, foldSaid, kindOf, runCmd, type Diff, type Kind, type Shown, type Step, type Tool } from "./fold";
@@ -67,7 +67,8 @@ function Face({ who }: { who: You | From }) {
 }
 
 /** One message of the user's side, QQ-like: the face beside it, the name above, yours on the right.
- *  jump: a key to the sending session, on the face and the name. */
+ *  jump: a key to the sending session, on the face and the name. Your own face opens the settings
+ *  (the user, 2026-11-08). */
 const Sender = forwardRef<HTMLDivElement, { who: You | From; title?: string; jump?: () => void; children: ReactNode }>(function Sender({ who, title, jump, children }, ref) {
   const mine = who.kind === "you";
   const name = mine ? youName(who) : who.name;
@@ -75,13 +76,14 @@ const Sender = forwardRef<HTMLDivElement, { who: You | From; title?: string; jum
   const whole = !mine && who.where ? `${name} · ${tilde(who.where)}` : name;
   const tip = mine ? t("msg.fromPanel", { name: deviceOf(who) ? `${name} · ${t(deviceOf(who)![1])}` : name }) : jump ? t("msg.jump", { name: whole }) : who.channel ? t("msg.viaChannel", { name }) : whole;
   const face = <Face who={who} />;
+  const press = jump ?? (mine ? () => go({ name: "settings" }) : undefined);
   // Every sender on the right, a letter as your words are: on the left it read as the agent's own
   // (the user, 2026-11-06).
   return (
     <div ref={ref} className="flex flex-row-reverse items-start gap-2.5 pl-6 sm:pl-10" title={title}>
       <Tip label={tip}>
-        {jump ? (
-          <button type="button" onClick={jump} aria-label={tip} className="g-press grid shrink-0 rounded-full">
+        {press ? (
+          <button type="button" onClick={press} aria-label={tip} className="g-press grid shrink-0 rounded-full">
             {face}
           </button>
         ) : (
@@ -107,20 +109,18 @@ const Sender = forwardRef<HTMLDivElement, { who: You | From; title?: string; jum
 
 /** Your words: a bubble on the right, under your terminal's name, its face beside. */
 /** Where a message of yours is, as a small mark outside its bubble's lower left corner, no words (the
- *  user, 2026-11-06; its tip says): going, a ring breathing; waiting in the queue, a clock; just
- *  taken, a green check that fades. The bubble itself is drawn as it will stay, not faint. */
-type Going = "sending" | "steering" | "queued" | "landed";
-const GOING: Record<Going, string> = { sending: "msg.sending", steering: "msg.steering", queued: "msg.queued", landed: "msg.landed" };
+ *  user, 2026-11-06; its tip says): going, a ring breathing; waiting in the queue, a clock. Taken,
+ *  nothing: no green check (the user, 2026-11-08). The bubble itself is drawn as it will stay. */
+type Going = "sending" | "steering" | "queued";
+const GOING: Record<Going, string> = { sending: "msg.sending", steering: "msg.steering", queued: "msg.queued" };
 function SendState({ state }: { state: Going }) {
   const label = t(GOING[state] as "msg.sending");
   return (
     <span role="status" aria-label={label} title={label} className="absolute bottom-2 -left-[18px] grid size-3 place-items-center text-ink-3">
-      {state === "queued" ? <Clock size={10} strokeWidth={2.25} className="g-fade" /> : state === "landed" ? <Check size={11} strokeWidth={2.5} className="sent-check text-run" /> : <span className="send-ring" />}
+      {state === "queued" ? <Clock size={10} strokeWidth={2.25} className="g-fade" /> : <span className="send-ring" />}
     </span>
   );
 }
-/** How long after it landed a message still shows its check. */
-const CHECK_FOR = 1600;
 
 export const YouBubble = forwardRef<HTMLDivElement, { text: string; who: You; failed?: boolean; children?: ReactNode; time?: number; going?: Going }>(function YouBubble({ text, who, failed, children, time, going }, ref) {
   return (
@@ -264,7 +264,7 @@ export function Said({ b, session, cwd, source, onJump }: { b: Shown; session: s
       const paths = new Set(b.files?.map((f) => f.path));
       const words = paths.size ? withoutFiles(text, paths) : text;
       return (
-        <YouBubble text={words} who={src} time={b.time} going={Date.now() - (landed.get(b.at) ?? 0) < CHECK_FOR ? "landed" : undefined}>
+        <YouBubble text={words} who={src} time={b.time} >
           {b.files?.map((f) => <Attached key={f.ref} session={session} f={f} />)}
         </YouBubble>
       );
@@ -291,14 +291,8 @@ export function Said({ b, session, cwd, source, onJump }: { b: Shown; session: s
         </Line>
       );
     case "fold":
-      return (
-        <>
-          <Fold steps={b.steps} session={session} cwd={cwd} />
-          {b.steps.filter(denied).map((s) => (
-            <DeniedLine key={s.at} s={s} session={session} cwd={cwd} />
-          ))}
-        </>
-      );
+      // A step auto mode denied waits above the composer, not here (chat/asks.tsx DenialCard).
+      return <Fold steps={b.steps} session={session} cwd={cwd} />;
     case "running":
       return <Running tool={b.tool} cwd={cwd} />;
   }
@@ -384,50 +378,6 @@ const DiffStat = ({ d }: { d: Diff }) => (
   </span>
 );
 const failed = (s: Step) => s.kind === "tool" && !!s.result?.error;
-
-/** Claude's auto mode classifier turned the call down: it never asked (internal/session/release.go). */
-const DENIED = "Permission for this action was denied by the Claude Code auto mode classifier";
-const denied = (s: Step) => failed(s) && !!s.id && !!s.result?.text.includes(DENIED);
-
-/** A step auto mode denied, out of its fold: what it was, why, and 放行 — Claude runs it again in
- *  manual mode, that same call allowed, the rest asked; the mode back at the turn's end. */
-function DeniedLine({ s, session, cwd }: { s: Step; session: string; cwd: string }) {
-  const [state, setState] = useState<"idle" | "busy" | "done">("idle");
-  const why = /Reason: \[([^\]]+)\]/.exec(s.result?.text ?? "")?.[1];
-  const a = argOf(s, cwd);
-  const release = async () => {
-    setState("busy");
-    try {
-      await api.release(session, s.id!);
-      setState("done");
-      toast(t("denied.released"), { description: t("denied.releasedHint") });
-    } catch (e) {
-      setState("idle");
-      toast(t("err.action"), { error: true, description: errText(e) });
-    }
-  };
-  return (
-    <div className="flex min-h-8 w-full min-w-0 items-center gap-2 text-sm text-ink-3 pointer-coarse:min-h-10">
-      <ShieldAlert size={14} className="shrink-0 text-need" />
-      <span className="shrink-0 text-ink-2">{t("denied.title")}</span>
-      <span className={cn("min-w-0 flex-1 truncate", a.code ? "font-mono text-xs" : "text-xs")} title={why}>
-        {a.arg || s.name}
-        {why && <span className="ml-2 font-sans text-ink-4">{why}</span>}
-      </span>
-      {state === "done" ? (
-        <span className="g-fade flex shrink-0 items-center gap-1 text-xs text-ink-3">
-          <Check size={13} />
-          {t("denied.done")}
-        </span>
-      ) : (
-        <button type="button" disabled={state === "busy"} onClick={() => void release()} className="g-press flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-ink px-2.5 text-xs font-medium text-on-ink disabled:opacity-60 pointer-coarse:h-9">
-          {state === "busy" && <LoaderCircle size={12} className="animate-spin" />}
-          {t("denied.release")}
-        </button>
-      )}
-    </div>
-  );
-}
 
 /** A step's line: its icon, its name, what it is about in monospace, an edit's +/−. */
 function StepLine({ s, cwd }: { s: Step; cwd?: string }) {

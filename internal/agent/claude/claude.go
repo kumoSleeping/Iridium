@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -757,8 +758,10 @@ func (d *Driver) user(f *frame) {
 	}
 	var m struct {
 		Content []struct {
-			Type      string `json:"type"`
-			ToolUseID string `json:"tool_use_id"`
+			Type      string          `json:"type"`
+			ToolUseID string          `json:"tool_use_id"`
+			IsError   bool            `json:"is_error"`
+			Content   json.RawMessage `json:"content"`
 		} `json:"content"`
 	}
 	if json.Unmarshal(f.Message, &m) != nil {
@@ -766,7 +769,11 @@ func (d *Driver) user(f *frame) {
 	}
 	for _, b := range m.Content {
 		if b.Type == "tool_result" {
-			d.emitLocked(agent.ToolDone{ID: b.ToolUseID})
+			denied := ""
+			if b.IsError {
+				denied = autoDenied(b.Content)
+			}
+			d.emitLocked(agent.ToolDone{ID: b.ToolUseID, Denied: denied})
 		}
 	}
 }
@@ -1085,4 +1092,34 @@ type imageSource struct {
 	Type      string `json:"type"` // base64
 	MediaType string `json:"media_type"`
 	Data      []byte `json:"data"` // base64 in JSON
+}
+
+// deniedReason is the classifier's reason in its denial: "Reason: [...]".
+var deniedReason = regexp.MustCompile(`Reason: \[([^\]]+)\]`)
+
+// autoDenied: a tool result's content (a string, or text blocks) is the auto mode classifier's
+// denial; its reason, "denied" for none. "" if it is not one.
+func autoDenied(raw json.RawMessage) string {
+	var text string
+	if json.Unmarshal(raw, &text) != nil {
+		var parts []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		}
+		if json.Unmarshal(raw, &parts) != nil {
+			return ""
+		}
+		for _, p := range parts {
+			if p.Type == "text" {
+				text += p.Text
+			}
+		}
+	}
+	if !strings.Contains(text, agent.AutoDenied) {
+		return ""
+	}
+	if r := deniedReason.FindStringSubmatch(text); r != nil {
+		return strings.TrimSpace(r[1])
+	}
+	return "denied"
 }

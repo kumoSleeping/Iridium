@@ -16,10 +16,6 @@ export type Sent = { key: string; text: string; files: { ref: string; name: stri
 /** Where a block's transcript line begins: its at up to the dot. */
 export const lineOf = (b: { at: string }) => parseInt(b.at);
 
-/** The blocks a message sent from this page just landed as, by their at, and when: its bubble
- *  shows a check a moment (chat/said.tsx SendState). */
-export const landed = new Map<string, number>();
-
 /** A /compact you sent: no bubble, the chat's compaction line says it (chat/said.tsx Compaction). */
 export const compactSent = (s: Sent) => /^\/compact(\s|$)/.test(s.text.trim());
 
@@ -35,8 +31,6 @@ export function unsent(sent: Sent[], blocks: Block[]): Sent[] {
     const b = blocks.find((b) => b.kind === "user" && ((s.input && b.id === s.input) || (lineOf(b) >= s.from && b.text !== undefined && s.text && b.text.trim().startsWith(s.text.trim().slice(0, 200)))));
     if (!b) return true;
     past = lineOf(b) + 1;
-    if (landed.size > 50) landed.clear();
-    landed.set(b.at, Date.now());
     return false;
   });
 }

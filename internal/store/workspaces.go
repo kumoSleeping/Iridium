@@ -84,6 +84,21 @@ func (s *Store) CreateWorkspace(name, path string) (int64, error) {
 	return id, err
 }
 
+// SetWorkspaceCreator says which terminal made workspace id.
+func (s *Store) SetWorkspaceCreator(id int64, creator string) error {
+	_, err := s.db.Exec(`UPDATE workspaces SET creator = NULLIF(?, '') WHERE id = ?`, creator, id)
+	return err
+}
+
+// ClaimWorkspaces gives creator every workspace with none; it gives how many.
+func (s *Store) ClaimWorkspaces(creator string) (int64, error) {
+	r, err := s.db.Exec(`UPDATE workspaces SET creator = ? WHERE creator IS NULL`, creator)
+	if err != nil {
+		return 0, err
+	}
+	return r.RowsAffected()
+}
+
 func (s *Store) RenameWorkspace(id int64, name string) error {
 	r, err := s.db.Exec(`UPDATE workspaces SET name = ? WHERE id = ?`, name, id)
 	if err != nil {

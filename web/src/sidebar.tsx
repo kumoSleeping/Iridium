@@ -9,7 +9,7 @@
 // colour tags (colors.ts); a workspace's, rename, its path, 通知, and delete pressed twice. The mouse resting on a row fetches its
 // chat ahead.
 import { Menu } from "@base-ui/react/menu";
-import { Archive, ArchiveRestore, Bot, Check, ChevronRight, Copy, Folder, FolderOpen, FolderPlus, Inbox, Pencil, Pin, PinOff, Plus, Search, Square, Trash2, Workflow as WorkflowIcon } from "lucide-react";
+import { Archive, ArchiveRestore, Bot, Check, ChevronRight, Copy, Folder, FolderOpen, Pencil, Pin, PinOff, Plus, Square, Trash2, Workflow as WorkflowIcon } from "lucide-react";
 import { ConfirmIcon, confirmName, confirmTitle } from "./confirmname";
 import { Fragment, lazy, Suspense, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { api } from "./api/client";
@@ -20,6 +20,7 @@ import { t } from "./i18n";
 import { useFlip } from "./motion";
 import { folderLevels, sessionLevels, usePushMenus, wsLevels, type PushLevel } from "./push";
 import type { Folder as FolderNode, Tree, WsNode } from "./tree";
+import { LinkDot } from "./link";
 import { errText, toast } from "./toast";
 import { useMe, useUpdate } from "./data";
 import { agentName, ago, cn, fine, IconKey, IrMark, keep, kept, Lamp, lampOf, Logo, own, sessionStatusText, statusText, tilde, Tip, titleOf, useLongPress, useMenuAt, useMinute } from "./ui";
@@ -119,15 +120,19 @@ export function Sidebar(p: Props) {
   const [width, setWidth] = useState(() => clampWidth(Number(kept(WIDTH_KEY)) || WIDTH.start));
   useLayoutEffect(() => void document.documentElement.style.setProperty("--sidebar-w", `${p.phone ? 0 : width}px`), [width, p.phone]);
   const [plusOpen, setPlusOpen] = useState<string | null>(null);
-  const needs = p.tree.needs.length + p.confirms.length;
-  const shape = [needs, ...p.tree.workspaces.map((w) => `${w.key}:${p.expanded(w.key)}:${w.rows.map((r) => (r.kind === "session" ? r.s.id : `${r.f.key}${p.expanded(r.f.key)}${r.f.sessions.length}`)).join(",")}`), p.expanded("archive"), p.tree.archived.length, [...p.tree.kids.values()].flat().map((s) => s.id).join(","), [...p.tree.runs.values()].flat().map((r) => `${r.id}${p.expanded(`run:${r.id}`)}${r.working.map((s) => s.id)}`).join(",")].join("|");
+  // A confirmation an agent's ir asked for lights its session's lamp; one of no session listed here
+  // is a row of its own at the top (no 需要你 group: the user, 2026-11-08).
+  const listed = new Set(p.tree.workspaces.flatMap((w) => w.rows.flatMap((r) => (r.kind === "session" ? [r.s.id] : r.f.sessions.map((s) => s.id)))));
+  const asked = new Set(p.confirms.flatMap((c) => (c.session && listed.has(c.session) ? [c.session] : [])));
+  const loose = p.confirms.filter((c) => !c.session || !listed.has(c.session));
+  const shape = [loose.map((c) => c.id).join(","), ...p.tree.workspaces.map((w) => `${w.key}:${p.expanded(w.key)}:${w.rows.map((r) => (r.kind === "session" ? r.s.id : `${r.f.key}${p.expanded(r.f.key)}${r.f.sessions.length}`)).join(",")}`), p.expanded("archive"), p.tree.archived.length, [...p.tree.kids.values()].flat().map((s) => s.id).join(","), [...p.tree.runs.values()].flat().map((r) => `${r.id}${p.expanded(`run:${r.id}`)}${r.working.map((s) => s.id)}`).join(",")].join("|");
   useFlip(list, shape);
   const scrolled = useRef(0);
   useLayoutEffect(() => void (!p.searching && list.current && (list.current.scrollTop = scrolled.current)), [p.searching]);
   // A session's row, and under it the subagents it has at work.
   const row = (s: Session, depth: number, flip = `s:${s.id}`) => (
     <Fragment key={flip}>
-      <SessionRow s={s} where={p.tree.where.get(s.id)} depth={depth} flip={flip} selected={p.selected === s.id} onSelect={p.onSelect} chatCode={p.chatCode} />
+      <SessionRow s={s} where={p.tree.where.get(s.id)} depth={depth} flip={flip} selected={p.selected === s.id} onSelect={p.onSelect} chatCode={p.chatCode} asked={asked.has(s.id)} />
       {p.tree.kids.get(s.id)?.map((k) => <SessionRow key={k.id} s={k} depth={depth + 1} flip={`${flip}>${k.id}`} selected={p.selected === k.id} onSelect={p.onSelect} chatCode={p.chatCode} working />)}
       {p.tree.runs.get(s.id)?.map((r) => {
         const open = p.expanded(`run:${r.id}`);
@@ -172,43 +177,34 @@ export function Sidebar(p: Props) {
   );
 
   return (
-    <aside className={cn("relative flex h-full flex-col", p.phone ? "w-full" : "shrink-0")} style={p.phone ? undefined : { width }}>
+    <aside className={cn("relative flex h-full flex-col select-none [-webkit-touch-callout:none]", p.phone ? "w-full" : "shrink-0")} style={p.phone ? undefined : { width }}>
       {!p.phone && <Divider width={width} setWidth={setWidth} />}
       {head}
       {/* While searching, the jump box in the tree's place; the tree stays mounted, hidden, and
           comes back scrolled as it was. */}
       {p.searching && <div className="flex min-h-0 flex-1 flex-col">{p.search}</div>}
       <div ref={list} hidden={p.searching} onScroll={(e) => void (scrolled.current = e.currentTarget.scrollTop)} className="relative min-h-0 flex-1 no-bar overflow-y-auto px-2 pb-3" role="tree" aria-label={t("nav.sessions")}>
-        {needs > 0 && (
-          <div role="group">
-            <Row depth={0} flip="needs" chevron={p.expanded("needs") ? "open" : "closed"} onClick={() => p.toggle("needs")} icon={<Inbox size={16} className="text-ink-2" />} label={t("nav.needsYou")} end={<Count n={needs} />} />
-            {p.expanded("needs") && (
+        {loose.map((c) => (
+          <Row
+            key={`c:${c.id}`}
+            depth={0}
+            flip={`c:${c.id}`}
+            onClick={() => p.onConfirm(c)}
+            icon={<ConfirmIcon c={c} size={15} className="text-need" />}
+            label={
               <>
-                {p.confirms.map((c) => (
-                  <Row
-                    key={`c:${c.id}`}
-                    depth={0}
-                    flip={`c:${c.id}`}
-                    onClick={() => p.onConfirm(c)}
-                    icon={<ConfirmIcon c={c} size={15} className="text-need" />}
-                    label={
-                      <>
-                        {confirmTitle(c)}
-                        {confirmName(c) && <span className="ml-1.5 text-ink-3">{confirmName(c)}</span>}
-                      </>
-                    }
-                    aria={`${confirmTitle(c)} ${confirmName(c) ?? ""}, ${t("status.needs")}`}
-                  />
-                ))}
-                {p.tree.needs.map((s) => row(s, 0, `n:${s.id}`))}
+                {confirmTitle(c)}
+                {confirmName(c) && <span className="ml-1.5 text-ink-3">{confirmName(c)}</span>}
               </>
-            )}
-          </div>
-        )}
+            }
+            end={<Lamp status="waiting" />}
+            aria={`${confirmTitle(c)} ${confirmName(c) ?? ""}, ${t("status.needs")}`}
+          />
+        ))}
         {p.tree.workspaces.map((w, i) => {
           const open = p.expanded(w.key);
           return (
-            <div key={w.key} className={i > 0 || needs ? "mt-4" : "mt-1"} role="group">
+            <div key={w.key} className={i > 0 || loose.length ? "mt-4" : "mt-1"} role="group">
               <WsRow
                 flip={`w:${w.key}`}
                 id={w.id}
@@ -267,26 +263,24 @@ export function Sidebar(p: Props) {
             {p.expanded("archive") && p.tree.archived.map((s) => row(s, 0))}
           </div>
         )}
-        {!p.tree.workspaces.length && !needs && <div className="g-fade px-2 pt-10 text-center text-sm text-ink-3">{t("nav.empty")}</div>}
+        {!p.tree.workspaces.length && !loose.length && <div className="g-fade px-2 pt-10 text-center text-sm text-ink-3">{t("nav.empty")}</div>}
       </div>
       {!p.noFoot && <Foot me={p.me} />}
     </aside>
   );
 }
 
-/** The head's keys: a new workspace, the jump box. On a phone they stand right of the sheet's tabs. */
-export function HeadKeys(p: Pick<Props, "createKey" | "onSearch" | "searching" | "panelsCode">) {
+/** The head's key: a new workspace, a "+" (the user, 2026-11-08: back from a folder). No search key
+ *  (the user, 2026-11-08): the jump box is a keyboard's (nav.searchKey). On a phone it stands right
+ *  of the sheet's tabs. */
+export function HeadKeys(p: Pick<Props, "createKey">) {
   return (
     <span className="flex shrink-0 items-center gap-0.5">
       {p.createKey(
         <button type="button" aria-label={t("nav.newWorkspace")} className="g-press grid size-8 place-items-center rounded-md text-ink-2 hover:bg-fill hover:text-ink data-popup-open:bg-fill pointer-coarse:size-10">
-          {/* A folder, not a "+": a "+" here was taken for a new session (the user, 2026-11-06). */}
-          <FolderPlus size={18} />
+          <Plus size={18} />
         </button>,
       )}
-      <IconKey label={`${t("nav.search")} · ${t("nav.searchKey")}`} tipSide="bottom" onClick={p.onSearch} onPointerEnter={p.panelsCode} onFocus={p.panelsCode} aria-pressed={p.searching} className={p.searching ? "bg-fill text-ink" : undefined}>
-        <Search size={16} />
-      </IconKey>
     </span>
   );
 }
@@ -299,6 +293,7 @@ function Foot(p: Pick<Props, "me">) {
     <div className="flex h-14 shrink-0 items-center justify-between gap-2 px-2 pointer-coarse:h-16">
       <div className="flex min-w-0 flex-1">{p.me}</div>
       <UpdateKey />
+      <LinkDot side="top" className="shrink-0" />
     </div>
   );
 }
@@ -338,25 +333,24 @@ function TrashLid({ open }: { open: boolean }) {
 
 /** A folder shut or open: both drawn, cross-faded (motion.css "swap"); tagged, in its colour and
  *  faintly filled with it. */
-function FolderMark({ open, color }: { open: boolean; color?: Color }) {
+function FolderMark({ open, color, size = 15, className }: { open: boolean; color?: Color; size?: number; className?: string }) {
   return (
     <span
       data-on={open || undefined}
-      className={cn("g-swap transition-colors duration-(--dur-2)", color ? "[&_svg]:[fill:color-mix(in_oklch,currentColor_24%,transparent)]" : "text-ink-3")}
+      className={cn("g-swap transition-colors duration-(--dur-2)", color ? "[&_svg]:[fill:color-mix(in_oklch,currentColor_24%,transparent)]" : (className ?? "text-ink-3"))}
       style={color ? { color: colorVar(color) } : undefined}
       aria-hidden
     >
-      <Folder size={15} />
-      <FolderOpen size={15} />
+      <Folder size={size} />
+      <FolderOpen size={size} />
     </span>
   );
 }
 
-/** reveal: hidden till the row is hovered or focused, its column kept so nothing moves; always
- *  there for a finger, which has no hover. */
-function Chevron({ state, reveal }: { state?: "open" | "closed"; reveal?: boolean }) {
+/** Its column is every row's, a chevron in it or not, so the names line up. */
+function Chevron({ state }: { state?: "open" | "closed" }) {
   return (
-    <span className={cn("grid w-[18px] shrink-0 place-items-center text-ink-4", reveal && "opacity-0 transition-opacity duration-(--dur-2) ease-(--ease-out) group-hover:opacity-100 group-focus-visible:opacity-100 pointer-coarse:opacity-100")} aria-hidden>
+    <span className="grid w-[18px] shrink-0 place-items-center text-ink-4" aria-hidden>
       {state && <ChevronRight size={13} strokeWidth={2.25} className="transition-transform duration-(--dur-2) ease-(--ease-out)" style={{ transform: state === "open" ? "rotate(90deg)" : undefined }} />}
     </span>
   );
@@ -378,8 +372,9 @@ type RowProps = {
   faded?: boolean;
   /** A second line, under the label: the row is two lines high, its icon by the first. */
   sub?: ReactNode;
-  /** A workspace's own row (the user, 2026-11-06): a larger name and no chevron till the mouse is on
-   *  it; then the chevron fades in and the name springs a little to the right. */
+  /** A workspace's own row (the user, 2026-11-06): a larger name that springs a little to the right
+   *  as the mouse comes on it; no chevron nor its column (the user, 2026-11-08): its folder
+   *  at the far left, the rows in it one step in under it, as a tree. */
   reveal?: boolean;
 };
 
@@ -400,11 +395,11 @@ function Row({ depth, flip, chevron, expanded, icon, label, end, selected, onCli
         two ? "items-start py-[5px] pointer-coarse:py-2" : "h-[30px] items-center pointer-coarse:h-10",
         faded && "opacity-60",
       )}
-      style={{ paddingLeft: depth * STEP } as CSSProperties}
+      style={{ paddingLeft: reveal ? 2 : depth * STEP } as CSSProperties}
       {...extra}
     >
-      <Chevron state={chevron} reveal={reveal} />
-      {icon && <span className={cn("mr-2 grid w-4 shrink-0 place-items-center", two && "h-5 pointer-coarse:h-[23px]")}>{icon}</span>}
+      {!reveal && <Chevron state={chevron} />}
+      {icon && <span className={cn("grid shrink-0 place-items-center", reveal ? "mr-2.5" : "mr-2 w-4", two && "h-5 pointer-coarse:h-[23px]")}>{icon}</span>}
       <span className="min-w-0 flex-1">
         <span className="flex min-w-0 items-center">
           <span
@@ -456,10 +451,18 @@ function WsRow({ flip, id, name, root, open, onToggle, end }: { flip: string; id
       <Row
         depth={0}
         flip={flip}
-        chevron={open ? "open" : "closed"}
+        // No chevron, on a phone either (the user, 2026-11-08): its sessions shown under it, or not.
+        expanded={open}
         reveal
+        icon={<WsMark open={open} />}
         onClick={() => !renaming && onToggle()}
-        label={renaming ? <WsRename id={id} name={name} done={() => setRenaming(false)} /> : <span className="font-medium">{name}</span>}
+        label={
+          renaming ? (
+            <WsRename id={id} name={name} done={() => setRenaming(false)} />
+          ) : (
+            <span className="font-medium">{name}</span>
+          )
+        }
         end={end && !renaming && <span className="flex items-center" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>{end}</span>}
         extra={menu ? { ...lp, onContextMenu: (e: React.MouseEvent) => own(e) && (e.preventDefault(), setAt({ x: e.clientX, y: e.clientY })), onClickCapture: lp.onClickCapture } : undefined}
       />
@@ -505,6 +508,16 @@ function WsRow({ flip, id, name, root, open, onToggle, end }: { flip: string; id
   );
 }
 
+/** A workspace's mark (the user, 2026-11-08): a folder larger than a folder's in it, shut or open
+ *  as the workspace is. No avatar on its corner (the user, 2026-11-08). */
+function WsMark({ open }: { open: boolean }) {
+  return (
+    <span className="grid size-[22px] shrink-0 place-items-center">
+      <FolderMark open={open} size={21} className="text-ink-2" />
+    </span>
+  );
+}
+
 /** A workspace's new name, in place of its row's: Enter or leaving it renames, Esc leaves it. */
 function WsRename({ id, name, done }: { id: number; name: string; done: () => void }) {
   const over = useRef(false);
@@ -537,13 +550,15 @@ function WsRename({ id, name, done }: { id: number; name: string; done: () => vo
 
 /** A session's row: its logo and lamp, its name, unread or pinned at the end. The mouse resting on
  *  it 0.1 s, counted from its last move, or a press, fetches its chat ahead. */
-function SessionRow({ s, where, depth, flip, selected, onSelect, chatCode, working }: { s: Session; where?: string; depth: number; flip: string; selected: boolean; onSelect: (id: string) => void; chatCode: () => void; working?: boolean }) {
+function SessionRow({ s, where, depth, flip, selected, onSelect, chatCode, working, asked }: { s: Session; where?: string; depth: number; flip: string; selected: boolean; onSelect: (id: string) => void; chatCode: () => void; working?: boolean; asked?: boolean }) {
   const unread = useUnread(s.id);
   const now = useMinute();
   const title = titleOf(s);
   // A subagent shown is at work, whatever discovery says of its process.
-  const status = working ? "running" : lampOf(s);
-  const told = working ? statusText("running") : sessionStatusText(s);
+  // A confirmation its agent asked for waits on you too, while it is not at work.
+  const base = working ? "running" : lampOf(s);
+  const status = asked && !BUSY.has(base) ? "waiting" : base;
+  const told = working ? statusText("running") : status !== base ? statusText("waiting") : sessionStatusText(s);
   // How long ago it was last active (its turn ended, it was last written to), but in a turn. Unread,
   // it is in ink: no grey dot for it (the user, 2026-11-06).
   const fresh = unread && status === "idle";

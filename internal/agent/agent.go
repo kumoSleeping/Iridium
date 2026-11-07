@@ -96,6 +96,10 @@ type Driver interface {
 // with the driver's lock held, but must not block for long.
 type Event interface{ event() }
 
+// AutoDenied begins the tool result Claude writes for a call its auto mode classifier denied: the
+// CLI answers the model itself, nothing is asked (session/release.go).
+const AutoDenied = "Permission for this action was denied by the Claude Code auto mode classifier"
+
 type (
 	// TurnStart: the agent left idle. Input: the message that began the turn, if the driver can tell.
 	TurnStart struct{ Input string }
@@ -118,7 +122,9 @@ type (
 		ID, Name string
 		Input    any
 	}
-	ToolDone    struct{ ID, Name string }
+	// ToolDone: call ID has its result. Denied: Claude's auto mode classifier turned it down (the
+	// result is AutoDenied's), its reason as the classifier gave it, or "denied" for none.
+	ToolDone    struct{ ID, Name, Denied string }
 	AskOpen     struct{ Ask api.Ask }
 	AskCancel   struct{ RequestID string }
 	PendingAsks struct {

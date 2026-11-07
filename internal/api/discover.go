@@ -6,6 +6,9 @@ type Workspace struct {
 	ID   int64  `json:"id"`
 	Name string `json:"name"`
 	Path string `json:"path"`
+	// Creator: the ID of the terminal that made it (GET /api/terminals has its avatar); "" when not
+	// known (made before Iridium kept it).
+	Creator string `json:"creator,omitempty"`
 }
 
 // NewWorkspace makes a workspace of folder Path; Name "" is the folder's name.

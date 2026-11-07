@@ -147,8 +147,11 @@ type Hosted struct {
 	commands      []agent.Command
 	account, plan string
 	rules         []store.AllowRule
-	rel           *released // a step auto mode denied, allowed from the page (release.go)
-	turnAt        time.Time // when the running or last turn began
+	rel           *released                  // a step auto mode denied, allowed from the page (release.go)
+	turnAt        time.Time                  // when the running or last turn began
+	denials       []api.Denial               // steps auto mode denied, waiting for you (release.go)
+	calls         map[string]agent.ToolStart // this turn's calls by id: what a denial was
+	lastTaken     string                     // the input the agent took last
 
 	hadTurn     bool        // the agent has the running turn: a crash now is continued
 	crashes     []time.Time // within the breaker's window
@@ -583,6 +586,9 @@ func (h *Hosted) onEvent(e agent.Event) {
 		return
 	case agent.ToolStart:
 		// The call whole: its draft is sealed, the transcript has it now.
+		if !replay {
+			h.callLocked(e)
+		}
 		sealed := -1
 		if h.toolDraft != "" {
 			sealed = h.draftN
@@ -620,6 +626,7 @@ func (h *Hosted) onEvent(e agent.Event) {
 		h.hadTurn, h.turnSeen = true, true
 		if !replay {
 			h.turnAt = time.Now()
+			h.calls = nil
 		}
 		if !replay && h.quotaUntil != 0 {
 			h.quotaEndLocked() // it went on by itself, or the queue did
@@ -630,6 +637,23 @@ func (h *Hosted) onEvent(e agent.Event) {
 		note(Notice{Kind: NoticeTurnStart})
 	case agent.Taken:
 		h.hadTurn = true
+		h.lastTaken = e.InputID
+		if r := h.rel; r != nil && r.msg != "" && r.msg == e.InputID {
+			r.taken = true
+		}
+	case agent.ToolDone:
+		if replay {
+			break
+		}
+		if e.Denied != "" && h.deniedLocked(e) {
+			list = true
+		}
+		if mode, over := h.releaseRanLocked(e.ID); over {
+			list = true
+			if mode != "" {
+				later(func() { h.restoreMode(mode) })
+			}
+		}
 	case agent.StateChange:
 		h.turn = e.State
 		h.lastActive = time.Now()
@@ -869,9 +893,14 @@ func (h *Hosted) status() api.Status {
 		return api.StatusStarting
 	case !h.live && h.errText != "":
 		return api.StatusError
+	case !h.live && len(h.denials) > 0:
+		return api.StatusWaiting
 	case !h.live:
 		return api.StatusIdle
 	case len(h.asks) > 0:
+		return api.StatusWaiting
+	case len(h.denials) > 0 && h.turn == agent.Idle:
+		// A step auto mode denied waits for you once the turn is over.
 		return api.StatusWaiting
 	case h.turn == agent.Compacting:
 		return api.StatusCompacting
@@ -900,7 +929,7 @@ func (h *Hosted) summaryLocked(o store.Overlay, archived bool) api.Session {
 func (h *Hosted) state(o store.Overlay, archived bool) api.SessionState {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	s := api.SessionState{Session: h.summaryLocked(o, archived), Asks: slices.Clone(h.asks), Tasks: slices.Clone(h.tasks), Model: h.model, Mode: h.mode, End: h.end, Proc: h.proc, Error: h.errText,
+	s := api.SessionState{Session: h.summaryLocked(o, archived), Asks: slices.Clone(h.asks), Tasks: slices.Clone(h.tasks), Denials: slices.Clone(h.denials), Model: h.model, Mode: h.mode, End: h.end, Proc: h.proc, Error: h.errText,
 		Effort: h.effort, Queue: slices.Clone(h.queue), Context: h.ctxSum, QuotaUntil: h.quotaUntil, Tail: h.tail}
 	s.Pick, s.EffortNow, s.Next, s.Preset = h.meta.Model, h.effortNow, h.next, h.preset
 	for _, m := range h.models {
@@ -938,6 +967,9 @@ func (h *Hosted) state(o store.Overlay, archived bool) api.SessionState {
 	}
 	if s.Tasks == nil {
 		s.Tasks = []api.Task{}
+	}
+	if s.Denials == nil {
+		s.Denials = []api.Denial{}
 	}
 	return s
 }

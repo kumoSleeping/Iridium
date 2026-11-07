@@ -24,7 +24,7 @@
 | `POST /api/sessions/{id}/interrupt` | → `{ok}` | 停掉当前回合（Esc），agent 留着。队列暂停 |
 | `POST /api/sessions/{id}/stop` | → `{ok}` | 停掉 agent 进程（关 stdin，写完记录自己退出）。会话还在，下一条消息再拉起。队列暂停 |
 | `POST /api/sessions/{id}/answer` | `Answer` → `{ok}` | 回答提问：审批 `allow`（不许时可带 `message`；`always` 见“会话设置”）；选择题 `answers`（问题原文 → 选项 `label`）；计划确认 `allow` |
-| `POST /api/sessions/{id}/release` | `Release{toolUseId}` → `{ok}` | 放行 Claude auto 模式拦下的一步（见“放行”）；Claude 会话要有 Claude，agent 调用一律 403 |
+| `POST /api/sessions/{id}/release` | `Release{toolUseId, dismiss?}` → `{ok}` | 放行 Claude auto 模式拦下的一步（见“放行”）；`dismiss` 只拿掉它的卡。Claude 会话要有 Claude，agent 调用一律 403 |
 | `GET /api/events?sub=…` | SSE | 见下。不带 `sub`：插件的事件流，见“插件” |
 | `GET /api/agents` | → `AgentInfo[]` | 能开的 agent：审批模式（`modes`、`defaultMode`、`modeSwitch`：now / next turn / restart）、有没有上下文分项、有没有额度窗口、能不能开 ultracode（`ultracode`） |
 | `GET /api/health` | → `{ok}` | |
@@ -116,7 +116,7 @@
 | 请求 | 正文 → 回答 | 说明 |
 |---|---|---|
 | `GET /api/workspaces` | → `Workspace[]` | 和事件流 `workspaces` 同一份 |
-| `POST /api/workspaces` | `NewWorkspace` → `Workspace` | 用一个文件夹建（要在选择器能去的范围里）；`name` 不给就用文件夹名。同一文件夹已有工作区回 409 |
+| `POST /api/workspaces` | `NewWorkspace` → `Workspace` | 用一个文件夹建（要在选择器能去的范围里）；`name` 不给就用文件夹名。同一文件夹已有工作区回 409。记下调用的终端为 `creator` |
 | `PATCH /api/workspaces/{id}` | `{name}` → `{ok}` | 改名 |
 | `DELETE /api/workspaces/{id}` | → `{ok}` | 删掉；里面的会话变成未归类 |
 | `PUT /api/colors` | `FolderColor` → `{ok}` | 给文件夹打颜色标签（`red`、`orange`、`yellow`、`green`、`blue`、`purple`），`color` 为空就去掉；事件流 `colors`（只给面板）是全部。会话的标签用 `PATCH /api/sessions/{id}` 的 `color` |
@@ -210,7 +210,7 @@
   - `ultracode`：`{on, active, available}`，`on` 是开没开（`ultracodeRequested`），`active` 是开了且生效，`available` 是这个模型能不能开（读到之前、进程没在跑时算能；CLI 不认 `get_settings` 算不能）。进程一结束，读到的就作废，下个进程再问。
   - 面板里选了模型就收起；强度滑条和 UltraCode 开关在面板底下，调了不收。
 - 本会话一直允许：`answer` 带 `always: true`（或卡片选 `always`）。记下工具和 `Ask.pattern`（Claude 自己建议的规则，例如 `ls *`；没有时 shell 命令取第一个词加 ` *`，别的工具不带模式＝这个工具全部）。之后这个会话里匹配的审批自动允许，不通知、不出卡片。
-- 放行：Claude 的 auto 模式分类器拦下的一步不经 Iridium，直接回给模型（结果开头是 `Permission for this action was denied by the Claude Code auto mode classifier`）。`release` 把运行中的进程切到 `manual`（不写进会话设置，进程重启就回到原模式），插一条“请原样再做一次”；重试时同一调用（工具相同，参数除 `description` 外相同）自动允许一次，别的照常问；这一回合结束（调用已允许，或回合在放行之后才开始）切回原模式，期间你自己换了模式就不切回（2026-11-07）。
+- 放行：Claude 的 auto 模式分类器拦下的一步不经 Iridium，直接回给模型（结果开头是 `Permission for this action was denied by the Claude Code auto mode classifier`）。`release` 把运行中的进程切到 `manual`（不写进会话设置，进程重启就回到原模式），插一条“请原样再做一次”；重试时同一调用（工具相同，参数除 `description` 外相同）自动允许一次，别的照常问；这一调用做完就切回原模式（2026-11-08），没再做就在拿到那条消息的回合结束时切回，期间你自己换了模式就不切回（2026-11-07）。拦下的每一步都在会话状态的 `denials`（`Denial{toolUseId, tool, input, reason, at}`，只记在内存里）直到放行或 `dismiss`；回合结束后还有，状态算 `waiting`（`ir wait` 不算需要你）。
 - 匹配：`*` 是任意一段字；`前缀:*` 同 `前缀*`。shell 命令里有 `;`、`&&`、`||`、`|`、`` ` ``、`$(`、换行的，一律不按模式放行。
 
 ## 设置

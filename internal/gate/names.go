@@ -23,9 +23,9 @@ type NameError struct{ Code string }
 
 func (e *NameError) Error() string { return "gate: name " + strings.ReplaceAll(e.Code, "_", " ") }
 
-// reservedNames are taken by built-in endpoints (the local `ir` is 本机; unknown sources
-// show as 未知), in both UI languages.
-var reservedNames = []string{"本机", "未知", "local", "unknown"}
+// reservedNames are taken by built-in endpoints (the local `ir` is 本机, shown as Ir; unknown
+// sources show as 未知), in both UI languages.
+var reservedNames = []string{"本机", "Ir", "未知", "local", "unknown"}
 
 // NormalizeName returns the stored form of a name, or why it cannot be one:
 // full-width ASCII becomes ASCII, spaces are trimmed and collapsed, and what remains must

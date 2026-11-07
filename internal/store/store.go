@@ -155,6 +155,8 @@ var schema = []string{
 	`ALTER TABLE names ADD COLUMN auto INTEGER NOT NULL DEFAULT 0;`,
 	// 12: a session's agent preset (dsh's tools and prompt); NULL: the agent's default.
 	`ALTER TABLE session_settings ADD COLUMN preset TEXT;`,
+	// 13: who made a workspace (a terminal's ID); NULL: not known (made before this).
+	`ALTER TABLE workspaces ADD COLUMN creator TEXT;`,
 }
 
 // steps run in Go after the migration of their version, in the same transaction.
@@ -333,6 +335,8 @@ type Workspace struct {
 	ID   int64  `json:"id"`
 	Name string `json:"name"`
 	Path string `json:"path"`
+	// Creator: the terminal that made it; "" when not known.
+	Creator string `json:"creator,omitempty"`
 }
 
 func (s *Store) AddWorkspace(name, path string) (int64, error) {
@@ -344,7 +348,7 @@ func (s *Store) AddWorkspace(name, path string) (int64, error) {
 }
 
 func (s *Store) Workspaces() ([]Workspace, error) {
-	rows, err := s.db.Query(`SELECT id, name, path FROM workspaces ORDER BY sort, id`)
+	rows, err := s.db.Query(`SELECT id, name, path, IFNULL(creator, '') FROM workspaces ORDER BY sort, id`)
 	if err != nil {
 		return nil, err
 	}
@@ -352,7 +356,7 @@ func (s *Store) Workspaces() ([]Workspace, error) {
 	var out []Workspace
 	for rows.Next() {
 		var w Workspace
-		if err := rows.Scan(&w.ID, &w.Name, &w.Path); err != nil {
+		if err := rows.Scan(&w.ID, &w.Name, &w.Path, &w.Creator); err != nil {
 			return nil, err
 		}
 		out = append(out, w)

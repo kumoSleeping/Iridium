@@ -58,7 +58,11 @@ export function FolderPicker({ initial, onChoose, startNew = false, busy }: { in
   const gone = q.error && missing(q.error); // the route is not served yet: only typing a path works
   const shown = tilde(here, home);
   const segs = shown.split("/").filter((s, i) => s || i === 0);
+  // The folder shown, at once as it is gone to (a press may come before the page draws it again).
+  const target = useRef(here);
+  target.current = here;
   const go = (p: string, d: "fwd" | "back") => {
+    target.current = p;
     setDir(d);
     setPath(p);
     setNewName(null);
@@ -77,19 +81,46 @@ export function FolderPicker({ initial, onChoose, startNew = false, busy }: { in
     // row now shut.
     if (document.activeElement === nameBox.current) root.current?.focus();
   };
-  const commitNew = async () => {
+  // A folder being made: 选择 pressed meanwhile (on a phone, the press is what ends the typing)
+  // waits for it and takes it, not the folder it is made in (the user, 2026-11-08).
+  const making = useRef<Promise<string | null> | null>(null);
+  const commitNew = () => {
     if (live.current === null) return;
     const n = live.current.trim();
     closeNew();
     if (!n || /[/\0]/.test(n)) return;
-    try {
-      await api.mkdir({ path: here, name: n });
-      void qc.invalidateQueries({ queryKey: ["folders", path] });
-      // Into it, made for choosing: 选择 takes it (the user, 2026-11-06).
-      go(join(here, n), "fwd");
-    } catch (e) {
-      toast(t("err.mkdir"), { error: true, description: errText(e) });
-    }
+    const at = here;
+    const made = api.mkdir({ path: at, name: n }).then(
+      () => {
+        void qc.invalidateQueries({ queryKey: ["folders", path] });
+        // Into it, made for choosing: 选择 takes it (the user, 2026-11-06).
+        go(join(at, n), "fwd");
+        return join(at, n);
+      },
+      (e) => (toast(t("err.mkdir"), { error: true, description: errText(e) }), null),
+    );
+    making.current = made;
+    void made.finally(() => making.current === made && (making.current = null));
+  };
+  // A path typed: where it leads, ~ for the home folder.
+  const typedPath = (v: string) => {
+    const p = v.trim().replace(/(.)\/+$/, "$1") || "~";
+    return p.startsWith("~") && home ? home + p.slice(1) : p;
+  };
+  const typed = useRef<string | null>(null);
+  typed.current = typing;
+  const enterTyped = () => {
+    if (typed.current === null) return;
+    const p = typedPath(typed.current);
+    typed.current = null;
+    setTyping(null);
+    if (p !== target.current) go(p, "fwd");
+  };
+  // 选择: a path being typed, else a folder being made, else the folder shown.
+  const choose = async () => {
+    let p = typed.current !== null ? typedPath(typed.current) : target.current;
+    if (typed.current === null && making.current) p = (await making.current) ?? target.current;
+    onChoose(p);
   };
   return (
     <div ref={root} tabIndex={-1} className="flex w-[min(352px,calc(100vw-16px))] flex-col outline-none">
@@ -100,15 +131,13 @@ export function FolderPicker({ initial, onChoose, startNew = false, busy }: { in
             aria-label={t("pick.typePath")}
             value={typing}
             onChange={(e) => setTyping(e.target.value)}
-            onBlur={() => setTyping(null)}
+            // Leaving it goes there, as Enter does: on a phone, 选择 pressed is what ends it.
+            onBlur={enterTyped}
             onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                const v = typing.trim().replace(/(.)\/+$/, "$1") || "~";
-                go(v.startsWith("~") && home ? home + v.slice(1) : v, "fwd");
-                setTyping(null);
-              }
+              if (e.key === "Enter") enterTyped();
               if (e.key === "Escape") {
                 e.stopPropagation();
+                typed.current = null;
                 setTyping(null);
               }
             }}
@@ -153,9 +182,9 @@ export function FolderPicker({ initial, onChoose, startNew = false, busy }: { in
               placeholder={t("pick.folderName")}
               value={newName ?? ""}
               onChange={(e) => setNewName(e.target.value)}
-              onBlur={() => void commitNew()}
+              onBlur={commitNew}
               onKeyDown={(e) => {
-                if (e.key === "Enter") void commitNew();
+                if (e.key === "Enter") commitNew();
                 if (e.key === "Escape") {
                   e.stopPropagation();
                   closeNew();
@@ -179,7 +208,7 @@ export function FolderPicker({ initial, onChoose, startNew = false, busy }: { in
         </div>
       </Tall>
       <div className="flex justify-end px-2.5 pt-1.5 pb-2.5">
-        <button type="button" disabled={busy || !!(q.error && !gone)} onClick={() => onChoose(here)} className="g-press flex h-8 items-center gap-1.5 rounded-md bg-ink px-3.5 text-sm font-medium text-on-ink disabled:opacity-40 pointer-coarse:h-10">
+        <button type="button" disabled={busy || !!(q.error && !gone)} onClick={() => void choose()} className="g-press flex h-8 items-center gap-1.5 rounded-md bg-ink px-3.5 text-sm font-medium text-on-ink disabled:opacity-40 pointer-coarse:h-10">
           {busy && <LoaderCircle size={14} className="animate-spin" />}
           {t("pick.choose")}
         </button>

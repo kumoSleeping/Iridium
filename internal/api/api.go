@@ -112,8 +112,11 @@ type SessionState struct {
 	Session `tstype:",extends"`
 	Asks    []Ask  `json:"asks"`
 	Tasks   []Task `json:"tasks"`
-	Model   string `json:"model,omitempty"`
-	Mode    string `json:"mode,omitempty"` // the approval (permission) mode
+	// Denials: steps Claude's auto mode classifier turned down since the daemon started, waiting
+	// for you to release them or let them be (docs/api.md "放行"); the oldest first.
+	Denials []Denial `json:"denials"`
+	Model   string   `json:"model,omitempty"`
+	Mode    string   `json:"mode,omitempty"` // the approval (permission) mode
 	// End: how far the transcript has been read; GET messages?after=<your end> for new blocks.
 	End int64 `json:"end"`
 	// Proc: the agent process's number, up by one at each start; drafts of another are stale.
@@ -176,6 +179,16 @@ type Ask struct {
 	Pattern string `json:"pattern,omitempty"`
 	// Card: the ask as the confirmation panel and plugins show it.
 	Card *Card `json:"card,omitempty"`
+}
+
+// Denial is a step Claude's auto mode classifier turned down: the call (ToolUseID), its tool and
+// input, the classifier's reason, when (ms).
+type Denial struct {
+	ToolUseID string `json:"toolUseId"`
+	Tool      string `json:"tool"`
+	Input     any    `json:"input" tstype:"unknown"`
+	Reason    string `json:"reason,omitempty"`
+	At        int64  `json:"at"`
 }
 
 // Task is a background task of the agent's. While one runs the session is not reaped.
@@ -367,6 +380,8 @@ type SendReply struct {
 // once, in manual mode for the turn (docs/api.md "放行").
 type Release struct {
 	ToolUseID string `json:"toolUseId"`
+	// Dismiss: let it be, not run: only its card goes.
+	Dismiss bool `json:"dismiss,omitempty"`
 }
 
 // Answer answers an ask. permission: Allow (and Message if not); question: Answers, by question

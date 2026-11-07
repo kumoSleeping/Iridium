@@ -34,6 +34,9 @@ import { Compaction, Pending, Running, Said } from "./said";
 import { Stick, toEnd } from "./stick";
 
 const BUSY = new Set(["running", "compacting", "starting", "waiting"]);
+/** A turn is on: at work, or waiting on an ask. Waiting only on a step auto mode denied, the turn is
+ *  over (session/release.go): no stop key, no activity row. */
+const turning = (s: { status: string; asks: unknown[]; denials?: unknown[] }) => BUSY.has(s.status) && !(s.status === "waiting" && !s.asks.length && !!s.denials?.length);
 
 /** The bottom stack's height as last measured: a chat opens padded by it, not by a guess and then
  *  moved (one frame drawn short or long, the conversation jumping after). */
@@ -41,7 +44,7 @@ let lastStackH = 140;
 
 /** A session's state before the stream (or chats.ts stateAhead) brings it, from its row: the chat is
  *  drawn whole at once, its composer and conversation, its keys after (ghost). */
-const ghostOf = (row: Session): LiveSession => ({ ...row, asks: [], tasks: [], queue: [], end: 0, proc: -1 });
+const ghostOf = (row: Session): LiveSession => ({ ...row, asks: [], tasks: [], denials: [], queue: [], end: 0, proc: -1 });
 
 /** sheet: on a phone, the sidebar's sheet is out this tall (sheet.tsx): the bottom stack sinks out
  *  under it; the conversation stays where it is, not pushed up with it (the user, 2026-11-06). onSheet: on a phone, brings it out,
@@ -99,7 +102,7 @@ export function ChatPage({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?:
   useEffect(() => void (real && log.procIs(real.proc), changed()), [real?.proc]);
   // The turn ended: what was drafted is in the transcript now. Only those drafted by then go: the
   // next turn (queued, sent at once) may begin to write while the page fetches.
-  const busy = !!s && BUSY.has(s.status);
+  const busy = !!s && turning(s);
   const wasBusy = useRef(busy);
   useEffect(() => {
     if (wasBusy.current && !busy) {
@@ -256,7 +259,7 @@ export function ChatPage({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?:
         {!elsewhere && !s.subagent && <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-[calc(44px+max(14px,calc(env(safe-area-inset-bottom)+6px)))] bg-[linear-gradient(to_bottom,transparent,var(--paper)_14px)]" />}
         <div className="relative mx-auto max-w-[760px]">
           <Queue session={id} queue={s.queue ?? []} steered={(q) => onSent({ key: crypto.randomUUID(), text: q.text, files: [], from: 0, input: q.id, steer: true })} />
-          <Asks session={id} asks={s.asks} cwd={cwd} confirms={confirms.filter((c) => c.session === id)} />
+          <Asks session={id} asks={s.asks} denials={s.denials ?? []} cwd={cwd} confirms={confirms.filter((c) => c.session === id)} />
           {s.subagent ? (
             <div className="glass float rest flex h-12 items-center justify-center gap-1 rounded-[20px] text-sm text-ink-3">
               {t("chat.subagent")}
@@ -289,7 +292,7 @@ function Under({ s, ghost, composer, onSent, onSentDone, modelOpen, setModelOpen
       <Composer
         ref={composer}
         s={s}
-        turn={BUSY.has(s.status)}
+        turn={turning(s)}
         onSent={onSent}
         onSentDone={onSentDone}
         cycleMode={mode.cycle}
@@ -350,7 +353,8 @@ function Bar({ s, onSheet, onMe }: { s?: Session; onSheet?: () => void; onMe?: (
           </>
         )}
       </div>
-      <LinkDot />
+      {/* With the sidebar shown, the link's dot is in its foot (sidebar.tsx Foot). */}
+      {onSheet && <LinkDot />}
       {s && (
         <span className="relative grid">
           {/* Anchored on ⋯ itself, under it: clicks go through to ⋯. */}

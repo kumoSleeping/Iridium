@@ -98,7 +98,6 @@ export const zh = {
   "msg.steering": "插入中",
   "msg.sending": "发送中",
   "msg.queued": "排队中，这一回合结束后发",
-  "msg.landed": "已送达",
 
   "sys.compact": "上下文已压缩",
   "sys.compactAuto": "上下文满了，已自动压缩",
@@ -238,9 +237,10 @@ export const zh = {
   "toast.restored": "已恢复",
   "denied.title": "auto 模式拦下了",
   "denied.release": "放行",
-  "denied.done": "已放行",
   "denied.released": "已放行",
-  "denied.releasedHint": "Claude 会再做一次这一步，不再问；这一回合别的操作会先问你，结束后回到原来的模式",
+  "denied.releasedHint": "Claude 会再做一次这一步，不再问；这一步做完就回到原来的模式",
+  "denied.dismiss": "不用了",
+  "denied.reason": "原因",
   "toast.wsDeleted": "删了 {name}，会话在未归类",
 
   "err.unavailable": "服务暂时不可用（可能正在重启），请稍后重试",
@@ -285,9 +285,9 @@ export const zh = {
   "jump.none": "没有对上的会话",
   "jump.you": "你：",
 
-  "me.local": "本机",
+  "me.local": "Ir",
   "me.localHint": "只在本机用，没开 Passkey",
-  "me.localOnly": "本机没有可改的资料",
+  "me.localOnly": "Ir 没有可改的资料",
   "me.avatar": "换头像",
   "me.rename": "改名",
   "me.nameTaken": "这个名字有人用了",
@@ -464,6 +464,13 @@ export const zh = {
   "usage.out": "出 {n}",
   "usage.cacheRead": "缓存读 {n}",
   "usage.cacheWrite": "缓存写 {n}",
+  "usage.only": "仅此",
+  "usage.onlyOf": "只看 {name}",
+  "usage.all": "全部",
+  "usage.allOf": "看全部终端",
+  "usage.selectAll": "全选",
+  "usage.picked": "{n} 个终端",
+  "usage.scale": "刻度 {n}",
 } as const;
 
 export type Key = keyof typeof zh;

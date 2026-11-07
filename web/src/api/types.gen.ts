@@ -135,6 +135,11 @@ export interface LastSaid {
 export interface SessionState extends Session {
   asks: Ask[];
   tasks: Task[];
+  /**
+   * Denials: steps Claude's auto mode classifier turned down since the daemon started, waiting
+   * for you to release them or let them be (docs/api.md "放行"); the oldest first.
+   */
+  denials: Denial[];
   model?: string;
   mode?: string; // the approval (permission) mode
   /**
@@ -230,6 +235,17 @@ export interface Ask {
    * Card: the ask as the confirmation panel and plugins show it.
    */
   card?: Card;
+}
+/**
+ * Denial is a step Claude's auto mode classifier turned down: the call (ToolUseID), its tool and
+ * input, the classifier's reason, when (ms).
+ */
+export interface Denial {
+  toolUseId: string;
+  tool: string;
+  input: unknown;
+  reason?: string;
+  at: number /* int64 */;
 }
 /**
  * Task is a background task of the agent's. While one runs the session is not reaped.
@@ -444,6 +460,10 @@ export interface SendReply {
  */
 export interface Release {
   toolUseId: string;
+  /**
+   * Dismiss: let it be, not run: only its card goes.
+   */
+  dismiss?: boolean;
 }
 /**
  * Answer answers an ask. permission: Allow (and Message if not); question: Answers, by question
@@ -738,6 +758,11 @@ export interface Workspace {
   id: number /* int64 */;
   name: string;
   path: string;
+  /**
+   * Creator: the ID of the terminal that made it (GET /api/terminals has its avatar); "" when not
+   * known (made before Iridium kept it).
+   */
+  creator?: string;
 }
 /**
  * NewWorkspace makes a workspace of folder Path; Name "" is the folder's name.

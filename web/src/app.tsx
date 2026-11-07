@@ -18,7 +18,7 @@ import { t, useLang } from "./i18n";
 import { applyTheme, initialTheme, keepTheme, MeKey, useTellLang, type ThemePref } from "./me";
 import { motion, pageTurn } from "./motion";
 import { prefetch } from "./prefetch";
-import { close, go, onTurn, openChat, over, route, useRoute, type Route } from "./route";
+import { close, go, onTurn, openChat, over, quietDialog, route, useRoute, type Route } from "./route";
 import { Pager, TABS_H } from "./pager";
 import { atLeft, GRIP, Sheet } from "./sheet";
 import { HeadKeys, Sidebar } from "./sidebar";
@@ -94,6 +94,8 @@ function useExpanded() {
 export function App() {
   useLang();
   const phone = useMedia(PHONE);
+  // The settings' steps out of the address with the sidebar shown (route.ts quietDialog).
+  quietDialog(!phone);
   // On a phone, whether the sidebar's sheet is out, and how tall it is: the chat keeps its newest
   // above it while it is out.
   const [sheetOut, setSheetOut] = useState(() => phone && route().name !== "chat");
@@ -319,7 +321,7 @@ export function App() {
           {phone && (
             <Sheet open={sheetIsOut} setOpen={setSheet} size={!open ? "full" : "half"} raised={jumping && !setsOut} name="phone" head={GRIP + TABS_H} from={() => true} onPull={(x) => setPulled(atLeft(x) ? "me" : "sessions")} label={setsOut ? t("nav.me") : t("nav.sessions")} onHeight={setSheetH}>
               <Pager
-                ends={[null, <HeadKeys key="s" createKey={(trigger) => <CreatePopover trigger={trigger} />} onSearch={() => setJumping((j) => !j)} searching={jumping} panelsCode={loadPanels} />]}
+                ends={[null, <HeadKeys key="s" createKey={(trigger) => <CreatePopover trigger={trigger} />} />]}
                 page={sheetPage}
                 still={turnStill}
                 onPage={toPage}

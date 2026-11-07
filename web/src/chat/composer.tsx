@@ -295,10 +295,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
   };
 
   const KEYS: Record<KeyMode, [string, React.ReactNode]> = {
-    send: [t("composer.send"), <ArrowUp size={17} strokeWidth={2.25} />],
+    send: [t("composer.send"), <ArrowUp size={16} strokeWidth={2.25} />],
     stop: [t("composer.stop"), <Square size={12} fill="currentColor" />],
-    queue: [t("composer.queue", { key: steerKey() }), <ArrowUp size={17} strokeWidth={2.25} />], // one send key for all: what it does in its tip (the user, 2026-11-06)
-    steer: [steers && queues && !/^[!！]/.test(text.trim()) ? t("composer.steerOr", { key: steerKey() }) : t("composer.steer"), <ArrowUp size={17} strokeWidth={2.25} />],
+    queue: [t("composer.queue", { key: steerKey() }), <ArrowUp size={16} strokeWidth={2.25} />], // one send key for all: what it does in its tip (the user, 2026-11-06)
+    steer: [steers && queues && !/^[!！]/.test(text.trim()) ? t("composer.steerOr", { key: steerKey() }) : t("composer.steer"), <ArrowUp size={16} strokeWidth={2.25} />],
   };
   const [label, icon] = KEYS[mode];
 
@@ -438,9 +438,13 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
             aria-label={label}
             disabled={(empty && mode !== "stop") || busy || uploading}
             onClick={() => void go()}
-            className="g-press grid size-8 shrink-0 place-items-center rounded-full bg-ink text-on-ink transition-opacity duration-(--dur-1) disabled:opacity-25 pointer-coarse:size-10"
+            className="group/send g-press grid size-8 shrink-0 place-items-center pointer-coarse:size-10"
           >
-            {busy || uploading ? <LoaderCircle size={15} className="animate-spin" /> : <span key={mode} className="g-fade grid">{icon}</span>}
+            {/* A rounded square the size of the attach key's glyph area, not a large disc; the
+                whole key still takes the press (the user, 2026-11-08). */}
+            <span className="grid size-7 place-items-center rounded-[9px] bg-ink text-on-ink transition-opacity duration-(--dur-1) group-disabled/send:opacity-25 pointer-coarse:size-8 pointer-coarse:rounded-[10px]">
+              {busy || uploading ? <LoaderCircle size={14} className="animate-spin" /> : <span key={mode} className="g-fade grid">{icon}</span>}
+            </span>
           </button>
         </Tip>
       </div>

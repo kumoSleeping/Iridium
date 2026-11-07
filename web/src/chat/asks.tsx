@@ -5,11 +5,11 @@
 // Markdown, approve or keep planning. A question: its options as keys, or your own words. Every
 // answer goes to the ask's card (POST /api/answer), as a plugin's does.
 import { Menu } from "@base-ui/react/menu";
-import { Check, ChevronDown, ChevronRight, ClipboardList, FilePen, Globe, LoaderCircle, MessageCircleQuestionMark, PenLine, ShieldQuestion, SquareTerminal } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, ClipboardList, FilePen, Globe, LoaderCircle, MessageCircleQuestionMark, PenLine, ShieldAlert, ShieldQuestion, SquareTerminal } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { api } from "../api/client";
-import type { Ask, CardAnswer, Confirm } from "../api/types.gen";
-import { CardDetails, CardFrame, CardHead, SecondKey } from "../card";
+import type { Ask, CardAnswer, Confirm, Denial } from "../api/types.gen";
+import { CardDetails, CardFrame, CardHead, Facts, MainKey, SecondKey } from "../card";
 import { ConfirmCard } from "../confirms";
 import { SecretHere } from "../secret";
 import { useSecret } from "../secrets";
@@ -24,7 +24,7 @@ type Q = { question: string; header?: string; options: { label: string; descript
 /** What a key press answers: an option of the card's, or a choice per question and own words. */
 type Reply = { option?: string; choices?: string[]; words?: string[]; message?: string };
 
-export function Asks({ session, asks, cwd, confirms = [] }: { session: string; asks: Ask[]; cwd: string; confirms?: Confirm[] }) {
+export function Asks({ session, asks, denials = [], cwd, confirms = [] }: { session: string; asks: Ask[]; denials?: Denial[]; cwd: string; confirms?: Confirm[] }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [leaving, setLeaving] = useState<string | null>(null);
   const answer = async (a: Ask, r: Reply) => {
@@ -41,7 +41,7 @@ export function Asks({ session, asks, cwd, confirms = [] }: { session: string; a
     }
   };
   const secretHere = useSecret()?.at === session;
-  if (!asks.length && !confirms.length && !secretHere) return null;
+  if (!asks.length && !denials.length && !confirms.length && !secretHere) return null;
   return (
     // Padded out under negative margins: the cards' shadows (12px down, 32px blur) are not cut, nor
     // over the meters row under it. Whole, however long (the user, 2026-11-06): it scrolls only
@@ -56,7 +56,66 @@ export function Asks({ session, asks, cwd, confirms = [] }: { session: string; a
           {a.kind === "question" ? <Question a={a} busy={busy === a.requestId} send={(r) => void answer(a, r)} /> : <Decide a={a} cwd={cwd} busy={busy === a.requestId} send={(r) => void answer(a, r)} />}
         </CardFrame>
       ))}
+      {denials.map((d) => (
+        <DenialCard key={d.toolUseId} d={d} session={session} cwd={cwd} />
+      ))}
     </div>
+  );
+}
+
+/** A step Claude's auto mode turned down (session/release.go): it waits here, as an ask does, till
+ *  you release it — Claude runs it again, that call allowed, auto mode back once it is done — or
+ *  let it be (the user, 2026-11-08: not a key in the conversation that stays after). */
+function DenialCard({ d, session, cwd }: { d: Denial; session: string; cwd: string }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState<"release" | "dismiss" | null>(null);
+  const [leaving, setLeaving] = useState(false);
+  const input = JSON.stringify(d.input ?? {});
+  const { arg } = argOf({ name: d.tool, input }, cwd);
+  const run = async (dismiss: boolean) => {
+    setBusy(dismiss ? "dismiss" : "release");
+    try {
+      await api.release(session, d.toolUseId, dismiss);
+      setLeaving(true);
+      if (!dismiss) toast(t("denied.released"), { description: t("denied.releasedHint") });
+    } catch (e) {
+      setBusy(null);
+      toast(t("err.action"), { error: true, description: errText(e) });
+    }
+  };
+  return (
+    <CardFrame leaving={leaving} label={t("denied.title")}>
+      <CardHead
+        icon={<ShieldAlert size={16} className="text-need" />}
+        title={t("denied.title")}
+        tag={d.reason}
+        summary={arg || d.tool}
+        mono
+        open={open}
+        setOpen={setOpen}
+        keys={
+          <>
+            <SecondKey disabled={!!busy} onClick={() => void run(true)}>
+              {t("denied.dismiss")}
+            </SecondKey>
+            <MainKey busy={busy === "release"} disabled={!!busy} onClick={() => void run(false)}>
+              {t("denied.release")}
+            </MainKey>
+          </>
+        }
+      />
+      {open && (
+        <CardDetails>
+          <Facts
+            rows={[
+              [t("ask.cwd"), <span className="font-mono text-xs">{tilde(cwd)}</span>],
+              ...(d.reason ? [[t("denied.reason"), d.reason] as [string, ReactNode]] : []),
+              [t("ask.input"), <span className="font-mono text-xs whitespace-pre-wrap">{JSON.stringify(d.input ?? {}, null, 2)}</span>],
+            ]}
+          />
+        </CardDetails>
+      )}
+    </CardFrame>
   );
 }
 
