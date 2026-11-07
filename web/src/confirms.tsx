@@ -21,9 +21,9 @@ import { titleOf } from "./ui";
 
 export { confirmTitle, confirmName, ConfirmIcon };
 
-/** This terminal may say another is the owner's own (--owner, Claude on): a passkey panel that
- *  has Claude itself. The server checks the same (ownerSays); 本机's ir may too. */
-export const saysOwner = (me?: Me) => !!me && me.kind === "panel" && !me.local && !!me.rules.claudeOwner && (me.rules.agents ?? []).includes("claude");
+/** This terminal may say a new one is the owner's own (--owner): a passkey panel that has Claude
+ *  itself. The server checks the same (ownerSays); 本机's ir may too. */
+export const saysOwner = (me?: Me) => !!me && me.kind === "panel" && !me.local && !!me.rules.claudeOwner;
 
 /** at: where it is drawn (the asking session's id, or "terminals"): the secret shows there. */
 export function ConfirmCard({ c, at: here }: { c: Confirm; at: string }) {

@@ -8,14 +8,11 @@ import (
 	"github.com/kumoSleeping/iridium/internal/api"
 )
 
-// Claude is given by a person only: ir access <名字> --claude on refuses an agent (and so does the
-// daemon, should an agent's ir skip the check); an agent's ir token --owner and ir invite --owner
-// only ask, for a panel that has Claude (or 本机) to allow; --claude off is anyone's.
+// Claude is given by a person only, as a terminal is made: an agent's ir token --owner and ir
+// invite --owner only ask, for a panel that has Claude (or 本机) to allow. Nothing turns it on or
+// off after: ir access only lists.
 func TestOwnerOnlyFromAPerson(t *testing.T) {
 	person, agent := daemonFor(t)
-	if code, out, errs := runAs(agent, "access", "bot", "--claude", "on"); code != 2 || !strings.Contains(errs, "agent 不能直接给终端 Claude") || out != "" {
-		t.Errorf("an agent's --claude on: %d %q %q", code, out, errs)
-	}
 	var p api.Pending
 	if code, err := agent.call("POST", "/api/terminals/tokens", api.NewInvite{Name: "bot", Owner: true}, &p); code != http.StatusAccepted || !p.Confirm.Owner {
 		t.Errorf("an agent's --owner did not ask: %d %v %+v", code, err, p)
@@ -42,29 +39,16 @@ func TestOwnerOnlyFromAPerson(t *testing.T) {
 	if claudeOf("bot") != "开" || claudeOf("plain") != "—" || claudeOf("本机") != "开" {
 		t.Fatal("the list's Claude column")
 	}
-
-	// Off: an agent may. On again: a person only.
-	if code, out, errs := runAs(agent, "access", "BOT", "--claude", "off"); code != 0 || !strings.Contains(out, "关了 bot") {
-		t.Fatalf("off: %d %q %q", code, out, errs)
+	// Not after: --owner for one there is without Claude is refused, and it stays without.
+	if code, _, errs := runAs(person, "token", "plain", "--owner"); code != 1 || !strings.Contains(errs, "claude is set as a terminal is made") {
+		t.Errorf("--owner after: %d %q", code, errs)
 	}
-	if claudeOf("bot") != "—" {
-		t.Fatal("still on")
+	if claudeOf("plain") != "—" {
+		t.Fatal("claude given after")
 	}
-	if code, out, errs := runAs(person, "access", "bot", "--claude=on"); code != 0 || !strings.Contains(out, "开了 Claude") {
-		t.Fatalf("on: %d %q %q", code, out, errs)
-	}
-	if claudeOf("bot") != "开" {
-		t.Fatal("not on")
-	}
-	if code, out, _ := runAs(person, "access", "bot", "--claude", "on"); code != 0 || !strings.Contains(out, "本来就开着") {
-		t.Fatalf("on twice: %d %q", code, out)
-	}
-	for _, args := range [][]string{{"access", "bot"}, {"access", "bot", "--claude", "yes"}, {"token", "--owner"}, {"invite", "a", "b"}} {
+	for _, args := range [][]string{{"access", "bot"}, {"access", "bot", "--claude", "on"}, {"token", "--owner"}, {"invite", "a", "b"}} {
 		if code, _, _ := runAs(person, args...); code != 2 {
 			t.Errorf("%v: %d, want usage", args, code)
 		}
-	}
-	if code, _, errs := runAs(person, "access", "nobody", "--claude", "on"); code != 1 || !strings.Contains(errs, "nobody") {
-		t.Errorf("nobody: %d %q", code, errs)
 	}
 }

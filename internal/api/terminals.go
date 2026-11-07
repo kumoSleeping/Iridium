@@ -15,39 +15,18 @@ const (
 // origin is set.
 const LocalTerminal = "local"
 
-// Rules is a terminal's permission table. The built-in 本机's is all of it and cannot change.
+// Rules is what a terminal may do: everything, every terminal alike, but Claude (the user,
+// 2026-11-08). Stored as before, the other fields of old tables are no longer read.
 type Rules struct {
-	// Agents it may use (and whose sessions it sees). claude needs ClaudeOwner.
-	Agents []Agent `json:"agents"`
-	// ClaudeOwner: the terminal is the owner's own (Claude's terms), as said on the machine. Only
-	// the server writes it; the web may take Claude away but never give it.
+	// ClaudeOwner: the terminal is the owner's own (Claude's terms), so it may use Claude. Set as
+	// the terminal was made, by the server only, and never changed. Without it a terminal sees
+	// Claude's sessions but may not start, write to or answer one.
 	ClaudeOwner *OwnerConfirm `json:"claudeOwner,omitempty"`
-	// AllDirs: every directory; else only under Dirs or in Workspaces.
-	AllDirs    bool     `json:"allDirs"`
-	Dirs       []string `json:"dirs"`
-	Workspaces []int64  `json:"workspaces"`
-	// SeeOthers: it sees the sessions other terminals opened, not only its own.
-	SeeOthers bool `json:"seeOthers"`
-	FilesIn   bool `json:"filesIn"`  // may copy files in (uploads)
-	FilesOut  bool `json:"filesOut"` // may copy files out (downloads)
-	Answer    bool `json:"answer"`   // may answer questions and approvals
-	// MustApprove: what it starts runs in an approving mode; it cannot send to a session that
-	// skips approvals.
-	MustApprove bool `json:"mustApprove"`
-	// DailyTokens caps the tokens (input, output and cache, all models) of the turns it starts in a
-	// day, local time; 0 is no cap.
-	DailyTokens int64 `json:"dailyTokens"`
-	// AllCommands: every slash command; else only Commands (e.g. "/compact").
-	AllCommands bool     `json:"allCommands"`
-	Commands    []string `json:"commands"`
-	// SecretsSet: it may store and replace credentials (never read them; deleting is a manager's).
-	SecretsSet bool `json:"secretsSet"`
 }
 
 // OwnerConfirm is how, and when (ms), a terminal was found the owner's own.
 type OwnerConfirm struct {
-	// By: "local" (a person's ir on the machine: ir invite --owner, ir token --owner,
-	// ir access --claude on), "panel" (a person on a panel that has Claude, or one that
+	// By: "local" (a person's ir on the machine: ir invite --owner, ir token --owner), "panel" (a person on a panel that has Claude, or one that
 	// confirmed an agent's ask) or "first" (the first panel registered).
 	By string `json:"by"`
 	At int64  `json:"at"`
@@ -142,12 +121,6 @@ type Invite struct {
 type Token struct {
 	Terminal Terminal `json:"terminal"`
 	Token    string   `json:"token"`
-}
-
-// SetRules changes a terminal's permission table. Adding claude is for a person's ir on the
-// machine only (ir access <name> --claude on); anyone that manages may take it away.
-type SetRules struct {
-	Rules Rules `json:"rules"`
 }
 
 // Confirm is what an agent's ir asked for that only a panel may give (an invite link, a token, a

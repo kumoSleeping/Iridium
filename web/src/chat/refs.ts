@@ -115,6 +115,32 @@ export function withoutFiles(text: string, paths: ReadonlySet<string>, home?: st
   return out.join("").replace(/\n{3,}/g, "\n\n").trim();
 }
 
+const NAME_LINE = /^[ \t]*\[标题\].*(?:\n|$)/gm;
+
+/** A reply without its title lines (plan "会话标题"): a line [标题] text the agent ends a reply
+ *  with names the session, it is not said. Fenced code stays as it is. */
+export function withoutNameLines(text: string): string {
+  if (!text.includes("[标题]")) return text;
+  return text
+    .split(/(```[\s\S]*?(?:```|$))/)
+    .map((part) => (part.startsWith("```") ? part : part.replace(NAME_LINE, "")))
+    .join("")
+    .trimEnd();
+}
+
+/** A draft as it is shown (chat/markdown.tsx Draft): without its title lines, as it will be once
+ *  whole, so the chat does not shrink by a line as it lands; while words still come (live), a
+ *  last line that may yet become one ("[", "[标"…) is held back too. */
+export function draftWords(text: string, live: boolean): string {
+  let out = withoutNameLines(text);
+  if (!live) return out;
+  const at = out.lastIndexOf("\n") + 1;
+  const last = out.slice(at).trimStart();
+  const fenced = (out.match(/^ {0,3}```/gm)?.length ?? 0) % 2 === 1;
+  if (last && "[标题]".startsWith(last) && !fenced) out = out.slice(0, at).trimEnd();
+  return out;
+}
+
 /** The @word the caret ends, to name a session by (the composer's @ list): where its @ is and what
  *  follows it; none unless the @ starts the words or follows a space. */
 export function atWord(text: string, caret: number): { from: number; q: string } | null {

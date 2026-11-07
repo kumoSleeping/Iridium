@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/kumoSleeping/iridium/internal/api"
+	"github.com/kumoSleeping/iridium/internal/session"
 	"github.com/kumoSleeping/iridium/internal/store"
 )
 
@@ -112,7 +113,7 @@ func TestSend(t *testing.T) {
 		t.Errorf("the gone subscription stayed: %+v", subs)
 	}
 	ps, _ := s.State()
-	if len(ps.Rules) != 0 || ps.Defaults != (api.PushEvents{NeedsYou: true, Error: true}) {
+	if len(ps.Rules) != 0 || ps.Defaults != (api.PushEvents{NeedsYou: true, Error: true, TurnEnd: true}) {
 		t.Errorf("defaults: %+v", ps)
 	}
 }
@@ -137,7 +138,7 @@ func TestResolve(t *testing.T) {
 		{Scope: api.PushScopeWorkspace, Target: "2", Mode: api.PushModeOn, Events: turn},
 		{Scope: api.PushScopeFolder, Target: "/w2/hush", Mode: api.PushModeOff},
 		{Scope: api.PushScopeSession, Target: "back", Mode: api.PushModeOn},
-		{Scope: api.PushScopeSession, Target: "own", Mode: api.PushModeOn, Events: &api.PushEvents{Compact: true}},
+		{Scope: api.PushScopeSession, Target: "own", Mode: api.PushModeOn, Events: &api.PushEvents{Error: true}},
 	} {
 		if err := s.SetRule(r); err != nil {
 			t.Fatal(err)
@@ -164,7 +165,7 @@ func TestResolve(t *testing.T) {
 		{2, "/w2", "a", true, *turn},                      // the workspace's own events
 		{2, "/w2/hush", "a", false, api.PushEvents{}},
 		{2, "/w2/hush", "back", true, *turn}, // on again: the events from above
-		{2, "/w2/hush", "own", true, api.PushEvents{Compact: true}},
+		{2, "/w2/hush", "own", true, api.PushEvents{Error: true}},
 		{2, "/w2/hush/deeper", "a", true, *turn}, // a folder is its own path only
 	} {
 		got, on := Resolve(ps, c.ws, c.cwd, c.session)
@@ -183,5 +184,29 @@ func TestResolve(t *testing.T) {
 		if r.Target == "2" && (r.Mode != api.PushModeOff || r.Events != nil) {
 			t.Errorf("off: %+v", r)
 		}
+	}
+}
+
+// A compaction is pushed only as asked for (/compact), as a turn's end; its turn's end with nothing
+// said after it is not pushed again. The agent's own is not pushed.
+func TestCompactionKind(t *testing.T) {
+	s := &Service{}
+	if _, _, ok := s.kindOf(session.Notice{Session: "a", Kind: session.NoticeCompacted}); ok {
+		t.Error("the agent's own compaction pushed")
+	}
+	if kind, n, ok := s.kindOf(session.Notice{Session: "a", Kind: session.NoticeTurnEnd, Text: "done"}); !ok || kind != "turn_end" || n.Text != "done" {
+		t.Errorf("turn end: %v %q %+v", ok, kind, n)
+	}
+	if kind, n, ok := s.kindOf(session.Notice{Session: "a", Kind: session.NoticeCompacted, Asked: true}); !ok || kind != "turn_end" || n.Text != "压缩完成" {
+		t.Errorf("asked compaction: %v %q %+v", ok, kind, n)
+	}
+	if _, _, ok := s.kindOf(session.Notice{Session: "a", Kind: session.NoticeTurnEnd}); ok {
+		t.Error("the compaction's empty turn end pushed again")
+	}
+	if _, _, ok := s.kindOf(session.Notice{Session: "a", Kind: session.NoticeTurnEnd, Text: "next"}); !ok {
+		t.Error("a later turn's end not pushed")
+	}
+	if _, _, ok := s.kindOf(session.Notice{Session: "a", Kind: session.NoticeTurnEnd, Background: true}); ok {
+		t.Error("an empty turn end with tasks running pushed")
 	}
 }

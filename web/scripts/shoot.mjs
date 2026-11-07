@@ -105,8 +105,7 @@ shots.push(
   // The terminals, the confirmations agents ask for, a token shown once.
   ["desktop-terminals-light-zh", desk, { theme: "light", lang: "zh" }, "#/settings/terminals"],
   ["desktop-terminals-dark-en", desk, { theme: "dark", lang: "en" }, "#/settings/terminals"],
-  ["desktop-terminal-rules-light-zh", desk, { theme: "light", lang: "zh" }, "#/settings/terminals", clickText("tg-bot")],
-  ["desktop-terminal-owner-light-en", desk, { theme: "light", lang: "en" }, "#/settings/terminals", steps(clickText("tg-bot"), click('button[aria-label="Claude"][aria-pressed="false"]'))],
+  ["desktop-terminal-light-zh", desk, { theme: "light", lang: "zh" }, "#/settings/terminals", clickText("tg-bot")],
   ["phone-terminals-light-zh", phone, { theme: "light", lang: "zh" }, "#/settings/terminals"],
   ["desktop-confirm-light-zh", desk, { theme: "light", lang: "zh" }, chat(STYLE), click('[role="alertdialog"][aria-label="插件 TOKEN"] button[aria-expanded]')],
   ["phone-confirm-dark-en", phone, { theme: "dark", lang: "en" }, chat(STYLE)],
@@ -178,7 +177,8 @@ if (!only || gated.some(([n]) => n.includes(only))) {
     try {
       link = readFileSync(`${dir}/state/setup-token`, "utf8").trim();
     } catch {
-      link = (await sock("POST", "/api/terminals/invites", { name: `mac-${Date.now() % 1000}` })).url;
+      // The owner's panel: Claude, as the invite says (the first panel has it anyway).
+      link = (await sock("POST", "/api/terminals/invites", { name: `mac-${Date.now() % 1000}`, owner: true })).url;
     }
     const cdp = await page.createCDPSession();
     await cdp.send("WebAuthn.enable");
@@ -190,9 +190,6 @@ if (!only || gated.some(([n]) => n.includes(only))) {
     await page.waitForFunction(() => !document.getElementById("join").disabled, { timeout: 5000 });
     await page.click("#join");
     await page.waitForFunction((b) => location.href.startsWith(b) && !location.pathname.startsWith("/_ir/"), { timeout: 10000 }, PUBLIC);
-    // The owner's panel: Claude too, as the owner says on its 终端 page (here 本机 says it).
-    const me = (await sock("GET", "/api/terminals")).terminals.filter((x) => x.kind === "panel").sort((a, b) => b.createdAt - a.createdAt)[0];
-    await sock("PUT", `/api/terminals/${me.id}/rules`, { rules: { ...me.rules, agents: ["claude", ...me.rules.agents.filter((a) => a !== "claude")] } });
     // An agent's ir asks for an invite: a card for the panel.
     if (!(await sock("GET", "/api/confirms")).pending.some((c) => c.kind === "invite")) await sock("POST", "/api/terminals/invites", { name: "ipad" }, STYLE);
     for (const s of gated) await shoot(PUBLIC, s);

@@ -8,7 +8,7 @@ import { Slider } from "@base-ui/react/slider";
 import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { t, useLang } from "../i18n";
 import { zh, type Key } from "../i18n/zh";
-import { cn } from "../ui";
+import { buzz, cn } from "../ui";
 import { pull } from "./goo";
 import { flow } from "./liquid";
 
@@ -121,7 +121,7 @@ export function EffortSlider({ levels, value, set, aside, tag }: { levels: strin
           </span>
         </div>
         {aside && name}
-        <Slider.Root value={i} min={0} max={n - 1} step={1} onValueChange={(v) => setDrag(v as number)} onValueCommitted={(v) => commit(v as number)} aria-label={t("composer.effort")} data-unknown={known ? undefined : ""} className="group/effort min-w-0">
+        <Slider.Root value={i} min={0} max={n - 1} step={1} onValueChange={(v) => (v !== i && buzz(), setDrag(v as number))} onValueCommitted={(v) => commit(v as number)} aria-label={t("composer.effort")} data-unknown={known ? undefined : ""} className="group/effort min-w-0">
           <Slider.Control className="relative flex h-7 cursor-grab touch-none items-center data-dragging:cursor-grabbing pointer-coarse:h-10">
             <Slider.Track className="relative h-6 w-full rounded-full bg-fill-2 shadow-[inset_0_1px_2px_oklch(0_0_0/0.12)]">
               <span aria-hidden className="effort-tone absolute inset-0 overflow-hidden rounded-full">

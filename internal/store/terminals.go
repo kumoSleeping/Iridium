@@ -92,14 +92,14 @@ func claudeForFirstPanel(tx *sql.Tx) error {
 			rows.Close()
 			return err
 		}
-		r := access.Default(api.TerminalPanel)
+		r := access.Default()
 		if raw != "" {
 			if err := json.Unmarshal([]byte(raw), &r); err != nil {
 				rows.Close()
 				return fmt.Errorf("rules of %s: %w", id, err)
 			}
 		}
-		panels = append(panels, panel{id, access.Clean(r)})
+		panels = append(panels, panel{id, r})
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil || len(panels) == 0 {

@@ -1,9 +1,9 @@
 // The layout (plan "网页"): one main pane, the chat, on a computer and on a phone alike (the user,
 // 2026-11-06). On a computer the sidebar always stands beside it, as wide as it is dragged; a window
 // too narrow for both is a phone's, its sidebar a sheet from the foot in the composer's place
-// (sheet.tsx), brought from the chat's ⋯ menu or by a swipe up; its foot, me and the settings key, a
-// small sheet of its own, by a swipe up from the left quarter (the user, 2026-11-06). The settings are a
-// dialog rising from their key, over the sidebar mostly, the chat staying under it. The jump box
+// (sheet.tsx), brought from the chat's ⋯ menu or by a swipe up. The 终端 panel, this terminal and the
+// settings in one (the user, 2026-11-07), is a dialog rising from the me key at the sidebar's foot,
+// the chat staying under it; on a phone a sheet too, by a swipe up from the left quarter or ⋯. The jump box
 // (⌘K) opens in the sidebar, not over the page. The chat, the settings and the jump box come only as
 // they are opened, or the page is idle: the first screen stays light.
 import { Dialog } from "@base-ui/react/dialog";
@@ -15,12 +15,13 @@ import { watchTurns } from "./chats";
 import { CreatePopover, WsPlus } from "./create";
 import { agentsQ, pushQ, useHome, useMe, useSettings, useTerminals, useUpdate, useWorkspaces } from "./data";
 import { t, useLang } from "./i18n";
-import { applyTheme, initialTheme, keepTheme, MeChip, MePanel, type ThemePref } from "./me";
+import { applyTheme, initialTheme, keepTheme, MeKey, useTellLang, type ThemePref } from "./me";
 import { motion, pageTurn } from "./motion";
 import { prefetch } from "./prefetch";
 import { close, go, onTurn, openChat, over, route, useRoute, type Route } from "./route";
-import { atLeft, Sheet } from "./sheet";
-import { Sidebar } from "./sidebar";
+import { Pager, TABS_H } from "./pager";
+import { atLeft, GRIP, Sheet } from "./sheet";
+import { HeadKeys, Sidebar } from "./sidebar";
 import { useConfirms, useList } from "./store";
 import { follow } from "./stream";
 import { ToastList, toasts } from "./toast";
@@ -97,9 +98,6 @@ export function App() {
   // above it while it is out.
   const [sheetOut, setSheetOut] = useState(() => phone && route().name !== "chat");
   const [sheetH, setSheetH] = useState(0);
-  // With a chat open, the sidebar's foot is a sheet of its own, one out at a time.
-  const [footOut, setFootOut] = useState(false);
-  const [footH, setFootH] = useState(0);
   const systemDark = useMedia("(prefers-color-scheme: dark)");
   const [theme, setTheme] = useState<ThemePref>(initialTheme);
   useEffect(() => applyTheme(theme, systemDark), [theme, systemDark]);
@@ -108,17 +106,23 @@ export function App() {
   const [under, setUnder] = useState<Route>(over(r) ? { name: "home" } : r);
   if (!over(r) && r !== under) setUnder(r);
   const open = under.name === "chat" ? under.id : null;
-  // On a phone the settings are a sheet too, as the me sheet is (the user, 2026-11-06): their page
-  // drawn still as it goes down, once they have been open.
+  // On a phone the 终端 panel is a sheet too (the user, 2026-11-06): its page drawn still as it goes
+  // down, once it has been open.
   const setsOut = phone && over(r);
-  const [setsH, setSetsH] = useState(0);
   const [setsPage, setSetsPage] = useState<SetsPage | null>(null);
   if (over(r) && setsPage !== setsPageOf(r)) setSetsPage(setsPageOf(r));
-  const below = !phone ? 0 : setsOut ? setsH : sheetOut ? sheetH : footOut && open ? footH : 0;
+  // One sheet on a phone, two pages in it: the sessions and the 终端 panel (the user, 2026-11-08),
+  // the panel shown while its route is open.
+  const sheetIsOut = sheetOut || setsOut;
+  const below = phone && sheetIsOut ? sheetH : 0;
+  // The panel's page drawn once the sheet has been out: the finger may drag it into sight.
+  const [seen, setSeen] = useState(false);
+  if (phone && sheetIsOut && !seen) setSeen(true);
   const list = useList();
   const ws = useWorkspaces();
   const update = useUpdate();
   useSettings(); // asked early: the chat's quota bars read it
+  useTellLang(); // hosted agents are told the user's language
   useHome(); // paths show ~ for it
   useMe();
   useTerminals(); // a message's source shows its terminal's avatar
@@ -129,7 +133,7 @@ export function App() {
   const tree = useMemo(() => buildTree(list ?? [], ws.data ?? [], t("nav.unsorted"), Math.max(minute, Date.now())), [list, ws.data, t("nav.unsorted"), minute]);
 
   useEffect(() => follow(open), [open]);
-  // Unread, the done reminder, and the chats of turns that end off screen.
+  // Unread, and the chats of turns that end off screen.
   const unread = useRef<ReturnType<typeof watchUnread>>(undefined);
   useEffect(() => {
     unread.current = watchUnread();
@@ -148,17 +152,36 @@ export function App() {
   // there is nothing else to see.
   useEffect(() => {
     if (phone) setSheetOut(!open);
-    setFootOut(false);
   }, [open, phone]);
-  const setSheet = (o: boolean) => (setSheetOut(o || !open), o && setFootOut(false));
-  const setFoot = (o: boolean) => (setFootOut(o), o && setSheetOut(false));
-  // Put away, the me sheet is drawn afresh once it is down: its first page, not renaming.
-  const [footRound, setFootRound] = useState(0);
+  // Out by a swipe up from the left quarter (x), on the 终端 page; else on the sessions' (the user,
+  // 2026-11-06). Put away, or brought to the sessions, the panel's route is left.
+  // A swipe up from the left shows the 终端 page from its first px, not the sessions' turning to it
+  // as it is let go (the user, 2026-11-08).
+  const [pulled, setPulled] = useState<"me" | "sessions" | null>(null);
+  // Out, its page is the route's; going down, it stays as it was; coming up, the swipe's.
+  const lastPage = useRef(1);
+  const sheetPage = sheetIsOut ? (setsOut ? 0 : 1) : pulled ? (pulled === "me" ? 0 : 1) : lastPage.current;
+  lastPage.current = sheetPage;
+  // Just come out too: its page set at once, not slid to as it rises.
+  const wasOut = useRef(sheetIsOut);
+  const turnStill = !sheetIsOut || !wasOut.current;
+  useEffect(() => void (wasOut.current = sheetIsOut));
+  const setSheet = (o: boolean, x?: number) => {
+    setPulled(null);
+    if (o && x !== undefined && atLeft(x)) return go({ name: "settings" });
+    setSheetOut(o || !open);
+    if (over(route())) close(under);
+  };
+  // A tab, or a swipe across: the sheet stays out, the back key going back to the sessions.
+  // 终端 the left page, as a swipe up from the left brings it; the sessions the right (the user, 2026-11-08).
+  const toPage = (i: number) => (setSheetOut(true), i === 0 ? go({ name: "settings" }) : over(route()) && close(under));
+  // Put away, the panel is drawn afresh once it is down: its first page, not renaming.
+  const [setsRound, setSetsRound] = useState(0);
   useEffect(() => {
-    if (footOut) return;
-    const t = setTimeout(() => setFootRound((n) => n + 1), motion.dur(3));
+    if (setsOut) return;
+    const t = setTimeout(() => setSetsRound((n) => n + 1), motion.dur(3));
     return () => clearTimeout(t);
-  }, [footOut]);
+  }, [setsOut]);
 
   // Chat to chat on a computer, the main pane swaps quickly, drifting the way the sidebar lists them.
   const now = useRef({ tree, phone });
@@ -190,12 +213,12 @@ export function App() {
     addEventListener("keydown", key);
     return () => removeEventListener("keydown", key);
   }, [tree, open]);
-  const sheetNow = useRef(sheetOut);
-  sheetNow.current = sheetOut;
+  const sheetNow = useRef(sheetIsOut);
+  sheetNow.current = sheetIsOut;
   const setThemeKept = (v: ThemePref) => (setTheme(v), keepTheme(v));
 
   const onSettings = () => (over(r) ? close(under) : go({ name: "settings" }));
-  const me = <MeChip theme={theme} setTheme={setThemeKept} defaultOpen={params.get("open") === "me"} initialPage={params.get("open") === "perms" ? "perms" : "main"} />;
+  const me = <MeKey open={over(r)} onOpen={onSettings} dot={!!update.data?.available} code={loadPanels} />;
   const sidebar = (
     <Sidebar
       tree={tree}
@@ -203,7 +226,7 @@ export function App() {
       toggle={toggle}
       selected={open ?? ""}
       onSelect={(id) => (openChat(id), phone && setSheetOut(false))}
-      noFoot={phone && !!open}
+      noFoot={phone}
       phone={phone}
       searching={jumping}
       search={
@@ -212,9 +235,6 @@ export function App() {
         </Suspense>
       }
       onSearch={() => setJumping((j) => !j)}
-      settings={over(r)}
-      onSettings={onSettings}
-      updateDot={!!update.data?.available}
       confirms={confirms}
       onConfirm={(c) => (c.session && list?.some((s) => s.id === c.session) ? openChat(c.session) : go({ name: c.kind.startsWith("secret-") ? "secrets" : "terminals" }, over(r)))}
       chatCode={() => void loadChat().catch(() => {})}
@@ -228,10 +248,10 @@ export function App() {
   const main = (
     // On a phone a tap on the chat puts the sheet away, the composer back (the user, 2026-11-06);
     // not one on its top bar: its ⋯ opens over the sheet (the user, 2026-11-06).
-    <main className={cn("relative h-full min-w-0 flex-1 bg-paper", !phone && "g-turn")} onClickCapture={phone && (((sheetOut || footOut) && open) || setsOut) ? (e) => !(e.target as Element).closest?.("header") && (setsOut ? close(under) : (setSheetOut(false), setFootOut(false))) : undefined}>
+    <main className={cn("relative h-full min-w-0 flex-1 bg-paper", !phone && "g-turn")} onClickCapture={phone && ((sheetOut && open) || setsOut) ? (e) => !(e.target as Element).closest?.("header") && setSheet(false) : undefined}>
       <Suspense fallback={<Waiting />}>
         {under.name === "chat" ? (
-          <ChatPage key={under.id} id={under.id} phone={phone} sheet={below} onSheet={phone ? () => setSheet(true) : undefined} onMe={phone ? () => setFoot(true) : undefined} />
+          <ChatPage key={under.id} id={under.id} sheet={below} onSheet={phone ? () => setSheet(true) : undefined} onMe={phone ? () => go({ name: "settings" }) : undefined} />
         ) : (
           <Empty below={below} />
         )}
@@ -261,16 +281,12 @@ export function App() {
         </div>
       ) : (
         <div key="settings" className="g-slide h-full" data-dir="back">
-          <SettingsPage theme={theme} setTheme={setThemeKept} />
+          <SettingsPage key={setsRound} theme={theme} setTheme={setThemeKept} />
         </div>
       )}
     </Suspense>
   );
-  const settings = phone ? (
-    <Sheet open={setsOut} setOpen={(o) => !o && over(route()) && close(under)} size="tall" from={() => false} label={t("nav.settings")} onHeight={setSetsH}>
-      <div className="absolute inset-0">{setsPage && setsBody(setsPage)}</div>
-    </Sheet>
-  ) : (
+  const settings = phone ? null : (
     <Dialog.Root
       open={over(r)}
       modal={false}
@@ -284,7 +300,7 @@ export function App() {
     >
       <Dialog.Portal>
         <Dialog.Popup
-          aria-label={t("nav.settings")}
+          aria-label={t("nav.me")}
           style={settingsAt}
           className="g-dialog glass thick float fixed z-50 w-[min(288px,calc(100vw-16px))] overflow-hidden rounded-lg text-ink outline-none"
         >
@@ -301,16 +317,19 @@ export function App() {
           {!phone && sidebar}
           {main}
           {phone && (
-            <Sheet open={sheetOut} setOpen={setSheet} size={!open ? "full" : jumping ? "tall" : "half"} from={(x) => !atLeft(x)} label={t("nav.sessions")} onHeight={setSheetH}>
-              {sidebar}
-            </Sheet>
-          )}
-          {phone && open && (
-            <Sheet open={footOut} setOpen={setFoot} size="fit" from={atLeft} label={t("me.title")} onHeight={setFootH}>
-              {/* The me popover's body, not the sidebar's foot: the settings a row in it (the user, 2026-11-06). */}
-              <div className="px-2 pb-2" onPointerEnter={loadPanels}>
-                <MePanel key={footRound} wide theme={theme} setTheme={setThemeKept} onSettings={() => (setFootOut(false), onSettings())} onLeave={() => setFootOut(false)} updateDot={!!update.data?.available} />
-              </div>
+            <Sheet open={sheetIsOut} setOpen={setSheet} size={!open ? "full" : "half"} raised={jumping && !setsOut} name="phone" head={GRIP + TABS_H} from={() => true} onPull={(x) => setPulled(atLeft(x) ? "me" : "sessions")} label={setsOut ? t("nav.me") : t("nav.sessions")} onHeight={setSheetH}>
+              <Pager
+                ends={[null, <HeadKeys key="s" createKey={(trigger) => <CreatePopover trigger={trigger} />} onSearch={() => setJumping((j) => !j)} searching={jumping} panelsCode={loadPanels} />]}
+                page={sheetPage}
+                still={turnStill}
+                onPage={toPage}
+                tabs={[
+                  { label: <>{t("nav.me")}{update.data?.available && <span className="size-1.5 rounded-full bg-err" aria-hidden />}</>, aria: update.data?.available ? `${t("nav.me")} · ${t("settings.updateReady")}` : t("nav.me") },
+                  { label: t("nav.sessions"), aria: t("nav.sessions") },
+                ]}
+              >
+                {[<div key="me" className="absolute inset-0">{seen && setsBody(setsPage ?? "settings")}</div>, sidebar]}
+              </Pager>
             </Sheet>
           )}
         </div>
@@ -340,8 +359,8 @@ function Waiting() {
   return <div className="glass absolute inset-x-0 top-0 h-12 shadow-[0_0.5px_0_var(--edge)] pointer-coarse:h-13" />;
 }
 
-/** Where the settings stand, open: above their key (sidebar.tsx data-settings-key), its right edge
- *  on the key's, as tall as fits there up to 600px; with too little room or no key in sight, at the
+/** Where the 终端 panel stands, open: above the me key (me.tsx data-settings-key), its left edge on
+ *  the key's, as tall as fits there up to 600px; with too little room or no key in sight, at the
  *  window's bottom left. */
 function useSettingsAt(open: boolean): CSSProperties | undefined {
   const [at, setAt] = useState<CSSProperties>();
@@ -355,7 +374,7 @@ function useSettingsAt(open: boolean): CSSProperties | undefined {
       setAt({ left: 8, bottom: "max(8px, env(safe-area-inset-bottom))", height: "min(600px, calc(100dvh - 16px))" });
       return;
     }
-    setAt({ left: Math.max(8, Math.min(innerWidth - w - 8, b.right - w)), bottom: innerHeight - b.top + 8, height: Math.min(600, room) });
+    setAt({ left: Math.max(8, Math.min(innerWidth - w - 8, b.left)), bottom: innerHeight - b.top + 8, height: Math.min(600, room) });
   }, [open]);
   return at;
 }

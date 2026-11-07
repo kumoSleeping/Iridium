@@ -103,12 +103,20 @@ func TestRules(t *testing.T) {
 		{"type": "system", "subtype": "api_error", "error": map[string]any{"message": "overloaded"}},
 		{"type": "system", "subtype": "local_command", "content": "<local-command-stdout>hi</local-command-stdout>"},
 		{"type": "file-history-snapshot"},
+		// Two sends queued in a turn, let in at its end as one line: two messages again.
+		func() map[string]any {
+			l := user("m1", []any{text("[网页] build, then ask me\n"), text("[网页] do not restart")})
+			l["mergedSendUuids"] = []any{"m2"}
+			return l
+		}(),
 	}.write(t, path, false)
 	w, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
 	w.WriteString("not json at all\n{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"half")
 	w.Close()
 
-	ours := func(uuid string) (string, string, bool) { return "pppppppppppppppp", "网页", uuid == "u1" }
+	ours := func(uuid string) (string, string, bool) {
+		return "pppppppppppppppp", "网页", uuid == "u1" || uuid == "m1" || uuid == "m2"
+	}
 	page, err := Open(path, ours).Latest()
 	if err != nil {
 		t.Fatal(err)
@@ -153,6 +161,8 @@ func TestRules(t *testing.T) {
 		"system(compact)",
 		"system(api_error)",
 		"system(local_command)",
+		"user(build, then ask me|网页|m1)",
+		"user(do not restart|网页|m2)",
 		"system(unreadable)",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {

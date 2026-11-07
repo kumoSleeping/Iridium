@@ -36,6 +36,9 @@ type Config struct {
 	QuotaHidden []string `json:"quotaHidden,omitempty"`
 	// EnterInTurn is what the page's Enter does while a turn runs: "steer" ("" too) or "queue".
 	EnterInTurn string `json:"enterInTurn,omitempty"`
+	// Lang is the user's language, as the web settings last set it: "zh", "en"; "" not yet known.
+	// Hosted agents are told it (session.SystemPrompt).
+	Lang string `json:"lang,omitempty"`
 	// ChatDir is where a plugin's chat opens a session before it set one with /new; "" is home.
 	ChatDir string `json:"chatDir,omitempty"`
 	// Path is the PATH agents run with; "" is the daemon's own.

@@ -18,15 +18,14 @@ func (s *Server) discoverRoutes(mux *http.ServeMux) {
 		return
 	}
 	mux.HandleFunc("GET /api/workspaces", s.workspaces)
-	// The permission table (access.go): workspaces are the panels' and 本机's to change; a session
-	// the terminal's to use; the folder picker only where its directories are.
+	// Workspaces are the panels' and 本机's to change; a session anyone's to name, colour, archive.
 	mux.HandleFunc("POST /api/workspaces", s.manages(s.createWorkspace))
 	mux.HandleFunc("PATCH /api/workspaces/{id}", s.manages(s.renameWorkspace))
 	mux.HandleFunc("DELETE /api/workspaces/{id}", s.manages(s.deleteWorkspace))
-	mux.HandleFunc("PATCH /api/sessions/{id}", s.use(s.patchSession))
+	mux.HandleFunc("PATCH /api/sessions/{id}", s.patchSession)
 	mux.HandleFunc("PUT /api/colors", s.manages(s.folderColor))
-	mux.HandleFunc("GET /api/folders", s.pathRoute("path", nil, false, false, s.folders))
-	mux.HandleFunc("POST /api/folders", s.pathRoute("", []string{"path"}, false, false, s.makeFolder))
+	mux.HandleFunc("GET /api/folders", s.folders)
+	mux.HandleFunc("POST /api/folders", s.makeFolder)
 }
 
 func (s *Server) workspaces(w http.ResponseWriter, r *http.Request) {

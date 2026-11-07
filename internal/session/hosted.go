@@ -112,6 +112,7 @@ type Hosted struct {
 	// output replayed then (the user, 2026-11-06: every session read "just now" after a deploy).
 	shownAt   time.Time
 	lastFrom  string // who sent the last message: whose turn an agent's own turn is counted to
+	compact   bool   // the last message was /compact: the compaction that follows was asked for
 	turnFrom  string // who began the running turn
 	draftN    int
 	toolDraft string        // the tool call draft draftN is being written as, if one is
@@ -250,7 +251,7 @@ func (h *Hosted) launch(ctx context.Context, proc int) error {
 		return err
 	}
 	prompt := filepath.Join(h.dir, filePrompt)
-	if err := os.WriteFile(prompt, []byte(SystemPrompt), 0o600); err != nil {
+	if err := os.WriteFile(prompt, []byte(SystemPrompt(m.tuned().Lang)), 0o600); err != nil {
 		return err
 	}
 	h.mu.Lock()
@@ -561,7 +562,7 @@ func (h *Hosted) onEvent(e agent.Event) {
 		if !replay {
 			h.m.o.Hub.Seal(h.id, proc, n)
 		}
-		note(Notice{Kind: NoticeMessage, Text: e.Text})
+		note(Notice{Kind: NoticeMessage, Text: transcript.WithoutNameLines(e.Text)})
 		h.m.notify(notes...)
 		return
 	case agent.ToolDraft:
@@ -664,7 +665,7 @@ func (h *Hosted) onEvent(e agent.Event) {
 				later(func() { h.restoreMode(mode) })
 			}
 		}
-		note(Notice{Kind: NoticeTurnEnd, Text: e.Reply, Background: e.Background})
+		note(Notice{Kind: NoticeTurnEnd, Text: transcript.WithoutNameLines(e.Reply), Background: e.Background})
 	case agent.AskOpen:
 		if !replay && h.rel != nil && !h.rel.used && sameCall(h.rel, e.Ask) {
 			// The step you released, run again: allowed once.
@@ -751,7 +752,8 @@ func (h *Hosted) onEvent(e agent.Event) {
 	case agent.Compacted:
 		if !e.Failed {
 			later(h.refreshContext)
-			note(Notice{Kind: NoticeCompacted})
+			note(Notice{Kind: NoticeCompacted, Asked: h.compact})
+			h.compact = false
 		}
 	case agent.QuotaHit:
 		if e.Exhausted && !replay {

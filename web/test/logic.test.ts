@@ -7,7 +7,7 @@ import { argOf, folded, foldLine, inputOf } from "../src/chat/fold";
 import { commandsOf, keyMode, matching } from "../src/chat/composer";
 import { levelName, restAt } from "../src/chat/effort";
 import { ctxParts, modelView } from "../src/chat/meters";
-import { atSessions, atWord, mentions, shortId, sourceOf, withoutFiles } from "../src/chat/refs";
+import { atSessions, atWord, mentions, shortId, sourceOf, withoutFiles, withoutNameLines, draftWords } from "../src/chat/refs";
 import { en } from "../src/i18n/en";
 import { zh } from "../src/i18n/zh";
 import { jumpList } from "../src/jump";
@@ -65,6 +65,24 @@ describe("withoutFiles", () => {
   });
   test("attachment lines in what you sent", () => {
     expect(withoutFiles("look\n\n[附件] `/w/up/a.png`", new Set(["/w/up/a.png"]))).toBe("look");
+  });
+});
+
+describe("withoutNameLines", () => {
+  test("a reply's title lines out; fenced code and inline mentions as they are", () => {
+    expect(withoutNameLines("Done.\n\n[标题] 侧边栏单行标题\n")).toBe("Done.");
+    expect(withoutNameLines("see [标题] here\n```\n[标题] kept\n```\n[标题] x")).toBe("see [标题] here\n```\n[标题] kept\n```");
+  });
+});
+
+describe("draftWords", () => {
+  test("a draft drops its title line, and while live a last line that may become one", () => {
+    expect(draftWords("Done.\n\n[标题] 侧边", true)).toBe("Done.");
+    expect(draftWords("Done.\n\n[标", true)).toBe("Done.");
+    expect(draftWords("Done.\n\n[", true)).toBe("Done.");
+    expect(draftWords("Done.\n\n[link", true)).toBe("Done.\n\n[link");
+    expect(draftWords("Done.\n\n[", false)).toBe("Done.\n\n[");
+    expect(draftWords("```\n[", true)).toBe("```\n[");
   });
 });
 

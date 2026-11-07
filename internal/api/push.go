@@ -9,12 +9,12 @@ type PushState struct {
 	Rules     []PushRule `json:"rules"`
 }
 
-// PushEvents are the events pushed. Default: NeedsYou and Error on, the rest off.
+// PushEvents are the events pushed, all on by default. TurnEnd takes in a compaction you asked for
+// (/compact); the agent's own is not pushed.
 type PushEvents struct {
 	NeedsYou bool `json:"needsYou"`
 	Error    bool `json:"error"`
 	TurnEnd  bool `json:"turnEnd"`
-	Compact  bool `json:"compact"`
 }
 
 // PushScope is what a push rule is on.

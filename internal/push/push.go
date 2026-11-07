@@ -65,6 +65,26 @@ type Service struct {
 	pub     []byte // uncompressed point
 	enabled atomic.Bool
 	mu      sync.Mutex // one SetEnabled at a time
+
+	amu       sync.Mutex
+	compacted map[string]bool // sessions whose running turn compacted as asked, pushed
+}
+
+// asked marks (set) a session's running turn as one whose compaction you asked for was pushed, or
+// takes the mark (not set) as the turn ends, saying if it was there.
+func (s *Service) asked(session string, set bool) bool {
+	s.amu.Lock()
+	defer s.amu.Unlock()
+	if set {
+		if s.compacted == nil {
+			s.compacted = map[string]bool{}
+		}
+		s.compacted[session] = true
+		return true
+	}
+	was := s.compacted[session]
+	delete(s.compacted, session)
+	return was
 }
 
 // Open loads the VAPID keys, or makes them (0600) the first time.
@@ -175,11 +195,11 @@ func (s *Service) State() (api.PushState, error) {
 }
 
 func apiEvents(e store.PushEvents) api.PushEvents {
-	return api.PushEvents{NeedsYou: e.NeedsYou, Error: e.Error, TurnEnd: e.TurnEnd, Compact: e.Compact}
+	return api.PushEvents{NeedsYou: e.NeedsYou, Error: e.Error, TurnEnd: e.TurnEnd}
 }
 
 func storeEvents(e api.PushEvents) store.PushEvents {
-	return store.PushEvents{NeedsYou: e.NeedsYou, Error: e.Error, TurnEnd: e.TurnEnd, Compact: e.Compact}
+	return store.PushEvents{NeedsYou: e.NeedsYou, Error: e.Error, TurnEnd: e.TurnEnd}
 }
 
 // SetDefaults sets the events pushed where no rule says otherwise.
@@ -281,23 +301,35 @@ func (s *Service) onNotice(n session.Notice) {
 	if !s.Enabled() {
 		return
 	}
-	var kind string
+	if kind, n, ok := s.kindOf(n); ok {
+		go s.notice(kind, n)
+	}
+}
+
+// kindOf is the push a notice is, if any, and the notice as pushed.
+func (s *Service) kindOf(n session.Notice) (string, session.Notice, bool) {
 	switch n.Kind {
 	case session.NoticeAsk:
-		kind = "needs_you"
+		return "needs_you", n, true
 	case session.NoticeError:
-		kind = "error"
+		return "error", n, true
 	case session.NoticeTurnEnd:
-		if n.Background && n.Text == "" {
-			return
+		// After a compaction you asked for, its turn's end with nothing said: that was pushed.
+		if s.asked(n.Session, false) && n.Text == "" {
+			return "", n, false
 		}
-		kind = "turn_end"
+		return "turn_end", n, !n.Background || n.Text != ""
 	case session.NoticeCompacted:
-		kind = "compact"
-	default:
-		return
+		// The agent's own, its context full, mid-work: nothing to tell. One you asked for is done
+		// work, a turn's end (the user, 2026-11-08).
+		if !n.Asked {
+			return "", n, false
+		}
+		s.asked(n.Session, true)
+		n.Text = "压缩完成"
+		return "turn_end", n, true
 	}
-	go s.notice(kind, n)
+	return "", n, false
 }
 
 func (s *Service) notice(kind string, n session.Notice) {
@@ -311,7 +343,7 @@ func (s *Service) notice(kind string, n session.Notice) {
 		return
 	}
 	e, on := Resolve(ps, st.Workspace, st.Cwd, n.Session)
-	if !on || !map[string]bool{"needs_you": e.NeedsYou, "error": e.Error, "turn_end": e.TurnEnd, "compact": e.Compact}[kind] {
+	if !on || !map[string]bool{"needs_you": e.NeedsYou, "error": e.Error, "turn_end": e.TurnEnd}[kind] {
 		return
 	}
 	msg := api.PushMessage{Kind: kind, Session: n.Session, Title: titleOf(st), Tag: n.Session}
@@ -329,8 +361,6 @@ func (s *Service) notice(kind string, n session.Notice) {
 		msg.Body = "出错：" + n.Text
 	case "turn_end":
 		msg.Body = n.Text
-	case "compact":
-		msg.Body = "压缩完成"
 	}
 	if s.o.Mask != nil {
 		msg.Title, msg.Body = s.o.Mask(msg.Title), s.o.Mask(msg.Body)

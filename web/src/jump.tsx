@@ -79,7 +79,7 @@ export function Jump({ close, tree, open }: { close: () => void; tree: Tree; ope
           className="no-ring h-full min-w-0 flex-1 bg-transparent text-base placeholder:text-ink-3 pointer-coarse:text-md"
         />
       </label>
-      <div id="jump-list" role="listbox" aria-label={t("nav.sessions")} className="mt-1.5 min-h-0 flex-1 overflow-y-auto px-2 pb-3" style={{ "--i": 1 } as CSSProperties}>
+      <div id="jump-list" role="listbox" aria-label={t("nav.sessions")} className="no-bar mt-1.5 min-h-0 flex-1 overflow-y-auto px-2 pb-3" style={{ "--i": 1 } as CSSProperties}>
         {list.map((s, i) => (
           <button
             key={s.id}

@@ -301,7 +301,7 @@ func TestQueueAndPushRoutes(t *testing.T) {
 	}
 
 	var ps api.PushState
-	if p.do("", "GET", "/api/push", nil, &ps); ps.Enabled || len(ps.PublicKey) < 80 || len(ps.Rules) != 0 || !ps.Defaults.NeedsYou || !ps.Defaults.Error || ps.Defaults.TurnEnd {
+	if p.do("", "GET", "/api/push", nil, &ps); ps.Enabled || len(ps.PublicKey) < 80 || len(ps.Rules) != 0 || !ps.Defaults.NeedsYou || !ps.Defaults.Error || !ps.Defaults.TurnEnd {
 		t.Errorf("push: %+v", ps)
 	}
 	ps = api.PushState{}
@@ -312,11 +312,11 @@ func TestQueueAndPushRoutes(t *testing.T) {
 		t.Errorf("workspace rule: %d", code)
 	}
 	ps = api.PushState{}
-	p.do("", "PUT", "/api/push/rules", api.PushRule{Scope: api.PushScopeSession, Target: id, Mode: api.PushModeOn, Events: &api.PushEvents{Compact: true}}, &ps)
+	p.do("", "PUT", "/api/push/rules", api.PushRule{Scope: api.PushScopeSession, Target: id, Mode: api.PushModeOn, Events: &api.PushEvents{Error: true}}, &ps)
 	if len(ps.Rules) != 2 {
 		t.Fatalf("rules: %+v", ps.Rules)
 	}
-	if e, on := push.Resolve(ps, 0, p.work, id); !on || !e.Compact || e.NeedsYou {
+	if e, on := push.Resolve(ps, 0, p.work, id); !on || !e.Error || e.NeedsYou {
 		t.Errorf("the session over its workspace: %v %+v", on, e)
 	}
 	if _, on := push.Resolve(ps, 0, p.work, "other"); on {

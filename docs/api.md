@@ -3,13 +3,13 @@
 一套接口，两个入口：
 
 - HTTP：`127.0.0.1:7810`（配置 `listen`），给网页，前面是 Passkey 门（`docs/gate.md`）。没配 `public.origin` 时只认本机的主机名（`localhost`、回环地址和配置 `hosts`），非 GET 请求带了别的 `Origin` 就拒绝，请求都算内置终端“本机”（带插件 TOKEN 的算那个插件）。配了以后每个请求都要面板登录或 TOKEN。
-- unix socket：`$XDG_RUNTIME_DIR/iridium/ir.sock`（0600），给本机 `ir`，不经过门，算“本机”。`ir` 认出是 agent 在调（环境里有 `CLAUDECODE`、`CODEX_THREAD_ID`、`IRIDIUM_SESSION`，或者没有终端）时带头 `X-Iridium-Agent: 1`，这时不回任何秘密（见“确认”）。`ir` 还带 `X-Iridium-Session`（它所在的会话：`IRIDIUM_SESSION` 或 agent 自己的会话变量）；那个会话是别的终端经 Iridium 开的，这个请求就算那个终端的：用它的权限表，记它的用量和来源（agent 在插件的会话里调 `ir`，等于插件自己做）。
+- unix socket：`$XDG_RUNTIME_DIR/iridium/ir.sock`（0600），给本机 `ir`，不经过门，算“本机”。`ir` 认出是 agent 在调（环境里有 `CLAUDECODE`、`CODEX_THREAD_ID`、`IRIDIUM_SESSION`，或者没有终端）时带头 `X-Iridium-Agent: 1`，这时不回任何秘密（见“确认”）。`ir` 还带 `X-Iridium-Session`（它所在的会话：`IRIDIUM_SESSION` 或 agent 自己的会话变量）；那个会话是别的终端经 Iridium 开的，这个请求就算那个终端的：有没有 Claude 照它，记它的用量和来源（agent 在插件的会话里调 `ir`，等于插件自己做）。
 
 来源：每条交给 agent 的消息开头是 `[终端名] `（`/` 开头的命令除外），名字取发送时终端的名字。库里记下这条输入是哪个终端（ID）发的、用的什么名字；读记录时服务端按 Iridium 自己写进去的输入认（Claude：发消息时给的 uuid；没有 ID 的 agent：`store.SourceByText` 比对输入记录），去掉前缀，消息块带 `from`（名字）和 `fromTerminal`（终端 ID，取头像用）。用量行按终端 ID 记，改名不丢。经 unix socket 的 `ir send`、`ir new` 只要带着它所在的会话（`X-Iridium-Session` 头，取自 `IRIDIUM_SESSION`、`CLAUDE_CODE_SESSION_ID` 等环境变量，或正文的 `caller`），前缀就是 `[ir:<会话 ID>] `，`from` 也是它，页面画成那个会话的来信（名字：会话改过的名字，否则“Claude · 工作区名或文件夹名”）；有没有 `X-Iridium-Agent` 都一样。终端（`fromTerminal`，记用量的）照旧：开那个会话的终端，否则本机。网页和 TOKEN 来的请求不认 `caller`。
 
 类型都在 `internal/api`。`go generate ./internal/api` 用 tygo 生成 `web/src/api/types.gen.ts`，前端只用它（生成的文件不进库）。
 
-出错时状态码非 2xx，正文 `{"error": "…"}`：400 请求不对，403 权限表不许，404 没有这个会话或位置（看不到的会话也是 404），409 agent 没在运行或状态不对，429 今天的用量到上限了，504 agent 没按时回。名字不行时 409 另带 `nameError`（`empty`、`too_long`、`invalid`、`reserved`、`taken`）。
+出错时状态码非 2xx，正文 `{"error": "…"}`：400 请求不对，403 不许（没有 Claude 的终端用 Claude 会话、没管理权的管理），404 没有这个会话或位置，409 agent 没在运行或状态不对，429 今天的用量到上限了，504 agent 没按时回。名字不行时 409 另带 `nameError`（`empty`、`too_long`、`invalid`、`reserved`、`taken`）。
 
 ## 请求
 
@@ -24,11 +24,11 @@
 | `POST /api/sessions/{id}/interrupt` | → `{ok}` | 停掉当前回合（Esc），agent 留着。队列暂停 |
 | `POST /api/sessions/{id}/stop` | → `{ok}` | 停掉 agent 进程（关 stdin，写完记录自己退出）。会话还在，下一条消息再拉起。队列暂停 |
 | `POST /api/sessions/{id}/answer` | `Answer` → `{ok}` | 回答提问：审批 `allow`（不许时可带 `message`；`always` 见“会话设置”）；选择题 `answers`（问题原文 → 选项 `label`）；计划确认 `allow` |
-| `POST /api/sessions/{id}/release` | `Release{toolUseId}` → `{ok}` | 放行 Claude auto 模式拦下的一步（见“放行”）；要 `answer` 权限，agent 调用一律 403 |
+| `POST /api/sessions/{id}/release` | `Release{toolUseId}` → `{ok}` | 放行 Claude auto 模式拦下的一步（见“放行”）；Claude 会话要有 Claude，agent 调用一律 403 |
 | `GET /api/events?sub=…` | SSE | 见下。不带 `sub`：插件的事件流，见“插件” |
 | `GET /api/agents` | → `AgentInfo[]` | 能开的 agent：审批模式（`modes`、`defaultMode`、`modeSwitch`：now / next turn / restart）、有没有上下文分项、有没有额度窗口、能不能开 ultracode（`ultracode`） |
 | `GET /api/health` | → `{ok}` | |
-| `GET /api/settings` | → `Settings` | 设置页改的配置项：空闲回收、崩溃续跑、额度续跑、隐藏的额度条、各 agent 新会话的审批模式、推送总开关。管理权 |
+| `GET /api/settings` | → `Settings` | 设置的配置项：空闲回收、崩溃续跑、额度续跑（这三项设置页不放，只改配置文件或经接口）、隐藏的额度条、各 agent 新会话的审批模式、推送总开关。管理权 |
 | `PUT /api/settings` | `SettingsPatch` → `Settings` | 只改给了的项，写进配置文件，马上生效。面板权 |
 
 ## 消息页
@@ -57,7 +57,7 @@
 
 不认识的键、不给这个终端的键（`confirms` 只给面板）不让整条流失败：开流时先为每个发一条 `state`，`{key, value: null, ignored: "unknown" | "forbidden"}`，其余照常。
 
-`list` 按订阅者的权限表过滤；看不到的会话订 `session:`、`context:` 回 404。终端被撤销、面板退出、`public.origin` 改了，流就断开。
+所有终端看到同样的 `list` 和会话。终端被撤销、面板退出、`public.origin` 改了，流就断开。
 
 事件：
 
@@ -215,7 +215,7 @@
 
 ## 设置
 
-`GET /api/settings` 给 `Settings`：`idleReap`（`"1h"`、`"15m"`，`"0"` 是不回收）、`crashResume`、`quotaResume`、`quotaHidden`（隐藏的额度条，`<agent>:<账号>:<窗口>:<模型>`）、`modes`（agent → 新会话的审批模式，没列的用 agent 自己的）、`push`（推送总开关，和 `PUT /api/push` 是同一个）、`enterInTurn`（回合在跑时网页回车做什么：`steer` 插话，默认；`queue` 排队）、`updateAuto`（自动下载更新，默认开；存成配置 `update.manual` 的反面）。
+`GET /api/settings` 给 `Settings`：`idleReap`（`"1h"`、`"15m"`，`"0"` 是不回收）、`crashResume`、`quotaResume`、`quotaHidden`（隐藏的额度条，`<agent>:<账号>:<窗口>:<模型>`）、`modes`（agent → 新会话的审批模式，没列的用 agent 自己的）、`push`（推送总开关，和 `PUT /api/push` 是同一个）、`enterInTurn`（回合在跑时网页回车做什么：`steer` 插话，默认；`queue` 排队）、`updateAuto`（自动下载更新，默认开；存成配置 `update.manual` 的反面）、`lang`（用户的语言 `zh`/`en`，网页设置里选的；`""` 是还没告诉过，网页发现是空的就报自己的；托管 agent 下次启动时写进系统提示）。
 
 - `PUT /api/settings` 带 `SettingsPatch`，只改给了的项；`modes` 里给 `""` 是去掉那个 agent 的。时长不对、agent 没有这个模式回 400。
 - 先读配置文件，只改这几项再写回（文件里别的照旧），同时改内存：空闲回收、续跑开关下次判断时就用新的，审批模式从下一次拉起起。
@@ -226,10 +226,10 @@
 配置 `crashResume`、`quotaResume`，默认都开。
 
 - 崩溃续跑（Rhodium §4.8、product §4.5）：Iridium 没要求的退出（非 0、信号、托管进程没了）算崩溃。只有 agent 已经有了这个回合（收下过它的输入，或自己开始的）才续跑，否则等你的下一条消息。
-  - 用 `--resume` 拉起，Claude 另设 `CLAUDE_CODE_RESUME_INTERRUPTED_TURN=1`，它自己重跑被打断的回合。握手应答时还没有回合开始，就发恢复提示（Iridium 行）：`上一回合被打断，先检查现状再继续`。
+  - 用 `--resume` 拉起，Claude 另设 `CLAUDE_CODE_RESUME_INTERRUPTED_TURN=1`，它自己重跑被打断的回合。握手应答时还没有回合开始，就发恢复提示（Iridium 行）：`The last turn was interrupted. Check where things stand, then carry on.`
   - 同一会话 10 分钟内第 3 次崩溃就不再续跑（熔断），状态停在 `error`。
   - 挂着的提问作废；队列暂停。
-- 额度续跑（product §4.6）：agent 报额度用完（Claude `rate_limit_event` rejected），`SessionState.quotaUntil` 记恢复时间（错开 0–60 秒）。期间发的话排队。到点：有排队的就发排队的，没有就发 Iridium 行 `继续`。期间 `interrupt` 或 `stop`：到点不发“继续”。agent 期间自己开了回合，等待结束。等额度只在内存里，重启就没了。
+- 额度续跑（product §4.6）：agent 报额度用完（Claude `rate_limit_event` rejected），`SessionState.quotaUntil` 记恢复时间（错开 0–60 秒）。期间发的话排队。到点：有排队的就发排队的，没有就发 Iridium 行 `Continue.`。期间 `interrupt` 或 `stop`：到点不发“继续”。agent 期间自己开了回合，等待结束。等额度只在内存里，重启就没了。
 
 ## 卡片（`Card`）
 
@@ -250,7 +250,7 @@ Web Push，总开关在配置 `push`，默认关。VAPID 密钥存在状态目�
 |---|---|---|
 | `GET /api/push` | → `PushState` | 总开关、VAPID 公钥（订阅时的 `applicationServerKey`）、默认事件 `defaults`、规则 `rules` |
 | `PUT /api/push` | `{enabled}` | 总开关，写进配置文件 |
-| `PUT /api/push/defaults` | `PushEvents` → `PushState` | 没有规则管的地方推哪些：`needsYou`、`error` 默认开，`turnEnd`、`compact` 默认关 |
+| `PUT /api/push/defaults` | `PushEvents` → `PushState` | 没有规则管的地方推哪些：`needsYou`、`error`、`turnEnd`（任务完成）默认都开。没有单独的压缩事件：你发的 `/compact`（dsh 的 `/压缩`）压缩成功算一次 `turnEnd`，正文“压缩完成”，它那一回合随后的空结束不再推；agent 自己在回合中途的自动压缩不推（2026-11-08） |
 | `PUT /api/push/rules` | `PushRule` → `PushState` | 一个工作区、文件夹或会话的规则；`mode: inherit`（或空）删掉它 |
 | `POST /api/push/subscriptions` | `PushSubscription` | 浏览器 `subscription.toJSON()`，记在这个交互终端名下；只收 https |
 | `DELETE /api/push/subscriptions` | `{endpoint}` | |
@@ -258,7 +258,7 @@ Web Push，总开关在配置 `push`，默认关。VAPID 密钥存在状态目�
 
 `PushRule{scope, target, mode, events?}`：`scope` 是 `workspace`（`target` 是工作区 ID，`"0"` 是没归类的）、`folder`（会话目录的绝对路径，只管这一个目录，不含子目录）、`session`（会话 ID）；`mode` 是 `on` 或 `off`；`events` 只跟 `on`，是这一层自己的事件，不带就用上面的。一个会话的事件：会话、文件夹、工作区里最近的那条规则说开还是关（都没有就开）；开的话，事件取最近一条带 `events` 的 `on` 规则的，没有就用 `defaults`。旧的按工作区设置迁移成工作区规则（全关的是 `off`，和默认一样的不留）。
 
-推送的内容（service worker 收到的 JSON）：`PushMessage{kind, session, title, body, tag}`，`kind` 是 `needs_you`、`error`、`turn_end`、`compact`、`test`；`tag` 是会话 ID。推送服务回 404/410 的订阅删掉。
+推送的内容（service worker 收到的 JSON）：`PushMessage{kind, session, title, body, tag}`，`kind` 是 `needs_you`、`error`、`turn_end`、`test`；`tag` 是会话 ID。推送服务回 404/410 的订阅删掉。
 
 ## 插件
 
@@ -286,7 +286,7 @@ Web Push，总开关在配置 `push`，默认关。VAPID 密钥存在状态目�
 | 类型 | 带什么 |
 |---|---|
 | `progress` | `text`：回合中 agent 说的一段话（最后一段是 `reply`，不在这里） |
-| `reply` | `reply{markdown, text, files[]}`：回合的最终回复；`files` 是回复里 `` [文件] `绝对路径` `` 行给的、存在的文件（名字、大小、类型、`ref`），这些行不在 `markdown`、`text` 里 |
+| `reply` | `reply{markdown, text, files[]}`：回合的最终回复；`files` 是回复里 `` [文件] `绝对路径` `` 行给的、存在的文件（名字、大小、类型、`ref`），这些行和 `[标题] …` 行都不在 `markdown`、`text` 里 |
 | `card`、`card_done` | 提问出现（`card`）；已答或撤回（`cardId`），网页答的也发 |
 | `error` | `text`：agent 进程出错退出 |
 | `status` | `status`：状态灯变了 |
@@ -297,50 +297,36 @@ Web Push，总开关在配置 `push`，默认关。VAPID 密钥存在状态目�
 
 ## 交互终端
 
-“本机”是内置终端（ID `local`），不在库里，权限全开，不能改、不能撤销。其余的是门里登记的面板（`panel`）和通道（`channel`），表在 SQLite（`terminals`、`invites`、`logins`、`permissions`、`devices`）。每个终端有个设备 `device`：`computer`（默认）、`laptop`、`phone` 或 `none`（不展示），消息头像右下角的小标就是它，`none` 不带小标。
+“本机”是内置终端（ID `local`），不在库里，有 Claude，不能撤销。其余的是门里登记的面板（`panel`）和通道（`channel`），表在 SQLite（`terminals`、`invites`、`logins`、`permissions`、`devices`）。每个终端有个设备 `device`：`computer`（默认）、`laptop`、`phone` 或 `none`（不展示），消息头像右下角的小标就是它，`none` 不带小标。
 
 谁能做什么：
 
-- **面板权**（批准新终端、放宽权限、看到 TOKEN 和邀请链接、答确认）：面板；本机 `ir` 由人在终端里跑时；没配 `public.origin` 时的本机网页。
-- **管理**（列出、改名和头像、收窄权限、撤销）：面板和本机，包括 agent 调的 `ir`。
+- **面板权**（批准新终端、看到 TOKEN 和邀请链接、答确认）：面板；本机 `ir` 由人在终端里跑时；没配 `public.origin` 时的本机网页。
+- **管理**（列出、改名和头像、撤销）：面板和本机，包括 agent 调的 `ir`。
 - 通道什么都不管，只能改自己的名字和头像。
 
 | 请求 | 正文 → 回答 | 说明 |
 |---|---|---|
-| `GET /api/me` | → `Me` | 调用者自己：终端、权限表、`panel`（有没有面板权）、`public` |
+| `GET /api/me` | → `Me` | 调用者自己：终端（`rules.claudeOwner`：有没有 Claude）、`panel`（有没有面板权）、`public` |
 | `PUT /api/me/profile` | 资料 → `EndpointInfo` | 改自己的名字、头像（见 `docs/gate.md`）；本机回 409 |
 | `PUT /api/endpoints/{id}/profile` | 同上 | 改别的终端的（`id` 也可以是名字）；`/api/terminals/{id}/profile` 同 |
 | `PUT /api/me/device` | `SetDevice` → `Terminal` | 改自己的设备（`computer`/`laptop`/`phone`/`none`，别的回 400）；本机也行。网页在“这个终端”弹窗里改 |
 | `PUT /api/terminals/{id}/device` | 同上 | 改别的终端的（`id` 也可以是名字，`本机`/`local` 也行），要管理权；`ir profile <名字> --device phone` |
-| `GET /api/terminals` | → `Terminals` | `ir access`：所有终端（本机在最前）、权限表、今天的用量，和未用的邀请。没有秘密 |
+| `GET /api/terminals` | → `Terminals` | `ir access`：所有终端（本机在最前）、有没有 Claude、今天的用量，和未用的邀请。没有秘密 |
 | `GET /api/usage?days=N&terminal=<ID、名字或 me>` | → `Usage` | `ir usage`：最近 N 天（默认 7，最多 366，今天在最后）按本地日期、终端、agent、模型合计的回合数、输入、输出、缓存读写 token 和费用（只有 agent 报了的）。不带 `terminal`：管理权看所有人，通道只看自己；看别的终端要管理权（否则 403）。`terminals` 给出行里还在的终端的名字和头像；`terminal` 为空的行是认不出谁发起的回合 |
 | `POST /api/terminals/invites` | `NewInvite` → `Invite` | `ir invite [名字]`：新面板的一次性链接（10 分钟），`qr` 是同一链接的二维码（SVG data URL）。要先有 `public.origin`（否则 409）。没有面板权时回 202 `Pending`。`owner: true`（`--owner`）：加入的面板带 Claude。本机由人跑的 `ir`、带 Claude 的面板（有 Passkey 的，不算没配 `public.origin` 的本机网页）直接给；agent 的回 202 `Pending`，只有带 Claude 的面板或本机 `ir` 能同意；别的 403 |
-| `POST /api/terminals/tokens` | `NewInvite` → `Token` | `ir token <名字>`：插件 TOKEN，只给这一次；已有的通道换新 TOKEN，旧的作废。没有面板权时回 202 `Pending`。`owner: true` 同上：给它开 Claude |
-| `PUT /api/terminals/{id}/rules` | `SetRules` → `Terminal` | 改权限表。放宽要面板权；加 Claude 只认本机由人跑的 `ir`（`ir access <名字> --claude on`）或带 Claude 的面板，别的面板、本机网页和 agent 一律 403；去掉 Claude 谁管都行 |
-| `DELETE /api/terminals/{id}` | → `{ok}` | `ir revoke`：终端（连同登录、权限、连接）或未用的邀请；最后一个有 Passkey 的面板删不了（409） |
+| `POST /api/terminals/tokens` | `NewInvite` → `Token` | `ir token <名字>`：插件 TOKEN，只给这一次；已有的通道换新 TOKEN，旧的作废。没有面板权时回 202 `Pending`。`owner: true` 同上：新建的通道带 Claude；已有的通道换 TOKEN 时 Claude 照旧，没 Claude 的再带 `owner` 回 409（Claude 只在建的时候定） |
+| `DELETE /api/terminals/{id}` | → `{ok}` | `ir revoke`：终端（连同登录、Claude、连接）或未用的邀请；最后一个有 Passkey 的面板删不了（409） |
 
-## 权限表（`Rules`）
+## 能做什么（`Rules`）
 
-| 项 | 说明 |
-|---|---|
-| `agents` | 能用哪些 agent，也只看得到这些 agent 的会话。`claude` 另要 `claudeOwner` |
-| `claudeOwner` | 这是你本人的终端（Claude 用户协议）：`{by, at}`，`by` 是 `local`（本机 `ir` 的 `--owner`、`--claude on`；`--owner` 邀请加入的面板也记这个）、`panel`（带 Claude 的面板开的或同意的）或 `first`（第一个面板）。服务端写，请求里带的不算。去掉 Claude 就清掉 |
-| `allDirs`、`dirs`、`workspaces` | 能用哪些目录：全部，或某些目录（含下层）和工作区 |
-| `seeOthers` | 看不看别的终端开的会话；不经 Iridium 开的算本机的 |
-| `filesIn`、`filesOut` | 拷入（上传、附件、按路径）、拷出（下载、缩略图、插件取文件） |
-| `answer` | 答提问和审批 |
-| `mustApprove` | 它开的会话一律要审批：不能用跳过审批的模式（`bypassPermissions`、`acceptEdits`、`auto`、`never`、`on-request`、`danger-full-access`），没给模式时用会询问的（Claude `manual`、Codex `untrusted`、pi `ask`）；不能往跳过审批的会话发消息 |
-| `dailyTokens` | 每天（本地时间）它起的回合用的 token 上限（输入、输出、缓存都算），0 不限；到了回 429 |
-| `allCommands`、`commands` | 能发哪些 `/` 命令：全部，或列出的（如 `/compact`） |
-| `secretsSet` | 能存、换凭据（不能读值，删要管理权） |
+所有终端都一样，什么都能做，只有 Claude 例外（用户，2026-11-08）：
 
-默认：面板除 Claude 外全开（第一个面板连 Claude 也开）；通道除 Claude 外，只看自己开的会话、必须审批、不能存凭据。没存过表的终端用默认。
+- `claudeOwner`：这是你本人的终端（Claude 用户协议），能用 Claude。`{by, at}`，`by` 是 `local`（本机由人跑的 `ir` 的 `--owner`；`--owner` 邀请加入的面板也记这个）、`panel`（带 Claude 的面板开的或同意的）或 `first`（第一个面板）。只在建终端时由服务端写，之后不能改，也没有改的接口。
+- 没有 Claude 的终端看得到 Claude 的会话（列表、读消息、事件流、文件），但不能开新的、发消息、停、中断、答提问、放行、换模型模式强度、动待发队列、往里传文件（403）。改名、置顶、颜色、归档谁都行。别的 agent 谁都能用。
+- 不再有目录、命令、审批、每日上限、拷入拷出、看别人会话这些限制；插件和面板一样。旧库里这些字段还在，不读。
 
-每个会话接口都查：列表（和事件流的 `list`）只给看得到的；看、读消息、取全文看不到就 404；发消息查 agent、命令、审批模式、上限（带附件另查 `filesIn`）；开会话查 agent、目录、模式、命令、上限，并记下是谁开的；停、中断、换模型和强度、待发队列、改名置顶查 agent；换审批模式另查 `mustApprove`；答提问（含 `POST /api/answer` 的卡片）另查 `answer`。
-
-文件：会话的文件和缩略图要 `filesOut`；上传（建任务、传块、完成、取消）要 `filesIn`；socket 上按路径的（`attach` 要 `filesIn`，`GET /api/files`、`POST /api/files/copy` 要 `filesIn`+`filesOut`）和文件夹选择器，路径都得在允许的目录里（先解析符号链接）。工作区的建、改、删只给面板和本机。
-
-插件的聊天层（`/api/chat/…`）按 TOKEN 认终端，同一张表：开会话（含 `/new`）查 agent、目录、上限，必须审批时用会询问的模式；发消息、`/use`、`/stop`、`/model` 只对看得到的会话；Iridium 命令本身查 `commands`，`/mode` 查 `mustApprove`；`/ls`、`/use` 只列看得到的；取文件查 `filesOut`。聊天开的会话记在插件名下，来源标记是 `[插件名·发送者]`。
+插件的聊天层（`/api/chat/…`）按 TOKEN 认终端，同一条规则：开会话（含 `/new`，默认 Claude）、发消息、`/use`、`/stop`、答提问对 Claude 会话要有 Claude。聊天开的会话记在插件名下，来源标记是 `[插件名·发送者]`。
 
 ## 确认（agent 的 `ir` 要秘密时）
 
@@ -358,8 +344,8 @@ agent 调 `ir invite`、`ir token` 时，邀请链接和 TOKEN 不能进它的�
 
 | 请求 | 正文 → 回答 | 说明 |
 |---|---|---|
-| `GET /api/secrets` | → `Secrets` | 名字、说明、范围、谁存的、用量和最近 50 次使用。从不带值。管理权、socket 上的 `ir`、有 `secretsSet` 的通道 |
-| `PUT /api/secrets/{name}` | `SetSecret` → `SecretInfo` | 存或换（值、说明、范围、`always`）。不带值：已有的只改说明和范围。面板、本机由人跑的 `ir`、有 `secretsSet` 的通道（通道只能存值和说明，范围、`always` 只有面板改）；agent 调的回 202 `Pending`（确认卡带密码框，值由点“存”的面板交上来，见下） |
+| `GET /api/secrets` | → `Secrets` | 名字、说明、范围、谁存的、用量和最近 50 次使用。从不带值。所有终端 |
+| `PUT /api/secrets/{name}` | `SetSecret` → `SecretInfo` | 存或换（值、说明、范围、`always`）。不带值：已有的只改说明和范围。面板、本机由人跑的 `ir`、所有通道（通道只能存值和说明，范围、`always` 只有面板改）；agent 调的回 202 `Pending`（确认卡带密码框，值由点“存”的面板交上来，见下） |
 | `DELETE /api/secrets/{name}` | → `{ok}` | 要管理权；agent 调的也行 |
 | `POST /api/secrets/use` | `UseSecrets` → `SecretValues` | 只给 `ir run`，只走 unix socket：会话、名字、命令开头。查范围；要确认时回 202 `Pending`，`ir run` 等到同意后带 `confirm`（确认的 ID）再取，一个确认只能用一次。值只交给 `ir` 进程，它不打印 |
 
@@ -406,7 +392,7 @@ GitHub 源：最新 Release 的 tag 是版本，正文（`<!-- iridium:assets --
 
 `platforms` 里有本机的（`GOOS-GOARCH`）就用它；`url` 以 `.tar.gz` 结尾的同样解包。版本是带点的数字（可有 `v`、`-rc.1`）；`dev` 版不提示更新，`ir update --force` 照样装。重启：在 systemd 单元里就 `systemctl --user restart --no-block <单元>`，否则原地重新执行。托管进程在自己的单元里，不受影响。
 
-设置页“更新”一组（有面板权的才有）：“自动下载更新”开关、“检查更新”（旁边写结果；打开设置时上次查过超过一小时就自己查一次）。有新版时最上面一张卡：版本、大小、说明、下载进度、“更新”键。
+终端面板里（有面板权的才有）：“自动下载更新”开关、“检查更新”（旁边写结果；打开面板时上次查过超过一小时就自己查一次）。有新版时最上面一张卡：版本、大小、说明、下载进度、“更新”键。
 
 ## 部署
 

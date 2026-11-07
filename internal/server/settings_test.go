@@ -16,9 +16,9 @@ import (
 // The settings page's fields: read, changed in part, saved to the config file beside what the
 // file has of its own, in force at once; only panels change them, channels see none.
 func TestSettings(t *testing.T) {
-	var path string
+	var path, state string
 	l := startWith(t, func(s *Server, cfg config.Config, work string) {
-		path = filepath.Join(filepath.Dir(cfg.StateDir), "config.json")
+		path, state = filepath.Join(filepath.Dir(cfg.StateDir), "config.json"), cfg.StateDir
 		// The file has a field of its own the settings must keep.
 		c := cfg
 		c.ChatDir = work
@@ -36,14 +36,16 @@ func TestSettings(t *testing.T) {
 	})
 	var st api.Settings
 	l.want(200, "web", "GET", "/api/settings", nil, &st)
-	if st.IdleReap != "1h" || !st.CrashResume || !st.QuotaResume || st.Push || len(st.QuotaHidden) != 0 || st.Modes == nil || st.EnterInTurn != "steer" {
+	if st.IdleReap != "1h" || !st.CrashResume || !st.QuotaResume || st.Push || len(st.QuotaHidden) != 0 || st.Modes == nil || st.EnterInTurn != "steer" || st.Lang != "" {
 		t.Fatalf("defaults: %+v", st)
 	}
 
 	off, reap, hidden, queue, later := false, "15m", []string{"claude:me@example.com:weekly:", "claude:me@example.com:weekly:"}, "queue", "later"
+	fr, zh := "fr", "zh"
 	l.want(400, "web", "PUT", "/api/settings", api.SettingsPatch{EnterInTurn: &later}, nil)
-	l.want(200, "web", "PUT", "/api/settings", api.SettingsPatch{IdleReap: &reap, CrashResume: &off, QuotaHidden: &hidden, Modes: map[string]string{"claude": "plan", "codex": "untrusted"}, EnterInTurn: &queue}, &st)
-	if st.IdleReap != "15m" || st.CrashResume || !st.QuotaResume || len(st.QuotaHidden) != 1 || st.Modes["claude"] != "plan" || st.Modes["codex"] != "untrusted" || st.EnterInTurn != "queue" {
+	l.want(400, "web", "PUT", "/api/settings", api.SettingsPatch{Lang: &fr}, nil)
+	l.want(200, "web", "PUT", "/api/settings", api.SettingsPatch{IdleReap: &reap, CrashResume: &off, QuotaHidden: &hidden, Modes: map[string]string{"claude": "plan", "codex": "untrusted"}, EnterInTurn: &queue, Lang: &zh}, &st)
+	if st.IdleReap != "15m" || st.CrashResume || !st.QuotaResume || len(st.QuotaHidden) != 1 || st.Modes["claude"] != "plan" || st.Modes["codex"] != "untrusted" || st.EnterInTurn != "queue" || st.Lang != "zh" {
 		t.Fatalf("after the change: %+v", st)
 	}
 	if tu := l.s.m.Tuned(); tu.IdleReap != 15*time.Minute || tu.CrashResume || !tu.QuotaResume || tu.Modes["claude"] != "plan" {
@@ -53,7 +55,7 @@ func TestSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if saved.IdleReap.D() != 15*time.Minute || saved.CrashResume || saved.Modes["codex"] != "untrusted" || len(saved.QuotaHidden) != 1 || saved.ChatDir != l.work || saved.EnterInTurn != "queue" {
+	if saved.IdleReap.D() != 15*time.Minute || saved.CrashResume || saved.Modes["codex"] != "untrusted" || len(saved.QuotaHidden) != 1 || saved.ChatDir != l.work || saved.EnterInTurn != "queue" || saved.Lang != "zh" {
 		t.Fatalf("file: %+v", saved)
 	}
 
@@ -65,6 +67,10 @@ func TestSettings(t *testing.T) {
 	l.want(200, "web", "GET", "/api/sessions/"+created.ID, nil, &ss)
 	if ss.Mode != "plan" {
 		t.Errorf("new session's mode %q, want plan", ss.Mode)
+	}
+	// Its agent is told the user's language.
+	if b, err := os.ReadFile(filepath.Join(state, "hold", created.ID, "system-prompt.md")); err != nil || !strings.Contains(string(b), "web settings: Chinese.") {
+		t.Errorf("system prompt %q %v", b, err)
 	}
 
 	// A mode back to the agent's own; push on through the settings is push on.

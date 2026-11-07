@@ -234,13 +234,31 @@ body {
   color: oklch(var(--k-l) var(--k-c) var(--k-h));
 }
 
-/* ---- a session's colour tag: a highlighter's stroke over its name (sidebar.tsx Marked), the
-   height of the letters, light; drawn from the left as it is given, wiped back as it is taken off ---- */
+/* ---- a session's colour tag: a highlighter's stroke over its name (sidebar.tsx Marked), drawn by
+   hand: ragged ends, edges that wander, a denser streak where the pen pressed, a little tilted
+   (the user, 2026-11-08). Light; drawn from the left as it is given, wiped back as it is taken off. */
 .tag-mark {
-  background: linear-gradient(var(--mark) 0 0) 0 55% / 0 82% no-repeat;
+  position: relative;
+  isolation: isolate;
 }
-.tag-mark[data-on] {
-  background-size: 100% 82%;
+.tag-mark::before {
+  content: "";
+  position: absolute;
+  inset: 12% 0 4% 0;
+  z-index: -1;
+  background: var(--mark);
+  mask: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 24' preserveAspectRatio='none'><path fill-opacity='.82' d='M4 5.2C40 3.1 82 4.6 121 3.3S177 3.9 196.5 2.4L199.6 8.8 197.6 15.1 199.2 21.2C160 22.6 121 20.4 81 21.7S26 20.9 1.8 22.4L.4 15.6 2.3 10.2Z'/><path fill-opacity='.18' d='M8 9.4C62 7.6 128 10.1 193 8.1L194.5 12.6C129 14.6 63 12.2 6.5 14.1Z'/></svg>") 0 0 / 100% 100% no-repeat;
+  transform: rotate(-0.6deg);
+  clip-path: inset(0 100% 0 0);
+  transition: clip-path var(--dur-3) var(--ease-out);
+}
+.tag-mark[data-on]::before {
+  clip-path: inset(0 0 0 0);
+}
+@media (prefers-reduced-motion: reduce) {
+  .tag-mark::before {
+    transition: none;
+  }
 }
 
 /* ---- status lamps on the logo's corner ---- */

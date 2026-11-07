@@ -20,7 +20,7 @@ import { cmdOfCall, type Cmd } from "./cmd";
 import { argOf, diffSum, foldLine, foldSaid, kindOf, runCmd, type Diff, type Kind, type Shown, type Step, type Tool } from "./fold";
 import { Markdown } from "./markdown";
 import { Mentioned } from "./mention";
-import { type Source, withoutFiles } from "./refs";
+import { type Source, withoutFiles, withoutNameLines } from "./refs";
 
 type You = Extract<Source, { kind: "you" }>;
 type From = Extract<Source, { kind: "letter" }>;
@@ -244,7 +244,7 @@ const SYSTEM: Record<string, Parameters<typeof t>[0]> = { compact: "sys.compact"
 /** What the agent said: Markdown, then the files it gives ([文件] `path` lines). */
 const Assistant = memo(function Assistant({ b, session }: { b: Block; session: string }) {
   const home = useHome().data;
-  const text = withoutFiles(b.text ?? "", new Set(b.files?.map((f) => f.path)), home);
+  const text = withoutFiles(withoutNameLines(b.text ?? ""), new Set(b.files?.map((f) => f.path)), home);
   return (
     <div className="flex min-w-0 flex-col items-start gap-2 pr-6">
       {text && <Markdown text={text} className="w-full" />}

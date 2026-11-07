@@ -69,7 +69,7 @@ func TestClaudeForFirstPanel(t *testing.T) {
 	downTo4(t, path)
 	s = reopen(t, path)
 	r, _ := rulesOf(t, s, first)
-	if !access.HasClaude(r) || r.ClaudeOwner.By != access.ByFirst || !r.AllDirs || !r.SeeOthers {
+	if !access.HasClaude(r) || r.ClaudeOwner.By != access.ByFirst {
 		t.Fatalf("the first panel: %+v", r)
 	}
 	if _, ok := rulesOf(t, s, second); ok {
@@ -78,9 +78,8 @@ func TestClaudeForFirstPanel(t *testing.T) {
 	if _, ok := rulesOf(t, s, bot); ok {
 		t.Error("the channel got rules")
 	}
-	// Once only: turned off again, it stays off.
-	b, _ := json.Marshal(access.WithoutClaude(r))
-	must(t, s.SetTerminalRules(first, b))
+	// Once only: without it again (an older table), it stays without.
+	must(t, s.SetTerminalRules(first, []byte(`{}`)))
 	s.Close()
 	s = reopen(t, path)
 	if r, _ := rulesOf(t, s, first); access.HasClaude(r) {
@@ -88,7 +87,7 @@ func TestClaudeForFirstPanel(t *testing.T) {
 	}
 
 	// One has it (a panel turned it on before the rule): nothing changes.
-	b, _ = json.Marshal(access.WithClaude(access.Default(api.TerminalPanel), first, 1))
+	b, _ := json.Marshal(access.WithClaude(access.Default(), first, 1))
 	must(t, s.SetTerminalRules(second, b))
 	s.Close()
 	downTo4(t, path)

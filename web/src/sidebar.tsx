@@ -1,15 +1,15 @@
 // The one list (plan "网页", "风格"; web/sample's design): workspace → folder → session. No panel, no
 // cards, no headings; groups split by space, chevrons in their own column, colour only in logos and
-// lamps, the selected row only bolder. A session's row has two truncated lines, as Rhodium's: its name
-// and, where the tree does not say it, its folder; under them the last thing said, yours after 你：
-// (the user's decision, 2026-11-05); out of a turn, the first line ends with how long ago it was. 需要你 on top when anything
+// lamps, the selected row only bolder. A session's row is one line (the user, 2026-11-08): its name
+// (the title its agent gave it, plan "会话标题") and, where the tree does not say it, its folder; out
+// of a turn, it ends with how long ago it was. 需要你 on top when anything
 // waits on you, 归档 folded at the bottom. A workspace's row: its name a size up, its chevron only
 // under the mouse, a faint "+" at its end for a new session there. A row's menu (right click,
 // long-press): pin, rename, stop, archive, 通知 while push is on (push.ts), and at its foot the
 // colour tags (colors.ts); a workspace's, rename, its path, 通知, and delete pressed twice. The mouse resting on a row fetches its
 // chat ahead.
 import { Menu } from "@base-ui/react/menu";
-import { Archive, ArchiveRestore, Bot, Check, ChevronRight, Copy, Folder, FolderOpen, FolderPlus, Inbox, Pencil, Pin, PinOff, Plus, Search, Settings, Square, Trash2, Workflow as WorkflowIcon } from "lucide-react";
+import { Archive, ArchiveRestore, Bot, Check, ChevronRight, Copy, Folder, FolderOpen, FolderPlus, Inbox, Pencil, Pin, PinOff, Plus, Search, Square, Trash2, Workflow as WorkflowIcon } from "lucide-react";
 import { ConfirmIcon, confirmName, confirmTitle } from "./confirmname";
 import { Fragment, lazy, Suspense, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { api } from "./api/client";
@@ -21,8 +21,8 @@ import { useFlip } from "./motion";
 import { folderLevels, sessionLevels, usePushMenus, wsLevels, type PushLevel } from "./push";
 import type { Folder as FolderNode, Tree, WsNode } from "./tree";
 import { errText, toast } from "./toast";
-import { useMe, useSaidLine, useUpdate } from "./data";
-import { agentName, ago, cn, fine, IconKey, IrMark, keep, kept, Lamp, lampOf, Logo, own, sessionStatusText, statusText, tilde, Tip, titleOf, useLongPress, useMinute } from "./ui";
+import { useMe, useUpdate } from "./data";
+import { agentName, ago, cn, fine, IconKey, IrMark, keep, kept, Lamp, lampOf, Logo, own, sessionStatusText, statusText, tilde, Tip, titleOf, useLongPress, useMenuAt, useMinute } from "./ui";
 import { SESSION_DRAG } from "./chat/refs";
 import { useUnread } from "./unread";
 
@@ -42,9 +42,6 @@ type Props = {
   searching: boolean;
   search: ReactNode;
   onSearch: () => void;
-  settings: boolean;
-  onSettings: () => void;
-  updateDot: boolean;
   /** What agents' ir asked this panel for (invites, tokens): under 需要你 too. */
   confirms: Confirm[];
   onConfirm: (c: Confirm) => void;
@@ -162,22 +159,15 @@ export function Sidebar(p: Props) {
     </Fragment>
   );
 
-  const head = (
-    <div className={cn("flex shrink-0 items-center gap-0.5 px-2", p.phone ? "glass absolute inset-x-0 top-0 z-20 h-11 shadow-[0_0.5px_0_var(--edge)]" : "h-12")}>
+  // On a phone no head of its own: its keys stand by the sheet's tabs (app.tsx, pager.tsx).
+  const head = !p.phone && (
+    <div className="flex h-12 shrink-0 items-center gap-0.5 px-2">
       {/* The name at the left, the keys at the right (the user, 2026-11-06). */}
       <span className="flex min-w-0 flex-1 items-center gap-2 pl-2 select-none">
         <IrMark size={18} className="text-ink" />
         <span className="truncate text-base font-semibold tracking-[-0.01em]">Iridium</span>
       </span>
-      {p.createKey(
-        <button type="button" aria-label={t("nav.newWorkspace")} className="g-press grid size-8 place-items-center rounded-md text-ink-2 hover:bg-fill hover:text-ink data-popup-open:bg-fill pointer-coarse:size-10">
-          {/* A folder, not a "+": a "+" here was taken for a new session (the user, 2026-11-06). */}
-          <FolderPlus size={18} />
-        </button>,
-      )}
-      <IconKey label={`${t("nav.search")} · ${t("nav.searchKey")}`} tipSide="bottom" onClick={p.onSearch} onPointerEnter={p.panelsCode} onFocus={p.panelsCode} aria-pressed={p.searching} className={p.searching ? "bg-fill text-ink" : undefined}>
-        <Search size={16} />
-      </IconKey>
+      <HeadKeys {...p} />
     </div>
   );
 
@@ -187,8 +177,8 @@ export function Sidebar(p: Props) {
       {head}
       {/* While searching, the jump box in the tree's place; the tree stays mounted, hidden, and
           comes back scrolled as it was. */}
-      {p.searching && <div className={cn("flex min-h-0 flex-1 flex-col", p.phone && "pt-13")}>{p.search}</div>}
-      <div ref={list} hidden={p.searching} onScroll={(e) => void (scrolled.current = e.currentTarget.scrollTop)} className={cn("relative min-h-0 flex-1 no-bar overflow-y-auto px-2 pb-3", p.phone && "pt-13")} role="tree" aria-label={t("nav.sessions")}>
+      {p.searching && <div className="flex min-h-0 flex-1 flex-col">{p.search}</div>}
+      <div ref={list} hidden={p.searching} onScroll={(e) => void (scrolled.current = e.currentTarget.scrollTop)} className="relative min-h-0 flex-1 no-bar overflow-y-auto px-2 pb-3" role="tree" aria-label={t("nav.sessions")}>
         {needs > 0 && (
           <div role="group">
             <Row depth={0} flip="needs" chevron={p.expanded("needs") ? "open" : "closed"} onClick={() => p.toggle("needs")} icon={<Inbox size={16} className="text-ink-2" />} label={t("nav.needsYou")} end={<Count n={needs} />} />
@@ -279,30 +269,41 @@ export function Sidebar(p: Props) {
         )}
         {!p.tree.workspaces.length && !needs && <div className="g-fade px-2 pt-10 text-center text-sm text-ink-3">{t("nav.empty")}</div>}
       </div>
-      {!p.noFoot && <Foot me={p.me} settings={p.settings} onSettings={p.onSettings} updateDot={p.updateDot} panelsCode={p.panelsCode} />}
+      {!p.noFoot && <Foot me={p.me} />}
     </aside>
   );
 }
 
-/** Me and the settings key, right on the sidebar's ground at its foot: no card around them (the
- *  user, 2026-11-06). Me is all of it up to the settings key, not only its name (the user, 2026-11-06). Not on a phone with a chat open: there the me popover's body is a sheet of
- *  its own, the settings a row in it (app.tsx, me.tsx MePanel). */
-function Foot(p: Pick<Props, "me" | "settings" | "onSettings" | "updateDot" | "panelsCode">) {
+/** The head's keys: a new workspace, the jump box. On a phone they stand right of the sheet's tabs. */
+export function HeadKeys(p: Pick<Props, "createKey" | "onSearch" | "searching" | "panelsCode">) {
+  return (
+    <span className="flex shrink-0 items-center gap-0.5">
+      {p.createKey(
+        <button type="button" aria-label={t("nav.newWorkspace")} className="g-press grid size-8 place-items-center rounded-md text-ink-2 hover:bg-fill hover:text-ink data-popup-open:bg-fill pointer-coarse:size-10">
+          {/* A folder, not a "+": a "+" here was taken for a new session (the user, 2026-11-06). */}
+          <FolderPlus size={18} />
+        </button>,
+      )}
+      <IconKey label={`${t("nav.search")} · ${t("nav.searchKey")}`} tipSide="bottom" onClick={p.onSearch} onPointerEnter={p.panelsCode} onFocus={p.panelsCode} aria-pressed={p.searching} className={p.searching ? "bg-fill text-ink" : undefined}>
+        <Search size={16} />
+      </IconKey>
+    </span>
+  );
+}
+
+/** Me, the key to the 终端 panel (me.tsx MeKey), right on the sidebar's ground at its foot: no card
+ *  around it (the user, 2026-11-06); 更新 beside it once a newer release is out. Not on a phone with a
+ *  chat open: there the panel comes by a swipe up from the left quarter or the chat bar's ⋯ (app.tsx). */
+function Foot(p: Pick<Props, "me">) {
   return (
     <div className="flex h-14 shrink-0 items-center justify-between gap-2 px-2 pointer-coarse:h-16">
       <div className="flex min-w-0 flex-1">{p.me}</div>
-      <span className="relative flex shrink-0 items-center gap-1">
-        <UpdateKey />
-        <IconKey label={p.updateDot ? `${t("nav.settings")} · ${t("settings.updateReady")}` : t("nav.settings")} onClick={p.onSettings} onPointerEnter={p.panelsCode} onFocus={p.panelsCode} aria-pressed={p.settings} data-settings-key className={cn("size-10 pointer-coarse:size-11", p.settings && "bg-fill text-ink")}>
-          <Settings size={19} />
-        </IconKey>
-        {p.updateDot && <span className="g-pop pointer-events-none absolute top-1.5 right-1.5 size-2 rounded-full bg-err shadow-[0_0_0_1.5px_var(--paper)]" aria-hidden />}
-      </span>
+      <UpdateKey />
     </div>
   );
 }
 
-/** 更新 by the settings key (updatekey.tsx), loaded only once a newer release is found. */
+/** 更新 by the me key (updatekey.tsx), loaded only once a newer release is found. */
 const UpdateKeyPart = lazy(() => import("./updatekey").then((m) => ({ default: m.UpdateKey })));
 function UpdateKey() {
   const u = useUpdate().data;
@@ -431,9 +432,10 @@ function WsRow({ flip, id, name, root, open, onToggle, end }: { flip: string; id
   const push = usePushMenus();
   const me = useMe().data;
   const real = id !== 0 && !!me && (me.local || me.kind === "panel");
-  const [at, setAt] = useState<{ x: number; y: number } | null>(null);
+  const [at, setAt] = useMenuAt();
   const [renaming, setRenaming] = useState(false);
   const [sure, setSure] = useState(false);
+  if (at === null && sure) setSure(false);
   const lp = useLongPress(() => {
     const r = document.activeElement?.closest?.("[role=treeitem]")?.getBoundingClientRect();
     setAt(r ? { x: r.left + 40, y: r.bottom } : { x: 40, y: 40 });
@@ -537,7 +539,6 @@ function WsRename({ id, name, done }: { id: number; name: string; done: () => vo
  *  it 0.1 s, counted from its last move, or a press, fetches its chat ahead. */
 function SessionRow({ s, where, depth, flip, selected, onSelect, chatCode, working }: { s: Session; where?: string; depth: number; flip: string; selected: boolean; onSelect: (id: string) => void; chatCode: () => void; working?: boolean }) {
   const unread = useUnread(s.id);
-  const said = useSaidLine();
   const now = useMinute();
   const title = titleOf(s);
   // A subagent shown is at work, whatever discovery says of its process.
@@ -546,8 +547,17 @@ function SessionRow({ s, where, depth, flip, selected, onSelect, chatCode, worki
   // How long ago it was last active (its turn ended, it was last written to), but in a turn. Unread,
   // it is in ink: no grey dot for it (the user, 2026-11-06).
   const fresh = unread && status === "idle";
-  const when = !BUSY.has(status) && s.updatedAt > 0 && !s.archived && <span className={cn("text-xs whitespace-nowrap tabular-nums transition-colors duration-(--dur-2)", fresh ? "font-medium text-ink" : "text-ink-4")}>{ago(s.updatedAt, now, true)}</span>;
-  const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
+  // At work, its lamp stands in the time's place: the two cross-fade there (g-swap), the time still
+  // drawn under it so the row keeps its width (the user, 2026-11-08).
+  const busy = BUSY.has(status);
+  const lastBusy = useRef<typeof status | null>(null);
+  if (busy) lastBusy.current = status;
+  const when = s.updatedAt > 0 && !s.archived && (
+    <span aria-hidden={busy || undefined} className={cn("text-xs whitespace-nowrap tabular-nums transition-colors duration-(--dur-2)", fresh ? "font-medium text-ink" : "text-ink-4")}>
+      {ago(s.updatedAt, now, true)}
+    </span>
+  );
+  const [menuAt, setMenuAt] = useMenuAt();
   const [renaming, setRenaming] = useState(false);
   const rest = useRef<number | undefined>(undefined);
   const lp = useLongPress(() => {
@@ -602,11 +612,17 @@ function SessionRow({ s, where, depth, flip, selected, onSelect, chatCode, worki
     <Pin size={12} className="text-ink-4" aria-label={t("menu.pinned")} />
   ) : undefined;
   const lamp = status !== "idle";
-  const end = when || mark || lamp ? (
+  const slot = (when || lastBusy.current) && (
+    <span className="g-swap items-center" data-on={busy ? "" : undefined}>
+      {when || <span />}
+      <span className="grid justify-self-end">{lastBusy.current && <Lamp status={lastBusy.current} />}</span>
+    </span>
+  );
+  const end = slot || mark || lamp ? (
     <span className="flex items-center gap-1.5">
-      {when}
       {mark}
-      <Lamp status={status} />
+      {slot}
+      {!busy && <Lamp status={status} />}
     </span>
   ) : undefined;
   return (
@@ -635,17 +651,16 @@ function SessionRow({ s, where, depth, flip, selected, onSelect, chatCode, worki
           renaming ? (
             <Rename s={s} done={() => setRenaming(false)} />
           ) : (
-            <>
+            <span className="flex min-w-0 items-baseline">
               <Marked color={s.color}>{title}</Marked>
               {where && (
                 <Tip label={tilde(s.cwd)} side="bottom">
                   <span className="ml-1.5 max-w-[35%] shrink-0 truncate text-xs font-normal text-ink-3">{where.startsWith("/") ? tilde(where) : where}</span>
                 </Tip>
               )}
-            </>
+            </span>
           )
         }
-        sub={status === "error" ? <span className="text-err">{statusText(s.status)}</span> : (said(s.last, s) ?? tilde(s.cwd))}
         end={end}
         extra={{ ...lp, ...hover, ...drag, onClickCapture: lp.onClickCapture }}
       />
@@ -713,7 +728,7 @@ export function sessionTags(s: Session): Tags {
  *  long-press): a session here, its path copied, open or folded, its sessions archived, its colour
  *  tag. */
 function FolderRow({ f, ws, label, open, onToggle, newHere, plus }: { f: FolderNode; ws: number; label: ReactNode; open: boolean; onToggle: () => void; newHere: () => void; plus: ReactNode }) {
-  const [at, setAt] = useState<{ x: number; y: number } | null>(null);
+  const [at, setAt] = useMenuAt();
   const lp = useLongPress(() => {
     const r = document.activeElement?.closest?.("[role=treeitem]")?.getBoundingClientRect();
     setAt(r ? { x: r.left + 40, y: r.bottom } : { x: 40, y: 40 });
@@ -841,7 +856,7 @@ function Marked({ color, children }: { color?: Color; children: ReactNode }) {
   if (color) last.current = color;
   const shown = color ?? last.current;
   return (
-    <span data-on={color ? "" : undefined} className="tag-mark -mx-1 min-w-0 truncate rounded-sm px-1 transition-[background] duration-(--dur-3) ease-(--ease-out)" style={shown ? ({ "--mark": `color-mix(in oklch,${colorVar(shown)} 26%,#0000)` } as CSSProperties) : undefined}>
+    <span data-on={color ? "" : undefined} className="tag-mark -mx-1 min-w-0 truncate px-1" style={shown ? ({ "--mark": `color-mix(in oklch,${colorVar(shown)} 32%,#0000)` } as CSSProperties) : undefined}>
       {children}
     </span>
   );

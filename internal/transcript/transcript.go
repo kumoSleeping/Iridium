@@ -19,6 +19,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/kumoSleeping/iridium/internal/api"
@@ -59,6 +60,8 @@ type File struct {
 	// dsh: a dsh session file, whose title is its last session/title event, kept in title.
 	dsh   bool
 	title string
+	// named: the title the agent's last title line gave (named.go), "" while none has.
+	named string
 }
 
 // entry is a line that gives blocks.
@@ -107,7 +110,7 @@ func (f *File) refresh() error {
 		end = f.zst.end
 	}
 	if ino != f.ino || st.Size() < end {
-		f.ino, f.size, f.lines, f.title, end = ino, 0, nil, "", 0
+		f.ino, f.size, f.lines, f.title, f.named, end = ino, 0, nil, "", "", 0
 		if f.zst != nil {
 			f.zst = &frames{}
 		}
@@ -149,6 +152,13 @@ func (f *File) refresh() error {
 			}
 		}
 		if blocks := f.format(off, line, Clip, nil); len(blocks) > 0 {
+			for _, b := range blocks {
+				if b.Kind == api.BlockKindAssistant {
+					if t := NameLine(b.Text); t != "" {
+						f.named = t
+					}
+				}
+			}
 			f.lines = append(f.lines, entry{off: off, n: int32(len(line)), msgs: uint16(messages(blocks)), blocks: uint16(min(len(blocks), 65535))})
 		}
 		off += int64(len(line)) + 1
@@ -334,23 +344,25 @@ func (f *File) LastSaid() (*api.LastSaid, error) {
 	if b == nil || err != nil {
 		return nil, err
 	}
-	text := heading.ReplaceAllString(b.Text, "")
+	text := heading.ReplaceAllString(WithoutNameLines(b.Text), "")
 	text = strings.NewReplacer("**", "", "`", "").Replace(text)
 	text = link.ReplaceAllString(text, "$1")
 	return &api.LastSaid{Role: string(b.Kind), Text: cut(oneLine(text), LastLen), From: b.From, At: b.Time}, nil
 }
 
-// Title is the opening of the first thing you said, on one line; "" if you said nothing. A dsh
-// session's is the title dsh gave it, where it did.
+// Title is the title the agent's last title line gave (named.go); else, a dsh session's, the
+// title dsh gave it, where it did; else the opening of the first thing you said, on one line; ""
+// if you said nothing.
 func (f *File) Title() (string, error) {
-	if f.dsh {
-		f.mu.Lock()
-		err := f.refresh()
-		t := f.title
-		f.mu.Unlock()
-		if err != nil || t != "" {
-			return cut(oneLine(t), TitleLen), err
-		}
+	f.mu.Lock()
+	err := f.refresh()
+	named, t := f.named, f.title
+	f.mu.Unlock()
+	if named != "" {
+		return named, err
+	}
+	if f.dsh && (err != nil || t != "") {
+		return cut(oneLine(t), TitleLen), err
 	}
 	b, err := f.walk(false, func(b api.Block) bool { return b.Kind == api.BlockKindUser })
 	if b == nil || err != nil {
@@ -426,14 +438,17 @@ func validID(id string) bool {
 // ---- Claude's lines as blocks ----
 
 type claudeLine struct {
-	Type             string         `json:"type"`
-	Subtype          string         `json:"subtype"`
-	UUID             string         `json:"uuid"`
-	Timestamp        string         `json:"timestamp"`
-	IsMeta           bool           `json:"isMeta"`
-	IsCompactSummary bool           `json:"isCompactSummary"`
-	Message          *claudeMessage `json:"message"`
-	Attachment       *attachment    `json:"attachment"`
+	Type             string `json:"type"`
+	Subtype          string `json:"subtype"`
+	UUID             string `json:"uuid"`
+	Timestamp        string `json:"timestamp"`
+	IsMeta           bool   `json:"isMeta"`
+	IsCompactSummary bool   `json:"isCompactSummary"`
+	// MergedSendUuids: the sends after the first that Claude took in as this one line (queued
+	// while a turn ran, all let in at its end), each a text block of its own after the first's.
+	MergedSendUuids []string       `json:"mergedSendUuids"`
+	Message         *claudeMessage `json:"message"`
+	Attachment      *attachment    `json:"attachment"`
 	// Origin: who wrote a user line, when not you (a task-notification, as one comes while idle).
 	Origin *struct {
 		Kind string `json:"kind"`
@@ -575,28 +590,45 @@ func blocksOf(off int64, raw []byte, max int, sources Sources) []api.Block {
 				}
 			}
 		}
-		var said []string
-		for _, s := range all {
-			if !tagged.MatchString(s) || pasted.MatchString(s) {
-				said = append(said, s)
+		said := func(all []string) string {
+			var said []string
+			for _, s := range all {
+				if !tagged.MatchString(s) || pasted.MatchString(s) {
+					said = append(said, s)
+				}
 			}
+			return strings.Join(said, "\n\n")
 		}
-		text := strings.Join(said, "\n\n")
-		if strings.TrimSpace(text) == "" {
+		say := func(text, uuid string) {
+			if strings.TrimSpace(text) == "" {
+				return
+			}
+			b := api.Block{Kind: api.BlockKindUser, Text: text, ID: uuid}
+			if sources != nil && uuid != "" {
+				if terminal, tag, ok := sources(uuid); ok {
+					b.From, b.FromTerminal = tag, terminal
+					b.Text = strings.TrimPrefix(text, "["+tag+"] ")
+				}
+			}
+			if b.From == api.SourceIridium {
+				// Iridium's own line (a recovery prompt), not your words.
+				b = api.Block{Kind: api.BlockKindSystem, Event: api.SystemEventIridium, Text: b.Text, From: b.From, ID: b.ID}
+			}
+			add(b)
+		}
+		// Sends Claude merged into one line: each its own message again, under its own uuid (so
+		// its own prefix goes, and the web finds it sent). Iridium sends one text block a message.
+		if m := l.MergedSendUuids; len(m) > 0 && len(all) == len(m)+1 {
+			for i, s := range all {
+				uuid := l.UUID
+				if i > 0 {
+					uuid = m[i-1]
+				}
+				say(strings.TrimRightFunc(said([]string{s}), unicode.IsSpace), uuid)
+			}
 			break
 		}
-		b := api.Block{Kind: api.BlockKindUser, Text: text, ID: l.UUID}
-		if sources != nil && l.UUID != "" {
-			if terminal, tag, ok := sources(l.UUID); ok {
-				b.From, b.FromTerminal = tag, terminal
-				b.Text = strings.TrimPrefix(text, "["+tag+"] ")
-			}
-		}
-		if b.From == api.SourceIridium {
-			// Iridium's own line (a recovery prompt), not your words.
-			b = api.Block{Kind: api.BlockKindSystem, Event: api.SystemEventIridium, Text: b.Text, From: b.From, ID: b.ID}
-		}
-		add(b)
+		say(said(all), l.UUID)
 	case "assistant":
 		for _, i := range items {
 			switch i.Type {

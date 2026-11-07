@@ -116,6 +116,7 @@ func (h *Hosted) write(ctx context.Context, in store.Input, images []agent.Image
 	}
 	h.mu.Lock()
 	h.lastFrom = in.Terminal
+	h.compact = line == "/compact" || line == "/压缩" || strings.HasPrefix(line, "/compact ")
 	ready := h.ready
 	h.mu.Unlock()
 	// The process says its use so far first, so this turn's share can be told from it.

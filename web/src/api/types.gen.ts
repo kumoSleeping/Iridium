@@ -914,13 +914,13 @@ export interface PushState {
   rules: PushRule[];
 }
 /**
- * PushEvents are the events pushed. Default: NeedsYou and Error on, the rest off.
+ * PushEvents are the events pushed, all on by default. TurnEnd takes in a compaction you asked for
+ * (/compact); the agent's own is not pushed.
  */
 export interface PushEvents {
   needsYou: boolean;
   error: boolean;
   turnEnd: boolean;
-  compact: boolean;
 }
 /**
  * PushScope is what a push rule is on.
@@ -1092,6 +1092,11 @@ export interface Settings {
    * UpdateAuto: a newer Iridium is downloaded as soon as it is seen, so 更新 only restarts.
    */
   updateAuto: boolean;
+  /**
+   * Lang: the user's language, as a web page's settings last set it ("zh", "en"; "" not yet):
+   * hosted agents are told it from their next start.
+   */
+  lang: string;
 }
 /**
  * SettingsPatch changes what it gives and nothing else. A mode "" goes back to the agent's own.
@@ -1105,6 +1110,7 @@ export interface SettingsPatch {
   push?: boolean;
   enterInTurn?: string;
   updateAuto?: boolean;
+  lang?: string;
 }
 
 //////////
@@ -1122,58 +1128,23 @@ export const TerminalChannel: TerminalKind = "channel";
  */
 export const LocalTerminal = "local";
 /**
- * Rules is a terminal's permission table. The built-in 本机's is all of it and cannot change.
+ * Rules is what a terminal may do: everything, every terminal alike, but Claude (the user,
+ * 2026-11-08). Stored as before, the other fields of old tables are no longer read.
  */
 export interface Rules {
   /**
-   * Agents it may use (and whose sessions it sees). claude needs ClaudeOwner.
-   */
-  agents: Agent[];
-  /**
-   * ClaudeOwner: the terminal is the owner's own (Claude's terms), as said on the machine. Only
-   * the server writes it; the web may take Claude away but never give it.
+   * ClaudeOwner: the terminal is the owner's own (Claude's terms), so it may use Claude. Set as
+   * the terminal was made, by the server only, and never changed. Without it a terminal sees
+   * Claude's sessions but may not start, write to or answer one.
    */
   claudeOwner?: OwnerConfirm;
-  /**
-   * AllDirs: every directory; else only under Dirs or in Workspaces.
-   */
-  allDirs: boolean;
-  dirs: string[];
-  workspaces: number /* int64 */[];
-  /**
-   * SeeOthers: it sees the sessions other terminals opened, not only its own.
-   */
-  seeOthers: boolean;
-  filesIn: boolean; // may copy files in (uploads)
-  filesOut: boolean; // may copy files out (downloads)
-  answer: boolean; // may answer questions and approvals
-  /**
-   * MustApprove: what it starts runs in an approving mode; it cannot send to a session that
-   * skips approvals.
-   */
-  mustApprove: boolean;
-  /**
-   * DailyTokens caps the tokens (input, output and cache, all models) of the turns it starts in a
-   * day, local time; 0 is no cap.
-   */
-  dailyTokens: number /* int64 */;
-  /**
-   * AllCommands: every slash command; else only Commands (e.g. "/compact").
-   */
-  allCommands: boolean;
-  commands: string[];
-  /**
-   * SecretsSet: it may store and replace credentials (never read them; deleting is a manager's).
-   */
-  secretsSet: boolean;
 }
 /**
  * OwnerConfirm is how, and when (ms), a terminal was found the owner's own.
  */
 export interface OwnerConfirm {
   /**
-   * By: "local" (a person's ir on the machine: ir invite --owner, ir token --owner,
-   * ir access --claude on), "panel" (a person on a panel that has Claude, or one that
+   * By: "local" (a person's ir on the machine: ir invite --owner, ir token --owner), "panel" (a person on a panel that has Claude, or one that
    * confirmed an agent's ask) or "first" (the first panel registered).
    */
   by: string;
@@ -1269,13 +1240,6 @@ export interface Invite {
 export interface Token {
   terminal: Terminal;
   token: string;
-}
-/**
- * SetRules changes a terminal's permission table. Adding claude is for a person's ir on the
- * machine only (ir access <name> --claude on); anyone that manages may take it away.
- */
-export interface SetRules {
-  rules: Rules;
 }
 /**
  * Confirm is what an agent's ir asked for that only a panel may give (an invite link, a token, a

@@ -30,7 +30,7 @@ export function SecretsPage({ onBack }: { onBack: () => void }) {
   return (
     <div className="flex h-full flex-col">
       <header className="flex h-10.5 shrink-0 items-center gap-1 px-1.5 pt-1.5">
-        <IconKey label={t("nav.settings")} onClick={onBack} tipSide="bottom" className="size-7">
+        <IconKey label={t("nav.me")} onClick={onBack} tipSide="bottom" className="size-7">
           <ChevronLeft size={16} />
         </IconKey>
         <h1 className="m-0 min-w-0 flex-1 truncate text-base font-semibold">{t("secrets.title")}</h1>
@@ -39,7 +39,7 @@ export function SecretsPage({ onBack }: { onBack: () => void }) {
           {adding ? <X size={16} /> : <Plus size={16} />}
         </IconKey>
       </header>
-      <div className="min-h-0 flex-1 overflow-y-auto pt-2 pb-4">
+      <div className="no-bar min-h-0 flex-1 overflow-y-auto pt-2 pb-4">
         <div className="flex flex-col gap-5 px-3">
           {confirms.length > 0 && (
             <div className="flex flex-col gap-2">

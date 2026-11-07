@@ -15,9 +15,9 @@ import (
 const (
 	// RecoveryPrompt is what Iridium tells an agent that cannot run an interrupted turn again by
 	// itself (the agent sees it as Iridium's own line).
-	RecoveryPrompt = "上一回合被打断，先检查现状再继续"
+	RecoveryPrompt = "The last turn was interrupted. Check where things stand, then carry on."
 	// QuotaPrompt goes when the quota is back and nothing else waits.
-	QuotaPrompt = "继续"
+	QuotaPrompt = "Continue."
 	// The circuit breaker: this many crashes of a session within BreakerWindow, and it is not
 	// continued again.
 	BreakerCrashes = 3

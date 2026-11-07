@@ -6,9 +6,9 @@ import { folderLevels, pushEvents, pushOn, wsLevels } from "../src/push";
 const st: PushState = {
   enabled: true,
   publicKey: "",
-  defaults: { needsYou: true, error: false, turnEnd: false, compact: false },
+  defaults: { needsYou: true, error: false, turnEnd: false },
   rules: [
-    { scope: "workspace", target: "2", mode: "on", events: { needsYou: false, error: false, turnEnd: true, compact: false } },
+    { scope: "workspace", target: "2", mode: "on", events: { needsYou: false, error: false, turnEnd: true } },
     { scope: "folder", target: "/w2/hush", mode: "off" },
     { scope: "session", target: "back", mode: "on" },
     { scope: "workspace", target: "1", mode: "off" },

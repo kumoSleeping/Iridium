@@ -40,7 +40,6 @@ import type {
   SetMode,
   SetModel,
   SetPreset,
-  SetRules,
   SetUltracode,
   Settings,
   SettingsPatch,
@@ -236,7 +235,6 @@ export const api = {
 
   // --- the interactive terminals (docs/api.md "交互终端"), the confirmations agents ask for ---
   terminals: () => get<Terminals>("/api/terminals"),
-  setRules: (id: string, r: SetRules) => write<Terminal>("PUT", `/api/terminals/${enc(id)}/rules`, r),
   invite: (name: string, owner?: boolean) => write<Invite>("POST", "/api/terminals/invites", { ...(name ? { name } : {}), ...(owner ? { owner } : {}) } satisfies NewInvite),
   token: (name: string, owner?: boolean) => write<Token>("POST", "/api/terminals/tokens", { name, ...(owner ? { owner } : {}) } satisfies NewInvite),
   revoke: (id: string) => write<{ ok: boolean }>("DELETE", `/api/terminals/${enc(id)}`),

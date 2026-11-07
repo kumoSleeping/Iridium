@@ -192,7 +192,7 @@ func TestAgentCommands(t *testing.T) {
 		}
 	}
 	prompt, err := os.ReadFile(filepath.Join(cfg.StatePath(), "hold", full, "system-prompt.md"))
-	if err != nil || !strings.Contains(string(prompt), "在需要时用 ir 开别的 agent 会话、发消息、等结果、跨机器拷文件；见 ir --help") {
+	if err != nil || !strings.Contains(string(prompt), "This session is hosted by Iridium.") || !strings.Contains(string(prompt), "ir send <id>") {
 		t.Errorf("system prompt %q %v", prompt, err)
 	}
 

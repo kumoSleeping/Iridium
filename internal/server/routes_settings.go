@@ -40,7 +40,7 @@ func (s *Server) settings() api.Settings {
 	if modes == nil {
 		modes = map[string]string{}
 	}
-	return api.Settings{IdleReap: shortDuration(t.IdleReap), CrashResume: t.CrashResume, QuotaResume: t.QuotaResume, QuotaHidden: hidden, Modes: modes, Push: push, EnterInTurn: enter, UpdateAuto: auto}
+	return api.Settings{IdleReap: shortDuration(t.IdleReap), CrashResume: t.CrashResume, QuotaResume: t.QuotaResume, QuotaHidden: hidden, Modes: modes, Push: push, EnterInTurn: enter, UpdateAuto: auto, Lang: t.Lang}
 }
 
 func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
@@ -56,6 +56,10 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		reap = d
+	}
+	if p.Lang != nil && *p.Lang != "zh" && *p.Lang != "en" {
+		fail(w, http.StatusBadRequest, `lang: "zh" or "en"`)
+		return
 	}
 	if p.EnterInTurn != nil && *p.EnterInTurn != "steer" && *p.EnterInTurn != "queue" {
 		fail(w, http.StatusBadRequest, `enterInTurn: "steer" or "queue"`)
@@ -104,6 +108,9 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		if p.UpdateAuto != nil {
 			c.Update.Manual = !*p.UpdateAuto
+		}
+		if p.Lang != nil {
+			c.Lang = *p.Lang
 		}
 		if p.Push != nil && s.Push == nil {
 			c.Push = *p.Push

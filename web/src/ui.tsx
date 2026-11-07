@@ -3,7 +3,7 @@
 import { Popover } from "@base-ui/react/popover";
 import { Tooltip } from "@base-ui/react/tooltip";
 import { Plug, type LucideIcon } from "lucide-react";
-import { useEffect, useRef, useState, useSyncExternalStore, type ComponentProps, type CSSProperties, type ReactElement, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ComponentProps, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import type { Agent, Status } from "./api/types.gen";
 import { t } from "./i18n";
 import { CLAUDE, PI, PI_VIEWBOX } from "./logos";
@@ -70,6 +70,28 @@ export const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
  *  popover's, a menu's): React events bubble out of those too. */
 export const own = (e: React.SyntheticEvent) => e.currentTarget.contains(e.target as Node);
 
+/** A short tick of the phone's motor (Android; the web has none on iOS): the effort slider's steps. */
+export const buzz = (ms = 8) => void navigator.vibrate?.(ms);
+/** Android's browser buzzes for a long press itself, its contextmenu: only that one, not ours too
+ *  (the user's Honor buzzed twice, 2026-11-07). */
+const android = typeof navigator !== "undefined" && /Android/i.test(navigator.userAgent);
+const buzzHeld = () => android || buzz();
+
+/** A row's menu at a point, one open at a time: a long press on another row never clicks outside
+ *  the one open (its click is swallowed), so opening one puts the other away (the user, 2026-11-07). */
+let shut: (() => void) | null = null;
+export function useMenuAt() {
+  const [at, setAt] = useState<{ x: number; y: number } | null>(null);
+  const self = useRef(() => setAt(null)).current;
+  useEffect(() => () => void (shut === self && (shut = null)), []);
+  const set = useCallback((p: { x: number; y: number } | null) => {
+    if (p && shut !== self) shut?.();
+    shut = p ? self : shut === self ? null : shut;
+    setAt(p);
+  }, []);
+  return [at, set] as const;
+}
+
 /** Long-press on touch: fires after 450 ms held still, and swallows the click that follows. Not for
  *  a press in a portal of its children (a row's "+" popover): React may hand one pointerdown to a
  *  row twice from there, from the portal's container and from <body>, and the first timer would be
@@ -87,7 +109,7 @@ export function useLongPress(onLong: () => void) {
       start.current = { x: e.clientX, y: e.clientY };
       timer.current = window.setTimeout(() => {
         fired.current = true;
-        navigator.vibrate?.(8);
+        buzzHeld();
         onLong();
       }, 450);
     },

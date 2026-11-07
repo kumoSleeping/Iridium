@@ -3,10 +3,12 @@
 // nothing typed it stops the turn; with words it queues them (or steers them into the turn, with a
 // leading !, Ctrl or ⌘+Enter as Claude Code's send now, or where the server has no queue). / at
 // the start lists the session's commands; @ lists the sessions to name, as a row dropped here
-// names one, on a phone too (the user, 2026-11-06).
-// Shift+Tab cycles the approval mode; Esc stops the turn. The draft is kept on this device; files
-// pasted, dropped or attached go up in chunks while you type.
-import { ArrowUp, FileText, LoaderCircle, Paperclip, Slash, Square, X } from "lucide-react";
+// names one, on a phone too (the user, 2026-11-06): a card among the files, one piece, gone with
+// its × or a Backspace at the box's start, its mention put before the words as it is sent (the
+// user, 2026-11-08). Shift+Tab cycles the approval mode; Esc stops the turn. The draft is kept on
+// this device; files pasted, dropped or attached go up in chunks while you type, a picture in its
+// own shape under a veil drawn back as it goes; nothing is sent till all are up.
+import { ArrowUp, FileText, LoaderCircle, MessageSquare, Paperclip, Slash, Square, X } from "lucide-react";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { Command, Session, SessionState as LiveSession } from "../api/types.gen";
 import { api, missing } from "../api/client";
@@ -14,11 +16,10 @@ import type { Sent } from "../chats";
 import { t } from "../i18n";
 import { errText, toast } from "../toast";
 import { useList } from "../store";
-import { cn, fine, IconKey, keep, kept, Logo, steerKey, tilde, Tip, titleOf } from "../ui";
+import { agentName, cn, fine, IconKey, keep, kept, Logo, steerKey, tilde, Tip, titleOf } from "../ui";
 import { hasMention, MentionMarks, mentionOf } from "./mention";
-import { atSessions, atWord } from "./refs";
+import { atSessions, atWord, shortId } from "./refs";
 import { useSettings } from "../data";
-import { askOnce, sentFromHere } from "../unread";
 import { useGlide } from "../motion";
 import { previews } from "./files";
 import { upload } from "./upload";
@@ -68,8 +69,9 @@ export function commandsOf(s: LiveSession): Command[] {
 
 type Att = { key: string; file: File; sent: number; ref?: string; path?: string; error?: string; url?: string; stop: AbortController };
 
-/** put: words on a line of their own at the end; insert: at the caret, a space either side. */
-export type ComposerHandle = { focus: () => void; put: (text: string) => void; insert: (text: string) => void; attach: (files: File[]) => void; box: () => HTMLTextAreaElement | null };
+/** put: words on a line of their own at the end; insert: at the caret, a space either side; name:
+ *  a session named, a card among the attachments (a row dropped here, chat.tsx). */
+export type ComposerHandle = { focus: () => void; put: (text: string) => void; insert: (text: string) => void; attach: (files: File[]) => void; name: (id: string) => void; box: () => HTMLTextAreaElement | null };
 
 type Props = {
   s: LiveSession;
@@ -95,6 +97,16 @@ type Props = {
 export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s, turn, onSent, onSentDone, cycleMode, openModel, openMode, openUsage, openContext, cleared, tools, end }, ref) {
   const [text, setText] = useState(() => kept(draftKey(s.id)) ?? "");
   const [atts, setAtts] = useState<Att[]>([]);
+  // Sessions named: cards before the files, one piece each, a Backspace at the box's start takes the
+  // last (the user, 2026-11-08); sent as their mentions before the words. Kept with the draft.
+  const [named, setNamedNow] = useState<string[]>(() => (kept(`${draftKey(s.id)}:named`) ?? "").split(" ").filter(Boolean));
+  const setNamed = (f: (ids: string[]) => string[]) =>
+    setNamedNow((ids) => {
+      const next = f(ids);
+      keep(`${draftKey(s.id)}:named`, next.length ? next.join(" ") : null);
+      return next;
+    });
+  const nameOne = (id: string) => setNamed((ids) => (ids.includes(id) || id === s.id ? ids : [...ids, id]));
   const [busy, setBusy] = useState(false);
   const [at, setAt] = useState(0);
   const [shut, setShut] = useState<string | null>(null);
@@ -165,40 +177,41 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
       });
     },
     attach,
+    name: (id) => (nameOne(id), box.current?.focus()),
     box: () => box.current,
   }));
 
   // The pictures and files row opens and shuts (the user, 2026-11-06): the composer grows to it
   // instead of jumping taller; the last ones stay drawn as it shuts.
-  const lastAtts = useRef(atts);
-  if (atts.length) lastAtts.current = atts;
-  const shownAtts = atts.length ? atts : lastAtts.current;
+  const lastAtts = useRef({ atts, named });
+  const row = atts.length + named.length > 0;
+  if (row) lastAtts.current = { atts, named };
+  const shownAtts = row ? atts : lastAtts.current.atts;
+  const shownNamed = row ? named : lastAtts.current.named;
 
   const commands = commandsOf(s);
   const list = /^\/\S*$/.test(text) && text !== shut ? matching(commands, text.slice(1)) : [];
   const sessions = useList();
   const word = caret !== null && text !== shut && !list.length ? atWord(text, caret) : null;
-  const named = word && sessions ? atSessions(sessions, word.q, s.id) : [];
-  /** The @word made a mention of session to, the caret after it and a space. */
+  const picks = word && sessions ? atSessions(sessions, word.q, s.id) : [];
+  /** The @word made a card of session to: the word goes, the caret where it was. */
   const name = (to: Session) => {
-    if (!word || !sessions) return;
-    const words = `${mentionOf(to, sessions)} `;
+    if (!word) return;
     const end = caret ?? word.from;
-    const v = text.slice(0, word.from) + words + text.slice(end).replace(/^ /, "");
-    type(v);
-    const at = word.from + words.length;
-    setCaret(at);
-    requestAnimationFrame(() => (box.current?.focus(), box.current?.setSelectionRange(at, at)));
+    type(text.slice(0, word.from) + text.slice(end).replace(/^ /, ""));
+    nameOne(to.id);
+    setCaret(word.from);
+    requestAnimationFrame(() => (box.current?.focus(), box.current?.setSelectionRange(word.from, word.from)));
   };
-  const shown = list.length || named.length;
+  const shown = list.length || picks.length;
   // What looks like a key: store it as a credential and say {{NAME}} instead (savesecret.tsx).
   const [notSecret, setNotSecret] = useState<ReadonlySet<string>>(new Set());
   const secretish = shown ? null : findSecretish(text, notSecret);
   const uploading = atts.some((a) => !a.ref && !a.error);
-  const empty = !text.trim() && !atts.length;
+  const empty = !text.trim() && !atts.length && !named.length;
   const queues = s.queue !== undefined;
   const steers = (useSettings().data?.enterInTurn ?? "steer") !== "queue";
-  const mode = keyMode(turn, text, atts.length, queues, steers);
+  const mode = keyMode(turn, text, atts.length + named.length, queues, steers);
 
   /** Page-handled commands: true when done here. */
   const own = (words: string) => {
@@ -237,12 +250,18 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
     }
   };
   const go = async (other = false) => {
-    const mode = keyMode(turn, text, atts.length, queues, steers, other);
+    const mode = keyMode(turn, text, atts.length + named.length, queues, steers, other);
     if (busy || uploading || (empty && mode !== "stop")) return;
     if (mode === "stop") return stop();
     if (atts.some((a) => a.error)) return toast(t("err.upload"), { error: true });
-    const words = text.trim().replace(/^[!！]\s*/, "");
-    if (!atts.length && own(words)) return;
+    const typed = text.trim().replace(/^[!！]\s*/, "");
+    if (!atts.length && !named.length && own(typed)) return;
+    // The sessions named, as their mentions, before the words: what the agent reads.
+    const said = named.flatMap((id) => {
+      const to = sessions?.find((x) => x.id === id);
+      return to && sessions ? [mentionOf(to, sessions)] : [];
+    });
+    const words = [...said, typed].filter(Boolean).join(" ");
     // A picture's copy here stays: the bubble shows it while sending, and once landed till the
     // server's thumbnail has come (chat/files.tsx previews).
     for (const a of atts) if (a.url && a.path) previews.set(a.path, a.url);
@@ -250,6 +269,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
     const sent: Sent = { key: crypto.randomUUID(), text: words, files, from: 0, steer: mode === "steer" };
     type("");
     setAtts([]);
+    setNamed(() => []);
     // While a turn runs the server queues what is sent; steering joins the turn. Queued, the queue
     // shows it, not a bubble; turned away, the words go back where they were typed.
     if (mode === "queue" && queues) {
@@ -261,8 +281,6 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
       }
       return;
     }
-    askOnce();
-    sentFromHere(s.id);
     onSent(sent);
     try {
       const r = await api.send(s.id, words, files.map((f) => f.ref), mode === "steer");
@@ -288,7 +306,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
   return (
     <div className="relative">
       {list.length > 0 && <Palette list={list} at={Math.min(at, list.length - 1)} point={setAt} pick={(c) => (own(`/${c.name}`) ? undefined : (type(`/${c.name} `), box.current?.focus()))} />}
-      {named.length > 0 && <AtList list={named} at={Math.min(at, named.length - 1)} point={setAt} pick={name} />}
+      {picks.length > 0 && <AtList list={picks} at={Math.min(at, picks.length - 1)} point={setAt} pick={name} />}
       {secretish && (
         <SaveSecret
           key={secretish.value}
@@ -302,28 +320,47 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
         />
       )}
     <div className="glass float rest relative @container rounded-[20px]">
-      <div aria-hidden={!atts.length || undefined} className={cn("grid transition-[grid-template-rows,opacity] duration-(--dur-3) ease-(--ease-out)", atts.length ? "grid-rows-[1fr]" : "grid-rows-[0fr] opacity-0")}>
+      <div aria-hidden={!row || undefined} className={cn("grid transition-[grid-template-rows,opacity] duration-(--dur-3) ease-(--ease-out)", row ? "grid-rows-[1fr]" : "grid-rows-[0fr] opacity-0")}>
         <div className="min-h-0 overflow-hidden">
         <ul data-attachments className="m-0 flex list-none gap-2 overflow-x-auto px-3.5 pt-3 pb-0">
-          {shownAtts.map((a) => (
-            <li key={a.key} className="g-pop relative shrink-0 pt-1.5 pr-1.5">
-              {a.url ? <img src={a.url} alt={a.file.name} className={cn("size-14 rounded-lg object-cover shadow-[0_0_0_0.5px_var(--edge)]", a.error && "opacity-50")} /> : (
-                <span className="flex h-14 w-36 items-center gap-1.5 rounded-lg bg-fill px-2 text-xs">
-                  <FileText size={16} className="shrink-0 text-ink-3" />
-                  <span className="line-clamp-2 [overflow-wrap:anywhere]">{a.file.name}</span>
-                </span>
-              )}
-              {!a.ref && !a.error && <span className="absolute right-1.5 bottom-0 left-0 h-[2px] origin-left rounded-full bg-ink-3 transition-transform" style={{ transform: `scaleX(${a.file.size ? a.sent / a.file.size : 0})` }} />}
-              {a.error && (
-                <Tip label={a.error}>
-                  <span className="absolute inset-x-0 bottom-0.5 text-center text-[10px] font-medium text-err">!</span>
-                </Tip>
-              )}
-              <button type="button" aria-label={t("composer.remove")} onClick={() => remove(a.key)} className="glass thick float absolute top-0 right-0 grid size-5 place-items-center rounded-full text-ink-2 hover:text-ink">
-                <X size={12} />
-              </button>
-            </li>
+          {shownNamed.map((id) => (
+            <NamedCard key={`s:${id}`} to={sessions?.find((x) => x.id === id)} remove={() => setNamed((ids) => ids.filter((x) => x !== id))} />
           ))}
+          {shownAtts.map((a) => {
+            // Its part sent, 0..1; a picture keeps its own shape, its height the row's.
+            const part = a.ref ? 1 : a.file.size ? a.sent / a.file.size : 0;
+            const going = !a.ref && !a.error;
+            return (
+              <li key={a.key} className="g-pop relative shrink-0 pt-1.5 pr-1.5">
+                <span className="relative block overflow-hidden rounded-lg shadow-[0_0_0_0.5px_var(--edge)]">
+                  {a.url ? (
+                    <img src={a.url} alt={a.file.name} className={cn("block h-14 w-auto max-w-40 min-w-10 object-cover", a.error && "opacity-50")} />
+                  ) : (
+                    <span className="flex h-14 w-36 items-center gap-1.5 bg-fill px-2 text-xs">
+                      <FileText size={16} className="shrink-0 text-ink-3" />
+                      <span className="line-clamp-2 [overflow-wrap:anywhere]">{a.file.name}</span>
+                    </span>
+                  )}
+                  {/* Going up: a veil over what has not gone yet, drawn back as it goes, and a ring
+                      in the middle; gone, it fades. Till then it cannot be sent (go). */}
+                  <span aria-hidden className={cn("pointer-events-none absolute inset-y-0 right-0 bg-paper/60 backdrop-blur-[1.5px] transition-[left,opacity] duration-(--dur-3) ease-(--ease-out)", !going && "opacity-0")} style={{ left: `${part * 100}%` }} />
+                  {going && (
+                    <span className="pointer-events-none absolute inset-0 grid place-items-center" role="progressbar" aria-label={t("composer.uploading")} aria-valuenow={Math.round(part * 100)}>
+                      <Ring part={part} />
+                    </span>
+                  )}
+                </span>
+                {a.error && (
+                  <Tip label={a.error}>
+                    <span className="absolute inset-x-0 bottom-0.5 text-center text-[10px] font-medium text-err">!</span>
+                  </Tip>
+                )}
+                <button type="button" aria-label={t("composer.remove")} onClick={() => remove(a.key)} className="glass thick float absolute top-0 right-0 grid size-5 place-items-center rounded-full text-ink-2 hover:text-ink">
+                  <X size={12} />
+                </button>
+              </li>
+            );
+          })}
         </ul>
         </div>
       </div>
@@ -369,7 +406,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
             else if (list.length && (e.key === "Enter" || e.key === "Tab") && !e.shiftKey) {
               const c = list[Math.min(at, list.length - 1)]!;
               if (!own(`/${c.name}`)) type(`/${c.name} `);
-            } else if (named.length && (e.key === "Enter" || e.key === "Tab") && !e.shiftKey) name(named[Math.min(at, named.length - 1)]!);
+            } else if (picks.length && (e.key === "Enter" || e.key === "Tab") && !e.shiftKey) name(picks[Math.min(at, picks.length - 1)]!);
+            // At the box's very start, Backspace takes the last session named, whole.
+            else if (e.key === "Backspace" && named.length && e.currentTarget.selectionStart === 0 && e.currentTarget.selectionEnd === 0) setNamed((ids) => ids.slice(0, -1));
             else if (shown && e.key === "Escape") setShut(text);
             else if (e.key === "Tab" && e.shiftKey) cycleMode();
             // In a turn, Ctrl or ⌘+Enter does what Enter does not: steer in (Claude Code's send now) or queue.
@@ -463,5 +502,36 @@ function Palette({ list, at, pick, point }: { list: Command[]; at: number; pick:
         </button>
       ))}
     </div>
+  );
+}
+
+/** A ring that fills as an upload goes. */
+function Ring({ part }: { part: number }) {
+  const r = 9;
+  const c = 2 * Math.PI * r;
+  return (
+    <svg width="24" height="24" viewBox="0 0 24 24" className="drop-shadow-[0_0_2px_var(--paper)]">
+      <circle cx="12" cy="12" r={r} fill="none" stroke="var(--fill-2)" strokeWidth="2.5" />
+      <circle cx="12" cy="12" r={r} fill="none" stroke="var(--ink)" strokeWidth="2.5" strokeLinecap="round" strokeDasharray={c} strokeDashoffset={c * (1 - Math.max(0.04, part))} transform="rotate(-90 12 12)" className="transition-[stroke-dashoffset] duration-(--dur-2) ease-(--ease-out)" />
+    </svg>
+  );
+}
+
+/** A session named, as a file is: its agent's mark, its title, its agent and short id; its ×. */
+function NamedCard({ to, remove }: { to?: Session; remove: () => void }) {
+  const list = useList();
+  return (
+    <li className="g-pop relative shrink-0 pt-1.5 pr-1.5">
+      <span className="flex h-14 w-44 items-center gap-2 rounded-lg bg-fill px-2.5">
+        {to ? <Logo agent={to.agent} size={16} /> : <MessageSquare size={16} className="text-ink-3" />}
+        <span className="min-w-0">
+          <span className="block truncate text-sm">{to ? titleOf(to) || tilde(to.cwd) : t("composer.goneSession")}</span>
+          {to && <span className="block truncate text-xs text-ink-3">{agentName(to.agent)} · {shortId(to.id, (list ?? []).map((x) => x.id))}</span>}
+        </span>
+      </span>
+      <button type="button" aria-label={t("composer.remove")} onClick={remove} className="glass thick float absolute top-0 right-0 grid size-5 place-items-center rounded-full text-ink-2 hover:text-ink">
+        <X size={12} />
+      </button>
+    </li>
   );
 }

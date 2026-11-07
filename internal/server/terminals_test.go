@@ -126,24 +126,20 @@ func (l *live) waitReply(as, id, text string) {
 	}
 }
 
-func (l *live) rules(as, id string, r api.Rules) int {
-	l.t.Helper()
-	return l.do(as, "PUT", "/api/terminals/"+id+"/rules", api.SetRules{Rules: r}, nil)
-}
-
-// The permission table, on every session route there is.
-func TestPermissions(t *testing.T) {
+// What terminals may do (access.go): everything, but Claude only the owner's own, set as the
+// terminal is made and never after. Without it a terminal sees Claude's sessions, nothing more.
+func TestClaudeOnlyRule(t *testing.T) {
 	l := start(t)
 	// 本机's own session, from the page.
 	var mine api.NewSessionReply
 	l.want(200, "web", "POST", "/api/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "mine"}, &mine)
 	l.waitReply("web", mine.ID, "ok: mine")
 
-	// A plugin: a person's ir gets its token.
+	// A plugin made without --owner: no Claude.
 	var tok api.Token
 	l.want(200, "socket", "POST", "/api/terminals/tokens", api.NewInvite{Name: "bot"}, &tok)
 	bot, botID := tok.Token, tok.Terminal.ID
-	if !strings.HasPrefix(bot, "ir_") || tok.Terminal.Kind != api.TerminalChannel || !tok.Terminal.Rules.MustApprove || tok.Terminal.Rules.SeeOthers {
+	if !strings.HasPrefix(bot, "ir_") || tok.Terminal.Kind != api.TerminalChannel || tok.Terminal.Rules.ClaudeOwner != nil {
 		t.Fatalf("token: %+v", tok.Terminal)
 	}
 	var me api.Me
@@ -152,129 +148,83 @@ func TestPermissions(t *testing.T) {
 		t.Fatalf("me: %+v", me)
 	}
 
-	// It sees nothing of 本机's, and may not use Claude.
+	// It sees 本机's Claude session and reads it, but may not use it nor start one.
 	var list []api.Session
 	l.want(200, bot, "GET", "/api/sessions", nil, &list)
-	if len(list) != 0 {
-		t.Fatalf("a channel sees 本机's sessions: %+v", list)
-	}
-	for _, p := range []string{"", "/messages", "/block?at=0.0"} {
-		l.want(404, bot, "GET", "/api/sessions/"+mine.ID+p, nil, nil)
-	}
-	l.want(404, bot, "POST", "/api/sessions/"+mine.ID+"/send", api.Send{Text: "hi"}, nil)
-	l.want(404, bot, "POST", "/api/sessions/"+mine.ID+"/stop", nil, nil)
-	l.want(404, bot, "GET", "/api/events?sub=session:"+mine.ID, nil, nil)
-	l.want(403, bot, "POST", "/api/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "x"}, nil)
-
-	// A channel manages nothing, its own table included.
-	full := tok.Terminal.Rules
-	full.Agents = append(full.Agents, api.AgentClaude)
-	if code := l.rules(bot, botID, full); code != 403 {
-		t.Fatalf("a channel set rules: %d", code)
-	}
-	l.want(403, bot, "GET", "/api/terminals", nil, nil)
-	l.want(403, bot, "POST", "/api/terminals/tokens", api.NewInvite{Name: "other"}, nil)
-
-	// Claude only from a person at the machine: not the web (here the local page, 本机 itself), not
-	// an agent's ir, whatever owner mark the request carries.
-	full.ClaudeOwner = &api.OwnerConfirm{By: "local", At: 1}
-	if code := l.rules("web", botID, full); code != 403 {
-		t.Fatalf("the web turned claude on: %d", code)
-	}
-	if code := l.rules("agent", botID, full); code != 403 {
-		t.Fatalf("an agent turned claude on: %d", code)
-	}
-	if code := l.rules("socket", botID, full); code != 200 {
-		t.Fatalf("claude from the machine: %d", code)
-	}
-	var ts api.Terminals
-	l.want(200, "agent", "GET", "/api/terminals", nil, &ts)
-	var row api.Terminal
-	for _, x := range ts.Terminals {
-		if x.ID == botID {
-			row = x
-		}
-	}
-	if row.Rules.ClaudeOwner == nil || row.Rules.ClaudeOwner.By != "local" || len(ts.Terminals) != 2 || !ts.Terminals[0].Local {
-		t.Fatalf("terminals: %+v", ts)
-	}
-	// An agent narrows (answers off, two commands) but does not widen.
-	narrow := row.Rules
-	narrow.Answer, narrow.AllCommands, narrow.Commands = false, false, []string{"/compact"}
-	if code := l.rules("agent", botID, narrow); code != 200 {
-		t.Fatalf("narrowing: %d", code)
-	}
-	wide := narrow
-	wide.SeeOthers = true
-	if code := l.rules("agent", botID, wide); code != 403 {
-		t.Fatalf("an agent widened: %d", code)
-	}
-
-	// Its own session: approvals on (a must-approve terminal), its tag on the message, its usage.
-	l.want(403, bot, "POST", "/api/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Mode: "bypassPermissions"}, nil)
-	var its api.NewSessionReply
-	l.want(200, bot, "POST", "/api/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "hello"}, &its)
-	l.waitReply(bot, its.ID, "ok: hello")
-	meta, _ := os.ReadFile(filepath.Join(l.cfg.StatePath(), "hold", its.ID, "session.json"))
-	if !strings.Contains(string(meta), `"mode":"manual"`) {
-		t.Errorf("a must-approve terminal's session: %s", meta)
-	}
-	l.want(200, bot, "GET", "/api/sessions", nil, &list)
-	if len(list) != 1 || list[0].ID != its.ID {
+	if len(list) != 1 || list[0].ID != mine.ID {
 		t.Fatalf("its list: %+v", list)
 	}
-	var page api.MessagePage
-	l.want(200, bot, "GET", "/api/sessions/"+its.ID+"/messages", nil, &page)
-	if len(page.Blocks) < 1 || page.Blocks[0].From != "bot" || page.Blocks[0].FromTerminal != botID || page.Blocks[0].Text != "hello" {
-		t.Fatalf("blocks: %+v", page.Blocks)
+	for _, p := range []string{"", "/messages"} {
+		l.want(200, bot, "GET", "/api/sessions/"+mine.ID+p, nil, nil)
 	}
-	inLog, _ := os.ReadFile(filepath.Join(l.cfg.StatePath(), "hold", its.ID, "in.log"))
-	if !strings.Contains(string(inLog), `[bot] hello`) {
-		t.Errorf("the agent did not see the tag: %s", inLog)
-	}
-	st := l.s.st
-	waitUsage(t, st, botID)
-
-	// Commands and answers as the table says.
-	l.want(403, bot, "POST", "/api/sessions/"+its.ID+"/send", api.Send{Text: "/mode bypassPermissions"}, nil)
-	l.want(403, bot, "POST", "/api/sessions/"+its.ID+"/answer", api.Answer{RequestID: "x", Kind: "permission", Allow: true}, nil)
-	// The page sees the plugin's session too (it sees others'), and answers.
-	l.want(200, "web", "GET", "/api/sessions/"+its.ID, nil, nil)
-
-	// The daily cap.
-	capped := narrow
-	capped.DailyTokens = 1
-	if code := l.rules("agent", botID, capped); code != 200 {
-		t.Fatalf("a cap: %d", code)
-	}
-	l.want(429, bot, "POST", "/api/sessions/"+its.ID+"/send", api.Send{Text: "more"}, nil)
-	// Directories: none but another.
-	dirs := capped
-	dirs.DailyTokens, dirs.AllDirs, dirs.Dirs = 0, false, []string{"/nowhere"}
-	if code := l.rules("web", botID, dirs); code != 200 {
-		t.Fatalf("dirs: %d", code)
-	}
-	l.want(403, bot, "POST", "/api/sessions", api.NewSession{Agent: api.AgentPi, Cwd: l.work}, nil)
-	l.want(404, bot, "GET", "/api/sessions/"+its.ID, nil, nil) // its cwd is out of bounds now
-	// The stream's list is the terminal's too.
-	resp, err := streamAs(l, bot, "/api/events?sub=list")
+	l.want(403, bot, "POST", "/api/sessions/"+mine.ID+"/send", api.Send{Text: "hi"}, nil)
+	l.want(403, bot, "POST", "/api/sessions/"+mine.ID+"/stop", nil, nil)
+	l.want(403, bot, "POST", "/api/sessions/"+mine.ID+"/answer", api.Answer{RequestID: "x", Kind: "permission", Allow: true}, nil)
+	l.want(403, bot, "PUT", "/api/sessions/"+mine.ID+"/mode", api.SetMode{Mode: "manual"}, nil)
+	l.want(403, bot, "POST", "/api/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "x"}, nil)
+	resp, err := streamAs(l, bot, "/api/events?sub=list,session:"+mine.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	line := firstState(t, resp)
-	if !strings.Contains(line, `"key":"list","value":[]`) {
-		t.Errorf("the stream's list: %s", line)
+	if line := firstState(t, resp); !strings.Contains(line, mine.ID) {
+		t.Errorf("the stream: %s", line)
 	}
 
-	// 本机 cannot change, nor be revoked; a revoked token stops working.
-	if code := l.rules("web", "local", full); code != 409 {
-		t.Errorf("本机's rules: %d", code)
+	// A channel manages nothing; there is no table to change any more.
+	l.want(403, bot, "GET", "/api/terminals", nil, nil)
+	l.want(403, bot, "POST", "/api/terminals/tokens", api.NewInvite{Name: "other"}, nil)
+	if code := l.do("socket", "PUT", "/api/terminals/"+botID+"/rules", map[string]any{"rules": map[string]any{}}, nil); code != 404 && code != 405 {
+		t.Errorf("the rules route: %d", code)
 	}
+	// Claude is not given after: a new token --owner for it is refused, and it stays without.
+	l.want(409, "socket", "POST", "/api/terminals/tokens", api.NewInvite{Name: "bot", Owner: true}, nil)
+	l.want(403, bot, "POST", "/api/sessions/"+mine.ID+"/send", api.Send{Text: "hi"}, nil)
+
+	// One made --owner by a person at the machine: Claude, and nothing held back (no approvals
+	// forced, every command).
+	var own api.Token
+	l.want(200, "socket", "POST", "/api/terminals/tokens", api.NewInvite{Name: "mybot", Owner: true}, &own)
+	if own.Terminal.Rules.ClaudeOwner == nil || own.Terminal.Rules.ClaudeOwner.By != "local" {
+		t.Fatalf("owner token: %+v", own.Terminal)
+	}
+	var its api.NewSessionReply
+	l.want(200, own.Token, "POST", "/api/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "hello"}, &its)
+	l.waitReply(own.Token, its.ID, "ok: hello")
+	meta, _ := os.ReadFile(filepath.Join(l.cfg.StatePath(), "hold", its.ID, "session.json"))
+	if strings.Contains(string(meta), `"mode":"manual"`) {
+		t.Errorf("approvals forced on: %s", meta)
+	}
+	var page api.MessagePage
+	l.want(200, own.Token, "GET", "/api/sessions/"+its.ID+"/messages", nil, &page)
+	if len(page.Blocks) < 1 || page.Blocks[0].From != "mybot" || page.Blocks[0].FromTerminal != own.Terminal.ID || page.Blocks[0].Text != "hello" {
+		t.Fatalf("blocks: %+v", page.Blocks)
+	}
+	inLog, _ := os.ReadFile(filepath.Join(l.cfg.StatePath(), "hold", its.ID, "in.log"))
+	if !strings.Contains(string(inLog), `[mybot] hello`) {
+		t.Errorf("the agent did not see the tag: %s", inLog)
+	}
+	st := l.s.st
+	waitUsage(t, st, own.Terminal.ID)
+	// A new token keeps its Claude.
+	l.want(200, "socket", "POST", "/api/terminals/tokens", api.NewInvite{Name: "mybot"}, &own)
+	if own.Terminal.Rules.ClaudeOwner == nil {
+		t.Error("a new token took Claude away")
+	}
+	// The one without Claude sees the owner's plugin's session too.
+	l.want(200, bot, "GET", "/api/sessions/"+its.ID, nil, nil)
+
+	var ts api.Terminals
+	l.want(200, "agent", "GET", "/api/terminals", nil, &ts)
+	if len(ts.Terminals) != 3 || !ts.Terminals[0].Local || ts.Terminals[0].Rules.ClaudeOwner == nil {
+		t.Fatalf("terminals: %+v", ts)
+	}
+
+	// 本机 cannot be revoked; a revoked token stops working, its row gone.
 	l.want(409, "socket", "DELETE", "/api/terminals/local", nil, nil)
-	l.want(200, "socket", "DELETE", "/api/terminals/bot", nil, nil)
-	l.want(401, bot, "GET", "/api/me", nil, nil)
-	if _, ok, _ := st.TerminalRules(botID); ok {
-		t.Error("the revoked terminal's rules stayed")
+	l.want(200, "socket", "DELETE", "/api/terminals/mybot", nil, nil)
+	l.want(401, own.Token, "GET", "/api/me", nil, nil)
+	if _, ok, _ := st.TerminalRules(own.Terminal.ID); ok {
+		t.Error("the revoked terminal's row stayed")
 	}
 }
 

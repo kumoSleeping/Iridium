@@ -26,13 +26,14 @@ const pushRulesSchema = `CREATE TABLE push_rules (
 		FROM push_settings WHERE NOT (needs_you AND error AND NOT turn_end AND NOT compact);
 	DROP TABLE push_settings;`
 
-// PushEvents is what is pushed.
+// PushEvents is what is pushed. A compaction you asked for is a turn's end; the agent's own is not
+// pushed (the user, 2026-11-08): the compact column is no longer read or written.
 type PushEvents struct {
-	NeedsYou, Error, TurnEnd, Compact bool
+	NeedsYou, Error, TurnEnd bool
 }
 
-// DefaultPushEvents: needs you and errors on, turn ends and compactions off.
-var DefaultPushEvents = PushEvents{NeedsYou: true, Error: true}
+// DefaultPushEvents: all on (the user, 2026-11-08).
+var DefaultPushEvents = PushEvents{NeedsYou: true, Error: true, TurnEnd: true}
 
 // The scopes of a push rule.
 const (
@@ -51,7 +52,7 @@ type PushRule struct {
 
 // PushRules is every rule there is, the defaults' among them if they were set.
 func (s *Store) PushRules() ([]PushRule, error) {
-	rows, err := s.db.Query(`SELECT scope, target, off, needs_you, error, turn_end, compact FROM push_rules ORDER BY scope, target`)
+	rows, err := s.db.Query(`SELECT scope, target, off, needs_you, error, turn_end FROM push_rules ORDER BY scope, target`)
 	if err != nil {
 		return nil, err
 	}
@@ -59,12 +60,12 @@ func (s *Store) PushRules() ([]PushRule, error) {
 	var out []PushRule
 	for rows.Next() {
 		var r PushRule
-		var n, e, t, c sql.NullBool
-		if err := rows.Scan(&r.Scope, &r.Target, &r.Off, &n, &e, &t, &c); err != nil {
+		var n, e, t sql.NullBool
+		if err := rows.Scan(&r.Scope, &r.Target, &r.Off, &n, &e, &t); err != nil {
 			return nil, err
 		}
 		if n.Valid {
-			r.Events = &PushEvents{NeedsYou: n.Bool, Error: e.Bool, TurnEnd: t.Bool, Compact: c.Bool}
+			r.Events = &PushEvents{NeedsYou: n.Bool, Error: e.Bool, TurnEnd: t.Bool}
 		}
 		out = append(out, r)
 	}
@@ -73,13 +74,13 @@ func (s *Store) PushRules() ([]PushRule, error) {
 
 // SetPushRule keeps r in place of the scope's rule before.
 func (s *Store) SetPushRule(r PushRule) error {
-	var n, e, t, c sql.NullBool
+	var n, e, t sql.NullBool
 	if r.Events != nil {
-		n, e, t, c = sql.NullBool{Bool: r.Events.NeedsYou, Valid: true}, sql.NullBool{Bool: r.Events.Error, Valid: true}, sql.NullBool{Bool: r.Events.TurnEnd, Valid: true}, sql.NullBool{Bool: r.Events.Compact, Valid: true}
+		n, e, t = sql.NullBool{Bool: r.Events.NeedsYou, Valid: true}, sql.NullBool{Bool: r.Events.Error, Valid: true}, sql.NullBool{Bool: r.Events.TurnEnd, Valid: true}
 	}
-	_, err := s.db.Exec(`INSERT INTO push_rules (scope, target, off, needs_you, error, turn_end, compact) VALUES (?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT (scope, target) DO UPDATE SET off = excluded.off, needs_you = excluded.needs_you, error = excluded.error, turn_end = excluded.turn_end, compact = excluded.compact`,
-		r.Scope, r.Target, r.Off, n, e, t, c)
+	_, err := s.db.Exec(`INSERT INTO push_rules (scope, target, off, needs_you, error, turn_end) VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT (scope, target) DO UPDATE SET off = excluded.off, needs_you = excluded.needs_you, error = excluded.error, turn_end = excluded.turn_end`,
+		r.Scope, r.Target, r.Off, n, e, t)
 	return err
 }
 

@@ -27,6 +27,8 @@ type Notice struct {
 	RequestID  string
 	Status     api.Status
 	Background bool
+	// Asked: a compaction you asked for (/compact), not the agent's own as its context ran full.
+	Asked bool
 }
 
 // Watch calls f with every notice from now on, in order per session. f runs on the session's

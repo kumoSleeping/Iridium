@@ -57,7 +57,7 @@ http.Serve(tcpListener, g.Wrap(mux))
 
 - 存储是 SQLite（`store.Store.Gate()`）；`JSONStore` 只留给门自己的测试。
 - `PUT /api/public` 换 `public.origin`：用新配置开一个新门换上，旧门 `CloseAll()` 断开它放进来的长连接。
-- 交互终端的权限表、确认、`ir` 管理命令见 `docs/api.md`“交互终端”。
+- 交互终端能做什么（只有 Claude 有区别）、确认、`ir` 管理命令见 `docs/api.md`“交互终端”。
 
 - 处理函数里 `gate.FromContext(ctx)` 拿到 `Identity{EndpointID, Name, Kind, Local}`；`CanManage()` 是面板或本机。
 - 长连接（事件流、WebSocket）调 `g.Track(r, closeFn)`，会话结束或终端被撤销时门会调 `closeFn`；连接自己结束时调返回的 `untrack`。
@@ -70,7 +70,6 @@ http.Serve(tcpListener, g.Wrap(mux))
 | `ir invite [名字] [--owner]` | `CreateInvite(name, owner)` → `InviteLink{ID, Name, URL, ExpiresAt}`（URL 带 TOKEN，只给确认面板看） |
 | `ir token <名字> [--owner]` | `CreateToken(name)` → `EndpointInfo`、TOKEN；`--owner` 时服务端再给它开 Claude |
 | `ir access` | `Access()` → 终端（含在线连接数、会话数）和未用邀请 |
-| `ir access <名字> --claude on\|off` | 服务端的 `PUT /api/terminals/{id}/rules`（开只认本机由人跑的 `ir`） |
 | `ir profile <名字> [--name] [--avatar]` | `UpdateProfile(ref, Profile{Name, Avatar, RemoveAvatar})` |
 | `ir revoke <名字>` | `Revoke(ref)`：终端或未用邀请；最后一个有 Passkey 的面板删不了（`ErrLastPasskey`） |
 
@@ -106,4 +105,4 @@ type Store interface {
 
 - 本机模式下“本机”没有可存的资料（`ServeProfile` 回 409 `local`）。
 - 节点（`ir invite --peer`）的签名请求。
-- 每个面板都有面板权，包括给别人开的面板（它能放宽自己的权限）；要分就在权限表里加一项。
+- 每个面板都有面板权，包括给别人开的面板；Claude 另算，只在建的时候定。

@@ -9,19 +9,18 @@ import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, KeyRound, Link2, LoaderCircle, Plus, Trash2, X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { ApiError, api } from "./api/client";
-import type { Agent, Rules, Terminal, Terminals } from "./api/types.gen";
+import type { Rules, Terminal } from "./api/types.gen";
 import { CardFrame, CardHead, MainKey, SecondKey } from "./card";
 import { ConfirmCard, saysOwner } from "./confirms";
-import { useMe, useTerminals, useWorkspaces } from "./data";
+import { useMe, useTerminals } from "./data";
 import { t, useLang } from "./i18n";
-import { LocalMark, Segmented } from "./me";
+import { LocalMark } from "./me";
 import { SecretHere } from "./secret";
 import { showSecret, useSecret } from "./secrets";
 import { Group, Item } from "./settings";
 import { useConfirms } from "./store";
 import { errText, toast } from "./toast";
-import { agentName, AGENTS, ago, Avatar, cn, IconKey, Logo, PopSurface, Switch, tilde, Tip, tokens } from "./ui";
-import { UsageGlance } from "./usage";
+import { ago, Avatar, cn, IconKey, Logo, PopSurface, Switch, Tip, tokens } from "./ui";
 
 
 const kindName = (x: Terminal) => (x.local ? t("term.local") : x.kind === "panel" ? t("term.panel") : t("term.channel"));
@@ -38,14 +37,14 @@ export function TerminalsPage({ onBack }: { onBack: () => void }) {
   return (
     <div className="flex h-full flex-col">
       <header className="flex h-10.5 shrink-0 items-center gap-1 px-1.5 pt-1.5">
-        <IconKey label={t("nav.settings")} onClick={onBack} tipSide="bottom" className="size-7">
+        <IconKey label={t("nav.me")} onClick={onBack} tipSide="bottom" className="size-7">
           <ChevronLeft size={16} />
         </IconKey>
         <h1 className="m-0 min-w-0 flex-1 truncate text-base font-semibold">{t("settings.terminals")}</h1>
         {q.isFetching && <LoaderCircle size={14} className="animate-spin text-ink-4" />}
         <NewTerminal />
       </header>
-      <div className="min-h-0 flex-1 overflow-y-auto pt-2 pb-4">
+      <div className="no-bar min-h-0 flex-1 overflow-y-auto pt-2 pb-4">
         <div className="flex flex-col gap-5 px-3">
           {(confirms.length > 0 || secretHere) && (
             <div className="flex flex-col gap-2">
@@ -56,7 +55,6 @@ export function TerminalsPage({ onBack }: { onBack: () => void }) {
             </div>
           )}
           {q.isError && <p className="m-0 text-sm text-ink-3">{errText(q.error)}</p>}
-          <UsageGlance label={t("usage.allRow")} />
           <section className="flex flex-col" aria-label={t("settings.terminals")}>
             {list.map((x) => (
               <TerminalRow key={x.id} x={x} open={open === x.id} toggle={() => setOpen(open === x.id ? null : x.id)} />
@@ -118,18 +116,19 @@ function TerminalRow({ x, open, toggle }: { x: Terminal; open: boolean; toggle: 
             </span>
           </span>
         </span>
-        <span className="hidden shrink-0 gap-1 sm:flex">
-          {AGENTS.filter((a) => x.rules.agents?.includes(a)).map((a) => (
-            <Logo key={a} agent={a} size={13} />
-          ))}
-        </span>
+        {hasClaude(x.rules) && (
+          <Tip label={t("term.claudeYes")}>
+            <span className="hidden shrink-0 sm:flex">
+              <Logo agent="claude" size={13} />
+            </span>
+          </Tip>
+        )}
         <ChevronRight size={15} className="shrink-0 text-ink-4 transition-transform duration-(--dur-2)" style={{ transform: open ? "rotate(90deg)" : undefined }} />
       </button>
       {open &&
         (x.local ? (
           <div className="g-fade flex flex-col gap-2 pt-1 pr-2 pl-2 sm:pl-[52px]">
             <p className="m-0 text-sm text-ink-3">{t("term.localHint")}</p>
-            <UsageGlance terminal={x.id} label={t("usage.title")} />
           </div>
         ) : (
           <Detail x={x} />
@@ -138,7 +137,7 @@ function TerminalRow({ x, open, toggle }: { x: Terminal; open: boolean; toggle: 
   );
 }
 
-/** A terminal opened: its name, its permission table, revoking it. */
+/** A terminal opened: its name, whether it has Claude, revoking it. */
 function Detail({ x }: { x: Terminal }) {
   const qc = useQueryClient();
   const [name, setName] = useState(x.name);
@@ -170,8 +169,10 @@ function Detail({ x }: { x: Terminal }) {
           className="no-ring h-8 w-40 rounded-md bg-fill px-2 text-sm"
         />
       </Item>
-      <UsageGlance terminal={x.id} label={t("usage.title")} />
-      <RulesEditor x={x} />
+      {/* Read only: Claude is set as a terminal is made (the user, 2026-11-08). */}
+      <Item label={<span className="flex items-center gap-2"><Logo agent="claude" size={15} />Claude</span>} hint={t(hasClaude(x.rules) ? "term.claudeYes" : "term.claudeNo")}>
+        <span className="text-sm text-ink-2">{hasClaude(x.rules) ? t("term.on") : t("term.off")}</span>
+      </Item>
       <div className="flex flex-col gap-2">
         {sure ? (
           <CardFrame label={t("term.revokeTitle", { name: x.name })}>
@@ -206,148 +207,8 @@ function Detail({ x }: { x: Terminal }) {
   );
 }
 
-/** Claude is on: the server marked the terminal the owner's own. */
-export const hasClaude = (r: Rules) => !!r.claudeOwner && (r.agents ?? []).includes("claude");
-
-/** A terminal's permission table (docs/api.md "权限表"), each change saved at once. Claude shows,
- *  on or off, and may be turned off; only a person turns it on (Claude's terms: the owner's own
- *  terminals only): here on a panel that has Claude, or with ir at the machine. */
-function RulesEditor({ x }: { x: Terminal }) {
-  const qc = useQueryClient();
-  const owner = saysOwner(useMe().data);
-  const ws = useWorkspaces().data ?? [];
-  const [r, setR] = useState<Rules>(x.rules);
-  const [saving, setSaving] = useState(false);
-  useEffect(() => setR(x.rules), [x.rules]);
-  const put = async (next: Rules) => {
-    const was = r;
-    setR(next);
-    setSaving(true);
-    try {
-      const got = await api.setRules(x.id, { rules: next });
-      qc.setQueryData<Terminals | null>(["terminals"], (d) => d && { ...d, terminals: d.terminals.map((y) => (y.id === x.id ? got : y)) });
-    } catch (e) {
-      setR(was);
-      toast(t("err.rules"), { error: true, description: errText(e) });
-    } finally {
-      setSaving(false);
-    }
-  };
-  const agents = r.agents ?? [];
-  const claude = hasClaude(r);
-  const toggleAgent = (a: Agent) => void put({ ...r, agents: agents.includes(a) ? agents.filter((y) => y !== a) : [...agents, a] });
-  const flag = (k: "seeOthers" | "filesIn" | "filesOut" | "answer" | "mustApprove" | "secretsSet", label: string, hint?: string) => (
-    <Item label={label} hint={hint}>
-      <Switch label={label} on={!!r[k]} onChange={(v) => void put({ ...r, [k]: v })} />
-    </Item>
-  );
-  return (
-    <Group title={saving ? `${t("me.perms")} ·` : t("me.perms")}>
-      <Item label={t("perm.agents")}>
-        <div className="flex gap-1">
-          {AGENTS.filter((a) => a !== "claude").map((a) => (
-            <Tip key={a} label={agentName(a)}>
-              <button
-                type="button"
-                aria-pressed={agents.includes(a)}
-                aria-label={agentName(a)}
-                onClick={() => toggleAgent(a)}
-                className={cn("g-press grid size-8 place-items-center rounded-md pointer-coarse:size-10", agents.includes(a) ? "bg-paper shadow-[0_0_0_0.5px_var(--edge),0_1px_2px_var(--edge)]" : "opacity-35 grayscale hover:opacity-60")}
-              >
-                <Logo agent={a} size={16} />
-              </button>
-            </Tip>
-          ))}
-        </div>
-      </Item>
-      <Item label={agentName("claude")} hint={claude ? (owner ? t("term.claudeOnHintPanel") : t("term.claudeOnHint")) : owner ? t("term.claudeOffHintPanel") : t("term.claudeOffHint", { name: /\s/.test(x.name) ? `"${x.name}"` : x.name })}>
-        <span className="flex items-center gap-1">
-          <span className={cn("px-1 text-sm", claude ? "text-ink-2" : "text-ink-3")}>{claude ? t("term.on") : t("term.off")}</span>
-          {claude && (
-            <button type="button" onClick={() => void put({ ...r, agents: agents.filter((y) => y !== "claude"), claudeOwner: undefined })} className="g-press h-8 rounded-md px-2.5 text-sm text-ink-2 hover:bg-fill">
-              {t("term.claudeTurnOff")}
-            </button>
-          )}
-          {!claude && owner && (
-            <button type="button" onClick={() => void put({ ...r, agents: [...agents, "claude"] })} className="g-press h-8 rounded-md px-2.5 text-sm text-ink-2 hover:bg-fill">
-              {t("term.claudeTurnOn")}
-            </button>
-          )}
-        </span>
-      </Item>
-      <Item label={t("term.places")} hint={r.allDirs ? undefined : placesHint(r, ws)}>
-        <Segmented
-          label={t("term.places")}
-          value={r.allDirs ? "all" : "some"}
-          onChange={(v) => void put({ ...r, allDirs: v === "all" })}
-          items={[
-            { v: "all", label: t("term.allPlaces"), icon: <span className="px-1 text-xs">{t("term.allPlaces")}</span> },
-            { v: "some", label: t("term.somePlaces"), icon: <span className="px-1 text-xs">{t("term.somePlaces")}</span> },
-          ]}
-        />
-      </Item>
-      {!r.allDirs && (
-        <div className="g-fade flex flex-col gap-2 pb-2">
-          {ws.length > 0 && (
-            <div className="flex flex-wrap gap-1.5">
-              {ws.map((w) => {
-                const on = (r.workspaces ?? []).includes(w.id);
-                return (
-                  <button key={w.id} type="button" aria-pressed={on} onClick={() => void put({ ...r, workspaces: on ? r.workspaces.filter((y) => y !== w.id) : [...(r.workspaces ?? []), w.id] })} className={cn("g-press h-7 rounded-md px-2.5 text-sm", on ? "bg-ink text-on-ink" : "bg-fill hover:bg-fill-2")}>
-                    {w.name}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-          <Lines label={t("term.dirs")} value={(r.dirs ?? []).map((d) => tilde(d)).join("\n")} save={(v) => void put({ ...r, dirs: v.split("\n").map((l) => l.trim()).filter(Boolean) })} />
-        </div>
-      )}
-      {flag("seeOthers", t("perm.others"))}
-      {flag("filesIn", t("perm.copyIn"))}
-      {flag("filesOut", t("perm.copyOut"))}
-      {flag("answer", t("perm.answer"))}
-      {flag("mustApprove", t("perm.mustApprove"), t("term.mustApproveHint"))}
-      {x.kind !== "panel" && flag("secretsSet", t("perm.secretsSet"), t("secrets.permHint"))}
-      <Item label={t("perm.daily")} hint={t("term.dailyHint")}>
-        <NumberIn value={Math.round((r.dailyTokens ?? 0) / 1000)} save={(k) => void put({ ...r, dailyTokens: k * 1000 })} label={t("perm.daily")} />
-      </Item>
-      <Item label={t("term.allCommands")}>
-        <Switch label={t("term.allCommands")} on={!!r.allCommands} onChange={(v) => void put({ ...r, allCommands: v })} />
-      </Item>
-      {!r.allCommands && <Lines label={t("term.commandsHint")} one value={(r.commands ?? []).join(" ")} save={(v) => void put({ ...r, commands: v.split(/\s+/).filter(Boolean).map((c) => (c.startsWith("/") ? c : `/${c}`)) })} />}
-    </Group>
-  );
-}
-
-const placesHint = (r: Rules, ws: { id: number; name: string }[]) => {
-  const n = (r.workspaces ?? []).length + (r.dirs ?? []).length;
-  return n ? [...(r.workspaces ?? []).map((id) => ws.find((w) => w.id === id)?.name ?? `#${id}`), ...(r.dirs ?? []).map((d) => tilde(d))].join(t("msg.sep")) : t("perm.none");
-};
-
-/** Text saved as it is left: lines (folders) or one line (commands). */
-function Lines({ label, value, save, one }: { label: string; value: string; save: (v: string) => void; one?: boolean }) {
-  const [v, setV] = useState(value);
-  useEffect(() => setV(value), [value]);
-  const done = () => v !== value && save(v);
-  const cls = "no-ring w-full rounded-md bg-fill px-2.5 py-1.5 font-mono text-xs leading-5 placeholder:font-sans placeholder:text-ink-3";
-  return one ? (
-    <input value={v} placeholder={label} aria-label={label} onChange={(e) => setV(e.target.value)} onBlur={done} onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()} className={cn(cls, "h-8")} />
-  ) : (
-    <textarea value={v} placeholder={label} aria-label={label} rows={Math.min(5, Math.max(2, v.split("\n").length))} onChange={(e) => setV(e.target.value)} onBlur={done} className={cn(cls, "resize-none")} />
-  );
-}
-
-function NumberIn({ value, save, label }: { value: number; save: (n: number) => void; label: string }) {
-  const [v, setV] = useState(String(value));
-  useEffect(() => setV(String(value)), [value]);
-  const done = () => {
-    const n = Math.max(0, Math.round(Number(v) || 0));
-    setV(String(n));
-    if (n !== value) save(n);
-  };
-  return <input inputMode="numeric" value={v} aria-label={label} onChange={(e) => setV(e.target.value.replace(/[^0-9]/g, ""))} onBlur={done} onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()} className="no-ring h-8 w-20 rounded-md bg-fill px-2 text-right text-sm tabular-nums" />;
-}
+/** Claude: the terminal was made the owner's own. Set then, never after (the user, 2026-11-08). */
+export const hasClaude = (r: Rules) => !!r.claudeOwner;
 
 /** The +: a new panel's invite (a public origin first) or a plugin's token, named; the secret then
  *  shows once. */

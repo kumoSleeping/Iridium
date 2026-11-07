@@ -107,14 +107,14 @@ func (s *Server) Handler(local bool) http.Handler {
 	// What carries transcripts goes out with the credentials' values masked (routes_secrets.go).
 	mux.HandleFunc("GET /api/sessions", s.masked(s.list))
 	mux.HandleFunc("POST /api/sessions", s.create)
-	mux.HandleFunc("GET /api/sessions/{id}", s.see(s.masked(s.get)))
-	mux.HandleFunc("GET /api/sessions/{id}/messages", s.see(s.masked(s.messages)))
-	mux.HandleFunc("GET /api/sessions/{id}/block", s.see(s.masked(s.block)))
+	mux.HandleFunc("GET /api/sessions/{id}", s.masked(s.get))
+	mux.HandleFunc("GET /api/sessions/{id}/messages", s.masked(s.messages))
+	mux.HandleFunc("GET /api/sessions/{id}/block", s.masked(s.block))
 	mux.HandleFunc("POST /api/sessions/{id}/send", s.send)
 	mux.HandleFunc("POST /api/sessions/{id}/interrupt", s.use(s.interrupt))
 	mux.HandleFunc("POST /api/sessions/{id}/stop", s.use(s.stop))
-	mux.HandleFunc("POST /api/sessions/{id}/answer", s.answering(s.answer))
-	mux.HandleFunc("POST /api/sessions/{id}/release", s.answering(s.release))
+	mux.HandleFunc("POST /api/sessions/{id}/answer", s.use(s.answer))
+	mux.HandleFunc("POST /api/sessions/{id}/release", s.use(s.release))
 	mux.HandleFunc("GET /api/events", s.masked(s.events))
 	s.terminalRoutes(mux)
 	s.secretRoutes(mux)
@@ -197,7 +197,7 @@ func (s *Server) list(w http.ResponseWriter, r *http.Request) {
 		s.error(w, err)
 		return
 	}
-	reply(w, http.StatusOK, s.visible(callerOf(r), l))
+	reply(w, http.StatusOK, l)
 }
 
 func (s *Server) create(w http.ResponseWriter, r *http.Request) {
@@ -279,7 +279,7 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 	if c.socket && (c.agent || c.session != "") {
 		req.Steer = true
 	}
-	if err := s.checkSend(c, r.PathValue("id"), req.Text, len(req.Attachments) > 0); err != nil {
+	if err := s.checkSend(c, r.PathValue("id")); err != nil {
 		s.error(w, err)
 		return
 	}
@@ -401,7 +401,6 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	_ = rc.Flush()
 	sub := s.hub.Subscribe(keys) // none it may carry: open all the same, pinging
 	defer sub.Close()
-	sub.Filter = s.filter(c)
 	_ = sub.Serve(r.Context(), w, func() { _ = rc.Flush() })
 }
 
@@ -421,8 +420,6 @@ func (s *Server) error(w http.ResponseWriter, err error) {
 		fail(w, http.StatusConflict, err.Error())
 	case errors.Is(err, context.DeadlineExceeded):
 		fail(w, http.StatusGatewayTimeout, "the agent did not answer in time")
-	case errors.Is(err, access.ErrCap):
-		fail(w, http.StatusTooManyRequests, err.Error())
 	case access.IsDenied(err):
 		fail(w, http.StatusForbidden, err.Error())
 	default:

@@ -29,13 +29,15 @@ func TestSecrets(t *testing.T) {
 		t.Fatalf("list: %s", raw)
 	}
 
-	// A plugin may not store one by default, nor list them.
+	// A plugin stores one and lists them, as every terminal (the user, 2026-11-08); deleting is a
+	// manager's.
 	var tok api.Token
 	l.want(200, "socket", "POST", "/api/terminals/tokens", api.NewInvite{Name: "bot"}, &tok)
 	bot := tok.Token
-	l.want(403, bot, "PUT", "/api/secrets/BOT_KEY", api.SetSecret{Value: "abcdefgh"}, nil)
-	l.want(403, bot, "GET", "/api/secrets", nil, nil)
+	l.want(200, bot, "PUT", "/api/secrets/BOT_KEY", api.SetSecret{Value: "abcdefgh"}, nil)
+	l.want(200, bot, "GET", "/api/secrets", nil, nil)
 	l.want(403, bot, "DELETE", "/api/secrets/GITHUB_TOKEN", nil, nil)
+	l.want(200, "web", "DELETE", "/api/secrets/BOT_KEY", nil, nil)
 
 	// An agent's ir: a confirmation, whose panel types the value; the agent learns only the outcome.
 	var p api.Pending
@@ -70,20 +72,15 @@ func TestSecrets(t *testing.T) {
 		t.Fatalf("uses: %+v", list)
 	}
 
-	// A session a channel without Claude opened: a confirmation only the owner's own may allow.
-	// (Claude for the fake agent while it opens the session, then off again.)
-	withClaude := tok.Terminal.Rules
-	withClaude.Agents = append(withClaude.Agents, api.AgentClaude)
-	withClaude.ClaudeOwner = &api.OwnerConfirm{By: "local"}
-	if code := l.rules("socket", tok.Terminal.ID, withClaude); code != 200 {
-		t.Fatalf("claude for the bot: %d", code)
-	}
+	// A session a terminal not known to be the owner's opened: a confirmation only the owner's own
+	// may allow. (The fake agent is Claude, which only the owner's own open: one opens it and is
+	// revoked after.)
+	var own api.Token
+	l.want(200, "socket", "POST", "/api/terminals/tokens", api.NewInvite{Name: "gone", Owner: true}, &own)
 	var its api.NewSessionReply
-	l.want(200, bot, "POST", "/api/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "token " + val + " here"}, &its)
+	l.want(200, own.Token, "POST", "/api/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "token " + val + " here"}, &its)
 	l.waitReply("web", its.ID, "ok: token [secret:GITHUB_TOKEN] here") // masked already
-	if code := l.rules("web", tok.Terminal.ID, tok.Terminal.Rules); code != 200 {
-		t.Fatalf("claude off: %d", code)
-	}
+	l.want(200, "socket", "DELETE", "/api/terminals/gone", nil, nil)
 	in := "agent-in:" + its.ID
 	one := api.UseSecrets{Names: []string{"GITHUB_TOKEN"}, Command: "gh auth"}
 	l.want(202, in, "POST", "/api/secrets/use", one, &p)
@@ -118,7 +115,7 @@ func TestSecrets(t *testing.T) {
 	l.want(200, "web", "PUT", "/api/secrets/NAS_PASSWORD", api.SetSecret{Scope: api.ScopeWorkspaces, Workspaces: []int64{99}}, nil)
 	l.want(403, "agent-in:"+its.ID, "POST", "/api/secrets/use", api.UseSecrets{Names: []string{"NAS_PASSWORD"}}, nil)
 	l.want(404, "agent", "POST", "/api/secrets/use", api.UseSecrets{Names: []string{"NOPE"}}, nil)
-	// A channel's secretsSet is not who may use them.
+	// Storing one is not saying who may use it.
 	l.want(403, bot, "PUT", "/api/secrets/NAS_PASSWORD", api.SetSecret{Scope: api.ScopeAll}, nil)
 
 	// What carries the transcript masks the value: the page of messages, the state, the list, the

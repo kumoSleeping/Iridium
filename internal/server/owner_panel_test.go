@@ -58,6 +58,7 @@ func TestOwnerFromPanels(t *testing.T) {
 	if code := as(t, guest, l.s.token, "POST", "", api.NewInvite{Name: "guestbot", Owner: true}, nil); code != 403 {
 		t.Fatalf("a panel without Claude said --owner: %d", code)
 	}
+	tok = api.Token{}
 	if code := as(t, guest, l.s.token, "POST", "", api.NewInvite{Name: "plainbot"}, &tok); code != 200 || access.HasClaude(tok.Terminal.Rules) {
 		t.Fatalf("a plain token from a panel: %d %+v", code, tok.Terminal.Rules)
 	}
@@ -103,17 +104,5 @@ func TestOwnerFromPanels(t *testing.T) {
 	l.want(200, "socket", "POST", "/api/confirms/"+p.Confirm.ID, api.ConfirmAnswer{Allow: true}, &ans)
 	if ans.Token == nil || ans.Token.Terminal.Rules.ClaudeOwner == nil || ans.Token.Terminal.Rules.ClaudeOwner.By != "local" {
 		t.Fatalf("本机 allowing: %+v", ans)
-	}
-
-	// --claude on: the owner's panel may, a panel without Claude may not.
-	plain := l.terminal("socket", tok.Terminal.ID).Rules
-	on := plain
-	on.Agents = append(on.Agents, api.AgentClaude)
-	if code := as(t, guest, l.s.setRules, "PUT", tok.Terminal.ID, api.SetRules{Rules: on}, nil); code != 403 {
-		t.Fatalf("a panel without Claude turned claude on: %d", code)
-	}
-	var got api.Terminal
-	if code := as(t, owner, l.s.setRules, "PUT", tok.Terminal.ID, api.SetRules{Rules: on}, &got); code != 200 || !access.HasClaude(got.Rules) || got.Rules.ClaudeOwner.By != "panel" {
-		t.Fatalf("the owner's panel turning claude on: %d %+v", code, got.Rules)
 	}
 }

@@ -30,7 +30,6 @@ func (s *Server) terminalRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/terminals/{id}/device", func(w http.ResponseWriter, r *http.Request) { s.setDevice(w, r, r.PathValue("id")) })
 	mux.HandleFunc("GET /api/terminals", s.manage(s.terminals))
 	mux.HandleFunc("DELETE /api/terminals/{id}", s.manage(s.revoke))
-	mux.HandleFunc("PUT /api/terminals/{id}/rules", s.manage(s.setRules))
 	mux.HandleFunc("POST /api/terminals/invites", s.manage(s.invite))
 	mux.HandleFunc("POST /api/terminals/tokens", s.manage(s.token))
 	mux.HandleFunc("GET /api/confirms", s.panelOnly(func(w http.ResponseWriter, r *http.Request) { reply(w, http.StatusOK, s.asks.pending()) }))
@@ -109,41 +108,6 @@ func (s *Server) revoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.gateDone(w, s.gate().Revoke(ref))
-}
-
-func (s *Server) setRules(w http.ResponseWriter, r *http.Request) {
-	var req api.SetRules
-	if !readJSON(w, r, &req) {
-		return
-	}
-	id := r.PathValue("id")
-	if id == gate.LocalEndpointID {
-		fail(w, http.StatusConflict, access.ErrLocal.Error())
-		return
-	}
-	info, ok := s.gate().Endpoint(id)
-	if !ok {
-		fail(w, http.StatusNotFound, "no such terminal")
-		return
-	}
-	c := callerOf(r)
-	next, err := widened(c, s.ownerSays(c), s.rulesOf(id, info.Kind, false), req)
-	switch {
-	case access.IsDenied(err):
-		forbid(w, err)
-		return
-	case err != nil:
-		fail(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	b, _ := json.Marshal(next)
-	if err := s.st.SetTerminalRules(id, b); err != nil {
-		s.error(w, err)
-		return
-	}
-	s.logf("server: %s set the permissions of %s (%s)", c.Name, info.Name, id)
-	s.publishList()
-	reply(w, http.StatusOK, s.terminalOf(info))
 }
 
 // setDevice sets the device terminal ref (ID or name; "" the caller) runs on.
@@ -275,14 +239,22 @@ func (s *Server) makeInvite(name string, owner bool) (*api.Invite, error) {
 	return out, nil
 }
 
-// makeToken gives channel name its token; ownerBy (ir token --owner, as ownerSays found it): it
-// gets Claude too. Without it, a channel that has Claude keeps it.
+// errClaudeFixed answers --owner for a channel there already is without Claude: Claude is set as a
+// terminal is made, never after (the user, 2026-11-08).
+var errClaudeFixed = errors.New("claude is set as a terminal is made: this channel has none, and a new token does not change that (revoke it and make it again with --owner)")
+
+// makeToken gives channel name its token; ownerBy (ir token --owner, as ownerSays found it): a new
+// channel gets Claude too. One there already keeps what it had, Claude or none.
 func (s *Server) makeToken(name, ownerBy string) (*api.Token, error) {
+	old, found := s.gate().Find(name)
+	if found && ownerBy != "" && old.Kind == gate.KindChannel && !access.HasClaude(s.rulesOf(old.ID, false)) {
+		return nil, errClaudeFixed
+	}
 	info, tok, err := s.gate().CreateToken(name)
 	if err != nil {
 		return nil, err
 	}
-	if ownerBy != "" {
+	if ownerBy != "" && !found {
 		if err := s.giveClaude(info, ownerBy); err != nil {
 			return nil, err
 		}
@@ -292,7 +264,7 @@ func (s *Server) makeToken(name, ownerBy string) (*api.Token, error) {
 
 // giveClaude turns Claude on for terminal info: it is the owner's own, as by says.
 func (s *Server) giveClaude(info gate.EndpointInfo, by string) error {
-	r := s.rulesOf(info.ID, info.Kind, false)
+	r := s.rulesOf(info.ID, false)
 	if access.HasClaude(r) {
 		return nil
 	}
@@ -463,7 +435,7 @@ func (s *Server) gateDone(w http.ResponseWriter, err error) {
 		reply(w, http.StatusConflict, map[string]string{"error": err.Error(), "nameError": ne.Code})
 	case errors.Is(err, gate.ErrNotFound):
 		fail(w, http.StatusNotFound, err.Error())
-	case errors.Is(err, gate.ErrLastPasskey), errors.Is(err, gate.ErrNotPublic), errors.Is(err, gate.ErrLocal):
+	case errors.Is(err, gate.ErrLastPasskey), errors.Is(err, gate.ErrNotPublic), errors.Is(err, gate.ErrLocal), errors.Is(err, errClaudeFixed):
 		fail(w, http.StatusConflict, err.Error())
 	default:
 		s.error(w, err)

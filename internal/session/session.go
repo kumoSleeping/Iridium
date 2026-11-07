@@ -26,6 +26,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/config"
 	"github.com/kumoSleeping/iridium/internal/hub"
+	"github.com/kumoSleeping/iridium/internal/irhelp"
 	"github.com/kumoSleeping/iridium/internal/platform"
 	"github.com/kumoSleeping/iridium/internal/store"
 )
@@ -33,8 +34,27 @@ import (
 // UnitPrefix names the holders' units; tests use iridium-test-.
 const UnitPrefix = "iridium-hold-"
 
-// SystemPrompt is appended to every hosted agent's system prompt (plan "ir").
-const SystemPrompt = "在需要时用 ir 开别的 agent 会话、发消息、等结果、跨机器拷文件；见 ir --help。要密码、API key 时用 ir secret set 让人在网页填，用 ir run 带进命令，别让人贴进对话。要给人看或下载文件时，在回复最后单独一行写 [文件] `绝对路径`（一个文件一行），网页把它显示成图片或下载卡片；别的写法（提到路径、链接、图片语法）都只是文字\n"
+// SystemPrompt is appended to every hosted agent's system prompt (plan "ir"), written anew at each
+// start of its process: ir's agent commands (irhelp), how to ask for a secret, hand over a file
+// and title the session (transcript/named.go), and lang, the user's language as the web settings
+// set it ("zh", "en"; "" leaves that line out).
+func SystemPrompt(lang string) string {
+	var b strings.Builder
+	b.WriteString("This session is hosted by Iridium. Use its ir command to start other agent sessions, message them, wait for their results and copy files across machines:\n\n")
+	b.WriteString(irhelp.Agent())
+	b.WriteString(`Admin commands (invites, tokens, going public, updates): ir --help.
+
+Secrets: when you need a password or an API key, have the user type it in on the web page with ir secret set, and pass it into commands with ir run; never ask for it in the chat.
+Files: to show or hand the user a file, end your reply with a line [文件] ` + "`/absolute/path`" + ` per file; the page shows it as a picture or a download card. A path, a link or image syntax anywhere else is plain text.
+Title: when the session has no fitting title yet, or its subject has clearly changed, end your reply with a line [标题] <title>: a noun phrase of at most 16 Chinese characters or 6 English words that names the subject and the task, in the user's language, without punctuation, quotes, emoji or chit-chat. Otherwise leave the line out.
+`)
+	if name := langNames[lang]; name != "" {
+		b.WriteString("The user's language, as set in the web settings: " + name + ".\n")
+	}
+	return b.String()
+}
+
+var langNames = map[string]string{"zh": "Chinese", "en": "English"}
 
 // Discovery finds the sessions on disk that agents started by themselves (agents' record
 // directories, ~/.claude/sessions/, /proc). Another package implements it.

@@ -123,14 +123,9 @@ func (s *Server) secretUse(u store.SecretUse) api.SecretUse {
 	return api.SecretUse{Secret: u.Secret, Session: u.Session, Terminal: s.terminalName(u.Terminal), Command: u.Command, At: u.At}
 }
 
-// listSecrets: names, notes, scopes, who stored them, their uses; never a value. For panels, ir
-// (an agent's too: it learns which names there are) and channels that may store them.
+// listSecrets: names, notes, scopes, who stored them, their uses; never a value. For every
+// terminal, ir too (an agent's: it learns which names there are).
 func (s *Server) listSecrets(w http.ResponseWriter, r *http.Request) {
-	c := callerOf(r)
-	if !c.CanManage() && !c.socket && !s.rulesFor(c).SecretsSet {
-		forbid(w, errors.New("this terminal may not see the credentials"))
-		return
-	}
 	all, err := s.st.Secrets()
 	if err != nil {
 		s.error(w, err)
@@ -202,10 +197,6 @@ func (s *Server) setSecret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !c.panel() {
-		if !s.rulesFor(c).SecretsSet {
-			forbid(w, errors.New("this terminal may not store credentials"))
-			return
-		}
 		if req.Scope != "" || req.Workspaces != nil || req.Always != nil {
 			forbid(w, errors.New("only a web panel sets who may use a credential"))
 			return
@@ -287,7 +278,7 @@ func (s *Server) ownSession(c caller, session string) bool {
 		return true
 	}
 	info, ok := s.gate().Endpoint(id)
-	return ok && access.HasClaude(s.rulesOf(info.ID, info.Kind, false))
+	return ok && access.HasClaude(s.rulesOf(info.ID, false))
 }
 
 // useSecrets gives ir run the values it asked for, if their scopes let the session have them and

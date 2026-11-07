@@ -17,11 +17,13 @@ type Tunables struct {
 	QuotaResume bool
 	// Modes: the approval mode a new session of each agent starts in; none: the agent's own.
 	Modes map[string]string
+	// Lang: the user's language ("zh", "en"; "" not known), told agents from their next start.
+	Lang string
 }
 
 // TunablesOf are cfg's.
 func TunablesOf(cfg config.Config) Tunables {
-	return Tunables{IdleReap: cfg.IdleReap.D(), CrashResume: cfg.CrashResume, QuotaResume: cfg.QuotaResume, Modes: maps.Clone(cfg.Modes)}
+	return Tunables{IdleReap: cfg.IdleReap.D(), CrashResume: cfg.CrashResume, QuotaResume: cfg.QuotaResume, Modes: maps.Clone(cfg.Modes), Lang: cfg.Lang}
 }
 
 // Tune puts t in place of the live values: idle reaping, crash and quota resume from the next

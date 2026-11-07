@@ -8,6 +8,7 @@ import { memo, useState, type ComponentProps } from "react";
 import { defaultComponents, Streamdown, type ExtraProps, type StreamdownProps } from "streamdown";
 import { t } from "../i18n";
 import { cn } from "../ui";
+import { draftWords } from "./refs";
 
 function CodeBlock({ className, children }: ComponentProps<"code"> & ExtraProps) {
   const [copied, setCopied] = useState(false);
@@ -18,13 +19,15 @@ function CodeBlock({ className, children }: ComponentProps<"code"> & ExtraProps)
       <button
         type="button"
         aria-label={copied ? t("msg.copied") : t("msg.copy")}
+        title={lang}
         onClick={() => void navigator.clipboard.writeText(code).then(() => (setCopied(true), setTimeout(() => setCopied(false), 1500)))}
         className="g-press absolute top-1 right-1 grid size-7 place-items-center rounded-sm text-ink-3 opacity-0 transition-opacity group-hover/code:opacity-100 hover:bg-fill-2 hover:text-ink focus-visible:opacity-100 pointer-coarse:opacity-100"
       >
         {copied ? <Check size={14} /> : <Copy size={14} />}
       </button>
-      {lang && <span className="absolute top-1.5 right-9 font-mono text-[11px] text-ink-4 opacity-0 transition-opacity group-hover/code:opacity-100">{lang}</span>}
-      <pre className="overflow-x-auto px-3 py-2.5 whitespace-pre">
+      {/* Its words clear of the key: a one-line block was written under it (the user, 2026-11-08).
+          The language is the key's tip, not a label over the words. */}
+      <pre className="overflow-x-auto py-2.5 pr-10 pl-3 whitespace-pre">
         <code>{code}</code>
       </pre>
     </div>
@@ -56,12 +59,12 @@ export const Markdown = memo(function Markdown({ text, className }: { text: stri
   );
 });
 
-/** What the agent is writing: Markdown half written shows as it will be. live: words still come.
- *  No caret after them (the user, 2026-11-06). */
+/** What the agent is writing: Markdown half written shows as it will be, its title line left out
+ *  (draftWords). live: words still come. No caret after them (the user, 2026-11-06). */
 export function Draft({ text, live }: { text: string; live: boolean }) {
   return (
     <Streamdown {...MARKDOWN} isAnimating={live} className="prose-ir min-w-0 text-md">
-      {text}
+      {draftWords(text, live)}
     </Streamdown>
   );
 }
