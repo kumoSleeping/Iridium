@@ -50,9 +50,24 @@ for p in ${PLATFORMS:-linux/amd64 linux/arm64}; do
 	tar -C "$stage" -czf "$out/iridium-qq-$os-$arch.tar.gz" --owner=0 --group=0 --numeric-owner .
 	rm -rf "$stage"
 done
+# Mac and Windows: the executor (ir join, docs/exec.md) only, no QQ plugin.
+for p in ${EXEC_PLATFORMS:-darwin/arm64 darwin/amd64 windows/amd64 windows/arm64}; do
+	os=${p%/*} arch=${p#*/}
+	name=iridium-$os-$arch
+	bin=iridium
+	[ "$os" = windows ] && bin=iridium.exe
+	stage=$(mktemp -d)
+	CGO_ENABLED=0 GOOS=$os GOARCH=$arch "$GO" build -trimpath \
+		-ldflags "-s -w -X github.com/kumoSleeping/iridium/internal/version.Version=$version" \
+		-o "$stage/$bin" ./cmd/iridium
+	tar -C "$stage" -czf "$out/$name.tar.gz" --owner=0 --group=0 --numeric-owner .
+	echo "| $os/$arch（执行端） | $(mib "$(size "$stage/$bin")") | $(mib "$(size "$out/$name.tar.gz")") |" >>"$out/notes.md"
+	rm -rf "$stage"
+done
 (cd "$out" && sha256sum iridium-*.tar.gz >SHA256SUMS)
 {
 	echo
 	echo '安装：`tar xzf iridium-linux-amd64.tar.gz && ./iridium install -now`；之后在设置里或 `ir update` 更新。'
+	echo 'Mac、Windows 只做执行端：解压后 `iridium join https://<你的 Iridium>`，在网页上核对配对码后允许；`--install` 登录时自动启动。'
 } >>"$out/notes.md"
 cat "$out/notes.md"
