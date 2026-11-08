@@ -373,7 +373,7 @@ export const zh = {
   "confirm.pairCode": "配对码 {code}",
   "confirm.pairHint": "与那台机器上显示的配对码一致再允许。允许后 TOKEN 只发给那台机器",
   "confirm.pairOwner": "本人的机器",
-  "confirm.pairOwnerHint": "带 Claude，用那台机器上你本人的登录",
+  "confirm.pairOwnerHint": "带 Claude，用那里本人的登录",
   "confirm.pairDone": "{name} 已接入",
   "confirm.system": "系统",
   "confirm.program": "程序",

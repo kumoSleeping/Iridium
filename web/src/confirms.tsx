@@ -309,25 +309,31 @@ function ExecPairCard({ c }: { c: Confirm }) {
             </MainKey>
           </>
         }
+        extra={
+          (c.replace || canOwn) && (
+            <>
+              {c.replace && (
+                <div className="flex items-center gap-2">
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm">{t("confirm.pairReplace", { name: c.name ?? "" })}</span>
+                    <span className="block text-xs text-ink-3">{t("confirm.pairReplaceHint")}</span>
+                  </span>
+                  <Switch label={t("confirm.pairReplace", { name: c.name ?? "" })} on={replace} onChange={setReplace} />
+                </div>
+              )}
+              {canOwn && (
+                <div className="g-fade flex items-center gap-2">
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm">{bot ? t("term.withClaude") : t("confirm.pairOwner")}</span>
+                    <span className="block text-xs text-ink-3">{bot ? t("confirm.pairBotOwnerHint") : t("confirm.pairOwnerHint")}</span>
+                  </span>
+                  <Switch label={bot ? t("term.withClaude") : t("confirm.pairOwner")} on={own} onChange={setOwn} />
+                </div>
+              )}
+            </>
+          )
+        }
       />
-      {c.replace && (
-        <div className="mt-2.5 flex items-center gap-2 pl-[26px]">
-          <span className="min-w-0 flex-1">
-            <span className="block text-sm">{t("confirm.pairReplace", { name: c.name ?? "" })}</span>
-            <span className="block text-xs text-ink-3">{t("confirm.pairReplaceHint")}</span>
-          </span>
-          <Switch label={t("confirm.pairReplace", { name: c.name ?? "" })} on={replace} onChange={setReplace} />
-        </div>
-      )}
-      {canOwn && (
-        <div className="g-fade mt-2.5 flex items-center gap-2 pl-[26px]">
-          <span className="min-w-0 flex-1">
-            <span className="block text-sm">{bot ? t("term.withClaude") : t("confirm.pairOwner")}</span>
-            <span className="block text-xs text-ink-3">{bot ? t("confirm.pairBotOwnerHint") : t("confirm.pairOwnerHint")}</span>
-          </span>
-          <Switch label={bot ? t("term.withClaude") : t("confirm.pairOwner")} on={own} onChange={setOwn} />
-        </div>
-      )}
       {open && (
         <CardDetails>
           <Facts

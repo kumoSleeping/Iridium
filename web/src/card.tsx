@@ -16,24 +16,27 @@ export function CardFrame({ label, leaving, children, className }: { label: stri
   );
 }
 
-/** A card's top line: the icon, the title (a faint tag after it), the summary under it, cut to one
- *  line till the details open; the keys at the end, under it on a narrow card. */
-export function CardHead({ icon, title, tag, summary, mono, open, setOpen, keys }: { icon: ReactNode; title: string; tag?: string; summary?: ReactNode; mono?: boolean; open?: boolean; setOpen?: (o: boolean) => void; keys: ReactNode }) {
+/** A card's top line: the icon, the title (a faint tag after it, on a line of its own on a narrow
+ *  card), the summary under it, cut to one line till the details open; the keys at the end, under
+ *  it on a narrow card. extra: rows that change the answer (switches), under the head; on a
+ *  narrow card above the keys, so the keys come last. */
+export function CardHead({ icon, title, tag, summary, mono, open, setOpen, keys, extra }: { icon: ReactNode; title: string; tag?: string; summary?: ReactNode; mono?: boolean; open?: boolean; setOpen?: (o: boolean) => void; keys: ReactNode; extra?: ReactNode }) {
   const body = (
     <>
       <span className="mt-0.5 shrink-0 text-ink-2">{icon}</span>
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-1.5 text-sm font-semibold">
           <span className="truncate">{title}</span>
-          {tag && <span className="truncate font-normal text-ink-3">{tag}</span>}
+          {tag && <span className="hidden truncate font-normal text-ink-3 @[34rem]:inline">{tag}</span>}
           {setOpen && <ChevronDown size={13} className="shrink-0 text-ink-4 transition-transform duration-(--dur-2) ease-(--ease-out)" style={{ transform: open ? "rotate(180deg)" : undefined }} aria-label={t("ask.details")} />}
         </span>
+        {tag && <span className="block truncate text-xs leading-5 text-ink-3 @[34rem]:hidden">{tag}</span>}
         {summary && <span className={cn("block text-xs leading-5 text-ink-2", mono && "font-mono", open ? "break-all whitespace-pre-wrap" : "truncate")}>{summary}</span>}
       </span>
     </>
   );
   return (
-    <div className="flex flex-col gap-2.5 @[34rem]:flex-row @[34rem]:items-center">
+    <div className="flex flex-col gap-2.5 @[34rem]:flex-row @[34rem]:flex-wrap @[34rem]:items-center">
       {setOpen ? (
         <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="group flex min-w-0 flex-1 items-start gap-2.5 rounded-sm text-left">
           {body}
@@ -41,7 +44,8 @@ export function CardHead({ icon, title, tag, summary, mono, open, setOpen, keys 
       ) : (
         <div className="flex min-w-0 flex-1 items-start gap-2.5">{body}</div>
       )}
-      <div className="flex shrink-0 justify-end gap-1.5">{keys}</div>
+      {extra && <div className="order-1 grid gap-2.5 pl-[26px] @[34rem]:order-2 @[34rem]:basis-full">{extra}</div>}
+      <div className="order-2 flex shrink-0 justify-end gap-1.5 @[34rem]:order-1">{keys}</div>
     </div>
   );
 }
