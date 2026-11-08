@@ -30,11 +30,12 @@ func TestChatFilesAndAgents(t *testing.T) {
 	var tok api.Token
 	l.want(200, "socket", "POST", "/api/terminals/tokens", api.NewInvite{Name: "nobot"}, &tok)
 	// The chat opens Claude by default: not for a plugin made without --owner.
-	l.want(403, tok.Token, "POST", "/api/chat/qq:1/input", api.ChatInput{Text: "hi", Sender: "张三"}, nil)
+	l.want(403, tok.Token, "POST", "/api/chat/qq:1/input", api.ChatInput{Text: "/new claude"}, nil)
 
 	l.want(200, "socket", "POST", "/api/terminals/tokens", api.NewInvite{Name: "bot", Owner: true}, &tok)
 	bot, botID := tok.Token, tok.Terminal.ID
 	var in api.ChatInputReply
+	l.want(200, bot, "POST", "/api/chat/qq:1/input", api.ChatInput{Text: "/new claude"}, nil)
 	l.want(200, bot, "POST", "/api/chat/qq:1/input", api.ChatInput{Text: "hi", Sender: "张三"}, &in)
 	l.waitReply(bot, in.Session, "ok: hi")
 	var page api.MessagePage

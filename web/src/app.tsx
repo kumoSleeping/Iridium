@@ -296,6 +296,16 @@ export function App() {
   const dialogPage: SetsPage = over(r) ? setsPageOf(r) : (setsPage ?? "settings");
   const usageLook = !phone && dialogPage === "usage";
   const settingsAt = useSettingsAt(over(r) && !phone, usageLook);
+  // As tall as its page, up to that room (the user, 2026-11-08: no empty foot); the usage keeps its own.
+  const [setsBox, setSetsBox] = useState<HTMLDivElement | null>(null);
+  const fit = useFit(setsBox, over(r) && !phone && !usageLook);
+  const room = settingsAt?.height;
+  // The terminals and the credentials keep the settings' height, scrolling within (the user,
+  // 2026-11-08: going in, the dialog neither grows nor shrinks); opened on them first, they fit.
+  const settingsH = useRef<number | undefined>(undefined);
+  if (dialogPage === "settings" && fit.h !== undefined) settingsH.current = fit.h;
+  const boxH = (dialogPage === "terminals" || dialogPage === "secrets") && settingsH.current !== undefined ? settingsH.current : fit.h;
+  const settingsStyle: CSSProperties | undefined = settingsAt && boxH !== undefined && !usageLook && room !== undefined ? { ...settingsAt, height: `min(${boxH}px, ${typeof room === "number" ? `${room}px` : room})` } : settingsAt;
   // The usage panel floats as a row's menu does: one of them at a time (ui.tsx holdMenu).
   const underNow = useRef(under);
   underNow.current = under;
@@ -340,8 +350,10 @@ export function App() {
     >
       <Dialog.Portal>
         <Dialog.Popup
+          ref={setSetsBox}
           aria-label={t("nav.me")}
-          style={settingsAt}
+          style={settingsStyle}
+          data-glide-h={fit.glide || undefined}
           className={cn("g-dialog glass thick float fixed z-50 overflow-hidden rounded-lg text-ink outline-none", usageLook ? "w-[min(360px,calc(100vw-16px))]" : "w-[min(288px,calc(100vw-16px))]")}
         >
           {setsBody(dialogPage)}
@@ -405,6 +417,48 @@ function Empty({ below }: { below: number }) {
 /** While a part's code comes: the top bar's place, frosted and empty. */
 function Waiting() {
   return <div className="glass absolute inset-x-0 top-0 h-12 shadow-[0_0.5px_0_var(--edge)] pointer-coarse:h-13" />;
+}
+
+/** The settings' dialog as tall as the page in it would stand: its scroller's whole content and
+ *  what is around it. Measured before the first paint as it opens, then as the page or what is in it
+ *  changes, the dialog gliding to it (motion.css .g-dialog[data-glide-h]). */
+function useFit(el: HTMLElement | null, open: boolean) {
+  const [h, setH] = useState<number>();
+  const [glide, setGlide] = useState(false);
+  useLayoutEffect(() => {
+    if (!open) return setGlide(false);
+    if (!el) return;
+    const ro = new ResizeObserver(() => measure());
+    let watched: Element[] = [];
+    const measure = () => {
+      const root = el.firstElementChild?.firstElementChild as HTMLElement | null | undefined;
+      if (!root) return;
+      const sc = root.querySelector<HTMLElement>(".overflow-y-auto");
+      const want = [root, sc, sc?.firstElementChild].filter(Boolean) as Element[];
+      if (want.some((x, i) => x !== watched[i]) || want.length !== watched.length) {
+        ro.disconnect();
+        want.forEach((x) => ro.observe(x));
+        watched = want;
+      }
+      if (!sc) return setH(Math.ceil(root.scrollHeight));
+      // What the scroller holds, to its last child's foot and its padding under it (its
+      // scrollHeight is never less than itself: no measure of a page shorter than the dialog).
+      // In layout px: the dialog may be scaled as it unfolds.
+      const last = sc.lastElementChild;
+      const box = sc.getBoundingClientRect();
+      const scale = box.height / (sc.offsetHeight || 1) || 1;
+      const inner = last ? (last.getBoundingClientRect().bottom - box.top) / scale + sc.scrollTop + parseFloat(getComputedStyle(sc).paddingBottom) : 0;
+      setH(Math.ceil(root.offsetHeight - sc.clientHeight + inner));
+    };
+    measure();
+    // A page put in (another page, its code come): measured again.
+    const mo = new MutationObserver(() => measure());
+    mo.observe(el, { childList: true, subtree: true });
+    // Its first height at once; after that, a new one glides.
+    const f = requestAnimationFrame(() => setGlide(true));
+    return () => (ro.disconnect(), mo.disconnect(), cancelAnimationFrame(f));
+  }, [open, el]);
+  return { h, glide };
 }
 
 /** Where the 终端 panel stands, open: above the me key (me.tsx data-settings-key), its left edge on

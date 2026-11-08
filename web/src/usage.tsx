@@ -2,13 +2,13 @@
 // /api/usage). One page (#/settings/usage, from the settings), one chart for everyone (the user,
 // 2026-11-08): the total of those shown, a bar a day stacked by terminal, each terminal in its own
 // colour; under it the terminals, the most first, each its colour's dot. A row pressed takes it
-// out of the chart (and the total) or puts it back; its 仅此 shows it alone, and on the one shown
-// alone it reads 全部; 全选 over the list and the chip at the top put everyone back. Leaving or
+// out of the chart (and the total) or puts it back (no 仅此 key: the user, 2026-11-08); 全选 over
+// the list and the chip at the top put everyone back. Leaving or
 // coming back, the bars and the total glide to the new figures. A bar pressed narrows the page to
 // that day. A terminal's models are in its line and its tip; no page of its own. Over it all, the
 // harnesses (the user, 2026-11-08): all four at first; pressed, one leaves the whole page (chart,
 // total, list) or comes back, and the last one taken out puts all four back.
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CircleHelp, LoaderCircle, UserX, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { api } from "./api/client";
@@ -25,7 +25,8 @@ const dollars = (n: number) => (n >= 100 ? `$${Math.round(n)}` : `$${n.toFixed(2
 const RANGES = [1, 7, 30] as const;
 
 /** The last days' usage. The last answer stays while another range loads. */
-const useUsage = (days: number) => useQuery({ queryKey: ["usage", days], queryFn: () => api.usage(days, undefined, days === 1 ? "hour" : undefined), staleTime: 30_000, placeholderData: keepPreviousData });
+const usageQ = (days: number) => ({ queryKey: ["usage", days], queryFn: () => api.usage(days, undefined, days === 1 ? "hour" : undefined), staleTime: 30_000 });
+const useUsage = (days: number) => useQuery({ ...usageQ(days), placeholderData: keepPreviousData });
 const rangeName = (days: number) => (days === 1 ? t("usage.last24h") : t("usage.lastDays", { n: days }));
 
 type Sum = { turns: number; input: number; output: number; cacheRead: number; cacheWrite: number; cost: number };
@@ -179,6 +180,17 @@ export function UsagePage() {
   const [hidden, setHidden] = useState<ReadonlySet<Agent>>(() => new Set());
   const q = useUsage(days);
   const u = q.data;
+  // The range of what is shown: a range chosen shows only once its figures came, the page changing
+  // all at once, the bars rising (the user, 2026-11-08: not half the old and half the new).
+  const range = u ? (hourly(u.days[0] ?? "") ? 1 : u.days.length) : days;
+  // The other ranges asked for once this one is in: chosen, they are at hand.
+  const qc = useQueryClient();
+  const came = !!u;
+  useEffect(() => {
+    if (!came) return;
+    const id = setTimeout(() => RANGES.forEach((n) => void qc.prefetchQuery(usageQ(n))), 300);
+    return () => clearTimeout(id);
+  }, [came, qc]);
   const rows = useMemo(() => (u?.rows ?? []).filter((r) => !hidden.has(r.agent)), [u, hidden]);
   const s = useMemo(() => summarize(rows, day), [rows, day]);
   // Colours from every terminal in the range, so a harness taken out recolours no one.
@@ -197,7 +209,6 @@ export function UsagePage() {
   const all = shown.length === s.order.length;
   const solo = shown.length === 1 && many ? shown[0] : undefined;
   const everyone = () => setOff(new Set());
-  const only = (id: string) => setOff(new Set(s.order.filter((x) => x !== id)));
   // The last one shown taken out: everyone back, never an empty chart.
   const toggle = (id: string) => setOff(on(id) && shown.length === 1 ? new Set() : (o) => {
     const n = new Set(o);
@@ -233,7 +244,7 @@ export function UsagePage() {
           {q.isError && <p className="m-0 text-sm text-ink-3">{errText(q.error)}</p>}
           <section className="flex flex-col gap-3" aria-label={t("usage.title")}>
             <div className="flex min-h-4 min-w-0 items-center gap-1.5 text-xs text-ink-3">
-              {day ? chip("day", dayLabel(day), () => setDay(null)) : <span className="shrink-0">{rangeName(days)}</span>}
+              {day ? chip("day", dayLabel(day), () => setDay(null)) : <span className="shrink-0">{rangeName(range)}</span>}
               {!all &&
                 chip(
                   "who",
@@ -265,7 +276,7 @@ export function UsagePage() {
                 </div>
               </div>
             )}
-            {u ? <Stacks u={u} days={u.days} perDay={s.perDay} order={s.order} colors={colors} on={on} sel={day} onSel={setDay} week={days === 7} /> : <StacksWaiting days={days} />}
+            {u ? <Stacks key={range} u={u} days={u.days} perDay={s.perDay} order={s.order} colors={colors} on={on} sel={day} onSel={setDay} week={range === 7} /> : <StacksWaiting days={days} />}
           </section>
 
           <section className="flex flex-col" aria-label={t("usage.byTerminal")}>
@@ -308,9 +319,7 @@ export function UsagePage() {
                 whole={whole}
                 on={on(x.id)}
                 many={many}
-                alone={solo === x.id}
                 onToggle={() => toggle(x.id)}
-                onOnly={() => (solo === x.id ? everyone() : only(x.id))}
               />
             ))}
           </section>
@@ -392,14 +401,13 @@ function niceUnder(max: number) {
  *  total and each one's. week: each day's weekday under it, else the range's ends. */
 function Stacks({ u, days, perDay, order, colors, on, sel, onSel, week }: { u: Usage; days: string[]; perDay: Map<string, Map<string, Sum>>; order: string[]; colors: Map<string, string>; on: (id: string) => boolean; sel: string | null; onSel: (d: string | null) => void; week: boolean }) {
   const hours = hourly(days[0] ?? "");
-  const H = week ? 136 : 120;
   // Drawn first at nothing, the bars rise to their figures (their height's glide).
   const [risen, setRisen] = useState(false);
   useEffect(() => {
     const f = requestAnimationFrame(() => setRisen(true));
     return () => cancelAnimationFrame(f);
   }, []);
-  const room = H - 14; // the scale's label above the highest bar
+  const room = CHART_H - 14; // the scale's label above the highest bar
   const totals = days.map((d) => {
     let n = 0;
     for (const [id, s] of perDay.get(d) ?? []) if (on(id)) n += totalOf(s);
@@ -410,7 +418,7 @@ function Stacks({ u, days, perDay, order, colors, on, sel, onSel, week }: { u: U
   const today = days[days.length - 1];
   return (
     <div className="flex flex-col gap-1">
-      <div role="group" aria-label={t("usage.chart")} className="relative border-b border-fill-2" style={{ height: H }}>
+      <div role="group" aria-label={t("usage.chart")} className="relative border-b border-fill-2" style={{ height: CHART_H }}>
         <div
           aria-hidden
           className={cn("pointer-events-none absolute inset-x-0 border-t border-dashed border-fill-2 transition-[bottom,opacity] duration-(--dur-3) ease-(--ease-out)", !line && "opacity-0")}
@@ -427,24 +435,8 @@ function Stacks({ u, days, perDay, order, colors, on, sel, onSel, week }: { u: U
             const chosen = sel === d;
             const cost = [...(day ?? [])].reduce((a, [id, s]) => a + (on(id) ? s.cost : 0), 0);
             const label = `${dayLabel(d)} · ${t("usage.tokens", { n: tokens(v) })}${cost ? ` · ${dollars(cost)}` : ""}`;
-            const parts = order.filter((id) => on(id) && day?.get(id) && totalOf(day.get(id)!) > 0);
             return (
-              <Tip
-                key={d}
-                label={
-                  <span className="flex flex-col gap-0.5 tabular-nums">
-                    <span className="font-medium">{label}</span>
-                    {parts.length > 1 &&
-                      parts.slice(0, 6).map((id) => (
-                        <span key={id} className="flex items-center gap-1.5">
-                          <Dot color={colors.get(id)!} on />
-                          <span className="min-w-0 flex-1 truncate">{who(u, id).name}</span>
-                          <span className="ml-3">{tokens(totalOf(day!.get(id)!))}</span>
-                        </span>
-                      ))}
-                  </span>
-                }
-              >
+              <Tip key={d} label={<BarTip label={label} u={u} day={day} order={order} colors={colors} on={on} />}>
                 <button
                   type="button"
                   aria-label={label}
@@ -490,6 +482,28 @@ function Stacks({ u, days, perDay, order, colors, on, sel, onSel, week }: { u: U
   );
 }
 
+/** The chart's height, whatever the range: another range changes no height. */
+const CHART_H = 136;
+
+/** A bar's tip: the day's total, then each one's. Drawn only as it opens: 30 bars' lists made with
+ *  every draw made a range chosen stutter. */
+function BarTip({ label, u, day, order, colors, on }: { label: string; u: Usage; day: Map<string, Sum> | undefined; order: string[]; colors: Map<string, string>; on: (id: string) => boolean }) {
+  const parts = order.filter((id) => on(id) && day?.get(id) && totalOf(day.get(id)!) > 0);
+  return (
+    <span className="flex flex-col gap-0.5 tabular-nums">
+      <span className="font-medium">{label}</span>
+      {parts.length > 1 &&
+        parts.slice(0, 6).map((id) => (
+          <span key={id} className="flex items-center gap-1.5">
+            <Dot color={colors.get(id)!} on />
+            <span className="min-w-0 flex-1 truncate">{who(u, id).name}</span>
+            <span className="ml-3">{tokens(totalOf(day!.get(id)!))}</span>
+          </span>
+        ))}
+    </span>
+  );
+}
+
 /** The chart's place while the first answer comes: as tall as it will be, faint bars of no
  *  figure in it, and the line under it. */
 function StacksWaiting({ days }: { days: number }) {
@@ -497,7 +511,7 @@ function StacksWaiting({ days }: { days: number }) {
   const n = days === 1 ? 24 : days;
   return (
     <div aria-hidden className="g-wait flex flex-col gap-1">
-      <div className={cn("flex items-end border-b border-fill-2", week ? "gap-1.5" : "gap-0.5")} style={{ height: week ? 136 : 120 }}>
+      <div className={cn("flex items-end border-b border-fill-2", week ? "gap-1.5" : "gap-0.5")} style={{ height: CHART_H }}>
         {Array.from({ length: n }, (_, i) => (
           <span key={i} className="flex h-full min-w-0 flex-1 items-end justify-center">
             <span className={cn("block w-full rounded-t-[4px] bg-fill", week ? "max-w-9" : "max-w-6")} style={{ height: `${18 + ((i * 37) % 45)}%` }} />
@@ -516,9 +530,8 @@ const shortModel = (m: ModelSum) => m.model.split("/").pop() || agentName(m.agen
 
 /** A terminal: its colour's dot, its avatar and name, its models in a line under it, its total
  *  and its part of everyone's in its colour; the finer figures in its tip. Pressed, it leaves the
- *  chart (its dot a ring, its line faint) or comes back. On its right, 仅此 shows it alone (always
- *  there on a touch screen, else as the pointer is over it); on the one alone, 全部. */
-function TerminalRow({ x, u, color, whole, on, many, alone, onToggle, onOnly }: { x: TerminalSum; u: Usage | undefined; color: string; whole: number; on: boolean; many: boolean; alone: boolean; onToggle: () => void; onOnly: () => void }) {
+ *  chart (its dot a ring, its line faint) or comes back. */
+function TerminalRow({ x, u, color, whole, on, many, onToggle }: { x: TerminalSum; u: Usage | undefined; color: string; whole: number; on: boolean; many: boolean; onToggle: () => void }) {
   const w = who(u, x.id);
   const v = totalOf(x.sum);
   const tip = (
@@ -561,25 +574,10 @@ function TerminalRow({ x, u, color, whole, on, many, alone, onToggle, onOnly }: 
       </Tip>
     );
   return (
-    <div className="g-fade group -mx-1.5 flex items-center gap-1 rounded-md pr-1 hover:bg-fill">
-      <Tip label={tip} align="start">
-        <button type="button" aria-pressed={on} aria-label={w.name} onClick={onToggle} className="g-press flex min-w-0 flex-1 items-center rounded-md py-2 pl-1.5 text-left outline-offset-1">
-          {body}
-        </button>
-      </Tip>
-      <button
-        type="button"
-        onClick={onOnly}
-        aria-label={alone ? t("usage.allOf") : t("usage.onlyOf", { name: w.name })}
-        className={cn(
-          "g-press h-6 w-11 shrink-0 rounded-full text-xs text-ink-2 transition-[opacity,background-color] duration-(--dur-2) hover:bg-fill-2 hover:text-ink focus-visible:opacity-100",
-          alone ? "bg-fill-2 opacity-100" : "opacity-0 group-hover:opacity-100 pointer-coarse:opacity-100",
-        )}
-      >
-        <span key={String(alone)} className="g-fade block">
-          {alone ? t("usage.all") : t("usage.only")}
-        </span>
+    <Tip label={tip} align="start">
+      <button type="button" aria-pressed={on} aria-label={w.name} onClick={onToggle} className="g-fade g-press -mx-1.5 flex min-w-0 items-center rounded-md px-1.5 py-2 text-left outline-offset-1 hover:bg-fill">
+        {body}
       </button>
-    </div>
+    </Tip>
   );
 }

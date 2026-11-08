@@ -48,6 +48,7 @@ function SecretGiveCard({ c, at: here }: { c: Confirm; at: string }) {
       const r = await api.answerConfirm(c.id, allow);
       setLeaving(true);
       if (r.invite) showSecret({ invite: r.invite, at: here });
+      else if (r.token?.into) toast(t("confirm.tokenWritten", { path: r.token.into }));
       else if (r.token) showSecret({ token: r.token, at: here });
       else if (r.state === "failed") toast(t("err.confirm"), { error: true, description: r.error });
       else toast(allow ? t("toast.allowed") : t("toast.denied"));
@@ -87,7 +88,7 @@ function SecretGiveCard({ c, at: here }: { c: Confirm; at: string }) {
               [t("confirm.until"), at(c.expiresAt)],
             ]}
           />
-          <p className="m-0 text-xs text-ink-3">{c.kind === "invite" ? t("confirm.inviteHint") : t("confirm.tokenHint")}</p>
+          <p className="m-0 text-xs break-words text-ink-3">{c.kind === "invite" ? t("confirm.inviteHint") : c.into ? t("confirm.tokenInto", { path: c.into }) : t("confirm.tokenHint")}</p>
           {c.owner && <p className="m-0 text-xs text-ink-3">{blocked ? t("confirm.ownerElsewhere") : t("confirm.ownerHint")}</p>}
         </CardDetails>
       )}

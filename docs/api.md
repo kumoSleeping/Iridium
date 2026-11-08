@@ -57,7 +57,7 @@
 
 不认识的键、不给这个终端的键（`confirms` 只给面板）不让整条流失败：开流时先为每个发一条 `state`，`{key, value: null, ignored: "unknown" | "forbidden"}`，其余照常。
 
-所有终端看到同样的 `list` 和会话。终端被撤销、面板退出、`public.origin` 改了，流就断开。
+所有终端看到同样的 `list` 和会话。`Session.bots` 是聊天指着它的插件，`Session.viewers` 是现在开着 `session:<id>` 流的终端（页面开着这个会话）；有人进出就重发 `list`（2026-11-08）。终端被撤销、面板退出、`public.origin` 改了，流就断开。
 
 事件：
 
@@ -268,16 +268,17 @@ Web Push，总开关在配置 `push`，默认关。VAPID 密钥存在状态目�
 | `GET /api/chat/{key}` | → `ChatPointer` | 指针：当前会话，和 `/new` 用的 agent、目录 |
 | `GET /api/chat/{key}/commands` | → `ChatCommand[]` | Iridium 的命令（`iridium: true`），再加当前会话 agent 自己的，拿去设平台菜单 |
 | `GET /api/chat/{key}/files/{ref}` | → 文件 | 回复里的文件，支持 Range |
+| `POST /api/chat/{key}/uploads` | `NewUpload` → `Upload` | 往指针指着的会话传附件（没选会话回 409），之后同网页分块 `PUT`、`complete`，拿 `file.ref` 放进 `ChatInput.attachments` |
 | `POST /api/answer` | `CardAnswer` → `CardReply` | 见“卡片” |
 | `GET /api/events` | SSE | 不带 `sub`：这个插件的事件 |
 
 收消息：
 
-- 不以 `/` 开头：交给指针指着的会话，回合在跑就并进去（插话，同 IM）。没有指针（或会话没了）：按指针的默认（没有就 `claude` 和配置 `chatDir`，再没有是家目录）开一个。
+- 不以 `/` 开头：交给指针指着的会话，回合在跑就并进去（插话，同 IM）。没有指针（或会话没了）：不开会话、消息不发，`card` 是标题“未选择会话”的选会话卡片（同 `/use`），一个会话都没有时 `reply` 提示 `/new`。`/new` 按指针的默认（没有就 `claude` 和配置 `chatDir`，再没有是家目录）开。
 - 以 `/` 开头：是 Iridium 命令就在这里做，回答直接在 `reply`（Markdown 和去掉标记的文字）或 `card` 里；不是就原样交给 agent（透传）。
 - 来源标记：`[插件名·sender]`，`sender` 去掉 `[ ] / : ·`，最多 24 字。
 
-命令：`/new [agent] [目录]`（目录可以是绝对路径、`~/…` 或相对指针的目录）、`/clear`（同 `send` 的 `/clear`，指针换到新会话）、`/use [序号|ID 开头]`（不带参数给卡片）、`/ls`、`/stop`、`/model [值]`、`/mode [模式]`（不带参数给卡片）、`/status`、`/usage`、`/context`。
+命令：`/new [agent] [目录]`（目录可以是绝对路径、`~/…` 或相对指针的目录）、`/clear`（同 `send` 的 `/clear`，指针换到新会话）、`/use [ID 开头]`（不带参数给选组的卡片，见 `docs/qq.md`）、`/ls`、`/history [轮数]`（最近几轮，默认 5，最多 10，一条消息）、`/stop`、`/model [值]`、`/mode [模式]`（不带参数给卡片）、`/status`、`/usage`、`/context`。
 
 事件流：`GET /api/events`，带 `Last-Event-ID`（或 `?after=<序号>`）从它之后接着收；都不带就从现在起。每条 `id: <序号>`，`event:` 是类型，`data:` 是 `ChatEvent`（都带 `chat`、`session`）：
 
@@ -289,9 +290,32 @@ Web Push，总开关在配置 `push`，默认关。VAPID 密钥存在状态目�
 | `error` | `text`：agent 进程出错退出 |
 | `status` | `status`：状态灯变了 |
 
-- 只发指针指着这个会话的聊天。事件存库 24 小时（`outbox` 表），过期删掉。
+- 只发指针指着这个会话的聊天。例外：没有聊天指着的会话，它的提问（`card`、`card_done`）发给一个聊天（选法见下），卡片标题换成会话（`[CC] 名字`），原标题放到 `summary` 第一行；在那里答，指针不动。事件存库 24 小时（`outbox` 表），过期删掉。
+- `/use` 选中会话时，回复带最近 3 轮：`# 近期消息预览`，每轮 `[发送者] 消息`（60 字）、`[CC] 回复`（160 字），过长的去掉中间、留头尾，轮间 `---`；合计不超过 1500 字，在跑的写“进行中”，一条消息发完。
+
+会话找你（`ir bot "消息" [--to bot]`，2026-11-08）：`POST /api/bot`，`BotLetter{text, to?, caller}` → `BotReply{bot, name, chat, letter}`。只认 socket 上在会话里跑的 `ir`（`X-Iridium-Session` 或 `caller`），否则 400；`to` 是 Bot 终端的名字，没有回 404。
+
+- 有聊天指着这个会话：当作它的 `reply` 发过去。
+- 没有：选一个聊天发 `card`（`pick`）：标题是会话，`summary` 是消息，选项“进入会话”（选项 ID 是会话 ID，等于 `/use` 它）和“关闭”（`-`，什么都不做）。不点直接说话，照旧进聊天指着的会话。
+- 选哪个聊天：只看连着事件流的插件（都没连就不限），能用这个会话的；最近有过这个会话的聊天优先，其次你最后说话的聊天（QQ 一小时内被动回复不耗额度）。记录在 `chat_seen` 表（插件、聊天、会话、时间：发消息、跑命令、切会话时记）。一个都没有回 404。
 - `ref` 只对这个插件有效，签过名，重启后照样能用；`~/.ssh`、`~/.claude`、`~/.codex`、`~/.pi`、Iridium 的状态和配置目录里的文件一律不给。
 - 例子：`examples/plugin/echo_im.py`（只用标准库）把 stdin/stdout 当成一个假 IM。
+- `ChatInput.attachments`：上面传好的引用，路径写进消息、图片照样给 agent（同网页）；只有附件没有文字也行。
+
+## 官方扩展
+
+Iridium 不内置、但认得名字的插件（现在只有 QQ 机器人 `qq`，二进制 `iridium-qq`，见 `docs/qq.md`）。只有人能用（面板，或本机人跑的 `ir`）；agent 回 403，用扩展自己的命令行。
+
+| 请求 | 正文 → 回答 | 说明 |
+|---|---|---|
+| `GET /api/extensions` | → `Extension[]` | 装没装、正在做什么、上次的错、扩展自己报的状态（`iridium-qq status --json`）、扫码中的二维码 |
+| `POST /api/extensions/{id}/install` | → `Extension` | 从同版本的 Release 下二进制放在 Iridium 旁边（校验 sha256、跑一次）；开发版用旁边的 `<名>.dist` |
+| `POST /api/extensions/{id}/bind` | → `Extension` | 开始扫码，回答带第一张二维码；扫完 Iridium 建终端、把 TOKEN 写进扩展的目录（同 `--into`；本人才带 Claude）、启动服务 |
+| `DELETE /api/extensions/{id}/bind` | → `Extension` | 取消扫码 |
+| `POST /api/extensions/{id}/start`、`stop`、`pair` | → `Extension` | 服务开关；新配对码（在 `status.pair`） |
+| `DELETE /api/extensions/{id}` | → `Extension` | 停服务、删配置和二进制、撤销它的终端 |
+
+- Iridium 启动时（更新之后）把装了的扩展换成同版本，服务在跑就重启。
 
 ## 交互终端
 
@@ -313,7 +337,7 @@ Web Push，总开关在配置 `push`，默认关。VAPID 密钥存在状态目�
 | `GET /api/terminals` | → `Terminals` | `ir access`：所有终端（本机在最前）、有没有 Claude、今天的用量，和未用的邀请。没有秘密 |
 | `GET /api/usage?days=N&terminal=<ID、名字或 me>` | → `Usage` | `ir usage`：最近 N 天（默认 7，最多 366，今天在最后）按本地日期、终端、agent、模型合计的回合数、输入、输出、缓存读写 token 和费用（只有 agent 报了的）。不带 `terminal`：管理权看所有人，通道只看自己；看别的终端要管理权（否则 403）。`terminals` 给出行里还在的终端的名字和头像；`terminal` 为空的行是认不出谁发起的回合 |
 | `POST /api/terminals/invites` | `NewInvite` → `Invite` | `ir invite [名字]`：新面板的一次性链接（10 分钟），`qr` 是同一链接的二维码（SVG data URL）。要先有 `public.origin`（否则 409）。没有面板权时回 202 `Pending`。`owner: true`（`--owner`）：加入的面板带 Claude。本机由人跑的 `ir`、带 Claude 的面板（有 Passkey 的，不算没配 `public.origin` 的本机网页）直接给；agent 的回 202 `Pending`，只有带 Claude 的面板或本机 `ir` 能同意；别的 403 |
-| `POST /api/terminals/tokens` | `NewInvite` → `Token` | `ir token <名字>`：插件 TOKEN，只给这一次；已有的通道换新 TOKEN，旧的作废。没有面板权时回 202 `Pending`。`owner: true` 同上：新建的通道带 Claude；已有的通道换 TOKEN 时 Claude 照旧，没 Claude 的再带 `owner` 回 409（Claude 只在建的时候定） |
+| `POST /api/terminals/tokens` | `NewInvite` → `Token` | `ir token <名字>`：插件 TOKEN，只给这一次；已有的通道换新 TOKEN，旧的作废。没有面板权时回 202 `Pending`。`owner: true` 同上：新建的通道带 Claude；已有的通道换 TOKEN 时 Claude 照旧，没 Claude 的再带 `owner` 回 409（Claude 只在建的时候定）。`into`（`ir token --into 文件`）：由 Iridium 把 TOKEN 写进这个绝对路径（0600，不能落在 Iridium 和 agent 的目录里），回答和确认面板都不给 TOKEN，只给 `into` |
 | `DELETE /api/terminals/{id}` | → `{ok}` | `ir revoke`：终端（连同登录、Claude、连接）或未用的邀请；最后一个有 Passkey 的面板删不了（409） |
 
 ## 能做什么（`Rules`）

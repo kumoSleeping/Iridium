@@ -150,7 +150,7 @@ func TestPluginChat(t *testing.T) {
 	p := newPluginRig(t)
 	const key = "/api/chat/qq:private:1"
 	var cmds []api.ChatCommand
-	if p.do("qq", "GET", key+"/commands", nil, &cmds); len(cmds) != 10 || cmds[0].Name != "new" || !cmds[0].Iridium {
+	if p.do("qq", "GET", key+"/commands", nil, &cmds); len(cmds) != 11 || cmds[0].Name != "new" || !cmds[0].Iridium {
 		t.Fatalf("commands: %+v", cmds)
 	}
 	if code := p.do("nobody", "GET", key+"/commands", nil, nil); code != http.StatusUnauthorized {
@@ -159,7 +159,20 @@ func TestPluginChat(t *testing.T) {
 	events, closeEvents := p.stream("qq", "")
 	defer closeEvents()
 
-	// No pointer yet: a session opens in the chat directory, and the reply comes on the stream.
+	// No pointer yet: nothing opens; the chat gets a folder to open one in (its chat directory),
+	// then the agents, as the web's +.
+	var none api.ChatInputReply
+	if code := p.do("qq", "POST", key+"/input", api.ChatInput{Text: "hello"}, &none); code != 200 || none.Session != "" || none.Card == nil || none.Card.Options[0].ID != "n:d"+p.work {
+		t.Fatalf("no session: %d %+v", code, none.Card)
+	}
+	var agentsCard api.CardReply
+	if p.do("qq", "POST", "/api/answer", api.CardAnswer{Card: none.Card.ID, Option: none.Card.Options[0].ID}, &agentsCard); agentsCard.Card == nil || agentsCard.Card.Options[0].ID != "n:d"+p.work+":claude" {
+		t.Fatalf("agents: %+v", agentsCard.Card)
+	}
+	var opened api.CardReply
+	if p.do("qq", "POST", "/api/answer", api.CardAnswer{Card: agentsCard.Card.ID, Option: agentsCard.Card.Options[0].ID}, &opened); opened.Reply == nil || !strings.HasPrefix(opened.Reply.Text, "新会话") {
+		t.Fatalf("opened: %+v", opened)
+	}
 	var in api.ChatInputReply
 	if code := p.do("qq", "POST", key+"/input", api.ChatInput{Text: "hello", Sender: "张三"}, &in); code != 200 || in.Session == "" {
 		t.Fatalf("input: %d %+v", code, in)
@@ -181,6 +194,11 @@ func TestPluginChat(t *testing.T) {
 	if ptr = (api.ChatPointer{}); p.do("tg", "GET", key, nil, &ptr) != 200 || ptr.Session != "" {
 		t.Errorf("tg's pointer: %+v", ptr)
 	}
+	// With sessions there, a chat that chose none gets them to pick from.
+	var pick api.ChatInputReply
+	if p.do("tg", "POST", key+"/input", api.ChatInput{Text: "hi"}, &pick); pick.Card == nil || pick.Card.Title != "未选择会话" || len(pick.Card.Options) != 1 || pick.Card.Options[0].ID != "g:w0" || pick.Session != "" {
+		t.Errorf("tg without a session: %+v", pick)
+	}
 
 	// Iridium's commands answer at once; others pass through to the agent as typed.
 	var st api.ChatInputReply
@@ -193,12 +211,17 @@ func TestPluginChat(t *testing.T) {
 		t.Errorf("passed through: %+v", r.Reply)
 	}
 
-	// /use gives a card; picking from it moves the pointer.
+	// /use: a folder, then its sessions (and 新会话); picking one moves the pointer.
 	var use api.ChatInputReply
 	p.do("qq", "POST", key+"/input", api.ChatInput{Text: "/use"}, &use)
-	if use.Card == nil || use.Card.Kind != "pick" || len(use.Card.Options) != 1 {
-		t.Fatalf("use: %+v", use)
+	if use.Card == nil || use.Card.Kind != "pick" || len(use.Card.Options) != 1 || use.Card.Options[0].ID != "g:w0" {
+		t.Fatalf("use: %+v", use.Card)
 	}
+	var inFolder api.CardReply
+	if p.do("qq", "POST", "/api/answer", api.CardAnswer{Card: use.Card.ID, Option: use.Card.Options[0].ID}, &inFolder); inFolder.Card == nil || len(inFolder.Card.Options) != 2 || inFolder.Card.Options[0].ID != in.Session || inFolder.Card.Options[1].Text != "[NEW] 新会话" {
+		t.Fatalf("the folder: %+v", inFolder.Card)
+	}
+	use.Card = inFolder.Card
 	var picked api.CardReply
 	if code := p.do("qq", "POST", "/api/answer", api.CardAnswer{Card: use.Card.ID, Option: in.Session}, &picked); code != 200 || picked.Reply == nil || !strings.HasPrefix(picked.Reply.Text, "现在") {
 		t.Errorf("picked: %d %+v", code, picked)

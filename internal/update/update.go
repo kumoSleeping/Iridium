@@ -343,6 +343,55 @@ func (u *Updater) release(ctx context.Context, repo string) (Manifest, error) {
 	return m, nil
 }
 
+// Extension downloads the binary bin (an official plugin, iridium-qq) of release tag into a new
+// file in dir: the asset bin-<GOOS>-<GOARCH>.tar.gz, checked against its digest or SHA256SUMS,
+// run once (bin version). The caller renames it into place.
+func (u *Updater) Extension(ctx context.Context, bin, tag, dir string) (string, error) {
+	repo, ok := GitHubRepo(u.o.Source)
+	if !ok {
+		return "", errors.New("no GitHub repository to download from")
+	}
+	var r release
+	api := strings.TrimSuffix(u.o.GitHubAPI, "/") + "/repos/" + repo + "/releases/tags/" + url.PathEscape(tag)
+	if err := u.getJSON(ctx, api, "application/vnd.github+json", &r); err != nil {
+		return "", fmt.Errorf("github %s: release %s: %w", repo, tag, err)
+	}
+	want := bin + "-" + runtime.GOOS + "-" + runtime.GOARCH + ".tar.gz"
+	var a *Asset
+	var sums string
+	for _, x := range r.Assets {
+		switch x.Name {
+		case want:
+			sum, _ := strings.CutPrefix(x.Digest, "sha256:")
+			a = &Asset{URL: x.URL, SHA256: sum, Size: x.Size}
+		case "SHA256SUMS", "SHA256SUMS.txt":
+			sums = x.URL
+		}
+	}
+	if a == nil {
+		return "", fmt.Errorf("release %s has no %s", tag, want)
+	}
+	if a.SHA256 == "" && sums != "" {
+		listed, err := u.sums(ctx, sums)
+		if err != nil {
+			return "", err
+		}
+		a.SHA256 = listed[want]
+	}
+	if a.SHA256 == "" {
+		return "", fmt.Errorf("release %s: no sha256 for %s", tag, want)
+	}
+	tmp, err := u.fetch(ctx, *a, dir, bin, false)
+	if err != nil {
+		return "", err
+	}
+	if err := runs(ctx, tmp, tag); err != nil {
+		os.Remove(tmp)
+		return "", err
+	}
+	return tmp, nil
+}
+
 // assetPlatform is the GOOS-GOARCH of iridium-<GOOS>-<GOARCH>[.tar.gz].
 func assetPlatform(name string) (string, bool) {
 	rest, ok := strings.CutPrefix(name, "iridium-")
@@ -493,6 +542,11 @@ func (u *Updater) stageLocked(ctx context.Context, m Manifest) (string, error) {
 // download writes the asset's binary to a file in dir (so the rename stays on one file system),
 // once its sha256 matched; an archive gives the binary named iridium in it.
 func (u *Updater) download(ctx context.Context, a Asset, dir string) (string, error) {
+	return u.fetch(ctx, a, dir, "iridium", true)
+}
+
+// fetch is download for the binary named bin; track: publish the progress (the update's own).
+func (u *Updater) fetch(ctx context.Context, a Asset, dir, bin string, track bool) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.URL, nil)
 	if err != nil {
 		return "", err
@@ -508,14 +562,20 @@ func (u *Updater) download(ctx context.Context, a Asset, dir string) (string, er
 	}
 	if a.Size == 0 && resp.ContentLength > 0 {
 		a.Size = resp.ContentLength
-		u.set(func(s *api.UpdateState) { s.Size = a.Size })
+		if track {
+			u.set(func(s *api.UpdateState) { s.Size = a.Size })
+		}
 	}
 	f, err := os.CreateTemp(dir, staging+"*")
 	if err != nil {
 		return "", err
 	}
 	h := sha256.New()
-	n, err := io.Copy(io.MultiWriter(f, h, &progress{u: u, size: a.Size}), io.LimitReader(resp.Body, MaxBinary+1))
+	var w io.Writer = io.MultiWriter(f, h)
+	if track {
+		w = io.MultiWriter(f, h, &progress{u: u, size: a.Size})
+	}
+	n, err := io.Copy(w, io.LimitReader(resp.Body, MaxBinary+1))
 	if err == nil && n > MaxBinary {
 		err = errors.New("the download is too large")
 	}
@@ -526,13 +586,13 @@ func (u *Updater) download(ctx context.Context, a Asset, dir string) (string, er
 		err = fmt.Errorf("the download's sha256 is %x, not %s", h.Sum(nil), a.SHA256)
 	}
 	if err == nil && isArchive(a.URL) {
-		var bin string
-		bin, err = unpack(f.Name(), dir)
+		var out string
+		out, err = unpack(f.Name(), dir, bin)
 		os.Remove(f.Name())
 		if err != nil {
 			return "", err
 		}
-		return bin, nil
+		return out, nil
 	}
 	if err == nil {
 		err = os.Chmod(f.Name(), 0o755)
@@ -552,8 +612,8 @@ func isArchive(rawURL string) bool {
 	return strings.HasSuffix(p, ".tar.gz") || strings.HasSuffix(p, ".tgz")
 }
 
-// unpack takes the file named iridium out of a .tar.gz into a new file in dir.
-func unpack(archive, dir string) (string, error) {
+// unpack takes the file named bin out of a .tar.gz into a new file in dir.
+func unpack(archive, dir, bin string) (string, error) {
 	in, err := os.Open(archive)
 	if err != nil {
 		return "", err
@@ -567,12 +627,12 @@ func unpack(archive, dir string) (string, error) {
 	for {
 		hd, err := tr.Next()
 		if err == io.EOF {
-			return "", errors.New("the archive has no iridium in it")
+			return "", fmt.Errorf("the archive has no %s in it", bin)
 		}
 		if err != nil {
 			return "", fmt.Errorf("the archive: %w", err)
 		}
-		if hd.Typeflag != tar.TypeReg || path.Base(hd.Name) != "iridium" {
+		if hd.Typeflag != tar.TypeReg || path.Base(hd.Name) != bin {
 			continue
 		}
 		out, err := os.CreateTemp(dir, staging+"*")

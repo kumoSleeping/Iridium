@@ -99,6 +99,11 @@ type Session struct {
 	Workflow  *SessionWorkflow `json:"workflow,omitempty"`
 	Last      *LastSaid        `json:"last,omitempty"`
 	UpdatedAt int64            `json:"updatedAt"` // ms since the epoch
+	// Bots: the plugins (terminal IDs) whose chat is in this session now: the list shows their
+	// avatar and a Bot tag.
+	Bots []string `json:"bots,omitempty"`
+	// Viewers: the terminals (panels) with this session open now, a page's stream on it.
+	Viewers []string `json:"viewers,omitempty"`
 }
 
 // LastSaid is the last thing said in a session, on one line, at most 200 characters.

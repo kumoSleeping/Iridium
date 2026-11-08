@@ -686,6 +686,9 @@ func TestPublicHostAndOrigin(t *testing.T) {
 		{"ok", req{method: "POST", path: "/api/x"}, "", 200},
 		{"default port", req{path: "/api/x"}, "ir.example.com:443", 200},
 		{"loopback host", req{path: "/api/x"}, "127.0.0.1:7810", 421},
+		// A bearer token by a loopback name passes the host check (a local plugin), and is checked.
+		{"loopback with a token", req{path: "/api/x", header: map[string]string{"Authorization": "Bearer ir_nope"}}, "127.0.0.1:7810", 401},
+		{"other host with a token", req{path: "/api/x", header: map[string]string{"Authorization": "Bearer ir_nope"}}, "evil.example", 421},
 		{"other host", req{path: "/api/x"}, "evil.example", 421},
 		{"no origin", req{method: "POST", path: "/api/x", header: map[string]string{"Origin": ""}}, "", 403},
 		{"foreign origin", req{method: "POST", path: "/api/x", header: map[string]string{"Origin": "https://evil.example"}}, "", 403},
@@ -718,6 +721,9 @@ func (h *harness) doHost(q req, host string) *httptest.ResponseRecorder {
 	r := httptest.NewRequest(cmp(q.method, "GET"), q.path, nil)
 	r.Host = host
 	r.RemoteAddr = "198.51.100.7:40000"
+	for k, v := range q.header {
+		r.Header.Set(k, v)
+	}
 	r.AddCookie(&http.Cookie{Name: CookieName, Value: h.cookie})
 	w := httptest.NewRecorder()
 	h.h.ServeHTTP(w, r)

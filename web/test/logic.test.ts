@@ -241,7 +241,7 @@ describe("composer", () => {
 });
 
 describe("context parts", () => {
-  test("used largest first and darkest, then the reserve, then free", () => {
+  test("used largest first, then the reserve, then free; a colour by category, not by rank", () => {
     const p = ctxParts({
       used: 300,
       max: 1000,
@@ -259,6 +259,7 @@ describe("context parts", () => {
       ["buffer", 150],
       ["free", 550],
     ]);
+    expect(p.slice(0, 2).map((x) => x.tone)).toEqual(["var(--series-1)", "var(--series-3)"]);
   });
   test("only a total: free is the rest", () => {
     expect(ctxParts({ used: 300, max: 1000, at: 0 }).map((x) => [x.key, x.tokens])).toEqual([["free", 700]]);

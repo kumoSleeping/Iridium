@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -590,4 +591,26 @@ func turnStatus(st *api.SessionState) api.Status {
 		return api.StatusIdle
 	}
 	return st.Status
+}
+
+// ir bot "message" [--to bot]: the session it runs in tells the user through a bot. A chat that
+// points at the session gets it as its reply; else a letter, 进入会话 or 关闭 (docs/qq.md).
+func cmdBot(e *env, args []string) int {
+	o, err := parse(args, "to")
+	if err != nil {
+		return e.fail(err)
+	}
+	if len(o.pos) != 1 || strings.TrimSpace(o.pos[0]) == "" {
+		return e.failf(`usage: ir bot "消息" [--to bot]`)
+	}
+	from := caller()
+	if from == "" {
+		return e.failf("ir bot 在会话里运行（没有 IRIDIUM_SESSION）")
+	}
+	var r api.BotReply
+	if err := e.do("POST", "/api/bot", api.BotLetter{Text: o.pos[0], To: o.to, Caller: from}, &r); err != nil {
+		return e.fail(err)
+	}
+	fmt.Fprintf(e.out, "已发到 %s\n", cmp.Or(r.Name, r.Bot))
+	return exitDone
 }

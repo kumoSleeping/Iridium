@@ -158,6 +158,15 @@ var schema = []string{
 	// 13: who made a workspace (a terminal's ID); unused since workspaces are folder groups
 	// (2026-11-08), kept as the schema only grows.
 	`ALTER TABLE workspaces ADD COLUMN creator TEXT;`,
+	// 14: when a chat window last said something with a session in it (more.go: Seen), for what
+	// reaches the user through a bot.
+	`CREATE TABLE chat_seen (
+		plugin TEXT NOT NULL,
+		chat TEXT NOT NULL,
+		session TEXT NOT NULL,
+		at INTEGER NOT NULL,
+		PRIMARY KEY (plugin, chat, session)
+	);`,
 }
 
 // steps run in Go after the migration of their version, in the same transaction.

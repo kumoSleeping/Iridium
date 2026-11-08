@@ -30,9 +30,10 @@ var commands map[string]cmd
 
 func init() {
 	commands = map[string]cmd{
-		"new":     {"开新会话：/new [agent] [目录]", cmdNew},
+		"new":     {"开新会话", cmdNew},
 		"clear":   {"清空对话：同一处开新会话，旧的归档", cmdClear},
-		"use":     {"换到别的会话", cmdUse},
+		"use":     {"换会话", cmdUse},
+		"history": {"最近几轮对话", cmdHistory},
 		"ls":      {"列出会话", cmdLs},
 		"stop":    {"停掉当前回合", cmdStop},
 		"model":   {"换模型", cmdModel},
@@ -59,7 +60,7 @@ func cmdClear(s *Service, ctx context.Context, c Caller, p *store.ChatPointer, a
 	if id != "" && id != p.Session {
 		s.guard().Opened(c, id)
 		p.Session = id
-		if err := s.o.Store.SetPointer(*p); err != nil {
+		if err := s.setPointer(*p); err != nil {
 			return api.ChatInputReply{}, err
 		}
 	}
@@ -70,7 +71,7 @@ func cmdClear(s *Service, ctx context.Context, c Caller, p *store.ChatPointer, a
 }
 
 // Order is the commands' order in a menu.
-var Order = []string{"new", "clear", "use", "ls", "stop", "model", "mode", "status", "usage", "context"}
+var Order = []string{"new", "clear", "use", "ls", "history", "stop", "model", "mode", "status", "usage", "context"}
 
 // Commands is what the chat can send: Iridium's, then its session's agent's own.
 func (s *Service) Commands(c Caller, chat string) ([]api.ChatCommand, error) {
@@ -103,6 +104,9 @@ func reply(id, md string) (api.ChatInputReply, error) {
 var agents = []api.Agent{api.AgentClaude, api.AgentCodex, api.AgentPi, api.AgentDsh}
 
 func cmdNew(s *Service, ctx context.Context, c Caller, p *store.ChatPointer, args string) (api.ChatInputReply, error) {
+	if args == "" { // a folder, then an agent: as the web's +
+		return s.folderCard(ctx, c, p, true)
+	}
 	a := api.Agent(p.Agent)
 	f := strings.Fields(args)
 	if len(f) > 0 && slices.Contains(agents, api.Agent(strings.ToLower(f[0]))) {
@@ -127,7 +131,7 @@ func cmdNew(s *Service, ctx context.Context, c Caller, p *store.ChatPointer, arg
 	if err != nil {
 		return api.ChatInputReply{}, err
 	}
-	return reply(id, fmt.Sprintf("新会话 `%s` · %s · `%s`", short(id), cmp.Or(a, api.AgentClaude), cwd))
+	return reply(id, fmt.Sprintf("新会话 %s  \n%s", tag(a), tilde(cwd)))
 }
 
 // sessions are the ones a chat can use: not archived, the most recent first, ten.
@@ -140,10 +144,6 @@ func (s *Service) sessions(ctx context.Context, c Caller) ([]api.Session, error)
 	return l[:min(len(l), 10)], nil
 }
 
-func label(x api.Session) string {
-	return fmt.Sprintf("%s · %s", cmp.Or(x.Name, x.Title, "（还没说话）"), filepath.Base(x.Cwd))
-}
-
 func short(id string) string { return id[:min(len(id), 8)] }
 
 func cmdUse(s *Service, ctx context.Context, c Caller, p *store.ChatPointer, args string) (api.ChatInputReply, error) {
@@ -152,14 +152,10 @@ func cmdUse(s *Service, ctx context.Context, c Caller, p *store.ChatPointer, arg
 		return api.ChatInputReply{}, err
 	}
 	if args == "" {
-		if len(l) == 0 {
-			return reply("", "还没有会话，发 /new 开一个。")
-		}
-		card := &api.Card{Title: "换到哪个会话", Summary: []string{}}
-		for _, x := range l {
-			card.Options = append(card.Options, api.CardOption{ID: x.ID, Text: label(x), Primary: x.ID == p.Session})
-		}
-		return api.ChatInputReply{Session: p.Session, Card: s.newPick(c, p.Chat, "use", card)}, nil
+		return s.folderCard(ctx, c, p, false)
+	}
+	if r, ok, err := s.folderStep(ctx, c, p, args); ok {
+		return r, err
 	}
 	var chosen *api.Session
 	if n, err := strconv.Atoi(args); err == nil && n >= 1 && n <= len(l) {
@@ -183,30 +179,81 @@ func cmdUse(s *Service, ctx context.Context, c Caller, p *store.ChatPointer, arg
 		return api.ChatInputReply{}, fmt.Errorf("%w: no session %q", ErrNotFound, args)
 	}
 	p.Plugin, p.Session = c.ID, chosen.ID
-	if err := s.o.Store.SetPointer(*p); err != nil {
+	if err := s.setPointer(*p); err != nil {
 		return api.ChatInputReply{}, err
 	}
-	return reply(chosen.ID, "现在：**"+label(*chosen)+"**")
+	msg := "现在：" + sessionText(*chosen) + "  \n" + tilde(chosen.Cwd)
+	// The last rounds, as one message (QQ answers a message four times only).
+	if h := s.history(chosen.ID, switchRounds, switchChars); h != "" {
+		msg += "\n\n" + h
+	}
+	return reply(chosen.ID, msg)
 }
 
 func cmdLs(s *Service, ctx context.Context, c Caller, p *store.ChatPointer, args string) (api.ChatInputReply, error) {
-	l, err := s.sessions(ctx, c)
+	l, err := s.folders(ctx, c)
 	if err != nil {
 		return api.ChatInputReply{}, err
 	}
 	if len(l) == 0 {
 		return reply(p.Session, "还没有会话，发 /new 开一个。")
 	}
-	var b strings.Builder
-	for i, x := range l {
-		mark := ""
-		if x.ID == p.Session {
-			mark = " ←"
-		}
-		fmt.Fprintf(&b, "%d. %s · %s · `%s`%s\n", i+1, label(x), x.Agent, x.Status, mark)
+	// The groups as a tree, as the web lists them (the user, 2026-11-08); at most maxLs sessions.
+	type node struct {
+		text string
+		kids []node
 	}
-	return reply(p.Session, strings.TrimSuffix(b.String(), "\n"))
+	n := 0
+	var walk func(f *folder) []node
+	walk = func(f *folder) []node {
+		var out []node
+		for _, x := range f.sessions {
+			if n == maxLs {
+				break
+			}
+			n++
+			t := sessionText(x)
+			if x.ID == p.Session {
+				t = "**" + t + "**"
+			}
+			d := ago(x.UpdatedAt)
+			if x.Status == api.StatusRunning {
+				d = "进行中"
+			}
+			out = append(out, node{text: t + " " + d})
+		}
+		for _, g := range f.subs {
+			if kids := walk(g); len(kids) > 0 {
+				out = append(out, node{text: g.name + "/", kids: kids})
+			}
+		}
+		return out
+	}
+	var roots []node
+	for _, g := range l {
+		if kids := walk(g); len(kids) > 0 {
+			roots = append(roots, node{text: g.name, kids: kids})
+		}
+	}
+	lines := []string{"**会话**"}
+	var draw func(ns []node, indent string)
+	draw = func(ns []node, indent string) {
+		for i, x := range ns {
+			last := i == len(ns)-1
+			branch, more := "├── ", "│\u00a0\u00a0\u00a0"
+			if last {
+				branch, more = "└── ", "\u00a0\u00a0\u00a0\u00a0"
+			}
+			lines = append(lines, indent+branch+x.text)
+			draw(x.kids, indent+more)
+		}
+	}
+	draw(roots, "")
+	// Each line break a hard one (QQ's Markdown: two spaces before it).
+	return reply(p.Session, strings.Join(lines, "  \n"))
 }
+
+const maxLs = 30
 
 // current is the session the chat points at, or an error saying there is none.
 func (s *Service) current(c Caller, p *store.ChatPointer) (*api.SessionState, error) {
@@ -289,21 +336,24 @@ func cmdStatus(s *Service, ctx context.Context, c Caller, p *store.ChatPointer, 
 		return api.ChatInputReply{}, err
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "**%s**\n", label(st.Session))
-	fmt.Fprintf(&b, "- 会话：`%s` · %s · `%s`\n", short(st.ID), st.Agent, st.Cwd)
-	fmt.Fprintf(&b, "- 状态：%s", st.Status)
-	if st.QuotaUntil != 0 {
-		fmt.Fprintf(&b, "（等额度，%s 恢复）", time.UnixMilli(st.QuotaUntil).Format("01-02 15:04"))
-	}
-	fmt.Fprintf(&b, "\n- 模型：%s · 审批：%s", cmp.Or(modelName(st), "默认"), cmp.Or(st.Mode, "默认"))
+	fmt.Fprintf(&b, "**%s**\n", cmp.Or(st.Name, st.Title, filepath.Base(st.Cwd)))
+	fmt.Fprintf(&b, "- 会话：%s · `%s`\n", st.Agent, short(st.ID))
+	fmt.Fprintf(&b, "- 路径：%s\n", tilde(st.Cwd))
+	fmt.Fprintf(&b, "- 模型：%s", cmp.Or(modelName(st), "默认"))
 	if e := cmp.Or(st.Effort, st.EffortNow); e != "" {
-		fmt.Fprintf(&b, " · 思考：%s", e)
+		fmt.Fprintf(&b, " · %s", e)
 	}
 	if st.Ultracode != nil && st.Ultracode.On {
 		b.WriteString(" · UltraCode")
 	}
-	if st.Context != nil {
-		fmt.Fprintf(&b, "\n- 上下文：%s", contextLine(st.Context.Used, st.Context.Max))
+	if st.Context != nil && st.Context.Max > 0 {
+		fmt.Fprintf(&b, "\n- 上下文：%d%%", st.Context.Used*100/st.Context.Max)
+	}
+	if w := statusWord(st.Status); w != "" {
+		fmt.Fprintf(&b, "\n- 状态：%s", w)
+	}
+	if st.QuotaUntil != 0 {
+		fmt.Fprintf(&b, "\n- 等额度：%s 恢复", time.UnixMilli(st.QuotaUntil).Format("01-02 15:04"))
 	}
 	if n := len(st.Queue); n > 0 {
 		fmt.Fprintf(&b, "\n- 待发：%d 条", n)
@@ -312,6 +362,18 @@ func cmdStatus(s *Service, ctx context.Context, c Caller, p *store.ChatPointer, 
 		fmt.Fprintf(&b, "\n- 出错：%s", st.Error)
 	}
 	return reply(st.ID, b.String())
+}
+
+// statusWord is a status as /status says it; idle says nothing.
+func statusWord(s api.Status) string {
+	return map[api.Status]string{
+		api.StatusStarting:   "启动中",
+		api.StatusRunning:    "进行中",
+		api.StatusCompacting: "压缩中",
+		api.StatusWaiting:    "等你确认",
+		api.StatusError:      "出错",
+		api.StatusElsewhere:  "在别处运行",
+	}[s]
 }
 
 func contextLine(used, max int) string {

@@ -323,7 +323,10 @@ func bearer(r *http.Request) (string, bool) {
 // Wrap returns next behind the gate. Handlers can read the caller with FromContext.
 func (g *Gate) Wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !g.hostAllowed(r.Host) {
+		// A channel's bearer token is a secret no rebound page has: it may come by a loopback
+		// name (a plugin on this machine) even when the public origin is the only host.
+		_, hasToken := bearer(r)
+		if !g.hostAllowed(r.Host) && !(hasToken && loopbackName(hostOnly(r.Host))) {
 			writeJSON(w, http.StatusMisdirectedRequest, apiError{"bad_host"})
 			return
 		}

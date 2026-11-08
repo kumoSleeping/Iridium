@@ -105,6 +105,10 @@ type Me struct {
 type NewInvite struct {
 	Name  string `json:"name,omitempty"`
 	Owner bool   `json:"owner,omitempty"`
+	// Into (tokens only, ir token --into): the daemon writes the token into this file (absolute,
+	// 0600) and gives it to no one: not the asker, nor the panel that allows it. A plugin's setup
+	// asks so, its agent never seeing the token.
+	Into string `json:"into,omitempty"`
 }
 
 // Invite is a new panel invite. URL holds the secret: only a panel (or ir at a terminal) sees it.
@@ -120,7 +124,8 @@ type Invite struct {
 // Token is a channel's new token: shown once. Asking again replaces it.
 type Token struct {
 	Terminal Terminal `json:"terminal"`
-	Token    string   `json:"token"`
+	Token    string   `json:"token,omitempty"`
+	Into     string   `json:"into,omitempty"` // the file it went into (NewInvite.Into); no Token then
 }
 
 // Confirm is what an agent's ir asked for that only a panel may give (an invite link, a token, a
@@ -132,6 +137,7 @@ type Confirm struct {
 	// Name: the invite's or token's name; secret-set: the secret's.
 	Name      string `json:"name,omitempty"`
 	Owner     bool   `json:"owner,omitempty"`   // --owner: it gets Claude; only a panel that has Claude allows it
+	Into      string `json:"into,omitempty"`    // token: the file it goes into (NewInvite.Into)
 	Asker     string `json:"asker"`             // the terminal that asked (本机)
 	Session   string `json:"session,omitempty"` // the session whose agent asked, if known
 	CreatedAt int64  `json:"createdAt"`

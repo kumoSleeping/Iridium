@@ -2,7 +2,7 @@
 // popover shell, icon keys, agent logos with their status lamp, terminal avatars, switches.
 import { Popover } from "@base-ui/react/popover";
 import { Tooltip } from "@base-ui/react/tooltip";
-import { Plug, type LucideIcon } from "lucide-react";
+import { Bot, type LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ComponentProps, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import type { Agent, Status } from "./api/types.gen";
 import { t } from "./i18n";
@@ -344,11 +344,12 @@ export function LogoLamp({ agent, status, size = 16, ir }: { agent: Agent; statu
   );
 }
 
-/** A terminal's avatar, or its initial on a neutral disc; channel-type terminals (plugins, peers)
- *  carry a small plug on the corner, or badge another mark (a device: Monitor, Smartphone). */
+/** A terminal's avatar, or its initial on a neutral disc; channel-type terminals (plugins: bots)
+ *  carry a small bot on the corner, or badge another mark (a device: Monitor, Smartphone). */
 export function Avatar({ src, name, size = 20, channel, badge, badgeSize, badgeLabel, className }: { src?: string; name?: string; size?: number; channel?: boolean; badge?: LucideIcon; badgeSize?: number; badgeLabel?: string; className?: string }) {
   const [broken, setBroken] = useState<string | null>(null);
-  const mark = badge ?? (channel ? Plug : undefined);
+  // A plugin is a bot: the same mark as on the session list (the user, 2026-11-08).
+  const mark = badge ?? (channel ? Bot : undefined);
   return (
     <span className={cn("relative inline-block shrink-0", className)} style={{ width: size, height: size }}>
       {src && broken !== src ? (
@@ -358,7 +359,7 @@ export function Avatar({ src, name, size = 20, channel, badge, badgeSize, badgeL
           {[...(name ?? "?")][0]?.toUpperCase()}
         </span>
       )}
-      {mark && <Badge icon={mark} size={badgeSize ?? Math.max(10, Math.round(size * 0.5))} label={badgeLabel} />}
+      {mark && <Badge icon={mark} size={badgeSize ?? Math.max(10, Math.round(size * 0.5))} label={badgeLabel ?? (mark === Bot ? "Bot" : undefined)} />}
     </span>
   );
 }

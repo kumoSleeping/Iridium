@@ -19,6 +19,7 @@ const Help = `ir: this machine's Iridium on the command line (over its unix sock
   ir usage [name|me] [-d days] [--by day,terminal,agent,model]   tokens and cost per day, terminal, agent, model
   new and send take --wait to wait for the reply. send during a turn joins that turn (an agent's always does; a person at a terminal may add --queue to run it after)
   Exit codes: 0 done, 2 needs the user (a question, an approval), 1 error or exited. A path may be machine:path
+  ir bot "message" [--to bot]         tell the user through a bot (QQ); to add one: the web's 终端管理 +, or iridium-qq setup (a QR image: [文件] line; run again once scanned)
 Admin (an agent calling these never sees a TOKEN; a web panel confirms):
   ir invite [name] | token <name>     a link for a new web panel | a plugin TOKEN
     --owner: the user's own terminal, with Claude

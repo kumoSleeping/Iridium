@@ -150,6 +150,10 @@ func (s *Service) cached(session, ref string) (string, bool) {
 	return p, ok
 }
 
+// CheckPath is p resolved, or why Iridium may not touch it (outside the state and config
+// directories and the agents' own).
+func (s *Service) CheckPath(p string) (string, error) { return s.o.Guard.Check(p) }
+
 // Lookup is the path of a reference of session: one given before, an upload's, or one the
 // transcript names (read on from where it was last read). The path is checked again.
 func (s *Service) Lookup(session, ref string) (string, error) {

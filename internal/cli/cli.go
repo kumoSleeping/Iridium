@@ -31,6 +31,7 @@ var commands = map[string]func(e *env, args []string) int{
 	"cp":        cmdCp,
 	"files":     cmdFiles,
 	"ws":        cmdWs, // workspaces.go
+	"bot":       cmdBot,
 }
 
 func run(args []string, stdout, stderr io.Writer) int {

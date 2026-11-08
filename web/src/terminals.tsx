@@ -6,13 +6,14 @@
 // ir asked for waits on top. Changes are saved at once.
 import { Popover } from "@base-ui/react/popover";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, KeyRound, Link2, LoaderCircle, Plus, Trash2, X } from "lucide-react";
+import { Bot, ChevronLeft, ChevronRight, KeyRound, Link2, LoaderCircle, Plus, Trash2, X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { ApiError, api } from "./api/client";
 import type { Rules, Terminal } from "./api/types.gen";
 import { CardFrame, CardHead, MainKey, SecondKey } from "./card";
 import { ConfirmCard, saysOwner } from "./confirms";
 import { useMe, useTerminals } from "./data";
+import { ExtensionPage, ExtensionRows, OfficialTag } from "./extensions";
 import { t, useLang } from "./i18n";
 import { LocalMark } from "./me";
 import { SecretHere } from "./secret";
@@ -32,8 +33,15 @@ export function TerminalsPage({ onBack }: { onBack: () => void }) {
   const confirms = useConfirms();
   const secretHere = useSecret()?.at === "terminals";
   const [open, setOpen] = useState<string | null>(null);
+  const [ext, setExt] = useState<string | null>(null);
   const list = q.data?.terminals ?? [];
   const invites = q.data?.invites ?? [];
+  if (ext)
+    return (
+      <div key={ext} className="g-slide h-full">
+        <ExtensionPage id={ext} onBack={() => setExt(null)} />
+      </div>
+    );
   return (
     <div className="flex h-full flex-col">
       <header className="flex h-10.5 shrink-0 items-center gap-1 px-1.5 pt-1.5">
@@ -42,7 +50,7 @@ export function TerminalsPage({ onBack }: { onBack: () => void }) {
         </IconKey>
         <h1 className="m-0 min-w-0 flex-1 truncate text-base font-semibold">{t("settings.terminals")}</h1>
         {q.isFetching && <LoaderCircle size={14} className="animate-spin text-ink-4" />}
-        <NewTerminal />
+        <NewTerminal openExt={setExt} />
       </header>
       <div className="no-bar min-h-0 flex-1 overflow-y-auto pt-2 pb-4">
         <div className="flex flex-col gap-5 px-3">
@@ -60,6 +68,7 @@ export function TerminalsPage({ onBack }: { onBack: () => void }) {
               <TerminalRow key={x.id} x={x} open={open === x.id} toggle={() => setOpen(open === x.id ? null : x.id)} />
             ))}
           </section>
+          <ExtensionRows openExt={setExt} />
           {invites.length > 0 && (
             <Group title={t("term.invites")}>
               {invites.map((i) => (
@@ -211,8 +220,8 @@ function Detail({ x }: { x: Terminal }) {
 export const hasClaude = (r: Rules) => !!r.claudeOwner;
 
 /** The +: a new panel's invite (a public origin first) or a plugin's token, named; the secret then
- *  shows once. */
-function NewTerminal() {
+ *  shows once. Below them the official extensions, each opening its page. */
+function NewTerminal({ openExt }: { openExt: (id: string) => void }) {
   const qc = useQueryClient();
   const me = useMe().data;
   const [open, setOpen] = useState(false);
@@ -262,6 +271,19 @@ function NewTerminal() {
           <div className="flex flex-col">
             {choice("invite", <Link2 size={16} />, t("term.invite"), me?.public ? t("term.inviteHint") : t("term.needPublic"), !me?.public)}
             {choice("token", <KeyRound size={16} />, t("term.token"), t("term.tokenHint"))}
+            <div role="separator" className="mx-1 my-1.5 h-px bg-edge" />
+            <button type="button" onClick={() => (setOpen(false), openExt("qq"))} className="flex min-h-11 items-start gap-2.5 rounded-md px-2 py-1.5 text-left hover:bg-fill">
+              <span className="mt-0.5 text-ink-2">
+                <Bot size={16} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="flex items-center gap-2 text-base">
+                  {t("ext.qq")}
+                  <OfficialTag />
+                </span>
+                <span className="block text-xs text-ink-3">{t("ext.qqHint")}</span>
+              </span>
+            </button>
           </div>
         ) : (
           <form

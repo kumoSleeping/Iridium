@@ -16,6 +16,7 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -69,6 +70,10 @@ type Server struct {
 	App http.Handler
 
 	files *files.Service // routes_files.go
+
+	// ExtDir is where the official extensions' binaries go; "" is beside Iridium's (extensions.go).
+	ExtDir string
+	ext    extensions
 }
 
 // New is the API over m. The interactive terminals live in m's store, behind the Passkey gate
@@ -127,6 +132,7 @@ func (s *Server) Handler(local bool) http.Handler {
 	s.sessionRoutes(mux)
 	s.pushRoutes(mux)
 	s.pluginRoutes(mux)
+	s.extensionRoutes(mux)
 	s.discoverRoutes(mux)
 	s.fileRoutes(mux, local)
 	if local {
@@ -405,6 +411,12 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	_ = rc.Flush()
 	sub := s.hub.Subscribe(keys) // none it may carry: open all the same, pinging
 	defer sub.Close()
+	// A panel on a session: the list marks it there, for the other pages (the user, 2026-11-08).
+	for _, k := range keys {
+		if id, ok := strings.CutPrefix(k, "session:"); ok && c.EndpointID != "" {
+			defer s.m.View(id, c.EndpointID)()
+		}
+	}
 	_ = sub.Serve(r.Context(), w, func() { _ = rc.Flush() })
 }
 
@@ -450,3 +462,6 @@ func reply(w http.ResponseWriter, status int, v any) {
 }
 
 func fail(w http.ResponseWriter, status int, msg string) { reply(w, status, api.Error{Error: msg}) }
+
+// Files is the files service (uploads, refs, paths), for the chat layer's attachments.
+func (s *Server) Files() *files.Service { return s.files }

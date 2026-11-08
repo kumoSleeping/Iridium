@@ -20,6 +20,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/kumoSleeping/iridium/internal/agent"
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/session"
 	"github.com/kumoSleeping/iridium/internal/store"
@@ -43,6 +44,14 @@ type Options struct {
 	Logf     func(string, ...any)
 	// Guard checks what a plugin does against its terminal's permissions; nil allows it all.
 	Guard Guard
+	// Workspaces are the web's folder groups (discovery's), which /use picks from first; nil:
+	// each session's own folder.
+	Workspaces func() ([]api.Workspace, error)
+	// Terminal reports whether a plugin's terminal is still there; nil: all are.
+	Terminal func(id string) bool
+	// Message is text with attachments (refs of session) written in, and the images among them
+	// (the files service's Message); nil takes no attachments.
+	Message func(session, text string, refs []string) (string, []agent.Image, error)
 }
 
 // Guard is the interactive terminals' permission table as the chat layer meets it (the server
@@ -100,10 +109,12 @@ type Service struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
-	mu    sync.Mutex
-	held  map[string]string        // session: the agent's last message this turn, not sent yet
-	wake  map[string]chan struct{} // plugin: closed when an event is posted
-	picks map[string]pick          // a command's card
+	mu     sync.Mutex
+	held   map[string]string            // session: the agent's last message this turn, not sent yet
+	wake   map[string]chan struct{}     // plugin: closed when an event is posted
+	picks  map[string]pick              // a command's card
+	online map[string]int               // plugin: its event streams open now
+	away   map[string]store.ChatPointer // an ask's card: the chat it went to, its session pointed at by none
 }
 
 // pick is a command's card: answering it runs the command with the option chosen.
@@ -124,7 +135,7 @@ func New(o Options) (*Service, error) {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &Service{o: o, key: key, ctx: ctx, cancel: cancel, held: map[string]string{}, wake: map[string]chan struct{}{}, picks: map[string]pick{}}
+	s := &Service{o: o, key: key, ctx: ctx, cancel: cancel, held: map[string]string{}, wake: map[string]chan struct{}{}, picks: map[string]pick{}, online: map[string]int{}, away: map[string]store.ChatPointer{}}
 	o.Manager.Watch(s.onNotice)
 	s.wg.Add(1)
 	go s.prune()
@@ -213,40 +224,86 @@ func (s *Service) Input(ctx context.Context, c Caller, chat string, in api.ChatI
 		return api.ChatInputReply{}, fmt.Errorf("%w: bad chat key", ErrBadRequest)
 	}
 	text := strings.TrimSpace(in.Text)
-	if text == "" {
+	if text == "" && len(in.Attachments) == 0 {
 		return api.ChatInputReply{}, fmt.Errorf("%w: an empty message", ErrBadRequest)
 	}
 	p, err := s.o.Store.Pointer(c.ID, chat)
 	if err != nil {
 		return api.ChatInputReply{}, err
 	}
-	if name, args, ok := command(text); ok {
+	if name, args, ok := command(text); ok && len(in.Attachments) == 0 {
 		if cmd, ok := commands[name]; ok {
+			s.seen(c, chat, p.Session)
 			if err := s.guard().Command(c, p.Session, "/"+name); err != nil {
 				return api.ChatInputReply{}, err
 			}
 			return cmd.run(s, ctx, c, &p, args)
 		}
 	}
-	id, err := s.ensure(ctx, c, &p, source(c, in.Sender))
-	if err != nil {
-		return api.ChatInputReply{}, err
+	id, ok := s.pointed(c, &p)
+	s.seen(c, chat, id)
+	if !ok {
+		return s.choose(ctx, c, &p)
 	}
 	if err := s.guard().Send(c, id, text); err != nil {
 		return api.ChatInputReply{}, err
 	}
-	_, queued, err := s.o.Manager.SendWith(ctx, id, text, source(c, in.Sender), true)
+	var images []agent.Image
+	if len(in.Attachments) > 0 {
+		if s.o.Message == nil {
+			return api.ChatInputReply{}, fmt.Errorf("%w: attachments are not taken here", ErrBadRequest)
+		}
+		if text, images, err = s.o.Message(id, text, in.Attachments); err != nil {
+			return api.ChatInputReply{}, fmt.Errorf("%w: %v", ErrBadRequest, err)
+		}
+	}
+	_, queued, err := s.o.Manager.SendWith(ctx, id, text, source(c, in.Sender), true, images...)
 	return api.ChatInputReply{Session: id, Queued: queued}, err
 }
 
-// ensure is the session the chat points at, opening one with its defaults if none (or gone).
-func (s *Service) ensure(ctx context.Context, c Caller, p *store.ChatPointer, from string) (string, error) {
-	if p.Session != "" {
-		if _, err := s.o.Manager.State(p.Session); err == nil && s.guard().Use(c, p.Session) == nil {
-			return p.Session, nil
-		}
+// Session is the session the chat points at (ErrNoSession if none): where its uploads go before
+// the message that names them.
+func (s *Service) Session(c Caller, chat string) (string, error) {
+	if !ValidKey(chat) {
+		return "", fmt.Errorf("%w: bad chat key", ErrBadRequest)
 	}
-	return s.open(ctx, c, p, api.Agent(p.Agent), p.Cwd, from)
+	p, err := s.o.Store.Pointer(c.ID, chat)
+	if err != nil {
+		return "", err
+	}
+	id, ok := s.pointed(c, &p)
+	if !ok {
+		return "", ErrNoSession
+	}
+	return id, s.guard().Send(c, id, "")
+}
+
+// ErrNoSession: the chat has chosen no session (/use, /new) yet.
+var ErrNoSession = errors.New("no session chosen: /use or /new")
+
+// pointed is the session the chat points at, if there still is one it may use.
+func (s *Service) pointed(c Caller, p *store.ChatPointer) (string, bool) {
+	if p.Session == "" {
+		return "", false
+	}
+	if _, err := s.o.Manager.State(p.Session); err != nil || s.guard().Use(c, p.Session) != nil {
+		return "", false
+	}
+	return p.Session, true
+}
+
+// choose answers a message that has no session to go to: it does not open one (there are no
+// slots to fall back on, the user 2026-11-08); the sessions to pick from, or how to open one.
+func (s *Service) choose(ctx context.Context, c Caller, p *store.ChatPointer) (api.ChatInputReply, error) {
+	r, err := cmdUse(s, ctx, c, p, "")
+	if err != nil {
+		return r, err
+	}
+	r.Session = ""
+	if r.Card != nil {
+		r.Card.Title = "未选择会话"
+	}
+	return r, nil
 }
 
 func (s *Service) open(ctx context.Context, c Caller, p *store.ChatPointer, a api.Agent, cwd, from string) (string, error) {
@@ -264,7 +321,7 @@ func (s *Service) open(ctx context.Context, c Caller, p *store.ChatPointer, a ap
 		return "", fmt.Errorf("%w: %v", ErrBadRequest, err)
 	}
 	p.Plugin, p.Session, p.Agent, p.Cwd = c.ID, id, string(a), cwd
-	if err := s.o.Store.SetPointer(*p); err != nil {
+	if err := s.setPointer(*p); err != nil {
 		return id, err
 	}
 	return id, err
@@ -295,6 +352,12 @@ func (s *Service) Answer(ctx context.Context, c Caller, a api.CardAnswer) (api.C
 		}
 		if option == "" {
 			return api.CardReply{}, fmt.Errorf("%w: pick an option", ErrBadRequest)
+		}
+		if option == dismiss {
+			s.mu.Lock()
+			delete(s.picks, a.Card)
+			s.mu.Unlock()
+			return api.CardReply{OK: true}, nil
 		}
 		r, err := s.Input(ctx, c, p.chat, api.ChatInput{Text: "/" + p.command + " " + option})
 		if err != nil {
@@ -329,12 +392,14 @@ func (s *Service) newPick(c Caller, chat, command string, card *api.Card) *api.C
 
 // ---- events ----
 
+// ev is an event for the chats of a session.
+type ev struct {
+	typ string
+	e   api.ChatEvent
+}
+
 // onNotice turns what happened in a session into events for the chats that point at it.
 func (s *Service) onNotice(n session.Notice) {
-	type ev struct {
-		typ string
-		e   api.ChatEvent
-	}
 	var out []ev
 	s.mu.Lock()
 	held := s.held[n.Session]
@@ -374,6 +439,10 @@ func (s *Service) onNotice(n session.Notice) {
 	chats, err := s.o.Store.Pointing(n.Session)
 	if err != nil {
 		s.o.Logf("chat: %v", err)
+		return
+	}
+	if len(chats) == 0 {
+		s.away1(n.Session, out)
 		return
 	}
 	for _, p := range chats {
@@ -426,6 +495,16 @@ func (s *Service) Serve(ctx context.Context, c Caller, last int64, w interface{ 
 			return err
 		}
 	}
+	s.mu.Lock()
+	s.online[c.ID]++
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		if s.online[c.ID]--; s.online[c.ID] <= 0 {
+			delete(s.online, c.ID)
+		}
+		s.mu.Unlock()
+	}()
 	ping := time.NewTicker(Ping)
 	defer ping.Stop()
 	for {
@@ -456,4 +535,16 @@ func (s *Service) Serve(ctx context.Context, c Caller, last int64, w interface{ 
 			flush()
 		}
 	}
+}
+
+// setPointer keeps where the chat points, and has the session list show it (the Bot mark).
+func (s *Service) setPointer(p store.ChatPointer) error {
+	if err := s.o.Store.SetPointer(p); err != nil {
+		return err
+	}
+	if p.Session != "" {
+		s.seen(Caller{ID: p.Plugin}, p.Chat, p.Session)
+	}
+	s.o.Manager.PublishList()
+	return nil
 }

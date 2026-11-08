@@ -5,6 +5,9 @@ package api
 type ChatInput struct {
 	Text   string `json:"text"`
 	Sender string `json:"sender,omitempty"`
+	// Attachments: refs of uploads into the chat's session (POST /api/chat/{key}/uploads): their
+	// paths go into the message, images to the agent as images too, as the web's.
+	Attachments []string `json:"attachments,omitempty"`
 }
 
 // ChatInputReply: Session is where the message went (or the command ran). An Iridium command
@@ -62,4 +65,21 @@ type ChatEvent struct {
 	CardID string `json:"cardId,omitempty"`
 	// status
 	Status Status `json:"status,omitempty"`
+}
+
+// BotLetter is what a session says to the user through a bot (ir bot): To, a bot's name (its
+// terminal's), else the one Iridium picks; Caller, the session (ir's own, as Send's).
+type BotLetter struct {
+	Text   string `json:"text"`
+	To     string `json:"to,omitempty"`
+	Caller string `json:"caller,omitempty"`
+}
+
+// BotReply is where a letter went: the bot (its terminal ID, and name) and its chat; Letter, as a
+// letter (the chat pointed elsewhere) rather than the session's reply.
+type BotReply struct {
+	Bot    string `json:"bot"`
+	Name   string `json:"name,omitempty"`
+	Chat   string `json:"chat"`
+	Letter bool   `json:"letter,omitempty"`
 }

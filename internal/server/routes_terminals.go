@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -190,6 +192,12 @@ func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 		s.gateDone(w, err)
 		return
 	}
+	if req.Into != "" {
+		if _, err := s.files.CheckPath(req.Into); err != nil {
+			fail(w, http.StatusBadRequest, "--into: "+err.Error())
+			return
+		}
+	}
 	c := callerOf(r)
 	by := s.ownerSays(c)
 	if req.Owner && c.panel() && by == "" {
@@ -197,18 +205,53 @@ func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !c.panel() {
-		s.ask(w, c, "token", req.Name, req.Owner)
+		cf := s.asks.addConfirm(api.Confirm{Kind: "token", Name: req.Name, Owner: req.Owner, Into: req.Into, Asker: c.Name, Session: c.session})
+		s.logf("server: %s asks a panel for a token (%s, owner %v, into %q), confirmation %s", c.Name, req.Name, req.Owner, req.Into, cf.ID)
+		reply(w, http.StatusAccepted, api.Pending{Confirm: cf})
 		return
 	}
 	if !req.Owner {
 		by = ""
 	}
 	tok, err := s.makeToken(req.Name, by)
+	if err == nil && req.Into != "" {
+		err = s.tokenInto(tok, req.Into)
+	}
 	if err != nil {
 		s.gateDone(w, err)
 		return
 	}
 	reply(w, http.StatusOK, tok)
+}
+
+// tokenInto writes tok's token into the file path (0600, in place of what is there) and takes
+// it out of tok: no one is shown it.
+func (s *Server) tokenInto(tok *api.Token, path string) error {
+	p, err := s.files.CheckPath(path)
+	if err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(filepath.Dir(p), ".token-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	_, err = f.WriteString(tok.Token + "\n")
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Chmod(f.Name(), 0o600)
+	}
+	if err == nil {
+		err = os.Rename(f.Name(), p)
+	}
+	if err != nil {
+		return err
+	}
+	tok.Token, tok.Into = "", p
+	s.logf("server: the token of %s went into %s", tok.Terminal.Name, p)
+	return nil
 }
 
 // ask turns an agent's request for a secret into a confirmation for the panels: 202 and no secret.
@@ -337,6 +380,9 @@ func (s *Server) answerConfirm(w http.ResponseWriter, r *http.Request) {
 			}
 		case "token":
 			out.Token, err = s.makeToken(cf.Name, by)
+			if err == nil && cf.Into != "" {
+				err = s.tokenInto(out.Token, cf.Into)
+			}
 			if err == nil {
 				st.Name = out.Token.Terminal.Name
 			}

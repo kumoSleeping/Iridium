@@ -22,8 +22,8 @@ import { folderLevels, sessionLevels, usePushMenus, wsLevels, type PushLevel } f
 import type { Folder as FolderNode, Tree, WsNode } from "./tree";
 import { LinkDot } from "./link";
 import { errText, toast } from "./toast";
-import { useMe, useUpdate } from "./data";
-import { agentName, ago, cn, fine, IconKey, IrMark, keep, kept, Lamp, lampOf, Logo, own, sessionStatusText, statusText, tilde, Tip, titleOf, useLongPress, useMenuAt, useMinute } from "./ui";
+import { useMe, useTerminalList, useUpdate } from "./data";
+import { agentName, ago, Avatar, cn, fine, IconKey, IrMark, keep, kept, Lamp, lampOf, Logo, own, sessionStatusText, statusText, tilde, Tip, titleOf, useLongPress, useMenuAt, useMinute } from "./ui";
 import { SESSION_DRAG } from "./chat/refs";
 import { useUnread } from "./unread";
 
@@ -626,8 +626,10 @@ const SessionRow = memo(function SessionRow({ s, where, depth, flip, selected, o
       <span className="grid justify-self-end">{lastBusy.current && <Lamp status={lastBusy.current} />}</span>
     </span>
   );
-  const end = slot || mark || lamp ? (
+  const bots = s.bots?.length || s.viewers?.length ? <Here bots={s.bots ?? []} viewers={s.viewers ?? []} /> : null;
+  const end = slot || mark || lamp || bots ? (
     <span className="flex items-center gap-1.5">
+      {bots}
       {mark}
       {slot}
       {!busy && <Lamp status={status} />}
@@ -676,6 +678,28 @@ const SessionRow = memo(function SessionRow({ s, where, depth, flip, selected, o
     </>
   );
 });
+
+/** Who is in this session now, between the name and the time (the user, 2026-11-08): the bots whose
+ *  chat points here (a bot on the corner), then the other panels that have it open; as big as the
+ *  agent's logo, three at most and +N for the rest. Not this page's own terminal. */
+function Here({ bots, viewers }: { bots: string[]; viewers: string[] }) {
+  const terms = useTerminalList();
+  const me = useMe().data?.id;
+  const ids = [...bots, ...viewers.filter((id) => id !== me && !bots.includes(id))];
+  if (!ids.length) return null;
+  const who = ids.map((id) => terms.find((x) => x.id === id) ?? { id, name: "", avatar: undefined, kind: bots.includes(id) ? "channel" : "panel" });
+  const shown = who.slice(0, 3);
+  return (
+    <Tip label={who.map((b) => b.name || (bots.includes(b.id) ? "Bot" : "?")).join("、")} side="bottom">
+      <span className="flex shrink-0 items-center gap-1.5">
+        {shown.map((b) => (
+          <Avatar key={b.id} src={b.avatar} name={b.name || "?"} size={16} badge={bots.includes(b.id) ? Bot : undefined} badgeSize={10} />
+        ))}
+        {who.length > 3 && <span className="text-xs text-ink-3 tabular-nums">+{who.length - 3}</span>}
+      </span>
+    </Tip>
+  );
+}
 
 /** The new name, in place of the row's: Enter or leaving it renames, Esc leaves it as it was. */
 export function Rename({ s, done, className }: { s: Session; done: () => void; className?: string }) {

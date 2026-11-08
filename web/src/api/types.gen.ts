@@ -123,6 +123,15 @@ export interface Session {
   workflow?: SessionWorkflow;
   last?: LastSaid;
   updatedAt: number /* int64 */; // ms since the epoch
+  /**
+   * Bots: the plugins (terminal IDs) whose chat is in this session now: the list shows their
+   * avatar and a Bot tag.
+   */
+  bots?: string[];
+  /**
+   * Viewers: the terminals (panels) with this session open now, a page's stream on it.
+   */
+  viewers?: string[];
 }
 /**
  * LastSaid is the last thing said in a session, on one line, at most 200 characters.
@@ -554,6 +563,11 @@ export interface DraftTool {
 export interface ChatInput {
   text: string;
   sender?: string;
+  /**
+   * Attachments: refs of uploads into the chat's session (POST /api/chat/{key}/uploads): their
+   * paths go into the message, images to the agent as images too, as the web's.
+   */
+  attachments?: string[];
 }
 /**
  * ChatInputReply: Session is where the message went (or the command ran). An Iridium command
@@ -625,6 +639,25 @@ export interface ChatEvent {
    * status
    */
   status?: Status;
+}
+/**
+ * BotLetter is what a session says to the user through a bot (ir bot): To, a bot's name (its
+ * terminal's), else the one Iridium picks; Caller, the session (ir's own, as Send's).
+ */
+export interface BotLetter {
+  text: string;
+  to?: string;
+  caller?: string;
+}
+/**
+ * BotReply is where a letter went: the bot (its terminal ID, and name) and its chat; Letter, as a
+ * letter (the chat pointed elsewhere) rather than the session's reply.
+ */
+export interface BotReply {
+  bot: string;
+  name?: string;
+  chat: string;
+  letter?: boolean;
 }
 
 //////////
@@ -826,6 +859,75 @@ export interface NewFolder {
  */
 export interface FolderReply {
   path: string;
+}
+
+//////////
+// source: extensions.go
+
+/**
+ * Extension is an official extension as GET /api/extensions lists it.
+ */
+export interface Extension {
+  id: string; // qq
+  name: string; // what the page calls it
+  installed: boolean;
+  /**
+   * Busy: what is under way: install | bind | start | stop | remove.
+   */
+  busy?: string;
+  error?: string; // the last action's failure
+  /**
+   * Status is what the extension says of itself (iridium-qq status --json), once installed.
+   */
+  status?: ExtensionStatus;
+  /**
+   * Bind: a scan under way.
+   */
+  bind?: ExtensionBind;
+  /**
+   * Online: its terminal's live connections in Iridium.
+   */
+  online?: number /* int */;
+}
+/**
+ * ExtensionStatus is iridium-qq status --json.
+ */
+export interface ExtensionStatus {
+  version: string;
+  home: string;
+  bound: boolean; // it has a bot
+  appId?: string;
+  name: string; // its terminal's name in Iridium
+  owners: number /* int */;
+  iridium?: string;
+  token: boolean;
+  /**
+   * Service: systemd's ActiveState of its unit (active, inactive, failed, activating); "" for
+   * no unit.
+   */
+  service: string;
+  enabled: boolean;
+  running?: ExtensionRunning; // while the service is active
+  pair?: string; // a pairing code waiting
+}
+/**
+ * ExtensionRunning is how the running extension stands.
+ */
+export interface ExtensionRunning {
+  pid: number /* int */;
+  qq: boolean; // connected to QQ
+  qqError?: string;
+  iridium: boolean; // its event stream is open
+  iridiumError?: string;
+  bot?: string; // the bot's name on QQ
+  at: number /* int64 */;
+}
+/**
+ * ExtensionBind is a scan under way: the page to scan, and its QR code.
+ */
+export interface ExtensionBind {
+  url: string;
+  qr: string; // an SVG data URL
 }
 
 //////////
@@ -1244,6 +1346,12 @@ export interface Me extends Terminal {
 export interface NewInvite {
   name?: string;
   owner?: boolean;
+  /**
+   * Into (tokens only, ir token --into): the daemon writes the token into this file (absolute,
+   * 0600) and gives it to no one: not the asker, nor the panel that allows it. A plugin's setup
+   * asks so, its agent never seeing the token.
+   */
+  into?: string;
 }
 /**
  * Invite is a new panel invite. URL holds the secret: only a panel (or ir at a terminal) sees it.
@@ -1263,7 +1371,8 @@ export interface Invite {
  */
 export interface Token {
   terminal: Terminal;
-  token: string;
+  token?: string;
+  into?: string; // the file it went into (NewInvite.Into); no Token then
 }
 /**
  * Confirm is what an agent's ir asked for that only a panel may give (an invite link, a token, a
@@ -1278,6 +1387,7 @@ export interface Confirm {
    */
   name?: string;
   owner?: boolean; // --owner: it gets Claude; only a panel that has Claude allows it
+  into?: string; // token: the file it goes into (NewInvite.Into)
   asker: string; // the terminal that asked (本机)
   session?: string; // the session whose agent asked, if known
   createdAt: number /* int64 */;

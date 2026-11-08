@@ -147,6 +147,7 @@ type opts struct {
 	n       int  // ir read -n: how many messages
 	model   string
 	approve string
+	to      string // ir bot --to: the bot
 	attach  []string
 	pos     []string
 }
@@ -194,6 +195,8 @@ func parse(args []string, allowed string) (opts, error) {
 			o.model = val
 		case "approve":
 			o.approve = val
+		case "to":
+			o.to = val
 		case "attach":
 			o.attach = append(o.attach, val)
 		case "n":

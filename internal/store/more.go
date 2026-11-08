@@ -144,6 +144,24 @@ func (s *Store) SetPointer(p ChatPointer) error {
 	return err
 }
 
+// PointedAt is, for each session some plugin's chat points at, those plugins (terminal IDs).
+func (s *Store) PointedAt() (map[string][]string, error) {
+	rows, err := s.db.Query(`SELECT DISTINCT session, plugin FROM chat_pointers WHERE session IS NOT NULL AND session != '' ORDER BY session, plugin`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string][]string{}
+	for rows.Next() {
+		var session, plugin string
+		if err := rows.Scan(&session, &plugin); err != nil {
+			return nil, err
+		}
+		out[session] = append(out[session], plugin)
+	}
+	return out, rows.Err()
+}
+
 // Pointing is every chat window that points at session.
 func (s *Store) Pointing(session string) ([]ChatPointer, error) {
 	rows, err := s.db.Query(`SELECT plugin, chat, IFNULL(agent, ''), IFNULL(cwd, '') FROM chat_pointers WHERE session = ? ORDER BY plugin, chat`, session)
@@ -167,4 +185,35 @@ func (s *Store) OutboxLast(plugin string) (int64, error) {
 	var seq int64
 	err := s.db.QueryRow(`SELECT IFNULL(MAX(seq), 0) FROM outbox WHERE plugin = ?`, plugin).Scan(&seq)
 	return seq, err
+}
+
+// ChatSeen is when a chat window last said something with session in it ("": none chosen).
+type ChatSeen struct {
+	Plugin, Chat, Session string
+	At                    int64
+}
+
+// Seen notes that the chat said something now, with session in it.
+func (s *Store) Seen(plugin, chat, session string) error {
+	_, err := s.db.Exec(`INSERT INTO chat_seen (plugin, chat, session, at) VALUES (?, ?, ?, ?)
+		ON CONFLICT (plugin, chat, session) DO UPDATE SET at = excluded.at`, plugin, chat, session, now())
+	return err
+}
+
+// ChatsSeen is every chat window's notes, the latest first.
+func (s *Store) ChatsSeen() ([]ChatSeen, error) {
+	rows, err := s.db.Query(`SELECT plugin, chat, session, at FROM chat_seen ORDER BY at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ChatSeen
+	for rows.Next() {
+		var c ChatSeen
+		if err := rows.Scan(&c.Plugin, &c.Chat, &c.Session, &c.At); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
 }

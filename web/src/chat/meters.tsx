@@ -22,29 +22,51 @@ import { quotaKey, windowFor, windowName } from "../quota";
 
 const k = (n: number) => (n >= 100_000 ? `${Math.round(n / 1000)}k` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`);
 
-/** A category's name in the page's language, for the names Claude gives; any other as given. */
-function ctxName(c: ContextCategory): string {
+type CtxKind = "free" | "reserve" | "mcp" | "memory" | "agents" | "tools" | "system" | "messages" | "other";
+/** What a category is, by the names Claude gives. */
+function ctxKind(c: ContextCategory): CtxKind {
   const n = `${c.id} ${c.name}`.toLowerCase();
-  if (c.kind === "free" || n.includes("free")) return t("ctx.free");
-  if (c.kind === "buffer" || n.includes("buffer") || n.includes("compact")) return t("ctx.reserve");
-  if (n.includes("mcp")) return t("ctx.mcp");
-  if (n.includes("memory")) return t("ctx.memory");
-  if (n.includes("agent")) return t("ctx.agents");
-  if (n.includes("tool")) return t("ctx.tools");
-  if (n.includes("system")) return t("ctx.system");
-  if (n.includes("message")) return t("ctx.messages");
-  return c.name;
+  if (c.kind === "free" || n.includes("free")) return "free";
+  if (c.kind === "buffer" || n.includes("buffer") || n.includes("compact")) return "reserve";
+  if (n.includes("mcp")) return "mcp";
+  if (n.includes("memory")) return "memory";
+  if (n.includes("agent")) return "agents";
+  if (n.includes("tool")) return "tools";
+  if (n.includes("system")) return "system";
+  if (n.includes("message")) return "messages";
+  return "other";
 }
+/** A category's name in the page's language; any other as given. */
+const ctxName = (c: ContextCategory) => {
+  const kind = ctxKind(c);
+  return kind === "other" ? c.name : t(`ctx.${kind}`);
+};
 
-const RAMP = ["var(--ctx-1)", "var(--ctx-2)", "var(--ctx-3)", "var(--ctx-4)", "var(--ctx-5)"];
+/** Each category its own colour, whatever its size (a colour follows what it is, never its rank):
+ *  the three that are most of a context in the chart's first three hues, the only three that stay
+ *  apart for every eye in both themes (validated, all pairs); the smaller ones in greys of their
+ *  own, each named in the list under the bar (the user, 2026-11-08: the popover in colour). */
+const TONE: Record<Exclude<CtxKind, "free" | "reserve">, string> = {
+  messages: "var(--series-1)",
+  tools: "var(--series-2)",
+  system: "var(--series-3)",
+  mcp: "var(--ctx-2)",
+  memory: "var(--ctx-3)",
+  agents: "var(--ctx-4)",
+  other: "var(--ctx-5)",
+};
 const HATCH = "repeating-linear-gradient(135deg, var(--ink-4) 0 1.5px, transparent 1.5px 4px)";
 
-/** The parts in the bar's order: what is used, largest first, the darkest; then the reserve, then free. */
+/** The parts in the bar's order: what is used, largest first, each in its category's colour; then
+ *  the reserve, then free. */
 type Part = { key: string; name: string; tokens: number; tone: string; ring?: boolean };
 export function ctxParts(c: Context): Part[] {
   const cats = c.categories ?? [];
   const used = cats.filter((x) => x.kind === "used" && x.tokens > 0).sort((a, b) => b.tokens - a.tokens);
-  const parts: Part[] = used.map((x, i) => ({ key: x.id || x.name, name: ctxName(x), tokens: x.tokens, tone: RAMP[Math.min(i, RAMP.length - 1)]! }));
+  const parts: Part[] = used.map((x) => {
+    const kind = ctxKind(x);
+    return { key: x.id || x.name, name: ctxName(x), tokens: x.tokens, tone: TONE[kind === "free" || kind === "reserve" ? "other" : kind] };
+  });
   for (const x of cats.filter((x) => x.kind === "buffer" && x.tokens > 0)) parts.push({ key: x.id || x.name, name: ctxName(x), tokens: x.tokens, tone: HATCH, ring: true });
   const free = cats.find((x) => x.kind === "free");
   const freeTokens = free?.tokens ?? (c.max ? Math.max(0, c.max - c.used - parts.filter((p) => p.ring).reduce((n, p) => n + p.tokens, 0)) : 0);

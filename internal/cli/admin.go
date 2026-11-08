@@ -205,17 +205,38 @@ func invite(e adminEnv, args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// token: ir token <名字> [--owner]. A person gets the token; an agent, only what the panel
-// decided. --owner: the plugin is the owner's own and gets Claude; an agent's waits for a panel
-// that has Claude (or 本机) to allow it.
+// token: ir token <名字> [--owner] [--into 文件]. A person gets the token; an agent, only what the
+// panel decided. --owner: the plugin is the owner's own and gets Claude; an agent's waits for a
+// panel that has Claude (or 本机) to allow it. --into: the daemon writes the token into the file,
+// shown to no one (a plugin's setup asks so).
 func token(e adminEnv, args []string, stdout, stderr io.Writer) int {
 	args, owner := ownerFlag(args)
-	if len(args) != 1 || strings.HasPrefix(args[0], "-") {
-		fmt.Fprintln(stderr, "用法：ir token <名字> [--owner]\n  --owner：确认这是我本人用的终端，带 Claude")
+	var into string
+	var rest []string
+	for i := 0; i < len(args); i++ {
+		switch a := args[i]; {
+		case a == "--into" && i+1 < len(args):
+			i++
+			into = args[i]
+		case strings.HasPrefix(a, "--into="):
+			into = strings.TrimPrefix(a, "--into=")
+		default:
+			rest = append(rest, a)
+		}
+	}
+	if len(rest) != 1 || strings.HasPrefix(rest[0], "-") {
+		fmt.Fprintln(stderr, "用法：ir token <名字> [--owner] [--into 文件]\n  --owner：确认这是我本人用的终端，带 Claude\n  --into：TOKEN 写进这个文件（0600），不显示")
 		return 2
 	}
+	if into != "" {
+		abs, err := filepath.Abs(into)
+		if err != nil {
+			return failed(stderr, "token", err)
+		}
+		into = abs
+	}
 	var raw json.RawMessage
-	code, err := e.call("POST", "/api/terminals/tokens", api.NewInvite{Name: args[0], Owner: owner}, &raw)
+	code, err := e.call("POST", "/api/terminals/tokens", api.NewInvite{Name: rest[0], Owner: owner, Into: into}, &raw)
 	if err != nil {
 		return failed(stderr, "token", err)
 	}
@@ -229,6 +250,10 @@ func token(e adminEnv, args []string, stdout, stderr io.Writer) int {
 	claude := "不带 Claude"
 	if irAccess.HasClaude(t.Terminal.Rules) {
 		claude = "带 Claude"
+	}
+	if t.Into != "" {
+		fmt.Fprintf(stdout, "%s 的 TOKEN 已写入 %s（%s；再跑一次就换新的，旧的作废）。\n", t.Terminal.Name, t.Into, claude)
+		return 0
 	}
 	fmt.Fprintf(stdout, "%s 的 TOKEN（只显示这一次；再跑一次就换新的，旧的作废；%s）：\n\n  %s\n\n请求带 Authorization: Bearer <TOKEN>。\n", t.Terminal.Name, claude, t.Token)
 	return 0
@@ -257,6 +282,9 @@ func waitConfirm(e adminEnv, raw json.RawMessage, stdout, stderr io.Writer) int 
 	if p.Confirm.Name != "" {
 		what += "（" + p.Confirm.Name + "）"
 	}
+	if p.Confirm.Into != "" {
+		what += "，写入 " + p.Confirm.Into
+	}
 	who := "网页面板"
 	if p.Confirm.Owner {
 		what += "，带 Claude"
@@ -278,6 +306,8 @@ func waitConfirm(e adminEnv, raw json.RawMessage, stdout, stderr io.Writer) int 
 			}
 			if st.Kind == "invite" {
 				fmt.Fprintf(stdout, "同意了%s：邀请链接只显示在确认的那个面板上（%s 前有效）。\n", claude, hhmm(st.ExpiresAt))
+			} else if p.Confirm.Into != "" {
+				fmt.Fprintf(stdout, "同意了%s：%s 的 TOKEN 已写入 %s。\n", claude, st.Name, p.Confirm.Into)
 			} else {
 				fmt.Fprintf(stdout, "同意了%s：%s 的 TOKEN 只显示在确认的那个面板上。\n", claude, st.Name)
 			}

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"io"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/chat"
+	"github.com/kumoSleeping/iridium/internal/gate"
 	"github.com/kumoSleeping/iridium/internal/push"
 	"github.com/kumoSleeping/iridium/internal/session"
 	"github.com/kumoSleeping/iridium/internal/store"
@@ -52,6 +54,71 @@ func (s *Server) pluginRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/chat/{key}/input", s.chatInput)
 	mux.HandleFunc("GET /api/chat/{key}/commands", s.chatCommands)
 	mux.HandleFunc("GET /api/chat/{key}/files/{ref}", s.chatFile)
+	mux.HandleFunc("POST /api/chat/{key}/uploads", s.chatUpload)
+	mux.HandleFunc("POST /api/bot", s.botLetter)
+}
+
+// HasTerminal reports whether the interactive terminal id is still there.
+func (s *Server) HasTerminal(id string) bool {
+	_, ok := s.gate().Endpoint(id)
+	return ok
+}
+
+// botLetter: ir bot, a session saying something to the user through a bot (docs/api.md "插件").
+// Only ir on the socket, run in a session.
+func (s *Server) botLetter(w http.ResponseWriter, r *http.Request) {
+	c := callerOf(r)
+	var req api.BotLetter
+	if !readJSON(w, r, &req) {
+		return
+	}
+	from := cmp.Or(c.session, req.Caller)
+	if !c.socket || from == "" {
+		fail(w, http.StatusBadRequest, "ir bot runs in a session")
+		return
+	}
+	plugin := ""
+	if req.To != "" {
+		info, ok := s.gate().Find(req.To)
+		if !ok || info.Kind != gate.KindChannel || info.ID == gate.LocalEndpointID {
+			fail(w, http.StatusNotFound, "no bot named "+req.To)
+			return
+		}
+		plugin = info.ID
+	}
+	out, err := s.Chat.Letter(r.Context(), from, req.Text, plugin)
+	if err != nil {
+		s.fault(w, err)
+		return
+	}
+	if info, ok := s.gate().Endpoint(out.Bot); ok {
+		out.Name = info.Name
+	}
+	reply(w, http.StatusOK, out)
+}
+
+// chatUpload starts an upload into the session the chat points at (409 if none): the plugin
+// sends its chunks as the web does (PUT /api/uploads/…), then names the ref in its input.
+func (s *Server) chatUpload(w http.ResponseWriter, r *http.Request) {
+	c, ok := s.caller(w, r)
+	if !ok {
+		return
+	}
+	var req api.NewUpload
+	if !readJSON(w, r, &req) {
+		return
+	}
+	id, err := s.Chat.Session(c, r.PathValue("key"))
+	if err != nil {
+		s.fault(w, err)
+		return
+	}
+	u, err := s.files.CreateUpload(id, req)
+	if err != nil {
+		s.fileError(w, err)
+		return
+	}
+	reply(w, http.StatusOK, u)
 }
 
 func (s *Server) chatPointer(w http.ResponseWriter, r *http.Request) {
@@ -201,6 +268,8 @@ func (s *Server) fault(w http.ResponseWriter, err error) {
 		fail(w, http.StatusNotFound, err.Error())
 	case errors.Is(err, session.ErrGone):
 		fail(w, http.StatusGone, err.Error())
+	case errors.Is(err, chat.ErrNoSession):
+		fail(w, http.StatusConflict, err.Error())
 	default:
 		s.error(w, err)
 	}

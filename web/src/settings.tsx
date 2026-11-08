@@ -349,8 +349,8 @@ function UpdateRow() {
   );
 }
 
-/** 退出此终端: a row like the others, no button (the user, 2026-11-08); never red; the first press
- *  only asks, the second signs out; left alone it asks no more. */
+/** 退出此终端: a quiet key at the list's foot, on the right (the user, 2026-11-08); never red; the
+ *  first press only asks, the second signs out; left alone it asks no more. */
 function SignOut() {
   const [sure, setSure] = useState(false);
   useEffect(() => {
@@ -360,9 +360,9 @@ function SignOut() {
   }, [sure]);
   const out = () => void api.logout().then(() => location.assign("/_ir/login"), (e) => toast(t("me.logout"), { error: true, description: errText(e) }));
   return (
-    <button type="button" onClick={() => (sure ? out() : setSure(true))} onBlur={() => setSure(false)} className="g-press -mx-1.5 flex min-h-10 items-center gap-3 rounded-md px-1.5 py-1 text-left hover:bg-fill">
-      <span key={String(sure)} className="g-fade min-w-0 flex-1 truncate text-sm">{sure ? t("me.logoutSure") : t("me.logout")}</span>
-      <LogOut size={15} className="shrink-0 text-ink-4" />
+    <button type="button" onClick={() => (sure ? out() : setSure(true))} onBlur={() => setSure(false)} className={cn("g-press -mr-1.5 mt-2 flex h-8 max-w-full items-center gap-1.5 self-end rounded-md px-2 text-sm hover:bg-fill hover:text-ink pointer-coarse:h-10", sure ? "text-ink" : "text-ink-3")}>
+      <LogOut size={14} className="shrink-0" />
+      <span key={String(sure)} className="g-fade min-w-0 truncate">{sure ? t("me.logoutSure") : t("me.logout")}</span>
     </button>
   );
 }

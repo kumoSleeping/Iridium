@@ -5,7 +5,7 @@
 ## 两种模式
 
 - **只听本机**（没配 `public.origin`）：不登录。只查 Host（回环名字）和 Origin，请求都算内置终端“本机”。带插件 TOKEN 的请求照样认成那个插件。
-- **上公网**（配了 `public.origin`）：所有网页请求都要面板的会话 Cookie 或通道的 TOKEN，回环也一样（cloudflared 从回环连进来）。Host 只认 `public.origin` 的主机名。
+- **上公网**（配了 `public.origin`）：所有网页请求都要面板的会话 Cookie 或通道的 TOKEN，回环也一样（cloudflared 从回环连进来）。Host 只认 `public.origin` 的主机名；带 Bearer TOKEN 的请求另认回环名字（本机的插件），TOKEN 照样要对。
 
 `public.origin` 必须是 https（开发时可用 `http://localhost:端口`）。它的主机名就是 Passkey 的 rpID：换域名，所有 Passkey 作废。
 

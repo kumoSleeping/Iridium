@@ -2,6 +2,7 @@
 // here, typed by internal/api's generated types.
 import { QueryClient } from "@tanstack/react-query";
 import type {
+  Extension,
   AgentInfo,
   AllowRule,
   ApplyUpdate,
@@ -235,6 +236,12 @@ export const api = {
   invite: (name: string, owner?: boolean) => write<Invite>("POST", "/api/terminals/invites", { ...(name ? { name } : {}), ...(owner ? { owner } : {}) } satisfies NewInvite),
   token: (name: string, owner?: boolean) => write<Token>("POST", "/api/terminals/tokens", { name, ...(owner ? { owner } : {}) } satisfies NewInvite),
   revoke: (id: string) => write<{ ok: boolean }>("DELETE", `/api/terminals/${enc(id)}`),
+
+  // --- official extensions (the QQ bot): installed and run from 终端管理 ---
+  extensions: () => get<Extension[]>("/api/extensions"),
+  extension: (id: string, action: "install" | "bind" | "start" | "stop" | "pair") => write<Extension>("POST", `/api/extensions/${enc(id)}/${action}`),
+  unbind: (id: string) => write<Extension>("DELETE", `/api/extensions/${enc(id)}/bind`),
+  removeExtension: (id: string) => write<Extension>("DELETE", `/api/extensions/${enc(id)}`),
   /** GET /api/usage: the last days' tokens by day, terminal, agent and model; terminal: one only; by hour: the last 24 hours'. */
   usage: (days: number, terminal?: string, by?: "hour") => get<Usage>(`/api/usage?days=${days}${terminal ? `&terminal=${enc(terminal)}` : ""}${by ? `&by=${by}` : ""}`),
   confirms: () => get<Confirms>("/api/confirms"),

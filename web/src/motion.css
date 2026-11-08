@@ -27,7 +27,7 @@
   --dur-2: 200ms; /* unfold, pop */
   --dur-3: 280ms; /* slide, reorder */
   --dur-4: 420ms; /* long moves */
-  --stagger: 18ms;
+  --stagger: 12ms;
 
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-in: cubic-bezier(0.55, 0, 1, 0.45);
@@ -150,6 +150,13 @@
   transition:
     transform var(--dur-2) var(--ease-spring),
     opacity var(--dur-2) var(--ease-out);
+}
+/* Its height glides as it is made as tall as another page (app.tsx useFit). */
+.g-dialog[data-glide-h] {
+  transition:
+    transform var(--dur-2) var(--ease-spring),
+    opacity var(--dur-2) var(--ease-out),
+    height var(--dur-3) var(--ease-out);
 }
 .g-dialog[data-starting-style],
 .g-dialog[data-ending-style] {
@@ -328,9 +335,11 @@ html[data-turn] .vt-drawer {
 }
 
 /* --- stagger: children of an opening popup rise in turn (set --i on each) --- */
+/* All in place by the time the popup has unfolded: the last ones coming after it, its foot still
+   empty a moment, read as a flash (the user, 2026-11-08). */
 .g-stagger > * {
   animation: g-rise var(--dur-2) var(--ease-out) both;
-  animation-delay: calc(min(var(--i, 0), 8) * var(--stagger));
+  animation-delay: calc(min(var(--i, 0), 4) * var(--stagger));
 }
 @keyframes g-rise {
   from {

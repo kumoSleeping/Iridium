@@ -14,6 +14,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/chat"
 	"github.com/kumoSleeping/iridium/internal/cli"
 	"github.com/kumoSleeping/iridium/internal/config"
@@ -136,7 +137,14 @@ func serve(args []string) int {
 		log.Print(err)
 		return 1
 	}
-	srv.Chat, err = chat.New(chat.Options{Manager: m, Store: st, StateDir: state, ChatDir: cfg.ChatDir, Guard: srv.ChatGuard()})
+	srv.Chat, err = chat.New(chat.Options{Manager: m, Store: st, StateDir: state, ChatDir: cfg.ChatDir, Guard: srv.ChatGuard(), Message: srv.Files().Message,
+		Terminal: srv.HasTerminal,
+		Workspaces: func() ([]api.Workspace, error) {
+			if srv.Discover == nil {
+				return nil, nil
+			}
+			return srv.Discover.Workspaces()
+		}})
 	if err != nil {
 		log.Print(err)
 		return 1
@@ -156,6 +164,7 @@ func serve(args []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	go srv.Updater.Run(ctx)
+	go srv.SyncExtensions(ctx)
 	if err := srv.Serve(ctx, tcp, sock); err != nil {
 		log.Print(err)
 		return 1

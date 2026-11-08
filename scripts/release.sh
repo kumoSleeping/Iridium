@@ -1,7 +1,7 @@
 #!/bin/sh
 # Builds the release assets into a directory (the web app must be built already, npm run build in
 # web/): for each platform a static, stripped binary packed as iridium-<os>-<arch>.tar.gz (the
-# binary, README.md, LICENSE), SHA256SUMS, and notes.md: the commits since the last tag (what the
+# binary, README.md, LICENSE), the official QQ plugin as iridium-qq-<os>-<arch>.tar.gz, SHA256SUMS, and notes.md: the commits since the last tag (what the
 # settings page shows), then after the marker internal/update.NotesEnd the sizes and how to install.
 #
 #   scripts/release.sh v1.2.0 dist
@@ -41,6 +41,13 @@ for p in ${PLATFORMS:-linux/amd64 linux/arm64}; do
 	cp LICENSE "$stage/" 2>/dev/null || true
 	tar -C "$stage" -czf "$out/$name.tar.gz" --owner=0 --group=0 --numeric-owner .
 	echo "| $os/$arch | $(mib "$(size "$stage/iridium")") | $(mib "$(size "$out/$name.tar.gz")") |" >>"$out/notes.md"
+	rm -rf "$stage"
+	# The official QQ plugin: not in Iridium's archive; 终端管理 installs it from here when asked.
+	stage=$(mktemp -d)
+	CGO_ENABLED=0 GOOS=$os GOARCH=$arch "$GO" build -trimpath \
+		-ldflags "-s -w -X github.com/kumoSleeping/iridium/internal/version.Version=$version" \
+		-o "$stage/iridium-qq" ./cmd/iridium-qq
+	tar -C "$stage" -czf "$out/iridium-qq-$os-$arch.tar.gz" --owner=0 --group=0 --numeric-owner .
 	rm -rf "$stage"
 done
 (cd "$out" && sha256sum iridium-*.tar.gz >SHA256SUMS)
