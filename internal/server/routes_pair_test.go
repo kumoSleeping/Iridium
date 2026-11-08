@@ -6,6 +6,10 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -124,10 +128,30 @@ func TestExecPair(t *testing.T) {
 	if m.Name != "home-pc-2" || m.OS != "linux" && m.OS != "darwin" || len(m.Agents) != 2 || m.Agents[0].Agent != "dsh" || m.Agents[1].Agent != "claude" || m.Home == "" || m.SeenAt == 0 {
 		t.Fatalf("the machine: %+v", m)
 	}
+	// Its folders, for the picker; one made there.
+	work := t.TempDir()
+	for _, d := range []string{"proj", ".hidden"} {
+		if err := os.Mkdir(filepath.Join(work, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var fl api.Folders
+	l.want(200, "socket", "GET", "/api/folders?machine="+m.ID+"&path="+url.QueryEscape(work), nil, &fl)
+	if fl.Path != work || !slices.Equal(fl.Folders, []string{"proj"}) || fl.Parent != filepath.Dir(work) {
+		t.Fatalf("folders there: %+v", fl)
+	}
+	var made api.FolderReply
+	l.want(200, "socket", "POST", "/api/folders", api.NewFolder{Machine: m.ID, Path: work, Name: "new"}, &made)
+	if st, err := os.Stat(filepath.Join(work, "new")); err != nil || !st.IsDir() || made.Path != filepath.Join(work, "new") {
+		t.Fatalf("made there: %+v %v", made, err)
+	}
+	l.want(409, "socket", "POST", "/api/folders", api.NewFolder{Machine: m.ID, Path: work, Name: "new"}, nil)
+	l.want(400, "socket", "POST", "/api/folders", api.NewFolder{Machine: m.ID, Path: work, Name: "a/b"}, nil)
 	cancel()
 	<-done
 	exe.Close()
 	machine(false)
+	l.want(409, "socket", "GET", "/api/folders?machine="+m.ID+"&path=~", nil, nil)
 	// Claude: at the owner's own machine (away now: not a refusal), never at another Bot.
 	if code := l.do("socket", "POST", "/api/sessions", api.NewSession{Agent: api.AgentClaude, Machine: "home-pc-2", Cwd: "/"}, nil); code == 403 {
 		t.Fatal("claude refused at the owner's own machine")

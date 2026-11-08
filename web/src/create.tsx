@@ -11,7 +11,7 @@ import { openChat } from "./route";
 import type { Agent } from "./api/types.gen";
 import { t } from "./i18n";
 import { agentsQ, useHome } from "./data";
-import { MachineBadge, MachineFace, remoteOf } from "./machines";
+import { atMachine, homeAt, MachineBadge, MachineFace, pageAt, remoteOf } from "./machines";
 import { useMachines } from "./store";
 import { errText, toast } from "./toast";
 import { AGENTS, agentName, cn, homeOf, IconKey, Logo, PopSurface, tilde, Tip } from "./ui";
@@ -19,7 +19,7 @@ import { AGENTS, agentName, cn, homeOf, IconKey, Logo, PopSurface, tilde, Tip } 
 const join = (dir: string, name: string) => (dir.endsWith("/") ? dir + name : `${dir}/${name}`);
 /** One folder's listing; prefetched before it is shown (the popover opening, a row hovered), so the
  *  picker opens and steps at its full height instead of a spinner springing open into the list. */
-const foldersQ = (path: string) => ({ queryKey: ["folders", path], queryFn: () => api.folders(path), retry: false, staleTime: 10_000 });
+const foldersQ = (path: string, machine?: string) => ({ queryKey: ["folders", machine ?? "", path], queryFn: () => api.folders(path, machine), retry: false, staleTime: 10_000 });
 
 /** Its children's height, glided to as it changes (a folder of more or fewer folders): the popover
  *  grows and shrinks instead of jumping (the user, 2026-11-06). */
@@ -41,14 +41,16 @@ function Tall({ children, className }: { children: ReactNode; className?: string
   );
 }
 
-/** The folder picker. initial: where it opens; onChoose: the folder chosen, absolute. */
-export function FolderPicker({ initial, onChoose, startNew = false, busy }: { initial: string; onChoose: (path: string) => void; startNew?: boolean; busy?: boolean }) {
+/** The folder picker. initial: where it opens; onChoose: the folder chosen, absolute. machine:
+ *  another machine's folders (docs/exec.md), its paths '/'-separated. */
+export function FolderPicker({ initial, onChoose, startNew = false, busy, machine }: { initial: string; onChoose: (path: string) => void; startNew?: boolean; busy?: boolean; machine?: Machine }) {
   const qc = useQueryClient();
   const [path, setPath] = useState(initial);
   const [dir, setDir] = useState<"fwd" | "back">("fwd");
   const [typing, setTyping] = useState<string | null>(null);
   const [newName, setNewName] = useState<string | null>(startNew ? "" : null);
-  const q = useQuery(foldersQ(path));
+  const mid = machine?.id;
+  const q = useQuery(foldersQ(path, mid));
   const nameBox = useRef<HTMLInputElement>(null);
   const root = useRef<HTMLDivElement>(null);
   const naming = newName !== null;
@@ -56,7 +58,8 @@ export function FolderPicker({ initial, onChoose, startNew = false, busy }: { in
     if (naming) nameBox.current?.focus();
   }, [naming]);
   const here = q.data?.path ?? path;
-  const home = useHome().data ?? homeOf(here);
+  const localHome = useHome().data;
+  const home = machine ? homeAt(machine) : (localHome ?? homeOf(here));
   const gone = q.error && missing(q.error); // the route is not served yet: only typing a path works
   const shown = tilde(here, home);
   const segs = shown.split("/").filter((s, i) => s || i === 0);
@@ -70,7 +73,8 @@ export function FolderPicker({ initial, onChoose, startNew = false, busy }: { in
     setNewName(null);
   };
   const segPath = (i: number) => {
-    const s = segs.slice(0, i + 1).join("/") || "/";
+    let s = segs.slice(0, i + 1).join("/") || "/";
+    if (/^[A-Za-z]:$/.test(s)) s += "/"; // a drive's root (another machine's, on Windows)
     return s.startsWith("~") && home ? home + s.slice(1) : s;
   };
   // What the row holds now, read by its blur too: Enter or Escape has closed it by then.
@@ -92,9 +96,9 @@ export function FolderPicker({ initial, onChoose, startNew = false, busy }: { in
     closeNew();
     if (!n || /[/\0]/.test(n)) return;
     const at = here;
-    const made = api.mkdir({ path: at, name: n }).then(
+    const made = api.mkdir({ path: at, name: n, ...(mid ? { machine: mid } : {}) }).then(
       () => {
-        void qc.invalidateQueries({ queryKey: ["folders", path] });
+        void qc.invalidateQueries({ queryKey: ["folders", mid ?? "", path] });
         // Into it, made for choosing: 选择 takes it (the user, 2026-11-06).
         go(join(at, n), "fwd");
         return join(at, n);
@@ -199,7 +203,7 @@ export function FolderPicker({ initial, onChoose, startNew = false, busy }: { in
         <div key={here} data-dir={dir === "back" ? "back" : undefined} className="g-slide max-h-[min(264px,45vh)] min-h-9 overflow-y-auto px-1.5 pb-1">
           {q.isPending && <LoaderCircle size={15} className="mx-auto my-2.5 animate-spin text-ink-4" />}
           {q.data?.folders.map((f) => (
-            <button key={f} type="button" onPointerEnter={() => void qc.prefetchQuery(foldersQ(join(here, f)))} onFocus={() => void qc.prefetchQuery(foldersQ(join(here, f)))} onClick={() => go(join(here, f), "fwd")} className="flex h-9 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-base hover:bg-fill pointer-coarse:h-11">
+            <button key={f} type="button" onPointerEnter={() => void qc.prefetchQuery(foldersQ(join(here, f), mid))} onFocus={() => void qc.prefetchQuery(foldersQ(join(here, f), mid))} onClick={() => go(join(here, f), "fwd")} className="flex h-9 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-base hover:bg-fill pointer-coarse:h-11">
               <Folder size={16} className="shrink-0 text-ink-3" />
               <span className="truncate">{f}</span>
             </button>
@@ -240,11 +244,12 @@ export function NewSession({ ws, folder, onFolder, onPick, busy }: { ws: string;
   return (
     <div className="flex w-[min(288px,calc(100vw-16px))] flex-col gap-1 p-1.5">
       {there ? (
-        <div className="flex h-9 items-center gap-2 px-2">
+        <button type="button" onClick={onFolder} className="flex h-9 items-center gap-2 rounded-md px-2 text-left hover:bg-fill pointer-coarse:h-11" aria-label={t("new.folder")}>
           <MachineFace m={there.m} size={16} />
           {ws && <span className="shrink-0 text-sm font-semibold">{ws}</span>}
-          <span className="min-w-0 flex-1 truncate font-mono text-xs text-ink-3">{there.cwd}</span>
-        </div>
+          <span className="min-w-0 flex-1 truncate font-mono text-xs text-ink-3">{tilde(pageAt(folder, machines)?.path ?? there.cwd, homeAt(there.m))}</span>
+          <ChevronRight size={14} className="shrink-0 text-ink-4" />
+        </button>
       ) : (
         <button type="button" onClick={onFolder} className="flex h-9 items-center gap-2 rounded-md px-2 text-left hover:bg-fill pointer-coarse:h-11" aria-label={t("new.folder")}>
           <Folder size={16} className="shrink-0 text-ink-3" />
@@ -323,6 +328,9 @@ export function CreatePopover({ trigger }: { trigger: ReactElement }) {
   const [open, setOpen] = useState(false);
   const [page, setPage] = useState<"folder" | "session">("folder");
   const [folder, setFolder] = useState("~");
+  // Another machine's folders (docs/exec.md): picked above the folders; its agents alone then.
+  const machines = useMachines().filter((m) => m.agents.length > 0);
+  const [at, setAt] = useState<Machine | undefined>(undefined);
   const { busy, start } = useStart((id) => (setOpen(false), openChat(id)));
   return (
     <Popover.Root
@@ -337,15 +345,20 @@ export function CreatePopover({ trigger }: { trigger: ReactElement }) {
         {/* Page to page, sliding the way you went: on to the agents, back to the folder. */}
         <div key={page} data-dir={page === "folder" ? "back" : undefined} className="g-slide">
           {page === "folder" ? (
-            <FolderPicker
-              initial={folder}
-              onChoose={(p) => {
-                setFolder(p);
-                setPage("session");
-              }}
-            />
+            <>
+              {machines.length > 0 && <MachineSwitch machines={machines} at={at} onAt={(m) => (setAt(m), setFolder("~"))} />}
+              <FolderPicker
+                key={at?.id ?? ""}
+                machine={at}
+                initial={folder}
+                onChoose={(p) => {
+                  setFolder(p);
+                  setPage("session");
+                }}
+              />
+            </>
           ) : (
-            <NewSession ws="" folder={folder} busy={busy} onFolder={() => setPage("folder")} onPick={(a, at) => void start(a, at?.cwd ?? folder, undefined, at?.m.id)} />
+            <NewSession ws="" folder={at ? atMachine(at, folder) : folder} busy={busy} onFolder={() => setPage("folder")} onPick={(a, to) => void start(a, to?.cwd ?? folder, undefined, to?.m.id)} />
           )}
         </div>
       </PopSurface>
@@ -363,7 +376,8 @@ export function WsPlus({ w, trigger, open, setOpen, opened }: { w: Workspace; tr
   const machines = useMachines();
   // the folder page, ready before its line is tapped (opened by the "+" or by the row's menu); not
   // for a group at another machine, whose folders are not listed here
-  const remote = !!remoteOf(folder, machines);
+  const there = pageAt(folder, machines);
+  const remote = !!there;
   useEffect(() => {
     if (open && !remote) void qc.prefetchQuery(foldersQ(folder));
   }, [open, folder, qc, remote]);
@@ -383,9 +397,10 @@ export function WsPlus({ w, trigger, open, setOpen, opened }: { w: Workspace; tr
             <NewSession ws={w.name} folder={folder} busy={busy} onFolder={() => (setStepped(true), setPage("folder"))} onPick={(a, at) => void start(a, at?.cwd ?? folder, !at || at.inGroup ? w.id : undefined, at?.m.id)} />
           ) : (
             <FolderPicker
-              initial={folder}
+              machine={there?.m}
+              initial={there ? there.path : folder}
               onChoose={(p) => {
-                setFolder(p);
+                setFolder(there ? atMachine(there.m, p) : p);
                 setPage("session");
               }}
             />
@@ -393,5 +408,32 @@ export function WsPlus({ w, trigger, open, setOpen, opened }: { w: Workspace; tr
         </div>
       </PopSurface>
     </Popover.Root>
+  );
+}
+
+/** Which machine's folders the picker shows: this one, or another connected one. */
+function MachineSwitch({ machines, at, onAt }: { machines: Machine[]; at?: Machine; onAt: (m?: Machine) => void }) {
+  return (
+    <div role="radiogroup" aria-label={t("new.machine")} className="flex gap-1 overflow-x-auto px-2 pt-2 [scrollbar-width:none]">
+      {[undefined, ...machines].map((m) => {
+        const on = m?.id === at?.id;
+        const off = !!m && !m.online;
+        return (
+          <button
+            key={m?.id ?? ""}
+            type="button"
+            role="radio"
+            aria-checked={on}
+            disabled={off}
+            onClick={() => !on && onAt(m)}
+            className={cn("g-press flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-xs transition-colors duration-(--dur-2) pointer-coarse:h-9", on ? "bg-ink text-on-ink" : "bg-fill text-ink-2 hover:bg-fill-2", off && "opacity-40")}
+          >
+            {m && <MachineFace m={m} size={14} />}
+            {m ? m.name : t("term.local")}
+            {off && <span>{t("status.offline")}</span>}
+          </button>
+        );
+      })}
+    </div>
   );
 }

@@ -47,6 +47,9 @@ type Folders struct {
 type NewFolder struct {
 	Path string `json:"path"`
 	Name string `json:"name"`
+	// Machine: at another machine's executor (its terminal ID); its paths '/'-separated, as
+	// GET /api/folders?machine= gives them.
+	Machine string `json:"machine,omitempty"`
 }
 
 // FolderReply is the folder made.

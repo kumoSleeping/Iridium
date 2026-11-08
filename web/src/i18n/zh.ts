@@ -282,6 +282,7 @@ export const zh = {
   "new.agent": "选 agent",
   "new.notInstalled": "{name} 未安装",
   "new.offline": "{name} 未连接",
+  "new.machine": "机器",
   "new.folder": "目录",
 
   "jump.placeholder": "会话名、目录或说过的话",

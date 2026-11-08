@@ -860,6 +860,11 @@ export interface Folders {
 export interface NewFolder {
   path: string;
   name: string;
+  /**
+   * Machine: at another machine's executor (its terminal ID); its paths '/'-separated, as
+   * GET /api/folders?machine= gives them.
+   */
+  machine?: string;
 }
 /**
  * FolderReply is the folder made.

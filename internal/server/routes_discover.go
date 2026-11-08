@@ -12,8 +12,11 @@ import (
 )
 
 // discoverRoutes are the workspaces, what lies over a session, and the folder picker
-// (docs/api.md "工作区和目录"). Only when the server has a discovery index.
+// (docs/api.md "工作区和目录"). Only when the server has a discovery index; the folder picker always
+// (another machine's folders need none).
 func (s *Server) discoverRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/folders", s.folders)
+	mux.HandleFunc("POST /api/folders", s.makeFolder)
 	if s.Discover == nil {
 		return
 	}
@@ -23,8 +26,6 @@ func (s *Server) discoverRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /api/workspaces/{id}", s.manages(s.renameWorkspace))
 	mux.HandleFunc("PATCH /api/sessions/{id}", s.patchSession)
 	mux.HandleFunc("PUT /api/colors", s.manages(s.folderColor))
-	mux.HandleFunc("GET /api/folders", s.folders)
-	mux.HandleFunc("POST /api/folders", s.makeFolder)
 }
 
 func (s *Server) workspaces(w http.ResponseWriter, r *http.Request) {
@@ -92,6 +93,14 @@ func (s *Server) folderColor(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) folders(w http.ResponseWriter, r *http.Request) {
+	if mid := r.URL.Query().Get("machine"); mid != "" {
+		s.remoteFolders(w, r, mid, r.URL.Query().Get("path"))
+		return
+	}
+	if s.Discover == nil {
+		fail(w, http.StatusNotFound, "no folders here")
+		return
+	}
 	l, err := s.Folders.List(r.URL.Query().Get("path"))
 	if err != nil {
 		s.discoverError(w, err)
@@ -103,6 +112,14 @@ func (s *Server) folders(w http.ResponseWriter, r *http.Request) {
 func (s *Server) makeFolder(w http.ResponseWriter, r *http.Request) {
 	var req api.NewFolder
 	if !readJSON(w, r, &req) {
+		return
+	}
+	if req.Machine != "" {
+		s.remoteMkdir(w, r, req)
+		return
+	}
+	if s.Discover == nil {
+		fail(w, http.StatusNotFound, "no folders here")
 		return
 	}
 	p, err := s.Folders.Make(req.Path, req.Name)

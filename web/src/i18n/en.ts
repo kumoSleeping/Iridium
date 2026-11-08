@@ -282,6 +282,7 @@ export const en: Dict = {
   "new.agent": "Pick an agent",
   "new.notInstalled": "{name} is not installed",
   "new.offline": "{name} is not connected",
+  "new.machine": "Machine",
   "new.folder": "Folder",
 
   "jump.placeholder": "Session, folder or something said",

@@ -172,7 +172,8 @@ export const api = {
   // --- workspaces, folders, the session overlay ---
   workspaces: () => get<Workspace[]>("/api/workspaces"),
   patchWorkspace: (id: number, p: WorkspacePatch) => writeAgain<{ ok: boolean }>("PATCH", `/api/workspaces/${id}`, p),
-  folders: (path: string) => get<Folders>(`/api/folders?path=${enc(path)}`),
+  /** machine: another machine's executor; its paths '/'-separated. */
+  folders: (path: string, machine?: string) => get<Folders>(`/api/folders?path=${enc(path)}${machine ? `&machine=${enc(machine)}` : ""}`),
   mkdir: (f: NewFolder) => write<FolderReply>("POST", "/api/folders", f),
   patch: (id: string, p: SessionPatch) => writeAgain<{ ok: boolean }>("PATCH", S(id), p),
   /** A folder's colour tag; "" takes it off. The carried state "colors" has them all. */

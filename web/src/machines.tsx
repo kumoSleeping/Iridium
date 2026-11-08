@@ -12,6 +12,18 @@ export const useMachine = (id?: string) => {
   return id ? ms.find((m) => m.id === id) : undefined;
 };
 
+/** A path at a machine as the folder picker and groups write it: "<machine>:<path>", '/'-separated. */
+export const atMachine = (m: Machine, path: string) => `${m.id}:${path}`;
+
+/** A machine's home, '/'-separated as the page writes its paths. */
+export const homeAt = (m: Machine) => (m.sep === "\\" ? m.home.replaceAll("\\", "/") : m.home);
+
+/** "<machine>:<path>" split: the machine and the page's path there; undefined for this machine's. */
+export function pageAt(path: string, ms: Machine[]): { m: Machine; path: string } | undefined {
+  const m = ms.find((x) => path.startsWith(`${x.id}:`));
+  return m && { m, path: path.slice(m.id.length + 1) };
+}
+
 /** A remote folder group's path ("<machine>:<path>", '/'-separated) as the machine and its own
  *  path there; undefined for this machine's. */
 export function remoteOf(path: string, ms: Machine[]): { m: Machine; cwd: string } | undefined {
