@@ -35,7 +35,7 @@ export function MeKey({ open, onOpen, dot, code }: { open: boolean; onOpen: () =
         onClick={onOpen}
         onPointerEnter={code}
         onFocus={code}
-        className={cn("g-press flex h-11 w-full min-w-0 items-center gap-2.5 rounded-full py-1 pr-3 pl-1 hover:bg-fill pointer-coarse:h-12", open && "bg-fill")}
+        className={cn("g-press flex h-11 w-full min-w-0 items-center gap-2.5 rounded-full pr-3 pl-1.5 hover:bg-fill pointer-coarse:h-12 pointer-coarse:pl-2", open && "bg-fill")}
       >
         <span className="relative shrink-0">
           {me.local ? <LocalMark size={32} /> : <Avatar src={me.avatar} name={name} size={32} />}
