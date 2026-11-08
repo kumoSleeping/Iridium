@@ -93,7 +93,7 @@ async function refused(url, token) {
 export function apply(ctx, config) {
   const url = config?.url
   if (!url) {
-    say('no url set: nothing to connect to')
+    say('no url set: set url (your Iridium, e.g. https://ir.example.com) in remote-iridium\'s config, then restart dsh web')
     return
   }
   const home = process.env.DSH_HOME || path.join(os.homedir(), '.dsh')
