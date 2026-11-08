@@ -3,7 +3,7 @@
 // 2026-11-08): the total of those shown, a bar a day stacked by terminal, each terminal in its own
 // colour; under it the terminals, the most first, each its bar in its colour (no dot, no tip: the
 // user, 2026-11-08). A row clicked takes it out of the chart (and the total) or puts it back;
-// right-clicked, it is the only one left in (again: everyone). 全选 over the list and the chip at
+// right-clicked or held (phones), it is the only one left in (again: everyone). 全选 over the list and the chip at
 // the top put everyone back. Leaving or
 // coming back, the bars and the total glide to the new figures. A bar pressed narrows the page to
 // that day. A terminal's models are in its line and its tip; no page of its own. Over it all, the
@@ -12,7 +12,7 @@
 // the only one left in (again: all four).
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CircleHelp, LoaderCircle, UserX, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent, type ReactNode } from "react";
 import { api } from "./api/client";
 import type { Agent, Usage, UsageRow } from "./api/types.gen";
 import { t, useLang } from "./i18n";
@@ -335,6 +335,53 @@ export function UsagePage() {
   );
 }
 
+/** A key's tap and its hold: a right click, or a touch held still (phones, where a long press
+ *  sends no context menu: iOS). The tap after a hold is no tap. */
+function useHold(onTap: () => void, onHold: () => void) {
+  const timer = useRef(0);
+  const at = useRef<{ x: number; y: number } | null>(null);
+  const held = useRef(false);
+  const hold = () => {
+    clearTimeout(timer.current);
+    if (held.current) return;
+    held.current = true;
+    navigator.vibrate?.(10);
+    onHold();
+  };
+  const cancel = () => {
+    clearTimeout(timer.current);
+    at.current = null;
+  };
+  useEffect(() => () => clearTimeout(timer.current), []);
+  return {
+    onPointerDown: (e: PointerEvent) => {
+      held.current = false;
+      cancel();
+      if (e.pointerType === "mouse") return;
+      at.current = { x: e.clientX, y: e.clientY };
+      timer.current = window.setTimeout(hold, 450);
+    },
+    onPointerMove: (e: PointerEvent) => {
+      if (at.current && Math.hypot(e.clientX - at.current.x, e.clientY - at.current.y) > 8) cancel();
+    },
+    onPointerUp: cancel,
+    onPointerCancel: cancel,
+    // A touch's own context menu (Android) is the hold; a mouse's right click is one at once.
+    onContextMenu: (e: MouseEvent) => {
+      e.preventDefault();
+      if (at.current) hold();
+      else if (!held.current) onHold();
+    },
+    onClick: () => {
+      if (held.current) held.current = false;
+      else onTap();
+    },
+  };
+}
+
+/** Pressed and held keys: no text selected, no callout over the avatar. */
+const HOLDS = "touch-manipulation select-none [-webkit-touch-callout:none]";
+
 /** The ranges as words, the one chosen in ink on a soft pill that glides to the next. */
 function Ranges({ value, onChange }: { value: number; onChange: (n: number) => void }) {
   const at = Math.max(0, RANGES.indexOf(value as (typeof RANGES)[number]));
@@ -364,26 +411,30 @@ function Harnesses({ on, onToggle, onOnly }: { on: (a: Agent) => boolean; onTogg
   return (
     <div role="group" aria-label={t("usage.harness")} className="-mr-1 flex items-center">
       {AGENTS.map((a) => (
-        <Tip key={a} label={agentName(a)}>
-          <button
-            type="button"
-            aria-pressed={on(a)}
-            aria-label={agentName(a)}
-            onClick={() => onToggle(a)}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              onOnly(a);
-            }}
-            className={cn(
-              "g-press grid size-7 place-items-center rounded-full transition-[opacity,filter,background-color] duration-(--dur-2) hover:bg-fill pointer-coarse:size-9",
-              !on(a) && "opacity-30 grayscale hover:opacity-60",
-            )}
-          >
-            <Logo agent={a} size={15} />
-          </button>
-        </Tip>
+        <HarnessKey key={a} a={a} on={on(a)} onToggle={() => onToggle(a)} onOnly={() => onOnly(a)} />
       ))}
     </div>
+  );
+}
+
+function HarnessKey({ a, on, onToggle, onOnly }: { a: Agent; on: boolean; onToggle: () => void; onOnly: () => void }) {
+  const hold = useHold(onToggle, onOnly);
+  return (
+    <Tip label={agentName(a)}>
+      <button
+        type="button"
+        aria-pressed={on}
+        aria-label={agentName(a)}
+        {...hold}
+        className={cn(
+          "g-press grid size-7 place-items-center rounded-full transition-[opacity,filter,background-color] duration-(--dur-2) hover:bg-fill pointer-coarse:size-9",
+          HOLDS,
+          !on && "opacity-30 grayscale hover:opacity-60",
+        )}
+      >
+        <Logo agent={a} size={15} />
+      </button>
+    </Tip>
   );
 }
 
@@ -562,18 +613,15 @@ function TerminalRow({ x, u, color, whole, on, many, onToggle, onOnly }: { x: Te
       </span>
     </span>
   );
+  const hold = useHold(onToggle, onOnly);
   if (!many) return <div className="g-fade -mx-1.5 flex items-center rounded-md px-1.5 py-2">{body}</div>;
   return (
     <button
       type="button"
       aria-pressed={on}
       aria-label={w.name}
-      onClick={onToggle}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        onOnly();
-      }}
-      className="g-fade g-press -mx-1.5 flex min-w-0 items-center rounded-md px-1.5 py-2 text-left outline-offset-1 hover:bg-fill"
+      {...hold}
+      className={cn("g-fade g-press -mx-1.5 flex min-w-0 items-center rounded-md px-1.5 py-2 text-left outline-offset-1 hover:bg-fill", HOLDS)}
     >
       {body}
     </button>
