@@ -1,12 +1,14 @@
 // Sessions named in what you write (a row dropped on the composer, chat.tsx, or picked after @ in
-// it, composer.tsx): in the composer a
-// soft mark under the words, in a sent message a chip with the session's logo and title that goes
-// there (the user, 2026-11-06). The words themselves stay plain text, what the agent reads.
+// it, composer.tsx): in the composer a card among the files; sent, the same card in the bubble's
+// row of files (the user, 2026-11-08); named among the words (older messages, letters), a chip
+// with the session's logo and title. Each goes there. The words themselves stay plain text, what
+// the agent reads.
 import { useLayoutEffect, useRef, type RefObject } from "react";
 import type { Agent, Session } from "../api/types.gen";
 import { openChat } from "../route";
 import { useList } from "../store";
 import { t } from "../i18n";
+import { MessageSquare } from "lucide-react";
 import { AGENTS, agentName, cn, Logo, tilde, Tip, titleOf } from "../ui";
 import { mentions, shortId, type Mention } from "./refs";
 
@@ -81,5 +83,30 @@ function Chip({ m, s }: { m: Mention; s?: Session }) {
         <span className="truncate">{title}</span>
       </button>
     </Tip>
+  );
+}
+
+/** A session named before a message's words, as its card was in the composer: its logo, its title
+ *  (as the sidebar has it now), its agent and short id; pressed, it goes there. */
+export function MentionCard({ m }: { m: Mention }) {
+  const list = useList();
+  const s = list?.find((x) => x.id.startsWith(m.id));
+  const agent: Agent | undefined = s?.agent ?? AGENTS.find((a) => agentName(a) === m.agent);
+  const title = (s && (titleOf(s) || tilde(s.cwd))) || m.title;
+  return (
+    <button
+      type="button"
+      disabled={!s}
+      onClick={() => s && openChat(s.id)}
+      className="g-press flex h-11 w-44 max-w-full items-center gap-2 rounded-lg bg-paper/70 px-2.5 text-left shadow-[0_0_0_0.5px_var(--edge)] enabled:hover:bg-paper disabled:opacity-60"
+    >
+      {agent ? <Logo agent={agent} size={16} className="shrink-0" /> : <MessageSquare size={16} className="shrink-0 text-ink-3" />}
+      <span className="min-w-0">
+        <span className="block truncate text-sm text-ink">{title}</span>
+        <span className="block truncate text-xs text-ink-3">
+          {agent ? agentName(agent) : m.agent} · {m.id}
+        </span>
+      </span>
+    </button>
   );
 }

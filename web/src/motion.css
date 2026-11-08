@@ -169,6 +169,11 @@
 }
 
 /* --- fade --- */
+/* A fold shutting (chat/stick.tsx shut): still open as its rows go in, its chevron already turning back. */
+details[data-shut] > summary .fold-chev {
+  rotate: none !important;
+}
+
 .g-fade {
   animation: g-fade-in var(--dur-2) var(--ease-out) both;
 }

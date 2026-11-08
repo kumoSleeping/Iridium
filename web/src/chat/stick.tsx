@@ -15,6 +15,7 @@ const near = (el: HTMLElement) => Math.max(600, el.clientHeight * 2);
 const END = 40; // px from the bottom that count as at the newest
 const SETTLE = 600; // ms after a chat opens that what grows does not glide
 const REST = 500; // ms since the user last scrolled it that a chat at its newest is at rest there
+const HOLD = 350; // ms with nothing changing before what shrank at the newest settles down
 
 const padOf = (el: HTMLElement) => parseFloat(getComputedStyle(el).paddingBottom) || 0;
 
@@ -62,6 +63,29 @@ export function Stick({ tail, older, place, style, children, scroller, bottom }:
   };
   /** To the newest, gliding up by as far as that scrolled it (a message sent). */
   const toBottom = (el: HTMLElement) => glide(pin(el));
+  /** What shrank at the newest (a draft giving way to its block, the turn's row going as the turn
+   *  ends, the composer emptied) is held: the column kept as tall, nothing moving, till nothing has
+   *  changed for HOLD, then it settles down once, gliding. Not a bounce down and back up each time
+   *  something shrinks and grows again (the user, 2026-11-08). */
+  const floorTimer = useRef(0);
+  const settleSoon = () => {
+    clearTimeout(floorTimer.current);
+    floorTimer.current = window.setTimeout(settleFloor, HOLD);
+  };
+  const settleFloor = () => {
+    const el = list.current;
+    const col = el?.firstElementChild as HTMLElement | null;
+    if (!el || !col || !col.style.minHeight) return;
+    // Not under a finger: then once it is lifted.
+    if (touching.current) return settleSoon();
+    const top = el.scrollTop;
+    col.style.minHeight = "";
+    height.current = col.offsetHeight;
+    pad.current = padOf(el);
+    // Let go of meanwhile, it may still have pulled the scroll up, at its foot: that glides too.
+    if (atEnd.current) pin(el);
+    glide(el.scrollTop - top);
+  };
   /** Kept at the newest: what came at the end, or the stack under it grown (the composer a line
    *  taller, the phone's sheet out), pushes the conversation up by as much, gliding; a short chat
    *  that does not scroll does not move at all. The pane itself shorter or taller (the phone's
@@ -72,13 +96,29 @@ export function Stick({ tail, older, place, style, children, scroller, bottom }:
     const padWas = pad.current;
     height.current = col?.offsetHeight ?? 0;
     pad.current = padOf(el);
-    if (!atEnd.current) return;
-    const by = pin(el);
-    // A fold opened or shut by a press: only what is above it goes, up or down, gliding; what is
-    // below it (a message sent, the turn's row) stays where it was (the user, 2026-11-08).
+    // A fold shut by shut below: everything is drawn where it now goes already.
+    if (shutting.current) {
+      shutting.current = false;
+      if (atEnd.current) pin(el);
+      return;
+    }
+    // A fold opened or shut by a press: what is above it and what is below it glide to their
+    // places, its rows drawn back as it opens, never over what is below (the user, 2026-11-08).
     const toggled = toggledAt.current && performance.now() - toggledAt.current.t < 400 ? toggledAt.current.el : null;
     toggledAt.current = null;
-    if (toggled && col && by && anim.current?.playState !== "running") return glideAbove(el, col, toggled, by);
+    const grew = height.current - was;
+    if (toggled && col && grew && was > 0 && anim.current?.playState !== "running") return unfold(el, col, toggled, atEnd.current ? pin(el) : 0, grew);
+    if (!atEnd.current) return;
+    // Shrunk at the newest: held as tall (settleFloor).
+    const lost = was + padWas - height.current - pad.current;
+    if (col && was > 0 && lost > 0.5 && !paging.current) {
+      col.style.minHeight = `${height.current + lost}px`;
+      height.current += lost;
+      settleSoon();
+      return;
+    }
+    if (col?.style.minHeight) settleSoon();
+    const by = pin(el);
     // Not the first page coming into an empty chat: that is drawn in place, at the newest.
     const want = was > 0 && !paging.current ? height.current - was + pad.current - padWas : 0;
     glide(want > 0 ? Math.min(want, Math.max(0, by)) : Math.max(want, Math.min(0, by)), settling);
@@ -104,16 +144,81 @@ export function Stick({ tail, older, place, style, children, scroller, bottom }:
 
   /** The fold pressed last, and when: the next growth is its. */
   const toggledAt = useRef<{ el: Element; t: number } | null>(null);
-  /** The blocks from the top down to the one holding at, those in sight, drawn where they were
-   *  (by px lower) and gliding to their place; the rest left still. */
-  const glideAbove = (el: HTMLElement, col: HTMLElement, at: Element, by: number) => {
+  /** Fold at grew by grew px (less when shut), the list scrolled by by to keep at the newest. What
+   *  is above it, at with it, is drawn where it was (by px lower) and glides to its place; what is
+   *  below it, where it was (grew − by px higher), glides to its own; at's rows are cut off at the
+   *  top of what is below all the way, so they come out from under it, never over it. */
+  const unfold = (el: HTMLElement, col: HTMLElement, at: Element, by: number, grew: number) => {
     if (reduced() || document.hidden) return;
-    const top = el.scrollTop - Math.abs(by);
-    const end = el.scrollTop + el.clientHeight + Math.abs(by);
-    for (const c of col.children as HTMLCollectionOf<HTMLElement>) {
-      if (c.offsetTop + c.offsetHeight > top && c.offsetTop < end) c.animate([{ transform: `translateY(${by}px)` }, { transform: "none" }], { duration: motion.dur(3), easing: motion.ease("out") });
-      if (c.contains(at)) break;
+    const opts = { duration: motion.dur(3), easing: motion.ease("out") };
+    const box = el.getBoundingClientRect();
+    const reach = Math.abs(by) + Math.abs(grew);
+    const seen = (n: Element) => {
+      const r = n.getBoundingClientRect();
+      return r.bottom > box.top - reach && r.top < box.bottom + reach;
+    };
+    const move = (n: Element, y: number) => y && seen(n) && n.animate([{ transform: `translateY(${y}px)` }, { transform: "none" }], opts);
+    for (let n: Element = at; n !== col && n.parentElement; n = n.parentElement) {
+      for (let p = n.previousElementSibling; p; p = p.previousElementSibling) move(p, by);
+      for (let p = n.nextElementSibling; p; p = p.nextElementSibling) move(p, by - grew);
     }
+    const cut = Math.max(0, grew);
+    at.animate([{ transform: `translateY(${by}px)`, clipPath: `inset(-40px -100vw ${cut}px -100vw)` }, { transform: "none", clipPath: "inset(-40px -100vw 0px -100vw)" }], opts);
+  };
+
+  /** Where the scroll was at the last scroll event; a finger on the list; a place leave scrolled
+   *  to, no move of the user's. */
+  const lastTop = useRef(0);
+  const touching = useRef(false);
+  const kept = useRef(-1);
+  /** The user goes up: the newest is let go, and a glide under way stops where it is drawn, the
+   *  conversation not moving on under the finger. */
+  const leave = () => {
+    atEnd.current = false;
+    const el = list.current;
+    const col = el?.firstElementChild as HTMLElement | null;
+    if (!el || !col || anim.current?.playState !== "running") return;
+    const tr = getComputedStyle(col).transform;
+    const at = tr && tr !== "none" ? new DOMMatrixReadOnly(tr).m42 : 0;
+    anim.current.cancel();
+    anim.current = null;
+    if (Math.abs(at) < 0.5) return;
+    el.scrollTop -= at;
+    kept.current = lastTop.current = el.scrollTop;
+  };
+
+  /** Set as a fold shut by shut lands: the growth that follows is its, already drawn. */
+  const shutting = useRef(false);
+  /** Fold d shut, the other way from unfold: its rows go in under what is below it, what is above
+   *  it and below it gliding to where they will be, then it shuts with everything in place. */
+  const shut = (el: HTMLElement, col: HTMLElement, d: HTMLDetailsElement) => {
+    if (col.style.minHeight) return false;
+    const sum = d.querySelector(":scope > summary") as HTMLElement | null;
+    const h = sum ? d.offsetHeight - sum.offsetHeight : 0;
+    if (h <= 0) return false;
+    // Where the scroll will be: kept at the newest, it comes up by as far as it can.
+    const down = atEnd.current ? Math.min(h, el.scrollTop) : 0;
+    const opts: KeyframeAnimationOptions = { duration: motion.dur(3), easing: motion.ease("out"), fill: "forwards" };
+    const box = el.getBoundingClientRect();
+    const seen = (n: Element) => {
+      const r = n.getBoundingClientRect();
+      return r.bottom > box.top - h && r.top < box.bottom + h;
+    };
+    const anims: Animation[] = [];
+    const move = (n: Element, y: number) => y && seen(n) && anims.push(n.animate([{ transform: "none" }, { transform: `translateY(${y}px)` }], opts));
+    for (let n: Element = d; n !== col && n.parentElement; n = n.parentElement) {
+      for (let p = n.previousElementSibling; p; p = p.previousElementSibling) move(p, down);
+      for (let p = n.nextElementSibling; p; p = p.nextElementSibling) move(p, down - h);
+    }
+    anims.push(d.animate([{ transform: "none", clipPath: "inset(-40px -100vw 0px -100vw)" }, { transform: `translateY(${down}px)`, clipPath: `inset(-40px -100vw ${h}px -100vw)` }], opts));
+    d.dataset.shut = "";
+    void anims[anims.length - 1]!.finished.then(() => {
+      shutting.current = true;
+      d.open = false;
+      delete d.dataset.shut;
+      for (const a of anims) a.cancel();
+    }).catch(() => {});
+    return true;
   };
 
   const back = async () => {
@@ -158,8 +263,28 @@ export function Stick({ tail, older, place, style, children, scroller, bottom }:
     if (col) ro.observe(col);
     ends.set(el, () => ((atEnd.current = true), setFresh(false), toBottom(el)));
     rests.set(el, () => atEnd.current && bottomOf(el) - el.scrollTop < 2 && performance.now() - moved.current > REST);
+    lastTop.current = el.scrollTop;
+    // What says the user is going up before the scroll comes: more coming meanwhile would put it
+    // back at the newest first.
+    let y = 0;
+    const wheel = (e: WheelEvent) => e.deltaY < 0 && Math.abs(e.deltaY) > Math.abs(e.deltaX) && atEnd.current && leave();
+    const touch = (e: TouchEvent) => {
+      touching.current = e.type === "touchstart" || e.type === "touchmove";
+      const p = e.touches[0];
+      if (!p) return;
+      if (e.type === "touchmove" && p.clientY - y > 2 && atEnd.current && bottomOf(el) > 0) leave();
+      y = p.clientY;
+    };
+    const key = (e: KeyboardEvent) => ["PageUp", "ArrowUp", "Home"].includes(e.key) && !(e.target as Element).closest?.("textarea, input") && atEnd.current && leave();
+    el.addEventListener("wheel", wheel, { passive: true });
+    for (const k of ["touchstart", "touchmove", "touchend", "touchcancel"] as const) el.addEventListener(k, touch, { passive: true });
+    el.addEventListener("keydown", key);
     return () => {
       ro.disconnect();
+      clearTimeout(floorTimer.current);
+      el.removeEventListener("wheel", wheel);
+      for (const k of ["touchstart", "touchmove", "touchend", "touchcancel"] as const) el.removeEventListener(k, touch);
+      el.removeEventListener("keydown", key);
       anim.current?.cancel();
       const end = bottomOf(el) - el.scrollTop < END;
       place.top = end ? null : el.scrollTop;
@@ -168,11 +293,20 @@ export function Stick({ tail, older, place, style, children, scroller, bottom }:
 
   const scrolled = () => {
     const el = list.current!;
+    const top = el.scrollTop;
+    const d = top - lastTop.current;
+    lastTop.current = top;
     // Where this put it is no move of the user's: the pane may have shrunk again since (the
     // keyboard coming in steps), and it is still to keep at the newest.
-    if (atEnd.current && Math.abs(el.scrollTop - ours.current) <= 1) return;
+    if (atEnd.current && Math.abs(top - ours.current) <= 1) return;
+    if (Math.abs(top - kept.current) <= 1) return void (kept.current = -1);
     moved.current = performance.now();
-    atEnd.current = bottomOf(el) - el.scrollTop < END;
+    // Any way up lets go of the newest at once, not only past END: a slow drag up was pulled back
+    // down each time more came (the user, 2026-11-08). Only going down near it holds on again.
+    const gap = bottomOf(el) - top;
+    if (atEnd.current) {
+      if (d < -0.5 && gap > 1) leave();
+    } else if (gap < END && d >= 0) atEnd.current = true;
     if (atEnd.current) setFresh(false);
     void back().catch(() => {});
   };
@@ -184,7 +318,14 @@ export function Stick({ tail, older, place, style, children, scroller, bottom }:
           and over it, not off to the left by half a scrollbar (the user, 2026-11-06). */}
       <div ref={list} role="log" aria-label={t("chat.log")} onScroll={scrolled} onClickCapture={(e) => {
           const fold = (e.target as Element).closest?.("summary")?.parentElement;
-          if (fold) toggledAt.current = { el: fold, t: performance.now() };
+          if (!fold) return;
+          if (fold instanceof HTMLDetailsElement && fold.open) {
+            const el = list.current!;
+            const col = el.firstElementChild as HTMLElement | null;
+            const busy = fold.dataset.shut !== undefined || anim.current?.playState === "running";
+            if (busy || (col && !reduced() && !document.hidden && shut(el, col, fold))) return e.preventDefault();
+          }
+          toggledAt.current = { el: fold, t: performance.now() };
         }} className="absolute inset-0 overflow-y-auto [overflow-anchor:none] [scrollbar-gutter:stable_both-edges]" style={style}>
         {children}
       </div>

@@ -302,6 +302,8 @@ Bot 用自己的 TOKEN（交互终端由门认，见 `gate.md`）；下面的“
 - 例子：`examples/plugin/echo_im.py`（只用标准库）把 stdin/stdout 当成一个假 IM。
 - `ChatInput.attachments`：上面传好的引用，路径写进消息、图片照样给 agent（同网页）；只有附件没有文字也行。
 
+Bot 切到会话（网页会话右键菜单最底下，2026-11-08）：`POST /api/sessions/{id}/bot`，`BringBot{bot}` → `BotReply{bot, name, chat}`。只有面板和本机；`bot` 不是 Bot 终端回 404。聊天的选法同上，指针改到这个会话，并发一条 `reply`，内容同 `/use`。没有能用这个会话的聊天回 404。`Terminal.bot`：有过聊天的插件，菜单按它列，已在这个会话里的不列。
+
 ## 官方 Bot
 
 Iridium 不内置、但认得名字的 Bot（现在只有 QQ Bot `qq`，二进制 `iridium-qq`，见 `docs/qq.md`）。只有人能用（面板，或本机人跑的 `ir`）；agent 回 403，用扩展自己的命令行。

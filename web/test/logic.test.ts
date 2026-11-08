@@ -7,7 +7,7 @@ import { argOf, folded, foldLine, inputOf } from "../src/chat/fold";
 import { commandsOf, keyMode, matching } from "../src/chat/composer";
 import { levelName, restAt } from "../src/chat/effort";
 import { ctxParts, modelView } from "../src/chat/meters";
-import { atSessions, atWord, mentions, shortId, sourceOf, withoutFiles, withoutNameLines, draftWords } from "../src/chat/refs";
+import { atSessions, atWord, leadingMentions, mentions, shortId, sourceOf, withoutFiles, withoutNameLines, draftWords } from "../src/chat/refs";
 import { en } from "../src/i18n/en";
 import { zh } from "../src/i18n/zh";
 import { jumpList } from "../src/jump";
@@ -194,6 +194,16 @@ describe("buildTree", () => {
     expect(commonDir(["/a/b/c", "/a/b/d"])).toBe("/a/b");
     expect(commonDir(["/a/b", "/a/b"])).toBe("/a");
     expect(commonDir(["/a", "/b"])).toBe("");
+  });
+  test("subagents under a session keep the order they came in", () => {
+    const now = 1_000_000;
+    const p = { id: "p", agent: "claude", cwd: "/w", status: "idle", live: true, updatedAt: now } as Session;
+    const kid = (id: string, at: number) => ({ id, agent: "claude", cwd: "/w", status: "idle", subagent: true, parent: "p", updatedAt: at }) as Session;
+    const seen = new Map<string, number>();
+    const ids = (list: Session[]) => buildTree(list, [], "未归类", now, seen).kids.get("p")?.map((s) => s.id);
+    expect(ids([p, kid("b", now - 10), kid("a", now - 20)])).toEqual(["a", "b"]);
+    expect(ids([p, kid("a", now), kid("b", now - 5)])).toEqual(["a", "b"]);
+    expect(ids([p, kid("c", now - 30), kid("b", now), kid("a", now - 1)])).toEqual(["a", "b", "c"]);
   });
 });
 
@@ -407,6 +417,12 @@ describe("mentions", () => {
     expect(mentions("ask 「Fix the login」（Claude 会话 ca5187d2） now")).toEqual(["ask ", { title: "Fix the login", agent: "Claude", id: "ca5187d2", text: "「Fix the login」（Claude 会话 ca5187d2）" }, " now"]);
     expect(mentions('"Run tests" (DeepSeek Harness session 1a2b3c4d-9)')).toEqual([{ title: "Run tests", agent: "DeepSeek Harness", id: "1a2b3c4d-9", text: '"Run tests" (DeepSeek Harness session 1a2b3c4d-9)' }]);
     expect(mentions("plain 「quoted」 words (session 12)")).toEqual(["plain 「quoted」 words (session 12)"]);
+  });
+  test("the sessions named before the words, as the composer sends them", () => {
+    const a = "「A」（Claude 会话 ca5187d2）", b = "「B」（Codex 会话 1a2b3c4d）";
+    expect(leadingMentions(`${a} ${b} look at ${a}`)).toEqual({ named: [mentions(a)[0], mentions(b)[0]], words: `look at ${a}` });
+    expect(leadingMentions(a).words).toBe("");
+    expect(leadingMentions(`see ${a}`)).toEqual({ named: [], words: `see ${a}` });
   });
 });
 

@@ -375,3 +375,65 @@ func TestBotLetter(t *testing.T) {
 		t.Fatalf("a removed bot still marked: %+v", list)
 	}
 }
+
+// A session's menu brings a bot's chat to it: the chat points there and is told so, as by /use;
+// the terminal list marks the bot.
+func TestBringBot(t *testing.T) {
+	var srv *Server
+	l := startWith(t, func(s *Server, cfg config.Config, work string) {
+		srv = s
+		var err error
+		s.Chat, err = chat.New(chat.Options{Manager: s.m, Store: s.st, StateDir: cfg.StateDir, ChatDir: work, Logf: t.Logf, Guard: s.ChatGuard(), Terminal: s.HasTerminal})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(s.Chat.Close)
+	})
+	var tok api.Token
+	l.want(200, "socket", "POST", "/api/terminals/tokens", api.NewInvite{Name: "QQ", Owner: true}, &tok)
+	bot, botID := tok.Token, tok.Terminal.ID
+	var b api.NewSessionReply
+	l.want(200, "web", "POST", "/api/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "first"}, &b)
+	l.waitReply("web", b.ID, "ok: first")
+	// No chat yet: not a bot in the list, none to bring.
+	isBot := func() bool {
+		var ts api.Terminals
+		l.want(200, "web", "GET", "/api/terminals", nil, &ts)
+		return slices.ContainsFunc(ts.Terminals, func(x api.Terminal) bool { return x.ID == botID && x.Bot })
+	}
+	if isBot() {
+		t.Fatal("a bot without a chat")
+	}
+	l.want(404, "web", "POST", "/api/sessions/"+b.ID+"/bot", api.BringBot{Bot: botID}, nil)
+
+	var a api.ChatInputReply
+	l.want(200, bot, "POST", "/api/chat/qq:1/input", api.ChatInput{Text: "/new claude"}, &a)
+	if !isBot() {
+		t.Fatal("not marked a bot")
+	}
+	last, _ := srv.st.OutboxLast(botID)
+	var r api.BotReply
+	l.want(200, "web", "POST", "/api/sessions/"+b.ID+"/bot", api.BringBot{Bot: botID}, &r)
+	if r.Bot != botID || r.Name != "QQ" || r.Chat != "qq:1" {
+		t.Fatalf("brought: %+v", r)
+	}
+	var ptr api.ChatPointer
+	if l.want(200, bot, "GET", "/api/chat/qq:1", nil, &ptr); ptr.Session != b.ID {
+		t.Fatalf("not moved: %+v", ptr)
+	}
+	out, _ := srv.st.OutboxAfter(botID, last)
+	out = slices.DeleteFunc(out, func(x store.Outgoing) bool { return x.Type == "status" })
+	var e api.ChatEvent
+	if len(out) != 1 || out[0].Type != "reply" || json.Unmarshal([]byte(out[0].Data), &e) != nil || e.Reply == nil ||
+		!strings.HasPrefix(e.Reply.Markdown, "现在：[CC]") || !strings.Contains(e.Reply.Markdown, "[CC] ok: first") {
+		t.Fatalf("told: %+v", out)
+	}
+	var list []api.Session
+	l.want(200, "web", "GET", "/api/sessions", nil, &list)
+	if i := slices.IndexFunc(list, func(x api.Session) bool { return x.ID == b.ID }); i < 0 || !slices.Contains(list[i].Bots, botID) {
+		t.Fatalf("not marked: %+v", list)
+	}
+	// Not a bot; not from a bot.
+	l.want(404, "web", "POST", "/api/sessions/"+b.ID+"/bot", api.BringBot{Bot: "nobody"}, nil)
+	l.want(403, bot, "POST", "/api/sessions/"+b.ID+"/bot", api.BringBot{Bot: botID}, nil)
+}

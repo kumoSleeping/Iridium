@@ -51,6 +51,7 @@ import type {
   Workspace,
   WorkspacePatch,
 } from "./types.gen";
+import type { BotReply, BringBot } from "./types.gen";
 import type { SecretInfo, Secrets, SetSecret, Usage } from "./types.gen";
 
 /** The gate's GET /_ir/api/session (docs/gate.md). */
@@ -162,6 +163,8 @@ export const api = {
     write<SendReply>("POST", `${S(id)}/send`, { text, ...(attachments?.length ? { attachments } : {}), ...(steer ? { steer } : {}) } satisfies Send),
   interrupt: (id: string) => write<{ ok: boolean }>("POST", `${S(id)}/interrupt`),
   stop: (id: string) => write<{ ok: boolean }>("POST", `${S(id)}/stop`),
+  /** A bot's chat (its terminal ID) pointed at the session, from the session's menu. */
+  bringBot: (id: string, bot: string) => write<BotReply>("POST", `${S(id)}/bot`, { bot } satisfies BringBot),
   /** An ask's card answered (docs/api.md "卡片"): an option, a choice per question, own words. */
   answer: (a: CardAnswer) => write<CardReply>("POST", "/api/answer", a),
   /** A step Claude's auto mode denied, run again (session/release.go). */

@@ -20,8 +20,8 @@ import { Files, Picture, previews, size } from "./files";
 import { cmdOfCall, type Cmd } from "./cmd";
 import { argOf, diffSum, foldLine, foldSaid, kindOf, runCmd, type Diff, type Kind, type Shown, type Step, type Tool } from "./fold";
 import { Markdown } from "./markdown";
-import { Mentioned } from "./mention";
-import { type Source, withoutFiles, withoutNameLines } from "./refs";
+import { MentionCard, Mentioned } from "./mention";
+import { leadingMentions, type Source, withoutFiles, withoutNameLines } from "./refs";
 
 type You = Extract<Source, { kind: "you" }>;
 type From = Extract<Source, { kind: "letter" }>;
@@ -131,7 +131,10 @@ function SendState({ state }: { state: Going }) {
   );
 }
 
-export const YouBubble = forwardRef<HTMLDivElement, { text: string; who: You; failed?: boolean; children?: ReactNode; time?: number; going?: Going }>(function YouBubble({ text, who, failed, children, time, going }, ref) {
+export const YouBubble = forwardRef<HTMLDivElement, { text: string; who: You; failed?: boolean; children?: ReactNode; time?: number; going?: Going }>(function YouBubble({ text: all, who, failed, children, time, going }, ref) {
+  // The sessions named before the words: cards with the files, as they were in the composer.
+  const { named, words: text } = useMemo(() => leadingMentions(all), [all]);
+  const row = named.length + Children.count(children) > 0;
   return (
     <Sender ref={ref} who={who} title={time ? clock(time) : undefined}>
       <div className="relative max-w-[min(560px,100%)] px-3.5 py-2">
@@ -140,7 +143,14 @@ export const YouBubble = forwardRef<HTMLDivElement, { text: string; who: You; fa
         {text && <span className="relative block text-md whitespace-pre-wrap [overflow-wrap:anywhere]"><Mentioned text={text} /></span>}
         {/* Not for no files: a message sent and the same one landed are as high (an empty list was
             a row of its own, the bubble shrinking as it landed). */}
-        {Children.count(children) > 0 && <span className="relative mt-1 flex flex-wrap gap-1.5">{children}</span>}
+        {row && (
+          <span className={cn("relative flex flex-wrap gap-1.5", text && "mt-1")}>
+            {named.map((m, i) => (
+              <MentionCard key={i} m={m} />
+            ))}
+            {children}
+          </span>
+        )}
       </div>
     </Sender>
   );
@@ -313,7 +323,7 @@ function SystemFold({ b, session }: { b: Block; session: string }) {
     <details className="group/sys text-xs text-ink-3">
       <summary className={cn("flex cursor-default list-none items-center justify-center gap-1.5 py-1 [&::-webkit-details-marker]:hidden", b.event === "api_error" && "text-err")}>
         <span className="min-w-0 truncate">{t(SYSTEM[b.event ?? ""] ?? "sys.other")}</span>
-        <ChevronRight size={12} className="shrink-0 transition-transform group-open/sys:rotate-90" />
+        <ChevronRight size={12} className="fold-chev shrink-0 transition-transform duration-(--dur-3) group-open/sys:rotate-90" />
       </summary>
       <Clipped text={b.text ?? ""} length={b.length} at={b.at} session={session} error={b.event === "api_error"} cap />
     </details>
@@ -439,7 +449,7 @@ function Fold({ steps, session, cwd }: { steps: Step[]; session: string; cwd: st
             {bad > 1 && bad}
           </span>
         )}
-        <ChevronRight size={13} className="shrink-0 text-ink-4 transition-transform duration-(--dur-2) group-open/fold:rotate-90" />
+        <ChevronRight size={13} className="fold-chev shrink-0 text-ink-4 transition-transform duration-(--dur-3) group-open/fold:rotate-90" />
       </summary>
       <div className="g-fade mt-0.5 ml-[7px] flex flex-col pl-3 shadow-[inset_1px_0_0_var(--edge)]">
         {steps.map((s) => (

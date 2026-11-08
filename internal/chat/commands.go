@@ -185,12 +185,17 @@ func cmdUse(s *Service, ctx context.Context, c Caller, p *store.ChatPointer, arg
 	if err := s.setPointer(*p); err != nil {
 		return api.ChatInputReply{}, err
 	}
-	msg := "现在：" + sessionText(*chosen) + "  \n" + tilde(chosen.Cwd)
-	// The last rounds, as one message (QQ answers a message four times only).
-	if h := s.history(chosen.ID, switchRounds, switchChars); h != "" {
+	return reply(chosen.ID, s.nowIn(*chosen))
+}
+
+// nowIn is what a chat is told as it is moved to session: the session, its folder, the last rounds
+// as one message (QQ answers a message four times only).
+func (s *Service) nowIn(session api.Session) string {
+	msg := "现在：" + sessionText(session) + "  \n" + tilde(session.Cwd)
+	if h := s.history(session.ID, switchRounds, switchChars); h != "" {
 		msg += "\n\n" + h
 	}
-	return reply(chosen.ID, msg)
+	return msg
 }
 
 func cmdLs(s *Service, ctx context.Context, c Caller, p *store.ChatPointer, args string) (api.ChatInputReply, error) {

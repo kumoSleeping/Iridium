@@ -657,6 +657,12 @@ export interface BotLetter {
   caller?: string;
 }
 /**
+ * BringBot is POST /api/sessions/{id}/bot: Bot's chat (its terminal ID) points at the session.
+ */
+export interface BringBot {
+  bot: string;
+}
+/**
  * BotReply is where a letter went: the bot (its terminal ID, and name) and its chat; Letter, as a
  * letter (the chat pointed elsewhere) rather than the session's reply.
  */
@@ -1308,6 +1314,10 @@ export interface Terminal {
    * Device: what it runs on, as the badge on its messages' avatar shows; the server always sets it.
    */
   device?: Device;
+  /**
+   * Bot: a plugin with a chat in Iridium; a session's menu offers to bring that chat to it.
+   */
+  bot?: boolean;
 }
 /**
  * Device is what a terminal runs on, set in its settings (PUT /api/me/device, ir profile

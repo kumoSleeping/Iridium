@@ -56,6 +56,27 @@ func (s *Server) pluginRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/chat/{key}/files/{ref}", s.chatFile)
 	mux.HandleFunc("POST /api/chat/{key}/uploads", s.chatUpload)
 	mux.HandleFunc("POST /api/bot", s.botLetter)
+	mux.HandleFunc("POST /api/sessions/{id}/bot", s.manages(s.use(s.bringBot)))
+}
+
+// bringBot points a bot's chat at the session, from its menu on the web (docs/api.md "插件").
+func (s *Server) bringBot(w http.ResponseWriter, r *http.Request) {
+	var req api.BringBot
+	if !readJSON(w, r, &req) {
+		return
+	}
+	info, ok := s.gate().Endpoint(req.Bot)
+	if !ok || info.Kind != gate.KindChannel || info.ID == gate.LocalEndpointID {
+		fail(w, http.StatusNotFound, "no bot "+req.Bot)
+		return
+	}
+	out, err := s.Chat.Bring(r.PathValue("id"), info.ID)
+	if err != nil {
+		s.fault(w, err)
+		return
+	}
+	out.Name = info.Name
+	reply(w, http.StatusOK, out)
 }
 
 // HasTerminal reports whether the interactive terminal id is still there.

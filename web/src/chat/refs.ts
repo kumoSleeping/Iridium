@@ -94,6 +94,21 @@ export function mentions(text: string): (string | Mention)[] {
   return out;
 }
 
+/** A message's text split as the composer put it together: the sessions named before the words
+ *  (cards there, as they were in the composer), the words after them. */
+export function leadingMentions(text: string): { named: Mention[]; words: string } {
+  const named: Mention[] = [];
+  const parts = mentions(text);
+  let i = 0;
+  for (; i < parts.length; i++) {
+    const p = parts[i]!;
+    if (typeof p !== "string") named.push(p);
+    else if (p.trim()) break;
+  }
+  if (!named.length) return { named, words: text };
+  return { named, words: parts.slice(i).map((p) => (typeof p === "string" ? p : p.text)).join("").trimStart() };
+}
+
 const LOCAL = (u: string) => !/^[a-z][a-z0-9+.-]*:/i.test(u) || u.startsWith("file:");
 const FILE_LINE = /^[ \t]*\[(文件|附件)\] `([^`\n]+)`[ \t]*$/gm;
 

@@ -7,6 +7,8 @@
 // not: those under 需要你 and 归档, out of their place (2026-11-05).
 // A subagent is no row of its own, nor in any folder: it sits under the session that started it,
 // and only while it works; done, it is gone, as Claude Code lets it go (the user, 2026-11-06).
+// Those under one session keep the order they came in, the newest last, not the order they last
+// wrote in, which swapped them back and forth (the user, 2026-11-08).
 import type { Workspace } from "./api/types.gen";
 import type { Session } from "./api/types.gen";
 
@@ -33,7 +35,17 @@ export const working = (s: Session, parent: Session | undefined, now: number) =>
 const under = (path: string, root: string) => root !== "" && (path === root || path.startsWith(root.endsWith("/") ? root : root + "/"));
 const rel = (path: string, root: string) => (path === root ? "" : path.slice(root.length).replace(/^\/+/, ""));
 
-export function buildTree(all: Session[], workspaces: Workspace[], unsorted: string, now = Date.now()): Tree {
+/** The order subagents and runs were first seen in, by id ("run:" before a run's): the list says
+ *  nothing of when one began. Those first seen together (the page opened) go by when they last
+ *  wrote, the earliest first. */
+const SEEN = new Map<string, number>();
+function bySeen<T>(xs: T[], key: (x: T) => string, at: (x: T) => number, seen: Map<string, number>): T[] {
+  const fresh = xs.filter((x) => !seen.has(key(x))).sort((a, b) => at(a) - at(b));
+  for (const x of fresh) seen.set(key(x), seen.size);
+  return [...xs].sort((a, b) => seen.get(key(a))! - seen.get(key(b))!);
+}
+
+export function buildTree(all: Session[], workspaces: Workspace[], unsorted: string, now = Date.now(), seen = SEEN): Tree {
   const list = all.filter((s) => !s.subagent);
   const byId = new Map(list.map((s) => [s.id, s]));
   const kids = new Map<string, Session[]>();
@@ -58,9 +70,10 @@ export function buildTree(all: Session[], workspaces: Workspace[], unsorted: str
   for (const [parent, list] of runs) {
     const live = list.filter((r) => r.working.length);
     for (const r of live) r.phase = [...r.working].sort((a, b) => b.updatedAt - a.updatedAt)[0]!.workflow?.phase ?? "";
-    if (live.length) runs.set(parent, live);
+    if (live.length) runs.set(parent, bySeen(live, (r) => `run:${r.id}`, (r) => Math.min(...r.working.map((s) => s.updatedAt)), seen));
     else runs.delete(parent);
   }
+  for (const [parent, list] of kids) kids.set(parent, bySeen(list, (s) => s.id, (s) => s.updatedAt, seen));
   // One that waits on you stays in its place, its lamp breathing amber: no 需要你 group of its own
   // (the user, 2026-11-08).
   const live = list.filter((s) => !s.archived);

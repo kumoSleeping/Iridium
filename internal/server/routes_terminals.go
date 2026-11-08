@@ -94,8 +94,14 @@ func (s *Server) terminals(w http.ResponseWriter, r *http.Request) {
 	t := s.terminalOf(local)
 	t.Rules = access.Full()
 	out.Terminals = append(out.Terminals, t)
+	var bots map[string]bool
+	if s.Chat != nil {
+		bots = s.Chat.Bots()
+	}
 	for _, e := range a.Endpoints {
-		out.Terminals = append(out.Terminals, s.terminalOf(e))
+		t := s.terminalOf(e)
+		t.Bot = bots[e.ID] && e.Kind == gate.KindChannel
+		out.Terminals = append(out.Terminals, t)
 	}
 	for _, i := range a.Invites {
 		out.Invites = append(out.Invites, api.PendingInvite{ID: i.ID, Name: i.Name, Setup: i.Setup, Owner: i.Owner, CreatedAt: ms(i.CreatedAt), ExpiresAt: ms(i.ExpiresAt)})

@@ -13,7 +13,7 @@ import { Archive, ArchiveRestore, Bot, Check, ChevronRight, Copy, Folder, Folder
 import { ConfirmIcon, confirmName, confirmTitle } from "./confirmname";
 import { Fragment, lazy, memo, Suspense, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { api } from "./api/client";
-import type { Color, Confirm, Session } from "./api/types.gen";
+import type { Color, Confirm, Session, Terminal } from "./api/types.gen";
 import { colorVar, COLORS, useFolderColors } from "./colors";
 import { ahead, behind } from "./chats";
 import { t, useLang } from "./i18n";
@@ -806,15 +806,42 @@ function FolderRow({ f, ws, label, open, onToggle, newHere, plus }: { f: FolderN
 
 function SessionMenu({ s, at, close, rename }: { s: Session; at: { x: number; y: number } | null; close: () => void; rename: () => void }) {
   const items = sessionActions(s, rename);
+  const bots = useTerminalList().filter((x) => x.bot && !s.bots?.includes(x.id));
   const anchor = at && { getBoundingClientRect: () => DOMRect.fromRect({ x: at.x, y: at.y, width: 0, height: 0 }) };
   return (
     <Menu.Root open={at !== null} onOpenChange={(o) => !o && close()}>
       <Menu.Portal>
         <Menu.Positioner anchor={anchor} side="bottom" align="start" sideOffset={4} collisionPadding={8} className="z-50">
-          <MenuItems items={items} tags={sessionTags(s)} foot={<PushFoot levels={sessionLevels(s)} i={items.length} />} />
+          <MenuItems
+            items={items}
+            tags={sessionTags(s)}
+            foot={<PushFoot levels={sessionLevels(s)} i={items.length} />}
+            tail={!s.archived && <BotItems s={s} bots={bots} i={items.length + 2} />}
+          />
         </Menu.Positioner>
       </Menu.Portal>
     </Menu.Root>
+  );
+}
+
+/** At a session's menu's foot, one item per bot whose chat is elsewhere: that chat moved to this
+ *  session, as its /use would (the user, 2026-11-08). */
+function BotItems({ s, bots, i }: { s: Session; bots: Terminal[]; i: number }) {
+  if (!bots.length) return null;
+  const bring = (b: Terminal) =>
+    void api.bringBot(s.id, b.id).then(
+      () => toast(t("toast.botHere", { name: b.name || "Bot" })),
+      (e) => toast(t("err.action"), { error: true, description: errText(e) }),
+    );
+  return (
+    <div style={{ "--i": i } as CSSProperties} className="mt-1.5 flex flex-col border-t border-edge pt-1.5">
+      {bots.map((b) => (
+        <Menu.Item key={b.id} onClick={() => bring(b)} className="flex h-8 cursor-default items-center gap-2.5 rounded-md px-2.5 text-base outline-none select-none data-highlighted:bg-fill pointer-coarse:h-11">
+          <Avatar src={b.avatar} name={b.name || "Bot"} size={15} badge={Bot} badgeSize={9} />
+          <span className="truncate">{t("menu.bringBot", { name: b.name || "Bot" })}</span>
+        </Menu.Item>
+      ))}
+    </div>
   );
 }
 
@@ -829,8 +856,9 @@ export type Tags = { value?: Color; set: (c: Color | "") => void };
 
 type MenuItem = { icon: ReactNode; label: string; run: () => void };
 
-/** A menu's items; lead: before the children, at its top; foot: after the items, over the tags. */
-export function MenuItems({ lead = [], items, tags, children, foot }: { lead?: MenuItem[]; items: MenuItem[]; tags?: Tags; children?: ReactNode; foot?: ReactNode }) {
+/** A menu's items; lead: before the children, at its top; foot: after the items, over the tags;
+ *  tail: under the tags, the very end. */
+export function MenuItems({ lead = [], items, tags, children, foot, tail }: { lead?: MenuItem[]; items: MenuItem[]; tags?: Tags; children?: ReactNode; foot?: ReactNode; tail?: ReactNode }) {
   const item = (it: MenuItem, i: number) => (
     <Menu.Item key={it.label} onClick={it.run} style={{ "--i": i } as CSSProperties} className="flex h-8 cursor-default items-center gap-2.5 rounded-md px-2.5 text-base outline-none select-none data-highlighted:bg-fill pointer-coarse:h-11">
       <span className="text-ink-2">{it.icon}</span>
@@ -845,6 +873,7 @@ export function MenuItems({ lead = [], items, tags, children, foot }: { lead?: M
         {items.map((it, i) => item(it, lead.length + i))}
         {foot}
         {tags && <TagDots tags={tags} i={lead.length + items.length + (foot ? 1 : 0)} />}
+        {tail}
       </div>
     </Menu.Popup>
   );

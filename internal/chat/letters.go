@@ -135,6 +135,43 @@ func (s *Service) Letter(ctx context.Context, session, text, plugin string) (api
 	return api.BotReply{Bot: to.Plugin, Chat: to.Chat, Letter: true}, nil
 }
 
+// Bring points plugin's chat at session, from a session's menu on the web (the user, 2026-11-08):
+// the chat reach picks for it, told as /use tells it. ErrNoBot if the bot has no chat that may use
+// the session.
+func (s *Service) Bring(session, plugin string) (api.BotReply, error) {
+	st, err := s.o.Manager.State(session)
+	if err != nil {
+		return api.BotReply{}, err
+	}
+	to, ok := s.reach(session, plugin)
+	if !ok {
+		return api.BotReply{}, ErrNoBot
+	}
+	p, err := s.o.Store.Pointer(to.Plugin, to.Chat)
+	if err != nil {
+		return api.BotReply{}, err
+	}
+	p.Session = session
+	if err := s.setPointer(p); err != nil {
+		return api.BotReply{}, err
+	}
+	s.post(p.Plugin, p.Chat, "reply", api.ChatEvent{Chat: p.Chat, Session: session, Reply: text(s.nowIn(st.Session))})
+	return api.BotReply{Bot: p.Plugin, Chat: p.Chat}, nil
+}
+
+// Bots is every plugin with a chat.
+func (s *Service) Bots() map[string]bool {
+	all, err := s.o.Store.ChatsSeen()
+	if err != nil {
+		s.o.Logf("chat: %v", err)
+	}
+	out := map[string]bool{}
+	for _, x := range all {
+		out[x.Plugin] = true
+	}
+	return out
+}
+
 // dismiss is a pick's option that does nothing: a letter's 关闭.
 const dismiss = "-"
 

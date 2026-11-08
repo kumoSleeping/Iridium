@@ -75,6 +75,11 @@ type BotLetter struct {
 	Caller string `json:"caller,omitempty"`
 }
 
+// BringBot is POST /api/sessions/{id}/bot: Bot's chat (its terminal ID) points at the session.
+type BringBot struct {
+	Bot string `json:"bot"`
+}
+
 // BotReply is where a letter went: the bot (its terminal ID, and name) and its chat; Letter, as a
 // letter (the chat pointed elsewhere) rather than the session's reply.
 type BotReply struct {
