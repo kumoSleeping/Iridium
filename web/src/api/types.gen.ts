@@ -1243,6 +1243,10 @@ export interface Settings {
    * hosted agents are told it from their next start.
    */
   lang: string;
+  /**
+   * PairClosed: new pairing requests (POST /api/pair, /api/exec/pair) are turned away.
+   */
+  pairClosed: boolean;
 }
 /**
  * SettingsPatch changes what it gives and nothing else. A mode "" goes back to the agent's own.
@@ -1256,6 +1260,7 @@ export interface SettingsPatch {
   push?: boolean;
   enterInTurn?: string;
   lang?: string;
+  pairClosed?: boolean;
 }
 
 //////////
@@ -1439,7 +1444,7 @@ export interface Token {
  */
 export interface Confirm {
   id: string;
-  kind: string; // invite | token | secret-set | secret-use | exec-pair
+  kind: string; // invite | token | secret-set | secret-use | exec-pair | bot-pair
   /**
    * Name: the invite's or token's name; secret-set: the secret's.
    */
@@ -1465,7 +1470,9 @@ export interface Confirm {
   always?: boolean;
   /**
    * exec-pair: the code both sides show, and the machine that asks to join as an executor
-   * (docs/exec.md "连接"); Name is the Bot it becomes.
+   * (docs/exec.md "连接"); Name is the Bot it becomes. bot-pair: the same, a Bot that asks
+   * (POST /api/pair), Machine saying its program. Replace there: a Bot by Name is there already,
+   * which the answer may hand over (ConfirmAnswer.Replace).
    */
   code?: string;
   machine?: ExecPair;
@@ -1490,13 +1497,19 @@ export interface ConfirmAnswer {
    */
   forSession?: boolean;
   /**
-   * Owner: exec-pair allowed as the owner's own machine: it runs Claude there. Only a panel that
-   * has Claude says so.
+   * Owner: exec-pair allowed as the owner's own machine: it runs Claude there; bot-pair: the Bot
+   * has Claude. Only a panel that has Claude says so.
    */
   owner?: boolean;
+  /**
+   * Replace: a pairing allowed as the Bot by its name that is there already (Confirm.Replace):
+   * the same terminal, its usage and Claude as they were, a new TOKEN, the old one void.
+   */
+  replace?: boolean;
 }
 /**
- * ExecPair is what an executor says of itself asking to pair (POST /api/exec/pair, no login).
+ * ExecPair is what an executor or a Bot says of itself asking to pair (POST /api/exec/pair,
+ * POST /api/pair; no login). A Bot says its name and program only.
  */
 export interface ExecPair {
   name: string;

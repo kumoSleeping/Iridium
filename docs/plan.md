@@ -87,7 +87,8 @@ ir ws [ls] | new <目录> [--name 名] | rename <ws> <新名> | rm <ws> | mv <id
 ```
 ir invite [名字] [--owner]   新网页面板：带 TOKEN 的链接；--owner 带 Claude
 ir join <地址>               申请接入另一个 Iridium，对方面板核对配对码后允许；单向
-ir token <名字> [--owner]    Bot TOKEN；--owner 带 Claude
+ir pair <地址> --name 名字 --into 文件   以 Bot 申请接入另一个 Iridium，对方允许后 TOKEN 写进文件
+ir token <名字> [--owner]    Bot TOKEN（给 iridium-qq 这类本机程序；网页不再发）；--owner 带 Claude
 ir access                    列出所有交互终端、未用邀请，哪些带 Claude
 ir profile <名字> [--name 新名] [--avatar 图片] [--device computer|laptop|phone|none]
 ir revoke <名字>

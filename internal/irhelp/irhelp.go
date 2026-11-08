@@ -24,7 +24,7 @@ Admin (an agent calling these never sees a TOKEN; a web panel confirms):
   ir invite [name] | token <name>     a link for a new web panel | a plugin TOKEN
     --owner: the user's own terminal, with Claude
   ir revoke <name> | profile <name> [--name new] [--avatar image] [--device computer|laptop|phone|none]
-  ir public [off] | update [--check] | join <address>   go public through Cloudflare (run in a terminal) | update Iridium | run agents for another Iridium (ir join --help)
+  ir public [off] | update [--check] | join <address> | pair <address> --name n --into file   go public through Cloudflare (run in a terminal) | update Iridium | run agents for another Iridium | a Bot's TOKEN from it, by its panel's approval (--help on each)
 `
 
 // Agent is Help's agent part: the commands an agent uses, without Admin.

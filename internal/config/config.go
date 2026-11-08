@@ -36,6 +36,8 @@ type Config struct {
 	QuotaHidden []string `json:"quotaHidden,omitempty"`
 	// EnterInTurn is what the page's Enter does while a turn runs: "steer" ("" too) or "queue".
 	EnterInTurn string `json:"enterInTurn,omitempty"`
+	// PairClosed: no new pairing requests (Bots, executors) are taken.
+	PairClosed bool `json:"pairClosed,omitempty"`
 	// Lang is the user's language, as the web settings last set it: "zh", "en"; "" not yet known.
 	// Hosted agents are told it (session.SystemPrompt).
 	Lang string `json:"lang,omitempty"`

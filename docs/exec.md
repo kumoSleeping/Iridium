@@ -27,7 +27,7 @@
 ## 连接
 
 - 执行端主动连 `wss://<Iridium>/api/exec`，头 `Authorization: Bearer <TOKEN>`。执行端就是一个 Bot：用 Bot 的 TOKEN 接入，终端类型也显示“Bot”，名字就是机器名（≤12 字符）。Claude（用户，2026-11-08）：批准时勾了“本人的机器”的执行端才开 Claude，用那台机器上本人的登录、原样跑（不加 `--bare`），等于 `--owner`；这个勾只出现在带 Claude 的面板上。
-- 配对（用户，2026-11-08）：插件里只有服务器地址，没有 TOKEN，人人同一个包。第一次不带 TOKEN 连 `/api/exec/pair`（门外唯一不用登录的口，什么也不给），报机器名、系统、装了哪些 agent，两边显示同一个 4 位配对码；网页弹确认卡片“home-pc 请求接入（Windows · dsh 0.2.2）”，带 Passkey 的面板点允许后，TOKEN 经这条连接发给执行端，它存起来以后自己用。限速，同时最多几个待批，10 分钟没人管作废。插件和 `ir join` 用同一个口：`POST /api/exec/pair` 带握手内容（同 `hello`），回 `{code, request}`；再轮询 `GET /api/exec/pair/<request>`，等到允许（拿 TOKEN）或拒绝。
+- 配对（用户，2026-11-08）：插件里只有服务器地址，没有 TOKEN，人人同一个包。第一次不带 TOKEN 连 `/api/exec/pair`（门外唯一不用登录的口，什么也不给），报机器名、系统、装了哪些 agent，两边显示同一个 4 位配对码；网页弹确认卡片“home-pc 请求接入（Windows · dsh 0.2.2）”，带 Passkey 的面板点允许后，TOKEN 经这条连接发给执行端，它存起来以后自己用。限速，同时最多几个待批，10 分钟没人管作废。插件和 `ir join` 用同一个口：`POST /api/exec/pair` 带握手内容（同 `hello`），回 `{code, request}`；再轮询 `GET /api/exec/pair/<request>`，等到允许（拿 TOKEN）或拒绝。普通 Bot 用同样的 `POST /api/pair`（`ir pair`），见 `api.md`。设置里可停止接收申请，对方收到 403。
 - 接入是单向的（用户，2026-11-08）：批准的一方能用申请方的 agent 和文件；反过来要对方也申请一次。
 - 一个 TOKEN 同时只有一条连接，新连上的顶掉旧的。
 - 断了执行端自己重连，退避 1 秒起、最多 30 秒。断开期间它启动的进程照跑，输出照写盘。

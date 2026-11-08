@@ -31,6 +31,8 @@ func main() {
 	switch args[0] {
 	case "join":
 		os.Exit(join.Main(args[1:], os.Stdout, os.Stderr))
+	case "pair":
+		os.Exit(join.PairMain(args[1:], os.Stdout, os.Stderr))
 	case "version", "--version":
 		fmt.Println("iridium", version.Version)
 		os.Exit(0)

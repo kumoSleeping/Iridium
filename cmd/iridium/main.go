@@ -84,6 +84,9 @@ func irMain(args []string) int {
 	if len(args) > 0 && args[0] == "join" {
 		return join.Main(args[1:], os.Stdout, os.Stderr)
 	}
+	if len(args) > 0 && args[0] == "pair" {
+		return join.PairMain(args[1:], os.Stdout, os.Stderr)
+	}
 	return cli.Main(args)
 }
 

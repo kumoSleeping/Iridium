@@ -364,7 +364,7 @@ func (s *Server) answerConfirm(w http.ResponseWriter, r *http.Request) {
 	// Denying it is any panel's.
 	cf, ok := s.asks.peek(id)
 	// An executor allowed as the owner's own machine runs Claude: only one that may say so.
-	if ok && cf.Kind == "exec-pair" && a.Allow && a.Owner && by == "" {
+	if ok && (cf.Kind == "exec-pair" || cf.Kind == "bot-pair") && a.Allow && a.Owner && by == "" {
 		forbid(w, errOwnerFlag)
 		return
 	}
@@ -410,13 +410,13 @@ func (s *Server) answerConfirm(w http.ResponseWriter, r *http.Request) {
 			err = s.storeAsked(cf, a.Value, c)
 		case "secret-use":
 			s.allowSecretUse(cf, a.ForSession)
-		case "exec-pair":
-			// The TOKEN goes to the executor alone, by its request; the panel never sees it.
+		case "exec-pair", "bot-pair":
+			// The TOKEN goes to the asker alone, by its request; the panel never sees it.
 			if !a.Owner {
 				owner = ""
 			}
 			var tok *api.Token
-			if tok, err = s.makeExecBot(cf.Name, owner); err == nil {
+			if tok, err = s.makePairedBot(cf.Name, owner, a.Replace && cf.Replace); err == nil {
 				s.pairAllowed(id, tok.Token)
 				st.Name = tok.Terminal.Name
 			}

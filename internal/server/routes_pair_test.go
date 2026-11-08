@@ -177,10 +177,85 @@ func TestExecPair(t *testing.T) {
 		t.Fatalf("a removed machine: %+v", ms)
 	}
 
-	// Two pending a client at most.
-	for i, want := range []int{200, 200, 429} {
+	// Four pending a client at most.
+	for i, want := range []int{200, 200, 200, 200, 429} {
 		if code := l.public("POST", "/api/exec/pair", "", hello, nil); code != want {
 			t.Fatalf("ask %d: %d, want %d", i, code, want)
 		}
+	}
+}
+
+// A Bot pairs the same way at /api/pair, with no executors here: a new Bot by its name, or, the
+// panel saying so, the one by its name with a new TOKEN (the same terminal, the old TOKEN void).
+// The settings' pairClosed turns every request away.
+func TestBotPair(t *testing.T) {
+	l := startWith(t, nil)
+	l.want(200, "socket", "PUT", "/api/public", api.SetPublic{Origin: "https://ir.example.com"}, nil)
+	ask := func(name string) (api.ExecPairing, api.Confirm) {
+		t.Helper()
+		var p api.ExecPairing
+		if code := l.public("POST", "/api/pair", "", api.ExecPair{Name: name, OS: "windows", Program: "my-bot 1.0"}, &p); code != 200 || len(p.Code) != 4 {
+			t.Fatalf("pair: %d %+v", code, p)
+		}
+		var cs api.Confirms
+		l.want(200, "socket", "GET", "/api/confirms", nil, &cs)
+		if len(cs.Pending) != 1 {
+			t.Fatalf("confirms: %+v", cs)
+		}
+		return p, cs.Pending[0]
+	}
+	token := func(p api.ExecPairing) string {
+		t.Helper()
+		var st api.ExecPairState
+		if l.public("GET", "/api/pair/"+p.Request, "", nil, &st); st.Status != "allowed" || !strings.HasPrefix(st.Token, "ir_") {
+			t.Fatalf("allowed: %+v", st)
+		}
+		return st.Token
+	}
+	p, cf := ask("helper")
+	if cf.Kind != "bot-pair" || cf.Code != p.Code || cf.Replace || cf.Machine == nil || cf.Machine.Program != "my-bot 1.0" || cf.Machine.OS != "" {
+		t.Fatalf("the card: %+v %+v", cf, cf.Machine)
+	}
+	l.want(200, "socket", "POST", "/api/confirms/"+cf.ID, api.ConfirmAnswer{Allow: true}, nil)
+	first := token(p)
+	var me api.Me
+	if code := l.public("GET", "/api/me", first, nil, &me); code != 200 || me.Name != "helper" || me.Rules.ClaudeOwner != nil {
+		t.Fatalf("the Bot: %d %+v", code, me)
+	}
+	id := me.ID
+
+	// Again by the same name: the card says so; not replaced, it is helper-2.
+	p, cf = ask("helper")
+	if !cf.Replace {
+		t.Fatalf("no replace on the card: %+v", cf)
+	}
+	l.want(200, "socket", "POST", "/api/confirms/"+cf.ID, api.ConfirmAnswer{Allow: true}, nil)
+	if l.public("GET", "/api/me", token(p), nil, &me); me.Name != "helper-2" {
+		t.Fatalf("the second: %+v", me)
+	}
+	// Replaced: the same terminal, a new TOKEN, the old one void.
+	p, cf = ask("helper")
+	l.want(200, "socket", "POST", "/api/confirms/"+cf.ID, api.ConfirmAnswer{Allow: true, Replace: true}, nil)
+	second := token(p)
+	if code := l.public("GET", "/api/me", second, nil, &me); code != 200 || me.ID != id || me.Name != "helper" {
+		t.Fatalf("replaced: %d %+v", code, me)
+	}
+	if code := l.public("GET", "/api/me", first, nil, nil); code != 401 {
+		t.Fatalf("the old TOKEN: %d", code)
+	}
+
+	// Closed: turned away, executors too; open again, taken.
+	closed, open := true, false
+	l.want(200, "socket", "PUT", "/api/settings", api.SettingsPatch{PairClosed: &closed}, nil)
+	var set api.Settings
+	if l.want(200, "socket", "GET", "/api/settings", nil, &set); !set.PairClosed {
+		t.Fatalf("settings: %+v", set)
+	}
+	if code := l.public("POST", "/api/pair", "", api.ExecPair{Name: "x"}, nil); code != 403 {
+		t.Fatalf("closed: %d", code)
+	}
+	l.want(200, "socket", "PUT", "/api/settings", api.SettingsPatch{PairClosed: &open}, nil)
+	if code := l.public("POST", "/api/pair", "", api.ExecPair{Name: "x"}, nil); code != 200 {
+		t.Fatalf("open again: %d", code)
 	}
 }

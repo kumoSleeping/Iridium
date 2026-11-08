@@ -1,27 +1,31 @@
 // The settings' 终端 page (plan "交互终端", docs/api.md "交互终端"): every interactive terminal —
-// 本机, the web panels, the channels (plugins, peers) — with its avatar, name, kind, when it was
-// last used and today's use; one opened shows its name and its permission table to change (Claude
-// only shows: the web may turn it off, never on; that is ir's on the machine), and revoking it. The +
-// makes a new panel's invite (its link and QR code) or a plugin's token, shown once. What agents'
-// ir asked for waits on top. Changes are saved at once.
+// 本机, the web panels, the Bots — with its avatar, name, kind, when it was last used and today's
+// use, Claude's mark if it has it. Nothing opens (the user, 2026-11-08): a right click or a long
+// press has its menu — rename, change the avatar, revoke. The + makes a new panel's invite (its
+// link and QR code), says how a Bot or a computer asks to pair, and opens the QQ Bot's page; no
+// TOKEN is handed out here (pairing is the way in). What agents' ir asked for, and pairing
+// requests, wait on top; at the foot, whether new pairing requests are taken.
 import { Popover } from "@base-ui/react/popover";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { Bot, ChevronLeft, ChevronRight, KeyRound, Link2, LoaderCircle, Plus, Trash2, X } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { Menu } from "@base-ui/react/menu";
+import { Bot, ChevronLeft, ImageUp, Link2, LoaderCircle, Monitor, PencilLine, Plus, Trash2, X } from "lucide-react";
+import { useRef, useState, type ReactNode } from "react";
 import { ApiError, api } from "./api/client";
 import type { Rules, Terminal } from "./api/types.gen";
 import { CardFrame, CardHead, MainKey, SecondKey } from "./card";
 import { ConfirmCard, saysOwner } from "./confirms";
-import { useMe, useTerminals } from "./data";
+import { useMe, useSettings, useTerminals } from "./data";
 import { ExtensionPage, OfficialTag } from "./extensions";
 import { t, useLang } from "./i18n";
 import { LocalMark } from "./me";
+import { Crop } from "./profile";
 import { SecretHere } from "./secret";
 import { showSecret, useSecret } from "./secrets";
 import { Group, Item } from "./settings";
+import { MenuItems } from "./sidebar";
 import { useConfirms } from "./store";
 import { errText, toast } from "./toast";
-import { ago, Avatar, cn, IconKey, Logo, PopSurface, Switch, Tip, tokens } from "./ui";
+import { ago, Avatar, IconKey, Logo, own, PopSurface, Switch, Tip, tokens, useLongPress, useMenuAt } from "./ui";
 
 
 const kindName = (x: Terminal) => (x.local ? t("term.local") : x.kind === "panel" ? t("term.panel") : t("term.channel"));
@@ -32,7 +36,6 @@ export function TerminalsPage({ onBack }: { onBack: () => void }) {
   const q = useTerminals();
   const confirms = useConfirms();
   const secretHere = useSecret()?.at === "terminals";
-  const [open, setOpen] = useState<string | null>(null);
   const [ext, setExt] = useState<string | null>(null);
   const list = q.data?.terminals ?? [];
   const invites = q.data?.invites ?? [];
@@ -65,7 +68,7 @@ export function TerminalsPage({ onBack }: { onBack: () => void }) {
           {q.isError && <p className="m-0 text-sm text-ink-3">{errText(q.error)}</p>}
           <section className="flex flex-col" aria-label={t("settings.terminals")}>
             {list.map((x) => (
-              <TerminalRow key={x.id} x={x} open={open === x.id} toggle={() => setOpen(open === x.id ? null : x.id)} />
+              <TerminalRow key={x.id} x={x} />
             ))}
           </section>
           {invites.length > 0 && (
@@ -83,6 +86,7 @@ export function TerminalsPage({ onBack }: { onBack: () => void }) {
               ))}
             </Group>
           )}
+          <Pairing />
         </div>
       </div>
     </div>
@@ -102,17 +106,55 @@ async function revoke(qc: QueryClient, id: string, name: string) {
   await qc.invalidateQueries({ queryKey: ["terminals"] });
 }
 
-/** One terminal's row, and opened, its page: name, permissions, revoke. */
-function TerminalRow({ x, open, toggle }: { x: Terminal; open: boolean; toggle: () => void }) {
+/** One terminal's row. Its menu, a right click or a long press away (not 本机's): rename it in
+ *  place, change its avatar (a picture chosen, then cropped under the row), revoke it (asked
+ *  under the row). */
+function TerminalRow({ x }: { x: Terminal }) {
   const me = useMe().data;
+  const qc = useQueryClient();
+  const [menuAt, setMenuAt] = useMenuAt();
+  const [renaming, setRenaming] = useState(false);
+  const [sure, setSure] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [picture, setPicture] = useState<string | null>(null);
+  const row = useRef<HTMLDivElement>(null);
+  const file = useRef<HTMLInputElement>(null);
+  const lp = useLongPress(() => {
+    const r = row.current?.getBoundingClientRect();
+    setMenuAt(r ? { x: r.left + 48, y: r.bottom } : { x: 40, y: 40 });
+  });
   const used = x.online ? t("term.online") : x.local ? t("term.localShort") : ago(x.lastSeenAt || x.createdAt);
+  const menu = x.local
+    ? undefined
+    : {
+        ...lp,
+        onContextMenu: (e: React.MouseEvent) => {
+          if (!own(e)) return;
+          e.preventDefault();
+          setMenuAt({ x: e.clientX, y: e.clientY });
+        },
+      };
+  const pick = (f: File | undefined) => {
+    if (f) setPicture((old) => (old && URL.revokeObjectURL(old), URL.createObjectURL(f)));
+  };
+  const dropPicture = () => setPicture((old) => (old && URL.revokeObjectURL(old), null));
+  const saveAvatar = async (blob: Blob) => {
+    try {
+      await api.profile({ avatar: blob }, x.id);
+      dropPicture();
+      void qc.invalidateQueries({ queryKey: ["terminals"] });
+    } catch (e) {
+      toast(t("term.avatar"), { error: true, description: errText(e) });
+    }
+  };
+  const anchor = menuAt && { getBoundingClientRect: () => DOMRect.fromRect({ x: menuAt.x, y: menuAt.y, width: 0, height: 0 }) };
   return (
-    <div className={cn("flex flex-col", open && "pb-4")}>
-      <button type="button" onClick={toggle} aria-expanded={open} className="g-press flex min-h-14 items-center gap-3 rounded-lg px-2 text-left hover:bg-fill">
+    <div className="flex flex-col">
+      <div ref={row} {...menu} className="flex min-h-14 items-center gap-3 rounded-lg px-2 select-none [-webkit-touch-callout:none]">
         {x.local ? <LocalMark size={32} /> : <Avatar src={x.avatar} name={x.name} size={32} channel={x.kind === "channel"} />}
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-2">
-            <span className="truncate text-base font-medium">{x.local ? t("me.local") : x.name}</span>
+            {renaming ? <Rename x={x} done={() => setRenaming(false)} /> : <span className="truncate text-base font-medium">{x.local ? t("me.local") : x.name}</span>}
             <span className="shrink-0 rounded-sm bg-fill-2 px-1.5 text-[11px] leading-[18px] text-ink-2">{kindName(x)}</span>
             {x.id === me?.id && !x.local && <span className="shrink-0 text-xs text-ink-3">{t("term.this")}</span>}
           </span>
@@ -126,63 +168,19 @@ function TerminalRow({ x, open, toggle }: { x: Terminal; open: boolean; toggle: 
         </span>
         {hasClaude(x.rules) && (
           <Tip label={t("term.claudeYes")}>
-            <span className="hidden shrink-0 sm:flex">
+            <span className="flex shrink-0">
               <Logo agent="claude" size={13} />
             </span>
           </Tip>
         )}
-        <ChevronRight size={15} className="shrink-0 text-ink-4 transition-transform duration-(--dur-2)" style={{ transform: open ? "rotate(90deg)" : undefined }} />
-      </button>
-      {open &&
-        (x.local ? (
-          <div className="g-fade flex flex-col gap-2 pt-1 pr-2 pl-2 sm:pl-[52px]">
-            <p className="m-0 text-sm text-ink-3">{t("term.localHint")}</p>
-          </div>
-        ) : (
-          <Detail x={x} />
-        ))}
-    </div>
-  );
-}
-
-/** A terminal opened: its name, whether it has Claude, revoking it. */
-function Detail({ x }: { x: Terminal }) {
-  const qc = useQueryClient();
-  const [name, setName] = useState(x.name);
-  const [sure, setSure] = useState(false);
-  const [busy, setBusy] = useState(false);
-  useEffect(() => setName(x.name), [x.name]);
-  const rename = async () => {
-    const to = name.trim();
-    if (!to || to === x.name) return setName(x.name);
-    try {
-      await api.profile({ name: to }, x.id);
-      void qc.invalidateQueries({ queryKey: ["terminals"] });
-    } catch (e) {
-      setName(x.name);
-      const code = e instanceof ApiError ? (e.body as { nameError?: string } | undefined)?.nameError : undefined;
-      toast(t("me.rename"), { error: true, description: code === "taken" ? t("me.nameTaken") : code ? t("me.nameBad") : errText(e) });
-    }
-  };
-  return (
-    <div className="g-fade flex flex-col gap-5 pt-2 pr-2 pl-2 sm:pl-[52px]">
-      <Item label={t("term.rename")}>
-        <input
-          value={name}
-          maxLength={12}
-          aria-label={t("term.rename")}
-          onChange={(e) => setName(e.target.value)}
-          onBlur={() => void rename()}
-          onKeyDown={(e) => e.key === "Enter" && !e.nativeEvent.isComposing && (e.currentTarget as HTMLInputElement).blur()}
-          className="no-ring h-8 w-40 rounded-md bg-fill px-2 text-sm"
-        />
-      </Item>
-      {/* Read only: Claude is set as a terminal is made (the user, 2026-11-08). */}
-      <Item label={<span className="flex items-center gap-2"><Logo agent="claude" size={15} />Claude</span>} hint={t(hasClaude(x.rules) ? "term.claudeYes" : "term.claudeNo")}>
-        <span className="text-sm text-ink-2">{hasClaude(x.rules) ? t("term.on") : t("term.off")}</span>
-      </Item>
-      <div className="flex flex-col gap-2">
-        {sure ? (
+      </div>
+      {picture && (
+        <div className="g-fade flex justify-center">
+          <Crop src={picture} onCancel={dropPicture} onDone={(b) => void saveAvatar(b)} />
+        </div>
+      )}
+      {sure && (
+        <div className="g-fade pt-1 pb-2">
           <CardFrame label={t("term.revokeTitle", { name: x.name })}>
             <CardHead
               icon={<Trash2 size={16} />}
@@ -198,44 +196,111 @@ function Detail({ x }: { x: Terminal }) {
               }
             />
           </CardFrame>
-        ) : (
-          <div className="flex items-center justify-between gap-3 text-xs text-ink-3">
-            <span className="tabular-nums">
-              {x.kind === "panel" ? `${t("term.passkeys")} ${x.passkeys ?? 0} · ${t("term.logins")} ${x.logins ?? 0} · ` : ""}
-              {x.createdAt ? t("term.created", { time: new Date(x.createdAt).toLocaleDateString() }) : ""}
-            </span>
-            <button type="button" onClick={() => setSure(true)} className="g-press flex h-8 items-center gap-1.5 rounded-md px-2.5 text-sm text-err hover:bg-fill">
-              <Trash2 size={14} />
-              {t("term.revoke")}
-            </button>
-          </div>
-        )}
-      </div>
+        </div>
+      )}
+      {!x.local && (
+        <>
+          <input ref={file} type="file" accept="image/*" hidden onChange={(e) => (pick(e.target.files?.[0]), (e.target.value = ""))} />
+          <Menu.Root open={menuAt !== null} onOpenChange={(o) => !o && setMenuAt(null)}>
+            <Menu.Portal>
+              <Menu.Positioner anchor={anchor} side="bottom" align="start" sideOffset={4} collisionPadding={8} className="z-50">
+                <MenuItems
+                  items={[
+                    { icon: <PencilLine size={15} />, label: t("term.renameIt"), run: () => setRenaming(true) },
+                    { icon: <ImageUp size={15} />, label: t("term.avatar"), run: () => file.current?.click() },
+                    { icon: <Trash2 size={15} />, label: t("term.revoke"), run: () => setSure(true) },
+                  ]}
+                />
+              </Menu.Positioner>
+            </Menu.Portal>
+          </Menu.Root>
+        </>
+      )}
     </div>
+  );
+}
+
+/** The name in place, chosen whole: Enter or leaving saves it, Escape keeps the old one. */
+function Rename({ x, done }: { x: Terminal; done: () => void }) {
+  const qc = useQueryClient();
+  const [name, setName] = useState(x.name);
+  const gone = useRef(false);
+  const save = async () => {
+    if (gone.current) return;
+    gone.current = true;
+    const to = name.trim();
+    done();
+    if (!to || to === x.name) return;
+    try {
+      await api.profile({ name: to }, x.id);
+      void qc.invalidateQueries({ queryKey: ["terminals"] });
+    } catch (e) {
+      const code = e instanceof ApiError ? (e.body as { nameError?: string } | undefined)?.nameError : undefined;
+      toast(t("term.renameIt"), { error: true, description: code === "taken" ? t("me.nameTaken") : code ? t("me.nameBad") : errText(e) });
+    }
+  };
+  return (
+    <input
+      autoFocus
+      value={name}
+      maxLength={12}
+      aria-label={t("term.rename")}
+      onFocus={(e) => e.currentTarget.select()}
+      onChange={(e) => setName(e.target.value)}
+      onBlur={() => void save()}
+      onKeyDown={(e) => {
+        if (e.nativeEvent.isComposing) return;
+        if (e.key === "Enter") e.currentTarget.blur();
+        if (e.key === "Escape") ((gone.current = true), done());
+      }}
+      className="no-ring h-7 w-36 min-w-0 rounded-md bg-fill px-2 text-base font-medium select-text"
+    />
+  );
+}
+
+/** At the page's foot: whether new pairing requests (Bots, computers) are taken. */
+function Pairing() {
+  const qc = useQueryClient();
+  const s = useSettings().data;
+  if (!s) return null;
+  const set = async (open: boolean) => {
+    qc.setQueryData(["settings"], { ...s, pairClosed: !open });
+    try {
+      qc.setQueryData(["settings"], await api.putSettings({ pairClosed: !open }));
+    } catch (e) {
+      qc.setQueryData(["settings"], s);
+      toast(t("err.settings"), { error: true, description: errText(e) });
+    }
+  };
+  return (
+    <Group title={t("term.pairing")}>
+      <Item label={t("term.pairOpen")} hint={t("term.pairOpenHint")}>
+        <Switch label={t("term.pairOpen")} on={!s.pairClosed} onChange={(o) => void set(o)} />
+      </Item>
+    </Group>
   );
 }
 
 /** Claude: the terminal was made the owner's own. Set then, never after (the user, 2026-11-08). */
 export const hasClaude = (r: Rules) => !!r.claudeOwner;
 
-/** The +: a new panel's invite (a public origin first) or a plugin's token, named; the secret then
- *  shows once. Below them the official extensions, each opening its page. */
+/** The +: a new panel's invite (a public origin first), named; the link then shows once. How a Bot
+ *  or a computer asks to pair (no TOKEN handed out here: the user, 2026-11-08). Below them the
+ *  official extensions, each opening its page. */
 function NewTerminal({ openExt }: { openExt: (id: string) => void }) {
   const qc = useQueryClient();
   const me = useMe().data;
   const [open, setOpen] = useState(false);
-  const [kind, setKind] = useState<"invite" | "token" | null>(null);
+  const [kind, setKind] = useState<"invite" | "pair" | null>(null);
   const [name, setName] = useState("");
   const [withClaude, setWithClaude] = useState(false);
   const [busy, setBusy] = useState(false);
   const canClaude = saysOwner(me);
   const make = async () => {
-    if (kind === "token" && !name.trim()) return;
     setBusy(true);
     try {
       const owner = canClaude && withClaude;
-      if (kind === "invite") showSecret({ invite: await api.invite(name.trim(), owner), at: "terminals" });
-      else showSecret({ token: await api.token(name.trim(), owner), at: "terminals" });
+      showSecret({ invite: await api.invite(name.trim(), owner), at: "terminals" });
       setOpen(false);
       void qc.invalidateQueries({ queryKey: ["terminals"] });
     } catch (e) {
@@ -245,7 +310,7 @@ function NewTerminal({ openExt }: { openExt: (id: string) => void }) {
       setBusy(false);
     }
   };
-  const choice = (k: "invite" | "token", icon: ReactNode, label: string, hint: string, off?: boolean) => (
+  const choice = (k: "invite" | "pair", icon: ReactNode, label: string, hint: string, off?: boolean) => (
     <button type="button" disabled={off} onClick={() => (setKind(k), setName(""), setWithClaude(false))} className="flex min-h-11 items-start gap-2.5 rounded-md px-2 py-1.5 text-left hover:bg-fill disabled:opacity-45 disabled:hover:bg-transparent">
       <span className="mt-0.5 text-ink-2">{icon}</span>
       <span className="min-w-0 flex-1">
@@ -269,7 +334,7 @@ function NewTerminal({ openExt }: { openExt: (id: string) => void }) {
         {kind === null ? (
           <div className="flex flex-col">
             {choice("invite", <Link2 size={16} />, t("term.invite"), me?.public ? t("term.inviteHint") : t("term.needPublic"), !me?.public)}
-            {choice("token", <KeyRound size={16} />, t("term.token"), t("term.tokenHint"))}
+            {choice("pair", <Monitor size={16} />, t("term.pairTitle"), t("term.pairHint"))}
             <div role="separator" className="mx-1 my-1.5 h-px bg-edge" />
             <button type="button" onClick={() => (setOpen(false), openExt("qq"))} className="flex min-h-11 items-start gap-2.5 rounded-md px-2 py-1.5 text-left hover:bg-fill">
               <span className="mt-0.5 text-ink-2">
@@ -284,6 +349,8 @@ function NewTerminal({ openExt }: { openExt: (id: string) => void }) {
               </span>
             </button>
           </div>
+        ) : kind === "pair" ? (
+          <PairHow back={() => setKind(null)} />
         ) : (
           <form
             className="g-slide flex flex-col gap-2 p-1.5"
@@ -296,9 +363,9 @@ function NewTerminal({ openExt }: { openExt: (id: string) => void }) {
               <IconKey label={t("nav.back")} onClick={() => setKind(null)} className="size-7">
                 <ChevronLeft size={16} />
               </IconKey>
-              <span className="text-sm font-semibold">{kind === "invite" ? t("term.invite") : t("term.token")}</span>
+              <span className="text-sm font-semibold">{t("term.invite")}</span>
             </div>
-            <input autoFocus value={name} maxLength={12} onChange={(e) => setName(e.target.value)} placeholder={kind === "invite" ? t("term.nameOptional") : t("term.name")} aria-label={t("term.name")} className="no-ring h-9 rounded-md bg-fill px-2.5 text-base placeholder:text-ink-3" />
+            <input autoFocus value={name} maxLength={12} onChange={(e) => setName(e.target.value)} placeholder={t("term.nameOptional")} aria-label={t("term.name")} className="no-ring h-9 rounded-md bg-fill px-2.5 text-base placeholder:text-ink-3" />
             {canClaude && (
               <div className="flex items-center gap-2 px-0.5">
                 <span className="min-w-0 flex-1">
@@ -309,7 +376,7 @@ function NewTerminal({ openExt }: { openExt: (id: string) => void }) {
               </div>
             )}
             <div className="flex justify-end">
-              <MainKey type="submit" busy={busy} disabled={kind === "token" && !name.trim()}>
+              <MainKey type="submit" busy={busy}>
                 {t("term.make")}
               </MainKey>
             </div>
@@ -317,5 +384,31 @@ function NewTerminal({ openExt }: { openExt: (id: string) => void }) {
         )}
       </PopSurface>
     </Popover.Root>
+  );
+}
+
+/** How a Bot or a computer comes in: it asks this address to pair, and its request waits on this
+ *  page as a card with the code it shows. */
+function PairHow({ back }: { back: () => void }) {
+  const closed = !!useSettings().data?.pairClosed;
+  const at = location.origin;
+  const line = (label: string, cmd: string) => (
+    <div className="flex flex-col gap-1">
+      <span className="text-xs text-ink-3">{label}</span>
+      <code className="block rounded-md bg-fill px-2 py-1.5 font-mono text-xs break-all select-all">{cmd}</code>
+    </div>
+  );
+  return (
+    <div className="g-slide flex flex-col gap-2.5 p-1.5">
+      <div className="flex items-center gap-1">
+        <IconKey label={t("nav.back")} onClick={back} className="size-7">
+          <ChevronLeft size={16} />
+        </IconKey>
+        <span className="text-sm font-semibold">{t("term.pairTitle")}</span>
+      </div>
+      {line(t("term.pairComputer"), `ir join ${at}`)}
+      {line(t("term.pairBot"), t("term.pairBotCmd", { at }))}
+      <p className="m-0 text-xs text-ink-3">{closed ? t("term.pairClosed") : t("term.pairNote")}</p>
+    </div>
   );
 }

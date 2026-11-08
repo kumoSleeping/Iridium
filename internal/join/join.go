@@ -64,6 +64,9 @@ type Options struct {
 	// Resident: started at login, no one to match a code. It never pairs, and ends (cleanly, not
 	// to be started again) once it has no TOKEN.
 	Resident bool
+	// Bot: pair as a Bot (POST /api/pair, ir pair): its name and Program only.
+	Bot     bool
+	Program string
 }
 
 // Main runs ir join with args (after "join").
@@ -361,6 +364,9 @@ var errUnpaired = errors.New("未配对")
 // errDenied: a panel declined the pairing.
 var errDenied = errors.New("配对被拒绝")
 
+// errClosed: the Iridium takes no pairing requests now (its settings).
+var errClosed = errors.New("对方已停止接收连接申请")
+
 // pairWait is how long it waits between asks after the Iridium could not be reached, and between
 // looks at a pending request.
 var pairWait, pairPoll = 30 * time.Second, 2 * time.Second
@@ -372,15 +378,23 @@ func (o *Options) pair(ctx context.Context) (string, error) {
 		name = MachineName()
 	}
 	who := api.ExecPair{Name: name, OS: runtime.GOOS, Arch: runtime.GOARCH, Program: o.program()}
-	if o.Agents == nil && !o.NoAgents {
-		o.Agents = FindAgents(o.Logf)
-	}
-	for _, a := range o.Agents {
-		who.Agents = append(who.Agents, api.ExecAgent{Agent: a.Agent, Version: a.Version})
+	path := "/api/exec/pair"
+	if o.Bot {
+		who, path = api.ExecPair{Name: name, Program: o.Program}, "/api/pair"
+	} else {
+		if o.Agents == nil && !o.NoAgents {
+			o.Agents = FindAgents(o.Logf)
+		}
+		for _, a := range o.Agents {
+			who.Agents = append(who.Agents, api.ExecAgent{Agent: a.Agent, Version: a.Version})
+		}
 	}
 	for {
 		var p api.ExecPairing
-		code, err := o.call(ctx, http.MethodPost, "/api/exec/pair", who, &p)
+		code, err := o.call(ctx, http.MethodPost, path, who, &p)
+		if err == nil && code == http.StatusForbidden {
+			return "", errClosed
+		}
 		if err == nil && code != http.StatusOK {
 			err = fmt.Errorf("HTTP %d", code)
 		} else if err == nil && p.Code == "" {
@@ -403,7 +417,7 @@ func (o *Options) pair(ctx context.Context) (string, error) {
 				return "", ctx.Err()
 			}
 			var st api.ExecPairState
-			code, err := o.call(ctx, http.MethodGet, "/api/exec/pair/"+url.PathEscape(p.Request), nil, &st)
+			code, err := o.call(ctx, http.MethodGet, path+"/"+url.PathEscape(p.Request), nil, &st)
 			switch {
 			case err != nil || (code != http.StatusOK && code != http.StatusNotFound):
 				continue // as pending

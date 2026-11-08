@@ -138,7 +138,7 @@ type Token struct {
 // panel answers it. No secrets.
 type Confirm struct {
 	ID   string `json:"id"`
-	Kind string `json:"kind"` // invite | token | secret-set | secret-use | exec-pair
+	Kind string `json:"kind"` // invite | token | secret-set | secret-use | exec-pair | bot-pair
 	// Name: the invite's or token's name; secret-set: the secret's.
 	Name      string `json:"name,omitempty"`
 	Owner     bool   `json:"owner,omitempty"`   // --owner: it gets Claude; only a panel that has Claude allows it
@@ -157,7 +157,9 @@ type Confirm struct {
 	Command string   `json:"command,omitempty"`
 	Always  bool     `json:"always,omitempty"`
 	// exec-pair: the code both sides show, and the machine that asks to join as an executor
-	// (docs/exec.md "连接"); Name is the Bot it becomes.
+	// (docs/exec.md "连接"); Name is the Bot it becomes. bot-pair: the same, a Bot that asks
+	// (POST /api/pair), Machine saying its program. Replace there: a Bot by Name is there already,
+	// which the answer may hand over (ConfirmAnswer.Replace).
 	Code    string    `json:"code,omitempty"`
 	Machine *ExecPair `json:"machine,omitempty"`
 }
@@ -174,12 +176,16 @@ type ConfirmAnswer struct {
 	Value string `json:"value,omitempty"`
 	// ForSession: secret-use allowed for the rest of the session (till it stops).
 	ForSession bool `json:"forSession,omitempty"`
-	// Owner: exec-pair allowed as the owner's own machine: it runs Claude there. Only a panel that
-	// has Claude says so.
+	// Owner: exec-pair allowed as the owner's own machine: it runs Claude there; bot-pair: the Bot
+	// has Claude. Only a panel that has Claude says so.
 	Owner bool `json:"owner,omitempty"`
+	// Replace: a pairing allowed as the Bot by its name that is there already (Confirm.Replace):
+	// the same terminal, its usage and Claude as they were, a new TOKEN, the old one void.
+	Replace bool `json:"replace,omitempty"`
 }
 
-// ExecPair is what an executor says of itself asking to pair (POST /api/exec/pair, no login).
+// ExecPair is what an executor or a Bot says of itself asking to pair (POST /api/exec/pair,
+// POST /api/pair; no login). A Bot says its name and program only.
 type ExecPair struct {
 	Name    string      `json:"name"`
 	OS      string      `json:"os,omitempty"` // windows | darwin | linux
