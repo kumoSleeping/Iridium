@@ -43,7 +43,7 @@ const usage = `usage:
   iridium push [-i <key>] [-listen <addr>] <user@host>
                                    this binary onto another account or machine, installed or restarted
   iridium node new <account> [-listen <addr>]
-                                   a new account on this machine as a node of its own (root once: sudo or su)
+                                   a new account on this machine with an Iridium instance of its own (root once: sudo or su)
   iridium join <address> [--name <name>] [--roots <dir>,...] [--install | --uninstall]
                                    this machine as an executor of another Iridium (ir join)
   iridium version

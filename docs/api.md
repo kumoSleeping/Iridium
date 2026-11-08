@@ -159,7 +159,7 @@
 ## `ir`（agent 用的部分）
 
 - 代码在 `internal/cli`，走上面这套接口；socket 用 `IRIDIUM_SOCKET`，没有就读配置（`IRIDIUM_CONFIG` 或默认位置）。
-- `<id>` 可只写开头（唯一即可）；`ir new`、`ir ls` 打印至少 8 位的短 ID。`ir ls` 只列有显示标记的，子代理只列还在工作的（没做完、父会话进程还在、5 分钟内写过），排在父会话下面；`ir ls --all` 连归档和做完的子代理一起列。`ir find <词>...` 在 ID、名字、标题、目录、最后一句里找（每个词都要有，不分大小写），归档的也找、标 `[归档]`。`ir archive`、`ir unarchive` 同会话列表菜单（`PATCH /api/sessions/{id}`）。`ir read` 默认每条消息一行（截 80 字）加它的最终回复（截 300 字），最近 10 条，`-n` 改条数，`--full` 打整页原文。`机器:路径`、`机器/<id>` 现在报 `peer not connected`。
+- `<id>` 可只写开头（唯一即可）；`ir new`、`ir ls` 打印至少 8 位的短 ID。`ir ls` 只列有显示标记的，子代理只列还在工作的（没做完、父会话进程还在、5 分钟内写过），排在父会话下面；`ir ls --all` 连归档和做完的子代理一起列。`ir find <词>...` 在 ID、名字、标题、目录、最后一句里找（每个词都要有，不分大小写），归档的也找、标 `[归档]`。`ir archive`、`ir unarchive` 同会话列表菜单（`PATCH /api/sessions/{id}`）。`ir read` 默认每条消息一行（截 80 字）加它的最终回复（截 300 字），最近 10 条，`-n` 改条数，`--full` 打整页原文。`机器:路径`、`机器/<id>`（机器是执行端，`plan.md`“别的机器”）除 `ir sh` 外现在报 `peer not connected`。
 - 输出给 agent 看：只打最后一段回复（`new --wait` 先一行 ID）；`cp` 一行 `路径 大小 sha256`；需要你时每个提问一行 `需要你：…`。进度只在 stderr 是终端时画。
 - `send`、`new` 不带 `--wait` 时等到 agent 接了这条消息（最多 15 秒）再返回，所以紧接着的 `ir wait` 等的是这一回合。
 - 回合在跑时 `ir send` 的话默认插进这一回合（和网页回车一样，2026-11-06 定）；`--wait` 等到这一回合结束，打印最后一段回复（可能还在说别的事）。加 `--queue` 进待发队列（只对人在终端里跑的 ir 有效；agent 跑的 `--queue` 不管用，总是插进，免得要人去点；2026-11-06）：不带 `--wait` 马上返回，带 `--wait` 等它发出去、再等它那一回合（队列暂停了就退出码 2）。`--steer` 还认，和默认一样。agent 在等额度时插话也进队列。
@@ -187,7 +187,7 @@
 
 ## 命令
 
-在会话所在的机器和目录直接执行一行命令，不经 agent、不花 token（用户，2026-11-08）。网页上在输入框里以 `$` 开头（`$ git status`）；`!` 已用于插话。只有面板和本机能用，Bot 不能。
+在会话所在的机器和目录直接执行一行命令，不经 agent、不花 token（用户，2026-11-08）。网页上在输入框里以 `$` 开头（`$ git status`）；`!` 已用于插话。只有面板和本机能用，Bot 不能（执行端也不能，它只是命令落地的机器）；Bot 开的会话里 agent 调 `ir sh` 算那个 Bot，同样 403。
 
 | 请求 | 正文 → 回答 | 说明 |
 |---|---|---|
@@ -441,6 +441,6 @@ GitHub 源：最新 Release 的 tag 是版本，正文（`<!-- iridium:assets --
 
 - `iridium install [-config <文件>] [-unit <名>] [-listen <地址>] [-env 名=值]... [-now]`：写用户级单元 `~/.config/systemd/user/iridium.service`（`iridium serve -config ~/.config/iridium/config.json`，带装的时候的 `PATH` 和 `-env` 给的变量；`$XDG_CONFIG_HOME` 设了就写在它下面），没有配置就写一份默认的（`127.0.0.1:7810`，`-listen` 换地址），把自己复制到 `~/.local/opt/iridium/iridium`（`-prefix`）、链 `~/.local/bin/ir`（`-bin`），建 `~/.local/state/iridium`，`daemon-reload`。不加 `-now` 不启动。没开 linger 时提醒：退出登录后服务和托管的 agent 都会停（`sudo loginctl enable-linger <用户>`）。
 - `iridium push [-i <密钥>] [-listen <地址>] <用户@主机>`：经 ssh 把这个二进制发到另一个账号或机器（先 `uname -sm` 核对平台），放到那边的 `~/.local/opt/iridium/iridium`，跑一次 `version`；那边 `iridium.service` 已经装了就重启，没有就 `iridium install -now`（`-listen` 给第一次装的地址）。托管进程不受影响。
-- `iridium node new <账号> [-listen <地址>]`：在这台机器上把一个账号做成节点，你在终端里跑：要 root 的几步（没有就 `useradd -m`、`loginctl enable-linger`、把 `~/.ssh/iridium_<账号>_ed25519` 放进那边的 `authorized_keys`）合成一次，是 root 就直接跑，在 sudo/wheel/admin 组里用 sudo，否则用 `su`（问 root 的密码）；再 `push` 过去（地址默认 127.0.0.1 上 7811 起第一个空着的端口）。不替你装 agent：那边的 agent 登录和 `ir public` 在那个账号里做。
+- `iridium node new <账号> [-listen <地址>]`：在这台机器上给一个账号装一个 Iridium，你在终端里跑：要 root 的几步（没有就 `useradd -m`、`loginctl enable-linger`、把 `~/.ssh/iridium_<账号>_ed25519` 放进那边的 `authorized_keys`）合成一次，是 root 就直接跑，在 sudo/wheel/admin 组里用 sudo，否则用 `su`（问 root 的密码）；再 `push` 过去（地址默认 127.0.0.1 上 7811 起第一个空着的端口）。不替你装 agent：那边的 agent 登录和 `ir public` 在那个账号里做。
 - `scripts/deploy.sh`：`web/package.json` 在就先 `npm ci && npm run build`（`NO_WEB=1` 用现成的），`internal/webui/dist` 里没有网页就停；`go build`（版本取 `git describe`）装到 `~/.local/opt/iridium/iridium`（`PREFIX`），`~/.local/bin/ir`（`BIN`）链过去，再跑 `iridium install`（`CONFIG`、`UNIT`、`UNIT_ENV` 照传）；服务已在跑就重启它。`IRIDIUM_NO_SYSTEMCTL=1` 不碰 systemd。TCP 地址上就是网页本身（`/api/`、`/_ir/` 之外都是网页，前面同样是门）。
 - `scripts/test-deploy.sh up|again|down [目录]`：不碰真的服务，把 `deploy.sh` 真跑一遍：临时的安装位置、状态、家目录和 Claude 目录，假 claude（`internal/testagent`），单元 `iridium-test-deploy-<n>` 写在 `$XDG_RUNTIME_DIR/systemd/user`（不进 `~/.config`），随机端口；托管进程的单元是 `iridium-test-hold-<n>-*`。`web/scripts/seed.mjs` 往里放会话，`e2e.mjs`、`shoot.mjs` 对着它跑。

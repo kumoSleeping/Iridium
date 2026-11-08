@@ -97,14 +97,14 @@ rm -r ~/.local/opt/iridium ~/.local/bin/ir ~/.config/systemd/user/iridium.servic
 - 发现正在跑的 agent 用 sysctl / proc_info，不靠 `/proc`。
 - 自更新、`iridium push` 都是写新文件再改名，不改正在跑的二进制。`iridium node new` 只支持 Linux。
 
-## 另一个节点
+## 装到另一个账号或机器
 
 - 本机另一个账号：`iridium node new <账号>`（要 root 一次：能 sudo 用 sudo，否则 su 问 root 密码），建账号、开 linger、放 ssh 密钥、装好启动；之后 `iridium push -i ~/.ssh/iridium_<账号>_ed25519 <账号>@localhost` 换成这个二进制。
 - 别的机器：`iridium push <用户@主机>`（那边能 ssh 进去、平台一样）。
 
-## 测试节点
+## 测试实例
 
-`scripts/push-test.sh`：构建工作区（版本由 `scripts/version.sh` 算，比上一个 Release 新、比下一个旧），第一次用 `iridium node new ir -listen 127.0.0.1:7811`，之后 `iridium push`。`NODE`、`PORT`、`NO_WEB=1` 可改。主节点不推。
+`scripts/push-test.sh`：构建工作区（版本由 `scripts/version.sh` 算，比上一个 Release 新、比下一个旧），第一次用 `iridium node new ir -listen 127.0.0.1:7811`，之后 `iridium push`。`NODE`、`PORT`、`NO_WEB=1` 可改。主实例不推。
 
 ## 测试部署
 

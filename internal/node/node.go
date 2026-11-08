@@ -1,6 +1,6 @@
-// Package node puts Iridium where another node runs (plan "节点"): iridium push sends this binary
+// Package node puts another Iridium instance in place (plan "别的机器"): iridium push sends this binary
 // to an account over ssh and installs it there or restarts it; iridium node new makes a new
-// account on this machine into a node of its own (sudo once), then pushes to it. Both are this
+// account on this machine into an instance of its own (sudo once), then pushes to it. Both are this
 // one binary: nothing is downloaded and no source is needed.
 package node
 
@@ -24,7 +24,7 @@ import (
 type PushOptions struct {
 	Target string // the ssh destination, user@host
 	Key    string // the ssh identity; "" is ssh's own
-	// Listen is the address a node installed now listens on; "" is install's default (7810).
+	// Listen is the address an instance installed now listens on; "" is install's default (7810).
 	Listen string
 	Exe    string // the binary sent; "" is this process's own
 	SSH    string // the ssh program; "" is ssh
@@ -143,7 +143,7 @@ func own(exe string) (string, error) {
 
 func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
-// NewOptions says which account to make a node of.
+// NewOptions says which account to install an instance in.
 type NewOptions struct {
 	User string
 	// Listen is its address; "" is the first free 127.0.0.1 port from 7811.
@@ -181,7 +181,7 @@ chown "$u:$u" "$f"
 chmod 600 "$f"
 echo "账号 $u 好了（$home）。"`
 
-// New makes the account o.User on this machine a node: its root part (rootPart) with one
+// New makes the account o.User on this machine an instance: its root part (rootPart) with one
 // password, then a push, which installs and starts Iridium there. Logging in to its agents and
 // ir public are done in it.
 func New(ctx context.Context, o NewOptions) error {
@@ -205,7 +205,7 @@ func New(ctx context.Context, o NewOptions) error {
 		return err
 	}
 	if me.Username == o.User {
-		return errors.New("node new: that is this account; a node is another one")
+		return errors.New("node new: that is this account; an instance goes in another one")
 	}
 	if o.Elevate == "" {
 		o.Elevate = elevation(me)
@@ -238,10 +238,10 @@ func New(ctx context.Context, o NewOptions) error {
 	case "root":
 		err = o.Run(ctx, args[0], args[1:]...)
 	case "sudo":
-		fmt.Fprintf(o.Out, "把账号 %s 做成一个节点：要 root，sudo 会问你的密码。\n", o.User)
+		fmt.Fprintf(o.Out, "给账号 %s 装一个 Iridium 实例：要 root，sudo 会问你的密码。\n", o.User)
 		err = o.Run(ctx, "sudo", args...)
 	case "su":
-		fmt.Fprintf(o.Out, "把账号 %s 做成一个节点：要 root，这个账号不能 sudo，su 会问 root 的密码。\n", o.User)
+		fmt.Fprintf(o.Out, "给账号 %s 装一个 Iridium 实例：要 root，这个账号不能 sudo，su 会问 root 的密码。\n", o.User)
 		q := make([]string, len(args))
 		for i, a := range args {
 			q[i] = shellQuote(a)
@@ -256,7 +256,7 @@ func New(ctx context.Context, o NewOptions) error {
 	if err := o.Push(ctx, PushOptions{Target: o.User + "@localhost", Key: o.Key, Listen: o.Listen, Exe: o.Exe, SSH: o.SSH, Out: o.Out}); err != nil {
 		return err
 	}
-	fmt.Fprintf(o.Out, `节点 %s 跑起来了：http://%s（只在本机）。
+	fmt.Fprintf(o.Out, `实例 %s 跑起来了：http://%s（只在本机）。
 以后推新的二进制：iridium push -i %s %s@localhost
 接下来在那个账号里（ssh -i %s %s@localhost）：
   装好、登录要用的 agent（Claude Code、Codex……）
