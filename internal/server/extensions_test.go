@@ -436,6 +436,11 @@ func TestBringBot(t *testing.T) {
 		t.Fatalf("told %d times, want 2", n)
 	}
 	l.want(200, bot, "POST", "/api/chat/qq:1/input", api.ChatInput{Text: "again"}, nil)
+	// Its turn's reply comes in its time: wait for it, so it is not taken for what bringing says.
+	waitTill(t, func() bool {
+		out, _ := srv.st.OutboxAfter(botID, 0)
+		return slices.ContainsFunc(out, func(x store.Outgoing) bool { return strings.Contains(x.Data, "ok: again") })
+	})
 	if n := changed.Load(); n != 2 {
 		t.Fatalf("told again for a chat it had: %d", n)
 	}
