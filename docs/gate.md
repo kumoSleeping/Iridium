@@ -4,18 +4,18 @@
 
 ## 两种模式
 
-- **只听本机**（没配 `public.origin`）：不登录。只查 Host（回环名字）和 Origin，请求都算内置终端“本机”。带插件 TOKEN 的请求照样认成那个插件。
-- **上公网**（配了 `public.origin`）：所有网页请求都要面板的会话 Cookie 或通道的 TOKEN，回环也一样（cloudflared 从回环连进来）。Host 只认 `public.origin` 的主机名；带 Bearer TOKEN 的请求另认回环名字（本机的插件），TOKEN 照样要对。
+- **只听本机**（没配 `public.origin`）：不登录。只查 Host（回环名字）和 Origin，请求都算内置终端“本机”。带 Bot TOKEN 的请求照样认成那个 Bot。
+- **上公网**（配了 `public.origin`）：所有网页请求都要面板的会话 Cookie 或通道的 TOKEN，回环也一样（cloudflared 从回环连进来）。Host 只认 `public.origin` 的主机名；带 Bearer TOKEN 的请求另认回环名字（本机的 Bot），TOKEN 照样要对。
 
 `public.origin` 必须是 https（开发时可用 `http://localhost:端口`）。它的主机名就是 Passkey 的 rpID：换域名，所有 Passkey 作废。
 
 ## 交互终端
 
-- `kind`：`panel`（网页面板，Passkey 登录）或 `channel`（插件、节点，TOKEN）。
+- `kind`：`panel`（网页面板，Passkey 登录）或 `channel`（Bot、节点，TOKEN）。
 - 名字：1–12 个字，字母、数字、空格和 `- _ .`；全角 ASCII 转半角，空格合并；不分大小写查重；`本机`、`未知`、`local`、`unknown` 保留。`[ ] / : ·` 之类不收，因为名字要放进 `[名字]`、`[QQ·张三]`、`mac:~/dir`。内部用 16 位随机 ID，比任何名字都长，不会混。
 - 新面板只能靠一次性邀请：`https://<域名>/_ir/join#<token>`，10 分钟。`#` 后面不进服务器日志；页面读到后立刻从地址栏去掉。打开后起名（边打边查重）、建 Passkey，成功才用掉邀请。邀请时定的名字只是预填，可改。
 - 首次：上公网且还没有面板时，启动会在状态目录写 `setup-token`（0600，内容就是一条 join 链接，不过期）；每次重启换新的。只要有了面板（不管用哪个邀请进来的），文件和这条邀请就删掉，`ir access` 也不再列；启动时（本机模式也一样）发现有面板就清掉残留的。
-- Claude（Claude 用户协议：只给本人的终端）：面板注册后门调 `OnJoin(Joined{Endpoint, Owner, First})`。`First`：注册时还没有别的面板；`Owner`：邀请是 `ir invite --owner` 生成的（`CreateInvite(名字, owner)`，存在 `invites.owner`）。两者之一，服务端就给它开 Claude。插件同理：`ir token --owner`。没 Claude 的面板不能开 Claude（规则接口只认本机由人跑的 `ir` 和带 Claude 的面板，见 `docs/api.md`），只能关。
+- Claude（Claude 用户协议：只给本人的终端）：面板注册后门调 `OnJoin(Joined{Endpoint, Owner, First})`。`First`：注册时还没有别的面板；`Owner`：邀请是 `ir invite --owner` 生成的（`CreateInvite(名字, owner)`，存在 `invites.owner`）。两者之一，服务端就给它开 Claude。Bot 同理：`ir token --owner`。没 Claude 的面板不能开 Claude（规则接口只认本机由人跑的 `ir` 和带 Claude 的面板，见 `docs/api.md`），只能关。
 - 每次注册用新的随机 user handle、不带 excludeCredentials（同步型 Passkey 提供方会互相覆盖或挡住新设备，Rhodium 踩过）。登录用可发现凭证，不把凭证 ID 发给未登录的人。计数器回退就拒绝。
 - 通道：`CreateToken(名字)` 建通道终端并给 TOKEN（`ir_` 开头）；对已有通道再调一次就换 TOKEN，旧的连接断开。请求带 `Authorization: Bearer <TOKEN>`，不查 Origin（TOKEN 不是浏览器自动带的）。
 - 名字和头像：`UpdateProfile`。头像收 PNG/JPEG/WebP，≤2MB，服务端居中裁方、缩到 128×128（不透明存 JPEG，透明存 PNG），照 JPEG 的 EXIF 方向转正。地址 `/_ir/avatar/<id>?v=<版本>`，带版本时可永久缓存（private）。

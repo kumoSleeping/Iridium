@@ -294,7 +294,7 @@ func failure(err error) string {
 	var e *APIError
 	switch {
 	case errors.Is(err, ErrToken):
-		return "Iridium 不认这个插件的 TOKEN：在电脑上运行 iridium-qq setup。"
+		return "Iridium 不认这个 Bot 的 TOKEN：在电脑上运行 iridium-qq setup。"
 	case errors.As(err, &e):
 		return "Iridium：" + e.Message
 	}

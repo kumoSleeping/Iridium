@@ -139,7 +139,7 @@ func setup(home string, args []string) int {
 		return 1
 	}
 	if qqbridge.Token(home) == "" || *rebind {
-		fmt.Printf("向 Iridium 要插件 TOKEN（终端名 %s，带 Claude）……\n", c.Name)
+		fmt.Printf("向 Iridium 要 Bot TOKEN（终端名 %s，带 Claude）……\n", c.Name)
 		cmd := exec.Command("ir", "token", c.Name, "--owner", "--into", filepath.Join(home, qqbridge.TokenFile))
 		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 		if err := cmd.Run(); err != nil || qqbridge.Token(home) == "" {

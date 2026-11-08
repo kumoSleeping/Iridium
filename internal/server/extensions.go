@@ -28,7 +28,7 @@ type extension struct {
 	id, name, bin string
 }
 
-var officialExtensions = []extension{{id: "qq", name: "QQ 机器人", bin: "iridium-qq"}}
+var officialExtensions = []extension{{id: "qq", name: "QQ Bot", bin: "iridium-qq"}}
 
 func findExtension(id string) (extension, bool) {
 	for _, e := range officialExtensions {

@@ -278,7 +278,7 @@ func waitConfirm(e adminEnv, raw json.RawMessage, stdout, stderr io.Writer) int 
 		fmt.Fprintln(stdout, outcome(st))
 		return 1
 	}
-	what := map[string]string{"invite": "新网页面板的邀请", "token": "插件 TOKEN"}[p.Confirm.Kind]
+	what := map[string]string{"invite": "新网页面板的邀请", "token": "Bot TOKEN"}[p.Confirm.Kind]
 	if p.Confirm.Name != "" {
 		what += "（" + p.Confirm.Name + "）"
 	}

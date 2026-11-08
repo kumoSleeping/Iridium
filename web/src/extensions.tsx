@@ -66,7 +66,6 @@ export function ExtensionRows({ openExt }: { openExt: (id: string) => void }) {
             <span className="min-w-0 flex-1">
               <span className="flex items-center gap-2">
                 <span className="truncate text-base font-medium">{nameOf(x)}</span>
-                <OfficialTag />
               </span>
               <span className="flex min-w-0 items-center gap-1.5 text-xs text-ink-3">
                 {st.live ? <span className="size-1.5 shrink-0 rounded-full bg-run" aria-hidden /> : null}

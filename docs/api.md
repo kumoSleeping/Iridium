@@ -2,8 +2,8 @@
 
 一套接口，两个入口：
 
-- HTTP：`127.0.0.1:7810`（配置 `listen`），给网页，前面是 Passkey 门（`docs/gate.md`）。没配 `public.origin` 时只认本机的主机名（`localhost`、回环地址和配置 `hosts`），非 GET 请求带了别的 `Origin` 就拒绝，请求都算内置终端“本机”（带插件 TOKEN 的算那个插件）。配了以后每个请求都要面板登录或 TOKEN。
-- unix socket：`$XDG_RUNTIME_DIR/iridium/ir.sock`（0600），给本机 `ir`，不经过门，算“本机”。`ir` 认出是 agent 在调（环境里有 `CLAUDECODE`、`CODEX_THREAD_ID`、`IRIDIUM_SESSION`，或者没有终端）时带头 `X-Iridium-Agent: 1`，这时不回任何秘密（见“确认”）。`ir` 还带 `X-Iridium-Session`（它所在的会话：`IRIDIUM_SESSION` 或 agent 自己的会话变量）；那个会话是别的终端经 Iridium 开的，这个请求就算那个终端的：有没有 Claude 照它，记它的用量和来源（agent 在插件的会话里调 `ir`，等于插件自己做）。
+- HTTP：`127.0.0.1:7810`（配置 `listen`），给网页，前面是 Passkey 门（`docs/gate.md`）。没配 `public.origin` 时只认本机的主机名（`localhost`、回环地址和配置 `hosts`），非 GET 请求带了别的 `Origin` 就拒绝，请求都算内置终端“本机”（带 Bot TOKEN 的算那个 Bot）。配了以后每个请求都要面板登录或 TOKEN。
+- unix socket：`$XDG_RUNTIME_DIR/iridium/ir.sock`（0600），给本机 `ir`，不经过门，算“本机”。`ir` 认出是 agent 在调（环境里有 `CLAUDECODE`、`CODEX_THREAD_ID`、`IRIDIUM_SESSION`，或者没有终端）时带头 `X-Iridium-Agent: 1`，这时不回任何秘密（见“确认”）。`ir` 还带 `X-Iridium-Session`（它所在的会话：`IRIDIUM_SESSION` 或 agent 自己的会话变量）；那个会话是别的终端经 Iridium 开的，这个请求就算那个终端的：有没有 Claude 照它，记它的用量和来源（agent 在 Bot 的会话里调 `ir`，等于 Bot 自己做）。
 
 来源：每条交给 agent 的消息开头是 `[终端名] `（`/` 开头的命令除外），名字取发送时终端的名字。库里记下这条输入是哪个终端（ID）发的、用的什么名字；读记录时服务端按 Iridium 自己写进去的输入认（Claude：发消息时给的 uuid；没有 ID 的 agent：`store.SourceByText` 比对输入记录），去掉前缀，消息块带 `from`（名字）和 `fromTerminal`（终端 ID，取头像用）。用量行按终端 ID 记，改名不丢。经 unix socket 的 `ir send`、`ir new` 只要带着它所在的会话（`X-Iridium-Session` 头，取自 `IRIDIUM_SESSION`、`CLAUDE_CODE_SESSION_ID` 等环境变量，或正文的 `caller`），前缀就是 `[ir:<会话 ID>] `，`from` 也是它，页面画成那个会话的来信（名字：会话改过的名字，否则“Claude · 工作区名或文件夹名”）；有没有 `X-Iridium-Agent` 都一样。终端（`fromTerminal`，记用量的）照旧：开那个会话的终端，否则本机。网页和 TOKEN 来的请求不认 `caller`。
 
@@ -25,7 +25,7 @@
 | `POST /api/sessions/{id}/stop` | → `{ok}` | 停掉 agent 进程（关 stdin，写完记录自己退出）。会话还在，下一条消息再拉起。队列暂停 |
 | `POST /api/sessions/{id}/answer` | `Answer` → `{ok}` | 回答提问：审批 `allow`（不许时可带 `message`；`always` 见“会话设置”）；选择题 `answers`（问题原文 → 选项 `label`）；计划确认 `allow` |
 | `POST /api/sessions/{id}/release` | `Release{toolUseId, dismiss?}` → `{ok}` | 放行 Claude auto 模式拦下的一步（见“放行”）；`dismiss` 只拿掉它的卡。Claude 会话要有 Claude，agent 调用一律 403 |
-| `GET /api/events?sub=…` | SSE | 见下。不带 `sub`：插件的事件流，见“插件” |
+| `GET /api/events?sub=…` | SSE | 见下。不带 `sub`：Bot 的事件流，见“Bot 接入” |
 | `GET /api/agents` | → `AgentInfo[]` | 能开的 agent：审批模式（`modes`、`defaultMode`、`modeSwitch`：now / next turn / restart）、有没有上下文分项、有没有额度窗口、能不能开 ultracode（`ultracode`）、程序装没装（`missing`：PATH 上找不到；这时 `POST /api/sessions` 立刻 400，不等 agent 自更新那 30 秒，网页把它画淡，点了只提示未安装） |
 | `GET /api/health` | → `{ok}` | |
 | `GET /api/settings` | → `Settings` | 设置的配置项：空闲回收、崩溃续跑、额度续跑（这三项设置页不放，只改配置文件或经接口）、隐藏的额度条、各 agent 新会话的审批模式、推送总开关。管理权 |
@@ -57,7 +57,7 @@
 
 不认识的键、不给这个终端的键（`confirms` 只给面板）不让整条流失败：开流时先为每个发一条 `state`，`{key, value: null, ignored: "unknown" | "forbidden"}`，其余照常。
 
-所有终端看到同样的 `list` 和会话。`Session.bots` 是聊天指着它的插件，`Session.viewers` 是现在开着 `session:<id>` 流的终端（页面开着这个会话）；有人进出就重发 `list`（2026-11-08）。终端被撤销、面板退出、`public.origin` 改了，流就断开。
+所有终端看到同样的 `list` 和会话。`Session.bots` 是聊天指着它的 Bot，`Session.viewers` 是现在开着 `session:<id>` 流的终端（页面开着这个会话）；有人进出就重发 `list`（2026-11-08）。终端被撤销、面板退出、`public.origin` 改了，流就断开。
 
 事件：
 
@@ -231,12 +231,12 @@
 
 ## 卡片（`Card`）
 
-确认面板和插件用同一份：`id`、`kind`（`permission`、`question`、`plan`、`pick`）、`title`、`summary`（几行）、`options`（`id`、`text`、`primary`、`group`）。
+确认面板和 Bot 用同一份：`id`、`kind`（`permission`、`question`、`plan`、`pick`）、`title`、`summary`（几行）、`options`（`id`、`text`、`primary`、`group`）。
 
 - 提问的卡片在 `SessionState.asks[].card`，`id` 是 `ask:<会话>:<requestId>`。
   - 审批：`allow`、`deny`、`always`。计划：`approve`、`reject`。
   - 选择题：每个问题一组（`group` 是问题序号），选项 `id` 是 `<问题>.<选项>`；`multi` 列出可多选的组。
-- `pick`：插件命令（`/use`、`/model`、`/mode`）给的选择，只有发起的插件能答，24 小时内有效。
+- `pick`：Bot 命令（`/use`、`/model`、`/mode`）给的选择，只有发起的 Bot 能答，24 小时内有效。
 
 `POST /api/answer`：`{card, option}` 或 `{card, choices: [...]}`（每组一个，多选组可多个）；选择题自己写的答案放 `words`（按组，空串是没写），顶替那一组的选择；拒绝时可带 `message` → `CardReply{ok, reply?, card?}`。已答过或撤回：410。
 
@@ -258,9 +258,9 @@ Web Push，总开关在配置 `push`，默认关。VAPID 密钥存在状态目�
 
 推送的内容（service worker 收到的 JSON）：`PushMessage{kind, session, title, body, tag}`，`kind` 是 `needs_you`、`error`、`turn_end`、`test`；`tag` 是会话 ID。推送服务回 404/410 的订阅删掉。
 
-## 插件
+## Bot 接入
 
-插件用自己的 TOKEN（交互终端由门认，见 `gate.md`）；下面的“插件”就是请求的交互终端。聊天键是插件自己定的字符串（1–200 字节可打印字符，放进路径要 URL 编码）。
+Bot 用自己的 TOKEN（交互终端由门认，见 `gate.md`）；下面的“Bot”就是请求的交互终端。聊天键是 Bot 自己定的字符串（1–200 字节可打印字符，放进路径要 URL 编码）。
 
 | 请求 | 正文 → 回答 | 说明 |
 |---|---|---|
@@ -270,13 +270,13 @@ Web Push，总开关在配置 `push`，默认关。VAPID 密钥存在状态目�
 | `GET /api/chat/{key}/files/{ref}` | → 文件 | 回复里的文件，支持 Range |
 | `POST /api/chat/{key}/uploads` | `NewUpload` → `Upload` | 往指针指着的会话传附件（没选会话回 409），之后同网页分块 `PUT`、`complete`，拿 `file.ref` 放进 `ChatInput.attachments` |
 | `POST /api/answer` | `CardAnswer` → `CardReply` | 见“卡片” |
-| `GET /api/events` | SSE | 不带 `sub`：这个插件的事件 |
+| `GET /api/events` | SSE | 不带 `sub`：这个 Bot 的事件 |
 
 收消息：
 
 - 不以 `/` 开头：交给指针指着的会话，回合在跑就并进去（插话，同 IM）。没有指针（或会话没了）：不开会话、消息不发，`card` 是标题“未选择会话”的选会话卡片（同 `/use`），一个会话都没有时 `reply` 提示 `/new`。`/new` 按指针的默认（没有就 `claude` 和配置 `chatDir`，再没有是家目录）开。
 - 以 `/` 开头：是 Iridium 命令就在这里做，回答直接在 `reply`（Markdown 和去掉标记的文字）或 `card` 里；不是就原样交给 agent（透传）。
-- 来源标记：`[插件名·sender]`，`sender` 去掉 `[ ] / : ·`，最多 24 字。
+- 来源标记：`[Bot 名·sender]`，`sender` 去掉 `[ ] / : ·`，最多 24 字。
 
 命令：`/new [agent] [目录]`（目录可以是绝对路径、`~/…` 或相对指针的目录）、`/clear`（同 `send` 的 `/clear`，指针换到新会话）、`/use [ID 开头]`（不带参数给选组的卡片，见 `docs/qq.md`）、`/ls`、`/history [轮数]`（最近几轮，默认 5，最多 10，一条消息）、`/stop`、`/model [值]`、`/mode [模式]`（不带参数给卡片）、`/status`、`/usage`、`/context`。
 
@@ -297,14 +297,14 @@ Web Push，总开关在配置 `push`，默认关。VAPID 密钥存在状态目�
 
 - 有聊天指着这个会话：当作它的 `reply` 发过去。
 - 没有：选一个聊天发 `card`（`pick`）：标题是会话，`summary` 是消息，选项“进入会话”（选项 ID 是会话 ID，等于 `/use` 它）和“关闭”（`-`，什么都不做）。不点直接说话，照旧进聊天指着的会话。
-- 选哪个聊天：只看连着事件流的插件（都没连就不限），能用这个会话的；最近有过这个会话的聊天优先，其次你最后说话的聊天（QQ 一小时内被动回复不耗额度）。记录在 `chat_seen` 表（插件、聊天、会话、时间：发消息、跑命令、切会话时记）。一个都没有回 404。
-- `ref` 只对这个插件有效，签过名，重启后照样能用；`~/.ssh`、`~/.claude`、`~/.codex`、`~/.pi`、Iridium 的状态和配置目录里的文件一律不给。
+- 选哪个聊天：只看连着事件流的 Bot（都没连就不限），能用这个会话的；最近有过这个会话的聊天优先，其次你最后说话的聊天（QQ 一小时内被动回复不耗额度）。记录在 `chat_seen` 表（Bot、聊天、会话、时间：发消息、跑命令、切会话时记）。一个都没有回 404。
+- `ref` 只对这个 Bot 有效，签过名，重启后照样能用；`~/.ssh`、`~/.claude`、`~/.codex`、`~/.pi`、Iridium 的状态和配置目录里的文件一律不给。
 - 例子：`examples/plugin/echo_im.py`（只用标准库）把 stdin/stdout 当成一个假 IM。
 - `ChatInput.attachments`：上面传好的引用，路径写进消息、图片照样给 agent（同网页）；只有附件没有文字也行。
 
-## 官方扩展
+## 官方 Bot
 
-Iridium 不内置、但认得名字的插件（现在只有 QQ 机器人 `qq`，二进制 `iridium-qq`，见 `docs/qq.md`）。只有人能用（面板，或本机人跑的 `ir`）；agent 回 403，用扩展自己的命令行。
+Iridium 不内置、但认得名字的 Bot（现在只有 QQ Bot `qq`，二进制 `iridium-qq`，见 `docs/qq.md`）。只有人能用（面板，或本机人跑的 `ir`）；agent 回 403，用扩展自己的命令行。
 
 | 请求 | 正文 → 回答 | 说明 |
 |---|---|---|
@@ -337,7 +337,7 @@ Iridium 不内置、但认得名字的插件（现在只有 QQ 机器人 `qq`，
 | `GET /api/terminals` | → `Terminals` | `ir access`：所有终端（本机在最前）、有没有 Claude、今天的用量，和未用的邀请。没有秘密 |
 | `GET /api/usage?days=N&terminal=<ID、名字或 me>` | → `Usage` | `ir usage`：最近 N 天（默认 7，最多 366，今天在最后）按本地日期、终端、agent、模型合计的回合数、输入、输出、缓存读写 token 和费用（只有 agent 报了的）。不带 `terminal`：管理权看所有人，通道只看自己；看别的终端要管理权（否则 403）。`terminals` 给出行里还在的终端的名字和头像；`terminal` 为空的行是认不出谁发起的回合 |
 | `POST /api/terminals/invites` | `NewInvite` → `Invite` | `ir invite [名字]`：新面板的一次性链接（10 分钟），`qr` 是同一链接的二维码（SVG data URL）。要先有 `public.origin`（否则 409）。没有面板权时回 202 `Pending`。`owner: true`（`--owner`）：加入的面板带 Claude。本机由人跑的 `ir`、带 Claude 的面板（有 Passkey 的，不算没配 `public.origin` 的本机网页）直接给；agent 的回 202 `Pending`，只有带 Claude 的面板或本机 `ir` 能同意；别的 403 |
-| `POST /api/terminals/tokens` | `NewInvite` → `Token` | `ir token <名字>`：插件 TOKEN，只给这一次；已有的通道换新 TOKEN，旧的作废。没有面板权时回 202 `Pending`。`owner: true` 同上：新建的通道带 Claude；已有的通道换 TOKEN 时 Claude 照旧，没 Claude 的再带 `owner` 回 409（Claude 只在建的时候定）。`into`（`ir token --into 文件`）：由 Iridium 把 TOKEN 写进这个绝对路径（0600，不能落在 Iridium 和 agent 的目录里），回答和确认面板都不给 TOKEN，只给 `into` |
+| `POST /api/terminals/tokens` | `NewInvite` → `Token` | `ir token <名字>`：Bot TOKEN，只给这一次；已有的通道换新 TOKEN，旧的作废。没有面板权时回 202 `Pending`。`owner: true` 同上：新建的通道带 Claude；已有的通道换 TOKEN 时 Claude 照旧，没 Claude 的再带 `owner` 回 409（Claude 只在建的时候定）。`into`（`ir token --into 文件`）：由 Iridium 把 TOKEN 写进这个绝对路径（0600，不能落在 Iridium 和 agent 的目录里），回答和确认面板都不给 TOKEN，只给 `into` |
 | `DELETE /api/terminals/{id}` | → `{ok}` | `ir revoke`：终端（连同登录、Claude、连接）或未用的邀请；最后一个有 Passkey 的面板删不了（409） |
 
 ## 能做什么（`Rules`）
@@ -346,9 +346,9 @@ Iridium 不内置、但认得名字的插件（现在只有 QQ 机器人 `qq`，
 
 - `claudeOwner`：这是你本人的终端（Claude 用户协议），能用 Claude。`{by, at}`，`by` 是 `local`（本机由人跑的 `ir` 的 `--owner`；`--owner` 邀请加入的面板也记这个）、`panel`（带 Claude 的面板开的或同意的）或 `first`（第一个面板）。只在建终端时由服务端写，之后不能改，也没有改的接口。
 - 没有 Claude 的终端看得到 Claude 的会话（列表、读消息、事件流、文件），但不能开新的、发消息、停、中断、答提问、放行、换模型模式强度、动待发队列、往里传文件（403）。改名、置顶、颜色、归档谁都行。别的 agent 谁都能用。
-- 不再有目录、命令、审批、每日上限、拷入拷出、看别人会话这些限制；插件和面板一样。旧库里这些字段还在，不读。
+- 不再有目录、命令、审批、每日上限、拷入拷出、看别人会话这些限制；Bot 和面板一样。旧库里这些字段还在，不读。
 
-插件的聊天层（`/api/chat/…`）按 TOKEN 认终端，同一条规则：开会话（含 `/new`，默认 Claude）、发消息、`/use`、`/stop`、答提问对 Claude 会话要有 Claude。聊天开的会话记在插件名下，来源标记是 `[插件名·发送者]`。
+Bot 的聊天层（`/api/chat/…`）按 TOKEN 认终端，同一条规则：开会话（含 `/new`，默认 Claude）、发消息、`/use`、`/stop`、答提问对 Claude 会话要有 Claude。聊天开的会话记在 Bot 名下，来源标记是 `[Bot 名·发送者]`。
 
 ## 确认（agent 的 `ir` 要秘密时）
 
@@ -373,7 +373,7 @@ agent 调 `ir invite`、`ir token` 时，邀请链接和 TOKEN 不能进它的�
 
 - 确认（`/api/confirms`）多两种：`secret-set`（`Confirm.note`、`replace`；同意时 `ConfirmAnswer.value` 带值，服务端存好，谁存的记点“存”的面板；回答和 `ConfirmState` 不带值）、`secret-use`（`Confirm.secrets`、`command`；允许 / 本会话一直允许（`ConfirmAnswer.forSession`）/ 拒绝，记在内存里，会话的进程停了就忘；`owner: true`，只有带 Claude 的面板或本机 `ir` 能允许；有 `always` 的凭据不给“本会话一直允许”）。
 - 要不要确认：本机由人跑的 `ir run` 直接用；agent 的，会话由本机、带 Claude 的终端开的（或不经 Iridium 开的）直接用，别的终端开的要确认；`always` 的每次都确认。范围不对直接 403，不弹确认。
-- 对话记录出接口前（会话列表、会话状态、消息页、整段原文、事件流、插件的聊天指针、推送；`ir read`、`ir wait` 走的就是这些），已知的值（原样、URL 编码、base64）换成 `[secret:名]`；短于 6 个字符的不换（误伤太多）。
+- 对话记录出接口前（会话列表、会话状态、消息页、整段原文、事件流、Bot 的聊天指针、推送；`ir read`、`ir wait` 走的就是这些），已知的值（原样、URL 编码、base64）换成 `[secret:名]`；短于 6 个字符的不换（误伤太多）。
 - `ir run` 自己起子进程（同目录、同环境，加上凭据），stdout/stderr 照转，按最长值的长度留尾巴再打码；退出码照子进程。
 
 ## 公网入口
