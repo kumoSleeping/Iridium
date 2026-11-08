@@ -107,7 +107,7 @@ export interface Session {
   subagent?: boolean;
   parent?: string;
   /**
-   * Done: a subagent that has finished (Claude: its transcript ends with its final answer); the
+   * Done: a subagent that has finished (Claude: its transcript ends with its final answer, or it was stopped); the
    * sidebar shows a subagent only while it works.
    */
   done?: boolean;

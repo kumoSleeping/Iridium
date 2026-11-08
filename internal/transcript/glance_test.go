@@ -11,7 +11,7 @@ import (
 
 // A subagent is done once its transcript ends with its final answer, as Claude writes them: a
 // reply that calls no tool, or the tool result that ends the turn (a workflow agent's
-// StructuredOutput). Progress lines after it do not count.
+// StructuredOutput), or once it is stopped. Progress lines after it do not count.
 func TestGlanceSubagentEnded(t *testing.T) {
 	const (
 		prompt  = `{"type":"user","isSidechain":true,"sessionId":"p","cwd":"/w","message":{"role":"user","content":"look"}}`
@@ -21,6 +21,9 @@ func TestGlanceSubagentEnded(t *testing.T) {
 		final   = `{"type":"user","isSidechain":true,"toolEndsTurn":true,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"s","content":"Structured output provided successfully"}]}}`
 		request = `{"type":"api-request","sessionId":"p"}`
 		attach  = `{"type":"attachment","isSidechain":true,"attachment":{}}`
+		stop    = `{"type":"user","isSidechain":true,"message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}`
+		stopUse = `{"type":"user","isSidechain":true,"message":{"role":"user","content":"[Request interrupted by user for tool use]"}}`
+		again   = `{"type":"user","isSidechain":true,"message":{"role":"user","content":"go on"}}`
 	)
 	cases := []struct {
 		name  string
@@ -33,6 +36,9 @@ func TestGlanceSubagentEnded(t *testing.T) {
 		{"final answer", []string{prompt, call, result, answer}, true},
 		{"final answer, then progress", []string{prompt, answer, attach, request}, true},
 		{"structured output", []string{prompt, call, result, attach, final}, true},
+		{"stopped", []string{prompt, call, result, stop, attach}, true},
+		{"stopped in a tool call", []string{prompt, call, stopUse}, true},
+		{"stopped, then woken", []string{prompt, call, stop, again, call}, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

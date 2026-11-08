@@ -88,7 +88,7 @@ type Session struct {
 	// session of its own, read-only; Parent: the session that started it.
 	Subagent bool   `json:"subagent,omitempty"`
 	Parent   string `json:"parent,omitempty"`
-	// Done: a subagent that has finished (Claude: its transcript ends with its final answer); the
+	// Done: a subagent that has finished (Claude: its transcript ends with its final answer, or it was stopped); the
 	// sidebar shows a subagent only while it works.
 	Done bool `json:"done,omitempty"`
 	// Needs: elsewhere, and its agent waits on you there (Claude: an ask or a question open in its

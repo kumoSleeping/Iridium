@@ -30,7 +30,7 @@ type Glimpse struct {
 	Parent    string
 	// Ended: a sidechain whose last message is its final answer: an assistant reply that calls no
 	// tool, or the tool result that ends the turn (toolEndsTurn, as a workflow agent's
-	// StructuredOutput). One still at work ends on a tool call or its result.
+	// StructuredOutput), or its being stopped. One still at work ends on a tool call or its result.
 	Ended bool
 }
 
@@ -99,7 +99,9 @@ func Glance(path string, sources Sources) (Glimpse, error) {
 }
 
 // ended reads a sidechain's line from the end: nil for one that is not a message (progress,
-// attachments, API requests), else whether it ends the subagent's work.
+// attachments, API requests), else whether it ends the subagent's work: its final answer, or
+// its being stopped (TaskStop writes "[Request interrupted by user]" and no answer follows; a
+// SendMessage that wakes it again writes on after it).
 func ended(_ int64, raw []byte) *bool {
 	if bytes.HasPrefix(raw, blobPrefix) {
 		return nil
@@ -118,7 +120,7 @@ func ended(_ int64, raw []byte) *bool {
 	var done bool
 	switch l.Type {
 	case "user":
-		done = l.ToolEndsTurn
+		done = l.ToolEndsTurn || stopped(l.Message.Content)
 	case "assistant":
 		var blocks []struct {
 			Type string `json:"type"`
@@ -134,6 +136,22 @@ func ended(_ int64, raw []byte) *bool {
 		return nil
 	}
 	return &done
+}
+
+// stopped: a user message that is only the note of its being stopped.
+func stopped(content json.RawMessage) bool {
+	var s string
+	if json.Unmarshal(content, &s) == nil {
+		return interrupted.MatchString(s)
+	}
+	var blocks []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if json.Unmarshal(content, &blocks) != nil || len(blocks) != 1 {
+		return false
+	}
+	return blocks[0].Type == "text" && interrupted.MatchString(blocks[0].Text)
 }
 
 // Said is a LastSaid of text: on one line, Markdown's marks for headings, bold, code and links
