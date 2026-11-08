@@ -1,6 +1,6 @@
 # 执行端
 
-另一台机器（Windows、Mac、Linux）不装 Iridium，只跑一个**执行端**：替这边启动 agent 进程、转发它的输入输出、读写文件。会话还是这边托管，网页、驱动、记录解析、卡片全部照旧。第一个实现是 dsh 插件（2026-11-08 定）。
+另一台机器（Windows、Mac、Linux）跑一个**执行端**：替这边启动 agent 进程、转发它的输入输出、读写文件。会话还是这边托管，网页、驱动、记录解析、卡片全部照旧。第一个实现是 dsh 插件 `dsh-remote-iridium`（2026-11-08 定）；第二个是 Iridium 二进制自己的 `ir join <地址>`：Windows 只做这个，Mac、Linux 是完整节点，接入别的 Iridium 时也用它（用户，2026-11-08）。
 
 ## 和节点的区别
 
@@ -26,8 +26,9 @@
 
 ## 连接
 
-- 执行端主动连 `wss://<Iridium>/api/exec`，头 `Authorization: Bearer <TOKEN>`。执行端就是一个 Bot：用 Bot 的 TOKEN 接入，终端类型也显示“Bot”，名字就是机器名（≤12 字符）。不带 Claude：Claude 只在本人的登录下跑。
-- 配对（用户，2026-11-08）：插件里只有服务器地址，没有 TOKEN，人人同一个包。第一次不带 TOKEN 连 `/api/exec/pair`（门外唯一不用登录的口，什么也不给），报机器名、系统、装了哪些 agent，两边显示同一个 4 位配对码；网页弹确认卡片“home-pc 请求接入（Windows · dsh 0.2.2）”，带 Passkey 的面板点允许后，TOKEN 经这条连接发给执行端，它存起来以后自己用。限速，同时最多几个待批，10 分钟没人管作废。
+- 执行端主动连 `wss://<Iridium>/api/exec`，头 `Authorization: Bearer <TOKEN>`。执行端就是一个 Bot：用 Bot 的 TOKEN 接入，终端类型也显示“Bot”，名字就是机器名（≤12 字符）。Claude（用户，2026-11-08）：批准时勾了“本人的机器”的执行端才开 Claude，用那台机器上本人的登录、原样跑（不加 `--bare`），等于 `--owner`；这个勾只出现在带 Claude 的面板上。
+- 配对（用户，2026-11-08）：插件里只有服务器地址，没有 TOKEN，人人同一个包。第一次不带 TOKEN 连 `/api/exec/pair`（门外唯一不用登录的口，什么也不给），报机器名、系统、装了哪些 agent，两边显示同一个 4 位配对码；网页弹确认卡片“home-pc 请求接入（Windows · dsh 0.2.2）”，带 Passkey 的面板点允许后，TOKEN 经这条连接发给执行端，它存起来以后自己用。限速，同时最多几个待批，10 分钟没人管作废。插件和 `ir join` 用同一个口：`POST /api/exec/pair` 带握手内容（同 `hello`），回 `{code, request}`；再轮询 `GET /api/exec/pair/<request>`，等到允许（拿 TOKEN）或拒绝。
+- 接入是单向的（用户，2026-11-08）：批准的一方能用申请方的 agent 和文件；反过来要对方也申请一次。
 - 一个 TOKEN 同时只有一条连接，新连上的顶掉旧的。
 - 断了执行端自己重连，退避 1 秒起、最多 30 秒。断开期间它启动的进程照跑，输出照写盘。
 - 帧是 JSON 文本，一帧一个：
@@ -108,7 +109,7 @@
 | | Windows | Mac | Linux |
 |---|---|---|---|
 | 整棵进程树 | Job Object（或 `taskkill /T /F`） | 新进程组，`kill(-pgid)`，先 TERM 后 KILL | 同 Mac |
-| 常驻 | 跟着 `dsh web` 进程；开机自启另说 | 同左；或 launchd 用户代理 | 同左；或 systemd 用户单元 |
+| 常驻 | 插件跟着 `dsh web`；`ir join` 用登录时运行的计划任务（不用系统服务：SYSTEM 账户拿不到本人的 PATH 和 agent 登录） | 插件同左；`ir join` 用 launchd 用户代理 | 插件同左；`ir join` 用 systemd 用户单元 |
 | 换行 | 只认 `\n`，行尾的 `\r` 去掉 | `\n` | `\n` |
 | dsh 记录的目录名 | `C:\a\b` → `C-a-b`（`/ \ :` 换成 `-`） | `/Users/a` → `Users-a` | 同 Mac |
 | 编码 | UTF-8，不带 BOM | UTF-8 | UTF-8 |
@@ -132,7 +133,9 @@
 5. `/api/exec` 端点、TOKEN、在线状态；会话断开时状态灯显示“已断开”，不当作停止。
 6. 网页：新会话选机器；列表标机器名。
 7. 一个 Go 写的参考执行端（`internal/remote/executor`），测试用；回放录制的假 dsh 在 `internal/testagent/dsh.go`。
+8. Claude 在执行端：驱动的 `Spawn` 按 `Remote` 走（系统提示文件写到那边），记录在那边的 `~/.claude/projects/` 用 `FindRemote` 找。只读那边的 `~/.claude`。
+9. `ir join <地址>`：二进制的执行端模式，复用 `internal/remote/executor`，配对、存 TOKEN、常驻（见“平台差异”）、找 agent（npm 的 `.cmd` 垫片解析成 `node` + 入口 js）。Windows 先做。
 
 ## 暂不做
 
-发现那边在终端里自己开的会话（扫进程）；那边的 Codex、pi、Claude；目录传输。
+发现那边在终端里自己开的会话（扫进程）；那边的 Codex、pi（Claude 先做）；目录传输。

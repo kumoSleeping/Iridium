@@ -86,7 +86,7 @@ ir ws [ls] | new <目录> [--name 名] | rename <ws> <新名> | rm <ws> | mv <id
 
 ```
 ir invite [名字] [--owner]   新网页面板：带 TOKEN 的链接；--owner 带 Claude
-ir invite --peer             节点邀请码；对方 ir join <码>
+ir join <地址>               申请接入另一个 Iridium，对方面板核对配对码后允许；单向
 ir token <名字> [--owner]    Bot TOKEN；--owner 带 Claude
 ir access                    列出所有交互终端、未用邀请，哪些带 Claude
 ir profile <名字> [--name 新名] [--avatar 图片] [--device computer|laptop|phone|none]
@@ -227,12 +227,13 @@ ir run [--secret 名,…] -- 命令 …   {{名}}、{{file:名}} 换进参数，
 
 ## 节点
 
-- 任意一方 `ir invite --peer`，对方 `ir join` 并确认，双方对等。
+- 接入单向（用户，2026-11-08）：B 跑 `ir join <A 的地址>` 申请，A 的面板核对配对码后允许，A 就能用 B 的 agent 和文件；要双向，A 再向 B 申请一次。配对同执行端（`exec.md`）。
 - 能用对方的 `ir` 和基本文件操作：`ir new codex mac:~/dir "…"`、`ir send mac/<id>`、`ir cp a mac:~/b`、`ir files mac:~/dir`。不删不改名。
 - 节点是通道型交互终端，同样不设权限（2026-11-08）。
 - 双方直接 HTTPS（签名请求）；没有公网地址的一方以后用出站 WebSocket。
 - 不做网页上的汇总视图。
-- 执行端（2026-11-08）：不装 Iridium 的机器（Windows、Mac）跑一个执行端，替这边启动 agent 进程、转发输入输出、读写文件，会话由这边托管、驱动照旧。协议和做法见 `docs/exec.md`；第一个实现是 dsh 插件。
+- 执行端（2026-11-08）：替这边启动 agent 进程、转发输入输出、读写文件，会话由这边托管、驱动照旧。协议和做法见 `docs/exec.md`；第一个实现是 dsh 插件，第二个是 `ir join`。
+- 平台（用户，2026-11-08）：Linux、Mac 做完整节点；Windows 先只做执行端（`ir join`）。不做代码签名和公证：命令行下载、`iridium push`、自更新都不经浏览器，不会被 Gatekeeper、SmartScreen 拦；Mac arm64 要的 ad-hoc 签名 Go 链接时自带。给别人分发时再说。
 - 用户要用的都在这一个二进制里（2026-11-06）：`iridium install`、`ir update`、`ir public`，以及 `iridium push <用户@主机>`（经 ssh 把自己装到另一个账号或机器、或换成新版）和 `iridium node new <账号>`（在本机建账号做成节点，sudo 一次）。脚本只给从源码构建的开发者用。
 
 ## 文件传输（网页、Bot、节点共用）
@@ -299,7 +300,7 @@ ir run [--secret 名,…] -- 命令 …   {{名}}、{{file:名}} 换进参数，
 ## 测试部署
 
 - 两个节点，同一台机器、两个账号（2026-11-06）：
-  - 主节点（现在这个账号）：只跑 Release 版，`https://ir.kumo.ltd`、`127.0.0.1:7810`；只靠发版和设置里的“更新”升级，不推开发版。Claude（你本人的登录）只在这里。
+  - 主节点（现在这个账号）：只跑 Release 版，`https://ir.kumo.ltd`、`127.0.0.1:7810`；只靠发版和设置里的“更新”升级，不推开发版。Claude（你本人的登录）只在这里；执行端上的 Claude 也由这里托管。
   - 测试节点（账号 `ir`）：`https://ir-test.kumo.ltd`、`127.0.0.1:7811`；`scripts/push-test.sh` 只构建工作区，第一次用 `iridium node new ir` 建好，之后 `iridium push` 推过去、重启。没有真的 Claude：Claude Code 接 DeepSeek（`deepseek-flash`，密钥在那边 `~/.config/deepseek/api-key`，由 `apiKeyHelper` 读）；Codex 你自己登录。`ir-test.kumo.ltd` 走主节点的隧道转到 7811，Passkey 门开着；测试由 agent 用无头浏览器和虚拟认证器登录，你不用去测。也用来开发节点功能。
 - 上公网前 Passkey 必须先做好。
 
