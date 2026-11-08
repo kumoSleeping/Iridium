@@ -110,18 +110,12 @@ export function Stick({ tail, older, place, style, children, scroller, bottom, q
     const padWas = pad.current;
     height.current = col?.offsetHeight ?? 0;
     pad.current = padOf(el);
-    // A fold shut by shut below: everything is drawn where it now goes already.
-    if (shutting.current) {
-      shutting.current = false;
+    // A fold opening or shutting (toggleFold): its own height glides, what is below it goes with
+    // the layout; at the newest the end is only kept, frame by frame, nothing more gliding.
+    if (performance.now() < folding.current) {
       if (atEnd.current) pin(el);
       return;
     }
-    // A fold opened or shut by a press: what is above it and what is below it glide to their
-    // places, its rows drawn back as it opens, never over what is below (the user, 2026-11-08).
-    const toggled = toggledAt.current && performance.now() - toggledAt.current.t < 400 ? toggledAt.current.el : null;
-    toggledAt.current = null;
-    const grew = height.current - was;
-    if (toggled && col && grew && was > 0 && anim.current?.playState !== "running") return unfold(el, col, toggled, atEnd.current ? pin(el) : 0, grew);
     if (!atEnd.current) return;
     // Shrunk at the newest: held as tall (settleFloor).
     const lost = was + padWas - height.current - pad.current;
@@ -156,28 +150,36 @@ export function Stick({ tail, older, place, style, children, scroller, bottom, q
     anim.current = Math.abs(from) < 0.5 ? null : col.animate([{ transform: `translateY(${from}px)` }, { transform: "none" }], { duration: motion.dur(3), easing: motion.ease("out") });
   };
 
-  /** The fold pressed last, and when: the next growth is its. */
-  const toggledAt = useRef<{ el: Element; t: number } | null>(null);
-  /** Fold at grew by grew px (less when shut), the list scrolled by by to keep at the newest. What
-   *  is above it, at with it, is drawn where it was (by px lower) and glides to its place; what is
-   *  below it, where it was (grew − by px higher), glides to its own; at's rows are cut off at the
-   *  top of what is below all the way, so they come out from under it, never over it. */
-  const unfold = (el: HTMLElement, col: HTMLElement, at: Element, by: number, grew: number) => {
-    if (reduced() || document.hidden) return;
-    const opts = { duration: motion.dur(3), easing: motion.ease("out") };
-    const box = el.getBoundingClientRect();
-    const reach = Math.abs(by) + Math.abs(grew);
-    const seen = (n: Element) => {
-      const r = n.getBoundingClientRect();
-      return r.bottom > box.top - reach && r.top < box.bottom + reach;
-    };
-    const move = (n: Element, y: number) => y && seen(n) && n.animate([{ transform: `translateY(${y}px)` }, { transform: "none" }], opts);
-    for (let n: Element = at; n !== col && n.parentElement; n = n.parentElement) {
-      for (let p = n.previousElementSibling; p; p = p.previousElementSibling) move(p, by);
-      for (let p = n.nextElementSibling; p; p = p.nextElementSibling) move(p, by - grew);
-    }
-    const cut = Math.max(0, grew);
-    at.animate([{ transform: `translateY(${by}px)`, clipPath: `inset(-40px -100vw ${cut}px -100vw)` }, { transform: "none", clipPath: "inset(-40px -100vw 0px -100vw)" }], opts);
+  /** Till when a fold's height glides (toggleFold): the growth meanwhile is its. */
+  const folding = useRef(0);
+  /** Fold d opened or shut by a press (the user, 2026-11-08: clean, no jump at either end): its
+   *  height glides from what it is to what it will be, its rows fading, clipped to it; shutting,
+   *  it shuts once the glide is done. Nothing is drawn where it is not: what is below it moves
+   *  with the layout, so nothing has to settle back at the end. */
+  const toggleFold = (d: HTMLDetailsElement) => {
+    if (d.dataset.anim !== undefined) return;
+    const opening = !d.open;
+    const from = d.offsetHeight;
+    if (opening) d.open = true;
+    else d.dataset.shut = "";
+    const sum = d.querySelector(":scope > summary") as HTMLElement | null;
+    const to = opening ? d.offsetHeight : (sum?.offsetHeight ?? 0);
+    const opts: KeyframeAnimationOptions = { duration: motion.dur(2), easing: motion.ease("out"), fill: "forwards" };
+    folding.current = performance.now() + motion.dur(2) + 100;
+    d.dataset.anim = "";
+    d.style.overflow = "clip";
+    const fades = [...d.children].filter((c) => c !== sum).map((c) => c.animate([{ opacity: opening ? 0 : 1 }, { opacity: opening ? 1 : 0 }], opts));
+    const a = d.animate([{ height: `${from}px` }, { height: `${to}px` }], opts);
+    void a.finished
+      .then(() => {
+        if (!opening) d.open = false;
+        delete d.dataset.shut;
+        delete d.dataset.anim;
+        d.style.overflow = "";
+        a.cancel();
+        for (const f of fades) f.cancel();
+      })
+      .catch(() => {});
   };
 
   /** Where the scroll was at the last scroll event; a finger on the list; a place leave scrolled
@@ -199,40 +201,6 @@ export function Stick({ tail, older, place, style, children, scroller, bottom, q
     if (Math.abs(at) < 0.5) return;
     el.scrollTop -= at;
     kept.current = lastTop.current = el.scrollTop;
-  };
-
-  /** Set as a fold shut by shut lands: the growth that follows is its, already drawn. */
-  const shutting = useRef(false);
-  /** Fold d shut, the other way from unfold: its rows go in under what is below it, what is above
-   *  it and below it gliding to where they will be, then it shuts with everything in place. */
-  const shut = (el: HTMLElement, col: HTMLElement, d: HTMLDetailsElement) => {
-    if (col.style.minHeight) return false;
-    const sum = d.querySelector(":scope > summary") as HTMLElement | null;
-    const h = sum ? d.offsetHeight - sum.offsetHeight : 0;
-    if (h <= 0) return false;
-    // Where the scroll will be: kept at the newest, it comes up by as far as it can.
-    const down = atEnd.current ? Math.min(h, el.scrollTop) : 0;
-    const opts: KeyframeAnimationOptions = { duration: motion.dur(3), easing: motion.ease("out"), fill: "forwards" };
-    const box = el.getBoundingClientRect();
-    const seen = (n: Element) => {
-      const r = n.getBoundingClientRect();
-      return r.bottom > box.top - h && r.top < box.bottom + h;
-    };
-    const anims: Animation[] = [];
-    const move = (n: Element, y: number) => y && seen(n) && anims.push(n.animate([{ transform: "none" }, { transform: `translateY(${y}px)` }], opts));
-    for (let n: Element = d; n !== col && n.parentElement; n = n.parentElement) {
-      for (let p = n.previousElementSibling; p; p = p.previousElementSibling) move(p, down);
-      for (let p = n.nextElementSibling; p; p = p.nextElementSibling) move(p, down - h);
-    }
-    anims.push(d.animate([{ transform: "none", clipPath: "inset(-40px -100vw 0px -100vw)" }, { transform: `translateY(${down}px)`, clipPath: `inset(-40px -100vw ${h}px -100vw)` }], opts));
-    d.dataset.shut = "";
-    void anims[anims.length - 1]!.finished.then(() => {
-      shutting.current = true;
-      d.open = false;
-      delete d.dataset.shut;
-      for (const a of anims) a.cancel();
-    }).catch(() => {});
-    return true;
   };
 
   const back = async () => {
@@ -347,14 +315,9 @@ export function Stick({ tail, older, place, style, children, scroller, bottom, q
           and over it, not off to the left by half a scrollbar (the user, 2026-11-06). */}
       <div ref={list} role="log" aria-label={t("chat.log")} onScroll={scrolled} onClickCapture={(e) => {
           const fold = (e.target as Element).closest?.("summary")?.parentElement;
-          if (!fold) return;
-          if (fold instanceof HTMLDetailsElement && fold.open) {
-            const el = list.current!;
-            const col = el.firstElementChild as HTMLElement | null;
-            const busy = fold.dataset.shut !== undefined || anim.current?.playState === "running";
-            if (busy || (col && !reduced() && !document.hidden && shut(el, col, fold))) return e.preventDefault();
-          }
-          toggledAt.current = { el: fold, t: performance.now() };
+          if (!(fold instanceof HTMLDetailsElement) || reduced() || document.hidden) return;
+          e.preventDefault();
+          toggleFold(fold);
         }} className="absolute inset-0 overflow-y-auto [overflow-anchor:none] [scrollbar-gutter:stable_both-edges]" style={style}>
         {children}
       </div>

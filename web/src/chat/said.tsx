@@ -449,9 +449,9 @@ function Fold({ steps, session, cwd }: { steps: Step[]; session: string; cwd: st
             {bad > 1 && bad}
           </span>
         )}
-        <ChevronRight size={13} className="fold-chev shrink-0 text-ink-4 transition-transform duration-(--dur-3) group-open/fold:rotate-90" />
+        <ChevronRight size={13} className="fold-chev shrink-0 text-ink-4 transition-transform duration-(--dur-2) group-open/fold:rotate-90" />
       </summary>
-      <div className="g-fade mt-0.5 ml-[7px] flex flex-col pl-3 shadow-[inset_1px_0_0_var(--edge)]">
+      <div className="mt-0.5 ml-[7px] flex flex-col pl-3 shadow-[inset_1px_0_0_var(--edge)]">
         {steps.map((s) => (
           <StepView key={s.at} s={s} session={session} cwd={cwd} />
         ))}

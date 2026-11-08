@@ -169,7 +169,7 @@
 }
 
 /* --- fade --- */
-/* A fold shutting (chat/stick.tsx shut): still open as its rows go in, its chevron already turning back. */
+/* A fold shutting (chat/stick.tsx toggleFold): still open as its height glides down, its chevron already turning back. */
 details[data-shut] > summary .fold-chev {
   rotate: none !important;
 }
