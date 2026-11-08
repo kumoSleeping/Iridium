@@ -14,6 +14,8 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -92,15 +94,31 @@ func New(o Options) *Driver {
 func (d *Driver) Spawn(o agent.SpawnOptions) (hold.Spec, error) {
 	// CleanEnv drops every CLAUDE_CODE_ variable, CLAUDE_CODE_SIMPLE (what --bare sets) too.
 	env := agent.CleanEnv(o.Env)
-	program, err := agent.LookPath(o.Program, env)
-	if err != nil {
-		return hold.Spec{}, err
+	var argv []string
+	prompt := o.SystemPromptFile
+	if r := o.Remote; r != nil {
+		// At an executor (docs/exec.md): its claude, the system prompt copied there.
+		argv = slices.Clone(r.Argv)
+		data, err := os.ReadFile(o.SystemPromptFile)
+		if err != nil {
+			return hold.Spec{}, err
+		}
+		prompt = r.Join(r.Scratch, o.Session, filepath.Base(o.SystemPromptFile))
+		if err := r.WriteFile(prompt, data); err != nil {
+			return hold.Spec{}, fmt.Errorf("claude: the system prompt there: %w", err)
+		}
+	} else {
+		program, err := agent.LookPath(o.Program, env)
+		if err != nil {
+			return hold.Spec{}, err
+		}
+		argv = []string{program}
 	}
-	argv := []string{
-		program, "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
+	argv = append(argv,
+		"-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
 		"--permission-prompt-tool", "stdio", "--include-partial-messages",
-		"--append-system-prompt-file", o.SystemPromptFile, "--system-prompt-snapshot", "off",
-	}
+		"--append-system-prompt-file", prompt, "--system-prompt-snapshot", "off",
+	)
 	if o.Model != "" {
 		argv = append(argv, "--model", o.Model)
 	}

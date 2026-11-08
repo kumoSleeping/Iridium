@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 	"unicode"
+	"unicode/utf16"
 	"unicode/utf8"
 
 	"github.com/kumoSleeping/iridium/internal/api"
@@ -422,6 +423,24 @@ func Find(home, id string) (string, error) {
 	}
 	return m[0], nil
 }
+
+// ClaudeProjectDir is the directory under projects/ Claude keeps a session started in cwd in: each
+// UTF-16 unit but an ASCII letter or digit made '-' (C:\a\b: C--a-b). Past 200 Claude cuts it
+// and adds a hash of its own; ok is false then.
+func ClaudeProjectDir(cwd string) (dir string, ok bool) {
+	var b strings.Builder
+	for _, c := range utf16.Encode([]rune(cwd)) {
+		if c < 0x80 && (c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9') {
+			b.WriteByte(byte(c))
+		} else {
+			b.WriteByte('-')
+		}
+	}
+	return b.String(), b.Len() <= 200
+}
+
+// ValidID reports whether id may be a Claude session's (a UUID's characters).
+func ValidID(id string) bool { return validID(id) }
 
 func validID(id string) bool {
 	if id == "" {

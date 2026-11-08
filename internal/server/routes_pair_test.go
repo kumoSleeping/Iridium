@@ -100,7 +100,7 @@ func TestExecPair(t *testing.T) {
 
 	// It connects: listed with the agents Iridium runs there, online; gone, still listed, away.
 	exe, err := executor.New(executor.Options{URL: "ws" + strings.TrimPrefix(l.base, "http") + "/api/exec", Token: st.Token, State: t.TempDir(), Logf: t.Logf,
-		Agents: []wire.AgentInfo{{Agent: "dsh", Version: "0.2.2", Argv: []string{"node", "bin.js"}}, {Agent: "nope", Version: "1"}}})
+		Agents: []wire.AgentInfo{{Agent: "dsh", Version: "0.2.2", Argv: []string{"node", "bin.js"}}, {Agent: "claude", Version: "2.1.318", Argv: []string{"claude"}}, {Agent: "nope", Version: "1"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,13 +121,18 @@ func TestExecPair(t *testing.T) {
 		}
 	}
 	m := machine(true)
-	if m.Name != "home-pc-2" || m.OS != "linux" && m.OS != "darwin" || len(m.Agents) != 1 || m.Agents[0].Agent != "dsh" || m.Home == "" || m.SeenAt == 0 {
+	if m.Name != "home-pc-2" || m.OS != "linux" && m.OS != "darwin" || len(m.Agents) != 2 || m.Agents[0].Agent != "dsh" || m.Agents[1].Agent != "claude" || m.Home == "" || m.SeenAt == 0 {
 		t.Fatalf("the machine: %+v", m)
 	}
 	cancel()
 	<-done
 	exe.Close()
 	machine(false)
+	// Claude: at the owner's own machine (away now: not a refusal), never at another Bot.
+	if code := l.do("socket", "POST", "/api/sessions", api.NewSession{Agent: api.AgentClaude, Machine: "home-pc-2", Cwd: "/"}, nil); code == 403 {
+		t.Fatal("claude refused at the owner's own machine")
+	}
+	l.want(403, "socket", "POST", "/api/sessions", api.NewSession{Agent: api.AgentClaude, Machine: "home-pc", Cwd: "/"}, nil)
 
 	// Denied.
 	l.public("POST", "/api/exec/pair", "", api.ExecPair{Name: "a b/c"}, &p)

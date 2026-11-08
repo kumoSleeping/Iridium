@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -252,10 +253,26 @@ func (s *Server) manages(h http.HandlerFunc) http.HandlerFunc {
 
 // checkCreate checks a new session: Claude's only for the owner's own.
 func (s *Server) checkCreate(c caller, req *api.NewSession) error {
+	if err := s.checkMachine(req); err != nil {
+		return err
+	}
 	if c.Local {
 		return nil
 	}
 	return access.Agent(s.rulesFor(c), req.Agent)
+}
+
+// checkMachine: Claude runs at another machine only if it was allowed as the owner's own
+// (docs/exec.md "连接"), whoever asks.
+func (s *Server) checkMachine(req *api.NewSession) error {
+	if req.Machine == "" {
+		return nil
+	}
+	info, ok := s.gate().Find(req.Machine)
+	if !ok || info.Kind != gate.KindChannel {
+		return fmt.Errorf("no machine %q", req.Machine)
+	}
+	return access.Agent(s.rulesOf(info.ID, false), req.Agent)
 }
 
 // checkSend checks a message for session id.

@@ -30,7 +30,8 @@ type Where struct {
 // RemoteWhere says where to look for a session's transcript at an executor (docs/exec.md).
 type RemoteWhere struct {
 	ID, Cwd string
-	Home    string // the agent's home there (dsh: DSH_HOME)
+	Home    string // the agent's home there (dsh: DSH_HOME; Claude: its config dir), "" if not said
+	User    string // the user's home there
 	Join    func(elem ...string) string
 	// List names the files in dir there; a dir not there has none.
 	List func(dir string) ([]string, error)
@@ -84,7 +85,28 @@ var all = []Info{
 		New: func(emit func(agent.Event), logf func(string, ...any)) agent.Driver {
 			return claude.New(claude.Options{Emit: emit, Logf: logf})
 		},
-		Find:   func(w Where) (string, error) { return transcript.Find(w.ClaudeHome, w.ID) },
+		Find: func(w Where) (string, error) { return transcript.Find(w.ClaudeHome, w.ID) },
+		// At an executor (docs/exec.md), under the owner's own login there: the session's project
+		// directory, by its cwd. One cut short by Claude (a path past 200) is not found.
+		FindRemote: func(w RemoteWhere) (string, error) {
+			if !transcript.ValidID(w.ID) {
+				return "", nil
+			}
+			dir, ok := transcript.ClaudeProjectDir(w.Cwd)
+			if !ok {
+				return "", nil
+			}
+			home := w.Home
+			if home == "" {
+				home = w.Join(w.User, ".claude")
+			}
+			dir = w.Join(home, "projects", dir)
+			names, err := w.List(dir)
+			if err != nil || !slices.Contains(names, w.ID+".jsonl") {
+				return "", err
+			}
+			return w.Join(dir, w.ID+".jsonl"), nil
+		},
 		Format: transcript.Claude,
 	},
 	{

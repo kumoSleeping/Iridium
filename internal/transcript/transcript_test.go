@@ -288,3 +288,19 @@ func TestFind(t *testing.T) {
 		t.Fatal("took a glob")
 	}
 }
+
+// Claude's project directories: each UTF-16 unit but an ASCII letter or digit a '-'.
+func TestClaudeProjectDir(t *testing.T) {
+	for cwd, want := range map[string]string{
+		"/home/iridium/kumo/Iridium": "-home-iridium-kumo-Iridium",
+		`C:\Users\kumo\my.proj`:      "C--Users-kumo-my-proj",
+		"/a/文😀":                      "-a----",
+	} {
+		if got, ok := ClaudeProjectDir(cwd); got != want || !ok {
+			t.Errorf("%q: %q %v, want %q", cwd, got, ok, want)
+		}
+	}
+	if _, ok := ClaudeProjectDir("/" + strings.Repeat("a", 200)); ok {
+		t.Error("a path past 200 is Claude's to cut")
+	}
+}

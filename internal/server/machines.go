@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/kumoSleeping/iridium/internal/access"
 	"github.com/kumoSleeping/iridium/internal/agents"
 	"github.com/kumoSleeping/iridium/internal/api"
 )
@@ -66,6 +67,9 @@ func (s *Server) machines() []api.Machine {
 			continue
 		}
 		m.ID, m.Name, m.Avatar, m.SeenAt = r.Terminal, info.Name, info.Avatar, r.At
+		// Claude only at a machine allowed as the owner's own.
+		claude := access.HasClaude(s.rulesOf(r.Terminal, false))
+		m.Agents = slices.DeleteFunc(m.Agents, func(a api.ExecAgent) bool { return a.Agent == string(api.AgentClaude) && !claude })
 		if m.Agents == nil {
 			m.Agents = []api.ExecAgent{}
 		}

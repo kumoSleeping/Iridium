@@ -133,7 +133,7 @@
 5. `/api/exec` 端点、TOKEN、在线状态；会话断开时状态灯显示“已断开”，不当作停止。
 6. 网页：新会话选机器；列表标机器名。
 7. 一个 Go 写的参考执行端（`internal/remote/executor`），测试用；回放录制的假 dsh 在 `internal/testagent/dsh.go`。
-8. Claude 在执行端：驱动的 `Spawn` 按 `Remote` 走（系统提示文件写到那边），记录在那边的 `~/.claude/projects/` 用 `FindRemote` 找。只读那边的 `~/.claude`。
+8. （已做）Claude 在执行端：驱动的 `Spawn` 按 `Remote` 走（系统提示文件写到那边），记录在那边的 `~/.claude/projects/` 用 `FindRemote` 找。只读那边的 `~/.claude`。项目目录名照 Claude 的规则（每个不是 ASCII 字母数字的 UTF-16 单元换成 `-`）；超过 200 的 Claude 会截断加哈希，这种找不到记录。没勾“本人的机器”的那台：新会话不列 Claude，接口也拒绝（403）。
 9. `ir join <地址>`：二进制的执行端模式，复用 `internal/remote/executor`，配对、存 TOKEN、常驻（见“平台差异”）、找 agent（npm 的 `.cmd` 垫片解析成 `node` + 入口 js）。Windows 先做。
 
 ## 暂不做

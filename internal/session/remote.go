@@ -179,7 +179,7 @@ func (h *Hosted) findRemoteTranscript(mc *remote.Machine) (string, error) {
 	ctx, cancel := context.WithTimeout(h.m.ctx, 30*time.Second)
 	defer cancel()
 	path, err := info.FindRemote(agents.RemoteWhere{
-		ID: h.meta.agentID(), Cwd: h.meta.Cwd, Home: ai.Home,
+		ID: h.meta.agentID(), Cwd: h.meta.Cwd, Home: ai.Home, User: hi.Home,
 		Join: func(elem ...string) string { return remote.Join(hi.Sep, elem...) },
 		List: func(dir string) ([]string, error) {
 			ents, err := mc.List(ctx, dir)

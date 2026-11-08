@@ -526,6 +526,23 @@ func TestSpawn(t *testing.T) {
 	if _, err := d.Spawn(agent.SpawnOptions{Session: "s1", Env: env, Program: "nope"}); err == nil {
 		t.Error("spawned a missing program")
 	}
+
+	// At an executor: its argv, the system prompt copied to its scratch, nothing looked up here.
+	prompt := filepath.Join(t.TempDir(), "system-prompt.md")
+	if err := os.WriteFile(prompt, []byte("be brief"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	wrote := map[string]string{}
+	r := &agent.Remote{Argv: []string{`C:\node.exe`, `C:\claude\cli.js`}, Scratch: `C:\s`,
+		Join:      func(e ...string) string { return strings.Join(e, `\`) },
+		WriteFile: func(p string, b []byte) error { wrote[p] = string(b); return nil }}
+	spec, err = d.Spawn(agent.SpawnOptions{Session: "s1", Cwd: `C:\w`, Env: []string{"PATH=C:\\x"}, SystemPromptFile: prompt, Remote: r})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spec.Argv[0] != `C:\node.exe` || spec.Argv[1] != `C:\claude\cli.js` || spec.Argv[2] != "-p" || !slices.Contains(spec.Argv, `C:\s\s1\system-prompt.md`) || wrote[`C:\s\s1\system-prompt.md`] != "be brief" || spec.Cwd != `C:\w` {
+		t.Errorf("remote: %v %v", spec.Argv, wrote)
+	}
 }
 
 // /effort lists (get_settings' applied.effort), then sets a level with ultracode as it was.
