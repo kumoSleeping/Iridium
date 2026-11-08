@@ -53,14 +53,14 @@ jobs:
           gh release create "$VERSION" dist/*.tar.gz dist/SHA256SUMS \
             --title "$VERSION" --notes-file dist/notes.md $pre
       # The dsh plugin (plugins/dsh-remote-iridium) goes to npm at Iridium's version, so dsh's
-      # 添加插件 takes it by name. Releases only, and only with the NPM_TOKEN secret set.
+      # 添加插件 takes it by name. Releases only. npm trusts this workflow (Trusted Publishing,
+      # OIDC: id-token above), so there is no token; it needs npm 11.5.1 or later.
       - name: dsh plugin
         if: ${{ !contains(github.ref_name, '-') }}
         working-directory: plugins/dsh-remote-iridium
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           VERSION: ${{ github.ref_name }}
         run: |
-          if [ -z "$NODE_AUTH_TOKEN" ]; then echo "no NPM_TOKEN secret: the dsh plugin is not published"; exit 0; fi
+          npm install -g npm@latest --no-audit --no-fund
           npm version "${VERSION#v}" --no-git-tag-version --allow-same-version
-          npm publish --access public --provenance
+          npm publish --access public
