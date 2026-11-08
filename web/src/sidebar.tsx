@@ -13,7 +13,7 @@ import { Archive, ArchiveRestore, Bot, Check, ChevronRight, Copy, Folder, Folder
 import { ConfirmIcon, confirmName, confirmTitle } from "./confirmname";
 import { Fragment, lazy, memo, Suspense, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { api } from "./api/client";
-import type { Color, Confirm, Session, Terminal } from "./api/types.gen";
+import type { Color, Confirm, Machine, Session, Terminal } from "./api/types.gen";
 import { colorVar, COLORS, useFolderColors } from "./colors";
 import { ahead, behind } from "./chats";
 import { t, useLang } from "./i18n";
@@ -26,7 +26,8 @@ import { useMe, useTerminalList, useUpdate } from "./data";
 import { agentName, ago, Avatar, cn, fine, IconKey, IrMark, keep, kept, Lamp, lampOf, Logo, own, sessionStatusText, statusText, tilde, Tip, titleOf, useLongPress, useMenuAt, useMinute } from "./ui";
 import { SESSION_DRAG } from "./chat/refs";
 import { useUnread } from "./unread";
-import { MachineBadge, useMachine } from "./machines";
+import { MachineBadge, MachineTag, remoteOf, shownPath, useMachine } from "./machines";
+import { useMachines } from "./store";
 
 const STEP = 18;
 const BUSY = new Set(["running", "compacting", "starting"]);
@@ -117,6 +118,7 @@ function Divider({ width, setWidth }: { width: number; setWidth: (w: number) => 
 }
 
 export function Sidebar(p: Props) {
+  const machines = useMachines();
   const list = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(() => clampWidth(Number(kept(WIDTH_KEY)) || WIDTH.start));
   useLayoutEffect(() => void document.documentElement.style.setProperty("--sidebar-w", `${p.phone ? 0 : width}px`), [width, p.phone]);
@@ -133,9 +135,10 @@ export function Sidebar(p: Props) {
   const scrolled = useRef(0);
   useLayoutEffect(() => void (!p.searching && list.current && (list.current.scrollTop = scrolled.current)), [p.searching]);
   // A session's row, and under it the subagents it has at work.
-  const row = (s: Session, depth: number, flip = `s:${s.id}`) => (
+  // shown: its machine is said by the group above it (no badge on its logo).
+  const row = (s: Session, depth: number, shown = false, flip = `s:${s.id}`) => (
     <Fragment key={flip}>
-      <SessionRow s={s} where={p.tree.where.get(s.id)} depth={depth} flip={flip} selected={p.selected === s.id} onSelect={p.onSelect} chatCode={p.chatCode} asked={asked.has(s.id)} />
+      <SessionRow s={s} where={p.tree.where.get(s.id)} depth={depth} flip={flip} selected={p.selected === s.id} onSelect={p.onSelect} chatCode={p.chatCode} asked={asked.has(s.id)} machineShown={shown} />
       {p.tree.kids.get(s.id)?.map((k) => <SessionRow key={k.id} s={k} depth={depth + 1} flip={`${flip}>${k.id}`} selected={p.selected === k.id} onSelect={p.onSelect} chatCode={p.chatCode} working />)}
       {p.tree.runs.get(s.id)?.map((r) => {
         const open = p.expanded(`run:${r.id}`);
@@ -218,6 +221,8 @@ export function Sidebar(p: Props) {
           // 2026-11-08).
           const prev = p.tree.workspaces[i - 1];
           const apart = prev ? p.expanded(prev.key) && prev.rows.length > 0 : loose.length > 0;
+          // A group at another machine: the Bot that brought it after its name.
+          const at = remoteOf(w.root, machines)?.m;
           return (
             <div key={w.key} className={apart ? "mt-4" : "mt-1"} role="group">
               <WsRow
@@ -225,6 +230,7 @@ export function Sidebar(p: Props) {
                 id={w.id}
                 name={w.name}
                 root={w.root}
+                machine={at}
                 open={open}
                 onToggle={() => p.toggle(w.key)}
                 // Not its count: the "+" that opens a session here, always at the row's end, plain to
@@ -244,13 +250,13 @@ export function Sidebar(p: Props) {
               {open &&
                 w.rows.map((r) =>
                   r.kind === "session" ? (
-                    row(r.s, 0)
+                    row(r.s, 0, !!at)
                   ) : (
                     <div key={r.f.key} role="group">
                       <FolderRow
                         f={r.f}
                         ws={w.id}
-                        label={w.id === 0 ? tilde(r.f.path) : r.f.name}
+                        label={w.id === 0 ? <FolderLabel path={r.f.path} /> : r.f.name}
                         open={p.expanded(r.f.key)}
                         onToggle={() => p.toggle(r.f.key)}
                         newHere={() => setPlusOpen(r.f.key)}
@@ -265,7 +271,7 @@ export function Sidebar(p: Props) {
                           (o) => setPlusOpen(o ? r.f.key : null),
                         )}
                       />
-                      {p.expanded(r.f.key) && r.f.sessions.map((s) => row(s, 1))}
+                      {p.expanded(r.f.key) && r.f.sessions.map((s) => row(s, 1, !!at || !!remoteOf(r.f.path, machines)))}
                     </div>
                   ),
                 )}
@@ -440,7 +446,8 @@ function Row({ depth, flip, chevron, expanded, icon, label, end, selected, onCli
 
 /** A group's row; its menu (right click, long-press): rename, its path copied, open or folded,
  *  通知 while push is on. 未归类 itself (id 0): its 通知 only, inline. */
-function WsRow({ flip, id, name, root, open, onToggle, end }: { flip: string; id: number; name: string; root: string; open: boolean; onToggle: () => void; end: ReactNode }) {
+function WsRow({ flip, id, name, root, machine, open, onToggle, end }: { flip: string; id: number; name: string; root: string; machine?: Machine; open: boolean; onToggle: () => void; end: ReactNode }) {
+  const machines = useMachines();
   const push = usePushMenus();
   const me = useMe().data;
   const real = id !== 0 && !!me && (me.local || me.kind === "panel");
@@ -454,7 +461,7 @@ function WsRow({ flip, id, name, root, open, onToggle, end }: { flip: string; id
   const failed = (e: unknown) => toast(t("err.action"), { error: true, description: errText(e) });
   const items = [
     { icon: <Pencil size={15} />, label: t("menu.rename"), run: () => setRenaming(true) },
-    { icon: <Copy size={15} />, label: t("menu.copyPath"), run: () => void navigator.clipboard.writeText(root).then(() => toast(t("toast.copied")), failed) },
+    { icon: <Copy size={15} />, label: t("menu.copyPath"), run: () => void navigator.clipboard.writeText(shownPath(root, machines).real).then(() => toast(t("toast.copied")), failed) },
     { icon: open ? <Folder size={15} /> : <FolderOpen size={15} />, label: open ? t("menu.fold") : t("menu.unfold"), run: onToggle },
   ];
   const menu = real || push;
@@ -474,7 +481,10 @@ function WsRow({ flip, id, name, root, open, onToggle, end }: { flip: string; id
           renaming ? (
             <WsRename id={id} name={name} done={() => setRenaming(false)} />
           ) : (
-            <span className="font-medium">{name}</span>
+            <span className="flex min-w-0 items-center">
+              <span className="truncate font-medium">{name}</span>
+              {machine && <MachineTag m={machine} />}
+            </span>
           )
         }
         end={end && !renaming && <span className="flex items-center" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>{end}</span>}
@@ -511,6 +521,18 @@ function WsRow({ flip, id, name, root, open, onToggle, end }: { flip: string; id
 
 /** A group's mark: a folder as a folder's in it is (the user, 2026-11-08: a group is only a folder),
  *  shut or open as the group is. */
+/** A folder in 未归类 by its path: ~ for home; at another machine, its Bot after it. */
+function FolderLabel({ path }: { path: string }) {
+  const sp = shownPath(path, useMachines());
+  if (!sp.m) return <>{tilde(path)}</>;
+  return (
+    <span className="flex min-w-0 items-center">
+      <span className="truncate">{sp.label}</span>
+      <MachineTag m={sp.m} />
+    </span>
+  );
+}
+
 function WsMark({ open }: { open: boolean }) {
   return <FolderMark open={open} className="text-ink-2" />;
 }
@@ -549,8 +571,9 @@ function WsRename({ id, name, done }: { id: number; name: string; done: () => vo
  *  it 0.1 s, counted from its last move, or a press, fetches its chat ahead. */
 /** Drawn again only as its props change, not with every draw of the list: a page of the phone's
  *  sheet turned drew every row, its menu and its tip, again (the user, 2026-11-08). */
-const SessionRow = memo(function SessionRow({ s, where, depth, flip, selected, onSelect, chatCode, working, asked }: { s: Session; where?: string; depth: number; flip: string; selected: boolean; onSelect: (id: string) => void; chatCode: () => void; working?: boolean; asked?: boolean }) {
+const SessionRow = memo(function SessionRow({ s, where, depth, flip, selected, onSelect, chatCode, working, asked, machineShown }: { s: Session; where?: string; depth: number; flip: string; selected: boolean; onSelect: (id: string) => void; chatCode: () => void; working?: boolean; asked?: boolean; machineShown?: boolean }) {
   useLang();
+  const machines = useMachines();
   const unread = useUnread(s.id);
   const now = useMinute();
   const title = titleOf(s);
@@ -658,7 +681,7 @@ const SessionRow = memo(function SessionRow({ s, where, depth, flip, selected, o
           <Tip label={[agentName(s.agent), machine?.name, s.subagent && t("row.subagent"), away ? t("status.offline") : status !== "idle" && told].filter(Boolean).join(" · ")} side="bottom">
             <span className="relative grid">
               <Logo agent={s.agent} />
-              {machine && !s.subagent && <MachineBadge m={machine} />}
+              {machine && !s.subagent && !machineShown && <MachineBadge m={machine} />}
               {/* A subagent: no word for it, a small agent badge on the logo's corner (the user, 2026-11-06). */}
               {s.subagent && (
                 <span role="img" aria-label={t("row.subagent")} className="absolute -right-1 -bottom-1 grid size-[11px] place-items-center rounded-full text-ink-2" style={{ background: "var(--row-bg, var(--paper))" }}>
@@ -676,7 +699,7 @@ const SessionRow = memo(function SessionRow({ s, where, depth, flip, selected, o
               <Marked color={s.color}>{title}</Marked>
               {where && (
                 <Tip label={tilde(s.cwd)} side="bottom">
-                  <span className="ml-1.5 max-w-[35%] shrink-0 truncate text-xs font-normal text-ink-3">{where.startsWith("/") ? tilde(where) : where}</span>
+                  <span className="ml-1.5 max-w-[35%] shrink-0 truncate text-xs font-normal text-ink-3">{where.startsWith("/") ? tilde(where) : shownPath(where, machines).label}</span>
                 </Tip>
               )}
             </span>
@@ -767,6 +790,7 @@ export function sessionTags(s: Session): Tags {
  *  long-press): a session here, its path copied, open or folded, its sessions archived, its colour
  *  tag. */
 function FolderRow({ f, ws, label, open, onToggle, newHere, plus }: { f: FolderNode; ws: number; label: ReactNode; open: boolean; onToggle: () => void; newHere: () => void; plus: ReactNode }) {
+  const machines = useMachines();
   const [at, setAt] = useMenuAt();
   const lp = useLongPress(() => {
     const r = document.activeElement?.closest?.("[role=treeitem]")?.getBoundingClientRect();
@@ -782,7 +806,7 @@ function FolderRow({ f, ws, label, open, onToggle, newHere, plus }: { f: FolderN
       ? [{ icon: <Archive size={15} />, label: t("menu.archiveHere", { n: f.sessions.length }), run: () => void Promise.all(f.sessions.map((s) => api.patch(s.id, { archived: true }))).then(done(t("toast.archived")), failed) }]
       : []),
     { icon: <Plus size={15} />, label: t("menu.newHere"), run: newHere },
-    { icon: <Copy size={15} />, label: t("menu.copyPath"), run: () => void navigator.clipboard.writeText(f.path).then(done(t("toast.copied")), failed) },
+    { icon: <Copy size={15} />, label: t("menu.copyPath"), run: () => void navigator.clipboard.writeText(shownPath(f.path, machines).real).then(done(t("toast.copied")), failed) },
     { icon: open ? <Folder size={15} /> : <FolderOpen size={15} />, label: open ? t("menu.fold") : t("menu.unfold"), run: onToggle },
   ];
   const anchor = at && { getBoundingClientRect: () => DOMRect.fromRect({ x: at.x, y: at.y, width: 0, height: 0 }) };
