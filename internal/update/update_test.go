@@ -17,6 +17,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kumoSleeping/iridium/internal/api"
 )
@@ -178,6 +179,55 @@ func TestGitHubAuto(t *testing.T) {
 	}
 	if left, _ := filepath.Glob(filepath.Join(dir, ".iridium-update-*")); len(left) != 0 {
 		t.Fatalf("left %v", left)
+	}
+}
+
+// github.com's release downloads failing (504, as for days in 2026-11), the update is fetched
+// through the assets' API URLs: retried first, then the API, the SHA256SUMS too.
+func TestGitHubDownloadFails(t *testing.T) {
+	retryWait = time.Millisecond
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "iridium")
+	os.WriteFile(exe, []byte("old"), 0o755)
+	archive := tarGz(t, "iridium", script("v1.3.0"))
+	name := "iridium-" + platform() + ".tar.gz"
+	var srv *httptest.Server
+	var dl, octet int
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/repos/o/r/releases/latest":
+			fmt.Fprintf(w, `{"tag_name":"v1.3.0","assets":[
+				{"name":"%s","browser_download_url":"%s/dl/%s","url":"%s/api/assets/1","size":%d},
+				{"name":"SHA256SUMS","browser_download_url":"%s/dl/SHA256SUMS","url":"%s/api/assets/2","size":1}]}`,
+				name, srv.URL, name, srv.URL, len(archive), srv.URL, srv.URL)
+		case strings.HasPrefix(r.URL.Path, "/dl/"):
+			dl++
+			w.WriteHeader(http.StatusGatewayTimeout)
+		case r.Header.Get("Accept") != "application/octet-stream":
+			http.Error(w, "json", http.StatusUnsupportedMediaType)
+		case r.URL.Path == "/api/assets/1":
+			octet++
+			w.Write(archive)
+		case r.URL.Path == "/api/assets/2":
+			fmt.Fprintf(w, "%s  %s\n", sum(archive), name)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	u := New(Options{Source: "github:o/r", GitHubAPI: srv.URL, Current: "v1.2.0", Exe: exe, Restart: func() error { return nil }, Logf: t.Logf})
+	ctx := context.Background()
+	if st, err := u.Check(ctx); err != nil || !st.Available {
+		t.Fatalf("check: %+v %v", st, err)
+	}
+	if st, err := u.Apply(ctx, false); err != nil || st.Phase != "restarting" {
+		t.Fatalf("apply: %+v %v", st, err)
+	}
+	if b, _ := os.ReadFile(exe); string(b) != string(script("v1.3.0")) {
+		t.Fatalf("not replaced: %q", b)
+	}
+	if dl < 4 || octet != 1 {
+		t.Fatalf("tries: %d at github.com, %d through the API", dl, octet)
 	}
 }
 

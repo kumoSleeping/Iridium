@@ -66,6 +66,10 @@ type Asset struct {
 	URL    string `json:"url"`
 	SHA256 string `json:"sha256"`
 	Size   int64  `json:"size,omitempty"`
+	// API: a GitHub release asset's API URL, the same bytes by another way (Accept:
+	// application/octet-stream), tried when URL keeps failing: github.com's release downloads
+	// answered 504 for days while the API served (2026-11-08).
+	API string `json:"-"`
 }
 
 // Asset is the binary for this platform.
@@ -297,6 +301,7 @@ type release struct {
 	Assets []struct {
 		Name   string `json:"name"`
 		URL    string `json:"browser_download_url"`
+		API    string `json:"url"` // the asset's API URL
 		Size   int64  `json:"size"`
 		Digest string `json:"digest"` // "sha256:<hex>"
 	} `json:"assets"`
@@ -314,10 +319,10 @@ func (u *Updater) release(ctx context.Context, repo string) (Manifest, error) {
 	if strings.TrimSpace(m.Version) == "" {
 		return m, fmt.Errorf("github %s: the latest release has no tag", repo)
 	}
-	var sums string
+	var sums Asset
 	for _, a := range r.Assets {
 		if a.Name == "SHA256SUMS" || a.Name == "SHA256SUMS.txt" {
-			sums = a.URL
+			sums = Asset{URL: a.URL, API: a.API}
 		}
 	}
 	var listed map[string]string
@@ -330,7 +335,7 @@ func (u *Updater) release(ctx context.Context, repo string) (Manifest, error) {
 			continue // the archive is the smaller one
 		}
 		sum, _ := strings.CutPrefix(a.Digest, "sha256:")
-		if a.Digest == "" && sums != "" {
+		if a.Digest == "" && sums.URL != "" {
 			if listed == nil {
 				if listed, _ = u.sums(ctx, sums); listed == nil {
 					listed = map[string]string{}
@@ -338,7 +343,7 @@ func (u *Updater) release(ctx context.Context, repo string) (Manifest, error) {
 			}
 			sum = listed[a.Name]
 		}
-		m.Platforms[plat] = Asset{URL: a.URL, SHA256: sum, Size: a.Size}
+		m.Platforms[plat] = Asset{URL: a.URL, SHA256: sum, Size: a.Size, API: a.API}
 	}
 	return m, nil
 }
@@ -358,20 +363,20 @@ func (u *Updater) Extension(ctx context.Context, bin, tag, dir string) (string, 
 	}
 	want := bin + "-" + runtime.GOOS + "-" + runtime.GOARCH + ".tar.gz"
 	var a *Asset
-	var sums string
+	var sums Asset
 	for _, x := range r.Assets {
 		switch x.Name {
 		case want:
 			sum, _ := strings.CutPrefix(x.Digest, "sha256:")
-			a = &Asset{URL: x.URL, SHA256: sum, Size: x.Size}
+			a = &Asset{URL: x.URL, SHA256: sum, Size: x.Size, API: x.API}
 		case "SHA256SUMS", "SHA256SUMS.txt":
-			sums = x.URL
+			sums = Asset{URL: x.URL, API: x.API}
 		}
 	}
 	if a == nil {
 		return "", fmt.Errorf("release %s has no %s", tag, want)
 	}
-	if a.SHA256 == "" && sums != "" {
+	if a.SHA256 == "" && sums.URL != "" {
 		listed, err := u.sums(ctx, sums)
 		if err != nil {
 			return "", err
@@ -406,20 +411,12 @@ func assetPlatform(name string) (string, bool) {
 }
 
 // sums reads a SHA256SUMS: "<hex>  <name>" lines.
-func (u *Updater) sums(ctx context.Context, url string) (map[string]string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("User-Agent", "iridium/"+u.o.Current)
-	resp, err := u.o.Client.Do(req)
+func (u *Updater) sums(ctx context.Context, a Asset) (map[string]string, error) {
+	resp, err := u.get(ctx, a)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, errors.New(resp.Status)
-	}
 	out := map[string]string{}
 	sc := bufio.NewScanner(io.LimitReader(resp.Body, 1<<20))
 	for sc.Scan() {
@@ -549,19 +546,11 @@ func (u *Updater) download(ctx context.Context, a Asset, dir string) (string, er
 
 // fetch is download for the binary named bin; track: publish the progress (the update's own).
 func (u *Updater) fetch(ctx context.Context, a Asset, dir, bin string, track bool) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.URL, nil)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("User-Agent", "iridium/"+u.o.Current)
-	resp, err := u.o.Client.Do(req)
+	resp, err := u.get(ctx, a)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("download %s: %s", a.URL, resp.Status)
-	}
 	if a.Size == 0 && resp.ContentLength > 0 {
 		a.Size = resp.ContentLength
 		if track {
@@ -604,6 +593,69 @@ func (u *Updater) fetch(ctx context.Context, a Asset, dir, bin string, track boo
 		return "", err
 	}
 	return f.Name(), nil
+}
+
+// retryWait is the wait before the first retry of a download; it doubles each time.
+var retryWait = time.Second
+
+// get opens asset a's download: its URL, again after a moment while the answer is a server's or a
+// gateway's failure (5xx, 429) or no answer at all, then the same through its API URL (a GitHub
+// release asset's), which may serve while github.com's downloads fail.
+func (u *Updater) get(ctx context.Context, a Asset) (*http.Response, error) {
+	type way struct{ url, accept string }
+	ways := []way{{a.URL, ""}}
+	if a.API != "" {
+		ways = append(ways, way{a.API, "application/octet-stream"})
+	}
+	var last error
+	for i, w := range ways {
+		// Fewer tries where another way follows: a failing gateway may take its time to say so.
+		tries := 3
+		if i < len(ways)-1 {
+			tries = 2
+		}
+		wait := retryWait
+		for try := 0; try < tries; try++ {
+			if try > 0 {
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-time.After(wait):
+				}
+				wait *= 2
+			}
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, w.url, nil)
+			if err != nil {
+				return nil, err
+			}
+			req.Header.Set("User-Agent", "iridium/"+u.o.Current)
+			if w.accept != "" {
+				req.Header.Set("Accept", w.accept)
+			}
+			resp, err := u.o.Client.Do(req)
+			if err != nil {
+				if ctx.Err() != nil {
+					return nil, ctx.Err()
+				}
+				last = fmt.Errorf("download %s: %w", w.url, err)
+				continue
+			}
+			if resp.StatusCode == http.StatusOK {
+				return resp, nil
+			}
+			resp.Body.Close()
+			last = fmt.Errorf("download %s: %s", w.url, resp.Status)
+			if resp.StatusCode < 500 && resp.StatusCode != http.StatusTooManyRequests {
+				break // not to be had this way: the next way, if any
+			}
+			if try < tries-1 {
+				u.o.Logf("update: %v, trying again", last)
+			} else if i < len(ways)-1 {
+				u.o.Logf("update: %v, trying the API", last)
+			}
+		}
+	}
+	return nil, last
 }
 
 func isArchive(rawURL string) bool {
