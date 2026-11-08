@@ -2,16 +2,23 @@ package session
 
 import (
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/kumoSleeping/iridium/internal/api"
+	"github.com/kumoSleeping/iridium/internal/config"
 )
 
 // dsh's preset is picked before the first message: a started session keeps its tools (dsh adds a
 // new set only as deferred tools, which the API turns down when all are).
 func TestPresetBeforeTheFirstMessage(t *testing.T) {
-	r := newRig(t, nil)
+	// The presets of a dsh package (the fixture's), not of whatever dsh this machine has.
+	bin, err := filepath.Abs("../agent/dsh/testdata/pkg/lib/bin.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := newRig(t, func(c *config.Config, _ *Options) { c.Programs["dsh"] = bin })
 	const id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 	h := r.m.newHosted(meta{ID: id, Agent: api.AgentDsh, Cwd: r.cwd, Created: time.Now().UnixMilli()})
 	r.m.mu.Lock()

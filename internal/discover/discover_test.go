@@ -413,9 +413,8 @@ func TestClassification(t *testing.T) {
 		t.Fatal("B, still hidden, classified")
 	}
 
-	// New sessions: one in /w/a/b/c (the deepest group holding it is B's), one in /w (none holds
-	// it: a group of its own), one started by C's session outside C's folder (its own folder's
-	// group, not C's: a group is a folder).
+	// A new session in /w/a/b/c: the outermost group holding it is A's (B's, inside A's folder and
+	// empty, is gone).
 	newClaude := func(id, cwd string, at time.Time) {
 		dir := filepath.Join(r.home, ".claude", "projects", filepath.Base(cwd)+"-x")
 		os.MkdirAll(dir, 0o700)
@@ -429,34 +428,43 @@ func TestClassification(t *testing.T) {
 	idF := "66666666-6666-4666-8666-666666666666"
 	now := time.Now().Add(time.Second)
 	newClaude(idD, "/w/a/b/c", now)
+	r.x.Scan()
+	if d, _ := r.assignment(idD); d.Workspace != wsA.ID || d.Manual {
+		t.Errorf("D in /w/a/b/c: %+v, want the outermost folder's workspace %d", d, wsA.ID)
+	}
+	// Then one in /w (none holds it: a group of its own, and A's and C's go into it), one started
+	// by C's session outside C's folder (its own folder's group, not C's: a group is a folder).
 	newClaude(idE, "/w", now)
 	newClaude(idF, "/somewhere/else", now)
 	r.register(600, idF, "/somewhere/else")
 	r.procs.set(600, &fakeProc{Stat: Stat{PPid: 1}, argv: []string{"claude"}, env: []string{"CLAUDE_CODE_SESSION_ID=" + idC}})
 	r.x.Scan()
-	if d, _ := r.assignment(idD); d.Workspace != wsB.ID || d.Manual {
-		t.Errorf("D in /w/a/b/c: %+v, want the nearest folder's workspace %d", d, wsB.ID)
-	}
 	groups, _ := r.x.Workspaces()
 	at := map[string]int64{}
 	for _, w := range groups {
 		at[w.Path] = w.ID
 	}
-	if e, _ := r.assignment(idE); e.Workspace == 0 || e.Workspace != at["/w"] {
-		t.Errorf("E in /w: %+v, want a group of /w (%v)", e, at)
+	for _, id := range []string{idA, idC, idD, idE} {
+		if a, _ := r.assignment(id); a.Workspace == 0 || a.Workspace != at["/w"] || a.Manual {
+			t.Errorf("%s: %+v, want the group of /w (%v)", id, a, at)
+		}
 	}
 	if f, _ := r.assignment(idF); f.Workspace == 0 || f.Workspace != at["/somewhere/else"] {
 		t.Errorf("F started by C elsewhere: %+v, want a group of its folder", f)
 	}
 
-	// Only once: with A moved to C's workspace, a later look leaves D where it went.
-	r.x.Patch(idA, api.SessionPatch{Workspace: &wsC.ID})
+	// Only once: with A moved to F's group, a later look leaves D where it went.
+	else_ := at["/somewhere/else"]
+	r.x.Patch(idA, api.SessionPatch{Workspace: &else_})
 	r.grow(idD)
 	r.x.Scan()
-	if d, _ := r.assignment(idD); d.Workspace != wsB.ID {
+	if d, _ := r.assignment(idD); d.Workspace != at["/w"] {
 		t.Errorf("D moved: %+v", d)
 	}
-	if ws, _ := r.x.Workspaces(); len(ws) != 5 {
+	if a, _ := r.assignment(idA); a.Workspace != else_ || !a.Manual {
+		t.Errorf("A moved back: %+v", a)
+	}
+	if ws, _ := r.x.Workspaces(); len(ws) != 2 {
 		t.Errorf("workspaces: %+v", ws)
 	}
 	r.x.publishWorkspaces()
@@ -468,7 +476,7 @@ func TestClassification(t *testing.T) {
 	for _, w := range carried {
 		byPath[w.Path] = w.Name
 	}
-	if len(carried) != 5 || byPath["/w/a/b"] != "B" || byPath["/w"] != "w" || byPath["/somewhere/else"] != "else" {
+	if len(carried) != 2 || byPath["/w"] != "w" || byPath["/somewhere/else"] != "else" {
 		t.Errorf("carried workspaces: %s", r.hub.Get("workspaces"))
 	}
 }

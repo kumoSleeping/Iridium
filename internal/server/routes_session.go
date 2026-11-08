@@ -17,6 +17,7 @@ func (s *Server) sessionRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/sessions/{id}/effort", s.use(s.setEffort))
 	mux.HandleFunc("PUT /api/sessions/{id}/ultracode", s.use(s.setUltracode))
 	mux.HandleFunc("PUT /api/sessions/{id}/preset", s.use(s.setPreset))
+	mux.HandleFunc("GET /api/sessions/{id}/presets", s.presets)
 	mux.HandleFunc("POST /api/sessions/{id}/continue", s.use(s.continueQueue))
 	mux.HandleFunc("POST /api/sessions/{id}/queue/{input}/steer", s.use(s.steer))
 	mux.HandleFunc("PUT /api/sessions/{id}/queue/{input}", s.use(s.editQueued))
@@ -66,6 +67,18 @@ func (s *Server) setPreset(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := agentCtx(r)
 	defer cancel()
 	s.settle(w, s.m.SetPreset(ctx, r.PathValue("id"), req.Preset))
+}
+
+// presets are the agent presets the session may run with: those its agent registers where it runs.
+func (s *Server) presets(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := agentCtx(r)
+	defer cancel()
+	l, err := s.m.SessionPresets(ctx, r.PathValue("id"))
+	if err != nil {
+		s.fault(w, err)
+		return
+	}
+	reply(w, http.StatusOK, l)
 }
 
 func (s *Server) setEffort(w http.ResponseWriter, r *http.Request) {

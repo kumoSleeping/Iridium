@@ -213,6 +213,31 @@ type DshPromptParams struct {
 	Steer   bool   `json:"steer,omitempty"`
 }
 
+// DshPresetsReply answers dsh.presets: the agent presets the dsh there registers (its
+// agentPresets registry: shipped, a bundle's, the profile's own edits), by its order, and its
+// default (the user's pick in its settings, else the deployment's).
+type DshPresetsReply struct {
+	Presets []DshPreset `json:"presets"`
+	Default string      `json:"default"`
+}
+
+// DshPreset is one registered preset: Plugins, its child plugin rows as YAML (the registry's
+// read); Broken, why it cannot compose a session there, if it cannot.
+type DshPreset struct {
+	ID          string `json:"id"`
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
+	Plugins     string `json:"plugins"`
+	Broken      string `json:"broken,omitempty"`
+}
+
+// DshLLMReply answers dsh.llm: a patch there (Patch, its path) that gives an sdk profile the
+// models and providers the dsh there has in its settings (DSH Desktop's): the llm adapters' rows
+// and the default model, as configured there. Keys may be in it: it stays there, served to no one.
+type DshLLMReply struct {
+	Patch string `json:"patch"`
+}
+
 // DshAttachParams is dsh.attach: session filed under the workspace of its folder cwd there.
 type DshAttachParams struct {
 	Session string `json:"session"`

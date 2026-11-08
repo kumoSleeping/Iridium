@@ -308,7 +308,7 @@ function Under({ s, ghost, composer, onSent, onSentDone, modelOpen, setModelOpen
             {!ghost && <ModeKey mode={mode} open={modeOpen} onOpenChange={setModeOpen} />}
             {!ghost && <ModelKey s={s} open={modelOpen} onOpenChange={setModelOpen} />}
             {/* dsh: its preset, then its balance where the bars would be (the user, 2026-11-08). */}
-            {agentInfo?.presets?.length ? <PresetKey s={s} /> : null}
+            {agentInfo?.presets ? <PresetKey s={s} /> : null}
             <QuotaBars agent={s.agent} live={s.live} using={[s.model, s.pick, modelView(s).name]} open={usageOpen} onOpenChange={setUsageOpen} />
           </>
         }

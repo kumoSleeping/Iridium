@@ -4,25 +4,30 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
+
+	"github.com/kumoSleeping/iridium/internal/agent"
 )
 
-// Agent presets. dsh-web-app ships them (presets/<id>.patch.yml), and only its web profile binds
-// one per session: the sdk profile never does. So a preset runs process-wide, through a --patch
-// file made from the installed package at every spawn, so it follows dsh's upgrades: the base rows
+// Agent presets. dsh registers them as @deepseek-ai/dsh-agent-preset rows: dsh-web-app ships
+// some (presets/<id>.patch.yml, listed in its package.json), a bundle or the profile may add more;
+// and only its web profile binds one per session: the sdk profile never does. So a preset runs
+// process-wide, through a --patch file made at every spawn from the preset's child rows as dsh
+// has them now (the files, or DSH Desktop's own registry through the dsh plugin): the base rows
 // the web surface moves behind presets are disabled, and so are base rows a preset row shares an
 // id or a package with; the preset's persona folds into the system-prompt row; PTC's executor
 // replaces the native one; then the preset's plugin rows go in, their ids prefixed so none meets a
 // base row of the same name. (Iridium's /tmp/dsh-tools/gen-preset.mjs, verified against dsh
 // 0.2.2-rc.1: standard 32 tools, ptc 1, minimal 9.)
 
-// Presets are the agent presets Iridium offers (not dsh-web-app's cordis).
-var Presets = []string{"standard", "ptc", "minimal"}
-
+// DefaultPreset is the preset of a session that names none, when dsh's registry says no default.
 const DefaultPreset = "standard"
 
 // PatchFile is the generated patch's name, written beside the session's system prompt.
@@ -69,40 +74,210 @@ func FindPackage(program string) (Package, error) {
 var (
 	idLine      = regexp.MustCompile(`^(\s*)(- )?id: ([A-Za-z0-9_-]+)\s*$`)
 	nameLine    = regexp.MustCompile(`^\s*name: '?([^'\s]+)'?\s*$`)
-	rowStart    = regexp.MustCompile(`^ {10}- id: `)
-	rowEnd      = regexp.MustCompile(`^ {10}- |^ {0,9}\S`)
 	topDisabled = regexp.MustCompile(`^- id: ([A-Za-z0-9_-]+)\s*$`)
 	isDisabled  = regexp.MustCompile(`^\s+disabled: true\s*$`)
+	rowLine     = regexp.MustCompile(`^( *)- id: ([A-Za-z0-9_-]+)\s*$`)
+	presetName  = regexp.MustCompile(`^\s*name: ["']?@deepseek-ai/dsh-agent-preset["']?\s*$`)
+	defaultLine = regexp.MustCompile(`^\s+default: ["']?([A-Za-z0-9_-]+)["']?\s*$`)
 )
 
-// Patch is the --patch file that runs preset process-wide, with suffix (Iridium's system prompt)
-// after the preset's own persona suffix.
-func (p Package) Patch(preset, suffix string) ([]byte, error) {
-	if !slices.Contains(Presets, preset) {
-		return nil, fmt.Errorf("dsh: no agent preset %q (%s)", preset, strings.Join(Presets, ", "))
+func (p Package) readFile(parts ...string) ([]byte, error) {
+	if p.Read != nil {
+		return p.Read(parts...)
 	}
-	readFile := p.Read
-	if readFile == nil {
-		readFile = func(parts ...string) ([]byte, error) {
-			return os.ReadFile(filepath.Join(append([]string{p.Scope}, parts...)...))
-		}
-	}
-	read := func(parts ...string) ([]string, error) {
-		b, err := readFile(parts...)
-		if err != nil {
-			return nil, fmt.Errorf("dsh: preset %s: %w", preset, err)
-		}
-		return strings.Split(strings.ReplaceAll(string(b), "\r\n", "\n"), "\n"), nil
-	}
-	lines, err := read("dsh-web-app", "presets", preset+".patch.yml")
+	return os.ReadFile(filepath.Join(append([]string{p.Scope}, parts...)...))
+}
+
+func (p Package) lines(parts ...string) ([]string, error) {
+	b, err := p.readFile(parts...)
 	if err != nil {
 		return nil, err
 	}
-	start := slices.Index(lines, "        plugins:")
-	if start < 0 {
-		return nil, fmt.Errorf("dsh: preset %s: no plugins list", preset)
+	return strings.Split(strings.ReplaceAll(string(b), "\r\n", "\n"), "\n"), nil
+}
+
+// Presets are the agent presets the package registers, as dsh's registry lists them (by order,
+// then id), and the registry's default: the @deepseek-ai/dsh-agent-preset rows in the patches
+// dsh-web-app's package.json lists (dsh.bundle.patch), less those a later one disables.
+func (p Package) Presets() ([]agent.Preset, string, error) {
+	b, err := p.readFile("dsh-web-app", "package.json")
+	if err != nil {
+		return nil, "", fmt.Errorf("dsh: agent presets: %w", err)
 	}
-	body := slices.Clone(lines[start+1:])
+	var pkg struct {
+		Dsh struct {
+			Bundle struct {
+				Patch []string `json:"patch"`
+			} `json:"bundle"`
+		} `json:"dsh"`
+	}
+	if err := json.Unmarshal(b, &pkg); err != nil {
+		return nil, "", fmt.Errorf("dsh: agent presets: dsh-web-app's package.json: %w", err)
+	}
+	if len(pkg.Dsh.Bundle.Patch) == 0 {
+		pkg.Dsh.Bundle.Patch = []string{"cordis.patch.yml"}
+	}
+	type row struct {
+		agent.Preset
+		key   string // the declaration row's id
+		order float64
+	}
+	var rows []row
+	def := ""
+	off := map[string]bool{}
+	for _, f := range pkg.Dsh.Bundle.Patch {
+		f = path.Clean(strings.ReplaceAll(f, "\\", "/"))
+		if path.IsAbs(f) || strings.HasPrefix(f, "../") {
+			continue
+		}
+		ls, err := p.lines(append([]string{"dsh-web-app"}, strings.Split(f, "/")...)...)
+		if err != nil {
+			return nil, "", fmt.Errorf("dsh: agent presets: %w", err)
+		}
+		for i := 0; i+1 < len(ls); i++ {
+			if m := topDisabled.FindStringSubmatch(ls[i]); m != nil && isDisabled.MatchString(ls[i+1]) {
+				off[m[1]] = true
+			}
+			m := rowLine.FindStringSubmatch(ls[i])
+			if m == nil {
+				continue
+			}
+			ind := len(m[1]) + 2 // the row's keys
+			end := i + 1
+			for end < len(ls) && (blank(ls[end]) || indent(ls[end]) >= ind) {
+				end++
+			}
+			r := ls[i+1 : end]
+			if m[2] == "agent-preset-registry" {
+				for _, l := range r {
+					if d := defaultLine.FindStringSubmatch(l); d != nil {
+						def = d[1]
+					}
+				}
+				continue
+			}
+			if !presetName.MatchString(ls[i+1]) || indent(ls[i+1]) != ind {
+				continue
+			}
+			cfg := keys(tail(keys(r, ind)["config"]), ind+2)
+			pr := row{Preset: agent.Preset{ID: scalarText(cfg["id"]), Name: scalarText(cfg["name"]), Description: scalarText(cfg["description"])}, key: m[2], order: math.Inf(1)}
+			if o, err := strconv.ParseFloat(scalarText(cfg["order"]), 64); err == nil {
+				pr.order = o
+			}
+			if pr.ID == "" {
+				continue
+			}
+			if pl := cfg["plugins"]; len(pl) > 1 {
+				var out []string
+				for _, l := range pl[1:] {
+					out = append(out, l[min(ind+4, indent(l)):])
+				}
+				pr.Plugins = strings.TrimRight(strings.Join(out, "\n"), "\n") + "\n"
+			}
+			rows = slices.DeleteFunc(rows, func(x row) bool { return x.ID == pr.ID })
+			rows = append(rows, pr)
+		}
+	}
+	rows = slices.DeleteFunc(rows, func(x row) bool { return off[x.key] })
+	slices.SortStableFunc(rows, func(a, b row) int {
+		if a.order != b.order {
+			if a.order < b.order {
+				return -1
+			}
+			return 1
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
+	out := make([]agent.Preset, len(rows))
+	for i, r := range rows {
+		out[i] = r.Preset
+	}
+	return out, def, nil
+}
+
+// FindPreset is the preset of id among those dsh registers.
+func FindPreset(presets []agent.Preset, id string) (agent.Preset, error) {
+	if i := slices.IndexFunc(presets, func(p agent.Preset) bool { return p.ID == id }); i >= 0 {
+		return presets[i], nil
+	}
+	ids := make([]string, len(presets))
+	for i, p := range presets {
+		ids[i] = p.ID
+	}
+	return agent.Preset{}, fmt.Errorf("dsh: no agent preset %q (%s)", id, strings.Join(ids, ", "))
+}
+
+func blank(l string) bool { return strings.TrimSpace(l) == "" }
+
+func indent(l string) int { return len(l) - len(strings.TrimLeft(l, " ")) }
+
+// keys are the keys at indent ind in a block's lines (a mapping's), each with its lines: the
+// rest of its own line first, then those under it.
+func keys(lines []string, ind int) map[string][]string {
+	out := map[string][]string{}
+	key := ""
+	for _, l := range lines {
+		if !blank(l) && indent(l) < ind {
+			break
+		}
+		if !blank(l) && indent(l) == ind && !strings.HasPrefix(strings.TrimSpace(l), "#") {
+			k, v, ok := strings.Cut(strings.TrimSpace(l), ":")
+			if !ok {
+				key = ""
+				continue
+			}
+			key = k
+			out[key] = []string{v}
+			continue
+		}
+		if key != "" {
+			out[key] = append(out[key], l)
+		}
+	}
+	return out
+}
+
+// tail is a key's lines under it.
+func tail(b []string) []string {
+	if len(b) == 0 {
+		return nil
+	}
+	return b[1:]
+}
+
+// scalarText is a scalar's text, a folded one's lines joined; "" if there is none.
+func scalarText(b []string) string {
+	if len(b) == 0 {
+		return ""
+	}
+	if h := strings.TrimSpace(b[0]); strings.HasPrefix(h, ">") {
+		var ws []string
+		for _, l := range b[1:] {
+			ws = append(ws, strings.TrimSpace(l))
+		}
+		return strings.TrimSpace(strings.Join(ws, " "))
+	}
+	s, err := scalar(b)
+	if err != nil {
+		return ""
+	}
+	return s
+}
+
+// Patch is the --patch file that runs preset process-wide, with suffix (Iridium's system prompt)
+// after the preset's own persona suffix.
+func (p Package) Patch(preset agent.Preset, suffix string) ([]byte, error) {
+	read := func(parts ...string) ([]string, error) {
+		ls, err := p.lines(parts...)
+		if err != nil {
+			return nil, fmt.Errorf("dsh: preset %s: %w", preset.ID, err)
+		}
+		return ls, nil
+	}
+	body := strings.Split(strings.TrimRight(strings.ReplaceAll(preset.Plugins, "\r\n", "\n"), "\n"), "\n")
+	if strings.TrimSpace(preset.Plugins) == "" {
+		body = nil
+	}
 
 	// The persona row registers the prompt's persona sections, which unscoped are the
 	// system-prompt row's own: it becomes that row's config. complete (the persona is the whole
@@ -110,47 +285,44 @@ func (p Package) Patch(preset, suffix string) ([]byte, error) {
 	var persona []string
 	presetSuffix := ""
 	at := -1
-	for i, l := range body {
-		if rowStart.MatchString(l) && i+1 < len(body) && strings.Contains(body[i+1], "'@deepseek-ai/dsh-persona'") {
-			at = i
-			break
+	for i := 0; i < len(body) && at < 0; i++ {
+		if !strings.HasPrefix(body[i], "- ") {
+			continue
+		}
+		// A row's name: on its first line, or a key under it.
+		for j := i; j < len(body) && (j == i || blank(body[j]) || indent(body[j]) > 0); j++ {
+			l := body[j]
+			if j == i {
+				l = "  " + l[2:]
+			}
+			if n := nameLine.FindStringSubmatch(l); n != nil && indent(l) == 2 && n[1] == "@deepseek-ai/dsh-persona" {
+				at = i
+				break
+			}
 		}
 	}
 	if at >= 0 {
 		end := at + 1
-		for end < len(body) && !rowEnd.MatchString(body[end]) {
+		for end < len(body) && (blank(body[end]) || indent(body[end]) > 0) {
 			end++
 		}
 		rows := slices.Clone(body[at:end])
 		body = slices.Delete(body, at, end)
-		block := func(key string) []string {
-			re := regexp.MustCompile(`^ {14}` + key + `:`)
-			i := slices.IndexFunc(rows, re.MatchString)
-			if i < 0 {
-				return nil
-			}
-			out := []string{re.ReplaceAllString(rows[i], "")}
-			for j := i + 1; j < len(rows) && strings.HasPrefix(rows[j], strings.Repeat(" ", 16)); j++ {
-				out = append(out, rows[j])
-			}
-			return out
-		}
-		if b := block("prefix"); b != nil {
+		cfg := keys(tail(keys(rows[1:], 2)["config"]), 4)
+		if b := cfg["prefix"]; b != nil {
 			persona = append(persona, "    personaPrefix:"+b[0])
-			for _, l := range b[1:] {
-				persona = append(persona, strings.TrimPrefix(l, strings.Repeat(" ", 10)))
-			}
+			persona = append(persona, b[1:]...)
 		}
-		if b := block("suffix"); b != nil {
+		if b := cfg["suffix"]; b != nil {
+			var err error
 			if presetSuffix, err = scalar(b); err != nil {
-				return nil, fmt.Errorf("dsh: preset %s: persona suffix: %w", preset, err)
+				return nil, fmt.Errorf("dsh: preset %s: persona suffix: %w", preset.ID, err)
 			}
 		}
-		cfg := strings.Join(rows, "\n")
-		if regexp.MustCompile(`(?m)^ {14}includeRuntimeContext: false`).MatchString(cfg) {
+		if strings.TrimSpace(scalarText(cfg["includeRuntimeContext"])) == "false" {
 			persona = append(persona, "    includeRuntimeContext: false")
 		}
-		if regexp.MustCompile(`(?m)^ {14}complete: true`).MatchString(cfg) {
+		if strings.TrimSpace(scalarText(cfg["complete"])) == "true" {
 			persona = append(persona, "    includeHarnessIdentity: false")
 		}
 	}
@@ -172,7 +344,10 @@ func (p Package) Patch(preset, suffix string) ([]byte, error) {
 			ids[m[3]] = true
 			l = m[1] + m[2] + "id: " + rowPrefix + m[3]
 		}
-		hoisted = append(hoisted, strings.TrimPrefix(l, "      "))
+		if !blank(l) {
+			l = "    " + l
+		}
+		hoisted = append(hoisted, l)
 	}
 	// Every row in the bundles the sdk profile composes, by id and by the package it loads.
 	baseIDs := map[string]bool{}
@@ -227,7 +402,7 @@ func (p Package) Patch(preset, suffix string) ([]byte, error) {
 	if names["@deepseek-ai/dsh-tool-executor-ptc"] {
 		off["tool-executor-native"] = true
 	}
-	out := []string{fmt.Sprintf("# Iridium: dsh-web-app's %q Agent preset, run process-wide by the sdk profile.", preset), "# Generated; do not edit."}
+	out := []string{fmt.Sprintf("# Iridium: dsh's %q Agent preset, run process-wide by the sdk profile.", preset.ID), "# Generated; do not edit."}
 	offs := make([]string, 0, len(off))
 	for id := range off {
 		offs = append(offs, id)

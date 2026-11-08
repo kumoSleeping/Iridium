@@ -153,6 +153,10 @@ func (h *Hosted) remoteSpawn(mc *remote.Machine, o *agent.SpawnOptions) error {
 			defer cancel()
 			return mc.WriteFile(c, path, data, true)
 		},
+		Presets: h.m.presetsHook(ctx, h.meta.Agent, h.meta.Machine),
+	}
+	if h.meta.Agent == api.AgentDsh {
+		o.Remote.Patches = h.m.desktopLLM(ctx, mc)
 	}
 	return nil
 }

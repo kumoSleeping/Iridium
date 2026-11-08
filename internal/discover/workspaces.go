@@ -3,6 +3,7 @@ package discover
 import (
 	"errors"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -15,7 +16,7 @@ import (
 
 // classify puts each session shown for the first time in a folder group (a workspace; the
 // user, 2026-11-08: a group is only a folder), once: its launcher's, if the group's folder holds
-// it or it is the launcher's subagent; else the group of the deepest folder holding it; else a new group of its own folder. The
+// it or it is the launcher's subagent; else the group of the outermost folder holding it; else a new group of its own folder. The
 // home folder and / hold only sessions right in them, so one session there does not swallow every
 // project. Hidden ones (the archive) wait for their first activity. Oldest first, so a launcher
 // seen in the same look is put somewhere before the sessions it started. A session in none
@@ -25,6 +26,7 @@ import (
 // none of DSH Desktop's workspaces there (loose: its 未分组) stays in none, as it is in DSH (the
 // user, 2026-11-08); one discovery put in a group goes back to none once quiet for looseAfter
 // (one Iridium started there is filed under its folder's workspace a moment after it is seen).
+// Then groups inside another's folder go into it (nest).
 func (x *Index) classify() {
 	assigned, err := x.o.Store.Assignments()
 	if err != nil {
@@ -37,11 +39,13 @@ func (x *Index) classify() {
 		return
 	}
 	roots := map[int64]string{}
+	hidden := map[int64]bool{}
 	if ws, err := x.o.Store.Workspaces(); err == nil {
 		for _, w := range ws {
-			roots[w.ID] = w.Path
+			roots[w.ID], hidden[w.ID] = w.Path, w.Hidden
 		}
 	}
+	defer x.nest(roots, hidden, assigned)
 	// The machines that have connected (a revoked Bot's is forgotten).
 	known := map[string]bool{}
 	if ms, err := x.o.Store.Machines(); err == nil {
@@ -100,7 +104,7 @@ func (x *Index) classify() {
 			ws = a.Workspace
 		}
 		if ws == 0 {
-			ws = x.groupOf(n.cwd, roots)
+			ws = x.outer(x.groupOf(n.cwd, roots), roots, hidden)
 		}
 		if ws == 0 {
 			w, err := x.groupFor(n.cwd)
@@ -151,16 +155,19 @@ func (x *Index) remoteTop(root string) bool {
 	if p == "/" || len(p) <= 3 && strings.HasSuffix(strings.TrimSuffix(p, "/"), ":") { // "/", "C:", "C:/"
 		return true
 	}
-	if x.hub == nil {
-		return false
-	}
-	if mc := x.hub.Find(machine); mc != nil {
-		if hi, _ := mc.Hello(); hi != nil && hi.Home != "" {
-			return root == remote.GroupPath(machine, hi.Home)
+	if x.hub != nil {
+		if mc := x.hub.Find(machine); mc != nil {
+			if hi, _ := mc.Hello(); hi != nil && hi.Home != "" {
+				return root == remote.GroupPath(machine, hi.Home)
+			}
 		}
 	}
-	return false
+	// Not connected now: a folder where homes are.
+	return homeLike.MatchString(p)
 }
+
+// homeLike: a home folder on Windows, macOS or Linux, '/'-separated.
+var homeLike = regexp.MustCompile(`^(?:[A-Za-z]:/Users/[^/]+|/Users/[^/]+|/home/[^/]+|/root)/?$`)
 
 // groupOf is the group of the deepest folder holding cwd; 0 if none does.
 func (x *Index) groupOf(cwd string, roots map[int64]string) int64 {
@@ -173,10 +180,70 @@ func (x *Index) groupOf(cwd string, roots map[int64]string) int64 {
 	return best
 }
 
+// outer is the outermost shown group holding shown group id's folder: a subfolder's sessions are
+// a folder in its parent's group (the user, 2026-11-08). id itself if none does, or if hidden; a
+// hidden group is skipped, so what it hides stays hidden and nothing more is.
+func (x *Index) outer(id int64, roots map[int64]string, hidden map[int64]bool) int64 {
+	if id == 0 || hidden[id] {
+		return id
+	}
+	best := id
+	for ws, root := range roots {
+		if !hidden[ws] && len(root) < len(roots[best]) && x.holds(root, roots[id]) {
+			best = ws
+		}
+	}
+	return best
+}
+
+// nest puts each shown group inside a shown group's folder into the outermost such: a group is
+// made for the first session seen in its folder, oldest first, so one of a subfolder may be made
+// before its parent's (an executor's sessions all seen at once). Sessions you moved stay, with
+// their group; one left empty is dropped.
+func (x *Index) nest(roots map[int64]string, hidden map[int64]bool, assigned map[string]store.Assignment) {
+	held := map[int64]bool{} // groups a session you moved is in
+	for _, a := range assigned {
+		if a.Manual {
+			held[a.Workspace] = true
+		}
+	}
+	for id := range roots {
+		to := x.outer(id, roots, hidden)
+		if to == id {
+			continue
+		}
+		auto := false
+		for _, a := range assigned {
+			if a.Workspace == id && !a.Manual {
+				auto = true
+				break
+			}
+		}
+		if !auto && held[id] {
+			continue
+		}
+		moved, dropped, err := x.o.Store.Nest(id, to)
+		if err != nil {
+			x.o.Logf("discover: %v", err)
+			return
+		}
+		for _, s := range moved {
+			assigned[s] = store.Assignment{Workspace: to}
+		}
+		if len(moved) > 0 {
+			x.Changed(moved...)
+		}
+		if dropped {
+			delete(roots, id)
+			x.Changed()
+		}
+	}
+}
+
 // GroupFor is the group a session in cwd goes in as it is made (the session manager, before its
 // transcript is there): prefer (its caller's) if it holds cwd, or is at another machine than cwd
 // (a coordinator's session started across machines stays with it; the user, 2026-11-08); else the
-// deepest holding it; else a new group of cwd. 0 if it cannot be had.
+// outermost holding it; else a new group of cwd. 0 if it cannot be had.
 func (x *Index) GroupFor(cwd string, prefer int64) int64 {
 	ws, err := x.o.Store.Workspaces()
 	if err != nil {
@@ -184,13 +251,14 @@ func (x *Index) GroupFor(cwd string, prefer int64) int64 {
 		return 0
 	}
 	roots := map[int64]string{}
+	hidden := map[int64]bool{}
 	for _, w := range ws {
-		roots[w.ID] = w.Path
+		roots[w.ID], hidden[w.ID] = w.Path, w.Hidden
 	}
 	if root := roots[prefer]; prefer != 0 && (x.holds(root, cwd) || root != "" && machineOf(root) != machineOf(cwd)) {
 		return prefer
 	}
-	if id := x.groupOf(cwd, roots); id != 0 {
+	if id := x.outer(x.groupOf(cwd, roots), roots, hidden); id != 0 {
 		return id
 	}
 	w, err := x.groupFor(cwd)

@@ -62,10 +62,11 @@ type Info struct {
 	Quota            bool
 	// Ultracode: its sessions can turn ultracode on (Claude; the driver is an agent.Ultracoder).
 	Ultracode bool
-	// Presets are the agent presets SpawnOptions.Preset takes, at launch only (dsh's tools and
-	// prompt); DefaultPreset is an empty preset's.
-	Presets       []string
-	DefaultPreset string
+	// ModelEfforts: its efforts are each model's (dsh: as its catalog says), none of its own.
+	ModelEfforts bool
+	// Presets: it takes an agent preset (SpawnOptions.Preset), at launch only (dsh's tools and
+	// prompt); which, those it registers where it runs (session.Manager.Presets).
+	Presets bool
 	// OwnID: the agent makes the session's id itself (Codex's thread) and reports it with
 	// Started; the session keeps it as the agent's id, beside its own.
 	OwnID bool
@@ -194,8 +195,8 @@ var all = []Info{
 		// dsh --profile sdk (0.2.2-rc.1): mode at once (/permission, /plan); model, effort and
 		// preset only at launch (the driver says agent.ErrRestart, the host restarts it).
 		Agent: api.AgentDsh, Name: "DeepSeek Harness",
-		Modes: dsh.Modes, DefaultMode: dsh.DefaultMode, ModeSwitch: "now", Efforts: dsh.Efforts,
-		Presets: dsh.Presets, DefaultPreset: dsh.DefaultPreset,
+		Modes: dsh.Modes, DefaultMode: dsh.DefaultMode, ModeSwitch: "now", ModelEfforts: true,
+		Presets: true,
 		New: func(emit func(agent.Event), logf func(string, ...any)) agent.Driver {
 			return dsh.New(dsh.Options{Emit: emit, Logf: logf})
 		},
@@ -234,7 +235,7 @@ func All() []Info { return slices.Clone(all) }
 func Describe() []api.AgentInfo {
 	out := make([]api.AgentInfo, 0, len(all))
 	for _, i := range all {
-		out = append(out, api.AgentInfo{Agent: i.Agent, Name: i.Name, Modes: slices.Clone(i.Modes), DefaultMode: i.DefaultMode, ModeSwitch: i.ModeSwitch, ContextBreakdown: i.ContextBreakdown, Quota: i.Quota, Ultracode: i.Ultracode, Presets: slices.Clone(i.Presets), DefaultPreset: i.DefaultPreset})
+		out = append(out, api.AgentInfo{Agent: i.Agent, Name: i.Name, Modes: slices.Clone(i.Modes), DefaultMode: i.DefaultMode, ModeSwitch: i.ModeSwitch, ContextBreakdown: i.ContextBreakdown, Quota: i.Quota, Ultracode: i.Ultracode, Presets: i.Presets})
 	}
 	return out
 }

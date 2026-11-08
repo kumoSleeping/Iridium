@@ -40,15 +40,31 @@ export interface AgentInfo {
    */
   ultracode: boolean;
   /**
-   * Presets: its agent presets (dsh: the tools and prompt a session runs with), taken at launch:
-   * a switch restarts the agent. DefaultPreset is an empty preset's. None: it has no presets.
+   * Presets: its sessions take an agent preset (dsh: the tools and prompt a session runs with),
+   * at launch: a switch restarts the agent. Which, a session's: GET /api/sessions/{id}/presets.
    */
-  presets?: string[];
-  defaultPreset?: string;
+  presets?: boolean;
   /**
    * Missing: its program is not on the daemon's PATH (not installed): a new session is refused.
    */
   missing?: boolean;
+}
+/**
+ * Presets are the agent presets a session may run with: those its agent registers where it runs
+ * (dsh's registry), by its order, and Default, a session's that names none.
+ */
+export interface Presets {
+  presets: Preset[];
+  default: string;
+}
+/**
+ * Preset is an agent preset: Name and Description, those it publishes (the shipped ones publish
+ * none: the page has their copy).
+ */
+export interface Preset {
+  id: string;
+  name?: string;
+  description?: string;
 }
 /**
  * Color is a colour tag a session or a folder is given from its menu (the user, 2026-11-06).

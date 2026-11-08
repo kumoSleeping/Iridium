@@ -54,8 +54,14 @@ type setup struct {
 	exit bool // the process ended after out.log: detach then
 }
 
+// testCatalog is what the probe of the recorded dsh prints (dsh 0.2.2-rc.1, a DeepSeek key).
+var testCatalog = agent.Catalog{Default: "deepseek-official/deepseek-flash", Models: []agent.Model{
+	{Value: "deepseek-official/deepseek-flash", Name: "DeepSeek-V4.1-Flash", Efforts: []string{"off", "low", "high", "max"}},
+	{Value: "deepseek-official/deepseek-v4-pro", Name: "DeepSeek-V4-Pro", Efforts: []string{"off", "low", "high", "max"}},
+}}
+
 func newSetup(session string) setup {
-	return setup{launch: launch{session: session, cwd: "/tmp/dsh-drv/w1", model: DefaultModel, version: "0.2.2-rc.1"}, mode: DefaultMode}
+	return setup{launch: launch{session: session, cwd: "/tmp/dsh-drv/w1", model: DefaultModel, provider: LegacyProvider, modelID: "deepseek-flash", catalog: testCatalog, version: "0.2.2-rc.1"}, mode: DefaultMode}
 }
 
 func replay(t *testing.T, name string, s setup) *harness {
@@ -68,7 +74,7 @@ func replay(t *testing.T, name string, s setup) *harness {
 	}
 	h := &harness{t: t, writes: make(chan map[string]any, 64), ids: map[string]string{}, result: map[string]any{}}
 	h.d = New(Options{Emit: h.record, IDPrefix: "ir-test-", Logf: t.Logf})
-	h.d.spawned, h.d.next, h.d.session, h.d.mode = true, s.launch, s.session, s.mode
+	h.d.spawned, h.d.next, h.d.session, h.d.mode, h.d.catalog = true, s.launch, s.session, s.mode, s.catalog
 	h.d.Attach(h.write, 1)
 	var off int64
 	feedUntil := func(at int64) {
@@ -402,10 +408,10 @@ func TestTurn(t *testing.T) {
 		t.Errorf("usage %+v", u)
 	}
 	hello := find[agent.Hello](h)[0]
-	if hello.Mode != "danger-full-access" || hello.Version != "0.2.2-rc.1" || len(hello.Models) != 2 || hello.Models[0].Value != "deepseek-flash" || len(hello.Commands) != 3 {
+	if hello.Mode != "danger-full-access" || hello.Version != "0.2.2-rc.1" || len(hello.Models) != 2 || hello.Models[0].Value != "deepseek-official/deepseek-flash" || len(hello.Commands) != 3 {
 		t.Errorf("hello %+v", hello)
 	}
-	if s := find[agent.Started](h)[0]; s != (agent.Started{Session: "5f0c1d2e-0001-4000-8000-000000000001", Model: "deepseek-flash", Effort: "high"}) {
+	if s := find[agent.Started](h)[0]; s != (agent.Started{Session: "5f0c1d2e-0001-4000-8000-000000000001", Model: "deepseek-official/deepseek-flash", Effort: "high"}) {
 		t.Errorf("started %+v", s)
 	}
 	c, err := h.d.Context(context.Background())
@@ -520,10 +526,10 @@ func TestInterrupt(t *testing.T) {
 // dsh said nothing of it yet, so every switch goes.
 func TestResume(t *testing.T) {
 	s := newSetup("5f0c1d2e-0007-4000-8000-000000000007")
-	s.resume, s.model, s.effort, s.mode = true, "deepseek-v4-pro", "max", "workspace-write"
+	s.resume, s.model, s.modelID, s.effort, s.mode = true, "deepseek-official/deepseek-v4-pro", "deepseek-v4-pro", "max", "workspace-write"
 	h := replay(t, "resume", s)
 	st := find[agent.Started](h)
-	if st[0] != (agent.Started{Session: s.session, Model: "deepseek-v4-pro", Effort: "max"}) || len(st) != 1 {
+	if st[0] != (agent.Started{Session: s.session, Model: "deepseek-official/deepseek-v4-pro", Effort: "max"}) || len(st) != 1 {
 		t.Errorf("started %+v", st)
 	}
 	if e := find[agent.TurnEnd](h); len(e) != 1 {
@@ -567,7 +573,7 @@ func TestAdopt(t *testing.T) {
 	if len(wrote) != 0 {
 		t.Fatalf("wrote %q", wrote)
 	}
-	if d.State() != agent.Waiting || len(d.asks) != 1 || d.session != "5f0c1d2e-0003-4000-8000-000000000003" || d.perm != "read-only" || d.model != "deepseek-flash" {
+	if d.State() != agent.Waiting || len(d.asks) != 1 || d.session != "5f0c1d2e-0003-4000-8000-000000000003" || d.perm != "read-only" || d.model != "deepseek-official/deepseek-flash" {
 		t.Fatalf("state %s, asks %d, session %s, perm %s, model %s", d.State(), len(d.asks), d.session, d.perm, d.model)
 	}
 	// The ask is still answerable on the same process.
@@ -642,7 +648,7 @@ func TestSpawn(t *testing.T) {
 	if !bytes.Contains(b, []byte(`"minimal" Agent preset`)) || !bytes.Contains(b, []byte("    personaSuffix: |-\n      Use ir { {name}}.\n")) {
 		t.Errorf("patch %s", b)
 	}
-	if d.next != (launch{session: "s1", cwd: "/w", model: "deepseek-v4-pro", effort: "max", version: "0.2.2-rc.1", resume: true}) || d.mode != "plan" {
+	if n := d.next; n.session != "s1" || n.cwd != "/w" || n.model != "deepseek-official/deepseek-v4-pro" || n.provider != LegacyProvider || n.modelID != "deepseek-v4-pro" || n.effort != "max" || n.version != "0.2.2-rc.1" || !n.resume || d.mode != "plan" {
 		t.Errorf("launch %+v, mode %s", d.next, d.mode)
 	}
 	// The defaults: the standard preset, Iridium's default mode, dsh's default model.
@@ -659,6 +665,7 @@ func TestSpawn(t *testing.T) {
 		"no prompt": {SystemPromptFile: "-"},
 	} {
 		o.Session, o.Env, o.Program = "s3", env, "dsh"
+		o.Catalog = func() (agent.Catalog, error) { return testCatalog, nil }
 		if o.SystemPromptFile == "-" {
 			o.SystemPromptFile = ""
 		} else {
@@ -688,21 +695,33 @@ func TestPatch(t *testing.T) {
 	if err != nil || p.Version != "0.2.2-rc.1" {
 		t.Fatalf("%+v %v", p, err)
 	}
-	for _, preset := range Presets {
+	presets, def, err := p.Presets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, pr := range presets {
+		ids = append(ids, pr.ID)
+	}
+	if def != "standard" || strings.Join(ids, " ") != "standard ptc minimal" {
+		t.Fatalf("presets %q, default %q", ids, def)
+	}
+	for _, preset := range presets {
 		got, err := p.Patch(preset, "")
 		if err != nil {
 			t.Fatal(err)
 		}
-		want, _ := os.ReadFile(filepath.Join("testdata", "presets", preset+".yml"))
+		want, _ := os.ReadFile(filepath.Join("testdata", "presets", preset.ID+".yml"))
 		if !bytes.Equal(got, want) {
-			t.Errorf("%s:\n%s", preset, got)
+			t.Errorf("%s:\n%s", preset.ID, got)
 		}
 	}
-	got, _ := p.Patch("ptc", "line {{a}}\n\nmore {{{b}}}")
+	ptc, _ := FindPreset(presets, "ptc")
+	got, _ := p.Patch(ptc, "line {{a}}\n\nmore {{{b}}}")
 	if !bytes.Contains(got, []byte("    personaPrefix: You are a coding agent powered by the {{model}} model.\n    personaSuffix: |-\n      line { {a}}\n\n      more { { {b}}}\n- insert:")) {
 		t.Errorf("suffix:\n%s", got)
 	}
-	if _, err := p.Patch("cordis", ""); err == nil {
+	if _, err := FindPreset(presets, "cordis"); err == nil {
 		t.Error("cordis")
 	}
 }

@@ -109,7 +109,7 @@
   - 没标记的就是归档：`Session.archived` 为 `true`，页面放在底部折叠的“归档”里，能搜。第一次启动时磁盘上已有、之后没动过的都在这里。
   - 归档（`PATCH archived: true`）：去掉标记，记下记录当时的长度；之后长过这个长度（有了新活动）就自动回来。托管的另外像空闲回收那样停掉 agent；它退出时写的不算活动（退出后重记长度）。恢复（`archived: false`）：设上标记。没有按时间自动归档。
   - 旧版的归档标记迁移成“没标记”。
-- 归组（2026-11-08：组就是文件夹，`Workspace` 是组，不能手建）：会话第一次显示时（第一次活动）做一次，记在库里，不给归档里的做：拉起者的组（组的文件夹包含它的目录时；子代理总跟父会话）→ 包含它目录的最深的组 → 用它的目录新建一个组。家目录和 `/` 的组只收正好在那里的会话。在未归类（`workspace` 为 0）且不是你手动放过去的也再归一次；只有没目录的留在 0。`POST /api/sessions` 开的托管会话当场归组，不等记录出现。手动移过的（`PATCH workspace`）不再自动动。
+- 归组（2026-11-08：组就是文件夹，`Workspace` 是组，不能手建）：会话第一次显示时（第一次活动）做一次，记在库里，不给归档里的做：拉起者的组（组的文件夹包含它的目录时；子代理总跟父会话）→ 包含它目录的最外层的组 → 用它的目录新建一个组。家目录和 `/` 的组（另一台机器不在线时，按路径认它的家目录）只收正好在那里的会话。之后每次归组都把落在别的组文件夹里的组并进最外层那个（子目录先建了组、父目录后建的，比如执行端的会话一次全看到）：自动归进去的会话移过去，空了的组删掉，有手动放进去的会话的组留着；隐藏的组不参与。在未归类（`workspace` 为 0）且不是你手动放过去的也再归一次；只有没目录的留在 0。`POST /api/sessions` 开的托管会话当场归组，不等记录出现。手动移过的（`PATCH workspace`）不再自动动。
 - 状态：`hosted` 托管；`elsewhere` 在别处运行，只读（能看状态和消息页，发消息回 409）；其余是磁盘上空闲的。别处退出后，发消息就接成托管会话（`--resume`），前提是没有别的进程在用（Claude：`sessions/` 里没有活着的同 ID 进程；dsh：`session.lock` 能拿到 flock；Codex：写锁）。现在只能接 Claude 的。
 - 列表变了（新会话、记录长了、进程起停、改了覆盖层）攒 200ms 发一次 `list` 整份，变了的会话另发 `session:<id>`。
 
@@ -209,11 +209,12 @@ agent 用 `ir sh <机器> [--cwd 目录] [--timeout 2m] -- 命令`（`POST /api/
 
 | 请求 | 正文 | 说明 |
 |---|---|---|
-| `PUT /api/sessions/{id}/model` | `{model}` | `""` 是 agent 的默认。Claude：`set_model` |
+| `PUT /api/sessions/{id}/model` | `{model}` | `""` 是 agent 的默认。Claude：`set_model`。dsh（用户，2026-11-08：模型和供应商不写死）：会话状态的 `models` 是会话所在机器上 dsh 的 sdk profile 注册的全部供应商的模型，值是 `供应商/模型`，思考强度按模型，默认是 dsh 的默认模型。Iridium 在那台机器上起一次探测（`dsh --profile sdk --patch` 插一个 cordis 插件，读 `llm` 的 `listProviders`、`listModels`、`resolveModelInfo` 和 `agentDefaultModel`，打一行就退出），每台机器缓存 3 分钟，失败 1 分钟内不重试；启动时按值里的供应商初始化。以前存的不带供应商的值（`deepseek-flash`）按目录里有这个模型的供应商算。和 DSH Desktop 同步（用户，2026-11-08）：Desktop 设置里的供应商和默认模型存在它的 web profile，sdk 进程本来没有；远端有 dsh 插件时，会话和探测都多带一个 `--patch`，是插件按 Desktop 此刻生效的设置写的（`dsh.llm`），所以列出的和能跑的都同 Desktop。本机没有 Desktop 进程，用 sdk profile 自己的 |
 | `PUT /api/sessions/{id}/mode` | `{mode}` | 审批模式，只收 `SessionState.modes` 里的。Claude：`set_permission_mode` |
 | `PUT /api/sessions/{id}/effort` | `{effort}` | 思考强度，只收 `SessionState.efforts` 里的。Claude：先 `get_settings` 问 ultracode 开没开，再 `apply_flag_settings` 照原样带上 |
 | `PUT /api/sessions/{id}/ultracode` | `{ultracode}` | 只 Claude（`GET /api/agents` 的 `ultracode`），别的 400。在跑时先 `get_settings`，要开而 `ultracodeAvailable` 不为真（CLI 不认 `get_settings` 也算）就 400；只发 `apply_flag_settings {ultracode}`，强度不变。没在跑时不查，只记下，下次拉起带上 |
-| `PUT /api/sessions/{id}/preset` | `{preset}` | Agent 预设（只 dsh：`GET /api/agents` 的 `presets`，`standard`、`ptc`、`minimal`，没有的 400），`""` 是 `defaultPreset`。只在启动时装，也只在会话第一条消息前能改（同 dsh 自己的界面）：开始后改是 400，因为 dsh 会把新工具当成追加的延迟加载工具，PTC 那样全是延迟的，API 会拒绝。在跑时改就重启（空闲马上，否则等回合结束），重启时状态仍显示空闲。网页放在额度条的位置（dsh 没额度，用户定的，2026-11-06）。新会话用 `NewSession.preset`，`/clear` 照原样带上 |
+| `GET /api/sessions/{id}/presets` | | `{presets: [{id, name?, description?}], default}`：会话所在那台 dsh 注册的 Agent 预设（用户，2026-11-08：不写死）。远端有 dsh 插件时问 DSH Desktop 自己的注册表（`dsh.presets`，含插件包和用户自建、改过的，按它的顺序，默认是它设置里选的，坏掉的不列）；本机和没有插件的执行端读 dsh 包里登记的补丁（`dsh-web-app` 的 `package.json` 里 `dsh.bundle.patch`）。按机器缓存 30 秒。内置的几个不带 `name`，网页用自己的文案；带 `name` 的照它写的显示。`GET /api/agents` 的 `presets` 只说这个 agent 有没有预设 |
+| `PUT /api/sessions/{id}/preset` | `{preset}` | Agent 预设（只 dsh：上一行列出的，没有的 400），`""` 是 `default`。只在启动时装，也只在会话第一条消息前能改（同 dsh 自己的界面）：开始后改是 400，因为 dsh 会把新工具当成追加的延迟加载工具，PTC 那样全是延迟的，API 会拒绝。在跑时改就重启（空闲马上，否则等回合结束），重启时状态仍显示空闲。网页放在额度条的位置（dsh 没额度，用户定的，2026-11-06）。新会话用 `NewSession.preset`，`/clear` 照原样带上 |
 | `GET /api/sessions/{id}/rules` | → `AllowRule[]` | “本会话一直允许”记下的规则 |
 | `DELETE /api/sessions/{id}/rules` | → `{ok}` | 清掉 |
 

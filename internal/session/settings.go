@@ -148,12 +148,9 @@ func (m *Manager) SetPreset(ctx context.Context, id, preset string) error {
 	if err != nil {
 		return err
 	}
-	info, _ := agents.Get(h.meta.Agent)
-	if len(info.Presets) == 0 {
-		return fmt.Errorf("%w: %s has no presets", ErrBadRequest, info.Name)
-	}
-	if preset != "" && !slices.Contains(info.Presets, preset) {
-		return fmt.Errorf("%w: no preset %q (%s)", ErrBadRequest, preset, strings.Join(info.Presets, ", "))
+	def, err := m.checkPreset(ctx, h.meta.Agent, h.meta.Machine, preset)
+	if err != nil {
+		return err
 	}
 	h.mu.Lock()
 	begun := h.said.last != nil || h.turnSeen
@@ -165,7 +162,7 @@ func (m *Manager) SetPreset(ctx context.Context, id, preset string) error {
 		return err
 	}
 	h.mu.Lock()
-	changed := cmp.Or(h.preset, info.DefaultPreset) != cmp.Or(preset, info.DefaultPreset)
+	changed := cmp.Or(h.preset, def) != cmp.Or(preset, def)
 	h.preset = preset
 	h.mu.Unlock()
 	h.publish()
@@ -185,8 +182,8 @@ func (m *Manager) SetEffort(ctx context.Context, id, effort string) error {
 	if !ok {
 		return fmt.Errorf("%w: %s has no thinking effort", ErrBadRequest, h.meta.Agent)
 	}
-	if info, _ := agents.Get(h.meta.Agent); effort != "" && !slices.Contains(info.Efforts, effort) {
-		return fmt.Errorf("%w: no effort %q (%s)", ErrBadRequest, effort, strings.Join(info.Efforts, ", "))
+	if levels := h.efforts(); effort != "" && levels != nil && !slices.Contains(levels, effort) {
+		return fmt.Errorf("%w: no effort %q (%s)", ErrBadRequest, effort, strings.Join(levels, ", "))
 	}
 	h.setMu.Lock()
 	defer h.setMu.Unlock()
@@ -443,4 +440,24 @@ func glob(p, s string) bool {
 		s = s[i+len(part):]
 	}
 	return strings.HasSuffix(s, parts[len(parts)-1])
+}
+
+// efforts are the levels the session's effort may be: its agent's; for one whose efforts are each
+// model's, those of the model in use as the agent offered it. nil: not known (the agent checks).
+func (h *Hosted) efforts() []string {
+	info, _ := agents.Get(h.meta.Agent)
+	if !info.ModelEfforts {
+		return info.Efforts
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, m := range h.models {
+		if m.Value == h.model || m.Value == h.meta.Model {
+			if m.NoEffort {
+				return []string{}
+			}
+			return m.Efforts
+		}
+	}
+	return nil
 }

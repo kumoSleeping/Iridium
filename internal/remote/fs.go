@@ -138,6 +138,23 @@ func (m *Machine) DshPrompt(ctx context.Context, session, text string, steer boo
 	return m.Call(ctx, "dsh.prompt", wire.DshPromptParams{Session: session, Text: text, Steer: steer}, nil)
 }
 
+// DshPresets is the agent presets the dsh the executor runs in registers (DSH Desktop's, through
+// the dsh plugin); an error of wire.CodeUnsupported from one that cannot say.
+func (m *Machine) DshPresets(ctx context.Context) (wire.DshPresetsReply, error) {
+	var r wire.DshPresetsReply
+	err := m.Call(ctx, "dsh.presets", struct{}{}, &r)
+	return r, err
+}
+
+// DshLLM is the path there of a patch with the models and providers the dsh the executor runs in
+// has in its settings (DSH Desktop's, through the dsh plugin, written anew); an error of
+// wire.CodeUnsupported from one that cannot say.
+func (m *Machine) DshLLM(ctx context.Context) (string, error) {
+	var r wire.DshLLMReply
+	err := m.Call(ctx, "dsh.llm", struct{}{}, &r)
+	return r.Patch, err
+}
+
 // DshAttach files session under the workspace of its folder cwd in the dsh the executor runs in
 // (DSH Desktop's sidebar), made if there is none.
 func (m *Machine) DshAttach(ctx context.Context, session, cwd string) error {
