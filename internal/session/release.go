@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -18,9 +20,11 @@ import (
 // (Denials) till you switch to manual for it or let it be (the user, 2026-11-08). Switching: the
 // running process goes to manual mode (only it: the session's setting stays, so a restart is back
 // in its own mode) and nothing is said to Claude: a message in your name told it to run the step
-// again, though it may have gone another way meanwhile (the user, 2026-11-08). Claude running the
-// step again, it is asked as any other, and once that call is done the mode goes back; else the
-// mode goes back when the turn ends: the one under way, or the next if none is.
+// again, though it may have gone another way meanwhile (the user, 2026-11-08). The first step
+// asked then is the one it was for (the call run again, or another way to it): once that call is
+// done the mode goes back (the user, 2026-11-08); none asked, the mode goes back when the turn
+// ends: the one under way, or the next if none is. A release is kept on disk (fileRelease): a
+// daemon taking the process up goes on with it, rather than leave the process in manual mode.
 
 // Denied is in the tool result Claude writes for a call its classifier denied.
 const Denied = agent.AutoDenied
@@ -30,6 +34,18 @@ const releaseMode = "manual"
 
 // maxDenials: the most denial cards a session keeps; the oldest go.
 const maxDenials = 20
+
+// fileRelease: a release under way (releaseMeta), in the hold directory.
+const fileRelease = "release.json"
+
+// releaseMeta is a release on disk: the process it put in manual mode, the call, the mode to go
+// back to.
+type releaseMeta struct {
+	Proc  int            `json:"proc"`
+	Tool  string         `json:"tool"`
+	Input map[string]any `json:"input,omitempty"`
+	Prev  string         `json:"prev"`
+}
 
 // released is a release under way: the call denied, the mode to go back to; during: a turn was
 // under way then, its end ends the release; call: the call's id run again.
@@ -73,7 +89,7 @@ func (m *Manager) Release(ctx context.Context, id, tool string, dismiss bool) er
 	h.mu.Lock()
 	prev := h.mode
 	h.mu.Unlock()
-	if prev != releaseMode && prev != "default" {
+	if !isManual(prev) {
 		if err := h.drv.SetMode(ctx, releaseMode); err != nil {
 			return err
 		}
@@ -84,7 +100,7 @@ func (m *Manager) Release(ctx context.Context, id, tool string, dismiss bool) er
 	}
 	h.mode = releaseMode
 	busy := h.turn != "" && h.turn != agent.Idle
-	h.rel = &released{tool: name, input: input, prev: prev, at: time.Now(), during: busy}
+	h.setRelLocked(&released{tool: name, input: input, prev: prev, at: time.Now(), during: busy})
 	h.denials = slices.DeleteFunc(h.denials, func(d api.Denial) bool { return d.ToolUseID == tool })
 	h.mu.Unlock()
 	h.publish()
@@ -195,9 +211,56 @@ func (h *Hosted) releaseRanLocked(id string) (mode string, over bool) {
 	if r == nil || r.call == "" || r.call != id {
 		return "", false
 	}
-	h.rel = nil
+	h.setRelLocked(nil)
 	return h.backLocked(r), true
 }
+
+// releaseAskedLocked: the first step asked in a release is the one it is for, whichever call it
+// is (Claude may run the step another way): once that call is done, the release is over.
+func (h *Hosted) releaseAskedLocked(a api.Ask) {
+	if r := h.rel; r != nil && r.call == "" && a.Kind == "permission" && a.ToolUseID != "" {
+		r.call = a.ToolUseID
+	}
+}
+
+// setRelLocked starts a release, or ends it (nil), on disk too.
+func (h *Hosted) setRelLocked(r *released) {
+	h.rel = r
+	if h.dir == "" {
+		return
+	}
+	path := filepath.Join(h.dir, fileRelease)
+	if r == nil {
+		_ = os.Remove(path)
+		return
+	}
+	if err := writeJSON(path, releaseMeta{Proc: h.proc, Tool: r.tool, Input: r.input, Prev: r.prev}); err != nil {
+		h.logf("release: %v", err)
+	}
+}
+
+// helloReleaseLocked: process proc said hello in mode. The process an earlier daemon put in manual
+// mode for a release, taken up, is in it still: the release goes on (from now, the turn under way
+// ending it). Else none is under way.
+func (h *Hosted) helloReleaseLocked(proc int, mode string) {
+	h.rel = nil
+	if h.dir == "" {
+		return
+	}
+	var m releaseMeta
+	b, err := os.ReadFile(filepath.Join(h.dir, fileRelease))
+	if err != nil || json.Unmarshal(b, &m) != nil || m.Proc != proc || !isManual(mode) || isManual(m.Prev) {
+		h.setRelLocked(nil)
+		return
+	}
+	busy := h.turn != "" && h.turn != agent.Idle
+	h.rel = &released{tool: m.Tool, input: m.Input, prev: m.Prev, at: time.Now(), during: busy}
+	h.mode = releaseMode
+	h.logf("release of %s goes on (back to %s mode after)", m.Tool, m.Prev)
+}
+
+// isManual: Claude's mode that asks for every call not allowed by a rule ("default" its old name).
+func isManual(mode string) bool { return mode == releaseMode || mode == "default" }
 
 // deniedCall finds call id in the transcript, the latest pages first: its tool, its input, and
 // whether its result is the classifier's denial.
@@ -273,14 +336,14 @@ func (h *Hosted) releaseOverLocked() string {
 	if r == nil || (!r.during && !h.turnAt.After(r.at)) {
 		return ""
 	}
-	h.rel = nil
+	h.setRelLocked(nil)
 	return h.backLocked(r)
 }
 
 // backLocked is the mode to go back to after release r, "" for none: you set one meanwhile, or
 // it was asking already.
 func (h *Hosted) backLocked(r *released) string {
-	if h.mode != releaseMode || r.prev == releaseMode || r.prev == "default" {
+	if h.mode != releaseMode || isManual(r.prev) {
 		return ""
 	}
 	return r.prev

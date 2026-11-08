@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -88,7 +90,60 @@ func TestDenialAndRanAgain(t *testing.T) {
 	if m, over := h.releaseRanLocked("t3"); !over || m != "auto" || h.rel != nil {
 		t.Fatalf("run again: %q %v", m, over)
 	}
+}
 
+// The first step asked in a release is the one it is for, though Claude ran it another way: once
+// it is done the mode goes back; a later ask does not take its place.
+func TestReleaseFirstAsked(t *testing.T) {
+	h := &Hosted{mode: releaseMode}
+	h.rel = &released{tool: "Bash", input: map[string]any{"command": "git push --force"}, prev: "auto", at: time.Now()}
+	h.callLocked(agent.ToolStart{ID: "t2", Name: "Bash", Input: map[string]any{"command": "git push --force-with-lease"}})
+	h.releaseAskedLocked(api.Ask{Kind: "question", ToolUseID: "t1"})
+	h.releaseAskedLocked(api.Ask{Kind: "permission", ToolUseID: "t2"})
+	h.releaseAskedLocked(api.Ask{Kind: "permission", ToolUseID: "t3"})
+	if _, over := h.releaseRanLocked("t3"); over {
+		t.Fatal("a later ask ended it")
+	}
+	if m, over := h.releaseRanLocked("t2"); !over || m != "auto" || h.rel != nil {
+		t.Fatalf("the first asked: %q %v", m, over)
+	}
+}
+
+// A release is kept on disk: the process taken up in manual mode goes on with it; a new process,
+// or one back in its own mode, ends it.
+func TestReleaseTakenUp(t *testing.T) {
+	dir := t.TempDir()
+	h := &Hosted{dir: dir, proc: 3, mode: releaseMode}
+	h.setRelLocked(&released{tool: "Bash", input: map[string]any{"command": "x"}, prev: "auto", at: time.Now()})
+
+	m := &Manager{o: Options{Logf: t.Logf}}
+	h2 := &Hosted{m: m, dir: dir, turn: agent.Idle}
+	h2.helloReleaseLocked(3, "default")
+	if h2.rel == nil || h2.rel.prev != "auto" || h2.rel.tool != "Bash" || h2.mode != releaseMode || h2.rel.during {
+		t.Fatalf("taken up: %+v %s", h2.rel, h2.mode)
+	}
+	h2.releaseAskedLocked(api.Ask{Kind: "permission", ToolUseID: "t9"})
+	if m, over := h2.releaseRanLocked("t9"); !over || m != "auto" {
+		t.Fatalf("taken up, then asked: %q %v", m, over)
+	}
+	if _, err := os.Stat(filepath.Join(dir, fileRelease)); !os.IsNotExist(err) {
+		t.Fatalf("over, still on disk: %v", err)
+	}
+
+	for _, c := range []struct {
+		proc int
+		mode string
+	}{{4, "default"}, {3, "auto"}} {
+		h.setRelLocked(&released{tool: "Bash", prev: "auto", at: time.Now()})
+		h3 := &Hosted{m: m, dir: dir, mode: c.mode}
+		h3.helloReleaseLocked(c.proc, c.mode)
+		if h3.rel != nil || h3.mode != c.mode {
+			t.Errorf("process %d in %s: %+v %s", c.proc, c.mode, h3.rel, h3.mode)
+		}
+		if _, err := os.Stat(filepath.Join(dir, fileRelease)); !os.IsNotExist(err) {
+			t.Errorf("process %d in %s: still on disk", c.proc, c.mode)
+		}
+	}
 }
 
 // A step auto mode denied waits as a card and the session waits on you; switched to manual for

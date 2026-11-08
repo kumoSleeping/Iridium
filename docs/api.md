@@ -224,7 +224,7 @@ agent 用 `ir sh <机器> [--cwd 目录] [--timeout 2m] -- 命令`（`POST /api/
   - `ultracode`：`{on, active, available}`，`on` 是开没开（`ultracodeRequested`），`active` 是开了且生效，`available` 是这个模型能不能开（读到之前、进程没在跑时算能；CLI 不认 `get_settings` 算不能）。进程一结束，读到的就作废，下个进程再问。
   - 面板里选了模型就收起；强度滑条和 UltraCode 开关在面板底下，调了不收。
 - 本会话一直允许：`answer` 带 `always: true`（或卡片选 `always`）。记下工具和 `Ask.pattern`（Claude 自己建议的规则，例如 `ls *`；没有时 shell 命令取第一个词加 ` *`，别的工具不带模式＝这个工具全部）。之后这个会话里匹配的审批自动允许，不通知、不出卡片。
-- 临时切换至 manual：Claude 的 auto 模式分类器拦下的一步不经 Iridium，直接回给模型（结果开头是 `Permission for this action was denied by the Claude Code auto mode classifier`）。`release` 把运行中的进程切到 `manual`（不写进会话设置，进程重启就回到原模式），不给 Claude 发消息（原来以用户名义插一条“请原样再做一次”，它可能已换了做法，2026-11-08）。之后的调用照常问；同一调用（工具相同，参数除 `description` 外相同）再做完就切回原模式，没再做就在当时进行中的回合（空闲时为下一回合）结束时切回，期间手动换了模式就不切回（2026-11-07）。拦下的每一步都在会话状态的 `denials`（`Denial{toolUseId, tool, input, reason, at}`，只记在内存里）直到放行或 `dismiss`；回合结束后还有，状态算 `waiting`（`ir wait` 不算需要你）。
+- 临时切换至 manual：Claude 的 auto 模式分类器拦下的一步不经 Iridium，直接回给模型（结果开头是 `Permission for this action was denied by the Claude Code auto mode classifier`）。`release` 把运行中的进程切到 `manual`（不写进会话设置，进程重启就回到原模式），不给 Claude 发消息（原来以用户名义插一条“请原样再做一次”，它可能已换了做法，2026-11-08）。之后的调用照常问；第一个问的调用（或同一调用：工具相同，参数除 `description` 外相同）做完就切回原模式（2026-11-08），一个都没问就在当时进行中的回合（空闲时为下一回合）结束时切回，期间手动换了模式就不切回（2026-11-07）。切换记在 hold 目录的 `release.json`：守护进程重启接管仍在 manual 的同一进程时接着算，新进程就删掉。拦下的每一步都在会话状态的 `denials`（`Denial{toolUseId, tool, input, reason, at}`，只记在内存里）直到放行或 `dismiss`；回合结束后还有，状态算 `waiting`（`ir wait` 不算需要你）。
 - 匹配：`*` 是任意一段字；`前缀:*` 同 `前缀*`。shell 命令里有 `;`、`&&`、`||`、`|`、`` ` ``、`$(`、换行的，一律不按模式放行。
 
 ## 设置

@@ -720,6 +720,9 @@ func (h *Hosted) onEvent(e agent.Event) {
 		if !slices.ContainsFunc(h.asks, func(a api.Ask) bool { return a.RequestID == e.Ask.RequestID }) {
 			h.asks = append(h.asks, e.Ask)
 		}
+		if !replay {
+			h.releaseAskedLocked(e.Ask)
+		}
 		list = true
 		ask := e.Ask
 		note(Notice{Kind: NoticeAsk, Ask: &ask})
@@ -758,7 +761,11 @@ func (h *Hosted) onEvent(e agent.Event) {
 	case agent.Hello:
 		h.starting = false
 		h.mode = e.Mode
-		h.rel = nil // a new process: in the session's own mode
+		if replay {
+			h.rel = nil // the hello the process is taken up with says where it is
+		} else {
+			h.helloReleaseLocked(proc, e.Mode) // a new process: in the session's own mode
+		}
 		h.models, h.commands = e.Models, e.Commands
 		h.account, h.plan = e.Account, e.Plan
 		list = true
