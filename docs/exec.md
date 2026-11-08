@@ -26,7 +26,7 @@
 
 ## 连接
 
-- 执行端主动连 `wss://<Iridium>/api/exec`，头 `Authorization: Bearer <TOKEN>`。TOKEN 在终端管理里签，终端类型“节点”，名字就是机器名（≤12 字符）。不带 Claude：Claude 只在本人的登录下跑。
+- 执行端主动连 `wss://<Iridium>/api/exec`，头 `Authorization: Bearer <TOKEN>`。执行端就是一个 Bot：用 Bot 的 TOKEN 接入，终端类型也显示“Bot”，名字就是机器名（≤12 字符）。不带 Claude：Claude 只在本人的登录下跑。
 - 一个 TOKEN 同时只有一条连接，新连上的顶掉旧的。
 - 断了执行端自己重连，退避 1 秒起、最多 30 秒。断开期间它启动的进程照跑，输出照写盘。
 - 帧是 JSON 文本，一帧一个：
