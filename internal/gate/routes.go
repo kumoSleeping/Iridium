@@ -24,7 +24,7 @@ var pages = map[string][2]string{ // path → file, content type
 	"/_ir/gate.css": {"web/gate.css", "text/css; charset=utf-8"},
 }
 
-const gateCSP = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; " +
+const gateCSP = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; manifest-src 'self'; " +
 	"base-uri 'none'; form-action 'self'; frame-ancestors 'none'; require-trusted-types-for 'script'"
 
 const maxBody = 64 << 10

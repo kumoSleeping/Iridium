@@ -607,6 +607,13 @@ func blocksOf(off int64, raw []byte, max int, sources Sources) []api.Block {
 				if c[1] == "/compact" {
 					break
 				}
+				// /model, /effort not sent by Iridium: Claude's own record of a set_model (the
+				// page's picker), no one's words. Without sources (the index's pass) it is kept.
+				if (c[1] == "/model" || c[1] == "/effort") && sources != nil {
+					if _, _, ok := sources(l.UUID); !ok {
+						break
+					}
+				}
 			}
 		}
 		said := func(all []string) string {

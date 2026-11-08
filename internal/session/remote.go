@@ -2,6 +2,11 @@ package session
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +17,7 @@ import (
 
 	"github.com/kumoSleeping/iridium/internal/agent"
 	"github.com/kumoSleeping/iridium/internal/agents"
+	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/platform"
 	"github.com/kumoSleeping/iridium/internal/remote"
 	"github.com/kumoSleeping/iridium/internal/remote/wire"
@@ -22,6 +28,17 @@ import (
 
 // fileRemoteTranscript: where the session's transcript is at the executor, and its mirror here.
 const fileRemoteTranscript = "remote-transcript.json"
+
+// fileIRToken: the SHA-256 of the session's own TOKEN, which the ir at its executor sends
+// (docs/exec.md "远端的 ir"); a new one each start of its process.
+const fileIRToken = "remote-ir-token"
+
+// IRTokenPrefix marks a session's TOKEN, apart from a channel's.
+const IRTokenPrefix = "irs_"
+
+// fileFiled: a dsh session is filed under DSH Desktop's workspace of its folder there (or that dsh
+// cannot file it): not asked again.
+const fileFiled = "remote-filed"
 
 type remoteTranscript struct {
 	Path  string `json:"path"`  // there
@@ -63,12 +80,7 @@ func (h *Hosted) launcher() platform.Launcher {
 
 // groupPath is the folder the session is grouped by: its cwd, or for one at an executor
 // "<machine>:<cwd with />", a path no folder here holds.
-func groupPath(machine, cwd string) string {
-	if machine == "" {
-		return cwd
-	}
-	return machine + ":" + strings.ReplaceAll(cwd, `\`, "/")
-}
+func groupPath(machine, cwd string) string { return remote.GroupPath(machine, cwd) }
 
 // remoteFor is the executor a new session asks for, by terminal ID or name, checked: connected,
 // the agent installed there, cwd a directory there.
@@ -117,6 +129,17 @@ func (h *Hosted) remoteSpawn(mc *remote.Machine, o *agent.SpawnOptions) error {
 	ctx := h.m.ctx
 	info, _ := agents.Get(h.meta.Agent)
 	o.Env, o.Program = info.RemoteEnv(hi.Env, ai.Home), ""
+	// Its ir (an executor that puts one there): this start's own TOKEN, the last one's void.
+	if hi.IRClient {
+		tok := IRTokenPrefix + base64.RawURLEncoding.EncodeToString(randomBytes(32))
+		if err := os.WriteFile(filepath.Join(h.dir, fileIRToken), []byte(tokenHash(tok)), 0o600); err != nil {
+			return err
+		}
+		o.Env = agent.SetEnv(o.Env, "IRIDIUM_TOKEN", tok)
+		if origin := h.m.o.Config.Public.Origin; origin != "" {
+			o.Env = agent.SetEnv(o.Env, "IRIDIUM_URL", origin)
+		}
+	}
 	o.Remote = &agent.Remote{
 		Argv: ai.Argv, Version: ai.Version, Scope: ai.Scope, Scratch: hi.Scratch,
 		Join: func(elem ...string) string { return remote.Join(hi.Sep, elem...) },
@@ -170,6 +193,7 @@ func (h *Hosted) findRemoteTranscript(mc *remote.Machine) (string, error) {
 	if err != nil || path == "" {
 		return rt.Local, err
 	}
+	h.fileInDesktop(mc)
 	if path != rt.Path {
 		rt = remoteTranscript{Path: path, Local: filepath.Join(h.dir, "remote", remote.Base(hi.Sep, path))}
 		if err := writeJSON(filepath.Join(h.dir, fileRemoteTranscript), rt); err != nil {
@@ -184,6 +208,40 @@ func (h *Hosted) findRemoteTranscript(mc *remote.Machine) (string, error) {
 		return "", err
 	}
 	return rt.Local, nil
+}
+
+// fileInDesktop asks once that a dsh session, its transcript there now, be filed under the workspace of its
+// folder in the dsh the executor runs in (dsh.attach: DSH Desktop's sidebar has it then).
+func (h *Hosted) fileInDesktop(mc *remote.Machine) {
+	if h.meta.Agent != api.AgentDsh {
+		return
+	}
+	h.mu.Lock()
+	done := h.filing
+	h.filing = true
+	h.mu.Unlock()
+	marker := filepath.Join(h.dir, fileFiled)
+	if done {
+		return
+	}
+	if _, err := os.Stat(marker); err == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(h.m.ctx, 30*time.Second)
+		defer cancel()
+		err := mc.DshAttach(ctx, h.meta.agentID(), h.meta.Cwd)
+		if err != nil && !wire.IsCode(err, wire.CodeUnsupported) {
+			h.logf("filing it under DSH Desktop's workspace: %v", err)
+			h.mu.Lock()
+			h.filing = false // the next look asks again
+			h.mu.Unlock()
+			return
+		}
+		if err := os.WriteFile(marker, nil, 0o600); err != nil {
+			h.logf("noting it filed: %v", err)
+		}
+	}()
 }
 
 // syncRemote brings the transcript's mirror up to date, at most every second.
@@ -239,4 +297,39 @@ func readJSONFile(path string, v any) error {
 		return err
 	}
 	return json.Unmarshal(b, v)
+}
+
+// SessionToken is the session whose own TOKEN tok is (an ir at its executor), and that executor,
+// as the gate asks (gate.Config.SessionToken); ok false for none.
+func (m *Manager) SessionToken(tok string) (machine, session string, ok bool) {
+	if !strings.HasPrefix(tok, IRTokenPrefix) {
+		return "", "", false
+	}
+	want := tokenHash(tok)
+	m.mu.Lock()
+	list := make([]*Hosted, 0, len(m.hosted))
+	for _, h := range m.hosted {
+		if h.meta.Machine != "" {
+			list = append(list, h)
+		}
+	}
+	m.mu.Unlock()
+	for _, h := range list {
+		b, err := os.ReadFile(filepath.Join(h.dir, fileIRToken))
+		if err == nil && subtle.ConstantTimeCompare(b, []byte(want)) == 1 {
+			return h.meta.Machine, h.id, true
+		}
+	}
+	return "", "", false
+}
+
+func tokenHash(tok string) string {
+	sum := sha256.Sum256([]byte(tok))
+	return hex.EncodeToString(sum[:])
+}
+
+func randomBytes(n int) []byte {
+	b := make([]byte, n)
+	rand.Read(b)
+	return b
 }

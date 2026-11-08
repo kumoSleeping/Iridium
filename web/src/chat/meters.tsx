@@ -1,5 +1,5 @@
-// The composer's meters (plan "网页"), in a row under it: the model key, the
-// quota bars after it, a bar and its percent per window, amber nearly full, red full, faded when
+// The composer's meters (plan "网页"), in a row under it: the approval-mode key, the model key, the
+// quota bars after them, a bar and its percent per window, amber nearly full, red full, faded when
 // last read long ago or no process runs, each window in a popover; at the right the context ring,
 // its breakdown in a popover. On a phone no percents in the row, and the bars stacked in one place,
 // one over another (the user, 2026-11-06); the popovers still say them.
@@ -311,14 +311,48 @@ export function useMode(s: LiveSession) {
       toast(t("err.mode"), { error: true, description: errText(e) });
     }
   };
-  // With no key showing it (the user, 2026-11-06), a step says where it left the mode.
-  const cycle = () => {
-    if (modes.length < 2) return;
-    const next = modes[(modes.findIndex((m) => m.id === now) + 1) % modes.length]!;
-    toast(t("mode.now", { mode: modeName(next) }));
-    void set(next.id);
-  };
+  const cycle = () => modes.length > 1 && void set(modes[(modes.findIndex((m) => m.id === now) + 1) % modes.length]!.id);
   return { modes, now, set, cycle };
+}
+
+/** The approval mode, under the composer, its name alone: no icon (the user, 2026-11-08). A mode
+ *  picked closes the menu. */
+export function ModeKey({ mode, open, onOpenChange }: { mode: ReturnType<typeof useMode>; open?: boolean; onOpenChange?: (o: boolean) => void }) {
+  useLang();
+  if (!mode.modes.length) return null;
+  const label = modeName({ id: mode.now });
+  return (
+    <Menu.Root open={open} onOpenChange={onOpenChange}>
+      <Tip label={t("composer.mode")}>
+        <Menu.Trigger
+          render={
+            <button type="button" aria-label={`${t("composer.mode")}: ${label}`} className="g-press flex h-7 min-w-0 shrink-0 items-center gap-1 rounded-md px-2 text-xs whitespace-nowrap text-ink-3 hover:bg-fill hover:text-ink data-popup-open:bg-fill pointer-coarse:h-9">
+              <span key={label} className="g-fade truncate">
+                {label}
+              </span>
+              <ChevronDown size={12} className="shrink-0 text-ink-4" />
+            </button>
+          }
+        />
+      </Tip>
+      <Menu.Portal>
+        <Menu.Positioner side="top" align="start" sideOffset={6} collisionPadding={8} className="z-50">
+          <Menu.Popup finalFocus={false} className="g-unfold glass thick float min-w-52 rounded-lg p-1.5 text-ink outline-none">
+            <Menu.RadioGroup value={mode.now} onValueChange={(v) => void mode.set(v as string)} className="g-stagger flex flex-col">
+              {mode.modes.map((m, i) => (
+                <Menu.RadioItem key={m.id} value={m.id} closeOnClick style={{ "--i": i } as CSSProperties} className="flex h-8 cursor-default items-center gap-2.5 rounded-md pr-2 pl-2.5 text-base outline-none select-none data-highlighted:bg-fill pointer-coarse:h-11">
+                  <span className="flex-1">{modeName(m)}</span>
+                  <Menu.RadioItemIndicator className="text-ink">
+                    <Check size={14} />
+                  </Menu.RadioItemIndicator>
+                </Menu.RadioItem>
+              ))}
+            </Menu.RadioGroup>
+          </Menu.Popup>
+        </Menu.Positioner>
+      </Menu.Portal>
+    </Menu.Root>
+  );
 }
 
 /** The models an agent offers when the session does not list them. */
@@ -463,7 +497,7 @@ export function ModelKey({ s, open, onOpenChange }: { s: LiveSession; open?: boo
           disabled={!models.length}
           render={
             <button type="button" aria-label={`${t("composer.model")}: ${label}${level ? ` · ${levelName(level)}` : ""}${ultraOn ? " · UltraCode" : ""}`} className="g-press flex h-7 min-w-0 items-center gap-1 rounded-md px-2 text-xs text-ink-3 hover:bg-fill hover:text-ink data-popup-open:bg-fill disabled:hover:bg-transparent pointer-coarse:h-9">
-              {/* No icon: the mode key has the same sparkle; the model's name says what this is. */}
+              {/* No icon: the model's name says what this is. */}
               <span key={label} className="g-fade truncate">
                 {label}
               </span>

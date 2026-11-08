@@ -30,7 +30,7 @@ func TestMain(m *testing.M) {
 	if code, ok := testagent.Main(); ok {
 		os.Exit(code)
 	}
-	poll = 50 * time.Millisecond
+	poll, replyLag = 50*time.Millisecond, 500*time.Millisecond
 	os.Exit(m.Run())
 }
 
@@ -294,6 +294,23 @@ func TestAgentCommands(t *testing.T) {
 	if r := ir("ls"); !strings.Contains(r.out, sid) {
 		t.Errorf("ls after unarchive: %+v", r)
 	}
+	// rename, run in a session: the agent's name, cleaned, over its first message; never over the
+	// user's. Without an id, the session it runs in (caller-session is none here).
+	if r := ir("rename", sid, "「会话命名」。"); r.code != 0 {
+		t.Errorf("rename: %+v", r)
+	}
+	if r := ir("ls"); !strings.HasSuffix(strings.TrimSpace(r.out), "\t会话命名") {
+		t.Errorf("ls after rename: %+v", r)
+	}
+	if err := (&env{}).client(cfg).do("PATCH", "/api/sessions/"+full, api.SessionPatch{Name: new("mine")}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if r := ir("rename", sid, "agent's"); r.code != 1 || !strings.Contains(r.err, "用户起的名") {
+		t.Errorf("rename over the user's: %+v", r)
+	}
+	if r := ir("rename", "own"); r.code != 1 || !strings.Contains(r.err, "no such session") {
+		t.Errorf("rename its own, not a session: %+v", r)
+	}
 	if r := ir("wait", "ffffffff"); r.code != 1 || !strings.Contains(r.err, "no session") {
 		t.Errorf("unknown id: %+v", r)
 	}
@@ -328,8 +345,9 @@ func TestFileCommands(t *testing.T) {
 	if r := ir("cp", src, dst); r.code != 1 || !strings.Contains(r.err, "never overwritten") {
 		t.Errorf("cp over: %+v", r)
 	}
-	if r := ir("cp", "mac:~/a", dst); r.code != 1 || !strings.Contains(r.err, "peer not connected: mac") {
-		t.Errorf("cp from a peer: %+v", r)
+	// machine:path goes to that machine's executor (none here).
+	if r := ir("cp", "mac:~/a", dst); r.code != 1 || !strings.Contains(r.err, "no executors here") {
+		t.Errorf("cp from another machine: %+v", r)
 	}
 	r := ir("files", work)
 	if r.code != 0 || !strings.HasPrefix(r.out, "a.bin\t100000\t") || !strings.Contains(r.out, "out/\t0\t") {

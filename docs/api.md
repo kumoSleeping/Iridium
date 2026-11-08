@@ -20,7 +20,7 @@
 | `GET /api/sessions/{id}` | → `SessionState` | 打开的会话的状态，和事件流里的同一份 |
 | `GET /api/sessions/{id}/messages` | → `MessagePage` | 不带参数：最新一页。`before=<start>`：往回一页。`after=<end>`：之后新写的 |
 | `GET /api/sessions/{id}/block?at=<at>` | → `{text}` | 截短的块（工具参数、结果、思考、系统行）的全文 |
-| `POST /api/sessions/{id}/send` | `{text, steer?}` → `{input, queued?, command?, session?}` | 发消息。agent 没在跑就先拉起（有记录就 `--resume`）。回合进行中发的进待发队列（`queued`），`steer` 则并进当前回合。`/` 开头的命令从不插话，排到回合结束。`/clear`（`/reset`、`/new`，后面带字、带附件也算）由 Iridium 做：同处开新会话（模型、模式、强度照旧），旧的空闲时归档，回新会话的 `session`。`command`：agent 自己执行、记录里不会有这句（Codex、pi 的 `/compact`）。见“待发队列”。在别处运行的回 409 |
+| `POST /api/sessions/{id}/send` | `{text, steer?}` → `{input, queued?, command?, session?, desktop?}` | 发消息。agent 没在跑就先拉起（有记录就 `--resume`）。回合进行中发的进待发队列（`queued`），`steer` 则并进当前回合。`/` 开头的命令从不插话，排到回合结束。`/clear`（`/reset`、`/new`，后面带字、带附件也算）由 Iridium 做：同处开新会话（模型、模式、强度照旧），旧的空闲时归档，回新会话的 `session`。`command`：agent 自己执行、记录里不会有这句（Codex、pi 的 `/compact`）。见“待发队列”。在别处运行的回 409；别的机器上 DSH Desktop 开着的 dsh 会话，消息交给 Desktop 里它的 agent（`desktop`，没有 `input`，见 `docs/exec.md`“远端 DSH”） |
 | `POST /api/sessions/{id}/interrupt` | → `{ok}` | 停掉当前回合（Esc），agent 留着。队列暂停 |
 | `POST /api/sessions/{id}/stop` | → `{ok}` | 停掉 agent 进程（关 stdin，写完记录自己退出）。会话还在，下一条消息再拉起。队列暂停 |
 | `POST /api/sessions/{id}/answer` | `Answer` → `{ok}` | 回答提问：审批 `allow`（不许时可带 `message`；`always` 见“会话设置”）；选择题 `answers`（问题原文 → 选项 `label`）；计划确认 `allow` |
@@ -116,11 +116,12 @@
 | 请求 | 正文 → 回答 | 说明 |
 |---|---|---|
 | `GET /api/workspaces` | → `Workspace[]` | 文件夹组，和事件流 `workspaces` 同一份（没有会话的也在，页面不列） |
-| `PATCH /api/workspaces/{id}` | `{name}` → `{ok}` | 改名 |
+| `PATCH /api/workspaces/{id}` | `{name?, hidden?}` → `{ok}` | 改名；隐藏或取消隐藏（隐藏的组：会话不列、不进归档、搜不到，除非其中有会话在别处运行，如 DSH Desktop 里开着；那时整组列出，菜单可取消隐藏） |
 | `PUT /api/colors` | `FolderColor` → `{ok}` | 给文件夹打颜色标签（`red`、`orange`、`yellow`、`green`、`blue`、`purple`），`color` 为空就去掉；事件流 `colors`（只给面板）是全部。会话的标签用 `PATCH /api/sessions/{id}` 的 `color` |
-| `PATCH /api/sessions/{id}` | `SessionPatch` → `{ok}` | 只改覆盖层，不碰 agent 的文件：`name`（空串去掉）、`pinned`、`archived`（归档或恢复，见上面的显示标记）、`workspace`（移动，0 为未归类；移过就不再自动归类） |
+| `PATCH /api/sessions/{id}` | `SessionPatch` → `{ok}` | 只改覆盖层，不碰 agent 的文件：`name`（空串去掉；带 `byAgent` 是会话里的 agent 起的，`ir rename` 这样发：去引号和句尾标点，不盖你起的名，盖不了回 409）、`pinned`、`archived`（归档或恢复，见上面的显示标记）、`workspace`（移动，0 为未归类；移过就不再自动归类） |
 | `GET /api/folders?path=` | → `Folders` | 选择器：只列文件夹，不列隐藏的，按名字排；`path` 为空或 `~` 是家目录。`parent` 为空表示到顶了 |
 | `POST /api/folders` | `NewFolder` → `{path}` | 在 `path` 里新建文件夹 `name`（不能以 `.` 开头、不能带 `/`）。已有回 409 |
+| `GET /api/machines/{id}/dsh/workspaces` | → `DshWorkspace[]` | 那台机器上 dsh 的工作区（DSH Desktop 侧边栏那份，按它的顺序，文件夹已不在的不列），读不懂时用它会话所在的文件夹代替，最近的在前；路径用 `/`。新会话选文件夹时列在最上面，见 `docs/exec.md`“远端 DSH” |
 
 - 选择器默认只能在家目录里（配置 `folderRoots` 可改），先解析符号链接再比；`~/.ssh`、`~/.gnupg`、`~/.claude`、`~/.codex`、`~/.pi`、`~/.dsh` 和 Iridium 的状态、配置目录一律不给（403）。不存在 404。
 
@@ -144,8 +145,9 @@
 | 请求 | 正文 → 回答 | 说明 |
 |---|---|---|
 | `POST /api/sessions/{id}/attach` | `{path}` → `FileRef` | 把本机文件当这个会话的附件（`ir send -a`），不复制 |
-| `GET /api/files?path=<目录>` | → `DirListing` | 列一层（`ir files`） |
-| `POST /api/files/copy` | `{from, to}` → NDJSON | 拷文件（`ir cp`）：每 250ms 一行 `CopyProgress`，最后一行带 `path`、`sha256` 或 `error`。由 Iridium 拷，`ir` 断了也接着拷；同样的请求再来就接上 |
+| `GET /api/files?path=<目录>[&machine=<机器>]` | → `DirListing` | 列一层（`ir files`）；带 `machine` 是那台机器上的目录（它自己的写法，空是家目录） |
+| `POST /api/files/copy` | `{from, to, fromMachine?, toMachine?}` → NDJSON | 拷文件（`ir cp`）：每 250ms 一行 `CopyProgress`，最后一行带 `path`、`sha256` 或 `error`。由 Iridium 拷，`ir` 断了也接着拷；同样的请求再来就接上。一边在别的机器（`fromMachine`、`toMachine`）时：不接续，写到那边的先限 4MB（413），目标已有文件 409 |
+| `POST /api/cli` | `CLIRun{args, cwd}` → NDJSON `CLIOutput` | 执行端上的会话里 agent 的 `ir`（只认会话 TOKEN，见 `docs/exec.md`“远端的 ir”）：这边照常跑这条 `ir`，算那台机器的 Bot、代表这个会话；输出按行流回（`out`、`err`），最后一行 `exit` |
 
 规则：
 
@@ -159,7 +161,7 @@
 ## `ir`（agent 用的部分）
 
 - 代码在 `internal/cli`，走上面这套接口；socket 用 `IRIDIUM_SOCKET`，没有就读配置（`IRIDIUM_CONFIG` 或默认位置）。
-- `<id>` 可只写开头（唯一即可）；`ir new`、`ir ls` 打印至少 8 位的短 ID。`ir ls` 只列有显示标记的，子代理只列还在工作的（没做完、父会话进程还在、5 分钟内写过），排在父会话下面；`ir ls --all` 连归档和做完的子代理一起列。`ir find <词>...` 在 ID、名字、标题、目录、最后一句里找（每个词都要有，不分大小写），归档的也找、标 `[归档]`。`ir archive`、`ir unarchive` 同会话列表菜单（`PATCH /api/sessions/{id}`）。`ir read` 默认每条消息一行（截 80 字）加它的最终回复（截 300 字），最近 10 条，`-n` 改条数，`--full` 打整页原文。`机器:路径`、`机器/<id>`（机器是执行端，`plan.md`“别的机器”）除 `ir sh` 外现在报 `peer not connected`。
+- `<id>` 可只写开头（唯一即可）；`ir new`、`ir ls` 打印至少 8 位的短 ID。`ir ls` 只列有显示标记的，子代理只列还在工作的（没做完、父会话进程还在、5 分钟内写过），排在父会话下面；`ir ls --all` 连归档和做完的子代理一起列。`ir find <词>...` 在 ID、名字、标题、目录、最后一句里找（每个词都要有，不分大小写），归档的也找、标 `[归档]`。`ir archive`、`ir unarchive` 同会话列表菜单（`PATCH /api/sessions/{id}`）。`ir rename [<id>] <名>` 给会话起名，不写 id 是自己所在的；在会话里跑算 agent 起的（`byAgent`），见 `plan.md`“会话标题”。`ir read` 默认每条消息一行（截 80 字）加它的最终回复（截 300 字），最近 10 条，`-n` 改条数，`--full` 打整页原文。`机器:路径`、`机器/<id>`（机器是执行端，`plan.md`“别的机器”）除 `ir sh` 外现在报 `peer not connected`。
 - 输出给 agent 看：只打最后一段回复（`new --wait` 先一行 ID）；`cp` 一行 `路径 大小 sha256`；需要你时每个提问一行 `需要你：…`。进度只在 stderr 是终端时画。
 - `send`、`new` 不带 `--wait` 时等到 agent 接了这条消息（最多 15 秒）再返回，所以紧接着的 `ir wait` 等的是这一回合。
 - 回合在跑时 `ir send` 的话默认插进这一回合（和网页回车一样，2026-11-06 定）；`--wait` 等到这一回合结束，打印最后一段回复（可能还在说别的事）。加 `--queue` 进待发队列（只对人在终端里跑的 ir 有效；agent 跑的 `--queue` 不管用，总是插进，免得要人去点；2026-11-06）：不带 `--wait` 马上返回，带 `--wait` 等它发出去、再等它那一回合（队列暂停了就退出码 2）。`--steer` 还认，和默认一样。agent 在等额度时插话也进队列。
@@ -224,7 +226,7 @@ agent 用 `ir sh <机器> [--cwd 目录] [--timeout 2m] -- 命令`（`POST /api/
   - `ultracode`：`{on, active, available}`，`on` 是开没开（`ultracodeRequested`），`active` 是开了且生效，`available` 是这个模型能不能开（读到之前、进程没在跑时算能；CLI 不认 `get_settings` 算不能）。进程一结束，读到的就作废，下个进程再问。
   - 面板里选了模型就收起；强度滑条和 UltraCode 开关在面板底下，调了不收。
 - 本会话一直允许：`answer` 带 `always: true`（或卡片选 `always`）。记下工具和 `Ask.pattern`（Claude 自己建议的规则，例如 `ls *`；没有时 shell 命令取第一个词加 ` *`，别的工具不带模式＝这个工具全部）。之后这个会话里匹配的审批自动允许，不通知、不出卡片。
-- 临时切换至 manual：Claude 的 auto 模式分类器拦下的一步不经 Iridium，直接回给模型（结果开头是 `Permission for this action was denied by the Claude Code auto mode classifier`）。`release` 把运行中的进程切到 `manual`（不写进会话设置，进程重启就回到原模式），不给 Claude 发消息（原来以用户名义插一条“请原样再做一次”，它可能已换了做法，2026-11-08）。之后的调用照常问；第一个问的调用（或同一调用：工具相同，参数除 `description` 外相同）做完就切回原模式（2026-11-08），一个都没问就在当时进行中的回合（空闲时为下一回合）结束时切回，期间手动换了模式就不切回（2026-11-07）。切换记在 hold 目录的 `release.json`：守护进程重启接管仍在 manual 的同一进程时接着算，新进程就删掉。拦下的每一步都在会话状态的 `denials`（`Denial{toolUseId, tool, input, reason, at}`，只记在内存里）直到放行或 `dismiss`；回合结束后还有，状态算 `waiting`（`ir wait` 不算需要你）。
+- 临时切换至 manual：Claude 的 auto 模式分类器拦下的一步不经 Iridium，直接回给模型（结果开头是 `Permission for this action was denied by the Claude Code auto mode classifier`）。`release` 把运行中的进程切到 `manual`（不写进会话设置，进程重启就回到原模式），不给 Claude 发消息（原来以用户名义插一条“请原样再做一次”，它可能已换了做法，2026-11-08）。之后的调用照常问；第一个问的调用（或同一调用：工具相同，参数除 `description` 外相同）做完就切回原模式（2026-11-08），一个都没问就在当时进行中的回合（空闲时为下一回合）结束时切回，期间手动换了模式就不切回（2026-11-07）。切换记在 hold 目录的 `release.json`：守护进程重启接管仍在 manual 的同一进程时接着算，新进程就删掉。拦下的每一步都在会话状态的 `denials`（`Denial{toolUseId, tool, input, reason, at}`，只记在内存里）直到放行、`dismiss` 或给这个会话发下一条消息。只有回合停在被拦的一步上（它之后本回合没有做完别的调用）才算 `waiting`（`ir wait` 不算需要你）；之后做完了别的调用就当它绕过去了，状态照常（2026-11-08）。回合结束的推送和 Bot 回复带上“auto 拦了 N 步”。
 - 匹配：`*` 是任意一段字；`前缀:*` 同 `前缀*`。shell 命令里有 `;`、`&&`、`||`、`|`、`` ` ``、`$(`、换行的，一律不按模式放行。
 
 ## 设置

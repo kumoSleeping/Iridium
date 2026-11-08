@@ -361,6 +361,9 @@ func (s *Service) notice(kind string, n session.Notice) {
 		msg.Body = "出错：" + n.Text
 	case "turn_end":
 		msg.Body = n.Text
+		if n.Denied > 0 {
+			msg.Body = fmt.Sprintf("（auto 拦了 %d 步）%s", n.Denied, msg.Body)
+		}
 	}
 	if s.o.Mask != nil {
 		msg.Title, msg.Body = s.o.Mask(msg.Title), s.o.Mask(msg.Body)

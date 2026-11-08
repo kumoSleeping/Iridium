@@ -350,7 +350,24 @@ func (h *Hosted) allow(id string) {
 }
 
 func (h *Hosted) allowedLocked(a api.Ask) bool {
-	return slices.ContainsFunc(h.rules, func(r store.AllowRule) bool { return ruleMatches(r, a) })
+	return renamesOnly(a) || slices.ContainsFunc(h.rules, func(r store.AllowRule) bool { return ruleMatches(r, a) })
+}
+
+// renamesOnly: a shell call that only names the session (ir rename, plan "会话标题"), which the
+// system prompt has every agent run: never asked about. Whatever chains, pipes, substitutes or
+// redirects is asked about as any command is.
+func renamesOnly(a api.Ask) bool {
+	in, _ := a.Input.(map[string]any)
+	s, _ := in["command"].(string)
+	if s == "" {
+		s, _ = in["cmd"].(string)
+	}
+	s = strings.TrimSpace(s)
+	if a.Kind != "permission" || strings.ContainsAny(s, ";|&`$<>\n\\") {
+		return false
+	}
+	f := strings.Fields(s)
+	return len(f) >= 3 && f[0] == "ir" && f[1] == "rename"
 }
 
 // fileTools are the tools whose subject is a file path.

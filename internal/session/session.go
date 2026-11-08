@@ -48,13 +48,34 @@ func SystemPrompt(lang string) string {
 
 Secrets: when you need a password or an API key, have the user type it in on the web page with ir secret set, and pass it into commands with ir run; never ask for it in the chat.
 Files: to show or hand the user a file, end your reply with a line [文件] ` + "`/absolute/path`" + ` per file; the page shows it as a picture or a download card. A path, a link or image syntax anywhere else is plain text.
-Title: when the session has no fitting title yet, or its subject has clearly changed, end your reply with a line [标题] <title>: a noun phrase of at most 16 Chinese characters or 6 English words that names the subject and the task, in the user's language, without punctuation, quotes, emoji or chit-chat. Otherwise leave the line out.
 `)
+	b.WriteString(titleLine)
 	if name := langNames[lang]; name != "" {
 		b.WriteString("The user's language, as set in the web settings: " + name + ".\n")
 	}
 	return b.String()
 }
+
+// RemotePrompt is SystemPrompt for a session hosted at another machine: with ir (its executor
+// puts one there, wire.Hello.IRClient), the commands that ir has (irhelp.Remote); without, none.
+// No [文件] line: its files are that machine's, which the page does not serve.
+func RemotePrompt(lang string, ir bool) string {
+	var b strings.Builder
+	if ir {
+		b.WriteString("This session is hosted by Iridium and runs at another machine than Iridium's own. Use its ir command to start other agent sessions (here or at other machines), message them and wait for their results:\n\n")
+		b.WriteString(irhelp.Remote())
+		b.WriteString("\n")
+	} else {
+		b.WriteString("This session is hosted by Iridium and runs at another machine than Iridium's own.\n")
+	}
+	b.WriteString(titleLine)
+	if name := langNames[lang]; name != "" {
+		b.WriteString("The user's language, as set in the web settings: " + name + ".\n")
+	}
+	return b.String()
+}
+
+const titleLine = "Title: as your first action in a session, and again only when its subject changes, run ir rename \"<title>\": a short name for the specific thing and task, in the user's language, without punctuation, quotes or emoji. If the user named it, leave it.\n"
 
 var langNames = map[string]string{"zh": "Chinese", "en": "English"}
 
@@ -114,8 +135,6 @@ type Manager struct {
 
 	wmu      sync.Mutex
 	watchers []func(Notice)
-
-	nmu sync.Mutex // a new session's name (name.go)
 
 	tune     atomic.Pointer[Tunables] // tune.go
 	annotate atomic.Pointer[Annotate] // carry.go
@@ -337,7 +356,7 @@ func (m *Manager) create(ctx context.Context, req api.NewSession, from, name str
 	if err := writeJSON(filepath.Join(h.dir, fileMeta), mt); err != nil {
 		return "", err
 	}
-	m.nameNew(mt.ID, groupPath(mt.Machine, mt.Cwd), name)
+	m.nameNew(mt.ID, name)
 	m.mu.Lock()
 	m.hosted[mt.ID] = h
 	m.mu.Unlock()
@@ -455,7 +474,7 @@ func (m *Manager) List(ctx context.Context) ([]api.Session, error) {
 		for _, s := range found {
 			if !seen[s.ID] {
 				o := over[s.ID]
-				s.Name, s.Pinned, s.Workspace, s.Color = o.NameOver(s.Title), o.Pinned, o.Workspace, api.Color(o.Color)
+				s.Name, s.Pinned, s.Workspace, s.Color = o.Name, o.Pinned, o.Workspace, api.Color(o.Color)
 				s.Archived = !vis.Shown(string(s.Agent), s.ID)
 				m.parentOf(&s)
 				out = append(out, s)

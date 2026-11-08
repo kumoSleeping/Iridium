@@ -129,6 +129,8 @@ type Hosted struct {
 	// mirroredAt: when the transcript's mirror was last brought up to date (remote.go).
 	mirroredAt time.Time
 	said       cached
+	// filing: its filing under DSH Desktop's workspace is asked for or done (remote.go).
+	filing bool
 
 	qmu     sync.Mutex   // one queue decision or release at a time; before mu
 	queue   []api.Queued // under mu
@@ -156,7 +158,9 @@ type Hosted struct {
 	rules         []store.AllowRule
 	rel           *released                  // a step auto mode denied, allowed from the page (release.go)
 	turnAt        time.Time                  // when the running or last turn began
-	denials       []api.Denial               // steps auto mode denied, waiting for you (release.go)
+	denials       []api.Denial               // steps auto mode denied, shown till your next message (release.go)
+	stuckOn       string                     // the turn's last call, if auto mode denied it: stopped on it, it needs you
+	turnDenied    int                        // calls auto mode denied in this turn
 	calls         map[string]agent.ToolStart // this turn's calls by id: what a denial was
 
 	hadTurn     bool        // the agent has the running turn: a crash now is continued
@@ -260,7 +264,12 @@ func (h *Hosted) launch(ctx context.Context, proc int) error {
 		return err
 	}
 	prompt := filepath.Join(h.dir, filePrompt)
-	if err := os.WriteFile(prompt, []byte(SystemPrompt(m.tuned().Lang)), 0o600); err != nil {
+	text := SystemPrompt(m.tuned().Lang)
+	if mc := h.machine(); mc != nil {
+		hi, _ := mc.Hello()
+		text = RemotePrompt(m.tuned().Lang, hi != nil && hi.IRClient)
+	}
+	if err := os.WriteFile(prompt, []byte(text), 0o600); err != nil {
 		return err
 	}
 	h.mu.Lock()
@@ -646,6 +655,7 @@ func (h *Hosted) onEvent(e agent.Event) {
 		if !replay {
 			h.turnAt = time.Now()
 			h.calls = nil
+			h.stuckOn, h.turnDenied = "", 0
 		}
 		if !replay && h.quotaUntil != 0 {
 			h.quotaEndLocked() // it went on by itself, or the queue did
@@ -667,6 +677,14 @@ func (h *Hosted) onEvent(e agent.Event) {
 			break
 		}
 		if e.Denied != "" && h.deniedLocked(e) {
+			list = true
+			h.turnDenied++
+		}
+		// A call done after a denial: Claude went on another way. One denied last, it stopped there.
+		if was := h.stuckOn; e.Denied != "" {
+			h.stuckOn = e.ID
+		} else if was != "" {
+			h.stuckOn = ""
 			list = true
 		}
 		if mode, over := h.releaseRanLocked(e.ID); over {
@@ -710,7 +728,7 @@ func (h *Hosted) onEvent(e agent.Event) {
 				later(func() { h.restoreMode(mode) })
 			}
 		}
-		note(Notice{Kind: NoticeTurnEnd, Text: transcript.WithoutNameLines(e.Reply), Background: e.Background})
+		note(Notice{Kind: NoticeTurnEnd, Text: transcript.WithoutNameLines(e.Reply), Background: e.Background, Denied: h.turnDenied})
 	case agent.AskOpen:
 		if !replay && e.Ask.Kind == "permission" && h.allowedLocked(e.Ask) {
 			id := e.Ask.RequestID
@@ -915,14 +933,15 @@ func (h *Hosted) status() api.Status {
 		return api.StatusStarting
 	case !h.live && h.errText != "":
 		return api.StatusError
-	case !h.live && len(h.denials) > 0:
+	case !h.live && h.stuckLocked():
 		return api.StatusWaiting
 	case !h.live:
 		return api.StatusIdle
 	case len(h.asks) > 0:
 		return api.StatusWaiting
-	case len(h.denials) > 0 && h.turn == agent.Idle:
-		// A step auto mode denied waits for you once the turn is over.
+	case h.stuckLocked() && h.turn == agent.Idle:
+		// The turn ended on a step auto mode denied: it waits for you. One Claude went past is
+		// no one's business (the user, 2026-11-08).
 		return api.StatusWaiting
 	case h.turn == agent.Compacting:
 		return api.StatusCompacting
@@ -941,7 +960,7 @@ func (h *Hosted) summary(o store.Overlay, archived bool) api.Session {
 
 func (h *Hosted) summaryLocked(o store.Overlay, archived bool) api.Session {
 	return api.Session{
-		ID: h.id, Agent: h.meta.Agent, Cwd: h.meta.Cwd, Name: o.NameOver(h.said.title), Title: h.said.title,
+		ID: h.id, Agent: h.meta.Agent, Cwd: h.meta.Cwd, Name: o.Name, Title: h.said.title,
 		Status: h.status(), Hosted: true, Live: h.live,
 		Pinned: o.Pinned, Archived: archived, Workspace: o.Workspace, Color: api.Color(o.Color),
 		Launcher: h.meta.Launcher, Last: h.said.last, UpdatedAt: h.shownAt.UnixMilli(),

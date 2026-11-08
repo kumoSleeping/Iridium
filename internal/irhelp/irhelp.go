@@ -6,12 +6,12 @@ import "strings"
 
 // Help is ir --help: at most 20 lines (plan "ir"). The agent part is before Admin.
 const Help = `ir: this machine's Iridium on the command line (over its unix socket). An <id> may be its first few characters.
-  ir new <agent> [dir] "task"         start a session, print its ID (--model <model>, --approve <mode>)
+  ir new <agent> [dir] "task"         start a session, print its ID (--model, --approve <mode>, --machine <name>: at that machine, --workspace <group>)
   ir send <id> "message" [-a file]...  send a message, with attachments
   ir wait <id>                        wait for the turn to end, print its last reply
   ir read <id> [-n count] [--full]    each message and its final reply, cut short (last 10; --full: the page as written)
-  ir ls | find <word> [--all]         list sessions | find by name, title, last thing said (--all: archived, finished subagents too)
-  ir stop | archive | unarchive <id>  stop its agent | archive | unarchive
+  ir ls | find <word> [--all]         list sessions | find by name, title, last thing said (--all: archived, finished subagents too; ls --here: your group's)
+  ir stop | archive | unarchive <id> | rename [<id>] <name>   stop its agent | archive | unarchive | name it (no <id>: your own session)
   ir ws [ls] | rename <group> <name>   folder groups, made as sessions go in their folders (<group>: ID or name)
   ir cp <src> <dst> | files <dir>     copy files, print path, size, sha256 | list one level: name, size, time, type
   ir machines | sh <machine> [--cwd dir] -- command   other machines connected here | run a command on one
@@ -31,4 +31,26 @@ Admin (an agent calling these never sees a TOKEN; a web panel confirms):
 func Agent() string {
 	h, _, _ := strings.Cut(Help, "Admin")
 	return h
+}
+
+// Remote is the agent part for a session hosted at another machine (docs/exec.md "远端的 ir"):
+// its ir reaches the Iridium over HTTPS with the session's own TOKEN, as that machine's Bot. The
+// session commands as Help has them; a folder is this machine's; the Iridium's own files, command
+// lines, secrets and bots are not reached from here.
+func Remote() string {
+	var b strings.Builder
+	b.WriteString("ir: the Iridium hosting this session, reached over HTTPS as this machine. An <id> may be its first few characters. A folder is this machine's.\n")
+	for _, l := range strings.Split(Agent(), "\n") {
+		for _, p := range []string{"  ir new ", "  ir send ", "  ir wait ", "  ir read ", "  ir ls ", "  ir stop ", "  ir ws ", "  new and send "} {
+			if strings.HasPrefix(l, p) {
+				if p == "  new and send " {
+					l, _, _ = strings.Cut(l, ". A path may be")
+				}
+				b.WriteString(l + "\n")
+			}
+		}
+	}
+	b.WriteString("  ir machines                        the machines connected to it\n")
+	b.WriteString("  Not from here: cp, files, sh, run, secret, bot, usage and the admin commands; ask a session on the Iridium's machine.\n")
+	return b.String()
 }

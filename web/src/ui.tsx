@@ -396,8 +396,11 @@ export function keep(key: string, value: string | null, storage: () => Storage =
   } catch {}
 }
 
-/** The name a session shows: its new name, else its first message's opening, else its folder's. */
-export const titleOf = (s: { name?: string; title?: string; cwd: string }) => s.name || s.title || s.cwd.split("/").filter(Boolean).pop() || s.cwd;
+/** The name a session shows: the one the user or its agent gave, else its first message's opening,
+ *  else 新会话 (drawn faint: untitled). */
+export const titleOf = (s: { name?: string; title?: string }) => s.name || s.title || t("session.new");
+/** Nothing said in it yet, nor a name given: titleOf is only 新会话. */
+export const untitled = (s: { name?: string; title?: string }) => !s.name && !s.title;
 
 /** The home directory as a path shows it: /home/<user>, /Users/<user> or /root. */
 export const homeOf = (p: string) => /^(\/home\/[^/]+|\/Users\/[^/]+|\/root)(?=\/|$)/.exec(p)?.[1];

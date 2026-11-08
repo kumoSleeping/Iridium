@@ -92,6 +92,13 @@ type rpcError struct {
 
 func (e *rpcError) Error() string { return fmt.Sprintf("dsh: %s (%d)", e.Message, e.Code) }
 
+// heldElsewhere: dsh refused a session another dsh process writes (its session lock: a flock on
+// session.lock, a named semaphore on Windows), as session/resume answers it (session/writer-held).
+func heldElsewhere(err error) bool {
+	var e *rpcError
+	return errors.As(err, &e) && (strings.Contains(e.Message, "already owned") || strings.Contains(string(e.Data), "writer-held"))
+}
+
 type result struct {
 	data json.RawMessage
 	err  error
@@ -361,6 +368,10 @@ func (d *Driver) handshake(proc int, l launch, ready chan struct{}) {
 			resumed = true
 			_, err = d.rpc(ctx, "session/resume", session)
 		}
+	}
+	if err != nil && heldElsewhere(err) {
+		fail(fmt.Sprintf("dsh: session %s is open in another dsh (DSH Desktop): close it there first", l.session))
+		return
 	}
 	if err != nil {
 		fail(fmt.Sprintf("dsh: opening session %s: %v", l.session, err))

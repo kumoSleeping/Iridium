@@ -5,7 +5,9 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import z from '@deepseek-ai/schemastery'
+import { dshMethods } from './dsh.js'
 import { Executor, iridiumKey, refused } from './executor.js'
 
 export const name = 'remote-iridium'
@@ -122,6 +124,9 @@ function migrate(tokens, tokenOf) {
   }
 }
 
+/** A volatile config field's value now. */
+const volatile = (v) => (typeof v?.get === 'function' ? v.get() : v)
+
 /** An Iridium address as typed: http(s), no path; null if it is not one. */
 export function iridiumURL(s) {
   let u
@@ -135,12 +140,15 @@ export function iridiumURL(s) {
 }
 
 /**
- * Config: url, the Iridium (https://…), set on the plugin's page in dsh (client.js), with
+ * Config: url, the Iridium (https://…), set on its page in dsh's settings (client.js), with
  * `/iridium <url>`, or in the profile; name, this machine's (default: its host name); roots, the
  * directories the Iridium may read and write files under (default: all but the denied); shell,
  * whether command lines from the Iridium run here, not only dsh (default: yes); agentShell, whether
- * its agents may run them too (ir sh), not only a person on its page (default: no). The url is
- * volatile: a new one is taken at once, without dsh starting the plugin again.
+ * its agents may run them too (ir sh), not only a person on its page (default: no); unsynced, the
+ * folders of the workspaces the Iridium does not list (switched off on the plugin's settings page;
+ * a name in dsh's sidebar does too); ungrouped, whether it lists the sessions in none of the
+ * workspaces (dsh's 未分组; default: yes). The url, unsynced and ungrouped are volatile: taken at
+ * once, without dsh starting the plugin again.
  */
 export const Config = z.object({
   url: z.string().default('').volatile(),
@@ -148,7 +156,17 @@ export const Config = z.object({
   roots: z.array(z.string()),
   shell: z.boolean().default(true),
   agentShell: z.boolean().default(false),
+  // A list; text with commas from an earlier build is taken too (unsyncedList).
+  unsynced: z.union([z.array(z.string()), z.string()]).default([]).volatile(),
+  ungrouped: z.boolean().default(true).volatile(),
 })
+
+/** The workspaces kept from the Iridium, as the setting lists them (folders or names; a list, or
+ *  text with commas as an earlier build kept it). */
+export function unsyncedList(v) {
+  const all = Array.isArray(v) ? v : String(v ?? '').split(/[,，;；\n]/)
+  return [...new Set(all.map((x) => String(x).trim()).filter(Boolean))]
+}
 
 export function apply(ctx, config) {
   const home = process.env.DSH_HOME || path.join(os.homedir(), '.dsh')
@@ -160,8 +178,7 @@ export function apply(ctx, config) {
   migrate(tokens, tokenOf)
   // The address as set, or the http(s) one in it (pasted with something before or after it).
   const urlNow = () => {
-    const u = config?.url
-    const s = ((typeof u?.get === 'function' ? u.get() : u) || '').trim()
+    const s = (volatile(config?.url) || '').trim()
     return iridiumURL(s.match(/https?:\/\/\S+/i)?.[0] ?? s) ?? s
   }
   let status = { state: 'idle' }
@@ -174,7 +191,7 @@ export function apply(ctx, config) {
     const url = urlNow()
     if (!url) {
       status = { state: 'no-url' }
-      say('no url set: set the Iridium address on this plugin\'s page in dsh, or type /iridium https://your-iridium')
+      say('no url set: set the Iridium address on the Iridium page of dsh\'s settings, or type /iridium https://your-iridium')
       return
     }
     if (!iridiumURL(url)) {
@@ -233,7 +250,7 @@ export function apply(ctx, config) {
         }
         if (stopped) return
         show({ state: 'paired', name: who.name })
-        ex = new Executor({ url: wsURL(url), token, state: path.join(state, iridiumKey(url)), denied: [tokens], roots: config?.roots ?? [], noShell, agentShell, agents: [dsh], program: who.program, log: (m) => say(m) })
+        ex = new Executor({ url: wsURL(url), token, state: path.join(state, iridiumKey(url)), denied: [tokens], roots: config?.roots ?? [], noShell, agentShell, agents: [dsh], methods: dshMethods(ctx, () => ({ unsynced: unsyncedList(volatile(config?.unsynced)), ungrouped: volatile(config?.ungrouped) !== false })), program: who.program, ir: fileURLToPath(new URL('./ir.js', import.meta.url)), log: (m) => say(m) })
         const running = ex.run()
         // A TOKEN turned down (its Bot removed) is forgotten, and the machine pairs again.
         while (!stopped) {
@@ -265,7 +282,7 @@ export function apply(ctx, config) {
     const at = status.url ? `（${status.url}）` : ''
     switch (status.state) {
       case 'no-url':
-        return '未设置 Iridium 地址。在插件页填写，或输入 /iridium https://你的-iridium'
+        return '未设置 Iridium 地址。在设置的 Iridium 一页填写，或输入 /iridium https://你的-iridium'
       case 'bad-url':
         return `不是 Iridium 地址：${status.url}。用法：/iridium https://你的-iridium`
       case 'unreachable':
@@ -310,7 +327,7 @@ export function apply(ctx, config) {
     start()
     return () => run?.stop()
   }, 'remote-iridium')
-  // The address changed on the plugin's page: ask the new one.
+  // The address changed on its settings page: ask the new one.
   ctx.on('loader/volatile-update', () => {
     if (urlNow() !== run?.url) start()
   })

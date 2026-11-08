@@ -197,3 +197,12 @@ func (s *Service) List(path string) (api.DirListing, error) {
 	}
 	return out, nil
 }
+
+// Guarded is path, absolute, as the guard lets it be read or written here (the copies across
+// machines' side on this one); an error if it may not.
+func (s *Service) Guarded(path string) (string, error) {
+	if !filepath.IsAbs(path) {
+		return "", fmt.Errorf("%w: paths must be absolute", ErrBad)
+	}
+	return s.o.Guard.Check(filepath.Clean(path))
+}

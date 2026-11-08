@@ -27,6 +27,11 @@ type env struct {
 	sock     string
 	hc       *http.Client
 	tty      bool // stderr is a terminal: progress may be drawn there
+	// at: ir runs for a session at another machine (POST /api/cli, remote.go); nil on the socket.
+	at *At
+	// after: the page's last block when the message waited on was sent ("": not known), for a
+	// transcript that does not keep its id (dsh gives each prompt its own).
+	after string
 }
 
 func newEnv(stdout, stderr io.Writer) *env {
@@ -68,6 +73,14 @@ func caller() string {
 	return ""
 }
 
+// caller is the session ir runs for: the one at another machine it was sent by, else caller().
+func (e *env) caller() string {
+	if e.at != nil {
+		return e.at.Session
+	}
+	return caller()
+}
+
 // apiError is the daemon's answer to a request that failed.
 type apiError struct {
 	status int
@@ -93,11 +106,14 @@ func (e *env) request(method, path string, body any) (*http.Response, error) {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	// The session ir runs in: what an agent does through it counts to that session's terminal.
-	if c := caller(); c != "" {
+	if c := e.caller(); c != "" && e.at == nil {
 		req.Header.Set(headerSession, c)
 	}
 	resp, err := e.hc.Do(req)
 	if err != nil {
+		if e.at != nil {
+			return nil, err
+		}
 		return nil, fmt.Errorf("iridium is not running (no answer on %s)", e.sock)
 	}
 	if resp.StatusCode/100 != 2 {
@@ -143,11 +159,14 @@ type opts struct {
 	steer   bool
 	queue   bool // ir send --queue: wait for the running turn to end instead of joining it
 	all     bool // ir ls, find --all: the archive and the subagents done too
+	here    bool // ir ls --here: the caller's group only
 	full    bool // ir read --full: the whole page as written
 	n       int  // ir read -n: how many messages
 	model   string
 	approve string
 	to      string // ir bot --to: the bot
+	machine string // ir new --machine: the Bot whose machine it runs at
+	group   string // ir new --workspace: the group it goes in
 	attach  []string
 	pos     []string
 }
@@ -172,7 +191,7 @@ func parse(args []string, allowed string) (opts, error) {
 		if !strings.Contains(" "+allowed+" ", " "+name+" ") {
 			return o, fmt.Errorf("no flag %s here", a)
 		}
-		if name == "wait" || name == "steer" || name == "queue" || name == "all" || name == "full" {
+		if name == "wait" || name == "steer" || name == "queue" || name == "all" || name == "full" || name == "here" {
 			if hasVal {
 				return o, fmt.Errorf("%s takes no value", a)
 			}
@@ -181,6 +200,7 @@ func parse(args []string, allowed string) (opts, error) {
 			o.queue = o.queue || name == "queue"
 			o.all = o.all || name == "all"
 			o.full = o.full || name == "full"
+			o.here = o.here || name == "here"
 			continue
 		}
 		if !hasVal {
@@ -197,6 +217,10 @@ func parse(args []string, allowed string) (opts, error) {
 			o.approve = val
 		case "to":
 			o.to = val
+		case "machine":
+			o.machine = val
+		case "workspace":
+			o.group = val
 		case "attach":
 			o.attach = append(o.attach, val)
 		case "n":
@@ -232,6 +256,17 @@ func localPath(arg string) (string, error) {
 		arg = filepath.Join(home, strings.TrimPrefix(arg, "~"))
 	}
 	return filepath.Abs(arg)
+}
+
+// pathArg is a path ir cp and files take: machine:path, a Bot's machine and its own path there
+// (as given; "" its home), or one here, made absolute.
+func pathArg(arg string) (machine, path string, err error) {
+	path, err = localPath(arg)
+	var peer errPeer
+	if errors.As(err, &peer) {
+		return string(peer), peerPath.FindStringSubmatch(arg)[2], nil
+	}
+	return "", path, err
 }
 
 // resolve is the full id of the session a unique prefix names.

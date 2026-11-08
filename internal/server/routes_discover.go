@@ -55,7 +55,14 @@ func (s *Server) renameWorkspace(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &req) {
 		return
 	}
-	s.discoverDone(w, s.Discover.RenameWorkspace(id, req.Name))
+	var err error
+	if req.Name != nil {
+		err = s.Discover.RenameWorkspace(id, *req.Name)
+	}
+	if err == nil && req.Hidden != nil {
+		err = s.Discover.HideWorkspace(id, *req.Hidden)
+	}
+	s.discoverDone(w, err)
 }
 
 func (s *Server) patchSession(w http.ResponseWriter, r *http.Request) {
@@ -142,7 +149,7 @@ func (s *Server) discoverError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, store.ErrNoWorkspace), errors.Is(err, fs.ErrNotExist):
 		fail(w, http.StatusNotFound, err.Error())
-	case errors.Is(err, store.ErrWorkspacePath), errors.Is(err, fs.ErrExist):
+	case errors.Is(err, store.ErrWorkspacePath), errors.Is(err, fs.ErrExist), errors.Is(err, store.ErrUserNamed):
 		fail(w, http.StatusConflict, err.Error())
 	case errors.Is(err, discover.ErrOutside), errors.Is(err, fs.ErrPermission):
 		fail(w, http.StatusForbidden, err.Error())

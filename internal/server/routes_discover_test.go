@@ -76,12 +76,29 @@ func TestWorkspacesAndFolders(t *testing.T) {
 	if len(list) != 1 || list[0].Name != "proj" || list[0].Path != made.Path || len(sessions) != 1 || sessions[0].Workspace != list[0].ID {
 		t.Fatalf("the session's group: %+v %+v", list, sessions)
 	}
-	if code := call(t, c, "PATCH", base+"/api/workspaces/"+strconv.FormatInt(list[0].ID, 10), api.WorkspacePatch{Name: "Project"}, nil); code != 200 {
+	if code := call(t, c, "PATCH", base+"/api/workspaces/"+strconv.FormatInt(list[0].ID, 10), api.WorkspacePatch{Name: new("Project")}, nil); code != 200 {
 		t.Errorf("rename: %d", code)
 	}
 	call(t, c, "GET", base+"/api/workspaces", nil, &list)
-	if len(list) != 1 || list[0].Name != "Project" {
+	if len(list) != 1 || list[0].Name != "Project" || list[0].Hidden {
 		t.Errorf("workspaces: %+v", list)
+	}
+	// Hidden, then shown again; its name left as it was.
+	wsURL := base + "/api/workspaces/" + strconv.FormatInt(list[0].ID, 10)
+	if code := call(t, c, "PATCH", wsURL, api.WorkspacePatch{Hidden: new(true)}, nil); code != 200 {
+		t.Errorf("hide: %d", code)
+	}
+	call(t, c, "GET", base+"/api/workspaces", nil, &list)
+	if len(list) != 1 || list[0].Name != "Project" || !list[0].Hidden {
+		t.Errorf("hidden: %+v", list)
+	}
+	if code := call(t, c, "PATCH", wsURL, api.WorkspacePatch{Hidden: new(false)}, nil); code != 200 {
+		t.Errorf("show: %d", code)
+	}
+	list = nil
+	call(t, c, "GET", base+"/api/workspaces", nil, &list)
+	if len(list) != 1 || list[0].Hidden {
+		t.Errorf("shown again: %+v", list)
 	}
 	yes, name := true, "named"
 	if code := call(t, c, "PATCH", base+"/api/sessions/"+created.ID, api.SessionPatch{Pinned: &yes, Name: &name}, nil); code != 200 {

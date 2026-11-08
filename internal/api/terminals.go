@@ -224,6 +224,15 @@ type ExecAgent struct {
 	Version string `json:"version,omitempty"`
 }
 
+// DshWorkspace is a folder a new dsh session at a machine may open in (GET
+// /api/machines/{id}/dsh/workspaces): one of dsh's workspaces there, as DSH Desktop's sidebar
+// has them, else a folder its sessions were in. Path is '/'-separated, as GET /api/folders gives.
+type DshWorkspace struct {
+	Title     string `json:"title"`
+	Path      string `json:"path"`
+	UpdatedAt int64  `json:"updatedAt,omitempty"` // ms
+}
+
 // ExecPairing answers a pairing request: the code to show, and the request to ask after.
 type ExecPairing struct {
 	Code    string `json:"code"`

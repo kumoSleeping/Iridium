@@ -10,7 +10,9 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -135,6 +137,7 @@ func serve(args []string) int {
 	}
 	d.SetOnChange(m.Refresh)
 	d.SetAlias(m.AgentID)
+	d.SetRemote(executors)
 	if err := d.Start(); err != nil {
 		log.Print(err)
 		return 1
@@ -150,6 +153,9 @@ func serve(args []string) int {
 	srv.Remote = executors
 	srv.WatchMachines()
 	srv.ConfigPath = *path
+	srv.CLI = func(args []string, stdout, stderr io.Writer, hc *http.Client, machine, session, cwd string) int {
+		return cli.RunAt(args, stdout, stderr, hc, cli.At{Machine: machine, Session: session, Cwd: cwd})
+	}
 	srv.Updater = newUpdater(cfg, h)
 	h.Set("update", srv.Updater.State())
 	// Web Push's total switch is the config's: turning it writes the file (with the settings').

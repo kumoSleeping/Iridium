@@ -418,7 +418,11 @@ func (s *Service) onNotice(n session.Notice) {
 		delete(s.held, n.Session)
 	case session.NoticeTurnEnd:
 		delete(s.held, n.Session)
-		if text := cmp.Or(n.Text, held); text != "" {
+		text := cmp.Or(n.Text, held)
+		if n.Denied > 0 { // said, not a lamp: Claude may have gone another way (the user, 2026-11-08)
+			text = strings.TrimSpace(text + fmt.Sprintf("\n\n（auto 拦了 %d 步）", n.Denied))
+		}
+		if text != "" {
 			out = append(out, ev{"reply", api.ChatEvent{}})
 			out[len(out)-1].e.Text = text // the reply is made per plugin below: its file refs
 		}

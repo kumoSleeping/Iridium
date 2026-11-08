@@ -2,8 +2,8 @@ import { partialInput, tail } from "../src/chat/partial";
 // A fold's line: the lines each kind of edit adds and takes, and the line read out.
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import type { Block } from "../src/api/types.gen";
-import { cmdOf, cmdOfCall } from "../src/chat/cmd";
-import { argOf, diffOf, diffSum, diffText, foldLine, foldSaid, lineDiff, patchDiff, runCmd, type Step } from "../src/chat/fold";
+import { cmdOf, cmdOfCall, renameOnly } from "../src/chat/cmd";
+import { argOf, diffOf, diffSum, diffText, folded, foldLine, foldSaid, lineDiff, patchDiff, runCmd, type Step } from "../src/chat/fold";
 import { setLang } from "../src/i18n";
 
 const call = (name: string, input: unknown, more: Partial<Omit<Block, "kind">> = {}): Step => ({ at: `${name}.${Math.random()}`, kind: "tool", name, input: typeof input === "string" ? input : JSON.stringify(input), result: { at: "r", text: "ok" }, ...more });
@@ -189,6 +189,24 @@ describe("a shell call's sort", () => {
     expect(cmdOfCall({ name: "Bash", input: '{"command":"curl -s http://x/a?q=1 | jq' })).toBe("net");
     expect(cmdOfCall({ name: "Grep", input: JSON.stringify({ pattern: "x" }) })).toBeUndefined();
     expect(cmdOfCall({ name: "Bash", input: JSON.stringify({ command: "frobnicate" }) })).toBeUndefined();
+  });
+  test("a call that only names the session (ir rename) is left out of the chat", () => {
+    const r = (name: string, command: unknown) => renameOnly({ name, input: JSON.stringify({ command }) });
+    expect(r("Bash", 'ir rename "会话命名"')).toBe(true);
+    expect(r("exec_command", "bash -lc 'ir rename x'")).toBe(true);
+    expect(r("shell", ["bash", "-lc", "ir rename x"])).toBe(true);
+    expect(renameOnly({ name: "Bash", input: '{"command":"ir rename \\"会话' })).toBe(true);
+    expect(r("Bash", "ir rename x && rm -rf y")).toBe(false);
+    expect(r("Bash", "ir rename x > /tmp/y")).toBe(false);
+    expect(r("Bash", "ir ls")).toBe(false);
+    expect(r("Read", "ir rename x")).toBe(false);
+    const shown = folded([
+      { at: "0", kind: "user", text: "go" },
+      { at: "1", kind: "tool", id: "a", name: "Bash", input: JSON.stringify({ command: "ir rename x" }) },
+      { at: "2", kind: "result", id: "a", text: "" },
+      { at: "3", kind: "assistant", text: "ok" },
+    ]);
+    expect(shown.map((s) => s.kind)).toEqual(["user", "assistant"]);
   });
   test("a fold's run of one name keeps a sort only all its calls share", () => {
     const think: Step = { at: "t", kind: "thinking", text: "hmm" };

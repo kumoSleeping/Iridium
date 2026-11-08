@@ -15,6 +15,7 @@ export type Cmd =
   | "ir-files"
   | "ir-access"
   | "ir-profile"
+  | "ir-rename"
   | "git"
   | "git-commit"
   | "git-push"
@@ -44,6 +45,31 @@ const SHELLS = new Set(["bash", "exec_command", "shell", "local_shell"]);
 
 /** A call's sort, if it runs a shell command. */
 export function cmdOfCall(t: { name?: string; input?: string }): Cmd | undefined {
+  const i = shellInput(t);
+  return i && cmdOf(commandOf(i), typeof i.description === "string" ? i.description : undefined);
+}
+
+/** Whether a call is only an agent naming its session (ir rename): the chat leaves it out. */
+export function renameOnly(t: { name?: string; input?: string }): boolean {
+  const i = shellInput(t);
+  return !!i && renames(commandOf(i));
+}
+
+function renames(command: string): boolean {
+  const segs = segments(command);
+  const w = segs.length === 1 && !segs[0]!.out ? strip(segs[0]!.words) : undefined;
+  if (!w) return false;
+  const sh = shellArg(w);
+  return sh !== undefined ? renames(sh) : /^(ir|iridium)$/.test(name(w[0]!)) && w[1] === "rename";
+}
+
+const commandOf = (i: Record<string, unknown>) => {
+  const c = i.command ?? i.cmd;
+  return typeof c === "string" ? c : Array.isArray(c) ? (shellArg(c.map(String)) ?? c.map(String).join(" ")) : "";
+};
+
+/** A shell call's input; none for another tool's. */
+function shellInput(t: { name?: string; input?: string }): Record<string, unknown> | undefined {
   if (!SHELLS.has((t.name ?? "").toLowerCase())) return undefined;
   let i: Record<string, unknown> = {};
   try {
@@ -53,9 +79,7 @@ export function cmdOfCall(t: { name?: string; input?: string }): Cmd | undefined
     // An input cut short: its command and description as far as they go.
     for (const m of (t.input ?? "").matchAll(/"(command|cmd|description)"\s*:\s*"((?:[^"\\]|\\.)*)/g)) i[m[1]!] ??= m[2]!.replace(/\\n/g, "\n").replace(/\\(.)/g, "$1");
   }
-  const c = i.command ?? i.cmd;
-  const command = typeof c === "string" ? c : Array.isArray(c) ? (shellArg(c.map(String)) ?? c.map(String).join(" ")) : "";
-  return cmdOf(command, typeof i.description === "string" ? i.description : undefined);
+  return i;
 }
 
 /** A command's sort: its first command that means something decides; one we don't know falls to
@@ -171,6 +195,7 @@ const IR: Record<string, Cmd> = {
   access: "ir-access",
   revoke: "ir-access",
   profile: "ir-profile",
+  rename: "ir-rename",
   public: "net",
   update: "install",
 };

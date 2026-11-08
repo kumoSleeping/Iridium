@@ -106,6 +106,9 @@ type Session struct {
 	// Offline: that executor is not connected now.
 	Machine string `json:"machine,omitempty"`
 	Offline bool   `json:"offline,omitempty"`
+	// Loose: a dsh session at another machine in none of DSH Desktop's workspaces there (its 未分组):
+	// in 未归类, a row of its own, not in a folder.
+	Loose bool `json:"loose,omitempty"`
 }
 
 // LastSaid is the last thing said in a session, on one line, at most 200 characters.
@@ -396,6 +399,9 @@ type SendReply struct {
 	// Command: the agent runs it as a command of its own (Codex's, pi's /compact): no words of
 	// it come in the transcript.
 	Command bool `json:"command,omitempty"`
+	// Desktop: given to DSH Desktop's own agent of the session (it holds the session there; no
+	// input here): the turn runs in Desktop, its words come in the mirrored transcript.
+	Desktop bool `json:"desktop,omitempty"`
 }
 
 // Release puts the process in manual mode for call ToolUseID, which Claude's auto mode classifier

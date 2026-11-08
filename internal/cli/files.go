@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"time"
 
 	"github.com/kumoSleeping/iridium/internal/api"
@@ -16,15 +17,14 @@ func cmdCp(e *env, args []string) int {
 	if err != nil || len(o.pos) != 2 {
 		return e.failf("usage: ir cp <源> <目标>")
 	}
-	from, err := localPath(o.pos[0])
-	if err != nil {
+	var req api.Copy
+	if req.FromMachine, req.From, err = pathArg(o.pos[0]); err != nil {
 		return e.fail(err)
 	}
-	to, err := localPath(o.pos[1])
-	if err != nil {
+	if req.ToMachine, req.To, err = pathArg(o.pos[1]); err != nil {
 		return e.fail(err)
 	}
-	resp, err := e.request("POST", "/api/files/copy", api.Copy{From: from, To: to})
+	resp, err := e.request("POST", "/api/files/copy", req)
 	if err != nil {
 		return e.fail(err)
 	}
@@ -63,12 +63,16 @@ func cmdFiles(e *env, args []string) int {
 	if len(o.pos) == 1 {
 		dir = o.pos[0]
 	}
-	path, err := localPath(dir)
+	machine, path, err := pathArg(dir)
 	if err != nil {
 		return e.fail(err)
 	}
+	q := query("path", path)
+	if machine != "" {
+		q += "&machine=" + url.QueryEscape(machine)
+	}
 	var l api.DirListing
-	if err := e.do("GET", "/api/files"+query("path", path), nil, &l); err != nil {
+	if err := e.do("GET", "/api/files"+q, nil, &l); err != nil {
 		return e.fail(err)
 	}
 	for _, en := range l.Entries {

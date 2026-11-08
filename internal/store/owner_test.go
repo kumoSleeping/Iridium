@@ -22,7 +22,7 @@ func downTo4(t *testing.T, path string) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	for _, q := range []string{`ALTER TABLE invites DROP COLUMN owner`, `ALTER TABLE session_settings DROP COLUMN ultracode`, `DROP TABLE devices`, `DROP TABLE session_colors`, `DROP TABLE folder_colors`, `DROP TABLE push_rules`, `DROP TABLE secrets`, `DROP TABLE secret_uses`, `ALTER TABLE names DROP COLUMN auto`, `ALTER TABLE session_settings DROP COLUMN preset`, `ALTER TABLE workspaces DROP COLUMN creator`, `DROP TABLE chat_seen`, `DROP TABLE machines`, `CREATE TABLE push_settings (workspace INTEGER PRIMARY KEY, needs_you INTEGER NOT NULL, error INTEGER NOT NULL, turn_end INTEGER NOT NULL, compact INTEGER NOT NULL)`, `PRAGMA user_version = 4`} {
+	for _, q := range []string{`ALTER TABLE invites DROP COLUMN owner`, `ALTER TABLE session_settings DROP COLUMN ultracode`, `DROP TABLE devices`, `DROP TABLE session_colors`, `DROP TABLE folder_colors`, `DROP TABLE push_rules`, `DROP TABLE secrets`, `DROP TABLE secret_uses`, `ALTER TABLE names DROP COLUMN auto`, `ALTER TABLE session_settings DROP COLUMN preset`, `ALTER TABLE workspaces DROP COLUMN creator`, `DROP TABLE chat_seen`, `DROP TABLE machines`, `ALTER TABLE workspaces DROP COLUMN hidden`, `CREATE TABLE push_settings (workspace INTEGER PRIMARY KEY, needs_you INTEGER NOT NULL, error INTEGER NOT NULL, turn_end INTEGER NOT NULL, compact INTEGER NOT NULL)`, `PRAGMA user_version = 4`} {
 		if _, err := db.Exec(q); err != nil {
 			t.Fatal(err)
 		}

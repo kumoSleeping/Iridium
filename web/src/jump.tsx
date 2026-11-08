@@ -40,7 +40,7 @@ export function Jump({ close, tree, open }: { close: () => void; tree: Tree; ope
   const said = useSaidLine();
   const [typed, setTyped] = useState("");
   const [pick, setPick] = useState(0);
-  const list = jumpList(all, flat(tree), typed, open, recent());
+  const list = jumpList(all.filter((s) => !tree.hidden.has(s.id)), flat(tree), typed, open, recent());
   const sel = Math.min(pick, list.length - 1);
   const go = (id: string) => (close(), id !== open && openChat(id));
   const root = useRef<HTMLDivElement>(null);

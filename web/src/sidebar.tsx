@@ -9,7 +9,7 @@
 // and at its foot the colour tags (colors.ts); a group's: rename, its path, 通知. The mouse resting
 // on a row fetches its chat ahead.
 import { Menu } from "@base-ui/react/menu";
-import { Archive, ArchiveRestore, Bot, Check, ChevronRight, Copy, Folder, FolderOpen, Pencil, Pin, PinOff, Plus, Square, Workflow as WorkflowIcon } from "lucide-react";
+import { Archive, ArchiveRestore, Bot, Check, ChevronRight, Copy, Eye, EyeOff, Folder, FolderOpen, Pencil, Pin, PinOff, Plus, Square, Workflow as WorkflowIcon } from "lucide-react";
 import { ConfirmIcon, confirmName, confirmTitle } from "./confirmname";
 import { Fragment, lazy, memo, Suspense, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { api } from "./api/client";
@@ -19,11 +19,11 @@ import { ahead, behind } from "./chats";
 import { t, useLang } from "./i18n";
 import { useFlip } from "./motion";
 import { folderLevels, sessionLevels, usePushMenus, wsLevels, type PushLevel } from "./push";
-import type { Folder as FolderNode, Tree, WsNode } from "./tree";
+import { remotePath, type Folder as FolderNode, type Tree, type WsNode } from "./tree";
 import { LinkDot } from "./link";
 import { errText, toast } from "./toast";
 import { useMe, useTerminalList, useUpdate } from "./data";
-import { agentName, ago, Avatar, cn, fine, IconKey, IrMark, keep, kept, Lamp, lampOf, Logo, own, sessionStatusText, statusText, tilde, Tip, titleOf, useLongPress, useMenuAt, useMinute } from "./ui";
+import { agentName, ago, Avatar, cn, fine, IconKey, IrMark, keep, kept, Lamp, lampOf, Logo, own, sessionStatusText, statusText, tilde, Tip, titleOf, untitled, useLongPress, useMenuAt, useMinute } from "./ui";
 import { SESSION_DRAG } from "./chat/refs";
 import { useUnread } from "./unread";
 import { MachineBadge, MachineTag, remoteOf, shownPath, useLate, useMachine } from "./machines";
@@ -232,6 +232,7 @@ export function Sidebar(p: Props) {
                 sessions={w.rows.flatMap((r) => (r.kind === "session" ? [r.s] : r.f.sessions))}
                 root={w.root}
                 machine={at}
+                hidden={w.hidden}
                 open={open}
                 onToggle={() => p.toggle(w.key)}
                 // Not its count: the "+" that opens a session here, always at the row's end, plain to
@@ -354,8 +355,8 @@ function TrashLid({ open }: { open: boolean }) {
 
 /** A folder shut or open: both drawn, cross-faded (motion.css "swap"); tagged, in its colour and
  *  faintly filled with it. */
-function FolderMark({ open, color, size = 15, className }: { open: boolean; color?: Color; size?: number; className?: string }) {
-  return (
+function FolderMark({ open, color, remote, size = 15, className }: { open: boolean; color?: Color; remote?: boolean; size?: number; className?: string }) {
+  const mark = (
     <span
       data-on={open || undefined}
       className={cn("g-swap transition-colors duration-(--dur-2)", color ? "[&_svg]:[fill:color-mix(in_oklch,currentColor_24%,transparent)]" : (className ?? "text-ink-3"))}
@@ -364,6 +365,17 @@ function FolderMark({ open, color, size = 15, className }: { open: boolean; colo
     >
       <Folder size={size} />
       <FolderOpen size={size} />
+    </span>
+  );
+  if (!remote) return mark;
+  // At another machine: a solid cloud over the folder's lower corner, tucked in toward its middle,
+  // ringed in the row's colour so the folder's line stops short of it (the user, 2026-11-08).
+  return (
+    <span className="relative grid">
+      {mark}
+      <svg role="img" aria-label={t("nav.remoteFolder")} width={10} height={8} viewBox="0 0 20 15" className="absolute -right-px -bottom-px overflow-visible text-ink-2">
+        <path d="M15 13.5H5.5a4 4 0 0 1-.6-7.95A5.2 5.2 0 0 1 14.8 4.6 4.45 4.45 0 0 1 15 13.5Z" fill="currentColor" stroke="var(--row-bg, var(--paper))" strokeWidth={3} strokeLinejoin="round" paintOrder="stroke" />
+      </svg>
     </span>
   );
 }
@@ -393,11 +405,10 @@ type RowProps = {
   faded?: boolean;
   /** A second line, under the label: the row is two lines high, its icon by the first. */
   sub?: ReactNode;
-  /** A workspace's own row (the user, 2026-11-06): a larger name that springs a little to the right
-   *  as the mouse comes on it; no chevron nor its column (the user, 2026-11-08): its folder
+  /** A workspace's own row (the user, 2026-11-06): a larger name; no chevron nor its column (the user, 2026-11-08): its folder
    *  at the far left, the rows in it one step in under it, as a tree. */
   reveal?: boolean;
-  /** A group's place without its name's spring: the bin of 归档, under the groups' folders. */
+  /** A group's place without its larger name: the bin of 归档, under the groups' folders. */
   head?: boolean;
 };
 
@@ -430,7 +441,7 @@ function Row({ depth, flip, chevron, expanded, icon, label, end, selected, onCli
           <span
             className={cn(
               "min-w-0 flex-1",
-              reveal ? "text-md transition-[translate] duration-(--dur-2) ease-(--ease-spring) motion-safe:group-hover:translate-x-[3px]" : "text-base pointer-coarse:text-md",
+              reveal ? "text-md" : "text-base pointer-coarse:text-md",
               two ? "flex items-baseline leading-5 pointer-coarse:leading-[23px]" : "truncate",
               selected ? "font-semibold text-ink" : "text-ink",
             )}
@@ -448,7 +459,7 @@ function Row({ depth, flip, chevron, expanded, icon, label, end, selected, onCli
 /** A group's row; its menu (right click, long-press): its sessions archived, as a folder's (the
  *  user, 2026-11-08: a group is a folder now), rename, its path copied, open or folded, 通知 while
  *  push is on. 未归类 itself (id 0): its sessions archived and its 通知. */
-function WsRow({ flip, id, name, root, sessions, machine, open, onToggle, end }: { flip: string; id: number; name: string; root: string; sessions: Session[]; machine?: Machine; open: boolean; onToggle: () => void; end: ReactNode }) {
+function WsRow({ flip, id, name, root, sessions, machine, hidden, open, onToggle, end }: { flip: string; id: number; name: string; root: string; sessions: Session[]; machine?: Machine; hidden?: boolean; open: boolean; onToggle: () => void; end: ReactNode }) {
   const machines = useMachines();
   const push = usePushMenus();
   const me = useMe().data;
@@ -470,6 +481,10 @@ function WsRow({ flip, id, name, root, sessions, machine, open, onToggle, end }:
           { icon: <Pencil size={15} />, label: t("menu.rename"), run: () => setRenaming(true) },
           { icon: <Copy size={15} />, label: t("menu.copyPath"), run: () => void navigator.clipboard.writeText(shownPath(root, machines).real).then(() => toast(t("toast.copied")), failed) },
           { icon: open ? <Folder size={15} /> : <FolderOpen size={15} />, label: open ? t("menu.fold") : t("menu.unfold"), run: onToggle },
+          // Hidden: listed no more, but while one of its sessions runs elsewhere (the user, 2026-11-08).
+          hidden
+            ? { icon: <Eye size={15} />, label: t("menu.unhide"), run: () => void api.patchWorkspace(id, { hidden: false }).catch(failed) }
+            : { icon: <EyeOff size={15} />, label: t("menu.hide"), run: () => void api.patchWorkspace(id, { hidden: true }).then(() => toast(t("toast.hidden", { ws: name })), failed) },
         ]
       : []),
   ];
@@ -484,7 +499,7 @@ function WsRow({ flip, id, name, root, sessions, machine, open, onToggle, end }:
         // No chevron, on a phone either (the user, 2026-11-08): its sessions shown under it, or not.
         expanded={open}
         reveal
-        icon={<WsMark open={open} />}
+        icon={<WsMark open={open} remote={remotePath(root)} />}
         onClick={() => !renaming && onToggle()}
         label={
           renaming ? (
@@ -542,8 +557,8 @@ function FolderLabel({ path }: { path: string }) {
   );
 }
 
-function WsMark({ open }: { open: boolean }) {
-  return <FolderMark open={open} className="text-ink-2" />;
+function WsMark({ open, remote }: { open: boolean; remote: boolean }) {
+  return <FolderMark open={open} remote={remote} className="text-ink-2" />;
 }
 
 /** A workspace's new name, in place of its row's: Enter or leaving it renames, Esc leaves it. */
@@ -668,6 +683,8 @@ const SessionRow = memo(function SessionRow({ s, where, depth, flip, selected, o
   const bots = s.bots?.length ? <Here bots={s.bots} /> : null;
   // At another machine: its face on the logo; not connected now, a grey ring for its lamp.
   const machine = useMachine(s.machine);
+  // In a group at another machine (machineShown), one of this machine's.
+  const here = !!machineShown && !s.machine && !s.subagent;
   // Gone a moment (a proxy's cut, a Mac waking) is not shown as gone (machines.tsx useLate).
   const away = useLate(!!s.offline) && !busy;
   const end = slot || mark || lamp || bots || away ? (
@@ -688,10 +705,17 @@ const SessionRow = memo(function SessionRow({ s, where, depth, flip, selected, o
         faded={s.archived}
         aria={`${title}, ${told}${s.color ? `, ${t("color.tagged", { color: t(`color.${s.color}`) })}` : ""}${unread ? `, ${t("status.unread")}` : ""}`}
         icon={
-          <Tip label={[agentName(s.agent), machine?.name, s.subagent && t("row.subagent"), away ? t("status.offline") : status !== "idle" && told].filter(Boolean).join(" · ")} side="bottom">
+          <Tip label={[agentName(s.agent), machine?.name, here && t("new.local"), s.subagent && t("row.subagent"), away ? t("status.offline") : status !== "idle" && told].filter(Boolean).join(" · ")} side="bottom">
             <span className="relative grid">
               <Logo agent={s.agent} />
               {machine && !s.subagent && !machineShown && <MachineBadge m={machine} />}
+              {/* This machine's, in a group at another (a coordinator there): Iridium's mark on its
+                  logo, as that machine's would have its own (the user, 2026-11-08). */}
+              {here && (
+                <span role="img" aria-label={t("new.local")} className="absolute -right-1 -bottom-1 grid place-items-center rounded-[3px]" style={{ boxShadow: "0 0 0 1.5px var(--row-bg, var(--paper))" }}>
+                  <IrMark size={10} ground="var(--ink-2)" />
+                </span>
+              )}
               {/* A subagent: no word for it, a small agent badge on the logo's corner (the user, 2026-11-06). */}
               {s.subagent && (
                 <span role="img" aria-label={t("row.subagent")} className="absolute -right-1 -bottom-1 grid size-[11px] place-items-center rounded-full text-ink-2" style={{ background: "var(--row-bg, var(--paper))" }}>
@@ -706,7 +730,7 @@ const SessionRow = memo(function SessionRow({ s, where, depth, flip, selected, o
             <Rename s={s} done={() => setRenaming(false)} />
           ) : (
             <span className="flex min-w-0 items-baseline">
-              <Marked color={s.color}>{title}</Marked>
+              <Marked color={s.color}>{untitled(s) ? <span className="text-ink-3">{title}</span> : title}</Marked>
               {where && (
                 <Tip label={tilde(s.cwd)} side="bottom">
                   <span className="ml-1.5 max-w-[35%] shrink-0 truncate text-xs font-normal text-ink-3">{where.startsWith("/") ? tilde(where) : shownPath(where, machines).label}</span>
@@ -755,7 +779,7 @@ export function Rename({ s, done, className }: { s: Session; done: () => void; c
     <input
       autoFocus
       aria-label={t("menu.rename")}
-      defaultValue={titleOf(s)}
+      defaultValue={untitled(s) ? "" : titleOf(s)}
       maxLength={80}
       onFocus={(e) => e.currentTarget.select()}
       onClick={(e) => e.stopPropagation()}
@@ -828,7 +852,7 @@ function FolderRow({ f, ws, label, open, onToggle, newHere, plus }: { f: FolderN
         expanded={open}
         onClick={onToggle}
         // No chevron: the folder itself is open or shut (the user, 2026-11-06).
-        icon={<FolderMark open={open} color={color} />}
+        icon={<FolderMark open={open} color={color} remote={remotePath(f.path)} />}
         label={label}
         end={plus && <span className="flex items-center" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>{plus}</span>}
         extra={{ ...lp, onContextMenu: (e: React.MouseEvent) => own(e) && (e.preventDefault(), setAt({ x: e.clientX, y: e.clientY })), onClickCapture: lp.onClickCapture }}

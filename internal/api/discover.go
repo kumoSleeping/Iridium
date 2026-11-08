@@ -7,18 +7,24 @@ type Workspace struct {
 	ID   int64  `json:"id"`
 	Name string `json:"name"`
 	Path string `json:"path"`
+	// Hidden: hidden from the page (a group's menu): its sessions are not listed, searched or in
+	// 归档, but while one of them runs elsewhere (open in DSH Desktop).
+	Hidden bool `json:"hidden,omitempty"`
 }
 
-// WorkspacePatch renames a group.
+// WorkspacePatch renames a group, hides it or shows it again; a field left out stays.
 type WorkspacePatch struct {
-	Name string `json:"name"`
+	Name   *string `json:"name,omitempty"`
+	Hidden *bool   `json:"hidden,omitempty"`
 }
 
 // SessionPatch changes what lies over a session; a field left out stays. Name "" takes the name
 // off. Workspace moves it (0: none), and it is never moved by discovery again. Color "" takes the
-// colour tag off.
+// colour tag off. ByAgent: Name is the session's agent's (ir rename from a session), which does
+// not replace a name the user gave (409) and is cleaned as a title line is.
 type SessionPatch struct {
 	Name      *string `json:"name,omitempty"`
+	ByAgent   bool    `json:"byAgent,omitempty"`
 	Pinned    *bool   `json:"pinned,omitempty"`
 	Archived  *bool   `json:"archived,omitempty"`
 	Workspace *int64  `json:"workspace,omitempty"`

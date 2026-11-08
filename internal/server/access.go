@@ -67,7 +67,8 @@ func callerOf(r *http.Request) caller {
 		return c
 	}
 	id, _ := gate.FromContext(r.Context())
-	return caller{Identity: id}
+	// A session's own TOKEN: its agent's ir, at the machine (docs/exec.md "远端的 ir").
+	return caller{Identity: id, agent: id.Session != "", session: id.Session}
 }
 
 var localIdentity = gate.Identity{EndpointID: gate.LocalEndpointID, Name: gate.LocalName, Kind: gate.KindChannel, Local: true}
@@ -115,6 +116,7 @@ func (s *Server) newGate(origin string) (*gate.Gate, error) {
 		StateDir:     s.cfg.StatePath(),
 		Hosts:        s.cfg.Hosts,
 		OnJoin:       s.joined,
+		SessionToken: s.sessionToken,
 		OnRevoke:     s.revoked,
 		OnTerminals:  s.terminalsChanged,
 		Open:         openPath,
@@ -123,9 +125,13 @@ func (s *Server) newGate(origin string) (*gate.Gate, error) {
 }
 
 // terminalsChanged tells the pages the terminals changed (a Bot's avatar came, a panel renamed):
-// they fetch GET /api/terminals again. The key "terminals" carries a count, nothing of them.
+// they fetch GET /api/terminals again. The key "terminals" carries a count, nothing of them. A
+// machine is its Bot, its name and avatar the Bot's: the machines are told again too.
 func (s *Server) terminalsChanged() {
 	s.hub.Set("terminals", s.terminalsSeq.Add(1))
+	if s.Remote != nil && s.st != nil {
+		s.publishMachines()
+	}
 }
 
 // revoked forgets a revoked terminal's chats (a Bot's): where they pointed, so the list marks no
@@ -167,7 +173,7 @@ func (l logWriter) Write(b []byte) (int, error) {
 // still counts the message and its usage. Whether the agent flag is set does not matter: ir send
 // does not send it, and a session in the environment is an agent's.
 func (s *Server) fromOf(c caller, callerSession string) string {
-	if !c.socket {
+	if !c.socket && c.session == "" {
 		return c.EndpointID
 	}
 	from := c.session
@@ -373,4 +379,16 @@ func (g chatGuard) Answer(c chat.Caller, id string) error {
 func (g chatGuard) FileOut(c chat.Caller, id string) error {
 	_, err := g.s.m.State(id)
 	return err
+}
+
+// sessionToken is the gate's Config.SessionToken: the hosted session whose own TOKEN it is, and
+// the Bot of the machine it runs at.
+func (s *Server) sessionToken(tok string) (endpointID, session string, ok bool) {
+	if s.tokenFor != nil {
+		return s.tokenFor(tok)
+	}
+	if s.m == nil {
+		return "", "", false
+	}
+	return s.m.SessionToken(tok)
 }

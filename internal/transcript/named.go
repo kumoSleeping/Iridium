@@ -28,7 +28,7 @@ func NameLine(text string) string {
 	}
 	ms := nameLine.FindAllStringSubmatch(nameFence.ReplaceAllString(text, ""), -1)
 	for i := len(ms) - 1; i >= 0; i-- {
-		if t := cleanName(ms[i][1]); t != "" {
+		if t := CleanName(ms[i][1]); t != "" {
 			return t
 		}
 	}
@@ -51,7 +51,9 @@ func WithoutNameLines(text string) string {
 	return strings.TrimRight(b.String(), " \t\n")
 }
 
-func cleanName(s string) string {
+// CleanName is s as a title line's text is taken: on one line, without the quotes around it or the
+// punctuation at its end, cut to NameWidth. Also an agent's ir rename.
+func CleanName(s string) string {
 	s = oneLine(s)
 	for changed := true; changed; {
 		changed = false

@@ -21,13 +21,15 @@ import { BotItems, MenuItems, Rename, sessionActions, sessionTags } from "../sid
 import { useConfirms, useList, useSession } from "../store";
 import { drafts, opened } from "../stream";
 import { errText } from "../toast";
-import { agentName, cn, lampOf, LogoLamp, sessionStatusText, tilde, Tip, titleOf } from "../ui";
-import { Asks } from "./asks";
+import { groupPath } from "../tree";
+import { agentName, cn, lampOf, LogoLamp, sessionStatusText, tilde, Tip, titleOf, untitled } from "../ui";
+import { Asks, Denials } from "./asks";
+import { renameOnly } from "./cmd";
 import { Composer, type ComposerHandle } from "./composer";
 import { folded, type Tool } from "./fold";
 import { ToolDraft, Waiting } from "./live";
 import { Draft } from "./markdown";
-import { ContextRing, ModelKey, modelView, PresetKey, QuotaBars, useMode } from "./meters";
+import { ContextRing, ModeKey, ModelKey, modelView, PresetKey, QuotaBars, useMode } from "./meters";
 import { Queue } from "./queue";
 import { ShellRuns } from "./shell";
 import { Crash } from "./crash";
@@ -162,6 +164,7 @@ export function ChatPage({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?:
 
   const composer = useRef<ComposerHandle>(null);
   const [modelOpen, setModelOpen] = useState(false);
+  const [modeOpen, setModeOpen] = useState(false);
   const [usageOpen, setUsageOpen] = useState(false);
   const shown = folded(log.blocks);
   const cwd = s?.cwd ?? row?.cwd ?? "";
@@ -217,7 +220,7 @@ export function ChatPage({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?:
             <Said key={b.at} b={b} session={id} cwd={cwd} source={source} onJump={openChat} />
           ))}
           {log.drafts
-            .filter((d) => !d.tool || !busy)
+            .filter((d) => !d.tool || (!busy && !renamesDraft(d)))
             .map((d) =>
               d.tool ? (
                 <ToolDraft key={`${d.proc}.${d.n}`} name={d.tool.name} input={d.text} whole />
@@ -244,7 +247,7 @@ export function ChatPage({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?:
             <div className="-mt-1">
               <Compaction since={compactSince.current} />
             </div>
-          ) : log.loaded && (busy ? <Activity calls={log.drafts.filter((d) => d.tool)} running={shown.flatMap((b) => (b.kind === "running" ? [b.tool] : []))} cwd={cwd} quiet={s.status !== "waiting" && !log.drafts.some((d) => !d.whole && !d.tool)} grew={grew} /> : <div aria-hidden className="-mt-3 h-7 pointer-coarse:h-9" />)}
+          ) : log.loaded && (busy ? <Activity calls={log.drafts.filter((d) => d.tool && !renamesDraft(d))} running={shown.flatMap((b) => (b.kind === "running" ? [b.tool] : []))} cwd={cwd} quiet={s.status !== "waiting" && !log.drafts.some((d) => !d.whole && !d.tool)} grew={grew} /> : s.denials?.length ? <Denials session={id} denials={s.denials} cwd={cwd} stuck={s.status === "waiting" && !s.asks.length} /> : <div aria-hidden className="-mt-3 h-7 pointer-coarse:h-9" />)}
           {s.status === "error" && s.error && <Crash error={s.error} />}
         </div>
       </Stick>
@@ -258,7 +261,7 @@ export function ChatPage({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?:
         <div className="relative mx-auto max-w-[760px]">
           {!s.subagent && !elsewhere && <ShellRuns s={s} />}
           <Queue session={id} queue={s.queue ?? []} steered={(q) => onSent({ key: crypto.randomUUID(), text: q.text, files: [], from: 0, input: q.id, steer: true })} />
-          <Asks session={id} asks={s.asks} denials={s.denials ?? []} cwd={cwd} confirms={confirms.filter((c) => c.session === id)} />
+          <Asks session={id} asks={s.asks} cwd={cwd} confirms={confirms.filter((c) => c.session === id)} />
           {s.subagent ? (
             <div className="glass float rest flex h-12 items-center justify-center gap-1 rounded-[20px] text-sm text-ink-3">
               {t("chat.subagent")}
@@ -271,7 +274,7 @@ export function ChatPage({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?:
           ) : elsewhere ? (
             <div className="glass float rest flex h-12 items-center justify-center rounded-[20px] text-sm text-ink-3">{t("chat.elsewhere")}</div>
           ) : (
-            <Under s={s} ghost={ghost} composer={composer} onSent={onSent} onSentDone={(x) => ((log.sent = log.sent.filter((y) => y !== x || !x.queued)), changed())} modelOpen={modelOpen} setModelOpen={setModelOpen} usageOpen={usageOpen} setUsageOpen={setUsageOpen} />
+            <Under s={s} ghost={ghost} composer={composer} onSent={onSent} onSentDone={(x) => ((log.sent = log.sent.filter((y) => y !== x || !x.queued)), changed())} modelOpen={modelOpen} setModelOpen={setModelOpen} modeOpen={modeOpen} setModeOpen={setModeOpen} usageOpen={usageOpen} setUsageOpen={setUsageOpen} />
           )}
         </div>
       </div>
@@ -279,10 +282,9 @@ export function ChatPage({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?:
   );
 }
 
-/** The composer, with in its foot the model key, the quota bars, and at the right the context ring,
- *  then send (the user, 2026-11-06). No approval-mode key (the user, 2026-11-06): Shift+Tab and
- *  /mode still step it, saying where they left it. */
-function Under({ s, ghost, composer, onSent, onSentDone, modelOpen, setModelOpen, usageOpen, setUsageOpen }: { s: LiveSession; ghost: boolean; composer: React.RefObject<ComposerHandle | null>; onSent: (x: Sent) => void; onSentDone: (x: Sent) => void; modelOpen: boolean; setModelOpen: (o: boolean) => void; usageOpen: boolean; setUsageOpen: (o: boolean) => void }) {
+/** The composer, with in its foot the approval-mode key (back, its name alone, the user,
+ *  2026-11-08), the model key, the quota bars, and at the right the context ring, then send. */
+function Under({ s, ghost, composer, onSent, onSentDone, modelOpen, setModelOpen, modeOpen, setModeOpen, usageOpen, setUsageOpen }: { s: LiveSession; ghost: boolean; composer: React.RefObject<ComposerHandle | null>; onSent: (x: Sent) => void; onSentDone: (x: Sent) => void; modelOpen: boolean; setModelOpen: (o: boolean) => void; modeOpen: boolean; setModeOpen: (o: boolean) => void; usageOpen: boolean; setUsageOpen: (o: boolean) => void }) {
   const mode = useMode(s);
   const agentInfo = useAgent(s.agent);
   const [ctxOpen, setCtxOpen] = useState(false);
@@ -296,13 +298,14 @@ function Under({ s, ghost, composer, onSent, onSentDone, modelOpen, setModelOpen
         onSentDone={onSentDone}
         cycleMode={mode.cycle}
         openModel={() => setModelOpen(true)}
-        openMode={mode.cycle}
+        openMode={() => setModeOpen(true)}
         openUsage={() => setUsageOpen(true)}
         openContext={() => !!s.context?.max && (setCtxOpen(true), true)}
         cleared={openChat}
         tools={
           <>
-            {/* Not guessed from the row: the model comes with the state, gliding in. */}
+            {/* Not guessed from the row: the mode and the model come with the state, gliding in. */}
+            {!ghost && <ModeKey mode={mode} open={modeOpen} onOpenChange={setModeOpen} />}
             {!ghost && <ModelKey s={s} open={modelOpen} onOpenChange={setModelOpen} />}
             {/* dsh: its preset, then its balance where the bars would be (the user, 2026-11-08). */}
             {agentInfo?.presets?.length ? <PresetKey s={s} /> : null}
@@ -357,7 +360,7 @@ function Bar({ s, onSheet, onMe }: { s?: Session; onSheet?: () => void; onMe?: (
                 <Rename s={s} done={() => setRenaming(false)} className="h-7 font-semibold" />
               </span>
             ) : (
-              <h1 className={cn("m-0 min-w-0 truncate text-base font-semibold", late)} title={tilde(s.cwd)} onDoubleClick={() => setRenaming(true)}>
+              <h1 className={cn("m-0 min-w-0 truncate text-base font-semibold", late, untitled(s) && "text-ink-3")} title={tilde(s.cwd)} onDoubleClick={() => setRenaming(true)}>
                 {titleOf(s)}
               </h1>
             )}
@@ -373,7 +376,7 @@ function Bar({ s, onSheet, onMe }: { s?: Session; onSheet?: () => void; onMe?: (
           {/* Anchored on ⋯ itself, under it: clicks go through to ⋯. */}
           <WsPlus
             key={s.id}
-            w={{ id: s.workspace ?? 0, name: ws.find((w) => w.id === s.workspace)?.name ?? "", path: s.cwd }}
+            w={{ id: s.workspace ?? 0, name: ws.find((w) => w.id === s.workspace)?.name ?? "", path: groupPath(s) }}
             trigger={<span aria-hidden className="pointer-events-none absolute inset-0" />}
             open={making}
             setOpen={setMaking}
@@ -401,6 +404,9 @@ function Bar({ s, onSheet, onMe }: { s?: Session; onSheet?: () => void; onMe?: (
   );
 }
 
+
+/** A call being written that only names the session (ir rename): left out, as its block is. */
+const renamesDraft = (d: Drafted) => !!d.tool && renameOnly({ name: d.tool.name, input: d.text });
 
 /** The turn's row at the end of the conversation: the call being written, else the one running
  *  (the newest, how many more beside it), else the dots once it has gone quiet; one line high, even

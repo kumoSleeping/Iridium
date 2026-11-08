@@ -35,7 +35,7 @@ const OUT = 'out.log'
 const ERR = 'err.log'
 const EXIT = 'exit'
 
-class RemoteError extends Error {
+export class RemoteError extends Error {
   constructor(code, message) {
     super(message)
     this.code = code
@@ -190,6 +190,7 @@ class Holder {
       const i = kv.indexOf('=')
       if (i > 0) env[kv.slice(0, i)] = kv.slice(i + 1)
     }
+    this.ex.withIR(env, this.dir)
     let child
     try {
       child = spawn(spec.argv[0], spec.argv.slice(1), {
@@ -337,7 +338,8 @@ function killTree(pid, hard) {
  * The executor. Options: url (ws(s)://…/api/exec), token, state (its own directory), roots
  * (directories files may be under; none: all but the denied), agents (Hello's), noShell (start
  * nothing but the agents: no command line runs here), agentShell (say the Iridium's agents may run
- * command lines here, ir sh, not only a person on its page), env, program, log.
+ * command lines here, ir sh, not only a person on its page), env, program, log; methods, more
+ * requests it answers ({name: async (params) => result}).
  */
 export class Executor {
   constructor(o) {
@@ -440,7 +442,40 @@ export class Executor {
       agents: this.o.agents ?? [], holds: [...this.holds.values()].map((h) => h.state()),
       ...(this.o.noShell ? { noShell: true } : {}),
       ...(this.o.agentShell ? { agentShell: true } : {}),
+      ...(this.o.ir ? { irClient: true } : {}),
     }
+  }
+
+  /**
+   * An agent the Iridium starts with its session's own TOKEN gets an ir (o.ir, ir.js): `ir` and
+   * `ir.cmd` in its holder's bin/ (dir) run it with this process's node (DSH Desktop's own
+   * executable as node), that folder first on its PATH. The address (this connection's, unless the
+   * env has one) and the TOKEN are written into them too: an agent's commands need not get its
+   * environment (dsh's do not get IRIDIUM_*), so ir would not find them there.
+   */
+  withIR(env, dir) {
+    if (!this.o.ir || !env.IRIDIUM_TOKEN) return
+    if (!env.IRIDIUM_URL) {
+      const u = new URL(this.o.url)
+      env.IRIDIUM_URL = `${u.protocol === 'wss:' ? 'https:' : 'http:'}//${u.host}`
+    }
+    const bin = path.join(dir, 'bin')
+    try {
+      fs.mkdirSync(bin, { recursive: true, mode: 0o700 })
+      const node = process.execPath
+      const asNode = path.basename(node).toLowerCase().replace(/\.exe$/, '') !== 'node'
+      const vars = { IRIDIUM_URL: env.IRIDIUM_URL, IRIDIUM_TOKEN: env.IRIDIUM_TOKEN, ...(asNode ? { ELECTRON_RUN_AS_NODE: '1' } : {}) }
+      const sh = Object.entries(vars).map(([k, v]) => `${k}=${JSON.stringify(v)} `).join('')
+      fs.writeFileSync(path.join(bin, 'ir'), `#!/bin/sh\n${sh}exec ${JSON.stringify(node)} ${JSON.stringify(this.o.ir)} "$@"\n`, { mode: 0o700 })
+      const cmd = Object.entries(vars).map(([k, v]) => `set "${k}=${v}"\r\n`).join('')
+      fs.writeFileSync(path.join(bin, 'ir.cmd'), `@echo off\r\nsetlocal\r\n${cmd}"${node}" "${this.o.ir}" %*\r\n`, { mode: 0o600 })
+    } catch (e) {
+      this.log(`ir for its agents: ${e.message}`)
+      return
+    }
+    // Windows names it Path, as often as PATH.
+    const key = Object.keys(env).find((k) => k.toUpperCase() === 'PATH') ?? 'PATH'
+    env[key] = env[key] ? bin + path.delimiter + env[key] : bin
   }
 
   /** How many processes it started still run. */
@@ -513,6 +548,9 @@ export class Executor {
         await fsp.mkdir(await this.allowed(p.path), { recursive: true })
         return {}
     }
+    // The ones its host adds (index.js: what dsh itself knows); any other is unsupported.
+    const extra = this.o.methods?.[method]
+    if (extra) return await extra(p ?? {})
     throw new RemoteError('unsupported', method)
   }
 
