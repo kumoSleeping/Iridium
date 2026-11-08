@@ -48,9 +48,9 @@ func TestChatFilesAndAgents(t *testing.T) {
 		t.Errorf("approvals forced on a plugin's session: %s", meta)
 	}
 	waitUsage(t, l.s.st, botID)
-	// Every command, /mode too.
+	// Every command.
 	l.want(200, bot, "POST", "/api/chat/qq:1/input", api.ChatInput{Text: "/status"}, nil)
-	l.want(200, bot, "POST", "/api/chat/qq:1/input", api.ChatInput{Text: "/mode manual"}, nil)
+	l.want(200, bot, "POST", "/api/chat/qq:1/input", api.ChatInput{Text: "/model"}, nil)
 
 	// Files: out and in; a file there is not is no such file.
 	l.want(404, bot, "GET", "/api/sessions/"+in.Session+"/files/nope", nil, nil)

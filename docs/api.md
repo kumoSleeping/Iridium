@@ -236,7 +236,7 @@
 - 提问的卡片在 `SessionState.asks[].card`，`id` 是 `ask:<会话>:<requestId>`。
   - 审批：`allow`、`deny`、`always`。计划：`approve`、`reject`。
   - 选择题：每个问题一组（`group` 是问题序号），选项 `id` 是 `<问题>.<选项>`；`multi` 列出可多选的组。
-- `pick`：Bot 命令（`/use`、`/model`、`/mode`）给的选择，只有发起的 Bot 能答，24 小时内有效。
+- `pick`：Bot 命令（`/use`、`/model`）给的选择，只有发起的 Bot 能答，24 小时内有效。
 
 `POST /api/answer`：`{card, option}` 或 `{card, choices: [...]}`（每组一个，多选组可多个）；选择题自己写的答案放 `words`（按组，空串是没写），顶替那一组的选择；拒绝时可带 `message` → `CardReply{ok, reply?, card?}`。已答过或撤回：410。
 
@@ -278,7 +278,7 @@ Bot 用自己的 TOKEN（交互终端由门认，见 `gate.md`）；下面的“
 - 以 `/` 开头：是 Iridium 命令就在这里做，回答直接在 `reply`（Markdown 和去掉标记的文字）或 `card` 里；不是就原样交给 agent（透传）。
 - 来源标记：`[Bot 名·sender]`，`sender` 去掉 `[ ] / : ·`，最多 24 字。
 
-命令：`/new [agent] [目录]`（目录可以是绝对路径、`~/…` 或相对指针的目录）、`/clear`（同 `send` 的 `/clear`，指针换到新会话）、`/use [ID 开头]`（不带参数给选组的卡片，见 `docs/qq.md`；在会话里时卡片最后一项是“离开当前会话”）、`/leave`（指针不指任何会话，列表上不再标这个 Bot）、`/ls`、`/history [轮数]`（最近几轮，默认 5，最多 10，一条消息）、`/stop`、`/model [值]`、`/mode [模式]`（不带参数给卡片）、`/status`、`/usage`、`/context`。
+命令：`/new [agent] [目录]`（目录可以是绝对路径、`~/…` 或相对指针的目录）、`/clear`（同 `send` 的 `/clear`，指针换到新会话）、`/use [ID 开头]`（不带参数给选组的卡片，见 `docs/qq.md`；在会话里时卡片最后一项是“离开当前会话”）、`/leave`（指针不指任何会话，列表上不再标这个 Bot）、`/ls`、`/history [轮数]`（最近几轮，默认 5，最多 10，一条消息）、`/stop`、`/model [值]`（不带参数给卡片）、`/status`、`/usage`、`/context`。
 
 事件流：`GET /api/events`，带 `Last-Event-ID`（或 `?after=<序号>`）从它之后接着收；都不带就从现在起。每条 `id: <序号>`，`event:` 是类型，`data:` 是 `ChatEvent`（都带 `chat`、`session`）：
 

@@ -23,7 +23,6 @@ var Menu = []qq.MenuItem{
 	{Name: "状态", Command: "/status"},
 	{Name: "更多", Sub: []qq.MenuItem{
 		{Name: "会话列表", Command: "/ls"},
-		{Name: "审批模式", Command: "/mode"},
 		{Name: "模型", Command: "/model"},
 		{Name: "上下文", Command: "/context"},
 		{Name: "用量", Command: "/usage"},

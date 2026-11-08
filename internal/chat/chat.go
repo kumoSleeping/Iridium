@@ -63,10 +63,8 @@ type Guard interface {
 	Opened(c Caller, id string)
 	// Send: may c send text to session id?
 	Send(c Caller, id, text string) error
-	// Command: may c run Iridium's command name ("/mode") at all?
+	// Command: may c run Iridium's command name ("/model") at all?
 	Command(c Caller, id, name string) error
-	// Mode: may c switch a session to approval mode mode?
-	Mode(c Caller, mode string) error
 	// Use: may c point its chat at session id, stop it, change its model?
 	Use(c Caller, id string) error
 	// Sessions is the part of l that c may see.
@@ -84,7 +82,6 @@ func (open) Open(Caller, *api.NewSession) error               { return nil }
 func (open) Opened(Caller, string)                            {}
 func (open) Send(Caller, string, string) error                { return nil }
 func (open) Command(Caller, string, string) error             { return nil }
-func (open) Mode(Caller, string) error                        { return nil }
 func (open) Use(Caller, string) error                         { return nil }
 func (open) Sessions(_ Caller, l []api.Session) []api.Session { return l }
 func (open) Answer(Caller, string) error                      { return nil }

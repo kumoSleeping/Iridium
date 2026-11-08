@@ -38,7 +38,6 @@ func init() {
 		"ls":      {"列出会话", cmdLs},
 		"stop":    {"停掉当前回合", cmdStop},
 		"model":   {"换模型", cmdModel},
-		"mode":    {"换审批模式", cmdMode},
 		"status":  {"会话状态", cmdStatus},
 		"usage":   {"额度", cmdUsage},
 		"context": {"上下文用了多少", cmdContext},
@@ -72,7 +71,7 @@ func cmdClear(s *Service, ctx context.Context, c Caller, p *store.ChatPointer, a
 }
 
 // Order is the commands' order in a menu.
-var Order = []string{"new", "clear", "use", "leave", "ls", "history", "stop", "model", "mode", "status", "usage", "context"}
+var Order = []string{"new", "clear", "use", "leave", "ls", "history", "stop", "model", "status", "usage", "context"}
 
 // Commands is what the chat can send: Iridium's, then its session's agent's own.
 func (s *Service) Commands(c Caller, chat string) ([]api.ChatCommand, error) {
@@ -311,27 +310,6 @@ func cmdModel(s *Service, ctx context.Context, c Caller, p *store.ChatPointer, a
 		return api.ChatInputReply{}, err
 	}
 	return reply(st.ID, "模型：`"+args+"`")
-}
-
-func cmdMode(s *Service, ctx context.Context, c Caller, p *store.ChatPointer, args string) (api.ChatInputReply, error) {
-	st, err := s.current(c, p)
-	if err != nil {
-		return api.ChatInputReply{}, err
-	}
-	if args == "" {
-		card := &api.Card{Session: st.ID, Title: "审批模式", Summary: []string{"现在：" + cmp.Or(st.Mode, "默认")}}
-		for _, m := range st.Modes {
-			card.Options = append(card.Options, api.CardOption{ID: m, Text: m, Primary: m == st.Mode})
-		}
-		return api.ChatInputReply{Session: st.ID, Card: s.newPick(c, p.Chat, "mode", card)}, nil
-	}
-	if err := s.guard().Mode(c, args); err != nil {
-		return api.ChatInputReply{}, err
-	}
-	if err := s.o.Manager.SetMode(ctx, st.ID, args); err != nil {
-		return api.ChatInputReply{}, err
-	}
-	return reply(st.ID, "审批模式：`"+args+"`")
 }
 
 func cmdStatus(s *Service, ctx context.Context, c Caller, p *store.ChatPointer, args string) (api.ChatInputReply, error) {

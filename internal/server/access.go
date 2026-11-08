@@ -330,7 +330,6 @@ func (g chatGuard) Send(c chat.Caller, id, text string) error {
 
 func (g chatGuard) Command(c chat.Caller, id, name string) error { return nil }
 
-func (g chatGuard) Mode(c chat.Caller, mode string) error { return nil }
 
 func (g chatGuard) Use(c chat.Caller, id string) error {
 	_, err := g.s.using(g.s.callerOfChat(c), id)
