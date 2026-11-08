@@ -10,7 +10,8 @@ import { Executor } from '../../plugins/dsh-remote-iridium/executor.js'
 const url = (process.argv[2] || '').replace(/\/+$/, '')
 const name = process.argv[3] || 'mac-shell'
 if (!/^https?:\/\//.test(url)) throw new Error('usage: node scripts/dev/shell-bot.mjs https://your-iridium [name]')
-const state = path.join(os.homedir(), '.iridium-shell-bot')
+// One per Iridium: its TOKEN and holders' files under the Iridium's host.
+const state = path.join(os.homedir(), '.iridium-shell-bot', new URL(url).host)
 const tokenFile = path.join(state, 'token')
 const program = 'iridium-shell-bot 0.1'
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
