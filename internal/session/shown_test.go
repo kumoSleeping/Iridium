@@ -40,7 +40,7 @@ func TestArchiveHosted(t *testing.T) {
 	if err := r.m.SetArchived(ctx, id, true); err != nil {
 		t.Fatal(err)
 	}
-	s := r.waitState(id, "its agent stopped", func(s *api.SessionState) bool { return !s.Live })
+	s := r.waitState(id, "its agent stopped, archived", func(s *api.SessionState) bool { return !s.Live && s.Archived })
 	if !s.Archived || !listed().Archived || s.Status == api.StatusError {
 		t.Fatalf("archived: %+v", s)
 	}
