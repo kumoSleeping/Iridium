@@ -57,6 +57,7 @@
 - `agents`：装了哪些 agent、怎么启动（`argv` 是程序部分，驱动接着加参数）。dsh 直接给 `node` 和 `bin.js`，不经 `.cmd`；`scope` 是它的 `@deepseek-ai` 包目录（这边从里面读预设），`home` 是 `DSH_HOME`。dsh 低于 0.2.2 不给开。
 - `holds`：它手上全部进程（`{hold, outSize, inSeq, exit}`，`inSeq` 是写进去的最后一行的序号）。这边据此对账：哪些还在跑、输入从哪儿续；这边起过、它却没有的，算进程没了。
 - `noShell`：执行端的主人选了只启动自己的 agent（`ir join --no-shell`，dsh 插件配置 `shell: false`）。这时 `hold.start` 的 `argv` 必须以某个 agent 的 `argv` 开头，否则报 `denied`；网页上这台机器的会话不能执行命令（`docs/api.md`“命令”）。
+- `agentShell`：这边的 agent 也能用 `ir sh` 在那台机器上执行命令，不只是网页上的人（`ir join --agent-shell`，dsh 插件配置 `agentShell: true`）。默认没有。
 
 **接入就是让这边能在那台机器上以那个账户运行程序。** `hold.start` 的 `argv` 由这边定，执行端不加限制（`noShell` 除外）；`roots` 只管文件读写，管不住进程。所以同不同意由那台机器的主人决定：装插件、跑 `ir join` 就是同意；不想让这边执行命令，就开 `noShell`。
 

@@ -109,7 +109,8 @@ export function iridiumURL(s) {
  * Config: url, the Iridium (https://…), set on the plugin's page in dsh (client.js), with
  * `/iridium <url>`, or in the profile; name, this machine's (default: its host name); roots, the
  * directories the Iridium may read and write files under (default: all but the denied); shell,
- * whether command lines from the Iridium run here, not only dsh (default: yes). The url is
+ * whether command lines from the Iridium run here, not only dsh (default: yes); agentShell, whether
+ * its agents may run them too (ir sh), not only a person on its page (default: no). The url is
  * volatile: a new one is taken at once, without dsh starting the plugin again.
  */
 export const Config = z.object({
@@ -117,6 +118,7 @@ export const Config = z.object({
   name: z.string(),
   roots: z.array(z.string()),
   shell: z.boolean().default(true),
+  agentShell: z.boolean().default(false),
 })
 
 export function apply(ctx, config) {
@@ -194,7 +196,7 @@ export function apply(ctx, config) {
         }
         if (stopped) return
         show({ state: 'paired', name: who.name })
-        ex = new Executor({ url: wsURL(url), token, state, roots: config?.roots ?? [], noShell: config?.shell === false, agents: [dsh], program: who.program, log: (m) => say(m) })
+        ex = new Executor({ url: wsURL(url), token, state, roots: config?.roots ?? [], noShell: config?.shell === false, agentShell: config?.agentShell === true, agents: [dsh], program: who.program, log: (m) => say(m) })
         const running = ex.run()
         // A TOKEN turned down (its Bot removed) is forgotten, and the machine pairs again.
         while (!stopped) {

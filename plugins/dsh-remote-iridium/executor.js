@@ -303,7 +303,8 @@ function killTree(pid, hard) {
 /**
  * The executor. Options: url (ws(s)://…/api/exec), token, state (its own directory), roots
  * (directories files may be under; none: all but the denied), agents (Hello's), noShell (start
- * nothing but the agents: no command line runs here), env, program, log.
+ * nothing but the agents: no command line runs here), agentShell (say the Iridium's agents may run
+ * command lines here, ir sh, not only a person on its page), env, program, log.
  */
 export class Executor {
   constructor(o) {
@@ -383,6 +384,7 @@ export class Executor {
       env: this.o.env ?? Object.entries(process.env).map(([k, v]) => `${k}=${v}`),
       agents: this.o.agents ?? [], holds: [...this.holds.values()].map((h) => h.state()),
       ...(this.o.noShell ? { noShell: true } : {}),
+      ...(this.o.agentShell ? { agentShell: true } : {}),
     }
   }
 

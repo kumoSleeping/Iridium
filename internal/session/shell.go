@@ -1,6 +1,7 @@
 package session
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -75,6 +76,35 @@ func (m *Manager) Shell(ctx context.Context, id, line, cwd string) (api.ShellSta
 		}
 		return api.ShellStarted{Cwd: dir}, nil
 	}
+	return m.startShell(ctx, launcher, env, osName, cwd, line)
+}
+
+// MachineShell runs line at machine, in cwd ("" its home), for an agent (ir sh): only at a
+// machine whose owner lets agents run command lines there (AgentShell).
+func (m *Manager) MachineShell(ctx context.Context, machine, line, cwd string) (api.ShellStarted, error) {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return api.ShellStarted{}, errors.New("no command")
+	}
+	if machine == "" || m.o.Remote == nil {
+		return api.ShellStarted{}, ErrOffline
+	}
+	mc := m.o.Remote.Machine(machine)
+	if mc == nil {
+		return api.ShellStarted{}, ErrOffline
+	}
+	hi, ok := mc.Hello()
+	if !ok {
+		return api.ShellStarted{}, ErrOffline
+	}
+	if hi.NoShell || !hi.AgentShell {
+		return api.ShellStarted{}, ErrNoShell
+	}
+	return m.startShell(ctx, mc.Launcher(), hi.Env, hi.OS, cmp.Or(cwd, hi.Home), line)
+}
+
+// startShell starts line in cwd with launcher: a holder of its own.
+func (m *Manager) startShell(ctx context.Context, launcher platform.Launcher, env []string, osName, cwd, line string) (api.ShellStarted, error) {
 	m.sweepShells()
 	b := make([]byte, 6)
 	_, _ = rand.Read(b)
@@ -104,7 +134,7 @@ func (m *Manager) Shell(ctx context.Context, id, line, cwd string) (api.ShellSta
 	}
 	m.shell.runs[run] = &shellRun{dir: dir, unit: unit, launcher: launcher}
 	m.shell.mu.Unlock()
-	m.o.Logf("session %s: running a command line (%s)", id, run)
+	m.o.Logf("shell: running a command line (%s)", run)
 	return api.ShellStarted{Run: run, Cwd: cwd}, nil
 }
 

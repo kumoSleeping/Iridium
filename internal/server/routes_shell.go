@@ -17,6 +17,29 @@ func (s *Server) shellRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/sessions/{id}/shell", s.manages(s.use(s.shellRun)))
 	mux.HandleFunc("GET /api/shell/{run}", s.manages(s.shellRead))
 	mux.HandleFunc("DELETE /api/shell/{run}", s.manages(s.shellStop))
+	// An agent's ir sh: at a machine by ID or name, where its owner lets agents.
+	mux.HandleFunc("POST /api/machines/{id}/shell", s.manages(s.machineShell))
+}
+
+func (s *Server) machineShell(w http.ResponseWriter, r *http.Request) {
+	var req api.ShellRun
+	if !readJSON(w, r, &req) {
+		return
+	}
+	id := r.PathValue("id")
+	if s.Remote != nil {
+		if mc := s.Remote.Find(id); mc != nil {
+			id = mc.ID()
+		}
+	}
+	ctx, cancel := agentCtx(r)
+	defer cancel()
+	st, err := s.m.MachineShell(ctx, id, req.Line, req.Cwd)
+	if err != nil {
+		s.shellError(w, err)
+		return
+	}
+	reply(w, http.StatusOK, st)
 }
 
 func (s *Server) shellRun(w http.ResponseWriter, r *http.Request) {

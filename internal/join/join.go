@@ -39,6 +39,7 @@ const Usage = `usage: ir join <address> [--name name] [--roots dir,…] [--insta
   --name     this machine's name there (default: the host name, 12 characters at most)
   --roots    the directories it may read and write files under (default: the home directory)
   --no-shell start only its agents: no command line from that Iridium runs here
+  --agent-shell  its agents may run command lines here too (ir sh), not only a person on its page
   --install  start at login (Windows: a scheduled task; macOS: a LaunchAgent; Linux: a systemd user unit)
   --uninstall  stop starting at login
 `
@@ -49,7 +50,7 @@ type Options struct {
 	Name  string
 	Roots []string
 	// NoShell: only the agents start here, no command line (docs/exec.md).
-	NoShell bool
+	NoShell, AgentShell bool
 	// Base is where joins keep their state (BaseDir): tokens/<key>, the TOKENs; <key>/, the
 	// executor's own directory.
 	Base   string
@@ -69,6 +70,7 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	name := fs.String("name", "", "")
 	roots := fs.String("roots", "", "")
 	noShell := fs.Bool("no-shell", false, "")
+	agentShell := fs.Bool("agent-shell", false, "")
 	install := fs.Bool("install", false, "")
 	uninstall := fs.Bool("uninstall", false, "")
 	base := fs.String("state", "", "")  // where joins keep their state (tests)
@@ -99,7 +101,7 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "ir join: %v\n", err)
 		return 2
 	}
-	o := Options{URL: u, Name: *name, NoShell: *noShell, Base: *base, Out: stdout, Resident: *resident}
+	o := Options{URL: u, Name: *name, NoShell: *noShell, AgentShell: *agentShell, Base: *base, Out: stdout, Resident: *resident}
 	if o.Base == "" {
 		o.Base, err = BaseDir()
 	} else {
@@ -295,7 +297,7 @@ func (o *Options) Run(ctx context.Context) error {
 		}
 		ex, err := executor.New(executor.Options{
 			URL: wsURL(o.URL), Token: tok, State: o.stateDir(), Roots: o.Roots, Deny: []string{o.tokenDir()},
-			Agents: o.Agents, NoShell: o.NoShell, Program: o.program(), HTTPClient: o.HTTP, Logf: o.logf,
+			Agents: o.Agents, NoShell: o.NoShell, AgentShell: o.AgentShell, Program: o.program(), HTTPClient: o.HTTP, Logf: o.logf,
 			Connected: func(name string) { o.say("已连接 %s（%s）", o.URL, name) },
 		})
 		if err != nil {

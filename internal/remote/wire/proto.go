@@ -65,6 +65,9 @@ type Hello struct {
 	// NoShell: it starts nothing but its agents (each hold.start's argv begins with one of
 	// theirs), so no command line runs there; its owner's choice.
 	NoShell bool `json:"noShell,omitempty"`
+	// AgentShell: agents of that Iridium may run command lines here (ir sh), not only a person
+	// on its page; its owner's choice, off unless said.
+	AgentShell bool `json:"agentShell,omitempty"`
 }
 
 // AgentInfo is an agent installed there and how to start it. Argv is the program part, to which

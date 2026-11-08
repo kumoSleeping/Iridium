@@ -41,8 +41,10 @@ type Options struct {
 	// NoShell: start nothing but the agents (an argv beginning with one of theirs), so no
 	// command line runs here (docs/exec.md).
 	NoShell bool
-	Env     []string // nil: os.Environ()
-	Program string   // what the hello says it is; "": iridium-executor
+	// AgentShell: say agents there may run command lines here (ir sh), not only a person.
+	AgentShell bool
+	Env        []string // nil: os.Environ()
+	Program    string   // what the hello says it is; "": iridium-executor
 	// HTTPClient dials the Iridium; nil: http.DefaultClient.
 	HTTPClient *http.Client
 	// Connected is told each time the hello is answered: the terminal name the Iridium knows it by.
@@ -179,7 +181,7 @@ func (e *Executor) hello() wire.Hello {
 	return wire.Hello{
 		Protocol: wire.Protocol, Program: e.o.Program, OS: runtime.GOOS, Arch: runtime.GOARCH,
 		Home: home, Sep: string(filepath.Separator), Scratch: filepath.Join(e.o.State, "scratch"),
-		Env: e.o.Env, Agents: e.o.Agents, Holds: holds, NoShell: e.o.NoShell,
+		Env: e.o.Env, Agents: e.o.Agents, Holds: holds, NoShell: e.o.NoShell, AgentShell: e.o.AgentShell,
 	}
 }
 

@@ -1518,6 +1518,10 @@ export interface Machine {
    * NoShell: it starts only its agents, so command lines cannot run there (docs/exec.md).
    */
   noShell?: boolean;
+  /**
+   * AgentShell: agents here may run command lines there (ir sh).
+   */
+  agentShell?: boolean;
 }
 /**
  * ExecAgent is an agent an executor has.

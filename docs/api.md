@@ -199,6 +199,8 @@
 - 进程照托管 agent 的方式起（本机的 `platform.Launcher`，别的机器经执行端），目录是托管目录下的 `sh-<id>`；结束 10 分钟后删。
 - 机器不在线：409；机器的主人关了命令（`Machine.noShell`）：403；目录不存在：404。
 
+agent 用 `ir sh <机器> [--cwd 目录] [--timeout 2m] -- 命令`（`POST /api/machines/{id}/shell`，`{id}` 是机器 ID 或名字，`cwd` 省略为那边的家目录）：等它结束，原样打出输出，退出码就是它的；超时停掉它，退出码 124。只在执行端声明了 `agentShell` 的机器上能用（主人的选择，默认不能；否则 403）。`ir machines` 列出机器：名字、系统、在线与否、能否 `ir sh`、家目录。系统提示里只有 `ir --help` 的一行。
+
 ## 会话设置
 
 按会话记在库里：马上设给在跑的 agent，之后每次拉起都带上（Claude：`--model`、`--permission-mode`、`--effort`，设过 ultracode 带 `--settings '{"ultracode":…}'`，关也带，压过你自己设置里的）。

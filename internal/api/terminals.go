@@ -200,6 +200,8 @@ type Machine struct {
 	SeenAt int64       `json:"seenAt"` // when it last connected (ms)
 	// NoShell: it starts only its agents, so command lines cannot run there (docs/exec.md).
 	NoShell bool `json:"noShell,omitempty"`
+	// AgentShell: agents here may run command lines there (ir sh).
+	AgentShell bool `json:"agentShell,omitempty"`
 }
 
 // ExecAgent is an agent an executor has.
