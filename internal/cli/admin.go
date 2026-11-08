@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -23,6 +24,7 @@ import (
 	irAccess "github.com/kumoSleeping/iridium/internal/access"
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/config"
+	"github.com/kumoSleeping/iridium/internal/launchd"
 	"github.com/kumoSleeping/iridium/internal/public"
 )
 
@@ -607,7 +609,7 @@ func publicOptions(e adminEnv, stdout io.Writer) (public.Options, error) {
 		return public.Options{}, err
 	}
 	in := bufio.NewReader(e.stdin)
-	return public.Options{
+	o := public.Options{
 		Dir:     filepath.Join(e.cfg.StatePath(), "cloudflared"),
 		BinDir:  filepath.Join(home, ".local", "bin"),
 		UnitDir: filepath.Join(xdgConfig(home), "systemd", "user"),
@@ -634,7 +636,12 @@ func publicOptions(e adminEnv, stdout io.Writer) (public.Options, error) {
 		},
 		Out:    stdout,
 		Daemon: daemon{e},
-	}, nil
+	}
+	if runtime.GOOS == "darwin" {
+		o.Launchd, o.UnitDir, o.Launchctl = true, launchd.Dir(home), launchd.Run
+		o.Domain, o.Log = launchd.Domain(context.Background()), launchd.LogFile(home, "iridium-cloudflared")
+	}
+	return o, nil
 }
 
 func xdgConfig(home string) string {

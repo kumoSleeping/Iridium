@@ -39,7 +39,7 @@ systemctl --user enable --now iridium.service
 
 ## 发版
 
-推一个 `v*` 标签，`.github/workflows/release.yml` 构建网页、跑测试，`scripts/release.sh` 出 `iridium-linux-{amd64,arm64}.tar.gz`（静态、去符号）和 `SHA256SUMS`，Release 说明里带大小表。本地试：`scripts/release.sh v0.0.0 /tmp/rel`（先 `npm run build`）。
+推一个 `v*` 标签，`.github/workflows/release.yml` 构建网页、跑测试，`scripts/release.sh` 出 `iridium-{linux,darwin}-{amd64,arm64}.tar.gz`（静态、去符号）和 `SHA256SUMS`，Release 说明里带大小表。本地试：`scripts/release.sh v0.0.0 /tmp/rel`（先 `npm run build`）。
 
 ## linger：必须开
 
@@ -80,6 +80,22 @@ rm -r ~/.local/opt/iridium ~/.local/bin/ir ~/.config/systemd/user/iridium.servic
 ```
 
 配置和状态目录留着，要彻底删再手动删 `~/.config/iridium` 和 `~/.local/state/iridium`。agent 自己的对话记录不动。
+
+## macOS
+
+同一个二进制（`iridium-darwin-arm64.tar.gz`，Intel 用 `-amd64`），位置同上，只是服务换成 launchd：
+
+| 东西 | 位置 |
+|---|---|
+| 服务 | `~/Library/LaunchAgents/iridium.plist`（LaunchAgent，登录后起，挂了重起），日志 `~/Library/Logs/iridium.log` |
+| 隧道服务 | `~/Library/LaunchAgents/iridium-cloudflared.plist`；cloudflared 用 PATH 里的（brew），没有就下 `cloudflared-darwin-*.tgz` |
+| 托管进程 | 每个 holder 一个自己的监管进程（新会话，交给 launchd），记录在 `~/.local/state/iridium/units/`；daemon 重启、更新不影响 |
+
+- 装：`./iridium install -now`（写 plist，`launchctl bootstrap gui/<uid>`）；ssh 进来、没在桌面登录时用 `user/<uid>` 域。
+- 检查：`launchctl print gui/$(id -u)/iridium`；停：`launchctl bootout gui/$(id -u)/iridium`，再删 plist。
+- 没有 linger：账号要在桌面登录着（或开自动登录）。
+- 发现正在跑的 agent 用 sysctl / proc_info，不靠 `/proc`。
+- 自更新、`iridium push` 都是写新文件再改名，不改正在跑的二进制。`iridium node new` 只支持 Linux。
 
 ## 另一个节点
 

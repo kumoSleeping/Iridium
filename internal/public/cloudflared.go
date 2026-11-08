@@ -1,6 +1,8 @@
 package public
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -11,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -63,8 +66,14 @@ func cloudflaredVersion(ctx context.Context, p string) (string, error) {
 	return v, nil
 }
 
-// AssetName is the release file for this machine.
-func AssetName() string { return "cloudflared-" + runtime.GOOS + "-" + runtime.GOARCH }
+// AssetName is the release file for this machine: the binary itself, on macOS a .tgz with it.
+func AssetName() string {
+	name := "cloudflared-" + runtime.GOOS + "-" + runtime.GOARCH
+	if runtime.GOOS == "darwin" {
+		name += ".tgz"
+	}
+	return name
+}
 
 type release struct {
 	TagName string `json:"tag_name"`
@@ -146,11 +155,18 @@ func (o *Options) download(ctx context.Context) (string, error) {
 	if got := hex.EncodeToString(h.Sum(nil)); got != want {
 		return "", fmt.Errorf("sha256 of %s is %s, the release says %s", name, got, want)
 	}
-	if _, err := cloudflaredVersion(ctx, f.Name()); err != nil {
+	bin := f.Name()
+	if strings.HasSuffix(name, ".tgz") {
+		if bin, err = untgz(bin, o.BinDir); err != nil {
+			return "", fmt.Errorf("%s: %w", name, err)
+		}
+		defer os.Remove(bin) // gone after the rename
+	}
+	if _, err := cloudflaredVersion(ctx, bin); err != nil {
 		return "", fmt.Errorf("the download does not run here: %w", err)
 	}
 	p := filepath.Join(o.BinDir, "cloudflared")
-	if err := os.Rename(f.Name(), p); err != nil {
+	if err := os.Rename(bin, p); err != nil {
 		return "", err
 	}
 	return p, nil
@@ -168,4 +184,46 @@ func notedSum(body, name string) string {
 		return strings.ToLower(m[1])
 	}
 	return ""
+}
+
+// untgz takes the file named cloudflared out of a .tgz into a new executable file in dir.
+func untgz(archive, dir string) (string, error) {
+	in, err := os.Open(archive)
+	if err != nil {
+		return "", err
+	}
+	defer in.Close()
+	zr, err := gzip.NewReader(in)
+	if err != nil {
+		return "", err
+	}
+	tr := tar.NewReader(zr)
+	for {
+		hd, err := tr.Next()
+		if err == io.EOF {
+			return "", errors.New("no cloudflared in it")
+		}
+		if err != nil {
+			return "", err
+		}
+		if hd.Typeflag != tar.TypeReg || path.Base(hd.Name) != "cloudflared" {
+			continue
+		}
+		out, err := os.CreateTemp(dir, ".cloudflared-*")
+		if err != nil {
+			return "", err
+		}
+		_, err = io.Copy(out, io.LimitReader(tr, 512<<20))
+		if err == nil {
+			err = out.Chmod(0o755)
+		}
+		if cerr := out.Close(); err == nil {
+			err = cerr
+		}
+		if err != nil {
+			os.Remove(out.Name())
+			return "", err
+		}
+		return out.Name(), nil
+	}
 }

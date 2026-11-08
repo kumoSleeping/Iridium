@@ -5,7 +5,7 @@
 # settings page shows), then after the marker internal/update.NotesEnd the sizes and how to install.
 #
 #   scripts/release.sh v1.2.0 dist
-#   PLATFORMS="linux/amd64 linux/arm64"   which to build (default both)
+#   PLATFORMS="linux/amd64 linux/arm64"   which to build (default Linux and macOS, amd64 and arm64)
 set -eu
 cd "$(dirname "$0")/.."
 version=${1:?usage: scripts/release.sh <version> <dir>}
@@ -30,7 +30,7 @@ prev=$(git describe --tags --abbrev=0 "$version^" 2>/dev/null || true)
 	echo "| 平台 | 二进制 | 下载（tar.gz） |"
 	echo "|---|---|---|"
 } >"$out/notes.md"
-for p in ${PLATFORMS:-linux/amd64 linux/arm64}; do
+for p in ${PLATFORMS:-linux/amd64 linux/arm64 darwin/arm64 darwin/amd64}; do
 	os=${p%/*} arch=${p#*/}
 	name=iridium-$os-$arch
 	stage=$(mktemp -d)
@@ -50,8 +50,8 @@ for p in ${PLATFORMS:-linux/amd64 linux/arm64}; do
 	tar -C "$stage" -czf "$out/iridium-qq-$os-$arch.tar.gz" --owner=0 --group=0 --numeric-owner .
 	rm -rf "$stage"
 done
-# Mac and Windows: the executor (ir join, docs/exec.md) only, no QQ plugin.
-for p in ${EXEC_PLATFORMS:-darwin/arm64 darwin/amd64 windows/amd64 windows/arm64}; do
+# Windows: the executor (ir join, docs/exec.md) only, no QQ plugin.
+for p in ${EXEC_PLATFORMS:-windows/amd64 windows/arm64}; do
 	os=${p%/*} arch=${p#*/}
 	name=iridium-$os-$arch
 	bin=iridium
@@ -67,7 +67,7 @@ done
 (cd "$out" && sha256sum iridium-*.tar.gz >SHA256SUMS)
 {
 	echo
-	echo '安装：`tar xzf iridium-linux-amd64.tar.gz && ./iridium install -now`；之后在设置里或 `ir update` 更新。'
-	echo 'Mac、Windows 只做执行端：解压后 `iridium join https://<你的 Iridium>`，在网页上核对配对码后允许；`--install` 登录时自动启动。'
+	echo '安装：`tar xzf iridium-linux-amd64.tar.gz && ./iridium install -now`（macOS 用 iridium-darwin-arm64.tar.gz）；之后在设置里或 `ir update` 更新。'
+	echo 'Windows 只做执行端：解压后 `iridium join https://<你的 Iridium>`，在网页上核对配对码后允许；`--install` 登录时自动启动。'
 } >>"$out/notes.md"
 cat "$out/notes.md"

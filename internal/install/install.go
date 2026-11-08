@@ -4,6 +4,7 @@
 package install
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -14,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/kumoSleeping/iridium/internal/config"
+	"github.com/kumoSleeping/iridium/internal/launchd"
 )
 
 var unitName = regexp.MustCompile(`^[a-zA-Z0-9_.@-]{1,200}$`)
@@ -32,6 +34,13 @@ type Options struct {
 	Now       bool   // enable and start it too
 	Linger    string // the file that says the user lingers; "" is /var/lib/systemd/linger/<user>
 	Out       io.Writer
+
+	// Launchd writes a LaunchAgent (macOS) into UnitDir (~/Library/LaunchAgents) instead of a
+	// systemd unit, the daemon's output going to Log; with Now, Launchctl loads it into Domain.
+	Launchd   bool
+	Log       string
+	Launchctl launchd.Launchctl
+	Domain    string
 }
 
 // Unit is the unit file. env: more NAME=VALUE for the daemon.
@@ -103,6 +112,9 @@ func Install(o Options) error {
 	if err := os.MkdirAll(cfg.StatePath(), 0o700); err != nil {
 		return err
 	}
+	if o.Launchd {
+		return installLaunchd(o, cfg)
+	}
 	if err := os.MkdirAll(o.UnitDir, 0o755); err != nil {
 		return err
 	}
@@ -138,6 +150,30 @@ func Install(o Options) error {
 	if _, err := os.Stat(linger); linger != "" && err != nil {
 		fmt.Fprintf(o.Out, "注意：没开 linger，你退出登录后服务和托管的 agent 都会停。要一直跑：sudo loginctl enable-linger %s\n", filepath.Base(linger))
 	}
+	return nil
+}
+
+// installLaunchd is Install on macOS: the LaunchAgent o.Unit, loaded at once with Now, else at
+// the next login.
+func installLaunchd(o Options, cfg config.Config) error {
+	env := o.Env
+	if o.Path != "" {
+		env = append([]string{"PATH=" + o.Path}, env...)
+	}
+	job := launchd.Job{Label: o.Unit, Argv: []string{o.Exe, "serve", "-config", o.ConfigPath}, Env: env, Log: o.Log}
+	path, err := launchd.Write(o.UnitDir, job)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(o.Out, "写了 %s：%s serve，状态在 %s。\n", path, o.Exe, cfg.StatePath())
+	if o.Now && o.Launchctl != nil {
+		if err := launchd.Load(context.Background(), o.Launchctl, o.Domain, o.Unit, path); err != nil {
+			return err
+		}
+		fmt.Fprintf(o.Out, "已启动（launchctl print %s/%s）。\n", o.Domain, o.Unit)
+		return nil
+	}
+	fmt.Fprintf(o.Out, "下次登录时启动；现在启动：launchctl bootstrap gui/%d %s\n", os.Getuid(), path)
 	return nil
 }
 

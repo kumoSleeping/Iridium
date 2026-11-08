@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -19,13 +20,15 @@ import (
 	"github.com/kumoSleeping/iridium/internal/config"
 	"github.com/kumoSleeping/iridium/internal/hub"
 	"github.com/kumoSleeping/iridium/internal/install"
+	"github.com/kumoSleeping/iridium/internal/launchd"
 	"github.com/kumoSleeping/iridium/internal/node"
 	"github.com/kumoSleeping/iridium/internal/update"
 	"github.com/kumoSleeping/iridium/internal/version"
 )
 
-// installCmd is `iridium install`: the user unit iridium.service, the config and the state
-// directory. It starts nothing unless -now.
+// installCmd is `iridium install`: the user unit iridium.service (on macOS the LaunchAgent
+// ~/Library/LaunchAgents/iridium.plist), the config and the state directory. It starts nothing
+// unless -now.
 func installCmd(args []string) int {
 	fs := flag.NewFlagSet("install", flag.ExitOnError)
 	path := fs.String("config", config.DefaultPath(), "the config file the service reads")
@@ -56,7 +59,11 @@ func installCmd(args []string) int {
 		unitDir = filepath.Join(d, "systemd", "user")
 	}
 	o := install.Options{Exe: exe, ConfigPath: cfgPath, Listen: *listen, UnitDir: unitDir, Unit: *unit, Path: os.Getenv("PATH"), Env: env, Now: *now, Out: os.Stdout}
-	if *reload || *now {
+	if runtime.GOOS == "darwin" {
+		// A LaunchAgent; launchd gives it a bare PATH, so the agents' is written into it.
+		o.Launchd, o.UnitDir, o.Log = true, launchd.Dir(home), launchd.LogFile(home, *unit)
+		o.Launchctl, o.Domain = launchd.Run, launchd.Domain(context.Background())
+	} else if *reload || *now {
 		o.Systemctl = func(args ...string) error {
 			cmd := exec.Command("systemctl", append([]string{"--user"}, args...)...)
 			cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
@@ -135,7 +142,8 @@ func newUpdater(cfg config.Config, h *hub.Hub) *update.Updater {
 }
 
 // restart restarts the daemon with the new binary: its systemd unit, if it runs in one, else this
-// process in place. The holders run in units of their own and keep running either way.
+// process in place (macOS, under launchd or not: the job's pid stays the same). The holders run
+// in units of their own and keep running either way.
 func restart() error {
 	if unit := ownUnit(); unit != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

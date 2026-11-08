@@ -328,19 +328,15 @@ func TestRestartFromSavedOffset(t *testing.T) {
 	}
 }
 
-// The holder under systemd: a stop ends the agent cleanly; a killed holder takes its agent with
-// it, and ExecStopPost says so.
-func TestSystemd(t *testing.T) {
-	if _, err := exec.LookPath("systemd-run"); err != nil {
-		t.Skip("no systemd-run")
-	}
-	if err := exec.Command("systemctl", "--user", "is-system-running").Run(); err != nil {
-		if out, _ := exec.Command("systemctl", "--user", "is-system-running").Output(); !bytes.HasPrefix(out, []byte("degraded")) {
-			t.Skip("no user systemd")
-		}
-	}
+// The holder under a supervisor of its own (macOS's launcher), as under systemd.
+func TestDetached(t *testing.T) {
+	testUnits(t, &platform.Detached{Dir: t.TempDir()})
+}
+
+// testUnits runs the holder as a unit of sd: a stop ends the agent cleanly; a killed holder takes
+// its agent with it, and StopPost says so.
+func testUnits(t *testing.T, sd platform.Launcher) {
 	ctx := context.Background()
-	var sd platform.Systemd
 	start := func(t *testing.T) (string, string) {
 		dir := t.TempDir()
 		if err := hold.Prepare(dir, spec("echo")); err != nil {

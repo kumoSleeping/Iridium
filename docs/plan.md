@@ -233,7 +233,7 @@ ir run [--secret 名,…] -- 命令 …   {{名}}、{{file:名}} 换进参数，
 - 双方直接 HTTPS（签名请求）；没有公网地址的一方以后用出站 WebSocket。
 - 不做网页上的汇总视图。
 - 执行端（2026-11-08）：替这边启动 agent 进程、转发输入输出、读写文件，会话由这边托管、驱动照旧。协议和做法见 `docs/exec.md`；第一个实现是 dsh 插件，第二个是 `ir join`。
-- 平台（用户，2026-11-08）：Linux、Mac 做完整节点；Windows 先只做执行端（`ir join`）。不做代码签名和公证：命令行下载、`iridium push`、自更新都不经浏览器，不会被 Gatekeeper、SmartScreen 拦；Mac arm64 要的 ad-hoc 签名 Go 链接时自带。给别人分发时再说。
+- 平台（用户，2026-11-08）：Linux、Mac 做完整节点；Windows 先只做执行端（`ir join`）。不做代码签名和公证：命令行下载、`iridium push`、自更新都不经浏览器，不会被 Gatekeeper、SmartScreen 拦；Mac arm64 要的 ad-hoc 签名 Go 链接时自带。给别人分发时再说。Mac 上服务用 launchd，holder 各有一个监管进程（见 `deploy.md` “macOS”）。
 - 用户要用的都在这一个二进制里（2026-11-06）：`iridium install`、`ir update`、`ir public`，以及 `iridium push <用户@主机>`（经 ssh 把自己装到另一个账号或机器、或换成新版）和 `iridium node new <账号>`（在本机建账号做成节点，sudo 一次）。脚本只给从源码构建的开发者用。
 
 ## 文件传输（网页、Bot、节点共用）

@@ -33,12 +33,31 @@ type PushOptions struct {
 
 // remote finishes a push on the other side: the binary sent runs once, takes its place in
 // ~/.local/opt/iridium, and the service is restarted onto it, or installed and started on a first
-// push. Holders run in units of their own and keep running.
+// push: a systemd user unit on Linux, a LaunchAgent on macOS. Holders run in units of their own
+// and keep running.
 const remote = `set -eu
 opt=$HOME/.local/opt/iridium
 new=$opt/.iridium-push
 "$new" version
 mv -f "$new" "$opt/iridium"
+# Claude Code and the like install in ~/.local/bin; Homebrew's tools are in /opt/homebrew/bin.
+if [ "$(uname -s)" = Darwin ]; then
+	export PATH=$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH
+	uid=$(id -u)
+	domain=gui/$uid
+	launchctl print "$domain" >/dev/null 2>&1 || domain=user/$uid
+	if launchctl print "$domain/iridium" >/dev/null 2>&1; then
+		launchctl kickstart -k "$domain/iridium"
+	else
+		"$opt/iridium" install -now ${LISTEN:+-listen "$LISTEN"}
+	fi
+	for i in 1 2 3 4 5 6 7 8 9 10; do
+		launchctl print "$domain/iridium" 2>/dev/null | grep -q 'state = running' && exit 0
+		sleep 1
+	done
+	echo 'iridium is not running' >&2
+	exit 1
+fi
 export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
 # The agents' PATH, which the unit keeps: Claude Code and the like install in ~/.local/bin.
 export PATH=$HOME/.local/bin:$PATH
@@ -174,6 +193,9 @@ func New(ctx context.Context, o NewOptions) error {
 	}
 	if o.Push == nil {
 		o.Push = Push
+	}
+	if runtime.GOOS != "linux" {
+		return fmt.Errorf("node new: Linux only (useradd, systemd); on %s make the account by hand and run iridium push <account>@localhost", runtime.GOOS)
 	}
 	if !userName.MatchString(o.User) {
 		return fmt.Errorf("node new: %q is not an account name (a-z, 0-9, _ and -)", o.User)

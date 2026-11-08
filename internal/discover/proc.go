@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// Procs is what discovery reads of the processes: /proc on Linux, a fake in tests.
+// Procs is what discovery reads of the processes: /proc on Linux, sysctl on macOS, a fake in tests.
 type Procs interface {
 	PIDs() ([]int, error)
 	Stat(pid int) (Stat, error)
@@ -26,15 +26,26 @@ type Procs interface {
 }
 
 // Stat: the parent, the start time in clock ticks since boot (/proc/<pid>/stat's 22nd field,
-// which Claude's sessions/<pid>.json records as procStart) and as a time, and the owner.
+// which Claude's sessions/<pid>.json records as procStart on Linux) and as a time, and the owner.
+// ProcStart is procStart as Claude writes it where it is not Start in decimal (macOS: `ps -o
+// lstart=` in UTC); "" is Start's.
 type Stat struct {
-	PPid    int
-	Start   uint64
-	Started time.Time
-	UID     int
+	PPid      int
+	Start     uint64
+	Started   time.Time
+	UID       int
+	ProcStart string
 }
 
-// ProcFS is the real /proc (Root "" is /proc).
+// procStart is how Claude's registry names this start.
+func (s Stat) procStart() string {
+	if s.ProcStart != "" {
+		return s.ProcStart
+	}
+	return strconv.FormatUint(s.Start, 10)
+}
+
+// ProcFS is the real /proc (Root "" is /proc): Linux's.
 type ProcFS struct{ Root string }
 
 func (p ProcFS) path(pid int, name string) string {

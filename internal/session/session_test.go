@@ -290,6 +290,42 @@ func TestDaemonRestart(t *testing.T) {
 	}
 }
 
+// The same under macOS's launcher: a new daemon, with a launcher of its own, finds the holder
+// the last one started by its files.
+func TestDaemonRestartDetached(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	r := newRig(t, func(_ *config.Config, o *Options) { o.Launcher = &platform.Detached{Dir: dir} })
+	t.Cleanup(func() {
+		ctx := context.Background()
+		d := &platform.Detached{Dir: dir}
+		names, _ := d.List(ctx, "iridium-test-")
+		for _, n := range names {
+			_ = d.Kill(ctx, n, "KILL", false)
+			_ = d.Kill(ctx, n, "KILL", true)
+		}
+		waitFor(t, "the units to go", func() bool { names, _ := d.List(ctx, "iridium-test-"); return len(names) == 0 })
+	})
+	id, _ := r.m.Create(context.Background(), api.NewSession{Cwd: r.cwd, Text: "before"}, "网页")
+	r.waitState(id, "the reply", func(s *api.SessionState) bool {
+		return s.Last != nil && s.Last.Text == "ok: before" && s.Status == api.StatusIdle
+	})
+	r.m.Close()
+	time.Sleep(200 * time.Millisecond)
+	o := r.options()
+	o.Launcher = &platform.Detached{Dir: dir}
+	r.start(o)
+	r.waitState(id, "the session taken up", func(s *api.SessionState) bool { return s.Live && s.Proc == 1 })
+	if _, err := r.m.Send(context.Background(), id, "after", "网页"); err != nil {
+		t.Fatal(err)
+	}
+	r.waitState(id, "the reply after", func(s *api.SessionState) bool { return s.Last != nil && s.Last.Text == "ok: after" })
+	if err := r.m.Stop(context.Background(), id); err != nil {
+		t.Fatal(err)
+	}
+	r.waitState(id, "the stop", func(s *api.SessionState) bool { return !s.Live })
+}
+
 func waitFor(t *testing.T, what string, ok func() bool) {
 	t.Helper()
 	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {

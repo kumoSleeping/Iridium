@@ -27,6 +27,7 @@ import (
 
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/config"
+	"github.com/kumoSleeping/iridium/internal/launchd"
 	"github.com/kumoSleeping/iridium/internal/qq"
 	"github.com/kumoSleeping/iridium/internal/qqbridge"
 	"github.com/kumoSleeping/iridium/internal/version"
@@ -88,7 +89,7 @@ func run(args []string) int {
 }
 
 func isTerminal(f *os.File) bool {
-	_, err := unix.IoctlGetTermios(int(f.Fd()), unix.TCGETS)
+	_, err := unix.IoctlGetTermios(int(f.Fd()), ioctlGetTermios)
 	return err == nil
 }
 
@@ -386,11 +387,15 @@ type State = api.ExtensionStatus
 func state(home string) State {
 	c, ok, _ := qqbridge.LoadConfig(home)
 	s := State{Version: version.Version, Home: home, Bound: ok, AppID: c.AppID, Name: c.Name, Owners: len(c.Owners), Iridium: c.Iridium, Token: qqbridge.Token(home) != ""}
-	s.Service = systemctlOut("show", "-p", "ActiveState", "--value", unit+".service")
-	if s.Service == "inactive" && !unitExists() {
-		s.Service = ""
+	if onMac {
+		s.Service, s.Enabled = macService()
+	} else {
+		s.Service = systemctlOut("show", "-p", "ActiveState", "--value", unit+".service")
+		if s.Service == "inactive" && !unitExists() {
+			s.Service = ""
+		}
+		s.Enabled = systemctlOut("is-enabled", unit+".service") == "enabled"
 	}
-	s.Enabled = systemctlOut("is-enabled", unit+".service") == "enabled"
 	if s.Service == "active" {
 		var st qqbridge.Status
 		if ok, _ := qqbridge.Read(home, qqbridge.StatusFile, &st); ok {
@@ -486,6 +491,9 @@ func start(home string) int {
 	if err != nil {
 		return fail(err)
 	}
+	if onMac {
+		return macStart(exe)
+	}
 	env := ""
 	if h := os.Getenv("IRIDIUM_QQ_HOME"); h != "" {
 		env = "Environment=IRIDIUM_QQ_HOME=" + h + "\n"
@@ -518,6 +526,9 @@ WantedBy=default.target
 }
 
 func stop() int {
+	if onMac {
+		return macStop()
+	}
 	if !unitExists() {
 		fmt.Println("服务没装。")
 		return 0
@@ -534,6 +545,9 @@ func logs(args []string) int {
 	if len(args) == 2 && args[0] == "-n" {
 		n = args[1]
 	}
+	if onMac {
+		return macLogs(n)
+	}
 	cmd := exec.Command("journalctl", "--user", "-u", unit+".service", "-n", n, "--no-pager", "-o", "short-iso")
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -544,7 +558,13 @@ func logs(args []string) int {
 
 func remove(home string) int {
 	c, _, _ := qqbridge.LoadConfig(home)
-	if unitExists() {
+	if onMac {
+		if _, err := os.Stat(macPlist()); err == nil {
+			ctx := context.Background()
+			launchd.Unload(ctx, launchd.Run, launchd.Domain(ctx), unit)
+			os.Remove(macPlist())
+		}
+	} else if unitExists() {
 		_ = systemctl("disable", "--now", unit+".service")
 		os.Remove(unitPath())
 		_ = systemctl("daemon-reload")

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -52,7 +51,7 @@ func (x *Index) alive(c claudeReg) bool {
 	if err != nil || st.UID != x.o.UID {
 		return false
 	}
-	return c.ProcStart == "" || c.ProcStart == strconv.FormatUint(st.Start, 10)
+	return c.ProcStart == "" || c.ProcStart == st.procStart()
 }
 
 // userNamed is the name the user gave a Claude session; "" for one Claude made up.
@@ -104,7 +103,7 @@ func (x *Index) scanProcs() {
 		}
 		p := &proc{st: st}
 		all[pid] = p
-		if c, ok := reg[pid]; ok && (c.ProcStart == "" || c.ProcStart == strconv.FormatUint(st.Start, 10)) {
+		if c, ok := reg[pid]; ok && (c.ProcStart == "" || c.ProcStart == st.procStart()) {
 			p.agent, p.sessions, p.name, p.needs = "claude", []string{c.SessionID}, userNamed(c), needsOf(c)
 			continue
 		}

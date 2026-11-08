@@ -3,7 +3,8 @@
 //
 // Everything of Iridium's lives in its state directory (Dir): the login (cert.pem, under
 // Dir/.cloudflared, since cloudflared writes it to $HOME/.cloudflared), the tunnel's credentials,
-// its config and what was set up (public.json). The tunnel runs as a user systemd unit of its own.
+// its config and what was set up (public.json). The tunnel runs as a user systemd unit of its own
+// (a LaunchAgent on macOS).
 // The machine's own cloudflared service, /etc/cloudflared and ~/.cloudflared are never touched.
 package public
 
@@ -21,6 +22,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/kumoSleeping/iridium/internal/launchd"
 )
 
 // Daemon is the running Iridium, over its socket.
@@ -47,6 +50,12 @@ type Options struct {
 
 	// Systemctl runs systemctl --user with args.
 	Systemctl func(ctx context.Context, args ...string) error
+	// Launchd runs the tunnel as a LaunchAgent (macOS) instead: its plist in UnitDir
+	// (~/Library/LaunchAgents), loaded into Domain with Launchctl, its output in Log.
+	Launchd   bool
+	Launchctl launchd.Launchctl
+	Domain    string
+	Log       string
 	// Ask asks the person at the terminal; def is the answer to an empty line.
 	Ask    func(question, def string) (string, error)
 	Out    io.Writer
@@ -96,7 +105,20 @@ func (o *Options) cert() string      { return filepath.Join(o.Dir, ".cloudflared
 func (o *Options) creds() string     { return filepath.Join(o.Dir, "tunnel.json") }
 func (o *Options) config() string    { return filepath.Join(o.Dir, "config.yml") }
 func (o *Options) stateFile() string { return filepath.Join(o.Dir, "public.json") }
-func (o *Options) unitFile() string  { return filepath.Join(o.UnitDir, o.Unit+".service") }
+func (o *Options) unitFile() string {
+	if o.Launchd {
+		return launchd.File(o.UnitDir, o.Unit)
+	}
+	return filepath.Join(o.UnitDir, o.Unit+".service")
+}
+
+// status is how to look at the tunnel's service.
+func (o *Options) status() string {
+	if o.Launchd {
+		return "launchctl print " + o.Domain + "/" + o.Unit
+	}
+	return "systemctl --user status " + o.Unit
+}
 
 func (o *Options) say(format string, a ...any) { fmt.Fprintf(o.Out, format+"\n", a...) }
 
@@ -497,6 +519,18 @@ func systemdQuote(s string) string {
 }
 
 func (o *Options) installUnit(ctx context.Context, cf, host string) error {
+	if o.Launchd {
+		job := launchd.Job{Label: o.Unit, Argv: []string{cf, "tunnel", "--no-autoupdate", "--config", o.config(), "run"}, Log: o.Log}
+		path, err := launchd.Write(o.UnitDir, job)
+		if err != nil {
+			return err
+		}
+		if err := launchd.Load(ctx, o.Launchctl, o.Domain, o.Unit, path); err != nil {
+			return err
+		}
+		o.say("隧道服务 %s 在跑（%s）。", o.Unit, o.status())
+		return nil
+	}
 	if err := os.MkdirAll(o.UnitDir, 0o755); err != nil {
 		return err
 	}
@@ -535,7 +569,7 @@ func (o *Options) health(ctx context.Context, host string) error {
 		}
 		last = err
 		if time.Now().After(deadline) {
-			return fmt.Errorf("%s 还不通（%v）：DNS 可能要几分钟才生效；看 systemctl --user status %s，过会儿再跑 ir public", url, last, o.Unit)
+			return fmt.Errorf("%s 还不通（%v）：DNS 可能要几分钟才生效；看 %s，过会儿再跑 ir public", url, last, o.status())
 		}
 		select {
 		case <-ctx.Done():
@@ -564,11 +598,18 @@ func Off(ctx context.Context, o Options) error {
 		st.Unit = o.Unit
 	}
 	o.Unit = st.Unit
-	_ = o.Systemctl(ctx, "disable", "--now", st.Unit+".service")
-	if err := os.Remove(o.unitFile()); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
+	if o.Launchd {
+		launchd.Unload(ctx, o.Launchctl, o.Domain, st.Unit)
+		if err := os.Remove(o.unitFile()); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	} else {
+		_ = o.Systemctl(ctx, "disable", "--now", st.Unit+".service")
+		if err := os.Remove(o.unitFile()); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		_ = o.Systemctl(ctx, "daemon-reload")
 	}
-	_ = o.Systemctl(ctx, "daemon-reload")
 	o.say("停了隧道服务 %s。", st.Unit)
 	if err := o.Daemon.SetOrigin(ctx, ""); err != nil {
 		return fmt.Errorf("清 public.origin：%w", err)

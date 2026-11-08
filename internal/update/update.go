@@ -463,6 +463,8 @@ func (u *Updater) Apply(ctx context.Context, force bool) (api.UpdateState, error
 	if err != nil {
 		return u.State(), err
 	}
+	// A new file renamed over the old, never written into it: the running binary keeps its inode
+	// (macOS kills a process whose signed binary changes under it).
 	if err := os.Rename(bin, exe); err != nil {
 		return fail(err)
 	}

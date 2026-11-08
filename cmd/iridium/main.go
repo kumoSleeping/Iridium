@@ -125,7 +125,7 @@ func serve(args []string) int {
 	var srv *server.Server // names terminals in source tags, once it is there
 	tag := func(id string) string { return srv.Tag(id) }
 	executors := &remote.Hub{Logf: log.Printf}
-	m, err := session.New(session.Options{Config: cfg, Store: st, Hub: h, Launcher: launcher(), UnitPrefix: cfg.UnitPrefix, Discovery: d, Tag: tag, Remote: executors})
+	m, err := session.New(session.Options{Config: cfg, Store: st, Hub: h, Launcher: launcher(state), UnitPrefix: cfg.UnitPrefix, Discovery: d, Tag: tag, Remote: executors})
 	if err != nil {
 		log.Print(err)
 		return 1

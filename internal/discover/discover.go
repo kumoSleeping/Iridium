@@ -42,7 +42,7 @@ type Options struct {
 	DshHome    string // $DSH_HOME, else ~/.dsh
 	Store      *store.Store
 	Hub        *hub.Hub // given the carried state "workspaces"; may be nil
-	Procs      Procs    // nil: /proc
+	Procs      Procs    // nil: the system's (/proc on Linux, sysctl on macOS)
 	UID        int      // whose processes count; -1: this process's
 	Logf       func(string, ...any)
 	// OnChange is told which sessions' rows may have changed, nil for the list as a whole
@@ -152,7 +152,7 @@ func (x *Index) aliasOf(hosted string) string {
 
 func New(o Options) *Index {
 	if o.Procs == nil {
-		o.Procs = ProcFS{}
+		o.Procs = defaultProcs()
 	}
 	if o.UID < 0 {
 		o.UID = os.Getuid()

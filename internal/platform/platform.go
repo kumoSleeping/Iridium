@@ -1,5 +1,6 @@
 // Package platform is what differs by operating system: how a holder is started away from the
-// daemon, stopped and looked at (plan "平台相关代码单独一层"). Linux only for now, via systemd.
+// daemon, stopped and looked at (plan "平台相关代码单独一层"): systemd on Linux, a supervisor
+// of each holder's own on macOS (Detached).
 package platform
 
 import (

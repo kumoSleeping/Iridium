@@ -1,5 +1,5 @@
 // Package hold is the holder: one small process per agent process, started away from the daemon
-// (systemd-run --user on Linux) so that restarting Iridium never cuts a turn short. It uses files
+// (systemd-run --user on Linux, a supervisor of its own on macOS) so that restarting Iridium never cuts a turn short. It uses files
 // only (plan "运行"): a named pipe it reads lines from and writes to the agent's stdin, and the
 // files below in the hold directory. It never parses the agent's protocol.
 //
@@ -24,6 +24,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/kumoSleeping/iridium/internal/platform"
 )
 
 // Files of a hold directory.
@@ -65,8 +67,11 @@ type Exit struct {
 const CodeCannotStart = 127
 
 // Main is `iridium hold ...`: `hold <dir>` holds one agent process; `hold --stop-post <dir>` is the
-// unit's ExecStopPost.
+// unit's ExecStopPost; `hold --unit <file>` is the supervisor of a platform.Detached unit.
 func Main(args []string) int {
+	if code, ok := platform.Supervise(args); ok {
+		return code
+	}
 	switch {
 	case len(args) == 1 && !strings.HasPrefix(args[0], "-"):
 		return Run(args[0])
