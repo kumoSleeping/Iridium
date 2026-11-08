@@ -1,9 +1,10 @@
 // The usage (plan "用量"): the tokens the turns used, by day, terminal, agent and model (GET
 // /api/usage). One page (#/settings/usage, from the settings), one chart for everyone (the user,
 // 2026-11-08): the total of those shown, a bar a day stacked by terminal, each terminal in its own
-// colour; under it the terminals, the most first, each its colour's dot. A row pressed takes it
-// out of the chart (and the total) or puts it back (no 仅此 key: the user, 2026-11-08); 全选 over
-// the list and the chip at the top put everyone back. Leaving or
+// colour; under it the terminals, the most first, each its bar in its colour (no dot, no tip: the
+// user, 2026-11-08). A row clicked takes it out of the chart (and the total) or puts it back;
+// right-clicked, it is the only one left in (again: everyone). 全选 over the list and the chip at
+// the top put everyone back. Leaving or
 // coming back, the bars and the total glide to the new figures. A bar pressed narrows the page to
 // that day. A terminal's models are in its line and its tip; no page of its own. Over it all, the
 // harnesses (the user, 2026-11-08): all four at first; pressed, one leaves the whole page (chart,
@@ -209,6 +210,8 @@ export function UsagePage() {
   const all = shown.length === s.order.length;
   const solo = shown.length === 1 && many ? shown[0] : undefined;
   const everyone = () => setOff(new Set());
+  // Only this one in; when it already is, everyone back.
+  const only = (id: string) => setOff(solo === id ? new Set() : new Set(s.order.filter((o) => o !== id)));
   // The last one shown taken out: everyone back, never an empty chart.
   const toggle = (id: string) => setOff(on(id) && shown.length === 1 ? new Set() : (o) => {
     const n = new Set(o);
@@ -299,7 +302,6 @@ export function UsagePage() {
               <div aria-hidden className="g-wait">
                 {[0, 1].map((i) => (
                   <div key={i} className="flex items-center gap-2.5 py-2">
-                    <span className="block size-2.5 shrink-0 rounded-full bg-fill" />
                     <span className="block size-6 shrink-0 rounded-full bg-fill" />
                     <span className="flex min-w-0 flex-1 flex-col gap-1.5">
                       <span className="block h-3 rounded-full bg-fill" style={{ width: i ? "40%" : "55%" }} />
@@ -320,6 +322,7 @@ export function UsagePage() {
                 on={on(x.id)}
                 many={many}
                 onToggle={() => toggle(x.id)}
+                onOnly={() => only(x.id)}
               />
             ))}
           </section>
@@ -528,56 +531,44 @@ function StacksWaiting({ days }: { days: number }) {
 /** A model without its provider ("opencode-go/deepseek-flash": deepseek-flash). */
 const shortModel = (m: ModelSum) => m.model.split("/").pop() || agentName(m.agent);
 
-/** A terminal: its colour's dot, its avatar and name, its models in a line under it, its total
- *  and its part of everyone's in its colour; the finer figures in its tip. Pressed, it leaves the
- *  chart (its dot a ring, its line faint) or comes back. */
-function TerminalRow({ x, u, color, whole, on, many, onToggle }: { x: TerminalSum; u: Usage | undefined; color: string; whole: number; on: boolean; many: boolean; onToggle: () => void }) {
+/** A terminal: its avatar and name, its models in a line under it, its total and its part of
+ *  everyone's in its colour. Clicked, it leaves the chart (its line faint) or comes back;
+ *  right-clicked, it is the only one in. */
+function TerminalRow({ x, u, color, whole, on, many, onToggle, onOnly }: { x: TerminalSum; u: Usage | undefined; color: string; whole: number; on: boolean; many: boolean; onToggle: () => void; onOnly: () => void }) {
   const w = who(u, x.id);
   const v = totalOf(x.sum);
-  const tip = (
-    <span className="flex flex-col tabular-nums">
-      {x.models.map((m) => (
-        <span key={m.key}>
-          {`${agentName(m.agent)} · ${m.model || "—"} · ${tokens(totalOf(m.sum))}`}
-          <span className="block text-ink-3">{`${t("usage.in", { n: m.sum.input.toLocaleString() })} · ${t("usage.out", { n: m.sum.output.toLocaleString() })} · ${t("usage.cacheRead", { n: m.sum.cacheRead.toLocaleString() })} · ${t("usage.cacheWrite", { n: m.sum.cacheWrite.toLocaleString() })}`}</span>
-        </span>
-      ))}
-    </span>
-  );
   const body = (
-    <span className="flex min-w-0 flex-1 items-center gap-2.5">
-      <Dot color={color} on={on} />
-      <span className={cn("flex min-w-0 flex-1 items-center gap-2.5 transition-opacity duration-(--dur-2)", !on && "opacity-45")}>
-        {w.mark(24)}
-        <span className="min-w-0 flex-1">
-          <span className="flex items-baseline gap-2">
-            <span className="min-w-0 flex-1 truncate text-sm font-medium">{w.name}</span>
-            {x.sum.cost > 0 && <span className="shrink-0 text-xs text-ink-3 tabular-nums">{dollars(x.sum.cost)}</span>}
-            <span className="shrink-0 text-sm font-medium tabular-nums">{tokens(v)}</span>
-          </span>
-          <span className="block truncate text-xs text-ink-3 tabular-nums">
-            {x.models.length ? x.models.slice(0, 3).map((m) => `${shortModel(m)} ${tokens(totalOf(m.sum))}`).join(" · ") : t("usage.turns", { n: 0 })}
-          </span>
-          <span className="mt-1 block h-1 overflow-hidden rounded-full bg-fill" aria-hidden>
-            <span className="block h-full rounded-full transition-[width] duration-(--dur-3) ease-(--ease-out)" style={{ width: `${whole && v ? Math.max(1, (v / whole) * 100) : 0}%`, background: color }} />
-          </span>
+    <span className={cn("flex min-w-0 flex-1 items-center gap-2.5 transition-opacity duration-(--dur-2)", !on && "opacity-45")}>
+      {w.mark(24)}
+      <span className="min-w-0 flex-1">
+        <span className="flex items-baseline gap-2">
+          <span className="min-w-0 flex-1 truncate text-sm font-medium">{w.name}</span>
+          {x.sum.cost > 0 && <span className="shrink-0 text-xs text-ink-3 tabular-nums">{dollars(x.sum.cost)}</span>}
+          <span className="shrink-0 text-sm font-medium tabular-nums">{tokens(v)}</span>
+        </span>
+        <span className="block truncate text-xs text-ink-3 tabular-nums">
+          {x.models.length ? x.models.slice(0, 3).map((m) => `${shortModel(m)} ${tokens(totalOf(m.sum))}`).join(" · ") : t("usage.turns", { n: 0 })}
+        </span>
+        <span className="mt-1 block h-1 overflow-hidden rounded-full bg-fill" aria-hidden>
+          <span className="block h-full rounded-full transition-[width] duration-(--dur-3) ease-(--ease-out)" style={{ width: `${whole && v ? Math.max(1, (v / whole) * 100) : 0}%`, background: color }} />
         </span>
       </span>
     </span>
   );
-  if (!many)
-    return (
-      <Tip label={tip} align="start">
-        <div tabIndex={0} className="g-fade -mx-1.5 flex items-center rounded-md px-1.5 py-2 outline-offset-1">
-          {body}
-        </div>
-      </Tip>
-    );
+  if (!many) return <div className="g-fade -mx-1.5 flex items-center rounded-md px-1.5 py-2">{body}</div>;
   return (
-    <Tip label={tip} align="start">
-      <button type="button" aria-pressed={on} aria-label={w.name} onClick={onToggle} className="g-fade g-press -mx-1.5 flex min-w-0 items-center rounded-md px-1.5 py-2 text-left outline-offset-1 hover:bg-fill">
-        {body}
-      </button>
-    </Tip>
+    <button
+      type="button"
+      aria-pressed={on}
+      aria-label={w.name}
+      onClick={onToggle}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onOnly();
+      }}
+      className="g-fade g-press -mx-1.5 flex min-w-0 items-center rounded-md px-1.5 py-2 text-left outline-offset-1 hover:bg-fill"
+    >
+      {body}
+    </button>
   );
 }
