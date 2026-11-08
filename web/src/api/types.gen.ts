@@ -1388,7 +1388,7 @@ export interface Token {
  */
 export interface Confirm {
   id: string;
-  kind: string; // invite | token | secret-set | secret-use
+  kind: string; // invite | token | secret-set | secret-use | exec-pair
   /**
    * Name: the invite's or token's name; secret-set: the secret's.
    */
@@ -1412,6 +1412,12 @@ export interface Confirm {
   secrets?: string[];
   command?: string;
   always?: boolean;
+  /**
+   * exec-pair: the code both sides show, and the machine that asks to join as an executor
+   * (docs/exec.md "连接"); Name is the Bot it becomes.
+   */
+  code?: string;
+  machine?: ExecPair;
 }
 /**
  * Confirms is the carried state "confirms": the pending ones, oldest first. Panels only.
@@ -1432,6 +1438,43 @@ export interface ConfirmAnswer {
    * ForSession: secret-use allowed for the rest of the session (till it stops).
    */
   forSession?: boolean;
+  /**
+   * Owner: exec-pair allowed as the owner's own machine: it runs Claude there. Only a panel that
+   * has Claude says so.
+   */
+  owner?: boolean;
+}
+/**
+ * ExecPair is what an executor says of itself asking to pair (POST /api/exec/pair, no login).
+ */
+export interface ExecPair {
+  name: string;
+  os?: string; // windows | darwin | linux
+  arch?: string;
+  program?: string;
+  agents?: ExecAgent[];
+}
+/**
+ * ExecAgent is an agent an executor has.
+ */
+export interface ExecAgent {
+  agent: string;
+  version?: string;
+}
+/**
+ * ExecPairing answers a pairing request: the code to show, and the request to ask after.
+ */
+export interface ExecPairing {
+  code: string;
+  request: string;
+}
+/**
+ * ExecPairState is how a pairing request stands (GET /api/exec/pair/{request}): pending, allowed
+ * (with the TOKEN, given once), denied or expired.
+ */
+export interface ExecPairState {
+  status: string;
+  token?: string;
 }
 /**
  * ConfirmState is how a Confirm went, as the asker sees it: never a secret.

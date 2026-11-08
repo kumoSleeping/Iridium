@@ -77,6 +77,10 @@ type Config struct {
 	// pages show of it (name, kind, avatar); not on a last-seen time alone.
 	OnTerminals func()
 
+	// Open says which requests pass without a login, as no one: executors asking to pair
+	// (docs/exec.md). Their handlers check and limit them themselves.
+	Open func(*http.Request) bool
+
 	Logger *slog.Logger     // default slog.Default()
 	Now    func() time.Time // default time.Now; for tests
 }
@@ -324,6 +328,9 @@ func bearer(r *http.Request) (string, bool) {
 	return "", false
 }
 
+// ClientKey is who r comes from, as the gate's rate limits count it.
+func (g *Gate) ClientKey(r *http.Request) string { return clientKey(r, g.ipHeader) }
+
 // Wrap returns next behind the gate. Handlers can read the caller with FromContext.
 func (g *Gate) Wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -336,6 +343,10 @@ func (g *Gate) Wrap(next http.Handler) http.Handler {
 		}
 		if r.URL.Path == "/_ir" || strings.HasPrefix(r.URL.Path, Prefix) {
 			g.serveGate(w, r)
+			return
+		}
+		if g.cfg.Open != nil && !hasToken && g.cfg.Open(r) {
+			next.ServeHTTP(w, r)
 			return
 		}
 		a, ok := g.authorize(w, r)

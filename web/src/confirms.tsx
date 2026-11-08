@@ -5,7 +5,7 @@
 // asked with --owner (the new terminal gets Claude) only a panel that has Claude allows.
 // A credential's (plan "凭据"): secret-set has a password box, whose value goes to the daemon and
 // nowhere else; secret-use is allow, this session, or deny, and only the owner's own allows it.
-import { KeyRound, Link2, LockKeyhole, Terminal as TermIcon } from "lucide-react";
+import { KeyRound, Link2, LockKeyhole, Monitor, Terminal as TermIcon } from "lucide-react";
 import { ConfirmIcon, confirmName, confirmTitle } from "./confirmname";
 import { useRef, useState, type ReactNode } from "react";
 import { api } from "./api/client";
@@ -17,7 +17,7 @@ import { openChat } from "./route";
 import { showSecret } from "./secrets";
 import { useList } from "./store";
 import { errText, toast } from "./toast";
-import { titleOf } from "./ui";
+import { Switch, titleOf } from "./ui";
 
 export { confirmTitle, confirmName, ConfirmIcon };
 
@@ -29,6 +29,7 @@ export const saysOwner = (me?: Me) => !!me && me.kind === "panel" && !me.local &
 export function ConfirmCard({ c, at: here }: { c: Confirm; at: string }) {
   if (c.kind === "secret-set") return <SecretSetCard c={c} />;
   if (c.kind === "secret-use") return <SecretUseCard c={c} />;
+  if (c.kind === "exec-pair") return <ExecPairCard c={c} />;
   return <SecretGiveCard c={c} at={here} />;
 }
 
@@ -239,6 +240,82 @@ function SecretUseCard({ c }: { c: Confirm }) {
         <CardDetails>
           <Facts rows={[[t("secrets.names"), names], ...(c.command ? ([[t("secrets.command"), <code className="font-mono text-xs">{c.command}</code>]] as [string, ReactNode][]) : []), ...facts]} />
           <p className="m-0 text-xs text-ink-3">{c.always ? t("secrets.alwaysHint") : t("secrets.useHint")}</p>
+        </CardDetails>
+      )}
+    </CardFrame>
+  );
+}
+
+const systems: Record<string, string> = { windows: "Windows", darwin: "macOS", linux: "Linux" };
+
+/** The machine an exec-pair card is for: its system and agents, e.g. "Windows · dsh 0.2.2". */
+export const machineLine = (c: Confirm) =>
+  [systems[c.machine?.os ?? ""], ...(c.machine?.agents ?? []).map((a) => [a.agent, a.version].filter(Boolean).join(" "))].filter(Boolean).join(" · ");
+
+/** Another machine's executor asks to join (docs/exec.md "连接"): allowed when its code matches the
+ *  one shown there; the TOKEN goes to it, never to this page. A panel that has Claude may say it is
+ *  the owner's own machine, which then runs Claude. */
+function ExecPairCard({ c }: { c: Confirm }) {
+  const me = useMe().data;
+  const canOwn = saysOwner(me);
+  const { facts } = useAsked(c);
+  const [own, setOwn] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState<"allow" | "deny" | null>(null);
+  const [leaving, setLeaving] = useState(false);
+  const answer = async (allow: boolean) => {
+    setBusy(allow ? "allow" : "deny");
+    try {
+      const r = await api.answerConfirm(c.id, allow, allow && canOwn && own ? { owner: true } : undefined);
+      setLeaving(true);
+      if (r.state === "failed") toast(t("err.confirm"), { error: true, description: r.error });
+      else toast(allow ? t("confirm.pairDone", { name: r.name ?? c.name ?? "" }) : t("toast.denied"));
+    } catch (e) {
+      toast(t("err.confirm"), { error: true, description: errText(e) });
+    } finally {
+      setBusy(null);
+    }
+  };
+  const m = c.machine;
+  return (
+    <CardFrame label={confirmTitle(c)} leaving={leaving}>
+      <CardHead
+        icon={<Monitor size={16} />}
+        title={confirmTitle(c)}
+        tag={machineLine(c)}
+        summary={t("confirm.pairCode", { code: c.code ?? "" })}
+        open={open}
+        setOpen={setOpen}
+        keys={
+          <>
+            <SecondKey disabled={!!busy} onClick={() => void answer(false)}>
+              {t("ask.deny")}
+            </SecondKey>
+            <MainKey busy={busy === "allow"} disabled={!!busy} onClick={() => void answer(true)}>
+              {t("confirm.allow")}
+            </MainKey>
+          </>
+        }
+      />
+      {canOwn && (
+        <div className="mt-2.5 flex items-center gap-2 pl-[26px]">
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm">{t("confirm.pairOwner")}</span>
+            <span className="block text-xs text-ink-3">{t("confirm.pairOwnerHint")}</span>
+          </span>
+          <Switch label={t("confirm.pairOwner")} on={own} onChange={setOwn} />
+        </div>
+      )}
+      {open && (
+        <CardDetails>
+          <Facts
+            rows={[
+              [t("confirm.system"), [systems[m?.os ?? ""], m?.arch].filter(Boolean).join(" ") || "—"],
+              ...(m?.program ? ([[t("confirm.program"), m.program]] as [string, ReactNode][]) : []),
+              ...facts.slice(-1),
+            ]}
+          />
+          <p className="m-0 text-xs text-ink-3">{t("confirm.pairHint")}</p>
         </CardDetails>
       )}
     </CardFrame>

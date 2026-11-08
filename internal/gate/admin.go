@@ -102,6 +102,15 @@ func (g *Gate) CreateInvite(name string, owner bool) (InviteLink, error) {
 // creating it if needed: `ir token <名字>`. For an existing channel the token is replaced:
 // the old one stops working and its connections are closed. Works in both modes.
 func (g *Gate) CreateToken(name string) (EndpointInfo, string, error) {
+	return g.createToken(name, true)
+}
+
+// CreateNewToken is CreateToken for a new channel only: ErrNameTaken if name is anyone's.
+func (g *Gate) CreateNewToken(name string) (EndpointInfo, string, error) {
+	return g.createToken(name, false)
+}
+
+func (g *Gate) createToken(name string, replace bool) (EndpointInfo, string, error) {
 	n, err := NormalizeName(name)
 	if err != nil {
 		return EndpointInfo{}, "", err
@@ -109,7 +118,7 @@ func (g *Gate) CreateToken(name string) (EndpointInfo, string, error) {
 	token := newChannelToken()
 	g.mu.Lock()
 	e, found := g.findLocked(n)
-	if found && e.Kind != KindChannel {
+	if found && (e.Kind != KindChannel || !replace) {
 		g.mu.Unlock()
 		return EndpointInfo{}, "", ErrNameTaken
 	}

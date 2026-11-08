@@ -133,7 +133,7 @@ type Token struct {
 // panel answers it. No secrets.
 type Confirm struct {
 	ID   string `json:"id"`
-	Kind string `json:"kind"` // invite | token | secret-set | secret-use
+	Kind string `json:"kind"` // invite | token | secret-set | secret-use | exec-pair
 	// Name: the invite's or token's name; secret-set: the secret's.
 	Name      string `json:"name,omitempty"`
 	Owner     bool   `json:"owner,omitempty"`   // --owner: it gets Claude; only a panel that has Claude allows it
@@ -151,6 +151,10 @@ type Confirm struct {
 	Secrets []string `json:"secrets,omitempty"`
 	Command string   `json:"command,omitempty"`
 	Always  bool     `json:"always,omitempty"`
+	// exec-pair: the code both sides show, and the machine that asks to join as an executor
+	// (docs/exec.md "连接"); Name is the Bot it becomes.
+	Code    string    `json:"code,omitempty"`
+	Machine *ExecPair `json:"machine,omitempty"`
 }
 
 // Confirms is the carried state "confirms": the pending ones, oldest first. Panels only.
@@ -165,6 +169,37 @@ type ConfirmAnswer struct {
 	Value string `json:"value,omitempty"`
 	// ForSession: secret-use allowed for the rest of the session (till it stops).
 	ForSession bool `json:"forSession,omitempty"`
+	// Owner: exec-pair allowed as the owner's own machine: it runs Claude there. Only a panel that
+	// has Claude says so.
+	Owner bool `json:"owner,omitempty"`
+}
+
+// ExecPair is what an executor says of itself asking to pair (POST /api/exec/pair, no login).
+type ExecPair struct {
+	Name    string      `json:"name"`
+	OS      string      `json:"os,omitempty"` // windows | darwin | linux
+	Arch    string      `json:"arch,omitempty"`
+	Program string      `json:"program,omitempty"`
+	Agents  []ExecAgent `json:"agents,omitempty"`
+}
+
+// ExecAgent is an agent an executor has.
+type ExecAgent struct {
+	Agent   string `json:"agent"`
+	Version string `json:"version,omitempty"`
+}
+
+// ExecPairing answers a pairing request: the code to show, and the request to ask after.
+type ExecPairing struct {
+	Code    string `json:"code"`
+	Request string `json:"request"`
+}
+
+// ExecPairState is how a pairing request stands (GET /api/exec/pair/{request}): pending, allowed
+// (with the TOKEN, given once), denied or expired.
+type ExecPairState struct {
+	Status string `json:"status"`
+	Token  string `json:"token,omitempty"`
 }
 
 // ConfirmState is how a Confirm went, as the asker sees it: never a secret.

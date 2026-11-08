@@ -59,6 +59,7 @@ type Server struct {
 	g       atomic.Pointer[gate.Gate]
 	initErr error // the gate for cfg.Public.Origin would not open; Listen gives it
 	asks    *confirms
+	pairs   *pairs // executors asking to pair (routes_pair.go)
 	vault   *vault // the credentials' masks and allowed uses (routes_secrets.go)
 
 	// Set before Handler, if at all: the plugin chat layer, Web Push, and who a request is from.
@@ -88,6 +89,7 @@ func New(cfg config.Config, m *session.Manager, h *hub.Hub, logf func(string, ..
 	}
 	s := &Server{cfg: cfg, m: m, hub: h, st: m.Store(), files: newFiles(cfg, m, logf), logf: logf}
 	s.asks = newConfirms(h)
+	s.pairs = newPairs()
 	s.vault = newVault()
 	s.reloadSecrets()
 	m.SetAnnotate(s.files.AnnotateBlocks) // a state's tail names files as a page of messages does
@@ -138,6 +140,7 @@ func (s *Server) Handler(local bool) http.Handler {
 	s.pushRoutes(mux)
 	s.pluginRoutes(mux)
 	mux.HandleFunc("GET /api/exec", s.execConnect)
+	s.pairRoutes(mux)
 	s.extensionRoutes(mux)
 	s.discoverRoutes(mux)
 	s.fileRoutes(mux, local)

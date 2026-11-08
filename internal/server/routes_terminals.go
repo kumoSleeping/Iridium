@@ -354,7 +354,13 @@ func (s *Server) answerConfirm(w http.ResponseWriter, r *http.Request) {
 	by := s.ownerSays(c)
 	// An --owner ask is allowed only by one that may say so; it stays waiting for one that may.
 	// Denying it is any panel's.
-	if cf, ok := s.asks.peek(id); ok && cf.Owner && a.Allow && by == "" {
+	cf, ok := s.asks.peek(id)
+	// An executor allowed as the owner's own machine runs Claude: only one that may say so.
+	if ok && cf.Kind == "exec-pair" && a.Allow && a.Owner && by == "" {
+		forbid(w, errOwnerFlag)
+		return
+	}
+	if ok && cf.Owner && a.Allow && by == "" {
 		if cf.Kind == "secret-use" {
 			forbid(w, errOwnerSecret)
 		} else {
@@ -365,11 +371,12 @@ func (s *Server) answerConfirm(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "type the value (64 KiB at most)")
 		return
 	}
-	cf, ok := s.asks.take(id)
+	cf, ok = s.asks.take(id)
 	if !ok {
 		fail(w, http.StatusNotFound, "no such confirmation waiting")
 		return
 	}
+	owner := by
 	if !cf.Owner {
 		by = ""
 	}
@@ -395,6 +402,16 @@ func (s *Server) answerConfirm(w http.ResponseWriter, r *http.Request) {
 			err = s.storeAsked(cf, a.Value, c)
 		case "secret-use":
 			s.allowSecretUse(cf, a.ForSession)
+		case "exec-pair":
+			// The TOKEN goes to the executor alone, by its request; the panel never sees it.
+			if !a.Owner {
+				owner = ""
+			}
+			var tok *api.Token
+			if tok, err = s.makeExecBot(cf.Name, owner); err == nil {
+				s.pairAllowed(id, tok.Token)
+				st.Name = tok.Terminal.Name
+			}
 		}
 		st.State = "allowed"
 		if err != nil {
