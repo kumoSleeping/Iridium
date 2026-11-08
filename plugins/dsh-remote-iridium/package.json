@@ -6,20 +6,45 @@
   "main": "index.js",
   "exports": {
     ".": "./index.js",
+    "./client": "./client.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
-  "files": ["index.js", "executor.js", "cordis.patch.yml", "README.md"],
+  "files": [
+    "index.js",
+    "executor.js",
+    "client.js",
+    "cordis.patch.yml",
+    "README.md"
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/kumoSleeping/Iridium",
     "directory": "plugins/dsh-remote-iridium"
   },
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-plugin-manager"
+      ],
+      "platform": "web"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/schemastery": "*"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/schemastery": {
+      "optional": true
     }
   }
 }
