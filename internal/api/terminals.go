@@ -185,13 +185,16 @@ type ConfirmAnswer struct {
 }
 
 // ExecPair is what an executor or a Bot says of itself asking to pair (POST /api/exec/pair,
-// POST /api/pair; no login). A Bot says its name and program only.
+// POST /api/pair; no login). A Bot says its name and program only. NoShell and AgentShell are what
+// it means to say in its hello (Machine's), so the card tells whether command lines would run there.
 type ExecPair struct {
-	Name    string      `json:"name"`
-	OS      string      `json:"os,omitempty"` // windows | darwin | linux
-	Arch    string      `json:"arch,omitempty"`
-	Program string      `json:"program,omitempty"`
-	Agents  []ExecAgent `json:"agents,omitempty"`
+	Name       string      `json:"name"`
+	OS         string      `json:"os,omitempty"` // windows | darwin | linux
+	Arch       string      `json:"arch,omitempty"`
+	Program    string      `json:"program,omitempty"`
+	Agents     []ExecAgent `json:"agents,omitempty"`
+	NoShell    bool        `json:"noShell,omitempty"`
+	AgentShell bool        `json:"agentShell,omitempty"`
 }
 
 // Machine is another machine's executor (docs/exec.md): a Bot, as it last said of itself; the

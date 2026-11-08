@@ -248,9 +248,19 @@ function SecretUseCard({ c }: { c: Confirm }) {
 
 const systems: Record<string, string> = { windows: "Windows", darwin: "macOS", linux: "Linux" };
 
-/** The machine an exec-pair card is for: its system and agents, e.g. "Windows · dsh 0.2.2". */
+/** Whether command lines would run at a machine that asks to join, as it says (docs/exec.md "握手"):
+ *  none (its agents only), a person's on the page, or agents' too (ir sh). */
+const shellOf = (c: Confirm) => (c.machine?.noShell ? "none" : c.machine?.agentShell ? "agents" : "page");
+
+/** The machine an exec-pair card is for: its system, agents and commands, e.g. "Windows · dsh 0.2.2 · 可执行命令". */
 export const machineLine = (c: Confirm) =>
-  [systems[c.machine?.os ?? ""], ...(c.machine?.agents ?? []).map((a) => [a.agent, a.version].filter(Boolean).join(" "))].filter(Boolean).join(" · ");
+  [
+    systems[c.machine?.os ?? ""],
+    ...(c.machine?.agents ?? []).map((a) => [a.agent, a.version].filter(Boolean).join(" ")),
+    t(`confirm.shell.${shellOf(c)}`),
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
 /** Another machine's executor (exec-pair) or a Bot (bot-pair) asks to join (docs/exec.md "连接"):
  *  allowed when its code matches the one shown there; the TOKEN goes to it, never to this page. A
@@ -323,6 +333,7 @@ function ExecPairCard({ c }: { c: Confirm }) {
           <Facts
             rows={[
               ...(bot ? [] : ([[t("confirm.system"), [systems[m?.os ?? ""], m?.arch].filter(Boolean).join(" ") || "—"]] as [string, ReactNode][])),
+              ...(bot ? [] : ([[t("confirm.commands"), t(`confirm.commands.${shellOf(c)}`)]] as [string, ReactNode][])),
               ...(m?.program ? ([[t("confirm.program"), m.program]] as [string, ReactNode][]) : []),
               ...facts.slice(-1),
             ]}

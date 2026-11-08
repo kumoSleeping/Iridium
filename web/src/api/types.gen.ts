@@ -1509,7 +1509,8 @@ export interface ConfirmAnswer {
 }
 /**
  * ExecPair is what an executor or a Bot says of itself asking to pair (POST /api/exec/pair,
- * POST /api/pair; no login). A Bot says its name and program only.
+ * POST /api/pair; no login). A Bot says its name and program only. NoShell and AgentShell are what
+ * it means to say in its hello (Machine's), so the card tells whether command lines would run there.
  */
 export interface ExecPair {
   name: string;
@@ -1517,6 +1518,8 @@ export interface ExecPair {
   arch?: string;
   program?: string;
   agents?: ExecAgent[];
+  noShell?: boolean;
+  agentShell?: boolean;
 }
 /**
  * Machine is another machine's executor (docs/exec.md): a Bot, as it last said of itself; the

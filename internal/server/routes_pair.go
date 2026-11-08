@@ -238,6 +238,9 @@ func cleanPair(m api.ExecPair) api.ExecPair {
 		}
 	}
 	m.Arch, m.Program = truncRunes(m.Arch, 16), truncRunes(m.Program, 64)
+	if m.NoShell {
+		m.AgentShell = false
+	}
 	if len(m.Agents) > 8 {
 		m.Agents = m.Agents[:8]
 	}

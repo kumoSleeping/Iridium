@@ -377,6 +377,13 @@ export const en: Dict = {
   "confirm.pairDone": "{name} joined",
   "confirm.system": "System",
   "confirm.program": "Program",
+  "confirm.commands": "Commands",
+  "confirm.shell.none": "Agents only",
+  "confirm.shell.page": "Runs commands",
+  "confirm.shell.agents": "Runs commands, agents' too",
+  "confirm.commands.none": "None: it starts its agents only",
+  "confirm.commands.page": "From the page",
+  "confirm.commands.agents": "From the page, and agents' ir sh",
 
   "secret.invite": "A new panel's invite",
   "secret.token": "Bot token",

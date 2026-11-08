@@ -140,6 +140,20 @@ func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, id, name string) {
 	}
 }
 
+// Drop ends executor id's connection, if it has one: its Bot was revoked. Connecting again, its
+// TOKEN is turned away before it gets here.
+func (h *Hub) Drop(id string) {
+	h.mu.Lock()
+	m := h.machines[id]
+	h.mu.Unlock()
+	if m == nil {
+		return
+	}
+	if c, err := m.Conn(); err == nil {
+		c.Close()
+	}
+}
+
 // Machine is one executor: its connection while there is one, and the holders relayed through it.
 type Machine struct {
 	hub *Hub

@@ -129,8 +129,12 @@ func (s *Server) terminalsChanged() {
 }
 
 // revoked forgets a revoked terminal's chats (a Bot's): where they pointed, so the list marks no
-// session with it, what they last did, their events.
+// session with it, what they last did, their events. An executor's connection ends now, not when
+// it next connects.
 func (s *Server) revoked(id string) {
+	if s.Remote != nil {
+		s.Remote.Drop(id)
+	}
 	if s.st == nil {
 		return
 	}

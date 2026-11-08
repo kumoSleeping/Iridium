@@ -6,7 +6,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import z from '@deepseek-ai/schemastery'
-import { Executor } from './executor.js'
+import { Executor, iridiumKey, refused } from './executor.js'
 
 export const name = 'remote-iridium'
 
@@ -43,14 +43,26 @@ function machineName() {
 const base = (url) => url.replace(/\/+$/, '')
 const wsURL = (url) => base(url).replace(/^http/i, 'ws') + '/api/exec'
 
-/** Asks the Iridium to pair until a panel allows it: the TOKEN; null if denied or stopped. */
+/** Asks the Iridium to pair until a panel allows it: the TOKEN; null if denied, closed or stopped. */
 async function pair(url, hello, stopped, show) {
-  for (;;) {
+  for (let again = false; ; again = true) {
     if (stopped()) return null
     let req
     try {
       const r = await fetch(`${base(url)}/api/exec/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(hello) })
-      if (!r.ok) throw new Error(`${r.status} ${await r.text()}`)
+      if (r.status === 403) {
+        show({ state: 'closed' })
+        say(`${url} takes no pairing requests now (its settings): ask again with /iridium ${url}`)
+        return null
+      }
+      if (r.status === 429) {
+        const wait = Math.min(Math.max(Number(r.headers.get('retry-after')) || 600, 30), 3600)
+        show({ state: 'busy', until: Date.now() + wait * 1000 })
+        say(`${url} has too many pairing requests: trying again in ${Math.round(wait / 60)} min`)
+        await sleep(wait * 1000)
+        continue
+      }
+      if (!r.ok) throw new Error(`HTTP ${r.status} ${(await r.text()).trim()}`.trim())
       req = await r.json()
     } catch (e) {
       show({ state: 'unreachable', error: e.message })
@@ -58,7 +70,7 @@ async function pair(url, hello, stopped, show) {
       await sleep(30000)
       continue
     }
-    show({ state: 'pairing', code: req.code })
+    show({ state: 'pairing', code: req.code, renewed: again })
     say(`pairing code ${req.code}: allow "${hello.name}" on the Iridium page`)
     for (;;) {
       if (stopped()) return null
@@ -75,7 +87,10 @@ async function pair(url, hello, stopped, show) {
         say('pairing was declined')
         return null
       }
-      if (st.status === 'expired') break
+      if (st.status === 'expired') {
+        say('the pairing code expired: asking for a new one')
+        break
+      }
       await sleep(2000)
     }
   }
@@ -83,13 +98,17 @@ async function pair(url, hello, stopped, show) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
-/** Whether the Iridium turns the TOKEN down (a removed Bot): then it pairs again. */
-async function refused(url, token) {
+/** The one TOKEN of 0.1 (token/token, its Iridium in token/url), filed under that Iridium. */
+function migrate(tokens, tokenOf) {
+  const old = path.join(tokens, 'token')
   try {
-    const r = await fetch(`${base(url)}/api/exec`, { headers: { Authorization: `Bearer ${token}` } })
-    return r.status === 401 || r.status === 403
-  } catch {
-    return false
+    const url = fs.readFileSync(path.join(tokens, 'url'), 'utf8').trim()
+    if (fs.statSync(old).isFile() && !fs.existsSync(tokenOf(url))) fs.renameSync(old, tokenOf(url))
+  } catch {}
+  for (const f of ['token', 'url']) {
+    try {
+      if (fs.statSync(path.join(tokens, f)).isFile()) fs.rmSync(path.join(tokens, f))
+    } catch {}
   }
 }
 
@@ -123,8 +142,12 @@ export const Config = z.object({
 
 export function apply(ctx, config) {
   const home = process.env.DSH_HOME || path.join(os.homedir(), '.dsh')
+  // Each Iridium its own TOKEN (token/<host>) and holders (<host>/): one set aside for another is
+  // there again when it comes back, unpaired only if that Iridium removed it.
   const state = path.join(home, 'remote-iridium')
-  const tokenFile = path.join(state, 'token', 'token')
+  const tokens = path.join(state, 'token')
+  const tokenOf = (url) => path.join(tokens, iridiumKey(url))
+  migrate(tokens, tokenOf)
   // The address as set, or the http(s) one in it (pasted with something before or after it).
   const urlNow = () => {
     const u = config?.url
@@ -133,6 +156,7 @@ export function apply(ctx, config) {
   }
   let status = { state: 'idle' }
   let run = null // { stop, url }: the loop for one url
+  let offer = null // what this machine gives the Iridium: dsh's version, commands, roots
 
   function start() {
     run?.stop()
@@ -148,13 +172,7 @@ export function apply(ctx, config) {
       say(`not an Iridium address: ${url}`)
       return
     }
-    // A token is the Iridium's it was given by: another one pairs afresh.
-    const pairedFile = path.join(state, 'token', 'url')
-    let pairedWith = ''
-    try {
-      pairedWith = fs.readFileSync(pairedFile, 'utf8').trim()
-    } catch {}
-    if (pairedWith && pairedWith !== base(url)) fs.rmSync(tokenFile, { force: true })
+    const tokenFile = tokenOf(url)
     let stopped = false
     let ex = null
     status = { state: 'idle', url }
@@ -163,8 +181,8 @@ export function apply(ctx, config) {
     }
     run = {
       url,
-      get conn() {
-        return ex?.conn
+      get ex() {
+        return ex
       },
       stop() {
         stopped = true
@@ -180,7 +198,17 @@ export function apply(ctx, config) {
         say(e.message)
         return
       }
-      const who = { name: config?.name || machineName(), os: process.platform === 'win32' ? 'windows' : process.platform, arch: process.arch, program: `dsh-remote-iridium ${version()}`, agents: [{ agent: 'dsh', version: dsh.version }] }
+      // What it asks with is what its hello will say: the Iridium's card shows the agents and
+      // whether command lines would run here.
+      const noShell = config?.shell === false
+      const agentShell = !noShell && config?.agentShell === true
+      const who = {
+        name: config?.name || machineName(), os: process.platform === 'win32' ? 'windows' : process.platform, arch: process.arch,
+        program: `dsh-remote-iridium ${version()}`, agents: [{ agent: 'dsh', version: dsh.version }],
+        ...(noShell ? { noShell } : {}), ...(agentShell ? { agentShell } : {}),
+      }
+      offer = { dsh: dsh.version, noShell, agentShell, roots: config?.roots ?? [] }
+      if (older(dsh.version, MIN_DSH)) say(`dsh ${dsh.version} is older than ${MIN_DSH}: the Iridium starts no dsh here`)
       for (;;) {
         let token = null
         try {
@@ -191,18 +219,18 @@ export function apply(ctx, config) {
           if (!token) return
           fs.mkdirSync(path.dirname(tokenFile), { recursive: true, mode: 0o700 })
           fs.writeFileSync(tokenFile, token, { mode: 0o600 })
-          fs.writeFileSync(pairedFile, base(url) + '\n', { mode: 0o600 })
           say(`paired with ${url}`)
         }
         if (stopped) return
         show({ state: 'paired', name: who.name })
-        ex = new Executor({ url: wsURL(url), token, state, roots: config?.roots ?? [], noShell: config?.shell === false, agentShell: config?.agentShell === true, agents: [dsh], program: who.program, log: (m) => say(m) })
+        ex = new Executor({ url: wsURL(url), token, state: path.join(state, iridiumKey(url)), denied: [tokens], roots: config?.roots ?? [], noShell, agentShell, agents: [dsh], program: who.program, log: (m) => say(m) })
         const running = ex.run()
         // A TOKEN turned down (its Bot removed) is forgotten, and the machine pairs again.
         while (!stopped) {
           await sleep(60000)
           if (!ex.conn && (await refused(url, token))) {
             say('the Iridium no longer takes this machine: pairing again')
+            show({ state: 'revoked' })
             ex.stop()
             fs.rmSync(tokenFile, { force: true })
             break
@@ -214,6 +242,15 @@ export function apply(ctx, config) {
     })()
   }
 
+  /** What this machine gives the Iridium, a line each. */
+  function offered() {
+    if (!offer) return []
+    const dsh = `dsh ${offer.dsh}${older(offer.dsh, MIN_DSH) ? `（低于 ${MIN_DSH}，Iridium 不会在本机开 dsh）` : ''}`
+    const commands = offer.noShell ? '不执行，仅启动 dsh' : offer.agentShell ? '执行网页上的命令和 agent 的 ir sh' : '执行网页上的命令（agent 的 ir sh 不执行）'
+    const roots = offer.roots.length ? offer.roots.join('、') : '全部（配置、TOKEN、~/.ssh 除外）'
+    return [`agent：${dsh}`, `命令：${commands}`, `文件：${roots}`]
+  }
+
   function describe() {
     const at = status.url ? `（${status.url}）` : ''
     switch (status.state) {
@@ -222,18 +259,41 @@ export function apply(ctx, config) {
       case 'bad-url':
         return `不是 Iridium 地址：${status.url}。用法：/iridium https://你的-iridium`
       case 'unreachable':
-        return `无法连接 Iridium${at}：${status.error}`
+        return `无法连接 Iridium${at}：${status.error}。30 秒后重试`
+      case 'closed':
+        return `Iridium 已停止接收连接申请${at}。对方开放后重新申请：/iridium ${status.url}`
+      case 'busy':
+        return `Iridium 的连接申请过多${at}，${ago(status.until - Date.now()) || '1 分钟'}内重试`
       case 'pairing':
-        return `等待批准${at}，配对码 ${status.code}`
+        return [`等待批准${at}，配对码 ${status.code}${status.renewed ? '（原配对码已过期，此为新码）' : ''}`, '在 Iridium 网页上核对配对码后允许。申请内容：', ...offered()].join('\n')
       case 'denied':
         return `配对被拒绝${at}。重新申请：/iridium ${status.url}`
+      case 'revoked':
+        return `已被 Iridium 移除${at}，重新申请中`
       case 'paired':
-        return `已接入${at}，本机名 ${status.name}${run?.conn ? '' : '，连接中'}`
+        return [`已接入${at}，名为 ${run?.ex?.name || status.name}`, connection(), ...offered(), running()].filter(Boolean).join('\n')
       case 'error':
         return `无法启动：${status.error}`
       default:
         return `连接中${at}`
     }
+  }
+
+  /** The connection: up since when, or down since when and why. */
+  function connection() {
+    const ex = run?.ex
+    if (!ex) return '连接：连接中'
+    const span = ex.since ? ago(Date.now() - ex.since) : ''
+    if (ex.conn) return span ? `连接：已连接 ${span}` : '连接：已连接'
+    const why = ex.error ? `（${ex.error}）` : ''
+    if (!ex.since) return `连接：连接中${why}`
+    return `连接：已断开${span ? ` ${span}` : ''}，重连中${why}`
+  }
+
+  /** The sessions' processes it runs now. */
+  function running() {
+    const n = run?.ex?.running() ?? 0
+    return n ? `进程：${n} 个运行中` : '进程：无'
   }
 
   ctx.effect(() => {
@@ -265,6 +325,28 @@ export function apply(ctx, config) {
       },
     })
   })
+}
+
+/** The oldest dsh the Iridium starts here (its MinRemote; dsh 0.1 has no sdk profile). */
+const MIN_DSH = '0.2.2'
+
+/** Whether version a is older than b, as the Iridium compares them (agents.RemoteVersionOK): the
+ *  first three numbers, "0.2.2-rc.1" as 0.2.2. */
+export function older(a, b) {
+  const parse = (v) => String(v).split('-', 1)[0].split('.').map((x) => Number.parseInt(x, 10) || 0)
+  const x = parse(a)
+  const y = parse(b)
+  for (let i = 0; i < 3; i++) if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) < (y[i] ?? 0)
+  return false
+}
+
+/** A rough span: 5 分钟, 3 小时, 2 天; '' under a minute. */
+function ago(ms) {
+  const m = Math.floor(Math.max(ms, 0) / 60000)
+  if (m < 1) return ''
+  if (m < 60) return `${m} 分钟`
+  if (m < 48 * 60) return `${Math.floor(m / 60)} 小时`
+  return `${Math.floor(m / 1440)} 天`
 }
 
 function version() {

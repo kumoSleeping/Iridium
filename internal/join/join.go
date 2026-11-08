@@ -377,7 +377,7 @@ func (o *Options) pair(ctx context.Context) (string, error) {
 	if name == "" {
 		name = MachineName()
 	}
-	who := api.ExecPair{Name: name, OS: runtime.GOOS, Arch: runtime.GOARCH, Program: o.program()}
+	who := api.ExecPair{Name: name, OS: runtime.GOOS, Arch: runtime.GOARCH, Program: o.program(), NoShell: o.NoShell, AgentShell: o.AgentShell && !o.NoShell}
 	path := "/api/exec/pair"
 	if o.Bot {
 		who, path = api.ExecPair{Name: name, Program: o.Program}, "/api/pair"

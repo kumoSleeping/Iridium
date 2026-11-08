@@ -58,7 +58,7 @@ func TestExecPair(t *testing.T) {
 	// A Bot by the machine's name is there already: the executor becomes home-pc-2.
 	l.want(200, "socket", "POST", "/api/terminals/tokens", api.NewInvite{Name: "home-pc"}, nil)
 
-	hello := api.ExecPair{Name: "home-pc", OS: "windows", Arch: "x64", Program: "dsh-remote-iridium 0.1.0", Agents: []api.ExecAgent{{Agent: "dsh", Version: "0.2.2"}}}
+	hello := api.ExecPair{Name: "home-pc", OS: "windows", Arch: "x64", Program: "dsh-remote-iridium 0.1.0", Agents: []api.ExecAgent{{Agent: "dsh", Version: "0.2.2"}}, AgentShell: true}
 	var p api.ExecPairing
 	if code := l.public("POST", "/api/exec/pair", "", hello, &p); code != 200 || len(p.Code) != 4 || len(p.Request) != 32 {
 		t.Fatalf("pair: %d %+v", code, p)
@@ -76,7 +76,7 @@ func TestExecPair(t *testing.T) {
 		t.Fatalf("confirms: %+v", cs)
 	}
 	cf := cs.Pending[0]
-	if cf.Kind != "exec-pair" || cf.Code != p.Code || cf.Machine == nil || cf.Machine.OS != "windows" || cf.Machine.Agents[0].Version != "0.2.2" {
+	if cf.Kind != "exec-pair" || cf.Code != p.Code || cf.Machine == nil || cf.Machine.OS != "windows" || cf.Machine.Agents[0].Version != "0.2.2" || !cf.Machine.AgentShell || cf.Machine.NoShell {
 		t.Fatalf("the card: %+v %+v", cf, cf.Machine)
 	}
 	// An agent may not answer; the person at the machine allows it as the owner's own.
@@ -194,13 +194,17 @@ func TestBotPair(t *testing.T) {
 	ask := func(name string) (api.ExecPairing, api.Confirm) {
 		t.Helper()
 		var p api.ExecPairing
-		if code := l.public("POST", "/api/pair", "", api.ExecPair{Name: name, OS: "windows", Program: "my-bot 1.0"}, &p); code != 200 || len(p.Code) != 4 {
+		if code := l.public("POST", "/api/pair", "", api.ExecPair{Name: name, OS: "windows", Program: "my-bot 1.0", AgentShell: true}, &p); code != 200 || len(p.Code) != 4 {
 			t.Fatalf("pair: %d %+v", code, p)
 		}
 		var cs api.Confirms
 		l.want(200, "socket", "GET", "/api/confirms", nil, &cs)
 		if len(cs.Pending) != 1 {
 			t.Fatalf("confirms: %+v", cs)
+		}
+		// A Bot offers no machine: nothing of commands on its card.
+		if m := cs.Pending[0].Machine; m == nil || m.AgentShell || m.OS != "" {
+			t.Fatalf("a Bot's card: %+v", m)
 		}
 		return p, cs.Pending[0]
 	}
@@ -257,5 +261,47 @@ func TestBotPair(t *testing.T) {
 	l.want(200, "socket", "PUT", "/api/settings", api.SettingsPatch{PairClosed: &open}, nil)
 	if code := l.public("POST", "/api/pair", "", api.ExecPair{Name: "x"}, nil); code != 200 {
 		t.Fatalf("open again: %d", code)
+	}
+}
+
+// A machine that starts only its agents runs no agent's command line either.
+func TestCleanPairShell(t *testing.T) {
+	m := cleanPair(api.ExecPair{Name: "pc", NoShell: true, AgentShell: true})
+	if !m.NoShell || m.AgentShell {
+		t.Fatalf("%+v", m)
+	}
+}
+
+// Its Bot revoked, an executor's connection ends at once, not when it next connects, and it is
+// not taken again.
+func TestRevokeDropsExecutor(t *testing.T) {
+	hub := &remote.Hub{}
+	l := startWith(t, func(s *Server, _ config.Config, _ string) { s.Remote = hub; s.WatchMachines() })
+	l.want(200, "socket", "PUT", "/api/public", api.SetPublic{Origin: "https://ir.example.com"}, nil)
+	var tok api.Token
+	l.want(200, "socket", "POST", "/api/terminals/tokens", api.NewInvite{Name: "pc"}, &tok)
+	exe, err := executor.New(executor.Options{URL: "ws" + strings.TrimPrefix(l.base, "http") + "/api/exec", Token: tok.Token, State: t.TempDir(), Logf: t.Logf})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { _ = exe.Run(ctx); close(done) }()
+	t.Cleanup(func() { cancel(); <-done; exe.Close() })
+	connected := func() bool { _, ok := hub.Machine(tok.Terminal.ID).Hello(); return ok }
+	until := func(what string, ok func() bool) {
+		t.Helper()
+		for deadline := time.Now().Add(10 * time.Second); !ok(); time.Sleep(20 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatalf("waiting for %s", what)
+			}
+		}
+	}
+	until("the executor", connected)
+	l.want(200, "socket", "DELETE", "/api/terminals/pc", nil, nil)
+	until("its connection to end", func() bool { return !connected() })
+	time.Sleep(1500 * time.Millisecond) // it tries again
+	if connected() {
+		t.Fatal("a revoked executor connected again")
 	}
 }

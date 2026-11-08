@@ -9,6 +9,25 @@ import os from 'node:os'
 import path from 'node:path'
 
 export const PROTOCOL = 1
+
+/**
+ * The name an Iridium's files go under on this machine: its host and port, as ir join names them
+ * (https://ir.kumo.ltd: ir.kumo.ltd; http://127.0.0.1:7811: 127.0.0.1-7811). Each Iridium has its
+ * own TOKEN and holders, so one may be left and come back to without pairing again.
+ */
+export function iridiumKey(url) {
+  return new URL(url).host.toLowerCase().replace(/[^a-z0-9.-]+/g, '-').replace(/^[-.]+|[-.]+$/g, '')
+}
+
+/** Whether the Iridium at url (http or ws) turns the TOKEN down (its Bot removed): then pair again. */
+export async function refused(url, token) {
+  try {
+    const r = await fetch(new URL('/api/exec', url.replace(/^ws/i, 'http')), { headers: { Authorization: `Bearer ${token}` } })
+    return r.status === 401 || r.status === 403
+  } catch {
+    return false
+  }
+}
 const MAX_READ = 4 << 20
 const DEFAULT_GRACE = 5000
 const CANNOT_START = 127
@@ -328,6 +347,11 @@ export class Executor {
     this.holds = new Map()
     this.conn = null
     this.stopped = false
+    // How the connection stands, for a status line: the name the Iridium gave it, since when it is
+    // connected (or not), and why it last failed.
+    this.name = ''
+    this.since = 0
+    this.error = ''
     fs.mkdirSync(path.join(this.state, 'holds'), { recursive: true, mode: 0o700 })
     this.load()
   }
@@ -370,7 +394,10 @@ export class Executor {
       try {
         await this.session()
       } catch (e) {
-        if (!this.stopped) this.log(`connection: ${e.message}`)
+        if (!this.stopped) {
+          this.error = e.message
+          this.log(`connection: ${e.message}`)
+        }
       }
       if (this.stopped) break
       if (Date.now() - began > 60000) wait = 1000
@@ -388,12 +415,18 @@ export class Executor {
     })
     const c = new Conn(ws, (m, p) => this.handle(c, m, p))
     this.conn = c
+    let up = false
     try {
-      await c.call('hello', this.hello())
+      const r = await c.call('hello', this.hello())
+      if (typeof r?.name === 'string' && r.name) this.name = r.name
+      up = true
+      this.since = Date.now()
+      this.error = ''
       this.log('connected')
       await c.closed
     } finally {
       if (this.conn === c) this.conn = null
+      if (up) this.since = Date.now()
       for (const h of this.holds.values()) if (h.tailOn === c) h.tailOn = null
       c.close()
     }
@@ -408,6 +441,11 @@ export class Executor {
       ...(this.o.noShell ? { noShell: true } : {}),
       ...(this.o.agentShell ? { agentShell: true } : {}),
     }
+  }
+
+  /** How many processes it started still run. */
+  running() {
+    return [...this.holds.values()].filter((h) => !h.exit).length
   }
 
   /** Ends the connection now; it connects again. */

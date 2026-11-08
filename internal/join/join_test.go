@@ -3,6 +3,7 @@ package join
 import (
 	"encoding/binary"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -213,6 +214,26 @@ func TestResident(t *testing.T) {
 	} {
 		if !strings.Contains(x, want) {
 			t.Errorf("the task has no %q:\n%s", want, x)
+		}
+	}
+}
+
+// The dsh plugin and the dev scripts file an Iridium's TOKEN and holders under the same name ir
+// join does, so a machine left for another Iridium and brought back finds them.
+func TestKeyAsPlugin(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("no node")
+	}
+	urls := []string{"https://ir.kumo.ltd", "http://127.0.0.1:7811", "https://IR.Kumo.ltd", "http://[::1]:7810", "https://host.example:8443"}
+	script := `import('../../plugins/dsh-remote-iridium/executor.js').then((m) => { for (const u of process.argv.slice(1)) console.log(m.iridiumKey(u)) })`
+	out, err := exec.Command("node", append([]string{"-e", script}, urls...)...).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Split(strings.TrimSpace(string(out)), "\n")
+	for i, u := range urls {
+		if want := (&Options{URL: u}).key(); i >= len(got) || got[i] != want {
+			t.Errorf("%s: plugin %q, ir join %q", u, got, want)
 		}
 	}
 }
