@@ -29,8 +29,8 @@ type env struct {
 	tty      bool // stderr is a terminal: progress may be drawn there
 	// at: ir runs for a session at another machine (POST /api/cli, remote.go); nil on the socket.
 	at *At
-	// after: the page's last block when the message waited on was sent ("": not known), for a
-	// transcript that does not keep its id (dsh gives each prompt its own).
+	// after: where the page ended (its last block's at) when the message waited on was sent ("":
+	// not known), for a transcript that does not keep its id (dsh gives each prompt its own).
 	after string
 }
 

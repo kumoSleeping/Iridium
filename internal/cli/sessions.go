@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -111,7 +112,7 @@ func cmdSend(e *env, args []string) int {
 		return e.waitMirrored(id, before)
 	}
 	if n := len(before.Blocks); n > 0 {
-		e.after = before.Blocks[n-1].ID
+		e.after = before.Blocks[n-1].At
 	}
 	if sent.Session != "" { // /clear: it goes on in a new session
 		fmt.Fprintln(e.out, short(sent.Session, e.ids()))
@@ -289,12 +290,7 @@ func (e *env) printReply(id, input string) int {
 		if input != "" {
 			from = userAt(page, input)
 			if from < 0 && e.after != "" { // its id not kept: what came after the page as it was
-				from = len(page.Blocks)
-				for i, b := range page.Blocks {
-					if b.ID == e.after {
-						from = i + 1
-					}
-				}
+				from = since(page, e.after)
 			}
 			from = max(0, from)
 		}
@@ -703,7 +699,7 @@ func (e *env) waitMirrored(id string, before api.MessagePage) int {
 	defer p.clear()
 	last := ""
 	if n := len(before.Blocks); n > 0 {
-		last = before.Blocks[n-1].ID
+		last = before.Blocks[n-1].At
 	}
 	var seen string
 	var still time.Time
@@ -714,10 +710,8 @@ func (e *env) waitMirrored(id string, before api.MessagePage) int {
 			return e.fail(err)
 		}
 		from := 0
-		for i, b := range page.Blocks {
-			if b.ID == last {
-				from = i + 1
-			}
+		if last != "" {
+			from = since(page, last)
 		}
 		var reply string
 		for _, b := range page.Blocks[from:] {
@@ -744,3 +738,27 @@ func (e *env) waitMirrored(id string, before api.MessagePage) int {
 
 // desktopSettle: a page still this long after a reply came is taken as the turn's end.
 var desktopSettle = 5 * time.Second
+
+// since is the first block of page past at (a block's at: its line in the transcript, a dot, its
+// place in the line; assistant blocks have no id to go by).
+func since(page api.MessagePage, at string) int {
+	for i, b := range page.Blocks {
+		if atAfter(b.At, at) {
+			return i
+		}
+	}
+	return len(page.Blocks)
+}
+
+func atAfter(a, b string) bool {
+	al, ai, _ := strings.Cut(a, ".")
+	bl, bi, _ := strings.Cut(b, ".")
+	an, _ := strconv.ParseInt(al, 10, 64)
+	bn, _ := strconv.ParseInt(bl, 10, 64)
+	if an != bn {
+		return an > bn
+	}
+	x, _ := strconv.ParseInt(ai, 10, 64)
+	y, _ := strconv.ParseInt(bi, 10, 64)
+	return x > y
+}

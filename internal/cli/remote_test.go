@@ -35,3 +35,13 @@ func TestForwardAt(t *testing.T) {
 		t.Errorf("refused: %d %q", code, errs.String())
 	}
 }
+
+// A block's at orders it in the transcript: a reply after the page as it was is found by it.
+func TestSince(t *testing.T) {
+	page := api.MessagePage{Blocks: []api.Block{{At: "58839.0"}, {At: "91507.0"}, {At: "93913.0"}, {At: "94345.0"}, {At: "94345.1"}}}
+	for at, want := range map[string]int{"91507.0": 2, "94345.0": 4, "94345.1": 5, "1.0": 0} {
+		if got := since(page, at); got != want {
+			t.Errorf("since %s: %d, want %d", at, got, want)
+		}
+	}
+}
