@@ -52,6 +52,8 @@ type Options struct {
 	// Message is text with attachments (refs of session) written in, and the images among them
 	// (the files service's Message); nil takes no attachments.
 	Message func(session, text string, refs []string) (string, []agent.Image, error)
+	// BotsChanged: Bots changed (a plugin's first chat, its stream came or went); nil: no one is told.
+	BotsChanged func()
 }
 
 // Guard is the interactive terminals' permission table as the chat layer meets it (the server
@@ -494,13 +496,22 @@ func (s *Service) Serve(ctx context.Context, c Caller, last int64, w interface{ 
 	}
 	s.mu.Lock()
 	s.online[c.ID]++
+	came := s.online[c.ID] == 1
 	s.mu.Unlock()
+	if came {
+		s.botsChanged()
+	}
 	defer func() {
 		s.mu.Lock()
+		gone := false
 		if s.online[c.ID]--; s.online[c.ID] <= 0 {
 			delete(s.online, c.ID)
+			gone = true
 		}
 		s.mu.Unlock()
+		if gone {
+			s.botsChanged()
+		}
 	}()
 	ping := time.NewTicker(Ping)
 	defer ping.Stop()

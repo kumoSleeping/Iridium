@@ -211,14 +211,26 @@ func TestPluginChat(t *testing.T) {
 		t.Errorf("passed through: %+v", r.Reply)
 	}
 
-	// /use: a folder, then its sessions (and 新会话); picking one moves the pointer.
+	// /use in a session: its folder first, its sessions, 新会话, 回到根目录, 离开当前会话; the root is
+	// the folders; picking one moves the pointer.
 	var use api.ChatInputReply
 	p.do("qq", "POST", key+"/input", api.ChatInput{Text: "/use"}, &use)
-	if use.Card == nil || use.Card.Kind != "pick" || len(use.Card.Options) != 2 || use.Card.Options[0].ID != "g:w0" || use.Card.Options[1].Text != "离开当前会话" {
+	texts := func(c *api.Card) (out []string) {
+		for _, o := range c.Options {
+			out = append(out, o.Text)
+		}
+		return out
+	}
+	if use.Card == nil || use.Card.Kind != "pick" || len(use.Card.Options) != 4 || use.Card.Options[0].ID != in.Session ||
+		!slices.Equal(texts(use.Card)[1:], []string{"[NEW] 新会话", "回到根目录", "离开当前会话"}) {
 		t.Fatalf("use: %+v", use.Card)
 	}
+	var root api.CardReply
+	if p.do("qq", "POST", "/api/answer", api.CardAnswer{Card: use.Card.ID, Option: use.Card.Options[2].ID}, &root); root.Card == nil || len(root.Card.Options) != 2 || root.Card.Options[0].ID != "g:w0" || root.Card.Options[1].Text != "离开当前会话" {
+		t.Fatalf("root: %+v", root.Card)
+	}
 	var inFolder api.CardReply
-	if p.do("qq", "POST", "/api/answer", api.CardAnswer{Card: use.Card.ID, Option: use.Card.Options[0].ID}, &inFolder); inFolder.Card == nil || len(inFolder.Card.Options) != 2 || inFolder.Card.Options[0].ID != in.Session || inFolder.Card.Options[1].Text != "[NEW] 新会话" {
+	if p.do("qq", "POST", "/api/answer", api.CardAnswer{Card: root.Card.ID, Option: root.Card.Options[0].ID}, &inFolder); inFolder.Card == nil || len(inFolder.Card.Options) != 4 || inFolder.Card.Options[0].ID != in.Session {
 		t.Fatalf("the folder: %+v", inFolder.Card)
 	}
 	use.Card = inFolder.Card
@@ -357,5 +369,41 @@ func TestQueueAndPushRoutes(t *testing.T) {
 	sub := api.PushSubscription{Endpoint: "http://insecure.example/x"}
 	if code := p.do("", "POST", "/api/push/subscriptions", sub, nil); code != 400 {
 		t.Errorf("an http endpoint: %d", code)
+	}
+}
+
+// TestUseFolders: in a session, 会话 opens its folder; a group's folder goes up to the group, every
+// folder back to the root (the user, 2026-11-08).
+func TestUseFolders(t *testing.T) {
+	p := newPluginRig(t)
+	const key = "/api/chat/qq:private:2"
+	for _, d := range []string{"a", "b"} {
+		if err := os.MkdirAll(filepath.Join(p.work, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		var r api.ChatInputReply
+		if code := p.do("qq", "POST", key+"/input", api.ChatInput{Text: "/new claude " + filepath.Join(p.work, d)}, &r); code != 200 || r.Session == "" {
+			t.Fatalf("new in %s: %d %+v", d, code, r)
+		}
+	}
+	texts := func(c *api.Card) (out []string) {
+		for _, o := range c.Options {
+			out = append(out, o.Text)
+		}
+		return out
+	}
+	var use api.ChatInputReply
+	p.do("qq", "POST", key+"/input", api.ChatInput{Text: "/use"}, &use)
+	if use.Card == nil || use.Card.Title != "b" || !slices.Equal(texts(use.Card)[1:], []string{"[NEW] 新会话", "回到上一级", "回到根目录", "离开当前会话"}) {
+		t.Fatalf("use: %+v", use.Card)
+	}
+	var up api.CardReply
+	if p.do("qq", "POST", "/api/answer", api.CardAnswer{Card: use.Card.ID, Option: use.Card.Options[2].ID}, &up); up.Card == nil ||
+		!slices.Equal(texts(up.Card), []string{"b/", "a/", "回到根目录", "离开当前会话"}) {
+		t.Fatalf("up: %+v", up.Card)
+	}
+	var root api.CardReply
+	if p.do("qq", "POST", "/api/answer", api.CardAnswer{Card: up.Card.ID, Option: up.Card.Options[2].ID}, &root); root.Card == nil || root.Card.Title != "文件夹" {
+		t.Fatalf("root: %+v", root.Card)
 	}
 }

@@ -205,6 +205,9 @@ func sessionText(x api.Session) string {
 const (
 	pageSize = 7 // a list's entries a page: with its last entries, at most 10 options (QQ's buttons)
 	newText  = "[NEW] 新会话"
+	upText   = "回到上一级"
+	rootText = "回到根目录"
+	rootStep = "p:0:use" // the groups' list, its first page
 	prevText = "上一页"
 	nextText = "下一页"
 )
@@ -253,7 +256,7 @@ func (s *Service) folderCard(ctx context.Context, c Caller, p *store.ChatPointer
 	}
 	// In a session: leaving it is the list's last (the user, 2026-11-08).
 	if _, in := s.pointed(c, p); in && !forNew {
-		extra = append(extra, api.CardOption{ID: leaveOption, Text: "离开当前会话"})
+		extra = append(extra, api.CardOption{ID: leaveOption, Text: leaveText})
 	}
 	paged(card, items, extra, n, step)
 	if len(card.Options) == 0 {
@@ -270,6 +273,27 @@ func (s *Service) folderCard(ctx context.Context, c Caller, p *store.ChatPointer
 	return api.ChatInputReply{Session: p.Session, Card: s.newPick(c, p.Chat, "use", card)}, nil
 }
 
+// useCard is /use's first card: in a session, its folder at the page with it (the user,
+// 2026-11-08); else the groups.
+func (s *Service) useCard(ctx context.Context, c Caller, p *store.ChatPointer) (api.ChatInputReply, error) {
+	if id, in := s.pointed(c, p); in {
+		l, err := s.folders(ctx, c)
+		if err != nil {
+			return api.ChatInputReply{}, err
+		}
+		for _, g := range l {
+			f := g
+			if i := slices.IndexFunc(g.subs, func(x *folder) bool { return x.holds(id) }); i >= 0 {
+				f = g.subs[i]
+			}
+			if i := slices.IndexFunc(f.sessions, func(x api.Session) bool { return x.ID == id }); i >= 0 {
+				return s.sessionCard(ctx, c, p, f.key, i/pageSize)
+			}
+		}
+	}
+	return s.folderCard(ctx, c, p, false, 0)
+}
+
 // holds: the session is in the group, or in one of its folders.
 func (f *folder) holds(id string) bool {
 	if id == "" {
@@ -282,7 +306,8 @@ func (f *folder) holds(id string) bool {
 }
 
 // sessionCard: what is in a group or folder, page n of it: its sessions, then its folders; a new
-// session there last on each page.
+// session there, 回到上一级 (in a group's folder), 回到根目录 and, in a session, 离开当前会话 last
+// on each page.
 func (s *Service) sessionCard(ctx context.Context, c Caller, p *store.ChatPointer, key string, n int) (api.ChatInputReply, error) {
 	f, err := s.findFolder(ctx, c, key)
 	if err != nil {
@@ -310,11 +335,31 @@ func (s *Service) sessionCard(ctx context.Context, c Caller, p *store.ChatPointe
 	if f.path != "" {
 		extra = append(extra, api.CardOption{ID: "n:" + f.key, Text: newText})
 	}
+	if up := s.parentOf(ctx, c, f); up != "" {
+		extra = append(extra, api.CardOption{ID: "g:" + up, Text: upText})
+	}
+	extra = append(extra, api.CardOption{ID: rootStep, Text: rootText})
+	if _, in := s.pointed(c, p); in {
+		extra = append(extra, api.CardOption{ID: leaveOption, Text: leaveText})
+	}
 	paged(card, items, extra, n, "g:"+f.key)
-	if len(card.Options) == 0 {
+	if len(items) == 0 && f.path == "" {
 		return reply(p.Session, "这个文件夹没有会话。")
 	}
 	return api.ChatInputReply{Session: p.Session, Card: s.newPick(c, p.Chat, "use", card)}, nil
+}
+
+// parentOf is the group a folder in one is in, "" for a group (its up is the root) or one the
+// group's card opens straight into (未归类 of one directory: it would come back here).
+func (s *Service) parentOf(ctx context.Context, c Caller, f *folder) string {
+	g, _, ok := strings.Cut(f.key, "/")
+	if !ok || !strings.HasPrefix(g, "w") {
+		return ""
+	}
+	if pf, err := s.findFolder(ctx, c, g); err != nil || len(pf.sessions) == 0 && len(pf.subs) == 1 && pf.path == "" {
+		return ""
+	}
+	return g
 }
 
 // agentCard: pick the agent of a new session in the folder.
@@ -397,8 +442,11 @@ func agentIDs() []api.Agent {
 	return out
 }
 
-// leaveOption is the folder card's 离开当前会话, a /use argument.
-const leaveOption = ":leave"
+// leaveOption is the folder cards' 离开当前会话, a /use argument.
+const (
+	leaveOption = ":leave"
+	leaveText   = "离开当前会话"
+)
 
 // cmdLeave points the chat at no session (the user, 2026-11-08): the web marks none with its bot,
 // and what the chat says next goes nowhere till a session is chosen.

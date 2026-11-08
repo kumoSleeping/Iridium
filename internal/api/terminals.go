@@ -48,8 +48,11 @@ type Terminal struct {
 	UsedToday  int64        `json:"usedToday"` // tokens of the turns it started today
 	// Device: what it runs on, as the badge on its messages' avatar shows; the server always sets it.
 	Device Device `json:"device,omitempty"`
-	// Bot: a plugin with a chat in Iridium; a session's menu offers to bring that chat to it.
+	// Bot: a plugin with a chat in Iridium, or connected as one now; a session's menu offers to
+	// bring that chat to it.
 	Bot bool `json:"bot,omitempty"`
+	// Chatless: a Bot no one has written to yet, so it has no chat to bring (the menu says so).
+	Chatless bool `json:"chatless,omitempty"`
 }
 
 // Device is what a terminal runs on, set in its settings (PUT /api/me/device, ir profile

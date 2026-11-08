@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -380,10 +382,12 @@ func TestBotLetter(t *testing.T) {
 // the terminal list marks the bot.
 func TestBringBot(t *testing.T) {
 	var srv *Server
+	var changed atomic.Int32
 	l := startWith(t, func(s *Server, cfg config.Config, work string) {
 		srv = s
 		var err error
-		s.Chat, err = chat.New(chat.Options{Manager: s.m, Store: s.st, StateDir: cfg.StateDir, ChatDir: work, Logf: t.Logf, Guard: s.ChatGuard(), Terminal: s.HasTerminal})
+		s.Chat, err = chat.New(chat.Options{Manager: s.m, Store: s.st, StateDir: cfg.StateDir, ChatDir: work, Logf: t.Logf, Guard: s.ChatGuard(), Terminal: s.HasTerminal,
+			BotsChanged: func() { changed.Add(1); s.BotsChanged() }})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -395,21 +399,51 @@ func TestBringBot(t *testing.T) {
 	var b api.NewSessionReply
 	l.want(200, "web", "POST", "/api/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "first"}, &b)
 	l.waitReply("web", b.ID, "ok: first")
-	// No chat yet: not a bot in the list, none to bring.
-	isBot := func() bool {
+	// No chat yet, not connected: not a bot in the list, none to bring.
+	botOf := func() (x api.Terminal) {
 		var ts api.Terminals
 		l.want(200, "web", "GET", "/api/terminals", nil, &ts)
-		return slices.ContainsFunc(ts.Terminals, func(x api.Terminal) bool { return x.ID == botID && x.Bot })
+		if i := slices.IndexFunc(ts.Terminals, func(x api.Terminal) bool { return x.ID == botID }); i >= 0 {
+			x = ts.Terminals[i]
+		}
+		return x
 	}
-	if isBot() {
+	if x := botOf(); x.Bot {
 		t.Fatal("a bot without a chat")
+	}
+	l.want(404, "web", "POST", "/api/sessions/"+b.ID+"/bot", api.BringBot{Bot: botID}, nil)
+
+	// Its event stream open, still no chat: a bot with none to bring, and the pages are told.
+	ctx, cancel := context.WithCancel(context.Background())
+	req, _ := http.NewRequestWithContext(ctx, "GET", l.base+"/api/events", nil)
+	req.Header.Set("Authorization", "Bearer "+bot)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil || resp.StatusCode != 200 {
+		t.Fatalf("events: %v %v", resp, err)
+	}
+	waitTill(t, func() bool { return changed.Load() == 1 })
+	if x := botOf(); !x.Bot || !x.Chatless {
+		t.Fatalf("connected, no chat: %+v", x)
 	}
 	l.want(404, "web", "POST", "/api/sessions/"+b.ID+"/bot", api.BringBot{Bot: botID}, nil)
 
 	var a api.ChatInputReply
 	l.want(200, bot, "POST", "/api/chat/qq:1/input", api.ChatInput{Text: "/new claude"}, &a)
-	if !isBot() {
-		t.Fatal("not marked a bot")
+	if x := botOf(); !x.Bot || x.Chatless {
+		t.Fatalf("not marked a bot with a chat: %+v", x)
+	}
+	if n := changed.Load(); n != 2 {
+		t.Fatalf("told %d times, want 2", n)
+	}
+	l.want(200, bot, "POST", "/api/chat/qq:1/input", api.ChatInput{Text: "again"}, nil)
+	if n := changed.Load(); n != 2 {
+		t.Fatalf("told again for a chat it had: %d", n)
+	}
+	cancel()
+	resp.Body.Close()
+	waitTill(t, func() bool { return changed.Load() == 3 })
+	if x := botOf(); !x.Bot || x.Chatless {
+		t.Fatalf("a bot with a chat, gone: %+v", x)
 	}
 	last, _ := srv.st.OutboxLast(botID)
 	var r api.BotReply
@@ -436,4 +470,14 @@ func TestBringBot(t *testing.T) {
 	// Not a bot; not from a bot.
 	l.want(404, "web", "POST", "/api/sessions/"+b.ID+"/bot", api.BringBot{Bot: "nobody"}, nil)
 	l.want(403, bot, "POST", "/api/sessions/"+b.ID+"/bot", api.BringBot{Bot: botID}, nil)
+}
+
+// waitTill waits up to 5s for ok.
+func waitTill(t *testing.T, ok func() bool) {
+	t.Helper()
+	for end := time.Now().Add(5 * time.Second); !ok(); time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(end) {
+			t.Fatal("timed out")
+		}
+	}
 }

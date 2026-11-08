@@ -100,7 +100,9 @@ func (s *Server) terminals(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, e := range a.Endpoints {
 		t := s.terminalOf(e)
-		t.Bot = bots[e.ID] && e.Kind == gate.KindChannel
+		chats, bot := bots[e.ID]
+		t.Bot = bot && e.Kind == gate.KindChannel
+		t.Chatless = t.Bot && !chats
 		out.Terminals = append(out.Terminals, t)
 	}
 	for _, i := range a.Invites {

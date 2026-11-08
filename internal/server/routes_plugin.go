@@ -79,6 +79,9 @@ func (s *Server) bringBot(w http.ResponseWriter, r *http.Request) {
 	reply(w, http.StatusOK, out)
 }
 
+// BotsChanged tells the pages to fetch the terminals again: which are Bots changed (chat.Options).
+func (s *Server) BotsChanged() { s.terminalsChanged() }
+
 // HasTerminal reports whether the interactive terminal id is still there.
 func (s *Server) HasTerminal(id string) bool {
 	_, ok := s.gate().Endpoint(id)

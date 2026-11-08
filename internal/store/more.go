@@ -200,6 +200,13 @@ func (s *Store) Seen(plugin, chat, session string) error {
 	return err
 }
 
+// HasChat reports whether plugin has said anything in any chat yet.
+func (s *Store) HasChat(plugin string) (bool, error) {
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM (SELECT 1 FROM chat_seen WHERE plugin = ? LIMIT 1)`, plugin).Scan(&n)
+	return n > 0, err
+}
+
 // ChatsSeen is every chat window's notes, the latest first.
 func (s *Store) ChatsSeen() ([]ChatSeen, error) {
 	rows, err := s.db.Query(`SELECT plugin, chat, session, at FROM chat_seen ORDER BY at DESC`)

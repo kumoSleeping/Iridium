@@ -25,8 +25,22 @@ import (
 
 // seen notes that the chat said something now, with session in it.
 func (s *Service) seen(c Caller, chat, session string) {
+	had, err := s.o.Store.HasChat(c.ID)
+	if err != nil {
+		s.o.Logf("chat: %v", err)
+	}
 	if err := s.o.Store.Seen(c.ID, chat, session); err != nil {
 		s.o.Logf("chat: %v", err)
+		return
+	}
+	if !had && err == nil {
+		s.botsChanged()
+	}
+}
+
+func (s *Service) botsChanged() {
+	if s.o.BotsChanged != nil {
+		s.o.BotsChanged()
 	}
 }
 
@@ -159,13 +173,19 @@ func (s *Service) Bring(session, plugin string) (api.BotReply, error) {
 	return api.BotReply{Bot: p.Plugin, Chat: p.Chat}, nil
 }
 
-// Bots is every plugin with a chat.
+// Bots is every plugin with a chat (true) or, without one yet, its event stream open now (false):
+// a Bot paired but not yet written to.
 func (s *Service) Bots() map[string]bool {
 	all, err := s.o.Store.ChatsSeen()
 	if err != nil {
 		s.o.Logf("chat: %v", err)
 	}
 	out := map[string]bool{}
+	s.mu.Lock()
+	for id := range s.online {
+		out[id] = false
+	}
+	s.mu.Unlock()
 	for _, x := range all {
 		out[x.Plugin] = true
 	}

@@ -152,7 +152,7 @@ func cmdUse(s *Service, ctx context.Context, c Caller, p *store.ChatPointer, arg
 		return api.ChatInputReply{}, err
 	}
 	if args == "" {
-		return s.folderCard(ctx, c, p, false, 0)
+		return s.useCard(ctx, c, p)
 	}
 	if args == leaveOption {
 		return cmdLeave(s, ctx, c, p, "")

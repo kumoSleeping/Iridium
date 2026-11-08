@@ -158,7 +158,7 @@ func serve(args []string) int {
 		return 1
 	}
 	srv.Chat, err = chat.New(chat.Options{Manager: m, Store: st, StateDir: state, ChatDir: cfg.ChatDir, Guard: srv.ChatGuard(), Message: srv.Files().Message,
-		Terminal: srv.HasTerminal,
+		Terminal: srv.HasTerminal, BotsChanged: srv.BotsChanged,
 		Workspaces: func() ([]api.Workspace, error) {
 			if srv.Discover == nil {
 				return nil, nil
