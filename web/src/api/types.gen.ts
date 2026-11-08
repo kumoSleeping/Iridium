@@ -1455,6 +1455,22 @@ export interface ExecPair {
   agents?: ExecAgent[];
 }
 /**
+ * Machine is another machine's executor (docs/exec.md): a Bot, as it last said of itself; the
+ * carried state "machines" lists them, GET /api/machines too. Agents: those Iridium can run there.
+ */
+export interface Machine {
+  id: string; // its terminal
+  name: string;
+  avatar?: string;
+  os: string; // windows | darwin | linux
+  arch?: string;
+  home: string;
+  sep: string;
+  agents: ExecAgent[];
+  online: boolean;
+  seenAt: number /* int64 */; // when it last connected (ms)
+}
+/**
  * ExecAgent is an agent an executor has.
  */
 export interface ExecAgent {

@@ -25,6 +25,7 @@ export const en: Dict = {
   "status.elsewhere": "Running elsewhere",
   "status.needsElsewhere": "Needs you elsewhere",
   "status.idle": "Idle",
+  "status.offline": "Disconnected",
   "status.unread": "Unread",
 
   "top.online": "Connected · {ms} ms round trip",
@@ -280,6 +281,7 @@ export const en: Dict = {
   "pick.home": "Home",
   "new.agent": "Pick an agent",
   "new.notInstalled": "{name} is not installed",
+  "new.offline": "{name} is not connected",
   "new.folder": "Folder",
 
   "jump.placeholder": "Session, folder or something said",

@@ -26,6 +26,7 @@ import { useMe, useTerminalList, useUpdate } from "./data";
 import { agentName, ago, Avatar, cn, fine, IconKey, IrMark, keep, kept, Lamp, lampOf, Logo, own, sessionStatusText, statusText, tilde, Tip, titleOf, useLongPress, useMenuAt, useMinute } from "./ui";
 import { SESSION_DRAG } from "./chat/refs";
 import { useUnread } from "./unread";
+import { MachineBadge, useMachine } from "./machines";
 
 const STEP = 18;
 const BUSY = new Set(["running", "compacting", "starting"]);
@@ -627,12 +628,15 @@ const SessionRow = memo(function SessionRow({ s, where, depth, flip, selected, o
     </span>
   );
   const bots = s.bots?.length ? <Here bots={s.bots} /> : null;
-  const end = slot || mark || lamp || bots ? (
+  // At another machine: its face on the logo; not connected now, a grey ring for its lamp.
+  const machine = useMachine(s.machine);
+  const away = !!s.offline && !busy;
+  const end = slot || mark || lamp || bots || away ? (
     <span className="flex items-center gap-1.5">
       {bots}
       {mark}
       {slot}
-      {!busy && <Lamp status={status} />}
+      {!busy && (away ? <span className="row-lamp g-pop" data-s="offline" role="img" aria-label={t("status.offline")} /> : <Lamp status={status} />)}
     </span>
   ) : undefined;
   return (
@@ -645,9 +649,10 @@ const SessionRow = memo(function SessionRow({ s, where, depth, flip, selected, o
         faded={s.archived}
         aria={`${title}, ${told}${s.color ? `, ${t("color.tagged", { color: t(`color.${s.color}`) })}` : ""}${unread ? `, ${t("status.unread")}` : ""}`}
         icon={
-          <Tip label={[agentName(s.agent), s.subagent && t("row.subagent"), status !== "idle" && told].filter(Boolean).join(" · ")} side="bottom">
+          <Tip label={[agentName(s.agent), machine?.name, s.subagent && t("row.subagent"), away ? t("status.offline") : status !== "idle" && told].filter(Boolean).join(" · ")} side="bottom">
             <span className="relative grid">
               <Logo agent={s.agent} />
+              {machine && !s.subagent && <MachineBadge m={machine} />}
               {/* A subagent: no word for it, a small agent badge on the logo's corner (the user, 2026-11-06). */}
               {s.subagent && (
                 <span role="img" aria-label={t("row.subagent")} className="absolute -right-1 -bottom-1 grid size-[11px] place-items-center rounded-full text-ink-2" style={{ background: "var(--row-bg, var(--paper))" }}>

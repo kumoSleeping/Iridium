@@ -129,6 +129,7 @@ func serve(args []string) int {
 	srv = server.New(cfg, m, h, nil)
 	defer srv.Close()
 	srv.Remote = executors
+	srv.WatchMachines()
 	srv.ConfigPath = *path
 	srv.Updater = newUpdater(cfg, h)
 	h.Set("update", srv.Updater.State())

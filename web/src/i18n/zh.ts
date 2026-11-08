@@ -25,6 +25,7 @@ export const zh = {
   "status.elsewhere": "在别处运行",
   "status.needsElsewhere": "在别处等你",
   "status.idle": "空闲",
+  "status.offline": "已断开",
   "status.unread": "有新消息",
 
   "top.online": "已连接 · 往返 {ms} ms",
@@ -280,6 +281,7 @@ export const zh = {
   "pick.home": "主目录",
   "new.agent": "选 agent",
   "new.notInstalled": "{name} 未安装",
+  "new.offline": "{name} 未连接",
   "new.folder": "目录",
 
   "jump.placeholder": "会话名、目录或说过的话",

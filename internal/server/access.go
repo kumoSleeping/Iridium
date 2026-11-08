@@ -133,6 +133,12 @@ func (s *Server) revoked(id string) {
 	if s.st == nil {
 		return
 	}
+	if err := s.st.ForgetMachine(id); err != nil {
+		s.logf("server: forgetting %s's machine: %v", id, err)
+	}
+	if s.Remote != nil {
+		s.publishMachines()
+	}
 	if err := s.st.ForgetChats(id); err != nil {
 		s.logf("server: forgetting %s's chats: %v", id, err)
 		return

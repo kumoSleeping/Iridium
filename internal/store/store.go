@@ -167,6 +167,8 @@ var schema = []string{
 		at INTEGER NOT NULL,
 		PRIMARY KEY (plugin, chat, session)
 	);`,
+	// 15: what each executor last said of itself (machines.go).
+	machinesSchema,
 }
 
 // steps run in Go after the migration of their version, in the same transaction.

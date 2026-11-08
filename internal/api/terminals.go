@@ -183,6 +183,21 @@ type ExecPair struct {
 	Agents  []ExecAgent `json:"agents,omitempty"`
 }
 
+// Machine is another machine's executor (docs/exec.md): a Bot, as it last said of itself; the
+// carried state "machines" lists them, GET /api/machines too. Agents: those Iridium can run there.
+type Machine struct {
+	ID     string      `json:"id"` // its terminal
+	Name   string      `json:"name"`
+	Avatar string      `json:"avatar,omitempty"`
+	OS     string      `json:"os"` // windows | darwin | linux
+	Arch   string      `json:"arch,omitempty"`
+	Home   string      `json:"home"`
+	Sep    string      `json:"sep"`
+	Agents []ExecAgent `json:"agents"`
+	Online bool        `json:"online"`
+	SeenAt int64       `json:"seenAt"` // when it last connected (ms)
+}
+
 // ExecAgent is an agent an executor has.
 type ExecAgent struct {
 	Agent   string `json:"agent"`
