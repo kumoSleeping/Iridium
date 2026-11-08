@@ -64,6 +64,9 @@ type Driver struct {
 	reply   string // the turn's last assistant message so far
 	sent    string // since the last turn ended: "", "compact" (only /compact), "other"
 	waiting []string
+	// resulted: a result came since the last message started: the next to start runs on its own
+	// (Taken.Runs), not taken in between two tool calls.
+	resulted bool
 	model   string
 	session string
 	caps    map[string]bool
@@ -184,7 +187,7 @@ func (d *Driver) reset() {
 	d.helloID = ""
 	d.state = agent.Idle
 	d.asks, d.tasks, d.agents = nil, nil, false
-	d.reply, d.sent, d.waiting = "", "", nil
+	d.reply, d.sent, d.waiting, d.resulted = "", "", nil, false
 	d.model, d.session, d.context = "", "", 0
 	d.caps = map[string]bool{}
 }
@@ -577,11 +580,14 @@ func (d *Driver) feed(line []byte, replay bool) []byte {
 			return nil
 		}
 		// With a subagent in the background the CLI never said idle, so it says no running either.
+		runs := false
 		if f.State == "started" {
+			runs = d.state != agent.Idle && d.resulted
+			d.resulted = false
 			d.move(agent.Running, f.CommandUUID)
 		}
 		d.waiting = slices.Delete(d.waiting, i, i+1)
-		d.emitLocked(agent.Taken{InputID: f.CommandUUID})
+		d.emitLocked(agent.Taken{InputID: f.CommandUUID, Runs: runs})
 	case "result":
 		d.result(&f)
 	default:
@@ -814,6 +820,7 @@ func (d *Driver) result(f *frame) {
 		u.Total = total
 	}
 	d.emitLocked(u)
+	d.resulted = true
 	// A subagent in the background holds back idle though the turn waits for you: the turn ends
 	// on its result, unless a queued message runs next (Rhodium §6.1).
 	if d.agents && f.QueuedTurnCount == 0 {

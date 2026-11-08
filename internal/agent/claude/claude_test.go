@@ -412,13 +412,17 @@ func TestContextAndQuota(t *testing.T) {
 	replay(t, "cmd-model")
 }
 
-// A message written mid-turn joins it: one turn, two inputs taken, ended once.
+// A message written mid-turn joins it: one turn, two inputs taken, ended once. The CLI runs it
+// after the first result, with a result of its own: its use is its (Runs).
 func TestMidTurnMessage(t *testing.T) {
 	h := replay(t, "mid-turn-message")
 	if n := len(find[agent.TurnEnd](h)); n != 1 {
 		t.Errorf("%d turn ends", n)
 	}
-	if taken := find[agent.Taken](h); len(taken) != 2 {
+	if n := len(find[agent.TurnUsage](h)); n != 2 {
+		t.Errorf("%d results", n)
+	}
+	if taken := find[agent.Taken](h); len(taken) != 2 || taken[0].Runs || !taken[1].Runs {
 		t.Errorf("taken: %+v", taken)
 	}
 }

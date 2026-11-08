@@ -189,3 +189,18 @@ func TestTurnEndWhileDown(t *testing.T) {
 	waitFor(t, "the turn's usage", func() bool { u, _ := r.store.UsageSince(0); return len(u) == 2 })
 	r.waitState(id, "the context read again", func(s *api.SessionState) bool { return s.Context != nil && s.Context.At > first.Context.At })
 }
+
+// How far the output was read is saved once it is quiet, not only as the daemon goes: a daemon
+// that dies after a turn's end reads it again as new otherwise, and counts its usage twice.
+func TestSeenSavedWhenQuiet(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, nil)
+	id, _ := r.m.Create(context.Background(), api.NewSession{Cwd: r.cwd, Text: "first"}, "网页")
+	r.waitState(id, "the reply", func(s *api.SessionState) bool { return s.Status == api.StatusIdle && s.Last != nil })
+	dir := filepath.Join(r.cfg.StatePath(), "hold", id)
+	waitFor(t, "the offset saved at out.log's end", func() bool {
+		var seen seenMeta
+		b, err := os.ReadFile(filepath.Join(dir, fileSeen))
+		return err == nil && json.Unmarshal(b, &seen) == nil && seen.Offset == hold.OutSize(dir)
+	})
+}

@@ -420,12 +420,16 @@ func (h *Hosted) loop(proc int, outStart, replay int64) {
 		return len(lines)
 	}
 	// How far the output was read, saved now and then and as the daemon goes (seenMeta).
+	// Saved too once the output is quiet: a turn's end read and not saved would be read again as
+	// new by the next daemon, after a crash, and its usage counted twice.
 	var saved time.Time
+	savedAt := int64(-1)
 	save := func() {
-		if err := writeJSON(filepath.Join(h.dir, fileSeen), seenMeta{Proc: proc, Offset: tail.Offset()}); err != nil {
+		off := tail.Offset()
+		if err := writeJSON(filepath.Join(h.dir, fileSeen), seenMeta{Proc: proc, Offset: off}); err != nil {
 			h.logf("saving how far out.log was read: %v", err)
 		}
-		saved = time.Now()
+		saved, savedAt = time.Now(), off
 	}
 	var looked, read time.Time
 	for {
@@ -439,6 +443,9 @@ func (h *Hosted) loop(proc int, outStart, replay int64) {
 				save()
 			}
 			continue
+		}
+		if tail.Offset() != savedAt {
+			save()
 		}
 		e, _ := hold.ReadExit(h.dir)
 		if e == nil && time.Since(looked) > 2*time.Second {
@@ -649,6 +656,12 @@ func (h *Hosted) onEvent(e agent.Event) {
 		note(Notice{Kind: NoticeTurnStart})
 	case agent.Taken:
 		h.hadTurn = true
+		// A message that runs on its own in the turn: its use is counted to who sent it.
+		if e.Runs {
+			if from, _, ok := h.m.o.Store.Source(e.InputID); ok {
+				h.turnFrom = from
+			}
+		}
 	case agent.ToolDone:
 		if replay {
 			break

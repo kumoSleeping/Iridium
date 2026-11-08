@@ -153,8 +153,13 @@ type (
 		Known bool // false: the agent cannot say, so any ask not answered yet is stale
 	}
 	Tasks struct{ Tasks []api.Task }
-	// Taken: the agent took the input into its conversation (or turned it down for good).
-	Taken struct{ InputID string }
+	// Taken: the agent took the input into its conversation (or turned it down for good). Runs:
+	// it runs on its own within the turn, after the last one's result (Claude's message queued
+	// mid-turn): the use from here on is its.
+	Taken struct {
+		InputID string
+		Runs    bool
+	}
 	// Started: the agent named its session and model (Claude: system/init, each turn), and the
 	// effort level it runs at, if it says (Codex, pi; "" for Claude, read with Applier).
 	Started struct{ Session, Model, Effort string }
