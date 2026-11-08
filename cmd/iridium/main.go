@@ -1,5 +1,9 @@
+//go:build !windows
+
 // Command iridium is the whole of Iridium in one binary: `iridium serve` is the daemon,
 // `iridium hold` the holder it starts for each agent process, and run as ir it is the CLI.
+// `iridium join` (ir join) makes the machine an executor of another Iridium; on Windows that is
+// all it does (main_windows.go).
 package main
 
 import (
@@ -21,7 +25,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/discover"
 	"github.com/kumoSleeping/iridium/internal/hold"
 	"github.com/kumoSleeping/iridium/internal/hub"
-	"github.com/kumoSleeping/iridium/internal/platform"
+	"github.com/kumoSleeping/iridium/internal/join"
 	"github.com/kumoSleeping/iridium/internal/push"
 	"github.com/kumoSleeping/iridium/internal/remote"
 	"github.com/kumoSleeping/iridium/internal/server"
@@ -40,12 +44,14 @@ const usage = `usage:
                                    this binary onto another account or machine, installed or restarted
   iridium node new <account> [-listen <addr>]
                                    a new account on this machine as a node of its own (root once: sudo or su)
+  iridium join <address> [--name <name>] [--roots <dir>,...] [--install | --uninstall]
+                                   this machine as an executor of another Iridium (ir join)
   iridium version
 `
 
 func main() {
 	if filepath.Base(os.Args[0]) == "ir" {
-		os.Exit(cli.Main(os.Args[1:]))
+		os.Exit(irMain(os.Args[1:]))
 	}
 	if len(os.Args) < 2 {
 		fmt.Fprint(os.Stderr, usage)
@@ -57,7 +63,9 @@ func main() {
 	case "hold":
 		os.Exit(hold.Main(os.Args[2:]))
 	case "ir":
-		os.Exit(cli.Main(os.Args[2:]))
+		os.Exit(irMain(os.Args[2:]))
+	case "join":
+		os.Exit(join.Main(os.Args[2:], os.Stdout, os.Stderr))
 	case "install":
 		os.Exit(installCmd(os.Args[2:]))
 	case "push":
@@ -69,6 +77,14 @@ func main() {
 	}
 	fmt.Fprint(os.Stderr, usage)
 	os.Exit(2)
+}
+
+// irMain is ir: join here, the rest the CLI's.
+func irMain(args []string) int {
+	if len(args) > 0 && args[0] == "join" {
+		return join.Main(args[1:], os.Stdout, os.Stderr)
+	}
+	return cli.Main(args)
 }
 
 func serve(args []string) int {
@@ -109,7 +125,7 @@ func serve(args []string) int {
 	var srv *server.Server // names terminals in source tags, once it is there
 	tag := func(id string) string { return srv.Tag(id) }
 	executors := &remote.Hub{Logf: log.Printf}
-	m, err := session.New(session.Options{Config: cfg, Store: st, Hub: h, Launcher: platform.Systemd{}, UnitPrefix: cfg.UnitPrefix, Discovery: d, Tag: tag, Remote: executors})
+	m, err := session.New(session.Options{Config: cfg, Store: st, Hub: h, Launcher: launcher(), UnitPrefix: cfg.UnitPrefix, Discovery: d, Tag: tag, Remote: executors})
 	if err != nil {
 		log.Print(err)
 		return 1

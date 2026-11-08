@@ -33,11 +33,21 @@ type Options struct {
 	Token string
 	State string // its own directory: holders' files, scratch
 	// Roots are the directories files may be read and written under; none: all but the denied.
-	Roots  []string
-	Agents []wire.AgentInfo
-	Env    []string // nil: os.Environ()
-	Logf   func(string, ...any)
+	Roots []string
+	// Deny are directories never served, besides its own TOKEN's and ~/.ssh.
+	Deny    []string
+	Agents  []wire.AgentInfo
+	Env     []string // nil: os.Environ()
+	Program string   // what the hello says it is; "": iridium-executor
+	// HTTPClient dials the Iridium; nil: http.DefaultClient.
+	HTTPClient *http.Client
+	// Connected is told each time the hello is answered: the terminal name the Iridium knows it by.
+	Connected func(name string)
+	Logf      func(string, ...any)
 }
+
+// ErrRefused: the Iridium turned the TOKEN down (401): its Bot is gone, connecting again is no use.
+var ErrRefused = errors.New("the Iridium refuses this TOKEN")
 
 // Executor is one running executor.
 type Executor struct {
@@ -55,6 +65,9 @@ func New(o Options) (*Executor, error) {
 	if o.Env == nil {
 		o.Env = os.Environ()
 	}
+	if o.Program == "" {
+		o.Program = "iridium-executor"
+	}
 	if err := os.MkdirAll(filepath.Join(o.State, "holds"), 0o700); err != nil {
 		return nil, err
 	}
@@ -65,7 +78,8 @@ func New(o Options) (*Executor, error) {
 	return e, nil
 }
 
-// Run connects, and connects again whenever the connection ends, until ctx ends.
+// Run connects, and connects again whenever the connection ends, until ctx ends or the Iridium
+// refuses the TOKEN (ErrRefused).
 func (e *Executor) Run(ctx context.Context) error {
 	wait := time.Second
 	for ctx.Err() == nil {
@@ -73,6 +87,9 @@ func (e *Executor) Run(ctx context.Context) error {
 		err := e.session(ctx)
 		if ctx.Err() != nil {
 			break
+		}
+		if errors.Is(err, ErrRefused) {
+			return err
 		}
 		if time.Since(start) > time.Minute {
 			wait = time.Second
@@ -88,8 +105,11 @@ func (e *Executor) Run(ctx context.Context) error {
 }
 
 func (e *Executor) session(ctx context.Context) error {
-	ws, _, err := websocket.Dial(ctx, e.o.URL, &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": {"Bearer " + e.o.Token}}})
+	ws, resp, err := websocket.Dial(ctx, e.o.URL, &websocket.DialOptions{HTTPClient: e.o.HTTPClient, HTTPHeader: http.Header{"Authorization": {"Bearer " + e.o.Token}}})
 	if err != nil {
+		if resp != nil && resp.StatusCode == http.StatusUnauthorized {
+			return ErrRefused
+		}
 		return err
 	}
 	c := wire.NewConn(ws)
@@ -109,10 +129,14 @@ func (e *Executor) session(ctx context.Context) error {
 		}
 		e.mu.Unlock()
 	}()
-	if err := c.Call(ctx, "hello", e.hello(), nil); err != nil {
+	var named struct{ Name string }
+	if err := c.Call(ctx, "hello", e.hello(), &named); err != nil {
 		c.Close()
 		<-done
 		return fmt.Errorf("hello: %w", err)
+	}
+	if e.o.Connected != nil {
+		e.o.Connected(named.Name)
 	}
 	return <-done
 }
@@ -149,7 +173,7 @@ func (e *Executor) hello() wire.Hello {
 	}
 	e.mu.Unlock()
 	return wire.Hello{
-		Protocol: wire.Protocol, Program: "iridium-executor", OS: runtime.GOOS, Arch: runtime.GOARCH,
+		Protocol: wire.Protocol, Program: e.o.Program, OS: runtime.GOOS, Arch: runtime.GOARCH,
 		Home: home, Sep: string(filepath.Separator), Scratch: filepath.Join(e.o.State, "scratch"),
 		Env: e.o.Env, Agents: e.o.Agents, Holds: holds,
 	}
@@ -541,7 +565,7 @@ func (e *Executor) allowed(path string) (string, error) {
 		return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 	}
 	home, _ := os.UserHomeDir()
-	for _, d := range []string{filepath.Join(e.o.State, "token"), filepath.Join(home, ".ssh")} {
+	for _, d := range append([]string{filepath.Join(e.o.State, "token"), filepath.Join(home, ".ssh")}, e.o.Deny...) {
 		if under(d) {
 			return "", &wire.Error{Code: wire.CodeDenied, Message: path}
 		}

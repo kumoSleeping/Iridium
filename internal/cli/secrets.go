@@ -165,17 +165,17 @@ func readValue(e adminEnv, name string, stderr io.Writer) (string, error) {
 // readHidden reads a line from terminal f with its echo off, and turns it on again (on ^C too).
 func readHidden(f *os.File) (string, error) {
 	fd := int(f.Fd())
-	old, err := unix.IoctlGetTermios(fd, unix.TCGETS)
+	old, err := unix.IoctlGetTermios(fd, ioctlGetTermios)
 	if err != nil {
 		return "", err
 	}
 	quiet := *old
 	quiet.Lflag &^= unix.ECHO
 	quiet.Lflag |= unix.ICANON | unix.ISIG
-	if err := unix.IoctlSetTermios(fd, unix.TCSETS, &quiet); err != nil {
+	if err := unix.IoctlSetTermios(fd, ioctlSetTermios, &quiet); err != nil {
 		return "", err
 	}
-	restore := func() { _ = unix.IoctlSetTermios(fd, unix.TCSETS, old) }
+	restore := func() { _ = unix.IoctlSetTermios(fd, ioctlSetTermios, old) }
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	stop := make(chan struct{})
