@@ -812,7 +812,6 @@ function FolderRow({ f, ws, label, open, onToggle, newHere, plus }: { f: FolderN
 
 function SessionMenu({ s, at, close, rename }: { s: Session; at: { x: number; y: number } | null; close: () => void; rename: () => void }) {
   const items = sessionActions(s, rename);
-  const bots = useTerminalList().filter((x) => x.bot && !s.bots?.includes(x.id));
   const anchor = at && { getBoundingClientRect: () => DOMRect.fromRect({ x: at.x, y: at.y, width: 0, height: 0 }) };
   return (
     <Menu.Root open={at !== null} onOpenChange={(o) => !o && close()}>
@@ -822,7 +821,7 @@ function SessionMenu({ s, at, close, rename }: { s: Session; at: { x: number; y:
             items={items}
             tags={sessionTags(s)}
             foot={<PushFoot levels={sessionLevels(s)} i={items.length} />}
-            tail={!s.archived && <BotItems s={s} bots={bots} i={items.length + 2} />}
+            tail={<BotItems s={s} i={items.length + 2} />}
           />
         </Menu.Positioner>
       </Menu.Portal>
@@ -831,9 +830,13 @@ function SessionMenu({ s, at, close, rename }: { s: Session; at: { x: number; y:
 }
 
 /** At a session's menu's foot, one item per bot whose chat is elsewhere: that chat moved to this
- *  session, as its /use would (the user, 2026-11-08). */
-function BotItems({ s, bots, i }: { s: Session; bots: Terminal[]; i: number }) {
-  if (!bots.length) return null;
+ *  session, as its /use would (the user, 2026-11-08); in the list's menu and the chat's ⋯. A Bot no one has written to yet has no chat
+ *  to move: its item is there, greyed, saying so. */
+export function BotItems({ s, i }: { s: Session; i: number }) {
+  // Claude's sessions only for a Bot that may use Claude (access.Agent).
+  const claude = !s.agent || s.agent === "claude";
+  const bots = useTerminalList().filter((x) => x.bot && !s.bots?.includes(x.id) && (!claude || x.rules.claudeOwner));
+  if (s.archived || !bots.length) return null;
   const bring = (b: Terminal) =>
     void api.bringBot(s.id, b.id).then(
       () => toast(t("toast.botHere", { name: b.name || "Bot" })),
@@ -842,9 +845,9 @@ function BotItems({ s, bots, i }: { s: Session; bots: Terminal[]; i: number }) {
   return (
     <div style={{ "--i": i } as CSSProperties} className="mt-1.5 flex flex-col border-t border-edge pt-1.5">
       {bots.map((b) => (
-        <Menu.Item key={b.id} onClick={() => bring(b)} className="flex h-8 cursor-default items-center gap-2.5 rounded-md px-2.5 text-base outline-none select-none data-highlighted:bg-fill pointer-coarse:h-11">
+        <Menu.Item key={b.id} disabled={b.chatless} onClick={() => bring(b)} className="flex h-8 cursor-default items-center gap-2.5 rounded-md px-2.5 text-base outline-none select-none data-highlighted:bg-fill data-disabled:opacity-40 pointer-coarse:h-11">
           <Avatar src={b.avatar} name={b.name || "Bot"} size={15} badge={Bot} badgeSize={9} />
-          <span className="truncate">{t("menu.bringBot", { name: b.name || "Bot" })}</span>
+          <span className="truncate">{t(b.chatless ? "menu.botChatless" : "menu.bringBot", { name: b.name || "Bot" })}</span>
         </Menu.Item>
       ))}
     </div>

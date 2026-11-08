@@ -351,6 +351,7 @@ export function App() {
       <Dialog.Portal>
         <Dialog.Popup
           ref={setSetsBox}
+          data-settings-dialog
           aria-label={t("nav.me")}
           style={settingsStyle}
           data-glide-h={fit.glide || undefined}

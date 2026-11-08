@@ -24,7 +24,7 @@
 | `POST /api/sessions/{id}/interrupt` | → `{ok}` | 停掉当前回合（Esc），agent 留着。队列暂停 |
 | `POST /api/sessions/{id}/stop` | → `{ok}` | 停掉 agent 进程（关 stdin，写完记录自己退出）。会话还在，下一条消息再拉起。队列暂停 |
 | `POST /api/sessions/{id}/answer` | `Answer` → `{ok}` | 回答提问：审批 `allow`（不许时可带 `message`；`always` 见“会话设置”）；选择题 `answers`（问题原文 → 选项 `label`）；计划确认 `allow` |
-| `POST /api/sessions/{id}/release` | `Release{toolUseId, dismiss?}` → `{ok}` | 放行 Claude auto 模式拦下的一步（见“放行”）；`dismiss` 只拿掉它的卡。Claude 会话要有 Claude，agent 调用一律 403 |
+| `POST /api/sessions/{id}/release` | `Release{toolUseId, dismiss?}` → `{ok}` | Claude auto 模式拦下一步后，临时切换至 manual（见“临时切换至 manual”）；`dismiss` 只拿掉它的卡。Claude 会话要有 Claude，agent 调用一律 403 |
 | `GET /api/events?sub=…` | SSE | 见下。不带 `sub`：Bot 的事件流，见“Bot 接入” |
 | `GET /api/agents` | → `AgentInfo[]` | 能开的 agent：审批模式（`modes`、`defaultMode`、`modeSwitch`：now / next turn / restart）、有没有上下文分项、有没有额度窗口、能不能开 ultracode（`ultracode`）、程序装没装（`missing`：PATH 上找不到；这时 `POST /api/sessions` 立刻 400，不等 agent 自更新那 30 秒，网页把它画淡，点了只提示未安装） |
 | `GET /api/health` | → `{ok}` | |
@@ -224,7 +224,7 @@ agent 用 `ir sh <机器> [--cwd 目录] [--timeout 2m] -- 命令`（`POST /api/
   - `ultracode`：`{on, active, available}`，`on` 是开没开（`ultracodeRequested`），`active` 是开了且生效，`available` 是这个模型能不能开（读到之前、进程没在跑时算能；CLI 不认 `get_settings` 算不能）。进程一结束，读到的就作废，下个进程再问。
   - 面板里选了模型就收起；强度滑条和 UltraCode 开关在面板底下，调了不收。
 - 本会话一直允许：`answer` 带 `always: true`（或卡片选 `always`）。记下工具和 `Ask.pattern`（Claude 自己建议的规则，例如 `ls *`；没有时 shell 命令取第一个词加 ` *`，别的工具不带模式＝这个工具全部）。之后这个会话里匹配的审批自动允许，不通知、不出卡片。
-- 放行：Claude 的 auto 模式分类器拦下的一步不经 Iridium，直接回给模型（结果开头是 `Permission for this action was denied by the Claude Code auto mode classifier`）。`release` 把运行中的进程切到 `manual`（不写进会话设置，进程重启就回到原模式），插一条“请原样再做一次”；重试时同一调用（工具相同，参数除 `description` 外相同）自动允许一次，别的照常问；这一调用做完就切回原模式（2026-11-08），没再做就在拿到那条消息的回合结束时切回，期间你自己换了模式就不切回（2026-11-07）。拦下的每一步都在会话状态的 `denials`（`Denial{toolUseId, tool, input, reason, at}`，只记在内存里）直到放行或 `dismiss`；回合结束后还有，状态算 `waiting`（`ir wait` 不算需要你）。
+- 临时切换至 manual：Claude 的 auto 模式分类器拦下的一步不经 Iridium，直接回给模型（结果开头是 `Permission for this action was denied by the Claude Code auto mode classifier`）。`release` 把运行中的进程切到 `manual`（不写进会话设置，进程重启就回到原模式），不给 Claude 发消息（原来以用户名义插一条“请原样再做一次”，它可能已换了做法，2026-11-08）。之后的调用照常问；同一调用（工具相同，参数除 `description` 外相同）再做完就切回原模式，没再做就在当时进行中的回合（空闲时为下一回合）结束时切回，期间手动换了模式就不切回（2026-11-07）。拦下的每一步都在会话状态的 `denials`（`Denial{toolUseId, tool, input, reason, at}`，只记在内存里）直到放行或 `dismiss`；回合结束后还有，状态算 `waiting`（`ir wait` 不算需要你）。
 - 匹配：`*` 是任意一段字；`前缀:*` 同 `前缀*`。shell 命令里有 `;`、`&&`、`||`、`|`、`` ` ``、`$(`、换行的，一律不按模式放行。
 
 ## 设置
@@ -294,7 +294,7 @@ Bot 用自己的 TOKEN（交互终端由门认，见 `gate.md`）；下面的“
 - 以 `/` 开头：是 Iridium 命令就在这里做，回答直接在 `reply`（Markdown 和去掉标记的文字）或 `card` 里；不是就原样交给 agent（透传）。
 - 来源标记：`[Bot 名·sender]`，`sender` 去掉 `[ ] / : ·`，最多 24 字。
 
-命令：`/new [agent] [目录]`（目录可以是绝对路径、`~/…` 或相对指针的目录）、`/clear`（同 `send` 的 `/clear`，指针换到新会话）、`/use [ID 开头]`（不带参数给选组的卡片，见 `docs/qq.md`；在会话里时卡片最后一项是“离开当前会话”）、`/leave`（指针不指任何会话，列表上不再标这个 Bot）、`/ls`、`/history [轮数]`（最近几轮，默认 5，最多 10，一条消息）、`/stop`、`/model [值]`（不带参数给卡片）、`/status`、`/usage`、`/context`。
+命令：`/new [agent] [目录]`（目录可以是绝对路径、`~/…` 或相对指针的目录）、`/clear`（同 `send` 的 `/clear`，指针换到新会话）、`/use [ID 开头]`（不带参数：在会话里时给当前会话所在文件夹的卡片，否则给选组的卡片，见 `docs/qq.md`；文件夹卡片末尾有“回到上一级”（子文件夹才有）、“回到根目录”；在会话里时卡片最后一项是“离开当前会话”）、`/leave`（指针不指任何会话，列表上不再标这个 Bot）、`/ls`、`/history [轮数]`（最近几轮，默认 5，最多 10，一条消息）、`/stop`、`/model [值]`（不带参数给卡片）、`/status`、`/usage`、`/context`。
 
 事件流：`GET /api/events`，带 `Last-Event-ID`（或 `?after=<序号>`）从它之后接着收；都不带就从现在起。每条 `id: <序号>`，`event:` 是类型，`data:` 是 `ChatEvent`（都带 `chat`、`session`）：
 
@@ -318,7 +318,7 @@ Bot 用自己的 TOKEN（交互终端由门认，见 `gate.md`）；下面的“
 - 例子：`examples/plugin/echo_im.py`（只用标准库）把 stdin/stdout 当成一个假 IM。
 - `ChatInput.attachments`：上面传好的引用，路径写进消息、图片照样给 agent（同网页）；只有附件没有文字也行。
 
-Bot 切到会话（网页会话右键菜单最底下，2026-11-08）：`POST /api/sessions/{id}/bot`，`BringBot{bot}` → `BotReply{bot, name, chat}`。只有面板和本机；`bot` 不是 Bot 终端回 404。聊天的选法同上，指针改到这个会话，并发一条 `reply`，内容同 `/use`。没有能用这个会话的聊天回 404。`Terminal.bot`：有过聊天的插件，菜单按它列，已在这个会话里的不列。
+Bot 切到会话（网页会话右键菜单、聊天页 ⋯ 菜单的最底下，2026-11-08）：`POST /api/sessions/{id}/bot`，`BringBot{bot}` → `BotReply{bot, name, chat}`。只有面板和本机；`bot` 不是 Bot 终端回 404。聊天的选法同上，指针改到这个会话，并发一条 `reply`，内容同 `/use`。没有能用这个会话的聊天回 404。`Terminal.bot`：有过聊天、或此刻连着事件流的插件，菜单按它列；已在这个会话里的不列，Claude 会话不列没有 Claude 的。`Terminal.chatless`：还没有聊天的 Bot，菜单项灰着，写「尚无对话」。插件第一次有聊天、事件流连上或断开时，服务端推 `terminals` 变更，网页重取终端列表。
 
 ## 官方 Bot
 

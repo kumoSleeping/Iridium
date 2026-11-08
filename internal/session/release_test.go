@@ -39,49 +39,31 @@ func TestDeniedCall(t *testing.T) {
 	}
 }
 
-// The call run again is allowed whatever its description now says; another is not.
-func TestSameCall(t *testing.T) {
-	r := &released{tool: "Bash", input: map[string]any{"command": "rm -rf build", "description": "clean"}}
-	for _, c := range []struct {
-		a    api.Ask
-		want bool
-	}{
-		{api.Ask{Kind: "permission", Tool: "Bash", Input: map[string]any{"command": "rm -rf build", "description": "clean it again"}}, true},
-		{api.Ask{Kind: "permission", Tool: "Bash", Input: map[string]any{"command": "rm -rf build ~"}}, false},
-		{api.Ask{Kind: "permission", Tool: "Write", Input: map[string]any{"command": "rm -rf build"}}, false},
-		{api.Ask{Kind: "question", Tool: "Bash", Input: map[string]any{"command": "rm -rf build"}}, false},
-	} {
-		if got := sameCall(r, c.a); got != c.want {
-			t.Errorf("%+v: %v", c.a, got)
-		}
-	}
-}
-
-// A release ends with a turn once its call was allowed, or with a turn begun after it; the mode
-// goes back only if it is still the release's.
+// A release ends with the turn under way at it, or with a turn begun after it; the mode goes
+// back only if it is still the release's.
 func TestReleaseOver(t *testing.T) {
 	at := time.Now()
 	h := &Hosted{mode: releaseMode, turnAt: at.Add(-time.Minute)}
 	h.rel = &released{prev: "auto", at: at}
 	if m := h.releaseOverLocked(); m != "" || h.rel == nil {
-		t.Errorf("the turn it was steered into, not run again: %q", m)
+		t.Errorf("a turn before it, none under way: %q", m)
 	}
-	h.rel.used = true
+	h.rel.during = true
 	if m := h.releaseOverLocked(); m != "auto" || h.rel != nil {
-		t.Errorf("run again: %q", m)
+		t.Errorf("the turn under way at it: %q", m)
 	}
 	h.rel, h.turnAt = &released{prev: "auto", at: at}, at.Add(time.Second)
 	if m := h.releaseOverLocked(); m != "auto" {
 		t.Errorf("a turn after it: %q", m)
 	}
-	h.rel, h.mode = &released{prev: "auto", at: at, used: true}, "plan"
+	h.rel, h.mode = &released{prev: "auto", at: at, during: true}, "plan"
 	if m := h.releaseOverLocked(); m != "" || h.rel != nil {
 		t.Errorf("mode changed meanwhile: %q", m)
 	}
 }
 
 // A denied call gets its card, once, with what the call was; a release is over as soon as the
-// call run again is done, not at the turn's end; a turn that took its message ends it too.
+// call run again is done, not at the turn's end.
 func TestDenialAndRanAgain(t *testing.T) {
 	h := &Hosted{mode: "auto"}
 	h.callLocked(agent.ToolStart{ID: "t1", Name: "Bash", Input: json.RawMessage(`{"command":"npx x","description":"get x"}`)})
@@ -107,16 +89,11 @@ func TestDenialAndRanAgain(t *testing.T) {
 		t.Fatalf("run again: %q %v", m, over)
 	}
 
-	h.rel = &released{prev: "auto", at: time.Now(), taken: true}
-	h.turnAt = h.rel.at.Add(-time.Minute)
-	if m := h.releaseOverLocked(); m != "auto" {
-		t.Errorf("the turn that took the message ended: %q", m)
-	}
 }
 
-// A step auto mode denied waits as a card and the session waits on you; released, Claude asks
-// for it again in manual mode, Iridium allows it, and the mode is auto again; dismissed, only the
-// card goes.
+// A step auto mode denied waits as a card and the session waits on you; switched to manual for
+// it, nothing is said to Claude; asked again, it is your ask, and the mode is auto again after;
+// dismissed, only the card goes.
 func TestReleaseFlow(t *testing.T) {
 	t.Parallel()
 	r := newRig(t, nil)
@@ -130,21 +107,30 @@ func TestReleaseFlow(t *testing.T) {
 	if d.ToolUseID != "toolu_denied" || d.Tool != "Bash" || d.Reason != "Code from External" || asMap(d.Input)["command"] != "npx -y some-tool" {
 		t.Fatalf("denial %+v", d)
 	}
-	if err := r.m.Release(ctx, id, d.ToolUseID, "网页", false); err != nil {
+	if err := r.m.Release(ctx, id, d.ToolUseID, false); err != nil {
 		t.Fatal(err)
 	}
-	s = r.waitState(id, "run again, back in auto", func(s *api.SessionState) bool {
-		return s.Status == api.StatusIdle && s.Mode == "auto" && s.Last != nil && strings.Contains(s.Last.Text, "请原样再做一次")
-	})
-	if len(s.Denials) != 0 || len(s.Asks) != 0 {
-		t.Fatalf("after the release: %+v %+v", s.Denials, s.Asks)
+	s = r.waitState(id, "manual, nothing said", func(s *api.SessionState) bool { return s.Mode == releaseMode && len(s.Denials) == 0 })
+	if s.Last != nil && strings.Contains(s.Last.Text, "放行") {
+		t.Fatalf("a message: %+v", s.Last)
 	}
+	if _, err := r.m.Send(ctx, id, "go AGAIN", "网页"); err != nil {
+		t.Fatal(err)
+	}
+	s = r.waitState(id, "asked", func(s *api.SessionState) bool { return len(s.Asks) == 1 })
+	if s.Mode != releaseMode {
+		t.Fatalf("asked in %s mode", s.Mode)
+	}
+	if err := r.m.Answer(ctx, id, api.Answer{RequestID: s.Asks[0].RequestID, Kind: "permission", Allow: true}); err != nil {
+		t.Fatal(err)
+	}
+	r.waitState(id, "back in auto", func(s *api.SessionState) bool { return s.Status == api.StatusIdle && s.Mode == "auto" })
 
 	if _, err := r.m.Send(ctx, id, "again DENIED", "网页"); err != nil {
 		t.Fatal(err)
 	}
 	r.waitState(id, "a second card", func(s *api.SessionState) bool { return len(s.Denials) == 1 })
-	if err := r.m.Release(ctx, id, "toolu_denied", "网页", true); err != nil {
+	if err := r.m.Release(ctx, id, "toolu_denied", true); err != nil {
 		t.Fatal(err)
 	}
 	// The card goes at once; the turn it came in may still be ending (a slow machine).

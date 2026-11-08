@@ -34,6 +34,11 @@ function visited(r: Route) {
 }
 
 let current = parse(location.hash);
+/** The route the views draw: current once its turn draws it. A turn to a chat may wait a moment
+ *  for its page (motion.ts pageTurn); a draw of the app meanwhile (the list, a minute) drew the next
+ *  chat early, outside the turn, still empty, and the turn then faded that same chat out and in: a
+ *  blink. */
+let shown = current;
 visited(current);
 const subs = new Set<() => void>();
 
@@ -43,7 +48,11 @@ export type Turn = (from: Route, to: Route, draw: () => void) => void;
 let turn: Turn = (_from, _to, draw) => draw();
 export const onTurn = (t: Turn) => void (turn = t);
 
-const moved = (from: Route) => (visited(current), turn(from, current, () => subs.forEach((f) => f())));
+const moved = (from: Route) => {
+  const to = current;
+  visited(to);
+  turn(from, to, () => ((shown = to), subs.forEach((f) => f())));
+};
 addEventListener("hashchange", () => {
   const from = current;
   steps = [];
@@ -85,7 +94,7 @@ export const over = (r: Route) => r.name === "settings" || r.name === "terminals
 export const useRoute = () =>
   useSyncExternalStore(
     (f) => (subs.add(f), () => void subs.delete(f)),
-    () => current,
+    () => shown,
   );
 
 /** Goes to r, a step of its own unless replace. The step's state marks it as the page's own, so the

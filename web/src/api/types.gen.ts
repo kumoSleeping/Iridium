@@ -152,7 +152,7 @@ export interface SessionState extends Session {
   tasks: Task[];
   /**
    * Denials: steps Claude's auto mode classifier turned down since the daemon started, waiting
-   * for you to release them or let them be (docs/api.md "放行"); the oldest first.
+   * for you to switch to manual for them or let them be (docs/api.md "临时切换至 manual"); the oldest first.
    */
   denials: Denial[];
   model?: string;
@@ -486,8 +486,9 @@ export interface SendReply {
   command?: boolean;
 }
 /**
- * Release lets Claude run again call ToolUseID, which its auto mode classifier denied: allowed
- * once, in manual mode for the turn (docs/api.md "放行").
+ * Release puts the process in manual mode for call ToolUseID, which Claude's auto mode classifier
+ * denied, till the step is run again or the turn ends; nothing is said to Claude (docs/api.md
+ * "临时切换至 manual").
  */
 export interface Release {
   toolUseId: string;
@@ -1345,9 +1346,14 @@ export interface Terminal {
    */
   device?: Device;
   /**
-   * Bot: a plugin with a chat in Iridium; a session's menu offers to bring that chat to it.
+   * Bot: a plugin with a chat in Iridium, or connected as one now; a session's menu offers to
+   * bring that chat to it.
    */
   bot?: boolean;
+  /**
+   * Chatless: a Bot no one has written to yet, so it has no chat to bring (the menu says so).
+   */
+  chatless?: boolean;
 }
 /**
  * Device is what a terminal runs on, set in its settings (PUT /api/me/device, ir profile

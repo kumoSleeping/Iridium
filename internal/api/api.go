@@ -122,7 +122,7 @@ type SessionState struct {
 	Asks    []Ask  `json:"asks"`
 	Tasks   []Task `json:"tasks"`
 	// Denials: steps Claude's auto mode classifier turned down since the daemon started, waiting
-	// for you to release them or let them be (docs/api.md "放行"); the oldest first.
+	// for you to switch to manual for them or let them be (docs/api.md "临时切换至 manual"); the oldest first.
 	Denials []Denial `json:"denials"`
 	Model   string   `json:"model,omitempty"`
 	Mode    string   `json:"mode,omitempty"` // the approval (permission) mode
@@ -398,8 +398,9 @@ type SendReply struct {
 	Command bool `json:"command,omitempty"`
 }
 
-// Release lets Claude run again call ToolUseID, which its auto mode classifier denied: allowed
-// once, in manual mode for the turn (docs/api.md "放行").
+// Release puts the process in manual mode for call ToolUseID, which Claude's auto mode classifier
+// denied, till the step is run again or the turn ends; nothing is said to Claude (docs/api.md
+// "临时切换至 manual").
 type Release struct {
 	ToolUseID string `json:"toolUseId"`
 	// Dismiss: let it be, not run: only its card goes.

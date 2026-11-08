@@ -22,7 +22,7 @@ import { hasMention, MentionMarks, mentionOf } from "./mention";
 import { atSessions, atWord, shortId } from "./refs";
 import { useSettings } from "../data";
 import { useGlide } from "../motion";
-import { previews } from "./files";
+import { previews, Zoom } from "./files";
 import { upload } from "./upload";
 import { findSecretish } from "./secretish";
 import { SaveSecret } from "./savesecret";
@@ -344,7 +344,11 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
               <li key={a.key} className="g-pop relative shrink-0 pt-1.5 pr-1.5">
                 <span className="relative block overflow-hidden rounded-lg shadow-[0_0_0_0.5px_var(--edge)]">
                   {a.url ? (
-                    <img src={a.url} alt={a.file.name} className={cn("block h-14 w-auto max-w-40 min-w-10 object-cover", a.error && "opacity-50")} />
+                    <Zoom full={a.url} name={a.file.name}>
+                      <button type="button" aria-label={`${a.file.name} · ${t("msg.openImage")}`} className="block cursor-zoom-in">
+                        <img src={a.url} alt={a.file.name} className={cn("block h-14 w-auto max-w-40 min-w-10 object-cover", a.error && "opacity-50")} />
+                      </button>
+                    </Zoom>
                   ) : (
                     <span className="flex h-14 w-36 items-center gap-1.5 bg-fill px-2 text-xs">
                       <FileText size={16} className="shrink-0 text-ink-3" />

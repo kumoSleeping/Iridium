@@ -371,8 +371,8 @@ func Claude() int {
 				note(map[string]any{"type": "user", "timestamp": stamp(), "message": map[string]any{"role": "user", "content": []any{result}}})
 				finish(f, nil)
 				continue
-			case strings.Contains(text, "请原样再做一次"):
-				// Released: the same call again, asked now that the mode is manual.
+			case strings.HasSuffix(text, "AGAIN"):
+				// Switched to manual for the denied call: the same call again, asked now.
 				pending, asked = f, 1
 				ask("again", "npx -y some-tool")
 				continue

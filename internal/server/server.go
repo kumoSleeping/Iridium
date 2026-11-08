@@ -367,7 +367,7 @@ func (s *Server) release(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), time.Minute)
 	defer cancel()
-	s.done(w, s.m.Release(ctx, r.PathValue("id"), req.ToolUseID, s.fromOf(c, ""), req.Dismiss))
+	s.done(w, s.m.Release(ctx, r.PathValue("id"), req.ToolUseID, req.Dismiss))
 }
 
 var stateKey = regexp.MustCompile(`^(list|quota|workspaces|colors|confirms|update|terminals|machines|(session|context):[0-9a-zA-Z_-]{1,128})$`)

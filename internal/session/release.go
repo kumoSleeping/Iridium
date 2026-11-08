@@ -15,12 +15,12 @@ import (
 
 // A step Claude's auto mode classifier turned down never reaches Iridium as an ask: the CLI
 // answers the model itself (the user, 2026-11-07). Each one waits as a card above the composer
-// (Denials) till you release it or let it be (the user, 2026-11-08). Release: the running process
-// goes to manual mode (only it: the session's setting stays, so a restart is back in its own
-// mode), Claude is told to run it again, the ask that comes of it the same call is allowed by
-// itself, and once that call is done the mode goes back at once (not at the turn's end: the rest
-// of the turn in manual mode asked for every step, 2026-11-08). Claude not running it again, the
-// mode goes back when the turn that took the message ends.
+// (Denials) till you switch to manual for it or let it be (the user, 2026-11-08). Switching: the
+// running process goes to manual mode (only it: the session's setting stays, so a restart is back
+// in its own mode) and nothing is said to Claude: a message in your name told it to run the step
+// again, though it may have gone another way meanwhile (the user, 2026-11-08). Claude running the
+// step again, it is asked as any other, and once that call is done the mode goes back; else the
+// mode goes back when the turn ends: the one under way, or the next if none is.
 
 // Denied is in the tool result Claude writes for a call its classifier denied.
 const Denied = agent.AutoDenied
@@ -31,22 +31,20 @@ const releaseMode = "manual"
 // maxDenials: the most denial cards a session keeps; the oldest go.
 const maxDenials = 20
 
-// released is a release under way: the call allowed once, the mode to go back to; input: the
-// message that asks Claude to run it again, taken: Claude took it; call: the call's id run again.
+// released is a release under way: the call denied, the mode to go back to; during: a turn was
+// under way then, its end ends the release; call: the call's id run again.
 type released struct {
-	tool  string
-	input map[string]any
-	prev  string
-	at    time.Time
-	used  bool
-	msg   string
-	taken bool
-	call  string
+	tool   string
+	input  map[string]any
+	prev   string
+	at     time.Time
+	during bool
+	call   string
 }
 
-// Release lets Claude run call tool (a tool_use id) again, which its auto mode classifier denied;
-// dismiss only takes its card away.
-func (m *Manager) Release(ctx context.Context, id, tool, from string, dismiss bool) error {
+// Release puts the process in manual mode for call tool (a tool_use id), which Claude's auto mode
+// classifier denied; dismiss only takes its card away.
+func (m *Manager) Release(ctx context.Context, id, tool string, dismiss bool) error {
 	if dismiss {
 		h, err := m.get(id)
 		if err != nil {
@@ -85,27 +83,14 @@ func (m *Manager) Release(ctx context.Context, id, tool, from string, dismiss bo
 		prev = h.rel.prev // a second release in the same one: back to the first's mode
 	}
 	h.mode = releaseMode
-	h.rel = &released{tool: name, input: input, prev: prev, at: time.Now()}
+	busy := h.turn != "" && h.turn != agent.Idle
+	h.rel = &released{tool: name, input: input, prev: prev, at: time.Now(), during: busy}
 	h.denials = slices.DeleteFunc(h.denials, func(d api.Denial) bool { return d.ToolUseID == tool })
 	h.mu.Unlock()
 	h.publish()
 	m.publishList()
 	h.logf("released %s %s (from %s mode)", name, tool, prev)
-	what := name
-	if c, _ := input["command"].(string); c != "" {
-		what = "`" + oneLine(c, 200) + "`"
-	} else if p := subjectOf(api.Ask{Tool: name, Input: input}); p != "" {
-		what = name + " " + p
-	}
-	text := "刚才被 auto 模式拦下的那一步（" + what + "），我放行了：请原样再做一次。"
-	msg, _, err := m.SendWith(ctx, id, text, from, true)
-	h.mu.Lock()
-	if r := h.rel; r != nil && msg != "" {
-		r.msg = msg
-		r.taken = r.taken || h.lastTaken == msg
-	}
-	h.mu.Unlock()
-	return err
+	return nil
 }
 
 // deniedOf is the call tool auto mode denied: from its card, else from the transcript.
@@ -266,15 +251,6 @@ func deniedCall(before func(int64) (api.MessagePage, error), full func(string) (
 	return call.Name, input, denied, nil
 }
 
-// sameCall: ask is the call released, run again.
-func sameCall(r *released, a api.Ask) bool {
-	if a.Kind != "permission" || a.Tool != r.tool {
-		return false
-	}
-	in, _ := a.Input.(map[string]any)
-	return sameInput(in, r.input)
-}
-
 // sameInput: a call's input is another's. Its description (Bash's) may be worded anew.
 func sameInput(a, b map[string]any) bool {
 	strip := func(m map[string]any) map[string]any {
@@ -289,11 +265,12 @@ func sameInput(a, b map[string]any) bool {
 	return reflect.DeepEqual(strip(a), strip(b))
 }
 
-// releaseOverLocked ends a release with the turn, if the turn had the message (Claude did not
-// run the call again, or did without its id seen). It gives the mode to go back to, "" for none.
+// releaseOverLocked ends a release with the turn under way at it, or begun after it (Claude did
+// not run the call again, or did without its id seen). It gives the mode to go back to, "" for
+// none.
 func (h *Hosted) releaseOverLocked() string {
 	r := h.rel
-	if r == nil || (!r.used && !r.taken && !h.turnAt.After(r.at)) {
+	if r == nil || (!r.during && !h.turnAt.After(r.at)) {
 		return ""
 	}
 	h.rel = nil

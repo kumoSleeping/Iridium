@@ -301,7 +301,9 @@ function UpdateRow() {
   const manages = !!me && (me.local || me.kind === "panel");
   const [busy, setBusy] = useState(false);
   if (!u) return null;
-  if (!u.available) return null;
+  // Kept while the daemon restarts (available is off by then): the dialog does not shrink as it
+  // goes, and grow again as the new build loads.
+  if (!u.available && u.phase !== "restarting") return null;
   const apply = () => {
     setBusy(true);
     expectUpgrade();
@@ -315,7 +317,7 @@ function UpdateRow() {
   const phase =
     u.phase === "downloading" ? (pct !== null ? `${t("settings.downloading")} ${pct}%` : t("settings.downloading")) : u.phase === "restarting" ? t("settings.restarting") : u.phase === "checking" ? t("settings.checking") : u.ready ? t("settings.downloaded") : "";
   return (
-    <section className="g-pop flex flex-col gap-2 rounded-md p-2.5 shadow-[0_0_0_1px_var(--edge)]" aria-label={t("settings.updateReady")}>
+    <section className="g-pop relative flex flex-col gap-2 overflow-hidden rounded-md p-2.5 shadow-[0_0_0_1px_var(--edge)]" aria-label={t("settings.updateReady")}>
       <div className="flex items-center gap-3">
         <span className="size-2 shrink-0 rounded-full bg-err" aria-hidden />
         <span className="min-w-0 flex-1 truncate text-sm font-semibold tabular-nums">
@@ -334,9 +336,11 @@ function UpdateRow() {
           </button>
         )}
       </div>
+      {/* Along the card's foot, taking no room: the card, and the dialog fitted to it, keep their
+          height as the download begins and ends. */}
       {u.phase === "downloading" && pct !== null && (
-        <div className="h-1 overflow-hidden rounded-full bg-fill" aria-hidden>
-          <div className="h-full rounded-full bg-ink-3 transition-[width] duration-300 ease-out" style={{ width: `${pct}%` }} />
+        <div className="g-fade absolute inset-x-0 bottom-0 h-0.5 bg-fill" aria-hidden>
+          <div className="h-full bg-ink-3 transition-[width] duration-300 ease-out" style={{ width: `${pct}%` }} />
         </div>
       )}
       {u.notes && <p className="m-0 max-h-40 overflow-y-auto text-sm whitespace-pre-wrap text-ink-2">{u.notes}</p>}

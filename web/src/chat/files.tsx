@@ -3,7 +3,7 @@
 // server says the conversation named, and that exist, show; it serves them by the session.
 import { Dialog } from "@base-ui/react/dialog";
 import { Download, FileCode2, FileText, X } from "lucide-react";
-import { useCallback, useState, type CSSProperties } from "react";
+import { useCallback, useState, type CSSProperties, type ReactElement } from "react";
 import { api } from "../api/client";
 import type { FileRef } from "../api/types.gen";
 import { t } from "../i18n";
@@ -56,15 +56,20 @@ function Shown({ src, under, alt, className, style }: { src: string; under?: str
  *  move (a chat opened the first time, its pictures not yet in the cache). */
 export function Picture({ src, full, name, small, under, w, h }: { src: string; full: string; name: string; small?: boolean; under?: string; w?: number; h?: number }) {
   return (
+    <Zoom full={full} name={name}>
+      <button type="button" aria-label={`${name} · ${t("msg.openImage")}`} className={cn("g-press relative block overflow-hidden rounded-lg bg-fill shadow-[0_0_0_0.5px_var(--edge)]", small ? "size-16" : "w-full max-w-[340px]")}>
+        <Shown src={src} under={under} alt={name} style={!small && w && h ? { aspectRatio: `${w} / ${h}` } : undefined} className={cn("block w-full object-cover", small ? "h-full" : "max-h-[420px]")} />
+      </button>
+    </Zoom>
+  );
+}
+
+/** children (a button) opens full over the page, to close by a click or download. */
+export function Zoom({ full, name, children }: { full: string; name: string; children: ReactElement }) {
+  return (
     <Dialog.Root>
       <Tip label={t("msg.openImage")}>
-        <Dialog.Trigger
-          render={
-            <button type="button" aria-label={`${name} · ${t("msg.openImage")}`} className={cn("g-press relative block overflow-hidden rounded-lg bg-fill shadow-[0_0_0_0.5px_var(--edge)]", small ? "size-16" : "w-full max-w-[340px]")}>
-              <Shown src={src} under={under} alt={name} style={!small && w && h ? { aspectRatio: `${w} / ${h}` } : undefined} className={cn("block w-full object-cover", small ? "h-full" : "max-h-[420px]")} />
-            </button>
-          }
-        />
+        <Dialog.Trigger render={children} />
       </Tip>
       <Dialog.Portal>
         <Dialog.Backdrop className="fixed inset-0 z-50 bg-paper/70 backdrop-blur-sm transition-opacity duration-(--dur-2) data-ending-style:opacity-0 data-starting-style:opacity-0" />

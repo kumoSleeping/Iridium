@@ -73,7 +73,11 @@ export const reloadServed = () => reload(served);
 function busy() {
   const e = document.activeElement;
   const typed = [...document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input, textarea")].some((f) => f.value !== "" && f.type !== "file" && (f === e || !f.dataset.draft));
-  return posting.count > 0 || anyUnsent() || typed || !!document.querySelector('[data-attachments], [role="dialog"], [role="alertdialog"], [role="menu"]');
+  // The settings' dialog, where 更新 was pressed, holds nothing to lose (words typed in it are
+  // counted above): kept open over the restart it held the old build there, drawn against the new
+  // daemon, till it was put away and the page loaded again under it.
+  const popups = '[data-attachments], [role="dialog"]:not([data-settings-dialog]), [role="alertdialog"], [role="menu"]';
+  return posting.count > 0 || anyUnsent() || typed || !!document.querySelector(asked ? popups : '[data-attachments], [role="dialog"], [role="alertdialog"], [role="menu"]');
 }
 function mayReload() {
   const last = lastReload();

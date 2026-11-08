@@ -5,7 +5,7 @@
 // Markdown, approve or keep planning. A question: its options as keys, or your own words. Every
 // answer goes to the ask's card (POST /api/answer), as a plugin's does.
 import { Menu } from "@base-ui/react/menu";
-import { Check, ChevronDown, ChevronRight, ClipboardList, FilePen, Globe, LoaderCircle, MessageCircleQuestionMark, PenLine, ShieldAlert, ShieldQuestion, SquareTerminal } from "lucide-react";
+import { Check, ChevronDown, ClipboardList, FilePen, Globe, LoaderCircle, MessageCircleQuestionMark, PenLine, ShieldAlert, ShieldQuestion, SquareTerminal } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { api } from "../api/client";
 import type { Ask, CardAnswer, Confirm, Denial } from "../api/types.gen";
@@ -64,8 +64,8 @@ export function Asks({ session, asks, denials = [], cwd, confirms = [] }: { sess
 }
 
 /** A step Claude's auto mode turned down (session/release.go): it waits here, as an ask does, till
- *  you release it — Claude runs it again, that call allowed, auto mode back once it is done — or
- *  let it be (the user, 2026-11-08: not a key in the conversation that stays after). */
+ *  you switch to manual for it — nothing said to Claude; run again, it is asked, and the mode is
+ *  back after it or at the turn's end — or let it be (the user, 2026-11-08). */
 function DenialCard({ d, session, cwd }: { d: Denial; session: string; cwd: string }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<"release" | "dismiss" | null>(null);
@@ -221,14 +221,14 @@ function Decide({ a, cwd, busy, send }: { a: Ask; cwd: string; busy: boolean; se
 
 /** An option's mark, a solid disc (a rounded square for a multiple choice): grey with its number,
  *  ink with a check once picked (the user, 2026-11-06: solid, not a small ring). */
-function Mark({ n, on, square, tap }: { n: number; on: boolean; square: boolean; tap: boolean }) {
+function Mark({ n, on, square }: { n: number; on: boolean; square: boolean }) {
   return (
     <span
       aria-hidden
       className={cn(
         "grid size-5 shrink-0 place-items-center text-[11px] font-semibold tabular-nums transition-[background-color,color,transform] duration-(--dur-2) ease-(--ease-out)",
         square ? "rounded-[6px]" : "rounded-full",
-        on ? "scale-105 bg-ink text-on-ink" : cn("bg-ink/10 text-ink-2", tap ? "group-hover:bg-ink group-hover:text-on-ink" : "group-hover:text-ink-2"),
+        on ? "scale-105 bg-ink text-on-ink" : "bg-ink/10 text-ink-2 group-hover:text-ink-2",
       )}
     >
       {on ? <Check size={12} strokeWidth={3} /> : n}
@@ -236,21 +236,19 @@ function Mark({ n, on, square, tap }: { n: number; on: boolean; square: boolean;
   );
 }
 
-/** Questions: each its options as keys; one question picked once answers as you tap; several, or
- *  a multiple choice, once sent. Your own words answer too. The card's option ids are
+/** Questions: each its options as keys, picked, then sent: no answer on a pick alone (a tap landed
+ *  on one as the card came in and answered it, the user 2026-11-08). Your own words answer too. The card's option ids are
  *  "<question>.<option>", by place. */
 function Question({ a, busy, send }: { a: Ask; busy: boolean; send: (r: Reply) => void }) {
   const qs = ((a.input as { questions?: Q[] } | null)?.questions ?? []).filter((q) => q?.question);
   const [picked, setPicked] = useState<number[][]>(() => qs.map(() => []));
   const [own, setOwn] = useState<string[]>(() => qs.map(() => ""));
-  const tap = qs.length === 1 && !qs[0]!.multiSelect;
   const reply = (p = picked, w = own): Reply => ({
     choices: p.flatMap((js, i) => (w[i]!.trim() ? [] : js.map((j) => `${i}.${j}`))),
     words: w.some((x) => x.trim()) ? w.map((x) => x.trim()) : undefined,
   });
   const ready = qs.every((_, i) => own[i]!.trim() || picked[i]!.length);
   const pick = (i: number, j: number) => {
-    if (tap) return send({ choices: [`0.${j}`] });
     setPicked((p) => p.map((was, k) => (k !== i ? was : was.includes(j) ? was.filter((x) => x !== j) : qs[i]!.multiSelect ? [...was, j] : [j])));
   };
   return (
@@ -288,19 +286,18 @@ function Question({ a, busy, send }: { a: Ask; busy: boolean; send: (r: Reply) =
                   <button
                     key={j}
                     type="button"
-                    aria-pressed={tap ? undefined : on}
+                    aria-pressed={on}
                     onClick={() => pick(i, j)}
                     className={cn(
                       "group flex w-full items-center gap-2.5 rounded-md border-0 px-2.5 py-1.5 text-left text-sm transition-colors duration-(--dur-1) pointer-coarse:py-2.5",
                       on ? "bg-fill" : "hover:bg-fill/70",
                     )}
                   >
-                    <Mark n={j + 1} on={on} square={!!q.multiSelect} tap={tap} />
+                    <Mark n={j + 1} on={on} square={!!q.multiSelect} />
                     <span className="flex min-w-0 flex-1 flex-col">
                       <span>{o.label}</span>
                       {o.description && <span className="text-xs leading-[18px] text-ink-3">{o.description}</span>}
                     </span>
-                    {tap && <ChevronRight size={14} className="shrink-0 text-ink-4 opacity-0 transition-opacity group-hover:opacity-100 pointer-coarse:opacity-100" />}
                   </button>
                 );
               })}
@@ -313,7 +310,7 @@ function Question({ a, busy, send }: { a: Ask; busy: boolean; send: (r: Reply) =
                   aria-label={t("ask.own")}
                   className="no-ring h-8 min-w-0 flex-1 bg-transparent text-sm placeholder:text-ink-3"
                 />
-                {last && (!tap || typed) && (
+                {last && (
                   <button type="submit" disabled={busy || !ready} className="g-press flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-ink px-2.5 text-sm text-on-ink disabled:opacity-25 pointer-coarse:h-9">
                     {busy && <LoaderCircle size={13} className="animate-spin" />}
                     {t("ask.send")}

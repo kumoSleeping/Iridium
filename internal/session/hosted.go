@@ -158,7 +158,6 @@ type Hosted struct {
 	turnAt        time.Time                  // when the running or last turn began
 	denials       []api.Denial               // steps auto mode denied, waiting for you (release.go)
 	calls         map[string]agent.ToolStart // this turn's calls by id: what a denial was
-	lastTaken     string                     // the input the agent took last
 
 	hadTurn     bool        // the agent has the running turn: a crash now is continued
 	crashes     []time.Time // within the breaker's window
@@ -650,10 +649,6 @@ func (h *Hosted) onEvent(e agent.Event) {
 		note(Notice{Kind: NoticeTurnStart})
 	case agent.Taken:
 		h.hadTurn = true
-		h.lastTaken = e.InputID
-		if r := h.rel; r != nil && r.msg != "" && r.msg == e.InputID {
-			r.taken = true
-		}
 	case agent.ToolDone:
 		if replay {
 			break
@@ -704,13 +699,6 @@ func (h *Hosted) onEvent(e agent.Event) {
 		}
 		note(Notice{Kind: NoticeTurnEnd, Text: transcript.WithoutNameLines(e.Reply), Background: e.Background})
 	case agent.AskOpen:
-		if !replay && h.rel != nil && !h.rel.used && sameCall(h.rel, e.Ask) {
-			// The step you released, run again: allowed once.
-			h.rel.used = true
-			id := e.Ask.RequestID
-			later(func() { h.allow(id) })
-			break
-		}
 		if !replay && e.Ask.Kind == "permission" && h.allowedLocked(e.Ask) {
 			id := e.Ask.RequestID
 			later(func() { h.allow(id) })

@@ -27,7 +27,17 @@ export const toEnd = (el: HTMLElement | null) => el && ends.get(el)?.();
 const rests = new WeakMap<HTMLElement, () => boolean>();
 export const restsAtEnd = (el: HTMLElement) => rests.get(el)?.() ?? false;
 
-export function Stick({ tail, older, place, style, children, scroller, bottom }: { tail: unknown; older: () => Promise<boolean>; place: { top: number | null }; style?: CSSProperties; children: ReactNode; scroller?: RefObject<HTMLDivElement | null>; bottom: number }) {
+/** Whether a box inside the list, between it and target, takes a scroll up itself (a long output
+ *  scrolled in place): the list does not move, so the newest is not let go. */
+const inner = (target: EventTarget | null, list: HTMLElement) => {
+  for (let n = target instanceof Element ? target : null; n && n !== list; n = n.parentElement)
+    if (n.scrollTop > 0 && n.scrollHeight > n.clientHeight && /auto|scroll/.test(getComputedStyle(n).overflowY)) return true;
+  return false;
+};
+
+/** quiet: no 新消息 key (an ask under it, the newest thing already in view: the key sat over it and
+ *  could not be put away, the user 2026-11-08). */
+export function Stick({ tail, older, place, style, children, scroller, bottom, quiet }: { tail: unknown; older: () => Promise<boolean>; place: { top: number | null }; style?: CSSProperties; children: ReactNode; scroller?: RefObject<HTMLDivElement | null>; bottom: number; quiet?: boolean }) {
   const own = useRef<HTMLDivElement>(null);
   const list = scroller ?? own;
   const atEnd = useRef(place.top === null);
@@ -55,6 +65,10 @@ export function Stick({ tail, older, place, style, children, scroller, bottom }:
   // may be swiped on to bring the phone's sheet (sheet.tsx).
   const ours = useRef(-1);
   const moved = useRef(0);
+  /** At the very end: nothing below to scroll to, so no scroll event comes to say so. */
+  const atFoot = (el: HTMLElement) => bottomOf(el) - el.scrollTop <= 1;
+  /** Back at the newest: kept there again, the key to go down gone. */
+  const hold = () => ((atEnd.current = true), setFresh(false));
   const pin = (el: HTMLElement) => {
     const was = el.scrollTop;
     el.scrollTop = bottomOf(el);
@@ -246,6 +260,10 @@ export function Stick({ tail, older, place, style, children, scroller, bottom }:
     if (!first && was === tail) return;
     if (first && place.top !== null) el.scrollTop = place.top;
     else if (first || atEnd.current) follow(el, true);
+    // Let go of at the very end (a wheel nudged up there, a box inside scrolled), and what came
+    // grew nothing below it (a draft's line run on): nothing to go down to, no key that only
+    // scrolling up and back down would take away (the user, 2026-11-08).
+    else if (atFoot(el)) (hold(), follow(el, true));
     else setFresh(true);
     void back().catch(() => {});
   });
@@ -267,15 +285,26 @@ export function Stick({ tail, older, place, style, children, scroller, bottom }:
     // What says the user is going up before the scroll comes: more coming meanwhile would put it
     // back at the newest first.
     let y = 0;
-    const wheel = (e: WheelEvent) => e.deltaY < 0 && Math.abs(e.deltaY) > Math.abs(e.deltaX) && atEnd.current && leave();
+    // Going down at the very end, already there: no scroll event comes, so it is held here.
+    const down = () => !atEnd.current && atFoot(el) && hold();
+    const wheel = (e: WheelEvent) => {
+      if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+      if (e.deltaY > 0) return down();
+      if (atEnd.current && !inner(e.target, el)) leave();
+    };
     const touch = (e: TouchEvent) => {
       touching.current = e.type === "touchstart" || e.type === "touchmove";
       const p = e.touches[0];
       if (!p) return;
-      if (e.type === "touchmove" && p.clientY - y > 2 && atEnd.current && bottomOf(el) > 0) leave();
+      if (e.type === "touchmove" && p.clientY - y > 2 && atEnd.current && bottomOf(el) > 0 && !inner(e.target, el)) leave();
+      if (e.type === "touchmove" && y - p.clientY > 2) down();
       y = p.clientY;
     };
-    const key = (e: KeyboardEvent) => ["PageUp", "ArrowUp", "Home"].includes(e.key) && !(e.target as Element).closest?.("textarea, input") && atEnd.current && leave();
+    const key = (e: KeyboardEvent) => {
+      if ((e.target as Element).closest?.("textarea, input")) return;
+      if (["PageUp", "ArrowUp", "Home"].includes(e.key)) return void (atEnd.current && leave());
+      if (["PageDown", "ArrowDown", "End", " "].includes(e.key)) down();
+    };
     el.addEventListener("wheel", wheel, { passive: true });
     for (const k of ["touchstart", "touchmove", "touchend", "touchcancel"] as const) el.addEventListener(k, touch, { passive: true });
     el.addEventListener("keydown", key);
@@ -306,7 +335,7 @@ export function Stick({ tail, older, place, style, children, scroller, bottom }:
     const gap = bottomOf(el) - top;
     if (atEnd.current) {
       if (d < -0.5 && gap > 1) leave();
-    } else if (gap < END && d >= 0) atEnd.current = true;
+    } else if ((gap < END && d >= 0) || gap <= 1) atEnd.current = true; // at the very end too as what shrank below pulled it there
     if (atEnd.current) setFresh(false);
     void back().catch(() => {});
   };
@@ -329,7 +358,7 @@ export function Stick({ tail, older, place, style, children, scroller, bottom }:
         }} className="absolute inset-0 overflow-y-auto [overflow-anchor:none] [scrollbar-gutter:stable_both-edges]" style={style}>
         {children}
       </div>
-      {fresh && (
+      {fresh && !quiet && (
         <button
           type="button"
           onClick={() => list.current!.scrollTo({ top: bottomOf(list.current!), behavior: "smooth" })}

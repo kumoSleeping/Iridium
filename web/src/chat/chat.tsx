@@ -17,7 +17,7 @@ import { t, useLang } from "../i18n";
 import { pushIn } from "../motion";
 import { openChat, openUsage } from "../route";
 import { PULL } from "../sheet";
-import { MenuItems, Rename, sessionActions, sessionTags } from "../sidebar";
+import { BotItems, MenuItems, Rename, sessionActions, sessionTags } from "../sidebar";
 import { useConfirms, useList, useSession } from "../store";
 import { drafts, opened } from "../stream";
 import { errText } from "../toast";
@@ -207,7 +207,7 @@ export function ChatPage({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?:
   const grew = `${log.blocks.at(-1)?.at} ${log.drafts.length} ${log.drafts.at(-1)?.text.length} ${log.drafts.at(-1)?.whole} ${log.sent.length}`;
   return (
     <div className="relative h-full" onDragOver={(e) => files(e) || session(e)} onDrop={drop}>
-      <Stick scroller={scroller} tail={grew} older={() => log.older()} place={chat.place} bottom={stackH} style={{ paddingTop: 64, paddingBottom: stackH + 20 }}>
+      <Stick scroller={scroller} tail={grew} older={() => log.older()} place={chat.place} bottom={stackH} quiet={!!s?.asks.length} style={{ paddingTop: 64, paddingBottom: stackH + 20 }}>
         <div className="mx-auto flex max-w-[760px] flex-col gap-5 px-4 sm:px-6">
           {/* In a turn, the calls being written or run and the dots share one row at the end, as
               high whatever it shows: the conversation does not jump as a call is drafted, runs and
@@ -333,6 +333,9 @@ function Bar({ s, onSheet, onMe }: { s?: Session; onSheet?: () => void; onMe?: (
     const b = more.current?.getBoundingClientRect();
     openUsage(b && { x: b.right, y: b.bottom + 6, end: true });
   };
+  // ⋯'s items: making, the sheet and 我 on a phone, usage; then the session's own.
+  const lead = [{ icon: <Plus size={15} />, label: t("menu.new"), run: () => requestAnimationFrame(() => setMaking(true)) }, ...(onSheet ? [{ icon: <ListTree size={15} />, label: t("nav.sidebar"), run: onSheet }] : []), ...(onMe ? [{ icon: <Settings size={15} />, label: t("nav.me"), run: onMe }] : []), { icon: <BarChart3 size={15} />, label: t("usage.title"), run: usageHere }];
+  const acts = s ? sessionActions(s, () => setRenaming(true)) : [];
   return (
     <header className="g-turn-stay vt-bar glass absolute inset-x-0 top-0 z-20 flex h-12 items-center gap-1 pr-2 pl-2 shadow-[0_0.5px_0_var(--edge)] pointer-coarse:h-13">
       <div className="flex min-w-0 flex-1 items-center gap-2.5 pl-2">
@@ -391,7 +394,7 @@ function Bar({ s, onSheet, onMe }: { s?: Session; onSheet?: () => void; onMe?: (
             </Tip>
             <Menu.Portal>
               <Menu.Positioner side="bottom" align="end" sideOffset={6} collisionPadding={8} className="z-50">
-                <MenuItems lead={[{ icon: <Plus size={15} />, label: t("menu.new"), run: () => requestAnimationFrame(() => setMaking(true)) }, ...(onSheet ? [{ icon: <ListTree size={15} />, label: t("nav.sidebar"), run: onSheet }] : []), ...(onMe ? [{ icon: <Settings size={15} />, label: t("nav.me"), run: onMe }] : []), { icon: <BarChart3 size={15} />, label: t("usage.title"), run: usageHere }]} items={sessionActions(s, () => setRenaming(true))} tags={sessionTags(s)} />
+                <MenuItems lead={lead} items={acts} tags={sessionTags(s)} tail={<BotItems s={s} i={lead.length + acts.length + 1} />} />
               </Menu.Positioner>
             </Menu.Portal>
           </Menu.Root>
