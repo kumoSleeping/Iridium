@@ -4,7 +4,7 @@ package api
 // per local day, terminal, agent and model that used any. A terminal that does not manage sees
 // only its own.
 type Usage struct {
-	Days []string   `json:"days"` // "2006-01-02", oldest first, today last
+	Days []string   `json:"days"` // "2006-01-02", oldest first, today last; by hour "2006-01-02T15"
 	Rows []UsageRow `json:"rows"`
 	// Terminals: the rows' terminals still there, by ID, to name them (a removed one is not).
 	Terminals map[string]UsageTerminal `json:"terminals"`

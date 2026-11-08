@@ -33,6 +33,8 @@ type AgentInfo struct {
 	// a switch restarts the agent. DefaultPreset is an empty preset's. None: it has no presets.
 	Presets       []string `json:"presets,omitempty"`
 	DefaultPreset string   `json:"defaultPreset,omitempty"`
+	// Missing: its program is not on the daemon's PATH (not installed): a new session is refused.
+	Missing bool `json:"missing,omitempty"`
 }
 
 // Color is a colour tag a session or a folder is given from its menu (the user, 2026-11-06).
@@ -225,8 +227,18 @@ type AgentQuota struct {
 	Account string        `json:"account,omitempty"` // the login the agent reports (Claude: e-mail)
 	Plan    string        `json:"plan,omitempty"`    // Claude: subscriptionType
 	Windows []QuotaWindow `json:"windows"`
-	At      int64         `json:"at"` // when they were read
+	Balance []Balance     `json:"balance,omitempty"` // dsh: the DeepSeek account's money, by currency
+	At      int64         `json:"at"`                // when they were read
 	Live    bool          `json:"live"`
+}
+
+// Balance is an account's money in one currency (DeepSeek's /user/balance): Total is Granted (given)
+// and ToppedUp (paid) together.
+type Balance struct {
+	Currency string  `json:"currency"` // CNY | USD
+	Total    float64 `json:"total"`
+	Granted  float64 `json:"granted"`
+	ToppedUp float64 `json:"toppedUp"`
 }
 
 type QuotaWindow struct {

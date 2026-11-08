@@ -1,13 +1,17 @@
 // The effort slider's fill as a liquid (the user, 2026-11-06): oil-paint orange, vivid pink and
 // fire orange flowing into one another, a faint light where the currents meet. Drawn per pixel on a
-// tiny canvas (the browser's smoothing as it is stretched over the track is the blur that makes it
-// liquid), so a frame costs a few hundred pixels.
+// canvas a sample per CSS pixel of the track (some 300 by 24): a coarser one, stretched, came out in
+// blocks (the user, 2026-11-08: "像素化"); this one the screen's own scaling keeps smooth.
 //
 // The flow: the track's point (u, v) is moved by two crossed sine currents that drift with time
 // (domain warping, cheaply); two fields read at the moved point decide the mix: a, orange against
 // fire; b, the pink veins. Where a and b meet, a little light. Moving the knob sloshes the liquid:
 // a damped spring pushes the pattern along the track and back, and the flow quickens a while.
 // Higher levels flow faster and run pinker.
+
+/** Linear 0..1 to sRGB 0..255, by a table: a pow per channel per pixel is the frame's dearest part. */
+const GAMMA = Float32Array.from({ length: 1025 }, (_, i) => Math.pow(i / 1024, 1 / 2.2) * 255);
+const srgb = (p: number) => GAMMA[Math.round(Math.min(1, Math.max(0, p)) * 1024)]!;
 
 /** sRGB 0..255 to linear 0..1. */
 const lin = (c: number) => Math.pow(c / 255, 2.2);
@@ -44,13 +48,14 @@ export function shade(u: number, v: number, t: number, energy: number, push: num
   const kFire = smooth(0.3, 0.7, a);
   const kPink = smooth(0.5, 0.85, b) * (0.45 + 0.3 * u + 0.25 * energy);
   const kEmber = smooth(0.25, 0, a) * 0.35;
-  const kLight = Math.pow(Math.max(0, 1 - Math.abs(a - b) * 2.6), 4) * (0.07 + 0.06 * energy);
+  const near = Math.max(0, 1 - Math.abs(a - b) * 2.6) ** 2;
+  const kLight = near * near * (0.07 + 0.06 * energy);
   for (let c = 0; c < 3; c++) {
     let p = mix(PAINT.oil[c]!, PAINT.fire[c]!, kFire);
     p = mix(p, PAINT.pink[c]!, kPink);
     p = mix(p, PAINT.ember[c]!, kEmber);
     p = mix(p, PAINT.light[c]!, kLight);
-    out[o + c] = Math.pow(p, 1 / 2.2) * 255;
+    out[o + c] = srgb(p);
   }
   // A little clear where it runs thin, so the track shows through: liquid, not a slab.
   out[o + 3] = (0.8 + 0.16 * a + 0.04 * energy) * 255;
@@ -67,27 +72,42 @@ export function slosh(s: Slosh, dt: number) {
   s.push += s.vel * dt;
 }
 
-const W = 72;
-const H = 8;
+/** Samples per CSS pixel, and a bound on them (a wide panel, a hi-dpi screen). */
+const PER_PX = 1;
+const MAX_W = 480;
 
 /** Runs the liquid on canvas till the returned stop is called. frac: the knob's place now (0..1).
- *  Still (reduced motion, or a screenshot being taken): one frame, nothing runs on. */
+ *  Still (reduced motion, or a screenshot being taken): one frame, nothing runs on. The canvas is
+ *  sized to the track as laid out, and again when that changes. */
 export function flow(canvas: HTMLCanvasElement, frac: () => number, still: boolean) {
-  canvas.width = W;
-  canvas.height = H;
   const g = canvas.getContext("2d");
   if (!g) return () => {};
-  const img = g.createImageData(W, H);
+  let W = 0;
+  let H = 0;
+  let img: ImageData | null = null;
+  const fit = () => {
+    const w = Math.min(MAX_W, Math.max(8, Math.round(canvas.clientWidth * PER_PX)));
+    const h = Math.max(4, Math.round(canvas.clientHeight * PER_PX));
+    if (w === W && h === H) return false;
+    W = canvas.width = w;
+    H = canvas.height = h;
+    img = g.createImageData(W, H);
+    return true;
+  };
+  fit();
   const s: Slosh = { push: 0, vel: 0 };
   let t = Math.random() * 100;
   let last = frac();
   let then = 0;
   let id = 0;
   const draw = () => {
+    if (!img) return;
     const energy = Math.min(1, frac() * 0.8 + Math.abs(s.vel) * 0.25);
-    for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) shade(i / (W - 1), j / (H - 1), t, energy, s.push, img.data, (j * W + i) * 4);
+    const d = img.data;
+    for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) shade(i / (W - 1), j / (H - 1), t, energy, s.push, d, (j * W + i) * 4);
     g.putImageData(img, 0, 0);
   };
+  const seen = new ResizeObserver(() => fit() && still && draw());
   const tick = (now: number) => {
     const dt = then ? Math.min(0.05, (now - then) / 1000) : 0;
     then = now;
@@ -102,7 +122,8 @@ export function flow(canvas: HTMLCanvasElement, frac: () => number, still: boole
     draw();
     id = requestAnimationFrame(tick);
   };
+  seen.observe(canvas);
   if (still) draw();
   else id = requestAnimationFrame(tick);
-  return () => cancelAnimationFrame(id);
+  return () => (cancelAnimationFrame(id), seen.disconnect());
 }

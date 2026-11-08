@@ -1,19 +1,19 @@
-// Creating things (plan "网页" 新建): the sidebar's "+" (a new workspace), a workspace row's "+" (a
-// new session: pick an agent; the folder defaults to the workspace's root) and the folder-only
+// Creating things (plan "网页" 新建): the sidebar's "+" (a new session: a folder, then an agent), a
+// group row's "+" (a new session: pick an agent; the folder defaults to the group's) and the folder-only
 // picker: a breadcrumb you can tap or type into, folders only, an inline new folder, one key.
 import { Popover } from "@base-ui/react/popover";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, Folder, FolderPlus, LoaderCircle, PencilLine } from "lucide-react";
+import { ChevronRight, Folder, FolderPlus, LoaderCircle } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import type { Workspace } from "./api/types.gen";
 import { api, missing } from "./api/client";
+import { openChat } from "./route";
 import type { Agent } from "./api/types.gen";
 import { t } from "./i18n";
-import { useAgents, useHome } from "./data";
+import { agentsQ, useHome } from "./data";
 import { errText, toast } from "./toast";
 import { AGENTS, agentName, cn, homeOf, IconKey, Logo, PopSurface, tilde, Tip } from "./ui";
 
-const base = (p: string) => p.split("/").filter(Boolean).pop() ?? p;
 const join = (dir: string, name: string) => (dir.endsWith("/") ? dir + name : `${dir}/${name}`);
 /** One folder's listing; prefetched before it is shown (the popover opening, a row hovered), so the
  *  picker opens and steps at its full height instead of a spinner springing open into the list. */
@@ -152,7 +152,8 @@ export function FolderPicker({ initial, onChoose, startNew = false, busy }: { in
                   {i > 0 && <ChevronRight size={12} className="mx-0.5 text-ink-4" />}
                   <button
                     type="button"
-                    onClick={() => !last && go(segPath(i), "back")}
+                    // The folder you are in: a press types the path (no pencil key: the user, 2026-11-08).
+                    onClick={() => (last ? setTyping(shown) : go(segPath(i), "back"))}
                     className={cn("g-press rounded-sm px-1.5 py-1 text-sm whitespace-nowrap", last ? "font-semibold text-ink" : "text-ink-2 hover:bg-fill hover:text-ink")}
                     aria-current={last ? "location" : undefined}
                   >
@@ -163,9 +164,6 @@ export function FolderPicker({ initial, onChoose, startNew = false, busy }: { in
             })}
           </nav>
         )}
-        <IconKey label={t("pick.typePath")} onClick={() => setTyping(shown)} className="size-7 pointer-coarse:size-9">
-          <PencilLine size={15} />
-        </IconKey>
         <IconKey label={t("pick.newFolder")} onClick={() => setNewName("")} disabled={!!gone} className="size-7 pointer-coarse:size-9">
           <FolderPlus size={15} />
         </IconKey>
@@ -219,8 +217,12 @@ export function FolderPicker({ initial, onChoose, startNew = false, busy }: { in
 
 /** Pick an agent; the folder line opens the picker for a subfolder. Picking an agent opens the chat. */
 export function NewSession({ ws, folder, onFolder, onPick, busy }: { ws: string; folder: string; onFolder: () => void; onPick: (a: Agent) => void; busy: Agent | null }) {
-  // The agents the daemon can host (GET /api/agents); all four before it says.
-  const agents = useAgents().data?.map((a) => a.agent) ?? AGENTS;
+  // The agents the daemon can host (GET /api/agents); all four before it says. One not installed
+  // is shown faded: picking it says so, no session is made.
+  const info = useQuery({ ...agentsQ, refetchOnMount: "always" }).data; // installed since: the next open knows
+  const agents = info?.map((a) => a.agent) ?? AGENTS;
+  const missing = (a: Agent) => !!info?.find((x) => x.agent === a)?.missing;
+  const pick = (a: Agent) => (missing(a) ? toast(t("new.notInstalled", { name: agentName(a) }), { error: true }) : onPick(a));
   return (
     <div className="flex w-[min(288px,calc(100vw-16px))] flex-col gap-1 p-1.5">
       <button type="button" onClick={onFolder} className="flex h-9 items-center gap-2 rounded-md px-2 text-left hover:bg-fill pointer-coarse:h-11" aria-label={t("new.folder")}>
@@ -231,9 +233,9 @@ export function NewSession({ ws, folder, onFolder, onPick, busy }: { ws: string;
       </button>
       <div role="group" aria-label={t("new.agent")} className="g-stagger grid grid-cols-4 gap-1">
         {agents.map((a, i) => (
-          <Tip key={a} label={agentName(a)}>
-            <button type="button" aria-label={agentName(a)} disabled={busy !== null} onClick={() => onPick(a)} style={{ "--i": i } as CSSProperties} className="g-press grid h-14 place-items-center rounded-md hover:bg-fill disabled:opacity-50">
-              {busy === a ? <LoaderCircle size={20} className="animate-spin text-ink-3" /> : <Logo agent={a} size={24} />}
+          <Tip key={a} label={missing(a) ? t("new.notInstalled", { name: agentName(a) }) : agentName(a)}>
+            <button type="button" aria-label={agentName(a)} disabled={busy !== null} onClick={() => pick(a)} style={{ "--i": i } as CSSProperties} className="g-press grid h-14 place-items-center rounded-md hover:bg-fill disabled:opacity-50">
+              {busy === a ? <LoaderCircle size={20} className="animate-spin text-ink-3" /> : <Logo agent={a} size={24} className={cn(missing(a) && "opacity-30 grayscale")} />}
             </button>
           </Tip>
         ))}
@@ -259,30 +261,38 @@ export function useStart(opened: (id: string) => void) {
   return { busy, start };
 }
 
-/** The "+" at the sidebar's top: a new workspace, its folder picked. New sessions are made in a
- *  workspace, from its row's "+" (the user's decision, 2026-11-05). */
+/** The "+" at the sidebar's top: a new session, its folder picked first, then its agent. The folder
+ *  is its group, or in one (the user, 2026-11-08: no workspaces to make first; the server groups it,
+ *  discover GroupFor). */
 export function CreatePopover({ trigger }: { trigger: ReactElement }) {
-  const qc = useQueryClient();
   const [open, setOpen] = useState(false);
-  const [making, setMaking] = useState(false);
-  const newWorkspace = async (path: string) => {
-    setMaking(true);
-    try {
-      const w = await api.createWorkspace({ path, name: base(path) });
-      await qc.invalidateQueries({ queryKey: ["workspaces"] });
-      setOpen(false);
-      toast(t("toast.created"), { description: w.name });
-    } catch (e) {
-      toast(t("err.newWorkspace"), { error: true, description: missing(e) ? t("err.notYet") : errText(e) });
-    } finally {
-      setMaking(false);
-    }
-  };
+  const [page, setPage] = useState<"folder" | "session">("folder");
+  const [folder, setFolder] = useState("~");
+  const { busy, start } = useStart((id) => (setOpen(false), openChat(id)));
   return (
-    <Popover.Root open={open} onOpenChange={setOpen}>
+    <Popover.Root
+      open={open}
+      onOpenChange={(o) => {
+        setOpen(o);
+        if (o) setPage("folder");
+      }}
+    >
       <Popover.Trigger render={trigger} />
       <PopSurface align="start" finalFocus={false}>
-        <FolderPicker initial="~" busy={making} onChoose={(p) => void newWorkspace(p)} />
+        {/* Page to page, sliding the way you went: on to the agents, back to the folder. */}
+        <div key={page} data-dir={page === "folder" ? "back" : undefined} className="g-slide">
+          {page === "folder" ? (
+            <FolderPicker
+              initial={folder}
+              onChoose={(p) => {
+                setFolder(p);
+                setPage("session");
+              }}
+            />
+          ) : (
+            <NewSession ws="" folder={folder} busy={busy} onFolder={() => setPage("folder")} onPick={(a) => void start(a, folder)} />
+          )}
+        </div>
       </PopSurface>
     </Popover.Root>
   );

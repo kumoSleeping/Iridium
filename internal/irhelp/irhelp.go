@@ -12,7 +12,7 @@ const Help = `ir: this machine's Iridium on the command line (over its unix sock
   ir read <id> [-n count] [--full]    each message and its final reply, cut short (last 10; --full: the page as written)
   ir ls | find <word> [--all]         list sessions | find by name, title, last thing said (--all: archived, finished subagents too)
   ir stop | archive | unarchive <id>  stop its agent | archive | unarchive
-  ir ws [ls] | new <dir> [--name name] | rename <ws> <name> | rm <ws> | mv <id> <ws>   workspaces (<ws>: ID or name; rm, or mv to 0, sends sessions to Unsorted)
+  ir ws [ls] | rename <group> <name>   folder groups, made as sessions go in their folders (<group>: ID or name)
   ir cp <src> <dst> | files <dir>     copy files, print path, size, sha256 | list one level: name, size, time, type
   ir secret ls | set <name> [--note text] | rm <name>   secrets: set has the user type the value on the web page
   ir run [--secret name,…] -- command …   {{name}}, {{file:name}} become the value, a temp file, and env vars; values in the output are masked

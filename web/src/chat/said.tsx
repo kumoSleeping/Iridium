@@ -5,8 +5,9 @@
 // peer sent; Iridium's own lines
 // centred and faint; the agent's words as Markdown with the files they name; tool calls and
 // thoughts folded to a line.
-import { Archive, ArchiveRestore, ArrowUpRight, BookOpen, Bot, ChevronRight, Clock, Cpu, FoldVertical, CircleStop, CircleX, CloudDownload, CloudUpload, Earth, FileCode, FileDiff, FilePen, Files as FilesIcon, FileText, FolderGit2, FlaskConical, FolderOpen, GitBranch, GitCommitHorizontal, GitPullRequest, Globe, Hammer, History, Hourglass, KeyRound, Laptop, List, ListChecks, LoaderCircle, MessageCircleQuestionMark, MessageSquarePlus, Monitor, Network, Package, Plug, RotateCcw, RotateCw, Search, Send, ServerCog, Smartphone, SquareTerminal, Trash2, UserRound, Workflow as WorkflowIcon, Wrench, X, type LucideIcon } from "lucide-react";
-import { Children, forwardRef, memo, useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { Archive, ArchiveRestore, ArrowUpRight, BookOpen, Bot, Check, ChevronRight, Clock, Copy, Cpu, FoldVertical, CircleStop, CircleX, CloudDownload, CloudUpload, Earth, FileCode, FileDiff, FilePen, Files as FilesIcon, FileText, FolderGit2, FlaskConical, FolderOpen, GitBranch, GitCommitHorizontal, GitPullRequest, Globe, Hammer, History, Hourglass, KeyRound, Laptop, List, ListChecks, LoaderCircle, MessageCircleQuestionMark, MessageSquarePlus, Monitor, Network, Package, Plug, RotateCcw, RotateCw, Search, Send, ServerCog, Smartphone, SquareTerminal, Trash2, UserRound, Workflow as WorkflowIcon, Wrench, X, type LucideIcon } from "lucide-react";
+import { Children, forwardRef, memo, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { Popover } from "@base-ui/react/popover";
 import { api } from "../api/client";
 import type { Block, FileRef, Result } from "../api/types.gen";
 import type { Sent } from "../chats";
@@ -25,7 +26,15 @@ import { type Source, withoutFiles, withoutNameLines } from "./refs";
 type You = Extract<Source, { kind: "you" }>;
 type From = Extract<Source, { kind: "letter" }>;
 
-const clock = (ms?: number) => (ms ? new Date(ms).toLocaleTimeString(document.documentElement.lang === "en" ? "en" : "zh-CN", { hour: "2-digit", minute: "2-digit" }) : "");
+/** One formatter per language: making one per call is slow, and a chat calls it for every block. */
+const clocks = new Map<string, Intl.DateTimeFormat>();
+const clock = (ms?: number) => {
+  if (!ms) return "";
+  const l = document.documentElement.lang === "en" ? "en" : "zh-CN";
+  let f = clocks.get(l);
+  if (!f) clocks.set(l, (f = new Intl.DateTimeFormat(l, { hour: "2-digit", minute: "2-digit" })));
+  return f.format(ms);
+};
 
 const FACE = 28;
 const BADGE = 12;
@@ -306,7 +315,7 @@ function SystemFold({ b, session }: { b: Block; session: string }) {
         <span className="min-w-0 truncate">{t(SYSTEM[b.event ?? ""] ?? "sys.other")}</span>
         <ChevronRight size={12} className="shrink-0 transition-transform group-open/sys:rotate-90" />
       </summary>
-      <Clipped text={b.text ?? ""} length={b.length} at={b.at} session={session} error={b.event === "api_error"} />
+      <Clipped text={b.text ?? ""} length={b.length} at={b.at} session={session} error={b.event === "api_error"} cap />
     </details>
   );
 }
@@ -405,7 +414,7 @@ const ROW = "flex h-7 min-w-0 cursor-default list-none items-center gap-2 rounde
 
 /** The steps between two things said: one of them is its own line; more fold into one, each name
  *  once with its kind's icon and ×n, then the lines their edits changed, which opens to a line each.
- *  Each opens to what it was given and what came back. */
+ *  Each, pressed, shows what it was given and what came back in a card (StepView). */
 function Fold({ steps, session, cwd }: { steps: Step[]; session: string; cwd: string }) {
   if (steps.length === 1) return <StepView s={steps[0]!} session={session} cwd={cwd} />;
   const runs = foldLine(steps);
@@ -441,23 +450,133 @@ function Fold({ steps, session, cwd }: { steps: Step[]; session: string; cwd: st
   );
 }
 
+/** A step's line; pressed, what it was given and what came back open in a card at the press, like a
+ *  context menu, instead of under the line (the user, 2026-11-08): the conversation stays put. */
 function StepView({ s, session, cwd }: { s: Step; session: string; cwd: string }) {
+  // Where it was pressed stays as the card goes: put away, it folds back into that point, not
+  // first thrown to the window's corner by an anchor gone (the user, 2026-11-08).
+  const [open, setOpen] = useState(false);
+  const [at, setAt] = useState<{ x: number; y: number } | null>(null);
+  const row = useRef<HTMLButtonElement>(null);
+  const toggle = (o: boolean, d: { event?: Event }) => {
+    setOpen(o);
+    if (!o) return;
+    const r = row.current?.getBoundingClientRect();
+    const e = d.event as MouseEvent | undefined;
+    const pointed = e && "clientX" in e && e.detail > 0;
+    setAt({ x: pointed ? e.clientX : (r?.left ?? 0) + 22, y: r?.bottom ?? (pointed ? e.clientY : 0) });
+  };
+  const anchor = useMemo(() => at && { getBoundingClientRect: () => DOMRect.fromRect({ x: at.x, y: at.y, width: 0, height: 0 }) }, [at]);
   return (
-    <details className="group/step w-full min-w-0">
-      <summary className={ROW}>
+    <Popover.Root open={open} onOpenChange={toggle}>
+      <Popover.Trigger ref={row} className={cn(ROW, "w-full text-left outline-none focus-visible:text-ink-2", open && "text-ink-2")}>
         <StepLine s={s} cwd={cwd} />
-      </summary>
-      <div className="g-fade mb-2 ml-[22px] grid min-w-0 gap-1.5">
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Positioner anchor={anchor} side="bottom" align="start" sideOffset={4} collisionPadding={8} className="z-50">
+          <Popover.Popup initialFocus={(type) => type === "keyboard"} className="g-unfold glass thick float flex max-h-[min(72dvh,620px,var(--available-height))] w-[min(620px,calc(100vw-16px))] flex-col overflow-hidden rounded-xl text-ink outline-none">
+            <StepCard s={s} session={session} />
+          </Popover.Popup>
+        </Popover.Positioner>
+      </Popover.Portal>
+    </Popover.Root>
+  );
+}
+
+/** The card: no head (its line is right above it, a press elsewhere puts it away; the user,
+ *  2026-11-08), only its input field by field and its output, each with a key to copy it; a
+ *  thought its words. */
+function StepCard({ s, session }: { s: Step; session: string }) {
+  return (
+    <>
+      <div className="grid min-h-0 gap-4 overflow-y-auto overscroll-contain px-3 pt-3 pb-3.5">
         {s.kind === "thinking" ? (
           <Clipped text={s.text ?? ""} length={s.length} at={s.at} session={session} prose />
         ) : (
           <>
-            <Clipped text={s.input ?? ""} length={s.length} at={s.at} session={session} />
-            {s.result ? <ResultView r={s.result} session={session} /> : <span className="text-xs text-ink-3">{t("msg.noResult")}</span>}
+            <Part label={t("msg.input")} copy={s.input}>
+              <Clipped text={s.input ?? ""} length={s.length} at={s.at} session={session} fields />
+            </Part>
+            <Part label={t("msg.output")} copy={s.result?.text} error={s.result?.error}>
+              {s.result ? <ResultView r={s.result} session={session} /> : <span className="text-xs text-ink-3">{t("msg.noResult")}</span>}
+            </Part>
           </>
         )}
       </div>
-    </details>
+    </>
+  );
+}
+
+/** One part of the card: its small label, a key to copy it, its body. */
+function Part({ label, copy, error, children }: { label: string; copy?: string; error?: boolean; children: ReactNode }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <section className="grid min-w-0 gap-1.5">
+      <div className="flex h-5 items-center gap-2">
+        <span className={cn("text-[11px] font-medium tracking-wide text-ink-4 uppercase", error && "text-err")}>{label}</span>
+        {error && <CircleX size={12} className="text-err" aria-label={t("msg.failed")} />}
+        <span className="flex-1" />
+        {!!copy && (
+          <button type="button" onClick={() => void navigator.clipboard.writeText(copy).then(() => (setCopied(true), setTimeout(() => setCopied(false), 1500)))} className="g-press flex h-5 items-center gap-1 rounded-sm px-1 text-[11px] text-ink-4 hover:text-ink-2">
+            {copied ? <Check size={12} /> : <Copy size={12} />}
+            {copied ? t("msg.copied") : t("msg.copy")}
+          </button>
+        )}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+/** An input object's fields, each its name and its value: a short one on the line, a long one or
+ *  one of many lines in a block; an edit's old text red, its new text green. Anything else as it is. */
+function Fields({ text }: { text: string }) {
+  let v: unknown;
+  try {
+    v = JSON.parse(text);
+  } catch {
+    return <Pre text={pretty(text)} />;
+  }
+  if (!v || typeof v !== "object" || Array.isArray(v)) return <Pre text={pretty(text)} />;
+  const rows = Object.entries(v as Record<string, unknown>);
+  if (!rows.length) return <span className="text-xs text-ink-4">{"{}"}</span>;
+  return (
+    <div className="grid min-w-0 gap-2">
+      {rows.map(([k, x]) => {
+        const str = typeof x === "string" ? x : JSON.stringify(x, null, 2);
+        const tone = OLD.has(k) ? "minus" : NEW.has(k) ? "plus" : undefined;
+        const inline = !tone && !str.includes("\n") && str.length <= 80;
+        return inline ? (
+          <div key={k} className="flex min-w-0 items-baseline gap-2 text-xs">
+            <span className="shrink-0 font-mono text-ink-4">{k}</span>
+            <span className={cn("min-w-0 font-mono [overflow-wrap:anywhere]", typeof x === "string" ? "text-ink-2" : "text-ink-3")}>{str}</span>
+          </div>
+        ) : (
+          <div key={k} className="grid min-w-0 gap-1">
+            <span className="font-mono text-xs text-ink-4">{k}</span>
+            <Pre text={str} tone={tone} />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+const OLD = new Set(["old_string", "old_str", "oldText"]);
+const NEW = new Set(["new_string", "new_str", "newText", "content"]);
+
+function Pre({ text, error, tone, cap }: { text: string; error?: boolean; tone?: "plus" | "minus"; cap?: boolean }) {
+  return (
+    <pre
+      className={cn(
+        "m-0 min-w-0 rounded-md bg-fill px-2.5 py-2 font-mono text-xs leading-[18px] whitespace-pre-wrap [overflow-wrap:anywhere]",
+        error ? "text-err" : "text-ink-2",
+        cap && "max-h-80 overflow-auto",
+        tone === "plus" && "shadow-[inset_2px_0_0_var(--plus)]",
+        tone === "minus" && "shadow-[inset_2px_0_0_var(--minus)]",
+      )}
+    >
+      {text}
+    </pre>
   );
 }
 
@@ -465,8 +584,9 @@ function ResultView({ r, session }: { r: Result; session: string }) {
   return <Clipped text={r.text} length={r.length} at={r.at} session={session} error={r.error} />;
 }
 
-/** Text the page may have only the start of (length: the whole's), with a key to bring the whole. */
-function Clipped({ text, length, at, session, error, prose }: { text: string; length?: number; at: string; session: string; error?: boolean; prose?: boolean }) {
+/** Text the page may have only the start of (length: the whole's), with a key to bring the whole.
+ *  fields: an input, shown field by field; cap: inline in the conversation, scrolled past 20 lines. */
+function Clipped({ text, length, at, session, error, prose, fields, cap }: { text: string; length?: number; at: string; session: string; error?: boolean; prose?: boolean; fields?: boolean; cap?: boolean }) {
   const [whole, setWhole] = useState<string>();
   const [state, setState] = useState<"idle" | "busy" | "failed">("idle");
   const more = () => {
@@ -479,11 +599,7 @@ function Clipped({ text, length, at, session, error, prose }: { text: string; le
   const shown = whole ?? text;
   return (
     <div className="grid min-w-0 gap-1">
-      {prose ? (
-        <Markdown text={shown} className="text-sm text-ink-2" />
-      ) : (
-        <pre className={cn("m-0 max-h-80 min-w-0 overflow-auto rounded-md bg-fill px-2.5 py-2 font-mono text-xs leading-[18px] whitespace-pre-wrap [overflow-wrap:anywhere]", error ? "text-err" : "text-ink-2")}>{pretty(shown)}</pre>
-      )}
+      {prose ? <Markdown text={shown} className="text-sm text-ink-2" /> : fields ? <Fields text={shown} /> : <Pre text={pretty(shown)} error={error} cap={cap} />}
       {length !== undefined && length > 0 && whole === undefined && (
         <button type="button" onClick={more} disabled={state === "busy"} className="g-press justify-self-start rounded-sm text-xs text-ink-3 underline decoration-ink-4 underline-offset-2 hover:text-ink">
           {state === "busy" ? <LoaderCircle size={12} className="inline animate-spin" /> : t("msg.whole", { n: length })}

@@ -7,10 +7,11 @@ import { useMe, useUpdate } from "./data";
 import { t } from "./i18n";
 import { errText, toast } from "./toast";
 import { Tip } from "./ui";
+import { expectUpgrade } from "./upgrade";
 
 /** A newer release found (the daemon looks by itself): 更新, left of the settings key, for those who
- *  may update (the user, 2026-11-06). Pressed, the daemon puts it in place and restarts; downloading
- *  still, it says how far. */
+ *  may update (the user, 2026-11-06). Pressed, the daemon puts it in place and restarts, and the page
+ *  loads the new build; downloading still, it says how far. */
 export function UpdateKey() {
   const u = useUpdate().data;
   const me = useMe().data;
@@ -20,9 +21,10 @@ export function UpdateKey() {
   const going = busy || u.phase === "restarting";
   const apply = () => {
     setBusy(true);
+    expectUpgrade();
     void api.applyUpdate().then(
-      () => (setBusy(false), toast(t("settings.updating"))),
-      (e) => (setBusy(false), toast(t("err.update"), { error: true, description: errText(e) })),
+      () => setBusy(false),
+      (e) => (setBusy(false), expectUpgrade(false), toast(t("err.update"), { error: true, description: errText(e) })),
     );
   };
   return (

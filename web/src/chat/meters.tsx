@@ -5,8 +5,8 @@
 // one over another (the user, 2026-11-06); the popovers still say them.
 import { Menu } from "@base-ui/react/menu";
 import { Popover } from "@base-ui/react/popover";
-import { Check, ChevronDown, Workflow } from "lucide-react";
-import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { Check, ChevronDown, ChevronRight, Workflow } from "lucide-react";
+import { useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import type { SessionState as LiveSession } from "../api/types.gen";
 import { api } from "../api/client";
 import type { Agent, AgentQuota, Context, ContextCategory, Model } from "../api/types.gen";
@@ -14,9 +14,10 @@ import { useAgent } from "../data";
 import { t, useLang } from "../i18n";
 import { useContextState, useQuota } from "../store";
 import { errText, toast } from "../toast";
-import { ago, cn, PHONE, PopSurface, Tip, useMedia, useMinute } from "../ui";
+import { ago, cn, PHONE, PopSurface, Tip, useLongPress, useMedia, useMinute } from "../ui";
 import { EffortSlider, levelName } from "./effort";
 import { modeName } from "../modes";
+import { openUsage } from "../route";
 import { quotaKey, windowFor, windowName } from "../quota";
 
 const k = (n: number) => (n >= 100_000 ? `${Math.round(n / 1000)}k` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`);
@@ -124,7 +125,10 @@ const quotaTone = (pct: number) => (pct >= 95 ? ["bg-err", "text-err"] : pct >= 
 
 /** The agent's quota bars, after the model key in the row under the composer; clicked, each window
  *  in a popover as Claude Code's /usage: its name, a wide bar, the percent and when it resets
- *  (the user, 2026-11-06). /usage in the composer opens it too, with nothing read yet as well. */
+ *  (the user, 2026-11-06), no heading nor account over them (the user, 2026-11-08: "用量" is the
+ *  usage page's). /usage in the composer opens it too, with nothing read yet as well. Held down,
+ *  or right-clicked, the bars open the usage instead (the user, 2026-11-08); the popover's foot
+ *  has a key to it too, as a hold is not seen. */
 /** using: what the session names the model it uses (chat.tsx): a window of one model shows only
  *  where that model is in use. */
 export function QuotaBars({ agent, live, using, open, onOpenChange }: { agent: Agent; live: boolean; using: (string | undefined)[]; open?: boolean; onOpenChange?: (o: boolean) => void }) {
@@ -132,30 +136,43 @@ export function QuotaBars({ agent, live, using, open, onOpenChange }: { agent: A
   const phone = useMedia(PHONE);
   useMinute(); // "read 5 min ago" and the fading, again each minute
   const quota = useQuota();
+  // Held down (a finger), or the right button: the usage, at the bars (the user, 2026-11-08).
+  const key = useRef<HTMLButtonElement>(null);
+  const toUsage = (at?: { x: number; y: number }) => {
+    const b = key.current?.getBoundingClientRect();
+    onOpenChange?.(false);
+    openUsage(at ?? (b && { x: b.left, y: b.top - 8 }));
+  };
+  const lp = useLongPress(() => toUsage());
+  const hold = { ...lp, onContextMenu: (e: MouseEvent) => (e.preventDefault(), toUsage({ x: e.clientX, y: e.clientY })) };
   const q: AgentQuota | undefined = quota?.agents.filter((a) => a.agent === agent).sort((a, b) => b.at - a.at)[0];
   const windows = (q?.windows ?? []).filter((w) => windowFor(w, using)); // all shown: no setting hides one (the user, 2026-11-06)
-  if (!q || !windows.length)
+  // dsh has no windows but money: its balance where the bars would be (the user, 2026-11-08).
+  const balance = q?.balance ?? [];
+  if (!q || (!windows.length && !balance.length))
     // No bars, but /usage still opens the popover, from where they would be.
     return (
       <Popover.Root open={open} onOpenChange={onOpenChange}>
         <Popover.Trigger nativeButton={false} render={<span aria-hidden className="h-7 w-0 shrink-0 pointer-coarse:h-9" />} />
         <PopSurface side="top" align="start" className="w-[min(300px,calc(100vw-16px))] p-3.5">
-          <span className="text-sm font-semibold">{t("quota.title")}</span>
-          <p className="m-0 mt-2 text-sm text-ink-3">{t("quota.none")}</p>
+          <p className="m-0 text-sm text-ink-3">{t("quota.none")}</p>
         </PopSurface>
       </Popover.Root>
     );
   // Faded once no process of the agent runs (the daemon says, else this session), or read long ago.
   const idle = !(q.live ?? live);
   const stale = idle || Date.now() - q.at > STALE;
-  const label = `${t("quota.title")}: ${windows.map((w) => `${windowName(agent, w)} ${Math.round(w.percent)}%`).join(", ")}`;
+  const title = windows.length ? t("quota.title") : t("quota.balance");
+  const label = `${title}: ${[...windows.map((w) => `${windowName(agent, w)} ${Math.round(w.percent)}%`), ...balance.map((b) => money(b.currency, b.total))].join(", ")}`;
   return (
     <Popover.Root open={open} onOpenChange={onOpenChange}>
-      <Tip label={t("quota.title")}>
+      <Tip label={title}>
         <Popover.Trigger
           render={
-            <button type="button" aria-label={label} className="g-press flex h-7 shrink-0 items-center rounded-md px-1.5 hover:bg-fill data-popup-open:bg-fill pointer-coarse:h-9">
-              {phone ? (
+            <button ref={key} type="button" aria-label={label} {...hold} className="g-press flex h-7 shrink-0 items-center rounded-md px-1.5 select-none hover:bg-fill data-popup-open:bg-fill pointer-coarse:h-9 [-webkit-touch-callout:none]">
+              {!windows.length ? (
+                <span className={cn("text-xs text-ink-3 tabular-nums transition-opacity", stale && "opacity-50")}>{balance.map((b) => money(b.currency, b.total)).join(" · ")}</span>
+              ) : phone ? (
                 <span className={cn("flex w-9 flex-col gap-[3px] transition-opacity", stale && "opacity-50")}>
                   {windows.map((w) => {
                     const pct = Math.round(w.percent);
@@ -188,11 +205,20 @@ export function QuotaBars({ agent, live, using, open, onOpenChange }: { agent: A
         />
       </Tip>
       <PopSurface side="top" align="start" className="w-[min(300px,calc(100vw-16px))] p-3.5">
-        <div className="flex items-baseline justify-between gap-3">
-          <span className="text-sm font-semibold">{t("quota.title")}</span>
-          {q.account && <span className="min-w-0 truncate text-xs text-ink-3">{q.account}</span>}
-        </div>
-        <ul className="m-0 mt-3 grid list-none gap-3 p-0">
+        {balance.length > 0 && (
+          <ul className={cn("m-0 grid list-none gap-2 p-0", windows.length > 0 && "mb-3")}>
+            {balance.map((b) => (
+              <li key={b.currency} className="grid gap-0.5">
+                <div className="flex items-baseline justify-between gap-3 text-sm">
+                  <span className="min-w-0 truncate text-ink-2">{t("quota.balance")}</span>
+                  <span className="text-base font-semibold tabular-nums">{money(b.currency, b.total)}</span>
+                </div>
+                <span className="text-xs text-ink-3 tabular-nums">{t("quota.balanceParts", { paid: money(b.currency, b.toppedUp), given: money(b.currency, b.granted) })}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+        <ul className="m-0 grid list-none gap-3 p-0">
           {windows.map((w) => {
             const pct = Math.round(w.percent);
             const [fill, text] = quotaTone(pct);
@@ -212,14 +238,29 @@ export function QuotaBars({ agent, live, using, open, onOpenChange }: { agent: A
             );
           })}
         </ul>
-        <p className={cn("m-0 mt-3 text-xs", stale ? "text-ink-4" : "text-ink-3")}>
-          {t("quota.read", { ago: ago(q.at) })}
-          {idle && ` · ${t("quota.idle")}`}
-        </p>
+        <div className="mt-3 flex items-center gap-3">
+          <p className={cn("m-0 min-w-0 flex-1 text-xs", stale ? "text-ink-4" : "text-ink-3")}>
+            {t("quota.read", { ago: ago(q.at) })}
+            {idle && ` · ${t("quota.idle")}`}
+          </p>
+          <button type="button" onClick={(e) => toUsage({ x: e.clientX, y: e.clientY })} className="g-press -my-1 -mr-1.5 flex shrink-0 items-center gap-0.5 rounded-md px-1.5 py-1 text-xs text-ink-2 hover:bg-fill hover:text-ink">
+            {t("quota.stats")}
+            <ChevronRight size={12} />
+          </button>
+        </div>
       </PopSurface>
     </Popover.Root>
   );
 }
+
+/** An amount in its currency: ¥9.83, $1.20. */
+const money = (currency: string, n: number) => {
+  try {
+    return n.toLocaleString(document.documentElement.lang || undefined, { style: "currency", currency, currencyDisplay: "narrowSymbol" });
+  } catch {
+    return `${n.toFixed(2)} ${currency}`;
+  }
+};
 
 /** An agent's approval modes, in the order the key cycles them: as GET /api/agents lists them, else
  *  Claude's own. */

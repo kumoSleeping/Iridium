@@ -7,6 +7,7 @@
 package session
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/json"
@@ -60,6 +61,11 @@ var langNames = map[string]string{"zh": "Chinese", "en": "English"}
 // directories, ~/.claude/sessions/, /proc). Another package implements it.
 type Discovery interface {
 	Sessions(ctx context.Context) ([]api.Session, error)
+}
+
+// grouper is a Discovery that puts a new session in its folder's group at once (discover.Index).
+type grouper interface {
+	GroupFor(cwd string, prefer int64) int64
 }
 
 type Options struct {
@@ -266,6 +272,10 @@ func (m *Manager) create(ctx context.Context, req api.NewSession, from, name str
 	if !ok {
 		return "", fmt.Errorf("agent %s is not supported yet", req.Agent)
 	}
+	// Not installed: say so at once, not after the wait for an agent updating itself (start).
+	if m.Missing(req.Agent) {
+		return "", fmt.Errorf("%w: %s (%s is not on PATH)", ErrNotInstalled, info.Name, m.program(req.Agent))
+	}
 	if req.Mode != "" && !slices.Contains(info.Modes, req.Mode) {
 		return "", fmt.Errorf("%s has no approval mode %q (%s)", info.Name, req.Mode, strings.Join(info.Modes, ", "))
 	}
@@ -317,8 +327,8 @@ func (m *Manager) create(ctx context.Context, req api.NewSession, from, name str
 		if err := m.o.Store.Move(mt.ID, req.Workspace); err != nil {
 			return mt.ID, err
 		}
-	} else if req.Caller != "" {
-		m.intoCallers(mt.ID, req.Caller)
+	} else {
+		m.intoGroup(mt.ID, mt.Cwd, req.Caller)
 	}
 	if err := h.start(ctx); err != nil {
 		return mt.ID, err
@@ -550,6 +560,20 @@ func (m *Manager) reap() {
 			}
 		}
 	}
+}
+
+// ErrNotInstalled: a new session's agent program is not there.
+var ErrNotInstalled = errors.New("agent not installed")
+
+// program is the program agent a runs: the config's, else its own name.
+func (m *Manager) program(a api.Agent) string {
+	return cmp.Or(m.o.Config.Programs[string(a)], string(a))
+}
+
+// Missing: agent a's program is not on the agents' PATH.
+func (m *Manager) Missing(a api.Agent) bool {
+	_, err := agent.LookPath(m.program(a), m.agentEnv())
+	return err != nil
 }
 
 // agentEnv is what agents start from: the daemon's environment, with the config's PATH and,

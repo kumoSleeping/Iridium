@@ -92,6 +92,12 @@ type Driver interface {
 	State() State
 }
 
+// Balancer is a driver whose account has money rather than quota windows (dsh: the DeepSeek
+// account's balance).
+type Balancer interface {
+	Balance(ctx context.Context) ([]api.Balance, error)
+}
+
 // Event is what a driver reports, through the emit func it was made with. Emit is never called
 // with the driver's lock held, but must not block for long.
 type Event interface{ event() }

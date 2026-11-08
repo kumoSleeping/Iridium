@@ -74,6 +74,11 @@ export function Stick({ tail, older, place, style, children, scroller, bottom }:
     pad.current = padOf(el);
     if (!atEnd.current) return;
     const by = pin(el);
+    // A fold opened or shut by a press: only what is above it goes, up or down, gliding; what is
+    // below it (a message sent, the turn's row) stays where it was (the user, 2026-11-08).
+    const toggled = toggledAt.current && performance.now() - toggledAt.current.t < 400 ? toggledAt.current.el : null;
+    toggledAt.current = null;
+    if (toggled && col && by && anim.current?.playState !== "running") return glideAbove(el, col, toggled, by);
     // Not the first page coming into an empty chat: that is drawn in place, at the newest.
     const want = was > 0 && !paging.current ? height.current - was + pad.current - padWas : 0;
     glide(want > 0 ? Math.min(want, Math.max(0, by)) : Math.max(want, Math.min(0, by)), settling);
@@ -97,6 +102,20 @@ export function Stick({ tail, older, place, style, children, scroller, bottom }:
     anim.current = Math.abs(from) < 0.5 ? null : col.animate([{ transform: `translateY(${from}px)` }, { transform: "none" }], { duration: motion.dur(3), easing: motion.ease("out") });
   };
 
+  /** The fold pressed last, and when: the next growth is its. */
+  const toggledAt = useRef<{ el: Element; t: number } | null>(null);
+  /** The blocks from the top down to the one holding at, those in sight, drawn where they were
+   *  (by px lower) and gliding to their place; the rest left still. */
+  const glideAbove = (el: HTMLElement, col: HTMLElement, at: Element, by: number) => {
+    if (reduced() || document.hidden) return;
+    const top = el.scrollTop - Math.abs(by);
+    const end = el.scrollTop + el.clientHeight + Math.abs(by);
+    for (const c of col.children as HTMLCollectionOf<HTMLElement>) {
+      if (c.offsetTop + c.offsetHeight > top && c.offsetTop < end) c.animate([{ transform: `translateY(${by}px)` }, { transform: "none" }], { duration: motion.dur(3), easing: motion.ease("out") });
+      if (c.contains(at)) break;
+    }
+  };
+
   const back = async () => {
     const el = list.current;
     if (!el || paging.current) return;
@@ -117,9 +136,12 @@ export function Stick({ tail, older, place, style, children, scroller, bottom }:
     const first = drawn.current === undefined;
     const was = drawn.current;
     drawn.current = tail;
+    // Only as the conversation grew: a draw that changed nothing in it (the page around it drawn
+    // again) forces no layout of the whole page; what grows without it the observer below sees.
+    if (!first && was === tail) return;
     if (first && place.top !== null) el.scrollTop = place.top;
-    else if (first || atEnd.current) follow(el, was !== tail);
-    else if (was !== tail) setFresh(true);
+    else if (first || atEnd.current) follow(el, true);
+    else setFresh(true);
     void back().catch(() => {});
   });
 
@@ -160,7 +182,10 @@ export function Stick({ tail, older, place, style, children, scroller, bottom }:
       {/* A scrollbar that takes room (not an overlay one) has its width kept on the left too: the
           conversation stays centred in the pane, in line with the composer and the top bar under
           and over it, not off to the left by half a scrollbar (the user, 2026-11-06). */}
-      <div ref={list} role="log" aria-label={t("chat.log")} onScroll={scrolled} className="absolute inset-0 overflow-y-auto [overflow-anchor:none] [scrollbar-gutter:stable_both-edges]" style={style}>
+      <div ref={list} role="log" aria-label={t("chat.log")} onScroll={scrolled} onClickCapture={(e) => {
+          const fold = (e.target as Element).closest?.("summary")?.parentElement;
+          if (fold) toggledAt.current = { el: fold, t: performance.now() };
+        }} className="absolute inset-0 overflow-y-auto [overflow-anchor:none] [scrollbar-gutter:stable_both-edges]" style={style}>
         {children}
       </div>
       {fresh && (

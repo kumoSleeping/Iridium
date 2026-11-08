@@ -67,6 +67,19 @@ function leave() {
 }
 
 export const route = () => current;
+
+/** Where the usage panel was asked for: a point, the panel's left edge on it, or its right (end). */
+export type At = { x: number; y: number; end?: boolean };
+let usageAt: At | null = null;
+export const usagePoint = () => usageAt;
+/** The usage: with the sidebar shown a panel at the point it was asked from, as a row's menu
+ *  (app.tsx, the user, 2026-11-08); on a phone the sheet's 用量 page. Asked twice (a long press,
+ *  then its contextmenu): once. */
+export function openUsage(at?: At) {
+  if (current.name === "usage") return;
+  usageAt = at ?? null;
+  go({ name: "usage" }, over(current));
+}
 /** The settings and the terminals: a dialog over the chat, not a page of their own. */
 export const over = (r: Route) => r.name === "settings" || r.name === "terminals" || r.name === "secrets" || r.name === "usage";
 export const useRoute = () =>

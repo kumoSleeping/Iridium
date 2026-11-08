@@ -11,10 +11,14 @@ import (
 	"github.com/kumoSleeping/iridium/internal/store"
 )
 
-// classify puts each session shown for the first time in a workspace, once: its launcher's;
-// else the one holding a session of its folder or of the nearest folder above it, or whose own
-// folder that is; else none. Hidden ones (the archive) wait for their first activity. Oldest
-// first, so a launcher seen in the same look is put somewhere before the sessions it started.
+// classify puts each session shown for the first time in a folder group (a workspace; the
+// user, 2026-11-08: a group is only a folder), once: its launcher's, if the group's folder holds
+// it or it is the launcher's subagent; else the group of the deepest folder holding it; else a new group of its own folder. The
+// home folder and / hold only sessions right in them, so one session there does not swallow every
+// project. Hidden ones (the archive) wait for their first activity. Oldest first, so a launcher
+// seen in the same look is put somewhere before the sessions it started. A session in none
+// (made before groups were folders, or its group deleted) is put in one too, unless you moved it
+// there.
 func (x *Index) classify() {
 	assigned, err := x.o.Store.Assignments()
 	if err != nil {
@@ -34,63 +38,118 @@ func (x *Index) classify() {
 	}
 	type fresh struct {
 		id, cwd, launcher string
+		sub               bool
 		at                time.Time
 	}
 	var news []fresh
-	cwds := map[string]string{}
 	x.mu.Lock()
 	for id, e := range x.entries {
-		cwds[id] = e.cwd
-		if _, ok := assigned[id]; !ok && vis.Shown(string(e.agent), id) {
-			news = append(news, fresh{id, e.cwd, x.launcherOf(e), e.mtime})
+		a, ok := assigned[id]
+		if (!ok || a.Workspace == 0 && !a.Manual) && e.cwd != "" && vis.Shown(string(e.agent), id) {
+			news = append(news, fresh{id, e.cwd, x.launcherOf(e), e.sub, e.mtime})
 		}
 	}
 	x.mu.Unlock()
 	slices.SortFunc(news, func(a, b fresh) int { return a.at.Compare(b.at) })
 	for _, n := range news {
 		ws := int64(0)
-		if a, ok := assigned[n.launcher]; ok && n.launcher != "" {
+		// A subagent goes with its parent wherever it works.
+		if a, ok := assigned[n.launcher]; ok && n.launcher != "" && a.Workspace != 0 && (n.sub || x.holds(roots[a.Workspace], n.cwd)) {
 			ws = a.Workspace
 		}
 		if ws == 0 {
-			ws = nearest(n.cwd, cwds, assigned, roots)
+			ws = x.groupOf(n.cwd, roots)
 		}
-		ok, err := x.o.Store.AssignIfNew(n.id, ws)
+		if ws == 0 {
+			w, err := x.groupFor(n.cwd)
+			if err != nil {
+				x.o.Logf("discover: a group for %s: %v", n.cwd, err)
+				continue
+			}
+			ws, roots[w.ID] = w.ID, w.Path
+		}
+		ok, err := x.o.Store.AssignAuto(n.id, ws)
 		if err != nil {
 			x.o.Logf("discover: %v", err)
 			return
 		}
 		if ok {
 			assigned[n.id] = store.Assignment{Workspace: ws}
-			if ws != 0 {
-				x.Changed(n.id)
-			}
+			x.Changed(n.id)
 		}
 	}
 }
 
-// nearest is the workspace of the session whose folder is cwd, or the nearest folder above it,
-// a workspace's own folder (roots) counting as one of its sessions'; 0 if none is in one.
-func nearest(cwd string, cwds map[string]string, assigned map[string]store.Assignment, roots map[int64]string) int64 {
-	if cwd == "" {
-		return 0
+// holds: a group of folder root holds a session in cwd. The home folder and / hold only their own.
+func (x *Index) holds(root, cwd string) bool {
+	if root == "" || cwd == "" {
+		return false
 	}
+	if root == "/" || root == x.o.Home {
+		return cwd == root
+	}
+	return within(cwd, root)
+}
+
+// groupOf is the group of the deepest folder holding cwd; 0 if none does.
+func (x *Index) groupOf(cwd string, roots map[int64]string) int64 {
 	best, depth := int64(0), -1
-	for id, c := range cwds {
-		a := assigned[id]
-		if a.Workspace == 0 || c == "" || !within(cwd, c) {
-			continue
-		}
-		if len(c) > depth {
-			best, depth = a.Workspace, len(c)
-		}
-	}
 	for ws, root := range roots {
-		if root != "" && within(cwd, root) && len(root) > depth {
+		if x.holds(root, cwd) && len(root) > depth {
 			best, depth = ws, len(root)
 		}
 	}
 	return best
+}
+
+// GroupFor is the group a session in cwd goes in as it is made (the session manager, before its
+// transcript is there): prefer (its caller's) if it holds cwd; else the deepest holding it; else a
+// new group of cwd. 0 if it cannot be had.
+func (x *Index) GroupFor(cwd string, prefer int64) int64 {
+	ws, err := x.o.Store.Workspaces()
+	if err != nil {
+		x.o.Logf("discover: %v", err)
+		return 0
+	}
+	roots := map[int64]string{}
+	for _, w := range ws {
+		roots[w.ID] = w.Path
+	}
+	if prefer != 0 && x.holds(roots[prefer], cwd) {
+		return prefer
+	}
+	if id := x.groupOf(cwd, roots); id != 0 {
+		return id
+	}
+	w, err := x.groupFor(cwd)
+	if err != nil {
+		x.o.Logf("discover: a group for %s: %v", cwd, err)
+		return 0
+	}
+	return w.ID
+}
+
+// groupFor makes the group of folder cwd, named as the folder; the one there if it is.
+func (x *Index) groupFor(cwd string) (store.Workspace, error) {
+	cwd = filepath.Clean(cwd)
+	id, err := x.o.Store.CreateWorkspace(oneLine(filepath.Base(cwd)), cwd)
+	if errors.Is(err, store.ErrWorkspacePath) {
+		ws, err := x.o.Store.Workspaces()
+		if err != nil {
+			return store.Workspace{}, err
+		}
+		for _, w := range ws {
+			if w.Path == cwd {
+				return w, nil
+			}
+		}
+		return store.Workspace{}, store.ErrWorkspacePath
+	}
+	if err != nil {
+		return store.Workspace{}, err
+	}
+	x.Changed()
+	return store.Workspace{ID: id, Name: filepath.Base(cwd), Path: cwd}, nil
 }
 
 // within: path is dir or below it.
@@ -113,20 +172,15 @@ func (x *Index) Workspaces() ([]api.Workspace, error) {
 	}
 	out := make([]api.Workspace, 0, len(ws))
 	for _, w := range ws {
-		out = append(out, api.Workspace{ID: w.ID, Name: w.Name, Path: w.Path, Creator: w.Creator})
+		out = append(out, api.Workspace{ID: w.ID, Name: w.Name, Path: w.Path})
 	}
 	return out, nil
 }
 
-// CreateWorkspace makes a workspace of folder path (absolute, checked by the caller); name ""
-// is the folder's name. It takes no session already classified: those shown from now on in its
-// folder go in it by the first-sight rule (classify), as the user decided (2026-11-05).
+// CreateWorkspace makes the group of folder path (absolute); name "" is the folder's name. It
+// takes no session already grouped. Sessions make their groups (classify, GroupFor); this is for
+// tests and a group made ahead.
 func (x *Index) CreateWorkspace(path, name string) (api.Workspace, error) {
-	return x.CreateWorkspaceBy(path, name, "")
-}
-
-// CreateWorkspaceBy is CreateWorkspace, made by terminal creator ("" not known).
-func (x *Index) CreateWorkspaceBy(path, name, creator string) (api.Workspace, error) {
 	path = filepath.Clean(path)
 	if name = oneLine(name); name == "" {
 		name = filepath.Base(path)
@@ -135,22 +189,8 @@ func (x *Index) CreateWorkspaceBy(path, name, creator string) (api.Workspace, er
 	if err != nil {
 		return api.Workspace{}, err
 	}
-	if creator != "" {
-		if err := x.o.Store.SetWorkspaceCreator(id, creator); err != nil {
-			return api.Workspace{}, err
-		}
-	}
 	x.Changed()
-	return api.Workspace{ID: id, Name: name, Path: path, Creator: creator}, nil
-}
-
-// ClaimWorkspaces gives creator the workspaces with none (made before it was kept).
-func (x *Index) ClaimWorkspaces(creator string) error {
-	n, err := x.o.Store.ClaimWorkspaces(creator)
-	if err == nil && n > 0 {
-		x.Changed()
-	}
-	return err
+	return api.Workspace{ID: id, Name: name, Path: path}, nil
 }
 
 func (x *Index) RenameWorkspace(id int64, name string) error {
@@ -164,7 +204,7 @@ func (x *Index) RenameWorkspace(id int64, name string) error {
 	return nil
 }
 
-// DeleteWorkspace drops a workspace; its sessions go to none (未归类).
+// DeleteWorkspace drops a group; its sessions are grouped again by their folders (classify).
 func (x *Index) DeleteWorkspace(id int64) error {
 	before, err := x.o.Store.Assignments()
 	if err != nil {

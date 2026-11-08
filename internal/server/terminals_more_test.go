@@ -76,7 +76,7 @@ func TestChatFilesAndAgents(t *testing.T) {
 	l.want(403, as, "GET", "/api/terminals", nil, nil)
 	l.want(403, as, "POST", "/api/terminals/tokens", api.NewInvite{Name: "x"}, nil)
 	l.want(200, as, "GET", "/api/files?path="+l.work, nil, nil)
-	l.want(403, as, "POST", "/api/workspaces", api.NewWorkspace{Path: l.work}, nil)
+	l.want(403, as, "PATCH", "/api/workspaces/1", api.WorkspacePatch{Name: "x"}, nil)
 	// One in a session 本机 opened stays 本机.
 	var mine api.NewSessionReply
 	l.want(200, "socket", "POST", "/api/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "mine"}, &mine)

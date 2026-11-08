@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kumoSleeping/iridium/internal/agent"
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/transcript"
 )
@@ -119,22 +120,37 @@ func (h *Hosted) refreshQuota() {
 	ctx, cancel := context.WithTimeout(h.m.ctx, 10*time.Second)
 	defer cancel()
 	if u, err := h.drv.Quota(ctx); err == nil && len(u.Windows) > 0 {
-		h.setQuota(u.Windows)
+		h.setQuota(u.Windows, nil)
 	}
+	h.refreshBalance(ctx)
 }
 
-func (h *Hosted) setQuota(w []api.QuotaWindow) {
+// refreshBalance reads the account's money, for a driver that has it (dsh); true if it did.
+func (h *Hosted) refreshBalance(ctx context.Context) bool {
+	b, ok := h.drv.(agent.Balancer)
+	if !ok {
+		return false
+	}
+	got, err := b.Balance(ctx)
+	if err != nil || len(got) == 0 {
+		return false
+	}
+	h.setQuota(nil, got)
+	return true
+}
+
+func (h *Hosted) setQuota(w []api.QuotaWindow, balance []api.Balance) {
 	h.mu.Lock()
 	account, plan := h.account, h.plan
 	h.mu.Unlock()
-	h.m.setQuota(h.meta.Agent, account, plan, w)
+	h.m.setQuota(h.meta.Agent, account, plan, w, balance)
 }
 
 func quotaKey(a api.Agent, account string) string { return string(a) + "\x00" + account }
 
-func (m *Manager) setQuota(a api.Agent, account, plan string, windows []api.QuotaWindow) {
+func (m *Manager) setQuota(a api.Agent, account, plan string, windows []api.QuotaWindow, balance []api.Balance) {
 	m.mu.Lock()
-	m.quota[quotaKey(a, account)] = api.AgentQuota{Agent: a, Account: account, Plan: plan, Windows: windows, At: time.Now().UnixMilli()}
+	m.quota[quotaKey(a, account)] = api.AgentQuota{Agent: a, Account: account, Plan: plan, Windows: windows, Balance: balance, At: time.Now().UnixMilli()}
 	saved := make([]api.AgentQuota, 0, len(m.quota))
 	for _, q := range m.quota {
 		saved = append(saved, q)

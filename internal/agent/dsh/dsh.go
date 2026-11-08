@@ -190,6 +190,7 @@ type Driver struct {
 	compact     bool // a compaction began while idle: it is the turn
 	queue       []agent.Event
 	unknown     map[string]int
+	env         []string // the agent's, as spawned: where Balance finds the key
 }
 
 func New(o Options) *Driver {
@@ -288,6 +289,9 @@ func (d *Driver) Spawn(o agent.SpawnOptions) (hold.Spec, error) {
 	d.session, d.mode = o.Session, mode
 	d.mu.Unlock()
 	env = agent.SetEnv(env, "IRIDIUM_SESSION", o.Session)
+	d.mu.Lock()
+	d.env = env
+	d.mu.Unlock()
 	return hold.Spec{Argv: []string{program, "--profile", "sdk", "--patch", path}, Env: env, Cwd: o.Cwd}, nil
 }
 

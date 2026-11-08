@@ -2,6 +2,7 @@
 // the new build only as it comes back in front, with nothing you would lose, once per build and
 // never twice within 10 s. The build is the HTML's first module script, whose name has its hash;
 // the served one is read from the HTML each time the stream opens.
+import { useSyncExternalStore } from "react";
 import { anyUnsent } from "./chats";
 import { posting, request } from "./api/client";
 import { opened } from "./stream";
@@ -44,6 +45,28 @@ export const entryOf = (html: string) => /<script[^>]*type="module"[^>]*src="([^
 const MINE = document.querySelector('script[type="module"][src]')?.getAttribute("src") ?? null;
 let served: string | null = null;
 let back = !document.hidden;
+/** An update pressed on this page: once the new build is served, load it without waiting for you
+ *  to come back. */
+let asked = false;
+const seen = new Set<() => void>();
+const tell = () => seen.forEach((f) => f());
+
+/** An update pressed here (settings, the update key): the new build is loaded as soon as it is
+ *  served, unless that would lose something. */
+export function expectUpgrade(on = true) {
+  asked = on;
+}
+
+/** Whether the daemon serves another build than this page's, as last read (kept while the stream
+ *  reopens, so the link dot does not flicker): the link dot offers 刷新. */
+let stale = false;
+export const useStale = () =>
+  useSyncExternalStore(
+    (f) => (seen.add(f), () => void seen.delete(f)),
+    () => stale,
+  );
+/** 刷新 pressed: load the served build now. */
+export const reloadServed = () => reload(served);
 
 /** What loading again would lose: a write going, a message that failed, words in a field (the
  *  composer's only while you type in it: its draft is kept), files attached, a popup open. */
@@ -54,7 +77,7 @@ function busy() {
 }
 function mayReload() {
   const last = lastReload();
-  if (last && reloadNow(MINE, served, { back, busy: busy() }, last, Date.now())) reload(served);
+  if (last && reloadNow(MINE, served, { back: back || asked, busy: busy() }, last, Date.now())) reload(served);
 }
 
 export function watchUpgrade() {
@@ -65,7 +88,7 @@ export function watchUpgrade() {
     served = null;
     void request("/", { cache: "no-cache" })
       .then((r) => (r.ok ? r.text() : ""))
-      .then((html) => ((served = entryOf(html)), mayReload()))
+      .then((html) => ((served = entryOf(html)), (stale = MINE !== null && served !== null && served !== MINE), tell(), mayReload()))
       .catch(() => {});
   });
   setInterval(mayReload, 1_000);

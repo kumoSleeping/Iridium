@@ -45,9 +45,18 @@ export const atLeft = (x: number) => x < innerWidth / 4;
  *  the window (searching, for the keyboard). from: where across the window a swipe up may begin to
  *  bring it, told to setOpen as it comes out; onPull: told as a swipe up begins to bring it, where. head: px from its top that are its head, where a swipe
  *  down or a hold may begin, if not HEAD (its grip and the tabs' line, pager.tsx). */
-export function Sheet({ open, setOpen, size, raised, name, head = 0, from: zone, onPull, label, onHeight, children }: { open: boolean; setOpen: (o: boolean, x?: number) => void; onPull?: (x: number) => void; size: "half" | "tall" | "full" | "fit"; raised?: boolean; name: string; head?: number; from: (x: number) => boolean; label: string; onHeight: (h: number) => void; children: ReactNode }) {
+export function Sheet({ open, setOpen, size: want, raised, name, head = 0, from: zone, onPull, label, onHeight, children }: { open: boolean; setOpen: (o: boolean, x?: number) => void; onPull?: (x: number) => void; size: "half" | "tall" | "full" | "fit"; raised?: boolean; name: string; head?: number; from: (x: number) => boolean; label: string; onHeight: (h: number) => void; children: ReactNode }) {
   const panel = useRef<HTMLDivElement>(null);
   const body = useRef<HTMLDivElement>(null);
+  // Going down, it keeps its size till it is down: a chat picked from the whole window's sheet put
+  // it away shrinking to half as it went, a second motion over the first (the user, 2026-11-08).
+  const [size, setSize] = useState(want);
+  if (open && size !== want) setSize(want);
+  useEffect(() => {
+    if (open || size === want) return;
+    const t = setTimeout(() => setSize(want), motion.dur(3) + 40);
+    return () => clearTimeout(t);
+  }, [open, want, size]);
   // While a finger drags it: how far it is out, 0..1; null when it is not dragged.
   const [drag, setDrag] = useState<number | null>(null);
   // As tall as it was left, a share of the window (0: its first height), and its px while sized.
@@ -86,7 +95,7 @@ export function Sheet({ open, setOpen, size, raised, name, head = 0, from: zone,
   const [sizing, setSizing] = useState(false);
   if (sizeIs !== sized) {
     setSized(sizeIs);
-    setSizing(live === null);
+    setSizing(live === null && open);
   }
   useEffect(() => {
     if (!sizing) return;

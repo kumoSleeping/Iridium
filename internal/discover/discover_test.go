@@ -413,8 +413,9 @@ func TestClassification(t *testing.T) {
 		t.Fatal("B, still hidden, classified")
 	}
 
-	// New sessions: one in /w/a/b/c (the nearest folder above is B's workspace's), one in /w
-	// (none above), one started by C's session wherever it is.
+	// New sessions: one in /w/a/b/c (the deepest group holding it is B's), one in /w (none holds
+	// it: a group of its own), one started by C's session outside C's folder (its own folder's
+	// group, not C's: a group is a folder).
 	newClaude := func(id, cwd string, at time.Time) {
 		dir := filepath.Join(r.home, ".claude", "projects", filepath.Base(cwd)+"-x")
 		os.MkdirAll(dir, 0o700)
@@ -436,11 +437,16 @@ func TestClassification(t *testing.T) {
 	if d, _ := r.assignment(idD); d.Workspace != wsB.ID || d.Manual {
 		t.Errorf("D in /w/a/b/c: %+v, want the nearest folder's workspace %d", d, wsB.ID)
 	}
-	if e, ok := r.assignment(idE); !ok || e.Workspace != 0 {
-		t.Errorf("E in /w: %+v %v, want none", e, ok)
+	groups, _ := r.x.Workspaces()
+	at := map[string]int64{}
+	for _, w := range groups {
+		at[w.Path] = w.ID
 	}
-	if f, _ := r.assignment(idF); f.Workspace != wsC.ID {
-		t.Errorf("F started by C: %+v, want C's workspace %d", f, wsC.ID)
+	if e, _ := r.assignment(idE); e.Workspace == 0 || e.Workspace != at["/w"] {
+		t.Errorf("E in /w: %+v, want a group of /w (%v)", e, at)
+	}
+	if f, _ := r.assignment(idF); f.Workspace == 0 || f.Workspace != at["/somewhere/else"] {
+		t.Errorf("F started by C elsewhere: %+v, want a group of its folder", f)
 	}
 
 	// Only once: with A moved to C's workspace, a later look leaves D where it went.
@@ -450,13 +456,19 @@ func TestClassification(t *testing.T) {
 	if d, _ := r.assignment(idD); d.Workspace != wsB.ID {
 		t.Errorf("D moved: %+v", d)
 	}
-	if ws, _ := r.x.Workspaces(); len(ws) != 3 {
+	if ws, _ := r.x.Workspaces(); len(ws) != 5 {
 		t.Errorf("workspaces: %+v", ws)
 	}
 	r.x.publishWorkspaces()
 	var carried []api.Workspace
 	json.Unmarshal(r.hub.Get("workspaces"), &carried)
-	if len(carried) != 3 || carried[1].Name != "B" || carried[1].Path != "/w/a/b" {
+	// By name and path, not place: the groups of /w and /somewhere/else are made in the order
+	// the scan meets E and F.
+	byPath := map[string]string{}
+	for _, w := range carried {
+		byPath[w.Path] = w.Name
+	}
+	if len(carried) != 5 || byPath["/w/a/b"] != "B" || byPath["/w"] != "w" || byPath["/somewhere/else"] != "else" {
 		t.Errorf("carried workspaces: %s", r.hub.Get("workspaces"))
 	}
 }
@@ -541,14 +553,15 @@ func TestMoveSticks(t *testing.T) {
 		t.Fatalf("A: %+v", a)
 	}
 	r.x.DeleteWorkspace(wsA.ID)
-	// Deleting a workspace leaves its sessions in none, and they are not classified again.
+	// Deleting a group: its sessions, moved there or not, are grouped again by their folders; one
+	// you moved to none stays there.
 	if err := r.x.DeleteWorkspace(wsC.ID); err != nil {
 		t.Fatal(err)
 	}
 	r.grow(idA)
 	r.x.Scan()
-	if a, ok := r.assignment(idA); !ok || a.Workspace != 0 {
-		t.Errorf("A after its workspace went: %+v %v", a, ok)
+	if a, ok := r.assignment(idA); !ok || a.Workspace == 0 || a.Workspace == wsC.ID || a.Manual {
+		t.Errorf("A after its group went: %+v %v", a, ok)
 	}
 	if b, _ := r.assignment(idB); b.Workspace != 0 {
 		t.Errorf("B: %+v", b)
@@ -692,6 +705,26 @@ func TestAgentOf(t *testing.T) {
 	} {
 		if got := agentOf(c.argv, c.exe); got != c.want {
 			t.Errorf("agentOf(%q, %q) = %q, want %q", c.argv, c.exe, got, c.want)
+		}
+	}
+}
+
+// A group of the home folder or of / holds only the sessions right in it; the deepest group
+// holding a folder is its group.
+func TestGroupOf(t *testing.T) {
+	x := &Index{o: Options{Home: "/home/u"}}
+	roots := map[int64]string{1: "/home/u", 2: "/", 3: "/home/u/kumo", 4: "/home/u/kumo/Iridium"}
+	for cwd, want := range map[string]int64{
+		"/home/u":                  1,
+		"/":                        2,
+		"/home/u/kumo":             3,
+		"/home/u/kumo/KVJ/app":     3,
+		"/home/u/kumo/Iridium/web": 4,
+		"/home/u/other":            0,
+		"/tmp":                     0,
+	} {
+		if got := x.groupOf(cwd, roots); got != want {
+			t.Errorf("%s: %d, want %d", cwd, got, want)
 		}
 	}
 }

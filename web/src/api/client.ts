@@ -24,7 +24,6 @@ import type {
   NewSession,
   NewSessionReply,
   NewUpload,
-  NewWorkspace,
   Release,
   PushEvents,
   PushRule,
@@ -171,9 +170,7 @@ export const api = {
 
   // --- workspaces, folders, the session overlay ---
   workspaces: () => get<Workspace[]>("/api/workspaces"),
-  createWorkspace: (w: NewWorkspace) => write<Workspace>("POST", "/api/workspaces", w),
   patchWorkspace: (id: number, p: WorkspacePatch) => writeAgain<{ ok: boolean }>("PATCH", `/api/workspaces/${id}`, p),
-  deleteWorkspace: (id: number) => write<{ ok: boolean }>("DELETE", `/api/workspaces/${id}`),
   folders: (path: string) => get<Folders>(`/api/folders?path=${enc(path)}`),
   mkdir: (f: NewFolder) => write<FolderReply>("POST", "/api/folders", f),
   patch: (id: string, p: SessionPatch) => writeAgain<{ ok: boolean }>("PATCH", S(id), p),
@@ -238,8 +235,8 @@ export const api = {
   invite: (name: string, owner?: boolean) => write<Invite>("POST", "/api/terminals/invites", { ...(name ? { name } : {}), ...(owner ? { owner } : {}) } satisfies NewInvite),
   token: (name: string, owner?: boolean) => write<Token>("POST", "/api/terminals/tokens", { name, ...(owner ? { owner } : {}) } satisfies NewInvite),
   revoke: (id: string) => write<{ ok: boolean }>("DELETE", `/api/terminals/${enc(id)}`),
-  /** GET /api/usage: the last days' tokens by day, terminal, agent and model; terminal: one only. */
-  usage: (days: number, terminal?: string) => get<Usage>(`/api/usage?days=${days}${terminal ? `&terminal=${enc(terminal)}` : ""}`),
+  /** GET /api/usage: the last days' tokens by day, terminal, agent and model; terminal: one only; by hour: the last 24 hours'. */
+  usage: (days: number, terminal?: string, by?: "hour") => get<Usage>(`/api/usage?days=${days}${terminal ? `&terminal=${enc(terminal)}` : ""}${by ? `&by=${by}` : ""}`),
   confirms: () => get<Confirms>("/api/confirms"),
   /** extra: a secret-set's value, a secret-use's "this session". */
   answerConfirm: (id: string, allow: boolean, extra?: Omit<ConfirmAnswer, "allow">) => write<ConfirmReply>("POST", `/api/confirms/${enc(id)}`, { allow, ...extra } satisfies ConfirmAnswer),

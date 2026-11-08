@@ -26,7 +26,7 @@
 | `POST /api/sessions/{id}/answer` | `Answer` → `{ok}` | 回答提问：审批 `allow`（不许时可带 `message`；`always` 见“会话设置”）；选择题 `answers`（问题原文 → 选项 `label`）；计划确认 `allow` |
 | `POST /api/sessions/{id}/release` | `Release{toolUseId, dismiss?}` → `{ok}` | 放行 Claude auto 模式拦下的一步（见“放行”）；`dismiss` 只拿掉它的卡。Claude 会话要有 Claude，agent 调用一律 403 |
 | `GET /api/events?sub=…` | SSE | 见下。不带 `sub`：插件的事件流，见“插件” |
-| `GET /api/agents` | → `AgentInfo[]` | 能开的 agent：审批模式（`modes`、`defaultMode`、`modeSwitch`：now / next turn / restart）、有没有上下文分项、有没有额度窗口、能不能开 ultracode（`ultracode`） |
+| `GET /api/agents` | → `AgentInfo[]` | 能开的 agent：审批模式（`modes`、`defaultMode`、`modeSwitch`：now / next turn / restart）、有没有上下文分项、有没有额度窗口、能不能开 ultracode（`ultracode`）、程序装没装（`missing`：PATH 上找不到；这时 `POST /api/sessions` 立刻 400，不等 agent 自更新那 30 秒，网页把它画淡，点了只提示未安装） |
 | `GET /api/health` | → `{ok}` | |
 | `GET /api/settings` | → `Settings` | 设置的配置项：空闲回收、崩溃续跑、额度续跑（这三项设置页不放，只改配置文件或经接口）、隐藏的额度条、各 agent 新会话的审批模式、推送总开关。管理权 |
 | `PUT /api/settings` | `SettingsPatch` → `Settings` | 只改给了的项，写进配置文件，马上生效。面板权 |
@@ -94,12 +94,12 @@
 
 `idle` 无灯，`starting` 启动中，`running` 运行中，`compacting` 压缩中，`waiting` 需要你（有提问），`error` 上次进程出错退出（原因在 `SessionState.error`），`elsewhere` 在别处运行（只读）。`live` 说 agent 进程在不在跑。
 
-## 工作区和目录（自动发现）
+## 文件夹组和目录（自动发现）
 
 会话列表以磁盘为准（`internal/discover`），启动时建索引放内存，inotify 加定时扫（目录每分钟、`/proc` 每 3 秒）跟上：
 
 - 来源：Claude `~/.claude/projects/<目录>/<id>.jsonl`；Codex `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-*.jsonl`（标题用 `session_index.jsonl` 的线程名）；pi `~/.pi/agent/sessions/*/*.jsonl`（标题用最后一个 `session_info` 名字）；dsh `~/.dsh/sessions/--<键>--/<id>/session.v<N>.jsonl.zstd`（现在只看路径和时间，目录由键反推）。标题、最近一句话只读文件开头 8MB 和末尾 4MB。
-- 子代理也列（用户定的，2026-11-06）：`subagent: true`，`parent` 是父会话（托管的 Codex 换成 Iridium 的 ID），`launcher` 同 `parent`，所以归父会话的工作区。只读：发消息回 409，只有父会话能和它说话。
+- 子代理也列（用户定的，2026-11-06）：`subagent: true`，`parent` 是父会话（托管的 Codex 换成 Iridium 的 ID），`launcher` 同 `parent`，所以归父会话的组。只读：发消息回 409，只有父会话能和它说话。
   - Claude：Agent 工具的子任务 `<目录>/<id>/subagents/agent-<agentId>.jsonl`（旧版是 `<目录>/agent-*.jsonl`），Workflow 跑出来的 agent 在 `<目录>/<id>/subagents/workflows/<runId>/agent-<agentId>.jsonl`（旁边的 `journal.jsonl` 不算会话），会话 ID 就是文件名 `agent-<agentId>`；首行 `isSidechain` 的 `sessionId` 是父会话；标题用旁边 `.meta.json` 的 `description`，没有就用任务的开头。
   - Codex：`session_meta.source.subagent.thread_spawn` 的 `parent_thread_id` 是父线程，标题用 `agent_path`（没有就 `agent_nickname`）。
 - 在跑的：`~/.claude/sessions/<pid>.json`（核对 `procStart`），`/proc` 里本人的 codex、pi、dsh 进程（打开的记录文件或锁、命令行；pi 用工作目录里进程起来后最新写的那份）。环境变量只读本人进程的，只取下面几个，不记日志。
@@ -109,16 +109,14 @@
   - 没标记的就是归档：`Session.archived` 为 `true`，页面放在底部折叠的“归档”里，能搜。第一次启动时磁盘上已有、之后没动过的都在这里。
   - 归档（`PATCH archived: true`）：去掉标记，记下记录当时的长度；之后长过这个长度（有了新活动）就自动回来。托管的另外像空闲回收那样停掉 agent；它退出时写的不算活动（退出后重记长度）。恢复（`archived: false`）：设上标记。没有按时间自动归档。
   - 旧版的归档标记迁移成“没标记”。
-- 首次归类一次（库里记下，以后不再动），在会话第一次显示时（第一次活动）做，不给归档里的做：拉起者的工作区 → 同目录或最近上层目录已有会话所在的工作区，工作区自己的目录也算 → 未归类（`workspace` 为 0）。手动移过的永远不再自动动。新建工作区不收已有的会话：之后在那个目录里显示的按这条规则进它。
+- 归组（2026-11-08：组就是文件夹，`Workspace` 是组，不能手建）：会话第一次显示时（第一次活动）做一次，记在库里，不给归档里的做：拉起者的组（组的文件夹包含它的目录时；子代理总跟父会话）→ 包含它目录的最深的组 → 用它的目录新建一个组。家目录和 `/` 的组只收正好在那里的会话。在未归类（`workspace` 为 0）且不是你手动放过去的也再归一次；只有没目录的留在 0。`POST /api/sessions` 开的托管会话当场归组，不等记录出现。手动移过的（`PATCH workspace`）不再自动动。
 - 状态：`hosted` 托管；`elsewhere` 在别处运行，只读（能看状态和消息页，发消息回 409）；其余是磁盘上空闲的。别处退出后，发消息就接成托管会话（`--resume`），前提是没有别的进程在用（Claude：`sessions/` 里没有活着的同 ID 进程；dsh：`session.lock` 能拿到 flock；Codex：写锁）。现在只能接 Claude 的。
 - 列表变了（新会话、记录长了、进程起停、改了覆盖层）攒 200ms 发一次 `list` 整份，变了的会话另发 `session:<id>`。
 
 | 请求 | 正文 → 回答 | 说明 |
 |---|---|---|
-| `GET /api/workspaces` | → `Workspace[]` | 和事件流 `workspaces` 同一份 |
-| `POST /api/workspaces` | `NewWorkspace` → `Workspace` | 用一个文件夹建（要在选择器能去的范围里）；`name` 不给就用文件夹名。同一文件夹已有工作区回 409。记下调用的终端为 `creator` |
+| `GET /api/workspaces` | → `Workspace[]` | 文件夹组，和事件流 `workspaces` 同一份（没有会话的也在，页面不列） |
 | `PATCH /api/workspaces/{id}` | `{name}` → `{ok}` | 改名 |
-| `DELETE /api/workspaces/{id}` | → `{ok}` | 删掉；里面的会话变成未归类 |
 | `PUT /api/colors` | `FolderColor` → `{ok}` | 给文件夹打颜色标签（`red`、`orange`、`yellow`、`green`、`blue`、`purple`），`color` 为空就去掉；事件流 `colors`（只给面板）是全部。会话的标签用 `PATCH /api/sessions/{id}` 的 `color` |
 | `PATCH /api/sessions/{id}` | `SessionPatch` → `{ok}` | 只改覆盖层，不碰 agent 的文件：`name`（空串去掉）、`pinned`、`archived`（归档或恢复，见上面的显示标记）、`workspace`（移动，0 为未归类；移过就不再自动归类） |
 | `GET /api/folders?path=` | → `Folders` | 选择器：只列文件夹，不列隐藏的，按名字排；`path` 为空或 `~` 是家目录。`parent` 为空表示到顶了 |
@@ -215,7 +213,7 @@
 
 ## 设置
 
-`GET /api/settings` 给 `Settings`：`idleReap`（`"1h"`、`"15m"`，`"0"` 是不回收）、`crashResume`、`quotaResume`、`quotaHidden`（隐藏的额度条，`<agent>:<账号>:<窗口>:<模型>`）、`modes`（agent → 新会话的审批模式，没列的用 agent 自己的）、`push`（推送总开关，和 `PUT /api/push` 是同一个）、`enterInTurn`（回合在跑时网页回车做什么：`steer` 插话，默认；`queue` 排队）、`updateAuto`（自动下载更新，默认开；存成配置 `update.manual` 的反面）、`lang`（用户的语言 `zh`/`en`，网页设置里选的；`""` 是还没告诉过，网页发现是空的就报自己的；托管 agent 下次启动时写进系统提示）。
+`GET /api/settings` 给 `Settings`：`idleReap`（`"1h"`、`"15m"`，`"0"` 是不回收）、`crashResume`、`quotaResume`、`quotaHidden`（隐藏的额度条，`<agent>:<账号>:<窗口>:<模型>`）、`modes`（agent → 新会话的审批模式，没列的用 agent 自己的）、`push`（推送总开关，和 `PUT /api/push` 是同一个）、`enterInTurn`（回合在跑时网页回车做什么：`steer` 插话，默认；`queue` 排队）、`lang`（用户的语言 `zh`/`en`，网页设置里选的；`""` 是还没告诉过，网页发现是空的就报自己的；托管 agent 下次启动时写进系统提示）。
 
 - `PUT /api/settings` 带 `SettingsPatch`，只改给了的项；`modes` 里给 `""` 是去掉那个 agent 的。时长不对、agent 没有这个模式回 400。
 - 先读配置文件，只改这几项再写回（文件里别的照旧），同时改内存：空闲回收、续跑开关下次判断时就用新的，审批模式从下一次拉起起。
@@ -377,11 +375,11 @@ agent 调 `ir invite`、`ir token` 时，邀请链接和 TOKEN 不能进它的�
 
 | 请求 | 正文 → 回答 | 说明 |
 |---|---|---|
-| `GET /api/update` | → `UpdateState` | 现在的版本、最新版本和说明、`size`（下载多大）、`available`、`auto`（自动下载）、`ready`（已下好）、`phase`（`idle`、`checking`、`downloading`（`got` 是下了多少）、`restarting`、`failed`）。事件流 `update` 是同一份 |
-| `POST /api/update/check` | → `UpdateState` | 马上查一次；`auto` 开着、有新版就在后台下好 |
+| `GET /api/update` | → `UpdateState` | 现在的版本、最新版本和说明、`size`（下载多大）、`available`、`auto`（查到新版就在后台下好：Release 版是，源码编译的不是）、`ready`（已下好）、`phase`（`idle`、`checking`、`downloading`（`got` 是下了多少）、`restarting`、`failed`）。事件流 `update` 是同一份 |
+| `POST /api/update/check` | → `UpdateState` | 马上查一次；`auto` 时有新版就在后台下好 |
 | `POST /api/update` | `ApplyUpdate` → `UpdateState` | `ir update`、设置里的“更新”：用下好的，没有就现在下（核对 sha256、跑一次 `iridium version` 看版本对不对），原子替换二进制、重启服务。没有更新的（`force` 除外）回 409 |
 
-更新源是配置 `update.url`：不填是 `github:kumoSleeping/Iridium`（GitHub Releases 的最新版），`off` 不查；`update.every` 默认一天查一次；`update.manual: true` 是设置里“自动下载更新”关掉（默认开：查到新版就下到二进制旁边的 `.iridium-update-*`，点“更新”只换文件、重启；守护进程启动时清掉上次剩下的）。
+更新源是配置 `update.url`：不填是 `github:kumoSleeping/Iridium`（GitHub Releases 的最新版），`off` 不查；`update.every` 默认一天查一次。Release 版（版本号是干净的 `vX.Y.Z`）查到新版就下到二进制旁边的 `.iridium-update-*`，点“更新”只换文件、重启；源码编译的（`dev`、`vX.Y.Z-dev.N+g…`）不预先下载。没有开关；旧配置里的 `update.manual` 不再读（2026-11-08）。守护进程启动时清掉上次剩下的。
 
 GitHub 源：最新 Release 的 tag 是版本，正文（`<!-- iridium:assets -->` 之前，后面的大小表只给 Release 页看）是说明，资源 `iridium-<GOOS>-<GOARCH>.tar.gz`（里面的 `iridium`）或 `iridium-<GOOS>-<GOARCH>`；sha256 用资源自带的 `digest`，没有就看同一 Release 里的 `SHA256SUMS`。别的地址返回清单：
 
@@ -392,7 +390,7 @@ GitHub 源：最新 Release 的 tag 是版本，正文（`<!-- iridium:assets --
 
 `platforms` 里有本机的（`GOOS-GOARCH`）就用它；`url` 以 `.tar.gz` 结尾的同样解包。版本是带点的数字（可有 `v`、`-rc.1`）；`dev` 版不提示更新，`ir update --force` 照样装。重启：在 systemd 单元里就 `systemctl --user restart --no-block <单元>`，否则原地重新执行。托管进程在自己的单元里，不受影响。
 
-终端面板里（有面板权的才有）：“自动下载更新”开关、“检查更新”（旁边写结果；打开面板时上次查过超过一小时就自己查一次）。有新版时最上面一张卡：版本、大小、说明、下载进度、“更新”键。
+设置里（有面板权的才有）：“检查更新”一个键，按下即 `POST /api/update`：查到新版就下载、替换、重启，中间不再确认；旁边写状态（检查中、下载中 37%、重启中、已是最新 · 时间、更新失败）。打开设置时上次查过超过一小时就查一次（只查）。有新版时最上面一张卡：版本、大小、说明、下载进度、“更新”键。在这个页面上按了更新，新版一上线页面就刷新（有没发出的内容除外）；否则连接状态那里换成“↻ 刷新”，点了刷新。
 
 ## 部署
 

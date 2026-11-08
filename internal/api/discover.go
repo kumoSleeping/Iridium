@@ -1,23 +1,15 @@
 package api
 
-// Workspace is a group of sessions, made from a folder. The carried state "workspaces" is
-// Workspace[]; a session's Workspace 0 is none (未归类).
+// Workspace is a folder group: the folder sessions are in, made as the first goes there (the user,
+// 2026-11-08: no workspaces made by hand). The carried state "workspaces" is Workspace[], those
+// with no session shown too; a session's Workspace 0 is none (未归类: one with no folder).
 type Workspace struct {
 	ID   int64  `json:"id"`
 	Name string `json:"name"`
 	Path string `json:"path"`
-	// Creator: the ID of the terminal that made it (GET /api/terminals has its avatar); "" when not
-	// known (made before Iridium kept it).
-	Creator string `json:"creator,omitempty"`
 }
 
-// NewWorkspace makes a workspace of folder Path; Name "" is the folder's name.
-type NewWorkspace struct {
-	Path string `json:"path"`
-	Name string `json:"name,omitempty"`
-}
-
-// WorkspacePatch renames a workspace.
+// WorkspacePatch renames a group.
 type WorkspacePatch struct {
 	Name string `json:"name"`
 }

@@ -146,13 +146,13 @@ describe("buildTree", () => {
   test("workspace → folder → session; a folder of one shown too; 未归类 named from its common folder; one that needs you stays in its place", () => {
     const list = [S("a", "/w/ir", { workspace: 1 }), S("b", "/w/ir/web", { workspace: 1, updatedAt: 5 }), S("c", "/w/ir/web", { workspace: 1 }), S("d", "/w/ir/docs", { workspace: 1 }), S("e", "/w/x/one"), S("f", "/w/x/two"), S("g", "/w/x/two", { archived: true }), S("h", "/w/ir", { workspace: 1, status: "waiting" })];
     const t = buildTree(list, ws, "未归类");
-    expect(t.workspaces.map((w) => w.name)).toEqual(["Iridium", "Empty", "未归类"]);
+    // A group with no session shown is not listed (the user, 2026-11-08).
+    expect(t.workspaces.map((w) => w.name)).toEqual(["Iridium", "未归类"]);
     const ir = t.workspaces[0]!;
     expect(ir.rows.map((r) => (r.kind === "session" ? r.s.id : `[${r.f.name}:${r.f.sessions.map((s) => s.id)}]`))).toEqual(["a", "h", "[web:b,c]", "[docs:d]"]);
-    expect(t.workspaces[1]!.rows).toEqual([]);
-    expect(t.workspaces[2]!.root).toBe("/w/x");
+    expect(t.workspaces[1]!.root).toBe("/w/x");
     expect(t.archived.map((s) => s.id)).toEqual(["g"]);
-    expect(t.workspaces[2]!.rows.map((r) => (r.kind === "session" ? r.s.id : `[${r.f.name}:${r.f.sessions.map((s) => s.id)}]`))).toEqual(["[one:e]", "[two:f]"]);
+    expect(t.workspaces[1]!.rows.map((r) => (r.kind === "session" ? r.s.id : `[${r.f.name}:${r.f.sessions.map((s) => s.id)}]`))).toEqual(["[one:e]", "[two:f]"]);
     expect(flat(t).map((s) => s.id)).toEqual(["a", "h", "b", "c", "d", "e", "f"]);
   });
   test("where: the folder a row says, where the tree does not", () => {
@@ -338,7 +338,7 @@ describe("model key", () => {
     const codex = modelView({ agent: "codex", model: "gpt-6-luna", models: [{ value: "gpt-6-luna", name: "Luna", resolved: "gpt-6-luna", efforts: ["low", "high"] }], efforts: ["minimal", "low"], effortNow: "low" });
     expect([codex.name, codex.value, codex.levels, codex.level]).toEqual(["Luna", "gpt-6-luna", ["low", "high"], "low"]);
   });
-  test("the effort slider rests on the level's stop; with none, on medium's, muted", () => {
+  test("the effort slider rests on the level's stop; with none, on medium's, not known", () => {
     const l = ["low", "medium", "high", "xhigh", "max"];
     expect(restAt(l, "xhigh")).toEqual({ i: 3, known: true });
     expect(restAt(l)).toEqual({ i: 1, known: false });

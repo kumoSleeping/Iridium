@@ -4,8 +4,8 @@
 // from the transcript (GET messages, after= what the open session's state says was written); its
 // drafts from the stream. Loaded only once a chat opens or the page is idle.
 import { Menu } from "@base-ui/react/menu";
-import { ChevronRight, Ellipsis, FolderInput, PanelBottomOpen, Plus, Settings } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent } from "react";
+import { BarChart3, Ellipsis, ListTree, Plus, Settings } from "lucide-react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import type { SessionState as LiveSession } from "../api/types.gen";
 import { api } from "../api/client";
 import { LinkDot } from "../link";
@@ -15,13 +15,13 @@ import { chatOf, compactSent, stateAhead, type Draft as Drafted, type Sent } fro
 import { LOCAL_ME, useAgent, useMe, useTerminalList, useWorkspaces } from "../data";
 import { t, useLang } from "../i18n";
 import { pushIn } from "../motion";
-import { openChat } from "../route";
+import { openChat, openUsage } from "../route";
 import { PULL } from "../sheet";
 import { MenuItems, Rename, sessionActions, sessionTags } from "../sidebar";
 import { useConfirms, useList, useSession } from "../store";
 import { drafts, opened } from "../stream";
-import { errText, toast } from "../toast";
-import { agentName, lampOf, LogoLamp, sessionStatusText, tilde, Tip, titleOf } from "../ui";
+import { errText } from "../toast";
+import { agentName, cn, lampOf, LogoLamp, sessionStatusText, tilde, Tip, titleOf } from "../ui";
 import { Asks } from "./asks";
 import { Composer, type ComposerHandle } from "./composer";
 import { folded, type Tool } from "./fold";
@@ -305,8 +305,9 @@ function Under({ s, ghost, composer, onSent, onSentDone, modelOpen, setModelOpen
           <>
             {/* Not guessed from the row: the model comes with the state, gliding in. */}
             {!ghost && <ModelKey s={s} open={modelOpen} onOpenChange={setModelOpen} />}
-            {/* dsh has no quota: its preset goes where the bars would be (the user, 2026-11-06). */}
-            {agentInfo?.presets?.length ? <PresetKey s={s} /> : <QuotaBars agent={s.agent} live={s.live} using={[s.model, s.pick, modelView(s).name]} open={usageOpen} onOpenChange={setUsageOpen} />}
+            {/* dsh: its preset, then its balance where the bars would be (the user, 2026-11-08). */}
+            {agentInfo?.presets?.length ? <PresetKey s={s} /> : null}
+            <QuotaBars agent={s.agent} live={s.live} using={[s.model, s.pick, modelView(s).name]} open={usageOpen} onOpenChange={setUsageOpen} />
           </>
         }
         end={<ContextRing session={s.id} summary={s.context} open={ctxOpen} onOpenChange={setCtxOpen} />}
@@ -322,6 +323,14 @@ function Bar({ s, onSheet, onMe }: { s?: Session; onSheet?: () => void; onMe?: (
   const [renaming, setRenaming] = useState(false);
   // ⋯'s "new session": the "+" of the session's workspace, its folder already this one's, under ⋯.
   const [making, setMaking] = useState(false);
+  // Not there as the bar was first drawn: faded in as it comes.
+  const late = useRef(!s).current ? "g-fade" : "";
+  const more = useRef<HTMLButtonElement>(null);
+  // The usage under ⋯, its right edge on ⋯'s, as the menu was (the user, 2026-11-08).
+  const usageHere = () => {
+    const b = more.current?.getBoundingClientRect();
+    openUsage(b && { x: b.right, y: b.bottom + 6, end: true });
+  };
   return (
     <header className="g-turn-stay vt-bar glass absolute inset-x-0 top-0 z-20 flex h-12 items-center gap-1 pr-2 pl-2 shadow-[0_0.5px_0_var(--edge)] pointer-coarse:h-13">
       <div className="flex min-w-0 flex-1 items-center gap-2.5 pl-2">
@@ -331,12 +340,12 @@ function Bar({ s, onSheet, onMe }: { s?: Session; onSheet?: () => void; onMe?: (
               {/* On a phone the logo is a key too: the session list's sheet, as ⋯'s first item (the
                   user, 2026-11-06). Its tap area wider than it, the bar not moved. */}
               {onSheet ? (
-                <button type="button" aria-label={t("nav.sidebar")} onClick={onSheet} className="g-press -m-2 grid place-items-center rounded-md p-2 hover:bg-fill">
+                <button type="button" aria-label={t("nav.sidebar")} onClick={onSheet} className={cn("g-press -m-2 grid place-items-center rounded-md p-2 hover:bg-fill", late)}>
                   {/* Iridium's mark, not the agent's (the user, 2026-11-06): it opens the list. */}
                   <LogoLamp agent={s.agent} status={lampOf(s)} size={18} ir />
                 </button>
               ) : (
-                <span className="grid">
+                <span className={cn("grid", late)}>
                   <LogoLamp agent={s.agent} status={lampOf(s)} size={18} />
                 </span>
               )}
@@ -346,15 +355,17 @@ function Bar({ s, onSheet, onMe }: { s?: Session; onSheet?: () => void; onMe?: (
                 <Rename s={s} done={() => setRenaming(false)} className="h-7 font-semibold" />
               </span>
             ) : (
-              <h1 className="m-0 min-w-0 truncate text-base font-semibold" title={tilde(s.cwd)} onDoubleClick={() => setRenaming(true)}>
+              <h1 className={cn("m-0 min-w-0 truncate text-base font-semibold", late)} title={tilde(s.cwd)} onDoubleClick={() => setRenaming(true)}>
                 {titleOf(s)}
               </h1>
             )}
           </>
         )}
       </div>
-      {/* With the sidebar shown, the link's dot is in its foot (sidebar.tsx Foot). */}
+      {/* With the sidebar shown, the link's dot is at its top (sidebar.tsx). */}
       {onSheet && <LinkDot />}
+      {/* ⋯'s place kept while the session comes: the dot beside it does not move as it does. */}
+      {!s && <span aria-hidden className="size-8 shrink-0 pointer-coarse:size-10" />}
       {s && (
         <span className="relative grid">
           {/* Anchored on ⋯ itself, under it: clicks go through to ⋯. */}
@@ -370,7 +381,7 @@ function Bar({ s, onSheet, onMe }: { s?: Session; onSheet?: () => void; onMe?: (
             <Tip label={t("top.more")} side="bottom">
               <Menu.Trigger
                 render={
-                  <button type="button" aria-label={t("top.more")} className="g-press grid size-8 place-items-center rounded-md text-ink-2 hover:bg-fill hover:text-ink data-popup-open:bg-fill pointer-coarse:size-10">
+                  <button ref={more} type="button" aria-label={t("top.more")} className={cn("g-press grid size-8 place-items-center rounded-md text-ink-2 hover:bg-fill hover:text-ink data-popup-open:bg-fill pointer-coarse:size-10", late)}>
                     <Ellipsis size={17} />
                   </button>
                 }
@@ -378,7 +389,7 @@ function Bar({ s, onSheet, onMe }: { s?: Session; onSheet?: () => void; onMe?: (
             </Tip>
             <Menu.Portal>
               <Menu.Positioner side="bottom" align="end" sideOffset={6} collisionPadding={8} className="z-50">
-                <MenuItems lead={[{ icon: <Plus size={15} />, label: t("menu.new"), run: () => requestAnimationFrame(() => setMaking(true)) }, ...(onSheet ? [{ icon: <PanelBottomOpen size={15} />, label: t("nav.sidebar"), run: onSheet }] : []), ...(onMe ? [{ icon: <Settings size={15} />, label: t("nav.me"), run: onMe }] : [])]} items={sessionActions(s, () => setRenaming(true))} tags={sessionTags(s)}>{ws.length > 1 && <MoveTo s={s} ws={ws} />}</MenuItems>
+                <MenuItems lead={[{ icon: <Plus size={15} />, label: t("menu.new"), run: () => requestAnimationFrame(() => setMaking(true)) }, ...(onSheet ? [{ icon: <ListTree size={15} />, label: t("nav.sidebar"), run: onSheet }] : []), ...(onMe ? [{ icon: <Settings size={15} />, label: t("nav.me"), run: onMe }] : []), { icon: <BarChart3 size={15} />, label: t("usage.title"), run: usageHere }]} items={sessionActions(s, () => setRenaming(true))} tags={sessionTags(s)} />
               </Menu.Positioner>
             </Menu.Portal>
           </Menu.Root>
@@ -388,37 +399,6 @@ function Bar({ s, onSheet, onMe }: { s?: Session; onSheet?: () => void; onMe?: (
   );
 }
 
-/** Moving a session to another workspace: dragged ones stay where they were put (plan "会话"). */
-function MoveTo({ s, ws }: { s: Session; ws: { id: number; name: string }[] }) {
-  return (
-    <Menu.SubmenuRoot>
-      <Menu.SubmenuTrigger className="flex h-8 cursor-default items-center gap-2.5 rounded-md px-2.5 text-base outline-none select-none data-highlighted:bg-fill data-popup-open:bg-fill pointer-coarse:h-11">
-        <span className="text-ink-2">
-          <FolderInput size={15} />
-        </span>
-        <span className="flex-1">{t("menu.move")}</span>
-        <ChevronRight size={14} className="text-ink-4" />
-      </Menu.SubmenuTrigger>
-      <Menu.Portal>
-        <Menu.Positioner className="z-50" sideOffset={4}>
-          <Menu.Popup className="g-unfold glass thick float min-w-44 rounded-lg p-1.5 text-ink outline-none">
-            {ws.map((w, i) => (
-              <Menu.Item
-                key={w.id}
-                disabled={w.id === s.workspace}
-                style={{ "--i": i } as CSSProperties}
-                onClick={() => void api.patch(s.id, { workspace: w.id }).catch((e) => toast(t("err.action"), { error: true, description: errText(e) }))}
-                className="flex h-8 cursor-default items-center gap-2.5 rounded-md px-2.5 text-base outline-none select-none data-disabled:opacity-40 data-highlighted:bg-fill"
-              >
-                {w.name}
-              </Menu.Item>
-            ))}
-          </Menu.Popup>
-        </Menu.Positioner>
-      </Menu.Portal>
-    </Menu.SubmenuRoot>
-  );
-}
 
 /** The turn's row at the end of the conversation: the call being written, else the one running
  *  (the newest, how many more beside it), else the dots once it has gone quiet; one line high, even

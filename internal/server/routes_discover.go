@@ -18,10 +18,9 @@ func (s *Server) discoverRoutes(mux *http.ServeMux) {
 		return
 	}
 	mux.HandleFunc("GET /api/workspaces", s.workspaces)
-	// Workspaces are the panels' and 本机's to change; a session anyone's to name, colour, archive.
-	mux.HandleFunc("POST /api/workspaces", s.manages(s.createWorkspace))
+	// Folder groups are made as sessions go in them, never by hand (the user, 2026-11-08); a name is
+	// the panels' and 本机's to change; a session anyone's to name, colour, archive.
 	mux.HandleFunc("PATCH /api/workspaces/{id}", s.manages(s.renameWorkspace))
-	mux.HandleFunc("DELETE /api/workspaces/{id}", s.manages(s.deleteWorkspace))
 	mux.HandleFunc("PATCH /api/sessions/{id}", s.patchSession)
 	mux.HandleFunc("PUT /api/colors", s.manages(s.folderColor))
 	mux.HandleFunc("GET /api/folders", s.folders)
@@ -30,24 +29,6 @@ func (s *Server) discoverRoutes(mux *http.ServeMux) {
 
 func (s *Server) workspaces(w http.ResponseWriter, r *http.Request) {
 	ws, err := s.Discover.Workspaces()
-	if err != nil {
-		s.discoverError(w, err)
-		return
-	}
-	reply(w, http.StatusOK, ws)
-}
-
-func (s *Server) createWorkspace(w http.ResponseWriter, r *http.Request) {
-	var req api.NewWorkspace
-	if !readJSON(w, r, &req) {
-		return
-	}
-	path, err := s.Folders.Resolve(req.Path)
-	if err != nil {
-		s.discoverError(w, err)
-		return
-	}
-	ws, err := s.Discover.CreateWorkspaceBy(path, req.Name, callerOf(r).EndpointID)
 	if err != nil {
 		s.discoverError(w, err)
 		return
@@ -74,14 +55,6 @@ func (s *Server) renameWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.discoverDone(w, s.Discover.RenameWorkspace(id, req.Name))
-}
-
-func (s *Server) deleteWorkspace(w http.ResponseWriter, r *http.Request) {
-	id, ok := workspaceID(w, r)
-	if !ok {
-		return
-	}
-	s.discoverDone(w, s.Discover.DeleteWorkspace(id))
 }
 
 func (s *Server) patchSession(w http.ResponseWriter, r *http.Request) {

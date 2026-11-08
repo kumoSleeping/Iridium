@@ -86,13 +86,14 @@ export function buildTree(all: Session[], workspaces: Workspace[], unsorted: str
     const sub = [...folders.values()].sort((a, b) => latest(b) - latest(a));
     return { key, id, name, root, rows: [...rows, ...sub.map((f): Row => ({ kind: "folder", f }))], count: sessions.length };
   };
-  // A workspace with no session yet shows too: one was just made.
-  const nodes = workspaces.map((w) => node(`w${w.id}`, w.id, w.name, w.path, byWs.get(w.id) ?? []));
+  // A group is a folder sessions are in (the user, 2026-11-08): one with none shown is not listed.
+  const nodes = workspaces.filter((w) => byWs.get(w.id)?.length).map((w) => node(`w${w.id}`, w.id, w.name, w.path, byWs.get(w.id)!));
   // 未归类 has no root: its folders are grouped under the directory all its sessions share, and shown
   // by their whole path (~ for the home directory, not its bare name).
   const none = byWs.get(0);
   if (none?.length) nodes.push(node("w0", 0, unsorted, commonDir(none.map((s) => s.cwd)), none));
-  const archived = list.filter((s) => s.archived);
+  // The last at work first, pinned or not: a pin is for the list in use (the user, 2026-11-08).
+  const archived = list.filter((s) => s.archived).sort((a, b) => b.updatedAt - a.updatedAt);
   // Out of their place: the workspace and the folder in it, or the directory's name in none.
   for (const s of archived) {
     const w = workspaces.find((w) => w.id === s.workspace && under(s.cwd, w.path));

@@ -47,6 +47,8 @@ type Options struct {
 	Logf       func(string, ...any)
 	// OnChange is told which sessions' rows may have changed, nil for the list as a whole
 	// (workspaces). Called at most once per Settle.
+	// Home: the user's home folder; a group of it (or of /) holds only the sessions right in it.
+	Home     string
 	OnChange func(ids []string)
 	Rescan   time.Duration // how often the directories are looked at whole; 0 is a minute
 	ProcScan time.Duration // how often /proc is looked at; 0 is 3s
@@ -57,6 +59,7 @@ type Options struct {
 func Defaults(cfg config.Config) Options {
 	home, _ := os.UserHomeDir()
 	o := Options{
+		Home:       home,
 		ClaudeDir:  cfg.ClaudeDir(),
 		CodexHome:  filepath.Join(home, ".codex"),
 		PiSessions: filepath.Join(home, ".pi", "agent", "sessions"),

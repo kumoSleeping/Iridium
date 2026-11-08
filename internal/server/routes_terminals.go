@@ -77,13 +77,6 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusNotFound, "no such terminal")
 		return
 	}
-	// The workspaces made before Iridium kept who made them are claimed by the first page that
-	// opens: its panel, or Ir's page with no gate (the user, 2026-11-08). Not an agent, not ir.
-	if !c.socket && c.panel() && s.Discover != nil && !s.claimed.Load() {
-		if err := s.Discover.ClaimWorkspaces(c.EndpointID); err == nil {
-			s.claimed.Store(true)
-		}
-	}
 	t := s.terminalOf(info)
 	t.Local = c.Local
 	if c.Local {

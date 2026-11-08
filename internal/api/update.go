@@ -8,7 +8,8 @@ type UpdateState struct {
 	Notes     string `json:"notes,omitempty"`
 	Available bool   `json:"available"`
 	Source    bool   `json:"source"` // an update source is configured
-	// Auto: a newer version is downloaded as soon as it is seen (settings 自动下载更新).
+	// Auto: a newer version is downloaded as soon as it is seen (release builds; not a build from
+	// source).
 	Auto bool `json:"auto"`
 	// Ready: Latest is downloaded and checked; 更新 only swaps it in and restarts.
 	Ready bool `json:"ready,omitempty"`

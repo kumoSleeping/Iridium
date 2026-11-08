@@ -1,22 +1,22 @@
-// The one list (plan "网页", "风格"; web/sample's design): workspace → folder → session. No panel, no
+// The one list (plan "网页", "风格"; web/sample's design): group → folder → session, a group the
+// folder its sessions are in (no workspaces to make or delete: the user, 2026-11-08). No panel, no
 // cards, no headings; groups split by space, chevrons in their own column, colour only in logos and
 // lamps, the selected row only bolder. A session's row is one line (the user, 2026-11-08): its name
 // (the title its agent gave it, plan "会话标题") and, where the tree does not say it, its folder; out
-// of a turn, it ends with how long ago it was. 需要你 on top when anything
-// waits on you, 归档 folded at the bottom. A workspace's row: its name a size up, its chevron only
-// under the mouse, a faint "+" at its end for a new session there. A row's menu (right click,
-// long-press): pin, rename, stop, archive, 通知 while push is on (push.ts), and at its foot the
-// colour tags (colors.ts); a workspace's, rename, its path, 通知, and delete pressed twice. The mouse resting on a row fetches its
-// chat ahead.
+// of a turn, it ends with how long ago it was. 归档 folded at the bottom, its bin where a group's
+// folder is. A group's row: its name a size up, a faint "+" at its end for a new session there. A
+// row's menu (right click, long-press): pin, rename, stop, archive, 通知 while push is on (push.ts),
+// and at its foot the colour tags (colors.ts); a group's: rename, its path, 通知. The mouse resting
+// on a row fetches its chat ahead.
 import { Menu } from "@base-ui/react/menu";
-import { Archive, ArchiveRestore, Bot, Check, ChevronRight, Copy, Folder, FolderOpen, Pencil, Pin, PinOff, Plus, Square, Trash2, Workflow as WorkflowIcon } from "lucide-react";
+import { Archive, ArchiveRestore, Bot, Check, ChevronRight, Copy, Folder, FolderOpen, Pencil, Pin, PinOff, Plus, Square, Workflow as WorkflowIcon } from "lucide-react";
 import { ConfirmIcon, confirmName, confirmTitle } from "./confirmname";
-import { Fragment, lazy, Suspense, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
+import { Fragment, lazy, memo, Suspense, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { api } from "./api/client";
 import type { Color, Confirm, Session } from "./api/types.gen";
 import { colorVar, COLORS, useFolderColors } from "./colors";
 import { ahead, behind } from "./chats";
-import { t } from "./i18n";
+import { t, useLang } from "./i18n";
 import { useFlip } from "./motion";
 import { folderLevels, sessionLevels, usePushMenus, wsLevels, type PushLevel } from "./push";
 import type { Folder as FolderNode, Tree, WsNode } from "./tree";
@@ -125,6 +125,8 @@ export function Sidebar(p: Props) {
   const listed = new Set(p.tree.workspaces.flatMap((w) => w.rows.flatMap((r) => (r.kind === "session" ? [r.s.id] : r.f.sessions.map((s) => s.id)))));
   const asked = new Set(p.confirms.flatMap((c) => (c.session && listed.has(c.session) ? [c.session] : [])));
   const loose = p.confirms.filter((c) => !c.session || !listed.has(c.session));
+  const last = p.tree.workspaces.at(-1);
+  const lastOpen = last ? p.expanded(last.key) && last.rows.length > 0 : loose.length > 0;
   const shape = [loose.map((c) => c.id).join(","), ...p.tree.workspaces.map((w) => `${w.key}:${p.expanded(w.key)}:${w.rows.map((r) => (r.kind === "session" ? r.s.id : `${r.f.key}${p.expanded(r.f.key)}${r.f.sessions.length}`)).join(",")}`), p.expanded("archive"), p.tree.archived.length, [...p.tree.kids.values()].flat().map((s) => s.id).join(","), [...p.tree.runs.values()].flat().map((r) => `${r.id}${p.expanded(`run:${r.id}`)}${r.working.map((s) => s.id)}`).join(",")].join("|");
   useFlip(list, shape);
   const scrolled = useRef(0);
@@ -171,6 +173,8 @@ export function Sidebar(p: Props) {
       <span className="flex min-w-0 flex-1 items-center gap-2 pl-2 select-none">
         <IrMark size={18} className="text-ink" />
         <span className="truncate text-base font-semibold tracking-[-0.01em]">Iridium</span>
+        {/* The link's dot and latency, by the name (the user, 2026-11-08). */}
+        <LinkDot className="shrink-0" />
       </span>
       <HeadKeys {...p} />
     </div>
@@ -203,8 +207,12 @@ export function Sidebar(p: Props) {
         ))}
         {p.tree.workspaces.map((w, i) => {
           const open = p.expanded(w.key);
+          // A gap after what is open above; folded groups one under another stay close (the user,
+          // 2026-11-08).
+          const prev = p.tree.workspaces[i - 1];
+          const apart = prev ? p.expanded(prev.key) && prev.rows.length > 0 : loose.length > 0;
           return (
-            <div key={w.key} className={i > 0 || loose.length ? "mt-4" : "mt-1"} role="group">
+            <div key={w.key} className={apart ? "mt-4" : "mt-1"} role="group">
               <WsRow
                 flip={`w:${w.key}`}
                 id={w.id}
@@ -218,7 +226,7 @@ export function Sidebar(p: Props) {
                   w.id !== 0 &&
                   p.wsPlus(
                     w,
-                    <button type="button" onClick={(e) => e.stopPropagation()} aria-label={t("nav.newHere", { ws: w.name })} className="g-press -mr-1 grid size-6 place-items-center rounded-sm text-ink-2 group-hover:text-ink hover:bg-fill-2 data-popup-open:bg-fill-2 data-popup-open:text-ink pointer-coarse:size-8">
+                    <button type="button" onClick={(e) => e.stopPropagation()} aria-label={t("nav.newHere", { ws: w.name })} className="g-press -mr-1 grid size-6 place-items-center rounded-sm text-ink-3 group-hover:text-ink-2 hover:bg-fill-2 data-popup-open:bg-fill-2 data-popup-open:text-ink-2 pointer-coarse:size-8">
                       <Plus size={15} />
                     </button>,
                     plusOpen === w.key,
@@ -243,7 +251,7 @@ export function Sidebar(p: Props) {
                         // (the user, 2026-11-06).
                         plus={p.wsPlus(
                           { ...w, key: r.f.key, root: r.f.path },
-                          <button type="button" onClick={(e) => e.stopPropagation()} aria-label={t("nav.newHere", { ws: r.f.name })} className="g-press -mr-1 grid size-6 place-items-center rounded-sm text-ink-2 group-hover:text-ink hover:bg-fill-2 data-popup-open:bg-fill-2 data-popup-open:text-ink pointer-coarse:size-8">
+                          <button type="button" onClick={(e) => e.stopPropagation()} aria-label={t("nav.newHere", { ws: r.f.name })} className="g-press -mr-1 grid size-6 place-items-center rounded-sm text-ink-3 group-hover:text-ink-2 hover:bg-fill-2 data-popup-open:bg-fill-2 data-popup-open:text-ink-2 pointer-coarse:size-8">
                             <Plus size={15} />
                           </button>,
                           plusOpen === r.f.key,
@@ -258,8 +266,8 @@ export function Sidebar(p: Props) {
           );
         })}
         {p.tree.archived.length > 0 && (
-          <div className="mt-4" role="group">
-            <Row depth={0} flip="archive" expanded={p.expanded("archive")} onClick={() => p.toggle("archive")} icon={<TrashLid open={p.expanded("archive")} />} label={<span className="text-ink-2">{t("nav.archive")}</span>} end={<Count n={p.tree.archived.length} faint />} />
+          <div className={lastOpen ? "mt-4" : "mt-1"} role="group">
+            <Row depth={0} flip="archive" head expanded={p.expanded("archive")} onClick={() => p.toggle("archive")} icon={<TrashLid open={p.expanded("archive")} />} label={<span className="text-ink-2">{t("nav.archive")}</span>} end={<Count n={p.tree.archived.length} faint />} />
             {p.expanded("archive") && p.tree.archived.map((s) => row(s, 0))}
           </div>
         )}
@@ -277,7 +285,7 @@ export function HeadKeys(p: Pick<Props, "createKey">) {
   return (
     <span className="flex shrink-0 items-center gap-0.5">
       {p.createKey(
-        <button type="button" aria-label={t("nav.newWorkspace")} className="g-press grid size-8 place-items-center rounded-md text-ink-2 hover:bg-fill hover:text-ink data-popup-open:bg-fill pointer-coarse:size-10">
+        <button type="button" aria-label={t("menu.new")} className="g-press grid size-8 place-items-center rounded-md text-ink-3 hover:bg-fill hover:text-ink-2 data-popup-open:bg-fill data-popup-open:text-ink-2 pointer-coarse:size-10">
           <Plus size={18} />
         </button>,
       )}
@@ -293,7 +301,6 @@ function Foot(p: Pick<Props, "me">) {
     <div className="flex h-14 shrink-0 items-center justify-between gap-2 px-2 pointer-coarse:h-16">
       <div className="flex min-w-0 flex-1">{p.me}</div>
       <UpdateKey />
-      <LinkDot side="top" className="shrink-0" />
     </div>
   );
 }
@@ -376,10 +383,13 @@ type RowProps = {
    *  as the mouse comes on it; no chevron nor its column (the user, 2026-11-08): its folder
    *  at the far left, the rows in it one step in under it, as a tree. */
   reveal?: boolean;
+  /** A group's place without its name's spring: the bin of 归档, under the groups' folders. */
+  head?: boolean;
 };
 
-function Row({ depth, flip, chevron, expanded, icon, label, end, selected, onClick, aria, extra, faded, sub, reveal }: RowProps) {
+function Row({ depth, flip, chevron, expanded, icon, label, end, selected, onClick, aria, extra, faded, sub, reveal, head }: RowProps) {
   const two = sub !== undefined;
+  const top = reveal || head;
   return (
     <div
       data-flip={flip}
@@ -395,11 +405,12 @@ function Row({ depth, flip, chevron, expanded, icon, label, end, selected, onCli
         two ? "items-start py-[5px] pointer-coarse:py-2" : "h-[30px] items-center pointer-coarse:h-10",
         faded && "opacity-60",
       )}
-      style={{ paddingLeft: reveal ? 2 : depth * STEP } as CSSProperties}
+      // A group's folder under the Ir mark at the top, its name under "Iridium" (the user, 2026-11-08).
+      style={{ paddingLeft: top ? 8 : depth * STEP } as CSSProperties}
       {...extra}
     >
-      {!reveal && <Chevron state={chevron} />}
-      {icon && <span className={cn("grid shrink-0 place-items-center", reveal ? "mr-2.5" : "mr-2 w-4", two && "h-5 pointer-coarse:h-[23px]")}>{icon}</span>}
+      {!top && <Chevron state={chevron} />}
+      {icon && <span className={cn("grid shrink-0 place-items-center", top ? "mr-2 w-[18px]" : "mr-2 w-4", two && "h-5 pointer-coarse:h-[23px]")}>{icon}</span>}
       <span className="min-w-0 flex-1">
         <span className="flex min-w-0 items-center">
           <span
@@ -420,17 +431,14 @@ function Row({ depth, flip, chevron, expanded, icon, label, end, selected, onCli
   );
 }
 
-/** A workspace's row; its menu (right click, long-press): rename, its path copied, open or folded,
- *  通知 while push is on, and at its foot delete (pressed twice: its sessions go to 未归类, kept).
- *  未归类 itself (id 0): its 通知 only, inline. */
+/** A group's row; its menu (right click, long-press): rename, its path copied, open or folded,
+ *  通知 while push is on. 未归类 itself (id 0): its 通知 only, inline. */
 function WsRow({ flip, id, name, root, open, onToggle, end }: { flip: string; id: number; name: string; root: string; open: boolean; onToggle: () => void; end: ReactNode }) {
   const push = usePushMenus();
   const me = useMe().data;
   const real = id !== 0 && !!me && (me.local || me.kind === "panel");
   const [at, setAt] = useMenuAt();
   const [renaming, setRenaming] = useState(false);
-  const [sure, setSure] = useState(false);
-  if (at === null && sure) setSure(false);
   const lp = useLongPress(() => {
     const r = document.activeElement?.closest?.("[role=treeitem]")?.getBoundingClientRect();
     setAt(r ? { x: r.left + 40, y: r.bottom } : { x: 40, y: 40 });
@@ -442,7 +450,6 @@ function WsRow({ flip, id, name, root, open, onToggle, end }: { flip: string; id
     { icon: <Copy size={15} />, label: t("menu.copyPath"), run: () => void navigator.clipboard.writeText(root).then(() => toast(t("toast.copied")), failed) },
     { icon: open ? <Folder size={15} /> : <FolderOpen size={15} />, label: open ? t("menu.fold") : t("menu.unfold"), run: onToggle },
   ];
-  const remove = () => void api.deleteWorkspace(id).then(() => toast(t("toast.wsDeleted", { name })), failed);
   const menu = real || push;
   // Its "+" popover is a portal, but React events bubble through it: a press in it must not fold
   // the workspace (the user's, 2026-11-05: only you fold or unfold).
@@ -467,28 +474,15 @@ function WsRow({ flip, id, name, root, open, onToggle, end }: { flip: string; id
         extra={menu ? { ...lp, onContextMenu: (e: React.MouseEvent) => own(e) && (e.preventDefault(), setAt({ x: e.clientX, y: e.clientY })), onClickCapture: lp.onClickCapture } : undefined}
       />
       {menu && (
-        <Menu.Root open={at !== null} onOpenChange={(o) => !o && (setAt(null), setSure(false))}>
+        <Menu.Root open={at !== null} onOpenChange={(o) => !o && setAt(null)}>
           <Menu.Portal>
             <Menu.Positioner anchor={anchor} side="bottom" align="start" sideOffset={4} collisionPadding={8} className="z-50">
               {real ? (
                 <MenuItems
                   items={items}
-                  foot={
-                    <>
-                      <PushFoot levels={wsLevels(id)} i={items.length} />
-                      {/* Twice: the first press only asks (the user, 2026-11-07). */}
-                      <div style={{ "--i": items.length + 1 } as CSSProperties} className="mt-1.5 border-t border-edge pt-1.5">
-                        <Menu.Item
-                          closeOnClick={sure}
-                          onClick={() => (sure ? remove() : setSure(true))}
-                          className="flex h-8 cursor-default items-center gap-2.5 rounded-md px-2.5 text-base text-err outline-none select-none data-highlighted:bg-fill pointer-coarse:h-11"
-                        >
-                          <Trash2 size={15} />
-                          <span key={String(sure)} className="g-fade">{sure ? t("menu.wsDeleteSure") : t("menu.wsDelete")}</span>
-                        </Menu.Item>
-                      </div>
-                    </>
-                  }
+                  // No 删除 (the user, 2026-11-08): a group is the folder its sessions are in; it
+                  // goes once none is shown.
+                  foot={<PushFoot levels={wsLevels(id)} i={items.length} />}
                 />
               ) : (
                 push && (
@@ -508,14 +502,10 @@ function WsRow({ flip, id, name, root, open, onToggle, end }: { flip: string; id
   );
 }
 
-/** A workspace's mark (the user, 2026-11-08): a folder larger than a folder's in it, shut or open
- *  as the workspace is. No avatar on its corner (the user, 2026-11-08). */
+/** A group's mark: a folder as a folder's in it is (the user, 2026-11-08: a group is only a folder),
+ *  shut or open as the group is. */
 function WsMark({ open }: { open: boolean }) {
-  return (
-    <span className="grid size-[22px] shrink-0 place-items-center">
-      <FolderMark open={open} size={21} className="text-ink-2" />
-    </span>
-  );
+  return <FolderMark open={open} className="text-ink-2" />;
 }
 
 /** A workspace's new name, in place of its row's: Enter or leaving it renames, Esc leaves it. */
@@ -550,7 +540,10 @@ function WsRename({ id, name, done }: { id: number; name: string; done: () => vo
 
 /** A session's row: its logo and lamp, its name, unread or pinned at the end. The mouse resting on
  *  it 0.1 s, counted from its last move, or a press, fetches its chat ahead. */
-function SessionRow({ s, where, depth, flip, selected, onSelect, chatCode, working, asked }: { s: Session; where?: string; depth: number; flip: string; selected: boolean; onSelect: (id: string) => void; chatCode: () => void; working?: boolean; asked?: boolean }) {
+/** Drawn again only as its props change, not with every draw of the list: a page of the phone's
+ *  sheet turned drew every row, its menu and its tip, again (the user, 2026-11-08). */
+const SessionRow = memo(function SessionRow({ s, where, depth, flip, selected, onSelect, chatCode, working, asked }: { s: Session; where?: string; depth: number; flip: string; selected: boolean; onSelect: (id: string) => void; chatCode: () => void; working?: boolean; asked?: boolean }) {
+  useLang();
   const unread = useUnread(s.id);
   const now = useMinute();
   const title = titleOf(s);
@@ -682,7 +675,7 @@ function SessionRow({ s, where, depth, flip, selected, onSelect, chatCode, worki
       <SessionMenu s={s} at={menuAt} close={() => setMenuAt(null)} rename={() => setRenaming(true)} />
     </>
   );
-}
+});
 
 /** The new name, in place of the row's: Enter or leaving it renames, Esc leaves it as it was. */
 export function Rename({ s, done, className }: { s: Session; done: () => void; className?: string }) {

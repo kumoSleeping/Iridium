@@ -9,6 +9,7 @@
      g-sheet    on a phone, the sidebar rises from the foot over the composer (sheet.tsx, g-sink)
      g-dialog   the settings rise out of their key at the sidebar's foot (app.tsx)
      g-fade     plain cross-fade
+     g-wait     a placeholder of what is coming, of its size: comes after a moment, breathes
      g-swap     one icon for another in place, both drawn, cross-faded (a folder shut / open)
      g-lid      the archive bin's lid, hinged at its right end, springs up as it opens
      g-stagger  children of an unfolded menu rise one after another
@@ -167,6 +168,24 @@
 @keyframes g-fade-in {
   from {
     opacity: 0;
+  }
+}
+
+/* --- wait: what stands in for what is still coming (faint blocks of its size): shown only once it
+   has been a moment, so a quick answer flashes nothing, then breathing softly. --- */
+.g-wait {
+  animation:
+    g-wait-in var(--dur-3) var(--ease-out) 160ms both,
+    g-breathe 1.6s ease-in-out calc(160ms + var(--dur-3)) infinite;
+}
+@keyframes g-wait-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes g-breathe {
+  50% {
+    opacity: 0.5;
   }
 }
 
@@ -354,12 +373,8 @@ html[data-turn] .vt-drawer {
   border-radius: 50%;
   background: color-mix(in oklab, #ff4a17, #ff2f82 calc(var(--b, var(--frac)) * 70%));
 }
-.effort-tone {
-  transition: filter var(--dur-2) var(--ease-out);
-}
-[data-unknown] .effort-tone {
-  filter: saturate(0.1) opacity(0.5);
-}
+/* A level not known (no process yet to say it) is not greyed: a grey liquid read as broken (the
+   user, 2026-11-08); the name over it says "default" instead. */
 /* The knob: white balls (.effort-ball, on the knob's springs) through the knob's goo, half clear;
    under them the liquid frosted (.effort-frost, round, at the knob), the glow round it warmer the
    higher the level (the user, 2026-11-06). */
@@ -379,7 +394,7 @@ html[data-turn] .vt-drawer {
   box-shadow: 0 0 calc(3px + var(--frac) * 9px) oklch(0.7 0.22 25 / calc(0.12 + var(--frac) * 0.33));
   transition: box-shadow var(--dur-3) var(--ease-out);
 }
-:root:has([data-still]) :is(.effort-tone, .effort-frost) {
+:root:has([data-still]) .effort-frost {
   transition: none;
   animation: none;
 }
@@ -397,12 +412,11 @@ html[data-turn] .vt-drawer {
   .g-stagger > * {
     animation: none;
   }
+  .g-wait {
+    animation: g-wait-in var(--dur-1) linear 160ms both;
+  }
   .g-swap > * {
     transform: none !important;
-  }
-  .effort-tone {
-    transition: none;
-    animation: none;
   }
   .g-sheet,
   .g-sink {
@@ -438,6 +452,9 @@ html[data-turn] .vt-drawer {
   .row-lamp[data-s="starting"] {
     animation-name: lamp-fade !important;
     animation-duration: 2.4s !important;
+  }
+  .row-lamp::after {
+    animation: none !important;
   }
   @keyframes g-rise {
     from {

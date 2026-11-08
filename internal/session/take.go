@@ -192,15 +192,27 @@ func (m *Manager) Refresh(ids []string) {
 	}
 }
 
-// intoCallers puts a session made for a caller (the session that ran ir new) in the caller's
-// workspace, as its launcher's (plan: 新会话进调用者的工作区). A caller in none leaves it to
-// discovery.
-func (m *Manager) intoCallers(id, caller string) {
-	over, err := m.o.Store.Overlays()
-	if err != nil || over[caller].Workspace == 0 {
+// intoGroup puts a new session in its folder's group at once (plan: 新会话进调用者的工作区, if
+// the caller's holds its folder): not left in none till discovery sees its transcript.
+func (m *Manager) intoGroup(id, cwd, caller string) {
+	var prefer int64
+	if caller != "" {
+		if over, err := m.o.Store.Overlays(); err == nil {
+			prefer = over[caller].Workspace
+		}
+	}
+	g, ok := m.o.Discovery.(grouper)
+	if !ok {
+		if prefer != 0 {
+			if _, err := m.o.Store.AssignIfNew(id, prefer); err != nil {
+				m.o.Logf("session %s: %v", id, err)
+			}
+		}
 		return
 	}
-	if _, err := m.o.Store.AssignIfNew(id, over[caller].Workspace); err != nil {
-		m.o.Logf("session %s: %v", id, err)
+	if ws := g.GroupFor(cwd, prefer); ws != 0 {
+		if _, err := m.o.Store.AssignAuto(id, ws); err != nil {
+			m.o.Logf("session %s: %v", id, err)
+		}
 	}
 }

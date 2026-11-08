@@ -54,6 +54,19 @@ func (s *Store) AssignIfNew(session string, workspace int64) (bool, error) {
 	return n == 1, err
 }
 
+// AssignAuto puts session in workspace by discovery: one not assigned yet, or in none and not
+// moved there by you. False if it was not put there.
+func (s *Store) AssignAuto(session string, workspace int64) (bool, error) {
+	r, err := s.db.Exec(`INSERT INTO assignments (session, workspace, manual, at) VALUES (?, ?, 0, ?)
+		ON CONFLICT (session) DO UPDATE SET workspace = excluded.workspace, at = excluded.at
+		WHERE assignments.workspace IS NULL AND assignments.manual = 0`, session, workspace, now())
+	if err != nil {
+		return false, err
+	}
+	n, err := r.RowsAffected()
+	return n == 1, err
+}
+
 // Move is the user moving a session to a workspace (0: none). It sticks: discovery never moves
 // the session again.
 func (s *Store) Move(session string, workspace int64) error {
@@ -84,21 +97,6 @@ func (s *Store) CreateWorkspace(name, path string) (int64, error) {
 	return id, err
 }
 
-// SetWorkspaceCreator says which terminal made workspace id.
-func (s *Store) SetWorkspaceCreator(id int64, creator string) error {
-	_, err := s.db.Exec(`UPDATE workspaces SET creator = NULLIF(?, '') WHERE id = ?`, creator, id)
-	return err
-}
-
-// ClaimWorkspaces gives creator every workspace with none; it gives how many.
-func (s *Store) ClaimWorkspaces(creator string) (int64, error) {
-	r, err := s.db.Exec(`UPDATE workspaces SET creator = ? WHERE creator IS NULL`, creator)
-	if err != nil {
-		return 0, err
-	}
-	return r.RowsAffected()
-}
-
 func (s *Store) RenameWorkspace(id int64, name string) error {
 	r, err := s.db.Exec(`UPDATE workspaces SET name = ? WHERE id = ?`, name, id)
 	if err != nil {
@@ -114,7 +112,8 @@ func (s *Store) RenameWorkspace(id int64, name string) error {
 // they are not classified again.
 func (s *Store) DeleteWorkspace(id int64) error {
 	return s.Tx(func(tx *sql.Tx) error {
-		if _, err := tx.Exec(`UPDATE assignments SET workspace = NULL WHERE workspace = ?`, id); err != nil {
+		// Its sessions grouped again by discovery, those you moved there too.
+		if _, err := tx.Exec(`UPDATE assignments SET workspace = NULL, manual = 0 WHERE workspace = ?`, id); err != nil {
 			return err
 		}
 		r, err := tx.Exec(`DELETE FROM workspaces WHERE id = ?`, id)

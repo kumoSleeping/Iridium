@@ -5,24 +5,28 @@
 // out of the chart (and the total) or puts it back; its 仅此 shows it alone, and on the one shown
 // alone it reads 全部; 全选 over the list and the chip at the top put everyone back. Leaving or
 // coming back, the bars and the total glide to the new figures. A bar pressed narrows the page to
-// that day. A terminal's models are in its line and its tip; no page of its own.
+// that day. A terminal's models are in its line and its tip; no page of its own. Over it all, the
+// harnesses (the user, 2026-11-08): all four at first; pressed, one leaves the whole page (chart,
+// total, list) or comes back, and the last one taken out puts all four back.
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { ChevronLeft, CircleHelp, LoaderCircle, UserX, X } from "lucide-react";
+import { CircleHelp, LoaderCircle, UserX, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { api } from "./api/client";
 import type { Agent, Usage, UsageRow } from "./api/types.gen";
 import { t, useLang } from "./i18n";
-import { LocalMark, Segmented } from "./me";
+import { LocalMark } from "./me";
 import { reduced } from "./motion";
 import { errText } from "./toast";
-import { agentName, Avatar, cn, IconKey, Tip, tokens } from "./ui";
+import { agentName, AGENTS, Avatar, cn, Logo, Tip, tokens } from "./ui";
 
 const dollars = (n: number) => (n >= 100 ? `$${Math.round(n)}` : `$${n.toFixed(2)}`);
 
-const RANGES = [7, 30] as const;
+/** 1: the last 24 hours, a bar an hour (the user, 2026-11-08); else a bar a day. */
+const RANGES = [1, 7, 30] as const;
 
 /** The last days' usage. The last answer stays while another range loads. */
-const useUsage = (days: number) => useQuery({ queryKey: ["usage", days], queryFn: () => api.usage(days), staleTime: 30_000, placeholderData: keepPreviousData });
+const useUsage = (days: number) => useQuery({ queryKey: ["usage", days], queryFn: () => api.usage(days, undefined, days === 1 ? "hour" : undefined), staleTime: 30_000, placeholderData: keepPreviousData });
+const rangeName = (days: number) => (days === 1 ? t("usage.last24h") : t("usage.lastDays", { n: days }));
 
 type Sum = { turns: number; input: number; output: number; cacheRead: number; cacheWrite: number; cost: number };
 const zero = (): Sum => ({ turns: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 });
@@ -96,8 +100,25 @@ function paint(ids: string[]): Map<string, string> {
   return out;
 }
 
-/** A day ("2026-11-07") as the page's language writes it: 11月7日周六, Sat, Nov 7. */
-const dayLabel = (day: string, weekday = true) => new Date(`${day}T00:00`).toLocaleDateString(document.documentElement.lang || undefined, { month: "numeric", day: "numeric", ...(weekday ? { weekday: "short" } : {}) });
+const hourly = (key: string) => key.includes("T");
+/** A formatter for the page's language, made once: a new one each call was the chart's cost. */
+const fmts = new Map<string, Intl.DateTimeFormat>();
+const fmt = (kind: "hm" | "md" | "mdw" | "w", o: Intl.DateTimeFormatOptions) => {
+  const k = `${document.documentElement.lang} ${kind}`;
+  let f = fmts.get(k);
+  if (!f) fmts.set(k, (f = new Intl.DateTimeFormat(document.documentElement.lang || undefined, o)));
+  return f;
+};
+/** An hour's key ("2026-11-07T05") as the page's language writes its start: 05:00. */
+const hourLabel = (key: string) => fmt("hm", { hour: "2-digit", minute: "2-digit" }).format(new Date(`${key}:00`));
+/** A bar's key as the page's language writes it: a day ("2026-11-07") 11月7日周六, Sat, Nov 7; an
+ *  hour ("2026-11-07T05") 11月7日 05:00. */
+const dayLabel = (day: string, weekday = true) =>
+  hourly(day)
+    ? `${fmt("md", { month: "numeric", day: "numeric" }).format(new Date(`${day}:00`))} ${hourLabel(day)}`
+    : (weekday ? fmt("mdw", { month: "numeric", day: "numeric", weekday: "short" }) : fmt("md", { month: "numeric", day: "numeric" })).format(new Date(`${day}T00:00`));
+/** A day's weekday, one letter. */
+const weekdayOf = (day: string) => fmt("w", { weekday: "narrow" }).format(new Date(`${day}T00:00`));
 
 /** A terminal in the usage: its avatar and name; "" (who began the turns not known) and removed
  *  ones said so. */
@@ -117,12 +138,16 @@ function who(u: Usage | undefined, id: string): { name: string; mark: (size: num
 
 /** A figure that runs to its new value rather than jumping (eased, 420ms); at once with reduced
  *  motion. */
-function useGlide(to: number) {
+function useGlide(to: number, ready = true) {
   const [v, setV] = useState(to);
   const from = useRef(to);
+  // Till the first answer there is nothing to run from: it is shown as it comes.
+  const was = useRef(ready);
   useEffect(() => {
     const start = from.current;
-    if (start === to || reduced()) {
+    const first = !was.current && ready;
+    was.current = ready;
+    if (start === to || reduced() || first || !ready) {
       from.current = to;
       setV(to);
       return;
@@ -142,16 +167,30 @@ function useGlide(to: number) {
   return v;
 }
 
-export function UsagePage({ onBack }: { onBack: () => void }) {
+/** A panel of its own (no way back to the settings: it is not one of their pages): at the point it
+ *  was asked from with the sidebar shown, the phone sheet's 用量 page. */
+export function UsagePage() {
   useLang();
   const [days, setDays] = useState<number>(7);
   const [day, setDay] = useState<string | null>(null);
   // Those taken out of the chart; none at first: everyone is in, and so is one first seen later.
   const [off, setOff] = useState<ReadonlySet<string>>(() => new Set());
+  // The harnesses taken out of the whole page; none at first.
+  const [hidden, setHidden] = useState<ReadonlySet<Agent>>(() => new Set());
   const q = useUsage(days);
   const u = q.data;
-  const s = useMemo(() => summarize(u?.rows ?? [], day), [u, day]);
-  const colors = useMemo(() => paint(s.order), [s.order]);
+  const rows = useMemo(() => (u?.rows ?? []).filter((r) => !hidden.has(r.agent)), [u, hidden]);
+  const s = useMemo(() => summarize(rows, day), [rows, day]);
+  // Colours from every terminal in the range, so a harness taken out recolours no one.
+  const ids = useMemo(() => [...new Set((u?.rows ?? []).map((r) => r.terminal))].join("\u0000"), [u]);
+  const colors = useMemo(() => paint(ids ? ids.split("\u0000") : []), [ids]);
+  const harnesses = AGENTS.filter((a) => !hidden.has(a));
+  const toggleHarness = (a: Agent) =>
+    setHidden(harnesses.length === 1 && !hidden.has(a) ? new Set() : (o) => {
+      const n = new Set(o);
+      if (!n.delete(a)) n.add(a);
+      return n;
+    });
   const on = (id: string) => !off.has(id);
   const shown = s.order.filter(on);
   const many = s.order.length > 1;
@@ -168,7 +207,7 @@ export function UsagePage({ onBack }: { onBack: () => void }) {
   const sum = zero();
   for (const x of s.byTerminal) if (on(x.id)) add(sum, x.sum);
   const whole = s.byTerminal.reduce((a, x) => a + totalOf(x.sum), 0);
-  const total = useGlide(totalOf(sum));
+  const total = useGlide(totalOf(sum), !!u);
   const chip = (key: string, label: ReactNode, clear: () => void, mark?: ReactNode) => (
     <button key={key} type="button" onClick={clear} className="g-pop g-press -my-1 flex h-6 min-w-0 items-center gap-1.5 rounded-full bg-fill px-2 text-ink-2 hover:bg-fill-2">
       {mark}
@@ -178,25 +217,23 @@ export function UsagePage({ onBack }: { onBack: () => void }) {
   );
   return (
     <div className="flex h-full flex-col">
-      <header className="flex h-10.5 shrink-0 items-center gap-1 px-1.5 pt-1.5">
-        <IconKey label={t("nav.back")} onClick={onBack} tipSide="bottom" className="size-7">
-          <ChevronLeft size={16} />
-        </IconKey>
+      <header className="flex h-10.5 shrink-0 items-center gap-1 px-3 pt-1.5">
         <h1 className="m-0 min-w-0 flex-1 truncate text-base font-semibold">{t("usage.title")}</h1>
-        {q.isFetching && <LoaderCircle size={14} className="animate-spin text-ink-4" />}
-        <Segmented
-          label={t("usage.range")}
-          value={String(days)}
-          onChange={(v) => (setDays(Number(v)), setDay(null))}
-          items={RANGES.map((n) => ({ v: String(n), label: t("usage.lastDays", { n }), icon: <span className="px-0.5 text-xs tabular-nums">{t("usage.days", { n })}</span> }))}
-        />
+        {/* Only once it has been a moment: a quick answer shows no spinner flashing. */}
+        {q.isFetching && u && <span className="g-fade mr-1.5 grid [animation-delay:200ms]"><LoaderCircle size={14} className="animate-spin text-ink-4" /></span>}
       </header>
+      {/* The page's two choices on a line of their own under the title, as plain words and marks
+          (the user, 2026-11-08): no box in a box, and room for the title in the narrow dialog. */}
+      <div className="flex h-9 shrink-0 items-center justify-between gap-2 px-3">
+        <Ranges value={days} onChange={(n) => (setDays(n), setDay(null))} />
+        <Harnesses on={(a) => !hidden.has(a)} onToggle={toggleHarness} />
+      </div>
       <div className="no-bar min-h-0 flex-1 overflow-y-auto pt-3 pb-4">
         <div className="flex flex-col gap-4 px-3">
           {q.isError && <p className="m-0 text-sm text-ink-3">{errText(q.error)}</p>}
           <section className="flex flex-col gap-3" aria-label={t("usage.title")}>
             <div className="flex min-h-4 min-w-0 items-center gap-1.5 text-xs text-ink-3">
-              {day ? chip("day", dayLabel(day), () => setDay(null)) : <span className="shrink-0">{t("usage.lastDays", { n: days })}</span>}
+              {day ? chip("day", dayLabel(day), () => setDay(null)) : <span className="shrink-0">{rangeName(days)}</span>}
               {!all &&
                 chip(
                   "who",
@@ -205,17 +242,30 @@ export function UsagePage({ onBack }: { onBack: () => void }) {
                   solo !== undefined && <Dot color={colors.get(solo)!} on />,
                 )}
             </div>
-            <div>
-              {/* The figure leads: proportional digits, as a figure that stands alone. */}
-              <div className="text-[30px] leading-9 font-semibold tracking-tight" aria-live="polite">
-                {tokens(Math.round(total))}
+            {/* Till the first answer, the page as it will be, in faint blocks of the same size: nothing
+                moves as it comes, the figures fading in over them and the bars rising. */}
+            {u ? (
+              <div className="g-fade">
+                {/* The figure leads: proportional digits, as a figure that stands alone. */}
+                <div className="text-[30px] leading-9 font-semibold tracking-tight" aria-live="polite">
+                  {tokens(Math.round(total))}
+                </div>
+                <div className="h-4 text-xs text-ink-3 tabular-nums">
+                  {t("usage.tokensTurns", { n: sum.turns })}
+                  {sum.cost > 0 && ` · ${dollars(sum.cost)}`}
+                </div>
               </div>
-              <div className="text-xs text-ink-3 tabular-nums">
-                {t("usage.tokensTurns", { n: sum.turns })}
-                {sum.cost > 0 && ` · ${dollars(sum.cost)}`}
+            ) : (
+              <div aria-hidden className="g-wait">
+                <div className="flex h-9 items-center">
+                  <span className="block h-7 w-24 rounded-md bg-fill" />
+                </div>
+                <div className="flex h-4 items-center">
+                  <span className="block h-2.5 w-28 rounded-full bg-fill" />
+                </div>
               </div>
-            </div>
-            {u && <Stacks u={u} days={u.days} perDay={s.perDay} order={s.order} colors={colors} on={on} sel={day} onSel={setDay} week={days === 7} />}
+            )}
+            {u ? <Stacks u={u} days={u.days} perDay={s.perDay} order={s.order} colors={colors} on={on} sel={day} onSel={setDay} week={days === 7} /> : <StacksWaiting days={days} />}
           </section>
 
           <section className="flex flex-col" aria-label={t("usage.byTerminal")}>
@@ -233,7 +283,22 @@ export function UsagePage({ onBack }: { onBack: () => void }) {
                 </button>
               </div>
             )}
-            {u && s.order.length === 0 && <p className="m-0 py-6 text-center text-sm text-ink-3">{t("usage.none")}</p>}
+            {u && s.order.length === 0 && <p className="g-fade m-0 py-6 text-center text-sm text-ink-3">{t("usage.none")}</p>}
+            {!u && !q.isError && (
+              <div aria-hidden className="g-wait">
+                {[0, 1].map((i) => (
+                  <div key={i} className="flex items-center gap-2.5 py-2">
+                    <span className="block size-2.5 shrink-0 rounded-full bg-fill" />
+                    <span className="block size-6 shrink-0 rounded-full bg-fill" />
+                    <span className="flex min-w-0 flex-1 flex-col gap-1.5">
+                      <span className="block h-3 rounded-full bg-fill" style={{ width: i ? "40%" : "55%" }} />
+                      <span className="block h-2 w-1/3 rounded-full bg-fill" />
+                      <span className="block h-1 rounded-full bg-fill" />
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
             {s.byTerminal.map((x) => (
               <TerminalRow
                 key={x.id}
@@ -251,6 +316,54 @@ export function UsagePage({ onBack }: { onBack: () => void }) {
           </section>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** The ranges as words, the one chosen in ink on a soft pill that glides to the next. */
+function Ranges({ value, onChange }: { value: number; onChange: (n: number) => void }) {
+  const at = Math.max(0, RANGES.indexOf(value as (typeof RANGES)[number]));
+  return (
+    <div role="radiogroup" aria-label={t("usage.range")} className="relative -ml-1 grid grid-cols-3">
+      <span aria-hidden className="absolute inset-y-0 left-0 w-1/3 rounded-full bg-fill transition-transform duration-(--dur-3) ease-(--ease-out)" style={{ transform: `translateX(${at * 100}%)` }} />
+      {RANGES.map((n) => (
+        <button
+          key={n}
+          type="button"
+          role="radio"
+          aria-checked={n === value}
+          aria-label={rangeName(n)}
+          onClick={() => onChange(n)}
+          className={cn("g-press relative h-7 px-2.5 text-xs whitespace-nowrap tabular-nums transition-colors duration-(--dur-2) pointer-coarse:h-9", n === value ? "font-medium text-ink" : "text-ink-3 hover:text-ink")}
+        >
+          {t("usage.days", { n })}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** The harnesses as a row of their bare marks (no box: the user, 2026-11-08), each one pressed in
+ *  or out of the whole page, faint and grey when out. */
+function Harnesses({ on, onToggle }: { on: (a: Agent) => boolean; onToggle: (a: Agent) => void }) {
+  return (
+    <div role="group" aria-label={t("usage.harness")} className="-mr-1 flex items-center">
+      {AGENTS.map((a) => (
+        <Tip key={a} label={agentName(a)}>
+          <button
+            type="button"
+            aria-pressed={on(a)}
+            aria-label={agentName(a)}
+            onClick={() => onToggle(a)}
+            className={cn(
+              "g-press grid size-7 place-items-center rounded-full transition-[opacity,filter,background-color] duration-(--dur-2) hover:bg-fill pointer-coarse:size-9",
+              !on(a) && "opacity-30 grayscale hover:opacity-60",
+            )}
+          >
+            <Logo agent={a} size={15} />
+          </button>
+        </Tip>
+      ))}
     </div>
   );
 }
@@ -278,7 +391,14 @@ function niceUnder(max: number) {
  *  marks a round figure. Pressed, a day is chosen (pressed again, the range); its tip has the day's
  *  total and each one's. week: each day's weekday under it, else the range's ends. */
 function Stacks({ u, days, perDay, order, colors, on, sel, onSel, week }: { u: Usage; days: string[]; perDay: Map<string, Map<string, Sum>>; order: string[]; colors: Map<string, string>; on: (id: string) => boolean; sel: string | null; onSel: (d: string | null) => void; week: boolean }) {
+  const hours = hourly(days[0] ?? "");
   const H = week ? 136 : 120;
+  // Drawn first at nothing, the bars rise to their figures (their height's glide).
+  const [risen, setRisen] = useState(false);
+  useEffect(() => {
+    const f = requestAnimationFrame(() => setRisen(true));
+    return () => cancelAnimationFrame(f);
+  }, []);
   const room = H - 14; // the scale's label above the highest bar
   const totals = days.map((d) => {
     let n = 0;
@@ -335,7 +455,7 @@ function Stacks({ u, days, perDay, order, colors, on, sel, onSel, week }: { u: U
                   <span className={cn("flex w-full flex-col-reverse overflow-hidden rounded-t-[4px]", week ? "max-w-9" : "max-w-6")}>
                     {order.map((id) => {
                       const x = day?.get(id);
-                      const h = x && on(id) && max ? (totalOf(x) / max) * room : 0;
+                      const h = risen && x && on(id) && max ? (totalOf(x) / max) * room : 0;
                       // A 1.5px gap over each part (its top border, see-through); none on a sliver.
                       return (
                         <span
@@ -356,16 +476,37 @@ function Stacks({ u, days, perDay, order, colors, on, sel, onSel, week }: { u: U
         <div className="flex gap-1.5 text-[11px] text-ink-3 tabular-nums">
           {days.map((d) => (
             <span key={d} className={cn("min-w-0 flex-1 truncate text-center transition-colors duration-(--dur-2)", (d === sel || (!sel && d === today)) && "font-medium text-ink-2")}>
-              {d === today ? t("usage.today") : new Date(`${d}T00:00`).toLocaleDateString(document.documentElement.lang || undefined, { weekday: "narrow" })}
+              {d === today ? t("usage.today") : weekdayOf(d)}
             </span>
           ))}
         </div>
       ) : (
         <div className="flex justify-between text-[11px] text-ink-3 tabular-nums">
-          <span>{dayLabel(days[0]!, false)}</span>
-          <span>{t("usage.today")}</span>
+          <span>{hours ? hourLabel(days[0]!) : dayLabel(days[0]!, false)}</span>
+          <span>{hours ? t("usage.thisHour") : t("usage.today")}</span>
         </div>
       )}
+    </div>
+  );
+}
+
+/** The chart's place while the first answer comes: as tall as it will be, faint bars of no
+ *  figure in it, and the line under it. */
+function StacksWaiting({ days }: { days: number }) {
+  const week = days === 7;
+  const n = days === 1 ? 24 : days;
+  return (
+    <div aria-hidden className="g-wait flex flex-col gap-1">
+      <div className={cn("flex items-end border-b border-fill-2", week ? "gap-1.5" : "gap-0.5")} style={{ height: week ? 136 : 120 }}>
+        {Array.from({ length: n }, (_, i) => (
+          <span key={i} className="flex h-full min-w-0 flex-1 items-end justify-center">
+            <span className={cn("block w-full rounded-t-[4px] bg-fill", week ? "max-w-9" : "max-w-6")} style={{ height: `${18 + ((i * 37) % 45)}%` }} />
+          </span>
+        ))}
+      </div>
+      <div className="flex h-[16.5px] items-center">
+        <span className="block h-2 w-full rounded-full bg-fill" />
+      </div>
     </div>
   );
 }
@@ -414,13 +555,13 @@ function TerminalRow({ x, u, color, whole, on, many, alone, onToggle, onOnly }: 
   if (!many)
     return (
       <Tip label={tip} align="start">
-        <div tabIndex={0} className="-mx-1.5 flex items-center rounded-md px-1.5 py-2 outline-offset-1">
+        <div tabIndex={0} className="g-fade -mx-1.5 flex items-center rounded-md px-1.5 py-2 outline-offset-1">
           {body}
         </div>
       </Tip>
     );
   return (
-    <div className="group -mx-1.5 flex items-center gap-1 rounded-md pr-1 hover:bg-fill">
+    <div className="g-fade group -mx-1.5 flex items-center gap-1 rounded-md pr-1 hover:bg-fill">
       <Tip label={tip} align="start">
         <button type="button" aria-pressed={on} aria-label={w.name} onClick={onToggle} className="g-press flex min-w-0 flex-1 items-center rounded-md py-2 pl-1.5 text-left outline-offset-1">
           {body}

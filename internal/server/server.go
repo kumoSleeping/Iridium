@@ -46,8 +46,6 @@ type Server struct {
 	hub  *hub.Hub
 	st   *store.Store
 	logf func(string, ...any)
-	// claimed: the workspaces made before their creator was kept have been given one (me).
-	claimed atomic.Bool
 	// ConfigPath is where PUT /api/public saves public.origin; "" saves it nowhere.
 	ConfigPath string
 	// Updater, if set, serves /api/update and carries the state "update".
@@ -104,7 +102,11 @@ func (s *Server) Handler(local bool) http.Handler {
 		reply(w, http.StatusOK, map[string]any{"ok": true})
 	})
 	mux.HandleFunc("GET /api/agents", func(w http.ResponseWriter, r *http.Request) {
-		reply(w, http.StatusOK, agents.Describe())
+		l := agents.Describe()
+		for i := range l {
+			l[i].Missing = s.m.Missing(l[i].Agent)
+		}
+		reply(w, http.StatusOK, l)
 	})
 	// What carries transcripts goes out with the credentials' values masked (routes_secrets.go).
 	mux.HandleFunc("GET /api/sessions", s.masked(s.list))

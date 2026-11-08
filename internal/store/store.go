@@ -155,7 +155,8 @@ var schema = []string{
 	`ALTER TABLE names ADD COLUMN auto INTEGER NOT NULL DEFAULT 0;`,
 	// 12: a session's agent preset (dsh's tools and prompt); NULL: the agent's default.
 	`ALTER TABLE session_settings ADD COLUMN preset TEXT;`,
-	// 13: who made a workspace (a terminal's ID); NULL: not known (made before this).
+	// 13: who made a workspace (a terminal's ID); unused since workspaces are folder groups
+	// (2026-11-08), kept as the schema only grows.
 	`ALTER TABLE workspaces ADD COLUMN creator TEXT;`,
 }
 
@@ -335,8 +336,6 @@ type Workspace struct {
 	ID   int64  `json:"id"`
 	Name string `json:"name"`
 	Path string `json:"path"`
-	// Creator: the terminal that made it; "" when not known.
-	Creator string `json:"creator,omitempty"`
 }
 
 func (s *Store) AddWorkspace(name, path string) (int64, error) {
@@ -348,7 +347,7 @@ func (s *Store) AddWorkspace(name, path string) (int64, error) {
 }
 
 func (s *Store) Workspaces() ([]Workspace, error) {
-	rows, err := s.db.Query(`SELECT id, name, path, IFNULL(creator, '') FROM workspaces ORDER BY sort, id`)
+	rows, err := s.db.Query(`SELECT id, name, path FROM workspaces ORDER BY sort, id`)
 	if err != nil {
 		return nil, err
 	}
@@ -356,7 +355,7 @@ func (s *Store) Workspaces() ([]Workspace, error) {
 	var out []Workspace
 	for rows.Next() {
 		var w Workspace
-		if err := rows.Scan(&w.ID, &w.Name, &w.Path, &w.Creator); err != nil {
+		if err := rows.Scan(&w.ID, &w.Name, &w.Path); err != nil {
 			return nil, err
 		}
 		out = append(out, w)
@@ -572,6 +571,11 @@ type UsageDay struct {
 // UsageByDay sums the usage since at (ms) by local day, terminal, agent and model, oldest day
 // first; terminals given, only theirs.
 func (s *Store) UsageByDay(at int64, terminals ...string) ([]UsageDay, error) {
+	return s.UsageBy(at, func(t time.Time) string { return t.Format(time.DateOnly) }, terminals...)
+}
+
+// UsageBy is UsageByDay with the rows put in bucket's keys (UsageDay.Day) rather than days.
+func (s *Store) UsageBy(at int64, bucket func(time.Time) string, terminals ...string) ([]UsageDay, error) {
 	q := `SELECT at, terminal, agent, model, input, output, cache_read, cache_write, cost_usd FROM usage WHERE at >= ?`
 	args := []any{at}
 	if len(terminals) > 0 {
@@ -596,7 +600,7 @@ func (s *Store) UsageByDay(at int64, terminals ...string) ([]UsageDay, error) {
 		if err := rows.Scan(&ms, &k.terminal, &k.agent, &k.model, &in, &o, &cr, &cw, &cost); err != nil {
 			return nil, err
 		}
-		k.day = time.UnixMilli(ms).Format(time.DateOnly)
+		k.day = bucket(time.UnixMilli(ms))
 		i, ok := index[k]
 		if !ok {
 			i = len(out)

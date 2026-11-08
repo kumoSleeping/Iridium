@@ -371,6 +371,7 @@ func (h *Hosted) attached(ready chan struct{}) {
 	defer cancel()
 	u, err := h.drv.Quota(ctx)
 	if err != nil {
+		go h.refreshQuota() // a balance instead (dsh), not waited for
 		return
 	}
 	h.mu.Lock()
@@ -379,7 +380,7 @@ func (h *Hosted) attached(ready chan struct{}) {
 	}
 	h.mu.Unlock()
 	if len(u.Windows) > 0 {
-		h.setQuota(u.Windows)
+		h.setQuota(u.Windows, nil)
 	} else {
 		h.m.publishQuota() // live now
 	}

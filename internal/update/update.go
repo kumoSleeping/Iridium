@@ -149,18 +149,6 @@ func (u *Updater) set(f func(*api.UpdateState)) api.UpdateState {
 	return st
 }
 
-// SetAuto turns auto download on or off (the settings page); on, a newer version already seen is
-// fetched now.
-func (u *Updater) SetAuto(on bool) {
-	u.mu.Lock()
-	u.auto = on
-	u.mu.Unlock()
-	u.set(func(s *api.UpdateState) { s.Auto = on })
-	if on {
-		u.fetchAhead()
-	}
-}
-
 // Run drops what an earlier run left staged, checks a minute after it starts, then every Every,
 // until ctx ends.
 func (u *Updater) Run(ctx context.Context) {

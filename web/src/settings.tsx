@@ -11,7 +11,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, LoaderCircle, LogOut, RefreshCw } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
-import { api } from "./api/client";
+import { api, ApiError } from "./api/client";
 import type { PushEvents, PushState, Settings, SettingsPatch } from "./api/types.gen";
 import { pushQ, useMe, useSettings, useTerminals, useUpdate } from "./data";
 import { t, useLang } from "./i18n";
@@ -23,6 +23,7 @@ import { useConfirms } from "./store";
 import { errText, toast } from "./toast";
 import { Choose } from "./choose";
 import { cn, IconKey, steerKey, Switch, Tip } from "./ui";
+import { expectUpgrade } from "./upgrade";
 
 /** The panel's own pages: the avatar's crop. */
 export type Page = "main" | "crop";
@@ -129,7 +130,6 @@ export function SettingsPage({ theme, setTheme, initial = "main" }: { theme: The
               </>,
             )}
           {manages && nav(t("secrets.title"), () => go({ name: "secrets" }))}
-          {manages && nav(t("usage.title"), () => go({ name: "usage" }))}
           <Item label={t("settings.pushOn")}>
             {pushing ? <LoaderCircle size={16} className="animate-spin text-ink-3" /> : <Switch label={t("settings.pushOn")} disabled={!push || !("PushManager" in window)} on={pushed} onChange={(v) => void pushOn(v)} />}
           </Item>
@@ -165,7 +165,7 @@ export function SettingsPage({ theme, setTheme, initial = "main" }: { theme: The
               ]}
             />
           </Item>
-          {manages && <UpdateItems auto={s?.updateAuto ?? true} disabled={off} onAuto={(v) => void put({ updateAuto: v })} />}
+          {manages && <UpdateItem />}
           {me && !me.local && <SignOut />}
         </div>
       </div>
@@ -226,56 +226,70 @@ const mb = (n: number) => (n >= 1 << 20 ? `${(n / (1 << 20)).toFixed(1)} MB` : `
  *  asks for one (the daemon looks once a day by itself). */
 const STALE = 3_600_000;
 
-/** The update's items (managers only, with a source): 自动下载更新 (a newer one is fetched ahead, so
- *  更新 only restarts) and 检查更新 with how the last look went. */
-function UpdateItems({ auto, disabled, onAuto }: { auto: boolean; disabled: boolean; onAuto: (v: boolean) => void }) {
+/** 检查更新 (managers only, with a source): one key that looks and, finding a newer release,
+ *  downloads it, puts it in place and restarts, asking nothing more; the page then loads the new
+ *  build (the user, 2026-11-08). Beside it how that goes: 检查中, 下载中 37%, 重启中, 已是最新 · when,
+ *  更新失败 (the error on hover). Release builds download a newer one ahead by themselves; there is no
+ *  switch for it. */
+function UpdateItem() {
   const lang = useLang();
   const u = useUpdate().data;
   const [busy, setBusy] = useState(false);
   const working = u?.phase === "checking" || u?.phase === "downloading" || u?.phase === "restarting";
-  const look = (quiet?: boolean) => {
+  const look = () => {
     setBusy(true);
     void api.checkUpdate().then(
       () => setBusy(false),
-      (e) => (setBusy(false), !quiet && toast(t("err.update"), { error: true, description: errText(e) })),
+      () => setBusy(false), // quiet: the status says it failed
+    );
+  };
+  const update = () => {
+    setBusy(true);
+    expectUpgrade();
+    void api.applyUpdate().then(
+      () => setBusy(false),
+      // The daemon's answers (409 nothing newer, a failed download) the status says; only a request
+      // that got no answer is told.
+      (e) => (setBusy(false), expectUpgrade(false), !(e instanceof ApiError) && toast(t("err.update"), { error: true, description: errText(e) })),
     );
   };
   // Opened with the last look stale: look now, saying nothing if it fails.
   const stale = !!u?.source && u.phase === "idle" && Date.now() - (u.checkedAt ?? 0) > STALE;
   useEffect(() => {
-    if (stale) look(true);
+    if (stale) look();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stale]);
   if (!u?.source) return null;
   const checked = u.checkedAt ? new Date(u.checkedAt).toLocaleString(lang === "zh" ? "zh-CN" : "en", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
+  const pct = u.phase === "downloading" && u.size ? Math.min(99, Math.floor(((u.got ?? 0) * 100) / u.size)) : null;
   const status =
-    u.phase === "checking" || busy
-      ? t("settings.checking")
+    u.phase === "restarting"
+      ? t("settings.restarting")
       : u.phase === "downloading"
-        ? t("settings.downloading")
-        : u.phase === "failed"
-          ? t("settings.checkFailed")
-          : u.available
-            ? t("settings.updateTo", { v: u.latest ?? "" })
-            : checked
-              ? `${t("settings.upToDate")} · ${checked}`
-              : "";
+        ? pct !== null
+          ? `${t("settings.downloading")} ${pct}%`
+          : t("settings.downloading")
+        : u.phase === "checking" || busy
+          ? t("settings.checking")
+          : u.phase === "failed"
+            ? t("settings.checkFailed")
+            : u.available
+              ? t("settings.updateTo", { v: u.latest ?? "" })
+              : checked
+                ? `${t("settings.upToDate")} · ${checked}`
+                : "";
+  const spin = busy || working;
   return (
-    <>
-      <Item label={t("settings.updateAuto")}>
-        <Switch label={t("settings.updateAuto")} disabled={disabled} on={auto} onChange={onAuto} />
-      </Item>
-      <Item label={t("settings.check")}>
-        <span className="flex items-center gap-1">
-          <Tip label={u.phase === "failed" && u.error ? u.error : status}>
-            <span className={`max-w-40 truncate text-xs tabular-nums ${u.phase === "failed" ? "text-err" : "text-ink-3"}`}>{status}</span>
-          </Tip>
-          <IconKey label={t("settings.check")} disabled={busy || working} onClick={() => look()} className="size-7">
-            <RefreshCw size={14} className={busy || u.phase === "checking" ? "animate-spin" : undefined} />
-          </IconKey>
-        </span>
-      </Item>
-    </>
+    <Item label={t("settings.check")}>
+      <span className="flex items-center gap-1">
+        <Tip label={u.phase === "failed" && u.error ? u.error : status}>
+          <span className={`max-w-40 truncate text-xs tabular-nums ${u.phase === "failed" ? "text-err" : "text-ink-3"}`}>{status}</span>
+        </Tip>
+        <IconKey label={t("settings.check")} disabled={spin} onClick={update} className="size-7">
+          <RefreshCw size={14} className={spin ? "animate-spin" : undefined} />
+        </IconKey>
+      </span>
+    </Item>
   );
 }
 
@@ -290,9 +304,10 @@ function UpdateRow() {
   if (!u.available) return null;
   const apply = () => {
     setBusy(true);
+    expectUpgrade();
     void api.applyUpdate().then(
-      () => (setBusy(false), toast(t("settings.updating"))),
-      (e) => (setBusy(false), toast(t("err.update"), { error: true, description: errText(e) })),
+      () => setBusy(false),
+      (e) => (setBusy(false), expectUpgrade(false), toast(t("err.update"), { error: true, description: errText(e) })),
     );
   };
   const working = u.phase === "checking" || u.phase === "downloading" || u.phase === "restarting";

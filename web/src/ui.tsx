@@ -92,6 +92,14 @@ export function useMenuAt() {
   return [at, set] as const;
 }
 
+/** Something else that floats at a point as a row's menu does (the usage panel, app.tsx): opening
+ *  it puts away the menu open, and a menu opened later puts it away. Gives its letting go. */
+export function holdMenu(close: () => void) {
+  if (shut !== close) shut?.();
+  shut = close;
+  return () => void (shut === close && (shut = null));
+}
+
 /** Long-press on touch: fires after 450 ms held still, and swallows the click that follows. Not for
  *  a press in a portal of its children (a row's "+" popover): React may hand one pointerdown to a
  *  row twice from there, from the portal's container and from <body>, and the first timer would be
@@ -136,16 +144,44 @@ export function useLongPress(onLong: () => void) {
 let touched = false;
 if (typeof window !== "undefined") {
   addEventListener("pointerdown", (e) => (touched = e.pointerType === "touch"), { capture: true, passive: true });
-  // A long press in the list or a bar is ours (a row's menu) or nothing: never the browser's own
-  // download, print, share (the user's unfolded phone, 2026-11-08). Words being typed keep theirs.
+  // A finger's long press is ours (a row's menu) or nothing: never the browser's own download,
+  // print, share, anywhere on the page (the user's unfolded phone in the computer's layout,
+  // 2026-11-08). The browser keeps it only where it is of use: words being typed, words to choose
+  // (a long press on them chooses them), a link, a picture.
   addEventListener(
     "contextmenu",
     (e) => {
       const el = e.target instanceof Element ? e.target : null;
-      if (touched && el?.closest("aside, header, [role=treeitem], [role=menu]") && !el.closest("input, textarea, [contenteditable]")) e.preventDefault();
+      if (!touched || !el) return;
+      if (el.closest("input, textarea, [contenteditable], a[href], img, video")) return;
+      if (!getSelection()?.isCollapsed) return;
+      if (!el.closest("aside, header, [role=treeitem], [role=menu]") && onWords(el, e.clientX, e.clientY)) return;
+      e.preventDefault();
     },
     { capture: true },
   );
+}
+
+/** Whether a point is on words that may be chosen: a letter under it, not only near it, in what
+ *  does not forbid choosing. */
+function onWords(el: Element, x: number, y: number) {
+  if (getComputedStyle(el).userSelect === "none") return false;
+  const doc = document as Document & { caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null; caretRangeFromPoint?: (x: number, y: number) => Range | null };
+  const p = doc.caretPositionFromPoint?.(x, y);
+  const r = doc.caretRangeFromPoint?.(x, y);
+  const node = p?.offsetNode ?? r?.startContainer;
+  const at = p?.offset ?? r?.startOffset ?? 0;
+  if (!node || node.nodeType !== Node.TEXT_NODE) return false;
+  const text = node.textContent ?? "";
+  // The letter before or after the caret, whichever the finger is on.
+  for (const i of [at, at - 1]) {
+    if (i < 0 || i >= text.length || !/\S/.test(text[i]!)) continue;
+    const range = document.createRange();
+    range.setStart(node, i);
+    range.setEnd(node, i + 1);
+    for (const b of range.getClientRects()) if (x >= b.left - 2 && x <= b.right + 2 && y >= b.top - 2 && y <= b.bottom + 2) return true;
+  }
+  return false;
 }
 
 /** The words behind an icon: on hover or keyboard focus; never for a finger, whose long press is a

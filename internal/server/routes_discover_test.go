@@ -14,19 +14,18 @@ import (
 	"github.com/kumoSleeping/iridium/internal/config"
 	"github.com/kumoSleeping/iridium/internal/discover"
 	"github.com/kumoSleeping/iridium/internal/session"
-	"github.com/kumoSleeping/iridium/internal/store"
 )
 
 func TestWorkspacesAndFolders(t *testing.T) {
-	s, cfg, work := setup(t)
-	st, err := store.Open(filepath.Join(cfg.StateDir, "iridium.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
+	// The session manager's discovery is this index: a session made goes in its group at once.
+	var d *discover.Index
+	s, _, work := setupWith(t, func(o *session.Options) {
+		empty := t.TempDir()
+		d = discover.New(discover.Options{ClaudeDir: o.Config.ClaudeHome, CodexHome: empty, PiSessions: empty, DshHome: empty, Store: o.Store, Hub: o.Hub, Procs: discover.ProcFS{Root: empty}, Logf: t.Logf, Settle: 10 * time.Millisecond})
+		o.Discovery = d
+	})
 	root := filepath.Dir(work)
-	empty := t.TempDir()
-	d := discover.New(discover.Options{ClaudeDir: cfg.ClaudeHome, CodexHome: empty, PiSessions: empty, DshHome: empty, Store: st, Hub: s.hub, Procs: discover.ProcFS{Root: empty}, Logf: t.Logf, Settle: 10 * time.Millisecond})
+	d.SetOnChange(s.m.Refresh)
 	if err := d.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -56,58 +55,40 @@ func TestWorkspacesAndFolders(t *testing.T) {
 		t.Errorf("outside the home: %d", code)
 	}
 
-	// Workspaces: make, rename, list, delete.
-	var ws api.Workspace
-	if code := call(t, c, "POST", base+"/api/workspaces", api.NewWorkspace{Path: made.Path}, &ws); code != 200 || ws.Name != "proj" || ws.Path != made.Path {
-		t.Fatalf("new workspace: %d %+v", code, ws)
+	// Groups: none made by hand (the user, 2026-11-08); a session in a folder makes its group,
+	// which is renamed and listed.
+	if code := call(t, c, "POST", base+"/api/workspaces", map[string]string{"path": made.Path}, nil); code != http.StatusMethodNotAllowed {
+		t.Errorf("a workspace made by hand: %d", code)
 	}
-	if code := call(t, c, "POST", base+"/api/workspaces", api.NewWorkspace{Path: made.Path}, nil); code != http.StatusConflict {
-		t.Errorf("a second of the folder: %d", code)
-	}
-	if code := call(t, c, "POST", base+"/api/workspaces", api.NewWorkspace{Path: filepath.Join(work, "gone")}, nil); code != http.StatusNotFound {
-		t.Errorf("a folder that is not there: %d", code)
-	}
-	if code := call(t, c, "PATCH", base+"/api/workspaces/"+strconv.FormatInt(ws.ID, 10), api.WorkspacePatch{Name: "Project"}, nil); code != 200 {
-		t.Errorf("rename: %d", code)
+	var created api.NewSessionReply
+	if code := call(t, c, "POST", base+"/api/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: made.Path, Text: "hi"}, &created); code != 200 {
+		t.Fatalf("new session: %d", code)
 	}
 	var list []api.Workspace
+	var sessions []api.Session
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		call(t, c, "GET", base+"/api/workspaces", nil, &list)
+		call(t, c, "GET", base+"/api/sessions", nil, &sessions)
+		if len(list) == 1 && len(sessions) == 1 && sessions[0].Workspace == list[0].ID {
+			break
+		}
+	}
+	if len(list) != 1 || list[0].Name != "proj" || list[0].Path != made.Path || len(sessions) != 1 || sessions[0].Workspace != list[0].ID {
+		t.Fatalf("the session's group: %+v %+v", list, sessions)
+	}
+	if code := call(t, c, "PATCH", base+"/api/workspaces/"+strconv.FormatInt(list[0].ID, 10), api.WorkspacePatch{Name: "Project"}, nil); code != 200 {
+		t.Errorf("rename: %d", code)
+	}
 	call(t, c, "GET", base+"/api/workspaces", nil, &list)
 	if len(list) != 1 || list[0].Name != "Project" {
 		t.Errorf("workspaces: %+v", list)
 	}
-
-	// A session moved into it, pinned and named; then the workspace deleted.
-	var created api.NewSessionReply
-	if code := call(t, c, "POST", base+"/api/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: work}, &created); code != 200 {
-		t.Fatalf("new session: %d", code)
-	}
 	yes, name := true, "named"
-	if code := call(t, c, "PATCH", base+"/api/sessions/"+created.ID, api.SessionPatch{Workspace: &ws.ID, Pinned: &yes, Name: &name}, nil); code != 200 {
+	if code := call(t, c, "PATCH", base+"/api/sessions/"+created.ID, api.SessionPatch{Pinned: &yes, Name: &name}, nil); code != 200 {
 		t.Fatalf("patch: %d", code)
-	}
-	var sessions []api.Session
-	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
-		call(t, c, "GET", base+"/api/sessions", nil, &sessions)
-		if len(sessions) == 1 && sessions[0].Workspace == ws.ID && sessions[0].Pinned && sessions[0].Name == "named" {
-			break
-		}
-	}
-	if len(sessions) != 1 || sessions[0].Workspace != ws.ID || !sessions[0].Pinned || sessions[0].Name != "named" {
-		t.Fatalf("sessions: %+v", sessions)
 	}
 	if code := call(t, c, "PATCH", base+"/api/sessions/00000000-0000-4000-8000-000000000000", api.SessionPatch{Pinned: &yes}, nil); code != http.StatusNotFound {
 		t.Errorf("patch of no session: %d", code)
-	}
-	if code := call(t, c, "DELETE", base+"/api/workspaces/"+strconv.FormatInt(ws.ID, 10), nil, nil); code != 200 {
-		t.Errorf("delete: %d", code)
-	}
-	if code := call(t, c, "DELETE", base+"/api/workspaces/"+strconv.FormatInt(ws.ID, 10), nil, nil); code != http.StatusNotFound {
-		t.Errorf("delete twice: %d", code)
-	}
-	sessions = nil
-	call(t, c, "GET", base+"/api/sessions", nil, &sessions)
-	if len(sessions) != 1 || sessions[0].Workspace != 0 {
-		t.Errorf("after delete: %+v", sessions)
 	}
 }
 

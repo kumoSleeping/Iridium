@@ -1,7 +1,7 @@
-// On a phone the bottom sheet holds two pages side by side, 会话 and 终端 (the user, 2026-11-08):
+// On a phone the bottom sheet holds its pages side by side, 设置, 用量 and 会话 (the user, 2026-11-08):
 // tabs at its head's left say which is shown, their pill following the finger, the shown page's
 // keys at its right, one line under the grip, apart from it (the user, 2026-11-08); a swipe across
-// the page, following the finger too, goes to the other, as a press on its tab does. Not a swipe that began
+// the page, following the finger too, goes to the next, as a press on its tab does. Not a swipe that began
 // on what scrolls across, a slider, a box of words, or a menu.
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { cn } from "./ui";
@@ -113,7 +113,7 @@ export function Pager({
     <div className="absolute inset-0 flex flex-col">
       <div className="mt-2 flex h-11 shrink-0 items-center gap-2 px-3 shadow-[0_0.5px_0_var(--edge)]">
         {lead}
-        <div role="tablist" className="relative grid h-8 w-40 shrink-0 rounded-full bg-fill p-0.5" style={{ gridTemplateColumns: `repeat(${tabs.length}, 1fr)` }}>
+        <div role="tablist" className="relative grid h-8 shrink-0 rounded-full bg-fill p-0.5" style={{ width: `${tabs.length * 4.5}rem`, gridTemplateColumns: `repeat(${tabs.length}, 1fr)` }}>
           <span
             aria-hidden
             className={cn("absolute inset-y-0.5 left-0.5 rounded-full bg-paper shadow-[0_0_0_0.5px_var(--edge),0_1px_2px_var(--edge)]", glide)}
@@ -151,8 +151,9 @@ export function Pager({
         </div>
       </div>
       <div ref={track} className="relative min-h-0 flex-1 overflow-hidden">
+        {/* Its own layer: a page turned moves it, nothing drawn again. */}
         <div
-          className={cn("flex h-full", glide)}
+          className={cn("flex h-full will-change-transform", glide)}
           style={
             {
               transform: `translateX(calc(${-page * 100}% + ${dx ?? 0}px))`,

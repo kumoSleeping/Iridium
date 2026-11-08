@@ -14,7 +14,8 @@ import (
 const maxUsageDays = 366
 
 // usage is GET /api/usage?days=N&terminal=<ID, name or "me">: the last N days' (7 by default)
-// usage by day, terminal, agent and model. Without a terminal it is everyone's for those who
+// usage by day, terminal, agent and model; by=hour: the last 24 hours' by hour, its days
+// "2006-01-02T15" (the 1 天 view, the user, 2026-11-08). Without a terminal it is everyone's for those who
 // manage terminals (panels, 本机), a channel's own for a channel; another's only for those who
 // manage.
 func (s *Server) usage(w http.ResponseWriter, r *http.Request) {
@@ -28,6 +29,7 @@ func (s *Server) usage(w http.ResponseWriter, r *http.Request) {
 		}
 		days = n
 	}
+	hourly := r.URL.Query().Get("by") == "hour"
 	var only []string
 	switch ref := r.URL.Query().Get("terminal"); {
 	case ref == "me":
@@ -46,16 +48,22 @@ func (s *Server) usage(w http.ResponseWriter, r *http.Request) {
 		}
 		only = []string{info.ID}
 	}
-	y, m, d := time.Now().Date()
-	first := time.Date(y, m, d-days+1, 0, 0, 0, 0, time.Local)
-	got, err := s.st.UsageByDay(first.UnixMilli(), only...)
+	now := time.Now()
+	y, m, d := now.Date()
+	n, step, format := days, func(i int) time.Time { return time.Date(y, m, d-days+1+i, 0, 0, 0, 0, time.Local) }, time.DateOnly
+	if hourly {
+		const hourKey = "2006-01-02T15"
+		h := now.Hour()
+		n, step, format = 24, func(i int) time.Time { return time.Date(y, m, d, h-23+i, 0, 0, 0, time.Local) }, hourKey
+	}
+	got, err := s.st.UsageBy(step(0).UnixMilli(), func(t time.Time) string { return t.Format(format) }, only...)
 	if err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	out := api.Usage{Days: make([]string, days), Rows: make([]api.UsageRow, 0, len(got)), Terminals: map[string]api.UsageTerminal{}}
-	for i := range days {
-		out.Days[i] = time.Date(y, m, d-days+1+i, 0, 0, 0, 0, time.Local).Format(time.DateOnly)
+	out := api.Usage{Days: make([]string, n), Rows: make([]api.UsageRow, 0, len(got)), Terminals: map[string]api.UsageTerminal{}}
+	for i := range n {
+		out.Days[i] = step(i).Format(format)
 	}
 	name := func(id string) {
 		if _, done := out.Terminals[id]; done || id == "" {

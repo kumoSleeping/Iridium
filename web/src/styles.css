@@ -324,10 +324,24 @@ body {
 /* A session row's lamp, at its top right: bigger than the logo's, and at work it breathes, a soft
    halo coming and going (the user, 2026-11-06: a little plainer to see, not loud). */
 .row-lamp {
+  position: relative;
   display: block;
   width: 7px;
   height: 7px;
   border-radius: 50%;
+}
+/* Its halo, a disc of its own that grows and fades: only opacity and transform move, on the
+   compositor. A box-shadow breathing was a paint of the page each frame, for as long as one was at
+   work, and the phone's sheet stuttered as it turned a page over it. */
+.row-lamp::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  background: color-mix(in oklch, var(--halo, var(--run)) 26%, transparent);
+  opacity: 0;
+  animation: inherit;
+  animation-name: row-halo;
 }
 .row-lamp[data-s="running"] {
   background: var(--run);
@@ -359,11 +373,20 @@ body {
   0%,
   100% {
     opacity: 1;
-    box-shadow: 0 0 0 3px color-mix(in oklch, var(--halo, var(--run)) 26%, transparent);
   }
   50% {
     opacity: 0.55;
-    box-shadow: 0 0 0 0 color-mix(in oklch, var(--halo, var(--run)) 0%, transparent);
+  }
+}
+@keyframes row-halo {
+  0%,
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+  50% {
+    opacity: 0;
+    transform: scale(0.54);
   }
 }
 @keyframes lamp-breathe {
@@ -588,6 +611,7 @@ body {
 /* Still screenshots (?still=1): the infinite animations frozen. */
 [data-still] .lamp > i,
 [data-still] .row-lamp,
+[data-still] .row-lamp::after,
 [data-still] .wait-dot,
 [data-still] .send-ring,
 [data-still] .shine {

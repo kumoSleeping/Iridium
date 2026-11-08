@@ -18,8 +18,6 @@ type Settings struct {
 	// EnterInTurn: what Enter does with words while a turn runs: "steer" (the default) puts them
 	// into the turn, Ctrl or ⌘+Enter queues them; "queue" the other way round.
 	EnterInTurn string `json:"enterInTurn"`
-	// UpdateAuto: a newer Iridium is downloaded as soon as it is seen, so 更新 only restarts.
-	UpdateAuto bool `json:"updateAuto"`
 	// Lang: the user's language, as a web page's settings last set it ("zh", "en"; "" not yet):
 	// hosted agents are told it from their next start.
 	Lang string `json:"lang"`
@@ -34,6 +32,5 @@ type SettingsPatch struct {
 	Modes       map[string]string `json:"modes,omitempty"`
 	Push        *bool             `json:"push,omitempty"`
 	EnterInTurn *string           `json:"enterInTurn,omitempty"`
-	UpdateAuto  *bool             `json:"updateAuto,omitempty"`
 	Lang        *string           `json:"lang,omitempty"`
 }

@@ -85,9 +85,7 @@ writeFileSync(`${iridium}/docs/pipe.png`, png(480, 300));
 writeFileSync(`${iridium}/docs/notes.md`, "# The named pipe\n\nThe holder opens the pipe before the agent starts, so a writer never meets a closed end.\n");
 writeFileSync(`${iridium}/internal/hold/hold.go`, "package hold\n");
 
-// The workspaces first: what is seen after them goes into them.
-const have = await api("GET", "/api/workspaces");
-for (const path of [iridium, kdj]) if (!have.some((w) => w.path === path)) await api("POST", "/api/workspaces", { path });
+// No workspaces to make: the server groups each session by its folder (discover GroupFor).
 
 // Claude sessions on disk, as Claude writes them.
 const ago = (min) => new Date(Date.now() - min * 60_000).toISOString();

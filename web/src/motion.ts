@@ -10,8 +10,18 @@ import type { Turn } from "./route";
 
 export const reduced = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 
+/** The tokens as read, kept: each read of the root's style is a style pass of the whole page,
+ *  forced in the middle of whatever is moving (a page turned in the phone's sheet stuttered). Read
+ *  again only as reduced motion is turned on or off, which changes them (motion.css). */
+const tokens = new Map<string, string>();
+if (typeof window !== "undefined") matchMedia("(prefers-reduced-motion: reduce)").addEventListener?.("change", () => tokens.clear());
 function token(name: string, fallback: string) {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+  let v = tokens.get(name);
+  if (v === undefined) {
+    v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    if (v) tokens.set(name, v);
+  }
+  return v || fallback;
 }
 const ms = (v: string) => (v.endsWith("ms") ? parseFloat(v) : parseFloat(v) * 1000);
 

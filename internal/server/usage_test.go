@@ -55,6 +55,15 @@ func TestUsage(t *testing.T) {
 	if len(long.Days) != 60 || len(long.Rows) != 2 || long.Rows[0].Input != 999 {
 		t.Fatalf("bot's 60 days: %+v", long.Rows)
 	}
+	// By hour: the last 24, this hour last; yesterday's row (24h ago) is before the first.
+	var hours api.Usage
+	l.want(200, "socket", "GET", "/api/usage?days=1&by=hour", nil, &hours)
+	if len(hours.Days) != 24 || hours.Days[23] != now.Format("2006-01-02T15") {
+		t.Fatalf("hours: %v", hours.Days)
+	}
+	if len(hours.Rows) != 2 || hours.Rows[0].Day != hours.Days[23] {
+		t.Fatalf("hours' rows: %+v", hours.Rows)
+	}
 
 	// A channel: its own, asked or not; not 本机's.
 	var own api.Usage

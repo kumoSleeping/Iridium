@@ -45,6 +45,10 @@ export interface AgentInfo {
    */
   presets?: string[];
   defaultPreset?: string;
+  /**
+   * Missing: its program is not on the daemon's PATH (not installed): a new session is refused.
+   */
+  missing?: boolean;
 }
 /**
  * Color is a colour tag a session or a folder is given from its menu (the user, 2026-11-06).
@@ -285,8 +289,19 @@ export interface AgentQuota {
   account?: string; // the login the agent reports (Claude: e-mail)
   plan?: string; // Claude: subscriptionType
   windows: QuotaWindow[];
+  balance?: Balance[]; // dsh: the DeepSeek account's money, by currency
   at: number /* int64 */; // when they were read
   live: boolean;
+}
+/**
+ * Balance is an account's money in one currency (DeepSeek's /user/balance): Total is Granted (given)
+ * and ToppedUp (paid) together.
+ */
+export interface Balance {
+  currency: string; // CNY | USD
+  total: number /* float64 */;
+  granted: number /* float64 */;
+  toppedUp: number /* float64 */;
 }
 export interface QuotaWindow {
   group: string; // Claude: session (5 hours) | weekly (7 days)
@@ -751,28 +766,17 @@ export interface CardReply {
 // source: discover.go
 
 /**
- * Workspace is a group of sessions, made from a folder. The carried state "workspaces" is
- * Workspace[]; a session's Workspace 0 is none (未归类).
+ * Workspace is a folder group: the folder sessions are in, made as the first goes there (the user,
+ * 2026-11-08: no workspaces made by hand). The carried state "workspaces" is Workspace[], those
+ * with no session shown too; a session's Workspace 0 is none (未归类: one with no folder).
  */
 export interface Workspace {
   id: number /* int64 */;
   name: string;
   path: string;
-  /**
-   * Creator: the ID of the terminal that made it (GET /api/terminals has its avatar); "" when not
-   * known (made before Iridium kept it).
-   */
-  creator?: string;
 }
 /**
- * NewWorkspace makes a workspace of folder Path; Name "" is the folder's name.
- */
-export interface NewWorkspace {
-  path: string;
-  name?: string;
-}
-/**
- * WorkspacePatch renames a workspace.
+ * WorkspacePatch renames a group.
  */
 export interface WorkspacePatch {
   name: string;
@@ -1114,10 +1118,6 @@ export interface Settings {
    */
   enterInTurn: string;
   /**
-   * UpdateAuto: a newer Iridium is downloaded as soon as it is seen, so 更新 only restarts.
-   */
-  updateAuto: boolean;
-  /**
    * Lang: the user's language, as a web page's settings last set it ("zh", "en"; "" not yet):
    * hosted agents are told it from their next start.
    */
@@ -1134,7 +1134,6 @@ export interface SettingsPatch {
   modes?: { [key: string]: string};
   push?: boolean;
   enterInTurn?: string;
-  updateAuto?: boolean;
   lang?: string;
 }
 
@@ -1370,7 +1369,8 @@ export interface UpdateState {
   available: boolean;
   source: boolean; // an update source is configured
   /**
-   * Auto: a newer version is downloaded as soon as it is seen (settings 自动下载更新).
+   * Auto: a newer version is downloaded as soon as it is seen (release builds; not a build from
+   * source).
    */
   auto: boolean;
   /**
@@ -1406,7 +1406,7 @@ export interface ApplyUpdate {
  * only its own.
  */
 export interface Usage {
-  days: string[]; // "2006-01-02", oldest first, today last
+  days: string[]; // "2006-01-02", oldest first, today last; by hour "2006-01-02T15"
   rows: UsageRow[];
   /**
    * Terminals: the rows' terminals still there, by ID, to name them (a removed one is not).

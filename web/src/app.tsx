@@ -9,7 +9,7 @@
 import { Dialog } from "@base-ui/react/dialog";
 import { Toast } from "@base-ui/react/toast";
 import { Tooltip } from "@base-ui/react/tooltip";
-import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties } from "react";
 import { queryClient } from "./api/client";
 import { watchTurns } from "./chats";
 import { CreatePopover, WsPlus } from "./create";
@@ -18,7 +18,7 @@ import { t, useLang } from "./i18n";
 import { applyTheme, initialTheme, keepTheme, MeKey, useTellLang, type ThemePref } from "./me";
 import { motion, pageTurn } from "./motion";
 import { prefetch } from "./prefetch";
-import { close, go, onTurn, openChat, over, quietDialog, route, useRoute, type Route } from "./route";
+import { close, go, onTurn, openChat, over, quietDialog, route, usagePoint, useRoute, type Route } from "./route";
 import { Pager, TABS_H } from "./pager";
 import { atLeft, GRIP, Sheet } from "./sheet";
 import { HeadKeys, Sidebar } from "./sidebar";
@@ -26,17 +26,19 @@ import { useConfirms, useList } from "./store";
 import { follow } from "./stream";
 import { ToastList, toasts } from "./toast";
 import { buildTree, flat } from "./tree";
-import { cn, IrMark, kept, keep, params, PHONE, useMedia, useMinute } from "./ui";
+import { cn, holdMenu, IrMark, kept, keep, params, PHONE, useMedia, useMinute } from "./ui";
 import { watchUnread } from "./unread";
 import { warmUp } from "./warm";
 
 /** A part that comes only as it is opened, or the page is idle. Once its code came it is drawn
  *  straight, not through lazy, whose first draw shows the fallback even with the code at hand
- *  (Rhodium #386); which of the two is picked as it mounts, for good. load fetches and runs it. */
+ *  (Rhodium #386); which of the two is picked as it mounts, for good. load fetches and runs it.
+ *  Drawn again only as its props change, not with every draw of the page: a page of the phone's
+ *  sheet turned drew the chat, the usage and the settings all again, and stuttered. */
 function part<P extends object>(get: () => Promise<ComponentType<P>>) {
   let code: ComponentType<P> | undefined;
   let coming: Promise<ComponentType<P>> | undefined;
-  const load = () => (coming ??= get().then((c) => (code = c)).catch((e) => ((coming = undefined), Promise.reject(e))));
+  const load = () => (coming ??= get().then((c) => (code = memo(c) as unknown as ComponentType<P>)).catch((e) => ((coming = undefined), Promise.reject(e))));
   const Lazy = lazy(() => load().then((c) => ({ default: c })));
   function Part(p: P) {
     const [C] = useState(() => code ?? Lazy);
@@ -112,7 +114,10 @@ export function App() {
   // down, once it has been open.
   const setsOut = phone && over(r);
   const [setsPage, setSetsPage] = useState<SetsPage | null>(null);
-  if (over(r) && setsPage !== setsPageOf(r)) setSetsPage(setsPageOf(r));
+  // On a phone the usage is a page of the sheet's own (the user, 2026-11-08): the 设置 page keeps
+  // the last of its own pages under it.
+  const ownPage = !phone || r.name !== "usage";
+  if (over(r) && ownPage && setsPage !== setsPageOf(r)) setSetsPage(setsPageOf(r));
   // One sheet on a phone, two pages in it: the sessions and the 终端 panel (the user, 2026-11-08),
   // the panel shown while its route is open.
   const sheetIsOut = sheetOut || setsOut;
@@ -152,17 +157,21 @@ export function App() {
 
   // On a phone a chat opened from the sheet puts it away, and with nothing open it is out, to stay:
   // there is nothing else to see.
-  useEffect(() => {
+  // In the same draw as the chat, not an effect's after: else the sheet, still out for a draw, took
+  // the chat's size first and went down shrinking.
+  const [sheetFor, setSheetFor] = useState(`${open} ${phone}`);
+  if (sheetFor !== `${open} ${phone}`) {
+    setSheetFor(`${open} ${phone}`);
     if (phone) setSheetOut(!open);
-  }, [open, phone]);
+  }
   // Out by a swipe up from the left quarter (x), on the 终端 page; else on the sessions' (the user,
   // 2026-11-06). Put away, or brought to the sessions, the panel's route is left.
   // A swipe up from the left shows the 终端 page from its first px, not the sessions' turning to it
   // as it is let go (the user, 2026-11-08).
   const [pulled, setPulled] = useState<"me" | "sessions" | null>(null);
   // Out, its page is the route's; going down, it stays as it was; coming up, the swipe's.
-  const lastPage = useRef(1);
-  const sheetPage = sheetIsOut ? (setsOut ? 0 : 1) : pulled ? (pulled === "me" ? 0 : 1) : lastPage.current;
+  const lastPage = useRef(2);
+  const sheetPage = sheetIsOut ? (setsOut ? (r.name === "usage" ? 1 : 0) : 2) : pulled ? (pulled === "me" ? 0 : 2) : lastPage.current;
   lastPage.current = sheetPage;
   // Just come out too: its page set at once, not slid to as it rises.
   const wasOut = useRef(sheetIsOut);
@@ -175,14 +184,19 @@ export function App() {
     if (over(route())) close(under);
   };
   // A tab, or a swipe across: the sheet stays out, the back key going back to the sessions.
-  // 终端 the left page, as a swipe up from the left brings it; the sessions the right (the user, 2026-11-08).
-  const toPage = (i: number) => (setSheetOut(true), i === 0 ? go({ name: "settings" }) : over(route()) && close(under));
+  // 终端 the left page, as a swipe up from the left brings it; the sessions the right (the user, 2026-11-08);
+  // the usage between them (the user, 2026-11-08).
+  const toPage = (i: number) => (setSheetOut(true), i === 0 ? go({ name: "settings" }, route().name === "usage") : i === 1 ? go({ name: "usage" }, over(route())) : over(route()) && close(under));
   // Put away, the panel is drawn afresh once it is down: its first page, not renaming.
   const [setsRound, setSetsRound] = useState(0);
   useEffect(() => {
     if (setsOut) return;
-    const t = setTimeout(() => setSetsRound((n) => n + 1), motion.dur(3));
-    return () => clearTimeout(t);
+    // Once the page has gone and the page is idle: drawn afresh, it must not land on a page turn's
+    // last frames.
+    let gone = false;
+    const round = () => !gone && setSetsRound((n) => n + 1);
+    const t = setTimeout(() => (window.requestIdleCallback ? window.requestIdleCallback(round, { timeout: 2000 }) : setTimeout(round, 200)), motion.dur(3) + 60);
+    return () => ((gone = true), clearTimeout(t));
   }, [setsOut]);
 
   // Chat to chat on a computer, the main pane swaps quickly, drifting the way the sidebar lists them.
@@ -217,7 +231,18 @@ export function App() {
   }, [tree, open]);
   const sheetNow = useRef(sheetIsOut);
   sheetNow.current = sheetIsOut;
-  const setThemeKept = (v: ThemePref) => (setTheme(v), keepTheme(v));
+  const setThemeKept = useCallback((v: ThemePref) => (setTheme(v), keepTheme(v)), []);
+  // The chat's keys to the phone's sheet, the same each draw (the chat is drawn again only as its
+  // props change).
+  const sheetNowFn = useRef(setSheet);
+  sheetNowFn.current = setSheet;
+  const onSheet = useCallback(() => sheetNowFn.current(true), []);
+  const onMe = useCallback(() => go({ name: "settings" }), []);
+  // The rows' own, the same each draw: a row is drawn again only as it changes (sidebar.tsx).
+  const phoneNow = useRef(phone);
+  phoneNow.current = phone;
+  const onSelect = useCallback((id: string) => (openChat(id), phoneNow.current && setSheetOut(false)), []);
+  const chatCode = useCallback(() => void loadChat().catch(() => {}), []);
 
   const onSettings = () => (over(r) ? close(under) : go({ name: "settings" }));
   const me = <MeKey open={over(r)} onOpen={onSettings} dot={!!update.data?.available} code={loadPanels} />;
@@ -227,7 +252,7 @@ export function App() {
       expanded={expanded}
       toggle={toggle}
       selected={open ?? ""}
-      onSelect={(id) => (openChat(id), phone && setSheetOut(false))}
+      onSelect={onSelect}
       noFoot={phone}
       phone={phone}
       searching={jumping}
@@ -239,7 +264,7 @@ export function App() {
       onSearch={() => setJumping((j) => !j)}
       confirms={confirms}
       onConfirm={(c) => (c.session && list?.some((s) => s.id === c.session) ? openChat(c.session) : go({ name: c.kind.startsWith("secret-") ? "secrets" : "terminals" }, over(r)))}
-      chatCode={() => void loadChat().catch(() => {})}
+      chatCode={chatCode}
       panelsCode={loadPanels}
       createKey={(trigger) => <CreatePopover trigger={trigger} />}
       wsPlus={(w, trigger, o, setO) => <WsPlus key={w.key} w={{ id: w.id, name: w.name, path: w.root }} trigger={trigger} open={o} setOpen={setO} opened={(id) => openChat(id)} />}
@@ -253,7 +278,7 @@ export function App() {
     <main className={cn("relative h-full min-w-0 flex-1 bg-paper", !phone && "g-turn")} onClickCapture={phone && ((sheetOut && open) || setsOut) ? (e) => !(e.target as Element).closest?.("header") && setSheet(false) : undefined}>
       <Suspense fallback={<Waiting />}>
         {under.name === "chat" ? (
-          <ChatPage key={under.id} id={under.id} sheet={below} onSheet={phone ? () => setSheet(true) : undefined} onMe={phone ? () => go({ name: "settings" }) : undefined} />
+          <ChatPage key={under.id} id={under.id} sheet={below} onSheet={phone ? onSheet : undefined} onMe={phone ? onMe : undefined} />
         ) : (
           <Empty below={below} />
         )}
@@ -265,8 +290,21 @@ export function App() {
   // foot, its right edge on the key's, rising out of it (the user, 2026-11-06); the terminals its page.
   // As the me popover is (the user, 2026-11-06): no shade over the page, which stays live; a press
   // outside puts it away, but one on its own key, which does that itself.
-  const settingsAt = useSettingsAt(over(r) && !phone);
-  const back = () => (history.state?.depth > 1 ? history.back() : go({ name: "settings" }, true));
+  const usageOut = !phone && r.name === "usage";
+  // The dialog keeps the page it showed while it goes (its route already left): the usage fading
+  // as itself, never as the settings (the user, 2026-11-08).
+  const dialogPage: SetsPage = over(r) ? setsPageOf(r) : (setsPage ?? "settings");
+  const usageLook = !phone && dialogPage === "usage";
+  const settingsAt = useSettingsAt(over(r) && !phone, usageLook);
+  // The usage panel floats as a row's menu does: one of them at a time (ui.tsx holdMenu).
+  const underNow = useRef(under);
+  underNow.current = under;
+  useEffect(() => (usageOut ? holdMenu(() => route().name === "usage" && close(underNow.current)) : undefined), [usageOut]);
+  const usagePage = () => (
+    <Suspense fallback={<Waiting />}>
+      <UsagePage />
+    </Suspense>
+  );
   const setsBody = (page: SetsPage) => (
     <Suspense fallback={<Waiting />}>
       {page === "terminals" ? (
@@ -279,7 +317,7 @@ export function App() {
         </div>
       ) : page === "usage" ? (
         <div key="usage" className="g-slide h-full">
-          <UsagePage onBack={back} />
+          {usagePage()}
         </div>
       ) : (
         <div key="settings" className="g-slide h-full" data-dir="back">
@@ -304,9 +342,9 @@ export function App() {
         <Dialog.Popup
           aria-label={t("nav.me")}
           style={settingsAt}
-          className="g-dialog glass thick float fixed z-50 w-[min(288px,calc(100vw-16px))] overflow-hidden rounded-lg text-ink outline-none"
+          className={cn("g-dialog glass thick float fixed z-50 overflow-hidden rounded-lg text-ink outline-none", usageLook ? "w-[min(360px,calc(100vw-16px))]" : "w-[min(288px,calc(100vw-16px))]")}
         >
-          {setsBody(setsPageOf(r))}
+          {setsBody(dialogPage)}
         </Dialog.Popup>
       </Dialog.Portal>
     </Dialog.Root>
@@ -319,18 +357,23 @@ export function App() {
           {!phone && sidebar}
           {main}
           {phone && (
-            <Sheet open={sheetIsOut} setOpen={setSheet} size={!open ? "full" : "half"} raised={jumping && !setsOut} name="phone" head={GRIP + TABS_H} from={() => true} onPull={(x) => setPulled(atLeft(x) ? "me" : "sessions")} label={setsOut ? t("nav.me") : t("nav.sessions")} onHeight={setSheetH}>
+            <Sheet open={sheetIsOut} setOpen={setSheet} size={!open ? "full" : "half"} raised={jumping && !setsOut} name="phone" head={GRIP + TABS_H} from={() => true} onPull={(x) => setPulled(atLeft(x) ? "me" : "sessions")} label={setsOut ? (r.name === "usage" ? t("usage.title") : t("nav.me")) : t("nav.sessions")} onHeight={setSheetH}>
               <Pager
-                ends={[null, <HeadKeys key="s" createKey={(trigger) => <CreatePopover trigger={trigger} />} />]}
+                ends={[null, null, <HeadKeys key="s" createKey={(trigger) => <CreatePopover trigger={trigger} />} />]}
                 page={sheetPage}
                 still={turnStill}
                 onPage={toPage}
                 tabs={[
                   { label: <>{t("nav.me")}{update.data?.available && <span className="size-1.5 rounded-full bg-err" aria-hidden />}</>, aria: update.data?.available ? `${t("nav.me")} · ${t("settings.updateReady")}` : t("nav.me") },
+                  { label: t("usage.title"), aria: t("usage.title") },
                   { label: t("nav.sessions"), aria: t("nav.sessions") },
                 ]}
               >
-                {[<div key="me" className="absolute inset-0">{seen && setsBody(setsPage ?? "settings")}</div>, sidebar]}
+                {[
+                  <div key="me" className="absolute inset-0">{seen && setsBody(setsPage ?? "settings")}</div>,
+                  <div key="usage" className="absolute inset-0">{seen && usagePage()}</div>,
+                  sidebar,
+                ]}
               </Pager>
             </Sheet>
           )}
@@ -345,6 +388,9 @@ export function App() {
     </Toast.Provider>
   );
 }
+
+/** Back a step in the settings' dialog. */
+const back = () => (history.state?.depth > 1 ? history.back() : go({ name: "settings" }, true));
 
 /** The main pane with nothing open: the faint mark alone, in the middle of what the phone's sheet
  *  leaves free. */
@@ -364,10 +410,21 @@ function Waiting() {
 /** Where the 终端 panel stands, open: above the me key (me.tsx data-settings-key), its left edge on
  *  the key's, as tall as fits there up to 600px; with too little room or no key in sight, at the
  *  window's bottom left. */
-function useSettingsAt(open: boolean): CSSProperties | undefined {
+function useSettingsAt(open: boolean, usage: boolean): CSSProperties | undefined {
   const [at, setAt] = useState<CSSProperties>();
   useLayoutEffect(() => {
     if (!open) return;
+    // The usage: at the point it was asked from, as a menu is (the user, 2026-11-08), below it if
+    // it fits, else above; its right edge on it for end.
+    const p = usage && usagePoint();
+    if (p) {
+      const w = Math.min(360, innerWidth - 16);
+      const h = Math.min(560, innerHeight - 16);
+      const left = Math.max(8, Math.min(innerWidth - w - 8, p.end ? p.x - w : p.x));
+      const top = p.y + h + 8 <= innerHeight ? p.y : Math.max(8, p.y - h);
+      setAt({ left, top, height: h });
+      return;
+    }
     const w = Math.min(288, innerWidth - 16);
     const b = document.querySelector("[data-settings-key]")?.getBoundingClientRect();
     const seen = b && b.width > 0 && b.right > 0 && b.left < innerWidth && b.bottom <= innerHeight;
@@ -377,6 +434,6 @@ function useSettingsAt(open: boolean): CSSProperties | undefined {
       return;
     }
     setAt({ left: Math.max(8, Math.min(innerWidth - w - 8, b.left)), bottom: innerHeight - b.top + 8, height: Math.min(600, room) });
-  }, [open]);
+  }, [open, usage]);
   return at;
 }

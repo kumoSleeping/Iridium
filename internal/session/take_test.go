@@ -207,3 +207,21 @@ func TestSubagentReadOnly(t *testing.T) {
 		t.Fatalf("send to a subagent: %v", err)
 	}
 }
+
+// An agent that is not installed is refused at once, no session made: not after the wait for one
+// updating itself.
+func TestCreateNotInstalled(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, func(c *config.Config, _ *Options) { c.Programs["dsh"] = filepath.Join(t.TempDir(), "dsh") })
+	if !r.m.Missing(api.AgentDsh) || r.m.Missing(api.AgentClaude) {
+		t.Fatalf("missing: dsh %v, claude %v", r.m.Missing(api.AgentDsh), r.m.Missing(api.AgentClaude))
+	}
+	start := time.Now()
+	id, err := r.m.Create(context.Background(), api.NewSession{Agent: api.AgentDsh, Cwd: r.cwd}, "网页")
+	if !errors.Is(err, ErrNotInstalled) || id != "" {
+		t.Fatalf("create: %q %v", id, err)
+	}
+	if d := time.Since(start); d > time.Second {
+		t.Errorf("took %v", d)
+	}
+}

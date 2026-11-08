@@ -16,7 +16,8 @@ import { flow } from "./liquid";
 export const levelName = (level: string) => (`effort.${level}` in zh ? t(`effort.${level}` as Key) : level);
 
 /** Where the slider rests for level among levels: its stop, known; with none set or one this model
- *  does not take, medium's stop (else the middle one), not known, shown muted. */
+ *  does not take, medium's stop (else the middle one), not known: the name says "default", the
+ *  liquid as ever (greyed, it read as broken; the user, 2026-11-08). */
 export function restAt(levels: string[], level?: string): { i: number; known: boolean } {
   const i = level ? levels.indexOf(level) : -1;
   if (i >= 0) return { i, known: true };
@@ -121,10 +122,10 @@ export function EffortSlider({ levels, value, set, aside, tag }: { levels: strin
           </span>
         </div>
         {aside && name}
-        <Slider.Root value={i} min={0} max={n - 1} step={1} onValueChange={(v) => (v !== i && buzz(), setDrag(v as number))} onValueCommitted={(v) => commit(v as number)} aria-label={t("composer.effort")} data-unknown={known ? undefined : ""} className="group/effort min-w-0">
+        <Slider.Root value={i} min={0} max={n - 1} step={1} onValueChange={(v) => (v !== i && buzz(), setDrag(v as number))} onValueCommitted={(v) => commit(v as number)} aria-label={t("composer.effort")} className="group/effort min-w-0">
           <Slider.Control className="relative flex h-7 cursor-grab touch-none items-center data-dragging:cursor-grabbing pointer-coarse:h-10">
             <Slider.Track className="relative h-6 w-full rounded-full bg-fill-2 shadow-[inset_0_1px_2px_oklch(0_0_0/0.12)]">
-              <span aria-hidden className="effort-tone absolute inset-0 overflow-hidden rounded-full">
+              <span aria-hidden className="absolute inset-0 overflow-hidden rounded-full">
                 {/* Under: the neck the knob draws out, the blobs run together; over: the liquid. */}
                 <span className="absolute inset-0" style={{ filter: `url(#${goo})` }}>
                   <span className="effort-blob" style={{ "--b": "var(--front)", "--s": "24px" } as CSSProperties} />

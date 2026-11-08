@@ -34,7 +34,8 @@ func TestWorkspaces(t *testing.T) {
 		t.Fatal(err)
 	}
 	a, _ := s.Assignments()
-	if len(a) != 3 || a["a"].Workspace != 0 || !a["a"].Manual || a["b"].Workspace != 0 || a["b"].Manual {
+	// All in none, moved there or not: discovery groups them again.
+	if len(a) != 3 || a["a"].Workspace != 0 || a["a"].Manual || a["b"].Workspace != 0 || a["b"].Manual {
 		t.Errorf("after delete: %+v", a)
 	}
 	o, _ := s.Overlays()
@@ -47,34 +48,19 @@ func TestWorkspaces(t *testing.T) {
 	if err := s.RenameWorkspace(ws, "x"); err != ErrNoWorkspace {
 		t.Errorf("rename gone: %v", err)
 	}
-}
-
-func TestWorkspaceCreator(t *testing.T) {
-	s, err := Open(filepath.Join(t.TempDir(), "db"))
-	if err != nil {
-		t.Fatal(err)
+	// Grouped by discovery: only one in none not moved there by you.
+	ws2, _ := s.CreateWorkspace("w2", "/w2")
+	if ok, _ := s.AssignAuto("b", ws2); !ok {
+		t.Error("b not grouped")
 	}
-	defer s.Close()
-	a, _ := s.CreateWorkspace("a", "/a")
-	b, _ := s.CreateWorkspace("b", "/b")
-	if err := s.SetWorkspaceCreator(a, "panel-1"); err != nil {
-		t.Fatal(err)
+	if ok, _ := s.AssignAuto("b", ws); ok {
+		t.Error("b grouped twice")
 	}
-	ws, err := s.Workspaces()
-	if err != nil || len(ws) != 2 {
-		t.Fatalf("%v %+v", err, ws)
+	if ok, _ := s.AssignAuto("d", ws2); !ok {
+		t.Error("d, new, not grouped")
 	}
-	got := map[int64]string{ws[0].ID: ws[0].Creator, ws[1].ID: ws[1].Creator}
-	if got[a] != "panel-1" || got[b] != "" {
-		t.Errorf("creators %+v", got)
-	}
-	if n, err := s.ClaimWorkspaces("panel-2"); err != nil || n != 1 {
-		t.Fatalf("claimed %d: %v", n, err)
-	}
-	ws, _ = s.Workspaces()
-	for _, w := range ws {
-		if want := map[int64]string{a: "panel-1", b: "panel-2"}[w.ID]; w.Creator != want {
-			t.Errorf("%d: creator %q, want %q", w.ID, w.Creator, want)
-		}
+	s.Move("c", 0)
+	if ok, _ := s.AssignAuto("c", ws2); ok {
+		t.Error("c, moved to none by you, grouped")
 	}
 }

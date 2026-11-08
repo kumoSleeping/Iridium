@@ -25,7 +25,7 @@ func (s *Server) settingsRoutes(mux *http.ServeMux) {
 func (s *Server) settings() api.Settings {
 	t := s.m.Tuned()
 	s.cmu.Lock()
-	hidden, push, enter, auto := slices.Clone(s.cfg.QuotaHidden), s.cfg.Push, s.cfg.EnterInTurn, !s.cfg.Update.Manual
+	hidden, push, enter := slices.Clone(s.cfg.QuotaHidden), s.cfg.Push, s.cfg.EnterInTurn
 	s.cmu.Unlock()
 	if enter == "" {
 		enter = "steer"
@@ -40,7 +40,7 @@ func (s *Server) settings() api.Settings {
 	if modes == nil {
 		modes = map[string]string{}
 	}
-	return api.Settings{IdleReap: shortDuration(t.IdleReap), CrashResume: t.CrashResume, QuotaResume: t.QuotaResume, QuotaHidden: hidden, Modes: modes, Push: push, EnterInTurn: enter, UpdateAuto: auto, Lang: t.Lang}
+	return api.Settings{IdleReap: shortDuration(t.IdleReap), CrashResume: t.CrashResume, QuotaResume: t.QuotaResume, QuotaHidden: hidden, Modes: modes, Push: push, EnterInTurn: enter, Lang: t.Lang}
 }
 
 func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
@@ -106,9 +106,6 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		if p.EnterInTurn != nil {
 			c.EnterInTurn = *p.EnterInTurn
 		}
-		if p.UpdateAuto != nil {
-			c.Update.Manual = !*p.UpdateAuto
-		}
 		if p.Lang != nil {
 			c.Lang = *p.Lang
 		}
@@ -122,9 +119,6 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.error(w, err)
 		return
-	}
-	if p.UpdateAuto != nil && s.Updater != nil {
-		s.Updater.SetAuto(*p.UpdateAuto)
 	}
 	s.logf("server: %s changed the settings", callerOf(r).Name)
 	reply(w, http.StatusOK, s.settings())
