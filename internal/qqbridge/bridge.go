@@ -561,15 +561,15 @@ func cardText(c api.Card) (md, text string) {
 	return strings.Join(m, "\n\n"), strings.Join(t, "\n\n")
 }
 
-// keyboard is a button per option of a one-question card: at most 5 rows of 3, a row of 1 up to 5
-// options, of 2 up to 10. Labels shorten as rows fill; with more than one a row, a session's
-// agent tag ("[CC] ") is left to the tree.
+// keyboard is a button per option of a one-question card, at most 10 (5 rows of 2).
 func (b *Bridge) keyboard(c *api.Card, chat string) *qq.Keyboard {
-	if c == nil || groups(*c) > 1 || len(c.Options) == 0 || len(c.Options) > 15 {
+	if c == nil || groups(*c) > 1 || len(c.Options) == 0 || len(c.Options) > 10 {
 		return nil
 	}
-	per := (len(c.Options) + 4) / 5
-	width := [...]int{16, 10, 7}[per-1]
+	per := 1
+	if len(c.Options) > 5 {
+		per = 2
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	var rows []qq.Row
@@ -578,13 +578,8 @@ func (b *Bridge) keyboard(c *api.Card, chat string) *qq.Keyboard {
 		key := "k" + strconv.Itoa(b.nkey)
 		b.keys[key] = press{chat: chat, card: c.ID, option: o.ID}
 		label := o.Text
-		if per > 1 && strings.HasPrefix(label, "[") {
-			if j := strings.Index(label, "] "); j > 0 && strings.TrimSpace(label[j+2:]) != "" {
-				label = strings.TrimSpace(label[j+2:])
-			}
-		}
-		if r := []rune(label); len(r) > width {
-			label = string(r[:width-1]) + "…"
+		if r := []rune(label); len(r) > 16 {
+			label = string(r[:15]) + "…"
 		}
 		style := 0
 		if o.Primary {

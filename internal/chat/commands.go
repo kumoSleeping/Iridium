@@ -105,7 +105,7 @@ var agents = []api.Agent{api.AgentClaude, api.AgentCodex, api.AgentPi, api.Agent
 
 func cmdNew(s *Service, ctx context.Context, c Caller, p *store.ChatPointer, args string) (api.ChatInputReply, error) {
 	if args == "" { // a folder, then an agent: as the web's +
-		return s.folderCard(ctx, c, p, true)
+		return s.folderCard(ctx, c, p, true, 0)
 	}
 	a := api.Agent(p.Agent)
 	f := strings.Fields(args)
@@ -152,7 +152,7 @@ func cmdUse(s *Service, ctx context.Context, c Caller, p *store.ChatPointer, arg
 		return api.ChatInputReply{}, err
 	}
 	if args == "" {
-		return s.folderCard(ctx, c, p, false)
+		return s.folderCard(ctx, c, p, false, 0)
 	}
 	if args == leaveOption {
 		return cmdLeave(s, ctx, c, p, "")

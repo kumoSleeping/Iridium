@@ -24,6 +24,7 @@ import (
 //	g:<folder>          what is in the group or folder
 //	n:<folder>          the agents to open a session with there
 //	n:<folder>:<agent>  open it
+//	p:<n>:<step>        page n (from 0) of a list: <step> is g:<folder>, or use or new for the groups
 //
 // A group is w<group ID>, w0 for 未归类; a folder in it <group>/<path under the group's root>; or
 // d<path>: a directory picked for a first session.
@@ -202,38 +203,59 @@ func sessionText(x api.Session) string {
 }
 
 const (
-	maxOptions = 15
-	newText    = "[NEW] 新会话"
+	pageSize = 7 // a list's entries a page: with its last entries, at most 10 options (QQ's buttons)
+	newText  = "[NEW] 新会话"
+	prevText = "上一页"
+	nextText = "下一页"
 )
 
-// folderCard: pick a group. forNew: then an agent, to open a session at its root (groups with a
-// root only); else what is in it.
-func (s *Service) folderCard(ctx context.Context, c Caller, p *store.ChatPointer, forNew bool) (api.ChatInputReply, error) {
+// paged puts page n (from 0, clamped) of items in the card, then extra, then 上一页 and 下一页 as
+// there are pages before and after it; step is the list's /use argument (p:<n>:<step> a page).
+func paged(card *api.Card, items, extra []api.CardOption, n int, step string) {
+	pages := max(1, (len(items)+pageSize-1)/pageSize)
+	n = min(max(n, 0), pages-1)
+	card.Options = append(card.Options, items[n*pageSize:min(len(items), (n+1)*pageSize)]...)
+	card.Options = append(card.Options, extra...)
+	if pages == 1 {
+		return
+	}
+	card.Summary = append(card.Summary, fmt.Sprintf("第 %d/%d 页", n+1, pages))
+	if n > 0 {
+		card.Options = append(card.Options, api.CardOption{ID: fmt.Sprintf("p:%d:%s", n-1, step), Text: prevText})
+	}
+	if n < pages-1 {
+		card.Options = append(card.Options, api.CardOption{ID: fmt.Sprintf("p:%d:%s", n+1, step), Text: nextText})
+	}
+}
+
+// folderCard: pick a group, page n of them. forNew: then an agent, to open a session at its root
+// (groups with a root only); else what is in it.
+func (s *Service) folderCard(ctx context.Context, c Caller, p *store.ChatPointer, forNew bool, n int) (api.ChatInputReply, error) {
 	l, err := s.folders(ctx, c)
 	if err != nil {
 		return api.ChatInputReply{}, err
 	}
 	card := &api.Card{Title: "文件夹", Summary: []string{}}
+	step := "use"
 	if forNew {
-		card.Title = "新会话"
+		card.Title, step = "新会话", "new"
 	}
+	var items, extra []api.CardOption
 	for _, g := range l {
 		if forNew && g.path == "" {
 			continue
-		}
-		if len(card.Options) == maxOptions {
-			break
 		}
 		o := api.CardOption{ID: "g:" + g.key, Text: g.name, Primary: g.holds(p.Session)}
 		if forNew {
 			o.ID = "n:" + g.key
 		}
-		card.Options = append(card.Options, o)
+		items = append(items, o)
 	}
 	// In a session: leaving it is the list's last (the user, 2026-11-08).
 	if _, in := s.pointed(c, p); in && !forNew {
-		card.Options = append(card.Options, api.CardOption{ID: leaveOption, Text: "离开当前会话"})
+		extra = append(extra, api.CardOption{ID: leaveOption, Text: "离开当前会话"})
 	}
+	paged(card, items, extra, n, step)
 	if len(card.Options) == 0 {
 		dir := cmp.Or(p.Cwd, s.o.ChatDir)
 		if dir == "" {
@@ -259,9 +281,9 @@ func (f *folder) holds(id string) bool {
 	return slices.ContainsFunc(f.subs, func(g *folder) bool { return g.holds(id) })
 }
 
-// sessionCard: what is in a group or folder: its sessions, then its folders, then a new session
-// there.
-func (s *Service) sessionCard(ctx context.Context, c Caller, p *store.ChatPointer, key string) (api.ChatInputReply, error) {
+// sessionCard: what is in a group or folder, page n of it: its sessions, then its folders; a new
+// session there last on each page.
+func (s *Service) sessionCard(ctx context.Context, c Caller, p *store.ChatPointer, key string, n int) (api.ChatInputReply, error) {
 	f, err := s.findFolder(ctx, c, key)
 	if err != nil {
 		return api.ChatInputReply{}, err
@@ -274,26 +296,21 @@ func (s *Service) sessionCard(ctx context.Context, c Caller, p *store.ChatPointe
 	if f.path != "" {
 		card.Summary = append(card.Summary, tilde(f.path))
 	}
-	room := maxOptions - 1 - len(f.subs)
+	var items, extra []api.CardOption
 	for _, x := range f.sessions {
-		if len(card.Options) >= max(room, 3) {
-			break
-		}
 		desc := ago(x.UpdatedAt)
 		if x.Status == api.StatusRunning {
 			desc = "进行中"
 		}
-		card.Options = append(card.Options, api.CardOption{ID: x.ID, Text: sessionText(x), Description: desc, Primary: x.ID == p.Session})
+		items = append(items, api.CardOption{ID: x.ID, Text: sessionText(x), Description: desc, Primary: x.ID == p.Session})
 	}
 	for _, g := range f.subs {
-		if len(card.Options) == maxOptions-1 {
-			break
-		}
-		card.Options = append(card.Options, api.CardOption{ID: "g:" + g.key, Text: g.name + "/", Primary: g.holds(p.Session)})
+		items = append(items, api.CardOption{ID: "g:" + g.key, Text: g.name + "/", Primary: g.holds(p.Session)})
 	}
 	if f.path != "" {
-		card.Options = append(card.Options, api.CardOption{ID: "n:" + f.key, Text: newText})
+		extra = append(extra, api.CardOption{ID: "n:" + f.key, Text: newText})
 	}
+	paged(card, items, extra, n, "g:"+f.key)
 	if len(card.Options) == 0 {
 		return reply(p.Session, "这个文件夹没有会话。")
 	}
@@ -340,8 +357,20 @@ func (s *Service) openIn(ctx context.Context, c Caller, p *store.ChatPointer, ke
 
 // folderStep runs a /use argument of the folder steps; ok false if args is none.
 func (s *Service) folderStep(ctx context.Context, c Caller, p *store.ChatPointer, args string) (api.ChatInputReply, bool, error) {
+	n := 0
+	if rest, ok := strings.CutPrefix(args, "p:"); ok {
+		num, step, _ := strings.Cut(rest, ":")
+		if v, err := strconv.Atoi(num); err == nil {
+			n, args = v, step
+		}
+		switch args {
+		case "use", "new":
+			r, err := s.folderCard(ctx, c, p, args == "new", n)
+			return r, true, err
+		}
+	}
 	if key, ok := strings.CutPrefix(args, "g:"); ok {
-		r, err := s.sessionCard(ctx, c, p, key)
+		r, err := s.sessionCard(ctx, c, p, key, n)
 		return r, true, err
 	}
 	rest, ok := strings.CutPrefix(args, "n:")

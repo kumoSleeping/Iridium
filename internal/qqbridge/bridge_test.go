@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -556,29 +555,5 @@ func TestCardTree(t *testing.T) {
 	}
 	if _, ok := pickByName(c.Options, "你好"); ok {
 		t.Error("a message taken for an option")
-	}
-}
-
-// A folder of 12 sessions and a new one still gets its buttons: rows of 3, no agent tag.
-func TestKeyboardRows(t *testing.T) {
-	b := &Bridge{keys: map[string]press{}}
-	c := api.Card{ID: "pick:1"}
-	for i := range 12 {
-		c.Options = append(c.Options, api.CardOption{ID: strconv.Itoa(i), Text: "[CC] 会话右键菜单切换 Bot"})
-	}
-	c.Options = append(c.Options, api.CardOption{ID: "new", Text: "[NEW] 新会话"})
-	k := b.keyboard(&c, "c2c:x")
-	if k == nil || len(k.Content.Rows) != 5 || len(k.Content.Rows[0].Buttons) != 3 {
-		t.Fatalf("keyboard %+v", k)
-	}
-	if l := k.Content.Rows[0].Buttons[0].RenderData.Label; l != "会话右键菜单…" {
-		t.Fatalf("label %q", l)
-	}
-	if l := k.Content.Rows[4].Buttons[0].RenderData.Label; l != "新会话" {
-		t.Fatalf("label %q", l)
-	}
-	c.Options = append(c.Options, c.Options[:3]...)
-	if b.keyboard(&c, "c2c:x") != nil {
-		t.Fatal("16 options got buttons")
 	}
 }
