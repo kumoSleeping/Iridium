@@ -219,7 +219,9 @@ func TestDenialGoneAround(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("no turn end")
 	}
-	s := r.waitState(id, "idle with its card", func(s *api.SessionState) bool { return len(s.Denials) == 1 && s.Status == api.StatusIdle && s.Last != nil })
+	s := r.waitState(id, "idle with its card", func(s *api.SessionState) bool {
+		return len(s.Denials) == 1 && s.Status == api.StatusIdle && s.Last != nil
+	})
 	if s.Denials[0].ToolUseID != "toolu_denied" {
 		t.Fatalf("denial %+v", s.Denials[0])
 	}
