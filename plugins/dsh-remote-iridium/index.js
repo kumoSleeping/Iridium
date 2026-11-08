@@ -140,6 +140,24 @@ export function iridiumURL(s) {
 }
 
 /**
+ * Whether url may be used: https, or http to this machine or a private network (loopback, 10/8,
+ * 172.16/12, 192.168/16, 100.64/10 as Tailscale's, fc00::/7, fe80::/10, localhost, *.local).
+ * Over http elsewhere the TOKEN and everything sent would cross the internet in the clear.
+ */
+export function secureURL(url) {
+  const u = new URL(url)
+  if (u.protocol === 'https:') return true
+  const h = u.hostname.toLowerCase().replace(/^\[|\]$/g, '')
+  if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.local')) return true
+  const v4 = h.match(/^(\d+)\.(\d+)\.\d+\.\d+$/)
+  if (v4) {
+    const [a, b] = [Number(v4[1]), Number(v4[2])]
+    return a === 127 || a === 10 || (a === 172 && b >= 16 && b < 32) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b < 128)
+  }
+  return h === '::1' || /^f[cd][0-9a-f]{0,2}:/.test(h) || /^fe[89ab][0-9a-f]?:/.test(h)
+}
+
+/**
  * Config: url, the Iridium (https://…), set on its page in dsh's settings (client.js), with
  * `/iridium <url>`, or in the profile; name, this machine's (default: its host name); roots, the
  * directories the Iridium may read and write files under (default: all but the denied); shell,
@@ -197,6 +215,11 @@ export function apply(ctx, config) {
     if (!iridiumURL(url)) {
       status = { state: 'bad-url', url }
       say(`not an Iridium address: ${url}`)
+      return
+    }
+    if (!secureURL(url)) {
+      status = { state: 'insecure-url', url }
+      say(`${url} is plain http to a public host: use https (http only to this machine or a private network)`)
       return
     }
     const tokenFile = tokenOf(url)
@@ -274,7 +297,7 @@ export function apply(ctx, config) {
     if (!offer) return []
     const dsh = `dsh ${offer.dsh}${older(offer.dsh, MIN_DSH) ? `（低于 ${MIN_DSH}，Iridium 不会在本机开 dsh）` : ''}`
     const commands = offer.noShell ? '不执行，仅启动 dsh' : offer.agentShell ? '执行网页上的命令和 agent 的 ir sh' : '执行网页上的命令（agent 的 ir sh 不执行）'
-    const roots = offer.roots.length ? offer.roots.join('、') : '全部（配置、TOKEN、~/.ssh 除外）'
+    const roots = offer.roots.length ? offer.roots.join('、') : '全部（TOKEN、dsh 的密钥和配置、各 agent 的登录、~/.ssh 等除外）'
     return [`agent：${dsh}`, `命令：${commands}`, `文件：${roots}`]
   }
 
@@ -285,6 +308,8 @@ export function apply(ctx, config) {
         return '未设置 Iridium 地址。在设置的 Iridium 一页填写，或输入 /iridium https://你的-iridium'
       case 'bad-url':
         return `不是 Iridium 地址：${status.url}。用法：/iridium https://你的-iridium`
+      case 'insecure-url':
+        return `不安全的地址：${status.url}。公网地址须用 https，http 仅限本机和内网`
       case 'unreachable':
         return `无法连接 Iridium${at}：${status.error}。30 秒后重试`
       case 'closed':
@@ -342,6 +367,7 @@ export function apply(ctx, config) {
         if (!arg) return { kind: 'success', text: describe() }
         const url = iridiumURL(arg)
         if (!url) return { kind: 'error', text: `不是 Iridium 地址：${arg}` }
+        if (!secureURL(url)) return { kind: 'error', text: `不安全的地址：${url}。公网地址须用 https，http 仅限本机和内网` }
         if (url === urlNow()) {
           start() // asked again, after a refusal or to see a new code
         } else {

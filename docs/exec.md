@@ -17,7 +17,7 @@
 
 ## 连接
 
-- 执行端主动连 `wss://<Iridium>/api/exec`，头 `Authorization: Bearer <TOKEN>`。执行端就是一个 Bot（提供机器的那种，见 `plan.md`“交互终端”）：用 Bot 的 TOKEN 接入，终端类型也显示“Bot”，名字就是机器名（≤12 字符）。Claude（用户，2026-11-08）：批准时勾了“本人的机器”的执行端才开 Claude，用那台机器上本人的登录、原样跑（不加 `--bare`），等于 `--owner`；这个勾只出现在带 Claude 的面板上。
+- 执行端主动连 `wss://<Iridium>/api/exec`（dsh 插件只接受 https，或到本机、内网地址的 http：公网的明文 http 拒绝），头 `Authorization: Bearer <TOKEN>`。执行端就是一个 Bot（提供机器的那种，见 `plan.md`“交互终端”）：用 Bot 的 TOKEN 接入，终端类型也显示“Bot”，名字就是机器名（≤12 字符）。Claude（用户，2026-11-08）：批准时勾了“本人的机器”的执行端才开 Claude，用那台机器上本人的登录、原样跑（不加 `--bare`），等于 `--owner`；这个勾只出现在带 Claude 的面板上。
 - 配对（用户，2026-11-08）：插件里只有服务器地址，没有 TOKEN，人人同一个包。第一次不带 TOKEN 连 `/api/exec/pair`（门外唯一不用登录的口，什么也不给），报机器名、系统、装了哪些 agent，两边显示同一个 4 位配对码；网页弹确认卡片“home-pc 请求接入（Windows · dsh 0.2.2）”，带 Passkey 的面板点允许后，TOKEN 经这条连接发给执行端，它存起来以后自己用。限速，同时最多几个待批，10 分钟没人管作废。插件和 `ir join` 用同一个口：`POST /api/exec/pair` 带握手内容（同 `hello` 的 `name`、`os`、`arch`、`program`、`agents`、`noShell`、`agentShell`；卡片据此写“可执行命令”“可执行命令（含 agent）”或“仅 agent”），回 `{code, request}`；再轮询 `GET /api/exec/pair/<request>`，等到允许（拿 TOKEN）或拒绝。普通 Bot 用同样的 `POST /api/pair`（`ir pair`），见 `api.md`。设置里可停止接收申请，对方收到 403。
 - 接入是单向的（用户，2026-11-08）：批准的一方能用申请方的 agent 和文件；反过来要对方也申请一次。
 - 一个 TOKEN 同时只有一条连接，新连上的顶掉旧的。
@@ -46,7 +46,7 @@
 ```
 
 - `os`：`windows`、`darwin`、`linux`。`sep`：路径分隔符。
-- `env`：执行端自己的环境。这边以它为底，按驱动的规则增删，启动时整份发过去。
+- `env`：执行端自己的环境。这边以它为底，按驱动的规则增删，启动时整份发过去。密钥不出那台机器（2026-11-08）：名字像密钥的（含 `KEY`、`TOKEN`、`SECRET`、`PASSW`、`CREDENTIAL`、`COOKIE`、`AUTH`、`SESSION`、`PRIVATE`，或以 `DEEPSEEK_`、`ANTHROPIC_`、`OPENAI_`、`AWS_`、`AZURE_`、`GOOGLE_`、`GH_`、`GITHUB_`、`NPM_`、`HF_` 开头）值换成占位 `(secret kept at the executor)`；`hold.start` 的 `env` 里值仍是占位的，执行端换回本机的值（本机没有就去掉）。这边设的值照用。执行端自己的 `IRIDIUM_SESSION`、`IRIDIUM_SOCKET`、`IRIDIUM_CONFIG`、`IRIDIUM_URL`、`IRIDIUM_TOKEN`（给它本机 Iridium 的）不报，子进程只拿到这边设的。旧执行端照旧报全值。
 - `scratch`：执行端自己的一个目录，这边往里写启动用的文件（dsh 的 `--patch`）。
 - `agents`：装了哪些 agent、怎么启动（`argv` 是程序部分，驱动接着加参数）。dsh 直接给 `node` 和 `bin.js`，不经 `.cmd`；`scope` 是它的 `@deepseek-ai` 包目录（这边从里面读预设），`home` 是 `DSH_HOME`。dsh 低于 0.2.2 不给开。
 - `holds`：它手上全部进程（`{hold, outSize, inSeq, exit}`，`inSeq` 是写进去的最后一行的序号）。这边据此对账：哪些还在跑、输入从哪儿续；这边起过、它却没有的，算进程没了。
@@ -88,14 +88,14 @@
 | `fs.write` | `{path, data, sha256, replace}` → `{}`；先写临时文件，核对后原子改名；`replace` 为假且已有就 `exists` |
 | `fs.mkdir` | `{path}` → `{}`，连父目录一起建 |
 
-- 允许的目录由执行端自己配，先解析符号链接再比；它自己的配置、TOKEN 和 `~/.ssh` 一律 `denied`。
+- 允许的目录由执行端自己配，先解析符号链接再比。一律 `denied`（读写都是）：TOKEN、`~/.ssh`；dsh 家目录的 `.credentials.yaml`、`.env`、`profiles/`（含插件配置）；Claude 的 `.credentials.json`、Codex 的 `auth.json`、pi 的 `~/.pi/agent/auth.json`；`~/.aws`、`~/.config/gh`、`~/.gnupg`、`~/.netrc`、`~/.npmrc`、`~/.git-credentials`、`~/.docker/config.json`。对话记录等其余文件照常。
 - 大文件分块，同 `plan.md`“文件传输”。
 
 ## 可选
 
 - `fs.watch {path}` 和事件 `changed {path, size}`：文件变了就报，合并着报。没有它这边定时 `fs.stat`。
-- 余额：这边要读那边 DeepSeek 的密钥才能查；不做就不显示那台机器的余额。
-- dsh 插件另有两个（见“远端 DSH”），别的执行端回 `unsupported`：`dsh.prompt {session, text, steer?}` → `{}`，把消息交给 Desktop 里这个会话的 agent（没有就 `not_found`）；`dsh.open {}` → `{sessions, unsynced, unsyncedUngrouped}`，插件所在的 dsh 进程（DSH Desktop）里此刻打开着的会话，插件设置里不同步到这边的工作区（文件夹或名字），以及未分组的会话是否也不同步；`dsh.attach {session, cwd}` → `{}`，把会话登记到 `cwd` 对应的工作区（没有就新建），Desktop 侧边栏里就有它。
+- 余额：这边要读那边 DeepSeek 的密钥才能查；不做，那台机器上的会话不查余额（这边不拿它的环境、不读本机同名路径）。
+- dsh 插件另有三个（见“远端 DSH”），别的执行端回 `unsupported`：`dsh.prompt {session, text, steer?}` → `{}`，把消息交给 Desktop 里这个会话的 agent（没有就 `not_found`）；`dsh.open {}` → `{sessions, unsynced, unsyncedUngrouped}`，插件所在的 dsh 进程（DSH Desktop）里此刻打开着的会话，插件设置里不同步到这边的工作区（文件夹或名字），以及未分组的会话是否也不同步；`dsh.attach {session, cwd}` → `{}`，把会话登记到 `cwd` 对应的工作区（没有就新建），Desktop 侧边栏里就有它。
 
 ## 网页（用户，2026-11-08）
 

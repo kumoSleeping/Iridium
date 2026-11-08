@@ -15,6 +15,7 @@
     "dsh.js",
     "executor.js",
     "ir.js",
+    "secrets.js",
     "client.js",
     "cordis.patch.yml",
     "README.md"
