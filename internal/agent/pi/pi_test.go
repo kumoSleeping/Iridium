@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -427,5 +428,34 @@ func TestSpawn(t *testing.T) {
 	}
 	if err := d.SetMode(context.Background(), "ask"); err != ErrRestart {
 		t.Errorf("set mode: %v", err)
+	}
+}
+
+// At an executor: its pi, the system prompt and the approval extension written there, nothing of
+// pi looked up here.
+func TestSpawnRemote(t *testing.T) {
+	state := t.TempDir()
+	pf := filepath.Join(state, "system-prompt.md")
+	os.WriteFile(pf, []byte("be brief"), 0o600)
+	there := map[string]string{}
+	r := &agent.Remote{
+		Argv: []string{`C:\node\node.exe`, `C:\pi\cli.js`}, Scratch: `C:\x\scratch`,
+		Join:      func(elem ...string) string { return strings.Join(elem, `\`) },
+		WriteFile: func(path string, data []byte) error { there[path] = string(data); return nil },
+	}
+	spec, err := New(Options{}).Spawn(agent.SpawnOptions{Session: "s1", Cwd: `C:\w`, Env: []string{"PATH=/nowhere"}, SystemPromptFile: pf, Mode: "ask", Remote: r})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt, ext := `C:\x\scratch\s1\system-prompt.md`, `C:\x\scratch\s1\`+ExtensionFile
+	want := `C:\node\node.exe C:\pi\cli.js --mode rpc --session-id s1 --append-system-prompt ` + prompt + " -e " + ext
+	if got := strings.Join(spec.Argv, " "); got != want {
+		t.Errorf("argv\n  %s\nwant\n  %s", got, want)
+	}
+	if there[prompt] != "be brief" || there[ext] != string(approvalSource) || len(there) != 2 {
+		t.Errorf("written there: %v", slices.Collect(maps.Keys(there)))
+	}
+	if spec.Cwd != `C:\w` {
+		t.Errorf("cwd %q", spec.Cwd)
 	}
 }

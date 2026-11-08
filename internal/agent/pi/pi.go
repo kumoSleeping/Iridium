@@ -6,7 +6,6 @@
 package pi
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	_ "embed"
@@ -15,8 +14,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -151,15 +148,13 @@ func SplitLevel(s string) (model, level string) {
 // "provider/id", maybe with ":level".
 func (d *Driver) Spawn(o agent.SpawnOptions) (hold.Spec, error) {
 	env := agent.ForeignEnv(o.Env)
-	program, err := agent.LookPath(o.Program, env)
+	argv, err := o.Command("pi", env)
 	if err != nil {
 		return hold.Spec{}, err
 	}
-	// pi is a `#!/usr/bin/env node` script: without node on that PATH it cannot start at all.
-	if head, err := readHead(program); err == nil && bytes.HasPrefix(head, []byte("#!")) && bytes.Contains(bytes.SplitN(head, []byte("\n"), 2)[0], []byte("env node")) {
-		if _, err := agent.LookPath("node", env); err != nil {
-			return hold.Spec{}, fmt.Errorf("pi: node not found: %w", err)
-		}
+	prompt, err := o.PromptFile()
+	if err != nil {
+		return hold.Spec{}, fmt.Errorf("pi: %w", err)
 	}
 	mode := o.Mode
 	if mode == "" {
@@ -168,9 +163,9 @@ func (d *Driver) Spawn(o agent.SpawnOptions) (hold.Spec, error) {
 	if !slices.Contains(Modes, mode) {
 		return hold.Spec{}, fmt.Errorf("pi: no approval mode %q (%s)", mode, strings.Join(Modes, ", "))
 	}
-	argv := []string{program, "--mode", "rpc", "--session-id", o.Session}
-	if o.SystemPromptFile != "" {
-		argv = append(argv, "--append-system-prompt", o.SystemPromptFile)
+	argv = append(argv, "--mode", "rpc", "--session-id", o.Session)
+	if prompt != "" {
+		argv = append(argv, "--append-system-prompt", prompt)
 	}
 	model, level := SplitLevel(o.Model)
 	if level == "" {
@@ -183,10 +178,10 @@ func (d *Driver) Spawn(o agent.SpawnOptions) (hold.Spec, error) {
 		argv = append(argv, "--thinking", level)
 	}
 	if mode == "ask" {
-		if o.SystemPromptFile == "" {
+		if o.Remote == nil && o.SystemPromptFile == "" {
 			return hold.Spec{}, errors.New("pi: approval mode ask needs a directory for its extension")
 		}
-		ext, err := installExtension(filepath.Dir(o.SystemPromptFile))
+		ext, err := o.LaunchFile(ExtensionFile, approvalSource)
 		if err != nil {
 			return hold.Spec{}, err
 		}
@@ -197,31 +192,6 @@ func (d *Driver) Spawn(o agent.SpawnOptions) (hold.Spec, error) {
 	d.mu.Unlock()
 	env = agent.SetEnv(env, "IRIDIUM_SESSION", o.Session)
 	return hold.Spec{Argv: argv, Env: env, Cwd: o.Cwd}, nil
-}
-
-func readHead(path string) ([]byte, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	b := make([]byte, 200)
-	n, _ := f.Read(b)
-	return b[:n], nil
-}
-
-// installExtension writes the approval extension into dir, whole or not at all: a pi starting
-// meanwhile may be loading it.
-func installExtension(dir string) (string, error) {
-	path := filepath.Join(dir, ExtensionFile)
-	if b, err := os.ReadFile(path); err == nil && bytes.Equal(b, approvalSource) {
-		return path, nil
-	}
-	tmp := fmt.Sprintf("%s.%d", path, os.Getpid())
-	if err := os.WriteFile(tmp, approvalSource, 0o600); err != nil {
-		return "", err
-	}
-	return path, os.Rename(tmp, path)
 }
 
 // Attach connects agent process proc and asks its state: the session, the model. One just

@@ -4,8 +4,11 @@
 package agents
 
 import (
+	"cmp"
 	"log"
 	"slices"
+	"strconv"
+	"strings"
 
 	"github.com/kumoSleeping/iridium/internal/agent"
 	"github.com/kumoSleeping/iridium/internal/agent/claude"
@@ -30,8 +33,9 @@ type Where struct {
 // RemoteWhere says where to look for a session's transcript at an executor (docs/exec.md).
 type RemoteWhere struct {
 	ID, Cwd string
-	Home    string // the agent's home there (dsh: DSH_HOME; Claude: its config dir), "" if not said
-	User    string // the user's home there
+	Home    string   // the agent's home there (dsh: DSH_HOME; Claude: its config dir), "" if not said
+	User    string   // the user's home there
+	Env     []string // the environment the agent starts with there (RemoteEnv)
 	Join    func(elem ...string) string
 	// List names the files in dir there; a dir not there has none.
 	List func(dir string) ([]string, error)
@@ -69,9 +73,43 @@ type Info struct {
 	// Find is the transcript of the session, "" if there is none yet.
 	Find   func(w Where) (string, error)
 	Format transcript.Format
-	// FindRemote is Find at an executor: the transcript's path there. nil: the agent does not run
-	// at one.
+	// At an executor (docs/exec.md) an agent needs no more than this row and a driver that
+	// launches through SpawnOptions.Command, LaunchFile and PromptFile. FindRemote is Find there:
+	// the transcript's path there; nil: the agent does not run at one. HomeEnv is the variable the
+	// agent's home there goes in when the executor says one (dsh: DSH_HOME). MinRemote is the
+	// oldest version that runs there ("": any).
 	FindRemote func(w RemoteWhere) (string, error)
+	HomeEnv    string
+	MinRemote  string
+}
+
+// RemoteEnv is the environment the agent starts with at an executor: the executor's own, its
+// home in HomeEnv.
+func (i Info) RemoteEnv(env []string, home string) []string {
+	env = slices.Clone(env)
+	if i.HomeEnv != "" && home != "" {
+		env = agent.SetEnv(env, i.HomeEnv, home)
+	}
+	return env
+}
+
+// RemoteVersionOK: version v of the agent may run at an executor (MinRemote; a dotted version's
+// first three numbers, "0.2.2-rc.1" as 0.2.2).
+func (i Info) RemoteVersionOK(v string) bool {
+	if i.MinRemote == "" {
+		return true
+	}
+	have, least := dotted(v), dotted(i.MinRemote)
+	return slices.Compare(have[:], least[:]) >= 0
+}
+
+func dotted(v string) [3]int {
+	var out [3]int
+	v, _, _ = strings.Cut(v, "-")
+	for i, p := range strings.SplitN(v, ".", 3) {
+		out[i], _ = strconv.Atoi(p)
+	}
+	return out
 }
 
 var all = []Info{
@@ -132,6 +170,25 @@ var all = []Info{
 		},
 		Find:   func(w Where) (string, error) { return transcript.FindPi(transcript.PiSessions(w.Env, w.Cwd), w.ID) },
 		Format: transcript.Pi,
+		// Where PiSessions looks, at the executor: its variables, else ~/.pi/agent there.
+		HomeEnv: "PI_CODING_AGENT_DIR",
+		FindRemote: func(w RemoteWhere) (string, error) {
+			if !transcript.ValidID(w.ID) {
+				return "", nil
+			}
+			dir := agent.GetEnv(w.Env, "PI_CODING_AGENT_SESSION_DIR")
+			if dir == "" {
+				root := cmp.Or(agent.GetEnv(w.Env, "PI_CODING_AGENT_DIR"), w.Join(w.User, ".pi", "agent"))
+				dir = w.Join(root, "sessions", transcript.PiFolder(w.Cwd))
+			}
+			names, err := w.List(dir)
+			for _, n := range names {
+				if strings.HasSuffix(n, "_"+w.ID+".jsonl") {
+					return w.Join(dir, n), nil
+				}
+			}
+			return "", err
+		},
 	},
 	{
 		// dsh --profile sdk (0.2.2-rc.1): mode at once (/permission, /plan); model, effort and
@@ -144,8 +201,11 @@ var all = []Info{
 		},
 		Find:   func(w Where) (string, error) { return transcript.FindDsh(transcript.DshHome(w.Env), w.ID) },
 		Format: transcript.Dsh,
+		// The first with the sdk profile.
+		HomeEnv: "DSH_HOME", MinRemote: "0.2.2",
 		FindRemote: func(w RemoteWhere) (string, error) {
-			dir := w.Join(w.Home, "sessions", transcript.DshProjectDir(w.Cwd), w.ID)
+			home := cmp.Or(agent.GetEnv(w.Env, "DSH_HOME"), w.Join(w.User, ".dsh"))
+			dir := w.Join(home, "sessions", transcript.DshProjectDir(w.Cwd), w.ID)
 			names, err := w.List(dir)
 			if err != nil {
 				return "", err

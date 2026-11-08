@@ -165,8 +165,13 @@ func PiSessions(env []string, cwd string) string {
 		home, _ := os.UserHomeDir()
 		root = filepath.Join(home, ".pi", "agent")
 	}
-	folder := strings.NewReplacer("/", "-", `\`, "-", ":", "-").Replace(strings.TrimLeft(cwd, `/\`))
-	return filepath.Join(root, "sessions", "--"+folder+"--")
+	return filepath.Join(root, "sessions", PiFolder(cwd))
+}
+
+// PiFolder is the folder under pi's sessions directory of the sessions started in cwd, which
+// may be another machine's (`C:\a\b`: `--C--a-b--`).
+func PiFolder(cwd string) string {
+	return "--" + strings.NewReplacer("/", "-", `\`, "-", ":", "-").Replace(strings.TrimLeft(cwd, `/\`)) + "--"
 }
 
 // FindPi is pi session id's file in dir ("<created>_<id>.jsonl"); "" if none yet: pi writes it

@@ -7,14 +7,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/kumoSleeping/iridium/internal/agent"
 	"github.com/kumoSleeping/iridium/internal/agents"
-	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/platform"
 	"github.com/kumoSleeping/iridium/internal/remote"
 	"github.com/kumoSleeping/iridium/internal/remote/wire"
@@ -73,28 +70,6 @@ func groupPath(machine, cwd string) string {
 	return machine + ":" + strings.ReplaceAll(cwd, `\`, "/")
 }
 
-// MinDsh is the oldest dsh an executor may run sessions with: the first with the sdk profile.
-var MinDsh = [3]int{0, 2, 2}
-
-// version is a dotted version's first three numbers ("0.2.2-rc.1": 0 2 2).
-func version(v string) [3]int {
-	var out [3]int
-	v, _, _ = strings.Cut(v, "-")
-	for i, p := range strings.SplitN(v, ".", 3) {
-		out[i], _ = strconv.Atoi(p)
-	}
-	return out
-}
-
-func older(a, b [3]int) bool {
-	for i := range a {
-		if a[i] != b[i] {
-			return a[i] < b[i]
-		}
-	}
-	return false
-}
-
 // remoteFor is the executor a new session asks for, by terminal ID or name, checked: connected,
 // the agent installed there, cwd a directory there.
 func (m *Manager) remoteFor(ctx context.Context, machine string, info agents.Info, cwd string) (*remote.Machine, error) {
@@ -116,8 +91,8 @@ func (m *Manager) remoteFor(ctx context.Context, machine string, info agents.Inf
 	if !ok {
 		return nil, fmt.Errorf("%w: %s (not at %s)", ErrNotInstalled, info.Name, machine)
 	}
-	if info.Agent == api.AgentDsh && older(version(ai.Version), MinDsh) {
-		return nil, fmt.Errorf("dsh %s at %s: %d.%d.%d or later is needed", ai.Version, machine, MinDsh[0], MinDsh[1], MinDsh[2])
+	if !info.RemoteVersionOK(ai.Version) {
+		return nil, fmt.Errorf("%s %s at %s: %s or later is needed", info.Name, ai.Version, machine, info.MinRemote)
 	}
 	if !remote.IsAbs(hi.Sep, cwd) {
 		return nil, fmt.Errorf("not a directory: %q", cwd)
@@ -140,11 +115,8 @@ func (h *Hosted) remoteSpawn(mc *remote.Machine, o *agent.SpawnOptions) error {
 		return fmt.Errorf("%w: %s is not at the machine", agent.ErrNoProgram, h.meta.Agent)
 	}
 	ctx := h.m.ctx
-	env := slices.Clone(hi.Env)
-	if h.meta.Agent == api.AgentDsh && ai.Home != "" {
-		env = agent.SetEnv(env, "DSH_HOME", ai.Home)
-	}
-	o.Env, o.Program = env, ""
+	info, _ := agents.Get(h.meta.Agent)
+	o.Env, o.Program = info.RemoteEnv(hi.Env, ai.Home), ""
 	o.Remote = &agent.Remote{
 		Argv: ai.Argv, Version: ai.Version, Scope: ai.Scope, Scratch: hi.Scratch,
 		Join: func(elem ...string) string { return remote.Join(hi.Sep, elem...) },
@@ -179,7 +151,7 @@ func (h *Hosted) findRemoteTranscript(mc *remote.Machine) (string, error) {
 	ctx, cancel := context.WithTimeout(h.m.ctx, 30*time.Second)
 	defer cancel()
 	path, err := info.FindRemote(agents.RemoteWhere{
-		ID: h.meta.agentID(), Cwd: h.meta.Cwd, Home: ai.Home, User: hi.Home,
+		ID: h.meta.agentID(), Cwd: h.meta.Cwd, Home: ai.Home, User: hi.Home, Env: info.RemoteEnv(hi.Env, ai.Home),
 		Join: func(elem ...string) string { return remote.Join(hi.Sep, elem...) },
 		List: func(dir string) ([]string, error) {
 			ents, err := mc.List(ctx, dir)
