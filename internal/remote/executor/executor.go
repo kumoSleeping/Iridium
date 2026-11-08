@@ -35,7 +35,7 @@ type Options struct {
 	State string // its own directory: holders' files, scratch
 	// Roots are the directories files may be read and written under; none: all but the denied.
 	Roots []string
-	// Deny are directories never served, besides its own TOKEN's and ~/.ssh.
+	// Deny are paths never served, besides its own TOKEN's, ~/.ssh and the agents' logins (denied).
 	Deny   []string
 	Agents []wire.AgentInfo
 	// NoShell: start nothing but the agents (an argv beginning with one of theirs), so no
@@ -43,7 +43,7 @@ type Options struct {
 	NoShell bool
 	// AgentShell: say agents there may run command lines here (ir sh), not only a person.
 	AgentShell bool
-	Env        []string // nil: os.Environ()
+	Env        []string // nil: os.Environ(); the hello gives it without secrets (helloEnv)
 	Program    string   // what the hello says it is; "": iridium-executor
 	// HTTPClient dials the Iridium; nil: http.DefaultClient.
 	HTTPClient *http.Client
@@ -219,7 +219,7 @@ func (e *Executor) hello() wire.Hello {
 	return wire.Hello{
 		Protocol: wire.Protocol, Program: e.o.Program, OS: runtime.GOOS, Arch: runtime.GOARCH,
 		Home: home, Sep: string(filepath.Separator), Scratch: filepath.Join(e.o.State, "scratch"),
-		Env: e.o.Env, Agents: e.o.Agents, Holds: holds, NoShell: e.o.NoShell, AgentShell: e.o.AgentShell,
+		Env: helloEnv(e.o.Env), Agents: e.o.Agents, Holds: holds, NoShell: e.o.NoShell, AgentShell: e.o.AgentShell,
 	}
 }
 
@@ -383,6 +383,7 @@ func (e *Executor) start(id string, spec spec) (any, error) {
 		h.grace = time.Duration(spec.StopGraceMS) * time.Millisecond
 	}
 	cmd := exec.Command(spec.Argv[0], spec.Argv[1:]...)
+	spec.Env = startEnv(spec.Env, e.o.Env)
 	cmd.Env, cmd.Dir, cmd.Stdout, cmd.Stderr = spec.Env, spec.Cwd, out, errLog
 	if p := lookPath(spec.Argv[0], spec.Env); p != "" {
 		cmd.Path, cmd.Err = p, nil
@@ -621,8 +622,7 @@ func (e *Executor) allowed(path string) (string, error) {
 		rel, err := filepath.Rel(root, real)
 		return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 	}
-	home, _ := os.UserHomeDir()
-	for _, d := range append([]string{filepath.Join(e.o.State, "token"), filepath.Join(home, ".ssh")}, e.o.Deny...) {
+	for _, d := range e.denied() {
 		if under(d) {
 			return "", &wire.Error{Code: wire.CodeDenied, Message: path}
 		}

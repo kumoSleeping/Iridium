@@ -7,6 +7,7 @@ import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import { deniedPaths, helloEnv, startEnv } from './secrets.js'
 
 export const PROTOCOL = 1
 
@@ -185,11 +186,7 @@ class Holder {
     const out = fs.openSync(path.join(this.dir, OUT), 'a', 0o600)
     const err = fs.openSync(path.join(this.dir, ERR), 'a', 0o600)
     if (spec.stopGraceMs > 0) this.grace = spec.stopGraceMs
-    const env = {}
-    for (const kv of spec.env ?? []) {
-      const i = kv.indexOf('=')
-      if (i > 0) env[kv.slice(0, i)] = kv.slice(i + 1)
-    }
+    const env = startEnv(spec.env, this.ex.env)
     let child
     try {
       child = spawn(spec.argv[0], spec.argv.slice(1), {
@@ -337,13 +334,16 @@ function killTree(pid, hard) {
  * The executor. Options: url (ws(s)://…/api/exec), token, state (its own directory), roots
  * (directories files may be under; none: all but the denied), agents (Hello's), noShell (start
  * nothing but the agents: no command line runs here), agentShell (say the Iridium's agents may run
- * command lines here, ir sh, not only a person on its page), env, program, log.
+ * command lines here, ir sh, not only a person on its page), env ({name: value}; default
+ * process.env, the hello gives it without secrets), denied (paths never served besides its own
+ * and the agents' logins), program, log.
  */
 export class Executor {
   constructor(o) {
     this.o = o
     this.state = o.state
     this.log = o.log ?? (() => {})
+    this.env = o.env ?? process.env
     this.holds = new Map()
     this.conn = null
     this.stopped = false
@@ -436,7 +436,7 @@ export class Executor {
     return {
       protocol: PROTOCOL, program: this.o.program ?? 'dsh-remote-iridium', os: process.platform === 'win32' ? 'windows' : process.platform,
       arch: process.arch, home: os.homedir(), sep: path.sep, scratch: path.join(this.state, 'scratch'),
-      env: this.o.env ?? Object.entries(process.env).map(([k, v]) => `${k}=${v}`),
+      env: helloEnv(this.env),
       agents: this.o.agents ?? [], holds: [...this.holds.values()].map((h) => h.state()),
       ...(this.o.noShell ? { noShell: true } : {}),
       ...(this.o.agentShell ? { agentShell: true } : {}),
@@ -536,7 +536,7 @@ export class Executor {
       const rel = path.relative(fold(root), fold(real))
       return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))
     }
-    for (const d of [path.join(this.state, 'token'), path.join(os.homedir(), '.ssh'), ...(this.o.denied ?? [])]) {
+    for (const d of deniedPaths(this.env, this.o.agents ?? [], [path.join(this.state, 'token'), ...(this.o.denied ?? [])])) {
       if (under(d)) throw new RemoteError('denied', p)
     }
     const roots = this.o.roots ?? []
