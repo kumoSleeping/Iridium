@@ -154,6 +154,50 @@ func (s *Store) DeleteWorkspace(id int64) error {
 	})
 }
 
+// Nest moves the sessions discovery put in workspace from to workspace to, and drops from once
+// none is left in it (one you moved there keeps it). It gives the sessions moved.
+func (s *Store) Nest(from, to int64) (moved []string, dropped bool, err error) {
+	err = s.Tx(func(tx *sql.Tx) error {
+		rows, err := tx.Query(`SELECT session FROM assignments WHERE workspace = ? AND manual = 0`, from)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return err
+			}
+			moved = append(moved, id)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`UPDATE assignments SET workspace = ?, at = ? WHERE workspace = ? AND manual = 0`, to, now(), from); err != nil {
+			return err
+		}
+		var left int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM assignments WHERE workspace = ?`, from).Scan(&left); err != nil {
+			return err
+		}
+		if left > 0 {
+			return nil
+		}
+		r, err := tx.Exec(`DELETE FROM workspaces WHERE id = ?`, from)
+		if err != nil {
+			return err
+		}
+		n, _ := r.RowsAffected()
+		dropped = n == 1
+		return nil
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	return moved, dropped, nil
+}
+
 // Adopt puts the given sessions in workspace, those that are in none and were never moved by
 // the user; the others stay. It gives how many moved.
 func (s *Store) Adopt(workspace int64, sessions []string) (int, error) {

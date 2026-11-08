@@ -143,3 +143,99 @@ func TestGroupForAcrossMachines(t *testing.T) {
 		t.Errorf("here, elsewhere than its caller's folder: %d", got)
 	}
 }
+
+// Groups of subfolders made before their parent's (an executor's sessions all seen at once, the
+// oldest in a subfolder) go into it, as folders there: what discovery put in them moves, a group
+// left empty is dropped; one with a session you moved there stays with it. Hidden groups stay as
+// they are, and a home folder's group holds only its own, at a machine not connected too.
+func TestNest(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "iridium.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	x := New(Options{Store: st, Home: "/home/u", Logf: t.Logf})
+	group := func(path string) int64 {
+		id, err := st.CreateWorkspace(filepath.Base(path), path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	add := func(id, cwd string, ws int64) {
+		x.entries[id] = &entry{onDisk: onDisk{id: id, agent: api.AgentDsh}, glimpse: glimpse{cwd: cwd}, mtime: time.Now(), machine: "m"}
+		if _, err := st.Show(string(api.AgentDsh), id); err != nil {
+			t.Fatal(err)
+		}
+		if ws != 0 {
+			if _, err := st.AssignAuto(id, ws); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	uc := group("m:C:/Code/Ds_Benchmark/UC")
+	hy4 := group("m:C:/Code/Ds_Benchmark/hy4")
+	deep := group("m:C:/Code/Ds_Benchmark/hy4/x")
+	kept := group("m:C:/Code/Ds_Benchmark/kept")
+	shut := group("m:C:/Code/Ds_Benchmark/shut")
+	home := group("m:C:/Users/o")
+	docs := group("m:C:/Users/o/Documents/a")
+	bench := group("m:C:/Code/Ds_Benchmark")
+	if err := st.HideWorkspace(shut, true); err != nil {
+		t.Fatal(err)
+	}
+	filed := map[string]bool{}
+	for _, s := range []struct {
+		id, cwd string
+		ws      int64
+	}{
+		{"uc", `C:\Code\Ds_Benchmark\UC`, uc},
+		{"hy4", `C:\Code\Ds_Benchmark\hy4`, hy4},
+		{"deep", `C:\Code\Ds_Benchmark\hy4\x`, deep},
+		{"auto", `C:\Code\Ds_Benchmark\kept`, kept},
+		{"moved", `C:\Code\Ds_Benchmark\kept`, 0},
+		{"shut", `C:\Code\Ds_Benchmark\shut`, shut},
+		{"home", `C:\Users\o`, home},
+		{"docs", `C:\Users\o\Documents\a`, docs},
+		{"bench", `C:\Code\Ds_Benchmark`, bench},
+		{"fresh", `C:\Code\Ds_Benchmark\UC\y`, 0},
+	} {
+		add(s.id, s.cwd, s.ws)
+		filed[s.id] = true
+	}
+	x.filed["m"] = filed
+	if err := st.Move("moved", kept); err != nil {
+		t.Fatal(err)
+	}
+	x.classify()
+	a, _ := st.Assignments()
+	for _, id := range []string{"uc", "hy4", "deep", "auto", "bench", "fresh"} {
+		if a[id].Workspace != bench || a[id].Manual {
+			t.Errorf("%s: %+v, want in Ds_Benchmark's group %d", id, a[id], bench)
+		}
+	}
+	if a["moved"].Workspace != kept || !a["moved"].Manual {
+		t.Errorf("moved: %+v, want left in %d", a["moved"], kept)
+	}
+	want := map[string]int64{"shut": shut, "home": home, "docs": docs}
+	for id, ws := range want {
+		if a[id].Workspace != ws {
+			t.Errorf("%s: %+v, want left in %d", id, a[id], ws)
+		}
+	}
+	ws, _ := st.Workspaces()
+	left := map[int64]bool{}
+	for _, w := range ws {
+		left[w.ID] = true
+	}
+	for _, id := range []int64{uc, hy4, deep} {
+		if left[id] {
+			t.Errorf("group %d left, want dropped", id)
+		}
+	}
+	for _, id := range []int64{kept, shut, home, docs, bench} {
+		if !left[id] {
+			t.Errorf("group %d dropped, want left", id)
+		}
+	}
+}
