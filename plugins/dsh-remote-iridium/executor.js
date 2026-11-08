@@ -25,6 +25,11 @@ class RemoteError extends Error {
 
 const bad = (m) => new RemoteError('bad_request', m)
 
+// Heartbeat (wire.PingEvery, wire.DeadAfter): a "ping" event every 25s keeps a proxy's idle timeout
+// from cutting the connection; once the other side has pinged, 70s of nothing ends it.
+const PING_EVERY = 25_000
+const DEAD_AFTER = 70_000
+
 /** A connection: requests both ways, answered by id; events one way. */
 class Conn {
   constructor(ws, onRequest) {
@@ -32,8 +37,15 @@ class Conn {
     this.onRequest = onRequest
     this.next = 0
     this.waits = new Map()
+    this.heard = Date.now()
+    this.pinged = false
+    const beat = setInterval(() => {
+      if (this.pinged && Date.now() - this.heard > DEAD_AFTER) return this.ws.close(4000, 'no heartbeat') // a client may close with 1000 or 3000–4999
+      this.notify('ping')
+    }, PING_EVERY)
     this.closed = new Promise((resolve) => {
       ws.addEventListener('close', () => {
+        clearInterval(beat)
         for (const w of this.waits.values()) w.reject(new Error('connection closed'))
         this.waits.clear()
         resolve()
@@ -50,7 +62,9 @@ class Conn {
       this.ws.close(1002, 'bad frame')
       return
     }
-    if (f.method) {
+    this.heard = Date.now()
+    if (f.event === 'ping') this.pinged = true
+    else if (f.method) {
       Promise.resolve()
         .then(() => this.onRequest(f.method, f.params ?? {}))
         .then(
@@ -343,6 +357,13 @@ export class Executor {
 
   /** Connects, and again whenever the connection ends, until stop. */
   async run() {
+    // A Mac stays awake while a process it started runs (caffeinate -i for a minute, again every
+    // 30s); a closed lid still sleeps it.
+    const awake =
+      process.platform === 'darwin' &&
+      setInterval(() => {
+        if ([...this.holds.values()].some((h) => !h.exit)) execFile('caffeinate', ['-i', '-t', '60'], () => {})
+      }, 30000)
     let wait = 1000
     while (!this.stopped) {
       const began = Date.now()
@@ -356,6 +377,7 @@ export class Executor {
       await new Promise((r) => (this.wakeTimer = setTimeout(r, wait)))
       wait = Math.min(wait * 2, 30000)
     }
+    if (awake) clearInterval(awake)
   }
 
   async session() {

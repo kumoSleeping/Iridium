@@ -87,6 +87,9 @@ func New(o Options) (*Executor, error) {
 // Run connects, and connects again whenever the connection ends, until ctx ends or the Iridium
 // refuses the TOKEN (ErrRefused).
 func (e *Executor) Run(ctx context.Context) error {
+	if runtime.GOOS == "darwin" {
+		go e.awake(ctx)
+	}
 	wait := time.Second
 	for ctx.Err() == nil {
 		start := time.Now()
@@ -108,6 +111,41 @@ func (e *Executor) Run(ctx context.Context) error {
 		wait = min(2*wait, 30*time.Second)
 	}
 	return ctx.Err()
+}
+
+// awake keeps a Mac from sleeping when idle while a process it started runs: caffeinate -i for a
+// minute, again every 30s; once none runs, it sleeps as it would (a closed lid still does).
+func (e *Executor) awake(ctx context.Context) {
+	t := time.NewTicker(30 * time.Second)
+	defer t.Stop()
+	for {
+		if e.running() {
+			if c := exec.Command("caffeinate", "-i", "-t", "60"); c.Start() == nil {
+				go func() { _ = c.Wait() }()
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+// running: a process it started has not ended.
+func (e *Executor) running() bool {
+	e.mu.Lock()
+	hs := make([]*holder, 0, len(e.holds))
+	for _, h := range e.holds {
+		hs = append(hs, h)
+	}
+	e.mu.Unlock()
+	for _, h := range hs {
+		if h.state().Exit == nil {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *Executor) session(ctx context.Context) error {

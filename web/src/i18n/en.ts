@@ -26,6 +26,8 @@ export const en: Dict = {
   "status.needsElsewhere": "Needs you elsewhere",
   "status.idle": "Idle",
   "status.offline": "Disconnected",
+  "machine.latency": "Latency {ms} ms",
+  "machine.reconnecting": "Reconnecting",
   "status.unread": "Unread",
 
   "top.online": "Connected · {ms} ms round trip",

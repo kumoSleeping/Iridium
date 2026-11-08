@@ -2,9 +2,11 @@ package server
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/remote/wire"
@@ -35,6 +37,17 @@ func (s *Server) machineShell(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := agentCtx(r)
 	defer cancel()
 	st, err := s.m.MachineShell(ctx, id, req.Line, req.Cwd)
+	if errors.Is(err, session.ErrOffline) {
+		// Said so an agent tells the user, not tries again and again.
+		msg := fmt.Sprintf("%s is not connected", r.PathValue("id"))
+		for _, m := range s.machines() {
+			if m.ID == id && m.SeenAt > 0 {
+				msg = fmt.Sprintf("%s is not connected (it last connected %s ago)", m.Name, roughly(time.Since(time.UnixMilli(m.SeenAt))))
+			}
+		}
+		fail(w, http.StatusConflict, msg)
+		return
+	}
 	if err != nil {
 		s.shellError(w, err)
 		return
@@ -86,4 +99,17 @@ func (s *Server) shellError(w http.ResponseWriter, err error) {
 	default:
 		s.error(w, err)
 	}
+}
+
+// roughly is d as a person says it: 40s, 12m, 3h, 2d.
+func roughly(d time.Duration) string {
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 48*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	}
+	return fmt.Sprintf("%dd", int(d.Hours()/24))
 }

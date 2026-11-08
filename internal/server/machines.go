@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/kumoSleeping/iridium/internal/access"
 	"github.com/kumoSleeping/iridium/internal/agents"
@@ -28,6 +29,35 @@ func (s *Server) WatchMachines() {
 		s.machineSeen(id)
 	}
 	s.publishMachines()
+	go s.watchLatency()
+}
+
+// SlowRTT: a round trip above it is a slow connection (the page's yellow lamp).
+const SlowRTT = 300 * time.Millisecond
+
+// watchLatency tells the pages again when a machine's connection turns slow or fast again, by the
+// heartbeat's round trips (not on every one).
+func (s *Server) watchLatency() {
+	slow := map[string]bool{}
+	for range time.Tick(30 * time.Second) {
+		changed := false
+		for _, id := range s.Remote.Online() {
+			mc := s.Remote.Machine(id)
+			if mc == nil {
+				continue
+			}
+			c, err := mc.Conn()
+			if err != nil || c.RTT() == 0 {
+				continue
+			}
+			if v := c.RTT() > SlowRTT; v != slow[id] {
+				slow[id], changed = v, true
+			}
+		}
+		if changed {
+			s.publishMachines()
+		}
+	}
 }
 
 // machineSeen keeps what executor id said, if it is connected, and tells the pages.
@@ -76,6 +106,9 @@ func (s *Server) machines() []api.Machine {
 		if s.Remote != nil {
 			if mc := s.Remote.Find(r.Terminal); mc != nil {
 				_, m.Online = mc.Hello()
+				if c, err := mc.Conn(); err == nil && m.Online {
+					m.Latency = c.RTT().Milliseconds()
+				}
 			}
 		}
 		out = append(out, m)

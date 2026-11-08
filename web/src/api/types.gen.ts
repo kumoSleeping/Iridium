@@ -1525,6 +1525,10 @@ export interface Machine {
    */
   noShell?: boolean;
   /**
+   * Latency: the connection's last round trip (ms), by its heartbeat; 0 not known.
+   */
+  latency?: number /* int64 */;
+  /**
    * AgentShell: agents here may run command lines there (ir sh).
    */
   agentShell?: boolean;

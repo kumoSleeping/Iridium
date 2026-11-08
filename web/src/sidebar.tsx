@@ -26,7 +26,7 @@ import { useMe, useTerminalList, useUpdate } from "./data";
 import { agentName, ago, Avatar, cn, fine, IconKey, IrMark, keep, kept, Lamp, lampOf, Logo, own, sessionStatusText, statusText, tilde, Tip, titleOf, useLongPress, useMenuAt, useMinute } from "./ui";
 import { SESSION_DRAG } from "./chat/refs";
 import { useUnread } from "./unread";
-import { MachineBadge, MachineTag, remoteOf, shownPath, useMachine } from "./machines";
+import { MachineBadge, MachineTag, remoteOf, shownPath, useLate, useMachine } from "./machines";
 import { useMachines } from "./store";
 
 const STEP = 18;
@@ -659,7 +659,8 @@ const SessionRow = memo(function SessionRow({ s, where, depth, flip, selected, o
   const bots = s.bots?.length ? <Here bots={s.bots} /> : null;
   // At another machine: its face on the logo; not connected now, a grey ring for its lamp.
   const machine = useMachine(s.machine);
-  const away = !!s.offline && !busy;
+  // Gone a moment (a proxy's cut, a Mac waking) is not shown as gone (machines.tsx useLate).
+  const away = useLate(!!s.offline) && !busy;
   const end = slot || mark || lamp || bots || away ? (
     <span className="flex items-center gap-1.5">
       {bots}

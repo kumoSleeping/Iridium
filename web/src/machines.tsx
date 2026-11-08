@@ -2,6 +2,7 @@
 // its sessions marked with its face on the agent's logo. Its face is its Bot's avatar, or by its
 // system: a Windows window, a laptop for a Mac, a monitor for Linux.
 import { Laptop, Monitor } from "lucide-react";
+import { useEffect, useState } from "react";
 import type { Machine } from "./api/types.gen";
 import { useMachines } from "./store";
 import { t } from "./i18n";
@@ -72,13 +73,43 @@ export function shownPath(path: string, ms: Machine[]): { m?: Machine; label: st
   return { m: r.m, label: p === home || p.startsWith(home + "/") ? "~" + p.slice(home.length) : p, real: r.cwd };
 }
 
-/** After a folder group's name: the Bot that brought the machine, its avatar and name; grey while
- *  it is not connected. */
+/** on, once it has stayed so for ms: a connection gone for a moment (a proxy's cut, a Mac waking)
+ *  is not shown as gone. */
+export function useLate(on: boolean, ms = AWAY_AFTER): boolean {
+  const [late, setLate] = useState(false);
+  useEffect(() => {
+    if (!on) return setLate(false);
+    const t = setTimeout(() => setLate(true), ms);
+    return () => clearTimeout(t);
+  }, [on, ms]);
+  return on && late;
+}
+
+/** How long a machine is gone before the page says so. */
+export const AWAY_AFTER = 10_000;
+/** A round trip above it is slow (the server's SlowRTT). */
+const SLOW_MS = 300;
+
+/** A machine's connection: on, slow (or gone a moment), away. */
+export function useLink(m: Machine): "on" | "slow" | "away" {
+  const away = useLate(!m.online);
+  return away ? "away" : !m.online || (m.latency ?? 0) > SLOW_MS ? "slow" : "on";
+}
+
+const LINK_COLOR = { on: "var(--plus)", slow: "var(--need)", away: "var(--err)" };
+
+/** After a folder group's name: the Bot that brought the machine, its avatar and name, and a lamp
+ *  for its connection (its round trip, or that it is gone, on hover); grey once it is gone. */
 export function MachineTag({ m }: { m: Machine }) {
+  const link = useLink(m);
+  const tip = link === "away" ? t("status.offline") : m.online && m.latency ? t("machine.latency", { ms: m.latency }) : t("machine.reconnecting");
   return (
-    <span className={cn("ml-2 inline-flex min-w-0 shrink items-center gap-1 align-middle text-sm font-normal text-ink-3", !m.online && "opacity-50 grayscale")} title={m.online ? m.name : `${m.name} · ${t("status.offline")}`}>
-      <MachineFace m={m} size={14} />
-      <span className="truncate">{m.name}</span>
+    <span className="ml-2 inline-flex min-w-0 shrink items-center gap-1 align-middle text-sm font-normal text-ink-3" title={`${m.name} · ${tip}`}>
+      <span className={cn("inline-flex min-w-0 items-center gap-1", link === "away" && "opacity-50 grayscale")}>
+        <MachineFace m={m} size={14} />
+        <span className="truncate">{m.name}</span>
+      </span>
+      <span role="img" aria-label={tip} className="size-1.5 shrink-0 rounded-full" style={{ background: LINK_COLOR[link] }} />
     </span>
   );
 }

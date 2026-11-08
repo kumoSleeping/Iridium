@@ -40,6 +40,7 @@ const Usage = `usage: ir join <address> [--name name] [--roots dir,…] [--insta
   --roots    the directories it may read and write files under (default: the home directory)
   --no-shell start only its agents: no command line from that Iridium runs here
   --agent-shell  its agents may run command lines here too (ir sh), not only a person on its page
+  --no-agents    offer none of the agents here (with --agent-shell: a machine for ir sh alone)
   --install  start at login (Windows: a scheduled task; macOS: a LaunchAgent; Linux: a systemd user unit)
   --uninstall  stop starting at login
 `
@@ -51,6 +52,8 @@ type Options struct {
 	Roots []string
 	// NoShell: only the agents start here, no command line (docs/exec.md).
 	NoShell, AgentShell bool
+	// NoAgents: offer none of the agents found here.
+	NoAgents bool
 	// Base is where joins keep their state (BaseDir): tokens/<key>, the TOKENs; <key>/, the
 	// executor's own directory.
 	Base   string
@@ -71,6 +74,7 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	roots := fs.String("roots", "", "")
 	noShell := fs.Bool("no-shell", false, "")
 	agentShell := fs.Bool("agent-shell", false, "")
+	noAgents := fs.Bool("no-agents", false, "")
 	install := fs.Bool("install", false, "")
 	uninstall := fs.Bool("uninstall", false, "")
 	base := fs.String("state", "", "")  // where joins keep their state (tests)
@@ -101,7 +105,7 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "ir join: %v\n", err)
 		return 2
 	}
-	o := Options{URL: u, Name: *name, NoShell: *noShell, AgentShell: *agentShell, Base: *base, Out: stdout, Resident: *resident}
+	o := Options{URL: u, Name: *name, NoShell: *noShell, AgentShell: *agentShell, NoAgents: *noAgents, Base: *base, Out: stdout, Resident: *resident}
 	if o.Base == "" {
 		o.Base, err = BaseDir()
 	} else {
@@ -272,7 +276,7 @@ func (o *Options) program() string { return "iridium " + version.Version }
 // Run pairs if there is no TOKEN, then runs the executor till ctx ends. A TOKEN the Iridium turns
 // down is forgotten and it pairs again.
 func (o *Options) Run(ctx context.Context) error {
-	if o.Agents == nil {
+	if o.Agents == nil && !o.NoAgents {
 		o.Agents = FindAgents(o.Logf)
 	}
 	if len(o.Roots) == 0 {
@@ -368,7 +372,7 @@ func (o *Options) pair(ctx context.Context) (string, error) {
 		name = MachineName()
 	}
 	who := api.ExecPair{Name: name, OS: runtime.GOOS, Arch: runtime.GOARCH, Program: o.program()}
-	if o.Agents == nil {
+	if o.Agents == nil && !o.NoAgents {
 		o.Agents = FindAgents(o.Logf)
 	}
 	for _, a := range o.Agents {

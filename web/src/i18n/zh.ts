@@ -26,6 +26,8 @@ export const zh = {
   "status.needsElsewhere": "在别处等你",
   "status.idle": "空闲",
   "status.offline": "已断开",
+  "machine.latency": "延迟 {ms} ms",
+  "machine.reconnecting": "重新连接中",
   "status.unread": "有新消息",
 
   "top.online": "已连接 · 往返 {ms} ms",

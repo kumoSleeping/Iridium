@@ -34,6 +34,9 @@ var (
 // shellKeep: how long an ended run's output stays to be read.
 const shellKeep = 10 * time.Minute
 
+// shellWait: how long ir sh waits for a machine not connected to come back.
+var shellWait = 10 * time.Second
+
 // shellRead: the most of a run's output one read gives.
 const shellRead = 64 << 10
 
@@ -93,7 +96,11 @@ func (m *Manager) MachineShell(ctx context.Context, machine, line, cwd string) (
 	if mc == nil {
 		return api.ShellStarted{}, ErrOffline
 	}
+	// Just gone, it may be back in a moment (a proxy's cut, a Mac waking): wait a little for it.
 	hi, ok := mc.Hello()
+	for wait := time.Now().Add(shellWait); !ok && time.Now().Before(wait) && ctx.Err() == nil; hi, ok = mc.Hello() {
+		time.Sleep(250 * time.Millisecond)
+	}
 	if !ok {
 		return api.ShellStarted{}, ErrOffline
 	}

@@ -7,9 +7,22 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/coder/websocket"
 )
+
+// Heartbeat: each side sends the event "ping" every PingEvery, which keeps a proxy's idle timeout
+// (Cloudflare's, about 100s) from cutting the connection; a side that has had a ping from the other
+// and then nothing for DeadAfter ends the connection, so both learn of a dead one soon. A peer that
+// never pings (an older one) is never ended for its silence.
+var (
+	PingEvery = 25 * time.Second
+	DeadAfter = 70 * time.Second
+)
+
+// EventPing is the heartbeat's event; it never reaches OnEvent.
+const EventPing = "ping"
 
 // MaxFrame is the largest Frame read: an fs.read of MaxRead in base64, and then some.
 const MaxFrame = 8 << 20
@@ -26,6 +39,10 @@ type Conn struct {
 	done  chan struct{}
 	err   error
 
+	heard  atomic.Int64 // when a frame last came (unix ns)
+	pinged atomic.Bool  // the other side pings
+	rtt    atomic.Int64 // the last WebSocket ping's round trip (ns); 0 before the first
+
 	// OnRequest answers a request from the other side; nil answers every one unsupported.
 	OnRequest func(ctx context.Context, method string, params json.RawMessage) (any, error)
 	// OnEvent is an event from the other side, called in order on Run's goroutine.
@@ -40,6 +57,10 @@ func NewConn(ws *websocket.Conn) *Conn {
 
 // Run reads frames until the connection ends or ctx does, and returns why.
 func (c *Conn) Run(ctx context.Context) error {
+	c.heard.Store(time.Now().UnixNano())
+	beat, stop := context.WithCancel(ctx)
+	defer stop()
+	go c.heartbeat(beat)
 	err := c.run(ctx)
 	c.mu.Lock()
 	c.err = err
@@ -60,11 +81,14 @@ func (c *Conn) run(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		c.heard.Store(time.Now().UnixNano())
 		var f Frame
 		if err := json.Unmarshal(b, &f); err != nil {
 			return fmt.Errorf("executor: bad Frame: %w", err)
 		}
 		switch {
+		case f.Event == EventPing:
+			c.pinged.Store(true)
 		case f.Method != "":
 			go c.answer(ctx, f)
 		case f.Event != "":
@@ -82,6 +106,34 @@ func (c *Conn) run(ctx context.Context) error {
 		}
 	}
 }
+
+// heartbeat pings the other side, and ends the connection once a peer that pings has gone quiet.
+func (c *Conn) heartbeat(ctx context.Context) {
+	t := time.NewTicker(PingEvery)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		if c.pinged.Load() && time.Since(time.Unix(0, c.heard.Load())) > DeadAfter {
+			_ = c.ws.CloseNow() // no close handshake: the other side is not there to answer it
+			return
+		}
+		_ = c.Notify(ctx, EventPing, nil)
+		// The round trip, by a WebSocket ping, which every peer answers by itself.
+		pctx, cancel := context.WithTimeout(ctx, min(10*time.Second, PingEvery))
+		start := time.Now()
+		if c.ws.Ping(pctx) == nil {
+			c.rtt.Store(int64(max(time.Since(start), time.Microsecond)))
+		}
+		cancel()
+	}
+}
+
+// RTT is the last heartbeat's round trip; 0 before the first.
+func (c *Conn) RTT() time.Duration { return time.Duration(c.rtt.Load()) }
 
 func (c *Conn) answer(ctx context.Context, f Frame) {
 	var res any
