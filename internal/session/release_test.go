@@ -147,8 +147,9 @@ func TestReleaseFlow(t *testing.T) {
 	if err := r.m.Release(ctx, id, "toolu_denied", "网页", true); err != nil {
 		t.Fatal(err)
 	}
-	s = r.waitState(id, "dismissed", func(s *api.SessionState) bool { return len(s.Denials) == 0 })
-	if s.Status != api.StatusIdle || s.Mode != "auto" {
+	// The card goes at once; the turn it came in may still be ending (a slow machine).
+	s = r.waitState(id, "dismissed", func(s *api.SessionState) bool { return len(s.Denials) == 0 && s.Status == api.StatusIdle })
+	if s.Mode != "auto" {
 		t.Errorf("dismissed: %s %s", s.Status, s.Mode)
 	}
 }

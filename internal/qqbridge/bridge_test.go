@@ -282,8 +282,10 @@ func start(t *testing.T) (*Bridge, *fakeQQ, *fakeIridium) {
 		Logf:       t.Logf,
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	go b.Run(ctx)
+	done := make(chan struct{})
+	go func() { b.Run(ctx); close(done) }()
+	// Stopped before its home goes: it writes its status there till it ends.
+	t.Cleanup(func() { cancel(); <-done })
 	waitFor(t, "connected", func() bool {
 		var s Status
 		ok, _ := Read(home, StatusFile, &s)
