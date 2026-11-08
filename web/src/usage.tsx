@@ -8,7 +8,8 @@
 // coming back, the bars and the total glide to the new figures. A bar pressed narrows the page to
 // that day. A terminal's models are in its line and its tip; no page of its own. Over it all, the
 // harnesses (the user, 2026-11-08): all four at first; pressed, one leaves the whole page (chart,
-// total, list) or comes back, and the last one taken out puts all four back.
+// total, list) or comes back, and the last one taken out puts all four back; right-clicked, it is
+// the only one left in (again: all four).
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CircleHelp, LoaderCircle, UserX, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
@@ -204,6 +205,8 @@ export function UsagePage() {
       if (!n.delete(a)) n.add(a);
       return n;
     });
+  // Only this harness in; when it already is, all four back.
+  const onlyHarness = (a: Agent) => setHidden(harnesses.length === 1 && harnesses[0] === a ? new Set() : new Set(AGENTS.filter((o) => o !== a)));
   const on = (id: string) => !off.has(id);
   const shown = s.order.filter(on);
   const many = s.order.length > 1;
@@ -240,7 +243,7 @@ export function UsagePage() {
           (the user, 2026-11-08): no box in a box, and room for the title in the narrow dialog. */}
       <div className="flex h-9 shrink-0 items-center justify-between gap-2 px-3">
         <Ranges value={days} onChange={(n) => (setDays(n), setDay(null))} />
-        <Harnesses on={(a) => !hidden.has(a)} onToggle={toggleHarness} />
+        <Harnesses on={(a) => !hidden.has(a)} onToggle={toggleHarness} onOnly={onlyHarness} />
       </div>
       <div className="no-bar min-h-0 flex-1 overflow-y-auto pt-3 pb-4">
         <div className="flex flex-col gap-4 px-3">
@@ -356,8 +359,8 @@ function Ranges({ value, onChange }: { value: number; onChange: (n: number) => v
 }
 
 /** The harnesses as a row of their bare marks (no box: the user, 2026-11-08), each one pressed in
- *  or out of the whole page, faint and grey when out. */
-function Harnesses({ on, onToggle }: { on: (a: Agent) => boolean; onToggle: (a: Agent) => void }) {
+ *  or out of the whole page, faint and grey when out; right-clicked, the only one in. */
+function Harnesses({ on, onToggle, onOnly }: { on: (a: Agent) => boolean; onToggle: (a: Agent) => void; onOnly: (a: Agent) => void }) {
   return (
     <div role="group" aria-label={t("usage.harness")} className="-mr-1 flex items-center">
       {AGENTS.map((a) => (
@@ -367,6 +370,10 @@ function Harnesses({ on, onToggle }: { on: (a: Agent) => boolean; onToggle: (a: 
             aria-pressed={on(a)}
             aria-label={agentName(a)}
             onClick={() => onToggle(a)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              onOnly(a);
+            }}
             className={cn(
               "g-press grid size-7 place-items-center rounded-full transition-[opacity,filter,background-color] duration-(--dur-2) hover:bg-fill pointer-coarse:size-9",
               !on(a) && "opacity-30 grayscale hover:opacity-60",
