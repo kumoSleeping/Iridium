@@ -147,6 +147,8 @@ export const en: Dict = {
   "preset.ptcHint": "The model writes code that calls the tools, many steps at once",
   "preset.minimal": "Minimal",
   "preset.minimalHint": "A shell and image reading only, the shortest prompt",
+  "preset.cordis": "Creator",
+  "preset.cordisHint": "Customize DSH by talking: plugins, tools and prompts",
   "preset.fixed": "The preset is picked before the session begins; it cannot change after",
   "preset.restart": "Takes effect when the agent restarts",
   "composer.ultracode": "UltraCode",

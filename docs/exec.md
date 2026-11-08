@@ -95,7 +95,7 @@
 
 - `fs.watch {path}` 和事件 `changed {path, size}`：文件变了就报，合并着报。没有它这边定时 `fs.stat`。
 - 余额：这边要读那边 DeepSeek 的密钥才能查；不做，那台机器上的会话不查余额（这边不拿它的环境、不读本机同名路径）。
-- dsh 插件另有三个（见“远端 DSH”），别的执行端回 `unsupported`：`dsh.prompt {session, text, steer?}` → `{}`，把消息交给 Desktop 里这个会话的 agent（没有就 `not_found`）；`dsh.open {}` → `{sessions, unsynced, unsyncedUngrouped}`，插件所在的 dsh 进程（DSH Desktop）里此刻打开着的会话，插件设置里不同步到这边的工作区（文件夹或名字），以及未分组的会话是否也不同步；`dsh.attach {session, cwd}` → `{}`，把会话登记到 `cwd` 对应的工作区（没有就新建），Desktop 侧边栏里就有它。
+- dsh 插件另有五个（见“远端 DSH”），别的执行端回 `unsupported`：`dsh.prompt {session, text, steer?}` → `{}`，把消息交给 Desktop 里这个会话的 agent（没有就 `not_found`）；`dsh.open {}` → `{sessions, unsynced, unsyncedUngrouped}`，插件所在的 dsh 进程（DSH Desktop）里此刻打开着的会话，插件设置里不同步到这边的工作区（文件夹或名字），以及未分组的会话是否也不同步；`dsh.attach {session, cwd}` → `{}`，把会话登记到 `cwd` 对应的工作区（没有就新建），Desktop 侧边栏里就有它。`dsh.presets {}` → `{presets: [{id, name?, description?, plugins, broken?}], default}`，插件所在 dsh 进程的 Agent 预设注册表（`agentPresets` 的 `list()`、`defaultId`，`plugins` 是 `readDocument` 给的子插件行 YAML）：这边按它列预设、生成 patch，自建和改过的预设也能用；不支持时退回读包里的预设文件。`dsh.llm {}` → `{patch}`：插件把 Desktop 此刻生效的模型设置（基础包里的 `dsh-llm*` 行和 `agent-default-model`，照它的配置和开关，`!!js` 原样）写成那台机器上的一个补丁，只回路径；这边起 dsh 会话和模型探测时多带 `--patch <它>`，sdk 进程就有了 Desktop 的供应商、模型和默认模型。里面可能有密钥：文件只在那台机器上，执行端不对外读。
 
 ## 网页（用户，2026-11-08）
 

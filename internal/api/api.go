@@ -29,12 +29,26 @@ type AgentInfo struct {
 	Quota            bool `json:"quota"`
 	// Ultracode: its sessions can turn ultracode on (Claude).
 	Ultracode bool `json:"ultracode"`
-	// Presets: its agent presets (dsh: the tools and prompt a session runs with), taken at launch:
-	// a switch restarts the agent. DefaultPreset is an empty preset's. None: it has no presets.
-	Presets       []string `json:"presets,omitempty"`
-	DefaultPreset string   `json:"defaultPreset,omitempty"`
+	// Presets: its sessions take an agent preset (dsh: the tools and prompt a session runs with),
+	// at launch: a switch restarts the agent. Which, a session's: GET /api/sessions/{id}/presets.
+	Presets bool `json:"presets,omitempty"`
 	// Missing: its program is not on the daemon's PATH (not installed): a new session is refused.
 	Missing bool `json:"missing,omitempty"`
+}
+
+// Presets are the agent presets a session may run with: those its agent registers where it runs
+// (dsh's registry), by its order, and Default, a session's that names none.
+type Presets struct {
+	Presets []Preset `json:"presets"`
+	Default string   `json:"default"`
+}
+
+// Preset is an agent preset: Name and Description, those it publishes (the shipped ones publish
+// none: the page has their copy).
+type Preset struct {
+	ID          string `json:"id"`
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
 }
 
 // Color is a colour tag a session or a folder is given from its menu (the user, 2026-11-06).

@@ -2,7 +2,9 @@
 // <token> <state>; IRIDIUM_TEST_AGENTS, if set, is the hello's agents (JSON); IRIDIUM_TEST_DSH, if
 // set, a directory standing in for the dsh it runs in (dsh.js): open.json the ids of the sessions
 // open in it, prompts.jsonl each message given to one of their agents, attached.jsonl each session
-// filed under a workspace, unsynced.json the workspaces
+// filed under a workspace, presets.json its agent preset registry ({presets: [{id, name?,
+// description?, plugins, broken?}], default}; none: no registry), entries.json its loader's rows
+// ([{id, name, config?, disabled?}]; dsh.llm writes llm.patch.yml there), unsynced.json the workspaces
 // its settings keep from the Iridium, ungrouped.json false if they keep its 未分组 too. SIGUSR1 drops the connection
 // (it connects again); SIGTERM stops it and its processes.
 import fs from 'node:fs'
@@ -12,8 +14,9 @@ import { Executor } from '../executor.js'
 
 const [url, token, state] = process.argv.slice(2)
 const agents = process.env.IRIDIUM_TEST_AGENTS ? JSON.parse(process.env.IRIDIUM_TEST_AGENTS) : undefined
-const methods = process.env.IRIDIUM_TEST_DSH ? dshMethods(fakeDsh(process.env.IRIDIUM_TEST_DSH), () => kept(process.env.IRIDIUM_TEST_DSH)) : undefined
-const ex = new Executor({ url, token, state, agents, methods, log: (m) => console.error(`executor: ${m}`) })
+const llm = process.env.IRIDIUM_TEST_DSH && agents?.[0]?.scope ? { file: path.join(process.env.IRIDIUM_TEST_DSH, 'llm.patch.yml'), scope: agents[0].scope } : {}
+const methods = process.env.IRIDIUM_TEST_DSH ? dshMethods(fakeDsh(process.env.IRIDIUM_TEST_DSH), () => kept(process.env.IRIDIUM_TEST_DSH), llm) : undefined
+const ex = new Executor({ url, token, state, agents, methods, denied: llm.file ? [llm.file] : [], log: (m) => console.error(`executor: ${m}`) })
 process.on('SIGUSR1', () => ex.drop())
 process.on('SIGTERM', () => {
   ex.stop()
@@ -42,6 +45,21 @@ function fakeDsh(dir) {
       }),
     },
   }
+  const presets = () => JSON.parse(fs.readFileSync(path.join(dir, 'presets.json'), 'utf8'))
+  if (fs.existsSync(path.join(dir, 'presets.json')))
+    services.agentPresets = {
+      list: async () => presets().presets.map(({ plugins, ...p }) => p),
+      readDocument: async (id) => ({ agentPreset: id, content: presets().presets.find((p) => p.id === id).plugins }),
+      get defaultId() {
+        return presets().default
+      },
+    }
+  if (fs.existsSync(path.join(dir, 'entries.json')))
+    services.loader = {
+      *entries() {
+        for (const options of JSON.parse(fs.readFileSync(path.join(dir, 'entries.json'), 'utf8'))) yield { options }
+      },
+    }
   return { get: (name) => services[name] }
 }
 

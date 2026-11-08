@@ -209,11 +209,12 @@ agent 用 `ir sh <机器> [--cwd 目录] [--timeout 2m] -- 命令`（`POST /api/
 
 | 请求 | 正文 | 说明 |
 |---|---|---|
-| `PUT /api/sessions/{id}/model` | `{model}` | `""` 是 agent 的默认。Claude：`set_model` |
+| `PUT /api/sessions/{id}/model` | `{model}` | `""` 是 agent 的默认。Claude：`set_model`。dsh（用户，2026-11-08：模型和供应商不写死）：会话状态的 `models` 是会话所在机器上 dsh 的 sdk profile 注册的全部供应商的模型，值是 `供应商/模型`，思考强度按模型，默认是 dsh 的默认模型。Iridium 在那台机器上起一次探测（`dsh --profile sdk --patch` 插一个 cordis 插件，读 `llm` 的 `listProviders`、`listModels`、`resolveModelInfo` 和 `agentDefaultModel`，打一行就退出），每台机器缓存 3 分钟，失败 1 分钟内不重试；启动时按值里的供应商初始化。以前存的不带供应商的值（`deepseek-flash`）按目录里有这个模型的供应商算。和 DSH Desktop 同步（用户，2026-11-08）：Desktop 设置里的供应商和默认模型存在它的 web profile，sdk 进程本来没有；远端有 dsh 插件时，会话和探测都多带一个 `--patch`，是插件按 Desktop 此刻生效的设置写的（`dsh.llm`），所以列出的和能跑的都同 Desktop。本机没有 Desktop 进程，用 sdk profile 自己的 |
 | `PUT /api/sessions/{id}/mode` | `{mode}` | 审批模式，只收 `SessionState.modes` 里的。Claude：`set_permission_mode` |
 | `PUT /api/sessions/{id}/effort` | `{effort}` | 思考强度，只收 `SessionState.efforts` 里的。Claude：先 `get_settings` 问 ultracode 开没开，再 `apply_flag_settings` 照原样带上 |
 | `PUT /api/sessions/{id}/ultracode` | `{ultracode}` | 只 Claude（`GET /api/agents` 的 `ultracode`），别的 400。在跑时先 `get_settings`，要开而 `ultracodeAvailable` 不为真（CLI 不认 `get_settings` 也算）就 400；只发 `apply_flag_settings {ultracode}`，强度不变。没在跑时不查，只记下，下次拉起带上 |
-| `PUT /api/sessions/{id}/preset` | `{preset}` | Agent 预设（只 dsh：`GET /api/agents` 的 `presets`，`standard`、`ptc`、`minimal`，没有的 400），`""` 是 `defaultPreset`。只在启动时装，也只在会话第一条消息前能改（同 dsh 自己的界面）：开始后改是 400，因为 dsh 会把新工具当成追加的延迟加载工具，PTC 那样全是延迟的，API 会拒绝。在跑时改就重启（空闲马上，否则等回合结束），重启时状态仍显示空闲。网页放在额度条的位置（dsh 没额度，用户定的，2026-11-06）。新会话用 `NewSession.preset`，`/clear` 照原样带上 |
+| `GET /api/sessions/{id}/presets` | | `{presets: [{id, name?, description?}], default}`：会话所在那台 dsh 注册的 Agent 预设（用户，2026-11-08：不写死）。远端有 dsh 插件时问 DSH Desktop 自己的注册表（`dsh.presets`，含插件包和用户自建、改过的，按它的顺序，默认是它设置里选的，坏掉的不列）；本机和没有插件的执行端读 dsh 包里登记的补丁（`dsh-web-app` 的 `package.json` 里 `dsh.bundle.patch`）。按机器缓存 30 秒。内置的几个不带 `name`，网页用自己的文案；带 `name` 的照它写的显示。`GET /api/agents` 的 `presets` 只说这个 agent 有没有预设 |
+| `PUT /api/sessions/{id}/preset` | `{preset}` | Agent 预设（只 dsh：上一行列出的，没有的 400），`""` 是 `default`。只在启动时装，也只在会话第一条消息前能改（同 dsh 自己的界面）：开始后改是 400，因为 dsh 会把新工具当成追加的延迟加载工具，PTC 那样全是延迟的，API 会拒绝。在跑时改就重启（空闲马上，否则等回合结束），重启时状态仍显示空闲。网页放在额度条的位置（dsh 没额度，用户定的，2026-11-06）。新会话用 `NewSession.preset`，`/clear` 照原样带上 |
 | `GET /api/sessions/{id}/rules` | → `AllowRule[]` | “本会话一直允许”记下的规则 |
 | `DELETE /api/sessions/{id}/rules` | → `{ok}` | 清掉 |
 

@@ -39,6 +39,9 @@ func parseDshInput(off int, line string) dshInput {
 // sent. Once it knows the session and its cwd it puts $IRIDIUM_FAKE_DSH_TRANSCRIPT, if set, where
 // dsh keeps the session's transcript under $DSH_HOME. It ends at the end of its input.
 func Dsh() int {
+	if probe() {
+		return 0
+	}
 	dir := os.Getenv("IRIDIUM_FAKE_DSH")
 	inLog, err := os.ReadFile(filepath.Join(dir, "in.log"))
 	if err != nil {
@@ -128,4 +131,26 @@ func placeDshTranscript(src, sess, cwd string) {
 	if err := os.WriteFile(filepath.Join(dir, filepath.Base(src)), b, 0o600); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 	}
+}
+
+// fakeCatalog is what the fake prints for Iridium's probe of dsh's models: dsh 0.2.2-rc.1's with
+// a DeepSeek key.
+const fakeCatalog = `IRIDIUM-CATALOG {"providers":[{"id":"deepseek-official","name":"DeepSeek","models":[` +
+	`{"id":"deepseek-flash","name":"DeepSeek-V4.1-Flash","efforts":["off","low","high","max"],"defaultEffort":"high"},` +
+	`{"id":"deepseek-v4-pro","name":"DeepSeek-V4-Pro","efforts":["off","low","high","max"],"defaultEffort":"high"}]},` +
+	`{"id":"deepseek-account","name":"DeepSeek Account","models":[]}],"default":{"provider":"deepseek-official","model":"deepseek-flash"}}`
+
+// probe: started with the --patch of Iridium's probe of dsh's models, the fake prints them, as the
+// probe would, and ends.
+func probe() bool {
+	for i, a := range os.Args {
+		if a != "--patch" || i+1 >= len(os.Args) {
+			continue
+		}
+		if b, err := os.ReadFile(os.Args[i+1]); err == nil && bytes.Contains(b, []byte("iridium-catalog-probe")) {
+			fmt.Println(fakeCatalog)
+			return true
+		}
+	}
+	return false
 }

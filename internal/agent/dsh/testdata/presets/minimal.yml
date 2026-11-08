@@ -1,4 +1,4 @@
-# Iridium: dsh-web-app's "minimal" Agent preset, run process-wide by the sdk profile.
+# Iridium: dsh's "minimal" Agent preset, run process-wide by the sdk profile.
 # Generated; do not edit.
 - id: agent-instructions
   disabled: true

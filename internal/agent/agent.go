@@ -67,6 +67,16 @@ type SpawnOptions struct {
 	// Remote: the agent runs at an executor (docs/exec.md), not here: Cwd and Env are its, and
 	// nothing of the agent is looked up on this machine. nil: here.
 	Remote *Remote
+	// Catalog: the models the agent offers where it runs, as it registers them (dsh: its
+	// providers'); nil, or an error: the driver's own idea.
+	Catalog func() (Catalog, error)
+}
+
+// Catalog is the models an agent registers where it runs (dsh: each provider's, Value
+// "<provider>/<model>"), and the one a session that names none runs (Default, a Value).
+type Catalog struct {
+	Models  []Model
+	Default string
 }
 
 // Remote is the executor an agent runs at, as the driver needs it.
@@ -79,6 +89,22 @@ type Remote struct {
 	// ReadFile and WriteFile read and write a file there (small ones).
 	ReadFile  func(path string) ([]byte, error)
 	WriteFile func(path string, data []byte) error
+	// Patches are more --patch files there, before the driver's own (dsh: DSH Desktop's models and
+	// providers, the dsh plugin's dsh.llm).
+	Patches []string
+	// Presets are the agent presets the dsh there registers, and its default (the dsh plugin asks
+	// DSH Desktop's own registry); nil: read from its package's files.
+	Presets func() ([]Preset, string, error)
+}
+
+// Preset is an agent preset dsh registers (a @deepseek-ai/dsh-agent-preset row): its id, the
+// name and description it publishes (the shipped ones publish none: dsh's app has their copy),
+// and its child plugin rows, a YAML entry list at indent 0.
+type Preset struct {
+	ID          string
+	Name        string
+	Description string
+	Plugins     string
 }
 
 // Writer writes one line to the agent's stdin (through the holder's pipe).

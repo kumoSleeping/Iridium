@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kumoSleeping/iridium/internal/agent"
+	"github.com/kumoSleeping/iridium/internal/agent/dsh"
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/config"
 	"github.com/kumoSleeping/iridium/internal/discover"
@@ -68,7 +71,14 @@ func TestRemoteDsh(t *testing.T) {
 	if _, err := r.m.Create(bg, api.NewSession{Agent: api.AgentClaude, Cwd: work, Machine: "pc"}, "web"); err == nil {
 		t.Fatal("Claude at an executor was taken")
 	}
-	id, err := r.m.Create(bg, api.NewSession{Agent: api.AgentDsh, Cwd: work, Machine: "pc"}, "web")
+	// No dsh plugin there: the presets its package's files register.
+	if l, def, err := r.m.Presets(bg, api.AgentDsh, "m1"); err != nil || def != "standard" || presetIDs(l) != "standard ptc minimal" {
+		t.Fatalf("presets there: %q %q %v", presetIDs(l), def, err)
+	}
+	if _, err := r.m.Create(bg, api.NewSession{Agent: api.AgentDsh, Cwd: work, Machine: "pc", Preset: "mine"}, "web"); err == nil {
+		t.Fatal("a preset not there was taken")
+	}
+	id, err := r.m.Create(bg, api.NewSession{Agent: api.AgentDsh, Cwd: work, Machine: "pc", Preset: "minimal"}, "web")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,9 +95,13 @@ func TestRemoteDsh(t *testing.T) {
 	if s.Machine != "m1" || s.Offline {
 		t.Errorf("machine %q, offline %v", s.Machine, s.Offline)
 	}
+	// Its models, dsh's there as its probe said them, each "<provider>/<model>".
+	if len(s.Models) != 2 || s.Models[0].Value != "deepseek-official/deepseek-flash" || s.Model != "deepseek-official/deepseek-flash" {
+		t.Errorf("models %+v, model %q", s.Models, s.Model)
+	}
 	// The patch went there, the transcript came here.
-	if _, err := os.Stat(filepath.Join(there, "executor", "scratch", id, "dsh-patch.yml")); err != nil {
-		t.Errorf("patch there: %v", err)
+	if b, err := os.ReadFile(filepath.Join(there, "executor", "scratch", id, "dsh-patch.yml")); err != nil || !strings.Contains(string(b), `"minimal" Agent preset`) {
+		t.Errorf("patch there: %v\n%s", err, b)
 	}
 	if len(r.messages(id)) == 0 {
 		t.Error("no messages from the mirrored transcript")
@@ -256,5 +270,89 @@ func TestFileInDesktop(t *testing.T) {
 	b, _ := os.ReadFile(filepath.Join(desktop, "attached.jsonl"))
 	if got := strings.TrimSpace(string(b)); got != `{"session":"`+id+`","cwd":"`+work+`"}` {
 		t.Errorf("attached: %s", got)
+	}
+}
+
+func presetIDs(l []agent.Preset) string {
+	ids := make([]string, len(l))
+	for i, p := range l {
+		ids[i] = p.ID
+	}
+	return strings.Join(ids, " ")
+}
+
+// At a machine with the dsh plugin, the presets are DSH Desktop's own registry's (dsh.presets): a
+// bundle's or the user's too, by its order, the default its settings pick; a broken one is left
+// out. A session started there runs the preset's rows as the registry has them.
+func TestRemotePresets(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("no node")
+	}
+	hub := &remote.Hub{Logf: t.Logf}
+	r := newRig(t, func(_ *config.Config, o *Options) { o.Remote = hub })
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) { hub.Serve(w, req, "m1", "pc") }))
+	t.Cleanup(srv.Close)
+	there := t.TempDir()
+	desktop := filepath.Join(there, "desktop")
+	os.MkdirAll(desktop, 0o700)
+	os.WriteFile(filepath.Join(desktop, "open.json"), []byte("[]"), 0o600)
+	presets := `{"default": "mine", "presets": [
+		{"id": "standard", "plugins": "- id: persona\n  name: '@deepseek-ai/dsh-persona'\n"},
+		{"id": "mine", "name": "Mine", "description": "My own", "plugins": "- id: persona\n  name: '@deepseek-ai/dsh-persona'\n  config:\n    prefix: You are mine.\n- id: tool-web\n  name: '@deepseek-ai/dsh-tool-web'\n"},
+		{"id": "gone", "plugins": "", "broken": "missing service"}]}`
+	os.WriteFile(filepath.Join(desktop, "presets.json"), []byte(presets), 0o600)
+	// Its loader's rows: DSH Desktop's settings of its models (a pi-ai provider, the default).
+	entries := `[
+		{"id": "llm-pi-ai", "name": "@deepseek-ai/dsh-llm-pi-ai", "disabled": false, "config": {"providers": [{"id": "openrouter", "apiKey": {"__jsExpr": "process.env.OR_KEY"}}]}},
+		{"id": "agent-default-model", "name": "@deepseek-ai/dsh-agent-default-model", "config": {"provider": "openrouter", "model": "x/y"}},
+		{"id": "llm-mine", "name": "@deepseek-ai/dsh-llm-mine", "config": {}},
+		{"id": "tool-web", "name": "@deepseek-ai/dsh-tool-web"}]`
+	os.WriteFile(filepath.Join(desktop, "entries.json"), []byte(entries), 0o600)
+	scope, _ := filepath.Abs("../agent/dsh/testdata/pkg/node_modules/@deepseek-ai")
+	agents, _ := json.Marshal([]wire.AgentInfo{{Agent: "dsh", Argv: []string{"dsh"}, Version: "0.2.2-rc.1", Scope: scope, Home: filepath.Join(there, ".dsh")}})
+	cmd := exec.Command("node", "../../plugins/dsh-remote-iridium/test/run.mjs", "ws"+strings.TrimPrefix(srv.URL, "http"), "tok", filepath.Join(there, "executor"))
+	cmd.Env = append(os.Environ(), "IRIDIUM_TEST_AGENTS="+string(agents), "IRIDIUM_TEST_DSH="+desktop)
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cmd.Process.Signal(syscall.SIGTERM); _ = cmd.Wait() })
+	waitFor(t, "the executor", func() bool { _, ok := hub.Machine("m1").Hello(); return ok })
+
+	// DSH Desktop's models: a patch there, of the base's llm rows as its settings have them, which
+	// sessions there boot with; the executor serves it to no one.
+	llm := r.m.desktopLLM(bg, hub.Machine("m1"))
+	if want := filepath.Join(desktop, "llm.patch.yml"); len(llm) != 1 || llm[0] != want {
+		t.Fatalf("dsh.llm: %q", llm)
+	}
+	b, _ := os.ReadFile(llm[0])
+	for _, line := range []string{
+		"- id: llm-pi-ai\n  disabled: false\n  config: {\"providers\": [{\"id\": \"openrouter\", \"apiKey\": !!js \"process.env.OR_KEY\"}]}\n",
+		"- id: agent-default-model\n  config: {\"provider\": \"openrouter\", \"model\": \"x/y\"}\n",
+	} {
+		if !strings.Contains(string(b), line) {
+			t.Errorf("llm patch, no %q:\n%s", line, b)
+		}
+	}
+	if strings.Contains(string(b), "llm-mine") || strings.Contains(string(b), "tool-web") {
+		t.Errorf("llm patch: rows not the base's llm ones:\n%s", b)
+	}
+	if _, err := hub.Machine("m1").ReadFile(bg, llm[0], 1<<20); err == nil {
+		t.Error("the llm patch was served")
+	}
+
+	l, def, err := r.m.Presets(bg, api.AgentDsh, "m1")
+	if err != nil || def != "mine" || presetIDs(l) != "standard mine" || l[1].Name != "Mine" || l[1].Description != "My own" {
+		t.Fatalf("presets: %+v %q %v", l, def, err)
+	}
+	if _, err := r.m.checkPreset(bg, api.AgentDsh, "m1", "gone"); !errors.Is(err, ErrBadRequest) {
+		t.Errorf("a broken preset: %v", err)
+	}
+	// What the launch makes of it: the registry's rows, persona folded in.
+	mine, _ := dsh.FindPreset(l, "mine")
+	pkg := dsh.Package{Scope: scope}
+	b, err = pkg.Patch(mine, "")
+	if err != nil || !strings.Contains(string(b), "    personaPrefix: You are mine.\n") || !strings.Contains(string(b), "    - id: iridium-tool-web\n") {
+		t.Errorf("patch: %v\n%s", err, b)
 	}
 }

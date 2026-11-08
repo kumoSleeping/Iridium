@@ -42,20 +42,13 @@ var Modes = []string{"read-only", "workspace-write", "danger-full-access", "plan
 // DefaultMode never asks: dsh's danger-full-access (dsh's own default is workspace-write).
 const DefaultMode = "danger-full-access"
 
-// Efforts are the DeepSeek adapter's reasoning efforts (dsh-llm-deepseek).
-var Efforts = []string{"off", "low", "high", "max"}
-
 const (
-	Provider      = "deepseek-official"
-	DefaultModel  = "deepseek-flash"
-	DefaultEffort = "high" // what the adapter runs at when none is given
+	// LegacyProvider and DefaultModel are a session's route when dsh's catalog cannot be had, and
+	// LegacyProvider a model's set before models were dsh's ("deepseek-flash", no provider).
+	LegacyProvider = "deepseek-official"
+	DefaultModel   = LegacyProvider + "/deepseek-flash"
+	DefaultEffort  = "high" // what the adapter runs at when none is given
 )
-
-// Models are the official models dsh-llm-deepseek's catalog names (DEFAULT_MODELS).
-var Models = []agent.Model{
-	{Value: "deepseek-flash", Name: "DeepSeek-V4.1-Flash", Efforts: Efforts},
-	{Value: "deepseek-v4-pro", Name: "DeepSeek-V4-Pro", Efforts: Efforts},
-}
 
 // Commands are the slash commands the sdk server runs itself (session/query).
 var Commands = []agent.Command{
@@ -81,6 +74,8 @@ type Options struct {
 // launch is what the process attaching next was spawned with.
 type launch struct {
 	session, cwd, model, effort, version string
+	provider, modelID                    string // model's route
+	catalog                              agent.Catalog
 	resume                               bool
 }
 
@@ -167,8 +162,9 @@ type Driver struct {
 	gone    chan struct{} // closed when the attached process ends
 	ending  bool          // shut down for an interrupt
 
-	model, effort, version string // the process's
-	perm                   string // dsh's permission preset, as it last said; "": not known
+	model, effort, version string        // the process's (model: "<provider>/<model>")
+	catalog                agent.Catalog // the models dsh offered at the last spawn
+	perm                   string        // dsh's permission preset, as it last said; "": not known
 	plan, planKnown        bool
 
 	state    agent.State
@@ -250,9 +246,6 @@ func (d *Driver) Spawn(o agent.SpawnOptions) (hold.Spec, error) {
 	if !slices.Contains(Modes, mode) {
 		return hold.Spec{}, fmt.Errorf("dsh: no approval mode %q (%s)", mode, strings.Join(Modes, ", "))
 	}
-	if o.Effort != "" && !slices.Contains(Efforts, o.Effort) {
-		return hold.Spec{}, fmt.Errorf("dsh: no effort %q (%s)", o.Effort, strings.Join(Efforts, ", "))
-	}
 	if o.SystemPromptFile == "" {
 		return hold.Spec{}, errors.New("dsh: the agent preset needs a directory for its patch")
 	}
@@ -270,7 +263,19 @@ func (d *Driver) Spawn(o agent.SpawnOptions) (hold.Spec, error) {
 	} else if pkg, err = FindPackage(argv[0]); err != nil {
 		return hold.Spec{}, fmt.Errorf("dsh: cannot build agent preset %q: %w", cmp.Or(o.Preset, DefaultPreset), err)
 	}
-	patch, err := pkg.Patch(cmp.Or(o.Preset, DefaultPreset), suffix)
+	list := pkg.Presets
+	if r := o.Remote; r != nil && r.Presets != nil {
+		list = r.Presets
+	}
+	presets, def, err := list()
+	if err != nil {
+		return hold.Spec{}, fmt.Errorf("dsh: cannot build agent preset %q: %w", cmp.Or(o.Preset, def, DefaultPreset), err)
+	}
+	preset, err := FindPreset(presets, cmp.Or(o.Preset, def, DefaultPreset))
+	if err != nil {
+		return hold.Spec{}, err
+	}
+	patch, err := pkg.Patch(preset, suffix)
 	if err != nil {
 		return hold.Spec{}, err
 	}
@@ -282,20 +287,40 @@ func (d *Driver) Spawn(o agent.SpawnOptions) (hold.Spec, error) {
 	if cwd == "" && o.Remote == nil {
 		cwd, _ = os.Getwd()
 	}
+	var cat agent.Catalog
+	if o.Catalog != nil {
+		if c, err := o.Catalog(); err == nil {
+			cat = c
+		} else {
+			d.logf("dsh: its models: %v", err)
+		}
+	}
 	model := o.Model
 	if model == "" || model == "default" {
-		model = DefaultModel
+		model = cmp.Or(cat.Default, DefaultModel)
+	}
+	provider, id := Route(model, cat)
+	model = provider + "/" + id
+	if m := modelIn(model, cat); o.Effort != "" && m != nil && !m.NoEffort && !slices.Contains(m.Efforts, o.Effort) {
+		return hold.Spec{}, fmt.Errorf("dsh: %s has no effort %q (%s)", model, o.Effort, strings.Join(m.Efforts, ", "))
 	}
 	d.mu.Lock()
 	d.spawned = true
-	d.next = launch{session: o.Session, cwd: cwd, model: model, effort: o.Effort, version: pkg.Version, resume: o.Resume}
+	d.catalog = cat
+	d.next = launch{session: o.Session, cwd: cwd, model: model, provider: provider, modelID: id, effort: o.Effort, version: pkg.Version, resume: o.Resume, catalog: cat}
 	d.session, d.mode = o.Session, mode
 	d.mu.Unlock()
 	env = agent.SetEnv(env, "IRIDIUM_SESSION", o.Session)
 	d.mu.Lock()
 	d.env = env
 	d.mu.Unlock()
-	return hold.Spec{Argv: append(argv, "--profile", "sdk", "--patch", path), Env: env, Cwd: o.Cwd}, nil
+	argv = append(argv, "--profile", "sdk")
+	if r := o.Remote; r != nil {
+		for _, p := range r.Patches {
+			argv = append(argv, "--patch", p)
+		}
+	}
+	return hold.Spec{Argv: append(argv, "--patch", path), Env: env, Cwd: o.Cwd}, nil
 }
 
 // Attach connects agent process proc. One just spawned gets the handshake: initialize, then the
@@ -338,7 +363,7 @@ func (d *Driver) handshake(proc int, l launch, ready chan struct{}) {
 			d.emit(agent.GiveUp{Why: why})
 		}
 	}
-	params := map[string]any{"cwd": l.cwd, "provider": Provider, "model": l.model, "approvalRequests": true, "capabilities": map[string]any{"userQuestions": true}}
+	params := map[string]any{"cwd": l.cwd, "provider": l.provider, "model": l.modelID, "approvalRequests": true, "capabilities": map[string]any{"userQuestions": true}}
 	if l.effort != "" {
 		params["reasoningEffort"] = l.effort
 	}
@@ -402,7 +427,7 @@ func (d *Driver) handshake(proc int, l launch, ready chan struct{}) {
 	}
 	d.mu.Lock()
 	same := d.proc == proc
-	h := agent.Hello{Version: cmp.Or(l.version, info.ServerInfo.Version), Mode: d.mode, Models: slices.Clone(Models), Commands: slices.Clone(Commands)}
+	h := agent.Hello{Version: cmp.Or(l.version, info.ServerInfo.Version), Mode: d.mode, Models: slices.Clone(l.catalog.Models), Commands: slices.Clone(Commands)}
 	d.mu.Unlock()
 	close(ready)
 	if same {
@@ -705,13 +730,13 @@ func answers(qs []question, by map[string]string) []any {
 // SetModel: the model is the process's (initialize). Another one takes a restart:
 // agent.ErrRestart, and the next start runs it.
 func (d *Driver) SetModel(ctx context.Context, model string) error {
-	if model == "" || model == "default" {
-		model = DefaultModel
-	}
 	d.mu.Lock()
-	now := d.model
+	now, cat := d.model, d.catalog
 	d.mu.Unlock()
-	if model == now {
+	if model == "" || model == "default" {
+		model = cmp.Or(cat.Default, DefaultModel)
+	}
+	if p, id := Route(model, cat); p+"/"+id == now {
 		return nil
 	}
 	return agent.ErrRestart
@@ -719,12 +744,12 @@ func (d *Driver) SetModel(ctx context.Context, model string) error {
 
 // SetEffort: the effort is the process's too; see SetModel.
 func (d *Driver) SetEffort(ctx context.Context, level string) error {
-	if !slices.Contains(Efforts, level) {
-		return fmt.Errorf("dsh: no effort %q (%s)", level, strings.Join(Efforts, ", "))
-	}
 	d.mu.Lock()
-	now := cmp.Or(d.effort, DefaultEffort)
+	now, m := cmp.Or(d.effort, DefaultEffort), modelIn(d.model, d.catalog)
 	d.mu.Unlock()
+	if m != nil && !m.NoEffort && !slices.Contains(m.Efforts, level) {
+		return fmt.Errorf("dsh: %s has no effort %q (%s)", m.Value, level, strings.Join(m.Efforts, ", "))
+	}
 	if level == now {
 		return nil
 	}
@@ -903,8 +928,17 @@ type frame struct {
 }
 
 type model struct {
-	Model  string `json:"model"`
-	Effort string `json:"reasoningEffort"`
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+	Effort   string `json:"reasoningEffort"`
+}
+
+// route is a model's value: "<provider>/<model>", the model alone if no provider is said.
+func route(provider, model string) string {
+	if provider == "" || model == "" {
+		return model
+	}
+	return provider + "/" + model
 }
 
 type event struct {
@@ -1160,8 +1194,8 @@ func (d *Driver) event(e *event) {
 		if e.Type == "request/header" {
 			c = v.Header.Config
 		}
-		if c.Model != "" && (c.Model != d.model || (c.Effort != "" && c.Effort != cmp.Or(d.effort, DefaultEffort))) {
-			d.model = c.Model
+		if m := route(c.Provider, c.Model); m != "" && (m != d.model || (c.Effort != "" && c.Effort != cmp.Or(d.effort, DefaultEffort))) {
+			d.model = m
 			if c.Effort != "" {
 				d.effort = c.Effort
 			}
@@ -1305,7 +1339,8 @@ func (d *Driver) usage(raw json.RawMessage, own bool) {
 				Text string `json:"text"`
 			} `json:"content"`
 			Source struct {
-				Model string `json:"model"`
+				Provider string `json:"provider"`
+				Model    string `json:"model"`
 			} `json:"source"`
 		} `json:"message"`
 		Usage *struct {
@@ -1327,7 +1362,7 @@ func (d *Driver) usage(raw json.RawMessage, own bool) {
 	if !own {
 		return
 	}
-	if m := v.Message.Source.Model; m != "" && m != d.model {
+	if m := route(v.Message.Source.Provider, v.Message.Source.Model); m != "" && m != d.model {
 		d.model = m
 		d.emitLocked(agent.Started{Session: d.session, Model: m, Effort: cmp.Or(d.effort, DefaultEffort)})
 	}

@@ -277,6 +277,9 @@ func (h *Hosted) launch(ctx context.Context, proc int) error {
 		Model: h.meta.Model, Mode: cmp.Or(h.meta.Mode, m.defaultMode(h.meta.Agent)), Effort: h.effort, Ultracode: h.ultracode, Preset: h.preset, CrashResume: h.crashResume && found != ""}
 	h.resuming, h.crashResume, h.turnSeen = o.CrashResume, false, false
 	h.mu.Unlock()
+	if h.meta.Agent == api.AgentDsh {
+		o.Catalog = m.catalogHook(h.meta.Machine)
+	}
 	if mc := h.machine(); mc != nil {
 		if err := h.remoteSpawn(mc, &o); err != nil {
 			return err
@@ -1050,7 +1053,7 @@ func (h *Hosted) commandsLocked() []agent.Command {
 		names = append(names, "usage")
 	}
 	names = append(names, "model")
-	if _, ok := h.drv.(agent.Efforter); ok && len(info.Efforts) > 0 {
+	if _, ok := h.drv.(agent.Efforter); ok && (len(info.Efforts) > 0 || info.ModelEfforts) {
 		names = append(names, "effort")
 	}
 	names = append(names, "mode")

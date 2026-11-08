@@ -1,0 +1,196 @@
+package session
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"time"
+
+	"github.com/kumoSleeping/iridium/internal/agent"
+	"github.com/kumoSleeping/iridium/internal/agent/dsh"
+	"github.com/kumoSleeping/iridium/internal/agents"
+	"github.com/kumoSleeping/iridium/internal/api"
+	"github.com/kumoSleeping/iridium/internal/hold"
+	"github.com/kumoSleeping/iridium/internal/platform"
+	"github.com/kumoSleeping/iridium/internal/remote"
+	"github.com/kumoSleeping/iridium/internal/remote/wire"
+)
+
+// dsh's models (the user, 2026-11-08: not a list of Iridium's own): those its sdk profile
+// registers at the machine a session runs at, every provider's, and the default, as dsh itself
+// says them: a probe run there (dsh.ProbeModule), one at a time a machine, kept a while.
+
+const (
+	catalogFor     = 3 * time.Minute  // a catalog is kept
+	catalogFailFor = time.Minute      // a probe that failed is not run again before
+	catalogWait    = 45 * time.Second // the most a probe runs
+)
+
+type catalogEntry struct {
+	at   time.Time
+	cat  agent.Catalog
+	err  error
+	busy chan struct{} // closed when the probe running ends
+}
+
+// Catalog is the models dsh offers at machine ("": this one).
+func (m *Manager) Catalog(ctx context.Context, machine string) (agent.Catalog, error) {
+	for {
+		m.presetMu.Lock()
+		if m.catalogs == nil {
+			m.catalogs = map[string]*catalogEntry{}
+		}
+		e := m.catalogs[machine]
+		if e != nil && e.busy != nil {
+			busy := e.busy
+			m.presetMu.Unlock()
+			select {
+			case <-busy:
+				continue
+			case <-ctx.Done():
+				return agent.Catalog{}, ctx.Err()
+			}
+		}
+		if e != nil && (e.err == nil && time.Since(e.at) < catalogFor || e.err != nil && time.Since(e.at) < catalogFailFor) {
+			m.presetMu.Unlock()
+			return e.cat, e.err
+		}
+		busy := make(chan struct{})
+		m.catalogs[machine] = &catalogEntry{busy: busy}
+		if e != nil && e.err == nil {
+			m.catalogs[machine].cat = e.cat
+		}
+		m.presetMu.Unlock()
+		cat, err := m.probeCatalog(ctx, machine)
+		if err != nil {
+			m.o.Logf("dsh: its models at %q: %v", machine, err)
+		}
+		m.presetMu.Lock()
+		m.catalogs[machine] = &catalogEntry{at: time.Now(), cat: cat, err: err}
+		m.presetMu.Unlock()
+		close(busy)
+		return cat, err
+	}
+}
+
+// probeCatalog runs dsh's probe at machine, as a holder of its own, and reads what it printed.
+func (m *Manager) probeCatalog(ctx context.Context, machine string) (agent.Catalog, error) {
+	ctx, cancel := context.WithTimeout(ctx, catalogWait)
+	defer cancel()
+	b := make([]byte, 6)
+	_, _ = rand.Read(b)
+	unit := m.o.UnitPrefix + "probe-" + hex.EncodeToString(b)
+	dir := m.HoldDir(unit)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return agent.Catalog{}, err
+	}
+	defer os.RemoveAll(dir)
+	info, _ := agents.Get(api.AgentDsh)
+	var launcher platform.Launcher
+	var spec hold.Spec
+	if machine == "" {
+		env := agent.ForeignEnv(m.agentEnv())
+		argv, err := agent.SpawnOptions{Program: m.o.Config.Programs[string(api.AgentDsh)]}.Command("dsh", env)
+		if err != nil {
+			return agent.Catalog{}, err
+		}
+		mod, patch := filepath.Join(dir, "probe.mjs"), filepath.Join(dir, "probe.yml")
+		if err := os.WriteFile(mod, []byte(dsh.ProbeModule), 0o600); err != nil {
+			return agent.Catalog{}, err
+		}
+		if err := os.WriteFile(patch, dsh.ProbePatch(dsh.FileURL(mod)), 0o600); err != nil {
+			return agent.Catalog{}, err
+		}
+		home, _ := os.UserHomeDir()
+		launcher, spec = m.o.Launcher, hold.Spec{Argv: append(argv, dsh.ProbeArgs(patch)...), Env: env, Cwd: home}
+	} else {
+		if m.o.Remote == nil {
+			return agent.Catalog{}, fmt.Errorf("no machine %q", machine)
+		}
+		mc := m.o.Remote.Find(machine)
+		if mc == nil {
+			return agent.Catalog{}, fmt.Errorf("no machine %q", machine)
+		}
+		hi, ok := mc.Hello()
+		if !ok {
+			return agent.Catalog{}, ErrOffline
+		}
+		ai, ok := mc.Agent(string(api.AgentDsh))
+		if !ok || len(ai.Argv) == 0 {
+			return agent.Catalog{}, fmt.Errorf("%w: dsh (not at %s)", ErrNotInstalled, machine)
+		}
+		mod := remote.Join(hi.Sep, hi.Scratch, "catalog-probe", "probe.mjs")
+		patch := remote.Join(hi.Sep, hi.Scratch, "catalog-probe", "probe.yml")
+		if err := mc.WriteFile(ctx, mod, []byte(dsh.ProbeModule), true); err != nil {
+			return agent.Catalog{}, err
+		}
+		if err := mc.WriteFile(ctx, patch, dsh.ProbePatch(dsh.FileURL(mod)), true); err != nil {
+			return agent.Catalog{}, err
+		}
+		argv := append(append([]string{}, ai.Argv...), dsh.ProbeArgs(patch, m.desktopLLM(ctx, mc)...)...)
+		launcher, spec = mc.Launcher(), hold.Spec{Argv: argv, Env: info.RemoteEnv(hi.Env, ai.Home), Cwd: hi.Home}
+	}
+	spec.StopGraceMS = 1000
+	if err := hold.Prepare(dir, spec); err != nil {
+		return agent.Catalog{}, err
+	}
+	u := platform.Unit{
+		Name:        unit,
+		Argv:        []string{m.o.Exe, "hold", dir},
+		StopPost:    []string{m.o.Exe, "hold", "--stop-post", dir},
+		StopTimeout: 10 * time.Second,
+	}
+	if err := launcher.Start(ctx, u); err != nil {
+		return agent.Catalog{}, err
+	}
+	for {
+		if e, _ := hold.ReadExit(dir); e != nil {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			stop, done := context.WithTimeout(context.Background(), 15*time.Second)
+			_ = launcher.Stop(stop, unit)
+			done()
+			return agent.Catalog{}, errors.New("dsh: the probe of its models did not end")
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+	out, _ := os.ReadFile(filepath.Join(dir, hold.FileOutLog))
+	cat, err := dsh.ParseProbe(out)
+	if err != nil {
+		if b, _ := os.ReadFile(filepath.Join(dir, hold.FileErrLog)); len(b) > 0 {
+			err = fmt.Errorf("%w: %s", err, b[max(0, len(b)-512):])
+		}
+		return agent.Catalog{}, err
+	}
+	return cat, nil
+}
+
+// desktopLLM are the --patch files at mc that give a dsh session there DSH Desktop's models and
+// providers (the user, 2026-11-08: synced with Desktop's): the dsh plugin's dsh.llm, written anew;
+// none from an executor without it.
+func (m *Manager) desktopLLM(ctx context.Context, mc *remote.Machine) []string {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	p, err := mc.DshLLM(ctx)
+	if err != nil {
+		if !wire.IsCode(err, wire.CodeUnsupported) {
+			m.o.Logf("dsh: DSH Desktop's models at %s: %v", mc.ID(), err)
+		}
+		return nil
+	}
+	if p == "" {
+		return nil
+	}
+	return []string{p}
+}
+
+// catalogHook is a launch's Catalog: dsh's at the session's machine.
+func (m *Manager) catalogHook(machine string) func() (agent.Catalog, error) {
+	return func() (agent.Catalog, error) { return m.Catalog(m.ctx, machine) }
+}

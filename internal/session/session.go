@@ -138,6 +138,10 @@ type Manager struct {
 
 	tune     atomic.Pointer[Tunables] // tune.go
 	annotate atomic.Pointer[Annotate] // carry.go
+
+	presetMu sync.Mutex
+	presets  map[string]presetList    // by machine (presets.go)
+	catalogs map[string]*catalogEntry // by machine (catalog.go)
 }
 
 func New(o Options) (*Manager, error) {
@@ -329,7 +333,7 @@ func (m *Manager) create(ctx context.Context, req api.NewSession, from, name str
 		mt.Launcher = h.id // a hosted Codex session calls itself by its thread
 	}
 	if req.Effort != "" {
-		if !slices.Contains(info.Efforts, req.Effort) {
+		if len(info.Efforts) > 0 && !slices.Contains(info.Efforts, req.Effort) {
 			return "", fmt.Errorf("%s has no effort %q (%s)", info.Name, req.Effort, strings.Join(info.Efforts, ", "))
 		}
 		if err := m.o.Store.UpdateSettings(mt.ID, func(s *store.Settings) { s.Effort = req.Effort }); err != nil {
@@ -337,8 +341,8 @@ func (m *Manager) create(ctx context.Context, req api.NewSession, from, name str
 		}
 	}
 	if req.Preset != "" {
-		if !slices.Contains(info.Presets, req.Preset) {
-			return "", fmt.Errorf("%s has no preset %q (%s)", info.Name, req.Preset, strings.Join(info.Presets, ", "))
+		if _, err := m.checkPreset(ctx, req.Agent, machine, req.Preset); err != nil {
+			return "", err
 		}
 		if err := m.o.Store.UpdateSettings(mt.ID, func(s *store.Settings) { s.Preset = req.Preset }); err != nil {
 			return "", err

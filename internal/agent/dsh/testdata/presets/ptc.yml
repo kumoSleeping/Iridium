@@ -1,4 +1,4 @@
-# Iridium: dsh-web-app's "ptc" Agent preset, run process-wide by the sdk profile.
+# Iridium: dsh's "ptc" Agent preset, run process-wide by the sdk profile.
 # Generated; do not edit.
 - id: agent-instructions
   disabled: true

@@ -6,10 +6,11 @@
 import { Menu } from "@base-ui/react/menu";
 import { Popover } from "@base-ui/react/popover";
 import { Check, ChevronDown, ChevronRight, Workflow } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import type { SessionState as LiveSession } from "../api/types.gen";
 import { api } from "../api/client";
-import type { Agent, AgentQuota, Context, ContextCategory, Model } from "../api/types.gen";
+import type { Agent, AgentQuota, Context, ContextCategory, Model, Preset } from "../api/types.gen";
 import { useAgent } from "../data";
 import { t, useLang } from "../i18n";
 import { useContextState, useQuota } from "../store";
@@ -552,41 +553,45 @@ export function ModelKey({ s, open, onOpenChange }: { s: LiveSession; open?: boo
   );
 }
 
-/** The presets Iridium knows (dsh's): a name and what it gives, in the page's language; another
- *  shows as the agent calls it. */
+/** The presets dsh ships: a name and what it gives, in the page's language. One that publishes its
+ *  own name (a bundle's, the user's) shows as it says (dsh's display rule). */
 const PRESET_KEY: Record<string, [Parameters<typeof t>[0], Parameters<typeof t>[0]]> = {
   standard: ["preset.standard", "preset.standardHint"],
   ptc: ["preset.ptc", "preset.ptcHint"],
   minimal: ["preset.minimal", "preset.minimalHint"],
+  cordis: ["preset.cordis", "preset.cordisHint"],
 };
-export const presetName = (p: string) => (PRESET_KEY[p] ? t(PRESET_KEY[p][0]) : p);
-const presetHint = (p: string) => (PRESET_KEY[p] ? t(PRESET_KEY[p][1]) : undefined);
+const presetName = (id: string, p?: Preset) => p?.name || (PRESET_KEY[id] ? t(PRESET_KEY[id][0]) : id);
+const presetHint = (id: string, p?: Preset) => (p?.name ? p.description : PRESET_KEY[id] ? t(PRESET_KEY[id][1]) : p?.description);
 
 /** The agent preset (dsh: the tools and prompt it runs with), where the quota bars would be: dsh
- *  has no quota (the user, 2026-11-06). Taken at launch: picked on a running agent, it restarts
- *  and the session goes on. Picked before the first message only, as in dsh's own app: a started
- *  session's preset is a label (the server refuses a switch; internal/session SetPreset). */
+ *  has no quota (the user, 2026-11-06). Those the dsh where the session runs registers (its
+ *  machine's DSH Desktop's own, the user, 2026-11-08). Taken at launch: picked on a running agent,
+ *  it restarts and the session goes on. Picked before the first message only, as in dsh's own app:
+ *  a started session's preset is a label (the server refuses a switch; internal/session SetPreset). */
 export function PresetKey({ s }: { s: LiveSession }) {
   useLang();
-  const info = useAgent(s.agent);
+  const q = useQuery({ queryKey: ["presets", s.id], queryFn: () => api.presets(s.id), staleTime: 30_000, retry: false });
   const [want, setWant] = useState<string | null>(null);
-  const presets = info?.presets ?? [];
-  const now = want ?? (s.preset || info?.defaultPreset || presets[0] || "");
-  if (want !== null && (s.preset || info?.defaultPreset) === want) setWant(null);
-  if (!presets.length) return null;
+  const list = q.data?.presets ?? [];
+  const def = q.data?.default ?? "";
+  const now = want ?? (s.preset || def || list[0]?.id || "");
+  if (want !== null && (s.preset || def) === want) setWant(null);
+  const byId = (id: string) => list.find((p) => p.id === id);
+  if (!now) return null;
   const pick = async (p: string) => {
     if (p === now) return;
     setWant(p);
     try {
-      await api.preset(s.id, p === info?.defaultPreset ? "" : p);
+      await api.preset(s.id, p === def ? "" : p);
       if (s.live) toast(t("preset.restart"));
     } catch (e) {
       setWant(null);
       toast(t("err.preset"), { error: true, description: errText(e) });
     }
   };
-  const label = presetName(now);
-  if (s.last)
+  const label = presetName(now, byId(now));
+  if (s.last || !list.length)
     return (
       <Tip label={t("preset.fixed")}>
         <span className="flex h-7 min-w-0 shrink-0 cursor-default items-center rounded-md px-2 text-xs text-ink-3 select-none pointer-coarse:h-9">
@@ -612,11 +617,11 @@ export function PresetKey({ s }: { s: LiveSession }) {
         <Menu.Positioner side="top" align="start" sideOffset={6} collisionPadding={8} className="z-50">
           <Menu.Popup finalFocus={false} className="g-unfold glass thick float flex w-72 max-w-[calc(100vw-16px)] flex-col rounded-lg p-1.5 text-ink outline-none">
             <Menu.RadioGroup value={now} onValueChange={(x) => void pick(x as string)} className="g-stagger flex flex-col">
-              {presets.map((p, i) => (
-                <Menu.RadioItem key={p} value={p} closeOnClick style={{ "--i": i } as CSSProperties} className="flex min-h-8 cursor-default items-center gap-2.5 rounded-md pr-2 pl-2.5 text-base outline-none select-none data-highlighted:bg-fill pointer-coarse:min-h-11">
+              {list.map(({ id }, i) => (
+                <Menu.RadioItem key={id} value={id} closeOnClick style={{ "--i": i } as CSSProperties} className="flex min-h-8 cursor-default items-center gap-2.5 rounded-md pr-2 pl-2.5 text-base outline-none select-none data-highlighted:bg-fill pointer-coarse:min-h-11">
                   <span className="flex min-w-0 flex-1 flex-col py-1">
-                    <span className="truncate">{presetName(p)}</span>
-                    {presetHint(p) && <span className="text-xs text-ink-3">{presetHint(p)}</span>}
+                    <span className="truncate">{presetName(id, byId(id))}</span>
+                    {presetHint(id, byId(id)) && <span className="text-xs text-ink-3">{presetHint(id, byId(id))}</span>}
                   </span>
                   <Menu.RadioItemIndicator className="text-ink">
                     <Check size={14} />
