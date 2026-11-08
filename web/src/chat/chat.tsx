@@ -29,6 +29,7 @@ import { ToolDraft, Waiting } from "./live";
 import { Draft } from "./markdown";
 import { ContextRing, ModelKey, modelView, PresetKey, QuotaBars, useMode } from "./meters";
 import { Queue } from "./queue";
+import { ShellRuns } from "./shell";
 import { SESSION_DRAG, sourceOf, yours } from "./refs";
 import { Compaction, Pending, Running, Said } from "./said";
 import { Stick, toEnd } from "./stick";
@@ -258,6 +259,7 @@ export function ChatPage({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?:
         {/* Paper from the composer's middle down: the conversation scrolled under it stops there. */}
         {!elsewhere && !s.subagent && <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-[calc(44px+max(14px,calc(env(safe-area-inset-bottom)+6px)))] bg-[linear-gradient(to_bottom,transparent,var(--paper)_14px)]" />}
         <div className="relative mx-auto max-w-[760px]">
+          {!s.subagent && !elsewhere && <ShellRuns s={s} />}
           <Queue session={id} queue={s.queue ?? []} steered={(q) => onSent({ key: crypto.randomUUID(), text: q.text, files: [], from: 0, input: q.id, steer: true })} />
           <Asks session={id} asks={s.asks} denials={s.denials ?? []} cwd={cwd} confirms={confirms.filter((c) => c.session === id)} />
           {s.subagent ? (

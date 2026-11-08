@@ -62,6 +62,9 @@ type Hello struct {
 	Env     []string    `json:"env"`
 	Agents  []AgentInfo `json:"agents"`
 	Holds   []HoldState `json:"holds"`
+	// NoShell: it starts nothing but its agents (each hold.start's argv begins with one of
+	// theirs), so no command line runs there; its owner's choice.
+	NoShell bool `json:"noShell,omitempty"`
 }
 
 // AgentInfo is an agent installed there and how to start it. Argv is the program part, to which

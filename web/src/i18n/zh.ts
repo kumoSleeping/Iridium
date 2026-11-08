@@ -162,6 +162,15 @@ export const zh = {
   "cmd.noContext": "还没有上下文用量，回合跑过一次后才有",
   "err.clear": "没能清空对话",
 
+  "shell.title": "命令",
+  "shell.failed": "命令未执行",
+  "shell.clear": "清除",
+  "shell.stop": "停止",
+  "shell.running": "运行中",
+  "shell.code": "退出码 {code}",
+  "shell.signal": "已终止（{signal}）",
+  "shell.ended": "已结束",
+
   "queue.title": "待发队列",
   "queue.paused": "已暂停",
   "queue.continue": "继续",

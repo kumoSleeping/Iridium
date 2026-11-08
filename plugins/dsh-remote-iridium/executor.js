@@ -302,8 +302,8 @@ function killTree(pid, hard) {
 
 /**
  * The executor. Options: url (ws(s)://…/api/exec), token, state (its own directory), roots
- * (directories files may be under; none: all but the denied), agents (Hello's), env, program,
- * log.
+ * (directories files may be under; none: all but the denied), agents (Hello's), noShell (start
+ * nothing but the agents: no command line runs here), env, program, log.
  */
 export class Executor {
   constructor(o) {
@@ -382,6 +382,7 @@ export class Executor {
       arch: process.arch, home: os.homedir(), sep: path.sep, scratch: path.join(this.state, 'scratch'),
       env: this.o.env ?? Object.entries(process.env).map(([k, v]) => `${k}=${v}`),
       agents: this.o.agents ?? [], holds: [...this.holds.values()].map((h) => h.state()),
+      ...(this.o.noShell ? { noShell: true } : {}),
     }
   }
 
@@ -411,6 +412,9 @@ export class Executor {
     switch (method) {
       case 'hold.start': {
         if (!p.hold || /[\\/.]/.test(p.hold) || !Array.isArray(p.argv) || !p.argv.length) throw bad('bad hold.start')
+        // With noShell, only an argv beginning with one of the agents' own.
+        if (this.o.noShell && !(this.o.agents ?? []).some((a) => a.argv?.length && a.argv.every((x, i) => p.argv[i] === x)))
+          throw new RemoteError('denied', 'only its agents start here')
         let h = this.holds.get(p.hold)
         if (h) return { pid: h.child?.pid ?? 0 }
         h = new Holder(this, p.hold)

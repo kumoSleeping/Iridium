@@ -185,6 +185,20 @@
 
 不在队列里（已发、已删）：404。
 
+## 命令
+
+在会话所在的机器和目录直接执行一行命令，不经 agent、不花 token（用户，2026-11-08）。网页上在输入框里以 `$` 开头（`$ git status`）；`!` 已用于插话。只有面板和本机能用，Bot 不能。
+
+| 请求 | 正文 → 回答 | 说明 |
+|---|---|---|
+| `POST /api/sessions/{id}/shell` | `{line, cwd?}` → `{run?, cwd}` | `cwd` 省略为会话目录。`cd <目录>` 不执行，确认那边有这个目录后回 `{cwd}`（`~` 是家目录，相对路径接在 `cwd` 后）；网页记住它，下一条带上 |
+| `GET /api/shell/{run}?from=N` | → `{data, next, done, code?, signal?, err?}` | 从字节偏移 `N` 读输出（一次至多 64KB），`next` 是下一次的 `from`。`done` 时输出已读完，`err` 是起不来时的原因 |
+| `DELETE /api/shell/{run}` | → `{ok}` | 停止（连同它起的进程） |
+
+- 每条命令一个进程：Linux、macOS 是 `/bin/sh -c`（stderr 并进 stdout），Windows 是 `cmd.exe /c`（stderr 在结束时给）。stdin 不接，读 stdin 的命令要手动停止。全屏程序（`vim`、`top`）不支持。
+- 进程照托管 agent 的方式起（本机的 `platform.Launcher`，别的机器经执行端），目录是托管目录下的 `sh-<id>`；结束 10 分钟后删。
+- 机器不在线：409；机器的主人关了命令（`Machine.noShell`）：403；目录不存在：404。
+
 ## 会话设置
 
 按会话记在库里：马上设给在跑的 agent，之后每次拉起都带上（Claude：`--model`、`--permission-mode`、`--effort`，设过 ultracode 带 `--settings '{"ultracode":…}'`，关也带，压过你自己设置里的）。

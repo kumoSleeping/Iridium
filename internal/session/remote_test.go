@@ -90,6 +90,8 @@ func TestRemoteDsh(t *testing.T) {
 		t.Errorf("mirror: %v", err)
 	}
 
+	testShell(t, r.m, id, work)
+
 	// The executor goes: the session shows it, and its agent is still there when it is back.
 	exe.Drop()
 	if s, _ := r.m.State(id); !s.Live {

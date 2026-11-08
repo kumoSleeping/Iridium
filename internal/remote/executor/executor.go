@@ -17,6 +17,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -35,8 +36,11 @@ type Options struct {
 	// Roots are the directories files may be read and written under; none: all but the denied.
 	Roots []string
 	// Deny are directories never served, besides its own TOKEN's and ~/.ssh.
-	Deny    []string
-	Agents  []wire.AgentInfo
+	Deny   []string
+	Agents []wire.AgentInfo
+	// NoShell: start nothing but the agents (an argv beginning with one of theirs), so no
+	// command line runs here (docs/exec.md).
+	NoShell bool
 	Env     []string // nil: os.Environ()
 	Program string   // what the hello says it is; "": iridium-executor
 	// HTTPClient dials the Iridium; nil: http.DefaultClient.
@@ -175,8 +179,18 @@ func (e *Executor) hello() wire.Hello {
 	return wire.Hello{
 		Protocol: wire.Protocol, Program: e.o.Program, OS: runtime.GOOS, Arch: runtime.GOARCH,
 		Home: home, Sep: string(filepath.Separator), Scratch: filepath.Join(e.o.State, "scratch"),
-		Env: e.o.Env, Agents: e.o.Agents, Holds: holds,
+		Env: e.o.Env, Agents: e.o.Agents, Holds: holds, NoShell: e.o.NoShell,
 	}
+}
+
+// agentArgv: argv begins with one of the agents' own.
+func (e *Executor) agentArgv(argv []string) bool {
+	for _, a := range e.o.Agents {
+		if len(a.Argv) > 0 && len(argv) >= len(a.Argv) && slices.Equal(argv[:len(a.Argv)], a.Argv) {
+			return true
+		}
+	}
+	return false
 }
 
 func bad(format string, a ...any) error {
@@ -300,6 +314,9 @@ func (e *Executor) newHolder(id string) *holder {
 func (e *Executor) start(id string, spec spec) (any, error) {
 	if id == "" || strings.ContainsAny(id, `/\.`) || len(spec.Argv) == 0 {
 		return nil, bad("bad hold.start")
+	}
+	if e.o.NoShell && !e.agentArgv(spec.Argv) {
+		return nil, &wire.Error{Code: wire.CodeDenied, Message: "only its agents start here"}
 	}
 	e.mu.Lock()
 	if h := e.holds[id]; h != nil {

@@ -33,7 +33,7 @@ func (s *Server) WatchMachines() {
 // machineSeen keeps what executor id said, if it is connected, and tells the pages.
 func (s *Server) machineSeen(id string) {
 	if hi, ok := s.Remote.Machine(id).Hello(); ok && hi != nil {
-		m := api.Machine{OS: hi.OS, Arch: hi.Arch, Home: hi.Home, Sep: hi.Sep, Agents: []api.ExecAgent{}}
+		m := api.Machine{OS: hi.OS, Arch: hi.Arch, Home: hi.Home, Sep: hi.Sep, Agents: []api.ExecAgent{}, NoShell: hi.NoShell}
 		for _, a := range hi.Agents {
 			// Only what Iridium runs at an executor.
 			if info, ok := agents.Get(api.Agent(a.Agent)); ok && info.FindRemote != nil {

@@ -1258,6 +1258,36 @@ export interface SettingsPatch {
 }
 
 //////////
+// source: shell.go
+
+/**
+ * ShellRun asks to run one command line at a session's machine, in a folder, without its agent
+ * (docs/api.md "命令"). "cd <dir>" runs nothing: it answers the folder it moves to.
+ */
+export interface ShellRun {
+  line: string;
+  cwd?: string; // "": the session's folder
+}
+/**
+ * ShellStarted answers a ShellRun: the run to read, "" for a cd; Cwd is the folder it runs in.
+ */
+export interface ShellStarted {
+  run?: string;
+  cwd: string;
+}
+/**
+ * ShellOutput is a run's output from an offset: its stdout and stderr together, as they came.
+ */
+export interface ShellOutput {
+  data: string;
+  next: number /* int64 */; // the offset to read from next
+  done: boolean; // it ended and all it wrote is in
+  code?: number /* int */;
+  signal?: string;
+  err?: string; // once done: what could not run it, if anything
+}
+
+//////////
 // source: terminals.go
 
 /**
@@ -1484,6 +1514,10 @@ export interface Machine {
   agents: ExecAgent[];
   online: boolean;
   seenAt: number /* int64 */; // when it last connected (ms)
+  /**
+   * NoShell: it starts only its agents, so command lines cannot run there (docs/exec.md).
+   */
+  noShell?: boolean;
 }
 /**
  * ExecAgent is an agent an executor has.

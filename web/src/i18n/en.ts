@@ -162,6 +162,15 @@ export const en: Dict = {
   "cmd.noContext": "No context usage yet: it comes after a turn",
   "err.clear": "Could not clear the conversation",
 
+  "shell.title": "Commands",
+  "shell.failed": "The command did not run",
+  "shell.clear": "Clear",
+  "shell.stop": "Stop",
+  "shell.running": "Running",
+  "shell.code": "Exit {code}",
+  "shell.signal": "Ended ({signal})",
+  "shell.ended": "Ended",
+
   "queue.title": "Queue",
   "queue.paused": "Paused",
   "queue.continue": "Continue",

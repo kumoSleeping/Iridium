@@ -108,22 +108,26 @@ export function iridiumURL(s) {
 /**
  * Config: url, the Iridium (https://…), set on the plugin's page in dsh (client.js), with
  * `/iridium <url>`, or in the profile; name, this machine's (default: its host name); roots, the
- * directories the Iridium may read and write files under (default: all but the denied). The url is
+ * directories the Iridium may read and write files under (default: all but the denied); shell,
+ * whether command lines from the Iridium run here, not only dsh (default: yes). The url is
  * volatile: a new one is taken at once, without dsh starting the plugin again.
  */
 export const Config = z.object({
   url: z.string().default('').volatile(),
   name: z.string(),
   roots: z.array(z.string()),
+  shell: z.boolean().default(true),
 })
 
 export function apply(ctx, config) {
   const home = process.env.DSH_HOME || path.join(os.homedir(), '.dsh')
   const state = path.join(home, 'remote-iridium')
   const tokenFile = path.join(state, 'token', 'token')
+  // The address as set, or the http(s) one in it (pasted with something before or after it).
   const urlNow = () => {
     const u = config?.url
-    return ((typeof u?.get === 'function' ? u.get() : u) || '').trim()
+    const s = ((typeof u?.get === 'function' ? u.get() : u) || '').trim()
+    return iridiumURL(s.match(/https?:\/\/\S+/i)?.[0] ?? s) ?? s
   }
   let status = { state: 'idle' }
   let run = null // { stop, url }: the loop for one url
@@ -135,6 +139,11 @@ export function apply(ctx, config) {
     if (!url) {
       status = { state: 'no-url' }
       say('no url set: set the Iridium address on this plugin\'s page in dsh, or type /iridium https://your-iridium')
+      return
+    }
+    if (!iridiumURL(url)) {
+      status = { state: 'bad-url', url }
+      say(`not an Iridium address: ${url}`)
       return
     }
     // A token is the Iridium's it was given by: another one pairs afresh.
@@ -185,7 +194,7 @@ export function apply(ctx, config) {
         }
         if (stopped) return
         show({ state: 'paired', name: who.name })
-        ex = new Executor({ url: wsURL(url), token, state, roots: config?.roots ?? [], agents: [dsh], program: who.program, log: (m) => say(m) })
+        ex = new Executor({ url: wsURL(url), token, state, roots: config?.roots ?? [], noShell: config?.shell === false, agents: [dsh], program: who.program, log: (m) => say(m) })
         const running = ex.run()
         // A TOKEN turned down (its Bot removed) is forgotten, and the machine pairs again.
         while (!stopped) {
@@ -208,6 +217,8 @@ export function apply(ctx, config) {
     switch (status.state) {
       case 'no-url':
         return '未设置 Iridium 地址。在插件页填写，或输入 /iridium https://你的-iridium'
+      case 'bad-url':
+        return `不是 Iridium 地址：${status.url}。用法：/iridium https://你的-iridium`
       case 'unreachable':
         return `无法连接 Iridium${at}：${status.error}`
       case 'pairing':

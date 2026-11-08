@@ -11,6 +11,7 @@
 import { ArrowUp, FileText, LoaderCircle, MessageSquare, Paperclip, Slash, Square, X } from "lucide-react";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { Command, Session, SessionState as LiveSession } from "../api/types.gen";
+import { runShell, shellLine, useShellable } from "./shell";
 import { api, missing } from "../api/client";
 import type { Sent } from "../chats";
 import { t } from "../i18n";
@@ -36,6 +37,7 @@ export type KeyMode = "send" | "stop" | "queue" | "steer";
 export function keyMode(turn: boolean, text: string, files: number, queues: boolean, steers = true, other = false): KeyMode {
   if (!turn) return "send";
   const words = text.trim();
+  if (words.startsWith("$")) return "send"; // a command line (shell.tsx), not for the turn
   if (!words && !files) return "stop";
   // A command waits for the turn's end: the server never steers one in.
   if (words.startsWith("/") && queues) return "queue";
@@ -212,6 +214,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
   const queues = s.queue !== undefined;
   const steers = (useSettings().data?.enterInTurn ?? "steer") !== "queue";
   const mode = keyMode(turn, text, atts.length + named.length, queues, steers);
+  const shellable = useShellable(s);
 
   /** Page-handled commands: true when done here. */
   const own = (words: string) => {
@@ -254,6 +257,13 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
     if (busy || uploading || (empty && mode !== "stop")) return;
     if (mode === "stop") return stop();
     if (atts.some((a) => a.error)) return toast(t("err.upload"), { error: true });
+    // $ and a command line: run at the session's machine, not sent to the agent (shell.tsx).
+    const line = shellable && !atts.length && !named.length ? shellLine(text) : null;
+    if (line) {
+      type("");
+      setBusy(true);
+      return void runShell(s, line).finally(() => setBusy(false));
+    }
     const typed = text.trim().replace(/^[!！]\s*/, "");
     if (!atts.length && !named.length && own(typed)) return;
     // The sessions named, as their mentions, before the words: what the agent reads.

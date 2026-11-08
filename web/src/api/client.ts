@@ -52,6 +52,7 @@ import type {
   WorkspacePatch,
 } from "./types.gen";
 import type { BotReply, BringBot } from "./types.gen";
+import type { ShellOutput, ShellRun, ShellStarted } from "./types.gen";
 import type { SecretInfo, Secrets, SetSecret, Usage } from "./types.gen";
 
 /** The gate's GET /_ir/api/session (docs/gate.md). */
@@ -163,6 +164,10 @@ export const api = {
     write<SendReply>("POST", `${S(id)}/send`, { text, ...(attachments?.length ? { attachments } : {}), ...(steer ? { steer } : {}) } satisfies Send),
   interrupt: (id: string) => write<{ ok: boolean }>("POST", `${S(id)}/interrupt`),
   stop: (id: string) => write<{ ok: boolean }>("POST", `${S(id)}/stop`),
+  /** A command line at the session's machine, in cwd ("": its folder) (docs/api.md "命令"). */
+  shell: (id: string, line: string, cwd?: string) => write<ShellStarted>("POST", `${S(id)}/shell`, { line, ...(cwd ? { cwd } : {}) } satisfies ShellRun),
+  shellRead: (run: string, from: number) => get<ShellOutput>(`/api/shell/${enc(run)}?from=${from}`),
+  shellStop: (run: string) => write<{ ok: boolean }>("DELETE", `/api/shell/${enc(run)}`),
   /** A bot's chat (its terminal ID) pointed at the session, from the session's menu. */
   bringBot: (id: string, bot: string) => write<BotReply>("POST", `${S(id)}/bot`, { bot } satisfies BringBot),
   /** An ask's card answered (docs/api.md "卡片"): an option, a choice per question, own words. */

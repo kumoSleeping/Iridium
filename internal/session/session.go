@@ -103,6 +103,7 @@ var (
 
 type Manager struct {
 	o      Options
+	shell  shells // command lines run at sessions' machines (shell.go)
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -175,6 +176,7 @@ func (m *Manager) Start() error {
 		return err
 	}
 	m.loadQuota()
+	m.sweepShellDirs()
 	vis := m.visibility()
 	metas, _ := filepath.Glob(filepath.Join(m.holdRoot(), "*", fileMeta))
 	for _, p := range metas {

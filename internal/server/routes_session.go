@@ -23,6 +23,7 @@ func (s *Server) sessionRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/sessions/{id}/queue/{input}", s.use(s.deleteQueued))
 	mux.HandleFunc("GET /api/sessions/{id}/rules", s.rules)
 	mux.HandleFunc("DELETE /api/sessions/{id}/rules", s.use(s.clearRules))
+	s.shellRoutes(mux)
 }
 
 func (s *Server) settle(w http.ResponseWriter, err error) {

@@ -5,6 +5,7 @@ import { windowFor } from "../src/quota";
 import type { Block, Model, Session, Terminal } from "../src/api/types.gen";
 import { argOf, folded, foldLine, inputOf } from "../src/chat/fold";
 import { commandsOf, keyMode, matching } from "../src/chat/composer";
+import { shellLine } from "../src/chat/shell";
 import { levelName, restAt } from "../src/chat/effort";
 import { ctxParts, modelView } from "../src/chat/meters";
 import { atSessions, atWord, leadingMentions, mentions, shortId, sourceOf, withoutFiles, withoutNameLines, draftWords } from "../src/chat/refs";
@@ -224,6 +225,7 @@ describe("composer", () => {
     expect(keyMode(true, " ", 0, true)).toBe("stop");
     expect(keyMode(true, "hi", 0, true)).toBe("steer");
     expect(keyMode(true, "", 1, true)).toBe("steer");
+    expect(keyMode(true, "$ ls", 0, true)).toBe("send"); // a command line, not for the turn
     expect(keyMode(true, "hi", 0, true, true, true)).toBe("queue");
     expect(keyMode(true, "hi", 0, true, false)).toBe("queue");
     expect(keyMode(true, "hi", 0, true, false, true)).toBe("steer");
@@ -442,5 +444,14 @@ describe("@ in the composer", () => {
     expect(atSessions(list, "side", "here").map((x) => x.id)).toEqual(["a1", "b2"]);
     expect(atSessions(list, "c3", "here").map((x) => x.id)).toEqual(["c3"]);
     expect(atSessions(list, "nothing", "here")).toEqual([]);
+  });
+});
+
+describe("shellLine", () => {
+  test("what follows a leading $", () => {
+    expect(shellLine("$ git status")).toBe("git status");
+    expect(shellLine("  $ls -la ")).toBe("ls -la");
+    expect(shellLine("$")).toBe("");
+    expect(shellLine("cost $5")).toBeNull();
   });
 });
