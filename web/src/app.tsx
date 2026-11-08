@@ -372,7 +372,9 @@ export function App() {
           {phone && (
             <Sheet open={sheetIsOut} setOpen={setSheet} size={!open ? "full" : "half"} raised={jumping && !setsOut} name="phone" head={GRIP + TABS_H} from={() => true} onPull={(x) => setPulled(atLeft(x) ? "me" : "sessions")} label={setsOut ? (r.name === "usage" ? t("usage.title") : t("nav.me")) : t("nav.sessions")} onHeight={setSheetH}>
               <Pager
-                ends={[null, null, <HeadKeys key="s" createKey={(trigger) => <CreatePopover trigger={trigger} />} />]}
+                // The tabs' bar is px-3, the list's rows end 4px further right: its "+" in line with
+                // theirs (the user, 2026-11-08).
+                ends={[null, null, <span key="s" className="-mr-1 flex"><HeadKeys createKey={(trigger) => <CreatePopover trigger={trigger} />} /></span>]}
                 page={sheetPage}
                 still={turnStill}
                 onPage={toPage}

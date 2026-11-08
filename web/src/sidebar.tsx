@@ -229,6 +229,7 @@ export function Sidebar(p: Props) {
                 flip={`w:${w.key}`}
                 id={w.id}
                 name={w.name}
+                sessions={w.rows.flatMap((r) => (r.kind === "session" ? [r.s] : r.f.sessions))}
                 root={w.root}
                 machine={at}
                 open={open}
@@ -444,9 +445,10 @@ function Row({ depth, flip, chevron, expanded, icon, label, end, selected, onCli
   );
 }
 
-/** A group's row; its menu (right click, long-press): rename, its path copied, open or folded,
- *  通知 while push is on. 未归类 itself (id 0): its 通知 only, inline. */
-function WsRow({ flip, id, name, root, machine, open, onToggle, end }: { flip: string; id: number; name: string; root: string; machine?: Machine; open: boolean; onToggle: () => void; end: ReactNode }) {
+/** A group's row; its menu (right click, long-press): its sessions archived, as a folder's (the
+ *  user, 2026-11-08: a group is a folder now), rename, its path copied, open or folded, 通知 while
+ *  push is on. 未归类 itself (id 0): its sessions archived and its 通知. */
+function WsRow({ flip, id, name, root, sessions, machine, open, onToggle, end }: { flip: string; id: number; name: string; root: string; sessions: Session[]; machine?: Machine; open: boolean; onToggle: () => void; end: ReactNode }) {
   const machines = useMachines();
   const push = usePushMenus();
   const me = useMe().data;
@@ -460,11 +462,18 @@ function WsRow({ flip, id, name, root, machine, open, onToggle, end }: { flip: s
   const anchor = at && { getBoundingClientRect: () => DOMRect.fromRect({ x: at.x, y: at.y, width: 0, height: 0 }) };
   const failed = (e: unknown) => toast(t("err.action"), { error: true, description: errText(e) });
   const items = [
-    { icon: <Pencil size={15} />, label: t("menu.rename"), run: () => setRenaming(true) },
-    { icon: <Copy size={15} />, label: t("menu.copyPath"), run: () => void navigator.clipboard.writeText(shownPath(root, machines).real).then(() => toast(t("toast.copied")), failed) },
-    { icon: open ? <Folder size={15} /> : <FolderOpen size={15} />, label: open ? t("menu.fold") : t("menu.unfold"), run: onToggle },
+    ...(sessions.length
+      ? [{ icon: <Archive size={15} />, label: t("menu.archiveHere", { n: sessions.length }), run: () => void Promise.all(sessions.map((s) => api.patch(s.id, { archived: true }))).then(() => toast(t("toast.archived")), failed) }]
+      : []),
+    ...(real
+      ? [
+          { icon: <Pencil size={15} />, label: t("menu.rename"), run: () => setRenaming(true) },
+          { icon: <Copy size={15} />, label: t("menu.copyPath"), run: () => void navigator.clipboard.writeText(shownPath(root, machines).real).then(() => toast(t("toast.copied")), failed) },
+          { icon: open ? <Folder size={15} /> : <FolderOpen size={15} />, label: open ? t("menu.fold") : t("menu.unfold"), run: onToggle },
+        ]
+      : []),
   ];
-  const menu = real || push;
+  const menu = items.length > 0 || push;
   // Its "+" popover is a portal, but React events bubble through it: a press in it must not fold
   // the workspace (the user's, 2026-11-05: only you fold or unfold).
   return (
@@ -494,7 +503,7 @@ function WsRow({ flip, id, name, root, machine, open, onToggle, end }: { flip: s
         <Menu.Root open={at !== null} onOpenChange={(o) => !o && setAt(null)}>
           <Menu.Portal>
             <Menu.Positioner anchor={anchor} side="bottom" align="start" sideOffset={4} collisionPadding={8} className="z-50">
-              {real ? (
+              {items.length ? (
                 <MenuItems
                   items={items}
                   // No 删除 (the user, 2026-11-08): a group is the folder its sessions are in; it
