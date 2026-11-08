@@ -11,6 +11,11 @@
   },
   "files": ["index.js", "executor.js", "cordis.patch.yml", "README.md"],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kumoSleeping/Iridium",
+    "directory": "plugins/dsh-remote-iridium"
+  },
   "engines": { "node": ">=22" },
   "dsh": {
     "bundle": {
