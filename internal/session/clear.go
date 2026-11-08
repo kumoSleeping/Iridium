@@ -42,7 +42,7 @@ func (m *Manager) Clear(ctx context.Context, id, from string) (string, error) {
 	h.mu.Lock()
 	mt, effort, ultracode, preset := h.meta, h.effort, h.ultracode, h.preset
 	h.mu.Unlock()
-	req := api.NewSession{Agent: mt.Agent, Cwd: mt.Cwd, Model: mt.Model, Mode: mt.Mode, Preset: preset, Caller: mt.Launcher}
+	req := api.NewSession{Agent: mt.Agent, Cwd: mt.Cwd, Model: mt.Model, Mode: mt.Mode, Preset: preset, Caller: mt.Launcher, Machine: mt.Machine}
 	var name string // the one the old was given, if it is to go to the archive
 	if over, err := m.o.Store.Overlays(); err == nil {
 		if o := over[h.id]; !o.AutoName && !h.busy() && len(h.asksNow()) == 0 {

@@ -44,6 +44,8 @@ type meta struct {
 	AgentID string `json:"agentId,omitempty"`
 	// Launcher: the session that opened it (ir new from inside one), by Iridium's id.
 	Launcher string `json:"launcher,omitempty"`
+	// Machine: the executor it runs at, by terminal ID (docs/exec.md); "": here. Cwd is its path there.
+	Machine string `json:"machine,omitempty"`
 }
 
 // agentID is the id the agent's records name the session by.
@@ -62,6 +64,9 @@ func (h *Hosted) findTranscript() (string, error) {
 	info, ok := agents.Get(mt.Agent)
 	if !ok {
 		return "", fmt.Errorf("no agent %s", mt.Agent)
+	}
+	if mc := h.machine(); mc != nil {
+		return h.findRemoteTranscript(mc)
 	}
 	return info.Find(agents.Where{ID: mt.agentID(), Cwd: mt.Cwd, Env: h.m.agentEnv(), ClaudeHome: h.m.o.Config.ClaudeDir()})
 }
@@ -121,7 +126,9 @@ type Hosted struct {
 	base      *agent.Usage  // the session's use as of the last result, for each turn's share
 	file      *transcript.File
 	end       int64
-	said      cached
+	// mirroredAt: when the transcript's mirror was last brought up to date (remote.go).
+	mirroredAt time.Time
+	said       cached
 
 	qmu     sync.Mutex   // one queue decision or release at a time; before mu
 	queue   []api.Queued // under mu
@@ -237,7 +244,7 @@ func (h *Hosted) launch(ctx context.Context, proc int) error {
 	// The last unit may still be ending (its ExecStopPost running): systemd takes no second one
 	// of the name meanwhile.
 	for i := 0; ; i++ {
-		st, err := m.o.Launcher.State(ctx, h.unit)
+		st, err := h.launcher().State(ctx, h.unit)
 		if err != nil {
 			return err
 		}
@@ -262,6 +269,11 @@ func (h *Hosted) launch(ctx context.Context, proc int) error {
 		Model: h.meta.Model, Mode: cmp.Or(h.meta.Mode, m.defaultMode(h.meta.Agent)), Effort: h.effort, Ultracode: h.ultracode, Preset: h.preset, CrashResume: h.crashResume && found != ""}
 	h.resuming, h.crashResume, h.turnSeen = o.CrashResume, false, false
 	h.mu.Unlock()
+	if mc := h.machine(); mc != nil {
+		if err := h.remoteSpawn(mc, &o); err != nil {
+			return err
+		}
+	}
 	// An agent updating itself is gone for a few seconds: wait for it (Rhodium §4.2).
 	var spec hold.Spec
 	for wait := time.Now().Add(30 * time.Second); ; {
@@ -289,7 +301,7 @@ func (h *Hosted) launch(ctx context.Context, proc int) error {
 		StopPost:    []string{m.o.Exe, "hold", "--stop-post", h.dir},
 		StopTimeout: 2*m.o.Config.StopGrace.D() + 10*time.Second,
 	}
-	if err := m.o.Launcher.Start(ctx, u); err != nil {
+	if err := h.launcher().Start(ctx, u); err != nil {
 		return err
 	}
 	in := hold.NewInput(h.dir)
@@ -323,7 +335,7 @@ func (h *Hosted) adopt() error {
 		return nil // never started
 	}
 	h.proc = pm.Proc
-	st, err := h.m.o.Launcher.State(h.m.ctx, h.unit)
+	st, err := h.launcher().State(h.m.ctx, h.unit)
 	if err != nil {
 		return err
 	}
@@ -433,7 +445,7 @@ func (h *Hosted) loop(proc int, outStart, replay int64) {
 		if e == nil && time.Since(looked) > 2*time.Second {
 			// A holder gone without an exit file: its ExecStopPost did not run.
 			looked = time.Now()
-			if st, err := h.m.o.Launcher.State(h.m.ctx, h.unit); err == nil && !st.Exists {
+			if st, err := h.launcher().State(h.m.ctx, h.unit); err == nil && !st.Exists {
 				if e, _ = hold.ReadExit(h.dir); e == nil {
 					e = &hold.Exit{From: "holder"}
 				}
@@ -523,7 +535,7 @@ func (h *Hosted) stop(ctx context.Context) error {
 	if err := os.WriteFile(filepath.Join(h.dir, fileStop), nil, 0o600); err != nil {
 		return err
 	}
-	return h.m.o.Launcher.Stop(ctx, h.unit)
+	return h.launcher().Stop(ctx, h.unit)
 }
 
 // idleSince: whether the agent runs with nothing to do, and since when.
@@ -859,6 +871,7 @@ func (h *Hosted) transcript() *transcript.File {
 // readTranscript notes how far the transcript goes, and what was last said: when it grew, the
 // page fetches what came after its end.
 func (h *Hosted) readTranscript() {
+	h.syncRemote()
 	f := h.transcript()
 	if f == nil {
 		return
@@ -924,6 +937,7 @@ func (h *Hosted) summaryLocked(o store.Overlay, archived bool) api.Session {
 		Status: h.status(), Hosted: true, Live: h.live,
 		Pinned: o.Pinned, Archived: archived, Workspace: o.Workspace, Color: api.Color(o.Color),
 		Launcher: h.meta.Launcher, Last: h.said.last, UpdatedAt: h.shownAt.UnixMilli(),
+		Machine: h.meta.Machine, Offline: h.offline(),
 	}
 }
 

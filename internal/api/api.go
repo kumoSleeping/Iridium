@@ -102,6 +102,10 @@ type Session struct {
 	// Bots: the plugins (terminal IDs) whose chat is in this session now: the list shows their
 	// avatar and a Bot tag.
 	Bots []string `json:"bots,omitempty"`
+	// Machine: the executor it runs at (its terminal ID; docs/exec.md), empty for this machine.
+	// Offline: that executor is not connected now.
+	Machine string `json:"machine,omitempty"`
+	Offline bool   `json:"offline,omitempty"`
 	// Viewers: the terminals (panels) with this session open now, a page's stream on it.
 	Viewers []string `json:"viewers,omitempty"`
 }
@@ -366,6 +370,9 @@ type NewSession struct {
 	// Caller is the session that ran ir new (from IRIDIUM_SESSION, CLAUDE_CODE_SESSION_ID,
 	// CODEX_THREAD_ID…): the new session goes into its workspace.
 	Caller string `json:"caller,omitempty"`
+	// Machine: the executor to run it at (a terminal ID or name; docs/exec.md); empty: here. Cwd
+	// is then a path there.
+	Machine string `json:"machine,omitempty"`
 }
 
 type NewSessionReply struct {

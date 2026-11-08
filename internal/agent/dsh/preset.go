@@ -35,6 +35,8 @@ const rowPrefix = "iridium-"
 // the directory of its @deepseek-ai packages.
 type Package struct {
 	Root, Scope, Version string
+	// Read reads a file under Scope by its parts; nil: this machine's files.
+	Read func(parts ...string) ([]byte, error)
 }
 
 // FindPackage finds the dsh package program runs: the program is <root>/lib/bin.js or a symlink
@@ -79,8 +81,14 @@ func (p Package) Patch(preset, suffix string) ([]byte, error) {
 	if !slices.Contains(Presets, preset) {
 		return nil, fmt.Errorf("dsh: no agent preset %q (%s)", preset, strings.Join(Presets, ", "))
 	}
+	readFile := p.Read
+	if readFile == nil {
+		readFile = func(parts ...string) ([]byte, error) {
+			return os.ReadFile(filepath.Join(append([]string{p.Scope}, parts...)...))
+		}
+	}
 	read := func(parts ...string) ([]string, error) {
-		b, err := os.ReadFile(filepath.Join(append([]string{p.Scope}, parts...)...))
+		b, err := readFile(parts...)
 		if err != nil {
 			return nil, fmt.Errorf("dsh: preset %s: %w", preset, err)
 		}

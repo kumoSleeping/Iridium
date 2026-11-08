@@ -23,6 +23,9 @@ func Main() (code int, ok bool) {
 	if filepath.Base(os.Args[0]) == "claude" {
 		return Claude(), true
 	}
+	if os.Getenv("IRIDIUM_FAKE_DSH") != "" {
+		return Dsh(), true
+	}
 	if len(os.Args) > 1 && os.Args[1] == "hold" {
 		return hold.Main(os.Args[2:]), true
 	}

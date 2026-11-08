@@ -23,6 +23,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/hub"
 	"github.com/kumoSleeping/iridium/internal/platform"
 	"github.com/kumoSleeping/iridium/internal/push"
+	"github.com/kumoSleeping/iridium/internal/remote"
 	"github.com/kumoSleeping/iridium/internal/server"
 	"github.com/kumoSleeping/iridium/internal/session"
 	"github.com/kumoSleeping/iridium/internal/store"
@@ -107,7 +108,8 @@ func serve(args []string) int {
 	d := discover.New(do)
 	var srv *server.Server // names terminals in source tags, once it is there
 	tag := func(id string) string { return srv.Tag(id) }
-	m, err := session.New(session.Options{Config: cfg, Store: st, Hub: h, Launcher: platform.Systemd{}, UnitPrefix: cfg.UnitPrefix, Discovery: d, Tag: tag})
+	executors := &remote.Hub{Logf: log.Printf}
+	m, err := session.New(session.Options{Config: cfg, Store: st, Hub: h, Launcher: platform.Systemd{}, UnitPrefix: cfg.UnitPrefix, Discovery: d, Tag: tag, Remote: executors})
 	if err != nil {
 		log.Print(err)
 		return 1
@@ -126,6 +128,7 @@ func serve(args []string) int {
 	defer m.Close()
 	srv = server.New(cfg, m, h, nil)
 	defer srv.Close()
+	srv.Remote = executors
 	srv.ConfigPath = *path
 	srv.Updater = newUpdater(cfg, h)
 	h.Set("update", srv.Updater.State())

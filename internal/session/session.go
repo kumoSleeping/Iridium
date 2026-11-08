@@ -29,6 +29,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/hub"
 	"github.com/kumoSleeping/iridium/internal/irhelp"
 	"github.com/kumoSleeping/iridium/internal/platform"
+	"github.com/kumoSleeping/iridium/internal/remote"
 	"github.com/kumoSleeping/iridium/internal/store"
 )
 
@@ -69,10 +70,12 @@ type grouper interface {
 }
 
 type Options struct {
-	Config     config.Config
-	Store      *store.Store
-	Hub        *hub.Hub
-	Launcher   platform.Launcher
+	Config   config.Config
+	Store    *store.Store
+	Hub      *hub.Hub
+	Launcher platform.Launcher
+	// Remote: the executors sessions may run at (docs/exec.md); nil: none.
+	Remote     *remote.Hub
 	Exe        string // the binary that runs `hold`; "" is this one
 	UnitPrefix string // "" is UnitPrefix
 	Discovery  Discovery
@@ -156,6 +159,10 @@ func New(o Options) (*Manager, error) {
 	m := &Manager{o: o, ctx: ctx, cancel: cancel, hosted: map[string]*Hosted{}, quota: map[string]api.AgentQuota{}}
 	m.Tune(TunablesOf(o.Config))
 	o.Hub.Provide = m.provide
+	if o.Remote != nil {
+		o.Remote.Dir = m.HoldDir
+		o.Remote.Changed = m.machineChanged
+	}
 	return m, nil
 }
 
@@ -275,20 +282,31 @@ func (m *Manager) create(ctx context.Context, req api.NewSession, from, name str
 	if !ok {
 		return "", fmt.Errorf("agent %s is not supported yet", req.Agent)
 	}
-	// Not installed: say so at once, not after the wait for an agent updating itself (start).
-	if m.Missing(req.Agent) {
+	var machine string
+	if req.Machine != "" {
+		mc, err := m.remoteFor(ctx, req.Machine, info, req.Cwd)
+		if err != nil {
+			return "", err
+		}
+		machine = mc.ID()
+	} else if m.Missing(req.Agent) {
+		// Not installed: say so at once, not after the wait for an agent updating itself (start).
 		return "", fmt.Errorf("%w: %s (%s is not on PATH)", ErrNotInstalled, info.Name, m.program(req.Agent))
 	}
 	if req.Mode != "" && !slices.Contains(info.Modes, req.Mode) {
 		return "", fmt.Errorf("%s has no approval mode %q (%s)", info.Name, req.Mode, strings.Join(info.Modes, ", "))
 	}
-	if st, err := os.Stat(req.Cwd); err != nil || !st.IsDir() || !filepath.IsAbs(req.Cwd) {
-		return "", fmt.Errorf("not a directory: %q", req.Cwd)
+	cwd := req.Cwd
+	if machine == "" {
+		if st, err := os.Stat(req.Cwd); err != nil || !st.IsDir() || !filepath.IsAbs(req.Cwd) {
+			return "", fmt.Errorf("not a directory: %q", req.Cwd)
+		}
+		cwd = filepath.Clean(req.Cwd)
 	}
 	if _, err := m.o.Store.Workspace(req.Workspace); req.Workspace != 0 && err != nil {
 		return "", err
 	}
-	mt := meta{ID: newUUID(), Agent: req.Agent, Cwd: filepath.Clean(req.Cwd), Created: time.Now().UnixMilli(), Model: req.Model, Mode: req.Mode, Launcher: req.Caller}
+	mt := meta{ID: newUUID(), Agent: req.Agent, Cwd: cwd, Created: time.Now().UnixMilli(), Model: req.Model, Mode: req.Mode, Launcher: req.Caller, Machine: machine}
 	if h := m.byAgentID(req.Caller); req.Caller != "" && h != nil {
 		mt.Launcher = h.id // a hosted Codex session calls itself by its thread
 	}
@@ -320,7 +338,7 @@ func (m *Manager) create(ctx context.Context, req api.NewSession, from, name str
 	if err := writeJSON(filepath.Join(h.dir, fileMeta), mt); err != nil {
 		return "", err
 	}
-	m.nameNew(mt.ID, mt.Cwd, name)
+	m.nameNew(mt.ID, groupPath(mt.Machine, mt.Cwd), name)
 	m.mu.Lock()
 	m.hosted[mt.ID] = h
 	m.mu.Unlock()
@@ -331,7 +349,7 @@ func (m *Manager) create(ctx context.Context, req api.NewSession, from, name str
 			return mt.ID, err
 		}
 	} else {
-		m.intoGroup(mt.ID, mt.Cwd, req.Caller)
+		m.intoGroup(mt.ID, groupPath(mt.Machine, mt.Cwd), req.Caller)
 	}
 	if err := h.start(ctx); err != nil {
 		return mt.ID, err

@@ -237,15 +237,21 @@ func closed() chan struct{} {
 // through as they are.
 func (d *Driver) Spawn(o agent.SpawnOptions) (hold.Spec, error) {
 	env := agent.ForeignEnv(o.Env)
-	program, err := agent.LookPath(cmp.Or(o.Program, "dsh"), env)
-	if err != nil {
-		return hold.Spec{}, err
-	}
-	// dsh is a `#!/usr/bin/env node` script: without node on that PATH it cannot start at all.
-	if head, err := readHead(program); err == nil && bytes.HasPrefix(head, []byte("#!")) && bytes.Contains(bytes.SplitN(head, []byte("\n"), 2)[0], []byte("env node")) {
-		if _, err := agent.LookPath("node", env); err != nil {
-			return hold.Spec{}, fmt.Errorf("dsh: node not found: %w", err)
+	var argv []string
+	if r := o.Remote; r != nil {
+		argv = slices.Clone(r.Argv)
+	} else {
+		program, err := agent.LookPath(cmp.Or(o.Program, "dsh"), env)
+		if err != nil {
+			return hold.Spec{}, err
 		}
+		// dsh is a `#!/usr/bin/env node` script: without node on that PATH it cannot start at all.
+		if head, err := readHead(program); err == nil && bytes.HasPrefix(head, []byte("#!")) && bytes.Contains(bytes.SplitN(head, []byte("\n"), 2)[0], []byte("env node")) {
+			if _, err := agent.LookPath("node", env); err != nil {
+				return hold.Spec{}, fmt.Errorf("dsh: node not found: %w", err)
+			}
+		}
+		argv = []string{program}
 	}
 	mode := cmp.Or(o.Mode, DefaultMode)
 	if !slices.Contains(Modes, mode) {
@@ -263,20 +269,32 @@ func (d *Driver) Spawn(o agent.SpawnOptions) (hold.Spec, error) {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return hold.Spec{}, fmt.Errorf("dsh: %w", err)
 	}
-	pkg, err := FindPackage(program)
-	if err != nil {
+	var pkg Package
+	var err error
+	if r := o.Remote; r != nil {
+		pkg = Package{Scope: r.Scope, Version: r.Version, Read: func(parts ...string) ([]byte, error) {
+			return r.ReadFile(r.Join(append([]string{r.Scope}, parts...)...))
+		}}
+	} else if pkg, err = FindPackage(argv[0]); err != nil {
 		return hold.Spec{}, fmt.Errorf("dsh: cannot build agent preset %q: %w", cmp.Or(o.Preset, DefaultPreset), err)
 	}
 	patch, err := pkg.Patch(cmp.Or(o.Preset, DefaultPreset), suffix)
 	if err != nil {
 		return hold.Spec{}, err
 	}
-	path := filepath.Join(filepath.Dir(o.SystemPromptFile), PatchFile)
-	if err := writeFile(path, patch); err != nil {
+	var path string
+	if r := o.Remote; r != nil {
+		path = r.Join(r.Scratch, o.Session, PatchFile)
+		err = r.WriteFile(path, patch)
+	} else {
+		path = filepath.Join(filepath.Dir(o.SystemPromptFile), PatchFile)
+		err = writeFile(path, patch)
+	}
+	if err != nil {
 		return hold.Spec{}, fmt.Errorf("dsh: writing the preset's patch: %w", err)
 	}
 	cwd := o.Cwd
-	if cwd == "" {
+	if cwd == "" && o.Remote == nil {
 		cwd, _ = os.Getwd()
 	}
 	model := o.Model
@@ -292,7 +310,7 @@ func (d *Driver) Spawn(o agent.SpawnOptions) (hold.Spec, error) {
 	d.mu.Lock()
 	d.env = env
 	d.mu.Unlock()
-	return hold.Spec{Argv: []string{program, "--profile", "sdk", "--patch", path}, Env: env, Cwd: o.Cwd}, nil
+	return hold.Spec{Argv: append(argv, "--profile", "sdk", "--patch", path), Env: env, Cwd: o.Cwd}, nil
 }
 
 func readHead(path string) ([]byte, error) {

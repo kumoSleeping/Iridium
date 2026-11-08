@@ -64,6 +64,21 @@ type SpawnOptions struct {
 	// CrashResume: the last process died mid-turn; an agent that can run that turn again by itself
 	// is told to.
 	CrashResume bool
+	// Remote: the agent runs at an executor (docs/exec.md), not here: Cwd and Env are its, and
+	// nothing of the agent is looked up on this machine. nil: here.
+	Remote *Remote
+}
+
+// Remote is the executor an agent runs at, as the driver needs it.
+type Remote struct {
+	Argv    []string // the agent's program part, as the executor gave it
+	Version string
+	Scope   string // dsh: the directory of its @deepseek-ai packages there
+	Scratch string // a directory there for launch files
+	Join    func(elem ...string) string
+	// ReadFile and WriteFile read and write a file there (small ones).
+	ReadFile  func(path string) ([]byte, error)
+	WriteFile func(path string, data []byte) error
 }
 
 // Writer writes one line to the agent's stdin (through the holder's pipe).

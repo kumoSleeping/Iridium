@@ -31,6 +31,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/gate"
 	"github.com/kumoSleeping/iridium/internal/hub"
 	"github.com/kumoSleeping/iridium/internal/push"
+	"github.com/kumoSleeping/iridium/internal/remote"
 	"github.com/kumoSleeping/iridium/internal/session"
 	"github.com/kumoSleeping/iridium/internal/store"
 	"github.com/kumoSleeping/iridium/internal/transcript"
@@ -68,6 +69,8 @@ type Server struct {
 	Folders  discover.Folders
 	// App is the web app on the TCP address, past the API; nil is the embedded build (webui).
 	App http.Handler
+	// Remote, if set, takes executors' connections at /api/exec (docs/exec.md).
+	Remote *remote.Hub
 
 	files *files.Service // routes_files.go
 
@@ -132,6 +135,7 @@ func (s *Server) Handler(local bool) http.Handler {
 	s.sessionRoutes(mux)
 	s.pushRoutes(mux)
 	s.pluginRoutes(mux)
+	mux.HandleFunc("GET /api/exec", s.execConnect)
 	s.extensionRoutes(mux)
 	s.discoverRoutes(mux)
 	s.fileRoutes(mux, local)
@@ -465,3 +469,18 @@ func fail(w http.ResponseWriter, status int, msg string) { reply(w, status, api.
 
 // Files is the files service (uploads, refs, paths), for the chat layer's attachments.
 func (s *Server) Files() *files.Service { return s.files }
+
+// execConnect takes an executor's WebSocket (docs/exec.md): a terminal with a TOKEN, as which the
+// machine is known.
+func (s *Server) execConnect(w http.ResponseWriter, r *http.Request) {
+	if s.Remote == nil {
+		fail(w, http.StatusNotFound, "no executors here")
+		return
+	}
+	c := callerOf(r)
+	if c.Kind != gate.KindChannel || c.Local || c.socket {
+		fail(w, http.StatusForbidden, "an executor connects with a TOKEN")
+		return
+	}
+	s.Remote.Serve(w, r, c.EndpointID, c.Name)
+}

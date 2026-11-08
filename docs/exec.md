@@ -1,0 +1,131 @@
+# 执行端
+
+另一台机器（Windows、Mac、Linux）不装 Iridium，只跑一个**执行端**：替这边启动 agent 进程、转发它的输入输出、读写文件。会话还是这边托管，网页、驱动、记录解析、卡片全部照旧。第一个实现是 dsh 插件（2026-11-08 定）。
+
+## 和节点的区别
+
+| | 节点（`plan.md`“节点”） | 执行端 |
+|---|---|---|
+| 对方装 | 完整的 `ir` | 实现本协议的任何程序 |
+| 会话归 | 各自托管，对等 | 这边托管 |
+| 双方说的 | `ir new/send/cp/files` | 进程、按行收发、偏移续传、退出码、文件 |
+| agent 协议由谁讲 | 对方的 Iridium | 这边现有的驱动 |
+
+执行端不懂会话、历史、审批，也不懂 agent 的协议。这边断开时，那边的回合照样跑完；断开期间不能发话、不能答审批。要离线也能用，装完整节点。
+
+## 镜像
+
+托管进程（`internal/hold`）只用文件：`in` 管道、追加写的 `out.log`、`exit`。执行端在它那边原样维护这几样，这边的托管目录里放一份**按字节一致的镜像**：
+
+- `out.log`：这边从镜像的大小开始要，执行端从那个偏移量推，只推整行。断线、这边重启都从镜像大小接着要，不丢不重。
+- 输入：这边照旧写 `in` 管道；读管道的是这边的转发，按 `in.log` 的偏移量做序号发过去，执行端按序号去重。
+- `exit`：执行端报了才写。
+- agent 的对话记录：也是追加写的文件，镜像在托管目录的 `remote/` 下，按大小和开头 4KB 的哈希核对，对不上（改写过、迁移过格式）就整份重取。
+
+所以会话这一层只换“谁启动托管进程”（`platform.Launcher`）和“记录在哪”，读写都还是本地文件。记录以那边的磁盘为准，镜像只是缓存。
+
+## 连接
+
+- 执行端主动连 `wss://<Iridium>/api/exec`，头 `Authorization: Bearer <TOKEN>`。TOKEN 在终端管理里签，终端类型“节点”，名字就是机器名（≤12 字符）。不带 Claude：Claude 只在本人的登录下跑。
+- 一个 TOKEN 同时只有一条连接，新连上的顶掉旧的。
+- 断了执行端自己重连，退避 1 秒起、最多 30 秒。断开期间它启动的进程照跑，输出照写盘。
+- 帧是 JSON 文本，一帧一个：
+  - 请求 `{"id":7,"method":"hold.start","params":{…}}`，两边都能发。
+  - 回答 `{"id":7,"result":{…}}` 或 `{"id":7,"error":{"code":"denied","message":"…"}}`。
+  - 事件 `{"event":"out","params":{…}}`，只由执行端发。
+- 错误码：`not_found`、`exists`、`denied`、`bad_request`、`unsupported`、`failed`。
+
+## 握手（必需）
+
+执行端连上先发 `hello`（请求），这边回 `{"name": "<终端名>"}`：
+
+```json
+{"protocol": 1, "program": "dsh-iridium 0.1.0",
+ "os": "windows", "arch": "x64", "home": "C:\\Users\\kumo", "sep": "\\",
+ "env": ["PATH=…", "…"],
+ "agents": [{"agent": "dsh", "argv": ["C:\\…\\node.exe", "C:\\…\\dsh\\lib\\bin.js"],
+             "scope": "C:\\…\\dsh\\node_modules\\@deepseek-ai", "version": "0.2.2-rc.1",
+             "home": "C:\\Users\\kumo\\.dsh"}],
+ "holds": [{"hold": "h_…", "outSize": 48211, "exit": null}]}
+```
+
+- `os`：`windows`、`darwin`、`linux`。`sep`：路径分隔符。
+- `env`：执行端自己的环境。这边以它为底，按驱动的规则增删，启动时整份发过去。
+- `scratch`：执行端自己的一个目录，这边往里写启动用的文件（dsh 的 `--patch`）。
+- `agents`：装了哪些 agent、怎么启动（`argv` 是程序部分，驱动接着加参数）。dsh 直接给 `node` 和 `bin.js`，不经 `.cmd`；`scope` 是它的 `@deepseek-ai` 包目录（这边从里面读预设），`home` 是 `DSH_HOME`。dsh 低于 0.2.2 不给开。
+- `holds`：它手上全部进程（`{hold, outSize, inSeq, exit}`，`inSeq` 是写进去的最后一行的序号）。这边据此对账：哪些还在跑、输入从哪儿续；这边起过、它却没有的，算进程没了。
+
+## 进程（必需）
+
+`hold` 是这边定的 ID（会话 ID 加进程序号），执行端照用。
+
+| 请求 | 参数 → 回答 | 要求 |
+|---|---|---|
+| `hold.start` | `{hold, argv, env, cwd, stopGraceMs}` → `{pid}` | 幂等：已有就回现状。程序起不来报 `exit`，码 127 |
+| `hold.write` | `{hold, seq, line}` → `{outSize}` | 写一行进 stdin（补 `\n`）。`seq` 不大于已写的就跳过 |
+| `hold.tail` | `{hold, from}` → `{}` | 从字节偏移 `from` 推 `out` 事件，跟着往下推；进程结束且推完后推 `exit`。再发一次换起点（旧的停） |
+| `hold.stop` | `{hold}` → `{}` | 关 stdin，等 `stopGraceMs`，还在就结束整棵进程树 |
+| `hold.kill` | `{hold}` → `{}` | 立刻结束整棵进程树 |
+| `hold.forget` | `{hold}` → `{}` | 删它的文件。这边拿到 `exit` 并写进镜像之后才发 |
+
+| 事件 | 参数 |
+|---|---|
+| `out` | `{hold, off, data}`：`off` 是 `data` 第一个字节在 `out.log` 的偏移，`data` 是若干整行（UTF-8 文本） |
+| `exit` | `{hold, from, code, signal, errTail}`：同 `hold.Exit`，`errTail` 是 stderr 的最后约 2KB（显示错误用）；进程被执行端自己的退出带走时 `from` 是 `holder` |
+
+- stdout 原样追加到它那边的 `out.log`，stderr 另存（这边要时用 `fs.read` 读）。
+- 执行端自己退出时，它启动的进程跟着结束（管道断了）。这边当作崩溃，照“崩溃续跑”接上。
+
+## 文件（必需）
+
+路径都是那边的绝对路径，这边当不透明字符串，只用握手给的 `sep` 拼接。
+
+| 请求 | 参数 → 回答 |
+|---|---|
+| `fs.stat` | `{path}` → `{size, mtime, type, head?}`；`type`：`file`、`dir`、`link`、`other`；带 `"head": 4096` 时回开头那么多字节的 sha256 |
+| `fs.list` | `{path}` → `{entries: [{name, size, mtime, type}]}`，只列一层 |
+| `fs.read` | `{path, offset, length}` → `{data}`，`data` 是 base64，一次最多 4MB |
+| `fs.write` | `{path, data, sha256, replace}` → `{}`；先写临时文件，核对后原子改名；`replace` 为假且已有就 `exists` |
+| `fs.mkdir` | `{path}` → `{}`，连父目录一起建 |
+
+- 允许的目录由执行端自己配，先解析符号链接再比；它自己的配置、TOKEN 和 `~/.ssh` 一律 `denied`。
+- 大文件分块，同 `plan.md`“文件传输”。
+
+## 可选
+
+- `fs.watch {path}` 和事件 `changed {path, size}`：文件变了就报，合并着报。没有它这边定时 `fs.stat`。
+- 余额：这边要读那边 DeepSeek 的密钥才能查；不做就不显示那台机器的余额。
+
+## 平台差异
+
+| | Windows | Mac | Linux |
+|---|---|---|---|
+| 整棵进程树 | Job Object（或 `taskkill /T /F`） | 新进程组，`kill(-pgid)`，先 TERM 后 KILL | 同 Mac |
+| 常驻 | 跟着 `dsh web` 进程；开机自启另说 | 同左；或 launchd 用户代理 | 同左；或 systemd 用户单元 |
+| 换行 | 只认 `\n`，行尾的 `\r` 去掉 | `\n` | `\n` |
+| dsh 记录的目录名 | `C:\a\b` → `C-a-b`（`/ \ :` 换成 `-`） | `/Users/a` → `Users-a` | 同 Mac |
+| 编码 | UTF-8，不带 BOM | UTF-8 | UTF-8 |
+
+这边的路径处理不能用 `filepath`（它只懂本机）：远端路径一律按握手的 `sep` 处理。
+
+## dsh 插件
+
+一个 cordis 插件，装进那台机器的 dsh（`dsh plugin --profile web add <包>`），跟着 `dsh web` 常驻：连这边、实现上面的必需部分。它不碰 dsh 自己的会话，每个会话照旧是一个 `dsh --profile sdk --patch …` 子进程（预设和系统提示按进程，`internal/agent/dsh/preset.go`）。
+
+实测（2026-11-08）：Mac（arm64，Node 25）上 dsh 0.2.2-rc.1 的 `--profile sdk` 握手、开会话、`shutdown` 都和 Linux 一样，记录写在 `sessions/--<目录>--/<会话>/`。0.1.0 没有 sdk profile，执行端握手报的版本低于 0.2.2 时不给开 dsh。Windows 待测。
+
+## 这边要做的
+
+已做（2026-11-08）：1、3、4、5 里的端点和“已断开”标记、7。代码：`internal/remote`（连接、转发、镜像）、`internal/remote/wire`（协议，各系统都能编）、`internal/remote/executor`（Go 写的参考执行端，测试用；dsh 插件照它做）、`internal/session/remote.go`。分组按 `机器ID:路径`（`/` 分隔）。还没做：网页、上传到那边、`pathsafe`。
+
+1. `platform.Launcher` 加远端实现：`Start` 读托管目录的 `spec.json` 发 `hold.start`，起转发（管道 → `hold.write`，`out` → 镜像 `out.log`，`exit` → 镜像 `exit`）；`State` 看执行端报的 `holds`。会话按所在机器选用哪个。
+2. 会话的 `meta` 记机器；目录是 `机器:路径`。分组、显示、`pathsafe` 认这种写法。
+3. dsh 驱动的 `Spawn` 不再直接读本机：程序、包、家目录取握手的 `agents`；预设的 yml 用 `fs.read` 取到本地缓存再生成 patch，patch 和系统提示用 `fs.write` 写到那边。
+4. 记录：找文件用 `fs.list`，读用镜像。
+5. `/api/exec` 端点、TOKEN、在线状态；会话断开时状态灯显示“已断开”，不当作停止。
+6. 网页：新会话选机器；列表标机器名。
+7. 一个 Go 写的参考执行端（`internal/remote/executor`），测试用；回放录制的假 dsh 在 `internal/testagent/dsh.go`。
+
+## 暂不做
+
+发现那边在终端里自己开的会话（扫进程）；那边的 Codex、pi、Claude；目录传输。

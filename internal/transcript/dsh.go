@@ -2,6 +2,7 @@ package transcript
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf16"
 
 	"github.com/kumoSleeping/iridium/internal/api"
 )
@@ -294,18 +296,67 @@ func FindDsh(home, id string) (string, error) {
 	best, bestN := "", -1
 	for _, dir := range dirs {
 		ents, _ := os.ReadDir(dir)
+		var names []string
 		for _, e := range ents {
-			m := dshName.FindStringSubmatch(e.Name())
-			if m == nil || !e.Type().IsRegular() {
-				continue
+			if e.Type().IsRegular() {
+				names = append(names, e.Name())
 			}
-			n, _ := strconv.Atoi(m[2])
-			if n > bestN {
-				best, bestN = filepath.Join(dir, e.Name()), n
-			}
+		}
+		if name, n := DshBest(names); n > bestN {
+			best, bestN = filepath.Join(dir, name), n
 		}
 	}
 	return best, nil
+}
+
+// DshBest is the session file among names (a session's directory) of the highest format
+// version, and that version; "", -1 if there is none.
+func DshBest(names []string) (string, int) {
+	best, bestN := "", -1
+	for _, name := range names {
+		m := dshName.FindStringSubmatch(name)
+		if m == nil {
+			continue
+		}
+		n, _ := strconv.Atoi(m[2])
+		if n > bestN {
+			best, bestN = name, n
+		}
+	}
+	return best, bestN
+}
+
+// DshProjectDir is the directory dsh keeps the sessions of cwd in, under its sessions/
+// (projectKey in session-persistence-jsonl, dsh 0.2.2): "--<key>--", the key cwd's UTF-16 code
+// units with / \\ and : made - (a run of them one -), letters, digits and ._- as they are, any
+// other ~XXXX; no - in front, "root" if nothing is left, at most 251. "_no-cwd" without a cwd.
+// Keys can meet: the session's header says its cwd.
+func DshProjectDir(cwd string) string {
+	if cwd == "" {
+		return "_no-cwd"
+	}
+	var b strings.Builder
+	run := false
+	for _, c := range utf16.Encode([]rune(cwd)) {
+		switch {
+		case c == '/' || c == '\\' || c == ':':
+			if !run {
+				b.WriteByte('-')
+			}
+			run = true
+			continue
+		case c < 0x80 && (c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '.' || c == '_' || c == '-'):
+			b.WriteByte(byte(c))
+		default:
+			fmt.Fprintf(&b, "~%04X", c)
+		}
+		run = false
+	}
+	key := cmp.Or(strings.TrimLeft(b.String(), "-"), "root")
+	if len(key) > 251 {
+		key = key[:251]
+	}
+	return "--" + key + "--"
 }
 
 // dshID: dsh takes any string as a session id; one that is a single path element, of letters,

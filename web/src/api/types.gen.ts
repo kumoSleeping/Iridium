@@ -129,6 +129,12 @@ export interface Session {
    */
   bots?: string[];
   /**
+   * Machine: the executor it runs at (its terminal ID; docs/exec.md), empty for this machine.
+   * Offline: that executor is not connected now.
+   */
+  machine?: string;
+  offline?: boolean;
+  /**
    * Viewers: the terminals (panels) with this session open now, a page's stream on it.
    */
   viewers?: string[];
@@ -447,6 +453,11 @@ export interface NewSession {
    * CODEX_THREAD_ID…): the new session goes into its workspace.
    */
   caller?: string;
+  /**
+   * Machine: the executor to run it at (a terminal ID or name; docs/exec.md); empty: here. Cwd
+   * is then a path there.
+   */
+  machine?: string;
 }
 export interface NewSessionReply {
   id: string;

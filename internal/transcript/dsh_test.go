@@ -271,3 +271,20 @@ func TestDshTitleTag(t *testing.T) {
 		t.Error("a title of a tag alone")
 	}
 }
+
+// dsh 0.2.2's projectKey, by its source (session-persistence-jsonl), and as seen on a Mac.
+func TestDshProjectDir(t *testing.T) {
+	for cwd, want := range map[string]string{
+		"/tmp/irexec.60QK/cwd":         "--tmp-irexec.60QK-cwd--",
+		`C:\Users\kumo\a--b`:           "--C-Users-kumo-a--b--",
+		"/home/x/我的 项目":                "--home-x-~6211~7684~0020~9879~76EE--",
+		"/":                            "--root--",
+		"":                             "_no-cwd",
+		"/a/~b//c":                     "--a-~007Eb-c--",
+		"/" + strings.Repeat("a", 300): "--" + strings.Repeat("a", 251) + "--",
+	} {
+		if got := DshProjectDir(cwd); got != want {
+			t.Errorf("DshProjectDir(%q) = %q, want %q", cwd, got, want)
+		}
+	}
+}

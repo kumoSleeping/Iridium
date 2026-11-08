@@ -27,6 +27,15 @@ type Where struct {
 	ClaudeHome string   // Claude's directory
 }
 
+// RemoteWhere says where to look for a session's transcript at an executor (docs/exec.md).
+type RemoteWhere struct {
+	ID, Cwd string
+	Home    string // the agent's home there (dsh: DSH_HOME)
+	Join    func(elem ...string) string
+	// List names the files in dir there; a dir not there has none.
+	List func(dir string) ([]string, error)
+}
+
 // Info is one agent's row.
 type Info struct {
 	Agent api.Agent
@@ -59,6 +68,9 @@ type Info struct {
 	// Find is the transcript of the session, "" if there is none yet.
 	Find   func(w Where) (string, error)
 	Format transcript.Format
+	// FindRemote is Find at an executor: the transcript's path there. nil: the agent does not run
+	// at one.
+	FindRemote func(w RemoteWhere) (string, error)
 }
 
 var all = []Info{
@@ -110,6 +122,17 @@ var all = []Info{
 		},
 		Find:   func(w Where) (string, error) { return transcript.FindDsh(transcript.DshHome(w.Env), w.ID) },
 		Format: transcript.Dsh,
+		FindRemote: func(w RemoteWhere) (string, error) {
+			dir := w.Join(w.Home, "sessions", transcript.DshProjectDir(w.Cwd), w.ID)
+			names, err := w.List(dir)
+			if err != nil {
+				return "", err
+			}
+			if best, _ := transcript.DshBest(names); best != "" {
+				return w.Join(dir, best), nil
+			}
+			return "", nil
+		},
 	},
 }
 
