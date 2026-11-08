@@ -269,7 +269,17 @@ func waitFor(t *testing.T, what string, ok func() bool) {
 func start(t *testing.T) (*Bridge, *fakeQQ, *fakeIridium) {
 	t.Helper()
 	q, ir := newFakeQQ(t), newFakeIridium(t)
-	home := t.TempDir()
+	// Not t.TempDir: a send still in flight as the bridge stops may write its outbox here a
+	// moment after; removed (retried) once the bridge is stopped (this cleanup runs last).
+	home, err := os.MkdirTemp("", "qqbridge-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		for i := 0; i < 50 && os.RemoveAll(home) != nil; i++ {
+			time.Sleep(20 * time.Millisecond)
+		}
+	})
 	if err := WriteFile(home, TokenFile, []byte("TOKEN\n")); err != nil {
 		t.Fatal(err)
 	}
