@@ -74,6 +74,9 @@ export const en: Dict = {
   "chat.subagentParent": "Open its parent",
   "row.subagent": "Subagent",
   "chat.crashed": "Its last process ended badly",
+  "chat.crashSignal": "killed ({signal})",
+  "chat.crashCode": "exit {code}",
+  "chat.crashDetails": "Details",
 
   "msg.fromPanel": "From {name}",
   "msg.viaChannel": "Sent by {name}",

@@ -73,7 +73,10 @@ export const zh = {
   "chat.subagent": "子代理，只读 ·",
   "chat.subagentParent": "回到父会话",
   "row.subagent": "子代理",
-  "chat.crashed": "上次进程出错退出",
+  "chat.crashed": "上次进程异常退出",
+  "chat.crashSignal": "被强制结束（{signal}）",
+  "chat.crashCode": "退出码 {code}",
+  "chat.crashDetails": "详情",
 
   "msg.fromPanel": "来自 {name}",
   "msg.viaChannel": "{name} 发来",

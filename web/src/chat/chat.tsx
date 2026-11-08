@@ -30,6 +30,7 @@ import { Draft } from "./markdown";
 import { ContextRing, ModelKey, modelView, PresetKey, QuotaBars, useMode } from "./meters";
 import { Queue } from "./queue";
 import { ShellRuns } from "./shell";
+import { Crash } from "./crash";
 import { SESSION_DRAG, sourceOf, yours } from "./refs";
 import { Compaction, Pending, Running, Said } from "./said";
 import { Stick, toEnd } from "./stick";
@@ -244,11 +245,7 @@ export function ChatPage({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?:
               <Compaction since={compactSince.current} />
             </div>
           ) : log.loaded && (busy ? <Activity calls={log.drafts.filter((d) => d.tool)} running={shown.flatMap((b) => (b.kind === "running" ? [b.tool] : []))} cwd={cwd} quiet={s.status !== "waiting" && !log.drafts.some((d) => !d.whole && !d.tool)} grew={grew} /> : <div aria-hidden className="-mt-3 h-7 pointer-coarse:h-9" />)}
-          {s.status === "error" && s.error && (
-            <p className="m-0 text-center text-xs text-err" title={s.error}>
-              {t("chat.crashed")} · <span className="font-mono">{s.error.slice(0, 160)}</span>
-            </p>
-          )}
+          {s.status === "error" && s.error && <Crash error={s.error} />}
         </div>
       </Stick>
       <Bar s={s} onSheet={onSheet} onMe={onMe} />
