@@ -42,10 +42,11 @@ type Bridge struct {
 	HTTP       *http.Client // for QQ's attachment URLs
 	Logf       func(string, ...any)
 
-	inbound  chan inbound
-	sendMu   sync.Mutex // one message out at a time, in order
-	avatarMu sync.Mutex
-	menuMu   sync.Mutex
+	inbound   chan inbound
+	sendMu    sync.Mutex // one message out at a time, in order
+	avatarMu  sync.Mutex
+	avatarFor string // the TOKEN the avatar went up with in this run
+	menuMu    sync.Mutex
 
 	mu     sync.Mutex
 	state  State
@@ -729,7 +730,8 @@ func (b *Bridge) avatar(ctx context.Context) {
 	sum := sha256.Sum256(append(img, b.IR.Token()...))
 	mark := hex.EncodeToString(sum[:8])
 	b.mu.Lock()
-	done := b.state.Avatar == mark
+	// QQ's image differs a little from fetch to fetch too: once a run, unless the TOKEN changed.
+	done := b.state.Avatar == mark || b.avatarFor == b.IR.Token()
 	b.mu.Unlock()
 	if done {
 		return
@@ -739,7 +741,7 @@ func (b *Bridge) avatar(ctx context.Context) {
 		return
 	}
 	b.mu.Lock()
-	b.state.Avatar = mark
+	b.state.Avatar, b.avatarFor = mark, b.IR.Token()
 	b.mu.Unlock()
 	b.save()
 	b.logf("avatar: set")

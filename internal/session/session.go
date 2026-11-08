@@ -116,9 +116,6 @@ type Manager struct {
 
 	nmu sync.Mutex // a new session's name (name.go)
 
-	vmu     sync.Mutex
-	viewers map[string]map[string]int // session: terminal: its page streams on it now (View)
-
 	tune     atomic.Pointer[Tunables] // tune.go
 	annotate atomic.Pointer[Annotate] // carry.go
 }
@@ -468,14 +465,6 @@ func (m *Manager) List(ctx context.Context) ([]api.Session, error) {
 			out[i].Bots = bots[out[i].ID]
 		}
 	}
-	m.vmu.Lock()
-	for i := range out {
-		for t := range m.viewers[out[i].ID] {
-			out[i].Viewers = append(out[i].Viewers, t)
-		}
-		slices.Sort(out[i].Viewers)
-	}
-	m.vmu.Unlock()
 	slices.SortStableFunc(out, func(a, b api.Session) int {
 		if a.Pinned != b.Pinned {
 			if a.Pinned {
@@ -552,43 +541,6 @@ func (m *Manager) provide(key string) (any, bool) {
 		return c, true
 	}
 	return nil, false
-}
-
-// View notes that terminal has session open (a page's stream on it), till the func returned is
-// called; the list says who is in each session (Session.Viewers), sent again as one comes or goes.
-func (m *Manager) View(session, terminal string) func() {
-	m.vmu.Lock()
-	if m.viewers == nil {
-		m.viewers = map[string]map[string]int{}
-	}
-	if m.viewers[session] == nil {
-		m.viewers[session] = map[string]int{}
-	}
-	m.viewers[session][terminal]++
-	first := m.viewers[session][terminal] == 1
-	m.vmu.Unlock()
-	if first {
-		m.publishList()
-	}
-	var once sync.Once
-	return func() {
-		once.Do(func() {
-			m.vmu.Lock()
-			v := m.viewers[session]
-			v[terminal]--
-			last := v[terminal] <= 0
-			if last {
-				delete(v, terminal)
-				if len(v) == 0 {
-					delete(m.viewers, session)
-				}
-			}
-			m.vmu.Unlock()
-			if last {
-				m.publishList()
-			}
-		})
-	}
 }
 
 // PublishList sends every stream the list again (a chat moved to another session).

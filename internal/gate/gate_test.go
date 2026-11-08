@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -42,6 +43,7 @@ type harness struct {
 	cookie  string // the browser's session cookie value
 	secrets []string
 	revoked []string
+	shown   atomic.Int32 // OnTerminals calls
 	joined  []Joined
 }
 
@@ -75,6 +77,7 @@ func (h *harness) open(origin string) {
 		Now:          h.clock.Now,
 		OnRevoke:     func(id string) { h.revoked = append(h.revoked, id) },
 		OnJoin:       func(j Joined) { h.joined = append(h.joined, j) },
+		OnTerminals:  func() { h.shown.Add(1) },
 	})
 	if err != nil {
 		h.t.Fatal(err)
@@ -867,4 +870,29 @@ func TestOriginConfig(t *testing.T) {
 		}
 		g.Close()
 	}
+}
+
+// OnTerminals: a terminal made, renamed or revoked tells the pages; its use alone does not.
+func TestOnTerminals(t *testing.T) {
+	h := newHarness(t, "")
+	wait := func(n int32) {
+		t.Helper()
+		for deadline := time.Now().Add(2 * time.Second); h.shown.Load() != n; time.Sleep(5 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatalf("OnTerminals %d times, want %d", h.shown.Load(), n)
+			}
+		}
+	}
+	if _, _, err := h.g.CreateToken("qq"); err != nil {
+		t.Fatal(err)
+	}
+	wait(1)
+	if _, err := h.g.UpdateProfile("qq", Profile{Name: ptr("QQ")}); err != nil {
+		t.Fatal(err)
+	}
+	wait(2)
+	if err := h.g.Revoke("QQ"); err != nil {
+		t.Fatal(err)
+	}
+	wait(3)
 }

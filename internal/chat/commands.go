@@ -33,6 +33,7 @@ func init() {
 		"new":     {"开新会话", cmdNew},
 		"clear":   {"清空对话：同一处开新会话，旧的归档", cmdClear},
 		"use":     {"换会话", cmdUse},
+		"leave":   {"离开当前会话", cmdLeave},
 		"history": {"最近几轮对话", cmdHistory},
 		"ls":      {"列出会话", cmdLs},
 		"stop":    {"停掉当前回合", cmdStop},
@@ -71,7 +72,7 @@ func cmdClear(s *Service, ctx context.Context, c Caller, p *store.ChatPointer, a
 }
 
 // Order is the commands' order in a menu.
-var Order = []string{"new", "clear", "use", "ls", "history", "stop", "model", "mode", "status", "usage", "context"}
+var Order = []string{"new", "clear", "use", "leave", "ls", "history", "stop", "model", "mode", "status", "usage", "context"}
 
 // Commands is what the chat can send: Iridium's, then its session's agent's own.
 func (s *Service) Commands(c Caller, chat string) ([]api.ChatCommand, error) {
@@ -153,6 +154,9 @@ func cmdUse(s *Service, ctx context.Context, c Caller, p *store.ChatPointer, arg
 	}
 	if args == "" {
 		return s.folderCard(ctx, c, p, false)
+	}
+	if args == leaveOption {
+		return cmdLeave(s, ctx, c, p, "")
 	}
 	if r, ok, err := s.folderStep(ctx, c, p, args); ok {
 		return r, err

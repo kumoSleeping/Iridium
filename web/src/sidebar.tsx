@@ -626,7 +626,7 @@ const SessionRow = memo(function SessionRow({ s, where, depth, flip, selected, o
       <span className="grid justify-self-end">{lastBusy.current && <Lamp status={lastBusy.current} />}</span>
     </span>
   );
-  const bots = s.bots?.length || s.viewers?.length ? <Here bots={s.bots ?? []} viewers={s.viewers ?? []} /> : null;
+  const bots = s.bots?.length ? <Here bots={s.bots} /> : null;
   const end = slot || mark || lamp || bots ? (
     <span className="flex items-center gap-1.5">
       {bots}
@@ -679,21 +679,17 @@ const SessionRow = memo(function SessionRow({ s, where, depth, flip, selected, o
   );
 });
 
-/** Who is in this session now, between the name and the time (the user, 2026-11-08): the bots whose
- *  chat points here (a bot on the corner), then the other panels that have it open; as big as the
- *  agent's logo, three at most and +N for the rest. Not this page's own terminal. */
-function Here({ bots, viewers }: { bots: string[]; viewers: string[] }) {
+/** The bots whose chat is in this session now, between the name and the time (the user,
+ *  2026-11-08): each one's avatar as big as the agent's logo, a bot on its corner; three at most and
+ *  +N for the rest. Panels are not marked. */
+function Here({ bots }: { bots: string[] }) {
   const terms = useTerminalList();
-  const me = useMe().data?.id;
-  const ids = [...bots, ...viewers.filter((id) => id !== me && !bots.includes(id))];
-  if (!ids.length) return null;
-  const who = ids.map((id) => terms.find((x) => x.id === id) ?? { id, name: "", avatar: undefined, kind: bots.includes(id) ? "channel" : "panel" });
-  const shown = who.slice(0, 3);
+  const who = bots.map((id) => terms.find((x) => x.id === id) ?? { id, name: "", avatar: undefined });
   return (
-    <Tip label={who.map((b) => b.name || (bots.includes(b.id) ? "Bot" : "?")).join("、")} side="bottom">
+    <Tip label={who.map((b) => b.name || "Bot").join("、")} side="bottom">
       <span className="flex shrink-0 items-center gap-1.5">
-        {shown.map((b) => (
-          <Avatar key={b.id} src={b.avatar} name={b.name || "?"} size={16} badge={bots.includes(b.id) ? Bot : undefined} badgeSize={10} />
+        {who.slice(0, 3).map((b) => (
+          <Avatar key={b.id} src={b.avatar} name={b.name || "Bot"} size={16} badge={Bot} badgeSize={10} />
         ))}
         {who.length > 3 && <span className="text-xs text-ink-3 tabular-nums">+{who.length - 3}</span>}
       </span>

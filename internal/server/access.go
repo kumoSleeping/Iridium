@@ -114,8 +114,31 @@ func (s *Server) newGate(origin string) (*gate.Gate, error) {
 		StateDir:     s.cfg.StatePath(),
 		Hosts:        s.cfg.Hosts,
 		OnJoin:       s.joined,
+		OnRevoke:     s.revoked,
+		OnTerminals:  s.terminalsChanged,
 		Logger:       slog.New(slog.NewTextHandler(logWriter{s.logf}, nil)),
 	})
+}
+
+// terminalsChanged tells the pages the terminals changed (a Bot's avatar came, a panel renamed):
+// they fetch GET /api/terminals again. The key "terminals" carries a count, nothing of them.
+func (s *Server) terminalsChanged() {
+	s.hub.Set("terminals", s.terminalsSeq.Add(1))
+}
+
+// revoked forgets a revoked terminal's chats (a Bot's): where they pointed, so the list marks no
+// session with it, what they last did, their events.
+func (s *Server) revoked(id string) {
+	if s.st == nil {
+		return
+	}
+	if err := s.st.ForgetChats(id); err != nil {
+		s.logf("server: forgetting %s's chats: %v", id, err)
+		return
+	}
+	if s.m != nil {
+		s.m.PublishList()
+	}
 }
 
 type logWriter struct{ logf func(string, ...any) }

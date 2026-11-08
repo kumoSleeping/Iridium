@@ -13,7 +13,7 @@ import type { Rules, Terminal } from "./api/types.gen";
 import { CardFrame, CardHead, MainKey, SecondKey } from "./card";
 import { ConfirmCard, saysOwner } from "./confirms";
 import { useMe, useTerminals } from "./data";
-import { ExtensionPage, ExtensionRows, OfficialTag } from "./extensions";
+import { ExtensionPage, OfficialTag } from "./extensions";
 import { t, useLang } from "./i18n";
 import { LocalMark } from "./me";
 import { SecretHere } from "./secret";
@@ -68,7 +68,6 @@ export function TerminalsPage({ onBack }: { onBack: () => void }) {
               <TerminalRow key={x.id} x={x} open={open === x.id} toggle={() => setOpen(open === x.id ? null : x.id)} />
             ))}
           </section>
-          <ExtensionRows openExt={setExt} />
           {invites.length > 0 && (
             <Group title={t("term.invites")}>
               {invites.map((i) => (

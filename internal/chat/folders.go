@@ -230,6 +230,10 @@ func (s *Service) folderCard(ctx context.Context, c Caller, p *store.ChatPointer
 		}
 		card.Options = append(card.Options, o)
 	}
+	// In a session: leaving it is the list's last (the user, 2026-11-08).
+	if _, in := s.pointed(c, p); in && !forNew {
+		card.Options = append(card.Options, api.CardOption{ID: leaveOption, Text: "离开当前会话"})
+	}
 	if len(card.Options) == 0 {
 		dir := cmp.Or(p.Cwd, s.o.ChatDir)
 		if dir == "" {
@@ -362,4 +366,20 @@ func agentIDs() []api.Agent {
 		out = append(out, a.Agent)
 	}
 	return out
+}
+
+// leaveOption is the folder card's 离开当前会话, a /use argument.
+const leaveOption = ":leave"
+
+// cmdLeave points the chat at no session (the user, 2026-11-08): the web marks none with its bot,
+// and what the chat says next goes nowhere till a session is chosen.
+func cmdLeave(s *Service, ctx context.Context, c Caller, p *store.ChatPointer, args string) (api.ChatInputReply, error) {
+	if p.Session == "" {
+		return reply("", "当前不在任何会话。")
+	}
+	p.Plugin, p.Session = c.ID, ""
+	if err := s.setPointer(*p); err != nil {
+		return api.ChatInputReply{}, err
+	}
+	return reply("", "已离开会话。")
 }

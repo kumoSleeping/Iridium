@@ -134,10 +134,6 @@ export interface Session {
    */
   machine?: string;
   offline?: boolean;
-  /**
-   * Viewers: the terminals (panels) with this session open now, a page's stream on it.
-   */
-  viewers?: string[];
 }
 /**
  * LastSaid is the last thing said in a session, on one line, at most 200 characters.

@@ -194,6 +194,17 @@ func TestExtensions(t *testing.T) {
 	if !found {
 		t.Fatalf("no QQ terminal with Claude: %+v", ts.Terminals)
 	}
+	// Removed in the list as any Bot: its service goes with it (the fake's remove clears its home).
+	l.want(200, "socket", "DELETE", "/api/terminals/QQ", nil, nil)
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+		if _, err := os.Stat(filepath.Join(dir, "home")); os.IsNotExist(err) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("its service stayed")
+		}
+	}
+	os.MkdirAll(filepath.Join(dir, "home"), 0o700)
 	x = api.Extension{}
 	l.want(200, "socket", "POST", "/api/extensions/qq/stop", nil, &x)
 	if x.Status.Service != "" || x.Error != "" {
@@ -336,4 +347,31 @@ func TestBotLetter(t *testing.T) {
 	l.want(400, bot, "POST", "/api/bot", api.BotLetter{Text: "x", Caller: b.ID}, nil)
 	l.want(400, "socket", "POST", "/api/bot", api.BotLetter{Text: "x"}, nil)
 	l.want(404, "socket", "POST", "/api/bot", api.BotLetter{Text: "x", Caller: b.ID, To: "nobody"}, nil)
+	// 会话 offers to leave the one it is in; /leave: in none, the list marks none with the bot.
+	var use api.ChatInputReply
+	if l.want(200, bot, "POST", "/api/chat/qq:1/input", api.ChatInput{Text: "/use"}, &use); use.Card == nil || use.Card.Options[len(use.Card.Options)-1].Text != "离开当前会话" {
+		t.Fatalf("no leaving: %+v", use.Card)
+	}
+	var left api.CardReply
+	l.want(200, bot, "POST", "/api/answer", api.CardAnswer{Card: use.Card.ID, Option: use.Card.Options[len(use.Card.Options)-1].ID}, &left)
+	var list []api.Session
+	if l.want(200, "web", "GET", "/api/sessions", nil, &list); left.Reply == nil || left.Reply.Text != "已离开会话。" || slices.ContainsFunc(list, func(x api.Session) bool { return len(x.Bots) > 0 }) {
+		t.Fatalf("left: %+v %+v", left.Reply, list)
+	}
+	var again api.ChatInputReply
+	if l.want(200, bot, "POST", "/api/chat/qq:1/input", api.ChatInput{Text: "/leave"}, &again); again.Reply == nil || again.Reply.Text != "当前不在任何会话。" {
+		t.Fatalf("again: %+v", again.Reply)
+	}
+	l.want(200, bot, "POST", "/api/chat/qq:1/input", api.ChatInput{Text: "/use " + b.ID}, nil)
+
+	// The bot removed: no session is marked with it any more.
+	list = nil
+	if l.want(200, "web", "GET", "/api/sessions", nil, &list); !slices.ContainsFunc(list, func(x api.Session) bool { return len(x.Bots) > 0 }) {
+		t.Fatalf("no bot marked: %+v", list)
+	}
+	l.want(200, "socket", "DELETE", "/api/terminals/"+botID, nil, nil)
+	list = nil
+	if l.want(200, "web", "GET", "/api/sessions", nil, &list); slices.ContainsFunc(list, func(x api.Session) bool { return len(x.Bots) > 0 }) {
+		t.Fatalf("a removed bot still marked: %+v", list)
+	}
 }

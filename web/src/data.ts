@@ -2,7 +2,8 @@
 // other terminals, the home folder. Each a query; a route an older daemon lacks leaves its part
 // empty rather than failing the page. The workspaces and the update are carried on the stream,
 // asked for once at first.
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect } from "react";
 import { api, missing } from "./api/client";
 import type { AgentInfo, LastSaid, Me, Session, Settings, Terminal, UpdateState, Workspace } from "./api/types.gen";
 import { sourceOf } from "./chat/refs";
@@ -60,11 +61,24 @@ export const useMe = () =>
     },
   });
 
+/** The last count of terminal changes acted on (useTerminals). */
+let terminalsSeen: number | undefined;
+
 /** The interactive terminals and the unused invites (GET /api/terminals): what a message's source
  *  shows (avatar, kind) and the settings' 终端 page. Only for a terminal that manages. */
 export function useTerminals() {
   const me = useMe().data;
   const manages = !!me && (me.local || me.kind === "panel");
+  // The stream's count of terminal changes (a Bot's avatar came, one renamed): each new one fetches
+  // them again (the user, 2026-11-08: a Bot's avatar did not show till a reload).
+  const changed = useCarried<number>("terminals");
+  const qc = useQueryClient();
+  useEffect(() => {
+    if (changed === undefined || changed === terminalsSeen) return;
+    const first = terminalsSeen === undefined;
+    terminalsSeen = changed; // once for all the hook's users
+    if (!first) void qc.invalidateQueries({ queryKey: ["terminals"] });
+  }, [changed, qc]);
   return useQuery({ queryKey: ["terminals"], queryFn: orNone(api.terminals), staleTime: 60_000, enabled: manages });
 }
 export const useTerminalList = (): Terminal[] => useTerminals().data?.terminals ?? [];

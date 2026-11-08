@@ -472,3 +472,24 @@ func (s *Server) localURL() string {
 	}
 	return "http://" + net.JoinHostPort(host, port)
 }
+
+// extDetach: a Bot terminal removed (the list's own remove, ir revoke) that an official
+// extension runs as: the extension goes with it, its service stopped and its home cleared; its
+// binary stays (the user, 2026-11-08: a Bot is a Bot, whoever made it).
+func (s *Server) extDetach(name string) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	for _, e := range officialExtensions {
+		if _, err := os.Stat(s.extBin(e)); err != nil {
+			continue
+		}
+		if es, err := s.extStatus(ctx, e); err != nil || es.Name != name {
+			continue
+		}
+		s.setBusy(e, "remove")
+		if err := s.extRun(ctx, e, "remove"); err != nil {
+			s.logf("server: %s: %v", e.bin, err)
+		}
+		s.setBusy(e, "")
+	}
+}

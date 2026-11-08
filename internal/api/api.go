@@ -106,8 +106,6 @@ type Session struct {
 	// Offline: that executor is not connected now.
 	Machine string `json:"machine,omitempty"`
 	Offline bool   `json:"offline,omitempty"`
-	// Viewers: the terminals (panels) with this session open now, a page's stream on it.
-	Viewers []string `json:"viewers,omitempty"`
 }
 
 // LastSaid is the last thing said in a session, on one line, at most 200 characters.

@@ -16,7 +16,6 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -43,11 +42,13 @@ import (
 const TerminalLocal = gate.LocalName
 
 type Server struct {
-	cfg  config.Config
-	m    *session.Manager
-	hub  *hub.Hub
-	st   *store.Store
-	logf func(string, ...any)
+	cfg config.Config
+	m   *session.Manager
+	hub *hub.Hub
+
+	terminalsSeq atomic.Int64 // the "terminals" state's count (terminalsChanged)
+	st           *store.Store
+	logf         func(string, ...any)
 	// ConfigPath is where PUT /api/public saves public.origin; "" saves it nowhere.
 	ConfigPath string
 	// Updater, if set, serves /api/update and carries the state "update".
@@ -97,6 +98,7 @@ func New(cfg config.Config, m *session.Manager, h *hub.Hub, logf func(string, ..
 	}
 	s.g.Store(g)
 	h.Set("update", s.updateState())
+	h.Set("terminals", int64(0))
 	return s
 }
 
@@ -364,7 +366,7 @@ func (s *Server) release(w http.ResponseWriter, r *http.Request) {
 	s.done(w, s.m.Release(ctx, r.PathValue("id"), req.ToolUseID, s.fromOf(c, ""), req.Dismiss))
 }
 
-var stateKey = regexp.MustCompile(`^(list|quota|workspaces|colors|confirms|update|(session|context):[0-9a-zA-Z_-]{1,128})$`)
+var stateKey = regexp.MustCompile(`^(list|quota|workspaces|colors|confirms|update|terminals|(session|context):[0-9a-zA-Z_-]{1,128})$`)
 
 // events is the page's one event stream: ?sub=<key> for each state it wants (list, quota,
 // workspaces, colors, session:<id>, context:<id>, confirms, update). See package hub. A key it does
@@ -415,12 +417,6 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	_ = rc.Flush()
 	sub := s.hub.Subscribe(keys) // none it may carry: open all the same, pinging
 	defer sub.Close()
-	// A panel on a session: the list marks it there, for the other pages (the user, 2026-11-08).
-	for _, k := range keys {
-		if id, ok := strings.CutPrefix(k, "session:"); ok && c.EndpointID != "" {
-			defer s.m.View(id, c.EndpointID)()
-		}
-	}
 	_ = sub.Serve(r.Context(), w, func() { _ = rc.Flush() })
 }
 

@@ -217,3 +217,14 @@ func (s *Store) ChatsSeen() ([]ChatSeen, error) {
 	}
 	return out, rows.Err()
 }
+
+// ForgetChats drops a plugin's chat windows: their pointers, notes and events (its terminal is
+// revoked).
+func (s *Store) ForgetChats(plugin string) error {
+	for _, q := range []string{`DELETE FROM chat_pointers WHERE plugin = ?`, `DELETE FROM chat_seen WHERE plugin = ?`, `DELETE FROM outbox WHERE plugin = ?`} {
+		if _, err := s.db.Exec(q, plugin); err != nil {
+			return err
+		}
+	}
+	return nil
+}

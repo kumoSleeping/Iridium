@@ -150,7 +150,7 @@ func TestPluginChat(t *testing.T) {
 	p := newPluginRig(t)
 	const key = "/api/chat/qq:private:1"
 	var cmds []api.ChatCommand
-	if p.do("qq", "GET", key+"/commands", nil, &cmds); len(cmds) != 11 || cmds[0].Name != "new" || !cmds[0].Iridium {
+	if p.do("qq", "GET", key+"/commands", nil, &cmds); len(cmds) != 12 || cmds[0].Name != "new" || !cmds[0].Iridium {
 		t.Fatalf("commands: %+v", cmds)
 	}
 	if code := p.do("nobody", "GET", key+"/commands", nil, nil); code != http.StatusUnauthorized {
@@ -214,7 +214,7 @@ func TestPluginChat(t *testing.T) {
 	// /use: a folder, then its sessions (and 新会话); picking one moves the pointer.
 	var use api.ChatInputReply
 	p.do("qq", "POST", key+"/input", api.ChatInput{Text: "/use"}, &use)
-	if use.Card == nil || use.Card.Kind != "pick" || len(use.Card.Options) != 1 || use.Card.Options[0].ID != "g:w0" {
+	if use.Card == nil || use.Card.Kind != "pick" || len(use.Card.Options) != 2 || use.Card.Options[0].ID != "g:w0" || use.Card.Options[1].Text != "离开当前会话" {
 		t.Fatalf("use: %+v", use.Card)
 	}
 	var inFolder api.CardReply

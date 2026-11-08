@@ -57,7 +57,7 @@
 
 不认识的键、不给这个终端的键（`confirms` 只给面板）不让整条流失败：开流时先为每个发一条 `state`，`{key, value: null, ignored: "unknown" | "forbidden"}`，其余照常。
 
-所有终端看到同样的 `list` 和会话。`Session.bots` 是聊天指着它的 Bot，`Session.viewers` 是现在开着 `session:<id>` 流的终端（页面开着这个会话）；有人进出就重发 `list`（2026-11-08）。终端被撤销、面板退出、`public.origin` 改了，流就断开。
+所有终端看到同样的 `list` 和会话。`Session.bots` 是聊天指着它的 Bot。终端被撤销、面板退出、`public.origin` 改了，流就断开。
 
 事件：
 
@@ -278,7 +278,7 @@ Bot 用自己的 TOKEN（交互终端由门认，见 `gate.md`）；下面的“
 - 以 `/` 开头：是 Iridium 命令就在这里做，回答直接在 `reply`（Markdown 和去掉标记的文字）或 `card` 里；不是就原样交给 agent（透传）。
 - 来源标记：`[Bot 名·sender]`，`sender` 去掉 `[ ] / : ·`，最多 24 字。
 
-命令：`/new [agent] [目录]`（目录可以是绝对路径、`~/…` 或相对指针的目录）、`/clear`（同 `send` 的 `/clear`，指针换到新会话）、`/use [ID 开头]`（不带参数给选组的卡片，见 `docs/qq.md`）、`/ls`、`/history [轮数]`（最近几轮，默认 5，最多 10，一条消息）、`/stop`、`/model [值]`、`/mode [模式]`（不带参数给卡片）、`/status`、`/usage`、`/context`。
+命令：`/new [agent] [目录]`（目录可以是绝对路径、`~/…` 或相对指针的目录）、`/clear`（同 `send` 的 `/clear`，指针换到新会话）、`/use [ID 开头]`（不带参数给选组的卡片，见 `docs/qq.md`；在会话里时卡片最后一项是“离开当前会话”）、`/leave`（指针不指任何会话，列表上不再标这个 Bot）、`/ls`、`/history [轮数]`（最近几轮，默认 5，最多 10，一条消息）、`/stop`、`/model [值]`、`/mode [模式]`（不带参数给卡片）、`/status`、`/usage`、`/context`。
 
 事件流：`GET /api/events`，带 `Last-Event-ID`（或 `?after=<序号>`）从它之后接着收；都不带就从现在起。每条 `id: <序号>`，`event:` 是类型，`data:` 是 `ChatEvent`（都带 `chat`、`session`）：
 
@@ -314,6 +314,8 @@ Iridium 不内置、但认得名字的 Bot（现在只有 QQ Bot `qq`，二进�
 | `DELETE /api/extensions/{id}/bind` | → `Extension` | 取消扫码 |
 | `POST /api/extensions/{id}/start`、`stop`、`pair` | → `Extension` | 服务开关；新配对码（在 `status.pair`） |
 | `DELETE /api/extensions/{id}` | → `Extension` | 停服务、删配置和二进制、撤销它的终端 |
+
+网页只用 `install`、`bind`、取消扫码；撤销（`DELETE /api/terminals/{id}`、`ir revoke`）一个官方 Bot 的终端时，Iridium 顺带让它 `remove`（停服务、删配置，二进制留着）。
 
 - Iridium 启动时（更新之后）把装了的扩展换成同版本，服务在跑就重启。
 

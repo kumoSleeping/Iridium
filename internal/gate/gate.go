@@ -73,6 +73,10 @@ type Config struct {
 	// OnJoin runs after a new panel registered, before its browser hears so.
 	OnJoin func(Joined)
 
+	// OnTerminals runs, on its own goroutine, after a terminal came, went, or changed what the
+	// pages show of it (name, kind, avatar); not on a last-seen time alone.
+	OnTerminals func()
+
 	Logger *slog.Logger     // default slog.Default()
 	Now    func() time.Time // default time.Now; for tests
 }
@@ -461,11 +465,19 @@ func (g *Gate) commitLocked(c Change) error {
 	if c.empty() {
 		return nil
 	}
+	shown := len(c.DeleteEndpoints) > 0
+	for _, e := range c.Endpoints {
+		old, ok := g.st.endpoints[e.ID]
+		shown = shown || !ok || old.Name != e.Name || old.Kind != e.Kind || old.AvatarVersion != e.AvatarVersion
+	}
 	if err := g.store.Apply(c); err != nil {
 		g.log.Error("gate: store", "err", err)
 		return err
 	}
 	g.st.apply(c)
+	if shown && g.cfg.OnTerminals != nil {
+		go g.cfg.OnTerminals()
+	}
 	return nil
 }
 

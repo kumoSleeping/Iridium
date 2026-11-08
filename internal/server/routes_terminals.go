@@ -109,7 +109,12 @@ func (s *Server) revoke(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusConflict, "本机 is built in")
 		return
 	}
-	s.gateDone(w, s.gate().Revoke(ref))
+	t, found := s.gate().Find(ref)
+	err := s.gate().Revoke(ref)
+	if err == nil && found {
+		go s.extDetach(t.Name)
+	}
+	s.gateDone(w, err)
 }
 
 // setDevice sets the device terminal ref (ID or name; "" the caller) runs on.
