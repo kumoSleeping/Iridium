@@ -18,19 +18,29 @@ const say = (m) => console.log(`dsh-remote-iridium: ${m}`)
 /** The dsh this process runs: its node and bin.js, its package's @deepseek-ai, its version. */
 export function findDsh() {
   const bin = fs.realpathSync(process.argv[1])
-  for (let dir = path.dirname(bin); ; dir = path.dirname(dir)) {
-    let pkg
+  const pkgAt = (dir) => {
     try {
-      pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'))
+      return JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'))
     } catch {}
-    if (pkg?.name === '@deepseek-ai/dsh') {
-      // Installed globally its packages are its own; in a project they may be hoisted beside it.
-      const scope = [path.join(dir, 'node_modules', '@deepseek-ai'), path.dirname(dir)].find((s) =>
-        fs.existsSync(path.join(s, 'dsh-web-app', 'presets')),
-      )
-      if (!scope) throw new Error(`no dsh-web-app presets in the dsh at ${dir}`)
-      return { argv: [process.execPath, bin], scope, version: pkg.version }
-    }
+  }
+  const asDsh = (dir, pkg) => {
+    // Installed globally its packages are its own; in a project they may be hoisted beside it.
+    const scope = [path.join(dir, 'node_modules', '@deepseek-ai'), path.dirname(dir)].find((s) =>
+      fs.existsSync(path.join(s, 'dsh-web-app', 'presets')),
+    )
+    if (!scope) throw new Error(`no dsh-web-app presets in the dsh at ${dir}`)
+    const entry = typeof pkg.bin === 'string' ? pkg.bin : (pkg.bin?.dsh ?? 'lib/bin.js')
+    return { argv: [process.execPath, path.join(dir, entry)], scope, version: pkg.version }
+  }
+  for (let dir = path.dirname(bin); ; dir = path.dirname(dir)) {
+    const pkg = pkgAt(dir)
+    if (pkg?.name === '@deepseek-ai/dsh') return asDsh(dir, pkg)
+    // dsh's desktop app runs a profile in its own host (@deepseek-ai/dsh-desktop-host), and the
+    // process this plugin runs in is that host: the CLI is then a dependency of the runtime beside
+    // it, not a package above it, so this dir's node_modules is looked in too.
+    const cli = path.join(dir, 'node_modules', '@deepseek-ai', 'dsh')
+    const cliPkg = pkgAt(cli)
+    if (cliPkg?.name === '@deepseek-ai/dsh') return asDsh(cli, cliPkg)
     if (path.dirname(dir) === dir) throw new Error(`${bin} is in no @deepseek-ai/dsh package`)
   }
 }
