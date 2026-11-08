@@ -189,23 +189,29 @@ export function Sidebar(p: Props) {
           comes back scrolled as it was. */}
       {p.searching && <div className="flex min-h-0 flex-1 flex-col">{p.search}</div>}
       <div ref={list} hidden={p.searching} onScroll={(e) => void (scrolled.current = e.currentTarget.scrollTop)} className="relative min-h-0 flex-1 no-bar overflow-y-auto px-2 pb-3" role="tree" aria-label={t("nav.sessions")}>
-        {loose.map((c) => (
-          <Row
-            key={`c:${c.id}`}
-            depth={0}
-            flip={`c:${c.id}`}
-            onClick={() => p.onConfirm(c)}
-            icon={<ConfirmIcon c={c} size={15} className="text-need" />}
-            label={
-              <>
-                {confirmTitle(c)}
-                {confirmName(c) && <span className="ml-1.5 text-ink-3">{confirmName(c)}</span>}
-              </>
-            }
-            end={<Lamp status="waiting" />}
-            aria={`${confirmTitle(c)} ${confirmName(c) ?? ""}, ${t("status.needs")}`}
-          />
-        ))}
+        {/* 需要你's confirmations: lined up with the groups' folders, apart from the list as a group is. */}
+        {loose.length > 0 && (
+          <div className="mt-1" role="group">
+            {loose.map((c) => (
+              <Row
+                key={`c:${c.id}`}
+                depth={0}
+                head
+                flip={`c:${c.id}`}
+                onClick={() => p.onConfirm(c)}
+                icon={<ConfirmIcon c={c} size={15} className="text-need" />}
+                label={
+                  <>
+                    {confirmTitle(c)}
+                    {confirmName(c) && <span className="ml-1.5 text-ink-3">{confirmName(c)}</span>}
+                  </>
+                }
+                end={<Lamp status="waiting" />}
+                aria={`${confirmTitle(c)} ${confirmName(c) ?? ""}, ${t("status.needs")}`}
+              />
+            ))}
+          </div>
+        )}
         {p.tree.workspaces.map((w, i) => {
           const open = p.expanded(w.key);
           // A gap after what is open above; folded groups one under another stay close (the user,
