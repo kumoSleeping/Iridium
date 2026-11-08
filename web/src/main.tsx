@@ -4,10 +4,12 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { queryClient } from "./api/client";
 import { App } from "./app";
+import { watchInstall } from "./install";
 import "./styles.css";
 import { watchUpgrade } from "./upgrade";
 
 watchUpgrade();
+watchInstall();
 
 // A file dropped anywhere off the chat, which attaches it, is not opened by the browser in place of the page.
 const keepFile = (e: DragEvent) => e.dataTransfer?.types.includes("Files") && e.preventDefault();

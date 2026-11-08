@@ -109,13 +109,18 @@ func TestRules(t *testing.T) {
 			l["mergedSendUuids"] = []any{"m2"}
 			return l
 		}(),
+		// The page's model picker: Claude records its set_model as a /model line; no message.
+		// One Iridium sent is its message.
+		user("u7", "<command-name>/model</command-name>\n            <command-message>model</command-message>\n            <command-args>opus</command-args>"),
+		user("u7o", "<local-command-stdout>Set model to `opus (claude-opus-5-5)`</local-command-stdout>"),
+		user("u8", "<command-name>/model</command-name>\n            <command-message>model</command-message>\n            <command-args>haiku</command-args>"),
 	}.write(t, path, false)
 	w, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
 	w.WriteString("not json at all\n{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"half")
 	w.Close()
 
 	ours := func(uuid string) (string, string, bool) {
-		return "pppppppppppppppp", "网页", uuid == "u1" || uuid == "m1" || uuid == "m2"
+		return "pppppppppppppppp", "网页", uuid == "u1" || uuid == "u8" || uuid == "m1" || uuid == "m2"
 	}
 	page, err := Open(path, ours).Latest()
 	if err != nil {
@@ -163,6 +168,7 @@ func TestRules(t *testing.T) {
 		"system(local_command)",
 		"user(build, then ask me|网页|m1)",
 		"user(do not restart|网页|m2)",
+		"user(/model haiku|网页|u8)",
 		"system(unreadable)",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {

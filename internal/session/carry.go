@@ -125,10 +125,11 @@ func (h *Hosted) refreshQuota() {
 	h.refreshBalance(ctx)
 }
 
-// refreshBalance reads the account's money, for a driver that has it (dsh); true if it did.
+// refreshBalance reads the account's money, for a driver that has it (dsh); true if it did. Not
+// for a session at another machine: its key and files are there, not here (docs/exec.md "可选").
 func (h *Hosted) refreshBalance(ctx context.Context) bool {
 	b, ok := h.drv.(agent.Balancer)
-	if !ok {
+	if !ok || h.meta.Machine != "" {
 		return false
 	}
 	got, err := b.Balance(ctx)

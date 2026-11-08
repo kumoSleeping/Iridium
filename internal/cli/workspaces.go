@@ -33,7 +33,7 @@ func cmdWs(e *env, args []string) int {
 		if err != nil {
 			return e.fail(err)
 		}
-		if err := e.do("PATCH", fmt.Sprintf("/api/workspaces/%d", w.ID), api.WorkspacePatch{Name: rest[1]}, nil); err != nil {
+		if err := e.do("PATCH", fmt.Sprintf("/api/workspaces/%d", w.ID), api.WorkspacePatch{Name: &rest[1]}, nil); err != nil {
 			return e.fail(err)
 		}
 		return exitDone

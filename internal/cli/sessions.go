@@ -4,8 +4,8 @@ import (
 	"cmp"
 	"encoding/json"
 	"fmt"
-	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,14 +21,14 @@ const (
 
 // ir new <agent> [dir] "task"
 func cmdNew(e *env, args []string) int {
-	o, err := parse(args, "wait model approve")
+	o, err := parse(args, "wait model approve machine workspace")
 	if err != nil {
 		return e.fail(err)
 	}
 	if len(o.pos) < 1 || len(o.pos) > 3 {
-		return e.failf(`usage: ir new <agent> [目录] "任务"`)
+		return e.failf(`usage: ir new <agent> [目录] "任务" [--machine <机器>] [--workspace <组>]`)
 	}
-	req := api.NewSession{Agent: api.Agent(o.pos[0]), Model: o.model, Mode: o.approve, Caller: caller()}
+	req := api.NewSession{Agent: api.Agent(o.pos[0]), Model: o.model, Mode: o.approve, Caller: e.caller()}
 	dir := "."
 	switch len(o.pos) {
 	case 2:
@@ -36,8 +36,15 @@ func cmdNew(e *env, args []string) int {
 	case 3:
 		dir, req.Text = o.pos[1], o.pos[2]
 	}
-	if req.Cwd, err = localPath(dir); err != nil {
+	if req.Machine, req.Cwd, err = e.where(o.machine, dir); err != nil {
 		return e.fail(err)
+	}
+	if o.group != "" {
+		w, err := e.workspace(o.group)
+		if err != nil {
+			return e.fail(err)
+		}
+		req.Workspace = w.ID
 	}
 	var created api.NewSessionReply
 	if err := e.do("POST", "/api/sessions", req, &created); err != nil {
@@ -73,7 +80,7 @@ func cmdSend(e *env, args []string) int {
 	if err != nil {
 		return e.fail(err)
 	}
-	req := api.Send{Caller: caller(), Steer: !o.queue}
+	req := api.Send{Caller: e.caller(), Steer: !o.queue}
 	if len(o.pos) == 2 {
 		req.Text = o.pos[1]
 	}
@@ -88,9 +95,24 @@ func cmdSend(e *env, args []string) int {
 		}
 		req.Attachments = append(req.Attachments, f.Ref)
 	}
+	// What the page ends with now: a message given to DSH Desktop's agent is waited on by what
+	// comes after it.
+	var before api.MessagePage
+	if o.wait {
+		before, _ = e.latest(id)
+	}
 	var sent api.SendReply
 	if err := e.do("POST", "/api/sessions/"+id+"/send", req, &sent); err != nil {
 		return e.fail(err)
+	}
+	if sent.Desktop {
+		if !o.wait {
+			return exitDone
+		}
+		return e.waitMirrored(id, before)
+	}
+	if n := len(before.Blocks); n > 0 {
+		e.after = before.Blocks[n-1].At
 	}
 	if sent.Session != "" { // /clear: it goes on in a new session
 		fmt.Fprintln(e.out, short(sent.Session, e.ids()))
@@ -196,12 +218,18 @@ func (e *env) waitTurn(id, input string) int {
 				}
 				taken = userAt(page, input) >= 0
 			}
+			// Its message there and idle a while, with its agent up: one at another machine shows the
+			// message before its agent has started there (a few seconds), idle meanwhile.
 			stable := time.Since(idleAt) >= 3*poll/2
-			if seenBusy || (taken && (input == "" || stable)) {
+			if seenBusy || (taken && st.Live && (input == "" || stable)) {
 				p.clear()
 				return e.printReply(id, input)
 			}
-			if !st.Live && time.Since(idleAt) > 10*time.Second {
+			startup := 10 * time.Second
+			if st.Machine != "" {
+				startup = 30 * time.Second
+			}
+			if !st.Live && time.Since(idleAt) > startup {
 				p.clear()
 				return e.failf("the agent is not running")
 			}
@@ -251,22 +279,35 @@ func userAt(page api.MessagePage, input string) int {
 
 // printReply prints the last thing the agent said (after input, where it is on the page).
 func (e *env) printReply(id, input string) int {
-	page, err := e.latest(id)
-	if err != nil {
-		return e.fail(err)
-	}
-	from := 0
-	if input != "" {
-		from = max(0, userAt(page, input))
-	}
-	for i := len(page.Blocks) - 1; i >= from; i-- {
-		if b := page.Blocks[i]; b.Kind == api.BlockKindAssistant {
-			fmt.Fprintln(e.out, strings.TrimRight(b.Text, "\n"))
-			break
+	// A session at another machine: its transcript is mirrored here a moment after the turn ends,
+	// so the reply may come a little later than the idle.
+	for deadline := time.Now().Add(replyLag); ; time.Sleep(poll / 2) {
+		page, err := e.latest(id)
+		if err != nil {
+			return e.fail(err)
+		}
+		from := 0
+		if input != "" {
+			from = userAt(page, input)
+			if from < 0 && e.after != "" { // its id not kept: what came after the page as it was
+				from = since(page, e.after)
+			}
+			from = max(0, from)
+		}
+		for i := len(page.Blocks) - 1; i >= from; i-- {
+			if b := page.Blocks[i]; b.Kind == api.BlockKindAssistant {
+				fmt.Fprintln(e.out, strings.TrimRight(b.Text, "\n"))
+				return exitDone
+			}
+		}
+		if time.Now().After(deadline) {
+			return exitDone
 		}
 	}
-	return exitDone
 }
+
+// replyLag is how long a reply may be awaited past the turn's end (a mirrored transcript's lag).
+var replyLag = 5 * time.Second
 
 func (e *env) printAsks(asks []api.Ask) {
 	for _, a := range asks {
@@ -433,9 +474,11 @@ func (e *env) listed(all bool) ([]api.Session, []string, error) {
 
 // line is a session's line in ir ls and find: id, agent, status, directory, name or title (a
 // subagent's marked, an archived one too).
-func line(s api.Session, ids []string, home string) string {
+func line(s api.Session, ids []string, home string, machines map[string]string) string {
 	cwd := s.Cwd
-	if home != "" && (cwd == home || strings.HasPrefix(cwd, home+"/")) {
+	if s.Machine != "" {
+		cwd = cmp.Or(machines[s.Machine], s.Machine) + ":" + cwd // another machine's folder
+	} else if home != "" && (cwd == home || strings.HasPrefix(cwd, home+"/")) {
 		cwd = "~" + strings.TrimPrefix(cwd, home)
 	}
 	title := s.Name
@@ -453,19 +496,28 @@ func line(s api.Session, ids []string, home string) string {
 	return fmt.Sprintf("%s\t%s\t%s\t%s\t%s", short(s.ID, ids), s.Agent, s.Status, cwd, title)
 }
 
-// ir ls [--all]: one session a line; the archive and the subagents done only with --all.
+// ir ls [--all] [--here]: one session a line; the archive and the subagents done only with --all;
+// --here, those in the caller's group only (its own folder group, at whichever machine).
 func cmdLs(e *env, args []string) int {
-	o, err := parse(args, "all")
+	o, err := parse(args, "all here")
 	if err != nil || len(o.pos) != 0 {
-		return e.failf("usage: ir ls [--all]")
+		return e.failf("usage: ir ls [--all] [--here]")
 	}
 	list, ids, err := e.listed(o.all)
 	if err != nil {
 		return e.fail(err)
 	}
-	home, _ := os.UserHomeDir()
+	if o.here {
+		ws, err := e.groupOf(e.caller())
+		if err != nil {
+			return e.fail(err)
+		}
+		list = slices.DeleteFunc(list, func(s api.Session) bool { return s.Workspace != ws })
+	}
+	home := e.home()
+	names := e.machineNames()
 	for _, s := range underParents(list) {
-		fmt.Fprintln(e.out, line(s, ids, home))
+		fmt.Fprintln(e.out, line(s, ids, home, names))
 	}
 	return exitDone
 }
@@ -520,7 +572,8 @@ func cmdFind(e *env, args []string) int {
 	for _, s := range shown {
 		keep[s.ID] = true
 	}
-	home, _ := os.UserHomeDir()
+	home := e.home()
+	names := e.machineNames()
 	found := 0
 	for _, s := range all {
 		if !keep[s.ID] && !(s.Archived && !s.Subagent) {
@@ -529,7 +582,7 @@ func cmdFind(e *env, args []string) int {
 		hay := strings.ToLower(strings.Join([]string{s.ID, s.Name, s.Title, s.Cwd, lastText(s)}, "\n"))
 		if !slices.ContainsFunc(words, func(w string) bool { return !strings.Contains(hay, w) }) {
 			found++
-			fmt.Fprintln(e.out, line(s, ids, home))
+			fmt.Fprintln(e.out, line(s, ids, home, names))
 			if t := lastText(s); t != "" {
 				fmt.Fprintf(e.out, "\t%s\n", clip(t, askLen))
 			}
@@ -563,6 +616,29 @@ func cmdArchive(e *env, args []string, archived bool) int {
 		return e.fail(err)
 	}
 	if err := e.do("PATCH", "/api/sessions/"+id, api.SessionPatch{Archived: &archived}, nil); err != nil {
+		return e.fail(err)
+	}
+	return exitDone
+}
+
+// ir rename [<id>] <name>: names a session, the one it runs in when no id is given. Run from a
+// session, it is that agent's name for it, which a name the user gave stays over; else the user's.
+func cmdRename(e *env, args []string) int {
+	o, err := parse(args, "")
+	if err != nil || len(o.pos) < 1 || len(o.pos) > 2 {
+		return e.failf("usage: ir rename [<id>] <名>")
+	}
+	from := e.caller()
+	id := from
+	if len(o.pos) == 2 {
+		if id, err = e.resolve(o.pos[0]); err != nil {
+			return e.fail(err)
+		}
+	} else if id == "" {
+		return e.failf("不在会话里运行，要给出 <id>")
+	}
+	name := o.pos[len(o.pos)-1]
+	if err := e.do("PATCH", "/api/sessions/"+id, api.SessionPatch{Name: &name, ByAgent: from != ""}, nil); err != nil {
 		return e.fail(err)
 	}
 	return exitDone
@@ -613,4 +689,76 @@ func cmdBot(e *env, args []string) int {
 	}
 	fmt.Fprintf(e.out, "已发到 %s\n", cmp.Or(r.Name, r.Bot))
 	return exitDone
+}
+
+// waitMirrored waits for a turn DSH Desktop runs (a message given to its agent): no turn of
+// Iridium's to watch, so for a reply after the page's end before, in the mirrored transcript, and
+// that page still for a while (the turn may go on); then prints it.
+func (e *env) waitMirrored(id string, before api.MessagePage) int {
+	p := e.progress()
+	defer p.clear()
+	last := ""
+	if n := len(before.Blocks); n > 0 {
+		last = before.Blocks[n-1].At
+	}
+	var seen string
+	var still time.Time
+	for {
+		page, err := e.latest(id)
+		if err != nil {
+			p.clear()
+			return e.fail(err)
+		}
+		from := 0
+		if last != "" {
+			from = since(page, last)
+		}
+		var reply string
+		for _, b := range page.Blocks[from:] {
+			if b.Kind == api.BlockKindAssistant {
+				reply = b.Text
+			}
+		}
+		end := ""
+		if n := len(page.Blocks); n > 0 {
+			end = page.Blocks[n-1].ID + "\x00" + page.Blocks[n-1].Text
+		}
+		if end != seen {
+			seen, still = end, time.Now()
+		}
+		if reply != "" && time.Since(still) >= desktopSettle {
+			p.clear()
+			fmt.Fprintln(e.out, strings.TrimRight(reply, "\n"))
+			return exitDone
+		}
+		p.status("DSH Desktop")
+		time.Sleep(poll)
+	}
+}
+
+// desktopSettle: a page still this long after a reply came is taken as the turn's end.
+var desktopSettle = 5 * time.Second
+
+// since is the first block of page past at (a block's at: its line in the transcript, a dot, its
+// place in the line; assistant blocks have no id to go by).
+func since(page api.MessagePage, at string) int {
+	for i, b := range page.Blocks {
+		if atAfter(b.At, at) {
+			return i
+		}
+	}
+	return len(page.Blocks)
+}
+
+func atAfter(a, b string) bool {
+	al, ai, _ := strings.Cut(a, ".")
+	bl, bi, _ := strings.Cut(b, ".")
+	an, _ := strconv.ParseInt(al, 10, 64)
+	bn, _ := strconv.ParseInt(bl, 10, 64)
+	if an != bn {
+		return an > bn
+	}
+	x, _ := strconv.ParseInt(ai, 10, 64)
+	y, _ := strconv.ParseInt(bi, 10, 64)
+	return x > y
 }

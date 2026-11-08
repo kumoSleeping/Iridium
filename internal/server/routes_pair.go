@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math/big"
 	"net/http"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -50,9 +51,14 @@ type pairReq struct {
 
 func newPairs() *pairs { return &pairs{reqs: map[string]*pairReq{}, tries: map[string][]time.Time{}} }
 
-// openPath reports whether r is a pairing request: the gate lets these through without a login.
+// openPath reports whether r is a pairing request, or the app's icons and manifest: the gate lets
+// these through without a login. A browser fetches the manifest without cookies, and the login
+// page is what a phone adds to its home screen first.
 func openPath(r *http.Request) bool {
 	switch {
+	case (r.Method == http.MethodGet || r.Method == http.MethodHead) &&
+		(r.URL.Path == "/favicon.svg" || r.URL.Path == "/manifest.webmanifest" || strings.HasPrefix(r.URL.Path, "/icons/") && path.Clean(r.URL.Path) == r.URL.Path):
+		return true
 	case r.Method == http.MethodPost && (r.URL.Path == "/api/exec/pair" || r.URL.Path == "/api/pair"):
 		return true
 	case r.Method == http.MethodGet && (strings.HasPrefix(r.URL.Path, "/api/exec/pair/") || strings.HasPrefix(r.URL.Path, "/api/pair/")):

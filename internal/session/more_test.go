@@ -297,6 +297,29 @@ func TestRuleMatches(t *testing.T) {
 	}
 }
 
+// An agent naming its session (ir rename) is never asked about; anything chained to it is.
+func TestRenamesOnly(t *testing.T) {
+	for cmd, want := range map[string]bool{
+		`ir rename "会话命名"`:      true,
+		`ir rename x`:           true,
+		`ir rename`:             false,
+		`ir rename x; rm -rf ~`: false,
+		`ir rename x && ls`:     false,
+		`ir rename $(cat f)`:    false,
+		`ir rename x > f`:       false,
+		"ir rename x\nls":       false,
+		`ir ls`:                 false,
+		`irx rename x`:          false,
+	} {
+		if got := renamesOnly(api.Ask{Kind: "permission", Tool: "Bash", Input: map[string]any{"command": cmd}}); got != want {
+			t.Errorf("%q: %v", cmd, got)
+		}
+	}
+	if renamesOnly(api.Ask{Kind: "question", Input: map[string]any{"command": "ir rename x"}}) {
+		t.Error("a question")
+	}
+}
+
 // A crash mid-turn: Claude is started again with CLAUDE_CODE_RESUME_INTERRUPTED_TURN and runs the
 // turn again itself; no recovery prompt.
 func TestCrashResumed(t *testing.T) {

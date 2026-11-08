@@ -17,7 +17,7 @@
 
 ## 连接
 
-- 执行端主动连 `wss://<Iridium>/api/exec`，头 `Authorization: Bearer <TOKEN>`。执行端就是一个 Bot（提供机器的那种，见 `plan.md`“交互终端”）：用 Bot 的 TOKEN 接入，终端类型也显示“Bot”，名字就是机器名（≤12 字符）。Claude（用户，2026-11-08）：批准时勾了“本人的机器”的执行端才开 Claude，用那台机器上本人的登录、原样跑（不加 `--bare`），等于 `--owner`；这个勾只出现在带 Claude 的面板上。
+- 执行端主动连 `wss://<Iridium>/api/exec`（dsh 插件只接受 https，或到本机、内网地址的 http：公网的明文 http 拒绝），头 `Authorization: Bearer <TOKEN>`。执行端就是一个 Bot（提供机器的那种，见 `plan.md`“交互终端”）：用 Bot 的 TOKEN 接入，终端类型也显示“Bot”，名字就是机器名（≤12 字符）。Claude（用户，2026-11-08）：批准时勾了“本人的机器”的执行端才开 Claude，用那台机器上本人的登录、原样跑（不加 `--bare`），等于 `--owner`；这个勾只出现在带 Claude 的面板上。
 - 配对（用户，2026-11-08）：插件里只有服务器地址，没有 TOKEN，人人同一个包。第一次不带 TOKEN 连 `/api/exec/pair`（门外唯一不用登录的口，什么也不给），报机器名、系统、装了哪些 agent，两边显示同一个 4 位配对码；网页弹确认卡片“home-pc 请求接入（Windows · dsh 0.2.2）”，带 Passkey 的面板点允许后，TOKEN 经这条连接发给执行端，它存起来以后自己用。限速，同时最多几个待批，10 分钟没人管作废。插件和 `ir join` 用同一个口：`POST /api/exec/pair` 带握手内容（同 `hello` 的 `name`、`os`、`arch`、`program`、`agents`、`noShell`、`agentShell`；卡片据此写“可执行命令”“可执行命令（含 agent）”或“仅 agent”），回 `{code, request}`；再轮询 `GET /api/exec/pair/<request>`，等到允许（拿 TOKEN）或拒绝。普通 Bot 用同样的 `POST /api/pair`（`ir pair`），见 `api.md`。设置里可停止接收申请，对方收到 403。
 - 接入是单向的（用户，2026-11-08）：批准的一方能用申请方的 agent 和文件；反过来要对方也申请一次。
 - 一个 TOKEN 同时只有一条连接，新连上的顶掉旧的。
@@ -46,7 +46,7 @@
 ```
 
 - `os`：`windows`、`darwin`、`linux`。`sep`：路径分隔符。
-- `env`：执行端自己的环境。这边以它为底，按驱动的规则增删，启动时整份发过去。
+- `env`：执行端自己的环境。这边以它为底，按驱动的规则增删，启动时整份发过去。密钥不出那台机器（2026-11-08）：名字像密钥的（含 `KEY`、`TOKEN`、`SECRET`、`PASSW`、`CREDENTIAL`、`COOKIE`、`AUTH`、`SESSION`、`PRIVATE`，或以 `DEEPSEEK_`、`ANTHROPIC_`、`OPENAI_`、`AWS_`、`AZURE_`、`GOOGLE_`、`GH_`、`GITHUB_`、`NPM_`、`HF_` 开头）值换成占位 `(secret kept at the executor)`；`hold.start` 的 `env` 里值仍是占位的，执行端换回本机的值（本机没有就去掉）。这边设的值照用。执行端自己的 `IRIDIUM_SESSION`、`IRIDIUM_SOCKET`、`IRIDIUM_CONFIG`、`IRIDIUM_URL`、`IRIDIUM_TOKEN`（给它本机 Iridium 的）不报，子进程只拿到这边设的。旧执行端照旧报全值。
 - `scratch`：执行端自己的一个目录，这边往里写启动用的文件（dsh 的 `--patch`）。
 - `agents`：装了哪些 agent、怎么启动（`argv` 是程序部分，驱动接着加参数）。dsh 直接给 `node` 和 `bin.js`，不经 `.cmd`；`scope` 是它的 `@deepseek-ai` 包目录（这边从里面读预设），`home` 是 `DSH_HOME`。dsh 低于 0.2.2 不给开。
 - `holds`：它手上全部进程（`{hold, outSize, inSeq, exit}`，`inSeq` 是写进去的最后一行的序号）。这边据此对账：哪些还在跑、输入从哪儿续；这边起过、它却没有的，算进程没了。
@@ -88,13 +88,14 @@
 | `fs.write` | `{path, data, sha256, replace}` → `{}`；先写临时文件，核对后原子改名；`replace` 为假且已有就 `exists` |
 | `fs.mkdir` | `{path}` → `{}`，连父目录一起建 |
 
-- 允许的目录由执行端自己配，先解析符号链接再比；它自己的配置、TOKEN 和 `~/.ssh` 一律 `denied`。
+- 允许的目录由执行端自己配，先解析符号链接再比。一律 `denied`（读写都是）：TOKEN、`~/.ssh`；dsh 家目录的 `.credentials.yaml`、`.env`、`profiles/`（含插件配置）；Claude 的 `.credentials.json`、Codex 的 `auth.json`、pi 的 `~/.pi/agent/auth.json`；`~/.aws`、`~/.config/gh`、`~/.gnupg`、`~/.netrc`、`~/.npmrc`、`~/.git-credentials`、`~/.docker/config.json`。对话记录等其余文件照常。
 - 大文件分块，同 `plan.md`“文件传输”。
 
 ## 可选
 
 - `fs.watch {path}` 和事件 `changed {path, size}`：文件变了就报，合并着报。没有它这边定时 `fs.stat`。
-- 余额：这边要读那边 DeepSeek 的密钥才能查；不做就不显示那台机器的余额。
+- 余额：这边要读那边 DeepSeek 的密钥才能查；不做，那台机器上的会话不查余额（这边不拿它的环境、不读本机同名路径）。
+- dsh 插件另有三个（见“远端 DSH”），别的执行端回 `unsupported`：`dsh.prompt {session, text, steer?}` → `{}`，把消息交给 Desktop 里这个会话的 agent（没有就 `not_found`）；`dsh.open {}` → `{sessions, unsynced, unsyncedUngrouped}`，插件所在的 dsh 进程（DSH Desktop）里此刻打开着的会话，插件设置里不同步到这边的工作区（文件夹或名字），以及未分组的会话是否也不同步；`dsh.attach {session, cwd}` → `{}`，把会话登记到 `cwd` 对应的工作区（没有就新建），Desktop 侧边栏里就有它。
 
 ## 网页（用户，2026-11-08）
 
@@ -139,10 +140,41 @@
 7. 一个 Go 写的参考执行端（`internal/remote/executor`），测试用；回放录制的假 dsh 在 `internal/testagent/dsh.go`。
 8. （已做）Claude 在执行端：驱动的 `Spawn` 按 `Remote` 走（系统提示文件写到那边），记录在那边的 `~/.claude/projects/` 用 `FindRemote` 找。只读那边的 `~/.claude`。项目目录名照 Claude 的规则（每个不是 ASCII 字母数字的 UTF-16 单元换成 `-`）；超过 200 的 Claude 会截断加哈希，这种找不到记录。没勾“本人的机器”的那台：新会话不列 Claude，接口也拒绝（403）。
 9. （已做，`internal/join`）`ir join <地址>`：二进制的执行端模式，复用 `internal/remote/executor`，配对、存 TOKEN、常驻（见“平台差异”）、找 agent（npm 的 `.cmd` 垫片解析成 `node` + 入口 js）。
-10. `ir cp`、`ir files` 认执行端的 `机器:路径`（`fs.read`/`fs.write`/`fs.list`），`ir sh` 已做。
-11. 执行端上的会话里 agent 调 `ir`：启动时给它这边的地址和只属于这个会话的 TOKEN，那边的 `ir` 经 HTTPS 连这边，算这个会话。
+10. （已做）`ir cp`、`ir files` 认执行端的 `机器:路径`（`fs.read`/`fs.write`/`fs.list`），只给本机的 `ir`：读按 `MaxRead` 分块不限大小；写到那边是一次 `fs.write`，先限 4MB。`ir sh` 已做。
+11. （已做）执行端上的会话里 agent 调 `ir`，见“远端的 ir”。
 12. 任何 agent 都能在执行端跑（2026-11-08）：驱动不分本机和那边，程序取 `SpawnOptions.Command`（那边是握手的 `argv`），启动文件经 `LaunchFile`、系统提示经 `PromptFile`（那边写进 scratch）；agent 的不同只在注册表一行（`internal/agents`）：`FindRemote`（那边的记录在哪）、`HomeEnv`（握手给的家目录放进哪个变量）、`MinRemote`（最低版本）。已接：Claude、dsh、pi（已做，用 `scripts/dev/exec-mini.py` 在测试实例上实测：开会话、工具调用、记录镜像、执行端重启后续跑、停止）。Codex 待接：补它那一行（记录按日期分目录）。
-13. 发现那边在终端里自己开的会话：执行端加一个列进程的请求，记录同上。
+13. 发现那边自己开的会话：dsh 的已做（见“远端 DSH”），不用执行端新增请求；Claude、pi 还没做。
+
+## 远端 DSH（用户，2026-11-08）
+
+那台机器上 dsh 自己的工作区和会话（DSH Desktop 开的），这边照样能选、能看、能接着聊。只用现有的 `fs.list`、`fs.read`、`fs.stat`，执行端不用改。代码：`internal/dshhome`（读 dsh 家目录里的文件）、`internal/discover/remote.go`（扫描、镜像）。
+
+- 读什么：家目录取 dsh 的 `home`（握手），没有就 `DSH_HOME`，再没有就 `~/.dsh`。
+  - `storages/workspace.json`：工作区（`unit` 为 `workspace`、`version` 2；`global.workspaceIds` 是顺序，`tables.workspaces[id]` 有 `path`、`title`、`sessionIds`；`global.archivedSessionIds` 是 Desktop 里归档的会话）。
+  - `storages/session_projcache/sessions/<id>.json`：每个会话一份小文件，`record.identity.cwd`、`rows.title.val`、`rows.timeContext.val.lastMessageTime`。
+  - `sessions/--<目录>--/<id>/session.vN.jsonl.zstd`：记录。开头那一帧的第一行是会话头（`cwd`、`origin`、`parentSession`），读前 8KB（不够再读 64KB）就有，用来认子 agent。
+  - 版本对不上的一律当没有：工作区退回用会话所在的文件夹，摘要退回用会话头。
+- 扫描：每台连着、装了 dsh 的机器每 30 秒一次，连上时立刻一次；只看变了的：`sessions/` 下的目录按修改时间、摘要文件按修改时间；没有摘要的会话每 10 分钟逐个看一次。同时最多 8 个请求。结果存在状态目录 `remote-dsh/<机器>.json`，重启、机器断开时照样列出。
+- 列表：全部列出（用户，2026-11-08），不照本机“开始监视前就有的进归档”：第一次见到就显示，Desktop 里归档的进归档；之后 Desktop 里新归档的这边也归档，归档的有新内容再出来。显示标记的大小按那边记录文件的大小。分组照 `机器ID:路径`，和这边开的远端会话同组。
+- 记录：打开时才拉（`Mirror`，增量），放在状态目录 `remote-dsh/<机器>/<会话>/`；拉过的会话，扫描看到变了就跟着拉。断开时用已拉的。
+- 接着聊：发消息即接管（本机发现的 dsh 会话同样），在那台机器上 `session/resume`。插件每 5 秒报一次 Desktop 里开着哪些（`dsh.open`），这些会话显示“在别处运行”。Desktop 开着（拿着写锁）的会话，消息交给 Desktop 自己的那个 agent（插件的 `dsh.prompt`，`followup`／`steer`，来源 `user`，文本前带来源标记），任务在 Desktop 里接着跑，这边从镜像的记录里看（`SendReply.desktop`；`ir send --wait` 等记录里出现回复、5 秒不再变化）；Desktop 没有它的 agent 时照常在那边 `session/resume`，被写锁拒绝（`session/writer-held`，Windows 上是命名信号量，这边查不到）就报“正在另一个 dsh（DSH Desktop）里打开”。用户，2026-11-08：执行端断开一次（Desktop 重启），Desktop 回来后会自己载入这些会话并拿着写锁，之前就再也接不上。接管后这边的进程运行期间 Desktop 写不了它，停掉就放开。
+- 进 Desktop 的工作区：这边在那台机器上开的 dsh 会话，记录一出现就请插件登记到它目录的工作区（`dsh.attach`，没有就新建），只请求一次（成功或插件不支持，记在托管目录的 `remote-filed`）。Desktop 的会话列表只随它自己进程里的会话刷新，别的进程建的会话要重新载入窗口才出现：插件在浏览器里的那一半盯着工作区列表，工作区里有会话列表没有的会话时，让会话列表重新拉一次（每个会话最多三次）。
+- 分组（用户，2026-11-08）：Desktop 里不在任何工作区的会话（它的“未分组”）进这边的“未归类”，一条一条列，不套文件夹；已被自动放进某个分组的，安静 2 分钟后移回（这边刚开的会话过一会儿才登记进工作区）。读不到工作区登记表时照文件夹分组。执行端重新配对换了机器 ID，自动归到旧 ID 分组的会话改归新 ID 的分组。
+- 不同步（用户，2026-11-08）：插件在 dsh 设置里有自己的一页“Iridium”（`settings.section`，不在“插件”里；dsh web 和 DSH Desktop 共用这套设置外壳），上面是地址，下面每个工作区一个开关“同步到 Iridium”，最后一行是“未分组”（不在任何工作区里的会话，多是一次性的对话）。关掉的工作区按文件夹记在插件配置的 `unsynced`，未分组记在 `ungrouped: false`，随 `dsh.open` 报给这边（`unsynced`、`unsyncedUngrouped`）；这些会话（连同它们的子 agent）不列出，新会话的工作区列表里也没有，改了几秒内生效。只是这边不列，执行端照样能读那些文件。
+- 隐藏（用户，2026-11-08）：分组右键“隐藏”，会话不再列出、不进归档、搜不到；其中有会话在别处运行（Desktop 里开着）时整组出来，右键可取消隐藏。
+- 新会话：目录选择器在装了 dsh 的远端机器上，最上面列它的工作区（`GET /api/machines/{id}/dsh/workspaces`），点一下就选。从本机分组的“+”开远端会话，会话留在这个分组。
+- 插件在 Desktop 进程里用 dsh 自己的服务：`sessions.list()`、`workspaceRegistry` 的 `resolveByPath`、`create`、`attachSession`（`plugins/dsh-remote-iridium/dsh.js`）。旧版插件和 `ir join` 没有这两个请求：不显示 Desktop 里开着的，也不登记。
+
+## 远端的 ir（用户，2026-11-08）
+
+跨机器的多 agent 协同：远程组里开本机的 Claude 当协调者，给那边的 dsh 派活、看结果、搬文件；那边的会话也能回过来找它。
+
+- 网页：远程组的“+”除了那台机器的 agent，还列本机的 agent，目录用本机家目录或这个组上次选的（浏览器里按组记）。本机会话放进这个组。
+- `ir new … --machine <机器>` 在那台机器上开（目录按那边的写法，不给就是那边的家目录）；`--workspace <组>` 放进指定的组。拉起者在别的机器的组里时，新会话跟进拉起者的组。`ir ls --here` 只列自己组的会话；`ir ls` 里别的机器的会话目录写成 `机器名:路径`。
+- 那边的 `ir`：执行端握手声明 `irClient`，这边每次在那边启动 agent 时生成一个只属于这个会话的 TOKEN（前缀 `irs_`，托管目录只存它的哈希，重启一次换一个），经 `IRIDIUM_TOKEN` 给执行端；执行端在这个会话的托管目录里放一个 `ir`（`holds/<会话>/bin/`），排在它 PATH 的最前面，地址（自己连的那个，`IRIDIUM_URL` 给了就用它）和 TOKEN 直接写在里面：agent 跑的命令不一定拿得到它的环境变量（dsh 跑命令就不带 `IRIDIUM_*`，2026-11-08 实测）。dsh 插件的是 `ir.js`（`ir`、`ir.cmd` 用插件所在的 node 跑；DSH Desktop 里是它自己的程序，带 `ELECTRON_RUN_AS_NODE`）；`ir join` 的是这个二进制本身（脚本再执行 `bin/.ir/ir` 这个链接，按名字 `ir` 进命令行模式）。
+- 那边的 `ir` 只转发：把参数和当前目录发到 `POST /api/cli`，这边照常跑 `ir`，输出一行一行流回去，最后是退出码。请求算那台机器的 Bot 发的、代表这个会话：Bot 的规则照旧（没勾“本人的机器”的不能开 Claude、不能给 Claude 会话发消息），算 agent 发的（消息并进对方当前回合，不能放行 auto 模式拦下的步骤），信里写成来自这个会话。Bot 被删，它的会话 TOKEN 一起失效。
+- 那边能用的：`new`（目录是那边的，`--machine` 可开到别的机器）、`send`、`wait`、`read`、`ls`、`find`、`stop`、`archive`、`unarchive`、`rename`、`ws`、`machines`。不能用：`cp`、`files`、`sh`、`run`、`secret`、`bot`、`usage` 和管理命令，这些碰的是 Iridium 所在机器的文件、命令和秘密，留给本机的会话和面板。
+- 系统提示：执行端有 `ir` 的，给那边能用的命令（`irhelp.Remote`）；没有的，不提 `ir`。都不带 `[文件]` 那一行（那边的文件网页取不到）。
 
 ## 暂不做
 

@@ -68,6 +68,10 @@ type Hello struct {
 	// AgentShell: agents of that Iridium may run command lines here (ir sh), not only a person
 	// on its page; its owner's choice, off unless said.
 	AgentShell bool `json:"agentShell,omitempty"`
+	// IRClient: it puts an ir on the PATH of the agents it starts, which reaches the Iridium over
+	// HTTPS with the session's own TOKEN (hold.start's env IRIDIUM_TOKEN; docs/exec.md "远端的
+	// ir"): IRIDIUM_URL is set there to the address it connected to, unless the env has one.
+	IRClient bool `json:"irClient,omitempty"`
 }
 
 // AgentInfo is an agent installed there and how to start it. Argv is the program part, to which
@@ -187,3 +191,30 @@ type WriteFileParams struct {
 
 // MaxRead is the most one fs.read returns.
 const MaxRead = 4 << 20
+
+// Optional, the dsh plugin's (docs/exec.md "远端 DSH"): the dsh it runs in (DSH Desktop). Another
+// executor answers CodeUnsupported.
+
+// DshOpenReply answers dsh.open: the sessions open in that dsh process now; Unsynced, the
+// workspaces the plugin's settings keep from the Iridium (their folders or names);
+// UnsyncedUngrouped, the sessions in none of them (dsh's 未分组) kept too.
+type DshOpenReply struct {
+	Sessions          []string `json:"sessions"`
+	Unsynced          []string `json:"unsynced,omitempty"`
+	UnsyncedUngrouped bool     `json:"unsyncedUngrouped,omitempty"`
+}
+
+// DshPromptParams is dsh.prompt: a message for a session the dsh there holds (open in DSH
+// Desktop), which the Iridium cannot resume: its agent there takes it, a next turn or (Steer)
+// into the running one. CodeNotFound: no agent of it lives there.
+type DshPromptParams struct {
+	Session string `json:"session"`
+	Text    string `json:"text"`
+	Steer   bool   `json:"steer,omitempty"`
+}
+
+// DshAttachParams is dsh.attach: session filed under the workspace of its folder cwd there.
+type DshAttachParams struct {
+	Session string `json:"session"`
+	Cwd     string `json:"cwd"`
+}

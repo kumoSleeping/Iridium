@@ -304,7 +304,7 @@ func (o *Options) Run(ctx context.Context) error {
 		}
 		ex, err := executor.New(executor.Options{
 			URL: wsURL(o.URL), Token: tok, State: o.stateDir(), Roots: o.Roots, Deny: []string{o.tokenDir()},
-			Agents: o.Agents, NoShell: o.NoShell, AgentShell: o.AgentShell, Program: o.program(), HTTPClient: o.HTTP, Logf: o.logf,
+			Agents: o.Agents, NoShell: o.NoShell, AgentShell: o.AgentShell, Program: o.program(), HTTPClient: o.HTTP, Logf: o.logf, IR: selfExe(),
 			Connected: func(name string) { o.say("已连接 %s（%s）", o.URL, name) },
 		})
 		if err != nil {
@@ -478,4 +478,16 @@ func sleep(ctx context.Context, d time.Duration) bool {
 	case <-t.C:
 		return true
 	}
+}
+
+// selfExe is this program, which is ir by that name: the ir its agents get (executor.Options.IR).
+func selfExe() string {
+	p, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		p = r
+	}
+	return p
 }

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/kumoSleeping/iridium/internal/agents"
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/store"
 	"github.com/kumoSleeping/iridium/internal/transcript"
@@ -83,13 +84,19 @@ func (m *Manager) take(ctx context.Context, id string) (*Hosted, error) {
 	if err := f.Free(id); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrElsewhere, err)
 	}
-	// Claude and pi resume a session by its id, Codex a thread: its id is the hosted one's too.
+	// Claude, pi and dsh resume a session by its id, Codex a thread: its id is the hosted one's too.
 	switch s.Agent {
-	case api.AgentClaude, api.AgentCodex, api.AgentPi:
+	case api.AgentClaude, api.AgentCodex, api.AgentPi, api.AgentDsh:
 	default:
 		return nil, fmt.Errorf("resuming a %s session is not supported yet", s.Agent)
 	}
-	if st, err := os.Stat(s.Cwd); err != nil || !st.IsDir() || !filepath.IsAbs(s.Cwd) {
+	if s.Machine != "" {
+		// dsh at another machine (docs/exec.md "远端 DSH"): it is to be there now, its folder too.
+		info, _ := agents.Get(s.Agent)
+		if _, err := m.remoteFor(ctx, s.Machine, info, s.Cwd); err != nil {
+			return nil, err
+		}
+	} else if st, err := os.Stat(s.Cwd); err != nil || !st.IsDir() || !filepath.IsAbs(s.Cwd) {
 		return nil, fmt.Errorf("its folder is gone: %q", s.Cwd)
 	}
 	m.mu.Lock()
@@ -97,7 +104,7 @@ func (m *Manager) take(ctx context.Context, id string) (*Hosted, error) {
 	if h := m.hosted[id]; h != nil {
 		return h, nil // taken meanwhile
 	}
-	mt := meta{ID: id, Agent: s.Agent, Cwd: s.Cwd, Created: time.Now().UnixMilli()}
+	mt := meta{ID: id, Agent: s.Agent, Cwd: s.Cwd, Created: time.Now().UnixMilli(), Machine: s.Machine}
 	if s.Agent == api.AgentCodex {
 		mt.AgentID = id // the thread to resume
 	}
@@ -141,7 +148,7 @@ func (m *Manager) foreignState(id string, over map[string]store.Overlay) (*api.S
 		over, _ = m.o.Store.Overlays()
 	}
 	o := over[id]
-	s.Name, s.Pinned, s.Workspace, s.Color = o.NameOver(s.Title), o.Pinned, o.Workspace, api.Color(o.Color)
+	s.Name, s.Pinned, s.Workspace, s.Color = o.Name, o.Pinned, o.Workspace, api.Color(o.Color)
 	s.Archived = !m.visibility().Shown(string(s.Agent), s.ID)
 	m.parentOf(&s)
 	st := &api.SessionState{Session: s, Asks: []api.Ask{}, Tasks: []api.Task{}, Denials: []api.Denial{}}
@@ -162,16 +169,28 @@ func (m *Manager) parentOf(s *api.Session) {
 }
 
 // readable is the session's transcript, hosted or found on disk; nil if there is none (yet) or
-// it cannot be read.
+// it cannot be read. One found at another machine is mirrored here first (fetcher).
 func (m *Manager) readable(id string) (*transcript.File, error) {
 	if h, err := m.get(id); err == nil {
 		return h.transcript(), nil
 	}
-	_, f, ok := m.found(id)
+	s, f, ok := m.found(id)
 	if !ok {
 		return nil, ErrNotFound
 	}
+	if fe, can := m.o.Discovery.(fetcher); can && s.Machine != "" {
+		ctx, cancel := context.WithTimeout(m.ctx, time.Minute)
+		defer cancel()
+		if err := fe.Fetch(ctx, id); err != nil {
+			return nil, err
+		}
+	}
 	return f, nil
+}
+
+// fetcher is a Discovery that mirrors a session found at another machine when it is read.
+type fetcher interface {
+	Fetch(ctx context.Context, id string) error
 }
 
 // Refresh is discovery telling what changed: the list again, and the state of each session

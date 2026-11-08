@@ -169,6 +169,12 @@ var schema = []string{
 	);`,
 	// 15: what each executor last said of itself (machines.go).
 	machinesSchema,
+	// 16: a workspace hidden from the page (the user, 2026-11-08): listed only while a session in
+	// it runs elsewhere (DSH Desktop).
+	`ALTER TABLE workspaces ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;`,
+	// 17: no placeholder names (the user, 2026-11-08): auto marks a name the session's agent gave
+	// (ir rename) from now on.
+	`DELETE FROM names WHERE auto = 1;`,
 }
 
 // steps run in Go after the migration of their version, in the same transaction.
@@ -272,12 +278,12 @@ func now() int64 { return time.Now().UnixMilli() }
 // (shown.go), by its agent.
 type Overlay struct {
 	Name string
-	// AutoName: Name is Iridium's placeholder (SetAutoName), not one the user gave.
-	AutoName  bool
-	Pinned    bool
-	Workspace int64
-	Manual    bool
-	Color     string
+	// AgentNamed: Name is the one the session's agent gave (SetAgentName), not the user's.
+	AgentNamed bool
+	Pinned     bool
+	Workspace  int64
+	Manual     bool
+	Color      string
 }
 
 // Overlays is every session's overlay, by session id.
@@ -297,7 +303,7 @@ func (s *Store) Overlays() (map[string]Overlay, error) {
 	for rows.Next() {
 		var id string
 		var o Overlay
-		if err := rows.Scan(&id, &o.Name, &o.AutoName, &o.Pinned, &o.Workspace, &o.Manual, &o.Color); err != nil {
+		if err := rows.Scan(&id, &o.Name, &o.AgentNamed, &o.Pinned, &o.Workspace, &o.Manual, &o.Color); err != nil {
 			return nil, err
 		}
 		out[id] = o
@@ -305,29 +311,32 @@ func (s *Store) Overlays() (map[string]Overlay, error) {
 	return out, rows.Err()
 }
 
-// SetName renames a session; "" takes the name off.
-func (s *Store) SetName(session, name string) error { return s.setName(session, name, false) }
-
-// SetAutoName gives a session Iridium's placeholder name, which its title replaces (NameOver).
-func (s *Store) SetAutoName(session, name string) error { return s.setName(session, name, true) }
-
-func (s *Store) setName(session, name string, auto bool) error {
+// SetName renames a session as the user does; "" takes the name off.
+func (s *Store) SetName(session, name string) error {
 	if name == "" {
 		_, err := s.db.Exec(`DELETE FROM names WHERE session = ?`, session)
 		return err
 	}
-	_, err := s.db.Exec(`INSERT INTO names (session, name, auto) VALUES (?, ?, ?)
-		ON CONFLICT (session) DO UPDATE SET name = excluded.name, auto = excluded.auto`, session, name, auto)
+	_, err := s.db.Exec(`INSERT INTO names (session, name, auto) VALUES (?, ?, 0)
+		ON CONFLICT (session) DO UPDATE SET name = excluded.name, auto = 0`, session, name)
 	return err
 }
 
-// NameOver is the name a session goes by over title, the opening of its first message: Name,
-// unless that is only Iridium's placeholder and there is a title now.
-func (o Overlay) NameOver(title string) string {
-	if o.AutoName && title != "" {
-		return ""
+// ErrUserNamed: the session has a name the user gave, which its agent's does not replace.
+var ErrUserNamed = errors.New("用户起的名，不改")
+
+// SetAgentName gives a session the name its agent chose (ir rename): over its title, under a name
+// the user gave (ErrUserNamed).
+func (s *Store) SetAgentName(session, name string) error {
+	r, err := s.db.Exec(`INSERT INTO names (session, name, auto) VALUES (?, ?, 1)
+		ON CONFLICT (session) DO UPDATE SET name = excluded.name WHERE names.auto = 1`, session, name)
+	if err != nil {
+		return err
 	}
-	return o.Name
+	if n, err := r.RowsAffected(); err == nil && n == 0 {
+		return ErrUserNamed
+	}
+	return nil
 }
 
 func (s *Store) SetPinned(session string, on bool) error { return s.flag("pins", session, on) }
@@ -344,9 +353,10 @@ func (s *Store) flag(table, session string, on bool) error {
 }
 
 type Workspace struct {
-	ID   int64  `json:"id"`
-	Name string `json:"name"`
-	Path string `json:"path"`
+	ID     int64  `json:"id"`
+	Name   string `json:"name"`
+	Path   string `json:"path"`
+	Hidden bool   `json:"hidden,omitempty"`
 }
 
 func (s *Store) AddWorkspace(name, path string) (int64, error) {
@@ -358,7 +368,7 @@ func (s *Store) AddWorkspace(name, path string) (int64, error) {
 }
 
 func (s *Store) Workspaces() ([]Workspace, error) {
-	rows, err := s.db.Query(`SELECT id, name, path FROM workspaces ORDER BY sort, id`)
+	rows, err := s.db.Query(`SELECT id, name, path, hidden FROM workspaces ORDER BY sort, id`)
 	if err != nil {
 		return nil, err
 	}
@@ -366,7 +376,7 @@ func (s *Store) Workspaces() ([]Workspace, error) {
 	var out []Workspace
 	for rows.Next() {
 		var w Workspace
-		if err := rows.Scan(&w.ID, &w.Name, &w.Path); err != nil {
+		if err := rows.Scan(&w.ID, &w.Name, &w.Path, &w.Hidden); err != nil {
 			return nil, err
 		}
 		out = append(out, w)

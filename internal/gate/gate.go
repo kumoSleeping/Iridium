@@ -70,6 +70,10 @@ type Config struct {
 	// connections closed.
 	OnRevoke func(endpointID string)
 
+	// SessionToken resolves a session's own bearer token (one with its prefix, never a channel's):
+	// the channel whose machine the session runs at, and the session. nil: none is taken.
+	SessionToken func(token string) (endpointID, session string, ok bool)
+
 	// OnJoin runs after a new panel registered, before its browser hears so.
 	OnJoin func(Joined)
 
@@ -78,7 +82,7 @@ type Config struct {
 	OnTerminals func()
 
 	// Open says which requests pass without a login, as no one: executors asking to pair
-	// (docs/exec.md). Their handlers check and limit them themselves.
+	// (docs/exec.md), whose handlers check and limit them themselves; the app's icons and manifest.
 	Open func(*http.Request) bool
 
 	Logger *slog.Logger     // default slog.Default()
@@ -127,6 +131,9 @@ type Identity struct {
 	Name       string
 	Kind       string // KindPanel or KindChannel
 	Local      bool   // the built-in 本机 (local-only mode); full rights
+	// Session: the request came with a session's own TOKEN (Config.SessionToken): the ir of an
+	// agent hosted at that channel's machine. It acts as that channel, for that session.
+	Session string
 }
 
 // CanManage reports whether the identity may manage other endpoints: web panels and 本机.
@@ -397,6 +404,21 @@ func (g *Gate) authorize(w http.ResponseWriter, r *http.Request) (reqAuth, bool)
 // session cookie. bad means a bearer token was presented and is not valid.
 func (g *Gate) identify(r *http.Request, now time.Time) (a reqAuth, ok, bad bool) {
 	if tok, has := bearer(r); has {
+		if g.cfg.SessionToken != nil && strings.HasPrefix(tok, sessionTokenPrefix) {
+			id, session, found := g.cfg.SessionToken(tok)
+			if !found {
+				return a, false, true
+			}
+			g.mu.Lock()
+			e, live := g.st.endpoints[id]
+			g.mu.Unlock()
+			if !live || e.Kind != KindChannel {
+				return a, false, true // its machine's Bot revoked
+			}
+			who := identityOf(e)
+			who.Session = session
+			return reqAuth{id: who}, true, false
+		}
 		if !wellFormedChannel(tok) {
 			return a, false, true
 		}

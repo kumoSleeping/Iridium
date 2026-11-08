@@ -305,3 +305,23 @@ func TestRevokeDropsExecutor(t *testing.T) {
 		t.Fatal("a revoked executor connected again")
 	}
 }
+
+// The icons and the manifest pass the public gate with no login (a browser fetches the manifest
+// without cookies); nothing else does by their names.
+func TestOpenIcons(t *testing.T) {
+	l := start(t)
+	l.want(200, "socket", "PUT", "/api/public", api.SetPublic{Origin: "https://ir.example.com"}, nil)
+	for _, p := range []string{"/manifest.webmanifest", "/favicon.svg", "/icons/icon-192.png"} {
+		if code := l.public("GET", p, "", nil, nil); code == 401 || code == 302 {
+			t.Errorf("GET %s: %d, want past the gate", p, code)
+		}
+	}
+	for _, p := range []string{"/icons/../api/sessions", "/api/sessions", "/"} {
+		if code := l.public("GET", p, "", nil, nil); code != 401 {
+			t.Errorf("GET %s: %d, want 401", p, code)
+		}
+	}
+	if code := l.public("POST", "/manifest.webmanifest", "", nil, nil); code != 401 {
+		t.Errorf("POST /manifest.webmanifest: %d, want 401", code)
+	}
+}

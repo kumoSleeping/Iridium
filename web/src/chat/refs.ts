@@ -56,11 +56,11 @@ export function sourceOf(from: string | undefined, terminal: string | undefined,
 }
 
 /** A session as the sender of a letter, as the sidebar calls it (the user, 2026-11-06): its given
- *  name, else the opening of its first message, else its folder. Not its agent: its face is the
+ *  name, else the opening of its first message, else 新会话. Not its agent: its face is the
  *  agent's logo. Its workspace only when it is not here, the workspace of the chat shown (none
  *  known: none added): "Run the holder's tests · KDJ". */
 export function senderName(s: Pick<Session, "id" | "name" | "title" | "cwd" | "workspace">, workspaces: { id: number; name: string }[] = [], here?: number): string {
-  const name = titleOf(s) || s.id.slice(0, 8);
+  const name = titleOf(s);
   if (here === undefined || (s.workspace ?? 0) === (here ?? 0)) return name;
   const where = (s.workspace && workspaces.find((w) => w.id === s.workspace)?.name) || s.cwd.split("/").filter(Boolean).pop();
   return where ? `${name} · ${where}` : name;

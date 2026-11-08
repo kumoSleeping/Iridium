@@ -13,6 +13,7 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -35,7 +36,7 @@ type Options struct {
 	State string // its own directory: holders' files, scratch
 	// Roots are the directories files may be read and written under; none: all but the denied.
 	Roots []string
-	// Deny are directories never served, besides its own TOKEN's and ~/.ssh.
+	// Deny are paths never served, besides its own TOKEN's, ~/.ssh and the agents' logins (denied).
 	Deny   []string
 	Agents []wire.AgentInfo
 	// NoShell: start nothing but the agents (an argv beginning with one of theirs), so no
@@ -43,8 +44,11 @@ type Options struct {
 	NoShell bool
 	// AgentShell: say agents there may run command lines here (ir sh), not only a person.
 	AgentShell bool
-	Env        []string // nil: os.Environ()
+	Env        []string // nil: os.Environ(); the hello gives it without secrets (helloEnv)
 	Program    string   // what the hello says it is; "": iridium-executor
+	// IR: an ir program (this binary) for the agents started with their session's own TOKEN: linked
+	// as <State>/bin/ir, first on their PATH (docs/exec.md "远端的 ir"). "": none.
+	IR string
 	// HTTPClient dials the Iridium; nil: http.DefaultClient.
 	HTTPClient *http.Client
 	// Connected is told each time the hello is answered: the terminal name the Iridium knows it by.
@@ -219,9 +223,65 @@ func (e *Executor) hello() wire.Hello {
 	return wire.Hello{
 		Protocol: wire.Protocol, Program: e.o.Program, OS: runtime.GOOS, Arch: runtime.GOARCH,
 		Home: home, Sep: string(filepath.Separator), Scratch: filepath.Join(e.o.State, "scratch"),
-		Env: e.o.Env, Agents: e.o.Agents, Holds: holds, NoShell: e.o.NoShell, AgentShell: e.o.AgentShell,
+		Env: helloEnv(e.o.Env), Agents: e.o.Agents, Holds: holds, NoShell: e.o.NoShell, AgentShell: e.o.AgentShell,
+		IRClient: e.o.IR != "",
 	}
 }
+
+// withIR is env for an agent started with its session's own TOKEN: ir first on its PATH, in its
+// holder's bin/ (dir), a script with the address (this connection's, unless env has one) and the
+// TOKEN written in, as an agent's commands need not get its environment, which runs this binary
+// by the name ir (bin/.ir/ir, a link).
+func (e *Executor) withIR(env []string, dir string) []string {
+	get := func(k string) (string, int) {
+		for i, kv := range env {
+			if name, v, _ := strings.Cut(kv, "="); strings.EqualFold(name, k) {
+				return v, i
+			}
+		}
+		return "", -1
+	}
+	tok, _ := get("IRIDIUM_TOKEN")
+	if e.o.IR == "" || tok == "" {
+		return env
+	}
+	env = slices.Clone(env)
+	u, i := get("IRIDIUM_URL")
+	if u == "" {
+		if i >= 0 {
+			env = slices.Delete(env, i, i+1)
+		}
+		base := strings.Replace(strings.Replace(e.o.URL, "wss://", "https://", 1), "ws://", "http://", 1)
+		if p, err := url.Parse(base); err == nil {
+			u = p.Scheme + "://" + p.Host
+			env = append(env, "IRIDIUM_URL="+u)
+		}
+	}
+	bin := filepath.Join(dir, "bin")
+	link := filepath.Join(bin, ".ir", "ir")
+	script := "#!/bin/sh\nIRIDIUM_URL=" + shQuote(u) + " IRIDIUM_TOKEN=" + shQuote(tok) + " exec " + shQuote(link) + " \"$@\"\n"
+	err := os.MkdirAll(filepath.Dir(link), 0o700)
+	if err == nil {
+		os.Remove(link)
+		err = os.Symlink(e.o.IR, link)
+	}
+	if err == nil {
+		err = os.WriteFile(filepath.Join(bin, "ir"), []byte(script), 0o700)
+	}
+	if err != nil {
+		e.o.Logf("executor: ir for its agents: %v", err)
+		return env
+	}
+	if p, i := get("PATH"); i >= 0 {
+		env[i] = env[i][:strings.Index(env[i], "=")+1] + bin + string(filepath.ListSeparator) + p
+	} else {
+		env = append(env, "PATH="+bin)
+	}
+	return env
+}
+
+// shQuote is s as one word for sh.
+func shQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
 // agentArgv: argv begins with one of the agents' own.
 func (e *Executor) agentArgv(argv []string) bool {
@@ -369,6 +429,7 @@ func (e *Executor) start(id string, spec spec) (any, error) {
 	if err := os.MkdirAll(h.dir, 0o700); err != nil {
 		return nil, err
 	}
+	spec.Env = e.withIR(spec.Env, h.dir)
 	out, err := os.OpenFile(filepath.Join(h.dir, fileOut), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o600)
 	if err != nil {
 		return nil, err
@@ -383,6 +444,7 @@ func (e *Executor) start(id string, spec spec) (any, error) {
 		h.grace = time.Duration(spec.StopGraceMS) * time.Millisecond
 	}
 	cmd := exec.Command(spec.Argv[0], spec.Argv[1:]...)
+	spec.Env = startEnv(spec.Env, e.o.Env)
 	cmd.Env, cmd.Dir, cmd.Stdout, cmd.Stderr = spec.Env, spec.Cwd, out, errLog
 	if p := lookPath(spec.Argv[0], spec.Env); p != "" {
 		cmd.Path, cmd.Err = p, nil
@@ -621,8 +683,7 @@ func (e *Executor) allowed(path string) (string, error) {
 		rel, err := filepath.Rel(root, real)
 		return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 	}
-	home, _ := os.UserHomeDir()
-	for _, d := range append([]string{filepath.Join(e.o.State, "token"), filepath.Join(home, ".ssh")}, e.o.Deny...) {
+	for _, d := range e.denied() {
 		if under(d) {
 			return "", &wire.Error{Code: wire.CodeDenied, Message: path}
 		}

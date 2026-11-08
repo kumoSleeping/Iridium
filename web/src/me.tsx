@@ -88,7 +88,13 @@ export function useTellLang() {
 }
 
 export function applyTheme(v: ThemePref, systemDark: boolean) {
-  document.documentElement.dataset.theme = v === "auto" ? (systemDark ? "dark" : "light") : v;
+  const theme = v === "auto" ? (systemDark ? "dark" : "light") : v;
+  document.documentElement.dataset.theme = theme;
+  // The browser's bar (an installed app's title bar) in the page's paper (index.html, theme.js).
+  for (const m of document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')) {
+    m.removeAttribute("media");
+    m.content = theme === "dark" ? "#121212" : "#fdfdfd";
+  }
 }
 export const keepTheme = (v: ThemePref) => keep("theme", v === "auto" ? null : v);
 

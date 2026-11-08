@@ -28,6 +28,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/config"
 	"github.com/kumoSleeping/iridium/internal/hub"
+	"github.com/kumoSleeping/iridium/internal/remote"
 	"github.com/kumoSleeping/iridium/internal/store"
 	"github.com/kumoSleeping/iridium/internal/transcript"
 )
@@ -53,6 +54,10 @@ type Options struct {
 	Rescan   time.Duration // how often the directories are looked at whole; 0 is a minute
 	ProcScan time.Duration // how often /proc is looked at; 0 is 3s
 	Settle   time.Duration // changes are told together after this; 0 is 200ms
+	// State: Iridium's state directory, where what other machines' dsh has is kept (remote.go);
+	// RemoteScan: how often each is looked at, 0 is 30s.
+	State      string
+	RemoteScan time.Duration
 }
 
 // Defaults are the agents' own places, as the config and the environment say.
@@ -64,6 +69,7 @@ func Defaults(cfg config.Config) Options {
 		CodexHome:  filepath.Join(home, ".codex"),
 		PiSessions: filepath.Join(home, ".pi", "agent", "sessions"),
 		DshHome:    filepath.Join(home, ".dsh"),
+		State:      cfg.StatePath(),
 		UID:        -1,
 	}
 	if d := os.Getenv("CODEX_HOME"); d != "" {
@@ -87,6 +93,9 @@ type entry struct {
 	glimpse
 	size  int64
 	mtime time.Time
+	// machine: the executor whose dsh session it is (remote.go), "" for this one's; there: the
+	// transcript's path there, path its mirror here.
+	machine, there string
 }
 
 // running is an agent process of a session.
@@ -128,6 +137,21 @@ type Index struct {
 
 	sinceOnce sync.Once
 	since     int64 // when Iridium began watching (ms)
+
+	// Other machines' dsh (remote.go).
+	hub       *remote.Hub
+	remoteMu  sync.Mutex
+	remotes   map[string]*dshAt      // by machine
+	scanLocks map[string]*sync.Mutex // by machine
+	fetchMu   sync.Mutex
+	fetched   map[string]time.Time // by session
+	// open: the sessions open in each machine's own dsh (DSH Desktop), as it last said; x.mu.
+	// noOpen: the machines that cannot say (remoteLoop's).
+	open   map[string]map[string]bool
+	noOpen map[string]bool
+	// filed: the sessions in one of DSH Desktop's workspaces at each machine, as its registry
+	// last read had them (none for a machine whose registry is not known); x.mu.
+	filed map[string]map[string]bool
 }
 
 // SetAlias tells the index the agent's own id of a session Iridium hosts under another (Codex's
@@ -169,12 +193,17 @@ func New(o Options) *Index {
 	if o.Settle == 0 {
 		o.Settle = 200 * time.Millisecond
 	}
+	if o.RemoteScan == 0 {
+		o.RemoteScan = 30 * time.Second
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Index{
 		o: o, ctx: ctx, cancel: cancel, kick: make(chan struct{}, 1),
 		entries: map[string]*entry{}, running: map[string]running{}, launchers: map[string]string{},
 		files: map[string]*transcript.File{}, changed: map[string]bool{},
 		dshKeys: map[string]string{},
+		remotes: map[string]*dshAt{}, scanLocks: map[string]*sync.Mutex{}, fetched: map[string]time.Time{},
+		open: map[string]map[string]bool{}, noOpen: map[string]bool{}, filed: map[string]map[string]bool{},
 	}
 }
 
@@ -189,12 +218,19 @@ func (x *Index) Start() error {
 	}
 	x.w = w
 	x.dropStaleColors()
+	if x.hub != nil && x.o.State != "" {
+		x.loadRemote()
+	}
 	x.Scan()
 	x.publishWorkspaces()
 	x.publishColors()
 	x.wg.Add(2)
 	go x.loop()
 	go x.settle()
+	if x.hub != nil && x.o.State != "" {
+		x.wg.Add(1)
+		go x.remoteLoop()
+	}
 	return nil
 }
 
@@ -350,8 +386,8 @@ func (x *Index) scanDisk() {
 		}
 	}
 	x.mu.Lock()
-	for id := range x.entries {
-		if !seen[id] {
+	for id, e := range x.entries {
+		if !seen[id] && e.machine == "" {
 			delete(x.entries, id)
 			delete(x.files, id)
 			x.changed[id] = true
@@ -392,7 +428,7 @@ func (x *Index) scanDir(dir string, made bool) (fresh bool) {
 				}
 				x.mu.Lock()
 				for id, e := range x.entries {
-					if (filepath.Dir(e.path) == d || filepath.Dir(filepath.Dir(e.path)) == d) && !seen[e.path] {
+					if e.machine == "" && (filepath.Dir(e.path) == d || filepath.Dir(filepath.Dir(e.path)) == d) && !seen[e.path] {
 						if _, err := os.Stat(e.path); err != nil {
 							delete(x.entries, id)
 							delete(x.files, id)
@@ -501,11 +537,31 @@ func (x *Index) Sessions(context.Context) ([]api.Session, error) {
 	return out, nil
 }
 
+// loose: e is a dsh session at another machine in none of DSH Desktop's workspaces there (its
+// 未分组), as far as its registry is known; a subagent never is. x.mu held.
+func (x *Index) loose(e *entry) bool {
+	filed, known := x.filed[e.machine]
+	return e.machine != "" && known && !e.sub && !filed[e.id]
+}
+
 func (x *Index) row(e *entry) api.Session {
 	s := api.Session{
 		ID: e.id, Agent: e.agent, Cwd: e.cwd, Title: e.title, Status: api.StatusIdle,
 		Last: e.last, UpdatedAt: e.mtime.UnixMilli(), Launcher: x.launcherOf(e),
 		Subagent: e.sub, Parent: e.parent, Done: e.sub && e.done, Workflow: e.flow,
+	}
+	if e.machine != "" {
+		s.Machine, s.Offline = e.machine, true
+		if x.hub == nil {
+			// no executors served: what was found there before, away
+		} else if mc := x.hub.Find(e.machine); mc != nil { // nil: not connected since Iridium started
+			_, online := mc.Hello()
+			s.Offline = !online
+		}
+		if x.open[e.machine][e.id] {
+			s.Status, s.Live = api.StatusElsewhere, true // open in DSH Desktop there
+		}
+		s.Loose = x.loose(e)
 	}
 	if r, ok := x.running[e.id]; ok && !r.ours {
 		s.Status, s.Live, s.Needs = api.StatusElsewhere, true, r.needs
@@ -555,6 +611,12 @@ func (x *Index) Free(id string) error {
 	r, live := x.running[id]
 	e := x.entries[id]
 	x.mu.Unlock()
+	if e != nil && e.machine != "" {
+		// Open in DSH Desktop (dsh.open) is shown, not a bar: Desktop loads sessions it only shows
+		// too, and one it did not hold before the executor came back was refused for good (the
+		// user, 2026-11-08). dsh there holds its own writer lock: a resume it refuses says so.
+		return nil
+	}
 	if live && !r.ours {
 		return fmt.Errorf("%w (process %d)", ErrBusy, r.pid)
 	}

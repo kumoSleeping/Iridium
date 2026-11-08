@@ -134,6 +134,11 @@ export interface Session {
    */
   machine?: string;
   offline?: boolean;
+  /**
+   * Loose: a dsh session at another machine in none of DSH Desktop's workspaces there (its 未分组):
+   * in 未归类, a row of its own, not in a folder.
+   */
+  loose?: boolean;
 }
 /**
  * LastSaid is the last thing said in a session, on one line, at most 200 characters.
@@ -484,6 +489,11 @@ export interface SendReply {
    * it come in the transcript.
    */
   command?: boolean;
+  /**
+   * Desktop: given to DSH Desktop's own agent of the session (it holds the session there; no
+   * input here): the turn runs in Desktop, its words come in the mirrored transcript.
+   */
+  desktop?: boolean;
 }
 /**
  * Release puts the process in manual mode for call ToolUseID, which Claude's auto mode classifier
@@ -821,20 +831,28 @@ export interface Workspace {
   id: number /* int64 */;
   name: string;
   path: string;
+  /**
+   * Hidden: hidden from the page (a group's menu): its sessions are not listed, searched or in
+   * 归档, but while one of them runs elsewhere (open in DSH Desktop).
+   */
+  hidden?: boolean;
 }
 /**
- * WorkspacePatch renames a group.
+ * WorkspacePatch renames a group, hides it or shows it again; a field left out stays.
  */
 export interface WorkspacePatch {
-  name: string;
+  name?: string;
+  hidden?: boolean;
 }
 /**
  * SessionPatch changes what lies over a session; a field left out stays. Name "" takes the name
  * off. Workspace moves it (0: none), and it is never moved by discovery again. Color "" takes the
- * colour tag off.
+ * colour tag off. ByAgent: Name is the session's agent's (ir rename from a session), which does
+ * not replace a name the user gave (409) and is cleaned as a title line is.
  */
 export interface SessionPatch {
   name?: string;
+  byAgent?: boolean;
   pinned?: boolean;
   archived?: boolean;
   workspace?: number /* int64 */;
@@ -1037,6 +1055,12 @@ export interface DirListing {
 export interface Copy {
   from: string;
   to: string;
+  /**
+   * FromMachine, ToMachine: that side is at another machine's executor (a Bot's ID or name),
+   * its path as that machine writes it; "": this one. Written there whole, so at most 4 MB.
+   */
+  fromMachine?: string;
+  toMachine?: string;
 }
 /**
  * CopyProgress is one line of a copy's stream: progress (Done of Size), then the last line with
@@ -1048,6 +1072,23 @@ export interface CopyProgress {
   path?: string;
   sha256?: string;
   error?: string;
+}
+/**
+ * CLIRun is POST /api/cli: ir at another machine, run by an agent hosted there (its session's own
+ * TOKEN; docs/exec.md "远端的 ir"): its arguments and its working directory there.
+ */
+export interface CLIRun {
+  args: string[];
+  cwd: string;
+}
+/**
+ * CLIOutput is one line of POST /api/cli's answer: what ir wrote, as it wrote it, and last its
+ * exit code.
+ */
+export interface CLIOutput {
+  out?: string;
+  err?: string;
+  exit?: number /* int */;
 }
 
 //////////
@@ -1555,6 +1596,16 @@ export interface Machine {
 export interface ExecAgent {
   agent: string;
   version?: string;
+}
+/**
+ * DshWorkspace is a folder a new dsh session at a machine may open in (GET
+ * /api/machines/{id}/dsh/workspaces): one of dsh's workspaces there, as DSH Desktop's sidebar
+ * has them, else a folder its sessions were in. Path is '/'-separated, as GET /api/folders gives.
+ */
+export interface DshWorkspace {
+  title: string;
+  path: string;
+  updatedAt?: number /* int64 */; // ms
 }
 /**
  * ExecPairing answers a pairing request: the code to show, and the request to ask after.

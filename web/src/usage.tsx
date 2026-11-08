@@ -6,7 +6,8 @@
 // right-clicked or held (phones), it is the only one left in (again: everyone). 全选 over the list and the chip at
 // the top put everyone back. Leaving or
 // coming back, the bars and the total glide to the new figures. A bar pressed narrows the page to
-// that day. A terminal's models are in its line and its tip; no page of its own. Over it all, the
+// that day. With one terminal in, the bars are its models, each in its colour (the user,
+// 2026-11-08). A terminal's models are in its line and its tip; no page of its own. Over it all, the
 // harnesses (the user, 2026-11-08): all four at first; pressed, one leaves the whole page (chart,
 // total, list) or comes back, and the last one taken out puts all four back; right-clicked, it is
 // the only one left in (again: all four).
@@ -45,6 +46,28 @@ const totalOf = (s: Sum) => s.input + s.output + s.cacheRead + s.cacheWrite;
 
 type ModelSum = { key: string; agent: Agent; model: string; sum: Sum };
 type TerminalSum = { id: string; sum: Sum; models: ModelSum[] };
+
+/** A model without its provider ("opencode-go/deepseek-flash": deepseek-flash). */
+const shortName = (model: string, agent: Agent) => model.split("/").pop() || agentName(agent);
+
+/** One terminal's range by day and model, the models the most first: the chart's parts when it is
+ *  the only terminal in. A model's key is its harness and model, as in summarize. */
+function modelsOf(rows: UsageRow[], terminal: string) {
+  const perDay = new Map<string, Map<string, Sum>>();
+  const range = new Map<string, number>();
+  for (const r of rows) {
+    if (r.terminal !== terminal) continue;
+    const k = `${r.agent}\u0000${r.model}`;
+    const d = perDay.get(r.day) ?? new Map<string, Sum>();
+    perDay.set(r.day, d);
+    const ds = d.get(k) ?? zero();
+    d.set(k, ds);
+    add(ds, r);
+    range.set(k, (range.get(k) ?? 0) + r.input + r.output + r.cacheRead + r.cacheWrite);
+  }
+  const order = [...range.keys()].sort((a, b) => range.get(b)! - range.get(a)! || a.localeCompare(b));
+  return { perDay, order };
+}
 
 /** The range by day and terminal; the terminals in the order of the whole range, the most first
  *  (the list and the stacks keep it as a day is chosen: nothing moves), each with its figures for
@@ -212,6 +235,13 @@ export function UsagePage() {
   const many = s.order.length > 1;
   const all = shown.length === s.order.length;
   const solo = shown.length === 1 && many ? shown[0] : undefined;
+  // Only one terminal in: the chart is its models instead, the rest of the page as it was.
+  const pick = shown.length === 1 ? shown[0] : undefined;
+  const models = useMemo(() => (pick !== undefined ? modelsOf(rows, pick) : undefined), [rows, pick]);
+  const modelColors = useMemo(() => paint(models?.order ?? []), [models]);
+  const parts = models
+    ? { perDay: models.perDay, order: models.order, colors: modelColors, on: () => true, name: (id: string) => { const [agent, model] = id.split("\u0000") as [Agent, string]; return shortName(model, agent); } }
+    : { perDay: s.perDay, order: s.order, colors, on, name: (id: string) => who(u, id).name };
   const everyone = () => setOff(new Set());
   // Only this one in; when it already is, everyone back.
   const only = (id: string) => setOff(solo === id ? new Set() : new Set(s.order.filter((o) => o !== id)));
@@ -250,7 +280,8 @@ export function UsagePage() {
           {q.isError && <p className="m-0 text-sm text-ink-3">{errText(q.error)}</p>}
           <section className="flex flex-col gap-3" aria-label={t("usage.title")}>
             <div className="flex min-h-4 min-w-0 items-center gap-1.5 text-xs text-ink-3">
-              {day ? chip("day", dayLabel(day), () => setDay(null)) : <span className="shrink-0">{rangeName(range)}</span>}
+              {/* 7 and 30 days are named by the range's switch; 24 hours says what it is. */}
+              {day ? chip("day", dayLabel(day), () => setDay(null)) : range === 1 && <span className="shrink-0">{rangeName(range)}</span>}
               {!all &&
                 chip(
                   "who",
@@ -282,7 +313,7 @@ export function UsagePage() {
                 </div>
               </div>
             )}
-            {u ? <Stacks key={range} u={u} days={u.days} perDay={s.perDay} order={s.order} colors={colors} on={on} sel={day} onSel={setDay} week={range === 7} /> : <StacksWaiting days={days} />}
+            {u ? <Stacks key={range} days={u.days} perDay={parts.perDay} order={parts.order} colors={parts.colors} on={parts.on} name={parts.name} sel={day} onSel={setDay} week={range === 7} /> : <StacksWaiting days={days} />}
           </section>
 
           <section className="flex flex-col" aria-label={t("usage.byTerminal")}>
@@ -460,7 +491,7 @@ function niceUnder(max: number) {
  *  taking someone out or putting them back, every part glides to its new height. One quiet line
  *  marks a round figure. Pressed, a day is chosen (pressed again, the range); its tip has the day's
  *  total and each one's. week: each day's weekday under it, else the range's ends. */
-function Stacks({ u, days, perDay, order, colors, on, sel, onSel, week }: { u: Usage; days: string[]; perDay: Map<string, Map<string, Sum>>; order: string[]; colors: Map<string, string>; on: (id: string) => boolean; sel: string | null; onSel: (d: string | null) => void; week: boolean }) {
+function Stacks({ days, perDay, order, colors, on, name, sel, onSel, week }: { days: string[]; perDay: Map<string, Map<string, Sum>>; order: string[]; colors: Map<string, string>; on: (id: string) => boolean; name: (id: string) => string; sel: string | null; onSel: (d: string | null) => void; week: boolean }) {
   const hours = hourly(days[0] ?? "");
   // Drawn first at nothing, the bars rise to their figures (their height's glide).
   const [risen, setRisen] = useState(false);
@@ -497,7 +528,7 @@ function Stacks({ u, days, perDay, order, colors, on, sel, onSel, week }: { u: U
             const cost = [...(day ?? [])].reduce((a, [id, s]) => a + (on(id) ? s.cost : 0), 0);
             const label = `${dayLabel(d)} · ${t("usage.tokens", { n: tokens(v) })}${cost ? ` · ${dollars(cost)}` : ""}`;
             return (
-              <Tip key={d} label={<BarTip label={label} u={u} day={day} order={order} colors={colors} on={on} />}>
+              <Tip key={d} label={<BarTip label={label} day={day} order={order} colors={colors} on={on} name={name} />}>
                 <button
                   type="button"
                   aria-label={label}
@@ -548,7 +579,7 @@ const CHART_H = 136;
 
 /** A bar's tip: the day's total, then each one's. Drawn only as it opens: 30 bars' lists made with
  *  every draw made a range chosen stutter. */
-function BarTip({ label, u, day, order, colors, on }: { label: string; u: Usage; day: Map<string, Sum> | undefined; order: string[]; colors: Map<string, string>; on: (id: string) => boolean }) {
+function BarTip({ label, day, order, colors, on, name }: { label: string; day: Map<string, Sum> | undefined; order: string[]; colors: Map<string, string>; on: (id: string) => boolean; name: (id: string) => string }) {
   const parts = order.filter((id) => on(id) && day?.get(id) && totalOf(day.get(id)!) > 0);
   return (
     <span className="flex flex-col gap-0.5 tabular-nums">
@@ -557,7 +588,7 @@ function BarTip({ label, u, day, order, colors, on }: { label: string; u: Usage;
         parts.slice(0, 6).map((id) => (
           <span key={id} className="flex items-center gap-1.5">
             <Dot color={colors.get(id)!} on />
-            <span className="min-w-0 flex-1 truncate">{who(u, id).name}</span>
+            <span className="min-w-0 flex-1 truncate">{name(id)}</span>
             <span className="ml-3">{tokens(totalOf(day!.get(id)!))}</span>
           </span>
         ))}
@@ -586,8 +617,7 @@ function StacksWaiting({ days }: { days: number }) {
   );
 }
 
-/** A model without its provider ("opencode-go/deepseek-flash": deepseek-flash). */
-const shortModel = (m: ModelSum) => m.model.split("/").pop() || agentName(m.agent);
+const shortModel = (m: ModelSum) => shortName(m.model, m.agent);
 
 /** A terminal: its avatar and name, its models in a line under it, its total and its part of
  *  everyone's in its colour. Clicked, it leaves the chart (its line faint) or comes back;

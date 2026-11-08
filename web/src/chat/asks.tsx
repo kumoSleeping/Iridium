@@ -24,7 +24,7 @@ type Q = { question: string; header?: string; options: { label: string; descript
 /** What a key press answers: an option of the card's, or a choice per question and own words. */
 type Reply = { option?: string; choices?: string[]; words?: string[]; message?: string };
 
-export function Asks({ session, asks, denials = [], cwd, confirms = [] }: { session: string; asks: Ask[]; denials?: Denial[]; cwd: string; confirms?: Confirm[] }) {
+export function Asks({ session, asks, cwd, confirms = [] }: { session: string; asks: Ask[]; cwd: string; confirms?: Confirm[] }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [leaving, setLeaving] = useState<string | null>(null);
   const answer = async (a: Ask, r: Reply) => {
@@ -41,7 +41,7 @@ export function Asks({ session, asks, denials = [], cwd, confirms = [] }: { sess
     }
   };
   const secretHere = useSecret()?.at === session;
-  if (!asks.length && !denials.length && !confirms.length && !secretHere) return null;
+  if (!asks.length && !confirms.length && !secretHere) return null;
   return (
     // Padded out under negative margins: the cards' shadows (12px down, 32px blur) are not cut, nor
     // over the meters row under it. Whole, however long (the user, 2026-11-06): it scrolls only
@@ -56,16 +56,45 @@ export function Asks({ session, asks, denials = [], cwd, confirms = [] }: { sess
           {a.kind === "question" ? <Question a={a} busy={busy === a.requestId} send={(r) => void answer(a, r)} /> : <Decide a={a} cwd={cwd} busy={busy === a.requestId} send={(r) => void answer(a, r)} />}
         </CardFrame>
       ))}
-      {denials.map((d) => (
-        <DenialCard key={d.toolUseId} d={d} session={session} cwd={cwd} />
-      ))}
     </div>
   );
 }
 
-/** A step Claude's auto mode turned down (session/release.go): it waits here, as an ask does, till
- *  you switch to manual for it — nothing said to Claude; run again, it is asked, and the mode is
- *  back after it or at the turn's end — or let it be (the user, 2026-11-08). */
+/** The steps Claude's auto mode turned down (session/release.go), at the conversation's end once the
+ *  turn is over: one line as a compaction's, "auto 拦了 2 步", folded, for Claude may have gone
+ *  another way; open, a card each. stuck: the turn stopped on one, the session waits for you: open
+ *  (the user, 2026-11-08). They go with your next message. */
+export function Denials({ session, denials, cwd, stuck }: { session: string; denials: Denial[]; cwd: string; stuck: boolean }) {
+  const [open, setOpen] = useState(stuck);
+  const [was, setWas] = useState(stuck);
+  if (stuck !== was) {
+    setWas(stuck);
+    if (stuck) setOpen(true);
+  }
+  return (
+    <div className="-mt-3">
+      <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className="g-fade flex h-7 w-full cursor-pointer items-center gap-3 text-xs text-ink-3 hover:text-ink-2 pointer-coarse:h-9">
+        <span aria-hidden className="h-px flex-1 bg-edge" />
+        <span className={cn("flex items-center gap-1", stuck && "text-need")}>
+          {t("denied.count", { n: denials.length })}
+          <ChevronDown size={12} className={cn("text-ink-4 transition-transform", open && "rotate-180")} />
+        </span>
+        <span aria-hidden className="h-px flex-1 bg-edge" />
+      </button>
+      {open && (
+        <div className="mt-1 flex flex-col gap-2">
+          {denials.map((d) => (
+            <DenialCard key={d.toolUseId} d={d} session={session} cwd={cwd} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** A step auto mode turned down: switch to manual for it — nothing said to Claude; run again, it
+ *  is asked, and the mode is back after it or at the turn's end — or let it be (the user,
+ *  2026-11-08). */
 function DenialCard({ d, session, cwd }: { d: Denial; session: string; cwd: string }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<"release" | "dismiss" | null>(null);

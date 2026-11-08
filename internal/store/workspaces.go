@@ -67,6 +67,21 @@ func (s *Store) AssignAuto(session string, workspace int64) (bool, error) {
 	return n == 1, err
 }
 
+// Regroup moves session from workspace from to workspace to (0: none) by discovery, if discovery
+// put it there and you did not move it since. False if it was not moved.
+func (s *Store) Regroup(session string, from, to int64) (bool, error) {
+	var ws any
+	if to != 0 {
+		ws = to
+	}
+	r, err := s.db.Exec(`UPDATE assignments SET workspace = ?, at = ? WHERE session = ? AND workspace = ? AND manual = 0`, ws, now(), session, from)
+	if err != nil {
+		return false, err
+	}
+	n, err := r.RowsAffected()
+	return n == 1, err
+}
+
 // Move is the user moving a session to a workspace (0: none). It sticks: discovery never moves
 // the session again.
 func (s *Store) Move(session string, workspace int64) error {
@@ -99,6 +114,18 @@ func (s *Store) CreateWorkspace(name, path string) (int64, error) {
 
 func (s *Store) RenameWorkspace(id int64, name string) error {
 	r, err := s.db.Exec(`UPDATE workspaces SET name = ? WHERE id = ?`, name, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := r.RowsAffected(); n == 0 {
+		return ErrNoWorkspace
+	}
+	return nil
+}
+
+// HideWorkspace hides a workspace from the page, or shows it again.
+func (s *Store) HideWorkspace(id int64, hidden bool) error {
+	r, err := s.db.Exec(`UPDATE workspaces SET hidden = ? WHERE id = ?`, hidden, id)
 	if err != nil {
 		return err
 	}

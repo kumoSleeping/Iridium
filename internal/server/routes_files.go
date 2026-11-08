@@ -196,6 +196,10 @@ func (s *Server) attachPath(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listDir(w http.ResponseWriter, r *http.Request) {
+	if m := r.URL.Query().Get("machine"); m != "" {
+		s.listAt(w, r, m, r.URL.Query().Get("path"))
+		return
+	}
 	l, err := s.files.List(r.URL.Query().Get("path"))
 	if err != nil {
 		s.fileError(w, err)
@@ -209,6 +213,10 @@ func (s *Server) listDir(w http.ResponseWriter, r *http.Request) {
 func (s *Server) copyFile(w http.ResponseWriter, r *http.Request) {
 	var req api.Copy
 	if !readJSON(w, r, &req) {
+		return
+	}
+	if req.FromMachine != "" || req.ToMachine != "" {
+		s.copyAcross(w, r, req)
 		return
 	}
 	job, err := s.files.Copy(req.From, req.To)

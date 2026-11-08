@@ -16,8 +16,10 @@ import (
 )
 
 // A step Claude's auto mode classifier turned down never reaches Iridium as an ask: the CLI
-// answers the model itself (the user, 2026-11-07). Each one waits as a card above the composer
-// (Denials) till you switch to manual for it or let it be (the user, 2026-11-08). Switching: the
+// answers the model itself (the user, 2026-11-07). Each one is kept (Denials) till you switch to
+// manual for it, let it be, or send the session a message (the user, 2026-11-08). They need you
+// only when the turn stopped on one, no call done after it (stuckOn): else Claude went another
+// way, and the page shows them folded, the session idle (the user, 2026-11-08). Switching: the
 // running process goes to manual mode (only it: the session's setting stays, so a restart is back
 // in its own mode) and nothing is said to Claude: a message in your name told it to run the step
 // again, though it may have gone another way meanwhile (the user, 2026-11-08). The first step
@@ -193,6 +195,20 @@ func (h *Hosted) deniedLocked(e agent.ToolDone) bool {
 		h.denials = slices.Delete(h.denials, 0, n-maxDenials)
 	}
 	return true
+}
+
+// stuckLocked: the turn stopped on a call auto mode denied, its card still there.
+func (h *Hosted) stuckLocked() bool {
+	return h.stuckOn != "" && slices.ContainsFunc(h.denials, func(d api.Denial) bool { return d.ToolUseID == h.stuckOn })
+}
+
+// dropDenials takes every card away (a message sent: you went on); false if there were none.
+func (h *Hosted) dropDenials() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	n := len(h.denials)
+	h.denials, h.stuckOn = nil, ""
+	return n > 0
 }
 
 // dropDenial takes call tool's card away; false if there was none.

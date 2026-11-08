@@ -10,6 +10,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/access"
 	"github.com/kumoSleeping/iridium/internal/agents"
 	"github.com/kumoSleeping/iridium/internal/api"
+	"github.com/kumoSleeping/iridium/internal/remote/wire"
 )
 
 // The executors (docs/exec.md) as the page lists them: each one that connected, what it last said
@@ -35,13 +36,24 @@ func (s *Server) WatchMachines() {
 // SlowRTT: a round trip above it is a slow connection (the page's yellow lamp).
 const SlowRTT = 300 * time.Millisecond
 
-// watchLatency tells the pages again when a machine's connection turns slow or fast again, by the
-// heartbeat's round trips (not on every one).
+// watchLatency tells the pages again when a machine's round trip has moved enough to show: its
+// first one on a connection, crossing SlowRTT, or by a quarter and LatencyStep at once. The
+// heartbeat measures it every wire.PingEvery; the page shows it by the group's lamp.
 func (s *Server) watchLatency() {
-	slow := map[string]bool{}
-	for range time.Tick(30 * time.Second) {
+	type seen struct {
+		c   *wire.Conn
+		rtt time.Duration
+	}
+	last := map[string]seen{}
+	for range time.Tick(10 * time.Second) {
 		changed := false
-		for _, id := range s.Remote.Online() {
+		online := s.Remote.Online()
+		for id := range last {
+			if !slices.Contains(online, id) {
+				delete(last, id)
+			}
+		}
+		for _, id := range online {
 			mc := s.Remote.Machine(id)
 			if mc == nil {
 				continue
@@ -50,14 +62,28 @@ func (s *Server) watchLatency() {
 			if err != nil || c.RTT() == 0 {
 				continue
 			}
-			if v := c.RTT() > SlowRTT; v != slow[id] {
-				slow[id], changed = v, true
+			if was, now := last[id], c.RTT(); was.c != c || latencyMoved(was.rtt, now) {
+				last[id], changed = seen{c, now}, true
 			}
 		}
 		if changed {
 			s.publishMachines()
 		}
 	}
+}
+
+// LatencyStep: a round trip changed by less is not told again.
+const LatencyStep = 20 * time.Millisecond
+
+func latencyMoved(was, now time.Duration) bool {
+	if (was > SlowRTT) != (now > SlowRTT) {
+		return true
+	}
+	d := now - was
+	if d < 0 {
+		d = -d
+	}
+	return d >= LatencyStep && d*4 >= was
 }
 
 // machineSeen keeps what executor id said, if it is connected, and tells the pages.
@@ -121,4 +147,5 @@ func (s *Server) publishMachines() { s.hub.Set("machines", s.machines()) }
 
 func (s *Server) machineRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/machines", func(w http.ResponseWriter, r *http.Request) { reply(w, http.StatusOK, s.machines()) })
+	mux.HandleFunc("GET /api/machines/{id}/dsh/workspaces", s.dshWorkspaces)
 }

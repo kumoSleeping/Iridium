@@ -47,8 +47,12 @@ type Server struct {
 	hub *hub.Hub
 
 	terminalsSeq atomic.Int64 // the "terminals" state's count (terminalsChanged)
-	st           *store.Store
-	logf         func(string, ...any)
+	// CLI runs the ir of a session at another machine (POST /api/cli); nil: none.
+	CLI CLIAt
+	// tokenFor stands in for the session manager's SessionToken in tests.
+	tokenFor func(tok string) (endpointID, session string, ok bool)
+	st       *store.Store
+	logf     func(string, ...any)
 	// ConfigPath is where PUT /api/public saves public.origin; "" saves it nowhere.
 	ConfigPath string
 	// Updater, if set, serves /api/update and carries the state "update".
@@ -145,6 +149,9 @@ func (s *Server) Handler(local bool) http.Handler {
 	s.extensionRoutes(mux)
 	s.discoverRoutes(mux)
 	s.fileRoutes(mux, local)
+	if !local {
+		s.cliRoutes(mux)
+	}
 	if local {
 		return s.socketHandler(mux)
 	}
@@ -295,8 +302,9 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 	c := callerOf(r)
 	// What an agent tells another session joins its turn at once, --queue or not: queued, it would
 	// wait for a person to press it in (the user, 2026-11-06).
-	// (An agent's ir on the socket names the session it runs in.)
-	if c.socket && (c.agent || c.session != "") {
+	// (An agent's ir on the socket names the session it runs in; one at another machine is an
+	// agent's by its session's TOKEN.)
+	if c.agent || c.socket && c.session != "" {
 		req.Steer = true
 	}
 	if err := s.checkSend(c, r.PathValue("id")); err != nil {
@@ -326,6 +334,10 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 	input, queued, err := s.m.SendWith(r.Context(), r.PathValue("id"), text, s.fromOf(c, req.Caller), req.Steer, images...)
 	if err != nil {
 		s.error(w, err)
+		return
+	}
+	if input == session.DesktopInput {
+		reply(w, http.StatusOK, api.SendReply{Desktop: true})
 		return
 	}
 	reply(w, http.StatusOK, api.SendReply{Input: input, Queued: queued, Command: s.m.RunsItself(r.PathValue("id"), text)})
@@ -478,7 +490,7 @@ func (s *Server) execConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c := callerOf(r)
-	if c.Kind != gate.KindChannel || c.Local || c.socket {
+	if c.Kind != gate.KindChannel || c.Local || c.socket || c.session != "" {
 		fail(w, http.StatusForbidden, "an executor connects with a TOKEN")
 		return
 	}

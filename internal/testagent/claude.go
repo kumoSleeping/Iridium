@@ -371,6 +371,18 @@ func Claude() int {
 				note(map[string]any{"type": "user", "timestamp": stamp(), "message": map[string]any{"role": "user", "content": []any{result}}})
 				finish(f, nil)
 				continue
+			case strings.HasSuffix(text, "AROUND"):
+				// Denied, then Claude goes another way: a call that runs.
+				call := map[string]any{"type": "tool_use", "id": "toolu_denied", "name": "Bash", "input": map[string]any{"command": "npx -y some-tool", "description": "fetch a tool"}}
+				result := map[string]any{"type": "tool_result", "tool_use_id": "toolu_denied", "is_error": true, "content": "Permission for this action was denied by the Claude Code auto mode classifier. Reason: [Code from External]."}
+				other := map[string]any{"type": "tool_use", "id": "toolu_other", "name": "Bash", "input": map[string]any{"command": "ls", "description": "list"}}
+				done := map[string]any{"type": "tool_result", "tool_use_id": "toolu_other", "content": "a.txt"}
+				for _, m := range []map[string]any{{"role": "assistant", "content": []any{call}}, {"role": "user", "content": []any{result}}, {"role": "assistant", "content": []any{other}}, {"role": "user", "content": []any{done}}} {
+					say(map[string]any{"type": m["role"], "parent_tool_use_id": nil, "message": m})
+					note(map[string]any{"type": m["role"], "timestamp": stamp(), "message": m})
+				}
+				finish(f, nil)
+				continue
 			case strings.HasSuffix(text, "AGAIN"):
 				// Switched to manual for the denied call: the same call again, asked now.
 				pending, asked = f, 1

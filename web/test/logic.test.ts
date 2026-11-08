@@ -10,10 +10,11 @@ import { crashParts } from "../src/chat/crash";
 import { levelName, restAt } from "../src/chat/effort";
 import { ctxParts, modelView } from "../src/chat/meters";
 import { atSessions, atWord, leadingMentions, mentions, shortId, sourceOf, withoutFiles, withoutNameLines, draftWords } from "../src/chat/refs";
+import { t } from "../src/i18n";
 import { en } from "../src/i18n/en";
 import { zh } from "../src/i18n/zh";
 import { jumpList } from "../src/jump";
-import { buildTree, commonDir, flat } from "../src/tree";
+import { buildTree, commonDir, flat, groupPath, remotePath } from "../src/tree";
 import { entryOf, reloadNow } from "../src/upgrade";
 import { tilde, titleOf } from "../src/ui";
 
@@ -117,19 +118,19 @@ describe("sourceOf", () => {
   test("letters: a plugin with its sender, another session's ir by its title as the sidebar has it, its workspace only when not this one's; Iridium's own line", () => {
     expect(sourceOf("QQ·张三", "q", me, terminals, sessions)).toMatchObject({ kind: "letter", name: "QQ·张三", avatar: "/q.png", channel: true });
     expect(sourceOf("ir:s1", "local", local, terminals, sessions)).toMatchObject({ kind: "letter", name: "holder", agent: "codex", session: "s1", channel: false, where: "/w" });
-    expect(sourceOf("ir:s2", "p", me, terminals, sessions, ws)).toMatchObject({ kind: "letter", name: "Iridium", agent: "claude", session: "s2" }); // no title: its folder
+    expect(sourceOf("ir:s2", "p", me, terminals, sessions, ws)).toMatchObject({ kind: "letter", name: t("session.new"), agent: "claude", session: "s2" }); // no title: 新会话, as the sidebar has it
     expect(sourceOf("ir:s3", "local", me, terminals, sessions, ws)).toMatchObject({ name: "hi there" }); // its first message's opening
     // Here: the chat shown is in workspace 3. One in it is its title alone; one elsewhere adds where it is.
-    expect(sourceOf("ir:s2", "p", me, terminals, sessions, ws, { workspace: 3 })).toMatchObject({ name: "Iridium" });
+    expect(sourceOf("ir:s2", "p", me, terminals, sessions, ws, { workspace: 3 })).toMatchObject({ name: t("session.new") });
     expect(sourceOf("ir:s3", "p", me, terminals, sessions, ws, { workspace: 3 })).toMatchObject({ name: "hi there · notes" });
     expect(sourceOf("ir:s3", "p", me, terminals, sessions, ws, {})).toMatchObject({ name: "hi there" }); // both unsorted
-    expect(sourceOf("ir:s2", "p", me, terminals, sessions, ws, { workspace: 0 })).toMatchObject({ name: "Iridium · Iri" });
-    expect(sourceOf("ir:s2", "p", me, terminals, sessions, ws, { parent: undefined })).toMatchObject({ name: "Iridium · Iri" }); // here unsorted, its field left out
+    expect(sourceOf("ir:s2", "p", me, terminals, sessions, ws, { workspace: 0 })).toMatchObject({ name: `${t("session.new")} · Iri` });
+    expect(sourceOf("ir:s2", "p", me, terminals, sessions, ws, { parent: undefined })).toMatchObject({ name: `${t("session.new")} · Iri` }); // here unsorted, its field left out
     expect(sourceOf("ir:gone1234567", "local", me, terminals, sessions)).toEqual({ kind: "letter", name: "gone1234", channel: false });
     expect(sourceOf("Iridium", "Iridium", me, terminals, sessions)).toEqual({ kind: "iridium" });
   });
   test("a subagent's prompt is its parent's: by the parent's name, a workflow's with its name", () => {
-    expect(sourceOf(undefined, undefined, me, terminals, sessions, ws, { subagent: true, parent: "s2", workspace: 3 })).toEqual({ kind: "letter", name: "Iridium", channel: false, agent: "claude", session: "s2", where: "/home/k/Iridium" });
+    expect(sourceOf(undefined, undefined, me, terminals, sessions, ws, { subagent: true, parent: "s2", workspace: 3 })).toEqual({ kind: "letter", name: t("session.new"), channel: false, agent: "claude", session: "s2", where: "/home/k/Iridium" });
     expect(sourceOf(undefined, undefined, me, terminals, sessions, ws, { subagent: true, parent: "s1", workflow: { run: "r", name: "review" } })).toEqual({ kind: "letter", name: "holder · review", channel: false, agent: "codex", session: "s1", workflow: true, where: "/w" });
     expect(sourceOf(undefined, undefined, me, terminals, sessions, ws, { subagent: true, parent: "gone1234567" })).toEqual({ kind: "letter", name: "gone1234", channel: false, session: "gone1234567" });
     // Not a subagent, or tagged: as before.
@@ -196,6 +197,38 @@ describe("buildTree", () => {
     expect(commonDir(["/a/b/c", "/a/b/d"])).toBe("/a/b");
     expect(commonDir(["/a/b", "/a/b"])).toBe("/a");
     expect(commonDir(["/a", "/b"])).toBe("");
+    expect(commonDir(["m:C:/Code/a", "m:C:/Code/b"])).toBe("m:C:/Code");
+    expect(commonDir(["m:C:/Code/a", "/w/a"])).toBe("");
+  });
+  test("a hidden group: nowhere (list, 归档, jump box) but while one of its sessions runs elsewhere", () => {
+    const wss = [{ id: 1, name: "Iridium", path: "/w/ir", hidden: true }];
+    const list = [S("a", "/w/ir", { workspace: 1, live: false }), S("b", "/w/ir/web", { workspace: 1, live: false }), S("c", "/w/ir", { workspace: 1, archived: true }), S("d", "/w/x")];
+    const t = buildTree(list, wss, "未归类");
+    expect(t.workspaces.map((w) => w.name)).toEqual(["未归类"]);
+    expect(t.archived).toEqual([]);
+    expect([...t.hidden].sort()).toEqual(["a", "b", "c"]);
+    expect(flat(t).map((s) => s.id)).toEqual(["d"]);
+    // Opened in DSH Desktop: listed whole, its menu to show it again.
+    const open = buildTree(list.map((s) => (s.id === "b" ? { ...s, live: true, status: "elsewhere" as const } : s)), wss, "未归类");
+    expect(open.workspaces.map((w) => [w.name, w.hidden])).toEqual([["Iridium", true], ["未归类", undefined]]);
+    expect(flat(open).map((s) => s.id)).toEqual(["a", "b", "d"]);
+    expect(open.archived.map((s) => s.id)).toEqual(["c"]);
+  });
+  test("a session at another machine: grouped by its machine's path, not one folder more with its path", () => {
+    const wss = [{ id: 7, name: "Starmod", path: "m:C:/Code/Starmod" }];
+    const list = [S("a", "C:\\Code\\Starmod", { workspace: 7, machine: "m" }), S("b", "C:\\Code\\Starmod\\web", { workspace: 7, machine: "m" }), S("c", "C:\\Code\\jl", { machine: "m" }), S("d", "C:\\Code\\Starmod", { workspace: 7, machine: "m", archived: true })];
+    const t = buildTree(list, wss, "未归类");
+    expect(t.workspaces[0]!.rows.map((r) => (r.kind === "session" ? r.s.id : `[${r.f.name}:${r.f.path}]`))).toEqual(["a", "[web:m:C:/Code/Starmod/web]"]);
+    expect(t.workspaces[1]!.rows.map((r) => (r.kind === "session" ? r.s.id : r.f.path))).toEqual(["m:C:/Code/jl"]);
+    expect(t.where.get("d")).toBe("Starmod");
+    // One of this machine's in that group: a row of its own, no folder.
+    const here = buildTree([S("h", "/root", { workspace: 7 }), S("a", "C:\\Code\\Starmod", { workspace: 7, machine: "m" })], wss, "未归类");
+    expect(here.workspaces[0]!.rows.map((r) => (r.kind === "session" ? r.s.id : r.f.path))).toEqual(["h", "a"]);
+    // In DSH's 未分组: a row of its own in 未归类, no folder.
+    const u = buildTree([S("e", "C:\\Users\\o\\Documents\\DSH\\2026-11-02\\新聊天", { machine: "m", loose: true }), S("f", "/w/x/one")], wss, "未归类");
+    expect(u.workspaces[0]!.rows.map((r) => (r.kind === "session" ? r.s.id : r.f.path))).toEqual(["e", "/w/x/one"]);
+    expect(groupPath(list[1]!)).toBe("m:C:/Code/Starmod/web");
+    expect([remotePath("m:C:/Code"), remotePath("/w"), remotePath("")]).toEqual([true, false, false]);
   });
   test("subagents under a session keep the order they came in", () => {
     const now = 1_000_000;
@@ -307,9 +340,9 @@ describe("i18n", () => {
 
 describe("names", () => {
   test("a session's name; ~ for home", () => {
-    expect(titleOf({ cwd: "/w/x", title: "t" })).toBe("t");
-    expect(titleOf({ cwd: "/w/x", name: "n", title: "t" })).toBe("n");
-    expect(titleOf({ cwd: "/w/x/" })).toBe("x");
+    expect(titleOf({ title: "t" })).toBe("t");
+    expect(titleOf({ name: "n", title: "t" })).toBe("n");
+    expect(titleOf({})).toBe(t("session.new")); // nothing said yet: not its folder
     expect(tilde("/home/kumo/a")).toBe("~/a");
     expect(tilde("/tmp/a")).toBe("/tmp/a");
   });

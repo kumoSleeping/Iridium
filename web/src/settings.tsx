@@ -9,12 +9,13 @@
 // Changed is saved at once (GET/PUT /api/settings). Reaping idle agents and going on after a crash
 // or a quota are not here: as the config file says, by default 1h and on (the user, 2026-11-07).
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, LoaderCircle, LogOut, RefreshCw } from "lucide-react";
+import { ChevronLeft, ChevronRight, LoaderCircle, LogOut, MonitorDown, RefreshCw, Share, SquarePlus } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { api, ApiError } from "./api/client";
 import type { PushEvents, PushState, Settings, SettingsPatch } from "./api/types.gen";
 import { pushQ, useMe, useSettings, useTerminals, useUpdate } from "./data";
 import { t, useLang } from "./i18n";
+import { install, useInstall } from "./install";
 import { LangSwitch, ThemeSwitch, type ThemePref } from "./me";
 import { AvatarCrop, Profile } from "./profile";
 import { PUSH_EVENTS, subscribe } from "./pushmenu";
@@ -130,6 +131,7 @@ export function SettingsPage({ theme, setTheme, initial = "main" }: { theme: The
               </>,
             )}
           {manages && nav(t("secrets.title"), () => go({ name: "secrets" }))}
+          <InstallItem />
           <Item label={t("settings.pushOn")}>
             {pushing ? <LoaderCircle size={16} className="animate-spin text-ink-3" /> : <Switch label={t("settings.pushOn")} disabled={!push || !("PushManager" in window)} on={pushed} onChange={(v) => void pushOn(v)} />}
           </Item>
@@ -216,6 +218,33 @@ export function Item({ label, hint, children, below }: { label: ReactNode; hint?
       </div>
       <div className="flex shrink-0 items-center">{children}</div>
     </div>
+  );
+}
+
+/** 添加到主屏幕 (install.ts), above Web Push (an iPhone pushes only to a page on its home screen):
+ *  the browser's prompt on a key, 安装为应用 on a computer; on iOS and Safari on a Mac, whose
+ *  browsers keep it in their own menu, that menu's name. */
+function InstallItem() {
+  const how = useInstall();
+  if (!how) return null;
+  if (how === "key") {
+    const phone = matchMedia("(pointer: coarse)").matches;
+    const label = t(phone ? "settings.install" : "settings.installApp");
+    return (
+      <Item label={label}>
+        <IconKey label={label} onClick={() => void install()} className="size-7">
+          {phone ? <SquarePlus size={15} /> : <MonitorDown size={15} />}
+        </IconKey>
+      </Item>
+    );
+  }
+  return (
+    <Item label={t(how === "ios" ? "settings.install" : "settings.installDock")}>
+      <span className="flex items-center gap-1 text-xs text-ink-3">
+        {how === "ios" && <Share size={13} />}
+        {t(how === "ios" ? "settings.installIos" : "settings.installMac")}
+      </span>
+    </Item>
   );
 }
 

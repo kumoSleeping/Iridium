@@ -62,6 +62,15 @@ func IsAbs(sep, path string) bool {
 		(path[0]|0x20 >= 'a' && path[0]|0x20 <= 'z')
 }
 
+// GroupPath is the folder a session at machine is grouped by: "<machine>:<cwd with />", a path
+// no folder here holds; cwd itself for this machine ("").
+func GroupPath(machine, cwd string) string {
+	if machine == "" {
+		return cwd
+	}
+	return machine + ":" + strings.ReplaceAll(cwd, `\`, "/")
+}
+
 func (m *Machine) Stat(ctx context.Context, path string) (wire.Stat, error) {
 	var st wire.Stat
 	err := m.Call(ctx, "fs.stat", wire.StatParams{Path: path}, &st)
@@ -113,6 +122,26 @@ func (m *Machine) WriteFile(ctx context.Context, path string, data []byte, repla
 
 func (m *Machine) Mkdir(ctx context.Context, path string) error {
 	return m.Call(ctx, "fs.mkdir", wire.PathParams{Path: path}, nil)
+}
+
+// DshOpen is the sessions open in the dsh the executor runs in (DSH Desktop's, through the dsh
+// plugin); an error of wire.CodeUnsupported from one that cannot say.
+func (m *Machine) DshOpen(ctx context.Context) (wire.DshOpenReply, error) {
+	var r wire.DshOpenReply
+	err := m.Call(ctx, "dsh.open", struct{}{}, &r)
+	return r, err
+}
+
+// DshPrompt gives a message to the agent of a session the dsh the executor runs in holds (DSH
+// Desktop's).
+func (m *Machine) DshPrompt(ctx context.Context, session, text string, steer bool) error {
+	return m.Call(ctx, "dsh.prompt", wire.DshPromptParams{Session: session, Text: text, Steer: steer}, nil)
+}
+
+// DshAttach files session under the workspace of its folder cwd in the dsh the executor runs in
+// (DSH Desktop's sidebar), made if there is none.
+func (m *Machine) DshAttach(ctx context.Context, session, cwd string) error {
+	return m.Call(ctx, "dsh.attach", wire.DshAttachParams{Session: session, Cwd: cwd}, nil)
 }
 
 // headSize is how much of a mirrored file's start is checked for its being the same file.

@@ -137,6 +137,30 @@ func (s *Server) remoteMkdir(w http.ResponseWriter, r *http.Request, req api.New
 	reply(w, http.StatusOK, api.FolderReply{Path: pagePath(hi, p)})
 }
 
+// dshWorkspaces is GET /api/machines/{id}/dsh/workspaces: the folders a new dsh session there may
+// open in, dsh's own workspaces first (docs/exec.md "远端 DSH").
+func (s *Server) dshWorkspaces(w http.ResponseWriter, r *http.Request) {
+	mc, hi := s.machineAt(w, r.PathValue("id"))
+	if mc == nil {
+		return
+	}
+	if s.Discover == nil {
+		reply(w, http.StatusOK, []api.DshWorkspace{})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	defer cancel()
+	ws, err := s.Discover.DshWorkspaces(ctx, mc.ID())
+	if err != nil {
+		s.remoteError(w, err)
+		return
+	}
+	for i := range ws {
+		ws[i].Path = pagePath(hi, ws[i].Path)
+	}
+	reply(w, http.StatusOK, ws)
+}
+
 func (s *Server) remoteError(w http.ResponseWriter, err error) {
 	switch {
 	case wire.IsCode(err, wire.CodeNotFound):

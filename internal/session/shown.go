@@ -91,7 +91,7 @@ func (m *Manager) SetArchived(ctx context.Context, id string, on bool) error {
 			_, err = m.o.Store.Show(string(s.Agent), id)
 		} else {
 			size, _ := m.sizeOf(id)
-			if f != nil {
+			if f != nil && s.Machine == "" { // at another machine: its size there, as discovery counts
 				size, _ = f.Size()
 			}
 			err = m.o.Store.Hide(string(s.Agent), id, size, 0)

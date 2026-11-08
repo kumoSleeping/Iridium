@@ -45,7 +45,7 @@ func (m *Manager) Clear(ctx context.Context, id, from string) (string, error) {
 	req := api.NewSession{Agent: mt.Agent, Cwd: mt.Cwd, Model: mt.Model, Mode: mt.Mode, Preset: preset, Caller: mt.Launcher, Machine: mt.Machine}
 	var name string // the one the old was given, if it is to go to the archive
 	if over, err := m.o.Store.Overlays(); err == nil {
-		if o := over[h.id]; !o.AutoName && !h.busy() && len(h.asksNow()) == 0 {
+		if o := over[h.id]; !o.AgentNamed && !h.busy() && len(h.asksNow()) == 0 {
 			name = o.Name
 		}
 		req.Workspace = over[h.id].Workspace
@@ -117,8 +117,8 @@ func (m *Manager) clearedInside(h *Hosted, proc int, nid string) {
 	var workspace int64
 	var name string
 	if over, err := m.o.Store.Overlays(); err == nil {
-		if !over[h.id].AutoName {
-			name = over[h.id].Name // the one it was given; a placeholder stays behind
+		if !over[h.id].AgentNamed {
+			name = over[h.id].Name // the one the user gave; its agent's stays behind
 		}
 		if workspace = over[h.id].Workspace; workspace == 0 {
 			workspace = over[h.discoveredAs()].Workspace

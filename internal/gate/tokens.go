@@ -16,6 +16,9 @@ const (
 	tokenBytes         = 32
 	tokenLen           = 43
 	channelTokenPrefix = "ir_"
+	// sessionTokenPrefix marks a session's own token (session.IRTokenPrefix), resolved by
+	// Config.SessionToken.
+	sessionTokenPrefix = "irs_"
 )
 
 var idEncoding = base32.NewEncoding("abcdefghijklmnopqrstuvwxyz234567").WithPadding(base32.NoPadding)

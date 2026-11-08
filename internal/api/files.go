@@ -76,6 +76,10 @@ type DirListing struct {
 type Copy struct {
 	From string `json:"from"`
 	To   string `json:"to"`
+	// FromMachine, ToMachine: that side is at another machine's executor (a Bot's ID or name),
+	// its path as that machine writes it; "": this one. Written there whole, so at most 4 MB.
+	FromMachine string `json:"fromMachine,omitempty"`
+	ToMachine   string `json:"toMachine,omitempty"`
 }
 
 // CopyProgress is one line of a copy's stream: progress (Done of Size), then the last line with
@@ -86,4 +90,19 @@ type CopyProgress struct {
 	Path   string `json:"path,omitempty"`
 	Sha256 string `json:"sha256,omitempty"`
 	Error  string `json:"error,omitempty"`
+}
+
+// CLIRun is POST /api/cli: ir at another machine, run by an agent hosted there (its session's own
+// TOKEN; docs/exec.md "远端的 ir"): its arguments and its working directory there.
+type CLIRun struct {
+	Args []string `json:"args"`
+	Cwd  string   `json:"cwd"`
+}
+
+// CLIOutput is one line of POST /api/cli's answer: what ir wrote, as it wrote it, and last its
+// exit code.
+type CLIOutput struct {
+	Out  string `json:"out,omitempty"`
+	Err  string `json:"err,omitempty"`
+	Exit *int   `json:"exit,omitempty"`
 }

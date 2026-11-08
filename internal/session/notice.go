@@ -29,6 +29,8 @@ type Notice struct {
 	Background bool
 	// Asked: a compaction you asked for (/compact), not the agent's own as its context ran full.
 	Asked bool
+	// Denied: at a turn's end, how many of its calls auto mode denied.
+	Denied int
 }
 
 // Watch calls f with every notice from now on, in order per session. f runs on the session's

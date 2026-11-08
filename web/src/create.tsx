@@ -13,8 +13,9 @@ import { t } from "./i18n";
 import { agentsQ, useHome } from "./data";
 import { atMachine, homeAt, MachineBadge, MachineFace, pageAt, remoteOf } from "./machines";
 import { useMachines } from "./store";
+import { remotePath } from "./tree";
 import { errText, toast } from "./toast";
-import { AGENTS, agentName, cn, homeOf, IconKey, Logo, PopSurface, tilde, Tip } from "./ui";
+import { AGENTS, agentName, cn, homeOf, IconKey, keep, kept, Logo, PopSurface, tilde, Tip } from "./ui";
 
 const join = (dir: string, name: string) => (dir.endsWith("/") ? dir + name : `${dir}/${name}`);
 /** One folder's listing; prefetched before it is shown (the popover opening, a row hovered), so the
@@ -51,6 +52,11 @@ export function FolderPicker({ initial, onChoose, startNew = false, busy, machin
   const [newName, setNewName] = useState<string | null>(startNew ? "" : null);
   const mid = machine?.id;
   const q = useQuery(foldersQ(path, mid));
+  // dsh's workspaces at the machine (DSH Desktop's), above the folders where the picker opens: a
+  // press takes one (docs/exec.md "远端 DSH").
+  const dsh = !!mid && !!machine?.online && machine.agents.some((a) => a.agent === "dsh");
+  const ws = useQuery({ queryKey: ["dshWorkspaces", mid ?? ""], queryFn: () => api.dshWorkspaces(mid!), enabled: dsh, retry: false, staleTime: 30_000 });
+  const workspaces = dsh && path === initial ? (ws.data ?? []) : [];
   const nameBox = useRef<HTMLInputElement>(null);
   const root = useRef<HTMLDivElement>(null);
   const naming = newName !== null;
@@ -201,6 +207,18 @@ export function FolderPicker({ initial, onChoose, startNew = false, busy, machin
       </div>
       <Tall>
         <div key={here} data-dir={dir === "back" ? "back" : undefined} className="g-slide max-h-[min(264px,45vh)] min-h-9 overflow-y-auto px-1.5 pb-1">
+          {workspaces.length > 0 && (
+            <div role="group" aria-label={t("pick.dshWorkspaces")} className="mb-1 border-b border-fill-2 pb-1">
+              <p className="m-0 px-2.5 pt-1.5 pb-1 text-xs text-ink-3">{t("pick.dshWorkspaces")}</p>
+              {workspaces.map((w) => (
+                <button key={w.path} type="button" title={w.path} disabled={busy} onClick={() => onChoose(w.path)} className="flex h-9 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-base hover:bg-fill disabled:opacity-50 pointer-coarse:h-11">
+                  <Logo agent="dsh" size={16} className="shrink-0" />
+                  <span className="shrink-0 truncate">{w.title}</span>
+                  <span className="min-w-0 flex-1 truncate text-right font-mono text-xs text-ink-3">{tilde(w.path, home)}</span>
+                </button>
+              ))}
+            </div>
+          )}
           {q.isPending && <LoaderCircle size={15} className="mx-auto my-2.5 animate-spin text-ink-4" />}
           {q.data?.folders.map((f) => (
             <button key={f} type="button" onPointerEnter={() => void qc.prefetchQuery(foldersQ(join(here, f), mid))} onFocus={() => void qc.prefetchQuery(foldersQ(join(here, f), mid))} onClick={() => go(join(here, f), "fwd")} className="flex h-9 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-base hover:bg-fill pointer-coarse:h-11">
@@ -221,14 +239,17 @@ export function FolderPicker({ initial, onChoose, startNew = false, busy, machin
   );
 }
 
-/** Where a new session runs: another machine, the folder there, and whether that is the group's. */
-export type Target = { m: Machine; cwd: string; inGroup: boolean };
+/** Where a new session runs: another machine and the folder there. */
+export type Target = { m: Machine; cwd: string };
 
 /** Pick an agent; the folder line opens the picker for a subfolder. Picking an agent opens the chat.
  *  Other machines' agents follow this one's, each machine's face on their logos and its name over
  *  them (docs/exec.md "网页"); one not connected is faded and says so. A folder group at another
- *  machine offers that machine's agents alone. */
-export function NewSession({ ws, folder, onFolder, onPick, busy }: { ws: string; folder: string; onFolder: () => void; onPick: (a: Agent, at?: Target) => void; busy: string | null }) {
+ *  machine offers that machine's agents, and with local this machine's after them, in a folder
+ *  here (local.folder; its line opens the picker): a coordinator in the group, Claude under your
+ *  own login, working with the sessions there (the user, 2026-11-08). A pick of this machine's
+ *  comes with no Target. */
+export function NewSession({ ws, folder, onFolder, onPick, busy, local }: { ws: string; folder: string; onFolder: () => void; onPick: (a: Agent, at?: Target) => void; busy: string | null; local?: { folder: string; onFolder: () => void } }) {
   // The agents the daemon can host (GET /api/agents); all four before it says. One not installed
   // is shown faded: picking it says so, no session is made.
   const info = useQuery({ ...agentsQ, refetchOnMount: "always" }).data; // installed since: the next open knows
@@ -237,9 +258,11 @@ export function NewSession({ ws, folder, onFolder, onPick, busy }: { ws: string;
   const pick = (a: Agent) => (missing(a) ? toast(t("new.notInstalled", { name: agentName(a) }), { error: true }) : onPick(a));
   const machines = useMachines();
   const there = remoteOf(folder, machines);
+  // A group of a machine no more there (its Bot gone): its folder is no one's to open in.
+  const lost = !there && remotePath(folder);
   const shown = there ? [there.m] : machines.filter((m) => m.agents.length > 0);
   const pickAt = (a: Agent, m: Machine) =>
-    !m.online ? toast(t("new.offline", { name: m.name }), { error: true }) : onPick(a, there?.m.id === m.id ? { m, cwd: there.cwd, inGroup: true } : { m, cwd: m.home, inGroup: false });
+    !m.online ? toast(t("new.offline", { name: m.name }), { error: true }) : onPick(a, there?.m.id === m.id ? { m, cwd: there.cwd } : { m, cwd: m.home });
   let i = 0;
   return (
     <div className="flex w-[min(288px,calc(100vw-16px))] flex-col gap-1 p-1.5">
@@ -250,7 +273,7 @@ export function NewSession({ ws, folder, onFolder, onPick, busy }: { ws: string;
           <span className="min-w-0 flex-1 truncate font-mono text-xs text-ink-3">{tilde(pageAt(folder, machines)?.path ?? there.cwd, homeAt(there.m))}</span>
           <ChevronRight size={14} className="shrink-0 text-ink-4" />
         </button>
-      ) : (
+      ) : lost ? null : (
         <button type="button" onClick={onFolder} className="flex h-9 items-center gap-2 rounded-md px-2 text-left hover:bg-fill pointer-coarse:h-11" aria-label={t("new.folder")}>
           <Folder size={16} className="shrink-0 text-ink-3" />
           {ws && <span className="shrink-0 text-sm font-semibold">{ws}</span>}
@@ -258,8 +281,8 @@ export function NewSession({ ws, folder, onFolder, onPick, busy }: { ws: string;
           <ChevronRight size={14} className="shrink-0 text-ink-4" />
         </button>
       )}
-      {!there && (
-        <div role="group" aria-label={t("new.agent")} className="g-stagger grid grid-cols-4 gap-1">
+      {(!there || local) && (
+        <div role="group" aria-label={t("new.agent")} className={cn("g-stagger grid grid-cols-4 gap-1", (there || lost) && "order-2")}>
           {agents.map((a) => (
             <Tip key={a} label={missing(a) ? t("new.notInstalled", { name: agentName(a) }) : agentName(a)}>
               <button type="button" aria-label={agentName(a)} disabled={busy !== null} onClick={() => pick(a)} style={{ "--i": i++ } as CSSProperties} className="g-press grid h-14 place-items-center rounded-md hover:bg-fill disabled:opacity-50">
@@ -268,6 +291,14 @@ export function NewSession({ ws, folder, onFolder, onPick, busy }: { ws: string;
             </Tip>
           ))}
         </div>
+      )}
+      {(there || lost) && local && (
+        <button type="button" onClick={local.onFolder} className="order-1 mt-1 flex h-9 items-center gap-2 rounded-md px-2 text-left hover:bg-fill pointer-coarse:h-11" aria-label={t("new.localFolder")}>
+          <Folder size={16} className="shrink-0 text-ink-3" />
+          <span className="shrink-0 text-xs font-medium text-ink-2">{t("new.local")}</span>
+          <span className="min-w-0 flex-1 truncate font-mono text-xs text-ink-3">{tilde(local.folder)}</span>
+          <ChevronRight size={14} className="shrink-0 text-ink-4" />
+        </button>
       )}
       {shown.map((m) => (
         <div key={m.id} role="group" aria-label={m.name} className="flex flex-col gap-1">
@@ -366,10 +397,12 @@ export function CreatePopover({ trigger }: { trigger: ReactElement }) {
   );
 }
 
-/** The "+" on a workspace row: a new session there. */
+/** The "+" on a workspace row: a new session there. A group at another machine also offers this
+ *  machine's agents, in a folder here: the home folder, or the one last picked for this group
+ *  (kept in the browser). */
 export function WsPlus({ w, trigger, open, setOpen, opened }: { w: Workspace; trigger: ReactElement; open: boolean; setOpen: (o: boolean) => void; opened: (id: string) => void }) {
   const qc = useQueryClient();
-  const [page, setPage] = useState<"session" | "folder">("session");
+  const [page, setPage] = useState<"session" | "folder" | "local">("session");
   const [stepped, setStepped] = useState(false); // gone to the folder page since it opened
   const [folder, setFolder] = useState(w.path);
   const { busy, start } = useStart((id) => (setOpen(false), opened(id)));
@@ -378,9 +411,15 @@ export function WsPlus({ w, trigger, open, setOpen, opened }: { w: Workspace; tr
   // for a group at another machine, whose folders are not listed here
   const there = pageAt(folder, machines);
   const remote = !!there;
+  // At another machine, that one or one no more there: this machine's agents open in a folder here.
+  const away = remote || remotePath(folder);
+  const home = useHome().data;
+  const localKey = `ir.localFolder.${w.id}`;
+  const [picked, setPicked] = useState(() => kept(localKey));
+  const localFolder = picked ?? home;
   useEffect(() => {
-    if (open && !remote) void qc.prefetchQuery(foldersQ(folder));
-  }, [open, folder, qc, remote]);
+    if (open && !away) void qc.prefetchQuery(foldersQ(folder));
+  }, [open, folder, qc, away]);
   return (
     <Popover.Root
       open={open}
@@ -392,9 +431,25 @@ export function WsPlus({ w, trigger, open, setOpen, opened }: { w: Workspace; tr
       <Popover.Trigger render={trigger} />
       <PopSurface side="bottom" align="end" finalFocus={false}>
         {/* Page to page, sliding the way you went: into the folder, back to the agents (the user, 2026-11-06). */}
-        <div key={page} data-dir={page === "session" ? "back" : undefined} className={page === "folder" || stepped ? "g-slide" : ""}>
+        <div key={page} data-dir={page === "session" ? "back" : undefined} className={page !== "session" || stepped ? "g-slide" : ""}>
           {page === "session" ? (
-            <NewSession ws={w.name} folder={folder} busy={busy} onFolder={() => (setStepped(true), setPage("folder"))} onPick={(a, at) => void start(a, at?.cwd ?? folder, !at || at.inGroup ? w.id : undefined, at?.m.id)} />
+            <NewSession
+              ws={w.name}
+              folder={folder}
+              busy={busy}
+              onFolder={() => (setStepped(true), setPage("folder"))}
+              local={away && localFolder ? { folder: localFolder, onFolder: () => (setStepped(true), setPage("local")) } : undefined}
+              onPick={(a, at) => void start(a, at?.cwd ?? (away ? (localFolder ?? "") : folder), w.id, at?.m.id)}
+            />
+          ) : page === "local" ? (
+            <FolderPicker
+              initial={localFolder ?? "~"}
+              onChoose={(p) => {
+                keep(localKey, p);
+                setPicked(p);
+                setPage("session");
+              }}
+            />
           ) : (
             <FolderPicker
               machine={there?.m}

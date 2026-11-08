@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/kumoSleeping/iridium/internal/irhelp"
 )
@@ -15,7 +16,14 @@ import (
 const Help = irhelp.Help
 
 // Main runs ir with args, giving the exit code.
-func Main(args []string) int { return run(args, os.Stdout, os.Stderr) }
+// At another machine, in a session hosted there (IRIDIUM_URL and the session's own TOKEN in its
+// environment), ir goes to that Iridium over HTTPS (remote.go).
+func Main(args []string) int {
+	if url, tok := os.Getenv("IRIDIUM_URL"), os.Getenv("IRIDIUM_TOKEN"); url != "" && strings.HasPrefix(tok, "irs_") {
+		return ForwardAt(url, tok, args, os.Stdout, os.Stderr)
+	}
+	return run(args, os.Stdout, os.Stderr)
+}
 
 // commands are ir's commands by name. Each gets its arguments after the name.
 var commands = map[string]func(e *env, args []string) int{
@@ -28,6 +36,7 @@ var commands = map[string]func(e *env, args []string) int{
 	"stop":      cmdStop,
 	"archive":   func(e *env, args []string) int { return cmdArchive(e, args, true) },
 	"unarchive": func(e *env, args []string) int { return cmdArchive(e, args, false) },
+	"rename":    cmdRename,
 	"cp":        cmdCp,
 	"files":     cmdFiles,
 	"ws":        cmdWs, // workspaces.go

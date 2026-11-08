@@ -2,7 +2,7 @@
 // said fold into one line; the calls still running at the end show on their own. Pure, for tests.
 import type { Block } from "../api/types.gen";
 import { t } from "../i18n";
-import { cmdOfCall, type Cmd } from "./cmd";
+import { cmdOfCall, renameOnly, type Cmd } from "./cmd";
 
 export type Tool = Block & { kind: "tool" };
 export type Step = Block & { kind: "tool" | "thinking" };
@@ -14,7 +14,8 @@ export function folded(blocks: Block[]): Shown[] {
   // A result whose call was on another page goes with it by id.
   const results = new Map(blocks.flatMap((b) => (b.kind === "result" && b.id ? [[b.id, b] as const] : [])));
   const all = blocks.flatMap((b): Block[] => {
-    if (b.kind === "result") return [];
+    // An agent naming its session (ir rename) is the list's, not the chat's.
+    if (b.kind === "result" || (b.kind === "tool" && renameOnly(b))) return [];
     const r = b.kind === "tool" && !b.result && b.id ? results.get(b.id) : undefined;
     return r ? [{ ...b, result: { at: r.at, time: r.time, text: r.text ?? "", length: r.length, error: r.error } }] : [b];
   });

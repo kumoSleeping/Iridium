@@ -194,3 +194,39 @@ func TestReleaseFlow(t *testing.T) {
 		t.Errorf("dismissed: %s %s", s.Status, s.Mode)
 	}
 }
+
+// A denial Claude went past (a call done after it) needs no one: the session is idle, the card
+// kept; a message sent lets it be.
+func TestDenialGoneAround(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, nil)
+	ctx := context.Background()
+	denied := make(chan int, 4)
+	r.m.Watch(func(n Notice) {
+		if n.Kind == NoticeTurnEnd {
+			denied <- n.Denied
+		}
+	})
+	id, err := r.m.Create(ctx, api.NewSession{Cwd: r.cwd, Text: "go AROUND", Mode: "auto"}, "网页")
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case n := <-denied:
+		if n != 1 {
+			t.Errorf("the turn's end says %d denied", n)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("no turn end")
+	}
+	s := r.waitState(id, "idle with its card", func(s *api.SessionState) bool {
+		return len(s.Denials) == 1 && s.Status == api.StatusIdle && s.Last != nil
+	})
+	if s.Denials[0].ToolUseID != "toolu_denied" {
+		t.Fatalf("denial %+v", s.Denials[0])
+	}
+	if _, err := r.m.Send(ctx, id, "go on", "网页"); err != nil {
+		t.Fatal(err)
+	}
+	r.waitState(id, "let be", func(s *api.SessionState) bool { return len(s.Denials) == 0 && s.Status == api.StatusIdle })
+}
