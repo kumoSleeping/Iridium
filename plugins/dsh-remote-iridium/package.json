@@ -1,0 +1,20 @@
+{
+  "name": "dsh-remote-iridium",
+  "description": "Run Iridium's sessions on this machine: it pairs with an Iridium and starts dsh for the sessions hosted there.",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": ["index.js", "executor.js", "cordis.patch.yml", "README.md"],
+  "license": "MIT",
+  "engines": { "node": ">=22" },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

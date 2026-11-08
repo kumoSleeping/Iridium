@@ -5,9 +5,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -25,8 +27,9 @@ type rig struct {
 	srv    *httptest.Server
 	mu     sync.Mutex
 	hub    *remote.Hub
-	exe    *executor.Executor
-	stop   context.CancelFunc
+	kind   string // the executor: "go" (internal/remote/executor) or "node" (the dsh plugin's)
+	drop   func()
+	stop   func()
 	state  string
 	refuse bool
 }
@@ -37,9 +40,21 @@ func (r *rig) setRefuse(v bool) {
 	r.mu.Unlock()
 }
 
-func newRig(t *testing.T) *rig {
+// kinds runs test with each executor: the Go one, and the dsh plugin's if node is there.
+func kinds(t *testing.T, test func(t *testing.T, kind string)) {
+	for _, k := range []string{"go", "node"} {
+		t.Run(k, func(t *testing.T) {
+			if _, err := exec.LookPath("node"); k == "node" && err != nil {
+				t.Skip("no node")
+			}
+			test(t, k)
+		})
+	}
+}
+
+func newRig(t *testing.T, kind string) *rig {
 	t.Helper()
-	r := &rig{t: t, root: t.TempDir(), state: t.TempDir()}
+	r := &rig{t: t, root: t.TempDir(), state: t.TempDir(), kind: kind}
 	r.hub = r.newHub()
 	r.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if req.Header.Get("Authorization") != "Bearer tok" {
@@ -67,16 +82,42 @@ func (r *rig) newHub() *remote.Hub {
 }
 
 func (r *rig) startExecutor() {
-	exe, err := executor.New(executor.Options{
-		URL: "ws" + strings.TrimPrefix(r.srv.URL, "http") + "/api/exec", Token: "tok", State: r.state, Logf: r.t.Logf,
-	})
+	url := "ws" + strings.TrimPrefix(r.srv.URL, "http") + "/api/exec"
+	if r.kind == "node" {
+		cmd := exec.Command("node", "../../plugins/dsh-remote-iridium/test/run.mjs", url, "tok", r.state)
+		cmd.Stderr = testWriter{r.t}
+		if err := cmd.Start(); err != nil {
+			r.t.Fatal(err)
+		}
+		done := make(chan struct{})
+		go func() { _ = cmd.Wait(); close(done) }()
+		r.drop = func() { _ = cmd.Process.Signal(syscall.SIGUSR1) }
+		r.stop = func() {
+			_ = cmd.Process.Signal(syscall.SIGTERM)
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				_ = cmd.Process.Kill()
+				<-done
+			}
+		}
+		return
+	}
+	exe, err := executor.New(executor.Options{URL: url, Token: "tok", State: r.state, Logf: r.t.Logf})
 	if err != nil {
 		r.t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { _ = exe.Run(ctx); close(done) }()
-	r.exe, r.stop = exe, func() { cancel(); <-done; exe.Close() }
+	r.drop, r.stop = exe.Drop, func() { cancel(); <-done; exe.Close() }
+}
+
+type testWriter struct{ t *testing.T }
+
+func (w testWriter) Write(b []byte) (int, error) {
+	w.t.Log(strings.TrimRight(string(b), "\n"))
+	return len(b), nil
 }
 
 func (r *rig) machine() *remote.Machine {
@@ -120,8 +161,10 @@ func (r *rig) start(unit string) (string, *hold.Input) {
 	return dir, in
 }
 
-func TestRelay(t *testing.T) {
-	r := newRig(t)
+func TestRelay(t *testing.T) { kinds(t, testRelay) }
+
+func testRelay(t *testing.T, kind string) {
+	r := newRig(t, kind)
 	dir, in := r.start("u1")
 	for _, l := range []string{"one", "two"} {
 		if err := in.WriteLine([]byte(l)); err != nil {
@@ -133,7 +176,7 @@ func TestRelay(t *testing.T) {
 	// The connection goes and comes back: input written meanwhile goes after it, output is not
 	// lost or doubled.
 	r.setRefuse(true)
-	r.exe.Drop()
+	r.drop()
 	waitFor(t, "offline", func() bool { _, ok := r.machine().Hello(); return !ok })
 	st, _ := r.machine().Launcher().State(context.Background(), "u1")
 	if !st.Exists || st.Active != "disconnected" {
@@ -150,7 +193,7 @@ func TestRelay(t *testing.T) {
 	r.mu.Lock()
 	r.hub = r.newHub()
 	r.mu.Unlock()
-	r.exe.Drop()
+	r.drop()
 	r.waitOnline()
 	st, _ = r.machine().Launcher().State(context.Background(), "u1")
 	if !st.Exists {
@@ -182,20 +225,26 @@ func TestRelay(t *testing.T) {
 	})
 }
 
-// An executor that restarts loses its processes (their pipes went with it): the holder ends.
-func TestExecutorRestart(t *testing.T) {
-	r := newRig(t)
+// An executor that restarts loses its processes (their pipes went with it): the holder ends, not
+// cleanly.
+func TestExecutorRestart(t *testing.T) { kinds(t, testExecutorRestart) }
+
+func testExecutorRestart(t *testing.T, kind string) {
+	r := newRig(t, kind)
 	dir, _ := r.start("u3")
 	r.stop()
 	r.startExecutor()
 	waitFor(t, "exit", func() bool { e, _ := hold.ReadExit(dir); return e != nil })
-	if e, _ := hold.ReadExit(dir); e.From != "holder" {
+	// Gone with it (the new one finds it unended), or killed as it stopped: a crash either way.
+	if e, _ := hold.ReadExit(dir); e.From != "holder" && e.Signal == nil {
 		t.Fatalf("exit %+v", e)
 	}
 }
 
-func TestCannotStart(t *testing.T) {
-	r := newRig(t)
+func TestCannotStart(t *testing.T) { kinds(t, testCannotStart) }
+
+func testCannotStart(t *testing.T, kind string) {
+	r := newRig(t, kind)
 	dir := filepath.Join(r.root, "u2")
 	if err := hold.Prepare(dir, hold.Spec{Argv: []string{"/no/such/program"}, Env: os.Environ(), Cwd: r.state}); err != nil {
 		t.Fatal(err)
@@ -213,8 +262,10 @@ func TestCannotStart(t *testing.T) {
 	}
 }
 
-func TestMirror(t *testing.T) {
-	r := newRig(t)
+func TestMirror(t *testing.T) { kinds(t, testMirror) }
+
+func testMirror(t *testing.T, kind string) {
+	r := newRig(t, kind)
 	ctx := context.Background()
 	src := filepath.Join(r.state, "t.jsonl")
 	local := filepath.Join(r.root, "mirror", "t.jsonl")
