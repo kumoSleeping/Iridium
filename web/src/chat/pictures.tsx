@@ -42,16 +42,19 @@ function One({ url, p, name }: { url: string; p: Picture; name: string }) {
   const [later, setLater] = useState(0); // asked again in this many ms; 0: not
   const [asked, setAsked] = useState(0); // asked again by a press: another address, not the cache's
   const [waited, setWaited] = useState(false); // it was not in the record yet once
+  const [reloaded, setReloaded] = useState(false); // loaded again once, given as it failed
   useEffect(() => {
     if (!later) return;
     const id = setTimeout(() => (setLater(0), setTries((n) => n + 1)), later);
     return () => clearTimeout(id);
   }, [later]);
-  // Not given: ask once more for why, as an <img> is not told. Given now: it came in between.
+  // Not given: ask once more for why, as an <img> is not told. Given now: it came in between,
+  // loaded again once (a picture the browser cannot show is given too).
   const lost = () =>
     void fetch(url, { cache: "no-store" }).then(
       (r) => {
-        if (r.ok && tries < TRIES) return setTries((n) => n + 1);
+        void r.body?.cancel();
+        if (r.ok && !reloaded) return setReloaded(true), setTries((n) => n + 1);
         if (r.status === 425 && tries < TRIES) return setWaited(true), setLater(1000 * 2 ** Math.min(tries, 4));
         setFate(r.status === 409 ? "offline" : waited && (r.status === 404 || r.status === 410) ? "none" : "unreadable");
       },
@@ -67,7 +70,7 @@ function One({ url, p, name }: { url: string; p: Picture; name: string }) {
       <Tip label={t("msg.retry")}>
         <button
           type="button"
-          onClick={() => (setFate("coming"), setTries(0), setLater(0), setAsked(asked + 1))}
+          onClick={() => (setFate("coming"), setTries(0), setLater(0), setReloaded(false), setAsked(asked + 1))}
           aria-label={`${why} · ${t("msg.retry")}`}
           style={sized}
           className={cn("g-press flex max-w-full flex-col items-center justify-center gap-1.5 rounded-lg bg-fill text-xs text-ink-4 shadow-[inset_0_0_0_0.5px_var(--edge)] hover:text-ink-3", !sized && "h-24 w-40")}
