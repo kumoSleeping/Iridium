@@ -22,14 +22,17 @@ import (
 const PresetFile = "dsh-preset.mjs"
 
 // PresetModule binds each session the process runs, as it is created, to the preset of its
-// config, as DSH Desktop binds a session's (a subagent joins its parent's on its own).
+// config, as DSH Desktop binds a session's (a subagent joins its parent's on its own), and records
+// it in the session as Desktop's selection does: plugins tell a session's preset by the record
+// (OMD's Ultra is only for a session of its presets).
 const PresetModule = `// Iridium: binds each session of this process to the agent preset of its config.
 export const name = 'iridium-preset'
 export const inject = ['agents', 'agentPresets']
 export function apply(ctx, config) {
   ctx.on('agent/created', async ({ agent }) => {
     if (ctx.agentPresets.composedPreset(agent.ctx) !== undefined) return
-    await ctx.agentPresets.recompose(agent.ctx, config.preset)
+    const { id } = await ctx.agentPresets.recompose(agent.ctx, config.preset)
+    if (ctx.agentPresets.presetForSession(agent.session) !== id) agent.session.append('agent-preset/selected', { agentPreset: id })
   })
 }
 `
