@@ -263,29 +263,40 @@ func getenv(env []string, k string) string {
 // call), and the model sees what the script hands on with image(), in the script's output
 // (custom_tool_call_output: input_image items, data URLs). Codex records an ImageView for each
 // view_image between the call and its output, in the order they end, not the order the script
-// hands their pictures on: only a script that viewed one picture and showed one tells which is
-// which (the user's rollouts, 2026-11-09: two viewed at once came in the other order). Before the
-// output is written, ErrNotYet. size: where the record's whole lines end.
+// hands their pictures on: only a script that viewed one picture and showed one, the only call
+// open as it did, tells which is which (the user's rollouts, 2026-11-09: two viewed at once came
+// in the other order). Before the output is written, while its turn goes on, ErrNotYet. size:
+// where the record's whole lines end.
 func codexShown(r io.ReaderAt, size, off, n int64) (api.Image, error) {
-	// Back to the script's call: no other ImageView on the way.
-	call := ""
-	for pos, k := off, 0; call == ""; k++ {
-		if pos <= 0 || k > codexWindow {
+	// Back to the call open as the view ended, the only one: back from it, an output or a turn
+	// comes before any other call.
+	call, pos := "", off
+	for k := 0; ; k++ {
+		if pos <= 0 {
+			if call == "" {
+				return api.Image{}, ErrNoImage
+			}
+			break
+		}
+		if k > codexWindow {
 			return api.Image{}, ErrNoImage
 		}
 		start, line, err := lineBefore(r, pos)
 		if err != nil {
 			return api.Image{}, err
 		}
-		switch kind, id, _ := codexStep(line); kind {
-		case codexView, codexOutput:
-			return api.Image{}, ErrNoImage
-		case codexCall:
-			call = id
-		}
 		pos = start
+		kind, id, _ := codexStep(line)
+		if kind == codexView && call == "" || kind == codexCall && call != "" || (kind == codexOutput || kind == codexEnd) && call == "" {
+			return api.Image{}, ErrNoImage
+		}
+		if kind == codexCall {
+			call = id
+		} else if call != "" && (kind == codexOutput || kind == codexEnd) {
+			break
+		}
 	}
-	// On to its output: no other ImageView, and one picture.
+	// On to its output: no other view or call first, and one picture.
 	from := off + n + 1
 	br := bufio.NewReaderSize(io.NewSectionReader(r, from, max(size-from, 0)), 64<<10)
 	for k := 0; k <= codexWindow; k++ {
@@ -297,7 +308,7 @@ func codexShown(r io.ReaderAt, size, off, n int64) (api.Image, error) {
 			return api.Image{}, err
 		}
 		switch kind, id, output := codexStep(line); kind {
-		case codexView, codexCall:
+		case codexView, codexCall, codexEnd:
 			return api.Image{}, ErrNoImage
 		case codexOutput:
 			images := pictures(output, true)
@@ -319,6 +330,7 @@ const (
 	codexView   // an ImageView completed
 	codexCall   // a tool call the model made (a script's, or another's)
 	codexOutput // a call's output, as the model was given it
+	codexEnd    // a turn began or ended: no call of the one before is open
 )
 
 // codexStep is what line is to codexShown: its call's id for a call or an output, and an
@@ -346,6 +358,8 @@ func codexStep(line []byte) (kind int, call string, output json.RawMessage) {
 		return codexCall, p.CallID, nil
 	case l.Type == "response_item" && (p.Type == "custom_tool_call_output" || p.Type == "function_call_output"):
 		return codexOutput, p.CallID, p.Output
+	case l.Type == "event_msg" && (p.Type == "task_started" || p.Type == "task_complete" || p.Type == "turn_aborted"):
+		return codexEnd, "", nil
 	}
 	return codexOther, "", nil
 }

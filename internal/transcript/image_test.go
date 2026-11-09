@@ -149,85 +149,104 @@ func TestDshResultHandle(t *testing.T) {
 	}
 }
 
-// codexRollout writes a rollout where, after an earlier script's output (a big line), a script
-// (call c1) views the pictures named in views and hands on shown, other lines after the first
-// view; it gives the ImageView results' ats in order.
-func codexRollout(t *testing.T, views []string, shown [][]byte, between ...map[string]any) (*File, []string) {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "rollout.jsonl")
-	ev := func(item map[string]any) map[string]any {
-		return map[string]any{"timestamp": "2026-11-09T00:00:00Z", "type": "event_msg", "payload": map[string]any{"type": "item_completed", "item": item}}
-	}
-	big := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0xff}, 6<<20))
-	ls := lines{
-		{"type": "response_item", "payload": map[string]any{"type": "custom_tool_call", "call_id": "c0", "name": "exec", "input": "1"}},
-		{"type": "response_item", "payload": map[string]any{"type": "custom_tool_call_output", "call_id": "c0", "output": []any{
-			map[string]any{"type": "input_image", "image_url": "data:image/png;base64," + big}}}},
-		{"type": "response_item", "payload": map[string]any{"type": "custom_tool_call", "call_id": "c1", "name": "exec", "input": "image((await tools.view_image({path})).image_url)"}},
-		ev(map[string]any{"type": "CommandExecution", "id": "x", "command": []string{"true"}, "status": "completed"}),
-	}
-	for i, v := range views {
-		ls = append(ls, ev(map[string]any{"type": "ImageView", "id": "exec-" + v, "path": "file:///w/" + v}))
-		if i == 0 {
-			ls = append(ls, between...)
-		}
-	}
-	var out []any
+// Codex rollout lines, for codexShown.
+func cxCall(id string) map[string]any {
+	return map[string]any{"type": "response_item", "payload": map[string]any{"type": "custom_tool_call", "call_id": id, "name": "exec", "input": "…"}}
+}
+
+func cxOut(t *testing.T, id string, shown ...[]byte) map[string]any {
+	out := []any{map[string]any{"type": "input_text", "text": "Script completed"}}
 	for _, s := range shown {
 		out = append(out, map[string]any{"type": "input_image", "image_url": "data:image/png;base64," + base64.StdEncoding.EncodeToString(s), "detail": "high"})
 	}
-	if shown != nil {
-		ls = append(ls, map[string]any{"type": "response_item", "payload": map[string]any{"type": "custom_tool_call_output", "call_id": "c1", "output": out}})
-	}
-	ls.write(t, path, false)
+	return map[string]any{"type": "response_item", "payload": map[string]any{"type": "custom_tool_call_output", "call_id": id, "output": out}}
+}
+
+func cxEvent(payload map[string]any) map[string]any {
+	return map[string]any{"timestamp": "2026-11-09T00:00:00Z", "type": "event_msg", "payload": payload}
+}
+
+func cxView(name string) map[string]any {
+	return cxEvent(map[string]any{"type": "item_completed", "item": map[string]any{"type": "ImageView", "id": "exec-" + name, "path": "file:///w/" + name}})
+}
+
+// codexRollout writes ls after an earlier script's output (a big line) and gives the record and
+// its view_image steps.
+func codexRollout(t *testing.T, ls ...map[string]any) (*File, []api.Block) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "rollout.jsonl")
+	big := bytes.Repeat([]byte{0xff}, 6<<20)
+	append(lines{cxEvent(map[string]any{"type": "task_started"}), cxCall("c0"), cxOut(t, "c0", big)}, ls...).write(t, path, false)
 	f := OpenAs(path, Codex, nil)
 	p, err := f.Latest()
 	if err != nil {
 		t.Fatal(err)
 	}
-	var ats []string
+	var views []api.Block
 	for _, b := range p.Blocks {
-		if b.Name == "view_image" && b.Result != nil && len(b.Result.Images) == 1 {
-			ats = append(ats, b.Result.At)
+		if b.Name == "view_image" && b.Result != nil {
+			views = append(views, b)
 		}
 	}
-	if len(ats) != len(views) {
-		t.Fatalf("view_image results: %+v", p.Blocks)
-	}
-	return f, ats
+	return f, views
 }
 
 func TestCodexImageFromScriptOutput(t *testing.T) {
 	a, b := pngOf(t, 5, 5, color.Black), pngOf(t, 6, 4, color.White)
-	f, ats := codexRollout(t, []string{"a.png"}, [][]byte{a})
-	if img, data, err := f.Image(ats[0], 0); err != nil || !bytes.Equal(data, a) || img.Mime != "image/png" {
+	run := cxEvent(map[string]any{"type": "item_completed", "item": map[string]any{"type": "CommandExecution", "id": "x", "command": []string{"true"}, "status": "completed"}})
+
+	// One viewed, one shown: the page has its size, the picture its bytes.
+	f, v := codexRollout(t, cxCall("c1"), run, cxView("a.png"), cxOut(t, "c1", a))
+	if len(v) != 1 || len(v[0].Result.Images) != 1 || v[0].Result.Images[0].W != 5 {
+		t.Fatalf("on the page: %+v", v)
+	}
+	if img, data, err := f.Image(v[0].Result.At, 0); err != nil || !bytes.Equal(data, a) || img.Mime != "image/png" {
 		t.Errorf("one viewed, one shown: %+v %d bytes %v", img, len(data), err)
 	}
-	// Two viewed: the ImageViews come in the order the views ended, the pictures in the order
-	// the script showed them (the user's rollouts, 2026-11-09). Neither is told, either way.
-	for _, shown := range [][][]byte{{a, b}, {b, a}, {a}} {
-		f, ats = codexRollout(t, []string{"a.png", "b.png"}, shown)
-		for i, at := range ats {
-			if _, _, err := f.Image(at, 0); !errors.Is(err, ErrNoImage) {
-				t.Errorf("%d shown, view %d: %v", len(shown), i, err)
+
+	// Not told: neither on the page, nor by Image.
+	none := map[string][]map[string]any{
+		// Two viewed: the ImageViews come in the order the views ended, the pictures in the
+		// order the script showed them (the user's rollouts, 2026-11-09).
+		"two viewed":        {cxCall("c1"), cxView("a.png"), cxView("b.png"), cxOut(t, "c1", b, a)},
+		"viewed, not shown": {cxCall("c1"), cxView("a.png"), cxView("b.png"), cxOut(t, "c1", a)},
+		"shown, not viewed": {cxCall("c1"), cxView("a.png"), cxOut(t, "c1", a, b)},
+		// Another call ran at once: whose the view was is unclear (the review, 2026-11-09).
+		"two calls open":    {cxCall("c1"), cxCall("c2"), cxView("a.png"), cxOut(t, "c2", b), cxOut(t, "c1", a)},
+		"a call in between": {cxCall("c1"), cxView("a.png"), cxCall("c2"), cxOut(t, "c1", a)},
+		// The turn ended without the script's output: it will never come.
+		"turn over": {cxCall("c1"), cxView("a.png"), cxEvent(map[string]any{"type": "turn_aborted"})},
+	}
+	for name, ls := range none {
+		f, v := codexRollout(t, ls...)
+		if len(v) == 0 {
+			t.Fatalf("%s: no view_image", name)
+		}
+		for _, s := range v {
+			if len(s.Result.Images) != 0 {
+				t.Errorf("%s: on the page: %+v", name, s.Result.Images)
+			}
+			if _, _, err := f.Image(s.Result.At, 0); !errors.Is(err, ErrNoImage) {
+				t.Errorf("%s: Image: %v", name, err)
 			}
 		}
 	}
-	// Viewed one, showed two (one it did not view).
-	f, ats = codexRollout(t, []string{"a.png"}, [][]byte{a, b})
-	if _, _, err := f.Image(ats[0], 0); !errors.Is(err, ErrNoImage) {
-		t.Errorf("shown more: %v", err)
+
+	// The script still runs: on the page as it is, to be asked again.
+	f, v = codexRollout(t, cxCall("c1"), cxView("a.png"))
+	if len(v[0].Result.Images) != 1 || v[0].Result.Images[0].W != 0 {
+		t.Errorf("not yet, on the page: %+v", v[0].Result.Images)
 	}
-	// Another call began before the script's output.
-	other := map[string]any{"type": "response_item", "payload": map[string]any{"type": "function_call", "call_id": "c2", "name": "shell"}}
-	f, ats = codexRollout(t, []string{"a.png"}, [][]byte{a}, other)
-	if _, _, err := f.Image(ats[0], 0); !errors.Is(err, ErrNoImage) {
-		t.Errorf("interleaved: %v", err)
+	if _, _, err := f.Image(v[0].Result.At, 0); !errors.Is(err, ErrNotYet) {
+		t.Errorf("not yet: %v", err)
 	}
-	// The script still runs: its output is not written yet.
-	f, ats = codexRollout(t, []string{"a.png"}, nil)
-	if _, _, err := f.Image(ats[0], 0); !errors.Is(err, ErrNotYet) {
-		t.Errorf("no output yet: %v", err)
+	// Once written, the next page tells it.
+	lines{cxOut(t, "c1", a)}.write(t, f.Path(), true)
+	p, _ := f.Latest()
+	for _, s := range p.Blocks {
+		if s.Name == "view_image" && (len(s.Result.Images) != 1 || s.Result.Images[0].W != 5) {
+			t.Errorf("written since: %+v", s.Result.Images)
+		}
 	}
 }
 
@@ -241,6 +260,16 @@ func TestLineBefore(t *testing.T) {
 	}
 	if start, line, err := lineBefore(r, 6); err != nil || start != 0 || string(line) != "first" {
 		t.Fatalf("first line: %d %q %v", start, line, err)
+	}
+}
+
+func TestPicturesOtherValues(t *testing.T) {
+	// A block with another kind of value under a picture's names: the others still read, the
+	// same for a page and read whole.
+	b64 := base64.StdEncoding.EncodeToString(pngOf(t, 2, 2, color.White))
+	content := json.RawMessage(`[{"type":"resource","data":{"k":1}},{"type":"input_image","image_url":{"url":"x"}},{"type":"image","data":"` + b64 + `","mimeType":"image/png"}]`)
+	if page, whole := pictures(content, false), pictures(content, true); len(page) != 1 || len(whole) != 1 || whole[0].Data != b64 {
+		t.Fatalf("page %+v, whole %+v", page, whole)
 	}
 }
 
