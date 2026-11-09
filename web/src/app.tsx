@@ -26,7 +26,7 @@ import { useConfirms, useList, useMachines } from "./store";
 import { follow } from "./stream";
 import { ToastList, toasts } from "./toast";
 import { buildTree, flat } from "./tree";
-import { useFolderPlaces } from "./reorder";
+import { usePlaces } from "./reorder";
 import { cn, holdMenu, IrMark, kept, keep, params, PHONE, useMedia, useMinute } from "./ui";
 import { watchUnread } from "./unread";
 import { warmUp } from "./warm";
@@ -143,7 +143,7 @@ export function App() {
   const minute = useMinute();
   const machines = useMachines();
   const order = useMemo(() => machines.map((m) => m.id), [machines.map((m) => m.id).join(",")]);
-  const places = useFolderPlaces();
+  const places = usePlaces();
   const tree = useMemo(() => buildTree(list ?? [], ws.data ?? [], t("nav.unsorted"), Math.max(minute, Date.now()), undefined, order, places), [list, ws.data, t("nav.unsorted"), minute, order, places]);
 
   useEffect(() => follow(open), [open]);

@@ -2,7 +2,7 @@ package store
 
 import "database/sql"
 
-// The list's order by hand (the user, 2026-11-09): groups are dragged among themselves; a folder
+// The list's order by hand (the user, 2026-11-09): groups' rows are dragged among themselves; a folder
 // among those in its group, pinned ones apart from the rest; a session among those beside it, pinned ones apart from the rest. A
 // session or folder dragged keeps the key it was dropped at in place of its last activity, so it
 // stays where it was put while the others are still sorted by when they last worked.
@@ -18,20 +18,38 @@ func (s *Store) SetOrder(session string, at float64) error {
 	return err
 }
 
-// SetWorkspaceOrder lists the workspaces of ids in that order, before any left out; an id with no
-// workspace is skipped.
-func (s *Store) SetWorkspaceOrder(ids []int64) error {
+// SetGroupOrder lists the groups' rows of keys (api.GroupOrder) in that order, in place of the
+// order there was.
+func (s *Store) SetGroupOrder(keys []string) error {
 	return s.Tx(func(tx *sql.Tx) error {
-		if _, err := tx.Exec(`UPDATE workspaces SET sort = sort + ?`, len(ids)); err != nil {
+		if _, err := tx.Exec(`DELETE FROM group_order`); err != nil {
 			return err
 		}
-		for i, id := range ids {
-			if _, err := tx.Exec(`UPDATE workspaces SET sort = ? WHERE id = ?`, i, id); err != nil {
+		for i, k := range keys {
+			if _, err := tx.Exec(`INSERT INTO group_order (key, sort) VALUES (?, ?) ON CONFLICT (key) DO NOTHING`, k, i); err != nil {
 				return err
 			}
 		}
 		return nil
 	})
+}
+
+// GroupOrder is the groups' rows dragged, by key, first to last.
+func (s *Store) GroupOrder() ([]string, error) {
+	rows, err := s.db.Query(`SELECT key FROM group_order ORDER BY sort`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var k string
+		if err := rows.Scan(&k); err != nil {
+			return nil, err
+		}
+		out = append(out, k)
+	}
+	return out, rows.Err()
 }
 
 // SetFolderOrder sets the key the folder of path (as grouped: remote.GroupPath) is sorted by among

@@ -12,35 +12,14 @@ func TestOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	var ids []int64
-	for _, p := range []string{"/a", "/b", "/c"} {
-		id, err := s.CreateWorkspace(p, p)
-		if err != nil {
-			t.Fatal(err)
-		}
-		ids = append(ids, id)
-	}
-	order := func() []int64 {
-		ws, err := s.Workspaces()
-		if err != nil {
-			t.Fatal(err)
-		}
-		var out []int64
-		for _, w := range ws {
-			out = append(out, w.ID)
-		}
-		return out
-	}
-	// c dragged above a: b, left out, after them; one made after, last.
-	if err := s.SetWorkspaceOrder([]int64{ids[2], ids[0]}); err != nil {
+	if err := s.SetGroupOrder([]string{"w3", "w1@m", "w1"}); err != nil {
 		t.Fatal(err)
 	}
-	d, err := s.CreateWorkspace("/d", "/d")
-	if err != nil {
+	if err := s.SetGroupOrder([]string{"w1@m", "w3"}); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := order(), []int64{ids[2], ids[0], ids[1], d}; !slices.Equal(got, want) {
-		t.Errorf("order %v, want %v", got, want)
+	if g, err := s.GroupOrder(); err != nil || !slices.Equal(g, []string{"w1@m", "w3"}) {
+		t.Errorf("group order %v %v", g, err)
 	}
 
 	if err := s.SetOrder("x", 1234.5); err != nil {

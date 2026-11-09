@@ -11,7 +11,7 @@
 // Those under one session keep the order they came in, the newest last, not the order they last
 // wrote in, which swapped them back and forth (the user, 2026-11-08); so do a workflow run's agents
 // (2026-11-09).
-import type { FolderPlaces, Workspace } from "./api/types.gen";
+import type { Places, Workspace } from "./api/types.gen";
 import type { Session } from "./api/types.gen";
 
 /** pinned: above the sessions at its group's root (reorder.ts). */
@@ -62,8 +62,9 @@ function bySeen<T>(xs: T[], key: (x: T) => string, at: (x: T) => number, seen: M
 }
 
 /** machines: the other machines' IDs, in the order their sections follow this machine's. */
-/** places: where the folders were put, dragged or pinned, by path (the carried "folderPlaces"). */
-export function buildTree(all: Session[], workspaces: Workspace[], unsorted: string, now = Date.now(), seen = SEEN, machines: string[] = [], places: FolderPlaces = { order: {}, pinned: [] }): Tree {
+/** places: where the rows were put by hand (the carried "places"): the groups' rows by key, the
+ *  folders by path. */
+export function buildTree(all: Session[], workspaces: Workspace[], unsorted: string, now = Date.now(), seen = SEEN, machines: string[] = [], places: Places = { groups: [], order: {}, pinned: [] }): Tree {
   const list = all.filter((s) => !s.subagent);
   const byId = new Map(list.map((s) => [s.id, s]));
   const kids = new Map<string, Session[]>();
@@ -158,10 +159,11 @@ export function buildTree(all: Session[], workspaces: Workspace[], unsorted: str
   const none = new Map<string, Session[]>();
   for (const s of byWs.get(0) ?? []) none.set(s.machine ?? "", [...(none.get(s.machine ?? "") ?? []), s]);
   for (const [m, ss] of none) nodes.push(node(m ? `w0:${m}` : "w0", 0, unsorted, m ? `${m}:${commonDir(ss.map(groupPath).map((p) => p.slice(m.length + 1)))}` : commonDir(ss.map(groupPath)), ss));
-  // The groups in their own order, whichever machine each is at: dragged anywhere (the user,
-  // 2026-11-09, no longer a section a machine). 未归类 last, one a machine, this machine's first,
-  // then the others' in the order they are listed.
-  const rank = (w: WsNode) => (w.id === 0 ? 1 + machineAt(w.machine) : 0);
+  // The groups' rows in the order they were dragged to, whichever machine each is at (the user,
+  // 2026-11-09, no longer a section a machine); those never dragged after them, as the groups are
+  // listed. 未归类 last, one a machine, this machine's first, then the others' as listed.
+  const n = places.groups.length;
+  const rank = (w: WsNode) => (w.id === 0 ? n + 2 + machineAt(w.machine) : places.groups.indexOf(w.key) + 1 || n + 1);
   nodes.sort((a, b) => rank(a) - rank(b));
   // The last at work first, pinned or not: a pin is for the list in use (the user, 2026-11-08).
   const archived = list.filter((s) => s.archived && !hidden.has(s.id)).sort((a, b) => b.updatedAt - a.updatedAt);
@@ -202,7 +204,7 @@ export function foldRest(ss: Session[], kept: (s: Session) => boolean, n = FOLD_
 const latest = (f: Folder) => Math.max(...f.sessions.map((s) => s.updatedAt));
 /** What a folder is sorted by among those in its group: where it was dragged to, else its latest
  *  session's activity (reorder.ts). */
-export const folderKey = (f: Folder, order: FolderPlaces["order"]) => order[f.path] || latest(f);
+export const folderKey = (f: Folder, order: Places["order"]) => order[f.path] || latest(f);
 
 /** The sessions as the sidebar shows them from top to bottom, for Alt+↑↓ and the jump box. */
 export const flat = (t: Tree) => [...t.workspaces.flatMap((w) => w.rows.flatMap((r) => (r.kind === "session" ? [r.s] : r.f.sessions)))].flatMap((s) => [s, ...(t.kids.get(s.id) ?? []), ...(t.runs.get(s.id) ?? []).flatMap((r) => r.working)]);

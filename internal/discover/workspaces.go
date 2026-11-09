@@ -353,26 +353,37 @@ func (x *Index) HideWorkspace(id int64, hidden bool) error {
 	return nil
 }
 
-// OrderWorkspaces lists the groups of ids in that order, dragged so on the page.
-func (x *Index) OrderWorkspaces(ids []int64) error {
-	if err := x.o.Store.SetWorkspaceOrder(ids); err != nil {
+// OrderGroups lists the groups' rows of keys in that order, dragged so on the page, and carries it.
+func (x *Index) OrderGroups(keys []string) error {
+	if len(keys) > 10000 {
+		return errors.New("too many groups")
+	}
+	if err := x.o.Store.SetGroupOrder(keys); err != nil {
 		return err
 	}
-	x.Changed()
+	x.publishPlaces()
 	return nil
 }
 
-// FolderPlaces is where the folders were put, dragged or pinned: the carried state "folderPlaces".
-func (x *Index) FolderPlaces() (api.FolderPlaces, error) {
-	order, err := x.o.Store.FolderOrder()
+// Places is where the rows of the list were put by hand: the carried state "places".
+func (x *Index) Places() (api.Places, error) {
+	st := x.o.Store
+	groups, err := st.GroupOrder()
 	if err != nil {
-		return api.FolderPlaces{}, err
+		return api.Places{}, err
 	}
-	pinned, err := x.o.Store.FolderPins()
+	order, err := st.FolderOrder()
+	if err != nil {
+		return api.Places{}, err
+	}
+	pinned, err := st.FolderPins()
+	if groups == nil {
+		groups = []string{}
+	}
 	if pinned == nil {
 		pinned = []string{}
 	}
-	return api.FolderPlaces{Order: order, Pinned: pinned}, err
+	return api.Places{Groups: groups, Order: order, Pinned: pinned}, err
 }
 
 // PlaceFolder sets where the folder of p.Path is, dragged or pinned so on the page, and carries it.
@@ -390,20 +401,20 @@ func (x *Index) PlaceFolder(p api.FolderPlace) error {
 			return err
 		}
 	}
-	x.publishFolderPlaces()
+	x.publishPlaces()
 	return nil
 }
 
-func (x *Index) publishFolderPlaces() {
+func (x *Index) publishPlaces() {
 	if x.o.Hub == nil {
 		return
 	}
-	f, err := x.FolderPlaces()
+	p, err := x.Places()
 	if err != nil {
-		x.o.Logf("discover: folder places: %v", err)
+		x.o.Logf("discover: places: %v", err)
 		return
 	}
-	x.o.Hub.Set("folderPlaces", f)
+	x.o.Hub.Set("places", p)
 }
 
 // DeleteWorkspace drops a group; its sessions are grouped again by their folders (classify).

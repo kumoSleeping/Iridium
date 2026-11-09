@@ -13,7 +13,7 @@ import { Archive, ArchiveRestore, ArrowDown, ArrowUp, Bot, Check, ChevronRight, 
 import { ConfirmIcon, confirmName, confirmTitle } from "./confirmname";
 import { Fragment, lazy, memo, Suspense, useCallback, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode, type RefObject } from "react";
 import { api } from "./api/client";
-import type { Color, Confirm, FolderPlaces, Machine, Session, Terminal, Workspace } from "./api/types.gen";
+import type { Color, Confirm, Machine, Places, Session, Terminal } from "./api/types.gen";
 import { colorVar, COLORS, useFolderColors } from "./colors";
 import { ahead, behind } from "./chats";
 import { t, useLang } from "./i18n";
@@ -22,14 +22,14 @@ import { folderLevels, sessionLevels, usePushMenus, wsLevels, type PushLevel } f
 import { foldRest, machineOf, remotePath, type Folder as FolderNode, type Tree, type WsNode } from "./tree";
 import { LinkDot } from "./link";
 import { errText, toast } from "./toast";
-import { useMe, useTerminalList, useUpdate, useWorkspaces } from "./data";
+import { useMe, useTerminalList, useUpdate } from "./data";
 import { agentName, ago, Avatar, cn, fine, IconKey, IrMark, keep, kept, Lamp, lampOf, Logo, own, sessionStatusText, statusText, tilde, Tip, titleOf, untitled, useLongPress, useMenuAt, useMinute } from "./ui";
 import { SESSION_DRAG } from "./chat/refs";
 import { NoteMark, NotesAt, useNotes } from "./notekey";
 import { useUnread } from "./unread";
 import { LINK_COLOR, MachineBadge, MachineFace, setView, shownPath, useLate, useLink as useLinkOf, useMachine, useView } from "./machines";
 import { getCarried, setCarried, useMachines } from "./store";
-import { dropMark, dropTarget, endDrag, listDrag, NO_PLACES, pinFolder, placeFolder, placeSession, withPlace, placeWorkspace, sortList, startDrag, useDragged, useOver, type Dragged, type Edge, type Over } from "./reorder";
+import { dropMark, dropTarget, endDrag, listDrag, NO_PLACES, pinFolder, placeFolder, placeGroup as placeGroupKey, placeSession, withPlace, sortList, startDrag, useDragged, useOver, type Dragged, type Edge, type Over } from "./reorder";
 
 const STEP = 18;
 const BUSY = new Set(["running", "compacting", "starting"]);
@@ -157,9 +157,9 @@ export function Sidebar(p: Props) {
   lanes.current = new Map(p.tree.workspaces.flatMap((w) => [[w.key, w.rows.flatMap((r) => (r.kind === "session" ? [r.s] : []))] as const, ...w.rows.flatMap((r) => (r.kind === "folder" ? [[r.f.key, r.f.sessions] as const] : []))]));
   const folderLanes = useRef(new Map<string, FolderNode[]>());
   folderLanes.current = new Map(p.tree.workspaces.map((w) => [w.key, w.rows.flatMap((r) => (r.kind === "folder" ? [r.f] : []))]));
-  const groups = useWorkspaces().data;
-  const groupsNow = useRef(groups);
-  groupsNow.current = groups;
+  // The groups' rows, all machines', as listed (未归类 not among them).
+  const groupKeys = useRef<string[]>([]);
+  groupKeys.current = p.tree.workspaces.flatMap((w) => (w.id !== 0 ? [w.key] : []));
   const place = useCallback((id: string, target: Session, edge: Edge, lane: string) => {
     const sibs = lanes.current.get(lane) ?? [];
     const s = sibs.find((x) => x.id === id);
@@ -174,13 +174,13 @@ export function Sidebar(p: Props) {
     });
   }, []);
   // A folder put (dragged, pinned): shown so at once, then told the server.
-  const putFolder = useCallback((path: string, at: (was: FolderPlaces) => { order?: number; pinned?: boolean }) => {
-    const was = getCarried<FolderPlaces>("folderPlaces") ?? NO_PLACES;
+  const putFolder = useCallback((path: string, at: (was: Places) => { order?: number; pinned?: boolean }) => {
+    const was = getCarried<Places>("places") ?? NO_PLACES;
     const put = at(was);
     const shown = withPlace(was, path, put);
-    setCarried("folderPlaces", shown);
+    setCarried("places", shown);
     void api.placeFolder({ path, ...put }).catch((e: unknown) => {
-      if (getCarried("folderPlaces") === shown) setCarried("folderPlaces", was);
+      if (getCarried("places") === shown) setCarried("places", was);
       toast(t("err.action"), { error: true, description: errText(e) });
     });
   }, []);
@@ -196,15 +196,14 @@ export function Sidebar(p: Props) {
     const f = sibs.find((x) => x.path === path);
     if (f) putFolder(path, (was) => pinFolder(sibs, f, was));
   }, [putFolder]);
-  const placeGroup = useCallback((id: number, target: number, edge: Edge) => {
-    const ws = groupsNow.current;
-    if (!ws) return;
-    const ids = placeWorkspace(ws, id, target, edge);
-    const was = getCarried<Workspace[]>("workspaces");
-    const shown = was && ids.flatMap((x) => was.filter((w) => w.id === x));
-    if (shown) setCarried("workspaces", shown);
-    void api.orderWorkspaces(ids).catch((e: unknown) => {
-      if (getCarried("workspaces") === shown) setCarried("workspaces", was);
+  // A group's row moved, by its key: a group listed at two machines is two rows, each its own.
+  const placeGroup = useCallback((key: string, target: string, edge: Edge) => {
+    const was = getCarried<Places>("places") ?? NO_PLACES;
+    const keys = placeGroupKey(was.groups, groupKeys.current, key, target, edge);
+    const shown = { ...was, groups: keys };
+    setCarried("places", shown);
+    void api.orderGroups(keys).catch((e: unknown) => {
+      if (getCarried("places") === shown) setCarried("places", was);
       toast(t("err.action"), { error: true, description: errText(e) });
     });
   }, []);
@@ -287,8 +286,8 @@ export function Sidebar(p: Props) {
     // at two machines): one up, one down, from its menu.
     const lane = ws.filter((x) => x.id !== 0);
     const k = lane.indexOf(w);
-    const up = lane.slice(0, Math.max(k, 0)).findLast((x) => x.id !== w.id);
-    const down = lane.slice(k + 1).find((x) => x.id !== w.id);
+    const up = k > 0 ? lane[k - 1] : undefined;
+    const down = k >= 0 ? lane[k + 1] : undefined;
     // A folder of the group and its sessions; pinned ones above the sessions at the root.
     const firstRoot = roots(w)[0];
     const folderEl = (f: FolderNode) => (
@@ -330,10 +329,10 @@ export function Sidebar(p: Props) {
           hidden={w.hidden}
           open={open}
           onToggle={() => p.toggle(w.key)}
-          lane=""
+          wkey={w.key}
           place={placeGroup}
-          up={up && (() => placeGroup(w.id, up.id, "top"))}
-          down={down && (() => placeGroup(w.id, down.id, "bottom"))}
+          up={up && (() => placeGroup(w.key, up.key, "top"))}
+          down={down && (() => placeGroup(w.key, down.key, "bottom"))}
           // Not its count: the "+" that opens a session here, always at the row's end, plain to
           // see, darker when the row is hovered (the user, 2026-11-06).
           end={
@@ -611,7 +610,7 @@ function DropLine({ list }: { list: RefObject<HTMLDivElement | null> }) {
 /** A group's row; its menu (right click, long-press): its sessions archived, as a folder's (the
  *  user, 2026-11-08: a group is a folder now), rename, its path copied, open or folded, 通知 while
  *  push is on. 未归类 itself (id 0): its sessions archived and its 通知. */
-function WsRow({ flip, id, name, root, sessions, machine, remote, hidden, open, onToggle, end, lane, place, up, down }: { flip: string; id: number; name: string; root: string; sessions: Session[]; machine?: Machine; remote?: boolean; hidden?: boolean; open: boolean; onToggle: () => void; end: ReactNode; lane: string; place: (id: number, target: number, edge: Edge) => void; up?: () => void; down?: () => void }) {
+function WsRow({ flip, id, name, root, sessions, machine, remote, hidden, open, onToggle, end, wkey, place, up, down }: { flip: string; id: number; name: string; root: string; sessions: Session[]; machine?: Machine; remote?: boolean; hidden?: boolean; open: boolean; onToggle: () => void; end: ReactNode; wkey: string; place: (key: string, target: string, edge: Edge) => void; up?: () => void; down?: () => void }) {
   const machines = useMachines();
   const push = usePushMenus();
   const me = useMe().data;
@@ -657,17 +656,18 @@ function WsRow({ flip, id, name, root, sessions, machine, remote, hidden, open, 
       : []),
   ];
   const menu = items.length > 0 || push;
-  const dim = useDragged("ws", String(id));
+  // Dragged among all groups' rows, by its key (tree.ts WsNode.key).
+  const dim = useDragged("ws", wkey);
   const dragging = real && fine() && !renaming
     ? {
         draggable: true,
         onDragStart: (e: React.DragEvent) => {
           e.dataTransfer.setData("text/plain", name);
           e.dataTransfer.effectAllowed = "move";
-          startDrag({ kind: "ws", id: String(id), lane });
+          startDrag({ kind: "ws", id: wkey, lane: "" });
         },
         onDragEnd: endDrag,
-        ...dropTarget("ws", String(id), lane, (d, edge) => place(Number(d.id), id, edge)),
+        ...dropTarget("ws", wkey, "", (d, edge) => place(d.id, wkey, edge)),
       }
     : {};
   // Its "+" popover is a portal, but React events bubble through it: a press in it must not fold

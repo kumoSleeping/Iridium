@@ -118,8 +118,8 @@
 |---|---|---|
 | `GET /api/workspaces` | → `Workspace[]` | 文件夹组，和事件流 `workspaces` 同一份（没有会话的也在，页面不列） |
 | `PATCH /api/workspaces/{id}` | `{name?, hidden?}` → `{ok}` | 改名；隐藏或取消隐藏（隐藏的组：会话不列、不进归档、搜不到，除非其中有会话在别处运行，如 DSH Desktop 里开着；那时整组列出，菜单可取消隐藏） |
-| `PUT /api/workspaces/order` | `{ids}` → `{ok}` | 组的顺序（拖动或菜单上移下移）：`ids` 依次排在前，没列的随后；新建的组排在最后。只有面板和本机能改 |
-| `PATCH /api/folders/place` | `FolderPlace` → `{ok}` | 文件夹在组里的位置：`path` 是分组用的路径（本机绝对路径，或 `机器:路径`）；`order` 同会话的，0 去掉；`pinned` 置顶（排在组根下的会话上面）。不给的字段不变；事件流 `folderPlaces` 是全部（`order`、`pinned`）。只有面板和本机能改 |
+| `PUT /api/groups/order` | `{keys}` → `{ok}` | 组的顺序（拖动或菜单上移下移）：`keys` 是会话列表里每个组那一行的键（`w<id>`；同一个组在别的机器上的那部分是 `w<id>@<机器>`，各排各的），依次排在前，没列的随后；事件流 `places` 的 `groups`。只有面板和本机能改 |
+| `PATCH /api/folders/place` | `FolderPlace` → `{ok}` | 文件夹在组里的位置：`path` 是分组用的路径（本机绝对路径，或 `机器:路径`）；`order` 同会话的，0 去掉；`pinned` 置顶（排在组根下的会话上面）。不给的字段不变；事件流 `places` 的 `order`、`pinned`。只有面板和本机能改 |
 | `PUT /api/colors` | `FolderColor` → `{ok}` | 给文件夹打颜色标签（`red`、`orange`、`yellow`、`green`、`blue`、`purple`），`color` 为空就去掉；事件流 `colors`（只给面板）是全部。会话的标签用 `PATCH /api/sessions/{id}` 的 `color` |
 | `PATCH /api/sessions/{id}` | `SessionPatch` → `{ok}` | 只改覆盖层，不碰 agent 的文件：`name`（空串去掉；带 `byAgent` 是会话里的 agent 起的，`ir rename` 这样发：去引号和句尾标点，不盖你起的名，盖不了回 409）、`pinned`、`archived`（归档或恢复，见上面的显示标记）、`workspace`（移动，0 为未归类；移过就不再自动归类）、`order`（拖到的位置：列表按它排，代替最后活动时间，与 `updatedAt` 同为毫秒；0 去掉） |
 | `GET /api/folders?path=` | → `Folders` | 选择器：只列文件夹，不列隐藏的，按名字排；`path` 为空或 `~` 是家目录。`parent` 为空表示到顶了 |

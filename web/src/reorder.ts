@@ -1,13 +1,13 @@
-// The list's order by hand (the user, 2026-11-09): a group dragged among the groups of its
-// machine, a folder among those in its group, a session among those beside it (in its group's root
+// The list's order by hand (the user, 2026-11-09): a group's row dragged among all groups' rows
+// (a group listed at two machines is two rows, each its own), a folder among those in its group, a session among those beside it (in its group's root
 // or its folder). Pinned ones are ordered apart from the rest; one dropped on a pinned row is
 // pinned, on another unpinned. A folder pinned is above the sessions at its group's root; one
 // dropped on any of those is pinned, last of the pinned. A session or folder dragged keeps the key
-// it was dropped at (Session.order, the carried "folderPlaces") in place of its last activity: it
+// it was dropped at (Session.order, the carried "places") in place of its last activity: it
 // stays where it was put while those never dragged are still sorted by when they last worked.
 // With a mouse only, as a finger's long press is the menu: on a phone a group's menu moves it.
 import { useSyncExternalStore } from "react";
-import type { FolderPlaces, Session, Workspace } from "./api/types.gen";
+import type { Places, Session } from "./api/types.gen";
 import { useCarried } from "./store";
 import { folderKey, type Folder } from "./tree";
 
@@ -110,7 +110,7 @@ export function placeSession(sibs: Session[], s: Session, target: Session, edge:
 
 /** Where folder f goes, dropped at edge of target among sibs (the folders of its group, as
  *  listed): the key it takes, and pinned as the target is. */
-export function placeFolder(sibs: Folder[], f: Folder, target: Folder, edge: Edge, places: FolderPlaces, now = Date.now()): { order: number; pinned: boolean } {
+export function placeFolder(sibs: Folder[], f: Folder, target: Folder, edge: Edge, places: Places, now = Date.now()): { order: number; pinned: boolean } {
   const pinned = !!target.pinned;
   const zone = sibs.filter((x) => !!x.pinned === pinned && x.path !== f.path);
   const j = zone.findIndex((x) => x.path === target.path) + (edge === "bottom" ? 1 : 0);
@@ -119,29 +119,31 @@ export function placeFolder(sibs: Folder[], f: Folder, target: Folder, edge: Edg
 
 /** Folder f pinned last of its group's pinned (dropped on a session at its root): the key under
  *  the last, none if it is the first. */
-export function pinFolder(sibs: Folder[], f: Folder, places: FolderPlaces): { order?: number; pinned: true } {
+export function pinFolder(sibs: Folder[], f: Folder, places: Places): { order?: number; pinned: true } {
   const last = sibs.filter((x) => x.pinned && x.path !== f.path).at(-1);
   return last ? { order: folderKey(last, places.order) - 1000, pinned: true } : { pinned: true };
 }
 
 /** places with the folder of path put: its key (0 none) and pinned or not, as a field given. */
-export const withPlace = (places: FolderPlaces, path: string, p: { order?: number; pinned?: boolean }): FolderPlaces => {
+export const withPlace = (places: Places, path: string, p: { order?: number; pinned?: boolean }): Places => {
   const order = { ...places.order };
   if (p.order !== undefined) {
     if (p.order) order[path] = p.order;
     else delete order[path];
   }
   const pinned = p.pinned === undefined ? places.pinned : p.pinned ? [...places.pinned.filter((x) => x !== path), path] : places.pinned.filter((x) => x !== path);
-  return { order, pinned };
+  return { ...places, order, pinned };
 };
 
-export const NO_PLACES: FolderPlaces = { order: {}, pinned: [] };
-/** The carried "folderPlaces": where the folders were put, dragged or pinned, by path. */
-export const useFolderPlaces = () => useCarried<FolderPlaces>("folderPlaces") ?? NO_PLACES;
+export const NO_PLACES: Places = { groups: [], order: {}, pinned: [] };
+/** The carried "places": where the rows were put by hand, the groups' and the folders'. */
+export const usePlaces = () => useCarried<Places>("places") ?? NO_PLACES;
 
-/** The groups' IDs with id moved to edge of target: the order PUT /api/workspaces/order takes. */
-export function placeWorkspace(ws: Workspace[], id: number, target: number, edge: Edge): number[] {
-  const ids = ws.map((w) => w.id).filter((x) => x !== id);
-  ids.splice(ids.indexOf(target) + (edge === "bottom" ? 1 : 0), 0, id);
-  return ids;
+/** The groups' rows' keys with key moved to edge of target: the order PUT /api/groups/order takes.
+ *  stored: the order there was; shown: the rows as listed now (those not stored after the
+ *  stored). A row stored but not listed now (none of its sessions shown) keeps its place. */
+export function placeGroup(stored: string[], shown: string[], key: string, target: string, edge: Edge): string[] {
+  const all = [...stored, ...shown.filter((k) => !stored.includes(k))].filter((k) => k !== key);
+  all.splice(all.indexOf(target) + (edge === "bottom" ? 1 : 0), 0, key);
+  return all;
 }

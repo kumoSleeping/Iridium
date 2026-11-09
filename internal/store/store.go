@@ -195,6 +195,9 @@ var schema = []string{
 	`CREATE TABLE IF NOT EXISTS folder_order (path TEXT PRIMARY KEY, at REAL NOT NULL);`,
 	// 23: folders pinned in the list (the user, 2026-11-09): first among those in their group.
 	`CREATE TABLE IF NOT EXISTS folder_pins (path TEXT PRIMARY KEY, at INTEGER NOT NULL);`,
+	// 24: the groups' rows in the order they were dragged to, by the page's key for each: a group
+	// listed at two machines is two rows, ordered apart (the user, 2026-11-09).
+	`CREATE TABLE group_order (key TEXT PRIMARY KEY, sort INTEGER NOT NULL);`,
 }
 
 // steps run in Go after the migration of their version, in the same transaction.
@@ -382,9 +385,8 @@ type Workspace struct {
 	Hidden bool   `json:"hidden,omitempty"`
 }
 
-// AddWorkspace makes a workspace, listed after the others (SetWorkspaceOrder).
 func (s *Store) AddWorkspace(name, path string) (int64, error) {
-	r, err := s.db.Exec(`INSERT INTO workspaces (name, path, sort, created_at) VALUES (?, ?, (SELECT IFNULL(MAX(sort), -1) + 1 FROM workspaces), ?)`, name, path, now())
+	r, err := s.db.Exec(`INSERT INTO workspaces (name, path, created_at) VALUES (?, ?, ?)`, name, path, now())
 	if err != nil {
 		return 0, err
 	}

@@ -920,19 +920,22 @@ export interface Workspace {
   hidden?: boolean;
 }
 /**
- * WorkspaceOrder lists groups in the order they were dragged to (PUT /api/workspaces/order): IDs
- * first to last, before any left out.
+ * GroupOrder lists the groups' rows in the order they were dragged to (PUT /api/groups/order), by
+ * the key the page gives each (a group listed at two machines is two rows, ordered apart): first
+ * to last, those left out after them.
  */
-export interface WorkspaceOrder {
-  ids: number /* int64 */[];
+export interface GroupOrder {
+  keys: string[];
 }
 /**
- * FolderPlaces is where the folders in the list were put, by path as grouped (Session's cwd, or
- * "<machine>:<cwd>"): the carried state "folderPlaces". Order: the key each folder dragged is
- * sorted by among those in its group (as Session.Order); one not in it, by its latest session's
- * activity. Pinned: those pinned, first in their group.
+ * Places is where the rows of the list were put by hand: the carried state "places". Groups: the
+ * groups' rows in their order (GroupOrder); those not in it after them. Order: the key each folder
+ * dragged is sorted by among those in its group (as Session.Order), by its path as grouped
+ * (Session's cwd, or "<machine>:<cwd>"); one not in it, by its latest session's activity. Pinned:
+ * the folders pinned, first in their group.
  */
-export interface FolderPlaces {
+export interface Places {
+  groups: string[];
   order: { [key: string]: number /* float64 */};
   pinned: string[];
 }

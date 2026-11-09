@@ -1,7 +1,7 @@
 // Rows dragged to a new place (reorder.ts): the key a session is dropped at, and the groups' order.
 import { describe, expect, test } from "vitest";
-import type { Session, Workspace } from "../src/api/types.gen";
-import { pinFolder, placeFolder, placeSession, placeWorkspace, sortList, withPlace } from "../src/reorder";
+import type { Session } from "../src/api/types.gen";
+import { pinFolder, placeFolder, placeGroup, placeSession, sortList, withPlace } from "../src/reorder";
 import { buildTree, foldRest } from "../src/tree";
 
 const s = (id: string, updatedAt: number, more: Partial<Session> = {}) => ({ id, updatedAt, agent: "claude", cwd: "/w", status: "idle", hosted: false, live: false, ...more }) as Session;
@@ -34,11 +34,10 @@ describe("reorder", () => {
     expect(placeSession(sibs, p1, b, "top").pinned).toBe(false);
   });
 
-  test("a group moved before or after another", () => {
-    const ws = [1, 2, 3].map((id) => ({ id, name: `${id}`, path: `/${id}` })) as Workspace[];
-    expect(placeWorkspace(ws, 3, 1, "top")).toEqual([3, 1, 2]);
-    expect(placeWorkspace(ws, 1, 3, "bottom")).toEqual([2, 3, 1]);
-    expect(placeWorkspace(ws, 2, 1, "top")).toEqual([2, 1, 3]);
+  test("a group's row moved before or after another; one stored, not listed now, keeps its place", () => {
+    expect(placeGroup([], ["w1", "w2", "w3"], "w3", "w1", "top")).toEqual(["w3", "w1", "w2"]);
+    expect(placeGroup(["w2", "w1"], ["w2", "w1", "w3"], "w2", "w3", "bottom")).toEqual(["w1", "w3", "w2"]);
+    expect(placeGroup(["w9", "w1"], ["w1", "w1@m"], "w1@m", "w1", "top")).toEqual(["w9", "w1@m", "w1"]);
   });
 });
 
@@ -48,20 +47,20 @@ describe("folders", () => {
   const y = f("/w/y", 200);
   const z = f("/w/z", 100);
   test("a folder between two, at the top; one dragged keeps its key", () => {
-    const none = { order: {}, pinned: [] };
+    const none = { groups: [], order: {}, pinned: [] };
     expect(placeFolder([x, y, z], z, x, "bottom", none)).toEqual({ order: 250, pinned: false });
     expect(placeFolder([x, y, z], z, x, "top", none, 0)).toEqual({ order: 301, pinned: false });
-    expect(placeFolder([x, y, z], x, z, "top", { order: { "/w/y": 150 }, pinned: [] })).toEqual({ order: 125, pinned: false });
+    expect(placeFolder([x, y, z], x, z, "top", { groups: [], order: { "/w/y": 150 }, pinned: [] })).toEqual({ order: 125, pinned: false });
   });
 
   test("pinned: among the pinned, or last of them dropped on a session at the root", () => {
     const p = { ...x, pinned: true };
-    const none = { order: {}, pinned: ["/w/x"] };
+    const none = { groups: [], order: {}, pinned: ["/w/x"] };
     expect(placeFolder([p, y, z], z, p, "bottom", none, 0)).toEqual({ order: 300 - 1000, pinned: true });
     expect(pinFolder([p, y, z], z, none)).toEqual({ order: -700, pinned: true });
-    expect(pinFolder([y, z], z, { order: {}, pinned: [] })).toEqual({ pinned: true });
-    expect(withPlace(none, "/w/z", { order: 5, pinned: true })).toEqual({ order: { "/w/z": 5 }, pinned: ["/w/x", "/w/z"] });
-    expect(withPlace({ order: { "/w/x": 9 }, pinned: ["/w/x"] }, "/w/x", { order: 0, pinned: false })).toEqual({ order: {}, pinned: [] });
+    expect(pinFolder([y, z], z, { groups: [], order: {}, pinned: [] })).toEqual({ pinned: true });
+    expect(withPlace(none, "/w/z", { order: 5, pinned: true })).toEqual({ groups: [], order: { "/w/z": 5 }, pinned: ["/w/x", "/w/z"] });
+    expect(withPlace({ groups: [], order: { "/w/x": 9 }, pinned: ["/w/x"] }, "/w/x", { order: 0, pinned: false })).toEqual({ groups: [], order: {}, pinned: [] });
   });
 
   test("groups in their own order, whichever machine; 未归类 last", () => {
@@ -69,11 +68,14 @@ describe("folders", () => {
     const wss = [{ id: 2, name: "dsh", path: "m:C:/w" }, { id: 1, name: "here", path: "/w" }];
     const tree = buildTree([ses("a", "/w", { workspace: 1 }), ses("b", "C:\\w", { workspace: 2, machine: "m" }), ses("c", "/x", {}), ses("d", "C:\\x", { machine: "m" })], wss, "-", 0, undefined, ["m"]);
     expect(tree.workspaces.map((w) => w.key)).toEqual(["w2", "w1", "w0", "w0:m"]);
+    // Dragged: the remote group above this machine's; a group at two machines, its rows apart.
+    const moved = buildTree([ses("a", "/w", { workspace: 1 }), ses("b", "C:\\w", { workspace: 2, machine: "m" }), ses("e", "C:\\w\\e", { workspace: 1, machine: "m" }), ses("c", "/x", {})], wss, "-", 0, undefined, ["m"], { groups: ["w2", "w1@m"], order: {}, pinned: [] });
+    expect(moved.workspaces.map((w) => w.key)).toEqual(["w2", "w1@m", "w1", "w0"]);
   });
 
   test("pinned folders above the sessions at the root", () => {
     const ses = (id: string, cwd: string) => ({ id, cwd, updatedAt: 1, agent: "claude", status: "idle", hosted: false, live: false, workspace: 1 }) as Session;
-    const tree = buildTree([ses("r", "/w"), ses("a", "/w/a"), ses("b", "/w/b")], [{ id: 1, name: "w", path: "/w" }], "-", 0, undefined, [], { order: {}, pinned: ["/w/b"] });
+    const tree = buildTree([ses("r", "/w"), ses("a", "/w/a"), ses("b", "/w/b")], [{ id: 1, name: "w", path: "/w" }], "-", 0, undefined, [], { groups: [], order: {}, pinned: ["/w/b"] });
     expect(tree.workspaces[0]!.rows.map((r) => (r.kind === "session" ? r.s.id : r.f.name))).toEqual(["b", "r", "a"]);
   });
 });
