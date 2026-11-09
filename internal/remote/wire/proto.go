@@ -262,6 +262,10 @@ type HeldLive struct {
 	Model    string    `json:"model,omitempty"`
 	Effort   string    `json:"effort,omitempty"`
 	Features []Feature `json:"features,omitempty"`
+	// Owner is the feature that runs the session's effort at a level of its own now, Effort that
+	// level: also for one not held there whose features a process there runs (a dsh session
+	// Iridium started), whose effort is then set through held.set too.
+	Owner string `json:"owner,omitempty"`
 }
 
 // HeldChanged is the event held.changed: session's live state changed there (a feature switched
@@ -318,6 +322,27 @@ type DshPreset struct {
 // models and providers the dsh there has in its settings (DSH Desktop's): the llm adapters' rows
 // and the default model, as configured there. Keys may be in it: it stays there, served to no one.
 type DshLLMReply struct {
+	Patch string `json:"patch"`
+}
+
+// DshBundlesReply answers dsh.bundles: the bundles of the profile the dsh there runs (DSH
+// Desktop's web profile) that are neither dsh's own nor the dsh plugin, by the profile's order,
+// each with its patch files' text as the package has them (dsh.bundle.patch, in order).
+type DshBundlesReply struct {
+	Bundles []DshBundle `json:"bundles"`
+}
+
+// DshBundle is one bundle: its package's name and version, and its patch files.
+type DshBundle struct {
+	Name    string   `json:"name"`
+	Version string   `json:"version,omitempty"`
+	Patches []string `json:"patches"`
+}
+
+// DshSessionReply answers dsh.session: a patch there (Patch, its path) that puts the dsh plugin's
+// part for a session into the dsh processes Iridium starts there (their features, through it). A
+// secret of the plugin's is in it: it stays there, served to no one.
+type DshSessionReply struct {
 	Patch string `json:"patch"`
 }
 

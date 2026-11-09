@@ -107,8 +107,10 @@ type Sender interface {
 	Send(ctx context.Context, r Ref, text string, from Source, steer, images bool) (to string, done bool, err error)
 }
 
-// Setter sets a setting where the session is held (a holder's model, effort or feature). done
-// false: not such a session; the core goes its usual way (the driver's; a feature, none).
+// Setter sets a setting where the session is held (a holder's model, effort or feature), or one
+// the session's own process has the say over though it runs here (an effort a feature there
+// owns). done false: not such a session; the core goes its usual way (the driver's; a feature,
+// none).
 type Setter interface {
 	Set(ctx context.Context, r Ref, c Change) (done bool, err error)
 }

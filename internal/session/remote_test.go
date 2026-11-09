@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"syscall"
 	"testing"
@@ -472,6 +473,18 @@ func TestRemotePresets(t *testing.T) {
 		{"id": "llm-mine", "name": "@deepseek-ai/dsh-llm-mine", "config": {}},
 		{"id": "tool-web", "name": "@deepseek-ai/dsh-tool-web"}]`
 	os.WriteFile(filepath.Join(desktop, "entries.json"), []byte(entries), 0o600)
+	// Its profile's bundles: dsh's own, a third party's (OMD), the plugin itself, one not installed.
+	profile := filepath.Join(desktop, "profile")
+	for f, data := range map[string]string{
+		"package.json":                                    `{"dsh": {"profile": {"bundles": ["@deepseek-ai/dsh-base", "oh-my-dsh", "dsh-remote-iridium", "gone"]}}}`,
+		"node_modules/oh-my-dsh/package.json":             `{"name": "oh-my-dsh", "version": "1.3.9", "dsh": {"bundle": {"patch": ["./cordis.patch.yml", "./presets/cordis.patch.yml"]}}}`,
+		"node_modules/oh-my-dsh/cordis.patch.yml":         "- insert:\n    - id: oh-my-dsh\n      name: oh-my-dsh\n",
+		"node_modules/oh-my-dsh/presets/cordis.patch.yml": "[]\n",
+		"node_modules/dsh-remote-iridium/package.json":    `{"name": "dsh-remote-iridium", "dsh": {"bundle": {"patch": "./cordis.patch.yml"}}}`,
+	} {
+		os.MkdirAll(filepath.Dir(filepath.Join(profile, f)), 0o700)
+		os.WriteFile(filepath.Join(profile, f), []byte(data), 0o600)
+	}
 	scope, _ := filepath.Abs("../agent/dsh/testdata/pkg/node_modules/@deepseek-ai")
 	agents, _ := json.Marshal([]wire.AgentInfo{{Agent: "dsh", Argv: []string{"dsh"}, Version: "0.2.2-rc.1", Scope: scope, Home: filepath.Join(there, ".dsh")}})
 	cmd := exec.Command("node", "../../plugins/dsh-remote-iridium/test/run.mjs", "ws"+strings.TrimPrefix(srv.URL, "http"), "tok", filepath.Join(there, "executor"))
@@ -489,9 +502,10 @@ func TestRemotePresets(t *testing.T) {
 	if err := r.m.o.Channels[api.AgentDsh].(harness.Launcher).Prepare(bg, harness.Ref{ID: "x", As: "x", Agent: api.AgentDsh, Machine: "m1"}, &launch); err != nil {
 		t.Fatal(err)
 	}
+	// Then the plugin's part for the session's process (dsh.session).
 	llm := launch.Remote.Patches
-	if want := filepath.Join(desktop, "llm.patch.yml"); len(llm) != 1 || llm[0] != want {
-		t.Fatalf("dsh.llm: %q", llm)
+	if want := []string{filepath.Join(desktop, "llm.patch.yml"), filepath.Join(desktop, "session.patch.yml")}; !reflect.DeepEqual(llm, want) {
+		t.Fatalf("dsh.llm, dsh.session: %q", llm)
 	}
 	b, _ := os.ReadFile(llm[0])
 	for _, line := range []string{
@@ -509,6 +523,12 @@ func TestRemotePresets(t *testing.T) {
 		t.Error("the llm patch was served")
 	}
 
+	// Its profile's bundles of other packages, for a preset of theirs.
+	bundles, err := launch.Remote.Bundles()
+	if want := []agent.Bundle{{Name: "oh-my-dsh", Patches: []string{"- insert:\n    - id: oh-my-dsh\n      name: oh-my-dsh\n", "[]\n"}}}; err != nil || !reflect.DeepEqual(bundles, want) {
+		t.Errorf("dsh.bundles: %+v %v", bundles, err)
+	}
+
 	l, def, err := r.m.Presets(bg, api.AgentDsh, "m1")
 	if err != nil || def != "mine" || presetIDs(l) != "standard mine" || l[1].Name != "Mine" || l[1].Description != "My own" {
 		t.Fatalf("presets: %+v %q %v", l, def, err)
@@ -519,7 +539,7 @@ func TestRemotePresets(t *testing.T) {
 	// What the launch makes of it: the registry's rows, persona folded in.
 	mine, _ := dsh.FindPreset(l, "mine")
 	pkg := dsh.Package{Scope: scope}
-	b, err = pkg.Patch(mine, "")
+	b, err = pkg.Patch(mine, "", "")
 	if err != nil || !strings.Contains(string(b), "    personaPrefix: You are mine.\n") || !strings.Contains(string(b), "    - id: iridium-tool-web\n") {
 		t.Errorf("patch: %v\n%s", err, b)
 	}

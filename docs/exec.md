@@ -100,11 +100,13 @@
 - dsh 插件另有这些（见“远端 DSH”“附加功能”），别的执行端回 `unsupported`。`held.*` 照握手的 `caps` 用，没有就用旧名；插件新旧两个名字都答（给旧版 Iridium）。
   - `held.list {}` → `{sessions, running, unsynced, unsyncedUngrouped}`（旧名 `dsh.open`）：插件所在的 dsh 进程（DSH Desktop）里此刻打开着的会话（Desktop 载入了它、拿着写锁，下称“Desktop 拿着”），其中 agent 正在干活的，插件设置里不同步到这边的工作区（文件夹或名字），以及未分组的会话是否也不同步。
   - `held.send {session, text, steer?}` → `{}`（旧名 `dsh.prompt`）：把消息交给 Desktop 里这个会话的 agent（没有就 `not_found`）。
-  - `held.get {session, lang}` → `{held, model?, effort?, features?}`：会话在那边此刻的样子。`held`：Desktop 拿着它；只有这时才给 `model`（`供应商/模型`）和 `effort`（此刻跑的档位：有附加功能管着强度时是它的，否则是会话的模型选择里的）。`features`：插件给它的附加功能，拿不拿着都给（没拿着的不可用，带原因），文字按 `lang`（`zh`、`en`，这边设置的语言）。
-  - `held.set {session, lang, model | effort | feature: {id, on, option?}}` → 同 `held.get`，改后的：每次只改一样，只对 Desktop 拿着的会话（否则 `not_found`）。模型、强度经 dsh 的 `sessionController.selectModel`（同 Desktop 的模型选择）：换模型时新模型有原来的档位就保留；强度有附加功能管着时交给它（`setEffort`）。功能交给提供它的插件。审批模式不经这里。
+  - `held.get {session, lang}` → `{held, model?, effort?, owner?, features?}`：会话在那边此刻的样子。`held`：Desktop 拿着它；只有这时才给 `model`（`供应商/模型`）和 `effort`（此刻跑的档位：有附加功能管着强度时是它的，否则是会话的模型选择里的）。`owner`：此刻管着强度的那一项的 id，`effort` 是它的档位；这边起的会话（见“附加功能”）没拿着也给。`features`：插件给它的附加功能，拿不拿着都给（没拿着的不可用，带原因），文字按 `lang`（`zh`、`en`，这边设置的语言）。
+  - `held.set {session, lang, model | effort | feature: {id, on, option?}}` → 同 `held.get`，改后的：每次只改一样，只对 Desktop 拿着的会话（否则 `not_found`）；这边起的、会话进程连着插件的，只改功能和强度（强度只在有一项管着时，否则 `unsupported`，这边自己改）。模型、强度经 dsh 的 `sessionController.selectModel`（同 Desktop 的模型选择）：换模型时新模型有原来的档位就保留；强度有附加功能管着时交给它（`setEffort`）。功能交给提供它的插件。审批模式不经这里。
   - 事件 `held.changed {session, live}`：`live` 同 `held.get` 的回答，见“附加功能”。
   - `dsh.attach {session, cwd}` → `{}`，把会话登记到 `cwd` 对应的工作区（没有就新建），Desktop 侧边栏里就有它。
   - `dsh.presets {}` → `{presets: [{id, name?, description?, plugins, broken?}], default}`，插件所在 dsh 进程的 Agent 预设注册表（`agentPresets` 的 `list()`、`defaultId`，`plugins` 是 `readDocument` 给的子插件行 YAML）：这边按它列预设、生成 patch，自建和改过的预设也能用；不支持时退回读包里的预设文件。
+  - `dsh.bundles {}` → `{bundles: [{name, version?, patches}]}`：插件所在 profile 的 bundle（`package.json` 的 `dsh.profile.bundles`，按顺序），去掉 dsh 自己的（`@deepseek-ai/`）和本插件，`patches` 是它 `dsh.bundle.patch` 列的文件的原文。用于第三方 bundle 的预设（见“dsh 插件”）；不支持时那种预设退回按进程摊平。
+  - `dsh.session {}` → `{patch}`（2026-11-09）：插件写的一个 patch，把它的 `session.js` 装进这边在那台机器上起的每个 dsh 会话进程，带上连回插件的本地地址和口令（`bridge.js`：Unix socket 或 Windows 命名管道）。口令在里面，这边只拿路径，不读（同 `dsh.llm`）。不支持时会话里就没有插件这部分。
   - `dsh.llm {}` → `{patch}`：插件把 Desktop 此刻生效的模型设置（基础包里的 `dsh-llm*` 行和 `agent-default-model`，照它的配置和开关，`!!js` 原样）写成那台机器上的一个补丁，只回路径；这边起 dsh 会话和模型探测时多带 `--patch <它>`，sdk 进程就有了 Desktop 的供应商、模型和默认模型。里面可能有密钥：文件只在那台机器上，执行端不对外读。
 
 ## 网页（用户，2026-11-08）
@@ -134,6 +136,12 @@
 ## dsh 插件
 
 一个 cordis 插件，npm 包 `dsh-remote-iridium`，每次发版由 release.yml 用同一版本号发到 npm（Trusted Publishing，不用 TOKEN）；在 `dsh web` 的“添加插件”里填包名即可装（或 `dsh plugin --profile web add dsh-remote-iridium`），跟着 `dsh web` 常驻：连这边、实现上面的必需部分。它不碰 dsh 自己的会话，每个会话照旧是一个 `dsh --profile sdk --patch …` 子进程（预设和系统提示按进程，`internal/agent/dsh/preset.go`）。
+
+第三方包的预设（2026-11-09）：Desktop 的预设可以来自 web profile 里的 bundle，例如 OMD 的 `omd-ptc`、`oh-my-dsh`，行名是 `oh-my-dsh/host/tool-pwsh` 这种。sdk profile 只从 dsh 安装目录和自己的目录找包，这些行原样放进去会加载失败，被它们替换掉的基础行（shell、jobs）又已关掉，会话就没了执行工具。现在分两种（`internal/agent/dsh/modules.go`、`bound.go`）：
+
+- 找包：patch 里包不是 `@deepseek-ai/` 的行改走 `dsh-modules.mjs`（和 patch 写在一起）：它在 agent 那台机器上按 dsh 的家目录（`DSH_HOME`，否则 `~/.dsh`）去 `profiles/*/node_modules` 找包（先 web），照 `exports` 加载。这边读不到 `profiles`（插件不给），所以找包放在那边的进程里做。
+- 绑定（插件有 `dsh.bundles` 时）：预设用到的包是 Desktop 的 bundle，就照 Desktop 的组合来：预设注册表、web 的禁用、那个 bundle 自己那层（去掉其中的预设声明，预设以 `dsh.presets` 读到的为准）、这个预设的声明，再由 `dsh-preset.mjs` 在每个会话创建时绑定这个预设（`agentPresets.recompose`，子代理随父会话）。OMD 的 PTC 执行器只能在绑定的预设里用，这样 `run_code`、上下文、codegraph、workflow 都有。实测（dsh 0.2.2-rc.1、OMD 1.3.9）：`omd-ptc`、`oh-my-dsh` 都是 63 个工具，`run_code` 里跑 `git --version` 正常。仍没有的：只在 Desktop 网页进程里有的（OMD 的 deepseek-workbench、extensions、rewind 要 `webServer`），以及本插件（不进 sdk 进程，所以没有 Ultra）。
+- 插件旧、没有 `dsh.bundles`，或预设不用别的 bundle：照旧按进程摊平；被第三方包的行替换的基础行改为条件关闭（那个包在才关，`!!js`，并保留基础行自己的条件），包不在就留着 dsh 自己的 shell 和 jobs。这时 OMD 预设里依赖 `omd` 服务的行（PTC 执行器、上下文、codegraph、workflow）起不来，执行退回 dsh 自带的，shell、jobs、文件工具都在。
 
 实测（2026-11-08）：Mac（arm64，Node 25）上 dsh 0.2.2-rc.1 的 `--profile sdk` 握手、开会话、`shutdown` 都和 Linux 一样，记录写在 `sessions/--<目录>--/<会话>/`。0.1.0 没有 sdk profile，执行端握手报的版本低于 0.2.2 时不给开 dsh。Windows 待测。
 
@@ -184,7 +192,7 @@
 - 插件里的注册表：cordis 服务 `iridiumFeatures`（`features.js`）。`provide({id, get, set, ownsEffort?, effort?, setEffort?})` 注册一项，返回撤销函数；同 id 先到先得，前一个撤了后一个才顶上。每次调用有时限（读 3 秒、改 15 秒），出错或超时只让这一项不可用，错误消息作原因；`held.get` 里各项的读取和“谁管强度”同时问，整个回复 3 秒内给出。插件设置“Iridium”一页有一组开关“提供给 Iridium 的附加功能”，关掉的按 id 记在配置 `unfeatured`，不提供、也不能改；这一页在浏览器那一半，拿不到注册表，只列插件自带适配的（现在是 `omd.ultra`）和已关掉的。
 - 推送：Desktop 里有变化（切了功能、选了模型、agent 载入或卸下；Desktop 拿着的会话另外每 3 秒看一次），插件对这边 10 分钟内问过的会话发 `held.changed`（Desktop 一直拿着的会话不过期），每个会话每秒最多两次。
 - OMD 的适配：`adapters/omd.js` 是插件里唯一认识 OMD 的文件，一个 cordis 子插件，`inject: ['omd', 'iridiumFeatures']`：两样都在才启用，没装 OMD 时不运行也不报错，OMD 卸载或重载时连同这一项撤掉。它把 OMD 的 `ultracode`（`inspect`、`select`）译成 `omd.ultra`：名字 Ultra，暖色，子模式 Workflow、Agent Team（OMD 说能组队时才有）、自由。开着时强度归它管（滑条显示、设的都是 Ultra 的档位）；开时不给档位由 OMD 选（已开着的保留原档位），关时回到滑条的档位。哪天 OMD 自己注册进 `iridiumFeatures`，删掉这个文件即可。
-- 只在 Desktop 拿着的会话上能开。Iridium 自己起的 dsh 会话是 `dsh --profile sdk` 子进程，不加载 OMD 和本插件，没有 Ultra；它们和 Desktop 没拿着的会话照样列出这一项，但不可用（OMD 为会话记着的 Ultra 照样显示为开），原因是插件给的（“会话不在 DSH Desktop 里打开着，或没用 OMD 的预设”）。Iridium 所在机器上直接发现的 Desktop 会话没有执行端，也就没有附加功能；插件旧、握手没有 `held.features` 的，同样没有。
+- 能开的：Desktop 拿着的会话，和 Iridium 自己起的、用 OMD 预设的 dsh 会话（2026-11-09）。后者是 `dsh --profile sdk` 子进程，OMD 在那个进程里（见“dsh 插件”的绑定），所以功能也在那个进程里：插件经 `dsh.session` 把 `session.js` 装进去，它在进程里提供同样的 `iridiumFeatures`、启用同一个 `adapters/omd.js`，再经本地的桥（`bridge.js`：插件每次启动一个自己的 Unix socket 或 Windows 命名管道，带口令；`dsh.session` 每次写当前这个）连回 Desktop 里的插件；sdk 进程没有 dsh 的 `sessionController`（那是网页那一半的），`session.js` 补一个只会选模型的（`selectModel`，同 Desktop 的模型选择，但不存成默认模型），OMD 开关 Ultra 要用它；`held.get`、`held.set`、`held.changed` 对这种会话由插件转给那个进程，开关、子模式、强度归属都和 Desktop 拿着的一样（开着时滑条是 Ultra 的档位，改强度经 `held.set` 交给 OMD）。这边只认通用的形状：`available` 由插件说，`owner` 说明强度归谁。别的会话（Desktop 没拿着、非 OMD 预设、插件旧没有 `dsh.session`）照样列出这一项，但不可用（OMD 为会话记着的 Ultra 照样显示为开），原因是插件给的（“会话不在 DSH Desktop 里打开着，或没用 OMD 的预设”）。Iridium 所在机器上直接发现的 Desktop 会话没有执行端，也就没有附加功能；插件旧、握手没有 `held.features` 的，同样没有。
 - 这边的限制：
   - `id` 形如 `<插件>.<名字>`（只用 `a-z0-9-`），不合的丢；同 id 取第一个；每个会话最多 4 项，多的丢（每台机器记一次日志）。`v` 大于 1 的丢；`place` 只认 `effort`（网页只有这一处），别的丢；`tone` 只认 `warm`，别的当没有。
   - 名字、选项名至多 24 字，说明、原因至多 120 字：去掉控制字符和首尾空白，长了截断。选项至多 8 个，id 只用 `a-z0-9-`；`option` 不是其中之一就当没有。
@@ -196,7 +204,8 @@
 
 核心（`internal/session`、`server`、`cli`、`chat`、`remote`）不认识具体的 agent：某个 agent 独有的事放在它的通道里（`internal/harness/<agent>`），核心按会话的 agent 取通道、只问能力（`harness.Stater`、`Sender`、`Setter`、`Launcher`、`Models`、`Presets`、`Syncer`、`Retuner`），在 `cmd/iridium` 接线。静态的差异仍写在 `agents.Info` 的行里，驱动的差异仍是驱动的可选接口。
 
-- dsh 的通道（`internal/harness/dsh`）：DSH Desktop 拿着的会话（`held.*`：状态、转交消息、改模型强度和附加功能）、模型目录（探测）、预设、启动时的 `dsh.llm` 补丁和 `dsh.attach` 归档。协议名不变，插件不用重发。
+- dsh 的通道（`internal/harness/dsh`）：DSH Desktop 拿着的会话（`held.*`：状态、转交消息、改模型强度和附加功能）、模型目录（探测）、预设、启动时的 `dsh.llm`、`dsh.session` 补丁和 `dsh.bundles`、`dsh.attach` 归档。协议名不变，插件不用重发。
+- `Setter` 对在这边跑着的会话也问（2026-11-09）：由通道说是不是它的。dsh 的只接一种：会话进程里有一项附加功能管着强度时（`held.get` 的 `owner`），改强度交给它；别的照旧走驱动。
 - Claude、Codex、pi 暂无通道：它们的差异都在 `agents.Info` 和驱动接口里。
 - 新接口只加在核心真要做决定的地方（显示状态、发消息、改设置、启动），形状按核心的决定定，不按某个 agent 的协议定；只属于 dsh 的概念留在它的通道里。
 - 守护测试 `internal/harness/neutral_test.go`：核心包里出现 dsh 的名字就失败。还没搬的列在它的 `pending` 里：`/dsh/` 路由、`SendReply.desktop` 的等待、远端 dsh 会话的发现（`internal/discover/remote.go`，最大的一块，单独做）。UltraCode 的 `claude.ultracode` 也还在核心里，待驱动有 `Featurer` 后搬。

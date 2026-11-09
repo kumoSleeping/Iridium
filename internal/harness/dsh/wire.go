@@ -51,6 +51,23 @@ func desktopLLMPatch(ctx context.Context, mc *remote.Machine) (string, error) {
 	return r.Patch, err
 }
 
+// desktopBundleList is the bundles of DSH Desktop's profile besides dsh's own and the dsh plugin,
+// with their patches (dsh.bundles); an error of wire.CodeUnsupported from one that cannot say.
+func desktopBundleList(ctx context.Context, mc *remote.Machine) ([]wire.DshBundle, error) {
+	var r wire.DshBundlesReply
+	err := mc.Call(ctx, "dsh.bundles", struct{}{}, &r)
+	return r.Bundles, err
+}
+
+// desktopSessionPatch is the path there of the patch that puts the dsh plugin's part into a
+// session's dsh process (dsh.session, written anew); an error of wire.CodeUnsupported from one
+// that cannot.
+func desktopSessionPatch(ctx context.Context, mc *remote.Machine) (string, error) {
+	var r wire.DshSessionReply
+	err := mc.Call(ctx, "dsh.session", struct{}{}, &r)
+	return r.Patch, err
+}
+
 // desktopAttach files session under the workspace of its folder cwd in the dsh the executor runs
 // in (DSH Desktop's sidebar), made if there is none.
 func desktopAttach(ctx context.Context, mc *remote.Machine, session, cwd string) error {

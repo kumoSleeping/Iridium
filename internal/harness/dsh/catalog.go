@@ -151,6 +151,45 @@ func (c *Channel) probeCatalog(ctx context.Context, machine string) (agent.Catal
 	return cat, nil
 }
 
+// desktopSession is the dsh plugin's patch at mc for a session's dsh process (dsh.session): its
+// part there, for the features of plugins in that process; none from one too old to give it.
+func (c *Channel) desktopSession(ctx context.Context, mc *remote.Machine) []string {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	p, err := desktopSessionPatch(ctx, mc)
+	if err != nil {
+		if !wire.IsCode(err, wire.CodeUnsupported) {
+			c.o.Logf("dsh: the dsh plugin's part for sessions at %s: %v", mc.ID(), err)
+		}
+		return nil
+	}
+	if p == "" {
+		return nil
+	}
+	return []string{p}
+}
+
+// desktopBundles reads the bundles of DSH Desktop's profile at mc (dsh.bundles), when a preset
+// asks: none from a dsh plugin too old to say.
+func (c *Channel) desktopBundles(ctx context.Context, mc *remote.Machine) func() ([]agent.Bundle, error) {
+	return func() ([]agent.Bundle, error) {
+		ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		defer cancel()
+		bs, err := desktopBundleList(ctx, mc)
+		if err != nil {
+			if wire.IsCode(err, wire.CodeUnsupported) {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("DSH Desktop's bundles at %s: %w", mc.ID(), err)
+		}
+		out := make([]agent.Bundle, len(bs))
+		for i, b := range bs {
+			out[i] = agent.Bundle{Name: b.Name, Patches: b.Patches}
+		}
+		return out, nil
+	}
+}
+
 // desktopLLM are the --patch files at mc that give a dsh session there DSH Desktop's models and
 // providers (the user, 2026-11-08: synced with Desktop's): the dsh plugin's dsh.llm, written anew;
 // none from an executor without it.

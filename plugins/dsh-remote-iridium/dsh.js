@@ -13,11 +13,25 @@ import { heldMethods } from './held.js'
  * o.follow the feature registry and followHeld's (none: no features); dsh.attach {session, cwd},
  * the session filed under the workspace of its folder, made if there is none (a session the
  * Iridium started here, in DSH Desktop's sidebar); dsh.presets, the agent presets it registers;
- * dsh.llm, its models for the sessions the Iridium starts here.
+ * dsh.bundles, its profile's bundles of other packages (profileBundles); dsh.llm, its models for
+ * the sessions the Iridium starts here; dsh.session, this plugin's part in them (session.js).
  */
 export function dshMethods(ctx, kept = () => ({ unsynced: [], ungrouped: true }), llm = {}, o = {}) {
   return {
-    ...heldMethods(ctx, o.features, kept, o.follow),
+    ...heldMethods(ctx, o.features, kept, o.follow, o.bridge),
+    // The patch that puts this plugin's part for a session (session.js) into the dsh processes the
+    // Iridium starts here, connected to the bridge (o.bridge, at o.sessionFile): their features
+    // (a plugin's in that process, OMD's) answer the Iridium as Desktop's do. The secret stays here.
+    'dsh.session': async () => {
+      if (!o.bridge || !o.sessionFile) throw new RemoteError('unsupported', 'dsh.session')
+      try {
+        fs.mkdirSync(path.dirname(o.sessionFile), { recursive: true, mode: 0o700 })
+        fs.writeFileSync(o.sessionFile, sessionPatch(o.bridge), { mode: 0o600 })
+        return { patch: o.sessionFile }
+      } catch (e) {
+        throw new RemoteError('failed', e.message)
+      }
+    },
     // The agent presets this dsh registers (its agentPresets registry: the shipped ones, a
     // bundle's, the profile's own edits), each with its child plugin rows as YAML, which the
     // Iridium runs process-wide through a patch; and the default, the one set in its settings.
@@ -37,6 +51,18 @@ export function dshMethods(ctx, kept = () => ({ unsynced: [], ungrouped: true })
           })
         }
         return { presets, default: reg.defaultId ?? '' }
+      } catch (e) {
+        throw new RemoteError('failed', e.message)
+      }
+    },
+    // The bundles of the profile this dsh runs (its package.json's dsh.profile.bundles) besides
+    // dsh's own and this plugin, each with its patch files' text: a preset of theirs (OMD's) needs
+    // their layer in the Iridium's sessions, whose sdk profile has none of this one's bundles.
+    'dsh.bundles': async () => {
+      const dir = ctx.get('profileContext')?.dir
+      if (!dir) throw new RemoteError('unsupported', 'no profile in this dsh')
+      try {
+        return { bundles: profileBundles(dir) }
       } catch (e) {
         throw new RemoteError('failed', e.message)
       }
@@ -71,6 +97,48 @@ export function dshMethods(ctx, kept = () => ({ unsynced: [], ungrouped: true })
       }
     },
   }
+}
+
+/** The patch that loads session.js in a session's dsh process, connected to bridge. */
+export function sessionPatch(bridge) {
+  const q = (v) => JSON.stringify(v)
+  return [
+    "# dsh-remote-iridium: its part for the Iridium's sessions here (their features).",
+    '# Generated; do not edit.',
+    '- insert:',
+    '    - id: remote-iridium-session',
+    `      name: ${q(new URL('./session.js', import.meta.url).href)}`,
+    '      config:',
+    `        endpoint: ${q(bridge.endpoint)}`,
+    `        secret: ${q(bridge.secret)}`,
+  ].join('\n') + '\n'
+}
+
+/** This plugin's package name. */
+const own = JSON.parse(fs.readFileSync(new URL('./package.json', import.meta.url), 'utf8')).name
+
+/**
+ * The bundles of the profile at dir besides dsh's own (@deepseek-ai/) and this plugin, by its
+ * order: {name, version, patches}, patches the text of the files its dsh.bundle.patch lists. A
+ * bundle not installed in the profile's node_modules (dsh's installation has it) is left out.
+ */
+export function profileBundles(dir) {
+  const json = (f) => JSON.parse(fs.readFileSync(f, 'utf8'))
+  const out = []
+  for (const name of json(path.join(dir, 'package.json')).dsh?.profile?.bundles ?? []) {
+    if (typeof name !== 'string' || name.startsWith('@deepseek-ai/') || name === own) continue
+    const pkg = path.join(dir, 'node_modules', ...name.split('/'))
+    if (!fs.existsSync(path.join(pkg, 'package.json'))) continue
+    const m = json(path.join(pkg, 'package.json'))
+    const files = [m.dsh?.bundle?.patch ?? []].flat().filter((f) => typeof f === 'string')
+    const patches = files.map((f) => {
+      const file = path.resolve(pkg, f)
+      if (path.relative(pkg, file).startsWith('..')) throw new Error(`${name}: patch ${f} is outside the package`)
+      return fs.readFileSync(file, 'utf8')
+    })
+    out.push({ name, ...(m.version ? { version: m.version } : {}), patches })
+  }
+  return out
 }
 
 /** The ids of the rows dsh's base bundle has, which an sdk profile has too. */

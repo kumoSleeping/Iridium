@@ -12,8 +12,10 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/kumoSleeping/iridium/internal/agent"
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/config"
+	"github.com/kumoSleeping/iridium/internal/harness"
 	"github.com/kumoSleeping/iridium/internal/remote"
 	"github.com/kumoSleeping/iridium/internal/remote/wire"
 )
@@ -103,7 +105,7 @@ func TestHeldPlugin(t *testing.T) {
 		opts = append(opts, o.ID+"="+o.Name)
 	}
 	if len(st.Features) != 1 || u.ID != "omd.ultra" || u.Name != "Ultra" || u.On || u.Active || !u.Available || u.Option != "free" ||
-		u.Place != "effort" || u.Tone != "warm" || u.Hint != "OMD 的协作模式，在 DSH Desktop 里运行；子模式在下面选" ||
+		u.Place != "effort" || u.Tone != "warm" || u.Hint != "OMD 的协作模式；子模式在下面选" ||
 		strings.Join(opts, " ") != "workflow=Workflow free=自由" || st.Model != "p/m" {
 		t.Fatalf("off: %+v model %q", st.Features, st.Model)
 	}
@@ -201,5 +203,101 @@ func TestHeldPlugin(t *testing.T) {
 	}
 	if len(lines("modes.jsonl")) != n {
 		t.Error("asked of OMD, not held")
+	}
+}
+
+// A dsh session Iridium started at the machine (not Desktop's: run by a dsh process of its own
+// there, the plugin's session.js in it, OMD too): its Ultra is that process's, available though
+// Desktop does not hold it; switched on at a sub-mode, the level the page shows is Ultra's and one
+// set goes to OMD there; off again.
+func TestHeldPluginSession(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("no node")
+	}
+	const id = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+	hub := &remote.Hub{Logf: t.Logf}
+	r := newRig(t, func(_ *config.Config, o *Options) {
+		o.Remote = hub
+		o.Discovery = &heldFinder{desktopFinder: desktopFinder{id}}
+	})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) { hub.Serve(w, req, "m1", "pc") }))
+	t.Cleanup(srv.Close)
+	there := t.TempDir()
+	desktop := filepath.Join(there, "desktop")
+	proc := filepath.Join(desktop, "session")
+	os.MkdirAll(proc, 0o700)
+	put := func(name, s string) {
+		if err := os.WriteFile(filepath.Join(desktop, name), []byte(s), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Desktop has OMD but not the session; the session's process has both.
+	put("open.json", `[]`)
+	put("omd.json", `{}`)
+	put("session/session.json", `["`+id+`"]`)
+	put("session/omd.json", `{"`+id+`":{"eligible":true,"mode":"off","submode":"free","teamAvailable":true,"selected":{"provider":"p","model":"m","reasoningEffort":"high"}}}`)
+	agents, _ := json.Marshal([]wire.AgentInfo{{Agent: "dsh", Argv: []string{"dsh"}, Version: "0.2.2-rc.1", Home: filepath.Join(there, ".dsh")}})
+	cmd := exec.Command("node", "../../plugins/dsh-remote-iridium/test/run.mjs", "ws"+strings.TrimPrefix(srv.URL, "http"), "tok", filepath.Join(there, "executor"))
+	cmd.Env = append(os.Environ(), "IRIDIUM_TEST_AGENTS="+string(agents), "IRIDIUM_TEST_DSH="+desktop)
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cmd.Process.Signal(syscall.SIGTERM); _ = cmd.Wait() })
+	waitFor(t, "the executor", func() bool { _, ok := hub.Machine("m1").Hello(); return ok })
+
+	// The patch for its dsh process: session.js, the bridge's address; served to no one.
+	launch := agent.SpawnOptions{Remote: &agent.Remote{}}
+	if err := r.m.o.Channels[api.AgentDsh].(harness.Launcher).Prepare(bg, harness.Ref{ID: id, As: id, Agent: api.AgentDsh, Machine: "m1"}, &launch); err != nil {
+		t.Fatal(err)
+	}
+	if p := launch.Remote.Patches; len(p) != 1 || p[0] != filepath.Join(desktop, "session.patch.yml") {
+		t.Fatalf("dsh.session: %q", p)
+	} else if b, _ := os.ReadFile(p[0]); !strings.Contains(string(b), "session.js\"\n") || !strings.Contains(string(b), "endpoint: ") {
+		t.Errorf("session patch:\n%s", b)
+	} else if _, err := hub.Machine("m1").ReadFile(bg, p[0], 1<<20); err == nil {
+		t.Error("the session patch was served")
+	}
+
+	st := r.waitState(id, "its process's Ultra", func(s *api.SessionState) bool { return len(s.Features) > 0 && s.Features[0].Available })
+	u := st.Features[0]
+	if len(st.Features) != 1 || u.ID != "omd.ultra" || u.On || len(u.Options) != 3 || st.EffortNow != "" {
+		t.Fatalf("off: %+v effort %q", st.Features, st.EffortNow)
+	}
+	modes := func() []string {
+		b, _ := os.ReadFile(filepath.Join(proc, "modes.jsonl"))
+		if s := strings.TrimSpace(string(b)); s != "" {
+			return strings.Split(s, "\n")
+		}
+		return nil
+	}
+	if err := r.m.SetFeature(bg, id, "omd.ultra", api.SetFeature{On: true, Option: "team"}); err != nil {
+		t.Fatal(err)
+	}
+	st = r.waitState(id, "Ultra on", func(s *api.SessionState) bool { return len(s.Features) > 0 && s.Features[0].On })
+	if st.Features[0].Option != "team" || st.EffortNow != "xhigh" || st.Effort != "xhigh" {
+		t.Errorf("on: %+v effort %q/%q", st.Features[0], st.Effort, st.EffortNow)
+	}
+	// A level set while on is Ultra's, set by OMD in that process.
+	if err := r.m.SetEffort(bg, id, "max"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.m.SetFeature(bg, id, "omd.ultra", api.SetFeature{On: false}); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		`{"session":"` + id + `","provider":"p","model":"m","mode":"ultra","submode":"team","expectedRevision":1}`,
+		`{"session":"` + id + `","provider":"p","model":"m","reasoningEffort":"max","mode":"ultra","expectedRevision":1}`,
+		`{"session":"` + id + `","provider":"p","model":"m","reasoningEffort":"max","mode":"off","expectedRevision":1}`,
+	}
+	if got := modes(); strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("OMD there was asked:\n%s", strings.Join(got, "\n"))
+	}
+	st = r.waitState(id, "Ultra off", func(s *api.SessionState) bool { return len(s.Features) > 0 && !s.Features[0].On })
+	if st.EffortNow != "" {
+		t.Errorf("off: effort %q", st.EffortNow)
+	}
+	if b, _ := os.ReadFile(filepath.Join(desktop, "modes.jsonl")); len(b) > 0 {
+		t.Errorf("Desktop's OMD was asked: %s", b)
 	}
 }

@@ -15,6 +15,10 @@
 //   attached.jsonl  each session filed under a workspace (dsh.attach);
 //   presets.json    its agent preset registry ({presets: [{id, name?, description?, plugins,
 //                   broken?}], default}; none: no registry);
+//   session/        a dsh process the Iridium started here (session.js, over the bridge): a fake dsh
+//                   of its own, as this one (its omd.json, models.json, modes.jsonl), session.json
+//                   the sessions it runs;
+//   profile/        the directory of the profile it runs (package.json, node_modules: dsh.bundles);
 //   entries.json    its loader's rows ([{id, name, config?, disabled?}]; dsh.llm writes
 //                   llm.patch.yml there);
 //   omd.json        OMD's Ultra by session ({eligible, mode, submode, teamAvailable, selected,
@@ -34,6 +38,8 @@ import { dshMethods } from '../dsh.js'
 import { Executor } from '../executor.js'
 import { createFeatures } from '../features.js'
 import { followHeld } from '../held.js'
+import { bridgeEndpoint, createBridge } from '../bridge.js'
+import * as session from '../session.js'
 
 const [url, token, state] = process.argv.slice(2)
 const dir = process.env.IRIDIUM_TEST_DSH
@@ -45,7 +51,9 @@ let methods
 if (dir) {
   const ctx = fakeDsh(dir)
   const features = createFeatures({ unfeatured: () => read(dir, 'unfeatured.json', []) })
-  const follow = followHeld(ctx, features, (event, params) => ex?.notify(event, params))
+  const bridge = createBridge({ endpoint: bridgeEndpoint(dir), changed: (s) => features.changed(s) })
+  const follow = followHeld(ctx, features, (event, params) => ex?.notify(event, params), { bridge })
+  if (fs.existsSync(path.join(dir, 'session', 'session.json'))) startSession(path.join(dir, 'session'), bridge)
   // OMD comes and goes with omd.json, as cordis starts and stops the adapter with OMD's service.
   let omd = null
   const syncOmd = () => {
@@ -59,7 +67,7 @@ if (dir) {
   syncOmd()
   setInterval(syncOmd, 500).unref()
   methods = Object.fromEntries(
-    Object.entries(dshMethods(ctx, () => kept(dir), llm, { features, follow })).map(([k, fn]) => [
+    Object.entries(dshMethods(ctx, () => kept(dir), llm, { features, follow, bridge, sessionFile: path.join(dir, 'session.patch.yml') })).map(([k, fn]) => [
       k,
       (p) => {
         syncOmd()
@@ -68,13 +76,35 @@ if (dir) {
     ]),
   )
 }
-ex = new Executor({ url, token, state, agents, methods, caps, denied: llm.file ? [llm.file] : [], log: (m) => console.error(`executor: ${m}`) })
+ex = new Executor({ url, token, state, agents, methods, caps, denied: [...(llm.file ? [llm.file] : []), ...(dir ? [path.join(dir, 'session.patch.yml')] : [])], log: (m) => console.error(`executor: ${m}`) })
 process.on('SIGUSR1', () => ex.drop())
 process.on('SIGTERM', () => {
   ex.stop()
   setTimeout(() => process.exit(0), 100)
 })
 ex.run()
+
+/**
+ * A dsh process the Iridium started (session.js, as the patch dsh.session writes loads it), in
+ * this one: its own fake dsh at dir, OMD there while its omd.json is; the sessions it runs are
+ * session.json's.
+ */
+function startSession(dir, bridge) {
+  const there = fakeDsh(dir)
+  const services = {}
+  const on = {}
+  const ctx = {
+    provide: (name, v) => (services[name] = v),
+    get: (name) => services[name] ?? there.get(name),
+    on: (name, fn) => (on[name] = fn),
+    effect: (fn) => fn(),
+    plugin: (p) => {
+      if (p.inject.every((n) => ctx.get(n))) p.apply(ctx)
+    },
+  }
+  session.apply(ctx, { endpoint: bridge.endpoint, secret: bridge.secret })
+  for (const id of read(dir, 'session.json', [])) on['agent/created']({ agent: { id } })
+}
 
 /** name in dir as JSON; none if it is not there. */
 function read(dir, name, none) {
@@ -161,6 +191,7 @@ function fakeDsh(dir) {
         return read(dir, 'presets.json').default
       },
     }
+  if (fs.existsSync(file('profile'))) services.profileContext = { dir: file('profile') }
   if (fs.existsSync(file('entries.json')))
     services.loader = {
       *entries() {

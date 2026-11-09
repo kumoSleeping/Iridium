@@ -24,7 +24,8 @@ import (
 // the web surface moves behind presets are disabled, and so are base rows a preset row shares an
 // id or a package with; the preset's persona folds into the system-prompt row; PTC's executor
 // replaces the native one; then the preset's plugin rows go in, their ids prefixed so none meets a
-// base row of the same name. (Iridium's /tmp/dsh-tools/gen-preset.mjs, verified against dsh
+// base row of the same name. Rows from packages outside dsh's installation (a bundle's in DSH
+// Desktop's web profile, OMD's) load through modules.go. (Iridium's /tmp/dsh-tools/gen-preset.mjs, verified against dsh
 // 0.2.2-rc.1: standard 32 tools, ptc 1, minimal 9.)
 
 // DefaultPreset is the preset of a session that names none, when dsh's registry says no default.
@@ -72,13 +73,15 @@ func FindPackage(program string) (Package, error) {
 }
 
 var (
-	idLine      = regexp.MustCompile(`^(\s*)(- )?id: ([A-Za-z0-9_-]+)\s*$`)
-	nameLine    = regexp.MustCompile(`^\s*name: '?([^'\s]+)'?\s*$`)
-	topDisabled = regexp.MustCompile(`^- id: ([A-Za-z0-9_-]+)\s*$`)
-	isDisabled  = regexp.MustCompile(`^\s+disabled: true\s*$`)
-	rowLine     = regexp.MustCompile(`^( *)- id: ([A-Za-z0-9_-]+)\s*$`)
-	presetName  = regexp.MustCompile(`^\s*name: ["']?@deepseek-ai/dsh-agent-preset["']?\s*$`)
-	defaultLine = regexp.MustCompile(`^\s+default: ["']?([A-Za-z0-9_-]+)["']?\s*$`)
+	idLine       = regexp.MustCompile(`^(\s*)(- )?id: ([A-Za-z0-9_-]+)\s*$`)
+	nameLine     = regexp.MustCompile(`^\s*name: '?([^'\s]+)'?\s*$`)
+	disabledLine = regexp.MustCompile(`^(\s*)disabled: (.+?)\s*$`)
+	rowName      = regexp.MustCompile(`^(\s*)(- )?name: ["']?([^"'\s]+)["']?\s*$`)
+	topDisabled  = regexp.MustCompile(`^- id: ([A-Za-z0-9_-]+)\s*$`)
+	isDisabled   = regexp.MustCompile(`^\s+disabled: true\s*$`)
+	rowLine      = regexp.MustCompile(`^( *)- id: ([A-Za-z0-9_-]+)\s*$`)
+	presetName   = regexp.MustCompile(`^\s*name: ["']?@deepseek-ai/dsh-agent-preset["']?\s*$`)
+	defaultLine  = regexp.MustCompile(`^\s+default: ["']?([A-Za-z0-9_-]+)["']?\s*$`)
 )
 
 func (p Package) readFile(parts ...string) ([]byte, error) {
@@ -264,25 +267,17 @@ func scalarText(b []string) string {
 	return s
 }
 
-// Patch is the --patch file that runs preset process-wide, with suffix (Iridium's system prompt)
-// after the preset's own persona suffix.
-func (p Package) Patch(preset agent.Preset, suffix string) ([]byte, error) {
-	read := func(parts ...string) ([]string, error) {
-		ls, err := p.lines(parts...)
-		if err != nil {
-			return nil, fmt.Errorf("dsh: preset %s: %w", preset.ID, err)
-		}
-		return ls, nil
-	}
-	body := strings.Split(strings.TrimRight(strings.ReplaceAll(preset.Plugins, "\r\n", "\n"), "\n"), "\n")
+// personaOf is preset's rows less its persona row, which unscoped are the system-prompt row's
+// own: that row's config, the persona's with suffix (Iridium's system prompt) after its own.
+func personaOf(preset agent.Preset, suffix string) (body, persona []string, err error) {
+	body = strings.Split(strings.TrimRight(strings.ReplaceAll(preset.Plugins, "\r\n", "\n"), "\n"), "\n")
 	if strings.TrimSpace(preset.Plugins) == "" {
 		body = nil
 	}
 
-	// The persona row registers the prompt's persona sections, which unscoped are the
-	// system-prompt row's own: it becomes that row's config. complete (the persona is the whole
-	// prompt) comes as near as it can: no harness identity line.
-	var persona []string
+	// The persona row registers the prompt's persona sections: it becomes the system-prompt row's
+	// config. complete (the persona is the whole prompt) comes as near as it can: no harness
+	// identity line.
 	presetSuffix := ""
 	at := -1
 	for i := 0; i < len(body) && at < 0; i++ {
@@ -316,7 +311,7 @@ func (p Package) Patch(preset agent.Preset, suffix string) ([]byte, error) {
 		if b := cfg["suffix"]; b != nil {
 			var err error
 			if presetSuffix, err = scalar(b); err != nil {
-				return nil, fmt.Errorf("dsh: preset %s: persona suffix: %w", preset.ID, err)
+				return nil, nil, fmt.Errorf("dsh: preset %s: persona suffix: %w", preset.ID, err)
 			}
 		}
 		if strings.TrimSpace(scalarText(cfg["includeRuntimeContext"])) == "false" {
@@ -337,12 +332,54 @@ func (p Package) Patch(preset agent.Preset, suffix string) ([]byte, error) {
 		}
 	}
 
-	ids := map[string]bool{}
+	return body, persona, nil
+}
+
+// webOff are the rows the web surface turns off: its per-agent rows move behind presets.
+func (p Package) webOff(preset string) (map[string]bool, error) {
+	web, err := p.lines("dsh-web-app", "cordis.patch.yml")
+	if err != nil {
+		return nil, fmt.Errorf("dsh: preset %s: %w", preset, err)
+	}
+	off := map[string]bool{}
+	for i := 0; i < len(web)-1; i++ {
+		if m := topDisabled.FindStringSubmatch(web[i]); m != nil && isDisabled.MatchString(web[i+1]) {
+			off[m[1]] = true
+		}
+	}
+	return off, nil
+}
+
+// Patch is the --patch file that runs preset process-wide, with suffix (Iridium's system prompt)
+// after the preset's own persona suffix. modules is ModulesFile's file: URL where the agent runs,
+// for the rows of packages outside dsh's installation (modules.go).
+func (p Package) Patch(preset agent.Preset, suffix, modules string) ([]byte, error) {
+	read := func(parts ...string) ([]string, error) {
+		ls, err := p.lines(parts...)
+		if err != nil {
+			return nil, fmt.Errorf("dsh: preset %s: %w", preset.ID, err)
+		}
+		return ls, nil
+	}
+	body, persona, err := personaOf(preset, suffix)
+	if err != nil {
+		return nil, err
+	}
+
+	// ids are the preset's row ids, each with the package of its name when that is not dsh's own.
+	ids := map[string]string{}
 	hoisted := make([]string, 0, len(body))
+	row, keyed := "", -1 // the last row's id and the indent of its keys
 	for _, l := range body {
 		if m := idLine.FindStringSubmatch(l); m != nil {
-			ids[m[3]] = true
+			ids[m[3]] = ""
+			row, keyed = m[3], len(m[1])+len(m[2])
 			l = m[1] + m[2] + "id: " + rowPrefix + m[3]
+		} else if m := rowName.FindStringSubmatch(l); m != nil && !installed(m[3]) && modules != "" {
+			if len(m[1])+len(m[2]) == keyed {
+				ids[row] = packageOf(m[3])
+			}
+			l = m[1] + m[2] + "name: " + moduleName(modules, m[3])
 		}
 		if !blank(l) {
 			l = "    " + l
@@ -352,16 +389,22 @@ func (p Package) Patch(preset agent.Preset, suffix string) ([]byte, error) {
 	// Every row in the bundles the sdk profile composes, by id and by the package it loads.
 	baseIDs := map[string]bool{}
 	baseByName := map[string][]string{}
+	baseOff := map[string]string{} // a row's own disabled, a loader expression
 	for _, bundle := range []string{"dsh-base", "dsh-sdk-app"} {
 		ls, err := read(bundle, "cordis.patch.yml")
 		if err != nil {
 			return nil, err
 		}
+		row, keyed := "", -1
 		for i, l := range ls {
 			m := idLine.FindStringSubmatch(l)
 			if m == nil {
+				if d := disabledLine.FindStringSubmatch(l); d != nil && len(d[1]) == keyed {
+					baseOff[row] = d[2]
+				}
 				continue
 			}
+			row, keyed = m[3], len(m[1])+len(m[2])
 			baseIDs[m[3]] = true
 			if i+1 < len(ls) {
 				if n := nameLine.FindStringSubmatch(ls[i+1]); n != nil {
@@ -378,18 +421,21 @@ func (p Package) Patch(preset agent.Preset, suffix string) ([]byte, error) {
 	}
 	// The web surface's own disables (its per-agent rows move behind presets), and any base row a
 	// preset row shares an id or a package with.
-	web, err := read("dsh-web-app", "cordis.patch.yml")
+	off, err := p.webOff(preset.ID)
 	if err != nil {
 		return nil, err
 	}
-	off := map[string]bool{}
-	for i := 0; i < len(web)-1; i++ {
-		if m := topDisabled.FindStringSubmatch(web[i]); m != nil && isDisabled.MatchString(web[i+1]) {
-			off[m[1]] = true
-		}
-	}
-	for id := range ids {
-		if baseIDs[id] {
+	// A base row the preset brings again from another package goes off only where that package is
+	// (even one the web surface turns off): one the agent cannot load leaves dsh's own (its shell and
+	// jobs tools) in place.
+	unless := map[string][]string{}
+	for id, pkg := range ids {
+		switch {
+		case !baseIDs[id]:
+		case pkg != "":
+			unless[id] = append(unless[id], pkg)
+			delete(off, id)
+		default:
 			off[id] = true
 		}
 	}
@@ -403,13 +449,22 @@ func (p Package) Patch(preset agent.Preset, suffix string) ([]byte, error) {
 		off["tool-executor-native"] = true
 	}
 	out := []string{fmt.Sprintf("# Iridium: dsh's %q Agent preset, run process-wide by the sdk profile.", preset.ID), "# Generated; do not edit."}
-	offs := make([]string, 0, len(off))
+	offs := make([]string, 0, len(off)+len(unless))
 	for id := range off {
 		offs = append(offs, id)
 	}
+	for id := range unless {
+		if !off[id] {
+			offs = append(offs, id)
+		}
+	}
 	slices.Sort(offs)
 	for _, id := range offs {
-		out = append(out, "- id: "+id, "  disabled: true")
+		if off[id] {
+			out = append(out, "- id: "+id, "  disabled: true")
+		} else {
+			out = append(out, "- id: "+id, "  disabled: "+foundExpr(unless[id], baseOff[id]))
+		}
 	}
 	if len(persona) > 0 {
 		out = append(append(out, "- id: system-prompt", "  config:"), persona...)
