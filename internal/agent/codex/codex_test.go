@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -535,6 +536,24 @@ func TestSpawn(t *testing.T) {
 	}
 	if _, err := d.Spawn(agent.SpawnOptions{Session: "s1", Env: env, Program: "codex", Mode: "bogus"}); err == nil {
 		t.Error("took a bogus mode")
+	}
+	// At an executor (docs/exec.md): the argv it gave, nothing looked up here; the prompt read
+	// here goes in the protocol.
+	pf := filepath.Join(bin, "prompt.md")
+	os.WriteFile(pf, []byte("be brief"), 0o600)
+	spec, err = d.Spawn(agent.SpawnOptions{Session: "s2", Cwd: `C:\w`, Env: []string{"CODEX_HOME=/there"}, Program: "/not/here/codex", SystemPromptFile: pf,
+		Remote: &agent.Remote{Argv: []string{"/there/node", "/there/codex.js"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"/there/node", "/there/codex.js", "app-server", "--listen", "stdio://"}; !slices.Equal(spec.Argv, want) || spec.Cwd != `C:\w` {
+		t.Errorf("there: argv %v cwd %q", spec.Argv, spec.Cwd)
+	}
+	if d.want == nil || d.want.instructions != "be brief" {
+		t.Errorf("the prompt there: %+v", d.want)
+	}
+	if _, err := d.Spawn(agent.SpawnOptions{Session: "s3", Remote: &agent.Remote{}}); !errors.Is(err, agent.ErrNoProgram) {
+		t.Errorf("no codex there: %v", err)
 	}
 	if !reflect.DeepEqual(policyJSON("granular"), map[string]any{"granular": map[string]any{"sandbox_approval": true, "rules": true, "skill_approval": true, "request_permissions": true, "mcp_elicitations": true}}) {
 		t.Errorf("granular %v", policyJSON("granular"))

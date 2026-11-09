@@ -3,43 +3,21 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { RemoteError } from './executor.js'
+import { heldMethods } from './held.js'
 
 /**
- * What the dsh this plugin runs in knows, for the Iridium (its docs/exec.md "远端 DSH"):
- * dsh.open, the sessions open in this process now (DSH Desktop's: one the Iridium resumes is refused
- * while it is), and what this plugin's settings keep from it (kept(): unsynced, the workspaces,
- * by folder or name; ungrouped false, the sessions in none of them); dsh.attach {session, cwd}, the session filed under the workspace of its folder, made
- * if there is none (a session the Iridium started here, in DSH Desktop's sidebar); dsh.prompt
- * {session, text, steer}, a message for a session this dsh holds, given to its agent here;
- * dsh.presets, the agent presets it registers.
+ * What the dsh this plugin runs in knows, for the Iridium (its docs/exec.md "远端 DSH"): the
+ * sessions it holds (held.js: held.list, held.send, held.get, held.set, and dsh.open, dsh.prompt
+ * by their older names), with kept() what this plugin's settings keep from it (unsynced, the
+ * workspaces, by folder or name; ungrouped false, the sessions in none of them) and o.features,
+ * o.follow the feature registry and followHeld's (none: no features); dsh.attach {session, cwd},
+ * the session filed under the workspace of its folder, made if there is none (a session the
+ * Iridium started here, in DSH Desktop's sidebar); dsh.presets, the agent presets it registers;
+ * dsh.llm, its models for the sessions the Iridium starts here.
  */
-export function dshMethods(ctx, kept = () => ({ unsynced: [], ungrouped: true }), llm = {}) {
+export function dshMethods(ctx, kept = () => ({ unsynced: [], ungrouped: true }), llm = {}, o = {}) {
   return {
-    // running: those whose agent here works now (a turn, or one waiting on an approval or an
-    // answer). A session Desktop opened stays loaded, its writer lock held, till Desktop quits:
-    // the Iridium says "elsewhere" only while it runs, and gives the others' messages to it here.
-    'dsh.open': async () => {
-      const k = kept()
-      const ids = (ctx.get('sessions')?.list() ?? []).map((s) => s.id)
-      const agents = ctx.get('agents')
-      return { sessions: ids, running: ids.filter((id) => agents?.get(id)?.status === 'running'), unsynced: k.unsynced, ...(k.ungrouped === false ? { unsyncedUngrouped: true } : {}) }
-    },
-    // A message for a session this dsh holds (open in DSH Desktop, its writer lock here): the
-    // Iridium cannot resume it, so its agent here takes the message, as a next turn or (steer)
-    // into the running one; not_found if no agent of it lives here.
-    'dsh.prompt': async (p) => {
-      if (typeof p.session !== 'string' || !p.session || typeof p.text !== 'string' || !p.text.trim())
-        throw new RemoteError('bad_request', 'dsh.prompt: session and text')
-      const a = ctx.get('agents')?.get(p.session)
-      if (!a) throw new RemoteError('not_found', `no agent of ${p.session} here`)
-      const input = { content: [{ type: 'text', text: p.text }], source: { kind: 'user' } } // yours, through the Iridium (its tag before the words)
-      try {
-        await (p.steer ? a.steer(input) : a.followup(input))
-      } catch (e) {
-        throw new RemoteError('failed', e.message)
-      }
-      return {}
-    },
+    ...heldMethods(ctx, o.features, kept, o.follow),
     // The agent presets this dsh registers (its agentPresets registry: the shipped ones, a
     // bundle's, the profile's own edits), each with its child plugin rows as YAML, which the
     // Iridium runs process-wide through a patch; and the default, the one set in its settings.
@@ -127,3 +105,4 @@ function flow(v) {
   if (v && typeof v === 'object') return `{${Object.entries(v).filter(([, x]) => x !== undefined && typeof x !== 'function').map(([k, x]) => `${JSON.stringify(k)}: ${flow(x)}`).join(', ')}}`
   return v === undefined ? 'null' : JSON.stringify(v)
 }
+

@@ -3,6 +3,7 @@ package dshhome
 import (
 	"bytes"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/klauspost/compress/zstd"
@@ -58,14 +59,19 @@ func TestParseSummary(t *testing.T) {
   "identity": {"formatVersion": 4, "createdAt": 1794142197234, "cwd": "/home/otae/ir", "isSeeded": false},
   "rows": {
     "title": {"ver": 1, "seq": 34, "val": "fix the\nbuild"},
-    "timeContext": {"ver": 3, "seq": 34, "val": {"lastMessageTime": 1794142333807}}
+    "timeContext": {"ver": 3, "seq": 34, "val": {"lastMessageTime": 1794142333807}},
+    "turnBoundary": {"ver": 2, "seq": 34, "val": {"openTurnStartSeq": 30, "lastTurn": 2}}
   }}}`
 	s, err := ParseSummary([]byte(doc))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.Cwd != "/home/otae/ir" || s.Title != "fix the build" || s.Last != 1794142333807 {
+	if s.Cwd != "/home/otae/ir" || s.Title != "fix the build" || s.Last != 1794142333807 || s.Ended {
 		t.Errorf("%+v", s)
+	}
+	ended := strings.Replace(doc, `"openTurnStartSeq": 30`, `"openTurnStartSeq": null`, 1)
+	if s, err := ParseSummary([]byte(ended)); err != nil || !s.Ended {
+		t.Errorf("its turn over: %+v %v", s, err)
 	}
 	if _, err := ParseSummary([]byte(`{"version":7}`)); !errors.Is(err, ErrFormat) {
 		t.Errorf("no record: %v", err)

@@ -188,8 +188,8 @@ describe("buildTree", () => {
     const list = [S("p", "/w/ir", { workspace: 1 }), run("a1", "Investigate", { done: true }), run("a2", "Implement", { updatedAt: now - 500 }), run("a3", "Implement", { updatedAt: now - 900 }), S("k", "/w/ir", { subagent: true, parent: "p", updatedAt: now - 1000 })];
     const t = buildTree(list, ws, "未归类", now);
     expect(t.kids.get("p")?.map((s) => s.id)).toEqual(["k"]);
-    expect(t.runs.get("p")?.map((r) => ({ ...r, working: r.working.map((s) => s.id) }))).toEqual([{ id: "wf_1", name: "fix-caret", phase: "Implement", done: 1, total: 3, working: ["a2", "a3"] }]);
-    expect(flat(t).map((s) => s.id)).toEqual(["p", "k", "a2", "a3"]);
+    expect(t.runs.get("p")?.map((r) => ({ ...r, working: r.working.map((s) => s.id) }))).toEqual([{ id: "wf_1", name: "fix-caret", phase: "Implement", done: 1, total: 3, working: ["a3", "a2"] }]);
+    expect(flat(t).map((s) => s.id)).toEqual(["p", "k", "a3", "a2"]);
     // Its last agent done, the run is gone.
     expect(buildTree(list.map((s) => (s.workflow ? { ...s, done: true } : s)), ws, "未归类", now).runs.size).toBe(0);
   });
@@ -240,6 +240,16 @@ describe("buildTree", () => {
     const kid = (id: string, at: number) => ({ id, agent: "claude", cwd: "/w", status: "idle", subagent: true, parent: "p", updatedAt: at }) as Session;
     const seen = new Map<string, number>();
     const ids = (list: Session[]) => buildTree(list, [], "未归类", now, seen).kids.get("p")?.map((s) => s.id);
+    expect(ids([p, kid("b", now - 10), kid("a", now - 20)])).toEqual(["a", "b"]);
+    expect(ids([p, kid("a", now), kid("b", now - 5)])).toEqual(["a", "b"]);
+    expect(ids([p, kid("c", now - 30), kid("b", now), kid("a", now - 1)])).toEqual(["a", "b", "c"]);
+  });
+  test("a workflow run's agents keep the order they came in too", () => {
+    const now = 1_000_000;
+    const p = { id: "p", agent: "claude", cwd: "/w", status: "idle", live: true, updatedAt: now } as Session;
+    const kid = (id: string, at: number) => ({ id, agent: "claude", cwd: "/w", status: "idle", subagent: true, parent: "p", updatedAt: at, workflow: { run: "wf_1", name: "fix" } }) as Session;
+    const seen = new Map<string, number>();
+    const ids = (list: Session[]) => buildTree(list, [], "未归类", now, seen).runs.get("p")?.[0]?.working.map((s) => s.id);
     expect(ids([p, kid("b", now - 10), kid("a", now - 20)])).toEqual(["a", "b"]);
     expect(ids([p, kid("a", now), kid("b", now - 5)])).toEqual(["a", "b"]);
     expect(ids([p, kid("c", now - 30), kid("b", now), kid("a", now - 1)])).toEqual(["a", "b", "c"]);

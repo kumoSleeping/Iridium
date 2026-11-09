@@ -142,6 +142,12 @@ type Manager struct {
 	presetMu sync.Mutex
 	presets  map[string]presetList    // by machine (presets.go)
 	catalogs map[string]*catalogEntry // by machine (catalog.go)
+
+	heldMu sync.Mutex
+	helds  map[string]*heldEntry // by session (held.go)
+	many   map[string]bool       // machines told of for too many features
+	told   []heldTold            // held.changed events not taken in yet
+	taking bool                  // a goroutine takes them in
 }
 
 func New(o Options) (*Manager, error) {
@@ -177,12 +183,13 @@ func New(o Options) (*Manager, error) {
 		o.QuotaStagger = time.Minute
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	m := &Manager{o: o, ctx: ctx, cancel: cancel, hosted: map[string]*Hosted{}, quota: map[string]api.AgentQuota{}}
+	m := &Manager{o: o, ctx: ctx, cancel: cancel, hosted: map[string]*Hosted{}, quota: map[string]api.AgentQuota{}, helds: map[string]*heldEntry{}, many: map[string]bool{}}
 	m.Tune(TunablesOf(o.Config))
 	o.Hub.Provide = m.provide
 	if o.Remote != nil {
 		o.Remote.Dir = m.HoldDir
 		o.Remote.Changed = m.machineChanged
+		o.Remote.OnHeld = m.onHeld
 	}
 	return m, nil
 }

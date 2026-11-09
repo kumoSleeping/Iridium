@@ -151,6 +151,32 @@ func (ir *Iridium) File(ctx context.Context, chat, ref string, limit int64) ([]b
 	return b, err
 }
 
+// Me is this terminal as Iridium has it: its name now, whatever it was made as.
+func (ir *Iridium) Me(ctx context.Context) (api.Me, error) {
+	var m api.Me
+	err := ir.call(ctx, "GET", "/api/me", nil, &m)
+	if err == nil && m.Terminal.Name == "" {
+		err = errors.New("iridium: /api/me: no terminal")
+	}
+	return m, err
+}
+
+// SyncName asks Iridium for the terminal's name and keeps it in the config under home (a rename
+// on the page reaches the plugin so); the name, else the config's.
+func SyncName(ctx context.Context, ir *Iridium, home string) string {
+	c, ok, _ := LoadConfig(home)
+	if !ok {
+		return c.Name
+	}
+	m, err := ir.Me(ctx)
+	if err != nil || m.Terminal.Name == c.Name {
+		return c.Name
+	}
+	c.Name = m.Terminal.Name
+	_ = Write(home, ConfigFile, &c)
+	return c.Name
+}
+
 // SetAvatar sets this terminal's avatar.
 func (ir *Iridium) SetAvatar(ctx context.Context, image []byte) error {
 	var b bytes.Buffer

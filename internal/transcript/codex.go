@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -225,6 +226,19 @@ func FindCodex(home, id string) (string, error) {
 		}
 	}
 	return "", nil
+}
+
+// CodexThreadTime is when thread id was made, for a UUIDv7 (Codex's thread ids): its first 48
+// bits are Unix milliseconds. ok false for any other id (an older Codex's).
+func CodexThreadTime(id string) (t time.Time, ok bool) {
+	if len(id) != 36 || id[8] != '-' || id[13] != '-' || id[18] != '-' || id[23] != '-' || id[14] != '7' || !validID(id) {
+		return time.Time{}, false
+	}
+	ms, err := strconv.ParseInt(id[:8]+id[9:13], 16, 64)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return time.UnixMilli(ms), true
 }
 
 func getenv(env []string, k string) string {

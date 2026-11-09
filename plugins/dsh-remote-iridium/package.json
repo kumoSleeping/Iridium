@@ -13,6 +13,9 @@
   "files": [
     "index.js",
     "dsh.js",
+    "held.js",
+    "features.js",
+    "adapters/",
     "executor.js",
     "ir.js",
     "secrets.js",

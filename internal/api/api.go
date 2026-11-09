@@ -29,6 +29,9 @@ type AgentInfo struct {
 	Quota            bool `json:"quota"`
 	// Ultracode: its sessions can turn ultracode on (Claude).
 	Ultracode bool `json:"ultracode"`
+	// Features: the features (SessionState.Features) its sessions have before its agent runs, by
+	// ID (Claude: claude.ultracode).
+	Features []string `json:"features,omitempty"`
 	// Presets: its sessions take an agent preset (dsh: the tools and prompt a session runs with),
 	// at launch: a switch restarts the agent. Which, a session's: GET /api/sessions/{id}/presets.
 	Presets bool `json:"presets,omitempty"`
@@ -170,8 +173,11 @@ type SessionState struct {
 	Tail *BlockTail `json:"tail,omitempty"`
 	// Commands: the slash commands its agent offers, as its last handshake named them.
 	Commands []Command `json:"commands,omitempty"`
-	// Ultracode: Claude's ultracode; absent for an agent without it.
+	// Ultracode: Claude's ultracode; absent for an agent without it. Features has it too.
 	Ultracode *Ultracode `json:"ultracode,omitempty"`
+	// Features: its extra switches (Claude's UltraCode; at an executor whose DSH Desktop plugins
+	// add some, theirs); PUT features/{feature} switches one.
+	Features []Feature `json:"features,omitempty"`
 	// Next: its agent cleared itself (Claude's own /clear) and the conversation goes on in this
 	// session; this one is archived, as it was before. The page open on it follows.
 	Next string `json:"next,omitempty"`
@@ -247,9 +253,13 @@ type Quota struct {
 // AgentQuota is one agent and account's windows. Live: a process of that agent and account runs,
 // so they are kept fresh; else they are the last read, and At says how old.
 type AgentQuota struct {
-	Agent   Agent         `json:"agent"`
-	Account string        `json:"account,omitempty"` // the login the agent reports (Claude: e-mail)
-	Plan    string        `json:"plan,omitempty"`    // Claude: subscriptionType
+	Agent   Agent  `json:"agent"`
+	Account string `json:"account,omitempty"` // the login the agent reports (Claude: e-mail)
+	// Machine: the executor whose login they are (its terminal ID; docs/exec.md), empty for this
+	// machine's. A session at another machine runs under that machine's login, which may be another
+	// account, and Codex reports none: its windows are that machine's, not shared with this one's.
+	Machine string        `json:"machine,omitempty"`
+	Plan    string        `json:"plan,omitempty"` // Claude: subscriptionType
 	Windows []QuotaWindow `json:"windows"`
 	Balance []Balance     `json:"balance,omitempty"` // dsh: the DeepSeek account's money, by currency
 	At      int64         `json:"at"`                // when they were read

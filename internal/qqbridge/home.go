@@ -9,15 +9,18 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/kumoSleeping/iridium/internal/api"
+	"github.com/kumoSleeping/iridium/internal/gate"
 	"github.com/kumoSleeping/iridium/internal/qq"
 )
 
-// Home is the plugin's directory: its config, TOKEN and state. IRIDIUM_QQ_HOME, else
-// ~/.config/iridium-qq.
+// Home is the plugin's directory: a directory per bot under bots/, and a scan under way.
+// IRIDIUM_QQ_HOME, else ~/.config/iridium-qq.
 func Home() string {
 	if h := os.Getenv("IRIDIUM_QQ_HOME"); h != "" {
 		return h
@@ -28,7 +31,112 @@ func Home() string {
 	return filepath.Join(os.Getenv("HOME"), ".config", "iridium-qq")
 }
 
-// Files under Home.
+// BotsDir under Home holds a directory per bot, named by its AppID: its config, TOKEN and
+// state. A bot's directory is its home in what follows (LoadConfig, Token, Read, Write).
+const BotsDir = "bots"
+
+// BotHome is the directory of the bot appID under root.
+func BotHome(root, appID string) string { return filepath.Join(root, BotsDir, appID) }
+
+// ValidAppID: an AppID that names a directory and a service (QQ's are digits).
+func ValidAppID(id string) bool {
+	if id == "" || len(id) > 32 {
+		return false
+	}
+	for _, r := range id {
+		if !(r >= '0' && r <= '9' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z') {
+			return false
+		}
+	}
+	return true
+}
+
+// Bots lists the AppIDs of the bots under root that have a config, in order.
+func Bots(root string) []string {
+	ents, _ := os.ReadDir(filepath.Join(root, BotsDir))
+	var out []string
+	for _, e := range ents {
+		if !e.IsDir() || !ValidAppID(e.Name()) {
+			continue
+		}
+		if _, ok, _ := LoadConfig(BotHome(root, e.Name())); ok {
+			out = append(out, e.Name())
+		}
+	}
+	return out
+}
+
+// FreeName is the terminal name for the bot appID: base (its name on QQ) made a terminal's name,
+// else QQ; with 2, 3… after it while another bot under root, or one of taken, has it (case aside).
+func FreeName(root, appID, base string, taken ...string) string {
+	used := map[string]bool{}
+	for _, n := range taken {
+		used[strings.ToLower(n)] = true
+	}
+	for _, id := range Bots(root) {
+		if c, _, _ := LoadConfig(BotHome(root, id)); id != appID {
+			used[strings.ToLower(c.Name)] = true
+		}
+	}
+	base = nameOf(base)
+	if base == "" {
+		base = "QQ"
+	}
+	for i := 1; ; i++ {
+		n := base
+		if i > 1 {
+			suffix := strconv.Itoa(i)
+			r := []rune(base)
+			if len(r)+len(suffix) > gate.MaxNameLen {
+				r = r[:gate.MaxNameLen-len(suffix)]
+			}
+			n = strings.TrimSpace(string(r)) + suffix
+		}
+		if !used[strings.ToLower(n)] {
+			return n
+		}
+	}
+}
+
+// nameOf makes a bot's name on QQ a terminal's name: what a name may not hold dropped, cut to its
+// length; "" if nothing is left.
+func nameOf(s string) string {
+	s = strings.Map(func(r rune) rune {
+		if unicode.IsLetter(r) || unicode.IsNumber(r) || unicode.IsMark(r) || unicode.IsSpace(r) || strings.ContainsRune("-_.", r) {
+			return r
+		}
+		return ' '
+	}, s)
+	s = strings.Join(strings.Fields(s), " ")
+	if r := []rune(s); len(r) > gate.MaxNameLen {
+		s = strings.TrimSpace(string(r[:gate.MaxNameLen]))
+	}
+	n, err := gate.NormalizeName(s)
+	if err != nil {
+		return ""
+	}
+	return n
+}
+
+// MoveLegacy moves the one bot of before (its files right in root) into its own directory, and
+// gives its AppID; "" if there was none.
+func MoveLegacy(root string) string {
+	var c Config
+	if ok, err := Read(root, ConfigFile, &c); !ok || err != nil || !ValidAppID(c.AppID) {
+		return ""
+	}
+	dir := BotHome(root, c.AppID)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return ""
+	}
+	// The config last: while it is in root, another process may still be moving.
+	for _, f := range []string{TokenFile, StateFile, StatusFile, PairFile, ConfigFile} {
+		_ = os.Rename(filepath.Join(root, f), filepath.Join(dir, f))
+	}
+	return c.AppID
+}
+
+// Files under a bot's home (BindFile and QRFile: under Home, the bot not known yet).
 const (
 	ConfigFile = "config.json" // Config, 0600: it holds the bot's secret
 	TokenFile  = "token"       // Iridium's TOKEN for this plugin (ir token --into)

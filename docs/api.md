@@ -26,7 +26,7 @@
 | `POST /api/sessions/{id}/answer` | `Answer` → `{ok}` | 回答提问：审批 `allow`（不许时可带 `message`；`always` 见“会话设置”）；选择题 `answers`（问题原文 → 选项 `label`）；计划确认 `allow` |
 | `POST /api/sessions/{id}/release` | `Release{toolUseId, dismiss?}` → `{ok}` | Claude auto 模式拦下一步后，临时切换至 manual（见“临时切换至 manual”）；`dismiss` 只拿掉它的卡。Claude 会话要有 Claude，agent 调用一律 403 |
 | `GET /api/events?sub=…` | SSE | 见下。不带 `sub`：Bot 的事件流，见“Bot 接入” |
-| `GET /api/agents` | → `AgentInfo[]` | 能开的 agent：审批模式（`modes`、`defaultMode`、`modeSwitch`：now / next turn / restart）、有没有上下文分项、有没有额度窗口、能不能开 ultracode（`ultracode`）、程序装没装（`missing`：PATH 上找不到；这时 `POST /api/sessions` 立刻 400，不等 agent 自更新那 30 秒，网页把它画淡，点了只提示未安装） |
+| `GET /api/agents` | → `AgentInfo[]` | 能开的 agent：审批模式（`modes`、`defaultMode`、`modeSwitch`：now / next turn / restart）、有没有上下文分项、有没有额度窗口、能不能开 ultracode（`ultracode`）、agent 起来之前会话就有的附加功能（`features`，按 id：Claude 是 `claude.ultracode`）、程序装没装（`missing`：PATH 上找不到；这时 `POST /api/sessions` 立刻 400，不等 agent 自更新那 30 秒，网页把它画淡，点了只提示未安装） |
 | `GET /api/health` | → `{ok}` | |
 | `GET /api/settings` | → `Settings` | 设置的配置项：空闲回收、崩溃续跑、额度续跑（这三项设置页不放，只改配置文件或经接口）、隐藏的额度条、各 agent 新会话的审批模式、推送总开关。管理权 |
 | `PUT /api/settings` | `SettingsPatch` → `Settings` | 只改给了的项，写进配置文件，马上生效。面板权 |
@@ -49,11 +49,12 @@
 | `list` | `Session[]` |
 | `workspaces` | `Workspace[]` |
 | `colors` | `FolderColors` |
-| `session:<id>` | `SessionState`：状态、提问（带 `card`）、后台任务、模型（`model` 在用的，`pick` 设的）、审批模式、思考强度（`effort` 设的，`effortNow` agent 说在用的）、可选的模型/模式/强度、`ultracode`（只 Claude）、待发队列、上下文总数、等额度到几点、`tail`（块带 `files`）、`end`、`proc`、出错原因、`next`（Claude 自己清空了：对话接着在这个会话里，页面跟过去）、`commands`（给输入框的命令面板：人人都有的 `clear`、`compact`、`context`、`usage`、`model`、`effort`、`mode`，不带说明，页面按语言写；再接 agent 握手报的） |
+| `session:<id>` | `SessionState`：状态、提问（带 `card`）、后台任务、模型（`model` 在用的，`pick` 设的）、审批模式、思考强度（`effort` 设的，`effortNow` agent 说在用的）、可选的模型/模式/强度、`ultracode`（只 Claude）、`features`（附加功能，见“会话设置”）、待发队列、上下文总数、等额度到几点、`tail`（块带 `files`）、`end`、`proc`、出错原因、`next`（Claude 自己清空了：对话接着在这个会话里，页面跟过去）、`commands`（给输入框的命令面板：人人都有的 `clear`、`compact`、`context`、`usage`、`model`、`effort`、`mode`，不带说明，页面按语言写；再接 agent 握手报的） |
 | `context:<id>` | `Context`：上下文用了多少、分项。回合结束、压缩后，回合中调用工具时最多 30 秒一次更新；存在托管目录，没进程时也有 |
-| `quota` | `Quota`：按 agent + 账号（Claude：邮箱和套餐）的额度窗口、读到的时间、`live` |
+| `quota` | `Quota`：按 agent + 账号（Claude：邮箱和套餐）+ 机器（`machine`，执行端的会话是那台机器的登录）的额度窗口、读到的时间、`live` |
 | `confirms` | `Confirms`：等面板确认的事（只有面板能订） |
 | `update` | `UpdateState`：有没有新版本、更新到哪一步 |
+| `notes` | `Notes`：全部便签和便签夹（只给面板） |
 
 不认识的键、不给这个终端的键（`confirms` 只给面板）不让整条流失败：开流时先为每个发一条 `state`，`{key, value: null, ignored: "unknown" | "forbidden"}`，其余照常。
 
@@ -87,7 +88,7 @@
 
 - 托管目录 `seen.json` 记着上一个 Iridium 读 `out.log` 读到哪（每秒最多写一次，退出时写一次）。那之前的输出重放，只为恢复驱动的状态；之后的（停机期间回合结束、用量、提问）照新来的处理。没有这个文件的（旧版）当全读过。
 - 再发一次握手。Claude 回 `initialize` 时带 `pending_permission_requests`（还在等答复的提问，原样的 `control_request`），挂着的提问以它为准：没答的回来，带卡片，照常能答；答过的不再出现。
-- 上下文（托管目录 `context.json`）和额度（状态目录 `quota.json`）是上次读到的值和读的时间（`at`）。上下文随回合读（回合结束、长回合里每隔一阵）；额度不随回合，每分钟单独读一次：每个 agent 和账号找一个在跑的进程问（Claude `get_usage`，Codex `account/rateLimits/read`，都不花额度），没有在跑的进程就不读（2026-11-06 定）；额度的 `live` 要等这个 agent 和账号又有进程在跑。
+- 上下文（托管目录 `context.json`）和额度（状态目录 `quota.json`）是上次读到的值和读的时间（`at`）。上下文随回合读（回合结束、长回合里每隔一阵）；额度不随回合，每分钟单独读一次：每个 agent、账号和机器找一个在跑的进程问（Claude `get_usage`，Codex `account/rateLimits/read`，都不花额度），没有在跑的进程就不读（2026-11-06 定）；额度的 `live` 要等这个 agent、账号和机器又有进程在跑。
 - 托管进程在停机期间已经退出的：不补读它的输出，按它的退出处理。
 
 ## 状态灯（`Status`）
@@ -124,6 +125,20 @@
 | `GET /api/machines/{id}/dsh/workspaces` | → `DshWorkspace[]` | 那台机器上 dsh 的工作区（DSH Desktop 侧边栏那份，按它的顺序，文件夹已不在的不列），读不懂时用它会话所在的文件夹代替，最近的在前；路径用 `/`。新会话选文件夹时列在最上面，见 `docs/exec.md`“远端 DSH” |
 
 - 选择器默认只能在家目录里（配置 `folderRoots` 可改），先解析符号链接再比；`~/.ssh`、`~/.gnupg`、`~/.claude`、`~/.codex`、`~/.pi`、`~/.dsh` 和 Iridium 的状态、配置目录一律不给（403）。不存在 404。
+
+## 便签
+
+面板和本机的，同颜色标签。每次改动，事件流 `notes` 整份重发。
+
+| 路由 | 请求 → 回复 | 说明 |
+|---|---|---|
+| `GET /api/notes` | → `Notes` | 全部 |
+| `POST /api/notes` | `NewNote` → `Note` | `id` 页面自己给（UUID），同一个 `id` 再发不重复建；`pos` 不给就放在它那一夹最上面 |
+| `PATCH /api/notes/{id}` | `NotePatch` → `Note` | 改正文、夹（0：不在夹里）、位置、颜色、完成；`session`：放进过的会话，记在 `sessions` 最后 |
+| `DELETE /api/notes/{id}` | → `{ok}` | |
+| `POST /api/note-folders` | `NoteFolderPatch` → `NoteFolder` | 只一层 |
+| `PATCH /api/note-folders/{id}` | `NoteFolderPatch` → `{ok}` | 改名、位置 |
+| `DELETE /api/note-folders/{id}` | → `{ok}` | 里面的便签移出夹 |
 
 ## 文件和上传
 
@@ -209,10 +224,11 @@ agent 用 `ir sh <机器> [--cwd 目录] [--timeout 2m] -- 命令`（`POST /api/
 
 | 请求 | 正文 | 说明 |
 |---|---|---|
-| `PUT /api/sessions/{id}/model` | `{model}` | `""` 是 agent 的默认。Claude：`set_model`。dsh（用户，2026-11-08：模型和供应商不写死）：会话状态的 `models` 是会话所在机器上 dsh 的 sdk profile 注册的全部供应商的模型，值是 `供应商/模型`，思考强度按模型，默认是 dsh 的默认模型。Iridium 在那台机器上起一次探测（`dsh --profile sdk --patch` 插一个 cordis 插件，读 `llm` 的 `listProviders`、`listModels`、`resolveModelInfo` 和 `agentDefaultModel`，打一行就退出），每台机器缓存 3 分钟，失败 1 分钟内不重试；启动时按值里的供应商初始化。以前存的不带供应商的值（`deepseek-flash`）按目录里有这个模型的供应商算。和 DSH Desktop 同步（用户，2026-11-08）：Desktop 设置里的供应商和默认模型存在它的 web profile，sdk 进程本来没有；远端有 dsh 插件时，会话和探测都多带一个 `--patch`，是插件按 Desktop 此刻生效的设置写的（`dsh.llm`），所以列出的和能跑的都同 Desktop。本机没有 Desktop 进程，用 sdk profile 自己的。agent 还没起来的会话（新建未发消息的、Desktop 开的只是列出来的）也有模型可选（用户，2026-11-09）：页面打开它时后台对那台机器探测一次，回来后状态里的 `models` 用那台机器的目录，`model` 是默认模型；在 Desktop 开的会话上选模型、强度或预设会先接管它（同发消息，但不启动 agent）|
+| `PUT /api/sessions/{id}/model` | `{model}` | `""` 是 agent 的默认。Claude：`set_model`。dsh（用户，2026-11-08：模型和供应商不写死）：会话状态的 `models` 是会话所在机器上 dsh 的 sdk profile 注册的全部供应商的模型，值是 `供应商/模型`，思考强度按模型，默认是 dsh 的默认模型。Iridium 在那台机器上起一次探测（`dsh --profile sdk --patch` 插一个 cordis 插件，读 `llm` 的 `listProviders`、`listModels`、`resolveModelInfo` 和 `agentDefaultModel`，打一行就退出），每台机器缓存 3 分钟，失败 1 分钟内不重试；启动时按值里的供应商初始化。以前存的不带供应商的值（`deepseek-flash`）按目录里有这个模型的供应商算。和 DSH Desktop 同步（用户，2026-11-08）：Desktop 设置里的供应商和默认模型存在它的 web profile，sdk 进程本来没有；远端有 dsh 插件时，会话和探测都多带一个 `--patch`，是插件按 Desktop 此刻生效的设置写的（`dsh.llm`），所以列出的和能跑的都同 Desktop。本机没有 Desktop 进程，用 sdk profile 自己的。agent 还没起来的会话（新建未发消息的、Desktop 开的只是列出来的）也有模型可选（用户，2026-11-09）：页面打开它时后台对那台机器探测一次，回来后状态里的 `models` 用那台机器的目录，`model` 是默认模型；在 Desktop 开的会话上选模型、强度或预设会先接管它（同发消息，但不启动 agent）；插件有 `held.features` 时，Desktop 拿着、这边没在跑的会话改模型、强度不接管，直接在 Desktop 里改（`held.set`，`docs/exec.md`“附加功能”），预设照旧接管（2026-11-09）|
 | `PUT /api/sessions/{id}/mode` | `{mode}` | 审批模式，只收 `SessionState.modes` 里的。Claude：`set_permission_mode` |
 | `PUT /api/sessions/{id}/effort` | `{effort}` | 思考强度，只收 `SessionState.efforts` 里的。Claude：先 `get_settings` 问 ultracode 开没开，再 `apply_flag_settings` 照原样带上 |
 | `PUT /api/sessions/{id}/ultracode` | `{ultracode}` | 只 Claude（`GET /api/agents` 的 `ultracode`），别的 400。在跑时先 `get_settings`，要开而 `ultracodeAvailable` 不为真（CLI 不认 `get_settings` 也算）就 400；只发 `apply_flag_settings {ultracode}`，强度不变。没在跑时不查，只记下，下次拉起带上 |
+| `PUT /api/sessions/{id}/features/{feature}` | `{on, option?}` | 切一项附加功能（`SessionState.features` 里的 `id`），`option` 是它的选项之一。`claude.ultracode` 同上一行（`option` 不看）；别的是执行端那台机器上 DSH Desktop 里插件给的（`held.set`），只对 Desktop 拿着的会话，没拿着的 400（带插件给的原因）；不在会话最近拿到的附加功能里、选项不对的 400，不问执行端。`ir` 和 Bot 没有这个 |
 | `GET /api/sessions/{id}/presets` | | `{presets: [{id, name?, description?}], default}`：会话所在那台 dsh 注册的 Agent 预设（用户，2026-11-08：不写死）。远端有 dsh 插件时问 DSH Desktop 自己的注册表（`dsh.presets`，含插件包和用户自建、改过的，按它的顺序，默认是它设置里选的，坏掉的不列）；本机和没有插件的执行端读 dsh 包里登记的补丁（`dsh-web-app` 的 `package.json` 里 `dsh.bundle.patch`）。按机器缓存 30 秒。内置的几个不带 `name`，网页用自己的文案；带 `name` 的照它写的显示。`GET /api/agents` 的 `presets` 只说这个 agent 有没有预设 |
 | `PUT /api/sessions/{id}/preset` | `{preset}` | Agent 预设（只 dsh：上一行列出的，没有的 400），`""` 是 `default`。只在启动时装，也只在会话第一条消息前能改（同 dsh 自己的界面）：开始后改是 400，因为 dsh 会把新工具当成追加的延迟加载工具，PTC 那样全是延迟的，API 会拒绝。在跑时改就重启（空闲马上，否则等回合结束），重启时状态仍显示空闲。网页放在额度条的位置（dsh 没额度，用户定的，2026-11-06）。新会话用 `NewSession.preset`，`/clear` 照原样带上 |
 | `GET /api/sessions/{id}/rules` | → `AllowRule[]` | “本会话一直允许”记下的规则 |
@@ -225,7 +241,8 @@ agent 用 `ir sh <机器> [--cwd 目录] [--timeout 2m] -- 命令`（`POST /api/
   - `model` 是在用的模型，常是完整 id；`pick` 是设的值，空或 `default` 是 agent 的默认。默认时模型键显示具体的模型（`resolved` 对上的别名，再不行取默认项描述 ` · ` 前那段），不只写“默认”。
   - `effortNow`：Claude 握手后、换模型或强度后读 `get_settings` 的 `applied`（也拿到 `applied.model`，第一回合前就有）；Codex 取 `thread/start` 的 `reasoningEffort`；pi 取 `get_state` 的 `thinkingLevel`。没设过强度时显示它，但不记进库。
   - `ultracode`：`{on, active, available}`，`on` 是开没开（`ultracodeRequested`），`active` 是开了且生效，`available` 是这个模型能不能开（读到之前、进程没在跑时算能；CLI 不认 `get_settings` 算不能）。进程一结束，读到的就作废，下个进程再问。
-  - 面板里选了模型就收起；强度滑条和 UltraCode 开关在面板底下，调了不收。
+  - `features`：附加功能（2026-11-09），每项 `{id, name, on, active?, available, reason?, hint?, options?, option?, place, tone?}`：Claude 的 UltraCode（`claude.ultracode`，同 `ultracode`，那个字段先留着），以及 DSH Desktop 拿着的会话上插件给的（如 `omd.ultra`）。`place` 现在只有 `effort`：开关在强度滑条右边，开着时选项在滑条下面一行；`tone: "warm"` 是开着时的颜色。插件给的从执行端问来，缓存 10 秒，状态不等它：过期了后台去问，回来再推一次状态。Desktop 拿着的会话，`effortNow` 是它在 Desktop 里此刻跑的档位（附加功能管着强度时是它的），`model`、`effort` 没设过时也取 Desktop 的。限制见 `docs/exec.md`“附加功能”。
+  - 面板里选了模型就收起；强度滑条和附加功能的开关（UltraCode 等）在面板底下，调了不收。
 - 本会话一直允许：`answer` 带 `always: true`（或卡片选 `always`）。记下工具和 `Ask.pattern`（Claude 自己建议的规则，例如 `ls *`；没有时 shell 命令取第一个词加 ` *`，别的工具不带模式＝这个工具全部）。之后这个会话里匹配的审批自动允许，不通知、不出卡片。
 - 临时切换至 manual：Claude 的 auto 模式分类器拦下的一步不经 Iridium，直接回给模型（结果开头是 `Permission for this action was denied by the Claude Code auto mode classifier`）。`release` 把运行中的进程切到 `manual`（不写进会话设置，进程重启就回到原模式），不给 Claude 发消息（原来以用户名义插一条“请原样再做一次”，它可能已换了做法，2026-11-08）。之后的调用照常问；第一个问的调用（或同一调用：工具相同，参数除 `description` 外相同）做完就切回原模式（2026-11-08），一个都没问就在当时进行中的回合（空闲时为下一回合）结束时切回，期间手动换了模式就不切回（2026-11-07）。切换记在 hold 目录的 `release.json`：守护进程重启接管仍在 manual 的同一进程时接着算，新进程就删掉。拦下的每一步都在会话状态的 `denials`（`Denial{toolUseId, tool, input, reason, at}`，只记在内存里）直到放行、`dismiss` 或给这个会话发下一条消息。只有回合停在被拦的一步上（它之后本回合没有做完别的调用）才算 `waiting`（`ir wait` 不算需要你）；之后做完了别的调用就当它绕过去了，状态照常（2026-11-08）。回合结束的推送和 Bot 回复带上“auto 拦了 N 步”。
 - 匹配：`*` 是任意一段字；`前缀:*` 同 `前缀*`。shell 命令里有 `;`、`&&`、`||`、`|`、`` ` ``、`$(`、换行的，一律不按模式放行。
@@ -329,14 +346,14 @@ Iridium 不内置、但认得名字的 Bot（现在只有 QQ Bot `qq`，二进�
 
 | 请求 | 正文 → 回答 | 说明 |
 |---|---|---|
-| `GET /api/extensions` | → `Extension[]` | 装没装、正在做什么、上次的错、扩展自己报的状态（`iridium-qq status --json`）、扫码中的二维码 |
+| `GET /api/extensions` | → `Extension[]` | 装没装、正在做什么、上次的错、扩展的每个 Bot（`bots`，`iridium-qq list --json`，带终端在线数）、扫码中的二维码 |
 | `POST /api/extensions/{id}/install` | → `Extension` | 从同版本的 Release 下二进制放在 Iridium 旁边（校验 sha256、跑一次）；开发版用旁边的 `<名>.dist` |
-| `POST /api/extensions/{id}/bind` | → `Extension` | 开始扫码，回答带第一张二维码；扫完 Iridium 建终端、把 TOKEN 写进扩展的目录（同 `--into`；本人才带 Claude）、启动服务 |
+| `POST /api/extensions/{id}/bind` | → `Extension` | 开始扫码，回答带第一张二维码；扫完 Iridium 建终端、把 TOKEN 写进那个 Bot 的目录（同 `--into`；本人才带 Claude）、启动它的服务。新 Bot 多一个，扫过的 Bot 更新 |
 | `DELETE /api/extensions/{id}/bind` | → `Extension` | 取消扫码 |
-| `POST /api/extensions/{id}/start`、`stop`、`pair` | → `Extension` | 服务开关；新配对码（在 `status.pair`） |
-| `DELETE /api/extensions/{id}` | → `Extension` | 停服务、删配置和二进制、撤销它的终端 |
+| `POST /api/extensions/{id}/start`、`stop`、`pair` | → `Extension` | 服务开关；新配对码（在 `bots[].pair`）。`?bot=<AppID>` 指定 Bot，start、stop 不带就是全部 |
+| `DELETE /api/extensions/{id}` | → `Extension` | 停全部服务、删配置和二进制、撤销它的全部终端 |
 
-网页只用 `install`、`bind`、取消扫码；撤销（`DELETE /api/terminals/{id}`、`ir revoke`）一个官方 Bot 的终端时，Iridium 顺带让它 `remove`（停服务、删配置，二进制留着）。
+网页只用 `install`、`bind`、取消扫码；撤销（`DELETE /api/terminals/{id}`、`ir revoke`）一个官方 Bot 的终端时，Iridium 顺带让那个 Bot `remove`（停它的服务、删它的配置；别的 Bot 和二进制留着）。
 
 - Iridium 启动时（更新之后）把装了的扩展换成同版本，服务在跑就重启。
 

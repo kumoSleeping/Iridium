@@ -247,6 +247,25 @@ var leadTag = regexp.MustCompile(`^\[[^\]\n]{1,80}\] +`)
 
 var titlePrefix = []byte(`{"type":"session/title"`)
 
+const (
+	dshTurnOpen  = 1
+	dshTurnEnded = 2
+)
+
+var turnStart, turnEnd = []byte(`{"type":"turn/start"`), []byte(`{"type":"turn/end"`)
+
+// dshTurn is what a line says of the turn: it began (dshTurnOpen), it ended (dshTurnEnded), or
+// nothing (0).
+func dshTurn(raw []byte) int8 {
+	switch {
+	case bytes.HasPrefix(raw, turnStart):
+		return dshTurnOpen
+	case bytes.HasPrefix(raw, turnEnd):
+		return dshTurnEnded
+	}
+	return 0
+}
+
 // dshTitle is the title a session/title event gives; false for another line.
 func dshTitle(raw []byte) (string, bool) {
 	if !bytes.HasPrefix(raw, titlePrefix) {
@@ -374,8 +393,8 @@ func dshID(id string) bool {
 }
 
 // GlanceDsh is what a session list needs of the dsh session file at path: its header's cwd, a
-// subagent's parent, the title dsh gave it (else the first thing you said) and what was said
-// last.
+// subagent's parent and whether its last turn ended, the title dsh gave it (else the first thing
+// you said) and what was said last.
 func GlanceDsh(path string, sources Sources) (Glimpse, error) {
 	var g Glimpse
 	f := OpenAs(path, Dsh, sources)
@@ -389,6 +408,7 @@ func GlanceDsh(path string, sources Sources) (Glimpse, error) {
 	}
 	f.mu.Lock()
 	r, done, err := f.text()
+	ended := f.turn == dshTurnEnded
 	f.mu.Unlock()
 	if err != nil {
 		return g, err
@@ -410,6 +430,7 @@ func GlanceDsh(path string, sources Sources) (Glimpse, error) {
 		g.Cwd = h.Cwd
 		g.Sidechain = h.Origin == "subagent"
 		g.Parent = h.ParentSession
+		g.Ended = g.Sidechain && ended
 	}
 	return g, nil
 }

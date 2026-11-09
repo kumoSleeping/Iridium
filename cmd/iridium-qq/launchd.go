@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/exec"
 	"runtime"
@@ -18,16 +17,16 @@ func macHome() string {
 	return h
 }
 
-func macPlist() string { return launchd.File(launchd.Dir(macHome()), unit) }
-func macLog() string   { return launchd.LogFile(macHome(), unit) }
+func macPlist(u string) string { return launchd.File(launchd.Dir(macHome()), u) }
+func macLog(u string) string   { return launchd.LogFile(macHome(), u) }
 
-// macService is the service's state in systemd's words (active, inactive; "" not installed), and
+// macService is service u's state in systemd's words (active, inactive; "" not installed), and
 // whether it starts at login.
-func macService() (string, bool) {
-	_, err := os.Stat(macPlist())
+func macService(u string) (string, bool) {
+	_, err := os.Stat(macPlist(u))
 	installed := err == nil
 	ctx := context.Background()
-	switch launchd.State(ctx, launchd.Domain(ctx), unit) {
+	switch launchd.State(ctx, launchd.Domain(ctx), u) {
 	case "running":
 		return "active", installed
 	case "":
@@ -39,40 +38,31 @@ func macService() (string, bool) {
 	return "inactive", installed
 }
 
-func macStart(exe string) int {
+func macStart(u, exe, id string) error {
 	var env []string
 	if h := os.Getenv("IRIDIUM_QQ_HOME"); h != "" {
 		env = append(env, "IRIDIUM_QQ_HOME="+h)
 	}
-	path, err := launchd.Write(launchd.Dir(macHome()), launchd.Job{Label: unit, Argv: []string{exe, "run"}, Env: env, Log: macLog(), Always: true})
+	path, err := launchd.Write(launchd.Dir(macHome()), launchd.Job{Label: u, Argv: []string{exe, "run", "--bot", id}, Env: env, Log: macLog(u), Always: true})
 	if err != nil {
-		return fail(err)
+		return err
 	}
 	ctx := context.Background()
-	if err := launchd.Load(ctx, launchd.Run, launchd.Domain(ctx), unit, path); err != nil {
-		return fail(err)
-	}
-	fmt.Printf("服务已启动（%s）。\n", unit)
-	return 0
+	return launchd.Load(ctx, launchd.Run, launchd.Domain(ctx), u, path)
 }
 
-// macStop unloads the service and takes its plist away, so it does not come back at login.
-func macStop() int {
-	if _, err := os.Stat(macPlist()); err != nil {
-		fmt.Println("服务没装。")
-		return 0
+// macStop unloads service u and takes its plist away, so it does not come back at login.
+func macStop(u string) error {
+	if _, err := os.Stat(macPlist(u)); err != nil {
+		return nil
 	}
 	ctx := context.Background()
-	launchd.Unload(ctx, launchd.Run, launchd.Domain(ctx), unit)
-	if err := os.Remove(macPlist()); err != nil {
-		return fail(err)
-	}
-	fmt.Println("服务已停止。")
-	return 0
+	launchd.Unload(ctx, launchd.Run, launchd.Domain(ctx), u)
+	return os.Remove(macPlist(u))
 }
 
-func macLogs(n string) int {
-	cmd := exec.Command("tail", "-n", n, macLog())
+func macLogs(u, n string) int {
+	cmd := exec.Command("tail", "-n", n, macLog(u))
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	if err := cmd.Run(); err != nil {
 		return 1

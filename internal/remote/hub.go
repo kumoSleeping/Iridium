@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -23,6 +24,10 @@ type Hub struct {
 	Logf func(string, ...any)
 	// Changed is called when a machine comes or goes.
 	Changed func(id string)
+	// OnHeld is called with the event held.changed from machine (its terminal ID): a session the
+	// holder there has changed (wire.CapHeldFeatures). It is called on the connection's reading
+	// goroutine: it must not wait on the executor.
+	OnHeld func(machine string, c wire.HeldChanged)
 
 	mu       sync.Mutex
 	machines map[string]*Machine
@@ -177,6 +182,19 @@ func (m *Machine) Hello() (*wire.Hello, bool) {
 	return m.hello, m.conn != nil
 }
 
+// Caps are the optional parts of the protocol the executor said it speaks; nil while it is not
+// connected.
+func (m *Machine) Caps() []string {
+	hi, ok := m.Hello()
+	if !ok || hi == nil {
+		return nil
+	}
+	return hi.Caps
+}
+
+// Has: the executor is connected and speaks cap (wire.CapHeld…).
+func (m *Machine) Has(cap string) bool { return slices.Contains(m.Caps(), cap) }
+
 // Agent is agent a as the executor has it; ok false if not connected or not there.
 func (m *Machine) Agent(a string) (wire.AgentInfo, bool) {
 	hi, ok := m.Hello()
@@ -260,8 +278,15 @@ func (m *Machine) Call(ctx context.Context, method string, params, out any) erro
 	return c.Call(ctx, method, params, out)
 }
 
-// event is an event from the executor, for the relay of its holder.
+// event is an event from the executor, for the relay of its holder; held.changed, for OnHeld.
 func (m *Machine) event(name string, params json.RawMessage) {
+	if name == "held.changed" {
+		var c wire.HeldChanged
+		if f := m.hub.OnHeld; f != nil && json.Unmarshal(params, &c) == nil && c.Session != "" {
+			f(m.id, c)
+		}
+		return
+	}
 	var h wire.HoldParams
 	if err := json.Unmarshal(params, &h); err != nil || h.Hold == "" {
 		return

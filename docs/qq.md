@@ -1,24 +1,27 @@
 # QQ Bot（官方）
 
-`iridium-qq`：一个 QQ Bot，你和它的私聊交给 Iridium 的会话。不内置在 Iridium 里，和它同一个 Release 发布，要用时装。
+`iridium-qq`：QQ Bot，你和它们的私聊交给 Iridium 的会话。一台机器可以接多个 Bot，各是一个终端。不内置在 Iridium 里，和它同一个 Release 发布，要用时装。
 
 ## 怎么装
 
-- 网页：设置 → 终端管理 → + → QQ Bot（官方）。没装就先下载，然后直接出二维码；手机 QQ 扫码，选“创建新机器人”。扫完自动建终端 `QQ`（你本人的面板上操作就带 Claude）、启动服务，回到终端列表。之后它和别的 Bot 一样只是列表里的一个终端，没有单独的分组和管理页；在列表里移除它，服务一起停掉、配置删掉（二进制留着）。换 Bot 就再从 + 加一次。
-- 让 agent 做：说“接上 QQ”。它跑 `iridium-qq setup`，把二维码图片发给你；你扫完告诉它，它再跑一次；TOKEN 要你在网页面板上点同意（写进文件，agent 看不到）。
+- 网页：设置 → 终端管理 → + → QQ Bot（官方）。没装就先下载，然后直接出二维码；手机 QQ 扫码，选“创建新机器人”。扫完自动建终端（名字取 Bot 在 QQ 上的名字，不合终端名规则的字去掉、超过 12 字截断，和已有终端重名就加 2、3…；QQ 不给名字时叫 `QQ`。你本人的面板上操作就带 Claude）、启动服务，回到终端列表。之后它和别的 Bot 一样只是列表里的一个终端，没有单独的分组和管理页；在列表里移除它，只停它的服务、删它的配置（别的 Bot 和二进制留着）。再从 + 加一次就多一个 Bot；扫的是已经接上的 Bot，就只更新它（名字、主人不变）。终端可以在网页上改名：Iridium 认 Bot 的终端只按它的 TOKEN，不按名字（改名后旧名被别的 Bot 占了也不会认错）；插件连上 Iridium 时把新名字写回自己的配置。
+- 让 agent 做：说“接上 QQ”（已有 Bot 再加一个：“再接一个 QQ Bot”）。它跑 `iridium-qq setup`（再加一个是 `setup --new`），把二维码图片发给你；你扫完告诉它，它再跑一次；TOKEN 要你在网页面板上点同意（写进文件，agent 看不到）。
 - 终端里自己跑：`iridium-qq setup`，终端里直接画二维码，扫完一路做完。
 
 ## 命令
 
 ```
-iridium-qq setup [--wait] [--rebind]   扫码建 Bot、拿 TOKEN、启动服务（没终端时打印二维码后退出，码 2）
-iridium-qq status [--json]             Bot、主人、服务、连接
-iridium-qq start | stop | restart      服务（systemd 用户单元 iridium-qq）
+iridium-qq setup [--wait] [--new]      扫码建 Bot、拿 TOKEN、启动服务（没终端时打印二维码后退出，码 2）；--new 已有 Bot 时再加一个
+iridium-qq list [--json]               每个 Bot：终端名、主人、服务、连接
+iridium-qq status [--json]             一个 Bot
+iridium-qq start | stop | restart      服务（restart 只重启在跑的）
 iridium-qq logs [-n 行数]              服务日志
 iridium-qq pair                        配对码：别的 QQ 号发给 Bot 就成为主人
-iridium-qq remove                      停服务、删配置（TOKEN 用 ir revoke QQ 撤销；网页上的“移除”一起做）
-iridium-qq run                         前台跑（服务跑的就是它）
+iridium-qq remove [--all]              停一个 Bot 的服务、删它的配置（TOKEN 用 ir revoke <终端名> 撤销；网页上的“移除”一起做）
+iridium-qq run                         前台跑一个 Bot（服务跑的就是它）
 ```
+
+每个 Bot 一个目录、一个服务（systemd 用户单元 / LaunchAgent `iridium-qq-<AppID>`）。`--bot <AppID>` 指定 Bot；不指定时只有一个就是它，有多个时 start、stop、restart 对全部，其余报错。
 
 ## 做什么
 
@@ -42,4 +45,4 @@ iridium-qq run                         前台跑（服务跑的就是它）
 
 ## 文件
 
-都在 `~/.config/iridium-qq/`（`IRIDIUM_QQ_HOME` 可改）：`config.json`（AppID、密钥、主人，0600）、`token`、`state.json`（网关会话、额度计数、待发）、`status.json`。
+都在 `~/.config/iridium-qq/`（`IRIDIUM_QQ_HOME` 可改），每个 Bot 在 `bots/<AppID>/`：`config.json`（AppID、密钥、主人、终端名，0600）、`token`、`state.json`（网关会话、额度计数、待发）、`status.json`。旧版只有一个 Bot，文件直接在目录下、服务叫 `iridium-qq`；新版第一次运行时搬进 `bots/<AppID>/`，服务换成 `iridium-qq-<AppID>`（原来在跑就接着跑）。终端名不变。

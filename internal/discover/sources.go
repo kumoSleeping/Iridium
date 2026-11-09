@@ -271,7 +271,7 @@ func (x *Index) glance(d onDisk) glimpse {
 		return x.glancePi(d)
 	case api.AgentDsh:
 		g, _ := transcript.GlanceDsh(d.path, x.o.Store.Source)
-		out := glimpse{cwd: g.Cwd, title: g.Title, last: g.Last, sub: g.Sidechain, parent: g.Parent}
+		out := glimpse{cwd: g.Cwd, title: g.Title, last: g.Last, sub: g.Sidechain, parent: g.Parent, done: g.Ended}
 		if out.cwd == "" {
 			out.cwd = x.dshCwd(filepath.Base(filepath.Dir(filepath.Dir(d.path))))
 		}

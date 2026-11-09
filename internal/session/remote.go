@@ -177,22 +177,25 @@ func (h *Hosted) findRemoteTranscript(mc *remote.Machine) (string, error) {
 	}
 	ctx, cancel := context.WithTimeout(h.m.ctx, 30*time.Second)
 	defer cancel()
-	path, err := info.FindRemote(agents.RemoteWhere{
-		ID: h.meta.agentID(), Cwd: h.meta.Cwd, Home: ai.Home, User: hi.Home, Env: info.RemoteEnv(hi.Env, ai.Home),
-		Join: func(elem ...string) string { return remote.Join(hi.Sep, elem...) },
-		List: func(dir string) ([]string, error) {
+	list := func(kind string) func(dir string) ([]string, error) {
+		return func(dir string) ([]string, error) {
 			ents, err := mc.List(ctx, dir)
 			if wire.IsCode(err, wire.CodeNotFound) {
 				return nil, nil
 			}
 			var names []string
 			for _, e := range ents {
-				if e.Type == "file" {
+				if e.Type == kind {
 					names = append(names, e.Name)
 				}
 			}
 			return names, err
-		},
+		}
+	}
+	path, err := info.FindRemote(agents.RemoteWhere{
+		ID: h.meta.agentID(), Cwd: h.meta.Cwd, Home: ai.Home, User: hi.Home, Env: info.RemoteEnv(hi.Env, ai.Home),
+		Join: func(elem ...string) string { return remote.Join(hi.Sep, elem...) },
+		List: list("file"), Dirs: list("dir"),
 	})
 	if err != nil || path == "" {
 		return rt.Local, err

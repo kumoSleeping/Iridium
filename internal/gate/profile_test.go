@@ -311,3 +311,33 @@ func TestChannelInLocalMode(t *testing.T) {
 	h.h.ServeHTTP(w, r)
 	wantStatus(t, w, http.StatusConflict)
 }
+
+// A Bot found by its TOKEN, renamed or not; once revoked, its TOKEN's hash still names it.
+func TestByToken(t *testing.T) {
+	h := newHarness(t, testOrigin)
+	info, tok, err := h.g.CreateToken("QQ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.secrets = append(h.secrets, tok)
+	name := "小铱"
+	if _, err := h.g.UpdateProfile(info.ID, Profile{Name: &name}); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := h.g.ByToken(tok + "\n"); !ok || got.ID != info.ID || got.Name != name {
+		t.Fatalf("by token: %+v %v", got, ok)
+	}
+	if _, ok := h.g.ByToken("ir_nope"); ok {
+		t.Fatal("a token of no one's")
+	}
+	hash := h.g.TokenHash(info.ID)
+	if err := h.g.Revoke(info.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := h.g.ByToken(tok); ok {
+		t.Fatal("revoked, still found")
+	}
+	if !SameToken(hash, tok) || SameToken(hash, "ir_other") || SameToken("", tok) {
+		t.Fatal("SameToken")
+	}
+}

@@ -72,7 +72,16 @@ type Hello struct {
 	// HTTPS with the session's own TOKEN (hold.start's env IRIDIUM_TOKEN; docs/exec.md "远端的
 	// ir"): IRIDIUM_URL is set there to the address it connected to, unless the env has one.
 	IRClient bool `json:"irClient,omitempty"`
+	// Caps: the optional parts of the protocol it speaks (CapHeld…); none from an older one.
+	Caps []string `json:"caps,omitempty"`
 }
+
+// Caps an executor may say in Hello. CapHeld: held.list and held.send (dsh.open and dsh.prompt
+// otherwise). CapHeldFeatures: held.get, held.set and the event held.changed.
+const (
+	CapHeld         = "held"
+	CapHeldFeatures = "held.features"
+)
 
 // AgentInfo is an agent installed there and how to start it. Argv is the program part, to which
 // the driver adds its arguments.
@@ -195,10 +204,11 @@ const MaxRead = 4 << 20
 // Optional, the dsh plugin's (docs/exec.md "远端 DSH"): the dsh it runs in (DSH Desktop). Another
 // executor answers CodeUnsupported.
 
-// DshOpenReply answers dsh.open: the sessions open in that dsh process now; Unsynced, the
-// workspaces the plugin's settings keep from the Iridium (their folders or names);
-// UnsyncedUngrouped, the sessions in none of them (dsh's 未分组) kept too.
-type DshOpenReply struct {
+// HeldListReply answers held.list (dsh.open of an older plugin): the sessions open in that dsh
+// process now (held: DSH Desktop has them loaded, its writer lock); Unsynced, the workspaces the
+// plugin's settings keep from the Iridium (their folders or names); UnsyncedUngrouped, the
+// sessions in none of them (dsh's 未分组) kept too.
+type HeldListReply struct {
 	Sessions []string `json:"sessions"`
 	// Running: those of Sessions whose agent there works now (a turn, or one waiting on an
 	// approval or an answer); nil from a plugin that does not say (all of them, then).
@@ -207,13 +217,83 @@ type DshOpenReply struct {
 	UnsyncedUngrouped bool     `json:"unsyncedUngrouped,omitempty"`
 }
 
-// DshPromptParams is dsh.prompt: a message for a session the dsh there holds (open in DSH
-// Desktop), which the Iridium cannot resume: its agent there takes it, a next turn or (Steer)
-// into the running one. CodeNotFound: no agent of it lives there.
-type DshPromptParams struct {
+// DshOpenReply is HeldListReply by its older name.
+type DshOpenReply = HeldListReply
+
+// HeldSendParams is held.send (dsh.prompt of an older plugin): a message for a session the dsh
+// there holds (open in DSH Desktop), which the Iridium cannot resume: its agent there takes it, a
+// next turn or (Steer) into the running one. CodeNotFound: no agent of it lives there.
+type HeldSendParams struct {
 	Session string `json:"session"`
 	Text    string `json:"text"`
 	Steer   bool   `json:"steer,omitempty"`
+}
+
+// HeldGetParams is held.get: session's live state there, in Lang ("zh", "en"; "" the plugin's
+// own) for the features' texts. Any session: one not held has its features unavailable, with
+// why.
+type HeldGetParams struct {
+	Session string `json:"session"`
+	Lang    string `json:"lang,omitempty"`
+}
+
+// HeldSetParams is held.set: one of Model ("<provider>/<model>"), Effort or Feature changed on a
+// held session; the reply is HeldLive after it. CodeNotFound: not held there.
+type HeldSetParams struct {
+	Session string          `json:"session"`
+	Lang    string          `json:"lang,omitempty"`
+	Model   string          `json:"model,omitempty"`
+	Effort  string          `json:"effort,omitempty"`
+	Feature *HeldSetFeature `json:"feature,omitempty"`
+}
+
+// HeldSetFeature is feature ID switched On, maybe at Option (one of its options' IDs).
+type HeldSetFeature struct {
+	ID     string `json:"id"`
+	On     bool   `json:"on"`
+	Option string `json:"option,omitempty"`
+}
+
+// HeldLive is a session as the holder there runs it now. Held: it has the session loaded; Model
+// ("<provider>/<model>") and Effort, the level it runs at (a feature's own while that feature
+// owns the effort), only then. Features: the switches plugins there add to it, held or not.
+type HeldLive struct {
+	Held     bool      `json:"held"`
+	Model    string    `json:"model,omitempty"`
+	Effort   string    `json:"effort,omitempty"`
+	Features []Feature `json:"features,omitempty"`
+}
+
+// HeldChanged is the event held.changed: session's live state changed there (a feature switched
+// in DSH Desktop, its model or effort changed); at most two a second per session.
+type HeldChanged struct {
+	Session string   `json:"session"`
+	Live    HeldLive `json:"live"`
+}
+
+// Feature is an extra switch on a session from a plugin there, as api.Feature: ID
+// "<plugin>.<name>"; Available, it can be switched now (Reason, why not); Active, on and in
+// effect; Options, what it runs as while on (Option, the one picked); Place, where the page puts
+// it ("effort": at the effort track's right); Tone "warm" or none; V, its shape's version (1).
+type Feature struct {
+	ID        string          `json:"id"`
+	Name      string          `json:"name"`
+	On        bool            `json:"on"`
+	Active    bool            `json:"active,omitempty"`
+	Available bool            `json:"available"`
+	Reason    string          `json:"reason,omitempty"`
+	Hint      string          `json:"hint,omitempty"`
+	Options   []FeatureOption `json:"options,omitempty"`
+	Option    string          `json:"option,omitempty"`
+	Place     string          `json:"place"`
+	Tone      string          `json:"tone,omitempty"`
+	V         int             `json:"v,omitempty"`
+}
+
+// FeatureOption is one of a feature's options.
+type FeatureOption struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 // DshPresetsReply answers dsh.presets: the agent presets the dsh there registers (its

@@ -253,6 +253,14 @@ body {
   color: oklch(var(--k-l) var(--k-c) var(--k-h));
 }
 
+/* Where a note dragged would land (notes.tsx): a session's row, the chat. */
+[data-session][data-drop] {
+  background: var(--fill-2);
+}
+[data-chat-drop][data-drop] {
+  box-shadow: inset 0 0 0 2px var(--fill-2);
+}
+
 /* ---- a session's colour tag: a highlighter's stroke over its name (sidebar.tsx Marked), drawn by
    hand: ragged ends, edges that wander, a denser streak where the pen pressed, a little tilted
    (the user, 2026-11-08). Light; drawn from the left as it is given, wiped back as it is taken off. */

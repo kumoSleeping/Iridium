@@ -125,17 +125,42 @@ func (m *Machine) Mkdir(ctx context.Context, path string) error {
 }
 
 // DshOpen is the sessions open in the dsh the executor runs in (DSH Desktop's, through the dsh
-// plugin); an error of wire.CodeUnsupported from one that cannot say.
+// plugin): held.list, or dsh.open of a plugin without CapHeld; an error of wire.CodeUnsupported
+// from one that cannot say.
 func (m *Machine) DshOpen(ctx context.Context) (wire.DshOpenReply, error) {
-	var r wire.DshOpenReply
-	err := m.Call(ctx, "dsh.open", struct{}{}, &r)
+	var r wire.HeldListReply
+	err := m.Call(ctx, m.pick(wire.CapHeld, "held.list", "dsh.open"), struct{}{}, &r)
 	return r, err
 }
 
 // DshPrompt gives a message to the agent of a session the dsh the executor runs in holds (DSH
-// Desktop's).
+// Desktop's): held.send, or dsh.prompt of a plugin without CapHeld.
 func (m *Machine) DshPrompt(ctx context.Context, session, text string, steer bool) error {
-	return m.Call(ctx, "dsh.prompt", wire.DshPromptParams{Session: session, Text: text, Steer: steer}, nil)
+	return m.Call(ctx, m.pick(wire.CapHeld, "held.send", "dsh.prompt"), wire.HeldSendParams{Session: session, Text: text, Steer: steer}, nil)
+}
+
+// pick is method if the executor has cap, else older.
+func (m *Machine) pick(cap, method, older string) string {
+	if m.Has(cap) {
+		return method
+	}
+	return older
+}
+
+// HeldGet is session's live state at the holder there (held.get; the executor has
+// wire.CapHeldFeatures), its features' texts in lang.
+func (m *Machine) HeldGet(ctx context.Context, session, lang string) (wire.HeldLive, error) {
+	var r wire.HeldLive
+	err := m.Call(ctx, "held.get", wire.HeldGetParams{Session: session, Lang: lang}, &r)
+	return r, err
+}
+
+// HeldSet changes a held session's model, effort or a feature there (held.set); the reply is its
+// live state after.
+func (m *Machine) HeldSet(ctx context.Context, p wire.HeldSetParams) (wire.HeldLive, error) {
+	var r wire.HeldLive
+	err := m.Call(ctx, "held.set", p, &r)
+	return r, err
 }
 
 // DshPresets is the agent presets the dsh the executor runs in registers (DSH Desktop's, through

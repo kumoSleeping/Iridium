@@ -8,7 +8,8 @@
 // A subagent is no row of its own, nor in any folder: it sits under the session that started it,
 // and only while it works; done, it is gone, as Claude Code lets it go (the user, 2026-11-06).
 // Those under one session keep the order they came in, the newest last, not the order they last
-// wrote in, which swapped them back and forth (the user, 2026-11-08).
+// wrote in, which swapped them back and forth (the user, 2026-11-08); so do a workflow run's agents
+// (2026-11-09).
 import type { Workspace } from "./api/types.gen";
 import type { Session } from "./api/types.gen";
 
@@ -83,7 +84,10 @@ export function buildTree(all: Session[], workspaces: Workspace[], unsorted: str
   // A run shows while one of its agents works; its phase, the latest one's at work.
   for (const [parent, list] of runs) {
     const live = list.filter((r) => r.working.length);
-    for (const r of live) r.phase = [...r.working].sort((a, b) => b.updatedAt - a.updatedAt)[0]!.workflow?.phase ?? "";
+    for (const r of live) {
+      r.phase = [...r.working].sort((a, b) => b.updatedAt - a.updatedAt)[0]!.workflow?.phase ?? "";
+      r.working = bySeen(r.working, (s) => s.id, (s) => s.updatedAt, seen);
+    }
     if (live.length) runs.set(parent, bySeen(live, (r) => `run:${r.id}`, (r) => Math.min(...r.working.map((s) => s.updatedAt)), seen));
     else runs.delete(parent);
   }

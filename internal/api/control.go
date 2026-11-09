@@ -51,6 +51,39 @@ type Model struct {
 	Group string `json:"group,omitempty"`
 }
 
+// Feature is an extra switch on a session, at the effort track's right (Place "effort", the one
+// place the page knows): Claude's UltraCode (ID claude.ultracode), or one a plugin adds where DSH
+// Desktop holds the session (ID "<plugin>.<name>", its Name, Hint and Reason in the user's
+// language). On: asked for (what the switch shows); Active: on and in effect; Available: it can be
+// switched now (Reason: why not). Options: what it runs as while on, Option the one picked. Tone
+// "warm": the switch's colour when on.
+type Feature struct {
+	ID        string          `json:"id"`
+	Name      string          `json:"name"`
+	On        bool            `json:"on"`
+	Active    bool            `json:"active,omitempty"`
+	Available bool            `json:"available"`
+	Reason    string          `json:"reason,omitempty"`
+	Hint      string          `json:"hint,omitempty"`
+	Options   []FeatureOption `json:"options,omitempty"`
+	Option    string          `json:"option,omitempty"`
+	Place     string          `json:"place"`
+	Tone      string          `json:"tone,omitempty"`
+}
+
+// FeatureOption is one of a feature's options.
+type FeatureOption struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// SetFeature switches a feature on or off (PUT /api/sessions/{id}/features/{feature}), maybe at
+// one of its options.
+type SetFeature struct {
+	On     bool   `json:"on"`
+	Option string `json:"option,omitempty"`
+}
+
 // SetModel, SetMode and SetEffort change a session's model, approval mode and thinking effort,
 // at once if its agent runs, and for every later start. Model "" is the agent's default.
 type SetModel struct {

@@ -18,6 +18,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/chat"
 	"github.com/kumoSleeping/iridium/internal/config"
+	"github.com/kumoSleeping/iridium/internal/gate"
 	"github.com/kumoSleeping/iridium/internal/store"
 )
 
@@ -119,24 +120,48 @@ func TestChatAttachments(t *testing.T) {
 	l.want(400, bot, "POST", "/api/chat/qq:1/input", api.ChatInput{Text: "x", Attachments: []string{"nope"}}, nil)
 }
 
-// fakeExtension is an iridium-qq that answers status, start, pair and bind as the real one does,
-// its home a temp dir.
+// fakeExtension is an iridium-qq that answers list, start, stop, pair, bind and remove as the real
+// one does, its home a temp dir: each scan is one more bot (101 Bot1, 102 Bot2…).
 const fakeExtension = `#!/bin/sh
-home=$(dirname "$0")/home
-case "$1" in
-status)
-	bound=false; [ -f "$home/bound" ] && bound=true
-	service=""; [ -f "$home/started" ] && service=active
-	printf '{"version":"dev","home":"%s","bound":%s,"appId":"app","name":"QQ","owners":1,"token":false,"service":"%s","enabled":false}\n' "$home" "$bound" "$service" ;;
-start) [ -f "$home/token" ] || { echo "iridium-qq: no token" >&2; exit 1; }; touch "$home/started" ;;
-stop) rm -f "$home/started" ;;
+root=$(dirname "$0")/home
+cmd=$1; shift
+bot=""; all=""
+while [ $# -gt 0 ]; do
+	case "$1" in
+	--bot) bot=$2; shift ;;
+	--all) all=1 ;;
+	--taken) echo "$2" > "$root/taken" ;;
+	esac
+	shift
+done
+bots() { ls "$root/bots" 2>/dev/null; }
+case "$cmd" in
+list)
+	sep=""; printf '['
+	for id in $(bots); do
+		d="$root/bots/$id"
+		service=""; [ -f "$d/started" ] && service=active
+		token=false; [ -f "$d/token" ] && token=true
+		printf '%s{"version":"dev","home":"%s","bound":true,"appId":"%s","name":"%s","owners":1,"token":%s,"service":"%s","enabled":false}' "$sep" "$d" "$id" "$(cat "$d/name")" "$token" "$service"
+		sep=","
+	done
+	echo ']' ;;
+start)
+	for id in ${bot:-$(bots)}; do
+		[ -f "$root/bots/$id/token" ] || { echo "iridium-qq: no token" >&2; exit 1; }
+		touch "$root/bots/$id/started"
+	done ;;
+stop) for id in ${bot:-$(bots)}; do rm -f "$root/bots/$id/started"; done ;;
+restart) ;;
 pair) ;;
 bind)
 	echo '{"state":"qr","url":"https://q.qq.com/x"}'
 	sleep 0.3
-	touch "$home/bound"
-	echo '{"state":"bound","appId":"app","owner":true}' ;;
-remove) rm -rf "$home" ;;
+	n=$(( $(bots | wc -l) + 1 )); id=$((100 + n))
+	mkdir -p "$root/bots/$id"; echo "Bot$n" > "$root/bots/$id/name"
+	echo "{\"state\":\"bound\",\"appId\":\"$id\",\"name\":\"Bot$n\",\"owner\":true}" ;;
+remove)
+	if [ -n "$all" ]; then rm -rf "$root"; else rm -rf "$root/bots/$bot"; fi ;;
 version) echo dev ;;
 esac
 `
@@ -158,72 +183,110 @@ func TestExtensions(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "iridium-qq.dist"), []byte(fakeExtension), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	os.MkdirAll(filepath.Join(dir, "home"), 0o700)
+	home := filepath.Join(dir, "home")
+	os.MkdirAll(home, 0o700)
 	x = api.Extension{}
 	l.want(200, "socket", "POST", "/api/extensions/qq/install", nil, &x)
-	if !x.Installed || x.Error != "" || x.Status == nil || x.Status.Bound {
+	if !x.Installed || x.Error != "" || len(x.Bots) != 0 {
 		t.Fatalf("installed: %+v", x)
 	}
 	// An agent uses the extension's own command line.
 	l.want(403, "agent", "POST", "/api/extensions/qq/bind", nil, nil)
-	// The scan: a QR code, then the TOKEN in its home and the service started.
-	x = api.Extension{}
-	l.want(200, "socket", "POST", "/api/extensions/qq/bind", nil, &x)
-	if x.Busy != "bind" || x.Bind == nil || x.Bind.URL != "https://q.qq.com/x" || !strings.HasPrefix(x.Bind.QR, "data:image/svg+xml") {
-		t.Fatalf("binding: %+v", x)
-	}
-	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(50 * time.Millisecond) {
-		list = nil
-		l.want(200, "socket", "GET", "/api/extensions", nil, &list)
-		if list[0].Busy == "" || time.Now().After(deadline) {
-			break
+	// A scan: a QR code, then the bot's TOKEN in its directory and its service started.
+	scan := func(n int) []api.ExtensionStatus {
+		t.Helper()
+		x := api.Extension{}
+		l.want(200, "socket", "POST", "/api/extensions/qq/bind", nil, &x)
+		if x.Busy != "bind" || x.Bind == nil || x.Bind.URL != "https://q.qq.com/x" || !strings.HasPrefix(x.Bind.QR, "data:image/svg+xml") {
+			t.Fatalf("binding: %+v", x)
 		}
+		for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+			list = nil
+			l.want(200, "socket", "GET", "/api/extensions", nil, &list)
+			if list[0].Busy == "" || time.Now().After(deadline) {
+				break
+			}
+		}
+		bots := list[0].Bots
+		if list[0].Error != "" || len(bots) != n {
+			t.Fatalf("bound: %+v", list[0])
+		}
+		for _, b := range bots {
+			if !b.Bound || !b.Token || b.Service != "active" {
+				t.Fatalf("bot: %+v", b)
+			}
+		}
+		return bots
 	}
-	if s := list[0].Status; list[0].Error != "" || s == nil || !s.Bound || s.Service != "active" {
-		t.Fatalf("bound: %+v %+v", list[0], s)
-	}
-	if b, err := os.ReadFile(filepath.Join(dir, "home", "token")); err != nil || !strings.HasPrefix(string(b), "ir_") {
+	scan(1)
+	if b, err := os.ReadFile(filepath.Join(home, "bots", "101", "token")); err != nil || !strings.HasPrefix(string(b), "ir_") {
 		t.Fatalf("token: %q %v", b, err)
 	}
-	var ts api.Terminals
-	l.want(200, "socket", "GET", "/api/terminals", nil, &ts)
-	found := false
-	for _, tm := range ts.Terminals {
-		if tm.Name == "QQ" && tm.Kind == api.TerminalChannel && access.HasClaude(tm.Rules) {
-			found = true
+	// Another scan: one more bot, one more terminal; the terminal names in use go to the
+	// extension, for a new bot's to differ.
+	scan(2)
+	if b, _ := os.ReadFile(filepath.Join(home, "taken")); !strings.Contains(string(b), "Bot1") {
+		t.Fatalf("taken with a bot: %q", b)
+	}
+	terminals := func() map[string]bool {
+		var ts api.Terminals
+		l.want(200, "socket", "GET", "/api/terminals", nil, &ts)
+		out := map[string]bool{}
+		for _, tm := range ts.Terminals {
+			if tm.Kind == api.TerminalChannel {
+				out[tm.Name] = access.HasClaude(tm.Rules)
+			}
 		}
+		return out
 	}
-	if !found {
-		t.Fatalf("no QQ terminal with Claude: %+v", ts.Terminals)
+	if ts := terminals(); !ts["Bot1"] || !ts["Bot2"] {
+		t.Fatalf("no Bot terminals with Claude: %+v", ts)
 	}
-	// Removed in the list as any Bot: its service goes with it (the fake's remove clears its home).
-	l.want(200, "socket", "DELETE", "/api/terminals/QQ", nil, nil)
+	// One bot's service stopped: the other's runs on.
+	x = api.Extension{}
+	l.want(400, "socket", "POST", "/api/extensions/qq/stop?bot=-x", nil, nil)
+	l.want(200, "socket", "POST", "/api/extensions/qq/stop?bot=101", nil, &x)
+	if len(x.Bots) != 2 || x.Bots[0].Service != "" || x.Bots[1].Service != "active" || x.Error != "" {
+		t.Fatalf("stopped: %+v", x)
+	}
+	// Renamed on the page, its old name taken by another Bot: the bot is still its own terminal
+	// (by its TOKEN), and the other one is no bot of the extension's.
+	renamed := "改名一" // the page's rename lands here
+	if _, err := l.s.gate().UpdateProfile("Bot1", gate.Profile{Name: &renamed}); err != nil {
+		t.Fatal(err)
+	}
+	l.want(200, "socket", "POST", "/api/terminals/tokens", api.NewInvite{Name: "Bot1"}, nil)
+	x = api.Extension{}
+	l.want(200, "socket", "GET", "/api/extensions", nil, &list)
+	if b := list[0].Bots; b[0].Name != "改名一" || b[1].Name != "Bot2" {
+		t.Fatalf("renamed: %+v", b)
+	}
+	l.want(200, "socket", "DELETE", "/api/terminals/Bot1", nil, nil)
+	time.Sleep(300 * time.Millisecond)
+	if _, err := os.Stat(filepath.Join(home, "bots", "101")); err != nil {
+		t.Fatalf("another's terminal took the bot away: %v", err)
+	}
+	// Removed in the list as any Bot: that bot goes (its directory cleared), the other stays.
+	l.want(200, "socket", "DELETE", "/api/terminals/改名一", nil, nil)
 	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(50 * time.Millisecond) {
-		if _, err := os.Stat(filepath.Join(dir, "home")); os.IsNotExist(err) {
+		if _, err := os.Stat(filepath.Join(home, "bots", "101")); os.IsNotExist(err) {
 			break
 		}
 		if time.Now().After(deadline) {
 			t.Fatal("its service stayed")
 		}
 	}
-	os.MkdirAll(filepath.Join(dir, "home"), 0o700)
-	x = api.Extension{}
-	l.want(200, "socket", "POST", "/api/extensions/qq/stop", nil, &x)
-	if x.Status.Service != "" || x.Error != "" {
-		t.Fatalf("stopped: %+v", x)
+	if _, err := os.Stat(filepath.Join(home, "bots", "102")); err != nil {
+		t.Fatalf("the other bot went too: %v", err)
 	}
-	// Removing it: its terminal and binary go.
+	// Removing the extension: every bot's terminal and the binary go.
 	x = api.Extension{}
 	l.want(200, "socket", "DELETE", "/api/extensions/qq", nil, &x)
 	if x.Installed || x.Error != "" {
 		t.Fatalf("removed: %+v", x)
 	}
-	ts = api.Terminals{}
-	l.want(200, "socket", "GET", "/api/terminals", nil, &ts)
-	for _, tm := range ts.Terminals {
-		if tm.Name == "QQ" {
-			t.Fatalf("its terminal stayed: %+v", tm)
-		}
+	if ts := terminals(); len(ts) != 1 {
+		t.Fatalf("its terminals stayed: %+v", ts)
 	}
 }
 

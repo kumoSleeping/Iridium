@@ -40,6 +40,11 @@ export interface AgentInfo {
    */
   ultracode: boolean;
   /**
+   * Features: the features (SessionState.Features) its sessions have before its agent runs, by
+   * ID (Claude: claude.ultracode).
+   */
+  features?: string[];
+  /**
    * Presets: its sessions take an agent preset (dsh: the tools and prompt a session runs with),
    * at launch: a switch restarts the agent. Which, a session's: GET /api/sessions/{id}/presets.
    */
@@ -226,9 +231,14 @@ export interface SessionState extends Session {
    */
   commands?: Command[];
   /**
-   * Ultracode: Claude's ultracode; absent for an agent without it.
+   * Ultracode: Claude's ultracode; absent for an agent without it. Features has it too.
    */
   ultracode?: Ultracode;
+  /**
+   * Features: its extra switches (Claude's UltraCode; at an executor whose DSH Desktop plugins
+   * add some, theirs); PUT features/{feature} switches one.
+   */
+  features?: Feature[];
   /**
    * Next: its agent cleared itself (Claude's own /clear) and the conversation goes on in this
    * session; this one is archived, as it was before. The page open on it follows.
@@ -319,6 +329,12 @@ export interface Quota {
 export interface AgentQuota {
   agent: Agent;
   account?: string; // the login the agent reports (Claude: e-mail)
+  /**
+   * Machine: the executor whose login they are (its terminal ID; docs/exec.md), empty for this
+   * machine's. A session at another machine runs under that machine's login, which may be another
+   * account, and Codex reports none: its windows are that machine's, not shared with this one's.
+   */
+  machine?: string;
   plan?: string; // Claude: subscriptionType
   windows: QuotaWindow[];
   balance?: Balance[]; // dsh: the DeepSeek account's money, by currency
@@ -766,6 +782,42 @@ export interface Model {
   group?: string;
 }
 /**
+ * Feature is an extra switch on a session, at the effort track's right (Place "effort", the one
+ * place the page knows): Claude's UltraCode (ID claude.ultracode), or one a plugin adds where DSH
+ * Desktop holds the session (ID "<plugin>.<name>", its Name, Hint and Reason in the user's
+ * language). On: asked for (what the switch shows); Active: on and in effect; Available: it can be
+ * switched now (Reason: why not). Options: what it runs as while on, Option the one picked. Tone
+ * "warm": the switch's colour when on.
+ */
+export interface Feature {
+  id: string;
+  name: string;
+  on: boolean;
+  active?: boolean;
+  available: boolean;
+  reason?: string;
+  hint?: string;
+  options?: FeatureOption[];
+  option?: string;
+  place: string;
+  tone?: string;
+}
+/**
+ * FeatureOption is one of a feature's options.
+ */
+export interface FeatureOption {
+  id: string;
+  name: string;
+}
+/**
+ * SetFeature switches a feature on or off (PUT /api/sessions/{id}/features/{feature}), maybe at
+ * one of its options.
+ */
+export interface SetFeature {
+  on: boolean;
+  option?: string;
+}
+/**
  * SetModel, SetMode and SetEffort change a session's model, approval mode and thinking effort,
  * at once if its agent runs, and for every later start. Model "" is the agent's default.
  */
@@ -939,20 +991,16 @@ export interface Extension {
   busy?: string;
   error?: string; // the last action's failure
   /**
-   * Status is what the extension says of itself (iridium-qq status --json), once installed.
+   * Bots: what the extension says of each of its bots (iridium-qq list --json), once installed.
    */
-  status?: ExtensionStatus;
+  bots?: ExtensionStatus[];
   /**
    * Bind: a scan under way.
    */
   bind?: ExtensionBind;
-  /**
-   * Online: its terminal's live connections in Iridium.
-   */
-  online?: number /* int */;
 }
 /**
- * ExtensionStatus is iridium-qq status --json.
+ * ExtensionStatus is a bot as iridium-qq status --json gives it.
  */
 export interface ExtensionStatus {
   version: string;
@@ -971,6 +1019,10 @@ export interface ExtensionStatus {
   enabled: boolean;
   running?: ExtensionRunning; // while the service is active
   pair?: string; // a pairing code waiting
+  /**
+   * Online: its terminal's live connections in Iridium (Iridium fills it in).
+   */
+  online?: number /* int */;
 }
 /**
  * ExtensionRunning is how the running extension stands.
@@ -1114,6 +1166,71 @@ export interface CLIOutput {
   out?: string;
   err?: string;
   exit?: number /* int */;
+}
+
+//////////
+// source: notes.go
+
+/**
+ * Note is a note jotted down (便签, docs/plan.md "便签"): words to keep, an idea, a thing to do.
+ * In no folder (Folder 0) or in one; listed by Pos, small first. Sessions: those it was put into,
+ * the latest last. From: the session it was jotted in, if any. Times in ms since the epoch; Done 0
+ * is not done. The carried state "notes" is Notes, every note whole.
+ */
+export interface Note {
+  id: string;
+  folder?: number /* int64 */;
+  body: string;
+  pos: number /* float64 */;
+  color?: Color;
+  done?: number /* int64 */;
+  from?: string;
+  sessions?: string[];
+  created: number /* int64 */;
+  updated: number /* int64 */;
+}
+/**
+ * NoteFolder is a folder of notes: one level, no folders in it.
+ */
+export interface NoteFolder {
+  id: number /* int64 */;
+  name: string;
+  pos: number /* float64 */;
+}
+export interface Notes {
+  notes: Note[];
+  folders: NoteFolder[];
+}
+/**
+ * NewNote makes a note. Pos left out: above all in its folder. ID: the page's own (a UUID), so a
+ * note made offline keeps it; left out, one is made.
+ */
+export interface NewNote {
+  id?: string;
+  body: string;
+  folder?: number /* int64 */;
+  pos?: number /* float64 */;
+  color?: Color;
+  from?: string;
+}
+/**
+ * NotePatch changes a note; a field left out stays. Folder 0 takes it out of its folder; Color ""
+ * takes the colour off. Session: one it was put into, added to Sessions.
+ */
+export interface NotePatch {
+  body?: string;
+  folder?: number /* int64 */;
+  pos?: number /* float64 */;
+  color?: Color;
+  done?: boolean;
+  session?: string;
+}
+/**
+ * NoteFolderPatch makes or changes a folder of notes; a field left out stays.
+ */
+export interface NoteFolderPatch {
+  name?: string;
+  pos?: number /* float64 */;
 }
 
 //////////

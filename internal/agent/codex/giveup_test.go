@@ -59,3 +59,42 @@ func TestGiveUpWhenTheThreadDoesNotOpen(t *testing.T) {
 		t.Errorf("send: %v", err)
 	}
 }
+
+// A process that goes during the handshake (stopped, or it exits: Detach) ends the handshake
+// quietly; the next process's handshake is its own.
+func TestDetachDuringHandshake(t *testing.T) {
+	started := make(chan string, 4)
+	d := New(Options{Logf: t.Logf, Emit: func(e agent.Event) {
+		if s, ok := e.(agent.Started); ok {
+			started <- s.Session
+		}
+	}})
+	if _, err := d.Spawn(agent.SpawnOptions{Session: "s1", Cwd: "/w", Remote: &agent.Remote{Argv: []string{"codex"}}}); err != nil {
+		t.Fatal(err)
+	}
+	asked := make(chan struct{}, 1)
+	d.Attach(func([]byte) error { asked <- struct{}{}; return nil }, 1) // never answered
+	<-asked
+	d.Detach()
+	time.Sleep(50 * time.Millisecond) // the handshake's goroutine sees it fail
+	if _, err := d.Spawn(agent.SpawnOptions{Session: "s1", Cwd: "/w", Remote: &agent.Remote{Argv: []string{"codex"}}}); err != nil {
+		t.Fatal(err)
+	}
+	d.Attach(func(line []byte) error {
+		var m map[string]any
+		json.Unmarshal(line, &m)
+		res := map[string]string{"initialize": `{"userAgent":"codex/0.165.0"}`, "model/list": `{"data":[]}`, "thread/start": `{"thread":{"id":"t2"}}`}[fmt.Sprint(m["method"])]
+		if res != "" {
+			go d.Feed([]byte(fmt.Sprintf(`{"id":%q,"result":%s}`, m["id"], res)), false)
+		}
+		return nil
+	}, 2)
+	select {
+	case s := <-started:
+		if s != "t2" {
+			t.Errorf("the next process's thread: %q", s)
+		}
+	case <-time.After(3 * time.Second):
+		t.Error("the next process's thread did not open")
+	}
+}
