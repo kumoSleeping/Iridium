@@ -9,6 +9,7 @@ import (
 	"mime"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -258,158 +259,311 @@ func getenv(env []string, k string) string {
 	return v
 }
 
-// codexShown is the picture the ImageView on the line at off (n bytes) showed the model. In code
-// mode the model does not call view_image itself: a script it runs does (exec, a custom tool
-// call), and the model sees what the script hands on with image(), in the script's output
-// (custom_tool_call_output: input_image items, data URLs). Codex records an ImageView for each
-// view_image between the call and its output, in the order they end, not the order the script
-// hands their pictures on: only a script that viewed one picture and showed one, the only call
-// open as it did, tells which is which (the user's rollouts, 2026-11-09: two viewed at once came
-// in the other order). Before the output is written, while its turn goes on, ErrNotYet. size:
-// where the record's whole lines end.
-func codexShown(r io.ReaderAt, size, off, n int64) (api.Image, error) {
-	// Back to the call open as the view ended, the only one: back from it, an output or a turn
-	// comes before any other call.
-	call, pos := "", off
-	for k := 0; ; k++ {
-		if pos <= 0 {
-			if call == "" {
-				return api.Image{}, ErrNoImage
-			}
-			break
-		}
-		if k > codexWindow {
-			return api.Image{}, ErrNoImage
-		}
-		start, line, err := lineBefore(r, pos)
-		if err != nil {
-			return api.Image{}, err
-		}
-		pos = start
-		kind, id, _ := codexStep(line)
-		if kind == codexView && call == "" || kind == codexCall && call != "" || (kind == codexOutput || kind == codexEnd) && call == "" {
-			return api.Image{}, ErrNoImage
-		}
-		if kind == codexCall {
-			call = id
-		} else if call != "" && (kind == codexOutput || kind == codexEnd) {
-			break
-		}
-	}
-	// On to its output: no other view or call first, and one picture.
-	from := off + n + 1
-	br := bufio.NewReaderSize(io.NewSectionReader(r, from, max(size-from, 0)), 64<<10)
-	for k := 0; k <= codexWindow; k++ {
-		line, err := longLine(br)
-		if err == io.EOF {
-			return api.Image{}, ErrNotYet
-		}
-		if err != nil {
-			return api.Image{}, err
-		}
-		switch kind, id, output := codexStep(line); kind {
-		case codexView, codexCall, codexEnd:
-			return api.Image{}, ErrNoImage
-		case codexOutput:
-			images := pictures(output, true)
-			if id != call || len(images) != 1 {
-				return api.Image{}, ErrNoImage
-			}
-			return images[0], nil
-		}
-	}
-	return api.Image{}, ErrNoImage
+// A Codex view_image's picture is not on its ImageView's line. In code mode the model does not
+// call view_image itself: a script it runs does (exec, a custom tool call), and the model sees
+// what the script hands on with image(), in the script's output (custom_tool_call_output:
+// input_image items, data URLs). Codex records an ImageView for each view_image as it ends, not
+// in the order the script hands the pictures on, and a script may go on in the background after
+// its call's output (yielded: "Script running with cell ID n", taken up by wait). So a view is
+// told only where nothing else could have made it: one call open, no other script running, no
+// other view since that call and no other call before its output, which shows one picture (the
+// user's rollouts, 2026-11-09). codexViews reads the rollout once, on as it grows, and keeps
+// what it found of each view.
+type codexViews struct {
+	end     int64             // read up to here
+	open    map[string]string // calls without their output: the cell each waits for ("" none)
+	running map[string]bool   // cells going on after their call's output
+	last    string            // the call made last
+	since   int               // views since it
+	pending map[string]int64  // a call's one view, by its line, till its output
+	shots   map[int64]codexShot
+	// lost: a long line of the turn was not told by its head: a call or an output may have gone
+	// by unseen, so no view of the turn is told.
+	lost bool
 }
 
-// codexWindow is the lines codexShown reads each way from an ImageView, at most.
-const codexWindow = 10000
+// codexShot is where a view's picture is: the output line (at, n bytes); n 0: nowhere.
+type codexShot struct {
+	at int64
+	n  int
+}
 
-// What a rollout line is to codexShown.
+// shot is where the picture of the view on the line at off is, read on in r up to size first.
+// ErrNoImage: it is not told; ErrNotYet: its script's output is not written yet.
+func (c *codexViews) shot(r io.ReaderAt, size, off int64) (codexShot, error) {
+	if err := c.read(r, size); err != nil {
+		return codexShot{}, err
+	}
+	if s, ok := c.shots[off]; ok {
+		if s.n > 0 {
+			return s, nil
+		}
+		return codexShot{}, ErrNoImage
+	}
+	for _, v := range c.pending {
+		if v == off {
+			return codexShot{}, ErrNotYet
+		}
+	}
+	return codexShot{}, ErrNoImage
+}
+
+// read reads the rollout on from c.end to size.
+func (c *codexViews) read(r io.ReaderAt, size int64) error {
+	if c.end >= size {
+		return nil
+	}
+	if c.shots == nil {
+		c.shots, c.open, c.running, c.pending = map[int64]codexShot{}, map[string]string{}, map[string]bool{}, map[string]int64{}
+	}
+	br := bufio.NewReaderSize(io.NewSectionReader(r, c.end, size-c.end), 64<<10)
+	for c.end < size {
+		head, n, err := lineHead(br)
+		if err != nil {
+			return err
+		}
+		c.step(codexStep(head, len(head) == n), c.end, n)
+		c.end += int64(n) + 1
+	}
+	return nil
+}
+
+// none: the views waiting for their outputs will not be told.
+func (c *codexViews) none() {
+	for call, v := range c.pending {
+		c.shots[v] = codexShot{}
+		delete(c.pending, call)
+	}
+}
+
+// step takes in line l, at (n bytes long).
+func (c *codexViews) step(l codexStepLine, at int64, n int) {
+	switch l.kind {
+	case codexLost:
+		c.none()
+		c.lost = true
+	case codexEnd:
+		c.none()
+		clear(c.open)
+		clear(c.running)
+		c.last, c.since, c.lost = "", 0, false
+	case codexCall:
+		c.none() // a call began before their outputs
+		c.open[l.call], c.last, c.since = l.cell, l.call, 0
+	case codexView:
+		c.since++
+		waits, open := c.open[c.last]
+		alone := !c.lost && len(c.open) == 1 && open && c.since == 1 &&
+			(waits == "" && len(c.running) == 0 || waits != "" && len(c.running) == 1 && c.running[waits])
+		if !alone {
+			c.none()
+			c.shots[at] = codexShot{}
+			return
+		}
+		c.pending[c.last] = at
+	case codexOutput:
+		if v, ok := c.pending[l.call]; ok {
+			delete(c.pending, l.call)
+			c.shots[v] = codexShot{at: at, n: n}
+		}
+		if waits := c.open[l.call]; waits != "" && l.yielded == "" {
+			delete(c.running, waits)
+		}
+		delete(c.open, l.call)
+		if l.yielded != "" {
+			c.running[l.yielded] = true
+		}
+	}
+}
+
+// codexShot reads the picture the view on line e showed the model: keep, with its bytes; else
+// only what a page shows of it. f.mu is held; r reads the record.
+func (f *File) codexShot(r io.ReaderAt, e entry, keep bool) (api.Image, error) {
+	if f.views == nil {
+		f.views = &codexViews{}
+	}
+	s, err := f.views.shot(r, f.size, e.off)
+	if err != nil {
+		return api.Image{}, err
+	}
+	line := make([]byte, s.n)
+	if _, err := r.ReadAt(line, s.at); err != nil {
+		return api.Image{}, err
+	}
+	images := pictures(outputOf(line), keep)
+	if len(images) != 1 {
+		return api.Image{}, ErrNoImage
+	}
+	return images[0], nil
+}
+
+// What a rollout line is to codexViews.
 const (
 	codexOther  = iota
 	codexView   // an ImageView completed
 	codexCall   // a tool call the model made (a script's, or another's)
 	codexOutput // a call's output, as the model was given it
 	codexEnd    // a turn began or ended: no call of the one before is open
+	codexLost   // a long line not told by its head
 )
 
-// codexStep is what line is to codexShown: its call's id for a call or an output, and an
-// output's content.
-func codexStep(line []byte) (kind int, call string, output json.RawMessage) {
+// codexStepLine is a rollout line as codexViews reads it.
+type codexStepLine struct {
+	kind int
+	call string // a call's or an output's call id
+	// cell: the script cell a wait call takes up; yielded: the cell an output says goes on.
+	cell, yielded string
+}
+
+// payloadType is how a rollout line begins its payload: its type is read off the line's start,
+// a line of no other kind passed over without reading it whole (a script's output may be tens of
+// MB of pictures).
+var payloadType = regexp.MustCompile(`"payload":\{"type":"([a-z_]+)"`)
+
+// codexKinds are the payload types codexViews reads.
+var codexKinds = map[string]bool{"item_completed": true, "task_started": true, "task_complete": true, "turn_aborted": true,
+	"custom_tool_call": true, "function_call": true, "custom_tool_call_output": true, "function_call_output": true}
+
+// codexStep is what line is to codexViews; whole false: line is only a long line's head (a
+// script's output with its pictures, a long script), read off its start.
+func codexStep(line []byte, whole bool) codexStepLine {
+	m := payloadType.FindSubmatch(line[:min(len(line), 1024)])
+	if m != nil && !codexKinds[string(m[1])] {
+		return codexStepLine{}
+	}
+	if !whole {
+		return codexHead(line, m)
+	}
 	var l struct {
 		Type    string `json:"type"`
 		Payload struct {
-			Type   string `json:"type"`
-			CallID string `json:"call_id"`
-			Item   struct {
-				Type string `json:"type"`
-			} `json:"item"`
-			Output json.RawMessage `json:"output"`
+			Type      string                `json:"type"`
+			Name      string                `json:"name"`
+			CallID    string                `json:"call_id"`
+			Arguments string                `json:"arguments"`
+			Item      struct{ Type string } `json:"item"`
+			Output    outputHead            `json:"output"`
 		} `json:"payload"`
 	}
 	if json.Unmarshal(line, &l) != nil {
-		return codexOther, "", nil
+		return codexStepLine{}
 	}
 	p := l.Payload
 	switch {
 	case l.Type == "event_msg" && p.Type == "item_completed" && p.Item.Type == "ImageView":
-		return codexView, "", nil
-	case l.Type == "response_item" && (p.Type == "custom_tool_call" || p.Type == "function_call"):
-		return codexCall, p.CallID, nil
-	case l.Type == "response_item" && (p.Type == "custom_tool_call_output" || p.Type == "function_call_output"):
-		return codexOutput, p.CallID, p.Output
+		return codexStepLine{kind: codexView}
 	case l.Type == "event_msg" && (p.Type == "task_started" || p.Type == "task_complete" || p.Type == "turn_aborted"):
-		return codexEnd, "", nil
+		return codexStepLine{kind: codexEnd}
+	case l.Type == "response_item" && (p.Type == "custom_tool_call" || p.Type == "function_call"):
+		c := codexStepLine{kind: codexCall, call: p.CallID}
+		if p.Name == "wait" {
+			var a struct {
+				Cell json.RawMessage `json:"cell_id"`
+			}
+			_ = json.Unmarshal([]byte(p.Arguments), &a)
+			c.cell = strings.Trim(string(a.Cell), `"`)
+		}
+		return c
+	case l.Type == "response_item" && (p.Type == "custom_tool_call_output" || p.Type == "function_call_output"):
+		return codexStepLine{kind: codexOutput, call: p.CallID, yielded: string(p.Output)}
 	}
-	return codexOther, "", nil
+	return codexStepLine{}
 }
 
-// maxLine is the longest line read whole outside the index (a script's output with its
-// pictures).
-const maxLine = 64 << 20
-
-// lineBefore is the line that ends just before pos (a line's start) and where it starts: its
-// start found first, then the line read once.
-func lineBefore(r io.ReaderAt, pos int64) (int64, []byte, error) {
-	end := pos - 1 // its newline
-	start := int64(0)
-	buf := make([]byte, 64<<10)
-	for at := end; at > 0; {
-		from := max(at-int64(len(buf)), 0)
-		chunk := buf[:at-from]
-		if _, err := r.ReadAt(chunk, from); err != nil {
-			return 0, nil, err
+// codexHead is what a long line is to codexViews, read off its head: its payload's type (m), its
+// call's id, and an output's start. An ImageView or a turn's event is never long. One whose kind
+// is not told, a call or an output it may be, is codexLost.
+func codexHead(head []byte, m [][]byte) codexStepLine {
+	if m == nil {
+		if t := topType.FindSubmatch(head); t != nil && string(t[1]) != "response_item" && string(t[1]) != "event_msg" {
+			return codexStepLine{} // compacted history, a turn's context, …
 		}
-		if i := bytes.LastIndexByte(chunk, '\n'); i >= 0 {
-			start = from + int64(i) + 1
-			break
-		}
-		if end-from > maxLine {
-			return 0, nil, ErrNoImage
-		}
-		at = from
+		return codexStepLine{kind: codexLost}
 	}
-	line := make([]byte, end-start)
-	if _, err := r.ReadAt(line, start); err != nil {
-		return 0, nil, err
+	kind := string(m[1])
+	if kind != "custom_tool_call" && kind != "function_call" && kind != "custom_tool_call_output" && kind != "function_call_output" {
+		return codexStepLine{}
 	}
-	return start, line, nil
+	id := callID.FindSubmatch(head[:min(len(head), 1024)])
+	if id == nil {
+		return codexStepLine{kind: codexLost}
+	}
+	if kind == "custom_tool_call" || kind == "function_call" {
+		c := codexStepLine{kind: codexCall, call: string(id[1])}
+		if bytes.Contains(head[:min(len(head), 1024)], []byte(`"name":"wait"`)) {
+			if a := waitCell.FindSubmatch(head); a != nil {
+				c.cell = string(a[1])
+			}
+		}
+		return c
+	}
+	c := codexStepLine{kind: codexOutput, call: string(id[1])}
+	if i := bytes.Index(head, []byte(`"output":`)); i >= 0 {
+		var o outputHead
+		_ = o.UnmarshalJSON(head[i+len(`"output":`):])
+		c.yielded = string(o)
+	}
+	return c
 }
 
-// longLine is br's next whole line, without its newline.
-func longLine(br *bufio.Reader) ([]byte, error) {
-	var line []byte
+// topType is a rollout line's own type, as Codex writes it first.
+var topType = regexp.MustCompile(`^\{"timestamp":"[^"]*",(?:"ordinal":\d+,)?"type":"([a-z_]+)"`)
+
+// callID is a call's id on a rollout line; waitCell the cell a wait call takes up, in its
+// arguments (a string of JSON).
+var (
+	callID   = regexp.MustCompile(`"call_id":"([^"\\]+)"`)
+	waitCell = regexp.MustCompile(`\\"cell_id\\":(?:\\")?([^"\\,}\s]+)`)
+)
+
+// outputHead is, of an output, the cell a script that goes on after it names ("Script running
+// with cell ID n", its text's start); "" for any other. The output is not copied.
+type outputHead string
+
+// yieldedOutput is the start of the output of a script that goes on after it, as JSON writes it.
+var yieldedOutput = regexp.MustCompile(`^(?:\[\{[^{}]*?"text":)?"Script running with cell ID ([^\s\\"]+)`)
+
+func (o *outputHead) UnmarshalJSON(b []byte) error {
+	*o = ""
+	if m := yieldedOutput.FindSubmatch(b[:min(len(b), 256)]); m != nil {
+		*o = outputHead(m[1])
+	}
+	return nil
+}
+
+// outputOf is the output on a rollout line, whole.
+func outputOf(line []byte) json.RawMessage {
+	var l struct {
+		Payload struct {
+			Output json.RawMessage `json:"output"`
+		} `json:"payload"`
+	}
+	_ = json.Unmarshal(line, &l)
+	return l.Payload.Output
+}
+
+// headLine is the most of a line codexViews reads: a longer one is told by its head.
+const headLine = 64 << 10
+
+// lineHead is br's next line, without its newline, up to headLine bytes of it, and its whole
+// length.
+func lineHead(br *bufio.Reader) ([]byte, int, error) {
+	var head []byte
+	n := 0
 	for {
 		chunk, err := br.ReadSlice('\n')
-		if err == bufio.ErrBufferFull {
-			if line = append(line, chunk...); len(line) > maxLine {
-				return nil, ErrNoImage
-			}
-			continue
+		if err != nil && err != bufio.ErrBufferFull {
+			return nil, 0, err
 		}
-		if err != nil {
-			return nil, err
+		n += len(chunk)
+		if err == nil {
+			chunk = chunk[:len(chunk)-1]
 		}
-		return append(line, chunk[:len(chunk)-1]...), nil
+		if room := headLine - len(head); room > 0 {
+			head = append(head, chunk[:min(len(chunk), room)]...)
+		}
+		if err == nil {
+			return head, n - 1, nil
+		}
 	}
 }

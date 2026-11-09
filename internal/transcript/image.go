@@ -201,9 +201,9 @@ func (f *File) Image(at string, n int) (img api.Image, data []byte, err error) {
 }
 
 // settle tells, for a page, the pictures blocks have on a later line of the record (Later:
-// Codex's view_image, codexShown): with their size where the picture is told, gone where it never
-// will be, as they are while it is not written yet. What was found is kept, by the result's at,
-// so the record is read for each once. f.mu is held; r reads the record.
+// Codex's view_image, codexViews): with their size where the picture is told, gone where it never
+// will be, as they are while it is not written yet. What was found is kept, by the result's at.
+// f.mu is held; r reads the record.
 func (f *File) settle(r io.ReaderAt, blocks []api.Block) {
 	for i := range blocks {
 		b := &blocks[i]
@@ -220,7 +220,7 @@ func (f *File) settle(r io.ReaderAt, blocks []api.Block) {
 			if !found {
 				continue
 			}
-			img, err := codexShown(r, f.size, e.off, int64(e.n))
+			img, err := f.codexShot(r, e, false)
 			switch {
 			case err == nil:
 				told = &api.Image{Mime: img.Mime, W: img.W, H: img.H, Later: true}
@@ -256,15 +256,14 @@ func (f *File) entry(at string) (entry, bool) {
 }
 
 // later is the picture an ImageView on line e showed the model, from the output after it
-// (Codex's: codexShown).
+// (Codex's: codexViews).
 func (f *File) later(e entry) (api.Image, error) {
 	f.mu.Lock()
+	defer f.mu.Unlock()
 	r, done, err := f.text()
-	size := f.size
-	f.mu.Unlock()
 	if err != nil {
 		return api.Image{}, err
 	}
 	defer done()
-	return codexShown(r, size, e.off, int64(e.n))
+	return f.codexShot(r, e, true)
 }

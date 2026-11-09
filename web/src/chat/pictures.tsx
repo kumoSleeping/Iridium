@@ -27,8 +27,9 @@ export function Pictures({ session, s }: { session: string; s: Step }) {
 
 /** What became of a picture asked for: coming, here, or not given: its machine not connected
  *  (409), or not to be had (404, 410). One not in the record yet (425: a script still running) is
- *  asked again, a little later each time (at most every 16 s), `TRIES` times, about five minutes. */
-type Fate = "coming" | "here" | "unreadable" | "offline";
+ *  asked again, a little later each time (at most every 16 s), `TRIES` times, about five minutes;
+ *  if it is then not to be had, it is none, as a page put together now would not list it. */
+type Fate = "coming" | "here" | "unreadable" | "offline" | "none";
 const TRIES = 22;
 
 /** The most a picture takes under its line, in CSS pixels. */
@@ -40,20 +41,26 @@ function One({ url, p, name }: { url: string; p: Picture; name: string }) {
   const [tries, setTries] = useState(0);
   const [later, setLater] = useState(0); // asked again in this many ms; 0: not
   const [asked, setAsked] = useState(0); // asked again by a press: another address, not the cache's
+  const [waited, setWaited] = useState(false); // it was not in the record yet once
   useEffect(() => {
     if (!later) return;
     const id = setTimeout(() => (setLater(0), setTries((n) => n + 1)), later);
     return () => clearTimeout(id);
   }, [later]);
-  // Not given: ask once more for why, as an <img> is not told.
+  // Not given: ask once more for why, as an <img> is not told. Given now: it came in between.
   const lost = () =>
     void fetch(url, { cache: "no-store" }).then(
-      (r) => (r.status === 425 && tries < TRIES ? setLater(1000 * 2 ** Math.min(tries, 4)) : setFate(r.status === 409 ? "offline" : "unreadable")),
+      (r) => {
+        if (r.ok && tries < TRIES) return setTries((n) => n + 1);
+        if (r.status === 425 && tries < TRIES) return setWaited(true), setLater(1000 * 2 ** Math.min(tries, 4));
+        setFate(r.status === 409 ? "offline" : waited && (r.status === 404 || r.status === 410) ? "none" : "unreadable");
+      },
       () => setFate("offline"),
     );
   // Its size on the page, where the record tells: at most MAX_W × MAX_H, and the column's width.
   const k = p.w && p.h ? Math.min(1, MAX_W / p.w, MAX_H / p.h) : 0;
   const sized = k ? { width: Math.round(p.w! * k), aspectRatio: `${p.w} / ${p.h}` } : undefined;
+  if (fate === "none") return null;
   if (fate === "unreadable" || fate === "offline") {
     const why = fate === "offline" ? t("status.offline") : t("msg.unreadable");
     return (
