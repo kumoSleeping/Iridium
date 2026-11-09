@@ -12,8 +12,16 @@ import { buzz, cn } from "../ui";
 import { pull } from "./goo";
 import { flow } from "./liquid";
 
-/** A level by its name in the page's language; one the page does not know (pi's own) as it is. */
-export const levelName = (level: string) => (`effort.${level}` in zh ? t(`effort.${level}` as Key) : level);
+/** The agents' own names of levels the page has no name for (dsh: a provider's Ultra), by id. */
+const AGENT_NAMES = new Map<string, string>();
+/** Keeps the agents' names of their levels, as the models list them. */
+export function noteLevelNames(models: { effortNames?: { [k: string]: string } }[]) {
+  for (const m of models) for (const [id, name] of Object.entries(m.effortNames ?? {})) AGENT_NAMES.set(id, name);
+}
+
+/** A level by its name in the page's language; one the page does not know as the agent names it
+ *  (dsh's providers name theirs), else as it is (pi's own). */
+export const levelName = (level: string) => (`effort.${level}` in zh ? t(`effort.${level}` as Key) : (AGENT_NAMES.get(level) ?? level));
 
 /** Where the slider rests for level among levels: its stop, known; with none set or one this model
  *  does not take, medium's stop (else the middle one), not known: the name says "default", the

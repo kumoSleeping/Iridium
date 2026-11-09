@@ -147,7 +147,10 @@ type Index struct {
 	fetched   map[string]time.Time // by session
 	// open: the sessions open in each machine's own dsh (DSH Desktop), as it last said; x.mu.
 	// noOpen: the machines that cannot say (remoteLoop's).
-	open   map[string]map[string]bool
+	open map[string]map[string]bool
+	// busy: of those, the ones whose agent there runs now; none for a machine whose plugin does
+	// not say (all open ones count as running then); x.mu.
+	busy   map[string]map[string]bool
 	noOpen map[string]bool
 	// filed: the sessions in one of DSH Desktop's workspaces at each machine, as its registry
 	// last read had them (none for a machine whose registry is not known); x.mu.
@@ -203,7 +206,7 @@ func New(o Options) *Index {
 		files: map[string]*transcript.File{}, changed: map[string]bool{},
 		dshKeys: map[string]string{},
 		remotes: map[string]*dshAt{}, scanLocks: map[string]*sync.Mutex{}, fetched: map[string]time.Time{},
-		open: map[string]map[string]bool{}, noOpen: map[string]bool{}, filed: map[string]map[string]bool{},
+		open: map[string]map[string]bool{}, busy: map[string]map[string]bool{}, noOpen: map[string]bool{}, filed: map[string]map[string]bool{},
 	}
 }
 
@@ -558,8 +561,10 @@ func (x *Index) row(e *entry) api.Session {
 			_, online := mc.Hello()
 			s.Offline = !online
 		}
-		if x.open[e.machine][e.id] {
-			s.Status, s.Live = api.StatusElsewhere, true // open in DSH Desktop there
+		// Running in DSH Desktop there; one Desktop only has loaded (its writer lock held till it
+		// quits) is not "elsewhere" once its agent is idle (the user, 2026-11-09): HeldElsewhere.
+		if x.open[e.machine][e.id] && (x.busy[e.machine] == nil || x.busy[e.machine][e.id]) {
+			s.Status, s.Live = api.StatusElsewhere, true
 		}
 		s.Loose = x.loose(e)
 	}

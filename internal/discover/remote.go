@@ -254,7 +254,7 @@ func (x *Index) remoteLoop() {
 			if mc := x.hub.Machine(id); mc != nil {
 				if _, ok := mc.Hello(); !ok {
 					delete(last, id) // looked at again as soon as it is back
-					x.setOpen(id, nil)
+					x.setOpen(id, nil, nil)
 					x.remoteMu.Lock()
 					delete(x.noOpen, id) // asked again: it may be another version then
 					x.remoteMu.Unlock()
@@ -296,7 +296,14 @@ func (x *Index) pollOpen(id string) {
 	for _, s := range r.Sessions {
 		open[s] = true
 	}
-	x.setOpen(id, open)
+	var busy map[string]bool
+	if r.Running != nil {
+		busy = map[string]bool{}
+		for _, s := range r.Running {
+			busy[s] = true
+		}
+	}
+	x.setOpen(id, open, busy)
 	x.setUnsynced(id, r.Unsynced, r.UnsyncedUngrouped)
 }
 
@@ -322,26 +329,40 @@ func (x *Index) setUnsynced(machine string, names []string, noLoose bool) {
 	x.saveRemote(machine, d)
 }
 
-// setOpen notes the sessions open in machine's dsh; its sessions whose state that changes are told.
-func (x *Index) setOpen(machine string, open map[string]bool) {
+// setOpen notes the sessions open in machine's dsh, and of those the running ones (busy; nil: not
+// said); its sessions whose state that changes are told.
+func (x *Index) setOpen(machine string, open, busy map[string]bool) {
 	x.mu.Lock()
 	defer x.mu.Unlock()
-	was := x.open[machine]
-	for id := range was {
-		if !open[id] {
-			x.changed[id] = true
-		}
-	}
-	for id := range open {
-		if !was[id] {
-			x.changed[id] = true
+	was, wasBusy := x.open[machine], x.busy[machine]
+	running := func(o, b map[string]bool, id string) bool { return o[id] && (b == nil || b[id]) }
+	for _, set := range []map[string]bool{was, open} {
+		for id := range set {
+			if was[id] != open[id] || running(was, wasBusy, id) != running(open, busy, id) {
+				x.changed[id] = true
+			}
 		}
 	}
 	if len(open) == 0 {
 		delete(x.open, machine)
-	} else {
-		x.open[machine] = open
+		delete(x.busy, machine)
+		return
 	}
+	x.open[machine] = open
+	if busy == nil {
+		delete(x.busy, machine)
+	} else {
+		x.busy[machine] = busy
+	}
+}
+
+// HeldElsewhere: session id at another machine is open in DSH Desktop there, running or not:
+// Desktop holds its writer lock, so its agent there takes a message, not a resume here.
+func (x *Index) HeldElsewhere(id string) bool {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	e := x.entries[id]
+	return e != nil && e.machine != "" && x.open[e.machine][id]
 }
 
 // dshHome is where dsh keeps its sessions at mc ("" if it has no dsh), as the agent finds its

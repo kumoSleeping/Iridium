@@ -7,7 +7,7 @@ import { Menu } from "@base-ui/react/menu";
 import { Popover } from "@base-ui/react/popover";
 import { Check, ChevronDown, ChevronRight, Workflow } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
+import { Fragment, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import type { SessionState as LiveSession } from "../api/types.gen";
 import { api } from "../api/client";
 import type { Agent, AgentQuota, Context, ContextCategory, Model, Preset } from "../api/types.gen";
@@ -16,7 +16,7 @@ import { t, useLang } from "../i18n";
 import { useContextState, useQuota } from "../store";
 import { errText, toast } from "../toast";
 import { ago, cn, PHONE, PopSurface, Tip, useLongPress, useMedia, useMinute } from "../ui";
-import { EffortSlider, levelName } from "./effort";
+import { EffortSlider, levelName, noteLevelNames } from "./effort";
 import { modeName } from "../modes";
 import { openUsage } from "../route";
 import { quotaKey, windowFor, windowName } from "../quota";
@@ -407,6 +407,7 @@ type ModelOf = Pick<LiveSession, "agent" | "model" | "pick" | "models" | "effort
  *  level: the one in use: set, if this model takes it, else the agent's own. */
 export function modelView(s: ModelOf, want?: string | null) {
   const models = s.models ?? MODELS[s.agent] ?? [];
+  noteLevelNames(models);
   const pick = want ?? s.pick ?? "";
   const now = want ?? s.model ?? "";
   const def = models.find((m) => m.value === "default");
@@ -440,6 +441,7 @@ export function ModelKey({ s, open, onOpenChange }: { s: LiveSession; open?: boo
   if (ultraWant !== null && ultra?.on === ultraWant) setUltraWant(null);
   const v = modelView(s, want);
   const { models, levels, level } = v;
+  const grouped = new Set(models.map((m) => m.group).filter(Boolean)).size > 1;
   if (!models.length && !v.name) return null;
   const label = v.name || t("composer.defaultModel");
   const ultraOn = ultraWant ?? ultra?.on ?? false;
@@ -521,14 +523,21 @@ export function ModelKey({ s, open, onOpenChange }: { s: LiveSession; open?: boo
             <Scrolled className="-mr-1 min-h-0 pr-1">
               <Menu.RadioGroup value={v.value} onValueChange={(x) => void pickModel(x as string)} className="g-stagger flex flex-col">
                 {models.map((m, i) => (
-                  // A pick closes the menu (Base UI keeps a radio item's open by default).
-                  <Menu.RadioItem key={m.value} value={m.value} closeOnClick style={{ "--i": i } as CSSProperties} className="flex min-h-8 cursor-default items-center gap-2.5 rounded-md pr-2 pl-2.5 text-base outline-none select-none data-highlighted:bg-fill pointer-coarse:min-h-11">
-                    {/* The name alone: no model's blurb under it (the user, 2026-11-06). */}
-                    <span className="min-w-0 flex-1 truncate py-1">{m.name}</span>
-                    <Menu.RadioItemIndicator className="text-ink">
-                      <Check size={14} />
-                    </Menu.RadioItemIndicator>
-                  </Menu.RadioItem>
+                  <Fragment key={m.value}>
+                    {/* Each provider's models under its name (dsh), when there is more than one
+                        (the user, 2026-11-09). */}
+                    {grouped && m.group && m.group !== models[i - 1]?.group && (
+                      <div className="truncate px-2.5 pt-2 pb-0.5 text-xs text-ink-3 select-none first:pt-1">{m.group}</div>
+                    )}
+                    {/* A pick closes the menu (Base UI keeps a radio item's open by default). */}
+                    <Menu.RadioItem value={m.value} closeOnClick style={{ "--i": i } as CSSProperties} className="flex min-h-8 cursor-default items-center gap-2.5 rounded-md pr-2 pl-2.5 text-base outline-none select-none data-highlighted:bg-fill pointer-coarse:min-h-11">
+                      {/* The name alone: no model's blurb under it (the user, 2026-11-06). */}
+                      <span className="min-w-0 flex-1 truncate py-1">{m.name}</span>
+                      <Menu.RadioItemIndicator className="text-ink">
+                        <Check size={14} />
+                      </Menu.RadioItemIndicator>
+                    </Menu.RadioItem>
+                  </Fragment>
                 ))}
               </Menu.RadioGroup>
             </Scrolled>

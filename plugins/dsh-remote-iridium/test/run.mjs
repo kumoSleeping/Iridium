@@ -1,7 +1,7 @@
 // Runs the executor for Iridium's tests (internal/remote, internal/discover): node run.mjs <url>
 // <token> <state>; IRIDIUM_TEST_AGENTS, if set, is the hello's agents (JSON); IRIDIUM_TEST_DSH, if
 // set, a directory standing in for the dsh it runs in (dsh.js): open.json the ids of the sessions
-// open in it, prompts.jsonl each message given to one of their agents, attached.jsonl each session
+// open in it, running.json those whose agent runs (none: all idle), prompts.jsonl each message given to one of their agents, attached.jsonl each session
 // filed under a workspace, presets.json its agent preset registry ({presets: [{id, name?,
 // description?, plugins, broken?}], default}; none: no registry), entries.json its loader's rows
 // ([{id, name, config?, disabled?}]; dsh.llm writes llm.patch.yml there), unsynced.json the workspaces
@@ -34,7 +34,8 @@ function fakeDsh(dir) {
         const open = JSON.parse(fs.readFileSync(path.join(dir, 'open.json'), 'utf8'))
         if (!open.includes(id)) return undefined
         const note = (how) => async (input) => fs.appendFileSync(path.join(dir, 'prompts.jsonl'), JSON.stringify({ session: id, how, text: input.content[0].text, source: input.source.kind }) + '\n')
-        return { followup: note('followup'), steer: note('steer') }
+        const running = fs.existsSync(path.join(dir, 'running.json')) && JSON.parse(fs.readFileSync(path.join(dir, 'running.json'), 'utf8')).includes(id)
+        return { followup: note('followup'), steer: note('steer'), status: running ? 'running' : 'idle' }
       },
     },
     workspaceRegistry: {

@@ -15,9 +15,14 @@ import { RemoteError } from './executor.js'
  */
 export function dshMethods(ctx, kept = () => ({ unsynced: [], ungrouped: true }), llm = {}) {
   return {
+    // running: those whose agent here works now (a turn, or one waiting on an approval or an
+    // answer). A session Desktop opened stays loaded, its writer lock held, till Desktop quits:
+    // the Iridium says "elsewhere" only while it runs, and gives the others' messages to it here.
     'dsh.open': async () => {
       const k = kept()
-      return { sessions: (ctx.get('sessions')?.list() ?? []).map((s) => s.id), unsynced: k.unsynced, ...(k.ungrouped === false ? { unsyncedUngrouped: true } : {}) }
+      const ids = (ctx.get('sessions')?.list() ?? []).map((s) => s.id)
+      const agents = ctx.get('agents')
+      return { sessions: ids, running: ids.filter((id) => agents?.get(id)?.status === 'running'), unsynced: k.unsynced, ...(k.ungrouped === false ? { unsyncedUngrouped: true } : {}) }
     },
     // A message for a session this dsh holds (open in DSH Desktop, its writer lock here): the
     // Iridium cannot resume it, so its agent here takes the message, as a next turn or (steer)
