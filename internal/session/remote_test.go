@@ -20,6 +20,8 @@ import (
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/config"
 	"github.com/kumoSleeping/iridium/internal/discover"
+	"github.com/kumoSleeping/iridium/internal/harness"
+	hdsh "github.com/kumoSleeping/iridium/internal/harness/dsh"
 	"github.com/kumoSleeping/iridium/internal/hold"
 	"github.com/kumoSleeping/iridium/internal/remote"
 	"github.com/kumoSleeping/iridium/internal/remote/executor"
@@ -274,18 +276,15 @@ func TestTakeRemoteDsh(t *testing.T) {
 	if _, _, ok := r.m.found(id2); ok {
 		t.Fatal("listed before a look")
 	}
-	r.m.presetMu.Lock()
-	before := r.m.catalogs["m1"].at
-	r.m.presetMu.Unlock()
-	if err := r.m.SyncDsh(bg, "m1"); err != nil {
+	ch := r.m.o.Channels[api.AgentDsh].(*hdsh.Channel)
+	before := ch.ProbedAt("m1")
+	if err := r.m.Sync(bg, api.AgentDsh, "m1"); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, ok := r.m.found(id2); !ok {
 		t.Error("synced: the new session not listed")
 	}
-	r.m.presetMu.Lock()
-	after := r.m.catalogs["m1"].at
-	r.m.presetMu.Unlock()
+	after := ch.ProbedAt("m1")
 	if !after.After(before) {
 		t.Errorf("synced: models not probed again (%v, %v)", before, after)
 	}
@@ -430,7 +429,7 @@ func TestFileInDesktop(t *testing.T) {
 		if _, err := h.findRemoteTranscript(hub.Machine("m1")); err != nil {
 			t.Fatal(err)
 		}
-		waitFor(t, "filed", func() bool { _, err := os.Stat(filepath.Join(h.dir, fileFiled)); return err == nil })
+		waitFor(t, "filed", func() bool { _, err := os.Stat(filepath.Join(h.dir, "remote-filed")); return err == nil })
 	}
 	b, _ := os.ReadFile(filepath.Join(desktop, "attached.jsonl"))
 	if got := strings.TrimSpace(string(b)); got != `{"session":"`+id+`","cwd":"`+work+`"}` {
@@ -486,7 +485,11 @@ func TestRemotePresets(t *testing.T) {
 
 	// DSH Desktop's models: a patch there, of the base's llm rows as its settings have them, which
 	// sessions there boot with; the executor serves it to no one.
-	llm := r.m.desktopLLM(bg, hub.Machine("m1"))
+	launch := agent.SpawnOptions{Remote: &agent.Remote{}}
+	if err := r.m.o.Channels[api.AgentDsh].(harness.Launcher).Prepare(bg, harness.Ref{ID: "x", As: "x", Agent: api.AgentDsh, Machine: "m1"}, &launch); err != nil {
+		t.Fatal(err)
+	}
+	llm := launch.Remote.Patches
 	if want := filepath.Join(desktop, "llm.patch.yml"); len(llm) != 1 || llm[0] != want {
 		t.Fatalf("dsh.llm: %q", llm)
 	}

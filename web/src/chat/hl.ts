@@ -2,9 +2,10 @@
 // in the language they are written to), and code in a few languages by name or file extension.
 // Pieces only, in order: joined they are the text again.
 
-export type Kind = "cmd" | "kw" | "str" | "cmt" | "var" | "num" | "flag" | "op";
+export type Kind = "cmd" | "kw" | "str" | "cmt" | "var" | "num" | "flag" | "op" | "plus" | "minus";
 export type Piece = [text: string, kind?: Kind];
-export type Lang = "sh" | "py" | "go" | "js" | "rs" | "c" | "json";
+/** out: what a command printed, any language or none: only what is plain in any (see output). */
+export type Lang = "sh" | "py" | "go" | "js" | "rs" | "c" | "json" | "out";
 
 const EXT: Record<string, Lang> = {
   sh: "sh", bash: "sh", zsh: "sh", shell: "sh", console: "sh",
@@ -23,7 +24,7 @@ export function langOf(name?: string): Lang | undefined {
   return EXT[n] ?? EXT[/\.([a-z0-9]+)$/.exec(n)?.[1] ?? ""];
 }
 
-const KW: Record<Exclude<Lang, "sh">, Set<string>> = {
+const KW: Record<Exclude<Lang, "sh" | "out">, Set<string>> = {
   py: new Set("and as assert async await break class continue def del elif else except False finally for from global if import in is lambda None nonlocal not or pass raise return True try while with yield self print len range open".split(" ")),
   go: new Set("break case chan const continue default defer else fallthrough for func go goto if import interface map package range return select struct switch type var nil true false err error string int int64 bool byte any make new append len".split(" ")),
   js: new Set("as async await break case catch class const continue default delete do else export extends false finally for from function if import in instanceof interface let new null of return static super switch this throw true try type typeof undefined var void while yield".split(" ")),
@@ -38,10 +39,68 @@ const SH_PRE = new Set(["sudo", "env", "exec", "nohup", "xargs", "time", "comman
 
 /** Code in a language, in pieces. */
 export function highlight(text: string, lang: Lang): Piece[] {
-  return lang === "sh" ? shell(text) : code(text, lang);
+  return lang === "sh" ? shell(text) : lang === "out" ? output(text) : code(text, lang);
 }
 
-function code(s: string, lang: Exclude<Lang, "sh">): Piece[] {
+const OUT_KW = /^(True|False|None|null|true|false|nil|undefined|NaN)$/;
+const OUT_OK = /^(ok|PASS|PASSED|passed|success|succeeded|done|Done)$/;
+const OUT_BAD = /^(FAIL|FAILED|failed|error|Error|ERROR|panic|fatal|Fatal|FATAL|Traceback|warning|Warning|WARN)$/;
+
+/** Output: a diff's lines red and green; else quoted text closed on its line, numbers, literals,
+ *  file:line places, and words of passing and failing. An apostrophe in a word opens nothing. */
+function output(s: string): Piece[] {
+  const out: Piece[] = [];
+  const diff = /^@@ .* @@/m.test(s) || /^diff --git /m.test(s);
+  let plain = "";
+  const push = (t: string, k?: Kind) => {
+    if (!k) return void (plain += t);
+    if (plain) out.push([plain]), (plain = "");
+    out.push([t, k]);
+  };
+  for (const line of s.split(/(?<=\n)/)) {
+    if (diff && /^[+-]/.test(line) && !/^(\+\+\+|---) /.test(line)) {
+      push(line, line[0] === "+" ? "plus" : "minus");
+      continue;
+    }
+    if (diff && /^@@/.test(line)) {
+      push(line, "var");
+      continue;
+    }
+    let i = 0;
+    while (i < line.length) {
+      const c = line[i]!;
+      const prev = line[i - 1] ?? " ";
+      const rest = line.slice(i);
+      if ((c === "'" || c === '"') && !/\w/.test(prev)) {
+        const e = quoted(line, i, c, false);
+        if (line[e - 1] === c && e - i > 1 && !/\w/.test(line[e] ?? " ")) {
+          push(line.slice(i, e), "str");
+          i = e;
+          continue;
+        }
+      }
+      const place = !/[\w./-]/.test(prev) && /^[\w./-]*\w\.[A-Za-z]{1,5}:\d+(:\d+)?/.exec(rest);
+      if (place) {
+        push(place[0], "cmd");
+        i += place[0].length;
+        continue;
+      }
+      if (/[\w$]/.test(c) && !/[\w$.]/.test(prev)) {
+        const w = /^[\w$]+(\.\d+)?/.exec(rest)![0];
+        const k = /^\d[\d.]*$/.test(w) || /^0x[0-9a-f]+$/i.test(w) ? "num" : OUT_KW.test(w) ? "kw" : OUT_OK.test(w) ? "plus" : OUT_BAD.test(w) ? "minus" : undefined;
+        push(w, k);
+        i += w.length;
+        continue;
+      }
+      push(c);
+      i++;
+    }
+  }
+  if (plain) out.push([plain]);
+  return out;
+}
+
+function code(s: string, lang: Exclude<Lang, "sh" | "out">): Piece[] {
   const out: Piece[] = [];
   const kw = KW[lang];
   const hash = lang === "py";
@@ -134,8 +193,7 @@ function shell(s: string): Piece[] {
         const m = re.exec(s.slice(i));
         const bodyEnd = m ? i + m.index : s.length;
         const body = s.slice(i, bodyEnd);
-        if (lang && lang !== "sh") body && out.push(...flush(), ...code(body, lang));
-        else if (lang === "sh") body && out.push(...flush(), ...shell(body));
+        if (lang) body && out.push(...flush(), ...highlight(body, lang));
         else push(body, "str");
         i = bodyEnd;
         if (m) {

@@ -5,29 +5,15 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/kumoSleeping/iridium/internal/agent"
-	"github.com/kumoSleeping/iridium/internal/agent/dsh"
 	"github.com/kumoSleeping/iridium/internal/agents"
 	"github.com/kumoSleeping/iridium/internal/api"
-	"github.com/kumoSleeping/iridium/internal/remote"
-	"github.com/kumoSleeping/iridium/internal/remote/wire"
+	"github.com/kumoSleeping/iridium/internal/harness"
 )
 
-// Agent presets (dsh's): those the dsh where a session runs registers, not a list of Iridium's own
-// (the user, 2026-11-08). At another machine, DSH Desktop's own registry through the dsh plugin
-// (dsh.presets: a bundle's and the profile's own too); an executor without it, and this machine,
-// the dsh package's files. Kept a short while.
-
-// presetsFor is how long a machine's presets are kept.
-const presetsFor = 30 * time.Second
-
-type presetList struct {
-	at   time.Time
-	list []agent.Preset
-	def  string
-}
+// Agent presets: those the agent registers where a session runs (agents.Info.Presets), as its
+// channel says them (harness.Presets), not a list of Iridium's own (the user, 2026-11-08).
 
 // Presets are the agent presets agent a has at machine ("": this one), and the default (one of
 // them); none for an agent without presets.
@@ -35,80 +21,11 @@ func (m *Manager) Presets(ctx context.Context, a api.Agent, machine string) ([]a
 	if info, ok := agents.Get(a); !ok || !info.Presets {
 		return nil, "", nil
 	}
-	m.presetMu.Lock()
-	c, ok := m.presets[machine]
-	m.presetMu.Unlock()
-	if ok && time.Since(c.at) < presetsFor {
-		return c.list, c.def, nil
-	}
-	list, def, err := m.readPresets(ctx, machine)
-	if err != nil {
-		return nil, "", err
-	}
-	if len(list) == 0 {
-		return nil, "", fmt.Errorf("dsh registers no agent presets")
-	}
-	if !slices.ContainsFunc(list, func(p agent.Preset) bool { return p.ID == def }) {
-		def = list[0].ID
-		if slices.ContainsFunc(list, func(p agent.Preset) bool { return p.ID == dsh.DefaultPreset }) {
-			def = dsh.DefaultPreset
-		}
-	}
-	m.presetMu.Lock()
-	if m.presets == nil {
-		m.presets = map[string]presetList{}
-	}
-	m.presets[machine] = presetList{at: time.Now(), list: list, def: def}
-	m.presetMu.Unlock()
-	return list, def, nil
-}
-
-func (m *Manager) readPresets(ctx context.Context, machine string) ([]agent.Preset, string, error) {
-	if machine == "" {
-		prog, err := agent.LookPath(m.program(api.AgentDsh), m.agentEnv())
-		if err != nil {
-			return nil, "", fmt.Errorf("%w: dsh", ErrNotInstalled)
-		}
-		pkg, err := dsh.FindPackage(prog)
-		if err != nil {
-			return nil, "", err
-		}
-		return pkg.Presets()
-	}
-	if m.o.Remote == nil {
-		return nil, "", fmt.Errorf("no machine %q", machine)
-	}
-	mc := m.o.Remote.Find(machine)
-	if mc == nil {
-		return nil, "", fmt.Errorf("no machine %q", machine)
-	}
-	hi, ok := mc.Hello()
+	p, ok := channelOf[harness.Presets](m, a)
 	if !ok {
-		return nil, "", fmt.Errorf("%w: %s", ErrOffline, machine)
+		return nil, "", fmt.Errorf("%w: no presets of %s here", ErrNotInstalled, a)
 	}
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	r, err := mc.DshPresets(ctx)
-	if err == nil {
-		var out []agent.Preset
-		for _, p := range r.Presets {
-			if p.Broken == "" && p.ID != "" {
-				out = append(out, agent.Preset{ID: p.ID, Name: p.Name, Description: p.Description, Plugins: p.Plugins})
-			}
-		}
-		return out, r.Default, nil
-	}
-	if !wire.IsCode(err, wire.CodeUnsupported) {
-		return nil, "", fmt.Errorf("dsh at %s: agent presets: %w", machine, err)
-	}
-	ai, ok := mc.Agent(string(api.AgentDsh))
-	if !ok || ai.Scope == "" {
-		return nil, "", fmt.Errorf("%w: dsh (not at %s)", ErrNotInstalled, machine)
-	}
-	pkg := dsh.Package{Scope: ai.Scope, Version: ai.Version, Read: func(parts ...string) ([]byte, error) {
-		return mc.ReadFile(ctx, remote.Join(hi.Sep, append([]string{ai.Scope}, parts...)...), 16<<20)
-	}}
-	return pkg.Presets()
+	return p.Presets(ctx, machine)
 }
 
 // checkPreset: preset ("" the default) is one agent a has at machine; the default with it.
@@ -142,9 +59,7 @@ func (m *Manager) SessionPresets(ctx context.Context, id string) (api.Presets, e
 	} else {
 		return api.Presets{}, err
 	}
-	if a == api.AgentDsh {
-		m.warmCatalog(machine) // the page opened it: its models too
-	}
+	m.warmModels(a, machine) // the page opened it: its models too
 	list, def, err := m.Presets(ctx, a, machine)
 	if err != nil {
 		return api.Presets{}, err
@@ -156,7 +71,30 @@ func (m *Manager) SessionPresets(ctx context.Context, id string) (api.Presets, e
 	return out, nil
 }
 
-// presetsHook is a remote launch's Presets: the machine's, as the page lists them.
-func (m *Manager) presetsHook(ctx context.Context, a api.Agent, machine string) func() ([]agent.Preset, string, error) {
-	return func() ([]agent.Preset, string, error) { return m.Presets(ctx, a, machine) }
+// warmModels has agent a's channel ask again in the background for the models it offers at
+// machine, if what it keeps is old (harness.Models): the page offers a model before the first
+// message (the user, 2026-11-09).
+func (m *Manager) warmModels(a api.Agent, machine string) {
+	if mo, ok := channelOf[harness.Models](m, a); ok {
+		mo.Warm(machine)
+	}
+}
+
+// Catalog is the models agent a offers at machine ("": this one), as its channel says them.
+func (m *Manager) Catalog(ctx context.Context, a api.Agent, machine string) (agent.Catalog, error) {
+	mo, ok := channelOf[harness.Models](m, a)
+	if !ok {
+		return agent.Catalog{}, fmt.Errorf("%w: %s says no models", ErrBadRequest, a)
+	}
+	return mo.Catalog(ctx, machine)
+}
+
+// Sync reads again at once what agent a at machine (an executor's ID; "" this one) offers: its
+// presets, models, workspaces and sessions (harness.Syncer).
+func (m *Manager) Sync(ctx context.Context, a api.Agent, machine string) error {
+	s, ok := channelOf[harness.Syncer](m, a)
+	if !ok {
+		return fmt.Errorf("%w: %s has nothing to sync", ErrBadRequest, a)
+	}
+	return s.Sync(ctx, machine)
 }

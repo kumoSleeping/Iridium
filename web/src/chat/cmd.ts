@@ -48,6 +48,9 @@ export type Cmd =
 /** The shell tools: Claude's Bash, pi's bash, Codex's exec_command and shell. */
 const SHELLS = new Set(["bash", "exec_command", "shell", "local_shell"]);
 
+/** Whether a tool is a shell: its calls show the command and no name. */
+export const isShell = (name?: string) => SHELLS.has((name ?? "").toLowerCase());
+
 /** A call's sort, if it runs a shell command. */
 export function cmdOfCall(t: { name?: string; input?: string }): Cmd | undefined {
   const i = shellInput(t);

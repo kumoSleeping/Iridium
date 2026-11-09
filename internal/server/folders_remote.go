@@ -174,7 +174,7 @@ func (s *Server) dshSync(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
 	defer cancel()
-	if err := s.m.SyncDsh(ctx, mc.ID()); err != nil {
+	if err := s.m.Sync(ctx, api.AgentDsh, mc.ID()); err != nil {
 		s.remoteError(w, err)
 		return
 	}
