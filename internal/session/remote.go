@@ -157,6 +157,7 @@ func (h *Hosted) remoteSpawn(mc *remote.Machine, o *agent.SpawnOptions) error {
 	}
 	if h.meta.Agent == api.AgentDsh {
 		o.Remote.Patches = h.m.desktopLLM(ctx, mc)
+		o.Remote.Bundles = h.m.desktopBundles(ctx, mc)
 	}
 	return nil
 }

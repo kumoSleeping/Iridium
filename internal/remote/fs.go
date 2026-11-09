@@ -180,6 +180,14 @@ func (m *Machine) DshLLM(ctx context.Context) (string, error) {
 	return r.Patch, err
 }
 
+// DshBundles are the bundles of DSH Desktop's profile besides dsh's own and the dsh plugin, with
+// their patches (through the dsh plugin); an error of wire.CodeUnsupported from one that cannot say.
+func (m *Machine) DshBundles(ctx context.Context) ([]wire.DshBundle, error) {
+	var r wire.DshBundlesReply
+	err := m.Call(ctx, "dsh.bundles", struct{}{}, &r)
+	return r.Bundles, err
+}
+
 // DshAttach files session under the workspace of its folder cwd in the dsh the executor runs in
 // (DSH Desktop's sidebar), made if there is none.
 func (m *Machine) DshAttach(ctx context.Context, session, cwd string) error {

@@ -321,6 +321,20 @@ type DshLLMReply struct {
 	Patch string `json:"patch"`
 }
 
+// DshBundlesReply answers dsh.bundles: the bundles of the profile the dsh there runs (DSH
+// Desktop's web profile) that are neither dsh's own nor the dsh plugin, by the profile's order,
+// each with its patch files' text as the package has them (dsh.bundle.patch, in order).
+type DshBundlesReply struct {
+	Bundles []DshBundle `json:"bundles"`
+}
+
+// DshBundle is one bundle: its package's name and version, and its patch files.
+type DshBundle struct {
+	Name    string   `json:"name"`
+	Version string   `json:"version,omitempty"`
+	Patches []string `json:"patches"`
+}
+
 // DshAttachParams is dsh.attach: session filed under the workspace of its folder cwd there.
 type DshAttachParams struct {
 	Session string `json:"session"`

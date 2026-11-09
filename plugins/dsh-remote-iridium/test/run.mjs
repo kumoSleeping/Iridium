@@ -15,6 +15,7 @@
 //   attached.jsonl  each session filed under a workspace (dsh.attach);
 //   presets.json    its agent preset registry ({presets: [{id, name?, description?, plugins,
 //                   broken?}], default}; none: no registry);
+//   profile/        the directory of the profile it runs (package.json, node_modules: dsh.bundles);
 //   entries.json    its loader's rows ([{id, name, config?, disabled?}]; dsh.llm writes
 //                   llm.patch.yml there);
 //   omd.json        OMD's Ultra by session ({eligible, mode, submode, teamAvailable, selected,
@@ -161,6 +162,7 @@ function fakeDsh(dir) {
         return read(dir, 'presets.json').default
       },
     }
+  if (fs.existsSync(file('profile'))) services.profileContext = { dir: file('profile') }
   if (fs.existsSync(file('entries.json')))
     services.loader = {
       *entries() {

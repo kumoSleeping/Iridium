@@ -197,6 +197,27 @@ func (m *Manager) desktopLLM(ctx context.Context, mc *remote.Machine) []string {
 	return []string{p}
 }
 
+// desktopBundles reads the bundles of DSH Desktop's profile at mc (dsh.bundles), when a preset
+// asks: none from a dsh plugin too old to say, or failing.
+func (m *Manager) desktopBundles(ctx context.Context, mc *remote.Machine) func() ([]agent.Bundle, error) {
+	return func() ([]agent.Bundle, error) {
+		ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		defer cancel()
+		bs, err := mc.DshBundles(ctx)
+		if err != nil {
+			if wire.IsCode(err, wire.CodeUnsupported) {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("DSH Desktop's bundles at %s: %w", mc.ID(), err)
+		}
+		out := make([]agent.Bundle, len(bs))
+		for i, b := range bs {
+			out[i] = agent.Bundle{Name: b.Name, Patches: b.Patches}
+		}
+		return out, nil
+	}
+}
+
 // cachedCatalog is dsh's models at machine as last probed, stale or not; false if never had.
 func (m *Manager) cachedCatalog(machine string) (agent.Catalog, bool) {
 	m.presetMu.Lock()

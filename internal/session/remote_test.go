@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"syscall"
 	"testing"
@@ -473,6 +474,18 @@ func TestRemotePresets(t *testing.T) {
 		{"id": "llm-mine", "name": "@deepseek-ai/dsh-llm-mine", "config": {}},
 		{"id": "tool-web", "name": "@deepseek-ai/dsh-tool-web"}]`
 	os.WriteFile(filepath.Join(desktop, "entries.json"), []byte(entries), 0o600)
+	// Its profile's bundles: dsh's own, a third party's (OMD), the plugin itself, one not installed.
+	profile := filepath.Join(desktop, "profile")
+	for f, data := range map[string]string{
+		"package.json":                                    `{"dsh": {"profile": {"bundles": ["@deepseek-ai/dsh-base", "oh-my-dsh", "dsh-remote-iridium", "gone"]}}}`,
+		"node_modules/oh-my-dsh/package.json":             `{"name": "oh-my-dsh", "version": "1.3.9", "dsh": {"bundle": {"patch": ["./cordis.patch.yml", "./presets/cordis.patch.yml"]}}}`,
+		"node_modules/oh-my-dsh/cordis.patch.yml":         "- insert:\n    - id: oh-my-dsh\n      name: oh-my-dsh\n",
+		"node_modules/oh-my-dsh/presets/cordis.patch.yml": "[]\n",
+		"node_modules/dsh-remote-iridium/package.json":    `{"name": "dsh-remote-iridium", "dsh": {"bundle": {"patch": "./cordis.patch.yml"}}}`,
+	} {
+		os.MkdirAll(filepath.Dir(filepath.Join(profile, f)), 0o700)
+		os.WriteFile(filepath.Join(profile, f), []byte(data), 0o600)
+	}
 	scope, _ := filepath.Abs("../agent/dsh/testdata/pkg/node_modules/@deepseek-ai")
 	agents, _ := json.Marshal([]wire.AgentInfo{{Agent: "dsh", Argv: []string{"dsh"}, Version: "0.2.2-rc.1", Scope: scope, Home: filepath.Join(there, ".dsh")}})
 	cmd := exec.Command("node", "../../plugins/dsh-remote-iridium/test/run.mjs", "ws"+strings.TrimPrefix(srv.URL, "http"), "tok", filepath.Join(there, "executor"))
@@ -504,6 +517,12 @@ func TestRemotePresets(t *testing.T) {
 	}
 	if _, err := hub.Machine("m1").ReadFile(bg, llm[0], 1<<20); err == nil {
 		t.Error("the llm patch was served")
+	}
+
+	// Its profile's bundles of other packages, for a preset of theirs.
+	bundles, err := r.m.desktopBundles(bg, hub.Machine("m1"))()
+	if want := []agent.Bundle{{Name: "oh-my-dsh", Patches: []string{"- insert:\n    - id: oh-my-dsh\n      name: oh-my-dsh\n", "[]\n"}}}; err != nil || !reflect.DeepEqual(bundles, want) {
+		t.Errorf("dsh.bundles: %+v %v", bundles, err)
 	}
 
 	l, def, err := r.m.Presets(bg, api.AgentDsh, "m1")
