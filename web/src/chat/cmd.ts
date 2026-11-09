@@ -16,6 +16,11 @@ export type Cmd =
   | "ir-access"
   | "ir-profile"
   | "ir-rename"
+  | "ir-ws"
+  | "ir-machines"
+  | "ir-secret"
+  | "ir-usage"
+  | "ir-bot"
   | "git"
   | "git-commit"
   | "git-push"
@@ -196,6 +201,15 @@ const IR: Record<string, Cmd> = {
   revoke: "ir-access",
   profile: "ir-profile",
   rename: "ir-rename",
+  ws: "ir-ws",
+  machines: "ir-machines",
+  sh: "remote",
+  join: "remote",
+  pair: "ir-access",
+  secret: "ir-secret",
+  run: "ir-secret",
+  usage: "ir-usage",
+  bot: "ir-bot",
   public: "net",
   update: "install",
 };
