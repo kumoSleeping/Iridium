@@ -106,6 +106,12 @@ func (r *remoteRig) setOpen(ids ...string) {
 	os.WriteFile(filepath.Join(r.dsh, "open.json"), b, 0o600)
 }
 
+// setRunning says which of those have their agent at work there.
+func (r *remoteRig) setRunning(ids ...string) {
+	b, _ := json.Marshal(append([]string{}, ids...))
+	os.WriteFile(filepath.Join(r.dsh, "running.json"), b, 0o600)
+}
+
 func (r *remoteRig) index() *Index {
 	x := New(Options{Store: r.st, State: r.state, Logf: r.t.Logf, RemoteScan: time.Hour})
 	x.SetRemote(r.hub)
@@ -291,6 +297,7 @@ func testRemoteDshOpen(t *testing.T, kind string) {
 	r.scan()
 	if kind == "node" {
 		r.setOpen("s1", "unmade")
+		r.setRunning("s1")
 	}
 	r.x.pollOpen("m1")
 	s := r.sessions()["s1"]
@@ -305,9 +312,16 @@ func testRemoteDshOpen(t *testing.T, kind string) {
 	if s.Status != api.StatusElsewhere || !s.Live || err != nil {
 		t.Fatalf("open in DSH Desktop: %+v, free %v", s, err)
 	}
+	// Still loaded there, its agent idle (Desktop keeps what it opened till it quits): not shown as
+	// elsewhere (the user, 2026-11-09), but held: a message goes to its agent there.
+	r.setRunning()
+	r.x.pollOpen("m1")
+	if s := r.sessions()["s1"]; s.Status != api.StatusIdle || s.Live || !r.x.HeldElsewhere("s1") {
+		t.Errorf("loaded, idle there: %+v, held %v", s, r.x.HeldElsewhere("s1"))
+	}
 	r.setOpen()
 	r.x.pollOpen("m1")
-	if s := r.sessions()["s1"]; s.Status != api.StatusIdle || s.Live || r.x.Free("s1") != nil {
+	if s := r.sessions()["s1"]; s.Status != api.StatusIdle || s.Live || r.x.Free("s1") != nil || r.x.HeldElsewhere("s1") {
 		t.Errorf("closed there: %+v", s)
 	}
 }

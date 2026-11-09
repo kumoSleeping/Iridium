@@ -452,15 +452,15 @@ func (h *Hosted) efforts() []string {
 	h.mu.Lock()
 	models, now := h.models, cmp.Or(h.model, h.meta.Model)
 	h.mu.Unlock()
-	if cat, ok := h.m.cachedCatalog(h.meta.Machine); ok { // its machine's, as the page lists them
+	if cat, ok := h.m.cachedCatalog(h.meta.Machine); ok && h.meta.Agent == api.AgentDsh { // its machine's, as the page lists them
 		models, now = cat.Models, cmp.Or(now, cat.Default)
 	}
 	for _, m := range models {
 		if m.Value == now {
-			if m.NoEffort {
+			if m.NoEffort && len(m.Efforts) == 0 {
 				return []string{}
 			}
-			return m.Efforts
+			return m.Efforts // pi's that does not reason: off alone
 		}
 	}
 	return nil

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -292,7 +293,7 @@ func (m *Manager) catalogState(s *api.SessionState, machine string) {
 	}
 	s.Models = nil
 	for _, x := range cat.Models {
-		s.Models = append(s.Models, api.Model{Value: x.Value, Name: x.Name, Description: x.Description, Efforts: slices.Clone(x.Efforts), NoEffort: x.NoEffort})
+		s.Models = append(s.Models, api.Model{Value: x.Value, Name: x.Name, Description: x.Description, Efforts: slices.Clone(x.Efforts), NoEffort: x.NoEffort, EffortNames: maps.Clone(x.EffortNames), Group: x.Group})
 	}
 	if s.Model == "" {
 		s.Model = cat.Default

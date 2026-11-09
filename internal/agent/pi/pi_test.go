@@ -459,3 +459,20 @@ func TestSpawnRemote(t *testing.T) {
 		t.Errorf("cwd %q", spec.Cwd)
 	}
 }
+
+// A model's thinking levels as pi has them: off alone for one that does not reason; xhigh and max
+// only where its map names them, none it maps to null.
+func TestModelLevels(t *testing.T) {
+	var ms []piModel
+	if err := json.Unmarshal([]byte(`[
+		{"id":"a","provider":"p","reasoning":false},
+		{"id":"b","provider":"p","reasoning":true},
+		{"id":"c","provider":"q","reasoning":true,"thinkingLevelMap":{"minimal":null,"xhigh":"xhigh","max":"max"}}]`), &ms); err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range [][]string{{"off"}, {"off", "minimal", "low", "medium", "high"}, {"off", "low", "medium", "high", "xhigh", "max"}} {
+		if got := ms[i].levels(); !slices.Equal(got, want) {
+			t.Errorf("%s: %v, want %v", ms[i].ID, got, want)
+		}
+	}
+}

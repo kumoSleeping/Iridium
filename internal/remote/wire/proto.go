@@ -199,7 +199,10 @@ const MaxRead = 4 << 20
 // workspaces the plugin's settings keep from the Iridium (their folders or names);
 // UnsyncedUngrouped, the sessions in none of them (dsh's 未分组) kept too.
 type DshOpenReply struct {
-	Sessions          []string `json:"sessions"`
+	Sessions []string `json:"sessions"`
+	// Running: those of Sessions whose agent there works now (a turn, or one waiting on an
+	// approval or an answer); nil from a plugin that does not say (all of them, then).
+	Running           []string `json:"running,omitempty"`
 	Unsynced          []string `json:"unsynced,omitempty"`
 	UnsyncedUngrouped bool     `json:"unsyncedUngrouped,omitempty"`
 }

@@ -366,7 +366,11 @@ func (m *Manager) toDesktop(ctx context.Context, id, text, from string, steer, i
 		as = h.discoveredAs()
 	}
 	s, _, ok := f.Found(as)
-	if !ok || s.Agent != api.AgentDsh || s.Machine == "" || s.Status != api.StatusElsewhere {
+	held := s.Status == api.StatusElsewhere
+	if h, can := f.(interface{ HeldElsewhere(string) bool }); can {
+		held = h.HeldElsewhere(as) // loaded there, idle or not: Desktop holds its writer lock
+	}
+	if !ok || s.Agent != api.AgentDsh || s.Machine == "" || !held {
 		return false, nil
 	}
 	mc := m.o.Remote.Find(s.Machine)

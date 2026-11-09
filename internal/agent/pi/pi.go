@@ -38,8 +38,39 @@ var Modes = []string{"auto", "ask"}
 
 const DefaultMode = "auto"
 
-// Levels are pi's thinking levels (docs/cli.md --thinking).
+// Levels are pi's thinking levels (docs/cli.md --thinking), in its order.
 var Levels = []string{"off", "minimal", "low", "medium", "high", "xhigh", "max"}
+
+// piModel is a model as get_available_models gives it: what its levels are read from too.
+type piModel struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Provider string `json:"provider"`
+	// Reasoning: it thinks at all. ThinkingLevelMap: a level null is one it does not take;
+	// xhigh and max only those it names.
+	Reasoning        bool                       `json:"reasoning"`
+	ThinkingLevelMap map[string]json.RawMessage `json:"thinkingLevelMap"`
+}
+
+// levels are the thinking levels m takes, as pi has them (pi-ai's getSupportedThinkingLevels): only
+// off for one that does not reason; else all but those mapped to null, xhigh and max only mapped.
+func (m piModel) levels() []string {
+	if !m.Reasoning {
+		return []string{"off"}
+	}
+	var out []string
+	for _, l := range Levels {
+		v, named := m.ThinkingLevelMap[l]
+		if named && string(v) == "null" {
+			continue
+		}
+		if (l == "xhigh" || l == "max") && !named {
+			continue
+		}
+		out = append(out, l)
+	}
+	return out
+}
 
 var (
 	ErrNotAttached = errors.New("pi: no agent process attached")
@@ -249,15 +280,13 @@ func (d *Driver) hello(proc int, spawned bool) {
 	h := agent.Hello{Mode: d.modeNow()}
 	if r, err := d.rpc(ctx, "get_available_models", nil); err == nil {
 		var body struct {
-			Models []struct {
-				ID       string `json:"id"`
-				Name     string `json:"name"`
-				Provider string `json:"provider"`
-			} `json:"models"`
+			Models []piModel `json:"models"`
 		}
 		_ = json.Unmarshal(r, &body)
+		// Each model under its provider, with the levels it takes (the user, 2026-11-09).
 		for _, m := range body.Models {
-			h.Models = append(h.Models, agent.Model{Value: m.Provider + "/" + m.ID, Name: m.Name, Description: m.Provider})
+			levels := m.levels()
+			h.Models = append(h.Models, agent.Model{Value: m.Provider + "/" + m.ID, Name: m.Name, Group: m.Provider, Efforts: levels, NoEffort: len(levels) < 2})
 		}
 	}
 	d.mu.Lock()
