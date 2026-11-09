@@ -37,11 +37,12 @@ func (m *Manager) SetFeature(ctx context.Context, id, fid string, req api.SetFea
 	return fmt.Errorf("%w: no feature %q", ErrBadRequest, fid)
 }
 
-// channelSet sets ch on session id where it is held, through its channel (harness.Setter), when
-// it does not run here. done false: not such a session; the usual way goes.
+// channelSet sets ch on session id through its channel (harness.Setter), which says whether it is
+// its to set (one held elsewhere; an effort its own process has the say over while it runs here).
+// done false: not such a session; the usual way goes.
 func (m *Manager) channelSet(ctx context.Context, id string, ch harness.Change) (bool, error) {
 	r, ok := m.ref(id)
-	if !ok || r.Live {
+	if !ok {
 		return false, nil
 	}
 	s, ok := channelOf[harness.Setter](m, r.Agent)

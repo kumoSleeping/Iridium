@@ -43,9 +43,33 @@ export async function answer(features, method, p) {
   throw new RemoteError('not_found', `no method ${method}`)
 }
 
+/**
+ * A session controller for a process without dsh's (the web surface's): its model selection only,
+ * as Desktop's picker makes one (a plugin there switches a session's model through it, as OMD's
+ * Ultra does), not saved as the default model.
+ */
+export function sessionController(ctx) {
+  const resolveAgent = async (sessionId) => {
+    const agent = ctx.get('agents')?.get(sessionId)
+    return agent ? { agent } : { error: new RemoteError('not_found', `session ${sessionId} is not loaded here`) }
+  }
+  return {
+    resolveAgent,
+    async selectModel({ sessionId, provider, model, reasoningEffort }) {
+      const r = await resolveAgent(sessionId)
+      if (r.error) throw r.error
+      const selected = { provider, model, ...(reasoningEffort === undefined ? {} : { reasoningEffort }) }
+      await ctx.get('llm')?.resolveCallConfig?.(selected)
+      r.agent.model.select(selected)
+      return { selected: { ...selected } }
+    },
+  }
+}
+
 export function apply(ctx, config) {
   const features = createFeatures()
   ctx.provide('iridiumFeatures', features)
+  if (!ctx.get('sessionController')) ctx.provide('sessionController', sessionController(ctx))
   ctx.plugin(OmdAdapter)
   const sessions = new Set()
   let sock = null

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/config"
+	"github.com/kumoSleeping/iridium/internal/harness"
 	"github.com/kumoSleeping/iridium/internal/remote"
 	"github.com/kumoSleeping/iridium/internal/remote/wire"
 )
@@ -338,5 +340,48 @@ func TestHeldOlderPlugin(t *testing.T) {
 	}
 	if len(x.asked("dsh.prompt")) != 1 || len(x.asked("held.get")) != 0 || len(x.asked("held.send")) != 0 {
 		t.Errorf("asked: %v", x.calls)
+	}
+}
+
+// effortOwner is a channel whose session's own process has the say over an effort ("max": a
+// feature there owns it), though the session runs here.
+type effortOwner struct {
+	mu   sync.Mutex
+	asks []harness.Ref
+}
+
+func (e *effortOwner) Agent() api.Agent  { return api.AgentClaude }
+func (e *effortOwner) Bind(harness.Host) {}
+func (e *effortOwner) Set(_ context.Context, r harness.Ref, ch harness.Change) (bool, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.asks = append(e.asks, r)
+	return ch.Effort == "max", nil
+}
+
+// A session that runs here: its channel is asked first, and an effort it takes is not the driver's.
+func TestChannelSetLive(t *testing.T) {
+	owner := &effortOwner{}
+	r := newRig(t, func(_ *config.Config, o *Options) { o.Channels = harness.Set{api.AgentClaude: owner} })
+	id, err := r.m.Create(bg, api.NewSession{Cwd: r.cwd, Text: "hi"}, "网页")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.waitState(id, "the reply", func(s *api.SessionState) bool { return said(s, "ok: hi") })
+	if err := r.m.SetEffort(bg, id, "max"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.m.SetEffort(bg, id, "high"); err != nil {
+		t.Fatal(err)
+	}
+	owner.mu.Lock()
+	asks := slices.Clone(owner.asks)
+	owner.mu.Unlock()
+	if len(asks) != 2 || !asks[0].Live || asks[0].ID != id {
+		t.Fatalf("asked: %+v", asks)
+	}
+	in := r.inLog(id)
+	if strings.Contains(in, `"effortLevel":"max"`) || !strings.Contains(in, `"effortLevel":"high"`) {
+		t.Errorf("in.log:\n%s", in)
 	}
 }
