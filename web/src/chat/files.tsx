@@ -23,7 +23,7 @@ export function Files({ session, files }: { session: string; files: FileRef[] })
   );
 }
 
-const CODE = /\.(tsx?|jsx?|go|rs|py|css|json|ya?ml|toml|sh|md)$/i;
+export const CODE = /\.(tsx?|jsx?|go|rs|py|css|json|ya?ml|toml|sh|md)$/i;
 
 function One({ session, f }: { session: string; f: FileRef }) {
   const url = api.fileURL(session, f.ref, false, f.mtime);
@@ -51,14 +51,15 @@ function Shown({ src, under, alt, className, style }: { src: string; under?: str
   );
 }
 
-/** A picture: its thumbnail, opening the original over the page. under: what shows till it has come.
+/** A picture: its thumbnail, opening the original over the page; small, in a row of files, as high
+ *  as the composer's and its own shape, as it was there. under: what shows till it has come.
  *  w, h: its size as the server read it: its place is kept as it loads, the conversation does not
  *  move (a chat opened the first time, its pictures not yet in the cache). */
 export function Picture({ src, full, name, small, under, w, h }: { src: string; full: string; name: string; small?: boolean; under?: string; w?: number; h?: number }) {
   return (
     <Zoom full={full} name={name}>
-      <button type="button" aria-label={`${name} · ${t("msg.openImage")}`} className={cn("g-press relative block overflow-hidden rounded-lg bg-fill shadow-[0_0_0_0.5px_var(--edge)]", small ? "size-16" : "w-full max-w-[340px]")}>
-        <Shown src={src} under={under} alt={name} style={!small && w && h ? { aspectRatio: `${w} / ${h}` } : undefined} className={cn("block w-full object-cover", small ? "h-full" : "max-h-[420px]")} />
+      <button type="button" aria-label={`${name} · ${t("msg.openImage")}`} className={cn("g-press relative block overflow-hidden rounded-lg bg-fill shadow-[0_0_0_0.5px_var(--edge)]", small ? "h-14" : "w-full max-w-[340px]")}>
+        <Shown src={src} under={under} alt={name} style={w && h ? { aspectRatio: `${w} / ${h}` } : undefined} className={cn("block object-cover", small ? "h-full w-auto max-w-40 min-w-10" : "max-h-[420px] w-full")} />
       </button>
     </Zoom>
   );
@@ -87,6 +88,31 @@ export function Zoom({ full, name, children }: { full: string; name: string; chi
         </Dialog.Popup>
       </Dialog.Portal>
     </Dialog.Root>
+  );
+}
+
+/** A file sent with your words, as its card was in the composer (as high as a session's beside it,
+ *  mention.tsx MentionCard): its icon, its name, its size; pressed, it downloads. No href: not yet
+ *  landed. */
+export function SentFile({ name, bytes, href }: { name: string; bytes?: number; href?: string }) {
+  const Icon = CODE.test(name) ? FileCode2 : FileText;
+  const body = (
+    <>
+      <Icon size={16} className="shrink-0 text-ink-3" />
+      <span className="min-w-0">
+        <span className="block truncate text-sm text-ink">{name}</span>
+        {bytes !== undefined && <span className="block truncate text-xs text-ink-3 tabular-nums">{size(bytes)}</span>}
+      </span>
+    </>
+  );
+  const box = "flex h-11 w-44 max-w-full items-center gap-2 rounded-lg bg-paper/70 px-2.5 text-left shadow-[0_0_0_0.5px_var(--edge)]";
+  if (!href) return <span className={box}>{body}</span>;
+  return (
+    <Tip label={t("msg.download")}>
+      <a href={href} download={name} className={cn("g-press hover:bg-paper", box)}>
+        {body}
+      </a>
+    </Tip>
   );
 }
 

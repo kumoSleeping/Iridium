@@ -14,17 +14,18 @@ import type { Sent } from "../chats";
 import { t } from "../i18n";
 import { Avatar, Badge, cn, IconKey, Logo, tilde, Tip } from "../ui";
 import { useHome } from "../data";
+import { useList } from "../store";
 import { LocalMark } from "../me";
 import { go } from "../route";
-import { Files, Picture, previews, size } from "./files";
+import { Files, Picture, previews, SentFile } from "./files";
 import { Pictures } from "./pictures";
 import { cmdOfCall, isShell, type Cmd } from "./cmd";
 import { argOf, diffSum, foldLine, foldSaid, kindOf, runCmds, type Diff, type Kind, type Shown, type Step, type Tool } from "./fold";
 import { Code } from "./hl";
 import { Markdown } from "./markdown";
 import { partialInput } from "./partial";
-import { MentionCard, Mentioned } from "./mention";
-import { leadingMentions, type Source, withoutFiles, withoutNameLines } from "./refs";
+import { Ids, IdsNamed, MentionCard, Mentioned } from "./mention";
+import { leadingMentions, sessionIds, type Source, withoutFiles, withoutNameLines } from "./refs";
 
 type You = Extract<Source, { kind: "you" }>;
 type From = Extract<Source, { kind: "letter" }>;
@@ -159,17 +160,12 @@ export const YouBubble = forwardRef<HTMLDivElement, { text: string; who: You; fa
   );
 });
 
-/** A file in your words: a picture small, opening the original; any other its name and size. */
+/** A file in your words, as it was in the composer: a picture small, opening the original; any
+ *  other its card. */
 function Attached({ session, f }: { session: string; f: FileRef }) {
   const url = api.fileURL(session, f.ref, false, f.mtime);
-  if (f.kind === "image") return <Picture src={f.thumb ? api.thumbURL(session, f.ref, 256, f.mtime) : url} full={url} name={f.name} small under={previews.get(f.path)} />;
-  return (
-    <a href={api.fileURL(session, f.ref, true, f.mtime)} download={f.name} className="flex max-w-full items-center gap-1 rounded-md bg-paper/60 px-1.5 py-0.5 text-xs text-ink-2 hover:text-ink">
-      <FileText size={12} className="shrink-0" />
-      <span className="truncate">{f.name}</span>
-      <span className="shrink-0 text-ink-3 tabular-nums">{size(f.size)}</span>
-    </a>
-  );
+  if (f.kind === "image") return <Picture src={f.thumb ? api.thumbURL(session, f.ref, 256, f.mtime) : url} full={url} name={f.name} small under={previews.get(f.path)} w={f.w} h={f.h} />;
+  return <SentFile name={f.name} bytes={f.size} href={api.fileURL(session, f.ref, true, f.mtime)} />;
 }
 
 /** A message sent from here the transcript has yet to bring: its mark says where it is; not taken,
@@ -180,14 +176,7 @@ export function Pending({ s, who, retry, drop, bubbleRef }: { s: Sent; who: You;
     <div className="flex flex-col items-end gap-0.5">
       <YouBubble ref={bubbleRef} text={s.text} who={who} failed={s.failed !== undefined} going={s.failed !== undefined ? undefined : s.queued ? "queued" : s.steer ? "steering" : "sending"}>
         {s.files.map((f) =>
-          f.url ? (
-            <Picture key={f.ref} src={f.url} full={f.url} name={f.name} small />
-          ) : (
-          <span key={f.ref} className="flex items-center gap-1 rounded-md bg-paper/60 px-1.5 py-0.5 text-xs text-ink-2">
-            <FileText size={12} />
-            {f.name}
-          </span>
-          ),
+          f.url ? <Picture key={f.ref} src={f.url} full={f.url} name={f.name} small /> : <SentFile key={f.ref} name={f.name} bytes={f.size} />,
         )}
       </YouBubble>
       {s.failed !== undefined && (
@@ -207,10 +196,15 @@ export function Pending({ s, who, retry, drop, bubbleRef }: { s: Sent; who: You;
 
 /** A letter: from another session's ir, a plugin or a peer. Not your words: on the left, in a grey
  *  bubble as yours are (the user, 2026-11-06). */
-function Letter({ src, text, time, onJump }: { src: From; text: string; time?: number; onJump: (id: string) => void }) {
+function Letter({ src, text, time, onJump, children }: { src: From; text: string; time?: number; onJump: (id: string) => void; children?: ReactNode }) {
+  // Its files as in your bubble (ir send -a): they were not shown at all.
+  const files = Children.count(children) > 0;
   return (
     <Sender who={src} title={time ? clock(time) : undefined} jump={src.session ? () => onJump(src.session!) : undefined}>
-      <p className="m-0 max-w-[min(560px,100%)] min-w-0 rounded-xl rounded-tr-sm bg-fill px-3.5 py-2 text-md whitespace-pre-wrap [overflow-wrap:anywhere]"><Mentioned text={text} /></p>
+      <div className="max-w-[min(560px,100%)] min-w-0 rounded-xl rounded-tr-sm bg-fill px-3.5 py-2">
+        {text && <p className="m-0 text-md whitespace-pre-wrap [overflow-wrap:anywhere]"><Mentioned text={text} /></p>}
+        {files && <div className={cn("flex flex-wrap gap-1.5", text && "mt-1")}>{children}</div>}
+      </div>
     </Sender>
   );
 }
@@ -282,10 +276,15 @@ export function Said({ b, session, cwd, source, onJump }: { b: Shown; session: s
       const src = source(b);
       const text = b.text ?? "";
       if (src.kind === "iridium") return <Line icon={<RotateCcw size={12} />}>{text}</Line>;
-      if (src.kind === "letter") return <Letter src={src} text={text} time={b.time} onJump={onJump} />;
       // The server writes each attachment as a line "[附件] `path`" (absolute): the file shows as itself instead.
       const paths = new Set(b.files?.map((f) => f.path));
       const words = paths.size ? withoutFiles(text, paths) : text;
+      if (src.kind === "letter")
+        return (
+          <Letter src={src} text={words} time={b.time} onJump={onJump}>
+            {b.files?.map((f) => <Attached key={f.ref} session={session} f={f} />)}
+          </Letter>
+        );
       return (
         <YouBubble text={words} who={src} time={b.time} >
           {b.files?.map((f) => <Attached key={f.ref} session={session} f={f} />)}
@@ -564,6 +563,9 @@ function StepCard({ s, session }: { s: Step; session: string }) {
             <Part label={t("msg.output")} copy={s.result?.text} error={s.result?.error}>
               {s.result ? <ResultView r={s.result} session={session} /> : <span className="text-xs text-ink-3">{t("msg.noResult")}</span>}
             </Part>
+            {/* The sessions its input names by id (ir send, ir wait), each a key there; its output's
+                are links in place (Pre). */}
+            <IdsNamed text={s.input ?? ""} />
           </>
         )}
       </div>
@@ -636,7 +638,10 @@ const NEW = new Set(["new_string", "new_str", "newText", "content"]);
 const SHELL = new Set(["command", "cmd", "script"]);
 const FILE = new Set(["file_path", "path", "filePath", "notebook_path"]);
 
-function Pre({ text, error, tone, cap, lang }: { text: string; error?: boolean; tone?: "plus" | "minus"; cap?: boolean; lang?: string }) {
+function Pre({ text, error, tone, cap, lang, ids }: { text: string; error?: boolean; tone?: "plus" | "minus"; cap?: boolean; lang?: string; ids?: boolean }) {
+  // ids: a session it names by id a link there (ir ls, ir new), in place of its colours.
+  const list = useList();
+  const named = useMemo(() => !!ids && !!list && sessionIds(text, list).some((p) => typeof p !== "string"), [ids, list, text]);
   return (
     <pre
       className={cn(
@@ -647,7 +652,7 @@ function Pre({ text, error, tone, cap, lang }: { text: string; error?: boolean; 
         tone === "minus" && "shadow-[inset_2px_0_0_var(--minus)]",
       )}
     >
-      <Code text={text} lang={error ? undefined : lang} label />
+      {named ? <Ids text={text} /> : <Code text={text} lang={error ? undefined : lang} label />}
     </pre>
   );
 }
@@ -671,7 +676,7 @@ function Clipped({ text, length, at, session, error, prose, fields, cap }: { tex
   const shown = whole ?? text;
   return (
     <div className="grid min-w-0 gap-1">
-      {prose ? <Markdown text={shown} className="text-sm text-ink-2" /> : fields ? <Fields text={shown} /> : <Pre text={pretty(shown)} error={error} cap={cap} lang="auto" />}
+      {prose ? <Markdown text={shown} className="text-sm text-ink-2" /> : fields ? <Fields text={shown} /> : <Pre text={pretty(shown)} error={error} cap={cap} lang="auto" ids />}
       {length !== undefined && length > 0 && whole === undefined && (
         <button type="button" onClick={more} disabled={state === "busy"} className="g-press justify-self-start rounded-sm text-xs text-ink-3 underline decoration-ink-4 underline-offset-2 hover:text-ink">
           {state === "busy" ? <LoaderCircle size={12} className="inline animate-spin" /> : t("msg.whole", { n: length })}

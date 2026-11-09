@@ -2,15 +2,16 @@
 // it, composer.tsx): in the composer a card among the files; sent, the same card in the bubble's
 // row of files (the user, 2026-11-08); named among the words (older messages, letters), a chip
 // with the session's logo and title. Each goes there. The words themselves stay plain text, what
-// the agent reads.
-import { useLayoutEffect, useRef, type RefObject } from "react";
+// the agent reads. A session's id written out (ir's output, an agent's words: ir send 4ceb1321)
+// goes there too, as written (the user, 2026-11-09).
+import { useLayoutEffect, useMemo, useRef, type RefObject } from "react";
 import type { Agent, Session } from "../api/types.gen";
 import { openChat } from "../route";
 import { useList } from "../store";
 import { t } from "../i18n";
-import { MessageSquare } from "lucide-react";
+import { ArrowUpRight, MessageSquare } from "lucide-react";
 import { AGENTS, agentName, cn, Logo, tilde, Tip, titleOf } from "../ui";
-import { mentions, shortId, type Mention } from "./refs";
+import { mentions, sessionIds, shortId, type Mention } from "./refs";
 
 /** How the composer names session to, among list: what a row dropped or picked after @ puts in. */
 export const mentionOf = (to: Session, list: Session[]) => t("composer.mention", { title: titleOf(to) || tilde(to.cwd), agent: agentName(to.agent), id: shortId(to.id, list.map((x) => x.id)) });
@@ -60,10 +61,10 @@ function head(p: Mention) {
 export function Mentioned({ text }: { text: string }) {
   const list = useList();
   const parts = mentions(text);
-  if (parts.length === 1 && typeof parts[0] === "string") return <>{text}</>;
+  if (parts.length === 1 && typeof parts[0] === "string") return <Ids text={text} />;
   return (
     <>
-      {parts.map((p, i) => (typeof p === "string" ? p : <Chip key={i} m={p} s={list?.find((x) => x.id.startsWith(p.id))} />))}
+      {parts.map((p, i) => (typeof p === "string" ? <Ids key={i} text={p} /> : <Chip key={i} m={p} s={list?.find((x) => x.id.startsWith(p.id))} />))}
     </>
   );
 }
@@ -108,5 +109,52 @@ export function MentionCard({ m }: { m: Mention }) {
         </span>
       </span>
     </button>
+  );
+}
+
+/** text, each session's id in it (or the start of one, as ir prints it) a link there, as written;
+ *  its title and agent in the tip. */
+export function Ids({ text }: { text: string }) {
+  const list = useList();
+  const parts = useMemo(() => (list ? sessionIds(text, list) : [text]), [text, list]);
+  if (parts.length === 1 && typeof parts[0] === "string") return <>{text}</>;
+  return <>{parts.map((p, i) => (typeof p === "string" ? p : <IdLink key={i} id={p.id} s={p.s} />))}</>;
+}
+
+function IdLink({ id, s }: { id: string; s: Session }) {
+  return (
+    <Tip label={`${titleOf(s) || tilde(s.cwd)} · ${agentName(s.agent)}`}>
+      <button type="button" onClick={() => openChat(s.id)} className="cursor-pointer underline decoration-ink-4 decoration-dotted underline-offset-2 hover:text-ink hover:decoration-ink-3">
+        {id}
+      </button>
+    </Tip>
+  );
+}
+
+/** The sessions text names by id, each once, as chips that go there (a step's input and output:
+ *  ir send, ir new, ir ls). Nothing when it names none. */
+export function IdsNamed({ text }: { text: string }) {
+  const list = useList();
+  const named = useMemo(() => {
+    const out: Session[] = [];
+    for (const p of list ? sessionIds(text, list) : []) if (typeof p !== "string" && !out.includes(p.s)) out.push(p.s);
+    return out;
+  }, [text, list]);
+  if (!named.length) return null;
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {named.map((s) => (
+        <button
+          key={s.id}
+          type="button"
+          onClick={() => openChat(s.id)}
+          className="g-press flex h-7 max-w-[16em] items-center gap-1.5 rounded-md bg-fill px-2 text-xs text-ink-2 hover:bg-fill-2 hover:text-ink"
+        >
+          <Logo agent={s.agent} size={12} className="shrink-0" />
+          <span className="truncate">{titleOf(s) || tilde(s.cwd)}</span>
+          <ArrowUpRight size={12} className="shrink-0 text-ink-4" />
+        </button>
+      ))}
+    </div>
   );
 }

@@ -9,7 +9,7 @@ import { shellLine } from "../src/chat/shell";
 import { crashParts } from "../src/chat/crash";
 import { levelName, restAt } from "../src/chat/effort";
 import { ctxParts, modelView } from "../src/chat/meters";
-import { atSessions, atWord, leadingMentions, mentions, shortId, sourceOf, withoutFiles, withoutNameLines, draftWords } from "../src/chat/refs";
+import { atSessions, attachedOf, atWord, leadingMentions, mentions, SID, sessionIds, shortId, sourceOf, withoutFiles, withoutNameLines, draftWords } from "../src/chat/refs";
 import { t } from "../src/i18n";
 import { en } from "../src/i18n/en";
 import { zh } from "../src/i18n/zh";
@@ -54,6 +54,32 @@ describe("argOf", () => {
   });
   test("an input cut short is read for its first fields", () => {
     expect(inputOf('{"command":"ls -la","description":"lis')).toEqual({ command: "ls -la" });
+  });
+});
+
+describe("sessionIds", () => {
+  const list = [{ id: "4ceb1321-7f00-4a1b-9c2d-0123456789ab" }, { id: "039ec118-0000-4000-8000-000000000000" }, { id: "039ec119-0000-4000-8000-000000000000" }];
+  const ids = (text: string) => sessionIds(text, list).flatMap((p) => (typeof p === "string" ? [] : [p.id]));
+  test("a session's short id or whole id, standing alone", () => {
+    expect(sessionIds("ir send 4ceb1321 \"hi\"", list)).toEqual(["ir send ", { id: "4ceb1321", s: list[0] }, ' "hi"']);
+    expect(ids("交给 4ceb1321-7f00-4a1b-9c2d-0123456789ab。")).toEqual(["4ceb1321-7f00-4a1b-9c2d-0123456789ab"]);
+    expect(ids("done: 4ceb1321.")).toEqual(["4ceb1321"]);
+  });
+  test("not a path, a word, a longer hash, an unknown or shared start", () => {
+    expect(ids("/tmp/4ceb1321 4ceb1321.txt x4ceb1321 4ceb1321ff 039ec11 039ec11a 8a95ecf0")).toEqual([]);
+    expect(ids("039ec118 039ec11")).toEqual(["039ec118"]);
+  });
+  test("whatever the shared pattern's lastIndex", () => {
+    SID.lastIndex = 8;
+    expect(ids("4ceb1321 is it")).toEqual(["4ceb1321"]);
+    SID.lastIndex = 0;
+  });
+});
+
+describe("attachedOf", () => {
+  test("a queued message's attachments out of its words", () => {
+    expect(attachedOf("look\n\n[附件] `/u/a b.png`\n[附件] `/u/c.pdf`")).toEqual({ paths: ["/u/a b.png", "/u/c.pdf"], words: "look" });
+    expect(attachedOf("[文件] `/u/x`")).toEqual({ paths: [], words: "[文件] `/u/x`" });
   });
 });
 

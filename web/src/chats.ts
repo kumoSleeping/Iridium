@@ -11,7 +11,7 @@ import { getCarried, setCarried } from "./store";
 /** A message of yours sent from this page, till the transcript has it: input, the id the server gave
  *  it (Claude's uuid, which the user block carries); text, as typed; files, upload refs with their
  *  names; from, where the transcript ended as it was sent. failed: why it did not go. */
-export type Sent = { key: string; text: string; files: { ref: string; name: string; type: string; url?: string }[]; from: number; input?: string; failed?: string; queued?: boolean; steer?: boolean };
+export type Sent = { key: string; text: string; files: { ref: string; name: string; type: string; size?: number; url?: string }[]; from: number; input?: string; failed?: string; queued?: boolean; steer?: boolean };
 
 /** Where a block's transcript line begins: its at up to the dot. */
 export const lineOf = (b: { at: string }) => parseInt(b.at);

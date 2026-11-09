@@ -130,6 +130,43 @@ export function withoutFiles(text: string, paths: ReadonlySet<string>, home?: st
   return out.join("").replace(/\n{3,}/g, "\n\n").trim();
 }
 
+/** The files a queued message has (lines [附件] `path`, attach.go) and its words without them. */
+export function attachedOf(text: string): { paths: string[]; words: string } {
+  const paths = [...text.matchAll(FILE_LINE)].filter((m) => m[1] === "附件").map((m) => m[2]!.trim());
+  return { paths, words: paths.length ? withoutFiles(text, new Set(paths)) : text };
+}
+
+/** A session's id, or its start (8 characters at least, as ir prints it), standing alone in text:
+ *  not inside a path, a word or a longer hash. */
+export const SID = /(?<![\w/.-])[0-9a-f]{8}(?:-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{0,24})(?![\w/-]|\.\w)/g;
+
+/** text cut where it names a session of list by its id or the start of one: the parts that do as
+ *  {id, s}. A start more than one session has, or none, is text. */
+export function sessionIds<S extends { id: string }>(text: string, list: readonly S[]): (string | { id: string; s: S })[] {
+  const out: (string | { id: string; s: S })[] = [];
+  let last = 0;
+  for (const m of text.matchAll(new RegExp(SID))) { // a copy: matchAll starts at the pattern's lastIndex
+    const s = sessionOf(m[0], list);
+    if (!s) continue;
+    if (m.index > last) out.push(text.slice(last, m.index));
+    out.push({ id: m[0], s });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out;
+}
+
+/** The one session of list whose id starts with id, if just one. */
+export function sessionOf<S extends { id: string }>(id: string, list: readonly S[]): S | undefined {
+  let found: S | undefined;
+  for (const s of list) {
+    if (!s.id.startsWith(id)) continue;
+    if (found) return undefined;
+    found = s;
+  }
+  return found;
+}
+
 const NAME_LINE = /^[ \t]*\[标题\].*(?:\n|$)/gm;
 
 /** A reply without its title lines (plan "会话标题"): a line [标题] text the agent ends a reply
