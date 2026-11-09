@@ -19,8 +19,9 @@ import { go } from "../route";
 import { Files, Picture, previews, size } from "./files";
 import { cmdOfCall, isShell, type Cmd } from "./cmd";
 import { argOf, diffSum, foldLine, foldSaid, kindOf, runCmds, type Diff, type Kind, type Shown, type Step, type Tool } from "./fold";
-import { langOf, type Lang } from "./hl";
-import { Code, Markdown } from "./markdown";
+import { Code } from "./hl";
+import { Markdown } from "./markdown";
+import { partialInput } from "./partial";
 import { MentionCard, Mentioned } from "./mention";
 import { leadingMentions, type Source, withoutFiles, withoutNameLines } from "./refs";
 
@@ -448,12 +449,13 @@ function Fold({ steps, session, cwd }: { steps: Step[]; session: string; cwd: st
           {runs.map((r, i) => (
             <span key={i} className={cn(i > 0 && "ml-3")}>
               {(r.name ? runCmds(steps, r.name) : [{ cmd: undefined, n: 1 }]).map((g, j, gs) => (
-                <span key={j} className={cn("inline-block", j < gs.length - 1 ? "mr-1.5" : "mr-2")}>
+                <span key={j} className={cn("inline-block", j < gs.length - 1 ? "mr-1.5" : !isShell(r.name) && "mr-2")}>
                   <KindIcon kind={r.name ? kindOf(r.name) : "thinking"} cmd={g.cmd} shell={isShell(r.name)} className="inline-block align-[-2.5px]" />
                   {(gs.length > 1 || isShell(r.name)) && g.n > 1 && <span className="text-xs tabular-nums">×{g.n}</span>}
                 </span>
               ))}
-              {/* A shell's run is its icons alone, each with how many (the user, 2026-11-09). */}
+              {/* A shell's run is its icons alone, each with how many (the user, 2026-11-09): no
+                  room after the last for a name, only the gap between runs. */}
               {!isShell(r.name) && <span className="text-ink-2">{r.name || t("msg.thinking")}</span>}
               {!isShell(r.name) && r.n > 1 && <span className="tabular-nums"> ×{r.n}</span>}
             </span>
@@ -563,7 +565,10 @@ function Fields({ text }: { text: string }) {
   try {
     v = JSON.parse(text);
   } catch {
-    return <Pre text={pretty(text)} />;
+    // Cut short (the page has only its start): its string fields as far as they go.
+    const part = text.trimStart().startsWith("{") ? partialInput(text) : {};
+    if (!Object.keys(part).length) return <Pre text={pretty(text)} />;
+    v = part;
   }
   if (!v || typeof v !== "object" || Array.isArray(v)) return <Pre text={pretty(text)} />;
   const rows = Object.entries(v as Record<string, unknown>);
@@ -574,14 +579,12 @@ function Fields({ text }: { text: string }) {
       {rows.map(([k, x]) => {
         const str = typeof x === "string" ? x : JSON.stringify(x, null, 2);
         const tone = OLD.has(k) ? "minus" : NEW.has(k) ? "plus" : undefined;
-        const inline = !tone && !str.includes("\n") && str.length <= 80;
-        const lang = typeof x !== "string" ? undefined : SHELL.has(k) ? "sh" : OLD.has(k) || NEW.has(k) ? langOf(file) : undefined;
+        const inline = !tone && !SHELL.has(k) && !str.includes("\n") && str.length <= 80;
+        const lang = typeof x !== "string" ? undefined : SHELL.has(k) ? "bash" : OLD.has(k) || NEW.has(k) ? file : undefined;
         return inline ? (
           <div key={k} className="flex min-w-0 items-baseline gap-2 text-xs">
             <span className="shrink-0 font-mono text-ink-4">{k}</span>
-            <span className={cn("min-w-0 font-mono [overflow-wrap:anywhere]", typeof x === "string" ? "text-ink-2" : "text-ink-3")}>
-              <Code text={str} lang={lang} />
-            </span>
+            <span className={cn("min-w-0 font-mono [overflow-wrap:anywhere]", typeof x === "string" ? "text-ink-2" : "text-ink-3")}>{str}</span>
           </div>
         ) : (
           <div key={k} className="grid min-w-0 gap-1">
@@ -598,7 +601,7 @@ const NEW = new Set(["new_string", "new_str", "newText", "content"]);
 const SHELL = new Set(["command", "cmd", "script"]);
 const FILE = new Set(["file_path", "path", "filePath", "notebook_path"]);
 
-function Pre({ text, error, tone, cap, lang }: { text: string; error?: boolean; tone?: "plus" | "minus"; cap?: boolean; lang?: Lang }) {
+function Pre({ text, error, tone, cap, lang }: { text: string; error?: boolean; tone?: "plus" | "minus"; cap?: boolean; lang?: string }) {
   return (
     <pre
       className={cn(
@@ -609,7 +612,7 @@ function Pre({ text, error, tone, cap, lang }: { text: string; error?: boolean; 
         tone === "minus" && "shadow-[inset_2px_0_0_var(--minus)]",
       )}
     >
-      <Code text={text} lang={error ? undefined : lang} />
+      <Code text={text} lang={error ? undefined : lang} label />
     </pre>
   );
 }
@@ -633,7 +636,7 @@ function Clipped({ text, length, at, session, error, prose, fields, cap }: { tex
   const shown = whole ?? text;
   return (
     <div className="grid min-w-0 gap-1">
-      {prose ? <Markdown text={shown} className="text-sm text-ink-2" /> : fields ? <Fields text={shown} /> : <Pre text={pretty(shown)} error={error} cap={cap} lang="out" />}
+      {prose ? <Markdown text={shown} className="text-sm text-ink-2" /> : fields ? <Fields text={shown} /> : <Pre text={pretty(shown)} error={error} cap={cap} lang="auto" />}
       {length !== undefined && length > 0 && whole === undefined && (
         <button type="button" onClick={more} disabled={state === "busy"} className="g-press justify-self-start rounded-sm text-xs text-ink-3 underline decoration-ink-4 underline-offset-2 hover:text-ink">
           {state === "busy" ? <LoaderCircle size={12} className="inline animate-spin" /> : t("msg.whole", { n: length })}

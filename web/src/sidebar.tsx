@@ -251,16 +251,8 @@ export function Sidebar(p: Props) {
   const head = !p.phone && (
     <div className="flex h-12 shrink-0 items-center gap-0.5 px-2">
       {/* The name at the left, the keys at the right (the user, 2026-11-06). */}
-      {machines.length ? (
-        <ViewSwitch view={view} machines={machines} waits={waits} />
-      ) : (
-        <span className="flex min-w-0 flex-1 items-center gap-2 pl-2 select-none">
-          <IrMark size={18} className="text-ink" />
-          <span className="truncate text-base font-semibold tracking-[-0.01em]">Iridium</span>
-          {/* The link's dot and latency, by the name (the user, 2026-11-08). */}
-          <LinkDot className="shrink-0" />
-        </span>
-      )}
+      {/* Always a switch, other machines or none: a press or a right press opens it (the user, 2026-11-09). */}
+      <ViewSwitch view={view} machines={machines} waits={waits} />
       <HeadKeys {...p} />
     </div>
   );
@@ -587,7 +579,7 @@ function WsRow({ flip, id, name, root, sessions, machine, remote, hidden, open, 
   );
 }
 
-/** The head's name, while another machine's Bot is linked (the user, 2026-11-09): a press opens a
+/** The head's name (the user, 2026-11-09): a press, or a right press as the same, opens a
  *  menu of what the list shows, 全部, 本机 or one other machine (its face, name, link lamp and round
  *  trip). Showing one, the head says that machine: Iridium's mark, then its name, face and link
  *  where Iridium's are, its "+" opening there. An amber lamp after it while a session not shown
@@ -601,13 +593,15 @@ function ViewSwitch({ view, machines, waits }: { view: string | null; machines: 
       {view === v && <Check size={14} className="text-ink-2" />}
     </Menu.Item>
   );
+  const [open, setOpen] = useState(false);
   return (
-    <Menu.Root>
-      <Menu.Trigger className="g-press -my-1 flex min-w-0 flex-1 items-center gap-2 rounded-md py-1 pl-2 text-left outline-none select-none hover:bg-fill data-popup-open:bg-fill">
+    <Menu.Root open={open} onOpenChange={setOpen}>
+      <Menu.Trigger onContextMenu={(e) => (e.preventDefault(), setOpen(true))} className="g-press -my-1 flex min-w-0 flex-1 items-center gap-2 rounded-md py-1 pl-2 text-left outline-none select-none hover:bg-fill data-popup-open:bg-fill">
         {/* Iridium's mark stays; showing a machine, its face after its name, as a remote group's. */}
         <IrMark size={18} className="text-ink" />
         <span className="truncate text-base font-semibold tracking-[-0.01em]">{m ? m.name : view === "" ? t("new.local") : "Iridium"}</span>
         {m && <MachineFace m={m} size={16} />}
+        {/* The link's dot and latency, by the name (the user, 2026-11-08). */}
         {m ? <MachineLink m={m} /> : <LinkDot className="shrink-0" />}
         {waits && <Lamp status="waiting" />}
       </Menu.Trigger>
