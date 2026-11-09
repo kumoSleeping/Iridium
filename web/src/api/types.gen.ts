@@ -1175,7 +1175,8 @@ export interface CLIOutput {
  * Note is a note jotted down (便签, docs/plan.md "便签"): words to keep, an idea, a thing to do.
  * In no folder (Folder 0) or in one; listed by Pos, small first. Sessions: those it was put into,
  * the latest last. From: the session it was jotted in, if any. Times in ms since the epoch; Done 0
- * is not done. The carried state "notes" is Notes, every note whole.
+ * is not done. Root: the root folder it serves (the composer lists those of its session's), "" every
+ * one's. The carried state "notes" is Notes, every note whole.
  */
 export interface Note {
   id: string;
@@ -1185,6 +1186,7 @@ export interface Note {
   color?: Color;
   done?: number /* int64 */;
   from?: string;
+  root?: string;
   sessions?: string[];
   created: number /* int64 */;
   updated: number /* int64 */;
@@ -1212,6 +1214,7 @@ export interface NewNote {
   pos?: number /* float64 */;
   color?: Color;
   from?: string;
+  root?: string;
 }
 /**
  * NotePatch changes a note; a field left out stays. Folder 0 takes it out of its folder; Color ""

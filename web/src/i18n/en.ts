@@ -164,6 +164,7 @@ export const en: Dict = {
   "effort.xhigh": "Extra high",
   "effort.max": "Max",
   "effort.off": "Off",
+  "composer.cmdCommon": "Common",
   "composer.commands": "Commands",
 
   "cmd.compact": "Compact the context",
@@ -533,6 +534,8 @@ export const en: Dict = {
   "usage.scale": "Scale {n}",
   "toast.undo": "Undo",
   "note.title": "Notes",
+  "note.view": "View notes",
+  "note.takeBox": "Keep input",
   "note.new": "New note",
   "note.placeholder": "Jot something down",
   "note.keep": "Keep",

@@ -3,7 +3,7 @@ import { partialInput, tail } from "../src/chat/partial";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import type { Block } from "../src/api/types.gen";
 import { cmdOf, cmdOfCall, renameOnly } from "../src/chat/cmd";
-import { argOf, diffOf, diffSum, diffText, folded, foldLine, foldSaid, lineDiff, patchDiff, runCmd, type Step } from "../src/chat/fold";
+import { argOf, diffOf, diffSum, diffText, folded, foldLine, foldSaid, lineDiff, patchDiff, runCmds, type Step } from "../src/chat/fold";
 import { setLang } from "../src/i18n";
 
 const call = (name: string, input: unknown, more: Partial<Omit<Block, "kind">> = {}): Step => ({ at: `${name}.${Math.random()}`, kind: "tool", name, input: typeof input === "string" ? input : JSON.stringify(input), result: { at: "r", text: "ok" }, ...more });
@@ -115,6 +115,16 @@ describe("a shell call's sort", () => {
     expect(cmdOf("ir profile kumo --name K")).toBe("ir-profile");
     expect(cmdOf("ir public off")).toBe("net");
     expect(cmdOf("ir update --check")).toBe("install");
+    expect(cmdOf("ir ws rename ab docs")).toBe("ir-ws");
+    expect(cmdOf("ir machines")).toBe("ir-machines");
+    expect(cmdOf("ir sh kumo-mac --cwd ~/x -- git status")).toBe("remote");
+    expect(cmdOf("ir secret set gh --note x")).toBe("ir-secret");
+    expect(cmdOf("ir run --secret gh -- gh pr list")).toBe("ir-secret");
+    expect(cmdOf("ir usage me -d 7")).toBe("ir-usage");
+    expect(cmdOf('ir bot "done"')).toBe("ir-bot");
+    expect(cmdOf("ir pair host:7810 --name b --into f")).toBe("ir-access");
+    expect(cmdOf("ir join host:7810")).toBe("remote");
+    expect(cmdOf("ir rename 'title'")).toBe("ir-rename");
     expect(cmdOf("ir --help")).toBeUndefined();
   });
   test("git, past its own options", () => {
@@ -210,10 +220,10 @@ describe("a shell call's sort", () => {
   });
   test("a fold's run of one name keeps a sort only all its calls share", () => {
     const think: Step = { at: "t", kind: "thinking", text: "hmm" };
-    expect(runCmd([call("Bash", { command: "ir send a x" }), think, call("Read", { file_path: "/a" }), call("Bash", { command: "cd ~ && ir send b y" })], "Bash")).toBe("ir-send");
-    expect(runCmd([call("Bash", { command: "ir send a x" }), call("Bash", { command: "git status" }), call("Bash", { command: "ir send a x" })], "Bash")).toBeUndefined();
-    expect(runCmd([call("Bash", { command: "ir send a x" }), call("Bash", { command: "frobnicate" })], "Bash")).toBeUndefined();
-    expect(runCmd([call("Read", { file_path: "/a" })], "Read")).toBeUndefined();
+    expect(runCmds([call("Bash", { command: "ir send a x" }), think, call("Read", { file_path: "/a" }), call("Bash", { command: "cd ~ && ir send b y" })], "Bash")).toEqual(["ir-send"]);
+    expect(runCmds([call("Bash", { command: "ir send a x" }), call("Bash", { command: "git status" }), call("Bash", { command: "ir send a x" })], "Bash")).toEqual(["ir-send", "git-status", "ir-send"]);
+    expect(runCmds([call("Bash", { command: "ir send a x" }), call("Bash", { command: "frobnicate" })], "Bash")).toEqual(["ir-send", undefined]);
+    expect(runCmds([call("Read", { file_path: "/a" }), call("Read", { file_path: "/b" })], "Read")).toEqual([undefined]);
   });
 });
 

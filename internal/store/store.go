@@ -177,6 +177,9 @@ var schema = []string{
 	`DELETE FROM names WHERE auto = 1;`,
 	// 18: notes and their folders (notes.go).
 	notesSchema,
+	// 19: the root folder a note serves (the user, 2026-11-09): the composer lists those of its
+	// session's; "" (older notes) every one's.
+	`ALTER TABLE notes ADD COLUMN root TEXT NOT NULL DEFAULT '';`,
 }
 
 // steps run in Go after the migration of their version, in the same transaction.

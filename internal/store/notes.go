@@ -35,7 +35,7 @@ var ErrNoNote = errors.New("no such note")
 // Notes is every note and folder, by Pos.
 func (s *Store) Notes() (api.Notes, error) {
 	out := api.Notes{Notes: []api.Note{}, Folders: []api.NoteFolder{}}
-	rows, err := s.db.Query(`SELECT id, folder, body, pos, color, done_at, from_session, sessions, created_at, updated_at FROM notes ORDER BY pos, created_at`)
+	rows, err := s.db.Query(`SELECT id, folder, body, pos, color, done_at, from_session, root, sessions, created_at, updated_at FROM notes ORDER BY pos, created_at`)
 	if err != nil {
 		return out, err
 	}
@@ -43,7 +43,7 @@ func (s *Store) Notes() (api.Notes, error) {
 	for rows.Next() {
 		var n api.Note
 		var sessions string
-		if err := rows.Scan(&n.ID, &n.Folder, &n.Body, &n.Pos, &n.Color, &n.Done, &n.From, &sessions, &n.Created, &n.Updated); err != nil {
+		if err := rows.Scan(&n.ID, &n.Folder, &n.Body, &n.Pos, &n.Color, &n.Done, &n.From, &n.Root, &sessions, &n.Created, &n.Updated); err != nil {
 			return out, err
 		}
 		_ = json.Unmarshal([]byte(sessions), &n.Sessions)
@@ -71,8 +71,8 @@ func (s *Store) Notes() (api.Notes, error) {
 func (s *Store) Note(id string) (api.Note, error) {
 	var n api.Note
 	var sessions string
-	err := s.db.QueryRow(`SELECT id, folder, body, pos, color, done_at, from_session, sessions, created_at, updated_at FROM notes WHERE id = ?`, id).
-		Scan(&n.ID, &n.Folder, &n.Body, &n.Pos, &n.Color, &n.Done, &n.From, &sessions, &n.Created, &n.Updated)
+	err := s.db.QueryRow(`SELECT id, folder, body, pos, color, done_at, from_session, root, sessions, created_at, updated_at FROM notes WHERE id = ?`, id).
+		Scan(&n.ID, &n.Folder, &n.Body, &n.Pos, &n.Color, &n.Done, &n.From, &n.Root, &sessions, &n.Created, &n.Updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return n, ErrNoNote
 	}
@@ -96,8 +96,8 @@ func (s *Store) AddNote(n api.NewNote) (api.Note, error) {
 			pos = least.Float64 - 1
 		}
 	}
-	if _, err := s.db.Exec(`INSERT INTO notes (id, folder, body, pos, color, from_session, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING`,
-		n.ID, n.Folder, n.Body, pos, string(n.Color), n.From, now, now); err != nil {
+	if _, err := s.db.Exec(`INSERT INTO notes (id, folder, body, pos, color, from_session, root, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING`,
+		n.ID, n.Folder, n.Body, pos, string(n.Color), n.From, n.Root, now, now); err != nil {
 		return api.Note{}, err
 	}
 	return s.Note(n.ID)
