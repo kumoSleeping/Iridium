@@ -462,6 +462,14 @@ func (x *Index) look(f onDisk) bool {
 	if same {
 		return false
 	}
+	// The same session in two files (a project folder copied under another path, the user's,
+	// 2026-11-09): the one written last is it. Else each look would swap them, its folder and
+	// time with them, and the longer one would bring it back from the archive.
+	if e != nil && e.path != f.path {
+		if o, err := os.Stat(e.path); err == nil && !newer(st.ModTime(), f.path, o.ModTime(), e.path) {
+			return false
+		}
+	}
 	g := x.glance(f)
 	if e != nil && e.path == f.path && g.cwd == "" {
 		g.cwd = e.cwd // read before; the head does not change
@@ -472,6 +480,15 @@ func (x *Index) look(f onDisk) bool {
 	x.mu.Unlock()
 	x.activity(f.agent, f.id, st.Size(), st.ModTime(), e != nil && e.path == f.path && st.Size() > e.size)
 	return e == nil
+}
+
+// newer says whether a file of path a, changed at ta, comes before one of path b at tb: the
+// later, or on the same time the path sorted last, so that the choice is the same every look.
+func newer(ta time.Time, a string, tb time.Time, b string) bool {
+	if !ta.Equal(tb) {
+		return ta.After(tb)
+	}
+	return a > b
 }
 
 // ---- what is told ----
