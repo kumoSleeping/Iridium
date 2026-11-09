@@ -1,17 +1,16 @@
 // Sessions named in what you write (a row dropped on the composer, chat.tsx, or picked after @ in
 // it, composer.tsx): in the composer a card among the files; sent, the same card in the bubble's
-// row of files (the user, 2026-11-08); named among the words (older messages, letters), a chip
-// with the session's logo and title. Each goes there. The words themselves stay plain text, what
-// the agent reads. A session's id written out (ir's output, an agent's words: ir send 4ceb1321)
-// is the same chip, and in a step's card the same card (the user, 2026-11-09: the cards people
-// know, not the id as a link).
-import { useLayoutEffect, useMemo, useRef, type ReactNode, type RefObject } from "react";
+// row of files (the user, 2026-11-08). One way a session shows in a conversation (the user,
+// 2026-11-09): a session named among the words (older messages, letters) or by its id (an agent's
+// words, ir send 4ceb1321 in a step) is the same card, in a row under it; the words stay as they
+// were written. Each goes there.
+import { useLayoutEffect, useMemo, useRef, type RefObject } from "react";
 import type { Agent, Session } from "../api/types.gen";
 import { openChat } from "../route";
 import { useList } from "../store";
 import { t } from "../i18n";
 import { MessageSquare } from "lucide-react";
-import { AGENTS, agentName, cn, Logo, tilde, Tip, titleOf } from "../ui";
+import { AGENTS, agentName, cn, Logo, tilde, titleOf } from "../ui";
 import { mentions, sessionIds, shortId, type Mention } from "./refs";
 
 /** How the composer names session to, among list: what a row dropped or picked after @ puts in. */
@@ -57,37 +56,6 @@ function head(p: Mention) {
   return i > 0 ? i : p.text.length;
 }
 
-/** A message's words, a session it names a chip: its logo and title (as the sidebar has it now),
- *  going to it; its agent and id in the tip. */
-export function Mentioned({ text }: { text: string }) {
-  const list = useList();
-  const parts = mentions(text);
-  if (parts.length === 1 && typeof parts[0] === "string") return <Ids text={text} />;
-  return (
-    <>
-      {parts.map((p, i) => (typeof p === "string" ? <Ids key={i} text={p} /> : <Chip key={i} m={p} s={list?.find((x) => x.id.startsWith(p.id))} />))}
-    </>
-  );
-}
-
-function Chip({ m, s }: { m: Mention; s?: Session }) {
-  const agent: Agent | undefined = s?.agent ?? AGENTS.find((a) => agentName(a) === m.agent);
-  const title = (s && titleOf(s)) || m.title;
-  return (
-    <Tip label={`${title} · ${agent ? agentName(agent) : m.agent} · ${m.id}`}>
-      <button
-        type="button"
-        disabled={!s}
-        onClick={() => s && openChat(s.id)}
-        className="g-press mx-[3px] inline-flex max-w-[min(100%,14em)] items-center gap-[5px] rounded-[5px] bg-paper/85 py-px pr-1.5 pl-[5px] align-[-2px] text-[0.86em] leading-[17px] text-ink-2 shadow-[0_0_0_0.5px_var(--edge)] enabled:hover:bg-paper enabled:hover:text-ink disabled:opacity-60"
-      >
-        {agent && <Logo agent={agent} size={12} className="shrink-0" />}
-        <span className="truncate">{title}</span>
-      </button>
-    </Tip>
-  );
-}
-
 /** A session named before a message's words, as its card was in the composer: its logo, its title
  *  (as the sidebar has it now), its agent and short id; pressed, it goes there. */
 export function MentionCard({ m }: { m: Mention }) {
@@ -113,49 +81,36 @@ export function MentionCard({ m }: { m: Mention }) {
   );
 }
 
-/** text, each session's id in it (or the start of one, as ir prints it) a chip as a mention has:
- *  its logo and title, going there; the id in its tip. */
-export function Ids({ text }: { text: string }) {
-  const list = useList();
-  const parts = useMemo(() => (list ? sessionIds(text, list) : [text]), [text, list]);
-  if (parts.length === 1 && typeof parts[0] === "string") return <>{text}</>;
-  return <>{parts.map((p, i) => (typeof p === "string" ? p : <Chip key={i} m={named(p.s, p.id)} s={p.s} />))}</>;
-}
-
 /** A session met by its id, as a mention names it. */
-const named = (s: Session, id: string): Mention => ({ title: titleOf(s) || tilde(s.cwd), agent: agentName(s.agent), id, text: id });
+const named = (s: Session, id: string, list: Session[]): Mention => ({ title: titleOf(s) || tilde(s.cwd), agent: agentName(s.agent), id: shortId(s.id, list.map((x) => x.id)), text: id });
 
-/** The one session text is (its id alone, a word in code), as a chip; else otherwise. */
-export function IdChip({ text, otherwise }: { text: string; otherwise: ReactNode }) {
+/** The sessions text names, each once, in order: as the composer names them, and by id (or the
+ *  start of one, as ir prints it); also's too while it names few (ir new, not ir ls's list). */
+export function useNamed(text: string, also?: string): Mention[] {
   const list = useList();
-  const s = useMemo(() => {
-    const parts = list ? sessionIds(text.trim(), list) : [];
-    return parts.length === 1 && typeof parts[0] !== "string" ? parts[0] : undefined;
-  }, [text, list]);
-  return s ? <Chip m={named(s.s, s.id)} s={s.s} /> : otherwise;
-}
-
-/** The sessions text names by id, each once, as the cards a message's mentions are (a step's
- *  input: ir send, ir wait); also's too while it names few (ir new, not ir ls's list). Nothing
- *  when they name none. */
-export function IdsNamed({ text, also }: { text: string; also?: string }) {
-  const list = useList();
-  const found = useMemo(() => {
+  return useMemo(() => {
     const of = (x: string) => {
-      const out: { id: string; s: Session }[] = [];
-      for (const p of list ? sessionIds(x, list) : []) if (typeof p !== "string" && !out.some((y) => y.s === p.s)) out.push(p);
+      const out: Mention[] = [];
+      for (const p of mentions(x))
+        if (typeof p !== "string") out.push(p);
+        else for (const q of list ? sessionIds(p, list) : []) if (typeof q !== "string") out.push(named(q.s, q.id, list!));
       return out;
     };
+    const key = (m: Mention) => list?.find((x) => x.id.startsWith(m.id))?.id ?? m.id;
     const more = also ? of(also) : [];
-    const out = of(text);
-    for (const p of more.length <= 3 ? more : []) if (!out.some((y) => y.s === p.s)) out.push(p);
-    return out;
+    const all = [...of(text), ...(new Set(more.map(key)).size <= 3 ? more : [])];
+    return all.filter((m, i) => all.findIndex((n) => key(n) === key(m)) === i);
   }, [text, also, list]);
-  if (!found.length) return null;
+}
+
+/** The sessions text names, as the cards a message's mentions are: a row, or nothing. */
+export function NamedCards({ text, also, className }: { text: string; also?: string; className?: string }) {
+  const named = useNamed(text, also);
+  if (!named.length) return null;
   return (
-    <div className="flex flex-wrap gap-1.5">
-      {found.map((p) => (
-        <MentionCard key={p.s.id} m={named(p.s, p.id)} />
+    <div className={cn("flex flex-wrap gap-1.5", className)}>
+      {named.map((m, i) => (
+        <MentionCard key={i} m={m} />
       ))}
     </div>
   );

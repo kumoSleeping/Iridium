@@ -13,7 +13,6 @@ import { errText, toast } from "../toast";
 import { motion, reduced } from "../motion";
 import { useSettings } from "../data";
 import { cn, enterKey, IconKey, steerKey } from "../ui";
-import { Mentioned } from "./mention";
 import { attachedOf } from "./refs";
 
 /** The queue's height glides from what it was; lines not there before fade in. */
@@ -124,13 +123,13 @@ export function Queue({ session, queue, steered }: { session: string; queue: Que
   );
 }
 
-/** A queued message on its line as its bubble will show it: sessions named as chips, its files
- *  (lines [附件] `path`) by name after a clip, not as those lines. */
+/** A queued message on its line: its files (lines [附件] `path`) by name after a clip, not as
+ *  those lines. */
 function QueuedText({ text }: { text: string }) {
   const { paths, words } = attachedOf(text);
   return (
     <p className="m-0 min-w-0 flex-1 truncate py-1">
-      <Mentioned text={words} />
+      {words}
       {paths.length > 0 && (
         <span className={cn("text-ink-3", words && "ml-2")}>
           <Paperclip size={12} className="mr-0.5 inline align-[-1px]" aria-hidden />

@@ -1,8 +1,7 @@
 // An agent's words as Markdown (Streamdown, with the CJK fixes): quiet, no buttons of its own, code
 // blocks in their language's colours (hl.tsx) with a copy key, links only to http(s). Raw HTML
 // shows as written: rehype-raw is not even bundled (vite.config.ts). One options object, so a
-// message is not drawn again for each piece of a draft (Streamdown's memo). A session's id in it
-// (or the start of one) goes there (mention.tsx Ids).
+// message is not drawn again for each piece of a draft (Streamdown's memo).
 import { cjk } from "@streamdown/cjk";
 import { Check, Copy } from "lucide-react";
 import { memo, useState, type ComponentProps } from "react";
@@ -10,8 +9,7 @@ import { defaultComponents, Streamdown, type ExtraProps, type StreamdownProps } 
 import { t } from "../i18n";
 import { cn } from "../ui";
 import { Code } from "./hl";
-import { IdChip, Ids } from "./mention";
-import { draftWords, SID } from "./refs";
+import { draftWords } from "./refs";
 
 function CodeBlock({ className, children }: ComponentProps<"code"> & ExtraProps) {
   const [copied, setCopied] = useState(false);
@@ -39,41 +37,17 @@ function CodeBlock({ className, children }: ComponentProps<"code"> & ExtraProps)
   );
 }
 
-type Node = { type: string; tagName?: string; value?: string; properties?: Record<string, unknown>; children?: Node[] };
-
-/** Text that may name a session by id, outside code and links, put in an ir-ids element: Ids then
- *  finds which, with the sessions as they are now. */
-function rehypeIds() {
-  const walk = (n: Node) => {
-    if (!n.children || n.tagName === "pre" || n.tagName === "code" || n.tagName === "a") return;
-    n.children = n.children.map((c) => {
-      if (c.type !== "text") return (walk(c), c);
-      // search, not test: test moves the shared pattern's lastIndex, where matchAll then starts.
-      return (c.value ?? "").search(SID) >= 0 ? { type: "element", tagName: "ir-ids", properties: {}, children: [c] } : c;
-    });
-  };
-  return walk;
-}
-
-const textOf = (c: unknown): string | undefined => (typeof c === "string" ? c : Array.isArray(c) && c.every((x) => typeof x === "string") ? c.join("") : undefined);
-
 export const MARKDOWN: Partial<StreamdownProps> = {
   plugins: { cjk },
   controls: false,
   components: {
     // Streamdown's own pre marks the code inside as a block (data-block): that one is ours.
-    code: (p) => {
-      if ("data-block" in p) return <CodeBlock {...p} />;
-      // Code that is a session's id alone: its chip, as in the words around it.
-      const text = textOf(p.children);
-      return text === undefined ? <defaultComponents.code {...p} /> : <IdChip text={text} otherwise={<defaultComponents.code {...p} />} />;
-    },
-    ...({ "ir-ids": ({ children }: { children?: unknown }) => <Ids text={textOf(children) ?? ""} /> } as object),
+    code: (p) => ("data-block" in p ? <CodeBlock {...p} /> : <defaultComponents.code {...p} />),
   },
   lineNumbers: false,
   linkSafety: { enabled: false },
   className: "prose-ir min-w-0",
-  rehypePlugins: [rehypeIds],
+  rehypePlugins: [],
   tableMaxHeight: 0,
   allowElement: (e) => e.tagName !== "a" || /^https?:/i.test(String(e.properties.href ?? "")),
   unwrapDisallowed: true,

@@ -23,7 +23,7 @@ import { argOf, diffSum, foldLine, foldSaid, kindOf, runCmds, type Diff, type Ki
 import { Code } from "./hl";
 import { Markdown } from "./markdown";
 import { partialInput } from "./partial";
-import { IdsNamed, MentionCard, Mentioned } from "./mention";
+import { MentionCard, NamedCards, useNamed } from "./mention";
 import { leadingMentions, type Source, withoutFiles, withoutNameLines } from "./refs";
 
 type You = Extract<Source, { kind: "you" }>;
@@ -135,15 +135,17 @@ function SendState({ state }: { state: Going }) {
 }
 
 export const YouBubble = forwardRef<HTMLDivElement, { text: string; who: You; failed?: boolean; children?: ReactNode; time?: number; going?: Going }>(function YouBubble({ text: all, who, failed, children, time, going }, ref) {
-  // The sessions named before the words: cards with the files, as they were in the composer.
-  const { named, words: text } = useMemo(() => leadingMentions(all), [all]);
+  // The sessions named before the words: cards with the files, as they were in the composer; those
+  // named among the words or by id the same cards, the words as written.
+  const text = useMemo(() => leadingMentions(all).words, [all]);
+  const named = useNamed(all);
   const row = named.length + Children.count(children) > 0;
   return (
     <Sender ref={ref} who={who} title={time ? clock(time) : undefined}>
       <div className="relative max-w-[min(560px,100%)] px-3.5 py-2">
         {going && <SendState state={going} />}
         <span data-bubble-bg className={cn("absolute inset-0 rounded-xl rounded-tr-sm bg-fill", failed && "shadow-[inset_0_0_0_1px_var(--err)]")} aria-hidden />
-        {text && <span className="relative block text-md whitespace-pre-wrap [overflow-wrap:anywhere]"><Mentioned text={text} /></span>}
+        {text && <span className="relative block text-md whitespace-pre-wrap [overflow-wrap:anywhere]">{text}</span>}
         {/* Not for no files: a message sent and the same one landed are as high (an empty list was
             a row of its own, the bubble shrinking as it landed). */}
         {row && (
@@ -196,13 +198,22 @@ export function Pending({ s, who, retry, drop, bubbleRef }: { s: Sent; who: You;
 /** A letter: from another session's ir, a plugin or a peer. Not your words: on the left, in a grey
  *  bubble as yours are (the user, 2026-11-06). */
 function Letter({ src, text, time, onJump, children }: { src: From; text: string; time?: number; onJump: (id: string) => void; children?: ReactNode }) {
-  // Its files as in your bubble (ir send -a): they were not shown at all.
-  const files = Children.count(children) > 0;
+  // Its files as in your bubble (ir send -a): they were not shown at all. The sessions it names
+  // (ir send 4ceb1321 …) as cards before them, the words as written.
+  const named = useNamed(text);
+  const files = named.length + Children.count(children) > 0;
   return (
     <Sender who={src} title={time ? clock(time) : undefined} jump={src.session ? () => onJump(src.session!) : undefined}>
       <div className="max-w-[min(560px,100%)] min-w-0 rounded-xl rounded-tr-sm bg-fill px-3.5 py-2">
-        {text && <p className="m-0 text-md whitespace-pre-wrap [overflow-wrap:anywhere]"><Mentioned text={text} /></p>}
-        {files && <div className={cn("flex flex-wrap gap-1.5", text && "mt-1")}>{children}</div>}
+        {text && <p className="m-0 text-md whitespace-pre-wrap [overflow-wrap:anywhere]">{text}</p>}
+        {files && (
+          <div className={cn("flex flex-wrap gap-1.5", text && "mt-1")}>
+            {named.map((m, i) => (
+              <MentionCard key={i} m={m} />
+            ))}
+            {children}
+          </div>
+        )}
       </div>
     </Sender>
   );
@@ -264,6 +275,8 @@ const Assistant = memo(function Assistant({ b, session }: { b: Block; session: s
   return (
     <div className="flex min-w-0 flex-col items-start gap-2 pr-6">
       {text && <Markdown text={text} className="w-full" />}
+      {/* The sessions it names by id (09eeb223), as cards: the words as written. */}
+      <NamedCards text={text} />
       {!!b.files?.length && <Files session={session} files={b.files} />}
     </div>
   );
@@ -564,7 +577,7 @@ function StepCard({ s, session }: { s: Step; session: string }) {
             </Part>
             {/* The sessions it names by id, each a card going there (ir send, ir wait, ir new); not
                 a list's many (ir ls): the sidebar has those. */}
-            <IdsNamed text={s.input ?? ""} also={s.result?.text} />
+            <NamedCards text={s.input ?? ""} also={s.result?.text} />
           </>
         )}
       </div>
