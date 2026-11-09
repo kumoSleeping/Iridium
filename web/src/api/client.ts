@@ -193,8 +193,13 @@ export const api = {
   folderColor: (f: FolderColor) => writeAgain<{ ok: boolean }>("PUT", "/api/colors", f),
 
   // --- files in messages, uploads ---
-  fileURL: (id: string, ref: string, download = false) => `${S(id)}/files/${enc(ref)}${download ? "?download" : ""}`,
-  thumbURL: (id: string, ref: string, size = 1024) => `${S(id)}/files/${enc(ref)}/thumb?size=${size}`,
+  // v: the file's version (its mtime): a file written again at its path is another address, not
+  // the picture the browser has of it (the user, 2026-11-09: a shot redone showed the old one).
+  fileURL: (id: string, ref: string, download = false, v?: number) => {
+    const q = [download ? "download" : "", v ? `v=${v}` : ""].filter(Boolean).join("&");
+    return `${S(id)}/files/${enc(ref)}${q ? `?${q}` : ""}`;
+  },
+  thumbURL: (id: string, ref: string, size = 1024, v?: number) => `${S(id)}/files/${enc(ref)}/thumb?size=${size}${v ? `&v=${v}` : ""}`,
   upload: (id: string, u: NewUpload) => write<Upload>("POST", `${S(id)}/uploads`, u),
   uploadAt: (up: string) => get<Upload>(`/api/uploads/${enc(up)}`),
   uploadChunk: (up: string, offset: number, chunk: Blob, signal?: AbortSignal) =>

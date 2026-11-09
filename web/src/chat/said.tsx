@@ -158,9 +158,10 @@ export const YouBubble = forwardRef<HTMLDivElement, { text: string; who: You; fa
 
 /** A file in your words: a picture small, opening the original; any other its name and size. */
 function Attached({ session, f }: { session: string; f: FileRef }) {
-  if (f.kind === "image") return <Picture src={f.thumb ? api.thumbURL(session, f.ref, 256) : api.fileURL(session, f.ref)} full={api.fileURL(session, f.ref)} name={f.name} small under={previews.get(f.path)} />;
+  const url = api.fileURL(session, f.ref, false, f.mtime);
+  if (f.kind === "image") return <Picture src={f.thumb ? api.thumbURL(session, f.ref, 256, f.mtime) : url} full={url} name={f.name} small under={previews.get(f.path)} />;
   return (
-    <a href={api.fileURL(session, f.ref, true)} download={f.name} className="flex max-w-full items-center gap-1 rounded-md bg-paper/60 px-1.5 py-0.5 text-xs text-ink-2 hover:text-ink">
+    <a href={api.fileURL(session, f.ref, true, f.mtime)} download={f.name} className="flex max-w-full items-center gap-1 rounded-md bg-paper/60 px-1.5 py-0.5 text-xs text-ink-2 hover:text-ink">
       <FileText size={12} className="shrink-0" />
       <span className="truncate">{f.name}</span>
       <span className="shrink-0 text-ink-3 tabular-nums">{size(f.size)}</span>

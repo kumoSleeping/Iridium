@@ -398,3 +398,14 @@ describe("uploads", () => {
     expect(Object.keys(localStorage).filter((k) => k.startsWith("upload:"))).toEqual([]);
   }, 20_000);
 });
+
+// A file written again at its path (same ref) is another address: the page shows the new picture,
+// not the one it already has of that URL (the user, 2026-11-09).
+test("file and thumbnail URLs carry the file's version", () => {
+  expect(api.fileURL("s1", "r1")).toBe("/api/sessions/s1/files/r1");
+  expect(api.fileURL("s1", "r1", true)).toBe("/api/sessions/s1/files/r1?download");
+  expect(api.fileURL("s1", "r1", false, 42)).toBe("/api/sessions/s1/files/r1?v=42");
+  expect(api.fileURL("s1", "r1", true, 42)).toBe("/api/sessions/s1/files/r1?download&v=42");
+  expect(api.thumbURL("s1", "r1", 256, 42)).toBe("/api/sessions/s1/files/r1/thumb?size=256&v=42");
+  expect(api.thumbURL("s1", "r1", 256, 42)).not.toBe(api.thumbURL("s1", "r1", 256, 43));
+});
