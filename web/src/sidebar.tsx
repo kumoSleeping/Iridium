@@ -574,8 +574,8 @@ function WsRow({ flip, id, name, root, sessions, machine, remote, hidden, open, 
 
 /** The head's name, while another machine's Bot is linked (the user, 2026-11-09): a press opens a
  *  menu of what the list shows, 全部, 本机 or one other machine (its face, name, link lamp and round
- *  trip). Showing one, the head says that machine: its face on Iridium's mark's corner, its name
- *  and link where Iridium's are, its "+" opening there. An amber lamp after it while a session not shown needs you. 同步 DSH at the
+ *  trip). Showing one, the head says that machine: Iridium's mark, then its name, face and link
+ *  where Iridium's are, its "+" opening there. An amber lamp after it while a session not shown needs you. 同步 DSH at the
  *  menu's foot while a machine with dsh is shown. */
 function ViewSwitch({ view, machines, waits }: { view: string | null; machines: Machine[]; waits: boolean }) {
   const m = view ? machines.find((x) => x.id === view) : undefined;
@@ -589,12 +589,10 @@ function ViewSwitch({ view, machines, waits }: { view: string | null; machines: 
   return (
     <Menu.Root>
       <Menu.Trigger className="g-press -my-1 flex min-w-0 flex-1 items-center gap-2 rounded-md py-1 pl-2 text-left outline-none select-none hover:bg-fill data-popup-open:bg-fill">
-        {/* Iridium's mark stays; showing a machine, its face on the mark's corner, as on a logo. */}
-        <span className="relative grid shrink-0">
-          <IrMark size={18} className="text-ink" />
-          {m && <MachineBadge m={m} size={12} />}
-        </span>
+        {/* Iridium's mark stays; showing a machine, its face after its name, as a remote group's. */}
+        <IrMark size={18} className="text-ink" />
         <span className="truncate text-base font-semibold tracking-[-0.01em]">{m ? m.name : view === "" ? t("new.local") : "Iridium"}</span>
+        {m && <MachineFace m={m} size={16} />}
         {m ? <MachineLink m={m} /> : <LinkDot className="shrink-0" />}
         {waits && <Lamp status="waiting" />}
       </Menu.Trigger>
