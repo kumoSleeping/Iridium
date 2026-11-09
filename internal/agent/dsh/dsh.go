@@ -279,8 +279,26 @@ func (d *Driver) Spawn(o agent.SpawnOptions) (hold.Spec, error) {
 	if err != nil {
 		return hold.Spec{}, fmt.Errorf("dsh: writing the preset's modules: %w", err)
 	}
-	patch, err := pkg.Patch(preset, suffix, FileURL(modules))
-	if err != nil {
+	// A preset of DSH Desktop's bundles binds to each session over their layers (bound.go).
+	var bound []agent.Bundle
+	if r := o.Remote; r != nil && r.Bundles != nil && len(externalPackages(preset)) > 0 {
+		bundles, err := r.Bundles()
+		if err != nil {
+			d.logf("dsh: %v", err)
+		}
+		bound = Bound(preset, bundles)
+	}
+	var patch []byte
+	if len(bound) > 0 {
+		binder, err := o.LaunchFile(PresetFile, []byte(PresetModule))
+		if err != nil {
+			return hold.Spec{}, fmt.Errorf("dsh: writing the preset's binder: %w", err)
+		}
+		patch, err = pkg.BoundPatch(preset, suffix, FileURL(modules), FileURL(binder), bound)
+		if err != nil {
+			return hold.Spec{}, err
+		}
+	} else if patch, err = pkg.Patch(preset, suffix, FileURL(modules)); err != nil {
 		return hold.Spec{}, err
 	}
 	path, err := o.LaunchFile(PatchFile, patch)

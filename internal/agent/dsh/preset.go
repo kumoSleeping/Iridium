@@ -267,26 +267,17 @@ func scalarText(b []string) string {
 	return s
 }
 
-// Patch is the --patch file that runs preset process-wide, with suffix (Iridium's system prompt)
-// after the preset's own persona suffix. modules is ModulesFile's file: URL where the agent runs,
-// for the rows of packages outside dsh's installation (modules.go).
-func (p Package) Patch(preset agent.Preset, suffix, modules string) ([]byte, error) {
-	read := func(parts ...string) ([]string, error) {
-		ls, err := p.lines(parts...)
-		if err != nil {
-			return nil, fmt.Errorf("dsh: preset %s: %w", preset.ID, err)
-		}
-		return ls, nil
-	}
-	body := strings.Split(strings.TrimRight(strings.ReplaceAll(preset.Plugins, "\r\n", "\n"), "\n"), "\n")
+// personaOf is preset's rows less its persona row, which unscoped are the system-prompt row's
+// own: that row's config, the persona's with suffix (Iridium's system prompt) after its own.
+func personaOf(preset agent.Preset, suffix string) (body, persona []string, err error) {
+	body = strings.Split(strings.TrimRight(strings.ReplaceAll(preset.Plugins, "\r\n", "\n"), "\n"), "\n")
 	if strings.TrimSpace(preset.Plugins) == "" {
 		body = nil
 	}
 
-	// The persona row registers the prompt's persona sections, which unscoped are the
-	// system-prompt row's own: it becomes that row's config. complete (the persona is the whole
-	// prompt) comes as near as it can: no harness identity line.
-	var persona []string
+	// The persona row registers the prompt's persona sections: it becomes the system-prompt row's
+	// config. complete (the persona is the whole prompt) comes as near as it can: no harness
+	// identity line.
 	presetSuffix := ""
 	at := -1
 	for i := 0; i < len(body) && at < 0; i++ {
@@ -320,7 +311,7 @@ func (p Package) Patch(preset agent.Preset, suffix, modules string) ([]byte, err
 		if b := cfg["suffix"]; b != nil {
 			var err error
 			if presetSuffix, err = scalar(b); err != nil {
-				return nil, fmt.Errorf("dsh: preset %s: persona suffix: %w", preset.ID, err)
+				return nil, nil, fmt.Errorf("dsh: preset %s: persona suffix: %w", preset.ID, err)
 			}
 		}
 		if strings.TrimSpace(scalarText(cfg["includeRuntimeContext"])) == "false" {
@@ -339,6 +330,40 @@ func (p Package) Patch(preset agent.Preset, suffix, modules string) ([]byte, err
 				persona = append(persona, "      "+l)
 			}
 		}
+	}
+
+	return body, persona, nil
+}
+
+// webOff are the rows the web surface turns off: its per-agent rows move behind presets.
+func (p Package) webOff(preset string) (map[string]bool, error) {
+	web, err := p.lines("dsh-web-app", "cordis.patch.yml")
+	if err != nil {
+		return nil, fmt.Errorf("dsh: preset %s: %w", preset, err)
+	}
+	off := map[string]bool{}
+	for i := 0; i < len(web)-1; i++ {
+		if m := topDisabled.FindStringSubmatch(web[i]); m != nil && isDisabled.MatchString(web[i+1]) {
+			off[m[1]] = true
+		}
+	}
+	return off, nil
+}
+
+// Patch is the --patch file that runs preset process-wide, with suffix (Iridium's system prompt)
+// after the preset's own persona suffix. modules is ModulesFile's file: URL where the agent runs,
+// for the rows of packages outside dsh's installation (modules.go).
+func (p Package) Patch(preset agent.Preset, suffix, modules string) ([]byte, error) {
+	read := func(parts ...string) ([]string, error) {
+		ls, err := p.lines(parts...)
+		if err != nil {
+			return nil, fmt.Errorf("dsh: preset %s: %w", preset.ID, err)
+		}
+		return ls, nil
+	}
+	body, persona, err := personaOf(preset, suffix)
+	if err != nil {
+		return nil, err
 	}
 
 	// ids are the preset's row ids, each with the package of its name when that is not dsh's own.
@@ -396,15 +421,9 @@ func (p Package) Patch(preset agent.Preset, suffix, modules string) ([]byte, err
 	}
 	// The web surface's own disables (its per-agent rows move behind presets), and any base row a
 	// preset row shares an id or a package with.
-	web, err := read("dsh-web-app", "cordis.patch.yml")
+	off, err := p.webOff(preset.ID)
 	if err != nil {
 		return nil, err
-	}
-	off := map[string]bool{}
-	for i := 0; i < len(web)-1; i++ {
-		if m := topDisabled.FindStringSubmatch(web[i]); m != nil && isDisabled.MatchString(web[i+1]) {
-			off[m[1]] = true
-		}
 	}
 	// A base row the preset brings again from another package goes off only where that package is
 	// (even one the web surface turns off): one the agent cannot load leaves dsh's own (its shell and

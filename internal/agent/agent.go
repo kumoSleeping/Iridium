@@ -95,6 +95,16 @@ type Remote struct {
 	// Presets are the agent presets the dsh there registers, and its default (the dsh plugin asks
 	// DSH Desktop's own registry); nil: read from its package's files.
 	Presets func() ([]Preset, string, error)
+	// Bundles are the bundles of DSH Desktop's profile there besides dsh's own (the dsh plugin's
+	// dsh.bundles), for a preset of theirs; nil: none known.
+	Bundles func() ([]Bundle, error)
+}
+
+// Bundle is a dsh bundle (a package whose patches compose a profile): its name and its patch
+// files' text.
+type Bundle struct {
+	Name    string
+	Patches []string
 }
 
 // Preset is an agent preset dsh registers (a @deepseek-ai/dsh-agent-preset row): its id, the

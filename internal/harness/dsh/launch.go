@@ -16,8 +16,8 @@ import (
 const fileFiled = "remote-filed"
 
 // Prepare gives a dsh launch what dsh takes at its start: its machine's models (the driver's
-// catalog), and at another machine its presets there and DSH Desktop's models and providers
-// (dsh.llm's patch).
+// catalog), and at another machine its presets there, DSH Desktop's models and providers
+// (dsh.llm's patch) and the bundles of its profile, for a preset of theirs (dsh.bundles).
 func (c *Channel) Prepare(ctx context.Context, r harness.Ref, o *agent.SpawnOptions) error {
 	if !ours(r) {
 		return nil
@@ -28,6 +28,7 @@ func (c *Channel) Prepare(ctx context.Context, r harness.Ref, o *agent.SpawnOpti
 		o.Remote.Presets = c.spawnPresets(ctx, machine)
 		if mc := c.machine(machine); mc != nil {
 			o.Remote.Patches = c.desktopLLM(ctx, mc)
+			o.Remote.Bundles = c.desktopBundles(ctx, mc)
 		}
 	}
 	return nil

@@ -105,6 +105,7 @@
   - 事件 `held.changed {session, live}`：`live` 同 `held.get` 的回答，见“附加功能”。
   - `dsh.attach {session, cwd}` → `{}`，把会话登记到 `cwd` 对应的工作区（没有就新建），Desktop 侧边栏里就有它。
   - `dsh.presets {}` → `{presets: [{id, name?, description?, plugins, broken?}], default}`，插件所在 dsh 进程的 Agent 预设注册表（`agentPresets` 的 `list()`、`defaultId`，`plugins` 是 `readDocument` 给的子插件行 YAML）：这边按它列预设、生成 patch，自建和改过的预设也能用；不支持时退回读包里的预设文件。
+  - `dsh.bundles {}` → `{bundles: [{name, version?, patches}]}`：插件所在 profile 的 bundle（`package.json` 的 `dsh.profile.bundles`，按顺序），去掉 dsh 自己的（`@deepseek-ai/`）和本插件，`patches` 是它 `dsh.bundle.patch` 列的文件的原文。用于第三方 bundle 的预设（见“dsh 插件”）；不支持时那种预设退回按进程摊平。
   - `dsh.llm {}` → `{patch}`：插件把 Desktop 此刻生效的模型设置（基础包里的 `dsh-llm*` 行和 `agent-default-model`，照它的配置和开关，`!!js` 原样）写成那台机器上的一个补丁，只回路径；这边起 dsh 会话和模型探测时多带 `--patch <它>`，sdk 进程就有了 Desktop 的供应商、模型和默认模型。里面可能有密钥：文件只在那台机器上，执行端不对外读。
 
 ## 网页（用户，2026-11-08）
@@ -135,7 +136,11 @@
 
 一个 cordis 插件，npm 包 `dsh-remote-iridium`，每次发版由 release.yml 用同一版本号发到 npm（Trusted Publishing，不用 TOKEN）；在 `dsh web` 的“添加插件”里填包名即可装（或 `dsh plugin --profile web add dsh-remote-iridium`），跟着 `dsh web` 常驻：连这边、实现上面的必需部分。它不碰 dsh 自己的会话，每个会话照旧是一个 `dsh --profile sdk --patch …` 子进程（预设和系统提示按进程，`internal/agent/dsh/preset.go`）。
 
-第三方包的预设（2026-11-09）：Desktop 的预设可以来自 web profile 里的 bundle，例如 OMD 的 `omd-ptc`、`oh-my-dsh`，行名是 `oh-my-dsh/host/tool-pwsh` 这种。sdk profile 只从 dsh 安装目录和自己的目录找包，这些行原样放进去会加载失败，被它们替换掉的基础行（shell、jobs）又已关掉，会话就没了执行工具。现在 patch 里这类行（包不是 `@deepseek-ai/` 的）改走 `dsh-modules.mjs`（和 patch 写在一起）：它在 agent 那台机器上按 dsh 的家目录（`DSH_HOME`，否则 `~/.dsh`）去 `profiles/*/node_modules` 找包（先 web），照 `exports` 加载。被这类行替换的基础行改为条件关闭：那个包在才关，不在就留着 dsh 自己的。这边读不到 `profiles`（插件不给），所以找包放在那边的进程里做。限制：只装了预设、没装 bundle 自己那层（OMD 的根插件 `omd` 服务、workflow 运行时等），预设里依赖它们的行（OMD 的 PTC 执行器 `run_code`、上下文、codegraph、workflow）起不来，执行退回 dsh 自带的；要这些得在 sdk 进程里装上 bundle 那层、并按会话绑定预设。
+第三方包的预设（2026-11-09）：Desktop 的预设可以来自 web profile 里的 bundle，例如 OMD 的 `omd-ptc`、`oh-my-dsh`，行名是 `oh-my-dsh/host/tool-pwsh` 这种。sdk profile 只从 dsh 安装目录和自己的目录找包，这些行原样放进去会加载失败，被它们替换掉的基础行（shell、jobs）又已关掉，会话就没了执行工具。现在分两种（`internal/agent/dsh/modules.go`、`bound.go`）：
+
+- 找包：patch 里包不是 `@deepseek-ai/` 的行改走 `dsh-modules.mjs`（和 patch 写在一起）：它在 agent 那台机器上按 dsh 的家目录（`DSH_HOME`，否则 `~/.dsh`）去 `profiles/*/node_modules` 找包（先 web），照 `exports` 加载。这边读不到 `profiles`（插件不给），所以找包放在那边的进程里做。
+- 绑定（插件有 `dsh.bundles` 时）：预设用到的包是 Desktop 的 bundle，就照 Desktop 的组合来：预设注册表、web 的禁用、那个 bundle 自己那层（去掉其中的预设声明，预设以 `dsh.presets` 读到的为准）、这个预设的声明，再由 `dsh-preset.mjs` 在每个会话创建时绑定这个预设（`agentPresets.recompose`，子代理随父会话）。OMD 的 PTC 执行器只能在绑定的预设里用，这样 `run_code`、上下文、codegraph、workflow 都有。实测（dsh 0.2.2-rc.1、OMD 1.3.9）：`omd-ptc`、`oh-my-dsh` 都是 63 个工具，`run_code` 里跑 `git --version` 正常。仍没有的：只在 Desktop 网页进程里有的（OMD 的 deepseek-workbench、extensions、rewind 要 `webServer`），以及本插件（不进 sdk 进程，所以没有 Ultra）。
+- 插件旧、没有 `dsh.bundles`，或预设不用别的 bundle：照旧按进程摊平；被第三方包的行替换的基础行改为条件关闭（那个包在才关，`!!js`，并保留基础行自己的条件），包不在就留着 dsh 自己的 shell 和 jobs。这时 OMD 预设里依赖 `omd` 服务的行（PTC 执行器、上下文、codegraph、workflow）起不来，执行退回 dsh 自带的，shell、jobs、文件工具都在。
 
 实测（2026-11-08）：Mac（arm64，Node 25）上 dsh 0.2.2-rc.1 的 `--profile sdk` 握手、开会话、`shutdown` 都和 Linux 一样，记录写在 `sessions/--<目录>--/<会话>/`。0.1.0 没有 sdk profile，执行端握手报的版本低于 0.2.2 时不给开 dsh。Windows 待测。
 
@@ -186,7 +191,7 @@
 - 插件里的注册表：cordis 服务 `iridiumFeatures`（`features.js`）。`provide({id, get, set, ownsEffort?, effort?, setEffort?})` 注册一项，返回撤销函数；同 id 先到先得，前一个撤了后一个才顶上。每次调用有时限（读 3 秒、改 15 秒），出错或超时只让这一项不可用，错误消息作原因；`held.get` 里各项的读取和“谁管强度”同时问，整个回复 3 秒内给出。插件设置“Iridium”一页有一组开关“提供给 Iridium 的附加功能”，关掉的按 id 记在配置 `unfeatured`，不提供、也不能改；这一页在浏览器那一半，拿不到注册表，只列插件自带适配的（现在是 `omd.ultra`）和已关掉的。
 - 推送：Desktop 里有变化（切了功能、选了模型、agent 载入或卸下；Desktop 拿着的会话另外每 3 秒看一次），插件对这边 10 分钟内问过的会话发 `held.changed`（Desktop 一直拿着的会话不过期），每个会话每秒最多两次。
 - OMD 的适配：`adapters/omd.js` 是插件里唯一认识 OMD 的文件，一个 cordis 子插件，`inject: ['omd', 'iridiumFeatures']`：两样都在才启用，没装 OMD 时不运行也不报错，OMD 卸载或重载时连同这一项撤掉。它把 OMD 的 `ultracode`（`inspect`、`select`）译成 `omd.ultra`：名字 Ultra，暖色，子模式 Workflow、Agent Team（OMD 说能组队时才有）、自由。开着时强度归它管（滑条显示、设的都是 Ultra 的档位）；开时不给档位由 OMD 选（已开着的保留原档位），关时回到滑条的档位。哪天 OMD 自己注册进 `iridiumFeatures`，删掉这个文件即可。
-- 只在 Desktop 拿着的会话上能开。Iridium 自己起的 dsh 会话是 `dsh --profile sdk` 子进程，不加载 OMD 和本插件，没有 Ultra；它们和 Desktop 没拿着的会话照样列出这一项，但不可用（OMD 为会话记着的 Ultra 照样显示为开），原因是插件给的（“会话不在 DSH Desktop 里打开着，或没用 OMD 的预设”）。Iridium 所在机器上直接发现的 Desktop 会话没有执行端，也就没有附加功能；插件旧、握手没有 `held.features` 的，同样没有。
+- 只在 Desktop 拿着的会话上能开。Iridium 自己起的 dsh 会话是 `dsh --profile sdk` 子进程，不加载本插件（用 OMD 的预设时加载 OMD 那层，见“dsh 插件”），没有 Ultra；它们和 Desktop 没拿着的会话照样列出这一项，但不可用（OMD 为会话记着的 Ultra 照样显示为开），原因是插件给的（“会话不在 DSH Desktop 里打开着，或没用 OMD 的预设”）。Iridium 所在机器上直接发现的 Desktop 会话没有执行端，也就没有附加功能；插件旧、握手没有 `held.features` 的，同样没有。
 - 这边的限制：
   - `id` 形如 `<插件>.<名字>`（只用 `a-z0-9-`），不合的丢；同 id 取第一个；每个会话最多 4 项，多的丢（每台机器记一次日志）。`v` 大于 1 的丢；`place` 只认 `effort`（网页只有这一处），别的丢；`tone` 只认 `warm`，别的当没有。
   - 名字、选项名至多 24 字，说明、原因至多 120 字：去掉控制字符和首尾空白，长了截断。选项至多 8 个，id 只用 `a-z0-9-`；`option` 不是其中之一就当没有。
