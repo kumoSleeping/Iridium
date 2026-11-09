@@ -51,6 +51,10 @@ type piContent struct {
 	Arguments json.RawMessage `json:"arguments"`
 }
 
+// piUnsent is what pi's read adds to a picture's note when the model takes none: the picture is
+// kept in the record, and left out of what the model is sent.
+const piUnsent = "[Current model does not support images."
+
 // imageRef is a line an extension of pi's adds for each picture it sends along ("[Image #1]: path"),
 // the path in your words become "[Image #1]".
 var imageRef = regexp.MustCompile(`(?m)^\[Image #(\d+)\]: (\S.*)$\n?`)
@@ -144,8 +148,15 @@ func piBlocks(off int64, raw []byte, max int, sources Sources) []api.Block {
 			}
 		}
 	case "toolResult":
-		text, n := clip(joined(m.Content), max)
-		add(api.Block{Kind: api.BlockKindResult, ID: m.ToolCallID, Text: text, Length: n, Error: m.IsError})
+		all := joined(m.Content)
+		text, n := clip(all, max)
+		images := pictures(m.Content, max < 0)
+		if strings.Contains(all, piUnsent) {
+			for i := range images {
+				images[i].Unsent = true
+			}
+		}
+		add(api.Block{Kind: api.BlockKindResult, ID: m.ToolCallID, Text: text, Length: n, Error: m.IsError, Images: images})
 	case "bashExecution":
 		text, n := clip("$ "+m.Command+"\n"+m.Output, max)
 		add(api.Block{Kind: api.BlockKindSystem, Event: api.SystemEventLocalCommand, Text: text, Length: n})

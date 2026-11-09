@@ -20,6 +20,7 @@
 | `GET /api/sessions/{id}` | → `SessionState` | 打开的会话的状态，和事件流里的同一份 |
 | `GET /api/sessions/{id}/messages` | → `MessagePage` | 不带参数：最新一页。`before=<start>`：往回一页。`after=<end>`：之后新写的 |
 | `GET /api/sessions/{id}/block?at=<at>` | → `{text}` | 截短的块（工具参数、结果、思考、系统行）的全文 |
+| `GET /api/sessions/{id}/image?at=<at>&n=<n>` | → 图片 | 工具结果（`Result.images`，`at` 是结果的）给模型的第 `n` 张图，取自 agent 的记录，不读文件现在的样子：Claude、pi 的在结果里，Codex 的在脚本的输出里，dsh 的在它的附件库（经通道，远端经执行端）。只给 PNG、JPEG、GIF、WebP，按内容的 ETag。没有 404，不在了 410，所在机器没连上 409 |
 | `POST /api/sessions/{id}/send` | `{text, steer?}` → `{input, queued?, command?, session?, desktop?}` | 发消息。agent 没在跑就先拉起（有记录就 `--resume`）。回合进行中发的进待发队列（`queued`），`steer` 则并进当前回合。`/` 开头的命令从不插话，排到回合结束。`/clear`（`/reset`、`/new`，后面带字、带附件也算）由 Iridium 做：同处开新会话（模型、模式、强度照旧），旧的空闲时归档，回新会话的 `session`。`command`：agent 自己执行、记录里不会有这句（Codex、pi 的 `/compact`）。见“待发队列”。在别处运行的回 409；别的机器上 DSH Desktop 开着的 dsh 会话，消息交给 Desktop 里它的 agent（`desktop`，没有 `input`，见 `docs/exec.md`“远端 DSH”） |
 | `POST /api/sessions/{id}/interrupt` | → `{ok}` | 停掉当前回合（Esc），agent 留着。队列暂停 |
 | `POST /api/sessions/{id}/stop` | → `{ok}` | 停掉 agent 进程（关 stdin，写完记录自己退出）。会话还在，下一条消息再拉起。队列暂停 |

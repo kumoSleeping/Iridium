@@ -1,9 +1,12 @@
 package transcript
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
+	"mime"
 	"os"
 	"path/filepath"
 	"sort"
@@ -101,12 +104,12 @@ func codexBlocks(off int64, raw []byte, max int, sources Sources) []api.Block {
 	if json.Unmarshal(l.Payload.Item, &it) != nil {
 		return nil
 	}
-	call := func(name string, input any, result string, failed bool) {
+	call := func(name string, input any, result string, failed bool, images ...api.Image) {
 		b, _ := json.MarshalIndent(input, "", "  ")
 		in, n := clip(string(b), max)
 		add(api.Block{Kind: api.BlockKindTool, ID: it.ID, Name: name, Input: in, Length: n})
 		text, m := clip(result, max)
-		add(api.Block{Kind: api.BlockKindResult, ID: it.ID, Text: text, Length: m, Error: failed})
+		add(api.Block{Kind: api.BlockKindResult, ID: it.ID, Text: text, Length: m, Error: failed, Images: images})
 	}
 	failed := it.Status != "" && it.Status != "completed"
 	switch it.Type {
@@ -170,15 +173,19 @@ func codexBlocks(off int64, raw []byte, max int, sources Sources) []api.Block {
 			args = it.Arguments
 		}
 		out, isErr := "", false
+		var images []api.Image
 		if it.Result != nil {
-			out, isErr = joined(it.Result.Content), it.Result.IsError
+			out, isErr, images = joined(it.Result.Content), it.Result.IsError, pictures(it.Result.Content, max < 0)
 		}
 		if out == "" && len(it.Error) > 0 && string(it.Error) != "null" {
 			out = string(it.Error)
 		}
-		call("mcp__"+it.Server+"__"+it.Tool, args, out, failed || isErr)
+		call("mcp__"+it.Server+"__"+it.Tool, args, out, failed || isErr, images...)
 	case "ImageView":
-		call("view_image", map[string]any{"path": strings.TrimPrefix(it.Path, "file://")}, "", false)
+		// The picture is not on this line: the output of the script that viewed it has it
+		// (codexShown). Its type by its name, till it is read.
+		path := strings.TrimPrefix(it.Path, "file://")
+		call("view_image", map[string]any{"path": path}, "", false, api.Image{Mime: mime.TypeByExtension(strings.ToLower(filepath.Ext(path))), Later: true})
 	case "Extension":
 		// Its web search; other kinds (clock.sleep...) are not the conversation.
 		if it.Kind != "web.search" {
@@ -249,4 +256,143 @@ func getenv(env []string, k string) string {
 		}
 	}
 	return v
+}
+
+// codexShown is the picture the ImageView on the line at off (n bytes) showed the model. In code
+// mode the model does not call view_image itself: a script it runs does (exec, a custom tool
+// call), and the model sees what the script hands on with image(), in the script's output
+// (custom_tool_call_output: input_image items, data URLs). Codex records an ImageView for each
+// view_image between the call and its output, so the k-th of them is the output's k-th picture,
+// where the two count the same: a script may also show a picture it did not view, or view one it
+// does not show, and then none is told apart. size: where the record's whole lines end.
+func codexShown(r io.ReaderAt, size, off, n int64) (api.Image, error) {
+	// Back to the script's call: the ImageViews before this one.
+	before, call := 0, ""
+	for pos, k := off, 0; call == ""; k++ {
+		if pos <= 0 || k > codexWindow {
+			return api.Image{}, ErrNoImage
+		}
+		start, line, err := lineBefore(r, pos)
+		if err != nil {
+			return api.Image{}, err
+		}
+		switch kind, id, _ := codexStep(line); kind {
+		case codexView:
+			before++
+		case codexCall:
+			call = id
+		case codexOutput:
+			return api.Image{}, ErrNoImage
+		}
+		pos = start
+	}
+	// On to its output: the ImageViews after this one, and the pictures.
+	from := off + n + 1
+	br := bufio.NewReaderSize(io.NewSectionReader(r, from, max(size-from, 0)), 64<<10)
+	after := 0
+	for k := 0; k <= codexWindow; k++ {
+		line, err := longLine(br)
+		if err != nil {
+			return api.Image{}, ErrNoImage
+		}
+		switch kind, id, output := codexStep(line); kind {
+		case codexView:
+			after++
+		case codexCall:
+			return api.Image{}, ErrNoImage // another script began first: whose is unclear
+		case codexOutput:
+			images := pictures(output, true)
+			if id != call || len(images) != before+1+after {
+				return api.Image{}, ErrNoImage
+			}
+			return images[before], nil
+		}
+	}
+	return api.Image{}, ErrNoImage
+}
+
+// codexWindow is the lines codexShown reads each way from an ImageView, at most.
+const codexWindow = 10000
+
+// What a rollout line is to codexShown.
+const (
+	codexOther  = iota
+	codexView   // an ImageView completed
+	codexCall   // a tool call the model made (a script's, or another's)
+	codexOutput // a call's output, as the model was given it
+)
+
+// codexStep is what line is to codexShown: its call's id for a call or an output, and an
+// output's content.
+func codexStep(line []byte) (kind int, call string, output json.RawMessage) {
+	var l struct {
+		Type    string `json:"type"`
+		Payload struct {
+			Type   string `json:"type"`
+			CallID string `json:"call_id"`
+			Item   struct {
+				Type string `json:"type"`
+			} `json:"item"`
+			Output json.RawMessage `json:"output"`
+		} `json:"payload"`
+	}
+	if json.Unmarshal(line, &l) != nil {
+		return codexOther, "", nil
+	}
+	p := l.Payload
+	switch {
+	case l.Type == "event_msg" && p.Type == "item_completed" && p.Item.Type == "ImageView":
+		return codexView, "", nil
+	case l.Type == "response_item" && (p.Type == "custom_tool_call" || p.Type == "function_call"):
+		return codexCall, p.CallID, nil
+	case l.Type == "response_item" && (p.Type == "custom_tool_call_output" || p.Type == "function_call_output"):
+		return codexOutput, p.CallID, p.Output
+	}
+	return codexOther, "", nil
+}
+
+// maxLine is the longest line read whole outside the index (a script's output with its
+// pictures).
+const maxLine = 64 << 20
+
+// lineBefore is the line that ends just before pos (a line's start) and where it starts.
+func lineBefore(r io.ReaderAt, pos int64) (int64, []byte, error) {
+	end := pos - 1 // its newline
+	var line []byte
+	for at := end; ; {
+		from := max(at-64<<10, 0)
+		chunk := make([]byte, at-from)
+		if _, err := r.ReadAt(chunk, from); err != nil {
+			return 0, nil, err
+		}
+		if i := bytes.LastIndexByte(chunk, '\n'); i >= 0 {
+			return from + int64(i) + 1, append(chunk[i+1:], line...), nil
+		}
+		line = append(chunk, line...)
+		if from == 0 {
+			return 0, line, nil
+		}
+		if len(line) > maxLine {
+			return 0, nil, ErrNoImage
+		}
+		at = from
+	}
+}
+
+// longLine is br's next whole line, without its newline.
+func longLine(br *bufio.Reader) ([]byte, error) {
+	var line []byte
+	for {
+		chunk, err := br.ReadSlice('\n')
+		if err == bufio.ErrBufferFull {
+			if line = append(line, chunk...); len(line) > maxLine {
+				return nil, ErrNoImage
+			}
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		return append(line, chunk[:len(chunk)-1]...), nil
+	}
 }

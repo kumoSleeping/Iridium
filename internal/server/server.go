@@ -131,6 +131,7 @@ func (s *Server) Handler(local bool) http.Handler {
 	mux.HandleFunc("GET /api/sessions/{id}", s.masked(s.get))
 	mux.HandleFunc("GET /api/sessions/{id}/messages", s.masked(s.messages))
 	mux.HandleFunc("GET /api/sessions/{id}/block", s.masked(s.block))
+	mux.HandleFunc("GET /api/sessions/{id}/image", s.image)
 	mux.HandleFunc("POST /api/sessions/{id}/send", s.send)
 	mux.HandleFunc("POST /api/sessions/{id}/interrupt", s.use(s.interrupt))
 	mux.HandleFunc("POST /api/sessions/{id}/stop", s.use(s.stop))

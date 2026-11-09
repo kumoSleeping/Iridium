@@ -311,6 +311,8 @@ type Block struct {
 	Input  string  `json:"input,omitempty"`
 	Result *Result `json:"result,omitempty"`
 	Error  bool    `json:"error,omitempty"` // result
+	// result: the pictures it gave the model.
+	Images []Image `json:"images,omitempty"`
 	// system: what happened. Compact: a compaction's figures, as far as the agent records them.
 	Event   SystemEvent `json:"event,omitempty"`
 	Compact *Compaction `json:"compact,omitempty"`
@@ -363,13 +365,34 @@ type SessionWorkflow struct {
 // "继续"): the page shows those as a faint line of its own, not as your words.
 const SourceIridium = "Iridium"
 
-// Result is a tool call's result.
+// Result is a tool call's result: its text, and the pictures it gave the model.
 type Result struct {
-	At     string `json:"at"`
-	Time   int64  `json:"time,omitempty"`
-	Text   string `json:"text"`
-	Length int    `json:"length,omitempty"`
-	Error  bool   `json:"error,omitempty"`
+	At     string  `json:"at"`
+	Time   int64   `json:"time,omitempty"`
+	Text   string  `json:"text"`
+	Length int     `json:"length,omitempty"`
+	Error  bool    `json:"error,omitempty"`
+	Images []Image `json:"images,omitempty"`
+}
+
+// Image is a picture a tool's result gave the agent's model, as the agent's record keeps it: the
+// one the model was given, never the file as it is now. GET image?at=<its result's at>&n=<its
+// place in Images> gives it.
+type Image struct {
+	Mime string `json:"mime,omitempty"`
+	// W, H: its size in pixels, where the record or the picture's header tells; the page keeps
+	// its place before it has loaded.
+	W int `json:"w,omitempty"`
+	H int `json:"h,omitempty"`
+	// Unsent: the record says the model was not given it (pi, for a model without pictures).
+	Unsent bool `json:"unsent,omitempty"`
+	// Where the server finds it, never sent: its bytes in the record (Data, base64; only where
+	// the record is read again whole), a handle of the agent's own that its channel reads
+	// (Handle: dsh's attachment), or on a later line of the record (Later: Codex's, the output of
+	// the script that showed it).
+	Data   string `json:"-"`
+	Handle string `json:"-"`
+	Later  bool   `json:"-"`
 }
 
 // MessagePage is up to 20 messages (things you or the agent said) with the blocks between them.
