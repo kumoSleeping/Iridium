@@ -191,7 +191,7 @@ func dshBlocks(off int64, raw []byte, max int, sources Sources) []api.Block {
 			break
 		}
 		text, n := clip(joined(d.Message.Content), max)
-		add(api.Block{Kind: api.BlockKindResult, ID: d.Message.ToolCallID, Text: text, Length: n, Error: d.Message.IsError})
+		add(api.Block{Kind: api.BlockKindResult, ID: d.Message.ToolCallID, Text: text, Length: n, Error: d.Message.IsError, Images: pictures(d.Message.Content, max < 0)})
 	case "compaction/summary":
 		text, n := clip(joined(d.Summary), max)
 		b := api.Block{Kind: api.BlockKindSystem, Event: api.SystemEventCompact, Text: text, Length: n}

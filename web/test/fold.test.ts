@@ -3,7 +3,7 @@ import { partialInput, tail } from "../src/chat/partial";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import type { Block } from "../src/api/types.gen";
 import { cmdOf, cmdOfCall, renameOnly } from "../src/chat/cmd";
-import { argOf, diffOf, diffSum, diffText, folded, foldLine, foldSaid, lineDiff, patchDiff, runCmds, type Step } from "../src/chat/fold";
+import { argOf, diffOf, diffSum, diffText, folded, foldLine, foldSaid, lineDiff, patchDiff, pictureName, runCmds, type Step } from "../src/chat/fold";
 import { setLang } from "../src/i18n";
 
 const call = (name: string, input: unknown, more: Partial<Omit<Block, "kind">> = {}): Step => ({ at: `${name}.${Math.random()}`, kind: "tool", name, input: typeof input === "string" ? input : JSON.stringify(input), result: { at: "r", text: "ok" }, ...more });
@@ -237,5 +237,25 @@ describe("a call's input as it is written", () => {
   test("the tail shows what is being typed", () => {
     expect(tail("a\n  b", 90)).toBe("a b");
     expect(tail("x".repeat(100), 10)).toBe("…" + "x".repeat(10));
+  });
+});
+
+describe("a step's pictures", () => {
+  test("a result on another page brings its pictures to its call", () => {
+    const images = [{ mime: "image/png", w: 640, h: 420 }];
+    const shown = folded([
+      { at: "1.0", kind: "result", id: "c", text: "Read image file", images },
+      { at: "2.0", kind: "tool", id: "c", name: "read", input: '{"path":"/w/chart.png"}' },
+      { at: "3.0", kind: "assistant", text: "a chart" },
+    ]);
+    const fold = shown[0];
+    expect(fold?.kind === "fold" && fold.steps[0]?.result?.images).toEqual(images);
+  });
+  test("they are downloaded by the picture's own name, else the tool's, as what they are", () => {
+    expect(pictureName(call("Read", { file_path: "/w/shots/login.PNG" }), "image/png")).toBe("login.png");
+    expect(pictureName(call("read_image", { file_path: "C:\\Users\\kumo\\err.webp" }), "image/webp")).toBe("err.webp");
+    expect(pictureName(call("read", { path: "/w/a.png" }), "image/jpeg")).toBe("a.jpg");
+    expect(pictureName(call("view_image", { path: "/w/notes.txt" }))).toBe("view_image.png");
+    expect(pictureName(call("mcp__browser__screenshot", {}), "image/jpeg")).toBe("mcp__browser__screenshot.jpg");
   });
 });

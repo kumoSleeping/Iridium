@@ -27,7 +27,35 @@ var (
 	RegistryPath = []string{"storages", "workspace.json"}
 	SummaryDir   = []string{"storages", "session_projcache", "sessions"}
 	SessionsDir  = []string{"sessions"}
+	// AttachmentsDir holds what sessions were given (a picture a tool read, one you sent), each
+	// by its content's sha256: <first two hex digits>/<hex>, whatever its kind (attachments v1).
+	AttachmentsDir = []string{"attachments", "v1", "objects"}
 )
+
+// Home is dsh's home at a machine, as dsh finds it there: the one its executor said (said), else
+// DSH_HOME in env; "" for neither (then .dsh in the user's home).
+func Home(said string, env []string) string {
+	if said != "" {
+		return said
+	}
+	home := ""
+	for _, kv := range env {
+		if v, ok := strings.CutPrefix(kv, "DSH_HOME="); ok {
+			home = v
+		}
+	}
+	return home
+}
+
+// Attachment is where, below the home, the attachment handle names ("sha256:<hex>", as a
+// session's record gives it) is kept, and its sha256 (hex); ok false for any other handle.
+func Attachment(handle string) (elems []string, sum string, ok bool) {
+	sum, ok = strings.CutPrefix(handle, "sha256:")
+	if !ok || len(sum) != 64 || strings.Trim(sum, "0123456789abcdef") != "" {
+		return nil, "", false
+	}
+	return append(slices.Clone(AttachmentsDir), sum[:2], sum), sum, true
+}
 
 // Workspace is one of the registry's: a folder (the machine's own path), its title in DSH
 // Desktop, the sessions filed under it.

@@ -398,6 +398,10 @@ export interface Block {
   result?: Result;
   error?: boolean; // result
   /**
+   * result: the pictures it gave the model.
+   */
+  images?: Image[];
+  /**
    * system: what happened. Compact: a compaction's figures, as far as the agent records them.
    */
   event?: SystemEvent;
@@ -450,7 +454,7 @@ export interface SessionWorkflow {
  */
 export const SourceIridium = "Iridium";
 /**
- * Result is a tool call's result.
+ * Result is a tool call's result: its text, and the pictures it gave the model.
  */
 export interface Result {
   at: string;
@@ -458,6 +462,25 @@ export interface Result {
   text: string;
   length?: number /* int */;
   error?: boolean;
+  images?: Image[];
+}
+/**
+ * Image is a picture a tool's result gave the agent's model, as the agent's record keeps it: the
+ * one the model was given, never the file as it is now. GET image?at=<its result's at>&n=<its
+ * place in Images> gives it.
+ */
+export interface Image {
+  mime?: string;
+  /**
+   * W, H: its size in pixels, where the record or the picture's header tells; the page keeps
+   * its place before it has loaded.
+   */
+  w?: number /* int */;
+  h?: number /* int */;
+  /**
+   * Unsent: the record says the model was not given it (pi, for a model without pictures).
+   */
+  unsent?: boolean;
 }
 /**
  * MessagePage is up to 20 messages (things you or the agent said) with the blocks between them.

@@ -3,12 +3,12 @@ package session
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
 
 	"github.com/kumoSleeping/iridium/internal/api"
+	"github.com/kumoSleeping/iridium/internal/harness"
 )
 
 // Cards: an ask as the web's confirmation panel and plugins show it (plan "确认面板", "插件"). One
@@ -150,8 +150,9 @@ func (m *Manager) AnswerCard(ctx context.Context, ans api.CardAnswer) error {
 	return m.Answer(ctx, session, a)
 }
 
-// ErrGone: what the request names was there and is no more (an ask answered elsewhere).
-var ErrGone = errors.New("gone")
+// ErrGone: what the request names was there and is no more (an ask answered elsewhere, a
+// picture its agent no longer keeps).
+var ErrGone = harness.ErrGone
 
 func firstLines(s string, n int) []string {
 	var out []string

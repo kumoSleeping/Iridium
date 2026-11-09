@@ -115,3 +115,30 @@ func TestParseHead(t *testing.T) {
 		t.Error("not zstd: no error")
 	}
 }
+
+func TestHomeAndAttachment(t *testing.T) {
+	if got := Home("/said", []string{"DSH_HOME=/env"}); got != "/said" {
+		t.Errorf("said: %q", got)
+	}
+	if got := Home("", []string{"DSH_HOME=/a", "PATH=/bin", "DSH_HOME=/env"}); got != "/env" {
+		t.Errorf("env, the last: %q", got)
+	}
+	if got := Home("", []string{"PATH=/bin"}); got != "" {
+		t.Errorf("neither: %q", got)
+	}
+	sum := strings.Repeat("ab", 32)
+	elems, got, ok := Attachment("sha256:" + sum)
+	if !ok || got != sum || strings.Join(elems, "/") != "attachments/v1/objects/ab/"+sum {
+		t.Errorf("Attachment: %v %q %v", elems, got, ok)
+	}
+	for _, h := range []string{sum, "sha256:" + sum[:63], "sha256:" + strings.ToUpper(sum), "sha256:../" + sum[3:], "md5:" + sum} {
+		if _, _, ok := Attachment(h); ok {
+			t.Errorf("%q taken", h)
+		}
+	}
+	// What Attachment gives is its own: AttachmentsDir stays as it is.
+	elems[0] = "x"
+	if AttachmentsDir[0] != "attachments" {
+		t.Error("AttachmentsDir changed")
+	}
+}
