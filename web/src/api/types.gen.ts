@@ -755,6 +755,15 @@ export interface Model {
   resolved?: string;
   efforts?: string[];
   noEffort?: boolean;
+  /**
+   * EffortNames: what the agent calls its efforts (dsh: as a provider registers them, "ultra":
+   * "Ultra"), for those the page has no name of its own for.
+   */
+  effortNames?: { [key: string]: string};
+  /**
+   * Group: what it is listed under (dsh: its provider's name); the menu heads each group.
+   */
+  group?: string;
 }
 /**
  * SetModel, SetMode and SetEffort change a session's model, approval mode and thinking effort,

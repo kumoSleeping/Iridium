@@ -257,6 +257,10 @@ type Model struct {
 	Resolved    string   `json:"resolved,omitempty"`
 	Efforts     []string `json:"efforts,omitempty"`
 	NoEffort    bool     `json:"noEffort,omitempty"`
+	// EffortNames: the agent's names of its efforts, by id (dsh's providers name theirs).
+	EffortNames map[string]string `json:"effortNames,omitempty"`
+	// Group: what the model is listed under (dsh: its provider's name).
+	Group string `json:"group,omitempty"`
 }
 
 type Command struct {

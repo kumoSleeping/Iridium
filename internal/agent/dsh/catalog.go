@@ -3,6 +3,7 @@ package dsh
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -35,7 +36,7 @@ export function apply(ctx) {
         const r = await ctx.llm.resolveModelInfo(p.id, m.id).catch(() => undefined)
         models.push({
           id: m.id, name: m.name, description: m.description,
-          efforts: r?.reasoning?.efforts?.map((e) => e.id), defaultEffort: r?.reasoning?.defaultEffort,
+          efforts: r?.reasoning?.efforts?.map((e) => ({ id: e.id, name: e.name })), defaultEffort: r?.reasoning?.defaultEffort,
         })
       }
       providers.push({ id: p.id, name: p.name, models })
@@ -72,8 +73,7 @@ func ProbeArgs(patch string, more ...string) []string {
 }
 
 // ParseProbe reads the catalog from the probe's output: each provider's models, Value
-// "<provider>/<model>" (Description, the provider's name before the model's own, when more than
-// one offers models), and the default.
+// "<provider>/<model>", listed under the provider's name (Group), and the default.
 func ParseProbe(out []byte) (agent.Catalog, error) {
 	var line []byte
 	sc := bufio.NewScanner(bytes.NewReader(out))
@@ -91,7 +91,7 @@ func ParseProbe(out []byte) (agent.Catalog, error) {
 			ID, Name string
 			Models   []struct {
 				ID, Name, Description string
-				Efforts               []string
+				Efforts               []effort
 				DefaultEffort         string
 			}
 		}
@@ -100,23 +100,26 @@ func ParseProbe(out []byte) (agent.Catalog, error) {
 	if err := json.Unmarshal(line, &p); err != nil {
 		return agent.Catalog{}, fmt.Errorf("dsh: the probe's models: %w", err)
 	}
-	offering := 0
-	for _, pr := range p.Providers {
-		if len(pr.Models) > 0 {
-			offering++
-		}
-	}
 	var c agent.Catalog
 	for _, pr := range p.Providers {
 		for _, m := range pr.Models {
 			if pr.ID == "" || m.ID == "" {
 				continue
 			}
-			desc := m.Description
-			if offering > 1 {
-				desc = strings.TrimSuffix(pr.Name+" · "+desc, " · ")
+			x := agent.Model{Value: pr.ID + "/" + m.ID, Name: m.Name, Description: m.Description, Group: cmp.Or(pr.Name, pr.ID), NoEffort: len(m.Efforts) == 0}
+			for _, e := range m.Efforts {
+				if e.ID == "" {
+					continue
+				}
+				x.Efforts = append(x.Efforts, e.ID)
+				if e.Name != "" && e.Name != e.ID {
+					if x.EffortNames == nil {
+						x.EffortNames = map[string]string{}
+					}
+					x.EffortNames[e.ID] = e.Name
+				}
 			}
-			c.Models = append(c.Models, agent.Model{Value: pr.ID + "/" + m.ID, Name: m.Name, Description: desc, Efforts: m.Efforts, NoEffort: len(m.Efforts) == 0})
+			c.Models = append(c.Models, x)
 		}
 	}
 	if d := p.Default; d != nil && d.Provider != "" && d.Model != "" {
@@ -126,6 +129,19 @@ func ParseProbe(out []byte) (agent.Catalog, error) {
 		return agent.Catalog{}, errors.New("dsh: no provider offers a model")
 	}
 	return c, nil
+}
+
+// effort is one of a model's efforts as the probe prints it: {id, name}, or the id alone.
+type effort struct{ ID, Name string }
+
+func (e *effort) UnmarshalJSON(b []byte) error {
+	if len(b) > 0 && b[0] == '"' {
+		return json.Unmarshal(b, &e.ID)
+	}
+	var v struct{ ID, Name string }
+	err := json.Unmarshal(b, &v)
+	e.ID, e.Name = v.ID, v.Name
+	return err
 }
 
 // Route is the provider and model a model value names: "<provider>/<model>" of a provider in
