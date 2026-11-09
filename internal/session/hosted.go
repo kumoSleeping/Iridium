@@ -980,6 +980,7 @@ func (h *Hosted) state(o store.Overlay, archived bool) api.SessionState {
 	for _, m := range h.models {
 		s.Models = append(s.Models, api.Model{Value: m.Value, Name: m.Name, Description: m.Description, Resolved: m.Resolved, Efforts: slices.Clone(m.Efforts), NoEffort: m.NoEffort})
 	}
+	h.m.catalogState(&s, h.meta.Machine)
 	if _, ok := h.drv.(agent.Ultracoder); ok {
 		u := &api.Ultracode{Available: true}
 		if h.ultracode != nil {

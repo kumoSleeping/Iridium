@@ -21,7 +21,7 @@ import (
 
 // SetModel sets the session's model; "" is the agent's default.
 func (m *Manager) SetModel(ctx context.Context, id, model string) error {
-	h, err := m.get(id)
+	h, err := m.settable(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -144,7 +144,7 @@ func (h *Hosted) restart() {
 // additions, and a set all deferred (PTC's one run_code) the API turns down (dsh's own app picks a
 // preset for a blank session alone).
 func (m *Manager) SetPreset(ctx context.Context, id, preset string) error {
-	h, err := m.get(id)
+	h, err := m.settable(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -174,7 +174,7 @@ func (m *Manager) SetPreset(ctx context.Context, id, preset string) error {
 
 // SetEffort sets the session's thinking effort.
 func (m *Manager) SetEffort(ctx context.Context, id, effort string) error {
-	h, err := m.get(id)
+	h, err := m.settable(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -450,9 +450,14 @@ func (h *Hosted) efforts() []string {
 		return info.Efforts
 	}
 	h.mu.Lock()
-	defer h.mu.Unlock()
-	for _, m := range h.models {
-		if m.Value == h.model || m.Value == h.meta.Model {
+	models, now := h.models, cmp.Or(h.model, h.meta.Model)
+	h.mu.Unlock()
+	if len(models) == 0 { // not started yet: its machine's catalog
+		cat, _ := h.m.cachedCatalog(h.meta.Machine)
+		models, now = cat.Models, cmp.Or(now, cat.Default)
+	}
+	for _, m := range models {
+		if m.Value == now {
 			if m.NoEffort {
 				return []string{}
 			}
@@ -460,4 +465,22 @@ func (h *Hosted) efforts() []string {
 		}
 	}
 	return nil
+}
+
+// settable is the hosted session a setting goes to: one found on disk (DSH Desktop's) is taken
+// up first, as a message would, without starting its agent: its model, effort or preset is set
+// before the first message there (the user, 2026-11-09).
+func (m *Manager) settable(ctx context.Context, id string) (*Hosted, error) {
+	if h, err := m.get(id); err == nil {
+		return h, nil
+	}
+	if _, _, ok := m.found(id); !ok {
+		return nil, ErrNotFound
+	}
+	h, err := m.take(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	m.Refresh([]string{id})
+	return h, nil
 }

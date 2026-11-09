@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/kumoSleeping/iridium/internal/agent"
@@ -188,6 +189,73 @@ func (m *Manager) desktopLLM(ctx context.Context, mc *remote.Machine) []string {
 		return nil
 	}
 	return []string{p}
+}
+
+// cachedCatalog is dsh's models at machine as last probed, stale or not; false if never had.
+func (m *Manager) cachedCatalog(machine string) (agent.Catalog, bool) {
+	m.presetMu.Lock()
+	defer m.presetMu.Unlock()
+	e := m.catalogs[machine]
+	if e == nil || len(e.cat.Models) == 0 {
+		return agent.Catalog{}, false
+	}
+	return e.cat, true
+}
+
+// warmCatalog probes dsh's models at machine in the background if they are not fresh, then shows
+// them in its dsh sessions whose agent has not said its own (not started yet): the page offers a
+// model before the first message (the user, 2026-11-09).
+func (m *Manager) warmCatalog(machine string) {
+	m.presetMu.Lock()
+	e := m.catalogs[machine]
+	fresh := e != nil && (e.busy != nil || e.err == nil && time.Since(e.at) < catalogFor || e.err != nil && time.Since(e.at) < catalogFailFor)
+	m.presetMu.Unlock()
+	if fresh {
+		return
+	}
+	go func() {
+		if _, err := m.Catalog(m.ctx, machine); err != nil {
+			return
+		}
+		var ids []string
+		if d := m.o.Discovery; d != nil {
+			if l, err := d.Sessions(m.ctx); err == nil {
+				for _, s := range l {
+					if s.Agent == api.AgentDsh && s.Machine == machine {
+						ids = append(ids, s.ID)
+					}
+				}
+			}
+		}
+		m.mu.Lock()
+		for id, h := range m.hosted {
+			if h.meta.Agent == api.AgentDsh && h.meta.Machine == machine {
+				ids = append(ids, id)
+			}
+		}
+		m.mu.Unlock()
+		if len(ids) > 0 {
+			m.Refresh(ids)
+		}
+	}()
+}
+
+// catalogState fills a dsh session's models from its machine's catalog while its agent has said
+// none (not started yet): the models, and the default as the model it would run.
+func (m *Manager) catalogState(s *api.SessionState, machine string) {
+	if s.Agent != api.AgentDsh || len(s.Models) > 0 {
+		return
+	}
+	cat, ok := m.cachedCatalog(machine)
+	if !ok {
+		return
+	}
+	for _, x := range cat.Models {
+		s.Models = append(s.Models, api.Model{Value: x.Value, Name: x.Name, Description: x.Description, Efforts: slices.Clone(x.Efforts), NoEffort: x.NoEffort})
+	}
+	if s.Model == "" {
+		s.Model = cat.Default
+	}
 }
 
 // catalogHook is a launch's Catalog: dsh's at the session's machine.
