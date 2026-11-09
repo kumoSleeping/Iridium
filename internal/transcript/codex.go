@@ -379,13 +379,24 @@ func (c *codexViews) step(l codexStepLine, at int64, n int) {
 // codexShot reads the picture the view on line e showed the model: keep, with its bytes; else
 // only what a page shows of it. f.mu is held; r reads the record.
 func (f *File) codexShot(r io.ReaderAt, e entry, keep bool) (api.Image, error) {
-	if f.views == nil {
-		f.views = &codexViews{}
-	}
-	s, err := f.views.shot(r, f.size, e.off)
+	s, err := f.codexWhere(r, e)
 	if err != nil {
 		return api.Image{}, err
 	}
+	return s.image(r, keep)
+}
+
+// codexWhere is where the picture of the view on line e is, the rollout read on first. f.mu is
+// held.
+func (f *File) codexWhere(r io.ReaderAt, e entry) (codexShot, error) {
+	if f.views == nil {
+		f.views = &codexViews{}
+	}
+	return f.views.shot(r, f.size, e.off)
+}
+
+// image is the picture on s's output line, read from r: keep, with its bytes.
+func (s codexShot) image(r io.ReaderAt, keep bool) (api.Image, error) {
 	line := make([]byte, s.n)
 	if _, err := r.ReadAt(line, s.at); err != nil {
 		return api.Image{}, err

@@ -256,14 +256,19 @@ func (f *File) entry(at string) (entry, bool) {
 }
 
 // later is the picture an ImageView on line e showed the model, from the output after it
-// (Codex's: codexViews).
+// (Codex's: codexViews): where it is found under f.mu, the line read without it.
 func (f *File) later(e entry) (api.Image, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	r, done, err := f.text()
 	if err != nil {
+		f.mu.Unlock()
 		return api.Image{}, err
 	}
 	defer done()
-	return f.codexShot(r, e, true)
+	s, err := f.codexWhere(r, e)
+	f.mu.Unlock()
+	if err != nil {
+		return api.Image{}, err
+	}
+	return s.image(r, true)
 }
