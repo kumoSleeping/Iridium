@@ -148,4 +148,5 @@ func (s *Server) publishMachines() { s.hub.Set("machines", s.machines()) }
 func (s *Server) machineRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/machines", func(w http.ResponseWriter, r *http.Request) { reply(w, http.StatusOK, s.machines()) })
 	mux.HandleFunc("GET /api/machines/{id}/dsh/workspaces", s.dshWorkspaces)
+	mux.HandleFunc("POST /api/machines/{id}/dsh/sync", s.dshSync)
 }

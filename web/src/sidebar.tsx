@@ -9,7 +9,7 @@
 // and at its foot the colour tags (colors.ts); a group's: rename, its path, 通知. The mouse resting
 // on a row fetches its chat ahead.
 import { Menu } from "@base-ui/react/menu";
-import { Archive, ArchiveRestore, Bot, Check, ChevronRight, Copy, Eye, EyeOff, Folder, FolderOpen, Pencil, Pin, PinOff, Plus, Square, Workflow as WorkflowIcon } from "lucide-react";
+import { Archive, ArchiveRestore, Bot, Check, ChevronRight, Copy, Eye, EyeOff, Folder, FolderOpen, Pencil, Pin, PinOff, Plus, RefreshCw, Square, Workflow as WorkflowIcon } from "lucide-react";
 import { ConfirmIcon, confirmName, confirmTitle } from "./confirmname";
 import { Fragment, lazy, memo, Suspense, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { api } from "./api/client";
@@ -486,6 +486,14 @@ function WsRow({ flip, id, name, root, sessions, machine, hidden, open, onToggle
             ? { icon: <Eye size={15} />, label: t("menu.unhide"), run: () => void api.patchWorkspace(id, { hidden: false }).catch(failed) }
             : { icon: <EyeOff size={15} />, label: t("menu.hide"), run: () => void api.patchWorkspace(id, { hidden: true }).then(() => toast(t("toast.hidden", { ws: name })), failed) },
         ]
+      : []),
+    // A group at a machine with dsh: what its dsh offers read again now, its workspaces and
+    // sessions, models and presets with DSH Desktop's settings (the user, 2026-11-09).
+    ...(machine?.agents.some((a) => a.agent === "dsh")
+      ? [{ icon: <RefreshCw size={15} />, label: t("menu.syncDsh"), run: () => {
+          toast(t("toast.syncing"));
+          void api.dshSync(machine.id).then(() => toast(t("toast.synced", { m: machine.name })), (e: unknown) => toast(t("err.sync"), { error: true, description: errText(e) }));
+        } }]
       : []),
   ];
   const menu = items.length > 0 || push;

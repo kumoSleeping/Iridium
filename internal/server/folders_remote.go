@@ -161,6 +161,26 @@ func (s *Server) dshWorkspaces(w http.ResponseWriter, r *http.Request) {
 	reply(w, http.StatusOK, ws)
 }
 
+// dshSync is POST /api/machines/{id}/dsh/sync: the dsh there read again now, its workspaces and
+// sessions, models and presets (a remote group's menu; docs/exec.md "远端 DSH").
+func (s *Server) dshSync(w http.ResponseWriter, r *http.Request) {
+	mc, _ := s.machineAt(w, r.PathValue("id"))
+	if mc == nil {
+		return
+	}
+	if _, ok := mc.Agent(string(api.AgentDsh)); !ok {
+		fail(w, http.StatusNotFound, "no dsh at "+mc.ID())
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	defer cancel()
+	if err := s.m.SyncDsh(ctx, mc.ID()); err != nil {
+		s.remoteError(w, err)
+		return
+	}
+	reply(w, http.StatusOK, map[string]any{"ok": true})
+}
+
 func (s *Server) remoteError(w http.ResponseWriter, err error) {
 	switch {
 	case wire.IsCode(err, wire.CodeNotFound):
