@@ -10,7 +10,7 @@ import { defaultComponents, Streamdown, type ExtraProps, type StreamdownProps } 
 import { t } from "../i18n";
 import { cn } from "../ui";
 import { Code } from "./hl";
-import { Ids } from "./mention";
+import { IdChip, Ids } from "./mention";
 import { draftWords, SID } from "./refs";
 
 function CodeBlock({ className, children }: ComponentProps<"code"> & ExtraProps) {
@@ -64,8 +64,9 @@ export const MARKDOWN: Partial<StreamdownProps> = {
     // Streamdown's own pre marks the code inside as a block (data-block): that one is ours.
     code: (p) => {
       if ("data-block" in p) return <CodeBlock {...p} />;
+      // Code that is a session's id alone: its chip, as in the words around it.
       const text = textOf(p.children);
-      return <defaultComponents.code {...p}>{text === undefined ? p.children : <Ids text={text} />}</defaultComponents.code>;
+      return text === undefined ? <defaultComponents.code {...p} /> : <IdChip text={text} otherwise={<defaultComponents.code {...p} />} />;
     },
     ...({ "ir-ids": ({ children }: { children?: unknown }) => <Ids text={textOf(children) ?? ""} /> } as object),
   },

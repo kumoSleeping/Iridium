@@ -14,7 +14,6 @@ import type { Sent } from "../chats";
 import { t } from "../i18n";
 import { Avatar, Badge, cn, IconKey, Logo, tilde, Tip } from "../ui";
 import { useHome } from "../data";
-import { useList } from "../store";
 import { LocalMark } from "../me";
 import { go } from "../route";
 import { Files, Picture, previews, SentFile } from "./files";
@@ -24,8 +23,8 @@ import { argOf, diffSum, foldLine, foldSaid, kindOf, runCmds, type Diff, type Ki
 import { Code } from "./hl";
 import { Markdown } from "./markdown";
 import { partialInput } from "./partial";
-import { Ids, IdsNamed, MentionCard, Mentioned } from "./mention";
-import { leadingMentions, sessionIds, type Source, withoutFiles, withoutNameLines } from "./refs";
+import { IdsNamed, MentionCard, Mentioned } from "./mention";
+import { leadingMentions, type Source, withoutFiles, withoutNameLines } from "./refs";
 
 type You = Extract<Source, { kind: "you" }>;
 type From = Extract<Source, { kind: "letter" }>;
@@ -563,9 +562,9 @@ function StepCard({ s, session }: { s: Step; session: string }) {
             <Part label={t("msg.output")} copy={s.result?.text} error={s.result?.error}>
               {s.result ? <ResultView r={s.result} session={session} /> : <span className="text-xs text-ink-3">{t("msg.noResult")}</span>}
             </Part>
-            {/* The sessions its input names by id (ir send, ir wait), each a key there; its output's
-                are links in place (Pre). */}
-            <IdsNamed text={s.input ?? ""} />
+            {/* The sessions it names by id, each a card going there (ir send, ir wait, ir new); not
+                a list's many (ir ls): the sidebar has those. */}
+            <IdsNamed text={s.input ?? ""} also={s.result?.text} />
           </>
         )}
       </div>
@@ -638,10 +637,7 @@ const NEW = new Set(["new_string", "new_str", "newText", "content"]);
 const SHELL = new Set(["command", "cmd", "script"]);
 const FILE = new Set(["file_path", "path", "filePath", "notebook_path"]);
 
-function Pre({ text, error, tone, cap, lang, ids }: { text: string; error?: boolean; tone?: "plus" | "minus"; cap?: boolean; lang?: string; ids?: boolean }) {
-  // ids: a session it names by id a link there (ir ls, ir new), in place of its colours.
-  const list = useList();
-  const named = useMemo(() => !!ids && !!list && sessionIds(text, list).some((p) => typeof p !== "string"), [ids, list, text]);
+function Pre({ text, error, tone, cap, lang }: { text: string; error?: boolean; tone?: "plus" | "minus"; cap?: boolean; lang?: string }) {
   return (
     <pre
       className={cn(
@@ -652,7 +648,7 @@ function Pre({ text, error, tone, cap, lang, ids }: { text: string; error?: bool
         tone === "minus" && "shadow-[inset_2px_0_0_var(--minus)]",
       )}
     >
-      {named ? <Ids text={text} /> : <Code text={text} lang={error ? undefined : lang} label />}
+      <Code text={text} lang={error ? undefined : lang} label />
     </pre>
   );
 }
@@ -676,7 +672,7 @@ function Clipped({ text, length, at, session, error, prose, fields, cap }: { tex
   const shown = whole ?? text;
   return (
     <div className="grid min-w-0 gap-1">
-      {prose ? <Markdown text={shown} className="text-sm text-ink-2" /> : fields ? <Fields text={shown} /> : <Pre text={pretty(shown)} error={error} cap={cap} lang="auto" ids />}
+      {prose ? <Markdown text={shown} className="text-sm text-ink-2" /> : fields ? <Fields text={shown} /> : <Pre text={pretty(shown)} error={error} cap={cap} lang="auto" />}
       {length !== undefined && length > 0 && whole === undefined && (
         <button type="button" onClick={more} disabled={state === "busy"} className="g-press justify-self-start rounded-sm text-xs text-ink-3 underline decoration-ink-4 underline-offset-2 hover:text-ink">
           {state === "busy" ? <LoaderCircle size={12} className="inline animate-spin" /> : t("msg.whole", { n: length })}
