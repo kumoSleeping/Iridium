@@ -99,6 +99,12 @@ type Session struct {
 	Workspace int64 `json:"workspace,omitempty"` // 0: none
 	// Color: the colour tag it was given in its menu, if any.
 	Color Color `json:"color,omitempty"`
+	// Order: the key it was dragged to in the list (ms, as UpdatedAt), sorted by in place of
+	// UpdatedAt; 0 none.
+	Order float64 `json:"order,omitempty"`
+	// At: the folder at another machine one of this machine's was opened for (NewSession.At): it
+	// is listed there, in that folder, not by its Cwd.
+	At string `json:"at,omitempty"`
 	// Launcher: the session that started this one, if discovery saw it.
 	Launcher string `json:"launcher,omitempty"`
 	// Subagent: an Agent tool's subtask (Claude) or a subagent's thread (Codex), listed as a
@@ -398,6 +404,9 @@ type NewSession struct {
 	// Machine: the executor to run it at (a terminal ID or name; docs/exec.md); empty: here. Cwd
 	// is then a path there.
 	Machine string `json:"machine,omitempty"`
+	// At: one of this machine's opened for a folder at another ("<machine>:<path>", as grouped), a
+	// coordinator from a group's "+" there: grouped by that folder, wherever its group is nested.
+	At string `json:"at,omitempty"`
 }
 
 type NewSessionReply struct {

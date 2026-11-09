@@ -368,7 +368,14 @@ func (m *Manager) create(ctx context.Context, req api.NewSession, from, name str
 	m.mu.Unlock()
 	h.newSession = true
 	h.show() // Iridium's own: shown from the start
-	if req.Workspace != 0 {
+	if at := req.At; at != "" && machine == "" && !filepath.IsAbs(at) && strings.Contains(at, ":") && len(at) <= 4096 {
+		// A coordinator for a folder there: grouped by that folder as discovery groups (nested
+		// with it), not put in its group by hand.
+		if err := m.o.Store.SetAt(mt.ID, at); err != nil {
+			return mt.ID, err
+		}
+		m.intoGroupPrefer(mt.ID, at, req.Workspace)
+	} else if req.Workspace != 0 {
 		if err := m.o.Store.Move(mt.ID, req.Workspace); err != nil {
 			return mt.ID, err
 		}
@@ -451,7 +458,7 @@ func (m *Manager) Stop(ctx context.Context, id string) error {
 }
 
 // List is the hosted sessions, then those the Discovery found that Iridium does not host,
-// pinned first, then the most recent.
+// pinned first, then the most recent: by the key one was dragged to, else its last activity.
 func (m *Manager) List(ctx context.Context) ([]api.Session, error) {
 	over, err := m.o.Store.Overlays()
 	if err != nil {
@@ -480,7 +487,7 @@ func (m *Manager) List(ctx context.Context) ([]api.Session, error) {
 		for _, s := range found {
 			if !seen[s.ID] {
 				o := over[s.ID]
-				s.Name, s.Pinned, s.Workspace, s.Color = o.Name, o.Pinned, o.Workspace, api.Color(o.Color)
+				s.Name, s.Pinned, s.Workspace, s.Color, s.Order, s.At = o.Name, o.Pinned, o.Workspace, api.Color(o.Color), o.Order, o.At
 				s.Archived = !vis.Shown(string(s.Agent), s.ID)
 				m.parentOf(&s)
 				out = append(out, s)
@@ -499,9 +506,18 @@ func (m *Manager) List(ctx context.Context) ([]api.Session, error) {
 			}
 			return 1
 		}
-		return int(b.UpdatedAt - a.UpdatedAt)
+		return cmp.Compare(sortKey(b), sortKey(a))
 	})
 	return out, nil
+}
+
+// sortKey is what a session is sorted by in the list: where it was dragged to, else when it
+// last worked.
+func sortKey(s api.Session) float64 {
+	if s.Order != 0 {
+		return s.Order
+	}
+	return float64(s.UpdatedAt)
 }
 
 // State is the open session's carried state.

@@ -221,6 +221,11 @@ func (m *Manager) intoGroup(id, cwd, caller string) {
 			prefer = over[caller].Workspace
 		}
 	}
+	m.intoGroupPrefer(id, cwd, prefer)
+}
+
+// intoGroupPrefer puts a new session of folder cwd in its group: prefer if that holds it.
+func (m *Manager) intoGroupPrefer(id, cwd string, prefer int64) {
 	g, ok := m.o.Discovery.(grouper)
 	if !ok {
 		if prefer != 0 {
