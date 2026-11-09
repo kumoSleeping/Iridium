@@ -60,10 +60,12 @@ type heldEntry struct {
 	due   bool      // a showing for a held.changed waits
 }
 
-// heldView is a session's wire.HeldLive, its features checked (features).
+// heldView is a session's wire.HeldLive, its features checked (features); owner, the feature
+// that owns its effort now (effort its level), held or not.
 type heldView struct {
 	held          bool
 	model, effort string
+	owner         string
 	features      []api.Feature
 }
 
@@ -103,6 +105,9 @@ func (c *Channel) keepHeld(id, machine string, live wire.HeldLive, lang *string)
 	v := heldView{held: live.Held, features: c.features(machine, live.Features)}
 	if live.Held {
 		v.model, v.effort = live.Model, live.Effort
+	}
+	if live.Owner != "" && slices.ContainsFunc(v.features, func(f api.Feature) bool { return f.ID == live.Owner }) {
+		v.owner, v.effort = live.Owner, live.Effort
 	}
 	c.heldMu.Lock()
 	defer c.heldMu.Unlock()
@@ -195,6 +200,11 @@ func (c *Channel) heldState(r harness.Ref, s *api.SessionState) {
 	}
 	s.Features = append(s.Features, v.features...)
 	if !v.held || r.Live {
+		// A feature of the process there runs its effort (a session Iridium started there):
+		// the level it runs at is that one's.
+		if v.owner != "" && v.effort != "" {
+			s.Effort, s.EffortNow = v.effort, v.effort
+		}
 		return
 	}
 	// Desktop's, over what a hosted session keeps from when it ran here (its settings): what
@@ -362,17 +372,20 @@ func cut(s string, n int) string {
 
 // Set sets a model, an effort or a feature of session r where DSH Desktop holds it (held.set).
 // A model or an effort only while Desktop has it and it does not run here (the core would refuse
-// it: elsewhere); a feature, one the session has as last told, its option one of the feature's,
-// else nothing is asked. done false: not such a session, or Desktop does not have it after all.
+// it: elsewhere); an effort also while a feature there owns it (as last told), held or run here;
+// a feature, one the session has as last told, its option one of the feature's, else nothing is
+// asked. done false: not such a session, or the machine does not take it after all.
 func (c *Channel) Set(ctx context.Context, r harness.Ref, ch harness.Change) (bool, error) {
 	if ch.Feature != nil {
 		return c.setFeature(ctx, r, *ch.Feature)
 	}
-	if r.Live {
+	v, _ := c.cachedHeld(r.ID)
+	owned := ch.Effort != "" && v.owner != ""
+	if r.Live && !owned {
 		return false, nil
 	}
 	mc, held, ok := c.heldAt(r)
-	if !ok || !held || !mc.Has(wire.CapHeldFeatures) {
+	if !ok || !(held || owned) || !mc.Has(wire.CapHeldFeatures) {
 		return false, nil
 	}
 	lang := c.h().Lang()
@@ -395,7 +408,7 @@ func (c *Channel) Set(ctx context.Context, r harness.Ref, ch harness.Change) (bo
 // setFeature switches feature f of session r at its machine (held.set). done false: no plugin
 // there to ask (none of its features, then).
 func (c *Channel) setFeature(ctx context.Context, r harness.Ref, f harness.FeatureChange) (bool, error) {
-	mc, held, ok := c.heldAt(r)
+	mc, _, ok := c.heldAt(r)
 	if !ok || !mc.Has(wire.CapHeldFeatures) {
 		return false, nil
 	}
@@ -414,11 +427,12 @@ func (c *Channel) setFeature(ctx context.Context, r harness.Ref, f harness.Featu
 	if f.Option != "" && !slices.ContainsFunc(x.Options, func(o api.FeatureOption) bool { return o.ID == f.Option }) {
 		return true, fmt.Errorf("%w: %s has no option %q", harness.ErrBadRequest, x.Name, f.Option)
 	}
-	if !held && !v.held {
+	// The plugin says whether it can be switched now: held there, or run by a process there.
+	if !x.Available {
 		if x.Reason != "" {
 			return true, fmt.Errorf("%w: %s", harness.ErrBadRequest, x.Reason)
 		}
-		return true, fmt.Errorf("%w: %s: the session is not open in DSH Desktop", harness.ErrBadRequest, x.Name)
+		return true, fmt.Errorf("%w: %s cannot be switched now", harness.ErrBadRequest, x.Name)
 	}
 	ctx, cancel := context.WithTimeout(ctx, heldSet)
 	defer cancel()

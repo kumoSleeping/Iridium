@@ -27,7 +27,7 @@ func (c *Channel) Prepare(ctx context.Context, r harness.Ref, o *agent.SpawnOpti
 	if o.Remote != nil {
 		o.Remote.Presets = c.spawnPresets(ctx, machine)
 		if mc := c.machine(machine); mc != nil {
-			o.Remote.Patches = c.desktopLLM(ctx, mc)
+			o.Remote.Patches = append(c.desktopLLM(ctx, mc), c.desktopSession(ctx, mc)...)
 			o.Remote.Bundles = c.desktopBundles(ctx, mc)
 		}
 	}

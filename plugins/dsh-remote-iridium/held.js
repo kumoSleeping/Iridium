@@ -19,11 +19,28 @@ const langOf = (p) => (p?.lang === 'zh' || p?.lang === 'en' ? p.lang : '')
 /**
  * Session's live state here (wire.HeldLive): held, whether an agent of it lives in this process;
  * then its model ("<provider>/<model>") and the level it runs at (the feature's that owns the
- * effort now, else the model selection's); its features (held or not) in lang.
+ * effort now, owner its id, else the model selection's); its features (held or not) in lang. One
+ * a dsh process the Iridium started runs (bridge, bridge.js): its features are that process's,
+ * those here only for the ids it has not; owner and effort its owner's, if one owns it.
  */
-export async function heldLive(ctx, features, session, lang = '') {
+export async function heldLive(ctx, features, session, lang = '', bridge) {
   const agent = ctx.get('agents')?.get(session)
   const held = !!agent
+  if (!held && bridge?.has(session)) {
+    const [there, here] = await Promise.all([
+      bridge.call(session, 'live', { lang }, 3500).catch(() => null),
+      features?.views(session, { lang, held }) ?? [],
+    ])
+    const theirs = (Array.isArray(there?.features) ? there.features : []).filter((f) => features?.offered(f?.id) ?? true)
+    const list = [...theirs, ...(here ?? []).filter((f) => !theirs.some((x) => x.id === f.id))]
+    const out = { held }
+    if (typeof there?.owner === 'string' && there.owner) {
+      out.owner = there.owner
+      if (typeof there.effort === 'string' && there.effort) out.effort = there.effort
+    }
+    if (list.length) out.features = list
+    return out
+  }
   // The views and the effort's owner at once, each within the registry's 3s: one provider slow
   // or hung makes only its own feature unavailable, not the whole answer late.
   const [list, own] = await Promise.all([features?.views(session, { lang, held }) ?? [], held ? features?.effortNow(session) : undefined])
@@ -33,6 +50,7 @@ export async function heldLive(ctx, features, session, lang = '') {
     if (cur?.provider && cur?.model) out.model = `${cur.provider}/${cur.model}`
     const effort = own?.effort || cur?.reasoningEffort
     if (effort) out.effort = effort
+    if (own?.owner) out.owner = own.owner.id
   }
   if (list?.length) out.features = list
   return out
@@ -43,9 +61,10 @@ export async function heldLive(ctx, features, session, lang = '') {
  * dsh.prompt, the first two by the names an older Iridium asks with. features: the registry
  * (features.js; none: no features); kept(): what the plugin's settings keep from the Iridium
  * (unsynced, the workspaces by folder or name; ungrouped false, the sessions in none of them);
- * follow: followHeld's, told of each session the Iridium asks about.
+ * follow: followHeld's, told of each session the Iridium asks about; bridge: the dsh processes the
+ * Iridium started here (bridge.js), a session's features there set through it.
  */
-export function heldMethods(ctx, features, kept = () => ({ unsynced: [], ungrouped: true }), follow) {
+export function heldMethods(ctx, features, kept = () => ({ unsynced: [], ungrouped: true }), follow, bridge) {
   // running: those whose agent here works now (a turn, or one waiting on an approval or an
   // answer). A session Desktop opened stays loaded, its writer lock held, till Desktop quits:
   // the Iridium says "elsewhere" only while it runs, and gives the others' messages to it here.
@@ -70,7 +89,7 @@ export function heldMethods(ctx, features, kept = () => ({ unsynced: [], ungroup
     return {}
   }
   const reply = async (session, lang) => {
-    const live = await heldLive(ctx, features, session, lang)
+    const live = await heldLive(ctx, features, session, lang, bridge)
     follow?.seen(session, lang, live)
     return live
   }
@@ -89,6 +108,21 @@ export function heldMethods(ctx, features, kept = () => ({ unsynced: [], ungroup
       const asked = ['model', 'effort', 'feature'].filter((k) => p[k] !== undefined && p[k] !== null && p[k] !== '')
       if (asked.length !== 1) throw bad('held.set: one of model, effort and feature')
       const agent = ctx.get('agents')?.get(session)
+      if (!agent && bridge?.has(session)) {
+        // One a dsh process the Iridium started runs: a feature there, or the effort through the
+        // feature that owns it there (unsupported if none: the Iridium sets it itself).
+        if (p.feature !== undefined) {
+          const f = p.feature
+          if (typeof f !== 'object' || typeof f.id !== 'string' || typeof f.on !== 'boolean' || (f.option !== undefined && typeof f.option !== 'string'))
+            throw bad('held.set: feature {id, on, option?}')
+          if (features && !features.offered(f.id)) throw new RemoteError('not_found', `no feature ${f.id} here`)
+          await bridge.call(session, 'set', { id: f.id, on: f.on, ...(f.option ? { option: f.option } : {}) }, 16000)
+        } else if (p.effort !== undefined) {
+          if (typeof p.effort !== 'string' || p.effort.length > 64) throw bad('held.set: effort')
+          await bridge.call(session, 'setEffort', { level: p.effort }, 16000)
+        } else throw new RemoteError('unsupported', 'the Iridium runs this session: its model is set there')
+        return reply(session, langOf(p))
+      }
       if (!agent) throw new RemoteError('not_found', `no agent of ${session} here`)
       if (p.feature !== undefined) {
         const f = p.feature
@@ -157,7 +191,8 @@ async function hasEffort(ctx, provider, model, effort) {
  * is not what was last sent or answered. Told by the registry (a feature switched, a provider's
  * changed()), by dsh (a model selected, an agent loaded or gone: ctx.on where there is one), and
  * every 3s for one held here (a change nothing tells of: a feature switched in Desktop). Returns
- * {seen, stop}: seen is heldMethods' follow. o: watch, poll (ms; tests).
+ * {seen, stop}: seen is heldMethods' follow. o: watch, poll (ms; tests); bridge, as heldMethods':
+ * a session a dsh process the Iridium started runs is looked at as one held here.
  */
 export function followHeld(ctx, features, emit, o = {}) {
   const watch = o.watch ?? WATCH
@@ -166,7 +201,7 @@ export function followHeld(ctx, features, emit, o = {}) {
   const touch = (session) => features?.changed(session)
   const holds = (id) => {
     try {
-      return !!ctx.get('agents')?.get(id)
+      return !!ctx.get('agents')?.get(id) || !!o.bridge?.has(id)
     } catch {
       return false
     }
@@ -184,7 +219,7 @@ export function followHeld(ctx, features, emit, o = {}) {
     if (w.busy) return void (w.again = true)
     w.busy = true
     try {
-      const live = await heldLive(ctx, features, session, w.lang)
+      const live = await heldLive(ctx, features, session, w.lang, o.bridge)
       const s = JSON.stringify(live)
       if (s !== w.last && watched.get(session) === w) {
         w.last = s

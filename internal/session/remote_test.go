@@ -502,9 +502,10 @@ func TestRemotePresets(t *testing.T) {
 	if err := r.m.o.Channels[api.AgentDsh].(harness.Launcher).Prepare(bg, harness.Ref{ID: "x", As: "x", Agent: api.AgentDsh, Machine: "m1"}, &launch); err != nil {
 		t.Fatal(err)
 	}
+	// Then the plugin's part for the session's process (dsh.session).
 	llm := launch.Remote.Patches
-	if want := filepath.Join(desktop, "llm.patch.yml"); len(llm) != 1 || llm[0] != want {
-		t.Fatalf("dsh.llm: %q", llm)
+	if want := []string{filepath.Join(desktop, "llm.patch.yml"), filepath.Join(desktop, "session.patch.yml")}; !reflect.DeepEqual(llm, want) {
+		t.Fatalf("dsh.llm, dsh.session: %q", llm)
 	}
 	b, _ := os.ReadFile(llm[0])
 	for _, line := range []string{

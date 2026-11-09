@@ -14,11 +14,24 @@ import { heldMethods } from './held.js'
  * the session filed under the workspace of its folder, made if there is none (a session the
  * Iridium started here, in DSH Desktop's sidebar); dsh.presets, the agent presets it registers;
  * dsh.bundles, its profile's bundles of other packages (profileBundles); dsh.llm, its models for
- * the sessions the Iridium starts here.
+ * the sessions the Iridium starts here; dsh.session, this plugin's part in them (session.js).
  */
 export function dshMethods(ctx, kept = () => ({ unsynced: [], ungrouped: true }), llm = {}, o = {}) {
   return {
-    ...heldMethods(ctx, o.features, kept, o.follow),
+    ...heldMethods(ctx, o.features, kept, o.follow, o.bridge),
+    // The patch that puts this plugin's part for a session (session.js) into the dsh processes the
+    // Iridium starts here, connected to the bridge (o.bridge, at o.sessionFile): their features
+    // (a plugin's in that process, OMD's) answer the Iridium as Desktop's do. The secret stays here.
+    'dsh.session': async () => {
+      if (!o.bridge || !o.sessionFile) throw new RemoteError('unsupported', 'dsh.session')
+      try {
+        fs.mkdirSync(path.dirname(o.sessionFile), { recursive: true, mode: 0o700 })
+        fs.writeFileSync(o.sessionFile, sessionPatch(o.bridge), { mode: 0o600 })
+        return { patch: o.sessionFile }
+      } catch (e) {
+        throw new RemoteError('failed', e.message)
+      }
+    },
     // The agent presets this dsh registers (its agentPresets registry: the shipped ones, a
     // bundle's, the profile's own edits), each with its child plugin rows as YAML, which the
     // Iridium runs process-wide through a patch; and the default, the one set in its settings.
@@ -84,6 +97,21 @@ export function dshMethods(ctx, kept = () => ({ unsynced: [], ungrouped: true })
       }
     },
   }
+}
+
+/** The patch that loads session.js in a session's dsh process, connected to bridge. */
+export function sessionPatch(bridge) {
+  const q = (v) => JSON.stringify(v)
+  return [
+    "# dsh-remote-iridium: its part for the Iridium's sessions here (their features).",
+    '# Generated; do not edit.',
+    '- insert:',
+    '    - id: remote-iridium-session',
+    `      name: ${q(new URL('./session.js', import.meta.url).href)}`,
+    '      config:',
+    `        endpoint: ${q(bridge.endpoint)}`,
+    `        secret: ${q(bridge.secret)}`,
+  ].join('\n') + '\n'
 }
 
 /** This plugin's package name. */
