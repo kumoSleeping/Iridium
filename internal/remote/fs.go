@@ -129,77 +129,16 @@ func (m *Machine) Mkdir(ctx context.Context, path string) error {
 // from one that cannot say.
 func (m *Machine) DshOpen(ctx context.Context) (wire.DshOpenReply, error) {
 	var r wire.HeldListReply
-	err := m.Call(ctx, m.pick(wire.CapHeld, "held.list", "dsh.open"), struct{}{}, &r)
+	err := m.Call(ctx, m.Pick(wire.CapHeld, "held.list", "dsh.open"), struct{}{}, &r)
 	return r, err
 }
 
-// DshPrompt gives a message to the agent of a session the dsh the executor runs in holds (DSH
-// Desktop's): held.send, or dsh.prompt of a plugin without CapHeld.
-func (m *Machine) DshPrompt(ctx context.Context, session, text string, steer bool) error {
-	return m.Call(ctx, m.pick(wire.CapHeld, "held.send", "dsh.prompt"), wire.HeldSendParams{Session: session, Text: text, Steer: steer}, nil)
-}
-
-// pick is method if the executor has cap, else older.
-func (m *Machine) pick(cap, method, older string) string {
+// Pick is method if the executor has cap, else older (an older plugin's name for it).
+func (m *Machine) Pick(cap, method, older string) string {
 	if m.Has(cap) {
 		return method
 	}
 	return older
-}
-
-// HeldGet is session's live state at the holder there (held.get; the executor has
-// wire.CapHeldFeatures), its features' texts in lang.
-func (m *Machine) HeldGet(ctx context.Context, session, lang string) (wire.HeldLive, error) {
-	var r wire.HeldLive
-	err := m.Call(ctx, "held.get", wire.HeldGetParams{Session: session, Lang: lang}, &r)
-	return r, err
-}
-
-// HeldSet changes a held session's model, effort or a feature there (held.set); the reply is its
-// live state after.
-func (m *Machine) HeldSet(ctx context.Context, p wire.HeldSetParams) (wire.HeldLive, error) {
-	var r wire.HeldLive
-	err := m.Call(ctx, "held.set", p, &r)
-	return r, err
-}
-
-// DshPresets is the agent presets the dsh the executor runs in registers (DSH Desktop's, through
-// the dsh plugin); an error of wire.CodeUnsupported from one that cannot say.
-func (m *Machine) DshPresets(ctx context.Context) (wire.DshPresetsReply, error) {
-	var r wire.DshPresetsReply
-	err := m.Call(ctx, "dsh.presets", struct{}{}, &r)
-	return r, err
-}
-
-// DshLLM is the path there of a patch with the models and providers the dsh the executor runs in
-// has in its settings (DSH Desktop's, through the dsh plugin, written anew); an error of
-// wire.CodeUnsupported from one that cannot say.
-func (m *Machine) DshLLM(ctx context.Context) (string, error) {
-	var r wire.DshLLMReply
-	err := m.Call(ctx, "dsh.llm", struct{}{}, &r)
-	return r.Patch, err
-}
-
-// DshBundles are the bundles of DSH Desktop's profile besides dsh's own and the dsh plugin, with
-// their patches (through the dsh plugin); an error of wire.CodeUnsupported from one that cannot say.
-func (m *Machine) DshBundles(ctx context.Context) ([]wire.DshBundle, error) {
-	var r wire.DshBundlesReply
-	err := m.Call(ctx, "dsh.bundles", struct{}{}, &r)
-	return r.Bundles, err
-}
-
-// DshSession is the path there of the patch that puts the dsh plugin's part into a session's dsh
-// process (dsh.session, written anew); an error of wire.CodeUnsupported from one that cannot.
-func (m *Machine) DshSession(ctx context.Context) (string, error) {
-	var r wire.DshSessionReply
-	err := m.Call(ctx, "dsh.session", struct{}{}, &r)
-	return r.Patch, err
-}
-
-// DshAttach files session under the workspace of its folder cwd in the dsh the executor runs in
-// (DSH Desktop's sidebar), made if there is none.
-func (m *Machine) DshAttach(ctx context.Context, session, cwd string) error {
-	return m.Call(ctx, "dsh.attach", wire.DshAttachParams{Session: session, Cwd: cwd}, nil)
 }
 
 // headSize is how much of a mirrored file's start is checked for its being the same file.

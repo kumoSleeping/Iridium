@@ -1,7 +1,8 @@
 // The sidebar's shape (plan "会话", "网页"): workspace → folder → session. A folder is a session's
 // directory under its workspace's root, shown even with one session in it: only those at the root
 // sit right under the workspace (the user, 2026-11-06). Sessions keep the list's order (pinned
-// first, then the latest); folders follow the sessions at the root, by their latest session. Sessions in no workspace go under 未归类; archived
+// first, then the latest); folders follow the sessions at the root, by their latest session, or
+// where they were dragged to; those pinned come before them (reorder.ts). Sessions in no workspace go under 未归类; archived
 // ones (no shown marker) only under 归档; those that wait on you only in 需要你, back in their place
 // once answered (the user's decision, 2026-11-05). A session's row says its folder where the tree does
 // not: those under 需要你 and 归档, out of their place (2026-11-05).
@@ -10,10 +11,11 @@
 // Those under one session keep the order they came in, the newest last, not the order they last
 // wrote in, which swapped them back and forth (the user, 2026-11-08); so do a workflow run's agents
 // (2026-11-09).
-import type { Workspace } from "./api/types.gen";
+import type { Places, Workspace } from "./api/types.gen";
 import type { Session } from "./api/types.gen";
 
-export type Folder = { key: string; name: string; path: string; sessions: Session[] };
+/** pinned: above the sessions at its group's root (reorder.ts). */
+export type Folder = { key: string; name: string; path: string; sessions: Session[]; pinned?: boolean };
 export type Row = { kind: "session"; s: Session } | { kind: "folder"; f: Folder };
 /** hidden: a hidden group listed while one of its sessions runs elsewhere (its menu shows it again).
  *  machine: the machine its folder is at, by ID; none for this machine's. */
@@ -38,7 +40,8 @@ export const working = (s: Session, parent: Session | undefined, now: number) =>
 
 /** The path a session is grouped by, as the server's (remote.GroupPath): its cwd, or at another
  *  machine "<machine>:<cwd, '/'-separated>", as that machine's groups' roots are written. */
-export const groupPath = (s: Pick<Session, "cwd" | "machine">) => (s.machine ? `${s.machine}:${s.cwd.replaceAll("\\", "/")}` : s.cwd);
+/** One of this machine's opened for a folder at another (a coordinator, Session.at): that folder. */
+export const groupPath = (s: Pick<Session, "cwd" | "machine" | "at">) => s.at || (s.machine ? `${s.machine}:${s.cwd.replaceAll("\\", "/")}` : s.cwd);
 
 /** A folder at another machine: its path is "<machine>:…", never absolute here. */
 export const remotePath = (path: string) => path !== "" && !path.startsWith("/");
@@ -60,7 +63,9 @@ function bySeen<T>(xs: T[], key: (x: T) => string, at: (x: T) => number, seen: M
 }
 
 /** machines: the other machines' IDs, in the order their sections follow this machine's. */
-export function buildTree(all: Session[], workspaces: Workspace[], unsorted: string, now = Date.now(), seen = SEEN, machines: string[] = []): Tree {
+/** places: where the rows were put by hand (the carried "places"): the groups' rows by key, the
+ *  folders by path. */
+export function buildTree(all: Session[], workspaces: Workspace[], unsorted: string, now = Date.now(), seen = SEEN, machines: string[] = [], places: Places = { groups: [], order: {}, pinned: [] }): Tree {
   const list = all.filter((s) => !s.subagent);
   const byId = new Map(list.map((s) => [s.id, s]));
   const kids = new Map<string, Session[]>();
@@ -121,24 +126,33 @@ export function buildTree(all: Session[], workspaces: Workspace[], unsorted: str
         continue;
       }
       let f = folders.get(r);
-      if (!f) folders.set(r, (f = { key: `${key}/${r}`, name: r, path: p, sessions: [] }));
+      if (!f) folders.set(r, (f = { key: `${key}/${r}`, name: r, path: p, sessions: [], ...(places.pinned.includes(p) ? { pinned: true } : {}) }));
       f.sessions.push(s);
     }
-    const sub = [...folders.values()].sort((a, b) => latest(b) - latest(a));
-    return { key, id, name, root, rows: [...rows, ...sub.map((f): Row => ({ kind: "folder", f }))], count: sessions.length, ...(hidden ? { hidden } : {}), ...(machine ? { machine } : {}) };
+    const sub = [...folders.values()].sort((a, b) => folderKey(b, places.order) - folderKey(a, places.order));
+    const folder = (f: Folder): Row => ({ kind: "folder", f });
+    // Pinned folders above the sessions at the root, the rest under them.
+    return { key, id, name, root, rows: [...sub.filter((f) => f.pinned).map(folder), ...rows, ...sub.filter((f) => !f.pinned).map(folder)], count: sessions.length, ...(hidden ? { hidden } : {}), ...(machine ? { machine } : {}) };
   };
   // A group is a folder sessions are in (the user, 2026-11-08): one with none shown is not listed.
-  // A session is listed in the section of the machine it runs at, first (the user, 2026-11-09): a
-  // group with sessions at two machines (a coordinator here and its sessions there) is listed in
-  // each, by the same name, each time with those at that machine. Which group a session is in is
-  // not changed (ir ls --here, a new session in its starter's group): only where it is drawn.
+  // A session is listed with those of its group at the machine it runs at (the user, 2026-11-09): a
+  // group with sessions at two machines is listed twice, by the same name, each time with those at
+  // that machine, this machine's first. Which group a session is in is not changed (ir ls --here, a
+  // new session in its starter's group): only where it is drawn. One of this machine's in a group at
+  // another (a coordinator there, opened by that group's "+") stays in that group, marked on its
+  // logo (the user, 2026-11-09).
+  // Where a machine comes: this one first, then the others in the order they are listed.
+  const machineAt = (m?: string) => (m ? machines.indexOf(m) + 1 || machines.length + 1 : 0);
   const nodes = workspaces
     .filter((w) => byWs.get(w.id)?.length)
     .flatMap((w) => {
-      const by = new Map<string, Session[]>();
-      for (const s of byWs.get(w.id)!) by.set(s.machine ?? "", [...(by.get(s.machine ?? "") ?? []), s]);
       const own = machineOf(w.path) ?? "";
-      return [...by].map(([m, ss]) => node(m === own ? `w${w.id}` : `w${w.id}@${m}`, w.id, w.name, w.path, ss, w.hidden, m));
+      const by = new Map<string, Session[]>();
+      for (const s of byWs.get(w.id)!) {
+        const at = s.machine ?? own;
+        by.set(at, [...(by.get(at) ?? []), s]);
+      }
+      return [...by].sort(([a], [b]) => machineAt(a || undefined) - machineAt(b || undefined)).map(([m, ss]) => node(m === own ? `w${w.id}` : `w${w.id}@${m}`, w.id, w.name, w.path, ss, w.hidden, m));
     });
   // 未归类 has no root: its folders are grouped under the directory all its sessions share, and shown
   // by their whole path (~ for the home directory, not its bare name).
@@ -146,9 +160,11 @@ export function buildTree(all: Session[], workspaces: Workspace[], unsorted: str
   const none = new Map<string, Session[]>();
   for (const s of byWs.get(0) ?? []) none.set(s.machine ?? "", [...(none.get(s.machine ?? "") ?? []), s]);
   for (const [m, ss] of none) nodes.push(node(m ? `w0:${m}` : "w0", 0, unsorted, m ? `${m}:${commonDir(ss.map(groupPath).map((p) => p.slice(m.length + 1)))}` : commonDir(ss.map(groupPath)), ss));
-  // A section a machine (the user, 2026-11-09): this machine's groups first, then each other
-  // machine's in the order they are listed, 未归类 last in each; the order within kept.
-  const rank = (w: WsNode) => (w.machine ? 1 + (machines.indexOf(w.machine) + 1 || machines.length + 1) : 0) * 2 + (w.id === 0 ? 1 : 0);
+  // The groups' rows in the order they were dragged to, whichever machine each is at (the user,
+  // 2026-11-09, no longer a section a machine); those never dragged after them, as the groups are
+  // listed. 未归类 last, one a machine, this machine's first, then the others' as listed.
+  const n = places.groups.length;
+  const rank = (w: WsNode) => (w.id === 0 ? n + 2 + machineAt(w.machine) : places.groups.indexOf(w.key) + 1 || n + 1);
   nodes.sort((a, b) => rank(a) - rank(b));
   // The last at work first, pinned or not: a pin is for the list in use (the user, 2026-11-08).
   const archived = list.filter((s) => s.archived && !hidden.has(s.id)).sort((a, b) => b.updatedAt - a.updatedAt);
@@ -175,7 +191,21 @@ export function commonDir(paths: string[]): string {
   return n ? (paths[0]!.startsWith("/") ? "/" : "") + first.slice(0, n).join("/") : "";
 }
 
+/** How many sessions a folder, or a group's root, shows while the rest are folded (the user,
+ *  2026-11-09): with more, the first so many as listed (the latest, pinned first) and a row for the
+ *  rest, opened by hand. One kept (pinned, open, at work, waiting on you) is shown wherever it is.
+ *  Not one folded alone: a row for one would hide nothing. */
+export const FOLD_SHOW = 5;
+export function foldRest(ss: Session[], kept: (s: Session) => boolean, n = FOLD_SHOW): { shown: Session[]; rest: number } {
+  if (ss.length <= n + 1) return { shown: ss, rest: 0 };
+  const shown = ss.filter((s, i) => i < n || kept(s));
+  return shown.length >= ss.length - 1 ? { shown: ss, rest: 0 } : { shown, rest: ss.length - shown.length };
+}
+
 const latest = (f: Folder) => Math.max(...f.sessions.map((s) => s.updatedAt));
+/** What a folder is sorted by among those in its group: where it was dragged to, else its latest
+ *  session's activity (reorder.ts). */
+export const folderKey = (f: Folder, order: Places["order"]) => order[f.path] || latest(f);
 
 /** The sessions as the sidebar shows them from top to bottom, for Alt+↑↓ and the jump box. */
 export const flat = (t: Tree) => [...t.workspaces.flatMap((w) => w.rows.flatMap((r) => (r.kind === "session" ? [r.s] : r.f.sessions)))].flatMap((s) => [s, ...(t.kids.get(s.id) ?? []), ...(t.runs.get(s.id) ?? []).flatMap((r) => r.working)]);

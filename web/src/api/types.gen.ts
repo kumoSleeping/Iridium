@@ -118,6 +118,16 @@ export interface Session {
    */
   color?: Color;
   /**
+   * Order: the key it was dragged to in the list (ms, as UpdatedAt), sorted by in place of
+   * UpdatedAt; 0 none.
+   */
+  order?: number /* float64 */;
+  /**
+   * At: the folder at another machine one of this machine's was opened for (NewSession.At): it
+   * is listed there, in that folder, not by its Cwd.
+   */
+  at?: string;
+  /**
    * Launcher: the session that started this one, if discovery saw it.
    */
   launcher?: string;
@@ -491,6 +501,11 @@ export interface NewSession {
    * is then a path there.
    */
   machine?: string;
+  /**
+   * At: one of this machine's opened for a folder at another ("<machine>:<path>", as grouped), a
+   * coordinator from a group's "+" there: grouped by that folder, wherever its group is nested.
+   */
+  at?: string;
 }
 export interface NewSessionReply {
   id: string;
@@ -915,6 +930,35 @@ export interface Workspace {
   hidden?: boolean;
 }
 /**
+ * GroupOrder lists the groups' rows in the order they were dragged to (PUT /api/groups/order), by
+ * the key the page gives each (a group listed at two machines is two rows, ordered apart): first
+ * to last, those left out after them.
+ */
+export interface GroupOrder {
+  keys: string[];
+}
+/**
+ * Places is where the rows of the list were put by hand: the carried state "places". Groups: the
+ * groups' rows in their order (GroupOrder); those not in it after them. Order: the key each folder
+ * dragged is sorted by among those in its group (as Session.Order), by its path as grouped
+ * (Session's cwd, or "<machine>:<cwd>"); one not in it, by its latest session's activity. Pinned:
+ * the folders pinned, first in their group.
+ */
+export interface Places {
+  groups: string[];
+  order: { [key: string]: number /* float64 */};
+  pinned: string[];
+}
+/**
+ * FolderPlace puts a folder (PATCH /api/folders/place); a field left out stays. Order 0 takes its
+ * key off.
+ */
+export interface FolderPlace {
+  path: string;
+  order?: number /* float64 */;
+  pinned?: boolean;
+}
+/**
  * WorkspacePatch renames a group, hides it or shows it again; a field left out stays.
  */
 export interface WorkspacePatch {
@@ -925,7 +969,8 @@ export interface WorkspacePatch {
  * SessionPatch changes what lies over a session; a field left out stays. Name "" takes the name
  * off. Workspace moves it (0: none), and it is never moved by discovery again. Color "" takes the
  * colour tag off. ByAgent: Name is the session's agent's (ir rename from a session), which does
- * not replace a name the user gave (409) and is cleaned as a title line is.
+ * not replace a name the user gave (409) and is cleaned as a title line is. Order: the key it was
+ * dragged to among those beside it (Session.Order); 0 takes it off.
  */
 export interface SessionPatch {
   name?: string;
@@ -934,6 +979,7 @@ export interface SessionPatch {
   archived?: boolean;
   workspace?: number /* int64 */;
   color?: Color;
+  order?: number /* float64 */;
 }
 /**
  * FolderColor tags folder Path (absolute) with a colour; Color "" takes it off. The carried state
@@ -1175,7 +1221,8 @@ export interface CLIOutput {
  * Note is a note jotted down (便签, docs/plan.md "便签"): words to keep, an idea, a thing to do.
  * In no folder (Folder 0) or in one; listed by Pos, small first. Sessions: those it was put into,
  * the latest last. From: the session it was jotted in, if any. Times in ms since the epoch; Done 0
- * is not done. The carried state "notes" is Notes, every note whole.
+ * is not done. Root: the root folder it serves (the composer lists those of its session's), "" every
+ * one's. The carried state "notes" is Notes, every note whole.
  */
 export interface Note {
   id: string;
@@ -1185,6 +1232,7 @@ export interface Note {
   color?: Color;
   done?: number /* int64 */;
   from?: string;
+  root?: string;
   sessions?: string[];
   created: number /* int64 */;
   updated: number /* int64 */;
@@ -1212,6 +1260,7 @@ export interface NewNote {
   pos?: number /* float64 */;
   color?: Color;
   from?: string;
+  root?: string;
 }
 /**
  * NotePatch changes a note; a field left out stays. Folder 0 takes it out of its folder; Color ""

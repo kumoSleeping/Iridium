@@ -221,12 +221,17 @@ describe("buildTree", () => {
     expect(t.workspaces[0]!.rows.map((r) => (r.kind === "session" ? r.s.id : `[${r.f.name}:${r.f.path}]`))).toEqual(["a", "[web:m:C:/Code/Starmod/web]"]);
     expect(t.workspaces[1]!.rows.map((r) => (r.kind === "session" ? r.s.id : r.f.path))).toEqual(["m:C:/Code/jl"]);
     expect(t.where.get("d")).toBe("Starmod");
-    // One of this machine's in that group: the group listed in this machine's section too, by
-    // the same name, with it, a row of its own; the group's own part in its machine's.
+    // One of this machine's in that group (a coordinator there): in that group, at its machine,
+    // a row of its own; not this machine's section.
     const here = buildTree([S("h", "/root", { workspace: 7 }), S("a", "C:\\Code\\Starmod", { workspace: 7, machine: "m" })], wss, "未归类", undefined, undefined, ["m"]);
-    expect(here.workspaces.map((w) => [w.key, w.machine, w.rows.map((r) => (r.kind === "session" ? r.s.id : r.f.path))])).toEqual([
-      ["w7@", undefined, ["h"]],
-      ["w7", "m", ["a"]],
+    expect(here.workspaces.map((w) => [w.key, w.machine, w.rows.map((r) => (r.kind === "session" ? r.s.id : r.f.path))])).toEqual([["w7", "m", ["h", "a"]]]);
+    // One at another machine in this machine's group: that group listed in its machine's section
+    // too, by the same name, with it.
+    const local = [{ id: 8, name: "ir", path: "/home/o/ir" }];
+    const there = buildTree([S("h", "/home/o/ir", { workspace: 8 }), S("a", "C:\\Code\\x", { workspace: 8, machine: "m" })], local, "未归类", undefined, undefined, ["m"]);
+    expect(there.workspaces.map((w) => [w.key, w.machine])).toEqual([
+      ["w8", undefined],
+      ["w8@m", "m"],
     ]);
     // In DSH's 未分组: a row of its own in that machine's 未归类, no folder; this machine's first.
     const u = buildTree([S("e", "C:\\Users\\o\\Documents\\DSH\\2026-11-02\\新聊天", { machine: "m", loose: true }), S("f", "/w/x/one")], wss, "未归类");

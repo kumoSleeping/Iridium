@@ -19,6 +19,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/agent"
 	"github.com/kumoSleeping/iridium/internal/agents"
 	"github.com/kumoSleeping/iridium/internal/api"
+	"github.com/kumoSleeping/iridium/internal/harness"
 	"github.com/kumoSleeping/iridium/internal/hold"
 	"github.com/kumoSleeping/iridium/internal/platform"
 	"github.com/kumoSleeping/iridium/internal/store"
@@ -130,8 +131,6 @@ type Hosted struct {
 	// mirroredAt: when the transcript's mirror was last brought up to date (remote.go).
 	mirroredAt time.Time
 	said       cached
-	// filing: its filing under DSH Desktop's workspace is asked for or done (remote.go).
-	filing bool
 
 	qmu     sync.Mutex   // one queue decision or release at a time; before mu
 	queue   []api.Queued // under mu
@@ -278,11 +277,13 @@ func (h *Hosted) launch(ctx context.Context, proc int) error {
 		Model: h.meta.Model, Mode: cmp.Or(h.meta.Mode, m.defaultMode(h.meta.Agent)), Effort: h.effort, Ultracode: h.ultracode, Preset: h.preset, CrashResume: h.crashResume && found != ""}
 	h.resuming, h.crashResume, h.turnSeen = o.CrashResume, false, false
 	h.mu.Unlock()
-	if h.meta.Agent == api.AgentDsh {
-		o.Catalog = m.catalogHook(h.meta.Machine)
-	}
 	if mc := h.machine(); mc != nil {
 		if err := h.remoteSpawn(mc, &o); err != nil {
+			return err
+		}
+	}
+	if l, ok := channelOf[harness.Launcher](m, h.meta.Agent); ok {
+		if err := l.Prepare(m.ctx, h.ref(), &o); err != nil {
 			return err
 		}
 	}
@@ -966,7 +967,7 @@ func (h *Hosted) summaryLocked(o store.Overlay, archived bool) api.Session {
 	return api.Session{
 		ID: h.id, Agent: h.meta.Agent, Cwd: h.meta.Cwd, Name: o.Name, Title: h.said.title,
 		Status: h.status(), Hosted: true, Live: h.live,
-		Pinned: o.Pinned, Archived: archived, Workspace: o.Workspace, Color: api.Color(o.Color),
+		Pinned: o.Pinned, Archived: archived, Workspace: o.Workspace, Color: api.Color(o.Color), Order: o.Order, At: o.At,
 		Launcher: h.meta.Launcher, Last: h.said.last, UpdatedAt: h.shownAt.UnixMilli(),
 		Machine: h.meta.Machine, Offline: h.offline(),
 	}
@@ -981,8 +982,7 @@ func (h *Hosted) state(o store.Overlay, archived bool) api.SessionState {
 	for _, m := range h.models {
 		s.Models = append(s.Models, api.Model{Value: m.Value, Name: m.Name, Description: m.Description, Resolved: m.Resolved, Efforts: slices.Clone(m.Efforts), NoEffort: m.NoEffort, EffortNames: maps.Clone(m.EffortNames), Group: m.Group})
 	}
-	h.m.heldState(&s, h.live)
-	h.m.catalogState(&s, h.meta.Machine)
+	h.m.channelState(h.refLocked(), &s)
 	if _, ok := h.drv.(agent.Ultracoder); ok {
 		u := &api.Ultracode{Available: true}
 		if h.ultracode != nil {

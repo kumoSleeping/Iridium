@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kumoSleeping/iridium/internal/agents"
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/session"
 	"github.com/kumoSleeping/iridium/internal/store"
@@ -101,15 +102,13 @@ func reply(id, md string) (api.ChatInputReply, error) {
 	return api.ChatInputReply{Session: id, Reply: text(md)}, nil
 }
 
-var agents = []api.Agent{api.AgentClaude, api.AgentCodex, api.AgentPi, api.AgentDsh}
-
 func cmdNew(s *Service, ctx context.Context, c Caller, p *store.ChatPointer, args string) (api.ChatInputReply, error) {
 	if args == "" { // a folder, then an agent: as the web's +
 		return s.folderCard(ctx, c, p, true, 0)
 	}
 	a := api.Agent(p.Agent)
 	f := strings.Fields(args)
-	if len(f) > 0 && slices.Contains(agents, api.Agent(strings.ToLower(f[0]))) {
+	if len(f) > 0 && isAgent(api.Agent(strings.ToLower(f[0]))) {
 		a, f = api.Agent(strings.ToLower(f[0])), f[1:]
 	}
 	cwd := cmp.Or(p.Cwd, s.o.ChatDir)
@@ -439,4 +438,10 @@ func modelName(st *api.SessionState) string {
 		}
 	}
 	return cmp.Or(name, st.Model)
+}
+
+// isAgent: a is one of the agents (agents.Get).
+func isAgent(a api.Agent) bool {
+	_, ok := agents.Get(a)
+	return ok
 }

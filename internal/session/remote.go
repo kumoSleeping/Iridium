@@ -17,7 +17,7 @@ import (
 
 	"github.com/kumoSleeping/iridium/internal/agent"
 	"github.com/kumoSleeping/iridium/internal/agents"
-	"github.com/kumoSleeping/iridium/internal/api"
+	"github.com/kumoSleeping/iridium/internal/harness"
 	"github.com/kumoSleeping/iridium/internal/platform"
 	"github.com/kumoSleeping/iridium/internal/remote"
 	"github.com/kumoSleeping/iridium/internal/remote/wire"
@@ -36,17 +36,13 @@ const fileIRToken = "remote-ir-token"
 // IRTokenPrefix marks a session's TOKEN, apart from a channel's.
 const IRTokenPrefix = "irs_"
 
-// fileFiled: a dsh session is filed under DSH Desktop's workspace of its folder there (or that dsh
-// cannot file it): not asked again.
-const fileFiled = "remote-filed"
-
 type remoteTranscript struct {
 	Path  string `json:"path"`  // there
 	Local string `json:"local"` // the mirror here
 }
 
 // ErrOffline: the session's executor is not connected.
-var ErrOffline = errors.New("the machine is not connected")
+var ErrOffline = harness.ErrOffline
 
 // HoldDir is the hold directory of a holder unit (remote.Hub's Dir).
 func (m *Manager) HoldDir(unit string) string {
@@ -153,11 +149,6 @@ func (h *Hosted) remoteSpawn(mc *remote.Machine, o *agent.SpawnOptions) error {
 			defer cancel()
 			return mc.WriteFile(c, path, data, true)
 		},
-		Presets: h.m.presetsHook(ctx, h.meta.Agent, h.meta.Machine),
-	}
-	if h.meta.Agent == api.AgentDsh {
-		o.Remote.Patches = append(h.m.desktopLLM(ctx, mc), h.m.desktopSession(ctx, mc)...)
-		o.Remote.Bundles = h.m.desktopBundles(ctx, mc)
 	}
 	return nil
 }
@@ -201,7 +192,9 @@ func (h *Hosted) findRemoteTranscript(mc *remote.Machine) (string, error) {
 	if err != nil || path == "" {
 		return rt.Local, err
 	}
-	h.fileInDesktop(mc)
+	if l, ok := channelOf[harness.Launcher](h.m, h.meta.Agent); ok {
+		l.Recorded(h.m.ctx, h.ref(), h.dir)
+	}
 	if path != rt.Path {
 		rt = remoteTranscript{Path: path, Local: filepath.Join(h.dir, "remote", remote.Base(hi.Sep, path))}
 		if err := writeJSON(filepath.Join(h.dir, fileRemoteTranscript), rt); err != nil {
@@ -216,40 +209,6 @@ func (h *Hosted) findRemoteTranscript(mc *remote.Machine) (string, error) {
 		return "", err
 	}
 	return rt.Local, nil
-}
-
-// fileInDesktop asks once that a dsh session, its transcript there now, be filed under the workspace of its
-// folder in the dsh the executor runs in (dsh.attach: DSH Desktop's sidebar has it then).
-func (h *Hosted) fileInDesktop(mc *remote.Machine) {
-	if h.meta.Agent != api.AgentDsh {
-		return
-	}
-	h.mu.Lock()
-	done := h.filing
-	h.filing = true
-	h.mu.Unlock()
-	marker := filepath.Join(h.dir, fileFiled)
-	if done {
-		return
-	}
-	if _, err := os.Stat(marker); err == nil {
-		return
-	}
-	go func() {
-		ctx, cancel := context.WithTimeout(h.m.ctx, 30*time.Second)
-		defer cancel()
-		err := mc.DshAttach(ctx, h.meta.agentID(), h.meta.Cwd)
-		if err != nil && !wire.IsCode(err, wire.CodeUnsupported) {
-			h.logf("filing it under DSH Desktop's workspace: %v", err)
-			h.mu.Lock()
-			h.filing = false // the next look asks again
-			h.mu.Unlock()
-			return
-		}
-		if err := os.WriteFile(marker, nil, 0o600); err != nil {
-			h.logf("noting it filed: %v", err)
-		}
-	}()
 }
 
 // syncRemote brings the transcript's mirror up to date, at most every second.

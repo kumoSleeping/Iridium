@@ -24,13 +24,22 @@ type Hub struct {
 	Logf func(string, ...any)
 	// Changed is called when a machine comes or goes.
 	Changed func(id string)
-	// OnHeld is called with the event held.changed from machine (its terminal ID): a session the
-	// holder there has changed (wire.CapHeldFeatures). It is called on the connection's reading
-	// goroutine: it must not wait on the executor.
-	OnHeld func(machine string, c wire.HeldChanged)
 
 	mu       sync.Mutex
 	machines map[string]*Machine
+	handlers map[string]func(machine string, params json.RawMessage)
+}
+
+// Handle has fn called with each event named event from an executor (its machine's terminal ID),
+// one a harness's channel speaks (held.changed). It is called on the connection's reading
+// goroutine: it must not wait on the executor. Set before executors connect.
+func (h *Hub) Handle(event string, fn func(machine string, params json.RawMessage)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.handlers == nil {
+		h.handlers = map[string]func(string, json.RawMessage){}
+	}
+	h.handlers[event] = fn
 }
 
 func (h *Hub) logf(format string, a ...any) {
@@ -192,7 +201,7 @@ func (m *Machine) Caps() []string {
 	return hi.Caps
 }
 
-// Has: the executor is connected and speaks cap (wire.CapHeld…).
+// Has: the executor is connected and speaks cap (one of wire's Cap…).
 func (m *Machine) Has(cap string) bool { return slices.Contains(m.Caps(), cap) }
 
 // Agent is agent a as the executor has it; ok false if not connected or not there.
@@ -278,13 +287,14 @@ func (m *Machine) Call(ctx context.Context, method string, params, out any) erro
 	return c.Call(ctx, method, params, out)
 }
 
-// event is an event from the executor, for the relay of its holder; held.changed, for OnHeld.
+// event is an event from the executor: one a channel handles (Hub.Handle), else for the relay
+// of its holder.
 func (m *Machine) event(name string, params json.RawMessage) {
-	if name == "held.changed" {
-		var c wire.HeldChanged
-		if f := m.hub.OnHeld; f != nil && json.Unmarshal(params, &c) == nil && c.Session != "" {
-			f(m.id, c)
-		}
+	m.hub.mu.Lock()
+	f := m.hub.handlers[name]
+	m.hub.mu.Unlock()
+	if f != nil {
+		f(m.id, params)
 		return
 	}
 	var h wire.HoldParams

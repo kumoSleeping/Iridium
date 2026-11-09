@@ -12,8 +12,10 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/kumoSleeping/iridium/internal/agent"
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/config"
+	"github.com/kumoSleeping/iridium/internal/harness"
 	"github.com/kumoSleeping/iridium/internal/remote"
 	"github.com/kumoSleeping/iridium/internal/remote/wire"
 )
@@ -245,7 +247,11 @@ func TestHeldPluginSession(t *testing.T) {
 	waitFor(t, "the executor", func() bool { _, ok := hub.Machine("m1").Hello(); return ok })
 
 	// The patch for its dsh process: session.js, the bridge's address; served to no one.
-	if p := r.m.desktopSession(bg, hub.Machine("m1")); len(p) != 1 || p[0] != filepath.Join(desktop, "session.patch.yml") {
+	launch := agent.SpawnOptions{Remote: &agent.Remote{}}
+	if err := r.m.o.Channels[api.AgentDsh].(harness.Launcher).Prepare(bg, harness.Ref{ID: id, As: id, Agent: api.AgentDsh, Machine: "m1"}, &launch); err != nil {
+		t.Fatal(err)
+	}
+	if p := launch.Remote.Patches; len(p) != 1 || p[0] != filepath.Join(desktop, "session.patch.yml") {
 		t.Fatalf("dsh.session: %q", p)
 	} else if b, _ := os.ReadFile(p[0]); !strings.Contains(string(b), "session.js\"\n") || !strings.Contains(string(b), "endpoint: ") {
 		t.Errorf("session patch:\n%s", b)

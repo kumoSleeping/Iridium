@@ -21,12 +21,12 @@ import { prefetch } from "./prefetch";
 import { close, go, onTurn, openChat, over, quietDialog, route, usagePoint, useRoute, type Route } from "./route";
 import { Pager, TABS_H } from "./pager";
 import { atLeft, atRight, GRIP, Sheet } from "./sheet";
-import { NotesKey } from "./notekey";
 import { HeadKeys, Sidebar } from "./sidebar";
 import { useConfirms, useList, useMachines } from "./store";
 import { follow } from "./stream";
 import { ToastList, toasts } from "./toast";
 import { buildTree, flat } from "./tree";
+import { usePlaces } from "./reorder";
 import { cn, holdMenu, IrMark, kept, keep, params, PHONE, useMedia, useMinute } from "./ui";
 import { watchUnread } from "./unread";
 import { warmUp } from "./warm";
@@ -84,11 +84,13 @@ function useExpanded() {
       return {};
     }
   });
-  // Open unless folded, but the archive and a workflow run's agents: those wait to be opened.
-  const expanded = (k: string) => over[k] ?? (k !== "archive" && !k.startsWith("run:"));
+  // Open unless folded, but the archive, a workflow run's agents and the rest of a folder's
+  // sessions (tree.ts foldRest): those wait to be opened.
+  const shut = (k: string) => k === "archive" || k.startsWith("run:") || k.startsWith("more:");
+  const expanded = (k: string) => over[k] ?? !shut(k);
   const toggle = (k: string) =>
     setOver((o) => {
-      const n = { ...o, [k]: !(o[k] ?? k !== "archive") };
+      const n = { ...o, [k]: !(o[k] ?? !shut(k)) };
       keep("expanded", JSON.stringify(n));
       return n;
     });
@@ -141,7 +143,8 @@ export function App() {
   const minute = useMinute();
   const machines = useMachines();
   const order = useMemo(() => machines.map((m) => m.id), [machines.map((m) => m.id).join(",")]);
-  const tree = useMemo(() => buildTree(list ?? [], ws.data ?? [], t("nav.unsorted"), Math.max(minute, Date.now()), undefined, order), [list, ws.data, t("nav.unsorted"), minute, order]);
+  const places = usePlaces();
+  const tree = useMemo(() => buildTree(list ?? [], ws.data ?? [], t("nav.unsorted"), Math.max(minute, Date.now()), undefined, order, places), [list, ws.data, t("nav.unsorted"), minute, order, places]);
 
   useEffect(() => follow(open), [open]);
   // Unread, and the chats of turns that end off screen.
@@ -173,9 +176,8 @@ export function App() {
   // A swipe up from the left shows the 终端 page from its first px, not the sessions' turning to it
   // as it is let go (the user, 2026-11-08).
   const [pulled, setPulled] = useState<"me" | "sessions" | "notes" | null>(null);
-  // The notes: on a computer in the session list's place, on a phone the sheet's last page, brought
-  // by a swipe up from the right quarter (the user, 2026-11-09).
-  const [notesOut, setNotesOut] = useState(false);
+  // The notes: on a phone the sheet's last page, brought by a swipe up from the right quarter (the
+  // user, 2026-11-09); on a computer only the composer's (chat/notekey.tsx).
   const [notesPage, setNotesPage] = useState(false);
   // Drawn once first shown, then kept, hidden: a note dragged away from them (to the sessions) is
   // still theirs to drop.
@@ -183,7 +185,7 @@ export function App() {
   // Out, its page is the route's; going down, it stays as it was; coming up, the swipe's.
   const lastPage = useRef(2);
   const sheetPage = sheetIsOut ? (setsOut ? (r.name === "usage" ? 1 : 0) : notesPage ? 3 : 2) : pulled ? (pulled === "me" ? 0 : pulled === "notes" ? 3 : 2) : lastPage.current;
-  if (!notesSeen && (notesOut || (phone && sheetPage === 3))) setNotesSeen(true);
+  if (!notesSeen && phone && sheetPage === 3) setNotesSeen(true);
   lastPage.current = sheetPage;
   // Just come out too: its page set at once, not slid to as it rises.
   const wasOut = useRef(sheetIsOut);
@@ -282,16 +284,6 @@ export function App() {
       createKey={(trigger) => <CreatePopover trigger={trigger} />}
       wsPlus={(w, trigger, o, setO) => <WsPlus key={w.key} w={{ id: w.id, name: w.name, path: w.root }} trigger={trigger} open={o} setOpen={setO} opened={(id) => openChat(id)} />}
       me={me}
-      notesKey={!phone && <NotesKey open={notesOut} onClick={() => (setNotesOut((o) => !o), setJumping(false))} />}
-      notesOut={notesOut}
-      notes={
-        !phone &&
-        notesSeen && (
-          <Suspense>
-            <NotesPanel />
-          </Suspense>
-        )
-      }
     />
   );
 

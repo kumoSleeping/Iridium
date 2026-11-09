@@ -26,6 +26,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/agents"
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/config"
+	"github.com/kumoSleeping/iridium/internal/harness"
 	"github.com/kumoSleeping/iridium/internal/hub"
 	"github.com/kumoSleeping/iridium/internal/irhelp"
 	"github.com/kumoSleeping/iridium/internal/platform"
@@ -96,7 +97,9 @@ type Options struct {
 	Hub      *hub.Hub
 	Launcher platform.Launcher
 	// Remote: the executors sessions may run at (docs/exec.md); nil: none.
-	Remote     *remote.Hub
+	Remote *remote.Hub
+	// Channels: the harnesses' own code, by agent (internal/harness); bound to the manager.
+	Channels   harness.Set
 	Exe        string // the binary that runs `hold`; "" is this one
 	UnitPrefix string // "" is UnitPrefix
 	Discovery  Discovery
@@ -138,16 +141,6 @@ type Manager struct {
 
 	tune     atomic.Pointer[Tunables] // tune.go
 	annotate atomic.Pointer[Annotate] // carry.go
-
-	presetMu sync.Mutex
-	presets  map[string]presetList    // by machine (presets.go)
-	catalogs map[string]*catalogEntry // by machine (catalog.go)
-
-	heldMu sync.Mutex
-	helds  map[string]*heldEntry // by session (held.go)
-	many   map[string]bool       // machines told of for too many features
-	told   []heldTold            // held.changed events not taken in yet
-	taking bool                  // a goroutine takes them in
 }
 
 func New(o Options) (*Manager, error) {
@@ -183,13 +176,15 @@ func New(o Options) (*Manager, error) {
 		o.QuotaStagger = time.Minute
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	m := &Manager{o: o, ctx: ctx, cancel: cancel, hosted: map[string]*Hosted{}, quota: map[string]api.AgentQuota{}, helds: map[string]*heldEntry{}, many: map[string]bool{}}
+	m := &Manager{o: o, ctx: ctx, cancel: cancel, hosted: map[string]*Hosted{}, quota: map[string]api.AgentQuota{}}
 	m.Tune(TunablesOf(o.Config))
 	o.Hub.Provide = m.provide
 	if o.Remote != nil {
 		o.Remote.Dir = m.HoldDir
 		o.Remote.Changed = m.machineChanged
-		o.Remote.OnHeld = m.onHeld
+	}
+	for _, c := range o.Channels {
+		c.Bind(host{m})
 	}
 	return m, nil
 }
@@ -373,7 +368,14 @@ func (m *Manager) create(ctx context.Context, req api.NewSession, from, name str
 	m.mu.Unlock()
 	h.newSession = true
 	h.show() // Iridium's own: shown from the start
-	if req.Workspace != 0 {
+	if at := req.At; at != "" && machine == "" && !filepath.IsAbs(at) && strings.Contains(at, ":") && len(at) <= 4096 {
+		// A coordinator for a folder there: grouped by that folder as discovery groups (nested
+		// with it), not put in its group by hand.
+		if err := m.o.Store.SetAt(mt.ID, at); err != nil {
+			return mt.ID, err
+		}
+		m.intoGroupPrefer(mt.ID, at, req.Workspace)
+	} else if req.Workspace != 0 {
 		if err := m.o.Store.Move(mt.ID, req.Workspace); err != nil {
 			return mt.ID, err
 		}
@@ -456,7 +458,7 @@ func (m *Manager) Stop(ctx context.Context, id string) error {
 }
 
 // List is the hosted sessions, then those the Discovery found that Iridium does not host,
-// pinned first, then the most recent.
+// pinned first, then the most recent: by the key one was dragged to, else its last activity.
 func (m *Manager) List(ctx context.Context) ([]api.Session, error) {
 	over, err := m.o.Store.Overlays()
 	if err != nil {
@@ -485,7 +487,7 @@ func (m *Manager) List(ctx context.Context) ([]api.Session, error) {
 		for _, s := range found {
 			if !seen[s.ID] {
 				o := over[s.ID]
-				s.Name, s.Pinned, s.Workspace, s.Color = o.Name, o.Pinned, o.Workspace, api.Color(o.Color)
+				s.Name, s.Pinned, s.Workspace, s.Color, s.Order, s.At = o.Name, o.Pinned, o.Workspace, api.Color(o.Color), o.Order, o.At
 				s.Archived = !vis.Shown(string(s.Agent), s.ID)
 				m.parentOf(&s)
 				out = append(out, s)
@@ -504,9 +506,18 @@ func (m *Manager) List(ctx context.Context) ([]api.Session, error) {
 			}
 			return 1
 		}
-		return int(b.UpdatedAt - a.UpdatedAt)
+		return cmp.Compare(sortKey(b), sortKey(a))
 	})
 	return out, nil
+}
+
+// sortKey is what a session is sorted by in the list: where it was dragged to, else when it
+// last worked.
+func sortKey(s api.Session) float64 {
+	if s.Order != 0 {
+		return s.Order
+	}
+	return float64(s.UpdatedAt)
 }
 
 // State is the open session's carried state.
@@ -514,14 +525,12 @@ func (m *Manager) State(id string) (*api.SessionState, error) {
 	h, err := m.get(id)
 	if err != nil {
 		st, err := m.foreignState(id, nil)
-		if err == nil && st.Agent == api.AgentDsh {
-			m.warmCatalog(st.Machine)
+		if err == nil {
+			m.warmModels(st.Agent, st.Machine)
 		}
 		return st, err
 	}
-	if h.meta.Agent == api.AgentDsh {
-		m.warmCatalog(h.meta.Machine)
-	}
+	m.warmModels(h.meta.Agent, h.meta.Machine)
 	over, _ := m.o.Store.Overlays()
 	s := h.state(over[id], !h.shown())
 	return &s, nil
@@ -628,7 +637,7 @@ func (m *Manager) reap() {
 }
 
 // ErrNotInstalled: a new session's agent program is not there.
-var ErrNotInstalled = errors.New("agent not installed")
+var ErrNotInstalled = harness.ErrNotInstalled
 
 // program is the program agent a runs: the config's, else its own name.
 func (m *Manager) program(a api.Agent) string {

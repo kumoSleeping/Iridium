@@ -10,9 +10,12 @@ import (
 
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/config"
+	"github.com/kumoSleeping/iridium/internal/harness"
+	hdsh "github.com/kumoSleeping/iridium/internal/harness/dsh"
 	"github.com/kumoSleeping/iridium/internal/hold"
 	"github.com/kumoSleeping/iridium/internal/hub"
 	"github.com/kumoSleeping/iridium/internal/platform"
+	"github.com/kumoSleeping/iridium/internal/remote"
 	"github.com/kumoSleeping/iridium/internal/store"
 	"github.com/kumoSleeping/iridium/internal/testagent"
 )
@@ -59,6 +62,9 @@ func newRig(t *testing.T, edit func(*config.Config, *Options)) *rig {
 	o := r.options()
 	if edit != nil {
 		edit(&o.Config, &o)
+	}
+	if o.Channels == nil {
+		o.Channels = testChannels(t, o.Remote)
 	}
 	r.cfg = o.Config
 	// Every agent this test started, once its managers closed (cleanups run last first).
@@ -334,4 +340,11 @@ func waitFor(t *testing.T, what string, ok func() bool) {
 		}
 	}
 	t.Fatalf("timed out waiting for %s", what)
+}
+
+// testChannels are the harnesses' channels as Iridium has them (cmd/iridium), on remote.
+func testChannels(t *testing.T, remote *remote.Hub) harness.Set {
+	c := hdsh.New(hdsh.Options{Remote: remote, Logf: t.Logf})
+	t.Cleanup(c.Close)
+	return harness.Set{api.AgentDsh: c}
 }

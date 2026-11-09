@@ -10,6 +10,7 @@ import (
 
 	"github.com/kumoSleeping/iridium/internal/agents"
 	"github.com/kumoSleeping/iridium/internal/api"
+	"github.com/kumoSleeping/iridium/internal/harness"
 	"github.com/kumoSleeping/iridium/internal/store"
 	"github.com/kumoSleeping/iridium/internal/transcript"
 )
@@ -84,15 +85,14 @@ func (m *Manager) take(ctx context.Context, id string) (*Hosted, error) {
 	if err := f.Free(id); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrElsewhere, err)
 	}
-	// Claude, pi and dsh resume a session by its id, Codex a thread: its id is the hosted one's too.
-	switch s.Agent {
-	case api.AgentClaude, api.AgentCodex, api.AgentPi, api.AgentDsh:
-	default:
+	// Every agent resumes a session by its id; one that makes its own (Codex's thread) by that,
+	// the hosted one's id too.
+	info, ok := agents.Get(s.Agent)
+	if !ok {
 		return nil, fmt.Errorf("resuming a %s session is not supported yet", s.Agent)
 	}
 	if s.Machine != "" {
-		// dsh at another machine (docs/exec.md "远端 DSH"): it is to be there now, its folder too.
-		info, _ := agents.Get(s.Agent)
+		// At another machine (docs/exec.md): it is to be there now, its folder too.
 		if _, err := m.remoteFor(ctx, s.Machine, info, s.Cwd); err != nil {
 			return nil, err
 		}
@@ -105,8 +105,8 @@ func (m *Manager) take(ctx context.Context, id string) (*Hosted, error) {
 		return h, nil // taken meanwhile
 	}
 	mt := meta{ID: id, Agent: s.Agent, Cwd: s.Cwd, Created: time.Now().UnixMilli(), Machine: s.Machine}
-	if s.Agent == api.AgentCodex {
-		mt.AgentID = id // the thread to resume
+	if info.OwnID {
+		mt.AgentID = id // the agent's own id to resume (Codex's thread)
 	}
 	h = m.newHosted(mt)
 	if err := os.MkdirAll(h.dir, 0o700); err != nil {
@@ -155,8 +155,7 @@ func (m *Manager) foreignState(id string, over map[string]store.Overlay) (*api.S
 	if f != nil {
 		st.End, _ = f.Size()
 	}
-	m.heldState(st, false)
-	m.catalogState(st, s.Machine)
+	m.channelState(harness.Ref{ID: id, As: id, Agent: s.Agent, Machine: s.Machine, Cwd: s.Cwd, Found: true, Status: s.Status}, st)
 	return st, nil
 }
 
@@ -222,6 +221,11 @@ func (m *Manager) intoGroup(id, cwd, caller string) {
 			prefer = over[caller].Workspace
 		}
 	}
+	m.intoGroupPrefer(id, cwd, prefer)
+}
+
+// intoGroupPrefer puts a new session of folder cwd in its group: prefer if that holds it.
+func (m *Manager) intoGroupPrefer(id, cwd string, prefer int64) {
 	g, ok := m.o.Discovery.(grouper)
 	if !ok {
 		if prefer != 0 {

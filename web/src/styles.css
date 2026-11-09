@@ -488,6 +488,16 @@ body {
   font-size: 12.5px;
   line-height: 19px;
 }
+/* Streamdown's table frames (two rounded boxes, Tailwind classes of its own) drawn as nothing:
+   they showed once our code used a bare `border` (v0.1.30). The table stays scrollable. */
+.prose-ir div:has(> table),
+.prose-ir div:has(> div > table) {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
 .prose-ir table {
   border-collapse: collapse;
   font-size: 13px;
@@ -631,3 +641,14 @@ body {
   animation-delay: -0.2s;
 }
 
+/* Code in colours (chat/hl-lib.ts, highlight.js's classes): the tag hues, so light and dark each have
+   theirs. */
+.hljs-keyword, .hljs-built_in, .hljs-selector-tag, .hljs-doctag { color: var(--tag-purple); }
+.hljs-string, .hljs-regexp, .hljs-template-tag, .hljs-template-variable, .hljs-selector-attr { color: var(--tag-green); }
+.hljs-number, .hljs-literal, .hljs-variable, .hljs-symbol, .hljs-bullet { color: var(--tag-orange); }
+.hljs-title, .hljs-function .hljs-title, .hljs-section, .hljs-name, .hljs-selector-id, .hljs-selector-class { color: var(--tag-blue); }
+.hljs-attr, .hljs-attribute, .hljs-property, .hljs-params, .hljs-type, .hljs-meta { color: var(--tag-red); }
+.hljs-comment, .hljs-quote { color: var(--ink-4); font-style: italic; }
+.hljs-subst { color: var(--ink-2); }
+.hljs-addition { color: var(--plus); }
+.hljs-deletion { color: var(--minus); }

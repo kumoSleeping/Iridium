@@ -239,3 +239,61 @@ func TestNest(t *testing.T) {
 		}
 	}
 }
+
+// A group split at its folder keeps only the sessions right in it; those in its subfolders are
+// grouped again by their folders, a subfolder's in its parent's, and the split group swallows them
+// no more. A coordinator of this machine's, put by a group's "+" in a group there by hand, follows
+// that group's folder: nested with it, then grouped by it when its outer group is split.
+func TestSplitAndFollow(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "iridium.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	x := New(Options{Store: st, Home: "/home/u", Logf: t.Logf})
+	filed := map[string]bool{}
+	add := func(id, cwd, machine string, agent api.Agent) {
+		x.entries[id] = &entry{onDisk: onDisk{id: id, agent: agent}, glimpse: glimpse{cwd: cwd}, mtime: time.Now(), machine: machine}
+		if _, err := st.Show(string(agent), id); err != nil {
+			t.Fatal(err)
+		}
+		filed[id] = true
+	}
+	otc, _ := st.CreateWorkspace("otc", "m:C:/Code/otc")
+	add("root", `C:\Code`, "m", api.AgentDsh)
+	add("otc", `C:\Code\otc`, "m", api.AgentDsh)
+	add("bench", `C:\Code\Ds_Benchmark`, "m", api.AgentDsh)
+	add("hy4", `C:\Code\Ds_Benchmark\hy4`, "m", api.AgentDsh)
+	add("coord", "/home/u", "", api.AgentClaude)
+	x.filed["m"] = filed
+	if err := st.Move("coord", otc); err != nil {
+		t.Fatal(err)
+	}
+	x.classify()
+	a, _ := st.Assignments()
+	code := a["root"].Workspace
+	for _, id := range []string{"otc", "bench", "hy4", "coord"} {
+		if a[id].Workspace != code || a[id].Manual {
+			t.Errorf("%s: %+v, want in Code's group %d", id, a[id], code)
+		}
+	}
+	if ats, _ := st.Ats(); ats["coord"] != "m:C:/Code/otc" {
+		t.Errorf("coord at %q", ats["coord"])
+	}
+
+	if err := x.SplitWorkspace(code); err != nil {
+		t.Fatal(err)
+	}
+	x.classify()
+	a, _ = st.Assignments()
+	ws, _ := st.Workspaces()
+	path := map[int64]string{}
+	for _, w := range ws {
+		path[w.ID] = w.Path
+	}
+	for id, want := range map[string]string{"root": "m:C:/Code", "otc": "m:C:/Code/otc", "coord": "m:C:/Code/otc", "bench": "m:C:/Code/Ds_Benchmark", "hy4": "m:C:/Code/Ds_Benchmark"} {
+		if got := path[a[id].Workspace]; got != want {
+			t.Errorf("%s in %q, want %q", id, got, want)
+		}
+	}
+}

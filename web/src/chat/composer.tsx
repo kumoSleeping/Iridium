@@ -8,9 +8,9 @@
 // user, 2026-11-08). Shift+Tab cycles the approval mode; Esc stops the turn. The draft is kept on
 // this device; files pasted, dropped or attached go up in chunks while you type, a picture in its
 // own shape under a veil drawn back as it goes; nothing is sent till all are up.
-import { ArrowUp, FileText, LoaderCircle, MessageSquare, Paperclip, Slash, Square, X } from "lucide-react";
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import type { Command, Session, SessionState as LiveSession } from "../api/types.gen";
+import { ArrowUp, Box, Brain, ChartPie, Eraser, FileText, FoldVertical, Gauge, LoaderCircle, MessageSquare, Paperclip, ShieldCheck, Square, X, type LucideIcon } from "lucide-react";
+import { forwardRef, Fragment, useEffect, useImperativeHandle, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import type { Agent, Command, Session, SessionState as LiveSession } from "../api/types.gen";
 import { runShell, shellLine, useShellable } from "./shell";
 import { api, missing } from "../api/client";
 import type { Sent } from "../chats";
@@ -192,7 +192,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
   const shownNamed = row ? named : lastAtts.current.named;
 
   const commands = commandsOf(s);
-  const list = /^\/\S*$/.test(text) && text !== shut ? matching(commands, text.slice(1)) : [];
+  // Nothing typed after the /: the common ones first, then the agent's own, under their heads.
+  const list = /^\/\S*$/.test(text) && text !== shut ? (text === "/" ? [...commands.filter(isCommon), ...commands.filter((c) => !isCommon(c))] : matching(commands, text.slice(1))) : [];
   const sessions = useList();
   const word = caret !== null && text !== shut && !list.length ? atWord(text, caret) : null;
   const picks = word && sessions ? atSessions(sessions, word.q, s.id) : [];
@@ -315,7 +316,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
   // The palette beside the composer, not in it: a frosted layer inside another sees only that one.
   return (
     <div className="relative">
-      {list.length > 0 && <Palette list={list} at={Math.min(at, list.length - 1)} point={setAt} pick={(c) => (own(`/${c.name}`) ? undefined : (type(`/${c.name} `), box.current?.focus()))} />}
+      {list.length > 0 && <Palette list={list} at={Math.min(at, list.length - 1)} agent={s.agent} grouped={text === "/"} point={setAt} pick={(c) => (own(`/${c.name}`) ? undefined : (type(`/${c.name} `), box.current?.focus()))} />}
       {picks.length > 0 && <AtList list={picks} at={Math.min(at, picks.length - 1)} point={setAt} pick={name} />}
       {secretish && (
         <SaveSecret
@@ -471,7 +472,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
  *  folder; ↑↓ and Enter or Tab on a keyboard, a tap on a phone. */
 function AtList({ list, at, pick, point }: { list: Session[]; at: number; pick: (s: Session) => void; point: (i: number) => void }) {
   return (
-    <div role="listbox" aria-label={t("composer.sessions")} className="g-pop glass thick float absolute inset-x-0 bottom-full z-10 mb-2 max-h-72 overflow-y-auto rounded-lg p-1.5">
+    <div role="listbox" aria-label={t("composer.sessions")} className="g-pop glass thick float absolute inset-x-0 bottom-full z-10 mb-2 max-h-72 no-bar overflow-y-auto rounded-lg p-1.5">
       {list.map((x, i) => (
         <button
           key={x.id}
@@ -496,29 +497,44 @@ function AtList({ list, at, pick, point }: { list: Session[]; at: number; pick: 
   );
 }
 
-/** The commands over the composer, as wide: a row each, ↑↓ and Enter or Tab on a keyboard. */
-function Palette({ list, at, pick, point }: { list: Command[]; at: number; pick: (c: Command) => void; point: (i: number) => void }) {
+/** The common commands' icons; an agent's own have none (no slash: the user, 2026-11-09). */
+const CMD_ICONS: Record<(typeof COMMON)[number], LucideIcon> = { clear: Eraser, compact: FoldVertical, context: ChartPie, usage: Gauge, model: Box, effort: Brain, mode: ShieldCheck };
+const isCommon = (c: Command) => COMMON.includes(c.name as (typeof COMMON)[number]);
+
+/** The commands as the page's menus are (the model's, a right press's), not a bar as wide as the
+ *  composer over it (the user, 2026-11-09): a card at the box's corner, grown out of the /; a row
+ *  each, its icon, its name, what it does faint at its end; while nothing is typed after the /, the
+ *  common ones, then the agent's own, each under its head. ↑↓ and Enter or Tab on a keyboard. */
+function Palette({ list, at, agent, grouped, pick, point }: { list: Command[]; at: number; agent: Agent; grouped: boolean; pick: (c: Command) => void; point: (i: number) => void }) {
   return (
-    <div role="listbox" aria-label={t("composer.commands")} className="g-pop glass thick float absolute inset-x-0 bottom-full z-10 mb-2 max-h-72 overflow-y-auto rounded-lg p-1.5">
-      {list.map((c, i) => (
-        <button
-          key={c.name}
-          type="button"
-          role="option"
-          aria-selected={i === at}
-          ref={(el) => void (i === at && el?.scrollIntoView({ block: "nearest" }))}
-          onPointerDown={(e) => e.preventDefault()}
-          onPointerMove={() => i === at || point(i)}
-          onClick={() => pick(c)}
-          style={{ "--i": i } as CSSProperties}
-          className={cn("flex h-8 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-base pointer-coarse:h-11", i === at && "bg-fill")}
-        >
-          <Slash size={13} className="shrink-0 text-ink-3" />
-          <span className="shrink-0 font-medium">{c.name}</span>
-          {c.argumentHint && <span className="max-w-[33%] min-w-0 shrink truncate font-mono text-xs text-ink-3">{c.argumentHint}</span>}
-          <span className="min-w-0 flex-1 truncate text-sm text-ink-3">{c.description}</span>
-        </button>
-      ))}
+    <div role="listbox" aria-label={t("composer.commands")} className="g-pop glass thick float absolute bottom-full left-2 z-10 mb-2 max-h-[min(360px,50dvh)] w-80 max-w-[calc(100%-16px)] origin-bottom-left no-bar overflow-y-auto overscroll-contain rounded-lg p-1.5 text-ink">
+      <div className="g-stagger flex flex-col">
+        {list.map((c, i) => {
+          const Icon = isCommon(c) ? CMD_ICONS[c.name as (typeof COMMON)[number]] : undefined;
+          const head = grouped && (i === 0 || isCommon(list[i - 1]!) !== isCommon(c));
+          return (
+            <Fragment key={c.name}>
+              {head && <div className="truncate px-2.5 pt-2 pb-0.5 text-xs text-ink-3 select-none first:pt-1">{isCommon(c) ? t("composer.cmdCommon") : agentName(agent)}</div>}
+              <button
+                type="button"
+                role="option"
+                aria-selected={i === at}
+                ref={(el) => void (i === at && el?.scrollIntoView({ block: "nearest" }))}
+                onPointerDown={(e) => e.preventDefault()}
+                onPointerMove={() => i === at || point(i)}
+                onClick={() => pick(c)}
+                style={{ "--i": i } as CSSProperties}
+                className={cn("flex h-8 w-full shrink-0 cursor-default items-center gap-2.5 rounded-md px-2.5 text-left text-base outline-none select-none pointer-coarse:h-11", i === at && "bg-fill")}
+              >
+                {Icon && <Icon size={15} className="shrink-0 text-ink-2" aria-hidden />}
+                <span className="shrink-0">{c.name}</span>
+                {c.argumentHint && <span className="max-w-[30%] min-w-0 shrink truncate font-mono text-xs text-ink-3">{c.argumentHint}</span>}
+                <span className="min-w-0 flex-1 truncate text-right text-xs text-ink-3">{c.description}</span>
+              </button>
+            </Fragment>
+          );
+        })}
+      </div>
     </div>
   );
 }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/config"
+	"github.com/kumoSleeping/iridium/internal/harness"
 	"github.com/kumoSleeping/iridium/internal/remote"
 	"github.com/kumoSleeping/iridium/internal/remote/wire"
 )
@@ -300,7 +302,7 @@ func TestHeldFailedAndLang(t *testing.T) {
 	r.m.State(id)
 	waitFor(t, "a held.get", func() bool { return len(x.asked("held.get")) == 1 })
 	time.Sleep(50 * time.Millisecond)
-	if _, ok := r.m.cachedHeld(id); ok {
+	if st, _ := r.m.State(id); len(st.Features) > 0 {
 		t.Fatal("a failed held.get kept as told")
 	}
 	x.mu.Lock()
@@ -341,43 +343,45 @@ func TestHeldOlderPlugin(t *testing.T) {
 	}
 }
 
-// What a plugin says of its features is checked: IDs, the first of each, a known shape and place,
-// at most four; texts trimmed, without control characters, cut short; options checked.
-func TestFeatures(t *testing.T) {
-	m := &Manager{o: Options{Logf: t.Logf}}
-	long := strings.Repeat("長", 200)
-	in := []wire.Feature{
-		{ID: "a.one", Name: " One\x07 ", Place: "effort", Tone: "hot", Hint: long, Reason: "r\n",
-			Options: []wire.FeatureOption{{ID: "o1", Name: long}, {ID: "Bad", Name: "x"}, {ID: "o1", Name: "dup"}}, Option: "Bad"},
-		{ID: "a.one", Name: "second", Place: "effort"},
-		{ID: "noplugin", Name: "x", Place: "effort"},
-		{ID: "a.two", Name: "x", Place: "elsewhere"},
-		{ID: "a.three", Name: "x", Place: "effort", V: 2},
-		{ID: "a.b", Name: "b", Place: "effort", Tone: "warm", V: 1},
-		{ID: "a.c", Name: "c", Place: "effort"},
-		{ID: "a.d", Name: "d", Place: "effort"},
-		{ID: "a.e", Name: "e", Place: "effort"},
+// effortOwner is a channel whose session's own process has the say over an effort ("max": a
+// feature there owns it), though the session runs here.
+type effortOwner struct {
+	mu   sync.Mutex
+	asks []harness.Ref
+}
+
+func (e *effortOwner) Agent() api.Agent  { return api.AgentClaude }
+func (e *effortOwner) Bind(harness.Host) {}
+func (e *effortOwner) Set(_ context.Context, r harness.Ref, ch harness.Change) (bool, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.asks = append(e.asks, r)
+	return ch.Effort == "max", nil
+}
+
+// A session that runs here: its channel is asked first, and an effort it takes is not the driver's.
+func TestChannelSetLive(t *testing.T) {
+	owner := &effortOwner{}
+	r := newRig(t, func(_ *config.Config, o *Options) { o.Channels = harness.Set{api.AgentClaude: owner} })
+	id, err := r.m.Create(bg, api.NewSession{Cwd: r.cwd, Text: "hi"}, "网页")
+	if err != nil {
+		t.Fatal(err)
 	}
-	for i := range 10 {
-		in[0].Options = append(in[0].Options, wire.FeatureOption{ID: "n" + string(rune('a'+i)), Name: "n"})
+	r.waitState(id, "the reply", func(s *api.SessionState) bool { return said(s, "ok: hi") })
+	if err := r.m.SetEffort(bg, id, "max"); err != nil {
+		t.Fatal(err)
 	}
-	out := m.features("m1", in)
-	var ids []string
-	for _, f := range out {
-		ids = append(ids, f.ID)
+	if err := r.m.SetEffort(bg, id, "high"); err != nil {
+		t.Fatal(err)
 	}
-	if strings.Join(ids, " ") != "a.one a.b a.c a.d" {
-		t.Fatalf("ids: %v", ids)
+	owner.mu.Lock()
+	asks := slices.Clone(owner.asks)
+	owner.mu.Unlock()
+	if len(asks) != 2 || !asks[0].Live || asks[0].ID != id {
+		t.Fatalf("asked: %+v", asks)
 	}
-	one := out[0]
-	if one.Name != "One" || one.Tone != "" || len([]rune(one.Hint)) != 120 || one.Reason != "r" || one.Option != "" ||
-		len(one.Options) != 8 || one.Options[0].ID != "o1" || len([]rune(one.Options[0].Name)) != 24 || one.Options[1].ID != "na" {
-		t.Errorf("checked: %+v", one)
-	}
-	if out[1].Tone != "warm" {
-		t.Errorf("tone: %+v", out[1])
-	}
-	if m.features("m1", []wire.Feature{{ID: "a.b", Place: "effort", Options: []wire.FeatureOption{{ID: "x", Name: "X"}}, Option: "x"}})[0].Option != "x" {
-		t.Error("an option of its own dropped")
+	in := r.inLog(id)
+	if strings.Contains(in, `"effortLevel":"max"`) || !strings.Contains(in, `"effortLevel":"high"`) {
+		t.Errorf("in.log:\n%s", in)
 	}
 }

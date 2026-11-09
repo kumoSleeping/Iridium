@@ -1,7 +1,6 @@
 package session
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"slices"
@@ -10,7 +9,7 @@ import (
 
 	"github.com/kumoSleeping/iridium/internal/agent"
 	"github.com/kumoSleeping/iridium/internal/api"
-	"github.com/kumoSleeping/iridium/internal/remote/wire"
+	"github.com/kumoSleeping/iridium/internal/harness"
 	"github.com/kumoSleeping/iridium/internal/store"
 )
 
@@ -47,11 +46,11 @@ func (m *Manager) SendWith(ctx context.Context, id, text, from string, steer boo
 	if strings.HasPrefix(strings.TrimSpace(text), "/") {
 		text, steer = strings.TrimSpace(text), false
 	}
-	if done, err := m.toDesktop(ctx, id, text, from, steer, len(images) > 0); done {
+	if done, err := m.handOver(ctx, id, text, from, steer, len(images) > 0); done {
 		if err != nil {
 			return "", false, err
 		}
-		return DesktopInput, false, nil
+		return HandedInput, false, nil
 	}
 	h, err := m.take(ctx, id)
 	if err != nil {
@@ -343,57 +342,26 @@ func queuedInput(session string, q api.Queued) store.Input {
 	return store.Input{ID: q.ID, Session: session, Terminal: terminal, Tag: q.From, Text: q.Text}
 }
 
-// DesktopInput is the input SendWith gives for a message given to DSH Desktop's agent (toDesktop):
-// none of Iridium's.
-const DesktopInput = "desktop"
+// HandedInput is the input SendWith gives for a message handed to whoever holds the session
+// elsewhere (its channel's harness.Sender): none of Iridium's.
+const HandedInput = "desktop"
 
-// toDesktop gives a message for a dsh session at another machine that DSH Desktop there holds
-// (open in it, so its writer lock is Desktop's and a resume here is refused) to Desktop's own
-// agent of it, through the dsh plugin (held.send; dsh.prompt of an older one): the work goes on
-// there, its transcript mirrored here as for any of Desktop's sessions (the user, 2026-11-08: a
-// session the executor lost, Desktop took up on its return). done false: not such a session, or the plugin cannot,
-// so the message goes the usual way. Images do not go: Desktop's agent would not see them.
-func (m *Manager) toDesktop(ctx context.Context, id, text, from string, steer, images bool) (bool, error) {
-	f := m.finder()
-	if f == nil || m.o.Remote == nil || images {
+// handOver gives a message for a session another process holds to that process, through the
+// session's channel (harness.Sender), when it can take it: its work goes on there, its
+// transcript mirrored here. done false: not such a session; the message goes the usual way.
+func (m *Manager) handOver(ctx context.Context, id, text, from string, steer, images bool) (bool, error) {
+	r, ok := m.ref(id)
+	if !ok || r.Live {
 		return false, nil
 	}
-	as := id
-	if h, err := m.get(id); err == nil {
-		if h.isLive() || h.meta.Agent != api.AgentDsh || h.meta.Machine == "" {
-			return false, nil
-		}
-		as = h.discoveredAs()
-	}
-	s, _, ok := f.Found(as)
-	held := s.Status == api.StatusElsewhere
-	if h, can := f.(interface{ HeldElsewhere(string) bool }); can {
-		held = h.HeldElsewhere(as) // loaded there, idle or not: Desktop holds its writer lock
-	}
-	if !ok || s.Agent != api.AgentDsh || s.Machine == "" || !held {
+	s, ok := channelOf[harness.Sender](m, r.Agent)
+	if !ok {
 		return false, nil
 	}
-	mc := m.o.Remote.Find(s.Machine)
-	if mc == nil {
-		return false, nil
+	terminal, tag := m.source(from)
+	to, done, err := s.Send(ctx, r, text, harness.Source{Terminal: terminal, Tag: tag}, steer, images)
+	if done && err == nil {
+		m.o.Logf("session %s: handed to %s", id, to)
 	}
-	line := strings.TrimSpace(text)
-	if !strings.HasPrefix(line, "/") {
-		terminal, tag := m.source(from)
-		line = "[" + cmp.Or(tag, terminal) + "] " + line
-	}
-	err := mc.DshPrompt(ctx, as, line, steer)
-	if wire.IsCode(err, wire.CodeUnsupported) || wire.IsCode(err, wire.CodeNotFound) {
-		return false, nil // an older plugin, or Desktop holds no agent of it: the usual way says why not
-	}
-	if err != nil {
-		return true, err
-	}
-	m.o.Logf("session %s: given to DSH Desktop's agent at %s", id, s.Machine)
-	if c, ok := f.(interface {
-		Fetch(context.Context, string) error
-	}); ok {
-		go func() { _ = c.Fetch(context.Background(), as) }() // its mirror follows sooner
-	}
-	return true, nil
+	return done, err
 }

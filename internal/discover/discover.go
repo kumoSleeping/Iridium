@@ -135,6 +135,9 @@ type Index struct {
 	aliasMu sync.Mutex
 	alias   func(hosted string) string
 
+	flatMu sync.Mutex
+	flat   map[string]bool // the folders of groups split (SplitWorkspace), as rootsOf last read them
+
 	sinceOnce sync.Once
 	since     int64 // when Iridium began watching (ms)
 
@@ -227,6 +230,7 @@ func (x *Index) Start() error {
 	x.Scan()
 	x.publishWorkspaces()
 	x.publishColors()
+	x.publishPlaces()
 	x.wg.Add(2)
 	go x.loop()
 	go x.settle()

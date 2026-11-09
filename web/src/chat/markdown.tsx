@@ -1,13 +1,14 @@
 // An agent's words as Markdown (Streamdown, with the CJK fixes): quiet, no buttons of its own, code
-// blocks as plain monospace with a copy key, links only to http(s). Raw HTML shows as written:
-// rehype-raw is not even bundled (vite.config.ts). One options object, so a message is not drawn
-// again for each piece of a draft (Streamdown's memo).
+// blocks in their language's colours (hl.tsx) with a copy key, links only to http(s). Raw HTML
+// shows as written: rehype-raw is not even bundled (vite.config.ts). One options object, so a
+// message is not drawn again for each piece of a draft (Streamdown's memo).
 import { cjk } from "@streamdown/cjk";
 import { Check, Copy } from "lucide-react";
 import { memo, useState, type ComponentProps } from "react";
 import { defaultComponents, Streamdown, type ExtraProps, type StreamdownProps } from "streamdown";
 import { t } from "../i18n";
 import { cn } from "../ui";
+import { Code } from "./hl";
 import { draftWords } from "./refs";
 
 function CodeBlock({ className, children }: ComponentProps<"code"> & ExtraProps) {
@@ -28,7 +29,9 @@ function CodeBlock({ className, children }: ComponentProps<"code"> & ExtraProps)
       {/* Its words clear of the key: a one-line block was written under it (the user, 2026-11-08).
           The language is the key's tip, not a label over the words. */}
       <pre className="overflow-x-auto py-2.5 pr-10 pl-3 whitespace-pre">
-        <code>{code}</code>
+        <code>
+          <Code text={code} lang={lang} />
+        </code>
       </pre>
     </div>
   );

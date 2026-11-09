@@ -338,7 +338,7 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 		s.error(w, err)
 		return
 	}
-	if input == session.DesktopInput {
+	if input == session.HandedInput {
 		reply(w, http.StatusOK, api.SendReply{Desktop: true})
 		return
 	}
@@ -384,7 +384,7 @@ func (s *Server) release(w http.ResponseWriter, r *http.Request) {
 	s.done(w, s.m.Release(ctx, r.PathValue("id"), req.ToolUseID, req.Dismiss))
 }
 
-var stateKey = regexp.MustCompile(`^(list|quota|workspaces|colors|confirms|update|terminals|machines|notes|(session|context):[0-9a-zA-Z_-]{1,128})$`)
+var stateKey = regexp.MustCompile(`^(list|quota|workspaces|places|colors|confirms|update|terminals|machines|notes|(session|context):[0-9a-zA-Z_-]{1,128})$`)
 
 // events is the page's one event stream: ?sub=<key> for each state it wants (list, quota,
 // workspaces, colors, session:<id>, context:<id>, confirms, update, notes). See package hub. A key it

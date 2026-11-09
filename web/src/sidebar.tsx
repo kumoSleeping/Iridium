@@ -9,25 +9,27 @@
 // and at its foot the colour tags (colors.ts); a group's: rename, its path, 通知. The mouse resting
 // on a row fetches its chat ahead.
 import { Menu } from "@base-ui/react/menu";
-import { Archive, ArchiveRestore, Bot, Check, ChevronRight, Copy, Eye, EyeOff, Folder, FolderOpen, Monitor, Pencil, Pin, PinOff, Plus, RefreshCw, Square, Workflow as WorkflowIcon } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowDown, ArrowUp, Bot, Check, ChevronRight, Copy, Ellipsis, Ungroup, Eye, EyeOff, Folder, FolderOpen, Monitor, Pencil, Pin, PinOff, Plus, RefreshCw, Square, Workflow as WorkflowIcon } from "lucide-react";
 import { ConfirmIcon, confirmName, confirmTitle } from "./confirmname";
-import { Fragment, lazy, memo, Suspense, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
+import { Fragment, lazy, memo, Suspense, useCallback, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode, type RefObject } from "react";
 import { api } from "./api/client";
-import type { Color, Confirm, Machine, Session, Terminal } from "./api/types.gen";
+import type { Color, Confirm, Machine, Places, Session, Terminal } from "./api/types.gen";
 import { colorVar, COLORS, useFolderColors } from "./colors";
 import { ahead, behind } from "./chats";
 import { t, useLang } from "./i18n";
 import { useFlip } from "./motion";
 import { folderLevels, sessionLevels, usePushMenus, wsLevels, type PushLevel } from "./push";
-import { machineOf, remotePath, type Folder as FolderNode, type Tree, type WsNode } from "./tree";
+import { foldRest, machineOf, remotePath, type Folder as FolderNode, type Tree, type WsNode } from "./tree";
 import { LinkDot } from "./link";
 import { errText, toast } from "./toast";
 import { useMe, useTerminalList, useUpdate } from "./data";
 import { agentName, ago, Avatar, cn, fine, IconKey, IrMark, keep, kept, Lamp, lampOf, Logo, own, sessionStatusText, statusText, tilde, Tip, titleOf, untitled, useLongPress, useMenuAt, useMinute } from "./ui";
 import { SESSION_DRAG } from "./chat/refs";
+import { NoteMark, NotesAt, useNotes } from "./notekey";
 import { useUnread } from "./unread";
 import { LINK_COLOR, MachineBadge, MachineFace, setView, shownPath, useLate, useLink as useLinkOf, useMachine, useView } from "./machines";
-import { useMachines } from "./store";
+import { getCarried, setCarried, useMachines } from "./store";
+import { dropMark, dropTarget, endDrag, listDrag, NO_PLACES, pinFolder, placeFolder, placeGroup as placeGroupKey, placeSession, withPlace, sortList, startDrag, useDragged, useOver, type Dragged, type Edge, type Over } from "./reorder";
 
 const STEP = 18;
 const BUSY = new Set(["running", "compacting", "starting"]);
@@ -57,11 +59,6 @@ type Props = {
   panelsCode: () => void;
   /** Without its foot, me and the settings key: on a phone they are a sheet of their own. */
   noFoot?: boolean;
-  /** The notes, shown in the tree's place as the jump box is (a computer's; notes.tsx), and the
-   *  key in the head that shows them. */
-  notes?: ReactNode;
-  notesOut?: boolean;
-  notesKey?: ReactNode;
 };
 
 /** How wide the sidebar may be dragged, and at first: freely, to 640px or 60% of the window (the
@@ -139,15 +136,86 @@ export function Sidebar(p: Props) {
   const loose = p.confirms.filter((c) => !c.session || !listed.has(c.session));
   const last = shownWs.at(-1);
   const lastOpen = last ? p.expanded(last.key) && last.rows.length > 0 : loose.length > 0;
-  const shape = [loose.map((c) => c.id).join(","), ...p.tree.workspaces.map((w) => `${w.key}:${p.expanded(w.key)}:${w.rows.map((r) => (r.kind === "session" ? r.s.id : `${r.f.key}${p.expanded(r.f.key)}${r.f.sessions.length}`)).join(",")}`), p.expanded("archive"), p.tree.archived.length, [...p.tree.kids.values()].flat().map((s) => s.id).join(","), [...p.tree.runs.values()].flat().map((r) => `${r.id}${p.expanded(`run:${r.id}`)}${r.working.map((s) => s.id)}`).join(",")].join("|");
+  // A folder, or a group's root, with many sessions: the first few and a row for the rest (tree.ts
+  // foldRest), opened by hand; one open, pinned, at work or waiting on you shown wherever it is.
+  const stays = (s: Session) => !!s.pinned || s.id === p.selected || asked.has(s.id) || BUSY.has(lampOf(s)) || lampOf(s) === "waiting";
+  const fold = (ss: Session[], key: string) => {
+    const f = foldRest(ss, stays);
+    const all = p.expanded(`more:${key}`);
+    return { list: all ? ss : f.shown, rest: f.rest, all };
+  };
+  const roots = (w: WsNode) => w.rows.flatMap((r) => (r.kind === "session" ? [r.s] : []));
+  const foldShape = (ss: Session[], key: string) => {
+    const f = fold(ss, key);
+    return `${f.list.map((s) => s.id)}${f.rest ? `+${f.all}` : ""}`;
+  };
+  const shape = [loose.map((c) => c.id).join(","), ...p.tree.workspaces.map((w) => `${w.key}:${p.expanded(w.key)}:${foldShape(roots(w), w.key)}:${w.rows.flatMap((r) => (r.kind === "folder" ? [`${r.f.key}${p.expanded(r.f.key)}${foldShape(r.f.sessions, r.f.key)}`] : [])).join(",")}`), p.expanded("archive"), p.tree.archived.length, [...p.tree.kids.values()].flat().map((s) => s.id).join(","), [...p.tree.runs.values()].flat().map((r) => `${r.id}${p.expanded(`run:${r.id}`)}${r.working.map((s) => s.id)}`).join(",")].join("|");
   useFlip(list, shape);
+  // Dragged to a new place (reorder.ts): the sessions beside each other, by the key of their
+  // group's root or folder, and the groups, as last drawn. The page shows the new order at once.
+  const lanes = useRef(new Map<string, Session[]>());
+  lanes.current = new Map(p.tree.workspaces.flatMap((w) => [[w.key, w.rows.flatMap((r) => (r.kind === "session" ? [r.s] : []))] as const, ...w.rows.flatMap((r) => (r.kind === "folder" ? [[r.f.key, r.f.sessions] as const] : []))]));
+  const folderLanes = useRef(new Map<string, FolderNode[]>());
+  folderLanes.current = new Map(p.tree.workspaces.map((w) => [w.key, w.rows.flatMap((r) => (r.kind === "folder" ? [r.f] : []))]));
+  // The groups' rows, all machines', as listed (未归类 not among them).
+  const groupKeys = useRef<string[]>([]);
+  groupKeys.current = p.tree.workspaces.flatMap((w) => (w.id !== 0 ? [w.key] : []));
+  const place = useCallback((id: string, target: Session, edge: Edge, lane: string) => {
+    const sibs = lanes.current.get(lane) ?? [];
+    const s = sibs.find((x) => x.id === id);
+    if (!s) return;
+    const at = placeSession(sibs, s, target, edge);
+    const was = getCarried<Session[]>("list");
+    const shown = was && sortList(was.map((x) => (x.id === id ? { ...x, ...at } : x)));
+    if (shown) setCarried("list", shown);
+    void api.patch(id, { order: at.order, ...(at.pinned !== !!s.pinned ? { pinned: at.pinned } : {}) }).catch((e: unknown) => {
+      if (getCarried("list") === shown) setCarried("list", was);
+      toast(t("err.action"), { error: true, description: errText(e) });
+    });
+  }, []);
+  // A folder put (dragged, pinned): shown so at once, then told the server.
+  const putFolder = useCallback((path: string, at: (was: Places) => { order?: number; pinned?: boolean }) => {
+    const was = getCarried<Places>("places") ?? NO_PLACES;
+    const put = at(was);
+    const shown = withPlace(was, path, put);
+    setCarried("places", shown);
+    void api.placeFolder({ path, ...put }).catch((e: unknown) => {
+      if (getCarried("places") === shown) setCarried("places", was);
+      toast(t("err.action"), { error: true, description: errText(e) });
+    });
+  }, []);
+  const placeFolderAt = useCallback((path: string, target: FolderNode, edge: Edge, lane: string) => {
+    const sibs = folderLanes.current.get(lane) ?? [];
+    const f = sibs.find((x) => x.path === path);
+    if (f) putFolder(path, (was) => placeFolder(sibs, f, target, edge, was));
+  }, [putFolder]);
+  const pinFolderOn = useCallback((path: string, on: boolean) => putFolder(path, () => ({ pinned: on })), [putFolder]);
+  // Dropped on a session at its group's root: pinned, last of the pinned, above them.
+  const pinFolderAt = useCallback((path: string, lane: string) => {
+    const sibs = folderLanes.current.get(lane) ?? [];
+    const f = sibs.find((x) => x.path === path);
+    if (f) putFolder(path, (was) => pinFolder(sibs, f, was));
+  }, [putFolder]);
+  // A group's row moved, by its key: a group listed at two machines is two rows, each its own.
+  const placeGroup = useCallback((key: string, target: string, edge: Edge) => {
+    const was = getCarried<Places>("places") ?? NO_PLACES;
+    const keys = placeGroupKey(was.groups, groupKeys.current, key, target, edge);
+    const shown = { ...was, groups: keys };
+    setCarried("places", shown);
+    void api.orderGroups(keys).catch((e: unknown) => {
+      if (getCarried("places") === shown) setCarried("places", was);
+      toast(t("err.action"), { error: true, description: errText(e) });
+    });
+  }, []);
   const scrolled = useRef(0);
-  useLayoutEffect(() => void (!p.searching && !p.notesOut && list.current && (list.current.scrollTop = scrolled.current)), [p.searching, p.notesOut]);
+  useLayoutEffect(() => void (!p.searching && list.current && (list.current.scrollTop = scrolled.current)), [p.searching]);
   // A session's row, and under it the subagents it has at work.
   // shown: its machine is said by the group above it (no badge on its logo).
-  const row = (s: Session, depth: number, shown = false, flip = `s:${s.id}`) => (
+  // lane: the rows it may be dragged among (reorder.ts), none out of its place.
+  // pinLine: at a group's root, a folder dropped on it is pinned, the line at the top of the first.
+  const row = (s: Session, depth: number, shown = false, flip = `s:${s.id}`, lane?: string, pinLine?: string) => (
     <Fragment key={flip}>
-      <SessionRow s={s} where={p.tree.where.get(s.id)} depth={depth} flip={flip} selected={p.selected === s.id} onSelect={p.onSelect} chatCode={p.chatCode} asked={asked.has(s.id)} machineShown={shown} />
+      <SessionRow s={s} where={p.tree.where.get(s.id)} depth={depth} flip={flip} selected={p.selected === s.id} onSelect={p.onSelect} chatCode={p.chatCode} asked={asked.has(s.id)} machineShown={shown} lane={lane} place={place} pinLine={pinLine} pinFolder={pinFolderAt} />
       {p.tree.kids.get(s.id)?.map((k) => <SessionRow key={k.id} s={k} depth={depth + 1} flip={`${flip}>${k.id}`} selected={p.selected === k.id} onSelect={p.onSelect} chatCode={p.chatCode} working />)}
       {p.tree.runs.get(s.id)?.map((r) => {
         const open = p.expanded(`run:${r.id}`);
@@ -179,6 +247,28 @@ export function Sidebar(p: Props) {
     </Fragment>
   );
 
+  // The sessions of a folder or a group's root, those folded under one row: "还有 N 个" opens them,
+  // "收起" at their foot folds them again.
+  const folded = (ss: Session[], key: string, depth: number, draw: (s: Session) => ReactNode) => {
+    const f = fold(ss, key);
+    return (
+      <>
+        {f.list.map(draw)}
+        {f.rest > 0 && (
+          <Row
+            key={`more:${key}`}
+            depth={depth}
+            flip={`more:${key}`}
+            expanded={f.all}
+            onClick={() => p.toggle(`more:${key}`)}
+            icon={<Ellipsis size={15} className="text-ink-3" />}
+            label={<span className="text-ink-3">{f.all ? t("nav.less") : t("nav.more", { n: f.rest })}</span>}
+          />
+        )}
+      </>
+    );
+  };
+
   // One not shown that needs you, so it is not missed.
   const unseen = p.tree.workspaces.filter((w) => !shownWs.includes(w)).flatMap((w) => w.rows.flatMap((r) => (r.kind === "session" ? [r.s] : r.f.sessions)));
   const waits = unseen.some((s) => asked.has(s.id) || lampOf(s) === "waiting");
@@ -192,6 +282,40 @@ export function Sidebar(p: Props) {
     // there, its "+" in the first of them, at that machine.
     const foreign = (w.machine ?? "") !== (machineOf(w.root) ?? "") && w.id !== 0;
     const plusAt = foreign ? (w.rows.find((r) => r.kind === "folder")?.f.path ?? w.root) : w.root;
+    // The groups it moves among, at any machine (not 未归类; nor its other part, a group listed
+    // at two machines): one up, one down, from its menu.
+    const lane = ws.filter((x) => x.id !== 0);
+    const k = lane.indexOf(w);
+    const up = k > 0 ? lane[k - 1] : undefined;
+    const down = k >= 0 ? lane[k + 1] : undefined;
+    // A folder of the group and its sessions; pinned ones above the sessions at the root.
+    const firstRoot = roots(w)[0];
+    const folderEl = (f: FolderNode) => (
+      <div key={f.key} role="group">
+        <FolderRow
+          f={f}
+          ws={w.id}
+          label={w.id === 0 || foreign ? <FolderLabel path={f.path} /> : f.name}
+          open={p.expanded(f.key)}
+          onToggle={() => p.toggle(f.key)}
+          lane={w.key}
+          place={placeFolderAt}
+          pin={pinFolderOn}
+          newHere={() => setPlusOpen(f.key)}
+          // As a workspace's: not its count, the "+" that opens a session in the folder
+          // (the user, 2026-11-06).
+          plus={p.wsPlus(
+            { ...w, key: f.key, root: f.path },
+            <button type="button" onClick={(e) => e.stopPropagation()} aria-label={t("nav.newHere", { ws: f.name })} className="g-press -mr-1 grid size-6 place-items-center rounded-sm text-ink-3 group-hover:text-ink-2 hover:bg-fill-2 data-popup-open:bg-fill-2 data-popup-open:text-ink-2 pointer-coarse:size-8">
+              <Plus size={15} />
+            </button>,
+            plusOpen === f.key,
+            (o) => setPlusOpen(o ? f.key : null),
+          )}
+        />
+        {p.expanded(f.key) && folded(f.sessions, f.key, 1, (s) => row(s, 1, !!w.machine, undefined, f.key))}
+      </div>
+    );
     return (
       <div key={w.key} className={apart ? "mt-4" : "mt-1"} role="group">
         <WsRow
@@ -203,8 +327,13 @@ export function Sidebar(p: Props) {
           sessions={w.rows.flatMap((r) => (r.kind === "session" ? [r.s] : r.f.sessions))}
           root={w.root}
           hidden={w.hidden}
+          folders={w.rows.some((r) => r.kind === "folder")}
           open={open}
           onToggle={() => p.toggle(w.key)}
+          wkey={w.key}
+          place={placeGroup}
+          up={up && (() => placeGroup(w.key, up.key, "top"))}
+          down={down && (() => placeGroup(w.key, down.key, "bottom"))}
           // Not its count: the "+" that opens a session here, always at the row's end, plain to
           // see, darker when the row is hovered (the user, 2026-11-06).
           end={
@@ -219,53 +348,20 @@ export function Sidebar(p: Props) {
             )
           }
         />
-        {open &&
-          w.rows.map((r) =>
-            r.kind === "session" ? (
-              row(r.s, 0, !!w.machine)
-            ) : (
-              <div key={r.f.key} role="group">
-                <FolderRow
-                  f={r.f}
-                  ws={w.id}
-                  label={w.id === 0 || foreign ? <FolderLabel path={r.f.path} /> : r.f.name}
-                  open={p.expanded(r.f.key)}
-                  onToggle={() => p.toggle(r.f.key)}
-                  newHere={() => setPlusOpen(r.f.key)}
-                  // As a workspace's: not its count, the "+" that opens a session in the folder
-                  // (the user, 2026-11-06).
-                  plus={p.wsPlus(
-                    { ...w, key: r.f.key, root: r.f.path },
-                    <button type="button" onClick={(e) => e.stopPropagation()} aria-label={t("nav.newHere", { ws: r.f.name })} className="g-press -mr-1 grid size-6 place-items-center rounded-sm text-ink-3 group-hover:text-ink-2 hover:bg-fill-2 data-popup-open:bg-fill-2 data-popup-open:text-ink-2 pointer-coarse:size-8">
-                      <Plus size={15} />
-                    </button>,
-                    plusOpen === r.f.key,
-                    (o) => setPlusOpen(o ? r.f.key : null),
-                  )}
-                />
-                {p.expanded(r.f.key) && r.f.sessions.map((s) => row(s, 1, !!w.machine))}
-              </div>
-            ),
-          )}
+        {open && w.rows.flatMap((r) => (r.kind === "folder" && r.f.pinned ? [folderEl(r.f)] : []))}
+        {open && folded(roots(w), w.key, 0, (s) => row(s, 0, !!w.machine, undefined, w.key, firstRoot && dropMark({ kind: "s", id: firstRoot.id, lane: w.key })))}
+        {open && w.rows.flatMap((r) => (r.kind === "folder" && !r.f.pinned ? [folderEl(r.f)] : []))}
       </div>
     );
   };
+
 
   // On a phone no head of its own: its keys stand by the sheet's tabs (app.tsx, pager.tsx).
   const head = !p.phone && (
     <div className="flex h-12 shrink-0 items-center gap-0.5 px-2">
       {/* The name at the left, the keys at the right (the user, 2026-11-06). */}
-      {machines.length ? (
-        <ViewSwitch view={view} machines={machines} waits={waits} />
-      ) : (
-        <span className="flex min-w-0 flex-1 items-center gap-2 pl-2 select-none">
-          <IrMark size={18} className="text-ink" />
-          <span className="truncate text-base font-semibold tracking-[-0.01em]">Iridium</span>
-          {/* The link's dot and latency, by the name (the user, 2026-11-08). */}
-          <LinkDot className="shrink-0" />
-        </span>
-      )}
-      {p.notesKey}
+      {/* Always a switch, other machines or none: a press or a right press opens it (the user, 2026-11-09). */}
+      <ViewSwitch view={view} machines={machines} waits={waits} />
       <HeadKeys {...p} />
     </div>
   );
@@ -277,12 +373,8 @@ export function Sidebar(p: Props) {
       {/* While searching, the jump box in the tree's place; the tree stays mounted, hidden, and
           comes back scrolled as it was. */}
       {p.searching && <div className="flex min-h-0 flex-1 flex-col">{p.search}</div>}
-      {p.notes && (
-        <div hidden={p.searching || !p.notesOut} className="min-h-0 flex-1 flex-col [&:not([hidden])]:flex">
-          {p.notes}
-        </div>
-      )}
-      <div ref={list} hidden={p.searching || !!p.notesOut} onScroll={(e) => void (scrolled.current = e.currentTarget.scrollTop)} className="relative min-h-0 flex-1 no-bar overflow-y-auto px-2 pb-3" role="tree" aria-label={t("nav.sessions")}>
+      <div ref={list} {...listDrag} hidden={p.searching} onScroll={(e) => void (scrolled.current = e.currentTarget.scrollTop)} className="relative min-h-0 flex-1 no-bar overflow-y-auto px-2 pb-3" role="tree" aria-label={t("nav.sessions")}>
+        <DropLine list={list} />
         {/* On a phone, with no head: the switch at the list's top. */}
         {p.phone && machines.length > 0 && (
           <div className="flex h-10 items-center">
@@ -443,9 +535,11 @@ type RowProps = {
   reveal?: boolean;
   /** A group's place without its larger name: the bin of 归档, under the groups' folders. */
   head?: boolean;
+  /** The row dragged now (reorder.ts): faded while it is. */
+  dim?: boolean;
 };
 
-function Row({ depth, flip, chevron, expanded, icon, label, end, selected, onClick, aria, extra, faded, sub, reveal, head }: RowProps) {
+function Row({ depth, flip, chevron, expanded, icon, label, end, selected, onClick, aria, extra, faded, sub, reveal, head, dim }: RowProps) {
   const two = sub !== undefined;
   const top = reveal || head;
   return (
@@ -459,9 +553,10 @@ function Row({ depth, flip, chevron, expanded, icon, label, end, selected, onCli
       onClick={onClick}
       onKeyDown={(e) => e.target === e.currentTarget && (e.key === "Enter" || e.key === " ") && (e.preventDefault(), onClick?.())}
       className={cn(
-        "group relative flex cursor-default rounded-md pr-2 select-none hover:bg-fill hover:[--row-bg:var(--fill)]",
+        "group relative flex cursor-default rounded-md pr-2 transition-opacity duration-(--dur-2) select-none hover:bg-fill hover:[--row-bg:var(--fill)]",
         two ? "items-start py-[5px] pointer-coarse:py-2" : "h-[30px] items-center pointer-coarse:h-10",
         faded && "opacity-60",
+        dim && "opacity-40",
       )}
       // A group's folder under the Ir mark at the top, its name under "Iridium" (the user, 2026-11-08).
       style={{ paddingLeft: top ? 8 : depth * STEP } as CSSProperties}
@@ -489,16 +584,43 @@ function Row({ depth, flip, chevron, expanded, icon, label, end, selected, onCli
   );
 }
 
+/** The line where a dragged row goes (reorder.ts): one for the list, gliding from row to row as
+ *  the mouse moves, fading in where it first shows and out where it was dropped, while the rows
+ *  glide to their new places (useFlip). */
+function DropLine({ list }: { list: RefObject<HTMLDivElement | null> }) {
+  const over = useOver();
+  const [at, setAt] = useState({ x: 0, y: 0, w: 0, glide: false });
+  const was = useRef<Over | null>(null);
+  useLayoutEffect(() => {
+    const el = over && list.current?.querySelector<HTMLElement>(`[data-place="${CSS.escape(over.line)}"]`);
+    if (el) {
+      const pad = parseFloat(getComputedStyle(el).paddingLeft) || 0;
+      setAt({ x: el.offsetLeft + pad, y: el.offsetTop + (over.edge === "bottom" ? el.offsetHeight : 0) - 1, w: el.offsetWidth - pad, glide: was.current !== null });
+    }
+    was.current = over;
+  }, [over, list]);
+  return (
+    <div
+      aria-hidden
+      className={cn("pointer-events-none absolute top-0 left-0 z-10 h-0.5 rounded-full bg-ink-2 duration-(--dur-2) ease-(--ease-out) motion-reduce:transition-none", at.glide ? "transition-[transform,width,opacity]" : "transition-opacity")}
+      style={{ transform: `translate(${at.x}px, ${at.y}px)`, width: at.w, opacity: over ? 1 : 0 }}
+    />
+  );
+}
+
 /** A group's row; its menu (right click, long-press): its sessions archived, as a folder's (the
  *  user, 2026-11-08: a group is a folder now), rename, its path copied, open or folded, 通知 while
  *  push is on. 未归类 itself (id 0): its sessions archived and its 通知. */
-function WsRow({ flip, id, name, root, sessions, machine, remote, hidden, open, onToggle, end }: { flip: string; id: number; name: string; root: string; sessions: Session[]; machine?: Machine; remote?: boolean; hidden?: boolean; open: boolean; onToggle: () => void; end: ReactNode }) {
+function WsRow({ flip, id, name, root, sessions, machine, remote, hidden, folders, open, onToggle, end, wkey, place, up, down }: { flip: string; id: number; name: string; root: string; sessions: Session[]; machine?: Machine; remote?: boolean; hidden?: boolean; folders?: boolean; open: boolean; onToggle: () => void; end: ReactNode; wkey: string; place: (key: string, target: string, edge: Edge) => void; up?: () => void; down?: () => void }) {
   const machines = useMachines();
   const push = usePushMenus();
   const me = useMe().data;
   const real = id !== 0 && !!me && (me.local || me.kind === "panel");
   const [at, setAt] = useMenuAt();
   const [renaming, setRenaming] = useState(false);
+  // Its notes, where its menu was (notekey.tsx): those of its folder.
+  const [notesAt, setNotesAt] = useState<{ x: number; y: number } | null>(null);
+  const notes = useNotes() !== undefined && id !== 0;
   const lp = useLongPress(() => {
     const r = document.activeElement?.closest?.("[role=treeitem]")?.getBoundingClientRect();
     setAt(r ? { x: r.left + 40, y: r.bottom } : { x: 40, y: 40 });
@@ -506,6 +628,7 @@ function WsRow({ flip, id, name, root, sessions, machine, remote, hidden, open, 
   const anchor = at && { getBoundingClientRect: () => DOMRect.fromRect({ x: at.x, y: at.y, width: 0, height: 0 }) };
   const failed = (e: unknown) => toast(t("err.action"), { error: true, description: errText(e) });
   const items = [
+    ...(notes ? [{ icon: <NoteMark size={15} />, label: t("note.view"), run: () => setNotesAt(at) }] : []),
     ...(sessions.length
       ? [{ icon: <Archive size={15} />, label: t("menu.archiveHere", { n: sessions.length }), run: () => void Promise.all(sessions.map((s) => api.patch(s.id, { archived: true }))).then(() => toast(t("toast.archived")), failed) }]
       : []),
@@ -514,6 +637,11 @@ function WsRow({ flip, id, name, root, sessions, machine, remote, hidden, open, 
           { icon: <Pencil size={15} />, label: t("menu.rename"), run: () => setRenaming(true) },
           { icon: <Copy size={15} />, label: t("menu.copyPath"), run: () => void navigator.clipboard.writeText(shownPath(root, machines).real).then(() => toast(t("toast.copied")), failed) },
           { icon: open ? <Folder size={15} /> : <FolderOpen size={15} />, label: open ? t("menu.fold") : t("menu.unfold"), run: onToggle },
+          // Taken apart at its folder, its subfolders groups of their own (the user, 2026-11-09).
+          ...(folders ? [{ icon: <Ungroup size={15} />, label: t("menu.split"), run: () => void api.splitWorkspace(id).then(() => toast(t("toast.split", { ws: name })), failed) }] : []),
+          // Moved among its machine's groups; with a mouse it is dragged too (reorder.ts).
+          ...(up ? [{ icon: <ArrowUp size={15} />, label: t("menu.moveUp"), run: up }] : []),
+          ...(down ? [{ icon: <ArrowDown size={15} />, label: t("menu.moveDown"), run: down }] : []),
           // Hidden: listed no more, but while one of its sessions runs elsewhere (the user, 2026-11-08).
           hidden
             ? { icon: <Eye size={15} />, label: t("menu.unhide"), run: () => void api.patchWorkspace(id, { hidden: false }).catch(failed) }
@@ -531,6 +659,20 @@ function WsRow({ flip, id, name, root, sessions, machine, remote, hidden, open, 
       : []),
   ];
   const menu = items.length > 0 || push;
+  // Dragged among all groups' rows, by its key (tree.ts WsNode.key).
+  const dim = useDragged("ws", wkey);
+  const dragging = real && fine() && !renaming
+    ? {
+        draggable: true,
+        onDragStart: (e: React.DragEvent) => {
+          e.dataTransfer.setData("text/plain", name);
+          e.dataTransfer.effectAllowed = "move";
+          startDrag({ kind: "ws", id: wkey, lane: "" });
+        },
+        onDragEnd: endDrag,
+        ...dropTarget("ws", wkey, "", (d, edge) => place(d.id, wkey, edge)),
+      }
+    : {};
   // Its "+" popover is a portal, but React events bubble through it: a press in it must not fold
   // the workspace (the user's, 2026-11-05: only you fold or unfold).
   return (
@@ -561,7 +703,8 @@ function WsRow({ flip, id, name, root, sessions, machine, remote, hidden, open, 
           )
         }
         end={end && !renaming && <span className="flex items-center" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>{end}</span>}
-        extra={menu ? { ...lp, onContextMenu: (e: React.MouseEvent) => own(e) && (e.preventDefault(), setAt({ x: e.clientX, y: e.clientY })), onClickCapture: lp.onClickCapture } : undefined}
+        dim={dim}
+        extra={{ ...(menu ? { ...lp, onContextMenu: (e: React.MouseEvent) => own(e) && (e.preventDefault(), setAt({ x: e.clientX, y: e.clientY })), onClickCapture: lp.onClickCapture } : {}), ...dragging }}
       />
       {menu && (
         <Menu.Root open={at !== null} onOpenChange={(o) => !o && setAt(null)}>
@@ -588,11 +731,12 @@ function WsRow({ flip, id, name, root, sessions, machine, remote, hidden, open, 
           </Menu.Portal>
         </Menu.Root>
       )}
+      {notes && <NotesAt root={root} at={notesAt} close={() => setNotesAt(null)} />}
     </>
   );
 }
 
-/** The head's name, while another machine's Bot is linked (the user, 2026-11-09): a press opens a
+/** The head's name (the user, 2026-11-09): a press, or a right press as the same, opens a
  *  menu of what the list shows, 全部, 本机 or one other machine (its face, name, link lamp and round
  *  trip). Showing one, the head says that machine: Iridium's mark, then its name, face and link
  *  where Iridium's are, its "+" opening there. An amber lamp after it while a session not shown
@@ -606,13 +750,15 @@ function ViewSwitch({ view, machines, waits }: { view: string | null; machines: 
       {view === v && <Check size={14} className="text-ink-2" />}
     </Menu.Item>
   );
+  const [open, setOpen] = useState(false);
   return (
-    <Menu.Root>
-      <Menu.Trigger className="g-press -my-1 flex min-w-0 flex-1 items-center gap-2 rounded-md py-1 pl-2 text-left outline-none select-none hover:bg-fill data-popup-open:bg-fill">
+    <Menu.Root open={open} onOpenChange={setOpen}>
+      <Menu.Trigger onContextMenu={(e) => (e.preventDefault(), setOpen(true))} className="g-press -my-1 flex min-w-0 flex-1 items-center gap-2 rounded-md py-1 pl-2 text-left outline-none select-none hover:bg-fill data-popup-open:bg-fill">
         {/* Iridium's mark stays; showing a machine, its face after its name, as a remote group's. */}
         <IrMark size={18} className="text-ink" />
         <span className="truncate text-base font-semibold tracking-[-0.01em]">{m ? m.name : view === "" ? t("new.local") : "Iridium"}</span>
         {m && <MachineFace m={m} size={16} />}
+        {/* The link's dot and latency, by the name (the user, 2026-11-08). */}
         {m ? <MachineLink m={m} /> : <LinkDot className="shrink-0" />}
         {waits && <Lamp status="waiting" />}
       </Menu.Trigger>
@@ -700,7 +846,7 @@ function WsRename({ id, name, done }: { id: number; name: string; done: () => vo
  *  it 0.1 s, counted from its last move, or a press, fetches its chat ahead. */
 /** Drawn again only as its props change, not with every draw of the list: a page of the phone's
  *  sheet turned drew every row, its menu and its tip, again (the user, 2026-11-08). */
-const SessionRow = memo(function SessionRow({ s, where, depth, flip, selected, onSelect, chatCode, working, asked, machineShown }: { s: Session; where?: string; depth: number; flip: string; selected: boolean; onSelect: (id: string) => void; chatCode: () => void; working?: boolean; asked?: boolean; machineShown?: boolean }) {
+const SessionRow = memo(function SessionRow({ s, where, depth, flip, selected, onSelect, chatCode, working, asked, machineShown, lane, place, pinLine, pinFolder }: { s: Session; where?: string; depth: number; flip: string; selected: boolean; onSelect: (id: string) => void; chatCode: () => void; working?: boolean; asked?: boolean; machineShown?: boolean; lane?: string; place?: (id: string, target: Session, edge: Edge, lane: string) => void; pinLine?: string; pinFolder?: (path: string, lane: string) => void }) {
   useLang();
   const machines = useMachines();
   const unread = useUnread(s.id);
@@ -752,15 +898,22 @@ const SessionRow = memo(function SessionRow({ s, where, depth, flip, selected, o
     },
   };
   // Dragged to a chat, it is named in that chat's composer (chat.tsx): with a mouse, as a finger's
-  // long press is the menu. Nothing changes as it is dragged (the user, 2026-11-06).
+  // long press is the menu. Nothing changes as it is dragged (the user, 2026-11-06), but the line
+  // where it goes among those beside it (reorder.ts).
+  const dim = useDragged("s", s.id);
   const drag = fine() && !renaming
     ? {
         draggable: true,
         onDragStart: (e: React.DragEvent) => {
           e.dataTransfer.setData(SESSION_DRAG, s.id);
           e.dataTransfer.setData("text/plain", s.id);
-          e.dataTransfer.effectAllowed = "copyLink";
+          e.dataTransfer.effectAllowed = "all";
+          if (lane) startDrag({ kind: "s", id: s.id, lane });
         },
+        onDragEnd: endDrag,
+        ...(lane && place
+          ? dropTarget("s", s.id, lane, (d: Dragged, edge) => place(d.id, s, edge, lane), pinLine && pinFolder ? { kind: "f", lane, line: pinLine, drop: (d) => pinFolder(d.id, lane) } : undefined)
+          : {}),
       }
     : {};
   // An archived one (no shown marker): one press brings it back.
@@ -845,6 +998,7 @@ const SessionRow = memo(function SessionRow({ s, where, depth, flip, selected, o
           )
         }
         end={end}
+        dim={dim}
         // data-session: a note may be dropped on it (notes.tsx).
         extra={{ ...lp, ...hover, ...drag, onClickCapture: lp.onClickCapture, "data-session": s.id }}
       />
@@ -929,8 +1083,24 @@ export function sessionTags(s: Session): Tags {
 /** A folder's row in a workspace: its name, the "+" for a session in it; its menu (right click,
  *  long-press): a session here, its path copied, open or folded, its sessions archived, its colour
  *  tag. */
-function FolderRow({ f, ws, label, open, onToggle, newHere, plus }: { f: FolderNode; ws: number; label: ReactNode; open: boolean; onToggle: () => void; newHere: () => void; plus: ReactNode }) {
+function FolderRow({ f, ws, label, open, onToggle, newHere, plus, lane, place, pin }: { f: FolderNode; ws: number; label: ReactNode; open: boolean; onToggle: () => void; newHere: () => void; plus: ReactNode; lane: string; place: (path: string, target: FolderNode, edge: Edge, lane: string) => void; pin: (path: string, on: boolean) => void }) {
   const machines = useMachines();
+  const me = useMe().data;
+  // Dragged among the folders of its group (reorder.ts): the panels' and 本机's, as a group.
+  const dim = useDragged("f", f.path);
+  const real = !!me && (me.local || me.kind === "panel");
+  const dragging = real && fine()
+    ? {
+        draggable: true,
+        onDragStart: (e: React.DragEvent) => {
+          e.dataTransfer.setData("text/plain", f.path);
+          e.dataTransfer.effectAllowed = "move";
+          startDrag({ kind: "f", id: f.path, lane });
+        },
+        onDragEnd: endDrag,
+        ...dropTarget("f", f.path, lane, (d, edge) => place(d.id, f, edge, lane)),
+      }
+    : {};
   const [at, setAt] = useMenuAt();
   const lp = useLongPress(() => {
     const r = document.activeElement?.closest?.("[role=treeitem]")?.getBoundingClientRect();
@@ -948,6 +1118,8 @@ function FolderRow({ f, ws, label, open, onToggle, newHere, plus }: { f: FolderN
     { icon: <Plus size={15} />, label: t("menu.newHere"), run: newHere },
     { icon: <Copy size={15} />, label: t("menu.copyPath"), run: () => void navigator.clipboard.writeText(shownPath(f.path, machines).real).then(done(t("toast.copied")), failed) },
     { icon: open ? <Folder size={15} /> : <FolderOpen size={15} />, label: open ? t("menu.fold") : t("menu.unfold"), run: onToggle },
+    // Pinned: above the sessions at its group's root (reorder.ts).
+    ...(real ? [f.pinned ? { icon: <PinOff size={15} />, label: t("menu.unpin"), run: () => pin(f.path, false) } : { icon: <Pin size={15} />, label: t("menu.pin"), run: () => pin(f.path, true) }] : []),
   ];
   const anchor = at && { getBoundingClientRect: () => DOMRect.fromRect({ x: at.x, y: at.y, width: 0, height: 0 }) };
   return (
@@ -960,8 +1132,17 @@ function FolderRow({ f, ws, label, open, onToggle, newHere, plus }: { f: FolderN
         // No chevron: the folder itself is open or shut (the user, 2026-11-06).
         icon={<FolderMark open={open} color={color} remote={remotePath(f.path)} />}
         label={label}
-        end={plus && <span className="flex items-center" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>{plus}</span>}
-        extra={{ ...lp, onContextMenu: (e: React.MouseEvent) => own(e) && (e.preventDefault(), setAt({ x: e.clientX, y: e.clientY })), onClickCapture: lp.onClickCapture }}
+        // Pinned: the pin a session's row has, where it has it (the user, 2026-11-09).
+        end={
+          (f.pinned || plus) && (
+            <span className="flex items-center gap-1.5">
+              {f.pinned && <Pin size={12} className="text-ink-4" aria-label={t("menu.pinned")} />}
+              {plus && <span className="flex items-center" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>{plus}</span>}
+            </span>
+          )
+        }
+        dim={dim}
+        extra={{ ...lp, onContextMenu: (e: React.MouseEvent) => own(e) && (e.preventDefault(), setAt({ x: e.clientX, y: e.clientY })), onClickCapture: lp.onClickCapture, ...dragging }}
       />
       <Menu.Root open={at !== null} onOpenChange={(o) => !o && setAt(null)}>
         <Menu.Portal>

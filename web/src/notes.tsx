@@ -5,8 +5,7 @@
 // goes there, onto one it is joined to it, onto a folder into it, onto a session's row or the chat
 // into that chat's composer, to be read over and sent; held on a key that turns the page (the
 // sessions' tab, the notes key), the page turns. A finger held still and let go is the note's menu.
-// On a computer it stands in the session list's place (sidebar.tsx), on a phone it is the sheet's
-// last page (app.tsx).
+// A phone's: the sheet's last page (app.tsx); a computer has the composer's (notekey.tsx).
 import { Menu } from "@base-ui/react/menu";
 import { Check, ChevronRight, Folder, FolderOpen, FolderPlus, Inbox, ListTree, Pencil, Scissors, SendHorizontal, Trash2, Undo2 } from "lucide-react";
 import { createPortal } from "react-dom";

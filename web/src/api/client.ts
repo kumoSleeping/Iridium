@@ -58,6 +58,8 @@ import type {
   UpdateState,
   Upload,
   Workspace,
+  FolderPlace,
+  GroupOrder,
   WorkspacePatch,
 } from "./types.gen";
 import type { BotReply, BringBot } from "./types.gen";
@@ -189,6 +191,12 @@ export const api = {
   // --- workspaces, folders, the session overlay ---
   workspaces: () => get<Workspace[]>("/api/workspaces"),
   patchWorkspace: (id: number, p: WorkspacePatch) => writeAgain<{ ok: boolean }>("PATCH", `/api/workspaces/${id}`, p),
+  /** The groups in the order they were dragged to: IDs first to last (reorder.ts). */
+  /** Where a folder is put among those in its group, dragged or pinned (reorder.ts). */
+  placeFolder: (p: FolderPlace) => writeAgain<{ ok: boolean }>("PATCH", "/api/folders/place", p),
+  /** The group taken apart at its folder: its subfolders groups of their own. */
+  splitWorkspace: (id: number) => writeAgain<{ ok: boolean }>("POST", `/api/workspaces/${id}/split`),
+  orderGroups: (keys: string[]) => writeAgain<{ ok: boolean }>("PUT", "/api/groups/order", { keys } satisfies GroupOrder),
   /** machine: another machine's executor; its paths '/'-separated. */
   folders: (path: string, machine?: string) => get<Folders>(`/api/folders?path=${enc(path)}${machine ? `&machine=${enc(machine)}` : ""}`),
   mkdir: (f: NewFolder) => write<FolderReply>("POST", "/api/folders", f),

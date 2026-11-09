@@ -25,6 +25,8 @@ import (
 	"github.com/kumoSleeping/iridium/internal/cli"
 	"github.com/kumoSleeping/iridium/internal/config"
 	"github.com/kumoSleeping/iridium/internal/discover"
+	"github.com/kumoSleeping/iridium/internal/harness"
+	hdsh "github.com/kumoSleeping/iridium/internal/harness/dsh"
 	"github.com/kumoSleeping/iridium/internal/hold"
 	"github.com/kumoSleeping/iridium/internal/hub"
 	"github.com/kumoSleeping/iridium/internal/join"
@@ -130,7 +132,11 @@ func serve(args []string) int {
 	var srv *server.Server // names terminals in source tags, once it is there
 	tag := func(id string) string { return srv.Tag(id) }
 	executors := &remote.Hub{Logf: log.Printf}
-	m, err := session.New(session.Options{Config: cfg, Store: st, Hub: h, Launcher: launcher(state), UnitPrefix: cfg.UnitPrefix, Discovery: d, Tag: tag, Remote: executors})
+	// The harnesses' own channels (internal/harness): only here is an agent's own code wired in.
+	dshChannel := hdsh.New(hdsh.Options{Remote: executors, Logf: log.Printf})
+	defer dshChannel.Close()
+	channels := harness.Set{api.AgentDsh: dshChannel}
+	m, err := session.New(session.Options{Config: cfg, Store: st, Hub: h, Launcher: launcher(state), UnitPrefix: cfg.UnitPrefix, Discovery: d, Tag: tag, Remote: executors, Channels: channels})
 	if err != nil {
 		log.Print(err)
 		return 1
