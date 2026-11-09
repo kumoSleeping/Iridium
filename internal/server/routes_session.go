@@ -103,7 +103,7 @@ func (s *Server) setUltracode(w http.ResponseWriter, r *http.Request) {
 }
 
 // setFeature switches one of the session's features (api.Feature): Claude's UltraCode as
-// setUltracode does, or one a plugin adds where DSH Desktop holds the session.
+// setUltracode does, or one the session's channel says it has (harness.Setter).
 func (s *Server) setFeature(w http.ResponseWriter, r *http.Request) {
 	var req api.SetFeature
 	if !readJSON(w, r, &req) {

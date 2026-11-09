@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/kumoSleeping/iridium/internal/agents"
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/files"
 )
@@ -128,8 +129,11 @@ func denied(path string) bool {
 		return !errors.Is(err, os.ErrNotExist)
 	}
 	home, _ := os.UserHomeDir()
-	for _, d := range []string{".ssh", ".claude", ".codex", ".pi", ".config/iridium", ".local/state/iridium", ".gnupg"} {
-		dir := filepath.Join(home, d)
+	dirs := []string{".ssh", ".config/iridium", ".local/state/iridium", ".gnupg"}
+	for i, d := range dirs {
+		dirs[i] = filepath.Join(home, d)
+	}
+	for _, dir := range append(dirs, agents.Homes(home, os.Getenv)...) {
 		if real == dir || strings.HasPrefix(real, dir+string(filepath.Separator)) {
 			return true
 		}

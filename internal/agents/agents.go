@@ -6,6 +6,7 @@ package agents
 import (
 	"cmp"
 	"log"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -90,6 +91,13 @@ type Info struct {
 	FindRemote func(w RemoteWhere) (string, error)
 	HomeEnv    string
 	MinRemote  string
+	// HomeDir is its directory in the user's home (".claude"), HomeVars the variables that move it
+	// elsewhere: what holds its logins and keys, never served nor offered (Homes).
+	HomeDir  string
+	HomeVars []string
+	// SessionEnv are the variables it sets in the processes it starts, naming its session
+	// (SessionVars).
+	SessionEnv []string
 }
 
 // RemoteEnv is the environment the agent starts with at an executor: the executor's own, its
@@ -154,7 +162,8 @@ var all = []Info{
 			}
 			return w.Join(dir, w.ID+".jsonl"), nil
 		},
-		Format: transcript.Claude,
+		Format:  transcript.Claude,
+		HomeDir: ".claude", HomeVars: []string{"CLAUDE_CONFIG_DIR"}, SessionEnv: []string{"CLAUDE_CODE_SESSION_ID"},
 	},
 	{
 		Agent: api.AgentCodex, Name: "Codex",
@@ -172,6 +181,7 @@ var all = []Info{
 		Format: transcript.Codex,
 		// Where CodexHome looks, at the executor: CODEX_HOME there, else ~/.codex there.
 		HomeEnv: "CODEX_HOME", FindRemote: findCodexRemote,
+		HomeDir: ".codex", HomeVars: []string{"CODEX_HOME"}, SessionEnv: []string{"CODEX_THREAD_ID", "CODEX_SESSION_ID"},
 	},
 	{
 		Agent: api.AgentPi, Name: "pi",
@@ -183,6 +193,7 @@ var all = []Info{
 		Format: transcript.Pi,
 		// Where PiSessions looks, at the executor: its variables, else ~/.pi/agent there.
 		HomeEnv: "PI_CODING_AGENT_DIR",
+		HomeDir: ".pi", HomeVars: []string{"PI_CODING_AGENT_DIR", "PI_CODING_AGENT_SESSION_DIR"}, SessionEnv: []string{"PI_SESSION_ID"},
 		FindRemote: func(w RemoteWhere) (string, error) {
 			if !transcript.ValidID(w.ID) {
 				return "", nil
@@ -214,6 +225,7 @@ var all = []Info{
 		Format: transcript.Dsh,
 		// The first with the sdk profile.
 		HomeEnv: "DSH_HOME", MinRemote: "0.2.2",
+		HomeDir: ".dsh", HomeVars: []string{"DSH_HOME"}, SessionEnv: []string{"DSH_SESSION_ID"},
 		FindRemote: func(w RemoteWhere) (string, error) {
 			home := cmp.Or(agent.GetEnv(w.Env, "DSH_HOME"), w.Join(w.User, ".dsh"))
 			dir := w.Join(home, "sessions", transcript.DshProjectDir(w.Cwd), w.ID)
@@ -310,6 +322,40 @@ func Get(a api.Agent) (Info, bool) {
 	}
 	return all[i], true
 }
+
+// Homes are the agents' own directories (Info.HomeDir under home, and where getenv says their
+// HomeVars move them): never served nor offered, they hold logins and keys.
+func Homes(home string, getenv func(string) string) []string {
+	var out []string
+	for _, i := range all {
+		if home != "" && i.HomeDir != "" {
+			out = append(out, filepath.Join(home, i.HomeDir))
+		}
+		for _, v := range i.HomeVars {
+			if p := getenv(v); p != "" {
+				out = append(out, p)
+			}
+		}
+	}
+	return out
+}
+
+// SessionVars are the variables naming the session a process was started from, in the order
+// they are believed (docs/api.md): Iridium's own first (it sets it for every agent it hosts),
+// then each agent's (Info.SessionEnv), in sessionVarOrder.
+func SessionVars() []string {
+	out := []string{"IRIDIUM_SESSION"}
+	for _, a := range sessionVarOrder {
+		if i, ok := Get(a); ok {
+			out = append(out, i.SessionEnv...)
+		}
+	}
+	return out
+}
+
+// sessionVarOrder is the order agents' session variables are believed in: dsh's before pi's (a
+// shell of dsh's model inside pi's names the nearer one).
+var sessionVarOrder = []api.Agent{api.AgentClaude, api.AgentCodex, api.AgentDsh, api.AgentPi}
 
 // All is every agent's row, Claude first.
 func All() []Info { return slices.Clone(all) }

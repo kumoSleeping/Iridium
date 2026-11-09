@@ -7,6 +7,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/agents"
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/config"
+	"github.com/kumoSleeping/iridium/internal/harness"
 )
 
 // Tunables are the config's fields the settings page changes while the daemon runs (PUT
@@ -27,12 +28,16 @@ func TunablesOf(cfg config.Config) Tunables {
 }
 
 // Tune puts t in place of the live values: idle reaping, crash and quota resume from the next
-// time they are looked at, the default modes from the next start; a language, held sessions'
-// features at once (heldLang).
+// time they are looked at, the default modes from the next start; a language, the channels at
+// once (harness.Retuner: a holder's features' texts).
 func (m *Manager) Tune(t Tunables) {
 	t.Modes = maps.Clone(t.Modes)
 	if old := m.tune.Swap(&t); old != nil && old.Lang != t.Lang {
-		m.heldLang()
+		for _, c := range m.o.Channels {
+			if r, ok := c.(harness.Retuner); ok {
+				r.Retuned()
+			}
+		}
 	}
 }
 

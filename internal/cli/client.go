@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kumoSleeping/iridium/internal/agents"
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/config"
 )
@@ -63,9 +64,9 @@ func isTTY(w io.Writer) bool {
 }
 
 // caller is the session ir runs in, if it runs in one: Iridium's own hosted sessions set
-// IRIDIUM_SESSION; Claude and Codex set theirs.
+// IRIDIUM_SESSION; the agents set theirs (agents.SessionVars).
 func caller() string {
-	for _, k := range []string{"IRIDIUM_SESSION", "CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "CODEX_SESSION_ID", "PI_SESSION_ID"} {
+	for _, k := range agents.SessionVars() {
 		if v := os.Getenv(k); v != "" {
 			return v
 		}

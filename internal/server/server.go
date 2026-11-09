@@ -338,7 +338,7 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 		s.error(w, err)
 		return
 	}
-	if input == session.DesktopInput {
+	if input == session.HandedInput {
 		reply(w, http.StatusOK, api.SendReply{Desktop: true})
 		return
 	}

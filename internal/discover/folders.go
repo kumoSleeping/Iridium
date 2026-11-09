@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/kumoSleeping/iridium/internal/agents"
 	"github.com/kumoSleeping/iridium/internal/api"
 )
 
@@ -23,10 +24,11 @@ type Folders struct {
 
 // DefaultFolders: the user's home, without what no picker should show.
 func DefaultFolders(home string, more ...string) Folders {
-	deny := []string{".ssh", ".gnupg", ".claude", ".codex", ".pi", ".dsh", ".config/iridium", ".local/state/iridium"}
+	deny := []string{".ssh", ".gnupg", ".config/iridium", ".local/state/iridium"}
 	for i, d := range deny {
 		deny[i] = filepath.Join(home, d)
 	}
+	deny = append(deny, agents.Homes(home, os.Getenv)...)
 	return Folders{Roots: []string{home}, Deny: append(deny, more...)}
 }
 

@@ -10,6 +10,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/kumoSleeping/iridium/internal/agents"
 )
 
 // Procs is what discovery reads of the processes: /proc on Linux, sysctl on macOS, a fake in tests.
@@ -170,9 +172,9 @@ func (p ProcFS) Files(pid int) []string {
 }
 
 // launchVars are the variables that name the session a process was started from, in the order
-// they are believed: Iridium's own first (it sets it for every agent it hosts), then the agents'.
-// Only these are ever taken from an environment, and their values are never logged.
-var launchVars = []string{"IRIDIUM_SESSION", "CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "CODEX_SESSION_ID", "DSH_SESSION_ID", "PI_SESSION_ID"}
+// they are believed (agents.SessionVars). Only these are ever taken from an environment, and
+// their values are never logged.
+var launchVars = agents.SessionVars()
 
 // launchEnv picks launchVars out of env.
 func launchEnv(env []string) map[string]string {
