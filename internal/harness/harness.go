@@ -3,8 +3,8 @@
 // core never knows which agent it asks; a channel is registered for its agent at wiring
 // (cmd/iridium) and has only the capabilities it implements (Stater, Sender, Setter…), as a
 // driver its optional interfaces (agent.Efforter…). A capability is added here only where the
-// core has a decision to make (a state shown, a message sent, a setting set, a launch), shaped by
-// that decision, not by one harness's protocol (docs/exec.md "通道").
+// core has a decision to make (a state shown, a message sent, a setting set, a launch, a picture
+// shown), shaped by that decision, not by one harness's protocol (docs/exec.md "通道").
 package harness
 
 import (
@@ -20,6 +20,7 @@ var (
 	ErrBadRequest   = errors.New("bad request")
 	ErrOffline      = errors.New("the machine is not connected")
 	ErrNotInstalled = errors.New("agent not installed")
+	ErrGone         = errors.New("no longer there")
 )
 
 // Ref is a session as a channel sees it.
@@ -139,6 +140,13 @@ type Models interface {
 // Presets are the agent presets an agent has at a machine, and the default.
 type Presets interface {
 	Presets(ctx context.Context, machine string) ([]agent.Preset, string, error)
+}
+
+// Imager reads a picture a session's record names by a handle of its agent's own (dsh's
+// attachments) instead of carrying it, where the session runs. done false: not a handle of its;
+// the core has none to show.
+type Imager interface {
+	Image(ctx context.Context, r Ref, handle string) (data []byte, done bool, err error)
 }
 
 // Syncer reads again at once what an agent at a machine offers (its presets, models,

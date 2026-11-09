@@ -202,12 +202,13 @@
 
 ## 通道（2026-11-09）
 
-核心（`internal/session`、`server`、`cli`、`chat`、`remote`）不认识具体的 agent：某个 agent 独有的事放在它的通道里（`internal/harness/<agent>`），核心按会话的 agent 取通道、只问能力（`harness.Stater`、`Sender`、`Setter`、`Launcher`、`Models`、`Presets`、`Syncer`、`Retuner`），在 `cmd/iridium` 接线。静态的差异仍写在 `agents.Info` 的行里，驱动的差异仍是驱动的可选接口。
+核心（`internal/session`、`server`、`cli`、`chat`、`remote`）不认识具体的 agent：某个 agent 独有的事放在它的通道里（`internal/harness/<agent>`），核心按会话的 agent 取通道、只问能力（`harness.Stater`、`Sender`、`Setter`、`Launcher`、`Models`、`Presets`、`Syncer`、`Retuner`、`Imager`），在 `cmd/iridium` 接线。静态的差异仍写在 `agents.Info` 的行里，驱动的差异仍是驱动的可选接口。
 
 - dsh 的通道（`internal/harness/dsh`）：DSH Desktop 拿着的会话（`held.*`：状态、转交消息、改模型强度和附加功能）、模型目录（探测）、预设、启动时的 `dsh.llm`、`dsh.session` 补丁和 `dsh.bundles`、`dsh.attach` 归档。协议名不变，插件不用重发。
+- 工具读的图（`Imager`，2026-11-09）：记录里只写 handle、不带图的，由通道读。dsh 的 `read_image` 把图存进附件库（`<home>/attachments/v1/objects/<前两位>/<sha256>`），记录里是 `sha256:<hex>`；通道按会话所在的机器读本机的或经执行端 `fs.read`，核对 sha256，最近读的在内存里留 64MB。执行端不用改。
 - `Setter` 对在这边跑着的会话也问（2026-11-09）：由通道说是不是它的。dsh 的只接一种：会话进程里有一项附加功能管着强度时（`held.get` 的 `owner`），改强度交给它；别的照旧走驱动。
 - Claude、Codex、pi 暂无通道：它们的差异都在 `agents.Info` 和驱动接口里。
-- 新接口只加在核心真要做决定的地方（显示状态、发消息、改设置、启动），形状按核心的决定定，不按某个 agent 的协议定；只属于 dsh 的概念留在它的通道里。
+- 新接口只加在核心真要做决定的地方（显示状态、发消息、改设置、启动、显示图片），形状按核心的决定定，不按某个 agent 的协议定；只属于 dsh 的概念留在它的通道里。
 - 守护测试 `internal/harness/neutral_test.go`：核心包里出现 dsh 的名字就失败。还没搬的列在它的 `pending` 里：`/dsh/` 路由、`SendReply.desktop` 的等待、远端 dsh 会话的发现（`internal/discover/remote.go`，最大的一块，单独做）。UltraCode 的 `claude.ultracode` 也还在核心里，待驱动有 `Featurer` 后搬。
 
 ## 远端的 ir（用户，2026-11-08）

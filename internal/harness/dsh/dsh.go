@@ -1,7 +1,8 @@
 // Package dsh is dsh's own channel (internal/harness): what Iridium does for dsh alone. DSH
 // Desktop holding a session at an executor's machine (held.go: its live state, a message given to
 // its agent, a setting set there), the models dsh offers where it runs (catalog.go), its agent
-// presets (presets.go), and what a launch there gets from Desktop (launch.go). The core asks it
+// presets (presets.go), what a launch there gets from Desktop (launch.go), and the pictures its
+// sessions' records name by attachment (image.go). The core asks it
 // through harness's capabilities and never names dsh; it speaks to the dsh plugin at an executor
 // (plugins/dsh-remote-iridium) in held.* and dsh.* (docs/exec.md "远端 DSH").
 package dsh
@@ -41,6 +42,11 @@ type Channel struct {
 	presetMu sync.Mutex
 	presets  map[string]presetList    // by machine
 	catalogs map[string]*catalogEntry // by machine
+
+	imageMu    sync.Mutex
+	images     map[string][]byte // pictures read (image.go), by sha256
+	imageOrder []string          // their sums, oldest first
+	imageBytes int
 }
 
 var (

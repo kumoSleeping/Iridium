@@ -17,7 +17,7 @@ export function folded(blocks: Block[]): Shown[] {
     // An agent naming its session (ir rename) is the list's, not the chat's.
     if (b.kind === "result" || (b.kind === "tool" && renameOnly(b))) return [];
     const r = b.kind === "tool" && !b.result && b.id ? results.get(b.id) : undefined;
-    return r ? [{ ...b, result: { at: r.at, time: r.time, text: r.text ?? "", length: r.length, error: r.error } }] : [b];
+    return r ? [{ ...b, result: { at: r.at, time: r.time, text: r.text ?? "", length: r.length, error: r.error, images: r.images } }] : [b];
   });
   let end = all.length;
   while (all[end - 1]?.kind === "tool" || all[end - 1]?.kind === "thinking") end--;
@@ -229,6 +229,13 @@ export function runCmds(steps: Step[], name: string): { cmd: Cmd | undefined; n:
     else out.push({ cmd, n: 1 });
   }
   return out;
+}
+
+/** The name a step's pictures are downloaded by: the picture file it read, else its tool's. */
+export function pictureName(t: { name?: string; input?: string }): string {
+  const i = inputOf(t.input);
+  const path = ["file_path", "path"].map((k) => i[k]).find((v): v is string => typeof v === "string" && /\.(png|jpe?g|gif|webp)$/i.test(v));
+  return path ? path.split(/[\\/]/).pop()! : `${t.name || "picture"}.png`;
 }
 
 /** All the lines a fold's runs changed; undefined for none. */

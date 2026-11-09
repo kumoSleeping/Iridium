@@ -17,6 +17,13 @@ import (
 	"github.com/kumoSleeping/iridium/internal/hold"
 )
 
+// TinyPNG is a 2×1 black PNG (base64), the picture a PICTURE turn's Read gives; TinyHandle names
+// it in an agent's own store.
+const (
+	TinyPNG    = "iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAAC0lEQVR4nGNgAAMAAAcAAbKGrPQAAAAASUVORK5CYII="
+	TinyHandle = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+)
+
 // Main runs what the test binary was started as, if not the tests: the holder (`hold ...`), or
 // the fake Claude through a link named claude. ok false: run the tests.
 func Main() (code int, ok bool) {
@@ -378,6 +385,20 @@ func Claude() int {
 				other := map[string]any{"type": "tool_use", "id": "toolu_other", "name": "Bash", "input": map[string]any{"command": "ls", "description": "list"}}
 				done := map[string]any{"type": "tool_result", "tool_use_id": "toolu_other", "content": "a.txt"}
 				for _, m := range []map[string]any{{"role": "assistant", "content": []any{call}}, {"role": "user", "content": []any{result}}, {"role": "assistant", "content": []any{other}}, {"role": "user", "content": []any{done}}} {
+					say(map[string]any{"type": m["role"], "parent_tool_use_id": nil, "message": m})
+					note(map[string]any{"type": m["role"], "timestamp": stamp(), "message": m})
+				}
+				finish(f, nil)
+				continue
+			case strings.HasSuffix(text, "PICTURE"):
+				// A Read of a picture: its result carries the picture (TinyPNG), then one more by a
+				// handle of an agent's own store, as dsh's are.
+				call := map[string]any{"type": "tool_use", "id": "toolu_pic", "name": "Read", "input": map[string]any{"file_path": "/w/tiny.png"}}
+				result := map[string]any{"type": "tool_result", "tool_use_id": "toolu_pic", "content": []any{
+					map[string]any{"type": "image", "source": map[string]any{"type": "base64", "media_type": "image/png", "data": TinyPNG}},
+					map[string]any{"type": "image", "attachment": map[string]any{"attachmentId": TinyHandle, "mediaType": "image/png", "width": 2, "height": 1}},
+				}}
+				for _, m := range []map[string]any{{"role": "assistant", "content": []any{call}}, {"role": "user", "content": []any{result}}} {
 					say(map[string]any{"type": m["role"], "parent_tool_use_id": nil, "message": m})
 					note(map[string]any{"type": m["role"], "timestamp": stamp(), "message": m})
 				}

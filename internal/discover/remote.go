@@ -13,8 +13,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kumoSleeping/iridium/internal/agent"
-	"github.com/kumoSleeping/iridium/internal/agents"
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/dshhome"
 	"github.com/kumoSleeping/iridium/internal/remote"
@@ -375,8 +373,7 @@ func dshHome(mc *remote.Machine) (home, sep string, ok bool) {
 	if !online || !has {
 		return "", "", false
 	}
-	info, _ := agents.Get(api.AgentDsh)
-	return cmp.Or(agent.GetEnv(info.RemoteEnv(hi.Env, ai.Home), "DSH_HOME"), remote.Join(hi.Sep, hi.Home, ".dsh")), hi.Sep, true
+	return cmp.Or(dshhome.Home(ai.Home, hi.Env), remote.Join(hi.Sep, hi.Home, ".dsh")), hi.Sep, true
 }
 
 // ScanMachine looks at dsh's sessions at machine id now: what changed since the last look.

@@ -17,8 +17,9 @@ import { useHome } from "../data";
 import { LocalMark } from "../me";
 import { go } from "../route";
 import { Files, Picture, previews, size } from "./files";
+import { Pictures } from "./pictures";
 import { cmdOfCall, isShell, type Cmd } from "./cmd";
-import { argOf, diffSum, foldLine, foldSaid, kindOf, runCmds, type Diff, type Kind, type Shown, type Step, type Tool } from "./fold";
+import { argOf, diffSum, foldLine, foldSaid, kindOf, pictureName, runCmds, type Diff, type Kind, type Shown, type Step, type Tool } from "./fold";
 import { Code } from "./hl";
 import { Markdown } from "./markdown";
 import { partialInput } from "./partial";
@@ -409,12 +410,17 @@ const DiffStat = ({ d }: { d: Diff }) => (
 );
 const failed = (s: Step) => s.kind === "tool" && !!s.result?.error;
 
-/** A step's line: its icon, its name, what it is about in monospace, an edit's +/−. */
-function StepLine({ s, cwd }: { s: Step; cwd?: string }) {
+/** A step's icon: its kind's, a shell command's sort's, red if it failed. */
+const StepIcon = ({ s, className }: { s: Step; className?: string }) =>
+  s.kind === "thinking" ? <KindIcon kind="thinking" className={className} /> : <KindIcon kind={kindOf(s.name)} cmd={cmdOfCall(s)} shell={isShell(s.name)} failed={failed(s)} className={className} />;
+
+/** A step's line: its icon (bare: none, its row has it), its name, what it is about in monospace,
+ *  an edit's +/−. */
+function StepLine({ s, cwd, bare }: { s: Step; cwd?: string; bare?: boolean }) {
   if (s.kind === "thinking")
     return (
       <>
-        <KindIcon kind="thinking" />
+        {!bare && <StepIcon s={s} />}
         <span className="shrink-0 text-ink-2">{t("msg.thinking")}</span>
         <span className="min-w-0 truncate text-xs">{(s.text ?? "").replace(/[*_`#>]+/g, "").replace(/\s+/g, " ")}</span>
       </>
@@ -422,7 +428,7 @@ function StepLine({ s, cwd }: { s: Step; cwd?: string }) {
   const a = argOf(s, cwd);
   return (
     <>
-      <KindIcon kind={kindOf(s.name)} cmd={cmdOfCall(s)} shell={isShell(s.name)} failed={failed(s)} />
+      {!bare && <StepIcon s={s} />}
       {!isShell(s.name) && <span className="shrink-0 text-ink-2">{s.name}</span>}
       <span className={cn("min-w-0 truncate", a.code ? "font-mono text-xs" : "text-xs")}>{a.arg}</span>
       {a.diff && !failed(s) && <DiffStat d={a.diff} />}
@@ -480,8 +486,35 @@ function Fold({ steps, session, cwd }: { steps: Step[]; session: string; cwd: st
 }
 
 /** A step's line; pressed, what it was given and what came back open in a card at the press, like a
- *  context menu, instead of under the line (the user, 2026-11-08): the conversation stays put. */
+ *  context menu, instead of under the line (the user, 2026-11-08): the conversation stays put.
+ *  The pictures its result gave the model show under it, open at first; its icon, hovered, turns
+ *  to the chevron that folds them (the user, 2026-11-09: the tool's own icon otherwise). */
 function StepView({ s, session, cwd }: { s: Step; session: string; cwd: string }) {
+  const images = s.kind === "tool" ? s.result?.images : undefined;
+  const [shown, setShown] = useState(true);
+  if (!images?.length) return <StepCall s={s} session={session} cwd={cwd} />;
+  return (
+    <div className="min-w-0">
+      <div className="group/step flex min-w-0 items-center gap-2">
+        <button
+          type="button"
+          aria-expanded={shown}
+          aria-label={t(shown ? "msg.hidePictures" : "msg.showPictures")}
+          onClick={() => setShown(!shown)}
+          className="grid h-7 shrink-0 place-items-center rounded-sm outline-none pointer-coarse:h-9 [&>*]:[grid-area:1/1] [&>*]:transition-[opacity,rotate] [&>*]:duration-(--dur-1)"
+        >
+          <StepIcon s={s} className="group-hover/step:opacity-0 group-has-focus-visible/step:opacity-0" />
+          <ChevronRight size={14} aria-hidden className={cn("text-ink-3 opacity-0 group-hover/step:opacity-100 group-has-focus-visible/step:opacity-100", shown && "rotate-90")} />
+        </button>
+        <StepCall s={s} session={session} cwd={cwd} bare />
+      </div>
+      {shown && <Pictures session={session} at={s.result!.at} images={images} name={pictureName(s)} />}
+    </div>
+  );
+}
+
+/** A step's line as a key to its card (StepView). bare: without its icon, which its row has. */
+function StepCall({ s, session, cwd, bare }: { s: Step; session: string; cwd: string; bare?: boolean }) {
   // Where it was pressed stays as the card goes: put away, it folds back into that point, not
   // first thrown to the window's corner by an anchor gone (the user, 2026-11-08).
   const [open, setOpen] = useState(false);
@@ -499,7 +532,7 @@ function StepView({ s, session, cwd }: { s: Step; session: string; cwd: string }
   return (
     <Popover.Root open={open} onOpenChange={toggle}>
       <Popover.Trigger ref={row} className={cn(ROW, "w-full text-left outline-none focus-visible:text-ink-2", open && "text-ink-2")}>
-        <StepLine s={s} cwd={cwd} />
+        <StepLine s={s} cwd={cwd} bare={bare} />
       </Popover.Trigger>
       <Popover.Portal>
         <Popover.Positioner anchor={anchor} side="bottom" align="start" sideOffset={4} collisionPadding={8} className="z-50">

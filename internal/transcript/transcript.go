@@ -281,7 +281,7 @@ func paired(blocks []api.Block) []api.Block {
 	for _, b := range blocks {
 		if b.Kind == api.BlockKindResult {
 			if i, ok := calls[b.ID]; ok && out[i].Result == nil {
-				out[i].Result = &api.Result{At: b.At, Time: b.Time, Text: b.Text, Length: b.Length, Error: b.Error}
+				out[i].Result = &api.Result{At: b.At, Time: b.Time, Text: b.Text, Length: b.Length, Error: b.Error, Images: b.Images}
 				continue
 			}
 		}
@@ -299,41 +299,51 @@ var ErrNoBlock = errors.New("transcript: no block there")
 // Full is the whole text of the block at at ("offset.index"): a tool call's input, a result, a
 // thought, a system line, a message.
 func (f *File) Full(at string) (string, error) {
-	o, i, ok := strings.Cut(at, ".")
-	off, err1 := strconv.ParseInt(o, 10, 64)
-	idx, err2 := strconv.Atoi(i)
-	if !ok || err1 != nil || err2 != nil {
-		return "", ErrNoBlock
-	}
-	f.mu.Lock()
-	if err := f.refresh(); err != nil {
-		f.mu.Unlock()
-		return "", err
-	}
-	k := sort.Search(len(f.lines), func(j int) bool { return f.lines[j].off >= off })
-	if k == len(f.lines) || f.lines[k].off != off {
-		f.mu.Unlock()
-		return "", ErrNoBlock
-	}
-	e := f.lines[k]
-	r, done, err := f.text()
-	f.mu.Unlock()
+	blocks, idx, _, err := f.whole(at)
 	if err != nil {
 		return "", err
-	}
-	defer done()
-	buf := make([]byte, e.n)
-	if _, err := r.ReadAt(buf, e.off); err != nil {
-		return "", err
-	}
-	blocks := f.format(e.off, buf, -1, f.sources)
-	if idx < 0 || idx >= len(blocks) {
-		return "", ErrNoBlock
 	}
 	if blocks[idx].Kind == api.BlockKindTool {
 		return blocks[idx].Input, nil
 	}
 	return blocks[idx].Text, nil
+}
+
+// whole is the blocks of the line at at ("offset.index") read again with nothing cut, which of
+// them at is, and the line.
+func (f *File) whole(at string) ([]api.Block, int, entry, error) {
+	o, i, ok := strings.Cut(at, ".")
+	off, err1 := strconv.ParseInt(o, 10, 64)
+	idx, err2 := strconv.Atoi(i)
+	if !ok || err1 != nil || err2 != nil {
+		return nil, 0, entry{}, ErrNoBlock
+	}
+	f.mu.Lock()
+	if err := f.refresh(); err != nil {
+		f.mu.Unlock()
+		return nil, 0, entry{}, err
+	}
+	k := sort.Search(len(f.lines), func(j int) bool { return f.lines[j].off >= off })
+	if k == len(f.lines) || f.lines[k].off != off {
+		f.mu.Unlock()
+		return nil, 0, entry{}, ErrNoBlock
+	}
+	e := f.lines[k]
+	r, done, err := f.text()
+	f.mu.Unlock()
+	if err != nil {
+		return nil, 0, entry{}, err
+	}
+	defer done()
+	buf := make([]byte, e.n)
+	if _, err := r.ReadAt(buf, e.off); err != nil {
+		return nil, 0, entry{}, err
+	}
+	blocks := f.format(e.off, buf, -1, f.sources)
+	if idx < 0 || idx >= len(blocks) {
+		return nil, 0, entry{}, ErrNoBlock
+	}
+	return blocks, idx, e, nil
 }
 
 var (
@@ -590,7 +600,7 @@ func blocksOf(off int64, raw []byte, max int, sources Sources) []api.Block {
 		for _, r := range items {
 			if r.Type == "tool_result" {
 				text, n := clip(joined(r.Content), max)
-				add(api.Block{Kind: api.BlockKindResult, ID: r.ToolUseID, Text: text, Length: n, Error: r.IsError})
+				add(api.Block{Kind: api.BlockKindResult, ID: r.ToolUseID, Text: text, Length: n, Error: r.IsError, Images: pictures(r.Content, max < 0)})
 			}
 		}
 		all := texts(l.Message.Content)

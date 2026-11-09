@@ -225,6 +225,8 @@ export const api = {
     return `${S(id)}/files/${enc(ref)}${q ? `?${q}` : ""}`;
   },
   thumbURL: (id: string, ref: string, size = 1024, v?: number) => `${S(id)}/files/${enc(ref)}/thumb?size=${size}${v ? `&v=${v}` : ""}`,
+  /** Picture n of the tool result at (Result.images), as the model was given it. */
+  imageURL: (id: string, at: string, n: number) => `${S(id)}/image?at=${enc(at)}&n=${n}`,
   upload: (id: string, u: NewUpload) => write<Upload>("POST", `${S(id)}/uploads`, u),
   uploadAt: (up: string) => get<Upload>(`/api/uploads/${enc(up)}`),
   uploadChunk: (up: string, offset: number, chunk: Blob, signal?: AbortSignal) =>
