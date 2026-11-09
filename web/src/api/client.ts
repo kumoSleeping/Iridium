@@ -187,6 +187,7 @@ export const api = {
   mkdir: (f: NewFolder) => write<FolderReply>("POST", "/api/folders", f),
   /** dsh's workspaces at another machine (DSH Desktop's), else its sessions' folders: '/'-separated. */
   dshWorkspaces: (machine: string) => get<DshWorkspace[]>(`/api/machines/${enc(machine)}/dsh/workspaces`),
+  dshSync: (machine: string) => write<{ ok: boolean }>("POST", `/api/machines/${enc(machine)}/dsh/sync`),
   patch: (id: string, p: SessionPatch) => writeAgain<{ ok: boolean }>("PATCH", S(id), p),
   /** A folder's colour tag; "" takes it off. The carried state "colors" has them all. */
   folderColor: (f: FolderColor) => writeAgain<{ ok: boolean }>("PUT", "/api/colors", f),

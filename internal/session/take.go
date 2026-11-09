@@ -155,6 +155,7 @@ func (m *Manager) foreignState(id string, over map[string]store.Overlay) (*api.S
 	if f != nil {
 		st.End, _ = f.Size()
 	}
+	m.catalogState(st, s.Machine)
 	return st, nil
 }
 

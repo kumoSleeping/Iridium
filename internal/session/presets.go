@@ -134,11 +134,18 @@ func (m *Manager) checkPreset(ctx context.Context, a api.Agent, machine, preset 
 // SessionPresets are the agent presets a session may run with, for the page: those its agent has
 // where it runs, and the default.
 func (m *Manager) SessionPresets(ctx context.Context, id string) (api.Presets, error) {
-	h, err := m.get(id)
-	if err != nil {
+	a, machine := api.Agent(""), ""
+	if h, err := m.get(id); err == nil {
+		a, machine = h.meta.Agent, h.meta.Machine
+	} else if s, _, ok := m.found(id); ok {
+		a, machine = s.Agent, s.Machine
+	} else {
 		return api.Presets{}, err
 	}
-	list, def, err := m.Presets(ctx, h.meta.Agent, h.meta.Machine)
+	if a == api.AgentDsh {
+		m.warmCatalog(machine) // the page opened it: its models too
+	}
+	list, def, err := m.Presets(ctx, a, machine)
 	if err != nil {
 		return api.Presets{}, err
 	}

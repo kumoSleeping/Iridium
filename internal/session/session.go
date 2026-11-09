@@ -506,7 +506,14 @@ func (m *Manager) List(ctx context.Context) ([]api.Session, error) {
 func (m *Manager) State(id string) (*api.SessionState, error) {
 	h, err := m.get(id)
 	if err != nil {
-		return m.foreignState(id, nil)
+		st, err := m.foreignState(id, nil)
+		if err == nil && st.Agent == api.AgentDsh {
+			m.warmCatalog(st.Machine)
+		}
+		return st, err
+	}
+	if h.meta.Agent == api.AgentDsh {
+		m.warmCatalog(h.meta.Machine)
 	}
 	over, _ := m.o.Store.Overlays()
 	s := h.state(over[id], !h.shown())

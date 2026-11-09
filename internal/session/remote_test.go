@@ -71,6 +71,31 @@ func TestRemoteDsh(t *testing.T) {
 	if _, err := r.m.Create(bg, api.NewSession{Agent: api.AgentClaude, Cwd: work, Machine: "pc"}, "web"); err == nil {
 		t.Fatal("Claude at an executor was taken")
 	}
+	// A session there whose agent has not started: its models are the machine's, probed when the
+	// page opens it, before the first message; so are its efforts.
+	const idle = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+	ih := r.m.newHosted(meta{ID: idle, Agent: api.AgentDsh, Cwd: work, Created: time.Now().UnixMilli(), Machine: "m1"})
+	os.MkdirAll(ih.dir, 0o700)
+	r.m.mu.Lock()
+	r.m.hosted[idle] = ih
+	r.m.mu.Unlock()
+	if st, _ := r.m.State(idle); st == nil || st.Live {
+		t.Fatalf("idle: %+v", st)
+	}
+	waitFor(t, "the idle session's models", func() bool {
+		st, _ := r.m.State(idle)
+		return st != nil && len(st.Models) == 2 && st.Model == "deepseek-official/deepseek-flash" && st.Models[1].Value == "deepseek-official/deepseek-v4-pro"
+	})
+	if err := r.m.SetEffort(bg, idle, "medium"); !errors.Is(err, ErrBadRequest) {
+		t.Errorf("an effort the model has not: %v", err)
+	}
+	if err := r.m.SetModel(bg, idle, "deepseek-official/deepseek-v4-pro"); err != nil {
+		t.Errorf("a model before the first message: %v", err)
+	}
+	if st, _ := r.m.State(idle); st.Pick != "deepseek-official/deepseek-v4-pro" || st.Live {
+		t.Errorf("picked: %q live %v", st.Pick, st.Live)
+	}
+
 	// No dsh plugin there: the presets its package's files register.
 	if l, def, err := r.m.Presets(bg, api.AgentDsh, "m1"); err != nil || def != "standard" || presetIDs(l) != "standard ptc minimal" {
 		t.Fatalf("presets there: %q %q %v", presetIDs(l), def, err)
@@ -198,6 +223,18 @@ func TestTakeRemoteDsh(t *testing.T) {
 	if len(r.messages(id)) == 0 {
 		t.Fatal("no messages: not mirrored")
 	}
+	// Before it is taken up: its machine's models, opened from the page; a model picked takes it
+	// up, its agent not started till a message.
+	waitFor(t, "its models", func() bool {
+		st, _ := r.m.State(id)
+		return st != nil && len(st.Models) == 2 && !st.Hosted
+	})
+	if err := r.m.SetModel(bg, id, "deepseek-official/deepseek-v4-pro"); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := r.m.State(id); !st.Hosted || st.Live || st.Pick != "deepseek-official/deepseek-v4-pro" {
+		t.Errorf("picked: hosted %v live %v pick %q", st.Hosted, st.Live, st.Pick)
+	}
 
 	if _, err := r.m.Send(bg, id, "RUNTOOL:bash say hi", "web"); err != nil {
 		t.Fatal(err)
@@ -224,6 +261,33 @@ func TestTakeRemoteDsh(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.waitState(id, "stopped", func(s *api.SessionState) bool { return !s.Live })
+
+	// 同步 DSH (a remote group's menu): a session Desktop made since is listed now, not at the next
+	// look; the machine's models are probed again, not taken as kept.
+	const id2 = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+	dir2 := filepath.Join(home, "sessions", transcript.DshProjectDir(work), id2)
+	os.MkdirAll(dir2, 0o700)
+	fx, _ := os.ReadFile(fixture)
+	os.WriteFile(filepath.Join(dir2, "session.v4.jsonl.zstd"), fx, 0o600)
+	os.WriteFile(filepath.Join(sums, id2+".json"), []byte(`{"version":7,"record":{"identity":{"cwd":"`+work+`"},"rows":{"title":{"ver":1,"seq":1,"val":"made since"}}}}`), 0o600)
+	if _, _, ok := r.m.found(id2); ok {
+		t.Fatal("listed before a look")
+	}
+	r.m.presetMu.Lock()
+	before := r.m.catalogs["m1"].at
+	r.m.presetMu.Unlock()
+	if err := r.m.SyncDsh(bg, "m1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, ok := r.m.found(id2); !ok {
+		t.Error("synced: the new session not listed")
+	}
+	r.m.presetMu.Lock()
+	after := r.m.catalogs["m1"].at
+	r.m.presetMu.Unlock()
+	if !after.After(before) {
+		t.Errorf("synced: models not probed again (%v, %v)", before, after)
+	}
 }
 
 // A dsh session Iridium started at a machine is filed under DSH Desktop's workspace of its folder
