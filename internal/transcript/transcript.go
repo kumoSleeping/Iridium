@@ -65,6 +65,8 @@ type File struct {
 	turn  int8
 	// named: the title the agent's last title line gave (named.go), "" while none has.
 	named string
+	// told: what settle found of a picture on a later line, by its result's at; nil: none.
+	told map[string]*api.Image
 }
 
 // entry is a line that gives blocks.
@@ -114,6 +116,7 @@ func (f *File) refresh() error {
 	}
 	if ino != f.ino || st.Size() < end {
 		f.ino, f.size, f.lines, f.title, f.named, f.turn, end = ino, 0, nil, "", "", 0, 0
+		f.told = nil
 		if f.zst != nil {
 			f.zst = &frames{}
 		}
@@ -258,7 +261,9 @@ func (f *File) read(lines []entry) []api.Block {
 		}
 		out = append(out, f.format(e.off, buf, Clip, f.sources)...)
 	}
-	return paired(out)
+	out = paired(out)
+	f.settle(r, out)
+	return out
 }
 
 // text opens what the lines are read from at their offsets: the file, or a zstd file's decoded

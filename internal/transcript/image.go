@@ -9,7 +9,10 @@ import (
 	_ "image/gif"  // registers the GIF decoder
 	_ "image/jpeg" // registers the JPEG decoder
 	_ "image/png"  // registers the PNG decoder
+	"io"
 	"net/http"
+	"sort"
+	"strconv"
 	"strings"
 
 	_ "golang.org/x/image/webp" // registers the WebP decoder
@@ -27,7 +30,7 @@ const headLen = 64 << 10
 // imageItem is a content block that may be a picture, in any of its shapes: Anthropic's
 // (Claude: source.data, source.media_type), MCP's and pi's (data, mimeType), OpenAI's (Codex:
 // input_image, image_url a data URL), dsh's (attachment, a handle into its store). S is how its
-// base64 is kept: whole (string), or only its head (head), for a page.
+// base64 is kept: whole, or only its head, for a page.
 type imageItem[S ~string] struct {
 	Type   string `json:"type"`
 	Source *struct {
@@ -62,10 +65,24 @@ func (h *head) UnmarshalJSON(b []byte) error {
 		return nil
 	}
 	var s string
-	if err := json.Unmarshal(b, &s); err != nil {
-		return err
+	if json.Unmarshal(b, &s) != nil {
+		s = ""
 	}
 	*h = head(s[:min(len(s), headLen)])
+	return nil
+}
+
+// whole is a JSON string as it is, unescaped; anything else in its place, "". Where a block has
+// another kind of value under the same name (a resource's data), the content's other blocks
+// still read, as with head.
+type whole string
+
+func (w *whole) UnmarshalJSON(b []byte) error {
+	var s string
+	if json.Unmarshal(b, &s) != nil {
+		s = ""
+	}
+	*w = whole(s)
 	return nil
 }
 
@@ -77,7 +94,7 @@ func pictures(content json.RawMessage, keep bool) []api.Image {
 		return nil
 	}
 	if keep {
-		return picturesAs[string](content, true)
+		return picturesAs[whole](content, true)
 	}
 	return picturesAs[head](content, false)
 }
@@ -181,6 +198,61 @@ func (f *File) Image(at string, n int) (img api.Image, data []byte, err error) {
 	}
 	img.Data = ""
 	return img, data, nil
+}
+
+// settle tells, for a page, the pictures blocks have on a later line of the record (Later:
+// Codex's view_image, codexShown): with their size where the picture is told, gone where it never
+// will be, as they are while it is not written yet. What was found is kept, by the result's at,
+// so the record is read for each once. f.mu is held; r reads the record.
+func (f *File) settle(r io.ReaderAt, blocks []api.Block) {
+	for i := range blocks {
+		b := &blocks[i]
+		at, images := b.At, &b.Images
+		if b.Kind == api.BlockKindTool && b.Result != nil {
+			at, images = b.Result.At, &b.Result.Images
+		}
+		if len(*images) != 1 || !(*images)[0].Later {
+			continue
+		}
+		told, ok := f.told[at]
+		if !ok {
+			e, found := f.entry(at)
+			if !found {
+				continue
+			}
+			img, err := codexShown(r, f.size, e.off, int64(e.n))
+			switch {
+			case err == nil:
+				told = &api.Image{Mime: img.Mime, W: img.W, H: img.H, Later: true}
+			case errors.Is(err, ErrNoImage):
+			default:
+				continue // not written yet, or not read now: asked again next time
+			}
+			if f.told == nil {
+				f.told = map[string]*api.Image{}
+			}
+			f.told[at] = told
+		}
+		if told == nil {
+			*images = nil
+		} else {
+			*images = []api.Image{*told}
+		}
+	}
+}
+
+// entry is the line of the block at at ("offset.index"); f.mu is held.
+func (f *File) entry(at string) (entry, bool) {
+	o, _, _ := strings.Cut(at, ".")
+	off, err := strconv.ParseInt(o, 10, 64)
+	if err != nil {
+		return entry{}, false
+	}
+	k := sort.Search(len(f.lines), func(j int) bool { return f.lines[j].off >= off })
+	if k == len(f.lines) || f.lines[k].off != off {
+		return entry{}, false
+	}
+	return f.lines[k], true
 }
 
 // later is the picture an ImageView on line e showed the model, from the output after it
