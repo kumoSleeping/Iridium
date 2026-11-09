@@ -45,11 +45,15 @@ const MARKS: Record<string, string[]> = {
   "danger-full-access": ["M5 11h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2Z", "M7 11V7a5 5 0 0 1 9.9-1"],
 };
 
-export const hasMark = (id: string) => id in MARKS;
+/** A mode's mark for the agent, as that agent means it: Codex's auto is its own "never", asking
+ *  nothing; pi's two modes have none (their names are short). */
+const markOf = (agent: string, id: string) => (agent === "pi" ? undefined : agent === "codex" && id === "auto" ? MARKS.never : MARKS[id]);
 
-/** A mode's mark; null for a mode not known here. */
-export function ModeMark({ id, size = 16, className }: { id: string; size?: number; className?: string }) {
-  const d = MARKS[id];
+export const hasMark = (agent: string, id: string) => !!markOf(agent, id);
+
+/** A mode's mark; null for one with none. */
+export function ModeMark({ agent, id, size = 16, className }: { agent: string; id: string; size?: number; className?: string }) {
+  const d = markOf(agent, id);
   if (!d) return null;
   return (
     <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden className={className}>

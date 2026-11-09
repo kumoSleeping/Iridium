@@ -313,7 +313,7 @@ export function useMode(s: LiveSession) {
     }
   };
   const cycle = () => modes.length > 1 && void set(modes[(modes.findIndex((m) => m.id === now) + 1) % modes.length]!.id);
-  return { modes, now, set, cycle };
+  return { agent: s.agent, modes, now, set, cycle };
 }
 
 /** The approval mode, under the composer, its name alone: no icon (the user, 2026-11-08); on a phone,
@@ -323,7 +323,7 @@ export function ModeKey({ mode, open, onOpenChange }: { mode: ReturnType<typeof 
   const phone = useMedia(PHONE);
   if (!mode.modes.length) return null;
   const label = modeName({ id: mode.now });
-  const marked = phone && hasMark(mode.now);
+  const marked = phone && hasMark(mode.agent, mode.now);
   return (
     <Menu.Root open={open} onOpenChange={onOpenChange}>
       <Tip label={t("composer.mode")}>
@@ -331,7 +331,7 @@ export function ModeKey({ mode, open, onOpenChange }: { mode: ReturnType<typeof 
           render={
             <button type="button" aria-label={`${t("composer.mode")}: ${label}`} className="g-press flex h-7 min-w-0 shrink-0 items-center gap-1 rounded-md px-2 text-xs whitespace-nowrap text-ink-3 hover:bg-fill hover:text-ink data-popup-open:bg-fill pointer-coarse:h-9">
               {marked ? (
-                <ModeMark key={mode.now} id={mode.now} size={16} className="g-fade shrink-0" />
+                <ModeMark key={mode.now} agent={mode.agent} id={mode.now} size={16} className="g-fade shrink-0" />
               ) : (
                 <span key={label} className="g-fade truncate">
                   {label}
@@ -348,7 +348,7 @@ export function ModeKey({ mode, open, onOpenChange }: { mode: ReturnType<typeof 
             <Menu.RadioGroup value={mode.now} onValueChange={(v) => void mode.set(v as string)} className="g-stagger flex flex-col">
               {mode.modes.map((m, i) => (
                 <Menu.RadioItem key={m.id} value={m.id} closeOnClick style={{ "--i": i } as CSSProperties} className="flex h-8 cursor-default items-center gap-2.5 rounded-md pr-2 pl-2.5 text-base outline-none select-none data-highlighted:bg-fill pointer-coarse:h-11">
-                  <ModeMark id={m.id} size={16} className="shrink-0 text-ink-3" />
+                  <ModeMark agent={mode.agent} id={m.id} size={16} className="shrink-0 text-ink-3" />
                   <span className="flex-1">{modeName(m)}</span>
                   <Menu.RadioItemIndicator className="text-ink">
                     <Check size={14} />

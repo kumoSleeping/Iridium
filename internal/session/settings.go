@@ -452,8 +452,7 @@ func (h *Hosted) efforts() []string {
 	h.mu.Lock()
 	models, now := h.models, cmp.Or(h.model, h.meta.Model)
 	h.mu.Unlock()
-	if len(models) == 0 { // not started yet: its machine's catalog
-		cat, _ := h.m.cachedCatalog(h.meta.Machine)
+	if cat, ok := h.m.cachedCatalog(h.meta.Machine); ok { // its machine's, as the page lists them
 		models, now = cat.Models, cmp.Or(now, cat.Default)
 	}
 	for _, m := range models {

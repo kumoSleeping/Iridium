@@ -261,6 +261,33 @@ func TestTakeRemoteDsh(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.waitState(id, "stopped", func(s *api.SessionState) bool { return !s.Live })
+
+	// 同步 DSH (a remote group's menu): a session Desktop made since is listed now, not at the next
+	// look; the machine's models are probed again, not taken as kept.
+	const id2 = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+	dir2 := filepath.Join(home, "sessions", transcript.DshProjectDir(work), id2)
+	os.MkdirAll(dir2, 0o700)
+	fx, _ := os.ReadFile(fixture)
+	os.WriteFile(filepath.Join(dir2, "session.v4.jsonl.zstd"), fx, 0o600)
+	os.WriteFile(filepath.Join(sums, id2+".json"), []byte(`{"version":7,"record":{"identity":{"cwd":"`+work+`"},"rows":{"title":{"ver":1,"seq":1,"val":"made since"}}}}`), 0o600)
+	if _, _, ok := r.m.found(id2); ok {
+		t.Fatal("listed before a look")
+	}
+	r.m.presetMu.Lock()
+	before := r.m.catalogs["m1"].at
+	r.m.presetMu.Unlock()
+	if err := r.m.SyncDsh(bg, "m1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, ok := r.m.found(id2); !ok {
+		t.Error("synced: the new session not listed")
+	}
+	r.m.presetMu.Lock()
+	after := r.m.catalogs["m1"].at
+	r.m.presetMu.Unlock()
+	if !after.After(before) {
+		t.Errorf("synced: models not probed again (%v, %v)", before, after)
+	}
 }
 
 // A dsh session Iridium started at a machine is filed under DSH Desktop's workspace of its folder
