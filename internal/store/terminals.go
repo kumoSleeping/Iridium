@@ -212,6 +212,9 @@ func (g gateStore) Apply(c gate.Change) error {
 			if _, err := tx.Exec(`DELETE FROM devices WHERE terminal = ?`, id); err != nil {
 				return err
 			}
+			if _, err := tx.Exec(`DELETE FROM bot_follows WHERE bot = ? OR panel = ?`, id, id); err != nil {
+				return err
+			}
 		}
 		for _, id := range c.DeleteInvites {
 			if _, err := tx.Exec(`DELETE FROM invites WHERE id = ?`, id); err != nil {

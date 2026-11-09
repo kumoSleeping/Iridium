@@ -53,6 +53,14 @@ type Terminal struct {
 	Bot bool `json:"bot,omitempty"`
 	// Chatless: a Bot no one has written to yet, so it has no chat to bring (the menu says so).
 	Chatless bool `json:"chatless,omitempty"`
+	// Follows: the panels (IDs) a channel follows: what a session asks while no chat points at it
+	// goes to the Bots that follow the panel that began its turn, and to no other.
+	Follows []string `json:"follows,omitempty"`
+}
+
+// SetFollows is PUT /api/terminals/{id}/follows: the panels the Bot follows from now on.
+type SetFollows struct {
+	Panels []string `json:"panels"`
 }
 
 // Device is what a terminal runs on, set in its settings (PUT /api/me/device, ir profile

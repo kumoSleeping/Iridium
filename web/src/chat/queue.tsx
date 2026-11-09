@@ -4,7 +4,7 @@
 // stopped, the queue pauses: a pause sign and continue. With two or more, one key sends them all now,
 // in order: the first joins the turn (or starts one), the rest join it. Its height glides as a line
 // comes or goes; a new line fades in.
-import { Check, CornerUpRight, List, ListEnd, LoaderCircle, Pause, Pencil, Play, X } from "lucide-react";
+import { Check, CornerUpRight, List, ListEnd, LoaderCircle, Paperclip, Pause, Pencil, Play, X } from "lucide-react";
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { api, missing } from "../api/client";
 import type { Queued } from "../api/types.gen";
@@ -12,7 +12,8 @@ import { t } from "../i18n";
 import { errText, toast } from "../toast";
 import { motion, reduced } from "../motion";
 import { useSettings } from "../data";
-import { enterKey, IconKey, steerKey } from "../ui";
+import { cn, enterKey, IconKey, steerKey } from "../ui";
+import { attachedOf } from "./refs";
 
 /** The queue's height glides from what it was; lines not there before fade in. */
 function useGrow(box: React.RefObject<HTMLElement | null>, ids: string[]) {
@@ -110,7 +111,7 @@ export function Queue({ session, queue, steered }: { session: string; queue: Que
             </li>
           ) : (
             <li key={q.id} data-q={q.id} className="flex min-h-8 items-center gap-0.5 pr-1 pl-3">
-              <p className="m-0 min-w-0 flex-1 truncate py-1">{q.text}</p>
+              <QueuedText text={q.text} />
               {key(`${q.id} steer`, q.paused ? t("queue.sendNow") : t("queue.steer", { key: typed }), <CornerUpRight size={14} />, () => void run(`${q.id} steer`, () => api.steer(session, q.id), () => steered(q)))}
               {key(`${q.id} edit`, t("queue.edit"), <Pencil size={14} />, () => setEditing({ id: q.id, text: q.text }))}
               {key(`${q.id} drop`, t("queue.drop"), <X size={14} />, () => void run(`${q.id} drop`, () => api.unqueue(session, q.id)))}
@@ -119,5 +120,22 @@ export function Queue({ session, queue, steered }: { session: string; queue: Que
         )}
       </ul>
     </section>
+  );
+}
+
+/** A queued message on its line: its files (lines [附件] `path`) by name after a clip, not as
+ *  those lines. */
+function QueuedText({ text }: { text: string }) {
+  const { paths, words } = attachedOf(text);
+  return (
+    <p className="m-0 min-w-0 flex-1 truncate py-1">
+      {words}
+      {paths.length > 0 && (
+        <span className={cn("text-ink-3", words && "ml-2")}>
+          <Paperclip size={12} className="mr-0.5 inline align-[-1px]" aria-hidden />
+          {paths.map((p) => p.slice(p.lastIndexOf("/") + 1)).join(", ")}
+        </span>
+      )}
+    </p>
   );
 }

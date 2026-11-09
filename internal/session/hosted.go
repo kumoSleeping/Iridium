@@ -119,8 +119,10 @@ type Hosted struct {
 	// output replayed then (the user, 2026-11-06: every session read "just now" after a deploy).
 	shownAt   time.Time
 	lastFrom  string // who sent the last message: whose turn an agent's own turn is counted to
+	lastVia   string // the session whose agent sent it, if one did
 	compact   bool   // the last message was /compact: the compaction that follows was asked for
 	turnFrom  string // who began the running turn
+	turnVia   string // the session whose agent began it, if one did
 	draftN    int
 	toolDraft string        // the tool call draft draftN is being written as, if one is
 	toolName  string        // its tool's name
@@ -644,10 +646,10 @@ func (h *Hosted) onEvent(e agent.Event) {
 		h.m.notify(notes...)
 		return
 	case agent.TurnStart:
-		h.turnFrom = h.lastFrom
+		h.turnFrom, h.turnVia = h.lastFrom, h.lastVia
 		if e.Input != "" {
-			if from, _, ok := h.m.o.Store.Source(e.Input); ok {
-				h.turnFrom = from
+			if from, tag, ok := h.m.o.Store.Source(e.Input); ok {
+				h.turnFrom, h.turnVia = from, viaOf(tag)
 			}
 		}
 		h.draftN++
@@ -668,13 +670,13 @@ func (h *Hosted) onEvent(e agent.Event) {
 		if !replay {
 			h.shownLater() // activity: out of the archive
 		}
-		note(Notice{Kind: NoticeTurnStart})
+		note(Notice{Kind: NoticeTurnStart, From: h.turnFrom, Via: h.turnVia})
 	case agent.Taken:
 		h.hadTurn = true
 		// A message that runs on its own in the turn: its use is counted to who sent it.
 		if e.Runs {
-			if from, _, ok := h.m.o.Store.Source(e.InputID); ok {
-				h.turnFrom = from
+			if from, tag, ok := h.m.o.Store.Source(e.InputID); ok {
+				h.turnFrom, h.turnVia = from, viaOf(tag)
 			}
 		}
 	case agent.ToolDone:
@@ -748,7 +750,7 @@ func (h *Hosted) onEvent(e agent.Event) {
 		}
 		list = true
 		ask := e.Ask
-		note(Notice{Kind: NoticeAsk, Ask: &ask})
+		note(Notice{Kind: NoticeAsk, Ask: &ask, From: h.turnFrom, Via: h.turnVia})
 	case agent.AskCancel:
 		if slices.ContainsFunc(h.asks, func(a api.Ask) bool { return a.RequestID == e.RequestID }) {
 			note(Notice{Kind: NoticeAskDone, RequestID: e.RequestID}) // else a rule answered it

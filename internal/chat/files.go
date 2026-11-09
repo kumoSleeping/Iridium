@@ -20,7 +20,8 @@ import (
 )
 
 // A reply's files (plan "回复里交文件"): its lines [文件] `/absolute/path` (files.FileLines) that
-// exist; they leave the reply's words, the files going as themselves. Each goes to the plugin as a ref good only for that plugin and session,
+// exist, and its file links (ir:<id>, files.Links) still given; they leave the reply's words, the
+// files going as themselves. Each goes to the plugin as a ref good only for that plugin and session,
 // signed with a key kept in the state directory, so refs outlive a restart, and only paths a
 // reply named ever get one.
 
@@ -73,15 +74,38 @@ func (s *Service) reply(plugin, session, md string) api.ChatReply {
 			continue
 		}
 		given[path] = true
-		typ := mime.TypeByExtension(filepath.Ext(path))
-		if typ == "" {
-			typ = "application/octet-stream"
-		}
-		out = append(out, api.ChatFile{Name: filepath.Base(path), Size: st.Size(), Type: typ, Ref: s.ref(plugin, session, path)})
+		out = append(out, api.ChatFile{Name: filepath.Base(path), Size: st.Size(), Type: typeOf(path), Ref: s.ref(plugin, session, path)})
 	}
 	md = files.DropFileLines(md, given)
+	linked := map[string]bool{}
+	for _, id := range files.Links(md) {
+		if s.o.Linked == nil {
+			break
+		}
+		path, err := s.o.Linked(id)
+		if err != nil {
+			continue
+		}
+		st, err := os.Stat(path)
+		if err != nil {
+			continue
+		}
+		linked[id] = true
+		out = append(out, api.ChatFile{Name: filepath.Base(path), Size: st.Size(), Type: typeOf(path), Ref: s.ref(plugin, session, linkPrefix+id)})
+	}
+	md = files.DropLinks(md, linked)
 	return api.ChatReply{Markdown: md, Text: plain(md), Files: out}
 }
+
+func typeOf(path string) string {
+	if typ := mime.TypeByExtension(filepath.Ext(path)); typ != "" {
+		return typ
+	}
+	return "application/octet-stream"
+}
+
+// linkPrefix marks a ref's path as a file link's id: read where the files service keeps it.
+const linkPrefix = "ir:"
 
 type refBody struct {
 	P string `json:"p"` // the path
@@ -112,13 +136,21 @@ func (s *Service) File(c Caller, ref string) (string, error) {
 	if err != nil || json.Unmarshal(b, &r) != nil || r.C != c.ID {
 		return "", fmt.Errorf("%w: no such file", ErrNotFound)
 	}
-	if denied(r.P) {
+	path := r.P
+	if id, ok := strings.CutPrefix(path, linkPrefix); ok {
+		if s.o.Linked == nil {
+			return "", fmt.Errorf("%w: no such file", ErrNotFound)
+		}
+		if path, err = s.o.Linked(id); err != nil {
+			return "", fmt.Errorf("%w: no such file", ErrNotFound)
+		}
+	} else if denied(path) {
 		return "", fmt.Errorf("%w: no such file", ErrNotFound)
 	}
 	if err := s.guard().FileOut(c, r.S); err != nil {
 		return "", err
 	}
-	return r.P, nil
+	return path, nil
 }
 
 // denied: paths never given out, whatever a reply says (plan "文件传输"): ~/.ssh, the agents'

@@ -8,7 +8,7 @@
 // user, 2026-11-08). Shift+Tab cycles the approval mode; Esc stops the turn. The draft is kept on
 // this device; files pasted, dropped or attached go up in chunks while you type, a picture in its
 // own shape under a veil drawn back as it goes; nothing is sent till all are up.
-import { ArrowUp, Box, Brain, ChartPie, Eraser, FileText, FoldVertical, Gauge, LoaderCircle, MessageSquare, Paperclip, ShieldCheck, Square, X, type LucideIcon } from "lucide-react";
+import { ArrowUp, Box, Brain, ChartPie, Eraser, FileCode2, FileText, FoldVertical, Gauge, LoaderCircle, MessageSquare, Paperclip, ShieldCheck, Square, X, type LucideIcon } from "lucide-react";
 import { forwardRef, Fragment, useEffect, useImperativeHandle, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { Agent, Command, Session, SessionState as LiveSession } from "../api/types.gen";
 import { runShell, shellLine, useShellable } from "./shell";
@@ -22,7 +22,7 @@ import { hasMention, MentionMarks, mentionOf } from "./mention";
 import { atSessions, atWord, shortId } from "./refs";
 import { useSettings } from "../data";
 import { useGlide } from "../motion";
-import { previews, Zoom } from "./files";
+import { CODE, previews, size, Zoom } from "./files";
 import { upload } from "./upload";
 import { findSecretish } from "./secretish";
 import { SaveSecret } from "./savesecret";
@@ -276,7 +276,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
     // A picture's copy here stays: the bubble shows it while sending, and once landed till the
     // server's thumbnail has come (chat/files.tsx previews).
     for (const a of atts) if (a.url && a.path) previews.set(a.path, a.url);
-    const files = atts.map((a) => ({ ref: a.ref!, name: a.file.name, type: a.file.type, url: a.url }));
+    const files = atts.map((a) => ({ ref: a.ref!, name: a.file.name, type: a.file.type, size: a.file.size, url: a.url }));
     const sent: Sent = { key: crypto.randomUUID(), text: words, files, from: 0, steer: mode === "steer" };
     type("");
     setAtts([]);
@@ -351,9 +351,12 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
                       </button>
                     </Zoom>
                   ) : (
-                    <span className="flex h-14 w-36 items-center gap-1.5 bg-fill px-2 text-xs">
-                      <FileText size={16} className="shrink-0 text-ink-3" />
-                      <span className="line-clamp-2 [overflow-wrap:anywhere]">{a.file.name}</span>
+                    <span className="flex h-14 w-44 items-center gap-2 bg-fill px-2.5">
+                      {CODE.test(a.file.name) ? <FileCode2 size={16} className="shrink-0 text-ink-3" /> : <FileText size={16} className="shrink-0 text-ink-3" />}
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm">{a.file.name}</span>
+                        <span className="block truncate text-xs text-ink-3 tabular-nums">{size(a.file.size)}</span>
+                      </span>
                     </span>
                   )}
                   {/* Going up: a veil over what has not gone yet, drawn back as it goes, and a ring

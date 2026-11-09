@@ -16,14 +16,14 @@ import { Avatar, Badge, cn, IconKey, Logo, tilde, Tip } from "../ui";
 import { useHome } from "../data";
 import { LocalMark } from "../me";
 import { go } from "../route";
-import { Files, Picture, previews, size } from "./files";
+import { Files, isLink, Picture, previews, SentFile } from "./files";
 import { Pictures } from "./pictures";
 import { cmdOfCall, isShell, type Cmd } from "./cmd";
 import { argOf, diffSum, foldLine, foldSaid, kindOf, runCmds, type Diff, type Kind, type Shown, type Step, type Tool } from "./fold";
 import { Code } from "./hl";
 import { Markdown } from "./markdown";
 import { partialInput } from "./partial";
-import { MentionCard, Mentioned } from "./mention";
+import { MentionCard, NamedCards, useNamed } from "./mention";
 import { leadingMentions, type Source, withoutFiles, withoutNameLines } from "./refs";
 
 type You = Extract<Source, { kind: "you" }>;
@@ -135,15 +135,17 @@ function SendState({ state }: { state: Going }) {
 }
 
 export const YouBubble = forwardRef<HTMLDivElement, { text: string; who: You; failed?: boolean; children?: ReactNode; time?: number; going?: Going }>(function YouBubble({ text: all, who, failed, children, time, going }, ref) {
-  // The sessions named before the words: cards with the files, as they were in the composer.
-  const { named, words: text } = useMemo(() => leadingMentions(all), [all]);
+  // The sessions named before the words: cards with the files, as they were in the composer; those
+  // named among the words or by id the same cards, the words as written.
+  const text = useMemo(() => leadingMentions(all).words, [all]);
+  const named = useNamed(all);
   const row = named.length + Children.count(children) > 0;
   return (
     <Sender ref={ref} who={who} title={time ? clock(time) : undefined}>
       <div className="relative max-w-[min(560px,100%)] px-3.5 py-2">
         {going && <SendState state={going} />}
         <span data-bubble-bg className={cn("absolute inset-0 rounded-xl rounded-tr-sm bg-fill", failed && "shadow-[inset_0_0_0_1px_var(--err)]")} aria-hidden />
-        {text && <span className="relative block text-md whitespace-pre-wrap [overflow-wrap:anywhere]"><Mentioned text={text} /></span>}
+        {text && <span className="relative block text-md whitespace-pre-wrap [overflow-wrap:anywhere]">{text}</span>}
         {/* Not for no files: a message sent and the same one landed are as high (an empty list was
             a row of its own, the bubble shrinking as it landed). */}
         {row && (
@@ -159,17 +161,12 @@ export const YouBubble = forwardRef<HTMLDivElement, { text: string; who: You; fa
   );
 });
 
-/** A file in your words: a picture small, opening the original; any other its name and size. */
+/** A file in your words, as it was in the composer: a picture small, opening the original; any
+ *  other its card. */
 function Attached({ session, f }: { session: string; f: FileRef }) {
   const url = api.fileURL(session, f.ref, false, f.mtime);
-  if (f.kind === "image") return <Picture src={f.thumb ? api.thumbURL(session, f.ref, 256, f.mtime) : url} full={url} name={f.name} small under={previews.get(f.path)} />;
-  return (
-    <a href={api.fileURL(session, f.ref, true, f.mtime)} download={f.name} className="flex max-w-full items-center gap-1 rounded-md bg-paper/60 px-1.5 py-0.5 text-xs text-ink-2 hover:text-ink">
-      <FileText size={12} className="shrink-0" />
-      <span className="truncate">{f.name}</span>
-      <span className="shrink-0 text-ink-3 tabular-nums">{size(f.size)}</span>
-    </a>
-  );
+  if (f.kind === "image") return <Picture src={f.thumb ? api.thumbURL(session, f.ref, 256, f.mtime) : url} full={url} name={f.name} small under={previews.get(f.path)} w={f.w} h={f.h} />;
+  return <SentFile name={f.name} bytes={f.size} href={api.fileURL(session, f.ref, true, f.mtime)} />;
 }
 
 /** A message sent from here the transcript has yet to bring: its mark says where it is; not taken,
@@ -180,14 +177,7 @@ export function Pending({ s, who, retry, drop, bubbleRef }: { s: Sent; who: You;
     <div className="flex flex-col items-end gap-0.5">
       <YouBubble ref={bubbleRef} text={s.text} who={who} failed={s.failed !== undefined} going={s.failed !== undefined ? undefined : s.queued ? "queued" : s.steer ? "steering" : "sending"}>
         {s.files.map((f) =>
-          f.url ? (
-            <Picture key={f.ref} src={f.url} full={f.url} name={f.name} small />
-          ) : (
-          <span key={f.ref} className="flex items-center gap-1 rounded-md bg-paper/60 px-1.5 py-0.5 text-xs text-ink-2">
-            <FileText size={12} />
-            {f.name}
-          </span>
-          ),
+          f.url ? <Picture key={f.ref} src={f.url} full={f.url} name={f.name} small /> : <SentFile key={f.ref} name={f.name} bytes={f.size} />,
         )}
       </YouBubble>
       {s.failed !== undefined && (
@@ -207,10 +197,24 @@ export function Pending({ s, who, retry, drop, bubbleRef }: { s: Sent; who: You;
 
 /** A letter: from another session's ir, a plugin or a peer. Not your words: on the left, in a grey
  *  bubble as yours are (the user, 2026-11-06). */
-function Letter({ src, text, time, onJump }: { src: From; text: string; time?: number; onJump: (id: string) => void }) {
+function Letter({ src, text, time, onJump, children }: { src: From; text: string; time?: number; onJump: (id: string) => void; children?: ReactNode }) {
+  // Its files as in your bubble (ir send -a): they were not shown at all. The sessions it names
+  // (ir send 4ceb1321 …) as cards before them, the words as written.
+  const named = useNamed(text);
+  const files = named.length + Children.count(children) > 0;
   return (
     <Sender who={src} title={time ? clock(time) : undefined} jump={src.session ? () => onJump(src.session!) : undefined}>
-      <p className="m-0 max-w-[min(560px,100%)] min-w-0 rounded-xl rounded-tr-sm bg-fill px-3.5 py-2 text-md whitespace-pre-wrap [overflow-wrap:anywhere]"><Mentioned text={text} /></p>
+      <div className="max-w-[min(560px,100%)] min-w-0 rounded-xl rounded-tr-sm bg-fill px-3.5 py-2">
+        {text && <p className="m-0 text-md whitespace-pre-wrap [overflow-wrap:anywhere]">{text}</p>}
+        {files && (
+          <div className={cn("flex flex-wrap gap-1.5", text && "mt-1")}>
+            {named.map((m, i) => (
+              <MentionCard key={i} m={m} />
+            ))}
+            {children}
+          </div>
+        )}
+      </div>
     </Sender>
   );
 }
@@ -264,14 +268,19 @@ export function Compaction({ b, since }: { b?: Block; since?: number }) {
 
 const SYSTEM: Record<string, Parameters<typeof t>[0]> = { compact: "sys.compact", interrupted: "sys.interrupted", unreadable: "sys.unreadable", api_error: "sys.apiError", local_command: "sys.localCommand" };
 
-/** What the agent said: Markdown, then the files it gives ([文件] `path` lines). */
+/** What the agent said: Markdown, its file links (ir:<id>) in place, then the files its file lines
+ *  give ([文件] `path`). */
 const Assistant = memo(function Assistant({ b, session }: { b: Block; session: string }) {
   const home = useHome().data;
   const text = withoutFiles(withoutNameLines(b.text ?? ""), new Set(b.files?.map((f) => f.path)), home);
+  // A file link's file shows where the words put it; the rest (file lines) under them.
+  const under = b.files?.filter((f) => !isLink(f)) ?? [];
   return (
     <div className="flex min-w-0 flex-col items-start gap-2 pr-6">
-      {text && <Markdown text={text} className="w-full" />}
-      {!!b.files?.length && <Files session={session} files={b.files} />}
+      {text && <Markdown text={text} className="w-full" session={session} files={b.files ?? undefined} />}
+      {/* The sessions it names by id (09eeb223), as cards: the words as written. */}
+      <NamedCards text={text} />
+      {!!under.length && <Files session={session} files={under} />}
     </div>
   );
 });
@@ -282,10 +291,15 @@ export function Said({ b, session, cwd, source, onJump }: { b: Shown; session: s
       const src = source(b);
       const text = b.text ?? "";
       if (src.kind === "iridium") return <Line icon={<RotateCcw size={12} />}>{text}</Line>;
-      if (src.kind === "letter") return <Letter src={src} text={text} time={b.time} onJump={onJump} />;
       // The server writes each attachment as a line "[附件] `path`" (absolute): the file shows as itself instead.
       const paths = new Set(b.files?.map((f) => f.path));
       const words = paths.size ? withoutFiles(text, paths) : text;
+      if (src.kind === "letter")
+        return (
+          <Letter src={src} text={words} time={b.time} onJump={onJump}>
+            {b.files?.map((f) => <Attached key={f.ref} session={session} f={f} />)}
+          </Letter>
+        );
       return (
         <YouBubble text={words} who={src} time={b.time} >
           {b.files?.map((f) => <Attached key={f.ref} session={session} f={f} />)}
@@ -564,6 +578,9 @@ function StepCard({ s, session }: { s: Step; session: string }) {
             <Part label={t("msg.output")} copy={s.result?.text} error={s.result?.error}>
               {s.result ? <ResultView r={s.result} session={session} /> : <span className="text-xs text-ink-3">{t("msg.noResult")}</span>}
             </Part>
+            {/* The sessions it names by id, each a card going there (ir send, ir wait, ir new); not
+                a list's many (ir ls): the sidebar has those. */}
+            <NamedCards text={s.input ?? ""} also={s.result?.text} />
           </>
         )}
       </div>

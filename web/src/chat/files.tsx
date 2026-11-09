@@ -2,8 +2,8 @@
 // original, a video or a sound to play in place, anything else a card to download. Only paths the
 // server says the conversation named, and that exist, show; it serves them by the session.
 import { Dialog } from "@base-ui/react/dialog";
-import { Download, FileCode2, FileText, X } from "lucide-react";
-import { useCallback, useState, type CSSProperties, type ReactElement } from "react";
+import { Download, FileCode2, FileText, FileX2, X } from "lucide-react";
+import { createContext, useCallback, useContext, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { api } from "../api/client";
 import type { FileRef } from "../api/types.gen";
 import { t } from "../i18n";
@@ -23,7 +23,7 @@ export function Files({ session, files }: { session: string; files: FileRef[] })
   );
 }
 
-const CODE = /\.(tsx?|jsx?|go|rs|py|css|json|ya?ml|toml|sh|md)$/i;
+export const CODE = /\.(tsx?|jsx?|go|rs|py|css|json|ya?ml|toml|sh|md)$/i;
 
 function One({ session, f }: { session: string; f: FileRef }) {
   const url = api.fileURL(session, f.ref, false, f.mtime);
@@ -51,14 +51,15 @@ function Shown({ src, under, alt, className, style }: { src: string; under?: str
   );
 }
 
-/** A picture: its thumbnail, opening the original over the page. under: what shows till it has come.
+/** A picture: its thumbnail, opening the original over the page; small, in a row of files, as high
+ *  as the composer's and its own shape, as it was there. under: what shows till it has come.
  *  w, h: its size as the server read it: its place is kept as it loads, the conversation does not
  *  move (a chat opened the first time, its pictures not yet in the cache). */
 export function Picture({ src, full, name, small, under, w, h }: { src: string; full: string; name: string; small?: boolean; under?: string; w?: number; h?: number }) {
   return (
     <Zoom full={full} name={name}>
-      <button type="button" aria-label={`${name} · ${t("msg.openImage")}`} className={cn("g-press relative block overflow-hidden rounded-lg bg-fill shadow-[0_0_0_0.5px_var(--edge)]", small ? "size-16" : "w-full max-w-[340px]")}>
-        <Shown src={src} under={under} alt={name} style={!small && w && h ? { aspectRatio: `${w} / ${h}` } : undefined} className={cn("block w-full object-cover", small ? "h-full" : "max-h-[420px]")} />
+      <button type="button" aria-label={`${name} · ${t("msg.openImage")}`} className={cn("g-press relative block overflow-hidden rounded-lg bg-fill shadow-[0_0_0_0.5px_var(--edge)]", small ? "h-14" : "w-full max-w-[340px]")}>
+        <Shown src={src} under={under} alt={name} style={w && h ? { aspectRatio: `${w} / ${h}` } : undefined} className={cn("block object-cover", small ? "h-full w-auto max-w-40 min-w-10" : "max-h-[420px] w-full")} />
       </button>
     </Zoom>
   );
@@ -90,16 +91,42 @@ export function Zoom({ full, name, children }: { full: string; name: string; chi
   );
 }
 
-/** A file to download: its name, its size, the download key. */
+/** A file sent with your words, as its card was in the composer (as high as a session's beside it,
+ *  mention.tsx MentionCard): its icon, its name, its size; pressed, it downloads. No href: not yet
+ *  landed. */
+export function SentFile({ name, bytes, href }: { name: string; bytes?: number; href?: string }) {
+  const Icon = CODE.test(name) ? FileCode2 : FileText;
+  const body = (
+    <>
+      <Icon size={16} className="shrink-0 text-ink-3" />
+      <span className="min-w-0">
+        <span className="block truncate text-sm text-ink">{name}</span>
+        {bytes !== undefined && <span className="block truncate text-xs text-ink-3 tabular-nums">{size(bytes)}</span>}
+      </span>
+    </>
+  );
+  const box = "flex h-11 w-44 max-w-full items-center gap-2 rounded-lg bg-paper/70 px-2.5 text-left shadow-[0_0_0_0.5px_var(--edge)]";
+  if (!href) return <span className={box}>{body}</span>;
+  return (
+    <Tip label={t("msg.download")}>
+      <a href={href} download={name} className={cn("g-press hover:bg-paper", box)}>
+        {body}
+      </a>
+    </Tip>
+  );
+}
+
+/** A file to download: its name, its size, the download key. Spans, as it may stand in a paragraph
+ *  (a reply's file link). */
 export function FileCard({ name, detail, href, code, onRemove, progress }: { name: string; detail: string; href?: string; code?: boolean; onRemove?: () => void; progress?: number }) {
   const Icon = code ? FileCode2 : FileText;
   return (
-    <div className="relative flex w-full max-w-[340px] items-center gap-3 overflow-hidden rounded-lg py-2 pr-1.5 pl-3 shadow-[0_0_0_0.5px_var(--edge),0_0_0_1px_var(--edge)]">
+    <span className="relative my-1 flex w-full max-w-[340px] items-center gap-3 overflow-hidden rounded-lg py-2 pr-1.5 pl-3 shadow-[0_0_0_0.5px_var(--edge),0_0_0_1px_var(--edge)]">
       <Icon size={20} className="shrink-0 text-ink-3" />
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-sm">{name}</div>
-        <div className="text-xs text-ink-3 tabular-nums">{detail}</div>
-      </div>
+      <span className="block min-w-0 flex-1">
+        <span className="block truncate text-sm">{name}</span>
+        <span className="block text-xs text-ink-3 tabular-nums">{detail}</span>
+      </span>
       {href && (
         <Tip label={t("msg.download")}>
           <a href={href} download={name} aria-label={t("msg.download")} className="g-press grid size-8 shrink-0 place-items-center rounded-md text-ink-2 hover:bg-fill hover:text-ink pointer-coarse:size-10">
@@ -113,6 +140,53 @@ export function FileCard({ name, detail, href, code, onRemove, progress }: { nam
         </IconKey>
       )}
       {progress !== undefined && progress < 1 && <span className={cn("absolute bottom-0 left-0 h-[2px] origin-left bg-ink-3 transition-transform")} style={{ width: "100%", transform: `scaleX(${progress})` }} />}
-    </div>
+    </span>
+  );
+}
+
+/** The files a reply's links may name (docs/api.md "文件链接"), by id: its Block.files with a path
+ *  ir:<id>. None while the reply is still being written (a draft). */
+const Linkable = createContext<{ session: string; files: Map<string, FileRef> } | null>(null);
+
+/** Gives the Markdown inside the files its links name. */
+export function LinkFiles({ session, files, children }: { session: string; files: FileRef[]; children: ReactNode }) {
+  const links = new Map(files.filter((f) => isLink(f)).map((f) => [f.ref, f]));
+  return <Linkable.Provider value={{ session, files: links }}>{children}</Linkable.Provider>;
+}
+
+/** f is a file link's (ir:<id>), shown where the reply puts it, not under it. */
+export const isLink = (f: FileRef) => f.path.startsWith("ir:");
+
+/** A file link where the reply puts it: ![caption](ir:id) a picture, a video or a sound in place (any
+ *  other file a card); [text](ir:id) a file to download, in the line. Unknown: struck, its words
+ *  kept; in a draft (no files yet) its words only. */
+export function Linked({ id, label, inline }: { id: string; label: string; inline: boolean }) {
+  const it = useContext(Linkable);
+  const f = it?.files.get(id);
+  if (!it) return <span className="text-ink-3">{label}</span>;
+  if (!f)
+    return (
+      <Tip label={t("msg.fileGone")}>
+        <span className="inline-flex items-baseline gap-1 text-ink-3 line-through decoration-ink-4">
+          <FileX2 size={13} className="shrink-0 self-center" />
+          {label || id}
+        </span>
+      </Tip>
+    );
+  if (inline) {
+    const href = api.fileURL(it.session, f.ref, true, f.mtime);
+    return (
+      <Tip label={`${f.name} · ${size(f.size)}`}>
+        <a href={href} download={f.name} className="inline-flex items-baseline gap-1 rounded-sm text-ink underline decoration-ink-4 underline-offset-2 hover:decoration-ink-2">
+          <Download size={13} className="shrink-0 self-center text-ink-3" />
+          {label || f.name}
+        </a>
+      </Tip>
+    );
+  }
+  return (
+    <span className="my-1 block">
+      <One session={it.session} f={f} />
+    </span>
   );
 }

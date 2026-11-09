@@ -1119,7 +1119,8 @@ export interface ExtensionBind {
 /**
  * FileRef is a file a session's transcript names (in a reply, a message, a Write call) or a
  * message's attachment: GET /api/sessions/<session>/files/<ref>. A ref is only good for its
- * session, and only paths the session's transcript names (or its attachments) get one.
+ * session, and only paths the session's transcript names (or its attachments) get one. A file
+ * link's (FileLink): Ref is its id, good in any session, and Path "ir:<id>", as the reply has it.
  */
 export interface FileRef {
   ref: string;
@@ -1181,6 +1182,19 @@ export interface CompleteUpload {
  */
 export interface AttachPath {
   path: string;
+}
+/**
+ * FileLink is POST /api/links' answer (local ir only, ir attach <path>): the file, kept by
+ * Iridium under a random id, and how a reply puts it in its words.
+ */
+export interface FileLink {
+  file: FileRef;
+  link: string; // ir:<id>
+  /**
+   * Markdown is the link as a reply writes it: ![name](ir:id) for a picture, a video or a sound,
+   * which shows where it is; [name](ir:id) for any other file, to download.
+   */
+  markdown: string;
 }
 /**
  * DirEntry is one entry of GET /api/files?path=<dir> (local ir only): one level.
@@ -1614,6 +1628,17 @@ export interface Terminal {
    * Chatless: a Bot no one has written to yet, so it has no chat to bring (the menu says so).
    */
   chatless?: boolean;
+  /**
+   * Follows: the panels (IDs) a channel follows: what a session asks while no chat points at it
+   * goes to the Bots that follow the panel that began its turn, and to no other.
+   */
+  follows?: string[];
+}
+/**
+ * SetFollows is PUT /api/terminals/{id}/follows: the panels the Bot follows from now on.
+ */
+export interface SetFollows {
+  panels: string[];
 }
 /**
  * Device is what a terminal runs on, set in its settings (PUT /api/me/device, ir profile

@@ -52,6 +52,9 @@ type Options struct {
 	// Message is text with attachments (refs of session) written in, and the images among them
 	// (the files service's Message); nil takes no attachments.
 	Message func(session, text string, refs []string) (string, []agent.Image, error)
+	// Linked is the path a file link's id is read from (the files service's Linked); nil: replies'
+	// links give no files.
+	Linked func(id string) (string, error)
 	// BotsChanged: Bots changed (a plugin's first chat, its stream came or went); nil: no one is told.
 	BotsChanged func()
 }
@@ -109,11 +112,12 @@ type Service struct {
 	wg     sync.WaitGroup
 
 	mu     sync.Mutex
-	held   map[string]string            // session: the agent's last message this turn, not sent yet
-	wake   map[string]chan struct{}     // plugin: closed when an event is posted
-	picks  map[string]pick              // a command's card
-	online map[string]int               // plugin: its event streams open now
-	away   map[string]store.ChatPointer // an ask's card: the chat it went to, its session pointed at by none
+	held   map[string]string              // session: the agent's last message this turn, not sent yet
+	wake   map[string]chan struct{}       // plugin: closed when an event is posted
+	picks  map[string]pick                // a command's card
+	online map[string]int                 // plugin: its event streams open now
+	away   map[string][]store.ChatPointer // an ask's card: the chats it went to, its session pointed at by none
+	origin map[string]string              // session: the terminal its latest turn began at, through the agents that passed it on
 }
 
 // pick is a command's card: answering it runs the command with the option chosen.
@@ -134,7 +138,7 @@ func New(o Options) (*Service, error) {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &Service{o: o, key: key, ctx: ctx, cancel: cancel, held: map[string]string{}, wake: map[string]chan struct{}{}, picks: map[string]pick{}, online: map[string]int{}, away: map[string]store.ChatPointer{}}
+	s := &Service{o: o, key: key, ctx: ctx, cancel: cancel, held: map[string]string{}, wake: map[string]chan struct{}{}, picks: map[string]pick{}, online: map[string]int{}, away: map[string][]store.ChatPointer{}, origin: map[string]string{}}
 	o.Manager.Watch(s.onNotice)
 	s.wg.Add(1)
 	go s.prune()
@@ -400,11 +404,13 @@ type ev struct {
 // onNotice turns what happened in a session into events for the chats that point at it.
 func (s *Service) onNotice(n session.Notice) {
 	var out []ev
+	origin := ""
 	s.mu.Lock()
 	held := s.held[n.Session]
 	switch n.Kind {
 	case session.NoticeTurnStart:
 		delete(s.held, n.Session)
+		s.origin[n.Session] = s.originLocked(n.From, n.Via)
 	case session.NoticeMessage:
 		// The last message of a turn is its reply: the one before is progress once another comes.
 		if held != "" {
@@ -428,6 +434,7 @@ func (s *Service) onNotice(n session.Notice) {
 		}
 	case session.NoticeAsk:
 		out = append(out, ev{"card", api.ChatEvent{Card: session.CardOf(n.Session, *n.Ask)}})
+		origin = s.originLocked(n.From, n.Via)
 	case session.NoticeAskDone:
 		out = append(out, ev{"card_done", api.ChatEvent{CardID: session.AskCardID(n.Session, n.RequestID)}})
 	case session.NoticeError:
@@ -445,7 +452,7 @@ func (s *Service) onNotice(n session.Notice) {
 		return
 	}
 	if len(chats) == 0 {
-		s.away1(n.Session, out)
+		s.away1(n.Session, origin, out)
 		return
 	}
 	for _, p := range chats {

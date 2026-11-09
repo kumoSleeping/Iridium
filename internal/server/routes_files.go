@@ -60,6 +60,7 @@ func (s *Server) fileRoutes(mux *http.ServeMux, local bool) {
 	mux.HandleFunc("DELETE /api/uploads/{upload}", s.uploadCancel)
 	if local {
 		mux.HandleFunc("POST /api/sessions/{id}/attach", s.use(s.attachPath))
+		mux.HandleFunc("POST /api/links", s.linkPath)
 		mux.HandleFunc("GET /api/files", s.listDir)
 		mux.HandleFunc("POST /api/files/copy", s.copyFile)
 	}
@@ -100,8 +101,14 @@ func (s *Server) fileInfo(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	info, err := s.files.Info(p)
-	if err == nil {
+	var info api.FileRef
+	var err error
+	if ref := r.PathValue("ref"); files.IsLink(ref) {
+		info, err = s.files.LinkInfo(ref)
+	} else {
+		info, err = s.files.Info(p)
+	}
+	if err == nil && info.Sha256 == "" {
 		info.Sha256, err = s.files.Sum(p)
 	}
 	if err != nil {
@@ -195,6 +202,20 @@ func (s *Server) attachPath(w http.ResponseWriter, r *http.Request) {
 	reply(w, http.StatusOK, info)
 }
 
+// linkPath gives a local file a link (ir attach), in the session ir runs in if it runs in one.
+func (s *Server) linkPath(w http.ResponseWriter, r *http.Request) {
+	var req api.AttachPath
+	if !readJSON(w, r, &req) {
+		return
+	}
+	l, err := s.files.Link(r.Header.Get(HeaderSession), req.Path)
+	if err != nil {
+		s.fileError(w, err)
+		return
+	}
+	reply(w, http.StatusOK, l)
+}
+
 func (s *Server) listDir(w http.ResponseWriter, r *http.Request) {
 	if m := r.URL.Query().Get("machine"); m != "" {
 		s.listAt(w, r, m, r.URL.Query().Get("path"))
@@ -263,6 +284,8 @@ func (s *Server) fileError(w http.ResponseWriter, err error) {
 		fail(w, http.StatusUnprocessableEntity, err.Error())
 	case errors.Is(err, files.ErrTooLarge), errors.Is(err, files.ErrTooLong):
 		fail(w, http.StatusRequestEntityTooLarge, err.Error())
+	case errors.Is(err, files.ErrChanged):
+		fail(w, http.StatusGone, err.Error())
 	case errors.Is(err, files.ErrNotImage):
 		fail(w, http.StatusUnsupportedMediaType, err.Error())
 	case errors.Is(err, files.ErrBad), errors.Is(err, files.ErrNotFile), errors.Is(err, pathsafe.ErrRelative):

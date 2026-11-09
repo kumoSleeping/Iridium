@@ -2,7 +2,8 @@ package api
 
 // FileRef is a file a session's transcript names (in a reply, a message, a Write call) or a
 // message's attachment: GET /api/sessions/<session>/files/<ref>. A ref is only good for its
-// session, and only paths the session's transcript names (or its attachments) get one.
+// session, and only paths the session's transcript names (or its attachments) get one. A file
+// link's (FileLink): Ref is its id, good in any session, and Path "ir:<id>", as the reply has it.
 type FileRef struct {
 	Ref  string `json:"ref"`
 	Name string `json:"name"`
@@ -57,6 +58,16 @@ type CompleteUpload struct {
 // AttachPath makes a local file an attachment of the session (local ir only).
 type AttachPath struct {
 	Path string `json:"path"`
+}
+
+// FileLink is POST /api/links' answer (local ir only, ir attach <path>): the file, kept by
+// Iridium under a random id, and how a reply puts it in its words.
+type FileLink struct {
+	File FileRef `json:"file"`
+	Link string  `json:"link"` // ir:<id>
+	// Markdown is the link as a reply writes it: ![name](ir:id) for a picture, a video or a sound,
+	// which shows where it is; [name](ir:id) for any other file, to download.
+	Markdown string `json:"markdown"`
 }
 
 // DirEntry is one entry of GET /api/files?path=<dir> (local ir only): one level.

@@ -378,9 +378,26 @@ func TestBotLetter(t *testing.T) {
 	if ev := took(); r.Letter || len(ev) != 1 || ev[0].Type != "reply" || !strings.Contains(ev[0].Data, "again") {
 		t.Fatalf("as the reply: %+v %+v", r, ev)
 	}
-	// A's ask, A pointed at by none now: to the chat, A named; answered there, the chat stays.
+	// A's ask, A pointed at by none now, its turn begun by 本机: no Bot follows 本机, so none gets it.
 	events()
 	l.want(200, "web", "POST", "/api/sessions/"+a.Session+"/send", api.Send{Text: "please ASK"}, nil)
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		var st api.SessionState
+		if l.do("web", "GET", "/api/sessions/"+a.Session, nil, &st); len(st.Asks) > 0 {
+			l.want(200, "web", "POST", "/api/answer", api.CardAnswer{Card: st.Asks[0].Card.ID, Option: "allow"}, nil)
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("no ask in A")
+		}
+	}
+	l.waitReply("web", a.Session, "ok: please ASK")
+	if slices.ContainsFunc(events(), func(x store.Outgoing) bool { return x.Type == "card" }) {
+		t.Fatal("an ask no Bot follows went to the bot")
+	}
+	// The bot sends to A itself (not through its chat): begun at the bot, so its chat gets the ask,
+	// A named; answered there, the chat stays.
+	l.want(200, bot, "POST", "/api/sessions/"+a.Session+"/send", api.Send{Text: "please ASK"}, nil)
 	var card *api.Card
 	for deadline := time.Now().Add(10 * time.Second); card == nil; time.Sleep(20 * time.Millisecond) {
 		for _, x := range events() {
@@ -428,6 +445,12 @@ func TestBotLetter(t *testing.T) {
 		t.Fatalf("again: %+v", again.Reply)
 	}
 	l.want(200, bot, "POST", "/api/chat/qq:1/input", api.ChatInput{Text: "/use " + b.ID}, nil)
+
+	// What it follows: web panels only, set by a panel or a person's ir.
+	l.want(400, "socket", "PUT", "/api/terminals/"+botID+"/follows", api.SetFollows{Panels: []string{"local"}}, nil)
+	l.want(404, "socket", "PUT", "/api/terminals/local/follows", api.SetFollows{}, nil)
+	l.want(403, bot, "PUT", "/api/terminals/"+botID+"/follows", api.SetFollows{}, nil)
+	l.want(200, "socket", "PUT", "/api/terminals/"+botID+"/follows", api.SetFollows{}, nil)
 
 	// The bot removed: no session is marked with it any more.
 	list = nil

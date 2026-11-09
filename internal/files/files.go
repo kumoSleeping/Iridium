@@ -74,6 +74,8 @@ type Service struct {
 	uploads map[string]*upload
 	loaded  bool
 	copies  map[string]*copyJob
+	links   map[string]link   // id → record, as read (links.go)
+	linked  map[string]string // session NUL path → the link it was given
 }
 
 type sumKey struct {
@@ -96,7 +98,7 @@ func New(o Options) *Service {
 	if o.Guard == nil {
 		o.Guard = pathsafe.New(nil, pathsafe.Deny(o.State, ""), []string{UploadsFallback(o.State)})
 	}
-	s := &Service{o: o, refs: map[string]map[string]string{}, scanned: map[string]int64{}, scanMu: map[string]*sync.Mutex{}, sums: map[sumKey]string{}, dims: map[sumKey][2]int{}, uploads: map[string]*upload{}, copies: map[string]*copyJob{}}
+	s := &Service{o: o, refs: map[string]map[string]string{}, scanned: map[string]int64{}, scanMu: map[string]*sync.Mutex{}, sums: map[sumKey]string{}, dims: map[sumKey][2]int{}, uploads: map[string]*upload{}, copies: map[string]*copyJob{}, links: map[string]link{}, linked: map[string]string{}}
 	s.key = s.loadKey()
 	return s
 }
@@ -155,8 +157,12 @@ func (s *Service) cached(session, ref string) (string, bool) {
 func (s *Service) CheckPath(p string) (string, error) { return s.o.Guard.Check(p) }
 
 // Lookup is the path of a reference of session: one given before, an upload's, or one the
-// transcript names (read on from where it was last read). The path is checked again.
+// transcript names (read on from where it was last read), or a file link's (links.go: any
+// session's). The path is checked again.
 func (s *Service) Lookup(session, ref string) (string, error) {
+	if linkID.MatchString(ref) {
+		return s.Linked(ref)
+	}
 	p, ok := s.cached(session, ref)
 	if !ok {
 		s.loadUploads()
@@ -223,7 +229,8 @@ func (s *Service) scan(session string) error {
 	return nil
 }
 
-// files is the files block b names that exist and may be served, each given a reference.
+// files is the files block b names that exist and may be served, each given a reference; then
+// those its words link (ir:<id>, what the agent said only), still given.
 func (s *Service) files(session string, b api.Block) []api.FileRef {
 	var out []api.FileRef
 	for _, m := range Detect(b) {
@@ -240,6 +247,15 @@ func (s *Service) files(session string, b api.Block) []api.FileRef {
 		}
 		info.Ref = s.register(session, p)
 		out = append(out, info)
+	}
+	if b.Kind == api.BlockKindAssistant {
+		for _, id := range Links(b.Text) {
+			if l, err := s.linkOf(id); err == nil {
+				if f, err := s.linkFile(l); err == nil {
+					out = append(out, f)
+				}
+			}
+		}
 	}
 	return out
 }

@@ -220,7 +220,7 @@
 - 那边的 `ir`：执行端握手声明 `irClient`，这边每次在那边启动 agent 时生成一个只属于这个会话的 TOKEN（前缀 `irs_`，托管目录只存它的哈希，重启一次换一个），经 `IRIDIUM_TOKEN` 给执行端；执行端在这个会话的托管目录里放一个 `ir`（`holds/<会话>/bin/`），排在它 PATH 的最前面，地址（自己连的那个，`IRIDIUM_URL` 给了就用它）和 TOKEN 直接写在里面：agent 跑的命令不一定拿得到它的环境变量（dsh 跑命令就不带 `IRIDIUM_*`，2026-11-08 实测）。dsh 插件的是 `ir.js`（`ir`、`ir.cmd` 用插件所在的 node 跑；DSH Desktop 里是它自己的程序，带 `ELECTRON_RUN_AS_NODE`）；`ir join` 的是这个二进制本身（脚本再执行 `bin/.ir/ir` 这个链接，按名字 `ir` 进命令行模式）。
 - 那边的 `ir` 只转发：把参数和当前目录发到 `POST /api/cli`，这边照常跑 `ir`，输出一行一行流回去，最后是退出码。请求算那台机器的 Bot 发的、代表这个会话：Bot 的规则照旧（没勾“本人的机器”的不能开 Claude、不能给 Claude 会话发消息），算 agent 发的（消息并进对方当前回合，不能放行 auto 模式拦下的步骤），信里写成来自这个会话。Bot 被删，它的会话 TOKEN 一起失效。
 - 那边能用的：`new`（目录是那边的，`--machine` 可开到别的机器）、`send`、`wait`、`read`、`ls`、`find`、`stop`、`archive`、`unarchive`、`rename`、`ws`、`machines`。不能用：`cp`、`files`、`sh`、`run`、`secret`、`bot`、`usage` 和管理命令，这些碰的是 Iridium 所在机器的文件、命令和秘密，留给本机的会话和面板。
-- 系统提示：执行端有 `ir` 的，给那边能用的命令（`irhelp.Remote`）；没有的，不提 `ir`。都不带 `[文件]` 那一行（那边的文件网页取不到）。
+- 系统提示：执行端有 `ir` 的，给那边能用的命令（`irhelp.Remote`）；没有的，不提 `ir`。都不教文件链接（那边的 `ir` 没有 `attach`，文件网页取不到）。
 
 ## 暂不做
 

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"time"
 
@@ -30,6 +31,7 @@ func (s *Server) terminalRoutes(mux *http.ServeMux) {
 	// The device it runs on: its own, or (panels and 本机) another's.
 	mux.HandleFunc("PUT /api/me/device", func(w http.ResponseWriter, r *http.Request) { s.setDevice(w, r, "") })
 	mux.HandleFunc("PUT /api/terminals/{id}/device", func(w http.ResponseWriter, r *http.Request) { s.setDevice(w, r, r.PathValue("id")) })
+	mux.HandleFunc("PUT /api/terminals/{id}/follows", s.panelOnly(s.setFollows))
 	mux.HandleFunc("GET /api/terminals", s.manage(s.terminals))
 	mux.HandleFunc("DELETE /api/terminals/{id}", s.manage(s.revoke))
 	mux.HandleFunc("POST /api/terminals/invites", s.manage(s.invite))
@@ -98,11 +100,15 @@ func (s *Server) terminals(w http.ResponseWriter, r *http.Request) {
 	if s.Chat != nil {
 		bots = s.Chat.Bots()
 	}
+	follows, _ := s.st.Follows()
 	for _, e := range a.Endpoints {
 		t := s.terminalOf(e)
 		chats, bot := bots[e.ID]
 		t.Bot = bot && e.Kind == gate.KindChannel
 		t.Chatless = t.Bot && !chats
+		if e.Kind == gate.KindChannel {
+			t.Follows = follows[e.ID]
+		}
 		out.Terminals = append(out.Terminals, t)
 	}
 	for _, i := range a.Invites {
@@ -127,6 +133,40 @@ func (s *Server) revoke(w http.ResponseWriter, r *http.Request) {
 		go s.extDetach(hash)
 	}
 	s.gateDone(w, err)
+}
+
+// setFollows puts the panels Bot ref (ID or name) follows in place: channels only, panels only.
+func (s *Server) setFollows(w http.ResponseWriter, r *http.Request) {
+	var req api.SetFollows
+	if !readJSON(w, r, &req) {
+		return
+	}
+	bot, ok := s.gate().Find(r.PathValue("id"))
+	if !ok || bot.ID == gate.LocalEndpointID {
+		fail(w, http.StatusNotFound, "no such terminal")
+		return
+	}
+	if bot.Kind != gate.KindChannel {
+		fail(w, http.StatusBadRequest, "only a Bot follows panels")
+		return
+	}
+	panels := []string{}
+	for _, ref := range req.Panels {
+		p, ok := s.gate().Find(ref)
+		if !ok || p.ID == gate.LocalEndpointID || p.Kind != gate.KindPanel {
+			fail(w, http.StatusBadRequest, "not a web panel: "+ref)
+			return
+		}
+		if !slices.Contains(panels, p.ID) {
+			panels = append(panels, p.ID)
+		}
+	}
+	if err := s.st.SetFollows(bot.ID, panels); err != nil {
+		s.error(w, err)
+		return
+	}
+	s.terminalsChanged()
+	reply(w, http.StatusOK, api.SetFollows{Panels: panels})
 }
 
 // setDevice sets the device terminal ref (ID or name; "" the caller) runs on.
