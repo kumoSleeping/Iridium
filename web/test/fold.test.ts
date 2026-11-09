@@ -251,10 +251,11 @@ describe("a step's pictures", () => {
     const fold = shown[0];
     expect(fold?.kind === "fold" && fold.steps[0]?.result?.images).toEqual(images);
   });
-  test("they are downloaded by the picture's own name, else the tool's", () => {
-    expect(pictureName(call("Read", { file_path: "/w/shots/login.PNG" }))).toBe("login.PNG");
-    expect(pictureName(call("read_image", { file_path: "C:\\Users\\kumo\\err.webp" }))).toBe("err.webp");
+  test("they are downloaded by the picture's own name, else the tool's, as what they are", () => {
+    expect(pictureName(call("Read", { file_path: "/w/shots/login.PNG" }), "image/png")).toBe("login.png");
+    expect(pictureName(call("read_image", { file_path: "C:\\Users\\kumo\\err.webp" }), "image/webp")).toBe("err.webp");
+    expect(pictureName(call("read", { path: "/w/a.png" }), "image/jpeg")).toBe("a.jpg");
     expect(pictureName(call("view_image", { path: "/w/notes.txt" }))).toBe("view_image.png");
-    expect(pictureName(call("mcp__browser__screenshot", {}))).toBe("mcp__browser__screenshot.png");
+    expect(pictureName(call("mcp__browser__screenshot", {}), "image/jpeg")).toBe("mcp__browser__screenshot.jpg");
   });
 });

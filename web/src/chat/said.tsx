@@ -19,7 +19,7 @@ import { go } from "../route";
 import { Files, Picture, previews, size } from "./files";
 import { Pictures } from "./pictures";
 import { cmdOfCall, isShell, type Cmd } from "./cmd";
-import { argOf, diffSum, foldLine, foldSaid, kindOf, pictureName, runCmds, type Diff, type Kind, type Shown, type Step, type Tool } from "./fold";
+import { argOf, diffSum, foldLine, foldSaid, kindOf, runCmds, type Diff, type Kind, type Shown, type Step, type Tool } from "./fold";
 import { Code } from "./hl";
 import { Markdown } from "./markdown";
 import { partialInput } from "./partial";
@@ -496,19 +496,21 @@ function StepView({ s, session, cwd }: { s: Step; session: string; cwd: string }
   return (
     <div className="min-w-0">
       <div className="group/step flex min-w-0 items-center gap-2">
+        {/* Touch has no hover: the chevron shows always, its key as wide as a finger, the line
+            where it was. */}
         <button
           type="button"
           aria-expanded={shown}
           aria-label={t(shown ? "msg.hidePictures" : "msg.showPictures")}
           onClick={() => setShown(!shown)}
-          className="grid h-7 shrink-0 place-items-center rounded-sm outline-none pointer-coarse:h-9 [&>*]:[grid-area:1/1] [&>*]:transition-[opacity,rotate] [&>*]:duration-(--dur-1)"
+          className="group/pic grid h-7 shrink-0 place-items-center rounded-sm outline-none hover:bg-fill focus-visible:bg-fill pointer-coarse:-mx-3 pointer-coarse:h-9 pointer-coarse:px-3 [&>*]:[grid-area:1/1] [&>*]:transition-[opacity,rotate] [&>*]:duration-(--dur-1)"
         >
-          <StepIcon s={s} className="group-hover/step:opacity-0 group-has-focus-visible/step:opacity-0" />
-          <ChevronRight size={14} aria-hidden className={cn("text-ink-3 opacity-0 group-hover/step:opacity-100 group-has-focus-visible/step:opacity-100", shown && "rotate-90")} />
+          <StepIcon s={s} className="group-hover/step:opacity-0 group-focus-visible/pic:opacity-0 pointer-coarse:opacity-0" />
+          <ChevronRight size={14} aria-hidden className={cn("text-ink-3 opacity-0 group-hover/step:opacity-100 group-focus-visible/pic:opacity-100 pointer-coarse:opacity-100", shown && "rotate-90")} />
         </button>
         <StepCall s={s} session={session} cwd={cwd} bare />
       </div>
-      {shown && <Pictures session={session} at={s.result!.at} images={images} name={pictureName(s)} />}
+      {shown && <Pictures session={session} s={s} />}
     </div>
   );
 }

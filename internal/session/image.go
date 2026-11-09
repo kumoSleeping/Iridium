@@ -11,6 +11,9 @@ import (
 // ErrNoImage: the record has no such picture, or not one that may be shown.
 var ErrNoImage = transcript.ErrNoImage
 
+// ErrNotYet: the picture is not in the record yet (a script still running); asked again, it may be.
+var ErrNotYet = transcript.ErrNotYet
+
 // shown are the picture types served: each shows as a picture and nothing else.
 var shown = map[string]bool{"image/png": true, "image/jpeg": true, "image/gif": true, "image/webp": true}
 

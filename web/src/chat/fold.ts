@@ -231,12 +231,15 @@ export function runCmds(steps: Step[], name: string): { cmd: Cmd | undefined; n:
   return out;
 }
 
-/** The name a step's pictures are downloaded by: the picture file it read, else its tool's. */
-export function pictureName(t: { name?: string; input?: string }): string {
+/** The name a step's picture of type mime is downloaded by: the picture file the step read, else
+ *  its tool's, with mime's extension. */
+export function pictureName(t: { name?: string; input?: string }, mime?: string): string {
+  const ext = { "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp" }[mime ?? ""] ?? "png";
   const i = inputOf(t.input);
-  const path = ["file_path", "path"].map((k) => i[k]).find((v): v is string => typeof v === "string" && /\.(png|jpe?g|gif|webp)$/i.test(v));
-  return path ? path.split(/[\\/]/).pop()! : `${t.name || "picture"}.png`;
+  const path = ["file_path", "path"].map((k) => i[k]).find((v): v is string => typeof v === "string" && PICTURE.test(v));
+  return (path ? path.split(/[\\/]/).pop()!.replace(PICTURE, "") : t.name || "picture") + "." + ext;
 }
+const PICTURE = /\.(png|jpe?g|gif|webp)$/i;
 
 /** All the lines a fold's runs changed; undefined for none. */
 export const diffSum = (runs: Run[]): Diff | undefined => runs.reduce<Diff | undefined>((a, r) => (r.diff ? plus(a, r.diff) : a), undefined);
