@@ -47,6 +47,7 @@ export const en: Dict = {
   "menu.archiveHere": "Archive the {n} sessions here",
   "menu.rename": "Rename",
   "menu.hide": "Hide",
+  "nav.all": "All",
   "menu.syncDsh": "Sync DSH",
   "menu.unhide": "Unhide",
   "menu.pin": "Pin",

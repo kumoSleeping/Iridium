@@ -2,11 +2,10 @@
 // its sessions marked with its face on the agent's logo. Its face is its Bot's avatar, or by its
 // system: a Windows window, a laptop for a Mac, a monitor for Linux.
 import { Laptop, Monitor } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import type { Machine } from "./api/types.gen";
 import { useMachines } from "./store";
-import { t } from "./i18n";
-import { cn, Tip } from "./ui";
+import { cn, keep, kept } from "./ui";
 
 /** The machine a session or a folder group runs at: by ID, as the carried "machines" lists them. */
 export const useMachine = (id?: string) => {
@@ -96,30 +95,22 @@ export function useLink(m: Machine): "on" | "slow" | "away" {
   return away ? "away" : !m.online || (m.latency ?? 0) > SLOW_MS ? "slow" : "on";
 }
 
-const LINK_COLOR = { on: "var(--plus)", slow: "var(--need)", away: "var(--err)" };
+export const LINK_COLOR = { on: "var(--plus)", slow: "var(--need)", away: "var(--err)" };
 
-/** The mark a machine without an avatar shows: its system's. */
-const markOf = (m: Machine) => (m.avatar ? `a:${m.id}` : m.os === "windows" || m.os === "darwin" ? m.os : "linux");
-
-/** After a folder group's name: the Bot that brought the machine, its avatar as big as a Bot's in a
- *  session's row, a lamp for its connection and the round trip (or 断开) by it, as the sidebar's
- *  head shows the daemon's; its name on hover, beside the face only where the face does not tell it
- *  from another machine's (no avatar, the same system's mark) (the user, 2026-11-08). Grey once gone. */
-export function MachineTag({ m }: { m: Machine }) {
-  const link = useLink(m);
-  const named = useMachines().some((x) => x.id !== m.id && markOf(x) === markOf(m));
-  const tip = link === "away" ? t("status.offline") : m.online && m.latency ? t("machine.latency", { ms: m.latency }) : t("machine.reconnecting");
-  const said = link === "away" ? t("top.offlineShort") : m.online && m.latency ? `${m.latency} ms` : "";
-  return (
-    <Tip label={`${m.name} · ${tip}`} side="bottom">
-      <span className="ml-2 inline-flex min-w-0 shrink items-center gap-1.5 align-middle text-xs font-normal text-ink-3 tabular-nums">
-        <span className={cn("inline-flex min-w-0 items-center gap-1", link === "away" && "opacity-50 grayscale")}>
-          <MachineFace m={m} size={16} />
-          {named && <span className="truncate text-sm">{m.name}</span>}
-        </span>
-        <span role="img" aria-label={tip} className="size-1.5 shrink-0 rounded-full" style={{ background: LINK_COLOR[link] }} />
-        {said && <span className="shrink-0">{said}</span>}
-      </span>
-    </Tip>
+/** What the session list shows (sidebar.tsx ViewSwitch): null all, "" this machine, else another's
+ *  ID; kept in this browser. The head's "+" opens at the machine shown. */
+const VIEW_KEY = "ir.machineView";
+const viewers = new Set<() => void>();
+export function setView(v: string | null) {
+  keep(VIEW_KEY, v);
+  viewers.forEach((f) => f());
+}
+/** The view, null once its machine is no more listed. */
+export function useView(): string | null {
+  const v = useSyncExternalStore(
+    (f) => (viewers.add(f), () => void viewers.delete(f)),
+    () => kept(VIEW_KEY),
   );
+  const ms = useMachines();
+  return v === null || (v !== "" && !ms.some((m) => m.id === v)) ? null : v;
 }

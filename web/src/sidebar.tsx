@@ -9,7 +9,7 @@
 // and at its foot the colour tags (colors.ts); a group's: rename, its path, 通知. The mouse resting
 // on a row fetches its chat ahead.
 import { Menu } from "@base-ui/react/menu";
-import { Archive, ArchiveRestore, Bot, Check, ChevronRight, Copy, Eye, EyeOff, Folder, FolderOpen, Pencil, Pin, PinOff, Plus, RefreshCw, Square, Workflow as WorkflowIcon } from "lucide-react";
+import { Archive, ArchiveRestore, Bot, Check, ChevronRight, Copy, Eye, EyeOff, Folder, FolderOpen, Monitor, Pencil, Pin, PinOff, Plus, RefreshCw, Square, Workflow as WorkflowIcon } from "lucide-react";
 import { ConfirmIcon, confirmName, confirmTitle } from "./confirmname";
 import { Fragment, lazy, memo, Suspense, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { api } from "./api/client";
@@ -19,14 +19,14 @@ import { ahead, behind } from "./chats";
 import { t, useLang } from "./i18n";
 import { useFlip } from "./motion";
 import { folderLevels, sessionLevels, usePushMenus, wsLevels, type PushLevel } from "./push";
-import { remotePath, type Folder as FolderNode, type Tree, type WsNode } from "./tree";
+import { machineOf, remotePath, type Folder as FolderNode, type Tree, type WsNode } from "./tree";
 import { LinkDot } from "./link";
 import { errText, toast } from "./toast";
 import { useMe, useTerminalList, useUpdate } from "./data";
 import { agentName, ago, Avatar, cn, fine, IconKey, IrMark, keep, kept, Lamp, lampOf, Logo, own, sessionStatusText, statusText, tilde, Tip, titleOf, untitled, useLongPress, useMenuAt, useMinute } from "./ui";
 import { SESSION_DRAG } from "./chat/refs";
 import { useUnread } from "./unread";
-import { MachineBadge, MachineTag, remoteOf, shownPath, useLate, useMachine } from "./machines";
+import { LINK_COLOR, MachineBadge, MachineFace, setView, shownPath, useLate, useLink as useLinkOf, useMachine, useView } from "./machines";
 import { useMachines } from "./store";
 
 const STEP = 18;
@@ -123,12 +123,16 @@ export function Sidebar(p: Props) {
   const [width, setWidth] = useState(() => clampWidth(Number(kept(WIDTH_KEY)) || WIDTH.start));
   useLayoutEffect(() => void document.documentElement.style.setProperty("--sidebar-w", `${p.phone ? 0 : width}px`), [width, p.phone]);
   const [plusOpen, setPlusOpen] = useState<string | null>(null);
+  // The machine the list shows (the head's switch, machines.tsx useView).
+  const view = useView();
+  // All groups, or one machine's (tree.ts lists this machine's first, then each other's).
+  const shownWs = view === null ? p.tree.workspaces : p.tree.workspaces.filter((w) => (w.machine ?? "") === view);
   // A confirmation an agent's ir asked for lights its session's lamp; one of no session listed here
   // is a row of its own at the top (no 需要你 group: the user, 2026-11-08).
   const listed = new Set(p.tree.workspaces.flatMap((w) => w.rows.flatMap((r) => (r.kind === "session" ? [r.s.id] : r.f.sessions.map((s) => s.id)))));
   const asked = new Set(p.confirms.flatMap((c) => (c.session && listed.has(c.session) ? [c.session] : [])));
   const loose = p.confirms.filter((c) => !c.session || !listed.has(c.session));
-  const last = p.tree.workspaces.at(-1);
+  const last = shownWs.at(-1);
   const lastOpen = last ? p.expanded(last.key) && last.rows.length > 0 : loose.length > 0;
   const shape = [loose.map((c) => c.id).join(","), ...p.tree.workspaces.map((w) => `${w.key}:${p.expanded(w.key)}:${w.rows.map((r) => (r.kind === "session" ? r.s.id : `${r.f.key}${p.expanded(r.f.key)}${r.f.sessions.length}`)).join(",")}`), p.expanded("archive"), p.tree.archived.length, [...p.tree.kids.values()].flat().map((s) => s.id).join(","), [...p.tree.runs.values()].flat().map((r) => `${r.id}${p.expanded(`run:${r.id}`)}${r.working.map((s) => s.id)}`).join(",")].join("|");
   useFlip(list, shape);
@@ -170,16 +174,92 @@ export function Sidebar(p: Props) {
     </Fragment>
   );
 
+  // One not shown that needs you, so it is not missed.
+  const unseen = p.tree.workspaces.filter((w) => !shownWs.includes(w)).flatMap((w) => w.rows.flatMap((r) => (r.kind === "session" ? [r.s] : r.f.sessions)));
+  const waits = unseen.some((s) => asked.has(s.id) || lampOf(s) === "waiting");
+  const group = (w: WsNode, i: number, ws: WsNode[]) => {
+    const open = p.expanded(w.key);
+    // A gap after what is open above; folded groups one under another stay close (the user,
+    // 2026-11-08).
+    const prev = ws[i - 1];
+    const apart = prev ? p.expanded(prev.key) && prev.rows.length > 0 : loose.length > 0;
+    // Listed at a machine its folder is not at (its sessions there): its folders by their paths
+    // there, its "+" in the first of them, at that machine.
+    const foreign = (w.machine ?? "") !== (machineOf(w.root) ?? "") && w.id !== 0;
+    const plusAt = foreign ? (w.rows.find((r) => r.kind === "folder")?.f.path ?? w.root) : w.root;
+    return (
+      <div key={w.key} className={apart ? "mt-4" : "mt-1"} role="group">
+        <WsRow
+          flip={`w:${w.key}`}
+          machine={machines.find((m) => m.id === w.machine)}
+          remote={!!w.machine}
+          id={w.id}
+          name={w.name}
+          sessions={w.rows.flatMap((r) => (r.kind === "session" ? [r.s] : r.f.sessions))}
+          root={w.root}
+          hidden={w.hidden}
+          open={open}
+          onToggle={() => p.toggle(w.key)}
+          // Not its count: the "+" that opens a session here, always at the row's end, plain to
+          // see, darker when the row is hovered (the user, 2026-11-06).
+          end={
+            w.id !== 0 &&
+            p.wsPlus(
+              { ...w, root: plusAt },
+              <button type="button" onClick={(e) => e.stopPropagation()} aria-label={t("nav.newHere", { ws: w.name })} className="g-press -mr-1 grid size-6 place-items-center rounded-sm text-ink-3 group-hover:text-ink-2 hover:bg-fill-2 data-popup-open:bg-fill-2 data-popup-open:text-ink-2 pointer-coarse:size-8">
+                <Plus size={15} />
+              </button>,
+              plusOpen === w.key,
+              (o) => setPlusOpen(o ? w.key : null),
+            )
+          }
+        />
+        {open &&
+          w.rows.map((r) =>
+            r.kind === "session" ? (
+              row(r.s, 0, !!w.machine)
+            ) : (
+              <div key={r.f.key} role="group">
+                <FolderRow
+                  f={r.f}
+                  ws={w.id}
+                  label={w.id === 0 || foreign ? <FolderLabel path={r.f.path} /> : r.f.name}
+                  open={p.expanded(r.f.key)}
+                  onToggle={() => p.toggle(r.f.key)}
+                  newHere={() => setPlusOpen(r.f.key)}
+                  // As a workspace's: not its count, the "+" that opens a session in the folder
+                  // (the user, 2026-11-06).
+                  plus={p.wsPlus(
+                    { ...w, key: r.f.key, root: r.f.path },
+                    <button type="button" onClick={(e) => e.stopPropagation()} aria-label={t("nav.newHere", { ws: r.f.name })} className="g-press -mr-1 grid size-6 place-items-center rounded-sm text-ink-3 group-hover:text-ink-2 hover:bg-fill-2 data-popup-open:bg-fill-2 data-popup-open:text-ink-2 pointer-coarse:size-8">
+                      <Plus size={15} />
+                    </button>,
+                    plusOpen === r.f.key,
+                    (o) => setPlusOpen(o ? r.f.key : null),
+                  )}
+                />
+                {p.expanded(r.f.key) && r.f.sessions.map((s) => row(s, 1, !!w.machine))}
+              </div>
+            ),
+          )}
+      </div>
+    );
+  };
+
   // On a phone no head of its own: its keys stand by the sheet's tabs (app.tsx, pager.tsx).
   const head = !p.phone && (
     <div className="flex h-12 shrink-0 items-center gap-0.5 px-2">
       {/* The name at the left, the keys at the right (the user, 2026-11-06). */}
-      <span className="flex min-w-0 flex-1 items-center gap-2 pl-2 select-none">
-        <IrMark size={18} className="text-ink" />
-        <span className="truncate text-base font-semibold tracking-[-0.01em]">Iridium</span>
-        {/* The link's dot and latency, by the name (the user, 2026-11-08). */}
-        <LinkDot className="shrink-0" />
-      </span>
+      {machines.length ? (
+        <ViewSwitch view={view} machines={machines} waits={waits} />
+      ) : (
+        <span className="flex min-w-0 flex-1 items-center gap-2 pl-2 select-none">
+          <IrMark size={18} className="text-ink" />
+          <span className="truncate text-base font-semibold tracking-[-0.01em]">Iridium</span>
+          {/* The link's dot and latency, by the name (the user, 2026-11-08). */}
+          <LinkDot className="shrink-0" />
+        </span>
+      )}
       <HeadKeys {...p} />
     </div>
   );
@@ -192,6 +272,12 @@ export function Sidebar(p: Props) {
           comes back scrolled as it was. */}
       {p.searching && <div className="flex min-h-0 flex-1 flex-col">{p.search}</div>}
       <div ref={list} hidden={p.searching} onScroll={(e) => void (scrolled.current = e.currentTarget.scrollTop)} className="relative min-h-0 flex-1 no-bar overflow-y-auto px-2 pb-3" role="tree" aria-label={t("nav.sessions")}>
+        {/* On a phone, with no head: the switch at the list's top. */}
+        {p.phone && machines.length > 0 && (
+          <div className="flex h-10 items-center">
+            <ViewSwitch view={view} machines={machines} waits={waits} />
+          </div>
+        )}
         {/* 需要你's confirmations: lined up with the groups' folders, apart from the list as a group is. */}
         {loose.length > 0 && (
           <div className="mt-1" role="group">
@@ -215,71 +301,7 @@ export function Sidebar(p: Props) {
             ))}
           </div>
         )}
-        {p.tree.workspaces.map((w, i) => {
-          const open = p.expanded(w.key);
-          // A gap after what is open above; folded groups one under another stay close (the user,
-          // 2026-11-08).
-          const prev = p.tree.workspaces[i - 1];
-          const apart = prev ? p.expanded(prev.key) && prev.rows.length > 0 : loose.length > 0;
-          // A group at another machine: the Bot that brought it after its name.
-          const at = remoteOf(w.root, machines)?.m;
-          return (
-            <div key={w.key} className={apart ? "mt-4" : "mt-1"} role="group">
-              <WsRow
-                flip={`w:${w.key}`}
-                id={w.id}
-                name={w.name}
-                sessions={w.rows.flatMap((r) => (r.kind === "session" ? [r.s] : r.f.sessions))}
-                root={w.root}
-                machine={at}
-                hidden={w.hidden}
-                open={open}
-                onToggle={() => p.toggle(w.key)}
-                // Not its count: the "+" that opens a session here, always at the row's end, plain to
-                // see, darker when the row is hovered (the user, 2026-11-06).
-                end={
-                  w.id !== 0 &&
-                  p.wsPlus(
-                    w,
-                    <button type="button" onClick={(e) => e.stopPropagation()} aria-label={t("nav.newHere", { ws: w.name })} className="g-press -mr-1 grid size-6 place-items-center rounded-sm text-ink-3 group-hover:text-ink-2 hover:bg-fill-2 data-popup-open:bg-fill-2 data-popup-open:text-ink-2 pointer-coarse:size-8">
-                      <Plus size={15} />
-                    </button>,
-                    plusOpen === w.key,
-                    (o) => setPlusOpen(o ? w.key : null),
-                  )
-                }
-              />
-              {open &&
-                w.rows.map((r) =>
-                  r.kind === "session" ? (
-                    row(r.s, 0, !!at)
-                  ) : (
-                    <div key={r.f.key} role="group">
-                      <FolderRow
-                        f={r.f}
-                        ws={w.id}
-                        label={w.id === 0 ? <FolderLabel path={r.f.path} /> : r.f.name}
-                        open={p.expanded(r.f.key)}
-                        onToggle={() => p.toggle(r.f.key)}
-                        newHere={() => setPlusOpen(r.f.key)}
-                        // As a workspace's: not its count, the "+" that opens a session in the folder
-                        // (the user, 2026-11-06).
-                        plus={p.wsPlus(
-                          { ...w, key: r.f.key, root: r.f.path },
-                          <button type="button" onClick={(e) => e.stopPropagation()} aria-label={t("nav.newHere", { ws: r.f.name })} className="g-press -mr-1 grid size-6 place-items-center rounded-sm text-ink-3 group-hover:text-ink-2 hover:bg-fill-2 data-popup-open:bg-fill-2 data-popup-open:text-ink-2 pointer-coarse:size-8">
-                            <Plus size={15} />
-                          </button>,
-                          plusOpen === r.f.key,
-                          (o) => setPlusOpen(o ? r.f.key : null),
-                        )}
-                      />
-                      {p.expanded(r.f.key) && r.f.sessions.map((s) => row(s, 1, !!at || !!remoteOf(r.f.path, machines)))}
-                    </div>
-                  ),
-                )}
-            </div>
-          );
-        })}
+        {shownWs.map(group)}
         {p.tree.archived.length > 0 && (
           <div className={lastOpen ? "mt-4" : "mt-1"} role="group">
             <Row depth={0} flip="archive" head expanded={p.expanded("archive")} onClick={() => p.toggle("archive")} icon={<TrashLid open={p.expanded("archive")} />} label={<span className="text-ink-2">{t("nav.archive")}</span>} end={<Count n={p.tree.archived.length} faint />} />
@@ -459,7 +481,7 @@ function Row({ depth, flip, chevron, expanded, icon, label, end, selected, onCli
 /** A group's row; its menu (right click, long-press): its sessions archived, as a folder's (the
  *  user, 2026-11-08: a group is a folder now), rename, its path copied, open or folded, 通知 while
  *  push is on. 未归类 itself (id 0): its sessions archived and its 通知. */
-function WsRow({ flip, id, name, root, sessions, machine, hidden, open, onToggle, end }: { flip: string; id: number; name: string; root: string; sessions: Session[]; machine?: Machine; hidden?: boolean; open: boolean; onToggle: () => void; end: ReactNode }) {
+function WsRow({ flip, id, name, root, sessions, machine, remote, hidden, open, onToggle, end }: { flip: string; id: number; name: string; root: string; sessions: Session[]; machine?: Machine; remote?: boolean; hidden?: boolean; open: boolean; onToggle: () => void; end: ReactNode }) {
   const machines = useMachines();
   const push = usePushMenus();
   const me = useMe().data;
@@ -487,14 +509,6 @@ function WsRow({ flip, id, name, root, sessions, machine, hidden, open, onToggle
             : { icon: <EyeOff size={15} />, label: t("menu.hide"), run: () => void api.patchWorkspace(id, { hidden: true }).then(() => toast(t("toast.hidden", { ws: name })), failed) },
         ]
       : []),
-    // A group at a machine with dsh: what its dsh offers read again now, its workspaces and
-    // sessions, models and presets with DSH Desktop's settings (the user, 2026-11-09).
-    ...(machine?.agents.some((a) => a.agent === "dsh")
-      ? [{ icon: <RefreshCw size={15} />, label: t("menu.syncDsh"), run: () => {
-          toast(t("toast.syncing"));
-          void api.dshSync(machine.id).then(() => toast(t("toast.synced", { m: machine.name })), (e: unknown) => toast(t("err.sync"), { error: true, description: errText(e) }));
-        } }]
-      : []),
   ];
   const menu = items.length > 0 || push;
   // Its "+" popover is a portal, but React events bubble through it: a press in it must not fold
@@ -507,7 +521,7 @@ function WsRow({ flip, id, name, root, sessions, machine, hidden, open, onToggle
         // No chevron, on a phone either (the user, 2026-11-08): its sessions shown under it, or not.
         expanded={open}
         reveal
-        icon={<WsMark open={open} remote={remotePath(root)} />}
+        icon={<WsMark open={open} remote={!!remote} />}
         onClick={() => !renaming && onToggle()}
         label={
           renaming ? (
@@ -515,7 +529,14 @@ function WsRow({ flip, id, name, root, sessions, machine, hidden, open, onToggle
           ) : (
             <span className="flex min-w-0 items-center">
               <span className="truncate font-medium">{name}</span>
-              {machine && <MachineTag m={machine} />}
+              {/* At another machine: its Bot's face after the name, its link said at the head. */}
+              {machine && (
+                <Tip label={machine.name} side="bottom">
+                  <span className="ml-2 inline-flex shrink-0">
+                    <MachineFace m={machine} size={16} className={cn(!machine.online && "opacity-50 grayscale")} />
+                  </span>
+                </Tip>
+              )}
             </span>
           )
         }
@@ -551,18 +572,86 @@ function WsRow({ flip, id, name, root, sessions, machine, hidden, open, onToggle
   );
 }
 
-/** A group's mark: a folder as a folder's in it is (the user, 2026-11-08: a group is only a folder),
- *  shut or open as the group is. */
-/** A folder in 未归类 by its path: ~ for home; at another machine, its Bot after it. */
-function FolderLabel({ path }: { path: string }) {
-  const sp = shownPath(path, useMachines());
-  if (!sp.m) return <>{tilde(path)}</>;
+/** The head's name, while another machine's Bot is linked (the user, 2026-11-09): a press opens a
+ *  menu of what the list shows, 全部, 本机 or one other machine (its face, name, link lamp and round
+ *  trip). Showing one, the head says that machine: Iridium's mark, then its name, face and link
+ *  where Iridium's are, its "+" opening there. An amber lamp after it while a session not shown needs you. 同步 DSH at the
+ *  menu's foot while a machine with dsh is shown. */
+function ViewSwitch({ view, machines, waits }: { view: string | null; machines: Machine[]; waits: boolean }) {
+  const m = view ? machines.find((x) => x.id === view) : undefined;
+  const pick = (v: string | null, icon: ReactNode, label: ReactNode, i: number) => (
+    <Menu.Item key={v ?? "all"} onClick={() => setView(v)} style={{ "--i": i } as CSSProperties} className="flex h-8 cursor-default items-center gap-2.5 rounded-md px-2.5 text-base outline-none select-none data-highlighted:bg-fill pointer-coarse:h-11">
+      <span className="grid w-4 place-items-center text-ink-2">{icon}</span>
+      <span className="flex min-w-0 flex-1 items-center gap-2">{label}</span>
+      {view === v && <Check size={14} className="text-ink-2" />}
+    </Menu.Item>
+  );
   return (
-    <span className="flex min-w-0 items-center">
-      <span className="truncate">{sp.label}</span>
-      <MachineTag m={sp.m} />
+    <Menu.Root>
+      <Menu.Trigger className="g-press -my-1 flex min-w-0 flex-1 items-center gap-2 rounded-md py-1 pl-2 text-left outline-none select-none hover:bg-fill data-popup-open:bg-fill">
+        {/* Iridium's mark stays; showing a machine, its face after its name, as a remote group's. */}
+        <IrMark size={18} className="text-ink" />
+        <span className="truncate text-base font-semibold tracking-[-0.01em]">{m ? m.name : view === "" ? t("new.local") : "Iridium"}</span>
+        {m && <MachineFace m={m} size={16} />}
+        {m ? <MachineLink m={m} /> : <LinkDot className="shrink-0" />}
+        {waits && <Lamp status="waiting" />}
+      </Menu.Trigger>
+      <Menu.Portal>
+        <Menu.Positioner side="bottom" align="start" sideOffset={4} collisionPadding={8} className="z-50">
+          <Menu.Popup finalFocus={false} className="g-unfold glass thick float min-w-56 rounded-lg p-1.5 text-ink outline-none">
+            <div className="g-stagger flex flex-col">
+              {pick(null, <IrMark size={14} className="text-ink-2" />, t("nav.all"), 0)}
+              {pick("", <Monitor size={14} />, t("new.local"), 1)}
+              {machines.map((x, i) =>
+                pick(
+                  x.id,
+                  <MachineFace m={x} size={16} />,
+                  <>
+                    <span className="truncate">{x.name}</span>
+                    <MachineLink m={x} />
+                  </>,
+                  i + 2,
+                ),
+              )}
+              {m?.agents.some((a) => a.agent === "dsh") && (
+                <Menu.Item
+                  onClick={() => {
+                    toast(t("toast.syncing"));
+                    void api.dshSync(m.id).then(() => toast(t("toast.synced", { m: m.name })), (e: unknown) => toast(t("err.sync"), { error: true, description: errText(e) }));
+                  }}
+                  className="mt-1.5 flex h-8 cursor-default items-center gap-2.5 rounded-md border-t border-edge px-2.5 pt-0.5 text-base outline-none select-none data-highlighted:bg-fill pointer-coarse:h-11"
+                >
+                  <span className="grid w-4 place-items-center text-ink-2"><RefreshCw size={15} /></span>
+                  {t("menu.syncDsh")}
+                </Menu.Item>
+              )}
+            </div>
+          </Menu.Popup>
+        </Menu.Positioner>
+      </Menu.Portal>
+    </Menu.Root>
+  );
+}
+
+/** A machine's link as the head shows the daemon's: a lamp, the round trip or 断开. */
+function MachineLink({ m }: { m: Machine }) {
+  const link = useLinkOf(m);
+  const said = link === "away" ? t("status.offline") : m.online && m.latency ? t("machine.latency", { ms: m.latency }) : t("machine.reconnecting");
+  return (
+    <span className="flex shrink-0 items-center gap-1.5 text-xs font-normal text-ink-3 tabular-nums">
+      <span role="img" aria-label={said} className="size-1.5 rounded-full" style={{ background: LINK_COLOR[link] }} />
+      {link === "away" ? t("top.offlineShort") : m.online && m.latency ? `${m.latency} ms` : ""}
     </span>
   );
+}
+
+/** A group's mark: a folder as a folder's in it is (the user, 2026-11-08: a group is only a folder),
+ *  shut or open as the group is. */
+/** A folder by its path, in 未归类 or a group listed at another machine: ~ for home. */
+function FolderLabel({ path }: { path: string }) {
+  const sp = shownPath(path, useMachines());
+  // At another machine: its path there; the group's mark says which.
+  return <>{sp.m ? sp.label : tilde(path)}</>;
 }
 
 function WsMark({ open, remote }: { open: boolean; remote: boolean }) {
