@@ -372,6 +372,7 @@ export const en: Dict = {
   "settings.terminalsRow": "Manage terminals",
   "settings.downloaded": "Downloaded",
   "settings.checkFailed": "Update failed",
+  "settings.version": "Version",
   "settings.check": "Check for updates",
   "settings.checking": "Checking",
   "settings.upToDate": "up to date",

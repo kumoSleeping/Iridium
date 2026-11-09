@@ -20,6 +20,8 @@ const TONE: Record<Kind, string> = {
   num: "text-(--tag-orange)",
   flag: "text-ink-3",
   op: "text-(--tag-red)",
+  plus: "text-(--plus)",
+  minus: "text-(--minus)",
 };
 
 /** Code in its colours; a language not known, as it is. */

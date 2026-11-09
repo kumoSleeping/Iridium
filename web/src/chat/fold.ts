@@ -216,11 +216,19 @@ export function foldLine(steps: Step[]): Run[] {
   return runs;
 }
 
-/** The sorts of shell command the calls by this name in a fold run, in order: one when they all
- *  run the same sort (or none, another tool's), else each call's, for an icon each. */
-export function runCmds(steps: Step[], name: string): (Cmd | undefined)[] {
-  const cs = steps.filter((s) => s.kind === "tool" && s.name === name).map(cmdOfCall);
-  return new Set(cs).size === 1 ? cs.slice(0, 1) : cs;
+/** The sorts of shell command the calls by this name in a fold run, each once with how many, in the
+ *  order first run: one when they all run the same sort (or none, another tool's), else an icon
+ *  each, ×n by it for more than one ("🔍×2 📄 Bash ×3", the user, 2026-11-09). */
+export function runCmds(steps: Step[], name: string): { cmd: Cmd | undefined; n: number }[] {
+  const out: { cmd: Cmd | undefined; n: number }[] = [];
+  for (const s of steps) {
+    if (s.kind !== "tool" || s.name !== name) continue;
+    const cmd = cmdOfCall(s);
+    const g = out.find((x) => x.cmd === cmd);
+    if (g) g.n++;
+    else out.push({ cmd, n: 1 });
+  }
+  return out;
 }
 
 /** All the lines a fold's runs changed; undefined for none. */

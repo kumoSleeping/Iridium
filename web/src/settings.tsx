@@ -9,7 +9,7 @@
 // Changed is saved at once (GET/PUT /api/settings). Reaping idle agents and going on after a crash
 // or a quota are not here: as the config file says, by default 1h and on (the user, 2026-11-07).
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, LoaderCircle, LogOut, MonitorDown, RefreshCw, Share, SquarePlus } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, LoaderCircle, LogOut, MonitorDown, RefreshCw, Share, SquarePlus } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { api, ApiError } from "./api/client";
 import type { PushEvents, PushState, Settings, SettingsPatch } from "./api/types.gen";
@@ -113,7 +113,6 @@ export function SettingsPage({ theme, setTheme, initial = "main" }: { theme: The
       {/* No head: the profile says whose it is, the phone's tab what it is (the user, 2026-11-08). */}
       <div className="no-bar min-h-0 flex-1 overflow-y-auto pt-2.5 pb-4">
         <div className="flex flex-col px-3">
-          <UpdateRow />
           <Profile onPicture={(url) => (setPicture(url), setPage("crop"))} />
           <Item label={t("me.theme")}>
             <ThemeSwitch theme={theme} setTheme={setTheme} />
@@ -167,7 +166,7 @@ export function SettingsPage({ theme, setTheme, initial = "main" }: { theme: The
               ]}
             />
           </Item>
-          {manages && <UpdateItem />}
+          <UpdateItem manages={manages} />
           {me && !me.local && <SignOut />}
         </div>
       </div>
@@ -255,15 +254,18 @@ const mb = (n: number) => (n >= 1 << 20 ? `${(n / (1 << 20)).toFixed(1)} MB` : `
  *  asks for one (the daemon looks once a day by itself). */
 const STALE = 3_600_000;
 
-/** 检查更新 (managers only, with a source): one key that looks and, finding a newer release,
- *  downloads it, puts it in place and restarts, asking nothing more; the page then loads the new
- *  build (the user, 2026-11-08). Beside it how that goes: 检查中, 下载中 37%, 重启中, 已是最新 · when,
- *  更新失败 (the error on hover). Release builds download a newer one ahead by themselves; there is no
- *  switch for it. */
-function UpdateItem() {
+/** 检查更新, the update in one row (the user, 2026-11-09: no notice above the profile). Up to date,
+ *  检查更新 with when it last looked and a key that looks and, finding a newer release, downloads it,
+ *  puts it in place and restarts, asking nothing more; the page then loads the new build (the user,
+ *  2026-11-08). A newer one out, 版本 with its version and the 更新 key, or how far its
+ *  download is, a hairline along the row's foot; pressing the title opens its notes, the current
+ *  version and the size under it. Those who do not manage see the versions, no key. Release builds download a newer one ahead
+ *  by themselves; there is no switch for it. */
+function UpdateItem({ manages }: { manages: boolean }) {
   const lang = useLang();
   const u = useUpdate().data;
   const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
   const working = u?.phase === "checking" || u?.phase === "downloading" || u?.phase === "restarting";
   const look = () => {
     setBusy(true);
@@ -283,35 +285,75 @@ function UpdateItem() {
     );
   };
   // Opened with the last look stale: look now, saying nothing if it fails.
-  const stale = !!u?.source && u.phase === "idle" && Date.now() - (u.checkedAt ?? 0) > STALE;
+  const stale = manages && !!u?.source && u.phase === "idle" && Date.now() - (u.checkedAt ?? 0) > STALE;
   useEffect(() => {
     if (stale) look();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stale]);
-  if (!u?.source) return null;
-  const checked = u.checkedAt ? new Date(u.checkedAt).toLocaleString(lang === "zh" ? "zh-CN" : "en", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
+  if (!u) return null;
+  // Kept while the daemon restarts (available is off by then): the row does not change back as the
+  // new build loads.
+  const newer = u.available || u.phase === "restarting";
+  if (!(manages && u.source) && !newer) return null;
   const pct = u.phase === "downloading" && u.size ? Math.min(99, Math.floor(((u.got ?? 0) * 100) / u.size)) : null;
-  const status =
-    u.phase === "restarting"
-      ? t("settings.restarting")
-      : u.phase === "downloading"
-        ? pct !== null
-          ? `${t("settings.downloading")} ${pct}%`
-          : t("settings.downloading")
-        : u.phase === "checking" || busy
-          ? t("settings.checking")
-          : u.phase === "failed"
-            ? t("settings.checkFailed")
-            : u.available
-              ? t("settings.updateTo", { v: u.latest ?? "" })
-              : checked
-                ? `${t("settings.upToDate")} · ${checked}`
-                : "";
   const spin = busy || working;
+  const failed = u.phase === "failed" && u.error;
+
+  if (newer) {
+    // The release's notes start with its own version ("- v0.1.31: …"): the row says it already.
+    const notes = u.notes?.replace(/^\s*-?\s*v?\d+\.\d+\.\d+:\s*/, "").trim();
+    const label = (
+      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="g-press -ml-1 flex items-center gap-1.5 rounded-md px-1 py-0.5 whitespace-nowrap hover:bg-fill">
+        <span className="size-1.5 shrink-0 rounded-full bg-err" aria-hidden />
+        {t("settings.version")}
+        <ChevronDown size={14} className={cn("text-ink-3 transition-transform duration-(--dur-2)", open && "rotate-180")} />
+      </button>
+    );
+    return (
+      <div className="relative">
+        <Item label={label}>
+          <span className="flex items-center gap-2">
+            <span className="text-xs font-medium text-ink tabular-nums">{u.latest}</span>
+            {pct !== null ? (
+              <span className="w-9 text-right text-xs text-ink-3 tabular-nums">{pct}%</span>
+            ) : manages ? (
+              <Tip label={failed ? t("settings.updateFailed", { e: u.error ?? "" }) : t("settings.updateTo", { v: u.latest ?? "" })}>
+                <button type="button" disabled={spin} onClick={update} className="g-press flex h-7 items-center gap-1.5 rounded-md bg-ink px-2.5 text-sm font-medium text-on-ink disabled:opacity-50">
+                  {spin && <LoaderCircle size={13} className="animate-spin" />}
+                  {u.phase === "restarting" ? t("settings.restarting") : t("settings.update")}
+                </button>
+              </Tip>
+            ) : null}
+          </span>
+        </Item>
+        {/* Along the row's foot, taking no room. */}
+        {pct !== null && (
+          <div className="g-fade absolute inset-x-0 bottom-0 h-0.5 overflow-hidden rounded-full bg-fill" aria-hidden>
+            <div className="h-full bg-ink-3 transition-[width] duration-300 ease-out" style={{ width: `${pct}%` }} />
+          </div>
+        )}
+        <div aria-hidden={!open || undefined} inert={!open || undefined} className={cn("grid transition-[grid-template-rows,opacity] duration-(--dur-3) ease-(--ease-out)", open ? "grid-rows-[1fr]" : "grid-rows-[0fr] opacity-0")}>
+          <div className="min-h-0 overflow-hidden">
+            <div className="flex flex-col gap-1 pb-2">
+              {notes && <p className="m-0 max-h-40 overflow-y-auto text-xs whitespace-pre-wrap text-ink-2">{notes}</p>}
+              <p className="m-0 text-xs break-all text-ink-3 tabular-nums">
+                {t("settings.current", { v: u.current })}
+                {u.size ? ` · ${mb(u.size)}` : null}
+                {failed ? <span className="text-err"> · {t("settings.updateFailed", { e: u.error ?? "" })}</span> : null}
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const checked = u.checkedAt ? new Date(u.checkedAt).toLocaleString(lang === "zh" ? "zh-CN" : "en", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
+  const status = u.phase === "checking" || busy ? t("settings.checking") : u.phase === "failed" ? t("settings.checkFailed") : checked ? `${t("settings.upToDate")} · ${checked}` : "";
   return (
     <Item label={t("settings.check")}>
       <span className="flex items-center gap-1">
-        <Tip label={u.phase === "failed" && u.error ? u.error : status}>
+        <Tip label={failed ? u.error : status}>
           <span className={`max-w-40 truncate text-xs tabular-nums ${u.phase === "failed" ? "text-err" : "text-ink-3"}`}>{status}</span>
         </Tip>
         <IconKey label={t("settings.check")} disabled={spin} onClick={update} className="size-7">
@@ -319,66 +361,6 @@ function UpdateItem() {
         </IconKey>
       </span>
     </Item>
-  );
-}
-
-/** The update (the carried "update"): once a newer one is out, at the top a small notice with its
- *  version and size, its notes and the 更新 key, then how downloading and installing go. */
-function UpdateRow() {
-  const u = useUpdate().data;
-  const me = useMe().data;
-  const manages = !!me && (me.local || me.kind === "panel");
-  const [busy, setBusy] = useState(false);
-  if (!u) return null;
-  // Kept while the daemon restarts (available is off by then): the dialog does not shrink as it
-  // goes, and grow again as the new build loads.
-  if (!u.available && u.phase !== "restarting") return null;
-  const apply = () => {
-    setBusy(true);
-    expectUpgrade();
-    void api.applyUpdate().then(
-      () => setBusy(false),
-      (e) => (setBusy(false), expectUpgrade(false), toast(t("err.update"), { error: true, description: errText(e) })),
-    );
-  };
-  const working = u.phase === "checking" || u.phase === "downloading" || u.phase === "restarting";
-  const pct = u.phase === "downloading" && u.size ? Math.min(99, Math.floor(((u.got ?? 0) * 100) / u.size)) : null;
-  const phase =
-    u.phase === "downloading" ? (pct !== null ? `${t("settings.downloading")} ${pct}%` : t("settings.downloading")) : u.phase === "restarting" ? t("settings.restarting") : u.phase === "checking" ? t("settings.checking") : u.ready ? t("settings.downloaded") : "";
-  return (
-    <section className="g-pop relative flex flex-col gap-2 overflow-hidden rounded-md p-2.5 shadow-[0_0_0_1px_var(--edge)]" aria-label={t("settings.updateReady")}>
-      <div className="flex items-center gap-3">
-        <span className="size-2 shrink-0 rounded-full bg-err" aria-hidden />
-        <span className="min-w-0 flex-1 truncate text-sm font-semibold tabular-nums">
-          {t("settings.updateTo", { v: u.latest ?? "" })}
-        </span>
-        {phase && <span className="shrink-0 text-xs text-ink-3 tabular-nums">{phase}</span>}
-        {manages && (
-          <button
-            type="button"
-            disabled={busy || working}
-            onClick={apply}
-            className="g-press flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-ink px-3 text-sm font-medium text-on-ink disabled:opacity-50"
-          >
-            {(busy || u.phase === "restarting") && <LoaderCircle size={14} className="animate-spin" />}
-            {t("settings.update")}
-          </button>
-        )}
-      </div>
-      {/* Along the card's foot, taking no room: the card, and the dialog fitted to it, keep their
-          height as the download begins and ends. */}
-      {u.phase === "downloading" && pct !== null && (
-        <div className="g-fade absolute inset-x-0 bottom-0 h-0.5 bg-fill" aria-hidden>
-          <div className="h-full bg-ink-3 transition-[width] duration-300 ease-out" style={{ width: `${pct}%` }} />
-        </div>
-      )}
-      {u.notes && <p className="m-0 max-h-40 overflow-y-auto text-sm whitespace-pre-wrap text-ink-2">{u.notes}</p>}
-      <p className="m-0 text-xs text-ink-3 tabular-nums">
-        {t("settings.current", { v: u.current })}
-        {u.size ? ` · ${mb(u.size)}` : null}
-        {u.phase === "failed" && u.error ? <span className="text-err"> · {t("settings.updateFailed", { e: u.error })}</span> : null}
-      </p>
-    </section>
   );
 }
 

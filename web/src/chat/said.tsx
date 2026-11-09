@@ -5,7 +5,7 @@
 // peer sent; Iridium's own lines
 // centred and faint; the agent's words as Markdown with the files they name; tool calls and
 // thoughts folded to a line.
-import { Archive, ArchiveRestore, ArrowUpRight, BookOpen, Bot, BotMessageSquare, ChartColumn, Check, ChevronRight, Clock, Copy, Cpu, FoldVertical, CircleStop, CircleX, CloudDownload, CloudUpload, Earth, FileCode, FileDiff, FilePen, Files as FilesIcon, FileText, FolderGit2, FlaskConical, FolderOpen, Folders, GitBranch, GitCommitHorizontal, GitPullRequest, Globe, Hammer, History, Hourglass, KeyRound, Laptop, List, ListChecks, LoaderCircle, LockKeyhole, MessageCircleQuestionMark, MessageSquarePlus, Monitor, MonitorSmartphone, Network, Package, PencilLine, Plug, RotateCcw, RotateCw, Search, Send, ServerCog, Smartphone, SquareTerminal, Trash2, UserRound, Workflow as WorkflowIcon, Wrench, X, type LucideIcon } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowUpRight, BookOpen, Bot, BotMessageSquare, ChartColumn, Check, ChevronRight, CircleStop, CircleX, Clock, CloudDownload, CloudUpload, Copy, Cpu, Earth, FileCode, FileDiff, FilePen, Files as FilesIcon, FileText, FlaskConical, FolderGit2, FolderOpen, Folders, FoldVertical, GitBranch, GitCommitHorizontal, GitPullRequest, Globe, Hammer, History, Hourglass, KeyRound, Laptop, List, ListChecks, LoaderCircle, LockKeyhole, MessageCircleQuestionMark, MessageSquarePlus, Monitor, MonitorSmartphone, Network, Package, PencilLine, Plug, RotateCcw, RotateCw, Search, Send, ServerCog, Smartphone, SquareTerminal, Terminal, Trash2, type LucideIcon, UserRound, Workflow as WorkflowIcon, Wrench, X } from "lucide-react";
 import { Children, forwardRef, memo, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Popover } from "@base-ui/react/popover";
 import { api } from "../api/client";
@@ -17,7 +17,7 @@ import { useHome } from "../data";
 import { LocalMark } from "../me";
 import { go } from "../route";
 import { Files, Picture, previews, size } from "./files";
-import { cmdOfCall, type Cmd } from "./cmd";
+import { cmdOfCall, isShell, type Cmd } from "./cmd";
 import { argOf, diffSum, foldLine, foldSaid, kindOf, runCmds, type Diff, type Kind, type Shown, type Step, type Tool } from "./fold";
 import { langOf, type Lang } from "./hl";
 import { Code, Markdown } from "./markdown";
@@ -390,9 +390,11 @@ const CMDS: Record<Cmd, LucideIcon> = {
   wait: Hourglass,
   stop: CircleStop,
 };
-export const KindIcon = ({ kind, cmd, failed, size = 14, className }: { kind: Kind; cmd?: Cmd; failed?: boolean; size?: number; className?: string }) => {
+/** shell: a shell's call, whose command is of no known sort: a shell's own glyph (the user,
+ *  2026-11-09). */
+export const KindIcon = ({ kind, cmd, shell, failed, size = 14, className }: { kind: Kind; cmd?: Cmd; shell?: boolean; failed?: boolean; size?: number; className?: string }) => {
   const [KindGlyph, hue] = KINDS[kind];
-  const Icon = (kind === "command" && cmd && CMDS[cmd]) || KindGlyph;
+  const Icon = (kind === "command" && cmd && CMDS[cmd]) || (shell ? Terminal : KindGlyph);
   const tint = !failed && hue !== undefined;
   return <Icon size={size} className={cn("shrink-0", failed ? "text-err" : tint ? "k-tint" : "text-ink-3", className)} style={tint ? ({ "--k-h": hue } as CSSProperties) : undefined} aria-hidden />;
 };
@@ -419,8 +421,8 @@ function StepLine({ s, cwd }: { s: Step; cwd?: string }) {
   const a = argOf(s, cwd);
   return (
     <>
-      <KindIcon kind={kindOf(s.name)} cmd={cmdOfCall(s)} failed={failed(s)} />
-      <span className="shrink-0 text-ink-2">{s.name}</span>
+      <KindIcon kind={kindOf(s.name)} cmd={cmdOfCall(s)} shell={isShell(s.name)} failed={failed(s)} />
+      {!isShell(s.name) && <span className="shrink-0 text-ink-2">{s.name}</span>}
       <span className={cn("min-w-0 truncate", a.code ? "font-mono text-xs" : "text-xs")}>{a.arg}</span>
       {a.diff && !failed(s) && <DiffStat d={a.diff} />}
       {failed(s) && <CircleX size={13} className="shrink-0 text-err" aria-label={t("msg.failed")} />}
@@ -445,11 +447,15 @@ function Fold({ steps, session, cwd }: { steps: Step[]; session: string; cwd: st
         <span className="min-w-0 truncate">
           {runs.map((r, i) => (
             <span key={i} className={cn(i > 0 && "ml-3")}>
-              {(r.name ? runCmds(steps, r.name) : [undefined]).map((c, j, cs) => (
-                <KindIcon key={j} kind={r.name ? kindOf(r.name) : "thinking"} cmd={c} className={cn("inline-block align-[-2.5px]", j < cs.length - 1 ? "mr-0.5" : "mr-2")} />
+              {(r.name ? runCmds(steps, r.name) : [{ cmd: undefined, n: 1 }]).map((g, j, gs) => (
+                <span key={j} className={cn("inline-block", j < gs.length - 1 ? "mr-1.5" : "mr-2")}>
+                  <KindIcon kind={r.name ? kindOf(r.name) : "thinking"} cmd={g.cmd} shell={isShell(r.name)} className="inline-block align-[-2.5px]" />
+                  {(gs.length > 1 || isShell(r.name)) && g.n > 1 && <span className="text-xs tabular-nums">×{g.n}</span>}
+                </span>
               ))}
-              <span className="text-ink-2">{r.name || t("msg.thinking")}</span>
-              {r.n > 1 && <span className="tabular-nums"> ×{r.n}</span>}
+              {/* A shell's run is its icons alone, each with how many (the user, 2026-11-09). */}
+              {!isShell(r.name) && <span className="text-ink-2">{r.name || t("msg.thinking")}</span>}
+              {!isShell(r.name) && r.n > 1 && <span className="tabular-nums"> ×{r.n}</span>}
             </span>
           ))}
         </span>
@@ -627,7 +633,7 @@ function Clipped({ text, length, at, session, error, prose, fields, cap }: { tex
   const shown = whole ?? text;
   return (
     <div className="grid min-w-0 gap-1">
-      {prose ? <Markdown text={shown} className="text-sm text-ink-2" /> : fields ? <Fields text={shown} /> : <Pre text={pretty(shown)} error={error} cap={cap} />}
+      {prose ? <Markdown text={shown} className="text-sm text-ink-2" /> : fields ? <Fields text={shown} /> : <Pre text={pretty(shown)} error={error} cap={cap} lang="out" />}
       {length !== undefined && length > 0 && whole === undefined && (
         <button type="button" onClick={more} disabled={state === "busy"} className="g-press justify-self-start rounded-sm text-xs text-ink-3 underline decoration-ink-4 underline-offset-2 hover:text-ink">
           {state === "busy" ? <LoaderCircle size={12} className="inline animate-spin" /> : t("msg.whole", { n: length })}
@@ -660,8 +666,8 @@ export function Running({ tool, cwd }: { tool: Tool; cwd: string }) {
   const secs = tool.time ? Math.max(0, Math.round((now - tool.time) / 1000)) : null;
   return (
     <div className="flex h-7 min-w-0 items-center gap-2 text-sm" aria-live="off">
-      <KindIcon kind={kindOf(tool.name)} cmd={cmdOfCall(tool)} />
-      <span className="shine shrink-0">{tool.name}</span>
+      <KindIcon kind={kindOf(tool.name)} cmd={cmdOfCall(tool)} shell={isShell(tool.name)} />
+      {!isShell(tool.name) && <span className="shine shrink-0">{tool.name}</span>}
       <span className={cn("shine min-w-0 truncate", a.code ? "font-mono text-xs" : "text-xs")}>{a.arg}</span>
       {secs !== null && <span className="ml-auto shrink-0 text-xs text-ink-3 tabular-nums">{secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m${secs % 60}s`}</span>}
     </div>
