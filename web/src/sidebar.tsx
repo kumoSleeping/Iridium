@@ -509,6 +509,15 @@ function WsRow({ flip, id, name, root, sessions, machine, remote, hidden, open, 
             : { icon: <EyeOff size={15} />, label: t("menu.hide"), run: () => void api.patchWorkspace(id, { hidden: true }).then(() => toast(t("toast.hidden", { ws: name })), failed) },
         ]
       : []),
+    // A group at a machine with dsh: what its dsh offers read again now, its workspaces and
+    // sessions, models and presets with DSH Desktop's settings (the user, 2026-11-09: here, not in
+    // the head's switch).
+    ...(machine?.agents.some((a) => a.agent === "dsh")
+      ? [{ icon: <RefreshCw size={15} />, label: t("menu.syncDsh"), run: () => {
+          toast(t("toast.syncing"));
+          void api.dshSync(machine.id).then(() => toast(t("toast.synced", { m: machine.name })), (e: unknown) => toast(t("err.sync"), { error: true, description: errText(e) }));
+        } }]
+      : []),
   ];
   const menu = items.length > 0 || push;
   // Its "+" popover is a portal, but React events bubble through it: a press in it must not fold
@@ -575,8 +584,8 @@ function WsRow({ flip, id, name, root, sessions, machine, remote, hidden, open, 
 /** The head's name, while another machine's Bot is linked (the user, 2026-11-09): a press opens a
  *  menu of what the list shows, 全部, 本机 or one other machine (its face, name, link lamp and round
  *  trip). Showing one, the head says that machine: Iridium's mark, then its name, face and link
- *  where Iridium's are, its "+" opening there. An amber lamp after it while a session not shown needs you. 同步 DSH at the
- *  menu's foot while a machine with dsh is shown. */
+ *  where Iridium's are, its "+" opening there. An amber lamp after it while a session not shown
+ *  needs you. */
 function ViewSwitch({ view, machines, waits }: { view: string | null; machines: Machine[]; waits: boolean }) {
   const m = view ? machines.find((x) => x.id === view) : undefined;
   const pick = (v: string | null, icon: ReactNode, label: ReactNode, i: number) => (
@@ -612,18 +621,6 @@ function ViewSwitch({ view, machines, waits }: { view: string | null; machines: 
                   </>,
                   i + 2,
                 ),
-              )}
-              {m?.agents.some((a) => a.agent === "dsh") && (
-                <Menu.Item
-                  onClick={() => {
-                    toast(t("toast.syncing"));
-                    void api.dshSync(m.id).then(() => toast(t("toast.synced", { m: m.name })), (e: unknown) => toast(t("err.sync"), { error: true, description: errText(e) }));
-                  }}
-                  className="mt-1.5 flex h-8 cursor-default items-center gap-2.5 rounded-md border-t border-edge px-2.5 pt-0.5 text-base outline-none select-none data-highlighted:bg-fill pointer-coarse:h-11"
-                >
-                  <span className="grid w-4 place-items-center text-ink-2"><RefreshCw size={15} /></span>
-                  {t("menu.syncDsh")}
-                </Menu.Item>
               )}
             </div>
           </Menu.Popup>

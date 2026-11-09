@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -734,5 +735,49 @@ func TestGroupOf(t *testing.T) {
 		if got := x.groupOf(cwd, roots); got != want {
 			t.Errorf("%s: %d, want %d", cwd, got, want)
 		}
+	}
+}
+
+// The same session in two files (a project folder copied under another path, its paths rewritten
+// longer): the one written last is it, every look; archived, neither brings it back.
+func TestSessionInTwoFiles(t *testing.T) {
+	r := newRig(t)
+	r.x.Scan()
+	_, f, _ := r.x.Found(idA)
+	orig := f.Path()
+	b, err := os.ReadFile(orig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(r.home, ".claude", "projects", "-x-copied-a")
+	os.MkdirAll(dir, 0o700)
+	copied := filepath.Join(dir, filepath.Base(orig))
+	if err := os.WriteFile(copied, []byte(strings.ReplaceAll(string(b), `"/w/a"`, `"/x/copied/a"`)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	later := time.Date(2026, 1, 3, 0, 0, 0, 0, time.UTC) // still before Iridium watched
+	os.Chtimes(copied, later, later)
+	st, _ := os.Stat(orig)
+	// Archived while the original was the one looked at (its size noted).
+	if err := r.store.Hide(string(api.AgentClaude), idA, st.Size(), 0); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 3 {
+		r.x.Scan()
+		if _, f, _ := r.x.Found(idA); f.Path() != copied {
+			t.Fatalf("look %d: %s, want the copy, written last", i, f.Path())
+		}
+		if s := r.sessions()[idA]; s.Cwd != "/x/copied/a" {
+			t.Fatalf("look %d: cwd %q", i, s.Cwd)
+		}
+		if r.shown(api.AgentClaude, idA) {
+			t.Fatalf("look %d: archived A back with no writing", i)
+		}
+	}
+	// Written to now: that is activity.
+	r.grow(idA)
+	r.x.Scan()
+	if !r.shown(api.AgentClaude, idA) {
+		t.Fatal("A written after it was archived: shown again")
 	}
 }
