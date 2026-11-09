@@ -198,6 +198,11 @@ var schema = []string{
 	// 24: the groups' rows in the order they were dragged to, by the page's key for each: a group
 	// listed at two machines is two rows, ordered apart (the user, 2026-11-09).
 	`CREATE TABLE group_order (key TEXT PRIMARY KEY, sort INTEGER NOT NULL);`,
+	// 25: the folder at another machine a session of this machine's was opened for (a coordinator,
+	// the user, 2026-11-09): it is grouped by that folder, not by its own. A group split (flat):
+	// it holds only the sessions right in its folder, its subfolders groups of their own (order.go).
+	`CREATE TABLE session_at (session TEXT PRIMARY KEY, path TEXT NOT NULL);
+	ALTER TABLE workspaces ADD COLUMN flat INTEGER NOT NULL DEFAULT 0;`,
 }
 
 // steps run in Go after the migration of their version, in the same transaction.
@@ -309,17 +314,20 @@ type Overlay struct {
 	Color      string
 	// Order: the key it was dragged to (SetOrder); 0 none.
 	Order float64
+	// At: the folder at another machine it was opened for (SetAt), "<machine>:<path>"; "" none.
+	At string
 }
 
 // Overlays is every session's overlay, by session id.
 func (s *Store) Overlays() (map[string]Overlay, error) {
 	rows, err := s.db.Query(`
-		SELECT session, MAX(name), MAX(auto), MAX(pinned), MAX(workspace), MAX(manual), MAX(color), MAX(ord) FROM (
-			SELECT session, name, auto, 0 AS pinned, 0 AS workspace, 0 AS manual, '' AS color, 0.0 AS ord FROM names
-			UNION ALL SELECT session, '', 0, 1, 0, 0, '', 0 FROM pins
-			UNION ALL SELECT session, '', 0, 0, IFNULL(workspace, 0), manual, '', 0 FROM assignments
-			UNION ALL SELECT session, '', 0, 0, 0, 0, color, 0 FROM session_colors
-			UNION ALL SELECT session, '', 0, 0, 0, 0, '', at FROM session_order
+		SELECT session, MAX(name), MAX(auto), MAX(pinned), MAX(workspace), MAX(manual), MAX(color), MAX(ord), MAX(at) FROM (
+			SELECT session, name, auto, 0 AS pinned, 0 AS workspace, 0 AS manual, '' AS color, 0.0 AS ord, '' AS at FROM names
+			UNION ALL SELECT session, '', 0, 1, 0, 0, '', 0, '' FROM pins
+			UNION ALL SELECT session, '', 0, 0, IFNULL(workspace, 0), manual, '', 0, '' FROM assignments
+			UNION ALL SELECT session, '', 0, 0, 0, 0, color, 0, '' FROM session_colors
+			UNION ALL SELECT session, '', 0, 0, 0, 0, '', at, '' FROM session_order
+			UNION ALL SELECT session, '', 0, 0, 0, 0, '', 0, path FROM session_at
 		) GROUP BY session`)
 	if err != nil {
 		return nil, err
@@ -329,7 +337,7 @@ func (s *Store) Overlays() (map[string]Overlay, error) {
 	for rows.Next() {
 		var id string
 		var o Overlay
-		if err := rows.Scan(&id, &o.Name, &o.AgentNamed, &o.Pinned, &o.Workspace, &o.Manual, &o.Color, &o.Order); err != nil {
+		if err := rows.Scan(&id, &o.Name, &o.AgentNamed, &o.Pinned, &o.Workspace, &o.Manual, &o.Color, &o.Order, &o.At); err != nil {
 			return nil, err
 		}
 		out[id] = o
@@ -383,6 +391,8 @@ type Workspace struct {
 	Name   string `json:"name"`
 	Path   string `json:"path"`
 	Hidden bool   `json:"hidden,omitempty"`
+	// Flat: split (SplitWorkspace): it holds only the sessions right in its folder.
+	Flat bool `json:"flat,omitempty"`
 }
 
 func (s *Store) AddWorkspace(name, path string) (int64, error) {
@@ -394,7 +404,7 @@ func (s *Store) AddWorkspace(name, path string) (int64, error) {
 }
 
 func (s *Store) Workspaces() ([]Workspace, error) {
-	rows, err := s.db.Query(`SELECT id, name, path, hidden FROM workspaces ORDER BY sort, id`)
+	rows, err := s.db.Query(`SELECT id, name, path, hidden, flat FROM workspaces ORDER BY sort, id`)
 	if err != nil {
 		return nil, err
 	}
@@ -402,7 +412,7 @@ func (s *Store) Workspaces() ([]Workspace, error) {
 	var out []Workspace
 	for rows.Next() {
 		var w Workspace
-		if err := rows.Scan(&w.ID, &w.Name, &w.Path, &w.Hidden); err != nil {
+		if err := rows.Scan(&w.ID, &w.Name, &w.Path, &w.Hidden, &w.Flat); err != nil {
 			return nil, err
 		}
 		out = append(out, w)

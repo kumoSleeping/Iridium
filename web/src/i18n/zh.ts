@@ -43,6 +43,7 @@ export const zh = {
 
   "menu.rename": "改名",
   "menu.hide": "隐藏",
+  "menu.split": "按子文件夹拆开",
   "nav.all": "全部",
   "menu.syncDsh": "同步 DSH",
   "menu.unhide": "取消隐藏",
@@ -268,6 +269,7 @@ export const zh = {
   "toast.botHere": "{name} 已切到此会话",
   "toast.archived": "已归档",
   "toast.hidden": "已隐藏 {ws}",
+  "toast.split": "已拆开 {ws}",
   "toast.syncing": "同步中",
   "toast.synced": "已同步 {m} 的 DSH",
   "toast.restored": "已恢复",

@@ -40,7 +40,8 @@ export const working = (s: Session, parent: Session | undefined, now: number) =>
 
 /** The path a session is grouped by, as the server's (remote.GroupPath): its cwd, or at another
  *  machine "<machine>:<cwd, '/'-separated>", as that machine's groups' roots are written. */
-export const groupPath = (s: Pick<Session, "cwd" | "machine">) => (s.machine ? `${s.machine}:${s.cwd.replaceAll("\\", "/")}` : s.cwd);
+/** One of this machine's opened for a folder at another (a coordinator, Session.at): that folder. */
+export const groupPath = (s: Pick<Session, "cwd" | "machine" | "at">) => s.at || (s.machine ? `${s.machine}:${s.cwd.replaceAll("\\", "/")}` : s.cwd);
 
 /** A folder at another machine: its path is "<machine>:…", never absolute here. */
 export const remotePath = (path: string) => path !== "" && !path.startsWith("/");

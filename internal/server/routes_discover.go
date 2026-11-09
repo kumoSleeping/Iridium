@@ -25,6 +25,7 @@ func (s *Server) discoverRoutes(mux *http.ServeMux) {
 	// the panels' and 本机's to change; a session anyone's to name, colour, archive.
 	mux.HandleFunc("PATCH /api/workspaces/{id}", s.manages(s.renameWorkspace))
 	mux.HandleFunc("PUT /api/groups/order", s.manages(s.orderGroups))
+	mux.HandleFunc("POST /api/workspaces/{id}/split", s.manages(s.splitWorkspace))
 	mux.HandleFunc("PATCH /api/folders/place", s.manages(s.placeFolder))
 	mux.HandleFunc("PATCH /api/sessions/{id}", s.patchSession)
 	mux.HandleFunc("PUT /api/colors", s.manages(s.folderColor))
@@ -65,6 +66,14 @@ func (s *Server) renameWorkspace(w http.ResponseWriter, r *http.Request) {
 		err = s.Discover.HideWorkspace(id, *req.Hidden)
 	}
 	s.discoverDone(w, err)
+}
+
+func (s *Server) splitWorkspace(w http.ResponseWriter, r *http.Request) {
+	id, ok := workspaceID(w, r)
+	if !ok {
+		return
+	}
+	s.discoverDone(w, s.Discover.SplitWorkspace(id))
 }
 
 func (s *Server) orderGroups(w http.ResponseWriter, r *http.Request) {

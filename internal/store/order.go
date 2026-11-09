@@ -110,3 +110,74 @@ func (s *Store) FolderPins() ([]string, error) {
 	}
 	return out, rows.Err()
 }
+
+// SetAt sets the folder at another machine session (of this machine's) was opened for: it is
+// grouped by that folder ("<machine>:<path>"), not by its own; "" takes it off.
+func (s *Store) SetAt(session, path string) error {
+	if path == "" {
+		_, err := s.db.Exec(`DELETE FROM session_at WHERE session = ?`, session)
+		return err
+	}
+	_, err := s.db.Exec(`INSERT INTO session_at (session, path) VALUES (?, ?)
+		ON CONFLICT (session) DO UPDATE SET path = excluded.path`, session, path)
+	return err
+}
+
+// FollowAt moves session, put in workspace by hand (as a coordinator once was, made by a group's
+// "+"), to follow folder path there: grouped by path from now on, as discovery puts it (nest
+// carries it along). False if it was not so put.
+func (s *Store) FollowAt(session string, workspace int64, path string) (bool, error) {
+	var ok bool
+	err := s.Tx(func(tx *sql.Tx) error {
+		r, err := tx.Exec(`UPDATE assignments SET manual = 0, at = ? WHERE session = ? AND workspace = ? AND manual = 1`, now(), session, workspace)
+		if err != nil {
+			return err
+		}
+		if n, _ := r.RowsAffected(); n == 0 {
+			return nil
+		}
+		ok = true
+		_, err = tx.Exec(`INSERT INTO session_at (session, path) VALUES (?, ?) ON CONFLICT (session) DO NOTHING`, session, path)
+		return err
+	})
+	return ok, err
+}
+
+// SplitWorkspace marks workspace id split (flat: it holds only the sessions right in its folder)
+// and takes the sessions of ids out of it, to none, as discovery had them, so it groups them again
+// by their folders.
+func (s *Store) SplitWorkspace(id int64, ids []string) error {
+	return s.Tx(func(tx *sql.Tx) error {
+		r, err := tx.Exec(`UPDATE workspaces SET flat = 1 WHERE id = ?`, id)
+		if err != nil {
+			return err
+		}
+		if n, _ := r.RowsAffected(); n == 0 {
+			return ErrNoWorkspace
+		}
+		for _, sid := range ids {
+			if _, err := tx.Exec(`UPDATE assignments SET workspace = NULL, manual = 0, at = ? WHERE session = ? AND workspace = ?`, now(), sid, id); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// Ats is the folder at another machine each session so opened was opened for (SetAt), by session.
+func (s *Store) Ats() (map[string]string, error) {
+	rows, err := s.db.Query(`SELECT session, path FROM session_at`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var id, p string
+		if err := rows.Scan(&id, &p); err != nil {
+			return nil, err
+		}
+		out[id] = p
+	}
+	return out, rows.Err()
+}

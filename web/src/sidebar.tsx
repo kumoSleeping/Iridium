@@ -9,7 +9,7 @@
 // and at its foot the colour tags (colors.ts); a group's: rename, its path, 通知. The mouse resting
 // on a row fetches its chat ahead.
 import { Menu } from "@base-ui/react/menu";
-import { Archive, ArchiveRestore, ArrowDown, ArrowUp, Bot, Check, ChevronRight, Copy, Ellipsis, Eye, EyeOff, Folder, FolderOpen, Monitor, Pencil, Pin, PinOff, Plus, RefreshCw, Square, Workflow as WorkflowIcon } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowDown, ArrowUp, Bot, Check, ChevronRight, Copy, Ellipsis, Ungroup, Eye, EyeOff, Folder, FolderOpen, Monitor, Pencil, Pin, PinOff, Plus, RefreshCw, Square, Workflow as WorkflowIcon } from "lucide-react";
 import { ConfirmIcon, confirmName, confirmTitle } from "./confirmname";
 import { Fragment, lazy, memo, Suspense, useCallback, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode, type RefObject } from "react";
 import { api } from "./api/client";
@@ -327,6 +327,7 @@ export function Sidebar(p: Props) {
           sessions={w.rows.flatMap((r) => (r.kind === "session" ? [r.s] : r.f.sessions))}
           root={w.root}
           hidden={w.hidden}
+          folders={w.rows.some((r) => r.kind === "folder")}
           open={open}
           onToggle={() => p.toggle(w.key)}
           wkey={w.key}
@@ -610,7 +611,7 @@ function DropLine({ list }: { list: RefObject<HTMLDivElement | null> }) {
 /** A group's row; its menu (right click, long-press): its sessions archived, as a folder's (the
  *  user, 2026-11-08: a group is a folder now), rename, its path copied, open or folded, 通知 while
  *  push is on. 未归类 itself (id 0): its sessions archived and its 通知. */
-function WsRow({ flip, id, name, root, sessions, machine, remote, hidden, open, onToggle, end, wkey, place, up, down }: { flip: string; id: number; name: string; root: string; sessions: Session[]; machine?: Machine; remote?: boolean; hidden?: boolean; open: boolean; onToggle: () => void; end: ReactNode; wkey: string; place: (key: string, target: string, edge: Edge) => void; up?: () => void; down?: () => void }) {
+function WsRow({ flip, id, name, root, sessions, machine, remote, hidden, folders, open, onToggle, end, wkey, place, up, down }: { flip: string; id: number; name: string; root: string; sessions: Session[]; machine?: Machine; remote?: boolean; hidden?: boolean; folders?: boolean; open: boolean; onToggle: () => void; end: ReactNode; wkey: string; place: (key: string, target: string, edge: Edge) => void; up?: () => void; down?: () => void }) {
   const machines = useMachines();
   const push = usePushMenus();
   const me = useMe().data;
@@ -636,6 +637,8 @@ function WsRow({ flip, id, name, root, sessions, machine, remote, hidden, open, 
           { icon: <Pencil size={15} />, label: t("menu.rename"), run: () => setRenaming(true) },
           { icon: <Copy size={15} />, label: t("menu.copyPath"), run: () => void navigator.clipboard.writeText(shownPath(root, machines).real).then(() => toast(t("toast.copied")), failed) },
           { icon: open ? <Folder size={15} /> : <FolderOpen size={15} />, label: open ? t("menu.fold") : t("menu.unfold"), run: onToggle },
+          // Taken apart at its folder, its subfolders groups of their own (the user, 2026-11-09).
+          ...(folders ? [{ icon: <Ungroup size={15} />, label: t("menu.split"), run: () => void api.splitWorkspace(id).then(() => toast(t("toast.split", { ws: name })), failed) }] : []),
           // Moved among its machine's groups; with a mouse it is dragged too (reorder.ts).
           ...(up ? [{ icon: <ArrowUp size={15} />, label: t("menu.moveUp"), run: up }] : []),
           ...(down ? [{ icon: <ArrowDown size={15} />, label: t("menu.moveDown"), run: down }] : []),

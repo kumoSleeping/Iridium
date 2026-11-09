@@ -368,7 +368,14 @@ func (m *Manager) create(ctx context.Context, req api.NewSession, from, name str
 	m.mu.Unlock()
 	h.newSession = true
 	h.show() // Iridium's own: shown from the start
-	if req.Workspace != 0 {
+	if at := req.At; at != "" && machine == "" && !filepath.IsAbs(at) && strings.Contains(at, ":") && len(at) <= 4096 {
+		// A coordinator for a folder there: grouped by that folder as discovery groups (nested
+		// with it), not put in its group by hand.
+		if err := m.o.Store.SetAt(mt.ID, at); err != nil {
+			return mt.ID, err
+		}
+		m.intoGroupPrefer(mt.ID, at, req.Workspace)
+	} else if req.Workspace != 0 {
 		if err := m.o.Store.Move(mt.ID, req.Workspace); err != nil {
 			return mt.ID, err
 		}
@@ -480,7 +487,7 @@ func (m *Manager) List(ctx context.Context) ([]api.Session, error) {
 		for _, s := range found {
 			if !seen[s.ID] {
 				o := over[s.ID]
-				s.Name, s.Pinned, s.Workspace, s.Color, s.Order = o.Name, o.Pinned, o.Workspace, api.Color(o.Color), o.Order
+				s.Name, s.Pinned, s.Workspace, s.Color, s.Order, s.At = o.Name, o.Pinned, o.Workspace, api.Color(o.Color), o.Order, o.At
 				s.Archived = !vis.Shown(string(s.Agent), s.ID)
 				m.parentOf(&s)
 				out = append(out, s)

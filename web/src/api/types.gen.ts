@@ -123,6 +123,11 @@ export interface Session {
    */
   order?: number /* float64 */;
   /**
+   * At: the folder at another machine one of this machine's was opened for (NewSession.At): it
+   * is listed there, in that folder, not by its Cwd.
+   */
+  at?: string;
+  /**
    * Launcher: the session that started this one, if discovery saw it.
    */
   launcher?: string;
@@ -496,6 +501,11 @@ export interface NewSession {
    * is then a path there.
    */
   machine?: string;
+  /**
+   * At: one of this machine's opened for a folder at another ("<machine>:<path>", as grouped), a
+   * coordinator from a group's "+" there: grouped by that folder, wherever its group is nested.
+   */
+  at?: string;
 }
 export interface NewSessionReply {
   id: string;

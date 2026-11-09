@@ -338,10 +338,11 @@ export function NewSession({ ws, folder, onFolder, onPick, busy, local }: { ws: 
  *  ("<machine>/<agent>" at another machine). */
 export function useStart(opened: (id: string) => void) {
   const [busy, setBusy] = useState<string | null>(null);
-  const start = async (agent: Agent, cwd: string, workspace?: number, machine?: string) => {
+  // at: one of this machine's opened for a folder at another (a coordinator): grouped by it.
+  const start = async (agent: Agent, cwd: string, workspace?: number, machine?: string, at?: string) => {
     setBusy(machine ? `${machine}/${agent}` : agent);
     try {
-      const { id } = await api.create({ agent, cwd, ...(workspace ? { workspace } : {}), ...(machine ? { machine } : {}) });
+      const { id } = await api.create({ agent, cwd, ...(workspace ? { workspace } : {}), ...(machine ? { machine } : {}), ...(at ? { at } : {}) });
       opened(id);
     } catch (e) {
       toast(t("err.newSession"), { error: true, description: errText(e) });
@@ -445,7 +446,8 @@ export function WsPlus({ w, trigger, open, setOpen, opened }: { w: Workspace; tr
               busy={busy}
               onFolder={() => (setStepped(true), setPage("folder"))}
               local={away && localFolder ? { folder: localFolder, onFolder: () => (setStepped(true), setPage("local")) } : undefined}
-              onPick={(a, at) => void start(a, at?.cwd ?? (away ? (localFolder ?? "") : folder), w.id, at?.m.id)}
+              // This machine's in a group at another: it follows the folder the "+" was on there.
+              onPick={(a, at) => void start(a, at?.cwd ?? (away ? (localFolder ?? "") : folder), w.id, at?.m.id, !at && away ? folder : undefined)}
             />
           ) : page === "local" ? (
             <FolderPicker
