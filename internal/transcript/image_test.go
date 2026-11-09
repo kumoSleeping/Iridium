@@ -8,6 +8,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -149,17 +150,27 @@ func TestDshResultHandle(t *testing.T) {
 	}
 }
 
-// Codex rollout lines, for codexShown.
+// Codex rollout lines, for codexViews.
 func cxCall(id string) map[string]any {
 	return map[string]any{"type": "response_item", "payload": map[string]any{"type": "custom_tool_call", "call_id": id, "name": "exec", "input": "…"}}
 }
 
 func cxOut(t *testing.T, id string, shown ...[]byte) map[string]any {
-	out := []any{map[string]any{"type": "input_text", "text": "Script completed"}}
+	return cxSaid(id, "Script completed\nWall time 0.1 seconds\nOutput:\n", shown...)
+}
+
+// cxSaid is call id's output, its text said first.
+func cxSaid(id, said string, shown ...[]byte) map[string]any {
+	out := []any{map[string]any{"type": "input_text", "text": said}}
 	for _, s := range shown {
 		out = append(out, map[string]any{"type": "input_image", "image_url": "data:image/png;base64," + base64.StdEncoding.EncodeToString(s), "detail": "high"})
 	}
 	return map[string]any{"type": "response_item", "payload": map[string]any{"type": "custom_tool_call_output", "call_id": id, "output": out}}
+}
+
+// cxWait takes up a script that went on after its call's output.
+func cxWait(id, cell string) map[string]any {
+	return map[string]any{"type": "response_item", "payload": map[string]any{"type": "function_call", "call_id": id, "name": "wait", "arguments": `{"cell_id":"` + cell + `","yield_time_ms":1000}`}}
 }
 
 func cxEvent(payload map[string]any) map[string]any {
@@ -175,8 +186,13 @@ func cxView(name string) map[string]any {
 func codexRollout(t *testing.T, ls ...map[string]any) (*File, []api.Block) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "rollout.jsonl")
-	big := bytes.Repeat([]byte{0xff}, 6<<20)
-	append(lines{cxEvent(map[string]any{"type": "task_started"}), cxCall("c0"), cxOut(t, "c0", big)}, ls...).write(t, path, false)
+	// The earlier output as Codex writes it, its payload's type first: a long line, told by its head.
+	big := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0xff}, 6<<20))
+	lines{cxEvent(map[string]any{"type": "task_started"}), cxCall("c0")}.write(t, path, false)
+	w, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	w.WriteString(`{"timestamp":"t","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"c0","output":[{"type":"input_text","text":"Script completed"},{"type":"input_image","image_url":"data:image/png;base64,` + big + `"}]}}` + "\n")
+	w.Close()
+	lines(ls).write(t, path, true)
 	f := OpenAs(path, Codex, nil)
 	p, err := f.Latest()
 	if err != nil {
@@ -216,6 +232,10 @@ func TestCodexImageFromScriptOutput(t *testing.T) {
 		"a call in between": {cxCall("c1"), cxView("a.png"), cxCall("c2"), cxOut(t, "c1", a)},
 		// The turn ended without the script's output: it will never come.
 		"turn over": {cxCall("c1"), cxView("a.png"), cxEvent(map[string]any{"type": "turn_aborted"})},
+		// A long line not told by its head (its keys in another order): the turn is not told.
+		"a long line unread": {cxCall("c1"), cxOut(t, "c1", bytes.Repeat([]byte{1}, 128<<10)), cxCall("c2"), cxView("a.png"), cxOut(t, "c2", a)},
+		// A script went on after its output (yielded) while another call viewed a picture.
+		"a script running": {cxCall("c1"), cxSaid("c1", "Script running with cell ID 1\nWall time 1.0 seconds\nOutput:\n"), cxCall("c2"), cxView("a.png"), cxOut(t, "c2", b)},
 	}
 	for name, ls := range none {
 		f, v := codexRollout(t, ls...)
@@ -229,6 +249,19 @@ func TestCodexImageFromScriptOutput(t *testing.T) {
 			if _, _, err := f.Image(s.Result.At, 0); !errors.Is(err, ErrNoImage) {
 				t.Errorf("%s: Image: %v", name, err)
 			}
+		}
+	}
+
+	// A wait takes up the script that went on: the view is its, the wait's output shows it.
+	yielded := cxSaid("c1", "Script running with cell ID 7\nWall time 1.0 seconds\nOutput:\n")
+	told := map[string][]map[string]any{
+		"taken up by wait": {cxCall("c1"), yielded, cxWait("w1", "7"), cxView("a.png"), cxOut(t, "w1", a)},
+		"one ended before": {cxCall("c1"), yielded, cxWait("w1", "7"), cxOut(t, "w1"), cxCall("c2"), cxView("a.png"), cxOut(t, "c2", a)},
+	}
+	for name, ls := range told {
+		f, v := codexRollout(t, ls...)
+		if _, data, err := f.Image(v[0].Result.At, 0); err != nil || !bytes.Equal(data, a) || len(v[0].Result.Images) != 1 {
+			t.Errorf("%s: %d bytes %v, on the page %+v", name, len(data), err, v[0].Result.Images)
 		}
 	}
 
@@ -247,19 +280,6 @@ func TestCodexImageFromScriptOutput(t *testing.T) {
 		if s.Name == "view_image" && (len(s.Result.Images) != 1 || s.Result.Images[0].W != 5) {
 			t.Errorf("written since: %+v", s.Result.Images)
 		}
-	}
-}
-
-func TestLineBefore(t *testing.T) {
-	long := bytes.Repeat([]byte("x"), 300<<10)
-	text := append(append(append([]byte("first\n"), long...), '\n'), "last\n"...)
-	r := bytes.NewReader(text)
-	start, line, err := lineBefore(r, int64(len(text))-5)
-	if err != nil || start != 6 || !bytes.Equal(line, long) {
-		t.Fatalf("long line: start %d, %d bytes, %v", start, len(line), err)
-	}
-	if start, line, err := lineBefore(r, 6); err != nil || start != 0 || string(line) != "first" {
-		t.Fatalf("first line: %d %q %v", start, line, err)
 	}
 }
 
@@ -287,5 +307,38 @@ func TestPicturesHeadEscaped(t *testing.T) {
 	}
 	if pictures(json.RawMessage(`[{"type":"text","text":"no pictures"}]`), false) != nil {
 		t.Error("text only")
+	}
+}
+
+func TestCodexStepAsCodexWrites(t *testing.T) {
+	// As Codex writes them: its keys in its order, a script's output an array or a string.
+	for line, want := range map[string]codexStepLine{
+		`{"timestamp":"t","ordinal":3,"type":"response_item","payload":{"type":"custom_tool_call_output","id":"x","call_id":"c1","output":[{"type":"input_text","text":"Script running with cell ID 13\nWall time 1.0 seconds\nOutput:\n"}]}}`: {kind: codexOutput, call: "c1", yielded: "13"},
+		`{"timestamp":"t","type":"response_item","payload":{"type":"function_call_output","call_id":"w1","output":"Script running with cell ID 11\nWall time 1.0 seconds\nOutput:\n"}}`:                                                        {kind: codexOutput, call: "w1", yielded: "11"},
+		`{"timestamp":"t","type":"response_item","payload":{"type":"function_call_output","call_id":"w1","output":"Script completed\nOutput:\n"}}`:                                                                                             {kind: codexOutput, call: "w1"},
+		`{"timestamp":"t","type":"response_item","payload":{"type":"function_call","name":"wait","arguments":"{\"cell_id\":\"13\",\"yield_time_ms\":1000}","call_id":"w2"}}`:                                                                   {kind: codexCall, call: "w2", cell: "13"},
+		`{"timestamp":"t","type":"response_item","payload":{"type":"reasoning","summary":[],"encrypted_content":"…"}}`:                                                                                                                         {},
+		`{"timestamp":"t","type":"event_msg","payload":{"type":"item_completed","item":{"type":"ImageView","id":"exec-1","path":"/a.png"}}}`:                                                                                                   {kind: codexView},
+		`{"timestamp":"t","type":"event_msg","payload":{"type":"task_complete","turn_id":"x"}}`:                                                                                                                                                {kind: codexEnd},
+	} {
+		if got := codexStep([]byte(line), true); got != want {
+			t.Errorf("%s:\n got %+v\nwant %+v", line[:80], got, want)
+		}
+		// Told by its head alone, as a long line is, the same.
+		if got := codexStep([]byte(line[:min(len(line), 400)]), false); got != want && want.kind != codexView && want.kind != codexEnd {
+			t.Errorf("by its head %s:\n got %+v\nwant %+v", line[:80], got, want)
+		}
+	}
+	// Long lines told by their head: a compacted history is nothing; a line whose kind is not
+	// told may be a call, so the turn is lost.
+	for head, want := range map[string]int{
+		`{"timestamp":"t","ordinal":9,"type":"compacted","payload":{"message":"","replacement_history":[`:                                codexOther,
+		`{"timestamp":"t","type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","aggregated_output":"`: codexOther,
+		`{"timestamp":"t","type":"response_item","payload":{"id":"x","type":"custom_tool_call_output","call_id":"c","output":[`:          codexLost,
+		`{"payload":{"call_id":"c","output":[{"text":"`:                                                                                  codexLost,
+	} {
+		if got := codexStep([]byte(head), false); got.kind != want {
+			t.Errorf("long %s: %+v, want kind %d", head[:60], got, want)
+		}
 	}
 }
