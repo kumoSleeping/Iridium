@@ -9,6 +9,7 @@ import (
 	"image/color"
 	"image/png"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/kumoSleeping/iridium/internal/api"
@@ -148,18 +149,20 @@ func TestDshResultHandle(t *testing.T) {
 	}
 }
 
-// codexRollout writes a rollout where a script (call c1) views the pictures named in views and
-// hands on shown, and gives the ImageView results' ats in order.
+// codexRollout writes a rollout where, after an earlier script's output (a big line), a script
+// (call c1) views the pictures named in views and hands on shown, other lines after the first
+// view; it gives the ImageView results' ats in order.
 func codexRollout(t *testing.T, views []string, shown [][]byte, between ...map[string]any) (*File, []string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "rollout.jsonl")
 	ev := func(item map[string]any) map[string]any {
 		return map[string]any{"timestamp": "2026-11-09T00:00:00Z", "type": "event_msg", "payload": map[string]any{"type": "item_completed", "item": item}}
 	}
+	big := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0xff}, 6<<20))
 	ls := lines{
 		{"type": "response_item", "payload": map[string]any{"type": "custom_tool_call", "call_id": "c0", "name": "exec", "input": "1"}},
 		{"type": "response_item", "payload": map[string]any{"type": "custom_tool_call_output", "call_id": "c0", "output": []any{
-			map[string]any{"type": "input_image", "image_url": "data:image/png;base64," + base64.StdEncoding.EncodeToString(pngOf(t, 9, 9, color.White))}}}},
+			map[string]any{"type": "input_image", "image_url": "data:image/png;base64," + big}}}},
 		{"type": "response_item", "payload": map[string]any{"type": "custom_tool_call", "call_id": "c1", "name": "exec", "input": "image((await tools.view_image({path})).image_url)"}},
 		ev(map[string]any{"type": "CommandExecution", "id": "x", "command": []string{"true"}, "status": "completed"}),
 	}
@@ -173,7 +176,9 @@ func codexRollout(t *testing.T, views []string, shown [][]byte, between ...map[s
 	for _, s := range shown {
 		out = append(out, map[string]any{"type": "input_image", "image_url": "data:image/png;base64," + base64.StdEncoding.EncodeToString(s), "detail": "high"})
 	}
-	ls = append(ls, map[string]any{"type": "response_item", "payload": map[string]any{"type": "custom_tool_call_output", "call_id": "c1", "output": out}})
+	if shown != nil {
+		ls = append(ls, map[string]any{"type": "response_item", "payload": map[string]any{"type": "custom_tool_call_output", "call_id": "c1", "output": out}})
+	}
 	ls.write(t, path, false)
 	f := OpenAs(path, Codex, nil)
 	p, err := f.Latest()
@@ -194,35 +199,64 @@ func codexRollout(t *testing.T, views []string, shown [][]byte, between ...map[s
 
 func TestCodexImageFromScriptOutput(t *testing.T) {
 	a, b := pngOf(t, 5, 5, color.Black), pngOf(t, 6, 4, color.White)
-	f, ats := codexRollout(t, []string{"a.png", "b.png"}, [][]byte{a, b})
-	for i, want := range [][]byte{a, b} {
-		img, data, err := f.Image(ats[i], 0)
-		if err != nil || !bytes.Equal(data, want) || img.Mime != "image/png" {
-			t.Errorf("view %d: %+v %d bytes %v", i, img, len(data), err)
+	f, ats := codexRollout(t, []string{"a.png"}, [][]byte{a})
+	if img, data, err := f.Image(ats[0], 0); err != nil || !bytes.Equal(data, a) || img.Mime != "image/png" {
+		t.Errorf("one viewed, one shown: %+v %d bytes %v", img, len(data), err)
+	}
+	// Two viewed: the ImageViews come in the order the views ended, the pictures in the order
+	// the script showed them (the user's rollouts, 2026-11-09). Neither is told, either way.
+	for _, shown := range [][][]byte{{a, b}, {b, a}, {a}} {
+		f, ats = codexRollout(t, []string{"a.png", "b.png"}, shown)
+		for i, at := range ats {
+			if _, _, err := f.Image(at, 0); !errors.Is(err, ErrNoImage) {
+				t.Errorf("%d shown, view %d: %v", len(shown), i, err)
+			}
 		}
 	}
-	// The script viewed two and showed one: which is which is unclear.
-	f, ats = codexRollout(t, []string{"a.png", "b.png"}, [][]byte{a})
+	// Viewed one, showed two (one it did not view).
+	f, ats = codexRollout(t, []string{"a.png"}, [][]byte{a, b})
 	if _, _, err := f.Image(ats[0], 0); !errors.Is(err, ErrNoImage) {
-		t.Errorf("counts differ: %v", err)
+		t.Errorf("shown more: %v", err)
 	}
 	// Another call began before the script's output.
 	other := map[string]any{"type": "response_item", "payload": map[string]any{"type": "function_call", "call_id": "c2", "name": "shell"}}
-	f, ats = codexRollout(t, []string{"a.png", "b.png"}, [][]byte{a, b}, other)
-	if _, _, err := f.Image(ats[1], 0); !errors.Is(err, ErrNoImage) {
+	f, ats = codexRollout(t, []string{"a.png"}, [][]byte{a}, other)
+	if _, _, err := f.Image(ats[0], 0); !errors.Is(err, ErrNoImage) {
 		t.Errorf("interleaved: %v", err)
+	}
+	// The script still runs: its output is not written yet.
+	f, ats = codexRollout(t, []string{"a.png"}, nil)
+	if _, _, err := f.Image(ats[0], 0); !errors.Is(err, ErrNotYet) {
+		t.Errorf("no output yet: %v", err)
 	}
 }
 
-func TestCodexImageNoOutputYet(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "rollout.jsonl")
-	lines{
-		{"type": "response_item", "payload": map[string]any{"type": "custom_tool_call", "call_id": "c1", "name": "exec"}},
-		{"timestamp": "2026-11-09T00:00:00Z", "type": "event_msg", "payload": map[string]any{"type": "item_completed", "item": map[string]any{"type": "ImageView", "id": "v", "path": "/w/a.png"}}},
-	}.write(t, path, false)
-	f := OpenAs(path, Codex, nil)
-	p, _ := f.Latest()
-	if _, _, err := f.Image(p.Blocks[0].Result.At, 0); !errors.Is(err, ErrNoImage) {
-		t.Errorf("no output yet: %v", err)
+func TestLineBefore(t *testing.T) {
+	long := bytes.Repeat([]byte("x"), 300<<10)
+	text := append(append(append([]byte("first\n"), long...), '\n'), "last\n"...)
+	r := bytes.NewReader(text)
+	start, line, err := lineBefore(r, int64(len(text))-5)
+	if err != nil || start != 6 || !bytes.Equal(line, long) {
+		t.Fatalf("long line: start %d, %d bytes, %v", start, len(line), err)
+	}
+	if start, line, err := lineBefore(r, 6); err != nil || start != 0 || string(line) != "first" {
+		t.Fatalf("first line: %d %q %v", start, line, err)
+	}
+}
+
+func TestPicturesHeadEscaped(t *testing.T) {
+	// A writer may escape base64's slashes: the head is read all the same.
+	b64 := base64.StdEncoding.EncodeToString(pngOf(t, 7, 3, color.White))
+	esc := strings.ReplaceAll(b64, "/", `\/`)
+	content := json.RawMessage(`[{"type":"image","data":"` + esc + `","mimeType":"image/png"}]`)
+	got := pictures(content, false)
+	if len(got) != 1 || got[0].W != 7 || got[0].H != 3 || got[0].Data != "" {
+		t.Fatalf("escaped: %+v", got)
+	}
+	if got := pictures(content, true); len(got) != 1 || got[0].Data != b64 {
+		t.Fatalf("escaped, whole: %+v", got)
+	}
+	if pictures(json.RawMessage(`[{"type":"text","text":"no pictures"}]`), false) != nil {
+		t.Error("text only")
 	}
 }

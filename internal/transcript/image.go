@@ -26,18 +26,18 @@ const headLen = 64 << 10
 
 // imageItem is a content block that may be a picture, in any of its shapes: Anthropic's
 // (Claude: source.data, source.media_type), MCP's and pi's (data, mimeType), OpenAI's (Codex:
-// input_image, image_url a data URL), dsh's (attachment, a handle into its store). Raw: its
-// bytes are only copied, not unescaped, till they are kept.
-type imageItem struct {
+// input_image, image_url a data URL), dsh's (attachment, a handle into its store). S is how its
+// base64 is kept: whole (string), or only its head (head), for a page.
+type imageItem[S ~string] struct {
 	Type   string `json:"type"`
 	Source *struct {
-		Type      string          `json:"type"`
-		MediaType string          `json:"media_type"`
-		Data      json.RawMessage `json:"data"`
+		Type      string `json:"type"`
+		MediaType string `json:"media_type"`
+		Data      S      `json:"data"`
 	} `json:"source"`
-	Data       json.RawMessage `json:"data"`
-	MimeType   string          `json:"mimeType"`
-	ImageURL   json.RawMessage `json:"image_url"`
+	Data       S      `json:"data"`
+	MimeType   string `json:"mimeType"`
+	ImageURL   S      `json:"image_url"`
 	Attachment *struct {
 		AttachmentID string `json:"attachmentId"`
 		MediaType    string `json:"mediaType"`
@@ -46,58 +46,74 @@ type imageItem struct {
 	} `json:"attachment"`
 }
 
+// head is a JSON string's first headLen characters: a picture's base64 as a page needs it, its
+// header, without the whole copied. base64 has nothing to escape but a slash a writer may (\/):
+// such a string is read whole.
+type head string
+
+func (h *head) UnmarshalJSON(b []byte) error {
+	if len(b) < 2 || b[0] != '"' {
+		*h = ""
+		return nil
+	}
+	body := b[1 : len(b)-1]
+	if bytes.IndexByte(body[:min(len(body), headLen)], '\\') < 0 {
+		*h = head(body[:min(len(body), headLen)])
+		return nil
+	}
+	var s string
+	if err := json.Unmarshal(b, &s); err != nil {
+		return err
+	}
+	*h = head(s[:min(len(s), headLen)])
+	return nil
+}
+
 // pictures is the pictures among content's blocks, in order. keep: with their bytes (Data), for
 // a record read again whole; else only what a page shows of them. A content that is a string, or
 // a picture by URL, gives none.
 func pictures(content json.RawMessage, keep bool) []api.Image {
-	if len(content) == 0 || content[0] != '[' {
+	if len(content) == 0 || content[0] != '[' || !bytes.Contains(content, []byte(`image"`)) {
 		return nil
 	}
-	var items []imageItem
+	if keep {
+		return picturesAs[string](content, true)
+	}
+	return picturesAs[head](content, false)
+}
+
+func picturesAs[S ~string](content json.RawMessage, keep bool) []api.Image {
+	var items []imageItem[S]
 	if json.Unmarshal(content, &items) != nil {
 		return nil
 	}
 	var out []api.Image
 	for _, it := range items {
 		var img api.Image
-		var data json.RawMessage
+		var b64 string
 		switch {
 		case it.Type == "image" && it.Attachment != nil && it.Attachment.AttachmentID != "":
 			a := it.Attachment
-			img = api.Image{Mime: a.MediaType, W: a.Width, H: a.Height, Handle: a.AttachmentID}
+			out = append(out, api.Image{Mime: a.MediaType, W: a.Width, H: a.Height, Handle: a.AttachmentID})
+			continue
 		case it.Type == "image" && it.Source != nil && it.Source.Type == "base64":
-			img.Mime, data = it.Source.MediaType, it.Source.Data
-		case it.Type == "image" && len(it.Data) > 0:
-			img.Mime, data = it.MimeType, it.Data
+			img.Mime, b64 = it.Source.MediaType, string(it.Source.Data)
+		case it.Type == "image":
+			img.Mime, b64 = it.MimeType, string(it.Data)
 		case it.Type == "input_image":
-			var url string
-			if json.Unmarshal(it.ImageURL, &url) != nil {
-				continue
-			}
-			mime, b64, ok := dataURL(url)
+			mime, data, ok := dataURL(string(it.ImageURL))
 			if !ok {
 				continue
 			}
-			img.Mime = mime
-			if keep {
-				img.Data = b64
-			}
-			sized(&img, b64)
-			out = append(out, img)
-			continue
-		default:
+			img.Mime, b64 = mime, data
+		}
+		if b64 == "" {
 			continue
 		}
-		if data != nil {
-			var b64 string
-			if json.Unmarshal(data, &b64) != nil || b64 == "" {
-				continue
-			}
-			if keep {
-				img.Data = b64
-			}
-			sized(&img, b64)
+		if keep {
+			img.Data = b64
 		}
+		sized(&img, b64)
 		out = append(out, img)
 	}
 	return out
@@ -135,6 +151,10 @@ func sized(img *api.Image, b64 string) {
 
 // ErrNoImage: the result has no such picture, or its bytes are not where the record says.
 var ErrNoImage = errors.New("transcript: no such picture")
+
+// ErrNotYet: the record names where the picture will be, and that is not written yet (a script
+// still running).
+var ErrNotYet = errors.New("transcript: the picture is not in the record yet")
 
 // Image is picture n of the result at at, read again whole: with its bytes where the record has
 // them (on that line, or on a later one), else with only img.Handle, for the agent's channel.

@@ -262,12 +262,13 @@ func getenv(env []string, k string) string {
 // mode the model does not call view_image itself: a script it runs does (exec, a custom tool
 // call), and the model sees what the script hands on with image(), in the script's output
 // (custom_tool_call_output: input_image items, data URLs). Codex records an ImageView for each
-// view_image between the call and its output, so the k-th of them is the output's k-th picture,
-// where the two count the same: a script may also show a picture it did not view, or view one it
-// does not show, and then none is told apart. size: where the record's whole lines end.
+// view_image between the call and its output, in the order they end, not the order the script
+// hands their pictures on: only a script that viewed one picture and showed one tells which is
+// which (the user's rollouts, 2026-11-09: two viewed at once came in the other order). Before the
+// output is written, ErrNotYet. size: where the record's whole lines end.
 func codexShown(r io.ReaderAt, size, off, n int64) (api.Image, error) {
-	// Back to the script's call: the ImageViews before this one.
-	before, call := 0, ""
+	// Back to the script's call: no other ImageView on the way.
+	call := ""
 	for pos, k := off, 0; call == ""; k++ {
 		if pos <= 0 || k > codexWindow {
 			return api.Image{}, ErrNoImage
@@ -277,35 +278,33 @@ func codexShown(r io.ReaderAt, size, off, n int64) (api.Image, error) {
 			return api.Image{}, err
 		}
 		switch kind, id, _ := codexStep(line); kind {
-		case codexView:
-			before++
+		case codexView, codexOutput:
+			return api.Image{}, ErrNoImage
 		case codexCall:
 			call = id
-		case codexOutput:
-			return api.Image{}, ErrNoImage
 		}
 		pos = start
 	}
-	// On to its output: the ImageViews after this one, and the pictures.
+	// On to its output: no other ImageView, and one picture.
 	from := off + n + 1
 	br := bufio.NewReaderSize(io.NewSectionReader(r, from, max(size-from, 0)), 64<<10)
-	after := 0
 	for k := 0; k <= codexWindow; k++ {
 		line, err := longLine(br)
+		if err == io.EOF {
+			return api.Image{}, ErrNotYet
+		}
 		if err != nil {
-			return api.Image{}, ErrNoImage
+			return api.Image{}, err
 		}
 		switch kind, id, output := codexStep(line); kind {
-		case codexView:
-			after++
-		case codexCall:
-			return api.Image{}, ErrNoImage // another script began first: whose is unclear
+		case codexView, codexCall:
+			return api.Image{}, ErrNoImage
 		case codexOutput:
 			images := pictures(output, true)
-			if id != call || len(images) != before+1+after {
+			if id != call || len(images) != 1 {
 				return api.Image{}, ErrNoImage
 			}
-			return images[before], nil
+			return images[0], nil
 		}
 	}
 	return api.Image{}, ErrNoImage
@@ -355,28 +354,32 @@ func codexStep(line []byte) (kind int, call string, output json.RawMessage) {
 // pictures).
 const maxLine = 64 << 20
 
-// lineBefore is the line that ends just before pos (a line's start) and where it starts.
+// lineBefore is the line that ends just before pos (a line's start) and where it starts: its
+// start found first, then the line read once.
 func lineBefore(r io.ReaderAt, pos int64) (int64, []byte, error) {
 	end := pos - 1 // its newline
-	var line []byte
-	for at := end; ; {
-		from := max(at-64<<10, 0)
-		chunk := make([]byte, at-from)
+	start := int64(0)
+	buf := make([]byte, 64<<10)
+	for at := end; at > 0; {
+		from := max(at-int64(len(buf)), 0)
+		chunk := buf[:at-from]
 		if _, err := r.ReadAt(chunk, from); err != nil {
 			return 0, nil, err
 		}
 		if i := bytes.LastIndexByte(chunk, '\n'); i >= 0 {
-			return from + int64(i) + 1, append(chunk[i+1:], line...), nil
+			start = from + int64(i) + 1
+			break
 		}
-		line = append(chunk, line...)
-		if from == 0 {
-			return 0, line, nil
-		}
-		if len(line) > maxLine {
+		if end-from > maxLine {
 			return 0, nil, ErrNoImage
 		}
 		at = from
 	}
+	line := make([]byte, end-start)
+	if _, err := r.ReadAt(line, start); err != nil {
+		return 0, nil, err
+	}
+	return start, line, nil
 }
 
 // longLine is br's next whole line, without its newline.
