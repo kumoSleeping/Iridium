@@ -21,7 +21,6 @@ import { prefetch } from "./prefetch";
 import { close, go, onTurn, openChat, over, quietDialog, route, usagePoint, useRoute, type Route } from "./route";
 import { Pager, TABS_H } from "./pager";
 import { atLeft, atRight, GRIP, Sheet } from "./sheet";
-import { NotesKey } from "./notekey";
 import { HeadKeys, Sidebar } from "./sidebar";
 import { useConfirms, useList, useMachines } from "./store";
 import { follow } from "./stream";
@@ -173,9 +172,8 @@ export function App() {
   // A swipe up from the left shows the 终端 page from its first px, not the sessions' turning to it
   // as it is let go (the user, 2026-11-08).
   const [pulled, setPulled] = useState<"me" | "sessions" | "notes" | null>(null);
-  // The notes: on a computer in the session list's place, on a phone the sheet's last page, brought
-  // by a swipe up from the right quarter (the user, 2026-11-09).
-  const [notesOut, setNotesOut] = useState(false);
+  // The notes: on a phone the sheet's last page, brought by a swipe up from the right quarter (the
+  // user, 2026-11-09); on a computer only the composer's (chat/notekey.tsx).
   const [notesPage, setNotesPage] = useState(false);
   // Drawn once first shown, then kept, hidden: a note dragged away from them (to the sessions) is
   // still theirs to drop.
@@ -183,7 +181,7 @@ export function App() {
   // Out, its page is the route's; going down, it stays as it was; coming up, the swipe's.
   const lastPage = useRef(2);
   const sheetPage = sheetIsOut ? (setsOut ? (r.name === "usage" ? 1 : 0) : notesPage ? 3 : 2) : pulled ? (pulled === "me" ? 0 : pulled === "notes" ? 3 : 2) : lastPage.current;
-  if (!notesSeen && (notesOut || (phone && sheetPage === 3))) setNotesSeen(true);
+  if (!notesSeen && phone && sheetPage === 3) setNotesSeen(true);
   lastPage.current = sheetPage;
   // Just come out too: its page set at once, not slid to as it rises.
   const wasOut = useRef(sheetIsOut);
@@ -282,16 +280,6 @@ export function App() {
       createKey={(trigger) => <CreatePopover trigger={trigger} />}
       wsPlus={(w, trigger, o, setO) => <WsPlus key={w.key} w={{ id: w.id, name: w.name, path: w.root }} trigger={trigger} open={o} setOpen={setO} opened={(id) => openChat(id)} />}
       me={me}
-      notesKey={!phone && <NotesKey open={notesOut} onClick={() => (setNotesOut((o) => !o), setJumping(false))} />}
-      notesOut={notesOut}
-      notes={
-        !phone &&
-        notesSeen && (
-          <Suspense>
-            <NotesPanel />
-          </Suspense>
-        )
-      }
     />
   );
 

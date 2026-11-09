@@ -164,6 +164,7 @@ export const zh = {
   "effort.xhigh": "超高",
   "effort.max": "最高",
   "effort.off": "关",
+  "composer.cmdCommon": "通用",
   "composer.commands": "命令",
 
   "cmd.compact": "压缩上下文",
@@ -533,6 +534,8 @@ export const zh = {
   "usage.scale": "刻度 {n}",
   "toast.undo": "撤销",
   "note.title": "便签",
+  "note.view": "查看便签",
+  "note.takeBox": "放入输入",
   "note.new": "新便签",
   "note.placeholder": "记点什么",
   "note.keep": "记下",

@@ -25,6 +25,7 @@ import { errText, toast } from "./toast";
 import { useMe, useTerminalList, useUpdate } from "./data";
 import { agentName, ago, Avatar, cn, fine, IconKey, IrMark, keep, kept, Lamp, lampOf, Logo, own, sessionStatusText, statusText, tilde, Tip, titleOf, untitled, useLongPress, useMenuAt, useMinute } from "./ui";
 import { SESSION_DRAG } from "./chat/refs";
+import { NoteMark, NotesAt, useNotes } from "./notekey";
 import { useUnread } from "./unread";
 import { LINK_COLOR, MachineBadge, MachineFace, setView, shownPath, useLate, useLink as useLinkOf, useMachine, useView } from "./machines";
 import { useMachines } from "./store";
@@ -57,11 +58,6 @@ type Props = {
   panelsCode: () => void;
   /** Without its foot, me and the settings key: on a phone they are a sheet of their own. */
   noFoot?: boolean;
-  /** The notes, shown in the tree's place as the jump box is (a computer's; notes.tsx), and the
-   *  key in the head that shows them. */
-  notes?: ReactNode;
-  notesOut?: boolean;
-  notesKey?: ReactNode;
 };
 
 /** How wide the sidebar may be dragged, and at first: freely, to 640px or 60% of the window (the
@@ -142,7 +138,7 @@ export function Sidebar(p: Props) {
   const shape = [loose.map((c) => c.id).join(","), ...p.tree.workspaces.map((w) => `${w.key}:${p.expanded(w.key)}:${w.rows.map((r) => (r.kind === "session" ? r.s.id : `${r.f.key}${p.expanded(r.f.key)}${r.f.sessions.length}`)).join(",")}`), p.expanded("archive"), p.tree.archived.length, [...p.tree.kids.values()].flat().map((s) => s.id).join(","), [...p.tree.runs.values()].flat().map((r) => `${r.id}${p.expanded(`run:${r.id}`)}${r.working.map((s) => s.id)}`).join(",")].join("|");
   useFlip(list, shape);
   const scrolled = useRef(0);
-  useLayoutEffect(() => void (!p.searching && !p.notesOut && list.current && (list.current.scrollTop = scrolled.current)), [p.searching, p.notesOut]);
+  useLayoutEffect(() => void (!p.searching && list.current && (list.current.scrollTop = scrolled.current)), [p.searching]);
   // A session's row, and under it the subagents it has at work.
   // shown: its machine is said by the group above it (no badge on its logo).
   const row = (s: Session, depth: number, shown = false, flip = `s:${s.id}`) => (
@@ -265,7 +261,6 @@ export function Sidebar(p: Props) {
           <LinkDot className="shrink-0" />
         </span>
       )}
-      {p.notesKey}
       <HeadKeys {...p} />
     </div>
   );
@@ -277,12 +272,7 @@ export function Sidebar(p: Props) {
       {/* While searching, the jump box in the tree's place; the tree stays mounted, hidden, and
           comes back scrolled as it was. */}
       {p.searching && <div className="flex min-h-0 flex-1 flex-col">{p.search}</div>}
-      {p.notes && (
-        <div hidden={p.searching || !p.notesOut} className="min-h-0 flex-1 flex-col [&:not([hidden])]:flex">
-          {p.notes}
-        </div>
-      )}
-      <div ref={list} hidden={p.searching || !!p.notesOut} onScroll={(e) => void (scrolled.current = e.currentTarget.scrollTop)} className="relative min-h-0 flex-1 no-bar overflow-y-auto px-2 pb-3" role="tree" aria-label={t("nav.sessions")}>
+      <div ref={list} hidden={p.searching} onScroll={(e) => void (scrolled.current = e.currentTarget.scrollTop)} className="relative min-h-0 flex-1 no-bar overflow-y-auto px-2 pb-3" role="tree" aria-label={t("nav.sessions")}>
         {/* On a phone, with no head: the switch at the list's top. */}
         {p.phone && machines.length > 0 && (
           <div className="flex h-10 items-center">
@@ -499,6 +489,9 @@ function WsRow({ flip, id, name, root, sessions, machine, remote, hidden, open, 
   const real = id !== 0 && !!me && (me.local || me.kind === "panel");
   const [at, setAt] = useMenuAt();
   const [renaming, setRenaming] = useState(false);
+  // Its notes, where its menu was (notekey.tsx): those of its folder.
+  const [notesAt, setNotesAt] = useState<{ x: number; y: number } | null>(null);
+  const notes = useNotes() !== undefined && id !== 0;
   const lp = useLongPress(() => {
     const r = document.activeElement?.closest?.("[role=treeitem]")?.getBoundingClientRect();
     setAt(r ? { x: r.left + 40, y: r.bottom } : { x: 40, y: 40 });
@@ -506,6 +499,7 @@ function WsRow({ flip, id, name, root, sessions, machine, remote, hidden, open, 
   const anchor = at && { getBoundingClientRect: () => DOMRect.fromRect({ x: at.x, y: at.y, width: 0, height: 0 }) };
   const failed = (e: unknown) => toast(t("err.action"), { error: true, description: errText(e) });
   const items = [
+    ...(notes ? [{ icon: <NoteMark size={15} />, label: t("note.view"), run: () => setNotesAt(at) }] : []),
     ...(sessions.length
       ? [{ icon: <Archive size={15} />, label: t("menu.archiveHere", { n: sessions.length }), run: () => void Promise.all(sessions.map((s) => api.patch(s.id, { archived: true }))).then(() => toast(t("toast.archived")), failed) }]
       : []),
@@ -588,6 +582,7 @@ function WsRow({ flip, id, name, root, sessions, machine, remote, hidden, open, 
           </Menu.Portal>
         </Menu.Root>
       )}
+      {notes && <NotesAt root={root} at={notesAt} close={() => setNotesAt(null)} />}
     </>
   );
 }

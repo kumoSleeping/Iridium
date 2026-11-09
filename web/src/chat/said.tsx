@@ -5,7 +5,7 @@
 // peer sent; Iridium's own lines
 // centred and faint; the agent's words as Markdown with the files they name; tool calls and
 // thoughts folded to a line.
-import { Archive, ArchiveRestore, ArrowUpRight, BookOpen, Bot, Check, ChevronRight, Clock, Copy, Cpu, FoldVertical, CircleStop, CircleX, CloudDownload, CloudUpload, Earth, FileCode, FileDiff, FilePen, Files as FilesIcon, FileText, FolderGit2, FlaskConical, FolderOpen, GitBranch, GitCommitHorizontal, GitPullRequest, Globe, Hammer, History, Hourglass, KeyRound, Laptop, List, ListChecks, LoaderCircle, MessageCircleQuestionMark, MessageSquarePlus, Monitor, Network, Package, PencilLine, Plug, RotateCcw, RotateCw, Search, Send, ServerCog, Smartphone, SquareTerminal, Trash2, UserRound, Workflow as WorkflowIcon, Wrench, X, type LucideIcon } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowUpRight, BookOpen, Bot, BotMessageSquare, ChartColumn, Check, ChevronRight, Clock, Copy, Cpu, FoldVertical, CircleStop, CircleX, CloudDownload, CloudUpload, Earth, FileCode, FileDiff, FilePen, Files as FilesIcon, FileText, FolderGit2, FlaskConical, FolderOpen, Folders, GitBranch, GitCommitHorizontal, GitPullRequest, Globe, Hammer, History, Hourglass, KeyRound, Laptop, List, ListChecks, LoaderCircle, LockKeyhole, MessageCircleQuestionMark, MessageSquarePlus, Monitor, MonitorSmartphone, Network, Package, PencilLine, Plug, RotateCcw, RotateCw, Search, Send, ServerCog, Smartphone, SquareTerminal, Trash2, UserRound, Workflow as WorkflowIcon, Wrench, X, type LucideIcon } from "lucide-react";
 import { Children, forwardRef, memo, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Popover } from "@base-ui/react/popover";
 import { api } from "../api/client";
@@ -18,8 +18,9 @@ import { LocalMark } from "../me";
 import { go } from "../route";
 import { Files, Picture, previews, size } from "./files";
 import { cmdOfCall, type Cmd } from "./cmd";
-import { argOf, diffSum, foldLine, foldSaid, kindOf, runCmd, type Diff, type Kind, type Shown, type Step, type Tool } from "./fold";
-import { Markdown } from "./markdown";
+import { argOf, diffSum, foldLine, foldSaid, kindOf, runCmds, type Diff, type Kind, type Shown, type Step, type Tool } from "./fold";
+import { langOf, type Lang } from "./hl";
+import { Code, Markdown } from "./markdown";
 import { MentionCard, Mentioned } from "./mention";
 import { leadingMentions, type Source, withoutFiles, withoutNameLines } from "./refs";
 
@@ -360,6 +361,11 @@ const CMDS: Record<Cmd, LucideIcon> = {
   "ir-access": KeyRound,
   "ir-profile": UserRound,
   "ir-rename": PencilLine,
+  "ir-ws": Folders,
+  "ir-machines": MonitorSmartphone,
+  "ir-secret": LockKeyhole,
+  "ir-usage": ChartColumn,
+  "ir-bot": BotMessageSquare,
   git: GitBranch,
   "git-commit": GitCommitHorizontal,
   "git-push": CloudUpload,
@@ -425,7 +431,8 @@ function StepLine({ s, cwd }: { s: Step; cwd?: string }) {
 const ROW = "flex h-7 min-w-0 cursor-default list-none items-center gap-2 rounded-sm text-sm text-ink-3 hover:text-ink-2 [&::-webkit-details-marker]:hidden pointer-coarse:h-9";
 
 /** The steps between two things said: one of them is its own line; more fold into one, each name
- *  once with its kind's icon and ×n, then the lines their edits changed, which opens to a line each.
+ *  once with its kind's icon (a shell's, one per call when they do different things) and ×n, then
+ *  the lines their edits changed, which opens to a line each.
  *  Each, pressed, shows what it was given and what came back in a card (StepView). */
 function Fold({ steps, session, cwd }: { steps: Step[]; session: string; cwd: string }) {
   if (steps.length === 1) return <StepView s={steps[0]!} session={session} cwd={cwd} />;
@@ -438,7 +445,9 @@ function Fold({ steps, session, cwd }: { steps: Step[]; session: string; cwd: st
         <span className="min-w-0 truncate">
           {runs.map((r, i) => (
             <span key={i} className={cn(i > 0 && "ml-3")}>
-              <KindIcon kind={r.name ? kindOf(r.name) : "thinking"} cmd={r.name ? runCmd(steps, r.name) : undefined} className="mr-2 inline-block align-[-2.5px]" />
+              {(r.name ? runCmds(steps, r.name) : [undefined]).map((c, j, cs) => (
+                <KindIcon key={j} kind={r.name ? kindOf(r.name) : "thinking"} cmd={c} className={cn("inline-block align-[-2.5px]", j < cs.length - 1 ? "mr-0.5" : "mr-2")} />
+              ))}
               <span className="text-ink-2">{r.name || t("msg.thinking")}</span>
               {r.n > 1 && <span className="tabular-nums"> ×{r.n}</span>}
             </span>
@@ -541,7 +550,8 @@ function Part({ label, copy, error, children }: { label: string; copy?: string; 
 }
 
 /** An input object's fields, each its name and its value: a short one on the line, a long one or
- *  one of many lines in a block; an edit's old text red, its new text green. Anything else as it is. */
+ *  one of many lines in a block; an edit's old text red, its new text green. A command in a shell's
+ *  colours, a file's text in its language's (by its extension). Anything else as it is. */
 function Fields({ text }: { text: string }) {
   let v: unknown;
   try {
@@ -551,6 +561,7 @@ function Fields({ text }: { text: string }) {
   }
   if (!v || typeof v !== "object" || Array.isArray(v)) return <Pre text={pretty(text)} />;
   const rows = Object.entries(v as Record<string, unknown>);
+  const file = rows.find(([k, x]) => FILE.has(k) && typeof x === "string")?.[1] as string | undefined;
   if (!rows.length) return <span className="text-xs text-ink-4">{"{}"}</span>;
   return (
     <div className="grid min-w-0 gap-2">
@@ -558,15 +569,18 @@ function Fields({ text }: { text: string }) {
         const str = typeof x === "string" ? x : JSON.stringify(x, null, 2);
         const tone = OLD.has(k) ? "minus" : NEW.has(k) ? "plus" : undefined;
         const inline = !tone && !str.includes("\n") && str.length <= 80;
+        const lang = typeof x !== "string" ? undefined : SHELL.has(k) ? "sh" : OLD.has(k) || NEW.has(k) ? langOf(file) : undefined;
         return inline ? (
           <div key={k} className="flex min-w-0 items-baseline gap-2 text-xs">
             <span className="shrink-0 font-mono text-ink-4">{k}</span>
-            <span className={cn("min-w-0 font-mono [overflow-wrap:anywhere]", typeof x === "string" ? "text-ink-2" : "text-ink-3")}>{str}</span>
+            <span className={cn("min-w-0 font-mono [overflow-wrap:anywhere]", typeof x === "string" ? "text-ink-2" : "text-ink-3")}>
+              <Code text={str} lang={lang} />
+            </span>
           </div>
         ) : (
           <div key={k} className="grid min-w-0 gap-1">
             <span className="font-mono text-xs text-ink-4">{k}</span>
-            <Pre text={str} tone={tone} />
+            <Pre text={str} tone={tone} lang={lang} />
           </div>
         );
       })}
@@ -575,8 +589,10 @@ function Fields({ text }: { text: string }) {
 }
 const OLD = new Set(["old_string", "old_str", "oldText"]);
 const NEW = new Set(["new_string", "new_str", "newText", "content"]);
+const SHELL = new Set(["command", "cmd", "script"]);
+const FILE = new Set(["file_path", "path", "filePath", "notebook_path"]);
 
-function Pre({ text, error, tone, cap }: { text: string; error?: boolean; tone?: "plus" | "minus"; cap?: boolean }) {
+function Pre({ text, error, tone, cap, lang }: { text: string; error?: boolean; tone?: "plus" | "minus"; cap?: boolean; lang?: Lang }) {
   return (
     <pre
       className={cn(
@@ -587,7 +603,7 @@ function Pre({ text, error, tone, cap }: { text: string; error?: boolean; tone?:
         tone === "minus" && "shadow-[inset_2px_0_0_var(--minus)]",
       )}
     >
-      {text}
+      <Code text={text} lang={error ? undefined : lang} />
     </pre>
   );
 }
