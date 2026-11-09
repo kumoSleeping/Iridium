@@ -8,7 +8,7 @@
 // user, 2026-11-08). Shift+Tab cycles the approval mode; Esc stops the turn. The draft is kept on
 // this device; files pasted, dropped or attached go up in chunks while you type, a picture in its
 // own shape under a veil drawn back as it goes; nothing is sent till all are up.
-import { ArrowUp, Box, Brain, ChartPie, Eraser, FileText, FoldVertical, Gauge, LoaderCircle, MessageSquare, Paperclip, ShieldCheck, Slash, Square, X, type LucideIcon } from "lucide-react";
+import { ArrowUp, Box, Brain, ChartPie, Eraser, FileText, FoldVertical, Gauge, LoaderCircle, MessageSquare, Paperclip, ShieldCheck, Square, X, type LucideIcon } from "lucide-react";
 import { forwardRef, Fragment, useEffect, useImperativeHandle, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { Agent, Command, Session, SessionState as LiveSession } from "../api/types.gen";
 import { runShell, shellLine, useShellable } from "./shell";
@@ -472,7 +472,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
  *  folder; ↑↓ and Enter or Tab on a keyboard, a tap on a phone. */
 function AtList({ list, at, pick, point }: { list: Session[]; at: number; pick: (s: Session) => void; point: (i: number) => void }) {
   return (
-    <div role="listbox" aria-label={t("composer.sessions")} className="g-pop glass thick float absolute inset-x-0 bottom-full z-10 mb-2 max-h-72 overflow-y-auto rounded-lg p-1.5">
+    <div role="listbox" aria-label={t("composer.sessions")} className="g-pop glass thick float absolute inset-x-0 bottom-full z-10 mb-2 max-h-72 no-bar overflow-y-auto rounded-lg p-1.5">
       {list.map((x, i) => (
         <button
           key={x.id}
@@ -497,7 +497,7 @@ function AtList({ list, at, pick, point }: { list: Session[]; at: number; pick: 
   );
 }
 
-/** The common commands' icons; an agent's own have the slash. */
+/** The common commands' icons; an agent's own have none (no slash: the user, 2026-11-09). */
 const CMD_ICONS: Record<(typeof COMMON)[number], LucideIcon> = { clear: Eraser, compact: FoldVertical, context: ChartPie, usage: Gauge, model: Box, effort: Brain, mode: ShieldCheck };
 const isCommon = (c: Command) => COMMON.includes(c.name as (typeof COMMON)[number]);
 
@@ -507,10 +507,10 @@ const isCommon = (c: Command) => COMMON.includes(c.name as (typeof COMMON)[numbe
  *  common ones, then the agent's own, each under its head. ↑↓ and Enter or Tab on a keyboard. */
 function Palette({ list, at, agent, grouped, pick, point }: { list: Command[]; at: number; agent: Agent; grouped: boolean; pick: (c: Command) => void; point: (i: number) => void }) {
   return (
-    <div role="listbox" aria-label={t("composer.commands")} className="g-pop glass thick float absolute bottom-full left-2 z-10 mb-2 max-h-[min(360px,50dvh)] w-80 max-w-[calc(100%-16px)] origin-bottom-left overflow-y-auto overscroll-contain rounded-lg p-1.5 text-ink">
+    <div role="listbox" aria-label={t("composer.commands")} className="g-pop glass thick float absolute bottom-full left-2 z-10 mb-2 max-h-[min(360px,50dvh)] w-80 max-w-[calc(100%-16px)] origin-bottom-left no-bar overflow-y-auto overscroll-contain rounded-lg p-1.5 text-ink">
       <div className="g-stagger flex flex-col">
         {list.map((c, i) => {
-          const Icon = isCommon(c) ? CMD_ICONS[c.name as (typeof COMMON)[number]] : Slash;
+          const Icon = isCommon(c) ? CMD_ICONS[c.name as (typeof COMMON)[number]] : undefined;
           const head = grouped && (i === 0 || isCommon(list[i - 1]!) !== isCommon(c));
           return (
             <Fragment key={c.name}>
@@ -526,7 +526,7 @@ function Palette({ list, at, agent, grouped, pick, point }: { list: Command[]; a
                 style={{ "--i": i } as CSSProperties}
                 className={cn("flex h-8 w-full shrink-0 cursor-default items-center gap-2.5 rounded-md px-2.5 text-left text-base outline-none select-none pointer-coarse:h-11", i === at && "bg-fill")}
               >
-                <Icon size={15} className="shrink-0 text-ink-2" aria-hidden />
+                {Icon && <Icon size={15} className="shrink-0 text-ink-2" aria-hidden />}
                 <span className="shrink-0">{c.name}</span>
                 {c.argumentHint && <span className="max-w-[30%] min-w-0 shrink truncate font-mono text-xs text-ink-3">{c.argumentHint}</span>}
                 <span className="min-w-0 flex-1 truncate text-right text-xs text-ink-3">{c.description}</span>
