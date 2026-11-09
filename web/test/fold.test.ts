@@ -218,12 +218,12 @@ describe("a shell call's sort", () => {
     ]);
     expect(shown.map((s) => s.kind)).toEqual(["user", "assistant"]);
   });
-  test("a fold's run of one name keeps a sort only all its calls share", () => {
+  test("a fold's run of one name counts its calls by sort, in order", () => {
     const think: Step = { at: "t", kind: "thinking", text: "hmm" };
-    expect(runCmds([call("Bash", { command: "ir send a x" }), think, call("Read", { file_path: "/a" }), call("Bash", { command: "cd ~ && ir send b y" })], "Bash")).toEqual(["ir-send"]);
-    expect(runCmds([call("Bash", { command: "ir send a x" }), call("Bash", { command: "git status" }), call("Bash", { command: "ir send a x" })], "Bash")).toEqual(["ir-send", "git-status", "ir-send"]);
-    expect(runCmds([call("Bash", { command: "ir send a x" }), call("Bash", { command: "frobnicate" })], "Bash")).toEqual(["ir-send", undefined]);
-    expect(runCmds([call("Read", { file_path: "/a" }), call("Read", { file_path: "/b" })], "Read")).toEqual([undefined]);
+    expect(runCmds([call("Bash", { command: "ir send a x" }), think, call("Read", { file_path: "/a" }), call("Bash", { command: "cd ~ && ir send b y" })], "Bash")).toEqual([{ cmd: "ir-send", n: 2 }]);
+    expect(runCmds([call("Bash", { command: "ir send a x" }), call("Bash", { command: "git status" }), call("Bash", { command: "ir send a x" })], "Bash")).toEqual([{ cmd: "ir-send", n: 2 }, { cmd: "git-status", n: 1 }]);
+    expect(runCmds([call("Bash", { command: "ir send a x" }), call("Bash", { command: "frobnicate" })], "Bash")).toEqual([{ cmd: "ir-send", n: 1 }, { cmd: undefined, n: 1 }]);
+    expect(runCmds([call("Read", { file_path: "/a" }), call("Read", { file_path: "/b" })], "Read")).toEqual([{ cmd: undefined, n: 2 }]);
   });
 });
 

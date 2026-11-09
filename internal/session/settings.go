@@ -12,7 +12,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/agent"
 	"github.com/kumoSleeping/iridium/internal/agents"
 	"github.com/kumoSleeping/iridium/internal/api"
-	"github.com/kumoSleeping/iridium/internal/remote/wire"
+	"github.com/kumoSleeping/iridium/internal/harness"
 	"github.com/kumoSleeping/iridium/internal/store"
 )
 
@@ -20,11 +20,11 @@ import (
 // store: set on the running agent at once, and given to every later start. A new session's mode is the
 // config's for its agent.
 
-// SetModel sets the session's model; "" is the agent's default. One a holder at its machine has
-// (DSH Desktop) is set there.
+// SetModel sets the session's model; "" is the agent's default. One another process at its machine
+// holds is set there, through its channel (harness.Setter).
 func (m *Manager) SetModel(ctx context.Context, id, model string) error {
 	if model != "" {
-		if done, err := m.heldSetting(ctx, id, wire.HeldSetParams{Model: model}); done {
+		if done, err := m.channelSet(ctx, id, harness.Change{Model: model}); done {
 			return err
 		}
 	}
@@ -179,11 +179,11 @@ func (m *Manager) SetPreset(ctx context.Context, id, preset string) error {
 	return nil
 }
 
-// SetEffort sets the session's thinking effort. One a holder at its machine has (DSH Desktop) is
-// set there.
+// SetEffort sets the session's thinking effort. One another process at its machine holds
+// is set there, through its channel (harness.Setter).
 func (m *Manager) SetEffort(ctx context.Context, id, effort string) error {
 	if effort != "" {
-		if done, err := m.heldSetting(ctx, id, wire.HeldSetParams{Effort: effort}); done {
+		if done, err := m.channelSet(ctx, id, harness.Change{Effort: effort}); done {
 			return err
 		}
 	}
@@ -261,7 +261,7 @@ func (m *Manager) SetUltracode(ctx context.Context, id string, on bool) error {
 }
 
 // ErrBadRequest: the request makes no sense for this session.
-var ErrBadRequest = errors.New("bad request")
+var ErrBadRequest = harness.ErrBadRequest
 
 // Answer answers an open ask. Always (allowing a tool): its pattern is allowed from now on in this
 // session, and other open asks it matches are allowed too.
@@ -465,8 +465,10 @@ func (h *Hosted) efforts() []string {
 	h.mu.Lock()
 	models, now := h.models, cmp.Or(h.model, h.meta.Model)
 	h.mu.Unlock()
-	if cat, ok := h.m.cachedCatalog(h.meta.Machine); ok && h.meta.Agent == api.AgentDsh { // its machine's, as the page lists them
-		models, now = cat.Models, cmp.Or(now, cat.Default)
+	if mo, ok := channelOf[harness.Models](h.m, h.meta.Agent); ok {
+		if cat, ok := mo.Cached(h.meta.Machine); ok { // its machine's, as the page lists them
+			models, now = cat.Models, cmp.Or(now, cat.Default)
+		}
 	}
 	for _, m := range models {
 		if m.Value == now {
@@ -479,7 +481,7 @@ func (h *Hosted) efforts() []string {
 	return nil
 }
 
-// settable is the hosted session a setting goes to: one found on disk (DSH Desktop's) is taken
+// settable is the hosted session a setting goes to: one found on disk (another app's) is taken
 // up first, as a message would, without starting its agent: its model, effort or preset is set
 // before the first message there (the user, 2026-11-09).
 func (m *Manager) settable(ctx context.Context, id string) (*Hosted, error) {

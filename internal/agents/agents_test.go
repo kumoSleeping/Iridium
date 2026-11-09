@@ -3,6 +3,7 @@ package agents
 import (
 	"fmt"
 	"path"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -150,5 +151,29 @@ func TestRemoteRows(t *testing.T) {
 		if i.MinRemote != "" && i.FindRemote == nil {
 			t.Errorf("%s: a least version but no FindRemote", i.Name)
 		}
+	}
+}
+
+// Every agent's home is denied, where it is moved too; every agent names its sessions to the
+// processes it starts, Iridium's own variable believed first.
+func TestHomesAndSessionVars(t *testing.T) {
+	env := map[string]string{"DSH_HOME": "/srv/dsh", "CODEX_HOME": "/srv/codex"}
+	got := Homes("/home/u", func(k string) string { return env[k] })
+	for _, want := range []string{"/home/u/.claude", "/home/u/.codex", "/home/u/.pi", "/home/u/.dsh", "/srv/dsh", "/srv/codex"} {
+		if !slices.Contains(got, want) {
+			t.Errorf("Homes lacks %s: %v", want, got)
+		}
+	}
+	for _, i := range All() {
+		if i.HomeDir == "" || len(i.SessionEnv) == 0 {
+			t.Errorf("%s: no HomeDir or SessionEnv", i.Agent)
+		}
+	}
+	want := []string{"IRIDIUM_SESSION", "CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "CODEX_SESSION_ID", "DSH_SESSION_ID", "PI_SESSION_ID"}
+	if vars := SessionVars(); !slices.Equal(vars, want) {
+		t.Errorf("SessionVars = %v, want %v (docs/api.md)", vars, want)
+	}
+	if len(sessionVarOrder) != len(all) {
+		t.Errorf("sessionVarOrder lacks an agent: %v", sessionVarOrder)
 	}
 }

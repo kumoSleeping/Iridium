@@ -372,6 +372,7 @@ export const zh = {
   "settings.terminalsRow": "终端管理",
   "settings.downloaded": "已下载",
   "settings.checkFailed": "更新失败",
+  "settings.version": "版本",
   "settings.check": "检查更新",
   "settings.checking": "检查中",
   "settings.upToDate": "已是最新",

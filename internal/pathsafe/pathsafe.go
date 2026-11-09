@@ -11,6 +11,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/kumoSleeping/iridium/internal/agents"
 )
 
 var (
@@ -47,21 +49,15 @@ func New(allow, deny, except []string) *Guard {
 }
 
 // Deny is the directories always denied: Iridium's state and config directories, extra (the
-// agents' homes where moved, as by CLAUDE_CONFIG_DIR), ~/.ssh, ~/.claude, ~/.codex, ~/.pi, ~/.dsh,
-// $CODEX_HOME, and /proc (other processes' environments).
+// agents' homes where moved, as by CLAUDE_CONFIG_DIR), ~/.ssh, the agents' homes (agents.Homes),
+// and /proc (other processes' environments).
 func Deny(state, config string, extra ...string) []string {
 	home, _ := os.UserHomeDir()
 	out := []string{state, config, "/proc"}
 	if home != "" {
-		for _, d := range []string{".ssh", ".claude", ".codex", ".pi", ".dsh"} {
-			out = append(out, filepath.Join(home, d))
-		}
+		out = append(out, filepath.Join(home, ".ssh"))
 	}
-	for _, env := range []string{"CLAUDE_CONFIG_DIR", "CODEX_HOME"} {
-		if v := os.Getenv(env); v != "" {
-			out = append(out, v)
-		}
-	}
+	out = append(out, agents.Homes(home, os.Getenv)...)
 	for _, e := range extra {
 		if e != "" {
 			out = append(out, e)

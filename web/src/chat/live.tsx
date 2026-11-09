@@ -4,7 +4,7 @@
 import { useEffect, useState } from "react";
 import { t } from "../i18n";
 import { cn } from "../ui";
-import { cmdOfCall } from "./cmd";
+import { cmdOfCall, isShell } from "./cmd";
 import { argOf, kindOf } from "./fold";
 import { partialInput, tail } from "./partial";
 import { KindIcon } from "./said";
@@ -16,8 +16,9 @@ export function ToolDraft({ name, input }: { name: string; input: string; whole?
   const a = argOf(call);
   return (
     <div className="g-fade flex h-7 min-w-0 items-center gap-2 text-sm" aria-live="off">
-      <KindIcon kind={kindOf(name)} cmd={cmdOfCall(call)} />
-      <span className="shine shrink-0">{name}</span>
+      <KindIcon kind={kindOf(name)} cmd={cmdOfCall(call)} shell={isShell(name)} />
+      {/* A shell's name only till its command comes. */}
+      {!(isShell(name) && a.arg) && <span className="shine shrink-0">{name}</span>}
       {a.arg ? (
         <span className={cn("min-w-0 truncate text-ink-3", a.code ? "font-mono text-xs" : "text-xs")}>{tail(a.arg)}</span>
       ) : (

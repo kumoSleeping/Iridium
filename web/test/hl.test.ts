@@ -42,3 +42,22 @@ describe("hl", () => {
     expect(langOf("README.md")).toBeUndefined();
   });
 });
+
+describe("hl output", () => {
+  const out = (s: string, k: Kind) => kinds(s, "out", k);
+  it("joins back and finds literals, quotes, places", () => {
+    const s = "None {'findings': [{'line': 177, 'ok': True, 'detail': 'The original lis\nit's at internal/a.go:12:3 --- FAIL\nok  \tpkg\t0.12s";
+    expect(highlight(s, "out").map((p) => p[0]).join("")).toBe(s);
+    expect(out(s, "kw")).toEqual(["None", "True"]);
+    expect(out(s, "str")).toEqual(["'findings'", "'line'", "'ok'", "'detail'"]);
+    expect(out(s, "num")).toEqual(["177", "0.12"]);
+    expect(out(s, "cmd")).toEqual(["internal/a.go:12:3"]);
+    expect(out(s, "minus")).toEqual(["FAIL"]);
+    expect(out(s, "plus")).toEqual(["ok"]);
+  });
+  it("colours a diff by line", () => {
+    const s = "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new\n same";
+    expect(out(s, "minus")).toEqual(["-old\n"]);
+    expect(out(s, "plus")).toEqual(["+new\n"]);
+  });
+});
