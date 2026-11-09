@@ -129,15 +129,20 @@ export function buildTree(all: Session[], workspaces: Workspace[], unsorted: str
   };
   // A group is a folder sessions are in (the user, 2026-11-08): one with none shown is not listed.
   // A session is listed in the section of the machine it runs at, first (the user, 2026-11-09): a
-  // group with sessions at two machines (a coordinator here and its sessions there) is listed in
-  // each, by the same name, each time with those at that machine. Which group a session is in is
-  // not changed (ir ls --here, a new session in its starter's group): only where it is drawn.
+  // group with sessions at two machines is listed in each, by the same name, each time with those
+  // at that machine. Which group a session is in is not changed (ir ls --here, a new session in its
+  // starter's group): only where it is drawn. One of this machine's in a group at another (a
+  // coordinator there, opened by that group's "+") stays in that group, marked on its logo (the
+  // user, 2026-11-09).
   const nodes = workspaces
     .filter((w) => byWs.get(w.id)?.length)
     .flatMap((w) => {
-      const by = new Map<string, Session[]>();
-      for (const s of byWs.get(w.id)!) by.set(s.machine ?? "", [...(by.get(s.machine ?? "") ?? []), s]);
       const own = machineOf(w.path) ?? "";
+      const by = new Map<string, Session[]>();
+      for (const s of byWs.get(w.id)!) {
+        const at = s.machine ?? own;
+        by.set(at, [...(by.get(at) ?? []), s]);
+      }
       return [...by].map(([m, ss]) => node(m === own ? `w${w.id}` : `w${w.id}@${m}`, w.id, w.name, w.path, ss, w.hidden, m));
     });
   // 未归类 has no root: its folders are grouped under the directory all its sessions share, and shown
