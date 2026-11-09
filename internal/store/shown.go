@@ -29,12 +29,13 @@ const shownSchema = `CREATE TABLE shown (
 	CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);`
 
 // Shown is a session's marker. Hidden ones keep Size, the transcript's size when hidden, and
-// QuietUntil (ms): growth before then is its agent ending, not activity. Legacy: hidden by the
-// old archive flag, its agent and size not known yet.
+// QuietUntil (ms): growth before then is its agent ending, not activity. At (ms): when it was
+// set or taken off. Legacy: hidden by the old archive flag, its agent and size not known yet.
 type Shown struct {
 	Shown      bool
 	Size       int64
 	QuietUntil int64
+	At         int64
 	Legacy     bool
 }
 
@@ -58,7 +59,7 @@ func (v Visibility) Shown(agent, session string) bool {
 
 // Visibility reads every marker.
 func (s *Store) Visibility() (Visibility, error) {
-	rows, err := s.db.Query(`SELECT agent, session, shown, size, quiet_until FROM shown`)
+	rows, err := s.db.Query(`SELECT agent, session, shown, size, quiet_until, at FROM shown`)
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +68,7 @@ func (s *Store) Visibility() (Visibility, error) {
 	for rows.Next() {
 		var a, id string
 		var r Shown
-		if err := rows.Scan(&a, &id, &r.Shown, &r.Size, &r.QuietUntil); err != nil {
+		if err := rows.Scan(&a, &id, &r.Shown, &r.Size, &r.QuietUntil, &r.At); err != nil {
 			return nil, err
 		}
 		r.Legacy = a == ""
@@ -80,8 +81,8 @@ func (s *Store) Visibility() (Visibility, error) {
 func (s *Store) ShownRow(agent, session string) (Shown, bool, error) {
 	var r Shown
 	var a string
-	err := s.db.QueryRow(`SELECT agent, shown, size, quiet_until FROM shown WHERE session = ? AND agent IN (?, '') ORDER BY agent DESC LIMIT 1`, session, agent).
-		Scan(&a, &r.Shown, &r.Size, &r.QuietUntil)
+	err := s.db.QueryRow(`SELECT agent, shown, size, quiet_until, at FROM shown WHERE session = ? AND agent IN (?, '') ORDER BY agent DESC LIMIT 1`, session, agent).
+		Scan(&a, &r.Shown, &r.Size, &r.QuietUntil, &r.At)
 	if errors.Is(err, sql.ErrNoRows) {
 		return r, false, nil
 	}
