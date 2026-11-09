@@ -227,6 +227,7 @@ func (x *Index) Start() error {
 	x.Scan()
 	x.publishWorkspaces()
 	x.publishColors()
+	x.publishFolderPlaces()
 	x.wg.Add(2)
 	go x.loop()
 	go x.settle()

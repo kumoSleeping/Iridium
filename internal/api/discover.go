@@ -12,6 +12,29 @@ type Workspace struct {
 	Hidden bool `json:"hidden,omitempty"`
 }
 
+// WorkspaceOrder lists groups in the order they were dragged to (PUT /api/workspaces/order): IDs
+// first to last, before any left out.
+type WorkspaceOrder struct {
+	IDs []int64 `json:"ids"`
+}
+
+// FolderPlaces is where the folders in the list were put, by path as grouped (Session's cwd, or
+// "<machine>:<cwd>"): the carried state "folderPlaces". Order: the key each folder dragged is
+// sorted by among those in its group (as Session.Order); one not in it, by its latest session's
+// activity. Pinned: those pinned, first in their group.
+type FolderPlaces struct {
+	Order  map[string]float64 `json:"order"`
+	Pinned []string           `json:"pinned"`
+}
+
+// FolderPlace puts a folder (PATCH /api/folders/place); a field left out stays. Order 0 takes its
+// key off.
+type FolderPlace struct {
+	Path   string   `json:"path"`
+	Order  *float64 `json:"order,omitempty"`
+	Pinned *bool    `json:"pinned,omitempty"`
+}
+
 // WorkspacePatch renames a group, hides it or shows it again; a field left out stays.
 type WorkspacePatch struct {
 	Name   *string `json:"name,omitempty"`
@@ -21,14 +44,16 @@ type WorkspacePatch struct {
 // SessionPatch changes what lies over a session; a field left out stays. Name "" takes the name
 // off. Workspace moves it (0: none), and it is never moved by discovery again. Color "" takes the
 // colour tag off. ByAgent: Name is the session's agent's (ir rename from a session), which does
-// not replace a name the user gave (409) and is cleaned as a title line is.
+// not replace a name the user gave (409) and is cleaned as a title line is. Order: the key it was
+// dragged to among those beside it (Session.Order); 0 takes it off.
 type SessionPatch struct {
-	Name      *string `json:"name,omitempty"`
-	ByAgent   bool    `json:"byAgent,omitempty"`
-	Pinned    *bool   `json:"pinned,omitempty"`
-	Archived  *bool   `json:"archived,omitempty"`
-	Workspace *int64  `json:"workspace,omitempty"`
-	Color     *Color  `json:"color,omitempty"`
+	Name      *string  `json:"name,omitempty"`
+	ByAgent   bool     `json:"byAgent,omitempty"`
+	Pinned    *bool    `json:"pinned,omitempty"`
+	Archived  *bool    `json:"archived,omitempty"`
+	Workspace *int64   `json:"workspace,omitempty"`
+	Color     *Color   `json:"color,omitempty"`
+	Order     *float64 `json:"order,omitempty"`
 }
 
 // FolderColor tags folder Path (absolute) with a colour; Color "" takes it off. The carried state

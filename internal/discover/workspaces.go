@@ -353,6 +353,59 @@ func (x *Index) HideWorkspace(id int64, hidden bool) error {
 	return nil
 }
 
+// OrderWorkspaces lists the groups of ids in that order, dragged so on the page.
+func (x *Index) OrderWorkspaces(ids []int64) error {
+	if err := x.o.Store.SetWorkspaceOrder(ids); err != nil {
+		return err
+	}
+	x.Changed()
+	return nil
+}
+
+// FolderPlaces is where the folders were put, dragged or pinned: the carried state "folderPlaces".
+func (x *Index) FolderPlaces() (api.FolderPlaces, error) {
+	order, err := x.o.Store.FolderOrder()
+	if err != nil {
+		return api.FolderPlaces{}, err
+	}
+	pinned, err := x.o.Store.FolderPins()
+	if pinned == nil {
+		pinned = []string{}
+	}
+	return api.FolderPlaces{Order: order, Pinned: pinned}, err
+}
+
+// PlaceFolder sets where the folder of p.Path is, dragged or pinned so on the page, and carries it.
+func (x *Index) PlaceFolder(p api.FolderPlace) error {
+	if p.Path == "" || len(p.Path) > 4096 {
+		return errors.New("no folder path")
+	}
+	if p.Order != nil {
+		if err := x.o.Store.SetFolderOrder(p.Path, *p.Order); err != nil {
+			return err
+		}
+	}
+	if p.Pinned != nil {
+		if err := x.o.Store.SetFolderPinned(p.Path, *p.Pinned); err != nil {
+			return err
+		}
+	}
+	x.publishFolderPlaces()
+	return nil
+}
+
+func (x *Index) publishFolderPlaces() {
+	if x.o.Hub == nil {
+		return
+	}
+	f, err := x.FolderPlaces()
+	if err != nil {
+		x.o.Logf("discover: folder places: %v", err)
+		return
+	}
+	x.o.Hub.Set("folderPlaces", f)
+}
+
 // DeleteWorkspace drops a group; its sessions are grouped again by their folders (classify).
 func (x *Index) DeleteWorkspace(id int64) error {
 	before, err := x.o.Store.Assignments()
@@ -408,6 +461,11 @@ func (x *Index) Patch(id string, p api.SessionPatch) error {
 	}
 	if p.Color != nil {
 		if err := st.SetColor(id, string(*p.Color)); err != nil {
+			return err
+		}
+	}
+	if p.Order != nil {
+		if err := st.SetOrder(id, *p.Order); err != nil {
 			return err
 		}
 	}

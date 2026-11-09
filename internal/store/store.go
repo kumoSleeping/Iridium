@@ -180,6 +180,21 @@ var schema = []string{
 	// 19: the root folder a note serves (the user, 2026-11-09): the composer lists those of its
 	// session's; "" (older notes) every one's.
 	`ALTER TABLE notes ADD COLUMN root TEXT NOT NULL DEFAULT '';`,
+	// 20: the panels each Bot follows (follows.go).
+	`CREATE TABLE bot_follows (
+		bot TEXT NOT NULL,
+		panel TEXT NOT NULL,
+		PRIMARY KEY (bot, panel)
+	);
+	CREATE INDEX bot_follows_panel ON bot_follows(panel);`,
+	// 21: where a session was dragged to in the list (the user, 2026-11-09): the key it is sorted by
+	// in place of its last activity (order.go). 21 to 23: IF NOT EXISTS, as a test instance had
+	// them under other numbers once.
+	`CREATE TABLE IF NOT EXISTS session_order (session TEXT PRIMARY KEY, at REAL NOT NULL);`,
+	// 22: where a folder was dragged to among those in its group, by its path as grouped (order.go).
+	`CREATE TABLE IF NOT EXISTS folder_order (path TEXT PRIMARY KEY, at REAL NOT NULL);`,
+	// 23: folders pinned in the list (the user, 2026-11-09): first among those in their group.
+	`CREATE TABLE IF NOT EXISTS folder_pins (path TEXT PRIMARY KEY, at INTEGER NOT NULL);`,
 }
 
 // steps run in Go after the migration of their version, in the same transaction.
@@ -289,16 +304,19 @@ type Overlay struct {
 	Workspace  int64
 	Manual     bool
 	Color      string
+	// Order: the key it was dragged to (SetOrder); 0 none.
+	Order float64
 }
 
 // Overlays is every session's overlay, by session id.
 func (s *Store) Overlays() (map[string]Overlay, error) {
 	rows, err := s.db.Query(`
-		SELECT session, MAX(name), MAX(auto), MAX(pinned), MAX(workspace), MAX(manual), MAX(color) FROM (
-			SELECT session, name, auto, 0 AS pinned, 0 AS workspace, 0 AS manual, '' AS color FROM names
-			UNION ALL SELECT session, '', 0, 1, 0, 0, '' FROM pins
-			UNION ALL SELECT session, '', 0, 0, IFNULL(workspace, 0), manual, '' FROM assignments
-			UNION ALL SELECT session, '', 0, 0, 0, 0, color FROM session_colors
+		SELECT session, MAX(name), MAX(auto), MAX(pinned), MAX(workspace), MAX(manual), MAX(color), MAX(ord) FROM (
+			SELECT session, name, auto, 0 AS pinned, 0 AS workspace, 0 AS manual, '' AS color, 0.0 AS ord FROM names
+			UNION ALL SELECT session, '', 0, 1, 0, 0, '', 0 FROM pins
+			UNION ALL SELECT session, '', 0, 0, IFNULL(workspace, 0), manual, '', 0 FROM assignments
+			UNION ALL SELECT session, '', 0, 0, 0, 0, color, 0 FROM session_colors
+			UNION ALL SELECT session, '', 0, 0, 0, 0, '', at FROM session_order
 		) GROUP BY session`)
 	if err != nil {
 		return nil, err
@@ -308,7 +326,7 @@ func (s *Store) Overlays() (map[string]Overlay, error) {
 	for rows.Next() {
 		var id string
 		var o Overlay
-		if err := rows.Scan(&id, &o.Name, &o.AgentNamed, &o.Pinned, &o.Workspace, &o.Manual, &o.Color); err != nil {
+		if err := rows.Scan(&id, &o.Name, &o.AgentNamed, &o.Pinned, &o.Workspace, &o.Manual, &o.Color, &o.Order); err != nil {
 			return nil, err
 		}
 		out[id] = o
@@ -364,8 +382,9 @@ type Workspace struct {
 	Hidden bool   `json:"hidden,omitempty"`
 }
 
+// AddWorkspace makes a workspace, listed after the others (SetWorkspaceOrder).
 func (s *Store) AddWorkspace(name, path string) (int64, error) {
-	r, err := s.db.Exec(`INSERT INTO workspaces (name, path, created_at) VALUES (?, ?, ?)`, name, path, now())
+	r, err := s.db.Exec(`INSERT INTO workspaces (name, path, sort, created_at) VALUES (?, ?, (SELECT IFNULL(MAX(sort), -1) + 1 FROM workspaces), ?)`, name, path, now())
 	if err != nil {
 		return 0, err
 	}

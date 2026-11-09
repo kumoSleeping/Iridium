@@ -24,6 +24,8 @@ func (s *Server) discoverRoutes(mux *http.ServeMux) {
 	// Folder groups are made as sessions go in them, never by hand (the user, 2026-11-08); a name is
 	// the panels' and 本机's to change; a session anyone's to name, colour, archive.
 	mux.HandleFunc("PATCH /api/workspaces/{id}", s.manages(s.renameWorkspace))
+	mux.HandleFunc("PUT /api/workspaces/order", s.manages(s.orderWorkspaces))
+	mux.HandleFunc("PATCH /api/folders/place", s.manages(s.placeFolder))
 	mux.HandleFunc("PATCH /api/sessions/{id}", s.patchSession)
 	mux.HandleFunc("PUT /api/colors", s.manages(s.folderColor))
 }
@@ -63,6 +65,22 @@ func (s *Server) renameWorkspace(w http.ResponseWriter, r *http.Request) {
 		err = s.Discover.HideWorkspace(id, *req.Hidden)
 	}
 	s.discoverDone(w, err)
+}
+
+func (s *Server) orderWorkspaces(w http.ResponseWriter, r *http.Request) {
+	var req api.WorkspaceOrder
+	if !readJSON(w, r, &req) {
+		return
+	}
+	s.discoverDone(w, s.Discover.OrderWorkspaces(req.IDs))
+}
+
+func (s *Server) placeFolder(w http.ResponseWriter, r *http.Request) {
+	var req api.FolderPlace
+	if !readJSON(w, r, &req) {
+		return
+	}
+	s.discoverDone(w, s.Discover.PlaceFolder(req))
 }
 
 func (s *Server) patchSession(w http.ResponseWriter, r *http.Request) {

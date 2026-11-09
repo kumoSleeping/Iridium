@@ -451,7 +451,7 @@ func (m *Manager) Stop(ctx context.Context, id string) error {
 }
 
 // List is the hosted sessions, then those the Discovery found that Iridium does not host,
-// pinned first, then the most recent.
+// pinned first, then the most recent: by the key one was dragged to, else its last activity.
 func (m *Manager) List(ctx context.Context) ([]api.Session, error) {
 	over, err := m.o.Store.Overlays()
 	if err != nil {
@@ -480,7 +480,7 @@ func (m *Manager) List(ctx context.Context) ([]api.Session, error) {
 		for _, s := range found {
 			if !seen[s.ID] {
 				o := over[s.ID]
-				s.Name, s.Pinned, s.Workspace, s.Color = o.Name, o.Pinned, o.Workspace, api.Color(o.Color)
+				s.Name, s.Pinned, s.Workspace, s.Color, s.Order = o.Name, o.Pinned, o.Workspace, api.Color(o.Color), o.Order
 				s.Archived = !vis.Shown(string(s.Agent), s.ID)
 				m.parentOf(&s)
 				out = append(out, s)
@@ -499,9 +499,18 @@ func (m *Manager) List(ctx context.Context) ([]api.Session, error) {
 			}
 			return 1
 		}
-		return int(b.UpdatedAt - a.UpdatedAt)
+		return cmp.Compare(sortKey(b), sortKey(a))
 	})
 	return out, nil
+}
+
+// sortKey is what a session is sorted by in the list: where it was dragged to, else when it
+// last worked.
+func sortKey(s api.Session) float64 {
+	if s.Order != 0 {
+		return s.Order
+	}
+	return float64(s.UpdatedAt)
 }
 
 // State is the open session's carried state.

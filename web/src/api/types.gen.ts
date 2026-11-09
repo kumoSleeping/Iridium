@@ -118,6 +118,11 @@ export interface Session {
    */
   color?: Color;
   /**
+   * Order: the key it was dragged to in the list (ms, as UpdatedAt), sorted by in place of
+   * UpdatedAt; 0 none.
+   */
+  order?: number /* float64 */;
+  /**
    * Launcher: the session that started this one, if discovery saw it.
    */
   launcher?: string;
@@ -915,6 +920,32 @@ export interface Workspace {
   hidden?: boolean;
 }
 /**
+ * WorkspaceOrder lists groups in the order they were dragged to (PUT /api/workspaces/order): IDs
+ * first to last, before any left out.
+ */
+export interface WorkspaceOrder {
+  ids: number /* int64 */[];
+}
+/**
+ * FolderPlaces is where the folders in the list were put, by path as grouped (Session's cwd, or
+ * "<machine>:<cwd>"): the carried state "folderPlaces". Order: the key each folder dragged is
+ * sorted by among those in its group (as Session.Order); one not in it, by its latest session's
+ * activity. Pinned: those pinned, first in their group.
+ */
+export interface FolderPlaces {
+  order: { [key: string]: number /* float64 */};
+  pinned: string[];
+}
+/**
+ * FolderPlace puts a folder (PATCH /api/folders/place); a field left out stays. Order 0 takes its
+ * key off.
+ */
+export interface FolderPlace {
+  path: string;
+  order?: number /* float64 */;
+  pinned?: boolean;
+}
+/**
  * WorkspacePatch renames a group, hides it or shows it again; a field left out stays.
  */
 export interface WorkspacePatch {
@@ -925,7 +956,8 @@ export interface WorkspacePatch {
  * SessionPatch changes what lies over a session; a field left out stays. Name "" takes the name
  * off. Workspace moves it (0: none), and it is never moved by discovery again. Color "" takes the
  * colour tag off. ByAgent: Name is the session's agent's (ir rename from a session), which does
- * not replace a name the user gave (409) and is cleaned as a title line is.
+ * not replace a name the user gave (409) and is cleaned as a title line is. Order: the key it was
+ * dragged to among those beside it (Session.Order); 0 takes it off.
  */
 export interface SessionPatch {
   name?: string;
@@ -934,6 +966,7 @@ export interface SessionPatch {
   archived?: boolean;
   workspace?: number /* int64 */;
   color?: Color;
+  order?: number /* float64 */;
 }
 /**
  * FolderColor tags folder Path (absolute) with a colour; Color "" takes it off. The carried state

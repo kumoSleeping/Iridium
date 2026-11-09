@@ -99,6 +99,9 @@ type Session struct {
 	Workspace int64 `json:"workspace,omitempty"` // 0: none
 	// Color: the colour tag it was given in its menu, if any.
 	Color Color `json:"color,omitempty"`
+	// Order: the key it was dragged to in the list (ms, as UpdatedAt), sorted by in place of
+	// UpdatedAt; 0 none.
+	Order float64 `json:"order,omitempty"`
 	// Launcher: the session that started this one, if discovery saw it.
 	Launcher string `json:"launcher,omitempty"`
 	// Subagent: an Agent tool's subtask (Claude) or a subagent's thread (Codex), listed as a

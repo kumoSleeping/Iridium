@@ -72,8 +72,8 @@ describe("api", () => {
 
 describe("the event stream", () => {
   test("names the list, the quota, the update, the confirmations and the open session with its context", () => {
-    expect(keysFor(null)).toEqual(["list", "workspaces", "colors", "quota", "update", "confirms", "terminals", "machines", "notes"]);
-    expect(streamURL("a")).toBe("/api/events?sub=list&sub=workspaces&sub=colors&sub=quota&sub=update&sub=confirms&sub=terminals&sub=machines&sub=notes&sub=session%3Aa&sub=context%3Aa");
+    expect(keysFor(null)).toEqual(["list", "workspaces", "folderPlaces", "colors", "quota", "update", "confirms", "terminals", "machines", "notes"]);
+    expect(streamURL("a")).toBe("/api/events?sub=list&sub=workspaces&sub=folderPlaces&sub=colors&sub=quota&sub=update&sub=confirms&sub=terminals&sub=machines&sub=notes&sub=session%3Aa&sub=context%3Aa");
   });
   test("the store: whole values, null drops, listeners told", () => {
     const told: string[] = [];

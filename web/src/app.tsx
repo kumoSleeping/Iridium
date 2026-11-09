@@ -26,6 +26,7 @@ import { useConfirms, useList, useMachines } from "./store";
 import { follow } from "./stream";
 import { ToastList, toasts } from "./toast";
 import { buildTree, flat } from "./tree";
+import { useFolderPlaces } from "./reorder";
 import { cn, holdMenu, IrMark, kept, keep, params, PHONE, useMedia, useMinute } from "./ui";
 import { watchUnread } from "./unread";
 import { warmUp } from "./warm";
@@ -83,11 +84,13 @@ function useExpanded() {
       return {};
     }
   });
-  // Open unless folded, but the archive and a workflow run's agents: those wait to be opened.
-  const expanded = (k: string) => over[k] ?? (k !== "archive" && !k.startsWith("run:"));
+  // Open unless folded, but the archive, a workflow run's agents and the rest of a folder's
+  // sessions (tree.ts foldRest): those wait to be opened.
+  const shut = (k: string) => k === "archive" || k.startsWith("run:") || k.startsWith("more:");
+  const expanded = (k: string) => over[k] ?? !shut(k);
   const toggle = (k: string) =>
     setOver((o) => {
-      const n = { ...o, [k]: !(o[k] ?? k !== "archive") };
+      const n = { ...o, [k]: !(o[k] ?? !shut(k)) };
       keep("expanded", JSON.stringify(n));
       return n;
     });
@@ -140,7 +143,8 @@ export function App() {
   const minute = useMinute();
   const machines = useMachines();
   const order = useMemo(() => machines.map((m) => m.id), [machines.map((m) => m.id).join(",")]);
-  const tree = useMemo(() => buildTree(list ?? [], ws.data ?? [], t("nav.unsorted"), Math.max(minute, Date.now()), undefined, order), [list, ws.data, t("nav.unsorted"), minute, order]);
+  const places = useFolderPlaces();
+  const tree = useMemo(() => buildTree(list ?? [], ws.data ?? [], t("nav.unsorted"), Math.max(minute, Date.now()), undefined, order, places), [list, ws.data, t("nav.unsorted"), minute, order, places]);
 
   useEffect(() => follow(open), [open]);
   // Unread, and the chats of turns that end off screen.
