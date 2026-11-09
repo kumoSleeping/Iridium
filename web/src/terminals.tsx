@@ -1,14 +1,14 @@
 // The settings' 终端 page (plan "交互终端", docs/api.md "交互终端"): every interactive terminal —
 // 本机, the web panels, the Bots — with its avatar, name, kind, when it was last used and today's
 // use, Claude's mark if it has it. Nothing opens (the user, 2026-11-08): a right click or a long
-// press has its menu — rename, change the avatar, revoke. The + makes a new panel's invite (its
+// press has its menu — rename, change the avatar, revoke; a Bot's also the panels it follows. The + makes a new panel's invite (its
 // link and QR code), says how a Bot or a computer asks to pair, and opens the QQ Bot's page; no
 // TOKEN is handed out here (pairing is the way in). What agents' ir asked for, and pairing
 // requests, wait on top; at the foot, whether new pairing requests are taken.
 import { Popover } from "@base-ui/react/popover";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { Menu } from "@base-ui/react/menu";
-import { Bot, ChevronLeft, ImageUp, Link2, LoaderCircle, Monitor, PencilLine, Plus, Trash2, X } from "lucide-react";
+import { Bot, ChevronLeft, Eye, ImageUp, Link2, LoaderCircle, Monitor, PencilLine, Plus, Trash2, X } from "lucide-react";
 import { useRef, useState, type ReactNode } from "react";
 import { ApiError, api } from "./api/client";
 import type { Rules, Terminal } from "./api/types.gen";
@@ -68,7 +68,7 @@ export function TerminalsPage({ onBack }: { onBack: () => void }) {
           {q.isError && <p className="m-0 text-sm text-ink-3">{errText(q.error)}</p>}
           <section className="flex flex-col" aria-label={t("settings.terminals")}>
             {list.map((x) => (
-              <TerminalRow key={x.id} x={x} />
+              <TerminalRow key={x.id} x={x} panels={list.filter((p) => p.kind === "panel" && !p.local)} />
             ))}
           </section>
           {invites.length > 0 && (
@@ -108,13 +108,14 @@ async function revoke(qc: QueryClient, id: string, name: string) {
 
 /** One terminal's row. Its menu, a right click or a long press away (not 本机's): rename it in
  *  place, change its avatar (a picture chosen, then cropped under the row), revoke it (asked
- *  under the row). */
-function TerminalRow({ x }: { x: Terminal }) {
+ *  under the row); a Bot's, the panels it follows (chosen under the row). */
+function TerminalRow({ x, panels }: { x: Terminal; panels: Terminal[] }) {
   const me = useMe().data;
   const qc = useQueryClient();
   const [menuAt, setMenuAt] = useMenuAt();
   const [renaming, setRenaming] = useState(false);
   const [sure, setSure] = useState(false);
+  const [following, setFollowing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [picture, setPicture] = useState<string | null>(null);
   const row = useRef<HTMLDivElement>(null);
@@ -163,6 +164,7 @@ function TerminalRow({ x }: { x: Terminal }) {
             {x.online ? <span className="size-1.5 shrink-0 rounded-full bg-run" aria-hidden /> : null}
             <span className="min-w-0 truncate">
               {used} · {t("term.today", { n: tokens(x.usedToday) })}
+              {followNames(x, panels) && <> · {t("term.followsShort", { names: followNames(x, panels) })}</>}
             </span>
           </span>
         </span>
@@ -179,6 +181,7 @@ function TerminalRow({ x }: { x: Terminal }) {
           <Crop src={picture} onCancel={dropPicture} onDone={(b) => void saveAvatar(b)} />
         </div>
       )}
+      {following && <Follows x={x} panels={panels} done={() => setFollowing(false)} />}
       {sure && (
         <div className="g-fade pt-1 pb-2">
           <CardFrame label={t("term.revokeTitle", { name: x.name })}>
@@ -208,6 +211,7 @@ function TerminalRow({ x }: { x: Terminal }) {
                   items={[
                     { icon: <PencilLine size={15} />, label: t("term.renameIt"), run: () => setRenaming(true) },
                     { icon: <ImageUp size={15} />, label: t("term.avatar"), run: () => file.current?.click() },
+                    ...(x.bot ? [{ icon: <Eye size={15} />, label: t("term.follows"), run: () => setFollowing(true) }] : []),
                     { icon: <Trash2 size={15} />, label: t("term.revoke"), run: () => setSure(true) },
                   ]}
                 />
@@ -216,6 +220,53 @@ function TerminalRow({ x }: { x: Terminal }) {
           </Menu.Root>
         </>
       )}
+    </div>
+  );
+}
+
+/** The names of the panels Bot x follows, "" for none. */
+const followNames = (x: Terminal, panels: Terminal[]) =>
+  (x.follows ?? [])
+    .map((id) => panels.find((p) => p.id === id)?.name)
+    .filter(Boolean)
+    .join("、");
+
+/** Under a Bot's row: the panels it follows, a switch each, saved as each is flipped. What a
+ *  session asks while no chat points at it goes to the Bots that follow the panel that began its
+ *  turn, and to no other (the user, 2026-11-09). */
+function Follows({ x, panels, done }: { x: Terminal; panels: Terminal[]; done: () => void }) {
+  const qc = useQueryClient();
+  const [on, setOn] = useState<string[]>(x.follows ?? []);
+  const flip = async (id: string, to: boolean) => {
+    const was = on;
+    const next = to ? [...on, id] : on.filter((p) => p !== id);
+    setOn(next);
+    try {
+      await api.follows(x.id, next);
+      void qc.invalidateQueries({ queryKey: ["terminals"] });
+    } catch (e) {
+      setOn(was);
+      toast(t("term.follows"), { error: true, description: errText(e) });
+    }
+  };
+  return (
+    <div className="g-fade flex flex-col gap-1 rounded-lg bg-fill px-3 pt-2 pb-2.5">
+      <div className="flex items-center gap-2">
+        <span className="min-w-0 flex-1 text-sm font-medium">{t("term.follows")}</span>
+        <IconKey label={t("me.cancel")} onClick={done} className="size-6">
+          <X size={14} />
+        </IconKey>
+      </div>
+      <p className="m-0 text-xs text-ink-3">{t("term.followsHint")}</p>
+      {!hasClaude(x.rules) && <p className="m-0 text-xs text-ink-3">{t("term.followsNoClaude")}</p>}
+      {panels.length === 0 && <p className="m-0 text-xs text-ink-3">{t("term.followsNone")}</p>}
+      {panels.map((p) => (
+        <div key={p.id} className="flex min-h-10 items-center gap-2.5">
+          <Avatar src={p.avatar} name={p.name} size={24} />
+          <span className="min-w-0 flex-1 truncate text-base">{p.name}</span>
+          <Switch label={p.name} on={on.includes(p.id)} onChange={(o) => void flip(p.id, o)} />
+        </div>
+      ))}
     </div>
   );
 }

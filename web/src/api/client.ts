@@ -44,6 +44,7 @@ import type {
   SessionPatch,
   SessionState,
   SetDevice,
+  SetFollows,
   SetMode,
   SetModel,
   SetPreset,
@@ -284,6 +285,8 @@ export const api = {
   invite: (name: string, owner?: boolean) => write<Invite>("POST", "/api/terminals/invites", { ...(name ? { name } : {}), ...(owner ? { owner } : {}) } satisfies NewInvite),
   token: (name: string, owner?: boolean) => write<Token>("POST", "/api/terminals/tokens", { name, ...(owner ? { owner } : {}) } satisfies NewInvite),
   revoke: (id: string) => write<{ ok: boolean }>("DELETE", `/api/terminals/${enc(id)}`),
+  /** PUT /api/terminals/{id}/follows: the panels a Bot follows (their asks go to it). */
+  follows: (id: string, panels: string[]) => write<SetFollows>("PUT", `/api/terminals/${enc(id)}/follows`, { panels } satisfies SetFollows),
 
   // --- official extensions (the QQ bot): installed and run from 终端管理 ---
   extensions: () => get<Extension[]>("/api/extensions"),

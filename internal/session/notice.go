@@ -31,6 +31,9 @@ type Notice struct {
 	Asked bool
 	// Denied: at a turn's end, how many of its calls auto mode denied.
 	Denied int
+	// From, on a turn's start and an ask: the terminal that began the turn; Via, the session whose
+	// agent sent the message that began it (ir send, ir new), if one did.
+	From, Via string
 }
 
 // Watch calls f with every notice from now on, in order per session. f runs on the session's

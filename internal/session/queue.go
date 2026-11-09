@@ -126,7 +126,7 @@ func (h *Hosted) write(ctx context.Context, in store.Input, images []agent.Image
 		line = "[" + tag + "] " + line
 	}
 	h.mu.Lock()
-	h.lastFrom = in.Terminal
+	h.lastFrom, h.lastVia = in.Terminal, viaOf(in.Tag)
 	h.compact = line == "/compact" || line == "/压缩" || strings.HasPrefix(line, "/compact ")
 	ready := h.ready
 	h.mu.Unlock()

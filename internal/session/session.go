@@ -246,6 +246,19 @@ func (m *Manager) get(id string) (*Hosted, error) {
 	return h, nil
 }
 
+// TurnFrom is who began hosted session id's latest turn: the terminal, and the session whose agent
+// sent the message that began it, if one did. ok is false for a session Iridium does not host, or
+// one with no turn yet.
+func (m *Manager) TurnFrom(id string) (from, via string, ok bool) {
+	h, err := m.get(id)
+	if err != nil {
+		return "", "", false
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.turnFrom, h.turnVia, h.turnFrom != ""
+}
+
 // AgentID is the agent's own id for hosted session id where it is another (Codex's thread, made
 // after Iridium's id); "" otherwise. Discovery lists the session under it.
 func (m *Manager) AgentID(id string) string {
@@ -412,6 +425,15 @@ func From(terminal, tag string) string {
 		return terminal
 	}
 	return terminal + fromSep + tag
+}
+
+// viaOf is the session a message's tag says its agent sent it from ("ir:<session>"), else "".
+func viaOf(tag string) string {
+	id, _ := strings.CutPrefix(tag, "ir:")
+	if id == tag {
+		return ""
+	}
+	return id
 }
 
 // source splits a sender into the terminal's ID and the tag the agent sees.

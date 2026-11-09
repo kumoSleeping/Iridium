@@ -14,14 +14,17 @@ import (
 
 // A session no chat points at still reaches the user through a bot (the user, 2026-11-08):
 //
-//   - its asks (approvals, questions) go to one chat as they are, the session named, answered
-//     there without moving the chat;
+//   - its asks (approvals, questions) go as they are, the session named, answered there without
+//     moving the chat;
 //   - what it says with ir bot goes as a letter: the session named, its text, and 进入会话 (the
 //     chat points at it then) or 关闭. Anything else the user says goes where the chat points.
 //
-// The chat is the one that last had the session in it, else the one the user last wrote in (QQ
-// lets a bot answer a message for an hour: what goes there then costs nothing); of the plugins
-// connected now, if any are.
+// Which bots (the user, 2026-11-09): those that follow the panel that began the session's turn
+// (followed back through the agents that passed the work on: ir send, ir new), and the bot itself
+// when its chat began it. An ask no bot follows goes nowhere but the web; a letter no bot follows
+// goes to one bot, picked as before. In each bot, the chat is the one that last had the session in it, else the one
+// the user last wrote in (QQ lets a bot answer a message for an hour: what goes there then costs
+// nothing); of the plugins connected now, if any are.
 
 // seen notes that the chat said something now, with session in it.
 func (s *Service) seen(c Caller, chat, session string) {
@@ -138,15 +141,24 @@ func (s *Service) Letter(ctx context.Context, session, text, plugin string) (api
 		s.post(p.Plugin, p.Chat, "reply", api.ChatEvent{Chat: p.Chat, Session: session, Reply: &r})
 		return api.BotReply{Bot: p.Plugin, Chat: p.Chat}, nil
 	}
-	to, ok := s.reach(session, plugin)
-	if !ok {
-		return api.BotReply{}, ErrNoBot
+	var tos []store.ChatSeen
+	if plugin == "" {
+		tos = s.following(session, s.originOf(session))
 	}
-	card := &api.Card{Session: session, Title: sessionText(st.Session), Summary: []string{text}, Options: []api.CardOption{
-		{ID: session, Text: "进入会话", Primary: true}, {ID: dismiss, Text: "关闭"}}}
-	s.newPick(Caller{ID: to.Plugin}, to.Chat, "use", card)
-	s.post(to.Plugin, to.Chat, "card", api.ChatEvent{Chat: to.Chat, Session: session, Card: card})
-	return api.BotReply{Bot: to.Plugin, Chat: to.Chat, Letter: true}, nil
+	if len(tos) == 0 {
+		to, ok := s.reach(session, plugin)
+		if !ok {
+			return api.BotReply{}, ErrNoBot
+		}
+		tos = []store.ChatSeen{to}
+	}
+	for _, to := range tos {
+		card := &api.Card{Session: session, Title: sessionText(st.Session), Summary: []string{text}, Options: []api.CardOption{
+			{ID: session, Text: "进入会话", Primary: true}, {ID: dismiss, Text: "关闭"}}}
+		s.newPick(Caller{ID: to.Plugin}, to.Chat, "use", card)
+		s.post(to.Plugin, to.Chat, "card", api.ChatEvent{Chat: to.Chat, Session: session, Card: card})
+	}
+	return api.BotReply{Bot: tos[0].Plugin, Chat: tos[0].Chat, Letter: true}, nil
 }
 
 // Bring points plugin's chat at session, from a session's menu on the web (the user, 2026-11-08):
@@ -331,28 +343,78 @@ func cmdHistory(s *Service, ctx context.Context, c Caller, p *store.ChatPointer,
 
 // away1 sends a session's asks to the one chat that reaches the user for it, no chat pointing at
 // it: an ask's card, the session named, and its end. Nothing else of the session goes there.
-func (s *Service) away1(session string, out []ev) {
+func (s *Service) away1(session, origin string, out []ev) {
 	for _, e := range out {
 		switch e.typ {
 		case "card":
-			to, ok := s.reach(session, "")
-			if !ok || e.e.Card == nil {
+			if e.e.Card == nil {
 				continue
 			}
-			s.mu.Lock()
-			s.away[e.e.Card.ID] = store.ChatPointer{Plugin: to.Plugin, Chat: to.Chat}
-			s.mu.Unlock()
-			e.e.Chat, e.e.Session, e.e.Card = to.Chat, session, s.awayCard(session, e.e.Card)
-			s.post(to.Plugin, to.Chat, "card", e.e)
+			card := s.awayCard(session, e.e.Card)
+			var sent []store.ChatPointer
+			for _, to := range s.following(session, origin) {
+				x := e.e
+				x.Chat, x.Session, x.Card = to.Chat, session, card
+				s.post(to.Plugin, to.Chat, "card", x)
+				sent = append(sent, store.ChatPointer{Plugin: to.Plugin, Chat: to.Chat})
+			}
+			if len(sent) > 0 {
+				s.mu.Lock()
+				s.away[e.e.Card.ID] = sent
+				s.mu.Unlock()
+			}
 		case "card_done":
 			s.mu.Lock()
-			to, ok := s.away[e.e.CardID]
+			sent := s.away[e.e.CardID]
 			delete(s.away, e.e.CardID)
 			s.mu.Unlock()
-			if ok {
-				e.e.Chat, e.e.Session = to.Chat, session
-				s.post(to.Plugin, to.Chat, "card_done", e.e)
+			for _, to := range sent {
+				x := e.e
+				x.Chat, x.Session = to.Chat, session
+				s.post(to.Plugin, to.Chat, "card_done", x)
 			}
 		}
 	}
+}
+
+// originLocked is the terminal a turn began at: from, or, when the agent of session via passed it
+// on, where via's own turn began, as far as this Service saw it. s.mu is held.
+func (s *Service) originLocked(from, via string) string {
+	if o, ok := s.origin[via]; ok && via != "" && o != "" {
+		return o
+	}
+	return from
+}
+
+// originOf is where session's latest turn began (originLocked), or, before its first, who opened it.
+func (s *Service) originOf(session string) string {
+	from, via, ok := s.o.Manager.TurnFrom(session)
+	if !ok {
+		return cmp.Or(s.o.Store.Opener(session), "local")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.originLocked(from, via)
+}
+
+// following is a chat (reach's) of each bot that follows origin, and of origin itself when it is a
+// bot: where what session asks goes while no chat points at it.
+func (s *Service) following(session, origin string) []store.ChatSeen {
+	if origin == "" {
+		return nil
+	}
+	bots, err := s.o.Store.Followers(origin)
+	if err != nil {
+		s.o.Logf("chat: %v", err)
+	}
+	if had, _ := s.o.Store.HasChat(origin); had && !slices.Contains(bots, origin) {
+		bots = append(bots, origin)
+	}
+	var out []store.ChatSeen
+	for _, b := range bots {
+		if to, ok := s.reach(session, b); ok {
+			out = append(out, to)
+		}
+	}
+	return out
 }
