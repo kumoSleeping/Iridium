@@ -12,6 +12,7 @@ import { dshMethods } from './dsh.js'
 import { Executor, iridiumKey, refused } from './executor.js'
 import { createFeatures, unfeaturedList } from './features.js'
 import { followHeld } from './held.js'
+import { bridgeEndpoint, createBridge } from './bridge.js'
 
 export const name = 'remote-iridium'
 
@@ -215,10 +216,15 @@ export function apply(ctx, config) {
   const features = createFeatures({ unfeatured: () => unfeaturedList(volatile(config?.unfeatured)) })
   ctx.provide('iridiumFeatures', features)
   ctx.plugin(OmdAdapter)
-  const follow = followHeld(ctx, features, (event, params) => run?.ex?.notify(event, params))
+  // The dsh processes the Iridium starts here run their sessions' features themselves (session.js,
+  // which dsh.session's patch loads there): they tell them over this bridge.
+  const bridge = createBridge({ endpoint: bridgeEndpoint(state), changed: (s) => features.changed(s), log: say })
+  const sessionFile = path.join(state, 'session.patch.yml')
+  const follow = followHeld(ctx, features, (event, params) => run?.ex?.notify(event, params), { bridge })
   ctx.effect(() => () => {
     follow.stop()
     features.dispose()
+    bridge.close()
   }, 'remote-iridium: features')
   // A dsh with agents (DSH Desktop's, dsh web's) holds sessions; one without has nothing to say.
   const caps = () => (ctx.get('agents') ? ['held', 'held.features'] : [])
@@ -295,7 +301,7 @@ export function apply(ctx, config) {
         show({ state: 'paired', name: who.name })
         // The models this dsh's settings give, for the sessions it starts (dsh.llm): keys may be in it.
         const llmFile = path.join(state, 'llm.patch.yml')
-        ex = new Executor({ url: wsURL(url), token, state: path.join(state, iridiumKey(url)), denied: [tokens, llmFile], roots: config?.roots ?? [], noShell, agentShell, agents: [dsh], caps, methods: dshMethods(ctx, () => ({ unsynced: unsyncedList(volatile(config?.unsynced)), ungrouped: volatile(config?.ungrouped) !== false }), { file: llmFile, scope: dsh.scope }, { features, follow }), program: who.program, ir: fileURLToPath(new URL('./ir.js', import.meta.url)), log: (m) => say(m) })
+        ex = new Executor({ url: wsURL(url), token, state: path.join(state, iridiumKey(url)), denied: [tokens, llmFile, sessionFile], roots: config?.roots ?? [], noShell, agentShell, agents: [dsh], caps, methods: dshMethods(ctx, () => ({ unsynced: unsyncedList(volatile(config?.unsynced)), ungrouped: volatile(config?.ungrouped) !== false }), { file: llmFile, scope: dsh.scope }, { features, follow, bridge, sessionFile }), program: who.program, ir: fileURLToPath(new URL('./ir.js', import.meta.url)), log: (m) => say(m) })
         const running = ex.run()
         // A TOKEN turned down (its Bot removed) is forgotten, and the machine pairs again.
         while (!stopped) {

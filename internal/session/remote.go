@@ -156,7 +156,7 @@ func (h *Hosted) remoteSpawn(mc *remote.Machine, o *agent.SpawnOptions) error {
 		Presets: h.m.presetsHook(ctx, h.meta.Agent, h.meta.Machine),
 	}
 	if h.meta.Agent == api.AgentDsh {
-		o.Remote.Patches = h.m.desktopLLM(ctx, mc)
+		o.Remote.Patches = append(h.m.desktopLLM(ctx, mc), h.m.desktopSession(ctx, mc)...)
 		o.Remote.Bundles = h.m.desktopBundles(ctx, mc)
 	}
 	return nil

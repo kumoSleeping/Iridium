@@ -14,6 +14,8 @@
     "index.js",
     "dsh.js",
     "held.js",
+    "bridge.js",
+    "session.js",
     "features.js",
     "adapters/",
     "executor.js",

@@ -188,6 +188,14 @@ func (m *Machine) DshBundles(ctx context.Context) ([]wire.DshBundle, error) {
 	return r.Bundles, err
 }
 
+// DshSession is the path there of the patch that puts the dsh plugin's part into a session's dsh
+// process (dsh.session, written anew); an error of wire.CodeUnsupported from one that cannot.
+func (m *Machine) DshSession(ctx context.Context) (string, error) {
+	var r wire.DshSessionReply
+	err := m.Call(ctx, "dsh.session", struct{}{}, &r)
+	return r.Patch, err
+}
+
 // DshAttach files session under the workspace of its folder cwd in the dsh the executor runs in
 // (DSH Desktop's sidebar), made if there is none.
 func (m *Machine) DshAttach(ctx context.Context, session, cwd string) error {

@@ -62,10 +62,12 @@ type heldEntry struct {
 	due   bool      // a showing for a held.changed waits
 }
 
-// heldView is a session's wire.HeldLive, its features checked (features).
+// heldView is a session's wire.HeldLive, its features checked (features); owner, the feature
+// that owns its effort now (effort its level), held or not.
 type heldView struct {
 	held          bool
 	model, effort string
+	owner         string
 	features      []api.Feature
 }
 
@@ -127,6 +129,9 @@ func (m *Manager) keepHeld(id, machine string, live wire.HeldLive, lang *string)
 	v := heldView{held: live.Held, features: m.features(machine, live.Features)}
 	if live.Held {
 		v.model, v.effort = live.Model, live.Effort
+	}
+	if live.Owner != "" && slices.ContainsFunc(v.features, func(f api.Feature) bool { return f.ID == live.Owner }) {
+		v.owner, v.effort = live.Owner, live.Effort
 	}
 	m.heldMu.Lock()
 	defer m.heldMu.Unlock()
@@ -213,6 +218,11 @@ func (m *Manager) heldState(s *api.SessionState, liveHere bool) {
 	}
 	s.Features = append(s.Features, v.features...)
 	if !v.held || liveHere {
+		// A feature of the process there runs its effort (a session Iridium started there):
+		// the level it runs at is that one's.
+		if v.owner != "" && v.effort != "" {
+			s.Effort, s.EffortNow = v.effort, v.effort
+		}
 		return
 	}
 	// The holder's, over what a hosted session keeps from when it ran here (its settings): what
@@ -402,7 +412,7 @@ func (m *Manager) SetFeature(ctx context.Context, id, fid string, req api.SetFea
 	if !m.Known(id) {
 		return ErrNotFound
 	}
-	mc, as, held, ok := m.heldAt(id)
+	mc, as, _, ok := m.heldAt(id)
 	if !ok || !mc.Has(wire.CapHeldFeatures) {
 		return fmt.Errorf("%w: no feature %q", ErrBadRequest, fid)
 	}
@@ -421,11 +431,12 @@ func (m *Manager) SetFeature(ctx context.Context, id, fid string, req api.SetFea
 	if req.Option != "" && !slices.ContainsFunc(f.Options, func(o api.FeatureOption) bool { return o.ID == req.Option }) {
 		return fmt.Errorf("%w: %s has no option %q", ErrBadRequest, f.Name, req.Option)
 	}
-	if !held && !v.held {
+	// The plugin says whether it can be switched now: held there, or run by a process there.
+	if !f.Available {
 		if f.Reason != "" {
 			return fmt.Errorf("%w: %s", ErrBadRequest, f.Reason)
 		}
-		return fmt.Errorf("%w: %s: the session is not open in DSH Desktop", ErrBadRequest, f.Name)
+		return fmt.Errorf("%w: %s cannot be switched now", ErrBadRequest, f.Name)
 	}
 	ctx, cancel := context.WithTimeout(ctx, heldSet)
 	defer cancel()
@@ -441,15 +452,17 @@ func (m *Manager) SetFeature(ctx context.Context, id, fid string, req api.SetFea
 }
 
 // heldSetting sets session id's model or effort (p's) at its machine when a holder there has it
-// and it does not run here (held.set): SetModel and SetEffort would refuse it (ErrElsewhere).
-// done false: not such a session, or the holder there does not have it after all; the usual way
-// goes.
+// and it does not run here (held.set): SetModel and SetEffort would refuse it (ErrElsewhere); and
+// its effort while a feature there owns it (as last told), held or run here. done false: not such
+// a session, or the machine does not take it after all; the usual way goes.
 func (m *Manager) heldSetting(ctx context.Context, id string, p wire.HeldSetParams) (done bool, err error) {
-	if h, err := m.get(id); err == nil && h.isLive() {
+	v, _ := m.cachedHeld(id)
+	owned := p.Effort != "" && v.owner != ""
+	if h, err := m.get(id); err == nil && h.isLive() && !owned {
 		return false, nil
 	}
 	mc, as, held, ok := m.heldAt(id)
-	if !ok || !held || !mc.Has(wire.CapHeldFeatures) {
+	if !ok || !(held || owned) || !mc.Has(wire.CapHeldFeatures) {
 		return false, nil
 	}
 	p.Session, p.Lang = as, m.tuned().Lang

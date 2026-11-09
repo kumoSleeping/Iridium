@@ -1,6 +1,7 @@
 // OMD's (oh-my-dsh, a third party's dsh plugin) Ultra as an Iridium feature: its collaboration mode
 // past the effort track, with a sub-mode and a level OMD picks for it, through OMD's own service in
-// this process (omd.ultracode). The only file here that knows OMD: what the Iridium sees is the
+// this process (omd.ultracode): DSH Desktop's, or a session's dsh process the Iridium started
+// (session.js), held there. The only file here that knows OMD: what the Iridium sees is the
 // feature `omd.ultra`. Optional: in dsh it runs as a sub-plugin only while both OMD and the
 // registry are there, and goes with OMD.
 import { RemoteError } from '../executor.js'
@@ -9,14 +10,14 @@ const SUBMODES = ['workflow', 'team', 'free']
 
 const texts = {
   zh: {
-    hint: 'OMD 的协作模式，在 DSH Desktop 里运行；子模式在下面选',
+    hint: 'OMD 的协作模式；子模式在下面选',
     unavailable: '会话不在 DSH Desktop 里打开着，或没用 OMD 的预设',
     workflow: 'Workflow',
     team: 'Agent Team',
     free: '自由',
   },
   en: {
-    hint: "OMD's collaboration mode, run in DSH Desktop; its sub-mode below",
+    hint: "OMD's collaboration mode; its sub-mode below",
     unavailable: 'Not open in DSH Desktop, or not on an OMD preset',
     workflow: 'Workflow',
     team: 'Agent Team',

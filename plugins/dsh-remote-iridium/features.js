@@ -81,6 +81,9 @@ export function createFeatures(o = {}) {
       }
     },
 
+    /** Whether feature id is offered: not switched off on the settings page. */
+    offered: (id) => !off(id),
+
     /** The features registered, switched off or not: {id, name}. */
     list() {
       return live().map((p) => ({ id: p.id, name: typeof p.name === 'string' ? p.name : p.id }))

@@ -197,6 +197,24 @@ func (m *Manager) desktopLLM(ctx context.Context, mc *remote.Machine) []string {
 	return []string{p}
 }
 
+// desktopSession is the dsh plugin's patch at mc for a session's dsh process (dsh.session): none
+// from one too old to give it, or failing.
+func (m *Manager) desktopSession(ctx context.Context, mc *remote.Machine) []string {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	p, err := mc.DshSession(ctx)
+	if err != nil {
+		if !wire.IsCode(err, wire.CodeUnsupported) {
+			m.o.Logf("dsh: the dsh plugin's part for sessions at %s: %v", mc.ID(), err)
+		}
+		return nil
+	}
+	if p == "" {
+		return nil
+	}
+	return []string{p}
+}
+
 // desktopBundles reads the bundles of DSH Desktop's profile at mc (dsh.bundles), when a preset
 // asks: none from a dsh plugin too old to say, or failing.
 func (m *Manager) desktopBundles(ctx context.Context, mc *remote.Machine) func() ([]agent.Bundle, error) {
