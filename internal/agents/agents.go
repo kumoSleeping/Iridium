@@ -62,7 +62,8 @@ type Info struct {
 	Quota            bool
 	// Ultracode: its sessions can turn ultracode on (Claude; the driver is an agent.Ultracoder).
 	Ultracode bool
-	// ModelEfforts: its efforts are each model's (dsh: as its catalog says), none of its own.
+	// ModelEfforts: its efforts are each model's (dsh: as its catalog says; pi: as each model
+	// takes them); Efforts, if any, all it has.
 	ModelEfforts bool
 	// Presets: it takes an agent preset (SpawnOptions.Preset), at launch only (dsh's tools and
 	// prompt); which, those it registers where it runs (session.Manager.Presets).
@@ -165,7 +166,7 @@ var all = []Info{
 	},
 	{
 		Agent: api.AgentPi, Name: "pi",
-		Modes: pi.Modes, DefaultMode: pi.DefaultMode, ModeSwitch: "restart", Efforts: pi.Levels,
+		Modes: pi.Modes, DefaultMode: pi.DefaultMode, ModeSwitch: "restart", Efforts: pi.Levels, ModelEfforts: true,
 		New: func(emit func(agent.Event), logf func(string, ...any)) agent.Driver {
 			return pi.New(pi.Options{Emit: emit, Logf: logf})
 		},
