@@ -516,7 +516,7 @@ func TestRemotePresets(t *testing.T) {
 	// What the launch makes of it: the registry's rows, persona folded in.
 	mine, _ := dsh.FindPreset(l, "mine")
 	pkg := dsh.Package{Scope: scope}
-	b, err = pkg.Patch(mine, "")
+	b, err = pkg.Patch(mine, "", "")
 	if err != nil || !strings.Contains(string(b), "    personaPrefix: You are mine.\n") || !strings.Contains(string(b), "    - id: iridium-tool-web\n") {
 		t.Errorf("patch: %v\n%s", err, b)
 	}

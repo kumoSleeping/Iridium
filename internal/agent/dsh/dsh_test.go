@@ -707,7 +707,7 @@ func TestPatch(t *testing.T) {
 		t.Fatalf("presets %q, default %q", ids, def)
 	}
 	for _, preset := range presets {
-		got, err := p.Patch(preset, "")
+		got, err := p.Patch(preset, "", "file:///m.mjs")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -717,7 +717,7 @@ func TestPatch(t *testing.T) {
 		}
 	}
 	ptc, _ := FindPreset(presets, "ptc")
-	got, _ := p.Patch(ptc, "line {{a}}\n\nmore {{{b}}}")
+	got, _ := p.Patch(ptc, "line {{a}}\n\nmore {{{b}}}", "")
 	if !bytes.Contains(got, []byte("    personaPrefix: You are a coding agent powered by the {{model}} model.\n    personaSuffix: |-\n      line { {a}}\n\n      more { { {b}}}\n- insert:")) {
 		t.Errorf("suffix:\n%s", got)
 	}

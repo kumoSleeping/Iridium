@@ -275,7 +275,11 @@ func (d *Driver) Spawn(o agent.SpawnOptions) (hold.Spec, error) {
 	if err != nil {
 		return hold.Spec{}, err
 	}
-	patch, err := pkg.Patch(preset, suffix)
+	modules, err := o.LaunchFile(ModulesFile, []byte(ModulesModule))
+	if err != nil {
+		return hold.Spec{}, fmt.Errorf("dsh: writing the preset's modules: %w", err)
+	}
+	patch, err := pkg.Patch(preset, suffix, FileURL(modules))
 	if err != nil {
 		return hold.Spec{}, err
 	}
