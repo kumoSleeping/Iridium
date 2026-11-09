@@ -118,9 +118,13 @@ func (s *Server) revoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	t, found := s.gate().Find(ref)
+	hash := ""
+	if found {
+		hash = s.gate().TokenHash(t.ID) // an official extension's bot holding it goes with it
+	}
 	err := s.gate().Revoke(ref)
-	if err == nil && found {
-		go s.extDetach(t.Name)
+	if err == nil && hash != "" {
+		go s.extDetach(hash)
 	}
 	s.gateDone(w, err)
 }

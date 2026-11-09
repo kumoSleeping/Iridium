@@ -10,9 +10,10 @@ import { useQuery } from "@tanstack/react-query";
 import { Fragment, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import type { SessionState as LiveSession } from "../api/types.gen";
 import { api } from "../api/client";
-import type { Agent, AgentQuota, Context, ContextCategory, Model, Preset } from "../api/types.gen";
+import type { Agent, AgentInfo, AgentQuota, Context, ContextCategory, Feature, Model, Preset } from "../api/types.gen";
 import { useAgent } from "../data";
 import { t, useLang } from "../i18n";
+import type { Key } from "../i18n/zh";
 import { useContextState, useQuota } from "../store";
 import { errText, toast } from "../toast";
 import { ago, cn, PHONE, PopSurface, Tip, useLongPress, useMedia, useMinute } from "../ui";
@@ -153,8 +154,9 @@ const quotaTone = (pct: number) => (pct >= 95 ? ["bg-err", "text-err"] : pct >= 
  *  or right-clicked, the bars open the usage instead (the user, 2026-11-08); the popover's foot
  *  has a key to it too, as a hold is not seen. */
 /** using: what the session names the model it uses (chat.tsx): a window of one model shows only
- *  where that model is in use. */
-export function QuotaBars({ agent, live, using, open, onOpenChange }: { agent: Agent; live: boolean; using: (string | undefined)[]; open?: boolean; onOpenChange?: (o: boolean) => void }) {
+ *  where that model is in use. machine: where the session runs; the windows are that machine's
+ *  login's (an executor's may be another account), not this one's. */
+export function QuotaBars({ agent, machine, live, using, open, onOpenChange }: { agent: Agent; machine?: string; live: boolean; using: (string | undefined)[]; open?: boolean; onOpenChange?: (o: boolean) => void }) {
   const lang = useLang();
   const phone = useMedia(PHONE);
   useMinute(); // "read 5 min ago" and the fading, again each minute
@@ -168,7 +170,7 @@ export function QuotaBars({ agent, live, using, open, onOpenChange }: { agent: A
   };
   const lp = useLongPress(() => toUsage());
   const hold = { ...lp, onContextMenu: (e: MouseEvent) => (e.preventDefault(), toUsage({ x: e.clientX, y: e.clientY })) };
-  const q: AgentQuota | undefined = quota?.agents.filter((a) => a.agent === agent).sort((a, b) => b.at - a.at)[0];
+  const q: AgentQuota | undefined = quota?.agents.filter((a) => a.agent === agent && (a.machine ?? "") === (machine ?? "")).sort((a, b) => b.at - a.at)[0];
   const windows = (q?.windows ?? []).filter((w) => windowFor(w, using)); // all shown: no setting hides one (the user, 2026-11-06)
   // dsh has no windows but money: its balance where the bars would be (the user, 2026-11-08).
   const balance = q?.balance ?? [];
@@ -436,22 +438,55 @@ export function modelView(s: ModelOf, want?: string | null) {
   return { models, cur, name, isDefault, value, levels, level };
 }
 
-/** The model, its thinking level and UltraCode, under the composer, each in use at once. A model
- *  picked closes the menu; the level and UltraCode at its foot are tuned in place, it stays. */
+// Features the page names itself, an agent's own (Claude's UltraCode): their words from i18n, not
+// the server's. A plugin's (one of DSH Desktop's, where Desktop holds the session) come with their own.
+const NATIVE: Record<string, { name: () => string; tip: (f: Feature) => string; err: Key }> = {
+  "claude.ultracode": {
+    name: () => t("composer.ultracode"),
+    tip: (f) => t(!f.available ? (f.on ? "composer.ultracodeIdle" : "composer.ultracodeUnavailable") : "composer.ultracodeHint"),
+    err: "err.ultracode",
+  },
+};
+
+/** The features at the effort track: the session's; before its agent runs (none yet), the ones its
+ *  agent has, off (Claude's UltraCode). */
+function effortFeatures(s: LiveSession, info?: AgentInfo): Feature[] {
+  const fs = (s.features ?? []).filter((f) => f.place === "effort");
+  const ids = info?.features ?? (info?.ultracode ? ["claude.ultracode"] : []);
+  for (const id of ids) {
+    const n = NATIVE[id];
+    if (n && !fs.some((f) => f.id === id)) fs.push({ id, name: n.name(), on: false, available: true, place: "effort", tone: "warm" });
+  }
+  return fs;
+}
+
+type FeatureWant = { on: boolean; option?: string };
+
+/** The model, its thinking level and its features (UltraCode), under the composer, each in use at
+ *  once. A model picked closes the menu; the level and a feature at its foot are tuned in place, it
+ *  stays. */
 export function ModelKey({ s, open, onOpenChange }: { s: LiveSession; open?: boolean; onOpenChange?: (o: boolean) => void }) {
   useLang();
   const [want, setWant] = useState<string | null>(null);
-  const [ultraWant, setUltraWant] = useState<boolean | null>(null);
+  const [featWant, setFeatWant] = useState<Record<string, FeatureWant>>({});
   const info = useAgent(s.agent);
   if (want !== null && (s.pick === want || s.model === want)) setWant(null);
-  const ultra = s.ultracode ?? (info?.ultracode ? { on: false, active: false, available: true } : undefined);
-  if (ultraWant !== null && ultra?.on === ultraWant) setUltraWant(null);
+  // A switch flipped shows at once, till the session says it is so (or the switch failed).
+  const base = effortFeatures(s, info);
+  const feats = base.map((f) => {
+    const w = featWant[f.id];
+    return w ? { ...f, on: w.on, option: w.option ?? f.option } : f;
+  });
+  const reached = Object.entries(featWant).filter(([id, w]) => {
+    const f = base.find((x) => x.id === id);
+    return !f || (f.on === w.on && (w.option === undefined || f.option === w.option));
+  }).map(([id]) => id);
+  if (reached.length) setFeatWant((m) => Object.fromEntries(Object.entries(m).filter(([id]) => !reached.includes(id))));
   const v = modelView(s, want);
   const { models, levels, level } = v;
   const grouped = new Set(models.map((m) => m.group).filter(Boolean)).size > 1;
   if (!models.length && !v.name) return null;
   const label = v.name || t("composer.defaultModel");
-  const ultraOn = ultraWant ?? ultra?.on ?? false;
   const pickModel = async (model: string) => {
     setWant(model);
     try {
@@ -470,43 +505,63 @@ export function ModelKey({ s, open, onOpenChange }: { s: LiveSession; open?: boo
       return false;
     }
   };
-  const flip = async (on: boolean) => {
-    setUltraWant(on);
+  const flip = async (f: Feature, u: FeatureWant) => {
+    setFeatWant((m) => ({ ...m, [f.id]: u }));
     try {
-      await api.ultracode(s.id, on);
+      await api.setFeature(s.id, f.id, u.option ? { on: u.on, option: u.option } : { on: u.on });
     } catch (e) {
-      setUltraWant(null);
-      toast(t("err.ultracode"), { error: true, description: errText(e) });
+      setFeatWant((m) => Object.fromEntries(Object.entries(m).filter(([id]) => id !== f.id)));
+      toast(t(NATIVE[f.id]?.err ?? "err.feature", { name: f.name }), { error: true, description: errText(e) });
     }
   };
-  const ultraTip = ultra && `UltraCode · ${!ultra.available ? t(ultraOn ? "composer.ultracodeIdle" : "composer.ultracodeUnavailable") : t("composer.ultracodeHint")}`;
-  // UltraCode: one key, its mark, pressed or not (the user, 2026-11-06); lit warm when on.
-  const ultraKey = ultra && (
-    <Tip label={ultraTip}>
+  const nameOf = (f: Feature) => NATIVE[f.id]?.name() ?? f.name;
+  const tone = (f: Feature) => (f.tone === "warm" ? "text-[#ff4a17]" : "text-ink");
+  // The first one at the track's right (more have no place yet).
+  const feat = feats[0];
+  const tip = feat && [nameOf(feat), NATIVE[feat.id]?.tip(feat) ?? (feat.available ? feat.hint : feat.reason)].filter(Boolean).join(" · ");
+  // UltraCode: one key, its mark, pressed or not (the user, 2026-11-06); lit warm when on. A
+  // plugin's the same (the user, 2026-11-09). On but not available: still switched off here (UltraCode
+  // on a model that cannot run it); a plugin's not (Desktop is not holding the session).
+  const featKey = feat && (
+    <Tip label={tip}>
       <button
         type="button"
-        aria-pressed={ultraOn}
-        aria-label={t("composer.ultracode")}
-        disabled={!ultra.available && !ultraOn}
-        onClick={() => void flip(!ultraOn)}
-        className={cn("g-press grid size-7 shrink-0 place-items-center rounded-md transition-colors duration-(--dur-2) disabled:opacity-40 pointer-coarse:size-10", ultraOn ? "bg-fill text-[#ff4a17] hover:bg-fill-2" : "text-ink-4 hover:bg-fill hover:text-ink-2")}
+        aria-pressed={feat.on}
+        aria-label={nameOf(feat)}
+        disabled={!feat.available && !(feat.on && NATIVE[feat.id])}
+        onClick={() => void flip(feat, { on: !feat.on })}
+        className={cn("g-press grid size-7 shrink-0 place-items-center rounded-md transition-colors duration-(--dur-2) disabled:opacity-40 pointer-coarse:size-10", feat.on ? cn("bg-fill hover:bg-fill-2", tone(feat)) : "text-ink-4 hover:bg-fill hover:text-ink-2")}
       >
-        <Workflow size={16} aria-hidden className={cn("transition-transform duration-(--dur-2) ease-(--ease-spring)", ultraOn && "scale-110")} />
+        <Workflow size={16} aria-hidden className={cn("transition-transform duration-(--dur-2) ease-(--ease-spring)", feat.on && "scale-110")} />
       </button>
     </Tip>
   );
-  // UltraCode on: said in words beside the level too (the user, 2026-11-06); on but not in effect
-  // (this model cannot run it), muted.
-  const ultraTag = ultraOn && (
-    <span className={cn("g-fade text-xs font-medium", ultra?.active || ultra?.available ? "text-[#ff4a17]" : "text-ink-4")}>UltraCode</span>
+  // On: said in words beside the level too (the user, 2026-11-06); on but not in effect (this model
+  // cannot run it), muted.
+  const featTag = feat?.on && <span className={cn("g-fade text-xs font-medium", feat.active || feat.available ? tone(feat) : "text-ink-4")}>{nameOf(feat)}</span>;
+  // On, its options a row under the track (a plugin's sub-modes; the user, 2026-11-09).
+  const featOptions = feat?.on && !!feat.options?.length && (
+    <div className="g-fade flex items-center gap-1 px-2.5 pb-2">
+      {feat.options.map((o) => (
+        <button
+          key={o.id}
+          type="button"
+          onClick={() => void flip(feat, { on: true, option: o.id })}
+          className={cn("g-press h-7 flex-1 rounded-md text-xs transition-colors duration-(--dur-2) pointer-coarse:h-9", feat.option === o.id ? "bg-fill-2 font-medium text-ink" : "text-ink-3 hover:bg-fill hover:text-ink-2")}
+        >
+          {o.name}
+        </button>
+      ))}
+    </div>
   );
+  const on = feats.filter((f) => f.on);
   return (
     <Menu.Root open={open} onOpenChange={onOpenChange}>
       <Tip label={t("composer.model")}>
         <Menu.Trigger
           disabled={!models.length}
           render={
-            <button type="button" aria-label={`${t("composer.model")}: ${label}${level ? ` · ${levelName(level)}` : ""}${ultraOn ? " · UltraCode" : ""}`} className="g-press flex h-7 min-w-0 items-center gap-1 rounded-md px-2 text-xs text-ink-3 hover:bg-fill hover:text-ink data-popup-open:bg-fill disabled:hover:bg-transparent pointer-coarse:h-9">
+            <button type="button" aria-label={`${t("composer.model")}: ${label}${level ? ` · ${levelName(level)}` : ""}${on.map((f) => ` · ${nameOf(f)}`).join("")}`} className="g-press flex h-7 min-w-0 items-center gap-1 rounded-md px-2 text-xs text-ink-3 hover:bg-fill hover:text-ink data-popup-open:bg-fill disabled:hover:bg-transparent pointer-coarse:h-9">
               {/* No icon: the model's name says what this is. */}
               <span key={label} className="g-fade truncate">
                 {label}
@@ -516,7 +571,7 @@ export function ModelKey({ s, open, onOpenChange }: { s: LiveSession; open?: boo
                   {levelName(level)}
                 </span>
               )}
-              {ultraOn && <Workflow size={12} aria-hidden className={cn("g-pop shrink-0", ultra?.active ? "text-ink-2" : "text-ink-4")} />}
+              {on.length > 0 && <Workflow size={12} aria-hidden className={cn("g-pop shrink-0", on.some((f) => f.active) ? "text-ink-2" : "text-ink-4")} />}
               {models.length > 0 && <ChevronDown size={12} className="shrink-0 text-ink-4" />}
             </button>
           }
@@ -548,17 +603,23 @@ export function ModelKey({ s, open, onOpenChange }: { s: LiveSession; open?: boo
                 ))}
               </Menu.RadioGroup>
             </Scrolled>
-            {(levels.length > 1 || ultra) && (
+            {(levels.length > 1 || feat) && (
               // The foot: tuned in place, never closing the menu; the model's own levels drawn anew.
               // UltraCode a switch at the track's right, not a row of its own (the user, 2026-11-06).
               <div className="mt-1 shrink-0 border-t border-(--edge) pt-0.5">
                 {levels.length > 1 ? (
-                  <EffortSlider key={levels.join(" ")} levels={levels} value={level || undefined} set={setEffort} aside={ultraKey} tag={ultraTag} />
+                  <>
+                    <EffortSlider key={levels.join(" ")} levels={levels} value={level || undefined} set={setEffort} aside={featKey} tag={featTag} />
+                    {featOptions}
+                  </>
                 ) : (
-                  <div className="flex h-10 items-center justify-between gap-3 px-2.5">
-                    <span className="text-xs text-ink-3">{t("composer.ultracode")}</span>
-                    {ultraKey}
-                  </div>
+                  <>
+                    <div className="flex h-10 items-center justify-between gap-3 px-2.5">
+                      <span className="text-xs text-ink-3">{feat && nameOf(feat)}</span>
+                      {featKey}
+                    </div>
+                    {featOptions}
+                  </>
                 )}
               </div>
             )}

@@ -223,10 +223,12 @@ func SplitEffort(s string) (model, effort string) {
 }
 
 // Spawn gives the holder's spec: Codex's private app-server, without Claude's keys or a parent
-// session's variables, IRIDIUM_SESSION set. Model may carry an effort: "gpt-6-luna:low".
+// session's variables, IRIDIUM_SESSION set. Model may carry an effort: "gpt-6-luna:low". At an
+// executor the program is the argv it gave; the prompt is read here and goes in the protocol
+// (developerInstructions), so no file goes there.
 func (d *Driver) Spawn(o agent.SpawnOptions) (hold.Spec, error) {
 	env := agent.ForeignEnv(o.Env)
-	program, err := agent.LookPath(o.Program, env)
+	argv, err := o.Command("codex", env)
 	if err != nil {
 		return hold.Spec{}, err
 	}
@@ -258,7 +260,7 @@ func (d *Driver) Spawn(o agent.SpawnOptions) (hold.Spec, error) {
 	d.pick.model, d.pick.effort = model, effort
 	d.mu.Unlock()
 	env = agent.SetEnv(env, "IRIDIUM_SESSION", o.Session)
-	return hold.Spec{Argv: []string{program, "app-server", "--listen", "stdio://"}, Env: env, Cwd: o.Cwd}, nil
+	return hold.Spec{Argv: append(argv, "app-server", "--listen", "stdio://"), Env: env, Cwd: o.Cwd}, nil
 }
 
 // Attach connects agent process proc. One just spawned gets the handshake and its thread; one an
@@ -348,7 +350,8 @@ func (d *Driver) open(proc int, w *open, ready chan struct{}) {
 		return err
 	}()
 	d.mu.Lock()
-	if d.proc != proc {
+	// Another process, or this one gone meanwhile (Detach closed ready and made another).
+	if d.proc != proc || d.ready != ready {
 		d.mu.Unlock()
 		return
 	}

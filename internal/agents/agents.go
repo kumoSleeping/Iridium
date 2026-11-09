@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/kumoSleeping/iridium/internal/agent"
 	"github.com/kumoSleeping/iridium/internal/agent/claude"
@@ -37,8 +38,9 @@ type RemoteWhere struct {
 	User    string   // the user's home there
 	Env     []string // the environment the agent starts with there (RemoteEnv)
 	Join    func(elem ...string) string
-	// List names the files in dir there; a dir not there has none.
+	// List names the files in dir there, Dirs its directories; a dir not there has none.
 	List func(dir string) ([]string, error)
+	Dirs func(dir string) ([]string, error)
 }
 
 // Info is one agent's row.
@@ -62,6 +64,11 @@ type Info struct {
 	Quota            bool
 	// Ultracode: its sessions can turn ultracode on (Claude; the driver is an agent.Ultracoder).
 	Ultracode bool
+	// Features: the features (api.Feature) its sessions have before it runs, by ID.
+	Features []string
+	// Holdable: a holder at an executor's machine may have its sessions (DSH Desktop, dsh's): the
+	// session layer asks it there about them (held.*), its model, level and features.
+	Holdable bool
 	// ModelEfforts: its efforts are each model's (dsh: as its catalog says; pi: as each model
 	// takes them); Efforts, if any, all it has.
 	ModelEfforts bool
@@ -121,7 +128,7 @@ var all = []Info{
 		// start in auto (the user's choice, 2026-11-05): Claude decides what to ask.
 		Modes:       []string{"manual", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"},
 		DefaultMode: "auto", ModeSwitch: "now", ContextBreakdown: true, Quota: true, Ultracode: true,
-		Efforts: []string{"low", "medium", "high", "xhigh", "max"},
+		Features: []string{"claude.ultracode"}, Efforts: []string{"low", "medium", "high", "xhigh", "max"},
 		New: func(emit func(agent.Event), logf func(string, ...any)) agent.Driver {
 			return claude.New(claude.Options{Emit: emit, Logf: logf})
 		},
@@ -163,6 +170,8 @@ var all = []Info{
 			return transcript.FindCodex(transcript.CodexHome(w.Env), w.ID)
 		},
 		Format: transcript.Codex,
+		// Where CodexHome looks, at the executor: CODEX_HOME there, else ~/.codex there.
+		HomeEnv: "CODEX_HOME", FindRemote: findCodexRemote,
 	},
 	{
 		Agent: api.AgentPi, Name: "pi",
@@ -197,7 +206,7 @@ var all = []Info{
 		// preset only at launch (the driver says agent.ErrRestart, the host restarts it).
 		Agent: api.AgentDsh, Name: "DeepSeek Harness",
 		Modes: dsh.Modes, DefaultMode: dsh.DefaultMode, ModeSwitch: "now", ModelEfforts: true,
-		Presets: true,
+		Presets: true, Holdable: true,
 		New: func(emit func(agent.Event), logf func(string, ...any)) agent.Driver {
 			return dsh.New(dsh.Options{Emit: emit, Logf: logf})
 		},
@@ -220,6 +229,79 @@ var all = []Info{
 	},
 }
 
+// codexDayDirs bounds the walk for a thread whose id has no time in it: the newest day folders.
+const codexDayDirs = 400
+
+// findCodexRemote is Codex's FindRemote: sessions/YYYY/MM/DD/rollout-<local time>-<thread>.jsonl,
+// else archived_sessions/. A thread id is a UUIDv7, the folder its time's date where Codex runs:
+// local there, within a day of the UTC date at any offset (UTC-12 to UTC+14), so three folders
+// are listed, not the whole history. An id with no time (an older Codex): the newest
+// codexDayDirs day folders, newest first. "" before the first turn (no thread, or no rollout).
+func findCodexRemote(w RemoteWhere) (string, error) {
+	if !transcript.ValidID(w.ID) {
+		return "", nil
+	}
+	home := cmp.Or(w.Home, agent.GetEnv(w.Env, "CODEX_HOME"), w.Join(w.User, ".codex"))
+	in := func(dir string) (string, error) {
+		names, err := w.List(dir)
+		for _, n := range names {
+			if strings.HasPrefix(n, "rollout-") && strings.HasSuffix(n, "-"+w.ID+".jsonl") {
+				return w.Join(dir, n), nil
+			}
+		}
+		return "", err
+	}
+	sessions := w.Join(home, "sessions")
+	day := func(t time.Time) string {
+		return w.Join(sessions, t.Format("2006"), t.Format("01"), t.Format("02"))
+	}
+	if t, ok := transcript.CodexThreadTime(w.ID); ok {
+		t = t.UTC()
+		for _, d := range []time.Time{t, t.AddDate(0, 0, -1), t.AddDate(0, 0, 1)} {
+			if p, err := in(day(d)); p != "" || err != nil {
+				return p, err
+			}
+		}
+	} else if w.Dirs != nil {
+		// Newest first: years, months, days, each a number's folder.
+		newest := func(dir string) ([]string, error) {
+			names, err := w.Dirs(dir)
+			names = slices.DeleteFunc(names, func(n string) bool { _, err := strconv.Atoi(n); return err != nil })
+			slices.Sort(names)
+			slices.Reverse(names)
+			return names, err
+		}
+		left := codexDayDirs
+		years, err := newest(sessions)
+		if err != nil {
+			return "", err
+		}
+	walk:
+		for _, y := range years {
+			months, err := newest(w.Join(sessions, y))
+			if err != nil {
+				return "", err
+			}
+			for _, m := range months {
+				days, err := newest(w.Join(sessions, y, m))
+				if err != nil {
+					return "", err
+				}
+				for _, d := range days {
+					if left == 0 {
+						break walk
+					}
+					left--
+					if p, err := in(w.Join(sessions, y, m, d)); p != "" || err != nil {
+						return p, err
+					}
+				}
+			}
+		}
+	}
+	return in(w.Join(home, "archived_sessions"))
+}
+
 // Get is agent a's row.
 func Get(a api.Agent) (Info, bool) {
 	i := slices.IndexFunc(all, func(x Info) bool { return x.Agent == a })
@@ -236,7 +318,7 @@ func All() []Info { return slices.Clone(all) }
 func Describe() []api.AgentInfo {
 	out := make([]api.AgentInfo, 0, len(all))
 	for _, i := range all {
-		out = append(out, api.AgentInfo{Agent: i.Agent, Name: i.Name, Modes: slices.Clone(i.Modes), DefaultMode: i.DefaultMode, ModeSwitch: i.ModeSwitch, ContextBreakdown: i.ContextBreakdown, Quota: i.Quota, Ultracode: i.Ultracode, Presets: i.Presets})
+		out = append(out, api.AgentInfo{Agent: i.Agent, Name: i.Name, Modes: slices.Clone(i.Modes), DefaultMode: i.DefaultMode, ModeSwitch: i.ModeSwitch, ContextBreakdown: i.ContextBreakdown, Quota: i.Quota, Ultracode: i.Ultracode, Features: slices.Clone(i.Features), Presets: i.Presets})
 	}
 	return out
 }

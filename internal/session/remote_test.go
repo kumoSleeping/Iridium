@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -288,6 +289,106 @@ func TestTakeRemoteDsh(t *testing.T) {
 	if !after.After(before) {
 		t.Errorf("synced: models not probed again (%v, %v)", before, after)
 	}
+}
+
+// A Codex session at an executor (docs/exec.md, item 12): started there with the argv its hello
+// gave and the executor's CODEX_HOME, its rollout found there by the thread (a UUIDv7's date, or
+// a walk of the newest day folders for an id with no time) and mirrored here. There is no fake
+// Codex app-server: the agent is a shell that notes how it was started.
+func TestRemoteCodex(t *testing.T) {
+	gone := make(chan struct{}, 1)
+	hub := &remote.Hub{Logf: func(format string, a ...any) {
+		t.Logf(format, a...)
+		if strings.Contains(format, "gone") {
+			select {
+			case gone <- struct{}{}:
+			default:
+			}
+		}
+	}}
+	r := newRig(t, func(_ *config.Config, o *Options) { o.Remote = hub })
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		hub.Serve(w, req, "m1", "pc")
+	}))
+	t.Cleanup(srv.Close)
+	there := t.TempDir()
+	work := filepath.Join(there, "work")
+	home := filepath.Join(there, "codex")
+	os.MkdirAll(work, 0o700)
+	script := `printf '%s\n' "$@" > argv.txt; printf '%s\n' "$CODEX_HOME" > home.txt; exec cat > /dev/null`
+	exe, err := executor.New(executor.Options{
+		URL: "ws" + strings.TrimPrefix(srv.URL, "http"), State: filepath.Join(there, "executor"), Env: append(os.Environ(), "CODEX_HOME="+home), Logf: t.Logf,
+		Agents: []wire.AgentInfo{{Agent: "codex", Argv: []string{"/bin/sh", "-c", script, "codex"}, Version: "0.165.0"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { _ = exe.Run(ctx); close(done) }()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+		exe.Close()
+		// Its going told before the session layer closes (it lists the session again).
+		select {
+		case <-gone:
+		case <-time.After(5 * time.Second):
+		}
+	})
+	waitFor(t, "the executor", func() bool { _, ok := hub.Machine("m1").Hello(); return ok })
+
+	id, err := r.m.Create(bg, api.NewSession{Agent: api.AgentCodex, Cwd: work, Machine: "pc"}, "web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "codex there", func() bool {
+		b, _ := os.ReadFile(filepath.Join(work, "home.txt"))
+		return len(b) > 0
+	})
+	if b, _ := os.ReadFile(filepath.Join(work, "argv.txt")); string(b) != "app-server\n--listen\nstdio://\n" {
+		t.Errorf("argv there: %q", b)
+	}
+	if b, _ := os.ReadFile(filepath.Join(work, "home.txt")); string(b) != home+"\n" {
+		t.Errorf("CODEX_HOME there: %q", b)
+	}
+
+	h, _ := r.m.get(id)
+	if p, err := h.findTranscript(); p != "" || err != nil {
+		t.Errorf("before the thread: %q %v", p, err)
+	}
+	line := func(text string) string {
+		return `{"timestamp":"2026-11-08T04:31:00.000Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","id":"u1","content":[{"type":"text","text":"` + text + `"}]}}}` + "\n"
+	}
+	// The thread Codex made (Started): a UUIDv7 of now, its rollout in today's folder there.
+	now := time.Now()
+	ms := fmt.Sprintf("%012x", now.UnixMilli())
+	thread := ms[:8] + "-" + ms[8:] + "-7abc-8def-0123456789ab"
+	day := filepath.Join(home, "sessions", now.Format("2006"), now.Format("01"), now.Format("02"))
+	os.MkdirAll(day, 0o700)
+	os.WriteFile(filepath.Join(day, "rollout-"+now.Format("2006-01-02T15-04-05")+"-"+thread+".jsonl"), []byte(line("hi there")), 0o600)
+	// An older Codex's thread, its id with no time in it.
+	const old = "0193a3c2-7d1e-4a51-9b8f-0c4d5e6f7a8b"
+	oldDay := filepath.Join(home, "sessions", "2024", "05", "06")
+	os.MkdirAll(oldDay, 0o700)
+	os.WriteFile(filepath.Join(oldDay, "rollout-2024-05-06T10-00-00-"+old+".jsonl"), []byte(line("long ago")), 0o600)
+	for thread, want := range map[string]string{thread: "hi there", old: "long ago"} {
+		h.mu.Lock()
+		h.meta.AgentID = thread
+		h.mu.Unlock()
+		p, err := h.findTranscript()
+		if err != nil || filepath.Dir(p) != filepath.Join(h.dir, "remote") {
+			t.Fatalf("%s: %q %v", thread, p, err)
+		}
+		if b, _ := os.ReadFile(p); !strings.Contains(string(b), want) {
+			t.Errorf("%s: mirrored %q", thread, b)
+		}
+	}
+
+	if err := r.m.Stop(bg, id); err != nil {
+		t.Fatal(err)
+	}
+	r.waitState(id, "stopped", func(s *api.SessionState) bool { return !s.Live })
 }
 
 // A dsh session Iridium started at a machine is filed under DSH Desktop's workspace of its folder

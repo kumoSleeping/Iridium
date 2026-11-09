@@ -981,6 +981,7 @@ func (h *Hosted) state(o store.Overlay, archived bool) api.SessionState {
 	for _, m := range h.models {
 		s.Models = append(s.Models, api.Model{Value: m.Value, Name: m.Name, Description: m.Description, Resolved: m.Resolved, Efforts: slices.Clone(m.Efforts), NoEffort: m.NoEffort, EffortNames: maps.Clone(m.EffortNames), Group: m.Group})
 	}
+	h.m.heldState(&s, h.live)
 	h.m.catalogState(&s, h.meta.Machine)
 	if _, ok := h.drv.(agent.Ultracoder); ok {
 		u := &api.Ultracode{Available: true}
@@ -993,6 +994,7 @@ func (h *Hosted) state(o store.Overlay, archived bool) api.SessionState {
 			u.Available = false // a CLI without get_settings: the driver refuses it
 		}
 		s.Ultracode = u
+		s.Features = append(s.Features, api.Feature{ID: ultracodeFeature, Name: "UltraCode", On: u.On, Active: u.Active, Available: u.Available, Place: featurePlace, Tone: "warm"})
 	}
 	for _, c := range h.commandsLocked() {
 		s.Commands = append(s.Commands, api.Command{Name: c.Name, Description: c.Description, ArgumentHint: c.ArgumentHint})

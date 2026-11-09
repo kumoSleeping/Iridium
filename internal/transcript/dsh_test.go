@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/klauspost/compress/zstd"
+
 	"github.com/kumoSleeping/iridium/internal/api"
 )
 
@@ -252,6 +254,43 @@ func TestGlanceDsh(t *testing.T) {
 	}
 	if DshHome([]string{"DSH_HOME=/x"}) != "/x" || !strings.HasSuffix(DshHome(nil), "/.dsh") {
 		t.Errorf("home: %q", DshHome(nil))
+	}
+}
+
+// A dsh subagent has ended once its turn has: the list stops showing it at work then.
+func TestGlanceDshSubagentEnded(t *testing.T) {
+	enc, err := zstd.NewWriter(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer enc.Close()
+	path := filepath.Join(t.TempDir(), "session.v4.jsonl.zstd")
+	var data []byte
+	write := func(lines ...string) Glimpse {
+		t.Helper()
+		for _, l := range lines {
+			data = enc.EncodeAll([]byte(l+"\n"), data)
+		}
+		if err := os.WriteFile(path, data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		g, err := GlanceDsh(path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return g
+	}
+	if g := write(`{"type":"session","version":4,"cwd":"/w","origin":"subagent","parentSession":"p1"}`); !g.Sidechain || g.Parent != "p1" || g.Ended {
+		t.Errorf("not begun: %+v", g)
+	}
+	if g := write(`{"type":"turn/start","seq":1,"time":1,"data":{"turn":1}}`, `{"type":"step/start","seq":2,"time":2,"data":{"turn":1,"step":1}}`); g.Ended {
+		t.Error("at work: ended")
+	}
+	if g := write(`{"type":"turn/end","seq":3,"time":3,"data":{"turn":1,"reason":{"kind":"completed"}}}`); !g.Ended {
+		t.Error("its turn over: not ended")
+	}
+	if g := write(`{"type":"turn/start","seq":4,"time":4,"data":{"turn":2}}`); g.Ended {
+		t.Error("sent another message: ended")
 	}
 }
 

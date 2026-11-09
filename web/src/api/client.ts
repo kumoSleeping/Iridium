@@ -23,6 +23,12 @@ import type {
   MessagePage,
   NewFolder,
   NewInvite,
+  NewNote,
+  Note,
+  NoteFolder,
+  NoteFolderPatch,
+  NotePatch,
+  Notes,
   NewSession,
   NewSessionReply,
   NewUpload,
@@ -42,6 +48,7 @@ import type {
   SetModel,
   SetPreset,
   Presets,
+  SetFeature,
   SetUltracode,
   Settings,
   SettingsPatch,
@@ -192,6 +199,16 @@ export const api = {
   /** A folder's colour tag; "" takes it off. The carried state "colors" has them all. */
   folderColor: (f: FolderColor) => writeAgain<{ ok: boolean }>("PUT", "/api/colors", f),
 
+  // --- notes (the carried state "notes" has them all) ---
+  notes: () => get<Notes>("/api/notes"),
+  /** id: the page's own, so one sent again is the same note. */
+  newNote: (n: NewNote) => writeAgain<Note>("POST", "/api/notes", n),
+  patchNote: (id: string, p: NotePatch) => writeAgain<Note>("PATCH", `/api/notes/${enc(id)}`, p),
+  deleteNote: (id: string) => writeAgain<{ ok: boolean }>("DELETE", `/api/notes/${enc(id)}`),
+  newNoteFolder: (p: NoteFolderPatch) => write<NoteFolder>("POST", "/api/note-folders", p),
+  patchNoteFolder: (id: number, p: NoteFolderPatch) => writeAgain<{ ok: boolean }>("PATCH", `/api/note-folders/${id}`, p),
+  deleteNoteFolder: (id: number) => writeAgain<{ ok: boolean }>("DELETE", `/api/note-folders/${id}`),
+
   // --- files in messages, uploads ---
   // v: the file's version (its mtime): a file written again at its path is another address, not
   // the picture the browser has of it (the user, 2026-11-09: a shot redone showed the old one).
@@ -217,6 +234,7 @@ export const api = {
   effort: (id: string, effort: string) => writeAgain<{ ok: boolean }>("PUT", `${S(id)}/effort`, { effort }),
   preset: (id: string, preset: string) => writeAgain<{ ok: boolean }>("PUT", `${S(id)}/preset`, { preset } satisfies SetPreset),
   presets: (id: string) => get<Presets>(`${S(id)}/presets`),
+  setFeature: (id: string, feature: string, f: SetFeature) => writeAgain<{ ok: boolean }>("PUT", `${S(id)}/features/${enc(feature)}`, f),
   ultracode: (id: string, on: boolean) => writeAgain<{ ok: boolean }>("PUT", `${S(id)}/ultracode`, { ultracode: on } satisfies SetUltracode),
   rules: (id: string) => get<AllowRule[]>(`${S(id)}/rules`),
   clearRules: (id: string) => write<{ ok: boolean }>("DELETE", `${S(id)}/rules`),

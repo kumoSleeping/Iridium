@@ -217,8 +217,18 @@ func TestAppliedAndUltracode(t *testing.T) {
 	if s.Pick != "haiku" || s.Ultracode.Available || s.Ultracode.Active || !s.Ultracode.On {
 		t.Errorf("after the switch: pick %q ultracode %+v", s.Pick, s.Ultracode)
 	}
+	// The same as a feature.
+	if f := s.Features; len(f) != 1 || f[0].ID != "claude.ultracode" || f[0].Available || f[0].Active || !f[0].On || f[0].Place != "effort" || f[0].Tone != "warm" {
+		t.Errorf("features: %+v", f)
+	}
 	if err := r.m.SetUltracode(bg, id, true); !errors.Is(err, ErrBadRequest) {
 		t.Errorf("ultracode on haiku: %v", err)
+	}
+	if err := r.m.SetFeature(bg, id, "claude.ultracode", api.SetFeature{On: true}); !errors.Is(err, ErrBadRequest) {
+		t.Errorf("ultracode on haiku, as a feature: %v", err)
+	}
+	if err := r.m.SetFeature(bg, id, "x.other", api.SetFeature{On: true}); !errors.Is(err, ErrBadRequest) {
+		t.Errorf("a feature it has not: %v", err)
 	}
 	if err := r.m.SetUltracode(bg, id, false); err != nil {
 		t.Fatal(err)

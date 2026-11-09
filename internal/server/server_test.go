@@ -278,6 +278,17 @@ func TestTurnOverHTTP(t *testing.T) {
 	if live.Ultracode == nil || !live.Ultracode.On {
 		t.Errorf("ultracode state: %+v", live.Ultracode)
 	}
+	// The same as a feature; one it has not is a bad request.
+	if code := call(t, c, "PUT", base+"/api/sessions/"+id+"/features/claude.ultracode", api.SetFeature{On: false}, nil); code != 200 {
+		t.Errorf("feature: %d", code)
+	}
+	call(t, c, "GET", base+"/api/sessions/"+id, nil, &live)
+	if live.Ultracode == nil || live.Ultracode.On || len(live.Features) != 1 || live.Features[0].On {
+		t.Errorf("feature state: %+v %+v", live.Ultracode, live.Features)
+	}
+	if code := call(t, c, "PUT", base+"/api/sessions/"+id+"/features/x.other", api.SetFeature{On: true}, nil); code != 400 {
+		t.Errorf("an unknown feature: %d", code)
+	}
 	// A second daemon on the same socket is refused.
 	if _, _, err := s.Listen(); err == nil {
 		t.Error("listened twice on one socket")

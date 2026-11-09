@@ -48,10 +48,11 @@
 - `os`：`windows`、`darwin`、`linux`。`sep`：路径分隔符。
 - `env`：执行端自己的环境。这边以它为底，按驱动的规则增删，启动时整份发过去。密钥不出那台机器（2026-11-08）：名字像密钥的（含 `KEY`、`TOKEN`、`SECRET`、`PASSW`、`CREDENTIAL`、`COOKIE`、`AUTH`、`SESSION`、`PRIVATE`，或以 `DEEPSEEK_`、`ANTHROPIC_`、`OPENAI_`、`AWS_`、`AZURE_`、`GOOGLE_`、`GH_`、`GITHUB_`、`NPM_`、`HF_` 开头）值换成占位 `(secret kept at the executor)`；`hold.start` 的 `env` 里值仍是占位的，执行端换回本机的值（本机没有就去掉）。这边设的值照用。执行端自己的 `IRIDIUM_SESSION`、`IRIDIUM_SOCKET`、`IRIDIUM_CONFIG`、`IRIDIUM_URL`、`IRIDIUM_TOKEN`（给它本机 Iridium 的）不报，子进程只拿到这边设的。旧执行端照旧报全值。
 - `scratch`：执行端自己的一个目录，这边往里写启动用的文件（dsh 的 `--patch`）。
-- `agents`：装了哪些 agent、怎么启动（`argv` 是程序部分，驱动接着加参数）。dsh 直接给 `node` 和 `bin.js`，不经 `.cmd`；`scope` 是它的 `@deepseek-ai` 包目录（这边从里面读预设），`home` 是 `DSH_HOME`。dsh 低于 0.2.2 不给开。
+- `agents`：装了哪些 agent、怎么启动（`argv` 是程序部分，驱动接着加参数）。dsh 直接给 `node` 和 `bin.js`，不经 `.cmd`；`scope` 是它的 `@deepseek-ai` 包目录（这边从里面读预设），`home` 是 `DSH_HOME`。dsh 低于 0.2.2 不给开。Codex 给 `codex` 本身（npm 装的给 `node` 和 `codex.js`），不给 `home`：这边看那边环境里的 `CODEX_HOME`。
 - `holds`：它手上全部进程（`{hold, outSize, inSeq, exit}`，`inSeq` 是写进去的最后一行的序号）。这边据此对账：哪些还在跑、输入从哪儿续；这边起过、它却没有的，算进程没了。
 - `noShell`：执行端的主人选了只启动自己的 agent（`ir join --no-shell`，dsh 插件配置 `shell: false`）。这时 `hold.start` 的 `argv` 必须以某个 agent 的 `argv` 开头，否则报 `denied`；网页上这台机器的会话不能执行命令（`docs/api.md`“命令”）。
 - `agentShell`：这边的 agent 也能用 `ir sh` 在那台机器上执行命令，不只是网页上的人（`ir join --agent-shell`，dsh 插件配置 `agentShell: true`）。默认没有。
+- `caps`（2026-11-09）：会讲的可选部分。`held`：`held.list`、`held.send`；`held.features`：`held.get`、`held.set` 和事件 `held.changed`（见“可选”“附加功能”）。dsh 插件在 dsh 有 `agents` 服务时报这两项。没有的（旧插件、`ir join`）照旧：`dsh.open`、`dsh.prompt`，没有附加功能。
 
 **接入就是让这边能在那台机器上以那个账户运行程序。** `hold.start` 的 `argv` 由这边定，执行端不加限制（`noShell` 除外）；`roots` 只管文件读写，管不住进程。所以同不同意由那台机器的主人决定：装插件、跑 `ir join` 就是同意；不想让这边执行命令，就开 `noShell`。
 
@@ -95,7 +96,16 @@
 
 - `fs.watch {path}` 和事件 `changed {path, size}`：文件变了就报，合并着报。没有它这边定时 `fs.stat`。
 - 余额：这边要读那边 DeepSeek 的密钥才能查；不做，那台机器上的会话不查余额（这边不拿它的环境、不读本机同名路径）。
-- dsh 插件另有五个（见“远端 DSH”），别的执行端回 `unsupported`：`dsh.prompt {session, text, steer?}` → `{}`，把消息交给 Desktop 里这个会话的 agent（没有就 `not_found`）；`dsh.open {}` → `{sessions, unsynced, unsyncedUngrouped}`，插件所在的 dsh 进程（DSH Desktop）里此刻打开着的会话，插件设置里不同步到这边的工作区（文件夹或名字），以及未分组的会话是否也不同步；`dsh.attach {session, cwd}` → `{}`，把会话登记到 `cwd` 对应的工作区（没有就新建），Desktop 侧边栏里就有它。`dsh.presets {}` → `{presets: [{id, name?, description?, plugins, broken?}], default}`，插件所在 dsh 进程的 Agent 预设注册表（`agentPresets` 的 `list()`、`defaultId`，`plugins` 是 `readDocument` 给的子插件行 YAML）：这边按它列预设、生成 patch，自建和改过的预设也能用；不支持时退回读包里的预设文件。`dsh.llm {}` → `{patch}`：插件把 Desktop 此刻生效的模型设置（基础包里的 `dsh-llm*` 行和 `agent-default-model`，照它的配置和开关，`!!js` 原样）写成那台机器上的一个补丁，只回路径；这边起 dsh 会话和模型探测时多带 `--patch <它>`，sdk 进程就有了 Desktop 的供应商、模型和默认模型。里面可能有密钥：文件只在那台机器上，执行端不对外读。
+- 额度窗口：照常问那边的 agent 进程（Codex `account/rateLimits/read`），是那台机器的登录的，可能是另一个账号（Codex 不报账号），所以按 agent、账号和机器分开记，不和这边的混。
+- dsh 插件另有这些（见“远端 DSH”“附加功能”），别的执行端回 `unsupported`。`held.*` 照握手的 `caps` 用，没有就用旧名；插件新旧两个名字都答（给旧版 Iridium）。
+  - `held.list {}` → `{sessions, running, unsynced, unsyncedUngrouped}`（旧名 `dsh.open`）：插件所在的 dsh 进程（DSH Desktop）里此刻打开着的会话（Desktop 载入了它、拿着写锁，下称“Desktop 拿着”），其中 agent 正在干活的，插件设置里不同步到这边的工作区（文件夹或名字），以及未分组的会话是否也不同步。
+  - `held.send {session, text, steer?}` → `{}`（旧名 `dsh.prompt`）：把消息交给 Desktop 里这个会话的 agent（没有就 `not_found`）。
+  - `held.get {session, lang}` → `{held, model?, effort?, features?}`：会话在那边此刻的样子。`held`：Desktop 拿着它；只有这时才给 `model`（`供应商/模型`）和 `effort`（此刻跑的档位：有附加功能管着强度时是它的，否则是会话的模型选择里的）。`features`：插件给它的附加功能，拿不拿着都给（没拿着的不可用，带原因），文字按 `lang`（`zh`、`en`，这边设置的语言）。
+  - `held.set {session, lang, model | effort | feature: {id, on, option?}}` → 同 `held.get`，改后的：每次只改一样，只对 Desktop 拿着的会话（否则 `not_found`）。模型、强度经 dsh 的 `sessionController.selectModel`（同 Desktop 的模型选择）：换模型时新模型有原来的档位就保留；强度有附加功能管着时交给它（`setEffort`）。功能交给提供它的插件。审批模式不经这里。
+  - 事件 `held.changed {session, live}`：`live` 同 `held.get` 的回答，见“附加功能”。
+  - `dsh.attach {session, cwd}` → `{}`，把会话登记到 `cwd` 对应的工作区（没有就新建），Desktop 侧边栏里就有它。
+  - `dsh.presets {}` → `{presets: [{id, name?, description?, plugins, broken?}], default}`，插件所在 dsh 进程的 Agent 预设注册表（`agentPresets` 的 `list()`、`defaultId`，`plugins` 是 `readDocument` 给的子插件行 YAML）：这边按它列预设、生成 patch，自建和改过的预设也能用；不支持时退回读包里的预设文件。
+  - `dsh.llm {}` → `{patch}`：插件把 Desktop 此刻生效的模型设置（基础包里的 `dsh-llm*` 行和 `agent-default-model`，照它的配置和开关，`!!js` 原样）写成那台机器上的一个补丁，只回路径；这边起 dsh 会话和模型探测时多带 `--patch <它>`，sdk 进程就有了 Desktop 的供应商、模型和默认模型。里面可能有密钥：文件只在那台机器上，执行端不对外读。
 
 ## 网页（用户，2026-11-08）
 
@@ -142,7 +152,7 @@
 9. （已做，`internal/join`）`ir join <地址>`：二进制的执行端模式，复用 `internal/remote/executor`，配对、存 TOKEN、常驻（见“平台差异”）、找 agent（npm 的 `.cmd` 垫片解析成 `node` + 入口 js）。
 10. （已做）`ir cp`、`ir files` 认执行端的 `机器:路径`（`fs.read`/`fs.write`/`fs.list`），只给本机的 `ir`：读按 `MaxRead` 分块不限大小；写到那边是一次 `fs.write`，先限 4MB。`ir sh` 已做。
 11. （已做）执行端上的会话里 agent 调 `ir`，见“远端的 ir”。
-12. 任何 agent 都能在执行端跑（2026-11-08）：驱动不分本机和那边，程序取 `SpawnOptions.Command`（那边是握手的 `argv`），启动文件经 `LaunchFile`、系统提示经 `PromptFile`（那边写进 scratch）；agent 的不同只在注册表一行（`internal/agents`）：`FindRemote`（那边的记录在哪）、`HomeEnv`（握手给的家目录放进哪个变量）、`MinRemote`（最低版本）。已接：Claude、dsh、pi（已做，用 `scripts/dev/exec-mini.py` 在测试实例上实测：开会话、工具调用、记录镜像、执行端重启后续跑、停止）。Codex 待接：补它那一行（记录按日期分目录）。
+12. 任何 agent 都能在执行端跑（2026-11-08）：驱动不分本机和那边，程序取 `SpawnOptions.Command`（那边是握手的 `argv`），启动文件经 `LaunchFile`、系统提示经 `PromptFile`（那边写进 scratch）；agent 的不同只在注册表一行（`internal/agents`）：`FindRemote`（那边的记录在哪）、`HomeEnv`（握手给的家目录放进哪个变量）、`MinRemote`（最低版本）。已接：Claude、dsh、pi（已做，用 `scripts/dev/exec-mini.py` 在测试实例上实测：开会话、工具调用、记录镜像、执行端重启后续跑、停止）、Codex（2026-11-09，只有测试，实机待跑）。Codex 的家目录是那边的 `CODEX_HOME`，没有就 `~/.codex`；记录是 `sessions/YYYY/MM/DD/rollout-<那边本地时间>-<线程>.jsonl`，日期按那边的本地时间。线程 id 是 UUIDv7，前 48 位是毫秒时间：取它的 UTC 日期和前后各一天（任何时区的本地日期都在其中）三个目录，再看 `archived_sessions/`；不是 v7 的（旧版）从最新的日目录往回找，最多 400 个。没有线程（第一回合前）就没有记录；停了再开按线程 `thread/resume`。系统提示在这边读、经协议发过去，那边不写文件。测试：`internal/agents` 的 `TestCodexFindRemote`（三个日期、归档、旧 id、上限），`internal/session` 的 `TestRemoteCodex`（Go 参考执行端：用握手的 `argv` 和那边的 `CODEX_HOME` 启动、按线程找到记录并镜像；没有假的 Codex app-server，agent 是一个记下启动参数的 shell，回合没测）。
 13. 发现那边自己开的会话：dsh 的已做（见“远端 DSH”），不用执行端新增请求；Claude、pi 还没做。
 
 ## 远端 DSH（用户，2026-11-08）
@@ -157,14 +167,30 @@
 - 扫描：每台连着、装了 dsh 的机器每 30 秒一次，连上时立刻一次；只看变了的：`sessions/` 下的目录按修改时间、摘要文件按修改时间；没有摘要的会话每 10 分钟逐个看一次。同时最多 8 个请求。结果存在状态目录 `remote-dsh/<机器>.json`，重启、机器断开时照样列出。
 - 列表：全部列出（用户，2026-11-08），不照本机“开始监视前就有的进归档”：第一次见到就显示，Desktop 里归档的进归档；之后 Desktop 里新归档的这边也归档，归档的有新内容再出来。显示标记的大小按那边记录文件的大小。分组照 `机器ID:路径`，和这边开的远端会话同组。
 - 记录：打开时才拉（`Mirror`，增量），放在状态目录 `remote-dsh/<机器>/<会话>/`；拉过的会话，扫描看到变了就跟着拉。断开时用已拉的。
-- 接着聊：发消息即接管（本机发现的 dsh 会话同样），在那台机器上 `session/resume`。插件每 5 秒报一次 Desktop 里开着哪些（`dsh.open`），这些会话显示“在别处运行”。Desktop 开着（拿着写锁）的会话，消息交给 Desktop 自己的那个 agent（插件的 `dsh.prompt`，`followup`／`steer`，来源 `user`，文本前带来源标记），任务在 Desktop 里接着跑，这边从镜像的记录里看（`SendReply.desktop`；`ir send --wait` 等记录里出现回复、5 秒不再变化）；Desktop 没有它的 agent 时照常在那边 `session/resume`，被写锁拒绝（`session/writer-held`，Windows 上是命名信号量，这边查不到）就报“正在另一个 dsh（DSH Desktop）里打开”。用户，2026-11-08：执行端断开一次（Desktop 重启），Desktop 回来后会自己载入这些会话并拿着写锁，之前就再也接不上。接管后这边的进程运行期间 Desktop 写不了它，停掉就放开。
+- 接着聊：发消息即接管（本机发现的 dsh 会话同样），在那台机器上 `session/resume`。插件每 5 秒报一次 Desktop 里开着哪些（`held.list`，旧插件 `dsh.open`），这些会话显示“在别处运行”。Desktop 开着（拿着写锁）的会话，消息交给 Desktop 自己的那个 agent（插件的 `held.send`，旧插件 `dsh.prompt`；`followup`／`steer`，来源 `user`，文本前带来源标记），任务在 Desktop 里接着跑，这边从镜像的记录里看（`SendReply.desktop`；`ir send --wait` 等记录里出现回复、5 秒不再变化）；Desktop 没有它的 agent 时照常在那边 `session/resume`，被写锁拒绝（`session/writer-held`，Windows 上是命名信号量，这边查不到）就报“正在另一个 dsh（DSH Desktop）里打开”。用户，2026-11-08：执行端断开一次（Desktop 重启），Desktop 回来后会自己载入这些会话并拿着写锁，之前就再也接不上。接管后这边的进程运行期间 Desktop 写不了它，停掉就放开。插件有 `held.features` 时，Desktop 拿着、这边没在跑的会话，网页上改模型、强度直接在 Desktop 里改（`held.set`），不接管；会话状态的 `effortNow` 是它在 Desktop 里此刻跑的档位（2026-11-09）。
 - 进 Desktop 的工作区：这边在那台机器上开的 dsh 会话，记录一出现就请插件登记到它目录的工作区（`dsh.attach`，没有就新建），只请求一次（成功或插件不支持，记在托管目录的 `remote-filed`）。Desktop 的会话列表只随它自己进程里的会话刷新，别的进程建的会话要重新载入窗口才出现：插件在浏览器里的那一半盯着工作区列表，工作区里有会话列表没有的会话时，让会话列表重新拉一次（每个会话最多三次）。
 - 分组（用户，2026-11-08）：Desktop 里不在任何工作区的会话（它的“未分组”）进这边的“未归类”，一条一条列，不套文件夹；已被自动放进某个分组的，安静 2 分钟后移回（这边刚开的会话过一会儿才登记进工作区）。读不到工作区登记表时照文件夹分组。执行端重新配对换了机器 ID，自动归到旧 ID 分组的会话改归新 ID 的分组。
-- 不同步（用户，2026-11-08）：插件在 dsh 设置里有自己的一页“Iridium”（`settings.section`，不在“插件”里；dsh web 和 DSH Desktop 共用这套设置外壳），上面是地址，下面每个工作区一个开关“同步到 Iridium”，最后一行是“未分组”（不在任何工作区里的会话，多是一次性的对话）。关掉的工作区按文件夹记在插件配置的 `unsynced`，未分组记在 `ungrouped: false`，随 `dsh.open` 报给这边（`unsynced`、`unsyncedUngrouped`）；这些会话（连同它们的子 agent）不列出，新会话的工作区列表里也没有，改了几秒内生效。只是这边不列，执行端照样能读那些文件。
+- 不同步（用户，2026-11-08）：插件在 dsh 设置里有自己的一页“Iridium”（`settings.section`，不在“插件”里；dsh web 和 DSH Desktop 共用这套设置外壳），上面是地址，下面每个工作区一个开关“同步到 Iridium”，最后一行是“未分组”（不在任何工作区里的会话，多是一次性的对话）。关掉的工作区按文件夹记在插件配置的 `unsynced`，未分组记在 `ungrouped: false`，随 `held.list`（`dsh.open`）报给这边（`unsynced`、`unsyncedUngrouped`）；这些会话（连同它们的子 agent）不列出，新会话的工作区列表里也没有，改了几秒内生效。只是这边不列，执行端照样能读那些文件。
 - 隐藏（用户，2026-11-08）：分组右键“隐藏”，会话不再列出、不进归档、搜不到；其中有会话在别处运行（Desktop 里开着）时整组出来，右键可取消隐藏。
 - 同步（用户，2026-11-09）：远端组右键菜单的“同步 DSH”（那台机器装了 dsh 才有，`POST /api/machines/{id}/dsh/sync`）立刻重读那台机器：工作区和会话（不等 30 秒的扫描）、模型和供应商（带 Desktop 此刻的设置重新探测，不用 3 分钟的缓存）、预设；那台机器的会话随即刷新。在跑的 agent 用的还是启动时的，下次启动才换。
 - 新会话：目录选择器在装了 dsh 的远端机器上，最上面列它的工作区（`GET /api/machines/{id}/dsh/workspaces`），点一下就选。从本机分组的“+”开远端会话，会话留在这个分组。
-- 插件在 Desktop 进程里用 dsh 自己的服务：`sessions.list()`、`workspaceRegistry` 的 `resolveByPath`、`create`、`attachSession`（`plugins/dsh-remote-iridium/dsh.js`）。旧版插件和 `ir join` 没有这两个请求：不显示 Desktop 里开着的，也不登记。
+- 插件在 Desktop 进程里用 dsh 自己的服务：`sessions.list()`、`agents.get()`、`sessionController.selectModel`（`plugins/dsh-remote-iridium/held.js`），`workspaceRegistry` 的 `resolveByPath`、`create`、`attachSession`（`dsh.js`）。旧版插件和 `ir join` 没有 `held.list`（`dsh.open`）和 `dsh.attach`：不显示 Desktop 里开着的，也不登记。
+
+## 附加功能（用户，2026-11-09）
+
+会话上多出的开关（Feature），网页画在思考强度滑条右边：Claude 的 UltraCode（驱动的，`claude.ultracode`），以及执行端那台机器上 DSH Desktop 里别的插件给的，例如 OMD（oh-my-dsh）的 Ultra（`omd.ultra`）。OMD 不进 Iridium 的核心（用户，2026-11-09）：这边只收插件给的数据，不带认识 OMD 的代码。代码：`internal/session/held.go`，插件的 `held.js`、`features.js`、`adapters/omd.js`。
+
+- 形状：`{id, name, on, active?, available, reason?, hint?, options?: [{id, name}], option?, place, tone?, v?}`。这边只认 `on`（开没开）、`active`（开了且生效）、`available`（现在能不能切，不能时 `reason` 说为什么）、`place`、`tone`；名字、说明、原因、选项照转，由插件按 `held.get` 的 `lang` 写。
+- 插件里的注册表：cordis 服务 `iridiumFeatures`（`features.js`）。`provide({id, get, set, ownsEffort?, effort?, setEffort?})` 注册一项，返回撤销函数；同 id 先到先得，前一个撤了后一个才顶上。每次调用有时限（读 3 秒、改 15 秒），出错或超时只让这一项不可用，错误消息作原因；`held.get` 里各项的读取和“谁管强度”同时问，整个回复 3 秒内给出。插件设置“Iridium”一页有一组开关“提供给 Iridium 的附加功能”，关掉的按 id 记在配置 `unfeatured`，不提供、也不能改；这一页在浏览器那一半，拿不到注册表，只列插件自带适配的（现在是 `omd.ultra`）和已关掉的。
+- 推送：Desktop 里有变化（切了功能、选了模型、agent 载入或卸下；Desktop 拿着的会话另外每 3 秒看一次），插件对这边 10 分钟内问过的会话发 `held.changed`（Desktop 一直拿着的会话不过期），每个会话每秒最多两次。
+- OMD 的适配：`adapters/omd.js` 是插件里唯一认识 OMD 的文件，一个 cordis 子插件，`inject: ['omd', 'iridiumFeatures']`：两样都在才启用，没装 OMD 时不运行也不报错，OMD 卸载或重载时连同这一项撤掉。它把 OMD 的 `ultracode`（`inspect`、`select`）译成 `omd.ultra`：名字 Ultra，暖色，子模式 Workflow、Agent Team（OMD 说能组队时才有）、自由。开着时强度归它管（滑条显示、设的都是 Ultra 的档位）；开时不给档位由 OMD 选（已开着的保留原档位），关时回到滑条的档位。哪天 OMD 自己注册进 `iridiumFeatures`，删掉这个文件即可。
+- 只在 Desktop 拿着的会话上能开。Iridium 自己起的 dsh 会话是 `dsh --profile sdk` 子进程，不加载 OMD 和本插件，没有 Ultra；它们和 Desktop 没拿着的会话照样列出这一项，但不可用（OMD 为会话记着的 Ultra 照样显示为开），原因是插件给的（“会话不在 DSH Desktop 里打开着，或没用 OMD 的预设”）。Iridium 所在机器上直接发现的 Desktop 会话没有执行端，也就没有附加功能；插件旧、握手没有 `held.features` 的，同样没有。
+- 这边的限制：
+  - `id` 形如 `<插件>.<名字>`（只用 `a-z0-9-`），不合的丢；同 id 取第一个；每个会话最多 4 项，多的丢（每台机器记一次日志）。`v` 大于 1 的丢；`place` 只认 `effort`（网页只有这一处），别的丢；`tone` 只认 `warm`，别的当没有。
+  - 名字、选项名至多 24 字，说明、原因至多 120 字：去掉控制字符和首尾空白，长了截断。选项至多 8 个，id 只用 `a-z0-9-`；`option` 不是其中之一就当没有。
+  - 切换前先核对：这一项、这个选项在会话最近一次拿到的里面，否则 400，不问执行端。
+  - 每个会话拿到的缓存 10 秒。会话状态不等执行端：过期了、或语言变了就在后台 `held.get`（6 秒超时；失败的 10 秒后再问，不当作拿到过），回来再发一次会话状态，所以第一份状态可能还没有附加功能。设置里换了语言，拿到过的会话都重发一次。Desktop 拿着的会话，强度、模型以 Desktop 的为准（这边起过的会话也一样，不看这边存的设置）。名字、说明按服务器的语言（设置里的），不按各页面的。`held.changed` 每个会话 500ms 至多发一次（取最后一份）；不是这边知道的、那台机器上的 dsh 会话，不理。
+  - 只有网页能切（`PUT /api/sessions/{id}/features/{feature}`，权限同改强度）；`ir` 和 Bot 不碰附加功能。
 
 ## 远端的 ir（用户，2026-11-08）
 

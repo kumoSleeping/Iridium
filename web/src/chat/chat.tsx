@@ -163,6 +163,17 @@ export function ChatPage({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?:
   });
 
   const composer = useRef<ComposerHandle>(null);
+  // A note put into this chat (notes.tsx putIntoSession): its words in the composer, on a line of
+  // their own; the event cancelled says it was taken.
+  useEffect(() => {
+    const put = (e: Event) => {
+      if (!composer.current) return;
+      composer.current.put((e as CustomEvent<string>).detail);
+      e.preventDefault();
+    };
+    addEventListener("ir:note", put);
+    return () => removeEventListener("ir:note", put);
+  }, []);
   const [modelOpen, setModelOpen] = useState(false);
   const [modeOpen, setModeOpen] = useState(false);
   const [usageOpen, setUsageOpen] = useState(false);
@@ -210,7 +221,7 @@ export function ChatPage({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?:
   // What changes as the conversation grows: it keeps to the bottom, the dots wait again.
   const grew = `${log.blocks.at(-1)?.at} ${log.drafts.length} ${log.drafts.at(-1)?.text.length} ${log.drafts.at(-1)?.whole} ${log.sent.length}`;
   return (
-    <div className="relative h-full" onDragOver={(e) => files(e) || session(e)} onDrop={drop}>
+    <div className="relative h-full" data-chat-drop={id} onDragOver={(e) => files(e) || session(e)} onDrop={drop}>
       <Stick scroller={scroller} tail={grew} older={() => log.older()} place={chat.place} bottom={stackH} quiet={!!s?.asks.length} style={{ paddingTop: 64, paddingBottom: stackH + 20 }}>
         <div className="mx-auto flex max-w-[760px] flex-col gap-5 px-4 sm:px-6">
           {/* In a turn, the calls being written or run and the dots share one row at the end, as
@@ -309,7 +320,7 @@ function Under({ s, ghost, composer, onSent, onSentDone, modelOpen, setModelOpen
             {!ghost && <ModelKey s={s} open={modelOpen} onOpenChange={setModelOpen} />}
             {/* dsh: its preset, then its balance where the bars would be (the user, 2026-11-08). */}
             {agentInfo?.presets ? <PresetKey s={s} /> : null}
-            <QuotaBars agent={s.agent} live={s.live} using={[s.model, s.pick, modelView(s).name]} open={usageOpen} onOpenChange={setUsageOpen} />
+            <QuotaBars agent={s.agent} machine={s.machine} live={s.live} using={[s.model, s.pick, modelView(s).name]} open={usageOpen} onOpenChange={setUsageOpen} />
           </>
         }
         end={<ContextRing session={s.id} summary={s.context} open={ctxOpen} onOpenChange={setCtxOpen} />}

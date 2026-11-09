@@ -349,9 +349,9 @@ const DesktopInput = "desktop"
 
 // toDesktop gives a message for a dsh session at another machine that DSH Desktop there holds
 // (open in it, so its writer lock is Desktop's and a resume here is refused) to Desktop's own
-// agent of it, through the dsh plugin (dsh.prompt): the work goes on there, its transcript
-// mirrored here as for any of Desktop's sessions (the user, 2026-11-08: a session the executor
-// lost, Desktop took up on its return). done false: not such a session, or the plugin cannot,
+// agent of it, through the dsh plugin (held.send; dsh.prompt of an older one): the work goes on
+// there, its transcript mirrored here as for any of Desktop's sessions (the user, 2026-11-08: a
+// session the executor lost, Desktop took up on its return). done false: not such a session, or the plugin cannot,
 // so the message goes the usual way. Images do not go: Desktop's agent would not see them.
 func (m *Manager) toDesktop(ctx context.Context, id, text, from string, steer, images bool) (bool, error) {
 	f := m.finder()

@@ -9,11 +9,12 @@ import { Logo } from "./ui";
 
 export const toasts = Toast.createToastManager();
 
-type Data = { agent?: Agent; jump?: string; error?: boolean };
+type Data = { agent?: Agent; jump?: string; error?: boolean; undo?: () => void };
 
-/** A toast: title, maybe a line after it; error ones stay 8 s. */
-export function toast(title: string, opts: { description?: string; error?: boolean; agent?: Agent; jump?: string; timeout?: number } = {}) {
-  toasts.add({ title, description: opts.description, timeout: opts.timeout ?? (opts.error ? 8000 : 2500), data: { agent: opts.agent, jump: opts.jump, error: opts.error } satisfies Data });
+/** A toast: title, maybe a line after it; error ones stay 8 s. undo: a key that takes back what
+ *  was done, the toast staying 6 s. */
+export function toast(title: string, opts: { description?: string; error?: boolean; agent?: Agent; jump?: string; timeout?: number; undo?: () => void } = {}) {
+  toasts.add({ title, description: opts.description, timeout: opts.timeout ?? (opts.error ? 8000 : opts.undo ? 6000 : 2500), data: { agent: opts.agent, jump: opts.jump, error: opts.error, undo: opts.undo } satisfies Data });
 }
 
 /** An error's words for a toast. */
@@ -35,7 +36,11 @@ export function ToastList({ onJump }: { onJump: (id: string) => void }) {
         {d?.error && <CircleAlert size={15} className="shrink-0 text-err" />}
         <Toast.Title className="min-w-0 truncate font-medium" />
         <Toast.Description className="min-w-0 shrink truncate text-ink-2" />
-        {d?.jump ? (
+        {d?.undo ? (
+          <Toast.Close onClick={d.undo} className="g-press ml-1 h-7 shrink-0 rounded-full bg-fill px-3 text-xs font-medium hover:bg-fill-2">
+            {t("toast.undo")}
+          </Toast.Close>
+        ) : d?.jump ? (
           <Toast.Close onClick={() => onJump(d.jump!)} className="g-press ml-1 h-7 shrink-0 rounded-full bg-fill px-3 text-xs font-medium hover:bg-fill-2">
             {t("toast.open")}
           </Toast.Close>
