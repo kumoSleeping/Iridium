@@ -41,6 +41,7 @@ export const zh = {
 
   "menu.rename": "改名",
   "menu.hide": "隐藏",
+  "nav.all": "全部",
   "menu.syncDsh": "同步 DSH",
   "menu.unhide": "取消隐藏",
   "menu.new": "新建会话",

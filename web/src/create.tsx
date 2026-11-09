@@ -11,7 +11,7 @@ import { openChat } from "./route";
 import type { Agent } from "./api/types.gen";
 import { t } from "./i18n";
 import { agentsQ, useHome } from "./data";
-import { atMachine, homeAt, MachineBadge, MachineFace, pageAt, remoteOf } from "./machines";
+import { atMachine, homeAt, MachineBadge, MachineFace, pageAt, remoteOf, useView } from "./machines";
 import { useMachines } from "./store";
 import { remotePath } from "./tree";
 import { errText, toast } from "./toast";
@@ -363,12 +363,18 @@ export function CreatePopover({ trigger }: { trigger: ReactElement }) {
   const machines = useMachines().filter((m) => m.agents.length > 0);
   const [at, setAt] = useState<Machine | undefined>(undefined);
   const { busy, start } = useStart((id) => (setOpen(false), openChat(id)));
+  // The list showing another machine: open there (sidebar.tsx ViewSwitch).
+  const view = useView();
   return (
     <Popover.Root
       open={open}
       onOpenChange={(o) => {
         setOpen(o);
-        if (o) setPage("folder");
+        if (o) {
+          setPage("folder");
+          const v = machines.find((m) => m.id === view);
+          if (v) setAt(v), setFolder("~");
+        }
       }}
     >
       <Popover.Trigger render={trigger} />

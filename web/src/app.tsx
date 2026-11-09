@@ -22,7 +22,7 @@ import { close, go, onTurn, openChat, over, quietDialog, route, usagePoint, useR
 import { Pager, TABS_H } from "./pager";
 import { atLeft, GRIP, Sheet } from "./sheet";
 import { HeadKeys, Sidebar } from "./sidebar";
-import { useConfirms, useList } from "./store";
+import { useConfirms, useList, useMachines } from "./store";
 import { follow } from "./stream";
 import { ToastList, toasts } from "./toast";
 import { buildTree, flat } from "./tree";
@@ -137,7 +137,9 @@ export function App() {
   const { expanded, toggle } = useExpanded();
   // Each minute too: a subagent long quiet is let go.
   const minute = useMinute();
-  const tree = useMemo(() => buildTree(list ?? [], ws.data ?? [], t("nav.unsorted"), Math.max(minute, Date.now())), [list, ws.data, t("nav.unsorted"), minute]);
+  const machines = useMachines();
+  const order = useMemo(() => machines.map((m) => m.id), [machines.map((m) => m.id).join(",")]);
+  const tree = useMemo(() => buildTree(list ?? [], ws.data ?? [], t("nav.unsorted"), Math.max(minute, Date.now()), undefined, order), [list, ws.data, t("nav.unsorted"), minute, order]);
 
   useEffect(() => follow(open), [open]);
   // Unread, and the chats of turns that end off screen.
