@@ -192,6 +192,7 @@ export function Sidebar(p: Props) {
         <WsRow
           flip={`w:${w.key}`}
           machine={machines.find((m) => m.id === w.machine)}
+          remote={!!w.machine}
           id={w.id}
           name={w.name}
           sessions={w.rows.flatMap((r) => (r.kind === "session" ? [r.s] : r.f.sessions))}
@@ -480,7 +481,7 @@ function Row({ depth, flip, chevron, expanded, icon, label, end, selected, onCli
 /** A group's row; its menu (right click, long-press): its sessions archived, as a folder's (the
  *  user, 2026-11-08: a group is a folder now), rename, its path copied, open or folded, 通知 while
  *  push is on. 未归类 itself (id 0): its sessions archived and its 通知. */
-function WsRow({ flip, id, name, root, sessions, machine, hidden, open, onToggle, end }: { flip: string; id: number; name: string; root: string; sessions: Session[]; machine?: Machine; hidden?: boolean; open: boolean; onToggle: () => void; end: ReactNode }) {
+function WsRow({ flip, id, name, root, sessions, machine, remote, hidden, open, onToggle, end }: { flip: string; id: number; name: string; root: string; sessions: Session[]; machine?: Machine; remote?: boolean; hidden?: boolean; open: boolean; onToggle: () => void; end: ReactNode }) {
   const machines = useMachines();
   const push = usePushMenus();
   const me = useMe().data;
@@ -520,7 +521,7 @@ function WsRow({ flip, id, name, root, sessions, machine, hidden, open, onToggle
         // No chevron, on a phone either (the user, 2026-11-08): its sessions shown under it, or not.
         expanded={open}
         reveal
-        icon={<WsMark open={open} machine={machine} remote={!machine && remotePath(root)} />}
+        icon={<WsMark open={open} remote={!!remote} />}
         onClick={() => !renaming && onToggle()}
         label={
           renaming ? (
@@ -528,6 +529,14 @@ function WsRow({ flip, id, name, root, sessions, machine, hidden, open, onToggle
           ) : (
             <span className="flex min-w-0 items-center">
               <span className="truncate font-medium">{name}</span>
+              {/* At another machine: its Bot's face after the name, its link said at the head. */}
+              {machine && (
+                <Tip label={machine.name} side="bottom">
+                  <span className="ml-2 inline-flex shrink-0">
+                    <MachineFace m={machine} size={16} className={cn(!machine.online && "opacity-50 grayscale")} />
+                  </span>
+                </Tip>
+              )}
             </span>
           )
         }
@@ -565,8 +574,8 @@ function WsRow({ flip, id, name, root, sessions, machine, hidden, open, onToggle
 
 /** The head's name, while another machine's Bot is linked (the user, 2026-11-09): a press opens a
  *  menu of what the list shows, 全部, 本机 or one other machine (its face, name, link lamp and round
- *  trip). Showing one, the head is that machine's: its face, name and link where Iridium's are, its
- *  "+" opening there. An amber lamp after it while a session not shown needs you. 同步 DSH at the
+ *  trip). Showing one, the head says that machine: its face on Iridium's mark's corner, its name
+ *  and link where Iridium's are, its "+" opening there. An amber lamp after it while a session not shown needs you. 同步 DSH at the
  *  menu's foot while a machine with dsh is shown. */
 function ViewSwitch({ view, machines, waits }: { view: string | null; machines: Machine[]; waits: boolean }) {
   const m = view ? machines.find((x) => x.id === view) : undefined;
@@ -580,7 +589,11 @@ function ViewSwitch({ view, machines, waits }: { view: string | null; machines: 
   return (
     <Menu.Root>
       <Menu.Trigger className="g-press -my-1 flex min-w-0 flex-1 items-center gap-2 rounded-md py-1 pl-2 text-left outline-none select-none hover:bg-fill data-popup-open:bg-fill">
-        {m ? <MachineFace m={m} size={18} /> : <IrMark size={18} className="text-ink" />}
+        {/* Iridium's mark stays; showing a machine, its face on the mark's corner, as on a logo. */}
+        <span className="relative grid shrink-0">
+          <IrMark size={18} className="text-ink" />
+          {m && <MachineBadge m={m} size={12} />}
+        </span>
         <span className="truncate text-base font-semibold tracking-[-0.01em]">{m ? m.name : view === "" ? t("new.local") : "Iridium"}</span>
         {m ? <MachineLink m={m} /> : <LinkDot className="shrink-0" />}
         {waits && <Lamp status="waiting" />}
@@ -643,17 +656,8 @@ function FolderLabel({ path }: { path: string }) {
   return <>{sp.m ? sp.label : tilde(path)}</>;
 }
 
-function WsMark({ open, remote, machine }: { open: boolean; remote: boolean; machine?: Machine }) {
-  if (!machine) return <FolderMark open={open} remote={remote} className="text-ink-2" />;
-  // At another machine: its Bot's face on the folder's lower corner, where the cloud was.
-  return (
-    <span className="relative grid">
-      <FolderMark open={open} className="text-ink-2" />
-      <span className="absolute -right-1 -bottom-1 grid place-items-center rounded-full" style={{ boxShadow: "0 0 0 1.5px var(--row-bg, var(--paper))" }}>
-        <MachineFace m={machine} size={12} />
-      </span>
-    </span>
-  );
+function WsMark({ open, remote }: { open: boolean; remote: boolean }) {
+  return <FolderMark open={open} remote={remote} className="text-ink-2" />;
 }
 
 /** A workspace's new name, in place of its row's: Enter or leaving it renames, Esc leaves it. */
