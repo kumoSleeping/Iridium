@@ -13,13 +13,13 @@ const Help = `ir: this machine's Iridium on the command line (over its unix sock
   ir ls | find <word> [--all]         list sessions | find by name, title, last thing said (--all: archived, finished subagents too; ls --here: your group's)
   ir stop | archive | unarchive <id> | rename [<id>] <name>   stop its agent | archive | unarchive | name it (no <id>: your own session)
   ir ws [ls] | rename <group> <name>   folder groups, made as sessions go in their folders (<group>: ID or name)
-  ir cp <src> <dst> | files <dir>     copy files, print path, size, sha256 | list one level: name, size, time, type
+  ir cp <src> <dst> | files <dir> | attach <file>...   copy files, print path, size, sha256 | list one level: name, size, time, type | its ir: link, the Markdown to put the file in your reply
   ir machines | sh <machine> [--cwd dir] -- command   other machines connected here | run a command on one
   ir secret ls | set <name> [--note text] | rm <name>   secrets: set has the user type the value on the web page
   ir run [--secret name,…] -- command …   {{name}}, {{file:name}} become the value, a temp file, and env vars; values in the output are masked
   ir usage [name|me] [-d days] [--by day,terminal,agent,model]   tokens and cost per day, terminal, agent, model
   new and send take --wait to wait for the reply. send during a turn joins that turn (an agent's always does; a person at a terminal may add --queue to run it after). Exit codes: 0 done, 2 needs the user (a question, an approval), 1 error or exited. A path may be machine:path
-  ir bot "message" [--to bot]         tell the user through a bot (QQ); to add one: the web's 终端管理 +, or iridium-qq setup (--new for one more; a QR image: [文件] line; run the same again once scanned)
+  ir bot "message" [--to bot]         tell the user through a bot (QQ); to add one: the web's 终端管理 +, or iridium-qq setup (--new for one more; a QR image: ir attach it; run the same again once scanned)
 Admin (an agent calling these never sees a TOKEN; a web panel confirms):
   ir invite [name] | token <name>     a link for a new web panel | a plugin TOKEN
     --owner: the user's own terminal, with Claude
@@ -51,6 +51,6 @@ func Remote() string {
 		}
 	}
 	b.WriteString("  ir machines                        the machines connected to it\n")
-	b.WriteString("  Not from here: cp, files, sh, run, secret, bot, usage and the admin commands; ask a session on the Iridium's machine.\n")
+	b.WriteString("  Not from here: cp, files, attach, sh, run, secret, bot, usage and the admin commands; ask a session on the Iridium's machine.\n")
 	return b.String()
 }

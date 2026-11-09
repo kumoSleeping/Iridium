@@ -48,7 +48,7 @@ func SystemPrompt(lang string) string {
 	b.WriteString(`Admin commands (invites, tokens, going public, updates): ir --help.
 
 Secrets: when you need a password or an API key, have the user type it in on the web page with ir secret set, and pass it into commands with ir run; never ask for it in the chat.
-Files: to show or hand the user a file, end your reply with a line [文件] ` + "`/absolute/path`" + ` per file; the page shows it as a picture or a download card. A path, a link or image syntax anywhere else is plain text.
+Files: to show or hand the user a file, run ir attach <path> and put the Markdown it prints in your reply where the file belongs: ![caption](ir:id) shows a picture, a video or a sound in place, [text](ir:id) is a file to download. Any other path, file:// link or local image is plain text.
 `)
 	b.WriteString(titleLine)
 	if name := langNames[lang]; name != "" {
@@ -59,7 +59,7 @@ Files: to show or hand the user a file, end your reply with a line [文件] ` + 
 
 // RemotePrompt is SystemPrompt for a session hosted at another machine: with ir (its executor
 // puts one there, wire.Hello.IRClient), the commands that ir has (irhelp.Remote); without, none.
-// No [文件] line: its files are that machine's, which the page does not serve.
+// No file links: its files are that machine's, which ir attach there does not reach.
 func RemotePrompt(lang string, ir bool) string {
 	var b strings.Builder
 	if ir {

@@ -53,6 +53,47 @@ func cmdCp(e *env, args []string) int {
 	return e.failf("the copy's progress stopped short; run the same command again to go on")
 }
 
+// ir attach <path>...: each file a link for a reply (docs/api.md "文件链接"), one line each: the
+// Markdown to put in the reply, then its kind and size. A file that cannot be given says why, and
+// the rest still are.
+func cmdAttach(e *env, args []string) int {
+	o, err := parse(args, "")
+	if err != nil || len(o.pos) == 0 {
+		return e.failf("usage: ir attach <文件>...")
+	}
+	code := exitDone
+	for _, a := range o.pos {
+		p, err := localPath(a)
+		if err == nil {
+			var l api.FileLink
+			if err = e.do("POST", "/api/links", api.AttachPath{Path: p}, &l); err == nil {
+				what := string(l.File.Kind)
+				if l.File.W > 0 && l.File.H > 0 {
+					what += fmt.Sprintf(" %d×%d", l.File.W, l.File.H)
+				}
+				fmt.Fprintf(e.out, "%s\t%s\t%s\n", l.Markdown, what, sizeOf(l.File.Size))
+				continue
+			}
+		}
+		fmt.Fprintf(e.err, "ir attach: %s: %v\n", a, err)
+		code = exitError
+	}
+	return code
+}
+
+// sizeOf is n bytes as a person reads it.
+func sizeOf(n int64) string {
+	switch {
+	case n < 1<<10:
+		return fmt.Sprintf("%d B", n)
+	case n < 1<<20:
+		return fmt.Sprintf("%.1f KB", float64(n)/(1<<10))
+	case n < 1<<30:
+		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
+	}
+	return fmt.Sprintf("%.2f GB", float64(n)/(1<<30))
+}
+
 // ir files <dir>: one level, one entry a line: name, size, time, type.
 func cmdFiles(e *env, args []string) int {
 	o, err := parse(args, "")

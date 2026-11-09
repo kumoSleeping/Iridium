@@ -89,6 +89,9 @@ describe("withoutFiles", () => {
     const r = withoutFiles(text, new Set(["/w/a.pdf", "/home/k/b.png"]), "/home/k");
     expect(r).toBe("Done.\n\n[文件] `/w/gone.txt`\nsee `/w/c.go:3` and [log](./run.log)\n\n```\n[文件] `/w/a.pdf`\n```");
   });
+  test("file links stay, for the Markdown to show in place", () => {
+    expect(withoutFiles("![chart](ir:abcdefghij) and [log](ir:bcdefghijk)", new Set(["ir:abcdefghij"]))).toBe("![chart](ir:abcdefghij) and [log](ir:bcdefghijk)");
+  });
   test("a local picture as its path; web pictures stay", () => {
     expect(withoutFiles("![a](/w/a.png) ![y](https://example.com/a.png)", new Set())).toBe("`/w/a.png` ![y](https://example.com/a.png)");
   });

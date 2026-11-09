@@ -1,13 +1,16 @@
 // An agent's words as Markdown (Streamdown, with the CJK fixes): quiet, no buttons of its own, code
-// blocks in their language's colours (hl.tsx) with a copy key, links only to http(s). Raw HTML
+// blocks in their language's colours (hl.tsx) with a copy key, links only to http(s) and the reply's
+// file links (ir:<id>, files.tsx Linked). Raw HTML
 // shows as written: rehype-raw is not even bundled (vite.config.ts). One options object, so a
 // message is not drawn again for each piece of a draft (Streamdown's memo).
 import { cjk } from "@streamdown/cjk";
 import { Check, Copy } from "lucide-react";
-import { memo, useState, type ComponentProps } from "react";
-import { defaultComponents, Streamdown, type ExtraProps, type StreamdownProps } from "streamdown";
+import { isValidElement, memo, useState, type ComponentProps, type ReactNode } from "react";
+import { defaultComponents, defaultUrlTransform, Streamdown, type ExtraProps, type StreamdownProps } from "streamdown";
+import type { FileRef } from "../api/types.gen";
 import { t } from "../i18n";
 import { cn } from "../ui";
+import { Linked, LinkFiles } from "./files";
 import { Code } from "./hl";
 import { draftWords } from "./refs";
 
@@ -43,22 +46,45 @@ export const MARKDOWN: Partial<StreamdownProps> = {
   components: {
     // Streamdown's own pre marks the code inside as a block (data-block): that one is ours.
     code: (p) => ("data-block" in p ? <CodeBlock {...p} /> : <defaultComponents.code {...p} />),
+    img: (p) => (linkID(p.src) ? <Linked id={linkID(p.src)!} label={p.alt ?? ""} inline={false} /> : <defaultComponents.img {...p} />),
+    a: (p) => (linkID(p.href) ? <Linked id={linkID(p.href)!} label={textOf(p.children)} inline /> : <defaultComponents.a {...p} />),
   },
   lineNumbers: false,
   linkSafety: { enabled: false },
   className: "prose-ir min-w-0",
   rehypePlugins: [],
   tableMaxHeight: 0,
-  allowElement: (e) => e.tagName !== "a" || /^https?:/i.test(String(e.properties.href ?? "")),
+  urlTransform: (url, key, node) => (linkID(url) ? url : defaultUrlTransform(url, key, node)),
+  allowElement: (e) => e.tagName !== "a" || /^(https?|ir):/i.test(String(e.properties.href ?? "")),
   unwrapDisallowed: true,
 };
 
-/** What the agent said, whole. */
-export const Markdown = memo(function Markdown({ text, className }: { text: string; className?: string }) {
-  return (
+/** The id of a file link (ir:<id>), if url is one. */
+function linkID(url: unknown): string | undefined {
+  return typeof url === "string" ? /^ir:([a-z2-7]{10})$/.exec(url)?.[1] : undefined;
+}
+
+/** The words of a link's children. */
+function textOf(n: ReactNode): string {
+  if (typeof n === "string" || typeof n === "number") return String(n);
+  if (Array.isArray(n)) return n.map(textOf).join("");
+  if (isValidElement<{ children?: ReactNode }>(n)) return textOf(n.props.children);
+  return "";
+}
+
+/** What the agent said, whole. files: the reply's (Block.files), its file links among them. */
+export const Markdown = memo(function Markdown({ text, className, session, files }: { text: string; className?: string; session?: string; files?: FileRef[] }) {
+  const md = (
     <Streamdown mode="static" {...MARKDOWN} className={cn("prose-ir min-w-0 text-md", className)}>
       {text}
     </Streamdown>
+  );
+  return session ? (
+    <LinkFiles session={session} files={files ?? []}>
+      {md}
+    </LinkFiles>
+  ) : (
+    md
   );
 });
 

@@ -104,6 +104,7 @@ export const zh = {
   "msg.unsent": "未发给模型",
   "msg.unreadable": "无法读取",
   "msg.download": "下载",
+  "msg.fileGone": "文件不可用",
   "msg.close": "关闭",
   "msg.copy": "复制",
   "msg.copied": "已复制",

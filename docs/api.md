@@ -164,6 +164,7 @@
 | 请求 | 正文 → 回答 | 说明 |
 |---|---|---|
 | `POST /api/sessions/{id}/attach` | `{path}` → `FileRef` | 把本机文件当这个会话的附件（`ir send -a`），不复制 |
+| `POST /api/links` | `{path}` → `FileLink` | 给本机文件一个文件链接（`ir attach`），见“文件链接” |
 | `GET /api/files?path=<目录>[&machine=<机器>]` | → `DirListing` | 列一层（`ir files`）；带 `machine` 是那台机器上的目录（它自己的写法，空是家目录） |
 | `POST /api/files/copy` | `{from, to, fromMachine?, toMachine?}` → NDJSON | 拷文件（`ir cp`）：每 250ms 一行 `CopyProgress`，最后一行带 `path`、`sha256` 或 `error`。由 Iridium 拷，`ir` 断了也接着拷；同样的请求再来就接上。一边在别的机器（`fromMachine`、`toMachine`）时：不接续，写到那边的先限 4MB（413），目标已有文件 409 |
 | `POST /api/cli` | `CLIRun{args, cwd}` → NDJSON `CLIOutput` | 执行端上的会话里 agent 的 `ir`（只认会话 TOKEN，见 `docs/exec.md`“远端的 ir”）：这边照常跑这条 `ir`，算那台机器的 Bot、代表这个会话；输出按行流回（`out`、`err`），最后一行 `exit` |
@@ -171,6 +172,7 @@
 规则：
 
 - **引用**：`ref` 只对这个会话有效，同一路径每次一样（状态目录 `files.key` 做的 HMAC），看不出路径。只有会话记录里出现过的路径、它的上传和附件才有引用；服务器取不到就从上次读到的地方往后读记录。
+- **文件链接**：`ir attach <路径>` 给文件一个随机 id（10 位小写 base32），打印 `![名字](ir:id)`（图片、音视频）或 `[名字](ir:id)`（其余）；回复把它写在正文里该放的位置。64MB 以内复制到状态目录 `links/<id>/<名字>`（原文件改了、删了照样显示）；更大的不复制，原文件变了就不再给（410）。记录在 `links/<id>.json`，同一会话同一文件没变时给同一个 id。id 不认会话：`/api/sessions/<任一会话>/files/<id>` 都能取，知道 id 才取得到。路径照样过 `pathsafe`。`Block.files` 里它的 `ref` 是 id、`path` 是 `ir:<id>`；网页在链接处显示（图片缩略图、音视频播放、其余卡片或行内下载），取不到的划掉，标“文件不可用”。只认 agent 的话，围栏代码块里的不算。执行端上的会话没有 `ir attach`。
 - **认文件**（`Block.files`）：只认单独一行的 `` [文件] `路径` ``（绝对路径或 `~/`），你的话里另认 `` [附件] `路径` ``；`Write` 调用的 `file_path` 只给引用、不显示。行内的路径、链接、`![]()`、围栏代码块里的都不算。只认存在的普通文件。
 - **类型**：先看扩展名，没有再嗅前 512 字节。图片、音视频、PDF、纯文本内联显示，其余下载。所有文件都带 `Content-Security-Policy: …; sandbox` 和 `nosniff`，SVG、HTML 里的脚本不会跑。
 - **上传位置**：会话目录的 `.iridium/uploads/`（建目录时写一个只有 `*` 的 `.gitignore`）。会话目录是 `$HOME`、写不进或不许写时，放状态目录 `uploads/files/<会话>/`。同名不覆盖，改叫 `名 (2).扩展名`。先写 `.<id>.part`，核对后用硬链接放到位（原子、不覆盖）。上传记录在状态目录 `uploads/records/`，重启后能续传。
@@ -325,7 +327,7 @@ Bot 用自己的 TOKEN（交互终端由门认，见 `gate.md`）；下面的“
 | 类型 | 带什么 |
 |---|---|
 | `progress` | `text`：回合中 agent 说的一段话（最后一段是 `reply`，不在这里） |
-| `reply` | `reply{markdown, text, files[]}`：回合的最终回复；`files` 是回复里 `` [文件] `绝对路径` `` 行给的、存在的文件（名字、大小、类型、`ref`），这些行和 `[标题] …` 行都不在 `markdown`、`text` 里 |
+| `reply` | `reply{markdown, text, files[]}`：回合的最终回复；`files` 是回复里 `` [文件] `绝对路径` `` 行给的、存在的文件，再接文件链接（`ir:<id>`）给的（名字、大小、类型、`ref`）；这些行、图片链接和 `[标题] …` 行都不在 `markdown`、`text` 里，文件链接 `[字](ir:id)` 只留字 |
 | `card`、`card_done` | 提问出现（`card`）；已答或撤回（`cardId`），网页答的也发 |
 | `error` | `text`：agent 进程出错退出 |
 | `status` | `status`：状态灯变了 |

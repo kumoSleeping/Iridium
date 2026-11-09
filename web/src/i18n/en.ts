@@ -104,6 +104,7 @@ export const en: Dict = {
   "msg.unsent": "Not sent to the model",
   "msg.unreadable": "Unavailable",
   "msg.download": "Download",
+  "msg.fileGone": "File unavailable",
   "msg.close": "Close",
   "msg.copy": "Copy",
   "msg.copied": "Copied",

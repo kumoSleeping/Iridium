@@ -52,6 +52,9 @@ type Options struct {
 	// Message is text with attachments (refs of session) written in, and the images among them
 	// (the files service's Message); nil takes no attachments.
 	Message func(session, text string, refs []string) (string, []agent.Image, error)
+	// Linked is the path a file link's id is read from (the files service's Linked); nil: replies'
+	// links give no files.
+	Linked func(id string) (string, error)
 	// BotsChanged: Bots changed (a plugin's first chat, its stream came or went); nil: no one is told.
 	BotsChanged func()
 }

@@ -16,7 +16,7 @@ import { Avatar, Badge, cn, IconKey, Logo, tilde, Tip } from "../ui";
 import { useHome } from "../data";
 import { LocalMark } from "../me";
 import { go } from "../route";
-import { Files, Picture, previews, SentFile } from "./files";
+import { Files, isLink, Picture, previews, SentFile } from "./files";
 import { Pictures } from "./pictures";
 import { cmdOfCall, isShell, type Cmd } from "./cmd";
 import { argOf, diffSum, foldLine, foldSaid, kindOf, runCmds, type Diff, type Kind, type Shown, type Step, type Tool } from "./fold";
@@ -268,16 +268,19 @@ export function Compaction({ b, since }: { b?: Block; since?: number }) {
 
 const SYSTEM: Record<string, Parameters<typeof t>[0]> = { compact: "sys.compact", interrupted: "sys.interrupted", unreadable: "sys.unreadable", api_error: "sys.apiError", local_command: "sys.localCommand" };
 
-/** What the agent said: Markdown, then the files it gives ([文件] `path` lines). */
+/** What the agent said: Markdown, its file links (ir:<id>) in place, then the files its file lines
+ *  give ([文件] `path`). */
 const Assistant = memo(function Assistant({ b, session }: { b: Block; session: string }) {
   const home = useHome().data;
   const text = withoutFiles(withoutNameLines(b.text ?? ""), new Set(b.files?.map((f) => f.path)), home);
+  // A file link's file shows where the words put it; the rest (file lines) under them.
+  const under = b.files?.filter((f) => !isLink(f)) ?? [];
   return (
     <div className="flex min-w-0 flex-col items-start gap-2 pr-6">
-      {text && <Markdown text={text} className="w-full" />}
+      {text && <Markdown text={text} className="w-full" session={session} files={b.files ?? undefined} />}
       {/* The sessions it names by id (09eeb223), as cards: the words as written. */}
       <NamedCards text={text} />
-      {!!b.files?.length && <Files session={session} files={b.files} />}
+      {!!under.length && <Files session={session} files={under} />}
     </div>
   );
 });
