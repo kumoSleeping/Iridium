@@ -39,6 +39,8 @@ const firstPx = { half: () => Math.max(320, innerHeight / 2), tall: () => innerH
 
 /** Whether a swipe up from x brings the foot's sheet: it began in the window's left quarter. */
 export const atLeft = (x: number) => x < innerWidth / 4;
+/** Whether a swipe up from x brings the notes: it began in the window's right quarter. */
+export const atRight = (x: number) => x > (innerWidth * 3) / 4;
 
 /** size: half the window, most of it, all of it (no chat open: not to be sized), or as tall as what
  *  it holds; made taller or shorter, as the user left it, kept by name. raised: at least most of

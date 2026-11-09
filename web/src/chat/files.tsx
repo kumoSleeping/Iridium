@@ -26,12 +26,12 @@ export function Files({ session, files }: { session: string; files: FileRef[] })
 const CODE = /\.(tsx?|jsx?|go|rs|py|css|json|ya?ml|toml|sh|md)$/i;
 
 function One({ session, f }: { session: string; f: FileRef }) {
-  const url = api.fileURL(session, f.ref);
+  const url = api.fileURL(session, f.ref, false, f.mtime);
   const name = f.name;
-  if (f.kind === "image") return <Picture src={f.thumb ? api.thumbURL(session, f.ref) : url} full={url} name={name} w={f.w} h={f.h} />;
+  if (f.kind === "image") return <Picture src={f.thumb ? api.thumbURL(session, f.ref, 1024, f.mtime) : url} full={url} name={name} w={f.w} h={f.h} />;
   if (f.kind === "video") return <video controls preload="metadata" src={url} className="block w-full max-w-[480px] rounded-lg bg-fill shadow-[0_0_0_0.5px_var(--edge)]" aria-label={name} />;
   if (f.kind === "audio") return <audio controls preload="metadata" src={url} className="w-full max-w-[340px]" aria-label={name} />;
-  return <FileCard name={name} detail={size(f.size)} href={api.fileURL(session, f.ref, true)} code={CODE.test(f.name)} />;
+  return <FileCard name={name} detail={size(f.size)} href={api.fileURL(session, f.ref, true, f.mtime)} code={CODE.test(f.name)} />;
 }
 
 /** The pictures sent from this page, by the path they were uploaded to: what the copy on this device

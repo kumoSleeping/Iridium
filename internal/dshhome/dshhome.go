@@ -115,6 +115,7 @@ type Summary struct {
 	Cwd   string
 	Title string
 	Last  int64 // ms since the epoch of the last message; 0 if not known
+	Ended bool  // a turn ran and none is open now (turnBoundary)
 }
 
 // ParseSummary reads storages/session_projcache/sessions/<id>.json: a per-record document,
@@ -134,6 +135,12 @@ func ParseSummary(b []byte) (Summary, error) {
 						LastMessage int64 `json:"lastMessageTime"`
 					} `json:"val"`
 				} `json:"timeContext"`
+				Turn struct {
+					Val *struct {
+						Open     *int64 `json:"openTurnStartSeq"`
+						LastTurn int    `json:"lastTurn"`
+					} `json:"val"`
+				} `json:"turnBoundary"`
 			} `json:"rows"`
 		} `json:"record"`
 	}
@@ -141,7 +148,8 @@ func ParseSummary(b []byte) (Summary, error) {
 		return Summary{}, ErrFormat
 	}
 	r := doc.Record
-	return Summary{Cwd: r.Identity.Cwd, Title: oneLine(r.Rows.Title.Val), Last: r.Rows.Time.Val.LastMessage}, nil
+	t := r.Rows.Turn.Val
+	return Summary{Cwd: r.Identity.Cwd, Title: oneLine(r.Rows.Title.Val), Last: r.Rows.Time.Val.LastMessage, Ended: t != nil && t.Open == nil && t.LastTurn > 0}, nil
 }
 
 func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }

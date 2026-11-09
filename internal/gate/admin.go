@@ -2,6 +2,7 @@ package gate
 
 import (
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -186,6 +187,37 @@ func (g *Gate) Endpoint(id string) (EndpointInfo, bool) {
 	defer g.mu.Unlock()
 	e, ok := g.st.endpoints[id]
 	return infoOf(e), ok
+}
+
+// ByToken returns the Bot (channel) whose TOKEN tok is: what a plugin holding it is, whatever the
+// terminal has been renamed to since.
+func (g *Gate) ByToken(tok string) (EndpointInfo, bool) {
+	tok = strings.TrimSpace(tok)
+	if !wellFormedChannel(tok) {
+		return EndpointInfo{}, false
+	}
+	h := hashToken(tok)
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for _, e := range g.st.endpoints {
+		if e.Kind == KindChannel && e.TokenHash != "" && hashEqual(e.TokenHash, h) {
+			return infoOf(e), true
+		}
+	}
+	return EndpointInfo{}, false
+}
+
+// TokenHash is the hash of endpoint id's TOKEN ("" for none), to know its holder by after it is
+// revoked (SameToken).
+func (g *Gate) TokenHash(id string) string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.st.endpoints[id].TokenHash
+}
+
+// SameToken: tok is the TOKEN whose hash TokenHash gave.
+func SameToken(hash, tok string) bool {
+	return hash != "" && hashEqual(hash, hashToken(strings.TrimSpace(tok)))
 }
 
 // Find returns one endpoint by ID or name, including the built-in 本机.

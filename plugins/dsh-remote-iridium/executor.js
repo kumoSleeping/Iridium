@@ -338,7 +338,9 @@ function killTree(pid, hard) {
  * command lines here, ir sh, not only a person on its page), env ({name: value}; default
  * process.env, the hello gives it without secrets), denied (paths never served besides its own
  * and the agents' logins), program, log; methods, more requests it answers ({name: async
- * (params) => result}); ir, an ir for its agents (ir.js, withIR).
+ * (params) => result}); caps, the optional parts of the protocol they make it speak (wire.Hello's
+ * caps: held, held.features; a list, or a function giving it at each hello); ir, an ir for its
+ * agents (ir.js, withIR).
  */
 export class Executor {
   constructor(o) {
@@ -435,6 +437,7 @@ export class Executor {
   }
 
   hello() {
+    const caps = (typeof this.o.caps === 'function' ? this.o.caps() : this.o.caps) ?? []
     return {
       protocol: PROTOCOL, program: this.o.program ?? 'dsh-remote-iridium', os: process.platform === 'win32' ? 'windows' : process.platform,
       arch: process.arch, home: os.homedir(), sep: path.sep, scratch: path.join(this.state, 'scratch'),
@@ -443,7 +446,13 @@ export class Executor {
       ...(this.o.noShell ? { noShell: true } : {}),
       ...(this.o.agentShell ? { agentShell: true } : {}),
       ...(this.o.ir ? { irClient: true } : {}),
+      ...(caps.length ? { caps } : {}),
     }
+  }
+
+  /** Sends event (params) to the Iridium if connected (held.changed); false if not. */
+  notify(event, params) {
+    return this.conn?.notify(event, params) ?? false
   }
 
   /**

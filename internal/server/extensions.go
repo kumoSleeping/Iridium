@@ -11,6 +11,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -87,9 +89,15 @@ func (s *Server) extensionRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/extensions/{id}/install", s.extAction(s.extInstall))
 	mux.HandleFunc("POST /api/extensions/{id}/bind", s.extAction(s.extBind))
 	mux.HandleFunc("DELETE /api/extensions/{id}/bind", s.extAction(s.extUnbind))
-	mux.HandleFunc("POST /api/extensions/{id}/start", s.extAction(func(ctx context.Context, e extension, _ caller) error { return s.extRun(ctx, e, "start") }))
-	mux.HandleFunc("POST /api/extensions/{id}/stop", s.extAction(func(ctx context.Context, e extension, _ caller) error { return s.extRun(ctx, e, "stop") }))
-	mux.HandleFunc("POST /api/extensions/{id}/pair", s.extAction(func(ctx context.Context, e extension, _ caller) error { return s.extRun(ctx, e, "pair") }))
+	// start, stop, pair: ?bot=<AppID> for one of its bots (start and stop: all without it).
+	for _, verb := range []string{"start", "stop", "pair"} {
+		mux.HandleFunc("POST /api/extensions/{id}/"+verb, s.extAction(func(ctx context.Context, e extension, _ caller, bot string) error {
+			if bot == "" {
+				return s.extRun(ctx, e, verb)
+			}
+			return s.extRun(ctx, e, verb, "--bot", bot)
+		}))
+	}
 	mux.HandleFunc("DELETE /api/extensions/{id}", s.extAction(s.extRemove))
 }
 
@@ -110,30 +118,63 @@ func (s *Server) extensionState(ctx context.Context, e extension) api.Extension 
 		return out
 	}
 	out.Installed = true
-	if es, err := s.extStatus(ctx, e); err == nil {
-		out.Status = &es
-		if es.Name != "" {
-			for _, t := range s.gate().Access().Endpoints {
-				if t.Kind == gate.KindChannel && strings.EqualFold(t.Name, es.Name) {
-					out.Online = t.Online
+	if bots, err := s.extBots(ctx, e); err == nil {
+		eps := s.gate().Access().Endpoints
+		for i := range bots {
+			t, ok := s.botTerminal(bots[i])
+			if !ok {
+				continue
+			}
+			bots[i].Name = t.Name // renamed since, the extension's own copy is behind
+			for _, ep := range eps {
+				if ep.ID == t.ID {
+					bots[i].Online = ep.Online
 				}
 			}
 		}
+		out.Bots = bots
 	} else if out.Error == "" {
 		out.Error = err.Error()
 	}
 	return out
 }
 
-func (s *Server) extStatus(ctx context.Context, e extension) (api.ExtensionStatus, error) {
+// extBots is what the extension says of each of its bots.
+func (s *Server) extBots(ctx context.Context, e extension) ([]api.ExtensionStatus, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	var st api.ExtensionStatus
-	b, err := exec.CommandContext(ctx, s.extBin(e), "status", "--json").Output()
+	var bots []api.ExtensionStatus
+	b, err := exec.CommandContext(ctx, s.extBin(e), "list", "--json").Output()
 	if err != nil {
-		return st, fmt.Errorf("%s status: %w", e.bin, err)
+		return nil, fmt.Errorf("%s list: %w", e.bin, err)
 	}
-	return st, json.Unmarshal(b, &st)
+	return bots, json.Unmarshal(b, &bots)
+}
+
+// botTerminal is the terminal a bot of an extension is: the one its TOKEN is, never by name (a
+// terminal may be renamed, and its old name taken by another).
+func (s *Server) botTerminal(b api.ExtensionStatus) (gate.EndpointInfo, bool) {
+	if b.Home == "" {
+		return gate.EndpointInfo{}, false
+	}
+	tok, err := os.ReadFile(filepath.Join(b.Home, "token"))
+	if err != nil {
+		return gate.EndpointInfo{}, false
+	}
+	return s.gate().ByToken(string(tok))
+}
+
+// validBot: a bot's AppID as a query names it, before it goes on a command line.
+func validBot(id string) bool {
+	if len(id) > 32 {
+		return false
+	}
+	for _, r := range id {
+		if !(r >= '0' && r <= '9' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z') {
+			return false
+		}
+	}
+	return true
 }
 
 // extRun runs the extension's command; its last line of output is the error if it fails.
@@ -154,11 +195,16 @@ func (s *Server) extRun(ctx context.Context, e extension, args ...string) error 
 
 // extAction runs an action on an extension for a person (a panel, or ir at the machine): an
 // agent runs the extension's own command line instead. The answer is the extension's state.
-func (s *Server) extAction(f func(context.Context, extension, caller) error) http.HandlerFunc {
+func (s *Server) extAction(f func(context.Context, extension, caller, string) error) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		e, ok := findExtension(r.PathValue("id"))
 		if !ok {
 			fail(w, http.StatusNotFound, "no such extension")
+			return
+		}
+		bot := r.URL.Query().Get("bot")
+		if !validBot(bot) {
+			fail(w, http.StatusBadRequest, "bot: an AppID")
 			return
 		}
 		c := callerOf(r)
@@ -177,7 +223,7 @@ func (s *Server) extAction(f func(context.Context, extension, caller) error) htt
 		s.ext.mu.Unlock()
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Minute)
 		defer cancel()
-		if err := f(ctx, e, c); err != nil {
+		if err := f(ctx, e, c, bot); err != nil {
 			s.ext.mu.Lock()
 			st.err = err.Error()
 			s.ext.mu.Unlock()
@@ -196,7 +242,7 @@ func (s *Server) setBusy(e extension, busy string) {
 
 // extInstall puts the extension's binary of this very version next to Iridium's: from the
 // release, or, on a build of no release, one placed there already.
-func (s *Server) extInstall(ctx context.Context, e extension, _ caller) error {
+func (s *Server) extInstall(ctx context.Context, e extension, _ caller, _ string) error {
 	s.setBusy(e, "install")
 	defer s.setBusy(e, "")
 	return s.installExtension(ctx, e)
@@ -286,12 +332,12 @@ func (s *Server) SyncExtensions(ctx context.Context) {
 		if err == nil && strings.TrimSpace(string(out)) == version.Version {
 			continue
 		}
-		st, _ := s.extStatus(ctx, e)
 		if err := s.installExtension(ctx, e); err != nil {
 			s.logf("server: bringing %s to %s: %v", e.bin, version.Version, err)
 			continue
 		}
-		if st.Service == "active" {
+		// The new one restarts the bots whose services ran (and moves an older layout first).
+		if bots, err := s.extBots(ctx, e); err == nil && len(bots) > 0 {
 			if err := s.extRun(ctx, e, "restart"); err != nil {
 				s.logf("server: restarting %s: %v", e.bin, err)
 			}
@@ -300,9 +346,9 @@ func (s *Server) SyncExtensions(ctx context.Context) {
 }
 
 // extBind starts a scan: the extension's bind gives QR codes till the phone scans one; then the
-// TOKEN goes into its directory (with Claude when the person may say it is the owner's own) and
-// its service starts.
-func (s *Server) extBind(_ context.Context, e extension, c caller) error {
+// bot's TOKEN goes into its directory (with Claude when the person may say it is the owner's own)
+// and its service starts. A bot scanned before is that bot again; another is one more.
+func (s *Server) extBind(_ context.Context, e extension, c caller, _ string) error {
 	if _, err := os.Stat(s.extBin(e)); err != nil {
 		return errors.New("not installed")
 	}
@@ -316,7 +362,11 @@ func (s *Server) extBind(_ context.Context, e extension, c caller) error {
 	st.busy, st.bind, st.cancel = "bind", nil, cancel
 	s.ext.mu.Unlock()
 	by := s.ownerSays(c)
-	cmd := exec.CommandContext(ctx, s.extBin(e), "bind", "--iridium", s.localURL())
+	var taken []string
+	for _, t := range s.gate().Access().Endpoints {
+		taken = append(taken, t.Name)
+	}
+	cmd := exec.CommandContext(ctx, s.extBin(e), "bind", "--iridium", s.localURL(), "--taken", strings.Join(taken, ","))
 	out, err := cmd.StdoutPipe()
 	if err == nil {
 		err = cmd.Start()
@@ -336,10 +386,12 @@ func (s *Server) extBind(_ context.Context, e extension, c caller) error {
 		var result struct {
 			State string `json:"state"`
 			URL   string `json:"url"`
+			AppID string `json:"appId"`
 			Error string `json:"error"`
 		}
 		failed := ""
 		bound := false
+		bot := ""
 		sc := bufio.NewScanner(out)
 		for sc.Scan() {
 			if json.Unmarshal(sc.Bytes(), &result) != nil {
@@ -354,7 +406,7 @@ func (s *Server) extBind(_ context.Context, e extension, c caller) error {
 				s.ext.mu.Unlock()
 				done()
 			case "bound":
-				bound = true
+				bound, bot = true, result.AppID
 			case "error":
 				failed = result.Error
 			}
@@ -372,9 +424,11 @@ func (s *Server) extBind(_ context.Context, e extension, c caller) error {
 			s.ext.mu.Lock()
 			st.bind = nil
 			s.ext.mu.Unlock()
-			if err := s.extToken(context.Background(), e, by); err != nil {
+			if !validBot(bot) || bot == "" {
+				failed = fmt.Sprintf("%s bind: no AppID", e.bin)
+			} else if err := s.extToken(context.Background(), e, bot, by); err != nil {
 				failed = err.Error()
-			} else if err := s.extRun(context.Background(), e, "start"); err != nil {
+			} else if err := s.extRun(context.Background(), e, "start", "--bot", bot); err != nil {
 				failed = err.Error()
 			}
 		}
@@ -395,7 +449,7 @@ func (s *Server) extBind(_ context.Context, e extension, c caller) error {
 	return nil
 }
 
-func (s *Server) extUnbind(_ context.Context, e extension, _ caller) error {
+func (s *Server) extUnbind(_ context.Context, e extension, _ caller, _ string) error {
 	st := s.ext.get(e.id)
 	s.ext.mu.Lock()
 	cancel := st.cancel
@@ -415,15 +469,27 @@ func (s *Server) extUnbind(_ context.Context, e extension, _ caller) error {
 	return nil
 }
 
-// extToken makes the extension's terminal's TOKEN and writes it into its directory.
-func (s *Server) extToken(ctx context.Context, e extension, by string) error {
-	es, err := s.extStatus(ctx, e)
+// extToken makes the TOKEN of the extension's bot's terminal and writes it into its directory.
+func (s *Server) extToken(ctx context.Context, e extension, bot, by string) error {
+	bots, err := s.extBots(ctx, e)
 	if err != nil {
 		return err
+	}
+	i := slices.IndexFunc(bots, func(b api.ExtensionStatus) bool { return b.AppID == bot })
+	if i < 0 {
+		return fmt.Errorf("%s has no bot %s", e.bin, bot)
+	}
+	es := bots[i]
+	if _, ok := s.botTerminal(es); ok {
+		return nil // scanned again: its terminal and TOKEN stay
 	}
 	name := es.Name
 	if name == "" {
 		name = "QQ"
+	}
+	// A TOKEN for a name of another's would take that terminal over: the name is made free.
+	if _, taken := s.gate().Find(name); taken {
+		name = s.freeName(name)
 	}
 	tok, err := s.makeToken(name, by)
 	if errors.Is(err, errClaudeFixed) {
@@ -435,21 +501,40 @@ func (s *Server) extToken(ctx context.Context, e extension, by string) error {
 	return s.tokenInto(tok, filepath.Join(es.Home, "token"))
 }
 
-func (s *Server) extRemove(ctx context.Context, e extension, _ caller) error {
+// freeName is name with 2, 3… after it (cut to fit) till no terminal has it.
+func (s *Server) freeName(name string) string {
+	for i := 2; ; i++ {
+		suffix := strconv.Itoa(i)
+		r := []rune(name)
+		if len(r)+len(suffix) > gate.MaxNameLen {
+			r = r[:gate.MaxNameLen-len(suffix)]
+		}
+		n := strings.TrimSpace(string(r)) + suffix
+		if _, taken := s.gate().Find(n); !taken {
+			return n
+		}
+	}
+}
+
+func (s *Server) extRemove(ctx context.Context, e extension, _ caller, _ string) error {
 	s.setBusy(e, "remove")
 	defer s.setBusy(e, "")
 	if _, err := os.Stat(s.extBin(e)); err != nil {
 		return nil
 	}
-	es, _ := s.extStatus(ctx, e)
-	if err := s.extRun(ctx, e, "remove"); err != nil {
+	bots, _ := s.extBots(ctx, e)
+	var terms []gate.EndpointInfo
+	for _, es := range bots {
+		if t, ok := s.botTerminal(es); ok {
+			terms = append(terms, t)
+		}
+	}
+	if err := s.extRun(ctx, e, "remove", "--all"); err != nil {
 		return err
 	}
-	if es.Name != "" {
-		if t, ok := s.gate().Find(es.Name); ok && t.Kind == gate.KindChannel {
-			if err := s.gate().Revoke(t.ID); err != nil {
-				s.logf("server: revoking %s: %v", es.Name, err)
-			}
+	for _, t := range terms {
+		if err := s.gate().Revoke(t.ID); err != nil {
+			s.logf("server: revoking %s: %v", t.Name, err)
 		}
 	}
 	if ir, err := exec.LookPath("ir"); err == nil {
@@ -474,22 +559,30 @@ func (s *Server) localURL() string {
 }
 
 // extDetach: a Bot terminal removed (the list's own remove, ir revoke) that an official
-// extension runs as: the extension goes with it, its service stopped and its home cleared; its
-// binary stays (the user, 2026-11-08: a Bot is a Bot, whoever made it).
-func (s *Server) extDetach(name string) {
+// extension's bot runs as (its TOKEN's hash before, hash): that bot goes with it, its service stopped and its directory cleared;
+// the extension's other bots and its binary stay (the user, 2026-11-08: a Bot is a Bot, whoever
+// made it).
+func (s *Server) extDetach(hash string) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	for _, e := range officialExtensions {
 		if _, err := os.Stat(s.extBin(e)); err != nil {
 			continue
 		}
-		if es, err := s.extStatus(ctx, e); err != nil || es.Name != name {
+		bots, err := s.extBots(ctx, e)
+		if err != nil {
 			continue
 		}
-		s.setBusy(e, "remove")
-		if err := s.extRun(ctx, e, "remove"); err != nil {
-			s.logf("server: %s: %v", e.bin, err)
+		for _, es := range bots {
+			tok, err := os.ReadFile(filepath.Join(es.Home, "token"))
+			if err != nil || es.AppID == "" || !gate.SameToken(hash, string(tok)) {
+				continue
+			}
+			s.setBusy(e, "remove")
+			if err := s.extRun(ctx, e, "remove", "--bot", es.AppID); err != nil {
+				s.logf("server: %s: %v", e.bin, err)
+			}
+			s.setBusy(e, "")
 		}
-		s.setBusy(e, "")
 	}
 }

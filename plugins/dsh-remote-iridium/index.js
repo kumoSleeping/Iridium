@@ -7,8 +7,11 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import z from '@deepseek-ai/schemastery'
+import { OmdAdapter } from './adapters/omd.js'
 import { dshMethods } from './dsh.js'
 import { Executor, iridiumKey, refused } from './executor.js'
+import { createFeatures, unfeaturedList } from './features.js'
+import { followHeld } from './held.js'
 
 export const name = 'remote-iridium'
 
@@ -165,8 +168,10 @@ export function secureURL(url) {
  * its agents may run them too (ir sh), not only a person on its page (default: no); unsynced, the
  * folders of the workspaces the Iridium does not list (switched off on the plugin's settings page;
  * a name in dsh's sidebar does too); ungrouped, whether it lists the sessions in none of the
- * workspaces (dsh's 未分组; default: yes). The url, unsynced and ungrouped are volatile: taken at
- * once, without dsh starting the plugin again.
+ * workspaces (dsh's 未分组; default: yes); unfeatured, the features (features.js: other plugins'
+ * switches on a session, OMD's Ultra) not offered to the Iridium, by id (default: none). The url,
+ * unsynced, ungrouped and unfeatured are volatile: taken at once, without dsh starting the plugin
+ * again.
  */
 export const Config = z.object({
   url: z.string().default('').volatile(),
@@ -177,6 +182,7 @@ export const Config = z.object({
   // A list; text with commas from an earlier build is taken too (unsyncedList).
   unsynced: z.union([z.array(z.string()), z.string()]).default([]).volatile(),
   ungrouped: z.boolean().default(true).volatile(),
+  unfeatured: z.union([z.array(z.string()), z.string()]).default([]).volatile(),
 })
 
 /** The workspaces kept from the Iridium, as the setting lists them (folders or names; a list, or
@@ -202,6 +208,20 @@ export function apply(ctx, config) {
   let status = { state: 'idle' }
   let run = null // { stop, url }: the loop for one url
   let offer = null // what this machine gives the Iridium: dsh's version, commands, roots
+
+  // Other plugins' switches on a session, for the Iridium's page (features.js), as the service
+  // iridiumFeatures; OMD's Ultra one of them, by a sub-plugin on while OMD is here. The page
+  // learns of a change by held.changed, over whichever connection is up.
+  const features = createFeatures({ unfeatured: () => unfeaturedList(volatile(config?.unfeatured)) })
+  ctx.provide('iridiumFeatures', features)
+  ctx.plugin(OmdAdapter)
+  const follow = followHeld(ctx, features, (event, params) => run?.ex?.notify(event, params))
+  ctx.effect(() => () => {
+    follow.stop()
+    features.dispose()
+  }, 'remote-iridium: features')
+  // A dsh with agents (DSH Desktop's, dsh web's) holds sessions; one without has nothing to say.
+  const caps = () => (ctx.get('agents') ? ['held', 'held.features'] : [])
 
   function start() {
     run?.stop()
@@ -275,7 +295,7 @@ export function apply(ctx, config) {
         show({ state: 'paired', name: who.name })
         // The models this dsh's settings give, for the sessions it starts (dsh.llm): keys may be in it.
         const llmFile = path.join(state, 'llm.patch.yml')
-        ex = new Executor({ url: wsURL(url), token, state: path.join(state, iridiumKey(url)), denied: [tokens, llmFile], roots: config?.roots ?? [], noShell, agentShell, agents: [dsh], methods: dshMethods(ctx, () => ({ unsynced: unsyncedList(volatile(config?.unsynced)), ungrouped: volatile(config?.ungrouped) !== false }), { file: llmFile, scope: dsh.scope }), program: who.program, ir: fileURLToPath(new URL('./ir.js', import.meta.url)), log: (m) => say(m) })
+        ex = new Executor({ url: wsURL(url), token, state: path.join(state, iridiumKey(url)), denied: [tokens, llmFile], roots: config?.roots ?? [], noShell, agentShell, agents: [dsh], caps, methods: dshMethods(ctx, () => ({ unsynced: unsyncedList(volatile(config?.unsynced)), ungrouped: volatile(config?.ungrouped) !== false }), { file: llmFile, scope: dsh.scope }, { features, follow }), program: who.program, ir: fileURLToPath(new URL('./ir.js', import.meta.url)), log: (m) => say(m) })
         const running = ex.run()
         // A TOKEN turned down (its Bot removed) is forgotten, and the machine pairs again.
         while (!stopped) {
@@ -354,9 +374,11 @@ export function apply(ctx, config) {
     start()
     return () => run?.stop()
   }, 'remote-iridium')
-  // The address changed on its settings page: ask the new one.
+  // The address changed on its settings page: ask the new one. A feature switched off or on
+  // there: the sessions the Iridium watches are looked at again.
   ctx.on('loader/volatile-update', () => {
     if (urlNow() !== run?.url) start()
+    features.changed(null)
   })
 
   ctx.inject(['commands', 'settings'], (ctx) => {

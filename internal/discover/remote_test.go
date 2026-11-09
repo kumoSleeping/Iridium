@@ -267,6 +267,55 @@ func testRemoteDshSessions(t *testing.T, kind string) {
 	}
 }
 
+// A subagent there is done once its summary says its turn ended. A directory still without a
+// transcript is looked in again only while new, else now and then (dsh leaves empty ones behind).
+func TestRemoteDshSubagentEnded(t *testing.T) { executors(t, testRemoteDshSubagentEnded) }
+
+func testRemoteDshSubagentEnded(t *testing.T, kind string) {
+	r := newRemoteRig(t, kind)
+	r.session("--x-work--", "s1", zlines(t, `{"type":"session","cwd":`+quote(r.work)+`}`))
+	r.session("--x-work--", "s2", zlines(t, `{"type":"session","cwd":`+quote(r.work)+`,"origin":"subagent","parentSession":"s1"}`, `{"type":"turn/start","seq":1}`))
+	os.MkdirAll(filepath.Join(r.home, "sessions", "--x-work--", "s3"), 0o700)
+	r.scan()
+	if s := r.sessions()["s2"]; !s.Subagent || s.Done {
+		t.Fatalf("at work: %+v", s)
+	}
+	turn := func(open string) {
+		r.write(filepath.Join(r.home, "storages", "session_projcache", "sessions", "s2.json"),
+			`{"version":7,"record":{"identity":{"cwd":`+quote(r.work)+`},"rows":{"title":{"ver":1,"seq":2,"val":"sub"},"turnBoundary":{"ver":2,"seq":2,"val":{"openTurnStartSeq":`+open+`,"lastTurn":1}}}}}`)
+	}
+	turn("1")
+	r.scan()
+	if s := r.sessions()["s2"]; s.Done || s.Title != "sub" {
+		t.Errorf("its turn open: %+v", s)
+	}
+	turn("null")
+	r.scan()
+	if s := r.sessions()["s2"]; !s.Done {
+		t.Errorf("its turn over: %+v", s)
+	}
+
+	// s3 empty, long seen: not looked in till the next deep look.
+	r.x.remoteMu.Lock()
+	r.x.remotes["m1"].Sessions["s3"].Seen = 0
+	r.x.remoteMu.Unlock()
+	p := filepath.Join(r.home, "sessions", "--x-work--", "s3", "session.v4.jsonl.zstd")
+	if err := os.WriteFile(p, []byte(zlines(t, `{"type":"session","cwd":`+quote(r.work)+`}`)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r.scan()
+	if _, ok := r.sessions()["s3"]; ok {
+		t.Error("an empty directory long seen looked in again")
+	}
+	r.x.remoteMu.Lock()
+	r.x.remotes["m1"].Deep = 0
+	r.x.remoteMu.Unlock()
+	r.scan()
+	if _, ok := r.sessions()["s3"]; !ok {
+		t.Error("not found by the deep look")
+	}
+}
+
 // Without a registry dsh knows, the folders of its sessions stand in for its workspaces.
 func TestRemoteDshWorkspacesFallback(t *testing.T) { executors(t, testRemoteDshWorkspacesFallback) }
 

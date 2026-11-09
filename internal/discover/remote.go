@@ -109,6 +109,8 @@ type remoteSession struct {
 	Headed  bool   `json:"headed,omitempty"` // its header was read: Sub and Parent are known
 	Sub     bool   `json:"sub,omitempty"`
 	Parent  string `json:"parent,omitempty"`
+	Ended   bool   `json:"ended,omitempty"` // its summary says its last turn ended
+	Seen    int64  `json:"seen,omitempty"`  // ms, when its directory was first seen; 0: long ago
 }
 
 const (
@@ -465,7 +467,7 @@ func (x *Index) ScanMachine(ctx context.Context, id string) error {
 					c := *s
 					d.Sessions[e.Name] = &c
 				} else {
-					d.Sessions[e.Name] = &remoteSession{Project: p.Name}
+					d.Sessions[e.Name] = &remoteSession{Project: p.Name, Seen: time.Now().UnixMilli()}
 				}
 			}
 		})
@@ -474,11 +476,19 @@ func (x *Index) ScanMachine(ctx context.Context, id string) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	// Each session whose summary changed, new ones, and (now and then) those with no summary:
-	// its transcript's name and size, its summary, its header once.
+	// Each session whose summary changed, new ones, subagents at work (their summary may say
+	// nothing till they end; the list shows them while they write), and now and then those with
+	// no summary: its transcript's name and size, its summary, its header once. A directory still
+	// without a transcript is looked in each time only while new: dsh leaves empty ones behind,
+	// thousands at a machine, which made each look take minutes (2026-11-09).
+	now := time.Now().UnixMilli()
 	for sid, s := range d.Sessions {
 		sum, has := summaries[sid]
-		if s.File != "" && (has && sum == s.Summary || !has && !deep) {
+		if s.File == "" && !deep && now-s.Seen >= remoteDeep.Milliseconds() {
+			continue
+		}
+		working := s.Sub && !s.Ended && now-max(s.Mtime, s.Last) < remoteDeep.Milliseconds()
+		if s.File != "" && (has && sum == s.Summary || !has && !deep) && !working {
 			continue
 		}
 		looks = append(looks, look{sid, s})
@@ -538,7 +548,7 @@ func (x *Index) lookRemote(ctx context.Context, mc *remote.Machine, join func(..
 	if summary != 0 && summary != s.Summary {
 		b, err := mc.ReadFile(ctx, join(append(append([]string{home}, dshhome.SummaryDir...), id+".json")...), 1<<20)
 		if sum, perr := dshhome.ParseSummary(b); err == nil && perr == nil {
-			s.Cwd, s.Title, s.Last, s.Summary = sum.Cwd, sum.Title, sum.Last, summary
+			s.Cwd, s.Title, s.Last, s.Ended, s.Summary = sum.Cwd, sum.Title, sum.Last, sum.Ended, summary
 		}
 	}
 	if !s.Headed {
@@ -672,11 +682,11 @@ func (x *Index) putRemote(machine string, d *dshAt, was *dshhome.Registry) {
 		}
 		e := &entry{
 			onDisk:  onDisk{id: id, agent: api.AgentDsh, path: x.mirrorPath(machine, id, s.File)},
-			glimpse: glimpse{cwd: s.Cwd, title: s.Title, sub: s.Sub, parent: s.Parent},
+			glimpse: glimpse{cwd: s.Cwd, title: s.Title, sub: s.Sub, parent: s.Parent, done: s.Sub && s.Ended},
 			size:    s.Size, mtime: time.UnixMilli(max(s.Mtime, s.Last)),
 			machine: machine, there: remote.Join(d.Sep, append(append([]string{d.Home}, dshhome.SessionsDir...), s.Project, id, s.File)...),
 		}
-		if o := x.entries[id]; o == nil || o.machine != machine || o.size != e.size || o.mtime != e.mtime || o.title != e.title || o.cwd != e.cwd || o.path != e.path || (known0 && !e.sub && !was0[id]) != x.loose(e) {
+		if o := x.entries[id]; o == nil || o.machine != machine || o.size != e.size || o.mtime != e.mtime || o.title != e.title || o.cwd != e.cwd || o.path != e.path || o.done != e.done || (known0 && !e.sub && !was0[id]) != x.loose(e) {
 			x.changed[id] = true
 		}
 		x.entries[id] = e

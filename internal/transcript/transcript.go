@@ -58,9 +58,11 @@ type File struct {
 	lines []entry
 	// zst: a zstd file's frames (offsets are then in its decoded text); nil for a plain one.
 	zst *frames
-	// dsh: a dsh session file, whose title is its last session/title event, kept in title.
+	// dsh: a dsh session file, whose title is its last session/title event, kept in title, and
+	// turn its last turn's state: 0 none yet, dshTurnOpen, dshTurnEnded.
 	dsh   bool
 	title string
+	turn  int8
 	// named: the title the agent's last title line gave (named.go), "" while none has.
 	named string
 }
@@ -111,7 +113,7 @@ func (f *File) refresh() error {
 		end = f.zst.end
 	}
 	if ino != f.ino || st.Size() < end {
-		f.ino, f.size, f.lines, f.title, f.named, end = ino, 0, nil, "", "", 0
+		f.ino, f.size, f.lines, f.title, f.named, f.turn, end = ino, 0, nil, "", "", 0, 0
 		if f.zst != nil {
 			f.zst = &frames{}
 		}
@@ -150,6 +152,8 @@ func (f *File) refresh() error {
 		if f.dsh {
 			if t, ok := dshTitle(line); ok {
 				f.title = t
+			} else if t := dshTurn(line); t != 0 {
+				f.turn = t
 			}
 		}
 		if blocks := f.format(off, line, Clip, nil); len(blocks) > 0 {

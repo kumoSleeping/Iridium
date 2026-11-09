@@ -26,7 +26,7 @@ export function Pager({
 }: {
   page: number;
   onPage: (i: number) => void;
-  tabs: { label: ReactNode; aria: string }[];
+  tabs: { label: ReactNode; aria: string; spring?: boolean }[];
   lead?: ReactNode;
   ends?: ReactNode[];
   still?: boolean;
@@ -129,6 +129,8 @@ export function Pager({
               role="tab"
               aria-selected={i === page}
               aria-label={tab.aria}
+              // A note dragged and held on it turns to its page (notes.tsx).
+              data-spring={tab.spring ? "" : undefined}
               onClick={() => i !== page && onPage(i)}
               className={cn("relative flex items-center justify-center gap-1.5 text-sm transition-colors duration-(--dur-2)", Math.round(at) === i ? "font-medium text-ink" : "text-ink-3")}
             >

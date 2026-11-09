@@ -72,8 +72,8 @@ describe("api", () => {
 
 describe("the event stream", () => {
   test("names the list, the quota, the update, the confirmations and the open session with its context", () => {
-    expect(keysFor(null)).toEqual(["list", "workspaces", "colors", "quota", "update", "confirms", "terminals", "machines"]);
-    expect(streamURL("a")).toBe("/api/events?sub=list&sub=workspaces&sub=colors&sub=quota&sub=update&sub=confirms&sub=terminals&sub=machines&sub=session%3Aa&sub=context%3Aa");
+    expect(keysFor(null)).toEqual(["list", "workspaces", "colors", "quota", "update", "confirms", "terminals", "machines", "notes"]);
+    expect(streamURL("a")).toBe("/api/events?sub=list&sub=workspaces&sub=colors&sub=quota&sub=update&sub=confirms&sub=terminals&sub=machines&sub=notes&sub=session%3Aa&sub=context%3Aa");
   });
   test("the store: whole values, null drops, listeners told", () => {
     const told: string[] = [];
@@ -397,4 +397,15 @@ describe("uploads", () => {
     // The task is gone once done.
     expect(Object.keys(localStorage).filter((k) => k.startsWith("upload:"))).toEqual([]);
   }, 20_000);
+});
+
+// A file written again at its path (same ref) is another address: the page shows the new picture,
+// not the one it already has of that URL (the user, 2026-11-09).
+test("file and thumbnail URLs carry the file's version", () => {
+  expect(api.fileURL("s1", "r1")).toBe("/api/sessions/s1/files/r1");
+  expect(api.fileURL("s1", "r1", true)).toBe("/api/sessions/s1/files/r1?download");
+  expect(api.fileURL("s1", "r1", false, 42)).toBe("/api/sessions/s1/files/r1?v=42");
+  expect(api.fileURL("s1", "r1", true, 42)).toBe("/api/sessions/s1/files/r1?download&v=42");
+  expect(api.thumbURL("s1", "r1", 256, 42)).toBe("/api/sessions/s1/files/r1/thumb?size=256&v=42");
+  expect(api.thumbURL("s1", "r1", 256, 42)).not.toBe(api.thumbURL("s1", "r1", 256, 43));
 });

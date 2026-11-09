@@ -27,10 +27,13 @@ func TunablesOf(cfg config.Config) Tunables {
 }
 
 // Tune puts t in place of the live values: idle reaping, crash and quota resume from the next
-// time they are looked at, the default modes from the next start.
+// time they are looked at, the default modes from the next start; a language, held sessions'
+// features at once (heldLang).
 func (m *Manager) Tune(t Tunables) {
 	t.Modes = maps.Clone(t.Modes)
-	m.tune.Store(&t)
+	if old := m.tune.Swap(&t); old != nil && old.Lang != t.Lang {
+		m.heldLang()
+	}
 }
 
 // Tuned are the live values.

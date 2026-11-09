@@ -9,7 +9,7 @@
 import { Dialog } from "@base-ui/react/dialog";
 import { Toast } from "@base-ui/react/toast";
 import { Tooltip } from "@base-ui/react/tooltip";
-import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type ReactNode } from "react";
 import { queryClient } from "./api/client";
 import { watchTurns } from "./chats";
 import { CreatePopover, WsPlus } from "./create";
@@ -20,7 +20,8 @@ import { motion, pageTurn } from "./motion";
 import { prefetch } from "./prefetch";
 import { close, go, onTurn, openChat, over, quietDialog, route, usagePoint, useRoute, type Route } from "./route";
 import { Pager, TABS_H } from "./pager";
-import { atLeft, GRIP, Sheet } from "./sheet";
+import { atLeft, atRight, GRIP, Sheet } from "./sheet";
+import { NotesKey } from "./notekey";
 import { HeadKeys, Sidebar } from "./sidebar";
 import { useConfirms, useList, useMachines } from "./store";
 import { follow } from "./stream";
@@ -55,6 +56,7 @@ const UsagePage = part(() => import("./usage").then((m) => m.UsagePage));
 type SetsPage = "settings" | "terminals" | "secrets" | "usage";
 const setsPageOf = (r: Route): SetsPage => (r.name === "terminals" || r.name === "secrets" || r.name === "usage" ? r.name : "settings");
 const Jump = part(() => import("./jump").then((m) => m.Jump));
+const NotesPanel = part(() => import("./notes").then((m) => m.NotesPanel));
 export const loadChat = ChatPage.load;
 /** The settings and the jump box, their code run, the settings' answers asked: once idle, or a
  *  pointer on their key. */
@@ -170,10 +172,18 @@ export function App() {
   // 2026-11-06). Put away, or brought to the sessions, the panel's route is left.
   // A swipe up from the left shows the 终端 page from its first px, not the sessions' turning to it
   // as it is let go (the user, 2026-11-08).
-  const [pulled, setPulled] = useState<"me" | "sessions" | null>(null);
+  const [pulled, setPulled] = useState<"me" | "sessions" | "notes" | null>(null);
+  // The notes: on a computer in the session list's place, on a phone the sheet's last page, brought
+  // by a swipe up from the right quarter (the user, 2026-11-09).
+  const [notesOut, setNotesOut] = useState(false);
+  const [notesPage, setNotesPage] = useState(false);
+  // Drawn once first shown, then kept, hidden: a note dragged away from them (to the sessions) is
+  // still theirs to drop.
+  const [notesSeen, setNotesSeen] = useState(false);
   // Out, its page is the route's; going down, it stays as it was; coming up, the swipe's.
   const lastPage = useRef(2);
-  const sheetPage = sheetIsOut ? (setsOut ? (r.name === "usage" ? 1 : 0) : 2) : pulled ? (pulled === "me" ? 0 : 2) : lastPage.current;
+  const sheetPage = sheetIsOut ? (setsOut ? (r.name === "usage" ? 1 : 0) : notesPage ? 3 : 2) : pulled ? (pulled === "me" ? 0 : pulled === "notes" ? 3 : 2) : lastPage.current;
+  if (!notesSeen && (notesOut || (phone && sheetPage === 3))) setNotesSeen(true);
   lastPage.current = sheetPage;
   // Just come out too: its page set at once, not slid to as it rises.
   const wasOut = useRef(sheetIsOut);
@@ -182,13 +192,14 @@ export function App() {
   const setSheet = (o: boolean, x?: number) => {
     setPulled(null);
     if (o && x !== undefined && atLeft(x)) return go({ name: "settings" });
+    if (o && x !== undefined) setNotesPage(atRight(x));
     setSheetOut(o || !open);
     if (over(route())) close(under);
   };
   // A tab, or a swipe across: the sheet stays out, the back key going back to the sessions.
   // 终端 the left page, as a swipe up from the left brings it; the sessions the right (the user, 2026-11-08);
   // the usage between them (the user, 2026-11-08).
-  const toPage = (i: number) => (setSheetOut(true), i === 0 ? go({ name: "settings" }, route().name === "usage") : i === 1 ? go({ name: "usage" }, over(route())) : over(route()) && close(under));
+  const toPage = (i: number) => (setSheetOut(true), i >= 2 && setNotesPage(i === 3), i === 0 ? go({ name: "settings" }, route().name === "usage") : i === 1 ? go({ name: "usage" }, over(route())) : over(route()) && close(under));
   // Put away, the panel is drawn afresh once it is down: its first page, not renaming.
   const [setsRound, setSetsRound] = useState(0);
   useEffect(() => {
@@ -271,6 +282,16 @@ export function App() {
       createKey={(trigger) => <CreatePopover trigger={trigger} />}
       wsPlus={(w, trigger, o, setO) => <WsPlus key={w.key} w={{ id: w.id, name: w.name, path: w.root }} trigger={trigger} open={o} setOpen={setO} opened={(id) => openChat(id)} />}
       me={me}
+      notesKey={!phone && <NotesKey open={notesOut} onClick={() => (setNotesOut((o) => !o), setJumping(false))} />}
+      notesOut={notesOut}
+      notes={
+        !phone &&
+        notesSeen && (
+          <Suspense>
+            <NotesPanel />
+          </Suspense>
+        )
+      }
     />
   );
 
@@ -319,23 +340,27 @@ export function App() {
   );
   const setsBody = (page: SetsPage) => (
     <Suspense fallback={<Waiting />}>
-      {page === "terminals" ? (
-        <div key="terminals" className="g-slide h-full">
-          <TerminalsPage onBack={back} />
-        </div>
-      ) : page === "secrets" ? (
-        <div key="secrets" className="g-slide h-full">
-          <SecretsPage onBack={back} />
-        </div>
-      ) : page === "usage" ? (
-        <div key="usage" className="g-slide h-full">
-          {usagePage()}
-        </div>
-      ) : (
-        <div key="settings" className="g-slide h-full" data-dir="back">
-          <SettingsPage key={setsRound} theme={theme} setTheme={setThemeKept} />
-        </div>
-      )}
+      <SetsPages page={page}>
+        {(slide) =>
+          page === "terminals" ? (
+            <div key="terminals" className={cn(slide, "h-full")}>
+              <TerminalsPage onBack={back} />
+            </div>
+          ) : page === "secrets" ? (
+            <div key="secrets" className={cn(slide, "h-full")}>
+              <SecretsPage onBack={back} />
+            </div>
+          ) : page === "usage" ? (
+            <div key="usage" className={cn(slide, "h-full")}>
+              {usagePage()}
+            </div>
+          ) : (
+            <div key="settings" className={cn(slide, "h-full")} data-dir="back">
+              <SettingsPage key={setsRound} theme={theme} setTheme={setThemeKept} />
+            </div>
+          )
+        }
+      </SetsPages>
     </Suspense>
   );
   const settings = phone ? null : (
@@ -372,24 +397,33 @@ export function App() {
           {!phone && sidebar}
           {main}
           {phone && (
-            <Sheet open={sheetIsOut} setOpen={setSheet} size={!open ? "full" : "half"} raised={jumping && !setsOut} name="phone" head={GRIP + TABS_H} from={() => true} onPull={(x) => setPulled(atLeft(x) ? "me" : "sessions")} label={setsOut ? (r.name === "usage" ? t("usage.title") : t("nav.me")) : t("nav.sessions")} onHeight={setSheetH}>
+            <Sheet open={sheetIsOut} setOpen={setSheet} size={!open ? "full" : "half"} raised={(jumping && !setsOut) || (notesPage && !setsOut && sheetIsOut)} name="phone" head={GRIP + TABS_H} from={() => true} onPull={(x) => setPulled(atLeft(x) ? "me" : atRight(x) ? "notes" : "sessions")} label={setsOut ? (r.name === "usage" ? t("usage.title") : t("nav.me")) : t("nav.sessions")} onHeight={setSheetH}>
               <Pager
                 // The tabs' bar is px-3, the list's rows end 4px further right: its "+" in line with
                 // theirs (the user, 2026-11-08).
-                ends={[null, null, <span key="s" className="-mr-1 flex"><HeadKeys createKey={(trigger) => <CreatePopover trigger={trigger} />} /></span>]}
+                ends={[null, null, <span key="s" className="-mr-1 flex"><HeadKeys createKey={(trigger) => <CreatePopover trigger={trigger} />} /></span>, null]}
                 page={sheetPage}
                 still={turnStill}
                 onPage={toPage}
                 tabs={[
                   { label: <>{t("nav.me")}{update.data?.available && <span className="size-1.5 rounded-full bg-err" aria-hidden />}</>, aria: update.data?.available ? `${t("nav.me")} · ${t("settings.updateReady")}` : t("nav.me") },
                   { label: t("usage.title"), aria: t("usage.title") },
-                  { label: t("nav.sessions"), aria: t("nav.sessions") },
+                  // A note dragged and held on it turns to the sessions (notes.tsx).
+                  { label: t("nav.sessions"), aria: t("nav.sessions"), spring: true },
+                  { label: t("note.title"), aria: t("note.title") },
                 ]}
               >
                 {[
                   <div key="me" className="absolute inset-0">{seen && setsBody(setsPage ?? "settings")}</div>,
                   <div key="usage" className="absolute inset-0">{seen && usagePage()}</div>,
                   sidebar,
+                  <div key="notes" className="absolute inset-0">
+                    {notesSeen && (
+                      <Suspense>
+                        <NotesPanel />
+                      </Suspense>
+                    )}
+                  </div>,
                 ]}
               </Pager>
             </Sheet>
@@ -404,6 +438,19 @@ export function App() {
       </Tooltip.Provider>
     </Toast.Provider>
   );
+}
+
+/** The settings' pages: the first one shown as the dialog (or the phone's tab) comes, still, as it
+ *  rises with it; only a page gone to after that slides in (g-slide). Sliding the first too, the
+ *  page drifted on after the dialog had stopped, its last frames off by a fraction of a pixel. */
+function SetsPages({ page, children }: { page: SetsPage; children: (slide: string | undefined) => ReactNode }) {
+  const [at, setAt] = useState(page);
+  const [moved, setMoved] = useState(false);
+  if (at !== page) {
+    setAt(page);
+    setMoved(true);
+  }
+  return children(moved ? "g-slide" : undefined);
 }
 
 /** Back a step in the settings' dialog. */
@@ -450,8 +497,11 @@ function useFit(el: HTMLElement | null, open: boolean) {
       // scrollHeight is never less than itself: no measure of a page shorter than the dialog).
       // In layout px: the dialog may be scaled as it unfolds.
       const last = sc.lastElementChild;
+      // The dialog's own scale, exact (a rect over offsetHeight, a whole number, was off by up to a
+      // pixel mid-unfold, and the height glided there and back as it settled).
       const box = sc.getBoundingClientRect();
-      const scale = box.height / (sc.offsetHeight || 1) || 1;
+      const m = getComputedStyle(el).transform;
+      const scale = (m && m !== "none" ? new DOMMatrixReadOnly(m).a : 1) || 1;
       const inner = last ? (last.getBoundingClientRect().bottom - box.top) / scale + sc.scrollTop + parseFloat(getComputedStyle(sc).paddingBottom) : 0;
       setH(Math.ceil(root.offsetHeight - sc.clientHeight + inner));
     };

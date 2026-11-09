@@ -105,6 +105,7 @@ func New(cfg config.Config, m *session.Manager, h *hub.Hub, logf func(string, ..
 	s.g.Store(g)
 	h.Set("update", s.updateState())
 	h.Set("terminals", int64(0))
+	s.carryNotes()
 	return s
 }
 
@@ -148,6 +149,7 @@ func (s *Server) Handler(local bool) http.Handler {
 	s.machineRoutes(mux)
 	s.extensionRoutes(mux)
 	s.discoverRoutes(mux)
+	s.noteRoutes(mux)
 	s.fileRoutes(mux, local)
 	if !local {
 		s.cliRoutes(mux)
@@ -382,11 +384,11 @@ func (s *Server) release(w http.ResponseWriter, r *http.Request) {
 	s.done(w, s.m.Release(ctx, r.PathValue("id"), req.ToolUseID, req.Dismiss))
 }
 
-var stateKey = regexp.MustCompile(`^(list|quota|workspaces|colors|confirms|update|terminals|machines|(session|context):[0-9a-zA-Z_-]{1,128})$`)
+var stateKey = regexp.MustCompile(`^(list|quota|workspaces|colors|confirms|update|terminals|machines|notes|(session|context):[0-9a-zA-Z_-]{1,128})$`)
 
 // events is the page's one event stream: ?sub=<key> for each state it wants (list, quota,
-// workspaces, colors, session:<id>, context:<id>, confirms, update). See package hub. A key it does
-// not know, or one not for this terminal (confirms and colors, but for panels), does not fail the
+// workspaces, colors, session:<id>, context:<id>, confirms, update, notes). See package hub. A key it
+// does not know, or one not for this terminal (confirms, colors and notes, but for panels), does not fail the
 // stream: it is left out, and the stream's first events say so (StateEvent.Ignored).
 func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	keys := r.URL.Query()["sub"]
@@ -405,7 +407,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case !stateKey.MatchString(k):
 			ignored = append(ignored, api.StateEvent{Key: k, Ignored: "unknown"})
-		case (k == "confirms" || k == "colors") && !c.panel():
+		case (k == "confirms" || k == "colors" || k == "notes") && !c.panel():
 			ignored = append(ignored, api.StateEvent{Key: k, Ignored: "forbidden"})
 		case !slices.Contains(carried, k):
 			carried = append(carried, k)

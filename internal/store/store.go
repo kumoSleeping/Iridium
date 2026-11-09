@@ -175,6 +175,8 @@ var schema = []string{
 	// 17: no placeholder names (the user, 2026-11-08): auto marks a name the session's agent gave
 	// (ir rename) from now on.
 	`DELETE FROM names WHERE auto = 1;`,
+	// 18: notes and their folders (notes.go).
+	notesSchema,
 }
 
 // steps run in Go after the migration of their version, in the same transaction.

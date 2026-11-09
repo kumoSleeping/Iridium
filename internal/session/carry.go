@@ -144,14 +144,25 @@ func (h *Hosted) setQuota(w []api.QuotaWindow, balance []api.Balance) {
 	h.mu.Lock()
 	account, plan := h.account, h.plan
 	h.mu.Unlock()
-	h.m.setQuota(h.meta.Agent, account, plan, w, balance)
+	h.m.setQuota(api.AgentQuota{Agent: h.meta.Agent, Account: account, Machine: h.meta.Machine, Plan: plan, Windows: w, Balance: balance})
 }
 
-func quotaKey(a api.Agent, account string) string { return string(a) + "\x00" + account }
+// quotaKey tells one login's windows from another's: the agent, the account it reports, and the
+// machine whose login it is. The account alone does not: Codex reports none, and an executor's
+// session runs under that machine's login (its ~/.codex/auth.json), maybe another account.
+func quotaKey(a api.Agent, account, machine string) string {
+	return string(a) + "\x00" + account + "\x00" + machine
+}
 
-func (m *Manager) setQuota(a api.Agent, account, plan string, windows []api.QuotaWindow, balance []api.Balance) {
+func keyOf(q api.AgentQuota) string { return quotaKey(q.Agent, q.Account, q.Machine) }
+
+// quotaKeyLocked is the key of the session's login; h.mu held.
+func (h *Hosted) quotaKeyLocked() string { return quotaKey(h.meta.Agent, h.account, h.meta.Machine) }
+
+func (m *Manager) setQuota(q api.AgentQuota) {
+	q.At = time.Now().UnixMilli()
 	m.mu.Lock()
-	m.quota[quotaKey(a, account)] = api.AgentQuota{Agent: a, Account: account, Plan: plan, Windows: windows, Balance: balance, At: time.Now().UnixMilli()}
+	m.quota[keyOf(q)] = q
 	saved := make([]api.AgentQuota, 0, len(m.quota))
 	for _, q := range m.quota {
 		saved = append(saved, q)
@@ -174,20 +185,20 @@ func (m *Manager) loadQuota() {
 	}
 	m.mu.Lock()
 	for _, q := range saved {
-		m.quota[quotaKey(q.Agent, q.Account)] = q
+		m.quota[keyOf(q)] = q
 	}
 	m.mu.Unlock()
 }
 
 func (m *Manager) publishQuota() { m.o.Hub.Set("quota", m.quotaState()) }
 
-// quotaState: the windows per agent and account; live where a process of theirs runs.
+// quotaState: the windows per agent, account and machine; live where a process of theirs runs.
 func (m *Manager) quotaState() api.Quota {
 	live := map[string]bool{}
 	for _, h := range m.all() {
 		h.mu.Lock()
 		if h.live {
-			live[quotaKey(h.meta.Agent, h.account)] = true
+			live[h.quotaKeyLocked()] = true
 		}
 		h.mu.Unlock()
 	}
@@ -199,30 +210,30 @@ func (m *Manager) quotaState() api.Quota {
 		q.Agents = append(q.Agents, a)
 	}
 	slices.SortFunc(q.Agents, func(a, b api.AgentQuota) int {
-		return strings.Compare(quotaKey(a.Agent, a.Account), quotaKey(b.Agent, b.Account))
+		return strings.Compare(keyOf(a), keyOf(b))
 	})
 	return q
 }
 
-// QuotaOf is the windows of the session's agent and account, nil if none were read.
+// QuotaOf is the windows of the session's agent, account and machine, nil if none were read.
 func (m *Manager) QuotaOf(id string) (*api.AgentQuota, error) {
 	h, err := m.get(id)
 	if err != nil {
 		return nil, err
 	}
 	h.mu.Lock()
-	k := quotaKey(h.meta.Agent, h.account)
+	k := h.quotaKeyLocked()
 	h.mu.Unlock()
 	for _, q := range m.quotaState().Agents {
-		if quotaKey(q.Agent, q.Account) == k {
+		if keyOf(q) == k {
 			return &q, nil
 		}
 	}
 	return nil, nil
 }
 
-// quotaLoop reads the windows again every QuotaEvery, through one running process of each agent
-// and account.
+// quotaLoop reads the windows again every QuotaEvery, through one running process of each agent,
+// account and machine.
 func (m *Manager) quotaLoop() {
 	defer m.wg.Done()
 	t := time.NewTicker(m.o.QuotaEvery)
@@ -236,7 +247,7 @@ func (m *Manager) quotaLoop() {
 		seen := map[string]bool{}
 		for _, h := range m.all() {
 			h.mu.Lock()
-			k, ok := quotaKey(h.meta.Agent, h.account), h.live && !h.starting
+			k, ok := h.quotaKeyLocked(), h.live && !h.starting
 			h.mu.Unlock()
 			if ok && !seen[k] {
 				seen[k] = true

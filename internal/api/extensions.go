@@ -1,7 +1,8 @@
 package api
 
 // Official extensions (plan "插件"): plugins Iridium does not build in but knows by name, to
-// install from its own release and manage from 终端管理. The QQ bot (iridium-qq) is the one so far.
+// install from its own release and manage from 终端管理. The QQ plugin (iridium-qq) is the one so
+// far; it runs any number of bots, each a terminal of its own.
 
 // Extension is an official extension as GET /api/extensions lists it.
 type Extension struct {
@@ -11,15 +12,13 @@ type Extension struct {
 	// Busy: what is under way: install | bind | start | stop | remove.
 	Busy  string `json:"busy,omitempty"`
 	Error string `json:"error,omitempty"` // the last action's failure
-	// Status is what the extension says of itself (iridium-qq status --json), once installed.
-	Status *ExtensionStatus `json:"status,omitempty"`
+	// Bots: what the extension says of each of its bots (iridium-qq list --json), once installed.
+	Bots []ExtensionStatus `json:"bots,omitempty"`
 	// Bind: a scan under way.
 	Bind *ExtensionBind `json:"bind,omitempty"`
-	// Online: its terminal's live connections in Iridium.
-	Online int `json:"online,omitempty"`
 }
 
-// ExtensionStatus is iridium-qq status --json.
+// ExtensionStatus is a bot as iridium-qq status --json gives it.
 type ExtensionStatus struct {
 	Version string `json:"version"`
 	Home    string `json:"home"`
@@ -35,6 +34,8 @@ type ExtensionStatus struct {
 	Enabled bool              `json:"enabled"`
 	Running *ExtensionRunning `json:"running,omitempty"` // while the service is active
 	Pair    string            `json:"pair,omitempty"`    // a pairing code waiting
+	// Online: its terminal's live connections in Iridium (Iridium fills it in).
+	Online int `json:"online,omitempty"`
 }
 
 // ExtensionRunning is how the running extension stands.

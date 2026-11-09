@@ -12,6 +12,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/agent"
 	"github.com/kumoSleeping/iridium/internal/agents"
 	"github.com/kumoSleeping/iridium/internal/api"
+	"github.com/kumoSleeping/iridium/internal/remote/wire"
 	"github.com/kumoSleeping/iridium/internal/store"
 )
 
@@ -19,8 +20,14 @@ import (
 // store: set on the running agent at once, and given to every later start. A new session's mode is the
 // config's for its agent.
 
-// SetModel sets the session's model; "" is the agent's default.
+// SetModel sets the session's model; "" is the agent's default. One a holder at its machine has
+// (DSH Desktop) is set there.
 func (m *Manager) SetModel(ctx context.Context, id, model string) error {
+	if model != "" {
+		if done, err := m.heldSetting(ctx, id, wire.HeldSetParams{Model: model}); done {
+			return err
+		}
+	}
 	h, err := m.settable(ctx, id)
 	if err != nil {
 		return err
@@ -172,8 +179,14 @@ func (m *Manager) SetPreset(ctx context.Context, id, preset string) error {
 	return nil
 }
 
-// SetEffort sets the session's thinking effort.
+// SetEffort sets the session's thinking effort. One a holder at its machine has (DSH Desktop) is
+// set there.
 func (m *Manager) SetEffort(ctx context.Context, id, effort string) error {
+	if effort != "" {
+		if done, err := m.heldSetting(ctx, id, wire.HeldSetParams{Effort: effort}); done {
+			return err
+		}
+	}
 	h, err := m.settable(ctx, id)
 	if err != nil {
 		return err

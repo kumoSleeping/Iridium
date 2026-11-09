@@ -31,6 +31,7 @@ type Glimpse struct {
 	// Ended: a sidechain whose last message is its final answer: an assistant reply that calls no
 	// tool, or the tool result that ends the turn (toolEndsTurn, as a workflow agent's
 	// StructuredOutput), or its being stopped. One still at work ends on a tool call or its result.
+	// A dsh subagent's: its last turn ended (turn/end after its turn/start).
 	Ended bool
 }
 

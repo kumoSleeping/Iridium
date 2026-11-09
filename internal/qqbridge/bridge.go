@@ -403,6 +403,12 @@ func (b *Bridge) events(ctx context.Context) {
 			b.logf("iridium: events connected")
 			go b.avatar(ctx)
 			go b.menus(ctx)
+			go func() { // renamed on the page: the config follows
+				n := SyncName(ctx, b.IR, b.Home)
+				b.mu.Lock()
+				b.Config.Name = n
+				b.mu.Unlock()
+			}()
 		}, func(e Event) error {
 			b.handle(ctx, e)
 			b.mu.Lock()

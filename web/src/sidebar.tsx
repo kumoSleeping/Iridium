@@ -57,6 +57,11 @@ type Props = {
   panelsCode: () => void;
   /** Without its foot, me and the settings key: on a phone they are a sheet of their own. */
   noFoot?: boolean;
+  /** The notes, shown in the tree's place as the jump box is (a computer's; notes.tsx), and the
+   *  key in the head that shows them. */
+  notes?: ReactNode;
+  notesOut?: boolean;
+  notesKey?: ReactNode;
 };
 
 /** How wide the sidebar may be dragged, and at first: freely, to 640px or 60% of the window (the
@@ -137,7 +142,7 @@ export function Sidebar(p: Props) {
   const shape = [loose.map((c) => c.id).join(","), ...p.tree.workspaces.map((w) => `${w.key}:${p.expanded(w.key)}:${w.rows.map((r) => (r.kind === "session" ? r.s.id : `${r.f.key}${p.expanded(r.f.key)}${r.f.sessions.length}`)).join(",")}`), p.expanded("archive"), p.tree.archived.length, [...p.tree.kids.values()].flat().map((s) => s.id).join(","), [...p.tree.runs.values()].flat().map((r) => `${r.id}${p.expanded(`run:${r.id}`)}${r.working.map((s) => s.id)}`).join(",")].join("|");
   useFlip(list, shape);
   const scrolled = useRef(0);
-  useLayoutEffect(() => void (!p.searching && list.current && (list.current.scrollTop = scrolled.current)), [p.searching]);
+  useLayoutEffect(() => void (!p.searching && !p.notesOut && list.current && (list.current.scrollTop = scrolled.current)), [p.searching, p.notesOut]);
   // A session's row, and under it the subagents it has at work.
   // shown: its machine is said by the group above it (no badge on its logo).
   const row = (s: Session, depth: number, shown = false, flip = `s:${s.id}`) => (
@@ -260,6 +265,7 @@ export function Sidebar(p: Props) {
           <LinkDot className="shrink-0" />
         </span>
       )}
+      {p.notesKey}
       <HeadKeys {...p} />
     </div>
   );
@@ -271,7 +277,12 @@ export function Sidebar(p: Props) {
       {/* While searching, the jump box in the tree's place; the tree stays mounted, hidden, and
           comes back scrolled as it was. */}
       {p.searching && <div className="flex min-h-0 flex-1 flex-col">{p.search}</div>}
-      <div ref={list} hidden={p.searching} onScroll={(e) => void (scrolled.current = e.currentTarget.scrollTop)} className="relative min-h-0 flex-1 no-bar overflow-y-auto px-2 pb-3" role="tree" aria-label={t("nav.sessions")}>
+      {p.notes && (
+        <div hidden={p.searching || !p.notesOut} className="min-h-0 flex-1 flex-col [&:not([hidden])]:flex">
+          {p.notes}
+        </div>
+      )}
+      <div ref={list} hidden={p.searching || !!p.notesOut} onScroll={(e) => void (scrolled.current = e.currentTarget.scrollTop)} className="relative min-h-0 flex-1 no-bar overflow-y-auto px-2 pb-3" role="tree" aria-label={t("nav.sessions")}>
         {/* On a phone, with no head: the switch at the list's top. */}
         {p.phone && machines.length > 0 && (
           <div className="flex h-10 items-center">
@@ -834,7 +845,8 @@ const SessionRow = memo(function SessionRow({ s, where, depth, flip, selected, o
           )
         }
         end={end}
-        extra={{ ...lp, ...hover, ...drag, onClickCapture: lp.onClickCapture }}
+        // data-session: a note may be dropped on it (notes.tsx).
+        extra={{ ...lp, ...hover, ...drag, onClickCapture: lp.onClickCapture, "data-session": s.id }}
       />
       <SessionMenu s={s} at={menuAt} close={() => setMenuAt(null)} rename={() => setRenaming(true)} />
     </>
@@ -1074,7 +1086,7 @@ function TagDots({ tags, i }: { tags: Tags; i: number }) {
 /** A session's name, its colour tag a highlighter's stroke over it, the whole height of the
  *  letters, light (the user, 2026-11-06): drawn left to right as it is given, wiped back off in its
  *  colour as it is taken off (styles.css .tag-mark). */
-function Marked({ color, children }: { color?: Color; children: ReactNode }) {
+export function Marked({ color, children }: { color?: Color; children: ReactNode }) {
   const last = useRef(color);
   if (color) last.current = color;
   const shown = color ?? last.current;
