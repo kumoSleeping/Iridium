@@ -135,6 +135,8 @@
 
 一个 cordis 插件，npm 包 `dsh-remote-iridium`，每次发版由 release.yml 用同一版本号发到 npm（Trusted Publishing，不用 TOKEN）；在 `dsh web` 的“添加插件”里填包名即可装（或 `dsh plugin --profile web add dsh-remote-iridium`），跟着 `dsh web` 常驻：连这边、实现上面的必需部分。它不碰 dsh 自己的会话，每个会话照旧是一个 `dsh --profile sdk --patch …` 子进程（预设和系统提示按进程，`internal/agent/dsh/preset.go`）。
 
+第三方包的预设（2026-11-09）：Desktop 的预设可以来自 web profile 里的 bundle，例如 OMD 的 `omd-ptc`、`oh-my-dsh`，行名是 `oh-my-dsh/host/tool-pwsh` 这种。sdk profile 只从 dsh 安装目录和自己的目录找包，这些行原样放进去会加载失败，被它们替换掉的基础行（shell、jobs）又已关掉，会话就没了执行工具。现在 patch 里这类行（包不是 `@deepseek-ai/` 的）改走 `dsh-modules.mjs`（和 patch 写在一起）：它在 agent 那台机器上按 dsh 的家目录（`DSH_HOME`，否则 `~/.dsh`）去 `profiles/*/node_modules` 找包（先 web），照 `exports` 加载。被这类行替换的基础行改为条件关闭：那个包在才关，不在就留着 dsh 自己的。这边读不到 `profiles`（插件不给），所以找包放在那边的进程里做。限制：只装了预设、没装 bundle 自己那层（OMD 的根插件 `omd` 服务、workflow 运行时等），预设里依赖它们的行（OMD 的 PTC 执行器 `run_code`、上下文、codegraph、workflow）起不来，执行退回 dsh 自带的；要这些得在 sdk 进程里装上 bundle 那层、并按会话绑定预设。
+
 实测（2026-11-08）：Mac（arm64，Node 25）上 dsh 0.2.2-rc.1 的 `--profile sdk` 握手、开会话、`shutdown` 都和 Linux 一样，记录写在 `sessions/--<目录>--/<会话>/`。0.1.0 没有 sdk profile，执行端握手报的版本低于 0.2.2 时不给开 dsh。Windows 待测。
 
 ## 这边要做的
