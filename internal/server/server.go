@@ -131,6 +131,15 @@ func (s *Server) Handler(local bool) http.Handler {
 	mux.HandleFunc("POST /api/sessions/{id}/stop", s.use(s.stop))
 	mux.HandleFunc("POST /api/sessions/{id}/answer", s.use(s.answer))
 	mux.HandleFunc("POST /api/sessions/{id}/release", s.use(s.release))
+	// The session's agent's own commands (an app sets its menu from them).
+	mux.HandleFunc("GET /api/sessions/{id}/commands", func(w http.ResponseWriter, r *http.Request) {
+		st, err := s.m.State(r.PathValue("id"))
+		if err != nil {
+			s.error(w, err)
+			return
+		}
+		reply(w, http.StatusOK, st.Commands)
+	})
 	mux.HandleFunc("GET /api/events", s.masked(s.events))
 	s.appRoutes(mux)
 	s.secretRoutes(mux)
