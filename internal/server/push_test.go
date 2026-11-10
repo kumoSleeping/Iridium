@@ -13,7 +13,9 @@ import (
 	"time"
 
 	"github.com/kumoSleeping/iridium/internal/api"
+	"github.com/kumoSleeping/iridium/internal/config"
 	"github.com/kumoSleeping/iridium/internal/push"
+	"github.com/kumoSleeping/iridium/internal/store"
 )
 
 // allowHTTP lets the tests' push service be plain http.
@@ -75,5 +77,70 @@ func TestPushOnAsk(t *testing.T) {
 	case m := <-got:
 		t.Errorf("another push: %+v", m)
 	case <-time.After(300 * time.Millisecond):
+	}
+}
+
+// Push is the panels' and 本机's: a TOKEN and an agent's ir get 403 on every route, so neither
+// switches it nor subscribes an address of its own. A revoked terminal's subscriptions go with it.
+func TestPushPanelsOnly(t *testing.T) {
+	l := startWith(t, func(s *Server, cfg config.Config, work string) {
+		var err error
+		s.Push, err = push.Open(push.Options{StateDir: cfg.StateDir, Store: s.st, Manager: s.m, Logf: t.Logf, AllowHTTP: allowHTTP})
+		if err != nil {
+			t.Fatal(err)
+		}
+	})
+	var bot api.Token
+	l.want(200, "socket", "POST", "/api/terminals/tokens", api.NewInvite{Name: "bot"}, &bot)
+	ua, _ := ecdh.P256().GenerateKey(rand.Reader)
+	auth := make([]byte, 16)
+	rand.Read(auth)
+	keyed := func(endpoint string) api.PushSubscription {
+		sub := api.PushSubscription{Endpoint: endpoint}
+		sub.Keys.P256dh = base64.RawURLEncoding.EncodeToString(ua.PublicKey().Bytes())
+		sub.Keys.Auth = base64.RawURLEncoding.EncodeToString(auth)
+		return sub
+	}
+	// Never pushed to: the test push below runs with the subscription dropped again.
+	sub := keyed("https://push.example.com/bot")
+	routes := []struct {
+		method, path string
+		body         any
+	}{
+		{"GET", "/api/push", nil},
+		{"PUT", "/api/push", api.PushSwitch{Enabled: true}},
+		{"PUT", "/api/push/defaults", api.PushEvents{NeedsYou: true}},
+		{"PUT", "/api/push/rules", api.PushRule{Scope: api.PushScopeWorkspace, Target: "0", Mode: api.PushModeOff}},
+		{"POST", "/api/push/subscriptions", sub},
+		{"DELETE", "/api/push/subscriptions", api.PushUnsubscribe{Endpoint: sub.Endpoint}},
+		{"POST", "/api/push/test", nil},
+	}
+	for _, as := range []string{bot.Token, "agent"} {
+		for _, r := range routes {
+			l.want(403, as, r.method, r.path, r.body, nil)
+		}
+	}
+	if l.s.Push.Enabled() {
+		t.Fatal("switched on by a TOKEN or an agent")
+	}
+	if subs, _ := l.s.st.PushSubscriptions(); len(subs) != 0 {
+		t.Fatalf("subscribed: %+v", subs)
+	}
+	for _, as := range []string{"web", "socket"} {
+		for _, r := range routes {
+			l.want(200, as, r.method, r.path, r.body, nil)
+		}
+	}
+
+	// Revoked: the terminal's subscriptions dropped, the others' kept.
+	mine := keyed("https://push.example.com/mine")
+	l.want(200, "web", "POST", "/api/push/subscriptions", mine, nil)
+	if err := l.s.st.AddPushSubscription(store.PushSubscription{Terminal: bot.Terminal.ID, Endpoint: sub.Endpoint, Keys: `{}`}); err != nil {
+		t.Fatal(err)
+	}
+	l.want(200, "socket", "DELETE", "/api/terminals/"+bot.Terminal.ID, nil, nil)
+	subs, _ := l.s.st.PushSubscriptions()
+	if len(subs) != 1 || subs[0].Endpoint != mine.Endpoint {
+		t.Fatalf("after the revoke: %+v", subs)
 	}
 }

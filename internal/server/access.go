@@ -135,14 +135,17 @@ func (s *Server) terminalsChanged() {
 }
 
 // revoked forgets a revoked terminal's chats (a Bot's): where they pointed, so the list marks no
-// session with it, what they last did, their events. An executor's connection ends now, not when
-// it next connects.
+// session with it, what they last did, their events; and its browsers' push subscriptions. An
+// executor's connection ends now, not when it next connects.
 func (s *Server) revoked(id string) {
 	if s.Remote != nil {
 		s.Remote.Drop(id)
 	}
 	if s.st == nil {
 		return
+	}
+	if err := s.st.DeleteTerminalPush(id); err != nil {
+		s.logf("server: dropping %s's push subscriptions: %v", id, err)
 	}
 	if err := s.st.ForgetMachine(id); err != nil {
 		s.logf("server: forgetting %s's machine: %v", id, err)

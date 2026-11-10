@@ -286,7 +286,7 @@ agent 用 `ir sh <机器> [--cwd 目录] [--timeout 2m] -- 命令`（`POST /api/
 
 ## 推送
 
-Web Push，总开关在配置 `push`，默认关。VAPID 密钥存在状态目录 `vapid.json`（0600）。
+Web Push，总开关在配置 `push`，默认关。VAPID 密钥存在状态目录 `vapid.json`（0600）。下面的请求只给面板（网页面板和本机，同 `PUT /api/settings`）：TOKEN 和 agent 的 `ir` 回 403。撤销一个终端时删掉它名下的订阅。
 
 | 请求 | 正文 → 回答 | 说明 |
 |---|---|---|
