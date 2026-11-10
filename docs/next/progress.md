@@ -142,3 +142,34 @@
 - 登录的权限（改权限）没做：登录的 `perms` 还只是占位，S2 一起做。
 - “带的 agent 开关”没做：开关属于 S3（hello 报 agent、主机上的应用去 agent），现在只读显示。
 - 截图时注意：在 agent 会话里跑测试 daemon 的 `ir`，要去掉 `IRIDIUM_SESSION`、`CLAUDECODE` 等变量并给它一个终端（`script -qec`），不然会被当成 agent 拒绝。这是对的行为。
+
+## S3 远端执行和位置
+
+做了什么：
+- 执行端协议加 `run`（`wire.CapRun`）：请求 `run {run, line, cwd?, env?}`、`run.stop {run}`，事件 `run.out {run, data, err?}`、`run.exit {run, code, signal?, error?}`。每条命令一个新进程，不经托管进程；连接断了执行端杀掉这条连接要的命令；进程退出后留在后台占着输出的，2 秒后一起结束。`wire.Protocol` 没升，字段只加。
+  - Go 执行端（`internal/remote/executor/run.go`，`ir join` 用的）和 `scripts/dev/exec-mini.py` 都实现了；dsh 插件没动，不报 `run`。
+  - 这边：`remote.Machine.Run` / `remote.Run`（`internal/remote/run.go`），读得慢时最多攒 8MB，再多就停掉命令。
+  - `POST /api/machines/{id}/shell` 带 `Accept: application/x-ndjson`、执行端有 `run` 时回 `api.ShellEvent` 的 NDJSON 流；`ir sh` 断开（`--timeout`）就 `run.stop`。没有 `run` 的执行端、或不带这个头，照旧起托管进程、轮询。网页的 `$` 没动。
+  - `ir sh <应用>[:目录]`：位置写法也认；`host:` 报错（主机上直接执行）。没有这台机器 422 `no_such_machine`。
+- hello 的 `shell`：一个开关管网页 `$` 和 agent 的 `ir sh`，默认关。旧 hello 按 `agentShell && !noShell` 算（`Hello.ShellOn`）；新执行端两套都报。`ir join --shell`；`--no-shell`、`--agent-shell`、`--no-agents` 照收（`shell = (--shell || --agent-shell) && !--no-shell`），常驻单元只写 `--shell`。配对申请同样：`PairRequest.shell`，旧的两个字段由 `cleanPair` 换成 `shell`。`api.Machine` 只剩 `shell`（去掉 `noShell`、`agentShell`），网页的卡片、应用详情、`$` 跟着改；文案少了“网页上的命令”一档。
+- hello 的 `machineId`（`internal/machineid`：Linux machine-id、Mac IOPlatformUUID、Windows MachineGuid 的哈希；`IRIDIUM_MACHINE_ID` 覆盖，`none` 为没有）。等于主机自己的（`Hub.Self`），就去掉它报的 agent，连接照收。exec-mini 也报。
+- 位置：`internal/place`（`Split`、`Parse`、`Format`、`Key`、`FromKey`）和 `web/src/places.ts`（`splitPlace` 等），共用 `internal/place/testdata/places.json`。按第一个冒号拆；单个 ASCII 字母、前缀里有 `/` `\` 或以 `~` 开头的不算前缀；`host`、`主机`、`本机` 是主机；输出一律带前缀，主机写 `host:`。
+  - CLI：`ir new <agent> <位置> "任务"`（`--machine` 还认，帮助里去掉）；`ir cp`、`ir files` 认 `host:`；`ir ls`、`ir find`、`ir ws` 的目录一律带前缀（`host:~/ir`、`mac:/x`）。去掉 `机器/<id>` 的会话写法（决定 24）。
+  - 网页：@ 里输入 `host:…`、`主机:…` 当主机的路径（`atPath`）。
+- P4 顺手修：
+  - `Hub.Find` 按应用现在的名字找（`Hub.NameOf`，server 用 gate 的名字），改名后旧名字找不到、也不会找到别的应用。
+  - 幻影机器：`Find` 不再返回只被 `Machine(id)` 查过、从没连上过、也没有这个应用的条目；`Hub.Drop`（应用被删）把没有托管进程挂着的条目一起删掉；`session` 的命令行查机器改用 `Find`，不再凭空建条目。
+  - `dropGone` 的保护：只有应用不在了才丢掉那台机器上发现的会话和镜像，`machines` 表少了一行不算（`Store.AppIDs`）。
+- 测试：`remote/run_test.go`（输出、退出码、找不到程序、目录不存在、停止、断线杀进程、`shell` 关着拒绝、主机上的应用去 agent、按现名找、exec-mini 的 `run` 和只有 401 才删 TOKEN）、`server/routes_shell_test.go`（流式、托管回退、没有 `run` 的执行端、`no_shell`、`no_such_machine`、改名）、`cli/shell_test.go`（流的打印、退出码、超时 124）、`place` 和 `web/test/places.test.ts`、`discover` 的 `dropGone` 保护、`pairing_test` 的映射。
+
+和计划不一样的地方：
+- `run` 的 ID 由这边定（同 `hold`），不是执行端回的。stderr 单独标 `err`，`ir sh` 分开打到 stdout、stderr（托管方式下仍合在一起）。
+- 输出里主机写 `host:`，不是 `主机:`（CLI 给 agent 看；网页的 `formatPlace` 可传别的名字）。
+- 旧执行端的默认（两个旧字段都没有）现在算 `shell` 关：以前网页能在它上面 `$`，现在不能，要在那边重新 `ir join --shell`（决定 21 的映射）。
+- `--no-agents` 没删：应用详情里的 agent 开关还没做，暂时没有别的办法做“只做命令行的机器”。
+
+留给后面的：
+- 没做：`machines` 并进应用（`GET /api/machines`、`machines.tsx`、`api.Machine` 仍在）；按应用的 agent 开关（API 和应用详情）。
+- 网页的位置显示（会话顶上、卡片、侧栏的组名）还没换成 `formatPlace`；网页 `$` 仍走托管进程（决定 20）。
+- dsh 插件（`executor.js`）和 `shell-bot.mjs` 没加 `run`、`shell`、`machineId`，它们仍报旧字段，照映射算。
+- 主目录 `scripts/dev/exec-mini.py` 有别的会话没提交的大改（多 Iridium），这里改的是 next 的那份（`run`、`--shell`、`machineId`、只认 401），合并时要手工合。
