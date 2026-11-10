@@ -35,6 +35,7 @@ func (s *Server) appRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/apps/{id}/logins/{login}", s.admin(s.removeLogin))
 	// What an app may use (agents, scope): whoever approves sets it (S2 enforces it).
 	mux.HandleFunc("PUT /api/apps/{id}/perms", s.approver(s.putAppPerms))
+	mux.HandleFunc("PUT /api/apps/{id}/logins/{login}/perms", s.approver(s.putLoginPerms))
 	mux.HandleFunc("POST /api/invites", s.manage(s.invite))
 	// An app asks for other permissions: an app_change need.
 	mux.HandleFunc("PUT /api/me/perms", s.askChange)
@@ -188,7 +189,7 @@ func (s *Server) apps(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, l := range others {
 		out.Logins = append(out.Logins, api.Login{App: l.App, ID: l.ID, Name: l.Name, CreatedAt: ms(l.CreatedAt),
-			LastSeenAt: ms(l.LastActive), ApprovedAt: ms(l.ApprovedAt), Rules: s.rulesOf(l.App, false)})
+			LastSeenAt: ms(l.LastActive), ApprovedAt: ms(l.ApprovedAt), Rules: s.rulesOf(l.App, false), Perms: s.loginPermsOf(l.App, l.ID)})
 	}
 	for _, i := range a.Invites {
 		out.Invites = append(out.Invites, api.PendingInvite{ID: i.ID, Name: i.Name, Setup: i.Setup, Claude: permsClaude(i.Perms),
@@ -230,6 +231,37 @@ func (s *Server) putAppPerms(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.logf("server: %s set %s's permissions", callerOf(r).Name, info.Name)
+	s.terminalsChanged()
+	reply(w, http.StatusOK, p)
+}
+
+// putLoginPerms sets what login {login} of app {id} (ir_web's too) may use, within its app's.
+func (s *Server) putLoginPerms(w http.ResponseWriter, r *http.Request) {
+	app := r.PathValue("id")
+	if app != gate.WebApp {
+		info, ok := s.gate().Find(app)
+		if !ok || info.Kind != gate.KindChannel || info.Host() {
+			refuse(w, http.StatusUnprocessableEntity, "no_such_app", "no such app")
+			return
+		}
+		app = info.ID
+	}
+	var p api.Perms
+	if !readJSON(w, r, &p) {
+		return
+	}
+	p = cleanPerms(&p)
+	b, _ := json.Marshal(p)
+	ok, err := s.st.SetLoginPermsOf(app, r.PathValue("login"), b)
+	switch {
+	case err != nil:
+		s.error(w, err)
+		return
+	case !ok:
+		refuse(w, http.StatusUnprocessableEntity, "no_such_login", "no such login")
+		return
+	}
+	s.logf("server: %s set %s/%s's permissions", callerOf(r).Name, app, r.PathValue("login"))
 	s.terminalsChanged()
 	reply(w, http.StatusOK, p)
 }

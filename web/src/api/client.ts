@@ -289,6 +289,8 @@ export const api = {
   removeLogin: (app: string, login: string) => write<{ ok: boolean }>("DELETE", `/api/apps/${enc(app)}/logins/${enc(login)}`),
   /** PUT /api/apps/{id}/perms: what an app may use (agents, scope). */
   appPerms: (id: string, p: Perms) => write<Perms>("PUT", `/api/apps/${enc(id)}/perms`, p),
+  /** PUT /api/apps/{app}/logins/{login}/perms: what a login may use, within its app's. */
+  loginPerms: (app: string, login: string, p: Perms) => write<Perms>("PUT", `/api/apps/${enc(app)}/logins/${enc(login)}/perms`, p),
   /** PUT /api/pairing: the pairing window opened for minutes (10 by default) or closed. */
   pairing: (open: boolean, minutes?: number) => write<PairWindow>("PUT", "/api/pairing", { open, ...(minutes ? { minutes } : {}) } satisfies PairWindow),
   /** GET /api/catalogue: the official apps and the commands that install them. */

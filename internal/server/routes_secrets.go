@@ -126,6 +126,11 @@ func (s *Server) secretUse(u store.SecretUse) api.SecretUse {
 // listSecrets: names, notes, scopes, who stored them, their uses; never a value. For every
 // terminal, ir too (an agent's: it learns which names there are).
 func (s *Server) listSecrets(w http.ResponseWriter, r *http.Request) {
+	// Credentials are the host's and ir_web's logins' to list, set and delete (decision 14).
+	if !callerOf(r).CanManage() {
+		forbid(w, errors.New("only the host and ir_web's logins see the credentials"))
+		return
+	}
 	all, err := s.st.Secrets()
 	if err != nil {
 		s.error(w, err)
@@ -194,6 +199,10 @@ func (s *Server) setSecret(w http.ResponseWriter, r *http.Request) {
 		cf := s.asks.addNeed(api.Need{Kind: api.NeedSecretSet, Name: name, Note: note, Replace: exists, Asker: c.Name, Session: c.session})
 		s.logf("server: %s asks a person for the secret %s, need %s", c.Name, name, cf.ID)
 		reply(w, http.StatusAccepted, api.Pending{Need: cf})
+		return
+	}
+	if !c.CanManage() {
+		forbid(w, errors.New("only the host and ir_web's logins set credentials"))
 		return
 	}
 	if !c.panel() {

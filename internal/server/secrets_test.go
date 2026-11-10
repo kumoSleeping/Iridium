@@ -29,14 +29,15 @@ func TestSecrets(t *testing.T) {
 		t.Fatalf("list: %s", raw)
 	}
 
-	// A plugin stores one and lists them, as every terminal (the user, 2026-11-08); deleting is a
-	// manager's.
+	// Credentials are the host's and ir_web's logins' to list, set and delete (decision 14): an
+	// app does none of it.
 	var tok api.Token
 	tok = l.newApp("bot", false)
 	bot := tok.Token
-	l.want(200, bot, "PUT", "/api/secrets/BOT_KEY", api.SetSecret{Value: "abcdefgh"}, nil)
-	l.want(200, bot, "GET", "/api/secrets", nil, nil)
+	l.want(403, bot, "PUT", "/api/secrets/BOT_KEY", api.SetSecret{Value: "abcdefgh"}, nil)
+	l.want(403, bot, "GET", "/api/secrets", nil, nil)
 	l.want(403, bot, "DELETE", "/api/secrets/GITHUB_TOKEN", nil, nil)
+	l.want(200, "web", "PUT", "/api/secrets/BOT_KEY", api.SetSecret{Value: "abcdefgh"}, nil)
 	l.want(200, "web", "DELETE", "/api/secrets/BOT_KEY", nil, nil)
 
 	// An agent's ir: a confirmation, whose panel types the value; the agent learns only the outcome.

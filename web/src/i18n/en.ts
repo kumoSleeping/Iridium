@@ -464,6 +464,7 @@ export const en: Dict = {
   "apps.removeLogin": "Remove",
   "apps.loginRemoved": "Removed {name}",
   "apps.delete": "Delete app",
+  "apps.loginPerms": "The login's permissions (within its app's)",
   "apps.perms": "Permissions",
   "apps.allAgents": "All agents",
   "apps.allScope": "All places",

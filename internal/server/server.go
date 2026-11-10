@@ -151,9 +151,9 @@ func (s *Server) Handler(local bool) http.Handler {
 		s.cliRoutes(mux)
 	}
 	if local {
-		return s.socketHandler(mux)
+		return s.socketHandler(s.sessionGuard(mux))
 	}
-	return s.webHandler(mux)
+	return s.webHandler(s.sessionGuard(mux))
 }
 
 // Listen opens the TCP address and the unix socket. A socket file left by a daemon that is gone
@@ -221,6 +221,9 @@ func (s *Server) list(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.error(w, err)
 		return
+	}
+	if c := callerOf(r); !c.Host() {
+		l = s.filterSessions(s.permsFor(c), l)
 	}
 	reply(w, http.StatusOK, l)
 }
@@ -431,6 +434,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	_ = rc.Flush()
 	sub := s.hub.Subscribe(keys) // none it may carry: open all the same, pinging
 	defer sub.Close()
+	sub.Filter = s.stateFilter(c)
 	_ = sub.Serve(r.Context(), w, func() { _ = rc.Flush() })
 }
 

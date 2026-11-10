@@ -132,6 +132,26 @@ func (s *Store) SetAppPerms(id string, perms []byte) error {
 	return err
 }
 
+// LoginPermsOf is what login id of app was given (the server's JSON), "" for all.
+func (s *Store) LoginPermsOf(app, id string) ([]byte, error) {
+	var p string
+	err := s.db.QueryRow(`SELECT perms FROM logins WHERE app = ? AND id = ?`, app, id).Scan(&p)
+	if errors.Is(err, sql.ErrNoRows) || p == "" {
+		return nil, nil
+	}
+	return []byte(p), err
+}
+
+// SetLoginPermsOf sets what login id of app was given ("" for all): false if there is none.
+func (s *Store) SetLoginPermsOf(app, id string, perms []byte) (bool, error) {
+	res, err := s.db.Exec(`UPDATE logins SET perms = ? WHERE app = ? AND id = ?`, string(perms), app, id)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
+}
+
 // LoginPerms is what login id of ir_web was given (the server's JSON), "" for all.
 func (s *Store) LoginPerms(id string) ([]byte, error) {
 	var p string

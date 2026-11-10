@@ -6,7 +6,7 @@
 // opens pairing for 10 minutes and lists the official apps' install commands; requests wait as
 // cards on top, the code checked against the one the app shows. No TOKEN is handed out here.
 import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { Check, ChevronLeft, ChevronRight, Copy, Link2, LoaderCircle, PencilLine, Plus, Trash2, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Copy, Link2, LoaderCircle, PencilLine, Plus, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ApiError, api } from "./api/client";
 import type { App, Apps, Login, Machine, Perms, PendingInvite, Rules } from "./api/types.gen";
@@ -27,7 +27,11 @@ import { ago, Avatar, IconKey, Logo, Switch, Tip, tokens } from "./ui";
 /** Claude: it was made the owner's own. Set then, never after (the user, 2026-11-08). */
 export const hasClaude = (r: Rules) => !!r.claudeOwner;
 
-const systems: Record<string, string> = { windows: "Windows", darwin: "macOS", linux: "Linux" };
+const systems: Record<string, string> = {
+  windows: "Windows",
+  darwin: "macOS",
+  linux: "Linux",
+};
 
 /** What an app is shown as: the host, 网页, or its type (电脑, Bot…), else 应用. */
 const typeName = (a: App) => {
@@ -52,7 +56,11 @@ const shellOf = (m: Machine) => (m.noShell ? "none" : m.agentShell ? "agents" : 
 /** A machine's line: its system and agents, e.g. "Linux · claude 2.1 · codex". */
 const machineLine = (m: Machine) => [systems[m.os] ?? m.os, ...m.agents.map((a) => [a.agent, a.version].filter(Boolean).join(" "))].filter(Boolean).join(" · ");
 
-const clock = (ms: number) => new Date(ms).toLocaleTimeString(document.documentElement.lang || undefined, { hour: "2-digit", minute: "2-digit" });
+const clock = (ms: number) =>
+  new Date(ms).toLocaleTimeString(document.documentElement.lang || undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 
 const nameError = (e: unknown) => {
   const code = e instanceof ApiError ? (e.body as { nameError?: string } | undefined)?.nameError : undefined;
@@ -91,7 +99,12 @@ export function AppsPage({ onBack }: { onBack: () => void }) {
       busy={q.isFetching}
       right={
         <Tip label={t("apps.new")} side="bottom">
-          <button type="button" aria-label={t("apps.new")} onClick={() => setView({ kind: "new" })} className="g-press grid size-7 place-items-center rounded-md text-ink-2 hover:bg-fill hover:text-ink pointer-coarse:size-10">
+          <button
+            type="button"
+            aria-label={t("apps.new")}
+            onClick={() => setView({ kind: "new" })}
+            className="g-press grid size-7 place-items-center rounded-md text-ink-2 hover:bg-fill hover:text-ink pointer-coarse:size-10"
+          >
             <Plus size={16} />
           </button>
         </Tip>
@@ -253,7 +266,7 @@ function AppPage({ app, data, machine, onBack }: { app: App; data: Apps; machine
         <WebLogins logins={logins} invites={data.invites} />
       ) : (
         <>
-          <PermsEditor app={app} />
+          <PermsEditor perms={app.perms} save={(p) => api.appPerms(app.id, p)} />
           {machine && (
             <Group title={t("apps.computer")}>
               <Line label={t("confirm.system")}>{[systems[machine.os] ?? machine.os, machine.arch].filter(Boolean).join(" ") || "—"}</Line>
@@ -264,7 +277,7 @@ function AppPage({ app, data, machine, onBack }: { app: App; data: Apps; machine
           {logins.length > 0 && (
             <Group title={t("apps.logins")}>
               {logins.map((l) => (
-                <LoginRow key={l.id} l={l} remove={() => void removeLogin(qc, app.id, l)} />
+                <LoginRow key={l.id} l={l} app={app.id} remove={() => void removeLogin(qc, app.id, l)} />
               ))}
             </Group>
           )}
@@ -337,38 +350,50 @@ async function removeLogin(qc: QueryClient, app: string, l: Login) {
 
 /** A login: its avatar, name, when it was last active, waiting or not; renamed (ir_web's) or
  *  removed here. */
-function LoginRow({ l, remove, rename }: { l: Login; remove: () => void; rename?: boolean }) {
+function LoginRow({ l, app, remove, rename }: { l: Login; app: string; remove: () => void; rename?: boolean }) {
   const me = useMe().data;
   const [renaming, setRenaming] = useState(false);
+  const [perms, setPerms] = useState(false);
+  const narrowed = !!l.perms && !(l.perms.agents.includes("*") && l.perms.scope.includes("*"));
   return (
-    <div className="flex min-h-12 items-center gap-3 px-2">
-      <Avatar src={l.avatar} name={l.name} size={28} />
-      <span className="min-w-0 flex-1">
-        <span className="flex items-center gap-2">
-          {renaming ? <Rename id={l.id} name={l.name} done={() => setRenaming(false)} /> : <span className="truncate text-base">{l.name}</span>}
-          {l.id === me?.login && <span className="shrink-0 text-xs text-ink-3">{t("term.this")}</span>}
-          {!l.approvedAt && <span className="shrink-0 rounded-sm bg-fill-2 px-1.5 text-[11px] leading-[18px] text-ink-2">{t("apps.pending")}</span>}
-        </span>
-        <span className="flex items-center gap-1.5 text-xs text-ink-3 tabular-nums">
-          {l.online ? <span className="size-1.5 shrink-0 rounded-full bg-run" aria-hidden /> : null}
-          {l.online ? t("term.online") : ago(l.lastSeenAt || l.createdAt || 0)} · {t("term.today", { n: tokens(l.usedToday) })}
-        </span>
-      </span>
-      {hasClaude(l.rules) && (
-        <Tip label={t("term.claudeYes")}>
-          <span className="flex shrink-0">
-            <Logo agent="claude" size={13} />
+    <div className="flex flex-col">
+      <div className="flex min-h-12 items-center gap-3 px-2">
+        <Avatar src={l.avatar} name={l.name} size={28} />
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-2">
+            {renaming ? <Rename id={l.id} name={l.name} done={() => setRenaming(false)} /> : <span className="truncate text-base">{l.name}</span>}
+            {l.id === me?.login && <span className="shrink-0 text-xs text-ink-3">{t("term.this")}</span>}
+            {!l.approvedAt && <span className="shrink-0 rounded-sm bg-fill-2 px-1.5 text-[11px] leading-[18px] text-ink-2">{t("apps.pending")}</span>}
           </span>
-        </Tip>
-      )}
-      {rename && !renaming && (
-        <IconKey label={t("term.renameIt")} onClick={() => setRenaming(true)} className="size-7">
-          <PencilLine size={14} />
+          <span className="flex items-center gap-1.5 text-xs text-ink-3 tabular-nums">
+            {l.online ? <span className="size-1.5 shrink-0 rounded-full bg-run" aria-hidden /> : null}
+            {l.online ? t("term.online") : ago(l.lastSeenAt || l.createdAt || 0)} · {t("term.today", { n: tokens(l.usedToday) })}
+          </span>
+        </span>
+        {hasClaude(l.rules) && (
+          <Tip label={t("term.claudeYes")}>
+            <span className="flex shrink-0">
+              <Logo agent="claude" size={13} />
+            </span>
+          </Tip>
+        )}
+        {rename && !renaming && (
+          <IconKey label={t("term.renameIt")} onClick={() => setRenaming(true)} className="size-7">
+            <PencilLine size={14} />
+          </IconKey>
+        )}
+        <IconKey label={t("apps.perms")} onClick={() => setPerms(!perms)} className={`size-7 ${narrowed ? "text-ink" : ""}`}>
+          <SlidersHorizontal size={14} />
         </IconKey>
+        <IconKey label={t("apps.removeLogin")} onClick={remove} className="size-7">
+          <X size={15} />
+        </IconKey>
+      </div>
+      {perms && (
+        <div className="g-fade mb-2 ml-11 rounded-lg bg-fill/60 py-2">
+          <PermsEditor title={t("apps.loginPerms")} perms={l.perms} save={(p) => api.loginPerms(app, l.id, p)} />
+        </div>
       )}
-      <IconKey label={t("apps.removeLogin")} onClick={remove} className="size-7">
-        <X size={15} />
-      </IconKey>
     </div>
   );
 }
@@ -381,7 +406,7 @@ function WebLogins({ logins, invites }: { logins: Login[]; invites: PendingInvit
   return (
     <Group title={t("apps.logins")}>
       {logins.map((l) => (
-        <LoginRow key={l.id} l={l} rename remove={() => void revoke(qc, l.id, l.name)} />
+        <LoginRow key={l.id} l={l} app="ir_web" rename remove={() => void revoke(qc, l.id, l.name)} />
       ))}
       {invites.map((i) => (
         <div key={i.id} className="flex min-h-10 items-center gap-3 px-2">
@@ -398,7 +423,12 @@ function WebLogins({ logins, invites }: { logins: Login[]; invites: PendingInvit
       {making ? (
         <InviteForm done={() => setMaking(false)} />
       ) : (
-        <button type="button" disabled={!me?.public} onClick={() => setMaking(true)} className="g-press flex min-h-10 items-center gap-3 rounded-md px-2 text-left text-sm hover:bg-fill disabled:opacity-45 disabled:hover:bg-transparent">
+        <button
+          type="button"
+          disabled={!me?.public}
+          onClick={() => setMaking(true)}
+          className="g-press flex min-h-10 items-center gap-3 rounded-md px-2 text-left text-sm hover:bg-fill disabled:opacity-45 disabled:hover:bg-transparent"
+        >
           <Plus size={15} className="mx-1.5 shrink-0 text-ink-2" />
           <span className="min-w-0 flex-1">
             <span className="block">{t("term.invite")}</span>
@@ -421,7 +451,10 @@ function InviteForm({ done }: { done: () => void }) {
   const make = async () => {
     setBusy(true);
     try {
-      showSecret({ invite: await api.invite(name.trim(), canClaude && withClaude), at: "terminals" });
+      showSecret({
+        invite: await api.invite(name.trim(), canClaude && withClaude),
+        at: "terminals",
+      });
       done();
       void qc.invalidateQueries({ queryKey: ["apps"] });
     } catch (e) {
@@ -438,7 +471,15 @@ function InviteForm({ done }: { done: () => void }) {
         void make();
       }}
     >
-      <input autoFocus value={name} maxLength={12} onChange={(e) => setName(e.target.value)} placeholder={t("term.nameOptional")} aria-label={t("term.name")} className="no-ring h-9 rounded-md bg-fill-2 px-2.5 text-base placeholder:text-ink-3" />
+      <input
+        autoFocus
+        value={name}
+        maxLength={12}
+        onChange={(e) => setName(e.target.value)}
+        placeholder={t("term.nameOptional")}
+        aria-label={t("term.name")}
+        className="no-ring h-9 rounded-md bg-fill-2 px-2.5 text-base placeholder:text-ink-3"
+      />
       {canClaude && (
         <div className="flex items-center gap-2 px-0.5">
           <span className="min-w-0 flex-1">
@@ -466,17 +507,21 @@ const same = (a: string[], b: string[]) => a.length === b.length && a.every((v, 
 
 /** What an app may use: its agents (all, or some) and its scope (all, or places "应用名:路径").
  *  Changed here, saved by whoever approves. */
-function PermsEditor({ app }: { app: App }) {
+function PermsEditor({ perms, save: put, title }: { perms?: Perms; save: (p: Perms) => Promise<Perms>; title?: string }) {
   const qc = useQueryClient();
-  const was = permsOf(app.perms);
+  const was = permsOf(perms);
   const [p, setP] = useState<Perms>(was);
   const [place, setPlace] = useState("");
   const [busy, setBusy] = useState(false);
-  useEffect(() => setP(permsOf(app.perms)), [app.perms]);
+  useEffect(() => setP(permsOf(perms)), [perms]);
   const dirty = !same(p.agents, was.agents) || !same(p.scope, was.scope);
   const allAgents = p.agents.includes(ALL);
   const allScope = p.scope.includes(ALL);
-  const flipAgent = (a: string, on: boolean) => setP({ ...p, agents: on ? [...p.agents.filter((x) => x !== ALL), a] : p.agents.filter((x) => x !== a) });
+  const flipAgent = (a: string, on: boolean) =>
+    setP({
+      ...p,
+      agents: on ? [...p.agents.filter((x) => x !== ALL), a] : p.agents.filter((x) => x !== a),
+    });
   const addPlace = () => {
     const v = place.trim();
     if (v && !p.scope.includes(v)) setP({ ...p, scope: [...p.scope.filter((x) => x !== ALL), v] });
@@ -485,7 +530,7 @@ function PermsEditor({ app }: { app: App }) {
   const save = async () => {
     setBusy(true);
     try {
-      setP(await api.appPerms(app.id, p));
+      setP(await put(p));
       toast(t("apps.saved"));
       void qc.invalidateQueries({ queryKey: ["apps"] });
     } catch (e) {
@@ -495,7 +540,7 @@ function PermsEditor({ app }: { app: App }) {
     }
   };
   return (
-    <Group title={t("apps.perms")}>
+    <Group title={title ?? t("apps.perms")}>
       <div className="flex min-h-10 items-center gap-2 px-2">
         <span className="min-w-0 flex-1 text-sm">{t("apps.allAgents")}</span>
         <Switch label={t("apps.allAgents")} on={allAgents} onChange={(on) => setP({ ...p, agents: on ? [ALL] : [] })} />
@@ -505,7 +550,13 @@ function PermsEditor({ app }: { app: App }) {
           {[...new Set([...AGENTS, ...p.agents])].map((a) => {
             const on = p.agents.includes(a);
             return (
-              <button key={a} type="button" aria-pressed={on} onClick={() => flipAgent(a, !on)} className={`g-press flex h-7 items-center gap-1 rounded-full px-2.5 text-sm ${on ? "bg-ink text-on-ink" : "bg-fill text-ink-2 hover:bg-fill-2"}`}>
+              <button
+                key={a}
+                type="button"
+                aria-pressed={on}
+                onClick={() => flipAgent(a, !on)}
+                className={`g-press flex h-7 items-center gap-1 rounded-full px-2.5 text-sm ${on ? "bg-ink text-on-ink" : "bg-fill text-ink-2 hover:bg-fill-2"}`}
+              >
                 {on && <Check size={13} />}
                 {a}
               </button>
@@ -535,7 +586,13 @@ function PermsEditor({ app }: { app: App }) {
               addPlace();
             }}
           >
-            <input value={place} onChange={(e) => setPlace(e.target.value)} placeholder={t("apps.scopePlaceholder")} aria-label={t("apps.scopeAdd")} className="no-ring h-8 min-w-0 flex-1 rounded-md bg-fill px-2.5 font-mono text-xs placeholder:font-sans placeholder:text-ink-3" />
+            <input
+              value={place}
+              onChange={(e) => setPlace(e.target.value)}
+              placeholder={t("apps.scopePlaceholder")}
+              aria-label={t("apps.scopeAdd")}
+              className="no-ring h-8 min-w-0 flex-1 rounded-md bg-fill px-2.5 font-mono text-xs placeholder:font-sans placeholder:text-ink-3"
+            />
             <SecondKey type="submit" disabled={!place.trim()}>
               {t("apps.scopeAdd")}
             </SecondKey>
@@ -638,7 +695,11 @@ function NewApp({ onBack }: { onBack: () => void }) {
   const win = usePairing();
   const [now, setNow] = useState(Date.now());
   const [err, setErr] = useState<string | null>(null);
-  const cat = useQuery({ queryKey: ["catalogue"], queryFn: () => api.catalogue(), staleTime: Infinity });
+  const cat = useQuery({
+    queryKey: ["catalogue"],
+    queryFn: () => api.catalogue(),
+    staleTime: Infinity,
+  });
   const opened = useRef(false);
   const set = async (open: boolean) => {
     try {

@@ -142,3 +142,21 @@
 - 登录的权限（改权限）没做：登录的 `perms` 还只是占位，S2 一起做。
 - “带的 agent 开关”没做：开关属于 S3（hello 报 agent、主机上的应用去 agent），现在只读显示。
 - 截图时注意：在 agent 会话里跑测试 daemon 的 `ir`，要去掉 `IRIDIUM_SESSION`、`CLAUDECODE` 等变量并给它一个终端（`script -qec`），不然会被当成 agent 拒绝。这是对的行为。
+
+## S2 权限（精简版）
+
+做了什么：
+- `internal/server/perms.go`：
+  - 能用的 = 主机全部；ir_web 的登录用它自己的；应用的登录取应用和登录的交集。
+  - 位置写成 `应用名:路径`：第一个冒号前是应用名或 ID，主机认 `host`/`主机`/`本机`；没有前缀或是盘符（`C:\`）算主机。
+  - 范围外的会话：列表里没有，hub 的 `list`、`session:`、`context:` 按订阅者过滤，按 ID 访问回“没有这个会话”。
+  - 范围内但不能用的 agent：能看，不能开、发、答、改名、归档（403 `no_permission`）。
+- 所有 `/api/sessions/{id}/…` 在路由前统一检查：GET 查范围，其余查范围加 agent（`sessionGuard`）。新建会话查 agent 和位置。
+- Claude 仍按“本人的”规则（`claudeOwner`），权限只会再收窄，不会放宽。
+- 登录的权限：`PUT /api/apps/{id}/logins/{login}/perms`（ir_web 的也是 `ir_web`），能批的人才能改；`Login.perms` 返回给网页。网页每个登录有“权限”按钮，打开同一个编辑器。
+- 凭据（决定 14）：列、设只给主机和 ir_web 的登录；agent 设凭据照旧走“需要”；用只走主机 socket。
+- 测试：`TestPerms`（范围、agent、登录交集、HTTP 权限）、`TestParsePlace`。
+
+和计划不一样的地方（没做）：
+- 路由登记表和全量权限矩阵测试；发起登录的持久化（`inputs.login`、`usage.login`）；共享布局按范围；用量按范围过滤；去掉 S1 垫片。
+- Claude 没有并进 `Perms.agents`，仍是独立的“本人的”标记。

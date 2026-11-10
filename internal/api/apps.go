@@ -81,6 +81,8 @@ type Login struct {
 	Rules      Rules  `json:"rules"`
 	UsedToday  int64  `json:"usedToday"`
 	Device     Device `json:"device,omitempty"`
+	// Perms: what it was given (nil: all); what it may use is this within its app's.
+	Perms *Perms `json:"perms,omitempty"`
 }
 
 // SetFollows is PUT /api/apps/{id}/follows: the logins of ir_web the app follows from now on.

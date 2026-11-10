@@ -464,6 +464,7 @@ export const zh = {
   "apps.removeLogin": "移除",
   "apps.loginRemoved": "已移除 {name}",
   "apps.delete": "删除应用",
+  "apps.loginPerms": "登录的权限（在应用的权限之内）",
   "apps.perms": "权限",
   "apps.allAgents": "全部 agent",
   "apps.allScope": "全部位置",

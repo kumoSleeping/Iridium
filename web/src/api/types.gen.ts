@@ -753,6 +753,10 @@ export interface Login {
   rules: Rules;
   usedToday: number /* int64 */;
   device?: Device;
+  /**
+   * Perms: what it was given (nil: all); what it may use is this within its app's.
+   */
+  perms?: Perms;
 }
 /**
  * SetFollows is PUT /api/apps/{id}/follows: the logins of ir_web the app follows from now on.

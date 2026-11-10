@@ -239,7 +239,12 @@ func (s *Server) using(c caller, id string) (*api.SessionState, error) {
 		return nil, err
 	}
 	if !c.Host() {
-		err = access.Agent(s.rulesFor(c), st.Agent)
+		if !s.sees(s.permsFor(c), st.Session) {
+			return nil, errNoSession
+		}
+		if err = access.Agent(s.rulesFor(c), st.Agent); err == nil {
+			err = s.checkPerms(c, st.Agent, st.Machine, st.Cwd)
+		}
 	}
 	return st, err
 }
@@ -274,7 +279,16 @@ func (s *Server) checkCreate(c caller, req *api.NewSession) error {
 	if c.Host() {
 		return nil
 	}
-	return access.Agent(s.rulesFor(c), req.Agent)
+	if err := access.Agent(s.rulesFor(c), req.Agent); err != nil {
+		return err
+	}
+	app := gate.HostID
+	if req.Machine != "" {
+		if info, ok := s.gate().Find(req.Machine); ok {
+			app = info.ID
+		}
+	}
+	return s.checkPerms(c, req.Agent, app, req.Cwd)
 }
 
 // checkMachine: Claude runs at another machine only if it was allowed as the owner's own
@@ -333,6 +347,7 @@ func (s *Server) loginOf(info gate.EndpointInfo) api.Login {
 		App: gate.WebApp, ID: info.ID, Name: info.Name, Avatar: info.Avatar, Passkeys: info.Passkeys,
 		Sessions: info.Sessions, Online: info.Online, CreatedAt: ms(info.CreatedAt), LastSeenAt: ms(info.LastSeenAt),
 		ApprovedAt: ms(info.ApprovedAt), Rules: s.rulesOf(info.ID, false), UsedToday: s.usedToday(info.ID), Device: s.deviceOf(info.ID),
+		Perms: s.loginPermsOf(gate.WebApp, info.ID),
 	}
 }
 
