@@ -11,8 +11,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/api"
 )
 
-// Messages: a session's transcript, its user and assistant blocks (tools, thoughts and system
-// lines are the web's, GET /api/sessions/{id}/messages); ids are the blocks' places
+// Messages: a session's transcript, a message per block (blocks.go); ids are the blocks' places
 // ("<offset>.<index>"), a page token a line's offset.
 
 // internalURL is a file of session id as login sees it: internal:{app}/{login}/files/{id}/{ref}.
@@ -47,7 +46,9 @@ func fileOf(path string) (id, ref string, ok bool) {
 	return id, ref, ok && id != "" && ref != "" && !strings.Contains(ref, "/")
 }
 
-// fileElements are files as elements for login: <img> for an image, else <file>.
+// fileElements are files as elements for login: <img>, <video>, <audio> or <file> by its kind,
+// src its internal: URL, title its name; and the rest of the file's record (path, size, mime,
+// mtime, thumb, sha256; an image's width and height), so the web has all it shows.
 func fileElements(app, login, id string, fs []api.FileRef) string {
 	var els []Element
 	for _, f := range fs {
@@ -55,35 +56,46 @@ func fileElements(app, login, id string, fs []api.FileRef) string {
 			continue
 		}
 		typ := "file"
-		if f.Kind == api.FileKindImage {
+		switch f.Kind {
+		case api.FileKindImage:
 			typ = "img"
+		case api.FileKindVideo, api.FileKindAudio:
+			typ = string(f.Kind)
 		}
-		els = append(els, Tag(typ, []string{"src", internalURL(app, login, id, f.Ref), "title", f.Name}))
+		e := Tag(typ, []string{"src", internalURL(app, login, id, f.Ref), "title", f.Name, "path", f.Path,
+			"size", strconv.FormatInt(f.Size, 10), "mime", f.Mime, "mtime", strconv.FormatInt(f.Mtime, 10)})
+		if typ == "file" && f.Kind != api.FileKindFile {
+			e.Attrs = append(e.Attrs, Attr{Key: "kind", Value: string(f.Kind)})
+		}
+		if f.Thumb {
+			e.Attrs = append(e.Attrs, Attr{Key: "thumb", Bare: true})
+		}
+		if f.W != 0 || f.H != 0 {
+			e.Attrs = append(e.Attrs, Attr{Key: "width", Value: strconv.Itoa(f.W)}, Attr{Key: "height", Value: strconv.Itoa(f.H)})
+		}
+		if f.Sha256 != "" {
+			e.Attrs = append(e.Attrs, Attr{Key: "sha256", Value: f.Sha256})
+		}
+		els = append(els, e)
 	}
 	return String(els)
 }
 
-// messageOf is block b of session ss as a message, its files as login sees them (none if "").
+// messageOf is block b of session ss as a message (blockContent), its files as login sees them
+// (none if ""). The sender: who wrote a person's message (the app it came from, user.name the tag
+// the agent saw), else the agent.
 func (s *Service) messageOf(c Caller, ss api.Session, b api.Block, guild *Guild) Message {
-	m := Message{ID: b.At, Content: Escape(s.b.Mask(b.Text)), Channel: channelOf(ss), Guild: guild, CreatedAt: b.Time}
-	if c.Login != "" {
-		m.Content += fileElements(c.App, c.Login, ss.ID, b.Files)
-	}
-	if b.Kind == api.BlockKindAssistant {
+	login := c.Login
+	m := Message{ID: b.At, Content: blockContent(b, c.App, login, ss.ID, s.b.Mask), Channel: channelOf(ss), Guild: guild, CreatedAt: b.Time}
+	switch {
+	case b.From != "" || b.FromTerminal != "":
+		m.User = &User{ID: b.FromTerminal, Name: b.From}
+	case b.Kind != api.BlockKindUser:
 		if u, ok := agentUser(ss.Agent); ok {
 			m.User = &u
 		}
-	} else {
-		m.User = &User{ID: b.FromTerminal, Name: b.From}
-		if m.User.ID == "" && b.From == "" {
-			m.User = nil
-		}
 	}
 	return m
-}
-
-func isMessage(b api.Block) bool {
-	return b.Kind == api.BlockKindUser || b.Kind == api.BlockKindAssistant
 }
 
 // lineOf is the offset of the line a block's place is in.
@@ -130,7 +142,7 @@ func (s *Service) messageGet(_ context.Context, c Caller, body []byte) (any, err
 		return nil, err
 	}
 	i := slices.IndexFunc(p.Blocks, func(b api.Block) bool { return b.At == req.MessageID })
-	if i < 0 || !isMessage(p.Blocks[i]) {
+	if i < 0 {
 		return nil, noMessage
 	}
 	b := p.Blocks[i]
@@ -193,13 +205,11 @@ func (s *Service) messageList(_ context.Context, c Caller, body []byte) (any, er
 		}
 		after = &p
 	}
-	out := BidiList[Message]{Data: []Message{}}
+	out := BidiList[Message]{Data: []Message{}, XData: &PageData{}}
 	guild := s.guildOf(st.Session)
 	add := func(bs []api.Block) {
 		for _, b := range bs {
-			if isMessage(b) {
-				out.Data = append(out.Data, s.messageOf(c, st.Session, b, guild))
-			}
+			out.Data = append(out.Data, s.messageOf(c, st.Session, b, guild))
 		}
 	}
 	limit := req.Limit
@@ -215,6 +225,7 @@ func (s *Service) messageList(_ context.Context, c Caller, body []byte) (any, er
 		if more {
 			out.Prev = strconv.FormatInt(start, 10)
 		}
+		*out.XData = PageData{Start: start, End: before.End, More: more}
 	}
 	if after != nil {
 		bs, end := after.Blocks, after.End
@@ -228,6 +239,10 @@ func (s *Service) messageList(_ context.Context, c Caller, body []byte) (any, er
 		if more {
 			out.Next = strconv.FormatInt(end, 10)
 		}
+		if before == nil {
+			out.XData.Start, out.XData.More = after.Start, after.More
+		}
+		out.XData.End = end
 	}
 	switch dir {
 	case "before":
@@ -246,10 +261,7 @@ func (s *Service) messageList(_ context.Context, c Caller, body []byte) (any, er
 func cutBefore(bs []api.Block, limit int) (int, bool) {
 	n := 0
 	for i := len(bs) - 1; i >= 0; i-- {
-		if isMessage(bs[i]) {
-			n++
-		}
-		if n == limit {
+		if n++; n == limit {
 			for i > 0 && lineOf(bs[i-1].At) == lineOf(bs[i].At) {
 				i--
 			}
@@ -262,11 +274,8 @@ func cutBefore(bs []api.Block, limit int) (int, bool) {
 // cutAfter is where to cut bs so that its first limit messages are kept, at a line's start.
 func cutAfter(bs []api.Block, limit int) (int, bool) {
 	n := 0
-	for i, b := range bs {
-		if isMessage(b) {
-			n++
-		}
-		if n == limit {
+	for i := range bs {
+		if n++; n == limit {
 			j := i + 1
 			for j < len(bs) && lineOf(bs[j].At) == lineOf(bs[i].At) {
 				j++

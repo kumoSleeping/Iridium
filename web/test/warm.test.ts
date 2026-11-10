@@ -1,6 +1,7 @@
 // Chats warmed ahead (src/warm.ts, src/chats.ts warmTo): which are picked, and how they are fetched.
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { Session } from "../src/api/types.gen";
+import { speakAs } from "../src/api/client";
 import { chatOf, peekChat, stateAhead, warmed, warmTo } from "../src/chats";
 import { getCarried, setCarried } from "../src/store";
 import { buildTree } from "../src/tree";
@@ -51,9 +52,12 @@ describe("warmTo", () => {
   let asked: string[] = [];
   beforeEach(() => {
     asked = [];
-    vi.stubGlobal("fetch", async (url: string) => {
-      asked.push(url);
-      return new Response(JSON.stringify({ blocks: [], start: 10, end: 20, more: true }), { headers: { "content-type": "application/json" } });
+    speakAs("ir_web", "u1");
+    // message.list as "<url> <channel> [<direction> <next>]".
+    vi.stubGlobal("fetch", async (url: string, init: RequestInit = {}) => {
+      const b = typeof init.body === "string" ? JSON.parse(init.body) : undefined;
+      asked.push(b ? [url, b.channel_id, b.direction, b.next].filter(Boolean).join(" ") : url);
+      return new Response(JSON.stringify({ data: [], _data: { start: 10, end: 20, more: true } }), { headers: { "content-type": "application/json" } });
     });
   });
   afterEach(() => (warmTo(new Map()), vi.unstubAllGlobals()));
@@ -62,11 +66,11 @@ describe("warmTo", () => {
   test("the newest page of each and its state, one at a time, not the page before; again only as it changes", async () => {
     warmTo(new Map([["w1", 1], ["w2", 1]]));
     await settle();
-    expect(asked).toEqual(["/v1/internal/sessions/w1/messages", "/v1/internal/sessions/w1", "/v1/internal/sessions/w2/messages", "/v1/internal/sessions/w2"]);
+    expect(asked).toEqual(["/v1/message.list w1", "/v1/internal/sessions/w1", "/v1/message.list w2", "/v1/internal/sessions/w2"]);
     expect(peekChat("w1")?.log.loaded).toBe(true);
     warmTo(new Map([["w1", 1], ["w2", 2]]));
     await settle();
-    expect(asked.slice(4)).toEqual(["/v1/internal/sessions/w2/messages?after=20"]);
+    expect(asked.slice(4)).toEqual(["/v1/message.list w2 after 20"]);
   });
   test("a state the stream brought meanwhile is not put over; one asked for again only as it is not there", async () => {
     let answer: () => void = () => {};
@@ -103,6 +107,6 @@ describe("warmTo", () => {
     expect(peekChat("v2")).toBeUndefined();
     expect(peekChat("v1")).toBe(it);
     await it!.log.older();
-    expect(asked.at(-1)).toBe("/v1/internal/sessions/v1/messages?before=10");
+    expect(asked.at(-1)).toBe("/v1/message.list v1 before 10");
   });
 });

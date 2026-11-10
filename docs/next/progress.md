@@ -311,3 +311,9 @@
 - 决定 17：配对申请带 `home`、`machineId`（`ir join` 报）；没带 `wants`、有 agent、有 `home` 的默认范围 `应用名:家目录`，批准时改名的跟着改；`machineId` 是主机的就去掉 agent。dsh 插件不报 `home`，照旧全部。
 - 范围按名字存：应用之后改名，范围里的旧名字不会跟着改（和人手写的范围一样，留给权限那条线）。
 
+## message.list 带全部记录
+
+- Satori 的 `message.list`/`message.get` 一块一条消息，带全部记录：思考、工具调用和结果、系统行用 `iridium:` 元素（`docs/satori.md`“记录”），截断、图片、文件、来源等字段都在。编码 `internal/satori/blocks.go`，网页解码 `web/src/satori.ts`，共用表 `internal/satori/testdata/blocks.json`。
+- `message.list` 多回 `_data {start, end, more}`；`limit` 按块数。文件元素按类型用 `<video>`/`<audio>`，带上文件的全部字段。
+- 网页读记录改走 `POST /v1/message.list`（最新一页、往回翻、`direction: after` 取新写的），`GET /v1/internal/sessions/{id}/messages` 网页不再用，路由留着。草稿和状态照旧走 STATE。
+- 记录里人说的消息 `user.id` 仍是应用 ID（记录里只存了应用和标签，没有登录 ID）。

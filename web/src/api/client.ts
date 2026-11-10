@@ -1,6 +1,7 @@
 // The one module that talks to the daemon (docs/api.md, docs/gate.md). Every path the page uses is
 // here, typed by internal/api's generated types.
 import { QueryClient } from "@tanstack/react-query";
+import { blockOf, type SatoriMessage } from "../satori";
 import type {
   DshWorkspace,
   AgentInfo,
@@ -192,8 +193,23 @@ export const api = {
   // --- served (docs/api.md) ---
   sessions: () => get<Session[]>("/v1/internal/sessions"),
   session: (id: string, init?: RequestInit) => get<SessionState>(S(id), init),
-  messages: (id: string, q: { before?: number; after?: number } = {}, init?: RequestInit) =>
-    get<MessagePage>(`${S(id)}/messages${q.before !== undefined ? `?before=${q.before}` : q.after !== undefined ? `?after=${q.after}` : ""}`, init),
+  /** A page of session id's transcript: the newest, the one before line before, or what came after
+   *  line after. Satori's message.list (docs/satori.md "记录"), a message per block; _data says
+   *  where the page is. */
+  messages: async (id: string, q: { before?: number; after?: number } = {}, init?: RequestInit): Promise<MessagePage> => {
+    await whoKnown();
+    const next = q.before ?? q.after;
+    const r = await request("/v1/message.list", {
+      method: "POST",
+      cache: "no-store",
+      ...init,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ channel_id: id, ...(next !== undefined && { next: String(next), direction: q.after !== undefined ? "after" : "before" }) }),
+    });
+    if (!r.ok) return fail(r);
+    const p = (await r.json()) as { data: SatoriMessage[]; _data?: { start: number; end: number; more: boolean } };
+    return { blocks: p.data.map(blockOf), start: p._data?.start ?? 0, end: p._data?.end ?? 0, more: p._data?.more ?? false };
+  },
   block: (id: string, at: string) => get<FullText>(`${S(id)}/block?at=${enc(at)}`),
   create: (s: NewSession) => write<NewSessionReply>("POST", "/v1/internal/sessions", s),
   /** A message: queued while a turn runs (queued in the reply), or joining it with steer.

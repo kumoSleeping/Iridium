@@ -152,9 +152,19 @@ type List[T any] struct {
 	Next string `json:"next,omitempty"`
 }
 
-// BidiList is a list paged both ways.
+// BidiList is a list paged both ways. XData: Iridium's own (_data), message.list's.
 type BidiList[T any] struct {
-	Data []T    `json:"data"`
-	Prev string `json:"prev,omitempty"`
-	Next string `json:"next,omitempty"`
+	Data  []T       `json:"data"`
+	Prev  string    `json:"prev,omitempty"`
+	Next  string    `json:"next,omitempty"`
+	XData *PageData `json:"_data,omitempty"`
+}
+
+// PageData is where a page of message.list is in the transcript, as the web pages it: Start, the
+// line it begins at (next for the page before); End, where the transcript ended as it was read
+// (next for what comes after, with direction after); More, there is more before Start.
+type PageData struct {
+	Start int64 `json:"start"`
+	End   int64 `json:"end"`
+	More  bool  `json:"more"`
 }

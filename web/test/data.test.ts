@@ -50,12 +50,17 @@ describe("api", () => {
     expect(calls.every((c) => c.headers.get("x-requested-with") === "XMLHttpRequest")).toBe(true);
     expect(calls.every((c) => c.headers.get("satori-platform") === "ir_web" && c.headers.get("satori-user-id") === "u1")).toBe(true);
   });
-  test("pages: newest, before=, after=; a refusal throws with its error", async () => {
-    answer = () => json({ blocks: [], start: 0, end: 0, more: false });
-    await api.messages("s 1");
+  test("pages are message.list's: newest, before, after; a refusal throws with its error", async () => {
+    speakAs("ir_web", "u1");
+    answer = () => json({ data: [{ id: "5.0", content: "<iridium:user/>hi", created_at: 3 }, { id: "5.1", content: "yes" }], _data: { start: 5, end: 9, more: true } });
+    expect(await api.messages("s 1")).toEqual({ blocks: [{ at: "5.0", kind: "user", text: "hi", time: 3 }, { at: "5.1", kind: "assistant", text: "yes" }], start: 5, end: 9, more: true });
     await api.messages("s1", { before: 10 });
     await api.messages("s1", { after: 20 });
-    expect(calls.map((c) => c.url)).toEqual(["/v1/internal/sessions/s%201/messages", "/v1/internal/sessions/s1/messages?before=10", "/v1/internal/sessions/s1/messages?after=20"]);
+    expect(calls.map((c) => [c.method, c.url, c.body])).toEqual([
+      ["POST", "/v1/message.list", { channel_id: "s 1" }],
+      ["POST", "/v1/message.list", { channel_id: "s1", next: "10", direction: "before" }],
+      ["POST", "/v1/message.list", { channel_id: "s1", next: "20", direction: "after" }],
+    ]);
     answer = () => json({ message: "the session's agent is not running" }, 409);
     await expect(api.interrupt("s1")).rejects.toMatchObject({ status: 409, message: "the session's agent is not running" });
   });

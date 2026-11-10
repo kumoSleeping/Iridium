@@ -13,14 +13,14 @@
 | `channel` | 会话，`id` 即会话 ID，`type` 0，`parent_id` 是子 agent 的上级会话 |
 | `guild` | 网页的文件夹组（`id` 是组号）；不在组里的会话归 `loose`（未分组） |
 | `user` | agent（`claude`、`codex`…，`is_bot`），以及说话的应用、登录、主机 |
-| `message` | 记录里用户和 agent 的块，`id` 是块的位置 `<偏移>.<序号>`；提问是 `ask:<会话>:<请求>` |
+| `message` | 记录里的一块（人说的、agent 说的、思考、工具调用、系统行），`id` 是块的位置 `<偏移>.<序号>`；提问是 `ask:<会话>:<请求>` |
 
 鉴权：应用用 `Authorization: Bearer <应用 TOKEN>`（过 gate）。网页也是应用（一视同仁）：浏览器凭 cookie，`Satori-Platform: ir_web`、`Satori-User-ID: <登录 ID>`；没开公网时主机自己的页面是平台 `local` 的登录 `local`。这两种连接只代表这一个登录。会话 TOKEN 403 `no_login`。`Satori-Platform` 不是本应用 ID、没有 `Satori-User-ID`：403 `no_such_login`。新登录第一次说话：403 `login_pending`，产生“登录加入”需要（和 `/api` 一样）。
 
 ## HTTP `POST /v1/{资源}.{方法}`
 
 - `message.create {channel_id, content}`：发进会话（插入正在跑的回合），发送者显示为 `应用·登录`。`<img>`/`<file>` 的 `src` 是本登录在这个会话 `upload.create` 得到的 `internal:` 地址时，作为附件；其余元素按意思转成文字。回 `[Message]`，`id` 是这条输入的 ID。
-- `message.get`、`message.list`：`message.list` 是 BidiList，翻页标记是记录里行的偏移；`limit` 按行截，可能略多；没有 `next` 时只能 `before`。只含用户和 agent 的话（工具、思考、系统行看网页的 `/api/sessions/{id}/messages`）。
+- `message.get`、`message.list`：记录的每一块是一条消息，内容见下面“记录”。`message.list` 是 BidiList，翻页标记是记录里行的偏移；`limit` 按块数、在行首截，可能略多；没有 `next` 时只能 `before`。多一个 `_data {start, end, more}`：这页从哪行起、读时记录到哪（`direction: after` 的 `next`）、前面还有没有。网页读记录也走它。
 - `channel.get`、`channel.list {guild_id?, next?}`（不给 `guild_id` 是全部；不列归档和子 agent）、`guild.get`、`guild.list`、`login.get`、`user.get`。
 - `upload.create`：一个 multipart，带字段 `channel_id`，每个文件回 `internal:{应用}/{登录}/files/{会话}/{ref}`。网页仍用分块的 `/api/uploads`。
 - `POST /v1/meta`：本应用已批准的登录，`proxy_urls` 为空。`/v1/meta/*`（webhook）不做。
@@ -28,6 +28,24 @@
 - 不支持的标准接口（`message.delete` 等）照规范 404。
 
 错误体 `{code, message}`。404 只表示接口不存在；资源不存在 422 加原因码：`no_such_session`、`no_such_message`、`no_such_guild`、`no_such_user`、`no_such_file`、`no_such_ask`、`no_such_button`。
+
+## 记录
+
+一块一条消息：标准元素放 Satori 有的（文字；文件按类型 `<img>`/`<video>`/`<audio>`/`<file>`，`src` 是 `internal:` 地址），其余用带适配器前缀的元素（advanced/internal.md），前缀 `iridium`。只认标准元素的客户端看到的是人和 agent 说的话。`created_at` 是块的时间。编码在 `internal/satori/blocks.go`，网页解码在 `web/src/satori.ts`，两边用同一张表 `internal/satori/testdata/blocks.json` 测，能原样还原。
+
+| 块 | 内容 |
+| --- | --- |
+| 人说的 | `<iridium:user id from terminal length/>` 加文字和文件 |
+| agent 说的 | 文字和文件；被截断时前面加 `<iridium:assistant length/>` |
+| 思考 | `<iridium:thinking length>文字</iridium:thinking>` |
+| 工具调用 | `<iridium:tool id name length error><iridium:input>参数 JSON</iridium:input><iridium:result at time length error>结果 <iridium:image/>…</iridium:result></iridium:tool>`，写出的文件跟在后面 |
+| 结果（调用在别页） | `<iridium:result id length error>结果 <iridium:image/>…</iridium:result>` |
+| 系统行 | `<iridium:system event from terminal id length>文字 <iridium:compact auto before after ms/></iridium:system>` |
+
+- `length`：文字（或参数）被截到 2000 字时全文的长度，全文用 `/v1/internal/sessions/{id}/block?at=`；`message.get` 直接给全文。
+- `<iridium:image mime width height unsent/>`：结果给模型的图，第 n 个用 `/v1/internal/sessions/{id}/image?at=<结果的 at>&n=`。
+- 文件元素还带 `path`、`size`、`mime`、`mtime`、`thumb`、`sha256`，图片带 `width`、`height`。没有登录的调用方不带文件。
+- 文字、参数、结果里的凭据打码。`message-created` 事件照旧只发 agent 的话，内容和这条块的一样。
 
 ## Iridium 自己的接口 `/v1/internal/*`
 
