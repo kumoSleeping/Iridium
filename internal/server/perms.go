@@ -46,6 +46,12 @@ func (s *Server) permsFor(c caller) api.Perms {
 	if c.Login != "" {
 		p = s.intersect(p, orAll(s.loginPermsOf(c.App, c.Login)))
 	}
+	// A session's own TOKEN (its agent's ir at another computer): within its turn's login's too.
+	if c.session != "" && !c.socket {
+		if o, ok := s.originOf(c.session); ok && !o.Host() && o.App != c.App {
+			p = s.intersect(p, s.permsFor(caller{Identity: o}))
+		}
+	}
 	return p
 }
 

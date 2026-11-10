@@ -150,3 +150,21 @@ func TestScopeFolders(t *testing.T) {
 		t.Fatalf("workspaces: %+v", ws)
 	}
 }
+
+// A turn is for the person who started it: an agent's ir in it, and what that agent starts or
+// sends, act as that login, down the chain.
+func TestTurnOrigin(t *testing.T) {
+	l := start(t)
+	web := caller{Identity: gate.Identity{App: gate.WebApp, Login: "pad0000000000000", Name: "pad"}}
+	l.s.noteOrigin(web, "S1", "")
+	agentInS1 := caller{Identity: localIdentity, socket: true, agent: true, session: "S1"}
+	l.s.noteOrigin(agentInS1, "S2", "")
+	if o, ok := l.s.originOf("S2"); !ok || o.Login != "pad0000000000000" {
+		t.Fatalf("S2's turn: %+v %v", o, ok)
+	}
+	// A person's own message starts a turn of their own.
+	l.s.noteOrigin(caller{Identity: localIdentity, socket: true}, "S2", "")
+	if o, _ := l.s.originOf("S2"); !o.Host() {
+		t.Fatalf("the host's turn: %+v", o)
+	}
+}

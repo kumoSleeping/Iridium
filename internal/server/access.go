@@ -78,12 +78,11 @@ var localIdentity = gate.HostIdentity
 func (s *Server) socketHandler(mux http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c := caller{Identity: localIdentity, socket: true, agent: r.Header.Get(HeaderAgent) != "", session: r.Header.Get(HeaderSession)}
+		// An agent's ir acts for its session's turn: as the login that turn is for (origin.go).
 		if c.session != "" {
-			if id := s.st.Opener(c.session); id != "" && id != gate.HostID {
-				if info, ok := s.gate().Endpoint(id); ok {
-					c.Identity = info.Identity()
-					c.agent = true
-				}
+			if o, ok := s.originOf(c.session); ok && !o.Host() {
+				c.Identity = o
+				c.agent = true
 			}
 		}
 		ctx := context.WithValue(gate.NewContext(r.Context(), c.Identity), callerKey{}, c)

@@ -44,6 +44,7 @@ type Server struct {
 	m   *session.Manager
 	hub *hub.Hub
 
+	turns        origins      // whose turn each session runs (origin.go)
 	terminalsSeq atomic.Int64 // the "terminals" state's count (terminalsChanged)
 	// CLI runs the ir of a session at another machine (POST /api/cli); nil: none.
 	CLI CLIAt
@@ -253,6 +254,11 @@ func (s *Server) create(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := s.m.Create(r.Context(), req, s.fromOf(c, req.Caller))
 	if id != "" {
+		via := c.session
+		if via == "" && c.socket {
+			via = req.Caller
+		}
+		s.noteOrigin(c, id, via)
 		if err := s.st.SetOpener(id, c.ID()); err != nil {
 			s.logf("server: opener of %s: %v", id, err)
 		}
@@ -348,6 +354,11 @@ func (s *Server) sendAs(ctx context.Context, c caller, from, id string, req api.
 	if err := s.checkSend(c, id); err != nil {
 		return api.SendReply{}, err
 	}
+	via := c.session
+	if via == "" && c.socket {
+		via = req.Caller
+	}
+	s.noteOrigin(c, id, via)
 	// Attachments and all: Claude would clear itself just the same.
 	if session.IsClear(req.Text) {
 		nid, err := s.m.Clear(ctx, id, from)
