@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"time"
 )
 
@@ -77,10 +79,14 @@ type Update struct {
 	URL string `json:"url,omitempty"`
 	// Every is how often to look; "" or "0" is once a day.
 	Every Duration `json:"every,omitzero"`
-	// Manual is no longer read (2026-11-08: release builds always download ahead, builds from
-	// source never); kept so a file that has it still loads.
-	Manual bool `json:"manual,omitempty"`
 }
+
+// legacy are fields an older file may still have that are no longer read, as dotted paths:
+// update.manual (2026-11-08: release builds always download ahead, builds from source never);
+// pairClosed and chatDir go in 0.2 (docs/next). One is dropped before decoding only once Config
+// has no field by its name, so it is listed ahead of its removal; any other unknown field is
+// still an error.
+var legacy = []string{"pairClosed", "chatDir", "update.manual"}
 
 // Source is where to look for new versions, "" for nowhere.
 func (u Update) Source(fallback string) string {
@@ -113,7 +119,7 @@ func DefaultPath() string {
 }
 
 // Load reads path over the defaults; none there is the defaults. Unknown fields are an error, so
-// a misspelt one is not silently ignored.
+// a misspelt one is not silently ignored; the legacy ones are not.
 func Load(path string) (Config, error) {
 	c := Default()
 	b, err := os.ReadFile(path)
@@ -123,6 +129,7 @@ func Load(path string) (Config, error) {
 	if err != nil {
 		return c, err
 	}
+	b = dropLegacy(b, reflect.TypeFor[Config](), legacy)
 	dec := json.NewDecoder(bytes.NewReader(b))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&c); err != nil {
@@ -134,6 +141,88 @@ func Load(path string) (Config, error) {
 		}
 	}
 	return c, nil
+}
+
+// dropLegacy takes out of the JSON object b each of paths that t has no field for. b as it was
+// when there is nothing to take, or it is no object (the decoder then says what is wrong).
+func dropLegacy(b []byte, t reflect.Type, paths []string) []byte {
+	var obj map[string]json.RawMessage
+	if json.Unmarshal(b, &obj) != nil || obj == nil {
+		return b
+	}
+	dropped := false
+	for _, p := range paths {
+		if drop(obj, t, strings.Split(p, ".")) {
+			dropped = true
+		}
+	}
+	if !dropped {
+		return b
+	}
+	out, err := json.Marshal(obj)
+	if err != nil {
+		return b
+	}
+	return out
+}
+
+// drop takes path out of obj, an object decoded into t, unless t has a field for it.
+func drop(obj map[string]json.RawMessage, t reflect.Type, path []string) bool {
+	raw, ok := obj[path[0]]
+	if !ok {
+		return false
+	}
+	f, has := field(t, path[0])
+	if len(path) == 1 {
+		if has {
+			return false
+		}
+		delete(obj, path[0])
+		return true
+	}
+	if !has {
+		return false // the whole parent is unknown: an error of its own
+	}
+	ft := f.Type
+	for ft.Kind() == reflect.Pointer {
+		ft = ft.Elem()
+	}
+	var sub map[string]json.RawMessage
+	if ft.Kind() != reflect.Struct || json.Unmarshal(raw, &sub) != nil || sub == nil || !drop(sub, ft, path[1:]) {
+		return false
+	}
+	b, err := json.Marshal(sub)
+	if err != nil {
+		return false
+	}
+	obj[path[0]] = b
+	return true
+}
+
+// field is t's field that JSON name decodes into, matched as encoding/json does (exactly, else
+// without case).
+func field(t reflect.Type, name string) (reflect.StructField, bool) {
+	var fold reflect.StructField
+	found := false
+	for f := range t.Fields() {
+		if !f.IsExported() {
+			continue
+		}
+		n, _, _ := strings.Cut(f.Tag.Get("json"), ",")
+		if n == "-" {
+			continue
+		}
+		if n == "" {
+			n = f.Name
+		}
+		if n == name {
+			return f, true
+		}
+		if !found && strings.EqualFold(n, name) {
+			fold, found = f, true
+		}
+	}
+	return fold, found
 }
 
 // Save writes c to path whole, or not at all.
