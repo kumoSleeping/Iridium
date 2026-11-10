@@ -84,5 +84,5 @@
 - 只有 agent 的话发 `message-created`，别人（网页、别的登录、主机终端）发的不发。
 - `<img src="https:…">`、`data:` 资源不下载，转成文字；`<message>` 不拆成多条。
 - `message.list` 不带 `limit` 时多给一个 `next`；同一事件给多个登录共用一个 `sn`，续传可能丢。
-- `guild.*` 不按范围过滤；IDENTIFY 的 TOKEN 不计入 gate 的失败限速。
+- `guild.*` 不按范围过滤。
 - 没有 `login-*`、`channel-*` 事件和 `channel.update`/`channel.delete`；事件和按钮只在内存里 24 小时，重启就没。

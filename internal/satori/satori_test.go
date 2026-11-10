@@ -74,7 +74,7 @@ func (f *fake) Who(r *http.Request) (Caller, bool) {
 	return c, true
 }
 
-func (f *fake) AppByToken(tok string) (Caller, bool) {
+func (f *fake) AppByToken(_ *http.Request, tok string) (Caller, bool) {
 	app, ok := f.tokens[tok]
 	return Caller{App: app}, ok
 }

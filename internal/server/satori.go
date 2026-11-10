@@ -82,8 +82,8 @@ func (b satoriBackend) Who(r *http.Request) (satori.Caller, bool) {
 	return satori.Caller{App: id.App, AppName: id.Name, Login: id.Login}, true
 }
 
-func (b satoriBackend) AppByToken(tok string) (satori.Caller, bool) {
-	info, ok := b.s.gate().ByToken(tok)
+func (b satoriBackend) AppByToken(r *http.Request, tok string) (satori.Caller, bool) {
+	info, ok := b.s.gate().ByTokenFrom(r, tok)
 	if !ok || info.Host() || info.Kind != gate.KindChannel {
 		return satori.Caller{}, false
 	}

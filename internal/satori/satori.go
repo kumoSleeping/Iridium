@@ -68,7 +68,7 @@ type Backend interface {
 	// approved (Satori-User-ID, checked before); ok false: not an app's TOKEN.
 	Who(r *http.Request) (c Caller, ok bool)
 	// AppByToken is the app whose TOKEN tok is (IDENTIFY's token).
-	AppByToken(tok string) (c Caller, ok bool)
+	AppByToken(r *http.Request, tok string) (c Caller, ok bool)
 	// Logins are app's approved logins, oldest first.
 	Logins(app string) []LoginInfo
 	// Track ends a connection of app (closeFn) when the app is removed or its TOKEN replaced.

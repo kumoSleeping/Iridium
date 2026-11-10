@@ -390,7 +390,7 @@ func (s *Service) serveEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	icancel()
 	if id.Token != "" {
-		tc, ok := s.b.AppByToken(id.Token)
+		tc, ok := s.b.AppByToken(r, id.Token)
 		// A TOKEN in IDENTIFY wins over what the browser brought along (a cookie, the host's
 		// page); only an app's own Authorization must agree with it.
 		if !ok || (authed && !c.Only && tc.App != c.App) {

@@ -2,6 +2,7 @@ package gate
 
 import (
 	"errors"
+	"net/http"
 	"strings"
 	"time"
 )
@@ -233,6 +234,22 @@ func (g *Gate) Endpoint(id string) (EndpointInfo, bool) {
 }
 
 // ByToken returns the app whose TOKEN tok is, whatever it has been renamed to since.
+// ByTokenFrom is ByToken for a TOKEN that came in a request's body (Satori's IDENTIFY), counted
+// against r's client as a bearer token is: a client that fails too often waits.
+func (g *Gate) ByTokenFrom(r *http.Request, tok string) (EndpointInfo, bool) {
+	now := g.now()
+	key := clientKey(r, g.ipHeader)
+	if g.lim.wait(key, now) > 0 {
+		return EndpointInfo{}, false
+	}
+	info, ok := g.ByToken(tok)
+	if !ok {
+		g.lim.fail(key, now)
+		g.log.Info("gate: bad token in a stream", "client", key)
+	}
+	return info, ok
+}
+
 func (g *Gate) ByToken(tok string) (EndpointInfo, bool) {
 	tok = strings.TrimSpace(tok)
 	if !wellFormedChannel(tok) {
