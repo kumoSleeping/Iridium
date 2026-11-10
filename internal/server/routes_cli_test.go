@@ -61,7 +61,7 @@ func TestCLIAtMachine(t *testing.T) {
 	if code, out, errs, exit := run(tok, "ls"); code != 200 || exit != 0 || !strings.Contains(out, own.ID[:8]) {
 		t.Fatalf("ls: %d %d %q %q", code, exit, out, errs)
 	}
-	if _, _, errs, exit := run(tok, "sh", "pc", "--", "id"); exit != 1 || !strings.Contains(errs, "Iridium's own machine") {
+	if _, _, errs, exit := run(tok, "sh", "pc", "--", "id"); exit != 1 || !strings.Contains(errs, "runs on the host") {
 		t.Errorf("sh from there: %d %q", exit, errs)
 	}
 	if _, _, errs, exit := run(tok, "cp", "a", "b"); exit != 1 || errs == "" {

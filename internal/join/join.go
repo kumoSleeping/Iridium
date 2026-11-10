@@ -323,9 +323,9 @@ func (o *Options) Run(ctx context.Context) error {
 			return err
 		}
 		if o.Resident {
-			return fmt.Errorf("%w：%s 不再接受本机，在终端里运行 ir join %s", errUnpaired, o.URL, o.URL)
+			return fmt.Errorf("%w：%s 不再接受这台电脑，在终端里运行 ir join %s", errUnpaired, o.URL, o.URL)
 		}
-		o.say("%s 不再接受本机，重新配对", o.URL)
+		o.say("%s 不再接受这台电脑，重新配对", o.URL)
 	}
 }
 

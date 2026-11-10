@@ -27,7 +27,7 @@ const nameError = (e: unknown) => {
   if (e instanceof ApiError) {
     const code = (e.body as { nameError?: string } | undefined)?.nameError;
     if (code) return code === "taken" ? t("me.nameTaken") : t("me.nameBad");
-    if (e.status === 409) return t("me.localOnly");
+    if ((e.body as { code?: string } | undefined)?.code === "built_in") return t("me.localOnly");
   }
   return errText(e);
 };

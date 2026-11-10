@@ -290,7 +290,7 @@ func (g *Gate) apiJoinVerify(w http.ResponseWriter, r *http.Request, key string)
 	now := g.now()
 	f := g.flows.take(req.Flow, flowJoin, now)
 	if f == nil {
-		g.failed(w, key, "join", http.StatusUnauthorized, "auth_failed", errors.New("unknown or expired flow"))
+		g.failed(w, key, "join", http.StatusForbidden, "flow_expired", errors.New("unknown or expired flow"))
 		return
 	}
 	parsed, err := protocol.ParseCredentialCreationResponseBytes(req.Response)
@@ -384,7 +384,7 @@ func (g *Gate) apiLoginVerify(w http.ResponseWriter, r *http.Request, key string
 	now := g.now()
 	f := g.flows.take(req.Flow, flowLogin, now)
 	if f == nil {
-		g.failed(w, key, "login", http.StatusUnauthorized, "auth_failed", errors.New("unknown or expired flow"))
+		g.failed(w, key, "login", http.StatusForbidden, "flow_expired", errors.New("unknown or expired flow"))
 		return
 	}
 	var epID string
@@ -413,7 +413,7 @@ func (g *Gate) apiLoginVerify(w http.ResponseWriter, r *http.Request, key string
 		err = errCounter // a copy of the key is in use somewhere
 	}
 	if err != nil {
-		g.failed(w, key, "login", http.StatusUnauthorized, "auth_failed", err)
+		g.failed(w, key, "login", http.StatusForbidden, "auth_failed", err)
 		return
 	}
 
@@ -425,7 +425,7 @@ func (g *Gate) apiLoginVerify(w http.ResponseWriter, r *http.Request, key string
 	}
 	if i < 0 { // revoked during the ceremony
 		g.mu.Unlock()
-		writeJSON(w, http.StatusUnauthorized, apiError{"auth_failed"})
+		writeJSON(w, http.StatusForbidden, apiError{"auth_failed"})
 		return
 	}
 	e.Passkeys = slices.Clone(e.Passkeys)

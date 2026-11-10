@@ -288,6 +288,8 @@ type Machine struct {
 	Shell bool `json:"shell,omitempty"`
 	// Latency: the connection's last round trip (ms), by its heartbeat; 0 not known.
 	Latency int64 `json:"latency,omitempty"`
+	// Program: what connects it, as its hello says (ir join and its version).
+	Program string `json:"program,omitempty"`
 }
 
 // ExecAgent is an agent an executor has.

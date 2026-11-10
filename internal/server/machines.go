@@ -102,7 +102,7 @@ func (s *Server) machineSeen(id string) {
 		hi, ok = mc.Hello()
 	}
 	if ok && hi != nil {
-		m := api.Machine{OS: hi.OS, Arch: hi.Arch, Home: hi.Home, Sep: hi.Sep, Agents: []api.ExecAgent{}, Shell: hi.ShellOn()}
+		m := api.Machine{OS: hi.OS, Arch: hi.Arch, Program: hi.Program, Home: hi.Home, Sep: hi.Sep, Agents: []api.ExecAgent{}, Shell: hi.ShellOn()}
 		for _, a := range hi.Agents {
 			// Only what Iridium runs at an executor.
 			if info, ok := agents.Get(api.Agent(a.Agent)); ok && info.FindRemote != nil {

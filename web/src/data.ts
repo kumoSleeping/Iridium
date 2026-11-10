@@ -93,7 +93,7 @@ export function useApps() {
 export function useWhoList(): Who[] {
   const d = useApps().data;
   if (!d) return [];
-  return [...d.apps.filter((a) => !a.web).map((a) => ({ id: a.id, name: a.name, avatar: a.avatar, device: a.device, host: a.host })), ...d.logins.map((l) => ({ id: l.id, name: l.name, avatar: l.avatar, device: l.device, web: true }))];
+  return [...d.apps.filter((a) => !a.web).map((a) => ({ id: a.id, name: a.name, avatar: a.avatar, device: a.device, host: a.host, type: a.type })), ...d.logins.map((l) => ({ id: l.id, name: l.name, avatar: l.avatar, device: l.device, web: true }))];
 }
 
 /** The last thing said, on one line: yours after 你：, another's after its name. Yours: none tagged

@@ -313,7 +313,7 @@ func TestDevice(t *testing.T) {
 func TestConfirmations(t *testing.T) {
 	l := start(t)
 	// Invites need a public origin.
-	l.want(409, "agent", "POST", "/api/invites", api.NewInvite{Name: "pad"}, nil)
+	l.want(403, "agent", "POST", "/api/invites", api.NewInvite{Name: "pad"}, nil)
 	l.want(200, "socket", "PUT", "/api/public", api.SetPublic{Origin: "https://ir.example.com"}, nil)
 	var p api.Pending
 	l.want(202, "agent", "POST", "/api/invites", api.NewInvite{Name: "pad"}, &p)

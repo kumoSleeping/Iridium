@@ -990,6 +990,10 @@ export interface Machine {
    * Latency: the connection's last round trip (ms), by its heartbeat; 0 not known.
    */
   latency?: number /* int64 */;
+  /**
+   * Program: what connects it, as its hello says (ir join and its version).
+   */
+  program?: string;
 }
 /**
  * ExecAgent is an agent an executor has.

@@ -16,7 +16,7 @@ import (
 // ir machines, ir sh: the other machines connected here, and a command line at one, for an agent
 // (docs/api.md "命令"). ir sh waits for it, prints what it prints, and exits with its code.
 
-const shUsage = "usage: ir sh <machine>[:dir] [--cwd dir] [--timeout 2m] -- command …"
+const shUsage = "usage: ir sh <app>[:dir] [--cwd dir] [--timeout 2m] -- command …"
 
 // exitTimeout: ir sh's command ran out of time and was stopped (as timeout(1)).
 const exitTimeout = 124

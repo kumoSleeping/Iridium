@@ -315,7 +315,7 @@ func TestChannelInLocalMode(t *testing.T) {
 	r.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	h.h.ServeHTTP(w, r)
-	wantStatus(t, w, http.StatusConflict)
+	wantStatus(t, w, http.StatusUnprocessableEntity)
 }
 
 // A Bot found by its TOKEN, renamed or not; once revoked, its TOKEN's hash still names it.

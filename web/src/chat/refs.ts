@@ -10,11 +10,11 @@ import { titleOf } from "../ui";
  *  Iridium's own line. local: 本机 (the machine's terminal, or this page with no gate). */
 export type Source =
   | { kind: "you"; name: string; avatar?: string; device: Device; local?: boolean }
-  | { kind: "letter"; name: string; avatar?: string; channel: boolean; agent?: Agent; session?: string; workflow?: boolean; where?: string }
+  | { kind: "letter"; name: string; avatar?: string; channel: boolean; type?: string; agent?: Agent; session?: string; workflow?: boolean; where?: string }
   | { kind: "iridium" };
 
 /** What sourceOf needs to know of who sent a message: an app, a login of ir_web (web), or the host. */
-export type Who = { id: string; name: string; avatar?: string; device?: Device; host?: boolean; web?: boolean };
+export type Who = { id: string; name: string; avatar?: string; device?: Device; host?: boolean; web?: boolean; type?: string };
 
 const HOST: Who = { id: "local", name: "主机", host: true };
 
@@ -54,7 +54,7 @@ export function sourceOf(from: string | undefined, terminal: string | undefined,
   if (e?.web || e?.host) return yours(e);
   if (!e && (terminal === "local" || from === "主机" || from === "本机")) return yours(local);
   // A plugin writes "[name·sender]": the plugin's avatar, the whole tag as the name.
-  return { kind: "letter", name: from, avatar: e?.avatar, channel: true };
+  return { kind: "letter", name: from, avatar: e?.avatar, channel: true, ...(e?.type ? { type: e.type } : {}) };
 }
 
 /** A session as the sender of a letter, as the sidebar calls it (the user, 2026-11-06): its given

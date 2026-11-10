@@ -286,3 +286,12 @@
 - 剩下约 25 处 404 改 422。
 - QQ 桥重写成 Satori 客户端；dsh 插件改用新的 `shell` 字段。
 - 注意：没带旧 shell 字段的老执行端现在算命令行关，要用 `ir join --shell` 重新接一次。
+
+## 用词和小修
+
+- 头像角标按应用类型：电脑、Bot、插件、脚本各一个图标，aria-label 用类型名；未知类型、网页和用量页不加。
+- 主机显示为“主机 / Host”（原来是 Ir）；“机器”改成应用或电脑（`new.machine`、`new.gone`、`confirm.pairHint`、`confirm.pairOwner`），`term.this` 改“当前”。
+- CLI：`ir usage --by` 用 `app`，`terminal` 照收；`?app=`，`?terminal=` 照收；表头“应用”；凭据范围“只本人开的”；`ir join` 里“本机”改“这台电脑”；`ir sh <app>`；irhelp 去掉 machine/terminal 的说法。
+- 决定 11：更新配对的卡片展开后新旧并排（系统、程序、agent、上次在线；旧的在线时标红）。`api.Machine` 加 `program`（来自执行端 hello）。
+- 决定 8：passkey 流程过期回 403 `flow_expired`，Passkey 不对回 403 `auth_failed`（不再 401）；没有公网地址时邀请回 403 `not_public`；主机改资料回 422 `built_in`。gate.js、网页、测试跟着改。
+- 没做：服务端各处 “no machine …” 报错（别的 lane 的文件）；`ir machines` 命令名；注释里的旧说法。

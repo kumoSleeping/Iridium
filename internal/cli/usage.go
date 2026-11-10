@@ -14,12 +14,12 @@ import (
 )
 
 // usageDims are what ir usage --by may group by, in the order a row shows them.
-var usageDims = []string{"day", "terminal", "agent", "model"}
+var usageDims = []string{"day", "app", "agent", "model"}
 
-const usageHelp = `用法：ir usage [名字|me] [-d 天数] [--by day,terminal,agent,model] [--json]
-  默认最近 7 天、所有终端（只管自己的终端看自己的），按天、终端、agent、模型分；--by 只按其中几样合起来。`
+const usageHelp = `用法：ir usage [名字|me] [-d 天数] [--by day,app,agent,model] [--json]
+  默认最近 7 天、所有应用（不能管理的只看自己的），按天、应用、agent、模型分；--by 只按其中几样合起来。`
 
-// usageCmd is ir usage: the tokens used by day, terminal, agent and model (GET /api/usage).
+// usageCmd is ir usage: the tokens used by day, app, agent and model (GET /api/usage).
 func usageCmd(e adminEnv, args []string, stdout, stderr io.Writer) int {
 	q := url.Values{}
 	by := usageDims
@@ -58,6 +58,9 @@ func usageCmd(e adminEnv, args []string, stdout, stderr io.Writer) int {
 			by = nil
 			for _, d := range strings.Split(v, ",") {
 				d = strings.TrimSpace(d)
+				if d == "terminal" { // its name before 0.2
+					d = "app"
+				}
 				if d == "" {
 					continue
 				}
@@ -67,11 +70,11 @@ func usageCmd(e adminEnv, args []string, stdout, stderr io.Writer) int {
 				}
 				by = append(by, d)
 			}
-		case strings.HasPrefix(a, "-") || q.Has("terminal"):
+		case strings.HasPrefix(a, "-") || q.Has("app"):
 			fmt.Fprintln(stderr, usageHelp)
 			return 2
 		default:
-			q.Set("terminal", a)
+			q.Set("app", a)
 		}
 	}
 	path := "/api/usage"
@@ -96,7 +99,7 @@ func usageCmd(e adminEnv, args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// sortedDims puts by in a row's order (day, terminal, agent, model), without repeats.
+// sortedDims puts by in a row's order (day, app, agent, model), without repeats.
 func sortedDims(by []string) []string {
 	var out []string
 	for _, d := range usageDims {
@@ -107,7 +110,7 @@ func sortedDims(by []string) []string {
 	return out
 }
 
-// usageTerminalName is a row's terminal as a person reads it.
+// usageTerminalName is a row's app as a person reads it.
 func usageTerminalName(u api.Usage, id string) string {
 	if id == "" {
 		return "（不明）"
@@ -142,7 +145,7 @@ func printUsage(w io.Writer, u api.Usage, by []string) {
 			switch d {
 			case "day":
 				keys = append(keys, r.Day)
-			case "terminal":
+			case "app":
 				keys = append(keys, usageTerminalName(u, r.Terminal))
 			case "agent":
 				keys = append(keys, string(r.Agent))
@@ -174,7 +177,7 @@ func printUsage(w io.Writer, u api.Usage, by []string) {
 		}
 		return total(sums[i]) > total(sums[j])
 	})
-	head := map[string]string{"day": "日期", "terminal": "终端", "agent": "agent", "model": "模型"}
+	head := map[string]string{"day": "日期", "app": "应用", "agent": "agent", "model": "模型"}
 	rows := [][]string{{}}
 	for _, d := range by {
 		rows[0] = append(rows[0], head[d])

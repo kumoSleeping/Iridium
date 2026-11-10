@@ -78,7 +78,7 @@ function Face({ who }: { who: You | From }) {
         {badge}
       </span>
     );
-  return <Avatar src={who.avatar} name={who.name} size={FACE} channel badgeSize={BADGE} />;
+  return <Avatar src={who.avatar} name={who.name} size={FACE} type={who.type} badgeSize={BADGE} />;
 }
 
 /** One message of the user's side, QQ-like: the face beside it, the name above, yours on the right.

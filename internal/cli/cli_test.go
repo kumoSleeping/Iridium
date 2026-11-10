@@ -340,7 +340,7 @@ func TestAgentCommands(t *testing.T) {
 		t.Errorf("send to a login --wait: %+v", r)
 	}
 	// A place at an app not there; the host's by its name.
-	if r := ir("new", "claude", "mac:~/dir", "x"); r.code != 1 || !strings.Contains(r.err, "no machine mac") {
+	if r := ir("new", "claude", "mac:~/dir", "x"); r.code != 1 || !strings.Contains(r.err, "no computer mac") {
 		t.Errorf("place at mac: %+v", r)
 	}
 	if r := ir("new", "claude", "host:"+work, ""); r.code != 0 {
