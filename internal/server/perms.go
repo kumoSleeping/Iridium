@@ -350,3 +350,16 @@ func (s *Server) remoteScope(c caller, ref, path string) error {
 	}
 	return &access.Denied{Reason: ref + ":" + path + " is out of this one's scope"}
 }
+
+// LoginSees says whether login (a login of ir_web by its ID, or the host) may see session id:
+// Web Push sends a session's notices to those only.
+func (s *Server) LoginSees(login, id string) bool {
+	if login == "" || login == gate.HostID {
+		return true
+	}
+	st, err := s.m.State(id)
+	if err != nil {
+		return false
+	}
+	return s.sees(s.permsFor(caller{Identity: gate.Identity{App: gate.WebApp, Login: login}}), st.Session)
+}

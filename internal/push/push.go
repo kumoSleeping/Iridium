@@ -57,6 +57,9 @@ type Options struct {
 	Logf      func(string, ...any)
 	// Mask, if set, takes the credentials' values out of what is pushed (plan "凭据").
 	Mask func(string) string
+	// Sees, if set, says whether a login (a subscription's owner) may see a session: a session's
+	// notices go only to the browsers of the logins that may (draft 二「推送」).
+	Sees func(login, session string) bool
 }
 
 type Service struct {
@@ -407,6 +410,9 @@ func (s *Service) Send(ctx context.Context, terminal string, msg api.PushMessage
 	n := 0
 	for _, sub := range subs {
 		if terminal != "" && sub.Terminal != terminal {
+			continue
+		}
+		if msg.Session != "" && s.o.Sees != nil && !s.o.Sees(sub.Terminal, msg.Session) {
 			continue
 		}
 		code, err := s.post(ctx, sub, body)
