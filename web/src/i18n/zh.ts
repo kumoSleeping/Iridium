@@ -62,6 +62,7 @@ export const zh = {
   "menu.copyId": "复制会话 ID",
   "menu.stop": "停掉 agent",
   "menu.bringBot": "把 {name} 切到此会话",
+  "menu.botChatless": "{name}：尚无对话",
   "color.red": "红色",
   "color.orange": "橙色",
   "color.yellow": "黄色",

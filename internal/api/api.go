@@ -142,7 +142,10 @@ type LastSaid struct {
 	Role string `json:"role"` // user | assistant
 	Text string `json:"text"`
 	From string `json:"from,omitempty"` // the user message's source, as Iridium wrote it
-	At   int64  `json:"at,omitempty"`
+	// FromTerminal: the ID of the app or login that sent it, where the transcript says (not Codex's
+	// or pi's glance): the page tells it by this, a name being unique only in its scope.
+	FromTerminal string `json:"fromTerminal,omitempty"`
+	At           int64  `json:"at,omitempty"`
 }
 
 // SessionState is the carried state "session:<id>": the open session.

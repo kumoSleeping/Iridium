@@ -367,6 +367,7 @@ func TestPublicOrigin(t *testing.T) {
 	}
 	firstState(t, stream)
 	l.want(403, "agent", "PUT", "/api/public", api.SetPublic{Origin: "https://ir.example.com"}, nil)
+	l.want(403, "web", "PUT", "/api/public", api.SetPublic{Origin: "https://ir.example.com"}, nil)
 	l.want(400, "socket", "PUT", "/api/public", api.SetPublic{Origin: "http://ir.example.com"}, nil)
 	var ps api.PublicState
 	l.want(200, "socket", "PUT", "/api/public", api.SetPublic{Origin: "https://ir.example.com"}, &ps)

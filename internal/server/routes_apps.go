@@ -46,7 +46,14 @@ func (s *Server) appRoutes(mux *http.ServeMux) {
 	})
 	mux.HandleFunc("GET /api/usage", s.usage) // routes_usage.go
 	mux.HandleFunc("GET /api/public", s.manage(s.publicState))
-	mux.HandleFunc("PUT /api/public", s.panelOnly(s.setPublic))
+	// Opening or closing ir_web: a person's ir at the host only (decision 3), never a login of it.
+	mux.HandleFunc("PUT /api/public", func(w http.ResponseWriter, r *http.Request) {
+		if !callerOf(r).machine() {
+			forbid(w, errors.New("only the host's ir sets public.origin"))
+			return
+		}
+		s.setPublic(w, r)
+	})
 }
 
 // errManageApps answers an app that would manage the others.
@@ -93,6 +100,10 @@ func (s *Server) apps(w http.ResponseWriter, r *http.Request) {
 	host, _ := s.gate().Endpoint(gate.HostID)
 	out.Apps = append(out.Apps, s.appOf(host))
 	follows, _ := s.st.Follows()
+	var chats map[string]bool
+	if s.Chat != nil {
+		chats = s.Chat.Bots()
+	}
 	web := api.App{ID: gate.WebApp, Name: gate.WebApp, Web: true, Rules: access.Default(), Device: api.DeviceComputer}
 	var apps []api.App
 	for _, e := range a.Endpoints {
@@ -107,6 +118,9 @@ func (s *Server) apps(w http.ResponseWriter, r *http.Request) {
 		}
 		app := s.appOf(e)
 		app.Follows = follows[e.ID]
+		if on, ok := chats[e.ID]; ok {
+			app.Chat = map[bool]api.AppChat{false: api.AppChatIdle, true: api.AppChatOn}[on]
+		}
 		apps = append(apps, app)
 	}
 	if s.gate().Public() || web.Logins > 0 {

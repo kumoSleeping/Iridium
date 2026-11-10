@@ -48,7 +48,19 @@ type App struct {
 	// Follows: the logins of ir_web (IDs) it follows: what a session asks while no chat points at
 	// it goes to the apps that follow the login that began its turn, and to no other. Until S4.
 	Follows []string `json:"follows,omitempty"`
+	// Chat: its chat layer in Iridium, until S4 removes it: "" none (a session's menu offers nothing),
+	// "idle" its event stream open but no chat yet (offered, greyed), "on" a chat a session's menu
+	// may bring to that session.
+	Chat AppChat `json:"chat,omitempty"`
 }
+
+// AppChat is App.Chat.
+type AppChat string
+
+const (
+	AppChatIdle AppChat = "idle"
+	AppChatOn   AppChat = "on"
+)
 
 // Login is a login of an app as listed: for now ir_web's, a browser with a passkey. No secrets.
 type Login struct {

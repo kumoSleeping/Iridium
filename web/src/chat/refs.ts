@@ -46,7 +46,9 @@ export function sourceOf(from: string | undefined, terminal: string | undefined,
   const local = terminals.find((x) => x.host) ?? (me.host ? me : HOST);
   if (!from) return yours(local);
   if ((terminal ?? "") === me.id) return yours(me);
-  const e = terminals.find((x) => x.id === terminal) ?? terminals.find((x) => x.name.toLowerCase() === from.toLowerCase());
+  // By ID; by name only without one (a name is unique only in its scope: ir_web's logins first).
+  const named = terminals.filter((x) => x.name.toLowerCase() === from.toLowerCase());
+  const e = terminal ? terminals.find((x) => x.id === terminal) : (named.find((x) => x.web || x.host) ?? named[0]);
   if (e?.id === me.id) return yours(me);
   // Another login of ir_web, or the host (its page with no gate, a person's ir): your words too.
   if (e?.web || e?.host) return yours(e);

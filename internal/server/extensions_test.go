@@ -446,7 +446,19 @@ func TestBringBot(t *testing.T) {
 	var b api.NewSessionReply
 	l.want(200, "web", "POST", "/api/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "first"}, &b)
 	l.waitReply("web", b.ID, "ok: first")
-	// No chat yet, not connected: none to bring.
+	// No chat yet, not connected: no chat in the list, none to bring.
+	chatOf := func() api.AppChat {
+		var as api.Apps
+		l.want(200, "web", "GET", "/api/apps", nil, &as)
+		if i := slices.IndexFunc(as.Apps, func(x api.App) bool { return x.ID == botID }); i >= 0 {
+			return as.Apps[i].Chat
+		}
+		t.Fatal("not listed")
+		return ""
+	}
+	if c := chatOf(); c != "" {
+		t.Fatalf("a chat without one: %q", c)
+	}
 	l.want(404, "web", "POST", "/api/sessions/"+b.ID+"/bot", api.BringBot{Bot: botID}, nil)
 
 	// Its event stream open, still no chat: a bot with none to bring, and the pages are told.
@@ -458,10 +470,16 @@ func TestBringBot(t *testing.T) {
 		t.Fatalf("events: %v %v", resp, err)
 	}
 	waitTill(t, func() bool { return changed.Load() == 1 })
+	if c := chatOf(); c != api.AppChatIdle {
+		t.Fatalf("connected, no chat: %q", c)
+	}
 	l.want(404, "web", "POST", "/api/sessions/"+b.ID+"/bot", api.BringBot{Bot: botID}, nil)
 
 	var a api.ChatInputReply
 	l.want(200, bot, "POST", "/api/chat/qq:1/input", api.ChatInput{Text: "/new claude"}, &a)
+	if c := chatOf(); c != api.AppChatOn {
+		t.Fatalf("a chat, not listed: %q", c)
+	}
 	if n := changed.Load(); n != 2 {
 		t.Fatalf("told %d times, want 2", n)
 	}
@@ -477,6 +495,9 @@ func TestBringBot(t *testing.T) {
 	cancel()
 	resp.Body.Close()
 	waitTill(t, func() bool { return changed.Load() == 3 })
+	if c := chatOf(); c != api.AppChatOn {
+		t.Fatalf("a chat, gone: %q", c)
+	}
 	last, _ := srv.st.OutboxLast(botID)
 	var r api.BotReply
 	l.want(200, "web", "POST", "/api/sessions/"+b.ID+"/bot", api.BringBot{Bot: botID}, &r)

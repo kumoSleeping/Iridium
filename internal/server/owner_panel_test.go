@@ -98,7 +98,7 @@ func TestOwnerFromPanels(t *testing.T) {
 	if code := as(t, guest, l.s.answerConfirm, "POST", p.Confirm.ID, api.ConfirmAnswer{Allow: true}, nil); code != 403 {
 		t.Fatalf("a login without Claude allowed Claude: %d", code)
 	}
-	if code := l.do("web", "POST", "/api/confirms/"+p.Confirm.ID, api.ConfirmAnswer{Allow: true}, nil); code < 400 {
+	if code := as(t, page, l.s.answerConfirm, "POST", p.Confirm.ID, api.ConfirmAnswer{Allow: true}, nil); code != 403 {
 		t.Fatalf("the page without a login allowed: %d", code)
 	}
 	var st api.ConfirmState

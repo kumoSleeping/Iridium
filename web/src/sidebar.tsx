@@ -1238,7 +1238,7 @@ function SessionMenu({ s, at, close, rename, detach }: { s: Session; at: { x: nu
 export function BotItems({ s, i }: { s: Session; i: number }) {
   // Claude's sessions only for a Bot that may use Claude (access.Agent).
   const claude = !s.agent || s.agent === "claude";
-  const bots = (useApps().data?.apps ?? []).filter((x) => !x.host && !x.web && !s.bots?.includes(x.id) && (!claude || x.rules.claudeOwner));
+  const bots = (useApps().data?.apps ?? []).filter((x) => x.chat && !s.bots?.includes(x.id) && (!claude || x.rules.claudeOwner));
   if (s.archived || !bots.length) return null;
   const bring = (b: App) =>
     void api.bringBot(s.id, b.id).then(
@@ -1248,9 +1248,9 @@ export function BotItems({ s, i }: { s: Session; i: number }) {
   return (
     <div style={{ "--i": i } as CSSProperties} className="mt-1.5 flex flex-col border-t border-edge pt-1.5">
       {bots.map((b) => (
-        <Menu.Item key={b.id} onClick={() => bring(b)} className="flex h-8 cursor-default items-center gap-2.5 rounded-md px-2.5 text-base outline-none select-none data-highlighted:bg-fill data-disabled:opacity-40 pointer-coarse:h-11">
+        <Menu.Item key={b.id} disabled={b.chat !== "on"} onClick={() => bring(b)} className="flex h-8 cursor-default items-center gap-2.5 rounded-md px-2.5 text-base outline-none select-none data-highlighted:bg-fill data-disabled:opacity-40 pointer-coarse:h-11">
           <Avatar src={b.avatar} name={b.name || "Bot"} size={15} badge={Bot} badgeSize={9} />
-          <span className="truncate">{t("menu.bringBot", { name: b.name || "Bot" })}</span>
+          <span className="truncate">{t(b.chat === "on" ? "menu.bringBot" : "menu.botChatless", { name: b.name || "Bot" })}</span>
         </Menu.Item>
       ))}
     </div>

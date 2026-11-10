@@ -181,6 +181,11 @@ export interface LastSaid {
   role: string; // user | assistant
   text: string;
   from?: string; // the user message's source, as Iridium wrote it
+  /**
+   * FromTerminal: the ID of the app or login that sent it, where the transcript says (not Codex's
+   * or pi's glance): the page tells it by this, a name being unique only in its scope.
+   */
+  fromTerminal?: string;
   at?: number /* int64 */;
 }
 /**
@@ -707,7 +712,19 @@ export interface App {
    * it goes to the apps that follow the login that began its turn, and to no other. Until S4.
    */
   follows?: string[];
+  /**
+   * Chat: its chat layer in Iridium, until S4 removes it: "" none (a session's menu offers nothing),
+   * "idle" its event stream open but no chat yet (offered, greyed), "on" a chat a session's menu
+   * may bring to that session.
+   */
+  chat?: AppChat;
 }
+/**
+ * AppChat is App.Chat.
+ */
+export const AppChatIdle = "idle";
+export const AppChatOn = "on";
+export type AppChat = typeof AppChatIdle | typeof AppChatOn;
 /**
  * Login is a login of an app as listed: for now ir_web's, a browser with a passkey. No secrets.
  */

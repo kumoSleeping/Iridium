@@ -369,7 +369,7 @@ func (f *File) LastSaid() (*api.LastSaid, error) {
 	text := heading.ReplaceAllString(WithoutNameLines(b.Text), "")
 	text = strings.NewReplacer("**", "", "`", "").Replace(text)
 	text = link.ReplaceAllString(text, "$1")
-	return &api.LastSaid{Role: string(b.Kind), Text: cut(oneLine(text), LastLen), From: b.From, At: b.Time}, nil
+	return &api.LastSaid{Role: string(b.Kind), Text: cut(oneLine(text), LastLen), From: b.From, FromTerminal: b.FromTerminal, At: b.Time}, nil
 }
 
 // Title is the title the agent's last title line gave (named.go); else, a dsh session's, the

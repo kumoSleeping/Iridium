@@ -99,13 +99,20 @@ export function useWhoList(): Who[] {
 export function useSaidLine() {
   const terminals = useWhoList();
   const sessions = useList() ?? [];
-  const yours = (from?: string) => !from || from === "主机" || from === "本机" || terminals.some((x) => x.name === from && (x.web || x.host));
+  // By the sender's ID where the transcript has it: a name is unique only among the apps, or among
+  // ir_web's logins.
+  const yours = (l: LastSaid) => {
+    const e = l.fromTerminal && terminals.find((x) => x.id === l.fromTerminal);
+    if (e) return !!(e.web || e.host);
+    if (l.fromTerminal === "local") return true;
+    return !l.from || l.from === "主机" || l.from === "本机" || (!l.fromTerminal && terminals.some((x) => x.name === l.from && (x.web || x.host)));
+  };
   const by = (l: LastSaid, of?: Pick<Session, "subagent" | "parent" | "workflow">) => {
     if ((!l.from && of?.subagent) || /^(?:ir|session):/.test(l.from ?? "")) {
       const src = sourceOf(l.from, undefined, LOCAL_ME, terminals, sessions, [], of);
       return src.kind === "letter" && src.name ? `${src.name}: ` : "";
     }
-    return yours(l.from) ? t("jump.you") : `${l.from}: `;
+    return yours(l) ? t("jump.you") : `${l.from}: `;
   };
   return (l?: LastSaid, of?: Pick<Session, "subagent" | "parent" | "workflow">) => l && `${l.role === "user" ? by(l, of) : ""}${l.text}`;
 }

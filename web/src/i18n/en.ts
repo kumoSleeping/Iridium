@@ -62,6 +62,7 @@ export const en: Dict = {
   "menu.copyId": "Copy session ID",
   "menu.stop": "Stop the agent",
   "menu.bringBot": "Move {name} here",
+  "menu.botChatless": "{name}: no chat yet",
   "color.red": "Red",
   "color.orange": "Orange",
   "color.yellow": "Yellow",
