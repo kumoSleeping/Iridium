@@ -293,8 +293,8 @@ export const api = {
   extension: (id: string, action: "install" | "bind" | "start" | "stop" | "pair") => write<Extension>("POST", `/api/extensions/${enc(id)}/${action}`),
   unbind: (id: string) => write<Extension>("DELETE", `/api/extensions/${enc(id)}/bind`),
   removeExtension: (id: string) => write<Extension>("DELETE", `/api/extensions/${enc(id)}`),
-  /** GET /api/usage: the last days' tokens by day, terminal, agent and model; terminal: one only; by hour: the last 24 hours'. */
-  usage: (days: number, terminal?: string, by?: "hour") => get<Usage>(`/api/usage?days=${days}${terminal ? `&terminal=${enc(terminal)}` : ""}${by ? `&by=${by}` : ""}`),
+  /** GET /api/usage: the last days' tokens by day, terminal, agent and model; terminal: one only; by hour: the last 24 hours'; by weekhour: by weekday and hour. */
+  usage: (days: number, terminal?: string, by?: "hour" | "weekhour") => get<Usage>(`/api/usage?days=${days}${terminal ? `&terminal=${enc(terminal)}` : ""}${by ? `&by=${by}` : ""}`),
   confirms: () => get<Confirms>("/api/confirms"),
   /** extra: a secret-set's value, a secret-use's "this session". */
   answerConfirm: (id: string, allow: boolean, extra?: Omit<ConfirmAnswer, "allow">) => write<ConfirmReply>("POST", `/api/confirms/${enc(id)}`, { allow, ...extra } satisfies ConfirmAnswer),

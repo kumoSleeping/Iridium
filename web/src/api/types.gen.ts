@@ -1966,6 +1966,9 @@ export interface ApplyUpdate {
  */
 export interface Usage {
   days: string[]; // "2006-01-02", oldest first, today last; by hour "2006-01-02T15"
+  /**
+   * Rows: by day (Days' keys); by=weekhour, by weekday and hour, "1T14" (Monday 14:00; 7 Sunday).
+   */
   rows: UsageRow[];
   /**
    * Terminals: the rows' terminals still there, by ID, to name them (a removed one is not).
@@ -1987,7 +1990,8 @@ export interface UsageRow {
   cacheRead: number /* int64 */;
   cacheWrite: number /* int64 */;
   /**
-   * CostUSD: what the agent said the turns cost (Claude's); 0 when it says nothing.
+   * CostUSD: what the agent said the turns cost (Claude's); a turn it gave none (or 0) priced at
+   * its model's maker's list price (models.dev); 0 when neither is known.
    */
   costUsd?: number /* float64 */;
 }

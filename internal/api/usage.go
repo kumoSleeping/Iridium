@@ -4,7 +4,8 @@ package api
 // per local day, terminal, agent and model that used any. A terminal that does not manage sees
 // only its own.
 type Usage struct {
-	Days []string   `json:"days"` // "2006-01-02", oldest first, today last; by hour "2006-01-02T15"
+	Days []string `json:"days"` // "2006-01-02", oldest first, today last; by hour "2006-01-02T15"
+	// Rows: by day (Days' keys); by=weekhour, by weekday and hour, "1T14" (Monday 14:00; 7 Sunday).
 	Rows []UsageRow `json:"rows"`
 	// Terminals: the rows' terminals still there, by ID, to name them (a removed one is not).
 	Terminals map[string]UsageTerminal `json:"terminals"`
@@ -22,7 +23,8 @@ type UsageRow struct {
 	Output     int64  `json:"output"`
 	CacheRead  int64  `json:"cacheRead"`
 	CacheWrite int64  `json:"cacheWrite"`
-	// CostUSD: what the agent said the turns cost (Claude's); 0 when it says nothing.
+	// CostUSD: what the agent said the turns cost (Claude's); a turn it gave none (or 0) priced at
+	// its model's maker's list price (models.dev); 0 when neither is known.
 	CostUSD float64 `json:"costUsd,omitempty"`
 }
 

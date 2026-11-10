@@ -1,10 +1,14 @@
 package server
 
 import (
+	"fmt"
+	"math"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/kumoSleeping/iridium/internal/api"
+	"github.com/kumoSleeping/iridium/internal/pricing"
 	"github.com/kumoSleeping/iridium/internal/store"
 )
 
@@ -64,6 +68,21 @@ func TestUsage(t *testing.T) {
 	if len(hours.Rows) != 2 || hours.Rows[0].Day != hours.Days[23] {
 		t.Fatalf("hours' rows: %+v", hours.Rows)
 	}
+	// By weekday and hour: today's rows at today's weekday and this hour.
+	var heat api.Usage
+	l.want(200, "socket", "GET", "/api/usage?by=weekhour", nil, &heat)
+	wd := int(now.Weekday())
+	if wd == 0 {
+		wd = 7
+	}
+	if len(heat.Days) != 7 || len(heat.Rows) != 3 {
+		t.Fatalf("heat: %+v", heat)
+	}
+	for _, r := range heat.Rows {
+		if r.Terminal == "local" && r.Day != fmt.Sprintf("%dT%02d", wd, now.Hour()) {
+			t.Fatalf("heat's row: %+v", r)
+		}
+	}
 
 	// A channel: its own, asked or not; not 本机's.
 	var own api.Usage
@@ -78,4 +97,37 @@ func TestUsage(t *testing.T) {
 	l.want(403, bot, "GET", "/api/usage?terminal=local", nil, nil)
 	l.want(404, "socket", "GET", "/api/usage?terminal=nobody", nil, nil)
 	l.want(400, "socket", "GET", "/api/usage?days=0", nil, nil)
+}
+
+// A row the agent gave no cost (or 0) is priced at its maker's list price; one it priced keeps it.
+func TestUsagePriced(t *testing.T) {
+	l := start(t)
+	f, err := os.Open("../pricing/testdata/api.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if l.s.Prices, err = pricing.Read(f); err != nil {
+		t.Fatal(err)
+	}
+	zero, own := 0.0, 0.5
+	now := time.Now().UnixMilli()
+	for _, u := range []store.Usage{
+		{At: now, Terminal: "local", Session: "a", Agent: "dsh", Model: "mistral/deepseek-v4-1-flash-1017", Input: 1_000_000, CacheRead: 10_000_000},
+		{At: now, Terminal: "local", Session: "b", Agent: "pi", Model: "opencode-go/deepseek-flash", Output: 1_000_000, CostUSD: &zero},
+		{At: now, Terminal: "local", Session: "c", Agent: "claude", Model: "claude-opus-5-5", Input: 1_000_000, CostUSD: &own},
+		{At: now, Terminal: "local", Session: "d", Agent: "codex", Model: "who-knows", Input: 1_000_000},
+	} {
+		if err := l.s.st.AddUsage(u); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var u api.Usage
+	l.want(200, "socket", "GET", "/api/usage", nil, &u)
+	want := map[string]float64{"mistral/deepseek-v4-1-flash-1017": 0.15 + 0.03, "opencode-go/deepseek-flash": 0.6, "claude-opus-5-5": 0.5, "who-knows": 0}
+	for _, r := range u.Rows {
+		if math.Abs(r.CostUSD-want[r.Model]) > 1e-9 {
+			t.Errorf("%s: $%v, want $%v", r.Model, r.CostUSD, want[r.Model])
+		}
+	}
 }

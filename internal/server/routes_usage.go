@@ -2,12 +2,14 @@ package server
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/gate"
+	"github.com/kumoSleeping/iridium/internal/store"
 )
 
 // maxUsageDays is the most days GET /api/usage gives at once.
@@ -15,7 +17,9 @@ const maxUsageDays = 366
 
 // usage is GET /api/usage?days=N&terminal=<ID, name or "me">: the last N days' (7 by default)
 // usage by day, terminal, agent and model; by=hour: the last 24 hours' by hour, its days
-// "2006-01-02T15" (the 1 天 view, the user, 2026-11-08). Without a terminal it is everyone's for those who
+// "2006-01-02T15" (the 1 天 view, the user, 2026-11-08); by=weekhour: the N days' by weekday and
+// hour, the rows' days "1T14" (Monday, 14:00; 7 is Sunday; the heat map, the user, 2026-11-10).
+// A row the agent gave no cost is priced at its maker's list price (s.Prices; the user, 2026-11-10). Without a terminal it is everyone's for those who
 // manage terminals (panels, 本机), a channel's own for a channel; another's only for those who
 // manage.
 func (s *Server) usage(w http.ResponseWriter, r *http.Request) {
@@ -29,7 +33,8 @@ func (s *Server) usage(w http.ResponseWriter, r *http.Request) {
 		}
 		days = n
 	}
-	hourly := r.URL.Query().Get("by") == "hour"
+	by := r.URL.Query().Get("by")
+	hourly := by == "hour"
 	var only []string
 	switch ref := r.URL.Query().Get("terminal"); {
 	case ref == "me":
@@ -56,7 +61,21 @@ func (s *Server) usage(w http.ResponseWriter, r *http.Request) {
 		h := now.Hour()
 		n, step, format = 24, func(i int) time.Time { return time.Date(y, m, d, h-23+i, 0, 0, 0, time.Local) }, hourKey
 	}
-	got, err := s.st.UsageBy(step(0).UnixMilli(), func(t time.Time) string { return t.Format(format) }, only...)
+	bucket := func(t time.Time) string { return t.Format(format) }
+	if by == "weekhour" && !hourly {
+		bucket = func(t time.Time) string {
+			wd := int(t.Weekday())
+			if wd == 0 {
+				wd = 7
+			}
+			return fmt.Sprintf("%dT%02d", wd, t.Hour())
+		}
+	}
+	var price store.Price
+	if s.Prices != nil {
+		price = s.Prices.Cost
+	}
+	got, err := s.st.UsageBy(step(0).UnixMilli(), bucket, price, only...)
 	if err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
