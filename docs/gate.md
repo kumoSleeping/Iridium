@@ -105,5 +105,5 @@ type Store interface {
 
 ## 还没做
 
-- 只听本机时主机没有可存的资料（`ServeProfile` 回 409 `local`）。
+- 只听本机时主机没有可存的资料（`ServeProfile` 回 422 `built_in`）。
 - 门内部仍是一张 `Endpoint` 表（`panel`/`channel`），等别的应用的登录多起来再拆。

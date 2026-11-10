@@ -94,8 +94,13 @@ func TestUsage(t *testing.T) {
 	if len(own.Rows) != 1 {
 		t.Fatalf("me: %+v", own.Rows)
 	}
+	l.want(200, bot, "GET", "/api/usage?app=me", nil, &own) // terminal= is its name before 0.2
+	if len(own.Rows) != 1 {
+		t.Fatalf("app=me: %+v", own.Rows)
+	}
+	l.want(403, bot, "GET", "/api/usage?app=local", nil, nil)
 	l.want(403, bot, "GET", "/api/usage?terminal=local", nil, nil)
-	l.want(404, "socket", "GET", "/api/usage?terminal=nobody", nil, nil)
+	l.want(404, "socket", "GET", "/api/usage?app=nobody", nil, nil)
 	l.want(400, "socket", "GET", "/api/usage?days=0", nil, nil)
 }
 

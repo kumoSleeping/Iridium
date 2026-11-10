@@ -29,7 +29,7 @@ func (g *Gate) ServeProfile(w http.ResponseWriter, r *http.Request, id string) {
 		writeJSON(w, http.StatusMethodNotAllowed, apiError{"method_not_allowed"})
 		return
 	case id == "" && caller.Host():
-		writeJSON(w, http.StatusConflict, apiError{"local"})
+		writeJSON(w, http.StatusUnprocessableEntity, apiError{"built_in"})
 		return
 	case id == "":
 		id = caller.ID()
@@ -66,7 +66,7 @@ func (g *Gate) ServeProfile(w http.ResponseWriter, r *http.Request, id string) {
 	case errors.Is(err, ErrNotFound):
 		writeJSON(w, http.StatusNotFound, apiError{"not_found"})
 	case errors.Is(err, ErrLocal):
-		writeJSON(w, http.StatusConflict, apiError{"local"})
+		writeJSON(w, http.StatusUnprocessableEntity, apiError{"built_in"})
 	default:
 		writeJSON(w, http.StatusInternalServerError, apiError{"internal"})
 	}

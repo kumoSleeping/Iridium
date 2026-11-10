@@ -401,7 +401,7 @@ func TestRegisterAndLogin(t *testing.T) {
 	if _, code := h.whoami(); code != http.StatusUnauthorized {
 		t.Fatalf("revoked session still works: %d", code)
 	}
-	wantStatus(t, h.login(phone, nil), http.StatusUnauthorized)
+	wantStatus(t, h.login(phone, nil), http.StatusForbidden)
 
 	// The last passkey stays.
 	if err := h.g.Revoke(mac); err != ErrLastPasskey {
@@ -418,7 +418,7 @@ func TestCounterRollback(t *testing.T) {
 	wantStatus(t, h.login(a, nil), http.StatusOK) // counter 1
 	wantStatus(t, h.login(a, nil), http.StatusOK) // counter 2
 	a.creds[0].signed = 0                         // a clone replays an older counter (next use signs 1)
-	wantStatus(t, h.login(a, nil), http.StatusUnauthorized)
+	wantStatus(t, h.login(a, nil), http.StatusForbidden)
 	a.creds[0].signed = 5
 	wantStatus(t, h.login(a, nil), http.StatusOK) // the stored counter was not lowered
 }
@@ -433,24 +433,24 @@ func TestLoginRejectsForgeries(t *testing.T) {
 	stranger := &authenticator{t: t, origin: testOrigin}
 	other := newHarness(t, testOrigin)
 	wantStatus(t, other.join(stranger, other.setupToken(), ptr("xy")), http.StatusOK)
-	wantStatus(t, h.login(stranger, nil), http.StatusUnauthorized)
+	wantStatus(t, h.login(stranger, nil), http.StatusForbidden)
 
 	// A phishing origin.
 	phish := &authenticator{t: t, origin: "https://ir.example.com.evil.test", creds: a.creds}
-	wantStatus(t, h.login(phish, nil), http.StatusUnauthorized)
+	wantStatus(t, h.login(phish, nil), http.StatusForbidden)
 
 	// A flow is single use.
 	w := h.do(req{method: "POST", path: "/_ir/api/login/options", body: map[string]any{}})
 	c := decode[ceremonyReply](t, w)
 	resp := a.get(c.Options, nil)
 	wantStatus(t, h.do(req{method: "POST", path: "/_ir/api/login/verify", body: verifyRequest{Flow: c.Flow, Response: resp}}), http.StatusOK)
-	wantStatus(t, h.do(req{method: "POST", path: "/_ir/api/login/verify", body: verifyRequest{Flow: c.Flow, Response: resp}}), http.StatusUnauthorized)
+	wantStatus(t, h.do(req{method: "POST", path: "/_ir/api/login/verify", body: verifyRequest{Flow: c.Flow, Response: resp}}), http.StatusForbidden)
 
 	// Flows expire.
 	w = h.do(req{method: "POST", path: "/_ir/api/login/options", body: map[string]any{}})
 	c = decode[ceremonyReply](t, w)
 	h.clock.Advance(flowTTL)
-	wantStatus(t, h.do(req{method: "POST", path: "/_ir/api/login/verify", body: verifyRequest{Flow: c.Flow, Response: a.get(c.Options, nil)}}), http.StatusUnauthorized)
+	wantStatus(t, h.do(req{method: "POST", path: "/_ir/api/login/verify", body: verifyRequest{Flow: c.Flow, Response: a.get(c.Options, nil)}}), http.StatusForbidden)
 }
 
 func TestInviteExpiry(t *testing.T) {

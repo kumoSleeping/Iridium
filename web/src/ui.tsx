@@ -2,7 +2,7 @@
 // popover shell, icon keys, agent logos with their status lamp, terminal avatars, switches.
 import { Popover } from "@base-ui/react/popover";
 import { Tooltip } from "@base-ui/react/tooltip";
-import { Bot, type LucideIcon } from "lucide-react";
+import { Bot, Monitor, Puzzle, ScrollText, type LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ComponentProps, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import type { Agent, Status } from "./api/types.gen";
 import { t } from "./i18n";
@@ -344,12 +344,23 @@ export function LogoLamp({ agent, status, size = 16, ir }: { agent: Agent; statu
   );
 }
 
-/** A terminal's avatar, or its initial on a neutral disc; channel-type terminals (plugins: bots)
- *  carry a small bot on the corner, or badge another mark (a device: Monitor, Smartphone). */
-export function Avatar({ src, name, size = 20, channel, badge, badgeSize, badgeLabel, className }: { src?: string; name?: string; size?: number; channel?: boolean; badge?: LucideIcon; badgeSize?: number; badgeLabel?: string; className?: string }) {
+/** The mark an app's type puts on its avatar's corner, and the type's name; none for a type not
+ *  known (types are display only). */
+const TYPE_MARKS: Record<string, [LucideIcon, Parameters<typeof t>[0]]> = {
+  computer: [Monitor, "apps.type.computer"],
+  bot: [Bot, "apps.type.bot"],
+  plugin: [Puzzle, "apps.type.plugin"],
+  script: [ScrollText, "apps.type.script"],
+};
+export const typeMark = (type?: string) => (type ? TYPE_MARKS[type] : undefined);
+
+/** An app's or login's avatar, or its initial on a neutral disc; an app carries its type's mark on
+ *  the corner (type), or another mark (badge: a device, Monitor, Smartphone). */
+export function Avatar({ src, name, size = 20, type, badge, badgeSize, badgeLabel, className }: { src?: string; name?: string; size?: number; type?: string; badge?: LucideIcon; badgeSize?: number; badgeLabel?: string; className?: string }) {
   const [broken, setBroken] = useState<string | null>(null);
-  // A plugin is a bot: the same mark as on the session list (the user, 2026-11-08).
-  const mark = badge ?? (channel ? Bot : undefined);
+  const typed = badge ? undefined : typeMark(type);
+  const mark = badge ?? typed?.[0];
+  const label = badgeLabel ?? (typed && t(typed[1]));
   return (
     <span className={cn("relative inline-block shrink-0", className)} style={{ width: size, height: size }}>
       {src && broken !== src ? (
@@ -359,7 +370,7 @@ export function Avatar({ src, name, size = 20, channel, badge, badgeSize, badgeL
           {[...(name ?? "?")][0]?.toUpperCase()}
         </span>
       )}
-      {mark && <Badge icon={mark} size={badgeSize ?? Math.max(10, Math.round(size * 0.5))} label={badgeLabel ?? (mark === Bot ? "Bot" : undefined)} />}
+      {mark && <Badge icon={mark} size={badgeSize ?? Math.max(10, Math.round(size * 0.5))} label={label} />}
     </span>
   );
 }

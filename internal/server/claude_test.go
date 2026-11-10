@@ -39,7 +39,7 @@ func TestClaudeOnlyFromTheMachine(t *testing.T) {
 			t.Errorf("POST %s: %d", path, code)
 		}
 	}
-	l.want(409, "agent", "POST", "/api/invites", api.NewInvite{Claude: true}, nil) // no public origin
+	l.want(403, "agent", "POST", "/api/invites", api.NewInvite{Claude: true}, nil) // no public origin
 	l.want(403, "web", "POST", "/api/invites", api.NewInvite{Claude: true}, nil)
 	mine := l.newApp("mine", true)
 	if !access.HasClaude(mine.App.Rules) || mine.App.Rules.ClaudeOwner.By != "local" {

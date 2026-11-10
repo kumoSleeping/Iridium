@@ -24,6 +24,7 @@ const S = {
   tooMany: ['尝试太多次，请 15 分钟后再试', 'Too many attempts. Try again in 15 minutes.'],
   failed: ['出错了，请再试一次', 'Something went wrong. Try again.'],
   loginFailed: ['这个 Passkey 不认识', 'This passkey is not recognized'],
+  expired: ['已超时，请再试一次', 'Timed out. Try again.'],
   noPasskey: ['还没有注册 Passkey', 'No passkey registered yet'],
   refused: ['这台设备拒绝了，换个浏览器试试', 'This device refused. Try another browser.'],
   noStore: ['这台设备没有可用的 Passkey 存储：请设锁屏并开启密码管理器', 'No passkey storage on this device: set a screen lock and turn on a password manager'],
@@ -153,7 +154,7 @@ async function login() {
   status('');
   const v = await api('/_ir/api/login/verify', { flow: opt.data.flow, response: encodeCredential(cred) });
   if (v.status === 200) location.replace(nextUrl());
-  else status(v.status === 429 ? t('tooMany') : t('loginFailed'), true);
+  else status(v.status === 429 ? t('tooMany') : v.data.code === 'flow_expired' ? t('expired') : t('loginFailed'), true);
 }
 
 // --- join ---
@@ -216,7 +217,8 @@ async function join() {
   if (v.status === 200) {
     try { sessionStorage.removeItem(TOKEN_KEY); } catch { /* ignore */ }
     location.replace('/');
-  } else if (v.status === 403) badLink();
+  } else if (v.status === 403 && v.data.code === 'flow_expired') status(t('expired'), true);
+  else if (v.status === 403) badLink();
   else if (v.status === 409 && v.data.nameError) { nameNote(v.data.nameError); status(''); }
   else status(requestError(v), true);
 }

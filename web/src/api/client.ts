@@ -324,8 +324,8 @@ export const api = {
   /** GET /api/catalogue: the official apps and the commands that install them. */
   catalogue: () => get<CatalogueEntry[]>("/v1/internal/catalogue"),
 
-  /** GET /api/usage: the last days' tokens by day, terminal, agent and model; terminal: one only; by hour: the last 24 hours'; by weekhour: by weekday and hour. */
-  usage: (days: number, terminal?: string, by?: "hour" | "weekhour") => get<Usage>(`/v1/internal/usage?days=${days}${terminal ? `&terminal=${enc(terminal)}` : ""}${by ? `&by=${by}` : ""}`),
+  /** GET /api/usage: the last days' tokens by day, app, agent and model; terminal: one app only; by hour: the last 24 hours'; by weekhour: by weekday and hour. */
+  usage: (days: number, terminal?: string, by?: "hour" | "weekhour") => get<Usage>(`/v1/internal/usage?days=${days}${terminal ? `&app=${enc(terminal)}` : ""}${by ? `&by=${by}` : ""}`),
   confirms: () => get<Needs>("/v1/internal/needs"),
   /** extra: a secret-set's value, a secret-use's "this session". */
   answerConfirm: (id: string, allow: boolean, extra?: Omit<NeedAnswer, "allow">) => write<NeedReply>("POST", `/v1/internal/needs/${enc(id)}`, { allow, ...extra } satisfies NeedAnswer),

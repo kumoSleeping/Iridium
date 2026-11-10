@@ -9,15 +9,15 @@ import { KeyRound, Link2, LockKeyhole, Terminal as TermIcon } from "lucide-react
 import { ConfirmIcon, confirmName, confirmTitle, isPair } from "./confirmname";
 import { useRef, useState, type ReactNode } from "react";
 import { api } from "./api/client";
-import type { Need, Me, Perms } from "./api/types.gen";
+import type { ExecAgent, Machine, Need, Me, Perms } from "./api/types.gen";
 import { CardDetails, CardFrame, CardHead, Facts, MainKey, SecondKey } from "./card";
 import { useMe } from "./data";
 import { t, useLang } from "./i18n";
 import { openChat } from "./route";
 import { showSecret } from "./secrets";
-import { useList } from "./store";
+import { useList, useMachines } from "./store";
 import { errText, toast } from "./toast";
-import { Switch, titleOf } from "./ui";
+import { ago, Switch, titleOf } from "./ui";
 
 export { confirmTitle, confirmName, ConfirmIcon };
 
@@ -294,6 +294,7 @@ function PairCard({ c }: { c: Need }) {
     }
   };
   const m = c.pair;
+  const machines = useMachines();
   return (
     <CardFrame label={confirmTitle(c)} leaving={leaving}>
       <CardHead
@@ -342,11 +343,12 @@ function PairCard({ c }: { c: Need }) {
       />
       {open && (
         <CardDetails>
+          {update && <Compare c={c} was={machines.find((x) => x.id === c.app?.id)} />}
           <Facts
             rows={[
-              ...(computer ? ([[t("confirm.system"), [systems[m?.os ?? ""], m?.arch].filter(Boolean).join(" ") || "—"]] as [string, ReactNode][]) : []),
+              ...(computer && !update ? ([[t("confirm.system"), [systems[m?.os ?? ""], m?.arch].filter(Boolean).join(" ") || "—"]] as [string, ReactNode][]) : []),
               ...(computer ? ([[t("confirm.commands"), t(`confirm.commands.${shellOf(c)}`)]] as [string, ReactNode][]) : []),
-              ...(m?.program ? ([[t("confirm.program"), m.program]] as [string, ReactNode][]) : []),
+              ...(m?.program && !update ? ([[t("confirm.program"), m.program]] as [string, ReactNode][]) : []),
               ...facts.slice(-1),
             ]}
           />
@@ -354,6 +356,35 @@ function PairCard({ c }: { c: Need }) {
         </CardDetails>
       )}
     </CardFrame>
+  );
+}
+
+/** An update's two sides (decision 11): the app there now (was: its computer, if it is one) and
+ *  the one asking, side by side: system, program, agents, last seen; the one there now in red
+ *  while online. */
+function Compare({ c, was }: { c: Need; was?: Machine }) {
+  const m = c.pair;
+  const system = (os?: string, arch?: string) => [systems[os ?? ""] ?? os, arch].filter(Boolean).join(" ") || "—";
+  const agents = (list?: ExecAgent[]) => (list?.length ? list.map((a) => [a.agent, a.version].filter(Boolean).join(" ")).join("、") : "—");
+  const rows: [string, ReactNode, ReactNode][] = [
+    [t("confirm.system"), was ? system(was.os, was.arch) : "—", system(m?.os, m?.arch)],
+    [t("confirm.program"), was?.program || "—", m?.program || "—"],
+    [t("apps.carried"), agents(was?.agents), agents(m?.agents)],
+    [t("confirm.lastSeen"), c.app?.online ? <span className="text-err">{t("term.online")}</span> : ago(c.app?.lastSeenAt || c.app?.createdAt), ago(c.createdAt)],
+  ];
+  return (
+    <div className="grid grid-cols-[auto_1fr_1fr] gap-x-3 gap-y-1">
+      <span />
+      <span className="text-ink-3">{t("confirm.old")}</span>
+      <span className="text-ink-3">{t("confirm.new")}</span>
+      {rows.map(([k, a, b]) => (
+        <div key={k} className="contents">
+          <span className="text-ink-3">{k}</span>
+          <span className="min-w-0 break-all text-ink-2">{a}</span>
+          <span className="min-w-0 break-all text-ink-2">{b}</span>
+        </div>
+      ))}
+    </div>
   );
 }
 

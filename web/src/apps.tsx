@@ -22,7 +22,7 @@ import { showSecret, useSecret } from "./secrets";
 import { Group } from "./settings";
 import { useConfirms, useMachines, usePairing } from "./store";
 import { errText, toast } from "./toast";
-import { ago, Avatar, IconKey, Logo, Switch, Tip, tokens } from "./ui";
+import { ago, Avatar, IconKey, Logo, Switch, Tip, tokens, typeMark } from "./ui";
 
 /** Claude: it was made the owner's own. Set then, never after (the user, 2026-11-08). */
 export const hasClaude = (r: Rules) => !!r.claudeOwner;
@@ -37,17 +37,8 @@ const systems: Record<string, string> = {
 const typeName = (a: App) => {
   if (a.host) return t("term.local");
   if (a.web) return t("term.panel");
-  switch (a.type) {
-    case "computer":
-      return t("apps.type.computer");
-    case "bot":
-      return t("apps.type.bot");
-    case "plugin":
-      return t("apps.type.plugin");
-    case "script":
-      return t("apps.type.script");
-  }
-  return a.type || t("term.channel");
+  const m = typeMark(a.type);
+  return m ? t(m[1]) : a.type || t("term.channel");
 };
 
 /** Whether command lines run at a machine: none, a person's on the page, or agents' too (ir sh). */
@@ -161,7 +152,7 @@ function AppRow({ a, machine, onOpen }: { a: App; machine?: Machine; onOpen?: ()
   const used = a.online ? t("term.online") : a.host ? t("term.localShort") : ago(a.lastSeenAt || a.createdAt || 0);
   const body = (
     <>
-      {a.host ? <LocalMark size={32} /> : <Avatar src={a.avatar} name={a.web ? t("term.panel") : a.name} size={32} channel={!a.web} />}
+      {a.host ? <LocalMark size={32} /> : <Avatar src={a.avatar} name={a.web ? t("term.panel") : a.name} size={32} type={a.type} />}
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-2">
           <span className="truncate text-base font-medium">{a.host ? t("me.local") : a.web ? t("term.panel") : a.name}</span>
@@ -229,7 +220,7 @@ function AppPage({ app, data, machine, onBack }: { app: App; data: Apps; machine
             <Avatar src={app.avatar} name={title} size={40} />
           ) : (
             <button type="button" onClick={() => file.current?.click()} aria-label={t("term.avatar")} className="g-press rounded-full">
-              <Avatar src={app.avatar} name={app.name} size={40} channel />
+              <Avatar src={app.avatar} name={app.name} size={40} type={app.type} />
             </button>
           )}
           <span className="min-w-0 flex-1">

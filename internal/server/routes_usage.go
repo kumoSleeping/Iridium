@@ -14,13 +14,12 @@ import (
 // maxUsageDays is the most days GET /api/usage gives at once.
 const maxUsageDays = 366
 
-// usage is GET /api/usage?days=N&terminal=<ID, name or "me">: the last N days' (7 by default)
-// usage by day, terminal, agent and model; by=hour: the last 24 hours' by hour, its days
+// usage is GET /api/usage?days=N&app=<ID, name or "me"> (terminal= as before 0.2): the last N
+// days' (7 by default) usage by day, app, agent and model; by=hour: the last 24 hours' by hour, its days
 // "2006-01-02T15" (the 1 天 view, the user, 2026-11-08); by=weekhour: the N days' by weekday and
 // hour, the rows' days "1T14" (Monday, 14:00; 7 is Sunday; the heat map, the user, 2026-11-10).
-// A row the agent gave no cost is priced at its maker's list price (s.Prices; the user, 2026-11-10). Without a terminal it is everyone's for those who
-// manage terminals (panels, 本机), a channel's own for a channel; another's only for those who
-// manage.
+// A row the agent gave no cost is priced at its maker's list price (s.Prices; the user, 2026-11-10). Without an app it is everyone's for those who
+// manage (ir_web's logins, the host), else the caller's own; another's only for those who manage.
 func (s *Server) usage(w http.ResponseWriter, r *http.Request) {
 	c := callerOf(r)
 	days := 7
@@ -35,7 +34,11 @@ func (s *Server) usage(w http.ResponseWriter, r *http.Request) {
 	by := r.URL.Query().Get("by")
 	hourly := by == "hour"
 	var only []string
-	switch ref := r.URL.Query().Get("terminal"); {
+	ref := r.URL.Query().Get("app")
+	if ref == "" {
+		ref = r.URL.Query().Get("terminal") // its name before 0.2
+	}
+	switch {
 	case ref == "me":
 		only = []string{c.ID()}
 	case ref == "" && !c.CanManage():
@@ -43,7 +46,7 @@ func (s *Server) usage(w http.ResponseWriter, r *http.Request) {
 	case ref != "":
 		info, ok := s.gate().Find(ref)
 		if !ok {
-			fail(w, http.StatusNotFound, "no such terminal")
+			fail(w, http.StatusNotFound, "no such app")
 			return
 		}
 		if info.ID != c.ID() && !c.CanManage() {

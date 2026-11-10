@@ -26,7 +26,7 @@ describe("subfolder", () => {
   test("none at a machine no more there: its line says so", () => {
     const gone = page(async () => true, "m9:/root");
     expect(gone).not.toMatch(key);
-    expect(gone).toMatch(/已移除的机器|Removed machine/);
+    expect(gone).toMatch(/已移除的应用|Removed app/);
   });
   test("an agent at the folder's machine, picked while it was made, opens in the one made", () => {
     const to = { m: win, cwd: "C:\\Code" };

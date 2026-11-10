@@ -94,7 +94,7 @@ func secretLs(e adminEnv, stdout, stderr io.Writer) int {
 }
 
 func scopeName(s api.SecretInfo) string {
-	out := map[api.SecretScope]string{api.ScopeAll: "全部会话", api.ScopeOwner: "只本人终端开的", api.ScopeWorkspaces: "某些工作区"}[s.Scope]
+	out := map[api.SecretScope]string{api.ScopeAll: "全部会话", api.ScopeOwner: "只本人开的", api.ScopeWorkspaces: "某些工作区"}[s.Scope]
 	if s.Always {
 		out += "，每次确认"
 	}

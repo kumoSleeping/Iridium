@@ -45,7 +45,7 @@ func RunAt(args []string, stdout, stderr io.Writer, hc *http.Client, at At) int 
 		return exitDone
 	}
 	if !remoteCommands[args[0]] {
-		fmt.Fprintf(stderr, "ir: %s runs on the Iridium's own machine, not here\n", args[0])
+		fmt.Fprintf(stderr, "ir: %s runs on the host, not here\n", args[0])
 		return exitError
 	}
 	return commands[args[0]](&env{out: stdout, err: stderr, hc: hc, at: &at}, args[1:])
@@ -107,7 +107,7 @@ func (e *env) machineOf(arg string) (api.Machine, error) {
 			return m, nil
 		}
 	}
-	return api.Machine{}, fmt.Errorf("no machine %s (ir machines lists them)", arg)
+	return api.Machine{}, fmt.Errorf("no computer %s (ir machines lists them)", arg)
 }
 
 // machineNames is each machine's name by its Bot's ID; none if they cannot be had.

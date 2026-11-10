@@ -336,7 +336,7 @@ func (s *Server) invite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.gate().Public() {
-		fail(w, http.StatusConflict, "no public origin: ir_web needs one for its passkeys (ir public)")
+		refuse(w, http.StatusForbidden, "not_public", "no public origin: ir_web needs one for its passkeys (ir public)")
 		return
 	}
 	if _, err := s.gate().CheckLoginName(req.Name); req.Name != "" && err != nil {
@@ -631,7 +631,7 @@ func (s *Server) gateDone(w http.ResponseWriter, err error) {
 	case errors.Is(err, gate.ErrLastPasskey):
 		refuse(w, http.StatusConflict, "last_passkey", err.Error())
 	case errors.Is(err, gate.ErrNotPublic):
-		refuse(w, http.StatusConflict, "not_public", err.Error())
+		refuse(w, http.StatusForbidden, "not_public", err.Error())
 	case errors.Is(err, gate.ErrLocal):
 		refuse(w, http.StatusUnprocessableEntity, "built_in", err.Error())
 	default:
