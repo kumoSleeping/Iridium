@@ -227,12 +227,51 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := backup(db, path); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("store %s: a copy before the upgrade: %w", path, err)
+	}
 	s := &Store{db: db, keyPath: filepath.Join(filepath.Dir(path), "secrets.key")}
 	if err := s.migrate(); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("store %s: %w", path, err)
 	}
 	return s, nil
+}
+
+// backup copies the database to <path>.v<N>.bak (0600, by VACUUM INTO) before the migrations
+// from version N run, so a rollback to the binary before has its database to go back to
+// (docs/next/prep.md §4). Nothing for a new database (version 0) or one up to date. A copy there
+// already is kept: it is of the same version, from an upgrade that failed and rolled back.
+func backup(db *sql.DB, path string) error {
+	var v int
+	if err := db.QueryRow(`PRAGMA user_version`).Scan(&v); err != nil {
+		return err
+	}
+	if v == 0 || v >= len(schema) {
+		return nil
+	}
+	bak := fmt.Sprintf("%s.v%d.bak", path, v)
+	if _, err := os.Stat(bak); !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	// Into a file of its own first (VACUUM INTO takes an empty one), renamed once whole: a crash
+	// midway leaves no half copy under the name, and two openers do not collide.
+	f, err := os.CreateTemp(filepath.Dir(path), filepath.Base(bak)+".*")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	f.Close()
+	if _, err := db.Exec(`VACUUM INTO ?`, tmp); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, bak); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return nil
 }
 
 // private makes the database file 0600 before SQLite opens it (SQLite gives the -wal and -shm it

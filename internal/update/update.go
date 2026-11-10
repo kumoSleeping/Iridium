@@ -460,6 +460,9 @@ func (u *Updater) Apply(ctx context.Context, force bool) (api.UpdateState, error
 	if err != nil {
 		return u.State(), err
 	}
+	if err := keepPrev(exe); err != nil {
+		return fail(fmt.Errorf("keeping the binary before: %w", err))
+	}
 	// A new file renamed over the old, never written into it: the running binary keeps its inode
 	// (macOS kills a process whose signed binary changes under it).
 	if err := os.Rename(bin, exe); err != nil {
@@ -476,6 +479,51 @@ func (u *Updater) Apply(ctx context.Context, force bool) (api.UpdateState, error
 		}
 	}
 	return st, nil
+}
+
+// Prev is where Apply keeps the binary it replaced: beside it, named <exe>.prev (iridium.prev), a
+// way back together with the database's copy (store: <db>.v<N>.bak).
+func Prev(exe string) string { return exe + ".prev" }
+
+// keepPrev makes exe's present file Prev(exe), in place of an older one: a hard link to the same
+// inode (the rename over exe then leaves it there), else a copy. Made under another name and
+// renamed, so a failure leaves the older one whole.
+func keepPrev(exe string) error {
+	prev := Prev(exe)
+	tmp := prev + ".tmp"
+	os.Remove(tmp)
+	if err := os.Link(exe, tmp); err != nil {
+		if err := copyFile(exe, tmp); err != nil {
+			os.Remove(tmp)
+			return err
+		}
+	}
+	if err := os.Rename(tmp, prev); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
+func copyFile(from, to string) error {
+	in, err := os.Open(from)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	fi, err := in.Stat()
+	if err != nil {
+		return err
+	}
+	out, err := os.OpenFile(to, os.O_WRONLY|os.O_CREATE|os.O_EXCL, fi.Mode().Perm())
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
 }
 
 func (u *Updater) exe() (string, error) {

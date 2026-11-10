@@ -451,7 +451,7 @@ agent 调 `ir invite`、`ir token` 时，邀请链接和 TOKEN 不能进它的�
 |---|---|---|
 | `GET /api/update` | → `UpdateState` | 现在的版本、最新版本和说明、`size`（下载多大）、`available`、`auto`（查到新版就在后台下好：Release 版是，源码编译的不是）、`ready`（已下好）、`phase`（`idle`、`checking`、`downloading`（`got` 是下了多少）、`restarting`、`failed`）。事件流 `update` 是同一份 |
 | `POST /api/update/check` | → `UpdateState` | 马上查一次；`auto` 时有新版就在后台下好 |
-| `POST /api/update` | `ApplyUpdate` → `UpdateState` | `ir update`、设置里的“更新”：用下好的，没有就现在下（核对 sha256、跑一次 `iridium version` 看版本对不对），原子替换二进制、重启服务。没有更新的（`force` 除外）回 409 |
+| `POST /api/update` | `ApplyUpdate` → `UpdateState` | `ir update`、设置里的“更新”：用下好的，没有就现在下（核对 sha256、跑一次 `iridium version` 看版本对不对），原子替换二进制（换下的留在旁边，叫 `iridium.prev`）、重启服务。新版要升库时，先把库复制成 `iridium.db.v<旧版本号>.bak`。回滚：放回这两个文件。没有更新的（`force` 除外）回 409 |
 
 更新源是配置 `update.url`：不填是 `github:kumoSleeping/Iridium`（GitHub Releases 的最新版），`off` 不查；`update.every` 默认一天查一次。Release 版（版本号是干净的 `vX.Y.Z`）查到新版就下到二进制旁边的 `.iridium-update-*`，点“更新”只换文件、重启；源码编译的（`dev`、`vX.Y.Z-dev.N+g…`）不预先下载。没有开关；旧配置里的 `update.manual` 不再读（2026-11-08）。守护进程启动时清掉上次剩下的。
 

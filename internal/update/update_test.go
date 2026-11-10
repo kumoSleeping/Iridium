@@ -88,6 +88,9 @@ func TestApply(t *testing.T) {
 	if b, _ := os.ReadFile(exe); string(b) != "old" || restarts != 0 {
 		t.Fatalf("replaced after a bad sum: %q", b)
 	}
+	if _, err := os.Stat(Prev(exe)); err == nil {
+		t.Fatal("kept a binary before anything was replaced")
+	}
 	if left, _ := filepath.Glob(filepath.Join(dir, ".iridium-update-*")); len(left) != 0 {
 		t.Fatalf("left %v", left)
 	}
@@ -111,6 +114,13 @@ func TestApply(t *testing.T) {
 	if fi, _ := os.Stat(exe); fi.Mode().Perm() != 0o755 {
 		t.Errorf("mode %v", fi.Mode())
 	}
+	// The binary replaced is kept beside it, as it was.
+	if b, _ := os.ReadFile(Prev(exe)); string(b) != "old" || filepath.Base(Prev(exe)) != "iridium.prev" {
+		t.Fatalf("kept %q at %s", b, Prev(exe))
+	}
+	if fi, _ := os.Stat(Prev(exe)); fi.Mode().Perm() != 0o755 {
+		t.Errorf("kept mode %v", fi.Mode())
+	}
 	if len(published) == 0 || published[len(published)-1].Phase != "restarting" {
 		t.Errorf("published %+v", published)
 	}
@@ -122,9 +132,46 @@ func TestApply(t *testing.T) {
 	if _, err := u2.Apply(ctx, true); err != nil || restarts != 2 {
 		t.Fatalf("forced: %v", err)
 	}
+	// The one before it is now the one kept, and only it.
+	if b, _ := os.ReadFile(Prev(exe)); string(b) != string(src.binary) {
+		t.Fatalf("kept %q", b)
+	}
+	if left, _ := filepath.Glob(filepath.Join(dir, "*.tmp")); len(left) != 0 {
+		t.Fatalf("left %v", left)
+	}
 	// No source: no checks.
 	if _, err := New(Options{Current: "1.0.0"}).Check(ctx); err == nil {
 		t.Error("checked without a source")
+	}
+}
+
+// keepPrev replaces the one kept before only once the new one is whole; copyFile, its way where
+// no hard link can be made, never writes over a file.
+func TestKeepPrev(t *testing.T) {
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "iridium")
+	os.WriteFile(exe, []byte("v1"), 0o755)
+	os.WriteFile(Prev(exe), []byte("v0"), 0o755)
+	if err := copyFile(exe, Prev(exe)+".tmp"); err != nil {
+		t.Fatal(err)
+	}
+	if err := copyFile(exe, Prev(exe)+".tmp"); err == nil {
+		t.Fatal("copied over a file there")
+	}
+	os.Remove(Prev(exe) + ".tmp")
+	if err := keepPrev(exe); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(Prev(exe)); string(b) != "v1" {
+		t.Fatalf("kept %q", b)
+	}
+	// No binary to keep: an error, the one kept before left whole.
+	os.Remove(exe)
+	if err := keepPrev(exe); err == nil {
+		t.Fatal("kept nothing")
+	}
+	if b, _ := os.ReadFile(Prev(exe)); string(b) != "v1" {
+		t.Fatalf("kept %q", b)
 	}
 }
 
