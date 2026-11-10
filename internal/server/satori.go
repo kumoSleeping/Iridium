@@ -99,7 +99,14 @@ func (b satoriBackend) Workspaces() ([]api.Workspace, error) {
 }
 
 // Sees: every session, until S2's scopes (decision 17: the login's within its app's).
-func (b satoriBackend) Sees(c satori.Caller, id string) bool { return true }
+// Sees: the session is in the login's scope within its app's (S2).
+func (b satoriBackend) Sees(c satori.Caller, id string) bool {
+	st, err := b.s.m.State(id)
+	if err != nil {
+		return false
+	}
+	return b.s.sees(b.s.permsFor(callerAs(c)), st.Session)
+}
 
 func (b satoriBackend) Messages(id string, before, after int64) (api.MessagePage, error) {
 	p, err := b.s.m.Messages(id, before, after)

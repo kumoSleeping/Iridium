@@ -10,6 +10,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/access"
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/gate"
+	"github.com/kumoSleeping/iridium/internal/satori"
 )
 
 // What an app or login may use: its scope hides the sessions out of it (not listed, not found),
@@ -35,6 +36,10 @@ func TestPerms(t *testing.T) {
 		t.Fatalf("listed out of scope: %+v", list)
 	}
 	l.want(200, app.Token, "GET", "/api/sessions/"+inA.ID, nil, nil)
+	// Satori sees the same: its channels are the sessions in scope.
+	if sb := (satoriBackend{l.s}); !sb.Sees(satori.Caller{App: app.App.ID}, inA.ID) || sb.Sees(satori.Caller{App: app.App.ID}, inB.ID) {
+		t.Fatal("Satori's channels out of scope")
+	}
 	l.want(404, app.Token, "GET", "/api/sessions/"+inB.ID, nil, nil)
 	l.want(404, app.Token, "GET", "/api/sessions/"+inB.ID+"/messages", nil, nil)
 	l.want(404, app.Token, "POST", "/api/sessions/"+inB.ID+"/stop", nil, nil)
