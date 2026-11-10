@@ -379,6 +379,17 @@ func (g *Gate) Wrap(next http.Handler) http.Handler {
 			return
 		}
 		if g.cfg.Open != nil && !hasToken && g.cfg.Open(r) {
+			// Open to all, it still knows whoever the request is, if anyone: a login's cookie, or the
+			// host's page with no public origin (Satori's /v1/events of ir_web identifies so).
+			// Never refused here; a foreign page's ambient credentials are not taken.
+			if a, ok, _ := g.identify(r, g.now()); ok || !g.public {
+				if !ok {
+					a = reqAuth{id: localIdentity}
+				}
+				if !((a.session != "" || a.id.Host()) && (unsafeMethod(r.Method) || isUpgrade(r)) && !g.originOK(r)) {
+					r = r.WithContext(context.WithValue(r.Context(), ctxKey{}, a))
+				}
+			}
 			next.ServeHTTP(w, r)
 			return
 		}

@@ -4,7 +4,7 @@
 // asked for once at first.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
-import { api, missing } from "./api/client";
+import { api, missing, speakAs } from "./api/client";
 import type { AgentInfo, LastSaid, Me, Session, Settings, UpdateState, Workspace } from "./api/types.gen";
 import { sourceOf, type Who } from "./chat/refs";
 import { t } from "./i18n";
@@ -54,7 +54,10 @@ export const useMe = () =>
     staleTime: 300_000,
     queryFn: async (): Promise<Me> => {
       const me = await orNone(api.me)().catch(() => null);
-      if (me) return me;
+      if (me) {
+        speakAs(me.app, me.login || me.app);
+        return me;
+      }
       const s = await orNone(api.gateSession)().catch(() => null);
       if (s && !s.local) return { ...LOCAL_ME, id: "", name: s.name ?? "", app: "ir_web", host: false, web: true, public: true };
       return LOCAL_ME;

@@ -308,7 +308,7 @@ func (s *Service) messageCreate(ctx context.Context, c Caller, body []byte) (any
 		}
 		return src
 	})
-	if strings.HasPrefix(text, "ask:") {
+	if strings.HasPrefix(text, "ask:") && !c.Only {
 		if done, err := s.typed(ctx, c, text); done {
 			return []Message{}, err
 		}

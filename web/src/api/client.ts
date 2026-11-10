@@ -37,7 +37,6 @@ import type {
   PushState,
   PushSubscription,
   PushSwitch,
-  Send,
   SendReply,
   Session,
   SessionPatch,
@@ -96,10 +95,24 @@ function login() {
   location.assign(`/_ir/login?next=${encodeURIComponent(location.pathname + location.search + location.hash)}`);
 }
 
-/** fetch, saying the request is the page's own. Tests replace globalThis.fetch. */
+/** Who the page speaks as in Satori (docs/satori.md): ir_web and one of its logins, or the host's
+ *  page as local/local. Set once /me answers; until then Iridium's own routes go without them. */
+const who = { platform: "", user: "" };
+export function speakAs(platform: string, user: string) {
+  who.platform = platform;
+  who.user = user;
+}
+export const speaker = () => ({ ...who });
+
+/** fetch, saying the request is the page's own (and, to /v1, which login speaks). Tests replace
+ *  globalThis.fetch. */
 export async function request(url: string, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers);
   headers.set("x-requested-with", "XMLHttpRequest");
+  if (url.startsWith("/v1/") && who.platform) {
+    headers.set("satori-platform", who.platform);
+    headers.set("satori-user-id", who.user);
+  }
   const r = await fetch(url, { ...init, headers });
   if (r.status === 401) login();
   return r;
@@ -159,61 +172,80 @@ export async function writeAgain<T>(method: string, url: string, body?: unknown)
 }
 
 const enc = encodeURIComponent;
-const S = (id: string) => `/api/sessions/${enc(id)}`;
+
+/** Text as a Satori message's content: its markup characters escaped (protocol/elements.md). */
+export const escapeSatori = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+let whoAsked: Promise<void> | undefined;
+/** Satori's standard methods need the login: from /me, once. */
+function whoKnown(): Promise<void> {
+  if (who.platform) return Promise.resolve();
+  return (whoAsked ??= get<Me>("/v1/internal/me").then((m) => speakAs(m.app, m.login || m.app)));
+}
+const S = (id: string) => `/v1/internal/sessions/${enc(id)}`;
 
 export const api = {
   // --- served (docs/api.md) ---
-  sessions: () => get<Session[]>("/api/sessions"),
+  sessions: () => get<Session[]>("/v1/internal/sessions"),
   session: (id: string, init?: RequestInit) => get<SessionState>(S(id), init),
   messages: (id: string, q: { before?: number; after?: number } = {}, init?: RequestInit) =>
     get<MessagePage>(`${S(id)}/messages${q.before !== undefined ? `?before=${q.before}` : q.after !== undefined ? `?after=${q.after}` : ""}`, init),
   block: (id: string, at: string) => get<FullText>(`${S(id)}/block?at=${enc(at)}`),
-  create: (s: NewSession) => write<NewSessionReply>("POST", "/api/sessions", s),
+  create: (s: NewSession) => write<NewSessionReply>("POST", "/v1/internal/sessions", s),
   /** A message: queued while a turn runs (queued in the reply), or joining it with steer.
    *  attachments: upload refs. */
-  send: (id: string, text: string, attachments?: string[], steer = false) =>
-    write<SendReply>("POST", `${S(id)}/send`, { text, ...(attachments?.length ? { attachments } : {}), ...(steer ? { steer } : {}) } satisfies Send),
+  send: async (id: string, text: string, attachments?: string[], steer = false): Promise<SendReply> => {
+    // Satori's message.create (docs/satori.md), as every app sends; Iridium's _data says whether it
+    // joins the turn and which uploads go with it, and answers what the send did.
+    await whoKnown();
+    const sent = await write<{ _data?: SendReply }[]>("POST", "/v1/message.create", {
+      channel_id: id,
+      content: escapeSatori(text),
+      _data: { ...(steer ? { steer } : {}), ...(attachments?.length ? { attachments } : {}) },
+    });
+    return sent[0]?._data ?? { input: "" };
+  },
   interrupt: (id: string) => write<{ ok: boolean }>("POST", `${S(id)}/interrupt`),
   stop: (id: string) => write<{ ok: boolean }>("POST", `${S(id)}/stop`),
   /** A command line at the session's machine, in cwd ("": its folder) (docs/api.md "命令"). */
   shell: (id: string, line: string, cwd?: string) => write<ShellStarted>("POST", `${S(id)}/shell`, { line, ...(cwd ? { cwd } : {}) } satisfies ShellRun),
-  shellRead: (run: string, from: number) => get<ShellOutput>(`/api/shell/${enc(run)}?from=${from}`),
-  shellStop: (run: string) => write<{ ok: boolean }>("DELETE", `/api/shell/${enc(run)}`),
+  shellRead: (run: string, from: number) => get<ShellOutput>(`/v1/internal/shell/${enc(run)}?from=${from}`),
+  shellStop: (run: string) => write<{ ok: boolean }>("DELETE", `/v1/internal/shell/${enc(run)}`),
   /** One of session id's asks answered by its card (docs/api.md "卡片"): an option, a choice per question, own words. */
   answer: (id: string, a: CardAnswer) => write<CardReply>("POST", `${S(id)}/answer`, a),
   /** A step Claude's auto mode denied, run again (session/release.go). */
-  release: (id: string, toolUseId: string, dismiss?: boolean) => write<{ ok: boolean }>("POST", `/api/sessions/${enc(id)}/release`, { toolUseId, dismiss } satisfies Release),
-  health: (init?: RequestInit) => get<{ ok: boolean }>("/api/health", init),
-  agents: () => get<AgentInfo[]>("/api/agents"),
+  release: (id: string, toolUseId: string, dismiss?: boolean) => write<{ ok: boolean }>("POST", `/v1/internal/sessions/${enc(id)}/release`, { toolUseId, dismiss } satisfies Release),
+  health: (init?: RequestInit) => get<{ ok: boolean }>("/v1/internal/health", init),
+  agents: () => get<AgentInfo[]>("/v1/internal/agents"),
 
   // --- workspaces, folders, the session overlay ---
-  workspaces: () => get<Workspace[]>("/api/workspaces"),
-  patchWorkspace: (id: number, p: WorkspacePatch) => writeAgain<{ ok: boolean }>("PATCH", `/api/workspaces/${id}`, p),
+  workspaces: () => get<Workspace[]>("/v1/internal/workspaces"),
+  patchWorkspace: (id: number, p: WorkspacePatch) => writeAgain<{ ok: boolean }>("PATCH", `/v1/internal/workspaces/${id}`, p),
   /** The groups in the order they were dragged to: IDs first to last (reorder.ts). */
   /** Where a folder is put among those in its group, dragged or pinned (reorder.ts). */
-  placeFolder: (p: FolderPlace) => writeAgain<{ ok: boolean }>("PATCH", "/api/folders/place", p),
+  placeFolder: (p: FolderPlace) => writeAgain<{ ok: boolean }>("PATCH", "/v1/internal/folders/place", p),
   /** The group taken apart at its folder: its subfolders groups of their own. */
-  splitWorkspace: (id: number) => writeAgain<{ ok: boolean }>("POST", `/api/workspaces/${id}/split`),
-  orderGroups: (keys: string[]) => writeAgain<{ ok: boolean }>("PUT", "/api/groups/order", { keys } satisfies GroupOrder),
+  splitWorkspace: (id: number) => writeAgain<{ ok: boolean }>("POST", `/v1/internal/workspaces/${id}/split`),
+  orderGroups: (keys: string[]) => writeAgain<{ ok: boolean }>("PUT", "/v1/internal/groups/order", { keys } satisfies GroupOrder),
   /** machine: another machine's executor; its paths '/'-separated. */
-  folders: (path: string, machine?: string) => get<Folders>(`/api/folders?path=${enc(path)}${machine ? `&machine=${enc(machine)}` : ""}`),
-  mkdir: (f: NewFolder) => write<FolderReply>("POST", "/api/folders", f),
+  folders: (path: string, machine?: string) => get<Folders>(`/v1/internal/folders?path=${enc(path)}${machine ? `&machine=${enc(machine)}` : ""}`),
+  mkdir: (f: NewFolder) => write<FolderReply>("POST", "/v1/internal/folders", f),
   /** dsh's workspaces at another machine (DSH Desktop's), else its sessions' folders: '/'-separated. */
-  dshWorkspaces: (machine: string) => get<DshWorkspace[]>(`/api/machines/${enc(machine)}/dsh/workspaces`),
-  dshSync: (machine: string) => write<{ ok: boolean }>("POST", `/api/machines/${enc(machine)}/dsh/sync`),
+  dshWorkspaces: (machine: string) => get<DshWorkspace[]>(`/v1/internal/machines/${enc(machine)}/dsh/workspaces`),
+  dshSync: (machine: string) => write<{ ok: boolean }>("POST", `/v1/internal/machines/${enc(machine)}/dsh/sync`),
   patch: (id: string, p: SessionPatch) => writeAgain<{ ok: boolean }>("PATCH", S(id), p),
   /** A folder's colour tag; "" takes it off. The carried state "colors" has them all. */
-  folderColor: (f: FolderColor) => writeAgain<{ ok: boolean }>("PUT", "/api/colors", f),
+  folderColor: (f: FolderColor) => writeAgain<{ ok: boolean }>("PUT", "/v1/internal/colors", f),
 
   // --- notes (the carried state "notes" has them all) ---
-  notes: () => get<Notes>("/api/notes"),
+  notes: () => get<Notes>("/v1/internal/notes"),
   /** id: the page's own, so one sent again is the same note. */
-  newNote: (n: NewNote) => writeAgain<Note>("POST", "/api/notes", n),
-  patchNote: (id: string, p: NotePatch) => writeAgain<Note>("PATCH", `/api/notes/${enc(id)}`, p),
-  deleteNote: (id: string) => writeAgain<{ ok: boolean }>("DELETE", `/api/notes/${enc(id)}`),
-  newNoteFolder: (p: NoteFolderPatch) => write<NoteFolder>("POST", "/api/note-folders", p),
-  patchNoteFolder: (id: number, p: NoteFolderPatch) => writeAgain<{ ok: boolean }>("PATCH", `/api/note-folders/${id}`, p),
-  deleteNoteFolder: (id: number) => writeAgain<{ ok: boolean }>("DELETE", `/api/note-folders/${id}`),
+  newNote: (n: NewNote) => writeAgain<Note>("POST", "/v1/internal/notes", n),
+  patchNote: (id: string, p: NotePatch) => writeAgain<Note>("PATCH", `/v1/internal/notes/${enc(id)}`, p),
+  deleteNote: (id: string) => writeAgain<{ ok: boolean }>("DELETE", `/v1/internal/notes/${enc(id)}`),
+  newNoteFolder: (p: NoteFolderPatch) => write<NoteFolder>("POST", "/v1/internal/note-folders", p),
+  patchNoteFolder: (id: number, p: NoteFolderPatch) => writeAgain<{ ok: boolean }>("PATCH", `/v1/internal/note-folders/${id}`, p),
+  deleteNoteFolder: (id: number) => writeAgain<{ ok: boolean }>("DELETE", `/v1/internal/note-folders/${id}`),
 
   // --- files in messages, uploads ---
   // v: the file's version (its mtime): a file written again at its path is another address, not
@@ -226,11 +258,11 @@ export const api = {
   /** Picture n of the tool result at (Result.images), as the model was given it. */
   imageURL: (id: string, at: string, n: number) => `${S(id)}/image?at=${enc(at)}&n=${n}`,
   upload: (id: string, u: NewUpload) => write<Upload>("POST", `${S(id)}/uploads`, u),
-  uploadAt: (up: string) => get<Upload>(`/api/uploads/${enc(up)}`),
+  uploadAt: (up: string) => get<Upload>(`/v1/internal/uploads/${enc(up)}`),
   uploadChunk: (up: string, offset: number, chunk: Blob, signal?: AbortSignal) =>
-    write<Upload>("PUT", `/api/uploads/${enc(up)}?offset=${offset}`, chunk, { headers: { "content-type": "application/octet-stream" }, signal }),
-  uploadDone: (up: string, sha256: string) => write<Upload>("POST", `/api/uploads/${enc(up)}/complete`, { sha256 } satisfies CompleteUpload),
-  uploadCancel: (up: string) => write<{ ok: boolean }>("DELETE", `/api/uploads/${enc(up)}`),
+    write<Upload>("PUT", `/v1/internal/uploads/${enc(up)}?offset=${offset}`, chunk, { headers: { "content-type": "application/octet-stream" }, signal }),
+  uploadDone: (up: string, sha256: string) => write<Upload>("POST", `/v1/internal/uploads/${enc(up)}/complete`, { sha256 } satisfies CompleteUpload),
+  uploadCancel: (up: string) => write<{ ok: boolean }>("DELETE", `/v1/internal/uploads/${enc(up)}`),
 
   // --- the queue, the session's settings ---
   steer: (id: string, input: string) => write<{ ok: boolean }>("POST", `${S(id)}/queue/${enc(input)}/steer`),
@@ -248,22 +280,22 @@ export const api = {
   clearRules: (id: string) => write<{ ok: boolean }>("DELETE", `${S(id)}/rules`),
 
   // --- push ---
-  push: () => get<PushState>("/api/web/push"),
-  pushSwitch: (enabled: boolean) => writeAgain<{ ok: boolean }>("PUT", "/api/web/push", { enabled } satisfies PushSwitch),
-  pushDefaults: (e: PushEvents) => writeAgain<PushState>("PUT", "/api/web/push/defaults", e),
-  pushRule: (r: PushRule) => writeAgain<PushState>("PUT", "/api/web/push/rules", r),
-  pushSubscribe: (sub: PushSubscription) => write<{ ok: boolean }>("POST", "/api/web/push/subscriptions", sub),
-  pushUnsubscribe: (endpoint: string) => write<{ ok: boolean }>("DELETE", "/api/web/push/subscriptions", { endpoint }),
+  push: () => get<PushState>("/v1/internal/web/push"),
+  pushSwitch: (enabled: boolean) => writeAgain<{ ok: boolean }>("PUT", "/v1/internal/web/push", { enabled } satisfies PushSwitch),
+  pushDefaults: (e: PushEvents) => writeAgain<PushState>("PUT", "/v1/internal/web/push/defaults", e),
+  pushRule: (r: PushRule) => writeAgain<PushState>("PUT", "/v1/internal/web/push/rules", r),
+  pushSubscribe: (sub: PushSubscription) => write<{ ok: boolean }>("POST", "/v1/internal/web/push/subscriptions", sub),
+  pushUnsubscribe: (endpoint: string) => write<{ ok: boolean }>("DELETE", "/v1/internal/web/push/subscriptions", { endpoint }),
 
   // --- settings, update ---
-  settings: () => get<Settings>("/api/settings"),
-  putSettings: (p: SettingsPatch) => writeAgain<Settings>("PUT", "/api/settings", p),
-  update: () => get<UpdateState>("/api/update"),
-  checkUpdate: () => write<UpdateState>("POST", "/api/update/check"),
-  applyUpdate: (force = false) => write<UpdateState>("POST", "/api/update", force ? ({ force } satisfies ApplyUpdate) : undefined),
+  settings: () => get<Settings>("/v1/internal/settings"),
+  putSettings: (p: SettingsPatch) => writeAgain<Settings>("PUT", "/v1/internal/settings", p),
+  update: () => get<UpdateState>("/v1/internal/update"),
+  checkUpdate: () => write<UpdateState>("POST", "/v1/internal/update/check"),
+  applyUpdate: (force = false) => write<UpdateState>("POST", "/v1/internal/update", force ? ({ force } satisfies ApplyUpdate) : undefined),
 
   // --- this terminal (GET /api/me), the gate's session, profile and logout ---
-  me: () => get<Me>("/api/me"),
+  me: () => get<Me>("/v1/internal/me"),
   gateSession: () => get<GateSession>("/_ir/api/session"),
   /** PUT /api/me/profile, or another app's or login's (internal/gate): multipart name, avatar, removeAvatar. */
   profile: (p: { name?: string; avatar?: Blob; removeAvatar?: boolean }, of?: string) => {
@@ -271,37 +303,37 @@ export const api = {
     if (p.name !== undefined) f.set("name", p.name);
     if (p.avatar) f.set("avatar", p.avatar, "avatar.png");
     if (p.removeAvatar) f.set("removeAvatar", "1");
-    return write<Profile>("PUT", of ? `/api/apps/${enc(of)}/profile` : "/api/me/profile", f);
+    return write<Profile>("PUT", of ? `/v1/internal/apps/${enc(of)}/profile` : "/v1/internal/me/profile", f);
   },
   /** PUT /api/me/device, or another app's or login's: the device it runs on. */
-  device: (device: SetDevice["device"], of?: string) => write<SetDevice>("PUT", of ? `/api/apps/${enc(of)}/device` : "/api/me/device", { device } satisfies SetDevice),
+  device: (device: SetDevice["device"], of?: string) => write<SetDevice>("PUT", of ? `/v1/internal/apps/${enc(of)}/device` : "/v1/internal/me/device", { device } satisfies SetDevice),
   logout: () => write<{ ok: boolean }>("POST", "/_ir/api/logout"),
 
   // --- the apps and their logins (docs/api.md "应用"), the confirmations agents ask for ---
-  apps: () => get<Apps>("/api/apps"),
-  invite: (name: string, claude?: boolean) => write<Invite>("POST", "/api/invites", { ...(name ? { name } : {}), ...(claude ? { claude } : {}) } satisfies NewInvite),
-  revoke: (id: string) => write<{ ok: boolean }>("DELETE", `/api/apps/${enc(id)}`),
+  apps: () => get<Apps>("/v1/internal/apps"),
+  invite: (name: string, claude?: boolean) => write<Invite>("POST", "/v1/internal/invites", { ...(name ? { name } : {}), ...(claude ? { claude } : {}) } satisfies NewInvite),
+  revoke: (id: string) => write<{ ok: boolean }>("DELETE", `/v1/internal/apps/${enc(id)}`),
   /** DELETE /api/apps/{app}/logins/{login}: another app's login asks again as it next speaks. */
-  removeLogin: (app: string, login: string) => write<{ ok: boolean }>("DELETE", `/api/apps/${enc(app)}/logins/${enc(login)}`),
+  removeLogin: (app: string, login: string) => write<{ ok: boolean }>("DELETE", `/v1/internal/apps/${enc(app)}/logins/${enc(login)}`),
   /** PUT /api/apps/{id}/perms: what an app may use (agents, scope). */
-  appPerms: (id: string, p: Perms) => write<Perms>("PUT", `/api/apps/${enc(id)}/perms`, p),
+  appPerms: (id: string, p: Perms) => write<Perms>("PUT", `/v1/internal/apps/${enc(id)}/perms`, p),
   /** PUT /api/apps/{app}/logins/{login}/perms: what a login may use, within its app's. */
-  loginPerms: (app: string, login: string, p: Perms) => write<Perms>("PUT", `/api/apps/${enc(app)}/logins/${enc(login)}/perms`, p),
+  loginPerms: (app: string, login: string, p: Perms) => write<Perms>("PUT", `/v1/internal/apps/${enc(app)}/logins/${enc(login)}/perms`, p),
   /** PUT /api/pairing: the pairing window opened for minutes (10 by default) or closed. */
-  pairing: (open: boolean, minutes?: number) => write<PairWindow>("PUT", "/api/pairing", { open, ...(minutes ? { minutes } : {}) } satisfies PairWindow),
+  pairing: (open: boolean, minutes?: number) => write<PairWindow>("PUT", "/v1/internal/pairing", { open, ...(minutes ? { minutes } : {}) } satisfies PairWindow),
   /** GET /api/catalogue: the official apps and the commands that install them. */
-  catalogue: () => get<CatalogueEntry[]>("/api/catalogue"),
+  catalogue: () => get<CatalogueEntry[]>("/v1/internal/catalogue"),
 
   /** GET /api/usage: the last days' tokens by day, terminal, agent and model; terminal: one only; by hour: the last 24 hours'; by weekhour: by weekday and hour. */
-  usage: (days: number, terminal?: string, by?: "hour" | "weekhour") => get<Usage>(`/api/usage?days=${days}${terminal ? `&terminal=${enc(terminal)}` : ""}${by ? `&by=${by}` : ""}`),
-  confirms: () => get<Needs>("/api/needs"),
+  usage: (days: number, terminal?: string, by?: "hour" | "weekhour") => get<Usage>(`/v1/internal/usage?days=${days}${terminal ? `&terminal=${enc(terminal)}` : ""}${by ? `&by=${by}` : ""}`),
+  confirms: () => get<Needs>("/v1/internal/needs"),
   /** extra: a secret-set's value, a secret-use's "this session". */
-  answerConfirm: (id: string, allow: boolean, extra?: Omit<NeedAnswer, "allow">) => write<NeedReply>("POST", `/api/needs/${enc(id)}`, { allow, ...extra } satisfies NeedAnswer),
+  answerConfirm: (id: string, allow: boolean, extra?: Omit<NeedAnswer, "allow">) => write<NeedReply>("POST", `/v1/internal/needs/${enc(id)}`, { allow, ...extra } satisfies NeedAnswer),
 
   // --- the credentials (docs/api.md "凭据"): never a value back ---
-  secrets: () => get<Secrets>("/api/secrets"),
-  putSecret: (name: string, s: SetSecret) => write<SecretInfo>("PUT", `/api/secrets/${enc(name)}`, s),
-  deleteSecret: (name: string) => write<{ ok: boolean }>("DELETE", `/api/secrets/${enc(name)}`),
+  secrets: () => get<Secrets>("/v1/internal/secrets"),
+  putSecret: (name: string, s: SetSecret) => write<SecretInfo>("PUT", `/v1/internal/secrets/${enc(name)}`, s),
+  deleteSecret: (name: string) => write<{ ok: boolean }>("DELETE", `/v1/internal/secrets/${enc(name)}`),
 };
 
 /** Whether an error is the route not being there (an older daemon, a part turned off): the page

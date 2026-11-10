@@ -1,27 +1,39 @@
-// The top bar's dot against a mocked daemon and a fake EventSource: the round trip measured again
+// The top bar's dot against a mocked daemon and a fake WebSocket (Satori's /v1/events): the round trip measured again
 // at each beat, a drop that clears it, a request that hangs cut off, a stream that looks open but
 // is dead opened again. The tests follow on from each other, as the stream module is one per page.
 import { describe, expect, test, vi } from "vitest";
 import { getCarried, type Link } from "../src/store";
 
-class FakeES {
+class FakeWS {
   static CONNECTING = 0;
   static OPEN = 1;
-  static CLOSED = 2;
-  static all: FakeES[] = [];
-  readyState = FakeES.CONNECTING;
+  static CLOSING = 2;
+  static CLOSED = 3;
+  static all: FakeWS[] = [];
+  readyState = FakeWS.CONNECTING;
+  sent: string[] = [];
   onopen: (() => void) | null = null;
-  onerror: (() => void) | null = null;
+  onmessage: ((m: { data: string }) => void) | null = null;
+  onclose: (() => void) | null = null;
   constructor(readonly url: string) {
-    FakeES.all.push(this);
+    FakeWS.all.push(this);
   }
-  addEventListener() {}
+  send(d: string) {
+    this.sent.push(d);
+  }
   close() {
-    this.readyState = FakeES.CLOSED;
+    this.readyState = FakeWS.CLOSED;
   }
+  /** Opens, the page identifies, Iridium answers READY. */
   open() {
-    this.readyState = FakeES.OPEN;
+    this.readyState = FakeWS.OPEN;
     this.onopen?.();
+    this.onmessage?.({ data: JSON.stringify({ op: 4, body: { logins: [] } }) });
+  }
+  /** Dropped by the network. */
+  drop() {
+    this.readyState = FakeWS.CLOSED;
+    this.onclose?.();
   }
 }
 
@@ -31,7 +43,7 @@ let asked = 0;
 
 // Before the module loads, so its beat runs on these clocks.
 vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "performance", "Date"] });
-vi.stubGlobal("EventSource", FakeES);
+vi.stubGlobal("WebSocket", FakeWS);
 vi.stubGlobal("fetch", (_url: string, init: RequestInit = {}) => {
   asked++;
   return new Promise<Response>((ok, fail) => {
@@ -44,7 +56,7 @@ const { EVERY, WAIT, follow, measure } = await import("../src/stream");
 const t0 = performance.now();
 
 const link = () => getCarried<Link>("link");
-const last = () => FakeES.all.at(-1)!;
+const last = () => FakeWS.all.at(-1)!;
 const wait = (ms: number) => vi.advanceTimersByTimeAsync(ms);
 /** On to ms after the next beat. */
 const toBeat = (ms: number) => {
@@ -67,14 +79,15 @@ describe("link", () => {
     expect(link()).toEqual({ live: true, rtt: 7 });
 
     const es = last();
-    es.readyState = FakeES.CONNECTING; // the browser tries again itself
-    es.onerror?.();
+    expect(JSON.parse(es.sent[0]!)).toMatchObject({ op: 3, body: { _watch: expect.arrayContaining(["list"]) } });
+    es.drop();
     expect(link()).toEqual({ live: false, rtt: null });
     health = { ms: 12 };
-    es.open();
+    await wait(3000); // opened again
+    expect(last()).not.toBe(es);
+    last().open();
     await wait(20);
     expect(link()).toEqual({ live: true, rtt: 12 });
-    expect(last()).toBe(es);
   });
 
   test("a request that hangs is cut off, one at a time; two in a row and the stream opens again", async () => {
@@ -91,7 +104,7 @@ describe("link", () => {
     await toBeat(WAIT + 10); // the next hangs too: taken as down, opened again
     expect(asked).toBe(n + 2);
     expect(link()).toEqual({ live: false, rtt: null });
-    expect(es.readyState).toBe(FakeES.CLOSED);
+    expect(es.readyState).toBe(FakeWS.CLOSED);
     const again = last();
     expect(again).not.toBe(es);
 
@@ -104,12 +117,14 @@ describe("link", () => {
   test("a stream still opening long after requests get through again is opened again", async () => {
     const es = last();
     await toBeat(EVERY - 5000);
-    es.readyState = FakeES.CONNECTING;
-    es.onerror?.(); // dropped, and the browser's own try never answers
+    es.drop(); // dropped; the stream opened again never answers
+    await wait(3000);
+    const trying = last();
+    expect(trying).not.toBe(es);
     await toBeat(100);
-    expect(last()).toBe(es); // just dropped: the browser is given its time
+    expect(last()).toBe(trying); // just tried: given its time
     await toBeat(100);
-    expect(last()).not.toBe(es);
+    expect(last()).not.toBe(trying);
     expect(link()?.live).toBe(false);
     last().open();
     await wait(20);

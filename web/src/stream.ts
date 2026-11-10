@@ -1,8 +1,8 @@
-// The page's one event stream (docs/api.md "事件流"): it names what it carries (the list, the quota,
-// and the open session with its context) and gets each whole at once, then whole again as it
-// changes. Opening another session opens a new stream; one dropped comes back by itself, and its
-// first states bring the page up to date. Drafts, the agent's words as it writes them, go to the
-// open chat alone.
+// The page's one event stream: Satori's /v1/events (docs/satori.md), as every app's. It names what it
+// carries (WATCH: the list, the quota, and the open session with its context) and gets each whole
+// at once (STATE), then whole again as it changes. Opening another session says so on the same
+// stream; one dropped comes back, and its first states bring the page up to date. Drafts, the
+// agent's words as it writes them, go to the open chat alone.
 import { api } from "./api/client";
 import type { DraftEvent, StateEvent } from "./api/types.gen";
 import { getCarried, setCarried, type Link } from "./store";
@@ -12,7 +12,8 @@ export const drafts = new Set<(d: DraftEvent) => void>();
 /** Told each time the stream opens, which it may have been down: drafts go, new blocks are fetched. */
 export const opened = new Set<() => void>();
 
-let es: EventSource | null = null;
+let ws: WebSocket | null = null;
+let pinger: ReturnType<typeof setInterval> | undefined;
 let session: string | null = null;
 let retry: ReturnType<typeof setTimeout> | undefined;
 let soon: ReturnType<typeof setTimeout> | undefined;
@@ -34,46 +35,67 @@ const lastRaw = new Map<string, string>();
 /** The keys the daemon said it does not carry, and why ("unknown", "forbidden"). */
 export const ignored = new Map<string, string>();
 export const keysFor = (s: string | null) => [...ALWAYS, ...(s ? [`session:${s}`, `context:${s}`] : [])];
-export const streamURL = (s: string | null) => `/api/events?${keysFor(s).map((k) => `sub=${encodeURIComponent(k)}`).join("&")}`;
+/** Satori's event stream, at this page's own address. */
+export const streamURL = () => `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/v1/events`;
+/** Satori's signals (protocol/events.md), and Iridium's own WATCH and STATE. */
+const OP = { event: 0, ping: 1, pong: 2, identify: 3, ready: 4, meta: 5, watch: 6, state: 7 } as const;
+/** How often the stream says it is there (Satori: every 10 seconds). */
+const PING = 10_000;
+
+function onState(raw: string) {
+  const e = JSON.parse(raw) as StateEvent;
+  if (ALWAYS.includes(e.key)) {
+    if (lastRaw.get(e.key) === raw && getCarried(e.key) !== undefined) return;
+    lastRaw.set(e.key, raw);
+  }
+  if (e.ignored) ignored.set(e.key, e.ignored);
+  else ignored.delete(e.key);
+  setCarried(e.key, e.ignored ? null : e.value);
+}
 
 function connect() {
   clearTimeout(retry);
-  es?.close();
-  const src = new EventSource(streamURL(session));
-  es = src;
+  clearInterval(pinger);
+  if (ws) {
+    ws.onclose = null;
+    ws.close();
+  }
+  const sock = new WebSocket(streamURL());
+  ws = sock;
   since = performance.now();
-  src.onopen = () => {
-    if (es !== src) return;
-    missed = 0;
-    link({ live: true });
-    opened.forEach((f) => f());
-    void measure();
+  sock.onopen = () => {
+    if (ws !== sock) return;
+    sock.send(JSON.stringify({ op: OP.identify, body: { _watch: keysFor(session) } }));
+    pinger = setInterval(() => sock.readyState === WebSocket.OPEN && sock.send(JSON.stringify({ op: OP.ping })), PING);
   };
-  src.addEventListener("state", (m) => {
-    const raw = (m as MessageEvent<string>).data;
-    const e = JSON.parse(raw) as StateEvent;
-    if (ALWAYS.includes(e.key)) {
-      if (lastRaw.get(e.key) === raw && getCarried(e.key) !== undefined) return;
-      lastRaw.set(e.key, raw);
+  sock.onmessage = (m) => {
+    if (ws !== sock) return;
+    const sig = JSON.parse(m.data as string) as { op: number; body?: { type?: string; data?: unknown } };
+    if (sig.op === OP.ready) {
+      missed = 0;
+      link({ live: true });
+      opened.forEach((f) => f());
+      void measure();
+    } else if (sig.op === OP.state && sig.body) {
+      const raw = JSON.stringify(sig.body.data);
+      if (sig.body.type === "state") onState(raw);
+      else if (sig.body.type === "draft") drafts.forEach((f) => f(sig.body!.data as DraftEvent));
     }
-    if (e.ignored) ignored.set(e.key, e.ignored);
-    else ignored.delete(e.key);
-    setCarried(e.key, e.ignored ? null : e.value);
-  });
-  src.addEventListener("draft", (m) => {
-    const d = JSON.parse((m as MessageEvent<string>).data) as DraftEvent;
-    drafts.forEach((f) => f(d));
-  });
-  src.onerror = () => {
-    if (es !== src) return;
+  };
+  sock.onclose = () => {
+    if (ws !== sock) return;
+    clearInterval(pinger);
     link({ live: false, rtt: null }); // back, it is measured afresh
-    since = performance.now(); // the browser's own try begins
-    // The browser retries a dropped stream itself, but gives up for good on an answer other than
-    // 200 (a proxy's 502 while the daemon restarts, a login that ran out): then open a new one.
-    if (src.readyState !== EventSource.CLOSED) return;
+    since = performance.now();
     void api.health().catch(() => {}); // a 401 here takes the page to the login
     retry = setTimeout(connect, 3000);
   };
+}
+
+/** Says on the open stream what it carries now; opens one if there is none. */
+function watch() {
+  if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ op: OP.watch, body: { keys: keysFor(session) } }));
+  else if (!ws || ws.readyState === WebSocket.CLOSED) connect();
 }
 
 /** Follows session (null: none open) on the stream, opening it the first time. Switching quickly,
@@ -87,7 +109,7 @@ export function follow(s: string | null) {
     connect();
     return;
   }
-  soon = setTimeout(connect, 60);
+  soon = setTimeout(watch, 60);
 }
 
 /** How often the round trip is measured while the page is in front, and how long one may take. */
@@ -130,7 +152,7 @@ export async function beat() {
     missed = 0;
     link({ live: false, rtt: null });
     connect();
-  } else if (!live && ok && es?.readyState !== EventSource.OPEN && performance.now() - since > WAIT) connect();
+  } else if (!live && ok && ws?.readyState !== WebSocket.OPEN && performance.now() - since > WAIT) connect();
 }
 
 // While in front, a beat every EVERY; back in front, at once.

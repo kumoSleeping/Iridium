@@ -62,11 +62,11 @@ describe("warmTo", () => {
   test("the newest page of each and its state, one at a time, not the page before; again only as it changes", async () => {
     warmTo(new Map([["w1", 1], ["w2", 1]]));
     await settle();
-    expect(asked).toEqual(["/api/sessions/w1/messages", "/api/sessions/w1", "/api/sessions/w2/messages", "/api/sessions/w2"]);
+    expect(asked).toEqual(["/v1/internal/sessions/w1/messages", "/v1/internal/sessions/w1", "/v1/internal/sessions/w2/messages", "/v1/internal/sessions/w2"]);
     expect(peekChat("w1")?.log.loaded).toBe(true);
     warmTo(new Map([["w1", 1], ["w2", 2]]));
     await settle();
-    expect(asked.slice(4)).toEqual(["/api/sessions/w2/messages?after=20"]);
+    expect(asked.slice(4)).toEqual(["/v1/internal/sessions/w2/messages?after=20"]);
   });
   test("a state the stream brought meanwhile is not put over; one asked for again only as it is not there", async () => {
     let answer: () => void = () => {};
@@ -85,7 +85,7 @@ describe("warmTo", () => {
     answer();
     expect(await again).toBe(true);
     expect(getCarried<{ status: string }>("session:z")?.status).toBe("idle");
-    expect(asked).toEqual(["/api/sessions/z", "/api/sessions/z"]);
+    expect(asked).toEqual(["/v1/internal/sessions/z", "/v1/internal/sessions/z"]);
     setCarried("session:z", null);
   });
   test("a session not there: stateAhead says so", async () => {
@@ -103,6 +103,6 @@ describe("warmTo", () => {
     expect(peekChat("v2")).toBeUndefined();
     expect(peekChat("v1")).toBe(it);
     await it!.log.older();
-    expect(asked.at(-1)).toBe("/api/sessions/v1/messages?before=10");
+    expect(asked.at(-1)).toBe("/v1/internal/sessions/v1/messages?before=10");
   });
 });
