@@ -9,7 +9,7 @@ import { KeyRound, Link2, LockKeyhole, Terminal as TermIcon } from "lucide-react
 import { ConfirmIcon, confirmName, confirmTitle, isPair } from "./confirmname";
 import { useRef, useState, type ReactNode } from "react";
 import { api } from "./api/client";
-import type { Need, Me } from "./api/types.gen";
+import type { Need, Me, Perms } from "./api/types.gen";
 import { CardDetails, CardFrame, CardHead, Facts, MainKey, SecondKey } from "./card";
 import { useMe } from "./data";
 import { t, useLang } from "./i18n";
@@ -271,17 +271,22 @@ function PairCard({ c }: { c: Need }) {
   const update = c.kind === "app_update";
   const { facts } = useAsked(c);
   const [own, setOwn] = useState(false);
-  const canOwn = saysOwner(me) && !update;
+  const [asNew, setAsNew] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [struck, setStruck] = useState<string[]>([]);
+  const canOwn = saysOwner(me) && (!update || asNew);
+  const given = c.wants && struck.length ? { agents: c.wants.agents.filter((a) => !struck.includes(`a:${a}`)), scope: c.wants.scope.filter((p) => !struck.includes(`s:${p}`)) } : undefined;
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<"allow" | "deny" | null>(null);
   const [leaving, setLeaving] = useState(false);
   const answer = async (allow: boolean) => {
     setBusy(allow ? "allow" : "deny");
     try {
-      const r = await api.answerConfirm(c.id, allow, allow ? { owner: canOwn && own } : undefined);
+      const name = update && asNew ? newName.trim() : "";
+      const r = await api.answerConfirm(c.id, allow, allow ? { owner: canOwn && own, ...(name ? { name } : {}), ...(given ? { perms: given } : {}) } : undefined);
       setLeaving(true);
       if (r.state === "failed") toast(t("err.confirm"), { error: true, description: r.error });
-      else toast(allow ? t("confirm.pairDone", { name: r.name ?? c.name ?? "" }) : t("toast.denied"));
+      else toast(allow ? t("confirm.pairDone", { name: r.name ?? (name || c.name) ?? "" }) : t("toast.denied"));
     } catch (e) {
       toast(t("err.confirm"), { error: true, description: errText(e) });
     } finally {
@@ -303,16 +308,27 @@ function PairCard({ c }: { c: Need }) {
             <SecondKey disabled={!!busy} onClick={() => void answer(false)}>
               {t("ask.deny")}
             </SecondKey>
-            <MainKey busy={busy === "allow"} disabled={!!busy} onClick={() => void answer(true)}>
+            <MainKey busy={busy === "allow"} disabled={!!busy || (update && asNew && !newName.trim())} onClick={() => void answer(true)}>
               {t("confirm.allow")}
             </MainKey>
           </>
         }
         extra={
-          update ? (
-            <p className="m-0 text-xs text-ink-3">{c.app?.online ? t("confirm.updateOnline", { name: c.name ?? "" }) : t("confirm.updateHint")}</p>
-          ) : (
-            canOwn && (
+          <>
+            {update && (
+              <>
+                <p className={`m-0 text-xs ${c.app?.online && !asNew ? "text-err" : "text-ink-3"}`}>{asNew ? t("confirm.asNewHint") : c.app?.online ? t("confirm.updateOnline", { name: c.name ?? "" }) : t("confirm.updateHint")}</p>
+                <div className="flex items-center gap-2">
+                  <span className="min-w-0 flex-1 text-sm">{t("confirm.asNew")}</span>
+                  <Switch label={t("confirm.asNew")} on={asNew} onChange={setAsNew} />
+                </div>
+                {asNew && (
+                  <input autoFocus value={newName} maxLength={12} onChange={(e) => setNewName(e.target.value)} placeholder={t("term.name")} aria-label={t("term.name")} className="g-fade no-ring h-8 rounded-md bg-fill px-2.5 text-base placeholder:text-ink-3" />
+                )}
+              </>
+            )}
+            {(!update || asNew) && c.wants && <Wants wants={c.wants} struck={struck} setStruck={setStruck} />}
+            {canOwn && (
               <div className="g-fade flex items-center gap-2">
                 <span className="min-w-0 flex-1">
                   <span className="block text-sm">{computer ? t("confirm.pairOwner") : t("term.withClaude")}</span>
@@ -320,8 +336,8 @@ function PairCard({ c }: { c: Need }) {
                 </span>
                 <Switch label={computer ? t("confirm.pairOwner") : t("term.withClaude")} on={own} onChange={setOwn} />
               </div>
-            )
-          )
+            )}
+          </>
         }
       />
       {open && (
@@ -341,11 +357,48 @@ function PairCard({ c }: { c: Need }) {
   );
 }
 
+const ALL = "*";
+const permWord = (v: string, kind: "a" | "s") => (v === ALL ? t(kind === "a" ? "apps.allAgents" : "apps.allScope") : v);
+
+/** What a pairing app asks for, each a chip a person may strike out: what is allowed is the rest. */
+function Wants({ wants, struck, setStruck }: { wants: Perms; struck: string[]; setStruck: (s: string[]) => void }) {
+  const chip = (key: string, label: string) => {
+    const off = struck.includes(key);
+    return (
+      <button key={key} type="button" aria-pressed={!off} onClick={() => setStruck(off ? struck.filter((k) => k !== key) : [...struck, key])} className={`g-press h-6 max-w-full truncate rounded-full px-2 text-xs ${off ? "bg-fill text-ink-4 line-through" : "bg-fill-2 text-ink"}`}>
+        {label}
+      </button>
+    );
+  };
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-xs text-ink-3">{t("confirm.wants")}</span>
+      <div className="flex flex-wrap gap-1">
+        {wants.agents.map((a) => chip(`a:${a}`, permWord(a, "a")))}
+        {wants.scope.map((p) => chip(`s:${p}`, permWord(p, "s")))}
+      </div>
+    </div>
+  );
+}
+
+/** What app_change asks for over what it has: each more (+) and less (−). */
+const changeLines = (c: Need): [string, ReactNode][] => {
+  const has = c.has ?? { agents: [ALL], scope: [ALL] };
+  const wants = c.wants ?? { agents: [], scope: [] };
+  const diff = (a: string[], b: string[], kind: "a" | "s") => [...b.filter((v) => !a.includes(v)).map((v) => `+ ${permWord(v, kind)}`), ...a.filter((v) => !b.includes(v)).map((v) => `− ${permWord(v, kind)}`)].join("、");
+  const rows: [string, ReactNode][] = [];
+  const agents = diff(has.agents, wants.agents, "a");
+  const scope = diff(has.scope, wants.scope, "s");
+  if (agents) rows.push([t("apps.agentsShort"), agents]);
+  if (scope) rows.push([t("apps.scope"), scope]);
+  return rows;
+};
+
 /** An app asks for other permissions (app_change), or a login of an app spoke the first time
  *  (login_join): allow or deny. (0.2 S1c draws what changes.) */
 function AppNeedCard({ c }: { c: Need }) {
   const { facts } = useAsked(c);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(c.kind === "app_change");
   const [busy, setBusy] = useState<"allow" | "deny" | null>(null);
   const [leaving, setLeaving] = useState(false);
   const answer = async (allow: boolean) => {
@@ -383,7 +436,7 @@ function AppNeedCard({ c }: { c: Need }) {
       />
       {open && (
         <CardDetails>
-          <Facts rows={facts.slice(-1)} />
+          <Facts rows={[...(c.kind === "app_change" ? changeLines(c) : []), ...facts.slice(-1)]} />
         </CardDetails>
       )}
     </CardFrame>

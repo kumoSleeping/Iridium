@@ -3,20 +3,20 @@
 // a dialog over it (the user, 2026-11-06), the chat under it the one open before.
 import { useSyncExternalStore } from "react";
 
-export type Route = { name: "home" } | { name: "chat"; id: string } | { name: "settings" } | { name: "terminals" } | { name: "secrets" } | { name: "usage" };
+export type Route = { name: "home" } | { name: "chat"; id: string } | { name: "settings" } | { name: "apps" } | { name: "secrets" } | { name: "usage" };
 
 export function parse(hash: string): Route {
   const h = hash.replace(/^#/, "");
   const chat = /^\/s\/([^/?]+)/.exec(h);
   if (chat) return { name: "chat", id: decodeURIComponent(chat[1]!) };
-  if (h.startsWith("/settings/terminals")) return { name: "terminals" };
+  if (h.startsWith("/settings/apps") || h.startsWith("/settings/terminals")) return { name: "apps" };
   if (h.startsWith("/settings/secrets")) return { name: "secrets" };
   if (h.startsWith("/settings/usage")) return { name: "usage" };
   if (h.startsWith("/settings")) return { name: "settings" };
   return { name: "home" };
 }
 
-export const hashOf = (r: Route) => (r.name === "chat" ? `#/s/${encodeURIComponent(r.id)}` : r.name === "home" ? "#/" : r.name === "terminals" ? "#/settings/terminals" : r.name === "secrets" ? "#/settings/secrets" : r.name === "usage" ? "#/settings/usage" : `#/${r.name}`);
+export const hashOf = (r: Route) => (r.name === "chat" ? `#/s/${encodeURIComponent(r.id)}` : r.name === "home" ? "#/" : r.name === "apps" ? "#/settings/apps" : r.name === "secrets" ? "#/settings/secrets" : r.name === "usage" ? "#/settings/usage" : `#/${r.name}`);
 
 /** The sessions opened lately in this tab, the latest first, for the jump box. */
 export function recent(): string[] {
@@ -90,7 +90,7 @@ export function openUsage(at?: At) {
   go({ name: "usage" }, over(current));
 }
 /** The settings and the terminals: a dialog over the chat, not a page of their own. */
-export const over = (r: Route) => r.name === "settings" || r.name === "terminals" || r.name === "secrets" || r.name === "usage";
+export const over = (r: Route) => r.name === "settings" || r.name === "apps" || r.name === "secrets" || r.name === "usage";
 export const useRoute = () =>
   useSyncExternalStore(
     (f) => (subs.add(f), () => void subs.delete(f)),

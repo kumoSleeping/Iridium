@@ -33,6 +33,8 @@ func (s *Server) appRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/apps", s.manage(s.apps))
 	mux.HandleFunc("DELETE /api/apps/{id}", s.admin(s.revoke))
 	mux.HandleFunc("DELETE /api/apps/{id}/logins/{login}", s.admin(s.removeLogin))
+	// What an app may use (agents, scope): whoever approves sets it (S2 enforces it).
+	mux.HandleFunc("PUT /api/apps/{id}/perms", s.approver(s.putAppPerms))
 	mux.HandleFunc("POST /api/invites", s.manage(s.invite))
 	// An app asks for other permissions: an app_change need.
 	mux.HandleFunc("PUT /api/me/perms", s.askChange)
@@ -208,6 +210,28 @@ func (s *Server) revoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.gateDone(w, s.gate().Revoke(ref))
+}
+
+// putAppPerms sets what app {id} may use: any within bounds (the approver gives as they see fit,
+// not only less than it once asked for). Not the host's or ir_web's.
+func (s *Server) putAppPerms(w http.ResponseWriter, r *http.Request) {
+	info, ok := s.gate().Find(r.PathValue("id"))
+	if !ok || info.Kind != gate.KindChannel || info.Host() {
+		refuse(w, http.StatusUnprocessableEntity, "no_such_app", "no such app")
+		return
+	}
+	var p api.Perms
+	if !readJSON(w, r, &p) {
+		return
+	}
+	p = cleanPerms(&p)
+	if err := s.setAppPerms(info.ID, p); err != nil {
+		s.error(w, err)
+		return
+	}
+	s.logf("server: %s set %s's permissions", callerOf(r).Name, info.Name)
+	s.terminalsChanged()
+	reply(w, http.StatusOK, p)
 }
 
 // removeLogin removes login {login} of app {id}: for another app's, it asks again as it next speaks.

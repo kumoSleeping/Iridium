@@ -123,7 +123,7 @@ export function SettingsPage({ theme, setTheme, initial = "main" }: { theme: The
           {manages &&
             nav(
               t("settings.terminalsRow"),
-              () => go({ name: "terminals" }),
+              () => go({ name: "apps" }),
               <>
                 {confirms.length > 0 && <span className="size-2 shrink-0 rounded-full bg-need" aria-label={t("nav.needsYou")} />}
                 {terminals.length > 0 && <span className="text-xs text-ink-3 tabular-nums">{terminals.length}</span>}

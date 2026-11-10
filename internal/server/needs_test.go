@@ -159,6 +159,15 @@ func TestApprovers(t *testing.T) {
 	l.want(403, app.Token, "GET", "/api/needs", nil, nil)
 	l.want(403, app.Token, "DELETE", "/api/apps/bot", nil, nil)
 	l.want(403, "agent", "DELETE", "/api/apps/bot", nil, nil)
+	// What an app may use: set by whoever approves, cleaned; never by an agent or an app.
+	l.want(403, "agent", "PUT", "/api/apps/bot/perms", api.Perms{}, nil)
+	l.want(403, app.Token, "PUT", "/api/apps/bot/perms", api.Perms{}, nil)
+	var p api.Perms
+	l.want(200, "socket", "PUT", "/api/apps/bot/perms", api.Perms{Agents: []string{"codex", "codex", " "}, Scope: []string{"pc:/w"}}, &p)
+	if got := l.s.appPerms(app.App.ID); got == nil || len(got.Agents) != 1 || got.Agents[0] != "codex" || got.Scope[0] != "pc:/w" || len(p.Agents) != 1 {
+		t.Fatalf("perms set: %+v %+v", got, p)
+	}
+	l.want(422, "socket", "PUT", "/api/apps/主机/perms", api.Perms{}, nil)
 	if l.want(422, "socket", "POST", "/api/needs/x", api.NeedAnswer{}, &e); e.Code != "no_such_need" {
 		t.Fatalf("no such need: %+v", e)
 	}

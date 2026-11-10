@@ -53,6 +53,9 @@ import type {
   Settings,
   SettingsPatch,
   Apps,
+  CatalogueEntry,
+  PairWindow,
+  Perms,
   UpdateState,
   Upload,
   Workspace,
@@ -282,6 +285,14 @@ export const api = {
   apps: () => get<Apps>("/api/apps"),
   invite: (name: string, claude?: boolean) => write<Invite>("POST", "/api/invites", { ...(name ? { name } : {}), ...(claude ? { claude } : {}) } satisfies NewInvite),
   revoke: (id: string) => write<{ ok: boolean }>("DELETE", `/api/apps/${enc(id)}`),
+  /** DELETE /api/apps/{app}/logins/{login}: another app's login asks again as it next speaks. */
+  removeLogin: (app: string, login: string) => write<{ ok: boolean }>("DELETE", `/api/apps/${enc(app)}/logins/${enc(login)}`),
+  /** PUT /api/apps/{id}/perms: what an app may use (agents, scope). */
+  appPerms: (id: string, p: Perms) => write<Perms>("PUT", `/api/apps/${enc(id)}/perms`, p),
+  /** PUT /api/pairing: the pairing window opened for minutes (10 by default) or closed. */
+  pairing: (open: boolean, minutes?: number) => write<PairWindow>("PUT", "/api/pairing", { open, ...(minutes ? { minutes } : {}) } satisfies PairWindow),
+  /** GET /api/catalogue: the official apps and the commands that install them. */
+  catalogue: () => get<CatalogueEntry[]>("/api/catalogue"),
   /** PUT /api/apps/{id}/follows: the logins of ir_web an app follows (their asks go to it). Until S4. */
   follows: (id: string, panels: string[]) => write<SetFollows>("PUT", `/api/apps/${enc(id)}/follows`, { panels } satisfies SetFollows),
 

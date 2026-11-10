@@ -32,7 +32,7 @@ function precompress(): Plugin {
 
 /** The parts that come only as they are opened (src/app.tsx), the chat first: their files the first
  *  screen does not load go in a <meta name="later"> the page fetches ahead once idle (src/prefetch.ts). */
-const LATER = ["/src/chat/chat.tsx", "/src/settings.tsx", "/src/terminals.tsx", "/src/jump.tsx", "/src/secret.tsx"];
+const LATER = ["/src/chat/chat.tsx", "/src/settings.tsx", "/src/apps.tsx", "/src/jump.tsx", "/src/secret.tsx"];
 
 /** LATER's files, in a <meta name="later">. */
 function later(): Plugin {
