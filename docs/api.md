@@ -275,96 +275,42 @@ agent 用 `ir sh <机器> [--cwd 目录] [--timeout 2m] -- 命令`（`POST /api/
 
 ## 卡片（`Card`）
 
-确认面板和 Bot 用同一份：`id`、`kind`（`permission`、`question`、`plan`、`pick`）、`title`、`summary`（几行）、`options`（`id`、`text`、`primary`、`group`）。
+网页和应用用同一份：`id`、`kind`（`permission`、`question`、`plan`）、`title`、`summary`（几行）、`options`（`id`、`text`、`primary`、`group`）。
 
 - 提问的卡片在 `SessionState.asks[].card`，`id` 是 `ask:<会话>:<requestId>`。
   - 审批：`allow`、`deny`、`always`。计划：`approve`、`reject`。
   - 选择题：每个问题一组（`group` 是问题序号），选项 `id` 是 `<问题>.<选项>`；`multi` 列出可多选的组。
-- `pick`：Bot 命令（`/use`、`/model`）给的选择，只有发起的 Bot 能答，24 小时内有效。
 
-`POST /api/answer`：`{card, option}` 或 `{card, choices: [...]}`（每组一个，多选组可多个）；选择题自己写的答案放 `words`（按组，空串是没写），顶替那一组的选择；拒绝时可带 `message` → `CardReply{ok, reply?, card?}`。已答过或撤回：410。
+`POST /api/sessions/{id}/answer`：`CardAnswer`，`{card, option}` 或 `{card, choices: [...]}`（每组一个，多选组可多个）；选择题自己写的答案放 `words`（按组，空串是没写）；拒绝时可带 `message` → `CardReply{ok}`。卡片不是这个会话的 400；已答过或撤回 410。Satori 里是 `<button type="action" id="ask:…">`（`docs/satori.md`）。
 
 ## 推送
 
-Web Push，总开关在配置 `push`，默认关。VAPID 密钥存在状态目录 `vapid.json`（0600）。下面的请求只给面板（网页面板和本机，同 `PUT /api/settings`）：TOKEN 和 agent 的 `ir` 回 403。撤销一个终端时删掉它名下的订阅。
+Web Push，总开关在配置 `push`，默认关。VAPID 密钥存在状态目录 `vapid.json`（0600）。下面的请求只给网页的登录和主机：应用的 TOKEN 和 agent 的 `ir` 回 403。删一个登录时删掉它名下的订阅。
 
 | 请求 | 正文 → 回答 | 说明 |
 |---|---|---|
-| `GET /api/push` | → `PushState` | 总开关、VAPID 公钥（订阅时的 `applicationServerKey`）、默认事件 `defaults`、规则 `rules` |
-| `PUT /api/push` | `{enabled}` | 总开关，写进配置文件 |
-| `PUT /api/push/defaults` | `PushEvents` → `PushState` | 没有规则管的地方推哪些：`needsYou`、`error`、`turnEnd`（任务完成）默认都开。没有单独的压缩事件：你发的 `/compact`（dsh 的 `/压缩`）压缩成功算一次 `turnEnd`，正文“压缩完成”，它那一回合随后的空结束不再推；agent 自己在回合中途的自动压缩不推（2026-11-08） |
-| `PUT /api/push/rules` | `PushRule` → `PushState` | 一个工作区、文件夹或会话的规则；`mode: inherit`（或空）删掉它 |
-| `POST /api/push/subscriptions` | `PushSubscription` | 浏览器 `subscription.toJSON()`，记在这个交互终端名下；只收 https |
-| `DELETE /api/push/subscriptions` | `{endpoint}` | |
-| `POST /api/push/test` | → `{sent}` | 给本终端的订阅发一条测试，不看总开关 |
+| `GET /api/web/push` | → `PushState` | 总开关、VAPID 公钥（订阅时的 `applicationServerKey`）、默认事件 `defaults`、规则 `rules` |
+| `PUT /api/web/push` | `{enabled}` | 总开关，写进配置文件 |
+| `PUT /api/web/push/defaults` | `PushEvents` → `PushState` | 没有规则管的地方推哪些：`needsYou`、`error`、`turnEnd`（任务完成）默认都开。你发的 `/compact` 压缩成功算一次 `turnEnd`；agent 自己在回合中途的自动压缩不推（2026-11-08） |
+| `PUT /api/web/push/rules` | `PushRule` → `PushState` | 一个工作区、文件夹或会话的规则；`mode: inherit`（或空）删掉它 |
+| `POST /api/web/push/subscriptions` | `PushSubscription` | 浏览器 `subscription.toJSON()`，记在这个登录名下；只收 https |
+| `DELETE /api/web/push/subscriptions` | `{endpoint}` | |
+| `POST /api/web/push/test` | → `{sent}` | 给自己的订阅发一条测试，不看总开关 |
 
-`PushRule{scope, target, mode, events?}`：`scope` 是 `workspace`（`target` 是工作区 ID，`"0"` 是没归类的）、`folder`（会话目录的绝对路径，只管这一个目录，不含子目录）、`session`（会话 ID）；`mode` 是 `on` 或 `off`；`events` 只跟 `on`，是这一层自己的事件，不带就用上面的。一个会话的事件：会话、文件夹、工作区里最近的那条规则说开还是关（都没有就开）；开的话，事件取最近一条带 `events` 的 `on` 规则的，没有就用 `defaults`。旧的按工作区设置迁移成工作区规则（全关的是 `off`，和默认一样的不留）。
+`PushRule{scope, target, mode, events?}`：`scope` 是 `workspace`（`target` 是工作区 ID，`"0"` 是没归类的）、`folder`（会话目录的绝对路径，只管这一个目录）、`session`（会话 ID）；`mode` 是 `on` 或 `off`；`events` 只跟 `on`。一个会话的事件：会话、文件夹、工作区里最近的那条规则说开还是关（都没有就开）；开的话，事件取最近一条带 `events` 的 `on` 规则的，没有就用 `defaults`。
 
-推送的内容（service worker 收到的 JSON）：`PushMessage{kind, session, title, body, tag}`，`kind` 是 `needs_you`、`error`、`turn_end`、`test`；`tag` 是会话 ID。推送服务回 404/410 的订阅删掉。
+推送的内容（service worker 收到的 JSON）：`PushMessage{kind, session, title, body, tag}`，`kind` 是 `needs_you`、`error`、`turn_end`、`notice`、`test`；`tag` 是会话 ID。推送服务回 404/410 的订阅删掉。
 
-## Bot 接入
+## 发给一个登录（`ir send 应用/登录`）
 
-Bot 用自己的 TOKEN（交互终端由门认，见 `gate.md`）；下面的“Bot”就是请求的交互终端。聊天键是 Bot 自己定的字符串（1–200 字节可打印字符，放进路径要 URL 编码）。
+`POST /api/apps/{app}/logins/{login}/notice`，`Notice{text, caller?}` → `NoticeReply`。人和 agent 的 `ir` 能发，应用的 TOKEN 不能（403）。
 
-| 请求 | 正文 → 回答 | 说明 |
-|---|---|---|
-| `POST /api/chat/{key}/input` | `ChatInput{text, sender?}` → `ChatInputReply` | 见下 |
-| `GET /api/chat/{key}` | → `ChatPointer` | 指针：当前会话，和 `/new` 用的 agent、目录 |
-| `GET /api/chat/{key}/commands` | → `ChatCommand[]` | Iridium 的命令（`iridium: true`），再加当前会话 agent 自己的，拿去设平台菜单 |
-| `GET /api/chat/{key}/files/{ref}` | → 文件 | 回复里的文件，支持 Range |
-| `POST /api/chat/{key}/uploads` | `NewUpload` → `Upload` | 往指针指着的会话传附件（没选会话回 409），之后同网页分块 `PUT`、`complete`，拿 `file.ref` 放进 `ChatInput.attachments` |
-| `POST /api/answer` | `CardAnswer` → `CardReply` | 见“卡片” |
-| `GET /api/events` | SSE | 不带 `sub`：这个 Bot 的事件 |
+- 网页的登录：作为 Web Push（`kind: notice`），标题是发出它的会话，点开到那个会话。对方要看得到那个会话（范围）。
+- 送不到时 422 `not_deliverable` 带原因：推送关着、对方没有开推送的浏览器、看不到发出它的会话、别的应用的登录（等它们走 Satori）。没有这个应用、登录：422 `no_such_app`、`no_such_login`。
 
-收消息：
+## 应用的接口
 
-- 不以 `/` 开头：交给指针指着的会话，回合在跑就并进去（插话，同 IM）。没有指针（或会话没了）：不开会话、消息不发，`card` 是标题“未选择会话”的选会话卡片（同 `/use`），一个会话都没有时 `reply` 提示 `/new`。`/new` 按指针的默认（没有就 `claude` 和配置 `chatDir`，再没有是家目录）开。
-- 以 `/` 开头：是 Iridium 命令就在这里做，回答直接在 `reply`（Markdown 和去掉标记的文字）或 `card` 里；不是就原样交给 agent（透传）。
-- 来源标记：`[Bot 名·sender]`，`sender` 去掉 `[ ] / : ·`，最多 24 字。
-
-命令：`/new [agent] [目录]`（目录可以是绝对路径、`~/…` 或相对指针的目录）、`/clear`（同 `send` 的 `/clear`，指针换到新会话）、`/use [ID 开头]`（不带参数：在会话里时给当前会话所在文件夹的卡片，否则给选组的卡片，见 `docs/qq.md`；文件夹卡片末尾有“回到上一级”（子文件夹才有）、“回到根目录”；在会话里时卡片最后一项是“离开当前会话”）、`/leave`（指针不指任何会话，列表上不再标这个 Bot）、`/ls`、`/history [轮数]`（最近几轮，默认 5，最多 10，一条消息）、`/stop`、`/model [值]`（不带参数给卡片）、`/status`、`/usage`、`/context`。
-
-事件流：`GET /api/events`，带 `Last-Event-ID`（或 `?after=<序号>`）从它之后接着收；都不带就从现在起。每条 `id: <序号>`，`event:` 是类型，`data:` 是 `ChatEvent`（都带 `chat`、`session`）：
-
-| 类型 | 带什么 |
-|---|---|
-| `progress` | `text`：回合中 agent 说的一段话（最后一段是 `reply`，不在这里） |
-| `reply` | `reply{markdown, text, files[]}`：回合的最终回复；`files` 是回复里 `` [文件] `绝对路径` `` 行给的、存在的文件，再接文件链接（`ir:<id>`）给的（名字、大小、类型、`ref`）；这些行、图片链接和 `[标题] …` 行都不在 `markdown`、`text` 里，文件链接 `[字](ir:id)` 只留字 |
-| `card`、`card_done` | 提问出现（`card`）；已答或撤回（`cardId`），网页答的也发 |
-| `error` | `text`：agent 进程出错退出 |
-| `status` | `status`：状态灯变了 |
-
-- 只发指针指着这个会话的聊天。例外：没有聊天指着的会话，它的提问（`card`、`card_done`）发给跟随（见下）发起这一回合的面板的 Bot，以及这一回合本身是从哪个 Bot 发起的那个 Bot，每个 Bot 一个聊天（选法见下）；没有就谁都不发，只在网页上（用户，2026-11-09）。卡片标题换成会话（`[CC] 名字`），原标题放到 `summary` 第一行；在那里答，指针不动，别的 Bot 收到 `card_done`。
-- 跟随（用户，2026-11-09）：`PUT /api/terminals/{bot}/follows`，`SetFollows{panels}`（网页面板的 ID 或名字，本机不行），只有面板权能改；`Terminal.follows` 列出。发起者按回合算：发这一回合那条消息的终端；是 agent 用 `ir send`、`ir new` 派来的（消息标 `ir:<会话>`），就取那个会话当时那一回合的发起者，再往上同理（守护进程重启前看到的为准，之后取派活会话的开启者）。终端删掉，跟随一起删。事件存库 24 小时（`outbox` 表），过期删掉。
-- `/use` 选中会话时，回复带最近 3 轮：`# 近期消息预览`，每轮 `[发送者] 消息`（60 字）、`[CC] 回复`（160 字），过长的去掉中间、留头尾，轮间 `---`；合计不超过 1500 字，在跑的写“进行中”，一条消息发完。
-
-会话找你（`ir bot "消息" [--to bot]`，2026-11-08）：`POST /api/bot`，`BotLetter{text, to?, caller}` → `BotReply{bot, name, chat, letter}`。只认 socket 上在会话里跑的 `ir`（`X-Iridium-Session` 或 `caller`），否则 400；`to` 是 Bot 终端的名字，没有回 404。
-
-- 有聊天指着这个会话：当作它的 `reply` 发过去。
-- 没有：发给跟随发起这一回合的面板的 Bot（同提问）；一个都没有时照旧选一个聊天。发的是 `card`（`pick`）：标题是会话，`summary` 是消息，选项“进入会话”（选项 ID 是会话 ID，等于 `/use` 它）和“关闭”（`-`，什么都不做）。不点直接说话，照旧进聊天指着的会话。
-- 选哪个聊天：只看连着事件流的 Bot（都没连就不限），能用这个会话的；最近有过这个会话的聊天优先，其次你最后说话的聊天（QQ 一小时内被动回复不耗额度）。记录在 `chat_seen` 表（Bot、聊天、会话、时间：发消息、跑命令、切会话时记）。一个都没有回 404。
-- `ref` 只对这个 Bot 有效，签过名，重启后照样能用；`~/.ssh`、`~/.claude`、`~/.codex`、`~/.pi`、Iridium 的状态和配置目录里的文件一律不给。
-- 例子：`examples/plugin/echo_im.py`（只用标准库）把 stdin/stdout 当成一个假 IM。
-- `ChatInput.attachments`：上面传好的引用，路径写进消息、图片照样给 agent（同网页）；只有附件没有文字也行。
-
-Bot 切到会话（网页会话右键菜单、聊天页 ⋯ 菜单的最底下，2026-11-08）：`POST /api/sessions/{id}/bot`，`BringBot{bot}` → `BotReply{bot, name, chat}`。只有面板和本机；`bot` 不是 Bot 终端回 404。聊天的选法同上，指针改到这个会话，并发一条 `reply`，内容同 `/use`。没有能用这个会话的聊天回 404。`Terminal.bot`：有过聊天、或此刻连着事件流的插件，菜单按它列；已在这个会话里的不列，Claude 会话不列没有 Claude 的。`Terminal.chatless`：还没有聊天的 Bot，菜单项灰着，写「尚无对话」。插件第一次有聊天、事件流连上或断开时，服务端推 `terminals` 变更，网页重取终端列表。
-
-## 官方 Bot
-
-Iridium 不内置、但认得名字的 Bot（现在只有 QQ Bot `qq`，二进制 `iridium-qq`，见 `docs/qq.md`）。只有人能用（面板，或本机人跑的 `ir`）；agent 回 403，用扩展自己的命令行。
-
-| 请求 | 正文 → 回答 | 说明 |
-|---|---|---|
-| `GET /api/extensions` | → `Extension[]` | 装没装、正在做什么、上次的错、扩展的每个 Bot（`bots`，`iridium-qq list --json`，带终端在线数）、扫码中的二维码 |
-| `POST /api/extensions/{id}/install` | → `Extension` | 从同版本的 Release 下二进制放在 Iridium 旁边（校验 sha256、跑一次）；开发版用旁边的 `<名>.dist` |
-| `POST /api/extensions/{id}/bind` | → `Extension` | 开始扫码，回答带第一张二维码；扫完 Iridium 建终端、把 TOKEN 写进那个 Bot 的目录（同 `--into`；本人才带 Claude）、启动它的服务。新 Bot 多一个，扫过的 Bot 更新 |
-| `DELETE /api/extensions/{id}/bind` | → `Extension` | 取消扫码 |
-| `POST /api/extensions/{id}/start`、`stop`、`pair` | → `Extension` | 服务开关；新配对码（在 `bots[].pair`）。`?bot=<AppID>` 指定 Bot，start、stop 不带就是全部 |
-| `DELETE /api/extensions/{id}` | → `Extension` | 停全部服务、删配置和二进制、撤销它的全部终端 |
-
-网页只用 `install`、`bind`、取消扫码；撤销（`DELETE /api/terminals/{id}`、`ir revoke`）一个官方 Bot 的终端时，Iridium 顺带让那个 Bot `remove`（停它的服务、删它的配置；别的 Bot 和二进制留着）。
-
-- Iridium 启动时（更新之后）把装了的扩展换成同版本，服务在跑就重启。
+0.1 的聊天层（`/api/chat/*`、`/api/bot`、`POST /api/sessions/{id}/bot`、跟随、聊天指针、插件的 `/api/events`）删了（2026-11-10）。应用改用 **Satori with ir**：见 `docs/satori.md`。官方应用不再由 Iridium 安装，`GET /api/catalogue` 只列安装命令（见“应用和登录”）。
 
 ## 应用和登录
 
