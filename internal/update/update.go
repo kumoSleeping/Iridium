@@ -93,6 +93,9 @@ type Options struct {
 	Current string        // this binary's version
 	// Auto: download a newer version as soon as it is seen; Apply then only swaps and restarts.
 	Auto bool
+	// Manual: automatic updates are off (config update.manual, the settings' 自动更新): no
+	// looking on a timer, nothing downloaded ahead; only Check and Apply when asked.
+	Manual bool
 	// Exe is the binary to replace; "" is this process's own (links resolved).
 	Exe string
 	// Restart runs once the new binary is in place: it restarts the service (or this process).
@@ -114,6 +117,7 @@ type Updater struct {
 	st       api.UpdateState
 	latest   *Manifest
 	auto     bool
+	manual   bool
 	staged   string // the path of the downloaded st.Latest, "" for none
 	stagedV  string
 }
@@ -134,7 +138,7 @@ func New(o Options) *Updater {
 	if o.GitHubAPI == "" {
 		o.GitHubAPI = "https://api.github.com"
 	}
-	return &Updater{o: o, auto: o.Auto, st: api.UpdateState{Current: o.Current, Source: o.Source != "", Auto: o.Auto, Phase: "idle"}}
+	return &Updater{o: o, auto: o.Auto, manual: o.Manual, st: api.UpdateState{Current: o.Current, Source: o.Source != "", Auto: o.Auto, Manual: o.Manual, Phase: "idle"}}
 }
 
 // State is the update state now.
@@ -153,8 +157,18 @@ func (u *Updater) set(f func(*api.UpdateState)) api.UpdateState {
 	return st
 }
 
+// SetManual turns automatic updates off (true) or on again: on, a newer version already seen
+// starts downloading.
+func (u *Updater) SetManual(manual bool) {
+	u.mu.Lock()
+	u.manual = manual
+	u.mu.Unlock()
+	u.set(func(s *api.UpdateState) { s.Manual = manual })
+	u.fetchAhead()
+}
+
 // Run drops what an earlier run left staged, checks a minute after it starts, then every Every,
-// until ctx ends.
+// until ctx ends; with automatic updates off it does not look.
 func (u *Updater) Run(ctx context.Context) {
 	if u.o.Source == "" {
 		return
@@ -172,6 +186,13 @@ func (u *Updater) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+		}
+		u.mu.Lock()
+		manual := u.manual
+		u.mu.Unlock()
+		if manual {
+			t.Reset(u.o.Every)
+			continue
 		}
 		if _, err := u.Check(ctx); err != nil {
 			u.o.Logf("update: %v", err)
@@ -225,11 +246,11 @@ func (u *Updater) idle() string {
 	return "idle"
 }
 
-// fetchAhead downloads the latest in the background, if it is newer, auto download is on and it
-// is not already here or on its way.
+// fetchAhead downloads the latest in the background, if it is newer, auto download is on,
+// automatic updates are not off and it is not already here or on its way.
 func (u *Updater) fetchAhead() {
 	u.mu.Lock()
-	m, want := u.latest, u.auto && u.latest != nil && Newer(u.latest.Version, u.o.Current) && u.stagedV != u.latest.Version
+	m, want := u.latest, u.auto && !u.manual && u.latest != nil && Newer(u.latest.Version, u.o.Current) && u.stagedV != u.latest.Version
 	u.mu.Unlock()
 	if !want || !u.prep.TryLock() {
 		return

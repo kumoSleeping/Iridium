@@ -42,6 +42,7 @@ export function SettingsPage({ theme, setTheme, initial = "main" }: { theme: The
   const manages = !!me && (me.local || me.kind === "panel");
   const terminals = useTerminals().data?.terminals ?? [];
   const confirms = useConfirms();
+  const upd = useUpdate().data;
   const put = async (p: SettingsPatch) => {
     if (!s) return;
     const next: Settings = { ...s, ...(p as Partial<Settings>), modes: p.modes ? Object.fromEntries(Object.entries({ ...s.modes, ...p.modes }).filter(([, v]) => v)) : s.modes, quotaHidden: p.quotaHidden ?? s.quotaHidden };
@@ -166,6 +167,12 @@ export function SettingsPage({ theme, setTheme, initial = "main" }: { theme: The
               ]}
             />
           </Item>
+          {/* 自动更新: off, nothing is looked for or downloaded unasked; 检查更新 still does it all. */}
+          {manages && upd?.source && (
+            <Item label={t("settings.autoUpdate")}>
+              <Switch label={t("settings.autoUpdate")} disabled={off} on={s?.autoUpdate ?? !upd.manual} onChange={(v) => void put({ autoUpdate: v })} />
+            </Item>
+          )}
           <UpdateItem manages={manages} />
           {me && !me.local && <SignOut />}
         </div>
@@ -260,7 +267,7 @@ const STALE = 3_600_000;
  *  2026-11-08). A newer one out, 版本 with its version and the 更新 key, or how far its
  *  download is, a hairline along the row's foot; pressing the title opens its notes, the current
  *  version and the size under it. Those who do not manage see the versions, no key. Release builds download a newer one ahead
- *  by themselves; there is no switch for it. */
+ *  by themselves unless 自动更新 is off (u.manual); then the page does not look on opening either. */
 function UpdateItem({ manages }: { manages: boolean }) {
   const lang = useLang();
   const u = useUpdate().data;
@@ -285,7 +292,7 @@ function UpdateItem({ manages }: { manages: boolean }) {
     );
   };
   // Opened with the last look stale: look now, saying nothing if it fails.
-  const stale = manages && !!u?.source && u.phase === "idle" && Date.now() - (u.checkedAt ?? 0) > STALE;
+  const stale = manages && !!u?.source && !u.manual && u.phase === "idle" && Date.now() - (u.checkedAt ?? 0) > STALE;
   useEffect(() => {
     if (stale) look();
     // eslint-disable-next-line react-hooks/exhaustive-deps
