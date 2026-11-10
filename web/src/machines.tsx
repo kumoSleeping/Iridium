@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import type { Machine } from "./api/types.gen";
 import { t } from "./i18n";
 import { useMachines } from "./store";
+import { remotePath } from "./tree";
 import { cn } from "./ui";
 
 /** The machine a session or a folder group runs at: by ID, as the carried "machines" lists them. */
@@ -34,6 +35,13 @@ export function remoteOf(path: string, ms: Machine[]): { m: Machine; cwd: string
   if (!m) return undefined;
   const p = path.slice(m.id.length + 1);
   return { m, cwd: m.sep === "\\" ? p.replaceAll("/", "\\") : p };
+}
+
+/** Whose agents a folder offers (docs/exec.md "远端工作区", 2026-11-10): this machine's for one
+ *  here; at another, that machine's alone, in its own path there; none ("gone") for one at a machine
+ *  no more there (its Bot gone). */
+export function agentsAt(path: string, ms: Machine[]): "here" | "gone" | { m: Machine; cwd: string } {
+  return remoteOf(path, ms) ?? (remotePath(path) && !path.startsWith("~") ? "gone" : "here");
 }
 
 function WindowsMark({ size }: { size: number }) {

@@ -225,7 +225,8 @@ export function Sidebar(p: Props) {
         const { tree, expanded, toggle, reveal } = now.current;
         const path = at.machine ? `${at.machine}:${at.path}` : at.path;
         const w = tree.workspaces.find((w) => w.id !== 0 && inside(path, w.root));
-        if (!w) return createAt(at);
+        // On a phone the sheet comes out first: the "+" is on it.
+        if (!w) return reveal?.(), createAt(at);
         const f = w.rows.flatMap((r) => (r.kind === "folder" && inside(path, r.f.path) ? [r.f] : []))[0];
         if (!expanded(w.key)) toggle(w.key);
         if (f && !expanded(f.key)) toggle(f.key);
