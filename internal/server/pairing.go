@@ -53,9 +53,10 @@ type pairReq struct {
 
 func newPairs() *pairs { return &pairs{reqs: map[string]*pairReq{}} }
 
-// openPath reports whether r is a pairing request, or the app's icons and manifest: the gate lets
-// these through without a login. A browser fetches the manifest without cookies, and the login
-// page is what a phone adds to its home screen first.
+// openPath reports whether r is a pairing request, Satori's event stream (its IDENTIFY carries the
+// TOKEN), or the app's icons and manifest: the gate lets these through without a login. A browser
+// fetches the manifest without cookies, and the login page is what a phone adds to its home screen
+// first.
 func openPath(r *http.Request) bool {
 	switch {
 	case (r.Method == http.MethodGet || r.Method == http.MethodHead) &&
@@ -65,6 +66,8 @@ func openPath(r *http.Request) bool {
 		return true
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/pair/"):
 		return true
+	case r.Method == http.MethodGet && r.URL.Path == "/v1/events":
+		return true // Satori's IDENTIFY carries the TOKEN (package satori checks it)
 	}
 	return false
 }

@@ -32,6 +32,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/pricing"
 	"github.com/kumoSleeping/iridium/internal/push"
 	"github.com/kumoSleeping/iridium/internal/remote"
+	"github.com/kumoSleeping/iridium/internal/satori"
 	"github.com/kumoSleeping/iridium/internal/session"
 	"github.com/kumoSleeping/iridium/internal/store"
 	"github.com/kumoSleeping/iridium/internal/transcript"
@@ -77,7 +78,8 @@ type Server struct {
 	// Remote, if set, takes executors' connections at /api/exec (docs/exec.md).
 	Remote *remote.Hub
 
-	files *files.Service // routes_files.go
+	files *files.Service  // routes_files.go
+	sat   *satori.Service // /v1/: Satori with ir (satori.go)
 }
 
 // New is the API over m. The interactive terminals live in m's store, behind the Passkey gate
@@ -93,6 +95,8 @@ func New(cfg config.Config, m *session.Manager, h *hub.Hub, logf func(string, ..
 	s.vault = newVault()
 	s.reloadSecrets()
 	m.SetAnnotate(s.files.AnnotateBlocks) // a state's tail names files as a page of messages does
+	s.sat = satori.New(satoriBackend{s}, logf)
+	m.Watch(s.sat.Notice)
 	g, err := s.newGate(cfg.Public.Origin)
 	if err != nil {
 		s.initErr = err
@@ -105,8 +109,11 @@ func New(cfg config.Config, m *session.Manager, h *hub.Hub, logf func(string, ..
 	return s
 }
 
-// Close closes the gate.
-func (s *Server) Close() { s.gate().Close() }
+// Close closes the gate and stops Satori's events.
+func (s *Server) Close() {
+	s.gate().Close()
+	s.sat.Close()
+}
 
 // Handler is the API. local: requests come from the unix socket, from the local ir.
 func (s *Server) Handler(local bool) http.Handler {

@@ -142,3 +142,45 @@
 - 登录的权限（改权限）没做：登录的 `perms` 还只是占位，S2 一起做。
 - “带的 agent 开关”没做：开关属于 S3（hello 报 agent、主机上的应用去 agent），现在只读显示。
 - 截图时注意：在 agent 会话里跑测试 daemon 的 `ir`，要去掉 `IRIDIUM_SESSION`、`CLAUDECODE` 等变量并给它一个终端（`script -qec`），不然会被当成 agent 拒绝。这是对的行为。
+
+## S4b Satori
+
+做了什么：
+- 新包 `internal/satori`，说明在 `docs/satori.md`：
+  - `elements.go`：元素的解析和编码（转义、数字引用、注释、不成对的标签当文字、换行空白），`Plain` 把元素转成给 agent 的文字。解析是线性的（不成对标签、没闭合的引号都不会变成平方）；有模糊测试。
+  - HTTP `POST /v1/{资源}.{方法}`：`message.create/get/list`、`channel.get/list`、`guild.get/list`、`login.get`、`user.get`、`upload.create`，`POST /v1/meta`，`GET /v1/proxy/internal:…`，`POST /v1/internal/button`。
+  - WebSocket `/v1/events`：IDENTIFY（TOKEN、`sn` 续传）、READY、PING/PONG、EVENT。事件是 `message-created`（progress、reply、ask、error）、`message-updated`（提问结束）、`interaction/button`。
+  - 通过 `Backend` 接口用 server 的逻辑，不引用 server 包。
+- server：`internal/server/satori.go` 实现 `Backend`（发消息走 `checkSend` + `files.Message` + `SendWith`，答卡片走 `using` + `AnswerCard`，上传走 `CreateUpload/Put/Complete`），错误按决定 28 映射成 422 加原因码。
+- 登录由 `Satori-User-ID` 选，沿用 `withLogin`（新登录 403 `login_pending` 加需要）。
+- 测试：`internal/satori` 用假 Backend 测握手、续传、错误码、分页、按钮、上传和代理；`internal/server/satori_test.go` 对真 daemon 和假 Claude 走一遍（登录加入、发消息收回复、审批按钮、两个问题累计提交、上传后发附件、删应用断开）。
+
+和计划不一样的地方：
+- outbox 在内存里（24 小时、最多 1 万条），没进库：不用加迁移，也不和别的步骤抢 schema 编号。重启后续传补不回之前的事件；`sn` 从启动时刻的毫秒数开始，不会倒退。决定 26 说存库，要的话之后把 `outbox` 换成 store 实现。
+- 一个事件按登录各发一份，`sn` 相同。
+- agent 说的话先在记录里找对应的块，用块的位置作 `message.id`（和 `message.list` 一致）；找不到就是 `live:…`。
+- 按钮按下走 `POST /v1/internal/button`（Satori 没有“应用按按钮”的接口）；`type="input"` 的回答走 `message.create`，以按钮的 `text` 开头。
+- guild 用网页的文件夹组，加一个 `loose`（未分组）。
+- 没做：`login-*`、`channel-*` 事件，META 信令，webhook，自定义 op（草稿、状态、“正在看”），`proxy_urls`。
+
+共用文件的改动（合并时注意）：
+- `internal/server/server.go`：`Server.sat` 字段；`New` 里 `satori.New` 和 `m.Watch(s.sat.Notice)`；`Close` 里 `s.sat.Close()`。
+- `internal/server/access.go`：`webHandler` 加 `s.withSatori`（在 `withLogin` 里面、`WrapApp` 外面）。
+- `internal/server/pairing.go`：`openPath` 放过不带 TOKEN 的 `GET /v1/events`（TOKEN 在 IDENTIFY 里，由 satori 查）。
+- `web/vite.config.ts`：代理 `/v1`（含 WebSocket）。
+- `go.mod` 没改：`github.com/coder/websocket` 本来就在（`go mod tidy` 会把它挪到直接依赖，主线原来就这样）。
+
+合并时要接的：
+- S2 权限：
+  - `satoriBackend.Sees`（现在全部可见）换成登录范围 ∩ 应用范围；`channel.list`、`guild.list`、事件投递、代理都经过它。
+  - `callerAs` 现在把登录当成所属应用（`Identity.ID()` 是应用 ID）；S2 的登录权限要让 `checkSend`、`using`（Send、Answer、Upload）按登录查。
+  - `satoriBackend.File` 只查 ref，没查权限（同 `/api/sessions/{id}/files`），S2 一起加。
+  - `_data.origin` 现在是 `Notice.From`（应用 ID）；决定 18 的 `inputs.login` 做好后换成登录。
+  - 不允许的 agent 的会话（决定 16）：现在发消息、答提问按 `access.Agent` 拒绝（403 `no_permission`），读照常。
+- S4a 删聊天层：
+  - satori 只用 `session.Manager.Watch` 的 Notice 和 `Manager.AnswerCard`，不用 `internal/chat`；删聊天层不影响它。`/api/answer` 并进 `/sessions/{id}/answer` 后，按钮仍直接调 `AnswerCard`。
+  - “auto 拦了 N 步”的文案从聊天层抄过来，在 `events.go`。
+  - `channel-*`（会话新建、改名、归档）和 `login-*` 事件要从 hub 的 `list`/`terminals` 变化里做，加在 `Service.emit`。
+  - 聊天层的 store outbox（`Post`、`PruneOutbox`）删掉后，若决定 26 仍要存库，satori 的 `outbox` 换成新的 store 表。
+  - QQ 桥之后改成 Satori 客户端时用 `/v1/events` 和 `message.create`。
+- S5：server 里其余的 404 → 422 和这里的原因码统一；`docs/api.md` 加一节指向 `docs/satori.md`。

@@ -102,7 +102,12 @@ export default defineConfig({
     host: "127.0.0.1",
     port: 7820,
     // The daemon's own guard takes the page's Host and Origin as they are: keep the Host.
-    proxy: { "/api": { target: api, changeOrigin: false }, "/_ir": { target: api, changeOrigin: false } },
+    proxy: {
+      "/api": { target: api, changeOrigin: false },
+      "/_ir": { target: api, changeOrigin: false },
+      // Satori with ir (its WebSocket too), for an app tried against the dev server.
+      "/v1": { target: api, changeOrigin: false, ws: true },
+    },
   },
   test: {
     environment: "happy-dom",
