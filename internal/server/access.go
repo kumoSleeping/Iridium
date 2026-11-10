@@ -13,6 +13,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/access"
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/gate"
+	"github.com/kumoSleeping/iridium/internal/satori"
 	"github.com/kumoSleeping/iridium/internal/session"
 	"github.com/kumoSleeping/iridium/internal/webapp"
 	"github.com/kumoSleeping/iridium/internal/webui"
@@ -190,6 +191,10 @@ func (l logWriter) Write(b []byte) (int, error) {
 // does not send it, and a session in the environment is an agent's.
 func (s *Server) fromOf(c caller, callerSession string) string {
 	if !c.socket && c.session == "" {
+		// A login of an app (not ir_web's): counted to the app, the login kept with the message.
+		if c.Login != "" && !c.Web() && !c.Host() {
+			return session.FromLogin(c.App, c.Login, sourceTag(satori.Caller{AppName: s.Tag(c.App), LoginName: c.Name}))
+		}
 		return c.ID()
 	}
 	from := c.session

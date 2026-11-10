@@ -17,6 +17,8 @@ import (
 	"time"
 
 	_ "modernc.org/sqlite"
+
+	"github.com/kumoSleeping/iridium/internal/api"
 )
 
 // schema is every version's migration, in order; PRAGMA user_version says how many ran. Only
@@ -215,6 +217,8 @@ var schema = []string{
 	DELETE FROM outbox;`,
 	// 29: the agents an app carries that are turned off there (machines.go): a JSON list, '' none.
 	`ALTER TABLE apps ADD COLUMN agents_off TEXT NOT NULL DEFAULT '';`,
+	// 30: the login of the app an input came from (not ir_web's: its terminal is its login).
+	`ALTER TABLE inputs ADD COLUMN login TEXT NOT NULL DEFAULT '';`,
 }
 
 // steps run in Go after the migration of their version, in the same transaction.
@@ -560,6 +564,7 @@ type Input struct {
 	ID       string
 	Session  string
 	Terminal string // who sent it: the interactive terminal's ID
+	Login    string // and the login of that app it came from, if one (not ir_web's: Terminal is it)
 	Tag      string // the source it is prefixed with, "[Tag] ": the terminal's name then; "" is Terminal
 	Text     string
 	State    string // queued, paused, sent
@@ -574,8 +579,8 @@ func (s *Store) AddInput(in Input) error {
 	if in.State == "sent" {
 		sent = in.Created
 	}
-	_, err := s.db.Exec(`INSERT INTO inputs (id, session, terminal, tag, text, state, created_at, sent_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		in.ID, in.Session, in.Terminal, in.Tag, in.Text, in.State, in.Created, sent)
+	_, err := s.db.Exec(`INSERT INTO inputs (id, session, terminal, login, tag, text, state, created_at, sent_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		in.ID, in.Session, in.Terminal, in.Login, in.Tag, in.Text, in.State, in.Created, sent)
 	return err
 }
 
@@ -597,9 +602,19 @@ func (s *Store) Source(id string) (terminal, tag string, ok bool) {
 	return terminal, tag, true
 }
 
+// Sender is Source for a transcript (transcript.Sources): the terminal with the login it came
+// from, if one, as api.Sender joins them.
+func (s *Store) Sender(id string) (terminal, tag string, ok bool) {
+	var login string
+	if s.db.QueryRow(`SELECT terminal, login, IIF(tag = '', terminal, tag) FROM inputs WHERE id = ?`, id).Scan(&terminal, &login, &tag) != nil {
+		return "", "", false
+	}
+	return api.Sender(terminal, login), tag, true
+}
+
 // Queued is the session's inputs not sent yet, oldest first.
 func (s *Store) Queued(session string) ([]Input, error) {
-	rows, err := s.db.Query(`SELECT id, session, terminal, tag, text, state, created_at FROM inputs WHERE session = ? AND state != 'sent' ORDER BY created_at, rowid`, session)
+	rows, err := s.db.Query(`SELECT id, session, terminal, login, tag, text, state, created_at FROM inputs WHERE session = ? AND state != 'sent' ORDER BY created_at, rowid`, session)
 	if err != nil {
 		return nil, err
 	}
@@ -607,7 +622,7 @@ func (s *Store) Queued(session string) ([]Input, error) {
 	var out []Input
 	for rows.Next() {
 		var in Input
-		if err := rows.Scan(&in.ID, &in.Session, &in.Terminal, &in.Tag, &in.Text, &in.State, &in.Created); err != nil {
+		if err := rows.Scan(&in.ID, &in.Session, &in.Terminal, &in.Login, &in.Tag, &in.Text, &in.State, &in.Created); err != nil {
 			return nil, err
 		}
 		out = append(out, in)

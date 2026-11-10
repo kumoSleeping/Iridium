@@ -138,7 +138,7 @@ func (s *Service) channelList(ctx context.Context, c Caller, body []byte) (any, 
 			chans = append(chans, *channelOf(ss))
 		}
 	}
-	if req.GuildID != "" && len(chans) == 0 && !s.guildThere(req.GuildID) {
+	if req.GuildID != "" && len(chans) == 0 && !s.guildThere(c, req.GuildID) {
 		return nil, refuse(http.StatusUnprocessableEntity, "no_such_guild", "no guild "+req.GuildID)
 	}
 	p, next, err := page(chans, req.Next)
@@ -155,43 +155,45 @@ func nonNil[T any](l []T) []T {
 	return l
 }
 
-// guilds are the folder groups, then Loose.
-func (s *Service) guilds() []Guild {
+// guilds are the folder groups c sees, then Loose.
+func (s *Service) guilds(c Caller) []Guild {
 	var out []Guild
 	if ws, err := s.b.Workspaces(); err == nil {
 		for _, w := range ws {
-			out = append(out, Guild{ID: strconv.FormatInt(w.ID, 10), Name: w.Name})
+			if s.b.SeesGuild(c, w) {
+				out = append(out, Guild{ID: strconv.FormatInt(w.ID, 10), Name: w.Name})
+			}
 		}
 	}
 	return append(out, Guild{ID: Loose, Name: LooseName})
 }
 
-func (s *Service) guildThere(id string) bool {
-	return slices.ContainsFunc(s.guilds(), func(g Guild) bool { return g.ID == id })
+func (s *Service) guildThere(c Caller, id string) bool {
+	return slices.ContainsFunc(s.guilds(c), func(g Guild) bool { return g.ID == id })
 }
 
-func (s *Service) guildList(_ context.Context, _ Caller, body []byte) (any, error) {
+func (s *Service) guildList(_ context.Context, c Caller, body []byte) (any, error) {
 	var req struct {
 		Next string `json:"next"`
 	}
 	if err := decode(body, &req); err != nil {
 		return nil, err
 	}
-	p, next, err := page(s.guilds(), req.Next)
+	p, next, err := page(s.guilds(c), req.Next)
 	if err != nil {
 		return nil, err
 	}
 	return List[Guild]{Data: nonNil(p), Next: next}, nil
 }
 
-func (s *Service) guildGet(_ context.Context, _ Caller, body []byte) (any, error) {
+func (s *Service) guildGet(_ context.Context, c Caller, body []byte) (any, error) {
 	var req struct {
 		GuildID string `json:"guild_id"`
 	}
 	if err := decode(body, &req); err != nil {
 		return nil, err
 	}
-	for _, g := range s.guilds() {
+	for _, g := range s.guilds(c) {
 		if g.ID == req.GuildID {
 			return g, nil
 		}

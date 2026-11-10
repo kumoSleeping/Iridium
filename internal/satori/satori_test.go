@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -114,6 +115,10 @@ func (f *fake) Session(id string) (*api.SessionState, error) {
 	c := *s
 	return &c, nil
 }
+
+func (f *fake) SeesGuild(Caller, api.Workspace) bool { return true }
+
+func (f *fake) Patch(context.Context, Caller, string, api.SessionPatch) error { return nil }
 
 func (f *fake) Workspaces() ([]api.Workspace, error) {
 	return []api.Workspace{{ID: 7, Name: "proj", Path: "/w"}}, nil
@@ -484,8 +489,8 @@ func TestHandshake(t *testing.T) {
 	}
 }
 
-// What the agent says comes as message-created to each login, progress and reply; resumed by sn,
-// what was missed comes again.
+// What the agent says comes as message-created to each login (each with an sn of its own),
+// progress and reply; resumed by sn, what was missed comes again, even between two logins.
 func TestEventsAndResume(t *testing.T) {
 	r := newRig(t)
 	r.f.addSession("s1", 2)
@@ -505,7 +510,7 @@ func TestEventsAndResume(t *testing.T) {
 	}
 	p, rep := evs[0], evs[2]
 	if p.Type != "message-created" || p.XData.Kind != "progress" || p.Message.ID != "10.0" || p.Login.User.ID != "u1" || evs[1].Login.User.ID != "u2" ||
-		p.Channel.ID != "s1" || p.Guild.ID != Loose || p.User.ID != "claude" || p.XData.Origin != "app1" || p.SN != evs[1].SN {
+		p.Channel.ID != "s1" || p.Guild.ID != Loose || p.User.ID != "claude" || p.XData.Origin != "app1" || evs[1].SN != p.SN+1 {
 		t.Fatalf("progress: %+v %+v %+v", p, p.Message, p.XData)
 	}
 	if rep.XData.Kind != "reply" || rep.Message.Content != "done ******" || !strings.HasPrefix(rep.Message.ID, "live:") || rep.SN <= p.SN {
@@ -517,12 +522,19 @@ func TestEventsAndResume(t *testing.T) {
 	r.s.Notice(session.Notice{Session: "s1", Kind: session.NoticeTurnEnd, Text: "later"})
 	time.Sleep(100 * time.Millisecond)
 	w = r.dial(nil)
-	w.send(OpIdentify, Identify{Token: "ir_good", SN: rep.SN})
+	w.send(OpIdentify, Identify{Token: "ir_good", SN: evs[3].SN})
 	w.want(OpReady, nil)
 	var ev Event
 	w.want(OpEvent, &ev)
 	if ev.Message == nil || ev.Message.Content != "later" || ev.SN <= rep.SN {
 		t.Fatalf("resumed: %+v", ev)
+	}
+	w.c.CloseNow()
+	w = r.dial(nil)
+	w.send(OpIdentify, Identify{Token: "ir_good", SN: p.SN}) // u1 had it, u2 not yet
+	w.want(OpReady, nil)
+	if w.want(OpEvent, &ev); ev.SN != evs[1].SN || ev.Login.User.ID != "u2" {
+		t.Fatalf("resumed between two logins: %+v", ev)
 	}
 	// message.get finds what was said live, kept with its events.
 	var m Message
@@ -616,3 +628,88 @@ func TestAskButtons(t *testing.T) {
 		t.Errorf("submitted: %+v", r.f.answers[n:])
 	}
 }
+
+// message.create: <message> elements each a message of its own; a data: URL stored as an upload.
+func TestCreateSplitAndDataURL(t *testing.T) {
+	r := newRig(t)
+	r.f.addSession("s1", 0)
+	var out []Message
+	content := `<message>one</message><message>two <img src="data:image/png;base64,aGk=" title="a.png"/></message>`
+	if status, e := r.as("u1", "message.create", map[string]string{"channel_id": "s1", "content": content}, &out); status != 200 || len(out) != 2 {
+		t.Fatalf("message.create: %d %+v %+v", status, e, out)
+	}
+	r.f.mu.Lock()
+	sent := slices.Clone(r.f.sent)
+	r.f.mu.Unlock()
+	if len(sent) != 2 || sent[0] != "u1: one " || sent[1] != "u1: two refa.png" {
+		t.Fatalf("sent: %q", sent)
+	}
+}
+
+// Sessions coming, renamed and archived go out as channel events; a login approved, as
+// login-added to its app; what was kept, kept across a restart.
+func TestChannelLoginEventsKept(t *testing.T) {
+	r := newRig(t)
+	k := &memKeeper{}
+	r.s.Keep(k)
+	r.f.addSession("s1", 0)
+	s1 := r.f.sessions["s1"].Session
+	r.s.Sessions([]api.Session{s1}) // where it starts: nothing
+	w := r.dial(nil)
+	w.send(OpIdentify, Identify{Token: "ir_good"})
+	w.want(OpReady, nil)
+	r.f.addSession("s2", 0)
+	s2 := r.f.sessions["s2"].Session
+	r.s.Sessions([]api.Session{s1, s2})
+	renamed := s1
+	renamed.Name = "new name"
+	r.s.Sessions([]api.Session{renamed, s2})
+	gone := s2
+	gone.Archived = true
+	r.s.Sessions([]api.Session{renamed, gone})
+	var types []string
+	for range 6 { // each to two logins
+		var ev Event
+		w.want(OpEvent, &ev)
+		types = append(types, ev.Type+":"+ev.Channel.ID)
+	}
+	want := []string{"channel-added:s2", "channel-added:s2", "channel-updated:s1", "channel-updated:s1", "channel-removed:s2", "channel-removed:s2"}
+	if !slices.Equal(types, want) {
+		t.Fatalf("channel events: %v", types)
+	}
+	r.s.LoginEvent("app1", "login-added", LoginInfo{ID: "u3", Name: "Cy"})
+	var ev Event
+	if w.want(OpEvent, &ev); ev.Type != "login-added" || ev.Login == nil || ev.Login.User.ID != "u3" || ev.Login.Platform != "app1" {
+		t.Fatalf("login-added: %+v", ev)
+	}
+	// Kept: a new service finds them.
+	if len(k.kept) != 4 {
+		t.Fatalf("kept %d", len(k.kept))
+	}
+	s2nd := New(r.f, t.Logf)
+	defer s2nd.Close()
+	s2nd.Keep(k)
+	if es, _ := s2nd.out.after(0); len(es) != 4 || es[3].ev.Type != "login-added" || s2nd.out.last() < es[3].sn {
+		t.Fatalf("after a restart: %d", len(es))
+	}
+}
+
+type memKeeper struct {
+	mu   sync.Mutex
+	kept [][]byte
+}
+
+func (k *memKeeper) Keep(_, _ string, b []byte) error {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	k.kept = append(k.kept, b)
+	return nil
+}
+
+func (k *memKeeper) Kept(time.Time) ([][]byte, error) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	return slices.Clone(k.kept), nil
+}
+
+func (k *memKeeper) Drop(time.Time) error { return nil }

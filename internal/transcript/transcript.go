@@ -653,7 +653,8 @@ func blocksOf(off int64, raw []byte, max int, sources Sources) []api.Block {
 			b := api.Block{Kind: api.BlockKindUser, Text: text, ID: uuid}
 			if sources != nil && uuid != "" {
 				if terminal, tag, ok := sources(uuid); ok {
-					b.From, b.FromTerminal = tag, terminal
+					b.From = tag
+					b.FromTerminal, b.FromLogin = api.SplitSender(terminal)
 					b.Text = strings.TrimPrefix(text, "["+tag+"] ")
 				}
 			}

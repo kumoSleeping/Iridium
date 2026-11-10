@@ -83,6 +83,8 @@ type Server struct {
 
 	files *files.Service  // routes_files.go
 	sat   *satori.Service // /v1/: Satori with ir (satori.go)
+	// stopList stops giving Satori the session list (its channel events).
+	stopList func()
 }
 
 // New is the API over m. Apps and logins live in m's store; on the TCP address ir_web (package
@@ -100,7 +102,11 @@ func New(cfg config.Config, m *session.Manager, h *hub.Hub, logf func(string, ..
 	s.reloadSecrets()
 	m.SetAnnotate(s.files.AnnotateBlocks) // a state's tail names files as a page of messages does
 	s.sat = satori.New(satoriBackend{s}, logf)
+	s.sat.Keep(satoriKeeper{s.st})
 	m.Watch(s.sat.Notice)
+	lctx, lstop := context.WithCancel(context.Background())
+	s.stopList = lstop
+	go s.watchList(lctx)
 	s.wireNeeds()
 	if err := s.openGate(); err != nil {
 		s.initErr = err
@@ -125,6 +131,9 @@ func (s *Server) Close() {
 	}
 	if s.g != nil {
 		s.g.Close()
+	}
+	if s.stopList != nil {
+		s.stopList()
 	}
 	s.sat.Close()
 }
@@ -395,6 +404,10 @@ func (s *Server) sendAs(ctx context.Context, c caller, from, id string, req api.
 	}
 	if input == session.HandedInput {
 		return api.SendReply{Desktop: true}, nil
+	}
+	if st, err := s.m.State(id); err == nil {
+		// The others who see it see what was said too (Satori's message-created).
+		s.sat.Input(st.Session, input, req.Text, s.satoriUser(c), c.ID())
 	}
 	return api.SendReply{Input: input, Queued: queued, Command: s.m.RunsItself(id, text)}, nil
 }

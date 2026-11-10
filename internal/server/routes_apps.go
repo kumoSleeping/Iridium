@@ -15,6 +15,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/config"
 	"github.com/kumoSleeping/iridium/internal/gate"
+	"github.com/kumoSleeping/iridium/internal/satori"
 	"github.com/kumoSleeping/iridium/internal/secrets"
 	"github.com/kumoSleeping/iridium/internal/webapp"
 )
@@ -333,6 +334,7 @@ func (s *Server) dropLogin(w http.ResponseWriter, appRef, login string) {
 		return
 	}
 	s.logf("server: login %s of %s removed", login, info.Name)
+	s.sat.LoginEvent(info.ID, "login-removed", satori.LoginInfo{ID: login, Name: login})
 	s.terminalsChanged()
 	reply(w, http.StatusOK, map[string]any{"ok": true})
 }
@@ -581,6 +583,9 @@ func (s *Server) answerNeed(w http.ResponseWriter, r *http.Request) {
 		var there bool
 		if there, err = s.st.ApproveLogin(cf.App.ID, cf.Login, time.Now()); err == nil && !there {
 			err = errors.New("the login is gone")
+		}
+		if err == nil {
+			s.sat.LoginEvent(cf.App.ID, "login-added", satori.LoginInfo{ID: cf.Login, Name: cf.Name})
 		}
 		s.terminalsChanged()
 	}

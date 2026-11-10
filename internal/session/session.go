@@ -422,6 +422,15 @@ func From(terminal, tag string) string {
 	return terminal + fromSep + tag
 }
 
+// FromLogin is From for a login of an app (not ir_web's): its message counted to the app, the
+// login kept with it.
+func FromLogin(terminal, login, tag string) string {
+	if login == "" {
+		return From(terminal, tag)
+	}
+	return terminal + fromSep + tag + fromSep + login
+}
+
 // viaOf is the session a message's tag says its agent sent it from ("ir:<session>"), else "".
 func viaOf(tag string) string {
 	id, _ := strings.CutPrefix(tag, "ir:")
@@ -431,12 +440,14 @@ func viaOf(tag string) string {
 	return id
 }
 
-// source splits a sender into the terminal's ID and the tag the agent sees.
-func (m *Manager) source(from string) (terminal, tag string) {
+// source splits a sender into the terminal's ID, the tag the agent sees and the login of the app
+// it came from (if one).
+func (m *Manager) source(from string) (terminal, tag, login string) {
 	if t, g, ok := strings.Cut(from, fromSep); ok {
-		return t, g
+		g, login, _ = strings.Cut(g, fromSep)
+		return t, g, login
 	}
-	return from, m.tagOf(from)
+	return from, m.tagOf(from), ""
 }
 
 // Interrupt stops the running turn; the agent stays.

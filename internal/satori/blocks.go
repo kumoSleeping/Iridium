@@ -51,6 +51,7 @@ func blockContent(b api.Block, app, login, id string, mask func(string) string) 
 	add("event", string(b.Event))
 	add("from", mask(b.From))
 	add("terminal", b.FromTerminal)
+	add("login", b.FromLogin)
 	num("length", int64(b.Length))
 	if b.Error {
 		attrs = append(attrs, Attr{Key: "error", Bare: true})

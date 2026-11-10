@@ -902,7 +902,7 @@ func (h *Hosted) transcript() *transcript.File {
 		return nil
 	}
 	info, _ := agents.Get(h.meta.Agent)
-	f = transcript.OpenAs(path, info.Format, h.m.o.Store.Source)
+	f = transcript.OpenAs(path, info.Format, h.m.o.Store.Sender)
 	h.mu.Lock()
 	if h.file == nil {
 		h.file = f

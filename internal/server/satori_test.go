@@ -14,6 +14,8 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/kumoSleeping/iridium/internal/api"
+	"github.com/kumoSleeping/iridium/internal/config"
+	"github.com/kumoSleeping/iridium/internal/discover"
 	"github.com/kumoSleeping/iridium/internal/satori"
 )
 
@@ -100,7 +102,10 @@ func (w *satoriWS) event(ok func(satori.Event) bool) satori.Event {
 // WebSocket by the app's TOKEN, a message into a session and its reply, an ask answered by its
 // button, an upload, and the app removed closing its stream.
 func TestSatori(t *testing.T) {
-	l := start(t)
+	l := startWith(t, func(s *Server, cfg config.Config, work string) {
+		empty := t.TempDir()
+		s.Discover = discover.New(discover.Options{ClaudeDir: cfg.ClaudeHome, CodexHome: empty, PiSessions: empty, DshHome: empty, Store: s.st, Hub: s.hub, Procs: discover.ProcFS{Root: empty}, Logf: t.Logf})
+	})
 	app := l.newApp("bridge", true)
 
 	// A login the first time: login_pending, as anywhere; allowed, it speaks.
@@ -179,9 +184,16 @@ func TestSatori(t *testing.T) {
 	if code, e := l.satoriCall(app, "alice", "message.create", map[string]string{"channel_id": id, "content": "hello &amp; bye"}, &sent); code != 200 || len(sent) != 1 || sent[0].ID == "" {
 		t.Fatalf("message.create: %d %+v %+v", code, e, sent)
 	}
+	var said *satori.Event // the person's own message, as the others see it
 	reply := w.event(func(ev satori.Event) bool {
+		if ev.XData != nil && ev.XData.Kind == "user" {
+			said = &ev
+		}
 		return ev.Type == "message-created" && ev.XData != nil && ev.XData.Kind == "reply"
 	})
+	if said == nil || said.Message.ID != sent[0].ID || said.User.ID != "alice" || said.Message.Content != "hello &amp; bye" {
+		t.Fatalf("the person's message: %+v", said)
+	}
 	if reply.Message.Content != "ok: hello &amp; bye" || reply.Channel.ID != id || reply.Login.User.ID != "alice" || reply.User.ID != "claude" || reply.XData.Origin != app.App.ID {
 		t.Fatalf("the reply: %+v %+v", reply, reply.Message)
 	}
@@ -192,9 +204,21 @@ func TestSatori(t *testing.T) {
 	if code, e := l.satoriCall(app, "alice", "message.get", map[string]string{"channel_id": id, "message_id": reply.Message.ID}, &m); code != 200 || m.Content != reply.Message.Content {
 		t.Errorf("message.get: %d %+v %+v", code, e, m)
 	}
+	// message.create's id finds the message it became.
+	if code, e := l.satoriCall(app, "alice", "message.get", map[string]string{"channel_id": id, "message_id": sent[0].ID}, &m); code != 200 || m.User == nil || m.User.ID != "alice" || m.Channel == nil {
+		t.Errorf("message.get by its input: %d %+v %+v", code, e, m)
+	}
+	// channel.update renames it.
+	if code, e := l.satoriCall(app, "alice", "channel.update", map[string]any{"channel_id": id, "data": map[string]string{"name": "renamed"}}, nil); code != 200 {
+		t.Fatalf("channel.update: %d %+v", code, e)
+	}
+	var chn satori.Channel
+	if l.satoriCall(app, "alice", "channel.get", map[string]string{"channel_id": id}, &chn); chn.Name != "renamed" {
+		t.Errorf("channel.get after channel.update: %+v", chn)
+	}
 	var page satori.BidiList[satori.Message]
 	l.satoriCall(app, "alice", "message.list", map[string]string{"channel_id": id}, &page)
-	if n := len(page.Data); n < 2 || page.Data[n-1].ID != reply.Message.ID || page.Data[n-2].User == nil || !strings.Contains(page.Data[n-2].User.Name, "alice") {
+	if n := len(page.Data); n < 2 || page.Data[n-1].ID != reply.Message.ID || page.Data[n-2].User == nil || page.Data[n-2].User.ID != "alice" || !strings.Contains(page.Data[n-2].User.Name, "alice") {
 		t.Errorf("message.list: %+v", page.Data)
 	}
 

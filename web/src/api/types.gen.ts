@@ -397,6 +397,10 @@ export interface Block {
    */
   from?: string;
   fromTerminal?: string;
+  /**
+   * FromLogin: the login of that app it came from, if one (ir_web's logins are FromTerminal).
+   */
+  fromLogin?: string;
   id?: string; // tool, result: the call's id
   /**
    * tool: Name, Input as JSON, and Result when it is on the same page.
@@ -1165,6 +1169,7 @@ export interface Queued {
    * FromTerminal is the sending terminal's ID.
    */
   fromTerminal?: string;
+  fromLogin?: string; // and the login of that app, if one
   paused?: boolean;
   at: number /* int64 */;
 }

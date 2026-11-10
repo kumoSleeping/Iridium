@@ -38,8 +38,10 @@ type entry struct {
 	session string
 	ev      Event         // login left out; a message's content without its files
 	files   []api.FileRef // a message's files, written in for each login
-	// app, login: an event for that login alone (Share), whoever sees what session.
+	// app, login: an event for that login alone (Share), whoever sees what session; about: one
+	// about that login (login-*), for every connection of the app (a login's own: its own only).
 	app, login string
+	about      bool
 }
 
 type outbox struct {
@@ -47,10 +49,15 @@ type outbox struct {
 	seq  int64
 	list []entry
 	wake chan struct{}
+	// keep: where the events are kept across a restart (Service.Keep), dropped: when the old
+	// ones were last dropped there.
+	keep    Keeper
+	dropped time.Time
+	logf    func(string, ...any)
 }
 
-func newOutbox() *outbox {
-	return &outbox{seq: time.Now().UnixMilli(), wake: make(chan struct{})}
+func newOutbox(logf func(string, ...any)) *outbox {
+	return &outbox{seq: time.Now().UnixMilli(), wake: make(chan struct{}), logf: logf}
 }
 
 func (o *outbox) add(e entry) entry {
@@ -59,6 +66,7 @@ func (o *outbox) add(e entry) entry {
 	o.seq++
 	e.sn, e.ev.SN = o.seq, o.seq
 	o.list = append(o.list, e)
+	o.store(e, o.logf)
 	cut := 0
 	for cut < len(o.list) && (len(o.list)-cut > KeepMax || time.Since(o.list[cut].at) > Keep) {
 		cut++
@@ -257,7 +265,7 @@ func (s *Service) emit(ss api.Session, ev Event, files []api.FileRef, kind strin
 	if len(origin) > 0 {
 		ev.XData.Origin = origin[0]
 	}
-	if kind == "" && ev.Type == "interaction/button" {
+	if kind == "" {
 		ev.XData = nil
 		ev.XType = ""
 	}
@@ -425,7 +433,7 @@ func (s *Service) serveEvents(w http.ResponseWriter, r *http.Request) {
 		cn.only = c.Login
 	}
 	defer s.b.Track(r, c.App, cancel)()
-	cursor := s.out.last()
+	cursor := fullSN(s.out.last(), snSlots-1)
 	if id.SN > 0 {
 		cursor = min(id.SN, cursor)
 	}
@@ -491,31 +499,58 @@ func (cn *conn) logins(ls []LoginInfo) []LoginInfo {
 	return slices.DeleteFunc(ls, func(l LoginInfo) bool { return l.ID != cn.only })
 }
 
-// deliver sends the outbox from after cursor on, to each login that sees each event's session.
-func (s *Service) deliver(ctx context.Context, cancel func(), cn *conn, cursor int64) {
+// deliver sends the outbox from after done (an sn as sent: fullSN) on: each event to each login
+// that sees its session, with an sn of its own.
+func (s *Service) deliver(ctx context.Context, cancel func(), cn *conn, done int64) {
 	defer cancel()
 	for {
-		es, wake := s.out.after(cursor)
+		es, wake := s.out.after(done/snSlots - 1)
 		if len(es) > 0 {
 			logins := cn.logins(s.b.Logins(cn.app))
 			for _, e := range es {
-				for _, l := range logins {
-					switch {
-					case e.app != "":
-						if e.app != cn.app || e.login != l.ID {
+				k := 0
+				send := func(l LoginInfo, ev Event) bool {
+					sn := fullSN(e.sn, k)
+					k++
+					if sn <= done {
+						return true
+					}
+					ev.SN = sn
+					if err := cn.send(ctx, OpEvent, ev); err != nil {
+						return false
+					}
+					done = sn
+					return true
+				}
+				switch {
+				case e.about:
+					if e.app == cn.app && (cn.only == "" || cn.only == e.login) {
+						ev := e.ev
+						lg := *ev.Login
+						lg.SN = cn.sn(e.login)
+						ev.Login = &lg
+						if !send(LoginInfo{ID: e.login}, ev) {
+							return
+						}
+					}
+				default:
+					for _, l := range logins {
+						if e.app != "" {
+							if e.app != cn.app || e.login != l.ID {
+								continue
+							}
+						} else if !s.b.Sees(Caller{App: cn.app, Login: l.ID, LoginName: l.Name}, e.session) {
 							continue
 						}
-					case !s.b.Sees(Caller{App: cn.app, Login: l.ID, LoginName: l.Name}, e.session):
-						continue
-					}
-					ev := s.render(e, cn.app, l.ID)
-					lg := loginOf(cn.app, l, cn.sn(l.ID), false)
-					ev.Login = &lg
-					if err := cn.send(ctx, OpEvent, ev); err != nil {
-						return
+						ev := s.render(e, cn.app, l.ID)
+						lg := loginOf(cn.app, l, cn.sn(l.ID), false)
+						ev.Login = &lg
+						if !send(l, ev) {
+							return
+						}
 					}
 				}
-				cursor = e.sn
+				done = max(done, fullSN(e.sn, snSlots-1))
 			}
 		}
 		select {

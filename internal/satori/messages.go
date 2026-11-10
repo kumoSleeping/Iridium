@@ -1,7 +1,11 @@
 package satori
 
 import (
+	"bytes"
+	"cmp"
 	"context"
+	"encoding/base64"
+	gomime "mime"
 	"net/http"
 	"net/url"
 	"slices"
@@ -82,12 +86,14 @@ func fileElements(app, login, id string, fs []api.FileRef) string {
 }
 
 // messageOf is block b of session ss as a message (blockContent), its files as login sees them
-// (none if ""). The sender: who wrote a person's message (the app it came from, user.name the tag
-// the agent saw), else the agent.
+// (none if ""). The sender: who wrote a person's message (the login it came from, else the app;
+// user.name the tag the agent saw), else the agent.
 func (s *Service) messageOf(c Caller, ss api.Session, b api.Block, guild *Guild) Message {
 	login := c.Login
 	m := Message{ID: b.At, Content: blockContent(b, c.App, login, ss.ID, s.b.Mask), Channel: channelOf(ss), Guild: guild, CreatedAt: b.Time}
 	switch {
+	case b.FromLogin != "":
+		m.User = &User{ID: b.FromLogin, Name: b.From}
 	case b.From != "" || b.FromTerminal != "":
 		m.User = &User{ID: b.FromTerminal, Name: b.From}
 	case b.Kind != api.BlockKindUser:
@@ -122,7 +128,10 @@ func (s *Service) messageGet(_ context.Context, c Caller, body []byte) (any, err
 	}
 	noMessage := refuse(http.StatusUnprocessableEntity, "no_such_message", "no message "+req.MessageID)
 	if e, ok := s.out.message(req.ChannelID, req.MessageID); ok {
-		return s.render(e, c.App, c.Login).Message, nil
+		ev := s.render(e, c.App, c.Login)
+		m := *ev.Message
+		m.Channel, m.Guild = ev.Channel, ev.Guild
+		return m, nil
 	}
 	if strings.HasPrefix(req.MessageID, "ask:") {
 		for _, a := range st.Asks {
@@ -135,7 +144,9 @@ func (s *Service) messageGet(_ context.Context, c Caller, body []byte) (any, err
 	}
 	off := lineOf(req.MessageID)
 	if off < 0 {
-		return nil, noMessage
+		// message.create's id: the input, in the transcript once the agent took it (a person's
+		// block by its uuid), else still in the queue.
+		return s.inputMessage(c, st, req.MessageID, noMessage)
 	}
 	p, err := s.b.Messages(st.ID, -1, off)
 	if err != nil {
@@ -152,6 +163,34 @@ func (s *Service) messageGet(_ context.Context, c Caller, body []byte) (any, err
 		}
 	}
 	return s.messageOf(c, st.Session, b, s.guildOf(st.Session)), nil
+}
+
+// inputMessage is the message input id became: its block in the latest page, else its place
+// in the queue.
+func (s *Service) inputMessage(c Caller, st *api.SessionState, id string, none error) (any, error) {
+	p, err := s.b.Messages(st.ID, -1, -1)
+	if err != nil {
+		return nil, err
+	}
+	for i := len(p.Blocks) - 1; i >= 0; i-- {
+		if b := p.Blocks[i]; b.Kind == api.BlockKindUser && b.ID == id {
+			if b.Length > len([]rune(b.Text)) {
+				if full, err := s.b.Full(st.ID, b.At); err == nil {
+					b.Text = full
+				}
+			}
+			m := s.messageOf(c, st.Session, b, s.guildOf(st.Session))
+			m.ID = id
+			return m, nil
+		}
+	}
+	for _, q := range st.Queue {
+		if q.ID == id {
+			u := &User{ID: cmp.Or(q.FromLogin, q.FromTerminal), Name: q.From}
+			return Message{ID: id, Content: Escape(q.Text), Channel: channelOf(st.Session), Guild: s.guildOf(st.Session), User: u, CreatedAt: q.At}, nil
+		}
+	}
+	return nil, none
 }
 
 // messageList pages a session's transcript: BidiList, tokens the offsets of lines.
@@ -229,10 +268,13 @@ func (s *Service) messageList(_ context.Context, c Caller, body []byte) (any, er
 	}
 	if after != nil {
 		bs, end := after.Blocks, after.End
-		more := len(bs) > 0 && end > at
-		if limit > 0 {
-			if cut, ok := cutAfter(bs, limit); ok {
-				bs, more, end = bs[:cut], true, lineOf(bs[cut].At)
+		more := false
+		if cut, ok := cutAfter(bs, limit); limit > 0 && ok {
+			bs, more, end = bs[:cut], true, lineOf(bs[cut].At)
+		} else if len(bs) > 0 && end > at {
+			// The page stopped short of the end: more is written after it.
+			if rest, err := s.b.Messages(st.ID, -1, end); err == nil {
+				more = len(rest.Blocks) > 0
 			}
 		}
 		add(bs)
@@ -287,8 +329,9 @@ func cutAfter(bs []api.Block, limit int) (int, bool) {
 }
 
 // messageCreate sends a message to a session: its text, files uploaded to it (<img>/<file> by
-// their internal: URL), the rest by what it says. A message that begins with an input button's
-// text answers that ask instead.
+// their internal: URL, or data: URLs, stored as uploads), the rest by what it says. A message that
+// begins with an input button's text answers that ask instead. <message> elements at the top
+// are each a message of its own, sent in turn (what lies between them too).
 func (s *Service) messageCreate(ctx context.Context, c Caller, body []byte) (any, error) {
 	var req struct {
 		ChannelID string   `json:"channel_id"`
@@ -302,7 +345,44 @@ func (s *Service) messageCreate(ctx context.Context, c Caller, body []byte) (any
 	if err != nil {
 		return nil, err
 	}
-	els := Parse(req.Content)
+	var groups [][]Element
+	var loose []Element
+	for _, e := range Parse(req.Content) {
+		if e.Type != "message" {
+			loose = append(loose, e)
+			continue
+		}
+		if len(loose) > 0 {
+			groups, loose = append(groups, loose), nil
+		}
+		groups = append(groups, e.Children)
+	}
+	if len(loose) > 0 || len(groups) == 0 {
+		groups = append(groups, loose)
+	}
+	out := []Message{}
+	for i, els := range groups {
+		o := req.Data
+		if i > 0 {
+			o.Attachments = nil
+		}
+		m, err := s.sendOne(ctx, c, st, els, o)
+		if err != nil {
+			if len(out) > 0 {
+				break // what went, went
+			}
+			return nil, err
+		}
+		out = append(out, m...)
+	}
+	return out, nil
+}
+
+// MaxDataURL is the most a data: URL in a message may hold.
+const MaxDataURL = 20 << 20
+
+// sendOne sends one message's elements.
+func (s *Service) sendOne(ctx context.Context, c Caller, st *api.SessionState, els []Element, o SendOpts) ([]Message, error) {
 	var refs []string
 	text := Plain(els, func(e Element) string {
 		src := e.Attr("src")
@@ -312,6 +392,13 @@ func (s *Service) messageCreate(ctx context.Context, c Caller, body []byte) (any
 				return ""
 			}
 		}
+		if strings.HasPrefix(src, "data:") {
+			if ref, err := s.dataURL(c, st.ID, e, src); err == nil {
+				refs = append(refs, ref)
+				return ""
+			}
+			return cmp.Or(e.Attr("title"), "[file]")
+		}
 		if t := e.Attr("title"); t != "" && src != "" {
 			return t + " (" + src + ")"
 		}
@@ -319,14 +406,14 @@ func (s *Service) messageCreate(ctx context.Context, c Caller, body []byte) (any
 	})
 	if strings.HasPrefix(text, "ask:") && !c.Only {
 		if done, err := s.typed(ctx, c, text); done {
-			return []Message{}, err
+			return nil, err
 		}
 	}
-	refs = append(refs, req.Data.Attachments...)
+	refs = append(refs, o.Attachments...)
 	if text == "" && len(refs) == 0 {
 		return nil, bad("an empty message")
 	}
-	r, err := s.b.Send(ctx, c, st.ID, text, refs, req.Data)
+	r, err := s.b.Send(ctx, c, st.ID, text, refs, o)
 	if err != nil {
 		return nil, err
 	}
@@ -336,8 +423,42 @@ func (s *Service) messageCreate(ctx context.Context, c Caller, body []byte) (any
 			ss = nst.Session
 		}
 	}
-	return []Message{{ID: r.Input, Content: req.Content, Channel: channelOf(ss), Guild: s.guildOf(ss),
+	return []Message{{ID: r.Input, Content: String(els), Channel: channelOf(ss), Guild: s.guildOf(ss),
 		User: &User{ID: c.Login, Name: c.LoginName}, Data: r}}, nil
+}
+
+// dataURL stores the file a data: URL holds as an upload to session id: its ref.
+func (s *Service) dataURL(c Caller, id string, e Element, src string) (string, error) {
+	meta, data, ok := strings.Cut(strings.TrimPrefix(src, "data:"), ",")
+	if !ok || len(data) > MaxDataURL*4/3+4 {
+		return "", bad("a data: URL")
+	}
+	var b []byte
+	if strings.HasSuffix(meta, ";base64") {
+		var err error
+		if b, err = base64.StdEncoding.DecodeString(data); err != nil {
+			if b, err = base64.RawStdEncoding.DecodeString(data); err != nil {
+				return "", bad("a data: URL")
+			}
+		}
+	} else {
+		t, err := url.PathUnescape(data)
+		if err != nil {
+			return "", bad("a data: URL")
+		}
+		b = []byte(t)
+	}
+	mime, _, _ := strings.Cut(strings.TrimSuffix(meta, ";base64"), ";")
+	name := e.Attr("title")
+	if name == "" {
+		name = "file"
+		if exts, _ := gomime.ExtensionsByType(mime); len(exts) > 0 {
+			name += exts[0]
+		} else if e.Type == "img" {
+			name += ".png"
+		}
+	}
+	return s.b.Upload(c, id, name, int64(len(b)), bytes.NewReader(b))
 }
 
 // uploadCreate takes files for a session (form field channel_id), one request each: each file's

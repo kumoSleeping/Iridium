@@ -32,7 +32,7 @@ const (
 const Adapter = "iridium"
 
 // Features are login.features: the APIs served.
-var Features = []string{"message.create", "message.get", "message.list", "channel.get", "channel.list",
+var Features = []string{"message.create", "message.get", "message.list", "channel.get", "channel.list", "channel.update", "channel.delete",
 	"guild.get", "guild.list", "login.get", "user.get", "upload.create"}
 
 // Caller is who a request comes from: an app (by its TOKEN) and, past the headers, its login.
@@ -81,6 +81,8 @@ type Backend interface {
 	Session(id string) (*api.SessionState, error)
 	// Workspaces are the web's folder groups.
 	Workspaces() ([]api.Workspace, error)
+	// SeesGuild: c may see folder group w (its scope has the folder, or leads there).
+	SeesGuild(c Caller, w api.Workspace) bool
 	// Sees: c may see session id. What it may not see is not there for it.
 	Sees(c Caller, id string) bool
 	// Messages is a page of session id's transcript (Manager.Messages), its blocks' files named.
@@ -92,6 +94,8 @@ type Backend interface {
 	// Watch sends the states keys name to an event stream (Iridium's own, op STATE): what ir_web
 	// shows beyond chat (the session list, a session's whole state, drafts), till ctx ends.
 	Watch(ctx context.Context, r *http.Request, c Caller, keys []string, emit func(kind string, data []byte) error) error
+	// Patch changes session id as c may (a rename, archiving it).
+	Patch(ctx context.Context, c Caller, id string, p api.SessionPatch) error
 	// Answer answers an ask's card as c.
 	Answer(ctx context.Context, c Caller, a api.CardAnswer) error
 	// Upload stores a file for session id: its ref.
@@ -125,6 +129,8 @@ type Service struct {
 	done  chan struct{}
 	once  sync.Once
 
+	ch channels
+
 	mu      sync.Mutex
 	held    map[string]said             // session: the agent's last message this turn, not sent yet
 	origin  map[string]string           // session: who began its turn
@@ -144,7 +150,7 @@ func New(b Backend, logf func(string, ...any)) *Service {
 	if logf == nil {
 		logf = log.Printf
 	}
-	s := &Service{b: b, logf: logf, out: newOutbox(), qwake: make(chan struct{}, 1), stop: make(chan struct{}), done: make(chan struct{}),
+	s := &Service{b: b, logf: logf, out: newOutbox(logf), qwake: make(chan struct{}, 1), stop: make(chan struct{}), done: make(chan struct{}),
 		held: map[string]said{}, origin: map[string]string{}, started: map[string]time.Time{}, picks: map[string]map[int][]string{}, words: map[string]map[int]string{}}
 	go s.work()
 	return s
@@ -205,6 +211,8 @@ var methods = map[string]method{
 	"message.list":   (*Service).messageList,
 	"channel.get":    (*Service).channelGet,
 	"channel.list":   (*Service).channelList,
+	"channel.update": (*Service).channelUpdate,
+	"channel.delete": (*Service).channelDelete,
 	"guild.get":      (*Service).guildGet,
 	"guild.list":     (*Service).guildList,
 	"login.get":      (*Service).loginGet,

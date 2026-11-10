@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"io/fs"
 	"net/http"
@@ -108,23 +109,47 @@ func (s *Server) patchSession(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "bad workspace")
 		return
 	}
+	if err := s.patch(r.Context(), id, req); err != nil {
+		if errors.Is(err, errPatchManager) {
+			s.error(w, errors.Unwrap(err))
+			return
+		}
+		s.discoverError(w, err)
+		return
+	}
+	reply(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// errPatchManager wraps an error of the session manager's in patch (the rest are Discover's).
+var errPatchManager = errors.New("session")
+
+type managerErr struct{ err error }
+
+func (e managerErr) Error() string        { return e.err.Error() }
+func (e managerErr) Unwrap() error        { return e.err }
+func (e managerErr) Is(target error) bool { return target == errPatchManager }
+
+// patch changes session id as req says (PATCH /api/sessions/{id}, Satori's channel.update and
+// channel.delete).
+func (s *Server) patch(ctx context.Context, id string, req api.SessionPatch) error {
 	// Archiving is the shown marker's, and stops a hosted agent: the session manager's; the
 	// sessions hung under it go with it (ir archive too).
 	if req.Archived != nil {
-		if err := s.m.ArchiveTree(r.Context(), id, *req.Archived); err != nil {
-			s.error(w, err)
-			return
+		if err := s.m.ArchiveTree(ctx, id, *req.Archived); err != nil {
+			return managerErr{err}
 		}
 		req.Archived = nil
 	}
 	if req.Detach != nil && *req.Detach {
-		if err := s.m.Detach(r.Context(), id); err != nil {
-			s.error(w, err)
-			return
+		if err := s.m.Detach(ctx, id); err != nil {
+			return managerErr{err}
 		}
 	}
 	req.Detach = nil
-	s.discoverDone(w, s.Discover.Patch(id, req))
+	if s.Discover == nil {
+		return managerErr{errors.New("sessions are not indexed here")}
+	}
+	return s.Discover.Patch(id, req)
 }
 
 // folderColor tags a folder with a colour from its menu, or takes the tag off.

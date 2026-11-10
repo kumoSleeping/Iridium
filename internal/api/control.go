@@ -8,6 +8,7 @@ type Queued struct {
 	From string `json:"from"` // the sender's name, as the agent saw it
 	// FromTerminal is the sending terminal's ID.
 	FromTerminal string `json:"fromTerminal,omitempty"`
+	FromLogin    string `json:"fromLogin,omitempty"` // and the login of that app, if one
 	Paused       bool   `json:"paused,omitempty"`
 	At           int64  `json:"at"`
 }

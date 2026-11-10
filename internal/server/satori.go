@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -19,6 +20,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/pathsafe"
 	"github.com/kumoSleeping/iridium/internal/satori"
 	"github.com/kumoSleeping/iridium/internal/session"
+	"github.com/kumoSleeping/iridium/internal/store"
 	"github.com/kumoSleeping/iridium/internal/transcript"
 )
 
@@ -149,6 +151,74 @@ func (b satoriBackend) Sessions(ctx context.Context) ([]api.Session, error) { re
 
 func (b satoriBackend) Session(id string) (*api.SessionState, error) { return b.s.m.State(id) }
 
+func (b satoriBackend) Patch(ctx context.Context, c satori.Caller, id string, p api.SessionPatch) error {
+	if _, err := b.s.using(callerAs(c), id); err != nil {
+		return err
+	}
+	err := b.s.patch(ctx, id, p)
+	if errors.Is(err, errPatchManager) {
+		return errors.Unwrap(err)
+	}
+	return err
+}
+
+// satoriKeeper keeps Satori's events in the store's outbox (plugin "satori").
+type satoriKeeper struct{ st *store.Store }
+
+func (k satoriKeeper) Keep(session, typ string, data []byte) error {
+	_, err := k.st.Post("satori", session, typ, string(data))
+	return err
+}
+
+func (k satoriKeeper) Kept(since time.Time) ([][]byte, error) {
+	l, err := k.st.OutboxAfter("satori", 0)
+	var out [][]byte
+	for _, o := range l {
+		if o.At >= since.UnixMilli() {
+			out = append(out, []byte(o.Data))
+		}
+	}
+	return out, err
+}
+
+func (k satoriKeeper) Drop(before time.Time) error { return k.st.PruneOutbox(time.Since(before)) }
+
+// watchList gives Satori the session list as it changes, for its channel events, till ctx ends.
+func (s *Server) watchList(ctx context.Context) {
+	sub := s.hub.Subscribe([]string{"list"})
+	defer sub.Close()
+	_ = sub.Run(ctx, func(event string, data []byte) error {
+		var st struct {
+			Key   string          `json:"key"`
+			Value json.RawMessage `json:"value"`
+		}
+		if event != "state" || json.Unmarshal(data, &st) != nil || st.Key != "list" {
+			return nil
+		}
+		var l []api.Session
+		if json.Unmarshal(st.Value, &l) == nil {
+			s.sat.Sessions(l)
+		}
+		return nil
+	}, func() error { return nil }, func() {})
+}
+
+// satoriUser is the caller as Satori's user of a message it wrote.
+func (s *Server) satoriUser(c caller) satori.User {
+	switch {
+	case c.Host():
+		return satori.User{ID: gate.HostID, Name: s.Tag(gate.HostID)}
+	case c.Login != "":
+		return satori.User{ID: c.Login, Name: c.Name}
+	}
+	return satori.User{ID: c.App, Name: s.Tag(c.App)}
+}
+
+func (b satoriBackend) SeesGuild(c satori.Caller, w api.Workspace) bool {
+	cl := callerAs(c)
+	return cl.Host() || len(b.s.scopeWorkspaces(b.s.permsFor(cl), []api.Workspace{w})) == 1
+}
+
 func (b satoriBackend) Workspaces() ([]api.Workspace, error) {
 	if b.s.Discover == nil {
 		return nil, nil
@@ -202,7 +272,7 @@ func (b satoriBackend) Send(ctx context.Context, c satori.Caller, id, text strin
 	req := api.Send{Text: text, Attachments: refs, Caller: o.Caller}
 	// An app's message joins a running turn, as the chat layer's did; ir_web's and the host's
 	// steer or queue as the person chose.
-	from := session.From(c.App, sourceTag(c))
+	from := session.FromLogin(c.App, c.Login, sourceTag(c))
 	if cl.Host() || cl.Web() {
 		from = s.fromOf(cl, o.Caller)
 	} else {

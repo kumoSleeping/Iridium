@@ -12,6 +12,7 @@
         "text": "look at \u003cthis\u003e \u0026 \"that\"\n\n  indented\n",
         "from": "Telegram·张三",
         "fromTerminal": "tg",
+        "fromLogin": "u42",
         "id": "u-1",
         "files": [
           {
@@ -29,7 +30,7 @@
           }
         ]
       },
-      "content": "<iridium:user id=\"u-1\" from=\"Telegram·张三\" terminal=\"tg\"/>look at &lt;this&gt; &amp; &quot;that&quot;\n\n  indented\n<img src=\"internal:ir_web/kumo/files/s1/r1\" title=\"shot 1.png\" path=\"/w/shot 1.png\" size=\"1234\" mime=\"image/png\" mtime=\"1700000000001\" thumb width=\"640\" height=\"480\" sha256=\"ab12\"/>"
+      "content": "<iridium:user id=\"u-1\" from=\"Telegram·张三\" terminal=\"tg\" login=\"u42\"/>look at &lt;this&gt; &amp; &quot;that&quot;\n\n  indented\n<img src=\"internal:ir_web/kumo/files/s1/r1\" title=\"shot 1.png\" path=\"/w/shot 1.png\" size=\"1234\" mime=\"image/png\" mtime=\"1700000000001\" thumb width=\"640\" height=\"480\" sha256=\"ab12\"/>"
     },
     {
       "name": "a person's message, bare",

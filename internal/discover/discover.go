@@ -619,7 +619,7 @@ func (x *Index) Found(id string) (api.Session, *transcript.File, bool) {
 	var f *transcript.File
 	if info, ok := agents.Get(e.agent); ok {
 		if f = x.files[id]; f == nil || f.Path() != e.path {
-			f = transcript.OpenAs(e.path, info.Format, x.o.Store.Source)
+			f = transcript.OpenAs(e.path, info.Format, x.o.Store.Sender)
 			x.files[id] = f
 		}
 	}
