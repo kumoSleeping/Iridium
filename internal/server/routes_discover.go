@@ -4,10 +4,12 @@ import (
 	"errors"
 	"io/fs"
 	"net/http"
+	"path/filepath"
 	"strconv"
 
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/discover"
+	"github.com/kumoSleeping/iridium/internal/gate"
 	"github.com/kumoSleeping/iridium/internal/store"
 )
 
@@ -36,6 +38,9 @@ func (s *Server) workspaces(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.discoverError(w, err)
 		return
+	}
+	if c := callerOf(r); !c.Host() {
+		ws = s.scopeWorkspaces(s.permsFor(c), ws)
 	}
 	reply(w, http.StatusOK, ws)
 }
@@ -133,6 +138,10 @@ func (s *Server) folderColor(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) folders(w http.ResponseWriter, r *http.Request) {
 	if mid := r.URL.Query().Get("machine"); mid != "" {
+		if err := s.remoteScope(callerOf(r), mid, r.URL.Query().Get("path")); err != nil {
+			s.error(w, err)
+			return
+		}
 		s.remoteFolders(w, r, mid, r.URL.Query().Get("path"))
 		return
 	}
@@ -145,6 +154,10 @@ func (s *Server) folders(w http.ResponseWriter, r *http.Request) {
 		s.discoverError(w, err)
 		return
 	}
+	if err := s.scopeFolders(callerOf(r), gate.HostID, &l); err != nil {
+		s.error(w, err)
+		return
+	}
 	reply(w, http.StatusOK, l)
 }
 
@@ -154,12 +167,22 @@ func (s *Server) makeFolder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Machine != "" {
+		if err := s.remoteScope(callerOf(r), req.Machine, req.Path); err != nil {
+			s.error(w, err)
+			return
+		}
 		s.remoteMkdir(w, r, req)
 		return
 	}
 	if s.Discover == nil {
 		fail(w, http.StatusNotFound, "no folders here")
 		return
+	}
+	if dir, err := s.Folders.Resolve(req.Path); err == nil {
+		if err := s.inScope(callerOf(r), gate.HostID, filepath.Join(dir, req.Name)); err != nil {
+			s.error(w, err)
+			return
+		}
 	}
 	p, err := s.Folders.Make(req.Path, req.Name)
 	if err != nil {

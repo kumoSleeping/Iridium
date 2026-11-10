@@ -236,6 +236,13 @@ func (s *Server) stateFilter(c caller) func(key string, v []byte) []byte {
 	}
 	return func(key string, v []byte) []byte {
 		switch {
+		case key == "workspaces":
+			var ws []api.Workspace
+			if json.Unmarshal(v, &ws) != nil {
+				return v
+			}
+			b, _ := json.Marshal(s.scopeWorkspaces(p, ws))
+			return b
 		case key == "list":
 			var l []api.Session
 			if json.Unmarshal(v, &l) != nil {
@@ -251,4 +258,89 @@ func (s *Server) stateFilter(c caller) func(key string, v []byte) []byte {
 		}
 		return v
 	}
+}
+
+// scopeLeadsTo reports whether some place of scope lies under (app, path): a folder on the way to
+// what the caller may use, which it may open to go on (only the folders that lead there).
+func (s *Server) scopeLeadsTo(scope []string, app, path string) bool {
+	for _, e := range scope {
+		a, p := s.parsePlace(e)
+		if a == app && (placeWithin(p, path) || path == "/" && strings.HasPrefix(p, "/")) {
+			return true
+		}
+	}
+	return false
+}
+
+// scopeFolders keeps of folder list l (at app) what the caller may see: all of it within its
+// scope; on the way there only the folders that lead into it; elsewhere nothing (denied).
+func (s *Server) scopeFolders(c caller, app string, l *api.Folders) error {
+	if c.Host() {
+		return nil
+	}
+	p := s.permsFor(c)
+	if slices.Contains(p.Scope, api.PermsAll) || s.scopeHas(p.Scope, app, l.Path) {
+		return nil
+	}
+	if !s.scopeLeadsTo(p.Scope, app, l.Path) {
+		return &access.Denied{Reason: l.Path + " is out of this one's scope"}
+	}
+	sep := "/"
+	if strings.Contains(l.Path, `\`) {
+		sep = `\`
+	}
+	keep := l.Folders[:0]
+	for _, f := range l.Folders {
+		full := strings.TrimRight(l.Path, `/\`) + sep + f
+		if s.scopeHas(p.Scope, app, full) || s.scopeLeadsTo(p.Scope, app, full) {
+			keep = append(keep, f)
+		}
+	}
+	l.Folders = keep
+	return nil
+}
+
+// inScope is an error if (app, path) is out of the caller's scope.
+func (s *Server) inScope(c caller, app, path string) error {
+	if c.Host() {
+		return nil
+	}
+	if p := s.permsFor(c); !s.scopeHas(p.Scope, app, path) {
+		return &access.Denied{Reason: path + " is out of this one's scope"}
+	}
+	return nil
+}
+
+// scopeWorkspaces keeps the folder groups the caller's scope has (the host's folders).
+func (s *Server) scopeWorkspaces(p api.Perms, ws []api.Workspace) []api.Workspace {
+	if slices.Contains(p.Scope, api.PermsAll) {
+		return ws
+	}
+	out := make([]api.Workspace, 0, len(ws))
+	for _, w := range ws {
+		if s.scopeHas(p.Scope, gate.HostID, w.Path) || s.scopeLeadsTo(p.Scope, gate.HostID, w.Path) {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+// remoteScope: another computer's folder path (as asked: absolute, or "" / ~ for its home) is
+// one the caller may open: within its scope there or on the way to it; all for a scope of all.
+func (s *Server) remoteScope(c caller, ref, path string) error {
+	if c.Host() {
+		return nil
+	}
+	p := s.permsFor(c)
+	if slices.Contains(p.Scope, api.PermsAll) {
+		return nil
+	}
+	app := ref
+	if info, ok := s.gate().Find(ref); ok {
+		app = info.ID
+	}
+	if path != "" && !strings.HasPrefix(path, "~") && (s.scopeHas(p.Scope, app, path) || s.scopeLeadsTo(p.Scope, app, path)) {
+		return nil
+	}
+	return &access.Denied{Reason: ref + ":" + path + " is out of this one's scope"}
 }

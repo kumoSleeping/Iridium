@@ -120,3 +120,33 @@ func TestInvitePerms(t *testing.T) {
 		t.Fatal("a narrowed login approves")
 	}
 }
+
+// Folders: within the scope all of it, on the way there only what leads in, elsewhere refused.
+func TestScopeFolders(t *testing.T) {
+	l := start(t)
+	app := l.newApp("bot", false)
+	l.want(200, "socket", "PUT", "/api/apps/bot/perms", api.Perms{Agents: []string{"*"}, Scope: []string{"主机:/w/in"}}, nil)
+	c := caller{Identity: gate.Identity{App: app.App.ID, Name: "bot"}}
+	f := api.Folders{Path: "/w/in", Folders: []string{"deep"}}
+	if err := l.s.scopeFolders(c, gate.HostID, &f); err != nil || len(f.Folders) != 1 {
+		t.Fatalf("within: %+v %v", f, err)
+	}
+	f = api.Folders{Path: "/w", Folders: []string{"in", "out"}}
+	if err := l.s.scopeFolders(c, gate.HostID, &f); err != nil || len(f.Folders) != 1 || f.Folders[0] != "in" {
+		t.Fatalf("on the way: %+v %v", f, err)
+	}
+	f = api.Folders{Path: "/w/out", Folders: []string{"x"}}
+	if err := l.s.scopeFolders(c, gate.HostID, &f); !access.IsDenied(err) {
+		t.Fatalf("elsewhere: %v", err)
+	}
+	if l.s.inScope(c, gate.HostID, "/w/new") == nil || l.s.inScope(c, gate.HostID, "/w/in/new") != nil {
+		t.Fatal("inScope")
+	}
+	if l.s.remoteScope(c, "bot", "~") == nil || l.s.scopeFolders(caller{Identity: localIdentity}, gate.HostID, &f) != nil {
+		t.Fatal("remote home or the host")
+	}
+	ws := l.s.scopeWorkspaces(l.s.permsFor(c), []api.Workspace{{ID: 1, Path: "/w/in/a"}, {ID: 2, Path: "/w/out"}, {ID: 3, Path: "/w"}})
+	if len(ws) != 2 || ws[0].ID != 1 || ws[1].ID != 3 {
+		t.Fatalf("workspaces: %+v", ws)
+	}
+}
