@@ -1,5 +1,6 @@
 // 在哪干活 (docs/plan.md, 2026-11-10), pure for tests: the places under a chat's title, shown only
-// as the session dispatched work (sessions hung under it, tree.ts standing) or named a place (@):
+// as the session runs at another machine, dispatched work (sessions hung under it, tree.ts
+// standing) or named a place (@):
 // its own folder first; each place it dispatched to, the sessions there; the places it named and
 // sent no one to yet.
 import type { Session, Workspace } from "../api/types.gen";
@@ -47,7 +48,9 @@ function placeAt(key: string, workspaces: Workspace[]): Omit<Spot, "kind" | "ses
 export function spotsOf(s: Session, list: Session[], named: NamedPlace[], workspaces: Workspace[] = []): Spot[] {
   if (s.subagent) return [];
   const sent = dispatchedFrom(s.id, list, workspaces);
-  if (!sent.length && !named.length) return [];
+  // At another machine: where it runs is always said (the user, 2026-11-10).
+  const away = !!machineOf(groupPath(s));
+  if (!sent.length && !named.length && !away) return [];
   const out: Spot[] = [{ kind: "own", ...placeAt(groupPath(s), workspaces), sessions: [] }];
   for (const c of sent) {
     const key = groupPath(c);
@@ -60,6 +63,6 @@ export function spotsOf(s: Session, list: Session[], named: NamedPlace[], worksp
     if (out.some((o) => o.key === key || (o.kind === "sent" && inside(o.key, key)))) continue;
     out.push({ kind: "named", key, place: p.machine ? { machine: p.machine, path: p.path } : { path: p.path }, name: p.name, sessions: [] });
   }
-  // Only its own folder named: nothing to say.
-  return out.length > 1 || out[0]!.sessions.length ? out : [];
+  // Only its own folder named here: nothing to say; at another machine, that is the point.
+  return away || out.length > 1 || out[0]!.sessions.length ? out : [];
 }

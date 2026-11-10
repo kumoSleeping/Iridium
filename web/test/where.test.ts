@@ -56,4 +56,9 @@ describe("spotsOf", () => {
     expect(spotsOf(list[4]!, list, [{ path: "/w/other", name: "other" }], ws)).toEqual([]);
     expect(spotsOf(S("s", "/w/ir", { subagent: true }), list, [{ path: "/srv", name: "srv" }], ws)).toEqual([]);
   });
+  test("one at another machine always says where it runs, even with nothing sent or named", () => {
+    const list = [S("p", "/w/ir", { workspace: 1, own: true }), S("a", "C:\\Code\\Ds_Benchmark", { workspace: 7, machine: "m", launcher: "p" })];
+    expect(spotsOf(list[1]!, list, [], ws).map((x) => [x.kind, x.key, x.name])).toEqual([["own", "m:C:/Code/Ds_Benchmark", "Ds_Benchmark"]]);
+    expect(spotsOf(list[1]!, list, [], ws)[0]!.place).toEqual({ machine: "m", path: "C:/Code/Ds_Benchmark" });
+  });
 });

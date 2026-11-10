@@ -470,7 +470,7 @@ function lampFor(ss: Session[], asked: { session?: string }[]): Status {
 function Where({ spots, asked }: { spots: Spot[]; asked: { session?: string }[] }) {
   const ms = useMachines();
   return (
-    <div role="list" aria-label={t("chat.where")} className="g-fade flex h-8 min-w-0 items-start gap-1.5 overflow-x-auto pr-3 pl-4 [scrollbar-width:none] sm:pl-11 [&::-webkit-scrollbar]:hidden">
+    <div role="list" aria-label={t("chat.where")} className="g-fade flex h-8 min-w-0 items-start gap-1.5 overflow-x-auto pr-3 pl-9 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       {spots.map((x) => {
         const shown = shownPath(x.place.machine ? `${x.place.machine}:${x.place.path}` : x.place.path, ms);
         const m = shown.m;
@@ -486,8 +486,8 @@ function Where({ spots, asked }: { spots: Spot[]; asked: { session?: string }[] 
               onClick={() => (x.kind === "sent" ? openChat(x.sessions[0]!.id) : openPlace(x.place))}
               className={cn("g-press flex h-6 shrink-0 items-center gap-1.5 rounded-full px-2 text-xs transition-colors duration-(--dur-2)", x.kind === "named" ? "border border-dashed border-edge text-ink-3 hover:text-ink-2" : "bg-fill text-ink-2 hover:bg-fill-2 hover:text-ink")}
             >
-              {m && x.kind === "sent" ? <MachineFace m={m} size={14} className={cn(!m.online && "opacity-50 grayscale")} /> : <PlaceIcon remote={!!x.place.machine} label={m?.name} size={13} />}
-              <span className="max-w-48 truncate">{m && x.kind !== "own" ? `${m.name} · ${x.name}` : x.name}</span>
+              {m && x.kind !== "named" ? <MachineFace m={m} size={14} className={cn(!m.online && "opacity-50 grayscale")} /> : <PlaceIcon remote={!!x.place.machine} label={m?.name} size={13} />}
+              <span className="max-w-48 truncate">{m ? `${m.name} · ${x.name}` : x.name}</span>
               {n > 0 && <span className="text-ink-3 tabular-nums">{n}</span>}
               {lamp !== "idle" && <Lamp status={lamp} />}
             </button>
