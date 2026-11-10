@@ -28,6 +28,26 @@ import (
 // withSatori serves /v1/ by package satori, the rest by next.
 func (s *Server) withSatori(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// /v1/internal/<path>: Iridium's own API (Satori's "internal" routes, spec advanced/internal):
+		// the same as /api/<path>, for whoever speaks Satori. Satori-Platform and Satori-User-ID,
+		// if given, must be the caller's. (button is the Satori package's own.)
+		if rest, ok := strings.CutPrefix(r.URL.Path, "/v1/internal/"); ok && s.sat != nil && rest != "button" {
+			if c, ok := (satoriBackend{s}).Who(r); ok {
+				if p := r.Header.Get(satori.HeaderPlatform); p != "" && p != c.App {
+					refuse(w, http.StatusForbidden, "no_such_login", satori.HeaderPlatform+" is not this caller's")
+					return
+				}
+				if u := r.Header.Get(satori.HeaderUser); u != "" && c.Login != "" && u != c.Login {
+					refuse(w, http.StatusForbidden, "no_such_login", satori.HeaderUser+" is not this caller's")
+					return
+				}
+			}
+			r2 := r.Clone(r.Context())
+			r2.URL.Path = "/api/" + rest
+			r2.URL.RawPath = ""
+			next.ServeHTTP(w, r2)
+			return
+		}
 		if s.sat != nil && (r.URL.Path == "/v1" || strings.HasPrefix(r.URL.Path, "/v1/")) {
 			s.sat.ServeHTTP(w, r)
 			return
@@ -44,9 +64,19 @@ func callerAs(c satori.Caller) caller {
 	return caller{Identity: gate.Identity{App: c.App, Login: c.Login, Name: c.AppName}}
 }
 
+// Who: an app by its TOKEN (and the login it named); a login of ir_web by its cookie; the host
+// (its own page, with no public origin) as the login "local" of the platform "local". Every app
+// alike (draft 一): ir_web speaks Satori as any other, one login a connection.
 func (b satoriBackend) Who(r *http.Request) (satori.Caller, bool) {
 	id, ok := gate.FromContext(r.Context())
-	if !ok || id.App == "" || id.Host() || id.App == gate.WebApp || id.Session != "" {
+	switch {
+	case !ok || id.Session != "":
+		return satori.Caller{}, false
+	case id.Host():
+		return satori.Caller{App: gate.HostID, AppName: id.Name, Login: gate.HostID, LoginName: id.Name, Only: true}, true
+	case id.Web():
+		return satori.Caller{App: gate.WebApp, AppName: gate.WebApp, Login: id.Login, LoginName: id.Name, Only: true}, true
+	case id.App == "" || id.App == gate.WebApp:
 		return satori.Caller{}, false
 	}
 	return satori.Caller{App: id.App, AppName: id.Name, Login: id.Login}, true
@@ -61,6 +91,18 @@ func (b satoriBackend) AppByToken(tok string) (satori.Caller, bool) {
 }
 
 func (b satoriBackend) Logins(app string) []satori.LoginInfo {
+	switch app {
+	case gate.HostID:
+		return []satori.LoginInfo{{ID: gate.HostID, Name: b.s.Tag(gate.HostID)}}
+	case gate.WebApp:
+		var out []satori.LoginInfo
+		for _, e := range b.s.gate().Access().Endpoints {
+			if e.Kind == gate.KindPanel {
+				out = append(out, satori.LoginInfo{ID: e.ID, Name: e.Name})
+			}
+		}
+		return out
+	}
 	l, err := b.s.st.Logins()
 	if err != nil {
 		b.s.logf("server: logins: %v", err)
@@ -76,7 +118,21 @@ func (b satoriBackend) Logins(app string) []satori.LoginInfo {
 }
 
 func (b satoriBackend) Track(r *http.Request, app string, closeFn func()) func() {
+	// A login's own connection (its cookie) ends as it logs out or is removed.
+	if id, ok := gate.FromContext(r.Context()); ok && id.App == app {
+		return b.s.gate().Track(r, closeFn)
+	}
 	return b.s.gate().Track(r.WithContext(gate.NewContext(r.Context(), gate.Identity{App: app})), closeFn)
+}
+
+// Watch sends the states keys name (and the drafts) to a connection of ir_web or the host, as
+// the page's event stream had them (Iridium's own, op STATE).
+func (b satoriBackend) Watch(ctx context.Context, r *http.Request, c satori.Caller, keys []string, emit func(kind string, data []byte) error) error {
+	cl := callerOf(r)
+	if cl.App != c.App {
+		cl = callerAs(c)
+	}
+	return b.s.watchStates(ctx, cl, keys, emit)
 }
 
 func (b satoriBackend) User(id string) (satori.User, bool) {
@@ -139,34 +195,21 @@ func sourceTag(c satori.Caller) string {
 	return clean(c.AppName)
 }
 
-func (b satoriBackend) Send(ctx context.Context, c satori.Caller, id, text string, refs []string) (satori.SendResult, error) {
+func (b satoriBackend) Send(ctx context.Context, c satori.Caller, id, text string, refs []string, o satori.SendOpts) (satori.SendResult, error) {
 	s, cl := b.s, callerAs(c)
-	if err := s.checkSend(cl, id); err != nil {
-		return satori.SendResult{}, err
-	}
+	req := api.Send{Text: text, Attachments: refs, Caller: o.Caller}
+	// An app's message joins a running turn, as the chat layer's did; ir_web's and the host's
+	// steer or queue as the person chose.
 	from := session.From(c.App, sourceTag(c))
-	if session.IsClear(text) && len(refs) == 0 {
-		nid, err := s.m.Clear(ctx, id, from)
-		if nid != "" && nid != id {
-			if err := s.st.SetOpener(nid, cl.ID()); err != nil {
-				s.logf("server: opener of %s: %v", nid, err)
-			}
-		}
-		return satori.SendResult{Session: nid}, err
+	if cl.Host() || cl.Web() {
+		from = s.fromOf(cl, o.Caller)
+	} else {
+		req.Steer = true
 	}
-	text, images, err := s.files.Message(id, text, refs)
-	if err != nil {
-		return satori.SendResult{}, err
+	if o.Steer != nil && (cl.Host() || cl.Web()) {
+		req.Steer = *o.Steer
 	}
-	// As the chat layer did: it joins a running turn.
-	input, _, err := s.m.SendWith(ctx, id, text, from, true, images...)
-	if err != nil {
-		return satori.SendResult{}, err
-	}
-	if input == session.HandedInput {
-		input = ""
-	}
-	return satori.SendResult{Input: input, Session: id}, nil
+	return s.sendAs(ctx, cl, from, id, req)
 }
 
 func (b satoriBackend) Answer(ctx context.Context, c satori.Caller, a api.CardAnswer) error {

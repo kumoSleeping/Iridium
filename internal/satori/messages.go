@@ -282,8 +282,9 @@ func cutAfter(bs []api.Block, limit int) (int, bool) {
 // text answers that ask instead.
 func (s *Service) messageCreate(ctx context.Context, c Caller, body []byte) (any, error) {
 	var req struct {
-		ChannelID string `json:"channel_id"`
-		Content   string `json:"content"`
+		ChannelID string   `json:"channel_id"`
+		Content   string   `json:"content"`
+		Data      SendOpts `json:"_data"`
 	}
 	if err := decode(body, &req); err != nil {
 		return nil, err
@@ -312,10 +313,11 @@ func (s *Service) messageCreate(ctx context.Context, c Caller, body []byte) (any
 			return []Message{}, err
 		}
 	}
+	refs = append(refs, req.Data.Attachments...)
 	if text == "" && len(refs) == 0 {
 		return nil, bad("an empty message")
 	}
-	r, err := s.b.Send(ctx, c, st.ID, text, refs)
+	r, err := s.b.Send(ctx, c, st.ID, text, refs, req.Data)
 	if err != nil {
 		return nil, err
 	}
@@ -326,7 +328,7 @@ func (s *Service) messageCreate(ctx context.Context, c Caller, body []byte) (any
 		}
 	}
 	return []Message{{ID: r.Input, Content: req.Content, Channel: channelOf(ss), Guild: s.guildOf(ss),
-		User: &User{ID: c.Login, Name: c.LoginName}}}, nil
+		User: &User{ID: c.Login, Name: c.LoginName}, Data: r}}, nil
 }
 
 // uploadCreate takes files for a session (form field channel_id), one request each: each file's

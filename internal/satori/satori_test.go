@@ -149,7 +149,17 @@ func (f *fake) Messages(id string, before, after int64) (api.MessagePage, error)
 
 func (f *fake) Full(id, at string) (string, error) { return "", errGone }
 
-func (f *fake) Send(_ context.Context, c Caller, id, text string, refs []string) (SendResult, error) {
+func (f *fake) Watch(ctx context.Context, _ *http.Request, _ Caller, keys []string, emit func(string, []byte) error) error {
+	for _, k := range keys {
+		if err := emit("state", []byte(`{"key":"`+k+`","value":1}`)); err != nil {
+			return err
+		}
+	}
+	<-ctx.Done()
+	return nil
+}
+
+func (f *fake) Send(_ context.Context, c Caller, id, text string, refs []string, _ SendOpts) (SendResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.sent = append(f.sent, c.Login+": "+text+" "+strings.Join(refs, ","))

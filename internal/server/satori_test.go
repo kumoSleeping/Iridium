@@ -121,9 +121,29 @@ func TestSatori(t *testing.T) {
 	if code, e := l.satoriCall(app, "", "login.get", nil, nil); code != 403 || e.Code != "no_such_login" {
 		t.Errorf("no login: %d %+v", code, e)
 	}
+	// The host's page speaks Satori too, as the login "local" of the platform "local"; it names it.
 	var raw string
-	if code := l.do("web", "POST", "/v1/login.get", nil, &raw); code != 403 || !strings.Contains(raw, "app_only") {
-		t.Errorf("the host: %d %s", code, raw)
+	if code := l.do("web", "POST", "/v1/login.get", nil, &raw); code != 403 || !strings.Contains(raw, "no_such_login") {
+		t.Errorf("the host unnamed: %d %s", code, raw)
+	}
+	hreq, _ := http.NewRequest("POST", l.base+"/v1/login.get", strings.NewReader("{}"))
+	hreq.Header.Set("Content-Type", "application/json")
+	hreq.Header.Set(satori.HeaderPlatform, "local")
+	hreq.Header.Set(satori.HeaderUser, "local")
+	if resp, err := http.DefaultClient.Do(hreq); err != nil || resp.StatusCode != 200 {
+		t.Errorf("the host as local/local: %v %v", resp, err)
+	} else {
+		var hl satori.Login
+		json.NewDecoder(resp.Body).Decode(&hl)
+		resp.Body.Close()
+		if hl.Platform != "local" || hl.User == nil || hl.User.ID != "local" {
+			t.Errorf("the host's login: %+v", hl)
+		}
+	}
+	// Iridium's own API under /v1/internal/: the same as /api/.
+	var list []api.Session
+	if code := l.do("web", "GET", "/v1/internal/sessions", nil, &list); code != 200 {
+		t.Errorf("/v1/internal/sessions: %d", code)
 	}
 	if code, _ := l.satoriCall(api.Token{App: app.App, Token: "ir_nope"}, "alice", "login.get", nil, nil); code != 401 {
 		t.Errorf("a bad TOKEN: %d", code)

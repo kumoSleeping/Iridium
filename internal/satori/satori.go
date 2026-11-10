@@ -39,6 +39,9 @@ var Features = []string{"message.create", "message.get", "message.list", "channe
 type Caller struct {
 	App, AppName     string
 	Login, LoginName string
+	// Only: the connection is this login's alone (a browser of ir_web, the host's page): its
+	// event stream carries this login's events only.
+	Only bool
 }
 
 // LoginInfo is an approved login of an app.
@@ -46,10 +49,16 @@ type LoginInfo struct {
 	ID, Name string
 }
 
-// SendResult is what a message sent did: its input's id, and the session it went to (another one
-// after /clear).
-type SendResult struct {
-	Input, Session string
+// SendResult is what a message sent did, as POST /api/sessions/{id}/send answers it: its input's
+// id, whether it waits in the queue, and the session it went to (another one after /clear).
+type SendResult = api.SendReply
+
+// SendOpts are what Iridium's own extension of message.create (its "_data") may add: whether it
+// joins a running turn (apps' always do), and attachments by ref.
+type SendOpts struct {
+	Steer       *bool    `json:"steer,omitempty"`
+	Attachments []string `json:"attachments,omitempty"`
+	Caller      string   `json:"caller,omitempty"`
 }
 
 // Backend is what the protocol needs of Iridium; the server implements it. Errors go out as
@@ -79,7 +88,10 @@ type Backend interface {
 	// Full is the whole text of the block at at.
 	Full(id, at string) (string, error)
 	// Send sends text with attachments (file refs of the session) to session id as c.
-	Send(ctx context.Context, c Caller, id, text string, refs []string) (SendResult, error)
+	Send(ctx context.Context, c Caller, id, text string, refs []string, o SendOpts) (SendResult, error)
+	// Watch sends the states keys name to an event stream (Iridium's own, op STATE): what ir_web
+	// shows beyond chat (the session list, a session's whole state, drafts), till ctx ends.
+	Watch(ctx context.Context, r *http.Request, c Caller, keys []string, emit func(kind string, data []byte) error) error
 	// Answer answers an ask's card as c.
 	Answer(ctx context.Context, c Caller, a api.CardAnswer) error
 	// Upload stores a file for session id: its ref.
@@ -220,7 +232,11 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			s.fail(w, notApp)
 			return
 		}
-		reply(w, http.StatusOK, Meta{Logins: s.logins(c.App, nil), ProxyURLs: []string{}})
+		ls := s.logins(c.App, nil)
+		if c.Only {
+			ls = slices.DeleteFunc(ls, func(l Login) bool { return l.User == nil || l.User.ID != c.Login })
+		}
+		reply(w, http.StatusOK, Meta{Logins: ls, ProxyURLs: []string{}})
 		return
 	case strings.HasPrefix(path, "internal/"):
 		s.serveInternal(w, r, strings.TrimPrefix(path, "internal/"))
@@ -262,7 +278,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	reply(w, http.StatusOK, out)
 }
 
-var notApp = refuse(http.StatusForbidden, "app_only", "Satori is for apps: an app's TOKEN")
+var notApp = refuse(http.StatusForbidden, "no_login", "an app's TOKEN, or a login of ir_web")
 
 // speaker is the login a request speaks as: Satori-Platform the app's ID, Satori-User-ID one of
 // its logins (approved: the server refused it before, if not).

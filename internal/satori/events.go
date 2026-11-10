@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -314,6 +315,7 @@ type conn struct {
 	ws   *websocket.Conn
 	wmu  sync.Mutex
 	app  string
+	only string // a login's own connection: its events only
 	sns  map[string]int64
 	next int64
 }
@@ -400,19 +402,43 @@ func (s *Service) serveEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cn.app = c.App
+	if c.Only {
+		cn.only = c.Login
+	}
 	defer s.b.Track(r, c.App, cancel)()
 	cursor := s.out.last()
 	if id.SN > 0 {
 		cursor = min(id.SN, cursor)
 	}
 	ready := Ready{Logins: []Login{}, ProxyURLs: []string{}}
-	for _, l := range s.b.Logins(c.App) {
+	for _, l := range cn.logins(s.b.Logins(c.App)) {
 		ready.Logins = append(ready.Logins, loginOf(c.App, l, cn.sn(l.ID), true))
 	}
 	if err := cn.send(ctx, OpReady, ready); err != nil {
 		return
 	}
 	go s.deliver(ctx, cancel, cn, cursor)
+	// WATCH: the states this stream carries now (each WATCH replaces the last).
+	stopWatch := func() {}
+	defer func() { stopWatch() }()
+	watch := func(keys []string) {
+		stopWatch()
+		if len(keys) == 0 || !c.Only {
+			stopWatch = func() {}
+			return
+		}
+		wctx, wcancel := context.WithCancel(ctx)
+		stopWatch = wcancel
+		go func() {
+			err := s.b.Watch(wctx, r, c, keys, func(kind string, data []byte) error {
+				return cn.send(wctx, OpState, State{Type: kind, Data: data})
+			})
+			if err != nil && wctx.Err() == nil {
+				cancel()
+			}
+		}()
+	}
+	watch(id.Watch)
 	for {
 		rctx, rcancel := context.WithTimeout(ctx, DeadAfter)
 		_, b, err := ws.Read(rctx)
@@ -421,12 +447,29 @@ func (s *Service) serveEvents(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var sig Signal
-		if json.Unmarshal(b, &sig) == nil && sig.Op == OpPing {
+		if json.Unmarshal(b, &sig) != nil {
+			continue
+		}
+		switch sig.Op {
+		case OpPing:
 			if cn.send(ctx, OpPong, struct{}{}) != nil {
 				return
 			}
+		case OpWatch:
+			var wb Watch
+			if json.Unmarshal(sig.Body, &wb) == nil {
+				watch(wb.Keys)
+			}
 		}
 	}
+}
+
+// logins is ls, or of them only the connection's own login.
+func (cn *conn) logins(ls []LoginInfo) []LoginInfo {
+	if cn.only == "" {
+		return ls
+	}
+	return slices.DeleteFunc(ls, func(l LoginInfo) bool { return l.ID != cn.only })
 }
 
 // deliver sends the outbox from after cursor on, to each login that sees each event's session.
@@ -435,7 +478,7 @@ func (s *Service) deliver(ctx context.Context, cancel func(), cn *conn, cursor i
 	for {
 		es, wake := s.out.after(cursor)
 		if len(es) > 0 {
-			logins := s.b.Logins(cn.app)
+			logins := cn.logins(s.b.Logins(cn.app))
 			for _, e := range es {
 				for _, l := range logins {
 					if !s.b.Sees(Caller{App: cn.app, Login: l.ID, LoginName: l.Name}, e.session) {

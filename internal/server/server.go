@@ -321,40 +321,55 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 	if c.agent || c.socket && c.session != "" {
 		req.Steer = true
 	}
-	if err := s.checkSend(c, r.PathValue("id")); err != nil {
+	out, err := s.sendAs(r.Context(), c, s.fromOf(c, req.Caller), r.PathValue("id"), req)
+	if err != nil {
+		if errors.Is(err, errFiles) {
+			s.fileError(w, errors.Unwrap(err))
+			return
+		}
 		s.error(w, err)
 		return
+	}
+	reply(w, http.StatusOK, out)
+}
+
+// errFiles wraps what the files service refused of a message's attachments.
+var errFiles = errors.New("attachments")
+
+type fileErr struct{ err error }
+
+func (e fileErr) Error() string        { return e.err.Error() }
+func (e fileErr) Unwrap() error        { return e.err }
+func (e fileErr) Is(target error) bool { return target == errFiles }
+
+// sendAs sends req into session id as c, from (the source tag): what POST /api/sessions/{id}/send
+// and Satori's message.create both do. /clear starts the session anew.
+func (s *Server) sendAs(ctx context.Context, c caller, from, id string, req api.Send) (api.SendReply, error) {
+	if err := s.checkSend(c, id); err != nil {
+		return api.SendReply{}, err
 	}
 	// Attachments and all: Claude would clear itself just the same.
 	if session.IsClear(req.Text) {
-		id, err := s.m.Clear(r.Context(), r.PathValue("id"), s.fromOf(c, req.Caller))
-		if id != "" && id != r.PathValue("id") {
-			if err := s.st.SetOpener(id, c.ID()); err != nil {
-				s.logf("server: opener of %s: %v", id, err)
+		nid, err := s.m.Clear(ctx, id, from)
+		if nid != "" && nid != id {
+			if err := s.st.SetOpener(nid, c.ID()); err != nil {
+				s.logf("server: opener of %s: %v", nid, err)
 			}
 		}
-		if err != nil {
-			s.error(w, err)
-			return
-		}
-		reply(w, http.StatusOK, api.SendReply{Session: id})
-		return
+		return api.SendReply{Session: nid}, err
 	}
-	text, images, err := s.files.Message(r.PathValue("id"), req.Text, req.Attachments)
+	text, images, err := s.files.Message(id, req.Text, req.Attachments)
 	if err != nil {
-		s.fileError(w, err)
-		return
+		return api.SendReply{}, fileErr{err}
 	}
-	input, queued, err := s.m.SendWith(r.Context(), r.PathValue("id"), text, s.fromOf(c, req.Caller), req.Steer, images...)
+	input, queued, err := s.m.SendWith(ctx, id, text, from, req.Steer, images...)
 	if err != nil {
-		s.error(w, err)
-		return
+		return api.SendReply{}, err
 	}
 	if input == session.HandedInput {
-		reply(w, http.StatusOK, api.SendReply{Desktop: true})
-		return
+		return api.SendReply{Desktop: true}, nil
 	}
-	reply(w, http.StatusOK, api.SendReply{Input: input, Queued: queued, Command: s.m.RunsItself(r.PathValue("id"), text)})
+	return api.SendReply{Input: input, Queued: queued, Command: s.m.RunsItself(id, text)}, nil
 }
 
 func (s *Server) interrupt(w http.ResponseWriter, r *http.Request) {
@@ -421,18 +436,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c := callerOf(r)
-	var carried []string
-	var ignored []api.StateEvent
-	for _, k := range keys {
-		switch {
-		case !stateKey.MatchString(k):
-			ignored = append(ignored, api.StateEvent{Key: k, Ignored: "unknown"})
-		case (k == "needs" || k == "pairing" || k == "colors" || k == "notes") && !c.panel():
-			ignored = append(ignored, api.StateEvent{Key: k, Ignored: "forbidden"})
-		case !slices.Contains(carried, k):
-			carried = append(carried, k)
-		}
-	}
+	carried, ignored := s.stateKeys(c, keys)
 	keys = carried
 	if !s.mayWatch(w, c, keys) {
 		return
@@ -457,6 +461,42 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	defer sub.Close()
 	sub.Filter = s.stateFilter(c)
 	_ = sub.Serve(r.Context(), w, func() { _ = rc.Flush() })
+}
+
+// stateKeys splits the states an event stream asks for into those it carries and those it leaves
+// out (unknown, or not this caller's: needs, pairing, colors and notes are a person's on ir_web
+// or at the host).
+func (s *Server) stateKeys(c caller, keys []string) (carried []string, ignored []api.StateEvent) {
+	for _, k := range keys {
+		switch {
+		case !stateKey.MatchString(k):
+			ignored = append(ignored, api.StateEvent{Key: k, Ignored: "unknown"})
+		case (k == "needs" || k == "pairing" || k == "colors" || k == "notes") && !c.panel():
+			ignored = append(ignored, api.StateEvent{Key: k, Ignored: "forbidden"})
+		case !slices.Contains(carried, k):
+			carried = append(carried, k)
+		}
+	}
+	return carried, ignored
+}
+
+// watchStates sends c the states keys name (at most 16) and the drafts, as /api/events does,
+// through emit ("state" or "draft", the JSON), till ctx ends: Satori's /v1/events for ir_web.
+func (s *Server) watchStates(ctx context.Context, c caller, keys []string, emit func(kind string, data []byte) error) error {
+	if len(keys) > 16 {
+		keys = keys[:16]
+	}
+	carried, ignored := s.stateKeys(c, keys)
+	for _, e := range ignored {
+		b, _ := json.Marshal(e)
+		if err := emit("state", b); err != nil {
+			return err
+		}
+	}
+	sub := s.hub.Subscribe(carried)
+	defer sub.Close()
+	sub.Filter = s.stateFilter(c)
+	return sub.Run(ctx, emit, func() error { return nil }, func() {})
 }
 
 func (s *Server) done(w http.ResponseWriter, err error) {

@@ -12,6 +12,10 @@ const (
 	OpIdentify = 3
 	OpReady    = 4
 	OpMeta     = 5
+	// Iridium's own (decision 26): WATCH (to it: {keys}) names the states a stream carries,
+	// STATE (from it: {type: "state"|"draft", data}) carries them. Not EVENTs: not kept, no sn.
+	OpWatch = 6
+	OpState = 7
 )
 
 // Login statuses.
@@ -35,6 +39,19 @@ type Signal struct {
 type Identify struct {
 	Token string `json:"token,omitempty"`
 	SN    int64  `json:"sn,omitempty"`
+	// Watch: Iridium's own: the states to carry from the start (as WATCH).
+	Watch []string `json:"_watch,omitempty"`
+}
+
+// Watch is WATCH's body.
+type Watch struct {
+	Keys []string `json:"keys"`
+}
+
+// State is STATE's body: a state (api.StateEvent) or a draft (api.DraftEvent).
+type State struct {
+	Type string          `json:"type"`
+	Data json.RawMessage `json:"data"`
 }
 
 // Ready is READY's body.
@@ -90,6 +107,8 @@ type Message struct {
 	User      *User    `json:"user,omitempty"`
 	CreatedAt int64    `json:"created_at,omitempty"`
 	UpdatedAt int64    `json:"updated_at,omitempty"`
+	// Data: Iridium's own (Satori's _data): message.create's send result.
+	Data any `json:"_data,omitempty"`
 }
 
 // Button is an interaction/button event's button.

@@ -13,7 +13,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"strings"
 	"sync"
 	"time"
 
@@ -194,11 +193,27 @@ func (s *Sub) poke() {
 // (api.StateEvent) and "draft" events (api.DraftEvent), and a comment every Ping. flush pushes
 // what was written to the reader.
 func (s *Sub) Serve(ctx context.Context, w io.Writer, flush func()) error {
+	return s.Run(ctx, func(event string, data []byte) error {
+		if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, data); err != nil {
+			return err
+		}
+		return nil
+	}, func() error {
+		if _, err := io.WriteString(w, ": ping\n\n"); err != nil {
+			return err
+		}
+		flush()
+		return nil
+	}, flush)
+}
+
+// Run is Serve for any transport: each "state" (api.StateEvent) and "draft" (api.DraftEvent) to
+// emit, ping every Ping, flush after each batch.
+func (s *Sub) Run(ctx context.Context, emit func(event string, data []byte) error, pinged func() error, flush func()) error {
 	sent := map[string]time.Time{}
 	var drafted time.Time
 	ping := time.NewTicker(Ping)
 	defer ping.Stop()
-	var buf strings.Builder
 	for {
 		now := time.Now()
 		next := time.Duration(-1)
@@ -230,10 +245,11 @@ func (s *Sub) Serve(ctx context.Context, w io.Writer, flush func()) error {
 		}
 		s.mu.Unlock()
 
-		buf.Reset()
 		for _, d := range drafts {
 			b, _ := json.Marshal(d)
-			fmt.Fprintf(&buf, "event: draft\ndata: %s\n\n", b)
+			if err := emit("draft", b); err != nil {
+				return err
+			}
 		}
 		for _, k := range due {
 			// The value now, not when it was marked: anything set since is in it.
@@ -241,13 +257,12 @@ func (s *Sub) Serve(ctx context.Context, w io.Writer, flush func()) error {
 			if s.Filter != nil {
 				v = s.Filter(k, v)
 			}
-			fmt.Fprintf(&buf, "event: state\ndata: {\"key\":%q,\"value\":%s}\n\n", k, v)
-			sent[k] = now
-		}
-		if buf.Len() > 0 {
-			if _, err := io.WriteString(w, buf.String()); err != nil {
+			if err := emit("state", []byte(fmt.Sprintf("{\"key\":%q,\"value\":%s}", k, v))); err != nil {
 				return err
 			}
+			sent[k] = now
+		}
+		if len(drafts) > 0 || len(due) > 0 {
 			flush()
 		}
 
@@ -261,10 +276,9 @@ func (s *Sub) Serve(ctx context.Context, w io.Writer, flush func()) error {
 		case <-s.wake:
 		case <-timer:
 		case <-ping.C:
-			if _, err := io.WriteString(w, ": ping\n\n"); err != nil {
+			if err := pinged(); err != nil {
 				return err
 			}
-			flush()
 		}
 	}
 }
