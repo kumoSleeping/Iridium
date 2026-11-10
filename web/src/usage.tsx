@@ -384,17 +384,21 @@ export function UsagePage() {
                     ]}
                   />
                 </div>
-                <div className="mt-0.5 flex h-6 min-w-0 items-center gap-1.5 text-xs text-ink-3 tabular-nums">
-                  <span className="min-w-0 shrink truncate">{[other, t("usage.turns", { n: sum.turns }), hit && t("usage.hit", { n: hit })].filter(Boolean).join(" · ")}</span>
-                  {day && chip("day", dayLabel(day), () => setDay(null))}
-                  {!all &&
-                    chip(
-                      "who",
-                      solo !== undefined ? who(u, solo).name : t("usage.picked", { n: shown.length }),
-                      everyone,
-                      solo !== undefined && <Dot color={colors.get(solo)!} on />,
-                    )}
-                  <span className="ml-auto" />
+                <div className="mt-0.5 flex min-h-6 min-w-0 items-start gap-1.5 text-xs text-ink-3 tabular-nums">
+                  {/* The figures whole, the chips after them; where they don't fit, the chips go on
+                      a line of their own rather than both cut short (the narrow dialog). The view's
+                      switch stays on the first line. */}
+                  <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1.5 gap-y-1">
+                    <span className="min-w-0 truncate leading-6 whitespace-nowrap">{[other, t("usage.turns", { n: sum.turns }), hit && t("usage.hit", { n: hit })].filter(Boolean).join(" · ")}</span>
+                    {day && chip("day", dayLabel(day), () => setDay(null))}
+                    {!all &&
+                      chip(
+                        "who",
+                        solo !== undefined ? who(u, solo).name : t("usage.picked", { n: shown.length }),
+                        everyone,
+                        solo !== undefined && <Dot color={colors.get(solo)!} on />,
+                      )}
+                  </div>
                   {range > 1 && (
                     <Pills
                       label={t("usage.view")}
