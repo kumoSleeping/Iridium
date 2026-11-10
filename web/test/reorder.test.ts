@@ -42,7 +42,7 @@ describe("reorder", () => {
 });
 
 describe("folders", () => {
-  const f = (path: string, at: number) => ({ key: path, name: path, path, sessions: [{ id: path, updatedAt: at } as Session] });
+  const f = (path: string, at: number) => ({ key: path, name: path, path, sessions: [{ id: path, updatedAt: at } as Session], children: [] });
   const x = f("/w/x", 300);
   const y = f("/w/y", 200);
   const z = f("/w/z", 100);

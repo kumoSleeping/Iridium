@@ -19,7 +19,7 @@ import { ahead, behind } from "./chats";
 import { t, useLang } from "./i18n";
 import { useFlip } from "./motion";
 import { folderLevels, sessionLevels, usePushMenus, wsLevels, type PushLevel } from "./push";
-import { foldRest, groupHolding, machineOf, remotePath, type Folder as FolderNode, type Tree, type WsNode } from "./tree";
+import { allFolders, folderSessions, foldersHolding, foldRest, groupHolding, machineOf, remotePath, type Folder as FolderNode, type Tree, type WsNode } from "./tree";
 import { createAt, onOpenPlace, type Place } from "./places";
 import { LinkDot } from "./link";
 import { errText, toast } from "./toast";
@@ -33,6 +33,8 @@ import { getCarried, setCarried, useMachines } from "./store";
 import { dropMark, dropTarget, endDrag, listDrop, NO_PLACES, pinFolder, placeFolder, placeGroup as placeGroupKey, placeSession, withPlace, sortList, startDrag, useDragged, useOver, type Dragged, type Edge, type Over } from "./reorder";
 
 const STEP = 18;
+/** The deepest a folder is drawn in: those deeper are drawn as deep, the sidebar being narrow. */
+const MAX_IN = 3;
 const BUSY = new Set(["running", "compacting", "starting"]);
 /** While its agent works, an approval awaited too: then it may be stopped (the user, 2026-11-06). */
 const WORKING = new Set([...BUSY, "waiting"]);
@@ -131,7 +133,7 @@ export function Sidebar(p: Props) {
   // A confirmation an agent's ir asked for lights its session's lamp (one hung under its launcher
   // too); one of no session listed here is a row of its own at the top (no 需要你 group: the user,
   // 2026-11-08).
-  const listed = new Set([...p.tree.workspaces.flatMap((w) => w.rows.flatMap((r) => (r.kind === "session" ? [r.s.id] : r.f.sessions.map((s) => s.id)))), ...[...p.tree.hung.values()].flat().map((s) => s.id)]);
+  const listed = new Set([...p.tree.workspaces.flatMap((w) => w.rows.flatMap((r) => (r.kind === "session" ? [r.s.id] : folderSessions(r.f).map((s) => s.id)))), ...[...p.tree.hung.values()].flat().map((s) => s.id)]);
   const asked = new Set(p.confirms.flatMap((c) => (c.session && listed.has(c.session) ? [c.session] : [])));
   const loose = p.confirms.filter((c) => !c.session || !listed.has(c.session));
   const last = p.tree.workspaces.at(-1);
@@ -147,18 +149,20 @@ export function Sidebar(p: Props) {
     return { list: all ? ss : f.shown, rest: f.rest, all };
   };
   const roots = (w: WsNode) => w.rows.flatMap((r) => (r.kind === "session" ? [r.s] : []));
+  const tops = (w: WsNode) => w.rows.flatMap((r) => (r.kind === "folder" ? [r.f] : []));
   const foldShape = (ss: Session[], key: string) => {
     const f = fold(ss, key);
     return `${f.list.map((s) => s.id)}${f.rest ? `+${f.all}` : ""}`;
   };
-  const shape = [loose.map((c) => c.id).join(","), ...p.tree.workspaces.map((w) => `${w.key}:${p.expanded(w.key)}:${foldShape(roots(w), w.key)}:${w.rows.flatMap((r) => (r.kind === "folder" ? [`${r.f.key}${p.expanded(r.f.key)}${foldShape(r.f.sessions, r.f.key)}`] : [])).join(",")}`), p.expanded("archive"), p.tree.archived.length, [...p.tree.kids.values()].flat().map((s) => s.id).join(","), [...p.tree.runs.values()].flat().map((r) => `${r.id}${p.expanded(`run:${r.id}`)}${r.working.map((s) => s.id)}`).join(","), [...p.tree.hung].map(([at, ss]) => `${at}${p.expanded(`hung:${at}`)}>${ss.map((s) => s.id)}`).join(",")].join("|");
+  const shape = [loose.map((c) => c.id).join(","), ...p.tree.workspaces.map((w) => `${w.key}:${p.expanded(w.key)}:${foldShape(roots(w), w.key)}:${allFolders(tops(w)).map((f) => `${f.key}${p.expanded(f.key)}${foldShape(f.sessions, f.key)}`).join(",")}`), p.expanded("archive"), p.tree.archived.length, [...p.tree.kids.values()].flat().map((s) => s.id).join(","), [...p.tree.runs.values()].flat().map((r) => `${r.id}${p.expanded(`run:${r.id}`)}${r.working.map((s) => s.id)}`).join(","), [...p.tree.hung].map(([at, ss]) => `${at}${p.expanded(`hung:${at}`)}>${ss.map((s) => s.id)}`).join(",")].join("|");
   useFlip(list, shape);
   // Dragged to a new place (reorder.ts): the sessions beside each other, by the key of their
   // group's root or folder, and the groups, as last drawn. The page shows the new order at once.
   const lanes = useRef(new Map<string, Session[]>());
-  lanes.current = new Map(p.tree.workspaces.flatMap((w) => [[w.key, w.rows.flatMap((r) => (r.kind === "session" ? [r.s] : []))] as const, ...w.rows.flatMap((r) => (r.kind === "folder" ? [[r.f.key, r.f.sessions] as const] : []))]));
+  lanes.current = new Map(p.tree.workspaces.flatMap((w) => [[w.key, roots(w)] as const, ...allFolders(tops(w)).map((f) => [f.key, f.sessions] as const)]));
+  // A folder's siblings: those of its group's root, or of the folder it is in, by that one's key.
   const folderLanes = useRef(new Map<string, FolderNode[]>());
-  folderLanes.current = new Map(p.tree.workspaces.map((w) => [w.key, w.rows.flatMap((r) => (r.kind === "folder" ? [r.f] : []))]));
+  folderLanes.current = new Map(p.tree.workspaces.flatMap((w) => [[w.key, tops(w)] as const, ...allFolders(tops(w)).map((f) => [f.key, f.children] as const)]));
   // The groups' rows, all machines', as listed (未归类 not among them).
   const groupKeys = useRef<string[]>([]);
   groupKeys.current = p.tree.workspaces.flatMap((w) => (w.id !== 0 ? [w.key] : []));
@@ -227,9 +231,11 @@ export function Sidebar(p: Props) {
         const w = groupHolding(tree.workspaces, path);
         // On a phone the sheet comes out first: the "+" is on it.
         if (!w) return reveal?.(), createAt(at);
-        const f = w.rows.flatMap((r) => (r.kind === "folder" && inside(path, r.f.path) ? [r.f] : []))[0];
+        // A folder in another one: those it is in opened too.
+        const fs = foldersHolding(w, path);
+        const f = fs.at(-1);
         if (!expanded(w.key)) toggle(w.key);
-        if (f && !expanded(f.key)) toggle(f.key);
+        for (const x of fs) if (!expanded(x.key)) toggle(x.key);
         reveal?.();
         requestAnimationFrame(() => list.current?.querySelector(`[data-flip="${CSS.escape(f ? `f:${f.key}` : `w:${w.key}`)}"]`)?.scrollIntoView({ block: "nearest", behavior: "smooth" }));
       }),
@@ -349,33 +355,47 @@ export function Sidebar(p: Props) {
     const firstRoot = roots(w)[0];
     // At a machine no longer paired: no "+" (nowhere to open it).
     const gone = (path: string) => !!machineOf(path) && !machines.some((m) => m.id === machineOf(path));
-    const folderEl = (f: FolderNode) => (
-      <div key={f.key} role="group">
-        <FolderRow
-          f={f}
-          ws={w.id}
-          label={w.id === 0 ? <FolderLabel path={f.path} /> : f.name}
-          hung={hungOf(f.sessions)}
-          open={p.expanded(f.key)}
-          onToggle={() => p.toggle(f.key)}
-          lane={w.key}
-          place={placeFolderAt}
-          pin={pinFolderOn}
-          newHere={gone(f.path) ? undefined : () => setPlusOpen(f.key)}
-          // As a workspace's: not its count, the "+" that opens a session in the folder
-          // (the user, 2026-11-06).
-          plus={!gone(f.path) && p.wsPlus(
-            { ...w, key: f.key, root: f.path },
-            <button type="button" onClick={(e) => e.stopPropagation()} aria-label={t("nav.newHere", { ws: f.name })} className="g-press -mr-1 grid size-6 place-items-center rounded-sm text-ink-3 group-hover:text-ink-2 hover:bg-fill-2 data-popup-open:bg-fill-2 data-popup-open:text-ink-2 pointer-coarse:size-8">
-              <Plus size={15} />
-            </button>,
-            plusOpen === f.key,
-            (o) => setPlusOpen(o ? f.key : null),
+    // A folder of the group and its sessions, the folders in it under them, a step in each (none
+    // past MAX_IN); pinned ones above the sessions at the root, or at the folder they are in. Those
+    // hung under a session (dispatched) are under it wherever it is.
+    const folderEl = (f: FolderNode, lane: string, level: number): ReactNode => {
+      const at = Math.min(level, MAX_IN);
+      const first = f.sessions[0];
+      return (
+        <div key={f.key} role="group">
+          <FolderRow
+            f={f}
+            ws={w.id}
+            depth={at}
+            label={level === 0 && w.id === 0 ? <FolderLabel path={f.path} /> : f.name}
+            hung={hungOf(folderSessions(f))}
+            open={p.expanded(f.key)}
+            onToggle={() => p.toggle(f.key)}
+            lane={lane}
+            place={placeFolderAt}
+            pin={pinFolderOn}
+            newHere={gone(f.path) ? undefined : () => setPlusOpen(f.key)}
+            // As a workspace's: not its count, the "+" that opens a session in the folder
+            // (the user, 2026-11-06).
+            plus={!gone(f.path) && p.wsPlus(
+              { ...w, key: f.key, root: f.path },
+              <button type="button" onClick={(e) => e.stopPropagation()} aria-label={t("nav.newHere", { ws: f.name })} className="g-press -mr-1 grid size-6 place-items-center rounded-sm text-ink-3 group-hover:text-ink-2 hover:bg-fill-2 data-popup-open:bg-fill-2 data-popup-open:text-ink-2 pointer-coarse:size-8">
+                <Plus size={15} />
+              </button>,
+              plusOpen === f.key,
+              (o) => setPlusOpen(o ? f.key : null),
+            )}
+          />
+          {p.expanded(f.key) && (
+            <>
+              {f.children.flatMap((c) => (c.pinned ? [folderEl(c, f.key, level + 1)] : []))}
+              {folded(f.sessions, f.key, at + 1, (s) => row(s, at + 1, !!w.machine, undefined, f.key, first && f.children.length > 0 ? dropMark({ kind: "s", id: first.id, lane: f.key }) : undefined))}
+              {f.children.flatMap((c) => (c.pinned ? [] : [folderEl(c, f.key, level + 1)]))}
+            </>
           )}
-        />
-        {p.expanded(f.key) && folded(f.sessions, f.key, 1, (s) => row(s, 1, !!w.machine, undefined, f.key))}
-      </div>
-    );
+        </div>
+      );
+    };
     return (
       <div key={w.key} className={apart ? "mt-4" : "mt-1"} role="group">
         <WsRow
@@ -384,8 +404,8 @@ export function Sidebar(p: Props) {
           remote={!!w.machine}
           id={w.id}
           name={w.name}
-          sessions={w.rows.flatMap((r) => (r.kind === "session" ? [r.s] : r.f.sessions))}
-          hung={hungOf(w.rows.flatMap((r) => (r.kind === "session" ? [r.s] : r.f.sessions)))}
+          sessions={w.rows.flatMap((r) => (r.kind === "session" ? [r.s] : folderSessions(r.f)))}
+          hung={hungOf(w.rows.flatMap((r) => (r.kind === "session" ? [r.s] : folderSessions(r.f))))}
           root={w.root}
           folders={w.rows.some((r) => r.kind === "folder")}
           open={open}
@@ -409,9 +429,9 @@ export function Sidebar(p: Props) {
             )
           }
         />
-        {open && w.rows.flatMap((r) => (r.kind === "folder" && r.f.pinned ? [folderEl(r.f)] : []))}
+        {open && w.rows.flatMap((r) => (r.kind === "folder" && r.f.pinned ? [folderEl(r.f, w.key, 0)] : []))}
         {open && folded(roots(w), w.key, 0, (s) => row(s, 0, !!w.machine, undefined, w.key, firstRoot && dropMark({ kind: "s", id: firstRoot.id, lane: w.key })))}
-        {open && w.rows.flatMap((r) => (r.kind === "folder" && !r.f.pinned ? [folderEl(r.f)] : []))}
+        {open && w.rows.flatMap((r) => (r.kind === "folder" && !r.f.pinned ? [folderEl(r.f, w.key, 0)] : []))}
       </div>
     );
   };
@@ -477,9 +497,6 @@ export function Sidebar(p: Props) {
     </aside>
   );
 }
-
-/** path is root or in it ('/'-separated, "<machine>:" before another machine's). */
-const inside = (path: string, root: string) => root !== "" && (path === root || path.startsWith(root.endsWith("/") ? root : root + "/"));
 
 /** The lamp a launcher folded shows for those hung under it: amber while one needs you, else
  *  green while one works, else none. */
@@ -1118,7 +1135,7 @@ export function sessionTags(s: Session): Tags {
 /** A folder's row in a workspace: its name, the "+" for a session in it; its menu (right click,
  *  long-press): a session here, its path copied, open or folded, its sessions archived, its colour
  *  tag. */
-function FolderRow({ f, ws, label, hung, open, onToggle, newHere, plus, lane, place, pin }: { f: FolderNode; ws: number; label: ReactNode; hung: Session[]; open: boolean; onToggle: () => void; newHere?: () => void; plus: ReactNode; lane: string; place: (path: string, target: FolderNode, edge: Edge, lane: string) => void; pin: (path: string, on: boolean) => void }) {
+function FolderRow({ f, ws, depth, label, hung, open, onToggle, newHere, plus, lane, place, pin }: { f: FolderNode; ws: number; depth: number; label: ReactNode; hung: Session[]; open: boolean; onToggle: () => void; newHere?: () => void; plus: ReactNode; lane: string; place: (path: string, target: FolderNode, edge: Edge, lane: string) => void; pin: (path: string, on: boolean) => void }) {
   const machines = useMachines();
   const me = useMe().data;
   // Dragged among the folders of its group (reorder.ts): the panels' and 本机's, as a group.
@@ -1146,10 +1163,12 @@ function FolderRow({ f, ws, label, hung, open, onToggle, newHere, plus, lane, pl
   const failed = (e: unknown) => toast(t("err.action"), { error: true, description: errText(e) });
   const color = useFolderColors()[f.path];
   const tags: Tags = { value: color, set: (c) => void api.folderColor({ path: f.path, color: c as Color }).catch(failed) };
-  // Archive first, as in a session's menu (the user, 2026-11-06).
+  // Archive first, as in a session's menu (the user, 2026-11-06); those of the folders in it too
+  // (the user, 2026-11-10).
+  const all = folderSessions(f);
   const items = [
-    ...(f.sessions.length
-      ? [{ icon: <Archive size={15} />, label: t("menu.archiveHere", { n: f.sessions.length + hung.length }), run: () => void Promise.all(f.sessions.map((s) => api.patch(s.id, { archived: true }))).then(done(t("toast.archived")), failed) }]
+    ...(all.length
+      ? [{ icon: <Archive size={15} />, label: t("menu.archiveHere", { n: all.length + hung.length }), run: () => void Promise.all(all.map((s) => api.patch(s.id, { archived: true }))).then(done(t("toast.archived")), failed) }]
       : []),
     ...(newHere ? [{ icon: <Plus size={15} />, label: t("menu.newHere"), run: newHere }] : []),
     { icon: <Copy size={15} />, label: t("menu.copyPath"), run: () => void navigator.clipboard.writeText(shownPath(f.path, machines).real).then(done(t("toast.copied")), failed) },
@@ -1161,7 +1180,7 @@ function FolderRow({ f, ws, label, hung, open, onToggle, newHere, plus, lane, pl
   return (
     <>
       <Row
-        depth={0}
+        depth={depth}
         flip={`f:${f.key}`}
         expanded={open}
         onClick={onToggle}

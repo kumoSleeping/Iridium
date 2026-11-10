@@ -1,6 +1,7 @@
 // The sidebar's shape (plan "会话", "网页"): workspace → folder → session. A folder is a session's
 // directory under its workspace's root, shown even with one session in it: only those at the root
-// sit right under the workspace (the user, 2026-11-06). Sessions keep the list's order (pinned
+// sit right under the workspace (the user, 2026-11-06); one in another folder listed, under that
+// one (2026-11-10). Sessions keep the list's order (pinned
 // first, then the latest); folders follow the sessions at the root, by their latest session, or
 // where they were dragged to; those pinned come before them (reorder.ts). Sessions in no workspace go under 未归类; archived
 // ones (no shown marker) only under 归档; those that wait on you only in 需要你, back in their place
@@ -18,8 +19,9 @@
 import type { Places, Workspace } from "./api/types.gen";
 import type { Session } from "./api/types.gen";
 
-/** pinned: above the sessions at its group's root (reorder.ts). */
-export type Folder = { key: string; name: string; path: string; sessions: Session[]; pinned?: boolean };
+/** pinned: above the sessions at its group's root, or its parent's (reorder.ts). sessions: its
+ *  own; children: the folders in it (pinned first), each named by its path under it. */
+export type Folder = { key: string; name: string; path: string; sessions: Session[]; children: Folder[]; pinned?: boolean };
 export type Row = { kind: "session"; s: Session } | { kind: "folder"; f: Folder };
 /** machine: the machine its folder is at, by ID; none for this machine's, nor 未归类. only: it holds
  *  only the sessions right in its folder (Workspace.only). */
@@ -231,10 +233,29 @@ export function buildTree(all: Session[], workspaces: Workspace[], unsorted: str
         continue;
       }
       let f = folders.get(r);
-      if (!f) folders.set(r, (f = { key: `${key}/${r}`, name: r, path: p, sessions: [], ...(places.pinned.includes(p) ? { pinned: true } : {}) }));
+      if (!f) folders.set(r, (f = { key: `${key}/${r}`, name: r, path: p, sessions: [], children: [], ...(places.pinned.includes(p) ? { pinned: true } : {}) }));
       f.sessions.push(s);
     }
-    const sub = [...folders.values()].sort((a, b) => folderKey(b, places.order) - folderKey(a, places.order));
+    // A folder in another one listed is under it, named by its path there: the nearest one listed,
+    // the directories between with no session of their own in its name, not rows of their own
+    // ("b/c" under "a" for a/b/c) (the user, 2026-11-10).
+    const top: Folder[] = [];
+    for (const [r, f] of folders) {
+      const segs = r.split("/");
+      let parent: Folder | undefined;
+      for (let i = segs.length - 1; i > 0 && !parent; i--) {
+        const up = segs.slice(0, i).join("/");
+        parent = folders.get(up);
+        if (parent) f.name = r.slice(up.length + 1);
+      }
+      (parent ? parent.children : top).push(f);
+    }
+    const arrange = (fs: Folder[]): Folder[] => {
+      const sorted = fs.sort((a, b) => folderKey(b, places.order) - folderKey(a, places.order));
+      for (const f of sorted) f.children = arrange(f.children);
+      return [...sorted.filter((f) => f.pinned), ...sorted.filter((f) => !f.pinned)];
+    };
+    const sub = arrange(top);
     const folder = (f: Folder): Row => ({ kind: "folder", f });
     // Pinned folders above the sessions at the root, the rest under them.
     return { key, id, name, root, rows: [...sub.filter((f) => f.pinned).map(folder), ...rows, ...sub.filter((f) => !f.pinned).map(folder)], count: sessions.length, ...(machine ? { machine } : {}), ...(only ? { only } : {}) };
@@ -284,6 +305,15 @@ export function groupHolding(nodes: WsNode[], path: string): WsNode | undefined 
   return best;
 }
 
+/** The folders of group w that hold path, from its own row down to the deepest one listed in
+ *  another (each opened to show it); none: right at the group's root, or in no folder listed. */
+export function foldersHolding(w: WsNode, path: string): Folder[] {
+  const chain: Folder[] = [];
+  let fs = w.rows.flatMap((r) => (r.kind === "folder" ? [r.f] : []));
+  for (let f; (f = fs.find((x) => under(path, x.path))); fs = f.children) chain.push(f);
+  return chain;
+}
+
 /** The deepest directory all paths are in ("" for none but the root); another machine's paths
  *  ("<machine>:C:/…", "<machine>:/…") keep their machine in front. */
 export function commonDir(paths: string[]): string {
@@ -308,7 +338,13 @@ export function foldRest(ss: Session[], kept: (s: Session) => boolean, n = FOLD_
   return shown.length >= ss.length - 1 ? { shown: ss, rest: 0 } : { shown, rest: ss.length - shown.length };
 }
 
-const latest = (f: Folder) => Math.max(...f.sessions.map((s) => s.updatedAt));
+/** A folder's sessions and its folders', as the sidebar shows them: the pinned folders, its own,
+ *  the other folders. */
+export const folderSessions = (f: Folder): Session[] => [...f.children.filter((c) => c.pinned).flatMap(folderSessions), ...f.sessions, ...f.children.filter((c) => !c.pinned).flatMap(folderSessions)];
+/** A folder and those in it, at any depth. */
+export const allFolders = (fs: Folder[]): Folder[] => fs.flatMap((f) => [f, ...allFolders(f.children)]);
+
+const latest = (f: Folder) => Math.max(...folderSessions(f).map((s) => s.updatedAt));
 /** What a folder is sorted by among those in its group: where it was dragged to, else its latest
  *  session's activity (reorder.ts). */
 export const folderKey = (f: Folder, order: Places["order"]) => order[f.path] || latest(f);
@@ -319,4 +355,4 @@ const withUnder = (t: Tree, s: Session): Session[] => [s, ...(t.kids.get(s.id) ?
 export const family = (t: Tree, s: Session): Session[] => [...withUnder(t, s), ...(t.hung.get(s.id) ?? []).flatMap((h) => withUnder(t, h))];
 
 /** The sessions as the sidebar shows them from top to bottom, for Alt+↑↓ and the jump box. */
-export const flat = (t: Tree) => t.workspaces.flatMap((w) => w.rows.flatMap((r) => (r.kind === "session" ? [r.s] : r.f.sessions))).flatMap((s) => family(t, s));
+export const flat = (t: Tree) => t.workspaces.flatMap((w) => w.rows.flatMap((r) => (r.kind === "session" ? [r.s] : folderSessions(r.f)))).flatMap((s) => family(t, s));

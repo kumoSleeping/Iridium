@@ -15,9 +15,10 @@ import { t } from "../src/i18n";
 import { en } from "../src/i18n/en";
 import { zh } from "../src/i18n/zh";
 import { jumpList } from "../src/jump";
-import { buildTree, commonDir, flat, groupHolding, groupPath, hungUnder, isOwn, listedRemote, remotePath, standing } from "../src/tree";
+import { buildTree, commonDir, flat, foldersHolding, groupHolding, groupPath, hungUnder, isOwn, listedRemote, remotePath, standing, type Folder } from "../src/tree";
 import * as machines from "../src/machines";
 import { entryOf, reloadNow } from "../src/upgrade";
+import { workspaceOf } from "../src/warm";
 import { tilde, titleOf, tokens } from "../src/ui";
 import { dollars, hitOf, prettyModel } from "../src/usage";
 
@@ -190,6 +191,19 @@ describe("buildTree", () => {
     expect(t.workspaces[1]!.rows.map((r) => (r.kind === "session" ? r.s.id : `[${r.f.name}:${r.f.sessions.map((s) => s.id)}]`))).toEqual(["[one:e]", "[two:f]"]);
     expect(flat(t).map((s) => s.id)).toEqual(["a", "h", "b", "c", "d", "e", "f"]);
   });
+  test("a folder in another under it, by its path there; the directories between in its name", () => {
+    const list = [
+      S("a", "/w/ir/web", { workspace: 1, updatedAt: 1 }),
+      S("b", "/w/ir/web/api", { workspace: 1, updatedAt: 9 }),
+      S("c", "/w/ir/web/src/deep", { workspace: 1, updatedAt: 3 }),
+      S("d", "/w/ir/docs/x/y", { workspace: 1, updatedAt: 2 }),
+    ];
+    const t = buildTree(list, ws, "未归类", Date.now(), new Map(), { groups: [], order: {}, pinned: ["/w/ir/web/src/deep"] });
+    const show = (f: Folder): string => `${f.name}:${f.sessions.map((s) => s.id)}${f.children.length ? `(${f.children.map(show)})` : ""}`;
+    // web sorted by its latest, b's, in it; its folders: the pinned first.
+    expect(t.workspaces[0]!.rows.map((r) => (r.kind === "folder" ? show(r.f) : r.s.id))).toEqual(["web:a(src/deep:c,api:b)", "docs/x/y:d"]);
+    expect(flat(t).map((s) => s.id)).toEqual(["c", "a", "b", "d"]);
+  });
   test("where: the folder a row says, where the tree does not", () => {
     const list = [S("a", "/w/ir", { workspace: 1 }), S("b", "/w/ir/web", { workspace: 1 }), S("c", "/w/ir/web", { workspace: 1 }), S("d", "/w/ir/docs", { workspace: 1 }), S("e", "/w/x/one"), S("f", "/w/x/two"), S("g", "/w/x/two", { archived: true }), S("h", "/w/ir/web", { workspace: 1, status: "waiting" }), S("i", "/w/ir", { workspace: 1, archived: true })];
     const t = buildTree(list, ws, "未归类");
@@ -347,6 +361,27 @@ describe("buildTree", () => {
     expect(groupHolding(nodes, "/home/otae/ir/web/src")?.id).toBe(3);
     expect(groupHolding(nodes, "/home/otae/ir/docs")?.id).toBe(2);
     expect(groupHolding(nodes, "m:C:/Users/o/Code")).toBeUndefined();
+  });
+  test("a folder in another, in a group at another machine: a launcher in it with the one it started hung under it", () => {
+    const wss = [...ws, { id: 7, name: "Starmod", path: "m:C:/Code/Starmod" }];
+    const list = [
+      S("a", "C:\\Code\\Starmod\\web", { workspace: 7, machine: "m", own: true, updatedAt: 1 }),
+      S("L", "C:\\Code\\Starmod\\web\\api\\v2", { workspace: 7, machine: "m", own: true, updatedAt: 5 }),
+      S("h", "/w/ir/web", { workspace: 1, launcher: "L", updatedAt: 9 }),
+    ];
+    const t = buildTree(list, wss, "未归类");
+    const show = (f: Folder): string => `${f.name}:${f.sessions.map((s) => s.id)}${f.children.length ? `(${f.children.map(show)})` : ""}`;
+    // h's own group is not listed for it: it hangs under L, in the folder in web.
+    expect(t.workspaces.map((w) => [w.name, w.rows.map((r) => (r.kind === "folder" ? show(r.f) : r.s.id))])).toEqual([["Starmod", ["web:a(api/v2:L)"]]]);
+    expect(t.hung.get("L")?.map((s) => s.id)).toEqual(["h"]);
+    expect(flat(t).map((s) => s.id)).toEqual(["a", "L", "h"]);
+    expect(workspaceOf(t, "h")).toBe(7);
+    // A place in it: the folders it is in, to open; one between them not listed, the outer one.
+    const w = t.workspaces[0]!;
+    expect(foldersHolding(w, "m:C:/Code/Starmod/web/api/v2/src").map((f) => f.name)).toEqual(["web", "api/v2"]);
+    expect(foldersHolding(w, "m:C:/Code/Starmod/web/api").map((f) => f.name)).toEqual(["web"]);
+    expect(foldersHolding(w, "m:C:/Code/Starmod")).toEqual([]);
+    expect(groupHolding(t.workspaces, "m:C:/Code/Starmod/web/api/v2")?.id).toBe(7);
   });
   test("launchers in a cycle: the least ID on its own, the rest under it; no endless walk", () => {
     const list = [S("b", "/w/ir", { workspace: 1, launcher: "a" }), S("a", "/w/ir", { workspace: 1, launcher: "b" }), S("c", "/w/ir", { workspace: 1, launcher: "b" }), S("d", "/w/ir", { workspace: 1, launcher: "d" })];
