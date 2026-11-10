@@ -211,28 +211,17 @@ func New(cfg Config) (*Web, error) {
 	return w, nil
 }
 
-// AppToken is ir_web's own TOKEN, kept in stateDir (file "web-token", 0600) and made on first
-// use; core takes it as the built-in app ir_web's. With no stateDir it lives in memory only.
+// AppToken is ir_web's own TOKEN, made anew at each start (the web and the core are one process:
+// nothing holds the old one) and kept in stateDir (file "web-token", 0600) for a web run on its
+// own; core takes it as the built-in app ir_web's. With no stateDir it lives in memory only.
 func AppToken(core *gate.Gate, stateDir string) (string, error) {
-	var tok string
-	path := ""
+	tok := "ir_" + gate.NewSecret()
 	if stateDir != "" {
-		path = filepath.Join(stateDir, tokenFile)
-		if b, err := os.ReadFile(path); err == nil {
-			tok = strings.TrimSpace(string(b))
-		} else if !errors.Is(err, os.ErrNotExist) {
+		if err := os.MkdirAll(stateDir, 0o700); err != nil {
 			return "", err
 		}
-	}
-	if !strings.HasPrefix(tok, "ir_") || !gate.WellFormedSecret(strings.TrimPrefix(tok, "ir_")) {
-		tok = "ir_" + gate.NewSecret()
-		if path != "" {
-			if err := os.MkdirAll(stateDir, 0o700); err != nil {
-				return "", err
-			}
-			if err := gate.WriteFileAtomic(path, []byte(tok+"\n")); err != nil {
-				return "", err
-			}
+		if err := gate.WriteFileAtomic(filepath.Join(stateDir, tokenFile), []byte(tok+"\n")); err != nil {
+			return "", err
 		}
 	}
 	if err := core.SetAppToken(gate.WebApp, tok); err != nil {

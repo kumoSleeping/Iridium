@@ -3,6 +3,7 @@ package webapp
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -43,9 +44,16 @@ func TestForwardsBrowserAsWebLogin(t *testing.T) {
 	if !got.id.Web() || got.id.Login != me.ID || got.id.Name != "mac" {
 		t.Fatalf("identity: %+v", got.id)
 	}
-	tok, _ := AppToken(h.g, h.dir+"/state")
+	b, _ := os.ReadFile(h.dir + "/state/web-token")
+	tok := strings.TrimSpace(string(b))
 	if got.header.Get("Authorization") != "Bearer "+tok || got.header.Get(HeaderPlatform) != gate.WebApp || got.header.Get(HeaderUser) != me.ID {
 		t.Fatalf("headers: platform %q user %q", got.header.Get(HeaderPlatform), got.header.Get(HeaderUser))
+	}
+	// A start makes it anew, kept in the file.
+	if again, err := AppToken(h.g, h.dir+"/state"); err != nil || again == tok {
+		t.Fatalf("made anew: %v", err)
+	} else if b, _ := os.ReadFile(h.dir + "/state/web-token"); strings.TrimSpace(string(b)) != again {
+		t.Fatal("the file holds another")
 	}
 	if c := got.header.Get("Cookie"); strings.Contains(c, CookieName) || !strings.Contains(c, "theme=dark") {
 		t.Fatalf("cookie forwarded: %q", c)

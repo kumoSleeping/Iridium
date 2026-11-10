@@ -21,7 +21,7 @@ TCP 上的请求先过网页层（`internal/webapp`），再到核心的 `gate.W
 
 - 一张表：`Kind` 为 `channel` 的是应用（`apps`），`panel` 的是 ir_web 的登录（`logins` 里 `app = 'ir_web'`）。主机 ID `local`，显示“主机”。
 - `Identity{App, Login, Name, Session}`：`Host()` 主机，`Web()` 网页的登录，`ID()` 存权限、用量的 ID。
-- ir_web 自己是一行应用（ID `ir_web`，有 TOKEN 哈希），不列出、不能按名字找、不能改名或删除；TOKEN 在状态目录 `web-token`（0600），启动时没有就生成（`webapp.AppToken` → `SetAppToken`）。Satori 的 IDENTIFY 不收它。
+- ir_web 自己是一行应用（ID `ir_web`，有 TOKEN 哈希），不列出、不能按名字找、不能改名或删除；TOKEN 每次启动重新生成（网页和核心在同一个进程，旧的没人用），写进状态目录 `web-token`（0600）（`webapp.AppToken` → `SetAppToken`）。Satori 的 IDENTIFY 不收它。
 - 应用只经配对进来：`CreateApp`、`RenewToken`（更新配对，旧连接断开）。ir_web 的登录只经邀请：`CreateWebLogin`（网页层调）。
 - 名字：1–12 个字，字母、数字、空格和 `- _ .`；全角转半角，空格合并；不分大小写查重，应用之间、网页的登录之间各自不重名（登录改名时也避开邀请占着的名字，`Config.LoginNameTaken`）。保留 `host`、`主机`、`本机`、`ir_web`、`local`、`未知`、`unknown`，单个 ASCII 字母不能用。`[ ] / : ·` 不收。
 - 名字和头像：`UpdateProfile`、`ServeProfile`。头像收 PNG/JPEG/WebP，≤2MB，居中裁方、缩到 128×128。地址 `/_ir/avatar/<id>?v=<版本>`，核心给任何认出来的人，带版本时可永久缓存（private）。
