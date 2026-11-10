@@ -340,7 +340,8 @@ func (x *Index) Workspaces() ([]api.Workspace, error) {
 	}
 	out := make([]api.Workspace, 0, len(ws))
 	for _, w := range ws {
-		out = append(out, api.Workspace{ID: w.ID, Name: w.Name, Path: w.Path})
+		only := w.Path == "/" || w.Path == x.o.Home || x.remoteTop(w.Path) || w.Flat
+		out = append(out, api.Workspace{ID: w.ID, Name: w.Name, Path: w.Path, Only: only})
 	}
 	return out, nil
 }

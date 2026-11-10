@@ -15,18 +15,31 @@ import { Folder, MessageSquare } from "lucide-react";
 import { CloudBadge, MachineFace } from "../machines";
 import { openPlace, type Place } from "../places";
 import { AGENTS, agentName, cn, Logo, tilde, titleOf } from "../ui";
-import { nativeAt, type NamedPlace } from "./at";
+import { baseName, nativeAt, type NamedPlace } from "./at";
 import { mentions, sessionIds, shortId, type Mention } from "./refs";
 
 /** How the composer names session to, among list: what a row dropped or picked after @ puts in. */
 export const mentionOf = (to: Session, list: Session[]) => t("composer.mention", { title: titleOf(to) || tilde(to.cwd), agent: agentName(to.agent), id: shortId(to.id, list.map((x) => x.id)) });
 
 /** How the composer names place p: a folder here by its path; one at another machine by the
- *  machine's name and the path as it writes it. */
+ *  machine's name (its ID if the name has what would end it) and the path as it writes it. Its
+ *  name without the marks that close it (" 」 as ” 』), on one line, at most 200 long, so it reads
+ *  back (refs.ts mentions). */
 export function placeMention(p: NamedPlace, ms: Machine[]): string {
-  if (!p.machine) return t("composer.mentionFolder", { name: p.name, path: p.path });
+  const name = sayable(p.name) || sayable(baseName(p.path)) || "/";
+  if (!p.machine) return t("composer.mentionFolder", { name, path: p.path });
   const m = ms.find((x) => x.id === p.machine);
-  return t("composer.mentionWorkspace", { name: p.name, machine: m?.name ?? p.machine, path: nativeAt(m, p.path) });
+  const machine = m && !/[\n:「」（）"()]/.test(m.name) ? m.name : p.machine;
+  return t("composer.mentionWorkspace", { name, machine, path: nativeAt(m, p.path) });
+}
+
+function sayable(name: string): string {
+  let out = "";
+  for (const c of name.replaceAll('"', "”").replaceAll("」", "』").replace(/\s+/g, " ").trim()) {
+    if (out.length + c.length > 200) break;
+    out += c;
+  }
+  return out;
 }
 
 /** The machine a mention names: by its ID, else its name in any case. */

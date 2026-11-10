@@ -19,7 +19,7 @@ import { ahead, behind } from "./chats";
 import { t, useLang } from "./i18n";
 import { useFlip } from "./motion";
 import { folderLevels, sessionLevels, usePushMenus, wsLevels, type PushLevel } from "./push";
-import { foldRest, machineOf, remotePath, type Folder as FolderNode, type Tree, type WsNode } from "./tree";
+import { foldRest, groupHolding, machineOf, remotePath, type Folder as FolderNode, type Tree, type WsNode } from "./tree";
 import { createAt, onOpenPlace, type Place } from "./places";
 import { LinkDot } from "./link";
 import { errText, toast } from "./toast";
@@ -224,7 +224,7 @@ export function Sidebar(p: Props) {
       onOpenPlace((at: Place) => {
         const { tree, expanded, toggle, reveal } = now.current;
         const path = at.machine ? `${at.machine}:${at.path}` : at.path;
-        const w = tree.workspaces.find((w) => w.id !== 0 && inside(path, w.root));
+        const w = groupHolding(tree.workspaces, path);
         // On a phone the sheet comes out first: the "+" is on it.
         if (!w) return reveal?.(), createAt(at);
         const f = w.rows.flatMap((r) => (r.kind === "folder" && inside(path, r.f.path) ? [r.f] : []))[0];

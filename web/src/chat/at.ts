@@ -154,7 +154,8 @@ export function pathSection(p: AtPath, got: { path?: string; folders?: string[];
   const dir = got.path ?? p.dir;
   const machine = p.m ? { machine: p.m.id } : {};
   const join = (name: string) => (dir.endsWith("/") ? dir + name : `${dir}/${name}`);
-  const self: AtRow = { key: `f:${dir}`, kind: "place", p: { ...machine, path: dir, name: baseName(dir) }, self: true, ...(got.missing ? { off: true } : {}) };
+  // Not to be named while it is not a whole path (~ not known yet): the name would not read back.
+  const self: AtRow = { key: `f:${dir}`, kind: "place", p: { ...machine, path: dir, name: baseName(dir) }, self: true, ...(got.missing || dir.startsWith("~") ? { off: true } : {}) };
   const w = p.part.toLowerCase();
   const names = (got.missing ? [] : (got.folders ?? []))
     .map((n) => [n.toLowerCase().startsWith(w) ? 0 : n.toLowerCase().includes(w) ? 1 : 2, n] as const)
@@ -164,6 +165,11 @@ export function pathSection(p: AtPath, got: { path?: string; folders?: string[];
   const rows: AtRow[] = [self, ...names.map((n): AtRow => ({ key: `f:${join(n)}`, kind: "place", p: { ...machine, path: join(n), name: n } }))];
   return { key: "path", head: { kind: "path", ...(p.m ? { m: p.m } : {}), path: nativeAt(p.m, dir) }, rows };
 }
+
+/** Whether → goes into the folder typed would name (what → puts after the @, typedPath): only with
+ *  the caret alone (nothing selected) at the end of the @word (from: its @), no key held with it
+ *  (a word or line jump), and only to change what is typed; else → moves the caret as ever. */
+export const arrowInto = (text: string, from: number, start: number, end: number, typed: string, held: boolean) => !held && start === end && /^(\s|$)/.test(text.slice(end)) && text.slice(from, end) !== typed;
 
 /** What → puts after the @ to go into place p: its path and a /; at another machine, its name
  *  first (its ID if the name has a space, which would end the @word). */

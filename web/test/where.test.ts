@@ -26,6 +26,12 @@ describe("dispatchedFrom", () => {
     expect(dispatchedFrom("out", list, ws)).toEqual([]);
     expect(dispatchedFrom("x", list, ws).map((s) => s.id)).toEqual(["y"]);
   });
+  test("one taken out by hand in the middle of a chain ends it: what it started is its, not its launcher's", () => {
+    const list = [S("p", "/w/ir", { workspace: 1, own: true }), S("out", "/w/ir", { workspace: 1, launcher: "p", own: true }), S("c", "C:\\Code\\Ds_Benchmark", { workspace: 7, machine: "m", launcher: "out" })];
+    expect(dispatchedFrom("p", list, ws)).toEqual([]);
+    expect(dispatchedFrom("out", list, ws).map((s) => s.id)).toEqual(["c"]);
+    expect(spotsOf(list[0]!, list, [], ws)).toEqual([]);
+  });
 });
 
 describe("spotsOf", () => {

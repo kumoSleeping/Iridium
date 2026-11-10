@@ -4,7 +4,7 @@
 // sent no one to yet.
 import type { Session, Workspace } from "../api/types.gen";
 import type { Place } from "../places";
-import { groupPath, hungUnder, machineOf } from "../tree";
+import { groupPath, machineOf, standing } from "../tree";
 import { baseName, type NamedPlace } from "./at";
 
 /** One place: own, the session's folder (with those it sent there); sent, one it dispatched to,
@@ -16,15 +16,19 @@ export type Spot = { kind: "own" | "sent" | "named"; key: string; place: Place; 
  *  subagents, not taken out by hand), in its order; a cycle stops. workspaces: as the list has. */
 export function dispatchedFrom(id: string, list: Session[], workspaces?: Workspace[]): Session[] {
   const byId = new Map(list.map((s) => [s.id, s]));
+  const st = standing(list, workspaces);
+  // Up its launchers to id, through dispatched ones only: one taken out by hand (own, as the list
+  // has it) or a subagent between ends the chain, as it does in the list.
   const from = (s: Session) => {
     let cur: Session | undefined = s;
     for (let n = 0; cur?.launcher && n <= list.length; n++) {
       if (cur.launcher === id) return true;
       cur = byId.get(cur.launcher);
+      if (!cur || cur.subagent || st.own.has(cur.id)) return false;
     }
     return false;
   };
-  return [...hungUnder(list, workspaces).values()].flat().filter(from);
+  return [...st.hung.values()].flat().filter(from);
 }
 
 const inside = (path: string, root: string) => path === root || path.startsWith(root.endsWith("/") ? root : root + "/");

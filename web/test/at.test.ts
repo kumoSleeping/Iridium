@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { DshWorkspace, Machine, Session, Workspace } from "../src/api/types.gen";
-import { atPath, atSections, baseName, namedOf, pathSection, typedPath } from "../src/chat/at";
+import { arrowInto, atPath, atSections, baseName, namedOf, pathSection, typedPath } from "../src/chat/at";
 import { placeMention, placeOf } from "../src/chat/mention";
 import { leadingMentions, mentions, placesIn } from "../src/chat/refs";
 import { setLang } from "../src/i18n";
@@ -50,6 +50,30 @@ describe("place mentions", () => {
     expect(placeOf({ machine: "gone", path: "/x" }, [win])).toBeUndefined();
     expect(placeOf({ path: "/x" }, [win])).toEqual({ path: "/x" });
   });
+  test("a machine whose name has a space: read back, in either language", () => {
+    const pc = { ...win, id: "m3", name: "My PC" };
+    for (const lang of ["zh", "en"] as const) {
+      setLang(lang);
+      const said = placeMention({ machine: "m3", path: "C:/Code/Ds", name: "Ds" }, [pc]);
+      expect(mentions(`${said} hi`)[0]).toMatchObject({ kind: "place", name: "Ds", machine: "My PC", path: "C:\\Code\\Ds" });
+      expect(placeOf(mentions(said)[0] as { machine: string; path: string }, [pc])).toEqual({ machine: "m3", path: "C:/Code/Ds" });
+    }
+    // One whose name has what would end it: by its ID.
+    expect(placeMention({ machine: "m4", path: "/x", name: "x" }, [{ ...mac, id: "m4", name: "a (b)" }])).toBe('workspace "x" (m4:/x)');
+    setLang("zh");
+  });
+  test("a name with the marks that close it, or too long: said so it reads back", () => {
+    for (const lang of ["zh", "en"] as const) {
+      setLang(lang);
+      for (const name of ['My "big" app', "a」b", "x".repeat(300)]) {
+        const said = placeMention({ machine: "m1", path: "C:/Code/big", name }, [win]);
+        expect(mentions(`${said} hi`)[0]).toMatchObject({ kind: "place", machine: "otae-2", path: "C:\\Code\\big" });
+        const here = placeMention({ path: "/w/big", name }, [win]);
+        expect(mentions(`${here} hi`)[0]).toMatchObject({ kind: "place", path: "/w/big" });
+      }
+    }
+    setLang("zh");
+  });
 });
 
 describe("the @ list", () => {
@@ -93,6 +117,8 @@ describe("the @ list", () => {
     expect(atPath("/home/ot", [win])).toEqual({ dir: "/home", part: "ot" });
     expect(atPath("/", [win])).toEqual({ dir: "/", part: "" });
     expect(atPath("~/co", [win])).toEqual({ dir: "~", part: "co" });
+    expect(atPath("~/co", [win], "/home/otae")).toEqual({ dir: "/home/otae", part: "co" });
+    expect(atPath("~", [win], "/home/otae")).toEqual({ dir: "/home/otae", part: "" });
     expect(atPath("otae-2:C:\\Code\\Ds", [win])).toEqual({ m: win, dir: "C:/Code", part: "Ds" });
     expect(atPath("OTAE-2:", [win])).toEqual({ m: win, dir: "C:/Users/o", part: "" });
     expect(atPath("m1:C:", [win])).toEqual({ m: win, dir: "C:/", part: "" });
@@ -109,6 +135,18 @@ describe("the @ list", () => {
     const none = pathSection(atPath("/nope/x", [])!, { missing: true });
     expect(none.rows).toHaveLength(1);
     expect(none.rows[0]!.off).toBe(true);
+    // ~ not known yet: its folder not to be named (it would not read back), till the listing says.
+    expect(pathSection(atPath("~", [])!, {}).rows[0]!.off).toBe(true);
+    expect(pathSection(atPath("~", [])!, { path: "/home/k", folders: [] }).rows[0]).toMatchObject({ p: { path: "/home/k" } });
+    expect(pathSection(atPath("~", [])!, { path: "/home/k", folders: [] }).rows[0]!.off).toBeUndefined();
+  });
+  test("→ goes in only with the caret alone at the @word's end, no key held, to change it", () => {
+    const text = "@/home/otae x";
+    expect(arrowInto(text, 0, 11, 11, "@/home/otae/", false)).toBe(true);
+    expect(arrowInto(text, 0, 3, 3, "@/home/", false)).toBe(false); // inside the word
+    expect(arrowInto(text, 0, 11, 11, "@/home/otae/", true)).toBe(false); // Ctrl, Alt, ⌘ or Shift
+    expect(arrowInto(text, 0, 6, 11, "@/home/otae/", false)).toBe(false); // a selection
+    expect(arrowInto("@/", 0, 2, 2, "@/", false)).toBe(false); // nothing to change: the caret moves
   });
   test("→ into a folder; names", () => {
     expect(typedPath({ path: "/home/k" }, [])).toBe("/home/k/");

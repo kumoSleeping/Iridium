@@ -308,6 +308,7 @@ function MachineAgents({ m, busy, onPick }: { m: Machine; busy: string | null; o
         <span className="truncate font-medium">{m.name}</span>
         {!m.online && <span className="shrink-0">{t("status.offline")}</span>}
       </div>
+      {!m.agents.length && <p className="m-0 flex h-9 items-center px-2 text-sm text-ink-3">{t("new.noAgents")}</p>}
       <div className="g-stagger grid grid-cols-4 gap-1">
         {m.agents.map(({ agent }, i) => {
           const a = agent as Agent;
@@ -360,17 +361,19 @@ export function CreatePopover({ trigger }: { trigger: ReactElement }) {
   const [page, setPage] = useState<"folder" | "session">("folder");
   const [folder, setFolder] = useState("~");
   // Another machine's folders (docs/exec.md): picked above the folders; its agents alone then.
-  const machines = useMachines().filter((m) => m.agents.length > 0);
+  const all = useMachines();
+  const machines = all.filter((m) => m.agents.length > 0);
   const [at, setAt] = useState<Machine | undefined>(undefined);
   const { busy, start } = useStart((id) => (setOpen(false), openChat(id)));
-  const ms = useRef(machines);
-  ms.current = machines;
+  // Any paired machine, its agents or none (NewSession says so): only one not paired is gone.
+  const ms = useRef(all);
+  ms.current = all;
   useEffect(
     () =>
       onCreateAt((p) => {
-        const m = p.machine ? ms.current.find((x) => x.id === p.machine) : undefined;
-        if (p.machine && !m) return void toast(t("new.gone"), { error: true });
-        setAt(m);
+        const whose = p.machine ? agentsAt(`${p.machine}:${p.path}`, ms.current) : "here";
+        if (whose === "gone") return void toast(t("new.gone"), { error: true });
+        setAt(whose === "here" ? undefined : whose.m);
         setFolder(p.path);
         setPage("session");
         setOpen(true);

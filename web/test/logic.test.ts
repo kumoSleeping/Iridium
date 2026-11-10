@@ -15,7 +15,7 @@ import { t } from "../src/i18n";
 import { en } from "../src/i18n/en";
 import { zh } from "../src/i18n/zh";
 import { jumpList } from "../src/jump";
-import { buildTree, commonDir, flat, groupPath, hungUnder, isOwn, listedRemote, remotePath, standing } from "../src/tree";
+import { buildTree, commonDir, flat, groupHolding, groupPath, hungUnder, isOwn, listedRemote, remotePath, standing } from "../src/tree";
 import * as machines from "../src/machines";
 import { entryOf, reloadNow } from "../src/upgrade";
 import { tilde, titleOf, tokens } from "../src/ui";
@@ -338,6 +338,15 @@ describe("buildTree", () => {
       const st = standing(c.sessions.map((s) => ({ agent: "dsh", cwd: "/", status: "idle", hosted: false, live: false, updatedAt: 0, ...s }) as Session), c.workspaces);
       expect([[...st.rows], Object.fromEntries([...st.hung].map(([k, v]) => [k, v.map((s) => s.id)])), [...st.groups].sort((a, b) => a - b)], c.name).toEqual([c.rows, c.hung, c.groups]);
     }
+  });
+  test("groupHolding: the group a place is in, as the server groups: a home or split one holds only its own folder; the deepest", () => {
+    const node = (id: number, root: string, only?: boolean) => ({ key: `w${id}`, id, name: root, root, rows: [], count: 1, ...(only ? { only } : {}) });
+    const nodes = [node(1, "/home/otae", true), node(2, "/home/otae/ir"), node(3, "/home/otae/ir/web"), node(4, "m:C:/Users/o", true), node(0, "")];
+    expect(groupHolding(nodes, "/home/otae/newproj")).toBeUndefined();
+    expect(groupHolding(nodes, "/home/otae")?.id).toBe(1);
+    expect(groupHolding(nodes, "/home/otae/ir/web/src")?.id).toBe(3);
+    expect(groupHolding(nodes, "/home/otae/ir/docs")?.id).toBe(2);
+    expect(groupHolding(nodes, "m:C:/Users/o/Code")).toBeUndefined();
   });
   test("launchers in a cycle: the least ID on its own, the rest under it; no endless walk", () => {
     const list = [S("b", "/w/ir", { workspace: 1, launcher: "a" }), S("a", "/w/ir", { workspace: 1, launcher: "b" }), S("c", "/w/ir", { workspace: 1, launcher: "b" }), S("d", "/w/ir", { workspace: 1, launcher: "d" })];

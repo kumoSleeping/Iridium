@@ -21,8 +21,9 @@ import type { Session } from "./api/types.gen";
 /** pinned: above the sessions at its group's root (reorder.ts). */
 export type Folder = { key: string; name: string; path: string; sessions: Session[]; pinned?: boolean };
 export type Row = { kind: "session"; s: Session } | { kind: "folder"; f: Folder };
-/** machine: the machine its folder is at, by ID; none for this machine's, nor 未归类. */
-export type WsNode = { key: string; id: number; name: string; root: string; rows: Row[]; count: number; machine?: string };
+/** machine: the machine its folder is at, by ID; none for this machine's, nor 未归类. only: it holds
+ *  only the sessions right in its folder (Workspace.only). */
+export type WsNode = { key: string; id: number; name: string; root: string; rows: Row[]; count: number; machine?: string; only?: boolean };
 /** A workflow run at work under the session that started it, as Claude Code's /workflows shows it:
  *  its name, the phase its latest agent at work is in, how many of the agents seen so far are done,
  *  and those at work. */
@@ -218,7 +219,7 @@ export function buildTree(all: Session[], workspaces: Workspace[], unsorted: str
     const ws = workspaces.some((w) => w.id === s.workspace) ? s.workspace! : 0;
     byWs.set(ws, [...(byWs.get(ws) ?? []), s]);
   }
-  const node = (key: string, id: number, name: string, root: string, sessions: Session[]): WsNode => {
+  const node = (key: string, id: number, name: string, root: string, sessions: Session[], only?: boolean): WsNode => {
     const machine = id ? machineOf(root) : undefined;
     const folders = new Map<string, Folder>();
     const rows: Row[] = [];
@@ -236,11 +237,11 @@ export function buildTree(all: Session[], workspaces: Workspace[], unsorted: str
     const sub = [...folders.values()].sort((a, b) => folderKey(b, places.order) - folderKey(a, places.order));
     const folder = (f: Folder): Row => ({ kind: "folder", f });
     // Pinned folders above the sessions at the root, the rest under them.
-    return { key, id, name, root, rows: [...sub.filter((f) => f.pinned).map(folder), ...rows, ...sub.filter((f) => !f.pinned).map(folder)], count: sessions.length, ...(machine ? { machine } : {}) };
+    return { key, id, name, root, rows: [...sub.filter((f) => f.pinned).map(folder), ...rows, ...sub.filter((f) => !f.pinned).map(folder)], count: sessions.length, ...(machine ? { machine } : {}), ...(only ? { only } : {}) };
   };
   // A group is a folder sessions are in (the user, 2026-11-08): one with none shown is not listed.
   // One row a group, wherever its sessions run (2026-11-10: no group listed at two machines).
-  const nodes = workspaces.filter((w) => byWs.get(w.id)?.length).map((w) => node(`w${w.id}`, w.id, w.name, w.path, byWs.get(w.id)!));
+  const nodes = workspaces.filter((w) => byWs.get(w.id)?.length).map((w) => node(`w${w.id}`, w.id, w.name, w.path, byWs.get(w.id)!, w.only));
   // 未归类 has no root: its folders are grouped under the directory all its sessions share, and shown
   // by their whole path (~ for the home directory, not its bare name). One, this machine's: one of
   // another machine's in it only as a person opened it (2026-11-10).
@@ -269,6 +270,18 @@ export function buildTree(all: Session[], workspaces: Workspace[], unsorted: str
   const listed = new Set([...live, ...[...hung.values()].flat(), ...archived].map((s) => s.id));
   const unlisted = new Set(all.filter((s) => (s.subagent ? !!s.parent && byId.has(s.parent) && !listed.has(s.parent) : !listed.has(s.id))).map((s) => s.id));
   return { workspaces: nodes, archived, where, kids, runs, hung, unlisted };
+}
+
+/** The group listed that holds path (a group path, "<machine>:…" at another machine), as the server
+ *  groups: the one of that folder, else the deepest whose folder it is in and that holds more than
+ *  its own (not /, a home, a drive's root, one split: Workspace.only). None: no group listed does. */
+export function groupHolding(nodes: WsNode[], path: string): WsNode | undefined {
+  let best: WsNode | undefined;
+  for (const w of nodes) {
+    if (w.id === 0 || !(w.root === path || (!w.only && under(path, w.root)))) continue;
+    if (!best || w.root.length > best.root.length) best = w;
+  }
+  return best;
 }
 
 /** The deepest directory all paths are in ("" for none but the root); another machine's paths

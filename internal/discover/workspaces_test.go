@@ -336,3 +336,38 @@ func TestSubagentNotStray(t *testing.T) {
 		}
 	}
 }
+
+// A group says whether it holds only its own folder (Workspace.only: /, the home folder, a drive's
+// root or a home at another machine, one split), so the page finds the group a place is in as
+// this groups.
+func TestWorkspacesOnly(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "iridium.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	x := New(Options{Store: st, Home: "/home/u", Logf: t.Logf})
+	want := map[string]bool{"/": true, "/home/u": true, "/home/u/ir": false, "m:C:/": true, "m:C:/Users/o": true, "m:C:/Code": false, "/srv/split": true}
+	for p := range want {
+		if _, err := st.CreateWorkspace(filepath.Base(p), p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ws, _ := st.Workspaces()
+	for _, w := range ws {
+		if w.Path == "/srv/split" {
+			if err := st.SplitWorkspace(w.ID, nil); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	got, err := x.Workspaces()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range got {
+		if w.Only != want[w.Path] {
+			t.Errorf("%s: only %v, want %v", w.Path, w.Only, want[w.Path])
+		}
+	}
+}

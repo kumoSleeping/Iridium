@@ -23,10 +23,10 @@ import { useList, useMachines } from "../store";
 import { ago, agentName, cn, fine, IconKey, keep, kept, Logo, steerKey, tilde, Tip, titleOf, useMinute } from "../ui";
 import { hasMention, MentionMarks, mentionOf, PlaceIcon, PlaceLines, placeMention } from "./mention";
 import { atWord, shortId } from "./refs";
-import { atPath, atSections, nativeAt, namedKey, namedOf, pathSection, typedPath, type AtHead, type AtRow, type AtSection, type Named, type NamedPlace } from "./at";
+import { arrowInto, atPath, atSections, nativeAt, namedKey, namedOf, pathSection, typedPath, type AtHead, type AtRow, type AtSection, type Named, type NamedPlace } from "./at";
 import { MachineFace, MachineLink } from "../machines";
 import { foldersQ } from "../create";
-import { useSettings, useWorkspaces } from "../data";
+import { useHome, useSettings, useWorkspaces } from "../data";
 import { useGlide } from "../motion";
 import { CODE, previews, size, Zoom } from "./files";
 import { upload } from "./upload";
@@ -208,11 +208,12 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
   const sessions = useList();
   const machines = useMachines();
   const workspaces = useWorkspaces().data ?? [];
+  const home = useHome().data; // ~ typed after the @ is this; named, a whole path
   const word = caret !== null && text !== shut && !list.length ? atWord(text, caret) : null;
   // A path typed after the @: its folder and those in it, asked for as the picker does (~ the
   // daemon's to resolve, the folder named by the path it gives); else each
   // machine's DSH workspaces, while the list is open (online ones with dsh).
-  const path = word ? atPath(word.q, machines) : null;
+  const path = word ? atPath(word.q, machines, home) : null;
   const folders = useQuery({ ...foldersQ(path?.dir ?? "", path?.m?.id), enabled: !!path });
   const dsh = useQueries({ queries: machines.map((m) => ({ queryKey: ["dshWorkspaces", m.id], queryFn: () => api.dshWorkspaces(m.id), enabled: !!word && !path && hasDsh(m), retry: false, staleTime: 30_000 })) });
   const sections: AtSection[] = !word
@@ -243,6 +244,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
     setCaret(to);
     requestAnimationFrame(() => (box.current?.focus(), box.current?.setSelectionRange(to, to)));
   };
+  /** Whether → goes into row r's folder (arrowInto), the box as it is. */
+  const into = (r: AtRow | undefined, el: HTMLTextAreaElement, held: boolean) => !!word && r?.kind === "place" && arrowInto(text, word.from, el.selectionStart, el.selectionEnd, `@${typedPath(r.p, machines)}`, held);
   const atOpen = sections.length > 0;
   const shown = list.length || opts.length;
   // What looks like a key: store it as a credential and say {{NAME}} instead (savesecret.tsx).
@@ -466,7 +469,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
               if (!own(`/${c.name}`)) type(`/${c.name} `);
             } else if (opts.length && (e.key === "Enter" || e.key === "Tab") && !e.shiftKey) name(opts[sel]!);
             // → goes into the folder pointed at, only while the list is open on one.
-            else if (e.key === "ArrowRight" && !e.shiftKey && opts[sel]?.kind === "place") enter(opts[sel]!);
+            else if (e.key === "ArrowRight" && word && into(opts[sel], e.currentTarget, e.shiftKey || e.ctrlKey || e.metaKey || e.altKey)) enter(opts[sel]!);
             // At the box's very start, Backspace takes the last one named, whole.
             else if (e.key === "Backspace" && named.length && e.currentTarget.selectionStart === 0 && e.currentTarget.selectionEnd === 0) setNamed((ns) => ns.slice(0, -1));
             else if ((shown || atOpen) && e.key === "Escape") setShut(text);

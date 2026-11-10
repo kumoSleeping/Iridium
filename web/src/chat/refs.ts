@@ -92,7 +92,8 @@ export type Mention =
 // opening one (2026-11-10), so one after another, and words after, still part.
 const ZH_PATH = "([^\\n]{1,400}?)）(?![^\\s（]*）)";
 const EN_PATH = "([^\\n]{1,400}?)\\)(?![^\\s(]*\\))";
-const MACHINE = "([^\\s:「」（）\"()]{1,64}):";
+// A machine's name may have spaces (My PC); it ends at the first colon (a name has none).
+const MACHINE = "([^\\n:「」（）\"()]{1,64}):";
 const MENTION = new RegExp(
   [
     `文件夹「([^」\\n]{1,200})」（(?=/)${ZH_PATH}`,

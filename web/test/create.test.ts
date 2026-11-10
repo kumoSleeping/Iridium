@@ -14,6 +14,10 @@ describe("agentsAt", () => {
   test("a folder at another machine offers that machine's alone, in its own path", () => {
     expect(agentsAt("m1:C:/Code/Ds_Benchmark", [win])).toEqual({ m: win, cwd: "C:\\Code\\Ds_Benchmark" });
   });
+  test("a machine paired with no agents is there, not gone (the + says it has none)", () => {
+    const bare = { ...win, id: "m2", agents: [] };
+    expect(agentsAt("m2:C:/Code", [win, bare])).toEqual({ m: bare, cwd: "C:\\Code" });
+  });
   test("a machine no more there offers none", () => {
     expect(agentsAt("m9:/root", [win])).toBe("gone");
     expect(agentsAt("m1:C:/x", [])).toBe("gone");

@@ -7,6 +7,9 @@ type Workspace struct {
 	ID   int64  `json:"id"`
 	Name string `json:"name"`
 	Path string `json:"path"`
+	// Only: it holds only the sessions right in its folder (/, a home, a drive's root at another
+	// machine, one split), none in a folder under it.
+	Only bool `json:"only,omitempty"`
 }
 
 // GroupOrder lists the groups' rows in the order they were dragged to (PUT /api/groups/order), by

@@ -336,6 +336,7 @@ export const en: Dict = {
   "new.folder": "Folder",
   "new.local": "This machine",
   "new.gone": "Removed machine",
+  "new.noAgents": "No agents available",
 
   "jump.placeholder": "Session, folder or something said",
   "jump.none": "No matching session",

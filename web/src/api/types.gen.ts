@@ -959,6 +959,11 @@ export interface Workspace {
   id: number /* int64 */;
   name: string;
   path: string;
+  /**
+   * Only: it holds only the sessions right in its folder (/, a home, a drive's root at another
+   * machine, one split), none in a folder under it.
+   */
+  only?: boolean;
 }
 /**
  * GroupOrder lists the groups' rows in the order they were dragged to (PUT /api/groups/order), by

@@ -336,6 +336,7 @@ export const zh = {
   "new.folder": "目录",
   "new.local": "本机",
   "new.gone": "已移除的机器",
+  "new.noAgents": "无可用的 agent",
 
   "jump.placeholder": "会话名、目录或说过的话",
   "jump.none": "没有对上的会话",
