@@ -27,6 +27,12 @@ type needs struct {
 	hub *hub.Hub
 	mu  sync.Mutex
 	all map[string]*need
+	// more: the needs kept elsewhere (needs_more.go: sessions' asks, shares), carried with these.
+	more func() []api.Need
+	pub  sync.Mutex // one publish at a time: the last one set carries the latest
+	pmu  sync.Mutex
+	// poking: a publish poke started runs; again: poked meanwhile, run once more.
+	poking, again bool
 }
 
 type need struct {
@@ -89,7 +95,47 @@ func (cs *needs) pending() api.Needs {
 	return out
 }
 
-func (cs *needs) publish() { cs.hub.Set("needs", cs.pending()) }
+// everything is the pending needs and the more ones, oldest first.
+func (cs *needs) everything() api.Needs {
+	out := cs.pending()
+	if cs.more != nil {
+		out.Pending = append(out.Pending, cs.more()...)
+		slices.SortStableFunc(out.Pending, func(a, b api.Need) int { return int(a.CreatedAt - b.CreatedAt) })
+	}
+	return out
+}
+
+func (cs *needs) publish() {
+	cs.pub.Lock()
+	defer cs.pub.Unlock()
+	cs.hub.Set("needs", cs.everything())
+}
+
+// poke publishes soon, off the caller's goroutine (a session's notice): pokes meanwhile make one
+// more publish.
+func (cs *needs) poke() {
+	cs.pmu.Lock()
+	if cs.poking {
+		cs.again = true
+		cs.pmu.Unlock()
+		return
+	}
+	cs.poking = true
+	cs.pmu.Unlock()
+	go func() {
+		for {
+			cs.publish()
+			cs.pmu.Lock()
+			if !cs.again {
+				cs.poking = false
+				cs.pmu.Unlock()
+				return
+			}
+			cs.again = false
+			cs.pmu.Unlock()
+		}
+	}()
+}
 
 // peek is pending need id, unclaimed.
 func (cs *needs) peek(id string) (api.Need, bool) {

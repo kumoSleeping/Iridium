@@ -191,6 +191,11 @@ const (
 	NeedInvite    NeedKind = "invite"     // an agent's ir invite
 	NeedSecretSet NeedKind = "secret_set" // an agent's ir secret set: a person types the value
 	NeedSecretUse NeedKind = "secret_use" // an agent's ir run with credentials
+	// NeedAsk: a session's question, approval or plan (Card), for whoever may use the session;
+	// answered through the card (POST /api/sessions/{id}/answer), not POST /api/needs/{id}.
+	NeedAsk NeedKind = "ask"
+	// NeedShare: something shared with this login (Share); DELETE /api/needs/{id} puts it away.
+	NeedShare NeedKind = "share"
 )
 
 // Need is what waits for a person (docs/next/k_glossary.md "需要"): an app's or a login's request,
@@ -228,9 +233,18 @@ type Need struct {
 	Has   *Perms `json:"has,omitempty"`
 	// Login: login_join, the login's ID within App.
 	Login string `json:"login,omitempty"`
+	// Card: ask, the ask as a card (its id "ask:<session>:<request>" is the need's). Origin: ask,
+	// the app or login of ir_web that began the turn, if known.
+	Card   *Card  `json:"card,omitempty"`
+	Origin string `json:"origin,omitempty"`
+	// Share: share, what was shared and by whom; To, the login of ir_web it is for.
+	Share *Share `json:"share,omitempty"`
+	To    string `json:"to,omitempty"`
 }
 
-// Needs is the carried state "needs" (GET /api/needs): the pending ones, oldest first.
+// Needs is the carried state "needs" (GET /api/needs): the pending ones, oldest first, as the
+// caller may see them: applications for a person on ir_web or at the host, asks of the sessions it
+// may use, what was shared with it.
 type Needs struct {
 	Pending []Need `json:"pending"`
 }

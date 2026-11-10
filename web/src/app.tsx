@@ -10,7 +10,7 @@ import { Dialog } from "@base-ui/react/dialog";
 import { Toast } from "@base-ui/react/toast";
 import { Tooltip } from "@base-ui/react/tooltip";
 import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type ReactNode } from "react";
-import { queryClient } from "./api/client";
+import { api, queryClient } from "./api/client";
 import { watchTurns } from "./chats";
 import { CreatePopover, WsPlus } from "./create";
 import { agentsQ, pushQ, useApps, useHome, useMe, useSettings, useUpdate, useWorkspaces } from "./data";
@@ -278,7 +278,7 @@ export function App() {
       }
       onSearch={() => setJumping((j) => !j)}
       confirms={confirms}
-      onConfirm={(c) => (c.session && list?.some((s) => s.id === c.session) ? openChat(c.session) : go({ name: c.kind.startsWith("secret_") ? "secrets" : "apps" }, over(r)))}
+      onConfirm={(c) => (c.session && list?.some((s) => s.id === c.session) ? openChat(c.session) : c.kind === "share" && c.share?.session ? (openChat(c.share.session), void api.dropNeed(c.id).catch(() => {})) : go({ name: c.kind.startsWith("secret_") ? "secrets" : "apps" }, over(r)))}
       chatCode={chatCode}
       panelsCode={loadPanels}
       createKey={(trigger) => <CreatePopover trigger={trigger} />}

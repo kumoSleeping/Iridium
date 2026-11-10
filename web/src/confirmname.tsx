@@ -1,6 +1,6 @@
 // What the sidebar's 需要你 shows of a need (confirms.tsx draws its card): its title, the name it
 // is for, its icon. Apart from the cards, so the first screen does not carry them.
-import { Bot, KeyRound, Link2, LockKeyhole, Monitor, RefreshCw, SlidersHorizontal, Terminal as TermIcon, UserPlus } from "lucide-react";
+import { Bot, KeyRound, Share2, ShieldQuestion, Link2, LockKeyhole, Monitor, RefreshCw, SlidersHorizontal, Terminal as TermIcon, UserPlus } from "lucide-react";
 import type { Need } from "./api/types.gen";
 import { t } from "./i18n";
 
@@ -24,16 +24,24 @@ export const confirmTitle = (c: Need) => {
       return t("secrets.setTitle");
     case "secret_use":
       return t("secrets.useTitle");
+    case "ask":
+      return t(c.card?.kind === "plan" ? "need.ask.plan" : c.card?.kind === "question" ? "need.ask.question" : "need.ask.permission");
+    case "share":
+      return t("share.title", { who: c.share?.fromName || c.asker });
   }
   return t("confirm.token");
 };
 
 /** What a need names: the invite's or secret's name, the secrets a use wants, a pairing's code. */
-export const confirmName = (c: Need) => (c.kind === "secret_use" ? (c.secrets ?? []).join(", ") : isPair(c) ? c.code : c.kind === "login_join" ? undefined : c.name);
+export const confirmName = (c: Need) => (c.kind === "share" ? c.share?.title : c.kind === "secret_use" ? (c.secrets ?? []).join(", ") : isPair(c) ? c.code : c.kind === "login_join" ? undefined : c.name);
 
 /** A need's icon, as the sidebar and its card draw it. */
 export function ConfirmIcon({ c, size, className }: { c: Need; size: number; className?: string }) {
-  const I = isPair(c)
+  const I = c.kind === "ask"
+    ? ShieldQuestion
+    : c.kind === "share"
+      ? Share2
+      : isPair(c)
     ? c.kind === "app_update"
       ? RefreshCw
       : c.pair?.os

@@ -1,6 +1,10 @@
 package satori
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"github.com/kumoSleeping/iridium/internal/api"
+)
 
 // Satori's resources (satorijs/docs@50fee9ef), as Iridium fills them in: docs/satori.md.
 
@@ -134,10 +138,12 @@ type Event struct {
 }
 
 // EventData is what Iridium adds to an event: what the message is (reply, progress, ask, error,
-// user), and the app or login of ir_web that began the turn, if known.
+// user), and the app or login of ir_web that began the turn, if known. ir.share's: kind share and
+// the Share.
 type EventData struct {
-	Kind   string `json:"kind,omitempty"`
-	Origin string `json:"origin,omitempty"`
+	Kind   string     `json:"kind,omitempty"`
+	Origin string     `json:"origin,omitempty"`
+	Share  *api.Share `json:"share,omitempty"`
 }
 
 // List is a paged list.

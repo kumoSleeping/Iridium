@@ -29,6 +29,7 @@ func Main(args []string) int {
 var commands = map[string]func(e *env, args []string) int{
 	"new":       cmdNew,
 	"send":      cmdSend,
+	"share":     cmdShare, // share.go
 	"wait":      cmdWait,
 	"read":      cmdRead,
 	"ls":        cmdLs,

@@ -19,6 +19,7 @@ import { pushIn } from "../motion";
 import { openChat, openUsage } from "../route";
 import { PULL } from "../sheet";
 import { MenuItems, Rename, sessionActions, sessionTags } from "../sidebar";
+import { ShareSubmenu } from "../share";
 import { useConfirms, useList, useMachines, useSession } from "../store";
 import { drafts, opened } from "../stream";
 import { errText } from "../toast";
@@ -307,7 +308,7 @@ export function ChatPage({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?:
         <div className="relative mx-auto max-w-[760px]">
           {!s.subagent && !elsewhere && <ShellRuns s={s} />}
           <Queue session={id} queue={s.queue ?? []} steered={(q) => onSent({ key: crypto.randomUUID(), text: q.text, files: [], from: 0, input: q.id, steer: true })} />
-          <Asks session={id} asks={s.asks} cwd={cwd} confirms={confirms.filter((c) => c.session === id)} />
+          <Asks session={id} asks={s.asks} cwd={cwd} confirms={confirms.filter((c) => c.session === id && c.kind !== "ask")} />
           {s.subagent ? (
             <div className="glass float rest flex h-12 items-center justify-center gap-1 rounded-[20px] text-sm text-ink-3">
               {t("chat.subagent")}
@@ -443,7 +444,7 @@ function Bar({ s, onSheet, onMe, spots, asked }: { s?: Session; onSheet?: () => 
               </Tip>
               <Menu.Portal>
                 <Menu.Positioner side="bottom" align="end" sideOffset={6} collisionPadding={8} className="z-50">
-                  <MenuItems lead={lead} items={acts} tags={sessionTags(s)} />
+                  <MenuItems lead={lead} items={acts} tags={sessionTags(s)} foot={<ShareSubmenu thing={{ what: "session", session: s.id }} i={lead.length + acts.length} />} />
                 </Menu.Positioner>
               </Menu.Portal>
             </Menu.Root>

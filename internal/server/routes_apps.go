@@ -40,7 +40,8 @@ func (s *Server) appRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/invites", s.manage(s.invite))
 	// An app asks for other permissions: an app_change need.
 	mux.HandleFunc("PUT /api/me/perms", s.askChange)
-	mux.HandleFunc("GET /api/needs", s.panelOnly(func(w http.ResponseWriter, r *http.Request) { reply(w, http.StatusOK, s.asks.pending()) }))
+	mux.HandleFunc("GET /api/needs", s.listNeeds) // needs_more.go
+	mux.HandleFunc("DELETE /api/needs/{id}", s.dropNeed)
 	mux.HandleFunc("POST /api/needs/{id}", s.approver(s.answerNeed))
 	// How one went, never a secret: for whoever manages, and any ir on the socket (an agent's in a
 	// session an app opened waits for its ir run's too).

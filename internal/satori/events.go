@@ -38,6 +38,8 @@ type entry struct {
 	session string
 	ev      Event         // login left out; a message's content without its files
 	files   []api.FileRef // a message's files, written in for each login
+	// app, login: an event for that login alone (Share), whoever sees what session.
+	app, login string
 }
 
 type outbox struct {
@@ -262,6 +264,21 @@ func (s *Service) emit(ss api.Session, ev Event, files []api.FileRef, kind strin
 	s.out.add(entry{at: time.Now(), session: ss.ID, ev: ev, files: files})
 }
 
+// Share sends login of app an internal event, _type ir.share, _data {kind: "share", share} (draft
+// 二「消息」 分享): something shared with it, which the server checked it may use; its channel the
+// session shared (or the reply's, the file's), if any. What the app does with it is its own.
+func (s *Service) Share(app, login string, ss *api.Session, sh api.Share) {
+	ev := Event{Type: "internal", Timestamp: time.Now().UnixMilli(), XType: "ir.share", XData: &EventData{Kind: "share", Share: &sh}}
+	if sh.From != "" {
+		ev.User = &User{ID: sh.From, Name: sh.FromName}
+	}
+	id := ""
+	if ss != nil {
+		ev.Channel, ev.Guild, id = channelOf(*ss), s.guildOf(*ss), ss.ID
+	}
+	s.out.add(entry{at: time.Now(), session: id, ev: ev, app: app, login: login})
+}
+
 // resolve is the transcript's message for what the agent just said, if it is there: the last
 // assistant block saying text, not from before the turn began; and its files.
 func (s *Service) resolve(id, text string) (*Message, []api.FileRef) {
@@ -483,7 +500,12 @@ func (s *Service) deliver(ctx context.Context, cancel func(), cn *conn, cursor i
 			logins := cn.logins(s.b.Logins(cn.app))
 			for _, e := range es {
 				for _, l := range logins {
-					if !s.b.Sees(Caller{App: cn.app, Login: l.ID, LoginName: l.Name}, e.session) {
+					switch {
+					case e.app != "":
+						if e.app != cn.app || e.login != l.ID {
+							continue
+						}
+					case !s.b.Sees(Caller{App: cn.app, Login: l.ID, LoginName: l.Name}, e.session):
 						continue
 					}
 					ev := s.render(e, cn.app, l.ID)

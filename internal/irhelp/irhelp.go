@@ -9,6 +9,7 @@ const Help = `ir: this machine's Iridium on the command line (over its unix sock
   ir new <agent> [place] "task"       start a session, print its ID (--model, --approve <mode>, --workspace <group>); place: a folder, app:path at that app's computer, host:path
   ir send <id> "message" [-a file]...  send a message, with attachments; ir send app/login "message": a notice shown to that login (ir apps logins), no agent woken
   ir wait <id>                        wait for the turn to end, print its last reply
+  ir share app/login <id|folder|file> ["note"]   share a session, a place (app:path too) or a file (in your session) with a login that may use it
   ir read <id> [-n count] [--full]    each message and its final reply, cut short (last 10; --full: the page as written)
   ir ls | find <word> [--all]         list sessions | find by name, title, last thing said (--all: archived, finished subagents too; ls --here: your group's)
   ir stop | archive | unarchive <id> | rename [<id>] <name>   stop its agent | archive | unarchive | name it (no <id>: your own session)
@@ -40,7 +41,7 @@ func Remote() string {
 	var b strings.Builder
 	b.WriteString("ir: the Iridium hosting this session, reached over HTTPS as this machine. An <id> may be its first few characters. A folder is this machine's.\n")
 	for _, l := range strings.Split(Agent(), "\n") {
-		for _, p := range []string{"  ir new ", "  ir send ", "  ir wait ", "  ir read ", "  ir ls ", "  ir stop ", "  ir ws ", "  new and send "} {
+		for _, p := range []string{"  ir new ", "  ir send ", "  ir share ", "  ir wait ", "  ir read ", "  ir ls ", "  ir stop ", "  ir ws ", "  new and send "} {
 			if strings.HasPrefix(l, p) {
 				if p == "  new and send " {
 					l, _, _ = strings.Cut(l, ". A path may be")

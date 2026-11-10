@@ -339,6 +339,15 @@ func TestAgentCommands(t *testing.T) {
 	if r := ir("send", "ir_web/nobody", "x", "--wait"); r.code != 1 || !strings.Contains(r.err, "usage: ir send 应用/登录") {
 		t.Errorf("send to a login --wait: %+v", r)
 	}
+	// ir share: a session, a folder; to no login, an error saying so.
+	for _, what := range []string{sid, work} {
+		if r := ir("share", "ir_web/nobody", what, "看看"); r.code != 1 || !strings.Contains(r.err, "no such login") {
+			t.Errorf("share %s: %+v", what, r)
+		}
+	}
+	if r := ir("share", sid); r.code != 1 || !strings.Contains(r.err, "usage: ir share") {
+		t.Errorf("share without a login: %+v", r)
+	}
 	// A place at an app not there; the host's by its name.
 	if r := ir("new", "claude", "mac:~/dir", "x"); r.code != 1 || !strings.Contains(r.err, "no machine mac") {
 		t.Errorf("place at mac: %+v", r)
