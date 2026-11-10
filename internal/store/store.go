@@ -629,17 +629,22 @@ type UsageDay struct {
 	Output     int64
 	CacheRead  int64
 	CacheWrite int64
-	CostUSD    float64 // of the rows that have one
+	CostUSD    float64 // of the rows that have one, and those priced (UsageBy's price)
 }
+
+// Price prices a row the agent gave no cost (or a cost of 0): false when it cannot.
+type Price func(model string, input, output, cacheRead, cacheWrite int64) (float64, bool)
 
 // UsageByDay sums the usage since at (ms) by local day, terminal, agent and model, oldest day
 // first; terminals given, only theirs.
 func (s *Store) UsageByDay(at int64, terminals ...string) ([]UsageDay, error) {
-	return s.UsageBy(at, func(t time.Time) string { return t.Format(time.DateOnly) }, terminals...)
+	return s.UsageBy(at, func(t time.Time) string { return t.Format(time.DateOnly) }, nil, terminals...)
 }
 
-// UsageBy is UsageByDay with the rows put in bucket's keys (UsageDay.Day) rather than days.
-func (s *Store) UsageBy(at int64, bucket func(time.Time) string, terminals ...string) ([]UsageDay, error) {
+// UsageBy is UsageByDay with the rows put in bucket's keys (UsageDay.Day) rather than days, and
+// each row without a cost of its own priced by price (nil: none), row by row, before they are
+// summed.
+func (s *Store) UsageBy(at int64, bucket func(time.Time) string, price Price, terminals ...string) ([]UsageDay, error) {
 	q := `SELECT at, terminal, agent, model, input, output, cache_read, cache_write, cost_usd FROM usage WHERE at >= ?`
 	args := []any{at}
 	if len(terminals) > 0 {
@@ -677,8 +682,12 @@ func (s *Store) UsageBy(at int64, bucket func(time.Time) string, terminals ...st
 		d.Output += o
 		d.CacheRead += cr
 		d.CacheWrite += cw
-		if cost.Valid {
+		if cost.Valid && cost.Float64 > 0 {
 			d.CostUSD += cost.Float64
+		} else if price != nil {
+			if c, ok := price(k.model, in, o, cr, cw); ok {
+				d.CostUSD += c
+			}
 		}
 	}
 	return out, rows.Err()

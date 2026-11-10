@@ -29,6 +29,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/files"
 	"github.com/kumoSleeping/iridium/internal/gate"
 	"github.com/kumoSleeping/iridium/internal/hub"
+	"github.com/kumoSleeping/iridium/internal/pricing"
 	"github.com/kumoSleeping/iridium/internal/push"
 	"github.com/kumoSleeping/iridium/internal/remote"
 	"github.com/kumoSleeping/iridium/internal/session"
@@ -57,6 +58,8 @@ type Server struct {
 	ConfigPath string
 	// Updater, if set, serves /api/update and carries the state "update".
 	Updater *update.Updater
+	// Prices, if set, prices the usage the agents gave no cost (GET /api/usage).
+	Prices *pricing.Catalog
 
 	cmu     sync.Mutex // one config change at a time (SaveConfig); guards cfg's settings
 	gmu     sync.Mutex // one gate change at a time

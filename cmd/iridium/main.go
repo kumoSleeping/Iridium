@@ -30,6 +30,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/hold"
 	"github.com/kumoSleeping/iridium/internal/hub"
 	"github.com/kumoSleeping/iridium/internal/join"
+	"github.com/kumoSleeping/iridium/internal/pricing"
 	"github.com/kumoSleeping/iridium/internal/push"
 	"github.com/kumoSleeping/iridium/internal/remote"
 	"github.com/kumoSleeping/iridium/internal/server"
@@ -164,6 +165,7 @@ func serve(args []string) int {
 	}
 	srv.Updater = newUpdater(cfg, h)
 	h.Set("update", srv.Updater.State())
+	srv.Prices = pricing.Open(state)
 	// Web Push's total switch is the config's: turning it writes the file (with the settings').
 	srv.Push, err = push.Open(push.Options{StateDir: state, Store: st, Manager: m, Enabled: cfg.Push, Mask: srv.MaskText, Save: func(on bool) error {
 		return srv.SaveConfig(func(c *config.Config) { c.Push = on })
@@ -199,6 +201,7 @@ func serve(args []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	go srv.Updater.Run(ctx)
+	go srv.Prices.Run(ctx)
 	go srv.SyncExtensions(ctx)
 	if err := srv.Serve(ctx, tcp, sock); err != nil {
 		log.Print(err)

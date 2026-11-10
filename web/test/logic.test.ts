@@ -16,7 +16,8 @@ import { zh } from "../src/i18n/zh";
 import { jumpList } from "../src/jump";
 import { buildTree, commonDir, flat, groupPath, remotePath } from "../src/tree";
 import { entryOf, reloadNow } from "../src/upgrade";
-import { tilde, titleOf } from "../src/ui";
+import { tilde, titleOf, tokens } from "../src/ui";
+import { dollars, hitOf, prettyModel } from "../src/usage";
 
 const b = (at: string, kind: Block["kind"], more: Partial<Block> = {}): Block => ({ at, kind, ...more });
 
@@ -554,5 +555,26 @@ describe("hitRate", () => {
     expect(hitRate({ input: 1, cacheRead: 99_999, cacheWrite: 0 })).toBe("99.9%");
     expect(hitRate({ input: 0, cacheRead: 0, cacheWrite: 0 })).toBe("");
     expect(hitRate(undefined)).toBe("");
+  });
+});
+
+describe("usage", () => {
+  test("models as people say them", () => {
+    expect(prettyModel("mistral/deepseek-v4-1-flash-1017")).toBe("DeepSeek V4.1 Flash");
+    expect(prettyModel("claude-opus-5-5")).toBe("Opus 5.5");
+    expect(prettyModel("claude-haiku-5-5")).toBe("Haiku 5.5");
+    expect(prettyModel("gpt-6.1-sol")).toBe("GPT-6.1 Sol");
+    expect(prettyModel("gpt-6-luna")).toBe("GPT-6 Luna");
+    expect(prettyModel("deepseek-official/deepseek-flash")).toBe("DeepSeek Flash");
+    expect(prettyModel("", "pi")).toBe("pi");
+  });
+  test("hit rate and figures", () => {
+    expect(hitOf({ input: 10, cacheRead: 90, cacheWrite: 0 })).toBe(0.9);
+    expect(hitOf({ input: 0, cacheRead: 0, cacheWrite: 0 })).toBeUndefined();
+    expect(dollars(1862.4)).toBe("$1,862");
+    expect(dollars(475.2)).toBe("$475");
+    expect(dollars(0.42)).toBe("$0.42");
+    expect(tokens(1_498_200_000)).toBe("1.50B");
+    expect(tokens(438_100_000)).toBe("438.1M");
   });
 });
