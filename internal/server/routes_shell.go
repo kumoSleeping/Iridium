@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/kumoSleeping/iridium/internal/access"
 	"io/fs"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -21,10 +23,29 @@ import (
 // "命令"). Only panels and 本机: a Bot asks agents, it does not run commands.
 func (s *Server) shellRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/sessions/{id}/shell", s.manages(s.use(s.shellRun)))
-	mux.HandleFunc("GET /api/shell/{run}", s.manages(s.shellRead))
-	mux.HandleFunc("DELETE /api/shell/{run}", s.manages(s.shellStop))
-	// An agent's ir sh: at a machine by ID or name, where its owner lets agents.
-	mux.HandleFunc("POST /api/machines/{id}/shell", s.manages(s.machineShell))
+	mux.HandleFunc("GET /api/shell/{run}", s.shellers(s.shellRead))
+	mux.HandleFunc("DELETE /api/shell/{run}", s.shellers(s.shellStop))
+	// An agent's ir sh (draft 二「远端执行命令」: agents only, and the host): at an app's computer by
+	// ID or name, where its owner lets command lines run, in a folder within the caller's scope.
+	mux.HandleFunc("POST /api/machines/{id}/shell", func(w http.ResponseWriter, r *http.Request) {
+		if c := callerOf(r); !c.Host() && !c.agent && c.session == "" {
+			forbid(w, errors.New("command lines at another computer are agents' (ir sh)"))
+			return
+		}
+		s.machineShell(w, r)
+	})
+}
+
+// shellers lets through who runs or reads command lines: the host, a login of ir_web (its
+// session's $), an agent (ir sh).
+func (s *Server) shellers(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if c := callerOf(r); !c.Host() && !c.Web() && !c.agent && c.session == "" {
+			forbid(w, errors.New("command lines are the host's, ir_web's and agents'"))
+			return
+		}
+		h(w, r)
+	}
 }
 
 // machineShell is an agent's ir sh. Asked with Accept: application/x-ndjson, at an executor that
@@ -41,6 +62,13 @@ func (s *Server) machineShell(w http.ResponseWriter, r *http.Request) {
 	if s.Remote != nil {
 		if mc := s.Remote.Find(name); mc != nil {
 			id = mc.ID()
+		}
+	}
+	if c := callerOf(r); !c.Host() {
+		p := s.permsFor(c)
+		if !slices.Contains(p.Scope, api.PermsAll) && (req.Cwd == "" || strings.HasPrefix(req.Cwd, "~") || !s.scopeHas(p.Scope, id, req.Cwd)) {
+			s.error(w, &access.Denied{Reason: name + ":" + req.Cwd + " is out of this one's scope"})
+			return
 		}
 	}
 	stream := strings.Contains(r.Header.Get("Accept"), ndjson)
