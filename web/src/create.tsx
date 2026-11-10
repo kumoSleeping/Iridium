@@ -417,18 +417,29 @@ export function useStart(opened: (id: string) => void) {
  *  the folder then. An agent picked while it is being made waits for it and opens in it, or not at
  *  all when it failed (the folder picker's 选择 does the same). folder: as NewSession has it
  *  ("<machine>:<path>" at another). */
-export function useSubfolder(folder: string, setFolder: (f: string) => void) {
+export function useSubfolder(folder: string, setFolder: (f: string) => void, open: boolean) {
   const qc = useQueryClient();
   const machines = useMachines();
   const making = useRef<Promise<string | null> | null>(null);
+  // Which opening of the popover it is: one made for an earlier one, done late, is not the folder of
+  // this one (a pick that waited for it still opens in it).
+  const opening = useRef(0);
+  useEffect(
+    () => () => {
+      opening.current++;
+      making.current = null;
+    },
+    [open],
+  );
   const make = (name: string) => {
     const there = pageAt(folder, machines);
     const at = there ? there.path : folder;
+    const mine = opening.current;
     const made = api.mkdir({ path: at, name, ...(there ? { machine: there.m.id } : {}) }).then(
       () => {
         void qc.invalidateQueries({ queryKey: ["folders", there?.m.id ?? "", at] });
         const f = there ? atMachine(there.m, join(at, name)) : join(at, name);
-        setFolder(f);
+        if (opening.current === mine) setFolder(f);
         return f;
       },
       (e) => (toast(t("err.mkdir"), { error: true, description: errText(e) }), null),
@@ -470,7 +481,7 @@ export function CreatePopover({ trigger }: { trigger: ReactElement }) {
   const { busy, start } = useStart((id) => (setOpen(false), openChat(id)));
   // The folder as NewSession has it; a subfolder made there, the folder then.
   const here = at ? atMachine(at, folder) : folder;
-  const sub = useSubfolder(here, (f) => setFolder(at ? f.slice(at.id.length + 1) : f));
+  const sub = useSubfolder(here, (f) => setFolder(at ? f.slice(at.id.length + 1) : f), open);
   // Any paired machine, its agents or none (NewSession says so): only one not paired is gone.
   const ms = useRef(all);
   ms.current = all;
@@ -531,6 +542,14 @@ export function WsPlus({ w, trigger, open, setOpen, opened }: { w: Workspace; tr
   const [stepped, setStepped] = useState(false); // gone to the folder page since it opened
   const [folder, setFolder] = useState(w.path);
   const { busy, start } = useStart((id) => (setOpen(false), opened(id)));
+  // Each opening on the row's own folder and its agents, by the "+" or by the row's menu (which opens
+  // it without onOpenChange): not the folder picked or made last time (the subfolder is listed under
+  // the row by then).
+  const [shown, setShown] = useState(open);
+  if (open !== shown) {
+    setShown(open);
+    if (open) setPage("session"), setStepped(false), setFolder(w.path);
+  }
   const machines = useMachines();
   // the folder page, ready before its line is tapped (opened by the "+" or by the row's menu); not
   // for a group at another machine, whose folders are not listed here
@@ -539,15 +558,9 @@ export function WsPlus({ w, trigger, open, setOpen, opened }: { w: Workspace; tr
   useEffect(() => {
     if (open && !away) void qc.prefetchQuery(foldersQ(folder));
   }, [open, folder, qc, away]);
-  const sub = useSubfolder(folder, setFolder);
+  const sub = useSubfolder(folder, setFolder, open);
   return (
-    <Popover.Root
-      open={open}
-      onOpenChange={(o) => {
-        setOpen(o);
-        if (o) setPage("session"), setStepped(false);
-      }}
-    >
+    <Popover.Root open={open} onOpenChange={setOpen}>
       <Popover.Trigger render={trigger} />
       <PopSurface side="bottom" align="end" finalFocus={false}>
         {/* Page to page, sliding the way you went: into the folder, back to the agents (the user, 2026-11-06). */}
