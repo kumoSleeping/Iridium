@@ -16,7 +16,7 @@
 | 请求 | 正文 → 回答 | 说明 |
 |---|---|---|
 | `GET /api/sessions` | → `Session[]` | 会话列表：托管的加上磁盘上发现的（见“工作区和目录”）。置顶在前，再按最近 |
-| `POST /api/sessions` | `NewSession` → `{id}` | 在 `cwd` 开一个托管会话，带 `text` 就作为第一条消息。`agent`：`claude`、`codex`、`pi`；`model` 可带强度（Codex `gpt-6-luna:low`，pi `provider/id:off`）；`mode` 取 `GET /api/agents` 列的模式。带 `workspace` 就放进那个工作区。本机会话带 `at`（`机器:路径`，远端组的“+”开的协作者）：按那个远端文件夹归组和显示，跟着它进外层组，不按自己的目录 |
+| `POST /api/sessions` | `NewSession` → `{id}` | 在 `cwd` 开一个托管会话，带 `text` 就作为第一条消息。`agent`：`claude`、`codex`、`pi`；`model` 可带强度（Codex `gpt-6-luna:low`，pi `provider/id:off`）；`mode` 取 `GET /api/agents` 列的模式。带 `workspace` 就放进那个工作区（带 `caller` 时不算手动放的，照样挂在拉起者下面）。`caller` 是拉起者（`ir new` 所在的会话），记成新会话的 `launcher`。`at` 删掉（2026-11-10，见 `exec.md`“远端工作区”） |
 | `GET /api/sessions/{id}` | → `SessionState` | 打开的会话的状态，和事件流里的同一份 |
 | `GET /api/sessions/{id}/messages` | → `MessagePage` | 不带参数：最新一页。`before=<start>`：往回一页。`after=<end>`：之后新写的 |
 | `GET /api/sessions/{id}/block?at=<at>` | → `{text}` | 截短的块（工具参数、结果、思考、系统行）的全文 |
@@ -111,22 +111,24 @@
   - 没标记的就是归档：`Session.archived` 为 `true`，页面放在底部折叠的“归档”里，能搜。第一次启动时磁盘上已有、之后没动过的都在这里。
   - 归档（`PATCH archived: true`）：去掉标记，记下记录当时的长度；之后长过这个长度（有了新活动）就自动回来。托管的另外像空闲回收那样停掉 agent；它退出时写的不算活动（退出后重记长度）。恢复（`archived: false`）：设上标记。没有按时间自动归档。
   - 旧版的归档标记迁移成“没标记”。
-- 归组（2026-11-08：组就是文件夹，`Workspace` 是组，不能手建）：会话第一次显示时（第一次活动）做一次，记在库里，不给归档里的做：拉起者的组（组的文件夹包含它的目录时；子代理总跟父会话）→ 包含它目录的最外层的组 → 用它的目录新建一个组。家目录和 `/` 的组（另一台机器不在线时，按路径认它的家目录）只收正好在那里的会话。之后每次归组都把落在别的组文件夹里的组并进最外层那个（子目录先建了组、父目录后建的，比如执行端的会话一次全看到）：自动归进去的会话移过去，空了的组删掉，有手动放进去的会话的组留着；隐藏的组不参与。在未归类（`workspace` 为 0）且不是你手动放过去的也再归一次；只有没目录的留在 0。`POST /api/sessions` 开的托管会话当场归组，不等记录出现。手动移过的（`PATCH workspace`）不再自动动。
+- 归组（2026-11-08：组就是文件夹，`Workspace` 是组，不能手建）：会话第一次显示时（第一次活动）做一次，记在库里，不给归档里的做：拉起者的组（组的文件夹包含它的目录时；子代理总跟父会话）→ 包含它目录的最外层的组 → 用它的目录新建一个组。家目录和 `/` 的组（另一台机器不在线时，按路径认它的家目录）只收正好在那里的会话。之后每次归组都把落在别的组文件夹里的组并进最外层那个（子目录先建了组、父目录后建的，比如执行端的会话一次全看到）：自动归进去的会话移过去，空了的组删掉，有手动放进去的会话的组留着。在未归类（`workspace` 为 0）且不是你手动放过去的也再归一次；只有没目录的、远端 Desktop 里不在任何工作区的（`loose`）留在 0。自动归进别的机器的组的（执行端重新配对换了 ID；以前跨机器跟着拉起者归的）按自己的目录重归（2026-11-10）。`POST /api/sessions` 开的托管会话当场归组，不等记录出现：拉起者的组包含它的目录就进那个组，否则按自己的目录（跨机器不再跟拉起者，2026-11-10）。手动移过的（`PATCH workspace`）不再自动动。
+- 人开的和挂着的（2026-11-10，`exec.md`“远端工作区”）：`Session.own` 由服务端算，是“人开的”的唯一依据。有 `launcher` 的：手动放过（拖出来、`detach`）才算；没有的：托管、且经创建开的（`openers` 表有它：网页“+”、终端里的 `ir new`、Bot 开的、`/clear`）。子代理、接管的（`ir send` 接过来的）、发现的都不算。有 `launcher`、不是子代理、不是 `own` 的挂在拉起者下面（页面画）。
+- 推送和转给 Bot 的确认只给页面会列的会话：本机的、`own` 的、有 `launcher` 的（挂着的；拉起者不在或归档了就当人开的）、所在组里有没归档的人开会话的，子代理随父会话。远端没人开过的组里的会话不推送。
 - 状态：`hosted` 托管；`elsewhere` 在别处运行，只读（能看状态和消息页，发消息回 409）；其余是磁盘上空闲的。别处退出后，发消息就接成托管会话（`--resume`），前提是没有别的进程在用（Claude：`sessions/` 里没有活着的同 ID 进程；dsh：`session.lock` 能拿到 flock；Codex：写锁）。现在只能接 Claude 的。
 - 列表变了（新会话、记录长了、进程起停、改了覆盖层）攒 200ms 发一次 `list` 整份，变了的会话另发 `session:<id>`。
 
 | 请求 | 正文 → 回答 | 说明 |
 |---|---|---|
 | `GET /api/workspaces` | → `Workspace[]` | 文件夹组，和事件流 `workspaces` 同一份（没有会话的也在，页面不列） |
-| `PATCH /api/workspaces/{id}` | `{name?, hidden?}` → `{ok}` | 改名；隐藏或取消隐藏（隐藏的组：会话不列、不进归档、搜不到，除非其中有会话在别处运行，如 DSH Desktop 里开着；那时整组列出，菜单可取消隐藏） |
+| `PATCH /api/workspaces/{id}` | `{name?}` → `{ok}` | 改名（`hidden` 删掉，2026-11-10） |
 | `POST /api/workspaces/{id}/split` | → `{ok}` | 按子文件夹拆开：组只留它文件夹里直接的会话，子文件夹里的按各自文件夹重新归组（子文件夹的子文件夹仍进它的组），以后也不再收子文件夹（`flat`）。只有面板和本机 |
 | `PUT /api/groups/order` | `{keys}` → `{ok}` | 组的顺序（拖动或菜单上移下移）：`keys` 是会话列表里每个组那一行的键（`w<id>`；同一个组在别的机器上的那部分是 `w<id>@<机器>`，各排各的），依次排在前，没列的随后；事件流 `places` 的 `groups`。只有面板和本机能改 |
 | `PATCH /api/folders/place` | `FolderPlace` → `{ok}` | 文件夹在组里的位置：`path` 是分组用的路径（本机绝对路径，或 `机器:路径`）；`order` 同会话的，0 去掉；`pinned` 置顶（排在组根下的会话上面）。不给的字段不变；事件流 `places` 的 `order`、`pinned`。只有面板和本机能改 |
 | `PUT /api/colors` | `FolderColor` → `{ok}` | 给文件夹打颜色标签（`red`、`orange`、`yellow`、`green`、`blue`、`purple`），`color` 为空就去掉；事件流 `colors`（只给面板）是全部。会话的标签用 `PATCH /api/sessions/{id}` 的 `color` |
-| `PATCH /api/sessions/{id}` | `SessionPatch` → `{ok}` | 只改覆盖层，不碰 agent 的文件：`name`（空串去掉；带 `byAgent` 是会话里的 agent 起的，`ir rename` 这样发：去引号和句尾标点，不盖你起的名，盖不了回 409）、`pinned`、`archived`（归档或恢复，见上面的显示标记）、`workspace`（移动，0 为未归类；移过就不再自动归类）、`order`（拖到的位置：列表按它排，代替最后活动时间，与 `updatedAt` 同为毫秒；0 去掉） |
+| `PATCH /api/sessions/{id}` | `SessionPatch` → `{ok}` | 只改覆盖层，不碰 agent 的文件：`name`（空串去掉；带 `byAgent` 是会话里的 agent 起的，`ir rename` 这样发：去引号和句尾标点，不盖你起的名，盖不了回 409）、`pinned`、`archived`（归档或恢复，见上面的显示标记；挂在它下面的会话一路往下跟着归档或恢复，拖出来的不跟，`ir archive` 也是；2026-11-10）、`detach: true`（从拉起者下面拿出来：按自己的目录归组，最外层包含它的组，没有就新建，记成手动放的，此后 `own`）、`workspace`（移动，0 为未归类；移过就不再自动归类）、`order`（拖到的位置：列表按它排，代替最后活动时间，与 `updatedAt` 同为毫秒；0 去掉） |
 | `GET /api/folders?path=` | → `Folders` | 选择器：只列文件夹，不列隐藏的，按名字排；`path` 为空或 `~` 是家目录。`parent` 为空表示到顶了 |
 | `POST /api/folders` | `NewFolder` → `{path}` | 在 `path` 里新建文件夹 `name`（不能以 `.` 开头、不能带 `/`）。已有回 409 |
-| `GET /api/machines/{id}/dsh/workspaces` | → `DshWorkspace[]` | 那台机器上 dsh 的工作区（DSH Desktop 侧边栏那份，按它的顺序，文件夹已不在的不列），读不懂时用它会话所在的文件夹代替，最近的在前；路径用 `/`。新会话选文件夹时列在最上面，见 `docs/exec.md`“远端 DSH” |
+| `GET /api/machines/{id}/dsh/workspaces` | → `DshWorkspace[]` | 那台机器上 dsh 的工作区（DSH Desktop 侧边栏那份，按它的顺序，文件夹已不在的不列），读不懂时用它会话所在的文件夹代替，最近的在前；路径用 `/`。`sessions` 是其中列出的会话数（不算子代理、这边归档的、不同步的）。新会话选文件夹时列在最上面，见 `docs/exec.md`“远端 DSH” |
 
 - 选择器默认只能在家目录里（配置 `folderRoots` 可改），先解析符号链接再比；`~/.ssh`、`~/.gnupg`、`~/.claude`、`~/.codex`、`~/.pi`、`~/.dsh` 和 Iridium 的状态、配置目录一律不给（403）。不存在 404。
 

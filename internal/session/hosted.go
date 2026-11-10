@@ -977,13 +977,15 @@ func (h *Hosted) summary(o store.Overlay, archived bool) api.Session {
 }
 
 func (h *Hosted) summaryLocked(o store.Overlay, archived bool) api.Session {
-	return api.Session{
+	s := api.Session{
 		ID: h.id, Agent: h.meta.Agent, Cwd: h.meta.Cwd, Name: o.Name, Title: h.said.title,
 		Status: h.status(), Hosted: true, Live: h.live,
-		Pinned: o.Pinned, Archived: archived, Workspace: o.Workspace, Color: api.Color(o.Color), Order: o.Order, At: o.At,
+		Pinned: o.Pinned, Archived: archived, Workspace: o.Workspace, Color: api.Color(o.Color), Order: o.Order,
 		Launcher: h.meta.Launcher, Last: h.said.last, UpdatedAt: h.shownAt.UnixMilli(),
 		Machine: h.meta.Machine, Offline: h.offline(),
 	}
+	s.Own = ownOf(s, o)
+	return s
 }
 
 func (h *Hosted) state(o store.Overlay, archived bool) api.SessionState {

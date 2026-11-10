@@ -347,7 +347,8 @@ func (s *Service) away1(session, origin string, out []ev) {
 	for _, e := range out {
 		switch e.typ {
 		case "card":
-			if e.e.Card == nil {
+			// Nor one of a session not listed (a group at another machine no one opened).
+			if e.e.Card == nil || !s.o.Manager.Listed(session) {
 				continue
 			}
 			card := s.awayCard(session, e.e.Card)

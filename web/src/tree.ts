@@ -40,8 +40,7 @@ export const working = (s: Session, parent: Session | undefined, now: number) =>
 
 /** The path a session is grouped by, as the server's (remote.GroupPath): its cwd, or at another
  *  machine "<machine>:<cwd, '/'-separated>", as that machine's groups' roots are written. */
-/** One of this machine's opened for a folder at another (a coordinator, Session.at): that folder. */
-export const groupPath = (s: Pick<Session, "cwd" | "machine" | "at">) => s.at || (s.machine ? `${s.machine}:${s.cwd.replaceAll("\\", "/")}` : s.cwd);
+export const groupPath = (s: Pick<Session, "cwd" | "machine">) => (s.machine ? `${s.machine}:${s.cwd.replaceAll("\\", "/")}` : s.cwd);
 
 /** A folder at another machine: its path is "<machine>:…", never absolute here. */
 export const remotePath = (path: string) => path !== "" && !path.startsWith("/");
@@ -99,11 +98,7 @@ export function buildTree(all: Session[], workspaces: Workspace[], unsorted: str
   for (const [parent, list] of kids) kids.set(parent, bySeen(list, (s) => s.id, (s) => s.updatedAt, seen));
   // One that waits on you stays in its place, its lamp breathing amber: no 需要你 group of its own
   // (the user, 2026-11-08).
-  // A group hidden from its menu (the user, 2026-11-08): its sessions nowhere, but while one of
-  // them runs elsewhere (open in DSH Desktop, started there); then it is listed whole.
   const hidden = new Set<string>();
-  const shut = new Set(workspaces.filter((w) => w.hidden && !list.some((s) => s.workspace === w.id && !s.archived && s.live && s.status === "elsewhere")).map((w) => w.id));
-  for (const s of all) if (s.workspace && shut.has(s.workspace)) hidden.add(s.id);
   const live = list.filter((s) => !s.archived && !hidden.has(s.id));
   const byWs = new Map<number, Session[]>();
   const where = new Map<string, string>();
@@ -152,7 +147,7 @@ export function buildTree(all: Session[], workspaces: Workspace[], unsorted: str
         const at = s.machine ?? own;
         by.set(at, [...(by.get(at) ?? []), s]);
       }
-      return [...by].sort(([a], [b]) => machineAt(a || undefined) - machineAt(b || undefined)).map(([m, ss]) => node(m === own ? `w${w.id}` : `w${w.id}@${m}`, w.id, w.name, w.path, ss, w.hidden, m));
+      return [...by].sort(([a], [b]) => machineAt(a || undefined) - machineAt(b || undefined)).map(([m, ss]) => node(m === own ? `w${w.id}` : `w${w.id}@${m}`, w.id, w.name, w.path, ss, false, m));
     });
   // 未归类 has no root: its folders are grouped under the directory all its sessions share, and shown
   // by their whole path (~ for the home directory, not its bare name).

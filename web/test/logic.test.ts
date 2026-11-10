@@ -230,20 +230,6 @@ describe("buildTree", () => {
     expect(commonDir(["m:C:/Code/a", "m:C:/Code/b"])).toBe("m:C:/Code");
     expect(commonDir(["m:C:/Code/a", "/w/a"])).toBe("");
   });
-  test("a hidden group: nowhere (list, 归档, jump box) but while one of its sessions runs elsewhere", () => {
-    const wss = [{ id: 1, name: "Iridium", path: "/w/ir", hidden: true }];
-    const list = [S("a", "/w/ir", { workspace: 1, live: false }), S("b", "/w/ir/web", { workspace: 1, live: false }), S("c", "/w/ir", { workspace: 1, archived: true }), S("d", "/w/x")];
-    const t = buildTree(list, wss, "未归类");
-    expect(t.workspaces.map((w) => w.name)).toEqual(["未归类"]);
-    expect(t.archived).toEqual([]);
-    expect([...t.hidden].sort()).toEqual(["a", "b", "c"]);
-    expect(flat(t).map((s) => s.id)).toEqual(["d"]);
-    // Opened in DSH Desktop: listed whole, its menu to show it again.
-    const open = buildTree(list.map((s) => (s.id === "b" ? { ...s, live: true, status: "elsewhere" as const } : s)), wss, "未归类");
-    expect(open.workspaces.map((w) => [w.name, w.hidden])).toEqual([["Iridium", true], ["未归类", undefined]]);
-    expect(flat(open).map((s) => s.id)).toEqual(["a", "b", "d"]);
-    expect(open.archived.map((s) => s.id)).toEqual(["c"]);
-  });
   test("a session at another machine: grouped by its machine's path, not one folder more with its path", () => {
     const wss = [{ id: 7, name: "Starmod", path: "m:C:/Code/Starmod" }];
     const list = [S("a", "C:\\Code\\Starmod", { workspace: 7, machine: "m" }), S("b", "C:\\Code\\Starmod\\web", { workspace: 7, machine: "m" }), S("c", "C:\\Code\\jl", { machine: "m" }), S("d", "C:\\Code\\Starmod", { workspace: 7, machine: "m", archived: true })];

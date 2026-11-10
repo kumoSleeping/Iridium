@@ -338,11 +338,11 @@ export function NewSession({ ws, folder, onFolder, onPick, busy, local }: { ws: 
  *  ("<machine>/<agent>" at another machine). */
 export function useStart(opened: (id: string) => void) {
   const [busy, setBusy] = useState<string | null>(null);
-  // at: one of this machine's opened for a folder at another (a coordinator): grouped by it.
-  const start = async (agent: Agent, cwd: string, workspace?: number, machine?: string, at?: string) => {
+  // _at: no longer sent (the server has no coordinators, 2026-11-10); the "+" stage drops it.
+  const start = async (agent: Agent, cwd: string, workspace?: number, machine?: string, _at?: string) => {
     setBusy(machine ? `${machine}/${agent}` : agent);
     try {
-      const { id } = await api.create({ agent, cwd, ...(workspace ? { workspace } : {}), ...(machine ? { machine } : {}), ...(at ? { at } : {}) });
+      const { id } = await api.create({ agent, cwd, ...(workspace ? { workspace } : {}), ...(machine ? { machine } : {}) });
       opened(id);
     } catch (e) {
       toast(t("err.newSession"), { error: true, description: errText(e) });

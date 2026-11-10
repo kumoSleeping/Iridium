@@ -151,6 +151,7 @@ func (m *Manager) foreignState(id string, over map[string]store.Overlay) (*api.S
 	s.Name, s.Pinned, s.Workspace, s.Color = o.Name, o.Pinned, o.Workspace, api.Color(o.Color)
 	s.Archived = !m.visibility().Shown(string(s.Agent), s.ID)
 	m.parentOf(&s)
+	s.Own = ownOf(s, o)
 	st := &api.SessionState{Session: s, Asks: []api.Ask{}, Tasks: []api.Task{}, Denials: []api.Denial{}}
 	if f != nil {
 		st.End, _ = f.Size()
@@ -159,13 +160,18 @@ func (m *Manager) foreignState(id string, over map[string]store.Overlay) (*api.S
 	return st, nil
 }
 
-// parentOf names a subagent's parent by Iridium's id: a hosted Codex session's thread is not.
+// parentOf names a subagent's parent, and a session's launcher, by Iridium's id: a hosted Codex
+// session's thread is not.
 func (m *Manager) parentOf(s *api.Session) {
-	if !s.Subagent || s.Parent == "" {
-		return
-	}
-	if h := m.byAgentID(s.Parent); h != nil {
-		s.Parent, s.Launcher = h.id, h.id
+	switch {
+	case s.Subagent && s.Parent != "":
+		if h := m.byAgentID(s.Parent); h != nil {
+			s.Parent, s.Launcher = h.id, h.id
+		}
+	case s.Launcher != "":
+		if h := m.byAgentID(s.Launcher); h != nil {
+			s.Launcher = h.id
+		}
 	}
 }
 
@@ -221,11 +227,6 @@ func (m *Manager) intoGroup(id, cwd, caller string) {
 			prefer = over[caller].Workspace
 		}
 	}
-	m.intoGroupPrefer(id, cwd, prefer)
-}
-
-// intoGroupPrefer puts a new session of folder cwd in its group: prefer if that holds it.
-func (m *Manager) intoGroupPrefer(id, cwd string, prefer int64) {
 	g, ok := m.o.Discovery.(grouper)
 	if !ok {
 		if prefer != 0 {

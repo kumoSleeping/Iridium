@@ -337,6 +337,10 @@ func (s *Service) notice(kind string, n session.Notice) {
 	if err != nil {
 		return
 	}
+	// A session in a group at another machine not listed (docs/exec.md "远端工作区").
+	if !s.o.Manager.Listed(n.Session) {
+		return
+	}
 	ps, err := s.State()
 	if err != nil {
 		s.o.Logf("push: %v", err)

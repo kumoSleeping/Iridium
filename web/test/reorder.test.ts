@@ -73,12 +73,6 @@ describe("folders", () => {
     expect(moved.workspaces.map((w) => w.key)).toEqual(["w2", "w1@m", "w1", "w0"]);
   });
 
-  test("a coordinator of this machine's in the folder there it was opened for", () => {
-    const ses = (id: string, cwd: string, more: Partial<Session>) => ({ id, cwd, updatedAt: 1, agent: "claude", status: "idle", hosted: false, live: false, workspace: 1, ...more }) as Session;
-    const tree = buildTree([ses("a", "C:\\Code\\otc", { machine: "m" }), ses("c", "/home/u", { at: "m:C:/Code/otc" })], [{ id: 1, name: "Code", path: "m:C:/Code" }], "-", 0, undefined, ["m"]);
-    expect(tree.workspaces.map((w) => [w.key, w.rows.map((r) => (r.kind === "folder" ? `${r.f.name}:${r.f.sessions.map((x) => x.id)}` : r.s.id))])).toEqual([["w1", ["otc:a,c"]]]);
-  });
-
   test("pinned folders above the sessions at the root", () => {
     const ses = (id: string, cwd: string) => ({ id, cwd, updatedAt: 1, agent: "claude", status: "idle", hosted: false, live: false, workspace: 1 }) as Session;
     const tree = buildTree([ses("r", "/w"), ses("a", "/w/a"), ses("b", "/w/b")], [{ id: 1, name: "w", path: "/w" }], "-", 0, undefined, [], { groups: [], order: {}, pinned: ["/w/b"] });

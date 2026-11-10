@@ -28,7 +28,8 @@ func IsClear(text string) bool {
 }
 
 // Clear starts the session over (/clear, as Claude Code's): a new session of the same agent, in
-// the same folder and workspace, with the same model, mode, effort, ultracode and preset. The old one
+// the same folder and workspace, with the same model, mode, effort, ultracode, preset and launcher
+// (hung under it still, if it was; those it started hang under the new one). The old one
 // stays on record; idle, it goes to the archive and its agent stops; in a turn it is left to
 // finish. A session that has said nothing yet is already clear: its own id comes back.
 func (m *Manager) Clear(ctx context.Context, id, from string) (string, error) {
@@ -44,24 +45,27 @@ func (m *Manager) Clear(ctx context.Context, id, from string) (string, error) {
 	h.mu.Unlock()
 	req := api.NewSession{Agent: mt.Agent, Cwd: mt.Cwd, Model: mt.Model, Mode: mt.Mode, Preset: preset, Caller: mt.Launcher, Machine: mt.Machine}
 	var name string // the one the old was given, if it is to go to the archive
+	byHand := true  // one hung under its launcher stays hung (not put by hand)
 	if over, err := m.o.Store.Overlays(); err == nil {
 		if o := over[h.id]; !o.AgentNamed && !h.busy() && len(h.asksNow()) == 0 {
 			name = o.Name
 		}
-		req.Workspace = over[h.id].Workspace
-		if req.Workspace == 0 {
-			req.Workspace = over[h.discoveredAs()].Workspace
+		o := over[h.id]
+		if o.Workspace == 0 {
+			o = over[h.discoveredAs()]
 		}
+		req.Workspace, byHand = o.Workspace, mt.Launcher == "" || o.Manual
 	}
 	nid, err := m.create(ctx, req, from, name, func(nid string) error {
 		if effort == "" && ultracode == nil {
 			return nil
 		}
 		return m.o.Store.UpdateSettings(nid, func(s *store.Settings) { s.Effort, s.Ultracode = effort, ultracode })
-	})
+	}, byHand)
 	if err != nil {
 		return nid, err
 	}
+	m.relaunch(h, nid)
 	if !h.busy() && len(h.asksNow()) == 0 {
 		if err := m.SetArchived(ctx, h.id, true); err != nil {
 			m.o.Logf("session %s: archiving it after /clear: %v", h.id, err)
@@ -74,8 +78,9 @@ func (m *Manager) Clear(ctx context.Context, id, from string) (string, error) {
 // clearedInside: session h's agent cleared itself (Claude's own /clear, which came to it past
 // Iridium's): process proc now writes conversation nid, which Iridium does not host, so its words
 // would show only there, read-only, and its asks here. Once the process is quiet (no turn, ask or
-// task) it is stopped and h archived; nid is taken up in h's place, with h's settings, workspace
-// and opener, and h's page follows it (Next). h, resumed, is as it was before the /clear.
+// task) it is stopped and h archived; nid is taken up in h's place, with h's settings, workspace,
+// launcher and opener (those h started hang under nid), and h's page follows it (Next). h,
+// resumed, is as it was before the /clear.
 func (m *Manager) clearedInside(h *Hosted, proc int, nid string) {
 	h.logf("its agent cleared itself, going on as %s", nid)
 	ctx := m.ctx
@@ -116,13 +121,16 @@ func (m *Manager) clearedInside(h *Hosted, proc int, nid string) {
 	settings, _ := m.o.Store.Settings(h.id)
 	var workspace int64
 	var name string
+	byHand := true // one hung under its launcher stays hung (not put by hand)
 	if over, err := m.o.Store.Overlays(); err == nil {
 		if !over[h.id].AgentNamed {
 			name = over[h.id].Name // the one the user gave; its agent's stays behind
 		}
-		if workspace = over[h.id].Workspace; workspace == 0 {
-			workspace = over[h.discoveredAs()].Workspace
+		o := over[h.id]
+		if o.Workspace == 0 {
+			o = over[h.discoveredAs()]
 		}
+		workspace, byHand = o.Workspace, mt.Launcher == "" || o.Manual
 	}
 	opener := m.o.Store.Opener(h.id)
 	if err := m.SetArchived(ctx, h.id, true); err != nil {
@@ -148,6 +156,9 @@ func (m *Manager) clearedInside(h *Hosted, proc int, nid string) {
 	}
 	n.mu.Lock()
 	n.meta.Model, n.meta.Mode = mt.Model, mt.Mode
+	if n.meta.Launcher == "" && mt.Launcher != nid {
+		n.meta.Launcher = mt.Launcher
+	}
 	n.effort, n.ultracode, n.preset = h.effort, h.ultracode, h.preset
 	nmeta := n.meta
 	n.mu.Unlock()
@@ -158,10 +169,16 @@ func (m *Manager) clearedInside(h *Hosted, proc int, nid string) {
 		n.logf("saving its settings: %v", err)
 	}
 	if workspace != 0 {
-		if err := m.o.Store.Move(nid, workspace); err != nil && !errors.Is(err, store.ErrNoWorkspace) {
+		if _, err := m.o.Store.Workspace(workspace); err == nil {
+			err = m.o.Store.Assign(nid, workspace, byHand)
+			if err != nil {
+				n.logf("moving it to workspace %d: %v", workspace, err)
+			}
+		} else if !errors.Is(err, store.ErrNoWorkspace) {
 			n.logf("moving it to workspace %d: %v", workspace, err)
 		}
 	}
+	m.relaunch(h, nid)
 	if name != "" {
 		if err := m.o.Store.SetName(nid, name); err != nil {
 			n.logf("its name: %v", err)

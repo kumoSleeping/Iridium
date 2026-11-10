@@ -334,6 +334,27 @@ func testRemoteDshWorkspacesFallback(t *testing.T, kind string) {
 	if ws[0].Path != other && ws[0].Path != r.work {
 		t.Errorf("%+v", ws)
 	}
+	// Each with how many of its sessions are listed: subagents aside, archived ones aside.
+	count := func() map[string]int {
+		ws, err := r.x.DshWorkspaces(context.Background(), "m1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]int{}
+		for _, w := range ws {
+			out[w.Path] = w.Sessions
+		}
+		return out
+	}
+	if n := count(); n[other] != 2 || n[r.work] != 1 {
+		t.Errorf("sessions: %v", n)
+	}
+	if err := r.st.Hide(string(api.AgentDsh), "s2", 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(); n[other] != 1 {
+		t.Errorf("one archived: %v", n)
+	}
 }
 
 // A session open in DSH Desktop is shown run elsewhere and not resumed here, as the dsh plugin says
@@ -398,6 +419,9 @@ func testRemoteDshUnsynced(t *testing.T, kind string) {
 	r.scan()
 	if s := r.sessions(); len(s) != 4 {
 		t.Fatalf("before: %+v", s)
+	}
+	if ws, err := r.x.DshWorkspaces(context.Background(), "m1"); err != nil || len(ws) != 2 || ws[0].Sessions != 1 || ws[1].Sessions != 1 {
+		t.Errorf("workspaces with their sessions: %+v %v", ws, err)
 	}
 	unsynced := func(names ...string) {
 		b, _ := json.Marshal(append([]string{}, names...))
