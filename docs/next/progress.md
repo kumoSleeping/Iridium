@@ -271,3 +271,18 @@
   - 聊天层的 store outbox（`Post`、`PruneOutbox`）删掉后，若决定 26 仍要存库，satori 的 `outbox` 换成新的 store 表。
   - QQ 桥之后改成 Satori 客户端时用 `/v1/events` 和 `message.create`。
 - S5：server 里其余的 404 → 422 和这里的原因码统一；`docs/api.md` 加一节指向 `docs/satori.md`。
+
+## S5 收尾和合并（2026-11-10）
+
+- S2、S3、S4a、S4b 并行做完后合进 `next`；合并后接上了：Satori 的会话按 S2 的范围过滤，`ir send 应用/登录` 只发给看得到发出会话的登录，S2 的位置解析改用 `internal/place`。
+- 文档：`GLOSSARY.md` 按 0.2 重写；`docs/api.md`、`plan.md`、`gate.md` 改成应用、登录、配对、权限、需要；聊天层和扩展的几节删了，指向 `docs/satori.md`；`qq.md` 标明 0.2 起暂不可用；删了 `examples/plugin/echo_im.py`（旧聊天层的例子）。
+- `ir --help` 加了 `ir apps open`、`ir needs`；系统提示里凭据走“需要”。`GET /api/sessions/{id}/commands`。
+- 版本：`scripts/next-version` 写 `0.2.0`，这个分支构建出 `v0.2.0-dev.N+…`。
+- 网页文案里剩的“终端、面板、Bot”改成应用、登录。
+
+还没做（以后）：
+- 需要队列里没有会话的提问、审批、计划（网页照旧在会话里显示；Satori 里是按钮）。
+- 分享菜单；机器并进应用（`/api/machines` 还在）；每个应用的 agent 开关；发起登录的持久化；Satori 的事件存库、`channel.create`、`login-*`/`channel-*` 事件。
+- 剩下约 25 处 404 改 422。
+- QQ 桥重写成 Satori 客户端；dsh 插件改用新的 `shell` 字段。
+- 注意：没带旧 shell 字段的老执行端现在算命令行关，要用 `ir join --shell` 重新接一次。
