@@ -62,12 +62,18 @@ type Hello struct {
 	Env     []string    `json:"env"`
 	Agents  []AgentInfo `json:"agents"`
 	Holds   []HoldState `json:"holds"`
-	// NoShell: it starts nothing but its agents (each hold.start's argv begins with one of
-	// theirs), so no command line runs there; its owner's choice.
-	NoShell bool `json:"noShell,omitempty"`
-	// AgentShell: agents of that Iridium may run command lines here (ir sh), not only a person
-	// on its page; its owner's choice, off unless said.
+	// Shell: command lines run there, a person's on the page ($) and agents' (ir sh); else it
+	// starts nothing but its agents (each hold.start's argv begins with one of theirs). Its
+	// owner's choice, off unless said (ir join --shell). nil from an older executor: NoShell and
+	// AgentShell say it (ShellOn).
+	Shell *bool `json:"shell,omitempty"`
+	// NoShell and AgentShell are the older two switches, still said for an older Iridium:
+	// NoShell, only its agents start there; AgentShell, agents may run command lines there too.
+	NoShell    bool `json:"noShell,omitempty"`
 	AgentShell bool `json:"agentShell,omitempty"`
+	// MachineID is a hash of the computer's own ID (MachineHash): one equal to the Iridium's own
+	// is an app on the host, whose agents are not offered (they are the host's).
+	MachineID string `json:"machineId,omitempty"`
 	// IRClient: it puts an ir on the PATH of the agents it starts, which reaches the Iridium over
 	// HTTPS with the session's own TOKEN (hold.start's env IRIDIUM_TOKEN; docs/exec.md "远端的
 	// ir"): IRIDIUM_URL is set there to the address it connected to, unless the env has one.
@@ -76,11 +82,21 @@ type Hello struct {
 	Caps []string `json:"caps,omitempty"`
 }
 
+// ShellOn: command lines run there (Shell; from an older executor, AgentShell without NoShell).
+func (h *Hello) ShellOn() bool {
+	if h.Shell != nil {
+		return *h.Shell
+	}
+	return h.AgentShell && !h.NoShell
+}
+
 // Caps an executor may say in Hello. CapHeld: held.list and held.send (dsh.open and dsh.prompt
-// otherwise). CapHeldFeatures: held.get, held.set and the event held.changed.
+// otherwise). CapHeldFeatures: held.get, held.set and the event held.changed. CapRun: run,
+// run.stop and the events run.out, run.exit (else ir sh runs as a holder).
 const (
 	CapHeld         = "held"
 	CapHeldFeatures = "held.features"
+	CapRun          = "run"
 )
 
 // AgentInfo is an agent installed there and how to start it. Argv is the program part, to which
@@ -150,6 +166,39 @@ type Exit struct {
 	From   string  `json:"from"`
 	Code   *int    `json:"code"`
 	Signal *string `json:"signal"`
+}
+
+// RunParams is run: command line Line run there now, in Cwd ("" its home), by its shell (sh -c,
+// cmd.exe /c on Windows), with Env (as hold.start's; none: its own). Run is this side's ID for it,
+// in the events. Its output comes as run.out events, then one run.exit; run.stop ends it, and so
+// does the connection's end.
+type RunParams struct {
+	Run  string   `json:"run"`
+	Line string   `json:"line"`
+	Cwd  string   `json:"cwd,omitempty"`
+	Env  []string `json:"env,omitempty"`
+}
+
+// RunStopParams is run.stop: run ended, its whole tree.
+type RunStopParams struct {
+	Run string `json:"run"`
+}
+
+// RunOut is the event run.out: what the run wrote, as it came (UTF-8 text, whole characters);
+// Err: to its stderr.
+type RunOut struct {
+	Run  string `json:"run"`
+	Data string `json:"data"`
+	Err  bool   `json:"err,omitempty"`
+}
+
+// RunExit is the event run.exit, the run's last: its exit code, or the signal (without "SIG")
+// that ended it; Error, why it could not start (Code 127 then).
+type RunExit struct {
+	Run    string  `json:"run"`
+	Code   *int    `json:"code"`
+	Signal *string `json:"signal,omitempty"`
+	Error  string  `json:"error,omitempty"`
 }
 
 // Stat is a file there.

@@ -249,7 +249,7 @@ const systems: Record<string, string> = { windows: "Windows", darwin: "macOS", l
 
 /** Whether command lines would run at a machine that asks to join, as it says (docs/exec.md "握手"):
  *  none (its agents only), a person's on the page, or agents' too (ir sh). */
-const shellOf = (c: Need) => (c.pair?.noShell ? "none" : c.pair?.agentShell ? "agents" : "page");
+const shellOf = (c: Need) => (c.pair?.shell ? "agents" : "none");
 
 /** The machine a pairing card is for: its system, agents and commands, e.g. "Windows · dsh 0.2.2 · 可执行命令". */
 export const machineLine = (c: Need) =>

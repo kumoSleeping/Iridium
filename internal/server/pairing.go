@@ -328,9 +328,11 @@ func cleanPair(m api.PairRequest) api.PairRequest {
 		m.Type = "computer"
 	}
 	m.Arch, m.Program = truncRunes(m.Arch, 16), truncRunes(m.Program, 64)
-	if m.NoShell {
-		m.AgentShell = false
+	if m.Shell == nil {
+		on := m.AgentShell && !m.NoShell // an older executor's two
+		m.Shell = &on
 	}
+	m.NoShell, m.AgentShell = false, false
 	if len(m.Agents) > 8 {
 		m.Agents = m.Agents[:8]
 	}

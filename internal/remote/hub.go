@@ -24,6 +24,11 @@ type Hub struct {
 	Logf func(string, ...any)
 	// Changed is called when a machine comes or goes.
 	Changed func(id string)
+	// Self is the host's own machine hash (machineid.Hash()): an executor whose hello says the
+	// same is an app on the host, whose agents are not taken (they are the host's); "": none.
+	Self string
+	// NameOf is an app's name now, by its ID, for Find; nil: the name it connected with.
+	NameOf func(id string) string
 
 	mu       sync.Mutex
 	machines map[string]*Machine
@@ -59,29 +64,42 @@ func (h *Hub) Machine(id string) *Machine {
 	}
 	m := h.machines[id]
 	if m == nil {
-		m = &Machine{hub: h, id: id, relays: map[string]*relay{}, change: make(chan struct{})}
+		m = &Machine{hub: h, id: id, relays: map[string]*relay{}, runs: map[string]*Run{}, change: make(chan struct{})}
 		h.machines[id] = m
 	}
 	return m
 }
 
-// Find is the machine of terminal ID or name idOrName (any case) that has connected since this
-// side started; nil if none.
+// Find is the machine of app ID or name idOrName (any case) that has connected since this side
+// started; nil if none. A name is the app's now (NameOf), not the one it connected with: one
+// renamed is not found by its old name, nor another by the name it had.
 func (h *Hub) Find(idOrName string) *Machine {
 	h.mu.Lock()
-	defer h.mu.Unlock()
-	if m := h.machines[idOrName]; m != nil {
-		return m
-	}
+	ms := make([]*Machine, 0, len(h.machines))
 	for _, m := range h.machines {
+		ms = append(ms, m)
+	}
+	nameOf := h.NameOf
+	h.mu.Unlock()
+	var byName *Machine
+	for _, m := range ms {
 		m.mu.Lock()
-		name := m.name
+		name, seen := m.name, m.hello != nil
 		m.mu.Unlock()
+		if m.id == idOrName && (seen || nameOf == nil || nameOf(m.id) != "") {
+			return m // an app's, connected or not; not one only looked up by an ID of nothing
+		}
+		if !seen {
+			continue
+		}
+		if nameOf != nil {
+			name = nameOf(m.id)
+		}
 		if name != "" && strings.EqualFold(name, idOrName) {
-			return m
+			byName = m
 		}
 	}
-	return nil
+	return byName
 }
 
 // Online lists the machines connected now, by terminal ID.
@@ -130,6 +148,11 @@ func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, id, name string) {
 		if hi.Sep != "/" && hi.Sep != `\` {
 			return nil, &wire.Error{Code: wire.CodeBadRequest, Message: "sep must be / or \\"}
 		}
+		if h.Self != "" && hi.MachineID == h.Self && len(hi.Agents) > 0 {
+			// An app on the host: its agents are the host's own (decisions 22), not taken twice.
+			h.logf("executor %s (%s): on this computer: its agents are not taken", name, id)
+			hi.Agents = nil
+		}
 		select {
 		case helloed <- &hi:
 		default:
@@ -166,6 +189,14 @@ func (h *Hub) Drop(id string) {
 	if c, err := m.Conn(); err == nil {
 		c.Close()
 	}
+	// Forgotten unless something still hangs on it (a session's holder relayed through it).
+	h.mu.Lock()
+	m.mu.Lock()
+	if len(m.relays) == 0 {
+		delete(h.machines, id)
+	}
+	m.mu.Unlock()
+	h.mu.Unlock()
 }
 
 // Machine is one executor: its connection while there is one, and the holders relayed through it.
@@ -178,6 +209,7 @@ type Machine struct {
 	conn   *wire.Conn
 	hello  *wire.Hello
 	relays map[string]*relay // by unit
+	runs   map[string]*Run   // command lines running there (run), by ID
 	change chan struct{}     // closed and replaced when the connection comes or goes
 }
 
@@ -295,6 +327,10 @@ func (m *Machine) event(name string, params json.RawMessage) {
 	m.hub.mu.Unlock()
 	if f != nil {
 		f(m.id, params)
+		return
+	}
+	if name == "run.out" || name == "run.exit" {
+		m.runEvent(name, params)
 		return
 	}
 	var h wire.HoldParams

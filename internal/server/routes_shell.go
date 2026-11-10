@@ -1,14 +1,18 @@
 package server
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/kumoSleeping/iridium/internal/api"
+	"github.com/kumoSleeping/iridium/internal/remote"
 	"github.com/kumoSleeping/iridium/internal/remote/wire"
 	"github.com/kumoSleeping/iridium/internal/session"
 )
@@ -23,36 +27,107 @@ func (s *Server) shellRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/machines/{id}/shell", s.manages(s.machineShell))
 }
 
+// machineShell is an agent's ir sh. Asked with Accept: application/x-ndjson, at an executor that
+// speaks run, the command line's output streams back as ShellEvent lines as it comes, and its end
+// last; else it runs as a holder and its ShellStarted is the answer, read with GET /api/shell/{run}
+// (an older executor: the dsh plugin's).
 func (s *Server) machineShell(w http.ResponseWriter, r *http.Request) {
 	var req api.ShellRun
 	if !readJSON(w, r, &req) {
 		return
 	}
-	id := r.PathValue("id")
+	name := r.PathValue("id")
+	id := name
 	if s.Remote != nil {
-		if mc := s.Remote.Find(id); mc != nil {
+		if mc := s.Remote.Find(name); mc != nil {
 			id = mc.ID()
 		}
 	}
+	stream := strings.Contains(r.Header.Get("Accept"), ndjson)
 	ctx, cancel := agentCtx(r)
 	defer cancel()
-	st, err := s.m.MachineShell(ctx, id, req.Line, req.Cwd)
+	st, run, err := s.m.MachineShell(ctx, id, req.Line, req.Cwd, stream)
 	if errors.Is(err, session.ErrOffline) {
 		// Said so an agent tells the user, not tries again and again.
-		msg := fmt.Sprintf("%s is not connected", r.PathValue("id"))
 		for _, m := range s.machines() {
 			if m.ID == id && m.SeenAt > 0 {
-				msg = fmt.Sprintf("%s is not connected (it last connected %s ago)", m.Name, roughly(time.Since(time.UnixMilli(m.SeenAt))))
+				fail(w, http.StatusConflict, fmt.Sprintf("%s is not connected (it last connected %s ago)", m.Name, roughly(time.Since(time.UnixMilli(m.SeenAt)))))
+				return
+			}
+			if m.ID == id {
+				fail(w, http.StatusConflict, fmt.Sprintf("%s is not connected", m.Name))
+				return
 			}
 		}
-		fail(w, http.StatusConflict, msg)
+		refuse(w, http.StatusUnprocessableEntity, "no_such_machine", fmt.Sprintf("no machine %s (ir machines lists them)", name))
 		return
 	}
 	if err != nil {
 		s.shellError(w, err)
 		return
 	}
-	reply(w, http.StatusOK, st)
+	if run == nil {
+		reply(w, http.StatusOK, st)
+		return
+	}
+	s.streamRun(w, r, run)
+}
+
+const ndjson = "application/x-ndjson"
+
+// streamRun writes run's output as ShellEvent lines as it comes, its end last; the caller gone
+// (ir sh's --timeout, or killed), the run is stopped.
+func (s *Server) streamRun(w http.ResponseWriter, r *http.Request, run *remote.Run) {
+	rc := http.NewResponseController(w)
+	w.Header().Set("Content-Type", ndjson)
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	enc := json.NewEncoder(w)
+	send := func(ev api.ShellEvent) bool {
+		if enc.Encode(ev) != nil {
+			return false
+		}
+		_ = rc.Flush()
+		return true
+	}
+	_ = rc.Flush()
+	stop := func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := run.Stop(ctx); err != nil && !errors.Is(err, wire.ErrOffline) {
+			s.logf("shell: stopping %s: %v", run.ID(), err)
+		}
+	}
+	for {
+		ev, err := run.Next(r.Context())
+		if err != nil {
+			if r.Context().Err() != nil {
+				stop()
+			}
+			return
+		}
+		var out api.ShellEvent
+		switch {
+		case ev.Gone:
+			out = api.ShellEvent{Done: true, Error: "the machine's connection ended: the command line was stopped"}
+		case ev.Exit != nil:
+			out = api.ShellEvent{Done: true, Exit: ev.Exit.Code, Error: ev.Exit.Error}
+			if ev.Exit.Signal != nil {
+				out.Signal = *ev.Exit.Signal
+			}
+		case ev.Err:
+			out.Err = ev.Data
+		default:
+			out.Out = ev.Data
+		}
+		if !send(out) {
+			stop()
+			return
+		}
+		if out.Done {
+			return
+		}
+	}
 }
 
 func (s *Server) shellRun(w http.ResponseWriter, r *http.Request) {

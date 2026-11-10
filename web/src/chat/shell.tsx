@@ -32,7 +32,7 @@ export const shellLine = (text: string): string | null => {
 /** Whether command lines run where session s does (not at a machine that refuses them). */
 export function useShellable(s: LiveSession): boolean {
   const ms = useMachines();
-  return !s.machine || !ms.find((m) => m.id === s.machine)?.noShell;
+  return !s.machine || !!ms.find((m) => m.id === s.machine)?.shell;
 }
 
 /** Runs line at session s; resolves once it started (its output comes on by itself). */

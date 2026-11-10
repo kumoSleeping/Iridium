@@ -56,7 +56,7 @@ func TestRemoteDsh(t *testing.T) {
 		"IRIDIUM_FAKE_DSH="+abs("../agent/dsh/testdata/turn"),
 		"IRIDIUM_FAKE_DSH_TRANSCRIPT="+abs("../transcript/testdata/dsh/sessions/--tmp-dsh-probe-w--/sess-allow/session.v4.jsonl.zstd"))
 	exe, err := executor.New(executor.Options{
-		URL: "ws" + strings.TrimPrefix(srv.URL, "http"), State: filepath.Join(there, "executor"), Env: env, Logf: t.Logf, AgentShell: true,
+		URL: "ws" + strings.TrimPrefix(srv.URL, "http"), State: filepath.Join(there, "executor"), Env: env, Logf: t.Logf, Shell: true,
 		Agents: []wire.AgentInfo{{Agent: "dsh", Argv: []string{os.Args[0]}, Version: "0.2.2-rc.1",
 			Scope: abs("../agent/dsh/testdata/pkg/node_modules/@deepseek-ai"), Home: home}},
 	})
@@ -141,10 +141,30 @@ func TestRemoteDsh(t *testing.T) {
 
 	testShell(t, r.m, id, work)
 	// An agent's ir sh: at the machine, in its home unless told.
-	if st, err := r.m.MachineShell(bg, "m1", "echo agent; pwd", work); err != nil {
-		t.Error(err)
+	if st, run, err := r.m.MachineShell(bg, "m1", "echo agent; pwd", work, false); err != nil || run != nil {
+		t.Error(err, run)
 	} else if out, end := shellAll(t, r.m, st.Run); !strings.Contains(out, "agent\n") || end.Code == nil || *end.Code != 0 {
 		t.Errorf("ir sh: %q %+v", out, end)
+	}
+	// Streamed, through run: no holder.
+	if st, run, err := r.m.MachineShell(bg, "m1", "echo agent; exit 4", work, true); err != nil || run == nil || !strings.HasPrefix(st.Run, "run-") {
+		t.Errorf("ir sh by run: %+v %v %v", st, run, err)
+	} else {
+		var out string
+		var code *int
+		for {
+			ev, err := run.Next(bg)
+			if err != nil {
+				break
+			}
+			out += ev.Data
+			if ev.Exit != nil {
+				code = ev.Exit.Code
+			}
+		}
+		if out != "agent\n" || code == nil || *code != 4 {
+			t.Errorf("ir sh by run: %q %v", out, code)
+		}
 	}
 
 	// The executor goes: the session shows it, and its agent is still there when it is back.

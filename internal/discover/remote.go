@@ -152,8 +152,10 @@ func (x *Index) loadRemote() {
 	}
 }
 
-// knownMachines is the machines that have connected and whose Bot is still there (a revoked one's
-// is forgotten, store.ForgetMachine); nil if they cannot be had.
+// knownMachines is the machines that have connected and whose app is still there (a revoked one's
+// is forgotten, store.ForgetMachine), and every app there is: what was found at a machine is
+// dropped only once its app is gone, never for a row of machines missing alone; nil if they cannot
+// be had.
 func (x *Index) knownMachines() (map[string]bool, error) {
 	if x.o.Store == nil {
 		return nil, nil
@@ -162,7 +164,10 @@ func (x *Index) knownMachines() (map[string]bool, error) {
 	if err != nil {
 		return nil, err
 	}
-	known := make(map[string]bool, len(ms))
+	known, err := x.o.Store.AppIDs()
+	if err != nil {
+		return nil, err
+	}
 	for _, m := range ms {
 		known[m.Terminal] = true
 	}

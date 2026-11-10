@@ -32,6 +32,7 @@ type rig struct {
 	stop   func()
 	state  string
 	refuse bool
+	opts   func(*executor.Options) // the Go executor's, changed
 }
 
 func (r *rig) setRefuse(v bool) {
@@ -52,10 +53,16 @@ func kinds(t *testing.T, test func(t *testing.T, kind string)) {
 	}
 }
 
-func newRig(t *testing.T, kind string) *rig {
+func newRig(t *testing.T, kind string) *rig { return newRigWith(t, kind, nil, nil) }
+
+// newRigWith is newRig with the hub and the Go executor's options changed first.
+func newRigWith(t *testing.T, kind string, hub func(*remote.Hub), opts func(*executor.Options)) *rig {
 	t.Helper()
-	r := &rig{t: t, root: t.TempDir(), state: t.TempDir(), kind: kind}
+	r := &rig{t: t, root: t.TempDir(), state: t.TempDir(), kind: kind, opts: opts}
 	r.hub = r.newHub()
+	if hub != nil {
+		hub(r.hub)
+	}
 	r.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if req.Header.Get("Authorization") != "Bearer tok" {
 			http.Error(w, "no", http.StatusUnauthorized)
@@ -103,7 +110,11 @@ func (r *rig) startExecutor() {
 		}
 		return
 	}
-	exe, err := executor.New(executor.Options{URL: url, Token: "tok", State: r.state, Logf: r.t.Logf})
+	o := executor.Options{URL: url, Token: "tok", State: r.state, Logf: r.t.Logf, Shell: true}
+	if r.opts != nil {
+		r.opts(&o)
+	}
+	exe, err := executor.New(o)
 	if err != nil {
 		r.t.Fatal(err)
 	}

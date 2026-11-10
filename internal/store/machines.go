@@ -51,3 +51,21 @@ func (s *Store) ForgetMachine(terminal string) error {
 	}
 	return err
 }
+
+// AppIDs is every app's ID.
+func (s *Store) AppIDs() (map[string]bool, error) {
+	rows, err := s.db.Query(`SELECT id FROM apps`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out[id] = true
+	}
+	return out, rows.Err()
+}

@@ -431,10 +431,8 @@ export const zh = {
   "confirm.program": "程序",
   "confirm.commands": "命令",
   "confirm.shell.none": "仅 agent",
-  "confirm.shell.page": "可执行命令",
   "confirm.shell.agents": "可执行命令（含 agent）",
   "confirm.commands.none": "不执行，仅启动 agent",
-  "confirm.commands.page": "网页上的命令",
   "confirm.commands.agents": "网页上的命令和 agent 的 ir sh",
 
   "secret.invite": "新面板的邀请",

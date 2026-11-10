@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,10 +11,12 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/irhelp"
+	"github.com/kumoSleeping/iridium/internal/place"
 	"github.com/kumoSleeping/iridium/internal/remote"
 )
 
@@ -48,10 +51,24 @@ func RunAt(args []string, stdout, stderr io.Writer, hc *http.Client, at At) int 
 	return commands[args[0]](&env{out: stdout, err: stderr, hc: hc, at: &at}, args[1:])
 }
 
-// where is where ir new starts a session: at machine (a Bot's ID or name; "" is the caller's: this
-// machine, or for ir at another machine, that one) in dir, as that machine writes paths. The
-// machine's ID ("" for this one) and the folder.
+// where is where ir new starts a session: at place dir (internal/place: <app>:<path>, host:<path>;
+// without a prefix the caller's computer: this one, or for ir at another, that one), or with
+// machine (--machine, the older way: an app's ID or name) at that one in dir, as that computer
+// writes paths. The app's ID ("" for the host) and the folder.
 func (e *env) where(machine, dir string) (string, string, error) {
+	if machine == "" {
+		if name, path, ok := place.Split(dir); ok {
+			path = cmp.Or(path, "~")
+			if place.IsHost(name) {
+				if e.at != nil && !filepath.IsAbs(path) && path != "~" && !strings.HasPrefix(path, "~/") {
+					return "", "", fmt.Errorf("a folder at the host is a whole path there, not %q", path)
+				}
+				p, err := localPath(path)
+				return "", p, err
+			}
+			machine, dir = name, path
+		}
+	}
 	if machine == "" && e.at != nil {
 		machine = e.at.Machine
 	}
@@ -69,6 +86,8 @@ func (e *env) where(machine, dir string) (string, string, error) {
 		return m.ID, e.at.Cwd, nil
 	case dir == "." || dir == "~":
 		return m.ID, m.Home, nil
+	case strings.HasPrefix(dir, "~/") || (m.Sep == `\` && strings.HasPrefix(dir, `~\`)):
+		return m.ID, remote.Join(m.Sep, m.Home, dir[2:]), nil
 	case remote.IsAbs(m.Sep, dir):
 		return m.ID, dir, nil
 	case own:

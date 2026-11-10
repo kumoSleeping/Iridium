@@ -90,11 +90,14 @@ func TestParse(t *testing.T) {
 	if _, err := parse([]string{"--model"}, "model"); err == nil {
 		t.Error("took a flag without its value")
 	}
-	for arg, peer := range map[string]bool{"mac:~/dir": true, "kumo-m2:/tmp/a": true, "/abs:path": false, "./a:b": false, "plain": false, "~/x": false} {
+	for arg, peer := range map[string]bool{"mac:~/dir": true, "kumo-m2:/tmp/a": true, "工作站:/x": true, "/abs:path": false, "./a:b": false, "plain": false, "~/x": false, "host:/tmp": false, "主机:~/x": false} {
 		_, err := localPath(arg)
 		if _, isPeer := err.(errPeer); isPeer != peer {
 			t.Errorf("%s: %v", arg, err)
 		}
+	}
+	if p, err := localPath("host:/tmp/x"); err != nil || p != "/tmp/x" {
+		t.Errorf("host:/tmp/x: %q %v", p, err)
 	}
 	if short("abcdefgh1234", []string{"abcdefgh1234", "abcdefgh5678"}) != "abcdefgh1" {
 		t.Error("short id")
@@ -322,11 +325,18 @@ func TestAgentCommands(t *testing.T) {
 	if r := ir("stop", sid); r.code != 0 {
 		t.Errorf("stop: %+v", r)
 	}
-	if r := ir("send", "mac/"+sid, "x"); r.code != 1 || !strings.Contains(r.err, "peer not connected: mac") {
-		t.Errorf("peer id: %+v", r)
+	// No 机器/<id> for a session (decisions 24): it is no session's id.
+	if r := ir("send", "mac/"+sid, "x"); r.code != 1 || !strings.Contains(r.err, "no session mac/") {
+		t.Errorf("machine/id: %+v", r)
 	}
-	if r := ir("new", "claude", "mac:~/dir", "x"); r.code != 1 || !strings.Contains(r.err, "peer not connected: mac") {
-		t.Errorf("peer dir: %+v", r)
+	// A place at an app not there; the host's by its name.
+	if r := ir("new", "claude", "mac:~/dir", "x"); r.code != 1 || !strings.Contains(r.err, "no machine mac") {
+		t.Errorf("place at mac: %+v", r)
+	}
+	if r := ir("new", "claude", "host:"+work, ""); r.code != 0 {
+		t.Errorf("place at the host: %+v", r)
+	} else if ls := ir("ls"); !strings.Contains(ls.out, "\thost:"+work) && !strings.Contains(ls.out, "\thost:~") {
+		t.Errorf("ls without the host's prefix: %q", ls.out)
 	}
 }
 
@@ -381,7 +391,7 @@ func TestWorkspaceCommands(t *testing.T) {
 		t.Fatalf("new: %+v", r)
 	}
 	r = ir("ws")
-	if r.code != 0 || !strings.HasSuffix(r.out, "\t"+filepath.Base(dir)+"\t"+dir+"\t1\n") {
+	if r.code != 0 || !strings.HasSuffix(r.out, "\t"+filepath.Base(dir)+"\thost:"+dir+"\t1\n") {
 		t.Fatalf("ws: %+v", r)
 	}
 	id := strings.Split(r.out, "\t")[0]

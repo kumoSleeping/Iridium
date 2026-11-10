@@ -3,11 +3,11 @@ package cli
 import (
 	"errors"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 
 	"github.com/kumoSleeping/iridium/internal/api"
+	"github.com/kumoSleeping/iridium/internal/place"
 )
 
 // ir ws: the folder groups (the user, 2026-11-08: no workspaces to make or delete; a group is the
@@ -58,10 +58,15 @@ func wsLs(e *env) int {
 			n[s.Workspace]++
 		}
 	}
-	home, _ := os.UserHomeDir()
+	home := e.home()
+	names := e.machineNames()
 	for _, w := range list {
 		if n[w.ID] > 0 {
-			fmt.Fprintf(e.out, "%d\t%s\t%s\t%d\n", w.ID, w.Name, tildeOf(w.Path, home), n[w.ID])
+			p := place.FromKey(w.Path)
+			if p.App == "" {
+				p.Path = tildeOf(p.Path, home)
+			}
+			fmt.Fprintf(e.out, "%d\t%s\t%s\t%d\n", w.ID, w.Name, place.Format(p, func(id string) string { return names[id] }), n[w.ID])
 		}
 	}
 	if n[0] > 0 {

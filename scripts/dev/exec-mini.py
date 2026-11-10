@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
 # A minimal executor (docs/exec.md) in plain Python, standard library only, its WebSocket too: a
 # developer's test that the protocol is all an outside program needs, not shipped. It pairs once
-# (a code to allow on the Iridium's page), then lets the Iridium run the agents it finds here.
+# (a code to allow on the Iridium's page), then lets the Iridium run the agents it finds here, and
+# with --shell its command lines too (a person's $ on the page, an agent's ir sh, by run).
 #
-#   python3 -I scripts/dev/exec-mini.py http://127.0.0.1:7811 [name] [agent ...]   (default: pi)
-import base64, hashlib, json, os, platform, shutil, signal, socket, ssl, struct, subprocess
+#   python3 -I scripts/dev/exec-mini.py http://127.0.0.1:7811 [name] [agent ...] [--shell]   (default: pi)
+import base64, codecs, hashlib, json, os, platform, shutil, signal, socket, ssl, struct, subprocess
 import re, sys, threading, time, urllib.parse, urllib.request
 
-URL = sys.argv[1].rstrip("/")
-NAME = sys.argv[2] if len(sys.argv) > 2 else "exec-mini"
-AGENTS = sys.argv[3:] or ["pi"]
-PROGRAM = "exec-mini.py 0.1"
+SHELL = "--shell" in sys.argv[1:]  # its owner's switch: command lines run here
+ARGS = [a for a in sys.argv[1:] if a != "--shell"]
+URL = ARGS[0].rstrip("/")
+NAME = ARGS[1] if len(ARGS) > 1 else "exec-mini"
+AGENTS = ARGS[2:] or ["pi"]
+PROGRAM = "exec-mini.py 0.2"
 OS = {"win32": "windows"}.get(sys.platform, sys.platform)
 UA = {"user-agent": PROGRAM.replace(" ", "/")}  # a proxy may turn Python's own away (Cloudflare 1010)
 # Each Iridium its own TOKEN and holders, under its host and port as ir join names them.
@@ -25,7 +28,8 @@ def say(m):
 
 
 class Refused(OSError):
-    """The Iridium turns the TOKEN down (401, 403): its Bot was removed."""
+    """The Iridium turns the TOKEN down (401): its app was removed. Any other refusal (403 with a
+    reason, a proxy's 5xx) is for now: the TOKEN stays and it connects again."""
 
 
 class Fail(Exception):
@@ -77,7 +81,7 @@ class WS:
         status = self.r.readline()
         while self.r.readline() not in (b"\r\n", b""):
             pass
-        if b" 401 " in status or b" 403 " in status:
+        if b" 401 " in status:
             raise Refused(status.decode().strip())
         if b" 101 " not in status:
             raise OSError(f"no upgrade: {status.decode().strip()}")
@@ -231,6 +235,117 @@ class Hold:
 holds = {}
 
 
+# ---- run: a command line now, its output pushed as it comes (with --shell) ----
+
+def own_env():
+    """Its environment without what points an ir at an Iridium here (that one sets its own)."""
+    return {k: v for k, v in os.environ.items() if not re.fullmatch(r"IRIDIUM_(SESSION|SOCKET|CONFIG|URL|TOKEN)", k)}
+
+
+def machine_id():
+    """A hash of this computer's ID, as internal/machineid gives it: one equal to the Iridium's own
+    is an app on its host, whose agents are not taken."""
+    raw = os.environ.get("IRIDIUM_MACHINE_ID")
+    if raw is None:
+        for p in ("/etc/machine-id", "/var/lib/dbus/machine-id"):
+            try:
+                raw = open(p).read()
+                break
+            except OSError:
+                pass
+    if raw is None and sys.platform == "darwin":
+        out = subprocess.run(["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"], capture_output=True, text=True).stdout
+        m = re.search(r'"IOPlatformUUID" = "([^"]+)"', out)
+        raw = m.group(1) if m else None
+    raw = (raw or "").strip()
+    if not raw or raw == "none":
+        return ""
+    return hashlib.sha256(b"iridium machine " + raw.encode()).hexdigest()[:32]
+
+
+runs = {}
+
+
+class Run:
+    def __init__(self, ws, rid):
+        self.ws, self.id, self.proc, self.stopping = ws, rid, None, False
+
+    @staticmethod
+    def start(ws, p):
+        if not SHELL:
+            raise Fail("denied", "command lines do not run here")
+        rid, line = p.get("run", ""), p.get("line", "")
+        if not rid or not line:
+            raise Fail("bad_request", "bad run")
+        if rid in runs:
+            raise Fail("exists", rid)
+        r = runs[rid] = Run(ws, rid)
+        env = dict(kv.split("=", 1) for kv in p["env"] if "=" in kv) if p.get("env") else own_env()
+        argv = ["cmd.exe", "/d", "/s", "/c", line] if os.name == "nt" else ["/bin/sh", "-c", line]
+        try:
+            r.proc = subprocess.Popen(argv, env=env, cwd=p.get("cwd") or os.path.expanduser("~"), stdin=subprocess.DEVNULL,
+                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=os.name != "nt")
+        except OSError as e:
+            runs.pop(rid, None)
+            threading.Thread(target=r.send, args=("run.exit", {"code": 127, "error": str(e)}), daemon=True).start()
+            return {}
+        pumps = [threading.Thread(target=r.pump, args=(f, err), daemon=True) for f, err in ((r.proc.stdout, False), (r.proc.stderr, True))]
+        for t in pumps:
+            t.start()
+        threading.Thread(target=r.wait, args=(pumps,), daemon=True).start()
+        say(f"{rid}: running a command line")
+        return {}
+
+    def send(self, event, params):
+        try:
+            self.ws.send({"event": event, "params": {"run": self.id, **params}})
+        except OSError:
+            pass
+
+    def pump(self, f, err):
+        dec = codecs.getincrementaldecoder("utf-8")("replace")  # whole characters each
+        while chunk := f.read1(32 << 10):
+            if text := dec.decode(chunk):
+                self.send("run.out", {"data": text, **({"err": True} if err else {})})
+        if text := dec.decode(b"", final=True):
+            self.send("run.out", {"data": text, **({"err": True} if err else {})})
+
+    def wait(self, pumps):
+        rc = self.proc.wait()
+        for t in pumps:
+            t.join(2)
+        if any(t.is_alive() for t in pumps):
+            self.kill()  # what it left in the background holds its output
+            for t in pumps:
+                t.join(1)
+        runs.pop(self.id, None)
+        sig = signal.Signals(-rc).name[3:] if rc < 0 else None
+        self.send("run.exit", {"code": None if sig else rc, "signal": sig})
+
+    def signal_tree(self, sig):
+        try:
+            os.killpg(self.proc.pid, sig) if os.name != "nt" else self.proc.kill()
+        except OSError:
+            pass
+
+    def kill(self):
+        self.signal_tree(signal.SIGKILL if os.name != "nt" else None)
+
+    def stop(self):
+        if self.stopping:
+            return {}
+        self.stopping = True
+        self.signal_tree(signal.SIGTERM if os.name != "nt" else None)
+
+        def later():
+            time.sleep(2)
+            if self.proc.poll() is None:
+                self.kill()
+
+        threading.Thread(target=later, daemon=True).start()
+        return {}
+
+
 # ---- files ----
 
 def allowed(path):
@@ -289,12 +404,17 @@ def fs(method, p):
 def handle(ws, method, p):
     if method.startswith("fs."):
         return fs(method, p)
+    if method == "run":
+        return Run.start(ws, p)
+    if method == "run.stop":
+        r = runs.get(p.get("run", ""))
+        return r.stop() if r else {}
     if method == "hold.start":
         h = holds.get(p["hold"])
         if h:
             return {"pid": h.proc.pid if h.proc else 0}
         argv = p.get("argv") or []
-        if not any(a["argv"] == argv[:len(a["argv"])] for a in agents()):
+        if not SHELL and not any(a["argv"] == argv[:len(a["argv"])] for a in agents()):
             raise Fail("denied", "only its agents start here")
         h = holds[p["hold"]] = Hold(p["hold"])
         return h.start(p)
@@ -339,8 +459,9 @@ def serve(token):
     ws.send({"id": 1, "method": "hello", "params": {
         "protocol": 1, "program": PROGRAM, "os": OS,
         "arch": platform.machine(), "home": os.path.expanduser("~"), "sep": os.sep, "scratch": scratch,
-        "env": [f"{k}={v}" for k, v in os.environ.items()], "agents": agents(), "noShell": True,
-        "holds": [h.state() for h in holds.values()]}})
+        "env": [f"{k}={v}" for k, v in own_env().items()], "agents": agents(), "holds": [h.state() for h in holds.values()],
+        # shell, and the older two for an older Iridium; run: ir sh streamed, not as a holder.
+        "shell": SHELL, "noShell": not SHELL, "agentShell": SHELL, "caps": ["run"], "machineId": machine_id()}})
     alive = [True]
 
     def ping():
@@ -366,10 +487,12 @@ def serve(token):
     finally:
         alive[0] = False
         ws.close()
+        for r in [r for r in runs.values() if r.ws is ws]:
+            r.kill()  # the connection that asked for it is gone
 
 
 def pair():
-    body = json.dumps({"name": NAME, "os": OS, "arch": platform.machine(), "program": PROGRAM,
+    body = json.dumps({"name": NAME, "os": OS, "arch": platform.machine(), "program": PROGRAM, "shell": SHELL,
                        "agents": [{"agent": a["agent"], "version": a["version"]} for a in agents()]}).encode()
     while True:
         req = urllib.request.Request(URL + "/api/pair", data=body, headers={"content-type": "application/json", **UA})
@@ -378,7 +501,7 @@ def pair():
         except urllib.error.HTTPError as e:
             if e.code != 403:
                 raise
-            say("pairing is closed there (ir apps open, or 新建应用): waiting")
+            say("pairing is closed there (ir apps open, or 新建应用): waiting")  # pair_closed, too_many_pending
             time.sleep(5)
             continue
         say(f'pairing code {r["code"]}: allow "{NAME}" on the Iridium page')

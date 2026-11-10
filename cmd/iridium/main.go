@@ -30,6 +30,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/hold"
 	"github.com/kumoSleeping/iridium/internal/hub"
 	"github.com/kumoSleeping/iridium/internal/join"
+	"github.com/kumoSleeping/iridium/internal/machineid"
 	"github.com/kumoSleeping/iridium/internal/pricing"
 	"github.com/kumoSleeping/iridium/internal/push"
 	"github.com/kumoSleeping/iridium/internal/remote"
@@ -132,7 +133,7 @@ func serve(args []string) int {
 	d := discover.New(do)
 	var srv *server.Server // names terminals in source tags, once it is there
 	tag := func(id string) string { return srv.Tag(id) }
-	executors := &remote.Hub{Logf: log.Printf}
+	executors := &remote.Hub{Logf: log.Printf, Self: machineid.Hash()}
 	// The harnesses' own channels (internal/harness): only here is an agent's own code wired in.
 	dshChannel := hdsh.New(hdsh.Options{Remote: executors, Logf: log.Printf})
 	defer dshChannel.Close()
