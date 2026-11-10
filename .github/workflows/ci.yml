@@ -32,6 +32,8 @@ jobs:
           npm ci --no-audit --no-fund
           npm run check
           npm run build
+      - name: types
+        run: scripts/check-types.sh
       - name: vet
         run: |
           go vet ./...

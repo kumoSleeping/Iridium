@@ -25,6 +25,7 @@ npm ci --no-audit --no-fund --silent
 npm run check --silent
 npm run build --silent >/dev/null
 cd ..
+GO="$GO" scripts/check-types.sh
 "$GO" vet ./...
 GOOS=darwin GOARCH=arm64 "$GO" vet ./...
 "$GO" test ./... >"$tmp/test.log" 2>&1 || { grep -v '^ok\|no test files' "$tmp/test.log"; exit 1; }
