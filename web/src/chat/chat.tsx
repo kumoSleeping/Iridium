@@ -33,7 +33,8 @@ import { ContextRing, ModeKey, ModelKey, modelView, PresetKey, QuotaBars, useMod
 import { Queue } from "./queue";
 import { ShellRuns } from "./shell";
 import { Crash } from "./crash";
-import { SESSION_DRAG, sourceOf, yours } from "./refs";
+import { PLACE_DRAG, SESSION_DRAG, sourceOf, yours } from "./refs";
+import { placeDropped } from "./at";
 import { Compaction, Pending, Running, Said } from "./said";
 import { Stick, toEnd } from "./stick";
 
@@ -200,8 +201,14 @@ export function ChatPage({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?:
   // A session's row dropped here (sidebar.tsx): named in the composer, for this one to write to it
   // with ir (the user, 2026-11-06): a card among the attachments, one piece (the user, 2026-11-08).
   const session = (e: DragEvent) => e.dataTransfer.types.includes(SESSION_DRAG) && (e.preventDefault(), (e.dataTransfer.dropEffect = "copy"), true);
+  // A group's or a folder's row (2026-11-10): that place named, as @ names it.
+  const place = (e: DragEvent) => e.dataTransfer.types.includes(PLACE_DRAG) && (e.preventDefault(), (e.dataTransfer.dropEffect = "copy"), true);
   const drop = (e: DragEvent) => {
     if (files(e)) return composer.current?.attach([...e.dataTransfer.files]);
+    if (place(e)) {
+      const p = placeDropped(e.dataTransfer.getData(PLACE_DRAG));
+      return p && composer.current?.name(p);
+    }
     if (!session(e)) return;
     const to = list?.find((x) => x.id === e.dataTransfer.getData(SESSION_DRAG));
     if (!to || to.id === id) return;
@@ -221,7 +228,7 @@ export function ChatPage({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?:
   // What changes as the conversation grows: it keeps to the bottom, the dots wait again.
   const grew = `${log.blocks.at(-1)?.at} ${log.drafts.length} ${log.drafts.at(-1)?.text.length} ${log.drafts.at(-1)?.whole} ${log.sent.length}`;
   return (
-    <div className="relative h-full" data-chat-drop={id} onDragOver={(e) => files(e) || session(e)} onDrop={drop}>
+    <div className="relative h-full" data-chat-drop={id} onDragOver={(e) => files(e) || session(e) || place(e)} onDrop={drop}>
       <Stick scroller={scroller} tail={grew} older={() => log.older()} place={chat.place} bottom={stackH} quiet={!!s?.asks.length} style={{ paddingTop: 64, paddingBottom: stackH + 20 }}>
         <div className="mx-auto flex max-w-[760px] flex-col gap-5 px-4 sm:px-6">
           {/* In a turn, the calls being written or run and the dots share one row at the end, as

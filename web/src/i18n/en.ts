@@ -135,7 +135,10 @@ export const en: Dict = {
   "sys.other": "System",
 
   "composer.placeholder": "Say something…",
-  "composer.sessions": "Name a session",
+  "composer.atList": "Mention",
+  "composer.atSessions": "Sessions",
+  "composer.mentionFolder": "folder \"{name}\" ({path})",
+  "composer.mentionWorkspace": "workspace \"{name}\" ({machine}:{path})",
   "composer.mention": "\"{title}\" ({agent} session {id})",
   "composer.attach": "Add files",
   "composer.uploading": "Uploading",

@@ -25,7 +25,7 @@ import { LinkDot } from "./link";
 import { errText, toast } from "./toast";
 import { useMe, useTerminalList, useUpdate } from "./data";
 import { agentName, ago, Avatar, cn, fine, IconKey, IrMark, keep, kept, Lamp, lampOf, Logo, own, sessionStatusText, statusText, tilde, Tip, titleOf, untitled, useLongPress, useMenuAt, useMinute } from "./ui";
-import { SESSION_DRAG } from "./chat/refs";
+import { PLACE_DRAG, SESSION_DRAG } from "./chat/refs";
 import { NoteMark, NotesAt, useNotes } from "./notekey";
 import { useUnread } from "./unread";
 import { CloudBadge, MachineFace, shownPath, useLate, useMachine } from "./machines";
@@ -745,7 +745,9 @@ function WsRow({ flip, id, name, root, sessions, hung, machine, remote, folders,
         draggable: true,
         onDragStart: (e: React.DragEvent) => {
           e.dataTransfer.setData("text/plain", name);
-          e.dataTransfer.effectAllowed = "move";
+          // Dropped on a chat: the group named there (chat.tsx), so a copy too.
+          if (id) e.dataTransfer.setData(PLACE_DRAG, JSON.stringify({ path: root, name }));
+          e.dataTransfer.effectAllowed = "copyMove";
           startDrag({ kind: "ws", id: wkey, lane: "" });
         },
         onDragEnd: endDrag,
@@ -1127,7 +1129,8 @@ function FolderRow({ f, ws, label, hung, open, onToggle, newHere, plus, lane, pl
         draggable: true,
         onDragStart: (e: React.DragEvent) => {
           e.dataTransfer.setData("text/plain", f.path);
-          e.dataTransfer.effectAllowed = "move";
+          e.dataTransfer.setData(PLACE_DRAG, JSON.stringify({ path: f.path, name: f.path.split("/").filter(Boolean).pop() ?? f.path }));
+          e.dataTransfer.effectAllowed = "copyMove";
           startDrag({ kind: "f", id: f.path, lane });
         },
         onDragEnd: endDrag,

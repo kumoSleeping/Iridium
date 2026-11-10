@@ -135,7 +135,10 @@ export const zh = {
   "sys.other": "系统",
 
   "composer.placeholder": "说点什么…",
-  "composer.sessions": "提及一个会话",
+  "composer.atList": "提及",
+  "composer.atSessions": "会话",
+  "composer.mentionFolder": "文件夹「{name}」（{path}）",
+  "composer.mentionWorkspace": "工作区「{name}」（{machine}:{path}）",
   "composer.mention": "「{title}」（{agent} 会话 {id}）",
   "composer.attach": "添加文件",
   "composer.uploading": "正在上传",

@@ -68,6 +68,9 @@ export function senderName(s: Pick<Session, "id" | "name" | "title" | "cwd" | "w
 
 /** The type a session's row is dragged with (sidebar.tsx), its id the data. */
 export const SESSION_DRAG = "application/x-iridium-session";
+/** The type a group's or a folder's row is dragged with (sidebar.tsx): {path, name} as JSON, path
+ *  the page's ("<machine>:<path>" at another machine, '/'-separated). */
+export const PLACE_DRAG = "application/x-iridium-place";
 
 /** The shortest start of id, at least 8 characters, no other of ids shares: what ir takes for a
  *  session (internal/cli short). */
@@ -77,20 +80,67 @@ export function shortId(id: string, ids: string[]): string {
 }
 
 /** A session named in a message, as a row dropped on the composer writes it (i18n
- *  composer.mention): 「title」（Claude 会话 1a2b3c4d）, or "title" (Claude session 1a2b3c4d). */
-export type Mention = { title: string; agent: string; id: string; text: string };
-const MENTION = /「([^」\n]{1,200})」（([^（）\n]{1,40}?) 会话 ([0-9A-Za-z_-]{8,64})）|"([^"\n]{1,200})" \(([^()\n]{1,40}?) session ([0-9A-Za-z_-]{8,64})\)/g;
+ *  composer.mention): 「title」（Claude 会话 1a2b3c4d）, or "title" (Claude session 1a2b3c4d). A
+ *  place (composer.mentionFolder, composer.mentionWorkspace, docs/plan.md "@"): a folder here,
+ *  文件夹「ir」（/home/otae/ir）, or one at another machine by its name, its path as it writes it,
+ *  工作区「Ds_Benchmark」（otae-2:C:\Code\Ds_Benchmark）; folder "ir" (/home/otae/ir) and workspace
+ *  "Ds_Benchmark" (otae-2:C:\Code\Ds_Benchmark) in English. machine: none for this machine. */
+export type Mention =
+  | { kind: "session"; title: string; agent: string; id: string; text: string }
+  | { kind: "place"; name: string; machine?: string; path: string; text: string };
+// A place's path may hold brackets: it ends at the last closing one before a space or the next
+// opening one (2026-11-10), so one after another, and words after, still part.
+const ZH_PATH = "([^\\n]{1,400}?)）(?![^\\s（]*）)";
+const EN_PATH = "([^\\n]{1,400}?)\\)(?![^\\s(]*\\))";
+const MACHINE = "([^\\s:「」（）\"()]{1,64}):";
+const MENTION = new RegExp(
+  [
+    `文件夹「([^」\\n]{1,200})」（(?=/)${ZH_PATH}`,
+    `工作区「([^」\\n]{1,200})」（${MACHINE}${ZH_PATH}`,
+    `folder "([^"\\n]{1,200})" \\((?=/)${EN_PATH}`,
+    `workspace "([^"\\n]{1,200})" \\(${MACHINE}${EN_PATH}`,
+    "「([^」\\n]{1,200})」（([^（）\\n]{1,40}?) 会话 ([0-9A-Za-z_-]{8,64})）",
+    '"([^"\\n]{1,200})" \\(([^()\\n]{1,40}?) session ([0-9A-Za-z_-]{8,64})\\)',
+  ].join("|"),
+  "g",
+);
 
-/** A message's text cut at the sessions it names: plain runs and mentions, in order. */
+/** The mention a match of MENTION is, by which of its forms matched. */
+function mentionOf(m: RegExpMatchArray): Mention {
+  const g = m as unknown as (string | undefined)[];
+  const text = m[0];
+  if (g[1] !== undefined) return { kind: "place", name: g[1], path: g[2]!, text };
+  if (g[3] !== undefined) return { kind: "place", name: g[3], machine: g[4]!, path: g[5]!, text };
+  if (g[6] !== undefined) return { kind: "place", name: g[6], path: g[7]!, text };
+  if (g[8] !== undefined) return { kind: "place", name: g[8], machine: g[9]!, path: g[10]!, text };
+  return { kind: "session", title: g[11] ?? g[14]!, agent: g[12] ?? g[15]!, id: g[13] ?? g[16]!, text };
+}
+
+/** A message's text cut at the sessions and places it names: plain runs and mentions, in order. */
 export function mentions(text: string): (string | Mention)[] {
   const out: (string | Mention)[] = [];
   let at = 0;
   for (const m of text.matchAll(MENTION)) {
     if (m.index > at) out.push(text.slice(at, m.index));
-    out.push({ title: m[1] ?? m[4]!, agent: m[2] ?? m[5]!, id: m[3] ?? m[6]!, text: m[0] });
+    out.push(mentionOf(m));
     at = m.index + m[0].length;
   }
   if (at < text.length) out.push(text.slice(at));
+  return out;
+}
+
+/** A place named in words, as the composer sends it: local, a folder here; remote, at the machine
+ *  named (its name as written), its path as that machine writes it. */
+export type PlaceNamed = { kind: "local" | "remote"; machine?: string; path: string; name: string };
+
+/** The places text names, each once, in order (the chat's 在哪干活). */
+export function placesIn(text: string): PlaceNamed[] {
+  const out: PlaceNamed[] = [];
+  for (const p of mentions(text)) {
+    if (typeof p === "string" || p.kind !== "place") continue;
+    const x: PlaceNamed = p.machine ? { kind: "remote", machine: p.machine, path: p.path, name: p.name } : { kind: "local", path: p.path, name: p.name };
+    if (!out.some((o) => o.kind === x.kind && o.machine?.toLowerCase() === x.machine?.toLowerCase() && o.path === x.path)) out.push(x);
+  }
   return out;
 }
 
