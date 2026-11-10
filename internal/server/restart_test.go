@@ -50,7 +50,7 @@ func runDaemon(t *testing.T, cfg config.Config, st *store.Store, l *platform.Dir
 	return d
 }
 
-// After a restart, over HTTP: the open ask is back with its card and POST /api/answer ends the
+// After a restart, over HTTP: the open ask is back with its card and POST /api/sessions/{id}/answer ends the
 // turn; the context and the quota come back as last read, on GET and on the stream.
 func TestRestartOverHTTP(t *testing.T) {
 	root := t.TempDir()
@@ -142,7 +142,7 @@ func TestRestartOverHTTP(t *testing.T) {
 	}
 
 	var cr api.CardReply
-	if code := call(t, c, "POST", d.base+"/api/answer", api.CardAnswer{Card: s.Asks[0].Card.ID, Option: "allow"}, &cr); code != 200 || !cr.OK {
+	if code := call(t, c, "POST", d.base+"/api/sessions/"+id+"/answer", api.CardAnswer{Card: s.Asks[0].Card.ID, Option: "allow"}, &cr); code != 200 || !cr.OK {
 		t.Fatalf("answer: %d %+v", code, cr)
 	}
 	wait(d.base, id, "the reply", func(s api.SessionState) bool {

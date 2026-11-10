@@ -125,9 +125,6 @@ type Session struct {
 	Workflow  *SessionWorkflow `json:"workflow,omitempty"`
 	Last      *LastSaid        `json:"last,omitempty"`
 	UpdatedAt int64            `json:"updatedAt"` // ms since the epoch
-	// Bots: the plugins (terminal IDs) whose chat is in this session now: the list shows their
-	// avatar and a Bot tag.
-	Bots []string `json:"bots,omitempty"`
 	// Machine: the executor it runs at (its terminal ID; docs/exec.md), empty for this machine.
 	// Offline: that executor is not connected now.
 	Machine string `json:"machine,omitempty"`

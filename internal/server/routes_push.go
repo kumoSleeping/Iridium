@@ -8,19 +8,20 @@ import (
 	"github.com/kumoSleeping/iridium/internal/api"
 )
 
-// pushRoutes: Web Push (docs/api.md "推送"), the web panels' and 本机's alone: a TOKEN, or an
-// agent's ir, neither switches it nor subscribes an address of its own.
+// pushRoutes: Web Push (docs/api.md "推送"), under /api/web/push (decision 32): the web's alone,
+// the logins of ir_web and the host. A TOKEN, or an agent's ir, neither switches it nor
+// subscribes an address of its own.
 func (s *Server) pushRoutes(mux *http.ServeMux) {
 	if s.Push == nil {
 		return
 	}
-	mux.HandleFunc("GET /api/push", s.panelOnly(s.pushState))
-	mux.HandleFunc("PUT /api/push", s.panelOnly(s.pushSwitch))
-	mux.HandleFunc("PUT /api/push/defaults", s.panelOnly(s.pushDefaults))
-	mux.HandleFunc("PUT /api/push/rules", s.panelOnly(s.pushRule))
-	mux.HandleFunc("POST /api/push/subscriptions", s.panelOnly(s.pushSubscribe))
-	mux.HandleFunc("DELETE /api/push/subscriptions", s.panelOnly(s.pushUnsubscribe))
-	mux.HandleFunc("POST /api/push/test", s.panelOnly(s.pushTest))
+	mux.HandleFunc("GET /api/web/push", s.panelOnly(s.pushState))
+	mux.HandleFunc("PUT /api/web/push", s.panelOnly(s.pushSwitch))
+	mux.HandleFunc("PUT /api/web/push/defaults", s.panelOnly(s.pushDefaults))
+	mux.HandleFunc("PUT /api/web/push/rules", s.panelOnly(s.pushRule))
+	mux.HandleFunc("POST /api/web/push/subscriptions", s.panelOnly(s.pushSubscribe))
+	mux.HandleFunc("DELETE /api/web/push/subscriptions", s.panelOnly(s.pushUnsubscribe))
+	mux.HandleFunc("POST /api/web/push/test", s.panelOnly(s.pushTest))
 }
 
 func (s *Server) pushState(w http.ResponseWriter, r *http.Request) {
@@ -68,15 +69,12 @@ func (s *Server) pushRule(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) pushSubscribe(w http.ResponseWriter, r *http.Request) {
-	c, ok := s.caller(w, r)
-	if !ok {
-		return
-	}
+	c := callerOf(r)
 	var sub api.PushSubscription
 	if !readJSON(w, r, &sub) {
 		return
 	}
-	s.settle(w, s.Push.Subscribe(c.ID, sub))
+	s.settle(w, s.Push.Subscribe(c.ID(), sub))
 }
 
 func (s *Server) pushUnsubscribe(w http.ResponseWriter, r *http.Request) {
@@ -89,12 +87,9 @@ func (s *Server) pushUnsubscribe(w http.ResponseWriter, r *http.Request) {
 
 // pushTest pushes a test message to the caller's subscriptions, the switch on or off.
 func (s *Server) pushTest(w http.ResponseWriter, r *http.Request) {
-	c, ok := s.caller(w, r)
-	if !ok {
-		return
-	}
+	c := callerOf(r)
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	n := s.Push.Send(ctx, c.ID, api.PushMessage{Kind: "test", Title: "Iridium", Body: "推送通了"})
+	n := s.Push.Send(ctx, c.ID(), api.PushMessage{Kind: "test", Title: "Iridium", Body: "推送通了"})
 	reply(w, http.StatusOK, map[string]any{"sent": n})
 }

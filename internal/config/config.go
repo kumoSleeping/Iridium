@@ -41,8 +41,6 @@ type Config struct {
 	// Lang is the user's language, as the web settings last set it: "zh", "en"; "" not yet known.
 	// Hosted agents are told it (session.SystemPrompt).
 	Lang string `json:"lang,omitempty"`
-	// ChatDir is where a plugin's chat opens a session before it set one with /new; "" is home.
-	ChatDir string `json:"chatDir,omitempty"`
 	// Path is the PATH agents run with; "" is the daemon's own.
 	Path string `json:"path,omitempty"`
 	// Programs are the agents' programs, absolute or looked up on Path.
@@ -81,10 +79,9 @@ type Update struct {
 
 // legacy are fields an older file may still have that are no longer read, as dotted paths:
 // update.manual (2026-11-08: release builds always download ahead, builds from source never);
-// pairClosed (0.2: pairing opens for a while, docs/next/decisions.md) and chatDir (goes in 0.2's
-// S4). One is dropped before decoding only once Config
-// has no field by its name, so it is listed ahead of its removal; any other unknown field is
-// still an error.
+// pairClosed (0.2: pairing opens for a while, docs/next/decisions.md) and chatDir (0.2: the
+// plugins' chat layer is gone). One is dropped before decoding only once Config has no field by
+// its name, so it is listed ahead of its removal; any other unknown field is still an error.
 var legacy = []string{"pairClosed", "chatDir", "update.manual"}
 
 // Source is where to look for new versions, "" for nowhere.

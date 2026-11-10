@@ -15,7 +15,7 @@ import (
 func TestCoreNamesNoHarness(t *testing.T) {
 	_, here, _, _ := runtime.Caller(0)
 	root := filepath.Join(filepath.Dir(here), "..")
-	core := []string{"session", "server", "cli", "chat", "remote"}
+	core := []string{"session", "server", "cli", "remote"}
 	banned := regexp.MustCompile(`api\.AgentDsh|internal/agent/dsh"|internal/dshhome"|CapHeld|DSH Desktop|"held\.|"dsh\.`)
 	pending := map[string]string{
 		"server/folders_remote.go": "the /dsh/ routes, till the channel mounts them",

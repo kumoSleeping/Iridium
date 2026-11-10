@@ -16,6 +16,7 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -23,7 +24,6 @@ import (
 	"github.com/kumoSleeping/iridium/internal/access"
 	"github.com/kumoSleeping/iridium/internal/agents"
 	"github.com/kumoSleeping/iridium/internal/api"
-	"github.com/kumoSleeping/iridium/internal/chat"
 	"github.com/kumoSleeping/iridium/internal/config"
 	"github.com/kumoSleeping/iridium/internal/discover"
 	"github.com/kumoSleeping/iridium/internal/files"
@@ -60,15 +60,13 @@ type Server struct {
 	cmu     sync.Mutex // one config change at a time (SaveConfig); guards cfg's settings
 	gmu     sync.Mutex // one gate change at a time
 	g       atomic.Pointer[gate.Gate]
-	initErr error // the gate for cfg.Public.Origin would not open; Listen gives it
+	initErr error  // the gate for cfg.Public.Origin would not open; Listen gives it
 	asks    *needs // what waits for a person (needs.go)
 	pairs   *pairs // apps asking to pair (pairing.go)
 	vault   *vault // the credentials' masks and allowed uses (routes_secrets.go)
 
-	// Set before Handler, if at all: the plugin chat layer, Web Push, and who a request is from.
-	Chat *chat.Service
+	// Push, if set before Handler, is Web Push (routes_push.go).
 	Push *push.Service
-	Who  Identities
 	// Discover and Folders, if set, serve the workspaces and the folder picker (routes_discover.go).
 	Discover *discover.Index
 	Folders  discover.Folders
@@ -140,7 +138,6 @@ func (s *Server) Handler(local bool) http.Handler {
 	s.settingsRoutes(mux)
 	s.sessionRoutes(mux)
 	s.pushRoutes(mux)
-	s.pluginRoutes(mux)
 	mux.HandleFunc("GET /api/exec", s.execConnect)
 	s.pairRoutes(mux)
 	s.machineRoutes(mux)
@@ -351,12 +348,24 @@ func (s *Server) stop(w http.ResponseWriter, r *http.Request) {
 	s.done(w, s.m.Stop(r.Context(), r.PathValue("id")))
 }
 
+// answer answers one of session {id}'s asks by its card (decision 27): a CardAnswer for the card
+// "ask:<id>:<request>", as the web's panel and the apps' buttons give it.
 func (s *Server) answer(w http.ResponseWriter, r *http.Request) {
-	var a api.Answer
+	var a api.CardAnswer
 	if !readJSON(w, r, &a) {
 		return
 	}
-	s.done(w, s.m.Answer(r.Context(), r.PathValue("id"), a))
+	if !strings.HasPrefix(a.Card, "ask:"+r.PathValue("id")+":") {
+		fail(w, http.StatusBadRequest, "not a card of this session: "+a.Card)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), time.Minute)
+	defer cancel()
+	if err := s.m.AnswerCard(ctx, a); err != nil {
+		s.fault(w, err)
+		return
+	}
+	reply(w, http.StatusOK, api.CardReply{OK: true})
 }
 
 // release allows a step auto mode denied (session/release.go). Only a person may: an agent's ir
@@ -388,10 +397,6 @@ var stateKey = regexp.MustCompile(`^(list|quota|workspaces|places|colors|needs|p
 // stream: it is left out, and the stream's first events say so (StateEvent.Ignored).
 func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	keys := r.URL.Query()["sub"]
-	if len(keys) == 0 && s.Chat != nil {
-		s.pluginEvents(w, r) // a plugin's stream (routes_plugin.go)
-		return
-	}
 	if len(keys) == 0 || len(keys) > 16 {
 		fail(w, http.StatusBadRequest, "name 1 to 16 states with sub=")
 		return
@@ -442,6 +447,21 @@ func (s *Server) done(w http.ResponseWriter, err error) {
 	reply(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+// fault answers with err, knowing the errors of the session settings, the queue and push; the
+// rest as s.error does.
+func (s *Server) fault(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, session.ErrBadRequest), errors.Is(err, push.ErrBadSubscription), errors.Is(err, push.ErrBadRule):
+		fail(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, store.ErrNoInput):
+		fail(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, session.ErrGone):
+		fail(w, http.StatusGone, err.Error())
+	default:
+		s.error(w, err)
+	}
+}
+
 func (s *Server) error(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, session.ErrNotFound), errors.Is(err, transcript.ErrNoBlock):
@@ -482,9 +502,6 @@ func fail(w http.ResponseWriter, status int, msg string) { reply(w, status, api.
 func refuse(w http.ResponseWriter, status int, code, msg string) {
 	reply(w, status, api.Error{Code: code, Message: msg})
 }
-
-// Files is the files service (uploads, refs, paths), for the chat layer's attachments.
-func (s *Server) Files() *files.Service { return s.files }
 
 // execConnect takes an executor's WebSocket (docs/exec.md): a terminal with a TOKEN, as which the
 // machine is known.

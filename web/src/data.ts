@@ -32,7 +32,7 @@ export function useWorkspaces(): { data: Workspace[] | null | undefined } {
 export const agentsQ = { queryKey: ["agents"], queryFn: orNone(api.agents), staleTime: Infinity };
 export const useAgents = () => useQuery(agentsQ);
 export const useAgent = (a: string) => useAgents().data?.find((x: AgentInfo) => x.agent === a);
-/** Push's keys and each workspace's events, the daemon's own (GET /api/push): the settings show them. */
+/** Push's keys and each workspace's events, the daemon's own (GET /api/web/push): the settings show them. */
 export const pushQ = { queryKey: ["push"], queryFn: orNone(api.push), staleTime: 30_000 };
 export const useSettings = () => useQuery({ queryKey: ["settings"], queryFn: orNone(api.settings), staleTime: 60_000 });
 /** The update: as the stream carries it, else as asked for. */

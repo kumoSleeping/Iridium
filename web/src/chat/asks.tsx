@@ -3,7 +3,7 @@
 // of summary, a main and a second key; the details open under it. An approval: the tool and its
 // arguments (commands in monospace), allow / deny / always allow this session. A plan: its
 // Markdown, approve or keep planning. A question: its options as keys, or your own words. Every
-// answer goes to the ask's card (POST /api/answer), as a plugin's does.
+// answer goes to the ask's card (POST /api/sessions/{id}/answer), as an app's does.
 import { Menu } from "@base-ui/react/menu";
 import { Check, ChevronDown, ClipboardList, FilePen, Globe, LoaderCircle, MessageCircleQuestionMark, PenLine, ShieldAlert, ShieldQuestion, SquareTerminal } from "lucide-react";
 import { useState, type ReactNode } from "react";
@@ -30,7 +30,7 @@ export function Asks({ session, asks, cwd, confirms = [] }: { session: string; a
   const answer = async (a: Ask, r: Reply) => {
     setBusy(a.requestId);
     try {
-      await api.answer({ card: a.card?.id ?? `ask:${session}:${a.requestId}`, ...r } satisfies CardAnswer);
+      await api.answer(session, { card: a.card?.id ?? `ask:${session}:${a.requestId}`, ...r } satisfies CardAnswer);
       setLeaving(a.requestId);
       setTimeout(() => setLeaving(null), 140);
       if (a.kind === "permission") toast(r.option === "deny" ? t("toast.denied") : t("toast.allowed"), { description: r.option === "always" ? t("ask.always") : undefined });

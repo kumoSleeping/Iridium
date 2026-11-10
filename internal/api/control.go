@@ -124,12 +124,12 @@ type AllowRule struct {
 	Pattern string `json:"pattern"`
 }
 
-// Card is a choice to make, as the web's confirmation panel and plugins show it: an ask
-// (permission, question, plan) or a command's pick (/use, /model, /mode). Options with the same
-// Group are one question's; pick one per group.
+// Card is a choice to make, as the web's confirmation panel and apps show it: an ask
+// (permission, question, plan). Options with the same Group are one question's; pick one per
+// group.
 type Card struct {
 	ID      string       `json:"id"`
-	Kind    string       `json:"kind"` // permission | question | plan | pick
+	Kind    string       `json:"kind"` // permission | question | plan
 	Session string       `json:"session,omitempty"`
 	Title   string       `json:"title"`
 	Summary []string     `json:"summary"`
@@ -157,9 +157,7 @@ type CardAnswer struct {
 	Message string   `json:"message,omitempty"`
 }
 
-// CardReply is what answering a card did: for a pick, the command's reply or a next card.
+// CardReply is what answering a card did (POST /api/sessions/{id}/answer).
 type CardReply struct {
-	OK    bool       `json:"ok"`
-	Reply *ChatReply `json:"reply,omitempty"`
-	Card  *Card      `json:"card,omitempty"`
+	OK bool `json:"ok"`
 }

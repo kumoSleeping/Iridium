@@ -168,7 +168,6 @@ func (g gateStore) Apply(c gate.Change) error {
 				`DELETE FROM apps WHERE id = ?1`,
 				`DELETE FROM logins WHERE app = ?1 OR (app = 'ir_web' AND id = ?1)`,
 				`DELETE FROM permissions WHERE terminal = ?1`,
-				`DELETE FROM bot_follows WHERE bot = ?1 OR panel = ?1`,
 			} {
 				if _, err := tx.Exec(q, id); err != nil {
 					return err

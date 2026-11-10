@@ -268,9 +268,6 @@ function AppPage({ app, data, machine, onBack }: { app: App; data: Apps; machine
               ))}
             </Group>
           )}
-          <Group title={t("term.follows")}>
-            <Follows app={app} panels={data.logins.filter(ofWeb)} />
-          </Group>
           <section className="flex flex-col gap-2">
             {sure ? (
               <CardFrame label={t("term.revokeTitle", { name: app.name })}>
@@ -551,40 +548,6 @@ function PermsEditor({ app }: { app: App }) {
         </div>
       )}
     </Group>
-  );
-}
-
-/** The logins of 网页 an app follows, a switch each, saved as each is flipped. What a session asks
- *  while no chat points at it goes to the apps that follow the login that began its turn, and to
- *  no other (the user, 2026-11-09). Until S4. */
-function Follows({ app, panels }: { app: App; panels: Login[] }) {
-  const qc = useQueryClient();
-  const [on, setOn] = useState<string[]>(app.follows ?? []);
-  const flip = async (id: string, to: boolean) => {
-    const was = on;
-    const next = to ? [...on, id] : on.filter((p) => p !== id);
-    setOn(next);
-    try {
-      await api.follows(app.id, next);
-      void qc.invalidateQueries({ queryKey: ["apps"] });
-    } catch (e) {
-      setOn(was);
-      toast(t("term.follows"), { error: true, description: errText(e) });
-    }
-  };
-  return (
-    <>
-      <p className="m-0 px-2 text-xs text-ink-3">{t("term.followsHint")}</p>
-      {!hasClaude(app.rules) && <p className="m-0 px-2 text-xs text-ink-3">{t("term.followsNoClaude")}</p>}
-      {panels.length === 0 && <p className="m-0 px-2 text-xs text-ink-3">{t("term.followsNone")}</p>}
-      {panels.map((p) => (
-        <div key={p.id} className="flex min-h-10 items-center gap-2.5 px-2">
-          <Avatar src={p.avatar} name={p.name} size={24} />
-          <span className="min-w-0 flex-1 truncate text-base">{p.name}</span>
-          <Switch label={p.name} on={on.includes(p.id)} onChange={(o) => void flip(p.id, o)} />
-        </div>
-      ))}
-    </>
   );
 }
 

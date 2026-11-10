@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/qq"
 )
 
@@ -41,7 +40,7 @@ func (b *Bridge) commands(ctx context.Context) []qq.PanelItem {
 		chat = chatKey(b.Config.Owners[0])
 	}
 	b.mu.Unlock()
-	var l []api.ChatCommand
+	var l []ChatCommand
 	if err := b.IR.call(ctx, "GET", chatPath(chat)+"/commands", nil, &l); err != nil {
 		b.logf("menus: commands: %v", err)
 		return nil

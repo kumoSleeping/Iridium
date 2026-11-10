@@ -157,7 +157,7 @@ type fakeIridium struct {
 	srv     *httptest.Server
 	events  chan string
 	mu      sync.Mutex
-	inputs  []api.ChatInput
+	inputs  []ChatInput
 	answers []api.CardAnswer
 	avatars int
 	n       int
@@ -176,14 +176,14 @@ func newFakeIridium(t *testing.T) *fakeIridium {
 		}
 	}
 	mux.HandleFunc("POST /api/chat/{key}/input", auth(func(w http.ResponseWriter, r *http.Request) {
-		var in api.ChatInput
+		var in ChatInput
 		_ = json.NewDecoder(r.Body).Decode(&in)
 		f.mu.Lock()
 		f.inputs = append(f.inputs, in)
 		f.mu.Unlock()
-		out := api.ChatInputReply{Session: "s1"}
+		out := ChatInputReply{Session: "s1"}
 		if in.Text == "/ls" {
-			out.Reply = &api.ChatReply{Markdown: "**sessions**", Text: "sessions"}
+			out.Reply = &ChatReply{Markdown: "**sessions**", Text: "sessions"}
 		}
 		_ = json.NewEncoder(w).Encode(out)
 	}))
@@ -193,7 +193,7 @@ func newFakeIridium(t *testing.T) *fakeIridium {
 		f.mu.Lock()
 		f.answers = append(f.answers, a)
 		f.mu.Unlock()
-		_ = json.NewEncoder(w).Encode(api.CardReply{OK: true})
+		_ = json.NewEncoder(w).Encode(CardReply{OK: true})
 	}))
 	mux.HandleFunc("POST /api/chat/{key}/uploads", auth(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(api.Upload{ID: "u1"})
@@ -205,7 +205,7 @@ func newFakeIridium(t *testing.T) *fakeIridium {
 		_ = json.NewEncoder(w).Encode(api.Upload{ID: "u1", Done: true, File: &api.FileRef{Ref: "R1"}})
 	}))
 	mux.HandleFunc("GET /api/chat/{key}/commands", auth(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode([]api.ChatCommand{{Name: "new", Description: "开新会话", Iridium: true}, {Name: "review", Description: "agent's"}, {Name: "use", Description: "换会话", Iridium: true}})
+		_ = json.NewEncoder(w).Encode([]ChatCommand{{Name: "new", Description: "开新会话", Iridium: true}, {Name: "review", Description: "agent's"}, {Name: "use", Description: "换会话", Iridium: true}})
 	}))
 	mux.HandleFunc("GET /api/chat/{key}/files/{ref}", auth(func(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, "PNGDATA")
@@ -240,7 +240,7 @@ func newFakeIridium(t *testing.T) *fakeIridium {
 	return f
 }
 
-func (f *fakeIridium) send(kind string, e api.ChatEvent) {
+func (f *fakeIridium) send(kind string, e ChatEvent) {
 	f.mu.Lock()
 	f.n++
 	n := f.n
@@ -249,10 +249,10 @@ func (f *fakeIridium) send(kind string, e api.ChatEvent) {
 	f.events <- fmt.Sprintf("id: %d\nevent: %s\ndata: %s\n\n", n, kind, b)
 }
 
-func (f *fakeIridium) got() []api.ChatInput {
+func (f *fakeIridium) got() []ChatInput {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return append([]api.ChatInput(nil), f.inputs...)
+	return append([]ChatInput(nil), f.inputs...)
 }
 
 func waitFor(t *testing.T, what string, ok func() bool) {
@@ -311,7 +311,7 @@ func TestMessageToIridiumAndReplyBack(t *testing.T) {
 	if in := ir.got()[0]; in.Text != "你好" {
 		t.Fatalf("input %+v", in)
 	}
-	ir.send("reply", api.ChatEvent{Chat: "c2c:" + owner, Reply: &api.ChatReply{Markdown: "**好**", Text: "好", Files: []api.ChatFile{{Name: "a.png", Type: "image/png", Size: 7, Ref: "F"}}}})
+	ir.send("reply", ChatEvent{Chat: "c2c:" + owner, Reply: &ChatReply{Markdown: "**好**", Text: "好", Files: []ChatFile{{Name: "a.png", Type: "image/png", Size: 7, Ref: "F"}}}})
 	waitFor(t, "reply and file", func() bool { return len(q.messages()) == 2 })
 	m := q.messages()
 	if m[0].Type != qq.MsgMarkdown || m[0].Markdown.Content != "**好**" || m[0].MsgID != "M1" || m[0].MsgSeq != 1 {
@@ -356,7 +356,7 @@ func TestMarkdownRefusedGoesAsText(t *testing.T) {
 	q.mu.Unlock()
 	q.message("M1", owner, "x")
 	waitFor(t, "input", func() bool { return len(ir.got()) == 1 })
-	ir.send("reply", api.ChatEvent{Chat: "c2c:" + owner, Reply: &api.ChatReply{Markdown: "**a**", Text: "a"}})
+	ir.send("reply", ChatEvent{Chat: "c2c:" + owner, Reply: &ChatReply{Markdown: "**a**", Text: "a"}})
 	waitFor(t, "plain", func() bool { return len(q.messages()) == 1 })
 	if m := q.messages()[0]; m.Type != qq.MsgText || m.Content != "a" || m.MsgID != "M1" {
 		t.Fatalf("plain %+v", m)
@@ -364,7 +364,7 @@ func TestMarkdownRefusedGoesAsText(t *testing.T) {
 	if !waitState(b, func(s State) bool { return s.Markdown == "no" }) {
 		t.Fatal("markdown not marked refused")
 	}
-	ir.send("reply", api.ChatEvent{Chat: "c2c:" + owner, Reply: &api.ChatReply{Markdown: "**b**", Text: "b"}})
+	ir.send("reply", ChatEvent{Chat: "c2c:" + owner, Reply: &ChatReply{Markdown: "**b**", Text: "b"}})
 	waitFor(t, "second plain", func() bool { return len(q.messages()) == 2 })
 	if m := q.messages()[1]; m.Type != qq.MsgText || m.Content != "b" {
 		t.Fatalf("second %+v", m)
@@ -390,7 +390,7 @@ func TestQuota(t *testing.T) {
 	waitFor(t, "input", func() bool { return len(ir.got()) == 1 })
 	// Four passive replies, then active ones.
 	for i := 0; i < 5; i++ {
-		ir.send("reply", api.ChatEvent{Chat: "c2c:" + owner, Reply: &api.ChatReply{Markdown: fmt.Sprint(i), Text: fmt.Sprint(i)}})
+		ir.send("reply", ChatEvent{Chat: "c2c:" + owner, Reply: &ChatReply{Markdown: fmt.Sprint(i), Text: fmt.Sprint(i)}})
 	}
 	waitFor(t, "five", func() bool { return len(q.messages()) == 5 })
 	m := q.messages()
@@ -406,7 +406,7 @@ func TestQuota(t *testing.T) {
 	q.mu.Lock()
 	q.activeLeft = 0
 	q.mu.Unlock()
-	ir.send("reply", api.ChatEvent{Chat: "c2c:" + owner, Reply: &api.ChatReply{Markdown: "later", Text: "later"}})
+	ir.send("reply", ChatEvent{Chat: "c2c:" + owner, Reply: &ChatReply{Markdown: "later", Text: "later"}})
 	time.Sleep(200 * time.Millisecond)
 	if len(q.messages()) != 5 {
 		t.Fatalf("sent without quota: %+v", q.messages())
@@ -423,7 +423,7 @@ func TestCards(t *testing.T) {
 	q.message("M1", owner, "x")
 	waitFor(t, "input", func() bool { return len(ir.got()) == 1 })
 	card := api.Card{ID: "ask:s1:r1", Kind: "permission", Title: "运行 ls？", Options: []api.CardOption{{ID: "allow", Text: "允许", Primary: true}, {ID: "deny", Text: "拒绝"}}}
-	ir.send("card", api.ChatEvent{Chat: "c2c:" + owner, Card: &card})
+	ir.send("card", ChatEvent{Chat: "c2c:" + owner, Card: &card})
 	waitFor(t, "card", func() bool { return len(q.messages()) == 1 })
 	m := q.messages()[0]
 	if m.Keyboard == nil || len(m.Keyboard.Content.Rows) != 2 || !strings.Contains(m.Markdown.Content, "└── 拒绝") || strings.Contains(m.Markdown.Content, "2.") {
@@ -439,7 +439,7 @@ func TestCards(t *testing.T) {
 		t.Fatalf("the name went on as a message: %+v", ir.got())
 	}
 	// A button answers the next one.
-	ir.send("card", api.ChatEvent{Chat: "c2c:" + owner, Card: &card})
+	ir.send("card", ChatEvent{Chat: "c2c:" + owner, Card: &card})
 	waitFor(t, "card again", func() bool { return len(q.messages()) == 2 })
 	data := q.messages()[1].Keyboard.Content.Rows[0].Buttons[0].Action.Data
 	q.pressButton("I1", owner, data)

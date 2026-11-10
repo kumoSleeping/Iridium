@@ -3,6 +3,7 @@ package server
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -21,7 +22,7 @@ func TestSettings(t *testing.T) {
 		path, state = filepath.Join(filepath.Dir(cfg.StateDir), "config.json"), cfg.StateDir
 		// The file has a field of its own the settings must keep.
 		c := cfg
-		c.ChatDir = work
+		c.FolderRoots = []string{work}
 		if err := c.Save(path); err != nil {
 			t.Fatal(err)
 		}
@@ -55,7 +56,7 @@ func TestSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if saved.IdleReap.D() != 15*time.Minute || saved.CrashResume || saved.Modes["codex"] != "untrusted" || len(saved.QuotaHidden) != 1 || saved.ChatDir != l.work || saved.EnterInTurn != "queue" || saved.Lang != "zh" {
+	if saved.IdleReap.D() != 15*time.Minute || saved.CrashResume || saved.Modes["codex"] != "untrusted" || len(saved.QuotaHidden) != 1 || !slices.Equal(saved.FolderRoots, []string{l.work}) || saved.EnterInTurn != "queue" || saved.Lang != "zh" {
 		t.Fatalf("file: %+v", saved)
 	}
 
@@ -81,12 +82,12 @@ func TestSettings(t *testing.T) {
 		t.Fatalf("mode cleared, push on: %+v", st)
 	}
 	var ps api.PushState
-	l.want(200, "web", "GET", "/api/push", nil, &ps)
+	l.want(200, "web", "GET", "/api/web/push", nil, &ps)
 	if !ps.Enabled {
 		t.Fatal("GET /api/push says off")
 	}
 	// PUT /api/push is the same switch.
-	l.want(200, "web", "PUT", "/api/push", api.PushSwitch{Enabled: false}, nil)
+	l.want(200, "web", "PUT", "/api/web/push", api.PushSwitch{Enabled: false}, nil)
 	l.want(200, "web", "GET", "/api/settings", nil, &st)
 	if saved, _ = config.Load(path); st.Push || saved.Push {
 		t.Fatalf("push off: settings %v, file %v", st.Push, saved.Push)
@@ -124,7 +125,7 @@ func TestSettings(t *testing.T) {
 	}
 	wg.Wait()
 	b, _ := os.ReadFile(path)
-	if !strings.Contains(string(b), `"chatDir"`) {
+	if !strings.Contains(string(b), `"folderRoots"`) {
 		t.Fatalf("the file lost its own field: %s", b)
 	}
 }

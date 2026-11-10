@@ -160,7 +160,7 @@ func TestClaudeOnlyRule(t *testing.T) {
 	}
 	l.want(403, bot, "POST", "/api/sessions/"+mine.ID+"/send", api.Send{Text: "hi"}, nil)
 	l.want(403, bot, "POST", "/api/sessions/"+mine.ID+"/stop", nil, nil)
-	l.want(403, bot, "POST", "/api/sessions/"+mine.ID+"/answer", api.Answer{RequestID: "x", Kind: "permission", Allow: true}, nil)
+	l.want(403, bot, "POST", "/api/sessions/"+mine.ID+"/answer", api.CardAnswer{Card: "ask:" + mine.ID + ":x", Option: "allow"}, nil)
 	l.want(403, bot, "PUT", "/api/sessions/"+mine.ID+"/mode", api.SetMode{Mode: "manual"}, nil)
 	l.want(403, bot, "POST", "/api/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "x"}, nil)
 	resp, err := streamAs(l, bot, "/api/events?sub=list,session:"+mine.ID)

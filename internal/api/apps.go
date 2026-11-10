@@ -48,22 +48,7 @@ type App struct {
 	UsedToday int64  `json:"usedToday"` // tokens of the turns it started today
 	// Device: what it runs on, as the badge on its messages' avatar shows; the server always sets it.
 	Device Device `json:"device,omitempty"`
-	// Follows: the logins of ir_web (IDs) it follows: what a session asks while no chat points at
-	// it goes to the apps that follow the login that began its turn, and to no other. Until S4.
-	Follows []string `json:"follows,omitempty"`
-	// Chat: its chat layer in Iridium, until S4 removes it: "" none (a session's menu offers nothing),
-	// "idle" its event stream open but no chat yet (offered, greyed), "on" a chat a session's menu
-	// may bring to that session.
-	Chat AppChat `json:"chat,omitempty"`
 }
-
-// AppChat is App.Chat.
-type AppChat string
-
-const (
-	AppChatIdle AppChat = "idle"
-	AppChatOn   AppChat = "on"
-)
 
 // Login is a login of an app as listed: ir_web's, a browser with a passkey; another app's, as it
 // spoke (Satori-User-ID), waiting till approved (ApprovedAt 0). No secrets.
@@ -83,9 +68,20 @@ type Login struct {
 	Device     Device `json:"device,omitempty"`
 }
 
-// SetFollows is PUT /api/apps/{id}/follows: the logins of ir_web the app follows from now on.
-type SetFollows struct {
-	Panels []string `json:"panels"`
+// Notice is POST /api/apps/{id}/logins/{login}/notice (ir send 应用/登录): Text shown to the
+// login, no agent woken. Caller: the session it is from (ir's own, as Send's), if any.
+type Notice struct {
+	Text   string `json:"text"`
+	Caller string `json:"caller,omitempty"`
+}
+
+// NoticeReply is where a notice went: the login (its ID and name) and how many of its browsers
+// were pushed to.
+type NoticeReply struct {
+	App   string `json:"app"`
+	Login string `json:"login"`
+	Name  string `json:"name,omitempty"`
+	Sent  int    `json:"sent"`
 }
 
 // Device is what an app or login runs on, set in its settings (PUT /api/me/device, ir apps

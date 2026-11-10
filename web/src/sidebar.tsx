@@ -13,7 +13,7 @@ import { Archive, ArchiveRestore, ArrowDown, ArrowUp, Bot, Check, ChevronRight, 
 import { ConfirmIcon, confirmName, confirmTitle } from "./confirmname";
 import { Fragment, lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode, type RefObject } from "react";
 import { api } from "./api/client";
-import type { App, Color, Need, Machine, Places, Session, Status } from "./api/types.gen";
+import type { Color, Need, Machine, Places, Session, Status } from "./api/types.gen";
 import { colorVar, COLORS, useFolderColors } from "./colors";
 import { ahead, behind } from "./chats";
 import { t, useLang } from "./i18n";
@@ -23,8 +23,8 @@ import { allFolders, folderSessions, foldersHolding, foldRest, groupHolding, mac
 import { createAt, onOpenPlace, type Place } from "./places";
 import { LinkDot } from "./link";
 import { errText, toast } from "./toast";
-import { manages, useApps, useMe, useUpdate, useWhoList } from "./data";
-import { agentName, ago, Avatar, cn, fine, IconKey, IrMark, keep, kept, Lamp, lampOf, Logo, own, sessionStatusText, statusText, tilde, Tip, titleOf, untitled, useLongPress, useMenuAt, useMinute } from "./ui";
+import { manages, useMe, useUpdate } from "./data";
+import { agentName, ago, cn, fine, IconKey, IrMark, keep, kept, Lamp, lampOf, Logo, own, sessionStatusText, statusText, tilde, Tip, titleOf, untitled, useLongPress, useMenuAt, useMinute } from "./ui";
 import { PLACE_DRAG, SESSION_DRAG } from "./chat/refs";
 import { NoteMark, NotesAt, useNotes } from "./notekey";
 import { useUnread } from "./unread";
@@ -982,7 +982,6 @@ const SessionRow = memo(function SessionRow({ s, where, depth, flip, selected, o
       <span className="grid justify-self-end">{lastBusy.current && <Lamp status={lastBusy.current} />}</span>
     </span>
   );
-  const bots = s.bots?.length ? <Here bots={s.bots} /> : null;
   // At another machine, out of its group (hung under its launcher, in 归档, in 未归类): a cloud on
   // its logo, as a folder there has, its machine's face after its name (the user, 2026-11-10); in
   // its group, the group's row says both. Not connected now, a grey ring for its lamp.
@@ -999,10 +998,9 @@ const SessionRow = memo(function SessionRow({ s, where, depth, flip, selected, o
       </span>
     </Tip>
   );
-  const end = slot || mark || lamp || bots || away || folded ? (
+  const end = slot || mark || lamp || away || folded ? (
     <span className="flex items-center gap-1.5">
       {folded}
-      {bots}
       {mark}
       {slot}
       {!busy && (away ? <span className="row-lamp g-pop" data-s="offline" role="img" aria-label={t("status.offline")} /> : <Lamp status={status} />)}
@@ -1058,24 +1056,6 @@ const SessionRow = memo(function SessionRow({ s, where, depth, flip, selected, o
     </>
   );
 });
-
-/** The bots whose chat is in this session now, between the name and the time (the user,
- *  2026-11-08): each one's avatar as big as the agent's logo, a bot on its corner; three at most and
- *  +N for the rest. Panels are not marked. */
-function Here({ bots }: { bots: string[] }) {
-  const terms = useWhoList();
-  const who = bots.map((id) => terms.find((x) => x.id === id) ?? { id, name: "", avatar: undefined });
-  return (
-    <Tip label={who.map((b) => b.name || "Bot").join("、")} side="bottom">
-      <span className="flex shrink-0 items-center gap-1.5">
-        {who.slice(0, 3).map((b) => (
-          <Avatar key={b.id} src={b.avatar} name={b.name || "Bot"} size={16} badge={Bot} badgeSize={10} />
-        ))}
-        {who.length > 3 && <span className="text-xs text-ink-3 tabular-nums">+{who.length - 3}</span>}
-      </span>
-    </Tip>
-  );
-}
 
 /** The new name, in place of the row's: Enter or leaving it renames, Esc leaves it as it was. */
 export function Rename({ s, done, className }: { s: Session; done: () => void; className?: string }) {
@@ -1224,36 +1204,10 @@ function SessionMenu({ s, at, close, rename, detach }: { s: Session; at: { x: nu
             items={items}
             tags={sessionTags(s)}
             foot={<PushFoot levels={sessionLevels(s)} i={items.length} />}
-            tail={<BotItems s={s} i={items.length + 2} />}
           />
         </Menu.Positioner>
       </Menu.Portal>
     </Menu.Root>
-  );
-}
-
-/** At a session's menu's foot, one item per bot whose chat is elsewhere: that chat moved to this
- *  session, as its /use would (the user, 2026-11-08); in the list's menu and the chat's ⋯. A Bot no one has written to yet has no chat
- *  to move: its item is there, greyed, saying so. */
-export function BotItems({ s, i }: { s: Session; i: number }) {
-  // Claude's sessions only for a Bot that may use Claude (access.Agent).
-  const claude = !s.agent || s.agent === "claude";
-  const bots = (useApps().data?.apps ?? []).filter((x) => x.chat && !s.bots?.includes(x.id) && (!claude || x.rules.claudeOwner));
-  if (s.archived || !bots.length) return null;
-  const bring = (b: App) =>
-    void api.bringBot(s.id, b.id).then(
-      () => toast(t("toast.botHere", { name: b.name || "Bot" })),
-      (e) => toast(t("err.action"), { error: true, description: errText(e) }),
-    );
-  return (
-    <div style={{ "--i": i } as CSSProperties} className="mt-1.5 flex flex-col border-t border-edge pt-1.5">
-      {bots.map((b) => (
-        <Menu.Item key={b.id} disabled={b.chat !== "on"} onClick={() => bring(b)} className="flex h-8 cursor-default items-center gap-2.5 rounded-md px-2.5 text-base outline-none select-none data-highlighted:bg-fill data-disabled:opacity-40 pointer-coarse:h-11">
-          <Avatar src={b.avatar} name={b.name || "Bot"} size={15} badge={Bot} badgeSize={9} />
-          <span className="truncate">{t(b.chat === "on" ? "menu.bringBot" : "menu.botChatless", { name: b.name || "Bot" })}</span>
-        </Menu.Item>
-      ))}
-    </div>
   );
 }
 
@@ -1268,9 +1222,8 @@ export type Tags = { value?: Color; set: (c: Color | "") => void };
 
 type MenuItem = { icon: ReactNode; label: string; run: () => void };
 
-/** A menu's items; lead: before the children, at its top; foot: after the items, over the tags;
- *  tail: under the tags, the very end. */
-export function MenuItems({ lead = [], items, tags, children, foot, tail }: { lead?: MenuItem[]; items: MenuItem[]; tags?: Tags; children?: ReactNode; foot?: ReactNode; tail?: ReactNode }) {
+/** A menu's items; lead: before the children, at its top; foot: after the items, over the tags. */
+export function MenuItems({ lead = [], items, tags, children, foot }: { lead?: MenuItem[]; items: MenuItem[]; tags?: Tags; children?: ReactNode; foot?: ReactNode }) {
   const item = (it: MenuItem, i: number) => (
     <Menu.Item key={it.label} onClick={it.run} style={{ "--i": i } as CSSProperties} className="flex h-8 cursor-default items-center gap-2.5 rounded-md px-2.5 text-base outline-none select-none data-highlighted:bg-fill pointer-coarse:h-11">
       <span className="text-ink-2">{it.icon}</span>
@@ -1285,7 +1238,6 @@ export function MenuItems({ lead = [], items, tags, children, foot, tail }: { le
         {items.map((it, i) => item(it, lead.length + i))}
         {foot}
         {tags && <TagDots tags={tags} i={lead.length + items.length + (foot ? 1 : 0)} />}
-        {tail}
       </div>
     </Menu.Popup>
   );

@@ -215,7 +215,7 @@ func TestAgentCommands(t *testing.T) {
 		t.Errorf("wait with the ask open: %+v", r)
 	}
 	var ok map[string]any
-	if err := (&env{}).client(cfg).do("POST", "/api/sessions/"+full+"/answer", api.Answer{RequestID: "ask-1", Kind: "permission", Allow: true}, &ok); err != nil {
+	if err := (&env{}).client(cfg).do("POST", "/api/sessions/"+full+"/answer", api.CardAnswer{Card: "ask:" + full + ":ask-1", Option: "allow"}, &ok); err != nil {
 		t.Fatal(err)
 	}
 	if r := ir("wait", sid); r.code != 0 || r.out != "ok: please ASK\n" {
@@ -322,8 +322,18 @@ func TestAgentCommands(t *testing.T) {
 	if r := ir("stop", sid); r.code != 0 {
 		t.Errorf("stop: %+v", r)
 	}
-	if r := ir("send", "mac/"+sid, "x"); r.code != 1 || !strings.Contains(r.err, "peer not connected: mac") {
+	if r := ir("wait", "mac/"+sid); r.code != 1 || !strings.Contains(r.err, "peer not connected: mac") {
 		t.Errorf("peer id: %+v", r)
+	}
+	// ir send 应用/登录: a notice to a login, not a session; none there is an error saying so.
+	if r := ir("send", "mac/"+sid, "x"); r.code != 1 || !strings.Contains(r.err, "no such app: mac") {
+		t.Errorf("send to a login: %+v", r)
+	}
+	if r := ir("send", "ir_web/nobody", "x"); r.code != 1 || !strings.Contains(r.err, "no such login") {
+		t.Errorf("send to no login: %+v", r)
+	}
+	if r := ir("send", "ir_web/nobody", "x", "--wait"); r.code != 1 || !strings.Contains(r.err, "usage: ir send 应用/登录") {
+		t.Errorf("send to a login --wait: %+v", r)
 	}
 	if r := ir("new", "claude", "mac:~/dir", "x"); r.code != 1 || !strings.Contains(r.err, "peer not connected: mac") {
 		t.Errorf("peer dir: %+v", r)

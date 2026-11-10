@@ -65,7 +65,7 @@ type PushUnsubscribe struct {
 
 // PushMessage is a push's payload, as the service worker gets it.
 type PushMessage struct {
-	Kind    string `json:"kind"` // needs_you | error | turn_end | compact | test
+	Kind    string `json:"kind"` // needs_you | error | turn_end | compact | test | notice
 	Session string `json:"session,omitempty"`
 	Title   string `json:"title"`
 	Body    string `json:"body"`

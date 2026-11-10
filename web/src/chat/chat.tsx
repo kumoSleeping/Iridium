@@ -18,7 +18,7 @@ import { t, useLang } from "../i18n";
 import { pushIn } from "../motion";
 import { openChat, openUsage } from "../route";
 import { PULL } from "../sheet";
-import { BotItems, MenuItems, Rename, sessionActions, sessionTags } from "../sidebar";
+import { MenuItems, Rename, sessionActions, sessionTags } from "../sidebar";
 import { useConfirms, useList, useMachines, useSession } from "../store";
 import { drafts, opened } from "../stream";
 import { errText } from "../toast";
@@ -443,7 +443,7 @@ function Bar({ s, onSheet, onMe, spots, asked }: { s?: Session; onSheet?: () => 
               </Tip>
               <Menu.Portal>
                 <Menu.Positioner side="bottom" align="end" sideOffset={6} collisionPadding={8} className="z-50">
-                  <MenuItems lead={lead} items={acts} tags={sessionTags(s)} tail={<BotItems s={s} i={lead.length + acts.length + 1} />} />
+                  <MenuItems lead={lead} items={acts} tags={sessionTags(s)} />
                 </Menu.Positioner>
               </Menu.Portal>
             </Menu.Root>
