@@ -18,6 +18,7 @@ S1a 到 S5 都做完并合进 `next`，之后又做了：需要队列带提问�
 
 - 第一期其余都做完了（`progress.md`“第一期收尾”）。
 - QQ 桥重写成 Satori 客户端、合回 main 发 0.2.0：kumo 说先不急（2026-11-11）。
+- 发 0.2.0 时一起发 dsh 插件（`plugins/dsh-remote-iridium`，版本号从 0.1.0 提上去）：旧插件调 `/api/exec/pair` 配不了对，报旧的命令行开关会被算成关；已配好对的照样能用。
 - 插件方案：`plugin.md`，第一期之后。
 - 测试里 Codex 指向假的：另一个会话（pi c7f37f09）在这个工作树里改了 `internal/testagent` 和几处测试架子，没提交。在那之前 `go test` 会真的启动 Codex，写进 `~/.codex`。
 - 注意：
