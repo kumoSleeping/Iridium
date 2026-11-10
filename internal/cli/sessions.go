@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -64,11 +65,15 @@ func cmdNew(e *env, args []string) int {
 // as Enter does on the page (user 2026-11-06): what agents tell each other is wanted now, and
 // steering does not stop the turn. --queue waits in the queue for the turn to end instead, for a
 // person at a terminal only: an agent's message always joins (the daemon's send). --steer, the old
-// way to ask for it, is still taken.
+// way to ask for it, is still taken. ir send 应用/登录 "message": a notice shown to that login,
+// no agent woken (sendNotice).
 func cmdSend(e *env, args []string) int {
 	o, err := parse(args, "wait attach steer queue")
 	if err != nil {
 		return e.fail(err)
+	}
+	if len(o.pos) > 0 && strings.Contains(o.pos[0], "/") {
+		return e.sendNotice(o)
 	}
 	if o.steer && o.queue {
 		return e.failf("--steer 和 --queue 只能选一个")
@@ -130,6 +135,24 @@ func cmdSend(e *env, args []string) int {
 		return e.waitTurn(id, sent.Input)
 	}
 	return e.waitTaken(id, sent.Input)
+}
+
+// sendNotice is ir send 应用/登录 "message": shown to that login (a login of ir_web gets it as a
+// Web Push), waking no agent; what cannot get it is an error saying why.
+func (e *env) sendNotice(o opts) int {
+	if len(o.pos) != 2 || strings.TrimSpace(o.pos[1]) == "" || len(o.attach) > 0 || o.wait || o.queue || o.steer {
+		return e.failf(`usage: ir send 应用/登录 "消息"`)
+	}
+	app, login, _ := strings.Cut(o.pos[0], "/")
+	if app == "" || login == "" {
+		return e.failf(`usage: ir send 应用/登录 "消息"`)
+	}
+	var r api.NoticeReply
+	if err := e.do("POST", "/api/apps/"+url.PathEscape(app)+"/logins/"+url.PathEscape(login)+"/notice", api.Notice{Text: o.pos[1], Caller: e.caller()}, &r); err != nil {
+		return e.fail(err)
+	}
+	fmt.Fprintf(e.out, "已送到 %s/%s\n", app, cmp.Or(r.Name, r.Login))
+	return exitDone
 }
 
 // waitQueued waits for a queued message to leave the queue: -1 once it went to the agent, else
@@ -667,28 +690,6 @@ func turnStatus(st *api.SessionState) api.Status {
 		return api.StatusIdle
 	}
 	return st.Status
-}
-
-// ir bot "message" [--to bot]: the session it runs in tells the user through a bot. A chat that
-// points at the session gets it as its reply; else a letter, 进入会话 or 关闭 (docs/qq.md).
-func cmdBot(e *env, args []string) int {
-	o, err := parse(args, "to")
-	if err != nil {
-		return e.fail(err)
-	}
-	if len(o.pos) != 1 || strings.TrimSpace(o.pos[0]) == "" {
-		return e.failf(`usage: ir bot "消息" [--to bot]`)
-	}
-	from := caller()
-	if from == "" {
-		return e.failf("ir bot 在会话里运行（没有 IRIDIUM_SESSION）")
-	}
-	var r api.BotReply
-	if err := e.do("POST", "/api/bot", api.BotLetter{Text: o.pos[0], To: o.to, Caller: from}, &r); err != nil {
-		return e.fail(err)
-	}
-	fmt.Fprintf(e.out, "已发到 %s\n", cmp.Or(r.Name, r.Bot))
-	return exitDone
 }
 
 // waitMirrored waits for a turn DSH Desktop runs (a message given to its agent): no turn of

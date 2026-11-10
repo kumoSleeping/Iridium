@@ -32,16 +32,16 @@ describe("api", () => {
   test("send carries files only when there are some; answers go to the card", async () => {
     await api.send("s1", "hi");
     await api.send("s1", "hi", ["r1"], true);
-    await api.answer({ card: "ask:s1:q", option: "always" });
-    await api.answer({ card: "ask:s1:r", choices: ["0.1"], words: ["", "mine"] });
+    await api.answer("s1", { card: "ask:s1:q", option: "always" });
+    await api.answer("s1", { card: "ask:s1:r", choices: ["0.1"], words: ["", "mine"] });
     await api.editQueued("s1", "in 1", "again");
     await api.putSettings({ idleReap: "2h", modes: { claude: "plan" } });
     await api.answerConfirm("c1", true);
     expect(calls.map((c) => [c.method, c.url, c.body])).toEqual([
       ["POST", "/api/sessions/s1/send", { text: "hi" }],
       ["POST", "/api/sessions/s1/send", { text: "hi", attachments: ["r1"], steer: true }],
-      ["POST", "/api/answer", { card: "ask:s1:q", option: "always" }],
-      ["POST", "/api/answer", { card: "ask:s1:r", choices: ["0.1"], words: ["", "mine"] }],
+      ["POST", "/api/sessions/s1/answer", { card: "ask:s1:q", option: "always" }],
+      ["POST", "/api/sessions/s1/answer", { card: "ask:s1:r", choices: ["0.1"], words: ["", "mine"] }],
       ["PUT", "/api/sessions/s1/queue/in%201", { text: "again" }],
       ["PUT", "/api/settings", { idleReap: "2h", modes: { claude: "plan" } }],
       ["POST", "/api/needs/c1", { allow: true }],

@@ -43,7 +43,6 @@ import type {
   SessionPatch,
   SessionState,
   SetDevice,
-  SetFollows,
   SetMode,
   SetModel,
   SetPreset,
@@ -63,7 +62,6 @@ import type {
   GroupOrder,
   WorkspacePatch,
 } from "./types.gen";
-import type { BotReply, BringBot } from "./types.gen";
 import type { ShellOutput, ShellRun, ShellStarted } from "./types.gen";
 import type { SecretInfo, Secrets, SetSecret, Usage } from "./types.gen";
 
@@ -181,10 +179,8 @@ export const api = {
   shell: (id: string, line: string, cwd?: string) => write<ShellStarted>("POST", `${S(id)}/shell`, { line, ...(cwd ? { cwd } : {}) } satisfies ShellRun),
   shellRead: (run: string, from: number) => get<ShellOutput>(`/api/shell/${enc(run)}?from=${from}`),
   shellStop: (run: string) => write<{ ok: boolean }>("DELETE", `/api/shell/${enc(run)}`),
-  /** A bot's chat (its terminal ID) pointed at the session, from the session's menu. */
-  bringBot: (id: string, bot: string) => write<BotReply>("POST", `${S(id)}/bot`, { bot } satisfies BringBot),
-  /** An ask's card answered (docs/api.md "卡片"): an option, a choice per question, own words. */
-  answer: (a: CardAnswer) => write<CardReply>("POST", "/api/answer", a),
+  /** One of session id's asks answered by its card (docs/api.md "卡片"): an option, a choice per question, own words. */
+  answer: (id: string, a: CardAnswer) => write<CardReply>("POST", `${S(id)}/answer`, a),
   /** A step Claude's auto mode denied, run again (session/release.go). */
   release: (id: string, toolUseId: string, dismiss?: boolean) => write<{ ok: boolean }>("POST", `/api/sessions/${enc(id)}/release`, { toolUseId, dismiss } satisfies Release),
   health: (init?: RequestInit) => get<{ ok: boolean }>("/api/health", init),
@@ -252,12 +248,12 @@ export const api = {
   clearRules: (id: string) => write<{ ok: boolean }>("DELETE", `${S(id)}/rules`),
 
   // --- push ---
-  push: () => get<PushState>("/api/push"),
-  pushSwitch: (enabled: boolean) => writeAgain<{ ok: boolean }>("PUT", "/api/push", { enabled } satisfies PushSwitch),
-  pushDefaults: (e: PushEvents) => writeAgain<PushState>("PUT", "/api/push/defaults", e),
-  pushRule: (r: PushRule) => writeAgain<PushState>("PUT", "/api/push/rules", r),
-  pushSubscribe: (sub: PushSubscription) => write<{ ok: boolean }>("POST", "/api/push/subscriptions", sub),
-  pushUnsubscribe: (endpoint: string) => write<{ ok: boolean }>("DELETE", "/api/push/subscriptions", { endpoint }),
+  push: () => get<PushState>("/api/web/push"),
+  pushSwitch: (enabled: boolean) => writeAgain<{ ok: boolean }>("PUT", "/api/web/push", { enabled } satisfies PushSwitch),
+  pushDefaults: (e: PushEvents) => writeAgain<PushState>("PUT", "/api/web/push/defaults", e),
+  pushRule: (r: PushRule) => writeAgain<PushState>("PUT", "/api/web/push/rules", r),
+  pushSubscribe: (sub: PushSubscription) => write<{ ok: boolean }>("POST", "/api/web/push/subscriptions", sub),
+  pushUnsubscribe: (endpoint: string) => write<{ ok: boolean }>("DELETE", "/api/web/push/subscriptions", { endpoint }),
 
   // --- settings, update ---
   settings: () => get<Settings>("/api/settings"),
@@ -295,8 +291,6 @@ export const api = {
   pairing: (open: boolean, minutes?: number) => write<PairWindow>("PUT", "/api/pairing", { open, ...(minutes ? { minutes } : {}) } satisfies PairWindow),
   /** GET /api/catalogue: the official apps and the commands that install them. */
   catalogue: () => get<CatalogueEntry[]>("/api/catalogue"),
-  /** PUT /api/apps/{id}/follows: the logins of ir_web an app follows (their asks go to it). Until S4. */
-  follows: (id: string, panels: string[]) => write<SetFollows>("PUT", `/api/apps/${enc(id)}/follows`, { panels } satisfies SetFollows),
 
   /** GET /api/usage: the last days' tokens by day, terminal, agent and model; terminal: one only; by hour: the last 24 hours'; by weekhour: by weekday and hour. */
   usage: (days: number, terminal?: string, by?: "hour" | "weekhour") => get<Usage>(`/api/usage?days=${days}${terminal ? `&terminal=${enc(terminal)}` : ""}${by ? `&by=${by}` : ""}`),

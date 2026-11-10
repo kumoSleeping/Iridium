@@ -189,9 +189,6 @@ func TestMigrateToApps(t *testing.T) {
 	if d, _ := s.Devices(); len(d) != 3 || d[f.Mac] != "phone" || d[f.Box] != "laptop" || d[gate.HostID] != "none" {
 		t.Errorf("devices: %v", d)
 	}
-	if f, _ := s.Follows(); len(f[qq.ID]) != 1 {
-		t.Errorf("follows: %v", f)
-	}
 	// Push: the host's and mac's stay; the app's and the gone one's go.
 	subs, _ := s.PushSubscriptions()
 	var who []string
@@ -204,6 +201,13 @@ func TestMigrateToApps(t *testing.T) {
 	var n int
 	if s.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE name IN ('terminals', 'devices_old')`).Scan(&n); n != 0 {
 		t.Error("terminals table left")
+	}
+	// The chat layer's tables are gone (28); the outbox stays, emptied.
+	if s.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE name IN ('chat_pointers', 'chat_seen', 'bot_follows')`).Scan(&n); n != 0 {
+		t.Error("chat tables left")
+	}
+	if s.db.QueryRow(`SELECT COUNT(*) FROM outbox`).Scan(&n); n != 0 {
+		t.Errorf("outbox: %d rows", n)
 	}
 
 	// Through the gate: the TOKENs and the browser's cookie are let in as before.

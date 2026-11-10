@@ -27,7 +27,7 @@ type At struct {
 }
 
 // remoteCommands are what ir does for an agent at another machine: sessions and groups. Not the
-// files and command lines of the Iridium's own machine (cp, files, sh, run), its secrets, its bots
+// files and command lines of the Iridium's own machine (cp, files, sh, run), its secrets
 // or its admin: a person on a panel, or ir on that machine, does those.
 var remoteCommands = map[string]bool{
 	"new": true, "send": true, "wait": true, "read": true, "ls": true, "find": true,

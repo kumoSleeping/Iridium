@@ -158,11 +158,6 @@ export interface Session {
   last?: LastSaid;
   updatedAt: number /* int64 */; // ms since the epoch
   /**
-   * Bots: the plugins (terminal IDs) whose chat is in this session now: the list shows their
-   * avatar and a Bot tag.
-   */
-  bots?: string[];
-  /**
    * Machine: the executor it runs at (its terminal ID; docs/exec.md), empty for this machine.
    * Offline: that executor is not connected now.
    */
@@ -717,24 +712,7 @@ export interface App {
    * Device: what it runs on, as the badge on its messages' avatar shows; the server always sets it.
    */
   device?: Device;
-  /**
-   * Follows: the logins of ir_web (IDs) it follows: what a session asks while no chat points at
-   * it goes to the apps that follow the login that began its turn, and to no other. Until S4.
-   */
-  follows?: string[];
-  /**
-   * Chat: its chat layer in Iridium, until S4 removes it: "" none (a session's menu offers nothing),
-   * "idle" its event stream open but no chat yet (offered, greyed), "on" a chat a session's menu
-   * may bring to that session.
-   */
-  chat?: AppChat;
 }
-/**
- * AppChat is App.Chat.
- */
-export const AppChatIdle = "idle";
-export const AppChatOn = "on";
-export type AppChat = typeof AppChatIdle | typeof AppChatOn;
 /**
  * Login is a login of an app as listed: ir_web's, a browser with a passkey; another app's, as it
  * spoke (Satori-User-ID), waiting till approved (ApprovedAt 0). No secrets.
@@ -759,10 +737,22 @@ export interface Login {
   perms?: Perms;
 }
 /**
- * SetFollows is PUT /api/apps/{id}/follows: the logins of ir_web the app follows from now on.
+ * Notice is POST /api/apps/{id}/logins/{login}/notice (ir send 应用/登录): Text shown to the
+ * login, no agent woken. Caller: the session it is from (ir's own, as Send's), if any.
  */
-export interface SetFollows {
-  panels: string[];
+export interface Notice {
+  text: string;
+  caller?: string;
+}
+/**
+ * NoticeReply is where a notice went: the login (its ID and name) and how many of its browsers
+ * were pushed to.
+ */
+export interface NoticeReply {
+  app: string;
+  login: string;
+  name?: string;
+  sent: number /* int */;
 }
 /**
  * Device is what an app or login runs on, set in its settings (PUT /api/me/device, ir apps
@@ -1107,119 +1097,6 @@ export interface PublicState {
 }
 
 //////////
-// source: chat.go
-
-/**
- * ChatInput is a message from a plugin's chat window (plan "插件"). Sender, if given, is who in
- * the chat sent it: the agent sees "[plugin·sender] ".
- */
-export interface ChatInput {
-  text: string;
-  sender?: string;
-  /**
-   * Attachments: refs of uploads into the chat's session (POST /api/chat/{key}/uploads): their
-   * paths go into the message, images to the agent as images too, as the web's.
-   */
-  attachments?: string[];
-}
-/**
- * ChatInputReply: Session is where the message went (or the command ran). An Iridium command
- * answers here, with Reply or Card; what the agent says comes on the plugin's event stream.
- */
-export interface ChatInputReply {
-  session?: string;
-  queued?: boolean;
-  reply?: ChatReply;
-  card?: Card;
-}
-/**
- * ChatPointer is what a chat window points at: its session, and what /new opens.
- */
-export interface ChatPointer {
-  chat: string;
-  session?: string;
-  agent?: Agent;
-  cwd?: string;
-}
-/**
- * ChatCommand is a command a chat window can send. Iridium: Iridium runs it; else it goes to the
- * agent as typed.
- */
-export interface ChatCommand {
-  name: string;
-  description?: string;
-  iridium?: boolean;
-}
-/**
- * ChatReply is a reply in both forms: Markdown as written, Text with the marks taken off.
- */
-export interface ChatReply {
-  markdown: string;
-  text: string;
-  files?: ChatFile[];
-}
-/**
- * ChatFile is a file a reply names. GET /api/chat/files/<ref> gives it (Range works); the ref is
- * good only for the plugin it was given to.
- */
-export interface ChatFile {
-  name: string;
-  size: number /* int64 */;
-  type: string; // a MIME type
-  ref: string;
-}
-/**
- * ChatEvent is the data of a plugin event (SSE event types progress, reply, card, card_done,
- * error, status). Every event is for one chat window.
- */
-export interface ChatEvent {
-  chat: string;
-  session?: string;
-  /**
-   * progress, error: Text.
-   */
-  text?: string;
-  /**
-   * reply
-   */
-  reply?: ChatReply;
-  /**
-   * card; card_done: CardID.
-   */
-  card?: Card;
-  cardId?: string;
-  /**
-   * status
-   */
-  status?: Status;
-}
-/**
- * BotLetter is what a session says to the user through a bot (ir bot): To, a bot's name (its
- * terminal's), else the one Iridium picks; Caller, the session (ir's own, as Send's).
- */
-export interface BotLetter {
-  text: string;
-  to?: string;
-  caller?: string;
-}
-/**
- * BringBot is POST /api/sessions/{id}/bot: Bot's chat (its terminal ID) points at the session.
- */
-export interface BringBot {
-  bot: string;
-}
-/**
- * BotReply is where a letter went: the bot (its terminal ID, and name) and its chat; Letter, as a
- * letter (the chat pointed elsewhere) rather than the session's reply.
- */
-export interface BotReply {
-  bot: string;
-  name?: string;
-  chat: string;
-  letter?: boolean;
-}
-
-//////////
 // source: control.go
 
 /**
@@ -1364,13 +1241,13 @@ export interface AllowRule {
   pattern: string;
 }
 /**
- * Card is a choice to make, as the web's confirmation panel and plugins show it: an ask
- * (permission, question, plan) or a command's pick (/use, /model, /mode). Options with the same
- * Group are one question's; pick one per group.
+ * Card is a choice to make, as the web's confirmation panel and apps show it: an ask
+ * (permission, question, plan). Options with the same Group are one question's; pick one per
+ * group.
  */
 export interface Card {
   id: string;
-  kind: string; // permission | question | plan | pick
+  kind: string; // permission | question | plan
   session?: string;
   title: string;
   summary: string[];
@@ -1400,12 +1277,10 @@ export interface CardAnswer {
   message?: string;
 }
 /**
- * CardReply is what answering a card did: for a pick, the command's reply or a next card.
+ * CardReply is what answering a card did (POST /api/sessions/{id}/answer).
  */
 export interface CardReply {
   ok: boolean;
-  reply?: ChatReply;
-  card?: Card;
 }
 
 //////////
@@ -1795,7 +1670,7 @@ export interface PushUnsubscribe {
  * PushMessage is a push's payload, as the service worker gets it.
  */
 export interface PushMessage {
-  kind: string; // needs_you | error | turn_end | compact | test
+  kind: string; // needs_you | error | turn_end | compact | test | notice
   session?: string;
   title: string;
   body: string;
@@ -1905,7 +1780,7 @@ export interface Settings {
    */
   modes: { [key: string]: string};
   /**
-   * Push: Web Push's total switch (off by default); GET /api/push has the rest.
+   * Push: Web Push's total switch (off by default); GET /api/web/push has the rest.
    */
   push: boolean;
   /**

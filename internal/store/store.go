@@ -1,7 +1,7 @@
 // Package store is Iridium's database: SQLite through a pure-Go driver, WAL, writes in BEGIN
 // IMMEDIATE transactions. It holds only what lies over the sessions found on disk (plan "数据"):
 // workspaces and who belongs where, pins, colour tags, which sessions are shown, names, the queue of messages to send, push
-// subscriptions, apps, their logins and their permissions, usage, the plugin event outbox, and
+// subscriptions, apps, their logins and their permissions, usage, the event outbox, and
 // the credentials, sealed (secrets.go). Never the conversations themselves, nor asks.
 package store
 
@@ -207,6 +207,12 @@ var schema = []string{
 	appsSchema,
 	// 27: what an app was given as it paired, or by a change it asked for (logins.go): '' all.
 	`ALTER TABLE apps ADD COLUMN perms TEXT NOT NULL DEFAULT '';`,
+	// 28: the plugins' chat layer gone (0.2, S4a): where chats pointed, what they last said, the
+	// Bots' follows, and their events (the outbox stays, empty, for the apps' events).
+	`DROP TABLE chat_pointers;
+	DROP TABLE chat_seen;
+	DROP TABLE bot_follows;
+	DELETE FROM outbox;`,
 }
 
 // steps run in Go after the migration of their version, in the same transaction.

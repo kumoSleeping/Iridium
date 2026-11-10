@@ -29,10 +29,11 @@ func (s *Server) appRoutes(mux *http.ServeMux) {
 	// The device it runs on: its own, or (ir_web's logins and the host) another's.
 	mux.HandleFunc("PUT /api/me/device", func(w http.ResponseWriter, r *http.Request) { s.setDevice(w, r, "") })
 	mux.HandleFunc("PUT /api/apps/{id}/device", func(w http.ResponseWriter, r *http.Request) { s.setDevice(w, r, r.PathValue("id")) })
-	mux.HandleFunc("PUT /api/apps/{id}/follows", s.panelOnly(s.setFollows))
 	mux.HandleFunc("GET /api/apps", s.manage(s.apps))
 	mux.HandleFunc("DELETE /api/apps/{id}", s.admin(s.revoke))
 	mux.HandleFunc("DELETE /api/apps/{id}/logins/{login}", s.admin(s.removeLogin))
+	// ir send 应用/登录: a notice shown to one login (notice.go).
+	mux.HandleFunc("POST /api/apps/{id}/logins/{login}/notice", s.notice)
 	// What an app may use (agents, scope): whoever approves sets it (S2 enforces it).
 	mux.HandleFunc("PUT /api/apps/{id}/perms", s.approver(s.putAppPerms))
 	mux.HandleFunc("PUT /api/apps/{id}/logins/{login}/perms", s.approver(s.putLoginPerms))
@@ -153,11 +154,6 @@ func (s *Server) apps(w http.ResponseWriter, r *http.Request) {
 	out := api.Apps{Apps: []api.App{}, Logins: []api.Login{}, Invites: []api.PendingInvite{}}
 	host, _ := s.gate().Endpoint(gate.HostID)
 	out.Apps = append(out.Apps, s.appOf(host))
-	follows, _ := s.st.Follows()
-	var chats map[string]bool
-	if s.Chat != nil {
-		chats = s.Chat.Bots()
-	}
 	web := api.App{ID: gate.WebApp, Name: gate.WebApp, Web: true, Rules: access.Default(), Device: api.DeviceComputer}
 	var apps []api.App
 	for _, e := range a.Endpoints {
@@ -172,10 +168,6 @@ func (s *Server) apps(w http.ResponseWriter, r *http.Request) {
 		}
 		app := s.appOf(e)
 		app.Perms = s.appPerms(e.ID)
-		app.Follows = follows[e.ID]
-		if on, ok := chats[e.ID]; ok {
-			app.Chat = map[bool]api.AppChat{false: api.AppChatIdle, true: api.AppChatOn}[on]
-		}
 		apps = append(apps, app)
 	}
 	if s.gate().Public() || web.Logins > 0 {
@@ -294,40 +286,6 @@ func (s *Server) dropLogin(w http.ResponseWriter, appRef, login string) {
 	s.logf("server: login %s of %s removed", login, info.Name)
 	s.terminalsChanged()
 	reply(w, http.StatusOK, map[string]any{"ok": true})
-}
-
-// setFollows puts the logins of ir_web app ref (ID or name) follows in place. Until S4.
-func (s *Server) setFollows(w http.ResponseWriter, r *http.Request) {
-	var req api.SetFollows
-	if !readJSON(w, r, &req) {
-		return
-	}
-	bot, ok := s.gate().Find(r.PathValue("id"))
-	if !ok || bot.Host() {
-		fail(w, http.StatusNotFound, "no such app")
-		return
-	}
-	if bot.Kind != gate.KindChannel {
-		fail(w, http.StatusBadRequest, "only an app follows logins")
-		return
-	}
-	panels := []string{}
-	for _, ref := range req.Panels {
-		p, ok := s.gate().Find(ref)
-		if !ok || p.Host() || p.Kind != gate.KindPanel {
-			fail(w, http.StatusBadRequest, "not a login of ir_web: "+ref)
-			return
-		}
-		if !slices.Contains(panels, p.ID) {
-			panels = append(panels, p.ID)
-		}
-	}
-	if err := s.st.SetFollows(bot.ID, panels); err != nil {
-		s.error(w, err)
-		return
-	}
-	s.terminalsChanged()
-	reply(w, http.StatusOK, api.SetFollows{Panels: panels})
 }
 
 // setDevice sets the device app or login ref (ID or name; "" the caller) runs on.

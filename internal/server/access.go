@@ -12,7 +12,6 @@ import (
 
 	"github.com/kumoSleeping/iridium/internal/access"
 	"github.com/kumoSleeping/iridium/internal/api"
-	"github.com/kumoSleeping/iridium/internal/chat"
 	"github.com/kumoSleeping/iridium/internal/gate"
 	"github.com/kumoSleeping/iridium/internal/session"
 	"github.com/kumoSleeping/iridium/internal/webui"
@@ -135,8 +134,7 @@ func (s *Server) terminalsChanged() {
 	}
 }
 
-// revoked forgets a revoked terminal's chats (a Bot's): where they pointed, so the list marks no
-// session with it, what they last did, their events; and its browsers' push subscriptions. An
+// revoked forgets a revoked app's or login's browsers' push subscriptions and its machine. An
 // executor's connection ends now, not when it next connects.
 func (s *Server) revoked(id string) {
 	if s.Remote != nil {
@@ -153,13 +151,6 @@ func (s *Server) revoked(id string) {
 	}
 	if s.Remote != nil {
 		s.publishMachines()
-	}
-	if err := s.st.ForgetChats(id); err != nil {
-		s.logf("server: forgetting %s's chats: %v", id, err)
-		return
-	}
-	if s.m != nil {
-		s.m.PublishList()
 	}
 }
 
@@ -364,61 +355,6 @@ func ms(t time.Time) int64 {
 		return 0
 	}
 	return t.UnixMilli()
-}
-
-// ---- the plugin chat layer ----
-
-// chatCaller is a chat request's terminal (routes_plugin.go): the gate's identity.
-func chatCaller(c caller) chat.Caller { return chat.Caller{ID: c.ID(), Name: c.Name} }
-
-// callerOfChat is the terminal behind a chat.Caller.
-func (s *Server) callerOfChat(c chat.Caller) caller {
-	if c.ID == gate.HostID {
-		return caller{Identity: localIdentity}
-	}
-	info, ok := s.gate().Endpoint(c.ID)
-	if !ok {
-		return caller{Identity: gate.Identity{App: c.ID, Name: c.Name}}
-	}
-	return caller{Identity: info.Identity()}
-}
-
-// ChatGuard is what the chat layer checks: Claude's sessions only for the owner's own.
-func (s *Server) ChatGuard() chat.Guard { return chatGuard{s} }
-
-type chatGuard struct{ s *Server }
-
-func (g chatGuard) Open(c chat.Caller, req *api.NewSession) error {
-	return g.s.checkCreate(g.s.callerOfChat(c), req)
-}
-
-func (g chatGuard) Opened(c chat.Caller, id string) {
-	if err := g.s.st.SetOpener(id, c.ID); err != nil {
-		g.s.logf("server: opener of %s: %v", id, err)
-	}
-}
-
-func (g chatGuard) Send(c chat.Caller, id, text string) error {
-	return g.s.checkSend(g.s.callerOfChat(c), id)
-}
-
-func (g chatGuard) Command(c chat.Caller, id, name string) error { return nil }
-
-func (g chatGuard) Use(c chat.Caller, id string) error {
-	_, err := g.s.using(g.s.callerOfChat(c), id)
-	return err
-}
-
-func (g chatGuard) Sessions(c chat.Caller, l []api.Session) []api.Session { return l }
-
-func (g chatGuard) Answer(c chat.Caller, id string) error {
-	_, err := g.s.using(g.s.callerOfChat(c), id)
-	return err
-}
-
-func (g chatGuard) FileOut(c chat.Caller, id string) error {
-	_, err := g.s.m.State(id)
-	return err
 }
 
 // sessionToken is the gate's Config.SessionToken: the hosted session whose own TOKEN it is, and

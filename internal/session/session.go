@@ -512,11 +512,6 @@ func (m *Manager) List(ctx context.Context) ([]api.Session, error) {
 			}
 		}
 	}
-	if bots, err := m.o.Store.PointedAt(); err == nil {
-		for i := range out {
-			out[i].Bots = bots[out[i].ID]
-		}
-	}
 	slices.SortStableFunc(out, func(a, b api.Session) int {
 		if a.Pinned != b.Pinned {
 			if a.Pinned {

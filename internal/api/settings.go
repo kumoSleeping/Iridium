@@ -13,7 +13,7 @@ type Settings struct {
 	// Modes: the approval mode a new session of each agent starts in; an agent left out starts in
 	// its own default.
 	Modes map[string]string `json:"modes"`
-	// Push: Web Push's total switch (off by default); GET /api/push has the rest.
+	// Push: Web Push's total switch (off by default); GET /api/web/push has the rest.
 	Push bool `json:"push"`
 	// EnterInTurn: what Enter does with words while a turn runs: "steer" (the default) puts them
 	// into the turn, Ctrl or ⌘+Enter queues them; "queue" the other way round.

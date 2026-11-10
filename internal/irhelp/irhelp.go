@@ -7,7 +7,7 @@ import "strings"
 // Help is ir --help: at most 20 lines (plan "ir"). The agent part is before Admin.
 const Help = `ir: this machine's Iridium on the command line (over its unix socket). An <id> may be its first few characters.
   ir new <agent> [dir] "task"         start a session, print its ID (--model, --approve <mode>, --machine <name>: at that machine, --workspace <group>)
-  ir send <id> "message" [-a file]...  send a message, with attachments
+  ir send <id> "message" [-a file]...  send a message, with attachments; ir send app/login "message": a notice shown to that login (ir apps logins), no agent woken
   ir wait <id>                        wait for the turn to end, print its last reply
   ir read <id> [-n count] [--full]    each message and its final reply, cut short (last 10; --full: the page as written)
   ir ls | find <word> [--all]         list sessions | find by name, title, last thing said (--all: archived, finished subagents too; ls --here: your group's)
@@ -19,7 +19,6 @@ const Help = `ir: this machine's Iridium on the command line (over its unix sock
   ir run [--secret name,…] -- command …   {{name}}, {{file:name}} become the value, a temp file, and env vars; values in the output are masked
   ir usage [name|me] [-d days] [--by day,terminal,agent,model]   tokens and cost per day, terminal, agent, model
   new and send take --wait to wait for the reply. send during a turn joins that turn (an agent's always does; a person at a terminal may add --queue to run it after). Exit codes: 0 done, 2 needs the user (a question, an approval), 1 error or exited. A path may be machine:path
-  ir bot "message" [--to bot]         tell the user through a bot (QQ); to add one: the web's 终端管理 +, or iridium-qq setup (--new for one more; a QR image: ir attach it; run the same again once scanned)
 Admin (an agent calling these never sees a secret; a person on the web or the host confirms):
   ir apps [logins [app]] | rename <app> <name> | rm <app>   apps, the host and ir_web | their logins | rename | remove (a login: app/login)
   ir invite [name] [--claude] | profile <app> [--avatar image] [--device computer|laptop|phone|none]   a link for a new browser (--claude: the user's own) | avatar, device
@@ -35,7 +34,7 @@ func Agent() string {
 // Remote is the agent part for a session hosted at another machine (docs/exec.md "远端的 ir"):
 // its ir reaches the Iridium over HTTPS with the session's own TOKEN, as that machine's Bot. The
 // session commands as Help has them; a folder is this machine's; the Iridium's own files, command
-// lines, secrets and bots are not reached from here.
+// lines and secrets are not reached from here.
 func Remote() string {
 	var b strings.Builder
 	b.WriteString("ir: the Iridium hosting this session, reached over HTTPS as this machine. An <id> may be its first few characters. A folder is this machine's.\n")
@@ -50,6 +49,6 @@ func Remote() string {
 		}
 	}
 	b.WriteString("  ir machines                        the machines connected to it\n")
-	b.WriteString("  Not from here: cp, files, attach, sh, run, secret, bot, usage and the admin commands; ask a session on the Iridium's machine.\n")
+	b.WriteString("  Not from here: cp, files, attach, sh, run, secret, usage and the admin commands; ask a session on the Iridium's machine.\n")
 	return b.String()
 }

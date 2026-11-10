@@ -21,7 +21,6 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/kumoSleeping/iridium/internal/api"
-	"github.com/kumoSleeping/iridium/internal/chat"
 	"github.com/kumoSleeping/iridium/internal/cli"
 	"github.com/kumoSleeping/iridium/internal/config"
 	"github.com/kumoSleeping/iridium/internal/discover"
@@ -174,19 +173,6 @@ func serve(args []string) int {
 		log.Print(err)
 		return 1
 	}
-	srv.Chat, err = chat.New(chat.Options{Manager: m, Store: st, StateDir: state, ChatDir: cfg.ChatDir, Guard: srv.ChatGuard(), Message: srv.Files().Message, Linked: srv.Files().Linked,
-		Terminal: srv.HasTerminal, BotsChanged: srv.BotsChanged,
-		Workspaces: func() ([]api.Workspace, error) {
-			if srv.Discover == nil {
-				return nil, nil
-			}
-			return srv.Discover.Workspaces()
-		}})
-	if err != nil {
-		log.Print(err)
-		return 1
-	}
-	defer srv.Chat.Close()
 	home, _ := os.UserHomeDir()
 	srv.Discover, srv.Folders = d, discover.DefaultFolders(home, state, filepath.Dir(*path))
 	if len(cfg.FolderRoots) > 0 {
