@@ -77,8 +77,8 @@ type Update struct {
 	URL string `json:"url,omitempty"`
 	// Every is how often to look; "" or "0" is once a day.
 	Every Duration `json:"every,omitzero"`
-	// Manual is no longer read (2026-11-08: release builds always download ahead, builds from
-	// source never); kept so a file that has it still loads.
+	// Manual turns automatic updates off (the settings' 自动更新): no looking on a timer, nothing
+	// downloaded ahead; 检查更新 still looks, downloads and installs.
 	Manual bool `json:"manual,omitempty"`
 }
 

@@ -36,7 +36,7 @@ func TestSettings(t *testing.T) {
 	})
 	var st api.Settings
 	l.want(200, "web", "GET", "/api/settings", nil, &st)
-	if st.IdleReap != "1h" || !st.CrashResume || !st.QuotaResume || st.Push || len(st.QuotaHidden) != 0 || st.Modes == nil || st.EnterInTurn != "steer" || st.Lang != "" {
+	if st.IdleReap != "1h" || !st.CrashResume || !st.QuotaResume || st.Push || len(st.QuotaHidden) != 0 || st.Modes == nil || st.EnterInTurn != "steer" || st.Lang != "" || !st.AutoUpdate {
 		t.Fatalf("defaults: %+v", st)
 	}
 
@@ -44,7 +44,10 @@ func TestSettings(t *testing.T) {
 	fr, zh := "fr", "zh"
 	l.want(400, "web", "PUT", "/api/settings", api.SettingsPatch{EnterInTurn: &later}, nil)
 	l.want(400, "web", "PUT", "/api/settings", api.SettingsPatch{Lang: &fr}, nil)
-	l.want(200, "web", "PUT", "/api/settings", api.SettingsPatch{IdleReap: &reap, CrashResume: &off, QuotaHidden: &hidden, Modes: map[string]string{"claude": "plan", "codex": "untrusted"}, EnterInTurn: &queue, Lang: &zh}, &st)
+	l.want(200, "web", "PUT", "/api/settings", api.SettingsPatch{IdleReap: &reap, CrashResume: &off, QuotaHidden: &hidden, Modes: map[string]string{"claude": "plan", "codex": "untrusted"}, EnterInTurn: &queue, Lang: &zh, AutoUpdate: &off}, &st)
+	if st.AutoUpdate {
+		t.Fatalf("automatic updates still on: %+v", st)
+	}
 	if st.IdleReap != "15m" || st.CrashResume || !st.QuotaResume || len(st.QuotaHidden) != 1 || st.Modes["claude"] != "plan" || st.Modes["codex"] != "untrusted" || st.EnterInTurn != "queue" || st.Lang != "zh" {
 		t.Fatalf("after the change: %+v", st)
 	}
@@ -55,7 +58,7 @@ func TestSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if saved.IdleReap.D() != 15*time.Minute || saved.CrashResume || saved.Modes["codex"] != "untrusted" || len(saved.QuotaHidden) != 1 || saved.ChatDir != l.work || saved.EnterInTurn != "queue" || saved.Lang != "zh" {
+	if saved.IdleReap.D() != 15*time.Minute || saved.CrashResume || saved.Modes["codex"] != "untrusted" || len(saved.QuotaHidden) != 1 || saved.ChatDir != l.work || saved.EnterInTurn != "queue" || saved.Lang != "zh" || !saved.Update.Manual {
 		t.Fatalf("file: %+v", saved)
 	}
 

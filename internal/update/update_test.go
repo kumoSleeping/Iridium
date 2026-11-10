@@ -160,12 +160,22 @@ func TestGitHubAuto(t *testing.T) {
 		t.Fatalf("repo %q", repo)
 	}
 	restarts := 0
-	u := New(Options{Source: "github:o/r", GitHubAPI: srv.URL, Current: "v1.2.0", Auto: true, Exe: exe, Restart: func() error { restarts++; return nil }, Logf: t.Logf})
+	// Automatic updates off: the check sees it, nothing is downloaded until they are on again.
+	u := New(Options{Source: "github:o/r", GitHubAPI: srv.URL, Current: "v1.2.0", Auto: true, Manual: true, Exe: exe, Restart: func() error { restarts++; return nil }, Logf: t.Logf})
 	ctx := context.Background()
 	st, err := u.Check(ctx)
-	if err != nil || !st.Available || st.Latest != "v1.3.0" || st.Notes != "notes" || st.Size != int64(len(archive)) {
+	if err != nil || !st.Available || !st.Manual || st.Latest != "v1.3.0" || st.Notes != "notes" || st.Size != int64(len(archive)) {
 		t.Fatalf("check: %+v %v", st, err)
 	}
+	u.prep.Lock()
+	u.prep.Unlock()
+	if st := u.State(); st.Ready || st.Phase != "idle" {
+		t.Fatalf("downloaded with automatic updates off: %+v", st)
+	}
+	if left, _ := filepath.Glob(filepath.Join(dir, ".iridium-update-*")); len(left) != 0 {
+		t.Fatalf("staged %v", left)
+	}
+	u.SetManual(false)
 	u.prep.Lock() // the download ahead is done
 	u.prep.Unlock()
 	if st := u.State(); !st.Ready || st.Phase != "idle" {

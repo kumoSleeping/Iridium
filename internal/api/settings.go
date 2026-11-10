@@ -23,6 +23,9 @@ type Settings struct {
 	Lang string `json:"lang"`
 	// PairClosed: new pairing requests (POST /api/pair, /api/exec/pair) are turned away.
 	PairClosed bool `json:"pairClosed"`
+	// AutoUpdate: Iridium looks for a newer version by itself and downloads it ahead (on by
+	// default); off, only 检查更新 looks (config update.manual).
+	AutoUpdate bool `json:"autoUpdate"`
 }
 
 // SettingsPatch changes what it gives and nothing else. A mode "" goes back to the agent's own.
@@ -36,4 +39,5 @@ type SettingsPatch struct {
 	EnterInTurn *string           `json:"enterInTurn,omitempty"`
 	Lang        *string           `json:"lang,omitempty"`
 	PairClosed  *bool             `json:"pairClosed,omitempty"`
+	AutoUpdate  *bool             `json:"autoUpdate,omitempty"`
 }
