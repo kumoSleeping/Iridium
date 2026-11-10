@@ -42,7 +42,7 @@
 - `web/src/api/types.gen.ts` 是否已重新生成（网页没动，`extensions.tsx` 还在）。
 - `progress.md` 里还没有 S1b 一段。
 
-## 后面的顺序（详细范围见 workflow 脚本里的 steps，或 prep.md 第 5 节）
+## 后面的顺序（每步的详细范围在 `steps.json`；`next-all.workflow.js` 是跑它们的 workflow 脚本：S1 依次做，再两条线并行，最后合并和 S5）
 
 1. **S1b 收尾**：修上面的失败；补齐限额、登录加入和测试；生成类型；写 progress。
 2. **S1c 网页**：应用管理、应用详情、新建应用（开窗口 + 收录的安装命令）、需要卡片；删扩展页。
