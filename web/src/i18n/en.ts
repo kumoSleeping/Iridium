@@ -78,6 +78,8 @@ export const en: Dict = {
   "chat.writingCall": "Writing…",
   "chat.working": "Working",
   "chat.gone": "No such session",
+  "chat.where": "Where it works",
+  "chat.whereNamed": "Mentioned",
   "chat.elsewhere": "Running elsewhere, read only",
   "chat.subagent": "Subagent, read only ·",
   "chat.subagentParent": "Open its parent",

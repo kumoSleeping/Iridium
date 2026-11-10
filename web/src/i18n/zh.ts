@@ -78,6 +78,8 @@ export const zh = {
   "chat.writingCall": "正在写…",
   "chat.working": "正在工作",
   "chat.gone": "没有这个会话",
+  "chat.where": "在哪干活",
+  "chat.whereNamed": "提到过",
   "chat.elsewhere": "在别处运行，只读",
   "chat.subagent": "子代理，只读 ·",
   "chat.subagentParent": "回到父会话",

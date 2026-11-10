@@ -150,8 +150,9 @@ export function standing(all: Session[], workspaces?: Workspace[]): Standing {
 /** Whether a person opened s, as the page takes it (standing): never a subagent. list: the list. */
 export const isOwn = (s: Session, list: Session[]) => !s.subagent && (s.archived ? !!s.own : standing(list).own.has(s.id));
 
-/** The sessions others started, under the topmost listed one they came from (standing). */
-export const hungUnder = (list: Session[]) => standing(list).hung;
+/** The sessions others started, under the topmost listed one they came from (standing).
+ *  workspaces: the groups, as the list is built with them. */
+export const hungUnder = (list: Session[], workspaces?: Workspace[]) => standing(list, workspaces).hung;
 
 /** The groups at other machines listed (a person opened a session there), by their paths
  *  ("<machine>:<path>"). */
