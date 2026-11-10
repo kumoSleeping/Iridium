@@ -31,6 +31,8 @@ var needKinds = map[api.NeedKind]string{
 	api.NeedInvite:    "网页邀请",
 	api.NeedSecretSet: "存凭据",
 	api.NeedSecretUse: "用凭据",
+	api.NeedAsk:       "会话提问",
+	api.NeedShare:     "分享",
 }
 
 func needsCmd(e adminEnv, args []string, stdout, stderr io.Writer) int {
@@ -77,6 +79,10 @@ func needDetail(n api.Need) string {
 		parts = append(parts, strings.Join(n.Secrets, ","))
 	case api.NeedSecretSet:
 		parts = append(parts, n.Note)
+	case api.NeedAsk:
+		if n.Card != nil {
+			parts = append(parts, n.Card.Title)
+		}
 	}
 	if n.Owner {
 		parts = append(parts, "带 Claude")

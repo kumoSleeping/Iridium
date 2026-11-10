@@ -10,6 +10,9 @@ import type {
   CardReply,
   CompleteUpload,
   NeedAnswer,
+  ShareReply,
+  ShareRequest,
+  ShareTargets,
   NeedReply,
   Needs,
   EditQueued,
@@ -328,6 +331,11 @@ export const api = {
   usage: (days: number, terminal?: string, by?: "hour" | "weekhour") => get<Usage>(`/v1/internal/usage?days=${days}${terminal ? `&app=${enc(terminal)}` : ""}${by ? `&by=${by}` : ""}`),
   confirms: () => get<Needs>("/v1/internal/needs"),
   /** extra: a secret-set's value, a secret-use's "this session". */
+  /** A share put away by the login it was for. */
+  dropNeed: (id: string) => write<{ ok: boolean }>("DELETE", `/v1/internal/needs/${enc(id)}`),
+  /** Something shared with a login (docs/api.md "分享"); targets: who may use it. */
+  share: (r: ShareRequest) => write<ShareReply>("POST", "/v1/internal/share", r),
+  shareTargets: (r: Omit<ShareRequest, "to" | "note">) => get<ShareTargets>(`/v1/internal/share/targets?${new URLSearchParams(Object.entries(r).filter(([, v]) => v) as [string, string][])}`),
   answerConfirm: (id: string, allow: boolean, extra?: Omit<NeedAnswer, "allow">) => write<NeedReply>("POST", `/v1/internal/needs/${enc(id)}`, { allow, ...extra } satisfies NeedAnswer),
 
   // --- the credentials (docs/api.md "凭据"): never a value back ---

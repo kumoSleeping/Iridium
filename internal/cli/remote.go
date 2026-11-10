@@ -34,7 +34,7 @@ type At struct {
 // or its admin: a person on a panel, or ir on that machine, does those.
 var remoteCommands = map[string]bool{
 	"new": true, "send": true, "wait": true, "read": true, "ls": true, "find": true,
-	"stop": true, "archive": true, "unarchive": true, "rename": true, "ws": true, "machines": true,
+	"share": true, "stop": true, "archive": true, "unarchive": true, "rename": true, "ws": true, "machines": true,
 }
 
 // RunAt runs ir with args for a session at another machine, through hc (the daemon's own API,

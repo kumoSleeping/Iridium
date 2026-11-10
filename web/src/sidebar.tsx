@@ -18,6 +18,7 @@ import { colorVar, COLORS, useFolderColors } from "./colors";
 import { ahead, behind } from "./chats";
 import { t, useLang } from "./i18n";
 import { useFlip } from "./motion";
+import { ShareSubmenu } from "./share";
 import { folderLevels, sessionLevels, usePushMenus, wsLevels, type PushLevel } from "./push";
 import { allFolders, folderSessions, foldersHolding, foldRest, groupHolding, machineOf, remotePath, type Folder as FolderNode, type Tree, type WsNode } from "./tree";
 import { createAt, onOpenPlace, type Place } from "./places";
@@ -1203,7 +1204,12 @@ function SessionMenu({ s, at, close, rename, detach }: { s: Session; at: { x: nu
           <MenuItems
             items={items}
             tags={sessionTags(s)}
-            foot={<PushFoot levels={sessionLevels(s)} i={items.length} />}
+            foot={
+              <>
+                <ShareSubmenu thing={{ what: "session", session: s.id }} i={items.length} />
+                <PushFoot levels={sessionLevels(s)} i={items.length + 1} />
+              </>
+            }
           />
         </Menu.Positioner>
       </Menu.Portal>

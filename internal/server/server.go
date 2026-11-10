@@ -62,10 +62,11 @@ type Server struct {
 	cmu     sync.Mutex // one config change at a time (SaveConfig); guards cfg's settings
 	gmu     sync.Mutex // one gate change at a time
 	g       atomic.Pointer[gate.Gate]
-	initErr error  // the gate for cfg.Public.Origin would not open; Listen gives it
-	asks    *needs // what waits for a person (needs.go)
-	pairs   *pairs // apps asking to pair (pairing.go)
-	vault   *vault // the credentials' masks and allowed uses (routes_secrets.go)
+	initErr error      // the gate for cfg.Public.Origin would not open; Listen gives it
+	asks    *needs     // what waits for a person (needs.go)
+	more    *moreNeeds // asks' first sightings, shares (needs_more.go)
+	pairs   *pairs     // apps asking to pair (pairing.go)
+	vault   *vault     // the credentials' masks and allowed uses (routes_secrets.go)
 
 	// Push, if set before Handler, is Web Push (routes_push.go).
 	Push *push.Service
@@ -96,6 +97,7 @@ func New(cfg config.Config, m *session.Manager, h *hub.Hub, logf func(string, ..
 	m.SetAnnotate(s.files.AnnotateBlocks) // a state's tail names files as a page of messages does
 	s.sat = satori.New(satoriBackend{s}, logf)
 	m.Watch(s.sat.Notice)
+	s.wireNeeds()
 	g, err := s.newGate(cfg.Public.Origin)
 	if err != nil {
 		s.initErr = err
@@ -150,6 +152,7 @@ func (s *Server) Handler(local bool) http.Handler {
 	})
 	mux.HandleFunc("GET /api/events", s.masked(s.events))
 	s.appRoutes(mux)
+	s.shareRoutes(mux) // share.go
 	s.secretRoutes(mux)
 	s.updateRoutes(mux)
 	s.settingsRoutes(mux)
@@ -470,7 +473,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	_ = rc.Flush()
 	sub := s.hub.Subscribe(keys) // none it may carry: open all the same, pinging
 	defer sub.Close()
-	sub.Filter = s.stateFilter(c)
+	sub.Filter = s.streamFilter(c)
 	_ = sub.Serve(r.Context(), w, func() { _ = rc.Flush() })
 }
 
@@ -506,7 +509,7 @@ func (s *Server) watchStates(ctx context.Context, c caller, keys []string, emit 
 	}
 	sub := s.hub.Subscribe(carried)
 	defer sub.Close()
-	sub.Filter = s.stateFilter(c)
+	sub.Filter = s.streamFilter(c)
 	return sub.Run(ctx, emit, func() error { return nil }, func() {})
 }
 

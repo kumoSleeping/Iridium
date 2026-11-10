@@ -864,6 +864,15 @@ export const NeedInvite: NeedKind = "invite"; // an agent's ir invite
 export const NeedSecretSet: NeedKind = "secret_set"; // an agent's ir secret set: a person types the value
 export const NeedSecretUse: NeedKind = "secret_use"; // an agent's ir run with credentials
 /**
+ * NeedAsk: a session's question, approval or plan (Card), for whoever may use the session;
+ * answered through the card (POST /api/sessions/{id}/answer), not POST /api/needs/{id}.
+ */
+export const NeedAsk: NeedKind = "ask";
+/**
+ * NeedShare: something shared with this login (Share); DELETE /api/needs/{id} puts it away.
+ */
+export const NeedShare: NeedKind = "share";
+/**
  * Need is what waits for a person (docs/next/k_glossary.md "需要"): an app's or a login's request,
  * or what an agent's ir asked for that only a person may give. It waits in the carried state
  * "needs" till the host or a login of ir_web that may approve answers it. No secrets.
@@ -914,9 +923,22 @@ export interface Need {
    * Login: login_join, the login's ID within App.
    */
   login?: string;
+  /**
+   * Card: ask, the ask as a card (its id "ask:<session>:<request>" is the need's). Origin: ask,
+   * the app or login of ir_web that began the turn, if known.
+   */
+  card?: Card;
+  origin?: string;
+  /**
+   * Share: share, what was shared and by whom; To, the login of ir_web it is for.
+   */
+  share?: Share;
+  to?: string;
 }
 /**
- * Needs is the carried state "needs" (GET /api/needs): the pending ones, oldest first.
+ * Needs is the carried state "needs" (GET /api/needs): the pending ones, oldest first, as the
+ * caller may see them: applications for a person on ir_web or at the host, asks of the sessions it
+ * may use, what was shared with it.
  */
 export interface Needs {
   pending: Need[];
@@ -1813,6 +1835,89 @@ export interface SettingsPatch {
   push?: boolean;
   enterInTurn?: string;
   lang?: string;
+}
+
+//////////
+// source: share.go
+
+/**
+ * ShareWhat is what a Share is of.
+ */
+export type ShareWhat = string;
+export const ShareOfSession: ShareWhat = "session";
+export const ShareOfReply: ShareWhat = "reply"; // one block of a session: Session and At
+export const ShareOfPlace: ShareWhat = "place"; // a folder: Place
+export const ShareOfFile: ShareWhat = "file"; // a file: Session, and Ref or Path
+/**
+ * Share is something shared with one login (draft 二「消息」 分享; POST /api/share, ir share): a
+ * session, a reply, a place or a file, who shared it and a note. Iridium checks the login may use
+ * what is shared (a session's agent and scope; a place's or a file's scope); what it does with it
+ * is its app's: a login of ir_web finds it among its needs (and a Web Push), another app's gets a
+ * Satori event (internal, _type ir.share).
+ */
+export interface Share {
+  what: ShareWhat;
+  session?: string;
+  at?: string; // reply: the block's place
+  place?: string; // place: "应用名:路径"
+  ref?: string; // file: its ref in Session
+  path?: string; // file: its path (Iridium fills it from Ref); place: the folder's
+  note?: string;
+  /**
+   * Filled by Iridium: Machine, the app the place, file or session is at ("" the host's); Title,
+   * the session's name or title, a file's name or the reply's opening; From, the app or login of
+   * ir_web that shared it, FromName its name, FromSession the session whose agent did (ir share);
+   * At (ms) when.
+   */
+  machine?: string;
+  title?: string;
+  from?: string;
+  fromName?: string;
+  fromSession?: string;
+  sharedAt?: number /* int64 */;
+}
+/**
+ * ShareRequest is POST /api/share: what (Share's what and its refs; the rest Iridium fills) and to
+ * whom, "应用/登录" (an app's name or ID; ir_web for a login of the web). Caller: the session ir
+ * runs in, as ir send has it.
+ */
+export interface ShareRequest {
+  what: ShareWhat;
+  session?: string;
+  at?: string;
+  place?: string;
+  ref?: string;
+  path?: string;
+  note?: string;
+  to: string;
+  caller?: string;
+}
+/**
+ * ShareReply is where a share went: the app and login (IDs, and the login's name), and for a login
+ * of ir_web how many of its browsers were pushed to.
+ */
+export interface ShareReply {
+  app: string;
+  login: string;
+  name?: string;
+  pushed?: number /* int */;
+}
+/**
+ * ShareTargets is GET /api/share/targets (what as ShareRequest's, in the query): the apps whose
+ * logins may use it, each with those logins; the caller itself left out.
+ */
+export interface ShareTargets {
+  apps: ShareApp[];
+}
+export interface ShareApp {
+  id: string;
+  name: string;
+  logins: ShareLogin[];
+}
+export interface ShareLogin {
+  id: string;
+  name: string;
+  avatar?: string;
 }
 
 //////////

@@ -156,7 +156,12 @@ func TestApprovers(t *testing.T) {
 	if l.want(403, "agent", "POST", "/api/needs/x", api.NeedAnswer{}, &e); e.Code != "no_permission" {
 		t.Fatalf("an agent: %+v", e)
 	}
-	l.want(403, app.Token, "GET", "/api/needs", nil, nil)
+	// An app sees only the asks of sessions it may use (none here), never the applications.
+	var ns api.Needs
+	if l.want(200, app.Token, "GET", "/api/needs", nil, &ns); len(ns.Pending) != 0 {
+		t.Fatalf("an app's needs: %+v", ns)
+	}
+	l.want(403, "agent", "GET", "/api/needs", nil, nil)
 	l.want(403, app.Token, "DELETE", "/api/apps/bot", nil, nil)
 	l.want(403, "agent", "DELETE", "/api/apps/bot", nil, nil)
 	// What an app may use: set by whoever approves, cleaned; never by an agent or an app.

@@ -54,6 +54,7 @@
 | `message-created` | agent 进程出错 | `error` |
 | `message-updated` | 提问结束（答了或撤了）：去掉按钮，加“已结束” | `ask` |
 | `interaction/button` | 某个登录按了按钮 | — |
+| `internal`（`_type: ir.share`） | 有人分享给这个登录（`docs/api.md` 分享）；只发给它 | `share`，`_data.share` 是 `Share` |
 
 `_type` 固定 `iridium`，`_data.origin` 是发起这个回合的应用或网页登录（知道时）。agent 说的话能在记录里找到时，`message.id` 就是块的位置；找不到时是 `live:…`，只能在 24 小时内用 `message.get` 取。
 

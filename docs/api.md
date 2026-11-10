@@ -299,7 +299,7 @@ Web Push，总开关在配置 `push`，默认关。VAPID 密钥存在状态目�
 
 `PushRule{scope, target, mode, events?}`：`scope` 是 `workspace`（`target` 是工作区 ID，`"0"` 是没归类的）、`folder`（会话目录的绝对路径，只管这一个目录）、`session`（会话 ID）；`mode` 是 `on` 或 `off`；`events` 只跟 `on`。一个会话的事件：会话、文件夹、工作区里最近的那条规则说开还是关（都没有就开）；开的话，事件取最近一条带 `events` 的 `on` 规则的，没有就用 `defaults`。
 
-推送的内容（service worker 收到的 JSON）：`PushMessage{kind, session, title, body, tag}`，`kind` 是 `needs_you`、`error`、`turn_end`、`notice`、`test`；`tag` 是会话 ID。推送服务回 404/410 的订阅删掉。
+推送的内容（service worker 收到的 JSON）：`PushMessage{kind, session, title, body, tag}`，`kind` 是 `needs_you`、`error`、`turn_end`、`notice`、`share`、`test`；`tag` 是会话 ID。推送服务回 404/410 的订阅删掉。
 
 ## 发给一个登录（`ir send 应用/登录`）
 
@@ -307,6 +307,19 @@ Web Push，总开关在配置 `push`，默认关。VAPID 密钥存在状态目�
 
 - 网页的登录：作为 Web Push（`kind: notice`），标题是发出它的会话，点开到那个会话。对方要看得到那个会话（范围）。
 - 送不到时 422 `not_deliverable` 带原因：推送关着、对方没有开推送的浏览器、看不到发出它的会话、别的应用的登录（等它们走 Satori）。没有这个应用、登录：422 `no_such_app`、`no_such_login`。
+
+## 分享（`ir share`）
+
+`POST /api/share`，`ShareRequest{what, session?, at?, place?, ref?, path?, note?, to}` → `ShareReply{app, login, name, pushed}`。`to` 是 `应用/登录`（网页登录是 `ir_web/登录`）。`what`：
+
+- `session`：对方要能用这个会话（范围加 agent）。
+- `reply`：会话的一块（`at`），对方要看得到会话。
+- `place`：`应用名:路径`，对方的范围要有它。
+- `file`：会话里的文件，`ref`，或本机会话的 `path`（随之附进会话）；对方要看得到会话，范围有这个文件。
+
+分享的人自己也要看得到。Iridium 补上 `machine`、`title`、`from`、`fromName`、`fromSession`、`sharedAt`。送达：网页登录收到一条 `share` 需要，推送开着时再推一条（`kind: share`）；别的应用的登录收到 Satori 事件 `internal`，`_type: ir.share`，`_data: {kind: share, share}`，只发给它。错误：422 `no_such_app`、`no_such_login`、`not_usable`；400 缺东西或分享给自己。
+
+`GET /api/share/targets?what=&session=&…` → `ShareTargets{apps: [{id, name, logins}]}`：能用它的应用和登录（不含自己），网页“分享到 ▸”用。
 
 ## 应用的接口
 
@@ -356,11 +369,17 @@ Web Push，总开关在配置 `push`，默认关。VAPID 密钥存在状态目�
 
 ## 需要（`Need`）
 
-等一个人决定的事，内存里存 10 分钟。种类：`app_join`、`app_update`、`app_change`、`login_join`、`invite`、`secret_set`、`secret_use`。网页在应用管理和侧栏“需要你”里画成卡片；`ir needs`、`ir allow <id>`、`ir deny <id>`。
+等一个人决定的事，一个队列。申请（`app_join`、`app_update`、`app_change`、`login_join`、`invite`、`secret_set`、`secret_use`）内存里存 10 分钟，主机和网页登录看得到。另有：
+
+- `ask`：会话开着的提问、审批、计划，`id` 和 `card.id` 一样（`ask:<会话>:<请求>`），带 `session`、`card`、`origin`（发起这个回合的应用或登录）。只给能用这个会话的（范围加 agent，同 `using`）。用会话的 `POST /api/sessions/{id}/answer` 回答，不走 `POST /api/needs/{id}`。
+- `share`：分享给这个网页登录的东西（`share`），只给它自己，存 24 小时；`DELETE /api/needs/{id}` 收起。
+
+网页在应用管理和侧栏“需要你”里画成卡片（会话里的提问仍在会话里画，不重复）；`ir needs`、`ir allow <id>`、`ir deny <id>`。
 
 | 请求 | 正文 → 回答 | 说明 |
 |---|---|---|
-| `GET /api/needs` | → `Needs` | 主机和网页登录。hub 键 `needs` 是同一份 |
+| `GET /api/needs` | → `Needs` | 按调用方过滤（见上）；agent 的 `ir` 403。hub 键 `needs` 每条流也按它的调用方过滤 |
+| `DELETE /api/needs/{id}` | → `{ok}` | 网页登录收起分享给自己的一条 |
 | `POST /api/needs/{id}` | `NeedAnswer` → `NeedReply` | 允许或拒绝。只有能批的：主机上的人，或有 Claude、agent 和范围都是全部的网页登录；agent 的 `ir` 一律 403。`perms`：给的权限（不超过申请的）；`name`：配对时改名；`owner`：本人的（得 Claude）；`value`、`forSession`：凭据用 |
 | `GET /api/needs/{id}?wait=<秒>` | → `NeedState` | 结果，从不带秘密 |
 
