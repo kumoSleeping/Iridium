@@ -53,7 +53,7 @@ type InviteInfo struct {
 	ExpiresAt time.Time `json:"expiresAt,omitzero"`
 }
 
-// Access is what `ir access` shows.
+// Access is what `ir apps` shows.
 type Access struct {
 	Endpoints []EndpointInfo `json:"endpoints"`
 	Invites   []InviteInfo   `json:"invites"`
