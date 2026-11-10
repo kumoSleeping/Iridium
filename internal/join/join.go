@@ -22,7 +22,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -64,8 +63,9 @@ type Options struct {
 	// Resident: started at login, no one to match a code. It never pairs, and ends (cleanly, not
 	// to be started again) once it has no TOKEN.
 	Resident bool
-	// Bot: pair as a Bot (POST /api/pair, ir pair): its name and Program only.
+	// Bot: pair as an app that is not a computer (ir pair): its name, Type and Program only.
 	Bot     bool
+	Type    string
 	Program string
 }
 
@@ -361,26 +361,24 @@ func (o *Options) token(ctx context.Context) (string, error) {
 // errUnpaired: a resident has no TOKEN; a person runs ir join again to pair.
 var errUnpaired = errors.New("未配对")
 
-// errDenied: a panel declined the pairing.
+// errDenied: a person declined the pairing.
 var errDenied = errors.New("配对被拒绝")
 
-// errClosed: the Iridium takes no pairing requests now (its settings).
-var errClosed = errors.New("对方已停止接收连接申请")
-
 // pairWait is how long it waits between asks after the Iridium could not be reached, and between
-// looks at a pending request.
-var pairWait, pairPoll = 30 * time.Second, 2 * time.Second
+// looks at a pending request; pairClosedWait, between asks while that Iridium takes none.
+var pairWait, pairPoll, pairClosedWait = 30 * time.Second, 2 * time.Second, 5 * time.Second
 
-// pair asks the Iridium to pair until a panel allows it (the TOKEN) or declines it.
+// pair asks the Iridium to pair until a person allows it (the TOKEN) or declines it. While it
+// takes no requests (pair_closed, or too many waiting) it asks again.
 func (o *Options) pair(ctx context.Context) (string, error) {
 	name := o.Name
 	if name == "" {
 		name = MachineName()
 	}
-	who := api.ExecPair{Name: name, OS: runtime.GOOS, Arch: runtime.GOARCH, Program: o.program(), NoShell: o.NoShell, AgentShell: o.AgentShell && !o.NoShell}
-	path := "/api/exec/pair"
+	who := api.PairRequest{Name: name, Type: "computer", OS: runtime.GOOS, Arch: runtime.GOARCH, Program: o.program(), NoShell: o.NoShell, AgentShell: o.AgentShell && !o.NoShell}
+	const path = "/api/pair"
 	if o.Bot {
-		who, path = api.ExecPair{Name: name, Program: o.Program}, "/api/pair"
+		who = api.PairRequest{Name: name, Type: o.Type, Program: o.Program}
 	} else {
 		if o.Agents == nil && !o.NoAgents {
 			o.Agents = FindAgents(o.Logf)
@@ -389,14 +387,26 @@ func (o *Options) pair(ctx context.Context) (string, error) {
 			who.Agents = append(who.Agents, api.ExecAgent{Agent: a.Agent, Version: a.Version})
 		}
 	}
+	closed := false
 	for {
-		var p api.ExecPairing
-		code, err := o.call(ctx, http.MethodPost, path, who, &p)
-		if err == nil && code == http.StatusForbidden {
-			return "", errClosed
+		var p api.Pairing
+		code, refusal, err := o.call(ctx, http.MethodPost, path, who, &p)
+		if err == nil && code == http.StatusForbidden && (refusal.Code == "pair_closed" || refusal.Code == "too_many_pending") {
+			if !closed {
+				o.say("%s 没有开放配对：在那边运行 ir apps open，或在应用管理里新建应用；等待中", o.URL)
+				closed = true
+			}
+			if !sleep(ctx, pairClosedWait) {
+				return "", ctx.Err()
+			}
+			continue
+		}
+		closed = false
+		if err == nil && code == http.StatusUnprocessableEntity && refusal.Code == "bad_name" {
+			return "", fmt.Errorf("名字 %q 不能用（%s）：用 --name 换一个", name, refusal.NameError)
 		}
 		if err == nil && code != http.StatusOK {
-			err = fmt.Errorf("HTTP %d", code)
+			err = fmt.Errorf("HTTP %d %s", code, refusal.Message)
 		} else if err == nil && p.Code == "" {
 			err = errors.New("no code in the answer")
 		}
@@ -416,12 +426,12 @@ func (o *Options) pair(ctx context.Context) (string, error) {
 			if !sleep(ctx, pairPoll) {
 				return "", ctx.Err()
 			}
-			var st api.ExecPairState
-			code, err := o.call(ctx, http.MethodGet, path+"/"+url.PathEscape(p.Request), nil, &st)
+			var st api.PairState
+			code, _, err := o.call(ctx, http.MethodGet, path+"/"+url.PathEscape(p.Request), nil, &st)
 			switch {
-			case err != nil || (code != http.StatusOK && code != http.StatusNotFound):
+			case err != nil || (code != http.StatusOK && code != http.StatusUnprocessableEntity):
 				continue // as pending
-			case code == http.StatusNotFound || st.Status == "expired":
+			case code == http.StatusUnprocessableEntity || st.Status == "expired":
 				o.say("配对码已过期，重新申请")
 				break poll
 			case st.Status == "allowed" && st.Token != "":
@@ -433,40 +443,40 @@ func (o *Options) pair(ctx context.Context) (string, error) {
 	}
 }
 
-// call sends a JSON request to the Iridium: the status, and the body read into out.
-func (o *Options) call(ctx context.Context, method, path string, body, out any) (int, error) {
+// call sends a JSON request to the Iridium: the status, the refusal if not 200, and the body read
+// into out.
+func (o *Options) call(ctx context.Context, method, path string, body, out any) (int, api.Error, error) {
+	var refusal api.Error
 	var r io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
 		if err != nil {
-			return 0, err
+			return 0, refusal, err
 		}
 		r = bytes.NewReader(b)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, o.URL+path, r)
 	if err != nil {
-		return 0, err
+		return 0, refusal, err
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	resp, err := o.client().Do(req)
 	if err != nil {
-		return 0, err
+		return 0, refusal, err
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 	if resp.StatusCode == http.StatusOK && out != nil {
 		if err := json.Unmarshal(raw, out); err != nil {
-			return resp.StatusCode, err
+			return resp.StatusCode, refusal, err
 		}
 	}
-	if resp.StatusCode == http.StatusTooManyRequests {
-		if s, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil && s > 0 {
-			return resp.StatusCode, fmt.Errorf("too many pairing requests (again in %ds)", s)
-		}
+	if resp.StatusCode != http.StatusOK {
+		_ = json.Unmarshal(raw, &refusal)
 	}
-	return resp.StatusCode, nil
+	return resp.StatusCode, refusal, nil
 }
 
 func sleep(ctx context.Context, d time.Duration) bool {

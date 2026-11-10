@@ -14,7 +14,6 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/gate"
 	"github.com/kumoSleeping/iridium/internal/qq"
 )
@@ -179,8 +178,16 @@ type ChatState struct {
 	Waiting []Outgoing `json:"waiting,omitempty"`
 }
 
-// Status is how the running plugin stands, for iridium-qq status and Iridium's page.
-type Status = api.ExtensionRunning
+// Status is how the running plugin stands, for iridium-qq status.
+type Status struct {
+	PID          int    `json:"pid"`
+	QQ           bool   `json:"qq"` // connected to QQ
+	QQError      string `json:"qqError,omitempty"`
+	Iridium      bool   `json:"iridium"` // its event stream is open
+	IridiumError string `json:"iridiumError,omitempty"`
+	Bot          string `json:"bot,omitempty"` // the bot's name on QQ
+	At           int64  `json:"at"`
+}
 
 // Pair is a pairing code: the next private message with it makes its sender an owner.
 type Pair struct {

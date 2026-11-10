@@ -202,7 +202,6 @@ func serve(args []string) int {
 	defer stop()
 	go srv.Updater.Run(ctx)
 	go srv.Prices.Run(ctx)
-	go srv.SyncExtensions(ctx)
 	if err := srv.Serve(ctx, tcp, sock); err != nil {
 		log.Print(err)
 		return 1

@@ -72,11 +72,11 @@ func runAs(e adminEnv, args ...string) (int, string, string) {
 func approve(t *testing.T, as adminEnv, allow bool) string {
 	t.Helper()
 	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(20 * time.Millisecond) {
-		var cs api.Confirms
-		as.call("GET", "/api/confirms", nil, &cs)
+		var cs api.Needs
+		as.call("GET", "/api/needs", nil, &cs)
 		if len(cs.Pending) == 1 {
 			var raw json.RawMessage
-			if _, err := as.call("POST", "/api/confirms/"+cs.Pending[0].ID, api.ConfirmAnswer{Allow: allow}, &raw); err != nil {
+			if _, err := as.call("POST", "/api/needs/"+cs.Pending[0].ID, api.NeedAnswer{Allow: allow}, &raw); err != nil {
 				t.Fatal(err)
 			}
 			return string(raw)
@@ -101,20 +101,20 @@ func agentRun(e adminEnv, args ...string) chan [3]string {
 // person: its TOKEN. claude: allowed as the owner's own.
 func pairApp(t *testing.T, person adminEnv, name string, claude bool) string {
 	t.Helper()
-	var p api.ExecPairing
-	if _, err := person.call("POST", "/api/pair", api.ExecPair{Name: name}, &p); err != nil {
+	var p api.Pairing
+	if _, err := person.call("POST", "/api/pair", api.PairRequest{Name: name}, &p); err != nil {
 		t.Fatal(err)
 	}
-	var cs api.Confirms
-	person.call("GET", "/api/confirms", nil, &cs)
+	var cs api.Needs
+	person.call("GET", "/api/needs", nil, &cs)
 	for _, c := range cs.Pending {
 		if c.Code == p.Code {
-			if _, err := person.call("POST", "/api/confirms/"+c.ID, api.ConfirmAnswer{Allow: true, Owner: claude}, nil); err != nil {
+			if _, err := person.call("POST", "/api/needs/"+c.ID, api.NeedAnswer{Allow: true, Owner: claude}, nil); err != nil {
 				t.Fatal(err)
 			}
 		}
 	}
-	var st api.ExecPairState
+	var st api.PairState
 	if _, err := person.call("GET", "/api/pair/"+p.Request, nil, &st); err != nil || st.Status != "allowed" {
 		t.Fatalf("pairing %s: %+v %v", name, st, err)
 	}

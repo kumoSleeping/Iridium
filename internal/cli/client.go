@@ -121,10 +121,10 @@ func (e *env) request(method, path string, body any) (*http.Response, error) {
 		defer resp.Body.Close()
 		var ae api.Error
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
-		if json.Unmarshal(b, &ae) != nil || ae.Error == "" {
-			ae.Error = strings.TrimSpace(string(b))
+		if json.Unmarshal(b, &ae) != nil || ae.Message == "" {
+			ae.Message = strings.TrimSpace(string(b))
 		}
-		return nil, &apiError{status: resp.StatusCode, msg: ae.Error}
+		return nil, &apiError{status: resp.StatusCode, msg: ae.Message}
 	}
 	return resp, nil
 }

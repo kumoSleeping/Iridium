@@ -186,7 +186,7 @@ func (s *Server) remoteError(w http.ResponseWriter, err error) {
 	case wire.IsCode(err, wire.CodeNotFound):
 		fail(w, http.StatusNotFound, err.Error())
 	case wire.IsCode(err, wire.CodeDenied):
-		fail(w, http.StatusForbidden, err.Error())
+		refuse(w, http.StatusForbidden, "denied", err.Error())
 	case wire.IsCode(err, wire.CodeBadRequest):
 		fail(w, http.StatusBadRequest, err.Error())
 	default:

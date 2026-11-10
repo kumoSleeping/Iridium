@@ -150,16 +150,17 @@ func (id Identity) Host() bool { return id.App == HostID }
 func (id Identity) Web() bool { return id.App == WebApp && id.Login != "" }
 
 // ID is the identity's storage ID, which permissions, usage and openers are kept by: the login's
-// for ir_web, else the app's (HostID for the host).
+// for ir_web, else the app's (HostID for the host). Another app's login counts as its app till S2.
 func (id Identity) ID() string {
-	if id.Login != "" {
+	if id.Web() {
 		return id.Login
 	}
 	return id.App
 }
 
 // CanManage reports whether the identity may manage apps: ir_web's logins and the host. (Until
-// S2's permissions: what 0.1 let panels and 本机 do.)
+// S2's permissions: what 0.1 let panels and 本机 do.) An agent's ir has the identity of the host
+// or of its session's opener: the server keeps it from approving (decision 15).
 func (id Identity) CanManage() bool { return id.Host() || id.Web() }
 
 // HostIdentity is the host's identity.
@@ -780,8 +781,10 @@ func privateCacheControl(v string) string {
 	return strings.Join(out, ", ")
 }
 
+// apiError is a refusal: its code (decision 8: 401 unauthenticated only for a TOKEN or login
+// that is not valid; the rest 403 or other statuses with a code).
 type apiError struct {
-	Error string `json:"error"`
+	Code string `json:"code"`
 }
 
 func tooMany(w http.ResponseWriter, d time.Duration) {

@@ -205,6 +205,8 @@ var schema = []string{
 	ALTER TABLE workspaces ADD COLUMN flat INTEGER NOT NULL DEFAULT 0;`,
 	// 26: apps, the logins of ir_web and the host in place of terminals (0.2, apps.go).
 	appsSchema,
+	// 27: what an app was given as it paired, or by a change it asked for (logins.go): '' all.
+	`ALTER TABLE apps ADD COLUMN perms TEXT NOT NULL DEFAULT '';`,
 }
 
 // steps run in Go after the migration of their version, in the same transaction.

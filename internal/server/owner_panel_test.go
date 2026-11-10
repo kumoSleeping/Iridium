@@ -90,44 +90,47 @@ func TestOwnerFromPanels(t *testing.T) {
 	// An agent's: a confirmation that says so, no secret.
 	var p api.Pending
 	l.want(202, "agent", "POST", "/api/invites", api.NewInvite{Name: "pad", Claude: true}, &p)
-	if !p.Confirm.Owner {
-		t.Fatalf("pending: %+v", p.Confirm)
+	if !p.Need.Owner {
+		t.Fatalf("pending: %+v", p.Need)
 	}
 	l.want(202, "agent-in:s", "POST", "/api/invites", api.NewInvite{Name: "pad2", Claude: true}, nil)
 	// Neither a login without Claude nor a page without a login allows it; it stays waiting.
-	if code := as(t, guest, l.s.answerConfirm, "POST", p.Confirm.ID, api.ConfirmAnswer{Allow: true}, nil); code != 403 {
+	if code := as(t, guest, l.s.approver(l.s.answerNeed), "POST", p.Need.ID, api.NeedAnswer{Allow: true}, nil); code != 403 {
 		t.Fatalf("a login without Claude allowed Claude: %d", code)
 	}
-	if code := as(t, page, l.s.answerConfirm, "POST", p.Confirm.ID, api.ConfirmAnswer{Allow: true}, nil); code != 403 {
+	if code := as(t, page, l.s.approver(l.s.answerNeed), "POST", p.Need.ID, api.NeedAnswer{Allow: true}, nil); code != 403 {
 		t.Fatalf("the page without a login allowed: %d", code)
 	}
-	var st api.ConfirmState
-	l.want(200, "agent", "GET", "/api/confirms/"+p.Confirm.ID, nil, &st)
+	var st api.NeedState
+	l.want(200, "agent", "GET", "/api/needs/"+p.Need.ID, nil, &st)
 	if st.State != "pending" || !st.Owner {
 		t.Fatalf("after the refusals: %+v", st)
 	}
 	// The owner's login allows it: the invite has Claude, marked by a login.
-	var ans api.ConfirmReply
-	if code := as(t, owner, l.s.answerConfirm, "POST", p.Confirm.ID, api.ConfirmAnswer{Allow: true}, &ans); code != 200 || ans.Invite == nil {
+	var ans api.NeedReply
+	if code := as(t, owner, l.s.approver(l.s.answerNeed), "POST", p.Need.ID, api.NeedAnswer{Allow: true}, &ans); code != 200 || ans.Invite == nil {
 		t.Fatalf("the owner's login allowing: %d %+v", code, ans)
 	}
 	if c := claudeOf("pad"); c == nil || c.By != "panel" {
 		t.Fatalf("allowed invite's Claude: %+v", c)
 	}
-	l.want(200, "agent", "GET", "/api/confirms/"+p.Confirm.ID, nil, &st)
+	l.want(200, "agent", "GET", "/api/needs/"+p.Need.ID, nil, &st)
 	if st.State != "allowed" || !st.Owner {
 		t.Fatalf("the agent's view: %+v", st)
 	}
 
-	// Any login may deny one.
+	// A login that may not approve may not deny either (decision 15); one that may, does.
 	l.want(202, "agent", "POST", "/api/invites", api.NewInvite{Name: "pad3", Claude: true}, &p)
-	if code := as(t, guest, l.s.answerConfirm, "POST", p.Confirm.ID, api.ConfirmAnswer{Allow: false}, &ans); code != 200 || ans.State != "denied" {
+	if code := as(t, guest, l.s.approver(l.s.answerNeed), "POST", p.Need.ID, api.NeedAnswer{Allow: false}, &ans); code != 403 {
+		t.Fatalf("a login without Claude denying: %d %+v", code, ans)
+	}
+	if code := as(t, owner, l.s.approver(l.s.answerNeed), "POST", p.Need.ID, api.NeedAnswer{Allow: false}, &ans); code != 200 || ans.State != "denied" {
 		t.Fatalf("a login denying: %d %+v", code, ans)
 	}
 	// The host's ir allows one: marked local.
 	l.want(202, "agent", "POST", "/api/invites", api.NewInvite{Name: "pad4", Claude: true}, &p)
-	ans = api.ConfirmReply{}
-	l.want(200, "socket", "POST", "/api/confirms/"+p.Confirm.ID, api.ConfirmAnswer{Allow: true}, &ans)
+	ans = api.NeedReply{}
+	l.want(200, "socket", "POST", "/api/needs/"+p.Need.ID, api.NeedAnswer{Allow: true}, &ans)
 	if c := claudeOf("pad4"); ans.Invite == nil || c == nil || c.By != "local" {
 		t.Fatalf("the host allowing: %+v %+v", ans, c)
 	}

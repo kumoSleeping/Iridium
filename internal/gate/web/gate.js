@@ -136,7 +136,7 @@ async function login() {
   status(''); // the spinner in the key says it
   const opt = await api('/_ir/api/login/options', {});
   if (opt.status !== 200) {
-    status(opt.data.error === 'no_passkey' ? t('noPasskey') : requestError(opt), true);
+    status(opt.data.code === 'no_passkey' ? t('noPasskey') : requestError(opt), true);
     return;
   }
   const o = opt.data.options;

@@ -91,7 +91,7 @@ func (s *Server) shellError(w http.ResponseWriter, err error) {
 	case errors.Is(err, session.ErrNoRun), errors.Is(err, fs.ErrNotExist), wire.IsCode(err, wire.CodeNotFound):
 		fail(w, http.StatusNotFound, err.Error())
 	case errors.Is(err, session.ErrNoShell):
-		fail(w, http.StatusForbidden, err.Error())
+		refuse(w, http.StatusForbidden, "no_shell", err.Error())
 	case errors.Is(err, session.ErrOffline):
 		fail(w, http.StatusConflict, err.Error())
 	case errors.As(err, new(*wire.Error)):

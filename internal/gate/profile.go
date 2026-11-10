@@ -17,7 +17,7 @@ import (
 //
 // The body is multipart/form-data with optional fields "name", "avatar" (a file) and
 // "removeAvatar" ("1"), or JSON {"name"?, "avatar"? (base64 or a data: URL), "removeAvatar"?}.
-// The reply is the updated EndpointInfo, or {"error": ..., "nameError"?: ...}.
+// The reply is the updated EndpointInfo, or {"code": ..., "nameError"?: ...} (422 bad_name).
 func (g *Gate) ServeProfile(w http.ResponseWriter, r *http.Request, id string) {
 	caller, ok := FromContext(r.Context())
 	switch {
@@ -55,10 +55,10 @@ func (g *Gate) ServeProfile(w http.ResponseWriter, r *http.Request, id string) {
 	case err == nil:
 		writeJSON(w, http.StatusOK, info)
 	case nameCode(err) != "":
-		writeJSON(w, http.StatusConflict, struct {
-			Error     string `json:"error"`
+		writeJSON(w, http.StatusUnprocessableEntity, struct {
+			Code      string `json:"code"`
 			NameError string `json:"nameError"`
-		}{"name", nameCode(err)})
+		}{"bad_name", nameCode(err)})
 	case errors.Is(err, ErrAvatarTooLarge):
 		writeJSON(w, http.StatusRequestEntityTooLarge, apiError{"avatar_too_large"})
 	case errors.Is(err, ErrAvatarFormat):

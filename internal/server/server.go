@@ -61,8 +61,8 @@ type Server struct {
 	gmu     sync.Mutex // one gate change at a time
 	g       atomic.Pointer[gate.Gate]
 	initErr error // the gate for cfg.Public.Origin would not open; Listen gives it
-	asks    *confirms
-	pairs   *pairs // executors asking to pair (routes_pair.go)
+	asks    *needs // what waits for a person (needs.go)
+	pairs   *pairs // apps asking to pair (pairing.go)
 	vault   *vault // the credentials' masks and allowed uses (routes_secrets.go)
 
 	// Set before Handler, if at all: the plugin chat layer, Web Push, and who a request is from.
@@ -78,10 +78,6 @@ type Server struct {
 	Remote *remote.Hub
 
 	files *files.Service // routes_files.go
-
-	// ExtDir is where the official extensions' binaries go; "" is beside Iridium's (extensions.go).
-	ExtDir string
-	ext    extensions
 }
 
 // New is the API over m. The interactive terminals live in m's store, behind the Passkey gate
@@ -91,8 +87,9 @@ func New(cfg config.Config, m *session.Manager, h *hub.Hub, logf func(string, ..
 		logf = log.Printf
 	}
 	s := &Server{cfg: cfg, m: m, hub: h, st: m.Store(), files: newFiles(cfg, m, logf), logf: logf}
-	s.asks = newConfirms(h)
+	s.asks = newNeeds(h)
 	s.pairs = newPairs()
+	s.publishPairing()
 	s.vault = newVault()
 	s.reloadSecrets()
 	m.SetAnnotate(s.files.AnnotateBlocks) // a state's tail names files as a page of messages does
@@ -147,7 +144,6 @@ func (s *Server) Handler(local bool) http.Handler {
 	mux.HandleFunc("GET /api/exec", s.execConnect)
 	s.pairRoutes(mux)
 	s.machineRoutes(mux)
-	s.extensionRoutes(mux)
 	s.discoverRoutes(mux)
 	s.noteRoutes(mux)
 	s.fileRoutes(mux, local)
@@ -384,11 +380,11 @@ func (s *Server) release(w http.ResponseWriter, r *http.Request) {
 	s.done(w, s.m.Release(ctx, r.PathValue("id"), req.ToolUseID, req.Dismiss))
 }
 
-var stateKey = regexp.MustCompile(`^(list|quota|workspaces|places|colors|confirms|update|terminals|machines|notes|(session|context):[0-9a-zA-Z_-]{1,128})$`)
+var stateKey = regexp.MustCompile(`^(list|quota|workspaces|places|colors|needs|pairing|update|terminals|machines|notes|(session|context):[0-9a-zA-Z_-]{1,128})$`)
 
 // events is the page's one event stream: ?sub=<key> for each state it wants (list, quota,
 // workspaces, colors, session:<id>, context:<id>, confirms, update, notes). See package hub. A key it
-// does not know, or one not for this terminal (confirms, colors and notes, but for panels), does not fail the
+// does not know, or one not for this caller (needs, pairing, colors and notes, but for a person on ir_web or at the host), does not fail the
 // stream: it is left out, and the stream's first events say so (StateEvent.Ignored).
 func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	keys := r.URL.Query()["sub"]
@@ -407,7 +403,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case !stateKey.MatchString(k):
 			ignored = append(ignored, api.StateEvent{Key: k, Ignored: "unknown"})
-		case (k == "confirms" || k == "colors" || k == "notes") && !c.panel():
+		case (k == "needs" || k == "pairing" || k == "colors" || k == "notes") && !c.panel():
 			ignored = append(ignored, api.StateEvent{Key: k, Ignored: "forbidden"})
 		case !slices.Contains(carried, k):
 			carried = append(carried, k)
@@ -455,7 +451,7 @@ func (s *Server) error(w http.ResponseWriter, err error) {
 	case errors.Is(err, context.DeadlineExceeded):
 		fail(w, http.StatusGatewayTimeout, "the agent did not answer in time")
 	case access.IsDenied(err):
-		fail(w, http.StatusForbidden, err.Error())
+		refuse(w, http.StatusForbidden, "no_permission", err.Error())
 	default:
 		s.logf("server: %v", err)
 		fail(w, http.StatusInternalServerError, err.Error())
@@ -479,7 +475,13 @@ func reply(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-func fail(w http.ResponseWriter, status int, msg string) { reply(w, status, api.Error{Error: msg}) }
+func fail(w http.ResponseWriter, status int, msg string) { reply(w, status, api.Error{Message: msg}) }
+
+// refuse answers a refusal with its code (decision 8): 403 for what the caller may not do now,
+// 422 for what is not there or not right (decision 28).
+func refuse(w http.ResponseWriter, status int, code, msg string) {
+	reply(w, status, api.Error{Code: code, Message: msg})
+}
 
 // Files is the files service (uploads, refs, paths), for the chat layer's attachments.
 func (s *Server) Files() *files.Service { return s.files }
@@ -493,7 +495,7 @@ func (s *Server) execConnect(w http.ResponseWriter, r *http.Request) {
 	}
 	c := callerOf(r)
 	if c.Login != "" || c.Host() || c.socket || c.session != "" {
-		fail(w, http.StatusForbidden, "an executor connects with a TOKEN")
+		refuse(w, http.StatusForbidden, "no_permission", "an executor connects with a TOKEN")
 		return
 	}
 	s.Remote.Serve(w, r, c.ID(), c.Name)

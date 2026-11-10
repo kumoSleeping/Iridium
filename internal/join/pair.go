@@ -12,12 +12,14 @@ import (
 )
 
 // PairUsage is ir pair's help.
-const PairUsage = `ir pair <地址> --name <名字> --into <文件> [--program <程序>]
-  以 Bot 身份向那个 Iridium 申请接入：打印配对码，对方网页核对后允许，
+const PairUsage = `ir pair <地址> --name <名字> --into <文件> [--type <类型>] [--program <程序>]
+  向那个 Iridium 申请接入一个应用：打印配对码，对方核对后允许，
   TOKEN 写进 --into 的文件（0600），不打印。之后程序带 Authorization: Bearer <TOKEN> 访问。
+  对方没开放配对时一直等（ir apps open，或应用管理里的“新建应用”）。
+  --type  显示用的类型，如 bot、script
 `
 
-// PairMain runs ir pair with args (after "pair"): a Bot's TOKEN by pairing (POST /api/pair), into
+// PairMain runs ir pair with args (after "pair"): an app's TOKEN by pairing (POST /api/pair), into
 // a file; never printed, so an agent that runs it does not see it.
 func PairMain(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("pair", flag.ContinueOnError)
@@ -25,6 +27,7 @@ func PairMain(args []string, stdout, stderr io.Writer) int {
 	name := fs.String("name", "", "")
 	into := fs.String("into", "", "")
 	program := fs.String("program", "", "")
+	typ := fs.String("type", "", "")
 	var pos []string
 	for {
 		if err := fs.Parse(args); err != nil {
@@ -56,7 +59,7 @@ func PairMain(args []string, stdout, stderr io.Writer) int {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	o := Options{URL: u, Name: *name, Bot: true, Program: *program, Out: stdout}
+	o := Options{URL: u, Name: *name, Bot: true, Type: *typ, Program: *program, Out: stdout}
 	tok, err := o.pair(ctx)
 	if err != nil {
 		fmt.Fprintf(stderr, "ir pair: %v\n", err)

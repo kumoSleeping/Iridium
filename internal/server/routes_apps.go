@@ -1,14 +1,14 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
-	"os"
-	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/kumoSleeping/iridium/internal/access"
@@ -19,8 +19,8 @@ import (
 )
 
 // appRoutes are the apps' and their logins' (docs/api.md "应用"): who is calling, the list (ir
-// apps), invites of ir_web, names and avatars, devices, removing, the confirmations agents' ir asks
-// a person for, and public.origin. An app comes by pairing only (routes_pair.go).
+// apps), invites of ir_web, names and avatars, devices, removing, the needs (what waits for a
+// person), the catalogue and public.origin. An app comes by pairing only (pairing.go).
 func (s *Server) appRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/me", s.me)
 	mux.HandleFunc("PUT /api/me/profile", func(w http.ResponseWriter, r *http.Request) { s.gate().ServeProfile(w, r, "") })
@@ -31,19 +31,23 @@ func (s *Server) appRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/apps/{id}/device", func(w http.ResponseWriter, r *http.Request) { s.setDevice(w, r, r.PathValue("id")) })
 	mux.HandleFunc("PUT /api/apps/{id}/follows", s.panelOnly(s.setFollows))
 	mux.HandleFunc("GET /api/apps", s.manage(s.apps))
-	mux.HandleFunc("DELETE /api/apps/{id}", s.manage(s.revoke))
+	mux.HandleFunc("DELETE /api/apps/{id}", s.admin(s.revoke))
+	mux.HandleFunc("DELETE /api/apps/{id}/logins/{login}", s.admin(s.removeLogin))
 	mux.HandleFunc("POST /api/invites", s.manage(s.invite))
-	mux.HandleFunc("GET /api/confirms", s.panelOnly(func(w http.ResponseWriter, r *http.Request) { reply(w, http.StatusOK, s.asks.pending()) }))
-	mux.HandleFunc("POST /api/confirms/{id}", s.panelOnly(s.answerConfirm))
+	// An app asks for other permissions: an app_change need.
+	mux.HandleFunc("PUT /api/me/perms", s.askChange)
+	mux.HandleFunc("GET /api/needs", s.panelOnly(func(w http.ResponseWriter, r *http.Request) { reply(w, http.StatusOK, s.asks.pending()) }))
+	mux.HandleFunc("POST /api/needs/{id}", s.approver(s.answerNeed))
 	// How one went, never a secret: for whoever manages, and any ir on the socket (an agent's in a
 	// session an app opened waits for its ir run's too).
-	mux.HandleFunc("GET /api/confirms/{id}", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /api/needs/{id}", func(w http.ResponseWriter, r *http.Request) {
 		if c := callerOf(r); !c.CanManage() && !c.socket {
 			forbid(w, errManageApps)
 			return
 		}
-		s.confirmState(w, r)
+		s.needState(w, r)
 	})
+	mux.HandleFunc("GET /api/catalogue", func(w http.ResponseWriter, r *http.Request) { reply(w, http.StatusOK, catalogue) })
 	mux.HandleFunc("GET /api/usage", s.usage) // routes_usage.go
 	mux.HandleFunc("GET /api/public", s.manage(s.publicState))
 	// Opening or closing ir_web: a person's ir at the host only (decision 3), never a login of it.
@@ -59,7 +63,8 @@ func (s *Server) appRoutes(mux *http.ServeMux) {
 // errManageApps answers an app that would manage the others.
 var errManageApps = errors.New("only ir_web's logins and the host manage apps")
 
-// manage lets ir_web's logins and the host (also an agent's ir) through; apps manage nothing.
+// manage lets ir_web's logins and the host (also an agent's ir, to read or to ask a person)
+// through; apps manage nothing.
 func (s *Server) manage(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !callerOf(r).CanManage() {
@@ -68,6 +73,52 @@ func (s *Server) manage(h http.HandlerFunc) http.HandlerFunc {
 		}
 		h(w, r)
 	}
+}
+
+// admin lets a person through who manages: on a login of ir_web or at the host, never an agent's
+// ir (decision 15).
+func (s *Server) admin(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if c := callerOf(r); !c.CanManage() || c.agent {
+			forbid(w, errManageApps)
+			return
+		}
+		h(w, r)
+	}
+}
+
+// approver lets through who may approve needs (mayApprove).
+func (s *Server) approver(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !s.mayApprove(callerOf(r)) {
+			forbid(w, errApprove)
+			return
+		}
+		h(w, r)
+	}
+}
+
+// errApprove answers one that may not approve.
+var errApprove = errors.New("only the host, or a login of ir_web that may use every agent everywhere, approves")
+
+// mayApprove: the caller may answer needs and open pairing (decision 15): a person at the host, or
+// on a login of ir_web that may use all agents (Claude too) with the whole scope. Never an agent.
+func (s *Server) mayApprove(c caller) bool {
+	switch {
+	case c.agent || c.session != "":
+		return false
+	case c.Host():
+		return true
+	case !c.Web():
+		return false
+	}
+	if !access.HasClaude(s.rulesFor(c)) {
+		return false
+	}
+	if p := s.loginPerms(c.ID()); p != nil {
+		return slices.Contains(p.Agents, api.PermsAll) && slices.Contains(p.Scope, api.PermsAll)
+	}
+	return true
 }
 
 // panelOnly lets through what may approve, widen and see secrets: a person on a login of ir_web,
@@ -117,6 +168,7 @@ func (s *Server) apps(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		app := s.appOf(e)
+		app.Perms = s.appPerms(e.ID)
 		app.Follows = follows[e.ID]
 		if on, ok := chats[e.ID]; ok {
 			app.Chat = map[bool]api.AppChat{false: api.AppChatIdle, true: api.AppChatOn}[on]
@@ -127,6 +179,15 @@ func (s *Server) apps(w http.ResponseWriter, r *http.Request) {
 		out.Apps = append(out.Apps, web)
 	}
 	out.Apps = append(out.Apps, apps...)
+	others, err := s.st.Logins()
+	if err != nil {
+		s.error(w, err)
+		return
+	}
+	for _, l := range others {
+		out.Logins = append(out.Logins, api.Login{App: l.App, ID: l.ID, Name: l.Name, CreatedAt: ms(l.CreatedAt),
+			LastSeenAt: ms(l.LastActive), ApprovedAt: ms(l.ApprovedAt), Rules: s.rulesOf(l.App, false)})
+	}
 	for _, i := range a.Invites {
 		out.Invites = append(out.Invites, api.PendingInvite{ID: i.ID, Name: i.Name, Setup: i.Setup, Claude: permsClaude(i.Perms),
 			CreatedAt: ms(i.CreatedAt), ExpiresAt: ms(i.ExpiresAt)})
@@ -134,24 +195,49 @@ func (s *Server) apps(w http.ResponseWriter, r *http.Request) {
 	reply(w, http.StatusOK, out)
 }
 
-// revoke removes an app, a login of ir_web ("ir_web/名字", or its ID) or an unused invite. The
+// revoke removes an app, a login ("应用/登录", or for ir_web its ID) or an unused invite. The
 // host and ir_web are built in.
 func (s *Server) revoke(w http.ResponseWriter, r *http.Request) {
 	ref := r.PathValue("id")
 	if gate.IsHostRef(ref) || ref == gate.WebApp {
-		fail(w, http.StatusConflict, ref+" is built in")
+		refuse(w, http.StatusUnprocessableEntity, "built_in", ref+" is built in")
 		return
 	}
-	t, found := s.gate().Find(ref)
-	hash := ""
-	if found {
-		hash = s.gate().TokenHash(t.ID) // an official extension's bot holding it goes with it
+	if app, login, ok := strings.Cut(ref, "/"); ok && app != gate.WebApp {
+		s.dropLogin(w, app, login)
+		return
 	}
-	err := s.gate().Revoke(ref)
-	if err == nil && hash != "" {
-		go s.extDetach(hash)
+	s.gateDone(w, s.gate().Revoke(ref))
+}
+
+// removeLogin removes login {login} of app {id}: for another app's, it asks again as it next speaks.
+func (s *Server) removeLogin(w http.ResponseWriter, r *http.Request) {
+	app, login := r.PathValue("id"), r.PathValue("login")
+	if app == gate.WebApp {
+		s.gateDone(w, s.gate().Revoke(gate.WebApp+"/"+login))
+		return
 	}
-	s.gateDone(w, err)
+	s.dropLogin(w, app, login)
+}
+
+func (s *Server) dropLogin(w http.ResponseWriter, appRef, login string) {
+	info, ok := s.gate().Find(appRef)
+	if !ok || info.Kind != gate.KindChannel || info.Host() {
+		refuse(w, http.StatusUnprocessableEntity, "no_such_app", "no such app: "+appRef)
+		return
+	}
+	gone, err := s.st.DeleteLogin(info.ID, login)
+	if err != nil {
+		s.error(w, err)
+		return
+	}
+	if !gone {
+		refuse(w, http.StatusUnprocessableEntity, "no_such_login", "no such login: "+appRef+"/"+login)
+		return
+	}
+	s.logf("server: login %s of %s removed", login, info.Name)
+	s.terminalsChanged()
+	reply(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 // setFollows puts the logins of ir_web app ref (ID or name) follows in place. Until S4.
@@ -244,7 +330,7 @@ func (s *Server) invite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !c.panel() {
-		s.ask(w, c, "invite", req.Name, req.Claude)
+		s.ask(w, c, api.NeedInvite, req.Name, req.Claude)
 		return
 	}
 	by := ""
@@ -259,42 +345,12 @@ func (s *Server) invite(w http.ResponseWriter, r *http.Request) {
 	reply(w, http.StatusOK, inv)
 }
 
-// tokenInto writes tok's TOKEN into the file path (0600, in place of what is there) and takes
-// it out of tok: no one is shown it. For extensions.go only (S1b removes it).
-func (s *Server) tokenInto(tok *api.Token, path string) error {
-	p, err := s.files.CheckPath(path)
-	if err != nil {
-		return err
-	}
-	f, err := os.CreateTemp(filepath.Dir(p), ".token-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(f.Name())
-	_, err = f.WriteString(tok.Token + "\n")
-	if cerr := f.Close(); err == nil {
-		err = cerr
-	}
-	if err == nil {
-		err = os.Chmod(f.Name(), 0o600)
-	}
-	if err == nil {
-		err = os.Rename(f.Name(), p)
-	}
-	if err != nil {
-		return err
-	}
-	tok.Token = ""
-	s.logf("server: the token of %s went into %s", tok.App.Name, p)
-	return nil
-}
-
-// ask turns an agent's request for a secret into a confirmation for a person: 202 and no secret.
-// owner (Claude): only a login of ir_web that has Claude, or the host, may allow it (answerConfirm).
-func (s *Server) ask(w http.ResponseWriter, c caller, kind, name string, owner bool) {
+// ask turns an agent's request for a secret into a need for a person: 202 and no secret. owner
+// (Claude): only a login of ir_web that has Claude, or the host, may allow it (answerNeed).
+func (s *Server) ask(w http.ResponseWriter, c caller, kind api.NeedKind, name string, owner bool) {
 	cf := s.asks.add(kind, name, owner, c.Name, c.session)
-	s.logf("server: %s asks a panel for a %s (%s, owner %v), confirmation %s", c.Name, kind, name, owner, cf.ID)
-	reply(w, http.StatusAccepted, api.Pending{Confirm: cf})
+	s.logf("server: %s asks a person for a %s (%s, owner %v), need %s", c.Name, kind, name, owner, cf.ID)
+	reply(w, http.StatusAccepted, api.Pending{Need: cf})
 }
 
 // errOwnerSecret answers allowing a secret-use from a login that has no Claude itself.
@@ -323,29 +379,6 @@ func (s *Server) makeInvite(name, claudeBy string) (*api.Invite, error) {
 		s.logf("server: the invite's QR code: %v", err)
 	}
 	return out, nil
-}
-
-// errClaudeFixed answers Claude for an app there already is without it: Claude is set as an app is
-// made, never after (the user, 2026-11-08).
-var errClaudeFixed = errors.New("claude is set as an app is made: this one has none, and a new TOKEN does not change that")
-
-// makeToken gives app name its TOKEN; ownerBy (as ownerSays found it): a new app gets Claude too.
-// One there already keeps what it had, Claude or none. For extensions.go only (S1b removes it).
-func (s *Server) makeToken(name, ownerBy string) (*api.Token, error) {
-	old, found := s.gate().Find(name)
-	if found && ownerBy != "" && old.Kind == gate.KindChannel && !access.HasClaude(s.rulesOf(old.ID, false)) {
-		return nil, errClaudeFixed
-	}
-	info, tok, err := s.gate().CreateToken(name)
-	if err != nil {
-		return nil, err
-	}
-	if ownerBy != "" && !found {
-		if err := s.giveClaude(info, ownerBy); err != nil {
-			return nil, err
-		}
-	}
-	return &api.Token{App: s.appOf(info), Token: tok}, nil
 }
 
 // permsClaude: an invite's perms give Claude.
@@ -388,95 +421,137 @@ func (s *Server) joined(j gate.Joined) {
 	}
 }
 
-func (s *Server) answerConfirm(w http.ResponseWriter, r *http.Request) {
-	var a api.ConfirmAnswer
+func (s *Server) answerNeed(w http.ResponseWriter, r *http.Request) {
+	var a api.NeedAnswer
 	if !readJSON(w, r, &a) {
 		return
 	}
 	id := r.PathValue("id")
 	c := callerOf(r)
 	by := s.ownerSays(c)
-	// An ask for Claude is allowed only by one that may say so; it stays waiting for one that may.
-	// Denying it is anyone's who answers.
+	// What a person may not give, or an answer that cannot stand, leaves the need waiting for one
+	// that may. Denying it is anyone's who answers.
 	cf, ok := s.asks.peek(id)
-	// An executor allowed as the owner's own machine runs Claude: only one that may say so.
-	if ok && (cf.Kind == "exec-pair" || cf.Kind == "bot-pair") && a.Allow && a.Owner && by == "" {
-		forbid(w, errOwnerFlag)
-		return
-	}
-	if ok && cf.Owner && a.Allow && by == "" {
-		if cf.Kind == "secret-use" {
-			forbid(w, errOwnerSecret)
-		} else {
+	if ok && a.Allow {
+		switch {
+		case cf.Kind == api.NeedAppJoin && a.Owner && by == "":
 			forbid(w, errOwnerFlag)
+			return
+		case cf.Owner && by == "" && cf.Kind == api.NeedSecretUse:
+			forbid(w, errOwnerSecret)
+			return
+		case cf.Owner && by == "":
+			forbid(w, errOwnerFlag)
+			return
+		case cf.Kind == api.NeedSecretSet && (a.Value == "" || len(a.Value) > secrets.MaxValue):
+			refuse(w, http.StatusUnprocessableEntity, "bad_value", "type the value (64 KiB at most)")
+			return
+		case (cf.Kind == api.NeedAppJoin || cf.Kind == api.NeedAppUpdate) && !s.checkPairAnswer(w, cf, a):
+			return
+		case cf.Kind == api.NeedAppChange && !s.checkGiven(w, cf, a):
+			return
 		}
-		return
-	} else if ok && cf.Kind == "secret-set" && a.Allow && (a.Value == "" || len(a.Value) > secrets.MaxValue) {
-		fail(w, http.StatusBadRequest, "type the value (64 KiB at most)")
-		return
 	}
 	cf, ok = s.asks.take(id)
 	if !ok {
-		fail(w, http.StatusNotFound, "no such confirmation waiting")
+		refuse(w, http.StatusUnprocessableEntity, "no_such_need", "no such need waiting")
 		return
 	}
 	owner := by
 	if !cf.Owner {
 		by = ""
 	}
-	st := api.ConfirmState{ID: id, Kind: cf.Kind, Name: cf.Name, Owner: cf.Owner, State: "denied"}
-	out := api.ConfirmReply{}
+	st := api.NeedState{ID: id, Kind: cf.Kind, Name: cf.Name, Owner: cf.Owner, State: "denied"}
+	out := api.NeedReply{}
+	var err error
+	switch {
+	case !a.Allow && cf.Kind == api.NeedLoginJoin:
+		// Denied, it is gone: it asks again as it next speaks.
+		_, err = s.st.DeleteLogin(cf.App.ID, cf.Login)
+	case !a.Allow:
+	case cf.Kind == api.NeedInvite:
+		out.Invite, err = s.makeInvite(cf.Name, by)
+		if err == nil {
+			st.Name, st.ExpiresAt = out.Invite.Name, out.Invite.ExpiresAt
+		}
+	case cf.Kind == api.NeedSecretSet:
+		err = s.storeAsked(cf, a.Value, c)
+	case cf.Kind == api.NeedSecretUse:
+		s.allowSecretUse(cf, a.ForSession)
+	case cf.Kind == api.NeedAppJoin, cf.Kind == api.NeedAppUpdate:
+		// The TOKEN goes to the asker alone, by its request; the person never sees it.
+		var tok *api.Token
+		if tok, err = s.pairAllowed(cf, a, owner); err == nil {
+			s.pairToken(id, tok.Token)
+			st.Name = tok.App.Name
+		}
+	case cf.Kind == api.NeedAppChange:
+		err = s.setAppPerms(cf.App.ID, cleanPerms(cmp.Or(a.Perms, cf.Wants)))
+		s.terminalsChanged()
+	case cf.Kind == api.NeedLoginJoin:
+		var there bool
+		if there, err = s.st.ApproveLogin(cf.App.ID, cf.Login, time.Now()); err == nil && !there {
+			err = errors.New("the login is gone")
+		}
+		s.terminalsChanged()
+	}
 	if a.Allow {
-		var err error
-		switch cf.Kind {
-		case "invite":
-			out.Invite, err = s.makeInvite(cf.Name, by)
-			if err == nil {
-				st.Name, st.ExpiresAt = out.Invite.Name, out.Invite.ExpiresAt
-			}
-		case "secret-set":
-			err = s.storeAsked(cf, a.Value, c)
-		case "secret-use":
-			s.allowSecretUse(cf, a.ForSession)
-		case "exec-pair", "bot-pair":
-			// The TOKEN goes to the asker alone, by its request; the panel never sees it.
-			if !a.Owner {
-				owner = ""
-			}
-			var tok *api.Token
-			if tok, err = s.makePairedBot(cf.Name, owner, a.Replace && cf.Replace); err == nil {
-				s.pairAllowed(id, tok.Token)
-				st.Name = tok.App.Name
-			}
-		}
 		st.State = "allowed"
-		if err != nil {
-			st.State, st.Error = "failed", err.Error()
-		}
+	}
+	if err != nil {
+		st.State, st.Error = "failed", err.Error()
 	}
 	s.asks.finish(id, st)
-	s.logf("server: %s answered confirmation %s: %s", c.Name, id, st.State)
-	out.ConfirmState = st
+	s.logf("server: %s answered need %s (%s): %s", c.Name, id, cf.Kind, st.State)
+	out.NeedState = st
 	reply(w, http.StatusOK, out)
 }
 
-// confirmState is how a confirmation stands; ?wait=<seconds> (at most 60) waits for an answer.
-func (s *Server) confirmState(w http.ResponseWriter, r *http.Request) {
+// needState is how a need stands; ?wait=<seconds> (at most 60) waits for an answer.
+func (s *Server) needState(w http.ResponseWriter, r *http.Request) {
 	var d time.Duration
 	if v := r.URL.Query().Get("wait"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 0 {
-			fail(w, http.StatusBadRequest, "bad wait")
+			refuse(w, http.StatusUnprocessableEntity, "bad_wait", "bad wait")
 			return
 		}
 		d = time.Duration(min(n, 60)) * time.Second
 	}
 	st, ok := s.asks.wait(r.Context(), r.PathValue("id"), d)
 	if !ok {
-		fail(w, http.StatusNotFound, "no such confirmation")
+		refuse(w, http.StatusUnprocessableEntity, "no_such_need", "no such need")
 		return
 	}
 	reply(w, http.StatusOK, st)
+}
+
+// askChange is an app asking for other permissions (PUT /api/me/perms): an app_change need, 202.
+// Only an app's own TOKEN asks; what it has stays till a person allows it.
+func (s *Server) askChange(w http.ResponseWriter, r *http.Request) {
+	var p api.Perms
+	if !readJSON(w, r, &p) {
+		return
+	}
+	c := callerOf(r)
+	if c.Host() || c.Web() || c.session != "" || c.socket {
+		refuse(w, http.StatusForbidden, "no_permission", "only an app asks for its permissions")
+		return
+	}
+	info, ok := s.gate().Endpoint(c.App)
+	if !ok {
+		refuse(w, http.StatusUnprocessableEntity, "no_such_app", "no such app")
+		return
+	}
+	wants := cleanPerms(&p)
+	app := s.appOf(info)
+	has := cleanPerms(s.appPerms(info.ID))
+	if old, ok := s.asks.find(func(n api.Need) bool { return n.Kind == api.NeedAppChange && n.App != nil && n.App.ID == info.ID }); ok {
+		s.asks.drop(old.ID)
+	}
+	nd := s.asks.addNeed(api.Need{Kind: api.NeedAppChange, Name: info.Name, Asker: info.Name, App: &app, Wants: &wants, Has: &has})
+	s.logf("server: %s asks for other permissions, need %s", info.Name, nd.ID)
+	reply(w, http.StatusAccepted, api.Pending{Need: nd})
 }
 
 func (s *Server) publicState(w http.ResponseWriter, r *http.Request) {
@@ -536,11 +611,15 @@ func (s *Server) gateDone(w http.ResponseWriter, err error) {
 	case err == nil:
 		reply(w, http.StatusOK, map[string]any{"ok": true})
 	case errors.As(err, &ne):
-		reply(w, http.StatusConflict, map[string]string{"error": err.Error(), "nameError": ne.Code})
+		reply(w, http.StatusUnprocessableEntity, api.Error{Code: "bad_name", Message: err.Error(), NameError: ne.Code})
 	case errors.Is(err, gate.ErrNotFound):
-		fail(w, http.StatusNotFound, err.Error())
-	case errors.Is(err, gate.ErrLastPasskey), errors.Is(err, gate.ErrNotPublic), errors.Is(err, gate.ErrLocal), errors.Is(err, errClaudeFixed):
-		fail(w, http.StatusConflict, err.Error())
+		refuse(w, http.StatusUnprocessableEntity, "not_found", err.Error())
+	case errors.Is(err, gate.ErrLastPasskey):
+		refuse(w, http.StatusConflict, "last_passkey", err.Error())
+	case errors.Is(err, gate.ErrNotPublic):
+		refuse(w, http.StatusConflict, "not_public", err.Error())
+	case errors.Is(err, gate.ErrLocal):
+		refuse(w, http.StatusUnprocessableEntity, "built_in", err.Error())
 	default:
 		s.error(w, err)
 	}

@@ -26,7 +26,6 @@ import (
 	"golang.org/x/sys/unix"
 	"rsc.io/qr"
 
-	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/config"
 	"github.com/kumoSleeping/iridium/internal/qq"
 	"github.com/kumoSleeping/iridium/internal/qqbridge"
@@ -554,8 +553,25 @@ func pair(root, id string) int {
 
 // ---- status ----
 
-// State is iridium-qq status --json (and each of list --json), which Iridium's page reads too.
-type State = api.ExtensionStatus
+// State is iridium-qq status --json (and each of list --json): a bot as it stands.
+type State struct {
+	Version string `json:"version"`
+	Home    string `json:"home"`
+	Bound   bool   `json:"bound"` // it has a bot
+	AppID   string `json:"appId,omitempty"`
+	Name    string `json:"name"` // its terminal's name in Iridium
+	Owners  int    `json:"owners"`
+	Iridium string `json:"iridium,omitempty"`
+	Token   bool   `json:"token"`
+	// Service: systemd's ActiveState of its unit (active, inactive, failed, activating); "" for
+	// no unit.
+	Service string           `json:"service"`
+	Enabled bool             `json:"enabled"`
+	Running *qqbridge.Status `json:"running,omitempty"` // while the service is active
+	Pair    string           `json:"pair,omitempty"`    // a pairing code waiting
+	// Online: its terminal's live connections in Iridium (Iridium fills it in).
+	Online int `json:"online,omitempty"`
+}
 
 func state(root, id string) State {
 	home := qqbridge.BotHome(root, id)

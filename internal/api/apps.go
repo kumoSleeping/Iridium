@@ -42,7 +42,10 @@ type App struct {
 	CreatedAt  int64 `json:"createdAt,omitempty"`
 	LastSeenAt int64 `json:"lastSeenAt,omitempty"`
 	Rules      Rules `json:"rules"`
-	UsedToday  int64 `json:"usedToday"` // tokens of the turns it started today
+	// Perms: what an app was given as it paired (nil: all, as one paired before 0.2). Not the
+	// host's or ir_web's.
+	Perms     *Perms `json:"perms,omitempty"`
+	UsedToday int64  `json:"usedToday"` // tokens of the turns it started today
 	// Device: what it runs on, as the badge on its messages' avatar shows; the server always sets it.
 	Device Device `json:"device,omitempty"`
 	// Follows: the logins of ir_web (IDs) it follows: what a session asks while no chat points at
@@ -62,7 +65,8 @@ const (
 	AppChatOn   AppChat = "on"
 )
 
-// Login is a login of an app as listed: for now ir_web's, a browser with a passkey. No secrets.
+// Login is a login of an app as listed: ir_web's, a browser with a passkey; another app's, as it
+// spoke (Satori-User-ID), waiting till approved (ApprovedAt 0). No secrets.
 type Login struct {
 	App        string `json:"app"`
 	ID         string `json:"id"`
@@ -168,67 +172,100 @@ type Token struct {
 	Token string `json:"token,omitempty"`
 }
 
-// Confirm is what an agent's ir asked for that only a person may give (an invite link, a
-// credential's value, the use of credentials), or an app asking to pair: it waits in the carried
-// state "confirms" until a login of ir_web (or the host) answers it. No secrets.
-type Confirm struct {
-	ID   string `json:"id"`
-	Kind string `json:"kind"` // invite | secret-set | secret-use | exec-pair | bot-pair
-	// Name: the invite's name; secret-set: the secret's.
+// Perms is what an app or login asks for or is given (0.2 "权限"): the agents it may use and the
+// places it may use, each ["*"] for all. Plain data till S2 checks it; Claude stays Rules'.
+type Perms struct {
+	Agents []string `json:"agents"`
+	Scope  []string `json:"scope"`
+}
+
+// PermsAll is the word for all in Perms' lists.
+const PermsAll = "*"
+
+// NeedKind is what a Need waits for a person to decide.
+type NeedKind string
+
+const (
+	NeedAppJoin   NeedKind = "app_join"   // an app asks to pair
+	NeedAppUpdate NeedKind = "app_update" // an app asks to pair by the name of one there: a new TOKEN for it
+	NeedAppChange NeedKind = "app_change" // an app asks for other permissions
+	NeedLoginJoin NeedKind = "login_join" // a login an app spoke as the first time
+	NeedInvite    NeedKind = "invite"     // an agent's ir invite
+	NeedSecretSet NeedKind = "secret_set" // an agent's ir secret set: a person types the value
+	NeedSecretUse NeedKind = "secret_use" // an agent's ir run with credentials
+)
+
+// Need is what waits for a person (docs/next/k_glossary.md "需要"): an app's or a login's request,
+// or what an agent's ir asked for that only a person may give. It waits in the carried state
+// "needs" till the host or a login of ir_web that may approve answers it. No secrets.
+type Need struct {
+	ID   string   `json:"id"`
+	Kind NeedKind `json:"kind"`
+	// Name: the invite's name; secret_set: the secret's; app_join: the name the app asks for;
+	// app_update, app_change: the app's; login_join: the login's.
 	Name      string `json:"name,omitempty"`
 	Owner     bool   `json:"owner,omitempty"`   // it gets Claude; only one that has Claude allows it
 	Asker     string `json:"asker"`             // who asked (the app or login, or 主机)
 	Session   string `json:"session,omitempty"` // the session whose agent asked, if known
 	CreatedAt int64  `json:"createdAt"`
 	ExpiresAt int64  `json:"expiresAt"`
-	// secret-set: the note it was asked with (else the stored one's), and whether one by that
+	// secret_set: the note it was asked with (else the stored one's), and whether one by that
 	// name is stored (it is replaced).
 	Note    string `json:"note,omitempty"`
 	Replace bool   `json:"replace,omitempty"`
-	// secret-use: the secrets, the command's opening (as written: {{NAME}}), and whether one of
+	// secret_use: the secrets, the command's opening (as written: {{NAME}}), and whether one of
 	// them is confirmed every time (no "this session").
 	Secrets []string `json:"secrets,omitempty"`
 	Command string   `json:"command,omitempty"`
 	Always  bool     `json:"always,omitempty"`
-	// exec-pair: the code both sides show, and the machine that asks to join as an executor
-	// (docs/exec.md "连接"); Name is the Bot it becomes. bot-pair: the same, a Bot that asks
-	// (POST /api/pair), Machine saying its program. Replace there: a Bot by Name is there already,
-	// which the answer may hand over (ConfirmAnswer.Replace).
-	Code    string    `json:"code,omitempty"`
-	Machine *ExecPair `json:"machine,omitempty"`
+	// app_join, app_update: the code both sides show, and what the app says of itself.
+	Code string       `json:"code,omitempty"`
+	Pair *PairRequest `json:"pair,omitempty"`
+	// App: app_update, the app by that name now (its system, last seen, whether online: an update
+	// while it is online may be someone else's); app_change, login_join: the app asking.
+	App *App `json:"app,omitempty"`
+	// Wants: app_join, app_change: what it asks for; the answer may give less, never more.
+	// app_change: Has, what it has now.
+	Wants *Perms `json:"wants,omitempty"`
+	Has   *Perms `json:"has,omitempty"`
+	// Login: login_join, the login's ID within App.
+	Login string `json:"login,omitempty"`
 }
 
-// Confirms is the carried state "confirms": the pending ones, oldest first. Panels only.
-type Confirms struct {
-	Pending []Confirm `json:"pending"`
+// Needs is the carried state "needs" (GET /api/needs): the pending ones, oldest first.
+type Needs struct {
+	Pending []Need `json:"pending"`
 }
 
-// ConfirmAnswer is a person's answer to a Confirm.
-type ConfirmAnswer struct {
+// NeedAnswer is a person's answer to a Need (POST /api/needs/{id}).
+type NeedAnswer struct {
 	Allow bool `json:"allow"`
-	// Value: secret-set's value, typed on the panel; stored, never given back.
+	// Value: secret_set's value, typed by the person; stored, never given back.
 	Value string `json:"value,omitempty"`
-	// ForSession: secret-use allowed for the rest of the session (till it stops).
+	// ForSession: secret_use allowed for the rest of the session (till it stops).
 	ForSession bool `json:"forSession,omitempty"`
-	// Owner: exec-pair allowed as the owner's own machine: it runs Claude there; bot-pair: the Bot
-	// has Claude. Only a panel that has Claude says so.
+	// Owner: app_join allowed as the owner's own: the app has Claude. Only one that has Claude says so.
 	Owner bool `json:"owner,omitempty"`
-	// Replace: a pairing allowed as the Bot by its name that is there already (Confirm.Replace):
-	// the same terminal, its usage and Claude as they were, a new TOKEN, the old one void.
-	Replace bool `json:"replace,omitempty"`
+	// Name: app_join, app_update allowed as a new app by this name in place of the one asked for.
+	Name string `json:"name,omitempty"`
+	// Perms: app_join, app_change, what it gets: within Need.Wants. nil: as asked.
+	Perms *Perms `json:"perms,omitempty"`
 }
 
-// ExecPair is what an executor or a Bot says of itself asking to pair (POST /api/exec/pair,
-// POST /api/pair; no login). A Bot says its name and program only. NoShell and AgentShell are what
-// it means to say in its hello (Machine's), so the card tells whether command lines would run there.
-type ExecPair struct {
+// PairRequest is what an app says of itself asking to pair (POST /api/pair; no login): its name,
+// what it is shown as, and what it wants. An executor (ir join) says its machine too. NoShell and
+// AgentShell are what it means to say in its hello (Machine's), so the card tells whether command
+// lines would run there.
+type PairRequest struct {
 	Name       string      `json:"name"`
-	OS         string      `json:"os,omitempty"` // windows | darwin | linux
+	Type       string      `json:"type,omitempty"` // computer, bot, script…: display only
+	OS         string      `json:"os,omitempty"`   // windows | darwin | linux
 	Arch       string      `json:"arch,omitempty"`
 	Program    string      `json:"program,omitempty"`
 	Agents     []ExecAgent `json:"agents,omitempty"`
 	NoShell    bool        `json:"noShell,omitempty"`
 	AgentShell bool        `json:"agentShell,omitempty"`
+	Wants      *Perms      `json:"wants,omitempty"` // nil: all
 }
 
 // Machine is another machine's executor (docs/exec.md): a Bot, as it last said of itself; the
@@ -269,39 +306,71 @@ type DshWorkspace struct {
 	Sessions  int    `json:"sessions"`
 }
 
-// ExecPairing answers a pairing request: the code to show, and the request to ask after.
-type ExecPairing struct {
+// Pairing answers a pairing request: the code to show, and the request to ask after.
+type Pairing struct {
 	Code    string `json:"code"`
 	Request string `json:"request"`
 }
 
-// ExecPairState is how a pairing request stands (GET /api/exec/pair/{request}): pending, allowed
-// (with the TOKEN, given once), denied or expired.
-type ExecPairState struct {
+// PairState is how a pairing request stands (GET /api/pair/{request}): pending, allowed (with the
+// TOKEN, given once), denied or expired.
+type PairState struct {
 	Status string `json:"status"`
 	Token  string `json:"token,omitempty"`
 }
 
-// ConfirmState is how a Confirm went, as the asker sees it: never a secret.
-type ConfirmState struct {
-	ID        string `json:"id"`
-	Kind      string `json:"kind"`
-	State     string `json:"state"` // pending | allowed | denied | expired | failed
-	Name      string `json:"name,omitempty"`
-	Owner     bool   `json:"owner,omitempty"`     // it was asked with --owner
-	ExpiresAt int64  `json:"expiresAt,omitempty"` // allowed invite: until when the link works
-	Error     string `json:"error,omitempty"`
+// PairWindow is whether apps may ask to pair now (GET /api/pairing, the carried state "pairing"):
+// open till Until (ms), else closed (0). PUT /api/pairing opens it for Minutes (10 if 0, at most
+// 60), or closes it.
+type PairWindow struct {
+	Open    bool  `json:"open"`
+	Until   int64 `json:"until,omitempty"`
+	Minutes int   `json:"minutes,omitempty"`
 }
 
-// ConfirmReply answers the one that allowed a Confirm: the secret is for it alone.
-type ConfirmReply struct {
-	ConfirmState `tstype:",extends"`
-	Invite       *Invite `json:"invite,omitempty"`
+// NeedState is how a Need went, as the asker sees it: never a secret.
+type NeedState struct {
+	ID        string   `json:"id"`
+	Kind      NeedKind `json:"kind"`
+	State     string   `json:"state"` // pending | allowed | denied | expired | failed
+	Name      string   `json:"name,omitempty"`
+	Owner     bool     `json:"owner,omitempty"`     // it was asked with --claude
+	ExpiresAt int64    `json:"expiresAt,omitempty"` // allowed invite: until when the link works
+	Error     string   `json:"error,omitempty"`
 }
 
-// Pending is the reply to an agent's ir invite: a person must allow it.
+// NeedReply answers the one that allowed a Need: the secret is for it alone.
+type NeedReply struct {
+	NeedState `tstype:",extends"`
+	Invite    *Invite `json:"invite,omitempty"`
+}
+
+// Pending is the reply to what must wait for a person (an agent's ir invite, an app's change): 202.
 type Pending struct {
-	Confirm Confirm `json:"confirm"`
+	Need Need `json:"need"`
+}
+
+// CatalogueEntry is an official app Iridium lists (GET /api/catalogue): what it is and how to
+// install it, by system. Iridium installs nothing itself.
+type CatalogueEntry struct {
+	ID          string        `json:"id"`
+	Name        string        `json:"name"`
+	Type        string        `json:"type"` // as its app is shown once paired
+	Description Text          `json:"description"`
+	Install     []InstallStep `json:"install"`
+	URL         string        `json:"url,omitempty"` // where to read more
+}
+
+// InstallStep is a command that installs a catalogue entry on OS (windows | darwin | linux; "" any).
+type InstallStep struct {
+	OS      string `json:"os,omitempty"`
+	Command string `json:"command"`
+}
+
+// Text is a short text in Chinese and English.
+type Text struct {
+	Zh string `json:"zh"`
+	En string `json:"en"`
 }
 
 // SetPublic sets public.origin ("" turns the public way in off). The gate restarts with it.

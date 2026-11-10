@@ -42,16 +42,16 @@ func TestSecrets(t *testing.T) {
 	// An agent's ir: a confirmation, whose panel types the value; the agent learns only the outcome.
 	var p api.Pending
 	l.want(202, "agent", "PUT", "/api/secrets/NAS_PASSWORD", api.SetSecret{Note: ptr("mount the NAS"), Value: "ignored"}, &p)
-	if p.Confirm.Kind != "secret-set" || p.Confirm.Name != "NAS_PASSWORD" || p.Confirm.Note != "mount the NAS" || p.Confirm.Session != "caller-session" || p.Confirm.Replace {
-		t.Fatalf("pending: %+v", p.Confirm)
+	if p.Need.Kind != api.NeedSecretSet || p.Need.Name != "NAS_PASSWORD" || p.Need.Note != "mount the NAS" || p.Need.Session != "caller-session" || p.Need.Replace {
+		t.Fatalf("pending: %+v", p.Need)
 	}
-	l.want(400, "web", "POST", "/api/confirms/"+p.Confirm.ID, api.ConfirmAnswer{Allow: true}, nil) // no value typed
+	l.want(422, "web", "POST", "/api/needs/"+p.Need.ID, api.NeedAnswer{Allow: true}, nil) // no value typed
 	var rep string
-	rep = l.wantRaw(200, "web", "POST", "/api/confirms/"+p.Confirm.ID, api.ConfirmAnswer{Allow: true, Value: "nas-pass-123"})
+	rep = l.wantRaw(200, "web", "POST", "/api/needs/"+p.Need.ID, api.NeedAnswer{Allow: true, Value: "nas-pass-123"})
 	if strings.Contains(rep, "nas-pass-123") || !strings.Contains(rep, `"allowed"`) {
 		t.Fatalf("answer: %s", rep)
 	}
-	rep = l.wantRaw(200, "agent", "GET", "/api/confirms/"+p.Confirm.ID, nil)
+	rep = l.wantRaw(200, "agent", "GET", "/api/needs/"+p.Need.ID, nil)
 	if strings.Contains(rep, "nas-pass-123") || !strings.Contains(rep, `"allowed"`) {
 		t.Fatalf("state: %s", rep)
 	}
@@ -84,26 +84,26 @@ func TestSecrets(t *testing.T) {
 	in := "agent-in:" + its.ID
 	one := api.UseSecrets{Names: []string{"GITHUB_TOKEN"}, Command: "gh auth"}
 	l.want(202, in, "POST", "/api/secrets/use", one, &p)
-	if p.Confirm.Kind != "secret-use" || !p.Confirm.Owner || p.Confirm.Session != its.ID || p.Confirm.Command != "gh auth" || len(p.Confirm.Secrets) != 1 {
-		t.Fatalf("use pending: %+v", p.Confirm)
+	if p.Need.Kind != api.NeedSecretUse || !p.Need.Owner || p.Need.Session != its.ID || p.Need.Command != "gh auth" || len(p.Need.Secrets) != 1 {
+		t.Fatalf("use pending: %+v", p.Need)
 	}
-	l.want(403, "web", "POST", "/api/confirms/"+p.Confirm.ID, api.ConfirmAnswer{Allow: true}, nil) // the local page is not the owner's say
-	l.want(200, "socket", "POST", "/api/confirms/"+p.Confirm.ID, api.ConfirmAnswer{Allow: true}, nil)
+	l.want(403, "web", "POST", "/api/needs/"+p.Need.ID, api.NeedAnswer{Allow: true}, nil) // the local page is not the owner's say
+	l.want(200, "socket", "POST", "/api/needs/"+p.Need.ID, api.NeedAnswer{Allow: true}, nil)
 	once := one
-	once.Confirm = p.Confirm.ID
+	once.Confirm = p.Need.ID
 	l.want(200, in, "POST", "/api/secrets/use", once, &vals)
 	l.want(202, in, "POST", "/api/secrets/use", once, &p) // spent
-	l.want(200, "socket", "POST", "/api/confirms/"+p.Confirm.ID, api.ConfirmAnswer{Allow: true, ForSession: true}, nil)
+	l.want(200, "socket", "POST", "/api/needs/"+p.Need.ID, api.NeedAnswer{Allow: true, ForSession: true}, nil)
 	l.want(200, in, "POST", "/api/secrets/use", one, nil) // for the rest of the session
 	l.want(200, in, "POST", "/api/secrets/use", one, nil)
 
 	// Every time: the owner's own session asks too, and "this session" does not hold.
 	l.want(200, "web", "PUT", "/api/secrets/GITHUB_TOKEN", api.SetSecret{Always: ptr(true)}, nil)
 	l.want(202, "agent", "POST", "/api/secrets/use", one, &p)
-	if !p.Confirm.Always {
-		t.Fatalf("always: %+v", p.Confirm)
+	if !p.Need.Always {
+		t.Fatalf("always: %+v", p.Need)
 	}
-	l.want(200, "socket", "POST", "/api/confirms/"+p.Confirm.ID, api.ConfirmAnswer{Allow: true, ForSession: true}, nil)
+	l.want(200, "socket", "POST", "/api/needs/"+p.Need.ID, api.NeedAnswer{Allow: true, ForSession: true}, nil)
 	l.want(202, "agent", "POST", "/api/secrets/use", one, nil)
 	l.want(200, "socket", "POST", "/api/secrets/use", one, nil) // a person at the machine: at once
 

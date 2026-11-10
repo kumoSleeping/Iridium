@@ -184,7 +184,7 @@ func (s *Server) discoverError(w http.ResponseWriter, err error) {
 	case errors.Is(err, store.ErrWorkspacePath), errors.Is(err, fs.ErrExist), errors.Is(err, store.ErrUserNamed):
 		fail(w, http.StatusConflict, err.Error())
 	case errors.Is(err, discover.ErrOutside), errors.Is(err, fs.ErrPermission):
-		fail(w, http.StatusForbidden, err.Error())
+		refuse(w, http.StatusForbidden, "outside", err.Error())
 	default:
 		// The rest are what was asked: not a folder, not a folder name, no name.
 		fail(w, http.StatusBadRequest, err.Error())

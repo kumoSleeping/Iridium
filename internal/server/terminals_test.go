@@ -217,10 +217,10 @@ func TestClaudeOnlyRule(t *testing.T) {
 
 	// The host and ir_web cannot be removed; a removed app's TOKEN stops working, its row gone.
 	for _, ref := range []string{"local", "host", "主机", "本机", "ir_web"} {
-		l.want(409, "socket", "DELETE", "/api/apps/"+ref, nil, nil)
+		l.want(422, "socket", "DELETE", "/api/apps/"+ref, nil, nil)
 	}
 	// A login as 应用/登录, escaped in the path (ir apps rm ir_web/名字).
-	if raw := ""; l.do("socket", "DELETE", "/api/apps/ir_web%2Fnobody", nil, &raw) != 404 || !strings.Contains(raw, "no such app") {
+	if raw := ""; l.do("socket", "DELETE", "/api/apps/ir_web%2Fnobody", nil, &raw) != 422 || !strings.Contains(raw, "no such app") {
 		t.Errorf("ir_web/nobody: %s", raw)
 	}
 	l.want(200, "socket", "DELETE", "/api/apps/mybot", nil, nil)
@@ -311,26 +311,26 @@ func TestConfirmations(t *testing.T) {
 	l.want(200, "socket", "PUT", "/api/public", api.SetPublic{Origin: "https://ir.example.com"}, nil)
 	var p api.Pending
 	l.want(202, "agent", "POST", "/api/invites", api.NewInvite{Name: "pad"}, &p)
-	if p.Confirm.ID == "" || p.Confirm.Kind != "invite" || p.Confirm.Asker != "主机" || p.Confirm.Session != "caller-session" {
+	if p.Need.ID == "" || p.Need.Kind != "invite" || p.Need.Asker != "主机" || p.Need.Session != "caller-session" {
 		t.Fatalf("pending: %+v", p)
 	}
-	var cs api.Confirms
-	l.want(403, "agent", "GET", "/api/confirms", nil, nil)
-	l.want(200, "socket", "GET", "/api/confirms", nil, &cs)
-	if len(cs.Pending) != 1 || cs.Pending[0].ID != p.Confirm.ID {
+	var cs api.Needs
+	l.want(403, "agent", "GET", "/api/needs", nil, nil)
+	l.want(200, "socket", "GET", "/api/needs", nil, &cs)
+	if len(cs.Pending) != 1 || cs.Pending[0].ID != p.Need.ID {
 		t.Fatalf("confirms: %+v", cs)
 	}
 	// The agent waits; meanwhile a person allows.
 	got := make(chan string, 1)
 	go func() {
 		var raw string
-		l.do("agent", "GET", "/api/confirms/"+p.Confirm.ID+"?wait=10", nil, &raw)
+		l.do("agent", "GET", "/api/needs/"+p.Need.ID+"?wait=10", nil, &raw)
 		got <- raw
 	}()
 	time.Sleep(100 * time.Millisecond)
-	l.want(403, "agent", "POST", "/api/confirms/"+p.Confirm.ID, api.ConfirmAnswer{Allow: true}, nil)
-	var ans api.ConfirmReply
-	l.want(200, "socket", "POST", "/api/confirms/"+p.Confirm.ID, api.ConfirmAnswer{Allow: true}, &ans)
+	l.want(403, "agent", "POST", "/api/needs/"+p.Need.ID, api.NeedAnswer{Allow: true}, nil)
+	var ans api.NeedReply
+	l.want(200, "socket", "POST", "/api/needs/"+p.Need.ID, api.NeedAnswer{Allow: true}, &ans)
 	if ans.State != "allowed" || ans.Invite == nil || !strings.Contains(ans.Invite.URL, "/_ir/join#") {
 		t.Fatalf("answer: %+v", ans)
 	}
@@ -338,19 +338,19 @@ func TestConfirmations(t *testing.T) {
 	if !strings.Contains(raw, `"state":"allowed"`) || strings.Contains(raw, "/_ir/join") {
 		t.Fatalf("the agent's view: %s", raw)
 	}
-	l.want(404, "socket", "POST", "/api/confirms/"+p.Confirm.ID, api.ConfirmAnswer{Allow: true}, nil) // once
+	l.want(422, "socket", "POST", "/api/needs/"+p.Need.ID, api.NeedAnswer{Allow: true}, nil) // once
 	// Denied.
 	l.want(202, "agent", "POST", "/api/invites", api.NewInvite{Name: "other"}, &p)
-	ans = api.ConfirmReply{}
-	l.want(200, "socket", "POST", "/api/confirms/"+p.Confirm.ID, api.ConfirmAnswer{Allow: false}, &ans)
-	var st api.ConfirmState
-	l.want(200, "agent", "GET", "/api/confirms/"+p.Confirm.ID, nil, &st)
+	ans = api.NeedReply{}
+	l.want(200, "socket", "POST", "/api/needs/"+p.Need.ID, api.NeedAnswer{Allow: false}, &ans)
+	var st api.NeedState
+	l.want(200, "agent", "GET", "/api/needs/"+p.Need.ID, nil, &st)
 	if st.State != "denied" || ans.Invite != nil {
 		t.Fatalf("denied: %+v %+v", st, ans)
 	}
 	// A bad name is refused at once: a slash, a single letter, a reserved one.
 	for _, name := range []string{"a/b", "x", "ir_web", "host"} {
-		l.want(409, "agent", "POST", "/api/invites", api.NewInvite{Name: name}, nil)
+		l.want(422, "agent", "POST", "/api/invites", api.NewInvite{Name: name}, nil)
 	}
 }
 
@@ -411,11 +411,11 @@ func TestPublicOrigin(t *testing.T) {
 	var p api.Pending
 	l.want(202, "agent", "POST", "/api/invites", api.NewInvite{}, &p)
 	var raw string
-	l.do("socket", "POST", "/api/confirms/"+p.Confirm.ID, api.ConfirmAnswer{Allow: true}, &raw)
+	l.do("socket", "POST", "/api/needs/"+p.Need.ID, api.NeedAnswer{Allow: true}, &raw)
 	if !strings.Contains(raw, "https://ir.example.com/_ir/join#") || !strings.Contains(raw, `"qr":"data:image/svg+xml;base64,`) {
 		t.Fatalf("the panel's answer: %s", raw)
 	}
-	l.do("agent", "GET", "/api/confirms/"+p.Confirm.ID, nil, &raw)
+	l.do("agent", "GET", "/api/needs/"+p.Need.ID, nil, &raw)
 	if !strings.Contains(raw, `"allowed"`) || strings.Contains(raw, "/_ir/join") || strings.Contains(raw, "qr") {
 		t.Fatalf("the agent's view: %s", raw)
 	}

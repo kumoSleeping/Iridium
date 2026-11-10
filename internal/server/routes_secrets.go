@@ -191,9 +191,9 @@ func (s *Server) setSecret(w http.ResponseWriter, r *http.Request) {
 		if req.Note != nil {
 			note = strings.TrimSpace(*req.Note)
 		}
-		cf := s.asks.addConfirm(api.Confirm{Kind: "secret-set", Name: name, Note: note, Replace: exists, Asker: c.Name, Session: c.session})
-		s.logf("server: %s asks a panel for the secret %s, confirmation %s", c.Name, name, cf.ID)
-		reply(w, http.StatusAccepted, api.Pending{Confirm: cf})
+		cf := s.asks.addNeed(api.Need{Kind: api.NeedSecretSet, Name: name, Note: note, Replace: exists, Asker: c.Name, Session: c.session})
+		s.logf("server: %s asks a person for the secret %s, need %s", c.Name, name, cf.ID)
+		reply(w, http.StatusAccepted, api.Pending{Need: cf})
 		return
 	}
 	if !c.panel() {
@@ -350,9 +350,9 @@ func (s *Server) useSecrets(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if len(need) > 0 && !s.vault.use(req.Confirm, session, need) {
-		cf := s.asks.addConfirm(api.Confirm{Kind: "secret-use", Secrets: need, Command: command, Always: always, Owner: true, Asker: c.Name, Session: session})
-		s.logf("server: %s asks a panel to use %s, confirmation %s", c.Name, strings.Join(need, ", "), cf.ID)
-		reply(w, http.StatusAccepted, api.Pending{Confirm: cf})
+		cf := s.asks.addNeed(api.Need{Kind: api.NeedSecretUse, Secrets: need, Command: command, Always: always, Owner: true, Asker: c.Name, Session: session})
+		s.logf("server: %s asks a person to use %s, need %s", c.Name, strings.Join(need, ", "), cf.ID)
+		reply(w, http.StatusAccepted, api.Pending{Need: cf})
 		return
 	}
 	out := api.SecretValues{Values: map[string]string{}}
@@ -375,13 +375,13 @@ func (s *Server) useSecrets(w http.ResponseWriter, r *http.Request) {
 
 // allowSecretUse is a panel allowing secret-use confirmation cf: once, or for the rest of the
 // session's process (forSession; not for a secret confirmed every time).
-func (s *Server) allowSecretUse(cf api.Confirm, forSession bool) {
+func (s *Server) allowSecretUse(cf api.Need, forSession bool) {
 	v := s.vault
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	now := time.Now()
 	for id, g := range v.grants {
-		if now.Sub(g.at) > ConfirmTTL {
+		if now.Sub(g.at) > NeedTTL {
 			delete(v.grants, id)
 		}
 	}
@@ -432,7 +432,7 @@ func (v *vault) use(id, session string, names []string) bool {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	g, ok := v.grants[id]
-	if !ok || g.session != session || time.Since(g.at) > ConfirmTTL {
+	if !ok || g.session != session || time.Since(g.at) > NeedTTL {
 		return false
 	}
 	for _, n := range names {
@@ -446,7 +446,7 @@ func (v *vault) use(id, session string, names []string) bool {
 
 // storeAsked stores the value panel c typed for secret-set confirmation cf: the note it was asked
 // with, the scope it had (a new one: all).
-func (s *Server) storeAsked(cf api.Confirm, value string, c caller) error {
+func (s *Server) storeAsked(cf api.Need, value string, c caller) error {
 	sec, err := s.st.Secret(cf.Name)
 	if errors.Is(err, store.ErrNoSecret) {
 		sec, err = store.Secret{Name: cf.Name, Scope: string(api.ScopeAll)}, nil

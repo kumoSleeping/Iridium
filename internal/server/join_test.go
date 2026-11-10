@@ -94,19 +94,20 @@ func TestJoin(t *testing.T) {
 	}
 
 	cancel, done := run(o)
-	var cs api.Confirms
+	l.s.OpenPairing(0)
+	var cs api.Needs
 	for end := time.Now().Add(10 * time.Second); len(cs.Pending) == 0; time.Sleep(20 * time.Millisecond) {
 		if time.Now().After(end) {
 			t.Fatalf("no pairing request; it said:\n%s", out.String())
 		}
-		l.want(200, "socket", "GET", "/api/confirms", nil, &cs)
+		l.want(200, "socket", "GET", "/api/needs", nil, &cs)
 	}
 	cf := cs.Pending[0]
-	if cf.Kind != "exec-pair" || cf.Machine == nil || cf.Machine.Agents[0].Agent != "dsh" || cf.Machine.Agents[0].Version != "0.2.2" ||
+	if cf.Kind != api.NeedAppJoin || cf.Pair == nil || cf.Pair.Type != "computer" || cf.Pair.Agents[0].Agent != "dsh" || cf.Pair.Agents[0].Version != "0.2.2" ||
 		!strings.Contains(out.String(), "配对码 "+cf.Code+"：") {
-		t.Fatalf("the card %+v %+v; it said:\n%s", cf, cf.Machine, out.String())
+		t.Fatalf("the card %+v %+v; it said:\n%s", cf, cf.Pair, out.String())
 	}
-	l.want(200, "socket", "POST", "/api/confirms/"+cf.ID, api.ConfirmAnswer{Allow: true}, nil)
+	l.want(200, "socket", "POST", "/api/needs/"+cf.ID, api.NeedAnswer{Allow: true}, nil)
 	hi := online()
 	if len(hi.Agents) != 1 || hi.Agents[0].Agent != "dsh" || hi.Agents[0].Version != "0.2.2" || hi.Agents[0].Scope == "" ||
 		!strings.HasPrefix(hi.Program, "iridium ") || hi.Scratch == "" {
@@ -146,7 +147,7 @@ func TestJoin(t *testing.T) {
 	if n := strings.Count(out.String(), "配对码"); n != said {
 		t.Fatalf("paired again:\n%s", out.String())
 	}
-	l.want(200, "socket", "GET", "/api/confirms", nil, &cs)
+	l.want(200, "socket", "GET", "/api/needs", nil, &cs)
 	if len(cs.Pending) != 0 {
 		t.Fatalf("asked again: %+v", cs.Pending)
 	}

@@ -11,13 +11,13 @@ import (
 )
 
 // answer answers the one pending confirmation of kind as a panel would, with a.
-func answer(t *testing.T, as adminEnv, kind string, a api.ConfirmAnswer) api.Confirm {
+func answer(t *testing.T, as adminEnv, kind api.NeedKind, a api.NeedAnswer) api.Need {
 	t.Helper()
 	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(20 * time.Millisecond) {
-		var cs api.Confirms
-		as.call("GET", "/api/confirms", nil, &cs)
+		var cs api.Needs
+		as.call("GET", "/api/needs", nil, &cs)
 		if len(cs.Pending) == 1 && cs.Pending[0].Kind == kind {
-			if _, err := as.call("POST", "/api/confirms/"+cs.Pending[0].ID, a, nil); err != nil {
+			if _, err := as.call("POST", "/api/needs/"+cs.Pending[0].ID, a, nil); err != nil {
 				t.Fatal(err)
 			}
 			return cs.Pending[0]
@@ -45,13 +45,13 @@ func TestSecretCommands(t *testing.T) {
 
 	// An agent: the panel types the value; the agent hears only that it is stored.
 	got := agentRun(agent, "secret", "set", "NAS_PASSWORD", "--note", "mount")
-	cf := answer(t, person, "secret-set", api.ConfirmAnswer{Allow: true, Value: "nas-secret-pw"})
+	cf := answer(t, person, api.NeedSecretSet, api.NeedAnswer{Allow: true, Value: "nas-secret-pw"})
 	r := <-got
 	if r[0] != "0" || !strings.Contains(r[1], "已存 NAS_PASSWORD") || strings.Contains(r[1]+r[2], "nas-secret-pw") || cf.Note != "mount" {
 		t.Fatalf("agent set: %q %+v", r, cf)
 	}
 	got = agentRun(agent, "secret", "set", "OTHER")
-	answer(t, person, "secret-set", api.ConfirmAnswer{Allow: false})
+	answer(t, person, api.NeedSecretSet, api.NeedAnswer{Allow: false})
 	if r := <-got; r[0] != "1" || !strings.Contains(r[1], "拒绝") {
 		t.Fatalf("denied: %q", r)
 	}
@@ -98,7 +98,7 @@ func TestSecretCommands(t *testing.T) {
 		t.Fatal(err)
 	}
 	got = agentRun(agent, "run", "--secret", "API_TOKEN", "--", "sh", "-c", `echo "v=$API_TOKEN"`)
-	cf = answer(t, person, "secret-use", api.ConfirmAnswer{Allow: true})
+	cf = answer(t, person, api.NeedSecretUse, api.NeedAnswer{Allow: true})
 	if r := <-got; r[0] != "0" || !strings.Contains(r[1], "v=[secret:API_TOKEN]") || !strings.Contains(r[2], "等确认") {
 		t.Fatalf("confirmed run: %q", r)
 	}
@@ -106,7 +106,7 @@ func TestSecretCommands(t *testing.T) {
 		t.Fatalf("confirmation: %+v", cf)
 	}
 	got = agentRun(agent, "run", "--secret", "API_TOKEN", "--", "sh", "-c", "echo ran")
-	answer(t, person, "secret-use", api.ConfirmAnswer{Allow: false})
+	answer(t, person, api.NeedSecretUse, api.NeedAnswer{Allow: false})
 	if r := <-got; r[0] != "1" || strings.Contains(r[1], "ran") || !strings.Contains(r[2], "拒绝") {
 		t.Fatalf("denied run: %q", r)
 	}

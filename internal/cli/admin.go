@@ -90,6 +90,9 @@ var adminCommands = map[string]func(adminEnv, []string, io.Writer, io.Writer) in
 	"secret":  secretCmd, // secrets.go
 	"run":     runCmd,
 	"usage":   usageCmd, // usage.go
+	"needs":   needsCmd, // needs.go
+	"allow":   allowCmd,
+	"deny":    denyCmd,
 }
 
 // call sends one request to the daemon and decodes its JSON reply into out; it gives the status.
@@ -127,15 +130,12 @@ func (e adminEnv) call(method, path string, body any, out any) (int, error) {
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if resp.StatusCode >= 300 {
-		var ae struct {
-			Error     string `json:"error"`
-			NameError string `json:"nameError"`
-		}
+		var ae api.Error
 		if json.Unmarshal(data, &ae) == nil && ae.NameError != "" {
 			return resp.StatusCode, errors.New(nameErrors[ae.NameError] + " (" + ae.NameError + ")")
 		}
-		if ae.Error != "" {
-			return resp.StatusCode, errors.New(ae.Error)
+		if ae.Message != "" {
+			return resp.StatusCode, errors.New(ae.Message)
 		}
 		return resp.StatusCode, errors.New(resp.Status)
 	}
@@ -210,11 +210,11 @@ func invite(e adminEnv, args []string, stdout, stderr io.Writer) int {
 func waitConfirm(e adminEnv, raw json.RawMessage, stdout, stderr io.Writer) int {
 	var p api.Pending
 	if err := json.Unmarshal(raw, &p); err != nil {
-		return failed(stderr, "confirm", err)
+		return failed(stderr, "need", err)
 	}
-	if p.Confirm.Kind == "secret-set" {
-		fmt.Fprintf(stdout, "%s 的值要人在网页上填：已发到“需要你”，%s 前有效。等人填……\n", p.Confirm.Name, hhmm(p.Confirm.ExpiresAt))
-		st, err := waitState(e, p.Confirm.ID)
+	if p.Need.Kind == api.NeedSecretSet {
+		fmt.Fprintf(stdout, "%s 的值要人填：已发到“需要”，%s 前有效。等待中\n", p.Need.Name, hhmm(p.Need.ExpiresAt))
+		st, err := waitState(e, p.Need.ID)
 		if err != nil {
 			return failed(stderr, "secret set", err)
 		}
@@ -226,19 +226,17 @@ func waitConfirm(e adminEnv, raw json.RawMessage, stdout, stderr io.Writer) int 
 		return 1
 	}
 	what := "网页的邀请"
-	if p.Confirm.Name != "" {
-		what += "（" + p.Confirm.Name + "）"
+	if p.Need.Name != "" {
+		what += "（" + p.Need.Name + "）"
 	}
-	who := "网页或主机"
-	if p.Confirm.Owner {
+	if p.Need.Owner {
 		what += "，带 Claude"
-		who = "带 Claude 的网页登录或主机"
 	}
-	fmt.Fprintf(stdout, "%s要在%s上确认：已发到“需要你”，%s 前有效。等确认……\n", what, who, hhmm(p.Confirm.ExpiresAt))
+	fmt.Fprintf(stdout, "%s要主机或网页登录允许：已发到“需要”（%s），%s 前有效。等待中\n", what, p.Need.ID, hhmm(p.Need.ExpiresAt))
 	for {
-		var st api.ConfirmState
-		if _, err := e.call("GET", "/api/confirms/"+url.PathEscape(p.Confirm.ID)+"?wait=60", nil, &st); err != nil {
-			return failed(stderr, "confirm", err)
+		var st api.NeedState
+		if _, err := e.call("GET", "/api/needs/"+url.PathEscape(p.Need.ID)+"?wait=60", nil, &st); err != nil {
+			return failed(stderr, "need", err)
 		}
 		switch st.State {
 		case "pending":
@@ -248,12 +246,12 @@ func waitConfirm(e adminEnv, raw json.RawMessage, stdout, stderr io.Writer) int 
 			if st.Owner {
 				claude = "，带 Claude"
 			}
-			fmt.Fprintf(stdout, "已同意%s：邀请链接只显示在确认的那一处（%s 前有效）。\n", claude, hhmm(st.ExpiresAt))
+			fmt.Fprintf(stdout, "已允许%s：邀请链接只显示在允许的那一处（%s 前有效）。\n", claude, hhmm(st.ExpiresAt))
 			return 0
 		case "denied":
 			fmt.Fprintln(stdout, "已拒绝。")
 		case "expired":
-			fmt.Fprintln(stdout, "已过期，无人确认。")
+			fmt.Fprintln(stdout, "已过期，无人处理。")
 		default:
 			fmt.Fprintf(stdout, "失败：%s\n", st.Error)
 		}
@@ -269,9 +267,11 @@ func hhmm(ms int64) string {
 }
 
 const appsUsage = `用法：ir apps                       应用、主机和网页
-      ir apps logins [应用]           登录和未用的邀请（现在只有网页的）
+      ir apps logins [应用]           登录和未用的邀请
       ir apps rename <应用> <新名>     改名；登录写 应用/登录，如 ir_web/手机
-      ir apps rm <应用>               删除应用、登录或未用的邀请`
+      ir apps rm <应用>               删除应用、登录或未用的邀请
+      ir apps open [时长]             开放配对（默认 10m，最多 60m）
+      ir apps close                  关闭配对`
 
 // apps: ir apps [logins [应用] | rename <应用> <新名> | rm <应用>]: the apps, the host and ir_web,
 // their logins, renaming and removing (nothing secret). Claude is set as each was made, never
@@ -309,6 +309,8 @@ func apps(e adminEnv, args []string, stdout, stderr io.Writer) int {
 		}
 		fmt.Fprintf(stdout, "已改名：%s\n", info.Name)
 		return 0
+	case "open", "close":
+		return pairingCmd(e, sub == "open", args, stdout, stderr)
 	case "rm":
 		if len(args) != 1 {
 			return usage()
@@ -370,12 +372,22 @@ func appsLogins(e adminEnv, app string, stdout, stderr io.Writer) int {
 		}
 		app = id
 	}
+	names := map[string]string{api.WebApp: api.WebApp}
+	for _, a := range as.Apps {
+		if !a.Host && !a.Web {
+			names[a.ID] = a.Name
+		}
+	}
 	rows := [][]string{{"登录", "ID", "Claude", "浏览器", "今天用量", "上次"}}
 	for _, l := range as.Logins {
 		if app != "" && l.App != app {
 			continue
 		}
-		rows = append(rows, []string{l.App + "/" + l.Name, l.ID, claudeMark(l.Rules), strconv.Itoa(l.Sessions), strconv.FormatInt(l.UsedToday, 10), when(l.LastSeenAt)})
+		name := names[l.App] + "/" + l.Name
+		if l.ApprovedAt == 0 {
+			name += "（待批）"
+		}
+		rows = append(rows, []string{name, l.ID, claudeMark(l.Rules), strconv.Itoa(l.Sessions), strconv.FormatInt(l.UsedToday, 10), when(l.LastSeenAt)})
 	}
 	table(stdout, rows)
 	if len(as.Invites) > 0 && (app == "" || app == api.WebApp) {

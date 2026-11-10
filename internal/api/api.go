@@ -488,9 +488,14 @@ type Answer struct {
 	Always bool `json:"always,omitempty"`
 }
 
-// Error is every failed request's body.
+// Error is every failed request's body: Message for a person; Code, what went wrong, for a
+// program (decision 8: 401 only for a TOKEN that is not valid; any other refusal 403 with its
+// code, such as pair_closed, login_pending, no_permission; decision 28: 422 for what is not
+// there, such as no_such_need). NameError: bad_name's, which rule the name broke.
 type Error struct {
-	Error string `json:"error"`
+	Code      string `json:"code,omitempty"`
+	Message   string `json:"message"`
+	NameError string `json:"nameError,omitempty"`
 }
 
 // StateEvent is the event stream's "state" event: a carried state, whole. Value is null for one

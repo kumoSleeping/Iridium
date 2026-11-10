@@ -348,55 +348,6 @@ func (u *Updater) release(ctx context.Context, repo string) (Manifest, error) {
 	return m, nil
 }
 
-// Extension downloads the binary bin (an official plugin, iridium-qq) of release tag into a new
-// file in dir: the asset bin-<GOOS>-<GOARCH>.tar.gz, checked against its digest or SHA256SUMS,
-// run once (bin version). The caller renames it into place.
-func (u *Updater) Extension(ctx context.Context, bin, tag, dir string) (string, error) {
-	repo, ok := GitHubRepo(u.o.Source)
-	if !ok {
-		return "", errors.New("no GitHub repository to download from")
-	}
-	var r release
-	api := strings.TrimSuffix(u.o.GitHubAPI, "/") + "/repos/" + repo + "/releases/tags/" + url.PathEscape(tag)
-	if err := u.getJSON(ctx, api, "application/vnd.github+json", &r); err != nil {
-		return "", fmt.Errorf("github %s: release %s: %w", repo, tag, err)
-	}
-	want := bin + "-" + runtime.GOOS + "-" + runtime.GOARCH + ".tar.gz"
-	var a *Asset
-	var sums Asset
-	for _, x := range r.Assets {
-		switch x.Name {
-		case want:
-			sum, _ := strings.CutPrefix(x.Digest, "sha256:")
-			a = &Asset{URL: x.URL, SHA256: sum, Size: x.Size, API: x.API}
-		case "SHA256SUMS", "SHA256SUMS.txt":
-			sums = Asset{URL: x.URL, API: x.API}
-		}
-	}
-	if a == nil {
-		return "", fmt.Errorf("release %s has no %s", tag, want)
-	}
-	if a.SHA256 == "" && sums.URL != "" {
-		listed, err := u.sums(ctx, sums)
-		if err != nil {
-			return "", err
-		}
-		a.SHA256 = listed[want]
-	}
-	if a.SHA256 == "" {
-		return "", fmt.Errorf("release %s: no sha256 for %s", tag, want)
-	}
-	tmp, err := u.fetch(ctx, *a, dir, bin, false)
-	if err != nil {
-		return "", err
-	}
-	if err := runs(ctx, tmp, tag); err != nil {
-		os.Remove(tmp)
-		return "", err
-	}
-	return tmp, nil
-}
-
 // assetPlatform is the GOOS-GOARCH of iridium-<GOOS>-<GOARCH>[.tar.gz].
 func assetPlatform(name string) (string, bool) {
 	rest, ok := strings.CutPrefix(name, "iridium-")

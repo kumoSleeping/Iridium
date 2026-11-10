@@ -119,15 +119,42 @@ func (g *Gate) CreateInvite(name string, perms []byte) (InviteLink, error) {
 // For an existing app the TOKEN is replaced: the old one stops working and its connections are
 // closed. Works in both modes.
 func (g *Gate) CreateToken(name string) (EndpointInfo, string, error) {
-	return g.createToken(name, true)
+	return g.createToken(name, "", true)
 }
 
 // CreateNewToken is CreateToken for a new app only: ErrNameTaken if an app has name.
 func (g *Gate) CreateNewToken(name string) (EndpointInfo, string, error) {
-	return g.createToken(name, false)
+	return g.createToken(name, "", false)
 }
 
-func (g *Gate) createToken(name string, replace bool) (EndpointInfo, string, error) {
+// CreateApp makes a new app by name, shown as typ (display only), and gives its TOKEN: a pairing
+// allowed. ErrNameTaken if an app has name.
+func (g *Gate) CreateApp(name, typ string) (EndpointInfo, string, error) {
+	return g.createToken(name, typ, false)
+}
+
+// RenewToken gives app id a new TOKEN (an update pairing allowed): the old one stops working and
+// its connections are closed; its name, usage and permissions stay.
+func (g *Gate) RenewToken(id string) (EndpointInfo, string, error) {
+	token := newChannelToken()
+	g.mu.Lock()
+	e, ok := g.st.endpoints[id]
+	if !ok || e.Kind != KindChannel {
+		g.mu.Unlock()
+		return EndpointInfo{}, "", ErrNotFound
+	}
+	e.TokenHash = hashToken(token)
+	err := g.commitLocked(Change{Endpoints: []Endpoint{e}})
+	g.mu.Unlock()
+	if err != nil {
+		return EndpointInfo{}, "", err
+	}
+	g.closeConns(func(c *conn) bool { return c.endpoint == e.ID })
+	g.log.Info("gate: app TOKEN renewed", "endpoint", e.ID, "name", e.Name)
+	return infoOf(e), token, nil
+}
+
+func (g *Gate) createToken(name, typ string, replace bool) (EndpointInfo, string, error) {
 	n, err := NormalizeName(name)
 	if err != nil {
 		return EndpointInfo{}, "", err
@@ -144,7 +171,7 @@ func (g *Gate) createToken(name string, replace bool) (EndpointInfo, string, err
 			g.mu.Unlock()
 			return EndpointInfo{}, "", err
 		}
-		e = Endpoint{ID: g.newEndpointIDLocked(), Name: n, Kind: KindChannel, CreatedAt: g.now()}
+		e = Endpoint{ID: g.newEndpointIDLocked(), Name: n, Kind: KindChannel, Type: typ, CreatedAt: g.now()}
 	}
 	e.TokenHash = hashToken(token)
 	err = g.commitLocked(Change{Endpoints: []Endpoint{e}})

@@ -19,16 +19,16 @@ import (
 func TestPairMain(t *testing.T) {
 	pairPoll = 10 * time.Millisecond
 	closed := false
-	var asked api.ExecPair
+	var asked api.PairRequest
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case closed:
 			w.WriteHeader(http.StatusForbidden)
 		case r.Method == http.MethodPost && r.URL.Path == "/api/pair":
 			json.NewDecoder(r.Body).Decode(&asked)
-			json.NewEncoder(w).Encode(api.ExecPairing{Code: "1234", Request: "r1"})
+			json.NewEncoder(w).Encode(api.Pairing{Code: "1234", Request: "r1"})
 		case r.URL.Path == "/api/pair/r1":
-			json.NewEncoder(w).Encode(api.ExecPairState{Status: "allowed", Token: "ir_secret"})
+			json.NewEncoder(w).Encode(api.PairState{Status: "allowed", Token: "ir_secret"})
 		default:
 			http.NotFound(w, r)
 		}

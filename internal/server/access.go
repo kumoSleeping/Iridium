@@ -101,6 +101,7 @@ func (s *Server) webHandler(mux http.Handler) http.Handler {
 		app = webui.Handler()
 	}
 	site := webui.WrapApp(mux, app)
+	site = s.withLogin(site)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.gate().Wrap(site).ServeHTTP(w, r)
 	})
@@ -224,8 +225,9 @@ func (s *Server) usedToday(id string) int64 {
 	return n
 }
 
+// forbid refuses what the caller may not do: 403 no_permission.
 func forbid(w http.ResponseWriter, err error) bool {
-	fail(w, http.StatusForbidden, err.Error())
+	refuse(w, http.StatusForbidden, "no_permission", err.Error())
 	return false
 }
 
@@ -297,8 +299,8 @@ func (s *Server) checkSend(c caller, id string) error {
 // mayWatch checks the states an event stream asks for. It has answered when false.
 func (s *Server) mayWatch(w http.ResponseWriter, c caller, keys []string) bool {
 	for _, k := range keys {
-		if k == "confirms" && !c.panel() {
-			return forbid(w, errors.New("only a panel sees confirmations"))
+		if (k == "needs" || k == "pairing") && !c.panel() {
+			return forbid(w, errors.New("only a person on ir_web or at the host sees what waits for one"))
 		}
 	}
 	return true

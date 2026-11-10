@@ -367,8 +367,8 @@ func useSecrets(e adminEnv, names []string, command string, stderr io.Writer) (m
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, err
 		}
-		fmt.Fprintf(stderr, "ir run：用 %s 要在带 Claude 的网页面板上允许：已发到“需要你”，%s 前有效。等确认……\n", strings.Join(p.Confirm.Secrets, "、"), hhmm(p.Confirm.ExpiresAt))
-		st, err := waitState(e, p.Confirm.ID)
+		fmt.Fprintf(stderr, "ir run：用 %s 要主机或带 Claude 的网页登录允许：已发到“需要”，%s 前有效。等确认……\n", strings.Join(p.Need.Secrets, "、"), hhmm(p.Need.ExpiresAt))
+		st, err := waitState(e, p.Need.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -376,15 +376,15 @@ func useSecrets(e adminEnv, names []string, command string, stderr io.Writer) (m
 			fmt.Fprintln(stderr, "ir run："+outcome(st))
 			return nil, errDenied
 		}
-		req.Confirm = p.Confirm.ID
+		req.Confirm = p.Need.ID
 	}
 }
 
-// waitState waits for confirmation id to be answered.
-func waitState(e adminEnv, id string) (api.ConfirmState, error) {
+// waitState waits for need id to be answered.
+func waitState(e adminEnv, id string) (api.NeedState, error) {
 	for {
-		var st api.ConfirmState
-		if _, err := e.call("GET", "/api/confirms/"+url.PathEscape(id)+"?wait=60", nil, &st); err != nil {
+		var st api.NeedState
+		if _, err := e.call("GET", "/api/needs/"+url.PathEscape(id)+"?wait=60", nil, &st); err != nil {
 			return st, err
 		}
 		if st.State != "pending" {
@@ -393,13 +393,13 @@ func waitState(e adminEnv, id string) (api.ConfirmState, error) {
 	}
 }
 
-// outcome says how a confirmation that was not allowed went.
-func outcome(st api.ConfirmState) string {
+// outcome says how a need that was not allowed went.
+func outcome(st api.NeedState) string {
 	switch st.State {
 	case "denied":
-		return "网页面板拒绝了。"
+		return "已拒绝。"
 	case "expired":
-		return "没人确认，过期了。"
+		return "已过期，无人处理。"
 	}
 	return "没成：" + st.Error
 }

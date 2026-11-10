@@ -48,7 +48,7 @@ func (s *Server) remoteFileError(w http.ResponseWriter, err error) {
 	case wire.IsCode(err, wire.CodeNotFound):
 		fail(w, http.StatusNotFound, err.Error())
 	case wire.IsCode(err, wire.CodeDenied):
-		fail(w, http.StatusForbidden, err.Error())
+		refuse(w, http.StatusForbidden, "denied", err.Error())
 	case errors.Is(err, wire.ErrOffline):
 		fail(w, http.StatusConflict, err.Error())
 	default:
