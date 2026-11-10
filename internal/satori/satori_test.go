@@ -253,7 +253,7 @@ func TestErrors(t *testing.T) {
 	}{
 		{"app1", "app1", "u1", "nope.get", nil, 404, "no_such_api"},
 		{"app1", "app1", "u1", "message.delete", nil, 404, "no_such_api"},
-		{"", "app1", "u1", "channel.get", nil, 403, "app_only"},
+		{"", "app1", "u1", "channel.get", nil, 403, "no_login"},
 		{"app1", "app2", "u1", "channel.get", nil, 403, "no_such_login"},
 		{"app1", "app1", "", "channel.get", nil, 403, "no_such_login"},
 		{"app1", "app1", "stranger", "channel.get", nil, 403, "no_such_login"},
