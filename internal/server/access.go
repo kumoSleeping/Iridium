@@ -100,6 +100,7 @@ func (s *Server) webHandler(mux http.Handler) http.Handler {
 		app = webui.Handler()
 	}
 	site := webui.WrapApp(mux, app)
+	site = s.withSatori(site)
 	site = s.withLogin(site)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.gate().Wrap(site).ServeHTTP(w, r)
