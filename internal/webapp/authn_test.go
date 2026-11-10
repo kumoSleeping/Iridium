@@ -1,4 +1,4 @@
-package gate
+package webapp
 
 import (
 	"crypto/ecdsa"
@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-webauthn/webauthn/protocol/webauthncbor"
 	"github.com/go-webauthn/webauthn/protocol/webauthncose"
+	"github.com/kumoSleeping/iridium/internal/gate"
 )
 
 // authenticator is a minimal software passkey provider: ES256, "none" attestation,
@@ -85,7 +86,7 @@ func (a *authenticator) create(options json.RawMessage) json.RawMessage {
 		a.t.Fatalf("user id: %v", err)
 	}
 	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	c := &vcred{id: randomBytes(16), key: key, rpID: o.RP.ID, user: user}
+	c := &vcred{id: gate.RandomBytes(16), key: key, rpID: o.RP.ID, user: user}
 	a.creds = append(a.creds, c)
 
 	pub, _ := key.PublicKey.ECDH()

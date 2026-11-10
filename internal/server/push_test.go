@@ -16,7 +16,6 @@ import (
 
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/config"
-	"github.com/kumoSleeping/iridium/internal/gate"
 	"github.com/kumoSleeping/iridium/internal/push"
 	"github.com/kumoSleeping/iridium/internal/store"
 )
@@ -290,14 +289,7 @@ func TestNotice(t *testing.T) {
 		}
 	})
 	now := time.Now()
-	if err := l.s.st.Gate().Apply(gate.Change{Endpoints: []gate.Endpoint{{ID: "pad0000000000000", Name: "pad", Kind: gate.KindPanel, CreatedAt: now, ApprovedAt: now}}}); err != nil {
-		t.Fatal(err)
-	}
-	g, err := l.s.newGate("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	l.s.g.Store(g)
+	padID := l.addPanel("pad")
 	bot := l.newApp("bot", false)
 	if ok, err := l.s.st.AddLogin(bot.App.ID, "u1", "张三", 20, now); !ok || err != nil {
 		t.Fatal(ok, err)
@@ -346,14 +338,14 @@ func TestNotice(t *testing.T) {
 	}))
 	defer srv.Close()
 	keys, _ := json.Marshal(map[string]string{"p256dh": base64.RawURLEncoding.EncodeToString(ua.PublicKey().Bytes()), "auth": base64.RawURLEncoding.EncodeToString(auth)})
-	if err := l.s.st.AddPushSubscription(store.PushSubscription{Terminal: "pad0000000000000", Endpoint: srv.URL, Keys: string(keys)}); err != nil {
+	if err := l.s.st.AddPushSubscription(store.PushSubscription{Terminal: padID, Endpoint: srv.URL, Keys: string(keys)}); err != nil {
 		t.Fatal(err)
 	}
 	var mine api.NewSessionReply
 	l.want(200, "socket", "POST", "/api/sessions", api.NewSession{Agent: api.AgentCodex, Cwd: l.work, Text: "hi"}, &mine)
 	var r api.NoticeReply
 	l.want(200, "agent-in:"+mine.ID, "POST", "/api/apps/ir_web/logins/pad/notice", hi, &r)
-	if r.Sent != 1 || r.Login != "pad0000000000000" || r.Name != "pad" {
+	if r.Sent != 1 || r.Login != padID || r.Name != "pad" {
 		t.Errorf("reply: %+v", r)
 	}
 	select {

@@ -16,14 +16,7 @@ import (
 func TestNeedsAsksAndShare(t *testing.T) {
 	l := start(t)
 	now := time.Now()
-	if err := l.s.st.Gate().Apply(gate.Change{Endpoints: []gate.Endpoint{{ID: "pad0000000000000", Name: "pad", Kind: gate.KindPanel, CreatedAt: now, ApprovedAt: now}}}); err != nil {
-		t.Fatal(err)
-	}
-	g, err := l.s.newGate("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	l.s.g.Store(g)
+	padID := l.addPanel("pad")
 	bot := l.newApp("bot", true)
 	for _, id := range []string{"u1", "u2"} {
 		l.s.st.AddLogin(bot.App.ID, id, id, 20, now)
@@ -35,7 +28,7 @@ func TestNeedsAsksAndShare(t *testing.T) {
 	l.s.st.SetLoginPermsOf(bot.App.ID, "u1", codexOnly)
 	u1 := caller{Identity: gate.Identity{App: bot.App.ID, Login: "u1"}}
 	u2 := caller{Identity: gate.Identity{App: bot.App.ID, Login: "u2"}}
-	pad := caller{Identity: gate.Identity{App: gate.WebApp, Login: "pad0000000000000"}}
+	pad := caller{Identity: gate.Identity{App: gate.WebApp, Login: padID}}
 
 	var cr api.NewSessionReply
 	l.want(200, "socket", "POST", "/api/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "please ASK"}, &cr)
@@ -98,7 +91,7 @@ func TestNeedsAsksAndShare(t *testing.T) {
 	l.want(200, "socket", "POST", "/api/sessions", api.NewSession{Agent: api.AgentCodex, Cwd: l.work, Text: "hi"}, &cx)
 	var r api.ShareReply
 	l.want(200, "socket", "POST", "/api/share", api.ShareRequest{What: api.ShareOfSession, Session: cx.ID, To: "ir_web/pad", Note: "看看"}, &r)
-	if r.Login != "pad0000000000000" {
+	if r.Login != padID {
 		t.Errorf("reply: %+v", r)
 	}
 	mine := l.s.needsFor(pad, l.s.asks.everything().Pending)
@@ -108,7 +101,7 @@ func TestNeedsAsksAndShare(t *testing.T) {
 	if len(l.s.needsFor(caller{Identity: gate.HostIdentity}, l.s.asks.everything().Pending)) != 0 {
 		t.Error("the host sees pad's share")
 	}
-	if !l.s.more.dropShare(mine[0].ID, "pad0000000000000") || len(l.s.needsFor(pad, l.s.asks.everything().Pending)) != 0 {
+	if !l.s.more.dropShare(mine[0].ID, padID) || len(l.s.needsFor(pad, l.s.asks.everything().Pending)) != 0 {
 		t.Error("put away")
 	}
 

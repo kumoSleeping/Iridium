@@ -317,3 +317,15 @@
 - `message.list` 多回 `_data {start, end, more}`；`limit` 按块数。文件元素按类型用 `<video>`/`<audio>`，带上文件的全部字段。
 - 网页读记录改走 `POST /v1/message.list`（最新一页、往回翻、`direction: after` 取新写的），`GET /v1/internal/sessions/{id}/messages` 网页不再用，路由留着。草稿和状态照旧走 STATE。
 - 记录里人说的消息 `user.id` 仍是应用 ID（记录里只存了应用和标签，没有登录 ID）。
+
+
+## 网页独立成一层
+
+- 核心（`internal/gate`）只凭 TOKEN 认人：应用的 `ir_…`、会话的 `irs_…`、`Satori-User-ID` 指明的登录（照 `withLogin` 批），unix socket 是主机。不读 Cookie，不查 Host/Origin，没有登录页。见 `docs/gate.md`。
+- 网页（`internal/webapp`，同一进程，挂在 TCP 上核心前面）：Passkey 注册、登录、登出，Cookie，邀请和 `/_ir/` 页面，首次设置链接，公网地址和 Host/Origin 检查，private 缓存，网页文件。见 `docs/web.md`。
+- 登录了的浏览器转给核心时是 ir_web 替它的登录说话：`Authorization: Bearer <ir_web 的 TOKEN>`、`Satori-Platform: ir_web`、`Satori-User-ID: <登录 ID>`，浏览器自己带的这几个头替换掉，Cookie 去掉。带 TOKEN 的请求原样过。
+- ir_web 成了一行真的应用（`apps` 里 ID `ir_web`），TOKEN 在状态目录 `web-token`（0600），启动时没有就生成；不列出、不能找、改、删，Satori 的 IDENTIFY 不收它。
+- 唯一的信任边 `gate.AsHost`：网页关着（没设公网地址）时，本机浏览器查过 Host/Origin 后算主机。
+- 关网页就是 `ir public off`：TCP 上只剩 TOKEN 请求和本机的主机页面；不出登录页、不认 Cookie。
+- 存储：没有新迁移。Passkey 还在 `logins` 那一行（网页层的 `Store` 读写 `user_handle`、`passkeys` 两列），`web_sessions`、`invites` 不变，升级后浏览器不用重登。
+- 行为变化：换公网地址只断浏览器的连接，应用的不断；本机模式下带旧 Cookie 的浏览器算主机（原来算那个登录）；带 TOKEN 的请求拿不到网页文件（404）；退回旧版时会多出一个叫 `ir_web` 的应用。

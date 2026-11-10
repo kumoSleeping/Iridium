@@ -11,14 +11,23 @@ import (
 	"github.com/go-webauthn/webauthn/webauthn"
 
 	"github.com/kumoSleeping/iridium/internal/gate"
+	"github.com/kumoSleeping/iridium/internal/webapp"
 )
 
 func utc(st gate.State) string {
 	for i := range st.Endpoints {
 		e := &st.Endpoints[i]
 		e.CreatedAt, e.LastSeenAt, e.ApprovedAt = e.CreatedAt.UTC(), e.LastSeenAt.UTC(), e.ApprovedAt.UTC()
-		for j := range e.Passkeys {
-			e.Passkeys[j].CreatedAt, e.Passkeys[j].LastUsedAt = e.Passkeys[j].CreatedAt.UTC(), e.Passkeys[j].LastUsedAt.UTC()
+	}
+	b, _ := json.Marshal(st)
+	return string(b)
+}
+
+func webUTC(st webapp.State) string {
+	for i := range st.Creds {
+		c := &st.Creds[i]
+		for j := range c.Passkeys {
+			c.Passkeys[j].CreatedAt, c.Passkeys[j].LastUsedAt = c.Passkeys[j].CreatedAt.UTC(), c.Passkeys[j].LastUsedAt.UTC()
 		}
 	}
 	for i := range st.Invites {
@@ -32,32 +41,46 @@ func utc(st gate.State) string {
 	return string(b)
 }
 
-// The gate's state goes into the database (apps, logins of ir_web, invites, web sessions) and
-// comes back the same; an app or login deleted takes its permissions and device along.
+// The core's state (apps, logins of ir_web) and ir_web's (their passkeys, invites, web sessions)
+// go into the database and come back the same; an app or login deleted takes its permissions,
+// device and passkeys along.
 func TestGateStore(t *testing.T) {
 	s, path := open(t)
-	g := s.Gate()
-	if st, err := g.Load(); err != nil || len(st.Endpoints)+len(st.Invites)+len(st.Sessions) != 0 {
+	g, web := s.Gate(), s.Web()
+	if st, err := g.Load(); err != nil || len(st.Endpoints) != 0 {
+		t.Fatalf("empty: %+v %v", st, err)
+	}
+	if st, err := web.Load(); err != nil || len(st.Creds)+len(st.Invites)+len(st.Sessions) != 0 {
 		t.Fatalf("empty: %+v %v", st, err)
 	}
 	t0 := time.Date(2026, 11, 5, 12, 0, 0, 123456789, time.UTC)
-	panel := gate.Endpoint{ID: "aaaaaaaaaaaaaaaa", Name: "mac", Kind: gate.KindPanel, UserHandle: []byte{1, 2, 3},
-		Passkeys: []gate.Passkey{{Credential: webauthn.Credential{ID: []byte("cred"), PublicKey: []byte("pk")}, CreatedAt: t0, LastUsedAt: t0}},
-		Avatar:   []byte{0x89, 'P', 'N', 'G'}, AvatarVersion: "v1", CreatedAt: t0, LastSeenAt: t0.Add(time.Minute), ApprovedAt: t0}
+	panel := gate.Endpoint{ID: "aaaaaaaaaaaaaaaa", Name: "mac", Kind: gate.KindPanel,
+		Avatar: []byte{0x89, 'P', 'N', 'G'}, AvatarVersion: "v1", CreatedAt: t0, LastSeenAt: t0.Add(time.Minute), ApprovedAt: t0}
+	cred := webapp.Cred{Login: panel.ID, UserHandle: []byte{1, 2, 3},
+		Passkeys: []webapp.Passkey{{Credential: webauthn.Credential{ID: []byte("cred"), PublicKey: []byte("pk")}, CreatedAt: t0, LastUsedAt: t0}}}
 	bot := gate.Endpoint{ID: "bbbbbbbbbbbbbbbb", Name: "bot", Kind: gate.KindChannel, Type: "computer", TokenHash: "abc", CreatedAt: t0.Add(time.Second)}
 	other := gate.Endpoint{ID: "cccccccccccccccc", Name: "mac", Kind: gate.KindChannel, CreatedAt: t0.Add(2 * time.Second)}
-	setup := gate.Invite{ID: "setup", Hash: "h0", Setup: true, CreatedAt: t0}
-	inv := gate.Invite{ID: "invite01", Hash: "h1", Name: "pad", Perms: []byte(`{"claudeOwner":{"by":"local","at":1}}`), CreatedAt: t0, ExpiresAt: t0.Add(10 * time.Minute)}
-	login := gate.Session{Hash: "s1", EndpointID: panel.ID, CreatedAt: t0, LastSeenAt: t0, ExpiresAt: t0.Add(7 * 24 * time.Hour)}
-	must(t, g.Apply(gate.Change{Endpoints: []gate.Endpoint{panel, bot, other}, Invites: []gate.Invite{setup, inv}, Sessions: []gate.Session{login}}))
+	setup := webapp.Invite{ID: "setup", Hash: "h0", Setup: true, CreatedAt: t0}
+	inv := webapp.Invite{ID: "invite01", Hash: "h1", Name: "pad", Perms: []byte(`{"claudeOwner":{"by":"local","at":1}}`), CreatedAt: t0, ExpiresAt: t0.Add(10 * time.Minute)}
+	login := webapp.Session{Hash: "s1", Login: panel.ID, CreatedAt: t0, LastSeenAt: t0, ExpiresAt: t0.Add(7 * 24 * time.Hour)}
+	if err := web.Apply(webapp.Change{Creds: []webapp.Cred{cred}}); err == nil {
+		t.Error("passkeys for a login not there")
+	}
+	must(t, g.Apply(gate.Change{Endpoints: []gate.Endpoint{panel, bot, other}}))
+	must(t, web.Apply(webapp.Change{Creds: []webapp.Cred{cred}, Invites: []webapp.Invite{setup, inv}, Sessions: []webapp.Session{login}}))
 	// Ordered by creation, then ID.
-	want := gate.State{Endpoints: []gate.Endpoint{panel, bot, other}, Invites: []gate.Invite{inv, setup}, Sessions: []gate.Session{login}}
+	want := gate.State{Endpoints: []gate.Endpoint{panel, bot, other}}
 	got, err := g.Load()
 	if err != nil || utc(got) != utc(want) {
 		t.Fatalf("round trip:\n got %s\nwant %s\n%v", utc(got), utc(want), err)
 	}
-	if !got.Invites[1].ExpiresAt.IsZero() || !got.Endpoints[1].LastSeenAt.IsZero() {
-		t.Errorf("zero times: %+v %+v", got.Invites[1], got.Endpoints[1])
+	wantWeb := webapp.State{Creds: []webapp.Cred{cred}, Invites: []webapp.Invite{inv, setup}, Sessions: []webapp.Session{login}}
+	gotWeb, err := web.Load()
+	if err != nil || webUTC(gotWeb) != webUTC(wantWeb) {
+		t.Fatalf("round trip:\n got %s\nwant %s\n%v", webUTC(gotWeb), webUTC(wantWeb), err)
+	}
+	if !gotWeb.Invites[1].ExpiresAt.IsZero() || !got.Endpoints[1].LastSeenAt.IsZero() {
+		t.Errorf("zero times: %+v %+v", gotWeb.Invites[1], got.Endpoints[1])
 	}
 	var n int
 	s.db.QueryRow(`SELECT COUNT(*) FROM logins WHERE app = 'ir_web' AND id = ? AND approved_at IS NOT NULL`, panel.ID).Scan(&n)
@@ -75,17 +98,21 @@ func TestGateStore(t *testing.T) {
 	if d, _ := s.Devices(); len(d) != 3 || d[bot.ID] != "phone" || d[panel.ID] != "laptop" || d[gate.HostID] != "none" {
 		t.Fatalf("devices %v", d)
 	}
-	// A gate update keeps the device.
+	// A gate update keeps the device and the passkeys.
 	panel.Name = "Mac"
 	must(t, g.Apply(gate.Change{Endpoints: []gate.Endpoint{panel}}))
 	if d, _ := s.Device(panel.ID); d != "laptop" {
 		t.Errorf("device after a rename: %q", d)
 	}
+	if st, _ := web.Load(); len(st.Creds) != 1 || len(st.Creds[0].Passkeys) != 1 {
+		t.Errorf("passkeys after a rename: %+v", st.Creds)
+	}
 
 	// An update, a deletion with its rules, all in one change; then from a new connection.
 	must(t, s.SetTerminalRules(bot.ID, []byte(`{"agents":["pi"]}`)))
 	bot.Name, bot.TokenHash = "bot2", "def"
-	must(t, g.Apply(gate.Change{DeleteEndpoints: []string{bot.ID}, DeleteInvites: []string{inv.ID}, DeleteSessions: []string{"s1"}, Endpoints: []gate.Endpoint{other}}))
+	must(t, g.Apply(gate.Change{DeleteEndpoints: []string{bot.ID}, Endpoints: []gate.Endpoint{other}}))
+	must(t, web.Apply(webapp.Change{DeleteInvites: []string{inv.ID}, DeleteSessions: []string{"s1"}}))
 	if _, ok, _ := s.TerminalRules(bot.ID); ok {
 		t.Error("rules outlived their app")
 	}
@@ -107,8 +134,9 @@ func TestGateStore(t *testing.T) {
 	}
 	defer s2.Close()
 	got, _ = s2.Gate().Load()
-	if len(got.Endpoints) != 3 || len(got.Invites) != 1 || len(got.Sessions) != 0 || got.Endpoints[2].TokenHash != "" {
-		t.Fatalf("after: %s", utc(got))
+	gotWeb, _ = s2.Web().Load()
+	if len(got.Endpoints) != 3 || len(gotWeb.Invites) != 1 || len(gotWeb.Sessions) != 0 || got.Endpoints[2].TokenHash != "" {
+		t.Fatalf("after: %s %s", utc(got), webUTC(gotWeb))
 	}
 }
 
@@ -137,9 +165,20 @@ func TestMigrateToApps(t *testing.T) {
 		t.Fatalf("endpoints: %s", utc(st))
 	}
 	mac, qq, box := byID[f.Mac], byID[f.QQ], byID[f.Box]
-	if mac.Kind != gate.KindPanel || mac.Name != "kumo mac" || len(mac.Passkeys) != 1 || mac.AvatarVersion != "av1" ||
-		!mac.ApprovedAt.Equal(f.T0) || !mac.LastSeenAt.Equal(f.T0.Add(time.Hour)) || string(mac.UserHandle) != "\x01\x02" {
+	if mac.Kind != gate.KindPanel || mac.Name != "kumo mac" || mac.AvatarVersion != "av1" ||
+		!mac.ApprovedAt.Equal(f.T0) || !mac.LastSeenAt.Equal(f.T0.Add(time.Hour)) {
 		t.Errorf("mac: %+v", mac)
+	}
+	wst, err := s.Web().Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	creds := map[string]webapp.Cred{}
+	for _, c := range wst.Creds {
+		creds[c.Login] = c
+	}
+	if c := creds[f.Mac]; len(c.Passkeys) != 1 || string(c.UserHandle) != "\x01\x02" {
+		t.Errorf("mac's passkeys: %+v", c)
 	}
 	if byID[f.Pad].Kind != gate.KindPanel || byID[f.Pad].ApprovedAt.IsZero() {
 		t.Errorf("pad: %+v", byID[f.Pad])
@@ -151,8 +190,8 @@ func TestMigrateToApps(t *testing.T) {
 		t.Errorf("box: %+v", box)
 	}
 	// Invites: the --owner one carries Claude as its perms; the setup link is still one.
-	inv := map[string]gate.Invite{}
-	for _, i := range st.Invites {
+	inv := map[string]webapp.Invite{}
+	for _, i := range wst.Invites {
 		inv[i.ID] = i
 	}
 	var perms struct {
@@ -167,8 +206,8 @@ func TestMigrateToApps(t *testing.T) {
 	if inv[f.Plain].Perms != nil || !inv["setup"].Setup || inv[f.Owner].Name != "phone" {
 		t.Errorf("invites: %+v", inv)
 	}
-	if len(st.Sessions) != 1 || st.Sessions[0].EndpointID != f.Mac {
-		t.Errorf("web sessions: %+v", st.Sessions)
+	if len(wst.Sessions) != 1 || wst.Sessions[0].Login != f.Mac {
+		t.Errorf("web sessions: %+v", wst.Sessions)
 	}
 	// Permissions, usage, openers, devices by the same IDs.
 	if r, ok := rulesOf(t, s, f.Mac); !ok || r.ClaudeOwner == nil || r.ClaudeOwner.By != "first" {
@@ -210,15 +249,33 @@ func TestMigrateToApps(t *testing.T) {
 		t.Errorf("outbox: %d rows", n)
 	}
 
-	// Through the gate: the TOKENs and the browser's cookie are let in as before.
+	// Through ir_web and the gate: the TOKENs and the browser's cookie are let in as before, the
+	// browser as ir_web speaking for its login.
 	const origin = "https://ir.example.com"
-	g, err := gate.New(gate.Config{PublicOrigin: origin, Store: s.Gate(), Now: func() time.Time { return f.T0.Add(2 * time.Hour) }})
+	now := func() time.Time { return f.T0.Add(2 * time.Hour) }
+	g, err := gate.New(gate.Config{Store: s.Gate(), Now: now})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer g.Close()
+	tok, err := webapp.AppToken(g, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	web, err := webapp.New(webapp.Config{PublicOrigin: origin, Core: g, Token: tok, Store: s.Web(), Now: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer web.Close()
 	var seen gate.Identity
-	h := g.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { seen, _ = gate.FromContext(r.Context()) }))
+	core := g.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen, _ = gate.FromContext(r.Context())
+		if seen.App == gate.WebApp { // as the server's withLogin
+			info, _ := g.Seen(r.Header.Get(webapp.HeaderUser))
+			seen.Login, seen.Name = info.ID, info.Name
+		}
+	}))
+	h := web.Handler(core, http.NotFoundHandler())
 	do := func(set func(*http.Request)) (gate.Identity, int) {
 		seen = gate.Identity{}
 		r := httptest.NewRequest("GET", origin+"/api/me", nil)
@@ -233,7 +290,7 @@ func TestMigrateToApps(t *testing.T) {
 	if id, code := do(func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+f.BoxTok) }); code != 200 || id.App != f.Box {
 		t.Errorf("box's TOKEN: %d %+v", code, id)
 	}
-	if id, code := do(func(r *http.Request) { r.AddCookie(&http.Cookie{Name: gate.CookieName, Value: f.Cookie}) }); code != 200 || !id.Web() || id.Login != f.Mac || id.Name != "kumo mac" {
+	if id, code := do(func(r *http.Request) { r.AddCookie(&http.Cookie{Name: webapp.CookieName, Value: f.Cookie}) }); code != 200 || !id.Web() || id.Login != f.Mac || id.Name != "kumo mac" {
 		t.Errorf("mac's browser: %d %+v", code, id)
 	}
 	if _, code := do(func(r *http.Request) { r.Header.Set("Authorization", "Bearer ir_"+token("x")) }); code != http.StatusUnauthorized {

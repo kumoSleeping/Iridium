@@ -14,6 +14,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/access"
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/gate"
+	"github.com/kumoSleeping/iridium/internal/webapp"
 )
 
 // asLogin sends a request with an app's TOKEN as its login (Satori-User-ID): the status, and the
@@ -122,9 +123,9 @@ func TestApprovers(t *testing.T) {
 	l := start(t)
 	panel := func(id string) gate.EndpointInfo { return gate.EndpointInfo{ID: id, Name: id, Kind: gate.KindPanel} }
 	claude, _ := json.Marshal(access.WithClaude(access.Default(), access.ByLocal, 1))
-	l.s.joined(gate.Joined{Endpoint: panel("owner0000000000a"), Perms: claude})
-	l.s.joined(gate.Joined{Endpoint: panel("kept00000000000a"), Perms: claude})
-	l.s.joined(gate.Joined{Endpoint: panel("guest0000000000a")})
+	l.s.joined(webapp.Joined{Endpoint: panel("owner0000000000a"), Perms: claude})
+	l.s.joined(webapp.Joined{Endpoint: panel("kept00000000000a"), Perms: claude})
+	l.s.joined(webapp.Joined{Endpoint: panel("guest0000000000a")})
 	kept, _ := json.Marshal(api.Perms{Agents: []string{"*"}, Scope: []string{"pc:/work"}})
 	if _, err := l.s.st.AddLogin(gate.WebApp, "kept00000000000a", "kept", 20, time.Now()); err != nil {
 		t.Fatal(err)

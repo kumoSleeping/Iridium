@@ -11,6 +11,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/gate"
 	"github.com/kumoSleeping/iridium/internal/satori"
+	"github.com/kumoSleeping/iridium/internal/webapp"
 )
 
 // What an app or login may use: its scope hides the sessions out of it (not listed, not found),
@@ -110,7 +111,7 @@ func TestInvitePerms(t *testing.T) {
 	if _, err := l.s.st.AddLogin(gate.WebApp, id, "pad", 20, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	l.s.joined(gate.Joined{Endpoint: gate.EndpointInfo{ID: id, Name: "pad", Kind: gate.KindPanel}, Perms: slot})
+	l.s.joined(webapp.Joined{Endpoint: gate.EndpointInfo{ID: id, Name: "pad", Kind: gate.KindPanel}, Perms: slot})
 	if p := l.s.loginPermsOf(gate.WebApp, id); p == nil || len(p.Agents) != 1 || p.Agents[0] != "codex" {
 		t.Fatalf("the slot's perms: %+v", p)
 	}

@@ -37,6 +37,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/store"
 	"github.com/kumoSleeping/iridium/internal/transcript"
 	"github.com/kumoSleeping/iridium/internal/update"
+	"github.com/kumoSleeping/iridium/internal/webapp"
 )
 
 type Server struct {
@@ -59,14 +60,16 @@ type Server struct {
 	// Prices, if set, prices the usage the agents gave no cost (GET /api/usage).
 	Prices *pricing.Catalog
 
-	cmu     sync.Mutex // one config change at a time (SaveConfig); guards cfg's settings
-	gmu     sync.Mutex // one gate change at a time
-	g       atomic.Pointer[gate.Gate]
-	initErr error      // the gate for cfg.Public.Origin would not open; Listen gives it
-	asks    *needs     // what waits for a person (needs.go)
-	more    *moreNeeds // asks' first sightings, shares (needs_more.go)
-	pairs   *pairs     // apps asking to pair (pairing.go)
-	vault   *vault     // the credentials' masks and allowed uses (routes_secrets.go)
+	cmu      sync.Mutex // one config change at a time (SaveConfig); guards cfg's settings
+	gmu      sync.Mutex // one change of ir_web at a time
+	g        *gate.Gate // the core's door and registry (access.go)
+	w        atomic.Pointer[webapp.Web]
+	webToken string     // ir_web's own TOKEN, which it speaks to the core with
+	initErr  error      // ir_web for cfg.Public.Origin would not open; Listen gives it
+	asks     *needs     // what waits for a person (needs.go)
+	more     *moreNeeds // asks' first sightings, shares (needs_more.go)
+	pairs    *pairs     // apps asking to pair (pairing.go)
+	vault    *vault     // the credentials' masks and allowed uses (routes_secrets.go)
 
 	// Push, if set before Handler, is Web Push (routes_push.go).
 	Push *push.Service
@@ -82,8 +85,9 @@ type Server struct {
 	sat   *satori.Service // /v1/: Satori with ir (satori.go)
 }
 
-// New is the API over m. The interactive terminals live in m's store, behind the Passkey gate
-// (package gate) in front of the TCP address; the unix socket is 本机.
+// New is the API over m. Apps and logins live in m's store; on the TCP address ir_web (package
+// webapp: passkeys, cookies, the page) stands in front of the core's TOKEN gate (package gate);
+// the unix socket is the host.
 func New(cfg config.Config, m *session.Manager, h *hub.Hub, logf func(string, ...any)) *Server {
 	if logf == nil {
 		logf = log.Printf
@@ -98,21 +102,30 @@ func New(cfg config.Config, m *session.Manager, h *hub.Hub, logf func(string, ..
 	s.sat = satori.New(satoriBackend{s}, logf)
 	m.Watch(s.sat.Notice)
 	s.wireNeeds()
-	g, err := s.newGate(cfg.Public.Origin)
+	if err := s.openGate(); err != nil {
+		s.initErr = err
+		return s
+	}
+	web, err := s.newWeb(cfg.Public.Origin)
 	if err != nil {
 		s.initErr = err
-		g, _ = s.newGate("")
+		web, _ = s.newWeb("")
 	}
-	s.g.Store(g)
+	s.w.Store(web)
 	h.Set("update", s.updateState())
 	h.Set("terminals", int64(0))
 	s.carryNotes()
 	return s
 }
 
-// Close closes the gate and stops Satori's events.
+// Close closes ir_web and the gate and stops Satori's events.
 func (s *Server) Close() {
-	s.gate().Close()
+	if w := s.web(); w != nil {
+		w.Close()
+	}
+	if s.g != nil {
+		s.g.Close()
+	}
 	s.sat.Close()
 }
 

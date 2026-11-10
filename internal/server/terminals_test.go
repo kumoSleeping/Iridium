@@ -455,3 +455,13 @@ func (l *live) newApp(name string, claude bool) api.Token {
 	}
 	return api.Token{App: l.s.appOf(info), Token: tok}
 }
+
+// addPanel adds a login of ir_web named name, as one joined by an invite: its ID.
+func (l *live) addPanel(name string) string {
+	l.t.Helper()
+	info, err := l.s.gate().CreateWebLogin(name)
+	if err != nil {
+		l.t.Fatal(err)
+	}
+	return info.ID
+}

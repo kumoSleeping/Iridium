@@ -1,4 +1,4 @@
-package gate
+package webapp
 
 import (
 	"bytes"
@@ -15,6 +15,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/kumoSleeping/iridium/internal/gate"
 )
 
 const testOrigin = "https://ir.example.com"
@@ -31,24 +33,26 @@ func (c *clock) Advance(d time.Duration) {
 	c.mu.Unlock()
 }
 
-// harness runs a gate in front of an app that echoes the caller's identity.
+// harness runs ir_web in front of the core, in front of an app that echoes the caller's identity.
 type harness struct {
-	t       *testing.T
-	g       *Gate
-	h       http.Handler
-	clock   *clock
-	logs    *bytes.Buffer
-	dir     string
-	store   *JSONStore
-	cookie  string // the browser's session cookie value
-	secrets []string
-	revoked []string
-	shown   atomic.Int32 // OnTerminals calls
-	joined  []Joined
+	t         *testing.T
+	g         *gate.Gate
+	w         *Web
+	h         http.Handler
+	clock     *clock
+	logs      *bytes.Buffer
+	dir       string
+	store     *JSONStore
+	coreStore *gate.JSONStore
+	cookie    string // the browser's session cookie value
+	secrets   []string
+	revoked   []string
+	shown     atomic.Int32 // OnTerminals calls
+	joined    []Joined
 }
 
 type appReply struct {
-	Identity
+	gate.Identity
 	Method string
 	Host   bool
 	Web    bool
@@ -62,33 +66,57 @@ func newHarness(t *testing.T, origin string) *harness {
 	return h
 }
 
+// open starts (again) the core and ir_web over the same files.
 func (h *harness) open(origin string) {
 	h.t.Helper()
-	if h.g != nil {
+	if h.w != nil {
+		h.w.Close()
 		h.g.Close()
 	}
-	store, err := OpenJSONStore(filepath.Join(h.dir, "state", "gate.json"))
+	state := filepath.Join(h.dir, "state")
+	coreStore, err := gate.OpenJSONStore(filepath.Join(state, "gate.json"))
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	h.store = store
-	g, err := New(Config{
-		PublicOrigin: origin,
-		Store:        store,
-		StateDir:     filepath.Join(h.dir, "state"),
-		Logger:       slog.New(slog.NewTextHandler(h.logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
-		Now:          h.clock.Now,
-		OnRevoke:     func(id string) { h.revoked = append(h.revoked, id) },
-		OnJoin:       func(j Joined) { h.joined = append(h.joined, j) },
-		OnTerminals:  func() { h.shown.Add(1) },
+	store, err := OpenJSONStore(filepath.Join(state, "web.json"))
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	h.store, h.coreStore = store, coreStore
+	log := slog.New(slog.NewTextHandler(h.logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	g, err := gate.New(gate.Config{
+		Store:          coreStore,
+		Logger:         log,
+		Now:            h.clock.Now,
+		OnRevoke:       func(id string) { h.revoked = append(h.revoked, id); h.w.Forget(id) },
+		OnTerminals:    func() { h.shown.Add(1) },
+		LoginNameTaken: func(name string) bool { return h.w.NameTaken(name) },
 	})
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	h.t.Cleanup(func() { g.Close() })
-	h.g = g
-	h.h = g.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		id, ok := FromContext(r.Context())
+	tok, err := AppToken(g, state)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	h.secrets = append(h.secrets, tok)
+	w, err := New(Config{
+		PublicOrigin: origin,
+		Core:         g,
+		Token:        tok,
+		Store:        store,
+		StateDir:     state,
+		Logger:       log,
+		Now:          h.clock.Now,
+		OnJoin:       func(j Joined) { h.joined = append(h.joined, j) },
+	})
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	h.t.Cleanup(func() { w.Close(); g.Close() })
+	h.g, h.w = g, w
+	h.h = h.chain(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id, ok := gate.FromContext(r.Context())
 		if !ok {
 			http.Error(w, "no identity", 500)
 			return
@@ -104,6 +132,58 @@ func (h *harness) open(origin string) {
 		w.Header().Set("Cache-Control", "public, max-age=60")
 		json.NewEncoder(w).Encode(appReply{id, r.Method, id.Host(), id.Web(), id.ID()})
 	}))
+}
+
+// chain is ir_web in front of the core in front of api, as the server has it: the core takes
+// ir_web's TOKEN with the login it names (the server's withLogin); paths not the core's are the
+// page's files, which say "public".
+func (h *harness) chain(api http.Handler) http.Handler {
+	login := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if id, ok := gate.FromContext(r.Context()); ok && id.App == gate.WebApp {
+			info, there := h.g.Seen(r.Header.Get(HeaderUser))
+			if !there {
+				http.Error(w, "no such login", http.StatusForbidden)
+				return
+			}
+			id.Login, id.Name = info.ID, info.Name
+			r = r.WithContext(gate.NewContext(r.Context(), id))
+		}
+		api.ServeHTTP(w, r)
+	})
+	files := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=60")
+		w.Write([]byte("file"))
+	})
+	return h.w.Handler(h.g.Wrap(login), files)
+}
+
+// access is what `ir apps` lists of both: the core's apps and logins, ir_web's invites.
+func (h *harness) access() struct {
+	Endpoints []gate.EndpointInfo
+	Invites   []InviteInfo
+} {
+	return struct {
+		Endpoints []gate.EndpointInfo
+		Invites   []InviteInfo
+	}{h.g.Access().Endpoints, h.w.Invites()}
+}
+
+// revoke removes ref as the server does: an app or login (the last with a passkey stays), else an
+// invite.
+func (h *harness) revoke(ref string) error {
+	if gate.IsHostRef(ref) {
+		return gate.ErrLocal
+	}
+	info, ok := h.g.Find(ref)
+	if !ok {
+		return h.w.RevokeInvite(ref)
+	}
+	if info.Kind == gate.KindPanel {
+		if err := h.w.MayRemove(info.ID); err != nil {
+			return err
+		}
+	}
+	return h.g.Revoke(info.ID)
 }
 
 type req struct {
@@ -272,7 +352,7 @@ func TestRegisterAndLogin(t *testing.T) {
 	if s := decode[sessionReply](t, h.do(req{path: "/_ir/api/session"})); s.Authenticated || !s.Setup {
 		t.Fatalf("session before setup: %+v", s)
 	}
-	acc := h.g.Access()
+	acc := h.access()
 	if len(acc.Invites) != 1 || !acc.Invites[0].Setup {
 		t.Fatalf("setup invite not listed: %+v", acc.Invites)
 	}
@@ -314,7 +394,7 @@ func TestRegisterAndLogin(t *testing.T) {
 	wantStatus(t, h.do(req{method: "POST", path: "/_ir/api/join/check", body: joinRequest{Token: setup}}), http.StatusForbidden)
 
 	// A named invite for a second device. Its name is reserved meanwhile.
-	inv, err := h.g.CreateInvite("手机", nil)
+	inv, err := h.w.CreateInvite("手机", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -323,13 +403,13 @@ func TestRegisterAndLogin(t *testing.T) {
 	}
 	tok := tokenOf(t, inv.URL)
 	h.secrets = append(h.secrets, tok)
-	if _, err := h.g.CheckLoginName("手机"); err != ErrNameTaken {
+	if _, err := h.w.CheckLoginName("手机"); err != gate.ErrNameTaken {
 		t.Fatalf("pending invite name not reserved: %v", err)
 	}
 	if _, err := h.g.CheckName("手机"); err != nil {
 		t.Fatalf("an invite's name is a login's, free for an app: %v", err)
 	}
-	if _, err := h.g.CreateInvite("kumo mac", nil); err != ErrNameTaken {
+	if _, err := h.w.CreateInvite("kumo mac", nil); err != gate.ErrNameTaken {
 		t.Fatalf("invite with a taken name: %v", err)
 	}
 	if r := decode[joinReply](t, h.do(req{method: "POST", path: "/_ir/api/join/check", body: joinRequest{Token: tok}})); r.Name != "手机" {
@@ -360,7 +440,7 @@ func TestRegisterAndLogin(t *testing.T) {
 	if s := decode[sessionReply](t, h.do(req{path: "/_ir/api/session"})); !s.Authenticated || s.Name != "Kumo Mac" {
 		t.Fatalf("session: %+v", s)
 	}
-	acc = h.g.Access()
+	acc = h.access()
 	if len(acc.Endpoints) != 2 || len(acc.Invites) != 0 {
 		t.Fatalf("access: %+v", acc)
 	}
@@ -370,11 +450,11 @@ func TestRegisterAndLogin(t *testing.T) {
 	h.cookie = ""
 	wantStatus(t, h.login(phone, nil), http.StatusOK)
 	var closed bool
-	r := httptest.NewRequest("GET", "/events", nil)
+	r := httptest.NewRequest("GET", "/api/events", nil)
 	r.Host = "ir.example.com"
 	r.AddCookie(&http.Cookie{Name: CookieName, Value: h.cookie})
 	tracked := false
-	h.g.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h.chain(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h.g.Track(r, func() { closed = true })
 		tracked = true
 	})).ServeHTTP(httptest.NewRecorder(), r)
@@ -384,12 +464,12 @@ func TestRegisterAndLogin(t *testing.T) {
 	if info, _ := h.g.Endpoint(phoneID); info.Name != "手机" {
 		t.Fatalf("endpoint lookup: %+v", info)
 	}
-	for _, e := range h.g.Access().Endpoints {
+	for _, e := range h.access().Endpoints {
 		if want := map[bool]int{true: 1, false: 0}[e.ID == phoneID]; e.Online != want {
 			t.Fatalf("%s online %d, want %d", e.Name, e.Online, want)
 		}
 	}
-	if err := h.g.Revoke("手机"); err != nil {
+	if err := h.revoke("手机"); err != nil {
 		t.Fatal(err)
 	}
 	if !closed {
@@ -404,7 +484,7 @@ func TestRegisterAndLogin(t *testing.T) {
 	wantStatus(t, h.login(phone, nil), http.StatusForbidden)
 
 	// The last passkey stays.
-	if err := h.g.Revoke(mac); err != ErrLastPasskey {
+	if err := h.revoke(mac); err != ErrLastPasskey {
 		t.Fatalf("revoke last passkey: %v", err)
 	}
 	h.cookie = phoneCookie
@@ -457,7 +537,7 @@ func TestInviteExpiry(t *testing.T) {
 	h := newHarness(t, testOrigin)
 	a := &authenticator{t: t, origin: testOrigin}
 	wantStatus(t, h.join(a, h.setupToken(), ptr("mac")), http.StatusOK)
-	inv, _ := h.g.CreateInvite("", nil)
+	inv, _ := h.w.CreateInvite("", nil)
 	tok := tokenOf(t, inv.URL)
 
 	// Options fetched in time, verified after expiry: refused, nothing registered.
@@ -468,13 +548,13 @@ func TestInviteExpiry(t *testing.T) {
 	h.clock.Advance(2 * time.Minute)
 	wantStatus(t, h.do(req{method: "POST", path: "/_ir/api/join/verify", body: verifyRequest{Flow: c.Flow, Response: a.create(c.Options)}}), http.StatusForbidden)
 	wantStatus(t, h.do(req{method: "POST", path: "/_ir/api/join/check", body: joinRequest{Token: tok}}), http.StatusForbidden)
-	if acc := h.g.Access(); len(acc.Endpoints) != 1 || len(acc.Invites) != 0 {
+	if acc := h.access(); len(acc.Endpoints) != 1 || len(acc.Invites) != 0 {
 		t.Fatalf("after expiry: %+v", acc)
 	}
 
 	// A revoked invite is gone too.
-	inv, _ = h.g.CreateInvite("tablet", nil)
-	if err := h.g.Revoke("TABLET"); err != nil {
+	inv, _ = h.w.CreateInvite("tablet", nil)
+	if err := h.revoke("TABLET"); err != nil {
 		t.Fatal(err)
 	}
 	wantStatus(t, h.do(req{method: "POST", path: "/_ir/api/join/check", body: joinRequest{Token: tokenOf(t, inv.URL)}}), http.StatusForbidden)
@@ -486,17 +566,17 @@ func TestInviteExpiry(t *testing.T) {
 func TestJoinedOwnerAndSetup(t *testing.T) {
 	h := newHarness(t, testOrigin)
 	h.setupToken()
-	first, _ := h.g.CreateInvite("", nil) // a plain invite, used while the setup link waits
+	first, _ := h.w.CreateInvite("", nil) // a plain invite, used while the setup link waits
 	wantStatus(t, h.join(&authenticator{t: t, origin: testOrigin}, tokenOf(t, first.URL), ptr("mac")), http.StatusOK)
 	if _, err := os.Stat(filepath.Join(h.dir, "state", setupFile)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("setup file after the first panel: %v", err)
 	}
-	if acc := h.g.Access(); len(acc.Invites) != 0 {
+	if acc := h.access(); len(acc.Invites) != 0 {
 		t.Fatalf("invites after the first panel: %+v", acc.Invites)
 	}
-	owner, _ := h.g.CreateInvite("pad", []byte(`{"x":1}`))
-	plain, _ := h.g.CreateInvite("", nil)
-	if acc := h.g.Access(); len(acc.Invites) != 2 || (len(acc.Invites[0].Perms) > 0) != (acc.Invites[0].Name == "pad") || (len(acc.Invites[1].Perms) > 0) != (acc.Invites[1].Name == "pad") {
+	owner, _ := h.w.CreateInvite("pad", []byte(`{"x":1}`))
+	plain, _ := h.w.CreateInvite("", nil)
+	if acc := h.access(); len(acc.Invites) != 2 || (len(acc.Invites[0].Perms) > 0) != (acc.Invites[0].Name == "pad") || (len(acc.Invites[1].Perms) > 0) != (acc.Invites[1].Name == "pad") {
 		t.Fatalf("invite's perms not listed: %+v", acc.Invites)
 	}
 	h.cookie = ""
@@ -508,13 +588,13 @@ func TestJoinedOwnerAndSetup(t *testing.T) {
 	}
 	for i, want := range []Joined{{First: true}, {Perms: []byte(`{"x":1}`)}, {}} {
 		j := h.joined[i]
-		if string(j.Perms) != string(want.Perms) || j.First != want.First || j.Endpoint.Kind != KindPanel || j.Endpoint.ApprovedAt.IsZero() {
+		if string(j.Perms) != string(want.Perms) || j.First != want.First || j.Endpoint.Kind != gate.KindPanel || j.Endpoint.ApprovedAt.IsZero() {
 			t.Errorf("join %d (%s): %+v", i, j.Endpoint.Name, j)
 		}
 	}
 
 	// A stale setup link (from before this rule) is dropped at start, also in local mode.
-	h.store.Apply(Change{Invites: []Invite{{ID: "setup", Hash: hashToken(newToken()), Setup: true, CreatedAt: h.clock.Now()}}})
+	h.store.Apply(Change{Invites: []Invite{{ID: "setup", Hash: gate.HashSecret(gate.NewSecret()), Setup: true, CreatedAt: h.clock.Now()}}})
 	os.WriteFile(filepath.Join(h.dir, "state", setupFile), []byte("x\n"), 0o600)
 	h.open("")
 	if _, err := os.Stat(filepath.Join(h.dir, "state", setupFile)); !errors.Is(err, os.ErrNotExist) {
@@ -529,8 +609,8 @@ func TestNameRaceAtVerify(t *testing.T) {
 	h := newHarness(t, testOrigin)
 	a := &authenticator{t: t, origin: testOrigin}
 	wantStatus(t, h.join(a, h.setupToken(), ptr("mac")), http.StatusOK)
-	inv1, _ := h.g.CreateInvite("", nil)
-	inv2, _ := h.g.CreateInvite("", nil)
+	inv1, _ := h.w.CreateInvite("", nil)
+	inv2, _ := h.w.CreateInvite("", nil)
 	w := h.do(req{method: "POST", path: "/_ir/api/join/options", body: joinRequest{Token: tokenOf(t, inv1.URL), Name: ptr("pad")}})
 	c := decode[ceremonyReply](t, w)
 	h.cookie = ""
@@ -579,20 +659,28 @@ func TestSweeperClosesExpiredConnections(t *testing.T) {
 	h := newHarness(t, testOrigin)
 	a := &authenticator{t: t, origin: testOrigin}
 	wantStatus(t, h.join(a, h.setupToken(), ptr("mac")), http.StatusOK)
-	var closed bool
-	r := httptest.NewRequest("GET", "/events", nil)
+	// A stream forwarded for the session ends with it (its context), wherever in the core it is.
+	r := httptest.NewRequest("GET", "/api/events", nil)
 	r.Host = "ir.example.com"
 	r.AddCookie(&http.Cookie{Name: CookieName, Value: h.cookie})
-	h.g.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		h.g.Track(r, func() { closed = true })
+	streaming, ended := make(chan struct{}), make(chan struct{})
+	go h.chain(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(streaming)
+		<-r.Context().Done()
+		close(ended)
 	})).ServeHTTP(httptest.NewRecorder(), r)
-	h.g.sweep()
-	if closed {
+	<-streaming
+	h.w.sweep()
+	select {
+	case <-ended:
 		t.Fatal("closed a live session's connection")
+	case <-time.After(20 * time.Millisecond):
 	}
 	h.clock.Advance(IdleTimeout)
-	h.g.sweep()
-	if !closed {
+	h.w.sweep()
+	select {
+	case <-ended:
+	case <-time.After(2 * time.Second):
 		t.Fatal("expired session's connection left open")
 	}
 }
@@ -629,7 +717,7 @@ func TestStateSurvivesRestart(t *testing.T) {
 
 func TestLocalMode(t *testing.T) {
 	h := newHarness(t, "")
-	if h.g.Public() {
+	if h.w.Public() {
 		t.Fatal("public without an origin")
 	}
 	if _, err := os.Stat(filepath.Join(h.dir, "state", setupFile)); !errors.Is(err, os.ErrNotExist) {
@@ -648,7 +736,7 @@ func TestLocalMode(t *testing.T) {
 		w := httptest.NewRecorder()
 		h.h.ServeHTTP(w, r)
 		if w.Code == 200 {
-			if id := decode[appReply](t, w); !id.Host || id.Name != HostName {
+			if id := decode[appReply](t, w); !id.Host || id.Name != gate.HostName {
 				t.Fatalf("local identity: %+v", id)
 			}
 		}
@@ -676,7 +764,7 @@ func TestLocalMode(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.h.ServeHTTP(w, r)
 	wantStatus(t, w, http.StatusFound)
-	if _, err := h.g.CreateInvite("", nil); err != ErrNotPublic {
+	if _, err := h.w.CreateInvite("", nil); err != ErrNotPublic {
 		t.Fatalf("invite in local mode: %v", err)
 	}
 }
@@ -748,7 +836,7 @@ func cmp(a, b string) string {
 
 func TestRateLimit(t *testing.T) {
 	h := newHarness(t, testOrigin)
-	bad := joinRequest{Token: strings.Repeat("A", tokenLen)}
+	bad := joinRequest{Token: strings.Repeat("A", 43)}
 	check := func(remote, cf string) int {
 		q := req{method: "POST", path: "/_ir/api/join/check", body: bad, remote: remote}
 		if cf != "" {
@@ -756,7 +844,7 @@ func TestRateLimit(t *testing.T) {
 		}
 		return h.do(q).Code
 	}
-	for i := 0; i < maxFailures; i++ {
+	for i := 0; i < 10; i++ {
 		if code := check("198.51.100.7:1", ""); code != http.StatusForbidden {
 			t.Fatalf("attempt %d: %d", i, code)
 		}
@@ -785,7 +873,7 @@ func TestRateLimit(t *testing.T) {
 		t.Fatalf("cloudflared-forwarded other client: %d", code)
 	}
 	// The lock lifts after 15 minutes.
-	h.clock.Advance(lockout)
+	h.clock.Advance(15 * time.Minute)
 	if code := check("198.51.100.7:1", ""); code != http.StatusForbidden {
 		t.Fatalf("after lockout: %d", code)
 	}
@@ -856,8 +944,14 @@ func TestSafeNext(t *testing.T) {
 }
 
 func TestOriginConfig(t *testing.T) {
+	cs, _ := gate.OpenJSONStore(filepath.Join(t.TempDir(), "gate.json"))
+	core, err := gate.New(gate.Config{Store: cs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer core.Close()
 	for _, bad := range []string{"http://ir.example.com", "https://ir.example.com/path", "ftp://x", "https://user@ir.example.com", "ir.example.com", "https://127.0.0.1"} {
-		if _, err := New(Config{PublicOrigin: bad, Store: &JSONStore{cur: newMemState(State{})}}); err == nil {
+		if _, err := New(Config{PublicOrigin: bad, Core: core, Token: "ir_x", Store: &JSONStore{cur: newMemState(State{})}}); err == nil {
 			t.Errorf("accepted origin %q", bad)
 		}
 	}
@@ -867,7 +961,7 @@ func TestOriginConfig(t *testing.T) {
 		"https://ir.example.com:8443": "https://ir.example.com:8443",
 		"http://localhost:7810":       "http://localhost:7810",
 	} {
-		g, err := New(Config{PublicOrigin: in, Store: &JSONStore{path: filepath.Join(t.TempDir(), "g.json"), cur: newMemState(State{})}})
+		g, err := New(Config{PublicOrigin: in, Core: core, Token: "ir_x", Store: &JSONStore{path: filepath.Join(t.TempDir(), "g.json"), cur: newMemState(State{})}})
 		if err != nil {
 			t.Fatalf("%s: %v", in, err)
 		}
@@ -893,11 +987,11 @@ func TestOnTerminals(t *testing.T) {
 		t.Fatal(err)
 	}
 	wait(1)
-	if _, err := h.g.UpdateProfile("qq", Profile{Name: ptr("QQ")}); err != nil {
+	if _, err := h.g.UpdateProfile("qq", gate.Profile{Name: ptr("QQ")}); err != nil {
 		t.Fatal(err)
 	}
 	wait(2)
-	if err := h.g.Revoke("QQ"); err != nil {
+	if err := h.revoke("QQ"); err != nil {
 		t.Fatal(err)
 	}
 	wait(3)
@@ -924,21 +1018,21 @@ func TestNameScopes(t *testing.T) {
 		t.Errorf("ir_web/ID: %+v", e)
 	}
 	for _, ref := range []string{"local", "host", "HOST", "主机", "本机"} {
-		if e, ok := h.g.Find(ref); !ok || !e.Host() || e.Identity() != HostIdentity {
+		if e, ok := h.g.Find(ref); !ok || !e.Host() || e.Identity() != gate.HostIdentity {
 			t.Errorf("%s: %+v", ref, e)
 		}
-		if err := h.g.Revoke(ref); err != ErrLocal {
+		if err := h.revoke(ref); err != gate.ErrLocal {
 			t.Errorf("removed %s: %v", ref, err)
 		}
 	}
-	if _, err := h.g.UpdateProfile(app.ID, Profile{Name: ptr("x")}); err != ErrNameLetter {
+	if _, err := h.g.UpdateProfile(app.ID, gate.Profile{Name: ptr("x")}); err != gate.ErrNameLetter {
 		t.Errorf("a single letter: %v", err)
 	}
 	// The last login with a passkey stays; the app goes.
-	if err := h.g.Revoke("ir_web/mac"); err != ErrLastPasskey {
+	if err := h.revoke("ir_web/mac"); err != ErrLastPasskey {
 		t.Errorf("the last login: %v", err)
 	}
-	if err := h.g.Revoke("mac"); err != nil {
+	if err := h.revoke("mac"); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := h.g.Find("ir_web/mac"); !ok {
