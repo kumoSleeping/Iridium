@@ -142,3 +142,41 @@
 - 登录的权限（改权限）没做：登录的 `perms` 还只是占位，S2 一起做。
 - “带的 agent 开关”没做：开关属于 S3（hello 报 agent、主机上的应用去 agent），现在只读显示。
 - 截图时注意：在 agent 会话里跑测试 daemon 的 `ir`，要去掉 `IRIDIUM_SESSION`、`CLAUDECODE` 等变量并给它一个终端（`script -qec`），不然会被当成 agent 拒绝。这是对的行为。
+
+## S4a 删聊天层
+
+做了什么：
+- 删 `internal/chat` 全部、`routes_plugin.go`，以及它们的测试（`chat_test.go`、`plugin_test.go`、`internal/chat/*_test.go`）。没有要搬的：回复渲染、`onNotice` 的回合文本只给插件事件用，随之删掉；事件按登录分发时再写。
+  - 路由：`/api/chat/*`、`POST /api/bot`、`POST /api/sessions/{id}/bot`、不带 `sub` 的 `GET /api/events`（现在回 400）、`PUT /api/apps/{id}/follows`、`POST /api/answer`。
+  - 类型：`api/chat.go`（`ChatInput`、`ChatEvent`、`BotLetter`、`BringBot`…）、`App.Follows`、`App.Chat`、`AppChat`、`SetFollows`、`Session.Bots`；`CardReply` 只剩 `ok`，`Card.Kind` 不再有 `pick`。
+  - `Server.Chat`、`Server.Who`、`Identities`、`ChatGuard`、`Files()`；撤销时不再 `ForgetChats`。
+  - 配置删 `chatDir`（legacy 表早已收下，旧文件照读）。
+- 库：迁移 28 删 `chat_pointers`、`chat_seen`、`bot_follows`，清空 `outbox`（表和 `Post`/`OutboxAfter`/`OutboxLast`/`PruneOutbox` 留给 Satori 的事件）。`store/follows.go` 删，`apps.go` 里删 `bot_follows` 的语句同版去掉。`TestMigrateToApps` 验证三张表没了、outbox 空。
+- 答提问：`POST /api/sessions/{id}/answer` 改收 `CardAnswer`（卡片须是 `ask:<id>:…`，别的会话的 400），回 `CardReply{ok}`。旧的 `api.Answer` 只留给 agent 驱动内部用。网页 `api.answer(session, a)`、CLI 测试跟着改。
+- `ir send`：
+  - `ir send <会话> "消息"` 照旧。
+  - 目标带 `/` 就是 `应用/登录`：`POST /api/apps/{id}/logins/{login}/notice`（`api.Notice` → `api.NoticeReply`），不叫起 agent。
+  - ir_web 的登录：用 Web Push 发给它的浏览器（kind `notice`，标题是发送会话的名字，点开到那个会话）。
+  - 推送总开关关着、它没有开推送的浏览器：422 `not_deliverable`，说明原因。
+  - 别的应用的登录：422 `not_deliverable`（Satori 接上前没有通道）。
+  - 没有这个应用或登录：422 `no_such_app` / `no_such_login`。
+  - 能发的：主机上的 `ir`（人或 agent）、ir_web 登录和主机的网页、agent 用会话 TOKEN 的 `ir`；应用的裸 TOKEN 403。
+  - 删 `ir bot`、`--to`。irhelp 的 send 一行带上 `app/login`，删 bot 一行（现 19 行）。
+- Web Push 路由改到 `/api/web/push/*`（决定 32），仍是 `panelOnly`（ir_web 登录和主机）。网页 client 跟着改；service worker 不调接口，不用改。
+- 网页：删应用详情的“跟随面板”、侧栏会话行的 Bot 头像（`Here`）、会话菜单的“把 X 切到此会话”（`BotItems`）、`MenuItems` 的 `tail`；删 8 个 i18n 键（`menu.bringBot`、`menu.botChatless`、`toast.botHere`、`term.follows*`），zh/en 一致。
+- QQ 桥：旧聊天层的线上类型搬进 `internal/qqbridge/wire.go`，编得过、自己的测试照过（它们只对着自己的假 Iridium，没测删掉的服务端接口，所以没删）。对 0.2 不能用，等重写成 Satori 客户端。
+
+和计划不一样的地方：
+- `ir send 应用/登录` 只有 ir_web 的登录送得到（走 Web Push），没有做成“需要”。
+- 没查“对方能用发送的会话”：等 S2 的范围。
+- `outbox` 表没删，只清空。
+
+留给后面的：
+- 按登录分发事件、发起登录随事件带出、量大的只推“正在看”的链路（S4a 原范围，没做）。
+- Satori 的 outbox（sn）：S4b 接上。
+- 分享（会话、回复、位置、文件的“分享到 ▸”）没做；“切到此会话”删了，暂时没有替代。
+- `GET /api/sessions/{id}/commands` 没做。
+- “需要”队列收提问、审批、计划：没做，提问仍在会话状态里。
+- Web Push 按登录投递（现在会话事件推给所有订阅）：没做。
+- 文档（api.md 的插件、卡片、推送几节，qq.md、plan.md）和 `examples/plugin/echo_im.py` 还写着旧接口：S5。
+- 合并：迁移号 28 若和 S2/S4b 新加的迁移冲突，按合并顺序重排（迁移 28 只删表，放在哪一号都行）。
