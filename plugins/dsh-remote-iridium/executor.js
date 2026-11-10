@@ -20,11 +20,12 @@ export function iridiumKey(url) {
   return new URL(url).host.toLowerCase().replace(/[^a-z0-9.-]+/g, '-').replace(/^[-.]+|[-.]+$/g, '')
 }
 
-/** Whether the Iridium at url (http or ws) turns the TOKEN down (its Bot removed): then pair again. */
+/** Whether the Iridium at url (http or ws) turns the TOKEN down (its app removed): then pair again.
+ *  Only 401 says so; a 403 is a refusal of something else (its reason in the code). */
 export async function refused(url, token) {
   try {
     const r = await fetch(new URL('/api/exec', url.replace(/^ws/i, 'http')), { headers: { Authorization: `Bearer ${token}` } })
-    return r.status === 401 || r.status === 403
+    return r.status === 401
   } catch {
     return false
   }
@@ -443,6 +444,7 @@ export class Executor {
       arch: process.arch, home: os.homedir(), sep: path.sep, scratch: path.join(this.state, 'scratch'),
       env: helloEnv(this.env),
       agents: this.o.agents ?? [], holds: [...this.holds.values()].map((h) => h.state()),
+      shell: !this.o.noShell,
       ...(this.o.noShell ? { noShell: true } : {}),
       ...(this.o.agentShell ? { agentShell: true } : {}),
       ...(this.o.ir ? { irClient: true } : {}),
