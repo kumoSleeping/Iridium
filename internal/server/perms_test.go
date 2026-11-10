@@ -101,3 +101,22 @@ func TestParsePlace(t *testing.T) {
 		t.Fatal("scopeHas")
 	}
 }
+
+// A login slot carries what its login may use; only whoever approves makes one.
+func TestInvitePerms(t *testing.T) {
+	l := start(t)
+	slot, _ := json.Marshal(map[string]any{"_perms": api.Perms{Agents: []string{"codex"}, Scope: []string{"*"}}})
+	id := "newlogin00000000"
+	if _, err := l.s.st.AddLogin(gate.WebApp, id, "pad", 20, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	l.s.joined(gate.Joined{Endpoint: gate.EndpointInfo{ID: id, Name: "pad", Kind: gate.KindPanel}, Perms: slot})
+	if p := l.s.loginPermsOf(gate.WebApp, id); p == nil || len(p.Agents) != 1 || p.Agents[0] != "codex" {
+		t.Fatalf("the slot's perms: %+v", p)
+	}
+	// A narrowed login of ir_web may not make a slot.
+	c := caller{Identity: gate.Identity{App: gate.WebApp, Login: id, Name: "pad"}}
+	if l.s.mayApprove(c) {
+		t.Fatal("a narrowed login approves")
+	}
+}

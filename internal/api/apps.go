@@ -151,6 +151,8 @@ type Me struct {
 type NewInvite struct {
 	Name   string `json:"name,omitempty"`
 	Claude bool   `json:"claude,omitempty"`
+	// Perms: what the login that takes it may use (nil: all); set as the slot is made.
+	Perms *Perms `json:"perms,omitempty"`
 }
 
 // Invite is a new invite of ir_web. URL holds the secret: only a login of ir_web (or a person's

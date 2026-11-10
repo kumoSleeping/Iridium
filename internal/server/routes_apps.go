@@ -347,11 +347,16 @@ func (s *Server) invite(w http.ResponseWriter, r *http.Request) {
 		s.ask(w, c, api.NeedInvite, req.Name, req.Claude)
 		return
 	}
+	// A login slot is made by whoever approves (a narrowed login may not invite a wider one).
+	if !s.mayApprove(c) {
+		forbid(w, errApprove)
+		return
+	}
 	by := ""
 	if req.Claude {
 		by = s.ownerSays(c)
 	}
-	inv, err := s.makeInvite(req.Name, by)
+	inv, err := s.makeInvite(req.Name, by, req.Perms)
 	if err != nil {
 		s.gateDone(w, err)
 		return
@@ -375,11 +380,23 @@ var errOwnerFlag = errors.New("only a person at the host or on a login of ir_web
 
 // makeInvite makes a slot for a login of ir_web; claudeBy (ownerSays's, "" none): the login that
 // takes it gets Claude, as that one said (joined).
-func (s *Server) makeInvite(name, claudeBy string) (*api.Invite, error) {
-	var perms []byte
+func (s *Server) makeInvite(name, claudeBy string, given *api.Perms) (*api.Invite, error) {
+	// The invite keeps the login's rules (Claude) and, beside them, what it may use (_perms).
+	slot := struct {
+		api.Rules
+		Perms *api.Perms `json:"_perms,omitempty"`
+	}{Rules: access.Default()}
 	if claudeBy != "" {
+		slot.Rules = access.WithClaude(access.Default(), claudeBy, time.Now().UnixMilli())
+	}
+	if given != nil {
+		p := cleanPerms(given)
+		slot.Perms = &p
+	}
+	var perms []byte
+	if claudeBy != "" || given != nil {
 		var err error
-		if perms, err = json.Marshal(access.WithClaude(access.Default(), claudeBy, time.Now().UnixMilli())); err != nil {
+		if perms, err = json.Marshal(slot); err != nil {
 			return nil, err
 		}
 	}
@@ -433,6 +450,15 @@ func (s *Server) joined(j gate.Joined) {
 	if err := s.st.SetTerminalRules(j.Endpoint.ID, j.Perms); err != nil {
 		s.logf("server: the perms of the new login %s: %v", j.Endpoint.ID, err)
 	}
+	var slot struct {
+		Perms *api.Perms `json:"_perms"`
+	}
+	if json.Unmarshal(j.Perms, &slot) == nil && slot.Perms != nil {
+		b, _ := json.Marshal(slot.Perms)
+		if _, err := s.st.SetLoginPermsOf(gate.WebApp, j.Endpoint.ID, b); err != nil {
+			s.logf("server: what the new login %s may use: %v", j.Endpoint.ID, err)
+		}
+	}
 }
 
 func (s *Server) answerNeed(w http.ResponseWriter, r *http.Request) {
@@ -484,7 +510,7 @@ func (s *Server) answerNeed(w http.ResponseWriter, r *http.Request) {
 		_, err = s.st.DeleteLogin(cf.App.ID, cf.Login)
 	case !a.Allow:
 	case cf.Kind == api.NeedInvite:
-		out.Invite, err = s.makeInvite(cf.Name, by)
+		out.Invite, err = s.makeInvite(cf.Name, by, nil)
 		if err == nil {
 			st.Name, st.ExpiresAt = out.Invite.Name, out.Invite.ExpiresAt
 		}

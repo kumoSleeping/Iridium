@@ -83,8 +83,12 @@ func TestOwnerFromPanels(t *testing.T) {
 	if code := as(t, guest, l.s.invite, "POST", "", api.NewInvite{Name: "guest2", Claude: true}, nil); code != 403 {
 		t.Fatalf("a login without Claude gave Claude: %d", code)
 	}
-	if code := as(t, guest, l.s.invite, "POST", "", api.NewInvite{Name: "plain"}, nil); code != 200 || claudeOf("plain") != nil {
-		t.Fatalf("a plain invite from a login: %d", code)
+	// A login that may not approve (no Claude) makes no slot at all: it would invite a wider one.
+	if code := as(t, guest, l.s.invite, "POST", "", api.NewInvite{Name: "plain"}, nil); code != 403 {
+		t.Fatalf("a plain invite from a login that may not approve: %d", code)
+	}
+	if code := as(t, owner, l.s.invite, "POST", "", api.NewInvite{Name: "plain"}, nil); code != 200 || claudeOf("plain") != nil {
+		t.Fatalf("a plain invite from the owner's login: %d", code)
 	}
 
 	// An agent's: a confirmation that says so, no secret.

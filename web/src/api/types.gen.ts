@@ -814,6 +814,10 @@ export interface Me {
 export interface NewInvite {
   name?: string;
   claude?: boolean;
+  /**
+   * Perms: what the login that takes it may use (nil: all); set as the slot is made.
+   */
+  perms?: Perms;
 }
 /**
  * Invite is a new invite of ir_web. URL holds the secret: only a login of ir_web (or a person's
