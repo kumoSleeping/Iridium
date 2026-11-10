@@ -311,3 +311,14 @@
 - 决定 17：配对申请带 `home`、`machineId`（`ir join` 报）；没带 `wants`、有 agent、有 `home` 的默认范围 `应用名:家目录`，批准时改名的跟着改；`machineId` 是主机的就去掉 agent。dsh 插件不报 `home`，照旧全部。
 - 范围按名字存：应用之后改名，范围里的旧名字不会跟着改（和人手写的范围一样，留给权限那条线）。
 
+
+## 网页独立成一层
+
+- 核心（`internal/gate`）只凭 TOKEN 认人：应用的 `ir_…`、会话的 `irs_…`、`Satori-User-ID` 指明的登录（照 `withLogin` 批），unix socket 是主机。不读 Cookie，不查 Host/Origin，没有登录页。见 `docs/gate.md`。
+- 网页（`internal/webapp`，同一进程，挂在 TCP 上核心前面）：Passkey 注册、登录、登出，Cookie，邀请和 `/_ir/` 页面，首次设置链接，公网地址和 Host/Origin 检查，private 缓存，网页文件。见 `docs/web.md`。
+- 登录了的浏览器转给核心时是 ir_web 替它的登录说话：`Authorization: Bearer <ir_web 的 TOKEN>`、`Satori-Platform: ir_web`、`Satori-User-ID: <登录 ID>`，浏览器自己带的这几个头替换掉，Cookie 去掉。带 TOKEN 的请求原样过。
+- ir_web 成了一行真的应用（`apps` 里 ID `ir_web`），TOKEN 在状态目录 `web-token`（0600），启动时没有就生成；不列出、不能找、改、删，Satori 的 IDENTIFY 不收它。
+- 唯一的信任边 `gate.AsHost`：网页关着（没设公网地址）时，本机浏览器查过 Host/Origin 后算主机。
+- 关网页就是 `ir public off`：TCP 上只剩 TOKEN 请求和本机的主机页面；不出登录页、不认 Cookie。
+- 存储：没有新迁移。Passkey 还在 `logins` 那一行（网页层的 `Store` 读写 `user_handle`、`passkeys` 两列），`web_sessions`、`invites` 不变，升级后浏览器不用重登。
+- 行为变化：换公网地址只断浏览器的连接，应用的不断；本机模式下带旧 Cookie 的浏览器算主机（原来算那个登录）；带 TOKEN 的请求拿不到网页文件（404）；退回旧版时会多出一个叫 `ir_web` 的应用。

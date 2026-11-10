@@ -16,6 +16,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/config"
 	"github.com/kumoSleeping/iridium/internal/gate"
 	"github.com/kumoSleeping/iridium/internal/secrets"
+	"github.com/kumoSleeping/iridium/internal/webapp"
 )
 
 // appRoutes are the apps' and their logins' (docs/api.md "应用"): who is calling, the list (ir
@@ -175,7 +176,7 @@ func (s *Server) apps(w http.ResponseWriter, r *http.Request) {
 		app.Computer = computers[e.ID]
 		apps = append(apps, app)
 	}
-	if s.gate().Public() || web.Logins > 0 {
+	if s.web().Public() || web.Logins > 0 {
 		out.Apps = append(out.Apps, web)
 	}
 	out.Apps = append(out.Apps, apps...)
@@ -188,7 +189,7 @@ func (s *Server) apps(w http.ResponseWriter, r *http.Request) {
 		out.Logins = append(out.Logins, api.Login{App: l.App, ID: l.ID, Name: l.Name, CreatedAt: ms(l.CreatedAt),
 			LastSeenAt: ms(l.LastActive), ApprovedAt: ms(l.ApprovedAt), Rules: s.rulesOf(l.App, false), Perms: s.loginPermsOf(l.App, l.ID)})
 	}
-	for _, i := range a.Invites {
+	for _, i := range s.web().Invites() {
 		out.Invites = append(out.Invites, api.PendingInvite{ID: i.ID, Name: i.Name, Setup: i.Setup, Claude: permsClaude(i.Perms),
 			CreatedAt: ms(i.CreatedAt), ExpiresAt: ms(i.ExpiresAt)})
 	}
@@ -229,7 +230,28 @@ func (s *Server) revoke(w http.ResponseWriter, r *http.Request) {
 		s.dropLogin(w, app, login)
 		return
 	}
-	s.gateDone(w, s.gate().Revoke(ref))
+	s.gateDone(w, s.removeRef(ref))
+}
+
+// removeRef removes the app or login of ir_web ref (gate.Find's), or else ir_web's pending invite
+// ref. The last login of ir_web with a passkey stays (webapp.ErrLastPasskey).
+func (s *Server) removeRef(ref string) error {
+	if gate.IsHostRef(ref) {
+		return gate.ErrLocal
+	}
+	info, ok := s.gate().Find(ref)
+	if !ok {
+		if err := s.web().RevokeInvite(ref); !errors.Is(err, webapp.ErrNotFound) {
+			return err
+		}
+		return gate.ErrNotFound
+	}
+	if info.Kind == gate.KindPanel {
+		if err := s.web().MayRemove(info.ID); err != nil {
+			return err
+		}
+	}
+	return s.gate().Revoke(info.ID)
 }
 
 // putAppPerms sets what app {id} may use: any within bounds (the approver gives as they see fit,
@@ -289,7 +311,7 @@ func (s *Server) putLoginPerms(w http.ResponseWriter, r *http.Request) {
 func (s *Server) removeLogin(w http.ResponseWriter, r *http.Request) {
 	app, login := r.PathValue("id"), r.PathValue("login")
 	if app == gate.WebApp {
-		s.gateDone(w, s.gate().Revoke(gate.WebApp+"/"+login))
+		s.gateDone(w, s.removeRef(gate.WebApp+"/"+login))
 		return
 	}
 	s.dropLogin(w, app, login)
@@ -362,11 +384,11 @@ func (s *Server) invite(w http.ResponseWriter, r *http.Request) {
 		forbid(w, errOwnerFlag)
 		return
 	}
-	if !s.gate().Public() {
+	if !s.web().Public() {
 		refuse(w, http.StatusForbidden, "not_public", "no public origin: ir_web needs one for its passkeys (ir public)")
 		return
 	}
-	if _, err := s.gate().CheckLoginName(req.Name); req.Name != "" && err != nil {
+	if _, err := s.web().CheckLoginName(req.Name); req.Name != "" && err != nil {
 		s.gateDone(w, err)
 		return
 	}
@@ -427,7 +449,7 @@ func (s *Server) makeInvite(name, claudeBy string, given *api.Perms) (*api.Invit
 			return nil, err
 		}
 	}
-	inv, err := s.gate().CreateInvite(name, perms)
+	inv, err := s.web().CreateInvite(name, perms)
 	if err != nil {
 		return nil, err
 	}
@@ -464,7 +486,7 @@ func (s *Server) giveClaude(info gate.EndpointInfo, by string) error {
 
 // joined is the gate's word that a login of ir_web registered: it takes its invite's perms; the
 // first one is the owner's own and gets Claude.
-func (s *Server) joined(j gate.Joined) {
+func (s *Server) joined(j webapp.Joined) {
 	if j.First {
 		if err := s.giveClaude(j.Endpoint, access.ByFirst); err != nil {
 			s.logf("server: claude for the new login %s: %v", j.Endpoint.ID, err)
@@ -623,12 +645,7 @@ func (s *Server) askChange(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) publicState(w http.ResponseWriter, r *http.Request) {
 	st := api.PublicState{Origin: s.origin()}
-	a := s.gate().Access()
-	for _, e := range a.Endpoints {
-		if e.Passkeys > 0 {
-			st.Passkeys = true
-		}
-	}
+	st.Passkeys = s.web().HasPasskey()
 	reply(w, http.StatusOK, st)
 }
 
@@ -638,8 +655,8 @@ func (s *Server) origin() string {
 	return s.cfg.Public.Origin
 }
 
-// setPublic sets public.origin: a new gate takes over, every connection the old one let in is
-// closed, and the config file says it for the next start.
+// setPublic sets public.origin: a new ir_web takes over, every browser request the old one let in
+// is ended (apps' TOKEN traffic stays), and the config file says it for the next start.
 func (s *Server) setPublic(w http.ResponseWriter, r *http.Request) {
 	var req api.SetPublic
 	if !readJSON(w, r, &req) {
@@ -653,19 +670,19 @@ func (s *Server) setPublic(w http.ResponseWriter, r *http.Request) {
 	s.publicState(w, r)
 }
 
-// SetPublicOrigin opens the gate for origin ("" is this machine only) in place of the one there.
+// SetPublicOrigin opens ir_web for origin ("" is off: this machine only) in place of the one there.
 func (s *Server) SetPublicOrigin(origin string) error {
 	s.gmu.Lock()
 	defer s.gmu.Unlock()
-	g, err := s.newGate(origin)
+	web, err := s.newWeb(origin)
 	if err != nil {
 		return err
 	}
 	if err := s.SaveConfig(func(c *config.Config) { c.Public.Origin = origin }); err != nil {
-		g.Close()
+		web.Close()
 		return err
 	}
-	old := s.g.Swap(g)
+	old := s.w.Swap(web)
 	old.CloseAll()
 	old.Close()
 	return nil
@@ -679,13 +696,13 @@ func (s *Server) gateDone(w http.ResponseWriter, err error) {
 		reply(w, http.StatusOK, map[string]any{"ok": true})
 	case errors.As(err, &ne):
 		reply(w, http.StatusUnprocessableEntity, api.Error{Code: "bad_name", Message: err.Error(), NameError: ne.Code})
-	case errors.Is(err, gate.ErrNotFound):
+	case errors.Is(err, gate.ErrNotFound), errors.Is(err, webapp.ErrNotFound):
 		refuse(w, http.StatusUnprocessableEntity, "not_found", err.Error())
-	case errors.Is(err, gate.ErrLastPasskey):
+	case errors.Is(err, webapp.ErrLastPasskey):
 		refuse(w, http.StatusConflict, "last_passkey", err.Error())
-	case errors.Is(err, gate.ErrNotPublic):
+	case errors.Is(err, webapp.ErrNotPublic):
 		refuse(w, http.StatusForbidden, "not_public", err.Error())
-	case errors.Is(err, gate.ErrLocal):
+	case errors.Is(err, gate.ErrLocal), errors.Is(err, gate.ErrBuiltIn):
 		refuse(w, http.StatusUnprocessableEntity, "built_in", err.Error())
 	default:
 		s.error(w, err)

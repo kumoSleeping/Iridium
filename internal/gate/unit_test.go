@@ -95,37 +95,37 @@ func TestTokens(t *testing.T) {
 }
 
 func TestLimiter(t *testing.T) {
-	l := newLimiter()
+	l := NewLimiter()
 	now := time.Unix(1e9, 0)
 	for i := 0; i < maxFailures-1; i++ {
-		l.fail("a", now)
+		l.Fail("a", now)
 	}
-	if l.wait("a", now) != 0 {
+	if l.Wait("a", now) != 0 {
 		t.Fatal("locked too early")
 	}
-	l.fail("a", now)
-	if l.wait("a", now) != lockout || l.wait("b", now) != 0 {
+	l.Fail("a", now)
+	if l.Wait("a", now) != lockout || l.Wait("b", now) != 0 {
 		t.Fatal("lockout")
 	}
-	if l.wait("a", now.Add(lockout)) != 0 {
+	if l.Wait("a", now.Add(lockout)) != 0 {
 		t.Fatal("lockout did not lift")
 	}
 	// Failures spread over more than the window never lock.
 	for i := 0; i < 3*maxFailures; i++ {
 		now = now.Add(failureWindow / maxFailures * 2)
-		l.fail("c", now)
-		if l.wait("c", now) != 0 {
+		l.Fail("c", now)
+		if l.Wait("c", now) != 0 {
 			t.Fatalf("slow failures locked at %d", i)
 		}
 	}
-	l.fail("d", now)
-	l.success("d")
+	l.Fail("d", now)
+	l.Success("d")
 	if _, ok := l.buckets["d"]; ok {
 		t.Fatal("success kept the bucket")
 	}
 	// The table is bounded.
 	for i := 0; i < maxBuckets+50; i++ {
-		l.fail(strings.Repeat("k", 1+i%7)+string(rune('a'+i%26))+time.Duration(i).String(), now)
+		l.Fail(strings.Repeat("k", 1+i%7)+string(rune('a'+i%26))+time.Duration(i).String(), now)
 	}
 	if len(l.buckets) > maxBuckets {
 		t.Fatalf("%d buckets", len(l.buckets))
@@ -148,32 +148,9 @@ func TestClientKey(t *testing.T) {
 		if c.value != "" {
 			r.Header.Set(c.header, c.value)
 		}
-		if got := clientKey(r, c.header); got != c.want {
+		if got := ClientKey(r, c.header); got != c.want {
 			t.Errorf("clientKey(%s, %s=%s) = %s, want %s", c.remote, c.header, c.value, got, c.want)
 		}
-	}
-}
-
-func TestFlows(t *testing.T) {
-	f := newFlows()
-	now := time.Unix(1e9, 0)
-	id := f.put(&flow{kind: flowLogin}, now)
-	if f.take(id, flowJoin, now) != nil {
-		t.Fatal("took a flow of the wrong kind")
-	}
-	id = f.put(&flow{kind: flowLogin}, now)
-	if f.take(id, flowLogin, now) == nil || f.take(id, flowLogin, now) != nil {
-		t.Fatal("flow not single use")
-	}
-	id = f.put(&flow{kind: flowLogin}, now)
-	if f.take(id, flowLogin, now.Add(flowTTL)) != nil {
-		t.Fatal("expired flow taken")
-	}
-	for i := 0; i < maxFlows+10; i++ {
-		f.put(&flow{kind: flowLogin}, now.Add(time.Duration(i)))
-	}
-	if len(f.m) > maxFlows {
-		t.Fatalf("%d flows", len(f.m))
 	}
 }
 
@@ -188,10 +165,11 @@ func TestJSONStore(t *testing.T) {
 	}
 	now := time.Unix(1e9, 0).UTC()
 	e := Endpoint{ID: "e1", Name: "mac", Kind: KindPanel, Avatar: []byte{1, 2}, CreatedAt: now}
-	if err := s.Apply(Change{Endpoints: []Endpoint{e}, Sessions: []Session{{Hash: "h1", EndpointID: "e1"}, {Hash: "h2", EndpointID: "e1"}}}); err != nil {
+	e2 := Endpoint{ID: "e2", Name: "qq", Kind: KindChannel, CreatedAt: now}
+	if err := s.Apply(Change{Endpoints: []Endpoint{e, e2}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Apply(Change{DeleteSessions: []string{"h1"}, Invites: []Invite{{ID: "i1", Hash: "x"}}}); err != nil {
+	if err := s.Apply(Change{DeleteEndpoints: []string{"e2"}}); err != nil {
 		t.Fatal(err)
 	}
 	if fi, _ := os.Stat(path); fi.Mode().Perm() != 0o600 {
@@ -206,8 +184,7 @@ func TestJSONStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	st, _ := s2.Load()
-	if len(st.Endpoints) != 1 || st.Endpoints[0].Name != "mac" || string(st.Endpoints[0].Avatar) != "\x01\x02" ||
-		len(st.Sessions) != 1 || st.Sessions[0].Hash != "h2" || len(st.Invites) != 1 {
+	if len(st.Endpoints) != 1 || st.Endpoints[0].Name != "mac" || string(st.Endpoints[0].Avatar) != "\x01\x02" {
 		t.Fatalf("reloaded %+v", st)
 	}
 	// A failed write leaves the old state in place.

@@ -14,6 +14,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/gate"
 	"github.com/kumoSleeping/iridium/internal/session"
+	"github.com/kumoSleeping/iridium/internal/webapp"
 	"github.com/kumoSleeping/iridium/internal/webui"
 )
 
@@ -90,37 +91,60 @@ func (s *Server) socketHandler(mux http.Handler) http.Handler {
 	})
 }
 
-// webHandler serves the TCP address behind the gate, whichever is in place now: the API under
-// /api/, the gate's own pages under /_ir/, and the web app (package webui, or Server.App) for the
-// rest. The gate stands in front of the app too: with a public origin even its files need a login.
+// webHandler serves the TCP address: ir_web (package webapp, whichever is in place now) in front of
+// the core. The core is the gate (TOKEN only, or the host by gate.AsHost), the login an app speaks
+// as, Satori, and the API; ir_web serves its own pages under /_ir/ and the web app (package webui,
+// or Server.App) itself, and forwards a logged-in browser as ir_web speaking for its login.
 func (s *Server) webHandler(mux http.Handler) http.Handler {
 	app := s.App
 	if app == nil {
 		app = webui.Handler()
 	}
-	site := webui.WrapApp(mux, app)
-	site = s.withSatori(site)
-	site = s.withLogin(site)
+	core := s.gate().Wrap(s.withLogin(s.withSatori(webui.Gzip(mux))))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		s.gate().Wrap(site).ServeHTTP(w, r)
+		s.web().Handler(core, app).ServeHTTP(w, r)
 	})
 }
 
-func (s *Server) gate() *gate.Gate { return s.g.Load() }
+func (s *Server) gate() *gate.Gate { return s.g }
 
-// newGate opens a gate for origin ("" is this machine only) over the store.
-func (s *Server) newGate(origin string) (*gate.Gate, error) {
-	return gate.New(gate.Config{
+func (s *Server) web() *webapp.Web { return s.w.Load() }
+
+func (s *Server) gateLog() *slog.Logger {
+	return slog.New(slog.NewTextHandler(logWriter{s.logf}, nil))
+}
+
+// openGate opens the core's gate over the store, and ir_web's TOKEN with it.
+func (s *Server) openGate() error {
+	g, err := gate.New(gate.Config{
+		Store:          s.st.Gate(),
+		SessionToken:   s.sessionToken,
+		OnRevoke:       s.revoked,
+		OnTerminals:    s.terminalsChanged,
+		Open:           openPath,
+		LoginNameTaken: func(name string) bool { w := s.web(); return w != nil && w.NameTaken(name) },
+		Logger:         s.gateLog(),
+	})
+	if err != nil {
+		return err
+	}
+	s.g = g
+	s.webToken, err = webapp.AppToken(g, s.cfg.StatePath())
+	return err
+}
+
+// newWeb opens ir_web for origin ("" is off: this machine only) over the store.
+func (s *Server) newWeb(origin string) (*webapp.Web, error) {
+	return webapp.New(webapp.Config{
 		PublicOrigin: origin,
-		Store:        s.st.Gate(),
+		Core:         s.g,
+		Token:        s.webToken,
+		Store:        s.st.Web(),
 		StateDir:     s.cfg.StatePath(),
 		Hosts:        s.cfg.Hosts,
 		OnJoin:       s.joined,
-		SessionToken: s.sessionToken,
-		OnRevoke:     s.revoked,
-		OnTerminals:  s.terminalsChanged,
 		Open:         openPath,
-		Logger:       slog.New(slog.NewTextHandler(logWriter{s.logf}, nil)),
+		Logger:       s.gateLog(),
 	})
 }
 
@@ -131,9 +155,12 @@ func (s *Server) terminalsChanged() {
 	s.hub.Set("terminals", s.terminalsSeq.Add(1))
 }
 
-// revoked forgets a revoked app's or login's browsers' push subscriptions and its machine. An
-// executor's connection ends now, not when it next connects.
+// revoked forgets a revoked app's or login's web sessions, browsers' push subscriptions and its
+// machine. An executor's connection ends now, not when it next connects.
 func (s *Server) revoked(id string) {
+	if w := s.web(); w != nil {
+		w.Forget(id)
+	}
 	if s.Remote != nil {
 		s.Remote.Drop(id)
 	}
@@ -331,9 +358,10 @@ func (s *Server) appOf(info gate.EndpointInfo) api.App {
 
 // loginOf is a login of ir_web as the API lists it.
 func (s *Server) loginOf(info gate.EndpointInfo) api.Login {
+	passkeys, sessions := s.web().Counts(info.ID)
 	return api.Login{
-		App: gate.WebApp, ID: info.ID, Name: info.Name, Avatar: info.Avatar, Passkeys: info.Passkeys,
-		Sessions: info.Sessions, Online: info.Online, CreatedAt: ms(info.CreatedAt), LastSeenAt: ms(info.LastSeenAt),
+		App: gate.WebApp, ID: info.ID, Name: info.Name, Avatar: info.Avatar, Passkeys: passkeys,
+		Sessions: sessions, Online: info.Online, CreatedAt: ms(info.CreatedAt), LastSeenAt: ms(info.LastSeenAt),
 		ApprovedAt: ms(info.ApprovedAt), Rules: s.rulesOf(info.ID, false), UsedToday: s.usedToday(info.ID), Device: s.deviceOf(info.ID),
 		Perms: s.loginPermsOf(gate.WebApp, info.ID),
 	}
@@ -343,7 +371,7 @@ func (s *Server) loginOf(info gate.EndpointInfo) api.Login {
 func (s *Server) meOf(c caller, info gate.EndpointInfo) api.Me {
 	id := c.Identity
 	m := api.Me{ID: info.ID, Name: info.Name, App: id.App, Login: id.Login, Avatar: info.Avatar, Host: id.Host(), Web: id.Web(),
-		Rules: s.rulesOf(info.ID, id.Host()), UsedToday: s.usedToday(info.ID), Device: s.deviceOf(info.ID), Public: s.gate().Public()}
+		Rules: s.rulesOf(info.ID, id.Host()), UsedToday: s.usedToday(info.ID), Device: s.deviceOf(info.ID), Public: s.web().Public()}
 	return m
 }
 

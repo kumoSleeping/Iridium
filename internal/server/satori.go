@@ -64,9 +64,10 @@ func callerAs(c satori.Caller) caller {
 	return caller{Identity: gate.Identity{App: c.App, Login: c.Login, Name: c.AppName}}
 }
 
-// Who: an app by its TOKEN (and the login it named); a login of ir_web by its cookie; the host
-// (its own page, with no public origin) as the login "local" of the platform "local". Every app
-// alike (draft 一): ir_web speaks Satori as any other, one login a connection.
+// Who: an app by its TOKEN (and the login it named); a login of ir_web likewise, by ir_web's
+// TOKEN (package webapp forwards a browser so); the host (its own page, with no public origin) as
+// the login "local" of the platform "local". Every app alike (draft 一): ir_web speaks Satori as
+// any other, one login a connection.
 func (b satoriBackend) Who(r *http.Request) (satori.Caller, bool) {
 	id, ok := gate.FromContext(r.Context())
 	switch {
@@ -118,7 +119,8 @@ func (b satoriBackend) Logins(app string) []satori.LoginInfo {
 }
 
 func (b satoriBackend) Track(r *http.Request, app string, closeFn func()) func() {
-	// A login's own connection (its cookie) ends as it logs out or is removed.
+	// A login's own connection ends as it is removed; a browser's also as it logs out (package
+	// webapp ends the request it forwarded).
 	if id, ok := gate.FromContext(r.Context()); ok && id.App == app {
 		return b.s.gate().Track(r, closeFn)
 	}

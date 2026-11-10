@@ -31,7 +31,18 @@ func (s *Server) withLogin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		login := r.Header.Get(HeaderLogin)
 		id, ok := gate.FromContext(r.Context())
-		if login == "" || !ok || id.App == "" || id.Host() || id.App == gate.WebApp || id.Session != "" {
+		if ok && id.App == gate.WebApp && id.Session == "" {
+			// ir_web speaks only for its logins, which joined by invites (approved as they did).
+			info, there := s.gate().Seen(login)
+			if login == "" || !there {
+				refuse(w, http.StatusForbidden, "no_such_login", "ir_web speaks for one of its logins")
+				return
+			}
+			id.Login, id.Name = info.ID, info.Name
+			next.ServeHTTP(w, r.WithContext(gate.NewContext(r.Context(), id)))
+			return
+		}
+		if login == "" || !ok || id.App == "" || id.Host() || id.Session != "" {
 			next.ServeHTTP(w, r)
 			return
 		}

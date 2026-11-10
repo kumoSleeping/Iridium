@@ -108,3 +108,6 @@ func nameCode(err error) string {
 	}
 	return ""
 }
+
+// NameCode is the reason code of a name error ("" if err is none).
+func NameCode(err error) string { return nameCode(err) }

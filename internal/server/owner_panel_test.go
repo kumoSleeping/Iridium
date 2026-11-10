@@ -11,6 +11,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/access"
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/gate"
+	"github.com/kumoSleeping/iridium/internal/webapp"
 )
 
 // as runs handler h for caller c, as the routes would: c in the request's context.
@@ -35,8 +36,8 @@ func TestOwnerFromPanels(t *testing.T) {
 	l := start(t)
 	panel := func(id string) gate.EndpointInfo { return gate.EndpointInfo{ID: id, Name: id, Kind: gate.KindPanel} }
 	perms, _ := json.Marshal(access.WithClaude(access.Default(), access.ByLocal, 1))
-	l.s.joined(gate.Joined{Endpoint: panel("owner0000000000a"), Perms: perms})
-	l.s.joined(gate.Joined{Endpoint: panel("guest0000000000a")})
+	l.s.joined(webapp.Joined{Endpoint: panel("owner0000000000a"), Perms: perms})
+	l.s.joined(webapp.Joined{Endpoint: panel("guest0000000000a")})
 	who := func(id string) gate.Identity { return gate.Identity{App: gate.WebApp, Login: id, Name: id} }
 	owner, guest := caller{Identity: who("owner0000000000a")}, caller{Identity: who("guest0000000000a")}
 	agentIn := caller{Identity: who("owner0000000000a"), socket: true, agent: true, session: "s"}
@@ -60,7 +61,7 @@ func TestOwnerFromPanels(t *testing.T) {
 				if !i.Claude {
 					return nil
 				}
-				inv := l.s.gate().Access().Invites
+				inv := l.s.web().Invites()
 				for _, x := range inv {
 					if x.Name == name {
 						var r api.Rules

@@ -7,6 +7,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/access"
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/gate"
+	"github.com/kumoSleeping/iridium/internal/webapp"
 )
 
 // who is the app or login id as GET /api/apps lists it: its name and rules.
@@ -59,9 +60,9 @@ func TestClaudeForJoinedPanels(t *testing.T) {
 	l := start(t)
 	panel := func(id string) gate.EndpointInfo { return gate.EndpointInfo{ID: id, Name: id, Kind: gate.KindPanel} }
 	perms, _ := json.Marshal(access.WithClaude(access.Default(), access.ByLocal, 1))
-	l.s.joined(gate.Joined{Endpoint: panel("first0000000000a"), First: true})
-	l.s.joined(gate.Joined{Endpoint: panel("owner0000000000a"), Perms: perms})
-	l.s.joined(gate.Joined{Endpoint: panel("guest0000000000a")})
+	l.s.joined(webapp.Joined{Endpoint: panel("first0000000000a"), First: true})
+	l.s.joined(webapp.Joined{Endpoint: panel("owner0000000000a"), Perms: perms})
+	l.s.joined(webapp.Joined{Endpoint: panel("guest0000000000a")})
 	for id, by := range map[string]string{"first0000000000a": "first", "owner0000000000a": "local", "guest0000000000a": ""} {
 		r := l.s.rulesOf(id, false)
 		if access.HasClaude(r) != (by != "") || (by != "" && r.ClaudeOwner.By != by) {

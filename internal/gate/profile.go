@@ -1,6 +1,7 @@
 package gate
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"mime"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // ServeProfile updates a profile (name and/or avatar). Mount it behind Wrap:
@@ -147,4 +149,26 @@ func readProfile(r *http.Request) (Profile, error) {
 	default:
 		return p, errMediaType
 	}
+}
+
+// serveAvatar serves an app's or login's avatar to anyone identified (Wrap). With the current
+// version in ?v= it may be cached for good.
+func (g *Gate) serveAvatar(w http.ResponseWriter, r *http.Request, id string) {
+	g.mu.Lock()
+	e, ok := g.st.endpoints[id]
+	g.mu.Unlock()
+	if !ok || len(e.Avatar) == 0 {
+		writeJSON(w, http.StatusNotFound, apiError{"not_found"})
+		return
+	}
+	h := w.Header()
+	h.Set("Content-Type", http.DetectContentType(e.Avatar))
+	h.Set("Content-Security-Policy", "default-src 'none'; sandbox")
+	h.Set("ETag", `"`+e.AvatarVersion+`"`)
+	if r.URL.Query().Get("v") == e.AvatarVersion {
+		h.Set("Cache-Control", "private, max-age=31536000, immutable")
+	} else {
+		h.Set("Cache-Control", "private, no-cache")
+	}
+	http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(e.Avatar))
 }

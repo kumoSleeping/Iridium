@@ -13,7 +13,7 @@ import (
 
 	"github.com/go-webauthn/webauthn/webauthn"
 
-	"github.com/kumoSleeping/iridium/internal/gate"
+	"github.com/kumoSleeping/iridium/internal/webapp"
 )
 
 // v25 is the last schema of 0.1 (v0.1.41): what the 0.2 migrations start from.
@@ -93,7 +93,7 @@ func makeFixture(t *testing.T) fixture {
 	db := openAt(t, f.Path, v25)
 	ns := func(d time.Duration) int64 { return f.T0.Add(d).UnixNano() }
 	ms := func(d time.Duration) int64 { return f.T0.Add(d).UnixMilli() }
-	passkeys, _ := json.Marshal([]gate.Passkey{{Credential: webauthn.Credential{ID: []byte("cred-mac"), PublicKey: []byte("pk")}, CreatedAt: f.T0, LastUsedAt: f.T0}})
+	passkeys, _ := json.Marshal([]webapp.Passkey{{Credential: webauthn.Credential{ID: []byte("cred-mac"), PublicKey: []byte("pk")}, CreatedAt: f.T0, LastUsedAt: f.T0}})
 	claude := func(by string) string { return fmt.Sprintf(`{"claudeOwner":{"by":%q,"at":%d}}`, by, ms(0)) }
 	exec := func(q string, args ...any) {
 		t.Helper()
