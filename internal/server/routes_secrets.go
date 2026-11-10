@@ -103,8 +103,8 @@ func (s *Server) terminalName(id string) string {
 	if n := s.Tag(id); n != "" {
 		return n
 	}
-	if id == gate.LocalEndpointID {
-		return gate.LocalName
+	if id == gate.HostID {
+		return gate.HostName
 	}
 	return id
 }
@@ -224,7 +224,7 @@ func (s *Server) setSecret(w http.ResponseWriter, r *http.Request) {
 		sec.Always = *req.Always
 	}
 	if req.Value != "" {
-		sec.By = c.EndpointID
+		sec.By = c.ID()
 		err = s.st.PutSecret(sec, req.Value)
 	} else {
 		err = s.st.SetSecretMeta(sec)
@@ -274,7 +274,7 @@ func (s *Server) ownSession(c caller, session string) bool {
 	if session != "" {
 		id = s.st.Opener(session)
 	}
-	if id == "" || id == gate.LocalEndpointID {
+	if id == "" || id == gate.HostID {
 		return true
 	}
 	info, ok := s.gate().Endpoint(id)
@@ -365,7 +365,7 @@ func (s *Server) useSecrets(w http.ResponseWriter, r *http.Request) {
 		out.Values[n] = v
 	}
 	for _, n := range names {
-		if err := s.st.AddSecretUse(store.SecretUse{Secret: n, Session: session, Terminal: c.EndpointID, Command: command}); err != nil {
+		if err := s.st.AddSecretUse(store.SecretUse{Secret: n, Session: session, Terminal: c.ID(), Command: command}); err != nil {
 			s.logf("server: a use of %s: %v", n, err)
 		}
 	}
@@ -454,7 +454,7 @@ func (s *Server) storeAsked(cf api.Confirm, value string, c caller) error {
 	if err != nil {
 		return err
 	}
-	sec.Note, sec.By = cf.Note, c.EndpointID
+	sec.Note, sec.By = cf.Note, c.ID()
 	if err := s.st.PutSecret(sec, value); err != nil {
 		return err
 	}

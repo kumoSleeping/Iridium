@@ -45,13 +45,10 @@ const by = (re) => list.find((s) => re.test(s.title ?? ""))?.id ?? list[0]?.id;
 const ASK = by(/Holder/);
 const PLAIN = ASK;
 const STYLE = by(/Style sample/);
-// What agents ask a panel for, so the cards have something to show: a plugin token from the Style
-// sample's agent (an invite needs the gate on: asked for later).
+// So the cards have something to show: an app asking to pair (an invite needs the gate on: asked
+// for later).
 const pending = (await sock("GET", "/api/confirms")).pending;
-if (!pending.some((c) => c.kind === "token")) await sock("POST", "/api/terminals/tokens", { name: "qq-bot" }, STYLE);
-// A plugin terminal of its own on the 终端 page, with a narrower table.
-const terms = (await sock("GET", "/api/terminals")).terminals;
-if (!terms.some((x) => x.name === "tg-bot")) await sock("POST", "/api/terminals/tokens", { name: "tg-bot" });
+if (!pending.some((c) => c.kind === "bot-pair")) await sock("POST", "/api/pair", { name: "qq-bot", program: "iridium-qq" });
 
 const desk = { width: 1440, height: 900, deviceScaleFactor: 1 };
 const phone = { width: 390, height: 844, deviceScaleFactor: 2, isMobile: true, hasTouch: true };
@@ -178,7 +175,7 @@ if (!only || gated.some(([n]) => n.includes(only))) {
       link = readFileSync(`${dir}/state/setup-token`, "utf8").trim();
     } catch {
       // The owner's panel: Claude, as the invite says (the first panel has it anyway).
-      link = (await sock("POST", "/api/terminals/invites", { name: `mac-${Date.now() % 1000}`, owner: true })).url;
+      link = (await sock("POST", "/api/invites", { name: `mac-${Date.now() % 1000}`, claude: true })).url;
     }
     const cdp = await page.createCDPSession();
     await cdp.send("WebAuthn.enable");
@@ -191,7 +188,7 @@ if (!only || gated.some(([n]) => n.includes(only))) {
     await page.click("#join");
     await page.waitForFunction((b) => location.href.startsWith(b) && !location.pathname.startsWith("/_ir/"), { timeout: 10000 }, PUBLIC);
     // An agent's ir asks for an invite: a card for the panel.
-    if (!(await sock("GET", "/api/confirms")).pending.some((c) => c.kind === "invite")) await sock("POST", "/api/terminals/invites", { name: "ipad" }, STYLE);
+    if (!(await sock("GET", "/api/confirms")).pending.some((c) => c.kind === "invite")) await sock("POST", "/api/invites", { name: "ipad" }, STYLE);
     for (const s of gated) await shoot(PUBLIC, s);
   } finally {
     await sock("PUT", "/api/public", { origin: "" });

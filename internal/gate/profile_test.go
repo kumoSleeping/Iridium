@@ -149,8 +149,9 @@ func TestChannelTokensAndProfiles(t *testing.T) {
 	if info.Kind != KindChannel || info.Name != "QQ" || !strings.HasPrefix(tok, channelTokenPrefix) {
 		t.Fatalf("token: %+v", info)
 	}
-	if _, _, err := h.g.CreateToken("mac"); err != ErrNameTaken {
-		t.Fatalf("token for a panel's name: %v", err)
+	// Names are unique among apps, not across apps and logins: an app may share a browser's name.
+	if _, _, err := h.g.CreateNewToken("QQ"); err != ErrNameTaken {
+		t.Fatalf("a second app by the same name: %v", err)
 	}
 	bot := func(q req) *httptest.ResponseRecorder {
 		if q.header == nil {
@@ -164,7 +165,7 @@ func TestChannelTokensAndProfiles(t *testing.T) {
 	}
 	w := bot(req{method: "POST", path: "/api/chat/qq:private:1/input"})
 	wantStatus(t, w, http.StatusOK)
-	if id := decode[appReply](t, w); id.EndpointID != info.ID || id.Kind != KindChannel || id.Name != "QQ" {
+	if id := decode[appReply](t, w); id.App != info.ID || id.Login != "" || id.Name != "QQ" {
 		t.Fatalf("bot identity: %+v", id)
 	}
 	wantStatus(t, h.do(req{path: "/api/x", noCookie: true, header: map[string]string{"Authorization": "Bearer ir_" + strings.Repeat("x", tokenLen)}}), http.StatusUnauthorized)
@@ -190,7 +191,7 @@ func TestChannelTokensAndProfiles(t *testing.T) {
 			mac = e
 		}
 	}
-	w = bot(req{method: "PUT", path: "/api/endpoints/" + mac.ID + "/profile", body: map[string]any{"name": "pwned"}})
+	w = bot(req{method: "PUT", path: "/api/apps/" + mac.ID + "/profile", body: map[string]any{"name": "pwned"}})
 	wantStatus(t, w, http.StatusForbidden)
 
 	// The panel sees the avatar; outsiders do not; the version URL is cacheable.
@@ -208,13 +209,18 @@ func TestChannelTokensAndProfiles(t *testing.T) {
 	wantStatus(t, bot(req{path: info.Avatar}), http.StatusOK)
 	wantStatus(t, h.do(req{path: info.Avatar, noCookie: true}), http.StatusUnauthorized)
 
-	// The panel renames the bot (JSON), names stay unique, and removes its avatar.
-	w = h.do(req{method: "PUT", path: "/api/endpoints/" + info.ID + "/profile", body: map[string]any{"name": "MAC"}})
+	// The panel renames the bot (JSON), names stay unique among apps, and removes its avatar.
+	if _, other, err := h.g.CreateToken("Mac"); err != nil {
+		t.Fatal(err)
+	} else {
+		h.secrets = append(h.secrets, other)
+	}
+	w = h.do(req{method: "PUT", path: "/api/apps/" + info.ID + "/profile", body: map[string]any{"name": "MAC"}})
 	wantStatus(t, w, http.StatusConflict)
 	if r := decode[joinReply](t, w); r.NameError != "taken" {
 		t.Fatalf("rename to a taken name: %s", w.Body.String())
 	}
-	w = h.do(req{method: "PUT", path: "/api/endpoints/" + info.ID + "/profile", body: map[string]any{"name": "qq", "removeAvatar": true}})
+	w = h.do(req{method: "PUT", path: "/api/apps/" + info.ID + "/profile", body: map[string]any{"name": "qq", "removeAvatar": true}})
 	wantStatus(t, w, http.StatusOK)
 	if got := decode[EndpointInfo](t, w); got.Name != "qq" || got.Avatar != "" {
 		t.Fatalf("after panel update: %+v", got)
@@ -240,7 +246,7 @@ func TestChannelTokensAndProfiles(t *testing.T) {
 	if _, err := h.g.UpdateProfile("qq", Profile{Name: ptr("本机")}); err != ErrNameReserved {
 		t.Fatalf("reserved: %v", err)
 	}
-	if _, err := h.g.UpdateProfile(LocalName, Profile{Name: ptr("x")}); err != ErrLocal {
+	if _, err := h.g.UpdateProfile(HostName, Profile{Name: ptr("x")}); err != ErrLocal {
 		t.Fatalf("local: %v", err)
 	}
 	if _, err := h.g.UpdateProfile("nobody", Profile{}); err != ErrNotFound {
@@ -296,10 +302,10 @@ func TestChannelInLocalMode(t *testing.T) {
 		h.h.ServeHTTP(w, r)
 		return w
 	}
-	if id := decode[appReply](t, do("Bearer "+tok)); id.Name != "bot" || id.Local {
+	if id := decode[appReply](t, do("Bearer "+tok)); id.Name != "bot" || id.Host {
 		t.Fatalf("channel in local mode: %+v", id)
 	}
-	if id := decode[appReply](t, do("")); !id.Local {
+	if id := decode[appReply](t, do("")); !id.Host {
 		t.Fatalf("no token in local mode: %+v", id)
 	}
 	wantStatus(t, do("Bearer ir_"+strings.Repeat("A", tokenLen)), http.StatusUnauthorized)

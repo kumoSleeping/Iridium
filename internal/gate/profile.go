@@ -12,8 +12,8 @@ import (
 
 // ServeProfile updates a profile (name and/or avatar). Mount it behind Wrap:
 //
-//	PUT /api/me/profile             ServeProfile(w, r, "")                 the caller itself: a panel by its session, a channel by its token
-//	PUT /api/endpoints/{id}/profile ServeProfile(w, r, r.PathValue("id"))  any endpoint: web panels and 本机 only
+//	PUT /api/me/profile        ServeProfile(w, r, "")                 the caller itself: a browser by its session, an app by its TOKEN
+//	PUT /api/apps/{id}/profile ServeProfile(w, r, r.PathValue("id"))  any app or login: ir_web's logins and the host only
 //
 // The body is multipart/form-data with optional fields "name", "avatar" (a file) and
 // "removeAvatar" ("1"), or JSON {"name"?, "avatar"? (base64 or a data: URL), "removeAvatar"?}.
@@ -28,12 +28,12 @@ func (g *Gate) ServeProfile(w http.ResponseWriter, r *http.Request, id string) {
 		w.Header().Set("Allow", "PUT, POST")
 		writeJSON(w, http.StatusMethodNotAllowed, apiError{"method_not_allowed"})
 		return
-	case id == "" && caller.Local:
+	case id == "" && caller.Host():
 		writeJSON(w, http.StatusConflict, apiError{"local"})
 		return
 	case id == "":
-		id = caller.EndpointID
-	case id != caller.EndpointID && !caller.CanManage():
+		id = caller.ID()
+	case id != caller.ID() && !caller.CanManage():
 		writeJSON(w, http.StatusForbidden, apiError{"forbidden"})
 		return
 	}

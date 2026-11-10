@@ -14,17 +14,20 @@ import (
 	"github.com/go-webauthn/webauthn/webauthn"
 )
 
-// Endpoint kinds.
+// Endpoint kinds: what the gate holds, an ir_web login or an app. Not stored as such: the store
+// keeps logins and apps in tables of their own (docs/next/decisions.md 1-4).
 const (
-	KindPanel   = "panel"   // a web panel: one browser, logs in with a passkey
-	KindChannel = "channel" // a plugin or peer: authenticates with its own token
+	KindPanel   = "panel"   // a login of ir_web: one browser, logs in with a passkey
+	KindChannel = "channel" // an app: authenticates with its own TOKEN
 )
 
-// Endpoint is one registered interactive terminal (交互终端).
+// Endpoint is one login of ir_web or one app, as the gate holds it.
 type Endpoint struct {
 	ID   string `json:"id"`   // stable internal ID; names can change
-	Name string `json:"name"` // unique, case-insensitive; see NormalizeName
+	Name string `json:"name"` // unique, case-insensitive, among its kind; see NormalizeName
 	Kind string `json:"kind"` // KindPanel or KindChannel
+	// Type: an app's type as shown (computer, bot, script…); display only, no rights.
+	Type string `json:"type,omitempty"`
 
 	UserHandle []byte    `json:"userHandle,omitempty"` // panel: WebAuthn user handle, random per registration
 	Passkeys   []Passkey `json:"passkeys,omitempty"`   // panel
@@ -35,6 +38,8 @@ type Endpoint struct {
 
 	CreatedAt  time.Time `json:"createdAt"`
 	LastSeenAt time.Time `json:"lastSeenAt"`
+	// ApprovedAt: when a login was approved (a browser: as it joined); zero for pending. Apps: zero.
+	ApprovedAt time.Time `json:"approvedAt,omitzero"`
 }
 
 // Passkey is a WebAuthn credential of a panel. Credential holds only public data.
@@ -44,18 +49,19 @@ type Passkey struct {
 	LastUsedAt time.Time           `json:"lastUsedAt"`
 }
 
-// Invite is a pending one-time registration link for a new panel.
+// Invite is a slot for a new login of ir_web, approved beforehand: a one-time registration link.
 type Invite struct {
-	ID        string    `json:"id"`             // short ID for listing and revoking
-	Hash      string    `json:"hash"`           // SHA-256 (hex) of the token; the token itself is never stored
-	Name      string    `json:"name,omitempty"` // optional name chosen by the inviter; the joiner may change it
-	Setup     bool      `json:"setup,omitempty"`
-	Owner     bool      `json:"owner,omitempty"` // ir invite --owner: the joiner is the owner's own (Claude)
+	ID    string `json:"id"`             // short ID for listing and revoking
+	Hash  string `json:"hash"`           // SHA-256 (hex) of the token; the token itself is never stored
+	Name  string `json:"name,omitempty"` // optional name chosen by the inviter; the joiner may change it
+	Setup bool   `json:"setup,omitempty"`
+	// Perms: what the login that joins may do (the server's JSON; the gate does not read it).
+	Perms     []byte    `json:"perms,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 	ExpiresAt time.Time `json:"expiresAt"` // zero for the first-run setup token
 }
 
-// Session is a logged-in panel browser. Hash is the SHA-256 (hex) of the cookie value.
+// Session is a logged-in browser (a web session of an ir_web login). Hash is the SHA-256 (hex) of the cookie value.
 type Session struct {
 	Hash       string    `json:"hash"`
 	EndpointID string    `json:"endpointId"`
@@ -92,12 +98,9 @@ func (c Change) empty() bool {
 // Apply must be atomic (all of the Change or none of it). The gate serialises its calls,
 // so a Store needs no locking for the gate's sake.
 //
-// For SQLite: tables endpoints (id primary key, name, kind, user_handle, token_hash
-// unique, avatar blob, avatar_version, created_at, last_seen_at; passkeys as a JSON
-// column or a child table keyed by credential ID), invites (id primary key, hash unique,
-// name, setup, owner, created_at, expires_at) and sessions (hash primary key, endpoint_id
-// indexed, created_at, last_seen_at, expires_at). Apply is one transaction: deletes, then
-// INSERT ... ON CONFLICT DO UPDATE. The gate deletes an endpoint's sessions itself, in the
+// The SQLite store (package store) keeps apps (KindChannel) in apps, ir_web's logins (KindPanel)
+// in logins, invites in invites and sessions in web_sessions. Apply is one transaction: deletes,
+// then INSERT ... ON CONFLICT DO UPDATE. The gate deletes an endpoint's sessions itself, in the
 // same Change, so no cascade is needed.
 type Store interface {
 	Load() (State, error)

@@ -17,8 +17,8 @@ import (
 func TestUsage(t *testing.T) {
 	l := start(t)
 	var tok api.Token
-	l.want(200, "socket", "POST", "/api/terminals/tokens", api.NewInvite{Name: "bot"}, &tok)
-	bot, botID := tok.Token, tok.Terminal.ID
+	tok = l.newApp("bot", false)
+	bot, botID := tok.Token, tok.App.ID
 	st := l.s.st
 	now := time.Now()
 	yesterday := now.AddDate(0, 0, -1)
@@ -51,7 +51,7 @@ func TestUsage(t *testing.T) {
 	if mine == nil || mine.Turns != 2 || mine.Input != 11 || mine.Output != 22 || mine.CacheRead != 30 || mine.CostUSD != 1 || mine.Agent != api.AgentClaude || mine.Day != all.Days[6] {
 		t.Fatalf("本机's row: %+v", mine)
 	}
-	if all.Terminals[botID].Name != "bot" || !all.Terminals["local"].Local {
+	if all.Terminals[botID].Name != "bot" || !all.Terminals["local"].Host {
 		t.Fatalf("terminals: %+v", all.Terminals)
 	}
 	var long api.Usage

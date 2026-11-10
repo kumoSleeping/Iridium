@@ -3,14 +3,14 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 import { windowFor } from "../src/quota";
-import type { Block, Model, Session, Terminal, Workspace } from "../src/api/types.gen";
+import type { Block, Model, Session, Workspace } from "../src/api/types.gen";
 import { argOf, folded, foldLine, inputOf } from "../src/chat/fold";
 import { commandsOf, keyMode, matching } from "../src/chat/composer";
 import { shellLine } from "../src/chat/shell";
 import { crashParts } from "../src/chat/crash";
 import { levelName, restAt } from "../src/chat/effort";
 import { ctxParts, hitRate, modelView } from "../src/chat/meters";
-import { atSessions, attachedOf, atWord, leadingMentions, mentions, SID, sessionIds, shortId, sourceOf, withoutFiles, withoutNameLines, draftWords } from "../src/chat/refs";
+import { atSessions, attachedOf, atWord, leadingMentions, mentions, SID, sessionIds, shortId, sourceOf, type Who, withoutFiles, withoutNameLines, draftWords } from "../src/chat/refs";
 import { t } from "../src/i18n";
 import { en } from "../src/i18n/en";
 import { zh } from "../src/i18n/zh";
@@ -129,12 +129,11 @@ describe("sourceOf", () => {
     { id: "s3", agent: "claude", cwd: "/home/k/notes/", title: "hi there", status: "idle", hosted: false, live: false, updatedAt: 0 } as Session,
   ];
   const ws = [{ id: 3, name: "Iri" }];
-  const rules = {} as Terminal["rules"];
-  const terminals: Terminal[] = [
-    { id: "local", name: "本机", kind: "channel", local: true, rules, usedToday: 0, device: "computer" },
-    { id: "me", name: "kumo-mac", kind: "panel", rules, usedToday: 0, device: "computer" },
-    { id: "p", name: "kumo-phone", kind: "panel", avatar: "/a.png", rules, usedToday: 0, device: "phone" },
-    { id: "q", name: "QQ", kind: "channel", avatar: "/q.png", rules, usedToday: 0 },
+  const terminals: Who[] = [
+    { id: "local", name: "本机", host: true, device: "computer" },
+    { id: "me", name: "kumo-mac", web: true, device: "computer" },
+    { id: "p", name: "kumo-phone", web: true, avatar: "/a.png", device: "phone" },
+    { id: "q", name: "QQ", avatar: "/q.png" },
   ];
   const me = terminals[1];
   const local = terminals[0];
@@ -144,8 +143,8 @@ describe("sourceOf", () => {
     expect(sourceOf("本机", "local", local, terminals, sessions)).toEqual({ kind: "you", name: "本机", device: "computer", local: true }); // the page with no gate
     expect(sourceOf("kumo-phone", "p", me, terminals, sessions)).toEqual({ kind: "you", name: "kumo-phone", avatar: "/a.png", device: "phone" });
     expect(sourceOf("本机", "local", me, terminals, sessions)).toEqual({ kind: "you", name: "本机", device: "computer", local: true });
-    // No terminals list (yet): 本机 is still yours; no device is a computer.
-    expect(sourceOf("本机", "local", { id: "x", name: "x" }, [], sessions)).toEqual({ kind: "you", name: "本机", device: "computer", local: true });
+    // No list (yet): the host (本机 as 0.1 tagged it) is still yours; no device is a computer.
+    expect(sourceOf("本机", "local", { id: "x", name: "x" }, [], sessions)).toEqual({ kind: "you", name: "主机", device: "computer", local: true });
     expect(sourceOf("x", "x", { id: "x", name: "x" }, [], sessions)).toMatchObject({ kind: "you", device: "computer" });
   });
   test("letters: a plugin with its sender, another session's ir by its title as the sidebar has it, its workspace only when not this one's; Iridium's own line", () => {

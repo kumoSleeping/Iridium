@@ -50,6 +50,9 @@ type harness struct {
 type appReply struct {
 	Identity
 	Method string
+	Host   bool
+	Web    bool
+	ID     string
 }
 
 func newHarness(t *testing.T, origin string) *harness {
@@ -94,12 +97,12 @@ func (h *harness) open(origin string) {
 			g.ServeProfile(w, r, "")
 			return
 		}
-		if rest, ok := strings.CutPrefix(r.URL.Path, "/api/endpoints/"); ok {
+		if rest, ok := strings.CutPrefix(r.URL.Path, "/api/apps/"); ok {
 			g.ServeProfile(w, r, strings.TrimSuffix(rest, "/profile"))
 			return
 		}
 		w.Header().Set("Cache-Control", "public, max-age=60")
-		json.NewEncoder(w).Encode(appReply{id, r.Method})
+		json.NewEncoder(w).Encode(appReply{id, r.Method, id.Host(), id.Web(), id.ID()})
 	}))
 }
 
@@ -302,16 +305,16 @@ func TestRegisterAndLogin(t *testing.T) {
 		t.Fatalf("setup file still there: %v", err)
 	}
 	me, code := h.whoami()
-	if code != 200 || me.Name != "Kumo Mac" || me.Kind != KindPanel || me.Local {
+	if code != 200 || me.Name != "Kumo Mac" || !me.Web || me.Host {
 		t.Fatalf("whoami after join: %d %+v", code, me)
 	}
-	mac := me.EndpointID
+	mac := me.ID
 
 	// The setup token was used up.
 	wantStatus(t, h.do(req{method: "POST", path: "/_ir/api/join/check", body: joinRequest{Token: setup}}), http.StatusForbidden)
 
 	// A named invite for a second device. Its name is reserved meanwhile.
-	inv, err := h.g.CreateInvite("手机", false)
+	inv, err := h.g.CreateInvite("手机", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -320,10 +323,13 @@ func TestRegisterAndLogin(t *testing.T) {
 	}
 	tok := tokenOf(t, inv.URL)
 	h.secrets = append(h.secrets, tok)
-	if _, err := h.g.CheckName("手机"); err != ErrNameTaken {
+	if _, err := h.g.CheckLoginName("手机"); err != ErrNameTaken {
 		t.Fatalf("pending invite name not reserved: %v", err)
 	}
-	if _, err := h.g.CreateInvite("kumo mac", false); err != ErrNameTaken {
+	if _, err := h.g.CheckName("手机"); err != nil {
+		t.Fatalf("an invite's name is a login's, free for an app: %v", err)
+	}
+	if _, err := h.g.CreateInvite("kumo mac", nil); err != ErrNameTaken {
 		t.Fatalf("invite with a taken name: %v", err)
 	}
 	if r := decode[joinReply](t, h.do(req{method: "POST", path: "/_ir/api/join/check", body: joinRequest{Token: tok}})); r.Name != "手机" {
@@ -338,7 +344,7 @@ func TestRegisterAndLogin(t *testing.T) {
 	if me.Name != "手机" {
 		t.Fatalf("second panel: %+v", me)
 	}
-	phoneID := me.EndpointID
+	phoneID := me.ID
 	// One use only.
 	wantStatus(t, h.join(phone, tok, nil), http.StatusForbidden)
 
@@ -348,7 +354,7 @@ func TestRegisterAndLogin(t *testing.T) {
 		t.Fatalf("logout did not clear the cookie")
 	}
 	wantStatus(t, h.login(a, nil), http.StatusOK)
-	if me, _ = h.whoami(); me.EndpointID != mac {
+	if me, _ = h.whoami(); me.ID != mac {
 		t.Fatalf("logged in as %+v", me)
 	}
 	if s := decode[sessionReply](t, h.do(req{path: "/_ir/api/session"})); !s.Authenticated || s.Name != "Kumo Mac" {
@@ -426,7 +432,7 @@ func TestLoginRejectsForgeries(t *testing.T) {
 	// A passkey for this site that the gate never registered.
 	stranger := &authenticator{t: t, origin: testOrigin}
 	other := newHarness(t, testOrigin)
-	wantStatus(t, other.join(stranger, other.setupToken(), ptr("x")), http.StatusOK)
+	wantStatus(t, other.join(stranger, other.setupToken(), ptr("xy")), http.StatusOK)
 	wantStatus(t, h.login(stranger, nil), http.StatusUnauthorized)
 
 	// A phishing origin.
@@ -451,7 +457,7 @@ func TestInviteExpiry(t *testing.T) {
 	h := newHarness(t, testOrigin)
 	a := &authenticator{t: t, origin: testOrigin}
 	wantStatus(t, h.join(a, h.setupToken(), ptr("mac")), http.StatusOK)
-	inv, _ := h.g.CreateInvite("", false)
+	inv, _ := h.g.CreateInvite("", nil)
 	tok := tokenOf(t, inv.URL)
 
 	// Options fetched in time, verified after expiry: refused, nothing registered.
@@ -467,7 +473,7 @@ func TestInviteExpiry(t *testing.T) {
 	}
 
 	// A revoked invite is gone too.
-	inv, _ = h.g.CreateInvite("tablet", false)
+	inv, _ = h.g.CreateInvite("tablet", nil)
 	if err := h.g.Revoke("TABLET"); err != nil {
 		t.Fatal(err)
 	}
@@ -480,7 +486,7 @@ func TestInviteExpiry(t *testing.T) {
 func TestJoinedOwnerAndSetup(t *testing.T) {
 	h := newHarness(t, testOrigin)
 	h.setupToken()
-	first, _ := h.g.CreateInvite("", false) // a plain invite, used while the setup link waits
+	first, _ := h.g.CreateInvite("", nil) // a plain invite, used while the setup link waits
 	wantStatus(t, h.join(&authenticator{t: t, origin: testOrigin}, tokenOf(t, first.URL), ptr("mac")), http.StatusOK)
 	if _, err := os.Stat(filepath.Join(h.dir, "state", setupFile)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("setup file after the first panel: %v", err)
@@ -488,10 +494,10 @@ func TestJoinedOwnerAndSetup(t *testing.T) {
 	if acc := h.g.Access(); len(acc.Invites) != 0 {
 		t.Fatalf("invites after the first panel: %+v", acc.Invites)
 	}
-	owner, _ := h.g.CreateInvite("pad", true)
-	plain, _ := h.g.CreateInvite("", false)
-	if acc := h.g.Access(); len(acc.Invites) != 2 || acc.Invites[0].Owner == acc.Invites[1].Owner || acc.Invites[0].Owner != (acc.Invites[0].Name == "pad") {
-		t.Fatalf("owner invite not listed as one: %+v", acc.Invites)
+	owner, _ := h.g.CreateInvite("pad", []byte(`{"x":1}`))
+	plain, _ := h.g.CreateInvite("", nil)
+	if acc := h.g.Access(); len(acc.Invites) != 2 || (len(acc.Invites[0].Perms) > 0) != (acc.Invites[0].Name == "pad") || (len(acc.Invites[1].Perms) > 0) != (acc.Invites[1].Name == "pad") {
+		t.Fatalf("invite's perms not listed: %+v", acc.Invites)
 	}
 	h.cookie = ""
 	wantStatus(t, h.join(&authenticator{t: t, origin: testOrigin}, tokenOf(t, owner.URL), nil), http.StatusOK)
@@ -500,9 +506,9 @@ func TestJoinedOwnerAndSetup(t *testing.T) {
 	if len(h.joined) != 3 {
 		t.Fatalf("joined: %+v", h.joined)
 	}
-	for i, want := range []Joined{{Owner: false, First: true}, {Owner: true}, {}} {
+	for i, want := range []Joined{{First: true}, {Perms: []byte(`{"x":1}`)}, {}} {
 		j := h.joined[i]
-		if j.Owner != want.Owner || j.First != want.First || j.Endpoint.Kind != KindPanel {
+		if string(j.Perms) != string(want.Perms) || j.First != want.First || j.Endpoint.Kind != KindPanel || j.Endpoint.ApprovedAt.IsZero() {
 			t.Errorf("join %d (%s): %+v", i, j.Endpoint.Name, j)
 		}
 	}
@@ -523,8 +529,8 @@ func TestNameRaceAtVerify(t *testing.T) {
 	h := newHarness(t, testOrigin)
 	a := &authenticator{t: t, origin: testOrigin}
 	wantStatus(t, h.join(a, h.setupToken(), ptr("mac")), http.StatusOK)
-	inv1, _ := h.g.CreateInvite("", false)
-	inv2, _ := h.g.CreateInvite("", false)
+	inv1, _ := h.g.CreateInvite("", nil)
+	inv2, _ := h.g.CreateInvite("", nil)
 	w := h.do(req{method: "POST", path: "/_ir/api/join/options", body: joinRequest{Token: tokenOf(t, inv1.URL), Name: ptr("pad")}})
 	c := decode[ceremonyReply](t, w)
 	h.cookie = ""
@@ -642,7 +648,7 @@ func TestLocalMode(t *testing.T) {
 		w := httptest.NewRecorder()
 		h.h.ServeHTTP(w, r)
 		if w.Code == 200 {
-			if id := decode[appReply](t, w); !id.Local || id.Name != LocalName {
+			if id := decode[appReply](t, w); !id.Host || id.Name != HostName {
 				t.Fatalf("local identity: %+v", id)
 			}
 		}
@@ -670,7 +676,7 @@ func TestLocalMode(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.h.ServeHTTP(w, r)
 	wantStatus(t, w, http.StatusFound)
-	if _, err := h.g.CreateInvite("", false); err != ErrNotPublic {
+	if _, err := h.g.CreateInvite("", nil); err != ErrNotPublic {
 		t.Fatalf("invite in local mode: %v", err)
 	}
 }
@@ -895,4 +901,47 @@ func TestOnTerminals(t *testing.T) {
 		t.Fatal(err)
 	}
 	wait(3)
+}
+
+// Names are unique within their scope: an app may share a login's name. A bare name finds the app
+// first; "ir_web/名字" the login. The host goes by its ID and its names, and is never removed.
+func TestNameScopes(t *testing.T) {
+	h := newHarness(t, testOrigin)
+	wantStatus(t, h.join(&authenticator{t: t, origin: testOrigin}, h.setupToken(), ptr("mac")), http.StatusOK)
+	login, _ := h.whoami()
+	app, tok, err := h.g.CreateNewToken("Mac")
+	if err != nil {
+		t.Fatalf("an app by a login's name: %v", err)
+	}
+	h.secrets = append(h.secrets, tok)
+	if e, ok := h.g.Find("mac"); !ok || e.ID != app.ID {
+		t.Errorf("a bare name: %+v", e)
+	}
+	if e, ok := h.g.Find("ir_web/MAC"); !ok || e.ID != login.ID || !e.Identity().Web() {
+		t.Errorf("ir_web/name: %+v", e)
+	}
+	if e, ok := h.g.Find("ir_web/" + login.ID); !ok || e.ID != login.ID {
+		t.Errorf("ir_web/ID: %+v", e)
+	}
+	for _, ref := range []string{"local", "host", "HOST", "主机", "本机"} {
+		if e, ok := h.g.Find(ref); !ok || !e.Host() || e.Identity() != HostIdentity {
+			t.Errorf("%s: %+v", ref, e)
+		}
+		if err := h.g.Revoke(ref); err != ErrLocal {
+			t.Errorf("removed %s: %v", ref, err)
+		}
+	}
+	if _, err := h.g.UpdateProfile(app.ID, Profile{Name: ptr("x")}); err != ErrNameLetter {
+		t.Errorf("a single letter: %v", err)
+	}
+	// The last login with a passkey stays; the app goes.
+	if err := h.g.Revoke("ir_web/mac"); err != ErrLastPasskey {
+		t.Errorf("the last login: %v", err)
+	}
+	if err := h.g.Revoke("mac"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := h.g.Find("ir_web/mac"); !ok {
+		t.Error("the login went with the app")
+	}
 }

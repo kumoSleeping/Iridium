@@ -13,7 +13,7 @@ import { LinkDot } from "../link";
 import type { Session } from "../api/types.gen";
 import { WsPlus } from "../create";
 import { chatOf, compactSent, stateAhead, type Draft as Drafted, type Sent } from "../chats";
-import { LOCAL_ME, useAgent, useMe, useTerminalList, useWorkspaces } from "../data";
+import { LOCAL_ME, useAgent, useMe, useWhoList, useWorkspaces } from "../data";
 import { t, useLang } from "../i18n";
 import { pushIn } from "../motion";
 import { openChat, openUsage } from "../route";
@@ -82,7 +82,7 @@ export function ChatPage({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?:
   const [, redraw] = useState(0);
   const changed = () => redraw((n) => n + 1);
   const me = useMe().data;
-  const terminals = useTerminalList();
+  const terminals = useWhoList();
   const workspaces = useWorkspaces().data;
   const confirms = useConfirms();
 

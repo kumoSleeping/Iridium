@@ -53,9 +53,7 @@ import type {
   SetUltracode,
   Settings,
   SettingsPatch,
-  Terminal,
-  Terminals,
-  Token,
+  Apps,
   UpdateState,
   Upload,
   Workspace,
@@ -69,7 +67,7 @@ import type { SecretInfo, Secrets, SetSecret, Usage } from "./types.gen";
 
 /** The gate's GET /_ir/api/session (docs/gate.md). */
 export type GateSession = { authenticated: boolean; name?: string; local?: boolean; setup?: boolean };
-/** What PUT /api/me/profile and /api/terminals/{id}/profile answer: the terminal's name and avatar. */
+/** What PUT /api/me/profile and /api/apps/{id}/profile answer: the app's or login's name and avatar. */
 export type Profile = { id: string; name: string; kind: string; avatar?: string };
 
 /** The answers shown. A failed one is not retried: the next state or the clock asks again. */
@@ -268,25 +266,24 @@ export const api = {
   // --- this terminal (GET /api/me), the gate's session, profile and logout ---
   me: () => get<Me>("/api/me"),
   gateSession: () => get<GateSession>("/_ir/api/session"),
-  /** PUT /api/me/profile, or another terminal's (internal/gate): multipart name, avatar, removeAvatar. */
+  /** PUT /api/me/profile, or another app's or login's (internal/gate): multipart name, avatar, removeAvatar. */
   profile: (p: { name?: string; avatar?: Blob; removeAvatar?: boolean }, of?: string) => {
     const f = new FormData();
     if (p.name !== undefined) f.set("name", p.name);
     if (p.avatar) f.set("avatar", p.avatar, "avatar.png");
     if (p.removeAvatar) f.set("removeAvatar", "1");
-    return write<Profile>("PUT", of ? `/api/terminals/${enc(of)}/profile` : "/api/me/profile", f);
+    return write<Profile>("PUT", of ? `/api/apps/${enc(of)}/profile` : "/api/me/profile", f);
   },
-  /** PUT /api/me/device, or another terminal's: the device it runs on. */
-  device: (device: SetDevice["device"], of?: string) => write<Terminal>("PUT", of ? `/api/terminals/${enc(of)}/device` : "/api/me/device", { device } satisfies SetDevice),
+  /** PUT /api/me/device, or another app's or login's: the device it runs on. */
+  device: (device: SetDevice["device"], of?: string) => write<SetDevice>("PUT", of ? `/api/apps/${enc(of)}/device` : "/api/me/device", { device } satisfies SetDevice),
   logout: () => write<{ ok: boolean }>("POST", "/_ir/api/logout"),
 
-  // --- the interactive terminals (docs/api.md "交互终端"), the confirmations agents ask for ---
-  terminals: () => get<Terminals>("/api/terminals"),
-  invite: (name: string, owner?: boolean) => write<Invite>("POST", "/api/terminals/invites", { ...(name ? { name } : {}), ...(owner ? { owner } : {}) } satisfies NewInvite),
-  token: (name: string, owner?: boolean) => write<Token>("POST", "/api/terminals/tokens", { name, ...(owner ? { owner } : {}) } satisfies NewInvite),
-  revoke: (id: string) => write<{ ok: boolean }>("DELETE", `/api/terminals/${enc(id)}`),
-  /** PUT /api/terminals/{id}/follows: the panels a Bot follows (their asks go to it). */
-  follows: (id: string, panels: string[]) => write<SetFollows>("PUT", `/api/terminals/${enc(id)}/follows`, { panels } satisfies SetFollows),
+  // --- the apps and their logins (docs/api.md "应用"), the confirmations agents ask for ---
+  apps: () => get<Apps>("/api/apps"),
+  invite: (name: string, claude?: boolean) => write<Invite>("POST", "/api/invites", { ...(name ? { name } : {}), ...(claude ? { claude } : {}) } satisfies NewInvite),
+  revoke: (id: string) => write<{ ok: boolean }>("DELETE", `/api/apps/${enc(id)}`),
+  /** PUT /api/apps/{id}/follows: the logins of ir_web an app follows (their asks go to it). Until S4. */
+  follows: (id: string, panels: string[]) => write<SetFollows>("PUT", `/api/apps/${enc(id)}/follows`, { panels } satisfies SetFollows),
 
   // --- official extensions (the QQ bot): installed and run from 终端管理 ---
   extensions: () => get<Extension[]>("/api/extensions"),

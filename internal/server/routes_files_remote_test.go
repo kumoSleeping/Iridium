@@ -24,7 +24,7 @@ func TestCopyAcrossMachines(t *testing.T) {
 	hub := &remote.Hub{}
 	l := startWith(t, func(s *Server, _ config.Config, _ string) { s.Remote = hub; s.WatchMachines() })
 	var tok api.Token
-	l.want(200, "socket", "POST", "/api/terminals/tokens", api.NewInvite{Name: "pc"}, &tok)
+	tok = l.newApp("pc", false)
 	there := t.TempDir()
 	exe, err := executor.New(executor.Options{URL: "ws" + strings.TrimPrefix(l.base, "http") + "/api/exec", Token: tok.Token, State: filepath.Join(there, "state"), Logf: t.Logf})
 	if err != nil {
@@ -35,7 +35,7 @@ func TestCopyAcrossMachines(t *testing.T) {
 	go func() { _ = exe.Run(ctx); close(done) }()
 	t.Cleanup(func() { cancel(); <-done; exe.Close() })
 	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
-		if _, ok := hub.Machine(tok.Terminal.ID).Hello(); ok {
+		if _, ok := hub.Machine(tok.App.ID).Hello(); ok {
 			break
 		}
 		if time.Now().After(deadline) {

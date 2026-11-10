@@ -38,10 +38,6 @@ import (
 	"github.com/kumoSleeping/iridium/internal/update"
 )
 
-// TerminalLocal is the built-in channel terminal of the local ir (and of the web page while no
-// public origin is set).
-const TerminalLocal = gate.LocalName
-
 type Server struct {
 	cfg config.Config
 	m   *session.Manager
@@ -141,7 +137,7 @@ func (s *Server) Handler(local bool) http.Handler {
 	mux.HandleFunc("POST /api/sessions/{id}/answer", s.use(s.answer))
 	mux.HandleFunc("POST /api/sessions/{id}/release", s.use(s.release))
 	mux.HandleFunc("GET /api/events", s.masked(s.events))
-	s.terminalRoutes(mux)
+	s.appRoutes(mux)
 	s.secretRoutes(mux)
 	s.updateRoutes(mux)
 	s.settingsRoutes(mux)
@@ -245,7 +241,7 @@ func (s *Server) create(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := s.m.Create(r.Context(), req, s.fromOf(c, req.Caller))
 	if id != "" {
-		if err := s.st.SetOpener(id, c.EndpointID); err != nil {
+		if err := s.st.SetOpener(id, c.ID()); err != nil {
 			s.logf("server: opener of %s: %v", id, err)
 		}
 	}
@@ -321,7 +317,7 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 	if session.IsClear(req.Text) {
 		id, err := s.m.Clear(r.Context(), r.PathValue("id"), s.fromOf(c, req.Caller))
 		if id != "" && id != r.PathValue("id") {
-			if err := s.st.SetOpener(id, c.EndpointID); err != nil {
+			if err := s.st.SetOpener(id, c.ID()); err != nil {
 				s.logf("server: opener of %s: %v", id, err)
 			}
 		}
@@ -496,9 +492,9 @@ func (s *Server) execConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c := callerOf(r)
-	if c.Kind != gate.KindChannel || c.Local || c.socket || c.session != "" {
+	if c.Login != "" || c.Host() || c.socket || c.session != "" {
 		fail(w, http.StatusForbidden, "an executor connects with a TOKEN")
 		return
 	}
-	s.Remote.Serve(w, r, c.EndpointID, c.Name)
+	s.Remote.Serve(w, r, c.ID(), c.Name)
 }

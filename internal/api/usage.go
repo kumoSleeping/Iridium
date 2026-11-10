@@ -7,8 +7,9 @@ type Usage struct {
 	Days []string `json:"days"` // "2006-01-02", oldest first, today last; by hour "2006-01-02T15"
 	// Rows: by day (Days' keys); by=weekhour, by weekday and hour, "1T14" (Monday 14:00; 7 Sunday).
 	Rows []UsageRow `json:"rows"`
-	// Terminals: the rows' terminals still there, by ID, to name them (a removed one is not).
-	Terminals map[string]UsageTerminal `json:"terminals"`
+	// Terminals: who the rows' are (apps, logins, the host) still there, by ID, to name them (a
+	// removed one is not). Until S2 adds the login to usage, a row is by one ID.
+	Terminals map[string]UsageWho `json:"terminals"`
 }
 
 // UsageRow is one day's use by one terminal of one agent's model. Turns counts each turn once per
@@ -28,10 +29,10 @@ type UsageRow struct {
 	CostUSD float64 `json:"costUsd,omitempty"`
 }
 
-// UsageTerminal names a terminal in Usage.
-type UsageTerminal struct {
-	Name   string       `json:"name"`
-	Kind   TerminalKind `json:"kind"`
-	Avatar string       `json:"avatar,omitempty"`
-	Local  bool         `json:"local,omitempty"`
+// UsageWho names who began turns in Usage: an app, a login (of ir_web), or the host.
+type UsageWho struct {
+	Name   string `json:"name"`
+	App    string `json:"app"` // the app's ID; WebApp for a login of ir_web; HostID for the host
+	Avatar string `json:"avatar,omitempty"`
+	Host   bool   `json:"host,omitempty"`
 }

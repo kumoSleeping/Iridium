@@ -17,7 +17,7 @@ func TestPrintUsage(t *testing.T) {
 			{Day: "2026-11-07", Terminal: "p1", Agent: api.AgentClaude, Model: "opus", Turns: 2, Output: 900},
 			{Day: "2026-11-07", Terminal: "", Agent: api.AgentCodex, Model: "luna", Turns: 1, Input: 7},
 		},
-		Terminals: map[string]api.UsageTerminal{"p1": {Name: "手机"}},
+		Terminals: map[string]api.UsageWho{"p1": {Name: "手机"}},
 	}
 	var b bytes.Buffer
 	printUsage(&b, u, usageDims)

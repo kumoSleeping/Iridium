@@ -41,7 +41,7 @@ func (s *Server) cliRoutes(mux *http.ServeMux) {
 		w.WriteHeader(http.StatusOK)
 		out := &cliLines{w: w, flush: func() { _ = rc.Flush() }}
 		hc := &http.Client{Transport: inProcess{h: mux, ctx: r.Context(), who: c}}
-		code := s.CLI(req.Args, out.as("out"), out.as("err"), hc, c.EndpointID, c.session, req.Cwd)
+		code := s.CLI(req.Args, out.as("out"), out.as("err"), hc, c.ID(), c.session, req.Cwd)
 		out.line(api.CLIOutput{Exit: &code})
 	})
 }

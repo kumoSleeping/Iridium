@@ -91,7 +91,7 @@ func TestPushPanelsOnly(t *testing.T) {
 		}
 	})
 	var bot api.Token
-	l.want(200, "socket", "POST", "/api/terminals/tokens", api.NewInvite{Name: "bot"}, &bot)
+	bot = l.newApp("bot", false)
 	ua, _ := ecdh.P256().GenerateKey(rand.Reader)
 	auth := make([]byte, 16)
 	rand.Read(auth)
@@ -135,10 +135,10 @@ func TestPushPanelsOnly(t *testing.T) {
 	// Revoked: the terminal's subscriptions dropped, the others' kept.
 	mine := keyed("https://push.example.com/mine")
 	l.want(200, "web", "POST", "/api/push/subscriptions", mine, nil)
-	if err := l.s.st.AddPushSubscription(store.PushSubscription{Terminal: bot.Terminal.ID, Endpoint: sub.Endpoint, Keys: `{}`}); err != nil {
+	if err := l.s.st.AddPushSubscription(store.PushSubscription{Terminal: bot.App.ID, Endpoint: sub.Endpoint, Keys: `{}`}); err != nil {
 		t.Fatal(err)
 	}
-	l.want(200, "socket", "DELETE", "/api/terminals/"+bot.Terminal.ID, nil, nil)
+	l.want(200, "socket", "DELETE", "/api/apps/"+bot.App.ID, nil, nil)
 	subs, _ := l.s.st.PushSubscriptions()
 	if len(subs) != 1 || subs[0].Endpoint != mine.Endpoint {
 		t.Fatalf("after the revoke: %+v", subs)

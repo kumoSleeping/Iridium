@@ -35,13 +35,13 @@ type caller struct {
 	session string
 }
 
-// panel reports whether the caller may approve terminals, widen permissions and see tokens: a web
-// panel, or 本机 when a person runs ir (or the page, with no public origin).
-func (c caller) panel() bool { return !c.agent && (c.Kind == gate.KindPanel || c.Local) }
+// panel reports whether the caller may approve apps, widen permissions and see secrets: a person
+// on a login of ir_web, or at the host (ir, or the page with no public origin). Until S2: what 0.1
+// let a panel and 本机 do.
+func (c caller) panel() bool { return !c.agent && (c.Web() || c.Host()) }
 
-// machine reports whether a person at the machine sent it: ir over the socket, as 本机, not run
-// by an agent.
-func (c caller) machine() bool { return c.socket && c.Local && !c.agent }
+// machine reports whether a person at the host sent it: ir over the socket, not run by an agent.
+func (c caller) machine() bool { return c.socket && c.Host() && !c.agent }
 
 // ownerSays is how the caller may say a terminal is the owner's own and give it Claude (Claude's
 // terms: the owner's own terminals only), "" if it may not: a person at the machine (ByLocal), or
@@ -54,7 +54,7 @@ func (s *Server) ownerSays(c caller) string {
 		return ""
 	case c.machine():
 		return access.ByLocal
-	case c.panel() && !c.Local && c.Kind == gate.KindPanel && access.HasClaude(s.rulesFor(c)):
+	case c.panel() && c.Web() && access.HasClaude(s.rulesFor(c)):
 		return access.ByPanel
 	}
 	return ""
@@ -71,18 +71,18 @@ func callerOf(r *http.Request) caller {
 	return caller{Identity: id, agent: id.Session != "", session: id.Session}
 }
 
-var localIdentity = gate.Identity{EndpointID: gate.LocalEndpointID, Name: gate.LocalName, Kind: gate.KindChannel, Local: true}
+var localIdentity = gate.HostIdentity
 
-// socketHandler serves the local ir, past the gate: 本机, or, when an agent's ir names the session
-// it runs in and another terminal opened that session, that terminal. What an agent does through
-// ir is its session's terminal's doing: its permissions, its usage.
+// socketHandler serves the local ir, past the gate: the host, or, when an agent's ir names the
+// session it runs in and an app or login opened that session, that one. What an agent does
+// through ir is its session's opener's doing: its permissions, its usage.
 func (s *Server) socketHandler(mux http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c := caller{Identity: localIdentity, socket: true, agent: r.Header.Get(HeaderAgent) != "", session: r.Header.Get(HeaderSession)}
 		if c.session != "" {
-			if id := s.st.Opener(c.session); id != "" && id != gate.LocalEndpointID {
+			if id := s.st.Opener(c.session); id != "" && id != gate.HostID {
 				if info, ok := s.gate().Endpoint(id); ok {
-					c.Identity = gate.Identity{EndpointID: info.ID, Name: info.Name, Kind: info.Kind}
+					c.Identity = info.Identity()
 					c.agent = true
 				}
 			}
@@ -124,8 +124,8 @@ func (s *Server) newGate(origin string) (*gate.Gate, error) {
 	})
 }
 
-// terminalsChanged tells the pages the terminals changed (a Bot's avatar came, a panel renamed):
-// they fetch GET /api/terminals again. The key "terminals" carries a count, nothing of them. A
+// terminalsChanged tells the pages the apps changed (an app's avatar came, a login renamed): they
+// fetch GET /api/apps again. The key "terminals" carries a count, nothing of them. A
 // machine is its Bot, its name and avatar the Bot's: the machines are told again too.
 func (s *Server) terminalsChanged() {
 	s.hub.Set("terminals", s.terminalsSeq.Add(1))
@@ -177,16 +177,16 @@ func (l logWriter) Write(b []byte) (int, error) {
 // does not send it, and a session in the environment is an agent's.
 func (s *Server) fromOf(c caller, callerSession string) string {
 	if !c.socket && c.session == "" {
-		return c.EndpointID
+		return c.ID()
 	}
 	from := c.session
 	if from == "" {
 		from = callerSession
 	}
 	if from == "" || strings.ContainsAny(from, "[] \n") {
-		return c.EndpointID
+		return c.ID()
 	}
-	return session.From(c.EndpointID, "ir:"+from)
+	return session.From(c.ID(), "ir:"+from)
 }
 
 // Tag is the name terminal goes by in source tags: its name now.
@@ -198,10 +198,10 @@ func (s *Server) Tag(terminal string) string {
 }
 
 // rulesFor is what the caller may do: Claude or not.
-func (s *Server) rulesFor(c caller) api.Rules { return s.rulesOf(c.EndpointID, c.Local) }
+func (s *Server) rulesFor(c caller) api.Rules { return s.rulesOf(c.ID(), c.Host()) }
 
 func (s *Server) rulesOf(id string, local bool) api.Rules {
-	if local || id == gate.LocalEndpointID {
+	if local || id == gate.HostID {
 		return access.Full()
 	}
 	if b, ok, err := s.st.TerminalRules(id); ok && err == nil {
@@ -236,7 +236,7 @@ func (s *Server) using(c caller, id string) (*api.SessionState, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !c.Local {
+	if !c.Host() {
 		err = access.Agent(s.rulesFor(c), st.Agent)
 	}
 	return st, err
@@ -269,7 +269,7 @@ func (s *Server) checkCreate(c caller, req *api.NewSession) error {
 	if err := s.checkMachine(req); err != nil {
 		return err
 	}
-	if c.Local {
+	if c.Host() {
 		return nil
 	}
 	return access.Agent(s.rulesFor(c), req.Agent)
@@ -282,7 +282,7 @@ func (s *Server) checkMachine(req *api.NewSession) error {
 		return nil
 	}
 	info, ok := s.gate().Find(req.Machine)
-	if !ok || info.Kind != gate.KindChannel {
+	if !ok || info.Kind != gate.KindChannel || info.Host() {
 		return fmt.Errorf("no machine %q", req.Machine)
 	}
 	return access.Agent(s.rulesOf(info.ID, false), req.Agent)
@@ -304,22 +304,42 @@ func (s *Server) mayWatch(w http.ResponseWriter, c caller, keys []string) bool {
 	return true
 }
 
-// terminalOf is an endpoint as the API lists it, with Claude or not and today's use.
-func (s *Server) terminalOf(info gate.EndpointInfo) api.Terminal {
-	t := api.Terminal{
-		ID: info.ID, Name: info.Name, Kind: api.TerminalKind(info.Kind), Avatar: info.Avatar,
-		Passkeys: info.Passkeys, Logins: info.Sessions, Online: info.Online,
+// deviceOf is the device id is on: what it set, else a computer.
+func (s *Server) deviceOf(id string) api.Device {
+	if d, _ := s.st.Device(id); api.Device(d).Valid() {
+		return api.Device(d)
+	}
+	return api.DeviceComputer
+}
+
+// appOf is an app (or the host) as the API lists it, with Claude or not and today's use.
+func (s *Server) appOf(info gate.EndpointInfo) api.App {
+	a := api.App{
+		ID: info.ID, Name: info.Name, Type: info.Type, Avatar: info.Avatar, Online: info.Online,
 		CreatedAt: ms(info.CreatedAt), LastSeenAt: ms(info.LastSeenAt),
-		Rules: s.rulesOf(info.ID, false), UsedToday: s.usedToday(info.ID),
+		Rules: s.rulesOf(info.ID, false), UsedToday: s.usedToday(info.ID), Device: s.deviceOf(info.ID),
 	}
-	if info.ID == gate.LocalEndpointID {
-		t.Local = true
+	if info.Host() {
+		a.Host, a.Rules = true, access.Full()
 	}
-	t.Device = api.DeviceComputer
-	if d, _ := s.st.Device(info.ID); api.Device(d).Valid() {
-		t.Device = api.Device(d)
+	return a
+}
+
+// loginOf is a login of ir_web as the API lists it.
+func (s *Server) loginOf(info gate.EndpointInfo) api.Login {
+	return api.Login{
+		App: gate.WebApp, ID: info.ID, Name: info.Name, Avatar: info.Avatar, Passkeys: info.Passkeys,
+		Sessions: info.Sessions, Online: info.Online, CreatedAt: ms(info.CreatedAt), LastSeenAt: ms(info.LastSeenAt),
+		ApprovedAt: ms(info.ApprovedAt), Rules: s.rulesOf(info.ID, false), UsedToday: s.usedToday(info.ID), Device: s.deviceOf(info.ID),
 	}
-	return t
+}
+
+// meOf is the caller as GET /api/me has it.
+func (s *Server) meOf(c caller, info gate.EndpointInfo) api.Me {
+	id := c.Identity
+	m := api.Me{ID: info.ID, Name: info.Name, App: id.App, Login: id.Login, Avatar: info.Avatar, Host: id.Host(), Web: id.Web(),
+		Rules: s.rulesOf(info.ID, id.Host()), UsedToday: s.usedToday(info.ID), Device: s.deviceOf(info.ID), Public: s.gate().Public()}
+	return m
 }
 
 func ms(t time.Time) int64 {
@@ -332,18 +352,18 @@ func ms(t time.Time) int64 {
 // ---- the plugin chat layer ----
 
 // chatCaller is a chat request's terminal (routes_plugin.go): the gate's identity.
-func chatCaller(c caller) chat.Caller { return chat.Caller{ID: c.EndpointID, Name: c.Name} }
+func chatCaller(c caller) chat.Caller { return chat.Caller{ID: c.ID(), Name: c.Name} }
 
 // callerOfChat is the terminal behind a chat.Caller.
 func (s *Server) callerOfChat(c chat.Caller) caller {
-	if c.ID == gate.LocalEndpointID {
+	if c.ID == gate.HostID {
 		return caller{Identity: localIdentity}
 	}
 	info, ok := s.gate().Endpoint(c.ID)
 	if !ok {
-		return caller{Identity: gate.Identity{EndpointID: c.ID, Name: c.Name, Kind: gate.KindChannel}}
+		return caller{Identity: gate.Identity{App: c.ID, Name: c.Name}}
 	}
-	return caller{Identity: gate.Identity{EndpointID: info.ID, Name: info.Name, Kind: info.Kind}}
+	return caller{Identity: info.Identity()}
 }
 
 // ChatGuard is what the chat layer checks: Claude's sessions only for the owner's own.

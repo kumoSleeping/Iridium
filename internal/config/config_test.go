@@ -48,7 +48,7 @@ func TestLoadLegacy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Listen != "127.0.0.1:7811" || !c.PairClosed || c.ChatDir != "/home/someone/chats" || c.Update.URL != "github:someone/iridium" ||
+	if c.Listen != "127.0.0.1:7811" || c.ChatDir != "/home/someone/chats" || c.Update.URL != "github:someone/iridium" ||
 		c.Public.Origin != "https://ir-test.example.com" || c.EnterInTurn != "queue" || !c.Push || c.Lang != "zh" {
 		t.Fatalf("loaded: %+v", c)
 	}

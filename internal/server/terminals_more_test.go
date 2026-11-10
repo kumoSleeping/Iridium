@@ -28,12 +28,12 @@ func TestChatFilesAndAgents(t *testing.T) {
 		s.Folders = discover.DefaultFolders("/")
 	})
 	var tok api.Token
-	l.want(200, "socket", "POST", "/api/terminals/tokens", api.NewInvite{Name: "nobot"}, &tok)
+	tok = l.newApp("nobot", false)
 	// The chat opens Claude by default: not for a plugin made without --owner.
 	l.want(403, tok.Token, "POST", "/api/chat/qq:1/input", api.ChatInput{Text: "/new claude"}, nil)
 
-	l.want(200, "socket", "POST", "/api/terminals/tokens", api.NewInvite{Name: "bot", Owner: true}, &tok)
-	bot, botID := tok.Token, tok.Terminal.ID
+	tok = l.newApp("bot", true)
+	bot, botID := tok.Token, tok.App.ID
 	var in api.ChatInputReply
 	l.want(200, bot, "POST", "/api/chat/qq:1/input", api.ChatInput{Text: "/new claude"}, nil)
 	l.want(200, bot, "POST", "/api/chat/qq:1/input", api.ChatInput{Text: "hi", Sender: "张三"}, &in)
@@ -74,8 +74,8 @@ func TestChatFilesAndAgents(t *testing.T) {
 	if b := page.Blocks[len(page.Blocks)-2]; b.From != "ir:"+in.Session || b.FromTerminal != botID {
 		t.Errorf("ir send's block: %+v", b)
 	}
-	l.want(403, as, "GET", "/api/terminals", nil, nil)
-	l.want(403, as, "POST", "/api/terminals/tokens", api.NewInvite{Name: "x"}, nil)
+	l.want(403, as, "GET", "/api/apps", nil, nil)
+	l.want(403, as, "DELETE", "/api/apps/nobot", nil, nil)
 	l.want(200, as, "GET", "/api/files?path="+l.work, nil, nil)
 	l.want(403, as, "PATCH", "/api/workspaces/1", api.WorkspacePatch{Name: new("x")}, nil)
 	// One in a session 本机 opened stays 本机.
@@ -86,5 +86,5 @@ func TestChatFilesAndAgents(t *testing.T) {
 	if id, tag, _ := l.s.st.Source(sent.Input); id != "local" || tag != "ir:"+mine.ID {
 		t.Errorf("本机's session's agent: %q %q", id, tag)
 	}
-	l.want(200, "agent-in:"+mine.ID, "GET", "/api/terminals", nil, nil)
+	l.want(200, "agent-in:"+mine.ID, "GET", "/api/apps", nil, nil)
 }

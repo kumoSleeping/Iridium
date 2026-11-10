@@ -35,8 +35,13 @@ const (
 	IdleTimeout     = 12 * time.Hour
 	AbsoluteTimeout = 7 * 24 * time.Hour
 	InviteTTL       = 10 * time.Minute
-	LocalEndpointID = "local" // the built-in endpoint: local `ir`, and the web page in local-only mode
-	LocalName       = "本机"
+	// HostID is the host's storage ID (docs/next/decisions.md 4): the machine Iridium runs on, the
+	// local `ir`, and the web page in local-only mode. Shown as HostName.
+	HostID   = "local"
+	HostName = "主机"
+	// WebApp is the built-in app ir_web: a browser with a passkey is one of its logins. It is
+	// there only with a public origin (decisions 3).
+	WebApp = "ir_web"
 
 	setupFile  = "setup-token"
 	touchEvery = time.Minute // how often a session's or channel's last-seen time is written
@@ -117,30 +122,50 @@ type Gate struct {
 	closeOnce sync.Once
 }
 
-// Joined is a panel just registered: Owner, its invite was made with ir invite --owner; First, no
-// other panel was there (the owner's own, by the first-run setup or the first invite).
+// Joined is a login of ir_web just registered: Perms, its invite's (Invite.Perms); First, no
+// other login of ir_web was there (the owner's own, by the first-run setup or the first invite).
 type Joined struct {
 	Endpoint EndpointInfo
-	Owner    bool
+	Perms    []byte
 	First    bool
 }
 
-// Identity is who sent a request, as Wrap found it.
+// Identity is who sent a request, as Wrap found it: an app, and the login within it that spoke.
 type Identity struct {
-	EndpointID string
-	Name       string
-	Kind       string // KindPanel or KindChannel
-	Local      bool   // the built-in 本机 (local-only mode); full rights
+	// App: an app's ID (its TOKEN), WebApp (a browser with a passkey), or HostID (the host).
+	App string
+	// Login: the login within App; for WebApp the browser's (a former panel's ID). "" for an
+	// app's TOKEN and for the host.
+	Login string
+	Name  string // the login's name, else the app's
 	// Session: the request came with a session's own TOKEN (Config.SessionToken): the ir of an
-	// agent hosted at that channel's machine. It acts as that channel, for that session.
+	// agent hosted at that app's machine. It acts as that app, for that session.
 	Session string
 }
 
-// CanManage reports whether the identity may manage other endpoints: web panels and 本机.
-// (Seeing tokens and approving new endpoints are panel rights too; see docs/plan.md.)
-func (id Identity) CanManage() bool { return id.Local || id.Kind == KindPanel }
+// Host: the host (the local ir, or the page with no public origin); full rights.
+func (id Identity) Host() bool { return id.App == HostID }
 
-var localIdentity = Identity{EndpointID: LocalEndpointID, Name: LocalName, Kind: KindChannel, Local: true}
+// Web: a login of ir_web, a browser with a passkey.
+func (id Identity) Web() bool { return id.App == WebApp && id.Login != "" }
+
+// ID is the identity's storage ID, which permissions, usage and openers are kept by: the login's
+// for ir_web, else the app's (HostID for the host).
+func (id Identity) ID() string {
+	if id.Login != "" {
+		return id.Login
+	}
+	return id.App
+}
+
+// CanManage reports whether the identity may manage apps: ir_web's logins and the host. (Until
+// S2's permissions: what 0.1 let panels and 本机 do.)
+func (id Identity) CanManage() bool { return id.Host() || id.Web() }
+
+// HostIdentity is the host's identity.
+var HostIdentity = Identity{App: HostID, Name: HostName}
+
+var localIdentity = HostIdentity
 
 type ctxKey struct{}
 
@@ -393,7 +418,7 @@ func (g *Gate) authorize(w http.ResponseWriter, r *http.Request) (reqAuth, bool)
 	}
 	// Cookies (and 本机) are ambient credentials: a foreign page could make the browser
 	// send them. Bearer tokens are not.
-	if (a.session != "" || a.id.Local) && (unsafeMethod(r.Method) || isUpgrade(r)) && !g.originOK(r) {
+	if (a.session != "" || a.id.Host()) && (unsafeMethod(r.Method) || isUpgrade(r)) && !g.originOK(r) {
 		writeJSON(w, http.StatusForbidden, apiError{"bad_origin"})
 		return reqAuth{}, false
 	}
@@ -413,7 +438,7 @@ func (g *Gate) identify(r *http.Request, now time.Time) (a reqAuth, ok, bad bool
 			e, live := g.st.endpoints[id]
 			g.mu.Unlock()
 			if !live || e.Kind != KindChannel {
-				return a, false, true // its machine's Bot revoked
+				return a, false, true // its machine's app removed
 			}
 			who := identityOf(e)
 			who.Session = session
@@ -462,7 +487,7 @@ func (g *Gate) identify(r *http.Request, now time.Time) (a reqAuth, ok, bad bool
 	return reqAuth{id: identityOf(e), session: h}, true, false
 }
 
-func identityOf(e Endpoint) Identity { return Identity{EndpointID: e.ID, Name: e.Name, Kind: e.Kind} }
+func identityOf(e Endpoint) Identity { return infoOf(e).Identity() }
 
 func sessionExpired(s Session, now time.Time) bool {
 	return !now.Before(s.ExpiresAt) || now.Sub(s.LastSeenAt) >= IdleTimeout
@@ -607,9 +632,9 @@ type conn struct {
 // when the connection ends by itself.
 func (g *Gate) Track(r *http.Request, closeFn func()) (untrack func()) {
 	a, _ := r.Context().Value(ctxKey{}).(reqAuth)
-	c := &conn{session: a.session, endpoint: a.id.EndpointID, close: sync.OnceFunc(closeFn)}
-	if a.id.Local {
-		c.endpoint = "" // 本机 is never revoked
+	c := &conn{session: a.session, endpoint: a.id.ID(), close: sync.OnceFunc(closeFn)}
+	if a.id.Host() {
+		c.endpoint = "" // the host is never removed
 	}
 	g.connMu.Lock()
 	g.conns[c] = struct{}{}

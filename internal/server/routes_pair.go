@@ -24,9 +24,10 @@ import (
 // hand), the doors past the gate without a login, and gets nothing but a code and a request to
 // ask after. A panel sees an exec-pair or bot-pair confirmation with the same code; allowed, a new
 // Bot is made (or the one by its name given a new TOKEN, Replace) and its TOKEN waits for the
-// asker's GET /api/pair/{request}, once. The settings' pairClosed turns every request away.
+// asker's GET /api/pair/{request}, once. (S1b: a window that opens for a while in place of the
+// settings' pairClosed, gone.)
 
-// Pairing limits, loose (the user, 2026-11-08: pairClosed is the stop): requests per client an
+// Pairing limits, loose: requests per client an
 // hour, pending ones per client and in all, the body.
 const (
 	pairPerHour       = 30
@@ -79,13 +80,6 @@ func (s *Server) pairRoutes(mux *http.ServeMux) {
 func (s *Server) pairAsk(w http.ResponseWriter, r *http.Request, kind string) {
 	if kind == "exec-pair" && s.Remote == nil {
 		fail(w, http.StatusNotFound, "no executors here")
-		return
-	}
-	s.cmu.Lock()
-	closed := s.cfg.PairClosed
-	s.cmu.Unlock()
-	if closed {
-		fail(w, http.StatusForbidden, "not taking pairing requests")
 		return
 	}
 	var m api.ExecPair
@@ -202,7 +196,7 @@ func (s *Server) makePairedBot(name, ownerBy string, replace bool) (*api.Token, 
 		if err != nil {
 			return nil, err
 		}
-		return &api.Token{Terminal: s.terminalOf(info), Token: tok}, nil
+		return &api.Token{App: s.appOf(info), Token: tok}, nil
 	}
 	for i := 1; i < 100; i++ {
 		n := name
@@ -222,7 +216,7 @@ func (s *Server) makePairedBot(name, ownerBy string, replace bool) (*api.Token, 
 				return nil, err
 			}
 		}
-		return &api.Token{Terminal: s.terminalOf(info), Token: tok}, nil
+		return &api.Token{App: s.appOf(info), Token: tok}, nil
 	}
 	return nil, fmt.Errorf("no free name for %s", name)
 }

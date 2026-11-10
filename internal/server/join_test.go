@@ -154,7 +154,7 @@ func TestJoin(t *testing.T) {
 	<-done
 
 	// Its Bot removed: a resident forgets the TOKEN and ends, unpaired.
-	l.want(200, "socket", "DELETE", "/api/terminals/win-pc", nil, nil)
+	l.want(200, "socket", "DELETE", "/api/apps/win-pc", nil, nil)
 	o.Resident = true
 	_, done = run(o)
 	select {

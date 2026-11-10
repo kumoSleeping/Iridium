@@ -20,10 +20,9 @@ const Help = `ir: this machine's Iridium on the command line (over its unix sock
   ir usage [name|me] [-d days] [--by day,terminal,agent,model]   tokens and cost per day, terminal, agent, model
   new and send take --wait to wait for the reply. send during a turn joins that turn (an agent's always does; a person at a terminal may add --queue to run it after). Exit codes: 0 done, 2 needs the user (a question, an approval), 1 error or exited. A path may be machine:path
   ir bot "message" [--to bot]         tell the user through a bot (QQ); to add one: the web's 终端管理 +, or iridium-qq setup (--new for one more; a QR image: ir attach it; run the same again once scanned)
-Admin (an agent calling these never sees a TOKEN; a web panel confirms):
-  ir invite [name] | token <name>     a link for a new web panel | a plugin TOKEN
-    --owner: the user's own terminal, with Claude
-  ir revoke <name> | profile <name> [--name new] [--avatar image] [--device computer|laptop|phone|none]
+Admin (an agent calling these never sees a secret; a person on the web or the host confirms):
+  ir apps [logins [app]] | rename <app> <name> | rm <app>   apps, the host and ir_web | their logins | rename | remove (a login: app/login)
+  ir invite [name] [--claude] | profile <app> [--avatar image] [--device computer|laptop|phone|none]   a link for a new browser (--claude: the user's own) | avatar, device
   ir public [off] | update [--check] | join <address> | pair <address> --name n --into file   go public through Cloudflare (run in a terminal) | update Iridium | run agents for another Iridium | a Bot's TOKEN from it, by its panel's approval (--help on each)
 `
 

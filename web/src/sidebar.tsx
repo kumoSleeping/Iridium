@@ -13,7 +13,7 @@ import { Archive, ArchiveRestore, ArrowDown, ArrowUp, Bot, Check, ChevronRight, 
 import { ConfirmIcon, confirmName, confirmTitle } from "./confirmname";
 import { Fragment, lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode, type RefObject } from "react";
 import { api } from "./api/client";
-import type { Color, Confirm, Machine, Places, Session, Status, Terminal } from "./api/types.gen";
+import type { App, Color, Confirm, Machine, Places, Session, Status } from "./api/types.gen";
 import { colorVar, COLORS, useFolderColors } from "./colors";
 import { ahead, behind } from "./chats";
 import { t, useLang } from "./i18n";
@@ -23,7 +23,7 @@ import { allFolders, folderSessions, foldersHolding, foldRest, groupHolding, mac
 import { createAt, onOpenPlace, type Place } from "./places";
 import { LinkDot } from "./link";
 import { errText, toast } from "./toast";
-import { useMe, useTerminalList, useUpdate } from "./data";
+import { manages, useApps, useMe, useUpdate, useWhoList } from "./data";
 import { agentName, ago, Avatar, cn, fine, IconKey, IrMark, keep, kept, Lamp, lampOf, Logo, own, sessionStatusText, statusText, tilde, Tip, titleOf, untitled, useLongPress, useMenuAt, useMinute } from "./ui";
 import { PLACE_DRAG, SESSION_DRAG } from "./chat/refs";
 import { NoteMark, NotesAt, useNotes } from "./notekey";
@@ -537,7 +537,7 @@ const UpdateKeyPart = lazy(() => import("./updatekey").then((m) => ({ default: m
 function UpdateKey() {
   const u = useUpdate().data;
   const me = useMe().data;
-  if (!u?.available || !me || !(me.local || me.kind === "panel")) return null;
+  if (!u?.available || !manages(me)) return null;
   return (
     <Suspense>
       <UpdateKeyPart />
@@ -713,7 +713,7 @@ function WsRow({ flip, id, name, root, sessions, hung, machine, remote, folders,
   const machines = useMachines();
   const push = usePushMenus();
   const me = useMe().data;
-  const real = id !== 0 && !!me && (me.local || me.kind === "panel");
+  const real = id !== 0 && manages(me);
   const [at, setAt] = useMenuAt();
   const [renaming, setRenaming] = useState(false);
   // Its notes, where its menu was (notekey.tsx): those of its folder.
@@ -1063,7 +1063,7 @@ const SessionRow = memo(function SessionRow({ s, where, depth, flip, selected, o
  *  2026-11-08): each one's avatar as big as the agent's logo, a bot on its corner; three at most and
  *  +N for the rest. Panels are not marked. */
 function Here({ bots }: { bots: string[] }) {
-  const terms = useTerminalList();
+  const terms = useWhoList();
   const who = bots.map((id) => terms.find((x) => x.id === id) ?? { id, name: "", avatar: undefined });
   return (
     <Tip label={who.map((b) => b.name || "Bot").join("、")} side="bottom">
@@ -1140,7 +1140,7 @@ function FolderRow({ f, ws, depth, label, hung, open, onToggle, newHere, plus, l
   const me = useMe().data;
   // Dragged among the folders of its group (reorder.ts): the panels' and 本机's, as a group.
   const dim = useDragged("f", f.path);
-  const real = !!me && (me.local || me.kind === "panel");
+  const real = manages(me);
   const dragging = real && fine()
     ? {
         draggable: true,
@@ -1238,9 +1238,9 @@ function SessionMenu({ s, at, close, rename, detach }: { s: Session; at: { x: nu
 export function BotItems({ s, i }: { s: Session; i: number }) {
   // Claude's sessions only for a Bot that may use Claude (access.Agent).
   const claude = !s.agent || s.agent === "claude";
-  const bots = useTerminalList().filter((x) => x.bot && !s.bots?.includes(x.id) && (!claude || x.rules.claudeOwner));
+  const bots = (useApps().data?.apps ?? []).filter((x) => !x.host && !x.web && !s.bots?.includes(x.id) && (!claude || x.rules.claudeOwner));
   if (s.archived || !bots.length) return null;
-  const bring = (b: Terminal) =>
+  const bring = (b: App) =>
     void api.bringBot(s.id, b.id).then(
       () => toast(t("toast.botHere", { name: b.name || "Bot" })),
       (e) => toast(t("err.action"), { error: true, description: errText(e) }),
@@ -1248,9 +1248,9 @@ export function BotItems({ s, i }: { s: Session; i: number }) {
   return (
     <div style={{ "--i": i } as CSSProperties} className="mt-1.5 flex flex-col border-t border-edge pt-1.5">
       {bots.map((b) => (
-        <Menu.Item key={b.id} disabled={b.chatless} onClick={() => bring(b)} className="flex h-8 cursor-default items-center gap-2.5 rounded-md px-2.5 text-base outline-none select-none data-highlighted:bg-fill data-disabled:opacity-40 pointer-coarse:h-11">
+        <Menu.Item key={b.id} onClick={() => bring(b)} className="flex h-8 cursor-default items-center gap-2.5 rounded-md px-2.5 text-base outline-none select-none data-highlighted:bg-fill data-disabled:opacity-40 pointer-coarse:h-11">
           <Avatar src={b.avatar} name={b.name || "Bot"} size={15} badge={Bot} badgeSize={9} />
-          <span className="truncate">{t(b.chatless ? "menu.botChatless" : "menu.bringBot", { name: b.name || "Bot" })}</span>
+          <span className="truncate">{t("menu.bringBot", { name: b.name || "Bot" })}</span>
         </Menu.Item>
       ))}
     </div>

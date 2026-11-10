@@ -155,7 +155,7 @@ func (ir *Iridium) File(ctx context.Context, chat, ref string, limit int64) ([]b
 func (ir *Iridium) Me(ctx context.Context) (api.Me, error) {
 	var m api.Me
 	err := ir.call(ctx, "GET", "/api/me", nil, &m)
-	if err == nil && m.Terminal.Name == "" {
+	if err == nil && m.Name == "" {
 		err = errors.New("iridium: /api/me: no terminal")
 	}
 	return m, err
@@ -169,10 +169,10 @@ func SyncName(ctx context.Context, ir *Iridium, home string) string {
 		return c.Name
 	}
 	m, err := ir.Me(ctx)
-	if err != nil || m.Terminal.Name == c.Name {
+	if err != nil || m.Name == c.Name {
 		return c.Name
 	}
-	c.Name = m.Terminal.Name
+	c.Name = m.Name
 	_ = Write(home, ConfigFile, &c)
 	return c.Name
 }

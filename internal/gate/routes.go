@@ -158,7 +158,7 @@ type sessionReply struct {
 
 func (g *Gate) apiSession(w http.ResponseWriter, r *http.Request) {
 	if !g.public {
-		writeJSON(w, http.StatusOK, sessionReply{Authenticated: true, Name: LocalName, Local: true})
+		writeJSON(w, http.StatusOK, sessionReply{Authenticated: true, Name: HostName, Local: true})
 		return
 	}
 	a, ok, _ := g.identify(r, g.now())
@@ -218,7 +218,7 @@ func (g *Gate) apiJoinCheck(w http.ResponseWriter, r *http.Request, key string) 
 	if ok {
 		reply.Name = inv.Name
 		if req.Name != nil {
-			_, err := g.checkNameLocked(*req.Name, "", inv.ID)
+			_, err := g.checkNameLocked(*req.Name, KindPanel, "", inv.ID)
 			reply.NameError = nameCode(err)
 		}
 	}
@@ -250,7 +250,7 @@ func (g *Gate) apiJoinOptions(w http.ResponseWriter, r *http.Request, key string
 		if req.Name != nil {
 			raw = *req.Name
 		}
-		name, err = g.checkNameLocked(raw, "", inv.ID)
+		name, err = g.checkNameLocked(raw, KindPanel, "", inv.ID)
 	}
 	g.mu.Unlock()
 	if !ok {
@@ -311,7 +311,7 @@ func (g *Gate) apiJoinVerify(w http.ResponseWriter, r *http.Request, key string)
 		writeJSON(w, http.StatusForbidden, apiError{"invalid_invite"})
 		return
 	}
-	name, err := g.checkNameLocked(f.name, "", inv.ID)
+	name, err := g.checkNameLocked(f.name, KindPanel, "", inv.ID)
 	if err != nil {
 		g.mu.Unlock()
 		writeJSON(w, http.StatusConflict, joinReply{NameError: nameCode(err)})
@@ -329,7 +329,7 @@ func (g *Gate) apiJoinVerify(w http.ResponseWriter, r *http.Request, key string)
 	ep := Endpoint{
 		ID: g.newEndpointIDLocked(), Name: name, Kind: KindPanel, UserHandle: f.handle,
 		Passkeys:  []Passkey{{Credential: *cred, CreatedAt: now, LastUsedAt: now}},
-		CreatedAt: now, LastSeenAt: now,
+		CreatedAt: now, LastSeenAt: now, ApprovedAt: now,
 	}
 	token, s := g.newSessionLocked(ep.ID, now)
 	first := !g.hasPanelLocked()
@@ -343,9 +343,9 @@ func (g *Gate) apiJoinVerify(w http.ResponseWriter, r *http.Request, key string)
 	}
 	g.removeSetupFile()
 	g.lim.success(key)
-	g.log.Info("gate: panel joined", "endpoint", ep.ID, "name", ep.Name, "client", key, "setup", inv.Setup, "owner", inv.Owner, "first", first)
+	g.log.Info("gate: panel joined", "endpoint", ep.ID, "name", ep.Name, "client", key, "setup", inv.Setup, "perms", len(inv.Perms) > 0, "first", first)
 	if g.cfg.OnJoin != nil {
-		g.cfg.OnJoin(Joined{Endpoint: infoOf(ep), Owner: inv.Owner, First: first})
+		g.cfg.OnJoin(Joined{Endpoint: infoOf(ep), Perms: inv.Perms, First: first})
 	}
 	http.SetCookie(w, sessionCookie(token))
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "name": name})

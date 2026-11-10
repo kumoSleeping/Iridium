@@ -13,7 +13,7 @@ import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo,
 import { queryClient } from "./api/client";
 import { watchTurns } from "./chats";
 import { CreatePopover, WsPlus } from "./create";
-import { agentsQ, pushQ, useHome, useMe, useSettings, useTerminals, useUpdate, useWorkspaces } from "./data";
+import { agentsQ, pushQ, useApps, useHome, useMe, useSettings, useUpdate, useWorkspaces } from "./data";
 import { t, useLang } from "./i18n";
 import { applyTheme, initialTheme, keepTheme, MeKey, useTellLang, type ThemePref } from "./me";
 import { motion, pageTurn } from "./motion";
@@ -137,7 +137,7 @@ export function App() {
   useTellLang(); // hosted agents are told the user's language
   useHome(); // paths show ~ for it
   useMe();
-  useTerminals(); // a message's source shows its terminal's avatar
+  useApps(); // a message's source shows its app's or login's avatar
   const confirms = useConfirms();
   const { expanded, toggle } = useExpanded();
   // Each minute too: a subagent long quiet is let go.

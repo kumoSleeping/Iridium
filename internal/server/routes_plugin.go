@@ -66,7 +66,7 @@ func (s *Server) bringBot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	info, ok := s.gate().Endpoint(req.Bot)
-	if !ok || info.Kind != gate.KindChannel || info.ID == gate.LocalEndpointID {
+	if !ok || info.Kind != gate.KindChannel || info.ID == gate.HostID {
 		fail(w, http.StatusNotFound, "no bot "+req.Bot)
 		return
 	}
@@ -104,7 +104,7 @@ func (s *Server) botLetter(w http.ResponseWriter, r *http.Request) {
 	plugin := ""
 	if req.To != "" {
 		info, ok := s.gate().Find(req.To)
-		if !ok || info.Kind != gate.KindChannel || info.ID == gate.LocalEndpointID {
+		if !ok || info.Kind != gate.KindChannel || info.ID == gate.HostID {
 			fail(w, http.StatusNotFound, "no bot named "+req.To)
 			return
 		}

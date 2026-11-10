@@ -39,7 +39,7 @@ function useSave() {
     try {
       const next = await api.profile(p);
       qc.setQueryData(["me"], { ...me, name: next.name, avatar: next.avatar } satisfies Me);
-      void qc.invalidateQueries({ queryKey: ["terminals"] });
+      void qc.invalidateQueries({ queryKey: ["apps"] });
       return true;
     } catch (e) {
       toast(p.name ? t("me.rename") : t("me.avatar"), { error: true, description: nameError(e) });
@@ -51,7 +51,7 @@ function useSave() {
 /** Its avatar, name and today's tokens. onPicture: a picture chosen for the avatar, to be cropped. */
 export function Profile({ onPicture }: { onPicture: (url: string) => void }) {
   const me: Me = useMe().data ?? LOCAL_ME;
-  const name = me.local ? t("me.local") : me.name;
+  const name = me.host ? t("me.local") : me.name;
   const save = useSave();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(me.name);
@@ -73,7 +73,7 @@ export function Profile({ onPicture }: { onPicture: (url: string) => void }) {
           on, a key of its own: a press goes on to the next (the user, 2026-11-08). A grid, not
           inline: the face and its box one circle, no line's descent under it. */}
       <span className="relative grid shrink-0">
-        {me.local ? (
+        {me.host ? (
           <LocalMark size={44} />
         ) : (
           <Tip label={t("me.avatar")}>
@@ -105,10 +105,10 @@ export function Profile({ onPicture }: { onPicture: (url: string) => void }) {
       ) : (
         <span className="min-w-0 flex-1">
           <span className="block truncate text-base font-semibold">{name}</span>
-          <span className="block truncate text-xs text-ink-3 tabular-nums">{me.local ? t("me.localHint") : t("term.today", { n: tokens(me.usedToday) })}</span>
+          <span className="block truncate text-xs text-ink-3 tabular-nums">{me.host ? t("me.localHint") : t("term.today", { n: tokens(me.usedToday) })}</span>
         </span>
       )}
-      {!editing && !me.local && (
+      {!editing && !me.host && (
         <IconKey label={t("me.rename")} onClick={() => (setDraft(me.name), setEditing(true))} className="size-7">
           <PencilLine size={15} />
         </IconKey>
@@ -131,7 +131,7 @@ function DeviceKey() {
     try {
       const got = await api.device(d);
       qc.setQueryData(["me"], (m: Me | undefined) => m && { ...m, device: got.device });
-      void qc.invalidateQueries({ queryKey: ["terminals"] });
+      void qc.invalidateQueries({ queryKey: ["apps"] });
     } catch (e) {
       qc.setQueryData(["me"], (m: Me | undefined) => m && { ...m, device });
       toast(t("me.device"), { error: true, description: errText(e) });

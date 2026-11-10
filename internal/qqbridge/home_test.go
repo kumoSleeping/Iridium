@@ -83,7 +83,7 @@ func TestSyncName(t *testing.T) {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		json.NewEncoder(w).Encode(api.Me{Terminal: api.Terminal{Name: "新名字"}})
+		json.NewEncoder(w).Encode(api.Me{Name: "新名字"})
 	}))
 	defer srv.Close()
 	home := t.TempDir()

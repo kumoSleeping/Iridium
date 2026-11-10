@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kumoSleeping/iridium/internal/access"
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/config"
 	"github.com/kumoSleeping/iridium/internal/store"
@@ -137,14 +138,14 @@ func TestClaudeOnlyRule(t *testing.T) {
 
 	// A plugin made without --owner: no Claude.
 	var tok api.Token
-	l.want(200, "socket", "POST", "/api/terminals/tokens", api.NewInvite{Name: "bot"}, &tok)
-	bot, botID := tok.Token, tok.Terminal.ID
-	if !strings.HasPrefix(bot, "ir_") || tok.Terminal.Kind != api.TerminalChannel || tok.Terminal.Rules.ClaudeOwner != nil {
-		t.Fatalf("token: %+v", tok.Terminal)
+	tok = l.newApp("bot", false)
+	bot, botID := tok.Token, tok.App.ID
+	if !strings.HasPrefix(bot, "ir_") || tok.App.Rules.ClaudeOwner != nil {
+		t.Fatalf("token: %+v", tok.App)
 	}
 	var me api.Me
 	l.want(200, bot, "GET", "/api/me", nil, &me)
-	if me.ID != botID || me.Name != "bot" || me.Panel || me.Local {
+	if me.ID != botID || me.App != botID || me.Login != "" || me.Name != "bot" || me.Web || me.Host {
 		t.Fatalf("me: %+v", me)
 	}
 
@@ -171,21 +172,20 @@ func TestClaudeOnlyRule(t *testing.T) {
 	}
 
 	// A channel manages nothing; there is no table to change any more.
-	l.want(403, bot, "GET", "/api/terminals", nil, nil)
-	l.want(403, bot, "POST", "/api/terminals/tokens", api.NewInvite{Name: "other"}, nil)
-	if code := l.do("socket", "PUT", "/api/terminals/"+botID+"/rules", map[string]any{"rules": map[string]any{}}, nil); code != 404 && code != 405 {
+	l.want(403, bot, "GET", "/api/apps", nil, nil)
+	l.want(403, bot, "POST", "/api/invites", api.NewInvite{Name: "other"}, nil)
+	l.want(403, bot, "DELETE", "/api/apps/bot", nil, nil)
+	if code := l.do("socket", "PUT", "/api/apps/"+botID+"/rules", map[string]any{"rules": map[string]any{}}, nil); code != 404 && code != 405 {
 		t.Errorf("the rules route: %d", code)
 	}
-	// Claude is not given after: a new token --owner for it is refused, and it stays without.
-	l.want(409, "socket", "POST", "/api/terminals/tokens", api.NewInvite{Name: "bot", Owner: true}, nil)
 	l.want(403, bot, "POST", "/api/sessions/"+mine.ID+"/send", api.Send{Text: "hi"}, nil)
 
 	// One made --owner by a person at the machine: Claude, and nothing held back (no approvals
 	// forced, every command).
 	var own api.Token
-	l.want(200, "socket", "POST", "/api/terminals/tokens", api.NewInvite{Name: "mybot", Owner: true}, &own)
-	if own.Terminal.Rules.ClaudeOwner == nil || own.Terminal.Rules.ClaudeOwner.By != "local" {
-		t.Fatalf("owner token: %+v", own.Terminal)
+	own = l.newApp("mybot", true)
+	if own.App.Rules.ClaudeOwner == nil || own.App.Rules.ClaudeOwner.By != "local" {
+		t.Fatalf("owner token: %+v", own.App)
 	}
 	var its api.NewSessionReply
 	l.want(200, own.Token, "POST", "/api/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "hello"}, &its)
@@ -196,7 +196,7 @@ func TestClaudeOnlyRule(t *testing.T) {
 	}
 	var page api.MessagePage
 	l.want(200, own.Token, "GET", "/api/sessions/"+its.ID+"/messages", nil, &page)
-	if len(page.Blocks) < 1 || page.Blocks[0].From != "mybot" || page.Blocks[0].FromTerminal != own.Terminal.ID || page.Blocks[0].Text != "hello" {
+	if len(page.Blocks) < 1 || page.Blocks[0].From != "mybot" || page.Blocks[0].FromTerminal != own.App.ID || page.Blocks[0].Text != "hello" {
 		t.Fatalf("blocks: %+v", page.Blocks)
 	}
 	inLog, _ := os.ReadFile(filepath.Join(l.cfg.StatePath(), "hold", its.ID, "in.log"))
@@ -204,26 +204,28 @@ func TestClaudeOnlyRule(t *testing.T) {
 		t.Errorf("the agent did not see the tag: %s", inLog)
 	}
 	st := l.s.st
-	waitUsage(t, st, own.Terminal.ID)
-	// A new token keeps its Claude.
-	l.want(200, "socket", "POST", "/api/terminals/tokens", api.NewInvite{Name: "mybot"}, &own)
-	if own.Terminal.Rules.ClaudeOwner == nil {
-		t.Error("a new token took Claude away")
-	}
+	waitUsage(t, st, own.App.ID)
 	// The one without Claude sees the owner's plugin's session too.
 	l.want(200, bot, "GET", "/api/sessions/"+its.ID, nil, nil)
 
-	var ts api.Terminals
-	l.want(200, "agent", "GET", "/api/terminals", nil, &ts)
-	if len(ts.Terminals) != 3 || !ts.Terminals[0].Local || ts.Terminals[0].Rules.ClaudeOwner == nil {
-		t.Fatalf("terminals: %+v", ts)
+	var as api.Apps
+	l.want(200, "agent", "GET", "/api/apps", nil, &as)
+	// The host first; no ir_web without a public origin.
+	if len(as.Apps) != 3 || !as.Apps[0].Host || as.Apps[0].Name != "主机" || as.Apps[0].Rules.ClaudeOwner == nil || as.Apps[1].Web || as.Apps[2].Web {
+		t.Fatalf("apps: %+v", as)
 	}
 
-	// 本机 cannot be revoked; a revoked token stops working, its row gone.
-	l.want(409, "socket", "DELETE", "/api/terminals/local", nil, nil)
-	l.want(200, "socket", "DELETE", "/api/terminals/mybot", nil, nil)
+	// The host and ir_web cannot be removed; a removed app's TOKEN stops working, its row gone.
+	for _, ref := range []string{"local", "host", "主机", "本机", "ir_web"} {
+		l.want(409, "socket", "DELETE", "/api/apps/"+ref, nil, nil)
+	}
+	// A login as 应用/登录, escaped in the path (ir apps rm ir_web/名字).
+	if raw := ""; l.do("socket", "DELETE", "/api/apps/ir_web%2Fnobody", nil, &raw) != 404 || !strings.Contains(raw, "no such app") {
+		t.Errorf("ir_web/nobody: %s", raw)
+	}
+	l.want(200, "socket", "DELETE", "/api/apps/mybot", nil, nil)
 	l.want(401, own.Token, "GET", "/api/me", nil, nil)
-	if _, ok, _ := st.TerminalRules(own.Terminal.ID); ok {
+	if _, ok, _ := st.TerminalRules(own.App.ID); ok {
 		t.Error("the revoked terminal's row stayed")
 	}
 }
@@ -272,49 +274,53 @@ func firstState(t *testing.T, resp *http.Response) string {
 func TestDevice(t *testing.T) {
 	l := start(t)
 	var tok api.Token
-	l.want(200, "socket", "POST", "/api/terminals/tokens", api.NewInvite{Name: "bot"}, &tok)
-	bot, botID := tok.Token, tok.Terminal.ID
+	tok = l.newApp("bot", false)
+	bot, botID := tok.Token, tok.App.ID
 	var me api.Me
 	l.want(200, bot, "GET", "/api/me", nil, &me)
 	if me.Device != api.DeviceComputer {
 		t.Fatalf("default device: %q", me.Device)
 	}
-	var got api.Terminal
+	var got api.SetDevice
 	l.want(200, bot, "PUT", "/api/me/device", api.SetDevice{Device: api.DevicePhone}, &got)
-	if got.ID != botID || got.Device != api.DevicePhone {
+	if l.who("socket", botID).Device != api.DevicePhone || got.Device != api.DevicePhone {
 		t.Fatalf("own device: %+v", got)
 	}
 	l.want(400, bot, "PUT", "/api/me/device", api.SetDevice{Device: "tablet"}, nil)
-	l.want(403, bot, "PUT", "/api/terminals/local/device", api.SetDevice{Device: api.DevicePhone}, nil)
-	l.want(404, "socket", "PUT", "/api/terminals/nobody/device", api.SetDevice{Device: api.DevicePhone}, nil)
-	l.want(200, "socket", "PUT", "/api/terminals/bot/device", api.SetDevice{Device: api.DeviceComputer}, &got)
+	l.want(403, bot, "PUT", "/api/apps/local/device", api.SetDevice{Device: api.DevicePhone}, nil)
+	l.want(404, "socket", "PUT", "/api/apps/nobody/device", api.SetDevice{Device: api.DevicePhone}, nil)
+	l.want(200, "socket", "PUT", "/api/apps/bot/device", api.SetDevice{Device: api.DeviceComputer}, &got)
 	l.want(200, "web", "PUT", "/api/me/device", api.SetDevice{Device: api.DevicePhone}, &got)
-	if got.ID != "local" || got.Device != api.DevicePhone || !got.Local {
-		t.Fatalf("本机's device: %+v", got)
+	l.want(200, "web", "GET", "/api/me", nil, &me)
+	if me.ID != "local" || !me.Host || me.Device != api.DevicePhone {
+		t.Fatalf("the host's device: %+v", me)
 	}
-	var ts api.Terminals
-	l.want(200, "socket", "GET", "/api/terminals", nil, &ts)
-	if len(ts.Terminals) != 2 || ts.Terminals[0].Device != api.DevicePhone || ts.Terminals[1].Device != api.DeviceComputer {
-		t.Fatalf("listed: %+v", ts.Terminals)
+	var as api.Apps
+	l.want(200, "socket", "GET", "/api/apps", nil, &as)
+	if len(as.Apps) != 2 || as.Apps[0].Device != api.DevicePhone || as.Apps[1].Device != api.DeviceComputer {
+		t.Fatalf("listed: %+v", as.Apps)
 	}
 }
 
-// An agent's ir asks for a token: no secret comes back to it, a panel sees the ask, allows it
-// and alone gets the token; the agent learns only that it was allowed.
+// An agent's ir asks for an invite: no secret comes back to it, a person sees the ask, allows it
+// and alone gets the link; the agent learns only that it was allowed.
 func TestConfirmations(t *testing.T) {
 	l := start(t)
+	// Invites need a public origin.
+	l.want(409, "agent", "POST", "/api/invites", api.NewInvite{Name: "pad"}, nil)
+	l.want(200, "socket", "PUT", "/api/public", api.SetPublic{Origin: "https://ir.example.com"}, nil)
 	var p api.Pending
-	l.want(202, "agent", "POST", "/api/terminals/tokens", api.NewInvite{Name: "qqbot"}, &p)
-	if p.Confirm.ID == "" || p.Confirm.Kind != "token" || p.Confirm.Asker != "本机" || p.Confirm.Session != "caller-session" {
+	l.want(202, "agent", "POST", "/api/invites", api.NewInvite{Name: "pad"}, &p)
+	if p.Confirm.ID == "" || p.Confirm.Kind != "invite" || p.Confirm.Asker != "主机" || p.Confirm.Session != "caller-session" {
 		t.Fatalf("pending: %+v", p)
 	}
 	var cs api.Confirms
 	l.want(403, "agent", "GET", "/api/confirms", nil, nil)
-	l.want(200, "web", "GET", "/api/confirms", nil, &cs)
+	l.want(200, "socket", "GET", "/api/confirms", nil, &cs)
 	if len(cs.Pending) != 1 || cs.Pending[0].ID != p.Confirm.ID {
 		t.Fatalf("confirms: %+v", cs)
 	}
-	// The agent waits; meanwhile the page allows.
+	// The agent waits; meanwhile a person allows.
 	got := make(chan string, 1)
 	go func() {
 		var raw string
@@ -324,29 +330,28 @@ func TestConfirmations(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	l.want(403, "agent", "POST", "/api/confirms/"+p.Confirm.ID, api.ConfirmAnswer{Allow: true}, nil)
 	var ans api.ConfirmReply
-	l.want(200, "web", "POST", "/api/confirms/"+p.Confirm.ID, api.ConfirmAnswer{Allow: true}, &ans)
-	if ans.State != "allowed" || ans.Token == nil || !strings.HasPrefix(ans.Token.Token, "ir_") {
+	l.want(200, "socket", "POST", "/api/confirms/"+p.Confirm.ID, api.ConfirmAnswer{Allow: true}, &ans)
+	if ans.State != "allowed" || ans.Invite == nil || !strings.Contains(ans.Invite.URL, "/_ir/join#") {
 		t.Fatalf("answer: %+v", ans)
 	}
 	raw := <-got
-	if !strings.Contains(raw, `"state":"allowed"`) || strings.Contains(raw, ans.Token.Token) || strings.Contains(raw, "ir_") {
+	if !strings.Contains(raw, `"state":"allowed"`) || strings.Contains(raw, "/_ir/join") {
 		t.Fatalf("the agent's view: %s", raw)
 	}
-	l.want(404, "web", "POST", "/api/confirms/"+p.Confirm.ID, api.ConfirmAnswer{Allow: true}, nil) // once
-	l.want(200, ans.Token.Token, "GET", "/api/me", nil, nil)
+	l.want(404, "socket", "POST", "/api/confirms/"+p.Confirm.ID, api.ConfirmAnswer{Allow: true}, nil) // once
 	// Denied.
-	l.want(202, "agent", "POST", "/api/terminals/tokens", api.NewInvite{Name: "other"}, &p)
+	l.want(202, "agent", "POST", "/api/invites", api.NewInvite{Name: "other"}, &p)
 	ans = api.ConfirmReply{}
-	l.want(200, "web", "POST", "/api/confirms/"+p.Confirm.ID, api.ConfirmAnswer{Allow: false}, &ans)
+	l.want(200, "socket", "POST", "/api/confirms/"+p.Confirm.ID, api.ConfirmAnswer{Allow: false}, &ans)
 	var st api.ConfirmState
 	l.want(200, "agent", "GET", "/api/confirms/"+p.Confirm.ID, nil, &st)
-	if st.State != "denied" || ans.Token != nil {
+	if st.State != "denied" || ans.Invite != nil {
 		t.Fatalf("denied: %+v %+v", st, ans)
 	}
-	// Invites need a public origin.
-	l.want(409, "agent", "POST", "/api/terminals/invites", api.NewInvite{Name: "pad"}, nil)
-	// A bad name is refused at once.
-	l.want(409, "agent", "POST", "/api/terminals/tokens", api.NewInvite{Name: "a/b"}, nil)
+	// A bad name is refused at once: a slash, a single letter, a reserved one.
+	for _, name := range []string{"a/b", "x", "ir_web", "host"} {
+		l.want(409, "agent", "POST", "/api/invites", api.NewInvite{Name: name}, nil)
+	}
 }
 
 // Setting public.origin puts the passkey gate in front at once: the loopback page is no longer
@@ -395,7 +400,7 @@ func TestPublicOrigin(t *testing.T) {
 	}
 	// The socket is still 本机; a person's ir gets the link, an agent's a confirmation.
 	var inv api.Invite
-	l.want(200, "socket", "POST", "/api/terminals/invites", api.NewInvite{Name: "pad"}, &inv)
+	l.want(200, "socket", "POST", "/api/invites", api.NewInvite{Name: "pad"}, &inv)
 	if !strings.HasPrefix(inv.URL, "https://ir.example.com/_ir/join#") || inv.Name != "pad" || inv.ExpiresAt == 0 {
 		t.Fatalf("invite: %+v", inv)
 	}
@@ -403,7 +408,7 @@ func TestPublicOrigin(t *testing.T) {
 		t.Fatalf("invite's QR: %.40q", inv.QR)
 	}
 	var p api.Pending
-	l.want(202, "agent", "POST", "/api/terminals/invites", api.NewInvite{}, &p)
+	l.want(202, "agent", "POST", "/api/invites", api.NewInvite{}, &p)
 	var raw string
 	l.do("socket", "POST", "/api/confirms/"+p.Confirm.ID, api.ConfirmAnswer{Allow: true}, &raw)
 	if !strings.Contains(raw, "https://ir.example.com/_ir/join#") || !strings.Contains(raw, `"qr":"data:image/svg+xml;base64,`) {
@@ -413,11 +418,30 @@ func TestPublicOrigin(t *testing.T) {
 	if !strings.Contains(raw, `"allowed"`) || strings.Contains(raw, "/_ir/join") || strings.Contains(raw, "qr") {
 		t.Fatalf("the agent's view: %s", raw)
 	}
-	var ts api.Terminals
-	l.want(200, "socket", "GET", "/api/terminals", nil, &ts)
-	if len(ts.Invites) != 3 { // setup, pad, the agent's
-		t.Errorf("invites: %+v", ts.Invites)
+	var as api.Apps
+	l.want(200, "socket", "GET", "/api/apps", nil, &as)
+	if len(as.Invites) != 3 { // setup, pad, the agent's
+		t.Errorf("invites: %+v", as.Invites)
+	}
+	if len(as.Apps) != 2 || !as.Apps[1].Web { // the host, ir_web
+		t.Errorf("apps: %+v", as.Apps)
 	}
 	l.want(200, "socket", "PUT", "/api/public", api.SetPublic{Origin: ""}, nil)
 	l.want(200, "web", "GET", "/api/sessions", nil, nil)
+}
+
+// newApp makes app name as a pairing allowed would, with Claude or not (said by a person at the
+// host): its TOKEN. Pairing is the one way in (docs/next/decisions.md 9); tests take this short cut.
+func (l *live) newApp(name string, claude bool) api.Token {
+	l.t.Helper()
+	info, tok, err := l.s.gate().CreateNewToken(name)
+	if err != nil {
+		l.t.Fatal(err)
+	}
+	if claude {
+		if err := l.s.giveClaude(info, access.ByLocal); err != nil {
+			l.t.Fatal(err)
+		}
+	}
+	return api.Token{App: l.s.appOf(info), Token: tok}
 }

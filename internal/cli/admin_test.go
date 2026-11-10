@@ -8,6 +8,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -96,30 +97,39 @@ func agentRun(e adminEnv, args ...string) chan [3]string {
 	return got
 }
 
+// pairApp makes app name by pairing, the one way an app comes in (POST /api/pair), allowed by the
+// person: its TOKEN. claude: allowed as the owner's own.
+func pairApp(t *testing.T, person adminEnv, name string, claude bool) string {
+	t.Helper()
+	var p api.ExecPairing
+	if _, err := person.call("POST", "/api/pair", api.ExecPair{Name: name}, &p); err != nil {
+		t.Fatal(err)
+	}
+	var cs api.Confirms
+	person.call("GET", "/api/confirms", nil, &cs)
+	for _, c := range cs.Pending {
+		if c.Code == p.Code {
+			if _, err := person.call("POST", "/api/confirms/"+c.ID, api.ConfirmAnswer{Allow: true, Owner: claude}, nil); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	var st api.ExecPairState
+	if _, err := person.call("GET", "/api/pair/"+p.Request, nil, &st); err != nil || st.Status != "allowed" {
+		t.Fatalf("pairing %s: %+v %v", name, st, err)
+	}
+	return st.Token
+}
+
 func TestAdmin(t *testing.T) {
 	person, agent := daemonFor(t)
 
-	// A person gets a token, an agent the outcome only.
-	code, out, errs := runAs(person, "token", "bot")
-	if code != 0 || !strings.Contains(out, "ir_") {
-		t.Fatalf("token: %d %q %q", code, out, errs)
+	// ir token is gone: an app comes by pairing.
+	if _, ok := adminCommands["token"]; ok {
+		t.Fatal("ir token is still there")
 	}
-	got := agentRun(agent, "token", "bot2")
-	panel := approve(t, person, true)
-	r := <-got
-	if r[0] != "0" || !strings.Contains(r[1], "同意了") || strings.Contains(r[1]+r[2], "ir_") {
-		t.Fatalf("agent token: %q", r)
-	}
-	var reply api.ConfirmReply
-	json.Unmarshal([]byte(panel), &reply)
-	if reply.Token == nil || strings.Contains(r[1], reply.Token.Token) {
-		t.Fatalf("the panel's token: %s", panel)
-	}
-	got = agentRun(agent, "token", "bot3")
-	approve(t, person, false)
-	if r := <-got; r[0] != "1" || !strings.Contains(r[1], "拒绝") {
-		t.Fatalf("denied: %q", r)
-	}
+	pairApp(t, person, "bot", false)
+	pairApp(t, person, "bot2", false)
 
 	// Invites need a public origin; then a person gets the link and an agent does not.
 	if code, _, errs := runAs(agent, "invite", "pad"); code != 1 || !strings.Contains(errs, "public origin") {
@@ -131,57 +141,84 @@ func TestAdmin(t *testing.T) {
 	if code, out, _ := runAs(person, "invite", "pad"); code != 0 || !strings.Contains(out, "https://ir.example.com/_ir/join#") {
 		t.Fatalf("invite: %d %q", code, out)
 	}
-	got = agentRun(agent, "invite", "tab")
-	panel = approve(t, person, true)
-	r = <-got
-	if r[0] != "0" || strings.Contains(r[1]+r[2], "/_ir/join") || !strings.Contains(panel, "/_ir/join#") {
+	got := agentRun(agent, "invite", "tab")
+	panel := approve(t, person, true)
+	r := <-got
+	if r[0] != "0" || !strings.Contains(r[1], "已同意") || strings.Contains(r[1]+r[2], "/_ir/join") || !strings.Contains(panel, "/_ir/join#") {
 		t.Fatalf("agent invite: %q / %s", r, panel)
+	}
+	got = agentRun(agent, "invite", "tab2")
+	approve(t, person, false)
+	if r := <-got; r[0] != "1" || !strings.Contains(r[1], "已拒绝") {
+		t.Fatalf("denied: %q", r)
 	}
 	if code, _, errs := runAs(agent, "invite", "a/b"); code != 1 || errs == "" {
 		t.Fatalf("a bad name: %d %q", code, errs)
 	}
 
-	// The list: no secrets in it.
-	code, out, _ = runAs(agent, "access")
-	if code != 0 || !strings.Contains(out, "bot2") || !strings.Contains(out, "本机") || !strings.Contains(out, "未用的邀请") ||
-		strings.Contains(out, "ir_") || strings.Contains(out, "#") {
-		t.Fatalf("access: %d\n%s", code, out)
+	// The list: the host, ir_web, the apps; the logins and invites apart. No secrets in it.
+	code, out, _ := runAs(agent, "apps")
+	if code != 0 || !strings.Contains(out, "bot2") || !strings.Contains(out, "主机") || !strings.Contains(out, "网页") ||
+		regexp.MustCompile(`ir_[A-Za-z0-9_-]{43}`).MatchString(out) || strings.Contains(out, "#") {
+		t.Fatalf("apps: %d\n%s", code, out)
+	}
+	code, out, _ = runAs(agent, "apps", "logins")
+	if code != 0 || !strings.Contains(out, "未用的邀请") || !strings.Contains(out, "pad") || strings.Contains(out, "#") {
+		t.Fatalf("apps logins: %d\n%s", code, out)
+	}
+	if code, _, errs := runAs(agent, "apps", "logins", "nobody"); code != 1 || !strings.Contains(errs, "nobody") {
+		t.Fatalf("logins of no app: %d %q", code, errs)
 	}
 
-	// Name and avatar.
+	// Rename and avatar.
 	img := filepath.Join(t.TempDir(), "a.png")
 	f, _ := os.Create(img)
 	png.Encode(f, image.NewRGBA(image.Rect(0, 0, 40, 30)))
 	f.Close()
-	if code, out, errs := runAs(agent, "profile", "bot", "--name", "robot", "--avatar", img); code != 0 || !strings.Contains(out, "robot（有头像）") {
+	if code, out, errs := runAs(agent, "apps", "rename", "bot", "robot"); code != 0 || !strings.Contains(out, "robot") {
+		t.Fatalf("rename: %d %q %q", code, out, errs)
+	}
+	for name, why := range map[string]string{"bot2": "taken", "x": "letter", "主机": "reserved", "a/b": "invalid"} {
+		if code, _, errs := runAs(agent, "apps", "rename", "robot", name); code != 1 || !strings.Contains(errs, why) {
+			t.Fatalf("rename to %s: %d %q", name, code, errs)
+		}
+	}
+	if code, out, errs := runAs(agent, "profile", "robot", "--avatar", img); code != 0 || !strings.Contains(out, "robot（有头像）") {
 		t.Fatalf("profile: %d %q %q", code, out, errs)
 	}
-	if code, _, errs := runAs(agent, "profile", "robot", "--name=bot2"); code != 1 || !strings.Contains(errs, "taken") {
-		t.Fatalf("a taken name: %d %q", code, errs)
+	if code, _, _ := runAs(agent, "profile", "robot", "--name", "x"); code != 2 {
+		t.Fatal("profile --name: rename is ir apps rename")
 	}
 	if code, _, _ := runAs(agent, "profile", "robot"); code != 2 {
 		t.Fatal("profile with nothing to change")
 	}
-	// The device: alone, or with a name.
+	// The device.
 	if code, out, errs := runAs(agent, "profile", "robot", "--device", "phone"); code != 0 || !strings.Contains(out, "robot（手机）") {
 		t.Fatalf("device: %d %q %q", code, out, errs)
 	}
 	if code, _, _ := runAs(agent, "profile", "robot", "--device", "tablet"); code != 2 {
 		t.Fatal("a device that is none")
 	}
-	if code, out, errs := runAs(agent, "profile", "本机", "--device=computer"); code != 0 || !strings.Contains(out, "（电脑）") {
-		t.Fatalf("本机's device: %d %q %q", code, out, errs)
+	if code, out, errs := runAs(agent, "profile", "主机", "--device=computer"); code != 0 || !strings.Contains(out, "（电脑）") {
+		t.Fatalf("the host's device: %d %q %q", code, out, errs)
 	}
 
-	// Revoke.
-	if code, _, errs := runAs(agent, "revoke", "robot"); code != 0 {
-		t.Fatalf("revoke: %q", errs)
+	// Remove: an app; the host and ir_web are built in.
+	if code, _, errs := runAs(agent, "apps", "rm", "robot"); code != 0 {
+		t.Fatalf("rm: %q", errs)
 	}
-	if _, out, _ := runAs(agent, "access"); strings.Contains(out, "robot") {
-		t.Fatalf("revoked, still listed:\n%s", out)
+	if _, out, _ := runAs(agent, "apps"); strings.Contains(out, "robot") {
+		t.Fatalf("removed, still listed:\n%s", out)
 	}
-	if code, _, _ := runAs(agent, "revoke", "nobody"); code != 1 {
-		t.Fatal("revoked nobody")
+	for _, ref := range []string{"nobody", "主机", "ir_web"} {
+		if code, _, _ := runAs(agent, "apps", "rm", ref); code != 1 {
+			t.Fatalf("removed %s", ref)
+		}
+	}
+	for _, args := range [][]string{{"apps", "rm"}, {"apps", "rename", "a"}, {"apps", "x"}, {"apps", "ls", "y"}} {
+		if code, _, _ := runAs(agent, args...); code != 2 {
+			t.Errorf("%v: want usage", args)
+		}
 	}
 
 	// ir public is a person's, at a terminal.
@@ -221,7 +258,7 @@ func TestDetect(t *testing.T) {
 		t.Fatalf("detect: %+v %v", e, err)
 	}
 	// Not running: a plain error, nothing else.
-	if code, _, errs := runAs(e, "access"); code != 1 || !strings.Contains(errs, "没在运行") {
+	if code, _, errs := runAs(e, "apps"); code != 1 || !strings.Contains(errs, "没在运行") {
 		t.Fatalf("no daemon: %d %q", code, errs)
 	}
 }

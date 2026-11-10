@@ -1,7 +1,7 @@
 // Two readings of what a chat shows, pure for tests: who a message of the user's is from (plan
 // "消息来源"), and the files a reply names (plan "网页": `![](路径)`, `[名](路径)` and absolute paths
 // in inline code).
-import type { Agent, Device, Session, Terminal } from "../api/types.gen";
+import type { Agent, Device, Session } from "../api/types.gen";
 import { titleOf } from "../ui";
 
 /** A user block's source as the page draws it (QQ-like: a face, a name, a badge on the face):
@@ -13,20 +13,20 @@ export type Source =
   | { kind: "letter"; name: string; avatar?: string; channel: boolean; agent?: Agent; session?: string; workflow?: boolean; where?: string }
   | { kind: "iridium" };
 
-/** What sourceOf needs to know of a terminal. */
-export type Who = Pick<Terminal, "id" | "name" | "avatar" | "device" | "local">;
+/** What sourceOf needs to know of who sent a message: an app, a login of ir_web (web), or the host. */
+export type Who = { id: string; name: string; avatar?: string; device?: Device; host?: boolean; web?: boolean };
 
-const LOCAL_TERMINAL: Who = { id: "local", name: "本机", local: true };
+const HOST: Who = { id: "local", name: "主机", host: true };
 
 /** Your words from terminal x. */
-export const yours = (x: Who): Extract<Source, { kind: "you" }> => ({ kind: "you", name: x.name, avatar: x.avatar, device: x.device ?? "computer", ...(x.local ? { local: true } : {}) });
+export const yours = (x: Who): Extract<Source, { kind: "you" }> => ({ kind: "you", name: x.name, avatar: x.avatar, device: x.device ?? "computer", ...(x.host ? { local: true } : {}) });
 
 /** Who wrote a message: from, the tag Iridium wrote it with, and terminal, the sending terminal's ID
  *  (Block.from, fromTerminal). me: this panel ("local" with no gate). An agent's ir from another
  *  session is tagged "ir:<session>"; a block with no tag was typed in the agent's own terminal, on
  *  the machine (本机) — except in a subagent, where it is its parent's prompt (of: the session shown,
  *  whose workspace a sender's name leaves out). */
-export function sourceOf(from: string | undefined, terminal: string | undefined, me: Who, terminals: Terminal[], sessions: Session[], workspaces: { id: number; name: string }[] = [], of?: Pick<Session, "subagent" | "parent" | "workflow" | "workspace">): Source {
+export function sourceOf(from: string | undefined, terminal: string | undefined, me: Who, terminals: Who[], sessions: Session[], workspaces: { id: number; name: string }[] = [], of?: Pick<Session, "subagent" | "parent" | "workflow" | "workspace">): Source {
   const here = of ? (of.workspace ?? 0) : undefined; // 0: 未归类 (the field left out)
   if (from === "Iridium") return { kind: "iridium" };
   // A subagent's prompt is written by the session that started it (an Agent tool call, a workflow).
@@ -43,14 +43,14 @@ export function sourceOf(from: string | undefined, terminal: string | undefined,
     const s = sessions.find((s) => s.id === id || s.id.startsWith(id));
     return s ? { kind: "letter", name: senderName(s, workspaces, here), channel: false, agent: s.agent, session: s.id, where: s.cwd } : { kind: "letter", name: id.slice(0, 8), channel: false };
   }
-  const local = terminals.find((x) => x.local) ?? (me.local ? me : LOCAL_TERMINAL);
+  const local = terminals.find((x) => x.host) ?? (me.host ? me : HOST);
   if (!from) return yours(local);
   if ((terminal ?? "") === me.id) return yours(me);
   const e = terminals.find((x) => x.id === terminal) ?? terminals.find((x) => x.name.toLowerCase() === from.toLowerCase());
   if (e?.id === me.id) return yours(me);
-  // Another panel, or 本机 (this machine: its page with no gate, a person's ir): your words too.
-  if (e?.kind === "panel" || e?.local) return yours(e);
-  if (!e && (terminal === "local" || from === "本机")) return yours(local);
+  // Another login of ir_web, or the host (its page with no gate, a person's ir): your words too.
+  if (e?.web || e?.host) return yours(e);
+  if (!e && (terminal === "local" || from === "主机" || from === "本机")) return yours(local);
   // A plugin writes "[name·sender]": the plugin's avatar, the whole tag as the name.
   return { kind: "letter", name: from, avatar: e?.avatar, channel: true };
 }

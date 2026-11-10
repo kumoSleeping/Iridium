@@ -38,8 +38,6 @@ type Config struct {
 	QuotaHidden []string `json:"quotaHidden,omitempty"`
 	// EnterInTurn is what the page's Enter does while a turn runs: "steer" ("" too) or "queue".
 	EnterInTurn string `json:"enterInTurn,omitempty"`
-	// PairClosed: no new pairing requests (Bots, executors) are taken.
-	PairClosed bool `json:"pairClosed,omitempty"`
 	// Lang is the user's language, as the web settings last set it: "zh", "en"; "" not yet known.
 	// Hosted agents are told it (session.SystemPrompt).
 	Lang string `json:"lang,omitempty"`
@@ -83,7 +81,8 @@ type Update struct {
 
 // legacy are fields an older file may still have that are no longer read, as dotted paths:
 // update.manual (2026-11-08: release builds always download ahead, builds from source never);
-// pairClosed and chatDir go in 0.2 (docs/next). One is dropped before decoding only once Config
+// pairClosed (0.2: pairing opens for a while, docs/next/decisions.md) and chatDir (goes in 0.2's
+// S4). One is dropped before decoding only once Config
 // has no field by its name, so it is listed ahead of its removal; any other unknown field is
 // still an error.
 var legacy = []string{"pairClosed", "chatDir", "update.manual"}

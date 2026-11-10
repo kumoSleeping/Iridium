@@ -646,6 +646,358 @@ export interface DraftTool {
 }
 
 //////////
+// source: apps.go
+
+/**
+ * HostID is the host's storage ID; it is shown as 主机 (host).
+ */
+export const HostID = "local";
+/**
+ * WebApp is the built-in app ir_web's ID: there only with a public origin.
+ */
+export const WebApp = "ir_web";
+/**
+ * Rules is what an app or login may do: everything, all alike, but Claude (the user, 2026-11-08).
+ * Stored as before, the other fields of old tables are no longer read. S2 puts permissions in place.
+ */
+export interface Rules {
+  /**
+   * ClaudeOwner: it is the owner's own (Claude's terms), so it may use Claude. Set as it was
+   * made, by the server only, and never changed. Without it, it sees Claude's sessions but may
+   * not start, write to or answer one.
+   */
+  claudeOwner?: OwnerConfirm;
+}
+/**
+ * OwnerConfirm is how, and when (ms), an app or login was found the owner's own.
+ */
+export interface OwnerConfirm {
+  /**
+   * By: "local" (a person's ir at the host), "panel" (a person on a login of ir_web that has
+   * Claude, or one that confirmed an agent's ask) or "first" (the first login of ir_web).
+   */
+  by: string;
+  at: number /* int64 */;
+}
+/**
+ * App is an app as listed, or the host (Host) or ir_web (Web) beside them. No secrets.
+ */
+export interface App {
+  id: string;
+  name: string;
+  type?: string; // what it is shown as (computer…); display only
+  avatar?: string; // URL for <img src>
+  /**
+   * Host: the host, listed with the apps but not managed. Web: ir_web, the built-in app.
+   */
+  host?: boolean;
+  web?: boolean;
+  logins?: number /* int */; // ir_web: its logins
+  online?: number /* int */; // live connections
+  createdAt?: number /* int64 */;
+  lastSeenAt?: number /* int64 */;
+  rules: Rules;
+  usedToday: number /* int64 */; // tokens of the turns it started today
+  /**
+   * Device: what it runs on, as the badge on its messages' avatar shows; the server always sets it.
+   */
+  device?: Device;
+  /**
+   * Follows: the logins of ir_web (IDs) it follows: what a session asks while no chat points at
+   * it goes to the apps that follow the login that began its turn, and to no other. Until S4.
+   */
+  follows?: string[];
+}
+/**
+ * Login is a login of an app as listed: for now ir_web's, a browser with a passkey. No secrets.
+ */
+export interface Login {
+  app: string;
+  id: string;
+  name: string;
+  avatar?: string;
+  passkeys?: number /* int */;
+  sessions?: number /* int */; // browsers logged in
+  online?: number /* int */;
+  createdAt?: number /* int64 */;
+  lastSeenAt?: number /* int64 */;
+  approvedAt?: number /* int64 */; // 0: waits to be approved
+  rules: Rules;
+  usedToday: number /* int64 */;
+  device?: Device;
+}
+/**
+ * SetFollows is PUT /api/apps/{id}/follows: the logins of ir_web the app follows from now on.
+ */
+export interface SetFollows {
+  panels: string[];
+}
+/**
+ * Device is what an app or login runs on, set in its settings (PUT /api/me/device, ir apps
+ * device): a computer, the default, a laptop, a phone, or none shown (no badge).
+ */
+export const DeviceComputer = "computer";
+export const DeviceLaptop = "laptop";
+export const DevicePhone = "phone";
+export const DeviceNone = "none";
+export type Device = typeof DeviceComputer | typeof DeviceLaptop | typeof DevicePhone | typeof DeviceNone;
+/**
+ * SetDevice is PUT /api/me/device and PUT /api/apps/{id}/device.
+ */
+export interface SetDevice {
+  device: Device;
+}
+/**
+ * PendingInvite is a slot for a login of ir_web not taken yet.
+ */
+export interface PendingInvite {
+  id: string;
+  name?: string;
+  setup?: boolean; // the first-run link in the state directory
+  claude?: boolean; // the login gets Claude
+  createdAt: number /* int64 */;
+  expiresAt?: number /* int64 */;
+}
+/**
+ * Apps is GET /api/apps (ir apps): the host first, ir_web (with a public origin), the apps; the
+ * logins of ir_web; the invites not taken.
+ */
+export interface Apps {
+  apps: App[];
+  logins: Login[];
+  invites: PendingInvite[];
+}
+/**
+ * Me is GET /api/me: who calls. App: the app (HostID for the host, WebApp for a browser); Login:
+ * the login of it, for ir_web the browser's. ID is the one its usage and rules are kept by.
+ */
+export interface Me {
+  id: string;
+  name: string;
+  app: string;
+  login?: string;
+  avatar?: string;
+  host?: boolean;
+  web?: boolean; // a login of ir_web
+  rules: Rules;
+  usedToday: number /* int64 */;
+  device?: Device;
+  public: boolean; // a public origin is set: passkeys are on
+}
+/**
+ * NewInvite asks for a slot for a new login of ir_web (ir invite [name] [--claude]). Claude: the
+ * login gets Claude, the owner's own; only a person at the host or on a login of ir_web that has
+ * Claude may say so. An agent's goes to a confirmation that only such a login (or the host) allows.
+ */
+export interface NewInvite {
+  name?: string;
+  claude?: boolean;
+}
+/**
+ * Invite is a new invite of ir_web. URL holds the secret: only a login of ir_web (or a person's
+ * ir at the host) sees it.
+ */
+export interface Invite {
+  id: string;
+  name?: string;
+  url: string;
+  expiresAt: number /* int64 */;
+  /**
+   * QR is URL as a QR code, an SVG data URL for <img src>.
+   */
+  qr?: string;
+}
+/**
+ * Token is an app's new TOKEN, as a pairing allowed gives it to the app alone.
+ */
+export interface Token {
+  app: App;
+  token?: string;
+}
+/**
+ * Confirm is what an agent's ir asked for that only a person may give (an invite link, a
+ * credential's value, the use of credentials), or an app asking to pair: it waits in the carried
+ * state "confirms" until a login of ir_web (or the host) answers it. No secrets.
+ */
+export interface Confirm {
+  id: string;
+  kind: string; // invite | secret-set | secret-use | exec-pair | bot-pair
+  /**
+   * Name: the invite's name; secret-set: the secret's.
+   */
+  name?: string;
+  owner?: boolean; // it gets Claude; only one that has Claude allows it
+  asker: string; // who asked (the app or login, or 主机)
+  session?: string; // the session whose agent asked, if known
+  createdAt: number /* int64 */;
+  expiresAt: number /* int64 */;
+  /**
+   * secret-set: the note it was asked with (else the stored one's), and whether one by that
+   * name is stored (it is replaced).
+   */
+  note?: string;
+  replace?: boolean;
+  /**
+   * secret-use: the secrets, the command's opening (as written: {{NAME}}), and whether one of
+   * them is confirmed every time (no "this session").
+   */
+  secrets?: string[];
+  command?: string;
+  always?: boolean;
+  /**
+   * exec-pair: the code both sides show, and the machine that asks to join as an executor
+   * (docs/exec.md "连接"); Name is the Bot it becomes. bot-pair: the same, a Bot that asks
+   * (POST /api/pair), Machine saying its program. Replace there: a Bot by Name is there already,
+   * which the answer may hand over (ConfirmAnswer.Replace).
+   */
+  code?: string;
+  machine?: ExecPair;
+}
+/**
+ * Confirms is the carried state "confirms": the pending ones, oldest first. Panels only.
+ */
+export interface Confirms {
+  pending: Confirm[];
+}
+/**
+ * ConfirmAnswer is a person's answer to a Confirm.
+ */
+export interface ConfirmAnswer {
+  allow: boolean;
+  /**
+   * Value: secret-set's value, typed on the panel; stored, never given back.
+   */
+  value?: string;
+  /**
+   * ForSession: secret-use allowed for the rest of the session (till it stops).
+   */
+  forSession?: boolean;
+  /**
+   * Owner: exec-pair allowed as the owner's own machine: it runs Claude there; bot-pair: the Bot
+   * has Claude. Only a panel that has Claude says so.
+   */
+  owner?: boolean;
+  /**
+   * Replace: a pairing allowed as the Bot by its name that is there already (Confirm.Replace):
+   * the same terminal, its usage and Claude as they were, a new TOKEN, the old one void.
+   */
+  replace?: boolean;
+}
+/**
+ * ExecPair is what an executor or a Bot says of itself asking to pair (POST /api/exec/pair,
+ * POST /api/pair; no login). A Bot says its name and program only. NoShell and AgentShell are what
+ * it means to say in its hello (Machine's), so the card tells whether command lines would run there.
+ */
+export interface ExecPair {
+  name: string;
+  os?: string; // windows | darwin | linux
+  arch?: string;
+  program?: string;
+  agents?: ExecAgent[];
+  noShell?: boolean;
+  agentShell?: boolean;
+}
+/**
+ * Machine is another machine's executor (docs/exec.md): a Bot, as it last said of itself; the
+ * carried state "machines" lists them, GET /api/machines too. Agents: those Iridium can run there.
+ */
+export interface Machine {
+  id: string; // its terminal
+  name: string;
+  avatar?: string;
+  os: string; // windows | darwin | linux
+  arch?: string;
+  home: string;
+  sep: string;
+  agents: ExecAgent[];
+  online: boolean;
+  seenAt: number /* int64 */; // when it last connected (ms)
+  /**
+   * NoShell: it starts only its agents, so command lines cannot run there (docs/exec.md).
+   */
+  noShell?: boolean;
+  /**
+   * Latency: the connection's last round trip (ms), by its heartbeat; 0 not known.
+   */
+  latency?: number /* int64 */;
+  /**
+   * AgentShell: agents here may run command lines there (ir sh).
+   */
+  agentShell?: boolean;
+}
+/**
+ * ExecAgent is an agent an executor has.
+ */
+export interface ExecAgent {
+  agent: string;
+  version?: string;
+}
+/**
+ * DshWorkspace is a folder a new dsh session at a machine may open in (GET
+ * /api/machines/{id}/dsh/workspaces): one of dsh's workspaces there, as DSH Desktop's sidebar
+ * has them, else a folder its sessions were in. Path is '/'-separated, as GET /api/folders gives.
+ * Sessions: how many of its sessions Iridium lists (not archived, not kept from it), subagents aside.
+ */
+export interface DshWorkspace {
+  title: string;
+  path: string;
+  updatedAt?: number /* int64 */; // ms
+  sessions: number /* int */;
+}
+/**
+ * ExecPairing answers a pairing request: the code to show, and the request to ask after.
+ */
+export interface ExecPairing {
+  code: string;
+  request: string;
+}
+/**
+ * ExecPairState is how a pairing request stands (GET /api/exec/pair/{request}): pending, allowed
+ * (with the TOKEN, given once), denied or expired.
+ */
+export interface ExecPairState {
+  status: string;
+  token?: string;
+}
+/**
+ * ConfirmState is how a Confirm went, as the asker sees it: never a secret.
+ */
+export interface ConfirmState {
+  id: string;
+  kind: string;
+  state: string; // pending | allowed | denied | expired | failed
+  name?: string;
+  owner?: boolean; // it was asked with --owner
+  expiresAt?: number /* int64 */; // allowed invite: until when the link works
+  error?: string;
+}
+/**
+ * ConfirmReply answers the one that allowed a Confirm: the secret is for it alone.
+ */
+export interface ConfirmReply extends ConfirmState {
+  invite?: Invite;
+}
+/**
+ * Pending is the reply to an agent's ir invite: a person must allow it.
+ */
+export interface Pending {
+  confirm: Confirm;
+}
+/**
+ * SetPublic sets public.origin ("" turns the public way in off). The gate restarts with it.
+ */
+export interface SetPublic {
+  origin: string;
+}
+/**
+ * PublicState is GET /api/public.
+ */
+export interface PublicState {
+  origin?: string;
+  passkeys: boolean; // some login of ir_web has a passkey
+}
+
+//////////
 // source: chat.go
 
 /**
@@ -1526,10 +1878,6 @@ export interface Settings {
    * hosted agents are told it from their next start.
    */
   lang: string;
-  /**
-   * PairClosed: new pairing requests (POST /api/pair, /api/exec/pair) are turned away.
-   */
-  pairClosed: boolean;
 }
 /**
  * SettingsPatch changes what it gives and nothing else. A mode "" goes back to the agent's own.
@@ -1543,7 +1891,6 @@ export interface SettingsPatch {
   push?: boolean;
   enterInTurn?: string;
   lang?: string;
-  pairClosed?: boolean;
 }
 
 //////////
@@ -1574,346 +1921,6 @@ export interface ShellOutput {
   code?: number /* int */;
   signal?: string;
   err?: string; // once done: what could not run it, if anything
-}
-
-//////////
-// source: terminals.go
-
-/**
- * TerminalKind: panel (a web panel, passkey) or channel (a plugin or peer, token; also 本机).
- */
-export type TerminalKind = string;
-export const TerminalPanel: TerminalKind = "panel";
-export const TerminalChannel: TerminalKind = "channel";
-/**
- * LocalTerminal is the built-in terminal's ID: the local ir, and the web page while no public
- * origin is set.
- */
-export const LocalTerminal = "local";
-/**
- * Rules is what a terminal may do: everything, every terminal alike, but Claude (the user,
- * 2026-11-08). Stored as before, the other fields of old tables are no longer read.
- */
-export interface Rules {
-  /**
-   * ClaudeOwner: the terminal is the owner's own (Claude's terms), so it may use Claude. Set as
-   * the terminal was made, by the server only, and never changed. Without it a terminal sees
-   * Claude's sessions but may not start, write to or answer one.
-   */
-  claudeOwner?: OwnerConfirm;
-}
-/**
- * OwnerConfirm is how, and when (ms), a terminal was found the owner's own.
- */
-export interface OwnerConfirm {
-  /**
-   * By: "local" (a person's ir on the machine: ir invite --owner, ir token --owner), "panel" (a person on a panel that has Claude, or one that
-   * confirmed an agent's ask) or "first" (the first panel registered).
-   */
-  by: string;
-  at: number /* int64 */;
-}
-/**
- * Terminal is an interactive terminal as listed. No secrets.
- */
-export interface Terminal {
-  id: string;
-  name: string;
-  kind: TerminalKind;
-  avatar?: string; // URL for <img src>
-  local?: boolean; // the built-in 本机
-  passkeys?: number /* int */;
-  logins?: number /* int */; // logged-in browsers
-  online?: number /* int */; // live connections
-  createdAt?: number /* int64 */;
-  lastSeenAt?: number /* int64 */;
-  rules: Rules;
-  usedToday: number /* int64 */; // tokens of the turns it started today
-  /**
-   * Device: what it runs on, as the badge on its messages' avatar shows; the server always sets it.
-   */
-  device?: Device;
-  /**
-   * Bot: a plugin with a chat in Iridium, or connected as one now; a session's menu offers to
-   * bring that chat to it.
-   */
-  bot?: boolean;
-  /**
-   * Chatless: a Bot no one has written to yet, so it has no chat to bring (the menu says so).
-   */
-  chatless?: boolean;
-  /**
-   * Follows: the panels (IDs) a channel follows: what a session asks while no chat points at it
-   * goes to the Bots that follow the panel that began its turn, and to no other.
-   */
-  follows?: string[];
-}
-/**
- * SetFollows is PUT /api/terminals/{id}/follows: the panels the Bot follows from now on.
- */
-export interface SetFollows {
-  panels: string[];
-}
-/**
- * Device is what a terminal runs on, set in its settings (PUT /api/me/device, ir profile
- * --device): a computer, the default, a laptop, a phone, or none shown (no badge).
- */
-export const DeviceComputer = "computer";
-export const DeviceLaptop = "laptop";
-export const DevicePhone = "phone";
-export const DeviceNone = "none";
-export type Device = typeof DeviceComputer | typeof DeviceLaptop | typeof DevicePhone | typeof DeviceNone;
-/**
- * SetDevice is PUT /api/me/device and PUT /api/terminals/{id}/device.
- */
-export interface SetDevice {
-  device: Device;
-}
-/**
- * PendingInvite is a panel invite not used yet.
- */
-export interface PendingInvite {
-  id: string;
-  name?: string;
-  setup?: boolean; // the first-run link in the state directory
-  owner?: boolean; // ir invite --owner: the panel gets Claude
-  createdAt: number /* int64 */;
-  expiresAt?: number /* int64 */;
-}
-/**
- * Terminals is GET /api/terminals (ir access).
- */
-export interface Terminals {
-  terminals: Terminal[];
-  invites: PendingInvite[];
-}
-/**
- * Me is GET /api/me: the calling terminal. Panel: it may approve, widen and see tokens.
- */
-export interface Me extends Terminal {
-  panel: boolean;
-  public: boolean; // a public origin is set: passkeys are on
-}
-/**
- * NewInvite asks for a panel invite (ir invite [name]) or a channel token (ir token <name>).
- * Owner (--owner): the terminal is the owner's own and gets Claude; only a person at the machine
- * or on a panel that has Claude may say so. An agent's goes to a confirmation that only such a
- * panel (or 本机) may allow.
- */
-export interface NewInvite {
-  name?: string;
-  owner?: boolean;
-  /**
-   * Into (tokens only, ir token --into): the daemon writes the token into this file (absolute,
-   * 0600) and gives it to no one: not the asker, nor the panel that allows it. A plugin's setup
-   * asks so, its agent never seeing the token.
-   */
-  into?: string;
-}
-/**
- * Invite is a new panel invite. URL holds the secret: only a panel (or ir at a terminal) sees it.
- */
-export interface Invite {
-  id: string;
-  name?: string;
-  url: string;
-  expiresAt: number /* int64 */;
-  /**
-   * QR is URL as a QR code, an SVG data URL for <img src>.
-   */
-  qr?: string;
-}
-/**
- * Token is a channel's new token: shown once. Asking again replaces it.
- */
-export interface Token {
-  terminal: Terminal;
-  token?: string;
-  into?: string; // the file it went into (NewInvite.Into); no Token then
-}
-/**
- * Confirm is what an agent's ir asked for that only a panel may give (an invite link, a token, a
- * credential's value, the use of credentials): it waits in the carried state "confirms" until a
- * panel answers it. No secrets.
- */
-export interface Confirm {
-  id: string;
-  kind: string; // invite | token | secret-set | secret-use | exec-pair | bot-pair
-  /**
-   * Name: the invite's or token's name; secret-set: the secret's.
-   */
-  name?: string;
-  owner?: boolean; // --owner: it gets Claude; only a panel that has Claude allows it
-  into?: string; // token: the file it goes into (NewInvite.Into)
-  asker: string; // the terminal that asked (本机)
-  session?: string; // the session whose agent asked, if known
-  createdAt: number /* int64 */;
-  expiresAt: number /* int64 */;
-  /**
-   * secret-set: the note it was asked with (else the stored one's), and whether one by that
-   * name is stored (it is replaced).
-   */
-  note?: string;
-  replace?: boolean;
-  /**
-   * secret-use: the secrets, the command's opening (as written: {{NAME}}), and whether one of
-   * them is confirmed every time (no "this session").
-   */
-  secrets?: string[];
-  command?: string;
-  always?: boolean;
-  /**
-   * exec-pair: the code both sides show, and the machine that asks to join as an executor
-   * (docs/exec.md "连接"); Name is the Bot it becomes. bot-pair: the same, a Bot that asks
-   * (POST /api/pair), Machine saying its program. Replace there: a Bot by Name is there already,
-   * which the answer may hand over (ConfirmAnswer.Replace).
-   */
-  code?: string;
-  machine?: ExecPair;
-}
-/**
- * Confirms is the carried state "confirms": the pending ones, oldest first. Panels only.
- */
-export interface Confirms {
-  pending: Confirm[];
-}
-/**
- * ConfirmAnswer is a panel's answer to a Confirm.
- */
-export interface ConfirmAnswer {
-  allow: boolean;
-  /**
-   * Value: secret-set's value, typed on the panel; stored, never given back.
-   */
-  value?: string;
-  /**
-   * ForSession: secret-use allowed for the rest of the session (till it stops).
-   */
-  forSession?: boolean;
-  /**
-   * Owner: exec-pair allowed as the owner's own machine: it runs Claude there; bot-pair: the Bot
-   * has Claude. Only a panel that has Claude says so.
-   */
-  owner?: boolean;
-  /**
-   * Replace: a pairing allowed as the Bot by its name that is there already (Confirm.Replace):
-   * the same terminal, its usage and Claude as they were, a new TOKEN, the old one void.
-   */
-  replace?: boolean;
-}
-/**
- * ExecPair is what an executor or a Bot says of itself asking to pair (POST /api/exec/pair,
- * POST /api/pair; no login). A Bot says its name and program only. NoShell and AgentShell are what
- * it means to say in its hello (Machine's), so the card tells whether command lines would run there.
- */
-export interface ExecPair {
-  name: string;
-  os?: string; // windows | darwin | linux
-  arch?: string;
-  program?: string;
-  agents?: ExecAgent[];
-  noShell?: boolean;
-  agentShell?: boolean;
-}
-/**
- * Machine is another machine's executor (docs/exec.md): a Bot, as it last said of itself; the
- * carried state "machines" lists them, GET /api/machines too. Agents: those Iridium can run there.
- */
-export interface Machine {
-  id: string; // its terminal
-  name: string;
-  avatar?: string;
-  os: string; // windows | darwin | linux
-  arch?: string;
-  home: string;
-  sep: string;
-  agents: ExecAgent[];
-  online: boolean;
-  seenAt: number /* int64 */; // when it last connected (ms)
-  /**
-   * NoShell: it starts only its agents, so command lines cannot run there (docs/exec.md).
-   */
-  noShell?: boolean;
-  /**
-   * Latency: the connection's last round trip (ms), by its heartbeat; 0 not known.
-   */
-  latency?: number /* int64 */;
-  /**
-   * AgentShell: agents here may run command lines there (ir sh).
-   */
-  agentShell?: boolean;
-}
-/**
- * ExecAgent is an agent an executor has.
- */
-export interface ExecAgent {
-  agent: string;
-  version?: string;
-}
-/**
- * DshWorkspace is a folder a new dsh session at a machine may open in (GET
- * /api/machines/{id}/dsh/workspaces): one of dsh's workspaces there, as DSH Desktop's sidebar
- * has them, else a folder its sessions were in. Path is '/'-separated, as GET /api/folders gives.
- * Sessions: how many of its sessions Iridium lists (not archived, not kept from it), subagents aside.
- */
-export interface DshWorkspace {
-  title: string;
-  path: string;
-  updatedAt?: number /* int64 */; // ms
-  sessions: number /* int */;
-}
-/**
- * ExecPairing answers a pairing request: the code to show, and the request to ask after.
- */
-export interface ExecPairing {
-  code: string;
-  request: string;
-}
-/**
- * ExecPairState is how a pairing request stands (GET /api/exec/pair/{request}): pending, allowed
- * (with the TOKEN, given once), denied or expired.
- */
-export interface ExecPairState {
-  status: string;
-  token?: string;
-}
-/**
- * ConfirmState is how a Confirm went, as the asker sees it: never a secret.
- */
-export interface ConfirmState {
-  id: string;
-  kind: string;
-  state: string; // pending | allowed | denied | expired | failed
-  name?: string;
-  owner?: boolean; // it was asked with --owner
-  expiresAt?: number /* int64 */; // allowed invite: until when the link works
-  error?: string;
-}
-/**
- * ConfirmReply answers the panel that allowed a Confirm: the secret is for it alone.
- */
-export interface ConfirmReply extends ConfirmState {
-  invite?: Invite;
-  token?: Token;
-}
-/**
- * Pending is the reply to an agent's ir invite or ir token: a panel must allow it.
- */
-export interface Pending {
-  confirm: Confirm;
-}
-/**
- * SetPublic sets public.origin ("" turns the public way in off). The gate restarts with it.
- */
-export interface SetPublic {
-  origin: string;
-}
-/**
- * PublicState is GET /api/public.
- */
-export interface PublicState {
-  origin?: string;
-  passkeys: boolean; // some panel has a passkey
 }
 
 //////////
@@ -1973,9 +1980,10 @@ export interface Usage {
    */
   rows: UsageRow[];
   /**
-   * Terminals: the rows' terminals still there, by ID, to name them (a removed one is not).
+   * Terminals: who the rows' are (apps, logins, the host) still there, by ID, to name them (a
+   * removed one is not). Until S2 adds the login to usage, a row is by one ID.
    */
-  terminals: { [key: string]: UsageTerminal};
+  terminals: { [key: string]: UsageWho};
 }
 /**
  * UsageRow is one day's use by one terminal of one agent's model. Turns counts each turn once per
@@ -1998,11 +2006,11 @@ export interface UsageRow {
   costUsd?: number /* float64 */;
 }
 /**
- * UsageTerminal names a terminal in Usage.
+ * UsageWho names who began turns in Usage: an app, a login (of ir_web), or the host.
  */
-export interface UsageTerminal {
+export interface UsageWho {
   name: string;
-  kind: TerminalKind;
+  app: string; // the app's ID; WebApp for a login of ir_web; HostID for the host
   avatar?: string;
-  local?: boolean;
+  host?: boolean;
 }

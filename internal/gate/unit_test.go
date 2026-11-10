@@ -35,6 +35,18 @@ func TestNormalizeName(t *testing.T) {
 		"未知":         ErrNameReserved,
 		"LOCAL":      ErrNameReserved,
 		"Ｕｎｋｎｏｗｎ":    ErrNameReserved,
+		"host":       ErrNameReserved,
+		"HOST":       ErrNameReserved,
+		"主机":         ErrNameReserved,
+		"ir_web":     ErrNameReserved,
+		"IR_Web":     ErrNameReserved,
+		"c":          ErrNameLetter,
+		"Ｃ":          ErrNameLetter, // full width, narrowed first
+		" Z ":        ErrNameLetter,
+		"中":          "中",
+		"é":          "é", // a letter, but not ASCII: no drive letter
+		"7":          "7",
+		"ab":         "ab",
 	} {
 		got, err := NormalizeName(in)
 		if want, ok := want.(error); ok {

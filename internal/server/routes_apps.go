@@ -18,31 +18,28 @@ import (
 	"github.com/kumoSleeping/iridium/internal/secrets"
 )
 
-// terminalRoutes are the interactive terminals' (docs/api.md "交互终端"): who is calling, the
-// list (ir access), invites and tokens, names and avatars, permissions, revoking, the
-// confirmations agents' ir asks panels for, and public.origin.
-func (s *Server) terminalRoutes(mux *http.ServeMux) {
+// appRoutes are the apps' and their logins' (docs/api.md "应用"): who is calling, the list (ir
+// apps), invites of ir_web, names and avatars, devices, removing, the confirmations agents' ir asks
+// a person for, and public.origin. An app comes by pairing only (routes_pair.go).
+func (s *Server) appRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/me", s.me)
 	mux.HandleFunc("PUT /api/me/profile", func(w http.ResponseWriter, r *http.Request) { s.gate().ServeProfile(w, r, "") })
-	// Another terminal's: panels and 本机 only (the gate checks).
-	profile := func(w http.ResponseWriter, r *http.Request) { s.gate().ServeProfile(w, r, r.PathValue("id")) }
-	mux.HandleFunc("PUT /api/endpoints/{id}/profile", profile)
-	mux.HandleFunc("PUT /api/terminals/{id}/profile", profile)
-	// The device it runs on: its own, or (panels and 本机) another's.
+	// Another's: ir_web's logins and the host only (the gate checks).
+	mux.HandleFunc("PUT /api/apps/{id}/profile", func(w http.ResponseWriter, r *http.Request) { s.gate().ServeProfile(w, r, r.PathValue("id")) })
+	// The device it runs on: its own, or (ir_web's logins and the host) another's.
 	mux.HandleFunc("PUT /api/me/device", func(w http.ResponseWriter, r *http.Request) { s.setDevice(w, r, "") })
-	mux.HandleFunc("PUT /api/terminals/{id}/device", func(w http.ResponseWriter, r *http.Request) { s.setDevice(w, r, r.PathValue("id")) })
-	mux.HandleFunc("PUT /api/terminals/{id}/follows", s.panelOnly(s.setFollows))
-	mux.HandleFunc("GET /api/terminals", s.manage(s.terminals))
-	mux.HandleFunc("DELETE /api/terminals/{id}", s.manage(s.revoke))
-	mux.HandleFunc("POST /api/terminals/invites", s.manage(s.invite))
-	mux.HandleFunc("POST /api/terminals/tokens", s.manage(s.token))
+	mux.HandleFunc("PUT /api/apps/{id}/device", func(w http.ResponseWriter, r *http.Request) { s.setDevice(w, r, r.PathValue("id")) })
+	mux.HandleFunc("PUT /api/apps/{id}/follows", s.panelOnly(s.setFollows))
+	mux.HandleFunc("GET /api/apps", s.manage(s.apps))
+	mux.HandleFunc("DELETE /api/apps/{id}", s.manage(s.revoke))
+	mux.HandleFunc("POST /api/invites", s.manage(s.invite))
 	mux.HandleFunc("GET /api/confirms", s.panelOnly(func(w http.ResponseWriter, r *http.Request) { reply(w, http.StatusOK, s.asks.pending()) }))
 	mux.HandleFunc("POST /api/confirms/{id}", s.panelOnly(s.answerConfirm))
 	// How one went, never a secret: for whoever manages, and any ir on the socket (an agent's in a
-	// session a channel opened waits for its ir run's too).
+	// session an app opened waits for its ir run's too).
 	mux.HandleFunc("GET /api/confirms/{id}", func(w http.ResponseWriter, r *http.Request) {
 		if c := callerOf(r); !c.CanManage() && !c.socket {
-			forbid(w, errors.New("only a web panel or 本机 manages terminals"))
+			forbid(w, errManageApps)
 			return
 		}
 		s.confirmState(w, r)
@@ -52,22 +49,26 @@ func (s *Server) terminalRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/public", s.panelOnly(s.setPublic))
 }
 
-// manage lets panels and 本机 (also an agent's ir) through; channels manage nothing.
+// errManageApps answers an app that would manage the others.
+var errManageApps = errors.New("only ir_web's logins and the host manage apps")
+
+// manage lets ir_web's logins and the host (also an agent's ir) through; apps manage nothing.
 func (s *Server) manage(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !callerOf(r).CanManage() {
-			forbid(w, errors.New("only a web panel or 本机 manages terminals"))
+			forbid(w, errManageApps)
 			return
 		}
 		h(w, r)
 	}
 }
 
-// panelOnly lets through what may approve, widen and see secrets: panels, and a person's ir.
+// panelOnly lets through what may approve, widen and see secrets: a person on a login of ir_web,
+// or at the host.
 func (s *Server) panelOnly(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !callerOf(r).panel() {
-			forbid(w, errors.New("only a web panel may do this"))
+			forbid(w, errors.New("only a person on ir_web or at the host may do this"))
 			return
 		}
 		h(w, r)
@@ -76,51 +77,55 @@ func (s *Server) panelOnly(h http.HandlerFunc) http.HandlerFunc {
 
 func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 	c := callerOf(r)
-	info, ok := s.gate().Endpoint(c.EndpointID)
+	info, ok := s.gate().Endpoint(c.ID())
 	if !ok {
-		fail(w, http.StatusNotFound, "no such terminal")
+		fail(w, http.StatusNotFound, "no such app or login")
 		return
 	}
-	t := s.terminalOf(info)
-	t.Local = c.Local
-	if c.Local {
-		t.Rules = access.Full()
-	}
-	reply(w, http.StatusOK, api.Me{Terminal: t, Panel: c.panel(), Public: s.gate().Public()})
+	reply(w, http.StatusOK, s.meOf(c, info))
 }
 
-func (s *Server) terminals(w http.ResponseWriter, r *http.Request) {
+// apps lists the host, ir_web (while there is a public origin, or a login of it), the apps, the
+// logins of ir_web and their invites.
+func (s *Server) apps(w http.ResponseWriter, r *http.Request) {
 	a := s.gate().Access()
-	out := api.Terminals{Terminals: []api.Terminal{}, Invites: []api.PendingInvite{}}
-	local, _ := s.gate().Endpoint(gate.LocalEndpointID)
-	t := s.terminalOf(local)
-	t.Rules = access.Full()
-	out.Terminals = append(out.Terminals, t)
-	var bots map[string]bool
-	if s.Chat != nil {
-		bots = s.Chat.Bots()
-	}
+	out := api.Apps{Apps: []api.App{}, Logins: []api.Login{}, Invites: []api.PendingInvite{}}
+	host, _ := s.gate().Endpoint(gate.HostID)
+	out.Apps = append(out.Apps, s.appOf(host))
 	follows, _ := s.st.Follows()
+	web := api.App{ID: gate.WebApp, Name: gate.WebApp, Web: true, Rules: access.Default(), Device: api.DeviceComputer}
+	var apps []api.App
 	for _, e := range a.Endpoints {
-		t := s.terminalOf(e)
-		chats, bot := bots[e.ID]
-		t.Bot = bot && e.Kind == gate.KindChannel
-		t.Chatless = t.Bot && !chats
-		if e.Kind == gate.KindChannel {
-			t.Follows = follows[e.ID]
+		if e.Kind == gate.KindPanel {
+			l := s.loginOf(e)
+			out.Logins = append(out.Logins, l)
+			web.Logins++
+			web.Online += l.Online
+			web.UsedToday += l.UsedToday
+			web.LastSeenAt = max(web.LastSeenAt, l.LastSeenAt)
+			continue
 		}
-		out.Terminals = append(out.Terminals, t)
+		app := s.appOf(e)
+		app.Follows = follows[e.ID]
+		apps = append(apps, app)
 	}
+	if s.gate().Public() || web.Logins > 0 {
+		out.Apps = append(out.Apps, web)
+	}
+	out.Apps = append(out.Apps, apps...)
 	for _, i := range a.Invites {
-		out.Invites = append(out.Invites, api.PendingInvite{ID: i.ID, Name: i.Name, Setup: i.Setup, Owner: i.Owner, CreatedAt: ms(i.CreatedAt), ExpiresAt: ms(i.ExpiresAt)})
+		out.Invites = append(out.Invites, api.PendingInvite{ID: i.ID, Name: i.Name, Setup: i.Setup, Claude: permsClaude(i.Perms),
+			CreatedAt: ms(i.CreatedAt), ExpiresAt: ms(i.ExpiresAt)})
 	}
 	reply(w, http.StatusOK, out)
 }
 
+// revoke removes an app, a login of ir_web ("ir_web/名字", or its ID) or an unused invite. The
+// host and ir_web are built in.
 func (s *Server) revoke(w http.ResponseWriter, r *http.Request) {
 	ref := r.PathValue("id")
-	if ref == gate.LocalEndpointID || ref == gate.LocalName {
-		fail(w, http.StatusConflict, "本机 is built in")
+	if gate.IsHostRef(ref) || ref == gate.WebApp {
+		fail(w, http.StatusConflict, ref+" is built in")
 		return
 	}
 	t, found := s.gate().Find(ref)
@@ -135,26 +140,26 @@ func (s *Server) revoke(w http.ResponseWriter, r *http.Request) {
 	s.gateDone(w, err)
 }
 
-// setFollows puts the panels Bot ref (ID or name) follows in place: channels only, panels only.
+// setFollows puts the logins of ir_web app ref (ID or name) follows in place. Until S4.
 func (s *Server) setFollows(w http.ResponseWriter, r *http.Request) {
 	var req api.SetFollows
 	if !readJSON(w, r, &req) {
 		return
 	}
 	bot, ok := s.gate().Find(r.PathValue("id"))
-	if !ok || bot.ID == gate.LocalEndpointID {
-		fail(w, http.StatusNotFound, "no such terminal")
+	if !ok || bot.Host() {
+		fail(w, http.StatusNotFound, "no such app")
 		return
 	}
 	if bot.Kind != gate.KindChannel {
-		fail(w, http.StatusBadRequest, "only a Bot follows panels")
+		fail(w, http.StatusBadRequest, "only an app follows logins")
 		return
 	}
 	panels := []string{}
 	for _, ref := range req.Panels {
 		p, ok := s.gate().Find(ref)
-		if !ok || p.ID == gate.LocalEndpointID || p.Kind != gate.KindPanel {
-			fail(w, http.StatusBadRequest, "not a web panel: "+ref)
+		if !ok || p.Host() || p.Kind != gate.KindPanel {
+			fail(w, http.StatusBadRequest, "not a login of ir_web: "+ref)
 			return
 		}
 		if !slices.Contains(panels, p.ID) {
@@ -169,7 +174,7 @@ func (s *Server) setFollows(w http.ResponseWriter, r *http.Request) {
 	reply(w, http.StatusOK, api.SetFollows{Panels: panels})
 }
 
-// setDevice sets the device terminal ref (ID or name; "" the caller) runs on.
+// setDevice sets the device app or login ref (ID or name; "" the caller) runs on.
 func (s *Server) setDevice(w http.ResponseWriter, r *http.Request, ref string) {
 	var req api.SetDevice
 	if !readJSON(w, r, &req) {
@@ -181,29 +186,25 @@ func (s *Server) setDevice(w http.ResponseWriter, r *http.Request, ref string) {
 	}
 	c := callerOf(r)
 	if ref == "" {
-		ref = c.EndpointID
+		ref = c.ID()
 	}
 	info, ok := s.gate().Find(ref)
 	if !ok {
-		fail(w, http.StatusNotFound, "no such terminal")
+		fail(w, http.StatusNotFound, "no such app or login")
 		return
 	}
-	if info.ID != c.EndpointID && !c.CanManage() {
-		forbid(w, errors.New("only a web panel or 本机 sets another terminal's device"))
+	if info.ID != c.ID() && !c.CanManage() {
+		forbid(w, errors.New("only ir_web's logins and the host set another's device"))
 		return
 	}
 	if err := s.st.SetDevice(info.ID, string(req.Device)); err != nil {
 		s.error(w, err)
 		return
 	}
-	t := s.terminalOf(info)
-	if info.ID == gate.LocalEndpointID {
-		t.Rules = access.Full()
-	}
-	reply(w, http.StatusOK, t)
+	reply(w, http.StatusOK, api.SetDevice{Device: s.deviceOf(info.ID)})
 }
 
-// publishList makes every stream's list again: what a terminal sees may have changed.
+// publishList makes every stream's list again: what an app sees may have changed.
 func (s *Server) publishList() {
 	if l, err := s.m.List(context.Background()); err == nil {
 		s.hub.Set("list", l)
@@ -216,23 +217,27 @@ func (s *Server) invite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c := callerOf(r)
-	if req.Owner && c.panel() && s.ownerSays(c) == "" {
+	if req.Claude && c.panel() && s.ownerSays(c) == "" {
 		forbid(w, errOwnerFlag)
 		return
 	}
 	if !s.gate().Public() {
-		fail(w, http.StatusConflict, "no public origin: a panel needs one for its passkey (ir public)")
+		fail(w, http.StatusConflict, "no public origin: ir_web needs one for its passkeys (ir public)")
 		return
 	}
-	if _, err := s.gate().CheckName(req.Name); req.Name != "" && err != nil {
+	if _, err := s.gate().CheckLoginName(req.Name); req.Name != "" && err != nil {
 		s.gateDone(w, err)
 		return
 	}
 	if !c.panel() {
-		s.ask(w, c, "invite", req.Name, req.Owner)
+		s.ask(w, c, "invite", req.Name, req.Claude)
 		return
 	}
-	inv, err := s.makeInvite(req.Name, req.Owner)
+	by := ""
+	if req.Claude {
+		by = s.ownerSays(c)
+	}
+	inv, err := s.makeInvite(req.Name, by)
 	if err != nil {
 		s.gateDone(w, err)
 		return
@@ -240,49 +245,8 @@ func (s *Server) invite(w http.ResponseWriter, r *http.Request) {
 	reply(w, http.StatusOK, inv)
 }
 
-func (s *Server) token(w http.ResponseWriter, r *http.Request) {
-	var req api.NewInvite
-	if !readJSON(w, r, &req) {
-		return
-	}
-	if _, err := gate.NormalizeName(req.Name); err != nil {
-		s.gateDone(w, err)
-		return
-	}
-	if req.Into != "" {
-		if _, err := s.files.CheckPath(req.Into); err != nil {
-			fail(w, http.StatusBadRequest, "--into: "+err.Error())
-			return
-		}
-	}
-	c := callerOf(r)
-	by := s.ownerSays(c)
-	if req.Owner && c.panel() && by == "" {
-		forbid(w, errOwnerFlag)
-		return
-	}
-	if !c.panel() {
-		cf := s.asks.addConfirm(api.Confirm{Kind: "token", Name: req.Name, Owner: req.Owner, Into: req.Into, Asker: c.Name, Session: c.session})
-		s.logf("server: %s asks a panel for a token (%s, owner %v, into %q), confirmation %s", c.Name, req.Name, req.Owner, req.Into, cf.ID)
-		reply(w, http.StatusAccepted, api.Pending{Confirm: cf})
-		return
-	}
-	if !req.Owner {
-		by = ""
-	}
-	tok, err := s.makeToken(req.Name, by)
-	if err == nil && req.Into != "" {
-		err = s.tokenInto(tok, req.Into)
-	}
-	if err != nil {
-		s.gateDone(w, err)
-		return
-	}
-	reply(w, http.StatusOK, tok)
-}
-
-// tokenInto writes tok's token into the file path (0600, in place of what is there) and takes
-// it out of tok: no one is shown it.
+// tokenInto writes tok's TOKEN into the file path (0600, in place of what is there) and takes
+// it out of tok: no one is shown it. For extensions.go only (S1b removes it).
 func (s *Server) tokenInto(tok *api.Token, path string) error {
 	p, err := s.files.CheckPath(path)
 	if err != nil {
@@ -306,28 +270,36 @@ func (s *Server) tokenInto(tok *api.Token, path string) error {
 	if err != nil {
 		return err
 	}
-	tok.Token, tok.Into = "", p
-	s.logf("server: the token of %s went into %s", tok.Terminal.Name, p)
+	tok.Token = ""
+	s.logf("server: the token of %s went into %s", tok.App.Name, p)
 	return nil
 }
 
-// ask turns an agent's request for a secret into a confirmation for the panels: 202 and no secret.
-// owner (--owner): only a panel that has Claude, or 本机, may allow it (answerConfirm).
+// ask turns an agent's request for a secret into a confirmation for a person: 202 and no secret.
+// owner (Claude): only a login of ir_web that has Claude, or the host, may allow it (answerConfirm).
 func (s *Server) ask(w http.ResponseWriter, c caller, kind, name string, owner bool) {
 	cf := s.asks.add(kind, name, owner, c.Name, c.session)
 	s.logf("server: %s asks a panel for a %s (%s, owner %v), confirmation %s", c.Name, kind, name, owner, cf.ID)
 	reply(w, http.StatusAccepted, api.Pending{Confirm: cf})
 }
 
-// errOwnerSecret answers allowing a secret-use from a panel that has no Claude itself.
-var errOwnerSecret = errors.New("only a person at the machine or on a panel that has Claude lets a session use the credentials")
+// errOwnerSecret answers allowing a secret-use from a login that has no Claude itself.
+var errOwnerSecret = errors.New("only a person at the host or on a login of ir_web that has Claude lets a session use the credentials")
 
-// errOwnerFlag answers --owner from a panel that has no Claude itself.
-var errOwnerFlag = errors.New("only a person at the machine or on a panel that has Claude says a terminal is the owner's own (--owner)")
+// errOwnerFlag answers giving Claude from a login that has no Claude itself.
+var errOwnerFlag = errors.New("only a person at the host or on a login of ir_web that has Claude gives Claude")
 
-// makeInvite makes a panel invite; owner: the panel that joins gets Claude (joined).
-func (s *Server) makeInvite(name string, owner bool) (*api.Invite, error) {
-	inv, err := s.gate().CreateInvite(name, owner)
+// makeInvite makes a slot for a login of ir_web; claudeBy (ownerSays's, "" none): the login that
+// takes it gets Claude, as that one said (joined).
+func (s *Server) makeInvite(name, claudeBy string) (*api.Invite, error) {
+	var perms []byte
+	if claudeBy != "" {
+		var err error
+		if perms, err = json.Marshal(access.WithClaude(access.Default(), claudeBy, time.Now().UnixMilli())); err != nil {
+			return nil, err
+		}
+	}
+	inv, err := s.gate().CreateInvite(name, perms)
 	if err != nil {
 		return nil, err
 	}
@@ -339,12 +311,12 @@ func (s *Server) makeInvite(name string, owner bool) (*api.Invite, error) {
 	return out, nil
 }
 
-// errClaudeFixed answers --owner for a channel there already is without Claude: Claude is set as a
-// terminal is made, never after (the user, 2026-11-08).
-var errClaudeFixed = errors.New("claude is set as a terminal is made: this channel has none, and a new token does not change that (revoke it and make it again with --owner)")
+// errClaudeFixed answers Claude for an app there already is without it: Claude is set as an app is
+// made, never after (the user, 2026-11-08).
+var errClaudeFixed = errors.New("claude is set as an app is made: this one has none, and a new TOKEN does not change that")
 
-// makeToken gives channel name its token; ownerBy (ir token --owner, as ownerSays found it): a new
-// channel gets Claude too. One there already keeps what it had, Claude or none.
+// makeToken gives app name its TOKEN; ownerBy (as ownerSays found it): a new app gets Claude too.
+// One there already keeps what it had, Claude or none. For extensions.go only (S1b removes it).
 func (s *Server) makeToken(name, ownerBy string) (*api.Token, error) {
 	old, found := s.gate().Find(name)
 	if found && ownerBy != "" && old.Kind == gate.KindChannel && !access.HasClaude(s.rulesOf(old.ID, false)) {
@@ -359,10 +331,16 @@ func (s *Server) makeToken(name, ownerBy string) (*api.Token, error) {
 			return nil, err
 		}
 	}
-	return &api.Token{Terminal: s.terminalOf(info), Token: tok}, nil
+	return &api.Token{App: s.appOf(info), Token: tok}, nil
 }
 
-// giveClaude turns Claude on for terminal info: it is the owner's own, as by says.
+// permsClaude: an invite's perms give Claude.
+func permsClaude(perms []byte) bool {
+	var r api.Rules
+	return len(perms) > 0 && json.Unmarshal(perms, &r) == nil && access.HasClaude(r)
+}
+
+// giveClaude turns Claude on for app or login info: it is the owner's own, as by says.
 func (s *Server) giveClaude(info gate.EndpointInfo, by string) error {
 	r := s.rulesOf(info.ID, false)
 	if access.HasClaude(r) {
@@ -379,20 +357,20 @@ func (s *Server) giveClaude(info gate.EndpointInfo, by string) error {
 	return nil
 }
 
-// joined is the gate's word that a panel registered: the first one, or one invited with
-// --owner, is the owner's own and gets Claude.
+// joined is the gate's word that a login of ir_web registered: it takes its invite's perms; the
+// first one is the owner's own and gets Claude.
 func (s *Server) joined(j gate.Joined) {
-	by := ""
-	switch {
-	case j.First:
-		by = access.ByFirst
-	case j.Owner:
-		by = access.ByLocal
-	default:
+	if j.First {
+		if err := s.giveClaude(j.Endpoint, access.ByFirst); err != nil {
+			s.logf("server: claude for the new login %s: %v", j.Endpoint.ID, err)
+		}
 		return
 	}
-	if err := s.giveClaude(j.Endpoint, by); err != nil {
-		s.logf("server: claude for the new panel %s: %v", j.Endpoint.ID, err)
+	if len(j.Perms) == 0 {
+		return
+	}
+	if err := s.st.SetTerminalRules(j.Endpoint.ID, j.Perms); err != nil {
+		s.logf("server: the perms of the new login %s: %v", j.Endpoint.ID, err)
 	}
 }
 
@@ -404,8 +382,8 @@ func (s *Server) answerConfirm(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	c := callerOf(r)
 	by := s.ownerSays(c)
-	// An --owner ask is allowed only by one that may say so; it stays waiting for one that may.
-	// Denying it is any panel's.
+	// An ask for Claude is allowed only by one that may say so; it stays waiting for one that may.
+	// Denying it is anyone's who answers.
 	cf, ok := s.asks.peek(id)
 	// An executor allowed as the owner's own machine runs Claude: only one that may say so.
 	if ok && (cf.Kind == "exec-pair" || cf.Kind == "bot-pair") && a.Allow && a.Owner && by == "" {
@@ -438,17 +416,9 @@ func (s *Server) answerConfirm(w http.ResponseWriter, r *http.Request) {
 		var err error
 		switch cf.Kind {
 		case "invite":
-			out.Invite, err = s.makeInvite(cf.Name, cf.Owner)
+			out.Invite, err = s.makeInvite(cf.Name, by)
 			if err == nil {
 				st.Name, st.ExpiresAt = out.Invite.Name, out.Invite.ExpiresAt
-			}
-		case "token":
-			out.Token, err = s.makeToken(cf.Name, by)
-			if err == nil && cf.Into != "" {
-				err = s.tokenInto(out.Token, cf.Into)
-			}
-			if err == nil {
-				st.Name = out.Token.Terminal.Name
 			}
 		case "secret-set":
 			err = s.storeAsked(cf, a.Value, c)
@@ -462,7 +432,7 @@ func (s *Server) answerConfirm(w http.ResponseWriter, r *http.Request) {
 			var tok *api.Token
 			if tok, err = s.makePairedBot(cf.Name, owner, a.Replace && cf.Replace); err == nil {
 				s.pairAllowed(id, tok.Token)
-				st.Name = tok.Terminal.Name
+				st.Name = tok.App.Name
 			}
 		}
 		st.State = "allowed"

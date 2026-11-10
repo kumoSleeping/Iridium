@@ -13,7 +13,7 @@ import { ChevronDown, ChevronLeft, ChevronRight, LoaderCircle, LogOut, MonitorDo
 import { useEffect, useState, type ReactNode } from "react";
 import { api, ApiError } from "./api/client";
 import type { PushEvents, PushState, Settings, SettingsPatch } from "./api/types.gen";
-import { pushQ, useMe, useSettings, useTerminals, useUpdate } from "./data";
+import { manages as managesApps, pushQ, useApps, useMe, useSettings, useUpdate } from "./data";
 import { t, useLang } from "./i18n";
 import { install, useInstall } from "./install";
 import { LangSwitch, ThemeSwitch, type ThemePref } from "./me";
@@ -39,8 +39,8 @@ export function SettingsPage({ theme, setTheme, initial = "main" }: { theme: The
   const s = q.data ?? undefined;
   const off = !s; // not come yet, or an older daemon
   const me = useMe().data;
-  const manages = !!me && (me.local || me.kind === "panel");
-  const terminals = useTerminals().data?.terminals ?? [];
+  const manages = managesApps(me);
+  const terminals = useApps().data?.apps ?? [];
   const confirms = useConfirms();
   const put = async (p: SettingsPatch) => {
     if (!s) return;
@@ -167,7 +167,7 @@ export function SettingsPage({ theme, setTheme, initial = "main" }: { theme: The
             />
           </Item>
           <UpdateItem manages={manages} />
-          {me && !me.local && <SignOut />}
+          {me && !me.host && <SignOut />}
         </div>
       </div>
     </div>

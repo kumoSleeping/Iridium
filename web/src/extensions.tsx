@@ -79,7 +79,7 @@ export function ExtensionPage({ id, onBack }: { id: string; onBack: () => void }
     setPhase(null);
     if (x.error) setErr(x.error);
     else {
-      void qc.invalidateQueries({ queryKey: ["terminals"] });
+      void qc.invalidateQueries({ queryKey: ["apps"] });
       onBack();
     }
   }, [phase, x, qc, onBack]);

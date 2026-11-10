@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/kumoSleeping/iridium/internal/api"
-	"github.com/kumoSleeping/iridium/internal/gate"
 	"github.com/kumoSleeping/iridium/internal/store"
 )
 
@@ -38,17 +37,17 @@ func (s *Server) usage(w http.ResponseWriter, r *http.Request) {
 	var only []string
 	switch ref := r.URL.Query().Get("terminal"); {
 	case ref == "me":
-		only = []string{c.EndpointID}
+		only = []string{c.ID()}
 	case ref == "" && !c.CanManage():
-		only = []string{c.EndpointID}
+		only = []string{c.ID()}
 	case ref != "":
 		info, ok := s.gate().Find(ref)
 		if !ok {
 			fail(w, http.StatusNotFound, "no such terminal")
 			return
 		}
-		if info.ID != c.EndpointID && !c.CanManage() {
-			forbid(w, errors.New("only a web panel or 本机 sees another terminal's usage"))
+		if info.ID != c.ID() && !c.CanManage() {
+			forbid(w, errors.New("only ir_web's logins and the host see another's usage"))
 			return
 		}
 		only = []string{info.ID}
@@ -80,7 +79,7 @@ func (s *Server) usage(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	out := api.Usage{Days: make([]string, n), Rows: make([]api.UsageRow, 0, len(got)), Terminals: map[string]api.UsageTerminal{}}
+	out := api.Usage{Days: make([]string, n), Rows: make([]api.UsageRow, 0, len(got)), Terminals: map[string]api.UsageWho{}}
 	for i := range n {
 		out.Days[i] = step(i).Format(format)
 	}
@@ -89,7 +88,7 @@ func (s *Server) usage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if info, ok := s.gate().Endpoint(id); ok {
-			out.Terminals[id] = api.UsageTerminal{Name: info.Name, Kind: api.TerminalKind(info.Kind), Avatar: info.Avatar, Local: id == gate.LocalEndpointID}
+			out.Terminals[id] = api.UsageWho{Name: info.Name, App: info.Identity().App, Avatar: info.Avatar, Host: info.Host()}
 		}
 	}
 	for _, u := range got {

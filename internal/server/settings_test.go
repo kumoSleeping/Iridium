@@ -105,7 +105,7 @@ func TestSettings(t *testing.T) {
 
 	// A channel sees none of it; an agent's ir reads but does not change it.
 	var tok api.Token
-	l.want(200, "socket", "POST", "/api/terminals/tokens", api.NewInvite{Name: "bot"}, &tok)
+	tok = l.newApp("bot", false)
 	l.want(403, tok.Token, "GET", "/api/settings", nil, nil)
 	l.want(403, tok.Token, "PUT", "/api/settings", api.SettingsPatch{CrashResume: &on}, nil)
 	l.want(200, "agent", "GET", "/api/settings", nil, nil)

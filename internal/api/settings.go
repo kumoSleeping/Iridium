@@ -21,8 +21,6 @@ type Settings struct {
 	// Lang: the user's language, as a web page's settings last set it ("zh", "en"; "" not yet):
 	// hosted agents are told it from their next start.
 	Lang string `json:"lang"`
-	// PairClosed: new pairing requests (POST /api/pair, /api/exec/pair) are turned away.
-	PairClosed bool `json:"pairClosed"`
 }
 
 // SettingsPatch changes what it gives and nothing else. A mode "" goes back to the agent's own.
@@ -35,5 +33,4 @@ type SettingsPatch struct {
 	Push        *bool             `json:"push,omitempty"`
 	EnterInTurn *string           `json:"enterInTurn,omitempty"`
 	Lang        *string           `json:"lang,omitempty"`
-	PairClosed  *bool             `json:"pairClosed,omitempty"`
 }

@@ -32,7 +32,7 @@ func TestSecrets(t *testing.T) {
 	// A plugin stores one and lists them, as every terminal (the user, 2026-11-08); deleting is a
 	// manager's.
 	var tok api.Token
-	l.want(200, "socket", "POST", "/api/terminals/tokens", api.NewInvite{Name: "bot"}, &tok)
+	tok = l.newApp("bot", false)
 	bot := tok.Token
 	l.want(200, bot, "PUT", "/api/secrets/BOT_KEY", api.SetSecret{Value: "abcdefgh"}, nil)
 	l.want(200, bot, "GET", "/api/secrets", nil, nil)
@@ -76,11 +76,11 @@ func TestSecrets(t *testing.T) {
 	// may allow. (The fake agent is Claude, which only the owner's own open: one opens it and is
 	// revoked after.)
 	var own api.Token
-	l.want(200, "socket", "POST", "/api/terminals/tokens", api.NewInvite{Name: "gone", Owner: true}, &own)
+	own = l.newApp("gone", true)
 	var its api.NewSessionReply
 	l.want(200, own.Token, "POST", "/api/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "token " + val + " here"}, &its)
 	l.waitReply("web", its.ID, "ok: token [secret:GITHUB_TOKEN] here") // masked already
-	l.want(200, "socket", "DELETE", "/api/terminals/gone", nil, nil)
+	l.want(200, "socket", "DELETE", "/api/apps/gone", nil, nil)
 	in := "agent-in:" + its.ID
 	one := api.UseSecrets{Names: []string{"GITHUB_TOKEN"}, Command: "gh auth"}
 	l.want(202, in, "POST", "/api/secrets/use", one, &p)

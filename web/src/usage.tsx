@@ -205,7 +205,7 @@ const weekdayName = (wd: number, narrow = false) => {
  *  ones said so. */
 function who(u: Usage | undefined, id: string): { name: string; mark: (size: number) => ReactNode } {
   const x = u?.terminals[id];
-  if (x) return { name: x.local ? t("me.local") : x.name, mark: (n) => (x.local ? <LocalMark size={n} /> : <Avatar src={x.avatar} name={x.name} size={n} channel={x.kind === "channel"} />) };
+  if (x) return { name: x.host ? t("me.local") : x.name, mark: (n) => (x.host ? <LocalMark size={n} /> : <Avatar src={x.avatar} name={x.name} size={n} channel={x.app !== "ir_web"} />) };
   const Icon = id ? UserX : CircleHelp;
   return {
     name: id ? t("usage.removed") : t("usage.unknown"),

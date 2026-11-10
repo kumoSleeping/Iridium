@@ -25,7 +25,7 @@ export function initialTheme(): ThemePref {
  *  comes near. */
 export function MeKey({ open, onOpen, dot, code }: { open: boolean; onOpen: () => void; dot?: boolean; code?: () => void }) {
   const me: Me = useMe().data ?? LOCAL_ME;
-  const name = me.local ? t("me.local") : me.name;
+  const name = me.host ? t("me.local") : me.name;
   return (
     <Tip label={dot ? `${t("nav.me")} · ${t("settings.updateReady")}` : t("nav.me")} align="start">
       <button
@@ -38,7 +38,7 @@ export function MeKey({ open, onOpen, dot, code }: { open: boolean; onOpen: () =
         className={cn("g-press flex h-11 w-full min-w-0 items-center gap-2.5 rounded-full pr-3 pl-1.5 hover:bg-fill pointer-coarse:h-12 pointer-coarse:pl-2", open && "bg-fill")}
       >
         <span className="relative shrink-0">
-          {me.local ? <LocalMark size={32} /> : <Avatar src={me.avatar} name={name} size={32} />}
+          {me.host ? <LocalMark size={32} /> : <Avatar src={me.avatar} name={name} size={32} />}
           {dot && <span className="g-pop absolute -top-0.5 -right-0.5 size-2.5 rounded-full bg-err shadow-[0_0_0_1.5px_var(--paper)]" aria-hidden />}
         </span>
         <span className="truncate text-md text-ink">{name}</span>

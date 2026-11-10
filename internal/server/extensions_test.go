@@ -22,45 +22,6 @@ import (
 	"github.com/kumoSleeping/iridium/internal/store"
 )
 
-// ir token --into: the daemon writes the token into the file, and shows it to no one; an agent's
-// waits for a panel as before, the file named on the confirmation.
-func TestTokenInto(t *testing.T) {
-	l := startWith(t, nil)
-	dir := t.TempDir()
-	into := filepath.Join(dir, "token")
-	var tok api.Token
-	l.want(200, "socket", "POST", "/api/terminals/tokens", api.NewInvite{Name: "qq", Owner: true, Into: into}, &tok)
-	if tok.Token != "" || tok.Into != into || !access.HasClaude(tok.Terminal.Rules) {
-		t.Fatalf("token into: %+v", tok)
-	}
-	b, err := os.ReadFile(into)
-	fi, _ := os.Stat(into)
-	if err != nil || !strings.HasPrefix(string(b), "ir_") || fi.Mode().Perm() != 0o600 {
-		t.Fatalf("the file: %q %v %v", b, fi.Mode(), err)
-	}
-	// The token works.
-	l.want(200, strings.TrimSpace(string(b)), "GET", "/api/me", nil, nil)
-
-	// An agent's: pending, the file named; allowed, written, not shown to the panel.
-	into2 := filepath.Join(dir, "token2")
-	var p api.Pending
-	l.want(202, "agent", "POST", "/api/terminals/tokens", api.NewInvite{Name: "qq2", Owner: true, Into: into2}, &p)
-	if p.Confirm.Into != into2 {
-		t.Fatalf("pending: %+v", p.Confirm)
-	}
-	var ans api.ConfirmReply
-	l.want(200, "socket", "POST", "/api/confirms/"+p.Confirm.ID, api.ConfirmAnswer{Allow: true}, &ans)
-	if ans.Token == nil || ans.Token.Token != "" || ans.Token.Into != into2 {
-		t.Fatalf("allowed: %+v", ans.Token)
-	}
-	if b, err := os.ReadFile(into2); err != nil || !strings.HasPrefix(string(b), "ir_") {
-		t.Fatalf("the agent's file: %q %v", b, err)
-	}
-	// Not into Iridium's own directories, nor somewhere relative.
-	l.want(400, "socket", "POST", "/api/terminals/tokens", api.NewInvite{Name: "qq3", Into: filepath.Join(l.cfg.StatePath(), "x")}, nil)
-	l.want(400, "socket", "POST", "/api/terminals/tokens", api.NewInvite{Name: "qq3", Into: "token"}, nil)
-}
-
 // A plugin's attachments: an upload into the chat's session (opened for it), then named in the
 // input, written into the message as the web's are.
 func TestChatAttachments(t *testing.T) {
@@ -73,7 +34,7 @@ func TestChatAttachments(t *testing.T) {
 		t.Cleanup(s.Chat.Close)
 	})
 	var tok api.Token
-	l.want(200, "socket", "POST", "/api/terminals/tokens", api.NewInvite{Name: "bot", Owner: true}, &tok)
+	tok = l.newApp("bot", true)
 	bot := tok.Token
 	var u api.Upload
 	// No session chosen: no upload, and a message gets the sessions to pick from, not sent.
@@ -229,12 +190,12 @@ func TestExtensions(t *testing.T) {
 		t.Fatalf("taken with a bot: %q", b)
 	}
 	terminals := func() map[string]bool {
-		var ts api.Terminals
-		l.want(200, "socket", "GET", "/api/terminals", nil, &ts)
+		var as api.Apps
+		l.want(200, "socket", "GET", "/api/apps", nil, &as)
 		out := map[string]bool{}
-		for _, tm := range ts.Terminals {
-			if tm.Kind == api.TerminalChannel {
-				out[tm.Name] = access.HasClaude(tm.Rules)
+		for _, a := range as.Apps {
+			if !a.Host && !a.Web {
+				out[a.Name] = access.HasClaude(a.Rules)
 			}
 		}
 		return out
@@ -255,19 +216,19 @@ func TestExtensions(t *testing.T) {
 	if _, err := l.s.gate().UpdateProfile("Bot1", gate.Profile{Name: &renamed}); err != nil {
 		t.Fatal(err)
 	}
-	l.want(200, "socket", "POST", "/api/terminals/tokens", api.NewInvite{Name: "Bot1"}, nil)
+	l.newApp("Bot1", false)
 	x = api.Extension{}
 	l.want(200, "socket", "GET", "/api/extensions", nil, &list)
 	if b := list[0].Bots; b[0].Name != "改名一" || b[1].Name != "Bot2" {
 		t.Fatalf("renamed: %+v", b)
 	}
-	l.want(200, "socket", "DELETE", "/api/terminals/Bot1", nil, nil)
+	l.want(200, "socket", "DELETE", "/api/apps/Bot1", nil, nil)
 	time.Sleep(300 * time.Millisecond)
 	if _, err := os.Stat(filepath.Join(home, "bots", "101")); err != nil {
 		t.Fatalf("another's terminal took the bot away: %v", err)
 	}
 	// Removed in the list as any Bot: that bot goes (its directory cleared), the other stays.
-	l.want(200, "socket", "DELETE", "/api/terminals/改名一", nil, nil)
+	l.want(200, "socket", "DELETE", "/api/apps/改名一", nil, nil)
 	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(50 * time.Millisecond) {
 		if _, err := os.Stat(filepath.Join(home, "bots", "101")); os.IsNotExist(err) {
 			break
@@ -285,8 +246,8 @@ func TestExtensions(t *testing.T) {
 	if x.Installed || x.Error != "" {
 		t.Fatalf("removed: %+v", x)
 	}
-	if ts := terminals(); len(ts) != 1 {
-		t.Fatalf("its terminals stayed: %+v", ts)
+	if ts := terminals(); len(ts) != 0 {
+		t.Fatalf("its apps stayed: %+v", ts)
 	}
 }
 
@@ -312,8 +273,8 @@ func TestBotLetter(t *testing.T) {
 		t.Cleanup(s.Chat.Close)
 	})
 	var tok api.Token
-	l.want(200, "socket", "POST", "/api/terminals/tokens", api.NewInvite{Name: "QQ", Owner: true}, &tok)
-	bot, botID := tok.Token, tok.Terminal.ID
+	tok = l.newApp("QQ", true)
+	bot, botID := tok.Token, tok.App.ID
 	// None has a chat yet: no bot to reach.
 	var b api.NewSessionReply
 	l.want(200, "web", "POST", "/api/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "first"}, &b)
@@ -365,11 +326,11 @@ func TestBotLetter(t *testing.T) {
 	json.Unmarshal([]byte(took()[0].Data), &e)
 	cr = api.CardReply{}
 	l.want(200, bot, "POST", "/api/answer", api.CardAnswer{Card: e.Card.ID, Option: b.ID}, &cr)
-	if cr.Reply == nil || !strings.HasPrefix(cr.Reply.Markdown, "现在：[CC]") || !strings.Contains(cr.Reply.Markdown, "# 近期消息预览\n\n[本机] first  \n[CC] ok: first") {
+	if cr.Reply == nil || !strings.HasPrefix(cr.Reply.Markdown, "现在：[CC]") || !strings.Contains(cr.Reply.Markdown, "# 近期消息预览\n\n[主机] first  \n[CC] ok: first") {
 		t.Fatalf("entered: %+v", cr.Reply)
 	}
 	var h api.ChatInputReply
-	if l.want(200, bot, "POST", "/api/chat/qq:1/input", api.ChatInput{Text: "/history 1"}, &h); h.Reply == nil || !strings.Contains(h.Reply.Markdown, "[本机] first") {
+	if l.want(200, bot, "POST", "/api/chat/qq:1/input", api.ChatInput{Text: "/history 1"}, &h); h.Reply == nil || !strings.Contains(h.Reply.Markdown, "[主机] first") {
 		t.Fatalf("history: %+v", h.Reply)
 	}
 	// Pointed at now: the session's reply.
@@ -447,17 +408,17 @@ func TestBotLetter(t *testing.T) {
 	l.want(200, bot, "POST", "/api/chat/qq:1/input", api.ChatInput{Text: "/use " + b.ID}, nil)
 
 	// What it follows: web panels only, set by a panel or a person's ir.
-	l.want(400, "socket", "PUT", "/api/terminals/"+botID+"/follows", api.SetFollows{Panels: []string{"local"}}, nil)
-	l.want(404, "socket", "PUT", "/api/terminals/local/follows", api.SetFollows{}, nil)
-	l.want(403, bot, "PUT", "/api/terminals/"+botID+"/follows", api.SetFollows{}, nil)
-	l.want(200, "socket", "PUT", "/api/terminals/"+botID+"/follows", api.SetFollows{}, nil)
+	l.want(400, "socket", "PUT", "/api/apps/"+botID+"/follows", api.SetFollows{Panels: []string{"local"}}, nil)
+	l.want(404, "socket", "PUT", "/api/apps/local/follows", api.SetFollows{}, nil)
+	l.want(403, bot, "PUT", "/api/apps/"+botID+"/follows", api.SetFollows{}, nil)
+	l.want(200, "socket", "PUT", "/api/apps/"+botID+"/follows", api.SetFollows{}, nil)
 
 	// The bot removed: no session is marked with it any more.
 	list = nil
 	if l.want(200, "web", "GET", "/api/sessions", nil, &list); !slices.ContainsFunc(list, func(x api.Session) bool { return len(x.Bots) > 0 }) {
 		t.Fatalf("no bot marked: %+v", list)
 	}
-	l.want(200, "socket", "DELETE", "/api/terminals/"+botID, nil, nil)
+	l.want(200, "socket", "DELETE", "/api/apps/"+botID, nil, nil)
 	list = nil
 	if l.want(200, "web", "GET", "/api/sessions", nil, &list); slices.ContainsFunc(list, func(x api.Session) bool { return len(x.Bots) > 0 }) {
 		t.Fatalf("a removed bot still marked: %+v", list)
@@ -465,7 +426,7 @@ func TestBotLetter(t *testing.T) {
 }
 
 // A session's menu brings a bot's chat to it: the chat points there and is told so, as by /use;
-// the terminal list marks the bot.
+// the pages are told when a bot's chats change.
 func TestBringBot(t *testing.T) {
 	var srv *Server
 	var changed atomic.Int32
@@ -480,23 +441,12 @@ func TestBringBot(t *testing.T) {
 		t.Cleanup(s.Chat.Close)
 	})
 	var tok api.Token
-	l.want(200, "socket", "POST", "/api/terminals/tokens", api.NewInvite{Name: "QQ", Owner: true}, &tok)
-	bot, botID := tok.Token, tok.Terminal.ID
+	tok = l.newApp("QQ", true)
+	bot, botID := tok.Token, tok.App.ID
 	var b api.NewSessionReply
 	l.want(200, "web", "POST", "/api/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "first"}, &b)
 	l.waitReply("web", b.ID, "ok: first")
-	// No chat yet, not connected: not a bot in the list, none to bring.
-	botOf := func() (x api.Terminal) {
-		var ts api.Terminals
-		l.want(200, "web", "GET", "/api/terminals", nil, &ts)
-		if i := slices.IndexFunc(ts.Terminals, func(x api.Terminal) bool { return x.ID == botID }); i >= 0 {
-			x = ts.Terminals[i]
-		}
-		return x
-	}
-	if x := botOf(); x.Bot {
-		t.Fatal("a bot without a chat")
-	}
+	// No chat yet, not connected: none to bring.
 	l.want(404, "web", "POST", "/api/sessions/"+b.ID+"/bot", api.BringBot{Bot: botID}, nil)
 
 	// Its event stream open, still no chat: a bot with none to bring, and the pages are told.
@@ -508,16 +458,10 @@ func TestBringBot(t *testing.T) {
 		t.Fatalf("events: %v %v", resp, err)
 	}
 	waitTill(t, func() bool { return changed.Load() == 1 })
-	if x := botOf(); !x.Bot || !x.Chatless {
-		t.Fatalf("connected, no chat: %+v", x)
-	}
 	l.want(404, "web", "POST", "/api/sessions/"+b.ID+"/bot", api.BringBot{Bot: botID}, nil)
 
 	var a api.ChatInputReply
 	l.want(200, bot, "POST", "/api/chat/qq:1/input", api.ChatInput{Text: "/new claude"}, &a)
-	if x := botOf(); !x.Bot || x.Chatless {
-		t.Fatalf("not marked a bot with a chat: %+v", x)
-	}
 	if n := changed.Load(); n != 2 {
 		t.Fatalf("told %d times, want 2", n)
 	}
@@ -533,9 +477,6 @@ func TestBringBot(t *testing.T) {
 	cancel()
 	resp.Body.Close()
 	waitTill(t, func() bool { return changed.Load() == 3 })
-	if x := botOf(); !x.Bot || x.Chatless {
-		t.Fatalf("a bot with a chat, gone: %+v", x)
-	}
 	last, _ := srv.st.OutboxLast(botID)
 	var r api.BotReply
 	l.want(200, "web", "POST", "/api/sessions/"+b.ID+"/bot", api.BringBot{Bot: botID}, &r)

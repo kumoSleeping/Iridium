@@ -1,7 +1,6 @@
 package store
 
 import (
-	"database/sql"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -11,23 +10,7 @@ import (
 
 	"github.com/kumoSleeping/iridium/internal/access"
 	"github.com/kumoSleeping/iridium/internal/api"
-	"github.com/kumoSleeping/iridium/internal/gate"
 )
-
-// downTo4 makes the database at path one from before migration 5, with what is in it now.
-func downTo4(t *testing.T, path string) {
-	t.Helper()
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	for _, q := range []string{`ALTER TABLE invites DROP COLUMN owner`, `ALTER TABLE session_settings DROP COLUMN ultracode`, `DROP TABLE devices`, `DROP TABLE session_colors`, `DROP TABLE folder_colors`, `DROP TABLE push_rules`, `DROP TABLE secrets`, `DROP TABLE secret_uses`, `ALTER TABLE names DROP COLUMN auto`, `ALTER TABLE session_settings DROP COLUMN preset`, `ALTER TABLE workspaces DROP COLUMN creator`, `DROP TABLE chat_seen`, `DROP TABLE machines`, `ALTER TABLE workspaces DROP COLUMN hidden`, `DROP TABLE note_folders`, `DROP TABLE notes`, `DROP TABLE bot_follows`, `DROP TABLE session_order`, `DROP TABLE folder_order`, `DROP TABLE folder_pins`, `DROP TABLE group_order`, `DROP TABLE session_at`, `ALTER TABLE workspaces DROP COLUMN flat`, `CREATE TABLE push_settings (workspace INTEGER PRIMARY KEY, needs_you INTEGER NOT NULL, error INTEGER NOT NULL, turn_end INTEGER NOT NULL, compact INTEGER NOT NULL)`, `PRAGMA user_version = 4`} {
-		if _, err := db.Exec(q); err != nil {
-			t.Fatal(err)
-		}
-	}
-}
 
 func rulesOf(t *testing.T, s *Store, id string) (api.Rules, bool) {
 	t.Helper()
@@ -56,18 +39,30 @@ func reopen(t *testing.T, path string) *Store {
 func TestClaudeForFirstPanel(t *testing.T) {
 	t0 := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
 	const first, second, bot = "pppppppppppppp01", "pppppppppppppp02", "cccccccccccccc01"
-	panels := []gate.Endpoint{
-		{ID: second, Name: "pad", Kind: gate.KindPanel, CreatedAt: t0.Add(time.Hour)},
-		{ID: first, Name: "kumo-mac-m2", Kind: gate.KindPanel, CreatedAt: t0},
-		{ID: bot, Name: "bot", Kind: gate.KindChannel, CreatedAt: t0.Add(-time.Hour)},
+	// at4 makes a database from before migration 5 with these terminals, and rules (by ID).
+	at4 := func(rules map[string]string) string {
+		path := filepath.Join(t.TempDir(), "iridium.db")
+		db := openAt(t, path, 4)
+		for _, e := range []struct {
+			id, name, kind string
+			at             time.Time
+		}{{second, "pad", "panel", t0.Add(time.Hour)}, {first, "kumo-mac-m2", "panel", t0}, {bot, "bot", "channel", t0.Add(-time.Hour)}} {
+			if _, err := db.Exec(`INSERT INTO terminals (id, name, kind, created_at) VALUES (?, ?, ?, ?)`, e.id, e.name, e.kind, e.at.UnixNano()); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for id, r := range rules {
+			if _, err := db.Exec(`INSERT INTO permissions (terminal, rules) VALUES (?, ?)`, id, r); err != nil {
+				t.Fatal(err)
+			}
+		}
+		db.Close()
+		return path
 	}
 
 	// None has it: the earliest panel (not the older channel) gets it.
-	s, path := open(t)
-	must(t, s.Gate().Apply(gate.Change{Endpoints: panels}))
-	s.Close()
-	downTo4(t, path)
-	s = reopen(t, path)
+	path := at4(nil)
+	s := reopen(t, path)
 	r, _ := rulesOf(t, s, first)
 	if !access.HasClaude(r) || r.ClaudeOwner.By != access.ByFirst {
 		t.Fatalf("the first panel: %+v", r)
@@ -85,13 +80,11 @@ func TestClaudeForFirstPanel(t *testing.T) {
 	if r, _ := rulesOf(t, s, first); access.HasClaude(r) {
 		t.Error("migration 5 ran twice")
 	}
+	s.Close()
 
 	// One has it (a panel turned it on before the rule): nothing changes.
 	b, _ := json.Marshal(access.WithClaude(access.Default(), first, 1))
-	must(t, s.SetTerminalRules(second, b))
-	s.Close()
-	downTo4(t, path)
-	s = reopen(t, path)
+	s = reopen(t, at4(map[string]string{second: string(b)}))
 	defer s.Close()
 	if r, _ := rulesOf(t, s, first); access.HasClaude(r) {
 		t.Error("the first panel got Claude though another had it")

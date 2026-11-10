@@ -1,43 +1,49 @@
-// The settings' 终端 page (plan "交互终端", docs/api.md "交互终端"): every interactive terminal —
-// 本机, the web panels, the Bots — with its avatar, name, kind, when it was last used and today's
-// use, Claude's mark if it has it. Nothing opens (the user, 2026-11-08): a right click or a long
-// press has its menu — rename, change the avatar, revoke; a Bot's also the panels it follows. The + makes a new panel's invite (its
-// link and QR code), says how a Bot or a computer asks to pair, and opens the QQ Bot's page; no
-// TOKEN is handed out here (pairing is the way in). What agents' ir asked for, and pairing
-// requests, wait on top; at the foot, whether new pairing requests are taken.
+// The settings' apps page (docs/api.md "应用"; 0.2 S1c reworks it): the host, ir_web's logins (the
+// browsers) and the apps, each with its avatar, name, kind, when it was last used and today's use,
+// Claude's mark if it has it. Nothing opens (the user, 2026-11-08): a right click or a long press
+// has its menu — rename, change the avatar, remove; an app's also the logins it follows. The +
+// makes an invite of ir_web (its link and QR code), says how an app or a computer asks to pair,
+// and opens the QQ Bot's page; no TOKEN is handed out here (pairing is the way in). What agents'
+// ir asked for, and pairing requests, wait on top.
 import { Popover } from "@base-ui/react/popover";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { Menu } from "@base-ui/react/menu";
 import { Bot, ChevronLeft, Eye, ImageUp, Link2, LoaderCircle, Monitor, PencilLine, Plus, Trash2, X } from "lucide-react";
 import { useRef, useState, type ReactNode } from "react";
 import { ApiError, api } from "./api/client";
-import type { Rules, Terminal } from "./api/types.gen";
+import type { Apps, Rules } from "./api/types.gen";
 import { CardFrame, CardHead, MainKey, SecondKey } from "./card";
 import { ConfirmCard, saysOwner } from "./confirms";
-import { useMe, useSettings, useTerminals } from "./data";
+import { useApps, useMe } from "./data";
 import { ExtensionPage, OfficialTag } from "./extensions";
 import { t, useLang } from "./i18n";
 import { LocalMark } from "./me";
 import { Crop } from "./profile";
 import { SecretHere } from "./secret";
 import { showSecret, useSecret } from "./secrets";
-import { Group, Item } from "./settings";
+import { Group } from "./settings";
 import { MenuItems } from "./sidebar";
 import { useConfirms } from "./store";
 import { errText, toast } from "./toast";
 import { ago, Avatar, IconKey, Logo, own, PopSurface, Switch, Tip, tokens, useLongPress, useMenuAt } from "./ui";
 
 
-const kindName = (x: Terminal) => (x.local ? t("term.local") : x.kind === "panel" ? t("term.panel") : t("term.channel"));
+/** A row: the host, an app, or a login of ir_web (web). */
+type Row = Omit<Apps["apps"][number], "web"> & { web?: boolean };
+
+/** The rows: the host, ir_web's logins, the apps (ir_web itself not a row of its own here). */
+const rowsOf = (d?: Apps | null): Row[] => (d ? [...d.apps.filter((a) => a.host), ...d.logins.map((l) => ({ ...l, web: true })), ...d.apps.filter((a) => !a.host && !a.web)] : []);
+
+const kindName = (x: Row) => (x.host ? t("term.local") : x.web ? t("term.panel") : t("term.channel"));
 
 export function TerminalsPage({ onBack }: { onBack: () => void }) {
   useLang();
   const qc = useQueryClient();
-  const q = useTerminals();
+  const q = useApps();
   const confirms = useConfirms();
   const secretHere = useSecret()?.at === "terminals";
   const [ext, setExt] = useState<string | null>(null);
-  const list = q.data?.terminals ?? [];
+  const list = rowsOf(q.data);
   const invites = q.data?.invites ?? [];
   if (ext)
     return (
@@ -68,7 +74,7 @@ export function TerminalsPage({ onBack }: { onBack: () => void }) {
           {q.isError && <p className="m-0 text-sm text-ink-3">{errText(q.error)}</p>}
           <section className="flex flex-col" aria-label={t("settings.terminals")}>
             {list.map((x) => (
-              <TerminalRow key={x.id} x={x} panels={list.filter((p) => p.kind === "panel" && !p.local)} />
+              <TerminalRow key={x.id} x={x} panels={list.filter((p) => p.web)} />
             ))}
           </section>
           {invites.length > 0 && (
@@ -77,7 +83,7 @@ export function TerminalsPage({ onBack }: { onBack: () => void }) {
                 <div key={i.id} className="flex min-h-10 items-center gap-3">
                   <Link2 size={15} className="shrink-0 text-ink-3" />
                   <span className="min-w-0 flex-1 truncate text-base">{i.setup ? t("term.setup") : i.name || <span className="text-ink-3">{t("term.unnamed")}</span>}</span>
-                  {i.owner && <span className="shrink-0 text-xs text-ink-3">{t("term.withClaude")}</span>}
+                  {i.claude && <span className="shrink-0 text-xs text-ink-3">{t("term.withClaude")}</span>}
                   {i.expiresAt ? <span className="text-xs text-ink-3 tabular-nums">{t("term.until", { time: clock(i.expiresAt) })}</span> : null}
                   <IconKey label={t("term.revoke")} onClick={() => void revoke(qc, i.id, i.name || t("term.unnamed"))} className="size-7">
                     <X size={15} />
@@ -86,7 +92,6 @@ export function TerminalsPage({ onBack }: { onBack: () => void }) {
               ))}
             </Group>
           )}
-          <Pairing />
         </div>
       </div>
     </div>
@@ -95,7 +100,7 @@ export function TerminalsPage({ onBack }: { onBack: () => void }) {
 
 const clock = (ms: number) => new Date(ms).toLocaleTimeString(document.documentElement.lang || undefined, { hour: "2-digit", minute: "2-digit" });
 
-/** Revokes terminal or invite id, then lists them again. */
+/** Removes app, login or invite id, then lists them again. */
 async function revoke(qc: QueryClient, id: string, name: string) {
   try {
     await api.revoke(id);
@@ -103,13 +108,13 @@ async function revoke(qc: QueryClient, id: string, name: string) {
   } catch (e) {
     toast(t("err.revoke"), { error: true, description: errText(e) });
   }
-  await qc.invalidateQueries({ queryKey: ["terminals"] });
+  await qc.invalidateQueries({ queryKey: ["apps"] });
 }
 
-/** One terminal's row. Its menu, a right click or a long press away (not 本机's): rename it in
- *  place, change its avatar (a picture chosen, then cropped under the row), revoke it (asked
- *  under the row); a Bot's, the panels it follows (chosen under the row). */
-function TerminalRow({ x, panels }: { x: Terminal; panels: Terminal[] }) {
+/** One row. Its menu, a right click or a long press away (not the host's): rename it in place,
+ *  change its avatar (a picture chosen, then cropped under the row), remove it (asked under the
+ *  row); an app's, the logins it follows (chosen under the row). */
+function TerminalRow({ x, panels }: { x: Row; panels: Row[] }) {
   const me = useMe().data;
   const qc = useQueryClient();
   const [menuAt, setMenuAt] = useMenuAt();
@@ -124,8 +129,8 @@ function TerminalRow({ x, panels }: { x: Terminal; panels: Terminal[] }) {
     const r = row.current?.getBoundingClientRect();
     setMenuAt(r ? { x: r.left + 48, y: r.bottom } : { x: 40, y: 40 });
   });
-  const used = x.online ? t("term.online") : x.local ? t("term.localShort") : ago(x.lastSeenAt || x.createdAt);
-  const menu = x.local
+  const used = x.online ? t("term.online") : x.host ? t("term.localShort") : ago(x.lastSeenAt || x.createdAt || 0);
+  const menu = x.host
     ? undefined
     : {
         ...lp,
@@ -143,7 +148,7 @@ function TerminalRow({ x, panels }: { x: Terminal; panels: Terminal[] }) {
     try {
       await api.profile({ avatar: blob }, x.id);
       dropPicture();
-      void qc.invalidateQueries({ queryKey: ["terminals"] });
+      void qc.invalidateQueries({ queryKey: ["apps"] });
     } catch (e) {
       toast(t("term.avatar"), { error: true, description: errText(e) });
     }
@@ -152,12 +157,12 @@ function TerminalRow({ x, panels }: { x: Terminal; panels: Terminal[] }) {
   return (
     <div className="flex flex-col">
       <div ref={row} {...menu} className="flex min-h-14 items-center gap-3 rounded-lg px-2 select-none [-webkit-touch-callout:none]">
-        {x.local ? <LocalMark size={32} /> : <Avatar src={x.avatar} name={x.name} size={32} channel={x.kind === "channel"} />}
+        {x.host ? <LocalMark size={32} /> : <Avatar src={x.avatar} name={x.name} size={32} channel={!x.web} />}
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-2">
-            {renaming ? <Rename x={x} done={() => setRenaming(false)} /> : <span className="truncate text-base font-medium">{x.local ? t("me.local") : x.name}</span>}
+            {renaming ? <Rename x={x} done={() => setRenaming(false)} /> : <span className="truncate text-base font-medium">{x.host ? t("me.local") : x.name}</span>}
             <span className="shrink-0 rounded-sm bg-fill-2 px-1.5 text-[11px] leading-[18px] text-ink-2">{kindName(x)}</span>
-            {x.id === me?.id && !x.local && <span className="shrink-0 text-xs text-ink-3">{t("term.this")}</span>}
+            {x.id === me?.id && !x.host && <span className="shrink-0 text-xs text-ink-3">{t("term.this")}</span>}
           </span>
           {/* One line, cut at its end, never wrapped into columns (the panel is narrow). */}
           <span className="flex min-w-0 items-center gap-1.5 text-xs text-ink-3 tabular-nums">
@@ -201,7 +206,7 @@ function TerminalRow({ x, panels }: { x: Terminal; panels: Terminal[] }) {
           </CardFrame>
         </div>
       )}
-      {!x.local && (
+      {!x.host && (
         <>
           <input ref={file} type="file" accept="image/*" hidden onChange={(e) => (pick(e.target.files?.[0]), (e.target.value = ""))} />
           <Menu.Root open={menuAt !== null} onOpenChange={(o) => !o && setMenuAt(null)}>
@@ -211,7 +216,7 @@ function TerminalRow({ x, panels }: { x: Terminal; panels: Terminal[] }) {
                   items={[
                     { icon: <PencilLine size={15} />, label: t("term.renameIt"), run: () => setRenaming(true) },
                     { icon: <ImageUp size={15} />, label: t("term.avatar"), run: () => file.current?.click() },
-                    ...(x.bot ? [{ icon: <Eye size={15} />, label: t("term.follows"), run: () => setFollowing(true) }] : []),
+                    ...(!x.web ? [{ icon: <Eye size={15} />, label: t("term.follows"), run: () => setFollowing(true) }] : []),
                     { icon: <Trash2 size={15} />, label: t("term.revoke"), run: () => setSure(true) },
                   ]}
                 />
@@ -224,8 +229,8 @@ function TerminalRow({ x, panels }: { x: Terminal; panels: Terminal[] }) {
   );
 }
 
-/** The names of the panels Bot x follows, "" for none. */
-const followNames = (x: Terminal, panels: Terminal[]) =>
+/** The names of the logins app x follows, "" for none. */
+const followNames = (x: Row, panels: Row[]) =>
   (x.follows ?? [])
     .map((id) => panels.find((p) => p.id === id)?.name)
     .filter(Boolean)
@@ -234,7 +239,7 @@ const followNames = (x: Terminal, panels: Terminal[]) =>
 /** Under a Bot's row: the panels it follows, a switch each, saved as each is flipped. What a
  *  session asks while no chat points at it goes to the Bots that follow the panel that began its
  *  turn, and to no other (the user, 2026-11-09). */
-function Follows({ x, panels, done }: { x: Terminal; panels: Terminal[]; done: () => void }) {
+function Follows({ x, panels, done }: { x: Row; panels: Row[]; done: () => void }) {
   const qc = useQueryClient();
   const [on, setOn] = useState<string[]>(x.follows ?? []);
   const flip = async (id: string, to: boolean) => {
@@ -243,7 +248,7 @@ function Follows({ x, panels, done }: { x: Terminal; panels: Terminal[]; done: (
     setOn(next);
     try {
       await api.follows(x.id, next);
-      void qc.invalidateQueries({ queryKey: ["terminals"] });
+      void qc.invalidateQueries({ queryKey: ["apps"] });
     } catch (e) {
       setOn(was);
       toast(t("term.follows"), { error: true, description: errText(e) });
@@ -272,7 +277,7 @@ function Follows({ x, panels, done }: { x: Terminal; panels: Terminal[]; done: (
 }
 
 /** The name in place, chosen whole: Enter or leaving saves it, Escape keeps the old one. */
-function Rename({ x, done }: { x: Terminal; done: () => void }) {
+function Rename({ x, done }: { x: Row; done: () => void }) {
   const qc = useQueryClient();
   const [name, setName] = useState(x.name);
   const gone = useRef(false);
@@ -284,7 +289,7 @@ function Rename({ x, done }: { x: Terminal; done: () => void }) {
     if (!to || to === x.name) return;
     try {
       await api.profile({ name: to }, x.id);
-      void qc.invalidateQueries({ queryKey: ["terminals"] });
+      void qc.invalidateQueries({ queryKey: ["apps"] });
     } catch (e) {
       const code = e instanceof ApiError ? (e.body as { nameError?: string } | undefined)?.nameError : undefined;
       toast(t("term.renameIt"), { error: true, description: code === "taken" ? t("me.nameTaken") : code ? t("me.nameBad") : errText(e) });
@@ -309,30 +314,7 @@ function Rename({ x, done }: { x: Terminal; done: () => void }) {
   );
 }
 
-/** At the page's foot: whether new pairing requests (Bots, computers) are taken. */
-function Pairing() {
-  const qc = useQueryClient();
-  const s = useSettings().data;
-  if (!s) return null;
-  const set = async (open: boolean) => {
-    qc.setQueryData(["settings"], { ...s, pairClosed: !open });
-    try {
-      qc.setQueryData(["settings"], await api.putSettings({ pairClosed: !open }));
-    } catch (e) {
-      qc.setQueryData(["settings"], s);
-      toast(t("err.settings"), { error: true, description: errText(e) });
-    }
-  };
-  return (
-    <Group title={t("term.pairing")}>
-      <Item label={t("term.pairOpen")} hint={t("term.pairOpenHint")}>
-        <Switch label={t("term.pairOpen")} on={!s.pairClosed} onChange={(o) => void set(o)} />
-      </Item>
-    </Group>
-  );
-}
-
-/** Claude: the terminal was made the owner's own. Set then, never after (the user, 2026-11-08). */
+/** Claude: it was made the owner's own. Set then, never after (the user, 2026-11-08). */
 export const hasClaude = (r: Rules) => !!r.claudeOwner;
 
 /** The +: a new panel's invite (a public origin first), named; the link then shows once. How a Bot
@@ -350,10 +332,9 @@ function NewTerminal({ openExt }: { openExt: (id: string) => void }) {
   const make = async () => {
     setBusy(true);
     try {
-      const owner = canClaude && withClaude;
-      showSecret({ invite: await api.invite(name.trim(), owner), at: "terminals" });
+      showSecret({ invite: await api.invite(name.trim(), canClaude && withClaude), at: "terminals" });
       setOpen(false);
-      void qc.invalidateQueries({ queryKey: ["terminals"] });
+      void qc.invalidateQueries({ queryKey: ["apps"] });
     } catch (e) {
       const code = e instanceof ApiError ? (e.body as { nameError?: string } | undefined)?.nameError : undefined;
       toast(t("err.invite"), { error: true, description: code === "taken" ? t("me.nameTaken") : code ? t("me.nameBad") : errText(e) });
@@ -441,7 +422,6 @@ function NewTerminal({ openExt }: { openExt: (id: string) => void }) {
 /** How a Bot or a computer comes in: it asks this address to pair, and its request waits on this
  *  page as a card with the code it shows. */
 function PairHow({ back }: { back: () => void }) {
-  const closed = !!useSettings().data?.pairClosed;
   const at = location.origin;
   const line = (label: string, cmd: string) => (
     <div className="flex flex-col gap-1">
@@ -459,7 +439,7 @@ function PairHow({ back }: { back: () => void }) {
       </div>
       {line(t("term.pairComputer"), `ir join ${at}`)}
       {line(t("term.pairBot"), t("term.pairBotCmd", { at }))}
-      <p className="m-0 text-xs text-ink-3">{closed ? t("term.pairClosed") : t("term.pairNote")}</p>
+      <p className="m-0 text-xs text-ink-3">{t("term.pairNote")}</p>
     </div>
   );
 }

@@ -27,8 +27,8 @@ func TestCLIAtMachine(t *testing.T) {
 		}
 	})
 	var b api.Token
-	l.want(200, "socket", "POST", "/api/terminals/tokens", api.NewInvite{Name: "pc"}, &b)
-	botID = b.Terminal.ID
+	b = l.newApp("pc", false)
+	botID = b.App.ID
 	var own api.NewSessionReply
 	l.want(200, "socket", "POST", "/api/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "hello"}, &own)
 	l.waitReply("socket", own.ID, "ok: hello")
@@ -82,7 +82,7 @@ func TestCLIAtMachine(t *testing.T) {
 		t.Errorf("an unknown session TOKEN: %d", code)
 	}
 	// Its Bot revoked: its sessions' TOKENs go with it.
-	l.want(200, "socket", "DELETE", "/api/terminals/"+botID, nil, nil)
+	l.want(200, "socket", "DELETE", "/api/apps/"+botID, nil, nil)
 	if code, _, _, _ := run(tok, "ls"); code != http.StatusUnauthorized {
 		t.Errorf("after the Bot is revoked: %d", code)
 	}

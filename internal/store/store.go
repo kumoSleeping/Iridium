@@ -1,7 +1,7 @@
 // Package store is Iridium's database: SQLite through a pure-Go driver, WAL, writes in BEGIN
 // IMMEDIATE transactions. It holds only what lies over the sessions found on disk (plan "数据"):
 // workspaces and who belongs where, pins, colour tags, which sessions are shown, names, the queue of messages to send, push
-// subscriptions, interactive terminals and their permissions, usage, the plugin event outbox, and
+// subscriptions, apps, their logins and their permissions, usage, the plugin event outbox, and
 // the credentials, sealed (secrets.go). Never the conversations themselves, nor asks.
 package store
 
@@ -203,6 +203,8 @@ var schema = []string{
 	// it holds only the sessions right in its folder, its subfolders groups of their own (order.go).
 	`CREATE TABLE session_at (session TEXT PRIMARY KEY, path TEXT NOT NULL);
 	ALTER TABLE workspaces ADD COLUMN flat INTEGER NOT NULL DEFAULT 0;`,
+	// 26: apps, the logins of ir_web and the host in place of terminals (0.2, apps.go).
+	appsSchema,
 }
 
 // steps run in Go after the migration of their version, in the same transaction.
@@ -217,7 +219,7 @@ type Store struct {
 }
 
 // Open opens (and makes, or migrates) the database at path. The file and its -wal and -shm are
-// the owner's alone (0600): they hold the terminals' token hashes and passkeys.
+// the owner's alone (0600): they hold the apps' token hashes and the logins' passkeys.
 func Open(path string) (*Store, error) {
 	if err := private(path); err != nil {
 		return nil, err

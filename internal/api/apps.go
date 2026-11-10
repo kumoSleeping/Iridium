@@ -1,70 +1,79 @@
 package api
 
-// Interactive terminals (交互终端, plan "交互终端"): web panels, channels (plugins, peers) and the
-// built-in 本机. See docs/api.md "交互终端".
+// Apps and their logins (0.2, docs/next/k_glossary.md "应用"): an app connects with its TOKEN (a
+// QQ bridge, a dsh plugin, an executor), ir_web is the built-in one whose logins are browsers with a
+// passkey, and the host is the machine Iridium runs on: listed with them, never managed. See
+// docs/api.md.
 
-// TerminalKind: panel (a web panel, passkey) or channel (a plugin or peer, token; also 本机).
-type TerminalKind string
+// HostID is the host's storage ID; it is shown as 主机 (host).
+const HostID = "local"
 
-const (
-	TerminalPanel   TerminalKind = "panel"
-	TerminalChannel TerminalKind = "channel"
-)
+// WebApp is the built-in app ir_web's ID: there only with a public origin.
+const WebApp = "ir_web"
 
-// LocalTerminal is the built-in terminal's ID: the local ir, and the web page while no public
-// origin is set.
-const LocalTerminal = "local"
-
-// Rules is what a terminal may do: everything, every terminal alike, but Claude (the user,
-// 2026-11-08). Stored as before, the other fields of old tables are no longer read.
+// Rules is what an app or login may do: everything, all alike, but Claude (the user, 2026-11-08).
+// Stored as before, the other fields of old tables are no longer read. S2 puts permissions in place.
 type Rules struct {
-	// ClaudeOwner: the terminal is the owner's own (Claude's terms), so it may use Claude. Set as
-	// the terminal was made, by the server only, and never changed. Without it a terminal sees
-	// Claude's sessions but may not start, write to or answer one.
+	// ClaudeOwner: it is the owner's own (Claude's terms), so it may use Claude. Set as it was
+	// made, by the server only, and never changed. Without it, it sees Claude's sessions but may
+	// not start, write to or answer one.
 	ClaudeOwner *OwnerConfirm `json:"claudeOwner,omitempty"`
 }
 
-// OwnerConfirm is how, and when (ms), a terminal was found the owner's own.
+// OwnerConfirm is how, and when (ms), an app or login was found the owner's own.
 type OwnerConfirm struct {
-	// By: "local" (a person's ir on the machine: ir invite --owner, ir token --owner), "panel" (a person on a panel that has Claude, or one that
-	// confirmed an agent's ask) or "first" (the first panel registered).
+	// By: "local" (a person's ir at the host), "panel" (a person on a login of ir_web that has
+	// Claude, or one that confirmed an agent's ask) or "first" (the first login of ir_web).
 	By string `json:"by"`
 	At int64  `json:"at"`
 }
 
-// Terminal is an interactive terminal as listed. No secrets.
-type Terminal struct {
-	ID         string       `json:"id"`
-	Name       string       `json:"name"`
-	Kind       TerminalKind `json:"kind"`
-	Avatar     string       `json:"avatar,omitempty"` // URL for <img src>
-	Local      bool         `json:"local,omitempty"`  // the built-in 本机
-	Passkeys   int          `json:"passkeys,omitempty"`
-	Logins     int          `json:"logins,omitempty"` // logged-in browsers
-	Online     int          `json:"online,omitempty"` // live connections
-	CreatedAt  int64        `json:"createdAt,omitempty"`
-	LastSeenAt int64        `json:"lastSeenAt,omitempty"`
-	Rules      Rules        `json:"rules"`
-	UsedToday  int64        `json:"usedToday"` // tokens of the turns it started today
+// App is an app as listed, or the host (Host) or ir_web (Web) beside them. No secrets.
+type App struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Type   string `json:"type,omitempty"`   // what it is shown as (computer…); display only
+	Avatar string `json:"avatar,omitempty"` // URL for <img src>
+	// Host: the host, listed with the apps but not managed. Web: ir_web, the built-in app.
+	Host       bool  `json:"host,omitempty"`
+	Web        bool  `json:"web,omitempty"`
+	Logins     int   `json:"logins,omitempty"` // ir_web: its logins
+	Online     int   `json:"online,omitempty"` // live connections
+	CreatedAt  int64 `json:"createdAt,omitempty"`
+	LastSeenAt int64 `json:"lastSeenAt,omitempty"`
+	Rules      Rules `json:"rules"`
+	UsedToday  int64 `json:"usedToday"` // tokens of the turns it started today
 	// Device: what it runs on, as the badge on its messages' avatar shows; the server always sets it.
 	Device Device `json:"device,omitempty"`
-	// Bot: a plugin with a chat in Iridium, or connected as one now; a session's menu offers to
-	// bring that chat to it.
-	Bot bool `json:"bot,omitempty"`
-	// Chatless: a Bot no one has written to yet, so it has no chat to bring (the menu says so).
-	Chatless bool `json:"chatless,omitempty"`
-	// Follows: the panels (IDs) a channel follows: what a session asks while no chat points at it
-	// goes to the Bots that follow the panel that began its turn, and to no other.
+	// Follows: the logins of ir_web (IDs) it follows: what a session asks while no chat points at
+	// it goes to the apps that follow the login that began its turn, and to no other. Until S4.
 	Follows []string `json:"follows,omitempty"`
 }
 
-// SetFollows is PUT /api/terminals/{id}/follows: the panels the Bot follows from now on.
+// Login is a login of an app as listed: for now ir_web's, a browser with a passkey. No secrets.
+type Login struct {
+	App        string `json:"app"`
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Avatar     string `json:"avatar,omitempty"`
+	Passkeys   int    `json:"passkeys,omitempty"`
+	Sessions   int    `json:"sessions,omitempty"` // browsers logged in
+	Online     int    `json:"online,omitempty"`
+	CreatedAt  int64  `json:"createdAt,omitempty"`
+	LastSeenAt int64  `json:"lastSeenAt,omitempty"`
+	ApprovedAt int64  `json:"approvedAt,omitempty"` // 0: waits to be approved
+	Rules      Rules  `json:"rules"`
+	UsedToday  int64  `json:"usedToday"`
+	Device     Device `json:"device,omitempty"`
+}
+
+// SetFollows is PUT /api/apps/{id}/follows: the logins of ir_web the app follows from now on.
 type SetFollows struct {
 	Panels []string `json:"panels"`
 }
 
-// Device is what a terminal runs on, set in its settings (PUT /api/me/device, ir profile
-// --device): a computer, the default, a laptop, a phone, or none shown (no badge).
+// Device is what an app or login runs on, set in its settings (PUT /api/me/device, ir apps
+// device): a computer, the default, a laptop, a phone, or none shown (no badge).
 type Device string
 
 const (
@@ -83,48 +92,55 @@ func (d Device) Valid() bool {
 	return false
 }
 
-// SetDevice is PUT /api/me/device and PUT /api/terminals/{id}/device.
+// SetDevice is PUT /api/me/device and PUT /api/apps/{id}/device.
 type SetDevice struct {
 	Device Device `json:"device"`
 }
 
-// PendingInvite is a panel invite not used yet.
+// PendingInvite is a slot for a login of ir_web not taken yet.
 type PendingInvite struct {
 	ID        string `json:"id"`
 	Name      string `json:"name,omitempty"`
-	Setup     bool   `json:"setup,omitempty"` // the first-run link in the state directory
-	Owner     bool   `json:"owner,omitempty"` // ir invite --owner: the panel gets Claude
+	Setup     bool   `json:"setup,omitempty"`  // the first-run link in the state directory
+	Claude    bool   `json:"claude,omitempty"` // the login gets Claude
 	CreatedAt int64  `json:"createdAt"`
 	ExpiresAt int64  `json:"expiresAt,omitempty"`
 }
 
-// Terminals is GET /api/terminals (ir access).
-type Terminals struct {
-	Terminals []Terminal      `json:"terminals"`
-	Invites   []PendingInvite `json:"invites"`
+// Apps is GET /api/apps (ir apps): the host first, ir_web (with a public origin), the apps; the
+// logins of ir_web; the invites not taken.
+type Apps struct {
+	Apps    []App           `json:"apps"`
+	Logins  []Login         `json:"logins"`
+	Invites []PendingInvite `json:"invites"`
 }
 
-// Me is GET /api/me: the calling terminal. Panel: it may approve, widen and see tokens.
+// Me is GET /api/me: who calls. App: the app (HostID for the host, WebApp for a browser); Login:
+// the login of it, for ir_web the browser's. ID is the one its usage and rules are kept by.
 type Me struct {
-	Terminal `tstype:",extends"`
-	Panel    bool `json:"panel"`
-	Public   bool `json:"public"` // a public origin is set: passkeys are on
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	App       string `json:"app"`
+	Login     string `json:"login,omitempty"`
+	Avatar    string `json:"avatar,omitempty"`
+	Host      bool   `json:"host,omitempty"`
+	Web       bool   `json:"web,omitempty"` // a login of ir_web
+	Rules     Rules  `json:"rules"`
+	UsedToday int64  `json:"usedToday"`
+	Device    Device `json:"device,omitempty"`
+	Public    bool   `json:"public"` // a public origin is set: passkeys are on
 }
 
-// NewInvite asks for a panel invite (ir invite [name]) or a channel token (ir token <name>).
-// Owner (--owner): the terminal is the owner's own and gets Claude; only a person at the machine
-// or on a panel that has Claude may say so. An agent's goes to a confirmation that only such a
-// panel (or 本机) may allow.
+// NewInvite asks for a slot for a new login of ir_web (ir invite [name] [--claude]). Claude: the
+// login gets Claude, the owner's own; only a person at the host or on a login of ir_web that has
+// Claude may say so. An agent's goes to a confirmation that only such a login (or the host) allows.
 type NewInvite struct {
-	Name  string `json:"name,omitempty"`
-	Owner bool   `json:"owner,omitempty"`
-	// Into (tokens only, ir token --into): the daemon writes the token into this file (absolute,
-	// 0600) and gives it to no one: not the asker, nor the panel that allows it. A plugin's setup
-	// asks so, its agent never seeing the token.
-	Into string `json:"into,omitempty"`
+	Name   string `json:"name,omitempty"`
+	Claude bool   `json:"claude,omitempty"`
 }
 
-// Invite is a new panel invite. URL holds the secret: only a panel (or ir at a terminal) sees it.
+// Invite is a new invite of ir_web. URL holds the secret: only a login of ir_web (or a person's
+// ir at the host) sees it.
 type Invite struct {
 	ID        string `json:"id"`
 	Name      string `json:"name,omitempty"`
@@ -134,24 +150,22 @@ type Invite struct {
 	QR string `json:"qr,omitempty"`
 }
 
-// Token is a channel's new token: shown once. Asking again replaces it.
+// Token is an app's new TOKEN, as a pairing allowed gives it to the app alone.
 type Token struct {
-	Terminal Terminal `json:"terminal"`
-	Token    string   `json:"token,omitempty"`
-	Into     string   `json:"into,omitempty"` // the file it went into (NewInvite.Into); no Token then
+	App   App    `json:"app"`
+	Token string `json:"token,omitempty"`
 }
 
-// Confirm is what an agent's ir asked for that only a panel may give (an invite link, a token, a
-// credential's value, the use of credentials): it waits in the carried state "confirms" until a
-// panel answers it. No secrets.
+// Confirm is what an agent's ir asked for that only a person may give (an invite link, a
+// credential's value, the use of credentials), or an app asking to pair: it waits in the carried
+// state "confirms" until a login of ir_web (or the host) answers it. No secrets.
 type Confirm struct {
 	ID   string `json:"id"`
-	Kind string `json:"kind"` // invite | token | secret-set | secret-use | exec-pair | bot-pair
-	// Name: the invite's or token's name; secret-set: the secret's.
+	Kind string `json:"kind"` // invite | secret-set | secret-use | exec-pair | bot-pair
+	// Name: the invite's name; secret-set: the secret's.
 	Name      string `json:"name,omitempty"`
-	Owner     bool   `json:"owner,omitempty"`   // --owner: it gets Claude; only a panel that has Claude allows it
-	Into      string `json:"into,omitempty"`    // token: the file it goes into (NewInvite.Into)
-	Asker     string `json:"asker"`             // the terminal that asked (本机)
+	Owner     bool   `json:"owner,omitempty"`   // it gets Claude; only one that has Claude allows it
+	Asker     string `json:"asker"`             // who asked (the app or login, or 主机)
 	Session   string `json:"session,omitempty"` // the session whose agent asked, if known
 	CreatedAt int64  `json:"createdAt"`
 	ExpiresAt int64  `json:"expiresAt"`
@@ -177,7 +191,7 @@ type Confirms struct {
 	Pending []Confirm `json:"pending"`
 }
 
-// ConfirmAnswer is a panel's answer to a Confirm.
+// ConfirmAnswer is a person's answer to a Confirm.
 type ConfirmAnswer struct {
 	Allow bool `json:"allow"`
 	// Value: secret-set's value, typed on the panel; stored, never given back.
@@ -267,14 +281,13 @@ type ConfirmState struct {
 	Error     string `json:"error,omitempty"`
 }
 
-// ConfirmReply answers the panel that allowed a Confirm: the secret is for it alone.
+// ConfirmReply answers the one that allowed a Confirm: the secret is for it alone.
 type ConfirmReply struct {
 	ConfirmState `tstype:",extends"`
 	Invite       *Invite `json:"invite,omitempty"`
-	Token        *Token  `json:"token,omitempty"`
 }
 
-// Pending is the reply to an agent's ir invite or ir token: a panel must allow it.
+// Pending is the reply to an agent's ir invite: a person must allow it.
 type Pending struct {
 	Confirm Confirm `json:"confirm"`
 }
@@ -287,5 +300,5 @@ type SetPublic struct {
 // PublicState is GET /api/public.
 type PublicState struct {
 	Origin   string `json:"origin,omitempty"`
-	Passkeys bool   `json:"passkeys"` // some panel has a passkey
+	Passkeys bool   `json:"passkeys"` // some login of ir_web has a passkey
 }

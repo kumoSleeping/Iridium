@@ -261,7 +261,7 @@ func New(ctx context.Context, o NewOptions) error {
 接下来在那个账号里（ssh -i %s %s@localhost）：
   装好、登录要用的 agent（Claude Code、Codex……）
   ir public：给它一个公网地址，最后给你第一个面板的邀请
-  已经有公网地址的（配置里有 public.origin）：ir invite --owner 拿邀请
+  已经有公网地址的（配置里有 public.origin）：ir invite --claude 拿邀请
 `, o.User, o.Listen, o.Key, o.User, o.Key, o.User)
 	return nil
 }

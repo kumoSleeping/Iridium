@@ -56,7 +56,7 @@ func TestExecPair(t *testing.T) {
 		t.Fatalf("no login: %d", code)
 	}
 	// A Bot by the machine's name is there already: the executor becomes home-pc-2.
-	l.want(200, "socket", "POST", "/api/terminals/tokens", api.NewInvite{Name: "home-pc"}, nil)
+	l.newApp("home-pc", false)
 
 	hello := api.ExecPair{Name: "home-pc", OS: "windows", Arch: "x64", Program: "dsh-remote-iridium 0.1.0", Agents: []api.ExecAgent{{Agent: "dsh", Version: "0.2.2"}}, AgentShell: true}
 	var p api.ExecPairing
@@ -171,7 +171,7 @@ func TestExecPair(t *testing.T) {
 	}
 
 	// Its Bot removed, it is not listed.
-	l.want(200, "socket", "DELETE", "/api/terminals/home-pc-2", nil, nil)
+	l.want(200, "socket", "DELETE", "/api/apps/home-pc-2", nil, nil)
 	var ms []api.Machine
 	if l.want(200, "socket", "GET", "/api/machines", nil, &ms); len(ms) != 0 {
 		t.Fatalf("a removed machine: %+v", ms)
@@ -187,7 +187,6 @@ func TestExecPair(t *testing.T) {
 
 // A Bot pairs the same way at /api/pair, with no executors here: a new Bot by its name, or, the
 // panel saying so, the one by its name with a new TOKEN (the same terminal, the old TOKEN void).
-// The settings' pairClosed turns every request away.
 func TestBotPair(t *testing.T) {
 	l := startWith(t, nil)
 	l.want(200, "socket", "PUT", "/api/public", api.SetPublic{Origin: "https://ir.example.com"}, nil)
@@ -247,21 +246,6 @@ func TestBotPair(t *testing.T) {
 	if code := l.public("GET", "/api/me", first, nil, nil); code != 401 {
 		t.Fatalf("the old TOKEN: %d", code)
 	}
-
-	// Closed: turned away, executors too; open again, taken.
-	closed, open := true, false
-	l.want(200, "socket", "PUT", "/api/settings", api.SettingsPatch{PairClosed: &closed}, nil)
-	var set api.Settings
-	if l.want(200, "socket", "GET", "/api/settings", nil, &set); !set.PairClosed {
-		t.Fatalf("settings: %+v", set)
-	}
-	if code := l.public("POST", "/api/pair", "", api.ExecPair{Name: "x"}, nil); code != 403 {
-		t.Fatalf("closed: %d", code)
-	}
-	l.want(200, "socket", "PUT", "/api/settings", api.SettingsPatch{PairClosed: &open}, nil)
-	if code := l.public("POST", "/api/pair", "", api.ExecPair{Name: "x"}, nil); code != 200 {
-		t.Fatalf("open again: %d", code)
-	}
 }
 
 // A machine that starts only its agents runs no agent's command line either.
@@ -279,7 +263,7 @@ func TestRevokeDropsExecutor(t *testing.T) {
 	l := startWith(t, func(s *Server, _ config.Config, _ string) { s.Remote = hub; s.WatchMachines() })
 	l.want(200, "socket", "PUT", "/api/public", api.SetPublic{Origin: "https://ir.example.com"}, nil)
 	var tok api.Token
-	l.want(200, "socket", "POST", "/api/terminals/tokens", api.NewInvite{Name: "pc"}, &tok)
+	tok = l.newApp("pc", false)
 	exe, err := executor.New(executor.Options{URL: "ws" + strings.TrimPrefix(l.base, "http") + "/api/exec", Token: tok.Token, State: t.TempDir(), Logf: t.Logf})
 	if err != nil {
 		t.Fatal(err)
@@ -288,7 +272,7 @@ func TestRevokeDropsExecutor(t *testing.T) {
 	done := make(chan struct{})
 	go func() { _ = exe.Run(ctx); close(done) }()
 	t.Cleanup(func() { cancel(); <-done; exe.Close() })
-	connected := func() bool { _, ok := hub.Machine(tok.Terminal.ID).Hello(); return ok }
+	connected := func() bool { _, ok := hub.Machine(tok.App.ID).Hello(); return ok }
 	until := func(what string, ok func() bool) {
 		t.Helper()
 		for deadline := time.Now().Add(10 * time.Second); !ok(); time.Sleep(20 * time.Millisecond) {
@@ -298,7 +282,7 @@ func TestRevokeDropsExecutor(t *testing.T) {
 		}
 	}
 	until("the executor", connected)
-	l.want(200, "socket", "DELETE", "/api/terminals/pc", nil, nil)
+	l.want(200, "socket", "DELETE", "/api/apps/pc", nil, nil)
 	until("its connection to end", func() bool { return !connected() })
 	time.Sleep(1500 * time.Millisecond) // it tries again
 	if connected() {

@@ -33,7 +33,7 @@ function SecretCard({ secret }: { secret: Secret }) {
         <div className="flex min-w-0 flex-1 flex-col gap-2">
           <div className="flex min-h-6 items-center gap-1.5 text-sm font-semibold">
             <span className="truncate">{title}</span>
-            {(invite?.name || token?.terminal.name) && <span className="min-w-0 flex-1 truncate font-normal text-ink-3">{invite?.name || token?.terminal.name}</span>}
+            {(invite?.name || token?.app.name) && <span className="min-w-0 flex-1 truncate font-normal text-ink-3">{invite?.name || token?.app.name}</span>}
             <IconKey label={t("secret.done")} onClick={close} className="-my-1 -mr-1 ml-auto size-7 shrink-0">
               <X size={15} />
             </IconKey>
