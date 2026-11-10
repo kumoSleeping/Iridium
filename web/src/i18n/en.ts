@@ -439,6 +439,7 @@ export const en: Dict = {
   "confirm.loginHint": "A new login of the app, usable once allowed",
   "confirm.asNew": "Join as a new app",
   "confirm.asNewHint": "The app there stays; give this one another name",
+  "confirm.carried": "Agents it carries; tap off those to keep off",
   "confirm.wants": "Asked for; tap off what it does not get",
   "apps.agentsShort": "Agents",
   "apps.scope": "Scope",

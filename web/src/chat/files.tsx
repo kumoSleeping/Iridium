@@ -3,6 +3,7 @@
 // server says the conversation named, and that exist, show; it serves them by the session.
 import { Dialog } from "@base-ui/react/dialog";
 import { Download, FileCode2, FileText, FileX2, X } from "lucide-react";
+import { Shareable } from "../share";
 import { createContext, useCallback, useContext, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { api } from "../api/client";
 import type { FileRef } from "../api/types.gen";
@@ -26,6 +27,14 @@ export function Files({ session, files }: { session: string; files: FileRef[] })
 export const CODE = /\.(tsx?|jsx?|go|rs|py|css|json|ya?ml|toml|sh|md)$/i;
 
 function One({ session, f }: { session: string; f: FileRef }) {
+  return (
+    <Shareable thing={{ what: "file", session, ref: f.ref }} copy={f.path || undefined}>
+      <Bare session={session} f={f} />
+    </Shareable>
+  );
+}
+
+function Bare({ session, f }: { session: string; f: FileRef }) {
   const url = api.fileURL(session, f.ref, false, f.mtime);
   const name = f.name;
   if (f.kind === "image") return <Picture src={f.thumb ? api.thumbURL(session, f.ref, 1024, f.mtime) : url} full={url} name={name} w={f.w} h={f.h} />;

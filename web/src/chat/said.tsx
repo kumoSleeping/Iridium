@@ -6,6 +6,7 @@
 // centred and faint; the agent's words as Markdown with the files they name; tool calls and
 // thoughts folded to a line.
 import { Archive, ArchiveRestore, ArrowUpRight, BookOpen, Bot, BotMessageSquare, ChartColumn, Check, ChevronRight, CircleStop, CircleX, Clock, CloudDownload, CloudUpload, Copy, Cpu, Earth, FileCode, FileDiff, FilePen, Files as FilesIcon, FileText, FlaskConical, FolderGit2, FolderOpen, Folders, FoldVertical, GitBranch, GitCommitHorizontal, GitPullRequest, Globe, Hammer, History, Hourglass, KeyRound, Laptop, List, ListChecks, LoaderCircle, LockKeyhole, MessageCircleQuestionMark, MessageSquarePlus, Monitor, MonitorSmartphone, Network, Package, PencilLine, Plug, RotateCcw, RotateCw, Search, Send, ServerCog, Smartphone, SquareTerminal, Terminal, Trash2, type LucideIcon, UserRound, Workflow as WorkflowIcon, Wrench, X } from "lucide-react";
+import { Shareable } from "../share";
 import { Children, forwardRef, memo, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Popover } from "@base-ui/react/popover";
 import { api } from "../api/client";
@@ -310,7 +311,11 @@ export function Said({ b, session, cwd, source, onJump }: { b: Shown; session: s
       );
     }
     case "assistant":
-      return <Assistant b={b} session={session} />;
+      return (
+        <Shareable thing={{ what: "reply", session, at: b.at }} copy={b.text ?? ""}>
+          <Assistant b={b} session={session} />
+        </Shareable>
+      );
     case "system":
       if (b.event === "iridium") return <Line icon={<RotateCcw size={12} />} title={b.text}>{b.text}</Line>;
       if (b.event === "compact") return <Compaction b={b} />;

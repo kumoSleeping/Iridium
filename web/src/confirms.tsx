@@ -9,7 +9,7 @@ import { KeyRound, Link2, LockKeyhole, Share2, ShieldQuestion, Terminal as TermI
 import { ConfirmIcon, confirmName, confirmTitle, isPair } from "./confirmname";
 import { useRef, useState, type ReactNode } from "react";
 import { api } from "./api/client";
-import type { ExecAgent, Need, Me, Perms } from "./api/types.gen";
+import type { Agent, ExecAgent, Need, Me, Perms } from "./api/types.gen";
 import type { Machine } from "./machines";
 import { CardDetails, CardFrame, CardHead, Facts, MainKey, SecondKey } from "./card";
 import { useMachines, useMe, useWhoList } from "./data";
@@ -18,7 +18,7 @@ import { openChat } from "./route";
 import { showSecret } from "./secrets";
 import { useList } from "./store";
 import { errText, toast } from "./toast";
-import { ago, Switch, titleOf } from "./ui";
+import { agentName, ago, Switch, titleOf } from "./ui";
 
 export { confirmTitle, confirmName, ConfirmIcon };
 
@@ -277,6 +277,9 @@ function PairCard({ c }: { c: Need }) {
   const [asNew, setAsNew] = useState(false);
   const [newName, setNewName] = useState("");
   const [struck, setStruck] = useState<string[]>([]);
+  // The agents it carries, struck: turned off there from the start (app_join).
+  const [off, setOff] = useState<string[]>([]);
+  const carried = (!update && c.pair?.agents?.map((a) => a.agent)) || [];
   const canOwn = saysOwner(me) && (!update || asNew);
   const given = c.wants && struck.length ? { agents: c.wants.agents.filter((a) => !struck.includes(`a:${a}`)), scope: c.wants.scope.filter((p) => !struck.includes(`s:${p}`)) } : undefined;
   const [open, setOpen] = useState(false);
@@ -286,7 +289,7 @@ function PairCard({ c }: { c: Need }) {
     setBusy(allow ? "allow" : "deny");
     try {
       const name = update && asNew ? newName.trim() : "";
-      const r = await api.answerConfirm(c.id, allow, allow ? { owner: canOwn && own, ...(name ? { name } : {}), ...(given ? { perms: given } : {}) } : undefined);
+      const r = await api.answerConfirm(c.id, allow, allow ? { owner: canOwn && own, ...(name ? { name } : {}), ...(given ? { perms: given } : {}), ...(off.length ? { agentsOff: off } : {}) } : undefined);
       setLeaving(true);
       if (r.state === "failed") toast(t("err.confirm"), { error: true, description: r.error });
       else toast(allow ? t("confirm.pairDone", { name: r.name ?? (name || c.name) ?? "" }) : t("toast.denied"));
@@ -331,6 +334,7 @@ function PairCard({ c }: { c: Need }) {
                 )}
               </>
             )}
+            {carried.length > 0 && <Carried agents={carried} off={off} setOff={setOff} />}
             {(!update || asNew) && c.wants && <Wants wants={c.wants} struck={struck} setStruck={setStruck} />}
             {canOwn && (
               <div className="g-fade flex items-center gap-2">
@@ -395,6 +399,25 @@ const ALL = "*";
 const permWord = (v: string, kind: "a" | "s") => (v === ALL ? t(kind === "a" ? "apps.allAgents" : "apps.allScope") : v);
 
 /** What a pairing app asks for, each a chip a person may strike out: what is allowed is the rest. */
+/** The agents a computer asking to pair carries: each a chip, tapped off to turn it off there. */
+function Carried({ agents, off, setOff }: { agents: string[]; off: string[]; setOff: (s: string[]) => void }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-xs text-ink-3">{t("confirm.carried")}</span>
+      <div className="flex flex-wrap gap-1">
+        {agents.map((a) => {
+          const no = off.includes(a);
+          return (
+            <button key={a} type="button" aria-pressed={!no} onClick={() => setOff(no ? off.filter((x) => x !== a) : [...off, a])} className={`g-press h-6 max-w-full truncate rounded-full px-2 text-xs ${no ? "bg-fill text-ink-4 line-through" : "bg-fill-2 text-ink"}`}>
+              {agentName(a as Agent)}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function Wants({ wants, struck, setStruck }: { wants: Perms; struck: string[]; setStruck: (s: string[]) => void }) {
   const chip = (key: string, label: string) => {
     const off = struck.includes(key);

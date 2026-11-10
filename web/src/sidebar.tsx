@@ -814,7 +814,12 @@ function WsRow({ flip, id, name, root, sessions, hung, machine, remote, folders,
                   items={items}
                   // No 删除 (the user, 2026-11-08): a group is the folder its sessions are in; it
                   // goes once none is shown.
-                  foot={<PushFoot levels={wsLevels(id)} i={items.length} />}
+                  foot={
+                    <>
+                      <ShareSubmenu thing={{ what: "place", place: `${machine?.name ?? "主机"}:${root}` }} i={items.length} />
+                      <PushFoot levels={wsLevels(id)} i={items.length + 1} />
+                    </>
+                  }
                 />
               ) : (
                 push && (

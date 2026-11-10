@@ -439,6 +439,7 @@ export const zh = {
   "confirm.loginHint": "应用里的新登录，允许后可用",
   "confirm.asNew": "作为新应用接入",
   "confirm.asNewHint": "原有的应用不变，新起一个名字",
+  "confirm.carried": "带的 agent，点掉不开的",
   "confirm.wants": "申请的权限，点掉不给的",
   "apps.agentsShort": "Agent",
   "apps.scope": "范围",
