@@ -945,9 +945,10 @@ export interface NeedAnswer {
 }
 /**
  * PairRequest is what an app says of itself asking to pair (POST /api/pair; no login): its name,
- * what it is shown as, and what it wants. An executor (ir join) says its machine too. NoShell and
- * AgentShell are what it means to say in its hello (Machine's), so the card tells whether command
- * lines would run there.
+ * what it is shown as, and what it wants. An executor (ir join) says its machine too. Shell is
+ * what it means to say in its hello (Machine's), so the card tells whether command lines would run
+ * there; an older one says NoShell and AgentShell instead (shell: AgentShell without NoShell),
+ * which the Iridium turns into Shell.
  */
 export interface PairRequest {
   name: string;
@@ -956,6 +957,7 @@ export interface PairRequest {
   arch?: string;
   program?: string;
   agents?: ExecAgent[];
+  shell?: boolean;
   noShell?: boolean;
   agentShell?: boolean;
   wants?: Perms; // nil: all
@@ -976,17 +978,14 @@ export interface Machine {
   online: boolean;
   seenAt: number /* int64 */; // when it last connected (ms)
   /**
-   * NoShell: it starts only its agents, so command lines cannot run there (docs/exec.md).
+   * Shell: command lines run there, a person's on the page ($) and agents' (ir sh); else it
+   * starts only its agents (docs/exec.md). Its owner's switch.
    */
-  noShell?: boolean;
+  shell?: boolean;
   /**
    * Latency: the connection's last round trip (ms), by its heartbeat; 0 not known.
    */
   latency?: number /* int64 */;
-  /**
-   * AgentShell: agents here may run command lines there (ir sh).
-   */
-  agentShell?: boolean;
 }
 /**
  * ExecAgent is an agent an executor has.
@@ -1836,6 +1835,20 @@ export interface ShellOutput {
   code?: number /* int */;
   signal?: string;
   err?: string; // once done: what could not run it, if anything
+}
+/**
+ * ShellEvent is one line of an agent's ir sh streamed (POST /api/machines/{id}/shell asked with
+ * Accept: application/x-ndjson, at an executor that speaks run): what the command line wrote, as
+ * it wrote it (Out its stdout, Err its stderr); last (Done), how it ended: its exit code, the
+ * signal (without "SIG") that ended it, or Error, why it could not run or was cut off.
+ */
+export interface ShellEvent {
+  out?: string;
+  err?: string;
+  done?: boolean;
+  exit?: number /* int */;
+  signal?: string;
+  error?: string;
 }
 
 //////////

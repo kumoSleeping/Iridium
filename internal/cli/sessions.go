@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kumoSleeping/iridium/internal/api"
+	"github.com/kumoSleeping/iridium/internal/place"
 )
 
 // Exit codes of wait (and new, send with --wait).
@@ -27,7 +28,7 @@ func cmdNew(e *env, args []string) int {
 		return e.fail(err)
 	}
 	if len(o.pos) < 1 || len(o.pos) > 3 {
-		return e.failf(`usage: ir new <agent> [目录] "任务" [--machine <机器>] [--workspace <组>]`)
+		return e.failf(`usage: ir new <agent> [位置] "任务" [--workspace <组>]（位置：目录，或 应用名:路径、host:路径）`)
 	}
 	req := api.NewSession{Agent: api.Agent(o.pos[0]), Model: o.model, Mode: o.approve, Caller: e.caller()}
 	dir := "."
@@ -499,11 +500,10 @@ func (e *env) listed(all bool) ([]api.Session, []string, error) {
 // subagent's marked, an archived one too).
 func line(s api.Session, ids []string, home string, machines map[string]string) string {
 	cwd := s.Cwd
-	if s.Machine != "" {
-		cwd = cmp.Or(machines[s.Machine], s.Machine) + ":" + cwd // another machine's folder
-	} else if home != "" && (cwd == home || strings.HasPrefix(cwd, home+"/")) {
+	if s.Machine == "" && home != "" && (cwd == home || strings.HasPrefix(cwd, home+"/")) {
 		cwd = "~" + strings.TrimPrefix(cwd, home)
 	}
+	cwd = place.Format(place.Place{App: s.Machine, Path: cwd}, func(id string) string { return machines[id] })
 	title := s.Name
 	if title == "" {
 		title = s.Title

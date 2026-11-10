@@ -20,11 +20,15 @@ import (
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/hold"
 	"github.com/kumoSleeping/iridium/internal/platform"
+	"github.com/kumoSleeping/iridium/internal/remote"
+	"github.com/kumoSleeping/iridium/internal/remote/wire"
 )
 
 // A command line run at a session's machine and folder, without its agent (docs/api.md "命令"):
 // one holder each, in a hold directory "sh-<id>", started by the machine's launcher like an
-// agent's, so an executor runs it the same way and its output comes back the same way.
+// agent's, so an executor runs it the same way and its output comes back the same way. An agent's
+// ir sh at an executor that speaks run (wire.CapRun) runs through that instead, its output
+// streamed (MachineShell).
 
 var (
 	ErrNoShell = errors.New("command lines do not run on that machine")
@@ -83,18 +87,20 @@ func (m *Manager) Shell(ctx context.Context, id, line, cwd string) (api.ShellSta
 }
 
 // MachineShell runs line at machine, in cwd ("" its home), for an agent (ir sh): only at a
-// machine whose owner lets agents run command lines there (AgentShell).
-func (m *Manager) MachineShell(ctx context.Context, machine, line, cwd string) (api.ShellStarted, error) {
+// machine whose owner lets command lines run there (Shell). With stream, at an executor that speaks
+// run (wire.CapRun) it runs so, and its Run is given (read it till it ends); else it runs as a
+// holder, read with ShellRead.
+func (m *Manager) MachineShell(ctx context.Context, machine, line, cwd string, stream bool) (api.ShellStarted, *remote.Run, error) {
 	line = strings.TrimSpace(line)
 	if line == "" {
-		return api.ShellStarted{}, errors.New("no command")
+		return api.ShellStarted{}, nil, errors.New("no command")
 	}
 	if machine == "" || m.o.Remote == nil {
-		return api.ShellStarted{}, ErrOffline
+		return api.ShellStarted{}, nil, ErrOffline
 	}
-	mc := m.o.Remote.Machine(machine)
+	mc := m.o.Remote.Find(machine)
 	if mc == nil {
-		return api.ShellStarted{}, ErrOffline
+		return api.ShellStarted{}, nil, ErrOffline
 	}
 	// Just gone, it may be back in a moment (a proxy's cut, a Mac waking): wait a little for it.
 	hi, ok := mc.Hello()
@@ -102,12 +108,22 @@ func (m *Manager) MachineShell(ctx context.Context, machine, line, cwd string) (
 		time.Sleep(250 * time.Millisecond)
 	}
 	if !ok {
-		return api.ShellStarted{}, ErrOffline
+		return api.ShellStarted{}, nil, ErrOffline
 	}
-	if hi.NoShell || !hi.AgentShell {
-		return api.ShellStarted{}, ErrNoShell
+	if !hi.ShellOn() {
+		return api.ShellStarted{}, nil, ErrNoShell
 	}
-	return m.startShell(ctx, mc.Launcher(), hi.Env, hi.OS, cmp.Or(cwd, hi.Home), line)
+	cwd = cmp.Or(cwd, hi.Home)
+	if stream && mc.Has(wire.CapRun) {
+		r, err := mc.Run(ctx, line, cwd, nil)
+		if err != nil {
+			return api.ShellStarted{}, nil, err
+		}
+		m.o.Logf("shell: running a command line at %s (%s)", machine, r.ID())
+		return api.ShellStarted{Run: r.ID(), Cwd: cwd}, r, nil
+	}
+	st, err := m.startShell(ctx, mc.Launcher(), hi.Env, hi.OS, cwd, line)
+	return st, nil, err
 }
 
 // startShell starts line in cwd with launcher: a holder of its own.
@@ -155,7 +171,7 @@ func (m *Manager) shellAt(machine string) (platform.Launcher, []string, string, 
 	if m.o.Remote == nil {
 		return nil, nil, "", "", ErrOffline
 	}
-	mc := m.o.Remote.Machine(machine)
+	mc := m.o.Remote.Find(machine)
 	if mc == nil {
 		return nil, nil, "", "", ErrOffline
 	}
@@ -163,7 +179,7 @@ func (m *Manager) shellAt(machine string) (platform.Launcher, []string, string, 
 	if !ok {
 		return nil, nil, "", "", ErrOffline
 	}
-	if hi.NoShell {
+	if !hi.ShellOn() {
 		return nil, nil, "", "", ErrNoShell
 	}
 	return mc.Launcher(), hi.Env, hi.OS, hi.Home, nil
@@ -180,7 +196,7 @@ func (m *Manager) isDir(ctx context.Context, machine, dir string) error {
 		}
 		return nil
 	}
-	mc := m.o.Remote.Machine(machine)
+	mc := m.o.Remote.Find(machine)
 	if mc == nil {
 		return ErrOffline
 	}

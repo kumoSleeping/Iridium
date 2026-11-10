@@ -50,11 +50,11 @@
 - `scratch`：执行端自己的一个目录，这边往里写启动用的文件（dsh 的 `--patch`）。
 - `agents`：装了哪些 agent、怎么启动（`argv` 是程序部分，驱动接着加参数）。dsh 直接给 `node` 和 `bin.js`，不经 `.cmd`；`scope` 是它的 `@deepseek-ai` 包目录（这边从里面读预设），`home` 是 `DSH_HOME`。dsh 低于 0.2.2 不给开。Codex 给 `codex` 本身（npm 装的给 `node` 和 `codex.js`），不给 `home`：这边看那边环境里的 `CODEX_HOME`。
 - `holds`：它手上全部进程（`{hold, outSize, inSeq, exit}`，`inSeq` 是写进去的最后一行的序号）。这边据此对账：哪些还在跑、输入从哪儿续；这边起过、它却没有的，算进程没了。
-- `noShell`：执行端的主人选了只启动自己的 agent（`ir join --no-shell`，dsh 插件配置 `shell: false`）。这时 `hold.start` 的 `argv` 必须以某个 agent 的 `argv` 开头，否则报 `denied`；网页上这台机器的会话不能执行命令（`docs/api.md`“命令”）。
-- `agentShell`：这边的 agent 也能用 `ir sh` 在那台机器上执行命令，不只是网页上的人（`ir join --agent-shell`，dsh 插件配置 `agentShell: true`）。默认没有。
-- `caps`（2026-11-09）：会讲的可选部分。`held`：`held.list`、`held.send`；`held.features`：`held.get`、`held.set` 和事件 `held.changed`（见“可选”“附加功能”）。dsh 插件在 dsh 有 `agents` 服务时报这两项。没有的（旧插件、`ir join`）照旧：`dsh.open`、`dsh.prompt`，没有附加功能。
+- `shell`（2026-11-10）：命令行开关，主人定，默认关（`ir join --shell`）。开着：网页上的人（`$`）和这边 agent 的 `ir sh` 都能在那台机器上执行命令；关着：只启动自己的 agent，`hold.start` 的 `argv` 必须以某个 agent 的 `argv` 开头，否则报 `denied`，`run` 也报 `denied`。没有 `shell` 的旧执行端按旧的两个字段算：`shell = agentShell && !noShell`（旧的 `noShell` 只启动 agent，`agentShell` 让 agent 也能 `ir sh`）。新执行端两套都报，给旧 Iridium 看。dsh 插件仍报旧的两个。
+- `machineId`（2026-11-10）：这台电脑标识的哈希（Linux `/etc/machine-id`，Mac `IOPlatformUUID`，Windows `MachineGuid`；`sha256("iridium machine " + 标识)` 的前 16 字节，hex）。和这边自己的一样，就是主机上的应用：去掉它报的 agent（主机的 agent 只归主机），连接照收。环境变量 `IRIDIUM_MACHINE_ID` 换掉标识（测试、和主实例在同一台电脑的 ir-test 用；`none` 表示没有）。只防误操作，不防伪造。
+- `caps`（2026-11-09）：会讲的可选部分。`held`：`held.list`、`held.send`；`held.features`：`held.get`、`held.set` 和事件 `held.changed`（见“可选”“附加功能”）。dsh 插件在 dsh 有 `agents` 服务时报这两项。没有的（旧插件、旧 `ir join`）照旧：`dsh.open`、`dsh.prompt`，没有附加功能。`run`（2026-11-10）：见“命令”；`ir join`、exec-mini 报，dsh 插件不报。
 
-**接入就是让这边能在那台机器上以那个账户运行程序。** `hold.start` 的 `argv` 由这边定，执行端不加限制（`noShell` 除外）；`roots` 只管文件读写，管不住进程。所以同不同意由那台机器的主人决定：装插件、跑 `ir join` 就是同意；不想让这边执行命令，就开 `noShell`。
+**接入就是让这边能在那台机器上以那个账户运行程序。** `hold.start` 的 `argv` 由这边定，执行端不加限制（`shell` 关着时除外）；`roots` 只管文件读写，管不住进程。所以同不同意由那台机器的主人决定：装插件、跑 `ir join` 就是同意；不想让这边执行命令，就关着 `shell`（默认）。
 
 ## 进程（必需）
 
@@ -76,6 +76,24 @@
 
 - stdout 原样追加到它那边的 `out.log`，stderr 另存（这边要时用 `fs.read` 读）。
 - 执行端自己退出时，它启动的进程跟着结束（管道断了）。这边当作崩溃，照“崩溃续跑”接上。
+
+## 命令（可选，`run`，2026-11-10）
+
+agent 的 `ir sh`：每条命令一个新进程，不经托管进程，不写文件，边跑边推回。执行端在 `caps` 里报 `run` 才用；没报的（dsh 插件、旧执行端）照旧当一个托管进程（`sh-<ID>`）跑，这边轮询它的输出。网页上的 `$` 仍走托管进程。
+
+| 请求 | 参数 → 回答 |
+|---|---|
+| `run` | `{run, line, cwd?, env?}` → `{}`：`run` 是这边定的 ID；`line` 交给那边的 shell（`/bin/sh -c`，Windows `cmd.exe /d /s /c`）；`cwd` 不给是家目录；`env` 同 `hold.start`（占位的密钥换回本机的值），不给用执行端自己的环境（去掉 `IRIDIUM_*`）。`shell` 关着报 `denied`，ID 重了报 `exists` |
+| `run.stop` | `{run}` → `{}`：TERM 整棵进程树，2 秒后还在就 KILL；已结束的不报错 |
+
+| 事件 | 参数 |
+|---|---|
+| `run.out` | `{run, data, err?}`：写出的内容，来多少推多少（UTF-8，不切开字符）；`err` 为真是 stderr |
+| `run.exit` | `{run, code, signal?, error?}`，最后一条：退出码，或结束它的信号（不带 `SIG`）；起不来时 `code` 是 127，`error` 说原因 |
+
+- 连接断了，执行端结束这条连接要的全部命令；这边告诉 `ir sh` 连接断了、命令已停。
+- 进程退出后它留在后台、还占着输出的（`x &`），2 秒后一起结束。
+- 这边：`POST /api/machines/{id}/shell` 带 `Accept: application/x-ndjson`，执行端有 `run` 时回 NDJSON 流（`api.ShellEvent`：`out`、`err`，最后一行 `done` 带 `exit`、`signal` 或 `error`）；没有 `run` 时回 `ShellStarted`，照旧轮询 `GET /api/shell/{run}`。`ir sh` 断开（`--timeout` 到了）就 `run.stop`。
 
 ## 文件（必需）
 
@@ -119,7 +137,7 @@
 
 取代 11-08、11-09 的“远端组全部列出”“看哪台”和远端组里的本机协调者。（服务端：`Session.own`、`detach`、归档连带、不推送、DSH 工作区的会话数，见 `api.md`；会话列表、“+”、@、对话顶上的位置已做，2026-11-10）
 
-- 默认只列本机。远端组（`机器:路径`）里有人开的、没归档的会话才列；不另记状态。人开的：网页“+”开的、你在终端里 `ir new --machine` 开的、从拉起者下面拖出来的；agent 开的不算。列出来的组里会话全列。
+- 默认只列本机。远端组（`机器:路径`）里有人开的、没归档的会话才列；不另记状态。人开的：网页“+”开的、你在终端里 `ir new <agent> 应用名:路径` 开的、从拉起者下面拖出来的；agent 开的不算。列出来的组里会话全列。
 - 不做“添加”键：在哪开会话，哪就显示。顶上的“+”选了远端机器，列它的 DSH 工作区（名字、路径、会话数，不标显示与否），点一行就在那里开 agent，这个组随之列出，里面原有的会话一起出来；没有 dsh 的机器用“其他文件夹…”。不想看了，组右键“归档这里的 N 个会话”。插件里关了“同步到 Iridium”的工作区不在这个列表里。
 - 列出来的组：里面的会话全列，在那台机器上直接用 DSH 开的也算（约 30 秒内出现，“同步 DSH”立刻）。
 - 不列的：没列的组，会话列表不列、跳转框搜不到、不推送；Desktop 里不在任何工作区的会话也不列。只是这边不列，照常扫描、托管。
@@ -128,7 +146,7 @@
 - 派出的会话：会话里用 `ir new` 开的（本机、远端都算）一律挂在拉起者（`launcher`）下面，不管它所在的组列没列；链式拉起挂在最上面那个下面。从列表里拖出来的按自己的目录归组，算人开的，以后不再挂回去（它所在的组拆开时，它照样按手动放进自己目录的组）。拉起者那一行收起时写子会话数和汇总状态。拉起者归档，挂着的一起归档，恢复时一起恢复；拖出来的不跟。
 - 会话列表（2026-11-10）：挂着的往里缩一级，远端的 logo 右下角一朵云、名字后面带头像；子代理照旧只在干活时出来，挂着的一直在。拉起者那一行左边有箭头，点了收起，收起时行尾写个数和灯（有要你处理的琥珀，否则有在跑的绿）；默认展开。拖出来：拖到列表里拉起者那一片以外的任何地方松手；手指用会话菜单的“单独列出”（只在挂着的行上）。拉起者没列出来的（归档了、不在、链成环、所在组没列）当人开的，单独列在自己的组里，组也因此列出；它和拉起者在同一个组时，组列出来拉起者也在，就照常挂在下面；这一步先做，之后拉起者仍没列出的才单独列（一次定下，组只为单独列着的列出）。拉起者是子代理的也单独列。环里 ID 最小的那个单独列。组的“归档这里的 N 个会话”的 N 算上挂在这些会话下面的。
 - 归档里：本机的、人开的、列出来的组里的、有拉起者的；没人开的远端组里的（DSH Desktop 那边归档的）不进。跳转框、标题和图标上的未读数也不算没列出的。没列出的会话请求的确认（邀请、TOKEN）照样单独一行在最上面，免得 agent 卡住。
-- 权限：配对就是授权，没有按文件夹、按提及给的授权；能用哪些位置由终端范围管（`docs/next/k_bot.md` 第 5 节）。远端会话回头用 `ir` 操作这边，算在那个执行端 Bot 名下。`ir sh` 仍要 `agentShell`，`noShell` 照旧。
+- 权限：配对就是授权，没有按文件夹、按提及给的授权；能用哪些位置由终端范围管（`docs/next/k_bot.md` 第 5 节）。远端会话回头用 `ir` 操作这边，算在那个执行端 Bot 名下。`ir sh` 要那台机器开着 `shell`。
 - 迁移：用 `at` 开的旧协调者回到它本机目录的组；组的 `hidden` 列不再用。
 
 ## 平台差异
@@ -145,9 +163,9 @@
 
 ## 开发测试用的 Bot
 
-`scripts/dev/shell-bot.mjs`：开发者自己的 Mac 上测 `ir sh` 用的小脚本，不进发布包。它借用 dsh 插件的执行端，配对一次后只提供命令执行（`agentShell`），不带 agent。这种 Bot 谁都能照协议写一个；不想写代码就用 `ir join <地址> --agent-shell --no-agents`，效果一样。
+`scripts/dev/shell-bot.mjs`：开发者自己的 Mac 上测 `ir sh` 用的小脚本，不进发布包。它借用 dsh 插件的执行端，配对一次后只提供命令执行（`agentShell`，按 `shell` 开着算），不带 agent。这种 Bot 谁都能照协议写一个；不想写代码就用 `ir join <地址> --shell --no-agents`，效果一样。
 
-`scripts/dev/exec-mini.py`：只用 Python 标准库（WebSocket 也是手写）的最小执行端，证明照协议就能接入：配对、握手报本机找到的 agent（默认 pi）、进程、文件、心跳、重连；只开自己的 agent（`noShell`）。`python3 -I scripts/dev/exec-mini.py https://<Iridium> [名字] [agent…]`。要带自己的 User-Agent：Cloudflare 拒 Python 默认的（1010）。
+`scripts/dev/exec-mini.py`：只用 Python 标准库（WebSocket 也是手写）的最小执行端，证明照协议就能接入：配对、握手报本机找到的 agent（默认 pi）、进程、文件、心跳、重连、`run`；默认只开自己的 agent，加 `--shell` 才执行命令。只有 401 才删 TOKEN 重新配对，403（带原因码）等一会儿再连。`python3 -I scripts/dev/exec-mini.py https://<Iridium> [名字] [agent…] [--shell]`。要带自己的 User-Agent：Cloudflare 拒 Python 默认的（1010）。
 
 ## dsh 插件
 
@@ -229,12 +247,12 @@
 
 ## 远端的 ir（用户，2026-11-08）
 
-跨机器的多 agent 协同：本机的主 agent 经 @ 知道远端的位置，用 `ir new --machine` 给那边的 dsh 派活、看结果、搬文件；派出的会话挂在它下面（“远端工作区”）。那边的会话也能回过来找它。
+跨机器的多 agent 协同：本机的主 agent 经 @ 知道远端的位置，用 `ir new <agent> 应用名:路径` 给那边的 dsh 派活、看结果、搬文件；派出的会话挂在它下面（“远端工作区”）。那边的会话也能回过来找它。
 
-- `ir new … --machine <机器>` 在那台机器上开（目录按那边的写法，不给就是那边的家目录）；`--workspace <组>` 放进指定的组。会话里跑的，新会话挂在拉起者下面。`ir ls --here` 只列自己组的会话；`ir ls` 里别的机器的会话目录写成 `机器名:路径`。
+- `ir new <agent> 应用名:路径 "任务"` 在那台机器上开（路径按那边的写法，`~` 和空是那边的家目录；`host:路径` 是主机；不带前缀是调用者自己那台）。`--machine <机器>` 还认，不再写进帮助。`--workspace <组>` 放进指定的组。会话里跑的，新会话挂在拉起者下面。`ir ls --here` 只列自己组的会话；`ir ls`、`ir ws` 的目录一律带前缀：`host:~/ir`、`mac:/Users/k/x`。位置的写法见 `internal/place`（网页 `web/src/places.ts`，同一张用例表）。
 - 那边的 `ir`：执行端握手声明 `irClient`，这边每次在那边启动 agent 时生成一个只属于这个会话的 TOKEN（前缀 `irs_`，托管目录只存它的哈希，重启一次换一个），经 `IRIDIUM_TOKEN` 给执行端；执行端在这个会话的托管目录里放一个 `ir`（`holds/<会话>/bin/`），排在它 PATH 的最前面，地址（自己连的那个，`IRIDIUM_URL` 给了就用它）和 TOKEN 直接写在里面：agent 跑的命令不一定拿得到它的环境变量（dsh 跑命令就不带 `IRIDIUM_*`，2026-11-08 实测）。dsh 插件的是 `ir.js`（`ir`、`ir.cmd` 用插件所在的 node 跑；DSH Desktop 里是它自己的程序，带 `ELECTRON_RUN_AS_NODE`）；`ir join` 的是这个二进制本身（脚本再执行 `bin/.ir/ir` 这个链接，按名字 `ir` 进命令行模式）。
 - 那边的 `ir` 只转发：把参数和当前目录发到 `POST /api/cli`，这边照常跑 `ir`，输出一行一行流回去，最后是退出码。请求算那台机器的 Bot 发的、代表这个会话：Bot 的规则照旧（没勾“本人的机器”的不能开 Claude、不能给 Claude 会话发消息），算 agent 发的（消息并进对方当前回合，不能放行 auto 模式拦下的步骤），信里写成来自这个会话。Bot 被删，它的会话 TOKEN 一起失效。
-- 那边能用的：`new`（目录是那边的，`--machine` 可开到别的机器）、`send`、`wait`、`read`、`ls`、`find`、`stop`、`archive`、`unarchive`、`rename`、`ws`、`machines`。不能用：`cp`、`files`、`sh`、`run`、`secret`、`bot`、`usage` 和管理命令，这些碰的是 Iridium 所在机器的文件、命令和秘密，留给本机的会话和面板。
+- 那边能用的：`new`（不带前缀的目录是那边的，带前缀可开到别的机器）、`send`、`wait`、`read`、`ls`、`find`、`stop`、`archive`、`unarchive`、`rename`、`ws`、`machines`。不能用：`cp`、`files`、`sh`、`run`、`secret`、`bot`、`usage` 和管理命令，这些碰的是 Iridium 所在机器的文件、命令和秘密，留给本机的会话和面板。
 - 系统提示：执行端有 `ir` 的，给那边能用的命令（`irhelp.Remote`）；没有的，不提 `ir`。都不教文件链接（那边的 `ir` 没有 `attach`，文件网页取不到）。
 
 ## 暂不做

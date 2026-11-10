@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,7 +13,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +20,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/agents"
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/config"
+	"github.com/kumoSleeping/iridium/internal/place"
 )
 
 // env is one run of ir: where it writes, and its way to the daemon.
@@ -90,7 +91,8 @@ type apiError struct {
 
 func (e *apiError) Error() string { return e.msg }
 
-func (e *env) request(method, path string, body any) (*http.Response, error) {
+// request is a request to the daemon; hdr, headers' names and values in turn.
+func (e *env) request(method, path string, body any, hdr ...string) (*http.Response, error) {
 	var r io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -105,6 +107,9 @@ func (e *env) request(method, path string, body any) (*http.Response, error) {
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	for i := 0; i+1 < len(hdr); i += 2 {
+		req.Header.Set(hdr[i], hdr[i+1])
 	}
 	// The session ir runs in: what an agent does through it counts to that session's terminal.
 	if c := e.caller(); c != "" && e.at == nil {
@@ -165,7 +170,7 @@ type opts struct {
 	n       int  // ir read -n: how many messages
 	model   string
 	approve string
-	machine string // ir new --machine: the Bot whose machine it runs at
+	machine string // ir new --machine (hidden, the older way): the app whose computer it runs at
 	group   string // ir new --workspace: the group it goes in
 	attach  []string
 	pos     []string
@@ -232,19 +237,20 @@ func parse(args []string, allowed string) (opts, error) {
 	return o, nil
 }
 
-var peerPath = regexp.MustCompile(`^([A-Za-z0-9][A-Za-z0-9_.-]{0,31}):(.*)$`)
-
-// errPeer: a machine:path or machine/id names a peer, and peers are not connected yet.
+// errPeer: a place at another app's computer (<name>:<path>, internal/place) where only one here
+// is taken.
 type errPeer string
 
-func (e errPeer) Error() string { return "peer not connected: " + string(e) }
+func (e errPeer) Error() string { return "a place at " + string(e) + ", not here" }
 
-// localPath is arg as an absolute local path; a machine:path is an errPeer.
+// localPath is arg as an absolute path here (host:… too, the host's own name); a place at
+// another app's computer is an errPeer.
 func localPath(arg string) (string, error) {
-	if !strings.HasPrefix(arg, "/") && !strings.HasPrefix(arg, ".") && !strings.HasPrefix(arg, "~") {
-		if m := peerPath.FindStringSubmatch(arg); m != nil {
-			return "", errPeer(m[1])
+	if name, path, ok := place.Split(arg); ok {
+		if !place.IsHost(name) {
+			return "", errPeer(name)
 		}
+		arg = cmp.Or(path, "~")
 	}
 	if arg == "~" || strings.HasPrefix(arg, "~/") {
 		home, err := os.UserHomeDir()
@@ -256,22 +262,20 @@ func localPath(arg string) (string, error) {
 	return filepath.Abs(arg)
 }
 
-// pathArg is a path ir cp and files take: machine:path, a Bot's machine and its own path there
-// (as given; "" its home), or one here, made absolute.
+// pathArg is a path ir cp and files take: <app>:<path>, an app's computer by its name and its own
+// path there (as given; "" its home), or one here (host:… too), made absolute.
 func pathArg(arg string) (machine, path string, err error) {
 	path, err = localPath(arg)
 	var peer errPeer
 	if errors.As(err, &peer) {
-		return string(peer), peerPath.FindStringSubmatch(arg)[2], nil
+		_, path, _ = place.Split(arg)
+		return string(peer), path, nil
 	}
 	return "", path, err
 }
 
 // resolve is the full id of the session a unique prefix names.
 func (e *env) resolve(arg string) (string, error) {
-	if m, _, ok := strings.Cut(arg, "/"); ok {
-		return "", errPeer(m)
-	}
 	if arg == "" {
 		return "", errors.New("no session id")
 	}

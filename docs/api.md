@@ -222,9 +222,9 @@
 
 - 每条命令一个进程：Linux、macOS 是 `/bin/sh -c`（stderr 并进 stdout），Windows 是 `cmd.exe /c`（stderr 在结束时给）。stdin 不接，读 stdin 的命令要手动停止。全屏程序（`vim`、`top`）不支持。
 - 进程照托管 agent 的方式起（本机的 `platform.Launcher`，别的机器经执行端），目录是托管目录下的 `sh-<id>`；结束 10 分钟后删。
-- 机器不在线：409；机器的主人关了命令（`Machine.noShell`）：403；目录不存在：404。
+- 机器不在线：409；机器的主人关着命令行（`Machine.shell` 为假）：403 `no_shell`；目录不存在：404。
 
-agent 用 `ir sh <机器> [--cwd 目录] [--timeout 2m] -- 命令`（`POST /api/machines/{id}/shell`，`{id}` 是机器 ID 或名字，`cwd` 省略为那边的家目录）：等它结束，原样打出输出，退出码就是它的；超时停掉它，退出码 124。只在执行端声明了 `agentShell` 的机器上能用（主人的选择，默认不能；否则 403）。`ir machines` 列出机器：名字、系统、在线与否、能否 `ir sh`、家目录。系统提示里只有 `ir --help` 的一行。
+agent 用 `ir sh <机器>[:目录] [--cwd 目录] [--timeout 2m] -- 命令`（`POST /api/machines/{id}/shell`，`{id}` 是机器 ID 或名字，`cwd` 省略为那边的家目录；没有这台机器 422 `no_such_machine`）：原样打出输出，退出码就是它的；超时停掉它，退出码 124。执行端有 `run` 时请求带 `Accept: application/x-ndjson`，回 `ShellEvent` 的 NDJSON 流，边跑边出（`docs/exec.md`“命令”）；没有时照旧回 `ShellStarted` 再轮询。只在主人开了 `shell` 的机器上能用（默认关；否则 403 `no_shell`）。`ir machines` 列出机器：名字、系统、在线与否、能否 `ir sh`、家目录。系统提示里只有 `ir --help` 的一行。
 
 ## 会话设置
 

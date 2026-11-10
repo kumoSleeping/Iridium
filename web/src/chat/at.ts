@@ -4,7 +4,7 @@
 // nothing, notifies no one, grants nothing.
 import type { DshWorkspace, Machine, Session, Workspace } from "../api/types.gen";
 import { homeAt } from "../machines";
-import type { Place } from "../places";
+import { isHostName, splitPlace, type Place } from "../places";
 import { listedRemote, machineOf, remotePath, standing } from "../tree";
 import { tilde } from "../ui";
 import { atSessions } from "./refs";
@@ -121,20 +121,23 @@ export function atSections(d: AtData, q: string): AtSection[] {
 }
 
 /** A path typed after the @: at machine m (none: this machine), the folder dir it goes into and the
- *  start of a name in it (part). /… and ~/… are this machine's; <machine>:… another's, by its name
- *  (any case) or ID, its path either way separated. Else none. */
+ *  start of a name in it (part). /… and ~/… are this machine's, so is host:… (主机:…); <machine>:…
+ *  another's, by its name (any case) or ID, its path either way separated. Else none. */
 export type AtPath = { m?: Machine; dir: string; part: string };
 export function atPath(q: string, machines: Machine[], home?: string): AtPath | null {
   let m: Machine | undefined;
   let rest: string;
   if (q.startsWith("/") || q.startsWith("~")) rest = q;
   else {
-    const i = q.indexOf(":");
-    if (i <= 0) return null;
-    const name = q.slice(0, i);
-    m = machines.find((x) => x.id === name) ?? machines.find((x) => x.name.toLowerCase() === name.toLowerCase());
-    if (!m) return null;
-    rest = q.slice(i + 1).replaceAll("\\", "/");
+    const cut = splitPlace(q);
+    if (!cut) return null;
+    const name = cut.name;
+    if (isHostName(name)) rest = cut.path;
+    else {
+      m = machines.find((x) => x.id === name) ?? machines.find((x) => x.name.toLowerCase() === name.toLowerCase());
+      if (!m) return null;
+      rest = cut.path.replaceAll("\\", "/");
+    }
   }
   const h = m ? homeAt(m) : home;
   if (rest === "" || rest === "~") rest = "~/";

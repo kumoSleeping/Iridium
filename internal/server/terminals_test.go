@@ -36,6 +36,12 @@ func start(t *testing.T) *live { return startWith(t, nil) }
 func startWith(t *testing.T, ready func(*Server, config.Config, string)) *live {
 	t.Helper()
 	s, cfg, work := setup(t)
+	return serveLive(t, s, cfg, work, ready)
+}
+
+// serveLive serves s (setupWith's) as start does, with ready run on it first.
+func serveLive(t *testing.T, s *Server, cfg config.Config, work string, ready func(*Server, config.Config, string)) *live {
+	t.Helper()
 	if ready != nil {
 		ready(s, cfg, work)
 	}

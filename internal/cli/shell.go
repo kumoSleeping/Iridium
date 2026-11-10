@@ -1,19 +1,22 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/kumoSleeping/iridium/internal/api"
+	"github.com/kumoSleeping/iridium/internal/place"
 )
 
 // ir machines, ir sh: the other machines connected here, and a command line at one, for an agent
 // (docs/api.md "命令"). ir sh waits for it, prints what it prints, and exits with its code.
 
-const shUsage = "usage: ir sh <machine> [--cwd dir] [--timeout 2m] -- command …"
+const shUsage = "usage: ir sh <machine>[:dir] [--cwd dir] [--timeout 2m] -- command …"
 
 // exitTimeout: ir sh's command ran out of time and was stopped (as timeout(1)).
 const exitTimeout = 124
@@ -32,7 +35,7 @@ func cmdMachines(e *env, args []string) int {
 			state = "online"
 		}
 		sh := "no ir sh"
-		if m.AgentShell {
+		if m.Shell {
 			sh = "ir sh"
 		}
 		fmt.Fprintf(e.out, "%s\t%s/%s\t%s\t%s\t%s\n", m.Name, m.OS, m.Arch, state, sh, m.Home)
@@ -80,11 +83,30 @@ func cmdSh(e *env, args []string) int {
 	if machine == "" || line == "" {
 		return e.failf("%s", shUsage)
 	}
-	var st api.ShellStarted
-	if err := e.do("POST", "/api/machines/"+url.PathEscape(machine)+"/shell", api.ShellRun{Line: line, Cwd: cwd}, &st); err != nil {
-		return e.fail(err)
+	// A place (mac:~/dir) is the machine and the folder there.
+	if name, path, ok := place.Split(machine); ok {
+		machine = name
+		if cwd == "" {
+			cwd = path
+		}
+	}
+	if place.IsHost(machine) {
+		return e.failf("ir sh runs at another app's computer; at the host, run the command line yourself")
 	}
 	deadline := time.Now().Add(timeout)
+	// Streamed, at an executor that speaks run; else (an older one) a holder, read by polling.
+	resp, err := e.request("POST", "/api/machines/"+url.PathEscape(machine)+"/shell", api.ShellRun{Line: line, Cwd: cwd}, "Accept", ndjson)
+	if err != nil {
+		return e.fail(err)
+	}
+	defer resp.Body.Close()
+	if strings.HasPrefix(resp.Header.Get("Content-Type"), ndjson) {
+		return e.shStream(resp.Body, deadline, timeout)
+	}
+	var st api.ShellStarted
+	if err := json.NewDecoder(resp.Body).Decode(&st); err != nil {
+		return e.fail(err)
+	}
 	var from int64
 	for wait := 100 * time.Millisecond; ; {
 		var o api.ShellOutput
@@ -116,6 +138,44 @@ func cmdSh(e *env, args []string) int {
 			wait = min(wait*3/2, time.Second)
 		}
 		time.Sleep(wait)
+	}
+}
+
+const ndjson = "application/x-ndjson"
+
+// shStream prints a run's ShellEvent lines as they come, and exits with its code; past deadline
+// it hangs up, which stops the run.
+func (e *env) shStream(body io.ReadCloser, deadline time.Time, timeout time.Duration) int {
+	timer := time.AfterFunc(time.Until(deadline), func() { body.Close() })
+	dec := json.NewDecoder(body)
+	for {
+		var ev api.ShellEvent
+		if err := dec.Decode(&ev); err != nil {
+			if !timer.Stop() {
+				fmt.Fprintf(e.err, "ir: still running after %s: stopped (--timeout for more)\n", timeout)
+				return exitTimeout
+			}
+			return e.failf("the command line's output ended early: %v", err)
+		}
+		fmt.Fprint(e.out, ev.Out)
+		fmt.Fprint(e.err, ev.Err)
+		if !ev.Done {
+			continue
+		}
+		timer.Stop()
+		switch {
+		case ev.Exit != nil && ev.Error == "":
+			return *ev.Exit
+		case ev.Error != "":
+			fmt.Fprintf(e.err, "ir: %s\n", ev.Error)
+			if ev.Exit != nil {
+				return *ev.Exit
+			}
+			return exitError
+		case ev.Signal != "":
+			return e.failf("ended by %s", ev.Signal)
+		}
+		return exitError
 	}
 }
 

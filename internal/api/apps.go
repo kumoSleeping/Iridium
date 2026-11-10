@@ -251,9 +251,10 @@ type NeedAnswer struct {
 }
 
 // PairRequest is what an app says of itself asking to pair (POST /api/pair; no login): its name,
-// what it is shown as, and what it wants. An executor (ir join) says its machine too. NoShell and
-// AgentShell are what it means to say in its hello (Machine's), so the card tells whether command
-// lines would run there.
+// what it is shown as, and what it wants. An executor (ir join) says its machine too. Shell is
+// what it means to say in its hello (Machine's), so the card tells whether command lines would run
+// there; an older one says NoShell and AgentShell instead (shell: AgentShell without NoShell),
+// which the Iridium turns into Shell.
 type PairRequest struct {
 	Name       string      `json:"name"`
 	Type       string      `json:"type,omitempty"` // computer, bot, script…: display only
@@ -261,6 +262,7 @@ type PairRequest struct {
 	Arch       string      `json:"arch,omitempty"`
 	Program    string      `json:"program,omitempty"`
 	Agents     []ExecAgent `json:"agents,omitempty"`
+	Shell      *bool       `json:"shell,omitempty"`
 	NoShell    bool        `json:"noShell,omitempty"`
 	AgentShell bool        `json:"agentShell,omitempty"`
 	Wants      *Perms      `json:"wants,omitempty"` // nil: all
@@ -279,12 +281,11 @@ type Machine struct {
 	Agents []ExecAgent `json:"agents"`
 	Online bool        `json:"online"`
 	SeenAt int64       `json:"seenAt"` // when it last connected (ms)
-	// NoShell: it starts only its agents, so command lines cannot run there (docs/exec.md).
-	NoShell bool `json:"noShell,omitempty"`
+	// Shell: command lines run there, a person's on the page ($) and agents' (ir sh); else it
+	// starts only its agents (docs/exec.md). Its owner's switch.
+	Shell bool `json:"shell,omitempty"`
 	// Latency: the connection's last round trip (ms), by its heartbeat; 0 not known.
 	Latency int64 `json:"latency,omitempty"`
-	// AgentShell: agents here may run command lines there (ir sh).
-	AgentShell bool `json:"agentShell,omitempty"`
 }
 
 // ExecAgent is an agent an executor has.

@@ -33,13 +33,13 @@ import (
 )
 
 // Usage is ir join's help.
-const Usage = `usage: ir join <address> [--name name] [--roots dir,…] [--install | --uninstall]
+const Usage = `usage: ir join <address> [--name name] [--roots dir,…] [--shell] [--install | --uninstall]
   Run agents for another Iridium: pair once (a code to match on its page), then stay connected.
   --name     this machine's name there (default: the host name, 12 characters at most)
   --roots    the directories it may read and write files under (default: the home directory)
-  --no-shell start only its agents: no command line from that Iridium runs here
-  --agent-shell  its agents may run command lines here too (ir sh), not only a person on its page
-  --no-agents    offer none of the agents here (with --agent-shell: a machine for ir sh alone)
+  --shell    command lines from that Iridium run here: a person's on its page and its agents' (ir sh);
+             without it only the agents start here
+  --no-agents    offer none of the agents here (with --shell: a machine for ir sh alone)
   --install  start at login (Windows: a scheduled task; macOS: a LaunchAgent; Linux: a systemd user unit)
   --uninstall  stop starting at login
 `
@@ -49,8 +49,9 @@ type Options struct {
 	URL   string // the Iridium: https://host[:port]
 	Name  string
 	Roots []string
-	// NoShell: only the agents start here, no command line (docs/exec.md).
-	NoShell, AgentShell bool
+	// Shell: command lines run here, a person's on that Iridium's page and its agents' (ir sh);
+	// else only the agents start here (docs/exec.md).
+	Shell bool
 	// NoAgents: offer none of the agents found here.
 	NoAgents bool
 	// Base is where joins keep their state (BaseDir): tokens/<key>, the TOKENs; <key>/, the
@@ -75,6 +76,9 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(io.Discard)
 	name := fs.String("name", "", "")
 	roots := fs.String("roots", "", "")
+	shell := fs.Bool("shell", false, "")
+	// The older two, still taken (an installed resident's command line has them): shell is
+	// --agent-shell without --no-shell.
 	noShell := fs.Bool("no-shell", false, "")
 	agentShell := fs.Bool("agent-shell", false, "")
 	noAgents := fs.Bool("no-agents", false, "")
@@ -108,7 +112,7 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "ir join: %v\n", err)
 		return 2
 	}
-	o := Options{URL: u, Name: *name, NoShell: *noShell, AgentShell: *agentShell, NoAgents: *noAgents, Base: *base, Out: stdout, Resident: *resident}
+	o := Options{URL: u, Name: *name, Shell: (*shell || *agentShell) && !*noShell, NoAgents: *noAgents, Base: *base, Out: stdout, Resident: *resident}
 	if o.Base == "" {
 		o.Base, err = BaseDir()
 	} else {
@@ -304,7 +308,7 @@ func (o *Options) Run(ctx context.Context) error {
 		}
 		ex, err := executor.New(executor.Options{
 			URL: wsURL(o.URL), Token: tok, State: o.stateDir(), Roots: o.Roots, Deny: []string{o.tokenDir()},
-			Agents: o.Agents, NoShell: o.NoShell, AgentShell: o.AgentShell, Program: o.program(), HTTPClient: o.HTTP, Logf: o.logf, IR: selfExe(),
+			Agents: o.Agents, Shell: o.Shell, Program: o.program(), HTTPClient: o.HTTP, Logf: o.logf, IR: selfExe(),
 			Connected: func(name string) { o.say("已连接 %s（%s）", o.URL, name) },
 		})
 		if err != nil {
@@ -375,7 +379,7 @@ func (o *Options) pair(ctx context.Context) (string, error) {
 	if name == "" {
 		name = MachineName()
 	}
-	who := api.PairRequest{Name: name, Type: "computer", OS: runtime.GOOS, Arch: runtime.GOARCH, Program: o.program(), NoShell: o.NoShell, AgentShell: o.AgentShell && !o.NoShell}
+	who := api.PairRequest{Name: name, Type: "computer", OS: runtime.GOOS, Arch: runtime.GOARCH, Program: o.program(), Shell: &o.Shell, NoShell: !o.Shell, AgentShell: o.Shell}
 	const path = "/api/pair"
 	if o.Bot {
 		who = api.PairRequest{Name: name, Type: o.Type, Program: o.Program}

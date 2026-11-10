@@ -51,7 +51,7 @@ const typeName = (a: App) => {
 };
 
 /** Whether command lines run at a machine: none, a person's on the page, or agents' too (ir sh). */
-const shellOf = (m: Machine) => (m.noShell ? "none" : m.agentShell ? "agents" : "page");
+const shellOf = (m: Machine) => (m.shell ? "agents" : "none");
 
 /** A machine's line: its system and agents, e.g. "Linux · claude 2.1 · codex". */
 const machineLine = (m: Machine) => [systems[m.os] ?? m.os, ...m.agents.map((a) => [a.agent, a.version].filter(Boolean).join(" "))].filter(Boolean).join(" · ");

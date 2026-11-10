@@ -189,7 +189,7 @@ func TestExecPair(t *testing.T) {
 	}
 	cf := l.pending()
 	if cf.Kind != api.NeedAppUpdate || cf.Code != p.Code || cf.App == nil || cf.App.ID != old.App.ID || cf.Pair == nil || cf.Pair.Type != "computer" ||
-		cf.Pair.OS != "windows" || cf.Pair.Agents[0].Version != "0.2.2" || !cf.Pair.AgentShell || cf.Pair.NoShell {
+		cf.Pair.OS != "windows" || cf.Pair.Agents[0].Version != "0.2.2" || cf.Pair.Shell == nil || !*cf.Pair.Shell || cf.Pair.AgentShell {
 		t.Fatalf("the card: %+v %+v", cf, cf.Pair)
 	}
 	// An agent may not answer; the person at the host allows it as the owner's own, by a free name.
@@ -426,11 +426,25 @@ func TestPermsWithin(t *testing.T) {
 	}
 }
 
-// A machine that starts only its agents runs no agent's command line either.
+// An older executor's two switches become shell (agentShell && !noShell); a newer one's shell is
+// taken as said.
 func TestCleanPairShell(t *testing.T) {
-	m := cleanPair(api.PairRequest{Name: "pc", NoShell: true, AgentShell: true})
-	if !m.NoShell || m.AgentShell {
-		t.Fatalf("%+v", m)
+	on, off := true, false
+	for _, c := range []struct {
+		in   api.PairRequest
+		want bool
+	}{
+		{api.PairRequest{NoShell: true, AgentShell: true}, false},
+		{api.PairRequest{AgentShell: true}, true},
+		{api.PairRequest{}, false},
+		{api.PairRequest{Shell: &on, NoShell: true}, true},
+		{api.PairRequest{Shell: &off, AgentShell: true}, false},
+	} {
+		c.in.Name = "pc"
+		m := cleanPair(c.in)
+		if m.Shell == nil || *m.Shell != c.want || m.NoShell || m.AgentShell {
+			t.Errorf("%+v: %+v", c.in, m)
+		}
 	}
 }
 

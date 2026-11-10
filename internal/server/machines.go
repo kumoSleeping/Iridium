@@ -22,6 +22,13 @@ func (s *Server) WatchMachines() {
 	if s.Remote == nil {
 		return
 	}
+	// Found by its app's name now, not the one it connected with (an app renamed since).
+	s.Remote.NameOf = func(id string) string {
+		if info, ok := s.gate().Endpoint(id); ok {
+			return info.Name
+		}
+		return ""
+	}
 	prev := s.Remote.Changed
 	s.Remote.Changed = func(id string) {
 		if prev != nil {
@@ -86,10 +93,16 @@ func latencyMoved(was, now time.Duration) bool {
 	return d >= LatencyStep && d*4 >= was
 }
 
-// machineSeen keeps what executor id said, if it is connected, and tells the pages.
+// machineSeen keeps what executor id said, if it is connected, and tells the pages. One gone
+// with its app (Drop) is not found: nothing to keep.
 func (s *Server) machineSeen(id string) {
-	if hi, ok := s.Remote.Machine(id).Hello(); ok && hi != nil {
-		m := api.Machine{OS: hi.OS, Arch: hi.Arch, Home: hi.Home, Sep: hi.Sep, Agents: []api.ExecAgent{}, NoShell: hi.NoShell, AgentShell: hi.AgentShell && !hi.NoShell}
+	var hi *wire.Hello
+	ok := false
+	if mc := s.Remote.Find(id); mc != nil {
+		hi, ok = mc.Hello()
+	}
+	if ok && hi != nil {
+		m := api.Machine{OS: hi.OS, Arch: hi.Arch, Home: hi.Home, Sep: hi.Sep, Agents: []api.ExecAgent{}, Shell: hi.ShellOn()}
 		for _, a := range hi.Agents {
 			// Only what Iridium runs at an executor.
 			if info, ok := agents.Get(api.Agent(a.Agent)); ok && info.FindRemote != nil {

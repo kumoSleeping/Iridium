@@ -17,6 +17,7 @@ import (
 	"github.com/klauspost/compress/zstd"
 
 	"github.com/kumoSleeping/iridium/internal/api"
+	"github.com/kumoSleeping/iridium/internal/gate"
 	"github.com/kumoSleeping/iridium/internal/remote"
 	"github.com/kumoSleeping/iridium/internal/remote/executor"
 	"github.com/kumoSleeping/iridium/internal/remote/wire"
@@ -494,7 +495,19 @@ func testRemoteDshGone(t *testing.T, kind string) {
 	if n := later(); n != 1 {
 		t.Fatalf("its Bot there: %d sessions read back", n)
 	}
-	r.st.ForgetMachine("m1") // revoked: its connection ends with it
+	// Its row of machines gone while its app is still there: kept (what it found is not dropped
+	// for a missing row alone).
+	if err := r.st.Gate().Apply(gate.Change{Endpoints: []gate.Endpoint{{ID: "m1", Name: "pc", Kind: gate.KindChannel, TokenHash: "h"}}}); err != nil {
+		t.Fatal(err)
+	}
+	r.st.ForgetMachine("m1")
+	if n := later(); n != 1 {
+		t.Fatalf("its app there, its machine's row not: %d sessions read back", n)
+	}
+	// Its app revoked: its connection ends with it.
+	if err := r.st.Gate().Apply(gate.Change{DeleteEndpoints: []string{"m1"}}); err != nil {
+		t.Fatal(err)
+	}
 	if n := later(); n != 0 {
 		t.Errorf("its Bot gone: %d sessions read back", n)
 	}
