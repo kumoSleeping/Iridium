@@ -7,7 +7,7 @@ import { api } from "../api/client";
 import type { SessionState as LiveSession } from "../api/types.gen";
 import { t } from "../i18n";
 import { errText, toast } from "../toast";
-import { useMachines } from "../store";
+import { useMachines } from "../data";
 import { IconKey } from "../ui";
 
 type Run = { key: string; line: string; cwd: string; run?: string; out: string; done: boolean; code?: number; signal?: string; err?: string; stopping?: boolean };

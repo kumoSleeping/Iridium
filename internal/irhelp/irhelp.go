@@ -14,13 +14,13 @@ const Help = `ir: this machine's Iridium on the command line (over its unix sock
   ir stop | archive | unarchive <id> | rename [<id>] <name>   stop its agent | archive | unarchive | name it (no <id>: your own session)
   ir ws [ls] | rename <group> <name>   folder groups, made as sessions go in their folders (<group>: ID or name)
   ir cp <src> <dst> | files <dir> | attach <file>...   copy files, print path, size, sha256 | list one level: name, size, time, type | its ir: link, the Markdown to put the file in your reply
-  ir machines | sh <app>[:dir] -- command   other computers connected here | run a command line on one (--cwd dir, --timeout 2m)
+  ir sh <app>[:dir] -- command       run a command line at an app's computer (ir apps lists them; --cwd dir, --timeout 2m)
   ir secret ls | set <name> [--note text] | rm <name>   secrets: set has the user type the value on the web page
   ir run [--secret name,…] -- command …   {{name}}, {{file:name}} become the value, a temp file, and env vars; values in the output are masked
   ir usage [name|me] [-d days] [--by day,terminal,agent,model]   tokens and cost per day, terminal, agent, model
   new and send take --wait to wait for the reply. send during a turn joins that turn (an agent's always does; a person at a terminal may add --queue to run it after). Exit codes: 0 done, 2 needs the user (a question, an approval), 1 error or exited. A path may be app:path (host:path, the host's)
 Admin (an agent calling these never sees a secret, and never approves):
-  ir apps [logins [app]] | rename <app> <name> | rm <app> | open [10m] | close   apps, the host and ir_web | their logins | rename | remove (a login: app/login) | take pairing requests for a while | stop
+  ir apps [logins [app]] | agents <app> [agent=on|off] | rename <app> <name> | rm <app> | open [10m] | close   apps, the host and ir_web, their computers (system, agents, home) | their logins | the agents on or off there | rename | remove (a login: app/login) | take pairing requests for a while | stop
   ir needs | allow <id> | deny <id>   what waits for a person (apps and logins asking to join, invites, secrets): a person at the host decides
   ir invite [name] [--claude] | profile <app> [--avatar image] [--device computer|laptop|phone|none]   a link for a new browser (--claude: the user's own) | avatar, device
   ir public [off] | update [--check] | join <address> | pair <address> --name n --into file   go public through Cloudflare (run in a terminal) | update Iridium | join this machine to another Iridium | an app's TOKEN from it by pairing, into a file (--help on each)
@@ -49,7 +49,7 @@ func Remote() string {
 			}
 		}
 	}
-	b.WriteString("  ir machines                        the machines connected to it\n")
+	b.WriteString("  ir apps                            the apps and their computers\n")
 	b.WriteString("  Not from here: cp, files, attach, sh, run, secret, usage and the admin commands; ask a session on the Iridium's machine.\n")
 	return b.String()
 }

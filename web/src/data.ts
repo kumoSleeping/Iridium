@@ -5,7 +5,8 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { api, missing, speakAs } from "./api/client";
-import type { AgentInfo, LastSaid, Me, Session, Settings, UpdateState, Workspace } from "./api/types.gen";
+import type { AgentInfo, Apps, LastSaid, Me, Session, Settings, UpdateState, Workspace } from "./api/types.gen";
+import type { Machine } from "./machines";
 import { sourceOf, type Who } from "./chat/refs";
 import { t } from "./i18n";
 import { useCarried, useList, useUpdateState } from "./store";
@@ -70,12 +71,13 @@ export const manages = (me?: Me | null) => !!me && (!!me.host || !!me.web);
 /** The last count of app changes acted on (useApps). */
 let terminalsSeen: number | undefined;
 
-/** The apps (the host and ir_web among them), the logins of ir_web and the unused invites (GET
- *  /api/apps): what a message's source shows (avatar) and the settings' apps page. Only for one
- *  that manages. */
+/** The apps (the host and ir_web among them) with their computers, the logins and the unused invites
+ *  (GET /api/apps): what a message's source shows (avatar), the computers new sessions may start at
+ *  (machines.tsx) and the settings' apps page. Every caller gets the public part; one that manages,
+ *  all (full). */
 export function useApps() {
   const me = useMe().data;
-  const may = manages(me);
+  const may = !!me;
   // The stream's count of terminal changes (a Bot's avatar came, one renamed): each new one fetches
   // them again (the user, 2026-11-08: a Bot's avatar did not show till a reload).
   const changed = useCarried<number>("terminals");
@@ -87,6 +89,24 @@ export function useApps() {
     if (!first) void qc.invalidateQueries({ queryKey: ["apps"] });
   }, [changed, qc]);
   return useQuery({ queryKey: ["apps"], queryFn: orNone(api.apps), staleTime: 60_000, enabled: may });
+}
+
+const NO_MACHINES: Machine[] = [];
+const machinesOf = new WeakMap<Apps, Machine[]>();
+/** The apps' computers as the page's machines (machines.tsx): connected or not; the agents turned
+ *  off there left out (not offered for new sessions). */
+export function useMachines(): Machine[] {
+  const d = useApps().data;
+  if (!d) return NO_MACHINES;
+  let ms = machinesOf.get(d);
+  if (!ms) {
+    ms = d.apps
+      .filter((a) => a.computer && !a.host)
+      .map((a) => ({ ...a.computer!, id: a.id, name: a.name, avatar: a.avatar, agents: a.computer!.agents.filter((x) => !x.off) }))
+      .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+    machinesOf.set(d, ms);
+  }
+  return ms;
 }
 
 /** Everyone a message may come from: the apps and the host, and ir_web's logins (web). */

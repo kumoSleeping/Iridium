@@ -13,33 +13,25 @@ import (
 	"github.com/kumoSleeping/iridium/internal/place"
 )
 
-// ir machines, ir sh: the other machines connected here, and a command line at one, for an agent
-// (docs/api.md "命令"). ir sh waits for it, prints what it prints, and exits with its code.
+// ir sh: a command line at an app's computer, for an agent (docs/api.md "命令"); ir apps lists
+// the computers. ir sh waits for it, prints what it prints, and exits with its code.
 
 const shUsage = "usage: ir sh <machine>[:dir] [--cwd dir] [--timeout 2m] -- command …"
 
 // exitTimeout: ir sh's command ran out of time and was stopped (as timeout(1)).
 const exitTimeout = 124
 
-func cmdMachines(e *env, args []string) int {
+// cmdApps is ir apps for an agent at another machine (RunAt; at the host, ir apps is admin.go's):
+// the apps and their computers, as any caller sees them.
+func cmdApps(e *env, args []string) int {
 	if len(args) > 0 {
-		return e.failf("usage: ir machines")
+		return e.failf("usage: ir apps")
 	}
-	var ms []api.Machine
-	if err := e.do("GET", "/api/machines", nil, &ms); err != nil {
+	var as api.Apps
+	if err := e.do("GET", "/api/apps", nil, &as); err != nil {
 		return e.fail(err)
 	}
-	for _, m := range ms {
-		state := "offline"
-		if m.Online {
-			state = "online"
-		}
-		sh := "no ir sh"
-		if m.Shell {
-			sh = "ir sh"
-		}
-		fmt.Fprintf(e.out, "%s\t%s/%s\t%s\t%s\t%s\n", m.Name, m.OS, m.Arch, state, sh, m.Home)
-	}
+	printApps(e.out, as)
 	return exitDone
 }
 

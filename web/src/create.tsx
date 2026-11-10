@@ -5,15 +5,14 @@ import { Popover } from "@base-ui/react/popover";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, Folder, FolderPlus, LoaderCircle } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
-import type { Machine, Workspace } from "./api/types.gen";
+import type { Workspace } from "./api/types.gen";
 import { api, missing } from "./api/client";
 import { openChat } from "./route";
 import type { Agent } from "./api/types.gen";
 import { t } from "./i18n";
-import { agentsQ, useHome } from "./data";
-import { agentsAt, atMachine, homeAt, MachineBadge, MachineFace, pageAt } from "./machines";
+import { agentsQ, useHome, useMachines } from "./data";
+import { agentsAt, atMachine, homeAt, MachineBadge, MachineFace, pageAt, type Machine } from "./machines";
 import { onCreateAt } from "./places";
-import { useMachines } from "./store";
 import { errText, toast } from "./toast";
 import { AGENTS, agentName, cn, homeOf, IconKey, Logo, PopSurface, tilde, Tip } from "./ui";
 

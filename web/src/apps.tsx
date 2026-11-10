@@ -9,7 +9,7 @@ import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-quer
 import { Check, ChevronLeft, ChevronRight, Copy, Link2, LoaderCircle, PencilLine, Plus, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ApiError, api } from "./api/client";
-import type { App, Apps, Login, Machine, Perms, PendingInvite, Rules } from "./api/types.gen";
+import type { Agent, App, Apps, Computer, Login, Perms, PendingInvite, Rules } from "./api/types.gen";
 import { CardFrame, CardHead, MainKey, SecondKey } from "./card";
 import { ConfirmCard, saysOwner } from "./confirms";
 import { isPair } from "./confirmname";
@@ -20,7 +20,7 @@ import { Crop } from "./profile";
 import { SecretHere } from "./secret";
 import { showSecret, useSecret } from "./secrets";
 import { Group } from "./settings";
-import { useConfirms, useMachines, usePairing } from "./store";
+import { useConfirms, usePairing } from "./store";
 import { errText, toast } from "./toast";
 import { ago, Avatar, IconKey, Logo, Switch, Tip, tokens } from "./ui";
 
@@ -51,10 +51,10 @@ const typeName = (a: App) => {
 };
 
 /** Whether command lines run at a machine: none, a person's on the page, or agents' too (ir sh). */
-const shellOf = (m: Machine) => (m.shell ? "agents" : "none");
+const shellOf = (m: Computer) => (m.shell ? "agents" : "none");
 
 /** A machine's line: its system and agents, e.g. "Linux · claude 2.1 · codex". */
-const machineLine = (m: Machine) => [systems[m.os] ?? m.os, ...m.agents.map((a) => [a.agent, a.version].filter(Boolean).join(" "))].filter(Boolean).join(" · ");
+const machineLine = (m: Computer) => [systems[m.os] ?? m.os, ...m.agents.filter((a) => !a.off).map((a) => [a.agent, a.version].filter(Boolean).join(" "))].filter(Boolean).join(" · ");
 
 const clock = (ms: number) =>
   new Date(ms).toLocaleTimeString(document.documentElement.lang || undefined, {
@@ -75,14 +75,13 @@ type View = { kind: "list" } | { kind: "app"; id: string } | { kind: "new" };
 export function AppsPage({ onBack }: { onBack: () => void }) {
   useLang();
   const q = useApps();
-  const machines = useMachines();
   const [view, setView] = useState<View>({ kind: "list" });
   const apps = q.data?.apps ?? [];
   const open = view.kind === "app" ? apps.find((a) => a.id === view.id) : undefined;
   if (open && q.data)
     return (
       <div key={open.id} className="g-slide h-full">
-        <AppPage app={open} data={q.data} machine={machines.find((m) => m.id === open.id)} onBack={() => setView({ kind: "list" })} />
+        <AppPage app={open} data={q.data} machine={open.computer} onBack={() => setView({ kind: "list" })} />
       </div>
     );
   if (view.kind === "new")
@@ -114,7 +113,7 @@ export function AppsPage({ onBack }: { onBack: () => void }) {
       {q.isError && <p className="m-0 text-sm text-ink-3">{errText(q.error)}</p>}
       <section className="flex flex-col" aria-label={t("settings.terminals")}>
         {apps.map((a) => (
-          <AppRow key={a.id} a={a} machine={machines.find((m) => m.id === a.id)} onOpen={a.host ? undefined : () => setView({ kind: "app", id: a.id })} />
+          <AppRow key={a.id} a={a} machine={a.computer} onOpen={a.host ? undefined : () => setView({ kind: "app", id: a.id })} />
         ))}
       </section>
     </Page>
@@ -156,7 +155,7 @@ function Needs({ pair }: { pair?: boolean }) {
 }
 
 /** One app in the list; it opens its page (not the host's). */
-function AppRow({ a, machine, onOpen }: { a: App; machine?: Machine; onOpen?: () => void }) {
+function AppRow({ a, machine, onOpen }: { a: App; machine?: Computer; onOpen?: () => void }) {
   const me = useMe().data;
   const used = a.online ? t("term.online") : a.host ? t("term.localShort") : ago(a.lastSeenAt || a.createdAt || 0);
   const body = (
@@ -199,7 +198,7 @@ function AppRow({ a, machine, onOpen }: { a: App; machine?: Machine; onOpen?: ()
 }
 
 /** An app's page: what it is, its permissions, what it carries, its logins, removal. */
-function AppPage({ app, data, machine, onBack }: { app: App; data: Apps; machine?: Machine; onBack: () => void }) {
+function AppPage({ app, data, machine, onBack }: { app: App; data: Apps; machine?: Computer; onBack: () => void }) {
   const qc = useQueryClient();
   const [renaming, setRenaming] = useState(false);
   const [sure, setSure] = useState(false);
@@ -270,7 +269,7 @@ function AppPage({ app, data, machine, onBack }: { app: App; data: Apps; machine
           {machine && (
             <Group title={t("apps.computer")}>
               <Line label={t("confirm.system")}>{[systems[machine.os] ?? machine.os, machine.arch].filter(Boolean).join(" ") || "—"}</Line>
-              <Line label={t("apps.carried")}>{machine.agents.length ? machine.agents.map((a) => [a.agent, a.version].filter(Boolean).join(" ")).join("、") : t("apps.none")}</Line>
+              {machine.agents.length ? <CarriedAgents app={app.id} agents={machine.agents} /> : <Line label={t("apps.carried")}>{t("apps.none")}</Line>}
               <Line label={t("confirm.commands")}>{t(`confirm.commands.${shellOf(machine)}`)}</Line>
             </Group>
           )}
@@ -308,6 +307,38 @@ function AppPage({ app, data, machine, onBack }: { app: App; data: Apps; machine
         </>
       )}
     </Page>
+  );
+}
+
+/** The agents an app carries, each switched on or off there: one off is not started there nor
+ *  offered for new sessions. */
+function CarriedAgents({ app, agents }: { app: string; agents: Computer["agents"] }) {
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState<string | null>(null);
+  const set = async (agent: string, on: boolean) => {
+    setBusy(agent);
+    try {
+      const off = agents.filter((a) => (a.agent === agent ? !on : a.off)).map((a) => a.agent);
+      await api.appAgents(app, off);
+      await qc.invalidateQueries({ queryKey: ["apps"] });
+    } catch (e) {
+      toast(t("apps.carried"), { error: true, description: errText(e) });
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <>
+      {agents.map((a) => (
+        <div key={a.agent} className="flex min-h-9 items-center gap-3 px-2 text-sm">
+          <span className="w-20 shrink-0 text-ink-3">{a === agents[0] ? t("apps.carried") : ""}</span>
+          <Logo agent={a.agent as Agent} size={14} />
+          <span className={`min-w-0 flex-1 truncate ${a.off ? "text-ink-3" : ""}`}>{[a.agent, a.version].filter(Boolean).join(" ")}</span>
+          {busy === a.agent && <LoaderCircle size={13} className="animate-spin text-ink-4" />}
+          <Switch label={a.agent} on={!a.off} disabled={!!busy} onChange={(on) => void set(a.agent, on)} />
+        </div>
+      ))}
+    </>
   );
 }
 

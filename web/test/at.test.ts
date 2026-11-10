@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
-import type { DshWorkspace, Machine, Session, Workspace } from "../src/api/types.gen";
+import type { DshWorkspace, Session, Workspace } from "../src/api/types.gen";
+import type { Machine } from "../src/machines";
 import { arrowInto, atPath, atSections, baseName, namedOf, pathSection, typedPath } from "../src/chat/at";
 import { placeMention, placeOf } from "../src/chat/mention";
 import { leadingMentions, mentions, placesIn } from "../src/chat/refs";

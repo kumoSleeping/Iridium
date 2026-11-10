@@ -4,11 +4,15 @@
 // a Mac, a monitor for Linux.
 import { Laptop, Monitor } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { Machine } from "./api/types.gen";
+import type { Computer } from "./api/types.gen";
 import { t } from "./i18n";
-import { useMachines } from "./store";
+import { useMachines } from "./data";
 import { remotePath } from "./tree";
 import { cn } from "./ui";
+
+/** An app's computer (GET /api/apps, its computer) as the page goes by it: its app's ID, name and
+ *  avatar with it, the agents turned off there left out (data.ts useMachines). */
+export type Machine = Computer & { id: string; name: string; avatar?: string };
 
 /** The machine a session or a folder group runs at: by ID, as the carried "machines" lists them. */
 export const useMachine = (id?: string) => {

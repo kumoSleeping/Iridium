@@ -2,7 +2,8 @@
 // groups, each machine's workspaces and groups listed there; a path typed after the @ (/…, ~/…,
 // <machine>:…), that folder and the folders in it. A name is only a reference: it delivers
 // nothing, notifies no one, grants nothing.
-import type { DshWorkspace, Machine, Session, Workspace } from "../api/types.gen";
+import type { DshWorkspace, Session, Workspace } from "../api/types.gen";
+import type { Machine } from "../machines";
 import { homeAt } from "../machines";
 import { isHostName, splitPlace, type Place } from "../places";
 import { listedRemote, machineOf, remotePath, standing } from "../tree";

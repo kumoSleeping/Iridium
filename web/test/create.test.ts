@@ -1,6 +1,6 @@
 // The "+": whose agents a folder offers, and a place pressed elsewhere opening it (places.ts).
 import { describe, expect, test } from "vitest";
-import type { Machine } from "../src/api/types.gen";
+import type { Machine } from "../src/machines";
 import { agentsAt } from "../src/machines";
 import { createAt, onCreateAt, onOpenPlace, openPlace, type Place } from "../src/places";
 

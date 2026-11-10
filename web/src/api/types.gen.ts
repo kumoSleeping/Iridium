@@ -712,6 +712,44 @@ export interface App {
    * Device: what it runs on, as the badge on its messages' avatar shows; the server always sets it.
    */
   device?: Device;
+  /**
+   * Computer: an app that runs agents or command lines (an executor, ir join): its computer, as
+   * it last said in its hello; nil for any other.
+   */
+  computer?: Computer;
+}
+/**
+ * Computer is an app's computer as its executor last said of itself (docs/exec.md "握手"): kept
+ * in the store, so one away is listed too. GET /api/apps lists it with the app, to every caller.
+ */
+export interface Computer {
+  os: string; // windows | darwin | linux
+  arch?: string;
+  home: string;
+  sep: string;
+  /**
+   * Agents: those Iridium runs there, as it reported them; Off, turned off in its app's page
+   * (PUT /api/apps/{id}/agents): not started there, not offered for new sessions.
+   */
+  agents: ExecAgent[];
+  online: boolean; // its executor is connected
+  seenAt: number /* int64 */; // when it last connected (ms)
+  /**
+   * Shell: command lines run there, a person's on the page ($) and agents' (ir sh); else it
+   * starts only its agents (docs/exec.md). Its owner's switch.
+   */
+  shell?: boolean;
+  /**
+   * Latency: the connection's last round trip (ms), by its heartbeat; 0 not known.
+   */
+  latency?: number /* int64 */;
+}
+/**
+ * AppAgents is PUT /api/apps/{id}/agents: the agents an app carries that are turned off there.
+ * Any it reports later is on till turned off.
+ */
+export interface AppAgents {
+  off: string[];
 }
 /**
  * Login is a login of an app as listed: ir_web's, a browser with a passkey; another app's, as it
@@ -782,12 +820,15 @@ export interface PendingInvite {
 }
 /**
  * Apps is GET /api/apps (ir apps): the host first, ir_web (with a public origin), the apps; the
- * logins of ir_web; the invites not taken.
+ * logins of ir_web; the invites not taken. Public (draft 二「消息」): any caller gets the apps
+ * (names, types, avatars, online, computers) and the approved logins; their rules, perms and
+ * usage, the logins waiting and the invites only one that manages (Full).
  */
 export interface Apps {
   apps: App[];
   logins: Login[];
   invites: PendingInvite[];
+  full?: boolean;
 }
 /**
  * Me is GET /api/me: who calls. App: the app (HostID for the host, WebApp for a browser); Login:
@@ -942,13 +983,19 @@ export interface NeedAnswer {
    * Perms: app_join, app_change, what it gets: within Need.Wants. nil: as asked.
    */
   perms?: Perms;
+  /**
+   * AgentsOff: app_join, the agents it carries (Need.Pair's) turned off there from the start.
+   */
+  agentsOff?: string[];
 }
 /**
  * PairRequest is what an app says of itself asking to pair (POST /api/pair; no login): its name,
  * what it is shown as, and what it wants. An executor (ir join) says its machine too. Shell is
- * what it means to say in its hello (Machine's), so the card tells whether command lines would run
+ * what it means to say in its hello (Computer's), so the card tells whether command lines would run
  * there; an older one says NoShell and AgentShell instead (shell: AgentShell without NoShell),
- * which the Iridium turns into Shell.
+ * which the Iridium turns into Shell. Home and MachineID, as its hello will say them: one with
+ * agents gets its home as its scope unless it asks for another (decision 17); one on the host
+ * (its MachineID the host's) carries none.
  */
 export interface PairRequest {
   name: string;
@@ -960,39 +1007,17 @@ export interface PairRequest {
   shell?: boolean;
   noShell?: boolean;
   agentShell?: boolean;
-  wants?: Perms; // nil: all
+  home?: string;
+  machineId?: string;
+  wants?: Perms; // nil: all; one carrying agents, its home
 }
 /**
- * Machine is another machine's executor (docs/exec.md): a Bot, as it last said of itself; the
- * carried state "machines" lists them, GET /api/machines too. Agents: those Iridium can run there.
- */
-export interface Machine {
-  id: string; // its terminal
-  name: string;
-  avatar?: string;
-  os: string; // windows | darwin | linux
-  arch?: string;
-  home: string;
-  sep: string;
-  agents: ExecAgent[];
-  online: boolean;
-  seenAt: number /* int64 */; // when it last connected (ms)
-  /**
-   * Shell: command lines run there, a person's on the page ($) and agents' (ir sh); else it
-   * starts only its agents (docs/exec.md). Its owner's switch.
-   */
-  shell?: boolean;
-  /**
-   * Latency: the connection's last round trip (ms), by its heartbeat; 0 not known.
-   */
-  latency?: number /* int64 */;
-}
-/**
- * ExecAgent is an agent an executor has.
+ * ExecAgent is an agent an executor has. Off: turned off at that app (Computer's only).
  */
 export interface ExecAgent {
   agent: string;
   version?: string;
+  off?: boolean;
 }
 /**
  * DshWorkspace is a folder a new dsh session at a machine may open in (GET

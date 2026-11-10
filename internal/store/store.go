@@ -213,6 +213,8 @@ var schema = []string{
 	DROP TABLE chat_seen;
 	DROP TABLE bot_follows;
 	DELETE FROM outbox;`,
+	// 29: the agents an app carries that are turned off there (machines.go): a JSON list, '' none.
+	`ALTER TABLE apps ADD COLUMN agents_off TEXT NOT NULL DEFAULT '';`,
 }
 
 // steps run in Go after the migration of their version, in the same transaction.

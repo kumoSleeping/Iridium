@@ -27,7 +27,7 @@
 
 ## 能力和权限
 
-- **带 Agent**：应用连上时报了自己这台机器上的 agent；主机的由 Iridium 自己报。不想启用的，由有管理的在批准时或应用管理里勾掉。代码里：执行端 `hello` 的 `agents`；`ir join --no-agents`（未实现：删）。
+- **带 Agent**：应用连上时报了自己这台机器上的 agent；主机的由 Iridium 自己报。不想启用的，由有管理的在批准时或应用管理里勾掉。代码里：执行端 `hello` 的 `agents`；开关存在 `apps.agents_off`（`PUT /api/apps/{id}/agents`）；`ir join --no-agents` 已删。
 - **用 Agent**：能使用哪些 agent，权限第一项（未实现：现在只有“带 Claude”一项）。
 - **文件夹范围**：能用哪些文件夹，按位置写，可以跨应用，权限第二项（未实现）。
 - **管理**（admin）：权限第三项，第二阶段再定（kumo，2026-11-10），见 `draft.md` 七。第一阶段申请由主机和网页批。

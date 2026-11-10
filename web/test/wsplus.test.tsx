@@ -15,6 +15,8 @@ vi.mock("../src/api/client", async (orig) => {
       mkdir: (...a: unknown[]) => mkdir(...a),
       agents: async () => [{ agent: "claude" }, { agent: "codex" }, { agent: "pi" }, { agent: "dsh" }],
       folders: async (path: string) => ({ path, dirs: [] }),
+      apps: async () => ({ apps: [], logins: [], invites: [] }),
+      me: async () => ({ id: "local", name: "host", app: "local", host: true, rules: {}, usedToday: 0, public: false }),
     },
   };
 });

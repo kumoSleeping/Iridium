@@ -7,12 +7,13 @@
 // kind: its folder (a cloud on it at another machine), its name, where it is; pressed, the list
 // shows it (places.ts).
 import { useLayoutEffect, useMemo, useRef, type RefObject } from "react";
-import type { Agent, Machine, Session } from "../api/types.gen";
+import type { Agent, Session } from "../api/types.gen";
 import { openChat } from "../route";
-import { useList, useMachines } from "../store";
+import { useList } from "../store";
+import { useMachines } from "../data";
 import { t } from "../i18n";
 import { Folder, MessageSquare } from "lucide-react";
-import { CloudBadge, MachineFace } from "../machines";
+import { CloudBadge, MachineFace, type Machine } from "../machines";
 import { openPlace, type Place } from "../places";
 import { AGENTS, agentName, cn, Logo, tilde, titleOf } from "../ui";
 import { baseName, nativeAt, type NamedPlace } from "./at";

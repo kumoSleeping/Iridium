@@ -29,7 +29,8 @@ func (s *Server) appRoutes(mux *http.ServeMux) {
 	// The device it runs on: its own, or (ir_web's logins and the host) another's.
 	mux.HandleFunc("PUT /api/me/device", func(w http.ResponseWriter, r *http.Request) { s.setDevice(w, r, "") })
 	mux.HandleFunc("PUT /api/apps/{id}/device", func(w http.ResponseWriter, r *http.Request) { s.setDevice(w, r, r.PathValue("id")) })
-	mux.HandleFunc("GET /api/apps", s.manage(s.apps))
+	// The list is public (draft 二「消息」); what manages them only to one that manages (apps).
+	mux.HandleFunc("GET /api/apps", s.apps)
 	mux.HandleFunc("DELETE /api/apps/{id}", s.admin(s.revoke))
 	mux.HandleFunc("DELETE /api/apps/{id}/logins/{login}", s.admin(s.removeLogin))
 	// ir send 应用/登录: a notice shown to one login (notice.go).
@@ -147,11 +148,13 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 	reply(w, http.StatusOK, s.meOf(c, info))
 }
 
-// apps lists the host, ir_web (while there is a public origin, or a login of it), the apps, the
-// logins of ir_web and their invites.
+// apps lists the host, ir_web (while there is a public origin, or a login of it), the apps with
+// their computers, the logins of ir_web and their invites. To one that does not manage, the public
+// part (publicApps).
 func (s *Server) apps(w http.ResponseWriter, r *http.Request) {
 	a := s.gate().Access()
-	out := api.Apps{Apps: []api.App{}, Logins: []api.Login{}, Invites: []api.PendingInvite{}}
+	out := api.Apps{Apps: []api.App{}, Logins: []api.Login{}, Invites: []api.PendingInvite{}, Full: true}
+	computers := s.computers()
 	host, _ := s.gate().Endpoint(gate.HostID)
 	out.Apps = append(out.Apps, s.appOf(host))
 	web := api.App{ID: gate.WebApp, Name: gate.WebApp, Web: true, Rules: access.Default(), Device: api.DeviceComputer}
@@ -168,6 +171,7 @@ func (s *Server) apps(w http.ResponseWriter, r *http.Request) {
 		}
 		app := s.appOf(e)
 		app.Perms = s.appPerms(e.ID)
+		app.Computer = computers[e.ID]
 		apps = append(apps, app)
 	}
 	if s.gate().Public() || web.Logins > 0 {
@@ -187,7 +191,29 @@ func (s *Server) apps(w http.ResponseWriter, r *http.Request) {
 		out.Invites = append(out.Invites, api.PendingInvite{ID: i.ID, Name: i.Name, Setup: i.Setup, Claude: permsClaude(i.Perms),
 			CreatedAt: ms(i.CreatedAt), ExpiresAt: ms(i.ExpiresAt)})
 	}
+	if !callerOf(r).CanManage() {
+		out = publicApps(out)
+	}
 	reply(w, http.StatusOK, out)
+}
+
+// publicApps is what every caller sees of the list: the apps and the approved logins, who they
+// are and whether they are online, the apps' computers; not their rules, perms or usage, nor the
+// logins waiting or the invites.
+func publicApps(in api.Apps) api.Apps {
+	out := api.Apps{Apps: make([]api.App, 0, len(in.Apps)), Logins: []api.Login{}, Invites: []api.PendingInvite{}}
+	for _, a := range in.Apps {
+		out.Apps = append(out.Apps, api.App{ID: a.ID, Name: a.Name, Type: a.Type, Avatar: a.Avatar, Host: a.Host, Web: a.Web,
+			Online: a.Online, LastSeenAt: a.LastSeenAt, Device: a.Device, Computer: a.Computer})
+	}
+	for _, l := range in.Logins {
+		if l.ApprovedAt == 0 && l.App != gate.WebApp {
+			continue
+		}
+		out.Logins = append(out.Logins, api.Login{App: l.App, ID: l.ID, Name: l.Name, Avatar: l.Avatar, Online: l.Online,
+			LastSeenAt: l.LastSeenAt, ApprovedAt: l.ApprovedAt, Device: l.Device})
+	}
+	return out
 }
 
 // revoke removes an app, a login ("应用/登录", or for ir_web its ID) or an unused invite. The

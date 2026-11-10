@@ -286,3 +286,13 @@
 - 剩下约 25 处 404 改 422。
 - QQ 桥重写成 Satori 客户端；dsh 插件改用新的 `shell` 字段。
 - 注意：没带旧 shell 字段的老执行端现在算命令行关，要用 `ir join --shell` 重新接一次。
+
+## 带 Agent：机器并进应用、agent 开关
+
+- `api.Machine`、`GET /api/machines`、hub 键 `machines`、`ir machines` 删了。带 Agent 的应用在 `GET /api/apps` 里带 `computer`（系统、家目录、`sep`、agent、`shell`、在线、延迟、上次连上）；变化推 `terminals`，网页重取列表。`web/src/machines.tsx` 留作工具函数，`Machine` 类型改由它定义（应用的 `computer` 加上 ID、名字、头像），`useMachines` 移到 `data.ts`，从应用列表算出。
+- `GET /api/apps` 公开：谁都能调，不能管理的只拿名字、类型、头像、在线、电脑和已批准的登录；能管理的 `full: true`，照旧全部。远端 agent 的 `ir new`、`ir sh` 据此找电脑。
+- agent 开关：`apps.agents_off`（迁移 29），`PUT /api/apps/{id}/agents`（能批的人），`ir apps agents`。关掉的在 `checkMachine` 和 `session` 的 `remoteFor`、`remoteSpawn` 都拒（新建、接管、`/clear`、重启）；网页新会话不列，应用详情“电脑”一组里逐个开关。配对的答复可带 `agentsOff`（网页卡片上还没做划掉 agent）。
+- `ir join --no-agents` 删了；旧常驻单元的命令行里还有它，照收、写一行日志、不起作用（原来只做命令行的电脑会报出 agent，要在应用管理里关掉）。
+- 决定 17：配对申请带 `home`、`machineId`（`ir join` 报）；没带 `wants`、有 agent、有 `home` 的默认范围 `应用名:家目录`，批准时改名的跟着改；`machineId` 是主机的就去掉 agent。dsh 插件不报 `home`，照旧全部。
+- 范围按名字存：应用之后改名，范围里的旧名字不会跟着改（和人手写的范围一样，留给权限那条线）。
+

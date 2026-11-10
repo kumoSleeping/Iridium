@@ -2,6 +2,7 @@ package join
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kumoSleeping/iridium/internal/api"
+	"github.com/kumoSleeping/iridium/internal/remote/wire"
 )
 
 // ir pair asks at /api/pair as an app (its name and program, nothing of the machine), waits while
@@ -60,5 +62,29 @@ func TestPairMain(t *testing.T) {
 	errs.Reset()
 	if code := PairMain([]string{srv.URL, "--name", "helper", "--into", into}, &out, &errs); code != 1 || !strings.Contains(errs.String(), "拒绝") {
 		t.Fatalf("denied: %d %s", code, errs.String())
+	}
+}
+
+// ir join asks as a computer: its system, agents, home and computer's hash (decision 17: its home
+// is its scope; one on the host carries no agents).
+func TestPairComputer(t *testing.T) {
+	var asked api.PairRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			json.NewDecoder(r.Body).Decode(&asked)
+			json.NewEncoder(w).Encode(api.Pairing{Code: "1234", Request: "r1"})
+			return
+		}
+		json.NewEncoder(w).Encode(api.PairState{Status: "allowed", Token: "ir_x"})
+	}))
+	defer srv.Close()
+	var out bytes.Buffer
+	o := Options{URL: srv.URL, Name: "pc", Out: &out, Logf: t.Logf, Agents: []wire.AgentInfo{{Agent: "dsh", Version: "1"}}}
+	if _, err := o.pair(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	home, _ := os.UserHomeDir()
+	if asked.Type != "computer" || asked.Home != home || asked.MachineID == "" || len(asked.Agents) != 1 || asked.Wants != nil {
+		t.Fatalf("asked as %+v", asked)
 	}
 }

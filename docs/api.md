@@ -224,7 +224,7 @@
 - 进程照托管 agent 的方式起（本机的 `platform.Launcher`，别的机器经执行端），目录是托管目录下的 `sh-<id>`；结束 10 分钟后删。
 - 机器不在线：409；机器的主人关着命令行（`Machine.shell` 为假）：403 `no_shell`；目录不存在：404。
 
-agent 用 `ir sh <机器>[:目录] [--cwd 目录] [--timeout 2m] -- 命令`（`POST /api/machines/{id}/shell`，`{id}` 是机器 ID 或名字，`cwd` 省略为那边的家目录；没有这台机器 422 `no_such_machine`）：原样打出输出，退出码就是它的；超时停掉它，退出码 124。执行端有 `run` 时请求带 `Accept: application/x-ndjson`，回 `ShellEvent` 的 NDJSON 流，边跑边出（`docs/exec.md`“命令”）；没有时照旧回 `ShellStarted` 再轮询。只在主人开了 `shell` 的机器上能用（默认关；否则 403 `no_shell`）。`ir machines` 列出机器：名字、系统、在线与否、能否 `ir sh`、家目录。系统提示里只有 `ir --help` 的一行。
+agent 用 `ir sh <机器>[:目录] [--cwd 目录] [--timeout 2m] -- 命令`（`POST /api/machines/{id}/shell`，`{id}` 是机器 ID 或名字，`cwd` 省略为那边的家目录；没有这台机器 422 `no_such_machine`）：原样打出输出，退出码就是它的；超时停掉它，退出码 124。执行端有 `run` 时请求带 `Accept: application/x-ndjson`，回 `ShellEvent` 的 NDJSON 流，边跑边出（`docs/exec.md`“命令”）；没有时照旧回 `ShellStarted` 再轮询。只在主人开了 `shell` 的机器上能用（默认关；否则 403 `no_shell`）。`ir apps` 列出应用，带电脑的另列系统、连接、agent（关掉的标“关”）、能否 `ir sh`、家目录。系统提示里只有 `ir --help` 的一行。
 
 ## 会话设置
 
@@ -323,7 +323,8 @@ Web Push，总开关在配置 `push`，默认关。VAPID 密钥存在状态目�
 | `GET /api/me` | → `Me` | 调用者：`app`、`login`、`host`、`web`、`rules`、`public` |
 | `PUT /api/me/profile`、`PUT /api/apps/{id}/profile` | 资料 → `EndpointInfo` | 改名字、头像（见 `docs/gate.md`）。名字不合法 422 `bad_name`，带 `nameError`（`empty`、`too_long`、`invalid`、`reserved`、`letter`、`taken`） |
 | `PUT /api/me/device`、`PUT /api/apps/{id}/device` | `SetDevice` | 设备 |
-| `GET /api/apps` | → `Apps` | 应用（主机在最前、网页、其余）、登录（带 `perms`）、未用的邀请。没有秘密 |
+| `GET /api/apps` | → `Apps` | 应用（主机在最前、网页、其余）、登录（带 `perms`）、未用的邀请。没有秘密。谁都能调：不能管理的只拿公开部分（名字、类型、头像、在线、电脑，已批准的登录；不带 `rules`、`perms`、用量、待批的登录和邀请），能管理的 `full: true`。带 Agent 的应用（执行端）带 `computer`：系统、家目录、`sep`、报的 agent（关掉的 `off: true`）、`shell`、`online`、`latency`、`seenAt`。取代 `GET /api/machines` 和 hub 键 `machines`；电脑连上、断开、延迟变了都推 `terminals` |
+| `PUT /api/apps/{id}/agents` | `AppAgents` → `AppAgents` | `{off: [...]}`：它带的 agent 里关掉哪些，其余开（新报的默认开）。关掉的不能在那里启动（新建、接管、重启都拒，403），网页新会话里不列；在跑的不停。能批的人。`ir apps agents <应用> [agent=on\|off …]` |
 | `DELETE /api/apps/{id}` | → `{ok}` | 删应用（连同 TOKEN、连接）或网页的登录、未用的邀请。只有人（主机、网页登录），agent 不行 |
 | `DELETE /api/apps/{id}/logins/{login}` | → `{ok}` | 删一个登录；别的应用的登录下次说话重新申请 |
 | `PUT /api/apps/{id}/perms` | `Perms` → `Perms` | 应用能用的，能批的人改 |
@@ -343,7 +344,7 @@ Web Push，总开关在配置 `push`，默认关。VAPID 密钥存在状态目�
 | `POST /api/pair` | `PairRequest` → `Pairing` | 不用登录。窗口关着 403 `pair_closed`；每来源（IP，IPv6 按 /64）最多 4 个待批、总共 20 个，多了 403 `too_many_pending`；名字不合法 422 `bad_name`。回配对码 `code` 和 `request` |
 | `GET /api/pair/{request}` | → `PairState` | `pending`、`allowed`（带 `token`，只给一次）、`denied`、`expired`；不认识的 422 `no_such_request` |
 
-申请带 `wants`（想要的权限），批准时只能少给（422 `too_wide`）。名字已有应用时是 `app_update`：允许即给那个应用换新 TOKEN，旧的作废、连接断开，用量和权限照旧；答复带 `name` 则作为新应用、用这个名字接入。
+申请带 `wants`（想要的权限），批准时只能少给（422 `too_wide`）。没带 `wants`、报了 agent 和 `home` 的（`ir join`）默认范围是自己的家目录 `应用名:家目录`（决定 17），批准时改名的跟着改；其余默认全部。`machineId` 和主机的一样就去掉它报的 agent。批准的答复可带 `agentsOff`：一开始就关掉的 agent。名字已有应用时是 `app_update`：允许即给那个应用换新 TOKEN，旧的作废、连接断开，用量和权限照旧；答复带 `name` 则作为新应用、用这个名字接入。
 
 ## 权限（`Perms`）
 

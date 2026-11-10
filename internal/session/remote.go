@@ -12,11 +12,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/kumoSleeping/iridium/internal/agent"
 	"github.com/kumoSleeping/iridium/internal/agents"
+	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/harness"
 	"github.com/kumoSleeping/iridium/internal/platform"
 	"github.com/kumoSleeping/iridium/internal/remote"
@@ -99,6 +101,9 @@ func (m *Manager) remoteFor(ctx context.Context, machine string, info agents.Inf
 	if !ok {
 		return nil, fmt.Errorf("%w: %s (not at %s)", ErrNotInstalled, info.Name, machine)
 	}
+	if err := m.agentOff(mc.ID(), info.Agent); err != nil {
+		return nil, err
+	}
 	if !info.RemoteVersionOK(ai.Version) {
 		return nil, fmt.Errorf("%s %s at %s: %s or later is needed", info.Name, ai.Version, machine, info.MinRemote)
 	}
@@ -112,6 +117,24 @@ func (m *Manager) remoteFor(ctx context.Context, machine string, info agents.Inf
 	return mc, nil
 }
 
+// ErrAgentOff: the agent is turned off at that app (its page in 应用管理): not started there.
+var ErrAgentOff = errors.New("turned off at that app")
+
+// agentOff is ErrAgentOff (wrapped) if agent a is turned off at app machine.
+func (m *Manager) agentOff(machine string, a api.Agent) error {
+	if m.o.Store == nil {
+		return nil
+	}
+	off, err := m.o.Store.AgentsOff(machine)
+	if err != nil {
+		return err
+	}
+	if slices.Contains(off, string(a)) {
+		return fmt.Errorf("%w: %s", ErrAgentOff, a)
+	}
+	return nil
+}
+
 // remoteSpawn makes o an agent's launch at mc: its environment, its program and files there.
 func (h *Hosted) remoteSpawn(mc *remote.Machine, o *agent.SpawnOptions) error {
 	hi, ok := mc.Hello()
@@ -121,6 +144,9 @@ func (h *Hosted) remoteSpawn(mc *remote.Machine, o *agent.SpawnOptions) error {
 	ai, ok := mc.Agent(string(h.meta.Agent))
 	if !ok {
 		return fmt.Errorf("%w: %s is not at the machine", agent.ErrNoProgram, h.meta.Agent)
+	}
+	if err := h.m.agentOff(mc.ID(), h.meta.Agent); err != nil {
+		return err
 	}
 	ctx := h.m.ctx
 	info, _ := agents.Get(h.meta.Agent)

@@ -125,14 +125,11 @@ func (s *Server) newGate(origin string) (*gate.Gate, error) {
 	})
 }
 
-// terminalsChanged tells the pages the apps changed (an app's avatar came, a login renamed): they
-// fetch GET /api/apps again. The key "terminals" carries a count, nothing of them. A
-// machine is its Bot, its name and avatar the Bot's: the machines are told again too.
+// terminalsChanged tells the pages the apps changed (an app's avatar came, a login renamed, its
+// computer connected): they fetch GET /api/apps again. The key "terminals" carries a count,
+// nothing of them.
 func (s *Server) terminalsChanged() {
 	s.hub.Set("terminals", s.terminalsSeq.Add(1))
-	if s.Remote != nil && s.st != nil {
-		s.publishMachines()
-	}
 }
 
 // revoked forgets a revoked app's or login's browsers' push subscriptions and its machine. An
@@ -149,9 +146,6 @@ func (s *Server) revoked(id string) {
 	}
 	if err := s.st.ForgetMachine(id); err != nil {
 		s.logf("server: forgetting %s's machine: %v", id, err)
-	}
-	if s.Remote != nil {
-		s.publishMachines()
 	}
 }
 
@@ -284,7 +278,7 @@ func (s *Server) checkCreate(c caller, req *api.NewSession) error {
 }
 
 // checkMachine: Claude runs at another machine only if it was allowed as the owner's own
-// (docs/exec.md "连接"), whoever asks.
+// (docs/exec.md "连接"), and no agent turned off there (its app's page), whoever asks.
 func (s *Server) checkMachine(req *api.NewSession) error {
 	if req.Machine == "" {
 		return nil
@@ -293,7 +287,10 @@ func (s *Server) checkMachine(req *api.NewSession) error {
 	if !ok || info.Kind != gate.KindChannel || info.Host() {
 		return fmt.Errorf("no machine %q", req.Machine)
 	}
-	return access.Agent(s.rulesOf(info.ID, false), req.Agent)
+	if err := access.Agent(s.rulesOf(info.ID, false), req.Agent); err != nil {
+		return err
+	}
+	return s.agentOff(info.ID, req.Agent)
 }
 
 // checkSend checks a message for session id.

@@ -1,6 +1,10 @@
 package store
 
-import "database/sql"
+import (
+	"database/sql"
+	"encoding/json"
+	"errors"
+)
 
 // machinesSchema is migration 15: what each executor (docs/exec.md) last said of itself when it
 // connected (JSON, the API's Machine without its state), so the page lists it while it is away.
@@ -50,6 +54,41 @@ func (s *Store) ForgetMachine(terminal string) error {
 		return nil
 	}
 	return err
+}
+
+// AgentsOff is the agents turned off at app id (none for an app not there).
+func (s *Store) AgentsOff(id string) ([]string, error) {
+	var v string
+	err := s.db.QueryRow(`SELECT agents_off FROM apps WHERE id = ?`, id).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) || v == "" {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	if err := json.Unmarshal([]byte(v), &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// SetAgentsOff sets the agents turned off at app id; false if there is no such app.
+func (s *Store) SetAgentsOff(id string, off []string) (bool, error) {
+	v := ""
+	if len(off) > 0 {
+		b, err := json.Marshal(off)
+		if err != nil {
+			return false, err
+		}
+		v = string(b)
+	}
+	res, err := s.db.Exec(`UPDATE apps SET agents_off = ? WHERE id = ?`, v, id)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
 }
 
 // AppIDs is every app's ID.

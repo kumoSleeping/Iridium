@@ -39,9 +39,9 @@ var commands = map[string]func(e *env, args []string) int{
 	"rename":    cmdRename,
 	"cp":        cmdCp,
 	"files":     cmdFiles,
-	"attach":    cmdAttach,   // files.go
-	"ws":        cmdWs,       // workspaces.go
-	"machines":  cmdMachines, // shell.go
+	"attach":    cmdAttach, // files.go
+	"ws":        cmdWs,     // workspaces.go
+	"apps":      cmdApps,   // shell.go; at the host admin.go's
 	"sh":        cmdSh,
 }
 
