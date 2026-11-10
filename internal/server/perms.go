@@ -11,6 +11,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/access"
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/gate"
+	"github.com/kumoSleeping/iridium/internal/place"
 	"github.com/kumoSleeping/iridium/internal/session"
 )
 
@@ -110,22 +111,21 @@ func mayAgent(p api.Perms, a api.Agent) bool {
 // parsePlace splits place "应用名:路径" into the app's ID and the path: split at the first colon,
 // the prefix an app's name or ID (the host by its names); none (or a drive letter, C:\…) is the
 // host's.
-func (s *Server) parsePlace(place string) (app, path string) {
-	i := strings.Index(place, ":")
-	if i <= 1 {
-		return gate.HostID, place
-	}
-	prefix, rest := place[:i], place[i+1:]
-	if gate.IsHostRef(prefix) || prefix == "本机" || prefix == "local" {
+func (s *Server) parsePlace(p string) (app, path string) {
+	name, rest, ok := place.Split(p)
+	switch {
+	case !ok:
+		return gate.HostID, p
+	case place.IsHost(name):
 		return gate.HostID, rest
 	}
-	if info, ok := s.gate().Find(prefix); ok {
+	if info, found := s.gate().Find(name); found {
 		if info.Host() {
 			return gate.HostID, rest
 		}
 		return info.ID, rest
 	}
-	return prefix, rest
+	return name, rest
 }
 
 // scopeHas reports whether place (app, path) is within scope.
