@@ -589,6 +589,13 @@ func (s *Store) AddUsage(u Usage) error {
 	return err
 }
 
+// SessionInput is a session's input tokens over its usage rows: not cached, read from the cache,
+// written to it.
+func (s *Store) SessionInput(session string) (input, cacheRead, cacheWrite int64, err error) {
+	err = s.db.QueryRow(`SELECT IFNULL(SUM(input), 0), IFNULL(SUM(cache_read), 0), IFNULL(SUM(cache_write), 0) FROM usage WHERE session = ?`, session).Scan(&input, &cacheRead, &cacheWrite)
+	return
+}
+
 // UsageSince is every usage row since at (ms), oldest first.
 func (s *Store) UsageSince(at int64) ([]Usage, error) {
 	rows, err := s.db.Query(`SELECT at, terminal, session, agent, model, input, output, cache_read, cache_write, cost_usd FROM usage WHERE at >= ? ORDER BY at, id`, at)

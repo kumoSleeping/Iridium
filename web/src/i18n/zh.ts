@@ -217,6 +217,8 @@ export const zh = {
   "ctx.messages": "消息",
   "ctx.reserve": "压缩预留",
   "ctx.free": "空余",
+  "ctx.cacheHit": "缓存命中",
+  "ctx.cacheParts": "读 {read} · 写 {write} · 未缓存 {input}",
 
   "quota.session": "5 小时",
   "quota.weekly": "7 天",

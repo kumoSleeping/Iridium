@@ -10,13 +10,13 @@ import { useQuery } from "@tanstack/react-query";
 import { Fragment, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import type { SessionState as LiveSession } from "../api/types.gen";
 import { api } from "../api/client";
-import type { Agent, AgentInfo, AgentQuota, Context, ContextCategory, Feature, Model, Preset } from "../api/types.gen";
+import type { Agent, AgentInfo, AgentQuota, Context, ContextCategory, Feature, InputTokens, Model, Preset } from "../api/types.gen";
 import { useAgent } from "../data";
 import { t, useLang } from "../i18n";
 import type { Key } from "../i18n/zh";
 import { useContextState, useQuota } from "../store";
 import { errText, toast } from "../toast";
-import { ago, cn, PHONE, PopSurface, Tip, useLongPress, useMedia, useMinute } from "../ui";
+import { ago, cn, PHONE, PopSurface, Tip, tokens as tok, useLongPress, useMedia, useMinute } from "../ui";
 import { EffortSlider, levelName, noteLevelNames } from "./effort";
 import { hasMark, ModeMark, modeName } from "../modes";
 import { openUsage } from "../route";
@@ -76,7 +76,15 @@ export function ctxParts(c: Context): Part[] {
   return parts;
 }
 
-export function ContextRing({ session, summary, open, onOpenChange }: { session: string; summary?: Context; open?: boolean; onOpenChange?: (o: boolean) => void }) {
+/** The cache's hit rate over a session's input so far, to a tenth of a percent; "" with no input. */
+export function hitRate(t?: InputTokens): string {
+  const all = t ? t.input + t.cacheRead + t.cacheWrite : 0;
+  return all > 0 ? `${(Math.floor((t!.cacheRead / all) * 1000) / 10).toFixed(1)}%` : "";
+}
+
+/** tokens: the session's input so far, its cache's hit rate under the parts (the user, 2026-11-10:
+ *  the total, in the popover only, never in the row). */
+export function ContextRing({ session, summary, tokens, open, onOpenChange }: { session: string; summary?: Context; tokens?: InputTokens; open?: boolean; onOpenChange?: (o: boolean) => void }) {
   useLang();
   const phone = useMedia(PHONE);
   // The breakdown when the stream carries one; the total the session's state has, else.
@@ -87,6 +95,7 @@ export function ContextRing({ session, summary, open, onOpenChange }: { session:
   const circ = 2 * Math.PI * r;
   const label = `${t("ctx.title")} · ${t("ctx.used", { used: k(c.used), total: k(c.max) })}`;
   const parts = ctxParts(c);
+  const hit = hitRate(tokens);
   return (
     <Popover.Root open={open} onOpenChange={onOpenChange}>
       <Tip label={label}>
@@ -129,6 +138,15 @@ export function ContextRing({ session, summary, open, onOpenChange }: { session:
               ))}
             </ul>
           </>
+        )}
+        {hit && tokens && (
+          <div className="mt-3 border-t border-edge pt-2.5">
+            <div className="flex items-baseline justify-between text-sm">
+              <span className="text-ink-2">{t("ctx.cacheHit")}</span>
+              <span className="text-ink tabular-nums">{hit}</span>
+            </div>
+            <div className="mt-0.5 text-xs text-ink-3 tabular-nums">{t("ctx.cacheParts", { read: tok(tokens.cacheRead), write: tok(tokens.cacheWrite), input: tok(tokens.input) })}</div>
+          </div>
         )}
       </PopSurface>
     </Popover.Root>

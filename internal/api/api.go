@@ -173,6 +173,9 @@ type SessionState struct {
 	Queue []Queued `json:"queue"`
 	// Context: how full its context window was when last read; context:<id> has the parts.
 	Context *ContextSummary `json:"context,omitempty"`
+	// Tokens: what its turns read so far, as recorded (GET /api/usage counts the same rows);
+	// absent before its first.
+	Tokens *InputTokens `json:"tokens,omitempty"`
 	// QuotaUntil: the agent's quota ran out; Iridium goes on at this time (ms).
 	QuotaUntil int64 `json:"quotaUntil,omitempty"`
 	// Tail: the newest blocks, when they are few and small; else the page fetches after its end.

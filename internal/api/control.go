@@ -24,6 +24,14 @@ type ContextSummary struct {
 	At   int64 `json:"at"`
 }
 
+// InputTokens is what a session's turns read so far: Input not cached, CacheRead read from the
+// cache, CacheWrite written to it. The cache's hit rate is CacheRead over the three.
+type InputTokens struct {
+	Input      int64 `json:"input"`
+	CacheRead  int64 `json:"cacheRead"`
+	CacheWrite int64 `json:"cacheWrite"`
+}
+
 // BlockTail is the blocks from Start to End of the transcript. Blocks nil: too many or too
 // large to carry, GET messages?after=<your end>. A page whose end is in [Start, End] takes the
 // blocks at or after its end, and replaces a block it has at the same At (a tool whose result
