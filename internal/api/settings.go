@@ -21,6 +21,9 @@ type Settings struct {
 	// Lang: the user's language, as a web page's settings last set it ("zh", "en"; "" not yet):
 	// hosted agents are told it from their next start.
 	Lang string `json:"lang"`
+	// AutoUpdate: Iridium looks for a newer version by itself and downloads it ahead (on by
+	// default); off, only 检查更新 looks (config update.manual).
+	AutoUpdate bool `json:"autoUpdate"`
 }
 
 // SettingsPatch changes what it gives and nothing else. A mode "" goes back to the agent's own.
@@ -33,4 +36,5 @@ type SettingsPatch struct {
 	Push        *bool             `json:"push,omitempty"`
 	EnterInTurn *string           `json:"enterInTurn,omitempty"`
 	Lang        *string           `json:"lang,omitempty"`
+	AutoUpdate  *bool             `json:"autoUpdate,omitempty"`
 }

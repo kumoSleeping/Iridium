@@ -1852,6 +1852,11 @@ export interface Settings {
    * hosted agents are told it from their next start.
    */
   lang: string;
+  /**
+   * AutoUpdate: Iridium looks for a newer version by itself and downloads it ahead (on by
+   * default); off, only 检查更新 looks (config update.manual).
+   */
+  autoUpdate: boolean;
 }
 /**
  * SettingsPatch changes what it gives and nothing else. A mode "" goes back to the agent's own.
@@ -1865,6 +1870,7 @@ export interface SettingsPatch {
   push?: boolean;
   enterInTurn?: string;
   lang?: string;
+  autoUpdate?: boolean;
 }
 
 //////////
@@ -2012,6 +2018,11 @@ export interface UpdateState {
    * source).
    */
   auto: boolean;
+  /**
+   * Manual: automatic updates are off (config update.manual): nothing looked for on a timer or
+   * downloaded ahead; the page does not look when the settings open.
+   */
+  manual?: boolean;
   /**
    * Ready: Latest is downloaded and checked; 更新 only swaps it in and restarts.
    */
