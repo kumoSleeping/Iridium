@@ -329,3 +329,26 @@
 - 关网页就是 `ir public off`：TCP 上只剩 TOKEN 请求和本机的主机页面；不出登录页、不认 Cookie。
 - 存储：没有新迁移。Passkey 还在 `logins` 那一行（网页层的 `Store` 读写 `user_handle`、`passkeys` 两列），`web_sessions`、`invites` 不变，升级后浏览器不用重登。
 - 行为变化：换公网地址只断浏览器的连接，应用的不断；本机模式下带旧 Cookie 的浏览器算主机（原来算那个登录）；带 TOKEN 的请求拿不到网页文件（404）；退回旧版时会多出一个叫 `ir_web` 的应用。
+
+## 第一期收尾（2026-11-11）
+
+- Satori：
+  - 记录里人发的消息带登录（`inputs.login`，迁移 30），`user.id` 是登录。
+  - `message.get` 能按 `message.create` 回的 id 取。
+  - 人发的话也发 `message-created`（`user`）。
+  - `channel-*`、`login-added`/`login-removed` 事件，`channel.update`（改名）、`channel.delete`（归档）。
+  - 事件存库，重启后能续传；每个登录各自的 `sn`。
+  - `guild.*` 按范围过滤。
+  - `<message>` 拆成几条，`data:` 存成上传。
+- 网页：
+  - 回复、文件、文件夹组的菜单里有“分享到”，可写留言。
+  - 配对卡片上能点掉带的 agent。
+- `web-token` 每次启动重新生成。
+- “不在”一律 422 加 `no_such_…`；404 只表示没有这个接口（头像没设、网页的页面除外）。
+- dsh 插件：只有 401 才扔 TOKEN；hello 报 `shell`。
+- 插件方案存在 `plan`：`docs/next/plugin.md`。
+- 剩下：
+  - QQ 桥重写。
+  - 合回 main、发 0.2.0。
+  - 主机终端里直接打的话没有 `user`。
+  - 提问多选按到一半只在内存。

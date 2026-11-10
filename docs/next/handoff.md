@@ -14,17 +14,14 @@ S1a 到 S5 都做完并合进 `next`，之后又做了：需要队列带提问�
 
 待确认：用 passkey 登录的浏览器打开 https://ir-test.kumo.ltd，旧登录是否还在、页面是否正常（没法自己验）。
 
-## 还没做（等 kumo 点头）
+## 还没做
 
-- 记录里人说的消息 `user.id` 是应用，不是登录（记录里没存登录 ID）。
-- “分享到”只在会话菜单，回复、文件、位置的菜单没有；网页上写留言；分享和提问只在内存。
-- 配对卡片上划掉 agent；`web-token` 轮换。
-- Satori：事件存库、`channel.create`、`login-*`/`channel-*` 事件等（`docs/satori.md`“还没做”）。
-- 约 25 处 404 改 422。
-- QQ 桥重写成 Satori 客户端；dsh 插件改用新的 `shell` 字段。QQ、dsh 先不管（kumo，2026-11-10）。
-- 合回 main、发 0.2.0：要 kumo 决定。
+- 第一期其余都做完了（`progress.md`“第一期收尾”）。
+- QQ 桥重写成 Satori 客户端、合回 main 发 0.2.0：kumo 说先不急（2026-11-11）。
+- 插件方案：`plugin.md`，第一期之后。
+- 测试里 Codex 指向假的：另一个会话（pi c7f37f09）在这个工作树里改了 `internal/testagent` 和几处测试架子，没提交。在那之前 `go test` 会真的启动 Codex，写进 `~/.codex`。
 - 注意：
-  - worktree 里不要把 `node_modules` 软链到主目录。`test-deploy`、`push-test` 会跑 `npm ci`，把主目录的也清空。
+  - worktree 里不要把 `node_modules` 软链到主目录。
   - 在 agent 的 shell 里对测试实例跑 `ir`：要 unset `IRIDIUM_SESSION`、`CLAUDECODE`、`CLAUDE_*`，再用 `script -qec` 给个 pty。
 
 ## 经验
