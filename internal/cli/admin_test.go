@@ -20,6 +20,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/server"
 	"github.com/kumoSleeping/iridium/internal/session"
 	"github.com/kumoSleeping/iridium/internal/store"
+	"github.com/kumoSleeping/iridium/internal/testagent"
 )
 
 // daemonFor runs a test daemon; person and agent are ir as run by a person at a terminal and by
@@ -27,10 +28,14 @@ import (
 func daemonFor(t *testing.T) (person, agent adminEnv) {
 	t.Helper()
 	root := t.TempDir()
+	bin := filepath.Join(root, "bin")
+	os.MkdirAll(bin, 0o700)
 	cfg := config.Default()
 	cfg.Listen = "127.0.0.1:0"
 	cfg.StateDir = filepath.Join(root, "state")
 	cfg.Socket = filepath.Join(root, "run", "ir.sock")
+	cfg.ClaudeHome = filepath.Join(root, "claude")
+	cfg.Programs = testagent.Programs(t, bin)
 	os.MkdirAll(cfg.StateDir, 0o700)
 	st, err := store.Open(filepath.Join(cfg.StateDir, "iridium.db"))
 	if err != nil {
