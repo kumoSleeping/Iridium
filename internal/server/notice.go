@@ -68,6 +68,11 @@ func (s *Server) notice(w http.ResponseWriter, r *http.Request) {
 	msg := api.PushMessage{Kind: "notice", Title: "Iridium", Body: req.Text, Session: from}
 	if from != "" {
 		if st, err := s.m.State(from); err == nil {
+			// The login it goes to must see the session it comes from (its scope).
+			if !s.sees(s.permsFor(caller{Identity: login.Identity()}), st.Session) {
+				refuse(w, http.StatusUnprocessableEntity, "not_deliverable", "not deliverable: "+login.Name+" may not see the session it comes from")
+				return
+			}
 			msg.Title = cmp.Or(st.Name, st.Title, string(st.Agent))
 		}
 	}
