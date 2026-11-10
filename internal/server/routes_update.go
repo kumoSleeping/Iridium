@@ -14,7 +14,7 @@ import (
 // updateRoutes are the update's (docs/api.md "更新"): the state, looking now, installing.
 func (s *Server) updateRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/update", func(w http.ResponseWriter, r *http.Request) { reply(w, http.StatusOK, s.updateState()) })
-	mux.HandleFunc("POST /api/update/check", s.manage(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /api/update/check", s.admin(func(w http.ResponseWriter, r *http.Request) {
 		if s.Updater == nil {
 			fail(w, http.StatusConflict, "no updater")
 			return
@@ -28,7 +28,7 @@ func (s *Server) updateRoutes(mux *http.ServeMux) {
 		}
 		reply(w, http.StatusOK, st)
 	}))
-	mux.HandleFunc("POST /api/update", s.manage(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /api/update", s.approver(func(w http.ResponseWriter, r *http.Request) {
 		var req api.ApplyUpdate
 		if r.ContentLength != 0 && !readJSON(w, r, &req) {
 			return

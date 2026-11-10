@@ -40,7 +40,8 @@ func (s *Server) cliRoutes(mux *http.ServeMux) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.WriteHeader(http.StatusOK)
 		out := &cliLines{w: w, flush: func() { _ = rc.Flush() }}
-		hc := &http.Client{Transport: inProcess{h: mux, ctx: r.Context(), who: c}}
+		// Through the session guard as every request is: its scope and agents (S2).
+		hc := &http.Client{Transport: inProcess{h: s.sessionGuard(mux), ctx: r.Context(), who: c}}
 		code := s.CLI(req.Args, out.as("out"), out.as("err"), hc, c.ID(), c.session, req.Cwd)
 		out.line(api.CLIOutput{Exit: &code})
 	})

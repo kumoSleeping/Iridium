@@ -111,7 +111,10 @@ func TestSecretCommands(t *testing.T) {
 		t.Fatalf("denied run: %q", r)
 	}
 
-	if code, out, _ := runAs(agent, "secret", "rm", "API_TOKEN"); code != 0 || !strings.Contains(out, "删了") {
+	if code, _, _ := runAs(agent, "secret", "rm", "API_TOKEN"); code != 1 {
+		t.Fatal("an agent removed a credential")
+	}
+	if code, out, _ := runAs(person, "secret", "rm", "API_TOKEN"); code != 0 || !strings.Contains(out, "删了") {
 		t.Fatalf("rm: %d %q", code, out)
 	}
 }

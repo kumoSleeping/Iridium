@@ -135,9 +135,10 @@ func TestSecrets(t *testing.T) {
 		t.Fatalf("stream not masked: %.400s", ev)
 	}
 
-	// Deleting is a manager's, an agent's ir's too; then it is masked no more (no longer known).
-	l.want(200, "agent", "DELETE", "/api/secrets/GITHUB_TOKEN", nil, nil)
-	l.want(404, "agent", "DELETE", "/api/secrets/GITHUB_TOKEN", nil, nil)
+	// Deleting is a person's at the host, never an agent's; then it is masked no more.
+	l.want(403, "agent", "DELETE", "/api/secrets/GITHUB_TOKEN", nil, nil)
+	l.want(200, "socket", "DELETE", "/api/secrets/GITHUB_TOKEN", nil, nil)
+	l.want(404, "socket", "DELETE", "/api/secrets/GITHUB_TOKEN", nil, nil)
 	raw = l.wantRaw(200, "web", "GET", "/api/sessions/"+its.ID+"/messages", nil)
 	if !strings.Contains(raw, val) {
 		t.Fatalf("still masked after delete: %.300s", raw)

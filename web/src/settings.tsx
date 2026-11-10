@@ -129,7 +129,7 @@ export function SettingsPage({ theme, setTheme, initial = "main" }: { theme: The
                 {terminals.length > 0 && <span className="text-xs text-ink-3 tabular-nums">{terminals.length}</span>}
               </>,
             )}
-          {manages && nav(t("secrets.title"), () => go({ name: "secrets" }))}
+          {me?.host && nav(t("secrets.title"), () => go({ name: "secrets" }))}
           <InstallItem />
           <Item label={t("settings.pushOn")}>
             {pushing ? <LoaderCircle size={16} className="animate-spin text-ink-3" /> : <Switch label={t("settings.pushOn")} disabled={!push || !("PushManager" in window)} on={pushed} onChange={(v) => void pushOn(v)} />}

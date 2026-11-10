@@ -207,7 +207,7 @@ func TestAdmin(t *testing.T) {
 	}
 
 	// Remove: an app, by a person only; the host and ir_web are built in.
-	if code, _, errs := runAs(agent, "apps", "rm", "robot"); code != 1 || !strings.Contains(errs, "manage") {
+	if code, _, errs := runAs(agent, "apps", "rm", "robot"); code != 1 || !strings.Contains(errs, "approves") {
 		t.Fatalf("an agent's rm: %d %q", code, errs)
 	}
 	if code, _, errs := runAs(person, "apps", "rm", "robot"); code != 0 {

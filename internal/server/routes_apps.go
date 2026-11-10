@@ -30,8 +30,8 @@ func (s *Server) appRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/me/device", func(w http.ResponseWriter, r *http.Request) { s.setDevice(w, r, "") })
 	mux.HandleFunc("PUT /api/apps/{id}/device", func(w http.ResponseWriter, r *http.Request) { s.setDevice(w, r, r.PathValue("id")) })
 	mux.HandleFunc("GET /api/apps", s.manage(s.apps))
-	mux.HandleFunc("DELETE /api/apps/{id}", s.admin(s.revoke))
-	mux.HandleFunc("DELETE /api/apps/{id}/logins/{login}", s.admin(s.removeLogin))
+	mux.HandleFunc("DELETE /api/apps/{id}", s.approver(s.revoke))
+	mux.HandleFunc("DELETE /api/apps/{id}/logins/{login}", s.approver(s.removeLogin))
 	// ir send 应用/登录: a notice shown to one login (notice.go).
 	mux.HandleFunc("POST /api/apps/{id}/logins/{login}/notice", s.notice)
 	// What an app may use (agents, scope): whoever approves sets it (S2 enforces it).

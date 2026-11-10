@@ -94,7 +94,13 @@ func (m *maskedWriter) Unwrap() http.ResponseWriter { return m.ResponseWriter }
 func (s *Server) secretRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/secrets", s.listSecrets)
 	mux.HandleFunc("PUT /api/secrets/{name}", s.setSecret)
-	mux.HandleFunc("DELETE /api/secrets/{name}", s.manage(s.deleteSecret))
+	mux.HandleFunc("DELETE /api/secrets/{name}", func(w http.ResponseWriter, r *http.Request) {
+		if c := callerOf(r); !c.Host() || c.agent {
+			forbid(w, errHostSecrets)
+			return
+		}
+		s.deleteSecret(w, r)
+	})
 	mux.HandleFunc("POST /api/secrets/use", s.useSecrets)
 }
 
@@ -126,9 +132,9 @@ func (s *Server) secretUse(u store.SecretUse) api.SecretUse {
 // listSecrets: names, notes, scopes, who stored them, their uses; never a value. For every
 // terminal, ir too (an agent's: it learns which names there are).
 func (s *Server) listSecrets(w http.ResponseWriter, r *http.Request) {
-	// Credentials are the host's and ir_web's logins' to list, set and delete (decision 14).
-	if !callerOf(r).CanManage() {
-		forbid(w, errors.New("only the host and ir_web's logins see the credentials"))
+	// Credentials are the host's alone (draft 二「权限」): to list, set, delete and use.
+	if !callerOf(r).Host() {
+		forbid(w, errHostSecrets)
 		return
 	}
 	all, err := s.st.Secrets()
@@ -155,6 +161,8 @@ func (s *Server) listSecrets(w http.ResponseWriter, r *http.Request) {
 	}
 	reply(w, http.StatusOK, out)
 }
+
+var errHostSecrets = errors.New("credentials are the host's alone")
 
 func validScope(sc api.SecretScope) bool {
 	return sc == "" || sc == api.ScopeAll || sc == api.ScopeWorkspaces || sc == api.ScopeOwner
@@ -201,8 +209,8 @@ func (s *Server) setSecret(w http.ResponseWriter, r *http.Request) {
 		reply(w, http.StatusAccepted, api.Pending{Need: cf})
 		return
 	}
-	if !c.CanManage() {
-		forbid(w, errors.New("only the host and ir_web's logins set credentials"))
+	if !c.Host() {
+		forbid(w, errHostSecrets)
 		return
 	}
 	if !c.panel() {
