@@ -22,7 +22,7 @@ import { close, go, onTurn, openChat, over, quietDialog, route, usagePoint, useR
 import { Pager, TABS_H } from "./pager";
 import { atLeft, atRight, GRIP, Sheet } from "./sheet";
 import { HeadKeys, Sidebar } from "./sidebar";
-import { useConfirms, useList, useMachines } from "./store";
+import { useConfirms, useList } from "./store";
 import { follow } from "./stream";
 import { ToastList, toasts } from "./toast";
 import { buildTree, flat } from "./tree";
@@ -85,7 +85,8 @@ function useExpanded() {
     }
   });
   // Open unless folded, but the archive, a workflow run's agents and the rest of a folder's
-  // sessions (tree.ts foldRest): those wait to be opened.
+  // sessions (tree.ts foldRest): those wait to be opened. Those hung under a launcher ("hung:")
+  // shown (2026-11-10).
   const shut = (k: string) => k === "archive" || k.startsWith("run:") || k.startsWith("more:");
   const expanded = (k: string) => over[k] ?? !shut(k);
   const toggle = (k: string) =>
@@ -141,10 +142,8 @@ export function App() {
   const { expanded, toggle } = useExpanded();
   // Each minute too: a subagent long quiet is let go.
   const minute = useMinute();
-  const machines = useMachines();
-  const order = useMemo(() => machines.map((m) => m.id), [machines.map((m) => m.id).join(",")]);
   const places = usePlaces();
-  const tree = useMemo(() => buildTree(list ?? [], ws.data ?? [], t("nav.unsorted"), Math.max(minute, Date.now()), undefined, order, places), [list, ws.data, t("nav.unsorted"), minute, order, places]);
+  const tree = useMemo(() => buildTree(list ?? [], ws.data ?? [], t("nav.unsorted"), Math.max(minute, Date.now()), undefined, places), [list, ws.data, t("nav.unsorted"), minute, places]);
 
   useEffect(() => follow(open), [open]);
   // Unread, and the chats of turns that end off screen.
@@ -156,7 +155,8 @@ export function App() {
   const turns = useRef(new Map<string, string>());
   useEffect(() => {
     if (!list) return;
-    unread.current?.take(list);
+    // Not those the list leaves out (a group at another machine no one opened): no count for them.
+    unread.current?.take(list.filter((s) => !tree.unlisted.has(s.id)));
     watchTurns(list, turns.current, open);
   }, [list]);
   // The chats you may open next, warmed (src/warm.ts).
@@ -284,6 +284,7 @@ export function App() {
       createKey={(trigger) => <CreatePopover trigger={trigger} />}
       wsPlus={(w, trigger, o, setO) => <WsPlus key={w.key} w={{ id: w.id, name: w.name, path: w.root }} trigger={trigger} open={o} setOpen={setO} opened={(id) => openChat(id)} />}
       me={me}
+      reveal={phone ? onSheet : undefined}
     />
   );
 

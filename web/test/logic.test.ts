@@ -2,7 +2,7 @@
 // tree, the composer's key, the upgrade rules, the i18n dictionaries.
 import { describe, expect, test } from "vitest";
 import { windowFor } from "../src/quota";
-import type { Block, Model, Session, Terminal } from "../src/api/types.gen";
+import type { Block, Model, Session, Terminal, Workspace } from "../src/api/types.gen";
 import { argOf, folded, foldLine, inputOf } from "../src/chat/fold";
 import { commandsOf, keyMode, matching } from "../src/chat/composer";
 import { shellLine } from "../src/chat/shell";
@@ -14,7 +14,8 @@ import { t } from "../src/i18n";
 import { en } from "../src/i18n/en";
 import { zh } from "../src/i18n/zh";
 import { jumpList } from "../src/jump";
-import { buildTree, commonDir, flat, groupPath, remotePath } from "../src/tree";
+import { buildTree, commonDir, flat, groupPath, hungUnder, isOwn, listedRemote, remotePath, standing } from "../src/tree";
+import * as machines from "../src/machines";
 import { entryOf, reloadNow } from "../src/upgrade";
 import { tilde, titleOf, tokens } from "../src/ui";
 import { dollars, hitOf, prettyModel } from "../src/usage";
@@ -232,28 +233,117 @@ describe("buildTree", () => {
   });
   test("a session at another machine: grouped by its machine's path, not one folder more with its path", () => {
     const wss = [{ id: 7, name: "Starmod", path: "m:C:/Code/Starmod" }];
-    const list = [S("a", "C:\\Code\\Starmod", { workspace: 7, machine: "m" }), S("b", "C:\\Code\\Starmod\\web", { workspace: 7, machine: "m" }), S("c", "C:\\Code\\jl", { machine: "m" }), S("d", "C:\\Code\\Starmod", { workspace: 7, machine: "m", archived: true })];
+    const list = [S("a", "C:\\Code\\Starmod", { workspace: 7, machine: "m", own: true }), S("b", "C:\\Code\\Starmod\\web", { workspace: 7, machine: "m" }), S("c", "C:\\Code\\jl", { machine: "m", own: true }), S("d", "C:\\Code\\Starmod", { workspace: 7, machine: "m", archived: true })];
     const t = buildTree(list, wss, "未归类");
+    expect(t.workspaces.map((w) => [w.key, w.machine])).toEqual([
+      ["w7", "m"],
+      ["w0", undefined],
+    ]);
     expect(t.workspaces[0]!.rows.map((r) => (r.kind === "session" ? r.s.id : `[${r.f.name}:${r.f.path}]`))).toEqual(["a", "[web:m:C:/Code/Starmod/web]"]);
     expect(t.workspaces[1]!.rows.map((r) => (r.kind === "session" ? r.s.id : r.f.path))).toEqual(["m:C:/Code/jl"]);
     expect(t.where.get("d")).toBe("Starmod");
-    // One of this machine's in that group (a coordinator there): in that group, at its machine,
-    // a row of its own; not this machine's section.
-    const here = buildTree([S("h", "/root", { workspace: 7 }), S("a", "C:\\Code\\Starmod", { workspace: 7, machine: "m" })], wss, "未归类", undefined, undefined, ["m"]);
-    expect(here.workspaces.map((w) => [w.key, w.machine, w.rows.map((r) => (r.kind === "session" ? r.s.id : r.f.path))])).toEqual([["w7", "m", ["h", "a"]]]);
-    // One at another machine in this machine's group: that group listed in its machine's section
-    // too, by the same name, with it.
-    const local = [{ id: 8, name: "ir", path: "/home/o/ir" }];
-    const there = buildTree([S("h", "/home/o/ir", { workspace: 8 }), S("a", "C:\\Code\\x", { workspace: 8, machine: "m" })], local, "未归类", undefined, undefined, ["m"]);
-    expect(there.workspaces.map((w) => [w.key, w.machine])).toEqual([
-      ["w8", undefined],
-      ["w8@m", "m"],
-    ]);
-    // In DSH's 未分组: a row of its own in that machine's 未归类, no folder; this machine's first.
-    const u = buildTree([S("e", "C:\\Users\\o\\Documents\\DSH\\2026-11-02\\新聊天", { machine: "m", loose: true }), S("f", "/w/x/one")], wss, "未归类");
-    expect(u.workspaces.map((w) => w.rows.map((r) => (r.kind === "session" ? r.s.id : r.f.path)))).toEqual([["/w/x/one"], ["e"]]);
     expect(groupPath(list[1]!)).toBe("m:C:/Code/Starmod/web");
     expect([remotePath("m:C:/Code"), remotePath("/w"), remotePath("")]).toEqual([true, false, false]);
+  });
+  test("a group at another machine: listed while it holds one a person opened, not archived; then all of it", () => {
+    const wss = [...ws, { id: 7, name: "Starmod", path: "m:C:/Code/Starmod" }, { id: 9, name: "Other", path: "m:C:/Other" }];
+    const list = [
+      S("a", "C:\\Code\\Starmod", { workspace: 7, machine: "m", own: true }),
+      // Opened in DSH Desktop there: listed with its group.
+      S("b", "C:\\Code\\Starmod\\web", { workspace: 7, machine: "m", hosted: false }),
+      S("d", "C:\\Code\\Starmod", { workspace: 7, machine: "m", archived: true }),
+      // No one opened a session in Other: not listed, nor in 归档, nor found by the jump box.
+      S("e", "C:\\Other", { workspace: 9, machine: "m", hosted: false }),
+      S("f", "C:\\Other", { workspace: 9, machine: "m", archived: true }),
+      S("fs", "C:\\Other", { subagent: true, parent: "e", machine: "m" }),
+      // In DSH's 未分组: listed only as a person opened it, in this machine's 未归类.
+      S("g", "C:\\Users\\o\\DSH\\新聊天", { machine: "m", loose: true, own: true }),
+      S("h", "C:\\Users\\o\\DSH\\旧聊天", { machine: "m", loose: true, hosted: false }),
+      // This machine's: always listed, whoever opened it.
+      S("l", "/w/ir", { workspace: 1, hosted: false }),
+    ];
+    const t = buildTree(list, wss, "未归类");
+    expect(t.workspaces.map((w) => w.name)).toEqual(["Iridium", "Starmod", "未归类"]);
+    expect(t.workspaces[1]!.rows.map((r) => (r.kind === "session" ? r.s.id : r.f.sessions.map((s) => s.id).join()))).toEqual(["a", "b"]);
+    expect(t.workspaces[2]!.rows.map((r) => (r.kind === "session" ? r.s.id : r.f.sessions.map((s) => s.id).join()))).toEqual(["g"]);
+    expect(t.archived.map((s) => s.id)).toEqual(["d"]);
+    expect([...t.unlisted].sort()).toEqual(["e", "f", "fs", "h"]);
+    expect(flat(t).map((s) => s.id)).toEqual(["l", "a", "b", "g"]);
+    expect(jumpList(list.filter((s) => !t.unlisted.has(s.id)), flat(t), "", null, []).map((s) => s.id)).toEqual(["l", "a", "b", "g"]);
+    expect([...listedRemote(list, wss)]).toEqual(["m:C:/Code/Starmod"]);
+    // Its own one archived (归档这里的): the group no longer listed; that one in 归档 to bring back.
+    const off = buildTree(list.map((s) => (s.id === "a" ? { ...s, archived: true } : s)), wss, "未归类");
+    expect(off.workspaces.map((w) => w.name)).toEqual(["Iridium", "未归类"]);
+    expect(off.archived.map((s) => s.id)).toEqual(["a"]);
+  });
+  test("one started by another (ir new): under its launcher, listed always, its group listed or not; a chain under the topmost", () => {
+    const now = 10 * 60_000;
+    const wss = [...ws, { id: 7, name: "Starmod", path: "m:C:/Code/Starmod" }];
+    const list = [
+      S("p", "/w/ir", { workspace: 1, own: true, live: true }),
+      S("k1", "C:\\Code\\Starmod", { workspace: 7, machine: "m", launcher: "p", live: false }),
+      S("k2", "/w/ir/web", { workspace: 1, launcher: "k1" }),
+      S("z", "C:\\Code\\Starmod", { workspace: 7, machine: "m", hosted: false }),
+      // A subagent carries its launcher too: never a whole row hung.
+      S("sa", "/w/ir", { subagent: true, parent: "p", launcher: "p", updatedAt: now - 1000 }),
+    ];
+    const t = buildTree(list, wss, "未归类", now);
+    expect(t.workspaces.map((w) => w.name)).toEqual(["Iridium"]);
+    expect(t.workspaces[0]!.rows.map((r) => (r.kind === "session" ? r.s.id : r.f.name))).toEqual(["p"]);
+    expect(Object.fromEntries([...t.hung].map(([k, v]) => [k, v.map((s) => s.id)]))).toEqual({ p: ["k1", "k2"] });
+    expect(t.kids.get("p")?.map((s) => s.id)).toEqual(["sa"]);
+    expect(flat(t).map((s) => s.id)).toEqual(["p", "sa", "k1", "k2"]);
+    expect([...t.unlisted]).toEqual(["z"]);
+    expect([isOwn(list[1]!, list), isOwn(list[4]!, list)]).toEqual([false, false]);
+    expect([...hungUnder(list).keys()]).toEqual(["p"]);
+    // Taken out (detach: own, in its own folder's group): a row there, that group listed whole.
+    const out = list.map((s) => (s.id === "k1" ? { ...s, own: true } : s));
+    const t2 = buildTree(out, wss, "未归类", now);
+    expect(t2.workspaces.map((w) => [w.name, w.rows.map((r) => (r.kind === "session" ? r.s.id : r.f.name))])).toEqual([
+      ["Iridium", ["p"]],
+      ["Starmod", ["k1", "z"]],
+    ]);
+    // k2 hangs under the topmost listed one it came from: k1 now.
+    expect(Object.fromEntries([...t2.hung].map(([k, v]) => [k, v.map((s) => s.id)]))).toEqual({ k1: ["k2"] });
+  });
+  test("one whose launcher is not listed: as a person opened it, so none is lost", () => {
+    const wss = [...ws, { id: 7, name: "Starmod", path: "m:C:/Code/Starmod" }, { id: 9, name: "Other", path: "m:C:/Other" }];
+    const rows = (t: ReturnType<typeof buildTree>) => t.workspaces.map((w) => [w.name, w.rows.map((r) => (r.kind === "session" ? r.s.id : r.f.name))]);
+    // Gone, or archived: on its own, its group listed for it.
+    const gone = [S("x", "C:\\Code\\Starmod", { workspace: 7, machine: "m", launcher: "gone" })];
+    expect(rows(buildTree(gone, wss, "未归类"))).toEqual([["Starmod", ["x"]]]);
+    expect(isOwn(gone[0]!, gone)).toBe(true);
+    const archived = [S("p", "/w/ir", { workspace: 1, archived: true }), S("y", "C:\\Code\\Starmod", { workspace: 7, machine: "m", launcher: "p" })];
+    const ta = buildTree(archived, wss, "未归类");
+    expect(rows(ta)).toEqual([["Starmod", ["y"]]]);
+    expect(ta.archived.map((s) => s.id)).toEqual(["p"]);
+    // In a group no one opened: the one it started on its own, those after it under that one.
+    const unlisted = [S("q", "C:\\Other", { workspace: 9, machine: "m", hosted: false }), S("r", "C:\\Code\\Starmod", { workspace: 7, machine: "m", launcher: "q" }), S("r2", "C:\\Code\\Starmod", { workspace: 7, machine: "m", launcher: "r" })];
+    const tu = buildTree(unlisted, wss, "未归类");
+    expect(rows(tu)).toEqual([["Starmod", ["r"]]]);
+    expect(tu.hung.get("r")?.map((s) => s.id)).toEqual(["r2"]);
+    expect([...tu.unlisted]).toEqual(["q"]);
+    expect([isOwn(unlisted[1]!, unlisted), isOwn(unlisted[2]!, unlisted)]).toEqual([true, false]);
+    // In that group itself: it lists the group, so its launcher is listed and it hangs under it.
+    const same = [S("q", "C:\\Code\\Starmod", { workspace: 7, machine: "m", hosted: false }), S("r", "C:\\Code\\Starmod\\a", { workspace: 7, machine: "m", launcher: "q" })];
+    const ts = buildTree(same, wss, "未归类");
+    expect(rows(ts)).toEqual([["Starmod", ["q"]]]);
+    expect(ts.hung.get("q")?.map((s) => s.id)).toEqual(["r"]);
+  });
+  test("launchers in a cycle: the least ID on its own, the rest under it; no endless walk", () => {
+    const list = [S("b", "/w/ir", { workspace: 1, launcher: "a" }), S("a", "/w/ir", { workspace: 1, launcher: "b" }), S("c", "/w/ir", { workspace: 1, launcher: "b" }), S("d", "/w/ir", { workspace: 1, launcher: "d" })];
+    const t = buildTree(list, ws, "未归类");
+    expect(t.workspaces[0]!.rows.map((r) => (r.kind === "session" ? r.s.id : r.f.name))).toEqual(["a", "d"]);
+    expect(t.hung.get("a")?.map((s) => s.id)).toEqual(["b", "c"]);
+    expect(standing(list).own).toEqual(new Set(["a", "d"]));
+  });
+  test("no hidden groups, no machine view (2026-11-10)", () => {
+    // A group's hidden flag, still in old answers, is not read.
+    const t = buildTree([S("a", "/w/ir", { workspace: 1 })], [{ ...ws[0]!, hidden: true } as Workspace], "未归类");
+    expect(t.workspaces.map((w) => w.name)).toEqual(["Iridium"]);
+    expect("hidden" in t).toBe(false);
+    expect(Object.keys(machines).filter((k) => /view/i.test(k))).toEqual([]);
+    expect(["menu.hide", "menu.unhide", "nav.all", "toast.hidden"].filter((k) => k in zh || k in en)).toEqual([]);
   });
   test("subagents under a session keep the order they came in", () => {
     const now = 1_000_000;

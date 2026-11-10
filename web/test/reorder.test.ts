@@ -63,19 +63,20 @@ describe("folders", () => {
     expect(withPlace({ groups: [], order: { "/w/x": 9 }, pinned: ["/w/x"] }, "/w/x", { order: 0, pinned: false })).toEqual({ groups: [], order: {}, pinned: [] });
   });
 
-  test("groups in their own order, whichever machine; 未归类 last", () => {
-    const ses = (id: string, cwd: string, more: Partial<Session>) => ({ id, cwd, updatedAt: 1, agent: "claude", status: "idle", hosted: false, live: false, ...more }) as Session;
+  test("groups in their own order, whichever machine; one 未归类, last", () => {
+    const ses = (id: string, cwd: string, more: Partial<Session>) => ({ id, cwd, updatedAt: 1, agent: "claude", status: "idle", hosted: true, live: false, ...more }) as Session;
     const wss = [{ id: 2, name: "dsh", path: "m:C:/w" }, { id: 1, name: "here", path: "/w" }];
-    const tree = buildTree([ses("a", "/w", { workspace: 1 }), ses("b", "C:\\w", { workspace: 2, machine: "m" }), ses("c", "/x", {}), ses("d", "C:\\x", { machine: "m" })], wss, "-", 0, undefined, ["m"]);
-    expect(tree.workspaces.map((w) => w.key)).toEqual(["w2", "w1", "w0", "w0:m"]);
-    // Dragged: the remote group above this machine's; a group at two machines, its rows apart.
-    const moved = buildTree([ses("a", "/w", { workspace: 1 }), ses("b", "C:\\w", { workspace: 2, machine: "m" }), ses("e", "C:\\w\\e", { workspace: 1, machine: "m" }), ses("c", "/x", {})], wss, "-", 0, undefined, ["m"], { groups: ["w2", "w1@m"], order: {}, pinned: [] });
-    expect(moved.workspaces.map((w) => w.key)).toEqual(["w2", "w1@m", "w1", "w0"]);
+    const tree = buildTree([ses("a", "/w", { workspace: 1 }), ses("b", "C:\\w", { workspace: 2, machine: "m", own: true }), ses("c", "/x", {}), ses("d", "C:\\x", { machine: "m", own: true })], wss, "-", 0);
+    expect(tree.workspaces.map((w) => w.key)).toEqual(["w2", "w1", "w0"]);
+    expect(tree.workspaces[2]!.rows.map((r) => (r.kind === "folder" ? r.f.path : r.s.id))).toEqual(["/x", "m:C:/x"]);
+    // Dragged: the remote group above this machine's; a stored key no longer listed keeps its place.
+    const moved = buildTree([ses("a", "/w", { workspace: 1 }), ses("b", "C:\\w", { workspace: 2, machine: "m", own: true }), ses("c", "/x", {})], wss, "-", 0, undefined, { groups: ["w1@m", "w1", "w2"], order: {}, pinned: [] });
+    expect(moved.workspaces.map((w) => w.key)).toEqual(["w1", "w2", "w0"]);
   });
 
   test("pinned folders above the sessions at the root", () => {
     const ses = (id: string, cwd: string) => ({ id, cwd, updatedAt: 1, agent: "claude", status: "idle", hosted: false, live: false, workspace: 1 }) as Session;
-    const tree = buildTree([ses("r", "/w"), ses("a", "/w/a"), ses("b", "/w/b")], [{ id: 1, name: "w", path: "/w" }], "-", 0, undefined, [], { groups: [], order: {}, pinned: ["/w/b"] });
+    const tree = buildTree([ses("r", "/w"), ses("a", "/w/a"), ses("b", "/w/b")], [{ id: 1, name: "w", path: "/w" }], "-", 0, undefined, { groups: [], order: {}, pinned: ["/w/b"] });
     expect(tree.workspaces[0]!.rows.map((r) => (r.kind === "session" ? r.s.id : r.f.name))).toEqual(["b", "r", "a"]);
   });
 });

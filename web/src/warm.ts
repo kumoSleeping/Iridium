@@ -8,7 +8,7 @@
 import type { Session } from "./api/types.gen";
 import { mayPrefetch, warmTo } from "./chats";
 import { settled } from "./prefetch";
-import { working, type Tree } from "./tree";
+import { family, working, type Tree } from "./tree";
 import { keep, kept } from "./ui";
 
 /** How many sessions a workspace warms. */
@@ -29,8 +29,9 @@ export function made(s: Session, byId: Map<string, Session>, now: number): boole
 export function pick(all: Session[], tree: Tree, open: string | null, lastWs: number | null, now = Date.now()): Map<string, number> {
   const byId = new Map(all.map((s) => [s.id, s]));
   const places = tree.workspaces.map((w) => {
-    // As the sidebar lists them.
-    const order = w.rows.flatMap((r) => (r.kind === "session" ? [r.s] : r.f.sessions));
+    // As the sidebar lists them, those hung under one (dispatched, tree.ts) with it; not its
+    // subagents.
+    const order = w.rows.flatMap((r) => (r.kind === "session" ? [r.s] : r.f.sessions)).flatMap((s) => family(tree, s).filter((x) => !x.subagent));
     const at = order.findIndex((s) => s.id === open);
     const near = at < 0 ? [] : [order[at - 1], order[at + 1]].filter((s): s is Session => !!s);
     const rest = order.filter((s) => s.id !== open && !near.includes(s)).sort((a, b) => b.updatedAt - a.updatedAt);
@@ -44,9 +45,11 @@ export function pick(all: Session[], tree: Tree, open: string | null, lastWs: nu
   return want;
 }
 
-/** The workspace of session id as the sidebar has it (0: 未归类), if it is listed. */
+/** The workspace of session id as the sidebar has it (0: 未归类), if it is listed: one hung under
+ *  another, that one's. */
 export function workspaceOf(tree: Tree, id: string): number | undefined {
-  for (const w of tree.workspaces) if (w.rows.some((r) => (r.kind === "session" ? r.s.id === id : r.f.sessions.some((s) => s.id === id)))) return w.id;
+  const at = (s: Session) => s.id === id || !!tree.hung.get(s.id)?.some((h) => h.id === id);
+  for (const w of tree.workspaces) if (w.rows.some((r) => (r.kind === "session" ? at(r.s) : r.f.sessions.some(at)))) return w.id;
   return undefined;
 }
 
