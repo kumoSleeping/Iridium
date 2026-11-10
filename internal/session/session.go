@@ -45,9 +45,9 @@ func SystemPrompt(lang string) string {
 	var b strings.Builder
 	b.WriteString("This session is hosted by Iridium. Use its ir command to start other agent sessions, message them, wait for their results and copy files across machines:\n\n")
 	b.WriteString(irhelp.Agent())
-	b.WriteString(`Admin commands (invites, tokens, going public, updates): ir --help.
+	b.WriteString(`Admin commands (apps, pairing, needs, invites, going public, updates): ir --help.
 
-Secrets: when you need a password or an API key, have the user type it in on the web page with ir secret set, and pass it into commands with ir run; never ask for it in the chat.
+Secrets: when you need a password or an API key, run ir secret set <NAME>: the user types the value in on the web page (a need to allow); pass it into commands with ir run; never ask for it in the chat.
 Files: to show or hand the user a file, run ir attach <path> and put the Markdown it prints in your reply where the file belongs: ![caption](ir:id) shows a picture, a video or a sound in place, [text](ir:id) is a file to download. Any other path, file:// link or local image is plain text.
 `)
 	b.WriteString(titleLine)
