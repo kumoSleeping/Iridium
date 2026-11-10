@@ -1,5 +1,6 @@
 // The page's pure logic: folding tool calls, reading sources and file references, the sidebar's
 // tree, the composer's key, the upgrade rules, the i18n dictionaries.
+import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 import { windowFor } from "../src/quota";
 import type { Block, Model, Session, Terminal, Workspace } from "../src/api/types.gen";
@@ -329,6 +330,14 @@ describe("buildTree", () => {
     const ts = buildTree(same, wss, "未归类");
     expect(rows(ts)).toEqual([["Starmod", ["q"]]]);
     expect(ts.hung.get("q")?.map((s) => s.id)).toEqual(["r"]);
+  });
+  test("the server's fixtures (internal/session/testdata/standing.json): the same rows, hung and groups", () => {
+    type Case = { name: string; workspaces: Workspace[]; sessions: Partial<Session>[]; rows: string[]; hung: Record<string, string[]>; groups: number[] };
+    const cases = JSON.parse(readFileSync("../internal/session/testdata/standing.json", "utf8")) as Case[];
+    for (const c of cases) {
+      const st = standing(c.sessions.map((s) => ({ agent: "dsh", cwd: "/", status: "idle", hosted: false, live: false, updatedAt: 0, ...s }) as Session), c.workspaces);
+      expect([[...st.rows], Object.fromEntries([...st.hung].map(([k, v]) => [k, v.map((s) => s.id)])), [...st.groups].sort((a, b) => a - b)], c.name).toEqual([c.rows, c.hung, c.groups]);
+    }
   });
   test("launchers in a cycle: the least ID on its own, the rest under it; no endless walk", () => {
     const list = [S("b", "/w/ir", { workspace: 1, launcher: "a" }), S("a", "/w/ir", { workspace: 1, launcher: "b" }), S("c", "/w/ir", { workspace: 1, launcher: "b" }), S("d", "/w/ir", { workspace: 1, launcher: "d" })];

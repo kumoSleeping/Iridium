@@ -1,14 +1,18 @@
 package session
 
 import (
+	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/config"
 	"github.com/kumoSleeping/iridium/internal/discover"
+	"github.com/kumoSleeping/iridium/internal/store"
 )
 
 // groupRig is a rig whose sessions are grouped as discovery groups them (GroupFor), never scanned.
@@ -76,6 +80,52 @@ func TestOwn(t *testing.T) {
 	}
 	if r.row(child).Own {
 		t.Error("its sibling taken out too")
+	}
+}
+
+// splitAll is discovery splitting a group as it does the sessions it found: those of out (in its
+// subfolders) given back to it, put there by hand no more.
+type splitAll struct {
+	*discover.Index
+	st  *store.Store
+	out []string
+}
+
+func (d *splitAll) SplitWorkspace(id int64) error { return d.st.SplitWorkspace(id, d.out) }
+
+// A split of the group one taken out from under its launcher is in gives back to discovery what
+// is in its subfolders, put there by hand no more; that one goes in its folder's group by hand
+// again, still taken out.
+func TestSplitKeepsTakenOut(t *testing.T) {
+	t.Parallel()
+	var d *splitAll
+	r := newRig(t, func(c *config.Config, o *Options) {
+		d = &splitAll{Index: discover.New(discover.Options{ClaudeDir: c.ClaudeHome, CodexHome: t.TempDir(), PiSessions: t.TempDir(), DshHome: t.TempDir(), Store: o.Store, Procs: &procs{}, UID: os.Getuid(), Logf: t.Logf}), st: o.Store}
+		o.Discovery = d
+	})
+	top, _ := r.m.Create(bg, api.NewSession{Cwd: r.cwd}, "网页")
+	sub := filepath.Join(r.cwd, "bench")
+	os.MkdirAll(sub, 0o700)
+	out, _ := r.m.Create(bg, api.NewSession{Cwd: sub, Caller: top}, "ir:"+top)
+	hung, _ := r.m.Create(bg, api.NewSession{Cwd: sub, Caller: top}, "ir:"+top)
+	if err := r.m.Detach(bg, out); err != nil {
+		t.Fatal(err)
+	}
+	ws := r.row(out).Workspace
+	if w, _ := r.store.Workspace(ws); w.Path != r.cwd || !r.row(out).Own {
+		t.Fatalf("detached: in %q, own %v", w.Path, r.row(out).Own)
+	}
+	d.out = []string{out, hung}
+	if err := r.m.SplitWorkspace(bg, ws); err != nil {
+		t.Fatal(err)
+	}
+	s := r.row(out)
+	w, _ := r.store.Workspace(s.Workspace)
+	if over, _ := r.store.Overlays(); !s.Own || w.Path != sub || !over[out].Manual {
+		t.Errorf("split: own %v, in %q (manual %v), want %q", s.Own, w.Path, over[out].Manual, sub)
+	}
+	if r.row(hung).Own {
+		t.Error("the one hung taken out by the split")
 	}
 }
 
@@ -177,8 +227,56 @@ func TestListed(t *testing.T) {
 	want := map[string]bool{"here": true, "desk": false, "agent": false, "sub": false, "mine": true, "beside": true,
 		"hung": true, "orphan": true, "near": true, "old": true, "by": false, "unknown": true}
 	for id, w := range want {
-		if got := listed(l, id); got != w {
+		if got := listed(l, nil, id); got != w {
 			t.Errorf("%s: listed %v, want %v", id, got, w)
+		}
+	}
+}
+
+// The page's fixtures (web/test/logic.test.ts reads the same): what stands where, so what is
+// listed, is the page's.
+func TestStanding(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("testdata", "standing.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cases []struct {
+		Name       string
+		Workspaces []api.Workspace
+		Sessions   []api.Session
+		Rows       []string
+		Hung       map[string][]string
+		Groups     []int64
+	}
+	if err := json.Unmarshal(b, &cases); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range cases {
+		roots := map[int64]string{}
+		for _, w := range c.Workspaces {
+			roots[w.ID] = w.Path
+		}
+		st := standOf(c.Sessions, roots)
+		var rows []string
+		for _, s := range c.Sessions {
+			if st.rows[s.ID] {
+				rows = append(rows, s.ID)
+			}
+		}
+		groups := slices.Sorted(maps.Keys(st.groups))
+		if !slices.Equal(rows, c.Rows) || !maps.EqualFunc(st.hung, c.Hung, slices.Equal) || !slices.Equal(groups, c.Groups) {
+			t.Errorf("%s: rows %v hung %v groups %v, want %v %v %v", c.Name, rows, st.hung, groups, c.Rows, c.Hung, c.Groups)
+		}
+		hung := map[string]bool{}
+		for _, h := range st.hung {
+			for _, id := range h {
+				hung[id] = true
+			}
+		}
+		for _, s := range c.Sessions {
+			if got, want := listed(c.Sessions, roots, s.ID), s.Archived && (s.Machine == "" || s.Own) || st.rows[s.ID] || hung[s.ID] || s.Subagent && listed(c.Sessions, roots, s.Parent); got != want {
+				t.Errorf("%s: %s listed %v, want %v", c.Name, s.ID, got, want)
+			}
 		}
 	}
 }

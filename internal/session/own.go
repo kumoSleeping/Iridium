@@ -3,6 +3,8 @@ package session
 import (
 	"context"
 	"path/filepath"
+	"slices"
+	"strings"
 
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/store"
@@ -38,46 +40,194 @@ func hungUnder(list []api.Session) map[string][]api.Session {
 	return out
 }
 
-// listed says whether the page lists session id of list (the page's tree.ts, as far as it is
-// the server's business): one at this machine; one Own; one with a launcher (hung under it while
-// that is listed and not archived, else on its own, as Own); one in a group holding such a
-// session not archived; a subagent as its parent. One not in list is.
-func listed(list []api.Session, id string) bool {
+// standing is where the sessions not archived stand in the list, as the page's tree.ts standing
+// has it (the same rules, the same fixtures: testdata/standing.json). rows: listed on their own;
+// hung: the dispatched ones (a launcher, not own) by the topmost listed one they came from; own:
+// opened by a person as the page takes it (Own, or one whose launcher is not listed: archived,
+// gone, a subagent, in a cycle, in a group not listed); groups: the groups listed.
+type standing struct {
+	rows   map[string]bool
+	hung   map[string][]string
+	own    map[string]bool
+	groups map[int64]bool
+}
+
+// standOf is standing of list; roots: each group's folder, by ID (nil: unknown, a group at another
+// machine by its sessions' machine), a session in none known in none.
+func standOf(list []api.Session, roots map[int64]string) standing {
+	var live []*api.Session
+	byID := map[string]*api.Session{}
+	for i := range list {
+		if s := &list[i]; !s.Subagent && !s.Archived {
+			live = append(live, s)
+			byID[s.ID] = s
+		}
+	}
+	wsOf := func(s *api.Session) int64 {
+		if _, ok := roots[s.Workspace]; roots != nil && !ok {
+			return 0
+		}
+		return s.Workspace
+	}
+	remote := func(s *api.Session) bool {
+		if id := wsOf(s); id != 0 && roots != nil {
+			return roots[id] != "" && !strings.HasPrefix(roots[id], "/")
+		}
+		return s.Machine != ""
+	}
+	st := standing{rows: map[string]bool{}, hung: map[string][]string{}, own: map[string]bool{}, groups: map[int64]bool{}}
+	// Started by another (its ir new), not taken out from under it by hand, nor taken as own here.
+	dispatched := func(s *api.Session) bool { return s.Launcher != "" && !s.Own && !st.own[s.ID] }
+	// The topmost one a chain of launchers goes up to: the first not dispatched, or whose launcher
+	// is not listed (archived, gone, a subagent); in a cycle, its least ID.
+	top := map[string]string{}
+	tops := func() {
+		clear(top)
+		for _, s := range live {
+			var path []*api.Session
+			seen := map[string]int{}
+			cur := s
+			var t string
+			for {
+				if known, ok := top[cur.ID]; ok {
+					t = known
+					break
+				}
+				if at, ok := seen[cur.ID]; ok {
+					t = cur.ID
+					for _, x := range path[at:] {
+						t = min(t, x.ID)
+					}
+					break
+				}
+				seen[cur.ID] = len(path)
+				path = append(path, cur)
+				var up *api.Session
+				if dispatched(cur) {
+					up = byID[cur.Launcher]
+				}
+				if up == nil {
+					t = cur.ID
+					break
+				}
+				cur = up
+			}
+			for _, x := range path {
+				top[x.ID] = t
+			}
+		}
+	}
+	tops()
+	isTop := func(s *api.Session) bool { return top[s.ID] == s.ID }
+	for _, s := range live {
+		if isTop(s) && (s.Own || dispatched(s)) {
+			st.own[s.ID] = true
+		}
+	}
+	// A group at another machine listed while it holds an own one, or one of this machine's.
+	count := func(s *api.Session) {
+		if id := wsOf(s); id != 0 && (!remote(s) || s.Machine == "" || st.own[s.ID]) {
+			st.groups[id] = true
+		}
+	}
+	for _, s := range live {
+		if isTop(s) {
+			count(s)
+		}
+	}
+	shown := func(s *api.Session) bool {
+		if !remote(s) {
+			return true
+		}
+		if id := wsOf(s); id != 0 {
+			return st.groups[id]
+		}
+		return st.own[s.ID]
+	}
+	// Those whose launcher is not listed: one in its launcher's group lists that group, and so
+	// hangs under it after all; the others, their launcher still not listed then, are as a person
+	// opened them, their groups listed for them. Decided all at once, as the page does.
+	var orphans, taken []*api.Session
+	for _, s := range live {
+		if up := byID[s.Launcher]; !isTop(s) && up != nil && isTop(up) && !shown(up) {
+			orphans = append(orphans, s)
+		}
+	}
+	for _, s := range orphans {
+		if id := wsOf(s); id != 0 && id == wsOf(byID[s.Launcher]) {
+			st.groups[id] = true
+		}
+	}
+	for _, s := range orphans {
+		if !shown(byID[s.Launcher]) {
+			taken = append(taken, s)
+		}
+	}
+	for _, s := range taken {
+		st.own[s.ID] = true
+	}
+	for _, s := range taken {
+		count(s)
+	}
+	if len(taken) > 0 {
+		tops()
+	}
+	for _, s := range live {
+		switch t := byID[top[s.ID]]; {
+		case s == t:
+			if shown(s) {
+				st.rows[s.ID] = true
+			}
+		case shown(t):
+			st.hung[t.ID] = append(st.hung[t.ID], s.ID)
+		case shown(s):
+			st.rows[s.ID] = true
+		}
+	}
+	return st
+}
+
+// listed says whether the page lists session id of list (standOf; roots as there): one listed on
+// its own or hung under another; an archived one at this machine, or own; a subagent as its
+// parent. One not in list is.
+func listed(list []api.Session, roots map[int64]string, id string) bool {
 	byID := make(map[string]*api.Session, len(list))
 	for i := range list {
 		byID[list[i].ID] = &list[i]
 	}
-	shown := func(id string) bool { l := byID[id]; return l != nil && !l.Archived }
-	// Own on the page: Own, or one whose launcher is not shown.
-	own := func(s *api.Session) bool {
-		return s.Own || s.Launcher != "" && !s.Subagent && !shown(s.Launcher)
-	}
-	groups := map[int64]bool{} // the groups listed for an Own session in them
-	for i := range list {
-		if s := &list[i]; s.Workspace != 0 && !s.Archived && own(s) {
-			groups[s.Workspace] = true
-		}
-	}
+	var st *standing
 	seen := map[string]bool{}
-	var is func(id string) bool
-	is = func(id string) bool {
+	for {
 		s := byID[id]
 		switch {
 		case s == nil:
 			return true
 		case seen[id]:
 			return false
+		case s.Subagent:
+			if s.Parent == "" {
+				return s.Machine == ""
+			}
+			seen[id] = true
+			id = s.Parent
+			continue
+		case s.Archived:
+			return s.Machine == "" || s.Own
 		}
-		seen[id] = true
-		switch {
-		case s.Machine == "", s.Own, s.Launcher != "" && !s.Subagent, groups[s.Workspace] && s.Workspace != 0:
+		if st == nil {
+			x := standOf(list, roots)
+			st = &x
+		}
+		if st.rows[id] {
 			return true
-		case s.Subagent && s.Parent != "":
-			return is(s.Parent)
+		}
+		for _, h := range st.hung {
+			if slices.Contains(h, id) {
+				return true
+			}
 		}
 		return false
 	}
-	return is(id)
 }
 
 // Listed says whether the page lists session id: what is not is not pushed, nor its asks sent to
@@ -90,7 +240,14 @@ func (m *Manager) Listed(id string) bool {
 	if h := m.byAgentID(id); h != nil {
 		id = h.id
 	}
-	return listed(l, id)
+	var roots map[int64]string
+	if ws, err := m.o.Store.Workspaces(); err == nil {
+		roots = make(map[int64]string, len(ws))
+		for _, w := range ws {
+			roots[w.ID] = w.Path
+		}
+	}
+	return listed(l, roots, id)
 }
 
 // ArchiveTree archives session id (SetArchived) and, all the way down, the sessions hung under
@@ -164,6 +321,37 @@ func (m *Manager) Detach(ctx context.Context, id string) error {
 	return nil
 }
 
+// splitter is a Discovery that splits a group at its folder (discover.Index).
+type splitter interface {
+	SplitWorkspace(id int64) error
+}
+
+// SplitWorkspace splits group ws at its folder, as discovery does: the sessions in its subfolders
+// go back to discovery, put there by hand no more. Those among them taken out from under their
+// launcher (Detach: put by hand is what keeps them out, ownOf) go in their own folders' groups by
+// hand again, so they never hang under it again.
+func (m *Manager) SplitWorkspace(ctx context.Context, ws int64) error {
+	d, ok := m.o.Discovery.(splitter)
+	if !ok {
+		return store.ErrNoWorkspace
+	}
+	l, err := m.List(ctx)
+	if err != nil {
+		return err
+	}
+	if err := d.SplitWorkspace(ws); err != nil {
+		return err
+	}
+	for _, s := range l {
+		if s.Workspace == ws && s.Own && s.Launcher != "" && !s.Subagent {
+			if err := m.Detach(ctx, s.ID); err != nil {
+				m.o.Logf("session %s: out of %d split: %v", s.ID, ws, err)
+			}
+		}
+	}
+	return nil
+}
+
 // relaunch hangs the hosted sessions launcher old started under nid, which goes on in its place
 // (/clear), so they stay under it.
 func (m *Manager) relaunch(old *Hosted, nid string) {
@@ -187,11 +375,11 @@ func (m *Manager) relaunch(old *Hosted, nid string) {
 			continue
 		}
 		h.meta.Launcher = nid
-		mt := h.meta
-		h.mu.Unlock()
-		if err := writeJSON(filepath.Join(h.dir, fileMeta), mt); err != nil {
+		// Written under its lock, as Started writes it: no older copy over a newer one.
+		if err := writeJSON(filepath.Join(h.dir, fileMeta), h.meta); err != nil {
 			h.logf("its launcher: %v", err)
 		}
+		h.mu.Unlock()
 		h.publish()
 	}
 }

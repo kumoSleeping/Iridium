@@ -70,7 +70,7 @@ func (s *Server) splitWorkspace(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	s.discoverDone(w, s.Discover.SplitWorkspace(id))
+	s.discoverDone(w, s.m.SplitWorkspace(r.Context(), id))
 }
 
 func (s *Server) orderGroups(w http.ResponseWriter, r *http.Request) {

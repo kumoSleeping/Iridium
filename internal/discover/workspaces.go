@@ -55,9 +55,10 @@ func (x *Index) classify() {
 			continue
 		}
 		a, ok := assigned[id]
-		// Put by discovery in a group of another machine.
+		// Put by discovery in a group of another machine; not a subagent, which goes with its
+		// parent wherever that is.
 		root := roots[a.Workspace]
-		stray := ok && !a.Manual && a.Workspace != 0 && root != "" && machineOf(root) != e.machine
+		stray := ok && !a.Manual && !e.sub && a.Workspace != 0 && root != "" && machineOf(root) != e.machine
 		if (!ok || a.Workspace == 0 && !a.Manual || stray) && e.cwd != "" && vis.Shown(string(e.agent), id) {
 			n := fresh{id: id, cwd: remote.GroupPath(e.machine, e.cwd), launcher: x.launcherOf(e), sub: e.sub, at: e.mtime}
 			if stray {
@@ -86,6 +87,9 @@ func (x *Index) classify() {
 			ws, roots[w.ID] = w.ID, w.Path
 		}
 		var ok bool
+		if n.from != 0 && ws == n.from {
+			continue // where it is: nothing changed
+		}
 		if n.from != 0 {
 			ok, err = x.o.Store.Regroup(n.id, n.from, ws)
 		} else {

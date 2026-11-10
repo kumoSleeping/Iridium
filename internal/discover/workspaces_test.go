@@ -298,3 +298,41 @@ func TestSplitAndFollow(t *testing.T) {
 		}
 	}
 }
+
+// A subagent goes with its parent, put by hand in a group of another machine, and stays there:
+// not taken for one put there by discovery, regrouped (and published) on every look.
+func TestSubagentNotStray(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "iridium.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	x := New(Options{Store: st, Home: "/home/u", Logf: t.Logf})
+	there, _ := st.CreateWorkspace("Starmod", "m:C:/Code/Starmod")
+	for _, e := range []*entry{
+		{onDisk: onDisk{id: "p", agent: api.AgentClaude}, glimpse: glimpse{cwd: "/home/u/ir"}, mtime: time.Now()},
+		{onDisk: onDisk{id: "s", agent: api.AgentClaude}, glimpse: glimpse{cwd: "/home/u/ir", sub: true, parent: "p"}, mtime: time.Now()},
+	} {
+		x.entries[e.id] = e
+		if _, err := st.Show(string(e.agent), e.id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.Move("p", there); err != nil {
+		t.Fatal(err)
+	}
+	x.classify()
+	for i := range 3 {
+		x.mu.Lock()
+		clear(x.changed)
+		x.mu.Unlock()
+		x.classify()
+		a, _ := st.Assignments()
+		x.mu.Lock()
+		changed := x.changed["s"]
+		x.mu.Unlock()
+		if a["s"].Workspace != there || a["s"].Manual || changed {
+			t.Errorf("look %d: s %+v, changed %v; want left with its parent in %d", i, a["s"], changed, there)
+		}
+	}
+}

@@ -160,11 +160,11 @@ func (m *Manager) clearedInside(h *Hosted, proc int, nid string) {
 		n.meta.Launcher = mt.Launcher
 	}
 	n.effort, n.ultracode, n.preset = h.effort, h.ultracode, h.preset
-	nmeta := n.meta
-	n.mu.Unlock()
-	if err := writeJSON(filepath.Join(n.dir, fileMeta), nmeta); err != nil {
+	// Written under its lock, so a thread ID its agent reports meanwhile (Started) is not lost.
+	if err := writeJSON(filepath.Join(n.dir, fileMeta), n.meta); err != nil {
 		n.logf("saving its settings: %v", err)
 	}
+	n.mu.Unlock()
 	if err := m.o.Store.SetSettings(nid, settings); err != nil {
 		n.logf("saving its settings: %v", err)
 	}

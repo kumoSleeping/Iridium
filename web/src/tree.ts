@@ -59,8 +59,10 @@ const rel = (path: string, root: string) => (path === root ? "" : path.slice(roo
  *  their own, in their group (or 未归类). hung: the dispatched ones (a launcher, not own) under the
  *  topmost listed session they came from, a chain all under it, in the list's order. own: opened by
  *  a person as the page takes it: Session.own, or one whose launcher is not listed (archived, gone,
- *  in a cycle, in a group not listed), so none is lost. groups: the groups listed (this machine's,
- *  and those at another holding an own one, or one of this machine's). Not in any: not listed. */
+ *  a subagent, in a cycle, in a group not listed), so none is lost. groups: the groups listed (this
+ *  machine's, and those at another holding an own one, or one of this machine's sessions, or a
+ *  launcher not listed with one it started beside it). Not in any: not listed. The server's
+ *  session.standOf is the same, for what it pushes (internal/session/testdata/standing.json). */
 export type Standing = { rows: Set<string>; hung: Map<string, Session[]>; own: Set<string>; groups: Set<number> };
 
 /** Where each session stands (Standing). workspaces: the groups, by whose paths a group is at
@@ -77,39 +79,44 @@ export function standing(all: Session[], workspaces?: Workspace[]): Standing {
     const id = wsOf(s);
     return id && paths ? remotePath(paths.get(id)!) : !!s.machine;
   };
-  // Started by another (its ir new), not taken out from under it by hand.
-  const dispatched = (s: Session) => !!s.launcher && !s.own;
+  const own = new Set<string>();
+  // Started by another (its ir new), not taken out from under it by hand, nor taken as own here.
+  const dispatched = (s: Session) => !!s.launcher && !s.own && !own.has(s.id);
   // The topmost one a chain of launchers goes up to: the first not dispatched, or whose launcher
-  // is not listed (archived, gone); in a cycle, its least ID.
+  // is not listed (archived, gone, a subagent); in a cycle, its least ID.
   const top = new Map<string, string>();
-  for (const s of live) {
-    const path: Session[] = [];
-    const seen = new Set<string>();
-    let cur = s;
-    let t: string;
-    for (;;) {
-      const known = top.get(cur.id);
-      if (known !== undefined) {
-        t = known;
-        break;
+  const tops = () => {
+    top.clear();
+    for (const s of live) {
+      const path: Session[] = [];
+      const seen = new Set<string>();
+      let cur = s;
+      let t: string;
+      for (;;) {
+        const known = top.get(cur.id);
+        if (known !== undefined) {
+          t = known;
+          break;
+        }
+        if (seen.has(cur.id)) {
+          t = path.slice(path.indexOf(cur)).map((x) => x.id).sort()[0]!;
+          break;
+        }
+        seen.add(cur.id);
+        path.push(cur);
+        const up = dispatched(cur) ? byId.get(cur.launcher!) : undefined;
+        if (!up) {
+          t = cur.id;
+          break;
+        }
+        cur = up;
       }
-      if (seen.has(cur.id)) {
-        t = path.slice(path.indexOf(cur)).map((x) => x.id).sort()[0]!;
-        break;
-      }
-      seen.add(cur.id);
-      path.push(cur);
-      const up = dispatched(cur) ? byId.get(cur.launcher!) : undefined;
-      if (!up) {
-        t = cur.id;
-        break;
-      }
-      cur = up;
+      for (const x of path) top.set(x.id, t);
     }
-    for (const x of path) top.set(x.id, t);
-  }
+  };
+  tops();
   const isTop = (s: Session) => top.get(s.id) === s.id;
-  const own = new Set(live.filter((s) => isTop(s) && (s.own || dispatched(s))).map((s) => s.id));
+  for (const s of live) if (isTop(s) && (s.own || dispatched(s))) own.add(s.id);
   // A group at another machine listed while it holds an own one, or one of this machine's.
   const groups = new Set<number>();
   const count = (s: Session) => {
@@ -118,18 +125,18 @@ export function standing(all: Session[], workspaces?: Workspace[]): Standing {
   };
   for (const s of live) if (isTop(s)) count(s);
   const shown = (s: Session) => !remote(s) || (wsOf(s) ? groups.has(wsOf(s)) : own.has(s.id));
-  // Those whose launcher is not listed (in a group at another machine no one opened): opened by a
-  // person, as the page takes them, their groups listed for them. One in its launcher's group lists
-  // that group, and so hangs under it after all.
-  const orphans = live.filter((s) => !isTop(s) && byId.get(s.launcher!) && isTop(byId.get(s.launcher!)!) && !shown(byId.get(s.launcher!)!));
-  for (const s of orphans) own.add(s.id), count(s);
-  for (const s of orphans) if (shown(byId.get(s.launcher!)!)) own.delete(s.id);
-  // The one under a top not listed, a chain under it hangs from: its launcher that top.
-  const below = (s: Session, t: string) => {
-    let cur = s;
-    for (let n = 0; n <= live.length && cur.launcher !== t; n++) cur = byId.get(cur.launcher!) ?? cur;
-    return cur;
-  };
+  // Those whose launcher is not listed (in a group at another machine no one opened). One in its
+  // launcher's group lists that group, and so hangs under it after all; the others, their
+  // launcher still not listed then, are as a person opened them: on their own, their groups listed
+  // for them, the top of those they started. Decided all at once, so a group is listed only for
+  // one that stays own.
+  const up = (s: Session) => byId.get(s.launcher!)!;
+  const orphans = live.filter((s) => !isTop(s) && isTop(up(s)) && !shown(up(s)));
+  for (const s of orphans) if (wsOf(s) && wsOf(s) === wsOf(up(s))) groups.add(wsOf(s));
+  const taken = orphans.filter((s) => !shown(up(s)));
+  for (const s of taken) own.add(s.id);
+  for (const s of taken) count(s);
+  if (taken.length) tops();
   const rows = new Set<string>();
   const hung = new Map<string, Session[]>();
   const hang = (at: string, s: Session) => hung.set(at, [...(hung.get(at) ?? []), s]);
@@ -138,11 +145,7 @@ export function standing(all: Session[], workspaces?: Workspace[]): Standing {
     if (s === t) {
       if (shown(s)) rows.add(s.id);
     } else if (shown(t)) hang(t.id, s);
-    else {
-      const b = below(s, t.id);
-      if (b === s) rows.add(s.id);
-      else hang(b.id, s);
-    }
+    else if (shown(s)) rows.add(s.id);
   }
   return { rows, hung, own, groups };
 }
