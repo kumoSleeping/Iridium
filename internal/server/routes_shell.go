@@ -77,17 +77,17 @@ func (s *Server) machineShell(w http.ResponseWriter, r *http.Request) {
 	st, run, err := s.m.MachineShell(ctx, id, req.Line, req.Cwd, stream)
 	if errors.Is(err, session.ErrOffline) {
 		// Said so an agent tells the user, not tries again and again.
-		for _, m := range s.machines() {
-			if m.ID == id && m.SeenAt > 0 {
-				fail(w, http.StatusConflict, fmt.Sprintf("%s is not connected (it last connected %s ago)", m.Name, roughly(time.Since(time.UnixMilli(m.SeenAt)))))
+		if info, ok := s.gate().Endpoint(id); ok {
+			if m := s.computerOf(id); m != nil && m.SeenAt > 0 {
+				fail(w, http.StatusConflict, fmt.Sprintf("%s is not connected (it last connected %s ago)", info.Name, roughly(time.Since(time.UnixMilli(m.SeenAt)))))
 				return
 			}
-			if m.ID == id {
-				fail(w, http.StatusConflict, fmt.Sprintf("%s is not connected", m.Name))
+			if s.computerOf(id) != nil {
+				fail(w, http.StatusConflict, fmt.Sprintf("%s is not connected", info.Name))
 				return
 			}
 		}
-		refuse(w, http.StatusUnprocessableEntity, "no_such_machine", fmt.Sprintf("no machine %s (ir machines lists them)", name))
+		refuse(w, http.StatusUnprocessableEntity, "no_such_machine", fmt.Sprintf("no machine %s (ir apps lists them)", name))
 		return
 	}
 	if err != nil {

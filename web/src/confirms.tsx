@@ -9,13 +9,14 @@ import { KeyRound, Link2, LockKeyhole, Share2, ShieldQuestion, Terminal as TermI
 import { ConfirmIcon, confirmName, confirmTitle, isPair } from "./confirmname";
 import { useRef, useState, type ReactNode } from "react";
 import { api } from "./api/client";
-import type { ExecAgent, Machine, Need, Me, Perms } from "./api/types.gen";
+import type { ExecAgent, Need, Me, Perms } from "./api/types.gen";
+import type { Machine } from "./machines";
 import { CardDetails, CardFrame, CardHead, Facts, MainKey, SecondKey } from "./card";
-import { useMe, useWhoList } from "./data";
+import { useMachines, useMe, useWhoList } from "./data";
 import { t, useLang } from "./i18n";
 import { openChat } from "./route";
 import { showSecret } from "./secrets";
-import { useList, useMachines } from "./store";
+import { useList } from "./store";
 import { errText, toast } from "./toast";
 import { ago, Switch, titleOf } from "./ui";
 

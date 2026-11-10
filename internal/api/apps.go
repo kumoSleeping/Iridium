@@ -48,6 +48,36 @@ type App struct {
 	UsedToday int64  `json:"usedToday"` // tokens of the turns it started today
 	// Device: what it runs on, as the badge on its messages' avatar shows; the server always sets it.
 	Device Device `json:"device,omitempty"`
+	// Computer: an app that runs agents or command lines (an executor, ir join): its computer, as
+	// it last said in its hello; nil for any other.
+	Computer *Computer `json:"computer,omitempty"`
+}
+
+// Computer is an app's computer as its executor last said of itself (docs/exec.md "握手"): kept
+// in the store, so one away is listed too. GET /api/apps lists it with the app, to every caller.
+type Computer struct {
+	OS   string `json:"os"` // windows | darwin | linux
+	Arch string `json:"arch,omitempty"`
+	Home string `json:"home"`
+	Sep  string `json:"sep"`
+	// Agents: those Iridium runs there, as it reported them; Off, turned off in its app's page
+	// (PUT /api/apps/{id}/agents): not started there, not offered for new sessions.
+	Agents []ExecAgent `json:"agents"`
+	Online bool        `json:"online"` // its executor is connected
+	SeenAt int64       `json:"seenAt"` // when it last connected (ms)
+	// Shell: command lines run there, a person's on the page ($) and agents' (ir sh); else it
+	// starts only its agents (docs/exec.md). Its owner's switch.
+	Shell bool `json:"shell,omitempty"`
+	// Latency: the connection's last round trip (ms), by its heartbeat; 0 not known.
+	Latency int64 `json:"latency,omitempty"`
+	// Program: what connects it, as its hello says (ir join and its version).
+	Program string `json:"program,omitempty"`
+}
+
+// AppAgents is PUT /api/apps/{id}/agents: the agents an app carries that are turned off there.
+// Any it reports later is on till turned off.
+type AppAgents struct {
+	Off []string `json:"off"`
 }
 
 // Login is a login of an app as listed: ir_web's, a browser with a passkey; another app's, as it
@@ -122,11 +152,14 @@ type PendingInvite struct {
 }
 
 // Apps is GET /api/apps (ir apps): the host first, ir_web (with a public origin), the apps; the
-// logins of ir_web; the invites not taken.
+// logins of ir_web; the invites not taken. Public (draft 二「消息」): any caller gets the apps
+// (names, types, avatars, online, computers) and the approved logins; their rules, perms and
+// usage, the logins waiting and the invites only one that manages (Full).
 type Apps struct {
 	Apps    []App           `json:"apps"`
 	Logins  []Login         `json:"logins"`
 	Invites []PendingInvite `json:"invites"`
+	Full    bool            `json:"full,omitempty"`
 }
 
 // Me is GET /api/me: who calls. App: the app (HostID for the host, WebApp for a browser); Login:
@@ -264,13 +297,17 @@ type NeedAnswer struct {
 	Name string `json:"name,omitempty"`
 	// Perms: app_join, app_change, what it gets: within Need.Wants. nil: as asked.
 	Perms *Perms `json:"perms,omitempty"`
+	// AgentsOff: app_join, the agents it carries (Need.Pair's) turned off there from the start.
+	AgentsOff []string `json:"agentsOff,omitempty"`
 }
 
 // PairRequest is what an app says of itself asking to pair (POST /api/pair; no login): its name,
 // what it is shown as, and what it wants. An executor (ir join) says its machine too. Shell is
-// what it means to say in its hello (Machine's), so the card tells whether command lines would run
+// what it means to say in its hello (Computer's), so the card tells whether command lines would run
 // there; an older one says NoShell and AgentShell instead (shell: AgentShell without NoShell),
-// which the Iridium turns into Shell.
+// which the Iridium turns into Shell. Home and MachineID, as its hello will say them: one with
+// agents gets its home as its scope unless it asks for another (decision 17); one on the host
+// (its MachineID the host's) carries none.
 type PairRequest struct {
 	Name       string      `json:"name"`
 	Type       string      `json:"type,omitempty"` // computer, bot, script…: display only
@@ -281,35 +318,16 @@ type PairRequest struct {
 	Shell      *bool       `json:"shell,omitempty"`
 	NoShell    bool        `json:"noShell,omitempty"`
 	AgentShell bool        `json:"agentShell,omitempty"`
-	Wants      *Perms      `json:"wants,omitempty"` // nil: all
+	Home       string      `json:"home,omitempty"`
+	MachineID  string      `json:"machineId,omitempty"`
+	Wants      *Perms      `json:"wants,omitempty"` // nil: all; one carrying agents, its home
 }
 
-// Machine is another machine's executor (docs/exec.md): a Bot, as it last said of itself; the
-// carried state "machines" lists them, GET /api/machines too. Agents: those Iridium can run there.
-type Machine struct {
-	ID     string      `json:"id"` // its terminal
-	Name   string      `json:"name"`
-	Avatar string      `json:"avatar,omitempty"`
-	OS     string      `json:"os"` // windows | darwin | linux
-	Arch   string      `json:"arch,omitempty"`
-	Home   string      `json:"home"`
-	Sep    string      `json:"sep"`
-	Agents []ExecAgent `json:"agents"`
-	Online bool        `json:"online"`
-	SeenAt int64       `json:"seenAt"` // when it last connected (ms)
-	// Shell: command lines run there, a person's on the page ($) and agents' (ir sh); else it
-	// starts only its agents (docs/exec.md). Its owner's switch.
-	Shell bool `json:"shell,omitempty"`
-	// Latency: the connection's last round trip (ms), by its heartbeat; 0 not known.
-	Latency int64 `json:"latency,omitempty"`
-	// Program: what connects it, as its hello says (ir join and its version).
-	Program string `json:"program,omitempty"`
-}
-
-// ExecAgent is an agent an executor has.
+// ExecAgent is an agent an executor has. Off: turned off at that app (Computer's only).
 type ExecAgent struct {
 	Agent   string `json:"agent"`
 	Version string `json:"version,omitempty"`
+	Off     bool   `json:"off,omitempty"`
 }
 
 // DshWorkspace is a folder a new dsh session at a machine may open in (GET

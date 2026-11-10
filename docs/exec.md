@@ -127,6 +127,12 @@ agent 的 `ir sh`：每条命令一个新进程，不经托管进程，不写文
   - `dsh.session {}` → `{patch}`（2026-11-09）：插件写的一个 patch，把它的 `session.js` 装进这边在那台机器上起的每个 dsh 会话进程，带上连回插件的本地地址和口令（`bridge.js`：Unix socket 或 Windows 命名管道）。口令在里面，这边只拿路径，不读（同 `dsh.llm`）。不支持时会话里就没有插件这部分。
   - `dsh.llm {}` → `{patch}`：插件把 Desktop 此刻生效的模型设置（基础包里的 `dsh-llm*` 行和 `agent-default-model`，照它的配置和开关，`!!js` 原样）写成那台机器上的一个补丁，只回路径；这边起 dsh 会话和模型探测时多带 `--patch <它>`，sdk 进程就有了 Desktop 的供应商、模型和默认模型。里面可能有密钥：文件只在那台机器上，执行端不对外读。
 
+## 机器并进应用（0.2，2026-11-11）
+
+- 没有单独的“机器”：执行端就是一个带 Agent 的应用，`GET /api/apps` 里它的 `computer` 是最后一次 `hello` 报的情况加上在线、延迟。
+- 报上来的 agent 默认都开；应用详情的“带的 agent”里逐个开关（`PUT /api/apps/{id}/agents`），关掉的不在那里启动，也不在新会话里列。只做命令行的电脑：agent 全关、`shell` 开。
+- 新配对的带 Agent 应用默认范围是自己的家目录（`ir join` 报 `home`）；不带的默认全部。
+
 ## 网页（用户，2026-11-08）
 
 - 不做“添加 harness”：执行端连上就自动出现，终端列表里是一个 Bot，新会话的 agent 里多出它带的 agent。
@@ -163,7 +169,7 @@ agent 的 `ir sh`：每条命令一个新进程，不经托管进程，不写文
 
 ## 开发测试用的 Bot
 
-`scripts/dev/shell-bot.mjs`：开发者自己的 Mac 上测 `ir sh` 用的小脚本，不进发布包。它借用 dsh 插件的执行端，配对一次后只提供命令执行（`agentShell`，按 `shell` 开着算），不带 agent。这种 Bot 谁都能照协议写一个；不想写代码就用 `ir join <地址> --shell --no-agents`，效果一样。
+`scripts/dev/shell-bot.mjs`：开发者自己的 Mac 上测 `ir sh` 用的小脚本，不进发布包。它借用 dsh 插件的执行端，配对一次后只提供命令执行（`agentShell`，按 `shell` 开着算），不带 agent。这种 Bot 谁都能照协议写一个；不想写代码就用 `ir join <地址> --shell`，再在应用管理里把它带的 agent 全关掉，效果一样（`--no-agents` 已删，2026-11-11；旧常驻单元里还有的照收、不起作用）。
 
 `scripts/dev/exec-mini.py`：只用 Python 标准库（WebSocket 也是手写）的最小执行端，证明照协议就能接入：配对、握手报本机找到的 agent（默认 pi）、进程、文件、心跳、重连、`run`；默认只开自己的 agent，加 `--shell` 才执行命令。只有 401 才删 TOKEN 重新配对，403（带原因码）等一会儿再连。`python3 -I scripts/dev/exec-mini.py https://<Iridium> [名字] [agent…] [--shell]`。要带自己的 User-Agent：Cloudflare 拒 Python 默认的（1010）。
 
@@ -181,7 +187,7 @@ agent 的 `ir sh`：每条命令一个新进程，不经托管进程，不写文
 
 ## 这边要做的
 
-已做（2026-11-08）：1、3、4、5 里的端点和“已断开”标记、7。代码：`internal/remote`（连接、转发、镜像）、`internal/remote/wire`（协议，各系统都能编）、`internal/remote/executor`（Go 写的参考执行端，测试用；dsh 插件照它做）、`internal/session/remote.go`。分组按 `机器ID:路径`（`/` 分隔）。配对口和网页的确认卡片也已做（`internal/server/routes_pair.go`）；机器列表（`GET /api/machines`、状态 `machines`，断开的也列，记在库里）、新会话里别的机器的 agent、会话的机器角标和“已断开”灯已做（`internal/server/machines.go`、`web/src/machines.tsx`）。别的机器上选目录也已做（目录选择器上方切换机器，`GET /api/folders?machine=`，路径给网页时一律用 `/`）。还没做：上传到那边、`pathsafe`。
+已做（2026-11-08）：1、3、4、5 里的端点和“已断开”标记、7。代码：`internal/remote`（连接、转发、镜像）、`internal/remote/wire`（协议，各系统都能编）、`internal/remote/executor`（Go 写的参考执行端，测试用；dsh 插件照它做）、`internal/session/remote.go`。分组按 `机器ID:路径`（`/` 分隔）。配对口和网页的确认卡片也已做（`internal/server/routes_pair.go`）；机器列表（断开的也列，记在库里；0.2 起并进应用：`GET /api/apps` 的 `computer`）、新会话里别的机器的 agent、会话的机器角标和“已断开”灯已做（`internal/server/machines.go`、`web/src/machines.tsx`）。别的机器上选目录也已做（目录选择器上方切换机器，`GET /api/folders?machine=`，路径给网页时一律用 `/`）。还没做：上传到那边、`pathsafe`。
 
 1. `platform.Launcher` 加远端实现：`Start` 读托管目录的 `spec.json` 发 `hold.start`，起转发（管道 → `hold.write`，`out` → 镜像 `out.log`，`exit` → 镜像 `exit`）；`State` 看执行端报的 `holds`。会话按所在机器选用哪个。
 2. 会话的 `meta` 记机器；目录是 `机器:路径`。分组、显示、`pathsafe` 认这种写法。
@@ -252,7 +258,7 @@ agent 的 `ir sh`：每条命令一个新进程，不经托管进程，不写文
 - `ir new <agent> 应用名:路径 "任务"` 在那台机器上开（路径按那边的写法，`~` 和空是那边的家目录；`host:路径` 是主机；不带前缀是调用者自己那台）。`--machine <机器>` 还认，不再写进帮助。`--workspace <组>` 放进指定的组。会话里跑的，新会话挂在拉起者下面。`ir ls --here` 只列自己组的会话；`ir ls`、`ir ws` 的目录一律带前缀：`host:~/ir`、`mac:/Users/k/x`。位置的写法见 `internal/place`（网页 `web/src/places.ts`，同一张用例表）。
 - 那边的 `ir`：执行端握手声明 `irClient`，这边每次在那边启动 agent 时生成一个只属于这个会话的 TOKEN（前缀 `irs_`，托管目录只存它的哈希，重启一次换一个），经 `IRIDIUM_TOKEN` 给执行端；执行端在这个会话的托管目录里放一个 `ir`（`holds/<会话>/bin/`），排在它 PATH 的最前面，地址（自己连的那个，`IRIDIUM_URL` 给了就用它）和 TOKEN 直接写在里面：agent 跑的命令不一定拿得到它的环境变量（dsh 跑命令就不带 `IRIDIUM_*`，2026-11-08 实测）。dsh 插件的是 `ir.js`（`ir`、`ir.cmd` 用插件所在的 node 跑；DSH Desktop 里是它自己的程序，带 `ELECTRON_RUN_AS_NODE`）；`ir join` 的是这个二进制本身（脚本再执行 `bin/.ir/ir` 这个链接，按名字 `ir` 进命令行模式）。
 - 那边的 `ir` 只转发：把参数和当前目录发到 `POST /api/cli`，这边照常跑 `ir`，输出一行一行流回去，最后是退出码。请求算那台机器的 Bot 发的、代表这个会话：Bot 的规则照旧（没勾“本人的机器”的不能开 Claude、不能给 Claude 会话发消息），算 agent 发的（消息并进对方当前回合，不能放行 auto 模式拦下的步骤），信里写成来自这个会话。Bot 被删，它的会话 TOKEN 一起失效。
-- 那边能用的：`new`（不带前缀的目录是那边的，带前缀可开到别的机器）、`send`、`wait`、`read`、`ls`、`find`、`stop`、`archive`、`unarchive`、`rename`、`ws`、`machines`。不能用：`cp`、`files`、`sh`、`run`、`secret`、`bot`、`usage` 和管理命令，这些碰的是 Iridium 所在机器的文件、命令和秘密，留给本机的会话和面板。
+- 那边能用的：`new`（不带前缀的目录是那边的，带前缀可开到别的机器）、`send`、`wait`、`read`、`ls`、`find`、`stop`、`archive`、`unarchive`、`rename`、`ws`、`apps`。不能用：`cp`、`files`、`sh`、`run`、`secret`、`bot`、`usage` 和管理命令，这些碰的是 Iridium 所在机器的文件、命令和秘密，留给本机的会话和面板。
 - 系统提示：执行端有 `ir` 的，给那边能用的命令（`irhelp.Remote`）；没有的，不提 `ir`。都不教文件链接（那边的 `ir` 没有 `attach`，文件网页取不到）。
 
 ## 暂不做

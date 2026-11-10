@@ -13,7 +13,7 @@ import type { Block, FileRef, Result } from "../api/types.gen";
 import type { Sent } from "../chats";
 import { t } from "../i18n";
 import { agentName, Avatar, Badge, cn, IconKey, Logo, tilde, Tip, titleOf } from "../ui";
-import { useHome } from "../data";
+import { useHome, useMachines } from "../data";
 import { LocalMark } from "../me";
 import { go } from "../route";
 import { Files, isLink, Picture, previews, SentFile } from "./files";
@@ -26,7 +26,7 @@ import { partialInput } from "./partial";
 import { machineNamed, MentionCard, NamedCards, useNamed } from "./mention";
 import { leadingMentions, type Mention, sessionOf, type Source, withoutFiles, withoutNameLines } from "./refs";
 import { MachineFace } from "../machines";
-import { useList, useMachines } from "../store";
+import { useList } from "../store";
 import type { Agent } from "../api/types.gen";
 
 type You = Extract<Source, { kind: "you" }>;

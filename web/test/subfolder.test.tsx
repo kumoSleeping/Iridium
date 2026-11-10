@@ -2,7 +2,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
-import type { Machine } from "../src/api/types.gen";
+import type { Machine } from "../src/machines";
 import { NewSession, retarget, subName } from "../src/create";
 
 const page = (onMake?: (n: string) => Promise<boolean>, folder = "/home/u/ir/web") =>

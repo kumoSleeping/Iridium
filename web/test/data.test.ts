@@ -74,7 +74,7 @@ describe("api", () => {
 
 describe("the event stream", () => {
   test("names the list, the quota, the update, the confirmations and the open session with its context", () => {
-    expect(keysFor(null)).toEqual(["list", "workspaces", "places", "colors", "quota", "update", "needs", "pairing", "terminals", "machines", "notes"]);
+    expect(keysFor(null)).toEqual(["list", "workspaces", "places", "colors", "quota", "update", "needs", "pairing", "terminals", "notes"]);
     expect(keysFor("a").slice(-2)).toEqual(["session:a", "context:a"]);
     expect(streamURL()).toMatch(/^wss?:\/\/.*\/v1\/events$/);
   });

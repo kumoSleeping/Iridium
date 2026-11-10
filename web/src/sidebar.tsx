@@ -13,7 +13,7 @@ import { Archive, ArchiveRestore, ArrowDown, ArrowUp, Bot, Check, ChevronRight, 
 import { ConfirmIcon, confirmName, confirmTitle } from "./confirmname";
 import { Fragment, lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode, type RefObject } from "react";
 import { api } from "./api/client";
-import type { Color, Need, Machine, Places, Session, Status } from "./api/types.gen";
+import type { Color, Need, Places, Session, Status } from "./api/types.gen";
 import { colorVar, COLORS, useFolderColors } from "./colors";
 import { ahead, behind } from "./chats";
 import { t, useLang } from "./i18n";
@@ -24,13 +24,13 @@ import { allFolders, folderSessions, foldersHolding, foldRest, groupHolding, mac
 import { createAt, onOpenPlace, type Place } from "./places";
 import { LinkDot } from "./link";
 import { errText, toast } from "./toast";
-import { manages, useMe, useUpdate } from "./data";
+import { manages, useMachines, useMe, useUpdate } from "./data";
 import { agentName, ago, cn, fine, IconKey, IrMark, keep, kept, Lamp, lampOf, Logo, own, sessionStatusText, statusText, tilde, Tip, titleOf, untitled, useLongPress, useMenuAt, useMinute } from "./ui";
 import { PLACE_DRAG, SESSION_DRAG } from "./chat/refs";
 import { NoteMark, NotesAt, useNotes } from "./notekey";
 import { useUnread } from "./unread";
-import { CloudBadge, MachineFace, shownPath, useLate, useMachine } from "./machines";
-import { getCarried, setCarried, useMachines } from "./store";
+import { CloudBadge, MachineFace, shownPath, useLate, useMachine, type Machine } from "./machines";
+import { getCarried, setCarried } from "./store";
 import { dropMark, dropTarget, endDrag, listDrop, NO_PLACES, pinFolder, placeFolder, placeGroup as placeGroupKey, placeSession, withPlace, sortList, startDrag, useDragged, useOver, type Dragged, type Edge, type Over } from "./reorder";
 
 const STEP = 18;

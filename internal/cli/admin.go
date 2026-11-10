@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -15,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -266,7 +268,8 @@ func hhmm(ms int64) string {
 	return time.UnixMilli(ms).Format("15:04")
 }
 
-const appsUsage = `用法：ir apps                       应用、主机和网页
+const appsUsage = `用法：ir apps                       应用、主机和网页；带电脑的再列系统、agent、命令行
+      ir apps agents <应用> [agent=on|off …]  它带的 agent 开关
       ir apps logins [应用]           登录和未用的邀请
       ir apps rename <应用> <新名>     改名；登录写 应用/登录，如 ir_web/手机
       ir apps rm <应用>               删除应用、登录或未用的邀请
@@ -309,6 +312,11 @@ func apps(e adminEnv, args []string, stdout, stderr io.Writer) int {
 		}
 		fmt.Fprintf(stdout, "已改名：%s\n", info.Name)
 		return 0
+	case "agents":
+		if len(args) < 1 {
+			return usage()
+		}
+		return appsAgents(e, args, stdout, stderr)
 	case "open", "close":
 		return pairingCmd(e, sub == "open", args, stdout, stderr)
 	case "rm":
@@ -336,19 +344,132 @@ func appsList(e adminEnv, stdout, stderr io.Writer) int {
 	if _, err := e.call("GET", "/api/apps", nil, &as); err != nil {
 		return failed(stderr, "apps", err)
 	}
-	rows := [][]string{{"名字", "类型", "ID", "Claude", "在线", "今天用量", "上次"}}
+	printApps(stdout, as)
+	return 0
+}
+
+var systems = map[string]string{"windows": "Windows", "darwin": "macOS", "linux": "Linux"}
+
+// printApps prints the apps, then the computers of those that have one: system, connection, agents
+// (those turned off marked), command lines, home. Rules and usage only in the list of one that
+// manages (Full).
+func printApps(w io.Writer, as api.Apps) {
+	rows := [][]string{{"名字", "类型", "ID", "在线", "上次"}}
+	if as.Full {
+		rows[0] = []string{"名字", "类型", "ID", "Claude", "在线", "今天用量", "上次"}
+	}
+	type comp struct {
+		name string
+		c    *api.Computer
+	}
+	var comps []comp
 	for _, a := range as.Apps {
 		name, typ, claude := a.Name, a.Type, claudeMark(a.Rules)
 		switch {
 		case a.Host:
 			name, typ = "主机", "内置"
 		case a.Web:
-			name, typ, claude = "网页", fmt.Sprintf("内置，%d 个登录", a.Logins), "按登录"
+			name, typ, claude = "网页", "内置", "按登录"
+			if a.Logins > 0 {
+				typ = fmt.Sprintf("内置，%d 个登录", a.Logins)
+			}
 		}
 		if typ == "" {
 			typ = "—"
 		}
-		rows = append(rows, []string{name, typ, a.ID, claude, strconv.Itoa(a.Online), strconv.FormatInt(a.UsedToday, 10), when(a.LastSeenAt)})
+		row := []string{name, typ, a.ID, strconv.Itoa(a.Online), when(a.LastSeenAt)}
+		if as.Full {
+			row = []string{name, typ, a.ID, claude, strconv.Itoa(a.Online), strconv.FormatInt(a.UsedToday, 10), when(a.LastSeenAt)}
+		}
+		rows = append(rows, row)
+		if a.Computer != nil && !a.Host {
+			comps = append(comps, comp{a.Name, a.Computer})
+		}
+	}
+	table(w, rows)
+	if len(comps) == 0 {
+		return
+	}
+	fmt.Fprintln(w, "\n电脑：")
+	rows = [][]string{{"应用", "系统", "连接", "agent", "命令行", "家目录"}}
+	for _, x := range comps {
+		c := x.c
+		sys := strings.TrimSpace(cmp.Or(systems[c.OS], c.OS) + " " + c.Arch)
+		link := "已断开"
+		if c.Online {
+			link = "在线"
+			if c.Latency > 0 {
+				link = fmt.Sprintf("%d ms", c.Latency)
+			}
+		}
+		var ags []string
+		for _, a := range c.Agents {
+			s := strings.TrimSpace(a.Agent + " " + a.Version)
+			if a.Off {
+				s += "（关）"
+			}
+			ags = append(ags, s)
+		}
+		sh := "关"
+		if c.Shell {
+			sh = "开"
+		}
+		rows = append(rows, []string{x.name, cmp.Or(sys, "—"), link, cmp.Or(strings.Join(ags, "、"), "—"), sh, c.Home})
+	}
+	table(w, rows)
+}
+
+// appsAgents is ir apps agents <应用> [agent=on|off …]: the agents app carries, each on or off
+// there; with arguments, turns those on or off first.
+func appsAgents(e adminEnv, args []string, stdout, stderr io.Writer) int {
+	var as api.Apps
+	if _, err := e.call("GET", "/api/apps", nil, &as); err != nil {
+		return failed(stderr, "apps agents", err)
+	}
+	i := slices.IndexFunc(as.Apps, func(a api.App) bool {
+		return !a.Host && !a.Web && (a.ID == args[0] || strings.EqualFold(a.Name, args[0]))
+	})
+	if i < 0 {
+		return failed(stderr, "apps agents", fmt.Errorf("没有应用 %s", args[0]))
+	}
+	a := as.Apps[i]
+	if a.Computer == nil {
+		return failed(stderr, "apps agents", fmt.Errorf("%s 没有报过电脑和 agent", a.Name))
+	}
+	off := map[string]bool{}
+	for _, x := range a.Computer.Agents {
+		off[x.Agent] = x.Off
+	}
+	for _, arg := range args[1:] {
+		name, v, ok := strings.Cut(arg, "=")
+		if _, there := off[name]; !ok || !there || (v != "on" && v != "off") {
+			fmt.Fprintln(stderr, appsUsage)
+			return 2
+		}
+		off[name] = v == "off"
+	}
+	if len(args) > 1 {
+		req := api.AppAgents{Off: []string{}}
+		for _, x := range a.Computer.Agents {
+			if off[x.Agent] {
+				req.Off = append(req.Off, x.Agent)
+			}
+		}
+		if _, err := e.call("PUT", "/api/apps/"+url.PathEscape(a.ID)+"/agents", req, nil); err != nil {
+			return failed(stderr, "apps agents", err)
+		}
+	}
+	rows := [][]string{}
+	for _, x := range a.Computer.Agents {
+		state := "开"
+		if off[x.Agent] {
+			state = "关"
+		}
+		rows = append(rows, []string{x.Agent, x.Version, state})
+	}
+	if len(rows) == 0 {
+		fmt.Fprintf(stdout, "%s 没有可用的 agent。\n", a.Name)
+		return 0
 	}
 	table(stdout, rows)
 	return 0

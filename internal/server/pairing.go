@@ -139,7 +139,15 @@ func (s *Server) pairAsk(w http.ResponseWriter, r *http.Request) {
 		refuse(w, http.StatusForbidden, "pair_closed", "pairing is closed: open it on the host (ir apps open) or in 应用管理")
 		return
 	}
+	asked := m.Wants != nil
 	m = cleanPair(m)
+	if s.Remote != nil && s.Remote.Self != "" && m.MachineID == s.Remote.Self {
+		m.Agents = nil // an app on the host: its agents are the host's (decision 22)
+	}
+	if !asked && len(m.Agents) > 0 && m.Home != "" {
+		// Decision 17: a new app carrying agents gets its own home, unless it asks for another.
+		m.Wants = &api.Perms{Agents: []string{api.PermsAll}, Scope: []string{m.Name + ":" + m.Home}}
+	}
 	kind := api.NeedAppJoin
 	var old *api.App
 	if _, err := s.gate().CheckName(m.Name); errors.Is(err, gate.ErrNameTaken) {
@@ -283,7 +291,16 @@ func (s *Server) pairAllowed(nd api.Need, a api.NeedAnswer, ownerBy string) (*ap
 	}
 	perms := cmp.Or(a.Perms, nd.Wants)
 	if perms != nil {
-		if err := s.setAppPerms(info.ID, cleanPerms(perms)); err != nil {
+		p := cleanPerms(perms)
+		if info.Name != nd.Name {
+			p.Scope = renamedScope(p.Scope, nd.Name, info.Name)
+		}
+		if err := s.setAppPerms(info.ID, p); err != nil {
+			return nil, err
+		}
+	}
+	if off := cleanAgents(a.AgentsOff); len(off) > 0 {
+		if _, err := s.st.SetAgentsOff(info.ID, off); err != nil {
 			return nil, err
 		}
 	}
@@ -317,6 +334,18 @@ func (s *Server) appPerms(id string) *api.Perms {
 	return &p
 }
 
+// renamedScope is scope with the places at app was (by its name) at app now: one allowed by another
+// name than it asked with keeps its home.
+func renamedScope(scope []string, was, now string) []string {
+	out := slices.Clone(scope)
+	for i, p := range out {
+		if rest, ok := strings.CutPrefix(p, was+":"); ok {
+			out[i] = now + ":" + rest
+		}
+	}
+	return out
+}
+
 // cleanPair keeps what a pairing request says within bounds: its name as given (the gate judges
 // it), a known system, short strings, a few agents, what it wants.
 func cleanPair(m api.PairRequest) api.PairRequest {
@@ -331,6 +360,7 @@ func cleanPair(m api.PairRequest) api.PairRequest {
 		m.Type = "computer"
 	}
 	m.Arch, m.Program = truncRunes(m.Arch, 16), truncRunes(m.Program, 64)
+	m.Home, m.MachineID = truncRunes(strings.TrimSpace(m.Home), 1024), truncRunes(m.MachineID, 128)
 	if m.Shell == nil {
 		on := m.AgentShell && !m.NoShell // an older executor's two
 		m.Shell = &on

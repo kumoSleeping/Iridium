@@ -238,22 +238,34 @@ func TestExecPair(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { _ = exe.Run(ctx); close(done) }()
-	machine := func(online bool) api.Machine {
+	machine := func(online bool) api.App {
 		t.Helper()
 		for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
-			var ms []api.Machine
-			l.want(200, "socket", "GET", "/api/machines", nil, &ms)
-			if len(ms) == 1 && ms[0].Online == online {
-				return ms[0]
+			var as api.Apps
+			l.want(200, "socket", "GET", "/api/apps", nil, &as)
+			var with []api.App
+			for _, a := range as.Apps {
+				if a.Computer != nil {
+					with = append(with, a)
+				}
+			}
+			if len(with) == 1 && with[0].Computer.Online == online {
+				return with[0]
 			}
 			if time.Now().After(deadline) {
-				t.Fatalf("machines, want online %v: %+v", online, ms)
+				t.Fatalf("computers, want online %v: %+v", online, with)
 			}
 		}
 	}
 	m := machine(true)
-	if m.Name != "home-pc-2" || m.OS != "linux" && m.OS != "darwin" || len(m.Agents) != 2 || m.Agents[0].Agent != "dsh" || m.Agents[1].Agent != "claude" || m.Home == "" || m.SeenAt == 0 {
-		t.Fatalf("the machine: %+v", m)
+	if c := m.Computer; m.Name != "home-pc-2" || c.OS != "linux" && c.OS != "darwin" || len(c.Agents) != 2 || c.Agents[0].Agent != "dsh" || c.Agents[1].Agent != "claude" || c.Home == "" || c.SeenAt == 0 {
+		t.Fatalf("the machine: %+v %+v", m, c)
+	}
+	// The app it made sees it in the list too, without what manages it.
+	var pub api.Apps
+	if l.public("GET", "/api/apps", st.Token, nil, &pub); pub.Full || len(pub.Invites) != 0 ||
+		!slices.ContainsFunc(pub.Apps, func(a api.App) bool { return a.ID == m.ID && a.Computer != nil && a.Perms == nil && a.Rules.ClaudeOwner == nil }) {
+		t.Fatalf("the public list: %+v", pub)
 	}
 	// Its folders, for the picker; one made there.
 	work := t.TempDir()
@@ -296,10 +308,11 @@ func TestExecPair(t *testing.T) {
 
 	// Its app removed, it is not listed.
 	l.want(200, "socket", "DELETE", "/api/apps/home-pc-2", nil, nil)
-	var ms []api.Machine
-	if l.want(200, "socket", "GET", "/api/machines", nil, &ms); len(ms) != 0 {
-		t.Fatalf("a removed machine: %+v", ms)
+	var as2 api.Apps
+	if l.want(200, "socket", "GET", "/api/apps", nil, &as2); slices.ContainsFunc(as2.Apps, func(a api.App) bool { return a.Computer != nil }) {
+		t.Fatalf("a removed machine: %+v", as2.Apps)
 	}
+	l.want(404, "socket", "GET", "/api/machines", nil, nil)
 
 }
 

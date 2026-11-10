@@ -62,7 +62,11 @@ func TestAppSessionsAndAgents(t *testing.T) {
 	if b := page.Blocks[len(page.Blocks)-2]; b.From != "ir:"+sid || b.FromTerminal != botID {
 		t.Errorf("ir send's block: %+v", b)
 	}
-	l.want(403, as, "GET", "/api/apps", nil, nil)
+	// The list is public; what manages it is not.
+	var pub api.Apps
+	if l.want(200, as, "GET", "/api/apps", nil, &pub); pub.Full || pub.Apps[0].UsedToday != 0 {
+		t.Errorf("the public list: %+v", pub)
+	}
 	l.want(403, as, "DELETE", "/api/apps/nobot", nil, nil)
 	l.want(200, as, "GET", "/api/files?path="+l.work, nil, nil)
 	l.want(403, as, "PATCH", "/api/workspaces/1", api.WorkspacePatch{Name: new("x")}, nil)

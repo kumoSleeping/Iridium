@@ -53,6 +53,7 @@ import type {
   SetUltracode,
   Settings,
   SettingsPatch,
+  AppAgents,
   Apps,
   CatalogueEntry,
   PairWindow,
@@ -320,6 +321,8 @@ export const api = {
   removeLogin: (app: string, login: string) => write<{ ok: boolean }>("DELETE", `/v1/internal/apps/${enc(app)}/logins/${enc(login)}`),
   /** PUT /api/apps/{id}/perms: what an app may use (agents, scope). */
   appPerms: (id: string, p: Perms) => write<Perms>("PUT", `/v1/internal/apps/${enc(id)}/perms`, p),
+  /** PUT /api/apps/{id}/agents: the agents an app carries turned off there. */
+  appAgents: (id: string, off: string[]) => write<AppAgents>("PUT", `/v1/internal/apps/${enc(id)}/agents`, { off } satisfies AppAgents),
   /** PUT /api/apps/{app}/logins/{login}/perms: what a login may use, within its app's. */
   loginPerms: (app: string, login: string, p: Perms) => write<Perms>("PUT", `/v1/internal/apps/${enc(app)}/logins/${enc(login)}/perms`, p),
   /** PUT /api/pairing: the pairing window opened for minutes (10 by default) or closed. */

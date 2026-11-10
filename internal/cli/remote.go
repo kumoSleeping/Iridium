@@ -34,7 +34,7 @@ type At struct {
 // or its admin: a person on a panel, or ir on that machine, does those.
 var remoteCommands = map[string]bool{
 	"new": true, "send": true, "wait": true, "read": true, "ls": true, "find": true,
-	"share": true, "stop": true, "archive": true, "unarchive": true, "rename": true, "ws": true, "machines": true,
+	"share": true, "stop": true, "archive": true, "unarchive": true, "rename": true, "ws": true, "apps": true,
 }
 
 // RunAt runs ir with args for a session at another machine, through hc (the daemon's own API,
@@ -96,29 +96,37 @@ func (e *env) where(machine, dir string) (string, string, error) {
 	return "", "", fmt.Errorf("a folder at %s is a whole path there, not %q", m.Name, dir)
 }
 
-// machineOf is the machine of a Bot's ID or name.
-func (e *env) machineOf(arg string) (api.Machine, error) {
-	var ms []api.Machine
-	if err := e.do("GET", "/api/machines", nil, &ms); err != nil {
-		return api.Machine{}, err
-	}
-	for _, m := range ms {
-		if m.ID == arg || strings.EqualFold(m.Name, arg) {
-			return m, nil
-		}
-	}
-	return api.Machine{}, fmt.Errorf("no computer %s (ir machines lists them)", arg)
+// machine is an app with a computer (docs/exec.md), as ir new and ir sh find one.
+type machine struct {
+	ID, Name string
+	api.Computer
 }
 
-// machineNames is each machine's name by its Bot's ID; none if they cannot be had.
+// machineOf is the computer of an app, by its ID or name (GET /api/apps lists them to any caller).
+func (e *env) machineOf(arg string) (machine, error) {
+	var as api.Apps
+	if err := e.do("GET", "/api/apps", nil, &as); err != nil {
+		return machine{}, err
+	}
+	for _, a := range as.Apps {
+		if a.Computer != nil && !a.Host && (a.ID == arg || strings.EqualFold(a.Name, arg)) {
+			return machine{ID: a.ID, Name: a.Name, Computer: *a.Computer}, nil
+		}
+	}
+	return machine{}, fmt.Errorf("no computer %s (ir apps lists them)", arg)
+}
+
+// machineNames is each app's name by its ID; none if they cannot be had.
 func (e *env) machineNames() map[string]string {
-	var ms []api.Machine
-	if e.do("GET", "/api/machines", nil, &ms) != nil {
+	var as api.Apps
+	if e.do("GET", "/api/apps", nil, &as) != nil {
 		return nil
 	}
-	out := make(map[string]string, len(ms))
-	for _, m := range ms {
-		out[m.ID] = m.Name
+	out := make(map[string]string, len(as.Apps))
+	for _, a := range as.Apps {
+		if !a.Host {
+			out[a.ID] = a.Name
+		}
 	}
 	return out
 }

@@ -178,7 +178,10 @@ func TestClaudeOnlyRule(t *testing.T) {
 	}
 
 	// A channel manages nothing; there is no table to change any more.
-	l.want(403, bot, "GET", "/api/apps", nil, nil)
+	var pub api.Apps
+	if l.want(200, bot, "GET", "/api/apps", nil, &pub); pub.Full || len(pub.Invites) != 0 {
+		t.Errorf("the public list: %+v", pub)
+	}
 	l.want(403, bot, "POST", "/api/invites", api.NewInvite{Name: "other"}, nil)
 	l.want(403, bot, "DELETE", "/api/apps/bot", nil, nil)
 	if code := l.do("socket", "PUT", "/api/apps/"+botID+"/rules", map[string]any{"rules": map[string]any{}}, nil); code != 404 && code != 405 {

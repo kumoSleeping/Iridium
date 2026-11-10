@@ -1,6 +1,6 @@
 // A developer's test Bot, not shipped (docs/exec.md "开发测试用的 Bot"): pairs with an Iridium once,
 // then lets its agents run command lines on this machine (ir sh). No agents of its own; anyone can
-// write one like it. ir join <url> --agent-shell --no-agents does the same without Node.
+// write one like it. ir join <url> --shell, its agents turned off in 应用管理, does the same without Node.
 // node scripts/dev/shell-bot.mjs <iridium url> [name]
 import fs from 'node:fs'
 import os from 'node:os'

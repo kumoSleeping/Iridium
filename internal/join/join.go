@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/kumoSleeping/iridium/internal/api"
+	"github.com/kumoSleeping/iridium/internal/machineid"
 	"github.com/kumoSleeping/iridium/internal/remote/executor"
 	"github.com/kumoSleeping/iridium/internal/remote/wire"
 	"github.com/kumoSleeping/iridium/internal/version"
@@ -39,7 +40,6 @@ const Usage = `usage: ir join <address> [--name name] [--roots dir,…] [--shell
   --roots    the directories it may read and write files under (default: the home directory)
   --shell    command lines from that Iridium run here: a person's on its page and its agents' (ir sh);
              without it only the agents start here
-  --no-agents    offer none of the agents here (with --shell: a machine for ir sh alone)
   --install  start at login (Windows: a scheduled task; macOS: a LaunchAgent; Linux: a systemd user unit)
   --uninstall  stop starting at login
 `
@@ -52,8 +52,6 @@ type Options struct {
 	// Shell: command lines run here, a person's on that Iridium's page and its agents' (ir sh);
 	// else only the agents start here (docs/exec.md).
 	Shell bool
-	// NoAgents: offer none of the agents found here.
-	NoAgents bool
 	// Base is where joins keep their state (BaseDir): tokens/<key>, the TOKENs; <key>/, the
 	// executor's own directory.
 	Base   string
@@ -81,6 +79,8 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	// --agent-shell without --no-shell.
 	noShell := fs.Bool("no-shell", false, "")
 	agentShell := fs.Bool("agent-shell", false, "")
+	// --no-agents is gone (agents are turned off in the app's page there); an installed resident's
+	// command line may still have it: taken, and ignored.
 	noAgents := fs.Bool("no-agents", false, "")
 	install := fs.Bool("install", false, "")
 	uninstall := fs.Bool("uninstall", false, "")
@@ -112,7 +112,7 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "ir join: %v\n", err)
 		return 2
 	}
-	o := Options{URL: u, Name: *name, Shell: (*shell || *agentShell) && !*noShell, NoAgents: *noAgents, Base: *base, Out: stdout, Resident: *resident}
+	o := Options{URL: u, Name: *name, Shell: (*shell || *agentShell) && !*noShell, Base: *base, Out: stdout, Resident: *resident}
 	if o.Base == "" {
 		o.Base, err = BaseDir()
 	} else {
@@ -146,6 +146,9 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	}
 	logger := log.New(stderr, "", log.LstdFlags)
 	o.Logf = logger.Printf
+	if *noAgents {
+		o.Logf("ir join: --no-agents is ignored: turn agents off in the app's page in 应用管理")
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	r := residentFor(o, *unit)
@@ -283,7 +286,7 @@ func (o *Options) program() string { return "iridium " + version.Version }
 // Run pairs if there is no TOKEN, then runs the executor till ctx ends. A TOKEN the Iridium turns
 // down is forgotten and it pairs again.
 func (o *Options) Run(ctx context.Context) error {
-	if o.Agents == nil && !o.NoAgents {
+	if o.Agents == nil {
 		o.Agents = FindAgents(o.Logf)
 	}
 	if len(o.Roots) == 0 {
@@ -384,9 +387,13 @@ func (o *Options) pair(ctx context.Context) (string, error) {
 	if o.Bot {
 		who = api.PairRequest{Name: name, Type: o.Type, Program: o.Program}
 	} else {
-		if o.Agents == nil && !o.NoAgents {
+		if o.Agents == nil {
 			o.Agents = FindAgents(o.Logf)
 		}
+		// Its home and computer, as its hello will say them: with agents, its home is its scope
+		// there unless the person gives another; on that Iridium's own computer, it carries none.
+		who.Home, _ = os.UserHomeDir()
+		who.MachineID = machineid.Hash()
 		for _, a := range o.Agents {
 			who.Agents = append(who.Agents, api.ExecAgent{Agent: a.Agent, Version: a.Version})
 		}
