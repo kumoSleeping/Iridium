@@ -229,6 +229,11 @@ export interface SessionState extends Session {
    */
   context?: ContextSummary;
   /**
+   * Tokens: what its turns read so far, as recorded (GET /api/usage counts the same rows);
+   * absent before its first.
+   */
+  tokens?: InputTokens;
+  /**
    * QuotaUntil: the agent's quota ran out; Iridium goes on at this time (ms).
    */
   quotaUntil?: number /* int64 */;
@@ -785,6 +790,15 @@ export interface ContextSummary {
   used: number /* int */;
   max?: number /* int */;
   at: number /* int64 */;
+}
+/**
+ * InputTokens is what a session's turns read so far: Input not cached, CacheRead read from the
+ * cache, CacheWrite written to it. The cache's hit rate is CacheRead over the three.
+ */
+export interface InputTokens {
+  input: number /* int64 */;
+  cacheRead: number /* int64 */;
+  cacheWrite: number /* int64 */;
 }
 /**
  * BlockTail is the blocks from Start to End of the transcript. Blocks nil: too many or too

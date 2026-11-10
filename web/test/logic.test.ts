@@ -8,7 +8,7 @@ import { commandsOf, keyMode, matching } from "../src/chat/composer";
 import { shellLine } from "../src/chat/shell";
 import { crashParts } from "../src/chat/crash";
 import { levelName, restAt } from "../src/chat/effort";
-import { ctxParts, modelView } from "../src/chat/meters";
+import { ctxParts, hitRate, modelView } from "../src/chat/meters";
 import { atSessions, attachedOf, atWord, leadingMentions, mentions, SID, sessionIds, shortId, sourceOf, withoutFiles, withoutNameLines, draftWords } from "../src/chat/refs";
 import { t } from "../src/i18n";
 import { en } from "../src/i18n/en";
@@ -545,5 +545,14 @@ describe("crashParts", () => {
     expect(p.lines).toEqual(["[llm] model listing loaded 2 model(s)", "[llm] mod"]);
     expect(crashParts("agent exited 1").lines).toEqual([]);
     expect(crashParts("the machine is not connected").cause).toBe("the machine is not connected");
+  });
+});
+
+describe("hitRate", () => {
+  test("reads over all input, a tenth of a percent, never rounded up to 100", () => {
+    expect(hitRate({ input: 13, cacheRead: 987, cacheWrite: 0 })).toBe("98.7%");
+    expect(hitRate({ input: 1, cacheRead: 99_999, cacheWrite: 0 })).toBe("99.9%");
+    expect(hitRate({ input: 0, cacheRead: 0, cacheWrite: 0 })).toBe("");
+    expect(hitRate(undefined)).toBe("");
   });
 });

@@ -118,6 +118,13 @@ func TestInputsUsageOutbox(t *testing.T) {
 	if len(u) != 2 || *u[0].CostUSD != 0.25 || u[1].CostUSD != nil {
 		t.Fatalf("usage: %+v", u)
 	}
+	must(t, s.AddUsage(Usage{Terminal: "网页", Session: "a", Agent: "claude", Model: "m", Input: 3, CacheRead: 90, CacheWrite: 6}))
+	if in, cr, cw, err := s.SessionInput("a"); err != nil || in != 4 || cr != 90 || cw != 6 {
+		t.Fatalf("session input: %d %d %d %v", in, cr, cw, err)
+	}
+	if in, cr, cw, _ := s.SessionInput("none"); in+cr+cw != 0 {
+		t.Fatalf("no rows: %d %d %d", in, cr, cw)
+	}
 
 	a, _ := s.Post("bot", "qq:1", "reply", `{}`)
 	b, _ := s.Post("bot", "qq:1", "status", `{}`)

@@ -175,6 +175,7 @@ type Hosted struct {
 	quotaTimer  *time.Timer
 
 	ctxSum   *api.ContextSummary
+	tokens   api.InputTokens // the input its recorded turns read (store.SessionInput)
 	ctxAsked time.Time // when the context was last asked for: within a turn, at most every ctxEvery
 	tail     *api.BlockTail
 	tailFrom int64
@@ -203,6 +204,9 @@ func (m *Manager) newHosted(mt meta) *Hosted {
 	h.rules, _ = m.o.Store.Rules(mt.ID)
 	if c := h.savedContext(); c != nil {
 		h.ctxSum = &api.ContextSummary{Used: c.Used, Max: c.Max, At: c.At}
+	}
+	if in, cr, cw, err := m.o.Store.SessionInput(mt.ID); err == nil {
+		h.tokens = api.InputTokens{Input: in, CacheRead: cr, CacheWrite: cw}
 	}
 	return h
 }
@@ -817,6 +821,7 @@ func (h *Hosted) onEvent(e agent.Event) {
 		h.mu.Unlock()
 		if !replay {
 			h.recordUsage(e, base, from, model)
+			h.publish()
 		}
 		return
 	case agent.Compacted:
@@ -864,7 +869,13 @@ func (h *Hosted) recordUsage(e agent.TurnUsage, base *agent.Usage, from, model s
 		err := h.m.o.Store.AddUsage(store.Usage{Terminal: from, Session: h.id, Agent: string(h.meta.Agent), Model: model, Input: t.Input, Output: t.Output, CacheRead: t.CacheRead, CacheWrite: t.CacheWrite, CostUSD: cost})
 		if err != nil {
 			h.logf("usage: %v", err)
+			return
 		}
+		h.mu.Lock()
+		h.tokens.Input += int64(t.Input)
+		h.tokens.CacheRead += int64(t.CacheRead)
+		h.tokens.CacheWrite += int64(t.CacheWrite)
+		h.mu.Unlock()
 	}
 	if base != nil && e.Total != nil {
 		for name, d := range e.Total.Since(base) {
@@ -980,6 +991,10 @@ func (h *Hosted) state(o store.Overlay, archived bool) api.SessionState {
 	defer h.mu.Unlock()
 	s := api.SessionState{Session: h.summaryLocked(o, archived), Asks: slices.Clone(h.asks), Tasks: slices.Clone(h.tasks), Denials: slices.Clone(h.denials), Model: h.model, Mode: h.mode, End: h.end, Proc: h.proc, Error: h.errText,
 		Effort: h.effort, Queue: slices.Clone(h.queue), Context: h.ctxSum, QuotaUntil: h.quotaUntil, Tail: h.tail}
+	if h.tokens != (api.InputTokens{}) {
+		t := h.tokens
+		s.Tokens = &t
+	}
 	s.Pick, s.EffortNow, s.Next, s.Preset = h.meta.Model, h.effortNow, h.next, h.preset
 	for _, m := range h.models {
 		s.Models = append(s.Models, api.Model{Value: m.Value, Name: m.Name, Description: m.Description, Resolved: m.Resolved, Efforts: slices.Clone(m.Efforts), NoEffort: m.NoEffort, EffortNames: maps.Clone(m.EffortNames), Group: m.Group})

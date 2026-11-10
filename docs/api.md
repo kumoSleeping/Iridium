@@ -50,7 +50,7 @@
 | `list` | `Session[]` |
 | `workspaces` | `Workspace[]` |
 | `colors` | `FolderColors` |
-| `session:<id>` | `SessionState`：状态、提问（带 `card`）、后台任务、模型（`model` 在用的，`pick` 设的）、审批模式、思考强度（`effort` 设的，`effortNow` agent 说在用的）、可选的模型/模式/强度、`ultracode`（只 Claude）、`features`（附加功能，见“会话设置”）、待发队列、上下文总数、等额度到几点、`tail`（块带 `files`）、`end`、`proc`、出错原因、`next`（Claude 自己清空了：对话接着在这个会话里，页面跟过去）、`commands`（给输入框的命令面板：人人都有的 `clear`、`compact`、`context`、`usage`、`model`、`effort`、`mode`，不带说明，页面按语言写；再接 agent 握手报的） |
+| `session:<id>` | `SessionState`：状态、提问（带 `card`）、后台任务、模型（`model` 在用的，`pick` 设的）、审批模式、思考强度（`effort` 设的，`effortNow` agent 说在用的）、可选的模型/模式/强度、`ultracode`（只 Claude）、`features`（附加功能，见“会话设置”）、待发队列、上下文总数、`tokens`（会话累计的输入：未缓存、读缓存、写缓存，和用量同一批记录；页面在上下文弹窗里算缓存命中率）、等额度到几点、`tail`（块带 `files`）、`end`、`proc`、出错原因、`next`（Claude 自己清空了：对话接着在这个会话里，页面跟过去）、`commands`（给输入框的命令面板：人人都有的 `clear`、`compact`、`context`、`usage`、`model`、`effort`、`mode`，不带说明，页面按语言写；再接 agent 握手报的） |
 | `context:<id>` | `Context`：上下文用了多少、分项。回合结束、压缩后，回合中调用工具时最多 30 秒一次更新；存在托管目录，没进程时也有 |
 | `quota` | `Quota`：按 agent + 账号（Claude：邮箱和套餐）+ 机器（`machine`，执行端的会话是那台机器的登录）的额度窗口、读到的时间、`live` |
 | `confirms` | `Confirms`：等面板确认的事（只有面板能订） |

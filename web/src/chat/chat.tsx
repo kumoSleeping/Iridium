@@ -323,7 +323,7 @@ function Under({ s, ghost, composer, onSent, onSentDone, modelOpen, setModelOpen
             <QuotaBars agent={s.agent} machine={s.machine} live={s.live} using={[s.model, s.pick, modelView(s).name]} open={usageOpen} onOpenChange={setUsageOpen} />
           </>
         }
-        end={<ContextRing session={s.id} summary={s.context} open={ctxOpen} onOpenChange={setCtxOpen} />}
+        end={<ContextRing session={s.id} summary={s.context} tokens={s.tokens} open={ctxOpen} onOpenChange={setCtxOpen} />}
       />
     </>
   );
