@@ -2,30 +2,38 @@
 // one round key whose icon says what it does now; the meters are under it, not in it (chat.tsx). Idle it sends; in a turn with
 // nothing typed it stops the turn; with words it queues them (or steers them into the turn, with a
 // leading !, Ctrl or ⌘+Enter as Claude Code's send now, or where the server has no queue). / at
-// the start lists the session's commands; @ lists the sessions to name, as a row dropped here
-// names one, on a phone too (the user, 2026-11-06): a card among the files, one piece, gone with
-// its × or a Backspace at the box's start, its mention put before the words as it is sent (the
-// user, 2026-11-08). Shift+Tab cycles the approval mode; Esc stops the turn. The draft is kept on
+// the start lists the session's commands; @ lists what to name (docs/plan.md "@", 2026-11-10):
+// sessions, this machine's groups, each machine's workspaces, a folder by its path; a session's or
+// a group's row dropped here names one too, on a phone the list alone: a card among the files, one
+// piece, gone with its × or a Backspace at the box's start, its mention put before the words as it
+// is sent (the user, 2026-11-08). Only a reference: nothing delivered, no one notified, nothing
+// granted. Shift+Tab cycles the approval mode; Esc stops the turn. The draft is kept on
 // this device; files pasted, dropped or attached go up in chunks while you type, a picture in its
 // own shape under a veil drawn back as it goes; nothing is sent till all are up.
 import { ArrowUp, Box, Brain, ChartPie, Eraser, FileCode2, FileText, FoldVertical, Gauge, LoaderCircle, MessageSquare, Paperclip, ShieldCheck, Square, X, type LucideIcon } from "lucide-react";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { forwardRef, Fragment, useEffect, useImperativeHandle, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import type { Agent, Command, Session, SessionState as LiveSession } from "../api/types.gen";
+import type { Agent, Command, Machine, Session, SessionState as LiveSession } from "../api/types.gen";
 import { runShell, shellLine, useShellable } from "./shell";
 import { api, missing } from "../api/client";
 import type { Sent } from "../chats";
 import { t } from "../i18n";
 import { errText, toast } from "../toast";
-import { useList } from "../store";
-import { agentName, cn, fine, IconKey, keep, kept, Logo, steerKey, tilde, Tip, titleOf } from "../ui";
-import { hasMention, MentionMarks, mentionOf } from "./mention";
-import { atSessions, atWord, shortId } from "./refs";
-import { useSettings } from "../data";
+import { useList, useMachines } from "../store";
+import { ago, agentName, cn, fine, IconKey, keep, kept, Logo, steerKey, tilde, Tip, titleOf, useMinute } from "../ui";
+import { hasMention, MentionMarks, mentionOf, PlaceIcon, PlaceLines, placeMention } from "./mention";
+import { atWord, shortId } from "./refs";
+import { arrowInto, atPath, atSections, nativeAt, namedKey, namedOf, pathSection, typedPath, type AtHead, type AtRow, type AtSection, type Named, type NamedPlace } from "./at";
+import { MachineFace, MachineLink } from "../machines";
+import { foldersQ } from "../create";
+import { useHome, useSettings, useWorkspaces } from "../data";
 import { useGlide } from "../motion";
 import { CODE, previews, size, Zoom } from "./files";
 import { upload } from "./upload";
 import { findSecretish } from "./secretish";
 import { SaveSecret } from "./savesecret";
+
+const hasDsh = (m: Machine) => m.online && m.agents.some((a) => a.agent === "dsh");
 
 /** The words' box, as MentionMarks draws them under it too. */
 const BOX = "px-0.5 py-1 text-md leading-[21px]";
@@ -72,8 +80,8 @@ export function commandsOf(s: LiveSession): Command[] {
 type Att = { key: string; file: File; sent: number; ref?: string; path?: string; error?: string; url?: string; stop: AbortController };
 
 /** put: words on a line of their own at the end; insert: at the caret, a space either side; name:
- *  a session named, a card among the attachments (a row dropped here, chat.tsx). */
-export type ComposerHandle = { focus: () => void; put: (text: string) => void; insert: (text: string) => void; attach: (files: File[]) => void; name: (id: string) => void; box: () => HTMLTextAreaElement | null };
+ *  a session (its ID) or a place named, a card among the attachments (a row dropped here, chat.tsx). */
+export type ComposerHandle = { focus: () => void; put: (text: string) => void; insert: (text: string) => void; attach: (files: File[]) => void; name: (to: string | NamedPlace) => void; box: () => HTMLTextAreaElement | null };
 
 type Props = {
   s: LiveSession;
@@ -99,18 +107,21 @@ type Props = {
 export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s, turn, onSent, onSentDone, cycleMode, openModel, openMode, openUsage, openContext, cleared, tools, end }, ref) {
   const [text, setText] = useState(() => kept(draftKey(s.id)) ?? "");
   const [atts, setAtts] = useState<Att[]>([]);
-  // Sessions named: cards before the files, one piece each, a Backspace at the box's start takes the
-  // last (the user, 2026-11-08); sent as their mentions before the words. Kept with the draft.
-  const [named, setNamedNow] = useState<string[]>(() => (kept(`${draftKey(s.id)}:named`) ?? "").split(" ").filter(Boolean));
-  const setNamed = (f: (ids: string[]) => string[]) =>
-    setNamedNow((ids) => {
-      const next = f(ids);
-      keep(`${draftKey(s.id)}:named`, next.length ? next.join(" ") : null);
+  // Sessions and places named: cards before the files, one piece each, a Backspace at the box's
+  // start takes the last (the user, 2026-11-08); sent as their mentions before the words. Kept
+  // with the draft, as JSON (a path may have spaces; namedOf still reads the IDs kept before).
+  const [named, setNamedNow] = useState<Named[]>(() => namedOf(kept(`${draftKey(s.id)}:named`)));
+  const setNamed = (f: (ns: Named[]) => Named[]) =>
+    setNamedNow((ns) => {
+      const next = f(ns);
+      keep(`${draftKey(s.id)}:named`, next.length ? JSON.stringify(next) : null);
       return next;
     });
-  const nameOne = (id: string) => setNamed((ids) => (ids.includes(id) || id === s.id ? ids : [...ids, id]));
+  const nameOne = (n: Named) => setNamed((ns) => (ns.some((x) => namedKey(x) === namedKey(n)) || (n.kind === "session" && n.id === s.id) ? ns : [...ns, n]));
   const [busy, setBusy] = useState(false);
-  const [at, setAt] = useState(0);
+  // The row pointed at in the open list; null: its first (in a typed path with a name begun, the
+  // first folder that name finds).
+  const [at, setAt] = useState<number | null>(null);
   const [shut, setShut] = useState<string | null>(null);
   const [composing, setComposing] = useState(false);
   // Where the caret is while the box has it: an @word there lists the sessions to name.
@@ -124,7 +135,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
   const type = (v: string) => {
     setText(v);
     keep(draftKey(s.id), v || null);
-    setAt(0);
+    setAt(null);
     setShut(null);
   };
   const grow = () => {
@@ -179,7 +190,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
       });
     },
     attach,
-    name: (id) => (nameOne(id), box.current?.focus()),
+    name: (to) => (nameOne(typeof to === "string" ? { kind: "session", id: to } : { kind: "place", ...to }), box.current?.focus()),
     box: () => box.current,
   }));
 
@@ -195,21 +206,51 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
   // Nothing typed after the /: the common ones first, then the agent's own, under their heads.
   const list = /^\/\S*$/.test(text) && text !== shut ? (text === "/" ? [...commands.filter(isCommon), ...commands.filter((c) => !isCommon(c))] : matching(commands, text.slice(1))) : [];
   const sessions = useList();
+  const machines = useMachines();
+  const workspaces = useWorkspaces().data ?? [];
+  const home = useHome().data; // ~ typed after the @ is this; named, a whole path
   const word = caret !== null && text !== shut && !list.length ? atWord(text, caret) : null;
-  const picks = word && sessions ? atSessions(sessions, word.q, s.id) : [];
-  /** The @word made a card of session to: the word goes, the caret where it was. */
-  const name = (to: Session) => {
+  // A path typed after the @: its folder and those in it, asked for as the picker does (~ the
+  // daemon's to resolve, the folder named by the path it gives); else each
+  // machine's DSH workspaces, while the list is open (online ones with dsh).
+  const path = word ? atPath(word.q, machines, home) : null;
+  const folders = useQuery({ ...foldersQ(path?.dir ?? "", path?.m?.id), enabled: !!path });
+  const dsh = useQueries({ queries: machines.map((m) => ({ queryKey: ["dshWorkspaces", m.id], queryFn: () => api.dshWorkspaces(m.id), enabled: !!word && !path && hasDsh(m), retry: false, staleTime: 30_000 })) });
+  const sections: AtSection[] = !word
+    ? []
+    : path
+      ? [pathSection(path, { path: folders.data?.path, folders: folders.data?.folders, missing: !!folders.error })]
+      : sessions
+        ? atSections({ list: sessions, here: s.id, workspaces, machines, dsh: Object.fromEntries(machines.map((m, i) => [m.id, hasDsh(m) ? dsh[i]?.data : undefined])) }, word.q)
+        : [];
+  const opts = sections.flatMap((x) => x.rows).filter((r) => !r.off);
+  const sel = opts.length ? Math.min(at ?? (path?.part && opts.length > 1 && opts[0]!.kind === "place" && opts[0]!.self ? 1 : 0), opts.length - 1) : 0;
+  /** The @word made a card of row r: the word goes, the caret where it was. */
+  const name = (r: AtRow) => {
     if (!word) return;
     const end = caret ?? word.from;
     type(text.slice(0, word.from) + text.slice(end).replace(/^ /, ""));
-    nameOne(to.id);
+    nameOne(r.kind === "session" ? { kind: "session", id: r.s.id } : { kind: "place", ...r.p });
     setCaret(word.from);
     requestAnimationFrame(() => (box.current?.focus(), box.current?.setSelectionRange(word.from, word.from)));
   };
-  const shown = list.length || picks.length;
+  /** Into place r's folder: its path after the @, the list then the folders in it. */
+  const enter = (r: AtRow) => {
+    if (!word || r.kind !== "place") return;
+    const end = caret ?? word.from;
+    const typed = `@${typedPath(r.p, machines)}`;
+    type(text.slice(0, word.from) + typed + text.slice(end));
+    const to = word.from + typed.length;
+    setCaret(to);
+    requestAnimationFrame(() => (box.current?.focus(), box.current?.setSelectionRange(to, to)));
+  };
+  /** Whether → goes into row r's folder (arrowInto), the box as it is. */
+  const into = (r: AtRow | undefined, el: HTMLTextAreaElement, held: boolean) => !!word && r?.kind === "place" && arrowInto(text, word.from, el.selectionStart, el.selectionEnd, `@${typedPath(r.p, machines)}`, held);
+  const atOpen = sections.length > 0;
+  const shown = list.length || opts.length;
   // What looks like a key: store it as a credential and say {{NAME}} instead (savesecret.tsx).
   const [notSecret, setNotSecret] = useState<ReadonlySet<string>>(new Set());
-  const secretish = shown ? null : findSecretish(text, notSecret);
+  const secretish = shown || atOpen ? null : findSecretish(text, notSecret);
   const uploading = atts.some((a) => !a.ref && !a.error);
   const empty = !text.trim() && !atts.length && !named.length;
   const queues = s.queue !== undefined;
@@ -267,9 +308,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
     }
     const typed = text.trim().replace(/^[!！]\s*/, "");
     if (!atts.length && !named.length && own(typed)) return;
-    // The sessions named, as their mentions, before the words: what the agent reads.
-    const said = named.flatMap((id) => {
-      const to = sessions?.find((x) => x.id === id);
+    // The sessions and places named, as their mentions, before the words: what the agent reads.
+    const said = named.flatMap((n) => {
+      if (n.kind === "place") return [placeMention(n, machines)];
+      const to = sessions?.find((x) => x.id === n.id);
       return to && sessions ? [mentionOf(to, sessions)] : [];
     });
     const words = [...said, typed].filter(Boolean).join(" ");
@@ -316,8 +358,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
   // The palette beside the composer, not in it: a frosted layer inside another sees only that one.
   return (
     <div className="relative">
-      {list.length > 0 && <Palette list={list} at={Math.min(at, list.length - 1)} agent={s.agent} grouped={text === "/"} point={setAt} pick={(c) => (own(`/${c.name}`) ? undefined : (type(`/${c.name} `), box.current?.focus()))} />}
-      {picks.length > 0 && <AtList list={picks} at={Math.min(at, picks.length - 1)} point={setAt} pick={name} />}
+      {list.length > 0 && <Palette list={list} at={Math.min(at ?? 0, list.length - 1)} agent={s.agent} grouped={text === "/"} point={setAt} pick={(c) => (own(`/${c.name}`) ? undefined : (type(`/${c.name} `), box.current?.focus()))} />}
+      {atOpen && <AtList sections={sections} at={sel} point={setAt} pick={name} />}
       {secretish && (
         <SaveSecret
           key={secretish.value}
@@ -334,8 +376,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
       <div aria-hidden={!row || undefined} className={cn("grid transition-[grid-template-rows,opacity] duration-(--dur-3) ease-(--ease-out)", row ? "grid-rows-[1fr]" : "grid-rows-[0fr] opacity-0")}>
         <div className="min-h-0 overflow-hidden">
         <ul data-attachments className="m-0 flex list-none gap-2 overflow-x-auto px-3.5 pt-3 pb-0">
-          {shownNamed.map((id) => (
-            <NamedCard key={`s:${id}`} to={sessions?.find((x) => x.id === id)} remove={() => setNamed((ids) => ids.filter((x) => x !== id))} />
+          {shownNamed.map((n) => (
+            <NamedCard key={`${n.kind}:${namedKey(n)}`} n={n} to={n.kind === "session" ? sessions?.find((x) => x.id === n.id) : undefined} remove={() => setNamed((ns) => ns.filter((x) => namedKey(x) !== namedKey(n)))} />
           ))}
           {shownAtts.map((a) => {
             // Its part sent, 0..1; a picture keeps its own shape, its height the row's.
@@ -420,14 +462,17 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
           onKeyDown={(e) => {
             if (composing || e.nativeEvent.isComposing || e.keyCode === 229) return;
             const move = shown ? { ArrowDown: 1, ArrowUp: -1 }[e.key] : undefined;
-            if (move) setAt((Math.min(at, shown - 1) + move + shown) % shown);
+            const now = list.length ? Math.min(at ?? 0, list.length - 1) : sel;
+            if (move) setAt((now + move + shown) % shown);
             else if (list.length && (e.key === "Enter" || e.key === "Tab") && !e.shiftKey) {
-              const c = list[Math.min(at, list.length - 1)]!;
+              const c = list[now]!;
               if (!own(`/${c.name}`)) type(`/${c.name} `);
-            } else if (picks.length && (e.key === "Enter" || e.key === "Tab") && !e.shiftKey) name(picks[Math.min(at, picks.length - 1)]!);
-            // At the box's very start, Backspace takes the last session named, whole.
-            else if (e.key === "Backspace" && named.length && e.currentTarget.selectionStart === 0 && e.currentTarget.selectionEnd === 0) setNamed((ids) => ids.slice(0, -1));
-            else if (shown && e.key === "Escape") setShut(text);
+            } else if (opts.length && (e.key === "Enter" || e.key === "Tab") && !e.shiftKey) name(opts[sel]!);
+            // → goes into the folder pointed at, only while the list is open on one.
+            else if (e.key === "ArrowRight" && word && into(opts[sel], e.currentTarget, e.shiftKey || e.ctrlKey || e.metaKey || e.altKey)) enter(opts[sel]!);
+            // At the box's very start, Backspace takes the last one named, whole.
+            else if (e.key === "Backspace" && named.length && e.currentTarget.selectionStart === 0 && e.currentTarget.selectionEnd === 0) setNamed((ns) => ns.slice(0, -1));
+            else if ((shown || atOpen) && e.key === "Escape") setShut(text);
             else if (e.key === "Tab" && e.shiftKey) cycleMode();
             // In a turn, Ctrl or ⌘+Enter does what Enter does not: steer in (Claude Code's send now) or queue.
             else if (e.key === "Enter" && !e.shiftKey && (e.ctrlKey || e.metaKey) && turn) void (empty || go(true));
@@ -471,31 +516,87 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
   );
 });
 
-/** The sessions an @ may name, over the composer as the commands are: each its logo, title and
- *  folder; ↑↓ and Enter or Tab on a keyboard, a tap on a phone. */
-function AtList({ list, at, pick, point }: { list: Session[]; at: number; pick: (s: Session) => void; point: (i: number) => void }) {
+/** What an @ may name, as the commands are (the user, 2026-11-10): a card at the box's corner, grown
+ *  out of the @, a section each under its head: 会话, 本机, each machine (its face, its name, its
+ *  lamp; away, faint, none to pick); a typed path, its machine and folder. A session's row: its
+ *  logo, its title, how long ago; a place's: its folder (a cloud on it at another machine), its
+ *  name, its path faint at the end. ↑↓, → into a folder, Enter or Tab on a keyboard, a tap on a
+ *  phone. */
+function AtList({ sections, at, pick, point }: { sections: AtSection[]; at: number; pick: (r: AtRow) => void; point: (i: number) => void }) {
+  const now = useMinute();
+  let i = -1;
+  let n = 0;
   return (
-    <div role="listbox" aria-label={t("composer.sessions")} className="g-pop glass thick float absolute inset-x-0 bottom-full z-10 mb-2 max-h-72 no-bar overflow-y-auto rounded-lg p-1.5">
-      {list.map((x, i) => (
-        <button
-          key={x.id}
-          type="button"
-          role="option"
-          aria-selected={i === at}
-          ref={(el) => void (i === at && el?.scrollIntoView({ block: "nearest" }))}
-          onPointerDown={(e) => e.preventDefault()}
-          onPointerMove={() => i === at || point(i)}
-          onClick={() => pick(x)}
-          style={{ "--i": i } as CSSProperties}
-          className={cn("flex h-8 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-base pointer-coarse:h-11", i === at && "bg-fill")}
-        >
-          <Logo agent={x.agent} size={14} className="shrink-0" />
-          <span className="min-w-0 shrink truncate">{titleOf(x)}</span>
-          <span className="ml-auto max-w-[40%] min-w-0 shrink-0 truncate font-mono text-xs text-ink-3 [direction:rtl]">
-            <bdi>{tilde(x.cwd)}</bdi>
-          </span>
-        </button>
-      ))}
+    <div role="listbox" aria-label={t("composer.atList")} className="g-pop glass thick float absolute bottom-full left-2 z-10 mb-2 max-h-[min(360px,50dvh)] w-[400px] max-w-[calc(100%-16px)] origin-bottom-left no-bar overflow-y-auto overscroll-contain rounded-lg p-1.5 text-ink">
+      <div className="g-stagger flex flex-col">
+        {sections.map((sec) => (
+          <Fragment key={sec.key}>
+            <AtHeadRow head={sec.head} off={sec.off} />
+            {sec.rows.map((r) => {
+              const idx = r.off ? -1 : ++i;
+              const on = idx === at;
+              return (
+                <button
+                  key={r.key}
+                  type="button"
+                  role="option"
+                  aria-selected={on}
+                  aria-disabled={r.off || undefined}
+                  disabled={r.off}
+                  ref={(el) => void (on && el?.scrollIntoView({ block: "nearest" }))}
+                  onPointerDown={(e) => e.preventDefault()}
+                  onPointerMove={() => r.off || on || point(idx)}
+                  onClick={() => r.off || pick(r)}
+                  style={{ "--i": n++ } as CSSProperties}
+                  className={cn("flex h-8 w-full shrink-0 cursor-default items-center gap-2.5 rounded-md px-2.5 text-left text-base outline-none select-none pointer-coarse:h-11", on && "bg-fill", r.off && "opacity-50")}
+                >
+                  {r.kind === "session" ? (
+                    <>
+                      <Logo agent={r.s.agent} size={14} className="shrink-0" />
+                      <span className="min-w-0 flex-1 truncate">{titleOf(r.s)}</span>
+                      <span className="shrink-0 text-xs text-ink-3 tabular-nums">{ago(r.s.updatedAt, now, true)}</span>
+                    </>
+                  ) : (
+                    <>
+                      <PlaceIcon remote={!!r.p.machine} size={15} />
+                      <span className={cn("min-w-0 truncate", r.hint ? "shrink" : "flex-1")}>{r.p.name}</span>
+                      {r.hint && (
+                        <span className="ml-auto max-w-[55%] min-w-0 shrink-0 truncate text-xs text-ink-3 [direction:rtl]">
+                          <bdi>{r.hint}</bdi>
+                        </span>
+                      )}
+                    </>
+                  )}
+                </button>
+              );
+            })}
+          </Fragment>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** A section's head in the @ list. A machine's is a component of its own: its lamp is a hook's. */
+function AtHeadRow({ head, off }: { head: AtHead; off?: boolean }) {
+  const cls = cn("flex min-w-0 shrink-0 items-center gap-1.5 px-2.5 pt-2 pb-1 text-xs text-ink-3 select-none first:pt-1", off && "opacity-50");
+  if (head.kind === "sessions") return <div className={cls}>{t("composer.atSessions")}</div>;
+  if (head.kind === "local") return <div className={cls}>{t("new.local")}</div>;
+  if (head.kind === "machine")
+    return (
+      <div className={cls}>
+        <MachineFace m={head.m} size={14} />
+        <span className="min-w-0 truncate">{head.m.name}</span>
+        <MachineLink m={head.m} />
+      </div>
+    );
+  return (
+    <div className={cls}>
+      {head.m && <MachineFace m={head.m} size={14} />}
+      <span className="shrink-0">{head.m ? head.m.name : t("new.local")}</span>
+      <span className="min-w-0 truncate [direction:rtl]">
+        <bdi>{head.m ? head.path : tilde(head.path)}</bdi>
+      </span>
     </div>
   );
 }
@@ -554,17 +655,26 @@ function Ring({ part }: { part: number }) {
   );
 }
 
-/** A session named, as a file is: its agent's mark, its title, its agent and short id; its ×. */
-function NamedCard({ to, remove }: { to?: Session; remove: () => void }) {
+/** A session named, as a file is: its agent's mark, its title, its agent and short id; a place, its
+ *  folder, its name, where it is; its ×. */
+function NamedCard({ n, to, remove }: { n: Named; to?: Session; remove: () => void }) {
   const list = useList();
+  const machines = useMachines();
+  const m = n.kind === "place" && n.machine ? machines.find((x) => x.id === n.machine) : undefined;
   return (
     <li className="g-pop relative shrink-0 pt-1.5 pr-1.5">
       <span className="flex h-14 w-44 items-center gap-2 rounded-lg bg-fill px-2.5">
-        {to ? <Logo agent={to.agent} size={16} /> : <MessageSquare size={16} className="text-ink-3" />}
-        <span className="min-w-0">
-          <span className="block truncate text-sm">{to ? titleOf(to) || tilde(to.cwd) : t("composer.goneSession")}</span>
-          {to && <span className="block truncate text-xs text-ink-3">{agentName(to.agent)} · {shortId(to.id, (list ?? []).map((x) => x.id))}</span>}
-        </span>
+        {n.kind === "place" ? (
+          <PlaceLines name={n.name} remote={!!n.machine} machine={m} machineName={n.machine} path={nativeAt(m, n.path)} />
+        ) : (
+          <>
+            {to ? <Logo agent={to.agent} size={16} /> : <MessageSquare size={16} className="text-ink-3" />}
+            <span className="min-w-0">
+              <span className="block truncate text-sm">{to ? titleOf(to) || tilde(to.cwd) : t("composer.goneSession")}</span>
+              {to && <span className="block truncate text-xs text-ink-3">{agentName(to.agent)} · {shortId(to.id, (list ?? []).map((x) => x.id))}</span>}
+            </span>
+          </>
+        )}
       </span>
       <button type="button" aria-label={t("composer.remove")} onClick={remove} className="glass thick float absolute top-0 right-0 grid size-5 place-items-center rounded-full text-ink-2 hover:text-ink">
         <X size={12} />

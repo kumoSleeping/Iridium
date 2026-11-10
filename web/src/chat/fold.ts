@@ -2,7 +2,7 @@
 // said fold into one line; the calls still running at the end show on their own. Pure, for tests.
 import type { Block } from "../api/types.gen";
 import { t } from "../i18n";
-import { cmdOfCall, renameOnly, type Cmd } from "./cmd";
+import { cmdOfCall, cpOfCall, renameOnly, type Cmd, type CpSide } from "./cmd";
 
 export type Tool = Block & { kind: "tool" };
 export type Step = Block & { kind: "tool" | "thinking" };
@@ -185,6 +185,9 @@ export function argOf(t: { name?: string; input?: string }, cwd?: string): { arg
   }
   if (file) return { arg: rel(file, cwd), code: true };
   const cmd = str("command", "cmd");
+  // ir cp: from where to where (plan "在哪干活", 2026-11-10).
+  const cp = cpOfCall(t);
+  if (cp) return { arg: `${sideText(cp.from)} → ${sideText(cp.to)}`, code: true };
   if (cmd) return { arg: cmd.replace(/\s+/g, " ").trim(), code: true };
   const pattern = str("pattern", "query", "url");
   if (pattern) return { arg: pattern, code: name !== "websearch" };
@@ -194,6 +197,9 @@ export function argOf(t: { name?: string; input?: string }, cwd?: string): { arg
   const first = Object.values(i).find((v): v is string => typeof v === "string");
   return { arg: first ? first.replace(/\s+/g, " ").slice(0, 200) : "", code: true };
 }
+
+/** One side of an ir cp as written: "machine:path" at another machine. */
+export const sideText = (x: CpSide) => (x.machine ? `${x.machine}:${x.path}` : x.path);
 
 /** A run of calls by one name in a fold: how many, how many failed, the lines its edits changed
  *  (failed ones changed nothing). Thinking's name is "". */

@@ -80,25 +80,13 @@ func TestWorkspacesAndFolders(t *testing.T) {
 		t.Errorf("rename: %d", code)
 	}
 	call(t, c, "GET", base+"/api/workspaces", nil, &list)
-	if len(list) != 1 || list[0].Name != "Project" || list[0].Hidden {
+	if len(list) != 1 || list[0].Name != "Project" {
 		t.Errorf("workspaces: %+v", list)
 	}
-	// Hidden, then shown again; its name left as it was.
-	wsURL := base + "/api/workspaces/" + strconv.FormatInt(list[0].ID, 10)
-	if code := call(t, c, "PATCH", wsURL, api.WorkspacePatch{Hidden: new(true)}, nil); code != 200 {
-		t.Errorf("hide: %d", code)
-	}
-	call(t, c, "GET", base+"/api/workspaces", nil, &list)
-	if len(list) != 1 || list[0].Name != "Project" || !list[0].Hidden {
-		t.Errorf("hidden: %+v", list)
-	}
-	if code := call(t, c, "PATCH", wsURL, api.WorkspacePatch{Hidden: new(false)}, nil); code != 200 {
-		t.Errorf("show: %d", code)
-	}
-	list = nil
-	call(t, c, "GET", base+"/api/workspaces", nil, &list)
-	if len(list) != 1 || list[0].Hidden {
-		t.Errorf("shown again: %+v", list)
+	// Opened on the page: a person's.
+	call(t, c, "GET", base+"/api/sessions", nil, &sessions)
+	if len(sessions) != 1 || !sessions[0].Own {
+		t.Errorf("a session opened on the page not own: %+v", sessions)
 	}
 	yes, name := true, "named"
 	if code := call(t, c, "PATCH", base+"/api/sessions/"+created.ID, api.SessionPatch{Pinned: &yes, Name: &name}, nil); code != 200 {

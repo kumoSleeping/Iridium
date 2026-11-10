@@ -1,6 +1,7 @@
-// The list's order by hand (the user, 2026-11-09): a group's row dragged among all groups' rows
-// (a group listed at two machines is two rows, each its own), a folder among those in its group, a session among those beside it (in its group's root
-// or its folder). Pinned ones are ordered apart from the rest; one dropped on a pinned row is
+// The list's order by hand (the user, 2026-11-09): a group's row dragged among all groups' rows, a
+// folder among those in its group, a session among those beside it (in its group's root or its
+// folder). A session hung under its launcher (tree.ts standing) is not ordered: dragged anywhere in
+// the list out from under that launcher, it is taken out (the user, 2026-11-10). Pinned ones are ordered apart from the rest; one dropped on a pinned row is
 // pinned, on another unpinned. A folder pinned is above the sessions at its group's root; one
 // dropped on any of those is pinned, last of the pinned. A session or folder dragged keeps the key
 // it was dropped at (Session.order, the carried "places") in place of its last activity: it
@@ -11,8 +12,9 @@ import type { Places, Session } from "./api/types.gen";
 import { useCarried } from "./store";
 import { folderKey, type Folder } from "./tree";
 
-/** What is dragged: a group (its ID) or a session, and the rows it may be dropped among. */
-export type Dragged = { kind: "ws" | "f" | "s"; id: string; lane: string };
+/** What is dragged: a group (its ID), a folder, a session, or a session hung under its launcher
+ *  ("h", lane: that launcher's ID), and the rows it may be dropped among. */
+export type Dragged = { kind: "ws" | "f" | "s" | "h"; id: string; lane: string };
 /** The row's edge it goes to: above it or under it. */
 export type Edge = "top" | "bottom";
 
@@ -36,12 +38,29 @@ const setOver = (o: Over | null) => {
 export const startDrag = (d: Dragged) => ((dragged = d), emit());
 export const endDrag = () => ((dragged = null), (over = null), emit());
 
+/** Whether a drag is over the rows of its launcher (data-under, sidebar.tsx): a hung one is not
+ *  taken out there. */
+const home = (e: React.DragEvent<HTMLElement>, d: Dragged) => e.target instanceof Element && e.target.closest("[data-under]")?.getAttribute("data-under") === d.lane;
+
 /** What the list takes, round its rows: over no row a drop goes to (none took the dragover) or
- *  out of the list, no line. Not on leaving a row: the line would blink between two. */
-export const listDrag = {
-  onDragOver: (e: React.DragEvent<HTMLElement>) => void (!e.defaultPrevented && setOver(null)),
+ *  out of the list, no line. Not on leaving a row: the line would blink between two. A hung one
+ *  dropped anywhere but under its launcher: out (detach). */
+export const listDrop = (detach: (id: string) => void) => ({
+  onDragOver: (e: React.DragEvent<HTMLElement>) => {
+    if (!e.defaultPrevented) setOver(null);
+    if (dragged?.kind !== "h" || home(e, dragged)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+  },
   onDragLeave: (e: React.DragEvent<HTMLElement>) => void (!e.currentTarget.contains(e.relatedTarget as Node | null) && setOver(null)),
-};
+  onDrop: (e: React.DragEvent<HTMLElement>) => {
+    const d = dragged;
+    if (d?.kind !== "h" || home(e, d)) return;
+    e.preventDefault();
+    endDrag();
+    detach(d.id);
+  },
+});
 
 /** The row a drop would go to now (the list draws one line, gliding from row to row). */
 export const useOver = () => useSyncExternalStore(subscribe, () => over);

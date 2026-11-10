@@ -62,9 +62,6 @@ func (s *Server) renameWorkspace(w http.ResponseWriter, r *http.Request) {
 	if req.Name != nil {
 		err = s.Discover.RenameWorkspace(id, *req.Name)
 	}
-	if err == nil && req.Hidden != nil {
-		err = s.Discover.HideWorkspace(id, *req.Hidden)
-	}
 	s.discoverDone(w, err)
 }
 
@@ -73,7 +70,7 @@ func (s *Server) splitWorkspace(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	s.discoverDone(w, s.Discover.SplitWorkspace(id))
+	s.discoverDone(w, s.m.SplitWorkspace(r.Context(), id))
 }
 
 func (s *Server) orderGroups(w http.ResponseWriter, r *http.Request) {
@@ -106,14 +103,22 @@ func (s *Server) patchSession(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "bad workspace")
 		return
 	}
-	// Archiving is the shown marker's, and stops a hosted agent: the session manager's.
+	// Archiving is the shown marker's, and stops a hosted agent: the session manager's; the
+	// sessions hung under it go with it (ir archive too).
 	if req.Archived != nil {
-		if err := s.m.SetArchived(r.Context(), id, *req.Archived); err != nil {
+		if err := s.m.ArchiveTree(r.Context(), id, *req.Archived); err != nil {
 			s.error(w, err)
 			return
 		}
 		req.Archived = nil
 	}
+	if req.Detach != nil && *req.Detach {
+		if err := s.m.Detach(r.Context(), id); err != nil {
+			s.error(w, err)
+			return
+		}
+	}
+	req.Detach = nil
 	s.discoverDone(w, s.Discover.Patch(id, req))
 }
 

@@ -12,19 +12,22 @@ import { api } from "../api/client";
 import type { Block, FileRef, Result } from "../api/types.gen";
 import type { Sent } from "../chats";
 import { t } from "../i18n";
-import { Avatar, Badge, cn, IconKey, Logo, tilde, Tip } from "../ui";
+import { agentName, Avatar, Badge, cn, IconKey, Logo, tilde, Tip, titleOf } from "../ui";
 import { useHome } from "../data";
 import { LocalMark } from "../me";
 import { go } from "../route";
 import { Files, isLink, Picture, previews, SentFile } from "./files";
 import { Pictures } from "./pictures";
-import { cmdOfCall, isShell, type Cmd } from "./cmd";
+import { cmdOfCall, cpOfCall, isShell, newOfCall, type Cmd, type CpSide } from "./cmd";
 import { argOf, diffSum, foldLine, foldSaid, kindOf, runCmds, type Diff, type Kind, type Shown, type Step, type Tool } from "./fold";
 import { Code } from "./hl";
 import { Markdown } from "./markdown";
 import { partialInput } from "./partial";
-import { MentionCard, NamedCards, useNamed } from "./mention";
-import { leadingMentions, type Source, withoutFiles, withoutNameLines } from "./refs";
+import { machineNamed, MentionCard, NamedCards, useNamed } from "./mention";
+import { leadingMentions, type Mention, sessionOf, type Source, withoutFiles, withoutNameLines } from "./refs";
+import { MachineFace } from "../machines";
+import { useList, useMachines } from "../store";
+import type { Agent } from "../api/types.gen";
 
 type You = Extract<Source, { kind: "you" }>;
 type From = Extract<Source, { kind: "letter" }>;
@@ -440,11 +443,12 @@ function StepLine({ s, cwd, bare }: { s: Step; cwd?: string; bare?: boolean }) {
       </>
     );
   const a = argOf(s, cwd);
+  const cp = cpOfCall(s);
   return (
     <>
       {!bare && <StepIcon s={s} />}
       {!isShell(s.name) && <span className="shrink-0 text-ink-2">{s.name}</span>}
-      <span className={cn("min-w-0 truncate", a.code ? "font-mono text-xs" : "text-xs")}>{a.arg}</span>
+      {cp ? <CpArg from={cp.from} to={cp.to} /> : <span className={cn("min-w-0 truncate", a.code ? "font-mono text-xs" : "text-xs")}>{a.arg}</span>}
       {a.diff && !failed(s) && <DiffStat d={a.diff} />}
       {failed(s) && <CircleX size={13} className="shrink-0 text-err" aria-label={t("msg.failed")} />}
     </>
@@ -462,40 +466,46 @@ function Fold({ steps, session, cwd }: { steps: Step[]; session: string; cwd: st
   const runs = foldLine(steps);
   const diff = diffSum(runs);
   const bad = steps.filter(failed).length;
+  const opened = steps.flatMap((s) => (s.kind === "tool" && newOfCall(s)) || []);
   return (
-    <details className="group/fold -my-0.5 w-full min-w-0">
-      <summary className={ROW} aria-label={foldSaid(runs)}>
-        <span className="min-w-0 truncate">
-          {runs.map((r, i) => (
-            <span key={i} className={cn(i > 0 && "ml-3")}>
-              {(r.name ? runCmds(steps, r.name) : [{ cmd: undefined, n: 1 }]).map((g, j, gs) => (
-                <span key={j} className={cn("inline-block", j < gs.length - 1 ? "mr-1.5" : !isShell(r.name) && "mr-2")}>
-                  <KindIcon kind={r.name ? kindOf(r.name) : "thinking"} cmd={g.cmd} shell={isShell(r.name)} className="inline-block align-[-2.5px]" />
-                  {(gs.length > 1 || isShell(r.name)) && g.n > 1 && <span className="text-xs tabular-nums">×{g.n}</span>}
-                </span>
-              ))}
-              {/* A shell's run is its icons alone, each with how many (the user, 2026-11-09): no
-                  room after the last for a name, only the gap between runs. */}
-              {!isShell(r.name) && <span className="text-ink-2">{r.name || t("msg.thinking")}</span>}
-              {!isShell(r.name) && r.n > 1 && <span className="tabular-nums"> ×{r.n}</span>}
-            </span>
-          ))}
-        </span>
-        {diff && <DiffStat d={diff} />}
-        {bad > 0 && (
-          <span className="flex shrink-0 items-center gap-0.5 text-xs text-err tabular-nums">
-            <CircleX size={13} aria-label={t("msg.failed")} />
-            {bad > 1 && bad}
+    <div className="min-w-0">
+      <details className="group/fold -my-0.5 w-full min-w-0">
+        <summary className={ROW} aria-label={foldSaid(runs)}>
+          <span className="min-w-0 truncate">
+            {runs.map((r, i) => (
+              <span key={i} className={cn(i > 0 && "ml-3")}>
+                {(r.name ? runCmds(steps, r.name) : [{ cmd: undefined, n: 1 }]).map((g, j, gs) => (
+                  <span key={j} className={cn("inline-block", j < gs.length - 1 ? "mr-1.5" : !isShell(r.name) && "mr-2")}>
+                    <KindIcon kind={r.name ? kindOf(r.name) : "thinking"} cmd={g.cmd} shell={isShell(r.name)} className="inline-block align-[-2.5px]" />
+                    {(gs.length > 1 || isShell(r.name)) && g.n > 1 && <span className="text-xs tabular-nums">×{g.n}</span>}
+                  </span>
+                ))}
+                {/* A shell's run is its icons alone, each with how many (the user, 2026-11-09): no
+                    room after the last for a name, only the gap between runs. */}
+                {!isShell(r.name) && <span className="text-ink-2">{r.name || t("msg.thinking")}</span>}
+                {!isShell(r.name) && r.n > 1 && <span className="tabular-nums"> ×{r.n}</span>}
+              </span>
+            ))}
           </span>
-        )}
-        <ChevronRight size={13} className="fold-chev shrink-0 text-ink-4 transition-transform duration-(--dur-2) group-open/fold:rotate-90" />
-      </summary>
-      <div className="mt-0.5 ml-[7px] flex flex-col pl-3 shadow-[inset_1px_0_0_var(--edge)]">
-        {steps.map((s) => (
-          <StepView key={s.at} s={s} session={session} cwd={cwd} />
-        ))}
-      </div>
-    </details>
+          {diff && <DiffStat d={diff} />}
+          {bad > 0 && (
+            <span className="flex shrink-0 items-center gap-0.5 text-xs text-err tabular-nums">
+              <CircleX size={13} aria-label={t("msg.failed")} />
+              {bad > 1 && bad}
+            </span>
+          )}
+          <ChevronRight size={13} className="fold-chev shrink-0 text-ink-4 transition-transform duration-(--dur-2) group-open/fold:rotate-90" />
+        </summary>
+        <div className="mt-0.5 ml-[7px] flex flex-col pl-3 shadow-[inset_1px_0_0_var(--edge)]">
+          {steps.map((s) => (
+            <StepView key={s.at} s={s} session={session} cwd={cwd} lifted />
+          ))}
+        </div>
+      </details>
+      {/* The sessions its ir new steps opened, under its line, open or shut: not moving in and out
+          as it folds. */}
+      {opened.length > 0 && <Opened opened={opened} />}
+    </div>
   );
 }
 
@@ -503,10 +513,19 @@ function Fold({ steps, session, cwd }: { steps: Step[]; session: string; cwd: st
  *  context menu, instead of under the line (the user, 2026-11-08): the conversation stays put.
  *  The pictures its result gave the model show under it, open at first; its icon, hovered, turns
  *  to the chevron that folds them (the user, 2026-11-09: the tool's own icon otherwise). */
-function StepView({ s, session, cwd }: { s: Step; session: string; cwd: string }) {
+function StepView({ s, session, cwd, lifted }: { s: Step; session: string; cwd: string; lifted?: boolean }) {
   const images = s.kind === "tool" ? s.result?.images : undefined;
   const [shown, setShown] = useState(true);
-  if (!images?.length) return <StepCall s={s} session={session} cwd={cwd} />;
+  const opened = !lifted && s.kind === "tool" ? newOfCall(s) : undefined;
+  if (!images?.length)
+    return opened ? (
+      <div className="min-w-0">
+        <StepCall s={s} session={session} cwd={cwd} />
+        <Opened opened={[opened]} />
+      </div>
+    ) : (
+      <StepCall s={s} session={session} cwd={cwd} />
+    );
   return (
     <div className="min-w-0">
       <div className="group/step flex min-w-0 items-center gap-2">
@@ -561,6 +580,43 @@ function StepCall({ s, session, cwd, bare }: { s: Step; session: string; cwd: st
   );
 }
 
+/** The sessions ir new steps opened (newOfCall: none before one is done), a card each under the
+ *  step's line, as a step's pictures are (plan "在哪干活", 2026-11-10). */
+function Opened({ opened }: { opened: { id: string; agent: string }[] }) {
+  const list = useList();
+  return (
+    <div className="mt-0.5 mb-1.5 ml-[7px] flex flex-wrap gap-1.5 pl-3 shadow-[inset_1px_0_0_var(--edge)]">
+      {opened.map((n) => {
+        const x = list && sessionOf(n.id, list);
+        const m: Mention = { kind: "session", title: (x && (titleOf(x) || tilde(x.cwd))) || n.id, agent: agentName((x?.agent ?? n.agent) as Agent), id: n.id, text: n.id };
+        return <MentionCard key={n.id} m={m} />;
+      })}
+    </div>
+  );
+}
+
+/** An ir cp's from → to: a side at another machine its face (by the name ir was given) and its
+ *  path there; one here as written, ~ for the home. */
+function CpArg({ from, to }: { from: CpSide; to: CpSide }) {
+  const ms = useMachines();
+  const side = (x: CpSide) => {
+    const m = x.machine ? machineNamed(x.machine, ms) : undefined;
+    return (
+      <span className="flex min-w-0 shrink items-center gap-1">
+        {m && <MachineFace m={m} size={12} className={cn(!m.online && "opacity-50 grayscale")} />}
+        <span className="min-w-0 truncate">{x.machine && !m ? `${x.machine}:${x.path}` : x.machine ? x.path : tilde(x.path)}</span>
+      </span>
+    );
+  };
+  return (
+    <span className="flex min-w-0 items-center gap-1.5 font-mono text-xs">
+      {side(from)}
+      <span aria-hidden className="shrink-0 text-ink-4">→</span>
+      {side(to)}
+    </span>
+  );
+}
+
 /** The card: no head (its line is right above it, a press elsewhere puts it away; the user,
  *  2026-11-08), only its input field by field and its output, each with a key to copy it; a
  *  thought its words. */
@@ -578,9 +634,9 @@ function StepCard({ s, session }: { s: Step; session: string }) {
             <Part label={t("msg.output")} copy={s.result?.text} error={s.result?.error}>
               {s.result ? <ResultView r={s.result} session={session} /> : <span className="text-xs text-ink-3">{t("msg.noResult")}</span>}
             </Part>
-            {/* The sessions it names by id, each a card going there (ir send, ir wait, ir new); not
-                a list's many (ir ls): the sidebar has those. */}
-            <NamedCards text={s.input ?? ""} also={s.result?.text} />
+            {/* The sessions it names by id, each a card going there (ir send, ir wait); not a list's
+                many (ir ls): the sidebar has those. ir new's is under its line (Opened). */}
+            {!newOfCall(s) && <NamedCards text={s.input ?? ""} also={s.result?.text} />}
           </>
         )}
       </div>

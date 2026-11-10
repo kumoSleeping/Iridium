@@ -2,7 +2,7 @@ import { partialInput, tail } from "../src/chat/partial";
 // A fold's line: the lines each kind of edit adds and takes, and the line read out.
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import type { Block } from "../src/api/types.gen";
-import { cmdOf, cmdOfCall, renameOnly } from "../src/chat/cmd";
+import { cmdOf, cmdOfCall, cpOfCall, irOfCall, newOfCall, renameOnly } from "../src/chat/cmd";
 import { argOf, diffOf, diffSum, diffText, folded, foldLine, foldSaid, lineDiff, patchDiff, pictureName, runCmds, type Step } from "../src/chat/fold";
 import { setLang } from "../src/i18n";
 
@@ -257,5 +257,30 @@ describe("a step's pictures", () => {
     expect(pictureName(call("read", { path: "/w/a.png" }), "image/jpeg")).toBe("a.jpg");
     expect(pictureName(call("view_image", { path: "/w/notes.txt" }))).toBe("view_image.png");
     expect(pictureName(call("mcp__browser__screenshot", {}), "image/jpeg")).toBe("mcp__browser__screenshot.jpg");
+  });
+});
+
+describe("an ir call's words (在哪干活)", () => {
+  const bash = (command: string, result?: { text: string; error?: boolean }) => ({ name: "Bash", input: JSON.stringify({ command }), ...(result ? { result } : {}) });
+  test("its subcommand and words, past cd, env and bash -c; none for another command", () => {
+    expect(irOfCall(bash("cd ~/x && ir cp a.txt kumo-mac:~/"))).toEqual({ sub: "cp", args: ["a.txt", "kumo-mac:~/"] });
+    expect(irOfCall(bash(`bash -lc "ir new claude 'go'"`))).toEqual({ sub: "new", args: ["claude", "go"] });
+    expect(irOfCall(bash("ls -la"))).toBeUndefined();
+    expect(irOfCall({ name: "Read", input: "{}" })).toBeUndefined();
+  });
+  test("ir cp: from, to; a machine by the name ir takes, a path here as written", () => {
+    expect(cpOfCall(bash("ir cp a.txt kumo-mac:~/"))).toEqual({ from: { path: "a.txt" }, to: { machine: "kumo-mac", path: "~/" } });
+    expect(cpOfCall(bash("ir cp 'otae-2:C:\\Code\\x.log' /tmp/x.log"))).toEqual({ from: { machine: "otae-2", path: "C:\\Code\\x.log" }, to: { path: "/tmp/x.log" } });
+    expect(cpOfCall(bash("ir cp ./a:b ~/c"))).toEqual({ from: { path: "./a:b" }, to: { path: "~/c" } });
+    expect(cpOfCall(bash("ir cp a"))).toBeUndefined();
+    expect(cpOfCall(bash("ir files ab"))).toBeUndefined();
+    expect(argOf(bash("ir cp a.txt kumo-mac:~/"))).toEqual({ arg: "a.txt → kumo-mac:~/", code: true });
+  });
+  test("ir new: the session it printed first, its agent past the options; none before it is done or as it failed", () => {
+    expect(newOfCall(bash("ir new --model x claude --machine m ~/x 'go 1a2b3c4d'", { text: "9f8e7d6c\nanswer" }))).toEqual({ id: "9f8e7d6c", agent: "claude" });
+    expect(newOfCall(bash("ir new codex 'go'"))).toBeUndefined();
+    expect(newOfCall(bash("ir new codex 'go'", { text: "no such agent", error: true }))).toBeUndefined();
+    expect(newOfCall(bash("ir new codex 'go'", { text: "usage: ir new <agent>" }))).toBeUndefined();
+    expect(newOfCall(bash("ir send ab 'go'", { text: "9f8e7d6c" }))).toBeUndefined();
   });
 });

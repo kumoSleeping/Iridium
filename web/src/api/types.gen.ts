@@ -123,14 +123,17 @@ export interface Session {
    */
   order?: number /* float64 */;
   /**
-   * At: the folder at another machine one of this machine's was opened for (NewSession.At): it
-   * is listed there, in that folder, not by its Cwd.
-   */
-  at?: string;
-  /**
-   * Launcher: the session that started this one, if discovery saw it.
+   * Launcher: the session that started this one (its ir new), if known.
    */
   launcher?: string;
+  /**
+   * Own: a person opened it (docs/exec.md "远端工作区"): with a Launcher, it was taken out from
+   * under it (its placement is by hand, SessionPatch.Detach); without, Iridium opened it through
+   * a create (the page's "+", ir new in a shell, a Bot's, /clear). Never a subagent. A session
+   * with a Launcher and not Own hangs under it on the page; a group at another machine is listed
+   * while it holds an Own session not archived.
+   */
+  own?: boolean;
   /**
    * Subagent: an Agent tool's subtask (Claude) or a subagent's thread (Codex), listed as a
    * session of its own, read-only; Parent: the session that started it.
@@ -167,7 +170,7 @@ export interface Session {
   offline?: boolean;
   /**
    * Loose: a dsh session at another machine in none of DSH Desktop's workspaces there (its 未分组):
-   * in 未归类, a row of its own, not in a folder.
+   * in no group, and not listed unless Own or hung under its launcher.
    */
   loose?: boolean;
 }
@@ -516,12 +519,13 @@ export interface NewSession {
   effort?: string;
   preset?: string;
   /**
-   * Workspace: the workspace it goes in (0: the caller's, else as discovery classifies it).
+   * Workspace: the workspace it goes in (0: as discovery classifies its folder; the caller's if
+   * that holds it).
    */
   workspace?: number /* int64 */;
   /**
    * Caller is the session that ran ir new (from IRIDIUM_SESSION, CLAUDE_CODE_SESSION_ID,
-   * CODEX_THREAD_ID…): the new session goes into its workspace.
+   * CODEX_THREAD_ID…): the new session's Launcher, which it hangs under on the page.
    */
   caller?: string;
   /**
@@ -529,11 +533,6 @@ export interface NewSession {
    * is then a path there.
    */
   machine?: string;
-  /**
-   * At: one of this machine's opened for a folder at another ("<machine>:<path>", as grouped), a
-   * coordinator from a group's "+" there: grouped by that folder, wherever its group is nested.
-   */
-  at?: string;
 }
 export interface NewSessionReply {
   id: string;
@@ -961,15 +960,14 @@ export interface Workspace {
   name: string;
   path: string;
   /**
-   * Hidden: hidden from the page (a group's menu): its sessions are not listed, searched or in
-   * 归档, but while one of them runs elsewhere (open in DSH Desktop).
+   * Only: it holds only the sessions right in its folder (/, a home, a drive's root at another
+   * machine, one split), none in a folder under it.
    */
-  hidden?: boolean;
+  only?: boolean;
 }
 /**
  * GroupOrder lists the groups' rows in the order they were dragged to (PUT /api/groups/order), by
- * the key the page gives each (a group listed at two machines is two rows, ordered apart): first
- * to last, those left out after them.
+ * the key the page gives each: first to last, those left out after them.
  */
 export interface GroupOrder {
   keys: string[];
@@ -996,18 +994,19 @@ export interface FolderPlace {
   pinned?: boolean;
 }
 /**
- * WorkspacePatch renames a group, hides it or shows it again; a field left out stays.
+ * WorkspacePatch renames a group; a field left out stays.
  */
 export interface WorkspacePatch {
   name?: string;
-  hidden?: boolean;
 }
 /**
  * SessionPatch changes what lies over a session; a field left out stays. Name "" takes the name
  * off. Workspace moves it (0: none), and it is never moved by discovery again. Color "" takes the
  * colour tag off. ByAgent: Name is the session's agent's (ir rename from a session), which does
  * not replace a name the user gave (409) and is cleaned as a title line is. Order: the key it was
- * dragged to among those beside it (Session.Order); 0 takes it off.
+ * dragged to among those beside it (Session.Order); 0 takes it off. Archived archives (or brings
+ * back) the sessions hung under it too, all the way down. Detach takes it out from under its
+ * launcher: it goes in its own folder's group, put there by hand, so it is Own from now on.
  */
 export interface SessionPatch {
   name?: string;
@@ -1017,6 +1016,7 @@ export interface SessionPatch {
   workspace?: number /* int64 */;
   color?: Color;
   order?: number /* float64 */;
+  detach?: boolean;
 }
 /**
  * FolderColor tags folder Path (absolute) with a colour; Color "" takes it off. The carried state
@@ -1854,11 +1854,13 @@ export interface ExecAgent {
  * DshWorkspace is a folder a new dsh session at a machine may open in (GET
  * /api/machines/{id}/dsh/workspaces): one of dsh's workspaces there, as DSH Desktop's sidebar
  * has them, else a folder its sessions were in. Path is '/'-separated, as GET /api/folders gives.
+ * Sessions: how many of its sessions Iridium lists (not archived, not kept from it), subagents aside.
  */
 export interface DshWorkspace {
   title: string;
   path: string;
   updatedAt?: number /* int64 */; // ms
+  sessions: number /* int */;
 }
 /**
  * ExecPairing answers a pairing request: the code to show, and the request to ask after.

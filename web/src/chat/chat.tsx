@@ -5,6 +5,7 @@
 // drafts from the stream. Loaded only once a chat opens or the page is idle.
 import { Menu } from "@base-ui/react/menu";
 import { BarChart3, Ellipsis, ListTree, Plus, Settings } from "lucide-react";
+import type { Status } from "../api/types.gen";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import type { SessionState as LiveSession } from "../api/types.gen";
 import { api } from "../api/client";
@@ -18,11 +19,13 @@ import { pushIn } from "../motion";
 import { openChat, openUsage } from "../route";
 import { PULL } from "../sheet";
 import { BotItems, MenuItems, Rename, sessionActions, sessionTags } from "../sidebar";
-import { useConfirms, useList, useSession } from "../store";
+import { useConfirms, useList, useMachines, useSession } from "../store";
 import { drafts, opened } from "../stream";
 import { errText } from "../toast";
 import { groupPath } from "../tree";
-import { agentName, cn, lampOf, LogoLamp, sessionStatusText, tilde, Tip, titleOf, untitled } from "../ui";
+import { agentName, cn, Lamp, lampOf, LogoLamp, sessionStatusText, tilde, Tip, titleOf, untitled } from "../ui";
+import { MachineFace, shownPath } from "../machines";
+import { openPlace } from "../places";
 import { Asks, Denials } from "./asks";
 import { renameOnly } from "./cmd";
 import { Composer, type ComposerHandle } from "./composer";
@@ -33,7 +36,10 @@ import { ContextRing, ModeKey, ModelKey, modelView, PresetKey, QuotaBars, useMod
 import { Queue } from "./queue";
 import { ShellRuns } from "./shell";
 import { Crash } from "./crash";
-import { SESSION_DRAG, sourceOf, yours } from "./refs";
+import { placesIn, PLACE_DRAG, SESSION_DRAG, sourceOf, yours } from "./refs";
+import { placeDropped, type NamedPlace } from "./at";
+import { PlaceIcon, placeOf } from "./mention";
+import { spotsOf, type Spot } from "./where";
 import { Compaction, Pending, Running, Said } from "./said";
 import { Stick, toEnd } from "./stick";
 
@@ -179,6 +185,29 @@ export function ChatPage({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?:
   const [usageOpen, setUsageOpen] = useState(false);
   const shown = folded(log.blocks);
   const cwd = s?.cwd ?? row?.cwd ?? "";
+  // 在哪干活 under the title (plan, 2026-11-10): the places this one sent sessions to, and those its
+  // messages name (as far as they are loaded), as the page has them.
+  const machines = useMachines();
+  const said = `${log.blocks.length}.${log.blocks[0]?.at}.${log.blocks.at(-1)?.at}.${log.sent.length}`;
+  const named = useMemo(() => {
+    const texts = [...log.blocks.filter((b) => b.kind === "user").map((b) => b.text ?? ""), ...log.sent.map((x) => x.text)];
+    const out: NamedPlace[] = [];
+    for (const p of texts.flatMap(placesIn)) {
+      const at = placeOf(p, machines);
+      if (at && !out.some((o) => o.machine === at.machine && o.path === at.path)) out.push({ ...at, name: p.name });
+    }
+    return out;
+  }, [said, machines]);
+  const spots = useMemo(() => (row ? spotsOf(row, list ?? [], named, workspaces ?? []) : []), [row, list, named, workspaces]);
+  // The bar a row taller with them: the conversation padded as much, and kept where it was as the
+  // row comes or goes (the bar's 48px and a gap; the row's 32px).
+  const padTop = spots.length ? 96 : 64;
+  const padWas = useRef(padTop);
+  useLayoutEffect(() => {
+    const d = padTop - padWas.current;
+    padWas.current = padTop;
+    if (d && scroller.current) scroller.current.scrollTop += d;
+  }, [padTop]);
 
   const onSent = (sent: Sent) => {
     sent.from = log.end;
@@ -200,8 +229,14 @@ export function ChatPage({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?:
   // A session's row dropped here (sidebar.tsx): named in the composer, for this one to write to it
   // with ir (the user, 2026-11-06): a card among the attachments, one piece (the user, 2026-11-08).
   const session = (e: DragEvent) => e.dataTransfer.types.includes(SESSION_DRAG) && (e.preventDefault(), (e.dataTransfer.dropEffect = "copy"), true);
+  // A group's or a folder's row (2026-11-10): that place named, as @ names it.
+  const place = (e: DragEvent) => e.dataTransfer.types.includes(PLACE_DRAG) && (e.preventDefault(), (e.dataTransfer.dropEffect = "copy"), true);
   const drop = (e: DragEvent) => {
     if (files(e)) return composer.current?.attach([...e.dataTransfer.files]);
+    if (place(e)) {
+      const p = placeDropped(e.dataTransfer.getData(PLACE_DRAG));
+      return p && composer.current?.name(p);
+    }
     if (!session(e)) return;
     const to = list?.find((x) => x.id === e.dataTransfer.getData(SESSION_DRAG));
     if (!to || to.id === id) return;
@@ -221,8 +256,8 @@ export function ChatPage({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?:
   // What changes as the conversation grows: it keeps to the bottom, the dots wait again.
   const grew = `${log.blocks.at(-1)?.at} ${log.drafts.length} ${log.drafts.at(-1)?.text.length} ${log.drafts.at(-1)?.whole} ${log.sent.length}`;
   return (
-    <div className="relative h-full" data-chat-drop={id} onDragOver={(e) => files(e) || session(e)} onDrop={drop}>
-      <Stick scroller={scroller} tail={grew} older={() => log.older()} place={chat.place} bottom={stackH} quiet={!!s?.asks.length} style={{ paddingTop: 64, paddingBottom: stackH + 20 }}>
+    <div className="relative h-full" data-chat-drop={id} onDragOver={(e) => files(e) || session(e) || place(e)} onDrop={drop}>
+      <Stick scroller={scroller} tail={grew} older={() => log.older()} place={chat.place} bottom={stackH} quiet={!!s?.asks.length} style={{ paddingTop: padTop, paddingBottom: stackH + 20 }}>
         <div className="mx-auto flex max-w-[760px] flex-col gap-5 px-4 sm:px-6">
           {/* In a turn, the calls being written or run and the dots share one row at the end, as
               high whatever it shows: the conversation does not jump as a call is drafted, runs and
@@ -262,7 +297,7 @@ export function ChatPage({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?:
           {s.status === "error" && s.error && <Crash error={s.error} />}
         </div>
       </Stick>
-      <Bar s={s} onSheet={onSheet} onMe={onMe} />
+      <Bar s={s} onSheet={onSheet} onMe={onMe} spots={spots} asked={confirms} />
       {/* Under the phone's sheet the stack stays where it is, covered, and is hidden once the sheet is
           up (its glass not drawn again as the chat moves under it); only one taller than the sheet,
           which would show over it or at its round corners, sinks (the user, 2026-11-06). */}
@@ -330,9 +365,11 @@ function Under({ s, ghost, composer, onSent, onSentDone, modelOpen, setModelOpen
 }
 
 /** The top bar: the logo with its lamp, the name (its folder only as its tooltip, the user,
- *  2026-11-08); more. The link's dot is the bar's own, left of ⋯ (link.tsx). */
-function Bar({ s, onSheet, onMe }: { s?: Session; onSheet?: () => void; onMe?: () => void }) {
+ *  2026-11-08); more. The link's dot is the bar's own, left of ⋯ (link.tsx). Under them, while
+ *  there are any, the places it works in (spots, Where). */
+function Bar({ s, onSheet, onMe, spots, asked }: { s?: Session; onSheet?: () => void; onMe?: () => void; spots?: Spot[]; asked?: { session?: string }[] }) {
   const ws = useWorkspaces().data ?? [];
+  const machines = useMachines();
   const [renaming, setRenaming] = useState(false);
   // ⋯'s "new session": the "+" of the session's workspace, its folder already this one's, under ⋯.
   const [making, setMaking] = useState(false);
@@ -348,70 +385,116 @@ function Bar({ s, onSheet, onMe }: { s?: Session; onSheet?: () => void; onMe?: (
   const lead = [{ icon: <Plus size={15} />, label: t("menu.new"), run: () => requestAnimationFrame(() => setMaking(true)) }, ...(onSheet ? [{ icon: <ListTree size={15} />, label: t("nav.sidebar"), run: onSheet }] : []), ...(onMe ? [{ icon: <Settings size={15} />, label: t("nav.me"), run: onMe }] : []), { icon: <BarChart3 size={15} />, label: t("usage.title"), run: usageHere }];
   const acts = s ? sessionActions(s, () => setRenaming(true)) : [];
   return (
-    <header className="g-turn-stay vt-bar glass absolute inset-x-0 top-0 z-20 flex h-12 items-center gap-1 pr-2 pl-2 shadow-[0_0.5px_0_var(--edge)] pointer-coarse:h-13">
-      <div className="flex min-w-0 flex-1 items-center gap-2.5 pl-2">
-        {s && (
-          <>
-            <Tip label={`${agentName(s.agent)} · ${sessionStatusText(s)}`} side="bottom">
-              {/* On a phone the logo is a key too: the session list's sheet, as ⋯'s first item (the
-                  user, 2026-11-06). Its tap area wider than it, the bar not moved. */}
-              {onSheet ? (
-                <button type="button" aria-label={t("nav.sidebar")} onClick={onSheet} className={cn("g-press -m-2 grid place-items-center rounded-md p-2 hover:bg-fill", late)}>
-                  {/* Iridium's mark, not the agent's (the user, 2026-11-06): it opens the list. */}
-                  <LogoLamp agent={s.agent} status={lampOf(s)} size={18} ir />
-                </button>
-              ) : (
-                <span className={cn("grid", late)}>
-                  <LogoLamp agent={s.agent} status={lampOf(s)} size={18} />
+    <header className="g-turn-stay vt-bar glass absolute inset-x-0 top-0 z-20 shadow-[0_0.5px_0_var(--edge)]">
+      <div className="flex h-12 items-center gap-1 pr-2 pl-2 pointer-coarse:h-13">
+        <div className="flex min-w-0 flex-1 items-center gap-2.5 pl-2">
+          {s && (
+            <>
+              <Tip label={`${agentName(s.agent)} · ${sessionStatusText(s)}`} side="bottom">
+                {/* On a phone the logo is a key too: the session list's sheet, as ⋯'s first item (the
+                    user, 2026-11-06). Its tap area wider than it, the bar not moved. */}
+                {onSheet ? (
+                  <button type="button" aria-label={t("nav.sidebar")} onClick={onSheet} className={cn("g-press -m-2 grid place-items-center rounded-md p-2 hover:bg-fill", late)}>
+                    {/* Iridium's mark, not the agent's (the user, 2026-11-06): it opens the list. */}
+                    <LogoLamp agent={s.agent} status={lampOf(s)} size={18} ir />
+                  </button>
+                ) : (
+                  <span className={cn("grid", late)}>
+                    <LogoLamp agent={s.agent} status={lampOf(s)} size={18} />
+                  </span>
+                )}
+              </Tip>
+              {renaming ? (
+                <span className="min-w-0 flex-1">
+                  <Rename s={s} done={() => setRenaming(false)} className="h-7 font-semibold" />
                 </span>
+              ) : (
+                <h1 className={cn("m-0 min-w-0 truncate text-base font-semibold", late, untitled(s) && "text-ink-3")} title={s.machine ? shownPath(groupPath(s), machines).real : tilde(s.cwd)} onDoubleClick={() => setRenaming(true)}>
+                  {titleOf(s)}
+                </h1>
               )}
-            </Tip>
-            {renaming ? (
-              <span className="min-w-0 flex-1">
-                <Rename s={s} done={() => setRenaming(false)} className="h-7 font-semibold" />
-              </span>
-            ) : (
-              <h1 className={cn("m-0 min-w-0 truncate text-base font-semibold", late, untitled(s) && "text-ink-3")} title={tilde(s.cwd)} onDoubleClick={() => setRenaming(true)}>
-                {titleOf(s)}
-              </h1>
-            )}
-          </>
+            </>
+          )}
+        </div>
+        {/* With the sidebar shown, the link's dot is at its top (sidebar.tsx). */}
+        {onSheet && <LinkDot />}
+        {/* ⋯'s place kept while the session comes: the dot beside it does not move as it does. */}
+        {!s && <span aria-hidden className="size-8 shrink-0 pointer-coarse:size-10" />}
+        {s && (
+          <span className="relative grid">
+            {/* Anchored on ⋯ itself, under it: clicks go through to ⋯. */}
+            <WsPlus
+              key={s.id}
+              w={{ id: s.workspace ?? 0, name: ws.find((w) => w.id === s.workspace)?.name ?? "", path: groupPath(s) }}
+              trigger={<span aria-hidden className="pointer-events-none absolute inset-0" />}
+              open={making}
+              setOpen={setMaking}
+              opened={(id) => openChat(id)}
+            />
+            <Menu.Root>
+              <Tip label={t("top.more")} side="bottom">
+                <Menu.Trigger
+                  render={
+                    <button ref={more} type="button" aria-label={t("top.more")} className={cn("g-press grid size-8 place-items-center rounded-md text-ink-2 hover:bg-fill hover:text-ink data-popup-open:bg-fill pointer-coarse:size-10", late)}>
+                      <Ellipsis size={17} />
+                    </button>
+                  }
+                />
+              </Tip>
+              <Menu.Portal>
+                <Menu.Positioner side="bottom" align="end" sideOffset={6} collisionPadding={8} className="z-50">
+                  <MenuItems lead={lead} items={acts} tags={sessionTags(s)} tail={<BotItems s={s} i={lead.length + acts.length + 1} />} />
+                </Menu.Positioner>
+              </Menu.Portal>
+            </Menu.Root>
+          </span>
         )}
       </div>
-      {/* With the sidebar shown, the link's dot is at its top (sidebar.tsx). */}
-      {onSheet && <LinkDot />}
-      {/* ⋯'s place kept while the session comes: the dot beside it does not move as it does. */}
-      {!s && <span aria-hidden className="size-8 shrink-0 pointer-coarse:size-10" />}
-      {s && (
-        <span className="relative grid">
-          {/* Anchored on ⋯ itself, under it: clicks go through to ⋯. */}
-          <WsPlus
-            key={s.id}
-            w={{ id: s.workspace ?? 0, name: ws.find((w) => w.id === s.workspace)?.name ?? "", path: groupPath(s) }}
-            trigger={<span aria-hidden className="pointer-events-none absolute inset-0" />}
-            open={making}
-            setOpen={setMaking}
-            opened={(id) => openChat(id)}
-          />
-          <Menu.Root>
-            <Tip label={t("top.more")} side="bottom">
-              <Menu.Trigger
-                render={
-                  <button ref={more} type="button" aria-label={t("top.more")} className={cn("g-press grid size-8 place-items-center rounded-md text-ink-2 hover:bg-fill hover:text-ink data-popup-open:bg-fill pointer-coarse:size-10", late)}>
-                    <Ellipsis size={17} />
-                  </button>
-                }
-              />
-            </Tip>
-            <Menu.Portal>
-              <Menu.Positioner side="bottom" align="end" sideOffset={6} collisionPadding={8} className="z-50">
-                <MenuItems lead={lead} items={acts} tags={sessionTags(s)} tail={<BotItems s={s} i={lead.length + acts.length + 1} />} />
-              </Menu.Positioner>
-            </Menu.Portal>
-          </Menu.Root>
-        </span>
-      )}
+      {!!spots?.length && <Where spots={spots} asked={asked ?? []} />}
     </header>
+  );
+}
+
+/** A chip's lamp for the sessions sent there: amber while one needs you, else green while one
+ *  works, else none (as a launcher folded in the list shows them). */
+function lampFor(ss: Session[], asked: { session?: string }[]): Status {
+  if (ss.some((s) => lampOf(s) === "waiting" || asked.some((c) => c.session === s.id))) return "waiting";
+  return ss.some((s) => ["running", "compacting", "starting"].includes(lampOf(s))) ? "running" : "idle";
+}
+
+/** 在哪干活 (plan, 2026-11-10): a row of chips under the title, in line with it, scrolled sideways
+ *  when they do not fit (on a phone, from the bar's edge). Its own folder; the places it sent
+ *  sessions to (another machine's with its face and name), how many, their lamp, pressed the first
+ *  of them; those it named and sent none to, faint, dashed. Its own and those named, pressed, show
+ *  in the list (places.ts openPlace). */
+function Where({ spots, asked }: { spots: Spot[]; asked: { session?: string }[] }) {
+  const ms = useMachines();
+  return (
+    <div role="list" aria-label={t("chat.where")} className="g-fade flex h-8 min-w-0 items-start gap-1.5 overflow-x-auto pr-3 pl-9 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      {spots.map((x) => {
+        const shown = shownPath(x.place.machine ? `${x.place.machine}:${x.place.path}` : x.place.path, ms);
+        const m = shown.m;
+        const where = m ? `${m.name} · ${shown.real}` : tilde(shown.real);
+        const n = x.sessions.length;
+        const lamp = n ? lampFor(x.sessions, asked) : "idle";
+        const label = x.kind === "named" ? `${where} · ${t("chat.whereNamed")}` : n ? `${where} · ${t("nav.hungCount", { n })}` : where;
+        return (
+          <Tip key={`${x.kind}:${x.key}`} label={label} side="bottom">
+            <button
+              type="button"
+              role="listitem"
+              onClick={() => (x.kind === "sent" ? openChat(x.sessions[0]!.id) : openPlace(x.place))}
+              className={cn("g-press flex h-6 shrink-0 items-center gap-1.5 rounded-full px-2 text-xs transition-colors duration-(--dur-2)", x.kind === "named" ? "border border-dashed border-edge text-ink-3 hover:text-ink-2" : "bg-fill text-ink-2 hover:bg-fill-2 hover:text-ink")}
+            >
+              {m && x.kind !== "named" ? <MachineFace m={m} size={14} className={cn(!m.online && "opacity-50 grayscale")} /> : <PlaceIcon remote={!!x.place.machine} label={m?.name} size={13} />}
+              <span className="max-w-48 truncate">{m ? `${m.name} · ${x.name}` : x.name}</span>
+              {n > 0 && <span className="text-ink-3 tabular-nums">{n}</span>}
+              {lamp !== "idle" && <Lamp status={lamp} />}
+            </button>
+          </Tip>
+        );
+      })}
+    </div>
   );
 }
 

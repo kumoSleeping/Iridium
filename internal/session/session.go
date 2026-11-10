@@ -306,12 +306,14 @@ func (h *Hosted) discoveredAs() string {
 // Create starts a hosted session in req.Cwd and, if req.Text is given, sends it as the first
 // message from `from`. The id is the agent's own session id.
 func (m *Manager) Create(ctx context.Context, req api.NewSession, from string) (string, error) {
-	return m.create(ctx, req, from, "", nil)
+	return m.create(ctx, req, from, "", nil, req.Caller == "")
 }
 
 // create is Create, the session named name (else after its folder); prep, if any, runs on the
-// new id before its agent starts.
-func (m *Manager) create(ctx context.Context, req api.NewSession, from, name string, prep func(id string) error) (string, error) {
+// new id before its agent starts. byHand: put in req.Workspace as you put it (Own, if it has a
+// launcher); else as discovery would, so one an agent started (ir new --workspace) still hangs
+// under it.
+func (m *Manager) create(ctx context.Context, req api.NewSession, from, name string, prep func(id string) error, byHand bool) (string, error) {
 	if req.Agent == "" {
 		req.Agent = api.AgentClaude
 	}
@@ -381,15 +383,8 @@ func (m *Manager) create(ctx context.Context, req api.NewSession, from, name str
 	m.mu.Unlock()
 	h.newSession = true
 	h.show() // Iridium's own: shown from the start
-	if at := req.At; at != "" && machine == "" && !filepath.IsAbs(at) && strings.Contains(at, ":") && len(at) <= 4096 {
-		// A coordinator for a folder there: grouped by that folder as discovery groups (nested
-		// with it), not put in its group by hand.
-		if err := m.o.Store.SetAt(mt.ID, at); err != nil {
-			return mt.ID, err
-		}
-		m.intoGroupPrefer(mt.ID, at, req.Workspace)
-	} else if req.Workspace != 0 {
-		if err := m.o.Store.Move(mt.ID, req.Workspace); err != nil {
+	if req.Workspace != 0 {
+		if err := m.o.Store.Assign(mt.ID, req.Workspace, byHand); err != nil {
 			return mt.ID, err
 		}
 	} else {
@@ -509,9 +504,10 @@ func (m *Manager) List(ctx context.Context) ([]api.Session, error) {
 		for _, s := range found {
 			if !seen[s.ID] {
 				o := over[s.ID]
-				s.Name, s.Pinned, s.Workspace, s.Color, s.Order, s.At = o.Name, o.Pinned, o.Workspace, api.Color(o.Color), o.Order, o.At
+				s.Name, s.Pinned, s.Workspace, s.Color, s.Order = o.Name, o.Pinned, o.Workspace, api.Color(o.Color), o.Order
 				s.Archived = !vis.Shown(string(s.Agent), s.ID)
 				m.parentOf(&s)
+				s.Own = ownOf(s, o)
 				out = append(out, s)
 			}
 		}

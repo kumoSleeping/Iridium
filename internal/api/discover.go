@@ -7,14 +7,13 @@ type Workspace struct {
 	ID   int64  `json:"id"`
 	Name string `json:"name"`
 	Path string `json:"path"`
-	// Hidden: hidden from the page (a group's menu): its sessions are not listed, searched or in
-	// 归档, but while one of them runs elsewhere (open in DSH Desktop).
-	Hidden bool `json:"hidden,omitempty"`
+	// Only: it holds only the sessions right in its folder (/, a home, a drive's root at another
+	// machine, one split), none in a folder under it.
+	Only bool `json:"only,omitempty"`
 }
 
 // GroupOrder lists the groups' rows in the order they were dragged to (PUT /api/groups/order), by
-// the key the page gives each (a group listed at two machines is two rows, ordered apart): first
-// to last, those left out after them.
+// the key the page gives each: first to last, those left out after them.
 type GroupOrder struct {
 	Keys []string `json:"keys"`
 }
@@ -38,17 +37,18 @@ type FolderPlace struct {
 	Pinned *bool    `json:"pinned,omitempty"`
 }
 
-// WorkspacePatch renames a group, hides it or shows it again; a field left out stays.
+// WorkspacePatch renames a group; a field left out stays.
 type WorkspacePatch struct {
-	Name   *string `json:"name,omitempty"`
-	Hidden *bool   `json:"hidden,omitempty"`
+	Name *string `json:"name,omitempty"`
 }
 
 // SessionPatch changes what lies over a session; a field left out stays. Name "" takes the name
 // off. Workspace moves it (0: none), and it is never moved by discovery again. Color "" takes the
 // colour tag off. ByAgent: Name is the session's agent's (ir rename from a session), which does
 // not replace a name the user gave (409) and is cleaned as a title line is. Order: the key it was
-// dragged to among those beside it (Session.Order); 0 takes it off.
+// dragged to among those beside it (Session.Order); 0 takes it off. Archived archives (or brings
+// back) the sessions hung under it too, all the way down. Detach takes it out from under its
+// launcher: it goes in its own folder's group, put there by hand, so it is Own from now on.
 type SessionPatch struct {
 	Name      *string  `json:"name,omitempty"`
 	ByAgent   bool     `json:"byAgent,omitempty"`
@@ -57,6 +57,7 @@ type SessionPatch struct {
 	Workspace *int64   `json:"workspace,omitempty"`
 	Color     *Color   `json:"color,omitempty"`
 	Order     *float64 `json:"order,omitempty"`
+	Detach    *bool    `json:"detach,omitempty"`
 }
 
 // FolderColor tags folder Path (absolute) with a colour; Color "" takes it off. The carried state
