@@ -2,14 +2,14 @@
 
 一套接口，两个入口：
 
-- HTTP：`127.0.0.1:7810`（配置 `listen`），给网页，前面是 Passkey 门（`docs/gate.md`）。没配 `public.origin` 时只认本机的主机名（`localhost`、回环地址和配置 `hosts`），非 GET 请求带了别的 `Origin` 就拒绝，请求都算内置终端“本机”（带 Bot TOKEN 的算那个 Bot）。配了以后每个请求都要面板登录或 TOKEN。
-- unix socket：`$XDG_RUNTIME_DIR/iridium/ir.sock`（0600），给本机 `ir`，不经过门，算“本机”。`ir` 认出是 agent 在调（环境里有 `CLAUDECODE`、`CODEX_THREAD_ID`、`IRIDIUM_SESSION`，或者没有终端）时带头 `X-Iridium-Agent: 1`，这时不回任何秘密（见“确认”）。`ir` 还带 `X-Iridium-Session`（它所在的会话：`IRIDIUM_SESSION` 或 agent 自己的会话变量）；那个会话是别的终端经 Iridium 开的，这个请求就算那个终端的：有没有 Claude 照它，记它的用量和来源（agent 在 Bot 的会话里调 `ir`，等于 Bot 自己做）。
+- HTTP：`127.0.0.1:7810`（配置 `listen`），给网页，前面是 Passkey 门（`docs/gate.md`）。没配 `public.origin` 时只认本机的主机名（`localhost`、回环地址和配置 `hosts`），非 GET 请求带了别的 `Origin` 就拒绝，请求都算主机（带 TOKEN 的算那个应用）。配了以后每个请求都要网页登录或 TOKEN。
+- unix socket：`$XDG_RUNTIME_DIR/iridium/ir.sock`（0600），给主机上的 `ir`，不经过门，算主机。`ir` 认出是 agent 在调（环境里有 `CLAUDECODE`、`CODEX_THREAD_ID`、`IRIDIUM_SESSION`，或者没有终端）时带头 `X-Iridium-Agent: 1`，这时不回任何秘密（见“需要”）。`ir` 还带 `X-Iridium-Session`（它所在的会话：`IRIDIUM_SESSION` 或 agent 自己的会话变量）；那个会话是别的终端经 Iridium 开的，这个请求就算那个终端的：有没有 Claude 照它，记它的用量和来源（agent 在 Bot 的会话里调 `ir`，等于 Bot 自己做）。
 
 来源：每条交给 agent 的消息开头是 `[终端名] `（`/` 开头的命令除外），名字取发送时终端的名字。库里记下这条输入是哪个终端（ID）发的、用的什么名字；读记录时服务端按 Iridium 自己写进去的输入认（Claude：发消息时给的 uuid；没有 ID 的 agent：`store.SourceByText` 比对输入记录），去掉前缀，消息块带 `from`（名字）和 `fromTerminal`（终端 ID，取头像用）。用量行按终端 ID 记，改名不丢。经 unix socket 的 `ir send`、`ir new` 只要带着它所在的会话（`X-Iridium-Session` 头，取自 `IRIDIUM_SESSION`、`CLAUDE_CODE_SESSION_ID` 等环境变量，或正文的 `caller`），前缀就是 `[ir:<会话 ID>] `，`from` 也是它，页面画成那个会话的来信（名字：会话改过的名字，否则“Claude · 工作区名或文件夹名”）；有没有 `X-Iridium-Agent` 都一样。终端（`fromTerminal`，记用量的）照旧：开那个会话的终端，否则本机。网页和 TOKEN 来的请求不认 `caller`。
 
 类型都在 `internal/api`。`go generate ./internal/api` 用 tygo 生成 `web/src/api/types.gen.ts`，前端只用它。生成的文件进库，改了 Go 的类型要一起重新生成提交；`scripts/check-types.sh`（CI、发布和 preflight 都跑）重新生成一遍，对不上就失败。
 
-出错时状态码非 2xx，正文 `{"error": "…"}`：400 请求不对，403 不许（没有 Claude 的终端用 Claude 会话、没管理权的管理），404 没有这个会话或位置，409 agent 没在运行或状态不对，429 今天的用量到上限了，504 agent 没按时回。名字不行时 409 另带 `nameError`（`empty`、`too_long`、`invalid`、`reserved`、`taken`）。
+出错时状态码非 2xx，正文 `{"code": "…", "message": "…"}`（决定 8）：401 只表示 TOKEN 或登录无效；其余拒绝一律 403 加原因码（`pair_closed`、`login_pending`、`no_permission`、`too_many_pending`…）；422 东西不在或不对（`no_such_need`、`no_such_app`、`bad_name`…）；400 请求不对；404 没有这个会话（逐步改为 422）；409 agent 没在运行或状态不对；429 今天的用量到上限；504 agent 没按时回。
 
 ## 请求
 
@@ -366,48 +366,59 @@ Iridium 不内置、但认得名字的 Bot（现在只有 QQ Bot `qq`，二进�
 
 - Iridium 启动时（更新之后）把装了的扩展换成同版本，服务在跑就重启。
 
-## 交互终端
+## 应用和登录
 
-“本机”是内置终端（ID `local`），不在库里，有 Claude，不能撤销。其余的是门里登记的面板（`panel`）和通道（`channel`），表在 SQLite（`terminals`、`invites`、`logins`、`permissions`、`devices`）。每个终端有个设备 `device`：`computer`（默认）、`laptop`、`phone` 或 `none`（不展示），消息头像右下角的小标就是它，`none` 不带小标。
+主机（ID `local`，显示“主机”）不在表里，不可被管理。别的都是应用（表 `apps`，`type` 只用来显示），应用下面是登录（表 `logins`，主键 `(app, id)`，`approved_at` 为空即待批）。网页（`ir_web`）是内置应用：每个浏览器（一套 passkey）是它的一个登录，只在设了公网地址或已有登录时列出。每个应用、登录有设备 `device`（`computer`、`laptop`、`phone`、`none`）。
 
-谁能做什么：
-
-- **面板权**（批准新终端、看到 TOKEN 和邀请链接、答确认）：面板；本机 `ir` 由人在终端里跑时；没配 `public.origin` 时的本机网页。
-- **管理**（列出、改名和头像、撤销）：面板和本机，包括 agent 调的 `ir`。
-- 通道什么都不管，只能改自己的名字和头像。
+别的应用说话时用头 `Satori-User-ID`（或 `X-Iridium-Login`）指明登录；新的登录第一次说话回 403 `login_pending`，产生一条 `login_join` 需要；每个应用最多 20 个待批。
 
 | 请求 | 正文 → 回答 | 说明 |
 |---|---|---|
-| `GET /api/me` | → `Me` | 调用者自己：终端（`rules.claudeOwner`：有没有 Claude）、`panel`（有没有面板权）、`public` |
-| `PUT /api/me/profile` | 资料 → `EndpointInfo` | 改自己的名字、头像（见 `docs/gate.md`）；本机回 409 |
-| `PUT /api/endpoints/{id}/profile` | 同上 | 改别的终端的（`id` 也可以是名字）；`/api/terminals/{id}/profile` 同 |
-| `PUT /api/me/device` | `SetDevice` → `Terminal` | 改自己的设备（`computer`/`laptop`/`phone`/`none`，别的回 400）；本机也行。网页在“这个终端”弹窗里改 |
-| `PUT /api/terminals/{id}/device` | 同上 | 改别的终端的（`id` 也可以是名字，`本机`/`local` 也行），要管理权；`ir profile <名字> --device phone` |
-| `GET /api/terminals` | → `Terminals` | `ir access`：所有终端（本机在最前）、有没有 Claude、今天的用量，和未用的邀请。没有秘密 |
-| `GET /api/usage?days=N&terminal=<ID、名字或 me>` | → `Usage` | `ir usage`：最近 N 天（默认 7，最多 366，今天在最后）按本地日期、终端、agent、模型合计的回合数、输入、输出、缓存读写 token 和费用（agent 没报或报 0 的回合按模型原厂在 models.dev 的标价估算：经第三方的 DeepSeek 按 DeepSeek 官方价；目录存在状态目录 `models-dev.json`，一天取一次；认不出的模型不算）。`by=hour`：最近 24 小时按小时；`by=weekhour`：N 天按星期和小时合计，行的 `day` 是 `1T14`（周一 14 点，7 是周日），给热点图。不带 `terminal`：管理权看所有人，通道只看自己；看别的终端要管理权（否则 403）。`terminals` 给出行里还在的终端的名字和头像；`terminal` 为空的行是认不出谁发起的回合 |
-| `POST /api/terminals/invites` | `NewInvite` → `Invite` | `ir invite [名字]`：新面板的一次性链接（10 分钟），`qr` 是同一链接的二维码（SVG data URL）。要先有 `public.origin`（否则 409）。没有面板权时回 202 `Pending`。`owner: true`（`--owner`）：加入的面板带 Claude。本机由人跑的 `ir`、带 Claude 的面板（有 Passkey 的，不算没配 `public.origin` 的本机网页）直接给；agent 的回 202 `Pending`，只有带 Claude 的面板或本机 `ir` 能同意；别的 403 |
-| `POST /api/terminals/tokens` | `NewInvite` → `Token` | `ir token <名字>`：Bot TOKEN，只给这一次；已有的通道换新 TOKEN，旧的作废。没有面板权时回 202 `Pending`。`owner: true` 同上：新建的通道带 Claude；已有的通道换 TOKEN 时 Claude 照旧，没 Claude 的再带 `owner` 回 409（Claude 只在建的时候定）。`into`（`ir token --into 文件`）：由 Iridium 把 TOKEN 写进这个绝对路径（0600，不能落在 Iridium 和 agent 的目录里），回答和确认面板都不给 TOKEN，只给 `into` |
-| `DELETE /api/terminals/{id}` | → `{ok}` | `ir revoke`：终端（连同登录、Claude、连接）或未用的邀请；最后一个有 Passkey 的面板删不了（409） |
+| `GET /api/me` | → `Me` | 调用者：`app`、`login`、`host`、`web`、`rules`、`public` |
+| `PUT /api/me/profile`、`PUT /api/apps/{id}/profile` | 资料 → `EndpointInfo` | 改名字、头像（见 `docs/gate.md`）。名字不合法 422 `bad_name`，带 `nameError`（`empty`、`too_long`、`invalid`、`reserved`、`letter`、`taken`） |
+| `PUT /api/me/device`、`PUT /api/apps/{id}/device` | `SetDevice` | 设备 |
+| `GET /api/apps` | → `Apps` | 应用（主机在最前、网页、其余）、登录（带 `perms`）、未用的邀请。没有秘密 |
+| `DELETE /api/apps/{id}` | → `{ok}` | 删应用（连同 TOKEN、连接）或网页的登录、未用的邀请。只有人（主机、网页登录），agent 不行 |
+| `DELETE /api/apps/{id}/logins/{login}` | → `{ok}` | 删一个登录；别的应用的登录下次说话重新申请 |
+| `PUT /api/apps/{id}/perms` | `Perms` → `Perms` | 应用能用的，能批的人改 |
+| `PUT /api/apps/{id}/logins/{login}/perms` | `Perms` → `Perms` | 登录能用的（网页的登录 `id` 写 `ir_web`），在应用的之内起作用 |
+| `PUT /api/me/perms` | `Perms` | 应用申请改权限：一条 `app_change` 需要 |
+| `POST /api/invites` | `NewInvite` → `Invite` | 网页的一次性邀请（10 分钟），先要公网地址。`claude: true` 加入的登录带 Claude。agent 调的回 202 `Pending` |
+| `GET /api/catalogue` | → `CatalogueEntry[]` | 收录的官方应用和各系统的安装命令 |
+| `GET /api/usage?days=N&terminal=<ID、名字或 me>` | → `Usage` | 按日期、应用或登录、agent、模型合计的用量（`by=hour`、`by=weekhour` 同前）。看别人的要管理权 |
 
-## 能做什么（`Rules`）
+## 配对
 
-所有终端都一样，什么都能做，只有 Claude 例外（用户，2026-11-08）：
-
-- `claudeOwner`：这是你本人的终端（Claude 用户协议），能用 Claude。`{by, at}`，`by` 是 `local`（本机由人跑的 `ir` 的 `--owner`；`--owner` 邀请加入的面板也记这个）、`panel`（带 Claude 的面板开的或同意的）或 `first`（第一个面板）。只在建终端时由服务端写，之后不能改，也没有改的接口。
-- 没有 Claude 的终端看得到 Claude 的会话（列表、读消息、事件流、文件），但不能开新的、发消息、停、中断、答提问、放行、换模型模式强度、动待发队列、往里传文件（403）。改名、置顶、颜色、归档谁都行。别的 agent 谁都能用。
-- 不再有目录、命令、审批、每日上限、拷入拷出、看别人会话这些限制；Bot 和面板一样。旧库里这些字段还在，不读。
-
-Bot 的聊天层（`/api/chat/…`）按 TOKEN 认终端，同一条规则：开会话（含 `/new`，默认 Claude）、发消息、`/use`、`/stop`、答提问对 Claude 会话要有 Claude。聊天开的会话记在 Bot 名下，来源标记是 `[Bot 名·发送者]`。
-
-## 确认（agent 的 `ir` 要秘密时）
-
-agent 调 `ir invite`、`ir token` 时，邀请链接和 TOKEN 不能进它的对话。服务端不回秘密，改记一条确认（内存里，10 分钟），网页面板在“需要你”里看到，同意后**只有点同意的那个面板**拿到链接或 TOKEN；agent 只拿到结果。认 agent 靠 `ir` 带的头，只防 TOKEN 进记录，挡不住故意读库。
+配对是应用唯一的来路（`ir join`、`ir pair`、dsh 插件、QQ 桥都走它）。
 
 | 请求 | 正文 → 回答 | 说明 |
 |---|---|---|
-| `GET /api/confirms` | → `Confirms` | 等确认的（面板权）。事件流 `confirms` 是同一份 |
-| `POST /api/confirms/{id}` | `ConfirmAnswer` → `ConfirmReply` | 面板同意或拒绝；同意时回答里带 `invite` 或 `token`，只此一次。`owner: true` 的确认只有带 Claude 的面板或本机 `ir` 能同意（别的 403，确认继续等），谁都能拒绝 |
-| `GET /api/confirms/{id}?wait=<秒>` | → `ConfirmState` | 管理权或本机 socket 上的 `ir`。结果：`pending`、`allowed`、`denied`、`expired`、`failed`，从不带秘密。`wait` 最多 60 秒，有结果就回 |
+| `GET /api/pairing`、`PUT /api/pairing` | `PairWindow` | 配对窗口：`{open, until}`；`PUT {open, minutes?}` 开（默认 10 分钟，最多 60）或关。能批的人。`ir apps open [时长]`、`ir apps close`；网页“新建应用”一进去就开。hub 键 `pairing` |
+| `POST /api/pair` | `PairRequest` → `Pairing` | 不用登录。窗口关着 403 `pair_closed`；每来源（IP，IPv6 按 /64）最多 4 个待批、总共 20 个，多了 403 `too_many_pending`；名字不合法 422 `bad_name`。回配对码 `code` 和 `request` |
+| `GET /api/pair/{request}` | → `PairState` | `pending`、`allowed`（带 `token`，只给一次）、`denied`、`expired`；不认识的 422 `no_such_request` |
+
+申请带 `wants`（想要的权限），批准时只能少给（422 `too_wide`）。名字已有应用时是 `app_update`：允许即给那个应用换新 TOKEN，旧的作废、连接断开，用量和权限照旧；答复带 `name` 则作为新应用、用这个名字接入。
+
+## 权限（`Perms`）
+
+`{agents, scope}`，`["*"]` 为全部。`scope` 是位置 `应用名:路径`（主机写 `主机:` 或 `host:`）。
+
+- 能用的 = 登录的 ∩ 应用的；主机全部。0.2 之前配对的应用是全部。
+- 范围外的会话不存在：列表里没有，hub 的 `list`、`session:`、`context:` 过滤掉，按 ID 访问回“没有这个会话”。
+- 范围内、agent 不在能用之列的会话只能看：开、发、答、停、改名、归档、改设置一律 403 `no_permission`。所有 `/api/sessions/{id}/…` 都在路由前统一查（GET 查范围，其余加查 agent）。
+- Claude 另外要“本人的”（`rules.claudeOwner`：`{by, at}`），只在建应用、登录时由服务端写（配对时允许为本人的、`ir invite --claude`）。
+
+## 需要（`Need`）
+
+等一个人决定的事，内存里存 10 分钟。种类：`app_join`、`app_update`、`app_change`、`login_join`、`invite`、`secret_set`、`secret_use`。网页在应用管理和侧栏“需要你”里画成卡片；`ir needs`、`ir allow <id>`、`ir deny <id>`。
+
+| 请求 | 正文 → 回答 | 说明 |
+|---|---|---|
+| `GET /api/needs` | → `Needs` | 主机和网页登录。hub 键 `needs` 是同一份 |
+| `POST /api/needs/{id}` | `NeedAnswer` → `NeedReply` | 允许或拒绝。只有能批的：主机上的人，或有 Claude、agent 和范围都是全部的网页登录；agent 的 `ir` 一律 403。`perms`：给的权限（不超过申请的）；`name`：配对时改名；`owner`：本人的（得 Claude）；`value`、`forSession`：凭据用 |
+| `GET /api/needs/{id}?wait=<秒>` | → `NeedState` | 结果，从不带秘密 |
+
+agent 调 `ir invite`、`ir secret set` 时秘密不进它的对话：变成一条需要，允许后链接只给点允许的那一处，agent 只拿到结果。
 
 ## 凭据
 
@@ -415,13 +426,12 @@ agent 调 `ir invite`、`ir token` 时，邀请链接和 TOKEN 不能进它的�
 
 | 请求 | 正文 → 回答 | 说明 |
 |---|---|---|
-| `GET /api/secrets` | → `Secrets` | 名字、说明、范围、谁存的、用量和最近 50 次使用。从不带值。所有终端 |
-| `PUT /api/secrets/{name}` | `SetSecret` → `SecretInfo` | 存或换（值、说明、范围、`always`）。不带值：已有的只改说明和范围。面板、本机由人跑的 `ir`、所有通道（通道只能存值和说明，范围、`always` 只有面板改）；agent 调的回 202 `Pending`（确认卡带密码框，值由点“存”的面板交上来，见下） |
+| `GET /api/secrets` | → `Secrets` | 名字、说明、范围、谁存的、用量和最近 50 次使用。从不带值。主机和网页登录 |
+| `PUT /api/secrets/{name}` | `SetSecret` → `SecretInfo` | 存或换（值、说明、范围、`always`）。不带值：已有的只改说明和范围。主机和网页登录；agent 调的回 202 `Pending`（需要卡片带密码框，值由点“存”的那一处交上来，见下） |
 | `DELETE /api/secrets/{name}` | → `{ok}` | 要管理权；agent 调的也行 |
 | `POST /api/secrets/use` | `UseSecrets` → `SecretValues` | 只给 `ir run`，只走 unix socket：会话、名字、命令开头。查范围；要确认时回 202 `Pending`，`ir run` 等到同意后带 `confirm`（确认的 ID）再取，一个确认只能用一次。值只交给 `ir` 进程，它不打印 |
 
-- 确认（`/api/confirms`）多两种：`secret-set`（`Confirm.note`、`replace`；同意时 `ConfirmAnswer.value` 带值，服务端存好，谁存的记点“存”的面板；回答和 `ConfirmState` 不带值）、`secret-use`（`Confirm.secrets`、`command`；允许 / 本会话一直允许（`ConfirmAnswer.forSession`）/ 拒绝，记在内存里，会话的进程停了就忘；`owner: true`，只有带 Claude 的面板或本机 `ir` 能允许；有 `always` 的凭据不给“本会话一直允许”）。
-- 配对（`docs/exec.md`“连接”）：执行端用 `POST /api/exec/pair`，Bot 用 `POST /api/pair`（`ExecPair` → `ExecPairing`；Bot 只报 `name`、`program`），再轮询 `GET /api/exec/pair/{request}` 或 `GET /api/pair/{request}`（→ `ExecPairState`：`pending`、`allowed` 带 `token`、`denied`、`expired`；未知或已取过 404）。这是门外仅有的不用登录的口。Bot 接入只走这条路，网页不再手动发 TOKEN（用户，2026-11-08）；`ir pair <地址> --name 名字 --into 文件` 替程序申请，TOKEN 写进文件、不打印。限制放宽（用户，2026-11-08）：每个来源每小时 30 次、同时最多 4 个待批，总共最多 20 个，多了 429；设置 `pairClosed`（终端管理页底部“接收新的连接申请”）关掉时一律 403。申请变成 `exec-pair` 或 `bot-pair` 确认（`Confirm.code`、`machine`）；面板同意时 `ConfirmAnswer.owner` 说“本人的机器”或“带 Claude”（只有带 Claude 的面板或本机 `ir` 能说）。同意后新建一个 Bot，名字是申请的名字，重名加 `-2`、`-3`；已有同名的 Bot 时 `Confirm.replace` 为真，面板可带 `ConfirmAnswer.replace` 改为替换它：同一个终端（用量、Claude 照旧），新 TOKEN，旧的作废。TOKEN 只经 `GET` 给申请方一次，面板拿不到。
+- 需要里的 `secret_set`（`Need.note`、`replace`；允许时 `NeedAnswer.value` 带值，服务端存好，谁存的记点“存”的面板；回答和 `ConfirmState` 不带值）、`secret_use`（`Need.secrets`、`command`；允许 / 本会话一直允许（`NeedAnswer.forSession`）/ 拒绝，记在内存里，会话的进程停了就忘；`owner: true`，只有带 Claude 的面板或本机 `ir` 能允许；有 `always` 的凭据不给“本会话一直允许”）。
 - 要不要确认：本机由人跑的 `ir run` 直接用；agent 的，会话由本机、带 Claude 的终端开的（或不经 Iridium 开的）直接用，别的终端开的要确认；`always` 的每次都确认。范围不对直接 403，不弹确认。
 - 对话记录出接口前（会话列表、会话状态、消息页、整段原文、事件流、Bot 的聊天指针、推送；`ir read`、`ir wait` 走的就是这些），已知的值（原样、URL 编码、base64）换成 `[secret:名]`；短于 6 个字符的不换（误伤太多）。
 - `ir run` 自己起子进程（同目录、同环境，加上凭据），stdout/stderr 照转，按最长值的长度留尾巴再打码；退出码照子进程。
