@@ -23,7 +23,7 @@ const BOX = "h-9 w-full min-w-0 rounded-md bg-fill px-2.5 text-sm outline-none p
 export function SecretsPage({ onBack }: { onBack: () => void }) {
   useLang();
   const q = useQuery(secretsQ);
-  const confirms = useConfirms().filter((c) => c.kind === "secret-set" || c.kind === "secret-use");
+  const confirms = useConfirms().filter((c) => c.kind === "secret_set" || c.kind === "secret_use");
   const [adding, setAdding] = useState(false);
   const list = q.data?.secrets ?? [];
   return (

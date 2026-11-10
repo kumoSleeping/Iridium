@@ -216,7 +216,7 @@ func TestChannelTokensAndProfiles(t *testing.T) {
 		h.secrets = append(h.secrets, other)
 	}
 	w = h.do(req{method: "PUT", path: "/api/apps/" + info.ID + "/profile", body: map[string]any{"name": "MAC"}})
-	wantStatus(t, w, http.StatusConflict)
+	wantStatus(t, w, http.StatusUnprocessableEntity)
 	if r := decode[joinReply](t, w); r.NameError != "taken" {
 		t.Fatalf("rename to a taken name: %s", w.Body.String())
 	}

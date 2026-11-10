@@ -5,11 +5,11 @@
 // asked with --owner (the new terminal gets Claude) only a panel that has Claude allows.
 // A credential's (plan "凭据"): secret-set has a password box, whose value goes to the daemon and
 // nowhere else; secret-use is allow, this session, or deny, and only the owner's own allows it.
-import { Bot, KeyRound, Link2, LockKeyhole, Monitor, Terminal as TermIcon } from "lucide-react";
-import { ConfirmIcon, confirmName, confirmTitle } from "./confirmname";
+import { KeyRound, Link2, LockKeyhole, Terminal as TermIcon } from "lucide-react";
+import { ConfirmIcon, confirmName, confirmTitle, isPair } from "./confirmname";
 import { useRef, useState, type ReactNode } from "react";
 import { api } from "./api/client";
-import type { Confirm, Me } from "./api/types.gen";
+import type { Need, Me } from "./api/types.gen";
 import { CardDetails, CardFrame, CardHead, Facts, MainKey, SecondKey } from "./card";
 import { useMe } from "./data";
 import { t, useLang } from "./i18n";
@@ -26,14 +26,15 @@ export { confirmTitle, confirmName, ConfirmIcon };
 export const saysOwner = (me?: Me) => !!me && !!me.web && !!me.rules.claudeOwner;
 
 /** at: where it is drawn (the asking session's id, or "terminals"): the secret shows there. */
-export function ConfirmCard({ c, at: here }: { c: Confirm; at: string }) {
-  if (c.kind === "secret-set") return <SecretSetCard c={c} />;
-  if (c.kind === "secret-use") return <SecretUseCard c={c} />;
-  if (c.kind === "exec-pair" || c.kind === "bot-pair") return <ExecPairCard c={c} />;
+export function ConfirmCard({ c, at: here }: { c: Need; at: string }) {
+  if (c.kind === "secret_set") return <SecretSetCard c={c} />;
+  if (c.kind === "secret_use") return <SecretUseCard c={c} />;
+  if (isPair(c)) return <PairCard c={c} />;
+  if (c.kind === "app_change" || c.kind === "login_join") return <AppNeedCard c={c} />;
   return <SecretGiveCard c={c} at={here} />;
 }
 
-function SecretGiveCard({ c, at: here }: { c: Confirm; at: string }) {
+function SecretGiveCard({ c, at: here }: { c: Need; at: string }) {
   const lang = useLang();
   const list = useList();
   const me = useMe().data;
@@ -96,7 +97,7 @@ function SecretGiveCard({ c, at: here }: { c: Confirm; at: string }) {
 }
 
 /** Who asked, and the card's time: the asking session's title (or the terminal), and until when. */
-function useAsked(c: Confirm) {
+function useAsked(c: Need) {
   const lang = useLang();
   const list = useList();
   const from = list?.find((s) => s.id === c.session);
@@ -112,7 +113,7 @@ function useAsked(c: Confirm) {
 
 /** An agent's ir secret set: the value is typed here, goes to the daemon, and is never shown again;
  *  the agent learns only that it is stored. Enter stores it. */
-function SecretSetCard({ c }: { c: Confirm }) {
+function SecretSetCard({ c }: { c: Need }) {
   const { facts } = useAsked(c);
   const [value, setValue] = useState("");
   const [open, setOpen] = useState(false);
@@ -187,7 +188,7 @@ function SecretSetCard({ c }: { c: Confirm }) {
 
 /** ir run in a session another terminal opened (or of a secret confirmed every time): allow it
  *  once, for the rest of the session, or not. Only the owner's own allows it. */
-function SecretUseCard({ c }: { c: Confirm }) {
+function SecretUseCard({ c }: { c: Need }) {
   const me = useMe().data;
   const blocked = !saysOwner(me);
   const { who, facts } = useAsked(c);
@@ -248,36 +249,36 @@ const systems: Record<string, string> = { windows: "Windows", darwin: "macOS", l
 
 /** Whether command lines would run at a machine that asks to join, as it says (docs/exec.md "握手"):
  *  none (its agents only), a person's on the page, or agents' too (ir sh). */
-const shellOf = (c: Confirm) => (c.machine?.noShell ? "none" : c.machine?.agentShell ? "agents" : "page");
+const shellOf = (c: Need) => (c.pair?.noShell ? "none" : c.pair?.agentShell ? "agents" : "page");
 
-/** The machine an exec-pair card is for: its system, agents and commands, e.g. "Windows · dsh 0.2.2 · 可执行命令". */
-export const machineLine = (c: Confirm) =>
+/** The machine a pairing card is for: its system, agents and commands, e.g. "Windows · dsh 0.2.2 · 可执行命令". */
+export const machineLine = (c: Need) =>
   [
-    systems[c.machine?.os ?? ""],
-    ...(c.machine?.agents ?? []).map((a) => [a.agent, a.version].filter(Boolean).join(" ")),
+    systems[c.pair?.os ?? ""],
+    ...(c.pair?.agents ?? []).map((a) => [a.agent, a.version].filter(Boolean).join(" ")),
     t(`confirm.shell.${shellOf(c)}`),
   ]
     .filter(Boolean)
     .join(" · ");
 
-/** Another machine's executor (exec-pair) or a Bot (bot-pair) asks to join (docs/exec.md "连接"):
- *  allowed when its code matches the one shown there; the TOKEN goes to it, never to this page. A
- *  panel that has Claude may say it is the owner's own machine (or Bot), which then has Claude. A
- *  Bot by its name already there may be replaced: the same one, a new TOKEN, its Claude as it was. */
-function ExecPairCard({ c }: { c: Confirm }) {
+/** An app asks to pair (draft 二「接入」): allowed when its code matches the one shown there; the
+ *  TOKEN goes to it, never to this page. app_join: a login that has Claude may say it is the owner's
+ *  own, which then has Claude. app_update: an app by that name is there; allowing gives it a new
+ *  TOKEN (the old one void, its usage and permissions as they were). */
+function PairCard({ c }: { c: Need }) {
   const me = useMe().data;
-  const bot = c.kind === "bot-pair";
+  const computer = !!c.pair?.os;
+  const update = c.kind === "app_update";
   const { facts } = useAsked(c);
   const [own, setOwn] = useState(false);
-  const [replace, setReplace] = useState(false);
-  const canOwn = saysOwner(me) && !replace;
+  const canOwn = saysOwner(me) && !update;
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<"allow" | "deny" | null>(null);
   const [leaving, setLeaving] = useState(false);
   const answer = async (allow: boolean) => {
     setBusy(allow ? "allow" : "deny");
     try {
-      const r = await api.answerConfirm(c.id, allow, allow ? { owner: canOwn && own, replace: !!c.replace && replace } : undefined);
+      const r = await api.answerConfirm(c.id, allow, allow ? { owner: canOwn && own } : undefined);
       setLeaving(true);
       if (r.state === "failed") toast(t("err.confirm"), { error: true, description: r.error });
       else toast(allow ? t("confirm.pairDone", { name: r.name ?? c.name ?? "" }) : t("toast.denied"));
@@ -287,13 +288,13 @@ function ExecPairCard({ c }: { c: Confirm }) {
       setBusy(null);
     }
   };
-  const m = c.machine;
+  const m = c.pair;
   return (
     <CardFrame label={confirmTitle(c)} leaving={leaving}>
       <CardHead
-        icon={bot ? <Bot size={16} /> : <Monitor size={16} />}
+        icon={<ConfirmIcon c={c} size={16} />}
         title={confirmTitle(c)}
-        tag={bot ? m?.program || t("term.channel") : machineLine(c)}
+        tag={computer ? machineLine(c) : m?.program || m?.type || t("term.channel")}
         summary={t("confirm.pairCode", { code: c.code ?? "" })}
         open={open}
         setOpen={setOpen}
@@ -308,27 +309,18 @@ function ExecPairCard({ c }: { c: Confirm }) {
           </>
         }
         extra={
-          (c.replace || canOwn) && (
-            <>
-              {c.replace && (
-                <div className="flex items-center gap-2">
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-sm">{t("confirm.pairReplace", { name: c.name ?? "" })}</span>
-                    <span className="block text-xs text-ink-3">{t("confirm.pairReplaceHint")}</span>
-                  </span>
-                  <Switch label={t("confirm.pairReplace", { name: c.name ?? "" })} on={replace} onChange={setReplace} />
-                </div>
-              )}
-              {canOwn && (
-                <div className="g-fade flex items-center gap-2">
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-sm">{bot ? t("term.withClaude") : t("confirm.pairOwner")}</span>
-                    <span className="block text-xs text-ink-3">{bot ? t("confirm.pairBotOwnerHint") : t("confirm.pairOwnerHint")}</span>
-                  </span>
-                  <Switch label={bot ? t("term.withClaude") : t("confirm.pairOwner")} on={own} onChange={setOwn} />
-                </div>
-              )}
-            </>
+          update ? (
+            <p className="m-0 text-xs text-ink-3">{c.app?.online ? t("confirm.updateOnline", { name: c.name ?? "" }) : t("confirm.updateHint")}</p>
+          ) : (
+            canOwn && (
+              <div className="g-fade flex items-center gap-2">
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm">{computer ? t("confirm.pairOwner") : t("term.withClaude")}</span>
+                  <span className="block text-xs text-ink-3">{computer ? t("confirm.pairOwnerHint") : t("confirm.pairBotOwnerHint")}</span>
+                </span>
+                <Switch label={computer ? t("confirm.pairOwner") : t("term.withClaude")} on={own} onChange={setOwn} />
+              </div>
+            )
           )
         }
       />
@@ -336,13 +328,62 @@ function ExecPairCard({ c }: { c: Confirm }) {
         <CardDetails>
           <Facts
             rows={[
-              ...(bot ? [] : ([[t("confirm.system"), [systems[m?.os ?? ""], m?.arch].filter(Boolean).join(" ") || "—"]] as [string, ReactNode][])),
-              ...(bot ? [] : ([[t("confirm.commands"), t(`confirm.commands.${shellOf(c)}`)]] as [string, ReactNode][])),
+              ...(computer ? ([[t("confirm.system"), [systems[m?.os ?? ""], m?.arch].filter(Boolean).join(" ") || "—"]] as [string, ReactNode][]) : []),
+              ...(computer ? ([[t("confirm.commands"), t(`confirm.commands.${shellOf(c)}`)]] as [string, ReactNode][]) : []),
               ...(m?.program ? ([[t("confirm.program"), m.program]] as [string, ReactNode][]) : []),
               ...facts.slice(-1),
             ]}
           />
-          <p className="m-0 text-xs text-ink-3">{bot ? t("confirm.pairBotHint") : t("confirm.pairHint")}</p>
+          <p className="m-0 text-xs text-ink-3">{computer ? t("confirm.pairHint") : t("confirm.pairBotHint")}</p>
+        </CardDetails>
+      )}
+    </CardFrame>
+  );
+}
+
+/** An app asks for other permissions (app_change), or a login of an app spoke the first time
+ *  (login_join): allow or deny. (0.2 S1c draws what changes.) */
+function AppNeedCard({ c }: { c: Need }) {
+  const { facts } = useAsked(c);
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState<"allow" | "deny" | null>(null);
+  const [leaving, setLeaving] = useState(false);
+  const answer = async (allow: boolean) => {
+    setBusy(allow ? "allow" : "deny");
+    try {
+      const r = await api.answerConfirm(c.id, allow);
+      setLeaving(true);
+      if (r.state === "failed") toast(t("err.confirm"), { error: true, description: r.error });
+      else toast(allow ? t("toast.allowed") : t("toast.denied"));
+    } catch (e) {
+      toast(t("err.confirm"), { error: true, description: errText(e) });
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <CardFrame label={confirmTitle(c)} leaving={leaving}>
+      <CardHead
+        icon={<ConfirmIcon c={c} size={16} />}
+        title={confirmTitle(c)}
+        tag={c.app?.name}
+        summary={c.kind === "login_join" ? t("confirm.loginHint") : t("confirm.changeHint")}
+        open={open}
+        setOpen={setOpen}
+        keys={
+          <>
+            <SecondKey disabled={!!busy} onClick={() => void answer(false)}>
+              {t("ask.deny")}
+            </SecondKey>
+            <MainKey busy={busy === "allow"} disabled={!!busy} onClick={() => void answer(true)}>
+              {t("confirm.allow")}
+            </MainKey>
+          </>
+        }
+      />
+      {open && (
+        <CardDetails>
+          <Facts rows={facts.slice(-1)} />
         </CardDetails>
       )}
     </CardFrame>

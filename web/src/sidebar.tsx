@@ -13,7 +13,7 @@ import { Archive, ArchiveRestore, ArrowDown, ArrowUp, Bot, Check, ChevronRight, 
 import { ConfirmIcon, confirmName, confirmTitle } from "./confirmname";
 import { Fragment, lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode, type RefObject } from "react";
 import { api } from "./api/client";
-import type { App, Color, Confirm, Machine, Places, Session, Status } from "./api/types.gen";
+import type { App, Color, Need, Machine, Places, Session, Status } from "./api/types.gen";
 import { colorVar, COLORS, useFolderColors } from "./colors";
 import { ahead, behind } from "./chats";
 import { t, useLang } from "./i18n";
@@ -51,8 +51,8 @@ type Props = {
   search: ReactNode;
   onSearch: () => void;
   /** What agents' ir asked this panel for (invites, tokens): under 需要你 too. */
-  confirms: Confirm[];
-  onConfirm: (c: Confirm) => void;
+  confirms: Need[];
+  onConfirm: (c: Need) => void;
   createKey: (trigger: ReactElement) => ReactNode;
   wsPlus: (ws: WsNode, trigger: ReactElement, open: boolean, setOpen: (o: boolean) => void) => ReactNode;
   me: ReactNode;

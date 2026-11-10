@@ -372,15 +372,22 @@ def pair():
     body = json.dumps({"name": NAME, "os": OS, "arch": platform.machine(), "program": PROGRAM,
                        "agents": [{"agent": a["agent"], "version": a["version"]} for a in agents()]}).encode()
     while True:
-        req = urllib.request.Request(URL + "/api/exec/pair", data=body, headers={"content-type": "application/json", **UA})
-        r = json.load(urllib.request.urlopen(req))
+        req = urllib.request.Request(URL + "/api/pair", data=body, headers={"content-type": "application/json", **UA})
+        try:
+            r = json.load(urllib.request.urlopen(req))
+        except urllib.error.HTTPError as e:
+            if e.code != 403:
+                raise
+            say("pairing is closed there (ir apps open, or 新建应用): waiting")
+            time.sleep(5)
+            continue
         say(f'pairing code {r["code"]}: allow "{NAME}" on the Iridium page')
         while True:
             time.sleep(2)
             try:
-                st = json.load(urllib.request.urlopen(urllib.request.Request(URL + "/api/exec/pair/" + r["request"], headers=UA)))
+                st = json.load(urllib.request.urlopen(urllib.request.Request(URL + "/api/pair/" + r["request"], headers=UA)))
             except urllib.error.HTTPError as e:
-                st = {"status": "expired" if e.code == 404 else "pending"}
+                st = {"status": "expired" if e.code in (404, 422) else "pending"}
             if st["status"] == "allowed" and st.get("token"):
                 return st["token"]
             if st["status"] == "denied":

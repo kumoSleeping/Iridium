@@ -24,9 +24,10 @@ const DEVICE_ICON: Record<Device, (size: number) => ReactNode> = {
 };
 
 const nameError = (e: unknown) => {
-  if (e instanceof ApiError && e.status === 409) {
+  if (e instanceof ApiError) {
     const code = (e.body as { nameError?: string } | undefined)?.nameError;
-    return code === "taken" ? t("me.nameTaken") : code ? t("me.nameBad") : t("me.localOnly");
+    if (code) return code === "taken" ? t("me.nameTaken") : t("me.nameBad");
+    if (e.status === 409) return t("me.localOnly");
   }
   return errText(e);
 };

@@ -101,6 +101,9 @@ func agentRun(e adminEnv, args ...string) chan [3]string {
 // person: its TOKEN. claude: allowed as the owner's own.
 func pairApp(t *testing.T, person adminEnv, name string, claude bool) string {
 	t.Helper()
+	if code, _, errs := runAs(person, "apps", "open"); code != 0 {
+		t.Fatalf("apps open: %d %s", code, errs)
+	}
 	var p api.Pairing
 	if _, err := person.call("POST", "/api/pair", api.PairRequest{Name: name}, &p); err != nil {
 		t.Fatal(err)
@@ -144,7 +147,7 @@ func TestAdmin(t *testing.T) {
 	got := agentRun(agent, "invite", "tab")
 	panel := approve(t, person, true)
 	r := <-got
-	if r[0] != "0" || !strings.Contains(r[1], "已同意") || strings.Contains(r[1]+r[2], "/_ir/join") || !strings.Contains(panel, "/_ir/join#") {
+	if r[0] != "0" || !strings.Contains(r[1], "已允许") || strings.Contains(r[1]+r[2], "/_ir/join") || !strings.Contains(panel, "/_ir/join#") {
 		t.Fatalf("agent invite: %q / %s", r, panel)
 	}
 	got = agentRun(agent, "invite", "tab2")
@@ -203,15 +206,18 @@ func TestAdmin(t *testing.T) {
 		t.Fatalf("the host's device: %d %q %q", code, out, errs)
 	}
 
-	// Remove: an app; the host and ir_web are built in.
-	if code, _, errs := runAs(agent, "apps", "rm", "robot"); code != 0 {
+	// Remove: an app, by a person only; the host and ir_web are built in.
+	if code, _, errs := runAs(agent, "apps", "rm", "robot"); code != 1 || !strings.Contains(errs, "manage") {
+		t.Fatalf("an agent's rm: %d %q", code, errs)
+	}
+	if code, _, errs := runAs(person, "apps", "rm", "robot"); code != 0 {
 		t.Fatalf("rm: %q", errs)
 	}
 	if _, out, _ := runAs(agent, "apps"); strings.Contains(out, "robot") {
 		t.Fatalf("removed, still listed:\n%s", out)
 	}
 	for _, ref := range []string{"nobody", "主机", "ir_web"} {
-		if code, _, _ := runAs(agent, "apps", "rm", ref); code != 1 {
+		if code, _, _ := runAs(person, "apps", "rm", ref); code != 1 {
 			t.Fatalf("removed %s", ref)
 		}
 	}

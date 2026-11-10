@@ -498,6 +498,14 @@ type Error struct {
 	NameError string `json:"nameError,omitempty"`
 }
 
+// Text is what to tell a person of the refusal: its message, else its code.
+func (e Error) Text() string {
+	if e.Message != "" {
+		return e.Message
+	}
+	return e.Code
+}
+
 // StateEvent is the event stream's "state" event: a carried state, whole. Value is null for one
 // that does not exist (a session gone).
 type StateEvent struct {

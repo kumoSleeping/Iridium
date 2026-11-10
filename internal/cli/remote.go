@@ -151,10 +151,10 @@ func ForwardAt(url, token string, args []string, stdout, stderr io.Writer) int {
 	if resp.StatusCode/100 != 2 {
 		var ae api.Error
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
-		if json.Unmarshal(b, &ae) != nil || ae.Message == "" {
+		if json.Unmarshal(b, &ae) != nil || ae.Text() == "" {
 			ae.Message = strings.TrimSpace(string(b))
 		}
-		fmt.Fprintf(stderr, "ir: %s\n", ae.Message)
+		fmt.Fprintf(stderr, "ir: %s\n", ae.Text())
 		return exitError
 	}
 	sc := bufio.NewScanner(resp.Body)

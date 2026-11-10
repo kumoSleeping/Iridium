@@ -134,8 +134,8 @@ func (e adminEnv) call(method, path string, body any, out any) (int, error) {
 		if json.Unmarshal(data, &ae) == nil && ae.NameError != "" {
 			return resp.StatusCode, errors.New(nameErrors[ae.NameError] + " (" + ae.NameError + ")")
 		}
-		if ae.Message != "" {
-			return resp.StatusCode, errors.New(ae.Message)
+		if ae.Text() != "" {
+			return resp.StatusCode, errors.New(ae.Text())
 		}
 		return resp.StatusCode, errors.New(resp.Status)
 	}

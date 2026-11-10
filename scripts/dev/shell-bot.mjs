@@ -20,14 +20,19 @@ const say = (m) => console.log(`${new Date().toISOString()} ${m}`)
 async function pair() {
   const hello = { name, os: process.platform === 'win32' ? 'windows' : process.platform, arch: process.arch, program, agents: [], agentShell: true }
   for (;;) {
-    const r = await fetch(`${url}/api/exec/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(hello) })
+    const r = await fetch(`${url}/api/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(hello) })
+    if (r.status === 403) {
+      say('pairing is closed there (ir apps open, or 新建应用): waiting')
+      await sleep(5000)
+      continue
+    }
     if (!r.ok) throw new Error(`pair: ${r.status} ${await r.text()}`)
     const req = await r.json()
     say(`pairing code ${req.code}: allow "${name}" on the Iridium page`)
     for (;;) {
       await sleep(2000)
-      const s = await fetch(`${url}/api/exec/pair/${req.request}`)
-      const st = s.ok ? await s.json() : { status: s.status === 404 ? 'expired' : 'pending' }
+      const s = await fetch(`${url}/api/pair/${req.request}`)
+      const st = s.ok ? await s.json() : { status: s.status === 404 || s.status === 422 ? 'expired' : 'pending' }
       if (st.status === 'allowed' && st.token) return st.token
       if (st.status === 'denied') throw new Error('declined')
       if (st.status === 'expired') break

@@ -14,16 +14,21 @@ import (
 	"github.com/kumoSleeping/iridium/internal/api"
 )
 
-// ir pair asks at /api/pair as a Bot (its name and program, nothing of the machine), shows the
-// code, and writes the TOKEN into the file, never to the output; turned away, it says so.
+// ir pair asks at /api/pair as an app (its name and program, nothing of the machine), waits while
+// pairing is closed, shows the code, and writes the TOKEN into the file, never to the output;
+// denied, it says so.
 func TestPairMain(t *testing.T) {
-	pairPoll = 10 * time.Millisecond
-	closed := false
+	pairPoll, pairClosedWait = 10*time.Millisecond, 10*time.Millisecond
+	closed, denied := 2, false
 	var asked api.PairRequest
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case closed:
+		case closed > 0 && r.Method == http.MethodPost:
+			closed--
 			w.WriteHeader(http.StatusForbidden)
+			json.NewEncoder(w).Encode(api.Error{Code: "pair_closed", Message: "closed"})
+		case denied && r.URL.Path == "/api/pair/r1":
+			json.NewEncoder(w).Encode(api.PairState{Status: "denied"})
 		case r.Method == http.MethodPost && r.URL.Path == "/api/pair":
 			json.NewDecoder(r.Body).Decode(&asked)
 			json.NewEncoder(w).Encode(api.Pairing{Code: "1234", Request: "r1"})
@@ -47,11 +52,13 @@ func TestPairMain(t *testing.T) {
 	if err != nil || strings.TrimSpace(string(b)) != "ir_secret" || st.Mode().Perm() != 0o600 {
 		t.Fatalf("the file: %q %v", b, err)
 	}
-	if !strings.Contains(out.String(), "1234") || strings.Contains(out.String()+errs.String(), "ir_secret") {
+	if !strings.Contains(out.String(), "1234") || strings.Contains(out.String()+errs.String(), "ir_secret") ||
+		strings.Count(out.String()+errs.String(), "没有开放配对") != 1 {
 		t.Fatalf("output: %s / %s", out.String(), errs.String())
 	}
-	closed = true
-	if code := PairMain([]string{srv.URL, "--name", "helper", "--into", into}, &out, &errs); code != 1 || !strings.Contains(errs.String(), "停止接收") {
-		t.Fatalf("closed: %d %s", code, errs.String())
+	denied = true
+	errs.Reset()
+	if code := PairMain([]string{srv.URL, "--name", "helper", "--into", into}, &out, &errs); code != 1 || !strings.Contains(errs.String(), "拒绝") {
+		t.Fatalf("denied: %d %s", code, errs.String())
 	}
 }

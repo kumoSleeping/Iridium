@@ -85,3 +85,34 @@
 - 发送者按 ID 认：`LastSaid` 加 `fromTerminal`（Codex、pi 的列表摘要没有），侧栏的“你：”和 `sourceOf` 先按 ID 找，只有没有 ID 时才按名字，名字重了优先 ir_web 的登录和主机。
 - `PUT /api/public` 只给主机上人的 `ir`（决定 3），ir_web 的登录和主机的网页都回 403。
 - `TestOwnerFromPanels` 恢复“主机的网页不能批 Claude”的 403 检查。
+
+## S1b 配对窗口、更新配对、需要队列、收录表
+
+做了什么：
+- 配对：
+  - 合并成 `POST /api/pair`、`GET /api/pair/{request}`，删 `/api/exec/pair` 和 `routes_pair.go`。
+  - 窗口 `GET`/`PUT /api/pairing`（能批的人才能开），`ir apps open [时长]`、`ir apps close`。默认 10 分钟，最多 1 小时，关着时 403 `pair_closed`。
+  - 每来源（IP，IPv6 按 /64）最多 4 个待批，总共 20 个，超了 403 `too_many_pending`。
+  - 名字不合法 422 `bad_name`，不再自动起名、加后缀；`ir join` 默认送主机名。
+  - 重名就是 `app_update`：允许后同一个应用换新 TOKEN，旧的作废、断开，用量和权限不变；允许时带 `name` 则改名建新应用。
+  - 申请可带 `wants`（agents、scope），批准只能缩小（422 `too_wide`）；S2 才执行。
+  - `ir pair`、`ir join` 遇到 `pair_closed` 一直等，只提示一次。
+- 需要：`confirms.go` 改为 `needs.go`。种类 `app_join`、`app_update`、`app_change`、`login_join`、`invite`、`secret_set`、`secret_use`。
+  - 路由 `GET /api/needs`、`POST /api/needs/{id}`、`GET /api/needs/{id}`，hub 键 `needs`。
+  - CLI：`ir needs`、`ir allow <id>`、`ir deny <id>`。
+  - 能批的（`mayApprove`）：主机上的人，或有 Claude、范围和 agent 都是全部的 ir_web 登录；agent 的 `ir` 一律不行。删应用、删登录也不让 agent 做（`admin`）。
+  - `PUT /api/me/perms`：应用申请改权限，产生 `app_change`。
+- 登录加入：应用的新登录第一次说话回 403 `login_pending`，产生 `login_join`；每个应用最多 20 个待批。删掉的登录下次说话重新申请。`DELETE /api/apps/{id}/logins/{login}`。
+- 错误体统一 `{code, message, nameError?}`（`api.Error`，`Text()` 取 message 或 code）。gate 自己的拒绝只有 `code`。
+- 删 `/api/extensions`、`extensions.go`、`update.Extension`、网页 `extensions.tsx`。收录表 `GET /api/catalogue`（`catalogue.go`，写死）。
+- 网页只做到能编译、能用：类型改成 `Need`，`/api/needs`，`secret_set`/`secret_use`；配对卡片改读 `pair`，`app_update` 显示说明（在线时警告）；`app_change`、`login_join` 先用简单的允许/拒绝卡片。改名重名的提示按 `nameError` 判断，不再看 409。
+- `scripts/dev/exec-mini.py`、`shell-bot.mjs`、dsh 插件改指 `/api/pair`，过期认 422；两个脚本遇到 403 等待。
+
+和计划不一样的地方：
+- 决定 28（资源不存在回 422）没有全面改：server 里还有约 25 处 404，留给 S4b/S5 一起扫。gate 的加入页重名仍回 409。
+- `pairing` 的 hub 键有了，网页还没订阅（S1c 的倒计时用）。
+
+留给后面的：
+- S1c：应用管理页、新建应用（开窗口、收录表的安装命令）、需要卡片的完整样子（`app_join` 可删减权限、批准时改名，`app_change` 显示增减）。
+- S2：`wants`/`perms` 真正生效；`CanManage` 等垫片照旧。
+- 主目录 `scripts/dev/exec-mini.py` 有别的会话没提交的改动，合并回 main 时注意冲突。

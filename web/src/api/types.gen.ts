@@ -602,10 +602,15 @@ export interface Answer {
   always?: boolean;
 }
 /**
- * Error is every failed request's body.
+ * Error is every failed request's body: Message for a person; Code, what went wrong, for a
+ * program (decision 8: 401 only for a TOKEN that is not valid; any other refusal 403 with its
+ * code, such as pair_closed, login_pending, no_permission; decision 28: 422 for what is not
+ * there, such as no_such_need). NameError: bad_name's, which rule the name broke.
  */
 export interface Error {
-  error: string;
+  code?: string;
+  message: string;
+  nameError?: string;
 }
 /**
  * StateEvent is the event stream's "state" event: a carried state, whole. Value is null for one
@@ -702,6 +707,11 @@ export interface App {
   createdAt?: number /* int64 */;
   lastSeenAt?: number /* int64 */;
   rules: Rules;
+  /**
+   * Perms: what an app was given as it paired (nil: all, as one paired before 0.2). Not the
+   * host's or ir_web's.
+   */
+  perms?: Perms;
   usedToday: number /* int64 */; // tokens of the turns it started today
   /**
    * Device: what it runs on, as the badge on its messages' avatar shows; the server always sets it.
@@ -726,7 +736,8 @@ export const AppChatIdle = "idle";
 export const AppChatOn = "on";
 export type AppChat = typeof AppChatIdle | typeof AppChatOn;
 /**
- * Login is a login of an app as listed: for now ir_web's, a browser with a passkey. No secrets.
+ * Login is a login of an app as listed: ir_web's, a browser with a passkey; another app's, as it
+ * spoke (Satori-User-ID), waiting till approved (ApprovedAt 0). No secrets.
  */
 export interface Login {
   app: string;
@@ -832,15 +843,39 @@ export interface Token {
   token?: string;
 }
 /**
- * Confirm is what an agent's ir asked for that only a person may give (an invite link, a
- * credential's value, the use of credentials), or an app asking to pair: it waits in the carried
- * state "confirms" until a login of ir_web (or the host) answers it. No secrets.
+ * Perms is what an app or login asks for or is given (0.2 "权限"): the agents it may use and the
+ * places it may use, each ["*"] for all. Plain data till S2 checks it; Claude stays Rules'.
  */
-export interface Confirm {
+export interface Perms {
+  agents: string[];
+  scope: string[];
+}
+/**
+ * PermsAll is the word for all in Perms' lists.
+ */
+export const PermsAll = "*";
+/**
+ * NeedKind is what a Need waits for a person to decide.
+ */
+export type NeedKind = string;
+export const NeedAppJoin: NeedKind = "app_join"; // an app asks to pair
+export const NeedAppUpdate: NeedKind = "app_update"; // an app asks to pair by the name of one there: a new TOKEN for it
+export const NeedAppChange: NeedKind = "app_change"; // an app asks for other permissions
+export const NeedLoginJoin: NeedKind = "login_join"; // a login an app spoke as the first time
+export const NeedInvite: NeedKind = "invite"; // an agent's ir invite
+export const NeedSecretSet: NeedKind = "secret_set"; // an agent's ir secret set: a person types the value
+export const NeedSecretUse: NeedKind = "secret_use"; // an agent's ir run with credentials
+/**
+ * Need is what waits for a person (docs/next/k_glossary.md "需要"): an app's or a login's request,
+ * or what an agent's ir asked for that only a person may give. It waits in the carried state
+ * "needs" till the host or a login of ir_web that may approve answers it. No secrets.
+ */
+export interface Need {
   id: string;
-  kind: string; // invite | secret-set | secret-use | exec-pair | bot-pair
+  kind: NeedKind;
   /**
-   * Name: the invite's name; secret-set: the secret's.
+   * Name: the invite's name; secret_set: the secret's; app_join: the name the app asks for;
+   * app_update, app_change: the app's; login_join: the login's.
    */
   name?: string;
   owner?: boolean; // it gets Claude; only one that has Claude allows it
@@ -849,70 +884,87 @@ export interface Confirm {
   createdAt: number /* int64 */;
   expiresAt: number /* int64 */;
   /**
-   * secret-set: the note it was asked with (else the stored one's), and whether one by that
+   * secret_set: the note it was asked with (else the stored one's), and whether one by that
    * name is stored (it is replaced).
    */
   note?: string;
   replace?: boolean;
   /**
-   * secret-use: the secrets, the command's opening (as written: {{NAME}}), and whether one of
+   * secret_use: the secrets, the command's opening (as written: {{NAME}}), and whether one of
    * them is confirmed every time (no "this session").
    */
   secrets?: string[];
   command?: string;
   always?: boolean;
   /**
-   * exec-pair: the code both sides show, and the machine that asks to join as an executor
-   * (docs/exec.md "连接"); Name is the Bot it becomes. bot-pair: the same, a Bot that asks
-   * (POST /api/pair), Machine saying its program. Replace there: a Bot by Name is there already,
-   * which the answer may hand over (ConfirmAnswer.Replace).
+   * app_join, app_update: the code both sides show, and what the app says of itself.
    */
   code?: string;
-  machine?: ExecPair;
+  pair?: PairRequest;
+  /**
+   * App: app_update, the app by that name now (its system, last seen, whether online: an update
+   * while it is online may be someone else's); app_change, login_join: the app asking.
+   */
+  app?: App;
+  /**
+   * Wants: app_join, app_change: what it asks for; the answer may give less, never more.
+   * app_change: Has, what it has now.
+   */
+  wants?: Perms;
+  has?: Perms;
+  /**
+   * Login: login_join, the login's ID within App.
+   */
+  login?: string;
 }
 /**
- * Confirms is the carried state "confirms": the pending ones, oldest first. Panels only.
+ * Needs is the carried state "needs" (GET /api/needs): the pending ones, oldest first.
  */
-export interface Confirms {
-  pending: Confirm[];
+export interface Needs {
+  pending: Need[];
 }
 /**
- * ConfirmAnswer is a person's answer to a Confirm.
+ * NeedAnswer is a person's answer to a Need (POST /api/needs/{id}).
  */
-export interface ConfirmAnswer {
+export interface NeedAnswer {
   allow: boolean;
   /**
-   * Value: secret-set's value, typed on the panel; stored, never given back.
+   * Value: secret_set's value, typed by the person; stored, never given back.
    */
   value?: string;
   /**
-   * ForSession: secret-use allowed for the rest of the session (till it stops).
+   * ForSession: secret_use allowed for the rest of the session (till it stops).
    */
   forSession?: boolean;
   /**
-   * Owner: exec-pair allowed as the owner's own machine: it runs Claude there; bot-pair: the Bot
-   * has Claude. Only a panel that has Claude says so.
+   * Owner: app_join allowed as the owner's own: the app has Claude. Only one that has Claude says so.
    */
   owner?: boolean;
   /**
-   * Replace: a pairing allowed as the Bot by its name that is there already (Confirm.Replace):
-   * the same terminal, its usage and Claude as they were, a new TOKEN, the old one void.
+   * Name: app_join, app_update allowed as a new app by this name in place of the one asked for.
    */
-  replace?: boolean;
+  name?: string;
+  /**
+   * Perms: app_join, app_change, what it gets: within Need.Wants. nil: as asked.
+   */
+  perms?: Perms;
 }
 /**
- * ExecPair is what an executor or a Bot says of itself asking to pair (POST /api/exec/pair,
- * POST /api/pair; no login). A Bot says its name and program only. NoShell and AgentShell are what
- * it means to say in its hello (Machine's), so the card tells whether command lines would run there.
+ * PairRequest is what an app says of itself asking to pair (POST /api/pair; no login): its name,
+ * what it is shown as, and what it wants. An executor (ir join) says its machine too. NoShell and
+ * AgentShell are what it means to say in its hello (Machine's), so the card tells whether command
+ * lines would run there.
  */
-export interface ExecPair {
+export interface PairRequest {
   name: string;
+  type?: string; // computer, bot, script…: display only
   os?: string; // windows | darwin | linux
   arch?: string;
   program?: string;
   agents?: ExecAgent[];
   noShell?: boolean;
   agentShell?: boolean;
+  wants?: Perms; // nil: all
 }
 /**
  * Machine is another machine's executor (docs/exec.md): a Bot, as it last said of itself; the
@@ -962,43 +1014,79 @@ export interface DshWorkspace {
   sessions: number /* int */;
 }
 /**
- * ExecPairing answers a pairing request: the code to show, and the request to ask after.
+ * Pairing answers a pairing request: the code to show, and the request to ask after.
  */
-export interface ExecPairing {
+export interface Pairing {
   code: string;
   request: string;
 }
 /**
- * ExecPairState is how a pairing request stands (GET /api/exec/pair/{request}): pending, allowed
- * (with the TOKEN, given once), denied or expired.
+ * PairState is how a pairing request stands (GET /api/pair/{request}): pending, allowed (with the
+ * TOKEN, given once), denied or expired.
  */
-export interface ExecPairState {
+export interface PairState {
   status: string;
   token?: string;
 }
 /**
- * ConfirmState is how a Confirm went, as the asker sees it: never a secret.
+ * PairWindow is whether apps may ask to pair now (GET /api/pairing, the carried state "pairing"):
+ * open till Until (ms), else closed (0). PUT /api/pairing opens it for Minutes (10 if 0, at most
+ * 60), or closes it.
  */
-export interface ConfirmState {
+export interface PairWindow {
+  open: boolean;
+  until?: number /* int64 */;
+  minutes?: number /* int */;
+}
+/**
+ * NeedState is how a Need went, as the asker sees it: never a secret.
+ */
+export interface NeedState {
   id: string;
-  kind: string;
+  kind: NeedKind;
   state: string; // pending | allowed | denied | expired | failed
   name?: string;
-  owner?: boolean; // it was asked with --owner
+  owner?: boolean; // it was asked with --claude
   expiresAt?: number /* int64 */; // allowed invite: until when the link works
   error?: string;
 }
 /**
- * ConfirmReply answers the one that allowed a Confirm: the secret is for it alone.
+ * NeedReply answers the one that allowed a Need: the secret is for it alone.
  */
-export interface ConfirmReply extends ConfirmState {
+export interface NeedReply extends NeedState {
   invite?: Invite;
 }
 /**
- * Pending is the reply to an agent's ir invite: a person must allow it.
+ * Pending is the reply to what must wait for a person (an agent's ir invite, an app's change): 202.
  */
 export interface Pending {
-  confirm: Confirm;
+  need: Need;
+}
+/**
+ * CatalogueEntry is an official app Iridium lists (GET /api/catalogue): what it is and how to
+ * install it, by system. Iridium installs nothing itself.
+ */
+export interface CatalogueEntry {
+  id: string;
+  name: string;
+  type: string; // as its app is shown once paired
+  description: Text;
+  install: InstallStep[];
+  url?: string; // where to read more
+}
+/**
+ * InstallStep is a command that installs a catalogue entry on OS (windows | darwin | linux; "" any).
+ */
+export interface InstallStep {
+  os?: string;
+  command: string;
+}
+/**
+ * Text is a short text in Chinese and English.
+ */
+export interface Text {
+  zh: string;
+  en: string;
 }
 /**
  * SetPublic sets public.origin ("" turns the public way in off). The gate restarts with it.
@@ -1425,75 +1513,6 @@ export interface NewFolder {
  */
 export interface FolderReply {
   path: string;
-}
-
-//////////
-// source: extensions.go
-
-/**
- * Extension is an official extension as GET /api/extensions lists it.
- */
-export interface Extension {
-  id: string; // qq
-  name: string; // what the page calls it
-  installed: boolean;
-  /**
-   * Busy: what is under way: install | bind | start | stop | remove.
-   */
-  busy?: string;
-  error?: string; // the last action's failure
-  /**
-   * Bots: what the extension says of each of its bots (iridium-qq list --json), once installed.
-   */
-  bots?: ExtensionStatus[];
-  /**
-   * Bind: a scan under way.
-   */
-  bind?: ExtensionBind;
-}
-/**
- * ExtensionStatus is a bot as iridium-qq status --json gives it.
- */
-export interface ExtensionStatus {
-  version: string;
-  home: string;
-  bound: boolean; // it has a bot
-  appId?: string;
-  name: string; // its terminal's name in Iridium
-  owners: number /* int */;
-  iridium?: string;
-  token: boolean;
-  /**
-   * Service: systemd's ActiveState of its unit (active, inactive, failed, activating); "" for
-   * no unit.
-   */
-  service: string;
-  enabled: boolean;
-  running?: ExtensionRunning; // while the service is active
-  pair?: string; // a pairing code waiting
-  /**
-   * Online: its terminal's live connections in Iridium (Iridium fills it in).
-   */
-  online?: number /* int */;
-}
-/**
- * ExtensionRunning is how the running extension stands.
- */
-export interface ExtensionRunning {
-  pid: number /* int */;
-  qq: boolean; // connected to QQ
-  qqError?: string;
-  iridium: boolean; // its event stream is open
-  iridiumError?: string;
-  bot?: string; // the bot's name on QQ
-  at: number /* int64 */;
-}
-/**
- * ExtensionBind is a scan under way: the page to scan, and its QR code.
- */
-export interface ExtensionBind {
-  url: string;
-  qr: string; // an SVG data URL
 }
 
 //////////

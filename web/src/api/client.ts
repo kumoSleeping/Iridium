@@ -3,16 +3,15 @@
 import { QueryClient } from "@tanstack/react-query";
 import type {
   DshWorkspace,
-  Extension,
   AgentInfo,
   AllowRule,
   ApplyUpdate,
   CardAnswer,
   CardReply,
   CompleteUpload,
-  ConfirmAnswer,
-  ConfirmReply,
-  Confirms,
+  NeedAnswer,
+  NeedReply,
+  Needs,
   EditQueued,
   FolderColor,
   FolderReply,
@@ -110,7 +109,8 @@ async function fail(r: Response): Promise<never> {
   let msg = `${r.status}`;
   try {
     body = await r.json();
-    if (body && typeof body === "object" && "error" in body) msg = String((body as { error: unknown }).error);
+    const e = body as { message?: unknown; code?: unknown } | null;
+    if (e && typeof e === "object") msg = String(e.message || e.code || msg);
   } catch {}
   throw new ApiError(r.status, msg, body);
 }
@@ -285,16 +285,11 @@ export const api = {
   /** PUT /api/apps/{id}/follows: the logins of ir_web an app follows (their asks go to it). Until S4. */
   follows: (id: string, panels: string[]) => write<SetFollows>("PUT", `/api/apps/${enc(id)}/follows`, { panels } satisfies SetFollows),
 
-  // --- official extensions (the QQ bot): installed and run from 终端管理 ---
-  extensions: () => get<Extension[]>("/api/extensions"),
-  extension: (id: string, action: "install" | "bind" | "start" | "stop" | "pair") => write<Extension>("POST", `/api/extensions/${enc(id)}/${action}`),
-  unbind: (id: string) => write<Extension>("DELETE", `/api/extensions/${enc(id)}/bind`),
-  removeExtension: (id: string) => write<Extension>("DELETE", `/api/extensions/${enc(id)}`),
   /** GET /api/usage: the last days' tokens by day, terminal, agent and model; terminal: one only; by hour: the last 24 hours'; by weekhour: by weekday and hour. */
   usage: (days: number, terminal?: string, by?: "hour" | "weekhour") => get<Usage>(`/api/usage?days=${days}${terminal ? `&terminal=${enc(terminal)}` : ""}${by ? `&by=${by}` : ""}`),
-  confirms: () => get<Confirms>("/api/confirms"),
+  confirms: () => get<Needs>("/api/needs"),
   /** extra: a secret-set's value, a secret-use's "this session". */
-  answerConfirm: (id: string, allow: boolean, extra?: Omit<ConfirmAnswer, "allow">) => write<ConfirmReply>("POST", `/api/confirms/${enc(id)}`, { allow, ...extra } satisfies ConfirmAnswer),
+  answerConfirm: (id: string, allow: boolean, extra?: Omit<NeedAnswer, "allow">) => write<NeedReply>("POST", `/api/needs/${enc(id)}`, { allow, ...extra } satisfies NeedAnswer),
 
   // --- the credentials (docs/api.md "凭据"): never a value back ---
   secrets: () => get<Secrets>("/api/secrets"),

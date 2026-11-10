@@ -44,7 +44,7 @@ describe("api", () => {
       ["POST", "/api/answer", { card: "ask:s1:r", choices: ["0.1"], words: ["", "mine"] }],
       ["PUT", "/api/sessions/s1/queue/in%201", { text: "again" }],
       ["PUT", "/api/settings", { idleReap: "2h", modes: { claude: "plan" } }],
-      ["POST", "/api/confirms/c1", { allow: true }],
+      ["POST", "/api/needs/c1", { allow: true }],
     ]);
     expect(calls.every((c) => c.headers.get("x-requested-with") === "XMLHttpRequest")).toBe(true);
   });
@@ -54,7 +54,7 @@ describe("api", () => {
     await api.messages("s1", { before: 10 });
     await api.messages("s1", { after: 20 });
     expect(calls.map((c) => c.url)).toEqual(["/api/sessions/s%201/messages", "/api/sessions/s1/messages?before=10", "/api/sessions/s1/messages?after=20"]);
-    answer = () => json({ error: "the session's agent is not running" }, 409);
+    answer = () => json({ message: "the session's agent is not running" }, 409);
     await expect(api.interrupt("s1")).rejects.toMatchObject({ status: 409, message: "the session's agent is not running" });
   });
   test("files and uploads by the session", () => {
@@ -72,8 +72,8 @@ describe("api", () => {
 
 describe("the event stream", () => {
   test("names the list, the quota, the update, the confirmations and the open session with its context", () => {
-    expect(keysFor(null)).toEqual(["list", "workspaces", "places", "colors", "quota", "update", "confirms", "terminals", "machines", "notes"]);
-    expect(streamURL("a")).toBe("/api/events?sub=list&sub=workspaces&sub=places&sub=colors&sub=quota&sub=update&sub=confirms&sub=terminals&sub=machines&sub=notes&sub=session%3Aa&sub=context%3Aa");
+    expect(keysFor(null)).toEqual(["list", "workspaces", "places", "colors", "quota", "update", "needs", "terminals", "machines", "notes"]);
+    expect(streamURL("a")).toBe("/api/events?sub=list&sub=workspaces&sub=places&sub=colors&sub=quota&sub=update&sub=needs&sub=terminals&sub=machines&sub=notes&sub=session%3Aa&sub=context%3Aa");
   });
   test("the store: whole values, null drops, listeners told", () => {
     const told: string[] = [];

@@ -2,20 +2,19 @@
 // browsers) and the apps, each with its avatar, name, kind, when it was last used and today's use,
 // Claude's mark if it has it. Nothing opens (the user, 2026-11-08): a right click or a long press
 // has its menu — rename, change the avatar, remove; an app's also the logins it follows. The +
-// makes an invite of ir_web (its link and QR code), says how an app or a computer asks to pair,
-// and opens the QQ Bot's page; no TOKEN is handed out here (pairing is the way in). What agents'
+// makes an invite of ir_web (its link and QR code), says how an app or a computer asks to pair;
+// no TOKEN is handed out here (pairing is the way in). What agents'
 // ir asked for, and pairing requests, wait on top.
 import { Popover } from "@base-ui/react/popover";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { Menu } from "@base-ui/react/menu";
-import { Bot, ChevronLeft, Eye, ImageUp, Link2, LoaderCircle, Monitor, PencilLine, Plus, Trash2, X } from "lucide-react";
+import { ChevronLeft, Eye, ImageUp, Link2, LoaderCircle, Monitor, PencilLine, Plus, Trash2, X } from "lucide-react";
 import { useRef, useState, type ReactNode } from "react";
 import { ApiError, api } from "./api/client";
 import type { Apps, Rules } from "./api/types.gen";
 import { CardFrame, CardHead, MainKey, SecondKey } from "./card";
 import { ConfirmCard, saysOwner } from "./confirms";
 import { useApps, useMe } from "./data";
-import { ExtensionPage, OfficialTag } from "./extensions";
 import { t, useLang } from "./i18n";
 import { LocalMark } from "./me";
 import { Crop } from "./profile";
@@ -42,15 +41,8 @@ export function TerminalsPage({ onBack }: { onBack: () => void }) {
   const q = useApps();
   const confirms = useConfirms();
   const secretHere = useSecret()?.at === "terminals";
-  const [ext, setExt] = useState<string | null>(null);
   const list = rowsOf(q.data);
   const invites = q.data?.invites ?? [];
-  if (ext)
-    return (
-      <div key={ext} className="g-slide h-full">
-        <ExtensionPage id={ext} onBack={() => setExt(null)} />
-      </div>
-    );
   return (
     <div className="flex h-full flex-col">
       <header className="flex h-10.5 shrink-0 items-center gap-1 px-1.5 pt-1.5">
@@ -59,7 +51,7 @@ export function TerminalsPage({ onBack }: { onBack: () => void }) {
         </IconKey>
         <h1 className="m-0 min-w-0 flex-1 truncate text-base font-semibold">{t("settings.terminals")}</h1>
         {q.isFetching && <LoaderCircle size={14} className="animate-spin text-ink-4" />}
-        <NewTerminal openExt={setExt} />
+        <NewTerminal />
       </header>
       <div className="no-bar min-h-0 flex-1 overflow-y-auto pt-2 pb-4">
         <div className="flex flex-col gap-5 px-3">
@@ -319,8 +311,8 @@ export const hasClaude = (r: Rules) => !!r.claudeOwner;
 
 /** The +: a new panel's invite (a public origin first), named; the link then shows once. How a Bot
  *  or a computer asks to pair (no TOKEN handed out here: the user, 2026-11-08). Below them the
- *  official extensions, each opening its page. */
-function NewTerminal({ openExt }: { openExt: (id: string) => void }) {
+ *  catalogue's install commands come with 新建应用 (S1c). */
+function NewTerminal() {
   const qc = useQueryClient();
   const me = useMe().data;
   const [open, setOpen] = useState(false);
@@ -367,19 +359,6 @@ function NewTerminal({ openExt }: { openExt: (id: string) => void }) {
           <div className="flex flex-col">
             {choice("invite", <Link2 size={16} />, t("term.invite"), me?.public ? t("term.inviteHint") : t("term.needPublic"), !me?.public)}
             {choice("pair", <Monitor size={16} />, t("term.pairTitle"), t("term.pairHint"))}
-            <div role="separator" className="mx-1 my-1.5 h-px bg-edge" />
-            <button type="button" onClick={() => (setOpen(false), openExt("qq"))} className="flex min-h-11 items-start gap-2.5 rounded-md px-2 py-1.5 text-left hover:bg-fill">
-              <span className="mt-0.5 text-ink-2">
-                <Bot size={16} />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="flex items-center gap-2 text-base">
-                  {t("ext.qq")}
-                  <OfficialTag />
-                </span>
-                <span className="block text-xs text-ink-3">{t("ext.qqHint")}</span>
-              </span>
-            </button>
           </div>
         ) : kind === "pair" ? (
           <PairHow back={() => setKind(null)} />

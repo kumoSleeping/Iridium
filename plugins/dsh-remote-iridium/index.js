@@ -65,7 +65,7 @@ async function pair(url, hello, stopped, show) {
     if (stopped()) return null
     let req
     try {
-      const r = await fetch(`${base(url)}/api/exec/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(hello) })
+      const r = await fetch(`${base(url)}/api/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(hello) })
       if (r.status === 403) {
         show({ state: 'closed' })
         say(`${url} takes no pairing requests now (its settings): ask again with /iridium ${url}`)
@@ -92,8 +92,8 @@ async function pair(url, hello, stopped, show) {
       if (stopped()) return null
       let st
       try {
-        const r = await fetch(`${base(url)}/api/exec/pair/${encodeURIComponent(req.request)}`)
-        st = r.ok ? await r.json() : { status: r.status === 404 ? 'expired' : 'pending' }
+        const r = await fetch(`${base(url)}/api/pair/${encodeURIComponent(req.request)}`)
+        st = r.ok ? await r.json() : { status: r.status === 404 || r.status === 422 ? 'expired' : 'pending' }
       } catch {
         st = { status: 'pending' }
       }

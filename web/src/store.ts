@@ -2,7 +2,7 @@
 // stream last brought it, and what else the page keeps live in memory (the stream's own state, the
 // round trip). Components read them with useCarried; nothing is a patch.
 import { useSyncExternalStore } from "react";
-import type { Confirms, Context, Machine, Quota, Session, SessionState, UpdateState } from "./api/types.gen";
+import type { Needs, Context, Machine, Quota, Session, SessionState, UpdateState } from "./api/types.gen";
 
 const states = new Map<string, unknown>();
 const subs = new Map<string, Set<() => void>>();
@@ -65,8 +65,8 @@ export const useQuota = () => useCarried<Quota>("quota");
 /** Whether a newer Iridium is out, and how installing it goes. */
 export const useUpdateState = () => useCarried<UpdateState>("update");
 /** What agents' ir asked a panel for (invites, tokens); none for a terminal that may not answer. */
-export const useConfirms = () => useCarried<Confirms>("confirms")?.pending ?? NONE;
-const NONE: Confirms["pending"] = [];
+export const useConfirms = () => useCarried<Needs>("needs")?.pending ?? NONE;
+const NONE: Needs["pending"] = [];
 /** Other machines' executors (docs/exec.md): connected or not. */
 export const useMachines = () => useCarried<Machine[]>("machines") ?? NO_MACHINES;
 const NO_MACHINES: Machine[] = [];
