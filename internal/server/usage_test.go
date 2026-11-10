@@ -100,7 +100,7 @@ func TestUsage(t *testing.T) {
 	}
 	l.want(403, bot, "GET", "/api/usage?app=local", nil, nil)
 	l.want(403, bot, "GET", "/api/usage?terminal=local", nil, nil)
-	l.want(404, "socket", "GET", "/api/usage?app=nobody", nil, nil)
+	l.want(422, "socket", "GET", "/api/usage?app=nobody", nil, nil)
 	l.want(400, "socket", "GET", "/api/usage?days=0", nil, nil)
 }
 

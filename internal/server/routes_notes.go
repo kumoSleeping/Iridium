@@ -50,7 +50,7 @@ func (s *Server) notes(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) noteError(w http.ResponseWriter, err error) {
 	if errors.Is(err, store.ErrNoNote) {
-		fail(w, http.StatusNotFound, err.Error())
+		refuse(w, http.StatusUnprocessableEntity, "no_such_note", err.Error())
 		return
 	}
 	s.error(w, err)

@@ -130,7 +130,7 @@ func TestUploadSendAndFetch(t *testing.T) {
 	if code := call(t, c, "GET", base+"/api/sessions/"+id+"/files/"+got.File.Ref+"/thumb", nil, nil); code != 200 {
 		t.Errorf("thumb: %d", code)
 	}
-	if code := call(t, c, "GET", base+"/api/sessions/"+id+"/files/aaaaaaaaaaaaaaaa", nil, nil); code != 404 {
+	if code := call(t, c, "GET", base+"/api/sessions/"+id+"/files/aaaaaaaaaaaaaaaa", nil, nil); code != 422 {
 		t.Errorf("unknown ref: %d", code)
 	}
 	// Paths are for the local ir only, not the page.

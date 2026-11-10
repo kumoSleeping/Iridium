@@ -66,7 +66,7 @@ func (g *Gate) ServeProfile(w http.ResponseWriter, r *http.Request, id string) {
 	case errors.Is(err, ErrAvatarFormat):
 		writeJSON(w, http.StatusUnprocessableEntity, apiError{"avatar_format"})
 	case errors.Is(err, ErrNotFound):
-		writeJSON(w, http.StatusNotFound, apiError{"not_found"})
+		writeJSON(w, http.StatusUnprocessableEntity, apiError{"no_such_app"})
 	case errors.Is(err, ErrLocal):
 		writeJSON(w, http.StatusUnprocessableEntity, apiError{"built_in"})
 	default:

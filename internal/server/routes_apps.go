@@ -145,7 +145,7 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 	c := callerOf(r)
 	info, ok := s.gate().Endpoint(c.ID())
 	if !ok {
-		fail(w, http.StatusNotFound, "no such app or login")
+		refuse(w, http.StatusUnprocessableEntity, "no_such_app", "no such app or login")
 		return
 	}
 	reply(w, http.StatusOK, s.meOf(c, info))
@@ -355,7 +355,7 @@ func (s *Server) setDevice(w http.ResponseWriter, r *http.Request, ref string) {
 	}
 	info, ok := s.gate().Find(ref)
 	if !ok {
-		fail(w, http.StatusNotFound, "no such app or login")
+		refuse(w, http.StatusUnprocessableEntity, "no_such_app", "no such app or login")
 		return
 	}
 	if info.ID != c.ID() && !c.CanManage() {

@@ -93,7 +93,7 @@
 
 ## 和规范不一样的地方
 
-- 资源不存在回 422 而不是 404。
+- 资源不存在回 422 而不是 404（`/api` 也一样）。
 - 按钮反过来：`interaction/button` 是登录按了 Iridium 发的按钮之后发出的；按下本身走 `/v1/internal/button`。
 - 没有 `guild-*`、`login-updated` 事件。`channel.update` 只能改名，`channel.delete` 是归档（不删记录）。
 - 没有 META 信令、webhook、`proxy_urls`；草稿、状态等自定义 op（≥6）还没有。

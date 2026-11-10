@@ -41,9 +41,9 @@ func TestPerms(t *testing.T) {
 	if sb := (satoriBackend{l.s}); !sb.Sees(satori.Caller{App: app.App.ID}, inA.ID) || sb.Sees(satori.Caller{App: app.App.ID}, inB.ID) {
 		t.Fatal("Satori's channels out of scope")
 	}
-	l.want(404, app.Token, "GET", "/api/sessions/"+inB.ID, nil, nil)
-	l.want(404, app.Token, "GET", "/api/sessions/"+inB.ID+"/messages", nil, nil)
-	l.want(404, app.Token, "POST", "/api/sessions/"+inB.ID+"/stop", nil, nil)
+	l.want(422, app.Token, "GET", "/api/sessions/"+inB.ID, nil, nil)
+	l.want(422, app.Token, "GET", "/api/sessions/"+inB.ID+"/messages", nil, nil)
+	l.want(422, app.Token, "POST", "/api/sessions/"+inB.ID+"/stop", nil, nil)
 	// A new session only within its scope.
 	l.want(403, app.Token, "POST", "/api/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: b, Text: "x"}, nil)
 	// The host sees both.

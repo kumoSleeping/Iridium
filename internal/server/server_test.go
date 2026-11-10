@@ -146,7 +146,7 @@ func TestTurnOverHTTP(t *testing.T) {
 		t.Fatalf("create: %d %+v", code, created)
 	}
 	id := created.ID
-	if code := call(t, c, "GET", base+"/api/sessions/nope", nil, nil); code != 404 {
+	if code := call(t, c, "GET", base+"/api/sessions/nope", nil, nil); code != 422 {
 		t.Errorf("unknown session: %d", code)
 	}
 	// A key the daemon does not know is left out, and the stream says so; the rest goes on.
@@ -228,7 +228,7 @@ func TestTurnOverHTTP(t *testing.T) {
 	if code := call(t, c, "GET", base+"/api/sessions/"+id+"/block?at="+page.Blocks[1].At, nil, &full); code != 200 || full.Text != "ok: hello" {
 		t.Errorf("full: %d %+v", code, full)
 	}
-	if code := call(t, c, "GET", base+"/api/sessions/"+id+"/block?at=1.0", nil, nil); code != 404 {
+	if code := call(t, c, "GET", base+"/api/sessions/"+id+"/block?at=1.0", nil, nil); code != 422 {
 		t.Errorf("full at nothing: %d", code)
 	}
 	// The same API on the unix socket, as the local terminal.

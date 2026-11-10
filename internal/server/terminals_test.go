@@ -297,7 +297,7 @@ func TestDevice(t *testing.T) {
 	}
 	l.want(400, bot, "PUT", "/api/me/device", api.SetDevice{Device: "tablet"}, nil)
 	l.want(403, bot, "PUT", "/api/apps/local/device", api.SetDevice{Device: api.DevicePhone}, nil)
-	l.want(404, "socket", "PUT", "/api/apps/nobody/device", api.SetDevice{Device: api.DevicePhone}, nil)
+	l.want(422, "socket", "PUT", "/api/apps/nobody/device", api.SetDevice{Device: api.DevicePhone}, nil)
 	l.want(200, "socket", "PUT", "/api/apps/bot/device", api.SetDevice{Device: api.DeviceComputer}, &got)
 	l.want(200, "web", "PUT", "/api/me/device", api.SetDevice{Device: api.DevicePhone}, &got)
 	l.want(200, "web", "GET", "/api/me", nil, &me)

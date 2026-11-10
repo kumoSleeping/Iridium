@@ -94,5 +94,5 @@ func TestCopyAcrossMachines(t *testing.T) {
 	if len(lst.Entries) != 1 || lst.Entries[0].Name != "a.txt" || lst.Entries[0].Size != 11 {
 		t.Errorf("listing there: %+v", lst)
 	}
-	l.want(404, "socket", "GET", "/api/files?machine=pc&path="+filepath.Join(box, "none"), nil, nil)
+	l.want(422, "socket", "GET", "/api/files?machine=pc&path="+filepath.Join(box, "none"), nil, nil)
 }

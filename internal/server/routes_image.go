@@ -25,7 +25,7 @@ func (s *Server) image(w http.ResponseWriter, r *http.Request) {
 	mime, data, err := s.m.Image(r.Context(), r.PathValue("id"), q.Get("at"), n)
 	switch {
 	case errors.Is(err, session.ErrNoImage):
-		fail(w, http.StatusNotFound, err.Error())
+		refuse(w, http.StatusUnprocessableEntity, "no_such_image", err.Error())
 		return
 	case errors.Is(err, session.ErrGone):
 		fail(w, http.StatusGone, err.Error())

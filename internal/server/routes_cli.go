@@ -28,7 +28,7 @@ func (s *Server) cliRoutes(mux *http.ServeMux) {
 			return
 		}
 		if s.CLI == nil {
-			fail(w, http.StatusNotFound, "no ir here")
+			refuse(w, http.StatusUnprocessableEntity, "not_here", "no ir here")
 			return
 		}
 		var req api.CLIRun

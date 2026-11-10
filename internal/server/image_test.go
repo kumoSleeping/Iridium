@@ -57,7 +57,7 @@ func TestImageRoute(t *testing.T) {
 		again.Body.Close()
 	}
 	// One by a handle, with no channel to read it; none there; n not a number.
-	for n, want := range map[string]int{"1": 404, "9": 404, "x": 400} {
+	for n, want := range map[string]int{"1": 422, "9": 422, "x": 400} {
 		resp := get(n, "")
 		resp.Body.Close()
 		if resp.StatusCode != want {

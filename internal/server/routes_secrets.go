@@ -269,7 +269,7 @@ func (s *Server) deleteSecret(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	err := s.st.DeleteSecret(name)
 	if errors.Is(err, store.ErrNoSecret) {
-		fail(w, http.StatusNotFound, err.Error())
+		refuse(w, http.StatusUnprocessableEntity, "no_such_secret", err.Error())
 		return
 	}
 	if err != nil {
@@ -339,7 +339,7 @@ func (s *Server) useSecrets(w http.ResponseWriter, r *http.Request) {
 	for _, n := range names {
 		sec, err := s.st.Secret(n)
 		if errors.Is(err, store.ErrNoSecret) {
-			fail(w, http.StatusNotFound, "no secret "+n+" (ir secret set "+n+")")
+			refuse(w, http.StatusUnprocessableEntity, "no_such_secret", "no secret "+n+" (ir secret set "+n+")")
 			return
 		}
 		if err != nil {

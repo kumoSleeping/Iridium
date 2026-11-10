@@ -223,7 +223,7 @@ func TestQueueAndPushRoutes(t *testing.T) {
 	if code := p.do("PUT", "/api/sessions/"+id+"/queue/"+sent.Input, api.EditQueued{Text: "two!"}, nil); code != 200 {
 		t.Errorf("edit: %d", code)
 	}
-	if code := p.do("DELETE", "/api/sessions/"+id+"/queue/nope", nil, nil); code != 404 {
+	if code := p.do("DELETE", "/api/sessions/"+id+"/queue/nope", nil, nil); code != 422 {
 		t.Errorf("delete nothing: %d", code)
 	}
 	if code := p.do("POST", "/api/sessions/"+id+"/queue/"+sent.Input+"/steer", nil, nil); code != 200 {

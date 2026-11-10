@@ -46,7 +46,7 @@ func (s *Server) listAt(w http.ResponseWriter, r *http.Request, machine, path st
 func (s *Server) remoteFileError(w http.ResponseWriter, err error) {
 	switch {
 	case wire.IsCode(err, wire.CodeNotFound):
-		fail(w, http.StatusNotFound, err.Error())
+		refuse(w, http.StatusUnprocessableEntity, "no_such_path", err.Error())
 	case wire.IsCode(err, wire.CodeDenied):
 		refuse(w, http.StatusForbidden, "denied", err.Error())
 	case errors.Is(err, wire.ErrOffline):

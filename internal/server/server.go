@@ -554,7 +554,7 @@ func (s *Server) fault(w http.ResponseWriter, err error) {
 	case errors.Is(err, session.ErrBadRequest), errors.Is(err, push.ErrBadSubscription), errors.Is(err, push.ErrBadRule):
 		fail(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, store.ErrNoInput):
-		fail(w, http.StatusNotFound, err.Error())
+		refuse(w, http.StatusUnprocessableEntity, "no_such_input", err.Error())
 	case errors.Is(err, session.ErrGone):
 		fail(w, http.StatusGone, err.Error())
 	default:
@@ -564,8 +564,10 @@ func (s *Server) fault(w http.ResponseWriter, err error) {
 
 func (s *Server) error(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, session.ErrNotFound), errors.Is(err, transcript.ErrNoBlock):
-		fail(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, session.ErrNotFound):
+		refuse(w, http.StatusUnprocessableEntity, "no_such_session", err.Error())
+	case errors.Is(err, transcript.ErrNoBlock):
+		refuse(w, http.StatusUnprocessableEntity, "no_such_message", err.Error())
 	case errors.Is(err, session.ErrNotLive), errors.Is(err, session.ErrElsewhere), errors.Is(err, session.ErrSubagent):
 		fail(w, http.StatusConflict, err.Error())
 	case errors.Is(err, context.DeadlineExceeded):
@@ -607,7 +609,7 @@ func refuse(w http.ResponseWriter, status int, code, msg string) {
 // machine is known.
 func (s *Server) execConnect(w http.ResponseWriter, r *http.Request) {
 	if s.Remote == nil {
-		fail(w, http.StatusNotFound, "no executors here")
+		refuse(w, http.StatusUnprocessableEntity, "not_here", "no executors here")
 		return
 	}
 	c := callerOf(r)

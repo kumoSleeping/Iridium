@@ -41,7 +41,7 @@ func TestAppSessionsAndAgents(t *testing.T) {
 	waitUsage(t, l.s.st, botID)
 
 	// Files: out and in; a file there is not is no such file.
-	l.want(404, bot, "GET", "/api/sessions/"+sid+"/files/nope", nil, nil)
+	l.want(422, bot, "GET", "/api/sessions/"+sid+"/files/nope", nil, nil)
 	l.want(200, bot, "POST", "/api/sessions/"+sid+"/uploads", api.NewUpload{Name: "a.txt", Size: 3}, nil)
 
 	// An agent's ir in the app's session is the app: its usage, no managing.

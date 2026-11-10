@@ -18,12 +18,12 @@ import (
 // machineAt is executor mid, connected; it has answered when nil.
 func (s *Server) machineAt(w http.ResponseWriter, mid string) (*remote.Machine, *wire.Hello) {
 	if s.Remote == nil {
-		fail(w, http.StatusNotFound, "no executors here")
+		refuse(w, http.StatusUnprocessableEntity, "not_here", "no executors here")
 		return nil, nil
 	}
 	mc := s.Remote.Find(mid)
 	if mc == nil {
-		fail(w, http.StatusNotFound, "no such machine")
+		refuse(w, http.StatusUnprocessableEntity, "no_such_app", "no such computer")
 		return nil, nil
 	}
 	hi, ok := mc.Hello()
@@ -169,7 +169,7 @@ func (s *Server) dshSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, ok := mc.Agent(string(api.AgentDsh)); !ok {
-		fail(w, http.StatusNotFound, "no dsh at "+mc.ID())
+		refuse(w, http.StatusUnprocessableEntity, "no_such_agent", "no dsh at "+mc.ID())
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
@@ -184,7 +184,7 @@ func (s *Server) dshSync(w http.ResponseWriter, r *http.Request) {
 func (s *Server) remoteError(w http.ResponseWriter, err error) {
 	switch {
 	case wire.IsCode(err, wire.CodeNotFound):
-		fail(w, http.StatusNotFound, err.Error())
+		refuse(w, http.StatusUnprocessableEntity, "no_such_path", err.Error())
 	case wire.IsCode(err, wire.CodeDenied):
 		refuse(w, http.StatusForbidden, "denied", err.Error())
 	case wire.IsCode(err, wire.CodeBadRequest):

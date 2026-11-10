@@ -115,7 +115,7 @@ func TestSecrets(t *testing.T) {
 	// Some workspaces: the session is in none.
 	l.want(200, "web", "PUT", "/api/secrets/NAS_PASSWORD", api.SetSecret{Scope: api.ScopeWorkspaces, Workspaces: []int64{99}}, nil)
 	l.want(403, "agent-in:"+its.ID, "POST", "/api/secrets/use", api.UseSecrets{Names: []string{"NAS_PASSWORD"}}, nil)
-	l.want(404, "agent", "POST", "/api/secrets/use", api.UseSecrets{Names: []string{"NOPE"}}, nil)
+	l.want(422, "agent", "POST", "/api/secrets/use", api.UseSecrets{Names: []string{"NOPE"}}, nil)
 	// Storing one is not saying who may use it.
 	l.want(403, bot, "PUT", "/api/secrets/NAS_PASSWORD", api.SetSecret{Scope: api.ScopeAll}, nil)
 
@@ -138,7 +138,7 @@ func TestSecrets(t *testing.T) {
 	// Deleting is a person's at the host, never an agent's; then it is masked no more.
 	l.want(403, "agent", "DELETE", "/api/secrets/GITHUB_TOKEN", nil, nil)
 	l.want(200, "socket", "DELETE", "/api/secrets/GITHUB_TOKEN", nil, nil)
-	l.want(404, "socket", "DELETE", "/api/secrets/GITHUB_TOKEN", nil, nil)
+	l.want(422, "socket", "DELETE", "/api/secrets/GITHUB_TOKEN", nil, nil)
 	raw = l.wantRaw(200, "web", "GET", "/api/sessions/"+its.ID+"/messages", nil)
 	if !strings.Contains(raw, val) {
 		t.Fatalf("still masked after delete: %.300s", raw)

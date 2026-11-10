@@ -180,7 +180,7 @@ func (s *Server) listNeeds(w http.ResponseWriter, r *http.Request) {
 func (s *Server) dropNeed(w http.ResponseWriter, r *http.Request) {
 	c := callerOf(r)
 	if !c.Web() || !s.more.dropShare(r.PathValue("id"), c.Login) {
-		fail(w, http.StatusNotFound, "no such share")
+		refuse(w, http.StatusUnprocessableEntity, "no_such_share", "no such share")
 		return
 	}
 	s.asks.publish()

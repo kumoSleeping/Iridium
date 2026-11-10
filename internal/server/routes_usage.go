@@ -46,7 +46,7 @@ func (s *Server) usage(w http.ResponseWriter, r *http.Request) {
 	case ref != "":
 		info, ok := s.gate().Find(ref)
 		if !ok {
-			fail(w, http.StatusNotFound, "no such app")
+			refuse(w, http.StatusUnprocessableEntity, "no_such_app", "no such app")
 			return
 		}
 		if info.ID != c.ID() && !c.CanManage() {

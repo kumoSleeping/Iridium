@@ -51,7 +51,7 @@ func TestNotes(t *testing.T) {
 	if got.Body != body || got.Folder != f.ID || got.Done == 0 || len(got.Sessions) != 2 || got.Sessions[1] != "s1" {
 		t.Fatalf("patched: %+v", got)
 	}
-	if code := call(t, c, "PATCH", base+"/api/notes/none", api.NotePatch{Body: &body}, nil); code != 404 {
+	if code := call(t, c, "PATCH", base+"/api/notes/none", api.NotePatch{Body: &body}, nil); code != 422 {
 		t.Fatalf("no such note: %d", code)
 	}
 

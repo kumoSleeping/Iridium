@@ -274,7 +274,7 @@ func (s *Server) copyFile(w http.ResponseWriter, r *http.Request) {
 func (s *Server) fileError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, files.ErrNoRef), errors.Is(err, files.ErrNoUpload), errors.Is(err, os.ErrNotExist), errors.Is(err, session.ErrNotFound):
-		fail(w, http.StatusNotFound, err.Error())
+		refuse(w, http.StatusUnprocessableEntity, "no_such_file", err.Error())
 	case errors.Is(err, pathsafe.ErrDenied), errors.Is(err, pathsafe.ErrOutside):
 		refuse(w, http.StatusForbidden, "outside", err.Error())
 	case errors.Is(err, files.ErrExists), errors.Is(err, files.ErrOffset), errors.Is(err, files.ErrBusy),

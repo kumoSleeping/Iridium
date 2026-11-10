@@ -6,7 +6,7 @@
 // comes or goes; a new line fades in.
 import { Check, CornerUpRight, List, ListEnd, LoaderCircle, Paperclip, Pause, Pencil, Play, X } from "lucide-react";
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { api, missing } from "../api/client";
+import { api, notThere } from "../api/client";
 import type { Queued } from "../api/types.gen";
 import { t } from "../i18n";
 import { errText, toast } from "../toast";
@@ -82,7 +82,7 @@ export function Queue({ session, queue, steered }: { session: string; queue: Que
                   await api.steer(session, q.id).then(
                     () => steered(q),
                     (e) => {
-                      if (!missing(e)) throw e;
+                      if (!notThere(e)) throw e;
                     },
                   );
               }),

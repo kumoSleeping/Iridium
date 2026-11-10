@@ -102,7 +102,7 @@ func (s *Server) patchSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.m.Known(id) {
-		fail(w, http.StatusNotFound, "no such session")
+		refuse(w, http.StatusUnprocessableEntity, "no_such_session", "no such session")
 		return
 	}
 	if req.Workspace != nil && *req.Workspace < 0 {
@@ -171,7 +171,7 @@ func (s *Server) folders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.Discover == nil {
-		fail(w, http.StatusNotFound, "no folders here")
+		refuse(w, http.StatusUnprocessableEntity, "not_here", "no folders here")
 		return
 	}
 	l, err := s.Folders.List(r.URL.Query().Get("path"))
@@ -200,7 +200,7 @@ func (s *Server) makeFolder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.Discover == nil {
-		fail(w, http.StatusNotFound, "no folders here")
+		refuse(w, http.StatusUnprocessableEntity, "not_here", "no folders here")
 		return
 	}
 	if dir, err := s.Folders.Resolve(req.Path); err == nil {
@@ -227,8 +227,10 @@ func (s *Server) discoverDone(w http.ResponseWriter, err error) {
 
 func (s *Server) discoverError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, store.ErrNoWorkspace), errors.Is(err, fs.ErrNotExist):
-		fail(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, store.ErrNoWorkspace):
+		refuse(w, http.StatusUnprocessableEntity, "no_such_workspace", err.Error())
+	case errors.Is(err, fs.ErrNotExist):
+		refuse(w, http.StatusUnprocessableEntity, "no_such_path", err.Error())
 	case errors.Is(err, store.ErrWorkspacePath), errors.Is(err, fs.ErrExist), errors.Is(err, store.ErrUserNamed):
 		fail(w, http.StatusConflict, err.Error())
 	case errors.Is(err, discover.ErrOutside), errors.Is(err, fs.ErrPermission):

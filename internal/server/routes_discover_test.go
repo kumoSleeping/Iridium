@@ -92,7 +92,7 @@ func TestWorkspacesAndFolders(t *testing.T) {
 	if code := call(t, c, "PATCH", base+"/api/sessions/"+created.ID, api.SessionPatch{Pinned: &yes, Name: &name}, nil); code != 200 {
 		t.Fatalf("patch: %d", code)
 	}
-	if code := call(t, c, "PATCH", base+"/api/sessions/00000000-0000-4000-8000-000000000000", api.SessionPatch{Pinned: &yes}, nil); code != http.StatusNotFound {
+	if code := call(t, c, "PATCH", base+"/api/sessions/00000000-0000-4000-8000-000000000000", api.SessionPatch{Pinned: &yes}, nil); code != http.StatusUnprocessableEntity {
 		t.Errorf("patch of no session: %d", code)
 	}
 }

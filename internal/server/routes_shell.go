@@ -192,7 +192,7 @@ func (s *Server) shellStop(w http.ResponseWriter, r *http.Request) {
 func (s *Server) shellError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, session.ErrNoRun), errors.Is(err, fs.ErrNotExist), wire.IsCode(err, wire.CodeNotFound):
-		fail(w, http.StatusNotFound, err.Error())
+		refuse(w, http.StatusUnprocessableEntity, "no_such_path", err.Error())
 	case errors.Is(err, session.ErrNoShell):
 		refuse(w, http.StatusForbidden, "no_shell", err.Error())
 	case errors.Is(err, session.ErrOffline):

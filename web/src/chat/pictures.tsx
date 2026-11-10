@@ -56,7 +56,7 @@ function One({ url, p, name }: { url: string; p: Picture; name: string }) {
         void r.body?.cancel();
         if (r.ok && !reloaded) return setReloaded(true), setTries((n) => n + 1);
         if (r.status === 425 && tries < TRIES) return setWaited(true), setLater(1000 * 2 ** Math.min(tries, 4));
-        setFate(r.status === 409 ? "offline" : waited && (r.status === 404 || r.status === 410) ? "none" : "unreadable");
+        setFate(r.status === 409 ? "offline" : waited && (r.status === 404 || r.status === 410 || r.status === 422) ? "none" : "unreadable");
       },
       () => setFate("offline"),
     );

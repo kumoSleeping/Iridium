@@ -366,3 +366,5 @@ export const api = {
 /** Whether an error is the route not being there (an older daemon, a part turned off): the page
  *  then shows what it can without it. */
 export const missing = (e: unknown) => e instanceof ApiError && (e.status === 404 || e.status === 405 || e.status === 501);
+/** The thing asked about is not there (422 with a no_such_ code; 404 from an Iridium before 0.2). */
+export const notThere = (e: unknown) => e instanceof ApiError && (e.status === 422 || e.status === 404);

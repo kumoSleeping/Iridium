@@ -9,7 +9,7 @@
 
 类型都在 `internal/api`。`go generate ./internal/api` 用 tygo 生成 `web/src/api/types.gen.ts`，前端只用它。生成的文件进库，改了 Go 的类型要一起重新生成提交；`scripts/check-types.sh`（CI、发布和 preflight 都跑）重新生成一遍，对不上就失败。
 
-出错时状态码非 2xx，正文 `{"code": "…", "message": "…"}`（决定 8）：401 只表示 TOKEN 或登录无效；其余拒绝一律 403 加原因码（`pair_closed`、`login_pending`、`no_permission`、`too_many_pending`…）；422 东西不在或不对（`no_such_need`、`no_such_app`、`bad_name`…）；400 请求不对；404 没有这个会话（逐步改为 422）；409 agent 没在运行或状态不对；429 今天的用量到上限；504 agent 没按时回。
+出错时状态码非 2xx，正文 `{"code": "…", "message": "…"}`（决定 8）：401 只表示 TOKEN 或登录无效；其余拒绝一律 403 加原因码（`pair_closed`、`login_pending`、`no_permission`、`too_many_pending`…）；422 东西不在或不对（`no_such_session`、`no_such_need`、`no_such_app`、`no_such_file`、`no_such_path`、`no_such_note`、`no_such_secret`、`no_such_input`、`no_such_image`、`not_here`（这台没开这项）、`bad_name`…）；400 请求不对；404 只表示没有这个接口（另外头像没设、网页的页面不在也是 404）；409 agent 没在运行或状态不对；429 今天的用量到上限；504 agent 没按时回。
 
 ## 请求
 
@@ -20,7 +20,7 @@
 | `GET /api/sessions/{id}` | → `SessionState` | 打开的会话的状态，和事件流里的同一份 |
 | `GET /api/sessions/{id}/messages` | → `MessagePage` | 不带参数：最新一页。`before=<start>`：往回一页。`after=<end>`：之后新写的 |
 | `GET /api/sessions/{id}/block?at=<at>` | → `{text}` | 截短的块（工具参数、结果、思考、系统行）的全文 |
-| `GET /api/sessions/{id}/image?at=<at>&n=<n>` | → 图片 | 工具结果（`Result.images`，`at` 是结果的）给模型的第 `n` 张图，取自 agent 的记录，不读文件现在的样子：Claude、pi 和 MCP 工具的在结果里，Codex 的 view_image 在脚本的输出里（脚本只看了一张、只交出一张，当时没有别的调用、也没有后台还在跑的脚本时，才认得出是哪张；认不出的不列进 `images`），dsh 的 read_image 在它的附件库（经通道，远端经执行端）。只给 PNG、JPEG、GIF、WebP，按内容的 ETag。没有 404，不在了 410，所在机器没连上 409，脚本还没跑完 425（稍后再问） |
+| `GET /api/sessions/{id}/image?at=<at>&n=<n>` | → 图片 | 工具结果（`Result.images`，`at` 是结果的）给模型的第 `n` 张图，取自 agent 的记录，不读文件现在的样子：Claude、pi 和 MCP 工具的在结果里，Codex 的 view_image 在脚本的输出里（脚本只看了一张、只交出一张，当时没有别的调用、也没有后台还在跑的脚本时，才认得出是哪张；认不出的不列进 `images`），dsh 的 read_image 在它的附件库（经通道，远端经执行端）。只给 PNG、JPEG、GIF、WebP，按内容的 ETag。没有这张 422 `no_such_image`，不在了 410，所在机器没连上 409，脚本还没跑完 425（稍后再问） |
 | `POST /api/sessions/{id}/send` | `{text, steer?}` → `{input, queued?, command?, session?, desktop?}` | 发消息。agent 没在跑就先拉起（有记录就 `--resume`）。回合进行中发的进待发队列（`queued`），`steer` 则并进当前回合。`/` 开头的命令从不插话，排到回合结束。`/clear`（`/reset`、`/new`，后面带字、带附件也算）由 Iridium 做：同处开新会话（模型、模式、强度照旧），旧的空闲时归档，回新会话的 `session`。`command`：agent 自己执行、记录里不会有这句（Codex、pi 的 `/compact`）。见“待发队列”。在别处运行的回 409；别的机器上 DSH Desktop 开着的 dsh 会话，消息交给 Desktop 里它的 agent（`desktop`，没有 `input`，见 `docs/exec.md`“远端 DSH”） |
 | `POST /api/sessions/{id}/interrupt` | → `{ok}` | 停掉当前回合（Esc），agent 留着。队列暂停 |
 | `POST /api/sessions/{id}/stop` | → `{ok}` | 停掉 agent 进程（关 stdin，写完记录自己退出）。会话还在，下一条消息再拉起。队列暂停 |
@@ -130,7 +130,7 @@
 | `POST /api/folders` | `NewFolder` → `{path}` | 在 `path` 里新建文件夹 `name`（不能以 `.` 开头、不能带 `/`）。已有回 409 |
 | `GET /api/machines/{id}/dsh/workspaces` | → `DshWorkspace[]` | 那台机器上 dsh 的工作区（DSH Desktop 侧边栏那份，按它的顺序，文件夹已不在的不列），读不懂时用它会话所在的文件夹代替，最近的在前；路径用 `/`。`sessions` 是其中列出的会话数（不算子代理、这边归档的、不同步的）。新会话选文件夹时列在最上面，见 `docs/exec.md`“远端 DSH” |
 
-- 选择器默认只能在家目录里（配置 `folderRoots` 可改），先解析符号链接再比；`~/.ssh`、`~/.gnupg`、`~/.claude`、`~/.codex`、`~/.pi`、`~/.dsh` 和 Iridium 的状态、配置目录一律不给（403）。不存在 404。
+- 选择器默认只能在家目录里（配置 `folderRoots` 可改），先解析符号链接再比；`~/.ssh`、`~/.gnupg`、`~/.claude`、`~/.codex`、`~/.pi`、`~/.dsh` 和 Iridium 的状态、配置目录一律不给（403）。不存在 422 `no_such_path`。
 
 ## 便签
 
@@ -208,7 +208,7 @@
 | `DELETE /api/sessions/{id}/queue/{input}` | → `{ok}` | 删这一条 |
 | `POST /api/sessions/{id}/continue` | → `{ok}` | 放开暂停的队列：没有回合在跑就马上发，否则等这个回合结束 |
 
-不在队列里（已发、已删）：404。
+不在队列里（已发、已删）：422 `no_such_input`。
 
 ## 命令
 
@@ -222,7 +222,7 @@
 
 - 每条命令一个进程：Linux、macOS 是 `/bin/sh -c`（stderr 并进 stdout），Windows 是 `cmd.exe /c`（stderr 在结束时给）。stdin 不接，读 stdin 的命令要手动停止。全屏程序（`vim`、`top`）不支持。
 - 进程照托管 agent 的方式起（本机的 `platform.Launcher`，别的机器经执行端），目录是托管目录下的 `sh-<id>`；结束 10 分钟后删。
-- 机器不在线：409；机器的主人关着命令行（`Machine.shell` 为假）：403 `no_shell`；目录不存在：404。
+- 机器不在线：409；机器的主人关着命令行（`Machine.shell` 为假）：403 `no_shell`；目录不存在：422 `no_such_path`。
 
 agent 用 `ir sh <机器>[:目录] [--cwd 目录] [--timeout 2m] -- 命令`（`POST /api/machines/{id}/shell`，`{id}` 是机器 ID 或名字，`cwd` 省略为那边的家目录；没有这台机器 422 `no_such_machine`）：原样打出输出，退出码就是它的；超时停掉它，退出码 124。执行端有 `run` 时请求带 `Accept: application/x-ndjson`，回 `ShellEvent` 的 NDJSON 流，边跑边出（`docs/exec.md`“命令”）；没有时照旧回 `ShellStarted` 再轮询。只在主人开了 `shell` 的机器上能用（默认关；否则 403 `no_shell`）。`ir apps` 列出应用，带电脑的另列系统、连接、agent（关掉的标“关”）、能否 `ir sh`、家目录。系统提示里只有 `ir --help` 的一行。
 
