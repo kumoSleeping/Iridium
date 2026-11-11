@@ -32,31 +32,28 @@ func TestSecretCommands(t *testing.T) {
 	person, agent := daemonFor(t)
 	const val = "tok/en+value=42"
 
-	// A person pipes the value in (no terminal on stdin); it is never printed.
-	p := person
-	p.stdin = strings.NewReader(val + "\n")
-	code, out, errs := runAs(p, "secret", "set", "API_TOKEN", "--note", "the API")
-	if code != 0 || !strings.Contains(out, "已存 API_TOKEN") || strings.Contains(out+errs, val) {
+	// A person sets the value; it is never shown back.
+	code, out, errs := apiAs(person, "PUT", "internal/secrets/API_TOKEN", "value="+val, "note=the API")
+	if code != 0 || !strings.Contains(out, "API_TOKEN") || strings.Contains(out+errs, val) {
 		t.Fatalf("set: %d %q %q", code, out, errs)
 	}
-	if code, _, _ := runAs(p, "secret", "set", "lower"); code != 2 {
+	if code, _, _ := apiAs(person, "PUT", "internal/secrets/lower", "value=x"); code != 1 {
 		t.Fatalf("a bad name: %d", code)
 	}
 
-	// An agent: the panel types the value; the agent hears only that it is stored.
-	got := agentRun(agent, "secret", "set", "NAS_PASSWORD", "--note", "mount")
+	// An agent: the panel types the value; --wait hears only that it is stored.
+	got := apiRun(agent, "PUT", "internal/secrets/NAS_PASSWORD", "note=mount", "--wait")
 	cf := answer(t, person, api.NeedSecretSet, api.NeedAnswer{Allow: true, Value: "nas-secret-pw"})
 	r := <-got
-	if r[0] != "0" || !strings.Contains(r[1], "已存 NAS_PASSWORD") || strings.Contains(r[1]+r[2], "nas-secret-pw") || cf.Note != "mount" {
+	if r[0] != "0" || !strings.Contains(r[1], "state: allowed") || strings.Contains(r[1]+r[2], "nas-secret-pw") || cf.Note != "mount" {
 		t.Fatalf("agent set: %q %+v", r, cf)
 	}
-	got = agentRun(agent, "secret", "set", "OTHER")
+	got = apiRun(agent, "PUT", "internal/secrets/OTHER", "--wait")
 	answer(t, person, api.NeedSecretSet, api.NeedAnswer{Allow: false})
-	if r := <-got; r[0] != "1" || !strings.Contains(r[1], "拒绝") {
+	if r := <-got; r[0] != "1" || !strings.Contains(r[1], "state: denied") {
 		t.Fatalf("denied: %q", r)
 	}
-
-	code, out, _ = runAs(agent, "secret", "ls")
+	code, out, _ = apiAs(agent, "internal/secrets")
 	if code != 0 || !strings.Contains(out, "API_TOKEN") || !strings.Contains(out, "the API") || strings.Contains(out, val) {
 		t.Fatalf("ls: %d %q", code, out)
 	}
@@ -111,10 +108,10 @@ func TestSecretCommands(t *testing.T) {
 		t.Fatalf("denied run: %q", r)
 	}
 
-	if code, _, _ := runAs(agent, "secret", "rm", "API_TOKEN"); code != 1 {
+	if code, _, _ := apiAs(agent, "DELETE", "internal/secrets/API_TOKEN"); code != 1 {
 		t.Fatal("an agent removed a credential")
 	}
-	if code, out, _ := runAs(person, "secret", "rm", "API_TOKEN"); code != 0 || !strings.Contains(out, "删了") {
-		t.Fatalf("rm: %d %q", code, out)
+	if code, _, _ := apiAs(person, "DELETE", "internal/secrets/API_TOKEN"); code != 0 {
+		t.Fatal("rm")
 	}
 }

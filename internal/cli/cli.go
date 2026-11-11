@@ -27,14 +27,7 @@ func Main(args []string) int {
 
 // commands are ir's commands by name. Each gets its arguments after the name.
 var commands = map[string]func(e *env, args []string) int{
-	"api":    cmdAPI, // api.go: the API as it is
-	"new":    cmdNew,
-	"share":  cmdShare, // share.go
-	"wait":   cmdWait,
-	"cp":     cmdCp,
-	"attach": cmdAttach, // files.go
-	"apps":   cmdApps,   // shell.go; at the host admin.go's
-	"sh":     cmdSh,
+	"api": cmdAPI, // api.go: the API as it is
 }
 
 func run(args []string, stdout, stderr io.Writer) int {

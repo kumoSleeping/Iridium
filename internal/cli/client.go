@@ -2,7 +2,6 @@ package cli
 
 import (
 	"bytes"
-	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,15 +10,12 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/kumoSleeping/iridium/internal/agents"
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/config"
-	"github.com/kumoSleeping/iridium/internal/place"
 	"github.com/kumoSleeping/iridium/internal/satori"
 )
 
@@ -36,6 +32,15 @@ type env struct {
 	after string
 	// as: the login ir speaks Satori as, once meta named it (ir api).
 	as *satori.Login
+	// agent: an agent runs ir (its environment says so, or no person at a terminal): every request
+	// says so (X-Iridium-Agent), so the daemon gives it no secret and takes no approval from it.
+	agent bool
+}
+
+// runByAgent: ir is run by an agent, as the admin commands tell (detect): the environment names
+// an agent's session, or stdin and stdout are not both a terminal. A var for the tests.
+var runByAgent = func() bool {
+	return os.Getenv("CLAUDECODE") != "" || caller() != "" || !isTerminal(os.Stdin) || !isTerminal(os.Stdout)
 }
 
 func newEnv(stdout, stderr io.Writer) *env {
@@ -54,7 +59,7 @@ func newEnv(stdout, stderr io.Writer) *env {
 	hc := &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", sock)
 	}}}
-	return &env{out: stdout, err: stderr, sock: sock, hc: hc, tty: isTTY(stderr)}
+	return &env{out: stdout, err: stderr, sock: sock, hc: hc, tty: isTTY(stderr), agent: runByAgent()}
 }
 
 func isTTY(w io.Writer) bool {
@@ -117,6 +122,9 @@ func (e *env) request(method, path string, body any, hdr ...string) (*http.Respo
 	if c := e.caller(); c != "" && e.at == nil {
 		req.Header.Set(headerSession, c)
 	}
+	if e.agent && e.at == nil {
+		req.Header.Set(headerAgent, "1")
+	}
 	resp, err := e.hc.Do(req)
 	if err != nil {
 		if e.at != nil {
@@ -131,7 +139,11 @@ func (e *env) request(method, path string, body any, hdr ...string) (*http.Respo
 		if json.Unmarshal(b, &ae) != nil || ae.Text() == "" {
 			ae.Message = strings.TrimSpace(string(b))
 		}
-		return nil, &apiError{status: resp.StatusCode, msg: ae.Text()}
+		msg := ae.Text()
+		if ae.NameError != "" {
+			msg += " (" + ae.NameError + ")"
+		}
+		return nil, &apiError{status: resp.StatusCode, msg: msg}
 	}
 	return resp, nil
 }
@@ -161,120 +173,6 @@ func (e *env) failf(format string, a ...any) int {
 }
 
 // ---- arguments ----
-
-type opts struct {
-	wait    bool
-	steer   bool
-	queue   bool // ir send --queue: wait for the running turn to end instead of joining it
-	all     bool // ir ls, find --all: the archive and the subagents done too
-	here    bool // ir ls --here: the caller's group only
-	full    bool // ir read --full: the whole page as written
-	n       int  // ir read -n: how many messages
-	model   string
-	approve string
-	machine string // ir new --machine (hidden, the older way): the app whose computer it runs at
-	group   string // ir new --workspace: the group it goes in
-	attach  []string
-	pos     []string
-}
-
-// parse takes the flags anywhere among the arguments; after "--" everything is positional.
-func parse(args []string, allowed string) (opts, error) {
-	var o opts
-	for i := 0; i < len(args); i++ {
-		a := args[i]
-		if a == "--" {
-			o.pos = append(o.pos, args[i+1:]...)
-			break
-		}
-		if !strings.HasPrefix(a, "-") || a == "-" {
-			o.pos = append(o.pos, a)
-			continue
-		}
-		name, val, hasVal := strings.Cut(strings.TrimLeft(a, "-"), "=")
-		if name == "a" {
-			name = "attach"
-		}
-		if !strings.Contains(" "+allowed+" ", " "+name+" ") {
-			return o, fmt.Errorf("no flag %s here", a)
-		}
-		if name == "wait" || name == "steer" || name == "queue" || name == "all" || name == "full" || name == "here" {
-			if hasVal {
-				return o, fmt.Errorf("%s takes no value", a)
-			}
-			o.wait = o.wait || name == "wait"
-			o.steer = o.steer || name == "steer"
-			o.queue = o.queue || name == "queue"
-			o.all = o.all || name == "all"
-			o.full = o.full || name == "full"
-			o.here = o.here || name == "here"
-			continue
-		}
-		if !hasVal {
-			if i+1 >= len(args) {
-				return o, fmt.Errorf("%s needs a value", a)
-			}
-			i++
-			val = args[i]
-		}
-		switch name {
-		case "model":
-			o.model = val
-		case "approve":
-			o.approve = val
-		case "machine":
-			o.machine = val
-		case "workspace":
-			o.group = val
-		case "attach":
-			o.attach = append(o.attach, val)
-		case "n":
-			n, err := strconv.Atoi(val)
-			if err != nil || n < 1 {
-				return o, fmt.Errorf("-n takes a count, not %q", val)
-			}
-			o.n = n
-		}
-	}
-	return o, nil
-}
-
-// errPeer: a place at another app's computer (<name>:<path>, internal/place) where only one here
-// is taken.
-type errPeer string
-
-func (e errPeer) Error() string { return "a place at " + string(e) + ", not here" }
-
-// localPath is arg as an absolute path here (host:… too, the host's own name); a place at
-// another app's computer is an errPeer.
-func localPath(arg string) (string, error) {
-	if name, path, ok := place.Split(arg); ok {
-		if !place.IsHost(name) {
-			return "", errPeer(name)
-		}
-		arg = cmp.Or(path, "~")
-	}
-	if arg == "~" || strings.HasPrefix(arg, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
-		}
-		arg = filepath.Join(home, strings.TrimPrefix(arg, "~"))
-	}
-	return filepath.Abs(arg)
-}
-
-// pathArg is a path ir cp and files take: <app>:<path>, an app's computer by its name and its own
-// path there (as given; "" its home), or one here (host:… too), made absolute.
-func pathArg(arg string) (machine, path string, err error) {
-	path, err = localPath(arg)
-	var peer errPeer
-	if errors.As(err, &peer) {
-		_, path, _ = place.Split(arg)
-		return string(peer), path, nil
-	}
-	return "", path, err
-}
 
 // resolve is the full id of the session a unique prefix names.
 func (e *env) resolve(arg string) (string, error) {

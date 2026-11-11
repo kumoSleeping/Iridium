@@ -6,12 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/irhelp"
@@ -45,10 +48,14 @@ type apiCall struct {
 	all, json    bool
 	wait         bool
 	clip         int
+	status       int // the answer's
 }
 
 func cmdAPI(e *env, args []string) int {
-	if len(args) > 0 && args[0] == "help" {
+	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
+		if len(args) == 0 {
+			args = []string{"help"}
+		}
 		fmt.Fprint(e.out, irhelp.Find(args[1:]))
 		return exitDone
 	}
@@ -59,9 +66,21 @@ func cmdAPI(e *env, args []string) int {
 	if c.path == "/v1/message.create" && !c.json {
 		return e.apiSend(c)
 	}
-	raw, err := e.call(c)
+	resp, err := e.send(c)
 	if err != nil {
 		return e.fail(err)
+	}
+	if strings.HasPrefix(resp.Header.Get("Content-Type"), ndjson) && !c.json {
+		defer resp.Body.Close()
+		return e.stream(resp.Body)
+	}
+	raw, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return e.fail(err)
+	}
+	if code := e.then(c, raw); code >= 0 {
+		return code
 	}
 	if c.all {
 		if raw, err = e.rest(c, raw); err != nil {
@@ -173,9 +192,6 @@ func parseAPI(args []string) (*apiCall, error) {
 	if len(c.query) > 0 {
 		c.path += "?" + c.query.Encode()
 	}
-	if c.wait && c.path != "/v1/message.create" {
-		return nil, errors.New("--wait is for message.create")
-	}
 	if c.all && !c.satori {
 		return nil, errors.New("--all is for Satori's lists (their next)")
 	}
@@ -235,27 +251,156 @@ func setPath(m map[string]any, path []string, v any) error {
 
 // call sends c: the answer as it came.
 func (e *env) call(c *apiCall) ([]byte, error) {
-	var body any
-	switch {
-	case c.raw != nil:
-		body = json.RawMessage(c.raw)
-	case len(c.body) > 0 || c.satori:
-		body = c.body
-	}
-	var hdr []string
-	if c.satori && c.path != "/v1/meta" {
-		login, err := e.login()
-		if err != nil {
-			return nil, err
-		}
-		hdr = []string{satori.HeaderPlatform, login.Platform, satori.HeaderUser, login.User.ID}
-	}
-	resp, err := e.request(c.method, c.path, body, hdr...)
+	resp, err := e.send(c)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 	return io.ReadAll(resp.Body)
+}
+
+// send sends c: the answer, its body still to read. A route that can stream (a command line at an
+// app's computer) streams: ndjson is asked for alongside JSON.
+func (e *env) send(c *apiCall) (*http.Response, error) {
+	var body any
+	switch {
+	case c.raw != nil:
+		body = json.RawMessage(c.raw)
+	case len(c.body) > 0 || c.satori || c.method == "POST" || c.method == "PUT" || c.method == "PATCH":
+		body = c.body // {} for one with no fields: the routes read JSON
+	}
+	hdr := []string{"Accept", "application/json, " + ndjson}
+	if c.satori && c.path != "/v1/meta" {
+		login, err := e.login()
+		if err != nil {
+			return nil, err
+		}
+		hdr = append(hdr, satori.HeaderPlatform, login.Platform, satori.HeaderUser, login.User.ID)
+	}
+	resp, err := e.request(c.method, c.path, body, hdr...)
+	if err == nil {
+		c.status = resp.StatusCode
+	}
+	return resp, err
+}
+
+// stream writes an ndjson answer as it comes, and exits as its last line says: a command line's
+// output (out, err) as it is, then its exit code; a copy's progress drawn on a terminal, then
+// its line (path, size, sha256); an error on stderr, 1.
+func (e *env) stream(body io.Reader) int {
+	p := e.progress()
+	defer p.clear()
+	dec := json.NewDecoder(body)
+	dec.UseNumber()
+	for {
+		var m map[string]any
+		if err := dec.Decode(&m); err != nil {
+			p.clear()
+			return e.failf("the answer stopped short (%v); the same request again goes on where it can", err)
+		}
+		out, _ := m["out"].(string)
+		errs, _ := m["err"].(string)
+		fmt.Fprint(e.out, out)
+		fmt.Fprint(e.err, errs)
+		num := func(k string) (int64, bool) {
+			n, ok := m[k].(json.Number)
+			if !ok {
+				return 0, false
+			}
+			v, err := n.Int64()
+			return v, err == nil
+		}
+		code := exitError
+		if c, ok := num("exit"); ok {
+			code = int(c)
+		}
+		if msg, _ := m["error"].(string); msg != "" {
+			p.clear()
+			fmt.Fprintf(e.err, "ir: %s\n", msg)
+			return code
+		}
+		if path, _ := m["path"].(string); path != "" {
+			p.clear()
+			size, _ := num("size")
+			sum, _ := m["sha256"].(string)
+			fmt.Fprintf(e.out, "%s\t%d\t%s\n", path, size, sum)
+			return exitDone
+		}
+		if done, ok := m["done"].(bool); ok && done {
+			if sig, _ := m["signal"].(string); sig != "" {
+				return e.failf("ended by %s", sig)
+			}
+			return code
+		}
+		if done, ok := num("done"); ok {
+			size, _ := num("size")
+			p.bar(done, size)
+		}
+	}
+}
+
+const ndjson = "application/x-ndjson"
+
+// then is what ir does past an answer, as --wait says (-1: nothing; else the exit code): a
+// session started with a message (POST internal/sessions) is waited on until the agent took it,
+// with --wait until its turn ends, the reply printed; what waits for a person (202 {need}: an
+// agent's invite, a secret to type in) is waited on with --wait until a person decided.
+func (e *env) then(c *apiCall, raw []byte) int {
+	switch {
+	case c.method == "POST" && c.path == "/v1/internal/sessions" && !c.json:
+		var made api.NewSessionReply
+		if json.Unmarshal(raw, &made) != nil || made.ID == "" {
+			return -1
+		}
+		fmt.Fprintln(e.out, made.ID)
+		text, _ := c.body["text"].(string)
+		if c.raw != nil {
+			var b api.NewSession
+			_ = json.Unmarshal(c.raw, &b)
+			text = b.Text
+		}
+		switch {
+		case strings.TrimSpace(text) == "":
+			return exitDone
+		case c.wait:
+			return e.waitTurn(made.ID, anyInput)
+		}
+		return e.waitTaken(made.ID, anyInput)
+	case c.method == "GET" && c.wait && sessionPath.MatchString(c.path):
+		var st api.SessionState
+		if json.Unmarshal(raw, &st) != nil || st.ID == "" {
+			return -1
+		}
+		return e.waitTurn(st.ID, "")
+	case c.wait && strings.HasSuffix(c.path, "/shell"):
+		var st api.ShellStarted
+		if json.Unmarshal(raw, &st) != nil || st.Run == "" {
+			return -1
+		}
+		return e.follow(st.Run)
+	case c.status == http.StatusAccepted && c.wait:
+		var p api.Pending
+		if json.Unmarshal(raw, &p) != nil || p.Need.ID == "" {
+			return -1
+		}
+		fmt.Fprintf(e.err, "需要人决定：%s（%s）\n", p.Need.ID, p.Need.Kind)
+		for {
+			var st api.NeedState
+			if err := e.do("GET", "/v1/internal/needs/"+url.PathEscape(p.Need.ID)+"?wait=60", nil, &st); err != nil {
+				return e.fail(err)
+			}
+			if st.State == "pending" {
+				continue
+			}
+			b, _ := json.Marshal(st)
+			e.render(&apiCall{clip: c.clip}, b)
+			if st.State == "allowed" {
+				return exitDone
+			}
+			return exitError
+		}
+	}
+	return -1
 }
 
 // satori calls method with body as the login ir acts for; the answer as it came.
@@ -375,6 +520,38 @@ func (e *env) afterSend(id string, sent api.SendReply, wait bool, before api.Mes
 		return e.waitTurn(id, sent.Input)
 	}
 	return e.waitTaken(id, sent.Input)
+}
+
+// sessionPath is GET internal/sessions/{id}: --wait waits for its turn to end.
+var sessionPath = regexp.MustCompile(`^/v1/internal/sessions/[^/?]+$`)
+
+// follow prints a command line's output (internal/shell/{run}) until it ends: its exit code.
+func (e *env) follow(run string) int {
+	var from int64
+	for wait := 100 * time.Millisecond; ; {
+		var o api.ShellOutput
+		if err := e.do("GET", "/v1/internal/shell/"+url.PathEscape(run)+"?from="+strconv.FormatInt(from, 10), nil, &o); err != nil {
+			return e.fail(err)
+		}
+		fmt.Fprint(e.out, o.Data)
+		from = o.Next
+		if o.Done {
+			fmt.Fprint(e.err, o.Err)
+			switch {
+			case o.Code != nil:
+				return *o.Code
+			case o.Signal != "":
+				return e.failf("ended by %s", o.Signal)
+			}
+			return exitError
+		}
+		if o.Data != "" {
+			wait = 100 * time.Millisecond
+		} else {
+			wait = min(wait*3/2, time.Second)
+		}
+		time.Sleep(wait)
+	}
 }
 
 // ---- the answer, shaped ----

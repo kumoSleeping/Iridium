@@ -1,8 +1,10 @@
 # METHOD internal/x is /v1/internal/x; a bare name (channel.list) is POST /v1/<name>. Errors: {code, message}.
 # {id}, channel_id: an id's unique start, or self (your session); guild_id=self: your group. person only: not an agent.
 # message.create: _data.text (plain words, escaped by the server) for content; _data.paths: local files (socket only).
+# A path or folder: ~/x, app:path at an app's computer, host:path; a relative one goes from your session's folder.
 
 # common
+POST internal/sessions {agent, cwd, text?, model?, mode?, effort?, preset?, workspace?} -> {id}  start a session; cwd: a place (app:path, host:path, ~/x, a path from your folder); --wait for its reply
 channel.list {guild_id?, next?, _data.all?} -> List<Channel>  sessions; _data.all adds archived  view=id,name,_data.status,_data.agent,_data.cwd,_data.title
 channel.get {channel_id} -> Channel  one session; _data is its Session  view=id,name,_data.status,_data.cwd,_data.title,_data.last.text
 channel.update {channel_id, data.name?, _data.archived?} -> {}  rename (not over a person's name), archive, restore
@@ -11,16 +13,18 @@ guild.list {next?} -> List<Guild>  folder groups, then loose  view=id,name,_data
 message.list {channel_id, next?, direction?, limit?, order?} -> BidiList<Message>  transcript; direction before|after|around  view=id,content
 message.get {channel_id, message_id} -> Message  one block, untruncated
 message.create {channel_id, content?, _data.text?, _data.paths?, _data.attachments?, _data.steer?} -> Message[]  send; joins a running turn (a person may queue: _data.steer=false)  view=id,_data.queued
-GET internal/sessions/{id} - -> SessionState  live state  view=id,status,model,mode,error,asks,queue,end
+POST internal/links {path} -> FileLink  a file's ir: link and the Markdown to put it in your reply; socket only  view=markdown
+PUT internal/secrets/{name} {note?, value?, scope?, workspaces?, always?} -> SecretInfo  set; an agent gets 202 {need}: --wait for the user to type it in
+GET internal/sessions/{id} - -> SessionState  live state; --wait: wait for the turn to end, print its reply  view=id,status,model,mode,error,asks,queue,end
 POST internal/sessions/{id}/interrupt - -> {ok}  end the current turn (Esc); the queue pauses
 POST internal/sessions/{id}/stop - -> {ok}  stop the agent process; the next message restarts it
 POST internal/sessions/{id}/answer {card, option?, choices?, words?, message?} -> {ok}  answer an ask (asks[].card)
+POST internal/files/copy {from, to} -> ndjson  copy a file: from, to are paths here or app:path at an app's computer; prints path, size, sha256; run again to resume; socket only
+POST internal/machines/{id}/shell {line, cwd?} -> output  a command line at an app's computer (id or name); --wait for its output and exit code; host or agents
 PATCH internal/workspaces/{id} {name?} -> {ok}  rename a folder group; host or web
 GET internal/apps - -> Apps  apps, computers, logins  view=apps.id,apps.name,apps.online,apps.computer.home,logins.id,logins.name
 GET internal/files?path&machine - -> DirListing  list a directory; socket only  view=entries.name,entries.size,entries.type
 GET internal/usage?days&app&by - -> Usage  tokens, cost; app=id|name|me, by=hour|weekhour  view=rows.day,rows.agent,rows.model,rows.output,rows.costUsd
-
-# more: ir api help <word> prints the ones it is in
 
 # satori
 meta - -> Meta  this app's approved logins; ir speaks as the first
@@ -32,7 +36,6 @@ upload.create {channel_id} -> {field: url}  multipart: files for a session, each
 # sessions
 GET internal/agents - -> AgentInfo[]  agents that can start here, their modes  view=agent,modes,defaultMode,missing
 GET internal/sessions - -> Session[]  sessions, pinned then recent  view=id,agent,status,name,title,cwd
-POST internal/sessions {agent, cwd, text?, model?, mode?, effort?, preset?, workspace?, machine?} -> {id}  start a session; machine: an app's computer
 PATCH internal/sessions/{id} {name?, byAgent?, pinned?, archived?, workspace?, color?, order?, detach?} -> {ok}  rename, pin, archive, move
 GET internal/sessions/{id}/messages?before&after - -> MessagePage  latest page; before=start, after=end  view=start,end,more,blocks.kind,blocks.text
 GET internal/sessions/{id}/block?at - -> {text}  full text of a truncated block
@@ -62,7 +65,6 @@ POST internal/sessions/{id}/continue - -> {ok}  resume a paused queue
 POST internal/sessions/{id}/shell {line, cwd?} -> {run?, cwd}  run a command line in the session's folder; host or web
 GET internal/shell/{run}?from - -> {data, next, done, code?, signal?, err?}  output from byte offset from (64KB max)
 DELETE internal/shell/{run} - -> {ok}  stop a command line
-POST internal/machines/{id}/shell {line, cwd?} -> {run?, cwd}  ir sh: at an app's computer (id or name); host or agents
 
 # groups and folders
 POST internal/workspaces/{id}/split - -> {ok}  split a group by subfolder; host or web
@@ -84,8 +86,6 @@ GET internal/uploads/{upload} - -> Upload  bytes received so far
 POST internal/uploads/{upload}/complete {sha256} -> Upload  verify and finish; file holds the ref
 DELETE internal/uploads/{upload} - -> {ok}  cancel an upload
 POST internal/sessions/{id}/attach {path} -> FileRef  attach a local file to the session; socket only
-POST internal/links {path} -> FileLink  ir attach: a file's ir: link and Markdown; socket only
-POST internal/files/copy {from, to, fromMachine?, toMachine?} -> ndjson  ir cp: CopyProgress lines, last: path, sha256 or error; socket only
 POST internal/cli {args, cwd} -> ndjson  ir of a session at another computer, by its TOKEN; not on the socket
 
 # share
@@ -96,7 +96,6 @@ GET internal/share/targets?what&session&at&place&ref&path - -> ShareTargets  who
 
 # secrets
 GET internal/secrets - -> Secrets  no values; host only  view=secrets.name,secrets.note,secrets.scope
-PUT internal/secrets/{name} {value?, note?, scope?, workspaces?, always?} -> SecretInfo  set; an agent gets 202 {need}
 DELETE internal/secrets/{name} - -> {ok}  host only, person only
 POST internal/secrets/use {names, command, session?, confirm?} -> {values}  ir run only; socket only; may be 202 {need}
 

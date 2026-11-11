@@ -11,7 +11,7 @@ import (
 // --wait waits for its own turn).
 func TestSendQueueAndSteer(t *testing.T) {
 	_, work := rig(t)
-	r := ir("new", "claude", work, "one WAIT")
+	r := ir("api", "POST", "internal/sessions", "agent=claude", "cwd="+work, "text=one WAIT")
 	if r.code != 0 {
 		t.Fatalf("new: %+v", r)
 	}

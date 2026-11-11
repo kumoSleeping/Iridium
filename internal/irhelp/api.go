@@ -10,11 +10,57 @@ import (
 //go:embed api.txt
 var API string
 
-// Common is API's preamble and its common routes: what every hosted agent's system prompt
-// carries (session.SystemPrompt), the rest left to ir api help <word>.
-func Common() string {
-	c, _, _ := strings.Cut(API, "\n# more")
-	return strings.TrimRight(c, "\n") + "\n"
+// Usage is how ir api is written, what it shows, how --wait waits: the head of ir api help.
+const Usage = `ir api [METHOD] <path|satori.method> [k=v | k:=json | k==query]... [@file|@-] [--pick a,b] [--grep word] [--all] [--clip N] [--json] [--wait]
+  path: internal/x is /v1/internal/x (GET without a body, POST with one, else as METHOD says); a bare name is a Satori method, POST /v1/<name>
+  k=v a string, k:=json any JSON, k==v the query; a.b=... sets a's b; @file, @- the body as it is
+  shown: a line an item, the route's view= fields, values cut to 200 (--clip 0: whole); --pick other fields, --grep words, --all every page, --json as it came
+  --wait: message.create, POST internal/sessions and GET internal/sessions/{id} wait for the turn to end and print its reply; a command line for its output; a 202 {need} for a person to decide
+  exit: 0 done, 2 needs the user (a question, an approval), 1 error
+  ir api help <topic or word>: that topic's routes, or the routes the words are in; ir api help all: every route
+`
+
+// Overview is ir api help: Usage, API's notes (its lines before the first blank one), its topics
+// and its common routes.
+func Overview() string {
+	pre, _, _ := strings.Cut(API, "\n\n")
+	var b strings.Builder
+	b.WriteString(Usage)
+	b.WriteString(pre + "\n")
+	b.WriteString("# topics: " + strings.Join(Topics(), ", ") + "\n")
+	b.WriteString(Section("common"))
+	return b.String()
+}
+
+// Topics are API's headings past its notes.
+func Topics() []string {
+	var out []string
+	_, body, _ := strings.Cut(API, "\n\n")
+	for _, l := range strings.Split(body, "\n") {
+		if t, ok := strings.CutPrefix(l, "# "); ok {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// Section is the routes under heading topic (its start will do), the heading first; "" if none.
+func Section(topic string) string {
+	var b strings.Builder
+	in := false
+	for _, l := range strings.Split(API, "\n") {
+		if t, ok := strings.CutPrefix(l, "# "); ok {
+			in = strings.HasPrefix(strings.ToLower(t), strings.ToLower(topic))
+			if in {
+				b.WriteString(l + "\n")
+			}
+			continue
+		}
+		if in && strings.TrimSpace(l) != "" {
+			b.WriteString(l + "\n")
+		}
+	}
+	return b.String()
 }
 
 // Route is a line of API: its method and path (a Satori method: POST and the method's name),
@@ -83,15 +129,39 @@ func Match(method, path string) (Route, bool) {
 	return Route{}, false
 }
 
-// Find is API's preamble (its lines before the first blank one) and the lines every word is in
-// (case aside), each under its heading; no words, all of it.
+// Find is ir api help <words>: all of API for "all"; a topic's section when the words name one
+// (sessions, secrets…); else the routes every word is in (case aside), each under its heading.
 func Find(words []string) string {
-	if len(words) == 0 {
+	switch {
+	case len(words) == 0:
+		return Overview()
+	case len(words) == 1 && words[0] == "all":
 		return API
+	case len(words) == 1 && words[0] != "":
+		if sec := Section(words[0]); sec != "" {
+			// And the routes elsewhere it is in (a common one, say).
+			var more []string
+			for _, l := range strings.Split(lines(words), "\n") {
+				if l != "" && !strings.HasPrefix(l, "# ") && !strings.Contains(sec, l+"\n") {
+					more = append(more, l)
+				}
+			}
+			if len(more) > 0 {
+				sec += "# also\n" + strings.Join(more, "\n") + "\n"
+			}
+			return sec
+		}
 	}
-	pre, body, _ := strings.Cut(API, "\n\n")
+	if l := lines(words); l != "" {
+		return l
+	}
+	return "no route has " + strings.Join(words, " ") + "; topics: " + strings.Join(Topics(), ", ") + "\n"
+}
+
+// lines are the routes every word is in (case aside), each under its heading.
+func lines(words []string) string {
+	_, body, _ := strings.Cut(API, "\n\n")
 	var b strings.Builder
-	b.WriteString(pre + "\n")
 	head := ""
 	for _, l := range strings.Split(body, "\n") {
 		if strings.HasPrefix(l, "# ") {

@@ -102,35 +102,10 @@ func TestParseAPI(t *testing.T) {
 	if c, err = parseAPI([]string{"channel.list", "--all"}); err != nil || !c.satori || c.method != "POST" || c.path != "/v1/channel.list" {
 		t.Errorf("satori: %+v %v", c, err)
 	}
-	for _, bad := range [][]string{{"GET", "internal/x", "k=v"}, {"PUT", "channel.list"}, {"internal/x", "--all"}, {"channel.list", "--wait"}, {"x/y", "nokey"}, {}} {
+	for _, bad := range [][]string{{"GET", "internal/x", "k=v"}, {"PUT", "channel.list"}, {"internal/x", "--all"}, {"x/y", "nokey"}, {}} {
 		if _, err := parseAPI(bad); err == nil {
 			t.Errorf("%q: no error", bad)
 		}
-	}
-}
-
-func TestParse(t *testing.T) {
-	o, err := parse([]string{"id", "--wait", "-a", "x.png", "msg", "--attach=y.txt", "--", "--not-a-flag"}, "wait attach")
-	if err != nil || !o.wait || !reflect.DeepEqual(o.attach, []string{"x.png", "y.txt"}) || !reflect.DeepEqual(o.pos, []string{"id", "msg", "--not-a-flag"}) {
-		t.Errorf("parse: %+v %v", o, err)
-	}
-	if _, err := parse([]string{"--model", "haiku"}, "wait"); err == nil {
-		t.Error("took a flag not allowed")
-	}
-	if _, err := parse([]string{"--model"}, "model"); err == nil {
-		t.Error("took a flag without its value")
-	}
-	for arg, peer := range map[string]bool{"mac:~/dir": true, "kumo-m2:/tmp/a": true, "工作站:/x": true, "/abs:path": false, "./a:b": false, "plain": false, "~/x": false, "host:/tmp": false, "主机:~/x": false} {
-		_, err := localPath(arg)
-		if _, isPeer := err.(errPeer); isPeer != peer {
-			t.Errorf("%s: %v", arg, err)
-		}
-	}
-	if p, err := localPath("host:/tmp/x"); err != nil || p != "/tmp/x" {
-		t.Errorf("host:/tmp/x: %q %v", p, err)
-	}
-	if short("abcdefgh1234", []string{"abcdefgh1234", "abcdefgh5678"}) != "abcdefgh1" {
-		t.Error("short id")
 	}
 }
 
@@ -210,12 +185,12 @@ func ir(args ...string) result {
 func TestAgentCommands(t *testing.T) {
 	cfg, work := rig(t)
 
-	r := ir("new", "claude", work, "hello", "--wait")
+	r := ir("api", "POST", "internal/sessions", "agent=claude", "cwd="+work, "text=hello", "--wait")
 	lines := strings.Split(strings.TrimSpace(r.out), "\n")
-	if r.code != 0 || len(lines) != 2 || len(lines[0]) != 8 || lines[1] != "ok: hello" {
-		t.Fatalf("new --wait: %+v", r)
+	if r.code != 0 || len(lines) != 2 || len(lines[0]) != 36 || lines[1] != "ok: hello" {
+		t.Fatalf("POST internal/sessions --wait: %+v", r)
 	}
-	sid := lines[0]
+	sid := lines[0][:8]
 	var full string
 	for _, id := range (&env{}).idsFrom(t, cfg) {
 		if strings.HasPrefix(id, sid) {
@@ -237,7 +212,7 @@ func TestAgentCommands(t *testing.T) {
 	if r := send(sid, "third"); r.code != 0 || r.out != "" {
 		t.Errorf("message.create: %+v", r)
 	}
-	if r := ir("wait", sid); r.code != 0 || r.out != "ok: third\n" {
+	if r := ir("api", "internal/sessions/"+sid, "--wait"); r.code != 0 || r.out != "ok: third\n" {
 		t.Errorf("wait: %+v", r)
 	}
 	// _data.text is plain words: what looks like markup goes as it is.
@@ -250,14 +225,14 @@ func TestAgentCommands(t *testing.T) {
 	if r.code != 2 || !strings.Contains(r.out, "需要你：审批 Bash") || !strings.Contains(r.out, `"command":"ls"`) {
 		t.Fatalf("ask: %+v", r)
 	}
-	if r := ir("wait", sid); r.code != 2 {
+	if r := ir("api", "internal/sessions/"+sid, "--wait"); r.code != 2 {
 		t.Errorf("wait with the ask open: %+v", r)
 	}
 	var ok map[string]any
 	if err := (&env{}).client(cfg).do("POST", "/v1/internal/sessions/"+full+"/answer", api.CardAnswer{Card: "ask:" + full + ":ask-1", Option: "allow"}, &ok); err != nil {
 		t.Fatal(err)
 	}
-	if r := ir("wait", sid); r.code != 0 || r.out != "ok: please ASK\n" {
+	if r := ir("api", "internal/sessions/"+sid, "--wait"); r.code != 0 || r.out != "ok: please ASK\n" {
 		t.Errorf("wait after the answer: %+v", r)
 	}
 
@@ -349,11 +324,14 @@ func TestAgentCommands(t *testing.T) {
 	if r := ir("api", "channel.update", "channel_id=self", "data.name=own"); r.code != 1 || !strings.Contains(r.err, "no such session") {
 		t.Errorf("self, not a session: %+v", r)
 	}
-	if r := ir("wait", "ffffffff"); r.code != 1 || !strings.Contains(r.err, "no session") {
+	if r := ir("api", "internal/sessions/ffffffff", "--wait"); r.code != 1 || !strings.Contains(r.err, "no such session") {
 		t.Errorf("unknown id: %+v", r)
 	}
-	// What ir api takes: a path or a method; k=v, k:=json or k==v; --wait only for message.create.
-	for _, bad := range [][]string{{"api"}, {"api", "channel.list", "nokey"}, {"api", "channel.list", "a:=nope"}, {"api", "channel.list", "--wait"}, {"api", "channel.list", "--text", "x"}} {
+	// What ir api takes: a path or a method; k=v, k:=json or k==v. Alone, its help.
+	if r := ir("api"); r.code != 0 || !strings.Contains(r.out, "# topics: ") {
+		t.Errorf("ir api: %+v", r)
+	}
+	for _, bad := range [][]string{{"api", "channel.list", "nokey"}, {"api", "channel.list", "a:=nope"}, {"api", "channel.list", "--text", "x"}} {
 		if r := ir(bad...); r.code != 1 || !strings.Contains(r.err, "usage: ir api") {
 			t.Errorf("%v: %+v", bad, r)
 		}
@@ -372,23 +350,20 @@ func TestAgentCommands(t *testing.T) {
 	if r := ir("api", "POST", "internal/sessions/"+sid+"/stop"); r.code != 0 || r.out != "ok: true\n" {
 		t.Errorf("stop: %+v", r)
 	}
-	if r := ir("wait", "mac/"+sid); r.code != 1 || !strings.Contains(r.err, "no session mac/") {
+	if r := ir("api", "internal/sessions/mac/"+sid, "--wait"); r.code != 1 || r.err == "" {
 		t.Errorf("machine/id: %+v", r)
 	}
-	// ir share: a session, a folder; to no login, an error saying so.
-	for _, what := range []string{sid, work} {
-		if r := ir("share", "ir_web/nobody", what, "看看"); r.code != 1 || !strings.Contains(r.err, "no such login") {
+	// Sharing a session, a folder: to no login, an error saying so.
+	for _, what := range [][]string{{"what=session", "session=" + sid}, {"what=place", "place=" + work}} {
+		if r := ir(append([]string{"api", "POST", "internal/share", "to=ir_web/nobody", "note=看看"}, what...)...); r.code != 1 || !strings.Contains(r.err, "no such login") {
 			t.Errorf("share %s: %+v", what, r)
 		}
 	}
-	if r := ir("share", sid); r.code != 1 || !strings.Contains(r.err, "usage: ir share") {
-		t.Errorf("share without a login: %+v", r)
-	}
 	// A place at an app not there; the host's by its name.
-	if r := ir("new", "claude", "mac:~/dir", "x"); r.code != 1 || !strings.Contains(r.err, "no computer mac") {
+	if r := ir("api", "POST", "internal/sessions", "agent=claude", "cwd=mac:~/dir", "text=x"); r.code != 1 || !strings.Contains(r.err, "no computer mac") {
 		t.Errorf("place at mac: %+v", r)
 	}
-	if r := ir("new", "claude", "host:"+work, ""); r.code != 0 {
+	if r := ir("api", "POST", "internal/sessions", "agent=claude", "cwd=host:"+work); r.code != 0 {
 		t.Errorf("place at the host: %+v", r)
 	} else if ls := ls(); strings.Count(ls.out, "\t"+work+"\t") != 2 {
 		t.Errorf("a folder at the host, as it is: %q", ls.out)
@@ -404,14 +379,15 @@ func TestFileCommands(t *testing.T) {
 	os.Mkdir(dst, 0o700)
 	sum := sha256.Sum256(data)
 	want := filepath.Join(dst, "a.bin") + "\t100000\t" + hex.EncodeToString(sum[:]) + "\n"
-	if r := ir("cp", src, dst); r.code != 0 || r.out != want {
+	cp := func(from, to string) result { return ir("api", "POST", "internal/files/copy", "from="+from, "to="+to) }
+	if r := cp(src, dst); r.code != 0 || r.out != want {
 		t.Errorf("cp: %+v", r)
 	}
-	if r := ir("cp", src, dst); r.code != 1 || !strings.Contains(r.err, "never overwritten") {
+	if r := cp(src, dst); r.code != 1 || !strings.Contains(r.err, "never overwritten") {
 		t.Errorf("cp over: %+v", r)
 	}
 	// machine:path goes to that machine's executor (none here).
-	if r := ir("cp", "mac:~/a", dst); r.code != 1 || !strings.Contains(r.err, "no executors here") {
+	if r := cp("mac:~/a", dst); r.code != 1 || !strings.Contains(r.err, "no executors here") {
 		t.Errorf("cp from another machine: %+v", r)
 	}
 	r := ir("api", "internal/files", "path=="+work)
@@ -441,7 +417,7 @@ func TestWorkspaceCommands(t *testing.T) {
 	}
 	dir := filepath.Join(work, "proj")
 	os.MkdirAll(dir, 0o700)
-	r := ir("new", "claude", dir, "hello", "--wait")
+	r := ir("api", "POST", "internal/sessions", "agent=claude", "cwd="+dir, "text=hello", "--wait")
 	if r.code != 0 {
 		t.Fatalf("new: %+v", r)
 	}
@@ -459,8 +435,8 @@ func TestWorkspaceCommands(t *testing.T) {
 	if r := ir("api", "guild.get", "guild_id="+id, "--json"); r.code != 0 || !strings.Contains(r.out, `"name":"Bee"`) {
 		t.Errorf("guild.get: %+v", r)
 	}
-	// ir new --workspace takes a group by its name.
-	if r := ir("new", "claude", work, "", "--workspace", "bee"); r.code != 0 {
-		t.Errorf("new --workspace: %+v", r)
+	// A new session put in a group by its id.
+	if r := ir("api", "POST", "internal/sessions", "agent=claude", "cwd="+work, "workspace:="+id); r.code != 0 {
+		t.Errorf("new in a group: %+v", r)
 	}
 }

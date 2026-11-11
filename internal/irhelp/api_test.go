@@ -67,16 +67,23 @@ func TestFindAndCommon(t *testing.T) {
 	if r, ok := Match("POST", "channel.list"); !ok || !r.Satori || len(r.View) == 0 {
 		t.Errorf("Match channel.list: %+v %v", r, ok)
 	}
-	pre, _, _ := strings.Cut(API, "\n\n")
-	f := Find([]string{"secrets"})
-	if !strings.HasPrefix(f, pre+"\n# secrets\n") || strings.Contains(f, "channel.list {") {
-		t.Errorf("Find: %q", f)
+	o := Find(nil)
+	if !strings.HasPrefix(o, Usage) || !strings.Contains(o, "# topics: common, satori, sessions") || !strings.Contains(o, "# common\nPOST internal/sessions") || strings.Contains(o, "internal/secrets/use") {
+		t.Errorf("overview: %q", o)
 	}
-	c := Common()
-	if !strings.Contains(c, "message.create ") || strings.Contains(c, "internal/secrets") || !strings.HasPrefix(c, pre) {
-		t.Errorf("Common: %q", c)
+	if f := Find([]string{"secrets"}); !strings.HasPrefix(f, "# secrets\nGET internal/secrets ") || !strings.Contains(f, "# also\nPUT internal/secrets/{name}") || strings.Contains(f, "# common") {
+		t.Errorf("a topic: %q", f)
 	}
-	if n := strings.Count(Help, "\n"); n > 20 {
+	if f := Find([]string{"queue", "drop"}); f != "# queue\nDELETE internal/sessions/{id}/queue/{input} - -> {ok}  drop a queued input\n" {
+		t.Errorf("words: %q", f)
+	}
+	if f := Find([]string{"no-such-word"}); !strings.Contains(f, "topics: ") {
+		t.Errorf("nothing found: %q", f)
+	}
+	if Find([]string{"all"}) != API {
+		t.Error("all")
+	}
+	if n := strings.Count(Help, "\n"); n > 8 {
 		t.Errorf("ir --help is %d lines", n)
 	}
 }

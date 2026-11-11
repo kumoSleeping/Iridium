@@ -88,6 +88,7 @@ function namesSelf(args: string[], sub?: string): boolean {
 function irApiOf(method: string | undefined, args: string[]): Cmd | undefined {
   if (method?.includes("/")) {
     const p = method.replace(/^\/?(v1\/)?/, "").split("?")[0]!;
+    if (p === "internal/sessions") return "ir-new";
     if (/^internal\/sessions\/[^/]+\/(stop|interrupt)$/.test(p)) return "ir-stop";
     if (/^internal\/files$/.test(p)) return "ir-files";
     if (/^internal\/workspaces\//.test(p)) return "ir-ws";

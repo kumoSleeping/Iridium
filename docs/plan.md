@@ -64,15 +64,12 @@ Rhodium 的轻量 Go 版本：一个网页，管理主机和别的电脑上 agen
 
 ## `ir`
 
-和 Iridium 同一个二进制，经本机 unix socket（0600）走网页那套接口。`ir api` 把请求原样发出去（透传，用户，2026-11-11）；只有在客户端做了事的才是单独的命令（`new`、`wait`、`cp`、`sh`、`run`、`share`、`attach`、凭据和管理）。
-
-agent 用：
+和 Iridium 同一个二进制，经本机 unix socket（0600）走网页那套接口。`ir api` 把请求原样发出去（透传，用户，2026-11-11）；只留它做不了的：`run`（在本机把凭据换进命令、输出打码），和人在终端跑的 `public`、`join`、`pair`。
 
 ```
 ir api [方法] <路径|satori.方法> [k=v | k:=JSON | k==查询]... [@文件|@-] [--pick a,b] [--grep 词] [--all] [--clip N] [--json] [--wait]
-ir api help [词]               接口说明（irhelp/api.txt）
-ir new <agent> [位置] "任务"   开会话，返回 ID；位置 应用名:路径，不写前缀是自己所在的电脑
-ir wait <id>                   等回合结束，打印最后一段回复
+ir api help [话题|词|all]       用法、话题和常用接口 | 一个话题的接口 | 含这些词的接口 | 全部
+ir run [--secret 名,…] -- 命令 …
 ```
 
 以前的命令和现在的写法：
@@ -85,13 +82,26 @@ ir wait <id>                   等回合结束，打印最后一段回复
 | `ir rename` / `archive` | `ir api channel.update channel_id=<id>\|self data.name=<名>`、`channel.delete` |
 | `ir stop <id>` | `ir api POST internal/sessions/<id>/stop` |
 | `ir ws [ls]` / `ws rename` | `ir api guild.list`、`ir api PATCH internal/workspaces/<组> name=<名>` |
-| `ir files <目录>` | `ir api internal/files path==<绝对路径>` |
+| `ir files <目录>` | `ir api internal/files path==<目录>` |
+| `ir wait <id>` | `ir api internal/sessions/<id> --wait` |
+| `ir cp <源> <目标>` | `ir api POST internal/files/copy from=<源> to=<目标>`（两边都可写 `应用名:路径`） |
+| `ir sh <应用> -- 命令` | `ir api POST internal/machines/<应用>/shell line="命令" --wait` |
+| `ir update [--check]` | `ir api POST internal/update`、`POST internal/update/check` |
+| `ir new <agent> [位置] "任务" [--wait]` | `ir api POST internal/sessions agent=<agent> cwd=<位置> text="任务" [--wait]` |
+| `ir attach <文件>` | `ir api POST internal/links path=<文件>` |
+| `ir share 应用/登录 <…>` | `ir api POST internal/share to=应用/登录 what=session\|place\|file …` |
+| `ir secret set/ls/rm` | `ir api PUT internal/secrets/<名> note=… --wait`、`internal/secrets`、`DELETE internal/secrets/<名>` |
+| `ir usage` | `ir api internal/usage days==7` |
+| `ir apps`、`profile`、`invite`、`needs`、`allow`、`deny` | `ir api internal/apps`、`PUT internal/apps/<id>/profile`、`POST internal/invites`、`internal/needs`、`POST internal/needs/<id> allow:=true` |
 
 - 透传：`ir` 只补头（`X-Iridium-Session`，Satori 的登录头），不改请求。有 `/` 的是 `/v1/<路径>`（不带正文 GET，带了 POST，写了方法照写的）；没有的是 Satori 方法，`POST /v1/<方法>`。`k=v` 字符串，`k:=JSON` 任意 JSON，`k==v` 查询串，带点的键写进对象。
 - 原来 `ir` 替人做的搬进服务端，谁调都一样：会话 ID 的开头和 `self`（`/v1/internal/sessions/{id}/…` 和 `channel_id`；`guild_id=self`），`message.create` 的 `_data.text`（纯文字，服务端转义）和 `_data.paths`（主机上的文件，只认 socket），来源从 `X-Iridium-Session` 取（不用 `_data.caller`）。
 - 输出只在回答这一侧加工：列表一项一行，`view=` 指定的字段排成表（`--pick` 换别的），对象一字段一行、它里面的对象数组各成一张表；空值不打，每个值一行、截到 200 字（`--clip`）；Satori 消息的 `content` 转成文字（人说的前面 `> [来源]`，工具、思考、系统行标出来）。`--grep` 筛项，`--all` 跟着 `next` 取完，`--json` 原样。
-- 接口说明 `internal/irhelp/api.txt`：一个接口一行（方法 路径 正文 -> 回答 说明 view=）。前面“common”一段（会话、消息、组、停止、提问、应用、文件、用量）写进托管会话的系统提示，其余的 agent 用 `ir api help <词>` 查，平衡开头占用和调用次数（用户，2026-11-11）。测试核对它和服务端注册的路由一条不差。
-- `message.create` 不带 `--wait` 也等到 agent 接了这条再返回（最多 15 秒），紧接着的 `ir wait` 等的才是这一回合。
+- 接口说明 `internal/irhelp/api.txt`：一个接口一行（方法 路径 正文 -> 回答 说明 view=），按话题分段，测试核对它和服务端注册的路由一条不差。系统提示只有几行（`ir api`、`ir run`、凭据、交文件、起标题、语言），不放接口表：agent 先 `ir api help`（用法、注意、话题、常用接口），用到哪块再 `ir api help <话题>`（用户，2026-11-11：提示词大量砍，用什么就 help 什么）。
+- 回答是 ndjson 的（远端命令行的输出、拷贝的进度）边收边打：命令行的输出原样，退出码照它；拷贝在终端上画进度，最后一行 `路径 大小 sha256`。`--wait` 在 `GET internal/sessions/{id}` 上等回合结束。
+- `message.create` 和带 `text` 的 `POST internal/sessions` 不带 `--wait` 也等到 agent 接了这条再返回（最多 15 秒），紧接着的 `ir wait` 等的才是这一回合；带 `--wait` 等回合结束、打印回复。回 202 `{need}`（agent 要邀请、要人填凭据）时 `--wait` 等人决定，只说结果。
+- 位置和路径服务端认（`server/places.go`）：`应用名:路径`、`host:路径`、`~/x`；相对路径和 `.` 从调用者会话的目录起（会话在那台电脑上时），否则要整路径。新会话的 `cwd`、`internal/links`、`attach`、`internal/files`、`_data.paths` 都这样。
+- `ir api` 带 `X-Iridium-Agent`（规则同管理命令：环境里有 agent 的会话变量，或 stdin/stdout 不全是终端），agent 拿不到秘密、批不了需要。
 - `new`、`message.create` 可加 `--wait`；`new` 可选 `--model`、`--approve`。`wait` 退出码：0 结束，2 需要你，1 出错/已退出。
 - 组不能手建、删除、挪会话（2026-11-08），只能改名。
 - 新会话进调用者的组（组的文件夹包含它的目录时），否则按目录归组；列表里挂在调用者下面（见“派出的会话”）。没有汇报、agent 间权限。

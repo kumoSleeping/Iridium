@@ -18,49 +18,6 @@ const (
 	exitNeeds = 2 // an ask is open: it needs you
 )
 
-// ir new <agent> [dir] "task"
-func cmdNew(e *env, args []string) int {
-	o, err := parse(args, "wait model approve machine workspace")
-	if err != nil {
-		return e.fail(err)
-	}
-	if len(o.pos) < 1 || len(o.pos) > 3 {
-		return e.failf(`usage: ir new <agent> [位置] "任务" [--workspace <组>]（位置：目录，或 应用名:路径、host:路径）`)
-	}
-	req := api.NewSession{Agent: api.Agent(o.pos[0]), Model: o.model, Mode: o.approve, Caller: e.caller()}
-	dir := "."
-	switch len(o.pos) {
-	case 2:
-		req.Text = o.pos[1]
-	case 3:
-		dir, req.Text = o.pos[1], o.pos[2]
-	}
-	if req.Machine, req.Cwd, err = e.where(o.machine, dir); err != nil {
-		return e.fail(err)
-	}
-	if o.group != "" {
-		w, err := e.workspace(o.group)
-		if err != nil {
-			return e.fail(err)
-		}
-		if req.Workspace, err = strconv.ParseInt(w, 10, 64); err != nil {
-			return e.failf("no workspace %s", o.group)
-		}
-	}
-	var created api.NewSessionReply
-	if err := e.do("POST", "/v1/internal/sessions", req, &created); err != nil {
-		return e.fail(err)
-	}
-	fmt.Fprintln(e.out, short(created.ID, e.ids()))
-	if strings.TrimSpace(req.Text) == "" {
-		return exitDone
-	}
-	if o.wait {
-		return e.waitTurn(created.ID, anyInput)
-	}
-	return e.waitTaken(created.ID, anyInput)
-}
-
 // waitQueued waits for a queued message to leave the queue: -1 once it went to the agent, else
 // the exit code (paused: it needs you to continue).
 func (e *env) waitQueued(id, input string) int {
@@ -79,19 +36,6 @@ func (e *env) waitQueued(id, input string) int {
 		}
 		time.Sleep(poll)
 	}
-}
-
-// ir wait <id>
-func cmdWait(e *env, args []string) int {
-	o, err := parse(args, "")
-	if err != nil || len(o.pos) != 1 {
-		return e.failf("usage: ir wait <id>")
-	}
-	id, err := e.resolve(o.pos[0])
-	if err != nil {
-		return e.fail(err)
-	}
-	return e.waitTurn(id, "")
 }
 
 // anyInput: the message waited on is the session's first, whatever its id.
@@ -252,13 +196,6 @@ func (e *env) printAsks(asks []api.Ask) {
 		fmt.Fprintf(e.out, "需要你：%s %s %s\n", what, a.Tool, s)
 	}
 }
-
-// What ir api message.list shows of each message.
-const (
-	readCount = 10
-	askLen    = 80
-	replyLen  = 300
-)
 
 // clip is text on one line, cut to n runes.
 func clip(text string, n int) string {
