@@ -220,7 +220,9 @@ func TestDraftTool(t *testing.T) {
 			t.Fatalf("no draft after %q", text)
 		}
 		d := draftOf(t, e)
-		if d.N != 2 || d.Tool == nil || d.Tool.ID != "toolu_1" || d.Tool.Name != "Bash" {
+		// The seal alone (the pieces went before it) carries no tool: it only ends draft N.
+		lone := d.Done && d.Text == "" && d.Tool == nil
+		if d.N != 2 || !lone && (d.Tool == nil || d.Tool.ID != "toolu_1" || d.Tool.Name != "Bash") {
 			t.Fatalf("tool draft %+v", d)
 		}
 		text += d.Text
