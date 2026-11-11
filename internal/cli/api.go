@@ -29,10 +29,10 @@ import (
 // self are the server's to take (docs/api.md "会话 ID"). The answer is what ir shapes: a line an
 // item, the fields the reference's view= names (--pick others), each value on one line and cut
 // short (--clip), a Satori message's content as plain words; --json shows it as it came.
-// ir api help [word]... prints the reference (irhelp.API).
+// ir api help [route | topic | word...] prints the reference a layer at a time (irhelp.Find).
 
 const apiUsage = `usage: ir api [METHOD] <path|satori.method> [k=v | k:=json | k==query]... [@file|@-] [--pick a,b] [--grep word] [--all] [--clip N] [--json] [--wait]
-       ir api help [word]...   the routes, their bodies and answers`
+       ir api help [route | topic | word...]   a route with its notes, a topic's routes, the routes words are in`
 
 // clipLen is how much of a value ir api shows by default.
 const clipLen = 200

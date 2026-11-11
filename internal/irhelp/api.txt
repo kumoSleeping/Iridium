@@ -4,18 +4,31 @@
 # A path or folder: ~/x, app:path at an app's computer, host:path; a relative one goes from your session's folder.
 
 # common
-POST internal/sessions {agent, cwd, text?, model?, mode?, effort?, preset?, workspace?} -> {id}  start a session; cwd: a place (app:path, host:path, ~/x, a path from your folder); --wait for its reply
+POST internal/sessions {agent, cwd, text?, model?, mode?, effort?, preset?, workspace?, caller?} -> {id}  start a session, a child of yours; cwd=. your folder; --wait for its reply
+  caller: the session it hangs under on the page (its launcher). Not given: the session your ir runs in, so one you start is your child: listed under you, archived with you. To start one of its own: PATCH internal/sessions/{id} detach:=true after.
+  cwd: . is your own folder and a relative path goes from it; ~ and ~/x the home; host:path here; app:path at that app's computer (GET internal/apps), where it then runs; an absolute path as it is.
+  workspace: a folder group's id (guild.list); not given: its folder's group, yours when yours holds its folder.
+  agent: claude, codex, pi or dsh (GET internal/agents: those that can start here, their modes); mode: one of them; model, effort, preset: the agent's own (SessionState.models, efforts; GET internal/sessions/{id}/presets).
+  text: its first message, from you: it reads [ir:<your session>] before it. ir prints the id, with text once the agent took it; --wait: once that turn ended, its reply too; later: GET internal/sessions/{id} --wait.
 channel.list {guild_id?, next?, _data.all?} -> List<Channel>  sessions; _data.all adds archived  view=id,name,_data.status,_data.agent,_data.cwd,_data.title
+  _data is the Session: _data.launcher the session that started it (it hangs under that one), _data.own a person opened it or took it out; --pick id,name,_data.launcher shows who is under whom.
+  guild_id: a folder group's (guild.list); self: yours.
 channel.get {channel_id} -> Channel  one session; _data is its Session  view=id,name,_data.status,_data.cwd,_data.title,_data.last.text
 channel.update {channel_id, data.name?, _data.archived?} -> {}  rename (not over a person's name), archive, restore
+  data.name: a short name; an agent's never covers one a person gave. _data.archived: true archives it and the sessions hung under it (their agents stop), false brings them back.
 channel.delete {channel_id} -> {}  archive: its agent stops, the transcript stays
+  The sessions hung under it are archived with it; channel.update _data.archived:=false brings them back.
 guild.list {next?} -> List<Guild>  folder groups, then loose  view=id,name,_data.path
 message.list {channel_id, next?, direction?, limit?, order?} -> BidiList<Message>  transcript; direction before|after|around  view=id,content
 message.get {channel_id, message_id} -> Message  one block, untruncated
 message.create {channel_id, content?, _data.text?, _data.paths?, _data.attachments?, _data.steer?} -> Message[]  send; joins a running turn (a person may queue: _data.steer=false)  view=id,_data.queued
+  _data.text: plain words (the server escapes them); content: Satori elements as they are. The session reads [ir:<your session>] before it.
+  _data.paths: files here to attach (relative: from your folder; socket only); _data.attachments: refs upload.create gave.
+  Returns once the agent took it; --wait: once that turn ended, with its reply (exit 2: it waits for a person).
 POST internal/links {path} -> FileLink  a file's ir: link and the Markdown to put it in your reply; socket only  view=markdown
 PUT internal/secrets/{name} {note?, value?, scope?, workspaces?, always?} -> SecretInfo  set; an agent gets 202 {need}: --wait for the user to type it in
 GET internal/sessions/{id} - -> SessionState  live state; --wait: wait for the turn to end, print its reply  view=id,status,model,mode,error,asks,queue,end
+  --wait: until its turn ends, then its last reply; exit 2 when it waits for a person (asks: its questions; POST internal/sessions/{id}/answer answers one).
 POST internal/sessions/{id}/interrupt - -> {ok}  end the current turn (Esc); the queue pauses
 POST internal/sessions/{id}/stop - -> {ok}  stop the agent process; the next message restarts it
 POST internal/sessions/{id}/answer {card, option?, choices?, words?, message?} -> {ok}  answer an ask (asks[].card)
@@ -37,6 +50,10 @@ upload.create {channel_id} -> {field: url}  multipart: files for a session, each
 GET internal/agents - -> AgentInfo[]  agents that can start here, their modes  view=agent,modes,defaultMode,missing
 GET internal/sessions - -> Session[]  sessions, pinned then recent  view=id,agent,status,name,title,cwd
 PATCH internal/sessions/{id} {name?, byAgent?, pinned?, archived?, workspace?, color?, order?, detach?} -> {ok}  rename, pin, archive, move
+  name with byAgent:=true: an agent's name, never over one a person gave (channel.update sets it by itself).
+  archived: true archives it and the sessions hung under it, false brings them back.
+  detach:=true: out from under its launcher, into its own folder's group, for good.
+  workspace: into that folder group (guild.list) by hand; pinned, color, order: as the page's menu.
 GET internal/sessions/{id}/messages?before&after - -> MessagePage  latest page; before=start, after=end  view=start,end,more,blocks.kind,blocks.text
 GET internal/sessions/{id}/block?at - -> {text}  full text of a truncated block
 GET internal/sessions/{id}/image?at&n - -> image  the n-th image a tool result gave the model

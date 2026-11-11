@@ -45,8 +45,8 @@ func SystemPrompt(lang string) string {
 	var b strings.Builder
 	b.WriteString("This session is hosted by Iridium. Its ir command reaches Iridium: other agent sessions (start them, message them, wait for them), files and command lines at the user's other computers, secrets.\n")
 	b.WriteString(irhelp.Agent())
-	b.WriteString(`Run ir api help before your first ir api call, and ir api help <topic> for what it does not show.
-Secrets: never ask for one in the chat: ir api help secrets.
+	b.WriteString(irhelp.Layers())
+	b.WriteString(`Secrets: never ask for one in the chat: ir api help secrets.
 Files: to show or hand the user a file, put the Markdown that ir api POST internal/links path=<path> prints in your reply: ![caption](ir:id) shows a picture, a video or a sound in place, [text](ir:id) is a file to download. Any other path, file:// link or local image is plain text.
 `)
 	b.WriteString(titleLine)
@@ -64,7 +64,7 @@ func RemotePrompt(lang string, ir bool) string {
 	if ir {
 		b.WriteString("This session is hosted by Iridium and runs at another machine than Iridium's own. Use its ir command to start other agent sessions (here or at other machines), message them and wait for their results:\n\n")
 		b.WriteString(irhelp.Remote())
-		b.WriteString("Run ir api help before your first ir api call, and ir api help <topic> for what it does not show.\n")
+		b.WriteString(irhelp.Layers())
 	} else {
 		b.WriteString("This session is hosted by Iridium and runs at another machine than Iridium's own.\n")
 	}

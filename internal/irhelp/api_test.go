@@ -68,7 +68,7 @@ func TestFindAndCommon(t *testing.T) {
 		t.Errorf("Match channel.list: %+v %v", r, ok)
 	}
 	o := Find(nil)
-	if !strings.HasPrefix(o, Usage) || !strings.Contains(o, "# topics: common, satori, sessions") || !strings.Contains(o, "# common\nPOST internal/sessions") || strings.Contains(o, "internal/secrets/use") {
+	if !strings.HasPrefix(o, Usage) || !strings.Contains(o, "(common, satori, sessions") || !strings.Contains(o, "# common\nPOST internal/sessions") || strings.Contains(o, "internal/secrets/use") {
 		t.Errorf("overview: %q", o)
 	}
 	if f := Find([]string{"secrets"}); !strings.HasPrefix(f, "# secrets\nGET internal/secrets ") || !strings.Contains(f, "# also\nPUT internal/secrets/{name}") || strings.Contains(f, "# common") {
@@ -80,8 +80,31 @@ func TestFindAndCommon(t *testing.T) {
 	if f := Find([]string{"no-such-word"}); !strings.Contains(f, "topics: ") {
 		t.Errorf("nothing found: %q", f)
 	}
-	if Find([]string{"all"}) != API {
-		t.Error("all")
+	// all: every route, notes left out, marked where there are some.
+	if a := Find([]string{"all"}); !strings.Contains(a, "# settings (admin)\n") || strings.Contains(a, "\n  caller:") || !strings.Contains(a, "caller?} -> {id}") || strings.Count(a, "  [more]") < 5 {
+		t.Errorf("all: %q", a)
+	}
+	// A route, by method and path, by path alone (as sent too), or a Satori method's name: its
+	// line and notes.
+	full := Find([]string{"POST", "internal/sessions"})
+	if !strings.HasPrefix(full, "POST internal/sessions {") || !strings.Contains(full, "\n  caller: ") || strings.Contains(full, "\nGET internal/sessions") {
+		t.Errorf("a route: %q", full)
+	}
+	if f := Find([]string{"/v1/internal/sessions"}); !strings.Contains(f, full) || !strings.Contains(f, "GET internal/sessions - ") {
+		t.Errorf("a path, both methods: %q", f)
+	}
+	if f := Find([]string{"patch", "internal/sessions/abc"}); !strings.HasPrefix(f, "PATCH internal/sessions/{id} ") || !strings.Contains(f, "\n  detach:=true") {
+		t.Errorf("a path as sent: %q", f)
+	}
+	if f := Find([]string{"channel.delete"}); !strings.HasPrefix(f, "channel.delete ") || !strings.Contains(f, "\n  The sessions hung under it") {
+		t.Errorf("a Satori method: %q", f)
+	}
+	// Notes stay out of lists; a word found in one brings that note along.
+	if f := Find([]string{"common"}); strings.Contains(f, "\n  ") || !strings.Contains(f, "caller?} -> {id}  start a session, a child of yours; cwd=. your folder; --wait for its reply  [more]\n") {
+		t.Errorf("a topic with notes: %q", f)
+	}
+	if f := Find([]string{"launcher"}); !strings.Contains(f, "\n  caller: the session it hangs under") || !strings.Contains(f, "\n  detach:=true") || strings.Contains(f, "\n  cwd:") {
+		t.Errorf("a word in notes: %q", f)
 	}
 	if n := strings.Count(Help, "\n"); n > 8 {
 		t.Errorf("ir --help is %d lines", n)

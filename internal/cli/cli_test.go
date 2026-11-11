@@ -328,7 +328,7 @@ func TestAgentCommands(t *testing.T) {
 		t.Errorf("unknown id: %+v", r)
 	}
 	// What ir api takes: a path or a method; k=v, k:=json or k==v. Alone, its help.
-	if r := ir("api"); r.code != 0 || !strings.Contains(r.out, "# topics: ") {
+	if r := ir("api"); r.code != 0 || !strings.Contains(r.out, "a layer at a time") {
 		t.Errorf("ir api: %+v", r)
 	}
 	for _, bad := range [][]string{{"api", "channel.list", "nokey"}, {"api", "channel.list", "a:=nope"}, {"api", "channel.list", "--text", "x"}} {

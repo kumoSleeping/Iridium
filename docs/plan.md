@@ -68,7 +68,7 @@ Rhodium 的轻量 Go 版本：一个网页，管理主机和别的电脑上 agen
 
 ```
 ir api [方法] <路径|satori.方法> [k=v | k:=JSON | k==查询]... [@文件|@-] [--pick a,b] [--grep 词] [--all] [--clip N] [--json] [--wait]
-ir api help [话题|词|all]       用法、话题和常用接口 | 一个话题的接口 | 含这些词的接口 | 全部
+ir api help [接口|话题|词|all]  一个接口和它的说明 | 一个话题的接口 | 含这些词的接口和说明 | 全部；不带：用法和常用接口
 ir run [--secret 名,…] -- 命令 …
 ```
 
@@ -97,7 +97,7 @@ ir run [--secret 名,…] -- 命令 …
 - 透传：`ir` 只补头（`X-Iridium-Session`，Satori 的登录头），不改请求。有 `/` 的是 `/v1/<路径>`（不带正文 GET，带了 POST，写了方法照写的）；没有的是 Satori 方法，`POST /v1/<方法>`。`k=v` 字符串，`k:=JSON` 任意 JSON，`k==v` 查询串，带点的键写进对象。
 - 原来 `ir` 替人做的搬进服务端，谁调都一样：会话 ID 的开头和 `self`（`/v1/internal/sessions/{id}/…` 和 `channel_id`；`guild_id=self`），`message.create` 的 `_data.text`（纯文字，服务端转义）和 `_data.paths`（主机上的文件，只认 socket），来源从 `X-Iridium-Session` 取（不用 `_data.caller`）。
 - 输出只在回答这一侧加工：列表一项一行，`view=` 指定的字段排成表（`--pick` 换别的），对象一字段一行、它里面的对象数组各成一张表；空值不打，每个值一行、截到 200 字（`--clip`）；Satori 消息的 `content` 转成文字（人说的前面 `> [来源]`，工具、思考、系统行标出来）。`--grep` 筛项，`--all` 跟着 `next` 取完，`--json` 原样。
-- 接口说明 `internal/irhelp/api.txt`：一个接口一行（方法 路径 正文 -> 回答 说明 view=），按话题分段，测试核对它和服务端注册的路由一条不差。系统提示只有几行（`ir api`、`ir run`、凭据、交文件、起标题、语言），不放接口表：agent 先 `ir api help`（用法、注意、话题、常用接口），用到哪块再 `ir api help <话题>`（用户，2026-11-11：提示词大量砍，用什么就 help 什么）。
+- 接口说明 `internal/irhelp/api.txt`：一个接口一行（方法 路径 正文 -> 回答 说明 view=），按话题分段，测试核对它和服务端注册的路由一条不差。接口下面缩进的行是它的说明（字段的意思、默认值），列表里只在行尾标 `[more]`，`ir api help <方法 路径>`（或 `satori.方法`、实际发的路径）才打出来；按词找时连带含这个词的说明行。系统提示只有几行（`ir api`、`ir run`、分层查法、凭据、交文件、起标题、语言），不放接口表，也不叫每个会话先跑一遍 `ir api help`：知道接口就直接查它，不知道再查话题或词；最常用的几个（起会话、发消息、等、列会话）直接写出接口名（用户，2026-11-11：提示词大量砍，用什么就 help 什么，要什么读什么）。
 - 回答是 ndjson 的（远端命令行的输出、拷贝的进度）边收边打：命令行的输出原样，退出码照它；拷贝在终端上画进度，最后一行 `路径 大小 sha256`。`--wait` 在 `GET internal/sessions/{id}` 上等回合结束。
 - `message.create` 和带 `text` 的 `POST internal/sessions` 不带 `--wait` 也等到 agent 接了这条再返回（最多 15 秒），紧接着的 `ir wait` 等的才是这一回合；带 `--wait` 等回合结束、打印回复。回 202 `{need}`（agent 要邀请、要人填凭据）时 `--wait` 等人决定，只说结果。
 - 位置和路径服务端认（`server/places.go`）：`应用名:路径`、`host:路径`、`~/x`；相对路径和 `.` 从调用者会话的目录起（会话在那台电脑上时），否则要整路径。新会话的 `cwd`、`internal/links`、`attach`、`internal/files`、`_data.paths` 都这样。

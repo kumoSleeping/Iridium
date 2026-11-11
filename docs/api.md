@@ -187,7 +187,7 @@ Iridium 自己的接口都在 `/v1/internal/` 下：Satori 规范的 internal �
 - 回合在跑时发的话默认插进这一回合（和网页回车一样，2026-11-06 定）；`--wait` 等到这一回合结束，打印最后一段回复（可能还在说别的事）。`_data.steer:=false` 进待发队列（只对人在终端里跑的 ir 有效；agent 的总是插进，免得要人去点；2026-11-06）：不带 `--wait` 马上返回，带 `--wait` 等它发出去、再等它那一回合（队列暂停了就退出码 2）。agent 在等额度时插话也进队列。
 - 退出码：0 结束，2 需要你，1 出错（agent 出错退出、回合中被停、`ir` 自己出错）。
 
-- `NewSession.caller`、`Send.caller`：`ir` 从环境变量（`IRIDIUM_SESSION`、`CLAUDE_CODE_SESSION_ID`、`CODEX_THREAD_ID`…）读到的调用者会话，记成新会话的 `launcher`（页面挂在它下面）；没给 `workspace` 时，调用者的组包含新会话的目录才进那个组，否则按自己的目录归组（2026-11-10）。
+- `NewSession.caller`、`Send.caller`：调用者会话，记成新会话的 `launcher`（页面挂在它下面，归档时一起归档）。不给时取请求所在的会话：socket 上 `X-Iridium-Session`（`ir` 从 `IRIDIUM_SESSION`、`CLAUDE_CODE_SESSION_ID`、`CODEX_THREAD_ID`… 取），远端是会话自己的 TOKEN；网页来的没有。不想挂：之后 `PATCH … detach:=true`（2026-11-11）。没给 `workspace` 时，调用者的组包含新会话的目录才进那个组，否则按自己的目录归组（2026-11-10）。
 
 ## 待发队列
 

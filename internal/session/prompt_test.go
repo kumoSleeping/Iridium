@@ -8,7 +8,7 @@ import (
 func TestSystemPrompt(t *testing.T) {
 	t.Parallel()
 	p := SystemPrompt("zh")
-	for _, want := range []string{"ir api [METHOD]", "ir api help secrets", "ir api POST internal/links path=<path>", "](ir:id)", `channel.update channel_id=self data.name="<title>"`, "Run ir api help before", "web settings: Chinese."} {
+	for _, want := range []string{"ir api [METHOD]", "ir api help secrets", "ir api POST internal/links path=<path>", "](ir:id)", `channel.update channel_id=self data.name="<title>"`, "ir api help, a layer at a time", "1. The route known: ir api help <METHOD path | satori.method>", "start POST internal/sessions", "web settings: Chinese."} {
 		if !strings.Contains(p, want) {
 			t.Errorf("no %q in:\n%s", want, p)
 		}

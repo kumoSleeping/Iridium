@@ -269,6 +269,11 @@ func (s *Server) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c := callerOf(r)
+	// Started from inside a session (ir's X-Iridium-Session, a session's own TOKEN): that session
+	// is its launcher unless the body names another, so an agent's new session hangs under it.
+	if req.Caller == "" {
+		req.Caller = c.session
+	}
 	// Its folder as written: a place, ~, a path from the caller's own session's (places.go).
 	if err := s.where(c, &req); err != nil {
 		s.error(w, err)
