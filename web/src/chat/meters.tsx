@@ -457,8 +457,42 @@ export function modelView(s: ModelOf, want?: string | null) {
 }
 
 /** A button attached at the effort track (Claude's UltraCode, a plugin's: what the session's
- *  `attached` says, docs/next/plugin.md): pressed as "att:<session>:<from>:<id>". */
-type AttachedKey = { press: string; label: string; pressed: boolean; disabled: boolean; title?: string };
+ *  `attached` says, docs/next/plugin.md): pressed as "att:<session>:<from>:<id>"; its mark a data:
+ *  image in it (<img>). */
+type AttachedKey = { press: string; label: string; pressed: boolean; disabled: boolean; title?: string; icon?: string };
+
+/** The <img> in a button, a data: image: its mark. Nothing fetched from elsewhere. */
+const iconIn = (els: El[]): string | undefined => {
+  for (const e of els) {
+    const src = e.type === "img" ? e.attrs.src : undefined;
+    if (typeof src === "string" && /^data:image\//i.test(src)) return src;
+    const inner = iconIn(e.children);
+    if (inner) return inner;
+  }
+};
+
+/** A key's mark: its own (a plugin's), drawn as a mask in the text's colour (an image's script never
+ *  runs, its colours never show), else UltraCode's. */
+export function KeyMark({ icon, size, className }: { icon?: string; size: number; className?: string }) {
+  if (!icon) return <Workflow size={size} aria-hidden className={className} />;
+  const url = `url("${icon.replace(/["\\\n\r]/g, encodeURIComponent)}")`;
+  const mask = { maskImage: url, WebkitMaskImage: url, maskSize: "contain", WebkitMaskSize: "contain", maskRepeat: "no-repeat", WebkitMaskRepeat: "no-repeat", maskPosition: "center", WebkitMaskPosition: "center" };
+  return <span aria-hidden className={cn("inline-block shrink-0", className)} style={{ width: size, height: size, backgroundColor: "currentColor", ...mask }} />;
+}
+
+/** A key with sub-modes is one key: off, or the sub-mode on; a press, the next (off, each sub-mode,
+ *  off; a disabled one passed over). Its sub-mode now, the button to press next and what that
+ *  turns on and off. Without sub-modes, a switch. */
+export function keyCycle(keys: AttachedKey[]): { cur?: AttachedKey; next: AttachedKey; want: Record<string, boolean> } | undefined {
+  const [feat, ...opts] = keys;
+  if (!feat) return undefined;
+  const live = opts.filter((o) => !o.disabled);
+  if (!live.length) return { next: feat, want: { [feat.press]: !feat.pressed } };
+  const cur = feat.pressed ? (opts.find((o) => o.pressed) ?? undefined) : undefined;
+  const after = feat.pressed ? (cur ? live.slice(live.indexOf(cur) + 1)[0] : undefined) : live[0];
+  if (!after) return { cur, next: feat, want: { [feat.press]: false } };
+  return { cur, next: after, want: { [feat.press]: true, [after.press]: true, ...(cur ? { [cur.press]: false } : {}) } };
+}
 
 const textIn = (els: El[]): string => els.map((e) => (e.type === "text" ? (e.text ?? "") : textIn(e.children))).join("");
 
@@ -480,6 +514,7 @@ export function attachedKeys(s: LiveSession, place: string, lang: string): Attac
           pressed: e.attrs.pressed !== undefined && e.attrs.pressed !== "false",
           disabled: e.attrs.disabled !== undefined && e.attrs.disabled !== "false",
           title: typeof title === "string" ? title : undefined,
+          icon: iconIn(e.children),
         });
       } else walk(e.children);
     }
@@ -530,19 +565,24 @@ export function ModelKey({ s, open, onOpenChange }: { s: LiveSession; open?: boo
       return false;
     }
   };
-  const press = async (x: AttachedKey, then: boolean) => {
-    setPressWant((m) => ({ ...m, [x.press]: then }));
+  // What it is to become shown at once: the button pressed and the sub-modes it turns on or off.
+  const press = async (x: AttachedKey, want: Record<string, boolean>) => {
+    setPressWant((m) => ({ ...m, ...want }));
     try {
       if (x.press) await api.button(x.press);
-      else await api.ultracode(s.id, then);
+      else await api.ultracode(s.id, !!want[x.press]);
     } catch (e) {
-      setPressWant((m) => Object.fromEntries(Object.entries(m).filter(([p]) => p !== x.press)));
+      setPressWant((m) => Object.fromEntries(Object.entries(m).filter(([p]) => !(p in want))));
       toast(t("err.feature", { name: x.label }), { error: true, description: errText(e) });
     }
   };
-  // The first button the key at the track's right; the rest its options, while it is pressed.
+  // The first button the key at the track's right; the rest its sub-modes, shown in it one at a
+  // time, a press the next (the user, 2026-11-11: no row of them under the track).
   const feat = keys[0];
-  const tip = feat && [feat.label, feat.title].filter(Boolean).join(" · ");
+  const cycle = keyCycle(keys);
+  const cur = cycle?.cur;
+  const name = feat && [feat.label, cur?.label].filter(Boolean).join(" · ");
+  const tip = feat && [name, feat.title].filter(Boolean).join(" · ");
   // One key, its mark, pressed or not (the user, 2026-11-06); lit warm when on. A plugin's the
   // same (the user, 2026-11-09).
   const featKey = feat && (
@@ -550,34 +590,22 @@ export function ModelKey({ s, open, onOpenChange }: { s: LiveSession; open?: boo
       <button
         type="button"
         aria-pressed={feat.pressed}
-        aria-label={feat.label}
+        aria-label={name}
         disabled={feat.disabled}
-        onClick={() => void press(feat, !feat.pressed)}
+        onClick={() => cycle && void press(cycle.next, cycle.want)}
         className={cn("g-press grid size-7 shrink-0 place-items-center rounded-md transition-colors duration-(--dur-2) disabled:opacity-40 pointer-coarse:size-10", feat.pressed ? "bg-fill text-[#ff4a17] hover:bg-fill-2" : "text-ink-4 hover:bg-fill hover:text-ink-2")}
       >
-        <Workflow size={16} aria-hidden className={cn("transition-transform duration-(--dur-2) ease-(--ease-spring)", feat.pressed && "scale-110")} />
+        <span key={cur?.press ?? ""} className="g-pop grid place-items-center">
+          <KeyMark icon={cur?.icon ?? feat.icon} size={16} className={cn("transition-transform duration-(--dur-2) ease-(--ease-spring)", feat.pressed && "scale-110")} />
+        </span>
       </button>
     </Tip>
   );
   // On: said in words beside the level too (the user, 2026-11-06).
-  const featTag = feat?.pressed && <span className="g-fade text-xs font-medium text-[#ff4a17]">{feat.label}</span>;
-  // On, its options a row under the track (a plugin's sub-modes; the user, 2026-11-09).
-  const opts = keys.slice(1);
-  const featOptions = feat?.pressed && opts.length > 0 && (
-    <div className="g-fade flex items-center gap-1 px-2.5 pb-2">
-      {opts.map((o) => (
-        <Tip key={o.press} label={o.title}>
-          <button
-            type="button"
-            disabled={o.disabled}
-            onClick={() => void press(o, true)}
-            className={cn("g-press h-7 flex-1 rounded-md text-xs transition-colors duration-(--dur-2) disabled:opacity-40 pointer-coarse:h-9", o.pressed ? "bg-fill-2 font-medium text-ink" : "text-ink-3 hover:bg-fill hover:text-ink-2")}
-          >
-            {o.label}
-          </button>
-        </Tip>
-      ))}
-    </div>
+  const featTag = feat?.pressed && (
+    <span key={name} className="g-fade text-xs font-medium text-[#ff4a17]">
+      {name}
+    </span>
   );
   const on = feat?.pressed ? [feat] : [];
   return (
@@ -586,7 +614,7 @@ export function ModelKey({ s, open, onOpenChange }: { s: LiveSession; open?: boo
         <Menu.Trigger
           disabled={!models.length}
           render={
-            <button type="button" aria-label={`${t("composer.model")}: ${label}${level ? ` · ${levelName(level)}` : ""}${on.map((f) => ` · ${f.label}`).join("")}`} className="g-press flex h-7 min-w-0 items-center gap-1 rounded-md px-2 text-xs text-ink-3 hover:bg-fill hover:text-ink data-popup-open:bg-fill disabled:hover:bg-transparent pointer-coarse:h-9">
+            <button type="button" aria-label={`${t("composer.model")}: ${label}${level ? ` · ${levelName(level)}` : ""}${on.length ? ` · ${name}` : ""}`} className="g-press flex h-7 min-w-0 items-center gap-1 rounded-md px-2 text-xs text-ink-3 hover:bg-fill hover:text-ink data-popup-open:bg-fill disabled:hover:bg-transparent pointer-coarse:h-9">
               {/* No icon: the model's name says what this is. */}
               <span key={label} className="g-fade truncate">
                 {label}
@@ -596,7 +624,7 @@ export function ModelKey({ s, open, onOpenChange }: { s: LiveSession; open?: boo
                   {levelName(level)}
                 </span>
               )}
-              {on.length > 0 && <Workflow size={12} aria-hidden className={cn("g-pop shrink-0", on.some((f) => !f.disabled) ? "text-ink-2" : "text-ink-4")} />}
+              {on.length > 0 && <KeyMark key={cur?.press ?? ""} icon={cur?.icon ?? feat?.icon} size={12} className={cn("g-pop shrink-0", on.some((f) => !f.disabled) ? "text-ink-2" : "text-ink-4")} />}
               {models.length > 0 && <ChevronDown size={12} className="shrink-0 text-ink-4" />}
             </button>
           }
@@ -633,18 +661,12 @@ export function ModelKey({ s, open, onOpenChange }: { s: LiveSession; open?: boo
               // UltraCode a switch at the track's right, not a row of its own (the user, 2026-11-06).
               <div className="mt-1 shrink-0 border-t border-(--edge) pt-0.5">
                 {levels.length > 1 ? (
-                  <>
-                    <EffortSlider key={levels.join(" ")} levels={levels} value={level || undefined} set={setEffort} aside={featKey} tag={featTag} />
-                    {featOptions}
-                  </>
+                  <EffortSlider key={levels.join(" ")} levels={levels} value={level || undefined} set={setEffort} aside={featKey} tag={featTag} />
                 ) : (
-                  <>
-                    <div className="flex h-10 items-center justify-between gap-3 px-2.5">
-                      <span className="text-xs text-ink-3">{feat?.label}</span>
-                      {featKey}
-                    </div>
-                    {featOptions}
-                  </>
+                  <div className="flex h-10 items-center justify-between gap-3 px-2.5">
+                    <span className="text-xs text-ink-3">{name}</span>
+                    {featKey}
+                  </div>
                 )}
               </div>
             )}

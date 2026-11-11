@@ -35,7 +35,8 @@ ir 核心
 
 ## 网页
 
-- 位置 `effort`：第一个 `<button>` 是强度滑条右边的键，其余的按钮在键按下时排成一行（子模式）。
+- 位置 `effort`：第一个 `<button>` 是强度滑条右边的键；其余的按钮是它的子模式，不单独显示：键按一下换下一种（关 → 各子模式 → 关），图标是当前子模式的。键关着时按第一个子模式，开着时按下一个，最后一个之后按键本身（关）。
+- 按钮里的 `<img src="data:image/…">` 是它的图标：只取形状，颜色随页面；只认 `data:` 地址。没有图标的用默认的。
 - `<button>` 多认 `pressed`（开着）、`disabled`、`title`（说明或原因）；别的应用不认识就忽略。
 
 ## dsh-remote-iridium
@@ -46,7 +47,7 @@ ir 核心
 
 ## OMD 的 Ultra
 
-在 dsh-remote-iridium 里，一个子插件 `omd.js`（kumo，2026-11-11：并进来，只装一个插件）：注入 `omd`、`iridium`，没装 OMD 时不启用。每个会话按 OMD 的状态挂 `<button id="omd.ultra" pressed? disabled? title>Ultra</button>` 和子模式按钮；按下就切换再重挂。插件里只有这个文件认识 OMD，核心里没有。
+在 dsh-remote-iridium 里，一个子插件 `omd.js`（kumo，2026-11-11：并进来，只装一个插件）：注入 `omd`、`iridium`，没装 OMD 时不启用。每个会话按 OMD 的状态挂 `<button id="omd.ultra" pressed? disabled? title>Ultra</button>` 和带图标的子模式按钮（开关时都挂）；按下就切换再重挂。插件里只有这个文件认识 OMD，核心里没有。
 
 ## 验证（要有 Desktop 和 OMD 的机器）
 
