@@ -18,6 +18,7 @@ import (
 // Bot, for that session; the session commands run, the Iridium's own machine's are refused, and
 // what a Bot may not do (Claude, not being the owner's) neither may it.
 func TestCLIAtMachine(t *testing.T) {
+	t.Parallel()
 	const tok = "irs_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 	var botID string
 	l := startWith(t, func(s *Server, _ config.Config, _ string) {

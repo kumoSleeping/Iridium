@@ -43,6 +43,12 @@ func (r *rig) setRefuse(v bool) {
 
 // kinds runs test with each executor: the Go one, and the dsh plugin's if node is there.
 func kinds(t *testing.T, test func(t *testing.T, kind string)) {
+	t.Parallel()
+	eachKind(t, func(t *testing.T, kind string) { t.Parallel(); test(t, kind) })
+}
+
+// eachKind is kinds one after the other: for a test that sets the environment (t.Setenv).
+func eachKind(t *testing.T, test func(t *testing.T, kind string)) {
 	for _, k := range []string{"go", "node"} {
 		t.Run(k, func(t *testing.T) {
 			if _, err := exec.LookPath("node"); k == "node" && err != nil {

@@ -12,6 +12,7 @@ import (
 // login may be another one: their windows are kept apart, each session's its own, not the last
 // written for both.
 func TestQuotaByMachine(t *testing.T) {
+	t.Parallel()
 	cfg := config.Default()
 	cfg.StateDir = t.TempDir()
 	m := &Manager{o: Options{Config: cfg, Hub: hub.New(), Logf: t.Logf}, hosted: map[string]*Hosted{}, quota: map[string]api.AgentQuota{}}

@@ -24,6 +24,7 @@ import (
 // from the folder it ran in, even with no IRIDIUM_* in its commands' environment (dsh's have
 // none), and what comes back is written out as it comes, the exit code last.
 func TestPluginIR(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("node"); err != nil {
 		t.Skip("no node")
 	}
@@ -79,6 +80,7 @@ func jsString(s string) string { b, _ := json.Marshal(s); return string(b) }
 // A session at a machine whose executor has ir: its TOKEN, given at each start, names it and
 // that machine; a TOKEN given before does not, nor one with another prefix.
 func TestSessionToken(t *testing.T) {
+	t.Parallel()
 	r := newRig(t, nil)
 	h := r.m.newHosted(meta{ID: "s1", Agent: api.AgentDsh, Cwd: "/w", Machine: "m1"})
 	if err := os.MkdirAll(h.dir, 0o700); err != nil {
@@ -116,6 +118,7 @@ func (f desktopFinder) Found(id string) (api.Session, *transcript.File, bool) {
 // A message for a dsh session DSH Desktop holds (open in it, its writer lock there): given to
 // Desktop's own agent of it through the plugin (dsh.prompt), with its source tag, not resumed here.
 func TestToDesktop(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("node"); err != nil {
 		t.Skip("no node")
 	}

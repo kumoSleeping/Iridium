@@ -33,6 +33,7 @@ func as(t *testing.T, c caller, h http.HandlerFunc, method, id string, body, out
 // Not a login without it, not the local page, never an agent, not even one in a session the
 // owner's login opened. An agent's ask waits for one that may to allow it.
 func TestOwnerFromPanels(t *testing.T) {
+	t.Parallel()
 	l := start(t)
 	panel := func(id string) gate.EndpointInfo { return gate.EndpointInfo{ID: id, Name: id, Kind: gate.KindPanel} }
 	perms, _ := json.Marshal(access.WithClaude(access.Default(), access.ByLocal, 1))

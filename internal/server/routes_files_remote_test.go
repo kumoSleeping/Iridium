@@ -21,6 +21,7 @@ import (
 // ir cp and files with machine:path (the socket's): a file from here to a machine's folder, back,
 // a folder listed there; not over a file, not more than remoteWriteMax to a machine.
 func TestCopyAcrossMachines(t *testing.T) {
+	t.Parallel()
 	hub := &remote.Hub{}
 	l := startWith(t, func(s *Server, _ config.Config, _ string) { s.Remote = hub; s.WatchMachines() })
 	var tok api.Token

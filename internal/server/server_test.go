@@ -99,6 +99,7 @@ func call(t *testing.T, c *http.Client, method, url string, body any, out any) i
 }
 
 func TestGuard(t *testing.T) {
+	t.Parallel()
 	s, _, _ := setup(t)
 	h := s.Handler(false)
 	for _, c := range []struct {
@@ -127,6 +128,7 @@ func TestGuard(t *testing.T) {
 // A turn over HTTP: the stream gives the session's state whole and the drafts; the page then
 // fetches the blocks after the end it knew.
 func TestTurnOverHTTP(t *testing.T) {
+	t.Parallel()
 	s, cfg, work := setup(t)
 	tcp, unix, err := s.Listen()
 	if err != nil {

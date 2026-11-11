@@ -12,6 +12,7 @@ func ptr[T any](v T) *T { return &v }
 // The credentials: stored from the page, a person's ir, an agent's ir through a panel; used by ir
 // run alone, as their scopes and confirmations say; masked in what carries transcripts.
 func TestSecrets(t *testing.T) {
+	t.Parallel()
 	l := start(t)
 	const val = "ghp_s3cretvalue42"
 

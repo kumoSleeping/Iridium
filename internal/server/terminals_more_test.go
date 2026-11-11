@@ -15,6 +15,7 @@ import (
 // nothing else held back; its tag, its usage; files in and out. What an agent does through ir in
 // its session is the app's too.
 func TestAppSessionsAndAgents(t *testing.T) {
+	t.Parallel()
 	l := startWith(t, func(s *Server, cfg config.Config, work string) {
 		empty := t.TempDir()
 		s.Discover = discover.New(discover.Options{ClaudeDir: cfg.ClaudeHome, CodexHome: empty, PiSessions: empty, DshHome: empty, Store: s.st, Hub: s.hub, Procs: discover.ProcFS{Root: empty}, Logf: t.Logf})

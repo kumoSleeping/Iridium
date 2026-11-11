@@ -45,6 +45,7 @@ func (l *live) irSatori(as, login, method string, body, out any) (int, string) {
 // its session's turn is for; channels carry Iridium's own in _data; channel.update
 // archives and brings back; an agent's name never covers one a person gave.
 func TestSatoriOnSocket(t *testing.T) {
+	t.Parallel()
 	l := startWith(t, func(s *Server, cfg config.Config, work string) {
 		empty := t.TempDir()
 		s.Discover = discover.New(discover.Options{ClaudeDir: cfg.ClaudeHome, CodexHome: empty, PiSessions: empty, DshHome: empty, Store: s.st, Hub: s.hub, Procs: discover.ProcFS{Root: empty}, Logf: t.Logf})

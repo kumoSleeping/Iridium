@@ -89,6 +89,7 @@ func (l *live) pending() api.Need {
 // long as it says (an hour at most), and closes it; an agent, an app and a login that may not
 // approve do neither.
 func TestPairWindow(t *testing.T) {
+	t.Parallel()
 	l := start(t)
 	l.want(200, "socket", "PUT", "/v1/internal/public", api.SetPublic{Origin: "https://ir.example.com"}, nil)
 	if code, _, e := l.pairFrom("", api.PairRequest{Name: "bot"}); code != 403 || e.Code != "pair_closed" {
@@ -124,6 +125,7 @@ func TestPairWindow(t *testing.T) {
 
 // At most 4 pending a source (an IP; IPv6 by /64) and 20 in all; a bad name is refused at once.
 func TestPairLimits(t *testing.T) {
+	t.Parallel()
 	l := start(t)
 	l.want(200, "socket", "PUT", "/v1/internal/public", api.SetPublic{Origin: "https://ir.example.com"}, nil)
 	l.s.OpenPairing(0)
@@ -164,6 +166,7 @@ func TestPairLimits(t *testing.T) {
 // allows it as the owner's own machine, by another name (an app has its name: no name is made up);
 // the executor alone gets the TOKEN, once, as a new app that has Claude. Denied, it hears so.
 func TestExecPair(t *testing.T) {
+	t.Parallel()
 	l := startWith(t, func(s *Server, _ config.Config, _ string) { s.Remote = &remote.Hub{}; s.WatchMachines() })
 	l.want(200, "socket", "PUT", "/v1/internal/public", api.SetPublic{Origin: "https://ir.example.com"}, nil)
 	if code := l.public("GET", "/v1/internal/sessions", "", nil, nil); code != 401 {
@@ -320,6 +323,7 @@ func TestExecPair(t *testing.T) {
 // one void, its usage and permissions as they were), or allows it by another name; a new one gets
 // what it asked for or less, never more.
 func TestUpdatePairing(t *testing.T) {
+	t.Parallel()
 	l := start(t)
 	l.want(200, "socket", "PUT", "/v1/internal/public", api.SetPublic{Origin: "https://ir.example.com"}, nil)
 	l.s.OpenPairing(0)
@@ -421,6 +425,7 @@ func TestUpdatePairing(t *testing.T) {
 }
 
 func TestPermsWithin(t *testing.T) {
+	t.Parallel()
 	all := api.Perms{Agents: []string{"*"}, Scope: []string{"*"}}
 	some := api.Perms{Agents: []string{"codex"}, Scope: []string{"pc:/a", `win:C:\w`}}
 	for _, c := range []struct {
@@ -442,6 +447,7 @@ func TestPermsWithin(t *testing.T) {
 // An older executor's two switches become shell (agentShell && !noShell); a newer one's shell is
 // taken as said.
 func TestCleanPairShell(t *testing.T) {
+	t.Parallel()
 	on, off := true, false
 	for _, c := range []struct {
 		in   api.PairRequest
@@ -464,6 +470,7 @@ func TestCleanPairShell(t *testing.T) {
 // Its Bot revoked, an executor's connection ends at once, not when it next connects, and it is
 // not taken again.
 func TestRevokeDropsExecutor(t *testing.T) {
+	t.Parallel()
 	hub := &remote.Hub{}
 	l := startWith(t, func(s *Server, _ config.Config, _ string) { s.Remote = hub; s.WatchMachines() })
 	l.want(200, "socket", "PUT", "/v1/internal/public", api.SetPublic{Origin: "https://ir.example.com"}, nil)
@@ -498,6 +505,7 @@ func TestRevokeDropsExecutor(t *testing.T) {
 // The icons and the manifest pass the public gate with no login (a browser fetches the manifest
 // without cookies); nothing else does by their names.
 func TestOpenIcons(t *testing.T) {
+	t.Parallel()
 	l := start(t)
 	l.want(200, "socket", "PUT", "/v1/internal/public", api.SetPublic{Origin: "https://ir.example.com"}, nil)
 	for _, p := range []string{"/manifest.webmanifest", "/favicon.svg", "/icons/icon-192.png"} {

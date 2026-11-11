@@ -15,6 +15,7 @@ import (
 // A picture a tool's result gave the model is served by its result's at, as a picture only, and
 // asked again by its ETag.
 func TestImageRoute(t *testing.T) {
+	t.Parallel()
 	l := start(t)
 	var created api.NewSessionReply
 	l.want(200, "web", "POST", "/v1/internal/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "PICTURE"}, &created)

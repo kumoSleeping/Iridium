@@ -17,7 +17,7 @@ import (
 // A secret in the executor's environment never reaches this side: the hello gives a placeholder,
 // which the executor makes the value again when it starts a process. The variables pointing an ir
 // at its own Iridium are left out.
-func TestSecretsStayThere(t *testing.T) { kinds(t, testSecretsStayThere) }
+func TestSecretsStayThere(t *testing.T) { eachKind(t, testSecretsStayThere) }
 
 func testSecretsStayThere(t *testing.T, kind string) {
 	const value = "fixture-not-a-real-key"
@@ -61,7 +61,7 @@ func testSecretsStayThere(t *testing.T, kind string) {
 }
 
 // Logins and keys at the executor are never served; the transcripts beside them are.
-func TestDeniedFiles(t *testing.T) { kinds(t, testDeniedFiles) }
+func TestDeniedFiles(t *testing.T) { eachKind(t, testDeniedFiles) }
 
 func testDeniedFiles(t *testing.T, kind string) {
 	home := t.TempDir()

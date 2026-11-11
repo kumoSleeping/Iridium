@@ -14,6 +14,7 @@ import (
 // its scope), answered at the session's card; a share goes to one login, checked that it may use
 // what is shared: a login of ir_web finds it in its needs, another app's gets an ir.share event.
 func TestNeedsAsksAndShare(t *testing.T) {
+	t.Parallel()
 	l := start(t)
 	now := time.Now()
 	padID := l.addPanel("pad")

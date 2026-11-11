@@ -79,6 +79,7 @@ func (p *pushRig) do(method, path string, body, out any) int {
 // With the switch on, an ask pushes "needs you" to the subscription; a turn's end does not, by
 // default.
 func TestPushOnAsk(t *testing.T) {
+	t.Parallel()
 	p := newPushRig(t)
 	ua, _ := ecdh.P256().GenerateKey(rand.Reader)
 	auth := make([]byte, 16)
@@ -138,6 +139,7 @@ func TestPushOnAsk(t *testing.T) {
 // Push is the panels' and 本机's: a TOKEN and an agent's ir get 403 on every route, so neither
 // switches it nor subscribes an address of its own. A revoked terminal's subscriptions go with it.
 func TestPushPanelsOnly(t *testing.T) {
+	t.Parallel()
 	l := startWith(t, func(s *Server, cfg config.Config, work string) {
 		var err error
 		s.Push, err = push.Open(push.Options{StateDir: cfg.StateDir, Store: s.st, Manager: s.m, Logf: t.Logf, AllowHTTP: allowHTTP})
@@ -202,6 +204,7 @@ func TestPushPanelsOnly(t *testing.T) {
 
 // The queue over HTTP, and the push settings.
 func TestQueueAndPushRoutes(t *testing.T) {
+	t.Parallel()
 	p := newPushRig(t)
 	var created api.NewSessionReply
 	p.do("POST", "/v1/internal/sessions", api.NewSession{Cwd: p.work, Text: "one WAIT"}, &created)
@@ -279,6 +282,7 @@ func TestQueueAndPushRoutes(t *testing.T) {
 
 // An ask is answered at its session's own path: a card of another session is a bad request.
 func TestAnswerAtSession(t *testing.T) {
+	t.Parallel()
 	l := start(t)
 	var a api.NewSessionReply
 	l.want(200, "socket", "POST", "/v1/internal/sessions", api.NewSession{Agent: api.AgentCodex, Cwd: l.work, Text: "hi"}, &a)

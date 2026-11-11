@@ -54,7 +54,8 @@ func Main() (code int, ok bool) {
 //   - QUESTION asks two questions (AskUserQuestion: a color, one of Red or Blue; sizes, any of S,
 //     M, L) and answers "ok: answers <question>=<answer>; ...", by question.
 //   - WAIT runs for half a second (an interrupt ends it at once); messages that come meanwhile
-//     join it, each answered "ok: <text>" in the same turn.
+//     join it, each answered "ok: <text>" in the same turn. HOLD is WAIT until the first message
+//     joins it (ten seconds at most), however slow the machine.
 //   - crash begins the turn, then exits 3. Resumed with CLAUDE_CODE_RESUME_INTERRUPTED_TURN=1, it
 //     runs that turn again by itself, saying "ok: continued". crash! exits the same way but is
 //     never run again by itself; crashloop crashes again each time it is run again.
@@ -210,6 +211,7 @@ func Claude() int {
 	var pending map[string]any // the message waiting on an ask
 	asked := 0
 	var waiting map[string]any // a WAIT turn
+	holding := false           // a HOLD turn: it ends once a message joins it
 	var steered []map[string]any
 	var timer <-chan time.Time
 	var compacting map[string]any // a /compact running
@@ -225,7 +227,7 @@ func Claude() int {
 		case <-timer:
 			timer = nil
 			finish(waiting, steered)
-			waiting, steered = nil, nil
+			waiting, steered, holding = nil, nil, false
 			continue
 		case <-compacted:
 			compacted = nil
@@ -284,7 +286,7 @@ func Claude() int {
 					for _, s := range steered {
 						say(map[string]any{"type": "command_lifecycle", "command_uuid": s["uuid"], "state": "completed"})
 					}
-					waiting, steered = nil, nil
+					waiting, steered, holding = nil, nil, false
 				}
 			}
 		case "control_response":
@@ -327,6 +329,9 @@ func Claude() int {
 				say(map[string]any{"type": "command_lifecycle", "command_uuid": f["uuid"], "state": "started"})
 				note(map[string]any{"type": "user", "uuid": f["uuid"], "timestamp": stamp(), "message": map[string]any{"role": "user", "content": text}})
 				steered = append(steered, f)
+				if holding {
+					holding, timer = false, time.After(50*time.Millisecond)
+				}
 				continue
 			}
 			if unprefixed(text) == "/compact" {
@@ -370,6 +375,10 @@ func Claude() int {
 			case strings.HasSuffix(text, "WAIT"):
 				waiting = f
 				timer = time.After(500 * time.Millisecond)
+				continue
+			case strings.HasSuffix(text, "HOLD"):
+				waiting, holding = f, true
+				timer = time.After(10 * time.Second)
 				continue
 			case strings.HasSuffix(text, "DENIED"):
 				// Auto mode's classifier turns the call down: the CLI answers the model itself.

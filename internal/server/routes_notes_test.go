@@ -10,6 +10,7 @@ import (
 )
 
 func TestNotes(t *testing.T) {
+	t.Parallel()
 	s, _, _ := setup(t)
 	srv := httptest.NewServer(s.Handler(false))
 	defer srv.Close()

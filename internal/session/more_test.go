@@ -70,16 +70,16 @@ func TestQueue(t *testing.T) {
 	if strings.Contains(r.inLog(id), "gone") {
 		t.Error("a deleted message was sent")
 	}
-	// Steer: true joins at once. "four WAIT" goes straight too: the fake writes its transcript
+	// Steer: true joins at once. "four HOLD" goes straight too: the fake writes its transcript
 	// ahead of out.log, so the turn above may not have ended for the driver yet, and a plain send
-	// would wait in the queue behind it.
-	r.m.SendWith(bg, id, "four WAIT", "网页", true)
+	// would wait in the queue behind it. HOLD runs until "five" joins it, on a slow machine too.
+	r.m.SendWith(bg, id, "four HOLD", "网页", true)
 	r.waitState(id, "the turn", func(s *api.SessionState) bool { return s.Status == api.StatusRunning })
 	if _, queued, err := r.m.SendWith(bg, id, "five", "网页", true); queued || err != nil {
 		t.Errorf("steer: queued %v, %v", queued, err)
 	}
 	r.waitState(id, "the joined reply", func(s *api.SessionState) bool { return said(s, "ok: five") })
-	if b := r.messages(id); b[len(b)-2].Text != "ok: four WAIT" {
+	if b := r.messages(id); b[len(b)-2].Text != "ok: four HOLD" {
 		t.Errorf("five did not join four's turn: %+v", b[len(b)-4:])
 	}
 }
@@ -284,6 +284,7 @@ func TestAlwaysAllow(t *testing.T) {
 }
 
 func TestRuleMatches(t *testing.T) {
+	t.Parallel()
 	ask := func(tool, cmd string) api.Ask {
 		return api.Ask{Kind: "permission", Tool: tool, Input: map[string]any{"command": cmd, "file_path": cmd}}
 	}
@@ -310,6 +311,7 @@ func TestRuleMatches(t *testing.T) {
 // An agent naming its session (ir api channel.update channel_id=self data.name=…, the older ir
 // rename) is never asked about; anything chained to it is.
 func TestRenamesOnly(t *testing.T) {
+	t.Parallel()
 	for cmd, want := range map[string]bool{
 		`ir rename "会话命名"`:      true,
 		`ir rename x`:           true,

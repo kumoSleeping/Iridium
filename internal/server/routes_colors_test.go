@@ -16,6 +16,7 @@ import (
 // Colour tags from a row's menu: a session's on its row in the list, a folder's carried as
 // "colors"; one that is none of api.Colors, or a folder not absolute, is refused.
 func TestColors(t *testing.T) {
+	t.Parallel()
 	s, cfg, work := setup(t)
 	st, err := store.Open(filepath.Join(cfg.StateDir, "iridium.db"))
 	if err != nil {

@@ -27,6 +27,7 @@ import (
 // Desktop, it is shown again (held.changed); one Desktop does not hold is shown, with the plugin's
 // reason, and not switched.
 func TestHeldPlugin(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("node"); err != nil {
 		t.Skip("no node")
 	}
@@ -211,6 +212,7 @@ func TestHeldPlugin(t *testing.T) {
 // Desktop does not hold it; switched on at a sub-mode, the level the page shows is Ultra's and one
 // set goes to OMD there; off again.
 func TestHeldPluginSession(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("node"); err != nil {
 		t.Skip("no node")
 	}

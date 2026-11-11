@@ -51,6 +51,7 @@ func runDaemon(t *testing.T, cfg config.Config, st *store.Store, l *platform.Dir
 // After a restart, over HTTP: the open ask is back with its card and POST /v1/internal/sessions/{id}/answer ends the
 // turn; the context and the quota come back as last read, on GET and on the stream.
 func TestRestartOverHTTP(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	bin := filepath.Join(root, "bin")
 	os.MkdirAll(bin, 0o700)

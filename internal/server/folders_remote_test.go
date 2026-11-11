@@ -8,6 +8,7 @@ import (
 
 // Paths at another machine: the page's '/' form, its own separator there, the parent of each.
 func TestRemotePaths(t *testing.T) {
+	t.Parallel()
 	win := &wire.Hello{Sep: `\`, Home: `C:\Users\kumo`}
 	unix := &wire.Hello{Sep: "/", Home: "/Users/kumo"}
 	for _, c := range []struct {

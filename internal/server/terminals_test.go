@@ -136,6 +136,7 @@ func (l *live) waitReply(as, id, text string) {
 // What terminals may do (access.go): everything, but Claude only the owner's own, set as the
 // terminal is made and never after. Without it a terminal sees Claude's sessions, nothing more.
 func TestClaudeOnlyRule(t *testing.T) {
+	t.Parallel()
 	l := start(t)
 	// 本机's own session, from the page.
 	var mine api.NewSessionReply
@@ -250,6 +251,7 @@ func waitUsage(t *testing.T, st *store.Store, id string) {
 // A terminal's device: a computer until set; its own by /v1/internal/me/device, another's only from a
 // panel or 本机; by ID or name.
 func TestDevice(t *testing.T) {
+	t.Parallel()
 	l := start(t)
 	var tok api.Token
 	tok = l.newApp("bot", false)
@@ -283,6 +285,7 @@ func TestDevice(t *testing.T) {
 // An agent's ir asks for an invite: no secret comes back to it, a person sees the ask, allows it
 // and alone gets the link; the agent learns only that it was allowed.
 func TestConfirmations(t *testing.T) {
+	t.Parallel()
 	l := start(t)
 	// Invites need a public origin.
 	l.want(403, "agent", "POST", "/v1/internal/invites", api.NewInvite{Name: "pad"}, nil)
@@ -336,6 +339,7 @@ func TestConfirmations(t *testing.T) {
 // 本机, the public host is the only one served, the setup link is written, and the config file
 // keeps it. An invite then is a join link on the public origin. Off again, it is 本机 again.
 func TestPublicOrigin(t *testing.T) {
+	t.Parallel()
 	l := start(t)
 	path := filepath.Join(t.TempDir(), "config.json")
 	l.s.ConfigPath = path

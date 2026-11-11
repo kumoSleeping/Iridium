@@ -15,6 +15,7 @@ import (
 // GET /v1/internal/usage: by day, terminal, agent and model; everyone's for 本机 and panels, a channel's
 // own for a channel, which may not ask for another's.
 func TestUsage(t *testing.T) {
+	t.Parallel()
 	l := start(t)
 	var tok api.Token
 	tok = l.newApp("bot", false)
@@ -106,6 +107,7 @@ func TestUsage(t *testing.T) {
 
 // A row the agent gave no cost (or 0) is priced at its maker's list price; one it priced keeps it.
 func TestUsagePriced(t *testing.T) {
+	t.Parallel()
 	l := start(t)
 	f, err := os.Open("../pricing/testdata/api.json")
 	if err != nil {

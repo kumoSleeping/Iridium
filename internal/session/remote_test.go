@@ -34,6 +34,7 @@ import (
 // mirrored here, stopped. The executor is the reference one in Go, its dsh a replay of a recorded
 // turn (testagent.Dsh).
 func TestRemoteDsh(t *testing.T) {
+	t.Parallel()
 	hub := &remote.Hub{Logf: t.Logf}
 	r := newRig(t, func(_ *config.Config, o *Options) { o.Remote = hub })
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -185,6 +186,7 @@ func TestRemoteDsh(t *testing.T) {
 // A dsh session DSH Desktop made at a machine (docs/exec.md "远端 DSH"): listed and read through
 // discovery, then taken up by a message: resumed there, hosted here from then on.
 func TestTakeRemoteDsh(t *testing.T) {
+	t.Parallel()
 	hub := &remote.Hub{Logf: t.Logf}
 	var d *discover.Index
 	r := newRig(t, func(c *config.Config, o *Options) {
@@ -316,6 +318,7 @@ func TestTakeRemoteDsh(t *testing.T) {
 // a walk of the newest day folders for an id with no time) and mirrored here. There is no fake
 // Codex app-server: the agent is a shell that notes how it was started.
 func TestRemoteCodex(t *testing.T) {
+	t.Parallel()
 	gone := make(chan struct{}, 1)
 	hub := &remote.Hub{Logf: func(format string, a ...any) {
 		t.Logf(format, a...)
@@ -415,6 +418,7 @@ func TestRemoteCodex(t *testing.T) {
 // once its transcript is there (dsh.attach, the dsh plugin's), once; the plugin stands in for
 // DSH Desktop in a directory (run.mjs).
 func TestFileInDesktop(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("node"); err != nil {
 		t.Skip("no node")
 	}
@@ -470,6 +474,7 @@ func presetIDs(l []agent.Preset) string {
 // bundle's or the user's too, by its order, the default its settings pick; a broken one is left
 // out. A session started there runs the preset's rows as the registry has them.
 func TestRemotePresets(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("node"); err != nil {
 		t.Skip("no node")
 	}

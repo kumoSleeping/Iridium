@@ -78,6 +78,7 @@ func pidIn(t *testing.T, file string) int {
 // run (docs/exec.md "命令"): a command line at the machine, its output as it comes, its exit code;
 // stopped, and ended with the connection.
 func TestRun(t *testing.T) {
+	t.Parallel()
 	r := newRig(t, "go")
 	ctx := context.Background()
 	m := r.machine()
@@ -146,6 +147,7 @@ func TestRun(t *testing.T) {
 // An executor whose owner keeps command lines off runs none, by run or as a holder; one on this
 // very computer has its agents left out, its connection kept.
 func TestRunShellOff(t *testing.T) {
+	t.Parallel()
 	self := machineid.Of("this computer")
 	r := newRigWith(t, "go", func(h *remote.Hub) { h.Self = self }, func(o *executor.Options) {
 		o.Shell = false
@@ -168,6 +170,7 @@ func TestRunShellOff(t *testing.T) {
 // Found by its app's name now (NameOf), not the one it connected with; nothing for an ID only ever
 // looked up.
 func TestFindByName(t *testing.T) {
+	t.Parallel()
 	name := "mini"
 	r := newRigWith(t, "go", func(h *remote.Hub) {
 		h.NameOf = func(id string) string {
@@ -194,6 +197,7 @@ func TestFindByName(t *testing.T) {
 // ended with its connection), its hello's shell and machine ID; a 403 keeps its TOKEN, only a 401
 // voids it.
 func TestExecMini(t *testing.T) {
+	t.Parallel()
 	py, err := exec.LookPath("python3")
 	if err != nil {
 		t.Skip("no python3")
@@ -201,17 +205,20 @@ func TestExecMini(t *testing.T) {
 	home := t.TempDir()
 	var mode atomic.Value
 	mode.Store("ok")
-	var pairs atomic.Int32
+	var pairs, refused atomic.Int32
+	var auth401 atomic.Value // the Authorization of the first try turned away with a 401
 	hub := &remote.Hub{Logf: t.Logf}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		switch req.URL.Path {
 		case "/v1/internal/exec":
 			switch mode.Load() {
 			case "403":
+				refused.Add(1)
 				w.WriteHeader(http.StatusForbidden)
 				io.WriteString(w, `{"code":"no_permission"}`)
 				return
 			case "401":
+				auth401.CompareAndSwap(nil, req.Header.Get("Authorization"))
 				w.WriteHeader(http.StatusUnauthorized)
 				return
 			}
@@ -280,12 +287,12 @@ func TestExecMini(t *testing.T) {
 		t.Errorf("cut off: %+v", last)
 	}
 	waitFor(t, "the run ended there", func() bool { return gone(pid) })
-	time.Sleep(3 * time.Second) // it tries again every 2s
-	if _, err := os.Stat(tokFile); err != nil {
-		t.Fatalf("a 403 voided the TOKEN: %v", err)
-	}
+	waitFor(t, "a try turned away", func() bool { return refused.Load() > 0 })
 	// A 401: the TOKEN is void, it asks to pair again.
 	mode.Store("401")
 	waitFor(t, "the TOKEN forgotten", func() bool { _, err := os.Stat(tokFile); return os.IsNotExist(err) })
 	waitFor(t, "a pairing request", func() bool { return pairs.Load() > 0 })
+	if a, _ := auth401.Load().(string); a != "Bearer tok" {
+		t.Fatalf("after the 403 it came back with %q, not the TOKEN", a)
+	}
 }

@@ -34,6 +34,7 @@ func (l *live) who(as, id string) api.App {
 // by pairing only (docs/next/decisions.md 9). An invite with Claude is a person's: an agent's only
 // asks, the local page's is refused.
 func TestClaudeOnlyFromTheMachine(t *testing.T) {
+	t.Parallel()
 	l := start(t)
 	for _, path := range []string{"/v1/internal/terminals/tokens", "/v1/internal/terminals", "/v1/internal/apps/tokens"} {
 		if code := l.do("socket", "POST", path, api.NewInvite{Name: "mine"}, nil); code != 404 && code != 405 {
@@ -57,6 +58,7 @@ func TestClaudeOnlyFromTheMachine(t *testing.T) {
 // A new login of ir_web gets Claude when the gate says it is the first, or its invite's perms give
 // it; any other does not. An invite with Claude is listed as one.
 func TestClaudeForJoinedPanels(t *testing.T) {
+	t.Parallel()
 	l := start(t)
 	panel := func(id string) gate.EndpointInfo { return gate.EndpointInfo{ID: id, Name: id, Kind: gate.KindPanel} }
 	perms, _ := json.Marshal(access.WithClaude(access.Default(), access.ByLocal, 1))

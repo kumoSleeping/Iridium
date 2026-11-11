@@ -17,6 +17,7 @@ import (
 )
 
 func TestWorkspacesAndFolders(t *testing.T) {
+	t.Parallel()
 	// The session manager's discovery is this index: a session made goes in its group at once.
 	var d *discover.Index
 	s, _, work := setupWith(t, func(o *session.Options) {
@@ -100,6 +101,7 @@ func TestWorkspacesAndFolders(t *testing.T) {
 // A session on disk from before Iridium watched is the archive: listed archived. Restored, it
 // is shown; archived again, it stays so till its transcript grows.
 func TestArchiveFound(t *testing.T) {
+	t.Parallel()
 	var d *discover.Index
 	var cfg config.Config
 	s, cfg, work := setupWith(t, func(o *session.Options) {

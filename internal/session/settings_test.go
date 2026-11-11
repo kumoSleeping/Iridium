@@ -13,6 +13,7 @@ import (
 // dsh's preset is picked before the first message: a started session keeps its tools (dsh adds a
 // new set only as deferred tools, which the API turns down when all are).
 func TestPresetBeforeTheFirstMessage(t *testing.T) {
+	t.Parallel()
 	// The presets of a dsh package (the fixture's), not of whatever dsh this machine has.
 	bin, err := filepath.Abs("../agent/dsh/testdata/pkg/lib/bin.js")
 	if err != nil {
@@ -44,6 +45,7 @@ func TestPresetBeforeTheFirstMessage(t *testing.T) {
 // A restart for a setting (dsh's effort, model, preset) is not a run: the session shows idle
 // while its agent starts again, not starting.
 func TestQuietRestartStatus(t *testing.T) {
+	t.Parallel()
 	r := newRig(t, nil)
 	h := r.m.newHosted(meta{ID: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", Agent: api.AgentDsh, Cwd: r.cwd, Created: time.Now().UnixMilli()})
 	h.starting = true

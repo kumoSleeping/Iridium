@@ -11,6 +11,7 @@ import (
 // The three 0.1 paths programs installed elsewhere still call are their /v1/internal routes; any
 // other /api path is no route, over TCP and the socket alike.
 func TestLegacyPaths(t *testing.T) {
+	t.Parallel()
 	l := start(t)
 	// Pairing: the window is closed, as at /v1/internal/pair.
 	for _, path := range []string{"/api/pair", "/v1/internal/pair"} {

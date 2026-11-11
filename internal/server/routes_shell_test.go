@@ -23,6 +23,7 @@ import (
 // speaks it, as a holder at one that does not or when not asked so; refused where its owner keeps
 // command lines off; the machine by its app's name now.
 func TestMachineShell(t *testing.T) {
+	t.Parallel()
 	hub := &remote.Hub{}
 	s, cfg, work := setupWith(t, func(o *session.Options) { o.Remote = hub })
 	l := serveLive(t, s, cfg, work, func(s *Server, _ config.Config, _ string) { s.Remote = hub; s.WatchMachines() })

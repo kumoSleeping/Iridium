@@ -180,6 +180,7 @@ func TestClearedInsideBeforeRestart(t *testing.T) {
 
 // Claude clears on /clear, /reset and /new, a name after them or not: Iridium runs each.
 func TestIsClear(t *testing.T) {
+	t.Parallel()
 	for text, want := range map[string]bool{
 		"/clear": true, " /CLEAR ": true, "/reset": true, "/new": true, "/clear my notes": true, "/new\nmore": true,
 		"/clearer": false, "/compact": false, "clear": false, "": false, "please /clear": false,

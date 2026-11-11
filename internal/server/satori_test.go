@@ -102,6 +102,7 @@ func (w *satoriWS) event(ok func(satori.Event) bool) satori.Event {
 // WebSocket by the app's TOKEN, a message into a session and its reply, an ask answered by its
 // button, an upload, and the app removed closing its stream.
 func TestSatori(t *testing.T) {
+	t.Parallel()
 	l := startWith(t, func(s *Server, cfg config.Config, work string) {
 		empty := t.TempDir()
 		s.Discover = discover.New(discover.Options{ClaudeDir: cfg.ClaudeHome, CodexHome: empty, PiSessions: empty, DshHome: empty, Store: s.st, Hub: s.hub, Procs: discover.ProcFS{Root: empty}, Logf: t.Logf})

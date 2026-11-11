@@ -22,6 +22,7 @@ import (
 
 // The web page's way: upload in chunks, send it with a message, find it in the reply, fetch it.
 func TestUploadSendAndFetch(t *testing.T) {
+	t.Parallel()
 	s, cfg, work := setup(t)
 	tcp, unix, err := s.Listen()
 	if err != nil {

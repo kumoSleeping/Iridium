@@ -18,6 +18,7 @@ import (
 // its agents keep it from using a session it may still see, and a login of an app gets what both
 // allow. The host may use all.
 func TestPerms(t *testing.T) {
+	t.Parallel()
 	l := start(t)
 	a, b := filepath.Join(l.work, "a"), filepath.Join(l.work, "b")
 	for _, d := range []string{a, b} {
@@ -84,6 +85,7 @@ func TestPerms(t *testing.T) {
 
 // Places: the app by name, the host by its names, a drive letter is no app.
 func TestParsePlace(t *testing.T) {
+	t.Parallel()
 	l := start(t)
 	app := l.newApp("pc", false)
 	for in, want := range map[string][2]string{
@@ -105,6 +107,7 @@ func TestParsePlace(t *testing.T) {
 
 // A login slot carries what its login may use; only whoever approves makes one.
 func TestInvitePerms(t *testing.T) {
+	t.Parallel()
 	l := start(t)
 	slot, _ := json.Marshal(map[string]any{"_perms": api.Perms{Agents: []string{"codex"}, Scope: []string{"*"}}})
 	id := "newlogin00000000"
@@ -124,6 +127,7 @@ func TestInvitePerms(t *testing.T) {
 
 // Folders: within the scope all of it, on the way there only what leads in, elsewhere refused.
 func TestScopeFolders(t *testing.T) {
+	t.Parallel()
 	l := start(t)
 	app := l.newApp("bot", false)
 	l.want(200, "socket", "PUT", "/v1/internal/apps/bot/perms", api.Perms{Agents: []string{"*"}, Scope: []string{"主机:/w/in"}}, nil)
@@ -155,6 +159,7 @@ func TestScopeFolders(t *testing.T) {
 // A turn is for the person who started it: an agent's ir in it, and what that agent starts or
 // sends, act as that login, down the chain.
 func TestTurnOrigin(t *testing.T) {
+	t.Parallel()
 	l := start(t)
 	web := caller{Identity: gate.Identity{App: gate.WebApp, Login: "pad0000000000000", Name: "pad"}}
 	l.s.noteOrigin(web, "S1", "")

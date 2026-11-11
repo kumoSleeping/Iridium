@@ -361,6 +361,7 @@ func (e *effortOwner) Set(_ context.Context, r harness.Ref, ch harness.Change) (
 
 // A session that runs here: its channel is asked first, and an effort it takes is not the driver's.
 func TestChannelSetLive(t *testing.T) {
+	t.Parallel()
 	owner := &effortOwner{}
 	r := newRig(t, func(_ *config.Config, o *Options) { o.Channels = harness.Set{api.AgentClaude: owner} })
 	id, err := r.m.Create(bg, api.NewSession{Cwd: r.cwd, Text: "hi"}, "网页")

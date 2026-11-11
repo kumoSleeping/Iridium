@@ -12,6 +12,7 @@ import (
 // The tail a session's state carries names files as a page of messages does: the reply's file
 // has a ref, and the files route serves it.
 func TestTailFiles(t *testing.T) {
+	t.Parallel()
 	l := start(t)
 	note := filepath.Join(l.work, "note.txt")
 	if err := os.WriteFile(note, []byte("a note\n"), 0o600); err != nil {

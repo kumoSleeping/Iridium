@@ -211,6 +211,7 @@ func TestClearKeepsLauncher(t *testing.T) {
 // another machine it is in; one hung under its launcher; one whose launcher is gone or archived;
 // a subagent as its parent. Not one in a group at another machine no one opened.
 func TestListed(t *testing.T) {
+	t.Parallel()
 	l := []api.Session{
 		{ID: "here", Workspace: 1},
 		{ID: "desk", Machine: "m", Workspace: 2},                // DSH Desktop's, in a group no one opened
@@ -236,6 +237,7 @@ func TestListed(t *testing.T) {
 // The page's fixtures (web/test/logic.test.ts reads the same): what stands where, so what is
 // listed, is the page's.
 func TestStanding(t *testing.T) {
+	t.Parallel()
 	b, err := os.ReadFile(filepath.Join("testdata", "standing.json"))
 	if err != nil {
 		t.Fatal(err)

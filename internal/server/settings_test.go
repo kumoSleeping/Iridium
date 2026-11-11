@@ -17,6 +17,7 @@ import (
 // The settings page's fields: read, changed in part, saved to the config file beside what the
 // file has of its own, in force at once; only panels change them, channels see none.
 func TestSettings(t *testing.T) {
+	t.Parallel()
 	var path, state string
 	l := startWith(t, func(s *Server, cfg config.Config, work string) {
 		path, state = filepath.Join(filepath.Dir(cfg.StateDir), "config.json"), cfg.StateDir
@@ -134,6 +135,7 @@ func TestSettings(t *testing.T) {
 }
 
 func TestShortDuration(t *testing.T) {
+	t.Parallel()
 	for d, want := range map[time.Duration]string{0: "0", time.Hour: "1h", 15 * time.Minute: "15m", 90 * time.Minute: "1h30m", 12 * time.Hour: "12h", 45 * time.Second: "45s"} {
 		if got := shortDuration(d); got != want {
 			t.Errorf("%s: %q, want %q", d, got, want)

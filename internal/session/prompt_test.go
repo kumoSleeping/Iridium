@@ -6,6 +6,7 @@ import (
 )
 
 func TestSystemPrompt(t *testing.T) {
+	t.Parallel()
 	p := SystemPrompt("zh")
 	for _, want := range []string{"ir api [METHOD]", "ir api help secrets", "ir api POST internal/links path=<path>", "](ir:id)", `channel.update channel_id=self data.name="<title>"`, "Run ir api help before", "web settings: Chinese."} {
 		if !strings.Contains(p, want) {

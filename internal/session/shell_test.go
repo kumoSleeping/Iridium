@@ -82,6 +82,7 @@ func testShell(t *testing.T, m *Manager, id, cwd string) {
 }
 
 func TestShell(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("sh")
 	}

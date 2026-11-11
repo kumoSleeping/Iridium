@@ -12,10 +12,12 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# The web app and the Go side side by side: the Go tests need no web build (internal/webui serves
+# whatever dist holds, built or not).
 jobs:
-  test:
+  web:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -23,15 +25,24 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
       - name: web
         working-directory: web
         run: |
           npm ci --no-audit --no-fund
           npm run check
           npm run build
+
+  go:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4 # the node executor and the dsh plugin under test
+        with:
+          node-version: 24
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
       - name: types
         run: scripts/check-types.sh
       - name: vet

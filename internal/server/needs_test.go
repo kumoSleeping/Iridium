@@ -47,6 +47,7 @@ func (l *live) asLogin(token, login, method, path string, body, out any) int {
 // however often it speaks. Allowed, it goes through as itself; denied or removed, it asks again
 // as it next speaks. An app has 20 waiting at most.
 func TestLoginJoin(t *testing.T) {
+	t.Parallel()
 	l := start(t)
 	app := l.newApp("qq", false)
 	var e api.Error
@@ -120,6 +121,7 @@ func TestLoginJoin(t *testing.T) {
 // agent (Claude too) everywhere. Never an agent's ir, an app, a login without Claude or one kept to
 // some places.
 func TestApprovers(t *testing.T) {
+	t.Parallel()
 	l := start(t)
 	panel := func(id string) gate.EndpointInfo { return gate.EndpointInfo{ID: id, Name: id, Kind: gate.KindPanel} }
 	claude, _ := json.Marshal(access.WithClaude(access.Default(), access.ByLocal, 1))
@@ -181,6 +183,7 @@ func TestApprovers(t *testing.T) {
 
 // The catalogue: the official apps, with how to install each, the dsh plugin and iridium-qq too.
 func TestCatalogue(t *testing.T) {
+	t.Parallel()
 	l := start(t)
 	var c []api.CatalogueEntry
 	l.want(200, "socket", "GET", "/v1/internal/catalogue", nil, &c)
