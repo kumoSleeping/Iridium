@@ -18,6 +18,7 @@ import (
 
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/gate"
+	"github.com/kumoSleeping/iridium/internal/satori"
 )
 
 // Pairing (draft 二「接入」, decisions 6-11): the one way an app comes in, an executor (ir join)
@@ -135,8 +136,14 @@ func (s *Server) pairAsk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now()
-	if !s.pairWindow().Open {
+	// The window keeps strangers from asking; the host's own socket (ir pair here) asks with it
+	// shut. Either way a person allows it.
+	if !s.pairWindow().Open && !callerOf(r).socket {
 		refuse(w, http.StatusForbidden, "pair_closed", "pairing is closed: open it on the host (ir apps open) or in 应用管理")
+		return
+	}
+	if m.Login != nil && !validLogin(m.Login.ID) {
+		refuse(w, http.StatusUnprocessableEntity, "bad_login", "a login's ID: 1 to 64 characters, no / and no control characters")
 		return
 	}
 	asked := m.Wants != nil
@@ -278,6 +285,9 @@ func (s *Server) pairAllowed(nd api.Need, a api.NeedAnswer, ownerBy string) (*ap
 		if s.Remote != nil {
 			s.Remote.Drop(info.ID)
 		}
+		if err := s.pairLogin(info.ID, nd); err != nil {
+			return nil, err
+		}
 		s.terminalsChanged()
 		return &api.Token{App: s.appOf(info), Token: tok}, nil
 	}
@@ -309,8 +319,25 @@ func (s *Server) pairAllowed(nd api.Need, a api.NeedAnswer, ownerBy string) (*ap
 			return nil, err
 		}
 	}
+	if err := s.pairLogin(info.ID, nd); err != nil {
+		return nil, err
+	}
 	s.terminalsChanged()
 	return &api.Token{App: s.appOf(info), Token: tok}, nil
+}
+
+// pairLogin approves the login pairing need nd asked for, as the person allowed the app with it:
+// a new one approved; one the app had already stays as it is (waiting, it waits for its own need).
+func (s *Server) pairLogin(app string, nd api.Need) error {
+	if nd.Pair == nil || nd.Pair.Login == nil {
+		return nil
+	}
+	l := nd.Pair.Login
+	added, err := s.st.AddApprovedLogin(app, l.ID, l.Name, time.Now())
+	if err == nil && added {
+		s.sat.LoginEvent(app, "login-added", satori.LoginInfo{ID: l.ID, Name: l.Name})
+	}
+	return err
 }
 
 func (s *Server) setAppPerms(id string, p api.Perms) error {
@@ -374,6 +401,11 @@ func cleanPair(m api.PairRequest) api.PairRequest {
 	}
 	w := cleanPerms(m.Wants)
 	m.Wants = &w
+	if m.Login != nil {
+		l := api.PairLogin{ID: m.Login.ID, Name: truncRunes(strings.TrimSpace(m.Login.Name), loginMaxLen)}
+		l.Name = cmp.Or(l.Name, l.ID)
+		m.Login = &l
+	}
 	return m
 }
 

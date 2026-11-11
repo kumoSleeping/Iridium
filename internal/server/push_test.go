@@ -107,12 +107,11 @@ func TestPushOnAsk(t *testing.T) {
 	if p.do("POST", "/v1/internal/web/push/test", nil, &sent); sent["sent"] != 1 || (<-got).Kind != "test" {
 		t.Errorf("test push: %v", sent)
 	}
-	var created api.NewSessionReply
-	p.do("POST", "/v1/internal/sessions", api.NewSession{Cwd: p.work, Text: "hi"}, &created)
+	created, _ := createAt(p.t, http.DefaultClient, p.base, api.NewSession{Cwd: p.work, Text: "hi"})
 	// A turn's end with the switch off: nothing (a push meanwhile would be the first got below).
 	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
 		var s api.SessionState
-		if p.do("GET", "/v1/internal/sessions/"+created.ID, nil, &s); s.Status == api.StatusIdle && s.Last != nil && s.Last.Text == "ok: hi" {
+		if p.do("GET", "/v1/internal/sessions/"+created, nil, &s); s.Status == api.StatusIdle && s.Last != nil && s.Last.Text == "ok: hi" {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -120,10 +119,10 @@ func TestPushOnAsk(t *testing.T) {
 		}
 	}
 	p.do("PUT", "/v1/internal/web/push", api.PushSwitch{Enabled: true}, nil)
-	p.do("POST", "/v1/internal/sessions/"+created.ID+"/send", api.Send{Text: "please ASK"}, nil)
+	sendAt(p.t, http.DefaultClient, p.base, created, api.Send{Text: "please ASK"})
 	select {
 	case m := <-got:
-		if m.Kind != "needs_you" || m.Session != created.ID || !strings.Contains(m.Body, "ls") {
+		if m.Kind != "needs_you" || m.Session != created || !strings.Contains(m.Body, "ls") {
 			t.Errorf("push: %+v", m)
 		}
 	case <-time.After(10 * time.Second):
@@ -206,9 +205,8 @@ func TestPushPanelsOnly(t *testing.T) {
 func TestQueueAndPushRoutes(t *testing.T) {
 	t.Parallel()
 	p := newPushRig(t)
-	var created api.NewSessionReply
-	p.do("POST", "/v1/internal/sessions", api.NewSession{Cwd: p.work, Text: "one WAIT"}, &created)
-	id := created.ID
+	created, _ := createAt(p.t, http.DefaultClient, p.base, api.NewSession{Cwd: p.work, Text: "one WAIT"})
+	id, sentInput := created, ""
 	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
 		var s api.SessionState
 		p.do("GET", "/v1/internal/sessions/"+id, nil, &s)
@@ -219,17 +217,25 @@ func TestQueueAndPushRoutes(t *testing.T) {
 			t.Fatal("no turn")
 		}
 	}
-	var sent api.SendReply
-	if p.do("POST", "/v1/internal/sessions/"+id+"/send", api.Send{Text: "two"}, &sent); !sent.Queued {
+	// A message waiting in the queue: changed (message.update), not one that is not there
+	// (message.delete).
+	if _, sent := sendAt(p.t, http.DefaultClient, p.base, id, api.Send{Text: "two"}); !sent.Queued {
 		t.Fatalf("not queued: %+v", sent)
+	} else {
+		var edited string
+		if code := satAt(p.t, http.DefaultClient, p.base, "message.update", map[string]any{"channel_id": id, "message_id": sent.Input, "content": "two!"}, &edited); code != 200 {
+			t.Errorf("edit: %d %s", code, edited)
+		}
+		var s api.SessionState
+		if p.do("GET", "/v1/internal/sessions/"+id, nil, &s); len(s.Queue) != 1 || s.Queue[0].Text != "two!" {
+			t.Errorf("edited: %+v", s.Queue)
+		}
+		if code := satAt(p.t, http.DefaultClient, p.base, "message.delete", map[string]any{"channel_id": id, "message_id": "nope"}, nil); code != 422 {
+			t.Errorf("delete nothing: %d", code)
+		}
+		sentInput = sent.Input
 	}
-	if code := p.do("PUT", "/v1/internal/sessions/"+id+"/queue/"+sent.Input, api.EditQueued{Text: "two!"}, nil); code != 200 {
-		t.Errorf("edit: %d", code)
-	}
-	if code := p.do("DELETE", "/v1/internal/sessions/"+id+"/queue/nope", nil, nil); code != 422 {
-		t.Errorf("delete nothing: %d", code)
-	}
-	if code := p.do("POST", "/v1/internal/sessions/"+id+"/queue/"+sent.Input+"/steer", nil, nil); code != 200 {
+	if code := p.do("POST", "/v1/internal/sessions/"+id+"/queue/"+sentInput+"/steer", nil, nil); code != 200 {
 		t.Errorf("steer: %d", code)
 	}
 	if code := p.do("PUT", "/v1/internal/sessions/"+id+"/mode", api.SetMode{Mode: "nope"}, nil); code != 400 {
@@ -280,13 +286,15 @@ func TestQueueAndPushRoutes(t *testing.T) {
 	}
 }
 
-// An ask is answered at its session's own path: a card of another session is a bad request.
-func TestAnswerAtSession(t *testing.T) {
+// An ask is answered by its card (internal/button): a card of no session, not an ask's, or an ask
+// no longer open is not there.
+func TestAnswerCard(t *testing.T) {
 	t.Parallel()
 	l := start(t)
-	var a api.NewSessionReply
-	l.want(200, "socket", "POST", "/v1/internal/sessions", api.NewSession{Agent: api.AgentCodex, Cwd: l.work, Text: "hi"}, &a)
-	l.want(400, "socket", "POST", "/v1/internal/sessions/"+a.ID+"/answer", api.CardAnswer{Card: "ask:other:1", Option: "allow"}, nil)
-	l.want(400, "socket", "POST", "/v1/internal/sessions/"+a.ID+"/answer", api.CardAnswer{Card: "pick:1", Option: "x"}, nil)
-	l.want(410, "socket", "POST", "/v1/internal/sessions/"+a.ID+"/answer", api.CardAnswer{Card: "ask:" + a.ID + ":none", Option: "allow"}, nil)
+	a := l.create(200, "socket", api.NewSession{Agent: api.AgentCodex, Cwd: l.work, Text: "hi"})
+	for _, card := range []string{"ask:other:1", "pick:1", "ask:" + a + ":none"} {
+		if code := l.answer("socket", api.CardAnswer{Card: card, Option: "allow"}); code != 422 {
+			t.Errorf("%s: %d", card, code)
+		}
+	}
 }

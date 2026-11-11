@@ -97,7 +97,7 @@ func closedContent(content string) string {
 // askMessage is an open ask of session ss as a message.
 func (s *Service) askMessage(ss api.Session, a api.Ask) Message {
 	card := session.CardOf(ss.ID, a)
-	m := Message{ID: card.ID, Content: s.b.Mask(cardContent(card)), Channel: channelOf(ss), Guild: s.guildOf(ss)}
+	m := Message{ID: card.ID, Content: s.b.Mask(cardContent(card)), Channel: s.channelMasked(ss), Guild: s.guildOf(ss)}
 	if u, ok := agentUser(ss.Agent); ok {
 		m.User = &u
 	}
@@ -211,7 +211,7 @@ func (s *Service) forget(card string) {
 }
 
 // serveInternal serves /v1/internal/: button (an action button pressed: {id}, or a card answered
-// whole: {id: <card>, choices, words, message}).
+// whole: {id: <card>, option, choices, words, message}).
 func (s *Service) serveInternal(w http.ResponseWriter, r *http.Request, name string) {
 	if name != "button" {
 		s.fail(w, refuse(http.StatusNotFound, "no_such_api", "no API internal/"+name))
@@ -228,6 +228,7 @@ func (s *Service) serveInternal(w http.ResponseWriter, r *http.Request, name str
 	}
 	var req struct {
 		ID      string   `json:"id"`
+		Option  string   `json:"option"`
 		Choices []string `json:"choices"`
 		Words   []string `json:"words"`
 		Message string   `json:"message"`
@@ -254,7 +255,7 @@ func (s *Service) serveInternal(w http.ResponseWriter, r *http.Request, name str
 		}
 		st, err := s.channel(c, id)
 		if err == nil {
-			err = s.b.Answer(r.Context(), c, api.CardAnswer{Card: req.ID, Choices: req.Choices, Words: req.Words, Message: req.Message})
+			err = s.b.Answer(r.Context(), c, api.CardAnswer{Card: req.ID, Option: req.Option, Choices: req.Choices, Words: req.Words, Message: req.Message})
 		}
 		if err != nil {
 			s.fail(w, err)

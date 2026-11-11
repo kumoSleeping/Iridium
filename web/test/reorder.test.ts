@@ -1,7 +1,9 @@
 // Rows dragged to a new place (reorder.ts): the key a session is dropped at, and the groups' order.
+import type { Color } from "../src/api/types.gen";
 import { describe, expect, test } from "vitest";
 import type { Session } from "../src/api/types.gen";
-import { pinFolder, placeFolder, placeGroup, placeSession, sortList, withPlace } from "../src/reorder";
+import { pinFolder, placeFolder, placeGroup, placeSession, sortList } from "../src/reorder";
+import { colorsOf, placesOf, withGroupOrder, withMark } from "../src/guilds";
 import { buildTree, foldRest } from "../src/tree";
 
 const s = (id: string, updatedAt: number, more: Partial<Session> = {}) => ({ id, updatedAt, agent: "claude", cwd: "/w", status: "idle", hosted: false, live: false, ...more }) as Session;
@@ -59,8 +61,18 @@ describe("folders", () => {
     expect(placeFolder([p, y, z], z, p, "bottom", none, 0)).toEqual({ order: 300 - 1000, pinned: true });
     expect(pinFolder([p, y, z], z, none)).toEqual({ order: -700, pinned: true });
     expect(pinFolder([y, z], z, { groups: [], order: {}, pinned: [] })).toEqual({ pinned: true });
-    expect(withPlace(none, "/w/z", { order: 5, pinned: true })).toEqual({ groups: [], order: { "/w/z": 5 }, pinned: ["/w/x", "/w/z"] });
-    expect(withPlace({ groups: [], order: { "/w/x": 9 }, pinned: ["/w/x"] }, "/w/x", { order: 0, pinned: false })).toEqual({ groups: [], order: {}, pinned: [] });
+  });
+
+  test("the carried guilds: places and colours made from them, a mark put, the groups reordered", () => {
+    const ws = (id: number) => ({ id, name: `g${id}`, path: `/g${id}` });
+    const g = { guilds: [ws(1), ws(2)], folders: [{ path: "/w/x", pinned: true, color: "red" as const }] };
+    expect(placesOf(g)).toEqual({ groups: ["w1", "w2"], order: {}, pinned: ["/w/x"] });
+    expect(placesOf(g)).toBe(placesOf(g));
+    expect(colorsOf(g)).toEqual({ "/w/x": "red" });
+    const put = withMark(g, "/w/z", { order: 5, pinned: true });
+    expect(placesOf(put)).toEqual({ groups: ["w1", "w2"], order: { "/w/z": 5 }, pinned: ["/w/x", "/w/z"] });
+    expect(withMark(withMark(g, "/w/x", { pinned: false }), "/w/x", { color: "" as Color }).folders).toEqual([]);
+    expect(withGroupOrder(g, ["w2"]).guilds.map((w) => w.id)).toEqual([2, 1]);
   });
 
   test("groups in their own order, whichever machine; one 未归类, last", () => {

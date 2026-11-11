@@ -16,7 +16,8 @@
 // session in it (Session.own) not archived; a session one started (ir new, Session.launcher) hangs
 // under the topmost listed one it came from, a whole session, listed always (docs/exec.md
 // "远端工作区", the user, 2026-11-10). One 未归类, this machine's.
-import type { Places, Workspace } from "./api/types.gen";
+import type { Workspace } from "./api/types.gen";
+import type { Places } from "./guilds";
 import type { Session } from "./api/types.gen";
 
 /** pinned: above the sessions at its group's root, or its parent's (reorder.ts). sessions: its
@@ -177,7 +178,7 @@ function bySeen<T>(xs: T[], key: (x: T) => string, at: (x: T) => number, seen: M
   return [...xs].sort((a, b) => seen.get(key(a))! - seen.get(key(b))!);
 }
 
-/** places: where the rows were put by hand (the carried "places"): the groups' rows by key, the
+/** places: where the rows were put by hand (from the carried "guilds"): the groups' rows by key, the
  *  folders by path. */
 export function buildTree(all: Session[], workspaces: Workspace[], unsorted: string, now = Date.now(), seen = SEEN, places: Places = { groups: [], order: {}, pinned: [] }): Tree {
   const list = all.filter((s) => !s.subagent);

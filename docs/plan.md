@@ -81,13 +81,13 @@ ir run [--secret 名,…] -- 命令 …
 | `ir send <id> "消息" [-a 文件]` | `ir api message.create channel_id=<id> _data.text="消息" [_data.paths:='["/绝对/路径"]'] [--wait]` |
 | `ir rename` / `archive` | `ir api channel.update channel_id=<id>\|self data.name=<名>`、`channel.delete` |
 | `ir stop <id>` | `ir api POST internal/sessions/<id>/stop` |
-| `ir ws [ls]` / `ws rename` | `ir api guild.list`、`ir api PATCH internal/workspaces/<组> name=<名>` |
+| `ir ws [ls]` / `ws rename` | `ir api guild.list`、`ir api PATCH internal/guilds/<组> name=<名>` |
 | `ir files <目录>` | `ir api internal/files path==<目录>` |
 | `ir wait <id>` | `ir api internal/sessions/<id> --wait` |
 | `ir cp <源> <目标>` | `ir api POST internal/files/copy from=<源> to=<目标>`（两边都可写 `应用名:路径`） |
 | `ir sh <应用> -- 命令` | `ir api POST internal/machines/<应用>/shell line="命令" --wait` |
 | `ir update [--check]` | `ir api POST internal/update`、`POST internal/update/check` |
-| `ir new <agent> [位置] "任务" [--wait]` | `ir api POST internal/sessions agent=<agent> cwd=<位置> text="任务" [--wait]` |
+| `ir new <agent> [位置] "任务" [--wait]` | `ir api channel.create _data.agent=<agent> _data.cwd=<位置> _data.text="任务" [--wait]` |
 | `ir attach <文件>` | `ir api POST internal/links path=<文件>` |
 | `ir share 应用/登录 <…>` | `ir api POST internal/share to=应用/登录 what=session\|place\|file …` |
 | `ir secret set/ls/rm` | `ir api PUT internal/secrets/<名> note=… --wait`、`internal/secrets`、`DELETE internal/secrets/<名>` |
@@ -99,7 +99,7 @@ ir run [--secret 名,…] -- 命令 …
 - 输出只在回答这一侧加工：列表一项一行，`view=` 指定的字段排成表（`--pick` 换别的），对象一字段一行、它里面的对象数组各成一张表；空值不打，每个值一行、截到 200 字（`--clip`）；Satori 消息的 `content` 转成文字（人说的前面 `> [来源]`，工具、思考、系统行标出来）。`--grep` 筛项，`--all` 跟着 `next` 取完，`--json` 原样。
 - 接口说明 `internal/irhelp/api.txt`：一个接口一行（方法 路径 正文 -> 回答 说明 view=），按话题分段，测试核对它和服务端注册的路由一条不差。接口下面缩进的行是它的说明（字段的意思、默认值），列表里只在行尾标 `[more]`，`ir api help <方法 路径>`（或 `satori.方法`、实际发的路径）才打出来；按词找时连带含这个词的说明行。系统提示只有几行（`ir api`、`ir run`、分层查法、凭据、交文件、起标题、语言），不放接口表，也不叫每个会话先跑一遍 `ir api help`：知道接口就直接查它，不知道再查话题或词；最常用的几个（起会话、发消息、等、列会话）直接写出接口名（用户，2026-11-11：提示词大量砍，用什么就 help 什么，要什么读什么）。
 - 回答是 ndjson 的（远端命令行的输出、拷贝的进度）边收边打：命令行的输出原样，退出码照它；拷贝在终端上画进度，最后一行 `路径 大小 sha256`。`--wait` 在 `GET internal/sessions/{id}` 上等回合结束。
-- `message.create` 和带 `text` 的 `POST internal/sessions` 不带 `--wait` 也等到 agent 接了这条再返回（最多 15 秒），紧接着的 `ir wait` 等的才是这一回合；带 `--wait` 等回合结束、打印回复。回 202 `{need}`（agent 要邀请、要人填凭据）时 `--wait` 等人决定，只说结果。
+- `message.create` 和带 `_data.text` 的 `channel.create` 不带 `--wait` 也等到 agent 接了这条再返回（最多 15 秒），紧接着的 `ir wait` 等的才是这一回合；带 `--wait` 等回合结束、打印回复。回 202 `{need}`（agent 要邀请、要人填凭据）时 `--wait` 等人决定，只说结果。
 - 位置和路径服务端认（`server/places.go`）：`应用名:路径`、`host:路径`、`~/x`；相对路径和 `.` 从调用者会话的目录起（会话在那台电脑上时），否则要整路径。新会话的 `cwd`、`internal/links`、`attach`、`internal/files`、`_data.paths` 都这样。
 - `ir api` 带 `X-Iridium-Agent`（规则同管理命令：环境里有 agent 的会话变量，或 stdin/stdout 不全是终端），agent 拿不到秘密、批不了需要。
 - `new`、`message.create` 可加 `--wait`；`new` 可选 `--model`、`--approve`。`wait` 退出码：0 结束，2 需要你，1 出错/已退出。
@@ -116,7 +116,7 @@ ir apps open [时长] | close  开放配对（默认 10 分钟）或关掉；只
 ir needs | allow <id> | deny <id>   等人决定的事：应用接入、更新配对、应用变更、登录加入…
 ir invite [名字] [--claude]  网页的一次性邀请链接；--claude 带 Claude
 ir join <地址> [--shell]     把这台电脑接入另一个 Iridium（执行端），对方核对配对码后允许
-ir pair <地址> --name 名字 --into 文件   替程序申请接入，允许后 TOKEN 写进文件，不打印
+ir pair [地址] --name 名字 --into 文件|--env 文件:变量 [--login ID]   替程序申请接入（连同登录，默认 bot），允许后 TOKEN 写进文件，不打印；不给地址是本机，不用开放配对
 ir profile <名字> [--name 新名] [--avatar 图片] [--device computer|laptop|phone|none]
 ```
 

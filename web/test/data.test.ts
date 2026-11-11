@@ -36,14 +36,22 @@ describe("api", () => {
     await api.answer("s1", { card: "ask:s1:q", option: "always" });
     await api.answer("s1", { card: "ask:s1:r", choices: ["0.1"], words: ["", "mine"] });
     await api.editQueued("s1", "in 1", "again");
+    await api.unqueue("s1", "in 1");
+    await api.patch("s1", { name: "n", pinned: true, detach: true });
+    await api.markFolder("/w/a", { color: "red" });
+    await api.create({ agent: "claude", cwd: "/w", text: "go", workspace: 7, caller: "s1" });
     await api.putSettings({ idleReap: "2h", modes: { claude: "plan" } });
     await api.answerConfirm("c1", true);
     expect(calls.map((c) => [c.method, c.url, c.body])).toEqual([
       ["POST", "/v1/message.create", { channel_id: "s1", content: "hi &lt;b&gt;&amp;", _data: {} }],
       ["POST", "/v1/message.create", { channel_id: "s1", content: "hi", _data: { attachments: ["r1"], steer: true } }],
-      ["POST", "/v1/internal/sessions/s1/answer", { card: "ask:s1:q", option: "always" }],
-      ["POST", "/v1/internal/sessions/s1/answer", { card: "ask:s1:r", choices: ["0.1"], words: ["", "mine"] }],
-      ["PUT", "/v1/internal/sessions/s1/queue/in%201", { text: "again" }],
+      ["POST", "/v1/internal/button", { id: "ask:s1:q", option: "always" }],
+      ["POST", "/v1/internal/button", { id: "ask:s1:r", choices: ["0.1"], words: ["", "mine"] }],
+      ["POST", "/v1/message.update", { channel_id: "s1", message_id: "in 1", _data: { text: "again" } }],
+      ["POST", "/v1/message.delete", { channel_id: "s1", message_id: "in 1" }],
+      ["POST", "/v1/channel.update", { channel_id: "s1", data: { name: "n", parent_id: null }, _data: { pinned: true } }],
+      ["POST", "/v1/channel.update", { channel_id: "folder:/w/a", _data: { color: "red" } }],
+      ["POST", "/v1/channel.create", { guild_id: "7", data: { parent_id: "s1" }, _data: { agent: "claude", cwd: "/w", text: "go" } }],
       ["PUT", "/v1/internal/settings", { idleReap: "2h", modes: { claude: "plan" } }],
       ["POST", "/v1/internal/needs/c1", { allow: true }],
     ]);
@@ -79,7 +87,7 @@ describe("api", () => {
 
 describe("the event stream", () => {
   test("names the list, the quota, the update, the confirmations and the open session with its context", () => {
-    expect(keysFor(null)).toEqual(["list", "workspaces", "places", "colors", "quota", "update", "needs", "pairing", "terminals", "notes"]);
+    expect(keysFor(null)).toEqual(["list", "guilds", "quota", "update", "needs", "pairing", "terminals", "notes"]);
     expect(keysFor("a").slice(-2)).toEqual(["session:a", "context:a"]);
     expect(streamURL()).toMatch(/^wss?:\/\/.*\/v1\/events$/);
   });

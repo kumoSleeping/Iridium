@@ -32,7 +32,7 @@ const (
 const Adapter = "iridium"
 
 // Features are login.features: the APIs served.
-var Features = []string{"message.create", "message.get", "message.list", "channel.get", "channel.list", "channel.update", "channel.delete",
+var Features = []string{"message.create", "message.get", "message.list", "message.update", "message.delete", "channel.get", "channel.list", "channel.create", "channel.update", "channel.delete",
 	"guild.get", "guild.list", "login.get", "user.get", "upload.create"}
 
 // Caller is who a request comes from: an app (by its TOKEN) and, past the headers, its login.
@@ -52,7 +52,7 @@ type LoginInfo struct {
 	ID, Name string
 }
 
-// SendResult is what a message sent did, as POST /v1/internal/sessions/{id}/send answers it: its input's
+// SendResult is what a message sent did (message.create's _data): its input's
 // id, whether it waits in the queue, and the session it went to (another one after /clear).
 type SendResult = api.SendReply
 
@@ -107,8 +107,15 @@ type Backend interface {
 	// Watch sends the states keys name to an event stream (Iridium's own, op STATE): what ir_web
 	// shows beyond chat (the session list, a session's whole state, drafts), till ctx ends.
 	Watch(ctx context.Context, r *http.Request, c Caller, keys []string, emit func(kind string, data []byte) error) error
-	// Patch changes session id as c may (a rename, archiving it).
+	// Create starts session req as c (channel.create): its id.
+	Create(ctx context.Context, c Caller, req api.NewSession) (string, error)
+	// Patch changes session id as c may (a rename, archiving it, its place in the list).
 	Patch(ctx context.Context, c Caller, id string, p api.SessionPatch) error
+	// Marks are the folders marked by hand; MarkFolder marks the folder of path (as grouped) as c.
+	Marks() []api.FolderMark
+	MarkFolder(c Caller, path string, p api.FolderPatch) error
+	// EditQueued changes the text of input of session id while it waits in the queue; nil drops it.
+	EditQueued(c Caller, id, input string, text *string) error
 	// Answer answers an ask's card as c.
 	Answer(ctx context.Context, c Caller, a api.CardAnswer) error
 	// Upload stores a file for session id: its ref.
@@ -222,8 +229,11 @@ var methods = map[string]method{
 	"message.create": (*Service).messageCreate,
 	"message.get":    (*Service).messageGet,
 	"message.list":   (*Service).messageList,
+	"message.update": (*Service).messageUpdate,
+	"message.delete": (*Service).messageDelete,
 	"channel.get":    (*Service).channelGet,
 	"channel.list":   (*Service).channelList,
+	"channel.create": (*Service).channelCreate,
 	"channel.update": (*Service).channelUpdate,
 	"channel.delete": (*Service).channelDelete,
 	"guild.get":      (*Service).guildGet,

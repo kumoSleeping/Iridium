@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/kumoSleeping/iridium/internal/agents"
 	"github.com/kumoSleeping/iridium/internal/api"
@@ -31,18 +32,68 @@ func agentUser(a api.Agent) (User, bool) {
 	return User{ID: string(a), Name: info.Name, IsBot: true}, true
 }
 
-// channelOf is session ss as a channel.
+// channelOf is session ss as a channel; its parent the channel it is under: the session it hangs
+// under (a subagent's, or its launcher's while not taken out, channel.create's data.parent_id),
+// else its folder's.
 func channelOf(ss api.Session) *Channel {
 	name := cmp.Or(ss.Name, ss.Title)
 	if name == "" && ss.Cwd != "" {
 		name = filepath.Base(ss.Cwd)
 	}
-	return &Channel{ID: ss.ID, Type: ChannelText, Name: name, ParentID: ss.Parent}
+	parent := ss.Parent
+	if parent == "" && !ss.Own {
+		parent = ss.Launcher
+	}
+	if parent == "" && ss.Cwd != "" {
+		parent = FolderPrefix + groupPath(ss)
+	}
+	return &Channel{ID: ss.ID, Type: ChannelText, Name: name, ParentID: parent}
+}
+
+// groupPath is the folder session ss is in as the list groups it: its cwd, "<machine>:<cwd>" at
+// another machine.
+func groupPath(ss api.Session) string {
+	if ss.Machine == "" {
+		return ss.Cwd
+	}
+	return ss.Machine + ":" + strings.ReplaceAll(ss.Cwd, `\`, "/")
+}
+
+// folders are the folders sessions l are in, as category channels, by first seen; their marks
+// from the backend.
+func (s *Service) folders(l []api.Session) []Channel {
+	marks := map[string]api.FolderMark{}
+	for _, m := range s.b.Marks() {
+		marks[m.Path] = m
+	}
+	seen := map[string]bool{}
+	var out []Channel
+	for _, ss := range l {
+		p := groupPath(ss)
+		if ss.Cwd == "" || seen[p] {
+			continue
+		}
+		seen[p] = true
+		m, ok := marks[p]
+		if !ok {
+			m = api.FolderMark{Path: p}
+		}
+		name := p[strings.LastIndexAny(p, `/\:`)+1:]
+		out = append(out, Channel{ID: FolderPrefix + p, Type: ChannelCategory, Name: cmp.Or(name, p), Mark: &m})
+	}
+	return out
+}
+
+// channelMasked is channelOf(ss), its name masked: as messages and events carry it.
+func (s *Service) channelMasked(ss api.Session) *Channel {
+	c := channelOf(ss)
+	c.Name = s.b.Mask(c.Name)
+	return c
 }
 
 // channelFull is session ss as a channel with Iridium's own of it (_data), its words masked.
 func (s *Service) channelFull(ss api.Session) Channel {
-	c := channelOf(ss)
+	c := s.channelMasked(ss)
 	d := ss
 	d.Name, d.Title = s.b.Mask(d.Name), s.b.Mask(d.Title)
 	if d.Last != nil {
@@ -111,18 +162,35 @@ func (s *Service) guildID(c Caller, id string) (string, error) {
 	return s.guildOf(st.Session).ID, nil
 }
 
-func (s *Service) channelGet(_ context.Context, c Caller, body []byte) (any, error) {
+func (s *Service) channelGet(ctx context.Context, c Caller, body []byte) (any, error) {
 	var req struct {
 		ChannelID string `json:"channel_id"`
 	}
 	if err := decode(body, &req); err != nil {
 		return nil, err
 	}
+	if strings.HasPrefix(req.ChannelID, FolderPrefix) {
+		return s.folder(ctx, c, req.ChannelID)
+	}
 	st, err := s.channel(c, req.ChannelID)
 	if err != nil {
 		return nil, err
 	}
 	return s.channelFull(st.Session), nil
+}
+
+// folder is the folder channel id, if c sees a session in it.
+func (s *Service) folder(ctx context.Context, c Caller, id string) (Channel, error) {
+	l, err := s.visible(ctx, c, false)
+	if err != nil {
+		return Channel{}, err
+	}
+	path := strings.TrimPrefix(id, FolderPrefix)
+	l = slices.DeleteFunc(l, func(ss api.Session) bool { return groupPath(ss) != path })
+	if f := s.folders(l); len(f) > 0 {
+		return f[0], nil
+	}
+	return Channel{}, refuse(http.StatusUnprocessableEntity, "no_such_channel", "no folder "+path)
 }
 
 // visible are the sessions c sees, newest first; archived ones and subagents only if all.
@@ -178,11 +246,16 @@ func (s *Service) channelList(ctx context.Context, c Caller, body []byte) (any, 
 	if req.GuildID, err = s.guildID(c, req.GuildID); err != nil {
 		return nil, err
 	}
-	var chans []Channel
+	var in []api.Session
 	for _, ss := range l {
 		if req.GuildID == "" || s.guildOf(ss).ID == req.GuildID {
-			chans = append(chans, s.channelFull(ss))
+			in = append(in, ss)
 		}
+	}
+	// The folders first, then the sessions in them.
+	chans := s.folders(in)
+	for _, ss := range in {
+		chans = append(chans, s.channelFull(ss))
 	}
 	if req.GuildID != "" && len(chans) == 0 && !s.guildThere(c, req.GuildID) {
 		return nil, refuse(http.StatusUnprocessableEntity, "no_such_guild", "no guild "+req.GuildID)

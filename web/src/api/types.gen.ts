@@ -538,9 +538,6 @@ export interface NewSession {
    */
   machine?: string;
 }
-export interface NewSessionReply {
-  id: string;
-}
 /**
  * Send gives the session a message: a new turn when idle; while a turn runs it waits in the
  * queue for the turn to end, unless Steer, which joins the running turn.
@@ -896,7 +893,7 @@ export const NeedSecretSet: NeedKind = "secret_set"; // an agent's ir secret set
 export const NeedSecretUse: NeedKind = "secret_use"; // an agent's ir run with credentials
 /**
  * NeedAsk: a session's question, approval or plan (Card), for whoever may use the session;
- * answered through the card (POST /v1/internal/sessions/{id}/answer), not POST /v1/internal/needs/{id}.
+ * answered through the card (POST /v1/internal/button), not POST /v1/internal/needs/{id}.
  */
 export const NeedAsk: NeedKind = "ask";
 /**
@@ -1026,6 +1023,17 @@ export interface PairRequest {
   home?: string;
   machineId?: string;
   wants?: Perms; // nil: all; one carrying agents, its home
+  /**
+   * Login: the login it speaks as (Satori-User-ID), approved with it; nil: none (ir join).
+   */
+  login?: PairLogin;
+}
+/**
+ * PairLogin is the login a pairing app speaks as. Name: ID when not given.
+ */
+export interface PairLogin {
+  id: string;
+  name?: string;
 }
 /**
  * ExecAgent is an agent an executor has. Off: turned off at that app (Computer's only).
@@ -1154,12 +1162,6 @@ export interface Queued {
   fromLogin?: string; // and the login of that app, if one
   paused?: boolean;
   at: number /* int64 */;
-}
-/**
- * EditQueued changes a queued message's text.
- */
-export interface EditQueued {
-  text: string;
 }
 /**
  * ContextSummary is how full a session's context window was, without the parts.
@@ -1317,20 +1319,14 @@ export interface CardAnswer {
   words?: string[];
   message?: string;
 }
-/**
- * CardReply is what answering a card did (POST /v1/internal/sessions/{id}/answer).
- */
-export interface CardReply {
-  ok: boolean;
-}
 
 //////////
 // source: discover.go
 
 /**
- * Workspace is a folder group: the folder sessions are in, made as the first goes there (the user,
- * 2026-11-08: no workspaces made by hand). The carried state "workspaces" is Workspace[], those
- * with no session shown too; a session's Workspace 0 is none (未归类: one with no folder).
+ * Workspace is a folder group (Satori's guild): the folder sessions are in, made as the first goes
+ * there (the user, 2026-11-08: no workspaces made by hand); a session's Workspace 0 is none (未归类:
+ * one with no folder).
  */
 export interface Workspace {
   id: number /* int64 */;
@@ -1343,38 +1339,45 @@ export interface Workspace {
   only?: boolean;
 }
 /**
- * GroupOrder lists the groups' rows in the order they were dragged to (PUT /v1/internal/groups/order), by
- * the key the page gives each: first to last, those left out after them.
+ * Guilds is the carried state "guilds": the folder groups in the order they were dragged to (those
+ * never dragged after them, newest last), those with no session shown too; and the folders marked
+ * by hand.
  */
-export interface GroupOrder {
-  keys: string[];
+export interface Guilds {
+  guilds: Workspace[];
+  folders: FolderMark[];
 }
 /**
- * Places is where the rows of the list were put by hand: the carried state "places". Groups: the
- * groups' rows in their order (GroupOrder); those not in it after them. Order: the key each folder
- * dragged is sorted by among those in its group (as Session.Order), by its path as grouped
- * (Session's cwd, or "<machine>:<cwd>"); one not in it, by its latest session's activity. Pinned:
- * the folders pinned, first in their group.
+ * FolderMark is what was put on a folder by hand, by its path as grouped (Session's cwd, or
+ * "<machine>:<cwd>"): its colour tag; pinned first in its group; Order, the key it was dragged to
+ * among those in its group (as Session.Order), else it goes by its latest session's activity.
+ * Satori's channel.list gives each folder sessions are in as a category channel (folder:<path>)
+ * with its mark in _data.
  */
-export interface Places {
-  groups: string[];
-  order: { [key: string]: number /* float64 */};
-  pinned: string[];
-}
-/**
- * FolderPlace puts a folder (PATCH /v1/internal/folders/place); a field left out stays. Order 0 takes its
- * key off.
- */
-export interface FolderPlace {
+export interface FolderMark {
   path: string;
-  order?: number /* float64 */;
+  color?: Color;
   pinned?: boolean;
+  order?: number /* float64 */;
 }
 /**
- * WorkspacePatch renames a group; a field left out stays.
+ * FolderPatch marks a folder (Satori's channel.update of its category, _data); a field left out
+ * stays. Color "" takes the tag off (a folder here only: an absolute path); Order 0 the key.
  */
-export interface WorkspacePatch {
+export interface FolderPatch {
+  color?: Color;
+  pinned?: boolean;
+  order?: number /* float64 */;
+}
+/**
+ * GuildPatch changes a folder group (PATCH /v1/internal/guilds/{id}); a field left out stays.
+ * Position: its place among the groups, 0 first (as the carried "guilds" lists them). Split takes
+ * it apart at its folder: its subfolders groups of their own.
+ */
+export interface GuildPatch {
   name?: string;
+  position?: number /* int */;
+  split?: boolean;
 }
 /**
  * SessionPatch changes what lies over a session; a field left out stays. Name "" takes the name
@@ -1395,18 +1398,6 @@ export interface SessionPatch {
   order?: number /* float64 */;
   detach?: boolean;
 }
-/**
- * FolderColor tags folder Path (absolute) with a colour; Color "" takes it off. The carried state
- * "colors" is every folder's, by path (FolderColors).
- */
-export interface FolderColor {
-  path: string;
-  color: Color;
-}
-/**
- * FolderColors is the colour tags of folders, by absolute path.
- */
-export type FolderColors = { [key: string]: Color};
 /**
  * Folders is one folder's subfolders for the picker: names only, no hidden ones, sorted. Parent
  * is "" at the top of what may be listed.

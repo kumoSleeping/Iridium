@@ -54,7 +54,7 @@ func TestLoginJoin(t *testing.T) {
 	if code := l.asLogin(app.Token, "u1", "GET", "/v1/internal/me", nil, &e); code != 403 || e.Code != "login_pending" || e.Message == "" {
 		t.Fatalf("a new login: %d %+v", code, e)
 	}
-	l.asLogin(app.Token, "u1", "GET", "/v1/internal/sessions", nil, nil)
+	l.asLogin(app.Token, "u1", "GET", "/v1/internal/agents", nil, nil)
 	nd := l.pending()
 	if nd.Kind != api.NeedLoginJoin || nd.Login != "u1" || nd.App == nil || nd.App.ID != app.App.ID || nd.Asker != "qq" {
 		t.Fatalf("the need: %+v", nd)

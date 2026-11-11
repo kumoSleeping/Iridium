@@ -7,6 +7,7 @@ package join
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -66,6 +67,8 @@ type Options struct {
 	Bot     bool
 	Type    string
 	Program string
+	Login   string // the login it speaks as, approved with it (ir pair); "": none
+	Where   string // the Iridium as a person reads it; "": URL
 }
 
 // Main runs ir join with args (after "join").
@@ -260,6 +263,8 @@ func (o *Options) logf(format string, a ...any) {
 	}
 }
 
+func (o *Options) where() string { return cmp.Or(o.Where, o.URL) }
+
 func (o *Options) client() *http.Client {
 	if o.HTTP != nil {
 		return o.HTTP
@@ -386,6 +391,9 @@ func (o *Options) pair(ctx context.Context) (string, error) {
 	const path = "/v1/internal/pair"
 	if o.Bot {
 		who = api.PairRequest{Name: name, Type: o.Type, Program: o.Program}
+		if o.Login != "" {
+			who.Login = &api.PairLogin{ID: o.Login}
+		}
 	} else {
 		if o.Agents == nil {
 			o.Agents = FindAgents(o.Logf)
@@ -404,7 +412,7 @@ func (o *Options) pair(ctx context.Context) (string, error) {
 		code, refusal, err := o.call(ctx, http.MethodPost, path, who, &p)
 		if err == nil && code == http.StatusForbidden && (refusal.Code == "pair_closed" || refusal.Code == "too_many_pending") {
 			if !closed {
-				o.say("%s 没有开放配对：在那边运行 ir apps open，或在应用管理里新建应用；等待中", o.URL)
+				o.say("%s 没有开放配对：在那边运行 ir apps open，或在应用管理里新建应用；等待中", o.where())
 				closed = true
 			}
 			if !sleep(ctx, pairClosedWait) {
@@ -425,13 +433,13 @@ func (o *Options) pair(ctx context.Context) (string, error) {
 			if ctx.Err() != nil {
 				return "", ctx.Err()
 			}
-			o.say("无法配对 %s：%v，%d 秒后重试", o.URL, err, int(pairWait/time.Second))
+			o.say("无法配对 %s：%v，%d 秒后重试", o.where(), err, int(pairWait/time.Second))
 			if !sleep(ctx, pairWait) {
 				return "", ctx.Err()
 			}
 			continue
 		}
-		o.say("配对码 %s：在 %s 的网页上核对后允许", p.Code, o.URL)
+		o.say("配对码 %s：在 %s 的网页上核对后允许", p.Code, o.where())
 	poll:
 		for {
 			if !sleep(ctx, pairPoll) {

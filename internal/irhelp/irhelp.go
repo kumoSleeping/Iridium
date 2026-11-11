@@ -9,7 +9,7 @@ const Help = `ir: the host's Iridium on the command line (over its unix socket).
   ir api [METHOD] <path|satori.method> [k=v | k:=json | k==query]... [--wait]   Iridium's API as it is: ir api help
   ir run [--secret name,…] -- command …   a command line with secrets in it ({{name}}, {{file:name}}, env vars); their values masked in its output
 Admin, a person at a terminal:
-  ir public [off] | join <address> | pair <address> --name n --into file   go public through Cloudflare | join this computer to another Iridium | an app's TOKEN by pairing, into a file (--help on each)
+  ir public [off] | join <address> | pair [<address>] --name n --env file:VAR   go public through Cloudflare | join this computer to another Iridium | an app's TOKEN and login by pairing, into a file; no address: here (--help on each)
 `
 
 // Agent is Help's agent part: the commands an agent uses, without Admin.

@@ -14,8 +14,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -148,16 +146,10 @@ func (s *Server) Handler(local bool) http.Handler {
 		reply(w, http.StatusOK, l)
 	})
 	// What carries transcripts goes out with the credentials' values masked (routes_secrets.go).
-	mux.HandleFunc("GET /v1/internal/sessions", s.masked(s.list))
-	mux.HandleFunc("POST /v1/internal/sessions", s.create)
 	mux.HandleFunc("GET /v1/internal/sessions/{id}", s.masked(s.get))
-	mux.HandleFunc("GET /v1/internal/sessions/{id}/messages", s.masked(s.messages))
-	mux.HandleFunc("GET /v1/internal/sessions/{id}/block", s.masked(s.block))
 	mux.HandleFunc("GET /v1/internal/sessions/{id}/image", s.image)
-	mux.HandleFunc("POST /v1/internal/sessions/{id}/send", s.send)
 	mux.HandleFunc("POST /v1/internal/sessions/{id}/interrupt", s.use(s.interrupt))
 	mux.HandleFunc("POST /v1/internal/sessions/{id}/stop", s.use(s.stop))
-	mux.HandleFunc("POST /v1/internal/sessions/{id}/answer", s.use(s.answer))
 	mux.HandleFunc("POST /v1/internal/sessions/{id}/release", s.use(s.release))
 	// The session's agent's own commands (an app sets its menu from them).
 	mux.HandleFunc("GET /v1/internal/sessions/{id}/commands", func(w http.ResponseWriter, r *http.Request) {
@@ -251,24 +243,14 @@ func (s *Server) Serve(ctx context.Context, tcp, unix net.Listener) error {
 	return nil
 }
 
-func (s *Server) list(w http.ResponseWriter, r *http.Request) {
-	l, err := s.m.List(r.Context())
-	if err != nil {
-		s.error(w, err)
-		return
-	}
-	if c := callerOf(r); !c.Host() {
-		l = s.filterSessions(s.permsFor(c), l)
-	}
-	reply(w, http.StatusOK, l)
-}
+// createError is a session that did not start (the manager's refusal before it had an id).
+type createError struct{ err error }
 
-func (s *Server) create(w http.ResponseWriter, r *http.Request) {
-	var req api.NewSession
-	if !readJSON(w, r, &req) {
-		return
-	}
-	c := callerOf(r)
+func (e *createError) Error() string { return e.err.Error() }
+func (e *createError) Unwrap() error { return e.err }
+
+// createAs starts session req as c (Satori's channel.create): its id.
+func (s *Server) createAs(ctx context.Context, c caller, req api.NewSession) (string, error) {
 	// Started from inside a session (ir's X-Iridium-Session, a session's own TOKEN): that session
 	// is its launcher unless the body names another, so an agent's new session hangs under it.
 	if req.Caller == "" {
@@ -276,14 +258,12 @@ func (s *Server) create(w http.ResponseWriter, r *http.Request) {
 	}
 	// Its folder as written: a place, ~, a path from the caller's own session's (places.go).
 	if err := s.where(c, &req); err != nil {
-		s.error(w, err)
-		return
+		return "", err
 	}
 	if err := s.checkCreate(c, &req); err != nil {
-		s.error(w, err)
-		return
+		return "", err
 	}
-	id, err := s.m.Create(r.Context(), req, s.fromOf(c, req.Caller))
+	id, err := s.m.Create(ctx, req, s.fromOf(c, req.Caller))
 	if id != "" {
 		via := c.session
 		if via == "" && c.socket {
@@ -295,14 +275,9 @@ func (s *Server) create(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err != nil && id == "" {
-		fail(w, http.StatusBadRequest, err.Error())
-		return
+		return "", &createError{err}
 	}
-	if err != nil {
-		s.error(w, err)
-		return
-	}
-	reply(w, http.StatusOK, api.NewSessionReply{ID: id})
+	return id, err
 }
 
 func (s *Server) get(w http.ResponseWriter, r *http.Request) {
@@ -314,62 +289,6 @@ func (s *Server) get(w http.ResponseWriter, r *http.Request) {
 	reply(w, http.StatusOK, st)
 }
 
-func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	before, after := int64(-1), int64(-1)
-	for name, v := range map[string]*int64{"before": &before, "after": &after} {
-		if q.Has(name) {
-			n, err := strconv.ParseInt(q.Get(name), 10, 64)
-			if err != nil || n < 0 {
-				fail(w, http.StatusBadRequest, "bad "+name)
-				return
-			}
-			*v = n
-		}
-	}
-	p, err := s.m.Messages(r.PathValue("id"), before, after)
-	if err != nil {
-		s.error(w, err)
-		return
-	}
-	s.files.Annotate(r.PathValue("id"), &p)
-	reply(w, http.StatusOK, p)
-}
-
-func (s *Server) block(w http.ResponseWriter, r *http.Request) {
-	text, err := s.m.Full(r.PathValue("id"), r.URL.Query().Get("at"))
-	if err != nil {
-		s.error(w, err)
-		return
-	}
-	reply(w, http.StatusOK, api.FullText{Text: text})
-}
-
-func (s *Server) send(w http.ResponseWriter, r *http.Request) {
-	var req api.Send
-	if !readJSON(w, r, &req) {
-		return
-	}
-	c := callerOf(r)
-	// What an agent tells another session joins its turn at once, --queue or not: queued, it would
-	// wait for a person to press it in (the user, 2026-11-06).
-	// (An agent's ir on the socket names the session it runs in; one at another machine is an
-	// agent's by its session's TOKEN.)
-	if c.agent || c.socket && c.session != "" {
-		req.Steer = true
-	}
-	out, err := s.sendAs(r.Context(), c, s.fromOf(c, req.Caller), r.PathValue("id"), req)
-	if err != nil {
-		if errors.Is(err, errFiles) {
-			s.fileError(w, errors.Unwrap(err))
-			return
-		}
-		s.error(w, err)
-		return
-	}
-	reply(w, http.StatusOK, out)
-}
-
 // errFiles wraps what the files service refused of a message's attachments.
 var errFiles = errors.New("attachments")
 
@@ -379,8 +298,7 @@ func (e fileErr) Error() string        { return e.err.Error() }
 func (e fileErr) Unwrap() error        { return e.err }
 func (e fileErr) Is(target error) bool { return target == errFiles }
 
-// sendAs sends req into session id as c, from (the source tag): what POST /v1/internal/sessions/{id}/send
-// and Satori's message.create both do. /clear starts the session anew.
+// sendAs sends req into session id as c, from (the source tag): what Satori's message.create does. /clear starts the session anew.
 func (s *Server) sendAs(ctx context.Context, c caller, from, id string, req api.Send) (api.SendReply, error) {
 	if err := s.checkSend(c, id); err != nil {
 		return api.SendReply{}, err
@@ -428,26 +346,6 @@ func (s *Server) stop(w http.ResponseWriter, r *http.Request) {
 	s.done(w, s.m.Stop(r.Context(), r.PathValue("id")))
 }
 
-// answer answers one of session {id}'s asks by its card (decision 27): a CardAnswer for the card
-// "ask:<id>:<request>", as the web's panel and the apps' buttons give it.
-func (s *Server) answer(w http.ResponseWriter, r *http.Request) {
-	var a api.CardAnswer
-	if !readJSON(w, r, &a) {
-		return
-	}
-	if !strings.HasPrefix(a.Card, "ask:"+r.PathValue("id")+":") {
-		fail(w, http.StatusBadRequest, "not a card of this session: "+a.Card)
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), time.Minute)
-	defer cancel()
-	if err := s.m.AnswerCard(ctx, a); err != nil {
-		s.fault(w, err)
-		return
-	}
-	reply(w, http.StatusOK, api.CardReply{OK: true})
-}
-
 // release allows a step auto mode denied (session/release.go). Only a person may: an agent's ir
 // releasing its own denied steps would undo what the classifier is for.
 func (s *Server) release(w http.ResponseWriter, r *http.Request) {
@@ -469,17 +367,17 @@ func (s *Server) release(w http.ResponseWriter, r *http.Request) {
 	s.done(w, s.m.Release(ctx, r.PathValue("id"), req.ToolUseID, req.Dismiss))
 }
 
-var stateKey = regexp.MustCompile(`^(list|quota|workspaces|places|colors|needs|pairing|update|terminals|machines|notes|(session|context):[0-9a-zA-Z_-]{1,128})$`)
+var stateKey = regexp.MustCompile(`^(list|quota|guilds|needs|pairing|update|terminals|machines|notes|(session|context):[0-9a-zA-Z_-]{1,128})$`)
 
 // stateKeys splits the states a WATCH asks for into those it carries and those it leaves
-// out (unknown, or not this caller's: needs, pairing, colors and notes are a person's on ir_web
-// or at the host).
+// out (unknown, or not this caller's: needs, pairing and notes are a person's on ir_web or at
+// the host).
 func (s *Server) stateKeys(c caller, keys []string) (carried []string, ignored []api.StateEvent) {
 	for _, k := range keys {
 		switch {
 		case !stateKey.MatchString(k):
 			ignored = append(ignored, api.StateEvent{Key: k, Ignored: "unknown"})
-		case (k == "needs" || k == "pairing" || k == "colors" || k == "notes") && !c.panel():
+		case (k == "needs" || k == "pairing" || k == "notes") && !c.panel():
 			ignored = append(ignored, api.StateEvent{Key: k, Ignored: "forbidden"})
 		case !slices.Contains(carried, k):
 			carried = append(carried, k)

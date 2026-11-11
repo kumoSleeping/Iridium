@@ -21,8 +21,6 @@ func (s *Server) sessionRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /v1/internal/sessions/{id}/features/{feature}", s.use(s.setFeature))
 	mux.HandleFunc("POST /v1/internal/sessions/{id}/continue", s.use(s.continueQueue))
 	mux.HandleFunc("POST /v1/internal/sessions/{id}/queue/{input}/steer", s.use(s.steer))
-	mux.HandleFunc("PUT /v1/internal/sessions/{id}/queue/{input}", s.use(s.editQueued))
-	mux.HandleFunc("DELETE /v1/internal/sessions/{id}/queue/{input}", s.use(s.deleteQueued))
 	mux.HandleFunc("GET /v1/internal/sessions/{id}/rules", s.rules)
 	mux.HandleFunc("DELETE /v1/internal/sessions/{id}/rules", s.use(s.clearRules))
 	s.shellRoutes(mux)
@@ -124,18 +122,6 @@ func (s *Server) steer(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := agentCtx(r)
 	defer cancel()
 	s.settle(w, s.m.Steer(ctx, r.PathValue("id"), r.PathValue("input")))
-}
-
-func (s *Server) editQueued(w http.ResponseWriter, r *http.Request) {
-	var req api.EditQueued
-	if !readJSON(w, r, &req) {
-		return
-	}
-	s.settle(w, s.m.EditQueued(r.PathValue("id"), r.PathValue("input"), req.Text))
-}
-
-func (s *Server) deleteQueued(w http.ResponseWriter, r *http.Request) {
-	s.settle(w, s.m.DeleteQueued(r.PathValue("id"), r.PathValue("input")))
 }
 
 func (s *Server) rules(w http.ResponseWriter, r *http.Request) {

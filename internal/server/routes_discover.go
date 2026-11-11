@@ -23,14 +23,10 @@ func (s *Server) discoverRoutes(mux *http.ServeMux) {
 	if s.Discover == nil {
 		return
 	}
-	// Folder groups are made as sessions go in them, never by hand (the user, 2026-11-08); a name is
-	// the panels' and 本机's to change; a session anyone's to name, colour, archive.
-	mux.HandleFunc("PATCH /v1/internal/workspaces/{id}", s.manages(s.renameWorkspace))
-	mux.HandleFunc("PUT /v1/internal/groups/order", s.manages(s.orderGroups))
-	mux.HandleFunc("POST /v1/internal/workspaces/{id}/split", s.manages(s.splitWorkspace))
-	mux.HandleFunc("PATCH /v1/internal/folders/place", s.manages(s.placeFolder))
-	mux.HandleFunc("PATCH /v1/internal/sessions/{id}", s.patchSession)
-	mux.HandleFunc("PUT /v1/internal/colors", s.manages(s.folderColor))
+	// Folder groups are made as sessions go in them, never by hand (the user, 2026-11-08): their
+	// names, order, splitting the panels' and 本机's. A session's place (Satori's channel.update),
+	// a folder's marks (channel.update of folder:<path>) are Satori's.
+	mux.HandleFunc("PATCH /v1/internal/guilds/{id}", s.manages(s.patchGuild))
 }
 
 func workspaceID(w http.ResponseWriter, r *http.Request) (int64, bool) {
@@ -42,12 +38,13 @@ func workspaceID(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	return id, true
 }
 
-func (s *Server) renameWorkspace(w http.ResponseWriter, r *http.Request) {
+// patchGuild renames a folder group, moves it among the groups, or splits it at its folder.
+func (s *Server) patchGuild(w http.ResponseWriter, r *http.Request) {
 	id, ok := workspaceID(w, r)
 	if !ok {
 		return
 	}
-	var req api.WorkspacePatch
+	var req api.GuildPatch
 	if !readJSON(w, r, &req) {
 		return
 	}
@@ -55,57 +52,17 @@ func (s *Server) renameWorkspace(w http.ResponseWriter, r *http.Request) {
 	if req.Name != nil {
 		err = s.Discover.RenameWorkspace(id, *req.Name)
 	}
+	if err == nil && req.Position != nil {
+		err = s.Discover.MoveGroup(id, *req.Position)
+	}
+	if err == nil && req.Split {
+		err = s.m.SplitWorkspace(r.Context(), id)
+	}
 	s.discoverDone(w, err)
 }
 
-func (s *Server) splitWorkspace(w http.ResponseWriter, r *http.Request) {
-	id, ok := workspaceID(w, r)
-	if !ok {
-		return
-	}
-	s.discoverDone(w, s.m.SplitWorkspace(r.Context(), id))
-}
-
-func (s *Server) orderGroups(w http.ResponseWriter, r *http.Request) {
-	var req api.GroupOrder
-	if !readJSON(w, r, &req) {
-		return
-	}
-	s.discoverDone(w, s.Discover.OrderGroups(req.Keys))
-}
-
-func (s *Server) placeFolder(w http.ResponseWriter, r *http.Request) {
-	var req api.FolderPlace
-	if !readJSON(w, r, &req) {
-		return
-	}
-	s.discoverDone(w, s.Discover.PlaceFolder(req))
-}
-
-func (s *Server) patchSession(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	var req api.SessionPatch
-	if !readJSON(w, r, &req) {
-		return
-	}
-	if !s.m.Known(id) {
-		refuse(w, http.StatusUnprocessableEntity, "no_such_session", "no such session")
-		return
-	}
-	if req.Workspace != nil && *req.Workspace < 0 {
-		fail(w, http.StatusBadRequest, "bad workspace")
-		return
-	}
-	if err := s.patch(r.Context(), id, req); err != nil {
-		if errors.Is(err, errPatchManager) {
-			s.error(w, errors.Unwrap(err))
-			return
-		}
-		s.discoverError(w, err)
-		return
-	}
-	reply(w, http.StatusOK, map[string]any{"ok": true})
-}
+// errNotIndexed: no discovery index here (the session manager alone, in tests).
+var errNotIndexed = errors.New("sessions are not indexed here")
 
 // errPatchManager wraps an error of the session manager's in patch (the rest are Discover's).
 var errPatchManager = errors.New("session")
@@ -116,8 +73,7 @@ func (e managerErr) Error() string        { return e.err.Error() }
 func (e managerErr) Unwrap() error        { return e.err }
 func (e managerErr) Is(target error) bool { return target == errPatchManager }
 
-// patch changes session id as req says (PATCH /v1/internal/sessions/{id}, Satori's channel.update and
-// channel.delete).
+// patch changes session id as req says (Satori's channel.update and channel.delete).
 func (s *Server) patch(ctx context.Context, id string, req api.SessionPatch) error {
 	// Archiving is the shown marker's, and stops a hosted agent: the session manager's; the
 	// sessions hung under it go with it (ir archive too).
@@ -134,18 +90,9 @@ func (s *Server) patch(ctx context.Context, id string, req api.SessionPatch) err
 	}
 	req.Detach = nil
 	if s.Discover == nil {
-		return managerErr{errors.New("sessions are not indexed here")}
+		return managerErr{errNotIndexed}
 	}
 	return s.Discover.Patch(id, req)
-}
-
-// folderColor tags a folder with a colour from its menu, or takes the tag off.
-func (s *Server) folderColor(w http.ResponseWriter, r *http.Request) {
-	var req api.FolderColor
-	if !readJSON(w, r, &req) {
-		return
-	}
-	s.discoverDone(w, s.Discover.SetFolderColor(req.Path, req.Color))
 }
 
 func (s *Server) folders(w http.ResponseWriter, r *http.Request) {

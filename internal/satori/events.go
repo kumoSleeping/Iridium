@@ -258,7 +258,7 @@ func (s *Service) said(id string, h said, kind, origin string) {
 // emit keeps an event of session ss in the outbox, for the connections to send.
 func (s *Service) emit(ss api.Session, ev Event, files []api.FileRef, kind string, origin ...string) {
 	ev.Timestamp = time.Now().UnixMilli()
-	ev.Channel = channelOf(ss)
+	ev.Channel = s.channelMasked(ss)
 	ev.Guild = s.guildOf(ss)
 	ev.XType = "iridium"
 	ev.XData = &EventData{Kind: kind}
@@ -282,7 +282,7 @@ func (s *Service) Share(app, login string, ss *api.Session, sh api.Share) {
 	}
 	id := ""
 	if ss != nil {
-		ev.Channel, ev.Guild, id = channelOf(*ss), s.guildOf(*ss), ss.ID
+		ev.Channel, ev.Guild, id = s.channelMasked(*ss), s.guildOf(*ss), ss.ID
 	}
 	s.out.add(entry{at: time.Now(), session: id, ev: ev, app: app, login: login})
 }

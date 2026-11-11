@@ -3,7 +3,10 @@ package satori
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"slices"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -168,24 +171,60 @@ func (s *Service) channelUpdate(ctx context.Context, c Caller, body []byte) (any
 		ChannelID string `json:"channel_id"`
 		Data      struct {
 			Name *string `json:"name"`
+			// ParentID: its folder's, "" or null take it out from under its launcher (detach).
+			ParentID json.RawMessage `json:"parent_id"`
 		} `json:"data"`
-		// Ext.Archived: archive the session or bring it back (Iridium's own); channel.delete
-		// archives too.
+		// Ext: Iridium's own: archived (with the sessions hung under it), pinned, color, order (the
+		// key it was dragged to), workspace (a folder group by hand, 0 none); a folder's color,
+		// pinned, order.
 		Ext struct {
-			Archived *bool `json:"archived"`
+			Archived  *bool      `json:"archived"`
+			Pinned    *bool      `json:"pinned"`
+			Color     *api.Color `json:"color"`
+			Order     *float64   `json:"order"`
+			Workspace *int64     `json:"workspace"`
 		} `json:"_data"`
 	}
 	if err := decode(body, &req); err != nil {
 		return nil, err
 	}
+	x := req.Ext
+	if path, ok := strings.CutPrefix(req.ChannelID, FolderPrefix); ok {
+		if req.Data.Name != nil || req.Data.ParentID != nil || x.Archived != nil || x.Workspace != nil {
+			return nil, bad("a folder takes _data.color, pinned, order")
+		}
+		if _, err := s.folder(ctx, c, req.ChannelID); err != nil {
+			return nil, err
+		}
+		return struct{}{}, s.b.MarkFolder(c, path, api.FolderPatch{Color: x.Color, Pinned: x.Pinned, Order: x.Order})
+	}
 	st, err := s.channel(c, req.ChannelID)
 	if err != nil {
 		return nil, err
 	}
-	if req.Data.Name == nil && req.Ext.Archived == nil {
+	if x.Workspace != nil && *x.Workspace < 0 {
+		return nil, bad("_data.workspace")
+	}
+	p := api.SessionPatch{Name: req.Data.Name, Archived: x.Archived, Pinned: x.Pinned, Color: x.Color, Order: x.Order, Workspace: x.Workspace}
+	if raw := req.Data.ParentID; raw != nil {
+		var to *string
+		if err := json.Unmarshal(raw, &to); err != nil {
+			return nil, bad("data.parent_id")
+		}
+		now := channelOf(st.Session).ParentID
+		switch {
+		case to != nil && *to == now:
+		case st.Launcher != "" && !st.Own && (to == nil || *to == "" || *to == FolderPrefix+groupPath(st.Session)):
+			yes := true
+			p.Detach = &yes
+		default:
+			return nil, refuse(http.StatusUnprocessableEntity, "parent_fixed", "data.parent_id: a session only comes out from under its launcher (its folder's, or null)")
+		}
+	}
+	if p == (api.SessionPatch{}) {
 		return struct{}{}, nil
 	}
-	return struct{}{}, s.b.Patch(ctx, c, st.ID, api.SessionPatch{Name: req.Data.Name, Archived: req.Ext.Archived})
+	return struct{}{}, s.b.Patch(ctx, c, st.ID, p)
 }
 
 // channelDelete archives a session: it leaves the list (and its agent stops); nothing is erased.
@@ -209,3 +248,56 @@ func (s *Service) channelDelete(ctx context.Context, c Caller, body []byte) (any
 const snSlots = 1024
 
 func fullSN(sn int64, k int) int64 { return sn*snSlots + int64(min(k, snSlots-1)) }
+
+// channelCreate starts a session: guild_id its folder group (loose or
+// none: as its folder falls), data.name its name, data.parent_id the session it hangs under (none:
+// the caller's own, if it speaks from one), _data the agent's start (agent, cwd, text, ...). The
+// channel it gives is the session as channel.get gives it.
+func (s *Service) channelCreate(ctx context.Context, c Caller, body []byte) (any, error) {
+	var req struct {
+		GuildID string `json:"guild_id"`
+		Data    struct {
+			Name     string `json:"name"`
+			ParentID string `json:"parent_id"`
+		} `json:"data"`
+		Ext api.NewSession `json:"_data"`
+	}
+	if err := decode(body, &req); err != nil {
+		return nil, err
+	}
+	n := req.Ext
+	n.Workspace = 0
+	g, err := s.guildID(c, req.GuildID)
+	if err != nil {
+		return nil, err
+	}
+	if g != "" && g != Loose {
+		if !s.guildThere(c, g) {
+			return nil, refuse(http.StatusUnprocessableEntity, "no_such_guild", "no guild "+g)
+		}
+		n.Workspace, _ = strconv.ParseInt(g, 10, 64)
+	}
+	if p := req.Data.ParentID; p != "" {
+		// A session here it sees, by its id's start; else as given (an agent's own session id, as
+		// its ir has it).
+		n.Caller = p
+		if id, err := s.sessionOf(c, p); err == nil && s.b.Sees(c, id) {
+			n.Caller = id
+		}
+	}
+	id, err := s.b.Create(ctx, c, n)
+	if err != nil {
+		return nil, err
+	}
+	if req.Data.Name != "" {
+		name := req.Data.Name
+		if err := s.b.Patch(ctx, c, id, api.SessionPatch{Name: &name}); err != nil {
+			return nil, err
+		}
+	}
+	st, err := s.b.Session(id)
+	if err != nil {
+		return Channel{ID: id, Type: ChannelText, Name: req.Data.Name}, nil
+	}
+	return s.channelFull(st.Session), nil
+}

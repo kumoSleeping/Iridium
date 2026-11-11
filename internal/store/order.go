@@ -18,7 +18,7 @@ func (s *Store) SetOrder(session string, at float64) error {
 	return err
 }
 
-// SetGroupOrder lists the groups' rows of keys (api.GroupOrder) in that order, in place of the
+// SetGroupOrder lists the groups' rows of keys (w<id>) in that order, in place of the
 // order there was.
 func (s *Store) SetGroupOrder(keys []string) error {
 	return s.Tx(func(tx *sql.Tx) error {

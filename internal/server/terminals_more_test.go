@@ -22,17 +22,16 @@ func TestAppSessionsAndAgents(t *testing.T) {
 		s.Folders = discover.DefaultFolders("/")
 	})
 	tok := l.newApp("nobot", false)
-	l.want(403, tok.Token, "POST", "/v1/internal/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "hi"}, nil)
+	l.create(403, tok.Token, api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "hi"})
 
 	tok = l.newApp("bot", true)
 	bot, botID := tok.Token, tok.App.ID
-	var created api.NewSessionReply
-	l.want(200, bot, "POST", "/v1/internal/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "hi"}, &created)
-	sid := created.ID
+	created := l.create(200, bot, api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "hi"})
+	sid := created
 	l.waitReply(bot, sid, "ok: hi")
-	var page api.MessagePage
-	l.want(200, bot, "GET", "/v1/internal/sessions/"+sid+"/messages", nil, &page)
-	if page.Blocks[0].From != "bot" || page.Blocks[0].FromTerminal != botID || page.Blocks[0].Text != "hi" {
+	page := l.page(bot, sid)
+	// As its login (an app speaks Satori as one): app·login.
+	if b := page.Blocks[0]; b.From != "bot·bot" || b.FromLogin != "main" || b.FromTerminal != botID || b.Text != "hi" {
 		t.Fatalf("the app's message: %+v", page.Blocks[0])
 	}
 	meta, _ := os.ReadFile(filepath.Join(l.cfg.StatePath(), "hold", sid, "session.json"))
@@ -47,19 +46,18 @@ func TestAppSessionsAndAgents(t *testing.T) {
 
 	// An agent's ir in the app's session is the app: its usage, no managing.
 	as := "agent-in:" + sid
-	var sent api.SendReply
-	l.want(200, as, "POST", "/v1/internal/sessions/"+sid+"/send", api.Send{Text: "from inside"}, &sent)
+	_, sent := l.send(as, sid, api.Send{Text: "from inside"})
 	if id, tag, ok := l.s.st.Source(sent.Input); !ok || id != botID || tag != "ir:"+sid {
 		t.Errorf("the agent's message: %q %q %v", id, tag, ok)
 	}
 	// ir send names the session it runs in but no agent flag: still a letter from that session,
 	// still the app's to count.
-	l.want(200, "ir-in:"+sid, "POST", "/v1/internal/sessions/"+sid+"/send", api.Send{Text: "by ir send"}, &sent)
+	_, sent = l.send("ir-in:"+sid, sid, api.Send{Text: "by ir send"})
 	if id, tag, ok := l.s.st.Source(sent.Input); !ok || id != botID || tag != "ir:"+sid {
 		t.Errorf("ir send's message: %q %q %v", id, tag, ok)
 	}
 	l.waitReply(bot, sid, "ok: by ir send")
-	l.want(200, bot, "GET", "/v1/internal/sessions/"+sid+"/messages", nil, &page)
+	page = l.page(bot, sid)
 	if b := page.Blocks[len(page.Blocks)-2]; b.From != "ir:"+sid || b.FromTerminal != botID {
 		t.Errorf("ir send's block: %+v", b)
 	}
@@ -70,14 +68,13 @@ func TestAppSessionsAndAgents(t *testing.T) {
 	}
 	l.want(403, as, "DELETE", "/v1/internal/apps/nobot", nil, nil)
 	l.want(200, as, "GET", "/v1/internal/files?path="+l.work, nil, nil)
-	l.want(403, as, "PATCH", "/v1/internal/workspaces/1", api.WorkspacePatch{Name: new("x")}, nil)
+	l.want(403, as, "PATCH", "/v1/internal/guilds/1", api.GuildPatch{Name: new("x")}, nil)
 	// One in a session 本机 opened stays 本机.
-	var mine api.NewSessionReply
-	l.want(200, "socket", "POST", "/v1/internal/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "mine"}, &mine)
-	l.waitReply("socket", mine.ID, "ok: mine")
-	l.want(200, "agent-in:"+mine.ID, "POST", "/v1/internal/sessions/"+mine.ID+"/send", api.Send{Text: "again"}, &sent)
-	if id, tag, _ := l.s.st.Source(sent.Input); id != "local" || tag != "ir:"+mine.ID {
+	mine := l.create(200, "socket", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "mine"})
+	l.waitReply("socket", mine, "ok: mine")
+	_, sent = l.send("agent-in:"+mine, mine, api.Send{Text: "again"})
+	if id, tag, _ := l.s.st.Source(sent.Input); id != "local" || tag != "ir:"+mine {
 		t.Errorf("本机's session's agent: %q %q", id, tag)
 	}
-	l.want(200, "agent-in:"+mine.ID, "GET", "/v1/internal/apps", nil, nil)
+	l.want(200, "agent-in:"+mine, "GET", "/v1/internal/apps", nil, nil)
 }

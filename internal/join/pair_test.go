@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -86,5 +87,64 @@ func TestPairComputer(t *testing.T) {
 	home, _ := os.UserHomeDir()
 	if asked.Type != "computer" || asked.Home != home || asked.MachineID == "" || len(asked.Agents) != 1 || asked.Wants != nil {
 		t.Fatalf("asked as %+v", asked)
+	}
+}
+
+// ir pair with no address asks this host's Iridium through its socket, with its login (bot by
+// default); --env puts the TOKEN as one line of a .env file, the others kept, and says where.
+func TestPairEnvSocket(t *testing.T) {
+	pairPoll = 10 * time.Millisecond
+	var asked api.PairRequest
+	sock := filepath.Join(t.TempDir(), "ir.sock")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/internal/pair":
+			asked = api.PairRequest{}
+			json.NewDecoder(r.Body).Decode(&asked)
+			json.NewEncoder(w).Encode(api.Pairing{Code: "1234", Request: "r1"})
+		case r.URL.Path == "/v1/internal/pair/r1":
+			json.NewEncoder(w).Encode(api.PairState{Status: "allowed", Token: "ir_secret"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	srv.Listener = ln
+	srv.Start()
+	defer srv.Close()
+	t.Setenv("IRIDIUM_SOCKET", sock)
+	t.Setenv("IRIDIUM_CONFIG", filepath.Join(t.TempDir(), "none.json"))
+	env := filepath.Join(t.TempDir(), ".env")
+	os.WriteFile(env, []byte("A=1\nIR_TOKEN=old\nB=2\n"), 0o644)
+	var out, errs bytes.Buffer
+	if code := PairMain([]string{"--name", "koishi", "--env", env + ":IR_TOKEN"}, &out, &errs); code != 0 {
+		t.Fatalf("exit %d: %s", code, errs.String())
+	}
+	if asked.Name != "koishi" || asked.Login == nil || asked.Login.ID != "bot" {
+		t.Fatalf("asked as %+v", asked)
+	}
+	b, _ := os.ReadFile(env)
+	st, _ := os.Stat(env)
+	if string(b) != "A=1\nIR_TOKEN=ir_secret\nB=2\n" || st.Mode().Perm() != 0o600 {
+		t.Fatalf("the .env: %q %v", b, st.Mode())
+	}
+	if o := out.String(); !strings.Contains(o, "本机") || !strings.Contains(o, "http://127.0.0.1:7810") || !strings.Contains(o, "IR_TOKEN") || !strings.Contains(o, "登录 bot") || strings.Contains(o+errs.String(), "ir_secret") {
+		t.Fatalf("output: %s / %s", o, errs.String())
+	}
+	// --login= asks with none; a file that is not there yet is made.
+	fresh := filepath.Join(t.TempDir(), "d", ".env")
+	if code := PairMain([]string{"--name", "koishi", "--login=", "--env", fresh + ":IR_TOKEN"}, &out, &errs); code != 0 || asked.Login != nil {
+		t.Fatalf("no login: exit %d, %+v: %s", code, asked, errs.String())
+	}
+	if b, _ := os.ReadFile(fresh); string(b) != "IR_TOKEN=ir_secret\n" {
+		t.Fatalf("a new .env: %q", b)
+	}
+	for _, bad := range [][]string{{"--name", "x"}, {"--name", "x", "--into", "a", "--env", "b:C"}, {"--name", "x", "--env", "b"}, {"--name", "x", "--env", "b:1C"}} {
+		if code := PairMain(bad, &out, &errs); code != 2 {
+			t.Fatalf("%v: exit %d", bad, code)
+		}
 	}
 }

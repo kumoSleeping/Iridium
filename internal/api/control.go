@@ -13,11 +13,6 @@ type Queued struct {
 	At           int64  `json:"at"`
 }
 
-// EditQueued changes a queued message's text.
-type EditQueued struct {
-	Text string `json:"text"`
-}
-
 // ContextSummary is how full a session's context window was, without the parts.
 type ContextSummary struct {
 	Used int   `json:"used"`
@@ -158,7 +153,3 @@ type CardAnswer struct {
 	Message string   `json:"message,omitempty"`
 }
 
-// CardReply is what answering a card did (POST /v1/internal/sessions/{id}/answer).
-type CardReply struct {
-	OK bool `json:"ok"`
-}

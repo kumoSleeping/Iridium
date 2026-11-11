@@ -28,10 +28,14 @@ const (
 	StatusOnline  = 1
 )
 
-// Channel types.
+// Channel types: a session; a folder sessions are in (folder:<its path as grouped>).
 const (
-	ChannelText = 0
+	ChannelText     = 0
+	ChannelCategory = 2
 )
+
+// FolderPrefix starts a folder's channel id.
+const FolderPrefix = "folder:"
 
 // Signal is one WebSocket frame.
 type Signal struct {
@@ -86,15 +90,28 @@ type User struct {
 	IsBot  bool   `json:"is_bot,omitempty"`
 }
 
-// Channel is a session.
+// Channel is a session, or a folder sessions are in (ChannelCategory).
 type Channel struct {
 	ID       string `json:"id"`
 	Type     int    `json:"type"`
 	Name     string `json:"name,omitempty"`
 	ParentID string `json:"parent_id,omitempty"`
 	// Data: Iridium's own (advanced/internal.md), in channel.get and channel.list: the session as
-	// GET /v1/internal/sessions lists it, its words masked.
+	// the carried "list" has it, its words masked.
 	Data *api.Session `json:"_data,omitempty"`
+	// Mark: a folder's _data in place of Data: its path and what was put on it by hand.
+	Mark *api.FolderMark `json:"-"`
+}
+
+func (c Channel) MarshalJSON() ([]byte, error) {
+	type plain Channel
+	if c.Mark == nil {
+		return json.Marshal(plain(c))
+	}
+	return json.Marshal(struct {
+		plain
+		Mark *api.FolderMark `json:"_data"`
+	}{plain(c), c.Mark})
 }
 
 // Guild is a folder group (the web's workspace), or Loose for the sessions in none.
@@ -173,4 +190,7 @@ type PageData struct {
 	Start int64 `json:"start"`
 	End   int64 `json:"end"`
 	More  bool  `json:"more"`
+	// Blocks: the page's blocks as Iridium has them, their words masked, when asked for
+	// (_data.blocks): ir's --wait reads them.
+	Blocks []api.Block `json:"blocks,omitempty"`
 }

@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kumoSleeping/iridium/internal/agents"
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/config"
 	"github.com/kumoSleeping/iridium/internal/discover"
@@ -185,10 +186,10 @@ func ir(args ...string) result {
 func TestAgentCommands(t *testing.T) {
 	cfg, work := rig(t)
 
-	r := ir("api", "POST", "internal/sessions", "agent=claude", "cwd="+work, "text=hello", "--wait")
+	r := ir("api", "channel.create", "_data.agent=claude", "_data.cwd="+work, "_data.text=hello", "--wait")
 	lines := strings.Split(strings.TrimSpace(r.out), "\n")
 	if r.code != 0 || len(lines) != 2 || len(lines[0]) != 36 || lines[1] != "ok: hello" {
-		t.Fatalf("POST internal/sessions --wait: %+v", r)
+		t.Fatalf("channel.create --wait: %+v", r)
 	}
 	sid := lines[0][:8]
 	var full string
@@ -200,6 +201,16 @@ func TestAgentCommands(t *testing.T) {
 	prompt, err := os.ReadFile(filepath.Join(cfg.StatePath(), "hold", full, "system-prompt.md"))
 	if err != nil || !strings.Contains(string(prompt), "This session is hosted by Iridium.") || !strings.Contains(string(prompt), "ir api [METHOD]") {
 		t.Errorf("system prompt %q %v", prompt, err)
+	}
+
+	// channel.create is the same start in Satori's words: its id, with --wait its reply; named.
+	r = ir("api", "channel.create", "data.name=helper", "_data.agent=claude", "_data.cwd="+work, "_data.text=hi", "--wait")
+	if lines := strings.Split(strings.TrimSpace(r.out), "\n"); r.code != 0 || len(lines) != 2 || len(lines[0]) != 36 || lines[1] != "ok: hi" {
+		t.Fatalf("channel.create --wait: %+v", r)
+	} else if g := ir("api", "channel.get", "channel_id="+lines[0], "--pick", "name"); !strings.Contains(g.out, "helper") {
+		t.Errorf("channel.create name: %+v", g)
+	} else if d := ir("api", "channel.delete", "channel_id="+lines[0]); d.code != 0 {
+		t.Errorf("channel.delete: %+v", d)
 	}
 
 	send := func(id, text string, more ...string) result {
@@ -228,9 +239,8 @@ func TestAgentCommands(t *testing.T) {
 	if r := ir("api", "internal/sessions/"+sid, "--wait"); r.code != 2 {
 		t.Errorf("wait with the ask open: %+v", r)
 	}
-	var ok map[string]any
-	if err := (&env{}).client(cfg).do("POST", "/v1/internal/sessions/"+full+"/answer", api.CardAnswer{Card: "ask:" + full + ":ask-1", Option: "allow"}, &ok); err != nil {
-		t.Fatal(err)
+	if r := ir("api", "POST", "internal/button", "id=ask:"+full+":ask-1", "option=allow"); r.code != 0 {
+		t.Fatalf("answer: %+v", r)
 	}
 	if r := ir("api", "internal/sessions/"+sid, "--wait"); r.code != 0 || r.out != "ok: please ASK\n" {
 		t.Errorf("wait after the answer: %+v", r)
@@ -248,7 +258,8 @@ func TestAgentCommands(t *testing.T) {
 	if r := ls(); r.code != 0 || !strings.HasPrefix(r.out, "id\tname\t_data.status\t") || !strings.Contains(r.out, "\n"+full+"\thello\tidle\tclaude\t"+work+"\thello\n") {
 		t.Errorf("channel.list: %+v", r)
 	}
-	if r := ir("api", "channel.list", "--json"); r.code != 0 || !strings.HasPrefix(r.out, `{"data":[{"id":"`+full+`"`) || !strings.Contains(r.out, `"_data":{"id":"`+full+`"`) {
+	// Its folder first (a category channel), then the session.
+	if r := ir("api", "channel.list", "--json"); r.code != 0 || !strings.HasPrefix(r.out, `{"data":[{"id":"folder:`+work+`","type":2`) || !strings.Contains(r.out, `"_data":{"id":"`+full+`"`) {
 		t.Errorf("channel.list --json: %+v", r)
 	}
 	// Archived (no shown marker): only with _data.all listed.
@@ -315,9 +326,14 @@ func TestAgentCommands(t *testing.T) {
 	if r := ls(); !strings.Contains(r.out, full+"\t会话命名\t") {
 		t.Errorf("channel.list after the name: %+v", r)
 	}
-	if err := (&env{}).client(cfg).do("PATCH", "/v1/internal/sessions/"+full, api.SessionPatch{Name: new("mine")}, nil); err != nil {
+	// The user's own ir, in no session: a person's name.
+	for _, k := range agents.SessionVars() {
+		t.Setenv(k, "")
+	}
+	if _, err := (&env{}).client(cfg).satori("channel.update", map[string]any{"channel_id": full, "data": map[string]any{"name": "mine"}}); err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv("IRIDIUM_SESSION", "caller-session")
 	if r := ir("api", "channel.update", "channel_id="+sid, "data.name=agent's"); r.code != 1 || !strings.Contains(r.err, "用户起的名") {
 		t.Errorf("a name over the user's: %+v", r)
 	}
@@ -360,10 +376,10 @@ func TestAgentCommands(t *testing.T) {
 		}
 	}
 	// A place at an app not there; the host's by its name.
-	if r := ir("api", "POST", "internal/sessions", "agent=claude", "cwd=mac:~/dir", "text=x"); r.code != 1 || !strings.Contains(r.err, "no computer mac") {
+	if r := ir("api", "channel.create", "_data.agent=claude", "_data.cwd=mac:~/dir", "_data.text=x"); r.code != 1 || !strings.Contains(r.err, "no computer mac") {
 		t.Errorf("place at mac: %+v", r)
 	}
-	if r := ir("api", "POST", "internal/sessions", "agent=claude", "cwd=host:"+work); r.code != 0 {
+	if r := ir("api", "channel.create", "_data.agent=claude", "_data.cwd=host:"+work); r.code != 0 {
 		t.Errorf("place at the host: %+v", r)
 	} else if ls := ls(); strings.Count(ls.out, "\t"+work+"\t") != 2 {
 		t.Errorf("a folder at the host, as it is: %q", ls.out)
@@ -417,7 +433,7 @@ func TestWorkspaceCommands(t *testing.T) {
 	}
 	dir := filepath.Join(work, "proj")
 	os.MkdirAll(dir, 0o700)
-	r := ir("api", "POST", "internal/sessions", "agent=claude", "cwd="+dir, "text=hello", "--wait")
+	r := ir("api", "channel.create", "_data.agent=claude", "_data.cwd="+dir, "_data.text=hello", "--wait")
 	if r.code != 0 {
 		t.Fatalf("new: %+v", r)
 	}
@@ -426,7 +442,7 @@ func TestWorkspaceCommands(t *testing.T) {
 		t.Fatalf("guild.list: %+v", r)
 	}
 	id := strings.Split(strings.Split(r.out, "\n")[1], "\t")[0]
-	if r := ir("api", "PATCH", "internal/workspaces/"+id, "name=Bee"); r.code != 0 {
+	if r := ir("api", "PATCH", "internal/guilds/"+id, "name=Bee"); r.code != 0 {
 		t.Errorf("rename: %+v", r)
 	}
 	if r := ir("api", "guild.list"); !strings.Contains(r.out, "\n"+id+"\tBee\t") {
@@ -436,7 +452,7 @@ func TestWorkspaceCommands(t *testing.T) {
 		t.Errorf("guild.get: %+v", r)
 	}
 	// A new session put in a group by its id.
-	if r := ir("api", "POST", "internal/sessions", "agent=claude", "cwd="+work, "workspace:="+id); r.code != 0 {
+	if r := ir("api", "channel.create", "_data.agent=claude", "_data.cwd="+work, "guild_id="+id); r.code != 0 {
 		t.Errorf("new in a group: %+v", r)
 	}
 }

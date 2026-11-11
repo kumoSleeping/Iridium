@@ -65,6 +65,12 @@ func serveLive(t *testing.T, s *Server, cfg config.Config, work string, ready fu
 // channel token.
 func (l *live) do(as, method, path string, body any, out any) int {
 	l.t.Helper()
+	return l.doWith(as, method, path, body, out, nil)
+}
+
+// doWith is do with these headers too.
+func (l *live) doWith(as, method, path string, body any, out any, hdr http.Header) int {
+	l.t.Helper()
 	var r io.Reader
 	if body != nil {
 		b, _ := json.Marshal(body)
@@ -90,6 +96,9 @@ func (l *live) do(as, method, path string, body any, out any) int {
 		req.Header.Set(HeaderSession, strings.TrimPrefix(as, "ir-in:"))
 	case strings.HasPrefix(as, "ir_"):
 		req.Header.Set("Authorization", "Bearer "+as)
+	}
+	for k, v := range hdr {
+		req.Header[k] = v
 	}
 	resp, err := c.Do(req)
 	if err != nil {
@@ -139,9 +148,8 @@ func TestClaudeOnlyRule(t *testing.T) {
 	t.Parallel()
 	l := start(t)
 	// 本机's own session, from the page.
-	var mine api.NewSessionReply
-	l.want(200, "web", "POST", "/v1/internal/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "mine"}, &mine)
-	l.waitReply("web", mine.ID, "ok: mine")
+	mine := l.create(200, "web", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "mine"})
+	l.waitReply("web", mine, "ok: mine")
 
 	// A plugin made without --owner: no Claude.
 	var tok api.Token
@@ -158,19 +166,22 @@ func TestClaudeOnlyRule(t *testing.T) {
 
 	// It sees 本机's Claude session and reads it, but may not use it nor start one.
 	var list []api.Session
-	l.want(200, bot, "GET", "/v1/internal/sessions", nil, &list)
-	if len(list) != 1 || list[0].ID != mine.ID {
+	list = l.sessions(bot)
+	if len(list) != 1 || list[0].ID != mine {
 		t.Fatalf("its list: %+v", list)
 	}
-	for _, p := range []string{"", "/messages"} {
-		l.want(200, bot, "GET", "/v1/internal/sessions/"+mine.ID+p, nil, nil)
+	l.want(200, bot, "GET", "/v1/internal/sessions/"+mine, nil, nil)
+	l.wantSat(200, bot, "message.list", map[string]any{"channel_id": mine}, nil)
+	if code, _ := l.send(bot, mine, api.Send{Text: "hi"}); code != 403 {
+		t.Errorf("send: %d", code)
 	}
-	l.want(403, bot, "POST", "/v1/internal/sessions/"+mine.ID+"/send", api.Send{Text: "hi"}, nil)
-	l.want(403, bot, "POST", "/v1/internal/sessions/"+mine.ID+"/stop", nil, nil)
-	l.want(403, bot, "POST", "/v1/internal/sessions/"+mine.ID+"/answer", api.CardAnswer{Card: "ask:" + mine.ID + ":x", Option: "allow"}, nil)
-	l.want(403, bot, "PUT", "/v1/internal/sessions/"+mine.ID+"/mode", api.SetMode{Mode: "manual"}, nil)
-	l.want(403, bot, "POST", "/v1/internal/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "x"}, nil)
-	if raw := l.wantRaw(200, bot, "GET", "/v1/internal/sessions/"+mine.ID, nil); !strings.Contains(raw, mine.ID) {
+	l.want(403, bot, "POST", "/v1/internal/sessions/"+mine+"/stop", nil, nil)
+	if code := l.answer(bot, api.CardAnswer{Card: "ask:" + mine + ":x", Option: "allow"}); code != 403 {
+		t.Errorf("answer: %d", code)
+	}
+	l.want(403, bot, "PUT", "/v1/internal/sessions/"+mine+"/mode", api.SetMode{Mode: "manual"}, nil)
+	l.create(403, bot, api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "x"})
+	if raw := l.wantRaw(200, bot, "GET", "/v1/internal/sessions/"+mine, nil); !strings.Contains(raw, mine) {
 		t.Errorf("the session: %.300s", raw)
 	}
 
@@ -184,7 +195,9 @@ func TestClaudeOnlyRule(t *testing.T) {
 	if code := l.do("socket", "PUT", "/v1/internal/apps/"+botID+"/rules", map[string]any{"rules": map[string]any{}}, nil); code != 404 && code != 405 {
 		t.Errorf("the rules route: %d", code)
 	}
-	l.want(403, bot, "POST", "/v1/internal/sessions/"+mine.ID+"/send", api.Send{Text: "hi"}, nil)
+	if code, _ := l.send(bot, mine, api.Send{Text: "hi"}); code != 403 {
+		t.Errorf("send: %d", code)
+	}
 
 	// One made --owner by a person at the machine: Claude, and nothing held back (no approvals
 	// forced, every command).
@@ -193,26 +206,24 @@ func TestClaudeOnlyRule(t *testing.T) {
 	if own.App.Rules.ClaudeOwner == nil || own.App.Rules.ClaudeOwner.By != "local" {
 		t.Fatalf("owner token: %+v", own.App)
 	}
-	var its api.NewSessionReply
-	l.want(200, own.Token, "POST", "/v1/internal/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "hello"}, &its)
-	l.waitReply(own.Token, its.ID, "ok: hello")
-	meta, _ := os.ReadFile(filepath.Join(l.cfg.StatePath(), "hold", its.ID, "session.json"))
+	its := l.create(200, own.Token, api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "hello"})
+	l.waitReply(own.Token, its, "ok: hello")
+	meta, _ := os.ReadFile(filepath.Join(l.cfg.StatePath(), "hold", its, "session.json"))
 	if strings.Contains(string(meta), `"mode":"manual"`) {
 		t.Errorf("approvals forced on: %s", meta)
 	}
-	var page api.MessagePage
-	l.want(200, own.Token, "GET", "/v1/internal/sessions/"+its.ID+"/messages", nil, &page)
-	if len(page.Blocks) < 1 || page.Blocks[0].From != "mybot" || page.Blocks[0].FromTerminal != own.App.ID || page.Blocks[0].Text != "hello" {
+	page := l.page(own.Token, its)
+	if len(page.Blocks) < 1 || page.Blocks[0].From != "mybot·mybot" || page.Blocks[0].FromLogin != "main" || page.Blocks[0].FromTerminal != own.App.ID || page.Blocks[0].Text != "hello" {
 		t.Fatalf("blocks: %+v", page.Blocks)
 	}
-	inLog, _ := os.ReadFile(filepath.Join(l.cfg.StatePath(), "hold", its.ID, "in.log"))
-	if !strings.Contains(string(inLog), `[mybot] hello`) {
+	inLog, _ := os.ReadFile(filepath.Join(l.cfg.StatePath(), "hold", its, "in.log"))
+	if !strings.Contains(string(inLog), `[mybot·mybot] hello`) {
 		t.Errorf("the agent did not see the tag: %s", inLog)
 	}
 	st := l.s.st
 	waitUsage(t, st, own.App.ID)
 	// The one without Claude sees the owner's plugin's session too.
-	l.want(200, bot, "GET", "/v1/internal/sessions/"+its.ID, nil, nil)
+	l.want(200, bot, "GET", "/v1/internal/sessions/"+its, nil, nil)
 
 	var as api.Apps
 	l.want(200, "agent", "GET", "/v1/internal/apps", nil, &as)
@@ -359,8 +370,8 @@ func TestPublicOrigin(t *testing.T) {
 	if b, err := os.ReadFile(filepath.Join(l.cfg.StatePath(), "setup-token")); err != nil || !strings.HasPrefix(string(b), "https://ir.example.com/_ir/join#") {
 		t.Fatalf("setup link: %v", err)
 	}
-	l.want(421, "web", "GET", "/v1/internal/sessions", nil, nil)
-	req, _ := http.NewRequest("GET", l.base+"/v1/internal/sessions", nil)
+	l.want(421, "web", "GET", "/v1/internal/agents", nil, nil)
+	req, _ := http.NewRequest("GET", l.base+"/v1/internal/agents", nil)
 	req.Host = "ir.example.com"
 	if resp, err := http.DefaultClient.Do(req); err != nil || resp.StatusCode != 401 {
 		t.Fatalf("no login: %v %v", resp.StatusCode, err)
@@ -411,7 +422,7 @@ func TestPublicOrigin(t *testing.T) {
 		t.Errorf("apps: %+v", as.Apps)
 	}
 	l.want(200, "socket", "PUT", "/v1/internal/public", api.SetPublic{Origin: ""}, nil)
-	l.want(200, "web", "GET", "/v1/internal/sessions", nil, nil)
+	l.want(200, "web", "GET", "/v1/internal/agents", nil, nil)
 }
 
 // newApp makes app name as a pairing allowed would, with Claude or not (said by a person at the

@@ -428,6 +428,7 @@ export const en: Dict = {
   "confirm.ownerElsewhere": "With Claude: allow it on a login that has Claude",
   "confirm.pair": "{name} asks to join",
   "confirm.pairCode": "Pairing code {code}",
+  "confirm.pairLogin": "Login: {login}, allowed with it",
   "confirm.pairHint": "Allow only if the code matches the one on that computer. The TOKEN goes to it alone",
   "confirm.pairOwner": "My own computer",
   "confirm.pairOwnerHint": "With Claude, under your own login there",

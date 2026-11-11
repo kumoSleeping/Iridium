@@ -8,7 +8,6 @@ import type {
   AllowRule,
   ApplyUpdate,
   CardAnswer,
-  CardReply,
   CompleteUpload,
   NeedAnswer,
   ShareReply,
@@ -16,11 +15,8 @@ import type {
   ShareTargets,
   NeedReply,
   Needs,
-  EditQueued,
-  FolderColor,
   FolderReply,
   Folders,
-  FullText,
   Invite,
   Me,
   MessagePage,
@@ -33,7 +29,6 @@ import type {
   NotePatch,
   Notes,
   NewSession,
-  NewSessionReply,
   NewUpload,
   Release,
   PushEvents,
@@ -42,7 +37,6 @@ import type {
   PushSubscription,
   PushSwitch,
   SendReply,
-  Session,
   SessionPatch,
   SessionState,
   SetDevice,
@@ -62,9 +56,8 @@ import type {
   UpdateState,
   Upload,
   Workspace,
-  FolderPlace,
-  GroupOrder,
-  WorkspacePatch,
+  FolderPatch,
+  GuildPatch,
 } from "./types.gen";
 import type { ShellOutput, ShellRun, ShellStarted } from "./types.gen";
 import type { SecretInfo, Secrets, SetSecret, Usage } from "./types.gen";
@@ -189,9 +182,25 @@ function whoKnown(): Promise<void> {
 }
 const S = (id: string) => `/v1/internal/sessions/${enc(id)}`;
 
+/** A Satori method (docs/satori.md), as the page's login: POST /v1/<method>. */
+async function sat<T>(method: string, body: unknown = {}, again = false): Promise<T> {
+  await whoKnown();
+  return again ? writeAgain<T>("POST", `/v1/${method}`, body) : write<T>("POST", `/v1/${method}`, body);
+}
+
+/** A folder's channel (docs/satori.md): folder:<its path as grouped>. */
+export const folderChannel = (path: string) => `folder:${path}`;
+
+/** p as channel.update takes it for session id: the name and the place out from under its launcher
+ *  in data, the rest Iridium's own in _data. */
+function channelPatch(id: string, p: SessionPatch) {
+  const { name, detach, byAgent: _, ...rest } = p;
+  const data = { ...(name !== undefined ? { name } : {}), ...(detach ? { parent_id: null } : {}) };
+  return { channel_id: id, ...(Object.keys(data).length ? { data } : {}), ...(Object.keys(rest).length ? { _data: rest } : {}) };
+}
+
 export const api = {
   // --- served (docs/api.md) ---
-  sessions: () => get<Session[]>("/v1/internal/sessions"),
   session: (id: string, init?: RequestInit) => get<SessionState>(S(id), init),
   /** A page of session id's transcript: the newest, the one before line before, or what came after
    *  line after. Satori's message.list (docs/satori.md "记录"), a message per block; _data says
@@ -210,8 +219,14 @@ export const api = {
     const p = (await r.json()) as { data: SatoriMessage[]; _data?: { start: number; end: number; more: boolean } };
     return { blocks: p.data.map(blockOf), start: p._data?.start ?? 0, end: p._data?.end ?? 0, more: p._data?.more ?? false };
   },
-  block: (id: string, at: string) => get<FullText>(`${S(id)}/block?at=${enc(at)}`),
-  create: (s: NewSession) => write<NewSessionReply>("POST", "/v1/internal/sessions", s),
+  /** A block's whole text: Satori's message.get, untruncated. */
+  block: async (id: string, at: string): Promise<{ text: string }> => ({ text: blockOf(await sat<SatoriMessage>("message.get", { channel_id: id, message_id: at })).text ?? "" }),
+  /** A session started: Satori's channel.create, its group guild_id, its launcher data.parent_id. */
+  create: async (s: NewSession): Promise<{ id: string }> => {
+    const { workspace, caller, ...start } = s;
+    const ch = await sat<{ id: string }>("channel.create", { ...(workspace ? { guild_id: String(workspace) } : {}), ...(caller ? { data: { parent_id: caller } } : {}), _data: start });
+    return { id: ch.id };
+  },
   /** A message: queued while a turn runs (queued in the reply), or joining it with steer.
    *  attachments: upload refs. */
   send: async (id: string, text: string, attachments?: string[], steer = false): Promise<SendReply> => {
@@ -232,7 +247,7 @@ export const api = {
   shellRead: (run: string, from: number) => get<ShellOutput>(`/v1/internal/shell/${enc(run)}?from=${from}`),
   shellStop: (run: string) => write<{ ok: boolean }>("DELETE", `/v1/internal/shell/${enc(run)}`),
   /** One of session id's asks answered by its card (docs/api.md "卡片"): an option, a choice per question, own words. */
-  answer: (id: string, a: CardAnswer) => write<CardReply>("POST", `${S(id)}/answer`, a),
+  answer: (_id: string, a: CardAnswer) => sat<object>("internal/button", { id: a.card, option: a.option, choices: a.choices, words: a.words, message: a.message }),
   /** A step Claude's auto mode denied, run again (session/release.go). */
   release: (id: string, toolUseId: string, dismiss?: boolean) => write<{ ok: boolean }>("POST", `/v1/internal/sessions/${enc(id)}/release`, { toolUseId, dismiss } satisfies Release),
   /** Satori's meta (advanced/meta.md): the page asks it only for its status, a 401 taking it to the login. */
@@ -254,22 +269,19 @@ export const api = {
     } while (next);
     return out;
   },
-  patchWorkspace: (id: number, p: WorkspacePatch) => writeAgain<{ ok: boolean }>("PATCH", `/v1/internal/workspaces/${id}`, p),
-  /** The groups in the order they were dragged to: IDs first to last (reorder.ts). */
-  /** Where a folder is put among those in its group, dragged or pinned (reorder.ts). */
-  placeFolder: (p: FolderPlace) => writeAgain<{ ok: boolean }>("PATCH", "/v1/internal/folders/place", p),
-  /** The group taken apart at its folder: its subfolders groups of their own. */
-  splitWorkspace: (id: number) => writeAgain<{ ok: boolean }>("POST", `/v1/internal/workspaces/${id}/split`),
-  orderGroups: (keys: string[]) => writeAgain<{ ok: boolean }>("PUT", "/v1/internal/groups/order", { keys } satisfies GroupOrder),
+  /** A folder group renamed, moved among the groups (position, 0 first), or taken apart at its
+   *  folder (split: its subfolders groups of their own). */
+  patchGuild: (id: number, p: GuildPatch) => writeAgain<{ ok: boolean }>("PATCH", `/v1/internal/guilds/${id}`, p),
+  /** A folder marked: its colour tag ("" off), pinned, where it was dragged (reorder.ts): channel.update of its channel. */
+  markFolder: (path: string, p: FolderPatch) => sat<object>("channel.update", { channel_id: folderChannel(path), _data: p }, true),
   /** machine: another machine's executor; its paths '/'-separated. */
   folders: (path: string, machine?: string) => get<Folders>(`/v1/internal/folders?path=${enc(path)}${machine ? `&machine=${enc(machine)}` : ""}`),
   mkdir: (f: NewFolder) => write<FolderReply>("POST", "/v1/internal/folders", f),
   /** dsh's workspaces at another machine (DSH Desktop's), else its sessions' folders: '/'-separated. */
   dshWorkspaces: (machine: string) => get<DshWorkspace[]>(`/v1/internal/machines/${enc(machine)}/dsh/workspaces`),
   dshSync: (machine: string) => write<{ ok: boolean }>("POST", `/v1/internal/machines/${enc(machine)}/dsh/sync`),
-  patch: (id: string, p: SessionPatch) => writeAgain<{ ok: boolean }>("PATCH", S(id), p),
-  /** A folder's colour tag; "" takes it off. The carried state "colors" has them all. */
-  folderColor: (f: FolderColor) => writeAgain<{ ok: boolean }>("PUT", "/v1/internal/colors", f),
+  /** A session renamed, archived, pinned, tagged, put, moved or taken out from under its launcher: Satori's channel.update. */
+  patch: (id: string, p: SessionPatch) => sat<object>("channel.update", channelPatch(id, p), true),
 
   // --- notes (the carried state "notes" has them all) ---
   notes: () => get<Notes>("/v1/internal/notes"),
@@ -300,8 +312,9 @@ export const api = {
 
   // --- the queue, the session's settings ---
   steer: (id: string, input: string) => write<{ ok: boolean }>("POST", `${S(id)}/queue/${enc(input)}/steer`),
-  editQueued: (id: string, input: string, text: string) => write<{ ok: boolean }>("PUT", `${S(id)}/queue/${enc(input)}`, { text } satisfies EditQueued),
-  unqueue: (id: string, input: string) => write<{ ok: boolean }>("DELETE", `${S(id)}/queue/${enc(input)}`),
+  /** A message waiting in the queue changed or taken back: Satori's message.update, message.delete. */
+  editQueued: (id: string, input: string, text: string) => sat<object>("message.update", { channel_id: id, message_id: input, _data: { text } }),
+  unqueue: (id: string, input: string) => sat<object>("message.delete", { channel_id: id, message_id: input }),
   continueQueue: (id: string) => write<{ ok: boolean }>("POST", `${S(id)}/continue`),
   mode: (id: string, mode: string) => writeAgain<{ ok: boolean }>("PUT", `${S(id)}/mode`, { mode } satisfies SetMode),
   model: (id: string, model: string) => writeAgain<{ ok: boolean }>("PUT", `${S(id)}/model`, { model } satisfies SetModel),

@@ -34,11 +34,11 @@ func TestUploadSendAndFetch(t *testing.T) {
 	base := "http://" + tcp.Addr().String()
 	c := &http.Client{Timeout: 10 * time.Second}
 
-	var created api.NewSessionReply
-	if code := call(t, c, "POST", base+"/v1/internal/sessions", api.NewSession{Agent: "claude", Cwd: work, Caller: "some-caller"}, &created); code != 200 {
+	created, code := createAt(t, c, base, api.NewSession{Agent: "claude", Cwd: work, Caller: "some-caller"})
+	if code != 200 {
 		t.Fatalf("create: %d", code)
 	}
-	id := created.ID
+	id := created
 
 	img := image.NewRGBA(image.Rect(0, 0, 40, 20))
 	for x := range 40 {
@@ -87,12 +87,12 @@ func TestUploadSendAndFetch(t *testing.T) {
 	}
 
 	// Sent with a message: the agent sees the path, and the image itself.
-	if code := call(t, c, "POST", base+"/v1/internal/sessions/"+id+"/send", api.Send{Text: "look", Attachments: []string{got.File.Ref}}, nil); code != 200 {
+	if code, _ := sendAt(t, c, base, id, api.Send{Text: "look", Attachments: []string{got.File.Ref}}); code != 200 {
 		t.Fatalf("send: %d", code)
 	}
 	var page api.MessagePage
 	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
-		call(t, c, "GET", base+"/v1/internal/sessions/"+id+"/messages", nil, &page)
+		page = pageAt(t, c, base, id)
 		if len(page.Blocks) == 2 {
 			break
 		}

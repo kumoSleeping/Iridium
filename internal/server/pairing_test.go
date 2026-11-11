@@ -169,7 +169,7 @@ func TestExecPair(t *testing.T) {
 	t.Parallel()
 	l := startWith(t, func(s *Server, _ config.Config, _ string) { s.Remote = &remote.Hub{}; s.WatchMachines() })
 	l.want(200, "socket", "PUT", "/v1/internal/public", api.SetPublic{Origin: "https://ir.example.com"}, nil)
-	if code := l.public("GET", "/v1/internal/sessions", "", nil, nil); code != 401 {
+	if code := l.public("GET", "/v1/internal/agents", "", nil, nil); code != 401 {
 		t.Fatalf("no login: %d", code)
 	}
 	l.want(200, "socket", "PUT", "/v1/internal/pairing", api.PairWindow{Open: true}, nil)
@@ -267,7 +267,9 @@ func TestExecPair(t *testing.T) {
 	// The app it made sees it in the list too, without what manages it.
 	var pub api.Apps
 	if l.public("GET", "/v1/internal/apps", st.Token, nil, &pub); pub.Full || len(pub.Invites) != 0 ||
-		!slices.ContainsFunc(pub.Apps, func(a api.App) bool { return a.ID == m.ID && a.Computer != nil && a.Perms == nil && a.Rules.ClaudeOwner == nil }) {
+		!slices.ContainsFunc(pub.Apps, func(a api.App) bool {
+			return a.ID == m.ID && a.Computer != nil && a.Perms == nil && a.Rules.ClaudeOwner == nil
+		}) {
 		t.Fatalf("the public list: %+v", pub)
 	}
 	// Its folders, for the picker; one made there.
@@ -295,10 +297,10 @@ func TestExecPair(t *testing.T) {
 	machine(false)
 	l.want(409, "socket", "GET", "/v1/internal/folders?machine="+m.ID+"&path=~", nil, nil)
 	// Claude: at the owner's own machine (away now: not a refusal), never at another Bot.
-	if code := l.do("socket", "POST", "/v1/internal/sessions", api.NewSession{Agent: api.AgentClaude, Machine: "home-pc-2", Cwd: "/"}, nil); code == 403 {
+	if code := l.sat("socket", "channel.create", createBody(api.NewSession{Agent: api.AgentClaude, Machine: "home-pc-2", Cwd: "/"}), nil); code == 403 {
 		t.Fatal("claude refused at the owner's own machine")
 	}
-	l.want(403, "socket", "POST", "/v1/internal/sessions", api.NewSession{Agent: api.AgentClaude, Machine: "home-pc", Cwd: "/"}, nil)
+	l.create(403, "socket", api.NewSession{Agent: api.AgentClaude, Machine: "home-pc", Cwd: "/"})
 
 	// Denied.
 	l.public("POST", "/v1/internal/pair", "", api.PairRequest{Name: "lab"}, &p)
@@ -513,12 +515,79 @@ func TestOpenIcons(t *testing.T) {
 			t.Errorf("GET %s: %d, want past the gate", p, code)
 		}
 	}
-	for _, p := range []string{"/icons/../v1/internal/sessions", "/v1/internal/sessions", "/"} {
+	for _, p := range []string{"/icons/../v1/internal/agents", "/v1/internal/agents", "/"} {
 		if code := l.public("GET", p, "", nil, nil); code != 401 {
 			t.Errorf("GET %s: %d, want 401", p, code)
 		}
 	}
 	if code := l.public("POST", "/manifest.webmanifest", "", nil, nil); code != 401 {
 		t.Errorf("POST /manifest.webmanifest: %d, want 401", code)
+	}
+}
+
+// An app may ask with the login it speaks as (ir pair --login): allowed, the login comes approved
+// with it, so its first Satori request goes through and READY/meta has it. A bad login ID is
+// refused at once; an update leaves a login there as it is. The host's socket asks with pairing
+// shut (ir pair with no address); others still may not.
+func TestPairLogin(t *testing.T) {
+	t.Parallel()
+	l := start(t)
+	l.want(200, "socket", "PUT", "/v1/internal/public", api.SetPublic{Origin: "https://ir.example.com"}, nil)
+	if code, _, e := l.pairFrom("", api.PairRequest{Name: "koishi", Login: &api.PairLogin{ID: "bot"}}); code != 403 || e.Code != "pair_closed" {
+		t.Fatalf("by the public host, shut: %d %+v", code, e)
+	}
+	var e api.Error
+	l.want(422, "socket", "POST", "/v1/internal/pair", api.PairRequest{Name: "koishi", Login: &api.PairLogin{ID: "a/b"}}, &e)
+	if e.Code != "bad_login" {
+		t.Fatalf("a bad login: %+v", e)
+	}
+	var p api.Pairing
+	l.want(200, "socket", "POST", "/v1/internal/pair", api.PairRequest{Name: "koishi", Program: "Koishi", Login: &api.PairLogin{ID: "bot"}}, &p)
+	nd := l.pending()
+	if nd.Kind != api.NeedAppJoin || nd.Pair == nil || nd.Pair.Login == nil || nd.Pair.Login.ID != "bot" || nd.Pair.Login.Name != "bot" {
+		t.Fatalf("the need: %+v", nd)
+	}
+	l.want(200, "socket", "POST", "/v1/internal/needs/"+nd.ID, api.NeedAnswer{Allow: true}, nil)
+	var st api.PairState
+	l.want(200, "socket", "GET", "/v1/internal/pair/"+p.Request, nil, &st)
+	if st.Status != "allowed" || st.Token == "" {
+		t.Fatalf("the state: %+v", st)
+	}
+	var meta struct {
+		Logins []struct {
+			Platform string              `json:"platform"`
+			User     struct{ ID string } `json:"user"`
+		} `json:"logins"`
+	}
+	if code := l.public("POST", "/v1/meta", st.Token, nil, &meta); code != 200 || len(meta.Logins) != 1 || meta.Logins[0].User.ID != "bot" {
+		t.Fatalf("meta: %d %+v", code, meta)
+	}
+	hdr := http.Header{"Satori-Platform": {meta.Logins[0].Platform}, "Satori-User-ID": {"bot"}, "Authorization": {"Bearer " + st.Token}}
+	if code := l.doWith("", "POST", "/v1/channel.list", map[string]any{}, nil, hdr); code != 200 {
+		t.Fatalf("channel.list as bot: %d", code)
+	}
+	var ns api.Needs
+	if l.want(200, "socket", "GET", "/v1/internal/needs", nil, &ns); len(ns.Pending) != 0 {
+		t.Fatalf("no login_join need: %+v", ns.Pending)
+	}
+	// Paired again (an update) naming its login otherwise: bot stays as it was.
+	l.want(200, "socket", "POST", "/v1/internal/pair", api.PairRequest{Name: "koishi", Login: &api.PairLogin{ID: "bot", Name: "Bot 2"}}, &p)
+	nd = l.pending()
+	l.want(200, "socket", "POST", "/v1/internal/needs/"+nd.ID, api.NeedAnswer{Allow: true}, nil)
+	ls, err := l.s.st.Logins()
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, x := range ls {
+		if x.ID == "bot" {
+			n++
+			if x.Name != "bot" || x.ApprovedAt.IsZero() {
+				t.Fatalf("bot changed: %+v", x)
+			}
+		}
+	}
+	if n != 1 {
+		t.Fatalf("logins: %+v", ls)
 	}
 }

@@ -90,6 +90,20 @@ func (s *Store) AddLogin(app, id, name string, max int, now time.Time) (bool, er
 	return added, err
 }
 
+// AddApprovedLogin keeps login id of app approved, as a person allowed it with its app (pairing):
+// true if it is new; one there already stays as it is.
+func (s *Store) AddApprovedLogin(app, id, name string, now time.Time) (bool, error) {
+	if app == gate.WebApp {
+		return false, nil
+	}
+	res, err := s.db.Exec(`INSERT OR IGNORE INTO logins (app, id, name, created_at, approved_at) VALUES (?, ?, ?, ?, ?)`, app, id, name, nanos(now), nanos(now))
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
+}
+
 // ApproveLogin approves login id of app: false if there is none.
 func (s *Store) ApproveLogin(app, id string, now time.Time) (bool, error) {
 	res, err := s.db.Exec(`UPDATE logins SET approved_at = ? WHERE app = ? AND id = ? AND app <> ?`, nanos(now), app, id, gate.WebApp)

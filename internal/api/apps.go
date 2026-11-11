@@ -211,7 +211,7 @@ const (
 	NeedSecretSet NeedKind = "secret_set" // an agent's ir secret set: a person types the value
 	NeedSecretUse NeedKind = "secret_use" // an agent's ir run with credentials
 	// NeedAsk: a session's question, approval or plan (Card), for whoever may use the session;
-	// answered through the card (POST /v1/internal/sessions/{id}/answer), not POST /v1/internal/needs/{id}.
+	// answered through the card (POST /v1/internal/button), not POST /v1/internal/needs/{id}.
 	NeedAsk NeedKind = "ask"
 	// NeedShare: something shared with this login (Share); DELETE /v1/internal/needs/{id} puts it away.
 	NeedShare NeedKind = "share"
@@ -305,6 +305,14 @@ type PairRequest struct {
 	Home       string      `json:"home,omitempty"`
 	MachineID  string      `json:"machineId,omitempty"`
 	Wants      *Perms      `json:"wants,omitempty"` // nil: all; one carrying agents, its home
+	// Login: the login it speaks as (Satori-User-ID), approved with it; nil: none (ir join).
+	Login *PairLogin `json:"login,omitempty"`
+}
+
+// PairLogin is the login a pairing app speaks as. Name: ID when not given.
+type PairLogin struct {
+	ID   string `json:"id"`
+	Name string `json:"name,omitempty"`
 }
 
 // ExecAgent is an agent an executor has. Off: turned off at that app (Computer's only).

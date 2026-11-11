@@ -11,6 +11,7 @@ import { sourceOf, type Who } from "./chat/refs";
 import { t } from "./i18n";
 import { useCarried, useList, useUpdateState } from "./store";
 import { setHome } from "./ui";
+import { useGuilds } from "./guilds";
 
 /** null on a 404: the route is not there. */
 const orNone =
@@ -24,9 +25,9 @@ const orNone =
     }
   };
 
-/** The workspaces: as the stream carries them, else as asked for. */
+/** The workspaces (folder groups), in their order: as the stream carries them, else as asked for. */
 export function useWorkspaces(): { data: Workspace[] | null | undefined } {
-  const carried = useCarried<Workspace[]>("workspaces");
+  const carried = useGuilds()?.guilds;
   const q = useQuery({ queryKey: ["workspaces"], queryFn: orNone(api.workspaces), staleTime: Infinity, enabled: carried === undefined });
   return { data: carried ?? q.data };
 }

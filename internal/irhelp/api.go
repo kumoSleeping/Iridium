@@ -16,7 +16,7 @@ const Usage = `ir api [METHOD] <path|satori.method> [k=v | k:=json | k==query]..
   path: internal/x is /v1/internal/x (GET without a body, POST with one, else as METHOD says); a bare name is a Satori method, POST /v1/<name>
   k=v a string, k:=json any JSON, k==v the query; a.b=... sets a's b; @file, @- the body as it is
   shown: a line an item, the route's view= fields, values cut to 200 (--clip 0: whole); --pick other fields, --grep words, --all every page, --json as it came
-  --wait: message.create, POST internal/sessions and GET internal/sessions/{id} wait for the turn to end and print its reply; a command line for its output; a 202 {need} for a person to decide
+  --wait: message.create, channel.create (POST internal/sessions) and GET internal/sessions/{id} wait for the turn to end and print its reply; a command line for its output; a 202 {need} for a person to decide
   exit: 0 done, 2 needs the user (a question, an approval), 1 error
 `
 
@@ -29,9 +29,9 @@ func Layers() string {
 		ts = append(ts, t)
 	}
 	return `ir api help, a layer at a time: read only what the next call needs, no more.
-  1. The route known: ir api help <METHOD path | satori.method> (POST internal/sessions, channel.list): its line and notes; one marked ` + More + ` in a list has notes on its fields: read them before its first call.
+  1. The route known: ir api help <METHOD path | satori.method> (channel.create, GET internal/sessions/{id}): its line and notes; one marked ` + More + ` in a list has notes on its fields: read them before its first call.
   2. Not known: ir api help <topic> (` + strings.Join(ts, ", ") + `), a line a route; or ir api help <words>, the routes and notes they are in.
-  Sessions: start POST internal/sessions, message message.create, wait GET internal/sessions/{id} --wait, list channel.list. ir api help alone: how ir api is written, the common routes; all: every route.
+  Sessions: start channel.create, message message.create, wait GET internal/sessions/{id} --wait, list channel.list. ir api help alone: how ir api is written, the common routes; all: every route.
 `
 }
 

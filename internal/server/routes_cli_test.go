@@ -30,9 +30,8 @@ func TestCLIAtMachine(t *testing.T) {
 	var b api.Token
 	b = l.newApp("pc", false)
 	botID = b.App.ID
-	var own api.NewSessionReply
-	l.want(200, "socket", "POST", "/v1/internal/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "hello"}, &own)
-	l.waitReply("socket", own.ID, "ok: hello")
+	own := l.create(200, "socket", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "hello"})
+	l.waitReply("socket", own, "ok: hello")
 
 	run := func(token string, args ...string) (int, string, string, int) {
 		t.Helper()
@@ -59,7 +58,7 @@ func TestCLIAtMachine(t *testing.T) {
 		return resp.StatusCode, out.String(), errs.String(), exit
 	}
 
-	if code, out, errs, exit := run(tok, "api", "channel.list"); code != 200 || exit != 0 || !strings.Contains(out, own.ID[:8]) {
+	if code, out, errs, exit := run(tok, "api", "channel.list"); code != 200 || exit != 0 || !strings.Contains(out, own[:8]) {
 		t.Fatalf("channel.list: %d %d %q %q", code, exit, out, errs)
 	}
 	if _, _, errs, exit := run(tok, "run", "--", "id"); exit != 1 || !strings.Contains(errs, "runs on the host") {
@@ -69,7 +68,7 @@ func TestCLIAtMachine(t *testing.T) {
 		t.Errorf("copy from there: %d %q", exit, errs)
 	}
 	// Claude is the owner's own terminals': that Bot is not.
-	if _, _, errs, exit := run(tok, "api", "message.create", "channel_id="+own.ID[:8], "_data.text=hi"); exit != 1 || errs == "" {
+	if _, _, errs, exit := run(tok, "api", "message.create", "channel_id="+own[:8], "_data.text=hi"); exit != 1 || errs == "" {
 		t.Errorf("send to Claude from a Bot not the owner's: %d %q", exit, errs)
 	}
 	if _, out, errs, exit := run(tok, "--help"); exit != 0 || !strings.Contains(out, "ir api") || strings.Contains(out, "ir run [") {

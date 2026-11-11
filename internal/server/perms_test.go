@@ -26,38 +26,39 @@ func TestPerms(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	var inA, inB api.NewSessionReply
-	l.want(200, "web", "POST", "/v1/internal/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: a, Text: "one"}, &inA)
-	l.want(200, "web", "POST", "/v1/internal/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: b, Text: "two"}, &inB)
+	inA := l.create(200, "web", api.NewSession{Agent: api.AgentClaude, Cwd: a, Text: "one"})
+	inB := l.create(200, "web", api.NewSession{Agent: api.AgentClaude, Cwd: b, Text: "two"})
 
 	app := l.newApp("bot", true)
 	l.want(200, "socket", "PUT", "/v1/internal/apps/bot/perms", api.Perms{Agents: []string{"*"}, Scope: []string{"主机:" + a}}, nil)
 	var list []api.Session
-	l.want(200, app.Token, "GET", "/v1/internal/sessions", nil, &list)
-	if len(list) != 1 || list[0].ID != inA.ID {
+	list = l.sessions(app.Token)
+	if len(list) != 1 || list[0].ID != inA {
 		t.Fatalf("listed out of scope: %+v", list)
 	}
-	l.want(200, app.Token, "GET", "/v1/internal/sessions/"+inA.ID, nil, nil)
+	l.want(200, app.Token, "GET", "/v1/internal/sessions/"+inA, nil, nil)
 	// Satori sees the same: its channels are the sessions in scope.
-	if sb := (satoriBackend{l.s}); !sb.Sees(satori.Caller{App: app.App.ID}, inA.ID) || sb.Sees(satori.Caller{App: app.App.ID}, inB.ID) {
+	if sb := (satoriBackend{l.s}); !sb.Sees(satori.Caller{App: app.App.ID}, inA) || sb.Sees(satori.Caller{App: app.App.ID}, inB) {
 		t.Fatal("Satori's channels out of scope")
 	}
-	l.want(422, app.Token, "GET", "/v1/internal/sessions/"+inB.ID, nil, nil)
-	l.want(422, app.Token, "GET", "/v1/internal/sessions/"+inB.ID+"/messages", nil, nil)
-	l.want(422, app.Token, "POST", "/v1/internal/sessions/"+inB.ID+"/stop", nil, nil)
+	l.want(422, app.Token, "GET", "/v1/internal/sessions/"+inB, nil, nil)
+	if code := l.sat(app.Token, "message.list", map[string]any{"channel_id": inB}, nil); code != 422 {
+		t.Errorf("message.list out of scope: %d", code)
+	}
+	l.want(422, app.Token, "POST", "/v1/internal/sessions/"+inB+"/stop", nil, nil)
 	// A new session only within its scope.
-	l.want(403, app.Token, "POST", "/v1/internal/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: b, Text: "x"}, nil)
+	l.create(403, app.Token, api.NewSession{Agent: api.AgentClaude, Cwd: b, Text: "x"})
 	// The host sees both.
-	l.want(200, "socket", "GET", "/v1/internal/sessions/"+inB.ID, nil, nil)
+	l.want(200, "socket", "GET", "/v1/internal/sessions/"+inB, nil, nil)
 
 	// An agent it may not use: the session it sees, it may not use.
 	l.want(200, "socket", "PUT", "/v1/internal/apps/bot/perms", api.Perms{Agents: []string{"codex"}, Scope: []string{"*"}}, nil)
-	l.want(200, app.Token, "GET", "/v1/internal/sessions/"+inB.ID, nil, nil)
+	l.want(200, app.Token, "GET", "/v1/internal/sessions/"+inB, nil, nil)
 	var e api.Error
-	if l.want(403, app.Token, "PATCH", "/v1/internal/sessions/"+inB.ID, map[string]any{"name": "x"}, &e); e.Code != "no_permission" {
+	if l.wantSat(403, app.Token, "channel.update", map[string]any{"channel_id": inB, "data": map[string]any{"name": "x"}}, &e); e.Code != "no_permission" {
 		t.Fatalf("an agent it may not use: %+v", e)
 	}
-	l.want(403, app.Token, "POST", "/v1/internal/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: b, Text: "x"}, nil)
+	l.create(403, app.Token, api.NewSession{Agent: api.AgentClaude, Cwd: b, Text: "x"})
 
 	// A login of the app: what both allow.
 	c := caller{Identity: gate.Identity{App: app.App.ID, Login: "u1", Name: "u1"}}
@@ -71,10 +72,10 @@ func TestPerms(t *testing.T) {
 	if p := l.s.permsFor(c); len(p.Agents) != 1 || p.Agents[0] != "codex" || len(p.Scope) != 1 || p.Scope[0] != "主机:"+b {
 		t.Fatalf("login within app: %+v", p)
 	}
-	if _, err := l.s.using(c, inA.ID); err == nil {
+	if _, err := l.s.using(c, inA); err == nil {
 		t.Fatal("a login used a session out of its scope")
 	}
-	if _, err := l.s.using(c, inB.ID); !access.IsDenied(err) {
+	if _, err := l.s.using(c, inB); !access.IsDenied(err) {
 		t.Fatalf("a login used an agent its app may not: %v", err)
 	}
 	// Set over HTTP by whoever approves, never by an app.

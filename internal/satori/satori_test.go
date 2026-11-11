@@ -34,6 +34,10 @@ type fake struct {
 	sent     []string
 	answers  []api.CardAnswer
 	hidden   map[string]bool // sessions no login sees
+	created  []api.NewSession
+	patches  []api.SessionPatch
+	marks    map[string]api.FolderMark
+	edits    []string // "<session> <input> <text>", "-" for a drop
 }
 
 func newFake() *fake {
@@ -118,7 +122,68 @@ func (f *fake) Session(id string) (*api.SessionState, error) {
 
 func (f *fake) SeesGuild(Caller, api.Workspace) bool { return true }
 
-func (f *fake) Patch(context.Context, Caller, string, api.SessionPatch) error { return nil }
+func (f *fake) Patch(_ context.Context, _ Caller, _ string, p api.SessionPatch) error {
+	f.mu.Lock()
+	f.patches = append(f.patches, p)
+	f.mu.Unlock()
+	return nil
+}
+
+func (f *fake) Marks() []api.FolderMark {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []api.FolderMark
+	for _, m := range f.marks {
+		out = append(out, m)
+	}
+	return out
+}
+
+func (f *fake) MarkFolder(_ Caller, path string, p api.FolderPatch) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.marks == nil {
+		f.marks = map[string]api.FolderMark{}
+	}
+	m := f.marks[path]
+	m.Path = path
+	if p.Color != nil {
+		m.Color = *p.Color
+	}
+	if p.Pinned != nil {
+		m.Pinned = *p.Pinned
+	}
+	if p.Order != nil {
+		m.Order = *p.Order
+	}
+	f.marks[path] = m
+	return nil
+}
+
+func (f *fake) EditQueued(_ Caller, id, input string, text *string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	t := "-"
+	if text != nil {
+		t = *text
+	}
+	f.edits = append(f.edits, id+" "+input+" "+t)
+	return nil
+}
+
+// Create starts session "new<n>" in req.Cwd, its launcher req.Caller.
+func (f *fake) Create(_ context.Context, _ Caller, req api.NewSession) (string, error) {
+	f.mu.Lock()
+	f.created = append(f.created, req)
+	id := fmt.Sprintf("new%d", len(f.created))
+	f.mu.Unlock()
+	f.addSession(id, 0)
+	f.mu.Lock()
+	ss := f.sessions[id]
+	ss.Cwd, ss.Launcher, ss.Workspace = req.Cwd, req.Caller, req.Workspace
+	f.mu.Unlock()
+	return id, nil
+}
 
 func (f *fake) Workspaces() ([]api.Workspace, error) {
 	return []api.Workspace{{ID: 7, Name: "proj", Path: "/w"}}, nil
@@ -257,7 +322,7 @@ func TestErrors(t *testing.T) {
 		code                       string
 	}{
 		{"app1", "app1", "u1", "nope.get", nil, 404, "no_such_api"},
-		{"app1", "app1", "u1", "message.delete", nil, 404, "no_such_api"},
+		{"app1", "app1", "u1", "guild.approve", nil, 404, "no_such_api"},
 		{"", "app1", "u1", "channel.get", nil, 403, "no_login"},
 		{"app1", "app2", "u1", "channel.get", nil, 403, "no_such_login"},
 		{"app1", "app1", "", "channel.get", nil, 403, "no_such_login"},
@@ -307,11 +372,12 @@ func TestResources(t *testing.T) {
 		t.Errorf("guilds: %+v", gl)
 	}
 	var cl List[Channel]
-	if r.as("u1", "channel.list", map[string]string{"guild_id": "7"}, &cl); len(cl.Data) != 1 || cl.Data[0].ID != "s2" || cl.Data[0].Name != "named" ||
-		cl.Data[0].Data == nil || cl.Data[0].Data.ID != "s2" {
+	// Its folder first, then the session.
+	if r.as("u1", "channel.list", map[string]string{"guild_id": "7"}, &cl); len(cl.Data) != 2 || cl.Data[0].ID != "folder:/w/s2" || cl.Data[0].Type != ChannelCategory ||
+		cl.Data[1].ID != "s2" || cl.Data[1].Name != "named" || cl.Data[1].Data == nil || cl.Data[1].Data.ID != "s2" {
 		t.Errorf("channels of 7: %+v", cl)
 	}
-	if r.as("u1", "channel.list", map[string]string{"guild_id": Loose}, &cl); len(cl.Data) != 1 || cl.Data[0].Name != "s1" {
+	if r.as("u1", "channel.list", map[string]string{"guild_id": Loose}, &cl); len(cl.Data) != 2 || cl.Data[1].Name != "s1" {
 		t.Errorf("loose channels: %+v", cl)
 	}
 	var u User
@@ -715,3 +781,110 @@ func (k *memKeeper) Kept(time.Time) ([][]byte, error) {
 }
 
 func (k *memKeeper) Drop(time.Time) error { return nil }
+
+// channel.create starts a session: its folder group, name and parent from Satori's fields, the
+// agent's start from _data; the channel back is the session, its parent its launcher.
+func TestChannelCreate(t *testing.T) {
+	r := newRig(t)
+	r.f.addSession("boss", 0)
+	var ch Channel
+	if code, e := r.call("app1", "app1", "u1", "channel.create", map[string]any{
+		"guild_id": "7", "data": map[string]any{"name": "worker", "parent_id": "boss"},
+		"_data": map[string]any{"agent": "claude", "cwd": "/w/x", "text": "hi"},
+	}, &ch); code != 200 {
+		t.Fatalf("channel.create: %d %+v", code, e)
+	}
+	got := r.f.created[0]
+	if got.Agent != api.AgentClaude || got.Cwd != "/w/x" || got.Text != "hi" || got.Workspace != 7 || got.Caller != "boss" {
+		t.Errorf("started %+v", got)
+	}
+	if ch.ID != "new1" || ch.ParentID != "boss" || ch.Data == nil || ch.Data.Cwd != "/w/x" {
+		t.Errorf("channel %+v", ch)
+	}
+	if len(r.f.patches) != 1 || r.f.patches[0].Name == nil || *r.f.patches[0].Name != "worker" {
+		t.Errorf("name: %+v", r.f.patches)
+	}
+	for _, c := range []struct {
+		body map[string]any
+		code int
+	}{
+		{map[string]any{"guild_id": "99", "_data": map[string]any{"agent": "claude", "cwd": "/w"}}, 422},
+	} {
+		if code, _ := r.call("app1", "app1", "u1", "channel.create", c.body, nil); code != c.code {
+			t.Errorf("%v: %d, want %d", c.body, code, c.code)
+		}
+	}
+	if len(r.f.created) != 1 {
+		t.Errorf("started %d", len(r.f.created))
+	}
+}
+
+// The folders sessions are in are category channels, their sessions' parent unless they hang
+// under another; a folder's marks, a session's place and its parent change by channel.update; a
+// message waiting in the queue changes and goes by message.update and message.delete.
+func TestFoldersPlacesAndQueue(t *testing.T) {
+	r := newRig(t)
+	r.f.addSession("a", 0)
+	r.f.addSession("b", 0)
+	r.f.mu.Lock()
+	r.f.sessions["b"].Launcher = "a"
+	r.f.sessions["a"].Queue = []api.Queued{{ID: "in1", Text: "later"}}
+	r.f.mu.Unlock()
+	var cl List[Channel]
+	r.call("app1", "app1", "u1", "channel.list", nil, &cl)
+	var kinds []string
+	parent := map[string]string{}
+	for _, c := range cl.Data {
+		kinds = append(kinds, fmt.Sprint(c.Type, " ", c.ID))
+		parent[c.ID] = c.ParentID
+	}
+	if !slices.Contains(kinds, "2 folder:/w/a") || !slices.Contains(kinds, "2 folder:/w/b") || parent["a"] != "folder:/w/a" || parent["b"] != "a" {
+		t.Fatalf("channels: %v %v", kinds, parent)
+	}
+	up := func(body map[string]any) int {
+		code, _ := r.call("app1", "app1", "u1", "channel.update", body, nil)
+		return code
+	}
+	if code := up(map[string]any{"channel_id": "folder:/w/a", "_data": map[string]any{"color": "red", "pinned": true}}); code != 200 || r.f.marks["/w/a"].Color != "red" || !r.f.marks["/w/a"].Pinned {
+		t.Errorf("a folder marked: %d %+v", code, r.f.marks)
+	}
+	var raw json.RawMessage
+	r.call("app1", "app1", "u1", "channel.get", map[string]any{"channel_id": "folder:/w/a"}, &raw)
+	if !strings.Contains(string(raw), `"_data":{"path":"/w/a","color":"red","pinned":true}`) {
+		t.Errorf("the folder: %s", raw)
+	}
+	for body, code := range map[string]int{
+		`{"channel_id":"folder:/w/a","data":{"name":"x"}}`:          400,
+		`{"channel_id":"folder:/nowhere","_data":{"color":"red"}}`: 422,
+		`{"channel_id":"a","data":{"parent_id":null}}`:             422, // it hangs under none
+		`{"channel_id":"b","data":{"parent_id":"a"}}`:              200, // as it is
+	} {
+		var m map[string]any
+		json.Unmarshal([]byte(body), &m)
+		if got := up(m); got != code {
+			t.Errorf("%s: %d, want %d", body, got, code)
+		}
+	}
+	r.f.patches = nil
+	if up(map[string]any{"channel_id": "b", "data": map[string]any{"parent_id": nil}, "_data": map[string]any{"pinned": true, "order": 5}}); len(r.f.patches) != 1 ||
+		r.f.patches[0].Detach == nil || !*r.f.patches[0].Detach || !*r.f.patches[0].Pinned || *r.f.patches[0].Order != 5 {
+		t.Errorf("taken out, pinned, put: %+v", r.f.patches)
+	}
+	for _, c := range []struct {
+		method string
+		body   map[string]any
+		code   int
+	}{
+		{"message.update", map[string]any{"channel_id": "a", "message_id": "in1", "content": "sooner &amp; better"}, 200},
+		{"message.update", map[string]any{"channel_id": "a", "message_id": "in1", "content": " "}, 400},
+		{"message.update", map[string]any{"channel_id": "a", "message_id": "gone", "content": "x"}, 422},
+		{"message.delete", map[string]any{"channel_id": "a", "message_id": "in1"}, 200},
+	} {
+		if code, _ := r.call("app1", "app1", "u1", c.method, c.body, nil); code != c.code {
+			t.Errorf("%s %v: %d, want %d", c.method, c.body, code, c.code)
+		}
+	}
+	if !slices.Equal(r.f.edits, []string{"a in1 sooner & better", "a in1 -"}) {
+		t.Errorf("edits: %q", r.f.edits)
+	}
+}

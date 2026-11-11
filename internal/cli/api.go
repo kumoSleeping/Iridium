@@ -192,7 +192,12 @@ func parseAPI(args []string) (*apiCall, error) {
 	if len(c.query) > 0 {
 		c.path += "?" + c.query.Encode()
 	}
-	if c.all && !c.satori {
+	// internal/button is Satori's own (an ask answered, a button pressed): as the login too.
+	button := c.path == "/v1/internal/button"
+	if button {
+		c.satori = true
+	}
+	if c.all && (!c.satori || button) {
 		return nil, errors.New("--all is for Satori's lists (their next)")
 	}
 	return c, nil
@@ -342,23 +347,27 @@ func (e *env) stream(body io.Reader) int {
 const ndjson = "application/x-ndjson"
 
 // then is what ir does past an answer, as --wait says (-1: nothing; else the exit code): a
-// session started with a message (POST internal/sessions) is waited on until the agent took it,
+// session started with a message (channel.create) is waited on until the agent took it,
 // with --wait until its turn ends, the reply printed; what waits for a person (202 {need}: an
 // agent's invite, a secret to type in) is waited on with --wait until a person decided.
 func (e *env) then(c *apiCall, raw []byte) int {
 	switch {
-	case c.method == "POST" && c.path == "/v1/internal/sessions" && !c.json:
-		var made api.NewSessionReply
+	case c.path == "/v1/channel.create" && !c.json:
+		var made satori.Channel
 		if json.Unmarshal(raw, &made) != nil || made.ID == "" {
 			return -1
 		}
 		fmt.Fprintln(e.out, made.ID)
-		text, _ := c.body["text"].(string)
-		if c.raw != nil {
-			var b api.NewSession
-			_ = json.Unmarshal(c.raw, &b)
-			text = b.Text
+		// Its first message, _data.text.
+		var b struct {
+			Data api.NewSession `json:"_data"`
 		}
+		if c.raw != nil {
+			_ = json.Unmarshal(c.raw, &b)
+		} else if j, err := json.Marshal(c.body); err == nil {
+			_ = json.Unmarshal(j, &b)
+		}
+		text := b.Data.Text
 		switch {
 		case strings.TrimSpace(text) == "":
 			return exitDone

@@ -48,7 +48,7 @@ func runDaemon(t *testing.T, cfg config.Config, st *store.Store, l *platform.Dir
 	return d
 }
 
-// After a restart, over HTTP: the open ask is back with its card and POST /v1/internal/sessions/{id}/answer ends the
+// After a restart, over HTTP: the open ask is back with its card and POST /v1/internal/button ends the
 // turn; the context and the quota come back as last read, on GET and on the stream.
 func TestRestartOverHTTP(t *testing.T) {
 	t.Parallel()
@@ -92,11 +92,10 @@ func TestRestartOverHTTP(t *testing.T) {
 	}
 
 	d := runDaemon(t, cfg, st, l)
-	var created api.NewSessionReply
-	call(t, c, "POST", d.base+"/v1/internal/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: work, Text: "first"}, &created)
-	id := created.ID
+	created, _ := createAt(t, c, d.base, api.NewSession{Agent: api.AgentClaude, Cwd: work, Text: "first"})
+	id := created
 	before := wait(d.base, id, "the context", func(s api.SessionState) bool { return s.Context != nil && s.Status == api.StatusIdle })
-	call(t, c, "POST", d.base+"/v1/internal/sessions/"+id+"/send", api.Send{Text: "please ASK"}, nil)
+	sendAt(t, c, d.base, id, api.Send{Text: "please ASK"})
 	wait(d.base, id, "the ask", func(s api.SessionState) bool { return s.Status == api.StatusWaiting })
 	d.stop()
 
@@ -137,9 +136,8 @@ func TestRestartOverHTTP(t *testing.T) {
 		t.Errorf("quota after the restart: %s", got["quota"])
 	}
 
-	var cr api.CardReply
-	if code := call(t, c, "POST", d.base+"/v1/internal/sessions/"+id+"/answer", api.CardAnswer{Card: s.Asks[0].Card.ID, Option: "allow"}, &cr); code != 200 || !cr.OK {
-		t.Fatalf("answer: %d %+v", code, cr)
+	if code := answerAt(t, c, d.base, api.CardAnswer{Card: s.Asks[0].Card.ID, Option: "allow"}); code != 200 {
+		t.Fatalf("answer: %d", code)
 	}
 	wait(d.base, id, "the reply", func(s api.SessionState) bool {
 		return s.Last != nil && s.Last.Text == "ok: please ASK" && s.Status == api.StatusIdle

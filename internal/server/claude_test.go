@@ -47,12 +47,12 @@ func TestClaudeOnlyFromTheMachine(t *testing.T) {
 	if !access.HasClaude(mine.App.Rules) || mine.App.Rules.ClaudeOwner.By != "local" {
 		t.Fatalf("an app with Claude: %+v", mine.App.Rules)
 	}
-	l.want(200, mine.Token, "POST", "/v1/internal/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work}, nil)
+	l.create(200, mine.Token, api.NewSession{Agent: api.AgentClaude, Cwd: l.work})
 	other := l.newApp("other", false)
 	if access.HasClaude(other.App.Rules) {
 		t.Fatalf("a plain app has claude: %+v", other.App.Rules)
 	}
-	l.want(403, other.Token, "POST", "/v1/internal/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work}, nil)
+	l.create(403, other.Token, api.NewSession{Agent: api.AgentClaude, Cwd: l.work})
 }
 
 // A new login of ir_web gets Claude when the gate says it is the first, or its invite's perms give

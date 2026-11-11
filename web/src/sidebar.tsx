@@ -13,7 +13,8 @@ import { Archive, ArchiveRestore, ArrowDown, ArrowUp, Bot, Check, ChevronRight, 
 import { ConfirmIcon, confirmName, confirmTitle } from "./confirmname";
 import { Fragment, lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode, type RefObject } from "react";
 import { api } from "./api/client";
-import type { Color, Need, Places, Session, Status } from "./api/types.gen";
+import type { Color, Guilds, Need, Session, Status } from "./api/types.gen";
+import { NO_GUILDS, placesOf, withGroupOrder, withMark, type Places } from "./guilds";
 import { colorVar, COLORS, useFolderColors } from "./colors";
 import { ahead, behind } from "./chats";
 import { t, useLang } from "./i18n";
@@ -31,7 +32,7 @@ import { NoteMark, NotesAt, useNotes } from "./notekey";
 import { useUnread } from "./unread";
 import { CloudBadge, MachineFace, shownPath, useLate, useMachine, type Machine } from "./machines";
 import { getCarried, setCarried } from "./store";
-import { dropMark, dropTarget, endDrag, listDrop, NO_PLACES, pinFolder, placeFolder, placeGroup as placeGroupKey, placeSession, withPlace, sortList, startDrag, useDragged, useOver, type Dragged, type Edge, type Over } from "./reorder";
+import { dropMark, dropTarget, endDrag, listDrop, pinFolder, placeFolder, placeGroup as placeGroupKey, placeSession, sortList, startDrag, useDragged, useOver, type Dragged, type Edge, type Over } from "./reorder";
 
 const STEP = 18;
 /** The deepest a folder is drawn in: those deeper are drawn as deep, the sidebar being narrow. */
@@ -182,12 +183,12 @@ export function Sidebar(p: Props) {
   }, []);
   // A folder put (dragged, pinned): shown so at once, then told the server.
   const putFolder = useCallback((path: string, at: (was: Places) => { order?: number; pinned?: boolean }) => {
-    const was = getCarried<Places>("places") ?? NO_PLACES;
-    const put = at(was);
-    const shown = withPlace(was, path, put);
-    setCarried("places", shown);
-    void api.placeFolder({ path, ...put }).catch((e: unknown) => {
-      if (getCarried("places") === shown) setCarried("places", was);
+    const was = getCarried<Guilds>("guilds") ?? NO_GUILDS;
+    const put = at(placesOf(was));
+    const shown = withMark(was, path, put);
+    setCarried("guilds", shown);
+    void api.markFolder(path, put).catch((e: unknown) => {
+      if (getCarried("guilds") === shown) setCarried("guilds", was);
       toast(t("err.action"), { error: true, description: errText(e) });
     });
   }, []);
@@ -205,12 +206,13 @@ export function Sidebar(p: Props) {
   }, [putFolder]);
   // A group's row moved, by its key.
   const placeGroup = useCallback((key: string, target: string, edge: Edge) => {
-    const was = getCarried<Places>("places") ?? NO_PLACES;
-    const keys = placeGroupKey(was.groups, groupKeys.current, key, target, edge);
-    const shown = { ...was, groups: keys };
-    setCarried("places", shown);
-    void api.orderGroups(keys).catch((e: unknown) => {
-      if (getCarried("places") === shown) setCarried("places", was);
+    const was = getCarried<Guilds>("guilds") ?? NO_GUILDS;
+    // Its place among the groups (未归类, w0, is always last).
+    const keys = placeGroupKey(placesOf(was).groups, groupKeys.current, key, target, edge).filter((k) => k !== "w0");
+    const shown = withGroupOrder(was, keys);
+    setCarried("guilds", shown);
+    void api.patchGuild(Number(key.slice(1)), { position: keys.indexOf(key) }).catch((e: unknown) => {
+      if (getCarried("guilds") === shown) setCarried("guilds", was);
       toast(t("err.action"), { error: true, description: errText(e) });
     });
   }, []);
@@ -739,7 +741,7 @@ function WsRow({ flip, id, name, root, sessions, hung, machine, remote, folders,
           { icon: <Copy size={15} />, label: t("menu.copyPath"), run: () => void navigator.clipboard.writeText(shownPath(root, machines).real).then(() => toast(t("toast.copied")), failed) },
           { icon: open ? <Folder size={15} /> : <FolderOpen size={15} />, label: open ? t("menu.fold") : t("menu.unfold"), run: onToggle },
           // Taken apart at its folder, its subfolders groups of their own (the user, 2026-11-09).
-          ...(folders ? [{ icon: <Ungroup size={15} />, label: t("menu.split"), run: () => void api.splitWorkspace(id).then(() => toast(t("toast.split", { ws: name })), failed) }] : []),
+          ...(folders ? [{ icon: <Ungroup size={15} />, label: t("menu.split"), run: () => void api.patchGuild(id, { split: true }).then(() => toast(t("toast.split", { ws: name })), failed) }] : []),
           // Moved among all groups; with a mouse it is dragged too (reorder.ts).
           ...(up ? [{ icon: <ArrowUp size={15} />, label: t("menu.moveUp"), run: up }] : []),
           ...(down ? [{ icon: <ArrowDown size={15} />, label: t("menu.moveDown"), run: down }] : []),
@@ -862,7 +864,7 @@ function WsRename({ id, name, done }: { id: number; name: string; done: () => vo
     over.current = true;
     const to = value?.trim();
     done();
-    if (to && to !== name) await api.patchWorkspace(id, { name: to }).catch((e) => toast(t("err.rename"), { error: true, description: errText(e) }));
+    if (to && to !== name) await api.patchGuild(id, { name: to }).catch((e: unknown) => toast(t("err.rename"), { error: true, description: errText(e) }));
   };
   return (
     <input
@@ -1148,7 +1150,7 @@ function FolderRow({ f, ws, depth, label, hung, open, onToggle, newHere, plus, l
   const done = (what: string) => () => toast(what);
   const failed = (e: unknown) => toast(t("err.action"), { error: true, description: errText(e) });
   const color = useFolderColors()[f.path];
-  const tags: Tags = { value: color, set: (c) => void api.folderColor({ path: f.path, color: c as Color }).catch(failed) };
+  const tags: Tags = { value: color, set: (c) => void api.markFolder(f.path, { color: c as Color }).catch(failed) };
   // Archive first, as in a session's menu (the user, 2026-11-06); those of the folders in it too
   // (the user, 2026-11-10).
   const all = folderSessions(f);

@@ -146,10 +146,9 @@ func TestSatori(t *testing.T) {
 			t.Errorf("the host's login: %+v", hl)
 		}
 	}
-	// Iridium's own API under /v1/internal/: the same as /v1/internal/.
-	var list []api.Session
-	if code := l.do("web", "GET", "/v1/internal/sessions", nil, &list); code != 200 {
-		t.Errorf("/v1/internal/sessions: %d", code)
+	// Iridium's own API under /v1/internal/.
+	if code := l.do("web", "GET", "/v1/internal/agents", nil, nil); code != 200 {
+		t.Errorf("/v1/internal/agents: %d", code)
 	}
 	if code, _ := l.satoriCall(api.Token{App: app.App, Token: "ir_nope"}, "alice", "login.get", nil, nil); code != 401 {
 		t.Errorf("a bad TOKEN: %d", code)
@@ -158,9 +157,8 @@ func TestSatori(t *testing.T) {
 		t.Errorf("no API: %d %+v", code, e)
 	}
 
-	var created api.NewSessionReply
-	l.want(200, "socket", "POST", "/v1/internal/sessions", api.NewSession{Agent: "claude", Cwd: l.work}, &created)
-	id := created.ID
+	created := l.create(200, "socket", api.NewSession{Agent: "claude", Cwd: l.work})
+	id := created
 	if code, e := l.satoriCall(app, "alice", "channel.get", map[string]string{"channel_id": "nope"}, nil); code != 422 || e.Code != "no_such_session" {
 		t.Errorf("no session: %d %+v", code, e)
 	}

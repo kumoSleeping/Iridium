@@ -31,8 +31,7 @@ func TestNeedsAsksAndShare(t *testing.T) {
 	u2 := caller{Identity: gate.Identity{App: bot.App.ID, Login: "u2"}}
 	pad := caller{Identity: gate.Identity{App: gate.WebApp, Login: padID}}
 
-	var cr api.NewSessionReply
-	l.want(200, "socket", "POST", "/v1/internal/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "please ASK"}, &cr)
+	cr := l.create(200, "socket", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "please ASK"})
 	var ask api.Need
 	for end := time.Now().Add(10 * time.Second); ask.ID == "" && time.Now().Before(end); time.Sleep(20 * time.Millisecond) {
 		var ns api.Needs
@@ -43,7 +42,7 @@ func TestNeedsAsksAndShare(t *testing.T) {
 			}
 		}
 	}
-	if ask.Session != cr.ID || ask.Card == nil || ask.Card.ID != ask.ID || ask.Card.Kind != "permission" {
+	if ask.Session != cr || ask.Card == nil || ask.Card.ID != ask.ID || ask.Card.Kind != "permission" {
 		t.Fatalf("the ask: %+v", ask)
 	}
 	all := l.s.asks.everything().Pending
@@ -54,7 +53,9 @@ func TestNeedsAsksAndShare(t *testing.T) {
 	if f := l.s.streamFilter(u1); string(f("needs", mustJSON(l.s.asks.everything()))) != `{"pending":[]}` {
 		t.Fatal("u1's stream has the ask")
 	}
-	l.want(200, "socket", "POST", "/v1/internal/sessions/"+cr.ID+"/answer", api.CardAnswer{Card: ask.ID, Option: "allow"}, nil)
+	if code := l.answer("socket", api.CardAnswer{Card: ask.ID, Option: "allow"}); code != 200 {
+		t.Fatalf("answer: %d", code)
+	}
 	for end := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
 		var ns api.Needs
 		l.want(200, "socket", "GET", "/v1/internal/needs", nil, &ns)
@@ -68,15 +69,15 @@ func TestNeedsAsksAndShare(t *testing.T) {
 
 	// Shares: checked against the login it goes to.
 	var e api.Error
-	if l.do("socket", "POST", "/v1/internal/share", api.ShareRequest{What: api.ShareOfSession, Session: cr.ID, To: "bot/u1"}, &e); e.Code != "not_usable" {
+	if l.do("socket", "POST", "/v1/internal/share", api.ShareRequest{What: api.ShareOfSession, Session: cr, To: "bot/u1"}, &e); e.Code != "not_usable" {
 		t.Errorf("a Claude session to a codex-only login: %+v", e)
 	}
-	if l.do("socket", "POST", "/v1/internal/share", api.ShareRequest{What: api.ShareOfSession, Session: cr.ID, To: "bot/nobody"}, &e); e.Code != "no_such_login" {
+	if l.do("socket", "POST", "/v1/internal/share", api.ShareRequest{What: api.ShareOfSession, Session: cr, To: "bot/nobody"}, &e); e.Code != "no_such_login" {
 		t.Errorf("no such login: %+v", e)
 	}
-	l.want(400, "socket", "POST", "/v1/internal/share", api.ShareRequest{What: "song", Session: cr.ID, To: "bot/u2"}, nil)
+	l.want(400, "socket", "POST", "/v1/internal/share", api.ShareRequest{What: "song", Session: cr, To: "bot/u2"}, nil)
 	var tg api.ShareTargets
-	l.want(200, "socket", "GET", "/v1/internal/share/targets?what=session&session="+cr.ID, nil, &tg)
+	l.want(200, "socket", "GET", "/v1/internal/share/targets?what=session&session="+cr, nil, &tg)
 	for _, a := range tg.Apps {
 		for _, x := range a.Logins {
 			if x.ID == "u1" {
@@ -85,18 +86,17 @@ func TestNeedsAsksAndShare(t *testing.T) {
 		}
 	}
 
-	if l.do("socket", "POST", "/v1/internal/share", api.ShareRequest{What: api.ShareOfSession, Session: cr.ID, To: "ir_web/pad"}, &e); e.Code != "not_usable" {
+	if l.do("socket", "POST", "/v1/internal/share", api.ShareRequest{What: api.ShareOfSession, Session: cr, To: "ir_web/pad"}, &e); e.Code != "not_usable" {
 		t.Errorf("a Claude session to a login without Claude: %+v", e)
 	}
-	var cx api.NewSessionReply
-	l.want(200, "socket", "POST", "/v1/internal/sessions", api.NewSession{Agent: api.AgentCodex, Cwd: l.work, Text: "hi"}, &cx)
+	cx := l.create(200, "socket", api.NewSession{Agent: api.AgentCodex, Cwd: l.work, Text: "hi"})
 	var r api.ShareReply
-	l.want(200, "socket", "POST", "/v1/internal/share", api.ShareRequest{What: api.ShareOfSession, Session: cx.ID, To: "ir_web/pad", Note: "看看"}, &r)
+	l.want(200, "socket", "POST", "/v1/internal/share", api.ShareRequest{What: api.ShareOfSession, Session: cx, To: "ir_web/pad", Note: "看看"}, &r)
 	if r.Login != padID {
 		t.Errorf("reply: %+v", r)
 	}
 	mine := l.s.needsFor(pad, l.s.asks.everything().Pending)
-	if len(mine) != 1 || mine[0].Kind != api.NeedShare || mine[0].Share.Note != "看看" || mine[0].Share.Session != cx.ID || mine[0].Share.From != gate.HostID {
+	if len(mine) != 1 || mine[0].Kind != api.NeedShare || mine[0].Share.Note != "看看" || mine[0].Share.Session != cx || mine[0].Share.From != gate.HostID {
 		t.Fatalf("pad's share: %+v", mine)
 	}
 	if len(l.s.needsFor(caller{Identity: gate.HostIdentity}, l.s.asks.everything().Pending)) != 0 {

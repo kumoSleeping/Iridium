@@ -215,9 +215,9 @@ describe("a shell call's sort", () => {
     expect(r("Bash", "ir api channel.update channel_id=self data.name=x _data.archived:=true")).toBe(false);
     expect(cmdOfCall({ name: "Bash", input: JSON.stringify({ command: "ir api message.create channel_id=1a2b _data.text=hi" }) })).toBe("ir-send");
     expect(cmdOfCall({ name: "Bash", input: JSON.stringify({ command: "ir api POST internal/sessions/1a2b/stop" }) })).toBe("ir-stop");
-    expect(cmdOfCall({ name: "Bash", input: JSON.stringify({ command: "ir api POST internal/sessions agent=claude cwd=. text=hi" }) })).toBe("ir-new");
+    expect(cmdOfCall({ name: "Bash", input: JSON.stringify({ command: "ir api channel.create _data.agent=claude _data.cwd=. _data.text=hi" }) })).toBe("ir-new");
     expect(cmdOfCall({ name: "Bash", input: JSON.stringify({ command: "ir api internal/files path==/tmp" }) })).toBe("ir-files");
-    expect(cmdOfCall({ name: "Bash", input: JSON.stringify({ command: "ir api PATCH internal/workspaces/3 name=x" }) })).toBe("ir-ws");
+    expect(cmdOfCall({ name: "Bash", input: JSON.stringify({ command: "ir api PATCH internal/guilds/3 name=x" }) })).toBe("ir-ws");
     expect(cmdOfCall({ name: "Bash", input: JSON.stringify({ command: "ir api channel.list --grep x" }) })).toBe("ir-find");
     expect(cmdOfCall({ name: "Bash", input: JSON.stringify({ command: "ir api channel.update channel_id=1a2b _data.archived:=false" }) })).toBe("ir-unarchive");
     expect(cmdOfCall({ name: "Bash", input: JSON.stringify({ command: "ir api message.list channel_id=1a2b" }) })).toBe("ir-read");
@@ -289,6 +289,7 @@ describe("an ir call's words (在哪干活)", () => {
   });
   test("ir new: the session it printed first, its agent past the options; none before it is done or as it failed", () => {
     expect(newOfCall(bash("ir new --model x claude --machine m ~/x 'go 1a2b3c4d'", { text: "9f8e7d6c\nanswer" }))).toEqual({ id: "9f8e7d6c", agent: "claude" });
+    expect(newOfCall(bash("ir api channel.create _data.agent=codex _data.cwd=. _data.text=hi", { text: "1f2e3d4c-aaaa-bbbb-cccc-000000000000\nok" }))).toEqual({ id: "1f2e3d4c-aaaa-bbbb-cccc-000000000000", agent: "codex" });
     expect(newOfCall(bash("ir new codex 'go'"))).toBeUndefined();
     expect(newOfCall(bash("ir new codex 'go'", { text: "no such agent", error: true }))).toBeUndefined();
     expect(newOfCall(bash("ir new codex 'go'", { text: "usage: ir new <agent>" }))).toBeUndefined();

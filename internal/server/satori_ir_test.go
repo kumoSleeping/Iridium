@@ -50,9 +50,8 @@ func TestSatoriOnSocket(t *testing.T) {
 		empty := t.TempDir()
 		s.Discover = discover.New(discover.Options{ClaudeDir: cfg.ClaudeHome, CodexHome: empty, PiSessions: empty, DshHome: empty, Store: s.st, Hub: s.hub, Procs: discover.ProcFS{Root: empty}, Logf: t.Logf})
 	})
-	var made api.NewSessionReply
-	l.want(200, "web", "POST", "/v1/internal/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "one"}, &made)
-	l.waitReply("web", made.ID, "ok: one")
+	made := l.create(200, "web", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "one"})
+	l.waitReply("web", made, "ok: one")
 
 	// Who ir is: meta names the one login it speaks as.
 	var meta satori.Meta
@@ -71,7 +70,7 @@ func TestSatoriOnSocket(t *testing.T) {
 	}
 	var ch *satori.Channel
 	for i := range list.Data {
-		if list.Data[i].ID == made.ID {
+		if list.Data[i].ID == made {
 			ch = &list.Data[i]
 		}
 	}
@@ -80,19 +79,19 @@ func TestSatoriOnSocket(t *testing.T) {
 	}
 
 	// message.create from the host's ir: into the session, as POST .../send had it.
-	if code, raw := l.irSatori("socket", "local/local", "message.create", map[string]any{"channel_id": made.ID, "content": "two &lt; three"}, nil); code != 200 {
+	if code, raw := l.irSatori("socket", "local/local", "message.create", map[string]any{"channel_id": made, "content": "two &lt; three"}, nil); code != 200 {
 		t.Fatalf("message.create: %d %s", code, raw)
 	}
-	l.waitReply("web", made.ID, "ok: two < three")
+	l.waitReply("web", made, "ok: two < three")
 
 	// Archived: out of the list, but for _data.all; and back.
 	yes, no := true, false
-	l.irSatori("socket", "local/local", "channel.update", map[string]any{"channel_id": made.ID, "_data": map[string]any{"archived": yes}}, nil)
+	l.irSatori("socket", "local/local", "channel.update", map[string]any{"channel_id": made, "_data": map[string]any{"archived": yes}}, nil)
 	listed := func(all bool) bool {
 		var lst satori.List[satori.Channel]
 		l.irSatori("socket", "local/local", "channel.list", map[string]any{"_data": map[string]any{"all": all}}, &lst)
 		for _, c := range lst.Data {
-			if c.ID == made.ID {
+			if c.ID == made {
 				return true
 			}
 		}
@@ -101,18 +100,18 @@ func TestSatoriOnSocket(t *testing.T) {
 	if listed(false) || !listed(true) {
 		t.Fatalf("archived: listed %v, all %v", listed(false), listed(true))
 	}
-	l.irSatori("socket", "local/local", "channel.update", map[string]any{"channel_id": made.ID, "_data": map[string]any{"archived": no}}, nil)
+	l.irSatori("socket", "local/local", "channel.update", map[string]any{"channel_id": made, "_data": map[string]any{"archived": no}}, nil)
 	if !listed(false) {
 		t.Fatal("not back")
 	}
 
 	// A name a person gave (the host's ir, not an agent's) stands against an agent's.
-	l.irSatori("socket", "local/local", "channel.update", map[string]any{"channel_id": made.ID, "data": map[string]any{"name": "Mine"}}, nil)
-	if code, raw := l.irSatori("agent-in:"+made.ID, "local/local", "channel.update", map[string]any{"channel_id": made.ID, "data": map[string]any{"name": "Agent's"}}, nil); code != 409 {
+	l.irSatori("socket", "local/local", "channel.update", map[string]any{"channel_id": made, "data": map[string]any{"name": "Mine"}}, nil)
+	if code, raw := l.irSatori("agent-in:"+made, "local/local", "channel.update", map[string]any{"channel_id": made, "data": map[string]any{"name": "Agent's"}}, nil); code != 409 {
 		t.Fatalf("agent over a person's name: %d %s", code, raw)
 	}
 	var st api.SessionState
-	l.want(200, "socket", "GET", "/v1/internal/sessions/"+made.ID, nil, &st)
+	l.want(200, "socket", "GET", "/v1/internal/sessions/"+made, nil, &st)
 	if st.Name != "Mine" {
 		t.Fatalf("name: %q", st.Name)
 	}

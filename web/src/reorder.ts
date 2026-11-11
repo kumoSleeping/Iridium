@@ -4,12 +4,12 @@
 // the list out from under that launcher, it is taken out (the user, 2026-11-10). Pinned ones are ordered apart from the rest; one dropped on a pinned row is
 // pinned, on another unpinned. A folder pinned is above the sessions at its group's root; one
 // dropped on any of those is pinned, last of the pinned. A session or folder dragged keeps the key
-// it was dropped at (Session.order, the carried "places") in place of its last activity: it
+// it was dropped at (Session.order, a folder's mark in the carried "guilds") in place of its last activity: it
 // stays where it was put while those never dragged are still sorted by when they last worked.
 // With a mouse only, as a finger's long press is the menu: on a phone a group's menu moves it.
 import { useSyncExternalStore } from "react";
-import type { Places, Session } from "./api/types.gen";
-import { useCarried } from "./store";
+import type { Session } from "./api/types.gen";
+import { NO_GUILDS, placesOf, useGuilds, type Places } from "./guilds";
 import { folderKey, type Folder } from "./tree";
 
 /** What is dragged: a group (its ID), a folder, a session, or a session hung under its launcher
@@ -143,22 +143,10 @@ export function pinFolder(sibs: Folder[], f: Folder, places: Places): { order?: 
   return last ? { order: folderKey(last, places.order) - 1000, pinned: true } : { pinned: true };
 }
 
-/** places with the folder of path put: its key (0 none) and pinned or not, as a field given. */
-export const withPlace = (places: Places, path: string, p: { order?: number; pinned?: boolean }): Places => {
-  const order = { ...places.order };
-  if (p.order !== undefined) {
-    if (p.order) order[path] = p.order;
-    else delete order[path];
-  }
-  const pinned = p.pinned === undefined ? places.pinned : p.pinned ? [...places.pinned.filter((x) => x !== path), path] : places.pinned.filter((x) => x !== path);
-  return { ...places, order, pinned };
-};
+/** Where the rows were put by hand, the groups' and the folders' (the carried "guilds"). */
+export const usePlaces = (): Places => placesOf(useGuilds() ?? NO_GUILDS);
 
-export const NO_PLACES: Places = { groups: [], order: {}, pinned: [] };
-/** The carried "places": where the rows were put by hand, the groups' and the folders'. */
-export const usePlaces = () => useCarried<Places>("places") ?? NO_PLACES;
-
-/** The groups' rows' keys with key moved to edge of target: the order PUT /v1/internal/groups/order takes.
+/** The groups' rows' keys with key moved to edge of target (its position: PATCH /v1/internal/guilds/{id}).
  *  stored: the order there was; shown: the rows as listed now (those not stored after the
  *  stored). A row stored but not listed now (none of its sessions shown) keeps its place. */
 export function placeGroup(stored: string[], shown: string[], key: string, target: string, edge: Edge): string[] {

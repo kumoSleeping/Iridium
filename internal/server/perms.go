@@ -242,12 +242,15 @@ func (s *Server) stateFilter(c caller) func(key string, v []byte) []byte {
 	}
 	return func(key string, v []byte) []byte {
 		switch {
-		case key == "workspaces":
-			var ws []api.Workspace
-			if json.Unmarshal(v, &ws) != nil {
+		case key == "guilds":
+			// Its groups, and the marks of the folders in its scope.
+			var g api.Guilds
+			if json.Unmarshal(v, &g) != nil {
 				return v
 			}
-			b, _ := json.Marshal(s.scopeWorkspaces(p, ws))
+			g.Guilds = s.scopeWorkspaces(p, g.Guilds)
+			g.Folders = slices.DeleteFunc(g.Folders, func(f api.FolderMark) bool { return !s.scopeHas(p.Scope, gate.HostID, f.Path) })
+			b, _ := json.Marshal(g)
 			return b
 		case key == "list":
 			var l []api.Session

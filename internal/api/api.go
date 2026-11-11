@@ -438,10 +438,6 @@ type NewSession struct {
 	Machine string `json:"machine,omitempty"`
 }
 
-type NewSessionReply struct {
-	ID string `json:"id"`
-}
-
 // Send gives the session a message: a new turn when idle; while a turn runs it waits in the
 // queue for the turn to end, unless Steer, which joins the running turn.
 type Send struct {

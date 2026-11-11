@@ -13,20 +13,16 @@ Iridium 自己的接口都在 `/v1/internal/` 下：Satori 规范的 internal �
 
 ## 请求
 
+会话的开、列、读、发、改名、归档、置顶、颜色、位置、拖出来，排队消息的修改和撤回，回答提问，都走 Satori（`docs/satori.md`：`channel.create`、`channel.list`、`message.list`、`message.get`、`message.create`、`channel.update`、`message.update`、`message.delete`、`/v1/internal/button`）；对应的旧路由 2026-11-11 删掉。
+
 | 请求 | 正文 → 回答 | 说明 |
 |---|---|---|
-| `GET /v1/internal/sessions` | → `Session[]` | 会话列表：托管的加上磁盘上发现的（见“工作区和目录”）。置顶在前，再按最近 |
-| `POST /v1/internal/sessions` | `NewSession` → `{id}` | 在 `cwd` 开一个托管会话，带 `text` 就作为第一条消息。`agent`：`claude`、`codex`、`pi`；`model` 可带强度（Codex `gpt-6-luna:low`，pi `provider/id:off`）；`mode` 取 `GET /v1/internal/agents` 列的模式。带 `workspace` 就放进那个工作区（带 `caller` 时不算手动放的，照样挂在拉起者下面）。`caller` 是拉起者（`ir new` 所在的会话），记成新会话的 `launcher`。`at` 删掉（2026-11-10，见 `exec.md`“远端工作区”） |
 | `GET /v1/internal/sessions/{id}` | → `SessionState` | 打开的会话的状态，和携带状态 `session:<id>` 同一份 |
-| `GET /v1/internal/sessions/{id}/messages` | → `MessagePage` | 不带参数：最新一页。`before=<start>`：往回一页。`after=<end>`：之后新写的 |
-| `GET /v1/internal/sessions/{id}/block?at=<at>` | → `{text}` | 截短的块（工具参数、结果、思考、系统行）的全文 |
 | `GET /v1/internal/sessions/{id}/image?at=<at>&n=<n>` | → 图片 | 工具结果（`Result.images`，`at` 是结果的）给模型的第 `n` 张图，取自 agent 的记录，不读文件现在的样子：Claude、pi 和 MCP 工具的在结果里，Codex 的 view_image 在脚本的输出里（脚本只看了一张、只交出一张，当时没有别的调用、也没有后台还在跑的脚本时，才认得出是哪张；认不出的不列进 `images`），dsh 的 read_image 在它的附件库（经通道，远端经执行端）。只给 PNG、JPEG、GIF、WebP，按内容的 ETag。没有这张 422 `no_such_image`，不在了 410，所在机器没连上 409，脚本还没跑完 425（稍后再问） |
-| `POST /v1/internal/sessions/{id}/send` | `{text, steer?}` → `{input, queued?, command?, session?, desktop?}` | 发消息。agent 没在跑就先拉起（有记录就 `--resume`）。回合进行中发的进待发队列（`queued`），`steer` 则并进当前回合。`/` 开头的命令从不插话，排到回合结束。`/clear`（`/reset`、`/new`，后面带字、带附件也算）由 Iridium 做：同处开新会话（模型、模式、强度照旧），旧的空闲时归档，回新会话的 `session`。`command`：agent 自己执行、记录里不会有这句（Codex、pi 的 `/compact`）。见“待发队列”。在别处运行的回 409；别的机器上 DSH Desktop 开着的 dsh 会话，消息交给 Desktop 里它的 agent（`desktop`，没有 `input`，见 `docs/exec.md`“远端 DSH”） |
 | `POST /v1/internal/sessions/{id}/interrupt` | → `{ok}` | 停掉当前回合（Esc），agent 留着。队列暂停 |
 | `POST /v1/internal/sessions/{id}/stop` | → `{ok}` | 停掉 agent 进程（关 stdin，写完记录自己退出）。会话还在，下一条消息再拉起。队列暂停 |
-| `POST /v1/internal/sessions/{id}/answer` | `Answer` → `{ok}` | 回答提问：审批 `allow`（不许时可带 `message`；`always` 见“会话设置”）；选择题 `answers`（问题原文 → 选项 `label`）；计划确认 `allow` |
 | `POST /v1/internal/sessions/{id}/release` | `Release{toolUseId, dismiss?}` → `{ok}` | Claude auto 模式拦下一步后，临时切换至 manual（见“临时切换至 manual”）；`dismiss` 只拿掉它的卡。Claude 会话要有 Claude，agent 调用一律 403 |
-| `GET /v1/internal/agents` | → `AgentInfo[]` | 能开的 agent：审批模式（`modes`、`defaultMode`、`modeSwitch`：now / next turn / restart）、有没有上下文分项、有没有额度窗口、能不能开 ultracode（`ultracode`）、agent 起来之前会话就有的附加功能（`features`，按 id：Claude 是 `claude.ultracode`）、程序装没装（`missing`：PATH 上找不到；这时 `POST /v1/internal/sessions` 立刻 400，不等 agent 自更新那 30 秒，网页把它画淡，点了只提示未安装） |
+| `GET /v1/internal/agents` | → `AgentInfo[]` | 能开的 agent：审批模式（`modes`、`defaultMode`、`modeSwitch`：now / next turn / restart）、有没有上下文分项、有没有额度窗口、能不能开 ultracode（`ultracode`）、agent 起来之前会话就有的附加功能（`features`，按 id：Claude 是 `claude.ultracode`）、程序装没装（`missing`：PATH 上找不到；这时 `channel.create` 立刻 400，不等 agent 自更新那 30 秒，网页把它画淡，点了只提示未安装） |
 | `GET /v1/internal/settings` | → `Settings` | 设置的配置项：空闲回收、崩溃续跑、额度续跑（这三项设置页不放，只改配置文件或经接口）、隐藏的额度条、各 agent 新会话的审批模式、推送总开关。管理权 |
 | `PUT /v1/internal/settings` | `SettingsPatch` → `Settings` | 只改给了的项，写进配置文件，马上生效。面板权 |
 
@@ -44,9 +40,7 @@ Iridium 自己的接口都在 `/v1/internal/` 下：Satori 规范的 internal �
 | 键 | 值 |
 |---|---|
 | `list` | `Session[]` |
-| `workspaces` | `Workspace[]` |
-| `places` | `Places`：组的顺序、文件夹的位置和置顶 |
-| `colors` | `FolderColors` |
+| `guilds` | `Guilds`：文件夹组（按拖成的顺序，没拖过的随后）和文件夹的标记（`FolderMark`：颜色、置顶、拖到的位置），2026-11-11 取代 `workspaces`、`places`、`colors` |
 | `session:<id>` | `SessionState`：状态、提问（带 `card`）、后台任务、模型（`model` 在用的，`pick` 设的）、审批模式、思考强度（`effort` 设的，`effortNow` agent 说在用的）、可选的模型/模式/强度、`ultracode`（只 Claude）、`features`（附加功能，见“会话设置”）、待发队列、上下文总数、`tokens`（会话累计的输入：未缓存、读缓存、写缓存，和用量同一批记录；页面在上下文弹窗里算缓存命中率）、等额度到几点、`tail`（块带 `files`）、`end`、`proc`、出错原因、`next`（Claude 自己清空了：对话接着在这个会话里，页面跟过去）、`commands`（给输入框的命令面板：人人都有的 `clear`、`compact`、`context`、`usage`、`model`、`effort`、`mode`，不带说明，页面按语言写；再接 agent 握手报的） |
 | `context:<id>` | `Context`：上下文用了多少、分项。回合结束、压缩后，回合中调用工具时最多 30 秒一次更新；存在托管目录，没进程时也有 |
 | `quota` | `Quota`：按 agent + 账号（Claude：邮箱和套餐）+ 机器（`machine`，执行端的会话是那台机器的登录）的额度窗口、读到的时间、`live` |
@@ -56,7 +50,7 @@ Iridium 自己的接口都在 `/v1/internal/` 下：Satori 规范的 internal �
 | `terminals` | 一个计数：应用或机器变了，重新取 `GET /v1/internal/apps` |
 | `notes` | `Notes`：全部便签和便签夹 |
 
-不认识的键、不给这个连接的键（`needs`、`pairing`、`colors`、`notes` 只给网页的登录和主机）不让 WATCH 失败：先为每个发一条 `state`，`{key, value: null, ignored: "unknown" | "forbidden"}`，其余照常。
+不认识的键、不给这个连接的键（`needs`、`pairing`、`notes` 只给网页的登录和主机）不让 WATCH 失败：先为每个发一条 `state`，`{key, value: null, ignored: "unknown" | "forbidden"}`，其余照常。
 
 `list` 和会话按权限范围给。应用被移除、网页登录退出、`public.origin` 改了，连接就断开。值里的凭据打码（见“凭据”）。
 
@@ -107,9 +101,9 @@ Iridium 自己的接口都在 `/v1/internal/` 下：Satori 规范的 internal �
 - 显示标记（用户定的，2026-11-05）：会话只有带“显示”标记才在列表里正常显示；标记在库里（`shown` 表），按 agent + agent 自己的会话 ID 记（托管的 Codex 在知道线程 ID 前用 Iridium 的 ID，两个哪个有标记都算）。从不写 agent 的文件，不删记录。
   - 设上：Iridium 开的、接管的托管会话；托管会话的 agent 开始回合或收到消息；发现看到“活动”：没见过的记录且最后修改晚于 Iridium 开始看的时间（第一次启动时记在库里，重启不变），或者记录比上次看时长了。
   - 没标记的就是归档：`Session.archived` 为 `true`，页面放在底部折叠的“归档”里，能搜。第一次启动时磁盘上已有、之后没动过的都在这里。
-  - 归档（`PATCH archived: true`）：去掉标记，记下记录当时的长度；之后长过这个长度（有了新活动）就自动回来。托管的另外像空闲回收那样停掉 agent；它退出时写的不算活动（退出后重记长度）。恢复（`archived: false`）：设上标记。没有按时间自动归档。
+  - 归档（`channel.update` 的 `_data.archived: true`）：去掉标记，记下记录当时的长度；之后长过这个长度（有了新活动）就自动回来。托管的另外像空闲回收那样停掉 agent；它退出时写的不算活动（退出后重记长度）。恢复（`archived: false`）：设上标记。没有按时间自动归档。
   - 旧版的归档标记迁移成“没标记”。
-- 归组（2026-11-08：组就是文件夹，`Workspace` 是组，不能手建）：会话第一次显示时（第一次活动）做一次，记在库里，不给归档里的做：拉起者的组（组的文件夹包含它的目录时；子代理总跟父会话）→ 包含它目录的最外层的组 → 用它的目录新建一个组。家目录和 `/` 的组（另一台机器不在线时，按路径认它的家目录）只收正好在那里的会话。之后每次归组都把落在别的组文件夹里的组并进最外层那个（子目录先建了组、父目录后建的，比如执行端的会话一次全看到）：自动归进去的会话移过去，空了的组删掉，有手动放进去的会话的组留着。在未归类（`workspace` 为 0）且不是你手动放过去的也再归一次；只有没目录的、远端 Desktop 里不在任何工作区的（`loose`）留在 0。自动归进别的机器的组的（执行端重新配对换了 ID；以前跨机器跟着拉起者归的）按自己的目录重归，子代理除外，它跟父会话（2026-11-10）。`POST /v1/internal/sessions` 开的托管会话当场归组，不等记录出现：拉起者的组包含它的目录就进那个组，否则按自己的目录（跨机器不再跟拉起者，2026-11-10）。手动移过的（`PATCH workspace`）不再自动动。
+- 归组（2026-11-08：组就是文件夹，`Workspace` 是组，不能手建）：会话第一次显示时（第一次活动）做一次，记在库里，不给归档里的做：拉起者的组（组的文件夹包含它的目录时；子代理总跟父会话）→ 包含它目录的最外层的组 → 用它的目录新建一个组。家目录和 `/` 的组（另一台机器不在线时，按路径认它的家目录）只收正好在那里的会话。之后每次归组都把落在别的组文件夹里的组并进最外层那个（子目录先建了组、父目录后建的，比如执行端的会话一次全看到）：自动归进去的会话移过去，空了的组删掉，有手动放进去的会话的组留着。在未归类（`workspace` 为 0）且不是你手动放过去的也再归一次；只有没目录的、远端 Desktop 里不在任何工作区的（`loose`）留在 0。自动归进别的机器的组的（执行端重新配对换了 ID；以前跨机器跟着拉起者归的）按自己的目录重归，子代理除外，它跟父会话（2026-11-10）。`channel.create` 开的托管会话当场归组，不等记录出现：拉起者的组包含它的目录就进那个组，否则按自己的目录（跨机器不再跟拉起者，2026-11-10）。手动移过的（`channel.update` 的 `_data.workspace`）不再自动动。
 - 人开的和挂着的（2026-11-10，`exec.md`“远端工作区”）：`Session.own` 由服务端算，是“人开的”的唯一依据。有 `launcher` 的：手动放过（拖出来、`detach`）才算；没有的：托管、且经创建开的（`openers` 表有它：网页“+”、终端里的 `ir new`、应用开的、`/clear`）。子代理、接管的（发消息接过来的）、发现的都不算。有 `launcher`、不是子代理、不是 `own` 的挂在拉起者下面（页面画）。
 - 推送只给页面会列的会话：本机的、`own` 的、有 `launcher` 的（挂着的；拉起者不在、归档了、是子代理或没列出就当人开的）、所在组列出来的（组里有没归档的人开会话，或本机的会话），子代理随父会话。远端没人开过的组里的会话不推送。服务端和页面用同一套规则（`session.standOf` 与 `tree.ts` 的 `standing`，共用 `internal/session/testdata/standing.json`，2026-11-10）。
 - 状态：`hosted` 托管；`elsewhere` 在别处运行，只读（能看状态和消息页，发消息回 409）；其余是磁盘上空闲的。别处退出后，发消息就接成托管会话（`--resume`），前提是没有别的进程在用（Claude：`sessions/` 里没有活着的同 ID 进程；dsh：`session.lock` 能拿到 flock；Codex：写锁）。现在只能接 Claude 的。
@@ -117,12 +111,7 @@ Iridium 自己的接口都在 `/v1/internal/` 下：Satori 规范的 internal �
 
 | 请求 | 正文 → 回答 | 说明 |
 |---|---|---|
-| `PATCH /v1/internal/workspaces/{id}` | `{name?}` → `{ok}` | 改名（`hidden` 删掉，2026-11-10） |
-| `POST /v1/internal/workspaces/{id}/split` | → `{ok}` | 按子文件夹拆开：组只留它文件夹里直接的会话，子文件夹里的按各自文件夹重新归组（子文件夹的子文件夹仍进它的组），以后也不再收子文件夹（`flat`）。从拉起者下面拖出来的仍按手动放进自己目录的组，不挂回去（2026-11-10）。只有面板和本机 |
-| `PUT /v1/internal/groups/order` | `{keys}` → `{ok}` | 组的顺序（拖动或菜单上移下移）：`keys` 是会话列表里每个组那一行的键（`w<id>`，一个组一行；以前的 `w<id>@<机器>`、`w0:<机器>` 留在库里无害，2026-11-10），依次排在前，没列的随后；携带状态 `places` 的 `groups`。只有面板和本机能改 |
-| `PATCH /v1/internal/folders/place` | `FolderPlace` → `{ok}` | 文件夹在组里的位置：`path` 是分组用的路径（本机绝对路径，或 `机器:路径`）；`order` 同会话的，0 去掉；`pinned` 置顶（排在组根下的会话上面）。不给的字段不变；携带状态 `places` 的 `order`、`pinned`。只有面板和本机能改 |
-| `PUT /v1/internal/colors` | `FolderColor` → `{ok}` | 给文件夹打颜色标签（`red`、`orange`、`yellow`、`green`、`blue`、`purple`），`color` 为空就去掉；携带状态 `colors`（只给面板）是全部。会话的标签用 `PATCH /v1/internal/sessions/{id}` 的 `color` |
-| `PATCH /v1/internal/sessions/{id}` | `SessionPatch` → `{ok}` | 只改覆盖层，不碰 agent 的文件：`name`（空串去掉；带 `byAgent` 是会话里的 agent 起的，会话里 agent 的改名这样发：去引号和句尾标点，不盖你起的名，盖不了回 409）、`pinned`、`archived`（归档或恢复，见上面的显示标记；挂在它下面的会话一路往下跟着归档或恢复，拖出来的不跟，`ir archive` 也是；2026-11-10）、`detach: true`（从拉起者下面拿出来：按自己的目录归组，最外层包含它的组，没有就新建，记成手动放的，此后 `own`）、`workspace`（移动，0 为未归类；移过就不再自动归类）、`order`（拖到的位置：列表按它排，代替最后活动时间，与 `updatedAt` 同为毫秒；0 去掉） |
+| `PATCH /v1/internal/guilds/{id}` | `GuildPatch{name?, position?, split?}` → `{ok}` | 文件夹组：`name` 改名；`position` 移到第几个（0 最前，和 `guilds` 的顺序一致；拖动或菜单上移下移）；`split` 按子文件夹拆开：组只留它文件夹里直接的会话，子文件夹里的按各自文件夹重新归组（子文件夹的子文件夹仍进它的组），以后也不再收子文件夹（`flat`），从拉起者下面拖出来的仍按手动放进自己目录的组。只有面板和本机 |
 | `GET /v1/internal/folders?path=` | → `Folders` | 选择器：只列文件夹，不列隐藏的，按名字排；`path` 为空或 `~` 是家目录。`parent` 为空表示到顶了 |
 | `POST /v1/internal/folders` | `NewFolder` → `{path}` | 在 `path` 里新建文件夹 `name`（不能以 `.` 开头、不能带 `/`）。已有回 409 |
 | `GET /v1/internal/machines/{id}/dsh/workspaces` | → `DshWorkspace[]` | 那台机器上 dsh 的工作区（DSH Desktop 侧边栏那份，按它的顺序，文件夹已不在的不列），读不懂时用它会话所在的文件夹代替，最近的在前；路径用 `/`。`sessions` 是其中列出的会话数（不算子代理、这边归档的、不同步的）。新会话选文件夹时列在最上面，见 `docs/exec.md`“远端 DSH” |
@@ -201,11 +190,9 @@ Iridium 自己的接口都在 `/v1/internal/` 下：Satori 规范的 internal �
 | 请求 | 正文 → 回答 | 说明 |
 |---|---|---|
 | `POST /v1/internal/sessions/{id}/queue/{input}/steer` | → `{ok}` | 这一条马上发，并进正在跑的回合（没有就开新回合） |
-| `PUT /v1/internal/sessions/{id}/queue/{input}` | `{text}` → `{ok}` | 改这一条 |
-| `DELETE /v1/internal/sessions/{id}/queue/{input}` | → `{ok}` | 删这一条 |
 | `POST /v1/internal/sessions/{id}/continue` | → `{ok}` | 放开暂停的队列：没有回合在跑就马上发，否则等这个回合结束 |
 
-不在队列里（已发、已删）：422 `no_such_input`。
+改这一条、删这一条：Satori 的 `message.update {channel_id, message_id, content | _data.text}`、`message.delete {channel_id, message_id}`，`message_id` 是 `message.create` 回的 ID；不在队列里（已发、已删）422 `no_such_message`。插话、继续仍是上面两条。
 
 ## 命令
 
@@ -278,7 +265,7 @@ agent 用 `ir sh <机器>[:目录] [--cwd 目录] [--timeout 2m] -- 命令`（`P
   - 审批：`allow`、`deny`、`always`。计划：`approve`、`reject`。
   - 选择题：每个问题一组（`group` 是问题序号），选项 `id` 是 `<问题>.<选项>`；`multi` 列出可多选的组。
 
-`POST /v1/internal/sessions/{id}/answer`：`CardAnswer`，`{card, option}` 或 `{card, choices: [...]}`（每组一个，多选组可多个）；选择题自己写的答案放 `words`（按组，空串是没写）；拒绝时可带 `message` → `CardReply{ok}`。卡片不是这个会话的 400；已答过或撤回 410。Satori 里是 `<button type="action" id="ask:…">`（`docs/satori.md`）。
+回答：`POST /v1/internal/button`（Satori 的，要带登录头），`{id: <卡片>, option}` 或 `{id, choices: [...]}`（每组一个，多选组可多个）；选择题自己写的答案放 `words`（按组，空串是没写）；拒绝时可带 `message` → `{}`。没有这张卡、已答过或撤回 422 `no_such_ask`。也可以一个一个按钮按（`id` 是 `<卡片>#<选项>`，见 `docs/satori.md`）。
 
 ## 推送
 
@@ -344,7 +331,7 @@ Web Push，总开关在配置 `push`，默认关。VAPID 密钥存在状态目�
 | 请求 | 正文 → 回答 | 说明 |
 |---|---|---|
 | `GET /v1/internal/pairing`、`PUT /v1/internal/pairing` | `PairWindow` | 配对窗口：`{open, until}`；`PUT {open, minutes?}` 开（默认 10 分钟，最多 60）或关。能批的人。`ir apps open [时长]`、`ir apps close`；网页“新建应用”一进去就开。hub 键 `pairing` |
-| `POST /v1/internal/pair` | `PairRequest` → `Pairing` | 不用登录。窗口关着 403 `pair_closed`；每来源（IP，IPv6 按 /64）最多 4 个待批、总共 20 个，多了 403 `too_many_pending`；名字不合法 422 `bad_name`。回配对码 `code` 和 `request` |
+| `POST /v1/internal/pair` | `PairRequest` → `Pairing` | 不用登录。窗口关着 403 `pair_closed`（本机 socket 来的不看窗口，`ir pair` 不给地址时）；带 `login {id, name?}` 的，批准时一并建好这个登录、已批准（已有的不动），ID 不合法 422 `bad_login`；每来源（IP，IPv6 按 /64）最多 4 个待批、总共 20 个，多了 403 `too_many_pending`；名字不合法 422 `bad_name`。回配对码 `code` 和 `request` |
 | `GET /v1/internal/pair/{request}` | → `PairState` | `pending`、`allowed`（带 `token`，只给一次）、`denied`、`expired`；不认识的 422 `no_such_request` |
 
 申请带 `wants`（想要的权限），批准时只能少给（422 `too_wide`）。没带 `wants`、报了 agent 和 `home` 的（`ir join`）默认范围是自己的家目录 `应用名:家目录`（决定 17），批准时改名的跟着改；其余默认全部。`machineId` 和主机的一样就去掉它报的 agent。批准的答复可带 `agentsOff`：一开始就关掉的 agent。名字已有应用时是 `app_update`：允许即给那个应用换新 TOKEN，旧的作废、连接断开，用量和权限照旧；答复带 `name` 则作为新应用、用这个名字接入。
@@ -362,7 +349,7 @@ Web Push，总开关在配置 `push`，默认关。VAPID 密钥存在状态目�
 
 等一个人决定的事，一个队列。申请（`app_join`、`app_update`、`app_change`、`login_join`、`invite`、`secret_set`、`secret_use`）内存里存 10 分钟，主机和网页登录看得到。另有：
 
-- `ask`：会话开着的提问、审批、计划，`id` 和 `card.id` 一样（`ask:<会话>:<请求>`），带 `session`、`card`、`origin`（发起这个回合的应用或登录）。只给能用这个会话的（范围加 agent，同 `using`）。用会话的 `POST /v1/internal/sessions/{id}/answer` 回答，不走 `POST /v1/internal/needs/{id}`。
+- `ask`：会话开着的提问、审批、计划，`id` 和 `card.id` 一样（`ask:<会话>:<请求>`），带 `session`、`card`、`origin`（发起这个回合的应用或登录）。只给能用这个会话的（范围加 agent，同 `using`）。用 `POST /v1/internal/button` 回答，不走 `POST /v1/internal/needs/{id}`。
 - `share`：分享给这个网页登录的东西（`share`），只给它自己，存 24 小时；`DELETE /v1/internal/needs/{id}` 收起。
 
 网页在应用管理和侧栏“需要你”里画成卡片（会话里的提问仍在会话里画，不重复）；`ir needs`、`ir allow <id>`、`ir deny <id>`。

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -338,13 +339,28 @@ func (x *Index) Workspaces() ([]api.Workspace, error) {
 	if err != nil {
 		return nil, err
 	}
+	keys, err := x.o.Store.GroupOrder()
+	if err != nil {
+		return nil, err
+	}
 	out := make([]api.Workspace, 0, len(ws))
 	for _, w := range ws {
 		only := w.Path == "/" || w.Path == x.o.Home || x.remoteTop(w.Path) || w.Flat
 		out = append(out, api.Workspace{ID: w.ID, Name: w.Name, Path: w.Path, Only: only})
 	}
+	// In the order they were dragged to; those never dragged after them, as made.
+	rank := func(w api.Workspace) int {
+		if i := slices.Index(keys, groupKey(w.ID)); i >= 0 {
+			return i
+		}
+		return len(keys)
+	}
+	slices.SortStableFunc(out, func(a, b api.Workspace) int { return rank(a) - rank(b) })
 	return out, nil
 }
+
+// groupKey is a group's key in the stored order.
+func groupKey(id int64) string { return "w" + strconv.FormatInt(id, 10) }
 
 // CreateWorkspace makes the group of folder path (absolute); name "" is the folder's name. It
 // takes no session already grouped. Sessions make their groups (classify, GroupFor); this is for
@@ -373,68 +389,124 @@ func (x *Index) RenameWorkspace(id int64, name string) error {
 	return nil
 }
 
-// OrderGroups lists the groups' rows of keys in that order, dragged so on the page, and carries it.
-func (x *Index) OrderGroups(keys []string) error {
-	if len(keys) > 10000 {
-		return errors.New("too many groups")
+// MoveGroup puts group id at position among the groups (0 first, as Workspaces lists them).
+func (x *Index) MoveGroup(id int64, position int) error {
+	ws, err := x.Workspaces()
+	if err != nil {
+		return err
 	}
+	keys := make([]string, 0, len(ws))
+	found := false
+	for _, w := range ws {
+		if w.ID == id {
+			found = true
+			continue
+		}
+		keys = append(keys, groupKey(w.ID))
+	}
+	if !found {
+		return store.ErrNoWorkspace
+	}
+	keys = slices.Insert(keys, max(0, min(position, len(keys))), groupKey(id))
 	if err := x.o.Store.SetGroupOrder(keys); err != nil {
 		return err
 	}
-	x.publishPlaces()
+	x.publishGuilds()
 	return nil
 }
 
-// Places is where the rows of the list were put by hand: the carried state "places".
-func (x *Index) Places() (api.Places, error) {
+// Marks are the folders marked by hand: colour, pin, the key it was dragged to.
+func (x *Index) Marks() ([]api.FolderMark, error) {
 	st := x.o.Store
-	groups, err := st.GroupOrder()
-	if err != nil {
-		return api.Places{}, err
-	}
 	order, err := st.FolderOrder()
 	if err != nil {
-		return api.Places{}, err
+		return nil, err
 	}
 	pinned, err := st.FolderPins()
-	if groups == nil {
-		groups = []string{}
+	if err != nil {
+		return nil, err
 	}
-	if pinned == nil {
-		pinned = []string{}
+	colors, err := st.FolderColors()
+	if err != nil {
+		return nil, err
 	}
-	return api.Places{Groups: groups, Order: order, Pinned: pinned}, err
+	m := map[string]*api.FolderMark{}
+	at := func(p string) *api.FolderMark {
+		if m[p] == nil {
+			m[p] = &api.FolderMark{Path: p}
+		}
+		return m[p]
+	}
+	for p, o := range order {
+		at(p).Order = o
+	}
+	for _, p := range pinned {
+		at(p).Pinned = true
+	}
+	for p, c := range colors {
+		at(p).Color = api.Color(c)
+	}
+	out := make([]api.FolderMark, 0, len(m))
+	for _, f := range m {
+		out = append(out, *f)
+	}
+	slices.SortFunc(out, func(a, b api.FolderMark) int { return strings.Compare(a.Path, b.Path) })
+	return out, nil
 }
 
-// PlaceFolder sets where the folder of p.Path is, dragged or pinned so on the page, and carries it.
-func (x *Index) PlaceFolder(p api.FolderPlace) error {
-	if p.Path == "" || len(p.Path) > 4096 {
+// MarkFolder marks the folder of path (as grouped) as p says, and carries it.
+func (x *Index) MarkFolder(path string, p api.FolderPatch) error {
+	if path == "" || len(path) > 4096 {
 		return errors.New("no folder path")
 	}
+	if p.Color != nil {
+		if !validColor(*p.Color) {
+			return ErrColor
+		}
+		if !filepath.IsAbs(path) {
+			return errors.New("a colour goes on a folder here (an absolute path)")
+		}
+	}
+	st := x.o.Store
 	if p.Order != nil {
-		if err := x.o.Store.SetFolderOrder(p.Path, *p.Order); err != nil {
+		if err := st.SetFolderOrder(path, *p.Order); err != nil {
 			return err
 		}
 	}
 	if p.Pinned != nil {
-		if err := x.o.Store.SetFolderPinned(p.Path, *p.Pinned); err != nil {
+		if err := st.SetFolderPinned(path, *p.Pinned); err != nil {
 			return err
 		}
 	}
-	x.publishPlaces()
+	if p.Color != nil {
+		if err := st.SetFolderColor(filepath.Clean(path), string(*p.Color)); err != nil {
+			return err
+		}
+	}
+	x.publishGuilds()
 	return nil
 }
 
-func (x *Index) publishPlaces() {
+// Guilds is the carried state "guilds".
+func (x *Index) Guilds() (api.Guilds, error) {
+	ws, err := x.Workspaces()
+	if err != nil {
+		return api.Guilds{}, err
+	}
+	marks, err := x.Marks()
+	return api.Guilds{Guilds: ws, Folders: marks}, err
+}
+
+func (x *Index) publishGuilds() {
 	if x.o.Hub == nil {
 		return
 	}
-	p, err := x.Places()
+	g, err := x.Guilds()
 	if err != nil {
-		x.o.Logf("discover: places: %v", err)
+		x.o.Logf("discover: guilds: %v", err)
 		return
 	}
-	x.o.Hub.Set("places", p)
+	x.o.Hub.Set("guilds", g)
 }
 
 // DeleteWorkspace drops a group; its sessions are grouped again by their folders (classify).

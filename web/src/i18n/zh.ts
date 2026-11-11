@@ -428,6 +428,7 @@ export const zh = {
   "confirm.ownerElsewhere": "带 Claude：要在带 Claude 的登录上允许",
   "confirm.pair": "{name} 请求接入",
   "confirm.pairCode": "配对码 {code}",
+  "confirm.pairLogin": "登录：{login}，一并批准",
   "confirm.pairHint": "与那台电脑上显示的配对码一致再允许。允许后 TOKEN 只发给它",
   "confirm.pairOwner": "本人的电脑",
   "confirm.pairOwnerHint": "带 Claude，用那里本人的登录",

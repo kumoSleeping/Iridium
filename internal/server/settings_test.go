@@ -65,16 +65,15 @@ func TestSettings(t *testing.T) {
 	}
 
 	// A new session starts in the agent's default mode, now plan.
-	var created api.NewSessionReply
-	l.want(200, "web", "POST", "/v1/internal/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "hi"}, &created)
-	l.waitReply("web", created.ID, "ok: hi")
+	created := l.create(200, "web", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "hi"})
+	l.waitReply("web", created, "ok: hi")
 	var ss api.SessionState
-	l.want(200, "web", "GET", "/v1/internal/sessions/"+created.ID, nil, &ss)
+	l.want(200, "web", "GET", "/v1/internal/sessions/"+created, nil, &ss)
 	if ss.Mode != "plan" {
 		t.Errorf("new session's mode %q, want plan", ss.Mode)
 	}
 	// Its agent is told the user's language.
-	if b, err := os.ReadFile(filepath.Join(state, "hold", created.ID, "system-prompt.md")); err != nil || !strings.Contains(string(b), "web settings: Chinese.") {
+	if b, err := os.ReadFile(filepath.Join(state, "hold", created, "system-prompt.md")); err != nil || !strings.Contains(string(b), "web settings: Chinese.") {
 		t.Errorf("system prompt %q %v", b, err)
 	}
 

@@ -334,6 +334,7 @@ function PairCard({ c }: { c: Need }) {
                 )}
               </>
             )}
+            {m?.login && <p className="m-0 text-xs text-ink-3">{t("confirm.pairLogin", { login: m.login.name || m.login.id })}</p>}
             {carried.length > 0 && <Carried agents={carried} off={off} setOff={setOff} />}
             {(!update || asNew) && c.wants && <Wants wants={c.wants} struck={struck} setStruck={setStruck} />}
             {canOwn && (

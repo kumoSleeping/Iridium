@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"encoding/json"
 	"encoding/base64"
 	gomime "mime"
 	"net/http"
@@ -90,7 +91,7 @@ func fileElements(app, login, id string, fs []api.FileRef) string {
 // user.name the tag the agent saw), else the agent.
 func (s *Service) messageOf(c Caller, ss api.Session, b api.Block, guild *Guild) Message {
 	login := c.Login
-	m := Message{ID: b.At, Content: blockContent(b, c.App, login, ss.ID, s.b.Mask), Channel: channelOf(ss), Guild: guild, CreatedAt: b.Time}
+	m := Message{ID: b.At, Content: blockContent(b, c.App, login, ss.ID, s.b.Mask), Channel: s.channelMasked(ss), Guild: guild, CreatedAt: b.Time}
 	switch {
 	case b.FromLogin != "":
 		m.User = &User{ID: b.FromLogin, Name: b.From}
@@ -187,7 +188,7 @@ func (s *Service) inputMessage(c Caller, st *api.SessionState, id string, none e
 	for _, q := range st.Queue {
 		if q.ID == id {
 			u := &User{ID: cmp.Or(q.FromLogin, q.FromTerminal), Name: q.From}
-			return Message{ID: id, Content: Escape(q.Text), Channel: channelOf(st.Session), Guild: s.guildOf(st.Session), User: u, CreatedAt: q.At}, nil
+			return Message{ID: id, Content: Escape(q.Text), Channel: s.channelMasked(st.Session), Guild: s.guildOf(st.Session), User: u, CreatedAt: q.At}, nil
 		}
 	}
 	return nil, none
@@ -201,6 +202,9 @@ func (s *Service) messageList(_ context.Context, c Caller, body []byte) (any, er
 		Direction string `json:"direction"`
 		Limit     int    `json:"limit"`
 		Order     string `json:"order"`
+		Data      struct {
+			Blocks bool `json:"blocks"`
+		} `json:"_data"`
 	}
 	if err := decode(body, &req); err != nil {
 		return nil, err
@@ -246,9 +250,13 @@ func (s *Service) messageList(_ context.Context, c Caller, body []byte) (any, er
 	}
 	out := BidiList[Message]{Data: []Message{}, XData: &PageData{}}
 	guild := s.guildOf(st.Session)
+	var blocks []api.Block
 	add := func(bs []api.Block) {
 		for _, b := range bs {
 			out.Data = append(out.Data, s.messageOf(c, st.Session, b, guild))
+			if req.Data.Blocks {
+				blocks = append(blocks, s.maskBlock(b))
+			}
 		}
 	}
 	limit := req.Limit
@@ -294,8 +302,25 @@ func (s *Service) messageList(_ context.Context, c Caller, body []byte) (any, er
 	}
 	if req.Order == "desc" {
 		slices.Reverse(out.Data)
+		slices.Reverse(blocks)
+	}
+	if req.Data.Blocks {
+		out.XData.Blocks = nonNil(blocks)
 	}
 	return out, nil
+}
+
+// maskBlock is b with the credentials' values masked wherever they are in it.
+func (s *Service) maskBlock(b api.Block) api.Block {
+	raw, err := json.Marshal(b)
+	if err != nil {
+		return b
+	}
+	var out api.Block
+	if json.Unmarshal([]byte(s.b.Mask(string(raw))), &out) != nil {
+		return api.Block{At: b.At, Kind: b.Kind, Time: b.Time}
+	}
+	return out
 }
 
 // cutBefore is where to cut bs so that its last limit messages are kept, at a line's start: ok
@@ -429,7 +454,7 @@ func (s *Service) sendOne(ctx context.Context, c Caller, st *api.SessionState, e
 			ss = nst.Session
 		}
 	}
-	return []Message{{ID: r.Input, Content: String(els), Channel: channelOf(ss), Guild: s.guildOf(ss),
+	return []Message{{ID: r.Input, Content: String(els), Channel: s.channelMasked(ss), Guild: s.guildOf(ss),
 		User: &User{ID: c.Login, Name: c.LoginName}, Data: r}}, nil
 }
 
@@ -547,4 +572,54 @@ func (s *Service) serveProxy(w http.ResponseWriter, r *http.Request, raw string)
 		return
 	}
 	s.b.ServeFile(w, r, p)
+}
+
+// messageUpdate changes the words of a message sent while it waits in the queue (message.create's
+// id); once the agent took it, it stays as it is (422 no_such_message).
+func (s *Service) messageUpdate(_ context.Context, c Caller, body []byte) (any, error) {
+	var req struct {
+		ChannelID string `json:"channel_id"`
+		MessageID string `json:"message_id"`
+		Content   string `json:"content"`
+		Data      struct {
+			Text *string `json:"text"`
+		} `json:"_data"`
+	}
+	if err := decode(body, &req); err != nil {
+		return nil, err
+	}
+	text := Plain(Parse(req.Content), nil)
+	if req.Data.Text != nil {
+		text = *req.Data.Text
+	}
+	if strings.TrimSpace(text) == "" {
+		return nil, bad("content: words")
+	}
+	return s.queued(c, req.ChannelID, req.MessageID, &text)
+}
+
+// messageDelete takes a message sent back while it waits in the queue.
+func (s *Service) messageDelete(_ context.Context, c Caller, body []byte) (any, error) {
+	var req struct {
+		ChannelID string `json:"channel_id"`
+		MessageID string `json:"message_id"`
+	}
+	if err := decode(body, &req); err != nil {
+		return nil, err
+	}
+	return s.queued(c, req.ChannelID, req.MessageID, nil)
+}
+
+func (s *Service) queued(c Caller, channel, id string, text *string) (any, error) {
+	if id == "" {
+		return nil, bad("message_id")
+	}
+	st, err := s.channel(c, channel)
+	if err != nil {
+		return nil, err
+	}
+	if !slices.ContainsFunc(st.Queue, func(q api.Queued) bool { return q.ID == id }) {
+		return nil, refuse(http.StatusUnprocessableEntity, "no_such_message", "not waiting in the queue: "+id)
+	}
+	return struct{}{}, s.b.EditQueued(c, st.ID, id, text)
 }

@@ -102,7 +102,7 @@ func TestAgentsOffAndHomeScope(t *testing.T) {
 		t.Fatalf("marked off: %+v", c.Agents)
 	}
 	var e api.Error
-	if l.want(403, "socket", "POST", "/v1/internal/sessions", api.NewSession{Agent: api.AgentDsh, Machine: "box", Cwd: "/"}, &e); !strings.Contains(e.Message, "turned off") {
+	if l.wantSat(403, "socket", "channel.create", createBody(api.NewSession{Agent: api.AgentDsh, Machine: "box", Cwd: "/"}), &e); !strings.Contains(e.Message, "turned off") {
 		t.Fatalf("started though off: %+v", e)
 	}
 	// On again: no longer refused for being off.
@@ -110,7 +110,7 @@ func TestAgentsOffAndHomeScope(t *testing.T) {
 	if c := box(); c.Agents[0].Off {
 		t.Fatalf("on again: %+v", c.Agents)
 	}
-	if code := l.do("socket", "POST", "/v1/internal/sessions", api.NewSession{Agent: api.AgentDsh, Machine: "box", Cwd: "/"}, nil); code == 403 {
+	if code := l.sat("socket", "channel.create", createBody(api.NewSession{Agent: api.AgentDsh, Machine: "box", Cwd: "/"}), nil); code == 403 {
 		t.Fatal("refused once on again")
 	}
 }

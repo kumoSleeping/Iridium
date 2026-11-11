@@ -10,19 +10,23 @@
 | `login.user.id`（`Satori-User-ID`） | 登录 ID（应用里的），名字是登录的名字 |
 | `login.sn` | 每条链路按顺序给；HTTP 的 `login.get` 按登录的先后 |
 | `login.adapter` | `iridium` |
-| `channel` | 会话，`id` 即会话 ID，`type` 0，`parent_id` 是子 agent 的上级会话 |
+| `channel` | 会话，`id` 即会话 ID，`type` 0，`parent_id` 是它所在的上一层：子 agent 的上级、派出它的拉起者（没被拖出来时），否则它的文件夹；会话所在的文件夹是分类频道，`type` 2，`id` 是 `folder:<分组用的路径>`（本机绝对路径，或 `机器:路径`），`_data` 是 `FolderMark`（`path`、颜色、置顶、拖到的位置） |
 | `guild` | 网页的文件夹组（`id` 是组号）；不在组里的会话归 `loose`（未分组） |
 | `user` | agent（`claude`、`codex`…，`is_bot`），以及说话的应用、登录、主机 |
 | `message` | 记录里的一块（人说的、agent 说的、思考、工具调用、系统行），`id` 是块的位置 `<偏移>.<序号>`；提问是 `ask:<会话>:<请求>` |
 
-鉴权：应用用 `Authorization: Bearer <应用 TOKEN>`（过 gate）。网页也是应用（一视同仁）：浏览器凭 cookie，`Satori-Platform: ir_web`、`Satori-User-ID: <登录 ID>`；没开公网时主机自己的页面是平台 `local` 的登录 `local`。这两种连接只代表这一个登录。会话 TOKEN 403 `no_login`。`Satori-Platform` 不是本应用 ID、没有 `Satori-User-ID`：403 `no_such_login`。新登录第一次说话：403 `login_pending`，产生“登录加入”需要（和 `/v1/internal/*` 一样）。
+鉴权：应用用 `Authorization: Bearer <应用 TOKEN>`（过 gate）。网页也是应用（一视同仁）：浏览器凭 cookie，`Satori-Platform: ir_web`、`Satori-User-ID: <登录 ID>`；没开公网时主机自己的页面是平台 `local` 的登录 `local`。这两种连接只代表这一个登录。会话 TOKEN 403 `no_login`。`Satori-Platform` 不是本应用 ID、没有 `Satori-User-ID`：403 `no_such_login`。新登录第一次说话：403 `login_pending`，产生“登录加入”需要（和 `/v1/internal/*` 一样）；配对时带上的登录（`ir pair --login`，默认 `bot`）随应用一并批准，READY 里一开始就有。
 
 ## HTTP `POST /v1/{资源}.{方法}`
 
 - `message.create {channel_id, content}`：发进会话（插入正在跑的回合），发送者显示为 `应用·登录`。`<img>`/`<file>` 的 `src` 是本登录在这个会话 `upload.create` 得到的 `internal:` 地址时，作为附件；`data:` 地址存成上传的文件再作附件；其余元素按意思转成文字。顶层的 `<message>` 各发一条。回 `[Message]`，`id` 是这条输入的 ID，拿去 `message.get` 能取到它（进了记录取记录里那块，还在排队取排队里的）。
 - `message.get`、`message.list`：记录的每一块是一条消息，内容见下面“记录”。`message.list` 是 BidiList，翻页标记是记录里行的偏移；`limit` 按块数、在行首截，可能略多；没有 `next` 时只能 `before`。多一个 `_data {start, end, more}`：这页从哪行起、读时记录到哪（下次 `direction: after` 从这里取新写的）、前面还有没有。`direction: after` 读到记录末尾时不带 `next`。网页读记录也走它。
-- `channel.get`、`channel.list {guild_id?, next?, _data?: {all}}`（不给 `guild_id` 是全部；不列归档和子 agent，`_data.all` 都列）、`guild.get`、`guild.list`（只列范围里的）、`login.get`、`user.get`。`channel.get`、`channel.list` 的每个 channel 带 `_data`：会话本身（同 `GET /v1/internal/sessions` 的一项，名字、标题、最后一句打码）；`guild.get`、`guild.list` 的 guild 带 `_data`：文件夹组（`path`、`only`），`loose` 没有。网页拿不到携带状态 `workspaces` 时用 `guild.list` 的 `_data`。
-- `channel.update {channel_id, data?: {name}, _data?: {archived}}` 改名，`_data.archived` 归档或恢复；`channel.delete {channel_id}` 归档（agent 停下，记录不删）。要能用这个会话。agent 改的名不盖人起的（409 `named`）。
+- `channel.get`、`channel.list {guild_id?, next?, _data?: {all}}`（不给 `guild_id` 是全部；先列文件夹，再列会话；不列归档和子 agent，`_data.all` 都列）、`guild.get`、`guild.list`（只列范围里的）、`login.get`、`user.get`。`channel.get`、`channel.list` 的每个 channel 带 `_data`：会话本身（同 `GET /v1/internal/sessions` 的一项，名字、标题、最后一句打码）；`guild.get`、`guild.list` 的 guild 带 `_data`：文件夹组（`path`、`only`），`loose` 没有。网页拿不到携带状态 `guilds` 时用 `guild.list` 的 `_data`。
+- `channel.create {guild_id?, data?: {name, parent_id}, _data: {agent, cwd, text?, model?, mode?, effort?, preset?}}`（2026-11-11）：开一个会话。`guild_id` 是文件夹组（`self` 自己的；不给或 `loose` 按目录归组），`data.parent_id` 是拉起者（不给是发话的会话自己，`ir` 开的就挂在自己下面），`data.name` 是名字；`_data` 是 agent 怎么起。回这个会话的 Channel（同 `channel.get`），随后照常有 `channel-added`。`ir api channel.create` 先印 ID，带 `text` 等 agent 接了再返回，`--wait` 等到这一回合结束。
+- `channel.update {channel_id, data?: {name, parent_id}, _data?: {archived, pinned, color, order, workspace}}` 改名，`_data.archived` 归档或恢复（挂在它下面的一起），`pinned` 置顶，`color` 颜色标签（`red`…`purple`，空串去掉），`order` 拖到的位置（毫秒，0 去掉），`workspace` 手动放进那个组（0 未归类）；`data.parent_id` 设成 `null` 或它自己的文件夹，就从拉起者下面拿出来（此后算人开的），别的值 422 `parent_fixed`。文件夹（`folder:…`）只收 `_data.color`（本机的文件夹）、`pinned`、`order`，只有面板和本机能改。
+- `message.update {channel_id, message_id, content | _data.text}`、`message.delete {channel_id, message_id}`（2026-11-11）：改、撤回还在排队的一条（`message_id` 是 `message.create` 回的 ID）；已经交给 agent 的 422 `no_such_message`。
+- `message.list` 带 `_data.blocks: true` 时，回答的 `_data.blocks` 另给这一页 Iridium 自己的块（`api.Block`，打码），`ir` 的 `--wait` 靠它读回复。
+- `channel.delete {channel_id}` 归档（agent 停下，记录不删）。要能用这个会话。agent 改的名不盖人起的（409 `named`）。
 - `upload.create`：一个 multipart，带字段 `channel_id`，每个文件回 `internal:{应用}/{登录}/files/{会话}/{ref}`。网页用分块的 `/v1/internal/uploads`。
 - `POST /v1/meta`：本应用已批准的登录，`proxy_urls` 为空。`/v1/meta/*`（webhook）不做。
 - `GET /v1/proxy/internal:…`：只取本应用登录的文件。不是地址 400，不是本应用的登录 404，别的地址 403。
@@ -53,7 +57,7 @@
 | 结果（调用在别页） | `<iridium:result id length error>结果 <iridium:image/>…</iridium:result>` |
 | 系统行 | `<iridium:system event from terminal id length>文字 <iridium:compact auto before after ms/></iridium:system>` |
 
-- `length`：文字（或参数）被截到 2000 字时全文的长度，全文用 `/v1/internal/sessions/{id}/block?at=`；`message.get` 直接给全文。
+- `length`：文字（或参数）被截到 2000 字时全文的长度，`message.get` 给全文。
 - `<iridium:image mime width height unsent/>`：结果给模型的图，第 n 个用 `/v1/internal/sessions/{id}/image?at=<结果的 at>&n=`。
 - 文件元素还带 `path`、`size`、`mime`、`mtime`、`thumb`、`sha256`，图片带 `width`、`height`。没有登录的调用方不带文件。
 - 文字、参数、结果里的凭据打码。`message-created` 事件照旧只发 agent 的话，内容和这条块的一样。
@@ -62,7 +66,7 @@
 
 照规范的 internal 路由（advanced/internal.md）：Iridium 自己的接口全在 `/v1/internal/<路径>`（`docs/api.md`），给 Satori 没有的东西：工具块、待发队列、模型和模式、文件夹组、设置、应用管理……带了 `Satori-Platform`、`Satori-User-ID` 就必须是调用者自己的。主机的 `ir` 经 unix socket 走同样的路径。网页只用这里和标准方法。
 
-`message.create` 多收一个 `_data`：`{steer?, attachments?, caller?}`（插话还是排队、上传好的引用），回答的 Message 也带 `_data`，是发送的结果（同 `POST /v1/internal/sessions/{id}/send` 的回答）。应用发的一律插话。
+`message.create` 多收一个 `_data`：`{steer?, attachments?, caller?}`（插话还是排队、上传好的引用），回答的 Message 也带 `_data`，是发送的结果（`api.SendReply`：`input`、`queued`、`session`、`command`、`desktop`）。应用发的一律插话。
 
 ## WebSocket `/v1/events`
 
@@ -106,12 +110,22 @@
 
 - 资源不存在回 422 而不是 404（`/v1/internal` 也一样）。
 - 按钮反过来：`interaction/button` 是登录按了 Iridium 发的按钮之后发出的；按下本身走 `/v1/internal/button`。
-- 没有 `guild-*`、`login-updated` 事件。`channel.update` 只能改名，`channel.delete` 是归档（不删记录）。
+- 没有 `guild-*`、`login-updated` 事件。`channel.create` 开的是会话（agent 起来），不能建空频道；`channel.update` 只改名字、位置和 Iridium 自己的（`_data`），`channel.delete` 是归档（不删记录）；文件夹（分类频道）由会话所在的目录生出，不能建也不能删。没有 `guild.update`：组的改名、顺序、拆开是 `PATCH /v1/internal/guilds/{id}`。
 - 没有 META 信令、webhook、`proxy_urls`。
 - 自定义 op：6 WATCH、7 STATE（见上），只给网页和主机的连接。
 - 发起登录不叫 `referrer`，放在 `_data.origin`，目前是应用 ID。服务端已按回合记下发起的登录（agent 的 `ir` 按它算权限），事件里还没带出来。
 - 权限：每个登录按“登录的 ∩ 应用的”权限；范围外的会话（channel）和文件夹组（guild）看不见。
 - `message.create` 里的 `<message>` 各发一条；`data:` 资源存成上传的文件；`https:` 资源不下载，转成文字。
+
+## 接 Koishi 等框架
+
+Koishi（`adapter-satori`）、NoneBot（`nonebot-adapter-satori`）、satori-python 这类客户端把登录当作 bot 自己：会话是频道，agent（`claude`…）和人是频道里的用户，bot 用 `message.create` 回话，前端显示为 `应用·登录`。
+
+```
+ir pair --name koishi --env ~/koishi/.env:IR_TOKEN   # 本机；网页上允许一次，连同登录 bot
+```
+
+Koishi 的 `koishi.yml`：`adapter-satori` 的 `endpoint` 是打印出的地址（本机 `http://127.0.0.1:7810`，不带 `/v1`），`token: ${{ env.IR_TOKEN }}`。命令要带前缀（频道 `type` 0，按群聊）。
 
 ## 还没做
 

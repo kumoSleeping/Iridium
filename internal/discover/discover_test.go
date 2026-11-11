@@ -468,17 +468,42 @@ func TestClassification(t *testing.T) {
 	if ws, _ := r.x.Workspaces(); len(ws) != 2 {
 		t.Errorf("workspaces: %+v", ws)
 	}
-	r.x.publishWorkspaces()
-	var carried []api.Workspace
-	json.Unmarshal(r.hub.Get("workspaces"), &carried)
+	r.x.publishGuilds()
+	var carried api.Guilds
+	json.Unmarshal(r.hub.Get("guilds"), &carried)
 	// By name and path, not place: the groups of /w and /somewhere/else are made in the order
 	// the scan meets E and F.
 	byPath := map[string]string{}
-	for _, w := range carried {
+	for _, w := range carried.Guilds {
 		byPath[w.Path] = w.Name
 	}
-	if len(carried) != 2 || byPath["/w"] != "w" || byPath["/somewhere/else"] != "else" {
-		t.Errorf("carried workspaces: %s", r.hub.Get("workspaces"))
+	if len(carried.Guilds) != 2 || byPath["/w"] != "w" || byPath["/somewhere/else"] != "else" {
+		t.Errorf("carried guilds: %s", r.hub.Get("guilds"))
+	}
+	// A group moved goes there in Workspaces and the carried state; a folder marked is carried.
+	last := carried.Guilds[1].ID
+	if err := r.x.MoveGroup(last, 0); err != nil {
+		t.Fatal(err)
+	}
+	if ws, _ := r.x.Workspaces(); ws[0].ID != last {
+		t.Errorf("moved first: %+v", ws)
+	}
+	if err := r.x.MoveGroup(last, 9); err != nil {
+		t.Fatal(err)
+	}
+	if ws, _ := r.x.Workspaces(); ws[1].ID != last {
+		t.Errorf("moved last: %+v", ws)
+	}
+	red, yes, key := api.Color("red"), true, 5.0
+	if err := r.x.MarkFolder("/w/a", api.FolderPatch{Color: &red, Pinned: &yes, Order: &key}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.x.MarkFolder("mac:/x", api.FolderPatch{Color: &red}); err == nil {
+		t.Error("a colour on a folder at another machine")
+	}
+	json.Unmarshal(r.hub.Get("guilds"), &carried)
+	if len(carried.Folders) != 1 || carried.Folders[0] != (api.FolderMark{Path: "/w/a", Color: red, Pinned: true, Order: 5}) || carried.Guilds[1].ID != last {
+		t.Errorf("carried marks: %s", r.hub.Get("guilds"))
 	}
 }
 

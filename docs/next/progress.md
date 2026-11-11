@@ -282,7 +282,7 @@
 
 还没做（以后）：
 - 需要队列里没有会话的提问、审批、计划（网页照旧在会话里显示；Satori 里是按钮）。
-- 分享菜单；机器并进应用（`/api/machines` 还在）；每个应用的 agent 开关；发起登录的持久化；Satori 的事件存库、`channel.create`、`login-*`/`channel-*` 事件。
+- 分享菜单；机器并进应用（`/api/machines` 还在）；每个应用的 agent 开关；发起登录的持久化；Satori 的事件存库、`login-*`/`channel-*` 事件。
 - 剩下约 25 处 404 改 422。
 - QQ 桥重写成 Satori 客户端；dsh 插件改用新的 `shell` 字段。
 - 注意：没带旧 shell 字段的老执行端现在算命令行关，要用 `ir join --shell` 重新接一次。

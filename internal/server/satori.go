@@ -331,7 +331,7 @@ func (b satoriBackend) Send(ctx context.Context, c satori.Caller, id, text strin
 		refs = append(refs, f.Ref)
 	}
 	req := api.Send{Text: text, Attachments: refs, Caller: o.Caller}
-	// ir: as POST /v1/internal/sessions/{id}/send has it. It steers unless told to queue; an
+	// ir: it steers unless told to queue; an
 	// agent's always steers (queued, it would wait for a person).
 	if _, ok := c.Self.(caller); ok {
 		req.Steer = o.Steer == nil || *o.Steer || cl.agent || cl.socket && cl.session != "" || !cl.socket
@@ -401,6 +401,14 @@ func (b satoriBackend) Fault(err error) (int, string) {
 	switch {
 	case errors.Is(err, session.ErrNotFound):
 		return http.StatusUnprocessableEntity, "no_such_session"
+	case errors.Is(err, store.ErrNoInput):
+		return http.StatusUnprocessableEntity, "no_such_message"
+	case errors.Is(err, store.ErrNoWorkspace):
+		return http.StatusUnprocessableEntity, "no_such_guild"
+	case errors.Is(err, discover.ErrColor):
+		return http.StatusBadRequest, "bad_request"
+	case errors.Is(err, access.ErrManage):
+		return http.StatusForbidden, "no_permission"
 	case errors.Is(err, transcript.ErrNoBlock):
 		return http.StatusUnprocessableEntity, "no_such_message"
 	case errors.Is(err, session.ErrGone):
@@ -421,9 +429,45 @@ func (b satoriBackend) Fault(err error) (int, string) {
 		return http.StatusForbidden, "outside"
 	case errors.Is(err, files.ErrTooLarge), errors.Is(err, files.ErrTooLong):
 		return http.StatusRequestEntityTooLarge, "too_large"
-	case errors.Is(err, session.ErrBadRequest), errors.Is(err, files.ErrBad), errors.Is(err, files.ErrNotFile),
+	case errors.As(err, new(*createError)), errors.Is(err, session.ErrBadRequest), errors.Is(err, files.ErrBad), errors.Is(err, files.ErrNotFile),
 		errors.Is(err, pathsafe.ErrRelative), errors.Is(err, files.ErrChecksum):
 		return http.StatusBadRequest, "bad_request"
 	}
 	return http.StatusInternalServerError, "internal"
+}
+
+func (b satoriBackend) Create(ctx context.Context, c satori.Caller, req api.NewSession) (string, error) {
+	return b.s.createAs(ctx, callerAs(c), req)
+}
+
+func (b satoriBackend) Marks() []api.FolderMark {
+	if b.s.Discover == nil {
+		return nil
+	}
+	m, err := b.s.Discover.Marks()
+	if err != nil {
+		b.s.logf("server: folder marks: %v", err)
+	}
+	return m
+}
+
+// MarkFolder: the panels' and the host's, as a group's name.
+func (b satoriBackend) MarkFolder(c satori.Caller, path string, p api.FolderPatch) error {
+	if !callerAs(c).CanManage() {
+		return access.ErrManage
+	}
+	if b.s.Discover == nil {
+		return errNotIndexed
+	}
+	return b.s.Discover.MarkFolder(path, p)
+}
+
+func (b satoriBackend) EditQueued(c satori.Caller, id, input string, text *string) error {
+	if _, err := b.s.using(callerAs(c), id); err != nil {
+		return err
+	}
+	if text == nil {
+		return b.s.m.DeleteQueued(id, input)
+	}
+	return b.s.m.EditQueued(id, input, *text)
 }

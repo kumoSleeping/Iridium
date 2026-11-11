@@ -17,12 +17,11 @@ import (
 func TestImageRoute(t *testing.T) {
 	t.Parallel()
 	l := start(t)
-	var created api.NewSessionReply
-	l.want(200, "web", "POST", "/v1/internal/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "PICTURE"}, &created)
+	created := l.create(200, "web", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "PICTURE"})
 	at := ""
 	for deadline := time.Now().Add(10 * time.Second); at == "" && time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
 		var page api.MessagePage
-		l.do("web", "GET", "/v1/internal/sessions/"+created.ID+"/messages", nil, &page)
+		page = l.page("web", created)
 		for _, b := range page.Blocks {
 			if b.Result != nil && len(b.Result.Images) > 0 {
 				at = b.Result.At
@@ -32,7 +31,7 @@ func TestImageRoute(t *testing.T) {
 	if at == "" {
 		t.Fatal("no result with a picture")
 	}
-	url := l.base + "/v1/internal/sessions/" + created.ID + "/image?at=" + at
+	url := l.base + "/v1/internal/sessions/" + created + "/image?at=" + at
 	get := func(n string, etag string) *http.Response {
 		req, _ := http.NewRequest("GET", url+"&n="+n, nil)
 		if etag != "" {

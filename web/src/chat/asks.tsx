@@ -3,7 +3,7 @@
 // of summary, a main and a second key; the details open under it. An approval: the tool and its
 // arguments (commands in monospace), allow / deny / always allow this session. A plan: its
 // Markdown, approve or keep planning. A question: its options as keys, or your own words. Every
-// answer goes to the ask's card (POST /v1/internal/sessions/{id}/answer), as an app's does.
+// answer goes to the ask's card (POST /v1/internal/button), as an app's does.
 import { Menu } from "@base-ui/react/menu";
 import { Check, ChevronDown, ClipboardList, FilePen, Globe, LoaderCircle, MessageCircleQuestionMark, PenLine, ShieldAlert, ShieldQuestion, SquareTerminal } from "lucide-react";
 import { useState, type ReactNode } from "react";

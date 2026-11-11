@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -174,31 +175,16 @@ func (e *env) failf(format string, a ...any) int {
 
 // ---- arguments ----
 
-// resolve is the full id of the session a unique prefix names.
+// resolve is the full id of the session a unique prefix names (the server takes the start of one).
 func (e *env) resolve(arg string) (string, error) {
 	if arg == "" {
 		return "", errors.New("no session id")
 	}
-	var list []api.Session
-	if err := e.do("GET", "/v1/internal/sessions", nil, &list); err != nil {
+	var st api.SessionState
+	if err := e.do("GET", "/v1/internal/sessions/"+url.PathEscape(arg), nil, &st); err != nil {
 		return "", err
 	}
-	var hits []string
-	for _, s := range list {
-		if s.ID == arg {
-			return s.ID, nil
-		}
-		if strings.HasPrefix(s.ID, arg) {
-			hits = append(hits, s.ID)
-		}
-	}
-	switch len(hits) {
-	case 0:
-		return "", fmt.Errorf("no session %s", arg)
-	case 1:
-		return hits[0], nil
-	}
-	return "", fmt.Errorf("%s is the start of %d sessions' ids; give more of it", arg, len(hits))
+	return st.ID, nil
 }
 
 // short is the shortest prefix of id, at least 8 characters, no other id of ids shares.
@@ -218,14 +204,29 @@ func short(id string, ids []string) string {
 	return id
 }
 
+// ids are every session's id (channel.list, archived ones too).
 func (e *env) ids() []string {
-	var list []api.Session
-	_ = e.do("GET", "/v1/internal/sessions", nil, &list)
-	out := make([]string, len(list))
-	for i, s := range list {
-		out[i] = s.ID
+	var out []string
+	next := ""
+	for {
+		body := map[string]any{"_data": map[string]any{"all": true}}
+		if next != "" {
+			body["next"] = next
+		}
+		raw, err := e.satori("channel.list", body)
+		var l satori.List[satori.Channel]
+		if err != nil || json.Unmarshal(raw, &l) != nil {
+			return out
+		}
+		for _, c := range l.Data {
+			if c.Type == satori.ChannelText {
+				out = append(out, c.ID)
+			}
+		}
+		if next = l.Next; next == "" {
+			return out
+		}
 	}
-	return out
 }
 
 // ---- progress, on a terminal only ----

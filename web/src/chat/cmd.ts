@@ -88,13 +88,14 @@ function namesSelf(args: string[], sub?: string): boolean {
 function irApiOf(method: string | undefined, args: string[]): Cmd | undefined {
   if (method?.includes("/")) {
     const p = method.replace(/^\/?(v1\/)?/, "").split("?")[0]!;
-    if (p === "internal/sessions") return "ir-new";
     if (/^internal\/sessions\/[^/]+\/(stop|interrupt)$/.test(p)) return "ir-stop";
     if (/^internal\/files$/.test(p)) return "ir-files";
-    if (/^internal\/workspaces\//.test(p)) return "ir-ws";
+    if (/^internal\/guilds\//.test(p)) return "ir-ws";
     return undefined;
   }
   switch (method) {
+    case "channel.create":
+      return "ir-new";
     case "channel.list":
       return args.some((a) => a === "--grep" || a.startsWith("--grep=")) ? "ir-find" : "ir-list";
     case "channel.get":
@@ -151,15 +152,17 @@ export function cpOfCall(t: { name?: string; input?: string }): { from: CpSide; 
   return pos.length === 2 ? { from: sideOf(pos[0]!), to: sideOf(pos[1]!) } : undefined;
 }
 
-/** The session an ir new call opened: the short ID it printed first (internal/cli cmdNew), and the
- *  agent it was asked for; none before it is done, or as it failed. Only its result's: the task
- *  may name other sessions. */
+/** The session an ir new or ir api channel.create call opened: the ID it printed first (internal/cli
+ *  cmdNew, then), and the agent it was asked for; none before it is done, or as it failed. Only its
+ *  result's: the task may name other sessions. */
 export function newOfCall(t: { name?: string; input?: string; result?: { text?: string; error?: boolean } }): { id: string; agent: string } | undefined {
   if (!t.result || t.result.error) return undefined;
   const ir = irOfCall(t);
-  if (ir?.sub !== "new") return undefined;
+  const created = ir?.sub === "api" && ir.args.includes("channel.create");
+  if (ir?.sub !== "new" && !created) return undefined;
   const id = (t.result.text ?? "").trimStart().split("\n", 1)[0]!.trim();
-  return /^[0-9A-Za-z_-]{6,64}$/.test(id) ? { id, agent: positional(ir.args, NEW_VALUED)[0] ?? "" } : undefined;
+  const agent = created ? (ir.args.find((a) => a.startsWith("_data.agent="))?.slice(12) ?? "") : (positional(ir.args, NEW_VALUED)[0] ?? "");
+  return /^[0-9A-Za-z_-]{6,64}$/.test(id) ? { id, agent } : undefined;
 }
 
 /** ir new's options that take a value (internal/cli cmdNew). */

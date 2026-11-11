@@ -37,7 +37,7 @@ func TestLegacyPaths(t *testing.T) {
 			}
 		}
 	}
-	if code := l.do("web", "GET", "/v1/internal/sessions", nil, nil); code != http.StatusOK {
-		t.Errorf("GET /v1/internal/sessions: %d", code)
+	if code := l.sat("web", "channel.list", nil, nil); code != http.StatusOK {
+		t.Errorf("channel.list: %d", code)
 	}
 }

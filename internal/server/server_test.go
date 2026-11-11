@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/kumoSleeping/iridium/internal/api"
+	"github.com/kumoSleeping/iridium/internal/satori"
 	"github.com/kumoSleeping/iridium/internal/config"
 	"github.com/kumoSleeping/iridium/internal/hub"
 	"github.com/kumoSleeping/iridium/internal/platform"
@@ -112,7 +113,7 @@ func TestGuard(t *testing.T) {
 		{"POST", "127.0.0.1:7810", "http://evil.example", http.StatusForbidden},
 		{"POST", "127.0.0.1:7810", "http://127.0.0.1:7810", http.StatusBadRequest}, // let through, then a bad body
 	} {
-		path := "/v1/internal/sessions"
+		path := "/v1/internal/notes"
 		req := httptest.NewRequest(c.method, "http://"+c.host+path, strings.NewReader("{"))
 		if c.origin != "" {
 			req.Header.Set("Origin", c.origin)
@@ -141,11 +142,11 @@ func TestTurnOverHTTP(t *testing.T) {
 	base := "http://" + tcp.Addr().String()
 	c := &http.Client{Timeout: 10 * time.Second}
 
-	var created api.NewSessionReply
-	if code := call(t, c, "POST", base+"/v1/internal/sessions", api.NewSession{Agent: "claude", Cwd: work}, &created); code != 200 || created.ID == "" {
+	created, code := createAt(t, c, base, api.NewSession{Agent: "claude", Cwd: work})
+	if code != 200 || created == "" {
 		t.Fatalf("create: %d %+v", code, created)
 	}
-	id := created.ID
+	id := created
 	if code := call(t, c, "GET", base+"/v1/internal/sessions/nope", nil, nil); code != 422 {
 		t.Errorf("unknown session: %d", code)
 	}
@@ -158,8 +159,7 @@ func TestTurnOverHTTP(t *testing.T) {
 		}
 	}()
 
-	var sent api.SendReply
-	if code := call(t, c, "POST", base+"/v1/internal/sessions/"+id+"/send", api.Send{Text: "hello"}, &sent); code != 200 || sent.Input == "" {
+	if code, sent := sendAt(t, c, base, id, api.Send{Text: "hello"}); code != 200 || sent.Input == "" {
 		t.Fatalf("send: %d", code)
 	}
 	var draft strings.Builder
@@ -205,16 +205,15 @@ func TestTurnOverHTTP(t *testing.T) {
 		t.Errorf("draft sealed at %q", sealed)
 	}
 
-	var page api.MessagePage
-	call(t, c, "GET", base+"/v1/internal/sessions/"+id+"/messages", nil, &page)
+	page := pageAt(t, c, base, id)
 	if len(page.Blocks) != 2 || page.Blocks[0].From != "主机" || page.Blocks[0].Text != "hello" || page.End != last.End {
 		t.Fatalf("page: %+v", page)
 	}
-	var full api.FullText
-	if code := call(t, c, "GET", base+"/v1/internal/sessions/"+id+"/block?at="+page.Blocks[1].At, nil, &full); code != 200 || full.Text != "ok: hello" {
+	var full satori.Message
+	if code := satAt(t, c, base, "message.get", map[string]any{"channel_id": id, "message_id": page.Blocks[1].At}, &full); code != 200 || !strings.Contains(full.Content, "ok: hello") {
 		t.Errorf("full: %d %+v", code, full)
 	}
-	if code := call(t, c, "GET", base+"/v1/internal/sessions/"+id+"/block?at=1.0", nil, nil); code != 422 {
+	if code := satAt(t, c, base, "message.get", map[string]any{"channel_id": id, "message_id": "1.0"}, nil); code != 422 {
 		t.Errorf("full at nothing: %d", code)
 	}
 	// The same API on the unix socket, as the local terminal.
@@ -225,14 +224,17 @@ func TestTurnOverHTTP(t *testing.T) {
 	uc := &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", cfg.SocketPath())
 	}}}
-	if code := call(t, uc, "POST", "http://ir/v1/internal/sessions/"+id+"/send", api.Send{Text: "again"}, nil); code != 200 {
+	if code, _ := sendAt(t, uc, "http://ir", id, api.Send{Text: "again"}); code != 200 {
 		t.Fatalf("send over the socket: %d", code)
 	}
 	waitAfter := func(end int64) api.MessagePage {
 		t.Helper()
 		for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
-			var after api.MessagePage
-			call(t, uc, "GET", "http://ir/v1/internal/sessions/"+id+"/messages?after="+itoa(end), nil, &after)
+			var l struct {
+				Data satori.PageData `json:"_data"`
+			}
+			satAt(t, uc, "http://ir", "message.list", map[string]any{"channel_id": id, "next": itoa(end), "direction": "after", "_data": map[string]any{"blocks": true}}, &l)
+			after := api.MessagePage{Blocks: l.Data.Blocks, Start: l.Data.Start, End: l.Data.End}
 			if len(after.Blocks) == 2 {
 				return after
 			}
@@ -246,9 +248,11 @@ func TestTurnOverHTTP(t *testing.T) {
 		t.Errorf("after: %+v", after.Blocks)
 	}
 	// An agent's ir in another session: a letter from that session, still 本机's.
-	req, _ := http.NewRequest("POST", "http://ir/v1/internal/sessions/"+id+"/send", strings.NewReader(`{"text":"from a session"}`))
+	req, _ := http.NewRequest("POST", "http://ir/v1/message.create", strings.NewReader(`{"channel_id":"`+id+`","_data":{"text":"from a session"}}`))
 	req.Header.Set(HeaderAgent, "1")
 	req.Header.Set(HeaderSession, "caller-1")
+	req.Header.Set(satori.HeaderPlatform, "local")
+	req.Header.Set(satori.HeaderUser, "local")
 	if resp, err := uc.Do(req); err != nil || resp.StatusCode != 200 {
 		t.Fatalf("an agent's send: %v %v", resp, err)
 	}
@@ -280,12 +284,11 @@ func TestTurnOverHTTP(t *testing.T) {
 		t.Error("listened twice on one socket")
 	}
 	// /clear is Iridium's: the reply names the session it goes on in, no input written.
-	var cleared api.SendReply
-	if code := call(t, c, "POST", base+"/v1/internal/sessions/"+id+"/send", api.Send{Text: "/clear"}, &cleared); code != 200 || cleared.Session == "" || cleared.Session == id || cleared.Input != "" {
+	code, cleared := sendAt(t, c, base, id, api.Send{Text: "/clear"})
+	if code != 200 || cleared.Session == "" || cleared.Session == id || cleared.Input != "" {
 		t.Fatalf("clear: %d %+v", code, cleared)
 	}
-	var again api.MessagePage
-	if call(t, c, "GET", base+"/v1/internal/sessions/"+cleared.Session+"/messages", nil, &again); len(again.Blocks) != 0 {
+	if again := pageAt(t, c, base, cleared.Session); len(again.Blocks) != 0 {
 		t.Errorf("the cleared session has words: %+v", again.Blocks)
 	}
 	// The old one's agent is stopping already (archived): stop the new one.

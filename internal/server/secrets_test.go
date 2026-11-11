@@ -79,14 +79,13 @@ func TestSecrets(t *testing.T) {
 	// revoked after.)
 	var own api.Token
 	own = l.newApp("gone", true)
-	var its api.NewSessionReply
-	l.want(200, own.Token, "POST", "/v1/internal/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "token " + val + " here"}, &its)
-	l.waitReply("web", its.ID, "ok: token [secret:GITHUB_TOKEN] here") // masked already
+	its := l.create(200, own.Token, api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "token " + val + " here"})
+	l.waitReply("web", its, "ok: token [secret:GITHUB_TOKEN] here") // masked already
 	l.want(200, "socket", "DELETE", "/v1/internal/apps/gone", nil, nil)
-	in := "agent-in:" + its.ID
+	in := "agent-in:" + its
 	one := api.UseSecrets{Names: []string{"GITHUB_TOKEN"}, Command: "gh auth"}
 	l.want(202, in, "POST", "/v1/internal/secrets/use", one, &p)
-	if p.Need.Kind != api.NeedSecretUse || !p.Need.Owner || p.Need.Session != its.ID || p.Need.Command != "gh auth" || len(p.Need.Secrets) != 1 {
+	if p.Need.Kind != api.NeedSecretUse || !p.Need.Owner || p.Need.Session != its || p.Need.Command != "gh auth" || len(p.Need.Secrets) != 1 {
 		t.Fatalf("use pending: %+v", p.Need)
 	}
 	l.want(403, "web", "POST", "/v1/internal/needs/"+p.Need.ID, api.NeedAnswer{Allow: true}, nil) // the local page is not the owner's say
@@ -115,20 +114,29 @@ func TestSecrets(t *testing.T) {
 	l.want(200, "agent", "POST", "/v1/internal/secrets/use", api.UseSecrets{Names: []string{"NAS_PASSWORD"}}, nil)
 	// Some workspaces: the session is in none.
 	l.want(200, "web", "PUT", "/v1/internal/secrets/NAS_PASSWORD", api.SetSecret{Scope: api.ScopeWorkspaces, Workspaces: []int64{99}}, nil)
-	l.want(403, "agent-in:"+its.ID, "POST", "/v1/internal/secrets/use", api.UseSecrets{Names: []string{"NAS_PASSWORD"}}, nil)
+	l.want(403, "agent-in:"+its, "POST", "/v1/internal/secrets/use", api.UseSecrets{Names: []string{"NAS_PASSWORD"}}, nil)
 	l.want(422, "agent", "POST", "/v1/internal/secrets/use", api.UseSecrets{Names: []string{"NOPE"}}, nil)
 	// Storing one is not saying who may use it.
 	l.want(403, bot, "PUT", "/v1/internal/secrets/NAS_PASSWORD", api.SetSecret{Scope: api.ScopeAll}, nil)
 
-	// What carries the transcript masks the value: the page of messages, the state, the list, the
-	// stream.
-	for _, path := range []string{"/v1/internal/sessions/" + its.ID + "/messages", "/v1/internal/sessions/" + its.ID, "/v1/internal/sessions"} {
-		raw = l.wantRaw(200, "web", "GET", path, nil)
+	// What carries the transcript masks the value: the page of messages (as Satori's messages and
+	// as blocks), the state, the list, the stream.
+	for _, call := range []struct {
+		method string
+		body   map[string]any
+	}{
+		{"message.list", map[string]any{"channel_id": its, "_data": map[string]any{"blocks": true}}},
+		{"channel.list", map[string]any{"_data": map[string]any{"all": true}}},
+	} {
+		l.wantSat(200, "web", call.method, call.body, &raw)
 		if strings.Contains(raw, val) || !strings.Contains(raw, "[secret:GITHUB_TOKEN]") {
-			t.Fatalf("%s not masked: %.400s", path, raw)
+			t.Fatalf("%s not masked: %.400s", call.method, raw)
 		}
 	}
-	if ev := firstState(t, watchStates(t, l.base, nil, "session:"+its.ID)); strings.Contains(ev, val) || !strings.Contains(ev, "[secret:GITHUB_TOKEN]") {
+	if raw = l.wantRaw(200, "web", "GET", "/v1/internal/sessions/"+its, nil); strings.Contains(raw, val) || !strings.Contains(raw, "[secret:GITHUB_TOKEN]") {
+		t.Fatalf("the state not masked: %.400s", raw)
+	}
+	if ev := firstState(t, watchStates(t, l.base, nil, "session:"+its)); strings.Contains(ev, val) || !strings.Contains(ev, "[secret:GITHUB_TOKEN]") {
 		t.Fatalf("stream not masked: %.400s", ev)
 	}
 
@@ -136,7 +144,7 @@ func TestSecrets(t *testing.T) {
 	l.want(403, "agent", "DELETE", "/v1/internal/secrets/GITHUB_TOKEN", nil, nil)
 	l.want(200, "socket", "DELETE", "/v1/internal/secrets/GITHUB_TOKEN", nil, nil)
 	l.want(422, "socket", "DELETE", "/v1/internal/secrets/GITHUB_TOKEN", nil, nil)
-	raw = l.wantRaw(200, "web", "GET", "/v1/internal/sessions/"+its.ID+"/messages", nil)
+	l.wantSat(200, "web", "message.list", map[string]any{"channel_id": its, "_data": map[string]any{"blocks": true}}, &raw)
 	if !strings.Contains(raw, val) {
 		t.Fatalf("still masked after delete: %.300s", raw)
 	}

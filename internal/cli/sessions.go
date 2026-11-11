@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kumoSleeping/iridium/internal/api"
+	"github.com/kumoSleeping/iridium/internal/satori"
 )
 
 // Exit codes of wait (and new, send with --wait).
@@ -133,10 +134,19 @@ func (e *env) waitTaken(id, input string) int {
 	return exitDone
 }
 
+// latest is the latest page of session id's transcript, as blocks (message.list _data.blocks).
 func (e *env) latest(id string) (api.MessagePage, error) {
-	var page api.MessagePage
-	err := e.do("GET", "/v1/internal/sessions/"+id+"/messages", nil, &page)
-	return page, err
+	raw, err := e.satori("message.list", map[string]any{"channel_id": id, "_data": map[string]any{"blocks": true}})
+	if err != nil {
+		return api.MessagePage{}, err
+	}
+	var l struct {
+		Data satori.PageData `json:"_data"`
+	}
+	if err := json.Unmarshal(raw, &l); err != nil {
+		return api.MessagePage{}, fmt.Errorf("message.list: %s", strings.TrimSpace(string(raw)))
+	}
+	return api.MessagePage{Blocks: l.Data.Blocks, Start: l.Data.Start, End: l.Data.End, More: l.Data.More}, nil
 }
 
 // userAt is where on the page the message input is (anyInput: any of yours); -1 if not there.
