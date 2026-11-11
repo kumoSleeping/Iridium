@@ -12,6 +12,7 @@
   },
   "files": [
     "index.js",
+    "machine.js",
     "dsh.js",
     "held.js",
     "bridge.js",

@@ -12,6 +12,7 @@ import { bridgeEndpoint, createBridge } from './bridge.js'
 import { dshMethods, fileSession } from './dsh.js'
 import { Executor, iridiumKey, refused } from './executor.js'
 import { followHeld } from './held.js'
+import { machineID } from './machine.js'
 import { OmdUltra } from './omd.js'
 
 export const name = 'remote-iridium'
@@ -293,10 +294,12 @@ export function apply(ctx, config) {
       // whether command lines would run here.
       const noShell = config?.shell === false
       const agentShell = !noShell && config?.agentShell === true
+      const machineId = machineID()
       const who = {
         name: config?.name || machineName(), os: process.platform === 'win32' ? 'windows' : process.platform, arch: process.arch,
         program: `dsh-remote-iridium ${version()}`, agents: [{ agent: 'dsh', version: dsh.version }],
         ...(noShell ? { noShell } : {}), ...(agentShell ? { agentShell } : {}),
+        ...(machineId ? { machineId } : {}),
       }
       offer = { dsh: dsh.version, noShell, agentShell, roots: config?.roots ?? [] }
       if (older(dsh.version, MIN_DSH)) say(`dsh ${dsh.version} is older than ${MIN_DSH}: the Iridium starts no dsh here`)
@@ -317,7 +320,7 @@ export function apply(ctx, config) {
         // The models this dsh's settings give, for the sessions it starts (agent.prepare): keys may be in it.
         const llmFile = path.join(state, 'llm.patch.yml')
         ex = new Executor({
-          url: wsURL(url), token, state: path.join(state, iridiumKey(url)), denied: [tokens, llmFile, sessionFile, prepared], roots: config?.roots ?? [], noShell, agentShell, agents: [dsh], caps,
+          url: wsURL(url), token, state: path.join(state, iridiumKey(url)), denied: [tokens, llmFile, sessionFile, prepared], roots: config?.roots ?? [], noShell, agentShell, agents: [dsh], caps, machineId,
           methods: dshMethods(ctx, () => ({ unsynced: unsyncedList(volatile(config?.unsynced)), ungrouped: volatile(config?.ungrouped) !== false }), { file: llmFile, scope: dsh.scope }, { follow, bridge, sessionFile, dir: prepared }),
           // Connected again: all that is attached, again; a button pressed on the page, to its plugin.
           connected: () => attach.resend(),

@@ -343,7 +343,8 @@ function killTree(pid, hard) {
  * nothing but the agents: no command line runs here), agentShell (say the Iridium's agents may run
  * command lines here, ir sh, not only a person on its page), env ({name: value}; default
  * process.env, the hello gives it without secrets), denied (paths never served besides its own
- * and the agents' logins), program, log; methods, more requests it answers ({name: async
+ * and the agents' logins), program, log; machineId (what the hello says of this computer,
+ * Iridium's machineid.Hash(); "" none); methods, more requests it answers ({name: async
  * (params) => result}); caps, the optional parts of the protocol they make it speak (wire.Hello's
  * caps: held, agent.prepare, session.attach; a list, or a function giving it at each hello);
  * events, the events from the Iridium it takes ({name: (params) => void}); connected, called once
@@ -459,6 +460,7 @@ export class Executor {
       ...(this.o.noShell ? { noShell: true } : {}),
       ...(this.o.agentShell ? { agentShell: true } : {}),
       ...(this.o.ir ? { irClient: true } : {}),
+      ...(this.o.machineId ? { machineId: this.o.machineId } : {}),
       ...(caps.length ? { caps } : {}),
     }
   }
