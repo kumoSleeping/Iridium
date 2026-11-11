@@ -269,6 +269,11 @@ func (s *Server) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c := callerOf(r)
+	// Its folder as written: a place, ~, a path from the caller's own session's (places.go).
+	if err := s.where(c, &req); err != nil {
+		s.error(w, err)
+		return
+	}
 	if err := s.checkCreate(c, &req); err != nil {
 		s.error(w, err)
 		return
@@ -538,6 +543,8 @@ func (s *Server) error(w http.ResponseWriter, err error) {
 		fail(w, http.StatusGatewayTimeout, "the agent did not answer in time")
 	case access.IsDenied(err):
 		refuse(w, http.StatusForbidden, "no_permission", err.Error())
+	case errors.Is(err, session.ErrBadRequest):
+		refuse(w, http.StatusBadRequest, "bad_request", err.Error())
 	default:
 		s.logf("server: %v", err)
 		fail(w, http.StatusInternalServerError, err.Error())

@@ -13,6 +13,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/config"
 	"github.com/kumoSleeping/iridium/internal/files"
 	"github.com/kumoSleeping/iridium/internal/pathsafe"
+	"github.com/kumoSleeping/iridium/internal/place"
 	"github.com/kumoSleeping/iridium/internal/session"
 )
 
@@ -194,7 +195,12 @@ func (s *Server) attachPath(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &req) {
 		return
 	}
-	info, err := s.files.Attach(r.PathValue("id"), req.Path)
+	p, err := s.hostPath(callerOf(r), req.Path)
+	if err != nil {
+		s.error(w, err)
+		return
+	}
+	info, err := s.files.Attach(r.PathValue("id"), p)
 	if err != nil {
 		s.fileError(w, err)
 		return
@@ -208,7 +214,12 @@ func (s *Server) linkPath(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &req) {
 		return
 	}
-	l, err := s.files.Link(r.Header.Get(HeaderSession), req.Path)
+	p, err := s.hostPath(callerOf(r), req.Path)
+	if err != nil {
+		s.error(w, err)
+		return
+	}
+	l, err := s.files.Link(r.Header.Get(HeaderSession), p)
 	if err != nil {
 		s.fileError(w, err)
 		return
@@ -221,7 +232,15 @@ func (s *Server) listDir(w http.ResponseWriter, r *http.Request) {
 		s.listAt(w, r, m, r.URL.Query().Get("path"))
 		return
 	}
-	l, err := s.files.List(r.URL.Query().Get("path"))
+	p := r.URL.Query().Get("path")
+	if p != "" {
+		var err error
+		if p, err = s.hostPath(callerOf(r), p); err != nil {
+			s.error(w, err)
+			return
+		}
+	}
+	l, err := s.files.List(p)
 	if err != nil {
 		s.fileError(w, err)
 		return
@@ -235,6 +254,22 @@ func (s *Server) copyFile(w http.ResponseWriter, r *http.Request) {
 	var req api.Copy
 	if !readJSON(w, r, &req) {
 		return
+	}
+	// Each side as written (places.go): app:path at that app's computer, else a path here.
+	for _, side := range []struct{ machine, path *string }{{&req.FromMachine, &req.From}, {&req.ToMachine, &req.To}} {
+		if *side.machine != "" {
+			continue
+		}
+		if name, p, ok := place.Split(*side.path); ok && !place.IsHost(name) {
+			*side.machine, *side.path = name, p
+			continue
+		}
+		p, err := s.hostPath(callerOf(r), *side.path)
+		if err != nil {
+			s.error(w, err)
+			return
+		}
+		*side.path = p
 	}
 	if req.FromMachine != "" || req.ToMachine != "" {
 		s.copyAcross(w, r, req)

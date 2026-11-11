@@ -320,6 +320,10 @@ func (b satoriBackend) Send(ctx context.Context, c satori.Caller, id, text strin
 		return satori.SendResult{}, fmt.Errorf("%w: _data.paths is for ir on the host's socket", session.ErrBadRequest)
 	}
 	for _, p := range o.Paths {
+		p, err := s.hostPath(cl, p)
+		if err != nil {
+			return satori.SendResult{}, err
+		}
 		f, err := s.files.Attach(id, p)
 		if err != nil {
 			return satori.SendResult{}, fmt.Errorf("%s: %w", p, err)
