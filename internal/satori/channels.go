@@ -40,6 +40,20 @@ func channelOf(ss api.Session) *Channel {
 	return &Channel{ID: ss.ID, Type: ChannelText, Name: name, ParentID: ss.Parent}
 }
 
+// channelFull is session ss as a channel with Iridium's own of it (_data), its words masked.
+func (s *Service) channelFull(ss api.Session) Channel {
+	c := channelOf(ss)
+	d := ss
+	d.Name, d.Title = s.b.Mask(d.Name), s.b.Mask(d.Title)
+	if d.Last != nil {
+		l := *d.Last
+		l.Text = s.b.Mask(l.Text)
+		d.Last = &l
+	}
+	c.Data = &d
+	return *c
+}
+
 // guildOf is the guild session ss is in.
 func (s *Service) guildOf(ss api.Session) *Guild {
 	if ss.Workspace == 0 {
@@ -83,18 +97,18 @@ func (s *Service) channelGet(_ context.Context, c Caller, body []byte) (any, err
 	if err != nil {
 		return nil, err
 	}
-	return channelOf(st.Session), nil
+	return s.channelFull(st.Session), nil
 }
 
-// visible are the sessions c sees, newest first, archived and subagents left out.
-func (s *Service) visible(ctx context.Context, c Caller) ([]api.Session, error) {
+// visible are the sessions c sees, newest first; archived ones and subagents only if all.
+func (s *Service) visible(ctx context.Context, c Caller, all bool) ([]api.Session, error) {
 	l, err := s.b.Sessions(ctx)
 	if err != nil {
 		return nil, err
 	}
 	out := l[:0]
 	for _, ss := range l {
-		if !ss.Archived && !ss.Subagent && s.b.Sees(c, ss.ID) {
+		if (all || !ss.Archived && !ss.Subagent) && s.b.Sees(c, ss.ID) {
 			out = append(out, ss)
 		}
 	}
@@ -124,18 +138,22 @@ func (s *Service) channelList(ctx context.Context, c Caller, body []byte) (any, 
 	var req struct {
 		GuildID string `json:"guild_id"`
 		Next    string `json:"next"`
+		// Data.All: archived sessions and subagents too (Iridium's own).
+		Data struct {
+			All bool `json:"all"`
+		} `json:"_data"`
 	}
 	if err := decode(body, &req); err != nil {
 		return nil, err
 	}
-	l, err := s.visible(ctx, c)
+	l, err := s.visible(ctx, c, req.Data.All)
 	if err != nil {
 		return nil, err
 	}
 	var chans []Channel
 	for _, ss := range l {
 		if req.GuildID == "" || s.guildOf(ss).ID == req.GuildID {
-			chans = append(chans, *channelOf(ss))
+			chans = append(chans, s.channelFull(ss))
 		}
 	}
 	if req.GuildID != "" && len(chans) == 0 && !s.guildThere(c, req.GuildID) {
@@ -161,7 +179,7 @@ func (s *Service) guilds(c Caller) []Guild {
 	if ws, err := s.b.Workspaces(); err == nil {
 		for _, w := range ws {
 			if s.b.SeesGuild(c, w) {
-				out = append(out, Guild{ID: strconv.FormatInt(w.ID, 10), Name: w.Name})
+				out = append(out, Guild{ID: strconv.FormatInt(w.ID, 10), Name: w.Name, Data: &w})
 			}
 		}
 	}

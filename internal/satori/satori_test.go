@@ -302,11 +302,13 @@ func TestResources(t *testing.T) {
 		t.Errorf("meta: %+v", meta)
 	}
 	var gl List[Guild]
-	if r.as("u1", "guild.list", nil, &gl); len(gl.Data) != 2 || gl.Data[0].ID != "7" || gl.Data[1].ID != Loose {
+	if r.as("u1", "guild.list", nil, &gl); len(gl.Data) != 2 || gl.Data[0].ID != "7" || gl.Data[1].ID != Loose ||
+		gl.Data[0].Data == nil || gl.Data[0].Data.Path != "/w" || gl.Data[1].Data != nil {
 		t.Errorf("guilds: %+v", gl)
 	}
 	var cl List[Channel]
-	if r.as("u1", "channel.list", map[string]string{"guild_id": "7"}, &cl); len(cl.Data) != 1 || cl.Data[0].ID != "s2" || cl.Data[0].Name != "named" {
+	if r.as("u1", "channel.list", map[string]string{"guild_id": "7"}, &cl); len(cl.Data) != 1 || cl.Data[0].ID != "s2" || cl.Data[0].Name != "named" ||
+		cl.Data[0].Data == nil || cl.Data[0].Data.ID != "s2" {
 		t.Errorf("channels of 7: %+v", cl)
 	}
 	if r.as("u1", "channel.list", map[string]string{"guild_id": Loose}, &cl); len(cl.Data) != 1 || cl.Data[0].Name != "s1" {

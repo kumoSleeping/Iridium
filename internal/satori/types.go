@@ -92,6 +92,9 @@ type Channel struct {
 	Type     int    `json:"type"`
 	Name     string `json:"name,omitempty"`
 	ParentID string `json:"parent_id,omitempty"`
+	// Data: Iridium's own (advanced/internal.md), in channel.get and channel.list: the session as
+	// GET /v1/internal/sessions lists it, its words masked.
+	Data *api.Session `json:"_data,omitempty"`
 }
 
 // Guild is a folder group (the web's workspace), or Loose for the sessions in none.
@@ -99,6 +102,9 @@ type Guild struct {
 	ID     string `json:"id"`
 	Name   string `json:"name,omitempty"`
 	Avatar string `json:"avatar,omitempty"`
+	// Data: Iridium's own, in guild.get and guild.list: the folder group (its folder, whether it
+	// holds only the sessions right in it); none for Loose.
+	Data *api.Workspace `json:"_data,omitempty"`
 }
 
 // Message is a block of a session's transcript (id: its place, "<offset>.<index>"), something

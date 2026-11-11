@@ -15,6 +15,7 @@ import (
 
 	"github.com/kumoSleeping/iridium/internal/access"
 	"github.com/kumoSleeping/iridium/internal/api"
+	"github.com/kumoSleeping/iridium/internal/discover"
 	"github.com/kumoSleeping/iridium/internal/files"
 	"github.com/kumoSleeping/iridium/internal/gate"
 	"github.com/kumoSleeping/iridium/internal/pathsafe"
@@ -25,7 +26,8 @@ import (
 )
 
 // Satori with ir (package satori, docs/satori.md): /v1/ on the TCP address, behind the gate and the
-// login check (withLogin); this file is the server as its Backend.
+// login check (withLogin), and on the socket and for an agent's ir at another machine (irCaller);
+// this file is the server as its Backend.
 
 // withSatori serves /v1/ by package satori, the rest by next.
 func (s *Server) withSatori(next http.Handler) http.Handler {
@@ -60,7 +62,38 @@ type satoriBackend struct{ s *Server }
 // callerAs is c as the server's caller: its app, speaking as its login. Until S2 a login counts as
 // its app (gate.Identity.ID): its permissions, its usage.
 func callerAs(c satori.Caller) caller {
+	if cl, ok := c.Self.(caller); ok {
+		return cl
+	}
 	return caller{Identity: gate.Identity{App: c.App, Login: c.Login, Name: c.AppName}}
+}
+
+// irCaller is ir's caller in Satori: the host's ir on the socket, an agent's (as the login its
+// session's turn is for, socketHandler), or an agent's at another machine (its session's TOKEN:
+// as that turn's login too, within its machine's permissions). What it may do is cl's own
+// (Self), the same as on /v1/internal; it speaks as that login. ok false: not ir.
+func (b satoriBackend) irCaller(cl caller) (satori.Caller, bool) {
+	if !cl.socket && cl.session == "" {
+		return satori.Caller{}, false
+	}
+	id := cl.Identity
+	if !cl.socket {
+		o, ok := b.s.originOf(cl.session)
+		if !ok {
+			return satori.Caller{}, false
+		}
+		id = o
+	}
+	sc := satori.Caller{App: id.App, AppName: b.s.Tag(id.App), Login: id.Login, LoginName: id.Name, Only: true, Self: cl}
+	switch {
+	case id.Host():
+		sc.AppName, sc.Login, sc.LoginName = b.s.Tag(gate.HostID), gate.HostID, b.s.Tag(gate.HostID)
+	case id.Web():
+		sc.AppName = gate.WebApp
+	case id.Login == "":
+		return satori.Caller{}, false
+	}
+	return sc, true
 }
 
 // Who: an app by its TOKEN (and the login it named); a login of ir_web likewise, by ir_web's
@@ -68,6 +101,9 @@ func callerAs(c satori.Caller) caller {
 // the login "local" of the platform "local". Every app alike (draft 一): ir_web speaks Satori as
 // any other, one login a connection.
 func (b satoriBackend) Who(r *http.Request) (satori.Caller, bool) {
+	if cl, ok := r.Context().Value(callerKey{}).(caller); ok && (cl.socket || cl.session != "") {
+		return b.irCaller(cl)
+	}
 	id, ok := gate.FromContext(r.Context())
 	switch {
 	case !ok || id.Session != "":
@@ -149,8 +185,13 @@ func (b satoriBackend) Sessions(ctx context.Context) ([]api.Session, error) { re
 func (b satoriBackend) Session(id string) (*api.SessionState, error) { return b.s.m.State(id) }
 
 func (b satoriBackend) Patch(ctx context.Context, c satori.Caller, id string, p api.SessionPatch) error {
-	if _, err := b.s.using(callerAs(c), id); err != nil {
+	cl := callerAs(c)
+	if _, err := b.s.using(cl, id); err != nil {
 		return err
+	}
+	// An agent's name never covers one a person gave (as ir rename did).
+	if p.Name != nil && (cl.agent || cl.session != "") {
+		p.ByAgent = true
 	}
 	err := b.s.patch(ctx, id, p)
 	if errors.Is(err, errPatchManager) {
@@ -267,6 +308,12 @@ func sourceTag(c satori.Caller) string {
 func (b satoriBackend) Send(ctx context.Context, c satori.Caller, id, text string, refs []string, o satori.SendOpts) (satori.SendResult, error) {
 	s, cl := b.s, callerAs(c)
 	req := api.Send{Text: text, Attachments: refs, Caller: o.Caller}
+	// ir: as POST /v1/internal/sessions/{id}/send has it. It steers unless told to queue; an
+	// agent's always steers (queued, it would wait for a person).
+	if _, ok := c.Self.(caller); ok {
+		req.Steer = o.Steer == nil || *o.Steer || cl.agent || cl.socket && cl.session != "" || !cl.socket
+		return s.sendAs(ctx, cl, s.fromOf(cl, o.Caller), id, req)
+	}
 	// An app's message joins a running turn, as the chat layer's did; ir_web's and the host's
 	// steer or queue as the person chose.
 	from := session.FromLogin(c.App, c.Login, sourceTag(c))
@@ -339,6 +386,10 @@ func (b satoriBackend) Fault(err error) (int, string) {
 		return http.StatusUnprocessableEntity, "no_such_file"
 	case errors.Is(err, session.ErrNotLive), errors.Is(err, session.ErrElsewhere), errors.Is(err, session.ErrSubagent):
 		return http.StatusConflict, "not_live"
+	case errors.Is(err, store.ErrUserNamed):
+		return http.StatusConflict, "named" // an agent's name over one a person gave
+	case errors.Is(err, discover.ErrNoName):
+		return http.StatusBadRequest, "bad_request"
 	case errors.Is(err, context.DeadlineExceeded):
 		return http.StatusGatewayTimeout, "timeout"
 	case access.IsDenied(err):

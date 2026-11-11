@@ -185,7 +185,8 @@ func (s *Server) Handler(local bool) http.Handler {
 		s.cliRoutes(mux)
 	}
 	if local {
-		return s.socketHandler(s.sessionGuard(mux))
+		// Satori too: ir speaks it (ir api), as the login it acts for (irCaller).
+		return s.socketHandler(s.withSatori(s.sessionGuard(mux)))
 	}
 	return s.webHandler(s.sessionGuard(mux))
 }

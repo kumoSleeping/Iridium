@@ -169,6 +169,11 @@ func (s *Service) channelUpdate(ctx context.Context, c Caller, body []byte) (any
 		Data      struct {
 			Name *string `json:"name"`
 		} `json:"data"`
+		// Ext.Archived: archive the session or bring it back (Iridium's own); channel.delete
+		// archives too.
+		Ext struct {
+			Archived *bool `json:"archived"`
+		} `json:"_data"`
 	}
 	if err := decode(body, &req); err != nil {
 		return nil, err
@@ -176,10 +181,10 @@ func (s *Service) channelUpdate(ctx context.Context, c Caller, body []byte) (any
 	if _, err := s.channel(c, req.ChannelID); err != nil {
 		return nil, err
 	}
-	if req.Data.Name == nil {
+	if req.Data.Name == nil && req.Ext.Archived == nil {
 		return struct{}{}, nil
 	}
-	return struct{}{}, s.b.Patch(ctx, c, req.ChannelID, api.SessionPatch{Name: req.Data.Name})
+	return struct{}{}, s.b.Patch(ctx, c, req.ChannelID, api.SessionPatch{Name: req.Data.Name, Archived: req.Ext.Archived})
 }
 
 // channelDelete archives a session: it leaves the list (and its agent stops); nothing is erased.

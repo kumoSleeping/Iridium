@@ -42,6 +42,9 @@ type Caller struct {
 	// Only: the connection is this login's alone (a browser of ir_web, the host's page): its
 	// event stream carries this login's events only.
 	Only bool
+	// Self: the backend's own caller the request came as, when it knows more than the above (the
+	// host's ir on the socket, an agent's ir); opaque here.
+	Self any
 }
 
 // LoginInfo is an approved login of an app.
