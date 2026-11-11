@@ -57,11 +57,21 @@ type LoginInfo struct {
 type SendResult = api.SendReply
 
 // SendOpts are what Iridium's own extension of message.create (its "_data") may add: whether it
-// joins a running turn (apps' always do), and attachments by ref.
+// joins a running turn (apps' always do), attachments by ref, the words as plain text (Text, in
+// place of content, escaped here), and files by their path at the host (Paths, the backend's to
+// take or refuse: ir on the socket).
 type SendOpts struct {
 	Steer       *bool    `json:"steer,omitempty"`
 	Attachments []string `json:"attachments,omitempty"`
 	Caller      string   `json:"caller,omitempty"`
+	Text        *string  `json:"text,omitempty"`
+	Paths       []string `json:"paths,omitempty"`
+}
+
+// Resolver is a Backend that takes a session's id as a caller may write it: the start of one,
+// or "self", the caller's own (docs/api.md "会话 ID"). Without it ids are taken as they are.
+type Resolver interface {
+	Resolve(ctx context.Context, c Caller, id string) (string, error)
 }
 
 // Backend is what the protocol needs of Iridium; the server implements it. Errors go out as

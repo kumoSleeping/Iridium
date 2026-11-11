@@ -127,7 +127,7 @@ func (s *Service) messageGet(_ context.Context, c Caller, body []byte) (any, err
 		return nil, err
 	}
 	noMessage := refuse(http.StatusUnprocessableEntity, "no_such_message", "no message "+req.MessageID)
-	if e, ok := s.out.message(req.ChannelID, req.MessageID); ok {
+	if e, ok := s.out.message(st.ID, req.MessageID); ok {
 		ev := s.render(e, c.App, c.Login)
 		m := *ev.Message
 		m.Channel, m.Guild = ev.Channel, ev.Guild
@@ -341,6 +341,12 @@ func (s *Service) messageCreate(ctx context.Context, c Caller, body []byte) (any
 	if err := decode(body, &req); err != nil {
 		return nil, err
 	}
+	if t := req.Data.Text; t != nil {
+		if req.Content != "" {
+			return nil, bad("content or _data.text, not both")
+		}
+		req.Content, req.Data.Text = Escape(*t), nil
+	}
 	st, err := s.channel(c, req.ChannelID)
 	if err != nil {
 		return nil, err
@@ -364,7 +370,7 @@ func (s *Service) messageCreate(ctx context.Context, c Caller, body []byte) (any
 	for i, els := range groups {
 		o := req.Data
 		if i > 0 {
-			o.Attachments = nil
+			o.Attachments, o.Paths = nil, nil
 		}
 		m, err := s.sendOne(ctx, c, st, els, o)
 		if err != nil {
@@ -410,7 +416,7 @@ func (s *Service) sendOne(ctx context.Context, c Caller, st *api.SessionState, e
 		}
 	}
 	refs = append(refs, o.Attachments...)
-	if text == "" && len(refs) == 0 {
+	if text == "" && len(refs) == 0 && len(o.Paths) == 0 {
 		return nil, bad("an empty message")
 	}
 	r, err := s.b.Send(ctx, c, st.ID, text, refs, o)

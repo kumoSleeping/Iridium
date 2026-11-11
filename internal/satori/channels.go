@@ -73,6 +73,10 @@ func (s *Service) channel(c Caller, id string) (*api.SessionState, error) {
 	if id == "" {
 		return nil, bad("channel_id")
 	}
+	id, err := s.sessionOf(c, id)
+	if err != nil {
+		return nil, err
+	}
 	if !s.b.Sees(c, id) {
 		return nil, errNoSession
 	}
@@ -84,6 +88,27 @@ func (s *Service) channel(c Caller, id string) (*api.SessionState, error) {
 		return nil, err
 	}
 	return st, nil
+}
+
+// sessionOf is the session id names for c (Resolver): the start of an id, or self.
+func (s *Service) sessionOf(c Caller, id string) (string, error) {
+	r, ok := s.b.(Resolver)
+	if !ok {
+		return id, nil
+	}
+	return r.Resolve(context.Background(), c, id)
+}
+
+// guildID is the guild id names for c: self is the guild of c's own session.
+func (s *Service) guildID(c Caller, id string) (string, error) {
+	if id != "self" {
+		return id, nil
+	}
+	st, err := s.channel(c, "self")
+	if err != nil {
+		return "", err
+	}
+	return s.guildOf(st.Session).ID, nil
 }
 
 func (s *Service) channelGet(_ context.Context, c Caller, body []byte) (any, error) {
@@ -150,6 +175,9 @@ func (s *Service) channelList(ctx context.Context, c Caller, body []byte) (any, 
 	if err != nil {
 		return nil, err
 	}
+	if req.GuildID, err = s.guildID(c, req.GuildID); err != nil {
+		return nil, err
+	}
 	var chans []Channel
 	for _, ss := range l {
 		if req.GuildID == "" || s.guildOf(ss).ID == req.GuildID {
@@ -211,6 +239,11 @@ func (s *Service) guildGet(_ context.Context, c Caller, body []byte) (any, error
 	if err := decode(body, &req); err != nil {
 		return nil, err
 	}
+	id, err := s.guildID(c, req.GuildID)
+	if err != nil {
+		return nil, err
+	}
+	req.GuildID = id
 	for _, g := range s.guilds(c) {
 		if g.ID == req.GuildID {
 			return g, nil

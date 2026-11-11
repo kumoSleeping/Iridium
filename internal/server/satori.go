@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -32,6 +33,12 @@ import (
 // withSatori serves /v1/ by package satori, the rest by next.
 func (s *Server) withSatori(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// A session by its id's start or self (resolve.go).
+		r, err := s.withSessionArg(r)
+		if err != nil {
+			refuse(w, http.StatusBadRequest, "bad_request", err.Error())
+			return
+		}
 		// /v1/internal/<path>: Iridium's own API (Satori's "internal" routes, spec advanced/internal),
 		// served by next. Satori-Platform and Satori-User-ID, if given, must be the caller's.
 		// (button is the Satori package's own.)
@@ -308,6 +315,17 @@ func sourceTag(c satori.Caller) string {
 
 func (b satoriBackend) Send(ctx context.Context, c satori.Caller, id, text string, refs []string, o satori.SendOpts) (satori.SendResult, error) {
 	s, cl := b.s, callerAs(c)
+	// Files by their path here: ir on the socket only, as POST …/attach is.
+	if len(o.Paths) > 0 && !cl.socket {
+		return satori.SendResult{}, fmt.Errorf("%w: _data.paths is for ir on the host's socket", session.ErrBadRequest)
+	}
+	for _, p := range o.Paths {
+		f, err := s.files.Attach(id, p)
+		if err != nil {
+			return satori.SendResult{}, fmt.Errorf("%s: %w", p, err)
+		}
+		refs = append(refs, f.Ref)
+	}
 	req := api.Send{Text: text, Attachments: refs, Caller: o.Caller}
 	// ir: as POST /v1/internal/sessions/{id}/send has it. It steers unless told to queue; an
 	// agent's always steers (queued, it would wait for a person).

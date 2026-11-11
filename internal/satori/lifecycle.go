@@ -178,13 +178,14 @@ func (s *Service) channelUpdate(ctx context.Context, c Caller, body []byte) (any
 	if err := decode(body, &req); err != nil {
 		return nil, err
 	}
-	if _, err := s.channel(c, req.ChannelID); err != nil {
+	st, err := s.channel(c, req.ChannelID)
+	if err != nil {
 		return nil, err
 	}
 	if req.Data.Name == nil && req.Ext.Archived == nil {
 		return struct{}{}, nil
 	}
-	return struct{}{}, s.b.Patch(ctx, c, req.ChannelID, api.SessionPatch{Name: req.Data.Name, Archived: req.Ext.Archived})
+	return struct{}{}, s.b.Patch(ctx, c, st.ID, api.SessionPatch{Name: req.Data.Name, Archived: req.Ext.Archived})
 }
 
 // channelDelete archives a session: it leaves the list (and its agent stops); nothing is erased.
@@ -195,11 +196,12 @@ func (s *Service) channelDelete(ctx context.Context, c Caller, body []byte) (any
 	if err := decode(body, &req); err != nil {
 		return nil, err
 	}
-	if _, err := s.channel(c, req.ChannelID); err != nil {
+	st, err := s.channel(c, req.ChannelID)
+	if err != nil {
 		return nil, err
 	}
 	yes := true
-	return struct{}{}, s.b.Patch(ctx, c, req.ChannelID, api.SessionPatch{Archived: &yes})
+	return struct{}{}, s.b.Patch(ctx, c, st.ID, api.SessionPatch{Archived: &yes})
 }
 
 // snSlots: each event goes to each login with an sn of its own, its outbox place times snSlots

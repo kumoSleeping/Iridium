@@ -68,7 +68,7 @@ func TestCLIAtMachine(t *testing.T) {
 		t.Errorf("cp from there: %d %q", exit, errs)
 	}
 	// Claude is the owner's own terminals': that Bot is not.
-	if _, _, errs, exit := run(tok, "api", "message.create", "channel_id="+own.ID[:8], "--text", "hi"); exit != 1 || errs == "" {
+	if _, _, errs, exit := run(tok, "api", "message.create", "channel_id="+own.ID[:8], "_data.text=hi"); exit != 1 || errs == "" {
 		t.Errorf("send to Claude from a Bot not the owner's: %d %q", exit, errs)
 	}
 	if _, out, errs, exit := run(tok, "--help"); exit != 0 || !strings.Contains(out, "ir new") || strings.Contains(out, "ir secret") {
