@@ -1,6 +1,7 @@
 package gate
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -8,16 +9,17 @@ import (
 	"mime"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // ServeProfile updates a profile (name and/or avatar). Mount it behind Wrap:
 //
-//	PUT /api/me/profile             ServeProfile(w, r, "")                 the caller itself: a panel by its session, a channel by its token
-//	PUT /api/endpoints/{id}/profile ServeProfile(w, r, r.PathValue("id"))  any endpoint: web panels and 本机 only
+//	PUT /v1/internal/me/profile        ServeProfile(w, r, "")                 the caller itself: a browser by its session, an app by its TOKEN
+//	PUT /v1/internal/apps/{id}/profile ServeProfile(w, r, r.PathValue("id"))  any app or login: ir_web's logins and the host only
 //
 // The body is multipart/form-data with optional fields "name", "avatar" (a file) and
 // "removeAvatar" ("1"), or JSON {"name"?, "avatar"? (base64 or a data: URL), "removeAvatar"?}.
-// The reply is the updated EndpointInfo, or {"error": ..., "nameError"?: ...}.
+// The reply is the updated EndpointInfo, or {"code": ..., "nameError"?: ...} (422 bad_name).
 func (g *Gate) ServeProfile(w http.ResponseWriter, r *http.Request, id string) {
 	caller, ok := FromContext(r.Context())
 	switch {
@@ -28,12 +30,12 @@ func (g *Gate) ServeProfile(w http.ResponseWriter, r *http.Request, id string) {
 		w.Header().Set("Allow", "PUT, POST")
 		writeJSON(w, http.StatusMethodNotAllowed, apiError{"method_not_allowed"})
 		return
-	case id == "" && caller.Local:
-		writeJSON(w, http.StatusConflict, apiError{"local"})
+	case id == "" && caller.Host():
+		writeJSON(w, http.StatusUnprocessableEntity, apiError{"built_in"})
 		return
 	case id == "":
-		id = caller.EndpointID
-	case id != caller.EndpointID && !caller.CanManage():
+		id = caller.ID()
+	case id != caller.ID() && !caller.CanManage():
 		writeJSON(w, http.StatusForbidden, apiError{"forbidden"})
 		return
 	}
@@ -55,18 +57,18 @@ func (g *Gate) ServeProfile(w http.ResponseWriter, r *http.Request, id string) {
 	case err == nil:
 		writeJSON(w, http.StatusOK, info)
 	case nameCode(err) != "":
-		writeJSON(w, http.StatusConflict, struct {
-			Error     string `json:"error"`
+		writeJSON(w, http.StatusUnprocessableEntity, struct {
+			Code      string `json:"code"`
 			NameError string `json:"nameError"`
-		}{"name", nameCode(err)})
+		}{"bad_name", nameCode(err)})
 	case errors.Is(err, ErrAvatarTooLarge):
 		writeJSON(w, http.StatusRequestEntityTooLarge, apiError{"avatar_too_large"})
 	case errors.Is(err, ErrAvatarFormat):
 		writeJSON(w, http.StatusUnprocessableEntity, apiError{"avatar_format"})
 	case errors.Is(err, ErrNotFound):
-		writeJSON(w, http.StatusNotFound, apiError{"not_found"})
+		writeJSON(w, http.StatusUnprocessableEntity, apiError{"no_such_app"})
 	case errors.Is(err, ErrLocal):
-		writeJSON(w, http.StatusConflict, apiError{"local"})
+		writeJSON(w, http.StatusUnprocessableEntity, apiError{"built_in"})
 	default:
 		writeJSON(w, http.StatusInternalServerError, apiError{"internal"})
 	}
@@ -147,4 +149,26 @@ func readProfile(r *http.Request) (Profile, error) {
 	default:
 		return p, errMediaType
 	}
+}
+
+// serveAvatar serves an app's or login's avatar to anyone identified (Wrap). With the current
+// version in ?v= it may be cached for good.
+func (g *Gate) serveAvatar(w http.ResponseWriter, r *http.Request, id string) {
+	g.mu.Lock()
+	e, ok := g.st.endpoints[id]
+	g.mu.Unlock()
+	if !ok || len(e.Avatar) == 0 {
+		writeJSON(w, http.StatusNotFound, apiError{"not_found"})
+		return
+	}
+	h := w.Header()
+	h.Set("Content-Type", http.DetectContentType(e.Avatar))
+	h.Set("Content-Security-Policy", "default-src 'none'; sandbox")
+	h.Set("ETag", `"`+e.AvatarVersion+`"`)
+	if r.URL.Query().Get("v") == e.AvatarVersion {
+		h.Set("Cache-Control", "private, max-age=31536000, immutable")
+	} else {
+		h.Set("Cache-Control", "private, no-cache")
+	}
+	http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(e.Avatar))
 }

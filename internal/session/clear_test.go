@@ -72,7 +72,8 @@ func TestClear(t *testing.T) {
 
 // A /clear that reached Claude (its own, not Iridium's) goes on in a conversation of a new id in
 // the same process: Iridium stops it, archives the session, and takes the new conversation up in
-// its place, with its settings; the page follows (Next). The old one, resumed, is as it was.
+// its place, with its settings and launcher; the page follows (Next). The old one, resumed, is as
+// it was.
 func TestClearedInside(t *testing.T) {
 	t.Parallel()
 	r, _ := clearRig(t, 20*time.Millisecond)
@@ -80,7 +81,8 @@ func TestClearedInside(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	old, _ := r.m.Create(bg, api.NewSession{Cwd: r.cwd, Workspace: ws, Text: "hi", Mode: "plan"}, "网页")
+	top, _ := r.m.Create(bg, api.NewSession{Cwd: r.cwd, Workspace: ws}, "网页")
+	old, _ := r.m.Create(bg, api.NewSession{Cwd: r.cwd, Workspace: ws, Text: "hi", Mode: "plan", Caller: top}, "网页")
 	r.waitState(old, "the reply", func(s *api.SessionState) bool { return said(s, "ok: hi") && s.Status == api.StatusIdle })
 	if err := r.m.SetEffort(bg, old, "high"); err != nil {
 		t.Fatal(err)
@@ -97,6 +99,10 @@ func TestClearedInside(t *testing.T) {
 	n, err := r.m.State(nid)
 	if err != nil || !n.Hosted || n.Archived || n.Cwd != r.cwd || n.Effort != "high" || n.Pick != "" {
 		t.Fatalf("the new session: %+v %v", n, err)
+	}
+	// Hung under its launcher, as the old one.
+	if n.Launcher != top || n.Own {
+		t.Errorf("launcher %q own %v", n.Launcher, n.Own)
 	}
 	if over, _ := r.store.Overlays(); over[nid].Workspace != ws {
 		t.Errorf("workspace %d, not %d", over[nid].Workspace, ws)
@@ -174,6 +180,7 @@ func TestClearedInsideBeforeRestart(t *testing.T) {
 
 // Claude clears on /clear, /reset and /new, a name after them or not: Iridium runs each.
 func TestIsClear(t *testing.T) {
+	t.Parallel()
 	for text, want := range map[string]bool{
 		"/clear": true, " /CLEAR ": true, "/reset": true, "/new": true, "/clear my notes": true, "/new\nmore": true,
 		"/clearer": false, "/compact": false, "clear": false, "": false, "please /clear": false,

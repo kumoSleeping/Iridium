@@ -17,6 +17,7 @@ import (
 	"github.com/klauspost/compress/zstd"
 
 	"github.com/kumoSleeping/iridium/internal/api"
+	"github.com/kumoSleeping/iridium/internal/gate"
 	"github.com/kumoSleeping/iridium/internal/remote"
 	"github.com/kumoSleeping/iridium/internal/remote/executor"
 	"github.com/kumoSleeping/iridium/internal/remote/wire"
@@ -334,6 +335,27 @@ func testRemoteDshWorkspacesFallback(t *testing.T, kind string) {
 	if ws[0].Path != other && ws[0].Path != r.work {
 		t.Errorf("%+v", ws)
 	}
+	// Each with how many of its sessions are listed: subagents aside, archived ones aside.
+	count := func() map[string]int {
+		ws, err := r.x.DshWorkspaces(context.Background(), "m1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]int{}
+		for _, w := range ws {
+			out[w.Path] = w.Sessions
+		}
+		return out
+	}
+	if n := count(); n[other] != 2 || n[r.work] != 1 {
+		t.Errorf("sessions: %v", n)
+	}
+	if err := r.st.Hide(string(api.AgentDsh), "s2", 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(); n[other] != 1 {
+		t.Errorf("one archived: %v", n)
+	}
 }
 
 // A session open in DSH Desktop is shown run elsewhere and not resumed here, as the dsh plugin says
@@ -398,6 +420,9 @@ func testRemoteDshUnsynced(t *testing.T, kind string) {
 	r.scan()
 	if s := r.sessions(); len(s) != 4 {
 		t.Fatalf("before: %+v", s)
+	}
+	if ws, err := r.x.DshWorkspaces(context.Background(), "m1"); err != nil || len(ws) != 2 || ws[0].Sessions != 1 || ws[1].Sessions != 1 {
+		t.Errorf("workspaces with their sessions: %+v %v", ws, err)
 	}
 	unsynced := func(names ...string) {
 		b, _ := json.Marshal(append([]string{}, names...))
@@ -470,7 +495,19 @@ func testRemoteDshGone(t *testing.T, kind string) {
 	if n := later(); n != 1 {
 		t.Fatalf("its Bot there: %d sessions read back", n)
 	}
-	r.st.ForgetMachine("m1") // revoked: its connection ends with it
+	// Its row of machines gone while its app is still there: kept (what it found is not dropped
+	// for a missing row alone).
+	if err := r.st.Gate().Apply(gate.Change{Endpoints: []gate.Endpoint{{ID: "m1", Name: "pc", Kind: gate.KindChannel, TokenHash: "h"}}}); err != nil {
+		t.Fatal(err)
+	}
+	r.st.ForgetMachine("m1")
+	if n := later(); n != 1 {
+		t.Fatalf("its app there, its machine's row not: %d sessions read back", n)
+	}
+	// Its app revoked: its connection ends with it.
+	if err := r.st.Gate().Apply(gate.Change{DeleteEndpoints: []string{"m1"}}); err != nil {
+		t.Fatal(err)
+	}
 	if n := later(); n != 0 {
 		t.Errorf("its Bot gone: %d sessions read back", n)
 	}

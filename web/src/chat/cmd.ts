@@ -57,7 +57,8 @@ export function cmdOfCall(t: { name?: string; input?: string }): Cmd | undefined
   return i && cmdOf(commandOf(i), typeof i.description === "string" ? i.description : undefined);
 }
 
-/** Whether a call is only an agent naming its session (ir rename): the chat leaves it out. */
+/** Whether a call is only an agent naming its session (ir api channel.update channel_id=self
+ *  data.name=…, or the older ir rename): the chat leaves it out. */
 export function renameOnly(t: { name?: string; input?: string }): boolean {
   const i = shellInput(t);
   return !!i && renames(commandOf(i));
@@ -68,7 +69,114 @@ function renames(command: string): boolean {
   const w = segs.length === 1 && !segs[0]!.out ? strip(segs[0]!.words) : undefined;
   if (!w) return false;
   const sh = shellArg(w);
-  return sh !== undefined ? renames(sh) : /^(ir|iridium)$/.test(name(w[0]!)) && w[1] === "rename";
+  return sh !== undefined ? renames(sh) : /^(ir|iridium)$/.test(name(w[0]!)) && (w[1] === "rename" || namesSelf(w.slice(2), w[1]));
+}
+
+/** ir api's words naming the session it runs in, and nothing else. */
+function namesSelf(args: string[], sub?: string): boolean {
+  return (
+    sub === "api" &&
+    args[0] === "channel.update" &&
+    args.includes("channel_id=self") &&
+    args.some((a) => a.startsWith("data.name=")) &&
+    args.slice(1).every((a) => a === "channel_id=self" || a.startsWith("data.name="))
+  );
+}
+
+/** An ir api call's sort, by its Satori method (and what channel.update changes), or by the
+ *  path of one of Iridium's own routes (internal/…). */
+function irApiOf(method: string | undefined, args: string[]): Cmd | undefined {
+  if (method?.includes("/")) {
+    const p = method.replace(/^\/?(v1\/)?/, "").split("?")[0]!;
+    if (/^internal\/sessions\/[^/]+\/(stop|interrupt)$/.test(p)) return "ir-stop";
+    if (/^internal\/files$/.test(p)) return "ir-files";
+    if (/^internal\/guilds\//.test(p)) return "ir-ws";
+    return undefined;
+  }
+  switch (method) {
+    case "channel.create":
+      return "ir-new";
+    case "channel.list":
+      return args.some((a) => a === "--grep" || a.startsWith("--grep=")) ? "ir-find" : "ir-list";
+    case "channel.get":
+      return "ir-list";
+    case "message.create":
+      return "ir-send";
+    case "message.list":
+    case "message.get":
+      return "ir-read";
+    case "channel.delete":
+      return "ir-archive";
+    case "channel.update": {
+      const a = args.find((x) => x.startsWith("_data.archived:="));
+      return a === undefined ? "ir-rename" : a.endsWith("false") ? "ir-unarchive" : "ir-archive";
+    }
+    case "guild.list":
+    case "guild.get":
+      return "ir-ws";
+  }
+  return undefined;
+}
+
+/** An ir call's subcommand and the words after it (past cd, env, sudo, bash -c): the first ir the
+ *  command runs; none for a call that runs no ir. */
+export function irOfCall(t: { name?: string; input?: string }): { sub: string; args: string[] } | undefined {
+  const i = shellInput(t);
+  return i && irOf(commandOf(i));
+}
+
+function irOf(command: string): { sub: string; args: string[] } | undefined {
+  for (const seg of segments(command)) {
+    const w = strip(seg.words);
+    if (!w) continue;
+    const sh = shellArg(w);
+    const r = sh !== undefined ? irOf(sh) : /^(ir|iridium)$/.test(name(w[0]!)) ? { sub: w[1] ?? "", args: w.slice(2) } : undefined;
+    if (r) return r;
+  }
+  return undefined;
+}
+
+/** One side of an ir cp: a path here, or "machine:path" at another machine, by the name ir takes
+ *  (internal/cli peerPath), its path as that machine writes it. */
+export type CpSide = { machine?: string; path: string };
+const PEER = /^([A-Za-z0-9][A-Za-z0-9_.-]{0,31}):(.*)$/;
+const sideOf = (a: string): CpSide => {
+  const m = /^[/.~]/.test(a) ? null : PEER.exec(a);
+  return m ? { machine: m[1]!, path: m[2]! } : { path: a };
+};
+
+/** What an ir cp call copies: from, to; none for another call, or one not of two paths. */
+export function cpOfCall(t: { name?: string; input?: string }): { from: CpSide; to: CpSide } | undefined {
+  const ir = irOfCall(t);
+  const pos = ir?.sub === "cp" ? ir.args.filter((a) => !a.startsWith("-")) : [];
+  return pos.length === 2 ? { from: sideOf(pos[0]!), to: sideOf(pos[1]!) } : undefined;
+}
+
+/** The session an ir new or ir api channel.create call opened: the ID it printed first (internal/cli
+ *  cmdNew, then), and the agent it was asked for; none before it is done, or as it failed. Only its
+ *  result's: the task may name other sessions. */
+export function newOfCall(t: { name?: string; input?: string; result?: { text?: string; error?: boolean } }): { id: string; agent: string } | undefined {
+  if (!t.result || t.result.error) return undefined;
+  const ir = irOfCall(t);
+  const created = ir?.sub === "api" && ir.args.includes("channel.create");
+  if (ir?.sub !== "new" && !created) return undefined;
+  const id = (t.result.text ?? "").trimStart().split("\n", 1)[0]!.trim();
+  const agent = created ? (ir.args.find((a) => a.startsWith("_data.agent="))?.slice(12) ?? "") : (positional(ir.args, NEW_VALUED)[0] ?? "");
+  return /^[0-9A-Za-z_-]{6,64}$/.test(id) ? { id, agent } : undefined;
+}
+
+/** ir new's options that take a value (internal/cli cmdNew). */
+const NEW_VALUED = new Set(["model", "approve", "machine", "workspace"]);
+
+/** The words that are no option nor an option's value. */
+function positional(args: string[], valued: Set<string>): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i]!;
+    if (!a.startsWith("-") || a === "-") out.push(a);
+    else if (!a.includes("=") && valued.has(a.replace(/^-+/, ""))) i++;
+  }
+  return out;
 }
 
 const commandOf = (i: Record<string, unknown>) => {
@@ -154,7 +262,7 @@ function sortOf(cmd: string, args: string[], out: boolean): Cmd | undefined {
   switch (cmd) {
     case "ir":
     case "iridium":
-      return IR[sub ?? ""];
+      return sub === "api" ? irApiOf(/^(GET|POST|PUT|PATCH|DELETE)$/.test(pos[1] ?? "") ? pos[2] : pos[1], args) : IR[sub ?? ""];
     case "git":
       return gitOf(args);
     case "gh":

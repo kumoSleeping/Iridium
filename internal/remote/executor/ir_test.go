@@ -16,7 +16,7 @@ func TestWithIR(t *testing.T) {
 	// Stands in for the binary: says how it was named and what it got.
 	fake := filepath.Join(state, "iridium")
 	os.WriteFile(fake, []byte("#!/bin/sh\necho \"$(basename \"$0\") $IRIDIUM_URL $IRIDIUM_TOKEN $*\"\n"), 0o755)
-	e := &Executor{o: Options{URL: "wss://ir.example.com/api/exec", State: state, IR: fake, Logf: t.Logf}}
+	e := &Executor{o: Options{URL: "wss://ir.example.com/v1/internal/exec", State: state, IR: fake, Logf: t.Logf}}
 	dir := filepath.Join(state, "holds", "h1")
 	if got := e.withIR([]string{"PATH=/usr/bin"}, dir); strings.Join(got, " ") != "PATH=/usr/bin" {
 		t.Errorf("without a TOKEN: %v", got)

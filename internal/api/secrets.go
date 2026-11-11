@@ -35,13 +35,13 @@ type SecretUse struct {
 	At       int64  `json:"at"`
 }
 
-// Secrets is GET /api/secrets: every secret by name, and the newest uses, newest first.
+// Secrets is GET /v1/internal/secrets: every secret by name, and the newest uses, newest first.
 type Secrets struct {
 	Secrets []SecretInfo `json:"secrets"`
 	Uses    []SecretUse  `json:"uses"`
 }
 
-// SetSecret is PUT /api/secrets/{name}. Value "": one stored keeps its value (only what is said of
+// SetSecret is PUT /v1/internal/secrets/{name}. Value "": one stored keeps its value (only what is said of
 // it changes); from an agent, a panel types it (202 Pending). Note, Scope, Always nil or "": as
 // they were (a new one: no note, all, false). Only a panel changes Scope and Always.
 type SetSecret struct {
@@ -52,7 +52,7 @@ type SetSecret struct {
 	Always     *bool       `json:"always,omitempty"`
 }
 
-// UseSecrets is POST /api/secrets/use, for ir run alone: the session it runs in, the secrets it
+// UseSecrets is POST /v1/internal/secrets/use, for ir run alone: the session it runs in, the secrets it
 // wants and the command's opening. Confirm: a secret-use confirmation that was allowed, to use it.
 type UseSecrets struct {
 	Session string   `json:"session,omitempty"`

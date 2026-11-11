@@ -15,13 +15,13 @@ import (
 // noteRoutes are the notes (docs/api.md "便签"): the panels' and 本机's, as the colour tags are.
 // Each change carries every note again (the state "notes").
 func (s *Server) noteRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/notes", s.manages(s.notes))
-	mux.HandleFunc("POST /api/notes", s.manages(s.newNote))
-	mux.HandleFunc("PATCH /api/notes/{id}", s.manages(s.patchNote))
-	mux.HandleFunc("DELETE /api/notes/{id}", s.manages(s.deleteNote))
-	mux.HandleFunc("POST /api/note-folders", s.manages(s.newNoteFolder))
-	mux.HandleFunc("PATCH /api/note-folders/{id}", s.manages(s.patchNoteFolder))
-	mux.HandleFunc("DELETE /api/note-folders/{id}", s.manages(s.deleteNoteFolder))
+	mux.HandleFunc("GET /v1/internal/notes", s.manages(s.notes))
+	mux.HandleFunc("POST /v1/internal/notes", s.manages(s.newNote))
+	mux.HandleFunc("PATCH /v1/internal/notes/{id}", s.manages(s.patchNote))
+	mux.HandleFunc("DELETE /v1/internal/notes/{id}", s.manages(s.deleteNote))
+	mux.HandleFunc("POST /v1/internal/note-folders", s.manages(s.newNoteFolder))
+	mux.HandleFunc("PATCH /v1/internal/note-folders/{id}", s.manages(s.patchNoteFolder))
+	mux.HandleFunc("DELETE /v1/internal/note-folders/{id}", s.manages(s.deleteNoteFolder))
 }
 
 // noteMax is the longest a note's words may be, in bytes.
@@ -50,7 +50,7 @@ func (s *Server) notes(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) noteError(w http.ResponseWriter, err error) {
 	if errors.Is(err, store.ErrNoNote) {
-		fail(w, http.StatusNotFound, err.Error())
+		refuse(w, http.StatusUnprocessableEntity, "no_such_note", err.Error())
 		return
 	}
 	s.error(w, err)

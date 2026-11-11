@@ -1,0 +1,261 @@
+package webapp
+
+import (
+	"bytes"
+	"encoding/base64"
+	"image"
+	"image/color"
+	_ "image/jpeg"
+	"image/png"
+	"mime/multipart"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/kumoSleeping/iridium/internal/gate"
+)
+
+// halves is a w×h image, left half red and right half blue, with alpha a.
+func halves(w, h int, a uint8) *image.NRGBA {
+	img := image.NewNRGBA(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			c := color.NRGBA{0, 0, 255, a}
+			if x < w/2 {
+				c = color.NRGBA{255, 0, 0, a}
+			}
+			img.SetNRGBA(x, y, c)
+		}
+	}
+	return img
+}
+
+func encodePNG(img image.Image) []byte {
+	var b bytes.Buffer
+	png.Encode(&b, img)
+	return b.Bytes()
+}
+
+func decodeAvatar(t *testing.T, data []byte) image.Image {
+	t.Helper()
+	img, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("decode avatar: %v", err)
+	}
+	return img
+}
+
+func TestChannelTokensAndProfiles(t *testing.T) {
+	h := newHarness(t, testOrigin)
+	a := &authenticator{t: t, origin: testOrigin}
+	wantStatus(t, h.join(a, h.setupToken(), ptr("mac")), http.StatusOK)
+	panelCookie := h.cookie
+
+	// `ir token qq`: a channel endpoint with a bearer token.
+	info, tok, err := h.g.CreateToken("QQ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.secrets = append(h.secrets, tok)
+	if info.Kind != gate.KindChannel || info.Name != "QQ" || !strings.HasPrefix(tok, "ir_") {
+		t.Fatalf("token: %+v", info)
+	}
+	// Names are unique among apps, not across apps and logins: an app may share a browser's name.
+	if _, _, err := h.g.CreateNewToken("QQ"); err != gate.ErrNameTaken {
+		t.Fatalf("a second app by the same name: %v", err)
+	}
+	bot := func(q req) *httptest.ResponseRecorder {
+		if q.header == nil {
+			q.header = map[string]string{}
+		}
+		q.header["Authorization"] = "Bearer " + tok
+		q.header["Origin"] = "" // plugins are not browsers
+		q.header["Sec-Fetch-Site"] = ""
+		q.noCookie = true
+		return h.do(q)
+	}
+	w := bot(req{method: "POST", path: "/v1/internal/chat/qq:private:1/input"})
+	wantStatus(t, w, http.StatusOK)
+	if id := decode[appReply](t, w); id.App != info.ID || id.Login != "" || id.Name != "QQ" {
+		t.Fatalf("bot identity: %+v", id)
+	}
+	wantStatus(t, h.do(req{path: "/v1/internal/x", noCookie: true, header: map[string]string{"Authorization": "Bearer ir_" + strings.Repeat("x", 43)}}), http.StatusUnauthorized)
+	wantStatus(t, h.do(req{path: "/v1/internal/x", noCookie: true, header: map[string]string{"Authorization": "Bearer junk"}}), http.StatusUnauthorized)
+
+	// The bot sets its own avatar and name (multipart).
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	mw.WriteField("name", "QQ Bot")
+	fw, _ := mw.CreateFormFile("avatar", "bot.png")
+	fw.Write(encodePNG(halves(256, 256, 255)))
+	mw.Close()
+	w = bot(req{method: "PUT", path: "/v1/internal/me/profile", body: body.Bytes(), header: map[string]string{"Content-Type": mw.FormDataContentType()}})
+	wantStatus(t, w, http.StatusOK)
+	info = decode[gate.EndpointInfo](t, w)
+	if info.Name != "QQ Bot" || !strings.HasPrefix(info.Avatar, "/_ir/avatar/"+info.ID+"?v=") {
+		t.Fatalf("bot profile: %+v", info)
+	}
+	// A bot cannot change another endpoint.
+	var mac gate.EndpointInfo
+	for _, e := range h.g.Access().Endpoints {
+		if e.Kind == gate.KindPanel {
+			mac = e
+		}
+	}
+	w = bot(req{method: "PUT", path: "/v1/internal/apps/" + mac.ID + "/profile", body: map[string]any{"name": "pwned"}})
+	wantStatus(t, w, http.StatusForbidden)
+
+	// The panel sees the avatar; outsiders do not; the version URL is cacheable.
+	w = h.do(req{path: info.Avatar})
+	wantStatus(t, w, http.StatusOK)
+	if w.Header().Get("Content-Type") != "image/jpeg" || w.Header().Get("Cache-Control") != "private, max-age=31536000, immutable" {
+		t.Fatalf("avatar headers: %v", w.Header())
+	}
+	decodeAvatar(t, w.Body.Bytes())
+	w = h.do(req{path: info.Avatar, header: map[string]string{"If-None-Match": w.Header().Get("ETag")}})
+	wantStatus(t, w, http.StatusNotModified)
+	if cc := h.do(req{path: "/_ir/avatar/" + info.ID}).Header().Get("Cache-Control"); cc != "private, no-cache" {
+		t.Fatalf("unversioned avatar cache-control %q", cc)
+	}
+	wantStatus(t, bot(req{path: info.Avatar}), http.StatusOK)
+	wantStatus(t, h.do(req{path: info.Avatar, noCookie: true}), http.StatusUnauthorized)
+
+	// The panel renames the bot (JSON), names stay unique among apps, and removes its avatar.
+	if _, other, err := h.g.CreateToken("Mac"); err != nil {
+		t.Fatal(err)
+	} else {
+		h.secrets = append(h.secrets, other)
+	}
+	w = h.do(req{method: "PUT", path: "/v1/internal/apps/" + info.ID + "/profile", body: map[string]any{"name": "MAC"}})
+	wantStatus(t, w, http.StatusUnprocessableEntity)
+	if r := decode[joinReply](t, w); r.NameError != "taken" {
+		t.Fatalf("rename to a taken name: %s", w.Body.String())
+	}
+	w = h.do(req{method: "PUT", path: "/v1/internal/apps/" + info.ID + "/profile", body: map[string]any{"name": "qq", "removeAvatar": true}})
+	wantStatus(t, w, http.StatusOK)
+	if got := decode[gate.EndpointInfo](t, w); got.Name != "qq" || got.Avatar != "" {
+		t.Fatalf("after panel update: %+v", got)
+	}
+	wantStatus(t, h.do(req{path: info.Avatar}), http.StatusNotFound)
+
+	// The panel updates itself: case change of its own name, avatar as a data: URL.
+	data := "data:image/png;base64," + base64.StdEncoding.EncodeToString(encodePNG(halves(40, 40, 0)))
+	w = h.do(req{method: "PUT", path: "/v1/internal/me/profile", body: map[string]any{"name": "Mac", "avatar": data}})
+	wantStatus(t, w, http.StatusOK)
+	if got := decode[gate.EndpointInfo](t, w); got.Name != "Mac" || got.Avatar == "" {
+		t.Fatalf("self update: %+v", got)
+	}
+	w = h.do(req{method: "PUT", path: "/v1/internal/me/profile", body: map[string]any{"avatar": base64.StdEncoding.EncodeToString([]byte("GIF89a"))}})
+	wantStatus(t, w, http.StatusUnprocessableEntity)
+	w = h.do(req{method: "PUT", path: "/v1/internal/me/profile", body: []byte("x"), header: map[string]string{"Content-Type": "text/plain"}})
+	wantStatus(t, w, http.StatusUnsupportedMediaType)
+	// Cookie-authenticated profile writes need our origin.
+	w = h.do(req{method: "PUT", path: "/v1/internal/me/profile", body: map[string]any{"name": "evil"}, header: map[string]string{"Origin": "https://evil.example"}})
+	wantStatus(t, w, http.StatusForbidden)
+
+	// Admin function, by name.
+	if _, err := h.g.UpdateProfile("qq", gate.Profile{Name: ptr("本机")}); err != gate.ErrNameReserved {
+		t.Fatalf("reserved: %v", err)
+	}
+	if _, err := h.g.UpdateProfile(gate.HostName, gate.Profile{Name: ptr("x")}); err != gate.ErrLocal {
+		t.Fatalf("local: %v", err)
+	}
+	if _, err := h.g.UpdateProfile("nobody", gate.Profile{}); err != gate.ErrNotFound {
+		t.Fatalf("missing: %v", err)
+	}
+
+	// Re-issuing the token cuts off the old one and its connections.
+	var closed bool
+	r := httptest.NewRequest("GET", "/v1/internal/events", nil)
+	r.Host = "ir.example.com"
+	r.Header.Set("Authorization", "Bearer "+tok)
+	h.chain(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h.g.Track(r, func() { closed = true })
+	})).ServeHTTP(httptest.NewRecorder(), r)
+	_, tok2, err := h.g.CreateToken("QQ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.secrets = append(h.secrets, tok2)
+	if !closed {
+		t.Fatal("old token's connection still open")
+	}
+	wantStatus(t, bot(req{path: "/v1/internal/x"}), http.StatusUnauthorized)
+	tok = tok2
+	wantStatus(t, bot(req{path: "/v1/internal/x"}), http.StatusOK)
+
+	// Revoking the channel is always allowed.
+	if err := h.revoke("qq"); err != nil {
+		t.Fatal(err)
+	}
+	wantStatus(t, bot(req{path: "/v1/internal/x"}), http.StatusUnauthorized)
+	h.cookie = panelCookie
+	if _, code := h.whoami(); code != 200 {
+		t.Fatal("panel lost its session")
+	}
+	h.noSecretsLogged()
+}
+
+func TestChannelInLocalMode(t *testing.T) {
+	h := newHarness(t, "")
+	_, tok, err := h.g.CreateToken("bot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	do := func(auth string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("POST", "/v1/internal/x", nil)
+		r.Host = "127.0.0.1:7810"
+		r.RemoteAddr = "127.0.0.1:1"
+		if auth != "" {
+			r.Header.Set("Authorization", auth)
+		}
+		w := httptest.NewRecorder()
+		h.h.ServeHTTP(w, r)
+		return w
+	}
+	if id := decode[appReply](t, do("Bearer "+tok)); id.Name != "bot" || id.Host {
+		t.Fatalf("channel in local mode: %+v", id)
+	}
+	if id := decode[appReply](t, do("")); !id.Host {
+		t.Fatalf("no token in local mode: %+v", id)
+	}
+	wantStatus(t, do("Bearer ir_"+strings.Repeat("A", 43)), http.StatusUnauthorized)
+	// 本机 has no stored profile.
+	r := httptest.NewRequest("PUT", "/v1/internal/me/profile", strings.NewReader(`{"name":"x"}`))
+	r.Host = "127.0.0.1:7810"
+	r.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.h.ServeHTTP(w, r)
+	wantStatus(t, w, http.StatusUnprocessableEntity)
+}
+
+// A Bot found by its TOKEN, renamed or not; once revoked, its TOKEN's hash still names it.
+func TestByToken(t *testing.T) {
+	h := newHarness(t, testOrigin)
+	info, tok, err := h.g.CreateToken("QQ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.secrets = append(h.secrets, tok)
+	name := "小铱"
+	if _, err := h.g.UpdateProfile(info.ID, gate.Profile{Name: &name}); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := h.g.ByToken(tok + "\n"); !ok || got.ID != info.ID || got.Name != name {
+		t.Fatalf("by token: %+v %v", got, ok)
+	}
+	if _, ok := h.g.ByToken("ir_nope"); ok {
+		t.Fatal("a token of no one's")
+	}
+	hash := h.g.TokenHash(info.ID)
+	if err := h.revoke(info.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := h.g.ByToken(tok); ok {
+		t.Fatal("revoked, still found")
+	}
+	if !gate.SameToken(hash, tok) || gate.SameToken(hash, "ir_other") || gate.SameToken("", tok) {
+		t.Fatal("SameToken")
+	}
+}

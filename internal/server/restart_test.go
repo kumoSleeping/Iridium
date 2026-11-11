@@ -1,13 +1,11 @@
 package server
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -50,19 +48,19 @@ func runDaemon(t *testing.T, cfg config.Config, st *store.Store, l *platform.Dir
 	return d
 }
 
-// After a restart, over HTTP: the open ask is back with its card and POST /api/answer ends the
+// After a restart, over HTTP: the open ask is back with its card and POST /v1/internal/button ends the
 // turn; the context and the quota come back as last read, on GET and on the stream.
 func TestRestartOverHTTP(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	bin := filepath.Join(root, "bin")
 	os.MkdirAll(bin, 0o700)
-	os.Symlink(os.Args[0], filepath.Join(bin, "claude"))
 	cfg := config.Default()
 	cfg.Listen = "127.0.0.1:0"
 	cfg.StateDir = filepath.Join(root, "state")
 	cfg.Socket = filepath.Join(root, "run", "ir.sock")
 	cfg.ClaudeHome = filepath.Join(root, "claude")
-	cfg.Programs["claude"] = filepath.Join(bin, "claude")
+	cfg.Programs = testagent.Programs(t, bin)
 	work := filepath.Join(root, "work")
 	os.MkdirAll(work, 0o700)
 	os.MkdirAll(cfg.StateDir, 0o700)
@@ -76,7 +74,7 @@ func TestRestartOverHTTP(t *testing.T) {
 	c := &http.Client{Timeout: 10 * time.Second}
 	state := func(base, id string) api.SessionState {
 		var s api.SessionState
-		if code := call(t, c, "GET", base+"/api/sessions/"+id, nil, &s); code != 200 {
+		if code := call(t, c, "GET", base+"/v1/internal/sessions/"+id, nil, &s); code != 200 {
 			t.Fatalf("state: %d", code)
 		}
 		return s
@@ -94,11 +92,10 @@ func TestRestartOverHTTP(t *testing.T) {
 	}
 
 	d := runDaemon(t, cfg, st, l)
-	var created api.NewSessionReply
-	call(t, c, "POST", d.base+"/api/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: work, Text: "first"}, &created)
-	id := created.ID
+	created, _ := createAt(t, c, d.base, api.NewSession{Agent: api.AgentClaude, Cwd: work, Text: "first"})
+	id := created
 	before := wait(d.base, id, "the context", func(s api.SessionState) bool { return s.Context != nil && s.Status == api.StatusIdle })
-	call(t, c, "POST", d.base+"/api/sessions/"+id+"/send", api.Send{Text: "please ASK"}, nil)
+	sendAt(t, c, d.base, id, api.Send{Text: "please ASK"})
 	wait(d.base, id, "the ask", func(s api.SessionState) bool { return s.Status == api.StatusWaiting })
 	d.stop()
 
@@ -113,23 +110,21 @@ func TestRestartOverHTTP(t *testing.T) {
 	}
 
 	// The stream's first states: the context's parts and the quota, as last read.
-	resp, err := http.Get(d.base + "/api/events?sub=context:" + id + "&sub=quota")
-	if err != nil {
-		t.Fatal(err)
-	}
 	got := map[string]json.RawMessage{}
-	sc := bufio.NewScanner(resp.Body)
-	for len(got) < 2 && sc.Scan() {
-		if v, ok := strings.CutPrefix(sc.Text(), "data: "); ok {
+	states := watchStates(t, d.base, nil, "context:"+id, "quota")
+	for deadline := time.After(5 * time.Second); len(got) < 2; {
+		select {
+		case st := <-states:
 			var e struct {
 				Key   string          `json:"key"`
 				Value json.RawMessage `json:"value"`
 			}
-			json.Unmarshal([]byte(v), &e)
+			json.Unmarshal(st.Data, &e)
 			got[e.Key] = e.Value
+		case <-deadline:
+			t.Fatalf("states after the restart: %d", len(got))
 		}
 	}
-	resp.Body.Close()
 	var cx api.Context
 	var q api.Quota
 	json.Unmarshal(got["context:"+id], &cx)
@@ -141,9 +136,8 @@ func TestRestartOverHTTP(t *testing.T) {
 		t.Errorf("quota after the restart: %s", got["quota"])
 	}
 
-	var cr api.CardReply
-	if code := call(t, c, "POST", d.base+"/api/answer", api.CardAnswer{Card: s.Asks[0].Card.ID, Option: "allow"}, &cr); code != 200 || !cr.OK {
-		t.Fatalf("answer: %d %+v", code, cr)
+	if code := answerAt(t, c, d.base, api.CardAnswer{Card: s.Asks[0].Card.ID, Option: "allow"}); code != 200 {
+		t.Fatalf("answer: %d", code)
 	}
 	wait(d.base, id, "the reply", func(s api.SessionState) bool {
 		return s.Last != nil && s.Last.Text == "ok: please ASK" && s.Status == api.StatusIdle

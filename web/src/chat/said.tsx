@@ -6,25 +6,29 @@
 // centred and faint; the agent's words as Markdown with the files they name; tool calls and
 // thoughts folded to a line.
 import { Archive, ArchiveRestore, ArrowUpRight, BookOpen, Bot, BotMessageSquare, ChartColumn, Check, ChevronRight, CircleStop, CircleX, Clock, CloudDownload, CloudUpload, Copy, Cpu, Earth, FileCode, FileDiff, FilePen, Files as FilesIcon, FileText, FlaskConical, FolderGit2, FolderOpen, Folders, FoldVertical, GitBranch, GitCommitHorizontal, GitPullRequest, Globe, Hammer, History, Hourglass, KeyRound, Laptop, List, ListChecks, LoaderCircle, LockKeyhole, MessageCircleQuestionMark, MessageSquarePlus, Monitor, MonitorSmartphone, Network, Package, PencilLine, Plug, RotateCcw, RotateCw, Search, Send, ServerCog, Smartphone, SquareTerminal, Terminal, Trash2, type LucideIcon, UserRound, Workflow as WorkflowIcon, Wrench, X } from "lucide-react";
+import { Shareable } from "../share";
 import { Children, forwardRef, memo, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Popover } from "@base-ui/react/popover";
 import { api } from "../api/client";
 import type { Block, FileRef, Result } from "../api/types.gen";
 import type { Sent } from "../chats";
 import { t } from "../i18n";
-import { Avatar, Badge, cn, IconKey, Logo, tilde, Tip } from "../ui";
-import { useHome } from "../data";
+import { agentName, Avatar, Badge, cn, IconKey, Logo, tilde, Tip, titleOf } from "../ui";
+import { useHome, useMachines } from "../data";
 import { LocalMark } from "../me";
 import { go } from "../route";
-import { Files, Picture, previews, size } from "./files";
+import { Files, isLink, Picture, previews, SentFile } from "./files";
 import { Pictures } from "./pictures";
-import { cmdOfCall, isShell, type Cmd } from "./cmd";
+import { cmdOfCall, cpOfCall, isShell, newOfCall, type Cmd, type CpSide } from "./cmd";
 import { argOf, diffSum, foldLine, foldSaid, kindOf, runCmds, type Diff, type Kind, type Shown, type Step, type Tool } from "./fold";
 import { Code } from "./hl";
 import { Markdown } from "./markdown";
 import { partialInput } from "./partial";
-import { MentionCard, Mentioned } from "./mention";
-import { leadingMentions, type Source, withoutFiles, withoutNameLines } from "./refs";
+import { machineNamed, MentionCard, NamedCards, useNamed } from "./mention";
+import { leadingMentions, type Mention, sessionOf, type Source, withoutFiles, withoutNameLines } from "./refs";
+import { MachineFace } from "../machines";
+import { useList } from "../store";
+import type { Agent } from "../api/types.gen";
 
 type You = Extract<Source, { kind: "you" }>;
 type From = Extract<Source, { kind: "letter" }>;
@@ -75,7 +79,7 @@ function Face({ who }: { who: You | From }) {
         {badge}
       </span>
     );
-  return <Avatar src={who.avatar} name={who.name} size={FACE} channel badgeSize={BADGE} />;
+  return <Avatar src={who.avatar} name={who.name} size={FACE} type={who.type} badgeSize={BADGE} />;
 }
 
 /** One message of the user's side, QQ-like: the face beside it, the name above, yours on the right.
@@ -135,15 +139,17 @@ function SendState({ state }: { state: Going }) {
 }
 
 export const YouBubble = forwardRef<HTMLDivElement, { text: string; who: You; failed?: boolean; children?: ReactNode; time?: number; going?: Going }>(function YouBubble({ text: all, who, failed, children, time, going }, ref) {
-  // The sessions named before the words: cards with the files, as they were in the composer.
-  const { named, words: text } = useMemo(() => leadingMentions(all), [all]);
+  // The sessions named before the words: cards with the files, as they were in the composer; those
+  // named among the words or by id the same cards, the words as written.
+  const text = useMemo(() => leadingMentions(all).words, [all]);
+  const named = useNamed(all);
   const row = named.length + Children.count(children) > 0;
   return (
     <Sender ref={ref} who={who} title={time ? clock(time) : undefined}>
       <div className="relative max-w-[min(560px,100%)] px-3.5 py-2">
         {going && <SendState state={going} />}
         <span data-bubble-bg className={cn("absolute inset-0 rounded-xl rounded-tr-sm bg-fill", failed && "shadow-[inset_0_0_0_1px_var(--err)]")} aria-hidden />
-        {text && <span className="relative block text-md whitespace-pre-wrap [overflow-wrap:anywhere]"><Mentioned text={text} /></span>}
+        {text && <span className="relative block text-md whitespace-pre-wrap [overflow-wrap:anywhere]">{text}</span>}
         {/* Not for no files: a message sent and the same one landed are as high (an empty list was
             a row of its own, the bubble shrinking as it landed). */}
         {row && (
@@ -159,17 +165,12 @@ export const YouBubble = forwardRef<HTMLDivElement, { text: string; who: You; fa
   );
 });
 
-/** A file in your words: a picture small, opening the original; any other its name and size. */
+/** A file in your words, as it was in the composer: a picture small, opening the original; any
+ *  other its card. */
 function Attached({ session, f }: { session: string; f: FileRef }) {
   const url = api.fileURL(session, f.ref, false, f.mtime);
-  if (f.kind === "image") return <Picture src={f.thumb ? api.thumbURL(session, f.ref, 256, f.mtime) : url} full={url} name={f.name} small under={previews.get(f.path)} />;
-  return (
-    <a href={api.fileURL(session, f.ref, true, f.mtime)} download={f.name} className="flex max-w-full items-center gap-1 rounded-md bg-paper/60 px-1.5 py-0.5 text-xs text-ink-2 hover:text-ink">
-      <FileText size={12} className="shrink-0" />
-      <span className="truncate">{f.name}</span>
-      <span className="shrink-0 text-ink-3 tabular-nums">{size(f.size)}</span>
-    </a>
-  );
+  if (f.kind === "image") return <Picture src={f.thumb ? api.thumbURL(session, f.ref, 256, f.mtime) : url} full={url} name={f.name} small under={previews.get(f.path)} w={f.w} h={f.h} />;
+  return <SentFile name={f.name} bytes={f.size} href={api.fileURL(session, f.ref, true, f.mtime)} />;
 }
 
 /** A message sent from here the transcript has yet to bring: its mark says where it is; not taken,
@@ -180,14 +181,7 @@ export function Pending({ s, who, retry, drop, bubbleRef }: { s: Sent; who: You;
     <div className="flex flex-col items-end gap-0.5">
       <YouBubble ref={bubbleRef} text={s.text} who={who} failed={s.failed !== undefined} going={s.failed !== undefined ? undefined : s.queued ? "queued" : s.steer ? "steering" : "sending"}>
         {s.files.map((f) =>
-          f.url ? (
-            <Picture key={f.ref} src={f.url} full={f.url} name={f.name} small />
-          ) : (
-          <span key={f.ref} className="flex items-center gap-1 rounded-md bg-paper/60 px-1.5 py-0.5 text-xs text-ink-2">
-            <FileText size={12} />
-            {f.name}
-          </span>
-          ),
+          f.url ? <Picture key={f.ref} src={f.url} full={f.url} name={f.name} small /> : <SentFile key={f.ref} name={f.name} bytes={f.size} />,
         )}
       </YouBubble>
       {s.failed !== undefined && (
@@ -207,10 +201,24 @@ export function Pending({ s, who, retry, drop, bubbleRef }: { s: Sent; who: You;
 
 /** A letter: from another session's ir, a plugin or a peer. Not your words: on the left, in a grey
  *  bubble as yours are (the user, 2026-11-06). */
-function Letter({ src, text, time, onJump }: { src: From; text: string; time?: number; onJump: (id: string) => void }) {
+function Letter({ src, text, time, onJump, children }: { src: From; text: string; time?: number; onJump: (id: string) => void; children?: ReactNode }) {
+  // Its files as in your bubble (ir send -a): they were not shown at all. The sessions it names
+  // (ir send 4ceb1321 …) as cards before them, the words as written.
+  const named = useNamed(text);
+  const files = named.length + Children.count(children) > 0;
   return (
     <Sender who={src} title={time ? clock(time) : undefined} jump={src.session ? () => onJump(src.session!) : undefined}>
-      <p className="m-0 max-w-[min(560px,100%)] min-w-0 rounded-xl rounded-tr-sm bg-fill px-3.5 py-2 text-md whitespace-pre-wrap [overflow-wrap:anywhere]"><Mentioned text={text} /></p>
+      <div className="max-w-[min(560px,100%)] min-w-0 rounded-xl rounded-tr-sm bg-fill px-3.5 py-2">
+        {text && <p className="m-0 text-md whitespace-pre-wrap [overflow-wrap:anywhere]">{text}</p>}
+        {files && (
+          <div className={cn("flex flex-wrap gap-1.5", text && "mt-1")}>
+            {named.map((m, i) => (
+              <MentionCard key={i} m={m} />
+            ))}
+            {children}
+          </div>
+        )}
+      </div>
     </Sender>
   );
 }
@@ -264,14 +272,19 @@ export function Compaction({ b, since }: { b?: Block; since?: number }) {
 
 const SYSTEM: Record<string, Parameters<typeof t>[0]> = { compact: "sys.compact", interrupted: "sys.interrupted", unreadable: "sys.unreadable", api_error: "sys.apiError", local_command: "sys.localCommand" };
 
-/** What the agent said: Markdown, then the files it gives ([文件] `path` lines). */
+/** What the agent said: Markdown, its file links (ir:<id>) in place, then the files its file lines
+ *  give ([文件] `path`). */
 const Assistant = memo(function Assistant({ b, session }: { b: Block; session: string }) {
   const home = useHome().data;
   const text = withoutFiles(withoutNameLines(b.text ?? ""), new Set(b.files?.map((f) => f.path)), home);
+  // A file link's file shows where the words put it; the rest (file lines) under them.
+  const under = b.files?.filter((f) => !isLink(f)) ?? [];
   return (
     <div className="flex min-w-0 flex-col items-start gap-2 pr-6">
-      {text && <Markdown text={text} className="w-full" />}
-      {!!b.files?.length && <Files session={session} files={b.files} />}
+      {text && <Markdown text={text} className="w-full" session={session} files={b.files ?? undefined} />}
+      {/* The sessions it names by id (09eeb223), as cards: the words as written. */}
+      <NamedCards text={text} />
+      {!!under.length && <Files session={session} files={under} />}
     </div>
   );
 });
@@ -282,10 +295,15 @@ export function Said({ b, session, cwd, source, onJump }: { b: Shown; session: s
       const src = source(b);
       const text = b.text ?? "";
       if (src.kind === "iridium") return <Line icon={<RotateCcw size={12} />}>{text}</Line>;
-      if (src.kind === "letter") return <Letter src={src} text={text} time={b.time} onJump={onJump} />;
       // The server writes each attachment as a line "[附件] `path`" (absolute): the file shows as itself instead.
       const paths = new Set(b.files?.map((f) => f.path));
       const words = paths.size ? withoutFiles(text, paths) : text;
+      if (src.kind === "letter")
+        return (
+          <Letter src={src} text={words} time={b.time} onJump={onJump}>
+            {b.files?.map((f) => <Attached key={f.ref} session={session} f={f} />)}
+          </Letter>
+        );
       return (
         <YouBubble text={words} who={src} time={b.time} >
           {b.files?.map((f) => <Attached key={f.ref} session={session} f={f} />)}
@@ -293,7 +311,11 @@ export function Said({ b, session, cwd, source, onJump }: { b: Shown; session: s
       );
     }
     case "assistant":
-      return <Assistant b={b} session={session} />;
+      return (
+        <Shareable thing={{ what: "reply", session, at: b.at }} copy={b.text ?? ""}>
+          <Assistant b={b} session={session} />
+        </Shareable>
+      );
     case "system":
       if (b.event === "iridium") return <Line icon={<RotateCcw size={12} />} title={b.text}>{b.text}</Line>;
       if (b.event === "compact") return <Compaction b={b} />;
@@ -426,11 +448,12 @@ function StepLine({ s, cwd, bare }: { s: Step; cwd?: string; bare?: boolean }) {
       </>
     );
   const a = argOf(s, cwd);
+  const cp = cpOfCall(s);
   return (
     <>
       {!bare && <StepIcon s={s} />}
       {!isShell(s.name) && <span className="shrink-0 text-ink-2">{s.name}</span>}
-      <span className={cn("min-w-0 truncate", a.code ? "font-mono text-xs" : "text-xs")}>{a.arg}</span>
+      {cp ? <CpArg from={cp.from} to={cp.to} /> : <span className={cn("min-w-0 truncate", a.code ? "font-mono text-xs" : "text-xs")}>{a.arg}</span>}
       {a.diff && !failed(s) && <DiffStat d={a.diff} />}
       {failed(s) && <CircleX size={13} className="shrink-0 text-err" aria-label={t("msg.failed")} />}
     </>
@@ -448,40 +471,46 @@ function Fold({ steps, session, cwd }: { steps: Step[]; session: string; cwd: st
   const runs = foldLine(steps);
   const diff = diffSum(runs);
   const bad = steps.filter(failed).length;
+  const opened = steps.flatMap((s) => (s.kind === "tool" && newOfCall(s)) || []);
   return (
-    <details className="group/fold -my-0.5 w-full min-w-0">
-      <summary className={ROW} aria-label={foldSaid(runs)}>
-        <span className="min-w-0 truncate">
-          {runs.map((r, i) => (
-            <span key={i} className={cn(i > 0 && "ml-3")}>
-              {(r.name ? runCmds(steps, r.name) : [{ cmd: undefined, n: 1 }]).map((g, j, gs) => (
-                <span key={j} className={cn("inline-block", j < gs.length - 1 ? "mr-1.5" : !isShell(r.name) && "mr-2")}>
-                  <KindIcon kind={r.name ? kindOf(r.name) : "thinking"} cmd={g.cmd} shell={isShell(r.name)} className="inline-block align-[-2.5px]" />
-                  {(gs.length > 1 || isShell(r.name)) && g.n > 1 && <span className="text-xs tabular-nums">×{g.n}</span>}
-                </span>
-              ))}
-              {/* A shell's run is its icons alone, each with how many (the user, 2026-11-09): no
-                  room after the last for a name, only the gap between runs. */}
-              {!isShell(r.name) && <span className="text-ink-2">{r.name || t("msg.thinking")}</span>}
-              {!isShell(r.name) && r.n > 1 && <span className="tabular-nums"> ×{r.n}</span>}
-            </span>
-          ))}
-        </span>
-        {diff && <DiffStat d={diff} />}
-        {bad > 0 && (
-          <span className="flex shrink-0 items-center gap-0.5 text-xs text-err tabular-nums">
-            <CircleX size={13} aria-label={t("msg.failed")} />
-            {bad > 1 && bad}
+    <div className="min-w-0">
+      <details className="group/fold -my-0.5 w-full min-w-0">
+        <summary className={ROW} aria-label={foldSaid(runs)}>
+          <span className="min-w-0 truncate">
+            {runs.map((r, i) => (
+              <span key={i} className={cn(i > 0 && "ml-3")}>
+                {(r.name ? runCmds(steps, r.name) : [{ cmd: undefined, n: 1 }]).map((g, j, gs) => (
+                  <span key={j} className={cn("inline-block", j < gs.length - 1 ? "mr-1.5" : !isShell(r.name) && "mr-2")}>
+                    <KindIcon kind={r.name ? kindOf(r.name) : "thinking"} cmd={g.cmd} shell={isShell(r.name)} className="inline-block align-[-2.5px]" />
+                    {(gs.length > 1 || isShell(r.name)) && g.n > 1 && <span className="text-xs tabular-nums">×{g.n}</span>}
+                  </span>
+                ))}
+                {/* A shell's run is its icons alone, each with how many (the user, 2026-11-09): no
+                    room after the last for a name, only the gap between runs. */}
+                {!isShell(r.name) && <span className="text-ink-2">{r.name || t("msg.thinking")}</span>}
+                {!isShell(r.name) && r.n > 1 && <span className="tabular-nums"> ×{r.n}</span>}
+              </span>
+            ))}
           </span>
-        )}
-        <ChevronRight size={13} className="fold-chev shrink-0 text-ink-4 transition-transform duration-(--dur-2) group-open/fold:rotate-90" />
-      </summary>
-      <div className="mt-0.5 ml-[7px] flex flex-col pl-3 shadow-[inset_1px_0_0_var(--edge)]">
-        {steps.map((s) => (
-          <StepView key={s.at} s={s} session={session} cwd={cwd} />
-        ))}
-      </div>
-    </details>
+          {diff && <DiffStat d={diff} />}
+          {bad > 0 && (
+            <span className="flex shrink-0 items-center gap-0.5 text-xs text-err tabular-nums">
+              <CircleX size={13} aria-label={t("msg.failed")} />
+              {bad > 1 && bad}
+            </span>
+          )}
+          <ChevronRight size={13} className="fold-chev shrink-0 text-ink-4 transition-transform duration-(--dur-2) group-open/fold:rotate-90" />
+        </summary>
+        <div className="mt-0.5 ml-[7px] flex flex-col pl-3 shadow-[inset_1px_0_0_var(--edge)]">
+          {steps.map((s) => (
+            <StepView key={s.at} s={s} session={session} cwd={cwd} lifted />
+          ))}
+        </div>
+      </details>
+      {/* The sessions its ir new steps opened, under its line, open or shut: not moving in and out
+          as it folds. */}
+      {opened.length > 0 && <Opened opened={opened} />}
+    </div>
   );
 }
 
@@ -489,10 +518,19 @@ function Fold({ steps, session, cwd }: { steps: Step[]; session: string; cwd: st
  *  context menu, instead of under the line (the user, 2026-11-08): the conversation stays put.
  *  The pictures its result gave the model show under it, open at first; its icon, hovered, turns
  *  to the chevron that folds them (the user, 2026-11-09: the tool's own icon otherwise). */
-function StepView({ s, session, cwd }: { s: Step; session: string; cwd: string }) {
+function StepView({ s, session, cwd, lifted }: { s: Step; session: string; cwd: string; lifted?: boolean }) {
   const images = s.kind === "tool" ? s.result?.images : undefined;
   const [shown, setShown] = useState(true);
-  if (!images?.length) return <StepCall s={s} session={session} cwd={cwd} />;
+  const opened = !lifted && s.kind === "tool" ? newOfCall(s) : undefined;
+  if (!images?.length)
+    return opened ? (
+      <div className="min-w-0">
+        <StepCall s={s} session={session} cwd={cwd} />
+        <Opened opened={[opened]} />
+      </div>
+    ) : (
+      <StepCall s={s} session={session} cwd={cwd} />
+    );
   return (
     <div className="min-w-0">
       <div className="group/step flex min-w-0 items-center gap-2">
@@ -547,6 +585,43 @@ function StepCall({ s, session, cwd, bare }: { s: Step; session: string; cwd: st
   );
 }
 
+/** The sessions ir new steps opened (newOfCall: none before one is done), a card each under the
+ *  step's line, as a step's pictures are (plan "在哪干活", 2026-11-10). */
+function Opened({ opened }: { opened: { id: string; agent: string }[] }) {
+  const list = useList();
+  return (
+    <div className="mt-0.5 mb-1.5 ml-[7px] flex flex-wrap gap-1.5 pl-3 shadow-[inset_1px_0_0_var(--edge)]">
+      {opened.map((n) => {
+        const x = list && sessionOf(n.id, list);
+        const m: Mention = { kind: "session", title: (x && (titleOf(x) || tilde(x.cwd))) || n.id, agent: agentName((x?.agent ?? n.agent) as Agent), id: n.id, text: n.id };
+        return <MentionCard key={n.id} m={m} />;
+      })}
+    </div>
+  );
+}
+
+/** An ir cp's from → to: a side at another machine its face (by the name ir was given) and its
+ *  path there; one here as written, ~ for the home. */
+function CpArg({ from, to }: { from: CpSide; to: CpSide }) {
+  const ms = useMachines();
+  const side = (x: CpSide) => {
+    const m = x.machine ? machineNamed(x.machine, ms) : undefined;
+    return (
+      <span className="flex min-w-0 shrink items-center gap-1">
+        {m && <MachineFace m={m} size={12} className={cn(!m.online && "opacity-50 grayscale")} />}
+        <span className="min-w-0 truncate">{x.machine && !m ? `${x.machine}:${x.path}` : x.machine ? x.path : tilde(x.path)}</span>
+      </span>
+    );
+  };
+  return (
+    <span className="flex min-w-0 items-center gap-1.5 font-mono text-xs">
+      {side(from)}
+      <span aria-hidden className="shrink-0 text-ink-4">→</span>
+      {side(to)}
+    </span>
+  );
+}
+
 /** The card: no head (its line is right above it, a press elsewhere puts it away; the user,
  *  2026-11-08), only its input field by field and its output, each with a key to copy it; a
  *  thought its words. */
@@ -564,6 +639,9 @@ function StepCard({ s, session }: { s: Step; session: string }) {
             <Part label={t("msg.output")} copy={s.result?.text} error={s.result?.error}>
               {s.result ? <ResultView r={s.result} session={session} /> : <span className="text-xs text-ink-3">{t("msg.noResult")}</span>}
             </Part>
+            {/* The sessions it names by id, each a card going there (ir send, ir wait); not a list's
+                many (ir ls): the sidebar has those. ir new's is under its line (Opened). */}
+            {!newOfCall(s) && <NamedCards text={s.input ?? ""} also={s.result?.text} />}
           </>
         )}
       </div>

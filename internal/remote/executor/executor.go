@@ -26,12 +26,13 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/kumoSleeping/iridium/internal/machineid"
 	"github.com/kumoSleeping/iridium/internal/remote/wire"
 )
 
 // Options configure an executor.
 type Options struct {
-	URL   string // ws(s)://…/api/exec
+	URL   string // ws(s)://…/v1/internal/exec
 	Token string
 	State string // its own directory: holders' files, scratch
 	// Roots are the directories files may be read and written under; none: all but the denied.
@@ -39,13 +40,16 @@ type Options struct {
 	// Deny are paths never served, besides its own TOKEN's, ~/.ssh and the agents' logins (denied).
 	Deny   []string
 	Agents []wire.AgentInfo
-	// NoShell: start nothing but the agents (an argv beginning with one of theirs), so no
-	// command line runs here (docs/exec.md).
-	NoShell bool
-	// AgentShell: say agents there may run command lines here (ir sh), not only a person.
-	AgentShell bool
-	Env        []string // nil: os.Environ(); the hello gives it without secrets (helloEnv)
-	Program    string   // what the hello says it is; "": iridium-executor
+	// Shell: command lines run here, a person's on its page and its agents' (ir sh); else it
+	// starts nothing but the agents (an argv beginning with one of theirs) (docs/exec.md).
+	Shell bool
+	// MachineID is what the hello says of this computer (wire.Hello.MachineID); "":
+	// machineid.Hash().
+	MachineID string
+	// NoRun: it says no run in its caps, as an older executor (tests).
+	NoRun   bool
+	Env     []string // nil: os.Environ(); the hello gives it without secrets (helloEnv)
+	Program string   // what the hello says it is; "": iridium-executor
 	// IR: an ir program (this binary) for the agents started with their session's own TOKEN: linked
 	// as <State>/bin/ir, first on their PATH (docs/exec.md "远端的 ir"). "": none.
 	IR string
@@ -66,6 +70,7 @@ type Executor struct {
 	mu    sync.Mutex
 	conn  *wire.Conn
 	holds map[string]*holder
+	runs  map[string]*running // run's, by their ID
 }
 
 func New(o Options) (*Executor, error) {
@@ -81,7 +86,10 @@ func New(o Options) (*Executor, error) {
 	if err := os.MkdirAll(filepath.Join(o.State, "holds"), 0o700); err != nil {
 		return nil, err
 	}
-	e := &Executor{o: o, holds: map[string]*holder{}}
+	if o.MachineID == "" {
+		o.MachineID = machineid.Hash()
+	}
+	e := &Executor{o: o, holds: map[string]*holder{}, runs: map[string]*running{}}
 	if err := e.load(); err != nil {
 		return nil, err
 	}
@@ -176,6 +184,7 @@ func (e *Executor) session(ctx context.Context) error {
 			h.untail(c)
 		}
 		e.mu.Unlock()
+		e.dropRuns(c)
 	}()
 	var named struct{ Name string }
 	if err := c.Call(ctx, "hello", e.hello(), &named); err != nil {
@@ -196,9 +205,18 @@ func (e *Executor) Close() {
 	for _, h := range e.holds {
 		hs = append(hs, h)
 	}
+	var cmds []*exec.Cmd
+	for _, r := range e.runs {
+		if r.cmd != nil {
+			cmds = append(cmds, r.cmd)
+		}
+	}
 	e.mu.Unlock()
 	for _, h := range hs {
 		h.stop(true)
+	}
+	for _, cmd := range cmds {
+		killTree(cmd, true)
 	}
 }
 
@@ -214,6 +232,11 @@ func (e *Executor) Drop() {
 
 func (e *Executor) hello() wire.Hello {
 	home, _ := os.UserHomeDir()
+	shell := e.o.Shell
+	caps := []string{wire.CapRun}
+	if e.o.NoRun {
+		caps = nil
+	}
 	e.mu.Lock()
 	var holds []wire.HoldState
 	for _, h := range e.holds {
@@ -223,8 +246,10 @@ func (e *Executor) hello() wire.Hello {
 	return wire.Hello{
 		Protocol: wire.Protocol, Program: e.o.Program, OS: runtime.GOOS, Arch: runtime.GOARCH,
 		Home: home, Sep: string(filepath.Separator), Scratch: filepath.Join(e.o.State, "scratch"),
-		Env: helloEnv(e.o.Env), Agents: e.o.Agents, Holds: holds, NoShell: e.o.NoShell, AgentShell: e.o.AgentShell,
-		IRClient: e.o.IR != "",
+		Env: helloEnv(e.o.Env), Agents: e.o.Agents, Holds: holds, IRClient: e.o.IR != "",
+		// The older two said too, for an older Iridium.
+		Shell: &shell, NoShell: !shell, AgentShell: shell,
+		MachineID: e.o.MachineID, Caps: caps,
 	}
 }
 
@@ -311,6 +336,21 @@ func (e *Executor) handle(ctx context.Context, method string, params json.RawMes
 		return nil, bad("%v", err)
 	}
 	switch method {
+	case "run":
+		var rp wire.RunParams
+		if err := json.Unmarshal(params, &rp); err != nil {
+			return nil, bad("%v", err)
+		}
+		e.mu.Lock()
+		c := e.conn
+		e.mu.Unlock()
+		return e.startRun(c, rp)
+	case "run.stop":
+		var rp wire.RunStopParams
+		if err := json.Unmarshal(params, &rp); err != nil {
+			return nil, bad("%v", err)
+		}
+		return e.stopRun(rp.Run)
 	case "hold.start":
 		return e.start(p.Hold, spec{Argv: p.Argv, Env: p.Env, Cwd: p.Cwd, StopGraceMS: p.StopGraceMS})
 	case "hold.write", "hold.tail", "hold.stop", "hold.kill", "hold.forget":
@@ -415,7 +455,7 @@ func (e *Executor) start(id string, spec spec) (any, error) {
 	if id == "" || strings.ContainsAny(id, `/\.`) || len(spec.Argv) == 0 {
 		return nil, bad("bad hold.start")
 	}
-	if e.o.NoShell && !e.agentArgv(spec.Argv) {
+	if !e.o.Shell && !e.agentArgv(spec.Argv) {
 		return nil, &wire.Error{Code: wire.CodeDenied, Message: "only its agents start here"}
 	}
 	e.mu.Lock()

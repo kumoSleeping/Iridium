@@ -70,16 +70,16 @@ func TestQueue(t *testing.T) {
 	if strings.Contains(r.inLog(id), "gone") {
 		t.Error("a deleted message was sent")
 	}
-	// Steer: true joins at once. "four WAIT" goes straight too: the fake writes its transcript
+	// Steer: true joins at once. "four HOLD" goes straight too: the fake writes its transcript
 	// ahead of out.log, so the turn above may not have ended for the driver yet, and a plain send
-	// would wait in the queue behind it.
-	r.m.SendWith(bg, id, "four WAIT", "网页", true)
+	// would wait in the queue behind it. HOLD runs until "five" joins it, on a slow machine too.
+	r.m.SendWith(bg, id, "four HOLD", "网页", true)
 	r.waitState(id, "the turn", func(s *api.SessionState) bool { return s.Status == api.StatusRunning })
 	if _, queued, err := r.m.SendWith(bg, id, "five", "网页", true); queued || err != nil {
 		t.Errorf("steer: queued %v, %v", queued, err)
 	}
 	r.waitState(id, "the joined reply", func(s *api.SessionState) bool { return said(s, "ok: five") })
-	if b := r.messages(id); b[len(b)-2].Text != "ok: four WAIT" {
+	if b := r.messages(id); b[len(b)-2].Text != "ok: four HOLD" {
 		t.Errorf("five did not join four's turn: %+v", b[len(b)-4:])
 	}
 }
@@ -217,18 +217,16 @@ func TestAppliedAndUltracode(t *testing.T) {
 	if s.Pick != "haiku" || s.Ultracode.Available || s.Ultracode.Active || !s.Ultracode.On {
 		t.Errorf("after the switch: pick %q ultracode %+v", s.Pick, s.Ultracode)
 	}
-	// The same as a feature.
-	if f := s.Features; len(f) != 1 || f[0].ID != "claude.ultracode" || f[0].Available || f[0].Active || !f[0].On || f[0].Place != "effort" || f[0].Tone != "warm" {
-		t.Errorf("features: %+v", f)
+	// Its key at the effort track: on, and why it does nothing now.
+	if a := s.Attached; len(a) != 1 || a[0].From != FromIR || a[0].Place != "effort" ||
+		!strings.Contains(a[0].Content["zh"], ` pressed title="已开，换到能用的模型才生效"`) || strings.Contains(a[0].Content["en"], "disabled") {
+		t.Errorf("attached: %+v", a)
 	}
 	if err := r.m.SetUltracode(bg, id, true); !errors.Is(err, ErrBadRequest) {
 		t.Errorf("ultracode on haiku: %v", err)
 	}
-	if err := r.m.SetFeature(bg, id, "claude.ultracode", api.SetFeature{On: true}); !errors.Is(err, ErrBadRequest) {
-		t.Errorf("ultracode on haiku, as a feature: %v", err)
-	}
-	if err := r.m.SetFeature(bg, id, "x.other", api.SetFeature{On: true}); !errors.Is(err, ErrBadRequest) {
-		t.Errorf("a feature it has not: %v", err)
+	if _, err := r.m.Press(bg, id, FromIR, "x.other", PressUser{}); !errors.Is(err, ErrBadRequest) {
+		t.Errorf("a button it has not: %v", err)
 	}
 	if err := r.m.SetUltracode(bg, id, false); err != nil {
 		t.Fatal(err)
@@ -284,6 +282,7 @@ func TestAlwaysAllow(t *testing.T) {
 }
 
 func TestRuleMatches(t *testing.T) {
+	t.Parallel()
 	ask := func(tool, cmd string) api.Ask {
 		return api.Ask{Kind: "permission", Tool: tool, Input: map[string]any{"command": cmd, "file_path": cmd}}
 	}
@@ -307,8 +306,10 @@ func TestRuleMatches(t *testing.T) {
 	}
 }
 
-// An agent naming its session (ir rename) is never asked about; anything chained to it is.
+// An agent naming its session (ir api channel.update channel_id=self data.name=…, the older ir
+// rename) is never asked about; anything chained to it is.
 func TestRenamesOnly(t *testing.T) {
+	t.Parallel()
 	for cmd, want := range map[string]bool{
 		`ir rename "会话命名"`:      true,
 		`ir rename x`:           true,
@@ -320,6 +321,13 @@ func TestRenamesOnly(t *testing.T) {
 		"ir rename x\nls":       false,
 		`ir ls`:                 false,
 		`irx rename x`:          false,
+		`ir api channel.update channel_id=self data.name="会话 命名"`:                true,
+		`ir api channel.update data.name=x channel_id=self`:                      true,
+		`ir api channel.update channel_id=self`:                                  false,
+		`ir api channel.update channel_id=1a2b data.name=x`:                      false,
+		`ir api channel.update channel_id=self data.name=x _data.archived:=true`: false,
+		`ir api channel.update channel_id=self data.name=x && rm -rf ~`:          false,
+		`ir api message.create channel_id=self data.name=x`:                      false,
 	} {
 		if got := renamesOnly(api.Ask{Kind: "permission", Tool: "Bash", Input: map[string]any{"command": cmd}}); got != want {
 			t.Errorf("%q: %v", cmd, got)

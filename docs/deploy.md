@@ -23,7 +23,7 @@ tar xzf iridium-linux-amd64.tar.gz
 ```
 
 - ARM 机器换成 `iridium-linux-arm64.tar.gz`。`-prefix`、`-bin` 改位置。
-- 之后升级：设置里“更新”（默认自动在后台下好），或 `ir update`。
+- 之后升级：设置里“更新”（默认自动在后台下好，设置里“自动更新”可关），或 `ir update`。
 
 从源码装：
 
@@ -68,7 +68,7 @@ ir public        # 在真正的终端里跑
 systemctl --user is-active iridium.service      # active
 ss -ltn | grep ':7810 '                         # 只听 127.0.0.1
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:7810/   # 200
-ir ls
+ir api channel.list
 ```
 
 ## 停和卸载

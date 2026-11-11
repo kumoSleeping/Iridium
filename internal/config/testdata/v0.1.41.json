@@ -1,0 +1,37 @@
+{
+  "listen": "127.0.0.1:7811",
+  "hosts": [
+    "ir-test.example.com"
+  ],
+  "idleReap": "1h0m0s",
+  "stopGrace": "5s",
+  "crashResume": true,
+  "quotaResume": true,
+  "modes": {
+    "claude": "auto",
+    "codex": "auto",
+    "pi": "auto"
+  },
+  "push": true,
+  "enterInTurn": "queue",
+  "pairClosed": true,
+  "lang": "zh",
+  "chatDir": "/home/someone/chats",
+  "programs": {
+    "claude": "claude",
+    "codex": "codex",
+    "dsh": "dsh",
+    "pi": "pi"
+  },
+  "uploads": {
+    "keep": "720h0m0s",
+    "maxFile": 2147483648
+  },
+  "public": {
+    "origin": "https://ir-test.example.com"
+  },
+  "update": {
+    "url": "github:someone/iridium",
+    "manual": true
+  }
+}

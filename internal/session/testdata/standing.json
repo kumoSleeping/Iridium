@@ -1,0 +1,120 @@
+[
+  {
+    "name": "this machine's always; a group at another listed for an own one; one hung under its launcher",
+    "workspaces": [{"id": 1, "name": "ir", "path": "/w/ir"}, {"id": 2, "name": "A", "path": "m:C:/A"}, {"id": 3, "name": "B", "path": "m:C:/B"}, {"id": 4, "name": "C", "path": "m:C:/C"}],
+    "sessions": [
+      {"id": "here", "workspace": 1},
+      {"id": "desk", "machine": "m", "workspace": 2},
+      {"id": "agent", "machine": "m", "workspace": 2, "hosted": true},
+      {"id": "mine", "machine": "m", "workspace": 3, "own": true, "hosted": true},
+      {"id": "beside", "machine": "m", "workspace": 3},
+      {"id": "hung", "machine": "m", "workspace": 4, "launcher": "here"},
+      {"id": "by", "machine": "m", "workspace": 4}
+    ],
+    "rows": ["here", "mine", "beside"],
+    "hung": {"here": ["hung"]},
+    "groups": [1, 3]
+  },
+  {
+    "name": "launcher gone or archived: on its own, its group listed for it",
+    "workspaces": [{"id": 1, "name": "ir", "path": "/w/ir"}, {"id": 7, "name": "S", "path": "m:C:/S"}],
+    "sessions": [
+      {"id": "p", "workspace": 1, "archived": true},
+      {"id": "y", "machine": "m", "workspace": 7, "launcher": "p"},
+      {"id": "x", "machine": "m", "workspace": 7, "launcher": "gone"},
+      {"id": "z", "machine": "m", "workspace": 7}
+    ],
+    "rows": ["y", "x", "z"],
+    "hung": {},
+    "groups": [7]
+  },
+  {
+    "name": "launcher a subagent: not listed, so on its own",
+    "workspaces": [{"id": 1, "name": "ir", "path": "/w/ir"}, {"id": 7, "name": "S", "path": "m:C:/S"}],
+    "sessions": [
+      {"id": "p", "workspace": 1, "own": true, "hosted": true},
+      {"id": "sub", "workspace": 1, "subagent": true, "parent": "p"},
+      {"id": "c", "machine": "m", "workspace": 7, "launcher": "sub"},
+      {"id": "z", "machine": "m", "workspace": 7}
+    ],
+    "rows": ["p", "c", "z"],
+    "hung": {},
+    "groups": [1, 7]
+  },
+  {
+    "name": "launcher in a group not listed, the one it started in that group: the group listed, it hung",
+    "workspaces": [{"id": 5, "name": "X", "path": "m2:/x"}],
+    "sessions": [
+      {"id": "l", "machine": "m2", "workspace": 5, "hosted": true},
+      {"id": "c", "machine": "m2", "workspace": 5, "launcher": "l"},
+      {"id": "d", "machine": "m2", "workspace": 5}
+    ],
+    "rows": ["l", "d"],
+    "hung": {"l": ["c"]},
+    "groups": [5]
+  },
+  {
+    "name": "launcher in a group not listed, the one it started elsewhere: that one on its own, those it started under it",
+    "workspaces": [{"id": 7, "name": "S", "path": "m:C:/S"}, {"id": 9, "name": "O", "path": "m:C:/O"}],
+    "sessions": [
+      {"id": "q", "machine": "m", "workspace": 9},
+      {"id": "r", "machine": "m", "workspace": 7, "launcher": "q"},
+      {"id": "r2", "machine": "m", "workspace": 7, "launcher": "r"},
+      {"id": "z", "machine": "m", "workspace": 7}
+    ],
+    "rows": ["r", "z"],
+    "hung": {"r": ["r2"]},
+    "groups": [7]
+  },
+  {
+    "name": "orphans in two groups, one beside the launcher: all hung, only the launcher's group listed",
+    "workspaces": [{"id": 1, "name": "GL", "path": "m:C:/GL"}, {"id": 2, "name": "G1", "path": "m:C:/G1"}],
+    "sessions": [
+      {"id": "l", "machine": "m", "workspace": 1, "hosted": true},
+      {"id": "o2", "machine": "m", "workspace": 1, "launcher": "l"},
+      {"id": "o1", "machine": "m", "workspace": 2, "launcher": "l"},
+      {"id": "d", "machine": "m", "workspace": 2}
+    ],
+    "rows": ["l"],
+    "hung": {"l": ["o2", "o1"]},
+    "groups": [1]
+  },
+  {
+    "name": "an orphan's group holds another launcher not listed: decided at once, both own",
+    "workspaces": [{"id": 9, "name": "A", "path": "m:C:/A"}, {"id": 10, "name": "B", "path": "m:C:/B"}, {"id": 11, "name": "C", "path": "m:C:/C"}],
+    "sessions": [
+      {"id": "l", "machine": "m", "workspace": 9},
+      {"id": "o1", "machine": "m", "workspace": 10, "launcher": "l"},
+      {"id": "l3", "machine": "m", "workspace": 10},
+      {"id": "o3", "machine": "m", "workspace": 11, "launcher": "l3"}
+    ],
+    "rows": ["o1", "l3", "o3"],
+    "hung": {},
+    "groups": [10, 11]
+  },
+  {
+    "name": "one of this machine's in a group at another: that group listed; one at another in this machine's group",
+    "workspaces": [{"id": 1, "name": "ir", "path": "/w/ir"}, {"id": 7, "name": "S", "path": "m:C:/S"}],
+    "sessions": [
+      {"id": "h", "workspace": 7},
+      {"id": "r", "machine": "m", "workspace": 7},
+      {"id": "x", "machine": "m", "workspace": 1}
+    ],
+    "rows": ["h", "r", "x"],
+    "hung": {},
+    "groups": [1, 7]
+  },
+  {
+    "name": "launchers in a cycle: the least ID on its own, the rest under it",
+    "workspaces": [{"id": 1, "name": "ir", "path": "/w/ir"}],
+    "sessions": [
+      {"id": "b", "workspace": 1, "launcher": "a"},
+      {"id": "a", "workspace": 1, "launcher": "b"},
+      {"id": "c", "workspace": 1, "launcher": "b"},
+      {"id": "d", "workspace": 1, "launcher": "d"}
+    ],
+    "rows": ["a", "d"],
+    "hung": {"a": ["b", "c"]},
+    "groups": [1]
+  }
+]

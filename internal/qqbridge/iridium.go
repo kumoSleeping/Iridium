@@ -103,15 +103,15 @@ func (ir *Iridium) call(ctx context.Context, method, path string, in, out any) e
 func chatPath(chat string) string { return "/api/chat/" + url.PathEscape(chat) }
 
 // Input sends a message (or an Iridium command) from chat.
-func (ir *Iridium) Input(ctx context.Context, chat string, in api.ChatInput) (api.ChatInputReply, error) {
-	var out api.ChatInputReply
+func (ir *Iridium) Input(ctx context.Context, chat string, in ChatInput) (ChatInputReply, error) {
+	var out ChatInputReply
 	err := ir.call(ctx, "POST", chatPath(chat)+"/input", in, &out)
 	return out, err
 }
 
 // Answer answers a card.
-func (ir *Iridium) Answer(ctx context.Context, a api.CardAnswer) (api.CardReply, error) {
-	var out api.CardReply
+func (ir *Iridium) Answer(ctx context.Context, a api.CardAnswer) (CardReply, error) {
+	var out CardReply
 	err := ir.call(ctx, "POST", "/api/answer", a, &out)
 	return out, err
 }
@@ -155,7 +155,7 @@ func (ir *Iridium) File(ctx context.Context, chat, ref string, limit int64) ([]b
 func (ir *Iridium) Me(ctx context.Context) (api.Me, error) {
 	var m api.Me
 	err := ir.call(ctx, "GET", "/api/me", nil, &m)
-	if err == nil && m.Terminal.Name == "" {
+	if err == nil && m.Name == "" {
 		err = errors.New("iridium: /api/me: no terminal")
 	}
 	return m, err
@@ -169,10 +169,10 @@ func SyncName(ctx context.Context, ir *Iridium, home string) string {
 		return c.Name
 	}
 	m, err := ir.Me(ctx)
-	if err != nil || m.Terminal.Name == c.Name {
+	if err != nil || m.Name == c.Name {
 		return c.Name
 	}
-	c.Name = m.Terminal.Name
+	c.Name = m.Name
 	_ = Write(home, ConfigFile, &c)
 	return c.Name
 }
@@ -203,7 +203,7 @@ func (ir *Iridium) SetAvatar(ctx context.Context, image []byte) error {
 type Event struct {
 	ID   int64
 	Kind string // progress, reply, card, card_done, error, status
-	Data api.ChatEvent
+	Data ChatEvent
 }
 
 // Events reads the plugin's event stream from the one after last (-1: from now on), handing each

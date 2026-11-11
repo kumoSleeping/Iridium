@@ -11,15 +11,13 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
-	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/kumoSleeping/iridium/internal/agents"
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/config"
+	"github.com/kumoSleeping/iridium/internal/satori"
 )
 
 // env is one run of ir: where it writes, and its way to the daemon.
@@ -28,11 +26,22 @@ type env struct {
 	sock     string
 	hc       *http.Client
 	tty      bool // stderr is a terminal: progress may be drawn there
-	// at: ir runs for a session at another machine (POST /api/cli, remote.go); nil on the socket.
+	// at: ir runs for a session at another machine (POST /v1/internal/cli, remote.go); nil on the socket.
 	at *At
 	// after: where the page ended (its last block's at) when the message waited on was sent ("":
 	// not known), for a transcript that does not keep its id (dsh gives each prompt its own).
 	after string
+	// as: the login ir speaks Satori as, once meta named it (ir api).
+	as *satori.Login
+	// agent: an agent runs ir (its environment says so, or no person at a terminal): every request
+	// says so (X-Iridium-Agent), so the daemon gives it no secret and takes no approval from it.
+	agent bool
+}
+
+// runByAgent: ir is run by an agent, as the admin commands tell (detect): the environment names
+// an agent's session, or stdin and stdout are not both a terminal. A var for the tests.
+var runByAgent = func() bool {
+	return os.Getenv("CLAUDECODE") != "" || caller() != "" || !isTerminal(os.Stdin) || !isTerminal(os.Stdout)
 }
 
 func newEnv(stdout, stderr io.Writer) *env {
@@ -51,7 +60,7 @@ func newEnv(stdout, stderr io.Writer) *env {
 	hc := &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", sock)
 	}}}
-	return &env{out: stdout, err: stderr, sock: sock, hc: hc, tty: isTTY(stderr)}
+	return &env{out: stdout, err: stderr, sock: sock, hc: hc, tty: isTTY(stderr), agent: runByAgent()}
 }
 
 func isTTY(w io.Writer) bool {
@@ -90,7 +99,8 @@ type apiError struct {
 
 func (e *apiError) Error() string { return e.msg }
 
-func (e *env) request(method, path string, body any) (*http.Response, error) {
+// request is a request to the daemon; hdr, headers' names and values in turn.
+func (e *env) request(method, path string, body any, hdr ...string) (*http.Response, error) {
 	var r io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -106,9 +116,15 @@ func (e *env) request(method, path string, body any) (*http.Response, error) {
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	for i := 0; i+1 < len(hdr); i += 2 {
+		req.Header.Set(hdr[i], hdr[i+1])
+	}
 	// The session ir runs in: what an agent does through it counts to that session's terminal.
 	if c := e.caller(); c != "" && e.at == nil {
 		req.Header.Set(headerSession, c)
+	}
+	if e.agent && e.at == nil {
+		req.Header.Set(headerAgent, "1")
 	}
 	resp, err := e.hc.Do(req)
 	if err != nil {
@@ -121,10 +137,14 @@ func (e *env) request(method, path string, body any) (*http.Response, error) {
 		defer resp.Body.Close()
 		var ae api.Error
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
-		if json.Unmarshal(b, &ae) != nil || ae.Error == "" {
-			ae.Error = strings.TrimSpace(string(b))
+		if json.Unmarshal(b, &ae) != nil || ae.Text() == "" {
+			ae.Message = strings.TrimSpace(string(b))
 		}
-		return nil, &apiError{status: resp.StatusCode, msg: ae.Error}
+		msg := ae.Text()
+		if ae.NameError != "" {
+			msg += " (" + ae.NameError + ")"
+		}
+		return nil, &apiError{status: resp.StatusCode, msg: msg}
 	}
 	return resp, nil
 }
@@ -155,149 +175,16 @@ func (e *env) failf(format string, a ...any) int {
 
 // ---- arguments ----
 
-type opts struct {
-	wait    bool
-	steer   bool
-	queue   bool // ir send --queue: wait for the running turn to end instead of joining it
-	all     bool // ir ls, find --all: the archive and the subagents done too
-	here    bool // ir ls --here: the caller's group only
-	full    bool // ir read --full: the whole page as written
-	n       int  // ir read -n: how many messages
-	model   string
-	approve string
-	to      string // ir bot --to: the bot
-	machine string // ir new --machine: the Bot whose machine it runs at
-	group   string // ir new --workspace: the group it goes in
-	attach  []string
-	pos     []string
-}
-
-// parse takes the flags anywhere among the arguments; after "--" everything is positional.
-func parse(args []string, allowed string) (opts, error) {
-	var o opts
-	for i := 0; i < len(args); i++ {
-		a := args[i]
-		if a == "--" {
-			o.pos = append(o.pos, args[i+1:]...)
-			break
-		}
-		if !strings.HasPrefix(a, "-") || a == "-" {
-			o.pos = append(o.pos, a)
-			continue
-		}
-		name, val, hasVal := strings.Cut(strings.TrimLeft(a, "-"), "=")
-		if name == "a" {
-			name = "attach"
-		}
-		if !strings.Contains(" "+allowed+" ", " "+name+" ") {
-			return o, fmt.Errorf("no flag %s here", a)
-		}
-		if name == "wait" || name == "steer" || name == "queue" || name == "all" || name == "full" || name == "here" {
-			if hasVal {
-				return o, fmt.Errorf("%s takes no value", a)
-			}
-			o.wait = o.wait || name == "wait"
-			o.steer = o.steer || name == "steer"
-			o.queue = o.queue || name == "queue"
-			o.all = o.all || name == "all"
-			o.full = o.full || name == "full"
-			o.here = o.here || name == "here"
-			continue
-		}
-		if !hasVal {
-			if i+1 >= len(args) {
-				return o, fmt.Errorf("%s needs a value", a)
-			}
-			i++
-			val = args[i]
-		}
-		switch name {
-		case "model":
-			o.model = val
-		case "approve":
-			o.approve = val
-		case "to":
-			o.to = val
-		case "machine":
-			o.machine = val
-		case "workspace":
-			o.group = val
-		case "attach":
-			o.attach = append(o.attach, val)
-		case "n":
-			n, err := strconv.Atoi(val)
-			if err != nil || n < 1 {
-				return o, fmt.Errorf("-n takes a count, not %q", val)
-			}
-			o.n = n
-		}
-	}
-	return o, nil
-}
-
-var peerPath = regexp.MustCompile(`^([A-Za-z0-9][A-Za-z0-9_.-]{0,31}):(.*)$`)
-
-// errPeer: a machine:path or machine/id names a peer, and peers are not connected yet.
-type errPeer string
-
-func (e errPeer) Error() string { return "peer not connected: " + string(e) }
-
-// localPath is arg as an absolute local path; a machine:path is an errPeer.
-func localPath(arg string) (string, error) {
-	if !strings.HasPrefix(arg, "/") && !strings.HasPrefix(arg, ".") && !strings.HasPrefix(arg, "~") {
-		if m := peerPath.FindStringSubmatch(arg); m != nil {
-			return "", errPeer(m[1])
-		}
-	}
-	if arg == "~" || strings.HasPrefix(arg, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
-		}
-		arg = filepath.Join(home, strings.TrimPrefix(arg, "~"))
-	}
-	return filepath.Abs(arg)
-}
-
-// pathArg is a path ir cp and files take: machine:path, a Bot's machine and its own path there
-// (as given; "" its home), or one here, made absolute.
-func pathArg(arg string) (machine, path string, err error) {
-	path, err = localPath(arg)
-	var peer errPeer
-	if errors.As(err, &peer) {
-		return string(peer), peerPath.FindStringSubmatch(arg)[2], nil
-	}
-	return "", path, err
-}
-
-// resolve is the full id of the session a unique prefix names.
+// resolve is the full id of the session a unique prefix names (the server takes the start of one).
 func (e *env) resolve(arg string) (string, error) {
-	if m, _, ok := strings.Cut(arg, "/"); ok {
-		return "", errPeer(m)
-	}
 	if arg == "" {
 		return "", errors.New("no session id")
 	}
-	var list []api.Session
-	if err := e.do("GET", "/api/sessions", nil, &list); err != nil {
+	var st api.SessionState
+	if err := e.do("GET", "/v1/internal/sessions/"+url.PathEscape(arg), nil, &st); err != nil {
 		return "", err
 	}
-	var hits []string
-	for _, s := range list {
-		if s.ID == arg {
-			return s.ID, nil
-		}
-		if strings.HasPrefix(s.ID, arg) {
-			hits = append(hits, s.ID)
-		}
-	}
-	switch len(hits) {
-	case 0:
-		return "", fmt.Errorf("no session %s", arg)
-	case 1:
-		return hits[0], nil
-	}
-	return "", fmt.Errorf("%s is the start of %d sessions' ids; give more of it", arg, len(hits))
+	return st.ID, nil
 }
 
 // short is the shortest prefix of id, at least 8 characters, no other id of ids shares.
@@ -317,14 +204,29 @@ func short(id string, ids []string) string {
 	return id
 }
 
+// ids are every session's id (channel.list, archived ones too).
 func (e *env) ids() []string {
-	var list []api.Session
-	_ = e.do("GET", "/api/sessions", nil, &list)
-	out := make([]string, len(list))
-	for i, s := range list {
-		out[i] = s.ID
+	var out []string
+	next := ""
+	for {
+		body := map[string]any{"_data": map[string]any{"all": true}}
+		if next != "" {
+			body["next"] = next
+		}
+		raw, err := e.satori("channel.list", body)
+		var l satori.List[satori.Channel]
+		if err != nil || json.Unmarshal(raw, &l) != nil {
+			return out
+		}
+		for _, c := range l.Data {
+			if c.Type == satori.ChannelText {
+				out = append(out, c.ID)
+			}
+		}
+		if next = l.Next; next == "" {
+			return out
+		}
 	}
-	return out
 }
 
 // ---- progress, on a terminal only ----
@@ -375,5 +277,3 @@ func bytesStr(n int64) string {
 	}
 	return fmt.Sprintf("%d B", n)
 }
-
-func query(k, v string) string { return "?" + url.Values{k: {v}}.Encode() }

@@ -1,0 +1,253 @@
+{
+  "session": "s1",
+  "app": "ir_web",
+  "login": "kumo",
+  "cases": [
+    {
+      "name": "a person's message, with a picture",
+      "block": {
+        "at": "0.0",
+        "time": 1700000000000,
+        "kind": "user",
+        "text": "look at \u003cthis\u003e \u0026 \"that\"\n\n  indented\n",
+        "from": "Telegram·张三",
+        "fromTerminal": "tg",
+        "fromLogin": "u42",
+        "id": "u-1",
+        "files": [
+          {
+            "ref": "r1",
+            "name": "shot 1.png",
+            "path": "/w/shot 1.png",
+            "size": 1234,
+            "mime": "image/png",
+            "kind": "image",
+            "thumb": true,
+            "mtime": 1700000000001,
+            "w": 640,
+            "h": 480,
+            "sha256": "ab12"
+          }
+        ]
+      },
+      "content": "<iridium:user id=\"u-1\" from=\"Telegram·张三\" terminal=\"tg\" login=\"u42\"/>look at &lt;this&gt; &amp; &quot;that&quot;\n\n  indented\n<img src=\"internal:ir_web/kumo/files/s1/r1\" title=\"shot 1.png\" path=\"/w/shot 1.png\" size=\"1234\" mime=\"image/png\" mtime=\"1700000000001\" thumb width=\"640\" height=\"480\" sha256=\"ab12\"/>"
+    },
+    {
+      "name": "a person's message, bare",
+      "block": {
+        "at": "120.0",
+        "kind": "user",
+        "text": "hi"
+      },
+      "content": "<iridium:user/>hi"
+    },
+    {
+      "name": "the agent's words",
+      "block": {
+        "at": "200.1",
+        "time": 1700000000002,
+        "kind": "assistant",
+        "text": "Done.\n\n```go\nif a \u003c b \u0026\u0026 c \u003e d {}\n```"
+      },
+      "content": "Done.\n\n```go\nif a &lt; b &amp;&amp; c &gt; d {}\n```"
+    },
+    {
+      "name": "the agent's words, cut, with files",
+      "block": {
+        "at": "300.0",
+        "kind": "assistant",
+        "text": "long…",
+        "length": 5000,
+        "files": [
+          {
+            "ref": "r2",
+            "name": "a.mp4",
+            "path": "/w/a.mp4",
+            "size": 9,
+            "mime": "video/mp4",
+            "kind": "video",
+            "mtime": 5
+          },
+          {
+            "ref": "r3",
+            "name": "notes.txt",
+            "path": "/w/notes.txt",
+            "size": 0,
+            "mime": "",
+            "kind": "file",
+            "mtime": 0
+          }
+        ]
+      },
+      "content": "<iridium:assistant length=\"5000\"/>long…<video src=\"internal:ir_web/kumo/files/s1/r2\" title=\"a.mp4\" path=\"/w/a.mp4\" size=\"9\" mime=\"video/mp4\" mtime=\"5\"/><file src=\"internal:ir_web/kumo/files/s1/r3\" title=\"notes.txt\" path=\"/w/notes.txt\" size=\"0\" mime=\"\" mtime=\"0\"/>"
+    },
+    {
+      "name": "thinking",
+      "block": {
+        "at": "400.0",
+        "kind": "thinking",
+        "text": "Let me see \u003cx\u003e"
+      },
+      "content": "<iridium:thinking>Let me see &lt;x&gt;</iridium:thinking>"
+    },
+    {
+      "name": "thinking, no words",
+      "block": {
+        "at": "400.1",
+        "kind": "thinking"
+      },
+      "content": "<iridium:thinking/>"
+    },
+    {
+      "name": "a tool call with its result and pictures",
+      "block": {
+        "at": "500.2",
+        "time": 7,
+        "kind": "tool",
+        "id": "toolu_1",
+        "name": "Bash",
+        "input": "{\"command\":\"echo \\\"\u003chi\u003e\\\" \u0026\u0026 ls\"}",
+        "result": {
+          "at": "600.0",
+          "time": 8,
+          "text": "\u003chi\u003e\nfile\n",
+          "length": 3000,
+          "error": true,
+          "images": [
+            {
+              "mime": "image/png",
+              "w": 10,
+              "h": 20
+            },
+            {
+              "unsent": true
+            }
+          ]
+        }
+      },
+      "content": "<iridium:tool id=\"toolu_1\" name=\"Bash\"><iridium:input>{&quot;command&quot;:&quot;echo \\&quot;&lt;hi&gt;\\&quot; &amp;&amp; ls&quot;}</iridium:input><iridium:result at=\"600.0\" time=\"8\" length=\"3000\" error>&lt;hi&gt;\nfile\n<iridium:image mime=\"image/png\" width=\"10\" height=\"20\"/><iridium:image unsent/></iridium:result></iridium:tool>"
+    },
+    {
+      "name": "a tool call with an empty result",
+      "block": {
+        "at": "500.3",
+        "kind": "tool",
+        "id": "toolu_2",
+        "name": "Write",
+        "input": "{\"file_path\":\"/w/x.png\"}",
+        "length": 4000,
+        "result": {
+          "at": "601.0",
+          "text": ""
+        },
+        "files": [
+          {
+            "ref": "r4",
+            "name": "x.png",
+            "path": "/w/x.png",
+            "size": 1,
+            "mime": "image/png",
+            "kind": "image",
+            "mtime": 2
+          }
+        ]
+      },
+      "content": "<iridium:tool id=\"toolu_2\" name=\"Write\" length=\"4000\"><iridium:input>{&quot;file_path&quot;:&quot;/w/x.png&quot;}</iridium:input><iridium:result at=\"601.0\"/></iridium:tool><img src=\"internal:ir_web/kumo/files/s1/r4\" title=\"x.png\" path=\"/w/x.png\" size=\"1\" mime=\"image/png\" mtime=\"2\"/>"
+    },
+    {
+      "name": "a tool call still running",
+      "block": {
+        "at": "500.4",
+        "kind": "tool",
+        "id": "toolu_3",
+        "name": "Task",
+        "input": "{}"
+      },
+      "content": "<iridium:tool id=\"toolu_3\" name=\"Task\"><iridium:input>{}</iridium:input></iridium:tool>"
+    },
+    {
+      "name": "a result whose call is on another page",
+      "block": {
+        "at": "700.0",
+        "kind": "result",
+        "id": "toolu_0",
+        "text": "ok",
+        "error": true,
+        "images": [
+          {
+            "mime": "image/jpeg"
+          }
+        ]
+      },
+      "content": "<iridium:result id=\"toolu_0\" error>ok<iridium:image mime=\"image/jpeg\"/></iridium:result>"
+    },
+    {
+      "name": "a compaction",
+      "block": {
+        "at": "800.0",
+        "time": 9,
+        "kind": "system",
+        "event": "compact",
+        "text": "Conversation compacted",
+        "compact": {
+          "auto": true,
+          "before": 160000,
+          "after": 12000,
+          "ms": 4200
+        }
+      },
+      "content": "<iridium:system event=\"compact\">Conversation compacted<iridium:compact auto before=\"160000\" after=\"12000\" ms=\"4200\"/></iridium:system>"
+    },
+    {
+      "name": "a compaction with no figures",
+      "block": {
+        "at": "800.1",
+        "kind": "system",
+        "event": "compact",
+        "compact": {}
+      },
+      "content": "<iridium:system event=\"compact\"><iridium:compact/></iridium:system>"
+    },
+    {
+      "name": "an API error",
+      "block": {
+        "at": "900.0",
+        "kind": "system",
+        "event": "api_error",
+        "text": "529 Overloaded"
+      },
+      "content": "<iridium:system event=\"api_error\">529 Overloaded</iridium:system>"
+    },
+    {
+      "name": "Iridium's own line",
+      "block": {
+        "at": "1000.0",
+        "kind": "system",
+        "event": "iridium",
+        "text": "继续",
+        "from": "Iridium",
+        "id": "u-9"
+      },
+      "content": "<iridium:system id=\"u-9\" event=\"iridium\" from=\"Iridium\">继续</iridium:system>"
+    },
+    {
+      "name": "a task ended",
+      "block": {
+        "at": "1100.0",
+        "kind": "system",
+        "event": "task",
+        "text": "3 agents, 2m"
+      },
+      "content": "<iridium:system event=\"task\">3 agents, 2m</iridium:system>"
+    },
+    {
+      "name": "interrupted",
+      "block": {
+        "at": "1200.0",
+        "kind": "system",
+        "event": "interrupted"
+      },
+      "content": "<iridium:system event=\"interrupted\"/>"
+    }
+  ]
+}

@@ -15,7 +15,7 @@ func TestForwardAt(t *testing.T) {
 	var got api.CLIRun
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer irs_x" {
-			http.Error(w, `{"error":"unauthenticated"}`, http.StatusUnauthorized)
+			http.Error(w, `{"code":"unauthenticated"}`, http.StatusUnauthorized)
 			return
 		}
 		json.NewDecoder(r.Body).Decode(&got)

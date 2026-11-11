@@ -1,7 +1,7 @@
 // Package store is Iridium's database: SQLite through a pure-Go driver, WAL, writes in BEGIN
 // IMMEDIATE transactions. It holds only what lies over the sessions found on disk (plan "数据"):
 // workspaces and who belongs where, pins, colour tags, which sessions are shown, names, the queue of messages to send, push
-// subscriptions, interactive terminals and their permissions, usage, the plugin event outbox, and
+// subscriptions, apps, their logins and their permissions, usage, the event outbox, and
 // the credentials, sealed (secrets.go). Never the conversations themselves, nor asks.
 package store
 
@@ -17,6 +17,8 @@ import (
 	"time"
 
 	_ "modernc.org/sqlite"
+
+	"github.com/kumoSleeping/iridium/internal/api"
 )
 
 // schema is every version's migration, in order; PRAGMA user_version says how many ran. Only
@@ -170,7 +172,7 @@ var schema = []string{
 	// 15: what each executor last said of itself (machines.go).
 	machinesSchema,
 	// 16: a workspace hidden from the page (the user, 2026-11-08): listed only while a session in
-	// it runs elsewhere (DSH Desktop).
+	// it runs elsewhere (DSH Desktop). Unused since 2026-11-10.
 	`ALTER TABLE workspaces ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;`,
 	// 17: no placeholder names (the user, 2026-11-08): auto marks a name the session's agent gave
 	// (ir rename) from now on.
@@ -195,14 +197,28 @@ var schema = []string{
 	`CREATE TABLE IF NOT EXISTS folder_order (path TEXT PRIMARY KEY, at REAL NOT NULL);`,
 	// 23: folders pinned in the list (the user, 2026-11-09): first among those in their group.
 	`CREATE TABLE IF NOT EXISTS folder_pins (path TEXT PRIMARY KEY, at INTEGER NOT NULL);`,
-	// 24: the groups' rows in the order they were dragged to, by the page's key for each: a group
-	// listed at two machines is two rows, ordered apart (the user, 2026-11-09).
+	// 24: the groups' rows in the order they were dragged to, by the page's key for each (the user,
+	// 2026-11-09).
 	`CREATE TABLE group_order (key TEXT PRIMARY KEY, sort INTEGER NOT NULL);`,
 	// 25: the folder at another machine a session of this machine's was opened for (a coordinator,
-	// the user, 2026-11-09): it is grouped by that folder, not by its own. A group split (flat):
+	// the user, 2026-11-09; unused since 2026-11-10). A group split (flat):
 	// it holds only the sessions right in its folder, its subfolders groups of their own (order.go).
 	`CREATE TABLE session_at (session TEXT PRIMARY KEY, path TEXT NOT NULL);
 	ALTER TABLE workspaces ADD COLUMN flat INTEGER NOT NULL DEFAULT 0;`,
+	// 26: apps, the logins of ir_web and the host in place of terminals (0.2, apps.go).
+	appsSchema,
+	// 27: what an app was given as it paired, or by a change it asked for (logins.go): '' all.
+	`ALTER TABLE apps ADD COLUMN perms TEXT NOT NULL DEFAULT '';`,
+	// 28: the plugins' chat layer gone (0.2, S4a): where chats pointed, what they last said, the
+	// Bots' follows, and their events (the outbox stays, empty, for the apps' events).
+	`DROP TABLE chat_pointers;
+	DROP TABLE chat_seen;
+	DROP TABLE bot_follows;
+	DELETE FROM outbox;`,
+	// 29: the agents an app carries that are turned off there (machines.go): a JSON list, '' none.
+	`ALTER TABLE apps ADD COLUMN agents_off TEXT NOT NULL DEFAULT '';`,
+	// 30: the login of the app an input came from (not ir_web's: its terminal is its login).
+	`ALTER TABLE inputs ADD COLUMN login TEXT NOT NULL DEFAULT '';`,
 }
 
 // steps run in Go after the migration of their version, in the same transaction.
@@ -217,7 +233,7 @@ type Store struct {
 }
 
 // Open opens (and makes, or migrates) the database at path. The file and its -wal and -shm are
-// the owner's alone (0600): they hold the terminals' token hashes and passkeys.
+// the owner's alone (0600): they hold the apps' token hashes and the logins' passkeys.
 func Open(path string) (*Store, error) {
 	if err := private(path); err != nil {
 		return nil, err
@@ -227,12 +243,51 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := backup(db, path); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("store %s: a copy before the upgrade: %w", path, err)
+	}
 	s := &Store{db: db, keyPath: filepath.Join(filepath.Dir(path), "secrets.key")}
 	if err := s.migrate(); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("store %s: %w", path, err)
 	}
 	return s, nil
+}
+
+// backup copies the database to <path>.v<N>.bak (0600, by VACUUM INTO) before the migrations
+// from version N run, so a rollback to the binary before has its database to go back to
+// (docs/next/prep.md §4). Nothing for a new database (version 0) or one up to date. A copy there
+// already is kept: it is of the same version, from an upgrade that failed and rolled back.
+func backup(db *sql.DB, path string) error {
+	var v int
+	if err := db.QueryRow(`PRAGMA user_version`).Scan(&v); err != nil {
+		return err
+	}
+	if v == 0 || v >= len(schema) {
+		return nil
+	}
+	bak := fmt.Sprintf("%s.v%d.bak", path, v)
+	if _, err := os.Stat(bak); !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	// Into a file of its own first (VACUUM INTO takes an empty one), renamed once whole: a crash
+	// midway leaves no half copy under the name, and two openers do not collide.
+	f, err := os.CreateTemp(filepath.Dir(path), filepath.Base(bak)+".*")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	f.Close()
+	if _, err := db.Exec(`VACUUM INTO ?`, tmp); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, bak); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return nil
 }
 
 // private makes the database file 0600 before SQLite opens it (SQLite gives the -wal and -shm it
@@ -314,20 +369,20 @@ type Overlay struct {
 	Color      string
 	// Order: the key it was dragged to (SetOrder); 0 none.
 	Order float64
-	// At: the folder at another machine it was opened for (SetAt), "<machine>:<path>"; "" none.
-	At string
+	// Opened: Iridium opened it through a create, of a terminal (SetOpener).
+	Opened bool
 }
 
 // Overlays is every session's overlay, by session id.
 func (s *Store) Overlays() (map[string]Overlay, error) {
 	rows, err := s.db.Query(`
-		SELECT session, MAX(name), MAX(auto), MAX(pinned), MAX(workspace), MAX(manual), MAX(color), MAX(ord), MAX(at) FROM (
-			SELECT session, name, auto, 0 AS pinned, 0 AS workspace, 0 AS manual, '' AS color, 0.0 AS ord, '' AS at FROM names
-			UNION ALL SELECT session, '', 0, 1, 0, 0, '', 0, '' FROM pins
-			UNION ALL SELECT session, '', 0, 0, IFNULL(workspace, 0), manual, '', 0, '' FROM assignments
-			UNION ALL SELECT session, '', 0, 0, 0, 0, color, 0, '' FROM session_colors
-			UNION ALL SELECT session, '', 0, 0, 0, 0, '', at, '' FROM session_order
-			UNION ALL SELECT session, '', 0, 0, 0, 0, '', 0, path FROM session_at
+		SELECT session, MAX(name), MAX(auto), MAX(pinned), MAX(workspace), MAX(manual), MAX(color), MAX(ord), MAX(opened) FROM (
+			SELECT session, name, auto, 0 AS pinned, 0 AS workspace, 0 AS manual, '' AS color, 0.0 AS ord, 0 AS opened FROM names
+			UNION ALL SELECT session, '', 0, 1, 0, 0, '', 0, 0 FROM pins
+			UNION ALL SELECT session, '', 0, 0, IFNULL(workspace, 0), manual, '', 0, 0 FROM assignments
+			UNION ALL SELECT session, '', 0, 0, 0, 0, color, 0, 0 FROM session_colors
+			UNION ALL SELECT session, '', 0, 0, 0, 0, '', at, 0 FROM session_order
+			UNION ALL SELECT session, '', 0, 0, 0, 0, '', 0, 1 FROM openers
 		) GROUP BY session`)
 	if err != nil {
 		return nil, err
@@ -337,7 +392,7 @@ func (s *Store) Overlays() (map[string]Overlay, error) {
 	for rows.Next() {
 		var id string
 		var o Overlay
-		if err := rows.Scan(&id, &o.Name, &o.AgentNamed, &o.Pinned, &o.Workspace, &o.Manual, &o.Color, &o.Order, &o.At); err != nil {
+		if err := rows.Scan(&id, &o.Name, &o.AgentNamed, &o.Pinned, &o.Workspace, &o.Manual, &o.Color, &o.Order, &o.Opened); err != nil {
 			return nil, err
 		}
 		out[id] = o
@@ -387,10 +442,9 @@ func (s *Store) flag(table, session string, on bool) error {
 }
 
 type Workspace struct {
-	ID     int64  `json:"id"`
-	Name   string `json:"name"`
-	Path   string `json:"path"`
-	Hidden bool   `json:"hidden,omitempty"`
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+	Path string `json:"path"`
 	// Flat: split (SplitWorkspace): it holds only the sessions right in its folder.
 	Flat bool `json:"flat,omitempty"`
 }
@@ -404,7 +458,7 @@ func (s *Store) AddWorkspace(name, path string) (int64, error) {
 }
 
 func (s *Store) Workspaces() ([]Workspace, error) {
-	rows, err := s.db.Query(`SELECT id, name, path, hidden, flat FROM workspaces ORDER BY sort, id`)
+	rows, err := s.db.Query(`SELECT id, name, path, flat FROM workspaces ORDER BY sort, id`)
 	if err != nil {
 		return nil, err
 	}
@@ -412,7 +466,7 @@ func (s *Store) Workspaces() ([]Workspace, error) {
 	var out []Workspace
 	for rows.Next() {
 		var w Workspace
-		if err := rows.Scan(&w.ID, &w.Name, &w.Path, &w.Hidden, &w.Flat); err != nil {
+		if err := rows.Scan(&w.ID, &w.Name, &w.Path, &w.Flat); err != nil {
 			return nil, err
 		}
 		out = append(out, w)
@@ -510,6 +564,7 @@ type Input struct {
 	ID       string
 	Session  string
 	Terminal string // who sent it: the interactive terminal's ID
+	Login    string // and the login of that app it came from, if one (not ir_web's: Terminal is it)
 	Tag      string // the source it is prefixed with, "[Tag] ": the terminal's name then; "" is Terminal
 	Text     string
 	State    string // queued, paused, sent
@@ -524,8 +579,8 @@ func (s *Store) AddInput(in Input) error {
 	if in.State == "sent" {
 		sent = in.Created
 	}
-	_, err := s.db.Exec(`INSERT INTO inputs (id, session, terminal, tag, text, state, created_at, sent_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		in.ID, in.Session, in.Terminal, in.Tag, in.Text, in.State, in.Created, sent)
+	_, err := s.db.Exec(`INSERT INTO inputs (id, session, terminal, login, tag, text, state, created_at, sent_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		in.ID, in.Session, in.Terminal, in.Login, in.Tag, in.Text, in.State, in.Created, sent)
 	return err
 }
 
@@ -547,9 +602,19 @@ func (s *Store) Source(id string) (terminal, tag string, ok bool) {
 	return terminal, tag, true
 }
 
+// Sender is Source for a transcript (transcript.Sources): the terminal with the login it came
+// from, if one, as api.Sender joins them.
+func (s *Store) Sender(id string) (terminal, tag string, ok bool) {
+	var login string
+	if s.db.QueryRow(`SELECT terminal, login, IIF(tag = '', terminal, tag) FROM inputs WHERE id = ?`, id).Scan(&terminal, &login, &tag) != nil {
+		return "", "", false
+	}
+	return api.Sender(terminal, login), tag, true
+}
+
 // Queued is the session's inputs not sent yet, oldest first.
 func (s *Store) Queued(session string) ([]Input, error) {
-	rows, err := s.db.Query(`SELECT id, session, terminal, tag, text, state, created_at FROM inputs WHERE session = ? AND state != 'sent' ORDER BY created_at, rowid`, session)
+	rows, err := s.db.Query(`SELECT id, session, terminal, login, tag, text, state, created_at FROM inputs WHERE session = ? AND state != 'sent' ORDER BY created_at, rowid`, session)
 	if err != nil {
 		return nil, err
 	}
@@ -557,7 +622,7 @@ func (s *Store) Queued(session string) ([]Input, error) {
 	var out []Input
 	for rows.Next() {
 		var in Input
-		if err := rows.Scan(&in.ID, &in.Session, &in.Terminal, &in.Tag, &in.Text, &in.State, &in.Created); err != nil {
+		if err := rows.Scan(&in.ID, &in.Session, &in.Terminal, &in.Login, &in.Tag, &in.Text, &in.State, &in.Created); err != nil {
 			return nil, err
 		}
 		out = append(out, in)
@@ -587,6 +652,13 @@ func (s *Store) AddUsage(u Usage) error {
 	_, err := s.db.Exec(`INSERT INTO usage (at, terminal, session, agent, model, input, output, cache_read, cache_write, cost_usd) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		u.At, u.Terminal, u.Session, u.Agent, u.Model, u.Input, u.Output, u.CacheRead, u.CacheWrite, u.CostUSD)
 	return err
+}
+
+// SessionInput is a session's input tokens over its usage rows: not cached, read from the cache,
+// written to it.
+func (s *Store) SessionInput(session string) (input, cacheRead, cacheWrite int64, err error) {
+	err = s.db.QueryRow(`SELECT IFNULL(SUM(input), 0), IFNULL(SUM(cache_read), 0), IFNULL(SUM(cache_write), 0) FROM usage WHERE session = ?`, session).Scan(&input, &cacheRead, &cacheWrite)
+	return
 }
 
 // UsageSince is every usage row since at (ms), oldest first.
@@ -622,17 +694,22 @@ type UsageDay struct {
 	Output     int64
 	CacheRead  int64
 	CacheWrite int64
-	CostUSD    float64 // of the rows that have one
+	CostUSD    float64 // of the rows that have one, and those priced (UsageBy's price)
 }
+
+// Price prices a row the agent gave no cost (or a cost of 0): false when it cannot.
+type Price func(model string, input, output, cacheRead, cacheWrite int64) (float64, bool)
 
 // UsageByDay sums the usage since at (ms) by local day, terminal, agent and model, oldest day
 // first; terminals given, only theirs.
 func (s *Store) UsageByDay(at int64, terminals ...string) ([]UsageDay, error) {
-	return s.UsageBy(at, func(t time.Time) string { return t.Format(time.DateOnly) }, terminals...)
+	return s.UsageBy(at, func(t time.Time) string { return t.Format(time.DateOnly) }, nil, terminals...)
 }
 
-// UsageBy is UsageByDay with the rows put in bucket's keys (UsageDay.Day) rather than days.
-func (s *Store) UsageBy(at int64, bucket func(time.Time) string, terminals ...string) ([]UsageDay, error) {
+// UsageBy is UsageByDay with the rows put in bucket's keys (UsageDay.Day) rather than days, and
+// each row without a cost of its own priced by price (nil: none), row by row, before they are
+// summed.
+func (s *Store) UsageBy(at int64, bucket func(time.Time) string, price Price, terminals ...string) ([]UsageDay, error) {
 	q := `SELECT at, terminal, agent, model, input, output, cache_read, cache_write, cost_usd FROM usage WHERE at >= ?`
 	args := []any{at}
 	if len(terminals) > 0 {
@@ -670,8 +747,12 @@ func (s *Store) UsageBy(at int64, bucket func(time.Time) string, terminals ...st
 		d.Output += o
 		d.CacheRead += cr
 		d.CacheWrite += cw
-		if cost.Valid {
+		if cost.Valid && cost.Float64 > 0 {
 			d.CostUSD += cost.Float64
+		} else if price != nil {
+			if c, ok := price(k.model, in, o, cr, cw); ok {
+				d.CostUSD += c
+			}
 		}
 	}
 	return out, rows.Err()

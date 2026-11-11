@@ -1,0 +1,157 @@
+# METHOD internal/x is /v1/internal/x; a bare name (channel.list) is POST /v1/<name>. Errors: {code, message}.
+# {id}, channel_id: an id's unique start, or self (your session); guild_id=self: your group. person only: not an agent.
+# message.create: _data.text (plain words, escaped by the server) for content; _data.paths: local files (socket only).
+# A path or folder: ~/x, app:path at an app's computer, host:path; a relative one goes from your session's folder.
+
+# common
+channel.create {_data.agent, _data.cwd, _data.text?, _data.model?, _data.mode?, _data.effort?, _data.preset?, data.name?, data.parent_id?, guild_id?} -> Channel  start a session, a child of yours; _data.cwd=. your folder; --wait for its reply
+  data.parent_id: the session it hangs under on the page (its launcher). Not given: the session your ir runs in, so one you start is your child: listed under you, archived with you. To start one of its own: channel.update data.parent_id:=null after.
+  _data.cwd: . is your own folder and a relative path goes from it; ~ and ~/x the home; host:path here; app:path at that app's computer (GET internal/apps), where it then runs; an absolute path as it is.
+  guild_id: a folder group's id (guild.list), self yours; not given: its folder's group, yours when yours holds its folder.
+  _data.agent: claude, codex, pi or dsh (GET internal/agents: those that can start here, their modes); _data.mode: one of them; model, effort, preset: the agent's own (SessionState.models, efforts; GET internal/sessions/{id}/presets).
+  _data.text: its first message, from you: it reads [ir:<your session>] before it. ir prints the id, with text once the agent took it; --wait: once that turn ended, its reply too; later: GET internal/sessions/{id} --wait.
+channel.list {guild_id?, next?, _data.all?} -> List<Channel>  the folders (type 2), then the sessions; _data.all adds archived  view=id,name,_data.status,_data.agent,_data.cwd,_data.title
+  parent_id: what it is under: the session it hangs under (its launcher, a subagent's session), else its folder (folder:<path>); --pick id,name,parent_id shows who is under whom.
+  _data: a session's Session (_data.own: a person opened it or took it out); a folder's path, color, pinned, order. guild_id: a folder group's (guild.list); self: yours.
+channel.get {channel_id} -> Channel  one session, or a folder (folder:<path>); _data is its Session  view=id,name,_data.status,_data.cwd,_data.title,_data.last.text
+channel.update {channel_id, data.name?, data.parent_id?, _data.archived?, _data.pinned?, _data.color?, _data.order?, _data.workspace?} -> {}  rename (not over a person's name), archive, restore, pin, tag, move
+  data.name: a short name; an agent's never covers one a person gave. _data.archived: true archives it and the sessions hung under it (their agents stop), false brings them back.
+  data.parent_id:=null (or its folder): out from under its launcher, into its own folder's group, for good. _data.workspace: into that folder group (guild.list) by hand, 0 none.
+  _data.color: red, orange, yellow, green, blue, purple, "" none; pinned; order: the key it was dragged to among those beside it. A folder (folder:<path>) takes color (one here), pinned, order.
+channel.delete {channel_id} -> {}  archive: its agent stops, the transcript stays
+  The sessions hung under it are archived with it; channel.update _data.archived:=false brings them back.
+guild.list {next?} -> List<Guild>  folder groups, then loose  view=id,name,_data.path
+message.list {channel_id, next?, direction?, limit?, order?, _data.blocks?} -> BidiList<Message>  transcript; direction before|after|around  view=id,content
+  _data.blocks:=true: the page's blocks as Iridium keeps them too, in _data.blocks (kind, text, from, tool calls).
+message.get {channel_id, message_id} -> Message  one block, untruncated
+message.update {channel_id, message_id, content?, _data.text?} -> {}  change a message you sent while it waits in the queue (message_id: message.create's id)
+message.delete {channel_id, message_id} -> {}  take back a message waiting in the queue
+message.create {channel_id, content?, _data.text?, _data.paths?, _data.attachments?, _data.steer?} -> Message[]  send; joins a running turn (a person may queue: _data.steer=false)  view=id,_data.queued
+  _data.text: plain words (the server escapes them); content: Satori elements as they are. The session reads [ir:<your session>] before it.
+  _data.paths: files here to attach (relative: from your folder; socket only); _data.attachments: refs upload.create gave.
+  Returns once the agent took it; --wait: once that turn ended, with its reply (exit 2: it waits for a person).
+POST internal/links {path} -> FileLink  a file's ir: link and the Markdown to put it in your reply; socket only  view=markdown
+PUT internal/secrets/{name} {note?, value?, scope?, workspaces?, always?} -> SecretInfo  set; an agent gets 202 {need}: --wait for the user to type it in
+GET internal/sessions/{id} - -> SessionState  live state; --wait: wait for the turn to end, print its reply  view=id,status,model,mode,error,asks,queue,end
+  --wait: until its turn ends, then its last reply; exit 2 when it waits for a person (asks: its questions; POST internal/button answers one).
+POST internal/sessions/{id}/interrupt - -> {ok}  end the current turn (Esc); the queue pauses
+POST internal/sessions/{id}/stop - -> {ok}  stop the agent process; the next message restarts it
+POST internal/button {id, option?, choices?, words?, message?} -> {}  answer an ask: id its card (asks[].card.id); or press a button (<card>#<option>; one attached: att:<session>:<from>:<id>, SessionState.attached)
+POST internal/files/copy {from, to} -> ndjson  copy a file: from, to are paths here or app:path at an app's computer; prints path, size, sha256; run again to resume; socket only
+POST internal/machines/{id}/shell {line, cwd?} -> output  a command line at an app's computer (id or name); --wait for its output and exit code; host or agents
+PATCH internal/guilds/{id} {name?, position?, split?} -> {ok}  rename a folder group, move it (0 first), split it by subfolder; host or web
+GET internal/apps - -> Apps  apps, computers, logins  view=apps.id,apps.name,apps.online,apps.computer.home,logins.id,logins.name
+GET internal/files?path&machine - -> DirListing  list a directory; socket only  view=entries.name,entries.size,entries.type
+GET internal/usage?days&app&by - -> Usage  tokens, cost; app=id|name|me, by=hour|weekhour  view=rows.day,rows.agent,rows.model,rows.output,rows.costUsd
+
+# satori
+meta - -> Meta  this app's approved logins; ir speaks as the first
+login.get - -> Login  the login ir speaks as
+user.get {user_id} -> User  an agent (claude, codex, pi, dsh), an app, a login or the host
+guild.get {guild_id} -> Guild  one folder group
+upload.create {channel_id} -> {field: url}  multipart: files for a session, each an internal: url for <img>/<file>
+
+# sessions
+GET internal/agents - -> AgentInfo[]  agents that can start here, their modes  view=agent,modes,defaultMode,missing
+GET internal/sessions/{id}/image?at&n - -> image  the n-th image a tool result gave the model
+POST internal/sessions/{id}/release {toolUseId, dismiss?} -> {ok}  run a step auto mode denied under manual; person only
+GET internal/sessions/{id}/commands - -> Command[]  the agent's slash commands  view=name,description
+
+# session settings
+PUT internal/sessions/{id}/model {model} -> {ok}  model ("" default; values in SessionState.models)
+PUT internal/sessions/{id}/mode {mode} -> {ok}  approval mode, one of SessionState.modes
+PUT internal/sessions/{id}/effort {effort} -> {ok}  thinking effort, one of SessionState.efforts
+PUT internal/sessions/{id}/ultracode {ultracode} -> {ok}  Claude only
+PUT internal/sessions/{id}/attach/{place} {content} -> {ok}  an app's Satori elements on the session's page (place effort); its buttons come back as interaction/button; apps only
+DELETE internal/sessions/{id}/attach/{place} - -> {ok}  take them away
+GET internal/sessions/{id}/presets - -> {presets, default}  dsh agent presets  view=presets.id,presets.name,default
+PUT internal/sessions/{id}/preset {preset} -> {ok}  dsh only, before the first message
+GET internal/sessions/{id}/rules - -> AllowRule[]  "always allow" rules of the session
+DELETE internal/sessions/{id}/rules - -> {ok}  clear them
+
+# queue
+POST internal/sessions/{id}/queue/{input}/steer - -> {ok}  send a queued input now, into the running turn
+POST internal/sessions/{id}/continue - -> {ok}  resume a paused queue
+
+# shell
+POST internal/sessions/{id}/shell {line, cwd?} -> {run?, cwd}  run a command line in the session's folder; host or web
+GET internal/shell/{run}?from - -> {data, next, done, code?, signal?, err?}  output from byte offset from (64KB max)
+DELETE internal/shell/{run} - -> {ok}  stop a command line
+
+# groups and folders
+GET internal/folders?path&machine - -> Folders  subfolders (home by default)  view=path,parent,folders
+POST internal/folders {path, name, machine?} -> {path}  make a folder
+GET internal/machines/{id}/dsh/workspaces - -> DshWorkspace[]  dsh workspaces at that computer  view=title,path,sessions
+POST internal/machines/{id}/dsh/sync - -> {ok}  re-read the dsh at that computer
+
+# files
+GET internal/sessions/{id}/files/{ref}?download - -> file  a file of the session (Range works)
+GET internal/sessions/{id}/files/{ref}/thumb?size - -> image  thumbnail, longest side 32-4096 (1024)
+GET internal/sessions/{id}/files/{ref}/info - -> FileRef  name, path, size, mime, sha256
+POST internal/sessions/{id}/uploads {name, size} -> Upload  begin a chunked upload
+PUT internal/uploads/{upload}?offset - -> Upload  body: the raw chunk at offset=received (64MB max)
+GET internal/uploads/{upload} - -> Upload  bytes received so far
+POST internal/uploads/{upload}/complete {sha256} -> Upload  verify and finish; file holds the ref
+DELETE internal/uploads/{upload} - -> {ok}  cancel an upload
+POST internal/sessions/{id}/attach {path} -> FileRef  attach a local file to the session; socket only
+POST internal/cli {args, cwd} -> ndjson  ir of a session at another computer, by its TOKEN; not on the socket
+
+# share
+POST internal/share {what, to, session?, at?, place?, ref?, path?, note?} -> {app, login, name?, pushed?}  share with app/login
+GET internal/share/targets?what&session&at&place&ref&path - -> ShareTargets  who may get it  view=apps.id,apps.name,apps.logins.id
+
+# usage
+
+# secrets
+GET internal/secrets - -> Secrets  no values; host only  view=secrets.name,secrets.note,secrets.scope
+DELETE internal/secrets/{name} - -> {ok}  host only, person only
+POST internal/secrets/use {names, command, session?, confirm?} -> {values}  ir run only; socket only; may be 202 {need}
+
+# notes (host or web)
+GET internal/notes - -> Notes  all  view=notes.id,notes.body,notes.done,folders.name
+POST internal/notes {id?, body, folder?, pos?, color?, from?, root?} -> Note  new note
+PATCH internal/notes/{id} {body?, folder?, pos?, color?, done?, session?} -> Note  edit a note
+DELETE internal/notes/{id} - -> {ok}  delete a note
+POST internal/note-folders {name?, pos?} -> NoteFolder  new note folder
+PATCH internal/note-folders/{id} {name?, pos?} -> {ok}  rename, move a note folder
+DELETE internal/note-folders/{id} - -> {ok}  delete a note folder; its notes move out
+
+# apps (admin)
+GET internal/me - -> Me  the caller: app, login, host, web, rules
+PUT internal/me/profile {name?, avatar?, removeAvatar?} -> EndpointInfo  own name, avatar (base64); not the host
+PUT internal/me/device {device} -> {device}  own device: computer|laptop|phone|none
+PUT internal/me/perms {agents, scope} -> 202 {need}  an app asks for new permissions; apps only
+PUT internal/apps/{id}/profile {name?, avatar?, removeAvatar?} -> EndpointInfo  an app's name, avatar; host or web
+PUT internal/apps/{id}/device {device} -> {device}  an app's or login's device; host or web
+PUT internal/apps/{id}/agents {off} -> {off}  agents turned off at an app's computer; person only
+PUT internal/apps/{id}/perms {agents, scope} -> Perms  an app's permissions; person only
+PUT internal/apps/{id}/logins/{login}/perms {agents, scope} -> Perms  a login's; person only
+DELETE internal/apps/{id} - -> {ok}  remove an app, an ir_web login or an invite; person only
+DELETE internal/apps/{id}/logins/{login} - -> {ok}  remove a login; person only
+POST internal/invites {name?, claude?, perms?} -> Invite  a one-time ir_web link (10 min); an agent gets 202 {need}
+GET internal/catalogue - -> CatalogueEntry[]  official apps and their install commands  view=id,name,type,description
+GET internal/needs - -> Needs  waiting for a person; person only  view=pending.id,pending.kind,pending.name
+GET internal/needs/{id}?wait - -> NeedState  how a need went; wait up to 60 s
+POST internal/needs/{id} {allow, value?, forSession?, owner?, name?, perms?, agentsOff?} -> NeedReply  allow or deny; person only
+DELETE internal/needs/{id} - -> {ok}  dismiss a share sent to this ir_web login
+GET internal/pairing - -> PairWindow  pairing window; person only
+PUT internal/pairing {open, minutes?} -> PairWindow  open (10 min, 60 max) or close pairing; person only
+POST internal/pair {name, type?, os?, arch?, program?, agents?, shell?, noShell?, agentShell?, home?, machineId?, wants?} -> {code, request}  ask to pair
+GET internal/pair/{request} - -> {status, token?}  pairing outcome; token given once
+GET internal/exec - -> ws  an executor's connection; its app TOKEN only
+
+# settings (admin)
+GET internal/settings - -> Settings  idle reaping, resumes, default modes, push, language; host or web
+PUT internal/settings {idleReap?, crashResume?, quotaResume?, quotaHidden?, modes?, push?, enterInTurn?, lang?, autoUpdate?} -> Settings  person only
+GET internal/public - -> {origin?, passkeys}  public address; host or web
+PUT internal/public {origin} -> {origin?, passkeys}  set the public origin ("" off); the host's own ir, person only
+GET internal/update - -> UpdateState  versions and update progress  view=current,latest,available,ready,phase,error
+POST internal/update/check - -> UpdateState  check for a release now; person only
+POST internal/update {force?} -> UpdateState  install the update and restart; person only
+GET internal/web/push - -> PushState  web push switch, key, defaults, rules; person only
+PUT internal/web/push {enabled} -> {ok}  on or off; person only
+PUT internal/web/push/defaults {needsYou, error, turnEnd} -> PushState  events pushed by default; person only
+PUT internal/web/push/rules {scope, target, mode, events?} -> PushState  group, folder, session rule; person only
+POST internal/web/push/subscriptions {endpoint, keys.p256dh, keys.auth} -> {ok}  add a browser; person only
+DELETE internal/web/push/subscriptions {endpoint} -> {ok}  remove a subscription; person only
+POST internal/web/push/test - -> {sent}  push a test to your own subscriptions; person only

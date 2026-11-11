@@ -62,12 +62,18 @@ type Hello struct {
 	Env     []string    `json:"env"`
 	Agents  []AgentInfo `json:"agents"`
 	Holds   []HoldState `json:"holds"`
-	// NoShell: it starts nothing but its agents (each hold.start's argv begins with one of
-	// theirs), so no command line runs there; its owner's choice.
-	NoShell bool `json:"noShell,omitempty"`
-	// AgentShell: agents of that Iridium may run command lines here (ir sh), not only a person
-	// on its page; its owner's choice, off unless said.
+	// Shell: command lines run there, a person's on the page ($) and agents' (ir sh); else it
+	// starts nothing but its agents (each hold.start's argv begins with one of theirs). Its
+	// owner's choice, off unless said (ir join --shell). nil from an older executor: NoShell and
+	// AgentShell say it (ShellOn).
+	Shell *bool `json:"shell,omitempty"`
+	// NoShell and AgentShell are the older two switches, still said for an older Iridium:
+	// NoShell, only its agents start there; AgentShell, agents may run command lines there too.
+	NoShell    bool `json:"noShell,omitempty"`
 	AgentShell bool `json:"agentShell,omitempty"`
+	// MachineID is a hash of the computer's own ID (MachineHash): one equal to the Iridium's own
+	// is an app on the host, whose agents are not offered (they are the host's).
+	MachineID string `json:"machineId,omitempty"`
 	// IRClient: it puts an ir on the PATH of the agents it starts, which reaches the Iridium over
 	// HTTPS with the session's own TOKEN (hold.start's env IRIDIUM_TOKEN; docs/exec.md "远端的
 	// ir"): IRIDIUM_URL is set there to the address it connected to, unless the env has one.
@@ -76,11 +82,23 @@ type Hello struct {
 	Caps []string `json:"caps,omitempty"`
 }
 
-// Caps an executor may say in Hello. CapHeld: held.list and held.send (dsh.open and dsh.prompt
-// otherwise). CapHeldFeatures: held.get, held.set and the event held.changed.
+// ShellOn: command lines run there (Shell; from an older executor, AgentShell without NoShell).
+func (h *Hello) ShellOn() bool {
+	if h.Shell != nil {
+		return *h.Shell
+	}
+	return h.AgentShell && !h.NoShell
+}
+
+// Caps an executor may say in Hello. CapHeld: held.list, held.send, held.get, held.set and the
+// event held.changed. CapRun: run, run.stop and the events run.out, run.exit (else ir sh runs as a
+// holder). CapPrepare: agent.presets and agent.prepare (it composes an agent's launch from its
+// host's own settings). CapAttach: it sends session.attach and takes the event session.button.
 const (
-	CapHeld         = "held"
-	CapHeldFeatures = "held.features"
+	CapHeld    = "held"
+	CapRun     = "run"
+	CapPrepare = "agent.prepare"
+	CapAttach  = "session.attach"
 )
 
 // AgentInfo is an agent installed there and how to start it. Argv is the program part, to which
@@ -152,6 +170,39 @@ type Exit struct {
 	Signal *string `json:"signal"`
 }
 
+// RunParams is run: command line Line run there now, in Cwd ("" its home), by its shell (sh -c,
+// cmd.exe /c on Windows), with Env (as hold.start's; none: its own). Run is this side's ID for it,
+// in the events. Its output comes as run.out events, then one run.exit; run.stop ends it, and so
+// does the connection's end.
+type RunParams struct {
+	Run  string   `json:"run"`
+	Line string   `json:"line"`
+	Cwd  string   `json:"cwd,omitempty"`
+	Env  []string `json:"env,omitempty"`
+}
+
+// RunStopParams is run.stop: run ended, its whole tree.
+type RunStopParams struct {
+	Run string `json:"run"`
+}
+
+// RunOut is the event run.out: what the run wrote, as it came (UTF-8 text, whole characters);
+// Err: to its stderr.
+type RunOut struct {
+	Run  string `json:"run"`
+	Data string `json:"data"`
+	Err  bool   `json:"err,omitempty"`
+}
+
+// RunExit is the event run.exit, the run's last: its exit code, or the signal (without "SIG")
+// that ended it; Error, why it could not start (Code 127 then).
+type RunExit struct {
+	Run    string  `json:"run"`
+	Code   *int    `json:"code"`
+	Signal *string `json:"signal,omitempty"`
+	Error  string  `json:"error,omitempty"`
+}
+
 // Stat is a file there.
 type Stat struct {
 	Size  int64  `json:"size"`
@@ -201,10 +252,10 @@ type WriteFileParams struct {
 // MaxRead is the most one fs.read returns.
 const MaxRead = 4 << 20
 
-// Optional, the dsh plugin's (docs/exec.md "远端 DSH"): the dsh it runs in (DSH Desktop). Another
-// executor answers CodeUnsupported.
+// Optional (docs/exec.md "远端 DSH"): an agent's host there (the dsh plugin: the dsh it runs in, DSH
+// Desktop). Another executor answers CodeUnsupported.
 
-// HeldListReply answers held.list (dsh.open of an older plugin): the sessions open in that dsh
+// HeldListReply answers held.list: the sessions open in that dsh
 // process now (held: DSH Desktop has them loaded, its writer lock); Unsynced, the workspaces the
 // plugin's settings keep from the Iridium (their folders or names); UnsyncedUngrouped, the
 // sessions in none of them (dsh's 未分组) kept too.
@@ -217,10 +268,7 @@ type HeldListReply struct {
 	UnsyncedUngrouped bool     `json:"unsyncedUngrouped,omitempty"`
 }
 
-// DshOpenReply is HeldListReply by its older name.
-type DshOpenReply = HeldListReply
-
-// HeldSendParams is held.send (dsh.prompt of an older plugin): a message for a session the dsh
+// HeldSendParams is held.send: a message for a session the dsh
 // there holds (open in DSH Desktop), which the Iridium cannot resume: its agent there takes it, a
 // next turn or (Steer) into the running one. CodeNotFound: no agent of it lives there.
 type HeldSendParams struct {
@@ -229,88 +277,50 @@ type HeldSendParams struct {
 	Steer   bool   `json:"steer,omitempty"`
 }
 
-// HeldGetParams is held.get: session's live state there, in Lang ("zh", "en"; "" the plugin's
-// own) for the features' texts. Any session: one not held has its features unavailable, with
-// why.
+// HeldGetParams is held.get: session's live state there.
 type HeldGetParams struct {
 	Session string `json:"session"`
-	Lang    string `json:"lang,omitempty"`
 }
 
-// HeldSetParams is held.set: one of Model ("<provider>/<model>"), Effort or Feature changed on a
-// held session; the reply is HeldLive after it. CodeNotFound: not held there.
+// HeldSetParams is held.set: one of Model ("<provider>/<model>") or Effort changed on a held
+// session; the reply is HeldLive after it. CodeNotFound: not held there.
 type HeldSetParams struct {
-	Session string          `json:"session"`
-	Lang    string          `json:"lang,omitempty"`
-	Model   string          `json:"model,omitempty"`
-	Effort  string          `json:"effort,omitempty"`
-	Feature *HeldSetFeature `json:"feature,omitempty"`
-}
-
-// HeldSetFeature is feature ID switched On, maybe at Option (one of its options' IDs).
-type HeldSetFeature struct {
-	ID     string `json:"id"`
-	On     bool   `json:"on"`
-	Option string `json:"option,omitempty"`
+	Session string `json:"session"`
+	Model   string `json:"model,omitempty"`
+	Effort  string `json:"effort,omitempty"`
 }
 
 // HeldLive is a session as the holder there runs it now. Held: it has the session loaded; Model
-// ("<provider>/<model>") and Effort, the level it runs at (a feature's own while that feature
-// owns the effort), only then. Features: the switches plugins there add to it, held or not.
+// ("<provider>/<model>") and Effort, the level it runs at, only then.
 type HeldLive struct {
-	Held     bool      `json:"held"`
-	Model    string    `json:"model,omitempty"`
-	Effort   string    `json:"effort,omitempty"`
-	Features []Feature `json:"features,omitempty"`
-	// Owner is the feature that runs the session's effort at a level of its own now, Effort that
-	// level: also for one not held there whose features a process there runs (a dsh session
-	// Iridium started), whose effort is then set through held.set too.
-	Owner string `json:"owner,omitempty"`
+	Held   bool   `json:"held"`
+	Model  string `json:"model,omitempty"`
+	Effort string `json:"effort,omitempty"`
 }
 
-// HeldChanged is the event held.changed: session's live state changed there (a feature switched
-// in DSH Desktop, its model or effort changed); at most two a second per session.
+// HeldChanged is the event held.changed: session's live state changed there (its model or effort
+// changed in DSH Desktop); at most two a second per session.
 type HeldChanged struct {
 	Session string   `json:"session"`
 	Live    HeldLive `json:"live"`
 }
 
-// Feature is an extra switch on a session from a plugin there, as api.Feature: ID
-// "<plugin>.<name>"; Available, it can be switched now (Reason, why not); Active, on and in
-// effect; Options, what it runs as while on (Option, the one picked); Place, where the page puts
-// it ("effort": at the effort track's right); Tone "warm" or none; V, its shape's version (1).
-type Feature struct {
-	ID        string          `json:"id"`
-	Name      string          `json:"name"`
-	On        bool            `json:"on"`
-	Active    bool            `json:"active,omitempty"`
-	Available bool            `json:"available"`
-	Reason    string          `json:"reason,omitempty"`
-	Hint      string          `json:"hint,omitempty"`
-	Options   []FeatureOption `json:"options,omitempty"`
-	Option    string          `json:"option,omitempty"`
-	Place     string          `json:"place"`
-	Tone      string          `json:"tone,omitempty"`
-	V         int             `json:"v,omitempty"`
+// PresetsParams is agent.presets: the agent presets Agent has there.
+type PresetsParams struct {
+	Agent string `json:"agent"`
 }
 
-// FeatureOption is one of a feature's options.
-type FeatureOption struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-}
-
-// DshPresetsReply answers dsh.presets: the agent presets the dsh there registers (its
+// PresetsReply answers agent.presets: the agent presets its host registers (dsh: DSH Desktop's
 // agentPresets registry: shipped, a bundle's, the profile's own edits), by its order, and its
 // default (the user's pick in its settings, else the deployment's).
-type DshPresetsReply struct {
-	Presets []DshPreset `json:"presets"`
-	Default string      `json:"default"`
+type PresetsReply struct {
+	Presets []Preset `json:"presets"`
+	Default string   `json:"default"`
 }
 
-// DshPreset is one registered preset: Plugins, its child plugin rows as YAML (the registry's
-// read); Broken, why it cannot compose a session there, if it cannot.
-type DshPreset struct {
+// Preset is one registered preset: Plugins, its child plugin rows as YAML (the registry's read);
+// Broken, why it cannot compose a session there, if it cannot.
+type Preset struct {
 	ID          string `json:"id"`
 	Name        string `json:"name,omitempty"`
 	Description string `json:"description,omitempty"`
@@ -318,36 +328,44 @@ type DshPreset struct {
 	Broken      string `json:"broken,omitempty"`
 }
 
-// DshLLMReply answers dsh.llm: a patch there (Patch, its path) that gives an sdk profile the
-// models and providers the dsh there has in its settings (DSH Desktop's): the llm adapters' rows
-// and the default model, as configured there. Keys may be in it: it stays there, served to no one.
-type DshLLMReply struct {
-	Patch string `json:"patch"`
+// PrepareParams is agent.prepare: what a launch of Agent there takes from its host's settings.
+// Session (the agent's own id), Cwd, Preset and System (Iridium's system prompt) for a session;
+// no Session: for a look at its models only.
+type PrepareParams struct {
+	Agent   string `json:"agent"`
+	Session string `json:"session,omitempty"`
+	Cwd     string `json:"cwd,omitempty"`
+	Preset  string `json:"preset,omitempty"`
+	System  string `json:"system,omitempty"`
 }
 
-// DshBundlesReply answers dsh.bundles: the bundles of the profile the dsh there runs (DSH
-// Desktop's web profile) that are neither dsh's own nor the dsh plugin, by the profile's order,
-// each with its patch files' text as the package has them (dsh.bundle.patch, in order).
-type DshBundlesReply struct {
-	Bundles []DshBundle `json:"bundles"`
-}
-
-// DshBundle is one bundle: its package's name and version, and its patch files.
-type DshBundle struct {
-	Name    string   `json:"name"`
-	Version string   `json:"version,omitempty"`
+// PrepareReply answers agent.prepare: Patches, files there the launch takes in order (dsh: each a
+// --patch after --profile sdk); Preset, the preset (System with it) is in them, so Iridium adds
+// none of its own. Keys may be in them: they stay there, served to no one.
+type PrepareReply struct {
 	Patches []string `json:"patches"`
+	Preset  bool     `json:"preset,omitempty"`
 }
 
-// DshSessionReply answers dsh.session: a patch there (Patch, its path) that puts the dsh plugin's
-// part for a session into the dsh processes Iridium starts there (their features, through it). A
-// secret of the plugin's is in it: it stays there, served to no one.
-type DshSessionReply struct {
-	Patch string `json:"patch"`
+// AttachParams is session.attach, from the executor: Content (Satori elements; a string, or one
+// a language: {"zh": …, "en": …}) at Place on session Session (the agent's own id there); empty
+// or null takes it away.
+type AttachParams struct {
+	Session string          `json:"session"`
+	Place   string          `json:"place"`
+	Content json.RawMessage `json:"content,omitempty"`
 }
 
-// DshAttachParams is dsh.attach: session filed under the workspace of its folder cwd there.
-type DshAttachParams struct {
-	Session string `json:"session"`
-	Cwd     string `json:"cwd"`
+// ButtonEvent is the event session.button, to the executor: a button it attached pressed (ID, its
+// own id) on session Session, by User.
+type ButtonEvent struct {
+	Session string     `json:"session"`
+	ID      string     `json:"id"`
+	User    ButtonUser `json:"user"`
+}
+
+// ButtonUser is who pressed a button.
+type ButtonUser struct {
+	ID   string `json:"id"`
+	Name string `json:"name,omitempty"`
 }

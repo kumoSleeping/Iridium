@@ -14,7 +14,7 @@ var gzips = sync.Pool{New: func() any { w, _ := gzip.NewWriterLevel(io.Discard, 
 // stream above all, goes as it is, flushed as next flushes it.
 func Gzip(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodHead || !accepts(r.Header.Get("Accept-Encoding"), "gzip") {
+		if r.Method == http.MethodHead || r.Header.Get("Upgrade") != "" || !accepts(r.Header.Get("Accept-Encoding"), "gzip") {
 			next.ServeHTTP(w, r)
 			return
 		}

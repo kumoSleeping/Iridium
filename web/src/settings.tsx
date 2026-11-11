@@ -6,14 +6,14 @@
 // permissions (the 终端 page shows each terminal's) and the approval mode of new sessions (the
 // config file's, else each agent's own). Each a title and its control, no line explaining it;
 // no version shown, no head, signing out a plain row, asked once (the user, 2026-11-08). Every quota bar shows: nothing here hides one.
-// Changed is saved at once (GET/PUT /api/settings). Reaping idle agents and going on after a crash
+// Changed is saved at once (GET/PUT /v1/internal/settings). Reaping idle agents and going on after a crash
 // or a quota are not here: as the config file says, by default 1h and on (the user, 2026-11-07).
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, ChevronLeft, ChevronRight, LoaderCircle, LogOut, MonitorDown, RefreshCw, Share, SquarePlus } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { api, ApiError } from "./api/client";
 import type { PushEvents, PushState, Settings, SettingsPatch } from "./api/types.gen";
-import { pushQ, useMe, useSettings, useTerminals, useUpdate } from "./data";
+import { manages as managesApps, pushQ, useApps, useMe, useSettings, useUpdate } from "./data";
 import { t, useLang } from "./i18n";
 import { install, useInstall } from "./install";
 import { LangSwitch, ThemeSwitch, type ThemePref } from "./me";
@@ -39,9 +39,10 @@ export function SettingsPage({ theme, setTheme, initial = "main" }: { theme: The
   const s = q.data ?? undefined;
   const off = !s; // not come yet, or an older daemon
   const me = useMe().data;
-  const manages = !!me && (me.local || me.kind === "panel");
-  const terminals = useTerminals().data?.terminals ?? [];
+  const manages = managesApps(me);
+  const terminals = useApps().data?.apps ?? [];
   const confirms = useConfirms();
+  const upd = useUpdate().data;
   const put = async (p: SettingsPatch) => {
     if (!s) return;
     const next: Settings = { ...s, ...(p as Partial<Settings>), modes: p.modes ? Object.fromEntries(Object.entries({ ...s.modes, ...p.modes }).filter(([, v]) => v)) : s.modes, quotaHidden: p.quotaHidden ?? s.quotaHidden };
@@ -123,13 +124,13 @@ export function SettingsPage({ theme, setTheme, initial = "main" }: { theme: The
           {manages &&
             nav(
               t("settings.terminalsRow"),
-              () => go({ name: "terminals" }),
+              () => go({ name: "apps" }),
               <>
                 {confirms.length > 0 && <span className="size-2 shrink-0 rounded-full bg-need" aria-label={t("nav.needsYou")} />}
                 {terminals.length > 0 && <span className="text-xs text-ink-3 tabular-nums">{terminals.length}</span>}
               </>,
             )}
-          {manages && nav(t("secrets.title"), () => go({ name: "secrets" }))}
+          {me?.host && nav(t("secrets.title"), () => go({ name: "secrets" }))}
           <InstallItem />
           <Item label={t("settings.pushOn")}>
             {pushing ? <LoaderCircle size={16} className="animate-spin text-ink-3" /> : <Switch label={t("settings.pushOn")} disabled={!push || !("PushManager" in window)} on={pushed} onChange={(v) => void pushOn(v)} />}
@@ -166,8 +167,14 @@ export function SettingsPage({ theme, setTheme, initial = "main" }: { theme: The
               ]}
             />
           </Item>
+          {/* 自动更新: off, nothing is looked for or downloaded unasked; 检查更新 still does it all. */}
+          {manages && upd?.source && (
+            <Item label={t("settings.autoUpdate")}>
+              <Switch label={t("settings.autoUpdate")} disabled={off} on={s?.autoUpdate ?? !upd.manual} onChange={(v) => void put({ autoUpdate: v })} />
+            </Item>
+          )}
           <UpdateItem manages={manages} />
-          {me && !me.local && <SignOut />}
+          {me && !me.host && <SignOut />}
         </div>
       </div>
     </div>
@@ -260,7 +267,7 @@ const STALE = 3_600_000;
  *  2026-11-08). A newer one out, 版本 with its version and the 更新 key, or how far its
  *  download is, a hairline along the row's foot; pressing the title opens its notes, the current
  *  version and the size under it. Those who do not manage see the versions, no key. Release builds download a newer one ahead
- *  by themselves; there is no switch for it. */
+ *  by themselves unless 自动更新 is off (u.manual); then the page does not look on opening either. */
 function UpdateItem({ manages }: { manages: boolean }) {
   const lang = useLang();
   const u = useUpdate().data;
@@ -285,7 +292,7 @@ function UpdateItem({ manages }: { manages: boolean }) {
     );
   };
   // Opened with the last look stale: look now, saying nothing if it fails.
-  const stale = manages && !!u?.source && u.phase === "idle" && Date.now() - (u.checkedAt ?? 0) > STALE;
+  const stale = manages && !!u?.source && !u.manual && u.phase === "idle" && Date.now() - (u.checkedAt ?? 0) > STALE;
   useEffect(() => {
     if (stale) look();
     // eslint-disable-next-line react-hooks/exhaustive-deps

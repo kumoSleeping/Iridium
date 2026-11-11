@@ -91,9 +91,18 @@ func (c *Channel) probeCatalog(ctx context.Context, machine string) (agent.Catal
 	var run harness.Run
 	if machine == "" {
 		env := agent.ForeignEnv(h.AgentEnv())
-		argv, err := agent.SpawnOptions{Program: h.Program(api.AgentDsh)}.Command("dsh", env)
-		if err != nil {
-			return agent.Catalog{}, err
+		var argv []string
+		if mc := c.hostOf(""); mc != nil {
+			if ai, ok := mc.HostAgent(string(api.AgentDsh)); ok && len(ai.Argv) > 0 {
+				argv = append([]string{}, ai.Argv...) // Desktop's own dsh, as its launches
+				env = agentdsh.HostEnv(argv, env)
+			}
+		}
+		if argv == nil {
+			var err error
+			if argv, err = (agent.SpawnOptions{Program: h.Program(api.AgentDsh)}).Command("dsh", env); err != nil {
+				return agent.Catalog{}, err
+			}
 		}
 		dir, err := os.MkdirTemp("", "iridium-dsh-probe-")
 		if err != nil {
@@ -108,7 +117,7 @@ func (c *Channel) probeCatalog(ctx context.Context, machine string) (agent.Catal
 			return agent.Catalog{}, err
 		}
 		home, _ := os.UserHomeDir()
-		run = harness.Run{Argv: append(argv, agentdsh.ProbeArgs(patch)...), Env: env, Cwd: home}
+		run = harness.Run{Argv: append(argv, agentdsh.ProbeArgs(patch, c.hostModels(ctx, "")...)...), Env: env, Cwd: home}
 	} else {
 		mc := c.machine(machine)
 		if mc == nil {
@@ -131,7 +140,7 @@ func (c *Channel) probeCatalog(ctx context.Context, machine string) (agent.Catal
 			return agent.Catalog{}, err
 		}
 		info, _ := agents.Get(api.AgentDsh)
-		argv := append(append([]string{}, ai.Argv...), agentdsh.ProbeArgs(patch, c.desktopLLM(ctx, mc)...)...)
+		argv := append(append([]string{}, ai.Argv...), agentdsh.ProbeArgs(patch, c.hostModels(ctx, machine)...)...)
 		run = harness.Run{Argv: argv, Env: info.RemoteEnv(hi.Env, ai.Home), Cwd: hi.Home}
 	}
 	out, errOut, err := h.RunOnce(ctx, machine, run)
@@ -151,62 +160,30 @@ func (c *Channel) probeCatalog(ctx context.Context, machine string) (agent.Catal
 	return cat, nil
 }
 
-// desktopSession is the dsh plugin's patch at mc for a session's dsh process (dsh.session): its
-// part there, for the features of plugins in that process; none from one too old to give it.
-func (c *Channel) desktopSession(ctx context.Context, mc *remote.Machine) []string {
-	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+// hostModels are the --patch files that give a dsh process at machine DSH Desktop's models and
+// providers (the user, 2026-11-08: synced with Desktop's), where its dsh plugin is connected
+// (agent.prepare without a session); none if it is not.
+func (c *Channel) hostModels(ctx context.Context, machine string) []string {
+	mc := c.hostOf(machine)
+	if mc == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, prepareWait)
 	defer cancel()
-	p, err := desktopSessionPatch(ctx, mc)
+	r, err := hostPrepare(ctx, mc, wire.PrepareParams{})
 	if err != nil {
-		if !wire.IsCode(err, wire.CodeUnsupported) {
-			c.o.Logf("dsh: the dsh plugin's part for sessions at %s: %v", mc.ID(), err)
-		}
+		c.o.Logf("dsh: DSH Desktop's models (%s): %v", mc.ID(), err)
 		return nil
 	}
-	if p == "" {
-		return nil
-	}
-	return []string{p}
-}
-
-// desktopBundles reads the bundles of DSH Desktop's profile at mc (dsh.bundles), when a preset
-// asks: none from a dsh plugin too old to say.
-func (c *Channel) desktopBundles(ctx context.Context, mc *remote.Machine) func() ([]agent.Bundle, error) {
-	return func() ([]agent.Bundle, error) {
-		ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
-		defer cancel()
-		bs, err := desktopBundleList(ctx, mc)
-		if err != nil {
-			if wire.IsCode(err, wire.CodeUnsupported) {
-				return nil, nil
+	if machine == "" {
+		for _, p := range r.Patches {
+			if err := ownFile(p); err != nil {
+				c.o.Logf("dsh: DSH Desktop's models: %v", err)
+				return nil
 			}
-			return nil, fmt.Errorf("DSH Desktop's bundles at %s: %w", mc.ID(), err)
 		}
-		out := make([]agent.Bundle, len(bs))
-		for i, b := range bs {
-			out[i] = agent.Bundle{Name: b.Name, Patches: b.Patches}
-		}
-		return out, nil
 	}
-}
-
-// desktopLLM are the --patch files at mc that give a dsh session there DSH Desktop's models and
-// providers (the user, 2026-11-08: synced with Desktop's): the dsh plugin's dsh.llm, written anew;
-// none from an executor without it.
-func (c *Channel) desktopLLM(ctx context.Context, mc *remote.Machine) []string {
-	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-	p, err := desktopLLMPatch(ctx, mc)
-	if err != nil {
-		if !wire.IsCode(err, wire.CodeUnsupported) {
-			c.o.Logf("dsh: DSH Desktop's models at %s: %v", mc.ID(), err)
-		}
-		return nil
-	}
-	if p == "" {
-		return nil
-	}
-	return []string{p}
+	return r.Patches
 }
 
 // Cached is dsh's models at machine as last probed, stale or not; false if never had.

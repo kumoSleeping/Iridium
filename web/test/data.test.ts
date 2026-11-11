@@ -2,7 +2,7 @@
 // what you sent finding its block, uploads in chunks that resume, the carried-state store.
 import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { api } from "../src/api/client";
+import { api, speakAs } from "../src/api/client";
 import type { Block, MessagePage } from "../src/api/types.gen";
 import { chatOf, KEPT_BLOCKS, Messages, unsent, watchTurns, type Sent } from "../src/chats";
 import { Sha256 } from "../src/chat/sha256";
@@ -29,38 +29,53 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("api", () => {
-  test("send carries files only when there are some; answers go to the card", async () => {
-    await api.send("s1", "hi");
+  test("send is Satori's message.create, files and steer in its _data; answers go to the card", async () => {
+    speakAs("ir_web", "u1");
+    await api.send("s1", "hi <b>&");
     await api.send("s1", "hi", ["r1"], true);
-    await api.answer({ card: "ask:s1:q", option: "always" });
-    await api.answer({ card: "ask:s1:r", choices: ["0.1"], words: ["", "mine"] });
+    await api.answer("s1", { card: "ask:s1:q", option: "always" });
+    await api.answer("s1", { card: "ask:s1:r", choices: ["0.1"], words: ["", "mine"] });
     await api.editQueued("s1", "in 1", "again");
+    await api.unqueue("s1", "in 1");
+    await api.patch("s1", { name: "n", pinned: true, detach: true });
+    await api.markFolder("/w/a", { color: "red" });
+    await api.create({ agent: "claude", cwd: "/w", text: "go", workspace: 7, caller: "s1" });
     await api.putSettings({ idleReap: "2h", modes: { claude: "plan" } });
     await api.answerConfirm("c1", true);
     expect(calls.map((c) => [c.method, c.url, c.body])).toEqual([
-      ["POST", "/api/sessions/s1/send", { text: "hi" }],
-      ["POST", "/api/sessions/s1/send", { text: "hi", attachments: ["r1"], steer: true }],
-      ["POST", "/api/answer", { card: "ask:s1:q", option: "always" }],
-      ["POST", "/api/answer", { card: "ask:s1:r", choices: ["0.1"], words: ["", "mine"] }],
-      ["PUT", "/api/sessions/s1/queue/in%201", { text: "again" }],
-      ["PUT", "/api/settings", { idleReap: "2h", modes: { claude: "plan" } }],
-      ["POST", "/api/confirms/c1", { allow: true }],
+      ["POST", "/v1/message.create", { channel_id: "s1", content: "hi &lt;b&gt;&amp;", _data: {} }],
+      ["POST", "/v1/message.create", { channel_id: "s1", content: "hi", _data: { attachments: ["r1"], steer: true } }],
+      ["POST", "/v1/internal/button", { id: "ask:s1:q", option: "always" }],
+      ["POST", "/v1/internal/button", { id: "ask:s1:r", choices: ["0.1"], words: ["", "mine"] }],
+      ["POST", "/v1/message.update", { channel_id: "s1", message_id: "in 1", _data: { text: "again" } }],
+      ["POST", "/v1/message.delete", { channel_id: "s1", message_id: "in 1" }],
+      ["POST", "/v1/channel.update", { channel_id: "s1", data: { name: "n", parent_id: null }, _data: { pinned: true } }],
+      ["POST", "/v1/channel.update", { channel_id: "folder:/w/a", _data: { color: "red" } }],
+      ["POST", "/v1/channel.create", { guild_id: "7", data: { parent_id: "s1" }, _data: { agent: "claude", cwd: "/w", text: "go" } }],
+      ["PUT", "/v1/internal/settings", { idleReap: "2h", modes: { claude: "plan" } }],
+      ["POST", "/v1/internal/needs/c1", { allow: true }],
     ]);
     expect(calls.every((c) => c.headers.get("x-requested-with") === "XMLHttpRequest")).toBe(true);
+    expect(calls.every((c) => c.headers.get("satori-platform") === "ir_web" && c.headers.get("satori-user-id") === "u1")).toBe(true);
   });
-  test("pages: newest, before=, after=; a refusal throws with its error", async () => {
-    answer = () => json({ blocks: [], start: 0, end: 0, more: false });
-    await api.messages("s 1");
+  test("pages are message.list's: newest, before, after; a refusal throws with its error", async () => {
+    speakAs("ir_web", "u1");
+    answer = () => json({ data: [{ id: "5.0", content: "<iridium:user/>hi", created_at: 3 }, { id: "5.1", content: "yes" }], _data: { start: 5, end: 9, more: true } });
+    expect(await api.messages("s 1")).toEqual({ blocks: [{ at: "5.0", kind: "user", text: "hi", time: 3 }, { at: "5.1", kind: "assistant", text: "yes" }], start: 5, end: 9, more: true });
     await api.messages("s1", { before: 10 });
     await api.messages("s1", { after: 20 });
-    expect(calls.map((c) => c.url)).toEqual(["/api/sessions/s%201/messages", "/api/sessions/s1/messages?before=10", "/api/sessions/s1/messages?after=20"]);
-    answer = () => json({ error: "the session's agent is not running" }, 409);
+    expect(calls.map((c) => [c.method, c.url, c.body])).toEqual([
+      ["POST", "/v1/message.list", { channel_id: "s 1" }],
+      ["POST", "/v1/message.list", { channel_id: "s1", next: "10", direction: "before" }],
+      ["POST", "/v1/message.list", { channel_id: "s1", next: "20", direction: "after" }],
+    ]);
+    answer = () => json({ message: "the session's agent is not running" }, 409);
     await expect(api.interrupt("s1")).rejects.toMatchObject({ status: 409, message: "the session's agent is not running" });
   });
   test("files and uploads by the session", () => {
-    expect(api.fileURL("s 1", "r/1")).toBe("/api/sessions/s%201/files/r%2F1");
-    expect(api.fileURL("s", "r", true)).toBe("/api/sessions/s/files/r?download");
-    expect(api.thumbURL("s", "r")).toBe("/api/sessions/s/files/r/thumb?size=1024");
+    expect(api.fileURL("s 1", "r/1")).toBe("/v1/internal/sessions/s%201/files/r%2F1");
+    expect(api.fileURL("s", "r", true)).toBe("/v1/internal/sessions/s/files/r?download");
+    expect(api.thumbURL("s", "r")).toBe("/v1/internal/sessions/s/files/r/thumb?size=1024");
   });
   test("writes that may go twice go again after a 502", async () => {
     let n = 0;
@@ -72,8 +87,9 @@ describe("api", () => {
 
 describe("the event stream", () => {
   test("names the list, the quota, the update, the confirmations and the open session with its context", () => {
-    expect(keysFor(null)).toEqual(["list", "workspaces", "places", "colors", "quota", "update", "confirms", "terminals", "machines", "notes"]);
-    expect(streamURL("a")).toBe("/api/events?sub=list&sub=workspaces&sub=places&sub=colors&sub=quota&sub=update&sub=confirms&sub=terminals&sub=machines&sub=notes&sub=session%3Aa&sub=context%3Aa");
+    expect(keysFor(null)).toEqual(["list", "guilds", "quota", "update", "needs", "pairing", "terminals", "notes"]);
+    expect(keysFor("a").slice(-2)).toEqual(["session:a", "context:a"]);
+    expect(streamURL()).toMatch(/^wss?:\/\/.*\/v1\/events$/);
   });
   test("the store: whole values, null drops, listeners told", () => {
     const told: string[] = [];
@@ -366,11 +382,11 @@ describe("uploads", () => {
     let fail = true;
     const up = () => ({ id: "up1", session: "s1", name: "big.bin", size, received, done: false, max: 1 << 31 });
     answer = async (c) => {
-      if (c.method === "POST" && c.url === "/api/sessions/s1/uploads") {
+      if (c.method === "POST" && c.url === "/v1/internal/sessions/s1/uploads") {
         expect(c.body).toEqual({ name: "big.bin", size });
         return json(up());
       }
-      if (c.method === "GET" && c.url === "/api/uploads/up1") return json(up());
+      if (c.method === "GET" && c.url === "/v1/internal/uploads/up1") return json(up());
       if (c.method === "PUT") {
         const offset = Number(new URL(c.url, "http://x").searchParams.get("offset"));
         const n = (c.body as Blob).size;
@@ -384,7 +400,7 @@ describe("uploads", () => {
         received = offset + n;
         return json(up());
       }
-      if (c.url === "/api/uploads/up1/complete") {
+      if (c.url === "/v1/internal/uploads/up1/complete") {
         expect((c.body as { sha256: string }).sha256).toBe(createHash("sha256").update(new Uint8Array(await file.arrayBuffer())).digest("hex"));
         return json({ ...up(), done: true, file: { ref: "r1", name: "big.bin", path: "/w/.iridium/uploads/big.bin", size, mime: "application/octet-stream", kind: "file", mtime: 0 } });
       }
@@ -402,10 +418,10 @@ describe("uploads", () => {
 // A file written again at its path (same ref) is another address: the page shows the new picture,
 // not the one it already has of that URL (the user, 2026-11-09).
 test("file and thumbnail URLs carry the file's version", () => {
-  expect(api.fileURL("s1", "r1")).toBe("/api/sessions/s1/files/r1");
-  expect(api.fileURL("s1", "r1", true)).toBe("/api/sessions/s1/files/r1?download");
-  expect(api.fileURL("s1", "r1", false, 42)).toBe("/api/sessions/s1/files/r1?v=42");
-  expect(api.fileURL("s1", "r1", true, 42)).toBe("/api/sessions/s1/files/r1?download&v=42");
-  expect(api.thumbURL("s1", "r1", 256, 42)).toBe("/api/sessions/s1/files/r1/thumb?size=256&v=42");
+  expect(api.fileURL("s1", "r1")).toBe("/v1/internal/sessions/s1/files/r1");
+  expect(api.fileURL("s1", "r1", true)).toBe("/v1/internal/sessions/s1/files/r1?download");
+  expect(api.fileURL("s1", "r1", false, 42)).toBe("/v1/internal/sessions/s1/files/r1?v=42");
+  expect(api.fileURL("s1", "r1", true, 42)).toBe("/v1/internal/sessions/s1/files/r1?download&v=42");
+  expect(api.thumbURL("s1", "r1", 256, 42)).toBe("/v1/internal/sessions/s1/files/r1/thumb?size=256&v=42");
   expect(api.thumbURL("s1", "r1", 256, 42)).not.toBe(api.thumbURL("s1", "r1", 256, 43));
 });

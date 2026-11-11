@@ -15,7 +15,7 @@ const (
 	AgentDsh    Agent = "dsh"
 )
 
-// AgentInfo is what an agent Iridium hosts can do (GET /api/agents).
+// AgentInfo is what an agent Iridium hosts can do (GET /v1/internal/agents).
 type AgentInfo struct {
 	Agent Agent  `json:"agent"`
 	Name  string `json:"name"`
@@ -29,11 +29,8 @@ type AgentInfo struct {
 	Quota            bool `json:"quota"`
 	// Ultracode: its sessions can turn ultracode on (Claude).
 	Ultracode bool `json:"ultracode"`
-	// Features: the features (SessionState.Features) its sessions have before its agent runs, by
-	// ID (Claude: claude.ultracode).
-	Features []string `json:"features,omitempty"`
 	// Presets: its sessions take an agent preset (dsh: the tools and prompt a session runs with),
-	// at launch: a switch restarts the agent. Which, a session's: GET /api/sessions/{id}/presets.
+	// at launch: a switch restarts the agent. Which, a session's: GET /v1/internal/sessions/{id}/presets.
 	Presets bool `json:"presets,omitempty"`
 	// Missing: its program is not on the daemon's PATH (not installed): a new session is refused.
 	Missing bool `json:"missing,omitempty"`
@@ -102,11 +99,14 @@ type Session struct {
 	// Order: the key it was dragged to in the list (ms, as UpdatedAt), sorted by in place of
 	// UpdatedAt; 0 none.
 	Order float64 `json:"order,omitempty"`
-	// At: the folder at another machine one of this machine's was opened for (NewSession.At): it
-	// is listed there, in that folder, not by its Cwd.
-	At string `json:"at,omitempty"`
-	// Launcher: the session that started this one, if discovery saw it.
+	// Launcher: the session that started this one (its ir new), if known.
 	Launcher string `json:"launcher,omitempty"`
+	// Own: a person opened it (docs/exec.md "远端工作区"): with a Launcher, it was taken out from
+	// under it (its placement is by hand, SessionPatch.Detach); without, Iridium opened it through
+	// a create (the page's "+", ir new in a shell, a Bot's, /clear). Never a subagent. A session
+	// with a Launcher and not Own hangs under it on the page; a group at another machine is listed
+	// while it holds an Own session not archived.
+	Own bool `json:"own,omitempty"`
 	// Subagent: an Agent tool's subtask (Claude) or a subagent's thread (Codex), listed as a
 	// session of its own, read-only; Parent: the session that started it.
 	Subagent bool   `json:"subagent,omitempty"`
@@ -122,15 +122,12 @@ type Session struct {
 	Workflow  *SessionWorkflow `json:"workflow,omitempty"`
 	Last      *LastSaid        `json:"last,omitempty"`
 	UpdatedAt int64            `json:"updatedAt"` // ms since the epoch
-	// Bots: the plugins (terminal IDs) whose chat is in this session now: the list shows their
-	// avatar and a Bot tag.
-	Bots []string `json:"bots,omitempty"`
 	// Machine: the executor it runs at (its terminal ID; docs/exec.md), empty for this machine.
 	// Offline: that executor is not connected now.
 	Machine string `json:"machine,omitempty"`
 	Offline bool   `json:"offline,omitempty"`
 	// Loose: a dsh session at another machine in none of DSH Desktop's workspaces there (its 未分组):
-	// in 未归类, a row of its own, not in a folder.
+	// in no group, and not listed unless Own or hung under its launcher.
 	Loose bool `json:"loose,omitempty"`
 }
 
@@ -139,7 +136,10 @@ type LastSaid struct {
 	Role string `json:"role"` // user | assistant
 	Text string `json:"text"`
 	From string `json:"from,omitempty"` // the user message's source, as Iridium wrote it
-	At   int64  `json:"at,omitempty"`
+	// FromTerminal: the ID of the app or login that sent it, where the transcript says (not Codex's
+	// or pi's glance): the page tells it by this, a name being unique only in its scope.
+	FromTerminal string `json:"fromTerminal,omitempty"`
+	At           int64  `json:"at,omitempty"`
 }
 
 // SessionState is the carried state "session:<id>": the open session.
@@ -173,17 +173,19 @@ type SessionState struct {
 	Queue []Queued `json:"queue"`
 	// Context: how full its context window was when last read; context:<id> has the parts.
 	Context *ContextSummary `json:"context,omitempty"`
+	// Tokens: what its turns read so far, as recorded (GET /v1/internal/usage counts the same rows);
+	// absent before its first.
+	Tokens *InputTokens `json:"tokens,omitempty"`
 	// QuotaUntil: the agent's quota ran out; Iridium goes on at this time (ms).
 	QuotaUntil int64 `json:"quotaUntil,omitempty"`
 	// Tail: the newest blocks, when they are few and small; else the page fetches after its end.
 	Tail *BlockTail `json:"tail,omitempty"`
 	// Commands: the slash commands its agent offers, as its last handshake named them.
 	Commands []Command `json:"commands,omitempty"`
-	// Ultracode: Claude's ultracode; absent for an agent without it. Features has it too.
+	// Ultracode: Claude's ultracode; absent for an agent without it. Attached has its key.
 	Ultracode *Ultracode `json:"ultracode,omitempty"`
-	// Features: its extra switches (Claude's UltraCode; at an executor whose DSH Desktop plugins
-	// add some, theirs); PUT features/{feature} switches one.
-	Features []Feature `json:"features,omitempty"`
+	// Attached: what is attached to its page (Claude's UltraCode, a plugin's).
+	Attached []Attached `json:"attached,omitempty"`
 	// Next: its agent cleared itself (Claude's own /clear) and the conversation goes on in this
 	// session; this one is archived, as it was before. The page open on it follows.
 	Next string `json:"next,omitempty"`
@@ -305,7 +307,9 @@ type Block struct {
 	// FromTerminal is the ID of the interactive terminal that sent it (its avatar, its kind).
 	From         string `json:"from,omitempty"`
 	FromTerminal string `json:"fromTerminal,omitempty"`
-	ID           string `json:"id,omitempty"` // tool, result: the call's id
+	// FromLogin: the login of that app it came from, if one (ir_web's logins are FromTerminal).
+	FromLogin string `json:"fromLogin,omitempty"`
+	ID        string `json:"id,omitempty"` // tool, result: the call's id
 	// tool: Name, Input as JSON, and Result when it is on the same page.
 	Name   string  `json:"name,omitempty"`
 	Input  string  `json:"input,omitempty"`
@@ -419,21 +423,15 @@ type NewSession struct {
 	Mode   string `json:"mode,omitempty"`
 	Effort string `json:"effort,omitempty"`
 	Preset string `json:"preset,omitempty"`
-	// Workspace: the workspace it goes in (0: the caller's, else as discovery classifies it).
+	// Workspace: the workspace it goes in (0: as discovery classifies its folder; the caller's if
+	// that holds it).
 	Workspace int64 `json:"workspace,omitempty"`
 	// Caller is the session that ran ir new (from IRIDIUM_SESSION, CLAUDE_CODE_SESSION_ID,
-	// CODEX_THREAD_ID…): the new session goes into its workspace.
+	// CODEX_THREAD_ID…): the new session's Launcher, which it hangs under on the page.
 	Caller string `json:"caller,omitempty"`
 	// Machine: the executor to run it at (a terminal ID or name; docs/exec.md); empty: here. Cwd
 	// is then a path there.
 	Machine string `json:"machine,omitempty"`
-	// At: one of this machine's opened for a folder at another ("<machine>:<path>", as grouped), a
-	// coordinator from a group's "+" there: grouped by that folder, wherever its group is nested.
-	At string `json:"at,omitempty"`
-}
-
-type NewSessionReply struct {
-	ID string `json:"id"`
 }
 
 // Send gives the session a message: a new turn when idle; while a turn runs it waits in the
@@ -481,9 +479,22 @@ type Answer struct {
 	Always bool `json:"always,omitempty"`
 }
 
-// Error is every failed request's body.
+// Error is every failed request's body: Message for a person; Code, what went wrong, for a
+// program (decision 8: 401 only for a TOKEN that is not valid; any other refusal 403 with its
+// code, such as pair_closed, login_pending, no_permission; decision 28: 422 for what is not
+// there, such as no_such_need). NameError: bad_name's, which rule the name broke.
 type Error struct {
-	Error string `json:"error"`
+	Code      string `json:"code,omitempty"`
+	Message   string `json:"message"`
+	NameError string `json:"nameError,omitempty"`
+}
+
+// Text is what to tell a person of the refusal: its message, else its code.
+func (e Error) Text() string {
+	if e.Message != "" {
+		return e.Message
+	}
+	return e.Code
 }
 
 // StateEvent is the event stream's "state" event: a carried state, whole. Value is null for one

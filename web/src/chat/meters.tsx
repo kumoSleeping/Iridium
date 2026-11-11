@@ -10,13 +10,13 @@ import { useQuery } from "@tanstack/react-query";
 import { Fragment, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import type { SessionState as LiveSession } from "../api/types.gen";
 import { api } from "../api/client";
-import type { Agent, AgentInfo, AgentQuota, Context, ContextCategory, Feature, Model, Preset } from "../api/types.gen";
+import type { Agent, AgentQuota, Context, ContextCategory, InputTokens, Model, Preset } from "../api/types.gen";
+import { parse, type El } from "../satori";
 import { useAgent } from "../data";
 import { t, useLang } from "../i18n";
-import type { Key } from "../i18n/zh";
 import { useContextState, useQuota } from "../store";
 import { errText, toast } from "../toast";
-import { ago, cn, PHONE, PopSurface, Tip, useLongPress, useMedia, useMinute } from "../ui";
+import { ago, cn, PHONE, PopSurface, Tip, tokens as tok, useLongPress, useMedia, useMinute } from "../ui";
 import { EffortSlider, levelName, noteLevelNames } from "./effort";
 import { hasMark, ModeMark, modeName } from "../modes";
 import { openUsage } from "../route";
@@ -76,7 +76,15 @@ export function ctxParts(c: Context): Part[] {
   return parts;
 }
 
-export function ContextRing({ session, summary, open, onOpenChange }: { session: string; summary?: Context; open?: boolean; onOpenChange?: (o: boolean) => void }) {
+/** The cache's hit rate over a session's input so far, to a tenth of a percent; "" with no input. */
+export function hitRate(t?: InputTokens): string {
+  const all = t ? t.input + t.cacheRead + t.cacheWrite : 0;
+  return all > 0 ? `${(Math.floor((t!.cacheRead / all) * 1000) / 10).toFixed(1)}%` : "";
+}
+
+/** tokens: the session's input so far, its cache's hit rate under the parts (the user, 2026-11-10:
+ *  the total, in the popover only, never in the row). */
+export function ContextRing({ session, summary, tokens, open, onOpenChange }: { session: string; summary?: Context; tokens?: InputTokens; open?: boolean; onOpenChange?: (o: boolean) => void }) {
   useLang();
   const phone = useMedia(PHONE);
   // The breakdown when the stream carries one; the total the session's state has, else.
@@ -87,6 +95,7 @@ export function ContextRing({ session, summary, open, onOpenChange }: { session:
   const circ = 2 * Math.PI * r;
   const label = `${t("ctx.title")} · ${t("ctx.used", { used: k(c.used), total: k(c.max) })}`;
   const parts = ctxParts(c);
+  const hit = hitRate(tokens);
   return (
     <Popover.Root open={open} onOpenChange={onOpenChange}>
       <Tip label={label}>
@@ -129,6 +138,15 @@ export function ContextRing({ session, summary, open, onOpenChange }: { session:
               ))}
             </ul>
           </>
+        )}
+        {hit && tokens && (
+          <div className="mt-3 border-t border-edge pt-2.5">
+            <div className="flex items-baseline justify-between text-sm">
+              <span className="text-ink-2">{t("ctx.cacheHit")}</span>
+              <span className="text-ink tabular-nums">{hit}</span>
+            </div>
+            <div className="mt-0.5 text-xs text-ink-3 tabular-nums">{t("ctx.cacheParts", { read: tok(tokens.cacheRead), write: tok(tokens.cacheWrite), input: tok(tokens.input) })}</div>
+          </div>
         )}
       </PopSurface>
     </Popover.Root>
@@ -287,7 +305,7 @@ const money = (currency: string, n: number) => {
   }
 };
 
-/** An agent's approval modes, in the order the key cycles them: as GET /api/agents lists them, else
+/** An agent's approval modes, in the order the key cycles them: as GET /v1/internal/agents lists them, else
  *  Claude's own. */
 const MODES: Partial<Record<Agent, string[]>> = { claude: ["manual", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"], codex: ["untrusted", "on-request", "granular", "auto"], pi: ["auto", "ask"] };
 type Mode = { id: string };
@@ -306,7 +324,7 @@ export function useMode(s: LiveSession) {
     setWant(m);
     try {
       await api.mode(s.id, m);
-      // Not every agent switches at once (GET /api/agents modeSwitch): say when it does.
+      // Not every agent switches at once (GET /v1/internal/agents modeSwitch): say when it does.
       if (info?.modeSwitch === "next turn") toast(t("mode.nextTurn"));
       else if (info?.modeSwitch === "restart") toast(t("mode.restart"));
     } catch (e) {
@@ -438,50 +456,57 @@ export function modelView(s: ModelOf, want?: string | null) {
   return { models, cur, name, isDefault, value, levels, level };
 }
 
-// Features the page names itself, an agent's own (Claude's UltraCode): their words from i18n, not
-// the server's. A plugin's (one of DSH Desktop's, where Desktop holds the session) come with their own.
-const NATIVE: Record<string, { name: () => string; tip: (f: Feature) => string; err: Key }> = {
-  "claude.ultracode": {
-    name: () => t("composer.ultracode"),
-    tip: (f) => t(!f.available ? (f.on ? "composer.ultracodeIdle" : "composer.ultracodeUnavailable") : "composer.ultracodeHint"),
-    err: "err.ultracode",
-  },
-};
+/** A button attached at the effort track (Claude's UltraCode, a plugin's: what the session's
+ *  `attached` says, docs/next/plugin.md): pressed as "att:<session>:<from>:<id>". */
+type AttachedKey = { press: string; label: string; pressed: boolean; disabled: boolean; title?: string };
 
-/** The features at the effort track: the session's; before its agent runs (none yet), the ones its
- *  agent has, off (Claude's UltraCode). */
-function effortFeatures(s: LiveSession, info?: AgentInfo): Feature[] {
-  const fs = (s.features ?? []).filter((f) => f.place === "effort");
-  const ids = info?.features ?? (info?.ultracode ? ["claude.ultracode"] : []);
-  for (const id of ids) {
-    const n = NATIVE[id];
-    if (n && !fs.some((f) => f.id === id)) fs.push({ id, name: n.name(), on: false, available: true, place: "effort", tone: "warm" });
-  }
-  return fs;
+const textIn = (els: El[]): string => els.map((e) => (e.type === "text" ? (e.text ?? "") : textIn(e.children))).join("");
+
+/** The buttons of the first piece attached at place, in the page's language (else the one for any,
+ *  else the first). */
+export function attachedKeys(s: LiveSession, place: string, lang: string): AttachedKey[] {
+  const a = (s.attached ?? []).find((x) => x.place === place);
+  if (!a) return [];
+  const c = a.content;
+  const text = c[lang] ?? c[""] ?? Object.values(c)[0] ?? "";
+  const out: AttachedKey[] = [];
+  const walk = (els: El[]) => {
+    for (const e of els) {
+      if (e.type === "button" && typeof e.attrs.id === "string") {
+        const title = e.attrs.title;
+        out.push({
+          press: `att:${s.id}:${a.from}:${e.attrs.id}`,
+          label: textIn(e.children).trim() || e.attrs.id,
+          pressed: e.attrs.pressed !== undefined && e.attrs.pressed !== "false",
+          disabled: e.attrs.disabled !== undefined && e.attrs.disabled !== "false",
+          title: typeof title === "string" ? title : undefined,
+        });
+      } else walk(e.children);
+    }
+  };
+  walk(parse(text));
+  return out;
 }
-
-type FeatureWant = { on: boolean; option?: string };
 
 /** The model, its thinking level and its features (UltraCode), under the composer, each in use at
  *  once. A model picked closes the menu; the level and a feature at its foot are tuned in place, it
  *  stays. */
 export function ModelKey({ s, open, onOpenChange }: { s: LiveSession; open?: boolean; onOpenChange?: (o: boolean) => void }) {
-  useLang();
+  const lang = useLang();
   const [want, setWant] = useState<string | null>(null);
-  const [featWant, setFeatWant] = useState<Record<string, FeatureWant>>({});
+  // A key pressed shows at once, till the session says it is so (or the press failed).
+  const [pressWant, setPressWant] = useState<Record<string, boolean>>({});
   const info = useAgent(s.agent);
   if (want !== null && (s.pick === want || s.model === want)) setWant(null);
-  // A switch flipped shows at once, till the session says it is so (or the switch failed).
-  const base = effortFeatures(s, info);
-  const feats = base.map((f) => {
-    const w = featWant[f.id];
-    return w ? { ...f, on: w.on, option: w.option ?? f.option } : f;
+  const base = attachedKeys(s, "effort", lang);
+  // Before its agent runs (none attached yet), Claude's UltraCode, off.
+  if (!base.length && info?.ultracode) base.push({ press: "", label: t("composer.ultracode"), pressed: false, disabled: false, title: t("composer.ultracodeHint") });
+  const keys = base.map((x) => (x.press in pressWant ? { ...x, pressed: pressWant[x.press] } : x));
+  const reached = Object.keys(pressWant).filter((p) => {
+    const x = base.find((y) => y.press === p);
+    return !x || x.pressed === pressWant[p];
   });
-  const reached = Object.entries(featWant).filter(([id, w]) => {
-    const f = base.find((x) => x.id === id);
-    return !f || (f.on === w.on && (w.option === undefined || f.option === w.option));
-  }).map(([id]) => id);
-  if (reached.length) setFeatWant((m) => Object.fromEntries(Object.entries(m).filter(([id]) => !reached.includes(id))));
+  if (reached.length) setPressWant((m) => Object.fromEntries(Object.entries(m).filter(([p]) => !reached.includes(p))));
   const v = modelView(s, want);
   const { models, levels, level } = v;
   const grouped = new Set(models.map((m) => m.group).filter(Boolean)).size > 1;
@@ -505,63 +530,63 @@ export function ModelKey({ s, open, onOpenChange }: { s: LiveSession; open?: boo
       return false;
     }
   };
-  const flip = async (f: Feature, u: FeatureWant) => {
-    setFeatWant((m) => ({ ...m, [f.id]: u }));
+  const press = async (x: AttachedKey, then: boolean) => {
+    setPressWant((m) => ({ ...m, [x.press]: then }));
     try {
-      await api.setFeature(s.id, f.id, u.option ? { on: u.on, option: u.option } : { on: u.on });
+      if (x.press) await api.button(x.press);
+      else await api.ultracode(s.id, then);
     } catch (e) {
-      setFeatWant((m) => Object.fromEntries(Object.entries(m).filter(([id]) => id !== f.id)));
-      toast(t(NATIVE[f.id]?.err ?? "err.feature", { name: f.name }), { error: true, description: errText(e) });
+      setPressWant((m) => Object.fromEntries(Object.entries(m).filter(([p]) => p !== x.press)));
+      toast(t("err.feature", { name: x.label }), { error: true, description: errText(e) });
     }
   };
-  const nameOf = (f: Feature) => NATIVE[f.id]?.name() ?? f.name;
-  const tone = (f: Feature) => (f.tone === "warm" ? "text-[#ff4a17]" : "text-ink");
-  // The first one at the track's right (more have no place yet).
-  const feat = feats[0];
-  const tip = feat && [nameOf(feat), NATIVE[feat.id]?.tip(feat) ?? (feat.available ? feat.hint : feat.reason)].filter(Boolean).join(" · ");
-  // UltraCode: one key, its mark, pressed or not (the user, 2026-11-06); lit warm when on. A
-  // plugin's the same (the user, 2026-11-09). On but not available: still switched off here (UltraCode
-  // on a model that cannot run it); a plugin's not (Desktop is not holding the session).
+  // The first button the key at the track's right; the rest its options, while it is pressed.
+  const feat = keys[0];
+  const tip = feat && [feat.label, feat.title].filter(Boolean).join(" · ");
+  // One key, its mark, pressed or not (the user, 2026-11-06); lit warm when on. A plugin's the
+  // same (the user, 2026-11-09).
   const featKey = feat && (
     <Tip label={tip}>
       <button
         type="button"
-        aria-pressed={feat.on}
-        aria-label={nameOf(feat)}
-        disabled={!feat.available && !(feat.on && NATIVE[feat.id])}
-        onClick={() => void flip(feat, { on: !feat.on })}
-        className={cn("g-press grid size-7 shrink-0 place-items-center rounded-md transition-colors duration-(--dur-2) disabled:opacity-40 pointer-coarse:size-10", feat.on ? cn("bg-fill hover:bg-fill-2", tone(feat)) : "text-ink-4 hover:bg-fill hover:text-ink-2")}
+        aria-pressed={feat.pressed}
+        aria-label={feat.label}
+        disabled={feat.disabled}
+        onClick={() => void press(feat, !feat.pressed)}
+        className={cn("g-press grid size-7 shrink-0 place-items-center rounded-md transition-colors duration-(--dur-2) disabled:opacity-40 pointer-coarse:size-10", feat.pressed ? "bg-fill text-[#ff4a17] hover:bg-fill-2" : "text-ink-4 hover:bg-fill hover:text-ink-2")}
       >
-        <Workflow size={16} aria-hidden className={cn("transition-transform duration-(--dur-2) ease-(--ease-spring)", feat.on && "scale-110")} />
+        <Workflow size={16} aria-hidden className={cn("transition-transform duration-(--dur-2) ease-(--ease-spring)", feat.pressed && "scale-110")} />
       </button>
     </Tip>
   );
-  // On: said in words beside the level too (the user, 2026-11-06); on but not in effect (this model
-  // cannot run it), muted.
-  const featTag = feat?.on && <span className={cn("g-fade text-xs font-medium", feat.active || feat.available ? tone(feat) : "text-ink-4")}>{nameOf(feat)}</span>;
+  // On: said in words beside the level too (the user, 2026-11-06).
+  const featTag = feat?.pressed && <span className="g-fade text-xs font-medium text-[#ff4a17]">{feat.label}</span>;
   // On, its options a row under the track (a plugin's sub-modes; the user, 2026-11-09).
-  const featOptions = feat?.on && !!feat.options?.length && (
+  const opts = keys.slice(1);
+  const featOptions = feat?.pressed && opts.length > 0 && (
     <div className="g-fade flex items-center gap-1 px-2.5 pb-2">
-      {feat.options.map((o) => (
-        <button
-          key={o.id}
-          type="button"
-          onClick={() => void flip(feat, { on: true, option: o.id })}
-          className={cn("g-press h-7 flex-1 rounded-md text-xs transition-colors duration-(--dur-2) pointer-coarse:h-9", feat.option === o.id ? "bg-fill-2 font-medium text-ink" : "text-ink-3 hover:bg-fill hover:text-ink-2")}
-        >
-          {o.name}
-        </button>
+      {opts.map((o) => (
+        <Tip key={o.press} label={o.title}>
+          <button
+            type="button"
+            disabled={o.disabled}
+            onClick={() => void press(o, true)}
+            className={cn("g-press h-7 flex-1 rounded-md text-xs transition-colors duration-(--dur-2) disabled:opacity-40 pointer-coarse:h-9", o.pressed ? "bg-fill-2 font-medium text-ink" : "text-ink-3 hover:bg-fill hover:text-ink-2")}
+          >
+            {o.label}
+          </button>
+        </Tip>
       ))}
     </div>
   );
-  const on = feats.filter((f) => f.on);
+  const on = feat?.pressed ? [feat] : [];
   return (
     <Menu.Root open={open} onOpenChange={onOpenChange}>
       <Tip label={t("composer.model")}>
         <Menu.Trigger
           disabled={!models.length}
           render={
-            <button type="button" aria-label={`${t("composer.model")}: ${label}${level ? ` · ${levelName(level)}` : ""}${on.map((f) => ` · ${nameOf(f)}`).join("")}`} className="g-press flex h-7 min-w-0 items-center gap-1 rounded-md px-2 text-xs text-ink-3 hover:bg-fill hover:text-ink data-popup-open:bg-fill disabled:hover:bg-transparent pointer-coarse:h-9">
+            <button type="button" aria-label={`${t("composer.model")}: ${label}${level ? ` · ${levelName(level)}` : ""}${on.map((f) => ` · ${f.label}`).join("")}`} className="g-press flex h-7 min-w-0 items-center gap-1 rounded-md px-2 text-xs text-ink-3 hover:bg-fill hover:text-ink data-popup-open:bg-fill disabled:hover:bg-transparent pointer-coarse:h-9">
               {/* No icon: the model's name says what this is. */}
               <span key={label} className="g-fade truncate">
                 {label}
@@ -571,7 +596,7 @@ export function ModelKey({ s, open, onOpenChange }: { s: LiveSession; open?: boo
                   {levelName(level)}
                 </span>
               )}
-              {on.length > 0 && <Workflow size={12} aria-hidden className={cn("g-pop shrink-0", on.some((f) => f.active) ? "text-ink-2" : "text-ink-4")} />}
+              {on.length > 0 && <Workflow size={12} aria-hidden className={cn("g-pop shrink-0", on.some((f) => !f.disabled) ? "text-ink-2" : "text-ink-4")} />}
               {models.length > 0 && <ChevronDown size={12} className="shrink-0 text-ink-4" />}
             </button>
           }
@@ -615,7 +640,7 @@ export function ModelKey({ s, open, onOpenChange }: { s: LiveSession; open?: boo
                 ) : (
                   <>
                     <div className="flex h-10 items-center justify-between gap-3 px-2.5">
-                      <span className="text-xs text-ink-3">{feat && nameOf(feat)}</span>
+                      <span className="text-xs text-ink-3">{feat?.label}</span>
                       {featKey}
                     </div>
                     {featOptions}

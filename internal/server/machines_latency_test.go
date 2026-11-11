@@ -6,6 +6,7 @@ import (
 )
 
 func TestLatencyMoved(t *testing.T) {
+	t.Parallel()
 	ms := time.Millisecond
 	for _, c := range []struct {
 		was, now time.Duration

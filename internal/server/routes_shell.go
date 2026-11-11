@@ -1,14 +1,20 @@
 package server
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/kumoSleeping/iridium/internal/access"
 	"io/fs"
 	"net/http"
+	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/kumoSleeping/iridium/internal/api"
+	"github.com/kumoSleeping/iridium/internal/remote"
 	"github.com/kumoSleeping/iridium/internal/remote/wire"
 	"github.com/kumoSleeping/iridium/internal/session"
 )
@@ -16,43 +22,140 @@ import (
 // shellRoutes: command lines run at a session's machine and folder, without its agent (docs/api.md
 // "命令"). Only panels and 本机: a Bot asks agents, it does not run commands.
 func (s *Server) shellRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/sessions/{id}/shell", s.manages(s.use(s.shellRun)))
-	mux.HandleFunc("GET /api/shell/{run}", s.manages(s.shellRead))
-	mux.HandleFunc("DELETE /api/shell/{run}", s.manages(s.shellStop))
-	// An agent's ir sh: at a machine by ID or name, where its owner lets agents.
-	mux.HandleFunc("POST /api/machines/{id}/shell", s.manages(s.machineShell))
+	mux.HandleFunc("POST /v1/internal/sessions/{id}/shell", s.manages(s.use(s.shellRun)))
+	mux.HandleFunc("GET /v1/internal/shell/{run}", s.shellers(s.shellRead))
+	mux.HandleFunc("DELETE /v1/internal/shell/{run}", s.shellers(s.shellStop))
+	// An agent's ir sh (draft 二「远端执行命令」: agents only, and the host): at an app's computer by
+	// ID or name, where its owner lets command lines run, in a folder within the caller's scope.
+	mux.HandleFunc("POST /v1/internal/machines/{id}/shell", func(w http.ResponseWriter, r *http.Request) {
+		if c := callerOf(r); !c.Host() && !c.agent && c.session == "" {
+			forbid(w, errors.New("command lines at another computer are agents' (ir sh)"))
+			return
+		}
+		s.machineShell(w, r)
+	})
 }
 
+// shellers lets through who runs or reads command lines: the host, a login of ir_web (its
+// session's $), an agent (ir sh).
+func (s *Server) shellers(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if c := callerOf(r); !c.Host() && !c.Web() && !c.agent && c.session == "" {
+			forbid(w, errors.New("command lines are the host's, ir_web's and agents'"))
+			return
+		}
+		h(w, r)
+	}
+}
+
+// machineShell is an agent's ir sh. Asked with Accept: application/x-ndjson, at an executor that
+// speaks run, the command line's output streams back as ShellEvent lines as it comes, and its end
+// last; else it runs as a holder and its ShellStarted is the answer, read with GET /v1/internal/shell/{run}
+// (an older executor: the dsh plugin's).
 func (s *Server) machineShell(w http.ResponseWriter, r *http.Request) {
 	var req api.ShellRun
 	if !readJSON(w, r, &req) {
 		return
 	}
-	id := r.PathValue("id")
+	name := r.PathValue("id")
+	id := name
 	if s.Remote != nil {
-		if mc := s.Remote.Find(id); mc != nil {
+		if mc := s.Remote.Find(name); mc != nil {
 			id = mc.ID()
 		}
 	}
+	if c := callerOf(r); !c.Host() {
+		p := s.permsFor(c)
+		if !slices.Contains(p.Scope, api.PermsAll) && (req.Cwd == "" || strings.HasPrefix(req.Cwd, "~") || !s.scopeHas(p.Scope, id, req.Cwd)) {
+			s.error(w, &access.Denied{Reason: name + ":" + req.Cwd + " is out of this one's scope"})
+			return
+		}
+	}
+	stream := strings.Contains(r.Header.Get("Accept"), ndjson)
 	ctx, cancel := agentCtx(r)
 	defer cancel()
-	st, err := s.m.MachineShell(ctx, id, req.Line, req.Cwd)
+	st, run, err := s.m.MachineShell(ctx, id, req.Line, req.Cwd, stream)
 	if errors.Is(err, session.ErrOffline) {
 		// Said so an agent tells the user, not tries again and again.
-		msg := fmt.Sprintf("%s is not connected", r.PathValue("id"))
-		for _, m := range s.machines() {
-			if m.ID == id && m.SeenAt > 0 {
-				msg = fmt.Sprintf("%s is not connected (it last connected %s ago)", m.Name, roughly(time.Since(time.UnixMilli(m.SeenAt))))
+		if info, ok := s.gate().Endpoint(id); ok {
+			if m := s.computerOf(id); m != nil && m.SeenAt > 0 {
+				fail(w, http.StatusConflict, fmt.Sprintf("%s is not connected (it last connected %s ago)", info.Name, roughly(time.Since(time.UnixMilli(m.SeenAt)))))
+				return
+			}
+			if s.computerOf(id) != nil {
+				fail(w, http.StatusConflict, fmt.Sprintf("%s is not connected", info.Name))
+				return
 			}
 		}
-		fail(w, http.StatusConflict, msg)
+		refuse(w, http.StatusUnprocessableEntity, "no_such_machine", fmt.Sprintf("no machine %s (ir apps lists them)", name))
 		return
 	}
 	if err != nil {
 		s.shellError(w, err)
 		return
 	}
-	reply(w, http.StatusOK, st)
+	if run == nil {
+		reply(w, http.StatusOK, st)
+		return
+	}
+	s.streamRun(w, r, run)
+}
+
+const ndjson = "application/x-ndjson"
+
+// streamRun writes run's output as ShellEvent lines as it comes, its end last; the caller gone
+// (ir sh's --timeout, or killed), the run is stopped.
+func (s *Server) streamRun(w http.ResponseWriter, r *http.Request, run *remote.Run) {
+	rc := http.NewResponseController(w)
+	w.Header().Set("Content-Type", ndjson)
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	enc := json.NewEncoder(w)
+	send := func(ev api.ShellEvent) bool {
+		if enc.Encode(ev) != nil {
+			return false
+		}
+		_ = rc.Flush()
+		return true
+	}
+	_ = rc.Flush()
+	stop := func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := run.Stop(ctx); err != nil && !errors.Is(err, wire.ErrOffline) {
+			s.logf("shell: stopping %s: %v", run.ID(), err)
+		}
+	}
+	for {
+		ev, err := run.Next(r.Context())
+		if err != nil {
+			if r.Context().Err() != nil {
+				stop()
+			}
+			return
+		}
+		var out api.ShellEvent
+		switch {
+		case ev.Gone:
+			out = api.ShellEvent{Done: true, Error: "the machine's connection ended: the command line was stopped"}
+		case ev.Exit != nil:
+			out = api.ShellEvent{Done: true, Exit: ev.Exit.Code, Error: ev.Exit.Error}
+			if ev.Exit.Signal != nil {
+				out.Signal = *ev.Exit.Signal
+			}
+		case ev.Err:
+			out.Err = ev.Data
+		default:
+			out.Out = ev.Data
+		}
+		if !send(out) {
+			stop()
+			return
+		}
+		if out.Done {
+			return
+		}
+	}
 }
 
 func (s *Server) shellRun(w http.ResponseWriter, r *http.Request) {
@@ -89,9 +192,9 @@ func (s *Server) shellStop(w http.ResponseWriter, r *http.Request) {
 func (s *Server) shellError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, session.ErrNoRun), errors.Is(err, fs.ErrNotExist), wire.IsCode(err, wire.CodeNotFound):
-		fail(w, http.StatusNotFound, err.Error())
+		refuse(w, http.StatusUnprocessableEntity, "no_such_path", err.Error())
 	case errors.Is(err, session.ErrNoShell):
-		fail(w, http.StatusForbidden, err.Error())
+		refuse(w, http.StatusForbidden, "no_shell", err.Error())
 	case errors.Is(err, session.ErrOffline):
 		fail(w, http.StatusConflict, err.Error())
 	case errors.As(err, new(*wire.Error)):

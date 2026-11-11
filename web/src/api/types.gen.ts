@@ -18,7 +18,7 @@ export const AgentPi = "pi";
 export const AgentDsh = "dsh";
 export type Agent = typeof AgentClaude | typeof AgentCodex | typeof AgentPi | typeof AgentDsh;
 /**
- * AgentInfo is what an agent Iridium hosts can do (GET /api/agents).
+ * AgentInfo is what an agent Iridium hosts can do (GET /v1/internal/agents).
  */
 export interface AgentInfo {
   agent: Agent;
@@ -40,13 +40,8 @@ export interface AgentInfo {
    */
   ultracode: boolean;
   /**
-   * Features: the features (SessionState.Features) its sessions have before its agent runs, by
-   * ID (Claude: claude.ultracode).
-   */
-  features?: string[];
-  /**
    * Presets: its sessions take an agent preset (dsh: the tools and prompt a session runs with),
-   * at launch: a switch restarts the agent. Which, a session's: GET /api/sessions/{id}/presets.
+   * at launch: a switch restarts the agent. Which, a session's: GET /v1/internal/sessions/{id}/presets.
    */
   presets?: boolean;
   /**
@@ -123,14 +118,17 @@ export interface Session {
    */
   order?: number /* float64 */;
   /**
-   * At: the folder at another machine one of this machine's was opened for (NewSession.At): it
-   * is listed there, in that folder, not by its Cwd.
-   */
-  at?: string;
-  /**
-   * Launcher: the session that started this one, if discovery saw it.
+   * Launcher: the session that started this one (its ir new), if known.
    */
   launcher?: string;
+  /**
+   * Own: a person opened it (docs/exec.md "远端工作区"): with a Launcher, it was taken out from
+   * under it (its placement is by hand, SessionPatch.Detach); without, Iridium opened it through
+   * a create (the page's "+", ir new in a shell, a Bot's, /clear). Never a subagent. A session
+   * with a Launcher and not Own hangs under it on the page; a group at another machine is listed
+   * while it holds an Own session not archived.
+   */
+  own?: boolean;
   /**
    * Subagent: an Agent tool's subtask (Claude) or a subagent's thread (Codex), listed as a
    * session of its own, read-only; Parent: the session that started it.
@@ -155,11 +153,6 @@ export interface Session {
   last?: LastSaid;
   updatedAt: number /* int64 */; // ms since the epoch
   /**
-   * Bots: the plugins (terminal IDs) whose chat is in this session now: the list shows their
-   * avatar and a Bot tag.
-   */
-  bots?: string[];
-  /**
    * Machine: the executor it runs at (its terminal ID; docs/exec.md), empty for this machine.
    * Offline: that executor is not connected now.
    */
@@ -167,7 +160,7 @@ export interface Session {
   offline?: boolean;
   /**
    * Loose: a dsh session at another machine in none of DSH Desktop's workspaces there (its 未分组):
-   * in 未归类, a row of its own, not in a folder.
+   * in no group, and not listed unless Own or hung under its launcher.
    */
   loose?: boolean;
 }
@@ -178,6 +171,11 @@ export interface LastSaid {
   role: string; // user | assistant
   text: string;
   from?: string; // the user message's source, as Iridium wrote it
+  /**
+   * FromTerminal: the ID of the app or login that sent it, where the transcript says (not Codex's
+   * or pi's glance): the page tells it by this, a name being unique only in its scope.
+   */
+  fromTerminal?: string;
   at?: number /* int64 */;
 }
 /**
@@ -229,6 +227,11 @@ export interface SessionState extends Session {
    */
   context?: ContextSummary;
   /**
+   * Tokens: what its turns read so far, as recorded (GET /v1/internal/usage counts the same rows);
+   * absent before its first.
+   */
+  tokens?: InputTokens;
+  /**
    * QuotaUntil: the agent's quota ran out; Iridium goes on at this time (ms).
    */
   quotaUntil?: number /* int64 */;
@@ -241,14 +244,13 @@ export interface SessionState extends Session {
    */
   commands?: Command[];
   /**
-   * Ultracode: Claude's ultracode; absent for an agent without it. Features has it too.
+   * Ultracode: Claude's ultracode; absent for an agent without it. Attached has its key.
    */
   ultracode?: Ultracode;
   /**
-   * Features: its extra switches (Claude's UltraCode; at an executor whose DSH Desktop plugins
-   * add some, theirs); PUT features/{feature} switches one.
+   * Attached: what is attached to its page (Claude's UltraCode, a plugin's).
    */
-  features?: Feature[];
+  attached?: Attached[];
   /**
    * Next: its agent cleared itself (Claude's own /clear) and the conversation goes on in this
    * session; this one is archived, as it was before. The page open on it follows.
@@ -389,6 +391,10 @@ export interface Block {
    */
   from?: string;
   fromTerminal?: string;
+  /**
+   * FromLogin: the login of that app it came from, if one (ir_web's logins are FromTerminal).
+   */
+  fromLogin?: string;
   id?: string; // tool, result: the call's id
   /**
    * tool: Name, Input as JSON, and Result when it is on the same page.
@@ -511,12 +517,13 @@ export interface NewSession {
   effort?: string;
   preset?: string;
   /**
-   * Workspace: the workspace it goes in (0: the caller's, else as discovery classifies it).
+   * Workspace: the workspace it goes in (0: as discovery classifies its folder; the caller's if
+   * that holds it).
    */
   workspace?: number /* int64 */;
   /**
    * Caller is the session that ran ir new (from IRIDIUM_SESSION, CLAUDE_CODE_SESSION_ID,
-   * CODEX_THREAD_ID…): the new session goes into its workspace.
+   * CODEX_THREAD_ID…): the new session's Launcher, which it hangs under on the page.
    */
   caller?: string;
   /**
@@ -524,14 +531,6 @@ export interface NewSession {
    * is then a path there.
    */
   machine?: string;
-  /**
-   * At: one of this machine's opened for a folder at another ("<machine>:<path>", as grouped), a
-   * coordinator from a group's "+" there: grouped by that folder, wherever its group is nested.
-   */
-  at?: string;
-}
-export interface NewSessionReply {
-  id: string;
 }
 /**
  * Send gives the session a message: a new turn when idle; while a turn runs it waits in the
@@ -593,10 +592,15 @@ export interface Answer {
   always?: boolean;
 }
 /**
- * Error is every failed request's body.
+ * Error is every failed request's body: Message for a person; Code, what went wrong, for a
+ * program (decision 8: 401 only for a TOKEN that is not valid; any other refusal 403 with its
+ * code, such as pair_closed, login_pending, no_permission; decision 28: 422 for what is not
+ * there, such as no_such_need). NameError: bad_name's, which rule the name broke.
  */
 export interface Error {
-  error: string;
+  code?: string;
+  message: string;
+  nameError?: string;
 }
 /**
  * StateEvent is the event stream's "state" event: a carried state, whole. Value is null for one
@@ -642,116 +646,496 @@ export interface DraftTool {
 }
 
 //////////
-// source: chat.go
+// source: apps.go
 
 /**
- * ChatInput is a message from a plugin's chat window (plan "插件"). Sender, if given, is who in
- * the chat sent it: the agent sees "[plugin·sender] ".
+ * HostID is the host's storage ID; it is shown as 主机 (host).
  */
-export interface ChatInput {
-  text: string;
-  sender?: string;
+export const HostID = "local";
+/**
+ * WebApp is the built-in app ir_web's ID: there only with a public origin.
+ */
+export const WebApp = "ir_web";
+/**
+ * Rules is what an app or login may do: everything, all alike, but Claude (the user, 2026-11-08).
+ * Stored as before, the other fields of old tables are no longer read. S2 puts permissions in place.
+ */
+export interface Rules {
   /**
-   * Attachments: refs of uploads into the chat's session (POST /api/chat/{key}/uploads): their
-   * paths go into the message, images to the agent as images too, as the web's.
+   * ClaudeOwner: it is the owner's own (Claude's terms), so it may use Claude. Set as it was
+   * made, by the server only, and never changed. Without it, it sees Claude's sessions but may
+   * not start, write to or answer one.
    */
-  attachments?: string[];
+  claudeOwner?: OwnerConfirm;
 }
 /**
- * ChatInputReply: Session is where the message went (or the command ran). An Iridium command
- * answers here, with Reply or Card; what the agent says comes on the plugin's event stream.
+ * OwnerConfirm is how, and when (ms), an app or login was found the owner's own.
  */
-export interface ChatInputReply {
-  session?: string;
-  queued?: boolean;
-  reply?: ChatReply;
-  card?: Card;
+export interface OwnerConfirm {
+  /**
+   * By: "local" (a person's ir at the host), "panel" (a person on a login of ir_web that has
+   * Claude, or one that confirmed an agent's ask) or "first" (the first login of ir_web).
+   */
+  by: string;
+  at: number /* int64 */;
 }
 /**
- * ChatPointer is what a chat window points at: its session, and what /new opens.
+ * App is an app as listed, or the host (Host) or ir_web (Web) beside them. No secrets.
  */
-export interface ChatPointer {
-  chat: string;
-  session?: string;
-  agent?: Agent;
-  cwd?: string;
-}
-/**
- * ChatCommand is a command a chat window can send. Iridium: Iridium runs it; else it goes to the
- * agent as typed.
- */
-export interface ChatCommand {
+export interface App {
+  id: string;
   name: string;
-  description?: string;
-  iridium?: boolean;
+  type?: string; // what it is shown as (computer…); display only
+  avatar?: string; // URL for <img src>
+  /**
+   * Host: the host, listed with the apps but not managed. Web: ir_web, the built-in app.
+   */
+  host?: boolean;
+  web?: boolean;
+  logins?: number /* int */; // ir_web: its logins
+  online?: number /* int */; // live connections
+  createdAt?: number /* int64 */;
+  lastSeenAt?: number /* int64 */;
+  rules: Rules;
+  /**
+   * Perms: what an app was given as it paired (nil: all, as one paired before 0.2). Not the
+   * host's or ir_web's.
+   */
+  perms?: Perms;
+  usedToday: number /* int64 */; // tokens of the turns it started today
+  /**
+   * Device: what it runs on, as the badge on its messages' avatar shows; the server always sets it.
+   */
+  device?: Device;
+  /**
+   * Computer: an app that runs agents or command lines (an executor, ir join): its computer, as
+   * it last said in its hello; nil for any other.
+   */
+  computer?: Computer;
 }
 /**
- * ChatReply is a reply in both forms: Markdown as written, Text with the marks taken off.
+ * Computer is an app's computer as its executor last said of itself (docs/exec.md "握手"): kept
+ * in the store, so one away is listed too. GET /v1/internal/apps lists it with the app, to every caller.
  */
-export interface ChatReply {
-  markdown: string;
-  text: string;
-  files?: ChatFile[];
+export interface Computer {
+  os: string; // windows | darwin | linux
+  arch?: string;
+  home: string;
+  sep: string;
+  /**
+   * Agents: those Iridium runs there, as it reported them; Off, turned off in its app's page
+   * (PUT /v1/internal/apps/{id}/agents): not started there, not offered for new sessions.
+   */
+  agents: ExecAgent[];
+  online: boolean; // its executor is connected
+  seenAt: number /* int64 */; // when it last connected (ms)
+  /**
+   * Shell: command lines run there, a person's on the page ($) and agents' (ir sh); else it
+   * starts only its agents (docs/exec.md). Its owner's switch.
+   */
+  shell?: boolean;
+  /**
+   * Latency: the connection's last round trip (ms), by its heartbeat; 0 not known.
+   */
+  latency?: number /* int64 */;
+  /**
+   * Program: what connects it, as its hello says (ir join and its version).
+   */
+  program?: string;
 }
 /**
- * ChatFile is a file a reply names. GET /api/chat/files/<ref> gives it (Range works); the ref is
- * good only for the plugin it was given to.
+ * AppAgents is PUT /v1/internal/apps/{id}/agents: the agents an app carries that are turned off there.
+ * Any it reports later is on till turned off.
  */
-export interface ChatFile {
+export interface AppAgents {
+  off: string[];
+}
+/**
+ * Login is a login of an app as listed: ir_web's, a browser with a passkey; another app's, as it
+ * spoke (Satori-User-ID), waiting till approved (ApprovedAt 0). No secrets.
+ */
+export interface Login {
+  app: string;
+  id: string;
   name: string;
-  size: number /* int64 */;
-  type: string; // a MIME type
-  ref: string;
+  avatar?: string;
+  passkeys?: number /* int */;
+  sessions?: number /* int */; // browsers logged in
+  online?: number /* int */;
+  createdAt?: number /* int64 */;
+  lastSeenAt?: number /* int64 */;
+  approvedAt?: number /* int64 */; // 0: waits to be approved
+  rules: Rules;
+  usedToday: number /* int64 */;
+  device?: Device;
+  /**
+   * Perms: what it was given (nil: all); what it may use is this within its app's.
+   */
+  perms?: Perms;
 }
 /**
- * ChatEvent is the data of a plugin event (SSE event types progress, reply, card, card_done,
- * error, status). Every event is for one chat window.
+ * Device is what an app or login runs on, set in its settings (PUT /v1/internal/me/device, ir apps
+ * device): a computer, the default, a laptop, a phone, or none shown (no badge).
  */
-export interface ChatEvent {
-  chat: string;
-  session?: string;
-  /**
-   * progress, error: Text.
-   */
-  text?: string;
-  /**
-   * reply
-   */
-  reply?: ChatReply;
-  /**
-   * card; card_done: CardID.
-   */
-  card?: Card;
-  cardId?: string;
-  /**
-   * status
-   */
-  status?: Status;
+export const DeviceComputer = "computer";
+export const DeviceLaptop = "laptop";
+export const DevicePhone = "phone";
+export const DeviceNone = "none";
+export type Device = typeof DeviceComputer | typeof DeviceLaptop | typeof DevicePhone | typeof DeviceNone;
+/**
+ * SetDevice is PUT /v1/internal/me/device and PUT /v1/internal/apps/{id}/device.
+ */
+export interface SetDevice {
+  device: Device;
 }
 /**
- * BotLetter is what a session says to the user through a bot (ir bot): To, a bot's name (its
- * terminal's), else the one Iridium picks; Caller, the session (ir's own, as Send's).
+ * PendingInvite is a slot for a login of ir_web not taken yet.
  */
-export interface BotLetter {
-  text: string;
-  to?: string;
-  caller?: string;
-}
-/**
- * BringBot is POST /api/sessions/{id}/bot: Bot's chat (its terminal ID) points at the session.
- */
-export interface BringBot {
-  bot: string;
-}
-/**
- * BotReply is where a letter went: the bot (its terminal ID, and name) and its chat; Letter, as a
- * letter (the chat pointed elsewhere) rather than the session's reply.
- */
-export interface BotReply {
-  bot: string;
+export interface PendingInvite {
+  id: string;
   name?: string;
-  chat: string;
-  letter?: boolean;
+  setup?: boolean; // the first-run link in the state directory
+  claude?: boolean; // the login gets Claude
+  createdAt: number /* int64 */;
+  expiresAt?: number /* int64 */;
+}
+/**
+ * Apps is GET /v1/internal/apps (ir apps): the host first, ir_web (with a public origin), the apps; the
+ * logins of ir_web; the invites not taken. Public (draft 二「消息」): any caller gets the apps
+ * (names, types, avatars, online, computers) and the approved logins; their rules, perms and
+ * usage, the logins waiting and the invites only one that manages (Full).
+ */
+export interface Apps {
+  apps: App[];
+  logins: Login[];
+  invites: PendingInvite[];
+  full?: boolean;
+}
+/**
+ * Me is GET /v1/internal/me: who calls. App: the app (HostID for the host, WebApp for a browser); Login:
+ * the login of it, for ir_web the browser's. ID is the one its usage and rules are kept by.
+ */
+export interface Me {
+  id: string;
+  name: string;
+  app: string;
+  login?: string;
+  avatar?: string;
+  host?: boolean;
+  web?: boolean; // a login of ir_web
+  rules: Rules;
+  usedToday: number /* int64 */;
+  device?: Device;
+  public: boolean; // a public origin is set: passkeys are on
+}
+/**
+ * NewInvite asks for a slot for a new login of ir_web (ir invite [name] [--claude]). Claude: the
+ * login gets Claude, the owner's own; only a person at the host or on a login of ir_web that has
+ * Claude may say so. An agent's goes to a confirmation that only such a login (or the host) allows.
+ */
+export interface NewInvite {
+  name?: string;
+  claude?: boolean;
+  /**
+   * Perms: what the login that takes it may use (nil: all); set as the slot is made.
+   */
+  perms?: Perms;
+}
+/**
+ * Invite is a new invite of ir_web. URL holds the secret: only a login of ir_web (or a person's
+ * ir at the host) sees it.
+ */
+export interface Invite {
+  id: string;
+  name?: string;
+  url: string;
+  expiresAt: number /* int64 */;
+  /**
+   * QR is URL as a QR code, an SVG data URL for <img src>.
+   */
+  qr?: string;
+}
+/**
+ * Token is an app's new TOKEN, as a pairing allowed gives it to the app alone.
+ */
+export interface Token {
+  app: App;
+  token?: string;
+}
+/**
+ * Perms is what an app or login asks for or is given (0.2 "权限"): the agents it may use and the
+ * places it may use, each ["*"] for all. Plain data till S2 checks it; Claude stays Rules'.
+ */
+export interface Perms {
+  agents: string[];
+  scope: string[];
+}
+/**
+ * PermsAll is the word for all in Perms' lists.
+ */
+export const PermsAll = "*";
+/**
+ * NeedKind is what a Need waits for a person to decide.
+ */
+export type NeedKind = string;
+export const NeedAppJoin: NeedKind = "app_join"; // an app asks to pair
+export const NeedAppUpdate: NeedKind = "app_update"; // an app asks to pair by the name of one there: a new TOKEN for it
+export const NeedAppChange: NeedKind = "app_change"; // an app asks for other permissions
+export const NeedLoginJoin: NeedKind = "login_join"; // a login an app spoke as the first time
+export const NeedInvite: NeedKind = "invite"; // an agent's ir invite
+export const NeedSecretSet: NeedKind = "secret_set"; // an agent's ir secret set: a person types the value
+export const NeedSecretUse: NeedKind = "secret_use"; // an agent's ir run with credentials
+/**
+ * NeedAsk: a session's question, approval or plan (Card), for whoever may use the session;
+ * answered through the card (POST /v1/internal/button), not POST /v1/internal/needs/{id}.
+ */
+export const NeedAsk: NeedKind = "ask";
+/**
+ * NeedShare: something shared with this login (Share); DELETE /v1/internal/needs/{id} puts it away.
+ */
+export const NeedShare: NeedKind = "share";
+/**
+ * Need is what waits for a person (docs/next/k_glossary.md "需要"): an app's or a login's request,
+ * or what an agent's ir asked for that only a person may give. It waits in the carried state
+ * "needs" till the host or a login of ir_web that may approve answers it. No secrets.
+ */
+export interface Need {
+  id: string;
+  kind: NeedKind;
+  /**
+   * Name: the invite's name; secret_set: the secret's; app_join: the name the app asks for;
+   * app_update, app_change: the app's; login_join: the login's.
+   */
+  name?: string;
+  owner?: boolean; // it gets Claude; only one that has Claude allows it
+  asker: string; // who asked (the app or login, or 主机)
+  session?: string; // the session whose agent asked, if known
+  createdAt: number /* int64 */;
+  expiresAt: number /* int64 */;
+  /**
+   * secret_set: the note it was asked with (else the stored one's), and whether one by that
+   * name is stored (it is replaced).
+   */
+  note?: string;
+  replace?: boolean;
+  /**
+   * secret_use: the secrets, the command's opening (as written: {{NAME}}), and whether one of
+   * them is confirmed every time (no "this session").
+   */
+  secrets?: string[];
+  command?: string;
+  always?: boolean;
+  /**
+   * app_join, app_update: the code both sides show, and what the app says of itself.
+   */
+  code?: string;
+  pair?: PairRequest;
+  /**
+   * App: app_update, the app by that name now (its system, last seen, whether online: an update
+   * while it is online may be someone else's); app_change, login_join: the app asking.
+   */
+  app?: App;
+  /**
+   * Wants: app_join, app_change: what it asks for; the answer may give less, never more.
+   * app_change: Has, what it has now.
+   */
+  wants?: Perms;
+  has?: Perms;
+  /**
+   * Login: login_join, the login's ID within App.
+   */
+  login?: string;
+  /**
+   * Card: ask, the ask as a card (its id "ask:<session>:<request>" is the need's). Origin: ask,
+   * the app or login of ir_web that began the turn, if known.
+   */
+  card?: Card;
+  origin?: string;
+  /**
+   * Share: share, what was shared and by whom; To, the login of ir_web it is for.
+   */
+  share?: Share;
+  to?: string;
+}
+/**
+ * Needs is the carried state "needs" (GET /v1/internal/needs): the pending ones, oldest first, as the
+ * caller may see them: applications for a person on ir_web or at the host, asks of the sessions it
+ * may use, what was shared with it.
+ */
+export interface Needs {
+  pending: Need[];
+}
+/**
+ * NeedAnswer is a person's answer to a Need (POST /v1/internal/needs/{id}).
+ */
+export interface NeedAnswer {
+  allow: boolean;
+  /**
+   * Value: secret_set's value, typed by the person; stored, never given back.
+   */
+  value?: string;
+  /**
+   * ForSession: secret_use allowed for the rest of the session (till it stops).
+   */
+  forSession?: boolean;
+  /**
+   * Owner: app_join allowed as the owner's own: the app has Claude. Only one that has Claude says so.
+   */
+  owner?: boolean;
+  /**
+   * Name: app_join, app_update allowed as a new app by this name in place of the one asked for.
+   */
+  name?: string;
+  /**
+   * Perms: app_join, app_change, what it gets: within Need.Wants. nil: as asked.
+   */
+  perms?: Perms;
+  /**
+   * AgentsOff: app_join, the agents it carries (Need.Pair's) turned off there from the start.
+   */
+  agentsOff?: string[];
+}
+/**
+ * PairRequest is what an app says of itself asking to pair (POST /v1/internal/pair; no login): its name,
+ * what it is shown as, and what it wants. An executor (ir join) says its machine too. Shell is
+ * what it means to say in its hello (Computer's), so the card tells whether command lines would run
+ * there; an older one says NoShell and AgentShell instead (shell: AgentShell without NoShell),
+ * which the Iridium turns into Shell. Home and MachineID, as its hello will say them: one with
+ * agents gets its home as its scope unless it asks for another (decision 17); one on the host
+ * (its MachineID the host's) carries none.
+ */
+export interface PairRequest {
+  name: string;
+  type?: string; // computer, bot, script…: display only
+  os?: string; // windows | darwin | linux
+  arch?: string;
+  program?: string;
+  agents?: ExecAgent[];
+  shell?: boolean;
+  noShell?: boolean;
+  agentShell?: boolean;
+  home?: string;
+  machineId?: string;
+  wants?: Perms; // nil: all; one carrying agents, its home
+  /**
+   * Login: the login it speaks as (Satori-User-ID), approved with it; nil: none (ir join).
+   */
+  login?: PairLogin;
+}
+/**
+ * PairLogin is the login a pairing app speaks as. Name: ID when not given.
+ */
+export interface PairLogin {
+  id: string;
+  name?: string;
+}
+/**
+ * ExecAgent is an agent an executor has. Off: turned off at that app (Computer's only).
+ */
+export interface ExecAgent {
+  agent: string;
+  version?: string;
+  off?: boolean;
+}
+/**
+ * DshWorkspace is a folder a new dsh session at a machine may open in (GET
+ * /v1/internal/machines/{id}/dsh/workspaces): one of dsh's workspaces there, as DSH Desktop's sidebar
+ * has them, else a folder its sessions were in. Path is '/'-separated, as GET /v1/internal/folders gives.
+ * Sessions: how many of its sessions Iridium lists (not archived, not kept from it), subagents aside.
+ */
+export interface DshWorkspace {
+  title: string;
+  path: string;
+  updatedAt?: number /* int64 */; // ms
+  sessions: number /* int */;
+}
+/**
+ * Pairing answers a pairing request: the code to show, and the request to ask after.
+ */
+export interface Pairing {
+  code: string;
+  request: string;
+}
+/**
+ * PairState is how a pairing request stands (GET /v1/internal/pair/{request}): pending, allowed (with the
+ * TOKEN, given once), denied or expired.
+ */
+export interface PairState {
+  status: string;
+  token?: string;
+}
+/**
+ * PairWindow is whether apps may ask to pair now (GET /v1/internal/pairing, the carried state "pairing"):
+ * open till Until (ms), else closed (0). PUT /v1/internal/pairing opens it for Minutes (10 if 0, at most
+ * 60), or closes it.
+ */
+export interface PairWindow {
+  open: boolean;
+  until?: number /* int64 */;
+  minutes?: number /* int */;
+}
+/**
+ * NeedState is how a Need went, as the asker sees it: never a secret.
+ */
+export interface NeedState {
+  id: string;
+  kind: NeedKind;
+  state: string; // pending | allowed | denied | expired | failed
+  name?: string;
+  owner?: boolean; // it was asked with --claude
+  expiresAt?: number /* int64 */; // allowed invite: until when the link works
+  error?: string;
+}
+/**
+ * NeedReply answers the one that allowed a Need: the secret is for it alone.
+ */
+export interface NeedReply extends NeedState {
+  invite?: Invite;
+}
+/**
+ * Pending is the reply to what must wait for a person (an agent's ir invite, an app's change): 202.
+ */
+export interface Pending {
+  need: Need;
+}
+/**
+ * CatalogueEntry is an official app Iridium lists (GET /v1/internal/catalogue): what it is and how to
+ * install it, by system. Iridium installs nothing itself.
+ */
+export interface CatalogueEntry {
+  id: string;
+  name: string;
+  type: string; // as its app is shown once paired
+  description: Text;
+  install: InstallStep[];
+  url?: string; // where to read more
+}
+/**
+ * InstallStep is a command that installs a catalogue entry on OS (windows | darwin | linux; "" any).
+ */
+export interface InstallStep {
+  os?: string;
+  command: string;
+}
+/**
+ * Text is a short text in Chinese and English.
+ */
+export interface Text {
+  zh: string;
+  en: string;
+}
+/**
+ * SetPublic sets public.origin ("" turns the public way in off). The gate restarts with it.
+ */
+export interface SetPublic {
+  origin: string;
+}
+/**
+ * PublicState is GET /v1/internal/public.
+ */
+export interface PublicState {
+  origin?: string;
+  passkeys: boolean; // some login of ir_web has a passkey
 }
 
 //////////
@@ -769,14 +1153,9 @@ export interface Queued {
    * FromTerminal is the sending terminal's ID.
    */
   fromTerminal?: string;
+  fromLogin?: string; // and the login of that app, if one
   paused?: boolean;
   at: number /* int64 */;
-}
-/**
- * EditQueued changes a queued message's text.
- */
-export interface EditQueued {
-  text: string;
 }
 /**
  * ContextSummary is how full a session's context window was, without the parts.
@@ -785,6 +1164,15 @@ export interface ContextSummary {
   used: number /* int */;
   max?: number /* int */;
   at: number /* int64 */;
+}
+/**
+ * InputTokens is what a session's turns read so far: Input not cached, CacheRead read from the
+ * cache, CacheWrite written to it. The cache's hit rate is CacheRead over the three.
+ */
+export interface InputTokens {
+  input: number /* int64 */;
+  cacheRead: number /* int64 */;
+  cacheWrite: number /* int64 */;
 }
 /**
  * BlockTail is the blocks from Start to End of the transcript. Blocks nil: too many or too
@@ -820,40 +1208,24 @@ export interface Model {
   group?: string;
 }
 /**
- * Feature is an extra switch on a session, at the effort track's right (Place "effort", the one
- * place the page knows): Claude's UltraCode (ID claude.ultracode), or one a plugin adds where DSH
- * Desktop holds the session (ID "<plugin>.<name>", its Name, Hint and Reason in the user's
- * language). On: asked for (what the switch shows); Active: on and in effect; Available: it can be
- * switched now (Reason: why not). Options: what it runs as while on, Option the one picked. Tone
- * "warm": the switch's colour when on.
+ * Attached is a piece of a session's page that something attached (docs/next/plugin.md): Satori
+ * elements at Place ("effort": at the effort track's right, its first button the key, the rest
+ * its options while it is pressed), by From ("ir": Iridium's own, Claude's UltraCode; "m:<machine>":
+ * an executor's plugin; "a:<app>": an app), Content by language ("" for any). A button in it is
+ * pressed as "att:<session>:<from>:<its id>" (POST /v1/internal/button); <button> takes pressed,
+ * disabled and title too.
  */
-export interface Feature {
-  id: string;
-  name: string;
-  on: boolean;
-  active?: boolean;
-  available: boolean;
-  reason?: string;
-  hint?: string;
-  options?: FeatureOption[];
-  option?: string;
+export interface Attached {
   place: string;
-  tone?: string;
+  from: string;
+  content: { [key: string]: string};
 }
 /**
- * FeatureOption is one of a feature's options.
+ * Attach is PUT /v1/internal/sessions/{id}/attach/{place}: Content, Satori elements, or one a
+ * language ({"zh": …, "en": …}); empty takes it away.
  */
-export interface FeatureOption {
-  id: string;
-  name: string;
-}
-/**
- * SetFeature switches a feature on or off (PUT /api/sessions/{id}/features/{feature}), maybe at
- * one of its options.
- */
-export interface SetFeature {
-  on: boolean;
-  option?: string;
+export interface Attach {
+  content: any /* json.RawMessage */;
 }
 /**
  * SetModel, SetMode and SetEffort change a session's model, approval mode and thinking effort,
@@ -890,13 +1262,13 @@ export interface AllowRule {
   pattern: string;
 }
 /**
- * Card is a choice to make, as the web's confirmation panel and plugins show it: an ask
- * (permission, question, plan) or a command's pick (/use, /model, /mode). Options with the same
- * Group are one question's; pick one per group.
+ * Card is a choice to make, as the web's confirmation panel and apps show it: an ask
+ * (permission, question, plan). Options with the same Group are one question's; pick one per
+ * group.
  */
 export interface Card {
   id: string;
-  kind: string; // permission | question | plan | pick
+  kind: string; // permission | question | plan
   session?: string;
   title: string;
   summary: string[];
@@ -925,75 +1297,74 @@ export interface CardAnswer {
   words?: string[];
   message?: string;
 }
-/**
- * CardReply is what answering a card did: for a pick, the command's reply or a next card.
- */
-export interface CardReply {
-  ok: boolean;
-  reply?: ChatReply;
-  card?: Card;
-}
 
 //////////
 // source: discover.go
 
 /**
- * Workspace is a folder group: the folder sessions are in, made as the first goes there (the user,
- * 2026-11-08: no workspaces made by hand). The carried state "workspaces" is Workspace[], those
- * with no session shown too; a session's Workspace 0 is none (未归类: one with no folder).
+ * Workspace is a folder group (Satori's guild): the folder sessions are in, made as the first goes
+ * there (the user, 2026-11-08: no workspaces made by hand); a session's Workspace 0 is none (未归类:
+ * one with no folder).
  */
 export interface Workspace {
   id: number /* int64 */;
   name: string;
   path: string;
   /**
-   * Hidden: hidden from the page (a group's menu): its sessions are not listed, searched or in
-   * 归档, but while one of them runs elsewhere (open in DSH Desktop).
+   * Only: it holds only the sessions right in its folder (/, a home, a drive's root at another
+   * machine, one split), none in a folder under it.
    */
-  hidden?: boolean;
+  only?: boolean;
 }
 /**
- * GroupOrder lists the groups' rows in the order they were dragged to (PUT /api/groups/order), by
- * the key the page gives each (a group listed at two machines is two rows, ordered apart): first
- * to last, those left out after them.
+ * Guilds is the carried state "guilds": the folder groups in the order they were dragged to (those
+ * never dragged after them, newest last), those with no session shown too; and the folders marked
+ * by hand.
  */
-export interface GroupOrder {
-  keys: string[];
+export interface Guilds {
+  guilds: Workspace[];
+  folders: FolderMark[];
 }
 /**
- * Places is where the rows of the list were put by hand: the carried state "places". Groups: the
- * groups' rows in their order (GroupOrder); those not in it after them. Order: the key each folder
- * dragged is sorted by among those in its group (as Session.Order), by its path as grouped
- * (Session's cwd, or "<machine>:<cwd>"); one not in it, by its latest session's activity. Pinned:
- * the folders pinned, first in their group.
+ * FolderMark is what was put on a folder by hand, by its path as grouped (Session's cwd, or
+ * "<machine>:<cwd>"): its colour tag; pinned first in its group; Order, the key it was dragged to
+ * among those in its group (as Session.Order), else it goes by its latest session's activity.
+ * Satori's channel.list gives each folder sessions are in as a category channel (folder:<path>)
+ * with its mark in _data.
  */
-export interface Places {
-  groups: string[];
-  order: { [key: string]: number /* float64 */};
-  pinned: string[];
-}
-/**
- * FolderPlace puts a folder (PATCH /api/folders/place); a field left out stays. Order 0 takes its
- * key off.
- */
-export interface FolderPlace {
+export interface FolderMark {
   path: string;
-  order?: number /* float64 */;
+  color?: Color;
   pinned?: boolean;
+  order?: number /* float64 */;
 }
 /**
- * WorkspacePatch renames a group, hides it or shows it again; a field left out stays.
+ * FolderPatch marks a folder (Satori's channel.update of its category, _data); a field left out
+ * stays. Color "" takes the tag off (a folder here only: an absolute path); Order 0 the key.
  */
-export interface WorkspacePatch {
+export interface FolderPatch {
+  color?: Color;
+  pinned?: boolean;
+  order?: number /* float64 */;
+}
+/**
+ * GuildPatch changes a folder group (PATCH /v1/internal/guilds/{id}); a field left out stays.
+ * Position: its place among the groups, 0 first (as the carried "guilds" lists them). Split takes
+ * it apart at its folder: its subfolders groups of their own.
+ */
+export interface GuildPatch {
   name?: string;
-  hidden?: boolean;
+  position?: number /* int */;
+  split?: boolean;
 }
 /**
  * SessionPatch changes what lies over a session; a field left out stays. Name "" takes the name
  * off. Workspace moves it (0: none), and it is never moved by discovery again. Color "" takes the
  * colour tag off. ByAgent: Name is the session's agent's (ir rename from a session), which does
  * not replace a name the user gave (409) and is cleaned as a title line is. Order: the key it was
- * dragged to among those beside it (Session.Order); 0 takes it off.
+ * dragged to among those beside it (Session.Order); 0 takes it off. Archived archives (or brings
+ * back) the sessions hung under it too, all the way down. Detach takes it out from under its
+ * launcher: it goes in its own folder's group, put there by hand, so it is Own from now on.
  */
 export interface SessionPatch {
   name?: string;
@@ -1003,19 +1374,8 @@ export interface SessionPatch {
   workspace?: number /* int64 */;
   color?: Color;
   order?: number /* float64 */;
+  detach?: boolean;
 }
-/**
- * FolderColor tags folder Path (absolute) with a colour; Color "" takes it off. The carried state
- * "colors" is every folder's, by path (FolderColors).
- */
-export interface FolderColor {
-  path: string;
-  color: Color;
-}
-/**
- * FolderColors is the colour tags of folders, by absolute path.
- */
-export type FolderColors = { [key: string]: Color};
 /**
  * Folders is one folder's subfolders for the picker: names only, no hidden ones, sorted. Parent
  * is "" at the top of what may be listed.
@@ -1033,7 +1393,7 @@ export interface NewFolder {
   name: string;
   /**
    * Machine: at another machine's executor (its terminal ID); its paths '/'-separated, as
-   * GET /api/folders?machine= gives them.
+   * GET /v1/internal/folders?machine= gives them.
    */
   machine?: string;
 }
@@ -1045,81 +1405,13 @@ export interface FolderReply {
 }
 
 //////////
-// source: extensions.go
-
-/**
- * Extension is an official extension as GET /api/extensions lists it.
- */
-export interface Extension {
-  id: string; // qq
-  name: string; // what the page calls it
-  installed: boolean;
-  /**
-   * Busy: what is under way: install | bind | start | stop | remove.
-   */
-  busy?: string;
-  error?: string; // the last action's failure
-  /**
-   * Bots: what the extension says of each of its bots (iridium-qq list --json), once installed.
-   */
-  bots?: ExtensionStatus[];
-  /**
-   * Bind: a scan under way.
-   */
-  bind?: ExtensionBind;
-}
-/**
- * ExtensionStatus is a bot as iridium-qq status --json gives it.
- */
-export interface ExtensionStatus {
-  version: string;
-  home: string;
-  bound: boolean; // it has a bot
-  appId?: string;
-  name: string; // its terminal's name in Iridium
-  owners: number /* int */;
-  iridium?: string;
-  token: boolean;
-  /**
-   * Service: systemd's ActiveState of its unit (active, inactive, failed, activating); "" for
-   * no unit.
-   */
-  service: string;
-  enabled: boolean;
-  running?: ExtensionRunning; // while the service is active
-  pair?: string; // a pairing code waiting
-  /**
-   * Online: its terminal's live connections in Iridium (Iridium fills it in).
-   */
-  online?: number /* int */;
-}
-/**
- * ExtensionRunning is how the running extension stands.
- */
-export interface ExtensionRunning {
-  pid: number /* int */;
-  qq: boolean; // connected to QQ
-  qqError?: string;
-  iridium: boolean; // its event stream is open
-  iridiumError?: string;
-  bot?: string; // the bot's name on QQ
-  at: number /* int64 */;
-}
-/**
- * ExtensionBind is a scan under way: the page to scan, and its QR code.
- */
-export interface ExtensionBind {
-  url: string;
-  qr: string; // an SVG data URL
-}
-
-//////////
 // source: files.go
 
 /**
  * FileRef is a file a session's transcript names (in a reply, a message, a Write call) or a
- * message's attachment: GET /api/sessions/<session>/files/<ref>. A ref is only good for its
- * session, and only paths the session's transcript names (or its attachments) get one.
+ * message's attachment: GET /v1/internal/sessions/<session>/files/<ref>. A ref is only good for its
+ * session, and only paths the session's transcript names (or its attachments) get one. A file
+ * link's (FileLink): Ref is its id, good in any session, and Path "ir:<id>", as the reply has it.
  */
 export interface FileRef {
   ref: string;
@@ -1183,7 +1475,20 @@ export interface AttachPath {
   path: string;
 }
 /**
- * DirEntry is one entry of GET /api/files?path=<dir> (local ir only): one level.
+ * FileLink is POST /v1/internal/links' answer (local ir only, ir attach <path>): the file, kept by
+ * Iridium under a random id, and how a reply puts it in its words.
+ */
+export interface FileLink {
+  file: FileRef;
+  link: string; // ir:<id>
+  /**
+   * Markdown is the link as a reply writes it: ![name](ir:id) for a picture, a video or a sound,
+   * which shows where it is; [name](ir:id) for any other file, to download.
+   */
+  markdown: string;
+}
+/**
+ * DirEntry is one entry of GET /v1/internal/files?path=<dir> (local ir only): one level.
  */
 export interface DirEntry {
   name: string;
@@ -1196,7 +1501,7 @@ export interface DirListing {
   entries: DirEntry[];
 }
 /**
- * Copy copies a file (local ir only): POST /api/files/copy streams CopyProgress lines.
+ * Copy copies a file (local ir only): POST /v1/internal/files/copy streams CopyProgress lines.
  */
 export interface Copy {
   from: string;
@@ -1220,7 +1525,7 @@ export interface CopyProgress {
   error?: string;
 }
 /**
- * CLIRun is POST /api/cli: ir at another machine, run by an agent hosted there (its session's own
+ * CLIRun is POST /v1/internal/cli: ir at another machine, run by an agent hosted there (its session's own
  * TOKEN; docs/exec.md "远端的 ir"): its arguments and its working directory there.
  */
 export interface CLIRun {
@@ -1228,7 +1533,7 @@ export interface CLIRun {
   cwd: string;
 }
 /**
- * CLIOutput is one line of POST /api/cli's answer: what ir wrote, as it wrote it, and last its
+ * CLIOutput is one line of POST /v1/internal/cli's answer: what ir wrote, as it wrote it, and last its
  * exit code.
  */
 export interface CLIOutput {
@@ -1375,7 +1680,7 @@ export interface PushUnsubscribe {
  * PushMessage is a push's payload, as the service worker gets it.
  */
 export interface PushMessage {
-  kind: string; // needs_you | error | turn_end | compact | test
+  kind: string; // needs_you | error | turn_end | compact | test | share
   session?: string;
   title: string;
   body: string;
@@ -1423,14 +1728,14 @@ export interface SecretUse {
   at: number /* int64 */;
 }
 /**
- * Secrets is GET /api/secrets: every secret by name, and the newest uses, newest first.
+ * Secrets is GET /v1/internal/secrets: every secret by name, and the newest uses, newest first.
  */
 export interface Secrets {
   secrets: SecretInfo[];
   uses: SecretUse[];
 }
 /**
- * SetSecret is PUT /api/secrets/{name}. Value "": one stored keeps its value (only what is said of
+ * SetSecret is PUT /v1/internal/secrets/{name}. Value "": one stored keeps its value (only what is said of
  * it changes); from an agent, a panel types it (202 Pending). Note, Scope, Always nil or "": as
  * they were (a new one: no note, all, false). Only a panel changes Scope and Always.
  */
@@ -1442,7 +1747,7 @@ export interface SetSecret {
   always?: boolean;
 }
 /**
- * UseSecrets is POST /api/secrets/use, for ir run alone: the session it runs in, the secrets it
+ * UseSecrets is POST /v1/internal/secrets/use, for ir run alone: the session it runs in, the secrets it
  * wants and the command's opening. Confirm: a secret-use confirmation that was allowed, to use it.
  */
 export interface UseSecrets {
@@ -1462,8 +1767,8 @@ export interface SecretValues {
 // source: settings.go
 
 /**
- * Settings is GET /api/settings: the config file's fields the settings page edits (plan "运行",
- * "推送", "网页"). PUT /api/settings takes a SettingsPatch and answers the whole again.
+ * Settings is GET /v1/internal/settings: the config file's fields the settings page edits (plan "运行",
+ * "推送", "网页"). PUT /v1/internal/settings takes a SettingsPatch and answers the whole again.
  */
 export interface Settings {
   /**
@@ -1485,7 +1790,7 @@ export interface Settings {
    */
   modes: { [key: string]: string};
   /**
-   * Push: Web Push's total switch (off by default); GET /api/push has the rest.
+   * Push: Web Push's total switch (off by default); GET /v1/internal/web/push has the rest.
    */
   push: boolean;
   /**
@@ -1499,9 +1804,10 @@ export interface Settings {
    */
   lang: string;
   /**
-   * PairClosed: new pairing requests (POST /api/pair, /api/exec/pair) are turned away.
+   * AutoUpdate: Iridium looks for a newer version by itself and downloads it ahead (on by
+   * default); off, only 检查更新 looks (config update.manual).
    */
-  pairClosed: boolean;
+  autoUpdate: boolean;
 }
 /**
  * SettingsPatch changes what it gives and nothing else. A mode "" goes back to the agent's own.
@@ -1515,7 +1821,90 @@ export interface SettingsPatch {
   push?: boolean;
   enterInTurn?: string;
   lang?: string;
-  pairClosed?: boolean;
+  autoUpdate?: boolean;
+}
+
+//////////
+// source: share.go
+
+/**
+ * ShareWhat is what a Share is of.
+ */
+export type ShareWhat = string;
+export const ShareOfSession: ShareWhat = "session";
+export const ShareOfReply: ShareWhat = "reply"; // one block of a session: Session and At
+export const ShareOfPlace: ShareWhat = "place"; // a folder: Place
+export const ShareOfFile: ShareWhat = "file"; // a file: Session, and Ref or Path
+/**
+ * Share is something shared with one login (draft 二「消息」 分享; POST /v1/internal/share, ir share): a
+ * session, a reply, a place or a file, who shared it and a note. Iridium checks the login may use
+ * what is shared (a session's agent and scope; a place's or a file's scope); what it does with it
+ * is its app's: a login of ir_web finds it among its needs (and a Web Push), another app's gets a
+ * Satori event (internal, _type ir.share).
+ */
+export interface Share {
+  what: ShareWhat;
+  session?: string;
+  at?: string; // reply: the block's place
+  place?: string; // place: "应用名:路径"
+  ref?: string; // file: its ref in Session
+  path?: string; // file: its path (Iridium fills it from Ref); place: the folder's
+  note?: string;
+  /**
+   * Filled by Iridium: Machine, the app the place, file or session is at ("" the host's); Title,
+   * the session's name or title, a file's name or the reply's opening; From, the app or login of
+   * ir_web that shared it, FromName its name, FromSession the session whose agent did (ir share);
+   * At (ms) when.
+   */
+  machine?: string;
+  title?: string;
+  from?: string;
+  fromName?: string;
+  fromSession?: string;
+  sharedAt?: number /* int64 */;
+}
+/**
+ * ShareRequest is POST /v1/internal/share: what (Share's what and its refs; the rest Iridium fills) and to
+ * whom, "应用/登录" (an app's name or ID; ir_web for a login of the web). Caller: the session ir
+ * runs in, as ir send has it.
+ */
+export interface ShareRequest {
+  what: ShareWhat;
+  session?: string;
+  at?: string;
+  place?: string;
+  ref?: string;
+  path?: string;
+  note?: string;
+  to: string;
+  caller?: string;
+}
+/**
+ * ShareReply is where a share went: the app and login (IDs, and the login's name), and for a login
+ * of ir_web how many of its browsers were pushed to.
+ */
+export interface ShareReply {
+  app: string;
+  login: string;
+  name?: string;
+  pushed?: number /* int */;
+}
+/**
+ * ShareTargets is GET /v1/internal/share/targets (what as ShareRequest's, in the query): the apps whose
+ * logins may use it, each with those logins; the caller itself left out.
+ */
+export interface ShareTargets {
+  apps: ShareApp[];
+}
+export interface ShareApp {
+  id: string;
+  name: string;
+  logins: ShareLogin[];
+}
+export interface ShareLogin {
+  id: string;
+  name: string;
+  avatar?: string;
 }
 
 //////////
@@ -1547,339 +1936,26 @@ export interface ShellOutput {
   signal?: string;
   err?: string; // once done: what could not run it, if anything
 }
-
-//////////
-// source: terminals.go
-
 /**
- * TerminalKind: panel (a web panel, passkey) or channel (a plugin or peer, token; also 本机).
+ * ShellEvent is one line of an agent's ir sh streamed (POST /v1/internal/machines/{id}/shell asked with
+ * Accept: application/x-ndjson, at an executor that speaks run): what the command line wrote, as
+ * it wrote it (Out its stdout, Err its stderr); last (Done), how it ended: its exit code, the
+ * signal (without "SIG") that ended it, or Error, why it could not run or was cut off.
  */
-export type TerminalKind = string;
-export const TerminalPanel: TerminalKind = "panel";
-export const TerminalChannel: TerminalKind = "channel";
-/**
- * LocalTerminal is the built-in terminal's ID: the local ir, and the web page while no public
- * origin is set.
- */
-export const LocalTerminal = "local";
-/**
- * Rules is what a terminal may do: everything, every terminal alike, but Claude (the user,
- * 2026-11-08). Stored as before, the other fields of old tables are no longer read.
- */
-export interface Rules {
-  /**
-   * ClaudeOwner: the terminal is the owner's own (Claude's terms), so it may use Claude. Set as
-   * the terminal was made, by the server only, and never changed. Without it a terminal sees
-   * Claude's sessions but may not start, write to or answer one.
-   */
-  claudeOwner?: OwnerConfirm;
-}
-/**
- * OwnerConfirm is how, and when (ms), a terminal was found the owner's own.
- */
-export interface OwnerConfirm {
-  /**
-   * By: "local" (a person's ir on the machine: ir invite --owner, ir token --owner), "panel" (a person on a panel that has Claude, or one that
-   * confirmed an agent's ask) or "first" (the first panel registered).
-   */
-  by: string;
-  at: number /* int64 */;
-}
-/**
- * Terminal is an interactive terminal as listed. No secrets.
- */
-export interface Terminal {
-  id: string;
-  name: string;
-  kind: TerminalKind;
-  avatar?: string; // URL for <img src>
-  local?: boolean; // the built-in 本机
-  passkeys?: number /* int */;
-  logins?: number /* int */; // logged-in browsers
-  online?: number /* int */; // live connections
-  createdAt?: number /* int64 */;
-  lastSeenAt?: number /* int64 */;
-  rules: Rules;
-  usedToday: number /* int64 */; // tokens of the turns it started today
-  /**
-   * Device: what it runs on, as the badge on its messages' avatar shows; the server always sets it.
-   */
-  device?: Device;
-  /**
-   * Bot: a plugin with a chat in Iridium, or connected as one now; a session's menu offers to
-   * bring that chat to it.
-   */
-  bot?: boolean;
-  /**
-   * Chatless: a Bot no one has written to yet, so it has no chat to bring (the menu says so).
-   */
-  chatless?: boolean;
-}
-/**
- * Device is what a terminal runs on, set in its settings (PUT /api/me/device, ir profile
- * --device): a computer, the default, a laptop, a phone, or none shown (no badge).
- */
-export const DeviceComputer = "computer";
-export const DeviceLaptop = "laptop";
-export const DevicePhone = "phone";
-export const DeviceNone = "none";
-export type Device = typeof DeviceComputer | typeof DeviceLaptop | typeof DevicePhone | typeof DeviceNone;
-/**
- * SetDevice is PUT /api/me/device and PUT /api/terminals/{id}/device.
- */
-export interface SetDevice {
-  device: Device;
-}
-/**
- * PendingInvite is a panel invite not used yet.
- */
-export interface PendingInvite {
-  id: string;
-  name?: string;
-  setup?: boolean; // the first-run link in the state directory
-  owner?: boolean; // ir invite --owner: the panel gets Claude
-  createdAt: number /* int64 */;
-  expiresAt?: number /* int64 */;
-}
-/**
- * Terminals is GET /api/terminals (ir access).
- */
-export interface Terminals {
-  terminals: Terminal[];
-  invites: PendingInvite[];
-}
-/**
- * Me is GET /api/me: the calling terminal. Panel: it may approve, widen and see tokens.
- */
-export interface Me extends Terminal {
-  panel: boolean;
-  public: boolean; // a public origin is set: passkeys are on
-}
-/**
- * NewInvite asks for a panel invite (ir invite [name]) or a channel token (ir token <name>).
- * Owner (--owner): the terminal is the owner's own and gets Claude; only a person at the machine
- * or on a panel that has Claude may say so. An agent's goes to a confirmation that only such a
- * panel (or 本机) may allow.
- */
-export interface NewInvite {
-  name?: string;
-  owner?: boolean;
-  /**
-   * Into (tokens only, ir token --into): the daemon writes the token into this file (absolute,
-   * 0600) and gives it to no one: not the asker, nor the panel that allows it. A plugin's setup
-   * asks so, its agent never seeing the token.
-   */
-  into?: string;
-}
-/**
- * Invite is a new panel invite. URL holds the secret: only a panel (or ir at a terminal) sees it.
- */
-export interface Invite {
-  id: string;
-  name?: string;
-  url: string;
-  expiresAt: number /* int64 */;
-  /**
-   * QR is URL as a QR code, an SVG data URL for <img src>.
-   */
-  qr?: string;
-}
-/**
- * Token is a channel's new token: shown once. Asking again replaces it.
- */
-export interface Token {
-  terminal: Terminal;
-  token?: string;
-  into?: string; // the file it went into (NewInvite.Into); no Token then
-}
-/**
- * Confirm is what an agent's ir asked for that only a panel may give (an invite link, a token, a
- * credential's value, the use of credentials): it waits in the carried state "confirms" until a
- * panel answers it. No secrets.
- */
-export interface Confirm {
-  id: string;
-  kind: string; // invite | token | secret-set | secret-use | exec-pair | bot-pair
-  /**
-   * Name: the invite's or token's name; secret-set: the secret's.
-   */
-  name?: string;
-  owner?: boolean; // --owner: it gets Claude; only a panel that has Claude allows it
-  into?: string; // token: the file it goes into (NewInvite.Into)
-  asker: string; // the terminal that asked (本机)
-  session?: string; // the session whose agent asked, if known
-  createdAt: number /* int64 */;
-  expiresAt: number /* int64 */;
-  /**
-   * secret-set: the note it was asked with (else the stored one's), and whether one by that
-   * name is stored (it is replaced).
-   */
-  note?: string;
-  replace?: boolean;
-  /**
-   * secret-use: the secrets, the command's opening (as written: {{NAME}}), and whether one of
-   * them is confirmed every time (no "this session").
-   */
-  secrets?: string[];
-  command?: string;
-  always?: boolean;
-  /**
-   * exec-pair: the code both sides show, and the machine that asks to join as an executor
-   * (docs/exec.md "连接"); Name is the Bot it becomes. bot-pair: the same, a Bot that asks
-   * (POST /api/pair), Machine saying its program. Replace there: a Bot by Name is there already,
-   * which the answer may hand over (ConfirmAnswer.Replace).
-   */
-  code?: string;
-  machine?: ExecPair;
-}
-/**
- * Confirms is the carried state "confirms": the pending ones, oldest first. Panels only.
- */
-export interface Confirms {
-  pending: Confirm[];
-}
-/**
- * ConfirmAnswer is a panel's answer to a Confirm.
- */
-export interface ConfirmAnswer {
-  allow: boolean;
-  /**
-   * Value: secret-set's value, typed on the panel; stored, never given back.
-   */
-  value?: string;
-  /**
-   * ForSession: secret-use allowed for the rest of the session (till it stops).
-   */
-  forSession?: boolean;
-  /**
-   * Owner: exec-pair allowed as the owner's own machine: it runs Claude there; bot-pair: the Bot
-   * has Claude. Only a panel that has Claude says so.
-   */
-  owner?: boolean;
-  /**
-   * Replace: a pairing allowed as the Bot by its name that is there already (Confirm.Replace):
-   * the same terminal, its usage and Claude as they were, a new TOKEN, the old one void.
-   */
-  replace?: boolean;
-}
-/**
- * ExecPair is what an executor or a Bot says of itself asking to pair (POST /api/exec/pair,
- * POST /api/pair; no login). A Bot says its name and program only. NoShell and AgentShell are what
- * it means to say in its hello (Machine's), so the card tells whether command lines would run there.
- */
-export interface ExecPair {
-  name: string;
-  os?: string; // windows | darwin | linux
-  arch?: string;
-  program?: string;
-  agents?: ExecAgent[];
-  noShell?: boolean;
-  agentShell?: boolean;
-}
-/**
- * Machine is another machine's executor (docs/exec.md): a Bot, as it last said of itself; the
- * carried state "machines" lists them, GET /api/machines too. Agents: those Iridium can run there.
- */
-export interface Machine {
-  id: string; // its terminal
-  name: string;
-  avatar?: string;
-  os: string; // windows | darwin | linux
-  arch?: string;
-  home: string;
-  sep: string;
-  agents: ExecAgent[];
-  online: boolean;
-  seenAt: number /* int64 */; // when it last connected (ms)
-  /**
-   * NoShell: it starts only its agents, so command lines cannot run there (docs/exec.md).
-   */
-  noShell?: boolean;
-  /**
-   * Latency: the connection's last round trip (ms), by its heartbeat; 0 not known.
-   */
-  latency?: number /* int64 */;
-  /**
-   * AgentShell: agents here may run command lines there (ir sh).
-   */
-  agentShell?: boolean;
-}
-/**
- * ExecAgent is an agent an executor has.
- */
-export interface ExecAgent {
-  agent: string;
-  version?: string;
-}
-/**
- * DshWorkspace is a folder a new dsh session at a machine may open in (GET
- * /api/machines/{id}/dsh/workspaces): one of dsh's workspaces there, as DSH Desktop's sidebar
- * has them, else a folder its sessions were in. Path is '/'-separated, as GET /api/folders gives.
- */
-export interface DshWorkspace {
-  title: string;
-  path: string;
-  updatedAt?: number /* int64 */; // ms
-}
-/**
- * ExecPairing answers a pairing request: the code to show, and the request to ask after.
- */
-export interface ExecPairing {
-  code: string;
-  request: string;
-}
-/**
- * ExecPairState is how a pairing request stands (GET /api/exec/pair/{request}): pending, allowed
- * (with the TOKEN, given once), denied or expired.
- */
-export interface ExecPairState {
-  status: string;
-  token?: string;
-}
-/**
- * ConfirmState is how a Confirm went, as the asker sees it: never a secret.
- */
-export interface ConfirmState {
-  id: string;
-  kind: string;
-  state: string; // pending | allowed | denied | expired | failed
-  name?: string;
-  owner?: boolean; // it was asked with --owner
-  expiresAt?: number /* int64 */; // allowed invite: until when the link works
+export interface ShellEvent {
+  out?: string;
+  err?: string;
+  done?: boolean;
+  exit?: number /* int */;
+  signal?: string;
   error?: string;
-}
-/**
- * ConfirmReply answers the panel that allowed a Confirm: the secret is for it alone.
- */
-export interface ConfirmReply extends ConfirmState {
-  invite?: Invite;
-  token?: Token;
-}
-/**
- * Pending is the reply to an agent's ir invite or ir token: a panel must allow it.
- */
-export interface Pending {
-  confirm: Confirm;
-}
-/**
- * SetPublic sets public.origin ("" turns the public way in off). The gate restarts with it.
- */
-export interface SetPublic {
-  origin: string;
-}
-/**
- * PublicState is GET /api/public.
- */
-export interface PublicState {
-  origin?: string;
-  passkeys: boolean; // some panel has a passkey
 }
 
 //////////
 // source: update.go
 
 /**
- * UpdateState is the carried state "update" and GET /api/update: whether a newer Iridium is out
+ * UpdateState is the carried state "update" and GET /v1/internal/update: whether a newer Iridium is out
  * (plan "更新"). The page puts a dot on the settings gear while Available.
  */
 export interface UpdateState {
@@ -1893,6 +1969,11 @@ export interface UpdateState {
    * source).
    */
   auto: boolean;
+  /**
+   * Manual: automatic updates are off (config update.manual): nothing looked for on a timer or
+   * downloaded ahead; the page does not look when the settings open.
+   */
+  manual?: boolean;
   /**
    * Ready: Latest is downloaded and checked; 更新 only swaps it in and restarts.
    */
@@ -1910,7 +1991,7 @@ export interface UpdateState {
   error?: string;
 }
 /**
- * ApplyUpdate is POST /api/update. Force installs the latest even when it is not newer (a dev
+ * ApplyUpdate is POST /v1/internal/update. Force installs the latest even when it is not newer (a dev
  * build is never older than anything).
  */
 export interface ApplyUpdate {
@@ -1921,17 +2002,21 @@ export interface ApplyUpdate {
 // source: usage.go
 
 /**
- * Usage is GET /api/usage (ir usage): the tokens used in the last days, today the last, one row
+ * Usage is GET /v1/internal/usage (ir usage): the tokens used in the last days, today the last, one row
  * per local day, terminal, agent and model that used any. A terminal that does not manage sees
  * only its own.
  */
 export interface Usage {
   days: string[]; // "2006-01-02", oldest first, today last; by hour "2006-01-02T15"
+  /**
+   * Rows: by day (Days' keys); by=weekhour, by weekday and hour, "1T14" (Monday 14:00; 7 Sunday).
+   */
   rows: UsageRow[];
   /**
-   * Terminals: the rows' terminals still there, by ID, to name them (a removed one is not).
+   * Terminals: who the rows' are (apps, logins, the host) still there, by ID, to name them (a
+   * removed one is not). Until S2 adds the login to usage, a row is by one ID.
    */
-  terminals: { [key: string]: UsageTerminal};
+  terminals: { [key: string]: UsageWho};
 }
 /**
  * UsageRow is one day's use by one terminal of one agent's model. Turns counts each turn once per
@@ -1948,16 +2033,17 @@ export interface UsageRow {
   cacheRead: number /* int64 */;
   cacheWrite: number /* int64 */;
   /**
-   * CostUSD: what the agent said the turns cost (Claude's); 0 when it says nothing.
+   * CostUSD: what the agent said the turns cost (Claude's); a turn it gave none (or 0) priced at
+   * its model's maker's list price (models.dev); 0 when neither is known.
    */
   costUsd?: number /* float64 */;
 }
 /**
- * UsageTerminal names a terminal in Usage.
+ * UsageWho names who began turns in Usage: an app, a login (of ir_web), or the host.
  */
-export interface UsageTerminal {
+export interface UsageWho {
   name: string;
-  kind: TerminalKind;
+  app: string; // the app's ID; WebApp for a login of ir_web; HostID for the host
   avatar?: string;
-  local?: boolean;
+  host?: boolean;
 }

@@ -12,7 +12,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/session"
 )
 
-// image is a picture a tool's result gave the model: GET /api/sessions/{id}/image?at=&n=. Its
+// image is a picture a tool's result gave the model: GET /v1/internal/sessions/{id}/image?at=&n=. Its
 // ETag is its content's, so a page shown again asks only whether it changed. 425: not in the
 // record yet, to ask again.
 func (s *Server) image(w http.ResponseWriter, r *http.Request) {
@@ -25,7 +25,7 @@ func (s *Server) image(w http.ResponseWriter, r *http.Request) {
 	mime, data, err := s.m.Image(r.Context(), r.PathValue("id"), q.Get("at"), n)
 	switch {
 	case errors.Is(err, session.ErrNoImage):
-		fail(w, http.StatusNotFound, err.Error())
+		refuse(w, http.StatusUnprocessableEntity, "no_such_image", err.Error())
 		return
 	case errors.Is(err, session.ErrGone):
 		fail(w, http.StatusGone, err.Error())

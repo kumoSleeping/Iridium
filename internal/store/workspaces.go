@@ -123,18 +123,6 @@ func (s *Store) RenameWorkspace(id int64, name string) error {
 	return nil
 }
 
-// HideWorkspace hides a workspace from the page, or shows it again.
-func (s *Store) HideWorkspace(id int64, hidden bool) error {
-	r, err := s.db.Exec(`UPDATE workspaces SET hidden = ? WHERE id = ?`, hidden, id)
-	if err != nil {
-		return err
-	}
-	if n, _ := r.RowsAffected(); n == 0 {
-		return ErrNoWorkspace
-	}
-	return nil
-}
-
 // DeleteWorkspace drops a workspace; its sessions are left with none (未归类), still seen, so
 // they are not classified again.
 func (s *Store) DeleteWorkspace(id int64) error {

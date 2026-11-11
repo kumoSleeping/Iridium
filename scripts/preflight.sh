@@ -20,12 +20,17 @@ ignored=$(git status --porcelain --ignored=matching | sed -n 's/^!! //p' | grep 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 git clone -q . "$tmp/src"
-cd "$tmp/src/web"
-npm ci --no-audit --no-fund --silent
-npm run check --silent
-npm run build --silent >/dev/null
-cd ..
-"$GO" vet ./...
-GOOS=darwin GOARCH=arm64 "$GO" vet ./...
-"$GO" test ./... >"$tmp/test.log" 2>&1 || { grep -v '^ok\|no test files' "$tmp/test.log"; exit 1; }
+cd "$tmp/src"
+# The web app and the Go side at once, as CI's two jobs.
+(cd web && npm ci --no-audit --no-fund --prefer-offline --silent && npm run check --silent &&
+	npm run build --silent >/dev/null) >"$tmp/web.log" 2>&1 &
+web=$!
+go_ok=0
+{ GO="$GO" scripts/check-types.sh && "$GO" vet ./... && GOOS=darwin GOARCH=arm64 "$GO" vet ./... &&
+	"$GO" test ./...; } >"$tmp/go.log" 2>&1 || go_ok=1
+web_ok=0
+wait $web || web_ok=1
+[ $web_ok = 0 ] || { echo "preflight: web:"; cat "$tmp/web.log"; }
+[ $go_ok = 0 ] || { echo "preflight: go:"; grep -v '^ok\|no test files' "$tmp/go.log"; }
+[ $web_ok = 0 ] && [ $go_ok = 0 ] || exit 1
 echo "preflight: ok at $(git rev-parse --short HEAD)"

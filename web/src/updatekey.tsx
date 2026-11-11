@@ -3,7 +3,7 @@
 import { ArrowUpCircle, LoaderCircle } from "lucide-react";
 import { useState } from "react";
 import { api } from "./api/client";
-import { useMe, useUpdate } from "./data";
+import { manages, useMe, useUpdate } from "./data";
 import { t } from "./i18n";
 import { errText, toast } from "./toast";
 import { Tip } from "./ui";
@@ -16,7 +16,7 @@ export function UpdateKey() {
   const u = useUpdate().data;
   const me = useMe().data;
   const [busy, setBusy] = useState(false);
-  if (!u?.available || !me || !(me.local || me.kind === "panel")) return null;
+  if (!u?.available || !manages(me)) return null;
   const pct = u.phase === "downloading" && u.size ? Math.min(99, Math.floor(((u.got ?? 0) * 100) / u.size)) : null;
   const going = busy || u.phase === "restarting";
   const apply = () => {

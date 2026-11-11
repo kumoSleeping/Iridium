@@ -119,8 +119,10 @@ type Hosted struct {
 	// output replayed then (the user, 2026-11-06: every session read "just now" after a deploy).
 	shownAt   time.Time
 	lastFrom  string // who sent the last message: whose turn an agent's own turn is counted to
+	lastVia   string // the session whose agent sent it, if one did
 	compact   bool   // the last message was /compact: the compaction that follows was asked for
 	turnFrom  string // who began the running turn
+	turnVia   string // the session whose agent began it, if one did
 	draftN    int
 	toolDraft string        // the tool call draft draftN is being written as, if one is
 	toolName  string        // its tool's name
@@ -173,6 +175,7 @@ type Hosted struct {
 	quotaTimer  *time.Timer
 
 	ctxSum   *api.ContextSummary
+	tokens   api.InputTokens // the input its recorded turns read (store.SessionInput)
 	ctxAsked time.Time // when the context was last asked for: within a turn, at most every ctxEvery
 	tail     *api.BlockTail
 	tailFrom int64
@@ -201,6 +204,9 @@ func (m *Manager) newHosted(mt meta) *Hosted {
 	h.rules, _ = m.o.Store.Rules(mt.ID)
 	if c := h.savedContext(); c != nil {
 		h.ctxSum = &api.ContextSummary{Used: c.Used, Max: c.Max, At: c.At}
+	}
+	if in, cr, cw, err := m.o.Store.SessionInput(mt.ID); err == nil {
+		h.tokens = api.InputTokens{Input: in, CacheRead: cr, CacheWrite: cw}
 	}
 	return h
 }
@@ -644,10 +650,10 @@ func (h *Hosted) onEvent(e agent.Event) {
 		h.m.notify(notes...)
 		return
 	case agent.TurnStart:
-		h.turnFrom = h.lastFrom
+		h.turnFrom, h.turnVia = h.lastFrom, h.lastVia
 		if e.Input != "" {
-			if from, _, ok := h.m.o.Store.Source(e.Input); ok {
-				h.turnFrom = from
+			if from, tag, ok := h.m.o.Store.Source(e.Input); ok {
+				h.turnFrom, h.turnVia = from, viaOf(tag)
 			}
 		}
 		h.draftN++
@@ -668,13 +674,13 @@ func (h *Hosted) onEvent(e agent.Event) {
 		if !replay {
 			h.shownLater() // activity: out of the archive
 		}
-		note(Notice{Kind: NoticeTurnStart})
+		note(Notice{Kind: NoticeTurnStart, From: h.turnFrom, Via: h.turnVia})
 	case agent.Taken:
 		h.hadTurn = true
 		// A message that runs on its own in the turn: its use is counted to who sent it.
 		if e.Runs {
-			if from, _, ok := h.m.o.Store.Source(e.InputID); ok {
-				h.turnFrom = from
+			if from, tag, ok := h.m.o.Store.Source(e.InputID); ok {
+				h.turnFrom, h.turnVia = from, viaOf(tag)
 			}
 		}
 	case agent.ToolDone:
@@ -748,7 +754,7 @@ func (h *Hosted) onEvent(e agent.Event) {
 		}
 		list = true
 		ask := e.Ask
-		note(Notice{Kind: NoticeAsk, Ask: &ask})
+		note(Notice{Kind: NoticeAsk, Ask: &ask, From: h.turnFrom, Via: h.turnVia})
 	case agent.AskCancel:
 		if slices.ContainsFunc(h.asks, func(a api.Ask) bool { return a.RequestID == e.RequestID }) {
 			note(Notice{Kind: NoticeAskDone, RequestID: e.RequestID}) // else a rule answered it
@@ -815,6 +821,7 @@ func (h *Hosted) onEvent(e agent.Event) {
 		h.mu.Unlock()
 		if !replay {
 			h.recordUsage(e, base, from, model)
+			h.publish()
 		}
 		return
 	case agent.Compacted:
@@ -862,7 +869,13 @@ func (h *Hosted) recordUsage(e agent.TurnUsage, base *agent.Usage, from, model s
 		err := h.m.o.Store.AddUsage(store.Usage{Terminal: from, Session: h.id, Agent: string(h.meta.Agent), Model: model, Input: t.Input, Output: t.Output, CacheRead: t.CacheRead, CacheWrite: t.CacheWrite, CostUSD: cost})
 		if err != nil {
 			h.logf("usage: %v", err)
+			return
 		}
+		h.mu.Lock()
+		h.tokens.Input += int64(t.Input)
+		h.tokens.CacheRead += int64(t.CacheRead)
+		h.tokens.CacheWrite += int64(t.CacheWrite)
+		h.mu.Unlock()
 	}
 	if base != nil && e.Total != nil {
 		for name, d := range e.Total.Since(base) {
@@ -889,7 +902,7 @@ func (h *Hosted) transcript() *transcript.File {
 		return nil
 	}
 	info, _ := agents.Get(h.meta.Agent)
-	f = transcript.OpenAs(path, info.Format, h.m.o.Store.Source)
+	f = transcript.OpenAs(path, info.Format, h.m.o.Store.Sender)
 	h.mu.Lock()
 	if h.file == nil {
 		h.file = f
@@ -964,13 +977,15 @@ func (h *Hosted) summary(o store.Overlay, archived bool) api.Session {
 }
 
 func (h *Hosted) summaryLocked(o store.Overlay, archived bool) api.Session {
-	return api.Session{
+	s := api.Session{
 		ID: h.id, Agent: h.meta.Agent, Cwd: h.meta.Cwd, Name: o.Name, Title: h.said.title,
 		Status: h.status(), Hosted: true, Live: h.live,
-		Pinned: o.Pinned, Archived: archived, Workspace: o.Workspace, Color: api.Color(o.Color), Order: o.Order, At: o.At,
+		Pinned: o.Pinned, Archived: archived, Workspace: o.Workspace, Color: api.Color(o.Color), Order: o.Order,
 		Launcher: h.meta.Launcher, Last: h.said.last, UpdatedAt: h.shownAt.UnixMilli(),
 		Machine: h.meta.Machine, Offline: h.offline(),
 	}
+	s.Own = ownOf(s, o)
+	return s
 }
 
 func (h *Hosted) state(o store.Overlay, archived bool) api.SessionState {
@@ -978,6 +993,10 @@ func (h *Hosted) state(o store.Overlay, archived bool) api.SessionState {
 	defer h.mu.Unlock()
 	s := api.SessionState{Session: h.summaryLocked(o, archived), Asks: slices.Clone(h.asks), Tasks: slices.Clone(h.tasks), Denials: slices.Clone(h.denials), Model: h.model, Mode: h.mode, End: h.end, Proc: h.proc, Error: h.errText,
 		Effort: h.effort, Queue: slices.Clone(h.queue), Context: h.ctxSum, QuotaUntil: h.quotaUntil, Tail: h.tail}
+	if h.tokens != (api.InputTokens{}) {
+		t := h.tokens
+		s.Tokens = &t
+	}
 	s.Pick, s.EffortNow, s.Next, s.Preset = h.meta.Model, h.effortNow, h.next, h.preset
 	for _, m := range h.models {
 		s.Models = append(s.Models, api.Model{Value: m.Value, Name: m.Name, Description: m.Description, Resolved: m.Resolved, Efforts: slices.Clone(m.Efforts), NoEffort: m.NoEffort, EffortNames: maps.Clone(m.EffortNames), Group: m.Group})
@@ -994,7 +1013,7 @@ func (h *Hosted) state(o store.Overlay, archived bool) api.SessionState {
 			u.Available = false // a CLI without get_settings: the driver refuses it
 		}
 		s.Ultracode = u
-		s.Features = append(s.Features, api.Feature{ID: ultracodeFeature, Name: "UltraCode", On: u.On, Active: u.Active, Available: u.Available, Place: featurePlace, Tone: "warm"})
+		s.Attached = append([]api.Attached{ultracodeAttached(u)}, s.Attached...)
 	}
 	for _, c := range h.commandsLocked() {
 		s.Commands = append(s.Commands, api.Command{Name: c.Name, Description: c.Description, ArgumentHint: c.ArgumentHint})

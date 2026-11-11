@@ -10,12 +10,15 @@ import (
 
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/discover"
+	"github.com/kumoSleeping/iridium/internal/satori"
 	"github.com/kumoSleeping/iridium/internal/store"
 )
 
-// Colour tags from a row's menu: a session's on its row in the list, a folder's carried as
-// "colors"; one that is none of api.Colors, or a folder not absolute, is refused.
+// Colour tags from a row's menu (channel.update): a session's on its row in the list, a folder's
+// on its category channel, carried in "guilds"; one that is none of api.Colors, or a folder not
+// absolute, is refused.
 func TestColors(t *testing.T) {
+	t.Parallel()
 	s, cfg, work := setup(t)
 	st, err := store.Open(filepath.Join(cfg.StateDir, "iridium.db"))
 	if err != nil {
@@ -33,13 +36,12 @@ func TestColors(t *testing.T) {
 	defer srv.Close()
 	c, base := srv.Client(), srv.URL
 
-	var created api.NewSessionReply
-	if code := call(t, c, "POST", base+"/api/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: work}, &created); code != 200 {
+	created, code := createAt(t, c, base, api.NewSession{Agent: api.AgentClaude, Cwd: work})
+	if code != 200 {
 		t.Fatalf("new session: %d", code)
 	}
 	color := func() api.Color {
-		var l []api.Session
-		call(t, c, "GET", base+"/api/sessions", nil, &l)
+		l := sessionsAt(t, c, base)
 		if len(l) != 1 {
 			t.Fatalf("sessions: %+v", l)
 		}
@@ -54,36 +56,43 @@ func TestColors(t *testing.T) {
 		}
 	}
 	blue, none, bad := api.ColorBlue, api.Color(""), api.Color("pink")
-	if code := call(t, c, "PATCH", base+"/api/sessions/"+created.ID, api.SessionPatch{Color: &blue}, nil); code != 200 {
+	if code := patchAt(t, c, base, created, api.SessionPatch{Color: &blue}); code != 200 {
 		t.Fatalf("tag: %d", code)
 	}
 	wait(api.ColorBlue)
-	if code := call(t, c, "PATCH", base+"/api/sessions/"+created.ID, api.SessionPatch{Color: &bad}, nil); code != http.StatusBadRequest {
+	if code := patchAt(t, c, base, created, api.SessionPatch{Color: &bad}); code != http.StatusBadRequest {
 		t.Errorf("a colour that is none: %d", code)
 	}
-	if code := call(t, c, "PATCH", base+"/api/sessions/"+created.ID, api.SessionPatch{Color: &none}, nil); code != 200 {
+	if code := patchAt(t, c, base, created, api.SessionPatch{Color: &none}); code != 200 {
 		t.Fatalf("untag: %d", code)
 	}
 	wait("")
 
-	carried := func() api.FolderColors {
-		var m api.FolderColors
-		json.Unmarshal(s.hub.Get("colors"), &m)
-		return m
+	carried := func() []api.FolderMark {
+		var g api.Guilds
+		json.Unmarshal(s.hub.Get("guilds"), &g)
+		return g.Folders
 	}
-	if code := call(t, c, "PUT", base+"/api/colors", api.FolderColor{Path: work + "/", Color: api.ColorGreen}, nil); code != 200 {
+	folder := func(c2 api.Color) int {
+		return satAt(t, c, base, "channel.update", map[string]any{"channel_id": satori.FolderPrefix + work, "_data": map[string]any{"color": c2}}, nil)
+	}
+	if code := folder(api.ColorGreen); code != 200 {
 		t.Fatalf("folder tag: %d", code)
 	}
-	if m := carried(); len(m) != 1 || m[work] != api.ColorGreen {
+	if m := carried(); len(m) != 1 || m[0].Path != work || m[0].Color != api.ColorGreen {
 		t.Errorf("carried: %+v", m)
 	}
-	if code := call(t, c, "PUT", base+"/api/colors", api.FolderColor{Path: "rel", Color: api.ColorGreen}, nil); code != http.StatusBadRequest {
-		t.Errorf("a folder not absolute: %d", code)
+	var ch satori.Channel
+	if satAt(t, c, base, "channel.get", map[string]any{"channel_id": satori.FolderPrefix + work}, &ch); ch.Type != satori.ChannelCategory {
+		t.Errorf("the folder's channel: %+v", ch)
 	}
-	if code := call(t, c, "PUT", base+"/api/colors", api.FolderColor{Path: work, Color: bad}, nil); code != http.StatusBadRequest {
+	if code := satAt(t, c, base, "channel.update", map[string]any{"channel_id": satori.FolderPrefix + "rel", "_data": map[string]any{"color": "green"}}, nil); code != http.StatusUnprocessableEntity {
+		t.Errorf("a folder no session is in: %d", code)
+	}
+	if code := folder(bad); code != http.StatusBadRequest {
 		t.Errorf("a folder colour that is none: %d", code)
 	}
-	if code := call(t, c, "PUT", base+"/api/colors", api.FolderColor{Path: work}, nil); code != 200 {
+	if code := folder(""); code != 200 {
 		t.Fatalf("folder untag: %d", code)
 	}
 	if m := carried(); len(m) != 0 {

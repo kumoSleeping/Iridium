@@ -1,47 +1,20 @@
-// The part of this plugin in a dsh process the Iridium starts here (dsh --profile sdk, a session):
-// the features registry (iridiumFeatures) for the plugins in that process, OMD's Ultra one of them
-// (the same adapter as in DSH Desktop), told to the plugin in Desktop over its bridge (bridge.js),
-// which answers the Iridium for it. The patch dsh.session writes loads it; config: endpoint and
-// secret, the bridge's.
+// The part of this plugin in a dsh process the Iridium starts here (dsh --profile sdk, a session),
+// which the patch agent.prepare writes loads: the service `iridium` (attach.js) for the plugins
+// in that process (OMD's), told to the plugin in DSH Desktop over its bridge (bridge.js), which
+// sends it on to the Iridium; a button pressed there comes back the same way. It also tells
+// Desktop of each session that begins here, which files it under its folder's workspace. Config:
+// endpoint and secret, the bridge's.
 import net from 'node:net'
-import { OmdAdapter } from './adapters/omd.js'
 import { lines } from './bridge.js'
+import { contentOf } from './attach.js'
 import { RemoteError } from './executor.js'
-import { createFeatures } from './features.js'
+import { OmdUltra } from './omd.js'
 
 export const name = 'remote-iridium-session'
 export const inject = ['agents']
 
 /** The least and most wait before connecting again. */
 const RETRY = [500, 10_000]
-
-/**
- * A call from the bridge on registry features (the session's: params.session): live {lang}, its
- * features as the Iridium shows them and the feature that owns its effort now ({features, owner?,
- * effort?}); set {id, on, option?}; setEffort {level}, through that owner (unsupported if none).
- */
-export async function answer(features, method, p) {
-  const session = p.session
-  switch (method) {
-    case 'live': {
-      const lang = p.lang === 'en' || p.lang === 'zh' ? p.lang : ''
-      const [list, own] = await Promise.all([features.views(session, { lang, held: true }), features.effortNow(session)])
-      return { features: list, ...(own.owner ? { owner: own.owner.id, ...(own.effort ? { effort: own.effort } : {}) } : {}) }
-    }
-    case 'set':
-      if (typeof p.id !== 'string' || typeof p.on !== 'boolean') throw new RemoteError('bad_request', 'set: {id, on, option?}')
-      await features.set(session, p.id, { on: p.on, ...(typeof p.option === 'string' && p.option ? { option: p.option } : {}) })
-      return {}
-    case 'setEffort': {
-      if (typeof p.level !== 'string' || !p.level) throw new RemoteError('bad_request', 'setEffort: a level')
-      const owner = await features.owner(session)
-      if (!owner?.setEffort) throw new RemoteError('unsupported', 'no feature owns the effort')
-      await features.setEffort(owner, session, p.level)
-      return {}
-    }
-  }
-  throw new RemoteError('not_found', `no method ${method}`)
-}
 
 /**
  * A session controller for a process without dsh's (the web surface's): its model selection only,
@@ -67,17 +40,35 @@ export function sessionController(ctx) {
 }
 
 export function apply(ctx, config) {
-  const features = createFeatures()
-  ctx.provide('iridiumFeatures', features)
   if (!ctx.get('sessionController')) ctx.provide('sessionController', sessionController(ctx))
-  ctx.plugin(OmdAdapter)
   const sessions = new Set()
+  const began = new Map() // session → its folder, told once a connection
+  const attached = new Map() // `${session}\n${place}` → {session, place, content}
+  const listeners = new Set()
   let sock = null
+  let up = false // sock has said hello: what is sent before waits for the next connect
   let stopped = false
   let wait = RETRY[0]
   let timer = null
-  const send = (m) => sock?.writable && sock.write(JSON.stringify(m) + '\n')
+  const send = (m) => up && sock?.writable && sock.write(JSON.stringify(m) + '\n')
   const tell = () => send({ t: 'sessions', ids: [...sessions] })
+
+  ctx.provide('iridium', {
+    attach(session, place, content) {
+      if (typeof session !== 'string' || !session || typeof place !== 'string' || !place) throw new Error('attach: a session and a place')
+      const c = contentOf(content)
+      const k = `${session}\n${place}`
+      if (c === null) attached.delete(k)
+      else attached.set(k, { session, place, content: c })
+      send({ t: 'attach', session, place, content: c })
+    },
+    onButton(fn) {
+      listeners.add(fn)
+      return () => listeners.delete(fn)
+    },
+  })
+
+  ctx.plugin(OmdUltra)
 
   function connect() {
     if (stopped || !config?.endpoint) return
@@ -86,23 +77,28 @@ export function apply(ctx, config) {
     s.on('connect', () => {
       wait = RETRY[0]
       s.write(JSON.stringify({ t: 'hello', secret: config.secret }) + '\n')
+      up = true
       tell()
+      for (const [session, cwd] of began) send({ t: 'started', session, cwd })
+      for (const a of attached.values()) send({ t: 'attach', ...a })
     })
     s.on('error', () => {})
     s.on('close', () => {
-      if (sock === s) sock = null
+      if (sock === s) {
+        sock = null
+        up = false
+      }
       if (stopped) return
       timer = setTimeout(connect, wait)
       timer.unref?.()
       wait = Math.min(wait * 2, RETRY[1])
     })
-    lines(s, async (m) => {
-      if (m?.t !== 'call') return
-      try {
-        const result = await answer(features, m.method, m.params ?? {})
-        send({ t: 're', id: m.id, result })
-      } catch (e) {
-        send({ t: 're', id: m.id, error: { code: e?.code ?? 'failed', message: String(e?.message ?? e) } })
+    lines(s, (m) => {
+      if (m?.t !== 'button' || typeof m.session !== 'string' || typeof m.id !== 'string') return
+      for (const fn of listeners) {
+        try {
+          Promise.resolve(fn(m.session, m.id, m.user)).catch(() => {})
+        } catch {}
       }
     })
   }
@@ -110,21 +106,22 @@ export function apply(ctx, config) {
   ctx.on('agent/created', ({ agent }) => {
     sessions.add(agent.id)
     tell()
+    let cwd = ''
+    try {
+      cwd = ctx.get('workingDirectory')?.get(agent.session) ?? ''
+    } catch {}
+    began.set(agent.id, cwd || process.cwd())
+    send({ t: 'started', session: agent.id, cwd: began.get(agent.id) })
   })
   ctx.on('agent/disposed', ({ agent }) => {
     sessions.delete(agent.id)
     tell()
   })
-  const off = features.listen((session) => {
-    if (session === null) for (const s of sessions) send({ t: 'changed', session: s })
-    else if (sessions.has(session)) send({ t: 'changed', session })
-  })
   connect()
   ctx.effect(() => () => {
     stopped = true
     clearTimeout(timer)
-    off()
-    features.dispose()
+    listeners.clear()
     sock?.destroy()
-  }, 'remote-iridium: the session\'s features')
+  }, 'remote-iridium: the session\'s part')
 }

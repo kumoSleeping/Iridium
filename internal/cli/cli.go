@@ -27,22 +27,7 @@ func Main(args []string) int {
 
 // commands are ir's commands by name. Each gets its arguments after the name.
 var commands = map[string]func(e *env, args []string) int{
-	"new":       cmdNew,
-	"send":      cmdSend,
-	"wait":      cmdWait,
-	"read":      cmdRead,
-	"ls":        cmdLs,
-	"find":      cmdFind,
-	"stop":      cmdStop,
-	"archive":   func(e *env, args []string) int { return cmdArchive(e, args, true) },
-	"unarchive": func(e *env, args []string) int { return cmdArchive(e, args, false) },
-	"rename":    cmdRename,
-	"cp":        cmdCp,
-	"files":     cmdFiles,
-	"ws":        cmdWs, // workspaces.go
-	"bot":       cmdBot,
-	"machines":  cmdMachines, // shell.go
-	"sh":        cmdSh,
+	"api": cmdAPI, // api.go: the API as it is
 }
 
 func run(args []string, stdout, stderr io.Writer) int {

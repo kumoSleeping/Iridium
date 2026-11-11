@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"net/http"
@@ -15,7 +14,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -23,102 +21,124 @@ import (
 	"github.com/kumoSleeping/iridium/internal/access"
 	"github.com/kumoSleeping/iridium/internal/agents"
 	"github.com/kumoSleeping/iridium/internal/api"
-	"github.com/kumoSleeping/iridium/internal/chat"
 	"github.com/kumoSleeping/iridium/internal/config"
 	"github.com/kumoSleeping/iridium/internal/discover"
 	"github.com/kumoSleeping/iridium/internal/files"
 	"github.com/kumoSleeping/iridium/internal/gate"
 	"github.com/kumoSleeping/iridium/internal/hub"
+	"github.com/kumoSleeping/iridium/internal/pricing"
 	"github.com/kumoSleeping/iridium/internal/push"
 	"github.com/kumoSleeping/iridium/internal/remote"
+	"github.com/kumoSleeping/iridium/internal/satori"
 	"github.com/kumoSleeping/iridium/internal/session"
 	"github.com/kumoSleeping/iridium/internal/store"
 	"github.com/kumoSleeping/iridium/internal/transcript"
 	"github.com/kumoSleeping/iridium/internal/update"
+	"github.com/kumoSleeping/iridium/internal/webapp"
 )
-
-// TerminalLocal is the built-in channel terminal of the local ir (and of the web page while no
-// public origin is set).
-const TerminalLocal = gate.LocalName
 
 type Server struct {
 	cfg config.Config
 	m   *session.Manager
 	hub *hub.Hub
 
+	turns        origins      // whose turn each session runs (origin.go)
 	terminalsSeq atomic.Int64 // the "terminals" state's count (terminalsChanged)
-	// CLI runs the ir of a session at another machine (POST /api/cli); nil: none.
+	// CLI runs the ir of a session at another machine (POST /v1/internal/cli); nil: none.
 	CLI CLIAt
 	// tokenFor stands in for the session manager's SessionToken in tests.
 	tokenFor func(tok string) (endpointID, session string, ok bool)
 	st       *store.Store
 	logf     func(string, ...any)
-	// ConfigPath is where PUT /api/public saves public.origin; "" saves it nowhere.
+	// ConfigPath is where PUT /v1/internal/public saves public.origin; "" saves it nowhere.
 	ConfigPath string
-	// Updater, if set, serves /api/update and carries the state "update".
+	// Updater, if set, serves /v1/internal/update and carries the state "update".
 	Updater *update.Updater
+	// Prices, if set, prices the usage the agents gave no cost (GET /v1/internal/usage).
+	Prices *pricing.Catalog
 
-	cmu     sync.Mutex // one config change at a time (SaveConfig); guards cfg's settings
-	gmu     sync.Mutex // one gate change at a time
-	g       atomic.Pointer[gate.Gate]
-	initErr error // the gate for cfg.Public.Origin would not open; Listen gives it
-	asks    *confirms
-	pairs   *pairs // executors asking to pair (routes_pair.go)
-	vault   *vault // the credentials' masks and allowed uses (routes_secrets.go)
+	cmu      sync.Mutex // one config change at a time (SaveConfig); guards cfg's settings
+	gmu      sync.Mutex // one change of ir_web at a time
+	g        *gate.Gate // the core's door and registry (access.go)
+	w        atomic.Pointer[webapp.Web]
+	webToken string     // ir_web's own TOKEN, which it speaks to the core with
+	initErr  error      // ir_web for cfg.Public.Origin would not open; Listen gives it
+	asks     *needs     // what waits for a person (needs.go)
+	more     *moreNeeds // asks' first sightings, shares (needs_more.go)
+	pairs    *pairs     // apps asking to pair (pairing.go)
+	vault    *vault     // the credentials' masks and allowed uses (routes_secrets.go)
 
-	// Set before Handler, if at all: the plugin chat layer, Web Push, and who a request is from.
-	Chat *chat.Service
+	// Push, if set before Handler, is Web Push (routes_push.go).
 	Push *push.Service
-	Who  Identities
 	// Discover and Folders, if set, serve the workspaces and the folder picker (routes_discover.go).
 	Discover *discover.Index
 	Folders  discover.Folders
 	// App is the web app on the TCP address, past the API; nil is the embedded build (webui).
 	App http.Handler
-	// Remote, if set, takes executors' connections at /api/exec (docs/exec.md).
+	// Remote, if set, takes executors' connections at /v1/internal/exec (docs/exec.md).
 	Remote *remote.Hub
 
-	files *files.Service // routes_files.go
-
-	// ExtDir is where the official extensions' binaries go; "" is beside Iridium's (extensions.go).
-	ExtDir string
-	ext    extensions
+	files *files.Service  // routes_files.go
+	sat   *satori.Service // /v1/: Satori with ir (satori.go)
+	// stopList stops giving Satori the session list (its channel events).
+	stopList func()
 }
 
-// New is the API over m. The interactive terminals live in m's store, behind the Passkey gate
-// (package gate) in front of the TCP address; the unix socket is 本机.
+// New is the API over m. Apps and logins live in m's store; on the TCP address ir_web (package
+// webapp: passkeys, cookies, the page) stands in front of the core's TOKEN gate (package gate);
+// the unix socket is the host.
 func New(cfg config.Config, m *session.Manager, h *hub.Hub, logf func(string, ...any)) *Server {
 	if logf == nil {
 		logf = log.Printf
 	}
 	s := &Server{cfg: cfg, m: m, hub: h, st: m.Store(), files: newFiles(cfg, m, logf), logf: logf}
-	s.asks = newConfirms(h)
+	s.asks = newNeeds(h)
 	s.pairs = newPairs()
+	s.publishPairing()
 	s.vault = newVault()
 	s.reloadSecrets()
 	m.SetAnnotate(s.files.AnnotateBlocks) // a state's tail names files as a page of messages does
-	g, err := s.newGate(cfg.Public.Origin)
+	s.sat = satori.New(satoriBackend{s}, logf)
+	s.sat.Keep(satoriKeeper{s.st})
+	m.Watch(s.sat.Notice)
+	lctx, lstop := context.WithCancel(context.Background())
+	s.stopList = lstop
+	go s.watchList(lctx)
+	s.wireNeeds()
+	if err := s.openGate(); err != nil {
+		s.initErr = err
+		return s
+	}
+	web, err := s.newWeb(cfg.Public.Origin)
 	if err != nil {
 		s.initErr = err
-		g, _ = s.newGate("")
+		web, _ = s.newWeb("")
 	}
-	s.g.Store(g)
+	s.w.Store(web)
 	h.Set("update", s.updateState())
 	h.Set("terminals", int64(0))
 	s.carryNotes()
 	return s
 }
 
-// Close closes the gate.
-func (s *Server) Close() { s.gate().Close() }
+// Close closes ir_web and the gate and stops Satori's events.
+func (s *Server) Close() {
+	if w := s.web(); w != nil {
+		w.Close()
+	}
+	if s.g != nil {
+		s.g.Close()
+	}
+	if s.stopList != nil {
+		s.stopList()
+	}
+	s.sat.Close()
+}
 
 // Handler is the API. local: requests come from the unix socket, from the local ir.
 func (s *Server) Handler(local bool) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
-		reply(w, http.StatusOK, map[string]any{"ok": true})
-	})
-	mux.HandleFunc("GET /api/agents", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /v1/internal/agents", func(w http.ResponseWriter, r *http.Request) {
 		l := agents.Describe()
 		for i := range l {
 			l[i].Missing = s.m.Missing(l[i].Agent)
@@ -126,29 +146,30 @@ func (s *Server) Handler(local bool) http.Handler {
 		reply(w, http.StatusOK, l)
 	})
 	// What carries transcripts goes out with the credentials' values masked (routes_secrets.go).
-	mux.HandleFunc("GET /api/sessions", s.masked(s.list))
-	mux.HandleFunc("POST /api/sessions", s.create)
-	mux.HandleFunc("GET /api/sessions/{id}", s.masked(s.get))
-	mux.HandleFunc("GET /api/sessions/{id}/messages", s.masked(s.messages))
-	mux.HandleFunc("GET /api/sessions/{id}/block", s.masked(s.block))
-	mux.HandleFunc("GET /api/sessions/{id}/image", s.image)
-	mux.HandleFunc("POST /api/sessions/{id}/send", s.send)
-	mux.HandleFunc("POST /api/sessions/{id}/interrupt", s.use(s.interrupt))
-	mux.HandleFunc("POST /api/sessions/{id}/stop", s.use(s.stop))
-	mux.HandleFunc("POST /api/sessions/{id}/answer", s.use(s.answer))
-	mux.HandleFunc("POST /api/sessions/{id}/release", s.use(s.release))
-	mux.HandleFunc("GET /api/events", s.masked(s.events))
-	s.terminalRoutes(mux)
+	mux.HandleFunc("GET /v1/internal/sessions/{id}", s.masked(s.get))
+	mux.HandleFunc("GET /v1/internal/sessions/{id}/image", s.image)
+	mux.HandleFunc("POST /v1/internal/sessions/{id}/interrupt", s.use(s.interrupt))
+	mux.HandleFunc("POST /v1/internal/sessions/{id}/stop", s.use(s.stop))
+	mux.HandleFunc("POST /v1/internal/sessions/{id}/release", s.use(s.release))
+	// The session's agent's own commands (an app sets its menu from them).
+	mux.HandleFunc("GET /v1/internal/sessions/{id}/commands", func(w http.ResponseWriter, r *http.Request) {
+		st, err := s.m.State(r.PathValue("id"))
+		if err != nil {
+			s.error(w, err)
+			return
+		}
+		reply(w, http.StatusOK, st.Commands)
+	})
+	s.appRoutes(mux)
+	s.shareRoutes(mux) // share.go
 	s.secretRoutes(mux)
 	s.updateRoutes(mux)
 	s.settingsRoutes(mux)
 	s.sessionRoutes(mux)
 	s.pushRoutes(mux)
-	s.pluginRoutes(mux)
-	mux.HandleFunc("GET /api/exec", s.execConnect)
+	mux.HandleFunc("GET /v1/internal/exec", s.execConnect)
 	s.pairRoutes(mux)
 	s.machineRoutes(mux)
-	s.extensionRoutes(mux)
 	s.discoverRoutes(mux)
 	s.noteRoutes(mux)
 	s.fileRoutes(mux, local)
@@ -156,9 +177,10 @@ func (s *Server) Handler(local bool) http.Handler {
 		s.cliRoutes(mux)
 	}
 	if local {
-		return s.socketHandler(mux)
+		// Satori too: ir speaks it (ir api), as the login it acts for (irCaller).
+		return s.socketHandler(s.withSatori(s.sessionGuard(mux)))
 	}
-	return s.webHandler(mux)
+	return s.webHandler(s.sessionGuard(mux))
 }
 
 // Listen opens the TCP address and the unix socket. A socket file left by a daemon that is gone
@@ -221,40 +243,41 @@ func (s *Server) Serve(ctx context.Context, tcp, unix net.Listener) error {
 	return nil
 }
 
-func (s *Server) list(w http.ResponseWriter, r *http.Request) {
-	l, err := s.m.List(r.Context())
-	if err != nil {
-		s.error(w, err)
-		return
-	}
-	reply(w, http.StatusOK, l)
-}
+// createError is a session that did not start (the manager's refusal before it had an id).
+type createError struct{ err error }
 
-func (s *Server) create(w http.ResponseWriter, r *http.Request) {
-	var req api.NewSession
-	if !readJSON(w, r, &req) {
-		return
+func (e *createError) Error() string { return e.err.Error() }
+func (e *createError) Unwrap() error { return e.err }
+
+// createAs starts session req as c (Satori's channel.create): its id.
+func (s *Server) createAs(ctx context.Context, c caller, req api.NewSession) (string, error) {
+	// Started from inside a session (ir's X-Iridium-Session, a session's own TOKEN): that session
+	// is its launcher unless the body names another, so an agent's new session hangs under it.
+	if req.Caller == "" {
+		req.Caller = c.session
 	}
-	c := callerOf(r)
+	// Its folder as written: a place, ~, a path from the caller's own session's (places.go).
+	if err := s.where(c, &req); err != nil {
+		return "", err
+	}
 	if err := s.checkCreate(c, &req); err != nil {
-		s.error(w, err)
-		return
+		return "", err
 	}
-	id, err := s.m.Create(r.Context(), req, s.fromOf(c, req.Caller))
+	id, err := s.m.Create(ctx, req, s.fromOf(c, req.Caller))
 	if id != "" {
-		if err := s.st.SetOpener(id, c.EndpointID); err != nil {
+		via := c.session
+		if via == "" && c.socket {
+			via = req.Caller
+		}
+		s.noteOrigin(c, id, via)
+		if err := s.st.SetOpener(id, c.ID()); err != nil {
 			s.logf("server: opener of %s: %v", id, err)
 		}
 	}
 	if err != nil && id == "" {
-		fail(w, http.StatusBadRequest, err.Error())
-		return
+		return "", &createError{err}
 	}
-	if err != nil {
-		s.error(w, err)
-		return
-	}
-	reply(w, http.StatusOK, api.NewSessionReply{ID: id})
+	return id, err
 }
 
 func (s *Server) get(w http.ResponseWriter, r *http.Request) {
@@ -266,84 +289,51 @@ func (s *Server) get(w http.ResponseWriter, r *http.Request) {
 	reply(w, http.StatusOK, st)
 }
 
-func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	before, after := int64(-1), int64(-1)
-	for name, v := range map[string]*int64{"before": &before, "after": &after} {
-		if q.Has(name) {
-			n, err := strconv.ParseInt(q.Get(name), 10, 64)
-			if err != nil || n < 0 {
-				fail(w, http.StatusBadRequest, "bad "+name)
-				return
-			}
-			*v = n
-		}
-	}
-	p, err := s.m.Messages(r.PathValue("id"), before, after)
-	if err != nil {
-		s.error(w, err)
-		return
-	}
-	s.files.Annotate(r.PathValue("id"), &p)
-	reply(w, http.StatusOK, p)
-}
+// errFiles wraps what the files service refused of a message's attachments.
+var errFiles = errors.New("attachments")
 
-func (s *Server) block(w http.ResponseWriter, r *http.Request) {
-	text, err := s.m.Full(r.PathValue("id"), r.URL.Query().Get("at"))
-	if err != nil {
-		s.error(w, err)
-		return
-	}
-	reply(w, http.StatusOK, api.FullText{Text: text})
-}
+type fileErr struct{ err error }
 
-func (s *Server) send(w http.ResponseWriter, r *http.Request) {
-	var req api.Send
-	if !readJSON(w, r, &req) {
-		return
+func (e fileErr) Error() string        { return e.err.Error() }
+func (e fileErr) Unwrap() error        { return e.err }
+func (e fileErr) Is(target error) bool { return target == errFiles }
+
+// sendAs sends req into session id as c, from (the source tag): what Satori's message.create does. /clear starts the session anew.
+func (s *Server) sendAs(ctx context.Context, c caller, from, id string, req api.Send) (api.SendReply, error) {
+	if err := s.checkSend(c, id); err != nil {
+		return api.SendReply{}, err
 	}
-	c := callerOf(r)
-	// What an agent tells another session joins its turn at once, --queue or not: queued, it would
-	// wait for a person to press it in (the user, 2026-11-06).
-	// (An agent's ir on the socket names the session it runs in; one at another machine is an
-	// agent's by its session's TOKEN.)
-	if c.agent || c.socket && c.session != "" {
-		req.Steer = true
+	via := c.session
+	if via == "" && c.socket {
+		via = req.Caller
 	}
-	if err := s.checkSend(c, r.PathValue("id")); err != nil {
-		s.error(w, err)
-		return
-	}
+	s.noteOrigin(c, id, via)
 	// Attachments and all: Claude would clear itself just the same.
 	if session.IsClear(req.Text) {
-		id, err := s.m.Clear(r.Context(), r.PathValue("id"), s.fromOf(c, req.Caller))
-		if id != "" && id != r.PathValue("id") {
-			if err := s.st.SetOpener(id, c.EndpointID); err != nil {
-				s.logf("server: opener of %s: %v", id, err)
+		nid, err := s.m.Clear(ctx, id, from)
+		if nid != "" && nid != id {
+			if err := s.st.SetOpener(nid, c.ID()); err != nil {
+				s.logf("server: opener of %s: %v", nid, err)
 			}
 		}
-		if err != nil {
-			s.error(w, err)
-			return
-		}
-		reply(w, http.StatusOK, api.SendReply{Session: id})
-		return
+		return api.SendReply{Session: nid}, err
 	}
-	text, images, err := s.files.Message(r.PathValue("id"), req.Text, req.Attachments)
+	text, images, err := s.files.Message(id, req.Text, req.Attachments)
 	if err != nil {
-		s.fileError(w, err)
-		return
+		return api.SendReply{}, fileErr{err}
 	}
-	input, queued, err := s.m.SendWith(r.Context(), r.PathValue("id"), text, s.fromOf(c, req.Caller), req.Steer, images...)
+	input, queued, err := s.m.SendWith(ctx, id, text, from, req.Steer, images...)
 	if err != nil {
-		s.error(w, err)
-		return
+		return api.SendReply{}, err
 	}
 	if input == session.HandedInput {
-		reply(w, http.StatusOK, api.SendReply{Desktop: true})
-		return
+		return api.SendReply{Desktop: true}, nil
 	}
-	reply(w, http.StatusOK, api.SendReply{Input: input, Queued: queued, Command: s.m.RunsItself(r.PathValue("id"), text)})
+	if st, err := s.m.State(id); err == nil {
+		// The others who see it see what was said too (Satori's message-created).
+		s.sat.Input(st.Session, input, req.Text, s.satoriUser(c), c.ID())
+	}
+	return api.SendReply{Input: input, Queued: queued, Command: s.m.RunsItself(id, text)}, nil
 }
 
 func (s *Server) interrupt(w http.ResponseWriter, r *http.Request) {
@@ -354,14 +344,6 @@ func (s *Server) interrupt(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) stop(w http.ResponseWriter, r *http.Request) {
 	s.done(w, s.m.Stop(r.Context(), r.PathValue("id")))
-}
-
-func (s *Server) answer(w http.ResponseWriter, r *http.Request) {
-	var a api.Answer
-	if !readJSON(w, r, &a) {
-		return
-	}
-	s.done(w, s.m.Answer(r.Context(), r.PathValue("id"), a))
 }
 
 // release allows a step auto mode denied (session/release.go). Only a person may: an agent's ir
@@ -385,58 +367,48 @@ func (s *Server) release(w http.ResponseWriter, r *http.Request) {
 	s.done(w, s.m.Release(ctx, r.PathValue("id"), req.ToolUseID, req.Dismiss))
 }
 
-var stateKey = regexp.MustCompile(`^(list|quota|workspaces|places|colors|confirms|update|terminals|machines|notes|(session|context):[0-9a-zA-Z_-]{1,128})$`)
+var stateKey = regexp.MustCompile(`^(list|quota|guilds|needs|pairing|update|terminals|machines|notes|(session|context):[0-9a-zA-Z_-]{1,128})$`)
 
-// events is the page's one event stream: ?sub=<key> for each state it wants (list, quota,
-// workspaces, colors, session:<id>, context:<id>, confirms, update, notes). See package hub. A key it
-// does not know, or one not for this terminal (confirms, colors and notes, but for panels), does not fail the
-// stream: it is left out, and the stream's first events say so (StateEvent.Ignored).
-func (s *Server) events(w http.ResponseWriter, r *http.Request) {
-	keys := r.URL.Query()["sub"]
-	if len(keys) == 0 && s.Chat != nil {
-		s.pluginEvents(w, r) // a plugin's stream (routes_plugin.go)
-		return
-	}
-	if len(keys) == 0 || len(keys) > 16 {
-		fail(w, http.StatusBadRequest, "name 1 to 16 states with sub=")
-		return
-	}
-	c := callerOf(r)
-	var carried []string
-	var ignored []api.StateEvent
+// stateKeys splits the states a WATCH asks for into those it carries and those it leaves
+// out (unknown, or not this caller's: needs, pairing and notes are a person's on ir_web or at
+// the host).
+func (s *Server) stateKeys(c caller, keys []string) (carried []string, ignored []api.StateEvent) {
 	for _, k := range keys {
 		switch {
 		case !stateKey.MatchString(k):
 			ignored = append(ignored, api.StateEvent{Key: k, Ignored: "unknown"})
-		case (k == "confirms" || k == "colors" || k == "notes") && !c.panel():
+		case (k == "needs" || k == "pairing" || k == "notes") && !c.panel():
 			ignored = append(ignored, api.StateEvent{Key: k, Ignored: "forbidden"})
 		case !slices.Contains(carried, k):
 			carried = append(carried, k)
 		}
 	}
-	keys = carried
-	if !s.mayWatch(w, c, keys) {
-		return
+	return carried, ignored
+}
+
+// watchStates sends c the states keys name (at most 16) and the drafts,
+// through emit ("state" or "draft", the JSON), till ctx ends: Satori's /v1/events for ir_web.
+func (s *Server) watchStates(ctx context.Context, c caller, keys []string, emit func(kind string, data []byte) error) error {
+	if len(keys) > 16 {
+		keys = keys[:16]
 	}
-	ctx, cancel := context.WithCancel(r.Context())
-	defer cancel()
-	defer s.gate().Track(r, cancel)() // the stream ends when its terminal is revoked or logs out
-	r = r.WithContext(ctx)
-	rc := http.NewResponseController(w)
-	_ = rc.SetWriteDeadline(time.Time{})
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
-	io.WriteString(w, "retry: 2000\n\n")
+	carried, ignored := s.stateKeys(c, keys)
 	for _, e := range ignored {
 		b, _ := json.Marshal(e)
-		fmt.Fprintf(w, "event: state\ndata: %s\n\n", b)
+		if err := emit("state", b); err != nil {
+			return err
+		}
 	}
-	_ = rc.Flush()
-	sub := s.hub.Subscribe(keys) // none it may carry: open all the same, pinging
+	sub := s.hub.Subscribe(carried)
 	defer sub.Close()
-	_ = sub.Serve(r.Context(), w, func() { _ = rc.Flush() })
+	sub.Filter = s.streamFilter(c)
+	// A session's state carries its transcript's tail: the credentials' values masked, as every
+	// answer that carries a transcript is (routes_secrets.go).
+	masked := func(kind string, data []byte) error {
+		data = s.jsonMask().Mask(data)
+		return emit(kind, data)
+	}
+	return sub.Run(ctx, masked, func() error { return nil }, func() {})
 }
 
 func (s *Server) done(w http.ResponseWriter, err error) {
@@ -447,16 +419,35 @@ func (s *Server) done(w http.ResponseWriter, err error) {
 	reply(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+// fault answers with err, knowing the errors of the session settings, the queue and push; the
+// rest as s.error does.
+func (s *Server) fault(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, session.ErrBadRequest), errors.Is(err, push.ErrBadSubscription), errors.Is(err, push.ErrBadRule):
+		fail(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, store.ErrNoInput):
+		refuse(w, http.StatusUnprocessableEntity, "no_such_input", err.Error())
+	case errors.Is(err, session.ErrGone):
+		fail(w, http.StatusGone, err.Error())
+	default:
+		s.error(w, err)
+	}
+}
+
 func (s *Server) error(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, session.ErrNotFound), errors.Is(err, transcript.ErrNoBlock):
-		fail(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, session.ErrNotFound):
+		refuse(w, http.StatusUnprocessableEntity, "no_such_session", err.Error())
+	case errors.Is(err, transcript.ErrNoBlock):
+		refuse(w, http.StatusUnprocessableEntity, "no_such_message", err.Error())
 	case errors.Is(err, session.ErrNotLive), errors.Is(err, session.ErrElsewhere), errors.Is(err, session.ErrSubagent):
 		fail(w, http.StatusConflict, err.Error())
 	case errors.Is(err, context.DeadlineExceeded):
 		fail(w, http.StatusGatewayTimeout, "the agent did not answer in time")
 	case access.IsDenied(err):
-		fail(w, http.StatusForbidden, err.Error())
+		refuse(w, http.StatusForbidden, "no_permission", err.Error())
+	case errors.Is(err, session.ErrBadRequest):
+		refuse(w, http.StatusBadRequest, "bad_request", err.Error())
 	default:
 		s.logf("server: %v", err)
 		fail(w, http.StatusInternalServerError, err.Error())
@@ -480,22 +471,25 @@ func reply(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-func fail(w http.ResponseWriter, status int, msg string) { reply(w, status, api.Error{Error: msg}) }
+func fail(w http.ResponseWriter, status int, msg string) { reply(w, status, api.Error{Message: msg}) }
 
-// Files is the files service (uploads, refs, paths), for the chat layer's attachments.
-func (s *Server) Files() *files.Service { return s.files }
+// refuse answers a refusal with its code (decision 8): 403 for what the caller may not do now,
+// 422 for what is not there or not right (decision 28).
+func refuse(w http.ResponseWriter, status int, code, msg string) {
+	reply(w, status, api.Error{Code: code, Message: msg})
+}
 
 // execConnect takes an executor's WebSocket (docs/exec.md): a terminal with a TOKEN, as which the
 // machine is known.
 func (s *Server) execConnect(w http.ResponseWriter, r *http.Request) {
 	if s.Remote == nil {
-		fail(w, http.StatusNotFound, "no executors here")
+		refuse(w, http.StatusUnprocessableEntity, "not_here", "no executors here")
 		return
 	}
 	c := callerOf(r)
-	if c.Kind != gate.KindChannel || c.Local || c.socket || c.session != "" {
-		fail(w, http.StatusForbidden, "an executor connects with a TOKEN")
+	if c.Login != "" || c.Host() || c.socket || c.session != "" {
+		refuse(w, http.StatusForbidden, "no_permission", "an executor connects with a TOKEN")
 		return
 	}
-	s.Remote.Serve(w, r, c.EndpointID, c.Name)
+	s.Remote.Serve(w, r, c.ID(), c.Name)
 }

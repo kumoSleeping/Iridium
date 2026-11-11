@@ -16,19 +16,19 @@ import (
 // there; the exit code.
 type CLIAt func(args []string, stdout, stderr io.Writer, hc *http.Client, machine, session, cwd string) int
 
-// cliRoutes: POST /api/cli, the ir of an agent hosted at another machine (docs/exec.md "远端的
+// cliRoutes: POST /v1/internal/cli, the ir of an agent hosted at another machine (docs/exec.md "远端的
 // ir"). It comes with its session's own TOKEN, so the caller is that machine's Bot for that
 // session; ir runs here, its requests answered by mux (the API as that Bot has it, not the
 // socket's), its output streamed back a line at a time.
 func (s *Server) cliRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/cli", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /v1/internal/cli", func(w http.ResponseWriter, r *http.Request) {
 		c := callerOf(r)
 		if c.session == "" || c.socket {
 			forbid(w, errIRAt)
 			return
 		}
 		if s.CLI == nil {
-			fail(w, http.StatusNotFound, "no ir here")
+			refuse(w, http.StatusUnprocessableEntity, "not_here", "no ir here")
 			return
 		}
 		var req api.CLIRun
@@ -40,13 +40,14 @@ func (s *Server) cliRoutes(mux *http.ServeMux) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.WriteHeader(http.StatusOK)
 		out := &cliLines{w: w, flush: func() { _ = rc.Flush() }}
-		hc := &http.Client{Transport: inProcess{h: mux, ctx: r.Context(), who: c}}
-		code := s.CLI(req.Args, out.as("out"), out.as("err"), hc, c.EndpointID, c.session, req.Cwd)
+		// Through the session guard as every request is: its scope and agents (S2).
+		hc := &http.Client{Transport: inProcess{h: s.withSatori(s.sessionGuard(mux)), ctx: r.Context(), who: c}}
+		code := s.CLI(req.Args, out.as("out"), out.as("err"), hc, c.ID(), c.session, req.Cwd)
 		out.line(api.CLIOutput{Exit: &code})
 	})
 }
 
-var errIRAt = cliError("POST /api/cli is the ir of a session at another machine, with that session's TOKEN")
+var errIRAt = cliError("POST /v1/internal/cli is the ir of a session at another machine, with that session's TOKEN")
 
 type cliError string
 

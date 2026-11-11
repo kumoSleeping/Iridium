@@ -282,7 +282,7 @@ func (b *Bridge) message(ctx context.Context, data json.RawMessage) {
 	if text == "" && len(refs) == 0 {
 		return
 	}
-	r, err := b.IR.Input(ctx, chat, api.ChatInput{Text: text, Attachments: refs})
+	r, err := b.IR.Input(ctx, chat, ChatInput{Text: text, Attachments: refs})
 	if err != nil {
 		b.deliver(ctx, who, Outgoing{Text: failure(err)})
 		return
@@ -377,7 +377,7 @@ func (b *Bridge) flush(ctx context.Context, openid string) {
 }
 
 // answered sends what Iridium answered at once: a command's reply or card.
-func (b *Bridge) answered(ctx context.Context, openid string, r *api.ChatReply, c *api.Card) {
+func (b *Bridge) answered(ctx context.Context, openid string, r *ChatReply, c *api.Card) {
 	if r != nil {
 		b.reply(ctx, openid, chatKey(openid), *r)
 	}
@@ -459,7 +459,7 @@ func (b *Bridge) handle(ctx context.Context, e Event) {
 	}
 }
 
-func (b *Bridge) reply(ctx context.Context, openid, chat string, r api.ChatReply) {
+func (b *Bridge) reply(ctx context.Context, openid, chat string, r ChatReply) {
 	if strings.TrimSpace(r.Markdown) != "" || strings.TrimSpace(r.Text) != "" {
 		b.deliver(ctx, openid, Outgoing{Markdown: r.Markdown, Text: r.Text})
 	}

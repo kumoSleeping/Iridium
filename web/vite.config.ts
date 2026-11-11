@@ -32,7 +32,7 @@ function precompress(): Plugin {
 
 /** The parts that come only as they are opened (src/app.tsx), the chat first: their files the first
  *  screen does not load go in a <meta name="later"> the page fetches ahead once idle (src/prefetch.ts). */
-const LATER = ["/src/chat/chat.tsx", "/src/settings.tsx", "/src/terminals.tsx", "/src/jump.tsx", "/src/secret.tsx"];
+const LATER = ["/src/chat/chat.tsx", "/src/settings.tsx", "/src/apps.tsx", "/src/jump.tsx", "/src/secret.tsx"];
 
 /** LATER's files, in a <meta name="later">. */
 function later(): Plugin {
@@ -102,7 +102,11 @@ export default defineConfig({
     host: "127.0.0.1",
     port: 7820,
     // The daemon's own guard takes the page's Host and Origin as they are: keep the Host.
-    proxy: { "/api": { target: api, changeOrigin: false }, "/_ir": { target: api, changeOrigin: false } },
+    proxy: {
+      "/_ir": { target: api, changeOrigin: false },
+      // Satori with ir and Iridium's own /v1/internal (the event stream a WebSocket).
+      "/v1": { target: api, changeOrigin: false, ws: true },
+    },
   },
   test: {
     environment: "happy-dom",

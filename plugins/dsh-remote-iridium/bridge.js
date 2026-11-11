@@ -1,12 +1,12 @@
-// The dsh processes the Iridium starts here (dsh --profile sdk, one a session) run their sessions'
-// features themselves: a plugin there (OMD) is in that process, not in this one. Each loads
-// session.js, which connects back here over a local socket; held.get and held.set for a session
-// one of them runs go to it (held.js). Apart from index.js so that it loads without dsh's packages.
+// The dsh processes the Iridium starts here (dsh --profile sdk, one a session) have plugins of
+// their own (OMD's, in a bundle's layer): what they hang on their sessions for the Iridium's page
+// (attach.js) comes here, and goes on over the executor's connection; a button pressed there goes
+// back to the process. Each loads session.js, which connects back here over a local socket.
+// Apart from index.js so that it loads without dsh's packages.
 import { createHash, randomBytes } from 'node:crypto'
 import fs from 'node:fs'
 import net from 'node:net'
 import path from 'node:path'
-import { RemoteError } from './executor.js'
 
 /**
  * A socket of its own for a plugin started with state (its directory): a named pipe on Windows, a
@@ -58,29 +58,24 @@ export function lines(sock, fn) {
 
 /**
  * Listens at endpoint for the session processes; one that does not say secret first is let go.
- * changed(session) is called when one says a session's features changed, or that it runs one
- * now or no more. Returns {secret, has(session), call(session, method, params, ms), close()}.
+ * A process says which sessions it runs ({t:'sessions', ids}), that one began ({t:'started',
+ * session, cwd}: started(session, cwd)), and what it hangs on one ({t:'attach', session, place,
+ * content}: attach(session, place, content, owner), owner its connection); gone(owner) once it
+ * closes. Returns {secret, endpoint, has(session), button(session, id, user) (to the process that
+ * runs it: {t:'button', …}), close()}.
  */
-export function createBridge({ endpoint, changed = () => {}, log = () => {} }) {
+export function createBridge({ endpoint, started = () => {}, attach = () => {}, gone = () => {}, log = () => {} }) {
   const secret = randomBytes(24).toString('hex')
   const bySession = new Map() // session → its process's connection
   const conns = new Set()
-  let seq = 0
 
   const server = net.createServer((sock) => {
-    const c = { sock, ok: false, sessions: new Set(), calls: new Map() }
-    const drop = () => {
+    const c = { sock, ok: false, sessions: new Set() }
+    sock.on('close', () => {
       conns.delete(c)
-      for (const s of c.sessions) {
-        if (bySession.get(s) === c) {
-          bySession.delete(s)
-          changed(s)
-        }
-      }
-      for (const { reject } of c.calls.values()) reject(new RemoteError('failed', 'the session\'s dsh process is gone'))
-      c.calls.clear()
-    }
-    sock.on('close', drop)
+      for (const s of c.sessions) if (bySession.get(s) === c) bySession.delete(s)
+      if (c.ok) gone(c)
+    })
     sock.on('error', () => {})
     lines(sock, (m) => {
       if (!c.ok) {
@@ -89,29 +84,19 @@ export function createBridge({ endpoint, changed = () => {}, log = () => {} }) {
         conns.add(c)
         return
       }
-      if (m.t === 'sessions' && Array.isArray(m.ids)) {
-        const now = new Set(m.ids.filter((s) => typeof s === 'string' && s))
-        for (const s of c.sessions) {
-          if (!now.has(s) && bySession.get(s) === c) {
-            bySession.delete(s)
-            changed(s)
-          }
+      try {
+        if (m.t === 'sessions' && Array.isArray(m.ids)) {
+          const now = new Set(m.ids.filter((s) => typeof s === 'string' && s))
+          for (const s of c.sessions) if (!now.has(s) && bySession.get(s) === c) bySession.delete(s)
+          for (const s of now) bySession.set(s, c)
+          c.sessions = now
+        } else if (m.t === 'started' && typeof m.session === 'string' && m.session) {
+          started(m.session, typeof m.cwd === 'string' ? m.cwd : '')
+        } else if (m.t === 'attach' && typeof m.session === 'string' && m.session) {
+          attach(m.session, m.place, m.content ?? null, c)
         }
-        for (const s of now) {
-          if (bySession.get(s) !== c) {
-            bySession.set(s, c)
-            changed(s)
-          }
-        }
-        c.sessions = now
-      } else if (m.t === 'changed' && typeof m.session === 'string') {
-        if (bySession.get(m.session) === c) changed(m.session)
-      } else if (m.t === 're') {
-        const p = c.calls.get(m.id)
-        if (!p) return
-        c.calls.delete(m.id)
-        if (m.error) p.reject(new RemoteError(m.error.code || 'failed', String(m.error.message ?? 'failed')))
-        else p.resolve(m.result)
+      } catch (e) {
+        log(`bridge: ${e.message}`)
       }
     })
   })
@@ -135,23 +120,10 @@ export function createBridge({ endpoint, changed = () => {}, log = () => {} }) {
     secret,
     endpoint,
     has: (session) => bySession.has(session),
-    /** Asks the process that runs session; an error if none does, or no answer in ms. */
-    call(session, method, params = {}, ms = 3000) {
+    /** A button pressed on session, to the process that runs it (none: nothing). */
+    button(session, id, user) {
       const c = bySession.get(session)
-      if (!c) return Promise.reject(new RemoteError('not_found', `no dsh process here runs ${session}`))
-      const id = ++seq
-      return new Promise((resolve, reject) => {
-        const t = setTimeout(() => {
-          c.calls.delete(id)
-          reject(new RemoteError('failed', `${method}: no answer in ${ms / 1000}s`))
-        }, ms)
-        t.unref?.()
-        c.calls.set(id, {
-          resolve: (v) => (clearTimeout(t), resolve(v)),
-          reject: (e) => (clearTimeout(t), reject(e)),
-        })
-        c.sock.write(JSON.stringify({ t: 'call', id, method, params: { ...params, session } }) + '\n')
-      })
+      if (c?.sock.writable) c.sock.write(JSON.stringify({ t: 'button', session, id, ...(user ? { user } : {}) }) + '\n')
     },
     close() {
       server.close()

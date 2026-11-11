@@ -2,6 +2,8 @@ package store
 
 import (
 	"database/sql"
+	"fmt"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -41,6 +43,85 @@ func TestSchemaAndWAL(t *testing.T) {
 	db.Close()
 	if _, err := Open(path); err == nil {
 		t.Fatal("opened a newer schema")
+	}
+}
+
+// Before an upgrade the database is copied to <db>.v<N>.bak, whole and private; a new database,
+// or one up to date, is not; a copy there already is kept, an upgrade that fails leaves one.
+func TestBackupBeforeUpgrade(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "iridium.db")
+	full := schema
+	t.Cleanup(func() { schema = full })
+	old := len(full) - 2
+	schema = full[:old]
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetName("s1", "kept"); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	if left, _ := filepath.Glob(filepath.Join(dir, "*.bak*")); len(left) != 0 {
+		t.Fatalf("a new database copied: %v", left)
+	}
+
+	schema = full
+	s, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.SetName("s1", "after")
+	s.Close()
+	bak := fmt.Sprintf("%s.v%d.bak", path, old)
+	fi, err := os.Stat(bak)
+	if err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("copy: %v %v", fi, err)
+	}
+	db, _ := sql.Open("sqlite", bak)
+	var v int
+	var name string
+	db.QueryRow(`PRAGMA user_version`).Scan(&v)
+	db.QueryRow(`SELECT name FROM names WHERE session = 's1'`).Scan(&name)
+	db.Close()
+	if v != old || name != "kept" {
+		t.Fatalf("copy at version %d with %q", v, name)
+	}
+	if left, _ := filepath.Glob(filepath.Join(dir, "*.bak.*")); len(left) != 0 {
+		t.Fatalf("left %v", left)
+	}
+	// Up to date: nothing more.
+	s, _ = Open(path)
+	s.Close()
+	if all, _ := filepath.Glob(filepath.Join(dir, "*.bak")); len(all) != 1 {
+		t.Fatalf("copies %v", all)
+	}
+
+	// An upgrade that fails: the copy made, the database left at its version, opened again the
+	// copy kept as it is.
+	schema = append(full[:len(full):len(full)], `CREATE TABLE broken (`)
+	if _, err := Open(path); err == nil {
+		t.Fatal("a broken migration opened")
+	}
+	bak = fmt.Sprintf("%s.v%d.bak", path, len(full))
+	before, err := os.Stat(bak)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Open(path); err == nil {
+		t.Fatal("a broken migration opened")
+	}
+	if after, err := os.Stat(bak); err != nil || !after.ModTime().Equal(before.ModTime()) {
+		t.Fatalf("copy replaced: %v", err)
+	}
+	schema = full
+	if s, err = Open(path); err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if v, _ := s.Version(); v != len(full) {
+		t.Fatalf("version %d", v)
 	}
 }
 
@@ -117,6 +198,13 @@ func TestInputsUsageOutbox(t *testing.T) {
 	u, _ := s.UsageSince(0)
 	if len(u) != 2 || *u[0].CostUSD != 0.25 || u[1].CostUSD != nil {
 		t.Fatalf("usage: %+v", u)
+	}
+	must(t, s.AddUsage(Usage{Terminal: "网页", Session: "a", Agent: "claude", Model: "m", Input: 3, CacheRead: 90, CacheWrite: 6}))
+	if in, cr, cw, err := s.SessionInput("a"); err != nil || in != 4 || cr != 90 || cw != 6 {
+		t.Fatalf("session input: %d %d %d %v", in, cr, cw, err)
+	}
+	if in, cr, cw, _ := s.SessionInput("none"); in+cr+cw != 0 {
+		t.Fatalf("no rows: %d %d %d", in, cr, cw)
 	}
 
 	a, _ := s.Post("bot", "qq:1", "reply", `{}`)

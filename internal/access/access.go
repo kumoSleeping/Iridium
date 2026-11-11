@@ -24,13 +24,13 @@ func IsDenied(err error) bool {
 
 // Errors the checks give.
 var (
-	ErrClaude = &Denied{"claude is only for the owner's own terminals, found so as the terminal was made (ir invite --owner, ir token --owner)"}
-	ErrManage = &Denied{"only a web panel or 本机 manages this"}
+	ErrClaude = &Denied{"claude is only for the owner's own apps and logins, found so as each was made (ir invite --claude, a pairing allowed as the owner's own)"}
+	ErrManage = &Denied{"only ir_web's logins and the host manage this"}
 )
 
 // Full is 本机's: the owner's machine, so Claude.
 func Full() api.Rules {
-	return api.Rules{ClaudeOwner: &api.OwnerConfirm{By: api.LocalTerminal}}
+	return api.Rules{ClaudeOwner: &api.OwnerConfirm{By: api.HostID}}
 }
 
 // Default is a terminal's that was not made the owner's own: no Claude.
@@ -38,9 +38,9 @@ func Default() api.Rules { return api.Rules{} }
 
 // Ways a terminal was found the owner's own (api.OwnerConfirm.By).
 const (
-	ByLocal = api.LocalTerminal // a person's ir on the machine
-	ByFirst = "first"           // the first panel registered
-	ByPanel = "panel"           // a person on a panel that has Claude (or that confirmed an agent's ask)
+	ByLocal = api.HostID // a person's ir on the machine
+	ByFirst = "first"    // the first panel registered
+	ByPanel = "panel"    // a person on a panel that has Claude (or that confirmed an agent's ask)
 )
 
 // HasClaude reports whether r gives its terminal Claude.

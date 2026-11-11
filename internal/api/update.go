@@ -1,6 +1,6 @@
 package api
 
-// UpdateState is the carried state "update" and GET /api/update: whether a newer Iridium is out
+// UpdateState is the carried state "update" and GET /v1/internal/update: whether a newer Iridium is out
 // (plan "更新"). The page puts a dot on the settings gear while Available.
 type UpdateState struct {
 	Current   string `json:"current"`
@@ -11,6 +11,9 @@ type UpdateState struct {
 	// Auto: a newer version is downloaded as soon as it is seen (release builds; not a build from
 	// source).
 	Auto bool `json:"auto"`
+	// Manual: automatic updates are off (config update.manual): nothing looked for on a timer or
+	// downloaded ahead; the page does not look when the settings open.
+	Manual bool `json:"manual,omitempty"`
 	// Ready: Latest is downloaded and checked; 更新 only swaps it in and restarts.
 	Ready bool `json:"ready,omitempty"`
 	// Size is Latest's download in bytes (0 unknown); Got how much of it came, while downloading.
@@ -22,7 +25,7 @@ type UpdateState struct {
 	Error string `json:"error,omitempty"`
 }
 
-// ApplyUpdate is POST /api/update. Force installs the latest even when it is not newer (a dev
+// ApplyUpdate is POST /v1/internal/update. Force installs the latest even when it is not newer (a dev
 // build is never older than anything).
 type ApplyUpdate struct {
 	Force bool `json:"force,omitempty"`

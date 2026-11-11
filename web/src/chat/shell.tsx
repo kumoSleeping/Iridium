@@ -7,7 +7,7 @@ import { api } from "../api/client";
 import type { SessionState as LiveSession } from "../api/types.gen";
 import { t } from "../i18n";
 import { errText, toast } from "../toast";
-import { useMachines } from "../store";
+import { useMachines } from "../data";
 import { IconKey } from "../ui";
 
 type Run = { key: string; line: string; cwd: string; run?: string; out: string; done: boolean; code?: number; signal?: string; err?: string; stopping?: boolean };
@@ -32,7 +32,7 @@ export const shellLine = (text: string): string | null => {
 /** Whether command lines run where session s does (not at a machine that refuses them). */
 export function useShellable(s: LiveSession): boolean {
   const ms = useMachines();
-  return !s.machine || !ms.find((m) => m.id === s.machine)?.noShell;
+  return !s.machine || !!ms.find((m) => m.id === s.machine)?.shell;
 }
 
 /** Runs line at session s; resolves once it started (its output comes on by itself). */

@@ -12,6 +12,7 @@ import (
 
 // The SVG draws exactly the code's dark modules, inside a quiet zone of 4, on white.
 func TestQRSVG(t *testing.T) {
+	t.Parallel()
 	text := "https://ir.example.com/_ir/join#ir_0123456789abcdefghijklmnopqrstuvwxyzABCDEFG"
 	url, err := qrSVG(text)
 	if err != nil {

@@ -61,14 +61,8 @@ func residentFor(o Options, unit string) resident {
 	if len(o.Roots) > 0 {
 		r.argv = append(r.argv, "--roots", strings.Join(o.Roots, ","))
 	}
-	if o.NoShell {
-		r.argv = append(r.argv, "--no-shell")
-	}
-	if o.AgentShell {
-		r.argv = append(r.argv, "--agent-shell")
-	}
-	if o.NoAgents {
-		r.argv = append(r.argv, "--no-agents")
+	if o.Shell {
+		r.argv = append(r.argv, "--shell")
 	}
 	home, _ := os.UserHomeDir()
 	switch r.goos {

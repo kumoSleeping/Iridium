@@ -64,3 +64,24 @@ func wellFormedChannel(s string) bool {
 }
 
 func hashEqual(a, b string) bool { return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1 }
+
+// Shared with package webapp: ir_web's cookies, invites and ceremonies are secrets of the same
+// kind, stored and compared the same way.
+
+// NewSecret is a fresh secret (an invite, a web session's cookie): 43 base64url characters.
+func NewSecret() string { return newToken() }
+
+// HashSecret is how a secret is stored and looked up.
+func HashSecret(s string) string { return hashToken(s) }
+
+// WellFormedSecret: s looks like NewSecret's, so junk is refused before any lookup.
+func WellFormedSecret(s string) bool { return wellFormed(s) }
+
+// SameHash compares two hashes in constant time.
+func SameHash(a, b string) bool { return hashEqual(a, b) }
+
+// RandomBytes is n random bytes.
+func RandomBytes(n int) []byte { return randomBytes(n) }
+
+// NewID is a random lowercase ID of 8*n/5 characters.
+func NewID(n int) string { return newID(n) }

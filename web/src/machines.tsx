@@ -1,11 +1,18 @@
 // Other machines' executors (docs/exec.md "网页"): a Bot each, its agents offered for new sessions,
-// its sessions marked with its face on the agent's logo. Its face is its Bot's avatar, or by its
-// system: a Windows window, a laptop for a Mac, a monitor for Linux.
+// its sessions out of their group marked with a cloud on the agent's logo and its face after the
+// name (2026-11-10). Its face is its Bot's avatar, or by its system: a Windows window, a laptop for
+// a Mac, a monitor for Linux.
 import { Laptop, Monitor } from "lucide-react";
-import { useEffect, useState, useSyncExternalStore } from "react";
-import type { Machine } from "./api/types.gen";
-import { useMachines } from "./store";
-import { cn, keep, kept } from "./ui";
+import { useEffect, useState } from "react";
+import type { Computer } from "./api/types.gen";
+import { t } from "./i18n";
+import { useMachines } from "./data";
+import { remotePath } from "./tree";
+import { cn } from "./ui";
+
+/** An app's computer (GET /v1/internal/apps, its computer) as the page goes by it: its app's ID, name and
+ *  avatar with it, the agents turned off there left out (data.ts useMachines). */
+export type Machine = Computer & { id: string; name: string; avatar?: string };
 
 /** The machine a session or a folder group runs at: by ID, as the carried "machines" lists them. */
 export const useMachine = (id?: string) => {
@@ -32,6 +39,13 @@ export function remoteOf(path: string, ms: Machine[]): { m: Machine; cwd: string
   if (!m) return undefined;
   const p = path.slice(m.id.length + 1);
   return { m, cwd: m.sep === "\\" ? p.replaceAll("/", "\\") : p };
+}
+
+/** Whose agents a folder offers (docs/exec.md "远端工作区", 2026-11-10): this machine's for one
+ *  here; at another, that machine's alone, in its own path there; none ("gone") for one at a machine
+ *  no more there (its Bot gone). */
+export function agentsAt(path: string, ms: Machine[]): "here" | "gone" | { m: Machine; cwd: string } {
+  return remoteOf(path, ms) ?? (remotePath(path) && !path.startsWith("~") ? "gone" : "here");
 }
 
 function WindowsMark({ size }: { size: number }) {
@@ -97,20 +111,25 @@ export function useLink(m: Machine): "on" | "slow" | "away" {
 
 export const LINK_COLOR = { on: "var(--plus)", slow: "var(--need)", away: "var(--err)" };
 
-/** What the session list shows (sidebar.tsx ViewSwitch): null all, "" this machine, else another's
- *  ID; kept in this browser. The head's "+" opens at the machine shown. */
-const VIEW_KEY = "ir.machineView";
-const viewers = new Set<() => void>();
-export function setView(v: string | null) {
-  keep(VIEW_KEY, v);
-  viewers.forEach((f) => f());
-}
-/** The view, null once its machine is no more listed. */
-export function useView(): string | null {
-  const v = useSyncExternalStore(
-    (f) => (viewers.add(f), () => void viewers.delete(f)),
-    () => kept(VIEW_KEY),
+/** A machine's link as the head shows the daemon's: a lamp, the round trip or 断开. */
+export function MachineLink({ m }: { m: Machine }) {
+  const link = useLink(m);
+  const said = link === "away" ? t("status.offline") : m.online && m.latency ? t("machine.latency", { ms: m.latency }) : t("machine.reconnecting");
+  return (
+    <span className="flex shrink-0 items-center gap-1.5 text-xs font-normal text-ink-3 tabular-nums">
+      <span role="img" aria-label={said} className="size-1.5 rounded-full" style={{ background: LINK_COLOR[link] }} />
+      {link === "away" ? t("top.offlineShort") : m.online && m.latency ? `${m.latency} ms` : ""}
+    </span>
   );
-  const ms = useMachines();
-  return v === null || (v !== "" && !ms.some((m) => m.id === v)) ? null : v;
+}
+
+/** At another machine: a solid cloud over a mark's lower corner (a folder's, an agent's logo),
+ *  tucked in toward its middle, ringed in the row's colour so the mark's line stops short of it (the
+ *  user, 2026-11-08). In a "relative" box round the mark. */
+export function CloudBadge({ label }: { label: string }) {
+  return (
+    <svg role="img" aria-label={label} width={10} height={8} viewBox="0 0 20 15" className="absolute -right-px -bottom-px overflow-visible text-ink-2">
+      <path d="M15 13.5H5.5a4 4 0 0 1-.6-7.95A5.2 5.2 0 0 1 14.8 4.6 4.45 4.45 0 0 1 15 13.5Z" fill="currentColor" stroke="var(--row-bg, var(--paper))" strokeWidth={3} strokeLinejoin="round" paintOrder="stroke" />
+    </svg>
+  );
 }

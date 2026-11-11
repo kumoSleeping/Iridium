@@ -17,15 +17,15 @@ import (
 // settingsRoutes are the settings page's (docs/api.md "设置"): the config file's fields it edits,
 // saved to the file and in force at once.
 func (s *Server) settingsRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/settings", s.manage(func(w http.ResponseWriter, r *http.Request) { reply(w, http.StatusOK, s.settings()) }))
-	mux.HandleFunc("PUT /api/settings", s.panelOnly(s.putSettings))
+	mux.HandleFunc("GET /v1/internal/settings", s.manage(func(w http.ResponseWriter, r *http.Request) { reply(w, http.StatusOK, s.settings()) }))
+	mux.HandleFunc("PUT /v1/internal/settings", s.panelOnly(s.putSettings))
 }
 
 // settings are the live values.
 func (s *Server) settings() api.Settings {
 	t := s.m.Tuned()
 	s.cmu.Lock()
-	hidden, push, enter, closed := slices.Clone(s.cfg.QuotaHidden), s.cfg.Push, s.cfg.EnterInTurn, s.cfg.PairClosed
+	hidden, push, enter, manual := slices.Clone(s.cfg.QuotaHidden), s.cfg.Push, s.cfg.EnterInTurn, s.cfg.Update.Manual
 	s.cmu.Unlock()
 	if enter == "" {
 		enter = "steer"
@@ -40,7 +40,7 @@ func (s *Server) settings() api.Settings {
 	if modes == nil {
 		modes = map[string]string{}
 	}
-	return api.Settings{IdleReap: shortDuration(t.IdleReap), CrashResume: t.CrashResume, QuotaResume: t.QuotaResume, QuotaHidden: hidden, Modes: modes, Push: push, EnterInTurn: enter, Lang: t.Lang, PairClosed: closed}
+	return api.Settings{IdleReap: shortDuration(t.IdleReap), CrashResume: t.CrashResume, QuotaResume: t.QuotaResume, QuotaHidden: hidden, Modes: modes, Push: push, EnterInTurn: enter, Lang: t.Lang, AutoUpdate: !manual}
 }
 
 func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
@@ -109,13 +109,16 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		if p.Lang != nil {
 			c.Lang = *p.Lang
 		}
-		if p.PairClosed != nil {
-			c.PairClosed = *p.PairClosed
-		}
 		if p.Push != nil && s.Push == nil {
 			c.Push = *p.Push
 		}
+		if p.AutoUpdate != nil {
+			c.Update.Manual = !*p.AutoUpdate
+		}
 	})
+	if err == nil && p.AutoUpdate != nil && s.Updater != nil {
+		s.Updater.SetManual(!*p.AutoUpdate)
+	}
 	if err == nil && p.Push != nil && s.Push != nil {
 		err = s.Push.SetEnabled(*p.Push) // saves the file's push through SaveConfig
 	}

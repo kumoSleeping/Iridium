@@ -10,10 +10,10 @@ import { Dialog } from "@base-ui/react/dialog";
 import { Toast } from "@base-ui/react/toast";
 import { Tooltip } from "@base-ui/react/tooltip";
 import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type ReactNode } from "react";
-import { queryClient } from "./api/client";
+import { api, queryClient } from "./api/client";
 import { watchTurns } from "./chats";
 import { CreatePopover, WsPlus } from "./create";
-import { agentsQ, pushQ, useHome, useMe, useSettings, useTerminals, useUpdate, useWorkspaces } from "./data";
+import { agentsQ, pushQ, useApps, useHome, useMe, useSettings, useUpdate, useWorkspaces } from "./data";
 import { t, useLang } from "./i18n";
 import { applyTheme, initialTheme, keepTheme, MeKey, useTellLang, type ThemePref } from "./me";
 import { motion, pageTurn } from "./motion";
@@ -22,7 +22,7 @@ import { close, go, onTurn, openChat, over, quietDialog, route, usagePoint, useR
 import { Pager, TABS_H } from "./pager";
 import { atLeft, atRight, GRIP, Sheet } from "./sheet";
 import { HeadKeys, Sidebar } from "./sidebar";
-import { useConfirms, useList, useMachines } from "./store";
+import { useConfirms, useList } from "./store";
 import { follow } from "./stream";
 import { ToastList, toasts } from "./toast";
 import { buildTree, flat } from "./tree";
@@ -49,19 +49,19 @@ function part<P extends object>(get: () => Promise<ComponentType<P>>) {
 }
 const ChatPage = part(() => import("./chat/chat").then((m) => m.ChatPage));
 const SettingsPage = part(() => import("./settings").then((m) => m.SettingsPage));
-const TerminalsPage = part(() => import("./terminals").then((m) => m.TerminalsPage));
+const AppsPage = part(() => import("./apps").then((m) => m.AppsPage));
 const SecretsPage = part(() => import("./credentials").then((m) => m.SecretsPage));
 const UsagePage = part(() => import("./usage").then((m) => m.UsagePage));
 /** The page of the settings' dialog a route is: the settings, or one of their own pages. */
-type SetsPage = "settings" | "terminals" | "secrets" | "usage";
-const setsPageOf = (r: Route): SetsPage => (r.name === "terminals" || r.name === "secrets" || r.name === "usage" ? r.name : "settings");
+type SetsPage = "settings" | "apps" | "secrets" | "usage";
+const setsPageOf = (r: Route): SetsPage => (r.name === "apps" || r.name === "secrets" || r.name === "usage" ? r.name : "settings");
 const Jump = part(() => import("./jump").then((m) => m.Jump));
 const NotesPanel = part(() => import("./notes").then((m) => m.NotesPanel));
 export const loadChat = ChatPage.load;
 /** The settings and the jump box, their code run, the settings' answers asked: once idle, or a
  *  pointer on their key. */
 const loadPanels = () => {
-  for (const p of [SettingsPage, TerminalsPage, SecretsPage, UsagePage, Jump]) void p.load().catch(() => {});
+  for (const p of [SettingsPage, AppsPage, SecretsPage, UsagePage, Jump]) void p.load().catch(() => {});
   void queryClient.prefetchQuery(agentsQ);
   void queryClient.prefetchQuery(pushQ);
 };
@@ -85,7 +85,8 @@ function useExpanded() {
     }
   });
   // Open unless folded, but the archive, a workflow run's agents and the rest of a folder's
-  // sessions (tree.ts foldRest): those wait to be opened.
+  // sessions (tree.ts foldRest): those wait to be opened. Those hung under a launcher ("hung:")
+  // shown (2026-11-10).
   const shut = (k: string) => k === "archive" || k.startsWith("run:") || k.startsWith("more:");
   const expanded = (k: string) => over[k] ?? !shut(k);
   const toggle = (k: string) =>
@@ -136,15 +137,13 @@ export function App() {
   useTellLang(); // hosted agents are told the user's language
   useHome(); // paths show ~ for it
   useMe();
-  useTerminals(); // a message's source shows its terminal's avatar
+  useApps(); // a message's source shows its app's or login's avatar
   const confirms = useConfirms();
   const { expanded, toggle } = useExpanded();
   // Each minute too: a subagent long quiet is let go.
   const minute = useMinute();
-  const machines = useMachines();
-  const order = useMemo(() => machines.map((m) => m.id), [machines.map((m) => m.id).join(",")]);
   const places = usePlaces();
-  const tree = useMemo(() => buildTree(list ?? [], ws.data ?? [], t("nav.unsorted"), Math.max(minute, Date.now()), undefined, order, places), [list, ws.data, t("nav.unsorted"), minute, order, places]);
+  const tree = useMemo(() => buildTree(list ?? [], ws.data ?? [], t("nav.unsorted"), Math.max(minute, Date.now()), undefined, places), [list, ws.data, t("nav.unsorted"), minute, places]);
 
   useEffect(() => follow(open), [open]);
   // Unread, and the chats of turns that end off screen.
@@ -156,7 +155,8 @@ export function App() {
   const turns = useRef(new Map<string, string>());
   useEffect(() => {
     if (!list) return;
-    unread.current?.take(list);
+    // Not those the list leaves out (a group at another machine no one opened): no count for them.
+    unread.current?.take(list.filter((s) => !tree.unlisted.has(s.id)));
     watchTurns(list, turns.current, open);
   }, [list]);
   // The chats you may open next, warmed (src/warm.ts).
@@ -278,12 +278,13 @@ export function App() {
       }
       onSearch={() => setJumping((j) => !j)}
       confirms={confirms}
-      onConfirm={(c) => (c.session && list?.some((s) => s.id === c.session) ? openChat(c.session) : go({ name: c.kind.startsWith("secret-") ? "secrets" : "terminals" }, over(r)))}
+      onConfirm={(c) => (c.session && list?.some((s) => s.id === c.session) ? openChat(c.session) : c.kind === "share" && c.share?.session ? (openChat(c.share.session), void api.dropNeed(c.id).catch(() => {})) : go({ name: c.kind.startsWith("secret_") ? "secrets" : "apps" }, over(r)))}
       chatCode={chatCode}
       panelsCode={loadPanels}
       createKey={(trigger) => <CreatePopover trigger={trigger} />}
       wsPlus={(w, trigger, o, setO) => <WsPlus key={w.key} w={{ id: w.id, name: w.name, path: w.root }} trigger={trigger} open={o} setOpen={setO} opened={(id) => openChat(id)} />}
       me={me}
+      reveal={phone ? onSheet : undefined}
     />
   );
 
@@ -319,7 +320,7 @@ export function App() {
   // 2026-11-08: going in, the dialog neither grows nor shrinks); opened on them first, they fit.
   const settingsH = useRef<number | undefined>(undefined);
   if (dialogPage === "settings" && fit.h !== undefined) settingsH.current = fit.h;
-  const boxH = (dialogPage === "terminals" || dialogPage === "secrets") && settingsH.current !== undefined ? settingsH.current : fit.h;
+  const boxH = (dialogPage === "apps" || dialogPage === "secrets") && settingsH.current !== undefined ? settingsH.current : fit.h;
   const settingsStyle: CSSProperties | undefined = settingsAt && boxH !== undefined && !usageLook && room !== undefined ? { ...settingsAt, height: `min(${boxH}px, ${typeof room === "number" ? `${room}px` : room})` } : settingsAt;
   // The usage panel floats as a row's menu does: one of them at a time (ui.tsx holdMenu).
   const underNow = useRef(under);
@@ -334,9 +335,9 @@ export function App() {
     <Suspense fallback={<Waiting />}>
       <SetsPages page={page}>
         {(slide) =>
-          page === "terminals" ? (
-            <div key="terminals" className={cn(slide, "h-full")}>
-              <TerminalsPage onBack={back} />
+          page === "apps" ? (
+            <div key="apps" className={cn(slide, "h-full")}>
+              <AppsPage onBack={back} />
             </div>
           ) : page === "secrets" ? (
             <div key="secrets" className={cn(slide, "h-full")}>

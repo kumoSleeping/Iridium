@@ -369,7 +369,7 @@ func (f *File) LastSaid() (*api.LastSaid, error) {
 	text := heading.ReplaceAllString(WithoutNameLines(b.Text), "")
 	text = strings.NewReplacer("**", "", "`", "").Replace(text)
 	text = link.ReplaceAllString(text, "$1")
-	return &api.LastSaid{Role: string(b.Kind), Text: cut(oneLine(text), LastLen), From: b.From, At: b.Time}, nil
+	return &api.LastSaid{Role: string(b.Kind), Text: cut(oneLine(text), LastLen), From: b.From, FromTerminal: b.FromTerminal, At: b.Time}, nil
 }
 
 // Title is the title the agent's last title line gave (named.go); else, a dsh session's, the
@@ -653,7 +653,8 @@ func blocksOf(off int64, raw []byte, max int, sources Sources) []api.Block {
 			b := api.Block{Kind: api.BlockKindUser, Text: text, ID: uuid}
 			if sources != nil && uuid != "" {
 				if terminal, tag, ok := sources(uuid); ok {
-					b.From, b.FromTerminal = tag, terminal
+					b.From = tag
+					b.FromTerminal, b.FromLogin = api.SplitSender(terminal)
 					b.Text = strings.TrimPrefix(text, "["+tag+"] ")
 				}
 			}

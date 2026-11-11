@@ -3,7 +3,7 @@
 // 8MB and are sized from the speed seen to take some 15 s each, between 8MB and 50MB, less only on
 // a link too slow for 8MB in a minute. The task is kept by file in localStorage, so the same file
 // picked again after a reload goes on from where it stopped.
-import { api, ApiError } from "../api/client";
+import { api, ApiError, notThere } from "../api/client";
 import type { FileRef, Upload } from "../api/types.gen";
 import { keep, kept } from "../ui";
 import { Sha256 } from "./sha256";
@@ -39,7 +39,7 @@ export async function upload(session: string, f: File, progress: (sent: number, 
       if (u.done && u.file) return (keep(key, null), u.file);
       at = u.received;
     } catch (e) {
-      if (!(e instanceof ApiError && e.status === 404)) throw e;
+      if (!notThere(e)) throw e;
       id = null;
     }
   }

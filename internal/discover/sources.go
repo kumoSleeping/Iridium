@@ -252,7 +252,7 @@ func (x *Index) dshIn(dir string) []onDisk {
 func (x *Index) glance(d onDisk) glimpse {
 	switch d.agent {
 	case api.AgentClaude:
-		g, err := transcript.Glance(d.path, x.o.Store.Source)
+		g, err := transcript.Glance(d.path, x.o.Store.Sender)
 		if err != nil {
 			return glimpse{}
 		}
@@ -270,7 +270,7 @@ func (x *Index) glance(d onDisk) glimpse {
 	case api.AgentPi:
 		return x.glancePi(d)
 	case api.AgentDsh:
-		g, _ := transcript.GlanceDsh(d.path, x.o.Store.Source)
+		g, _ := transcript.GlanceDsh(d.path, x.o.Store.Sender)
 		out := glimpse{cwd: g.Cwd, title: g.Title, last: g.Last, sub: g.Sidechain, parent: g.Parent, done: g.Ended}
 		if out.cwd == "" {
 			out.cwd = x.dshCwd(filepath.Base(filepath.Dir(filepath.Dir(d.path))))

@@ -8,10 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"mime/multipart"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -21,7 +19,6 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	irAccess "github.com/kumoSleeping/iridium/internal/access"
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/config"
 	"github.com/kumoSleeping/iridium/internal/launchd"
@@ -82,16 +79,8 @@ func socketClient(path string) *http.Client {
 
 // adminCommands are the ones this file runs.
 var adminCommands = map[string]func(adminEnv, []string, io.Writer, io.Writer) int{
-	"invite":  invite,
-	"token":   token,
-	"access":  access,
-	"profile": profile,
-	"revoke":  revoke,
-	"public":  publicCmd,
-	"update":  updateCmd,
-	"secret":  secretCmd, // secrets.go
-	"run":     runCmd,
-	"usage":   usageCmd, // usage.go
+	"public": publicCmd,
+	"run":    runCmd,
 }
 
 // call sends one request to the daemon and decodes its JSON reply into out; it gives the status.
@@ -129,15 +118,12 @@ func (e adminEnv) call(method, path string, body any, out any) (int, error) {
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if resp.StatusCode >= 300 {
-		var ae struct {
-			Error     string `json:"error"`
-			NameError string `json:"nameError"`
-		}
+		var ae api.Error
 		if json.Unmarshal(data, &ae) == nil && ae.NameError != "" {
 			return resp.StatusCode, errors.New(nameErrors[ae.NameError] + " (" + ae.NameError + ")")
 		}
-		if ae.Error != "" {
-			return resp.StatusCode, errors.New(ae.Error)
+		if ae.Text() != "" {
+			return resp.StatusCode, errors.New(ae.Text())
 		}
 		return resp.StatusCode, errors.New(resp.Status)
 	}
@@ -154,7 +140,8 @@ var nameErrors = map[string]string{
 	"too_long": "名字最多 12 个字",
 	"invalid":  "名字只能有字母、数字、空格和 - _ .",
 	"reserved": "这个名字是保留的",
-	"taken":    "名字已经有终端或邀请在用",
+	"letter":   "单个英文字母不能当名字",
+	"taken":    "名字已有人用",
 }
 
 func failed(stderr io.Writer, cmd string, err error) int {
@@ -162,216 +149,11 @@ func failed(stderr io.Writer, cmd string, err error) int {
 	return 1
 }
 
-// ownerFlag takes --owner out of args: the new terminal is the owner's own, so it gets Claude.
-func ownerFlag(args []string) (rest []string, owner bool) {
-	for _, a := range args {
-		if a == "--owner" {
-			owner = true
-		} else {
-			rest = append(rest, a)
-		}
-	}
-	return rest, owner
-}
-
-// invite: ir invite [名字] [--owner]. A person gets the link; an agent, only what the panel
-// decided. --owner: the panel is the owner's own and gets Claude; an agent's waits for a panel
-// that has Claude (or 本机) to allow it.
-func invite(e adminEnv, args []string, stdout, stderr io.Writer) int {
-	args, owner := ownerFlag(args)
-	if len(args) > 1 || (len(args) == 1 && strings.HasPrefix(args[0], "-")) {
-		fmt.Fprintln(stderr, "用法：ir invite [名字] [--owner]\n  --owner：确认这是我本人用的终端，带 Claude")
-		return 2
-	}
-	req := api.NewInvite{Owner: owner}
-	if len(args) == 1 {
-		req.Name = args[0]
-	}
-	var raw json.RawMessage
-	code, err := e.call("POST", "/api/terminals/invites", req, &raw)
-	if err != nil {
-		return failed(stderr, "invite", err)
-	}
-	if code == http.StatusAccepted {
-		return waitConfirm(e, raw, stdout, stderr)
-	}
-	var inv api.Invite
-	if err := json.Unmarshal(raw, &inv); err != nil {
-		return failed(stderr, "invite", err)
-	}
-	claude := "不带 Claude（要带：ir invite --owner）"
-	if owner {
-		claude = "带 Claude"
-	}
-	fmt.Fprintf(stdout, "新网页面板的邀请（%s 前有效，只能用一次，%s）：\n\n  %s\n\n在那台设备的浏览器里打开，起名、建 Passkey。\n", hhmm(inv.ExpiresAt), claude, inv.URL)
-	return 0
-}
-
-// token: ir token <名字> [--owner] [--into 文件]. A person gets the token; an agent, only what the
-// panel decided. --owner: the plugin is the owner's own and gets Claude; an agent's waits for a
-// panel that has Claude (or 本机) to allow it. --into: the daemon writes the token into the file,
-// shown to no one (a plugin's setup asks so).
-func token(e adminEnv, args []string, stdout, stderr io.Writer) int {
-	args, owner := ownerFlag(args)
-	var into string
-	var rest []string
-	for i := 0; i < len(args); i++ {
-		switch a := args[i]; {
-		case a == "--into" && i+1 < len(args):
-			i++
-			into = args[i]
-		case strings.HasPrefix(a, "--into="):
-			into = strings.TrimPrefix(a, "--into=")
-		default:
-			rest = append(rest, a)
-		}
-	}
-	if len(rest) != 1 || strings.HasPrefix(rest[0], "-") {
-		fmt.Fprintln(stderr, "用法：ir token <名字> [--owner] [--into 文件]\n  --owner：确认这是我本人用的终端，带 Claude\n  --into：TOKEN 写进这个文件（0600），不显示")
-		return 2
-	}
-	if into != "" {
-		abs, err := filepath.Abs(into)
-		if err != nil {
-			return failed(stderr, "token", err)
-		}
-		into = abs
-	}
-	var raw json.RawMessage
-	code, err := e.call("POST", "/api/terminals/tokens", api.NewInvite{Name: rest[0], Owner: owner, Into: into}, &raw)
-	if err != nil {
-		return failed(stderr, "token", err)
-	}
-	if code == http.StatusAccepted {
-		return waitConfirm(e, raw, stdout, stderr)
-	}
-	var t api.Token
-	if err := json.Unmarshal(raw, &t); err != nil {
-		return failed(stderr, "token", err)
-	}
-	claude := "不带 Claude"
-	if irAccess.HasClaude(t.Terminal.Rules) {
-		claude = "带 Claude"
-	}
-	if t.Into != "" {
-		fmt.Fprintf(stdout, "%s 的 TOKEN 已写入 %s（%s；再跑一次就换新的，旧的作废）。\n", t.Terminal.Name, t.Into, claude)
-		return 0
-	}
-	fmt.Fprintf(stdout, "%s 的 TOKEN（只显示这一次；再跑一次就换新的，旧的作废；%s）：\n\n  %s\n\n请求带 Authorization: Bearer <TOKEN>。\n", t.Terminal.Name, claude, t.Token)
-	return 0
-}
-
-// waitConfirm waits for a panel to answer what an agent asked for, and says only the outcome.
-func waitConfirm(e adminEnv, raw json.RawMessage, stdout, stderr io.Writer) int {
-	var p api.Pending
-	if err := json.Unmarshal(raw, &p); err != nil {
-		return failed(stderr, "confirm", err)
-	}
-	if p.Confirm.Kind == "secret-set" {
-		fmt.Fprintf(stdout, "%s 的值要人在网页面板上填：已发到“需要你”，%s 前有效。等人填……\n", p.Confirm.Name, hhmm(p.Confirm.ExpiresAt))
-		st, err := waitState(e, p.Confirm.ID)
-		if err != nil {
-			return failed(stderr, "secret set", err)
-		}
-		if st.State == "allowed" {
-			fmt.Fprintf(stdout, "已存 %s。用法：ir run -- 命令 …{{%s}}…\n", st.Name, st.Name)
-			return 0
-		}
-		fmt.Fprintln(stdout, outcome(st))
-		return 1
-	}
-	what := map[string]string{"invite": "新网页面板的邀请", "token": "Bot TOKEN"}[p.Confirm.Kind]
-	if p.Confirm.Name != "" {
-		what += "（" + p.Confirm.Name + "）"
-	}
-	if p.Confirm.Into != "" {
-		what += "，写入 " + p.Confirm.Into
-	}
-	who := "网页面板"
-	if p.Confirm.Owner {
-		what += "，带 Claude"
-		who = "带 Claude 的网页面板"
-	}
-	fmt.Fprintf(stdout, "%s要在%s上确认：已发到“需要你”，%s 前有效。等确认……\n", what, who, hhmm(p.Confirm.ExpiresAt))
-	for {
-		var st api.ConfirmState
-		if _, err := e.call("GET", "/api/confirms/"+url.PathEscape(p.Confirm.ID)+"?wait=60", nil, &st); err != nil {
-			return failed(stderr, "confirm", err)
-		}
-		switch st.State {
-		case "pending":
-			continue
-		case "allowed":
-			claude := ""
-			if st.Owner {
-				claude = "，带 Claude"
-			}
-			if st.Kind == "invite" {
-				fmt.Fprintf(stdout, "同意了%s：邀请链接只显示在确认的那个面板上（%s 前有效）。\n", claude, hhmm(st.ExpiresAt))
-			} else if p.Confirm.Into != "" {
-				fmt.Fprintf(stdout, "同意了%s：%s 的 TOKEN 已写入 %s。\n", claude, st.Name, p.Confirm.Into)
-			} else {
-				fmt.Fprintf(stdout, "同意了%s：%s 的 TOKEN 只显示在确认的那个面板上。\n", claude, st.Name)
-			}
-			return 0
-		case "denied":
-			fmt.Fprintln(stdout, "网页面板拒绝了。")
-		case "expired":
-			fmt.Fprintln(stdout, "没人确认，过期了。")
-		default:
-			fmt.Fprintf(stdout, "没成：%s\n", st.Error)
-		}
-		return 1
-	}
-}
-
 func hhmm(ms int64) string {
 	if ms == 0 {
 		return "—"
 	}
 	return time.UnixMilli(ms).Format("15:04")
-}
-
-// access: ir access, every terminal and unused invite (nothing secret), and which have Claude:
-// set as each was made, never changed (the user, 2026-11-08).
-func access(e adminEnv, args []string, stdout, stderr io.Writer) int {
-	if len(args) > 0 {
-		fmt.Fprintln(stderr, "用法：ir access\n  Claude 只在建终端时定（ir invite --owner、ir token --owner），之后不能改")
-		return 2
-	}
-	var ts api.Terminals
-	if _, err := e.call("GET", "/api/terminals", nil, &ts); err != nil {
-		return failed(stderr, "access", err)
-	}
-	rows := [][]string{{"名字", "类型", "ID", "Claude", "在线", "今天用量", "上次"}}
-	for _, t := range ts.Terminals {
-		kind := map[api.TerminalKind]string{api.TerminalPanel: "面板", api.TerminalChannel: "通道"}[t.Kind]
-		if t.Local {
-			kind = "内置"
-		}
-		claude := "—"
-		if irAccess.HasClaude(t.Rules) {
-			claude = "开"
-		}
-		rows = append(rows, []string{t.Name, kind, t.ID, claude, strconv.Itoa(t.Online), strconv.FormatInt(t.UsedToday, 10), when(t.LastSeenAt)})
-	}
-	table(stdout, rows)
-	if len(ts.Invites) > 0 {
-		fmt.Fprintln(stdout, "\n未用的邀请：")
-		rows = rows[:0]
-		for _, i := range ts.Invites {
-			until := "到 " + hhmm(i.ExpiresAt)
-			if i.Setup {
-				until = "首次设置（状态目录里的 setup-token）"
-			}
-			if i.Owner {
-				until += "，带 Claude"
-			}
-			rows = append(rows, []string{"", i.ID, i.Name, until})
-		}
-		table(stdout, rows)
-	}
-	return 0
 }
 
 // table prints rows in columns, by display width (a CJK character takes two).
@@ -410,158 +192,9 @@ func width(s string) int {
 	return n
 }
 
-func when(ms int64) string {
-	if ms == 0 {
-		return "—"
-	}
-	return time.UnixMilli(ms).Format("01-02 15:04")
-}
-
 type multipartBody struct {
 	buf bytes.Buffer
 	ct  string
-}
-
-// profile: ir profile <名字> [--name 新名] [--avatar 图片] [--no-avatar] [--device computer|laptop|phone|none].
-func profile(e adminEnv, args []string, stdout, stderr io.Writer) int {
-	usage := func() int {
-		fmt.Fprintln(stderr, "用法：ir profile <名字> [--name 新名] [--avatar 图片] [--no-avatar] [--device computer|laptop|phone|none]")
-		return 2
-	}
-	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
-		return usage()
-	}
-	ref, rest := args[0], args[1:]
-	body := &multipartBody{}
-	mw := multipart.NewWriter(&body.buf)
-	changed, device := false, ""
-	for i := 0; i < len(rest); i++ {
-		flag, val, hasVal := strings.Cut(rest[i], "=")
-		next := func() (string, bool) {
-			if hasVal {
-				return val, true
-			}
-			if i+1 < len(rest) {
-				i++
-				return rest[i], true
-			}
-			return "", false
-		}
-		switch flag {
-		case "--name":
-			v, ok := next()
-			if !ok {
-				return usage()
-			}
-			mw.WriteField("name", v)
-		case "--avatar":
-			v, ok := next()
-			if !ok {
-				return usage()
-			}
-			data, err := os.ReadFile(v)
-			if err != nil {
-				return failed(stderr, "profile", err)
-			}
-			w, _ := mw.CreateFormFile("avatar", filepath.Base(v))
-			w.Write(data)
-		case "--no-avatar":
-			mw.WriteField("removeAvatar", "1")
-		case "--device":
-			v, ok := next()
-			if !ok || !api.Device(v).Valid() {
-				return usage()
-			}
-			device = v
-			continue
-		default:
-			return usage()
-		}
-		changed = true
-	}
-	if !changed && device == "" {
-		return usage()
-	}
-	if device != "" {
-		var t api.Terminal
-		if _, err := e.call("PUT", "/api/terminals/"+url.PathEscape(ref)+"/device", api.SetDevice{Device: api.Device(device)}, &t); err != nil {
-			return failed(stderr, "profile", err)
-		}
-		if !changed {
-			fmt.Fprintf(stdout, "改好了：%s（%s）\n", t.Name, deviceName(t.Device))
-			return 0
-		}
-	}
-	mw.Close()
-	body.ct = mw.FormDataContentType()
-	var info struct {
-		Name   string `json:"name"`
-		Avatar string `json:"avatar"`
-	}
-	if _, err := e.call("PUT", "/api/endpoints/"+url.PathEscape(ref)+"/profile", body, &info); err != nil {
-		return failed(stderr, "profile", err)
-	}
-	fmt.Fprintf(stdout, "改好了：%s%s\n", info.Name, map[bool]string{true: "（有头像）", false: ""}[info.Avatar != ""])
-	return 0
-}
-
-func deviceName(d api.Device) string {
-	switch d {
-	case api.DeviceLaptop:
-		return "笔记本"
-	case api.DevicePhone:
-		return "手机"
-	case api.DeviceNone:
-		return "不展示"
-	}
-	return "电脑"
-}
-
-// revoke: ir revoke <名字>, a terminal or an unused invite.
-func revoke(e adminEnv, args []string, stdout, stderr io.Writer) int {
-	if len(args) != 1 {
-		fmt.Fprintln(stderr, "用法：ir revoke <名字或 ID>")
-		return 2
-	}
-	if _, err := e.call("DELETE", "/api/terminals/"+url.PathEscape(args[0]), nil, nil); err != nil {
-		return failed(stderr, "revoke", err)
-	}
-	fmt.Fprintf(stdout, "撤销了 %s。\n", args[0])
-	return 0
-}
-
-// updateCmd: ir update [--check] [--force].
-func updateCmd(e adminEnv, args []string, stdout, stderr io.Writer) int {
-	check, force := false, false
-	for _, a := range args {
-		switch a {
-		case "--check":
-			check = true
-		case "--force":
-			force = true
-		default:
-			fmt.Fprintln(stderr, "用法：ir update [--check] [--force]")
-			return 2
-		}
-	}
-	var st api.UpdateState
-	if _, err := e.call("POST", "/api/update/check", nil, &st); err != nil {
-		return failed(stderr, "update", err)
-	}
-	if !st.Available && !force {
-		fmt.Fprintf(stdout, "已是最新：%s（最新 %s）。\n", st.Current, st.Latest)
-		return 0
-	}
-	if check {
-		fmt.Fprintf(stdout, "有新版 %s（现在 %s）：\n%s\n跑 ir update 更新。\n", st.Latest, st.Current, st.Notes)
-		return 0
-	}
-	fmt.Fprintf(stdout, "更新到 %s……\n", st.Latest)
-	if _, err := e.call("POST", "/api/update", api.ApplyUpdate{Force: force}, &st); err != nil {
-		return failed(stderr, "update", err)
-	}
-	fmt.Fprintf(stdout, "装好了 %s，服务在重启；托管的会话不受影响。\n", st.Latest)
-	return 0
 }
 
 // publicCmd: ir public [off]. Interactive: a person at a terminal only.
@@ -576,7 +209,7 @@ func publicCmd(e adminEnv, args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	// The daemon sets public.origin at the end: make sure it is there before anything is made.
-	if _, err := e.call("GET", "/api/health", nil, nil); err != nil {
+	if _, err := e.call("GET", "/v1/internal/me", nil, nil); err != nil {
 		return failed(stderr, "public", err)
 	}
 	o, err := publicOptions(e, stdout)
@@ -655,13 +288,13 @@ func xdgConfig(home string) string {
 type daemon struct{ e adminEnv }
 
 func (d daemon) SetOrigin(_ context.Context, origin string) error {
-	_, err := d.e.call("PUT", "/api/public", api.SetPublic{Origin: origin}, nil)
+	_, err := d.e.call("PUT", "/v1/internal/public", api.SetPublic{Origin: origin}, nil)
 	return err
 }
 
 func (d daemon) Invite(context.Context) (string, time.Time, error) {
 	var inv api.Invite
-	if _, err := d.e.call("POST", "/api/terminals/invites", api.NewInvite{}, &inv); err != nil {
+	if _, err := d.e.call("POST", "/v1/internal/invites", api.NewInvite{}, &inv); err != nil {
 		return "", time.Time{}, err
 	}
 	return inv.URL, time.UnixMilli(inv.ExpiresAt), nil

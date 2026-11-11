@@ -1,7 +1,7 @@
 // Two readings of what a chat shows, pure for tests: who a message of the user's is from (plan
 // "消息来源"), and the files a reply names (plan "网页": `![](路径)`, `[名](路径)` and absolute paths
 // in inline code).
-import type { Agent, Device, Session, Terminal } from "../api/types.gen";
+import type { Agent, Device, Session } from "../api/types.gen";
 import { titleOf } from "../ui";
 
 /** A user block's source as the page draws it (QQ-like: a face, a name, a badge on the face):
@@ -10,23 +10,23 @@ import { titleOf } from "../ui";
  *  Iridium's own line. local: 本机 (the machine's terminal, or this page with no gate). */
 export type Source =
   | { kind: "you"; name: string; avatar?: string; device: Device; local?: boolean }
-  | { kind: "letter"; name: string; avatar?: string; channel: boolean; agent?: Agent; session?: string; workflow?: boolean; where?: string }
+  | { kind: "letter"; name: string; avatar?: string; channel: boolean; type?: string; agent?: Agent; session?: string; workflow?: boolean; where?: string }
   | { kind: "iridium" };
 
-/** What sourceOf needs to know of a terminal. */
-export type Who = Pick<Terminal, "id" | "name" | "avatar" | "device" | "local">;
+/** What sourceOf needs to know of who sent a message: an app, a login of ir_web (web), or the host. */
+export type Who = { id: string; name: string; avatar?: string; device?: Device; host?: boolean; web?: boolean; type?: string };
 
-const LOCAL_TERMINAL: Who = { id: "local", name: "本机", local: true };
+const HOST: Who = { id: "local", name: "主机", host: true };
 
 /** Your words from terminal x. */
-export const yours = (x: Who): Extract<Source, { kind: "you" }> => ({ kind: "you", name: x.name, avatar: x.avatar, device: x.device ?? "computer", ...(x.local ? { local: true } : {}) });
+export const yours = (x: Who): Extract<Source, { kind: "you" }> => ({ kind: "you", name: x.name, avatar: x.avatar, device: x.device ?? "computer", ...(x.host ? { local: true } : {}) });
 
 /** Who wrote a message: from, the tag Iridium wrote it with, and terminal, the sending terminal's ID
  *  (Block.from, fromTerminal). me: this panel ("local" with no gate). An agent's ir from another
  *  session is tagged "ir:<session>"; a block with no tag was typed in the agent's own terminal, on
  *  the machine (本机) — except in a subagent, where it is its parent's prompt (of: the session shown,
  *  whose workspace a sender's name leaves out). */
-export function sourceOf(from: string | undefined, terminal: string | undefined, me: Who, terminals: Terminal[], sessions: Session[], workspaces: { id: number; name: string }[] = [], of?: Pick<Session, "subagent" | "parent" | "workflow" | "workspace">): Source {
+export function sourceOf(from: string | undefined, terminal: string | undefined, me: Who, terminals: Who[], sessions: Session[], workspaces: { id: number; name: string }[] = [], of?: Pick<Session, "subagent" | "parent" | "workflow" | "workspace">): Source {
   const here = of ? (of.workspace ?? 0) : undefined; // 0: 未归类 (the field left out)
   if (from === "Iridium") return { kind: "iridium" };
   // A subagent's prompt is written by the session that started it (an Agent tool call, a workflow).
@@ -43,16 +43,18 @@ export function sourceOf(from: string | undefined, terminal: string | undefined,
     const s = sessions.find((s) => s.id === id || s.id.startsWith(id));
     return s ? { kind: "letter", name: senderName(s, workspaces, here), channel: false, agent: s.agent, session: s.id, where: s.cwd } : { kind: "letter", name: id.slice(0, 8), channel: false };
   }
-  const local = terminals.find((x) => x.local) ?? (me.local ? me : LOCAL_TERMINAL);
+  const local = terminals.find((x) => x.host) ?? (me.host ? me : HOST);
   if (!from) return yours(local);
   if ((terminal ?? "") === me.id) return yours(me);
-  const e = terminals.find((x) => x.id === terminal) ?? terminals.find((x) => x.name.toLowerCase() === from.toLowerCase());
+  // By ID; by name only without one (a name is unique only in its scope: ir_web's logins first).
+  const named = terminals.filter((x) => x.name.toLowerCase() === from.toLowerCase());
+  const e = terminal ? terminals.find((x) => x.id === terminal) : (named.find((x) => x.web || x.host) ?? named[0]);
   if (e?.id === me.id) return yours(me);
-  // Another panel, or 本机 (this machine: its page with no gate, a person's ir): your words too.
-  if (e?.kind === "panel" || e?.local) return yours(e);
-  if (!e && (terminal === "local" || from === "本机")) return yours(local);
+  // Another login of ir_web, or the host (its page with no gate, a person's ir): your words too.
+  if (e?.web || e?.host) return yours(e);
+  if (!e && (terminal === "local" || from === "主机" || from === "本机")) return yours(local);
   // A plugin writes "[name·sender]": the plugin's avatar, the whole tag as the name.
-  return { kind: "letter", name: from, avatar: e?.avatar, channel: true };
+  return { kind: "letter", name: from, avatar: e?.avatar, channel: true, ...(e?.type ? { type: e.type } : {}) };
 }
 
 /** A session as the sender of a letter, as the sidebar calls it (the user, 2026-11-06): its given
@@ -68,6 +70,9 @@ export function senderName(s: Pick<Session, "id" | "name" | "title" | "cwd" | "w
 
 /** The type a session's row is dragged with (sidebar.tsx), its id the data. */
 export const SESSION_DRAG = "application/x-iridium-session";
+/** The type a group's or a folder's row is dragged with (sidebar.tsx): {path, name} as JSON, path
+ *  the page's ("<machine>:<path>" at another machine, '/'-separated). */
+export const PLACE_DRAG = "application/x-iridium-place";
 
 /** The shortest start of id, at least 8 characters, no other of ids shares: what ir takes for a
  *  session (internal/cli short). */
@@ -77,20 +82,68 @@ export function shortId(id: string, ids: string[]): string {
 }
 
 /** A session named in a message, as a row dropped on the composer writes it (i18n
- *  composer.mention): 「title」（Claude 会话 1a2b3c4d）, or "title" (Claude session 1a2b3c4d). */
-export type Mention = { title: string; agent: string; id: string; text: string };
-const MENTION = /「([^」\n]{1,200})」（([^（）\n]{1,40}?) 会话 ([0-9A-Za-z_-]{8,64})）|"([^"\n]{1,200})" \(([^()\n]{1,40}?) session ([0-9A-Za-z_-]{8,64})\)/g;
+ *  composer.mention): 「title」（Claude 会话 1a2b3c4d）, or "title" (Claude session 1a2b3c4d). A
+ *  place (composer.mentionFolder, composer.mentionWorkspace, docs/plan.md "@"): a folder here,
+ *  文件夹「ir」（/home/otae/ir）, or one at another machine by its name, its path as it writes it,
+ *  工作区「Ds_Benchmark」（otae-2:C:\Code\Ds_Benchmark）; folder "ir" (/home/otae/ir) and workspace
+ *  "Ds_Benchmark" (otae-2:C:\Code\Ds_Benchmark) in English. machine: none for this machine. */
+export type Mention =
+  | { kind: "session"; title: string; agent: string; id: string; text: string }
+  | { kind: "place"; name: string; machine?: string; path: string; text: string };
+// A place's path may hold brackets: it ends at the last closing one before a space or the next
+// opening one (2026-11-10), so one after another, and words after, still part.
+const ZH_PATH = "([^\\n]{1,400}?)）(?![^\\s（]*）)";
+const EN_PATH = "([^\\n]{1,400}?)\\)(?![^\\s(]*\\))";
+// A machine's name may have spaces (My PC); it ends at the first colon (a name has none).
+const MACHINE = "([^\\n:「」（）\"()]{1,64}):";
+const MENTION = new RegExp(
+  [
+    `文件夹「([^」\\n]{1,200})」（(?=/)${ZH_PATH}`,
+    `工作区「([^」\\n]{1,200})」（${MACHINE}${ZH_PATH}`,
+    `folder "([^"\\n]{1,200})" \\((?=/)${EN_PATH}`,
+    `workspace "([^"\\n]{1,200})" \\(${MACHINE}${EN_PATH}`,
+    "「([^」\\n]{1,200})」（([^（）\\n]{1,40}?) 会话 ([0-9A-Za-z_-]{8,64})）",
+    '"([^"\\n]{1,200})" \\(([^()\\n]{1,40}?) session ([0-9A-Za-z_-]{8,64})\\)',
+  ].join("|"),
+  "g",
+);
 
-/** A message's text cut at the sessions it names: plain runs and mentions, in order. */
+/** The mention a match of MENTION is, by which of its forms matched. */
+function mentionOf(m: RegExpMatchArray): Mention {
+  const g = m as unknown as (string | undefined)[];
+  const text = m[0];
+  if (g[1] !== undefined) return { kind: "place", name: g[1], path: g[2]!, text };
+  if (g[3] !== undefined) return { kind: "place", name: g[3], machine: g[4]!, path: g[5]!, text };
+  if (g[6] !== undefined) return { kind: "place", name: g[6], path: g[7]!, text };
+  if (g[8] !== undefined) return { kind: "place", name: g[8], machine: g[9]!, path: g[10]!, text };
+  return { kind: "session", title: g[11] ?? g[14]!, agent: g[12] ?? g[15]!, id: g[13] ?? g[16]!, text };
+}
+
+/** A message's text cut at the sessions and places it names: plain runs and mentions, in order. */
 export function mentions(text: string): (string | Mention)[] {
   const out: (string | Mention)[] = [];
   let at = 0;
   for (const m of text.matchAll(MENTION)) {
     if (m.index > at) out.push(text.slice(at, m.index));
-    out.push({ title: m[1] ?? m[4]!, agent: m[2] ?? m[5]!, id: m[3] ?? m[6]!, text: m[0] });
+    out.push(mentionOf(m));
     at = m.index + m[0].length;
   }
   if (at < text.length) out.push(text.slice(at));
+  return out;
+}
+
+/** A place named in words, as the composer sends it: local, a folder here; remote, at the machine
+ *  named (its name as written), its path as that machine writes it. */
+export type PlaceNamed = { kind: "local" | "remote"; machine?: string; path: string; name: string };
+
+/** The places text names, each once, in order (the chat's 在哪干活). */
+export function placesIn(text: string): PlaceNamed[] {
+  const out: PlaceNamed[] = [];
+  for (const p of mentions(text)) {
+    if (typeof p === "string" || p.kind !== "place") continue;
+    const x: PlaceNamed = p.machine ? { kind: "remote", machine: p.machine, path: p.path, name: p.name } : { kind: "local", path: p.path, name: p.name };
+    if (!out.some((o) => o.kind === x.kind && o.machine?.toLowerCase() === x.machine?.toLowerCase() && o.path === x.path)) out.push(x);
+  }
   return out;
 }
 
@@ -128,6 +181,43 @@ export function withoutFiles(text: string, paths: ReadonlySet<string>, home?: st
     return p;
   });
   return out.join("").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+/** The files a queued message has (lines [附件] `path`, attach.go) and its words without them. */
+export function attachedOf(text: string): { paths: string[]; words: string } {
+  const paths = [...text.matchAll(FILE_LINE)].filter((m) => m[1] === "附件").map((m) => m[2]!.trim());
+  return { paths, words: paths.length ? withoutFiles(text, new Set(paths)) : text };
+}
+
+/** A session's id, or its start (8 characters at least, as ir prints it), standing alone in text:
+ *  not inside a path, a word or a longer hash. */
+export const SID = /(?<![\w/.-])[0-9a-f]{8}(?:-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{0,24})(?![\w/-]|\.\w)/g;
+
+/** text cut where it names a session of list by its id or the start of one: the parts that do as
+ *  {id, s}. A start more than one session has, or none, is text. */
+export function sessionIds<S extends { id: string }>(text: string, list: readonly S[]): (string | { id: string; s: S })[] {
+  const out: (string | { id: string; s: S })[] = [];
+  let last = 0;
+  for (const m of text.matchAll(new RegExp(SID))) { // a copy: matchAll starts at the pattern's lastIndex
+    const s = sessionOf(m[0], list);
+    if (!s) continue;
+    if (m.index > last) out.push(text.slice(last, m.index));
+    out.push({ id: m[0], s });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out;
+}
+
+/** The one session of list whose id starts with id, if just one. */
+export function sessionOf<S extends { id: string }>(id: string, list: readonly S[]): S | undefined {
+  let found: S | undefined;
+  for (const s of list) {
+    if (!s.id.startsWith(id)) continue;
+    if (found) return undefined;
+    found = s;
+  }
+  return found;
 }
 
 const NAME_LINE = /^[ \t]*\[标题\].*(?:\n|$)/gm;

@@ -18,12 +18,12 @@ import (
 // machineAt is executor mid, connected; it has answered when nil.
 func (s *Server) machineAt(w http.ResponseWriter, mid string) (*remote.Machine, *wire.Hello) {
 	if s.Remote == nil {
-		fail(w, http.StatusNotFound, "no executors here")
+		refuse(w, http.StatusUnprocessableEntity, "not_here", "no executors here")
 		return nil, nil
 	}
 	mc := s.Remote.Find(mid)
 	if mc == nil {
-		fail(w, http.StatusNotFound, "no such machine")
+		refuse(w, http.StatusUnprocessableEntity, "no_such_app", "no such computer")
 		return nil, nil
 	}
 	hi, ok := mc.Hello()
@@ -137,7 +137,7 @@ func (s *Server) remoteMkdir(w http.ResponseWriter, r *http.Request, req api.New
 	reply(w, http.StatusOK, api.FolderReply{Path: pagePath(hi, p)})
 }
 
-// dshWorkspaces is GET /api/machines/{id}/dsh/workspaces: the folders a new dsh session there may
+// dshWorkspaces is GET /v1/internal/machines/{id}/dsh/workspaces: the folders a new dsh session there may
 // open in, dsh's own workspaces first (docs/exec.md "远端 DSH").
 func (s *Server) dshWorkspaces(w http.ResponseWriter, r *http.Request) {
 	mc, hi := s.machineAt(w, r.PathValue("id"))
@@ -161,7 +161,7 @@ func (s *Server) dshWorkspaces(w http.ResponseWriter, r *http.Request) {
 	reply(w, http.StatusOK, ws)
 }
 
-// dshSync is POST /api/machines/{id}/dsh/sync: the dsh there read again now, its workspaces and
+// dshSync is POST /v1/internal/machines/{id}/dsh/sync: the dsh there read again now, its workspaces and
 // sessions, models and presets (a remote group's menu; docs/exec.md "远端 DSH").
 func (s *Server) dshSync(w http.ResponseWriter, r *http.Request) {
 	mc, _ := s.machineAt(w, r.PathValue("id"))
@@ -169,7 +169,7 @@ func (s *Server) dshSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, ok := mc.Agent(string(api.AgentDsh)); !ok {
-		fail(w, http.StatusNotFound, "no dsh at "+mc.ID())
+		refuse(w, http.StatusUnprocessableEntity, "no_such_agent", "no dsh at "+mc.ID())
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
@@ -184,9 +184,9 @@ func (s *Server) dshSync(w http.ResponseWriter, r *http.Request) {
 func (s *Server) remoteError(w http.ResponseWriter, err error) {
 	switch {
 	case wire.IsCode(err, wire.CodeNotFound):
-		fail(w, http.StatusNotFound, err.Error())
+		refuse(w, http.StatusUnprocessableEntity, "no_such_path", err.Error())
 	case wire.IsCode(err, wire.CodeDenied):
-		fail(w, http.StatusForbidden, err.Error())
+		refuse(w, http.StatusForbidden, "denied", err.Error())
 	case wire.IsCode(err, wire.CodeBadRequest):
 		fail(w, http.StatusBadRequest, err.Error())
 	default:

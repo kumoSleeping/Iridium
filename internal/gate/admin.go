@@ -2,54 +2,48 @@ package gate
 
 import (
 	"errors"
+	"net/http"
 	"strings"
 	"time"
 )
 
 // Admin errors.
 var (
-	ErrNotFound    = errors.New("gate: no such endpoint or invite")
-	ErrLastPasskey = errors.New("gate: cannot revoke the last web panel with a passkey")
-	ErrNotPublic   = errors.New("gate: no public origin configured")
-	ErrLocal       = errors.New("gate: 本机 is built in and has no profile")
+	ErrNotFound = errors.New("gate: no such app or login")
+	ErrLocal    = errors.New("gate: the host is built in and has no profile")
+	ErrBuiltIn  = errors.New("gate: ir_web is built in")
 )
 
-// EndpointInfo is an endpoint as listed: no secrets, no avatar bytes.
+// EndpointInfo is an app or a login of ir_web as listed: no secrets, no avatar bytes.
 type EndpointInfo struct {
 	ID         string    `json:"id"`
 	Name       string    `json:"name"`
-	Kind       string    `json:"kind"`             // KindPanel or KindChannel
+	Kind       string    `json:"kind"`             // KindPanel (a login of ir_web) or KindChannel (an app)
+	Type       string    `json:"type,omitempty"`   // an app's type, display only
 	Avatar     string    `json:"avatar,omitempty"` // URL with a version, for <img src>
-	Passkeys   int       `json:"passkeys,omitempty"`
-	Sessions   int       `json:"sessions,omitempty"` // logged-in browsers
-	Online     int       `json:"online,omitempty"`   // tracked live connections
+	Online     int       `json:"online,omitempty"` // tracked live connections
 	CreatedAt  time.Time `json:"createdAt"`
 	LastSeenAt time.Time `json:"lastSeenAt,omitzero"`
+	ApprovedAt time.Time `json:"approvedAt,omitzero"`
 }
 
-// InviteInfo is a pending invite as listed.
-type InviteInfo struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name,omitempty"`
-	Setup     bool      `json:"setup,omitempty"`
-	Owner     bool      `json:"owner,omitempty"`
-	CreatedAt time.Time `json:"createdAt"`
-	ExpiresAt time.Time `json:"expiresAt,omitzero"`
+// Host: the host's own (HostID).
+func (e EndpointInfo) Host() bool { return e.ID == HostID }
+
+// Identity is the identity of a request from it.
+func (e EndpointInfo) Identity() Identity {
+	switch {
+	case e.ID == HostID:
+		return HostIdentity
+	case e.Kind == KindPanel:
+		return Identity{App: WebApp, Login: e.ID, Name: e.Name}
+	}
+	return Identity{App: e.ID, Name: e.Name}
 }
 
-// Access is what `ir access` shows.
+// Access is what `ir apps` shows of the core: the apps and ir_web's logins.
 type Access struct {
 	Endpoints []EndpointInfo `json:"endpoints"`
-	Invites   []InviteInfo   `json:"invites"`
-}
-
-// InviteLink is a new panel invite. URL holds the secret: show it to the operator only,
-// never log it or let it reach an agent's transcript.
-type InviteLink struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name,omitempty"`
-	URL       string    `json:"url"`
-	ExpiresAt time.Time `json:"expiresAt"`
 }
 
 // Profile is an update to an endpoint's name and avatar. Zero fields change nothing.
@@ -60,75 +54,132 @@ type Profile struct {
 }
 
 func infoOf(e Endpoint) EndpointInfo {
-	info := EndpointInfo{ID: e.ID, Name: e.Name, Kind: e.Kind, Passkeys: len(e.Passkeys),
-		CreatedAt: e.CreatedAt, LastSeenAt: e.LastSeenAt}
+	info := EndpointInfo{ID: e.ID, Name: e.Name, Kind: e.Kind, Type: e.Type,
+		CreatedAt: e.CreatedAt, LastSeenAt: e.LastSeenAt, ApprovedAt: e.ApprovedAt}
 	if e.AvatarVersion != "" {
 		info.Avatar = "/_ir/avatar/" + e.ID + "?v=" + e.AvatarVersion
 	}
 	return info
 }
 
-// CreateInvite makes a one-time link (valid InviteTTL) for a new web panel: `ir invite
-// [名字]`. A name, if given, is reserved for the invite and offered to the joiner, who may
-// change it. owner (ir invite --owner): the panel that joins with it is the owner's own; Joined
-// says so.
-func (g *Gate) CreateInvite(name string, owner bool) (InviteLink, error) {
-	if !g.public {
-		return InviteLink{}, ErrNotPublic
-	}
+// CreateWebLogin registers a new login of ir_web named name (unique among them), approved now: a
+// browser joined through an invite (package webapp keeps its passkey).
+func (g *Gate) CreateWebLogin(name string) (EndpointInfo, error) {
 	now := g.now()
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if name != "" {
-		n, err := g.checkNameLocked(name, "", "")
-		if err != nil {
-			return InviteLink{}, err
-		}
-		name = n
+	n, err := g.checkNameLocked(name, KindPanel, "")
+	if err != nil {
+		return EndpointInfo{}, err
 	}
-	token := newToken()
-	id := newID(5) // 8 characters; never "setup"
-	for g.st.invites[id].ID != "" {
-		id = newID(5)
+	e := Endpoint{ID: g.newEndpointIDLocked(), Name: n, Kind: KindPanel, CreatedAt: now, LastSeenAt: now, ApprovedAt: now}
+	if err := g.commitLocked(Change{Endpoints: []Endpoint{e}}); err != nil {
+		return EndpointInfo{}, err
 	}
-	inv := Invite{ID: id, Hash: hashToken(token), Name: name, Owner: owner, CreatedAt: now, ExpiresAt: now.Add(InviteTTL)}
-	if err := g.commitLocked(Change{Invites: []Invite{inv}}); err != nil {
-		return InviteLink{}, err
-	}
-	g.log.Info("gate: invite created", "invite", inv.ID, "name", name, "owner", owner)
-	return InviteLink{ID: inv.ID, Name: name, URL: g.joinURL(token), ExpiresAt: inv.ExpiresAt}, nil
+	g.log.Info("gate: login of ir_web added", "endpoint", e.ID, "name", e.Name)
+	return infoOf(e), nil
 }
 
-// CreateToken returns the bearer token of the channel endpoint (plugin, peer) named name,
-// creating it if needed: `ir token <名字>`. For an existing channel the token is replaced:
-// the old one stops working and its connections are closed. Works in both modes.
+// HasWebLogin: ir_web has a login.
+func (g *Gate) HasWebLogin() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.hasWebLoginLocked()
+}
+
+// Seen is login id of ir_web, which just spoke (its last-seen time kept, once a minute).
+func (g *Gate) Seen(id string) (EndpointInfo, bool) {
+	now := g.now()
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	e, ok := g.st.endpoints[id]
+	if !ok || e.Kind != KindPanel {
+		return EndpointInfo{}, false
+	}
+	if now.Sub(e.LastSeenAt) >= touchEvery {
+		e.LastSeenAt = now
+		g.commitLocked(Change{Endpoints: []Endpoint{e}})
+	}
+	return infoOf(e), true
+}
+
+// SetAppToken makes token the TOKEN of the built-in app id (ir_web), adding its row if missing.
+// It is never listed, found by name, renamed or removed.
+func (g *Gate) SetAppToken(id, token string) error {
+	if !wellFormedChannel(token) {
+		return errors.New("gate: not a TOKEN")
+	}
+	h := hashToken(token)
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	e, ok := g.st.endpoints[id]
+	if ok && e.Kind == KindChannel && hashEqual(e.TokenHash, h) {
+		return nil
+	}
+	if !ok {
+		e = Endpoint{ID: id, Name: id, Kind: KindChannel, CreatedAt: g.now()}
+	}
+	e.TokenHash = h
+	return g.commitLocked(Change{Endpoints: []Endpoint{e}})
+}
+
+// CreateToken returns the TOKEN of the app named name, creating it if needed (a pairing allowed).
+// For an existing app the TOKEN is replaced: the old one stops working and its connections are
+// closed. Works in both modes.
 func (g *Gate) CreateToken(name string) (EndpointInfo, string, error) {
-	return g.createToken(name, true)
+	return g.createToken(name, "", true)
 }
 
-// CreateNewToken is CreateToken for a new channel only: ErrNameTaken if name is anyone's.
+// CreateNewToken is CreateToken for a new app only: ErrNameTaken if an app has name.
 func (g *Gate) CreateNewToken(name string) (EndpointInfo, string, error) {
-	return g.createToken(name, false)
+	return g.createToken(name, "", false)
 }
 
-func (g *Gate) createToken(name string, replace bool) (EndpointInfo, string, error) {
+// CreateApp makes a new app by name, shown as typ (display only), and gives its TOKEN: a pairing
+// allowed. ErrNameTaken if an app has name.
+func (g *Gate) CreateApp(name, typ string) (EndpointInfo, string, error) {
+	return g.createToken(name, typ, false)
+}
+
+// RenewToken gives app id a new TOKEN (an update pairing allowed): the old one stops working and
+// its connections are closed; its name, usage and permissions stay.
+func (g *Gate) RenewToken(id string) (EndpointInfo, string, error) {
+	token := newChannelToken()
+	g.mu.Lock()
+	e, ok := g.st.endpoints[id]
+	if !ok || e.Kind != KindChannel {
+		g.mu.Unlock()
+		return EndpointInfo{}, "", ErrNotFound
+	}
+	e.TokenHash = hashToken(token)
+	err := g.commitLocked(Change{Endpoints: []Endpoint{e}})
+	g.mu.Unlock()
+	if err != nil {
+		return EndpointInfo{}, "", err
+	}
+	g.closeConns(func(c *conn) bool { return c.endpoint == e.ID })
+	g.log.Info("gate: app TOKEN renewed", "endpoint", e.ID, "name", e.Name)
+	return infoOf(e), token, nil
+}
+
+func (g *Gate) createToken(name, typ string, replace bool) (EndpointInfo, string, error) {
 	n, err := NormalizeName(name)
 	if err != nil {
 		return EndpointInfo{}, "", err
 	}
 	token := newChannelToken()
 	g.mu.Lock()
-	e, found := g.findLocked(n)
-	if found && (e.Kind != KindChannel || !replace) {
+	e, found := g.byNameLocked(n, KindChannel)
+	if found && !replace {
 		g.mu.Unlock()
 		return EndpointInfo{}, "", ErrNameTaken
 	}
 	if !found {
-		if n, err = g.checkNameLocked(n, "", ""); err != nil {
+		if n, err = g.checkNameLocked(n, KindChannel, ""); err != nil {
 			g.mu.Unlock()
 			return EndpointInfo{}, "", err
 		}
-		e = Endpoint{ID: g.newEndpointIDLocked(), Name: n, Kind: KindChannel, CreatedAt: g.now()}
+		e = Endpoint{ID: g.newEndpointIDLocked(), Name: n, Kind: KindChannel, Type: typ, CreatedAt: g.now()}
 	}
 	e.TokenHash = hashToken(token)
 	err = g.commitLocked(Change{Endpoints: []Endpoint{e}})
@@ -139,13 +190,12 @@ func (g *Gate) createToken(name string, replace bool) (EndpointInfo, string, err
 	if found {
 		g.closeConns(func(c *conn) bool { return c.endpoint == e.ID })
 	}
-	g.log.Info("gate: channel token issued", "endpoint", e.ID, "name", e.Name, "replaced", found)
+	g.log.Info("gate: app TOKEN issued", "endpoint", e.ID, "name", e.Name, "replaced", found)
 	return infoOf(e), token, nil
 }
 
-// Access lists all endpoints and pending invites: `ir access`.
+// Access lists every app and every login of ir_web: `ir apps`. (Not ir_web's own row.)
 func (g *Gate) Access() Access {
-	now := g.now()
 	online := map[string]int{}
 	g.connMu.Lock()
 	for c := range g.conns {
@@ -155,33 +205,23 @@ func (g *Gate) Access() Access {
 
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	sessions := map[string]int{}
-	for _, s := range g.st.sessions {
-		if !sessionExpired(s, now) {
-			sessions[s.EndpointID]++
-		}
-	}
 	st := g.st.state()
-	out := Access{Endpoints: []EndpointInfo{}, Invites: []InviteInfo{}}
+	out := Access{Endpoints: []EndpointInfo{}}
 	for _, e := range st.Endpoints {
-		info := infoOf(e)
-		info.Sessions, info.Online = sessions[e.ID], online[e.ID]
-		out.Endpoints = append(out.Endpoints, info)
-	}
-	panel := g.hasPanelLocked() // then a setup link is no use, and not listed
-	for _, inv := range st.Invites {
-		if (inv.Setup && !panel) || (!inv.Setup && now.Before(inv.ExpiresAt)) {
-			out.Invites = append(out.Invites, InviteInfo{ID: inv.ID, Name: inv.Name, Setup: inv.Setup, Owner: inv.Owner,
-				CreatedAt: inv.CreatedAt, ExpiresAt: inv.ExpiresAt})
+		if e.ID == WebApp {
+			continue
 		}
+		info := infoOf(e)
+		info.Online = online[e.ID]
+		out.Endpoints = append(out.Endpoints, info)
 	}
 	return out
 }
 
-// Endpoint returns one endpoint by ID, including the built-in 本机.
+// Endpoint returns one app or login of ir_web by ID, including the host.
 func (g *Gate) Endpoint(id string) (EndpointInfo, bool) {
-	if id == LocalEndpointID {
-		return EndpointInfo{ID: LocalEndpointID, Name: LocalName, Kind: KindChannel}, true
+	if id == HostID {
+		return EndpointInfo{ID: HostID, Name: HostName, Kind: KindChannel}, true
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -189,8 +229,23 @@ func (g *Gate) Endpoint(id string) (EndpointInfo, bool) {
 	return infoOf(e), ok
 }
 
-// ByToken returns the Bot (channel) whose TOKEN tok is: what a plugin holding it is, whatever the
-// terminal has been renamed to since.
+// ByToken returns the app whose TOKEN tok is, whatever it has been renamed to since.
+// ByTokenFrom is ByToken for a TOKEN that came in a request's body (Satori's IDENTIFY), counted
+// against r's client as a bearer token is: a client that fails too often waits.
+func (g *Gate) ByTokenFrom(r *http.Request, tok string) (EndpointInfo, bool) {
+	now := g.now()
+	key := ClientKey(r, g.ipHeader)
+	if g.lim.Wait(key, now) > 0 {
+		return EndpointInfo{}, false
+	}
+	info, ok := g.ByToken(tok)
+	if !ok {
+		g.lim.Fail(key, now)
+		g.log.Info("gate: bad token in a stream", "client", key)
+	}
+	return info, ok
+}
+
 func (g *Gate) ByToken(tok string) (EndpointInfo, bool) {
 	tok = strings.TrimSpace(tok)
 	if !wellFormedChannel(tok) {
@@ -200,7 +255,7 @@ func (g *Gate) ByToken(tok string) (EndpointInfo, bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	for _, e := range g.st.endpoints {
-		if e.Kind == KindChannel && e.TokenHash != "" && hashEqual(e.TokenHash, h) {
+		if e.Kind == KindChannel && e.ID != WebApp && e.TokenHash != "" && hashEqual(e.TokenHash, h) {
 			return infoOf(e), true
 		}
 	}
@@ -220,10 +275,22 @@ func SameToken(hash, tok string) bool {
 	return hash != "" && hashEqual(hash, hashToken(strings.TrimSpace(tok)))
 }
 
-// Find returns one endpoint by ID or name, including the built-in 本机.
+// IsHostRef: ref names the host (its ID, or one of its reserved names).
+func IsHostRef(ref string) bool {
+	k := nameKey(strings.TrimSpace(ref))
+	for _, n := range []string{HostID, HostName, "host", "本机"} {
+		if k == nameKey(n) {
+			return true
+		}
+	}
+	return false
+}
+
+// Find returns one app or login of ir_web by ID or name, including the host: an app by its
+// name, a login as "ir_web/名字" (or by its name alone when no app has it).
 func (g *Gate) Find(ref string) (EndpointInfo, bool) {
-	if ref == LocalEndpointID || nameKey(ref) == nameKey(LocalName) {
-		return g.Endpoint(LocalEndpointID)
+	if IsHostRef(ref) {
+		return g.Endpoint(HostID)
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -231,11 +298,19 @@ func (g *Gate) Find(ref string) (EndpointInfo, bool) {
 	return infoOf(e), ok
 }
 
-// CheckName returns the stored form of name if a new endpoint could take it.
+// CheckName returns the stored form of name if a new app could take it.
 func (g *Gate) CheckName(name string) (string, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	return g.checkNameLocked(name, "", "")
+	return g.checkNameLocked(name, KindChannel, "")
+}
+
+// CheckLoginName returns the stored form of name if no login of ir_web has it (an invite's names
+// are package webapp's to check).
+func (g *Gate) CheckLoginName(name string) (string, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.checkNameLocked(name, KindPanel, "")
 }
 
 // UpdateProfile changes the name and/or avatar of the endpoint ref (ID or name):
@@ -249,19 +324,27 @@ func (g *Gate) UpdateProfile(ref string, p Profile) (EndpointInfo, error) {
 			return EndpointInfo{}, err
 		}
 	}
+	// A name an invite of ir_web holds, asked before the lock: ir_web calls in here holding its own.
+	held := false
+	if n, err := NormalizeName(deref(p.Name)); p.Name != nil && err == nil && g.cfg.LoginNameTaken != nil {
+		held = g.cfg.LoginNameTaken(n)
+	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	e, ok := g.findLocked(ref)
 	if !ok {
-		if ref == LocalEndpointID || nameKey(ref) == nameKey(LocalName) {
+		if IsHostRef(ref) {
 			return EndpointInfo{}, ErrLocal
 		}
 		return EndpointInfo{}, ErrNotFound
 	}
 	if p.Name != nil {
-		n, err := g.checkNameLocked(*p.Name, e.ID, "")
+		n, err := g.checkNameLocked(*p.Name, e.Kind, e.ID)
 		if err != nil {
 			return EndpointInfo{}, err
+		}
+		if held && e.Kind == KindPanel {
+			return EndpointInfo{}, ErrNameTaken
 		}
 		e.Name = n
 	}
@@ -278,102 +361,88 @@ func (g *Gate) UpdateProfile(ref string, p Profile) (EndpointInfo, error) {
 	return infoOf(e), nil
 }
 
-// Revoke removes the endpoint ref (ID or name), ending its sessions and closing its
-// tracked connections, or else the pending invite ref (ID or reserved name): `ir revoke`.
-// The last web panel with a passkey cannot be revoked; with every passkey lost, run
-// `ir invite` on the machine instead.
+// Revoke removes the app or login of ir_web ref (Find's), closing its tracked connections, then
+// tells Config.OnRevoke (ir_web ends a login's web sessions there): `ir apps rm`.
 func (g *Gate) Revoke(ref string) error {
+	if IsHostRef(ref) {
+		return ErrLocal
+	}
+	if ref == WebApp {
+		return ErrBuiltIn
+	}
 	g.mu.Lock()
-	if e, ok := g.findLocked(ref); ok {
-		if e.Kind == KindPanel && len(e.Passkeys) > 0 {
-			others := 0
-			for _, o := range g.st.endpoints {
-				if o.ID != e.ID && o.Kind == KindPanel && len(o.Passkeys) > 0 {
-					others++
-				}
-			}
-			if others == 0 {
-				g.mu.Unlock()
-				return ErrLastPasskey
-			}
-		}
-		ch := Change{DeleteEndpoints: []string{e.ID}}
-		for h, s := range g.st.sessions {
-			if s.EndpointID == e.ID {
-				ch.DeleteSessions = append(ch.DeleteSessions, h)
-			}
-		}
-		err := g.commitLocked(ch)
+	e, ok := g.findLocked(ref)
+	if !ok {
 		g.mu.Unlock()
-		if err != nil {
-			return err
-		}
-		g.closeConns(func(c *conn) bool { return c.endpoint == e.ID })
-		g.log.Info("gate: endpoint revoked", "endpoint", e.ID, "name", e.Name)
-		if g.cfg.OnRevoke != nil {
-			g.cfg.OnRevoke(e.ID)
-		}
-		return nil
+		return ErrNotFound
 	}
-	defer g.mu.Unlock()
-	key := ""
-	if n, err := NormalizeName(ref); err == nil {
-		key = nameKey(n)
+	err := g.commitLocked(Change{DeleteEndpoints: []string{e.ID}})
+	g.mu.Unlock()
+	if err != nil {
+		return err
 	}
-	for id, inv := range g.st.invites {
-		if id == ref || (inv.Name != "" && nameKey(inv.Name) == key) {
-			if err := g.commitLocked(Change{DeleteInvites: []string{id}}); err != nil {
-				return err
-			}
-			if inv.Setup {
-				g.removeSetupFile()
-			}
-			g.log.Info("gate: invite revoked", "invite", id)
-			return nil
-		}
+	g.closeConns(func(c *conn) bool { return c.endpoint == e.ID })
+	g.log.Info("gate: endpoint revoked", "endpoint", e.ID, "name", e.Name)
+	if g.cfg.OnRevoke != nil {
+		g.cfg.OnRevoke(e.ID)
 	}
-	return ErrNotFound
+	return nil
 }
 
-// findLocked resolves an endpoint by ID or by name. IDs are longer than any name.
+// findLocked resolves an app or a login of ir_web by ID or by name (Find's). IDs are longer than
+// any name.
 func (g *Gate) findLocked(ref string) (Endpoint, bool) {
+	if ref == WebApp {
+		return Endpoint{}, false
+	}
 	if e, ok := g.st.endpoints[ref]; ok {
 		return e, true
 	}
-	n, err := NormalizeName(ref)
+	if login, ok := strings.CutPrefix(ref, WebApp+"/"); ok {
+		if e, ok := g.st.endpoints[login]; ok && e.Kind == KindPanel {
+			return e, true
+		}
+		return g.byNameLocked(login, KindPanel)
+	}
+	if e, ok := g.byNameLocked(ref, KindChannel); ok {
+		return e, true
+	}
+	return g.byNameLocked(ref, KindPanel)
+}
+
+// byNameLocked finds the app (KindChannel) or login of ir_web (KindPanel) by name.
+func (g *Gate) byNameLocked(name, kind string) (Endpoint, bool) {
+	n, err := NormalizeName(name)
 	if err != nil {
 		return Endpoint{}, false
 	}
 	k := nameKey(n)
 	for _, e := range g.st.endpoints {
-		if nameKey(e.Name) == k {
+		if e.Kind == kind && nameKey(e.Name) == k {
 			return e, true
 		}
 	}
 	return Endpoint{}, false
 }
 
-// checkNameLocked normalizes raw and checks that no endpoint (but exceptEndpoint) and
-// no live invite (but exceptInvite) holds it.
-func (g *Gate) checkNameLocked(raw, exceptEndpoint, exceptInvite string) (string, error) {
+// checkNameLocked normalizes raw and checks that no other of its kind (but exceptEndpoint) holds
+// it: names are unique among apps, and among ir_web's logins.
+func (g *Gate) checkNameLocked(raw, kind, exceptEndpoint string) (string, error) {
 	n, err := NormalizeName(raw)
 	if err != nil {
 		return "", err
 	}
 	k := nameKey(n)
 	for _, e := range g.st.endpoints {
-		if e.ID != exceptEndpoint && nameKey(e.Name) == k {
-			return "", ErrNameTaken
-		}
-	}
-	now := g.now()
-	for _, inv := range g.st.invites {
-		if inv.ID != exceptInvite && inv.Name != "" && (inv.Setup || now.Before(inv.ExpiresAt)) && nameKey(inv.Name) == k {
+		if e.Kind == kind && e.ID != exceptEndpoint && nameKey(e.Name) == k {
 			return "", ErrNameTaken
 		}
 	}
 	return n, nil
 }
+
+// NameKey is the form names are compared in (case and width folded).
+func NameKey(name string) string { return nameKey(name) }
 
 func (g *Gate) newEndpointIDLocked() string {
 	for {
@@ -382,4 +451,11 @@ func (g *Gate) newEndpointIDLocked() string {
 			return id
 		}
 	}
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }

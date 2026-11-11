@@ -20,11 +20,12 @@ export function iridiumKey(url) {
   return new URL(url).host.toLowerCase().replace(/[^a-z0-9.-]+/g, '-').replace(/^[-.]+|[-.]+$/g, '')
 }
 
-/** Whether the Iridium at url (http or ws) turns the TOKEN down (its Bot removed): then pair again. */
+/** Whether the Iridium at url (http or ws) turns the TOKEN down (its app removed): then pair again.
+ *  Only 401 says so; a 403 is a refusal of something else (its reason in the code). */
 export async function refused(url, token) {
   try {
-    const r = await fetch(new URL('/api/exec', url.replace(/^ws/i, 'http')), { headers: { Authorization: `Bearer ${token}` } })
-    return r.status === 401 || r.status === 403
+    const r = await fetch(new URL('/v1/internal/exec', url.replace(/^ws/i, 'http')), { headers: { Authorization: `Bearer ${token}` } })
+    return r.status === 401
   } catch {
     return false
   }
@@ -52,9 +53,10 @@ const DEAD_AFTER = 70_000
 
 /** A connection: requests both ways, answered by id; events one way. */
 class Conn {
-  constructor(ws, onRequest) {
+  constructor(ws, onRequest, onEvent = () => {}) {
     this.ws = ws
     this.onRequest = onRequest
+    this.onEvent = onEvent
     this.next = 0
     this.waits = new Map()
     this.heard = Date.now()
@@ -84,7 +86,11 @@ class Conn {
     }
     this.heard = Date.now()
     if (f.event === 'ping') this.pinged = true
-    else if (f.method) {
+    else if (f.event) {
+      try {
+        this.onEvent(f.event, f.params ?? {})
+      } catch {}
+    } else if (f.method) {
       Promise.resolve()
         .then(() => this.onRequest(f.method, f.params ?? {}))
         .then(
@@ -332,15 +338,16 @@ function killTree(pid, hard) {
 }
 
 /**
- * The executor. Options: url (ws(s)://…/api/exec), token, state (its own directory), roots
+ * The executor. Options: url (ws(s)://…/v1/internal/exec), token, state (its own directory), roots
  * (directories files may be under; none: all but the denied), agents (Hello's), noShell (start
  * nothing but the agents: no command line runs here), agentShell (say the Iridium's agents may run
  * command lines here, ir sh, not only a person on its page), env ({name: value}; default
  * process.env, the hello gives it without secrets), denied (paths never served besides its own
  * and the agents' logins), program, log; methods, more requests it answers ({name: async
  * (params) => result}); caps, the optional parts of the protocol they make it speak (wire.Hello's
- * caps: held, held.features; a list, or a function giving it at each hello); ir, an ir for its
- * agents (ir.js, withIR).
+ * caps: held, agent.prepare, session.attach; a list, or a function giving it at each hello);
+ * events, the events from the Iridium it takes ({name: (params) => void}); connected, called once
+ * each connection has said hello; ir, an ir for its agents (ir.js, withIR).
  */
 export class Executor {
   constructor(o) {
@@ -417,7 +424,7 @@ export class Executor {
       ws.addEventListener('open', resolve, { once: true })
       ws.addEventListener('error', (e) => reject(new Error(e.message || 'cannot connect')), { once: true })
     })
-    const c = new Conn(ws, (m, p) => this.handle(c, m, p))
+    const c = new Conn(ws, (m, p) => this.handle(c, m, p), (e, p) => this.o.events?.[e]?.(p))
     this.conn = c
     let up = false
     try {
@@ -427,6 +434,11 @@ export class Executor {
       this.since = Date.now()
       this.error = ''
       this.log('connected')
+      try {
+        this.o.connected?.()
+      } catch (e) {
+        this.log(`connected: ${e.message}`)
+      }
       await c.closed
     } finally {
       if (this.conn === c) this.conn = null
@@ -443,6 +455,7 @@ export class Executor {
       arch: process.arch, home: os.homedir(), sep: path.sep, scratch: path.join(this.state, 'scratch'),
       env: helloEnv(this.env),
       agents: this.o.agents ?? [], holds: [...this.holds.values()].map((h) => h.state()),
+      shell: !this.o.noShell,
       ...(this.o.noShell ? { noShell: true } : {}),
       ...(this.o.agentShell ? { agentShell: true } : {}),
       ...(this.o.ir ? { irClient: true } : {}),
@@ -450,7 +463,7 @@ export class Executor {
     }
   }
 
-  /** Sends event (params) to the Iridium if connected (held.changed); false if not. */
+  /** Sends event (params) to the Iridium if connected (held.changed, session.attach); false if not. */
   notify(event, params) {
     return this.conn?.notify(event, params) ?? false
   }

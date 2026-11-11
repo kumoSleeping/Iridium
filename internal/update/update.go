@@ -93,6 +93,9 @@ type Options struct {
 	Current string        // this binary's version
 	// Auto: download a newer version as soon as it is seen; Apply then only swaps and restarts.
 	Auto bool
+	// Manual: automatic updates are off (config update.manual, the settings' 自动更新): no
+	// looking on a timer, nothing downloaded ahead; only Check and Apply when asked.
+	Manual bool
 	// Exe is the binary to replace; "" is this process's own (links resolved).
 	Exe string
 	// Restart runs once the new binary is in place: it restarts the service (or this process).
@@ -114,6 +117,7 @@ type Updater struct {
 	st       api.UpdateState
 	latest   *Manifest
 	auto     bool
+	manual   bool
 	staged   string // the path of the downloaded st.Latest, "" for none
 	stagedV  string
 }
@@ -134,7 +138,7 @@ func New(o Options) *Updater {
 	if o.GitHubAPI == "" {
 		o.GitHubAPI = "https://api.github.com"
 	}
-	return &Updater{o: o, auto: o.Auto, st: api.UpdateState{Current: o.Current, Source: o.Source != "", Auto: o.Auto, Phase: "idle"}}
+	return &Updater{o: o, auto: o.Auto, manual: o.Manual, st: api.UpdateState{Current: o.Current, Source: o.Source != "", Auto: o.Auto, Manual: o.Manual, Phase: "idle"}}
 }
 
 // State is the update state now.
@@ -153,8 +157,18 @@ func (u *Updater) set(f func(*api.UpdateState)) api.UpdateState {
 	return st
 }
 
+// SetManual turns automatic updates off (true) or on again: on, a newer version already seen
+// starts downloading.
+func (u *Updater) SetManual(manual bool) {
+	u.mu.Lock()
+	u.manual = manual
+	u.mu.Unlock()
+	u.set(func(s *api.UpdateState) { s.Manual = manual })
+	u.fetchAhead()
+}
+
 // Run drops what an earlier run left staged, checks a minute after it starts, then every Every,
-// until ctx ends.
+// until ctx ends; with automatic updates off it does not look.
 func (u *Updater) Run(ctx context.Context) {
 	if u.o.Source == "" {
 		return
@@ -172,6 +186,13 @@ func (u *Updater) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+		}
+		u.mu.Lock()
+		manual := u.manual
+		u.mu.Unlock()
+		if manual {
+			t.Reset(u.o.Every)
+			continue
 		}
 		if _, err := u.Check(ctx); err != nil {
 			u.o.Logf("update: %v", err)
@@ -225,11 +246,11 @@ func (u *Updater) idle() string {
 	return "idle"
 }
 
-// fetchAhead downloads the latest in the background, if it is newer, auto download is on and it
-// is not already here or on its way.
+// fetchAhead downloads the latest in the background, if it is newer, auto download is on,
+// automatic updates are not off and it is not already here or on its way.
 func (u *Updater) fetchAhead() {
 	u.mu.Lock()
-	m, want := u.latest, u.auto && u.latest != nil && Newer(u.latest.Version, u.o.Current) && u.stagedV != u.latest.Version
+	m, want := u.latest, u.auto && !u.manual && u.latest != nil && Newer(u.latest.Version, u.o.Current) && u.stagedV != u.latest.Version
 	u.mu.Unlock()
 	if !want || !u.prep.TryLock() {
 		return
@@ -348,55 +369,6 @@ func (u *Updater) release(ctx context.Context, repo string) (Manifest, error) {
 	return m, nil
 }
 
-// Extension downloads the binary bin (an official plugin, iridium-qq) of release tag into a new
-// file in dir: the asset bin-<GOOS>-<GOARCH>.tar.gz, checked against its digest or SHA256SUMS,
-// run once (bin version). The caller renames it into place.
-func (u *Updater) Extension(ctx context.Context, bin, tag, dir string) (string, error) {
-	repo, ok := GitHubRepo(u.o.Source)
-	if !ok {
-		return "", errors.New("no GitHub repository to download from")
-	}
-	var r release
-	api := strings.TrimSuffix(u.o.GitHubAPI, "/") + "/repos/" + repo + "/releases/tags/" + url.PathEscape(tag)
-	if err := u.getJSON(ctx, api, "application/vnd.github+json", &r); err != nil {
-		return "", fmt.Errorf("github %s: release %s: %w", repo, tag, err)
-	}
-	want := bin + "-" + runtime.GOOS + "-" + runtime.GOARCH + ".tar.gz"
-	var a *Asset
-	var sums Asset
-	for _, x := range r.Assets {
-		switch x.Name {
-		case want:
-			sum, _ := strings.CutPrefix(x.Digest, "sha256:")
-			a = &Asset{URL: x.URL, SHA256: sum, Size: x.Size, API: x.API}
-		case "SHA256SUMS", "SHA256SUMS.txt":
-			sums = Asset{URL: x.URL, API: x.API}
-		}
-	}
-	if a == nil {
-		return "", fmt.Errorf("release %s has no %s", tag, want)
-	}
-	if a.SHA256 == "" && sums.URL != "" {
-		listed, err := u.sums(ctx, sums)
-		if err != nil {
-			return "", err
-		}
-		a.SHA256 = listed[want]
-	}
-	if a.SHA256 == "" {
-		return "", fmt.Errorf("release %s: no sha256 for %s", tag, want)
-	}
-	tmp, err := u.fetch(ctx, *a, dir, bin, false)
-	if err != nil {
-		return "", err
-	}
-	if err := runs(ctx, tmp, tag); err != nil {
-		os.Remove(tmp)
-		return "", err
-	}
-	return tmp, nil
-}
-
 // assetPlatform is the GOOS-GOARCH of iridium-<GOOS>-<GOARCH>[.tar.gz].
 func assetPlatform(name string) (string, bool) {
 	rest, ok := strings.CutPrefix(name, "iridium-")
@@ -460,6 +432,9 @@ func (u *Updater) Apply(ctx context.Context, force bool) (api.UpdateState, error
 	if err != nil {
 		return u.State(), err
 	}
+	if err := keepPrev(exe); err != nil {
+		return fail(fmt.Errorf("keeping the binary before: %w", err))
+	}
 	// A new file renamed over the old, never written into it: the running binary keeps its inode
 	// (macOS kills a process whose signed binary changes under it).
 	if err := os.Rename(bin, exe); err != nil {
@@ -476,6 +451,51 @@ func (u *Updater) Apply(ctx context.Context, force bool) (api.UpdateState, error
 		}
 	}
 	return st, nil
+}
+
+// Prev is where Apply keeps the binary it replaced: beside it, named <exe>.prev (iridium.prev), a
+// way back together with the database's copy (store: <db>.v<N>.bak).
+func Prev(exe string) string { return exe + ".prev" }
+
+// keepPrev makes exe's present file Prev(exe), in place of an older one: a hard link to the same
+// inode (the rename over exe then leaves it there), else a copy. Made under another name and
+// renamed, so a failure leaves the older one whole.
+func keepPrev(exe string) error {
+	prev := Prev(exe)
+	tmp := prev + ".tmp"
+	os.Remove(tmp)
+	if err := os.Link(exe, tmp); err != nil {
+		if err := copyFile(exe, tmp); err != nil {
+			os.Remove(tmp)
+			return err
+		}
+	}
+	if err := os.Rename(tmp, prev); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
+func copyFile(from, to string) error {
+	in, err := os.Open(from)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	fi, err := in.Stat()
+	if err != nil {
+		return err
+	}
+	out, err := os.OpenFile(to, os.O_WRONLY|os.O_CREATE|os.O_EXCL, fi.Mode().Perm())
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
 }
 
 func (u *Updater) exe() (string, error) {

@@ -3,12 +3,12 @@
 // of summary, a main and a second key; the details open under it. An approval: the tool and its
 // arguments (commands in monospace), allow / deny / always allow this session. A plan: its
 // Markdown, approve or keep planning. A question: its options as keys, or your own words. Every
-// answer goes to the ask's card (POST /api/answer), as a plugin's does.
+// answer goes to the ask's card (POST /v1/internal/button), as an app's does.
 import { Menu } from "@base-ui/react/menu";
 import { Check, ChevronDown, ClipboardList, FilePen, Globe, LoaderCircle, MessageCircleQuestionMark, PenLine, ShieldAlert, ShieldQuestion, SquareTerminal } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { api } from "../api/client";
-import type { Ask, CardAnswer, Confirm, Denial } from "../api/types.gen";
+import type { Ask, CardAnswer, Need, Denial } from "../api/types.gen";
 import { CardDetails, CardFrame, CardHead, Facts, MainKey, SecondKey } from "../card";
 import { ConfirmCard } from "../confirms";
 import { SecretHere } from "../secret";
@@ -24,13 +24,13 @@ type Q = { question: string; header?: string; options: { label: string; descript
 /** What a key press answers: an option of the card's, or a choice per question and own words. */
 type Reply = { option?: string; choices?: string[]; words?: string[]; message?: string };
 
-export function Asks({ session, asks, cwd, confirms = [] }: { session: string; asks: Ask[]; cwd: string; confirms?: Confirm[] }) {
+export function Asks({ session, asks, cwd, confirms = [] }: { session: string; asks: Ask[]; cwd: string; confirms?: Need[] }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [leaving, setLeaving] = useState<string | null>(null);
   const answer = async (a: Ask, r: Reply) => {
     setBusy(a.requestId);
     try {
-      await api.answer({ card: a.card?.id ?? `ask:${session}:${a.requestId}`, ...r } satisfies CardAnswer);
+      await api.answer(session, { card: a.card?.id ?? `ask:${session}:${a.requestId}`, ...r } satisfies CardAnswer);
       setLeaving(a.requestId);
       setTimeout(() => setLeaving(null), 140);
       if (a.kind === "permission") toast(r.option === "deny" ? t("toast.denied") : t("toast.allowed"), { description: r.option === "always" ? t("ask.always") : undefined });

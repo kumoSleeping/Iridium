@@ -21,6 +21,7 @@ func (b *balancer) Balance(context.Context) ([]api.Balance, error) {
 // A session at another machine reads no balance here: that would take its key and read its files
 // at paths of this machine.
 func TestRemoteNoBalance(t *testing.T) {
+	t.Parallel()
 	b := &balancer{}
 	h := &Hosted{drv: b, meta: meta{Machine: "m1"}}
 	if h.refreshBalance(context.Background()) || b.asked {

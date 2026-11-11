@@ -7,6 +7,7 @@ package join
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -22,25 +23,24 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/kumoSleeping/iridium/internal/api"
+	"github.com/kumoSleeping/iridium/internal/machineid"
 	"github.com/kumoSleeping/iridium/internal/remote/executor"
 	"github.com/kumoSleeping/iridium/internal/remote/wire"
 	"github.com/kumoSleeping/iridium/internal/version"
 )
 
 // Usage is ir join's help.
-const Usage = `usage: ir join <address> [--name name] [--roots dir,…] [--install | --uninstall]
+const Usage = `usage: ir join <address> [--name name] [--roots dir,…] [--shell] [--install | --uninstall]
   Run agents for another Iridium: pair once (a code to match on its page), then stay connected.
   --name     this machine's name there (default: the host name, 12 characters at most)
   --roots    the directories it may read and write files under (default: the home directory)
-  --no-shell start only its agents: no command line from that Iridium runs here
-  --agent-shell  its agents may run command lines here too (ir sh), not only a person on its page
-  --no-agents    offer none of the agents here (with --agent-shell: a machine for ir sh alone)
+  --shell    command lines from that Iridium run here: a person's on its page and its agents' (ir sh);
+             without it only the agents start here
   --install  start at login (Windows: a scheduled task; macOS: a LaunchAgent; Linux: a systemd user unit)
   --uninstall  stop starting at login
 `
@@ -50,10 +50,9 @@ type Options struct {
 	URL   string // the Iridium: https://host[:port]
 	Name  string
 	Roots []string
-	// NoShell: only the agents start here, no command line (docs/exec.md).
-	NoShell, AgentShell bool
-	// NoAgents: offer none of the agents found here.
-	NoAgents bool
+	// Shell: command lines run here, a person's on that Iridium's page and its agents' (ir sh);
+	// else only the agents start here (docs/exec.md).
+	Shell bool
 	// Base is where joins keep their state (BaseDir): tokens/<key>, the TOKENs; <key>/, the
 	// executor's own directory.
 	Base   string
@@ -64,9 +63,12 @@ type Options struct {
 	// Resident: started at login, no one to match a code. It never pairs, and ends (cleanly, not
 	// to be started again) once it has no TOKEN.
 	Resident bool
-	// Bot: pair as a Bot (POST /api/pair, ir pair): its name and Program only.
+	// Bot: pair as an app that is not a computer (ir pair): its name, Type and Program only.
 	Bot     bool
+	Type    string
 	Program string
+	Login   string // the login it speaks as, approved with it (ir pair); "": none
+	Where   string // the Iridium as a person reads it; "": URL
 }
 
 // Main runs ir join with args (after "join").
@@ -75,8 +77,13 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(io.Discard)
 	name := fs.String("name", "", "")
 	roots := fs.String("roots", "", "")
+	shell := fs.Bool("shell", false, "")
+	// The older two, still taken (an installed resident's command line has them): shell is
+	// --agent-shell without --no-shell.
 	noShell := fs.Bool("no-shell", false, "")
 	agentShell := fs.Bool("agent-shell", false, "")
+	// --no-agents is gone (agents are turned off in the app's page there); an installed resident's
+	// command line may still have it: taken, and ignored.
 	noAgents := fs.Bool("no-agents", false, "")
 	install := fs.Bool("install", false, "")
 	uninstall := fs.Bool("uninstall", false, "")
@@ -108,7 +115,7 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "ir join: %v\n", err)
 		return 2
 	}
-	o := Options{URL: u, Name: *name, NoShell: *noShell, AgentShell: *agentShell, NoAgents: *noAgents, Base: *base, Out: stdout, Resident: *resident}
+	o := Options{URL: u, Name: *name, Shell: (*shell || *agentShell) && !*noShell, Base: *base, Out: stdout, Resident: *resident}
 	if o.Base == "" {
 		o.Base, err = BaseDir()
 	} else {
@@ -142,6 +149,9 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	}
 	logger := log.New(stderr, "", log.LstdFlags)
 	o.Logf = logger.Printf
+	if *noAgents {
+		o.Logf("ir join: --no-agents is ignored: turn agents off in the app's page in 应用管理")
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	r := residentFor(o, *unit)
@@ -253,6 +263,8 @@ func (o *Options) logf(format string, a ...any) {
 	}
 }
 
+func (o *Options) where() string { return cmp.Or(o.Where, o.URL) }
+
 func (o *Options) client() *http.Client {
 	if o.HTTP != nil {
 		return o.HTTP
@@ -279,7 +291,7 @@ func (o *Options) program() string { return "iridium " + version.Version }
 // Run pairs if there is no TOKEN, then runs the executor till ctx ends. A TOKEN the Iridium turns
 // down is forgotten and it pairs again.
 func (o *Options) Run(ctx context.Context) error {
-	if o.Agents == nil && !o.NoAgents {
+	if o.Agents == nil {
 		o.Agents = FindAgents(o.Logf)
 	}
 	if len(o.Roots) == 0 {
@@ -304,7 +316,7 @@ func (o *Options) Run(ctx context.Context) error {
 		}
 		ex, err := executor.New(executor.Options{
 			URL: wsURL(o.URL), Token: tok, State: o.stateDir(), Roots: o.Roots, Deny: []string{o.tokenDir()},
-			Agents: o.Agents, NoShell: o.NoShell, AgentShell: o.AgentShell, Program: o.program(), HTTPClient: o.HTTP, Logf: o.logf, IR: selfExe(),
+			Agents: o.Agents, Shell: o.Shell, Program: o.program(), HTTPClient: o.HTTP, Logf: o.logf, IR: selfExe(),
 			Connected: func(name string) { o.say("已连接 %s（%s）", o.URL, name) },
 		})
 		if err != nil {
@@ -319,17 +331,17 @@ func (o *Options) Run(ctx context.Context) error {
 			return err
 		}
 		if o.Resident {
-			return fmt.Errorf("%w：%s 不再接受本机，在终端里运行 ir join %s", errUnpaired, o.URL, o.URL)
+			return fmt.Errorf("%w：%s 不再接受这台电脑，在终端里运行 ir join %s", errUnpaired, o.URL, o.URL)
 		}
-		o.say("%s 不再接受本机，重新配对", o.URL)
+		o.say("%s 不再接受这台电脑，重新配对", o.URL)
 	}
 }
 
 func wsURL(base string) string {
 	if rest, ok := strings.CutPrefix(base, "http"); ok {
-		return "ws" + rest + "/api/exec"
+		return "ws" + rest + "/v1/internal/exec"
 	}
-	return base + "/api/exec"
+	return base + "/v1/internal/exec"
 }
 
 // token is the kept TOKEN, or a new one paired for and kept.
@@ -361,42 +373,59 @@ func (o *Options) token(ctx context.Context) (string, error) {
 // errUnpaired: a resident has no TOKEN; a person runs ir join again to pair.
 var errUnpaired = errors.New("未配对")
 
-// errDenied: a panel declined the pairing.
+// errDenied: a person declined the pairing.
 var errDenied = errors.New("配对被拒绝")
 
-// errClosed: the Iridium takes no pairing requests now (its settings).
-var errClosed = errors.New("对方已停止接收连接申请")
-
 // pairWait is how long it waits between asks after the Iridium could not be reached, and between
-// looks at a pending request.
-var pairWait, pairPoll = 30 * time.Second, 2 * time.Second
+// looks at a pending request; pairClosedWait, between asks while that Iridium takes none.
+var pairWait, pairPoll, pairClosedWait = 30 * time.Second, 2 * time.Second, 5 * time.Second
 
-// pair asks the Iridium to pair until a panel allows it (the TOKEN) or declines it.
+// pair asks the Iridium to pair until a person allows it (the TOKEN) or declines it. While it
+// takes no requests (pair_closed, or too many waiting) it asks again.
 func (o *Options) pair(ctx context.Context) (string, error) {
 	name := o.Name
 	if name == "" {
 		name = MachineName()
 	}
-	who := api.ExecPair{Name: name, OS: runtime.GOOS, Arch: runtime.GOARCH, Program: o.program(), NoShell: o.NoShell, AgentShell: o.AgentShell && !o.NoShell}
-	path := "/api/exec/pair"
+	who := api.PairRequest{Name: name, Type: "computer", OS: runtime.GOOS, Arch: runtime.GOARCH, Program: o.program(), Shell: &o.Shell, NoShell: !o.Shell, AgentShell: o.Shell}
+	const path = "/v1/internal/pair"
 	if o.Bot {
-		who, path = api.ExecPair{Name: name, Program: o.Program}, "/api/pair"
+		who = api.PairRequest{Name: name, Type: o.Type, Program: o.Program}
+		if o.Login != "" {
+			who.Login = &api.PairLogin{ID: o.Login}
+		}
 	} else {
-		if o.Agents == nil && !o.NoAgents {
+		if o.Agents == nil {
 			o.Agents = FindAgents(o.Logf)
 		}
+		// Its home and computer, as its hello will say them: with agents, its home is its scope
+		// there unless the person gives another; on that Iridium's own computer, it carries none.
+		who.Home, _ = os.UserHomeDir()
+		who.MachineID = machineid.Hash()
 		for _, a := range o.Agents {
 			who.Agents = append(who.Agents, api.ExecAgent{Agent: a.Agent, Version: a.Version})
 		}
 	}
+	closed := false
 	for {
-		var p api.ExecPairing
-		code, err := o.call(ctx, http.MethodPost, path, who, &p)
-		if err == nil && code == http.StatusForbidden {
-			return "", errClosed
+		var p api.Pairing
+		code, refusal, err := o.call(ctx, http.MethodPost, path, who, &p)
+		if err == nil && code == http.StatusForbidden && (refusal.Code == "pair_closed" || refusal.Code == "too_many_pending") {
+			if !closed {
+				o.say("%s 没有开放配对：在那边运行 ir apps open，或在应用管理里新建应用；等待中", o.where())
+				closed = true
+			}
+			if !sleep(ctx, pairClosedWait) {
+				return "", ctx.Err()
+			}
+			continue
+		}
+		closed = false
+		if err == nil && code == http.StatusUnprocessableEntity && refusal.Code == "bad_name" {
+			return "", fmt.Errorf("名字 %q 不能用（%s）：用 --name 换一个", name, refusal.NameError)
 		}
 		if err == nil && code != http.StatusOK {
-			err = fmt.Errorf("HTTP %d", code)
+			err = fmt.Errorf("HTTP %d %s", code, refusal.Message)
 		} else if err == nil && p.Code == "" {
 			err = errors.New("no code in the answer")
 		}
@@ -404,24 +433,24 @@ func (o *Options) pair(ctx context.Context) (string, error) {
 			if ctx.Err() != nil {
 				return "", ctx.Err()
 			}
-			o.say("无法配对 %s：%v，%d 秒后重试", o.URL, err, int(pairWait/time.Second))
+			o.say("无法配对 %s：%v，%d 秒后重试", o.where(), err, int(pairWait/time.Second))
 			if !sleep(ctx, pairWait) {
 				return "", ctx.Err()
 			}
 			continue
 		}
-		o.say("配对码 %s：在 %s 的网页上核对后允许", p.Code, o.URL)
+		o.say("配对码 %s：在 %s 的网页上核对后允许", p.Code, o.where())
 	poll:
 		for {
 			if !sleep(ctx, pairPoll) {
 				return "", ctx.Err()
 			}
-			var st api.ExecPairState
-			code, err := o.call(ctx, http.MethodGet, path+"/"+url.PathEscape(p.Request), nil, &st)
+			var st api.PairState
+			code, _, err := o.call(ctx, http.MethodGet, path+"/"+url.PathEscape(p.Request), nil, &st)
 			switch {
-			case err != nil || (code != http.StatusOK && code != http.StatusNotFound):
+			case err != nil || (code != http.StatusOK && code != http.StatusUnprocessableEntity):
 				continue // as pending
-			case code == http.StatusNotFound || st.Status == "expired":
+			case code == http.StatusUnprocessableEntity || st.Status == "expired":
 				o.say("配对码已过期，重新申请")
 				break poll
 			case st.Status == "allowed" && st.Token != "":
@@ -433,40 +462,40 @@ func (o *Options) pair(ctx context.Context) (string, error) {
 	}
 }
 
-// call sends a JSON request to the Iridium: the status, and the body read into out.
-func (o *Options) call(ctx context.Context, method, path string, body, out any) (int, error) {
+// call sends a JSON request to the Iridium: the status, the refusal if not 200, and the body read
+// into out.
+func (o *Options) call(ctx context.Context, method, path string, body, out any) (int, api.Error, error) {
+	var refusal api.Error
 	var r io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
 		if err != nil {
-			return 0, err
+			return 0, refusal, err
 		}
 		r = bytes.NewReader(b)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, o.URL+path, r)
 	if err != nil {
-		return 0, err
+		return 0, refusal, err
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	resp, err := o.client().Do(req)
 	if err != nil {
-		return 0, err
+		return 0, refusal, err
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 	if resp.StatusCode == http.StatusOK && out != nil {
 		if err := json.Unmarshal(raw, out); err != nil {
-			return resp.StatusCode, err
+			return resp.StatusCode, refusal, err
 		}
 	}
-	if resp.StatusCode == http.StatusTooManyRequests {
-		if s, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil && s > 0 {
-			return resp.StatusCode, fmt.Errorf("too many pairing requests (again in %ds)", s)
-		}
+	if resp.StatusCode != http.StatusOK {
+		_ = json.Unmarshal(raw, &refusal)
 	}
-	return resp.StatusCode, nil
+	return resp.StatusCode, refusal, nil
 }
 
 func sleep(ctx context.Context, d time.Duration) bool {

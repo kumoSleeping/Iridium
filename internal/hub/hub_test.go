@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -23,7 +24,7 @@ func stream(t *testing.T, s *Sub) (<-chan event, *io.PipeReader) {
 	r, w := io.Pipe()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(func() { cancel(); r.Close(); s.Close() })
-	go s.Serve(ctx, w, func() {})
+	go serve(s, ctx, w, func() {})
 	out := make(chan event, 1000)
 	go func() {
 		sc := bufio.NewScanner(r)
@@ -118,7 +119,7 @@ func TestSlowReaderSkipsStaleStates(t *testing.T) {
 	s := h.Subscribe([]string{"list"})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go s.Serve(ctx, w, func() {})
+	go serve(s, ctx, w, func() {})
 	time.Sleep(50 * time.Millisecond) // the snapshot write now blocks: no one reads
 	for i := range 200 {
 		h.Set("list", i)
@@ -219,7 +220,9 @@ func TestDraftTool(t *testing.T) {
 			t.Fatalf("no draft after %q", text)
 		}
 		d := draftOf(t, e)
-		if d.N != 2 || d.Tool == nil || d.Tool.ID != "toolu_1" || d.Tool.Name != "Bash" {
+		// The seal alone (the pieces went before it) carries no tool: it only ends draft N.
+		lone := d.Done && d.Text == "" && d.Tool == nil
+		if d.N != 2 || !lone && (d.Tool == nil || d.Tool.ID != "toolu_1" || d.Tool.Name != "Bash") {
 			t.Fatalf("tool draft %+v", d)
 		}
 		text += d.Text
@@ -305,4 +308,22 @@ func TestDraftsBeforeState(t *testing.T) {
 	if !ok || state(t, e).Key != "session:a" {
 		t.Fatalf("state %+v", e)
 	}
+}
+
+// serve writes s as text, one "event:"/"data:" pair a line pair, until ctx ends or a write fails: "state" events
+// (api.StateEvent) and "draft" events (api.DraftEvent), and a comment every Ping. flush pushes
+// what was written to the reader.
+func serve(s *Sub, ctx context.Context, w io.Writer, flush func()) error {
+	return s.Run(ctx, func(event string, data []byte) error {
+		if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, data); err != nil {
+			return err
+		}
+		return nil
+	}, func() error {
+		if _, err := io.WriteString(w, ": ping\n\n"); err != nil {
+			return err
+		}
+		flush()
+		return nil
+	}, flush)
 }

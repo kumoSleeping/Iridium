@@ -92,10 +92,16 @@ func (m *maskedWriter) Flush() {
 func (m *maskedWriter) Unwrap() http.ResponseWriter { return m.ResponseWriter }
 
 func (s *Server) secretRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/secrets", s.listSecrets)
-	mux.HandleFunc("PUT /api/secrets/{name}", s.setSecret)
-	mux.HandleFunc("DELETE /api/secrets/{name}", s.manage(s.deleteSecret))
-	mux.HandleFunc("POST /api/secrets/use", s.useSecrets)
+	mux.HandleFunc("GET /v1/internal/secrets", s.listSecrets)
+	mux.HandleFunc("PUT /v1/internal/secrets/{name}", s.setSecret)
+	mux.HandleFunc("DELETE /v1/internal/secrets/{name}", func(w http.ResponseWriter, r *http.Request) {
+		if c := callerOf(r); !c.Host() || c.agent {
+			forbid(w, errHostSecrets)
+			return
+		}
+		s.deleteSecret(w, r)
+	})
+	mux.HandleFunc("POST /v1/internal/secrets/use", s.useSecrets)
 }
 
 // terminalName is terminal id's name, for lists; the ID if it is gone.
@@ -103,8 +109,8 @@ func (s *Server) terminalName(id string) string {
 	if n := s.Tag(id); n != "" {
 		return n
 	}
-	if id == gate.LocalEndpointID {
-		return gate.LocalName
+	if id == gate.HostID {
+		return gate.HostName
 	}
 	return id
 }
@@ -126,6 +132,11 @@ func (s *Server) secretUse(u store.SecretUse) api.SecretUse {
 // listSecrets: names, notes, scopes, who stored them, their uses; never a value. For every
 // terminal, ir too (an agent's: it learns which names there are).
 func (s *Server) listSecrets(w http.ResponseWriter, r *http.Request) {
+	// Credentials are the host's alone (draft 二「权限」): to list, set, delete and use.
+	if !callerOf(r).Host() {
+		forbid(w, errHostSecrets)
+		return
+	}
 	all, err := s.st.Secrets()
 	if err != nil {
 		s.error(w, err)
@@ -150,6 +161,8 @@ func (s *Server) listSecrets(w http.ResponseWriter, r *http.Request) {
 	}
 	reply(w, http.StatusOK, out)
 }
+
+var errHostSecrets = errors.New("credentials are the host's alone")
 
 func validScope(sc api.SecretScope) bool {
 	return sc == "" || sc == api.ScopeAll || sc == api.ScopeWorkspaces || sc == api.ScopeOwner
@@ -191,9 +204,13 @@ func (s *Server) setSecret(w http.ResponseWriter, r *http.Request) {
 		if req.Note != nil {
 			note = strings.TrimSpace(*req.Note)
 		}
-		cf := s.asks.addConfirm(api.Confirm{Kind: "secret-set", Name: name, Note: note, Replace: exists, Asker: c.Name, Session: c.session})
-		s.logf("server: %s asks a panel for the secret %s, confirmation %s", c.Name, name, cf.ID)
-		reply(w, http.StatusAccepted, api.Pending{Confirm: cf})
+		cf := s.asks.addNeed(api.Need{Kind: api.NeedSecretSet, Name: name, Note: note, Replace: exists, Asker: c.Name, Session: c.session})
+		s.logf("server: %s asks a person for the secret %s, need %s", c.Name, name, cf.ID)
+		reply(w, http.StatusAccepted, api.Pending{Need: cf})
+		return
+	}
+	if !c.Host() {
+		forbid(w, errHostSecrets)
 		return
 	}
 	if !c.panel() {
@@ -224,7 +241,7 @@ func (s *Server) setSecret(w http.ResponseWriter, r *http.Request) {
 		sec.Always = *req.Always
 	}
 	if req.Value != "" {
-		sec.By = c.EndpointID
+		sec.By = c.ID()
 		err = s.st.PutSecret(sec, req.Value)
 	} else {
 		err = s.st.SetSecretMeta(sec)
@@ -252,7 +269,7 @@ func (s *Server) deleteSecret(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	err := s.st.DeleteSecret(name)
 	if errors.Is(err, store.ErrNoSecret) {
-		fail(w, http.StatusNotFound, err.Error())
+		refuse(w, http.StatusUnprocessableEntity, "no_such_secret", err.Error())
 		return
 	}
 	if err != nil {
@@ -274,7 +291,7 @@ func (s *Server) ownSession(c caller, session string) bool {
 	if session != "" {
 		id = s.st.Opener(session)
 	}
-	if id == "" || id == gate.LocalEndpointID {
+	if id == "" || id == gate.HostID {
 		return true
 	}
 	info, ok := s.gate().Endpoint(id)
@@ -322,7 +339,7 @@ func (s *Server) useSecrets(w http.ResponseWriter, r *http.Request) {
 	for _, n := range names {
 		sec, err := s.st.Secret(n)
 		if errors.Is(err, store.ErrNoSecret) {
-			fail(w, http.StatusNotFound, "no secret "+n+" (ir secret set "+n+")")
+			refuse(w, http.StatusUnprocessableEntity, "no_such_secret", "no secret "+n+" (ir secret set "+n+")")
 			return
 		}
 		if err != nil {
@@ -350,9 +367,9 @@ func (s *Server) useSecrets(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if len(need) > 0 && !s.vault.use(req.Confirm, session, need) {
-		cf := s.asks.addConfirm(api.Confirm{Kind: "secret-use", Secrets: need, Command: command, Always: always, Owner: true, Asker: c.Name, Session: session})
-		s.logf("server: %s asks a panel to use %s, confirmation %s", c.Name, strings.Join(need, ", "), cf.ID)
-		reply(w, http.StatusAccepted, api.Pending{Confirm: cf})
+		cf := s.asks.addNeed(api.Need{Kind: api.NeedSecretUse, Secrets: need, Command: command, Always: always, Owner: true, Asker: c.Name, Session: session})
+		s.logf("server: %s asks a person to use %s, need %s", c.Name, strings.Join(need, ", "), cf.ID)
+		reply(w, http.StatusAccepted, api.Pending{Need: cf})
 		return
 	}
 	out := api.SecretValues{Values: map[string]string{}}
@@ -365,7 +382,7 @@ func (s *Server) useSecrets(w http.ResponseWriter, r *http.Request) {
 		out.Values[n] = v
 	}
 	for _, n := range names {
-		if err := s.st.AddSecretUse(store.SecretUse{Secret: n, Session: session, Terminal: c.EndpointID, Command: command}); err != nil {
+		if err := s.st.AddSecretUse(store.SecretUse{Secret: n, Session: session, Terminal: c.ID(), Command: command}); err != nil {
 			s.logf("server: a use of %s: %v", n, err)
 		}
 	}
@@ -375,13 +392,13 @@ func (s *Server) useSecrets(w http.ResponseWriter, r *http.Request) {
 
 // allowSecretUse is a panel allowing secret-use confirmation cf: once, or for the rest of the
 // session's process (forSession; not for a secret confirmed every time).
-func (s *Server) allowSecretUse(cf api.Confirm, forSession bool) {
+func (s *Server) allowSecretUse(cf api.Need, forSession bool) {
 	v := s.vault
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	now := time.Now()
 	for id, g := range v.grants {
-		if now.Sub(g.at) > ConfirmTTL {
+		if now.Sub(g.at) > NeedTTL {
 			delete(v.grants, id)
 		}
 	}
@@ -432,7 +449,7 @@ func (v *vault) use(id, session string, names []string) bool {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	g, ok := v.grants[id]
-	if !ok || g.session != session || time.Since(g.at) > ConfirmTTL {
+	if !ok || g.session != session || time.Since(g.at) > NeedTTL {
 		return false
 	}
 	for _, n := range names {
@@ -446,7 +463,7 @@ func (v *vault) use(id, session string, names []string) bool {
 
 // storeAsked stores the value panel c typed for secret-set confirmation cf: the note it was asked
 // with, the scope it had (a new one: all).
-func (s *Server) storeAsked(cf api.Confirm, value string, c caller) error {
+func (s *Server) storeAsked(cf api.Need, value string, c caller) error {
 	sec, err := s.st.Secret(cf.Name)
 	if errors.Is(err, store.ErrNoSecret) {
 		sec, err = store.Secret{Name: cf.Name, Scope: string(api.ScopeAll)}, nil
@@ -454,7 +471,7 @@ func (s *Server) storeAsked(cf api.Confirm, value string, c caller) error {
 	if err != nil {
 		return err
 	}
-	sec.Note, sec.By = cf.Note, c.EndpointID
+	sec.Note, sec.By = cf.Note, c.ID()
 	if err := s.st.PutSecret(sec, value); err != nil {
 		return err
 	}

@@ -17,6 +17,7 @@ import (
 // The denied call is found on an earlier page, its result on a later one; its whole input read
 // when the page has only its start.
 func TestDeniedCall(t *testing.T) {
+	t.Parallel()
 	denial := "Permission for this action was denied by the Claude Code auto mode classifier. Reason: [Git Destructive]."
 	pages := map[int64]api.MessagePage{
 		-1:  {Start: 100, More: true, Blocks: []api.Block{{Kind: api.BlockKindResult, ID: "t1", Text: denial, Error: true}, {Kind: api.BlockKindTool, ID: "t2", Name: "Bash", Input: `{"command":"ls"}`, Result: &api.Result{Text: "ok"}}}},
@@ -44,6 +45,7 @@ func TestDeniedCall(t *testing.T) {
 // A release ends with the turn under way at it, or with a turn begun after it; the mode goes
 // back only if it is still the release's.
 func TestReleaseOver(t *testing.T) {
+	t.Parallel()
 	at := time.Now()
 	h := &Hosted{mode: releaseMode, turnAt: at.Add(-time.Minute)}
 	h.rel = &released{prev: "auto", at: at}
@@ -67,6 +69,7 @@ func TestReleaseOver(t *testing.T) {
 // A denied call gets its card, once, with what the call was; a release is over as soon as the
 // call run again is done, not at the turn's end.
 func TestDenialAndRanAgain(t *testing.T) {
+	t.Parallel()
 	h := &Hosted{mode: "auto"}
 	h.callLocked(agent.ToolStart{ID: "t1", Name: "Bash", Input: json.RawMessage(`{"command":"npx x","description":"get x"}`)})
 	if !h.deniedLocked(agent.ToolDone{ID: "t1", Denied: "Code from External"}) || h.deniedLocked(agent.ToolDone{ID: "t1", Denied: "x"}) {
@@ -95,6 +98,7 @@ func TestDenialAndRanAgain(t *testing.T) {
 // The first step asked in a release is the one it is for, though Claude ran it another way: once
 // it is done the mode goes back; a later ask does not take its place.
 func TestReleaseFirstAsked(t *testing.T) {
+	t.Parallel()
 	h := &Hosted{mode: releaseMode}
 	h.rel = &released{tool: "Bash", input: map[string]any{"command": "git push --force"}, prev: "auto", at: time.Now()}
 	h.callLocked(agent.ToolStart{ID: "t2", Name: "Bash", Input: map[string]any{"command": "git push --force-with-lease"}})
@@ -112,6 +116,7 @@ func TestReleaseFirstAsked(t *testing.T) {
 // A release is kept on disk: the process taken up in manual mode goes on with it; a new process,
 // or one back in its own mode, ends it.
 func TestReleaseTakenUp(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	h := &Hosted{dir: dir, proc: 3, mode: releaseMode}
 	h.setRelLocked(&released{tool: "Bash", input: map[string]any{"command": "x"}, prev: "auto", at: time.Now()})

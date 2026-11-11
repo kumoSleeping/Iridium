@@ -67,6 +67,7 @@ func (m *Manager) channelState(r harness.Ref, s *api.SessionState) {
 	if st, ok := channelOf[harness.Stater](m, r.Agent); ok {
 		st.State(r, s)
 	}
+	m.attachedState(r.ID, s)
 }
 
 // host is the manager as its channels' Host.

@@ -10,8 +10,8 @@ import (
 )
 
 // A session at another machine that discovery put in a group of another machine's (its executor
-// paired again: a new terminal ID) goes to the group of its folder at its machine now; one you
-// moved there stays.
+// paired again: a new terminal ID; or its caller's across machines, as once was) goes to the group
+// of its folder at its machine now; one you moved there stays.
 func TestRegroupRemote(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "iridium.db"))
 	if err != nil {
@@ -34,8 +34,16 @@ func TestRegroupRemote(t *testing.T) {
 		t.Fatal(err)
 	}
 	st.SetMachine("k", []byte(`{}`)) // a machine still there
-	add("kept", `C:\Code\Starmod`)
-	if _, err := st.AssignAuto("kept", coord); err != nil {
+	local, err := st.CreateWorkspace("ir", "/home/u/ir")
+	if err != nil {
+		t.Fatal(err)
+	}
+	add("across", `C:\Code\Starmod`)
+	if _, err := st.AssignAuto("across", coord); err != nil {
+		t.Fatal(err)
+	}
+	add("here", `C:\Code\Starmod`)
+	if _, err := st.AssignAuto("here", local); err != nil {
 		t.Fatal(err)
 	}
 	add("auto", `C:\Code\Starmod`)
@@ -58,8 +66,10 @@ func TestRegroupRemote(t *testing.T) {
 	if got := path[a["auto"].Workspace]; got != "new:C:/Code/Starmod" {
 		t.Errorf("auto: in %q, want new:C:/Code/Starmod", got)
 	}
-	if a["kept"].Workspace != coord {
-		t.Errorf("kept: %+v, want left in %d, the group of a machine still there", a["kept"], coord)
+	for _, id := range []string{"across", "here"} {
+		if got := path[a[id].Workspace]; got != "new:C:/Code/Starmod" || a[id].Manual {
+			t.Errorf("%s: in %q, want new:C:/Code/Starmod, as discovery put it", id, got)
+		}
 	}
 	if a["moved"].Workspace != old || !a["moved"].Manual {
 		t.Errorf("moved: %+v, want left in %d", a["moved"], old)
@@ -70,8 +80,8 @@ func TestRegroupRemote(t *testing.T) {
 	}
 }
 
-// A dsh session in none of DSH Desktop's workspaces (its 未分组) stays in none; one put in a group
-// goes back once quiet; one filed under a workspace there is grouped by its folder.
+// A dsh session in none of DSH Desktop's workspaces (its 未分组) stays in none, not grouped; one
+// filed under a workspace there is grouped by its folder. One put in a group before stays.
 func TestLooseRemote(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "iridium.db"))
 	if err != nil {
@@ -91,22 +101,16 @@ func TestLooseRemote(t *testing.T) {
 	}
 	quiet := time.Now().Add(-time.Hour)
 	add("old", `C:\Users\o\Documents\DSH\2026-11-02\新聊天`, quiet)
-	add("busy", `C:\Users\o\Documents\DSH\2026-11-02\新聊天`, time.Now())
 	add("new", `C:\Users\o\Documents\DSH\2026-11-03\新聊天`, quiet)
 	add("filed", `C:\Code\Starmod`, quiet)
-	for _, id := range []string{"old", "busy"} {
-		if _, err := st.AssignAuto(id, chats); err != nil {
-			t.Fatal(err)
-		}
+	if _, err := st.AssignAuto("old", chats); err != nil {
+		t.Fatal(err)
 	}
 	x.filed["m"] = map[string]bool{"filed": true}
 	x.classify()
 	a, _ := st.Assignments()
-	if got := a["old"]; got.Workspace != 0 || got.Manual {
-		t.Errorf("old: %+v, want back in none", got)
-	}
-	if a["busy"].Workspace != chats {
-		t.Errorf("busy: %+v, want left in %d until quiet", a["busy"], chats)
+	if a["old"].Workspace != chats {
+		t.Errorf("old: %+v, want left in %d", a["old"], chats)
 	}
 	if got, ok := a["new"]; ok && got.Workspace != 0 {
 		t.Errorf("new: %+v, want in none", got)
@@ -122,8 +126,8 @@ func TestLooseRemote(t *testing.T) {
 	}
 }
 
-// A session its caller starts at another machine goes in the caller's group (a coordinator and
-// the sessions it starts stay together); at the same machine, only a group holding it does.
+// A session its caller starts goes in the caller's group only if that holds its folder: one at
+// another machine is grouped by its own folder there (the page hangs it under its launcher).
 func TestGroupForAcrossMachines(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "iridium.db"))
 	if err != nil {
@@ -133,11 +137,14 @@ func TestGroupForAcrossMachines(t *testing.T) {
 	x := New(Options{Store: st, Home: "/home/u", Logf: t.Logf})
 	remoteGroup, _ := st.CreateWorkspace("Starmod", "m:C:/Code/Starmod")
 	localGroup, _ := st.CreateWorkspace("ir", "/home/u/ir")
-	if got := x.GroupFor("/home/u", remoteGroup); got != remoteGroup {
-		t.Errorf("here, from a session at m's group: %d, want %d", got, remoteGroup)
+	if got := x.GroupFor("/home/u/ir/web", remoteGroup); got != localGroup {
+		t.Errorf("here, from a session at m's group: %d, want %d", got, localGroup)
 	}
-	if got := x.GroupFor("m:D:/x", localGroup); got != localGroup {
-		t.Errorf("at m, from a session here: %d, want %d", got, localGroup)
+	if got := x.GroupFor("m:C:/Code/Starmod/x", localGroup); got != remoteGroup {
+		t.Errorf("at m, from a session here: %d, want %d", got, remoteGroup)
+	}
+	if got := x.GroupFor("m:D:/x", localGroup); got == localGroup || got == remoteGroup || got == 0 {
+		t.Errorf("at m, elsewhere: %d", got)
 	}
 	if got := x.GroupFor("/srv/other", localGroup); got == localGroup || got == 0 {
 		t.Errorf("here, elsewhere than its caller's folder: %d", got)
@@ -146,8 +153,8 @@ func TestGroupForAcrossMachines(t *testing.T) {
 
 // Groups of subfolders made before their parent's (an executor's sessions all seen at once, the
 // oldest in a subfolder) go into it, as folders there: what discovery put in them moves, a group
-// left empty is dropped; one with a session you moved there stays with it. Hidden groups stay as
-// they are, and a home folder's group holds only its own, at a machine not connected too.
+// left empty is dropped; one with a session you moved there stays with it. A home folder's group
+// holds only its own, at a machine not connected too.
 func TestNest(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "iridium.db"))
 	if err != nil {
@@ -177,13 +184,9 @@ func TestNest(t *testing.T) {
 	hy4 := group("m:C:/Code/Ds_Benchmark/hy4")
 	deep := group("m:C:/Code/Ds_Benchmark/hy4/x")
 	kept := group("m:C:/Code/Ds_Benchmark/kept")
-	shut := group("m:C:/Code/Ds_Benchmark/shut")
 	home := group("m:C:/Users/o")
 	docs := group("m:C:/Users/o/Documents/a")
 	bench := group("m:C:/Code/Ds_Benchmark")
-	if err := st.HideWorkspace(shut, true); err != nil {
-		t.Fatal(err)
-	}
 	filed := map[string]bool{}
 	for _, s := range []struct {
 		id, cwd string
@@ -194,7 +197,6 @@ func TestNest(t *testing.T) {
 		{"deep", `C:\Code\Ds_Benchmark\hy4\x`, deep},
 		{"auto", `C:\Code\Ds_Benchmark\kept`, kept},
 		{"moved", `C:\Code\Ds_Benchmark\kept`, 0},
-		{"shut", `C:\Code\Ds_Benchmark\shut`, shut},
 		{"home", `C:\Users\o`, home},
 		{"docs", `C:\Users\o\Documents\a`, docs},
 		{"bench", `C:\Code\Ds_Benchmark`, bench},
@@ -217,7 +219,7 @@ func TestNest(t *testing.T) {
 	if a["moved"].Workspace != kept || !a["moved"].Manual {
 		t.Errorf("moved: %+v, want left in %d", a["moved"], kept)
 	}
-	want := map[string]int64{"shut": shut, "home": home, "docs": docs}
+	want := map[string]int64{"home": home, "docs": docs}
 	for id, ws := range want {
 		if a[id].Workspace != ws {
 			t.Errorf("%s: %+v, want left in %d", id, a[id], ws)
@@ -233,7 +235,7 @@ func TestNest(t *testing.T) {
 			t.Errorf("group %d left, want dropped", id)
 		}
 	}
-	for _, id := range []int64{kept, shut, home, docs, bench} {
+	for _, id := range []int64{kept, home, docs, bench} {
 		if !left[id] {
 			t.Errorf("group %d dropped, want left", id)
 		}
@@ -242,8 +244,7 @@ func TestNest(t *testing.T) {
 
 // A group split at its folder keeps only the sessions right in it; those in its subfolders are
 // grouped again by their folders, a subfolder's in its parent's, and the split group swallows them
-// no more. A coordinator of this machine's, put by a group's "+" in a group there by hand, follows
-// that group's folder: nested with it, then grouped by it when its outer group is split.
+// no more. One of this machine's you put in a group there stays where you put it.
 func TestSplitAndFollow(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "iridium.db"))
 	if err != nil {
@@ -272,13 +273,13 @@ func TestSplitAndFollow(t *testing.T) {
 	x.classify()
 	a, _ := st.Assignments()
 	code := a["root"].Workspace
-	for _, id := range []string{"otc", "bench", "hy4", "coord"} {
+	for _, id := range []string{"otc", "bench", "hy4"} {
 		if a[id].Workspace != code || a[id].Manual {
 			t.Errorf("%s: %+v, want in Code's group %d", id, a[id], code)
 		}
 	}
-	if ats, _ := st.Ats(); ats["coord"] != "m:C:/Code/otc" {
-		t.Errorf("coord at %q", ats["coord"])
+	if a["coord"].Workspace != otc || !a["coord"].Manual {
+		t.Errorf("coord: %+v, want left in %d", a["coord"], otc)
 	}
 
 	if err := x.SplitWorkspace(code); err != nil {
@@ -291,9 +292,82 @@ func TestSplitAndFollow(t *testing.T) {
 	for _, w := range ws {
 		path[w.ID] = w.Path
 	}
-	for id, want := range map[string]string{"root": "m:C:/Code", "otc": "m:C:/Code/otc", "coord": "m:C:/Code/otc", "bench": "m:C:/Code/Ds_Benchmark", "hy4": "m:C:/Code/Ds_Benchmark"} {
+	for id, want := range map[string]string{"root": "m:C:/Code", "otc": "m:C:/Code/otc", "bench": "m:C:/Code/Ds_Benchmark", "hy4": "m:C:/Code/Ds_Benchmark"} {
 		if got := path[a[id].Workspace]; got != want {
 			t.Errorf("%s in %q, want %q", id, got, want)
+		}
+	}
+}
+
+// A subagent goes with its parent, put by hand in a group of another machine, and stays there:
+// not taken for one put there by discovery, regrouped (and published) on every look.
+func TestSubagentNotStray(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "iridium.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	x := New(Options{Store: st, Home: "/home/u", Logf: t.Logf})
+	there, _ := st.CreateWorkspace("Starmod", "m:C:/Code/Starmod")
+	for _, e := range []*entry{
+		{onDisk: onDisk{id: "p", agent: api.AgentClaude}, glimpse: glimpse{cwd: "/home/u/ir"}, mtime: time.Now()},
+		{onDisk: onDisk{id: "s", agent: api.AgentClaude}, glimpse: glimpse{cwd: "/home/u/ir", sub: true, parent: "p"}, mtime: time.Now()},
+	} {
+		x.entries[e.id] = e
+		if _, err := st.Show(string(e.agent), e.id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.Move("p", there); err != nil {
+		t.Fatal(err)
+	}
+	x.classify()
+	for i := range 3 {
+		x.mu.Lock()
+		clear(x.changed)
+		x.mu.Unlock()
+		x.classify()
+		a, _ := st.Assignments()
+		x.mu.Lock()
+		changed := x.changed["s"]
+		x.mu.Unlock()
+		if a["s"].Workspace != there || a["s"].Manual || changed {
+			t.Errorf("look %d: s %+v, changed %v; want left with its parent in %d", i, a["s"], changed, there)
+		}
+	}
+}
+
+// A group says whether it holds only its own folder (Workspace.only: /, the home folder, a drive's
+// root or a home at another machine, one split), so the page finds the group a place is in as
+// this groups.
+func TestWorkspacesOnly(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "iridium.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	x := New(Options{Store: st, Home: "/home/u", Logf: t.Logf})
+	want := map[string]bool{"/": true, "/home/u": true, "/home/u/ir": false, "m:C:/": true, "m:C:/Users/o": true, "m:C:/Code": false, "/srv/split": true}
+	for p := range want {
+		if _, err := st.CreateWorkspace(filepath.Base(p), p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ws, _ := st.Workspaces()
+	for _, w := range ws {
+		if w.Path == "/srv/split" {
+			if err := st.SplitWorkspace(w.ID, nil); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	got, err := x.Workspaces()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range got {
+		if w.Only != want[w.Path] {
+			t.Errorf("%s: only %v, want %v", w.Path, w.Only, want[w.Path])
 		}
 	}
 }

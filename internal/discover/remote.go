@@ -152,8 +152,10 @@ func (x *Index) loadRemote() {
 	}
 }
 
-// knownMachines is the machines that have connected and whose Bot is still there (a revoked one's
-// is forgotten, store.ForgetMachine); nil if they cannot be had.
+// knownMachines is the machines that have connected and whose app is still there (a revoked one's
+// is forgotten, store.ForgetMachine), and every app there is: what was found at a machine is
+// dropped only once its app is gone, never for a row of machines missing alone; nil if they cannot
+// be had.
 func (x *Index) knownMachines() (map[string]bool, error) {
 	if x.o.Store == nil {
 		return nil, nil
@@ -162,7 +164,10 @@ func (x *Index) knownMachines() (map[string]bool, error) {
 	if err != nil {
 		return nil, err
 	}
-	known := make(map[string]bool, len(ms))
+	known, err := x.o.Store.AppIDs()
+	if err != nil {
+		return nil, err
+	}
 	for _, m := range ms {
 		known[m.Terminal] = true
 	}
@@ -806,26 +811,44 @@ func (x *Index) DshWorkspaces(ctx context.Context, machine string) ([]api.DshWor
 	d = x.remotes[mc.ID()]
 	x.remoteMu.Unlock()
 	x.scanRegistry(ctx, mc, d, true) // as it is now, its folders looked at
+	// Listed: a session of its there, not a subagent, not archived here.
+	vis, err := x.o.Store.Visibility()
+	if err != nil {
+		return nil, err
+	}
+	listed := func(id string) bool {
+		s := d.Sessions[id]
+		return s != nil && !s.Sub && vis.Shown(string(api.AgentDsh), id)
+	}
 	out := []api.DshWorkspace{}
 	if d.Registry != nil {
 		for _, w := range d.Registry.Workspaces {
 			if !d.Gone[w.ID] && !d.unsynced(w) {
-				out = append(out, api.DshWorkspace{Title: cmp.Or(w.Title, remote.Base(d.Sep, w.Path)), Path: w.Path, UpdatedAt: w.UpdatedAt})
+				n := 0
+				for _, id := range w.Sessions {
+					if listed(id) {
+						n++
+					}
+				}
+				out = append(out, api.DshWorkspace{Title: cmp.Or(w.Title, remote.Base(d.Sep, w.Path)), Path: w.Path, UpdatedAt: w.UpdatedAt, Sessions: n})
 			}
 		}
 		return out, nil
 	}
-	latest := map[string]int64{}
-	for _, s := range d.Sessions {
+	latest, count := map[string]int64{}, map[string]int{}
+	for id, s := range d.Sessions {
 		if !s.Sub && s.Cwd != "" {
 			latest[s.Cwd] = max(latest[s.Cwd], s.Mtime, s.Last)
+			if listed(id) {
+				count[s.Cwd]++
+			}
 		}
 	}
 	for cwd, at := range latest {
 		if d.unsynced(dshhome.Workspace{Title: remote.Base(d.Sep, cwd), Path: cwd}) {
 			continue
 		}
-		out = append(out, api.DshWorkspace{Title: remote.Base(d.Sep, cwd), Path: cwd, UpdatedAt: at})
+		out = append(out, api.DshWorkspace{Title: remote.Base(d.Sep, cwd), Path: cwd, UpdatedAt: at, Sessions: count[cwd]})
 	}
 	slices.SortFunc(out, func(a, b api.DshWorkspace) int { return cmp.Compare(b.UpdatedAt, a.UpdatedAt) })
 	return out, nil

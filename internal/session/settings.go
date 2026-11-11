@@ -363,9 +363,10 @@ func (h *Hosted) allowedLocked(a api.Ask) bool {
 	return renamesOnly(a) || slices.ContainsFunc(h.rules, func(r store.AllowRule) bool { return ruleMatches(r, a) })
 }
 
-// renamesOnly: a shell call that only names the session (ir rename, plan "会话标题"), which the
-// system prompt has every agent run: never asked about. Whatever chains, pipes, substitutes or
-// redirects is asked about as any command is.
+// renamesOnly: a shell call that only names the session (ir api channel.update channel_id=self
+// data.name=…, plan "会话标题"; the older ir rename), which the system prompt has every agent run:
+// never asked about. Whatever chains, pipes, substitutes or redirects is asked about as any
+// command is, and so is one that sets anything else.
 func renamesOnly(a api.Ask) bool {
 	in, _ := a.Input.(map[string]any)
 	s, _ := in["command"].(string)
@@ -377,7 +378,21 @@ func renamesOnly(a api.Ask) bool {
 		return false
 	}
 	f := strings.Fields(s)
-	return len(f) >= 3 && f[0] == "ir" && f[1] == "rename"
+	if len(f) >= 3 && f[0] == "ir" && f[1] == "rename" {
+		return true
+	}
+	if len(f) < 5 || f[0] != "ir" || f[1] != "api" || f[2] != "channel.update" || !slices.Contains(f, "channel_id=self") {
+		return false
+	}
+	named := false
+	for _, w := range f[3:] {
+		named = named || strings.HasPrefix(w, "data.name=")
+		if strings.HasPrefix(w, "-") || strings.HasPrefix(w, "_data") || strings.HasPrefix(w, "content") ||
+			(strings.HasPrefix(w, "channel_id") && w != "channel_id=self") {
+			return false
+		}
+	}
+	return named
 }
 
 // fileTools are the tools whose subject is a file path.

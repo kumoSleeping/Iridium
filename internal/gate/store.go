@@ -10,81 +10,46 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/go-webauthn/webauthn/webauthn"
 )
 
-// Endpoint kinds.
+// Endpoint kinds: what the gate holds, an ir_web login or an app. Not stored as such: the store
+// keeps logins and apps in tables of their own (docs/next/decisions.md 1-4).
 const (
-	KindPanel   = "panel"   // a web panel: one browser, logs in with a passkey
-	KindChannel = "channel" // a plugin or peer: authenticates with its own token
+	KindPanel   = "panel"   // a login of ir_web: one browser, logs in with a passkey
+	KindChannel = "channel" // an app: authenticates with its own TOKEN
 )
 
-// Endpoint is one registered interactive terminal (交互终端).
+// Endpoint is one login of ir_web or one app, as the gate holds it.
 type Endpoint struct {
 	ID   string `json:"id"`   // stable internal ID; names can change
-	Name string `json:"name"` // unique, case-insensitive; see NormalizeName
+	Name string `json:"name"` // unique, case-insensitive, among its kind; see NormalizeName
 	Kind string `json:"kind"` // KindPanel or KindChannel
+	// Type: an app's type as shown (computer, bot, script…); display only, no rights.
+	Type string `json:"type,omitempty"`
 
-	UserHandle []byte    `json:"userHandle,omitempty"` // panel: WebAuthn user handle, random per registration
-	Passkeys   []Passkey `json:"passkeys,omitempty"`   // panel
-	TokenHash  string    `json:"tokenHash,omitempty"`  // channel: SHA-256 (hex) of its bearer token
+	TokenHash string `json:"tokenHash,omitempty"` // channel: SHA-256 (hex) of its bearer token
 
 	Avatar        []byte `json:"avatar,omitempty"`        // 128×128 PNG or JPEG, re-encoded by the gate
 	AvatarVersion string `json:"avatarVersion,omitempty"` // short hash of Avatar, for cache busting
 
 	CreatedAt  time.Time `json:"createdAt"`
 	LastSeenAt time.Time `json:"lastSeenAt"`
-}
-
-// Passkey is a WebAuthn credential of a panel. Credential holds only public data.
-type Passkey struct {
-	Credential webauthn.Credential `json:"credential"`
-	CreatedAt  time.Time           `json:"createdAt"`
-	LastUsedAt time.Time           `json:"lastUsedAt"`
-}
-
-// Invite is a pending one-time registration link for a new panel.
-type Invite struct {
-	ID        string    `json:"id"`             // short ID for listing and revoking
-	Hash      string    `json:"hash"`           // SHA-256 (hex) of the token; the token itself is never stored
-	Name      string    `json:"name,omitempty"` // optional name chosen by the inviter; the joiner may change it
-	Setup     bool      `json:"setup,omitempty"`
-	Owner     bool      `json:"owner,omitempty"` // ir invite --owner: the joiner is the owner's own (Claude)
-	CreatedAt time.Time `json:"createdAt"`
-	ExpiresAt time.Time `json:"expiresAt"` // zero for the first-run setup token
-}
-
-// Session is a logged-in panel browser. Hash is the SHA-256 (hex) of the cookie value.
-type Session struct {
-	Hash       string    `json:"hash"`
-	EndpointID string    `json:"endpointId"`
-	CreatedAt  time.Time `json:"createdAt"`
-	LastSeenAt time.Time `json:"lastSeenAt"`
-	ExpiresAt  time.Time `json:"expiresAt"` // absolute limit
+	// ApprovedAt: when a login was approved (a browser: as it joined); zero for pending. Apps: zero.
+	ApprovedAt time.Time `json:"approvedAt,omitzero"`
 }
 
 // State is everything the gate persists.
 type State struct {
 	Endpoints []Endpoint `json:"endpoints"`
-	Invites   []Invite   `json:"invites"`
-	Sessions  []Session  `json:"sessions"`
 }
 
-// Change is one atomic update: the deletions, then the upserts (by ID, or Hash for sessions).
+// Change is one atomic update: the deletions, then the upserts (by ID).
 type Change struct {
 	DeleteEndpoints []string
-	DeleteInvites   []string
-	DeleteSessions  []string
 	Endpoints       []Endpoint
-	Invites         []Invite
-	Sessions        []Session
 }
 
-func (c Change) empty() bool {
-	return len(c.DeleteEndpoints)+len(c.DeleteInvites)+len(c.DeleteSessions)+
-		len(c.Endpoints)+len(c.Invites)+len(c.Sessions) == 0
-}
+func (c Change) empty() bool { return len(c.DeleteEndpoints)+len(c.Endpoints) == 0 }
 
 // Store persists the gate's state. The state is small, so the gate keeps all of it in
 // memory: it calls Load once, from New, and sends every change through Apply.
@@ -92,13 +57,9 @@ func (c Change) empty() bool {
 // Apply must be atomic (all of the Change or none of it). The gate serialises its calls,
 // so a Store needs no locking for the gate's sake.
 //
-// For SQLite: tables endpoints (id primary key, name, kind, user_handle, token_hash
-// unique, avatar blob, avatar_version, created_at, last_seen_at; passkeys as a JSON
-// column or a child table keyed by credential ID), invites (id primary key, hash unique,
-// name, setup, owner, created_at, expires_at) and sessions (hash primary key, endpoint_id
-// indexed, created_at, last_seen_at, expires_at). Apply is one transaction: deletes, then
-// INSERT ... ON CONFLICT DO UPDATE. The gate deletes an endpoint's sessions itself, in the
-// same Change, so no cascade is needed.
+// The SQLite store (package store) keeps apps (KindChannel) in apps and ir_web's logins
+// (KindPanel) in logins. Apply is one transaction: deletes, then INSERT ... ON CONFLICT DO UPDATE.
+// What ir_web keeps of its logins (passkeys, web sessions, invites) is package webapp's.
 type Store interface {
 	Load() (State, error)
 	Apply(Change) error
@@ -107,17 +68,11 @@ type Store interface {
 // memState is the in-memory form of State, shared by the gate and JSONStore.
 type memState struct {
 	endpoints map[string]Endpoint
-	invites   map[string]Invite
-	sessions  map[string]Session
 }
 
 func newMemState(s State) *memState {
-	m := &memState{
-		endpoints: make(map[string]Endpoint, len(s.Endpoints)),
-		invites:   make(map[string]Invite, len(s.Invites)),
-		sessions:  make(map[string]Session, len(s.Sessions)),
-	}
-	m.apply(Change{Endpoints: s.Endpoints, Invites: s.Invites, Sessions: s.Sessions})
+	m := &memState{endpoints: make(map[string]Endpoint, len(s.Endpoints))}
+	m.apply(Change{Endpoints: s.Endpoints})
 	return m
 }
 
@@ -125,20 +80,8 @@ func (m *memState) apply(c Change) {
 	for _, id := range c.DeleteEndpoints {
 		delete(m.endpoints, id)
 	}
-	for _, id := range c.DeleteInvites {
-		delete(m.invites, id)
-	}
-	for _, h := range c.DeleteSessions {
-		delete(m.sessions, h)
-	}
 	for _, e := range c.Endpoints {
 		m.endpoints[e.ID] = e
-	}
-	for _, i := range c.Invites {
-		m.invites[i.ID] = i
-	}
-	for _, s := range c.Sessions {
-		m.sessions[s.Hash] = s
 	}
 }
 
@@ -146,15 +89,11 @@ func (m *memState) clone() *memState { return newMemState(m.state()) }
 
 // state returns the content sorted, so files and listings are stable.
 func (m *memState) state() State {
-	s := State{
-		Endpoints: sortedValues(m.endpoints, func(e Endpoint) (time.Time, string) { return e.CreatedAt, e.ID }),
-		Invites:   sortedValues(m.invites, func(i Invite) (time.Time, string) { return i.CreatedAt, i.ID }),
-		Sessions:  sortedValues(m.sessions, func(s Session) (time.Time, string) { return s.CreatedAt, s.Hash }),
-	}
-	return s
+	return State{Endpoints: SortedValues(m.endpoints, func(e Endpoint) (time.Time, string) { return e.CreatedAt, e.ID })}
 }
 
-func sortedValues[V any](m map[string]V, key func(V) (time.Time, string)) []V {
+// SortedValues is m's values by key's time, then its string: stable files and listings.
+func SortedValues[V any](m map[string]V, key func(V) (time.Time, string)) []V {
 	out := make([]V, 0, len(m))
 	for _, v := range m {
 		out = append(out, v)
@@ -224,15 +163,15 @@ func (s *JSONStore) Apply(c Change) error {
 	if err != nil {
 		return err
 	}
-	if err := writeFileAtomic(s.path, append(data, '\n')); err != nil {
+	if err := WriteFileAtomic(s.path, append(data, '\n')); err != nil {
 		return err
 	}
 	s.cur = next
 	return nil
 }
 
-// writeFileAtomic writes data to path with mode 0600 via a temp file in the same directory.
-func writeFileAtomic(path string, data []byte) error {
+// WriteFileAtomic writes data to path with mode 0600 via a temp file in the same directory.
+func WriteFileAtomic(path string, data []byte) error {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*") // created with mode 0600
 	if err != nil {

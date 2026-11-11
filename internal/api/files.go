@@ -1,8 +1,9 @@
 package api
 
 // FileRef is a file a session's transcript names (in a reply, a message, a Write call) or a
-// message's attachment: GET /api/sessions/<session>/files/<ref>. A ref is only good for its
-// session, and only paths the session's transcript names (or its attachments) get one.
+// message's attachment: GET /v1/internal/sessions/<session>/files/<ref>. A ref is only good for its
+// session, and only paths the session's transcript names (or its attachments) get one. A file
+// link's (FileLink): Ref is its id, good in any session, and Path "ir:<id>", as the reply has it.
 type FileRef struct {
 	Ref  string `json:"ref"`
 	Name string `json:"name"`
@@ -59,7 +60,17 @@ type AttachPath struct {
 	Path string `json:"path"`
 }
 
-// DirEntry is one entry of GET /api/files?path=<dir> (local ir only): one level.
+// FileLink is POST /v1/internal/links' answer (local ir only, ir attach <path>): the file, kept by
+// Iridium under a random id, and how a reply puts it in its words.
+type FileLink struct {
+	File FileRef `json:"file"`
+	Link string  `json:"link"` // ir:<id>
+	// Markdown is the link as a reply writes it: ![name](ir:id) for a picture, a video or a sound,
+	// which shows where it is; [name](ir:id) for any other file, to download.
+	Markdown string `json:"markdown"`
+}
+
+// DirEntry is one entry of GET /v1/internal/files?path=<dir> (local ir only): one level.
 type DirEntry struct {
 	Name  string `json:"name"`
 	Size  int64  `json:"size"`
@@ -72,7 +83,7 @@ type DirListing struct {
 	Entries []DirEntry `json:"entries"`
 }
 
-// Copy copies a file (local ir only): POST /api/files/copy streams CopyProgress lines.
+// Copy copies a file (local ir only): POST /v1/internal/files/copy streams CopyProgress lines.
 type Copy struct {
 	From string `json:"from"`
 	To   string `json:"to"`
@@ -92,14 +103,14 @@ type CopyProgress struct {
 	Error  string `json:"error,omitempty"`
 }
 
-// CLIRun is POST /api/cli: ir at another machine, run by an agent hosted there (its session's own
+// CLIRun is POST /v1/internal/cli: ir at another machine, run by an agent hosted there (its session's own
 // TOKEN; docs/exec.md "远端的 ir"): its arguments and its working directory there.
 type CLIRun struct {
 	Args []string `json:"args"`
 	Cwd  string   `json:"cwd"`
 }
 
-// CLIOutput is one line of POST /api/cli's answer: what ir wrote, as it wrote it, and last its
+// CLIOutput is one line of POST /v1/internal/cli's answer: what ir wrote, as it wrote it, and last its
 // exit code.
 type CLIOutput struct {
 	Out  string `json:"out,omitempty"`

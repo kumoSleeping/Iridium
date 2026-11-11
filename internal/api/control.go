@@ -1,5 +1,7 @@
 package api
 
+import "encoding/json"
+
 // Queued is a message waiting in a session's queue (docs/api.md "待发队列"). Paused: it waits for
 // "continue" (POST continue) or its own steer, not for the turn to end.
 type Queued struct {
@@ -8,13 +10,9 @@ type Queued struct {
 	From string `json:"from"` // the sender's name, as the agent saw it
 	// FromTerminal is the sending terminal's ID.
 	FromTerminal string `json:"fromTerminal,omitempty"`
+	FromLogin    string `json:"fromLogin,omitempty"` // and the login of that app, if one
 	Paused       bool   `json:"paused,omitempty"`
 	At           int64  `json:"at"`
-}
-
-// EditQueued changes a queued message's text.
-type EditQueued struct {
-	Text string `json:"text"`
 }
 
 // ContextSummary is how full a session's context window was, without the parts.
@@ -22,6 +20,14 @@ type ContextSummary struct {
 	Used int   `json:"used"`
 	Max  int   `json:"max,omitempty"`
 	At   int64 `json:"at"`
+}
+
+// InputTokens is what a session's turns read so far: Input not cached, CacheRead read from the
+// cache, CacheWrite written to it. The cache's hit rate is CacheRead over the three.
+type InputTokens struct {
+	Input      int64 `json:"input"`
+	CacheRead  int64 `json:"cacheRead"`
+	CacheWrite int64 `json:"cacheWrite"`
 }
 
 // BlockTail is the blocks from Start to End of the transcript. Blocks nil: too many or too
@@ -51,37 +57,22 @@ type Model struct {
 	Group string `json:"group,omitempty"`
 }
 
-// Feature is an extra switch on a session, at the effort track's right (Place "effort", the one
-// place the page knows): Claude's UltraCode (ID claude.ultracode), or one a plugin adds where DSH
-// Desktop holds the session (ID "<plugin>.<name>", its Name, Hint and Reason in the user's
-// language). On: asked for (what the switch shows); Active: on and in effect; Available: it can be
-// switched now (Reason: why not). Options: what it runs as while on, Option the one picked. Tone
-// "warm": the switch's colour when on.
-type Feature struct {
-	ID        string          `json:"id"`
-	Name      string          `json:"name"`
-	On        bool            `json:"on"`
-	Active    bool            `json:"active,omitempty"`
-	Available bool            `json:"available"`
-	Reason    string          `json:"reason,omitempty"`
-	Hint      string          `json:"hint,omitempty"`
-	Options   []FeatureOption `json:"options,omitempty"`
-	Option    string          `json:"option,omitempty"`
-	Place     string          `json:"place"`
-	Tone      string          `json:"tone,omitempty"`
+// Attached is a piece of a session's page that something attached (docs/next/plugin.md): Satori
+// elements at Place ("effort": at the effort track's right, its first button the key, the rest
+// its options while it is pressed), by From ("ir": Iridium's own, Claude's UltraCode; "m:<machine>":
+// an executor's plugin; "a:<app>": an app), Content by language ("" for any). A button in it is
+// pressed as "att:<session>:<from>:<its id>" (POST /v1/internal/button); <button> takes pressed,
+// disabled and title too.
+type Attached struct {
+	Place   string            `json:"place"`
+	From    string            `json:"from"`
+	Content map[string]string `json:"content"`
 }
 
-// FeatureOption is one of a feature's options.
-type FeatureOption struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-}
-
-// SetFeature switches a feature on or off (PUT /api/sessions/{id}/features/{feature}), maybe at
-// one of its options.
-type SetFeature struct {
-	On     bool   `json:"on"`
-	Option string `json:"option,omitempty"`
+// Attach is PUT /v1/internal/sessions/{id}/attach/{place}: Content, Satori elements, or one a
+// language ({"zh": …, "en": …}); empty takes it away.
+type Attach struct {
+	Content json.RawMessage `json:"content"`
 }
 
 // SetModel, SetMode and SetEffort change a session's model, approval mode and thinking effort,
@@ -116,12 +107,12 @@ type AllowRule struct {
 	Pattern string `json:"pattern"`
 }
 
-// Card is a choice to make, as the web's confirmation panel and plugins show it: an ask
-// (permission, question, plan) or a command's pick (/use, /model, /mode). Options with the same
-// Group are one question's; pick one per group.
+// Card is a choice to make, as the web's confirmation panel and apps show it: an ask
+// (permission, question, plan). Options with the same Group are one question's; pick one per
+// group.
 type Card struct {
 	ID      string       `json:"id"`
-	Kind    string       `json:"kind"` // permission | question | plan | pick
+	Kind    string       `json:"kind"` // permission | question | plan
 	Session string       `json:"session,omitempty"`
 	Title   string       `json:"title"`
 	Summary []string     `json:"summary"`
@@ -149,9 +140,3 @@ type CardAnswer struct {
 	Message string   `json:"message,omitempty"`
 }
 
-// CardReply is what answering a card did: for a pick, the command's reply or a next card.
-type CardReply struct {
-	OK    bool       `json:"ok"`
-	Reply *ChatReply `json:"reply,omitempty"`
-	Card  *Card      `json:"card,omitempty"`
-}

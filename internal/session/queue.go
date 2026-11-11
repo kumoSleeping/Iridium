@@ -63,8 +63,8 @@ func (m *Manager) SendWith(ctx context.Context, id, text, from string, steer boo
 		h.publish()
 		m.publishList()
 	}
-	terminal, tag := m.source(from)
-	in := store.Input{ID: newUUID(), Session: h.id, Terminal: terminal, Tag: tag, Text: text, State: "sent"}
+	terminal, tag, login := m.source(from)
+	in := store.Input{ID: newUUID(), Session: h.id, Terminal: terminal, Login: login, Tag: tag, Text: text, State: "sent"}
 	// Steering joins a running turn; while it waits for the quota there is none to join, so it waits too.
 	if (!steer && h.busy()) || h.quotaWait() {
 		in.State = "queued"
@@ -72,7 +72,7 @@ func (m *Manager) SendWith(ctx context.Context, id, text, from string, steer boo
 			return "", false, err
 		}
 		h.mu.Lock()
-		h.queue = append(h.queue, api.Queued{ID: in.ID, Text: text, From: in.Tag, FromTerminal: terminal, At: time.Now().UnixMilli()})
+		h.queue = append(h.queue, api.Queued{ID: in.ID, Text: text, From: in.Tag, FromTerminal: terminal, FromLogin: login, At: time.Now().UnixMilli()})
 		if len(images) > 0 {
 			h.qimages[in.ID] = images
 		}
@@ -126,7 +126,7 @@ func (h *Hosted) write(ctx context.Context, in store.Input, images []agent.Image
 		line = "[" + tag + "] " + line
 	}
 	h.mu.Lock()
-	h.lastFrom = in.Terminal
+	h.lastFrom, h.lastVia = in.Terminal, viaOf(in.Tag)
 	h.compact = line == "/compact" || line == "/压缩" || strings.HasPrefix(line, "/compact ")
 	ready := h.ready
 	h.mu.Unlock()
@@ -329,7 +329,7 @@ func (h *Hosted) loadQueue() {
 		if tag == "" {
 			tag = in.Terminal
 		}
-		h.queue = append(h.queue, api.Queued{ID: in.ID, Text: in.Text, From: tag, FromTerminal: in.Terminal, Paused: in.State == "paused", At: in.Created})
+		h.queue = append(h.queue, api.Queued{ID: in.ID, Text: in.Text, From: tag, FromTerminal: in.Terminal, FromLogin: in.Login, Paused: in.State == "paused", At: in.Created})
 	}
 }
 
@@ -339,7 +339,7 @@ func queuedInput(session string, q api.Queued) store.Input {
 	if terminal == "" {
 		terminal = q.From
 	}
-	return store.Input{ID: q.ID, Session: session, Terminal: terminal, Tag: q.From, Text: q.Text}
+	return store.Input{ID: q.ID, Session: session, Terminal: terminal, Login: q.FromLogin, Tag: q.From, Text: q.Text}
 }
 
 // HandedInput is the input SendWith gives for a message handed to whoever holds the session
@@ -358,7 +358,7 @@ func (m *Manager) handOver(ctx context.Context, id, text, from string, steer, im
 	if !ok {
 		return false, nil
 	}
-	terminal, tag := m.source(from)
+	terminal, tag, _ := m.source(from)
 	to, done, err := s.Send(ctx, r, text, harness.Source{Terminal: terminal, Tag: tag}, steer, images)
 	if done && err == nil {
 		m.o.Logf("session %s: handed to %s", id, to)

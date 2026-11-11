@@ -91,7 +91,9 @@ func Glance(path string, sources Sources) (Glimpse, error) {
 		blocks := blocksOf(off, raw, Clip, sources)
 		for j := len(blocks) - 1; j >= 0; j-- {
 			if b := blocks[j]; b.Kind == api.BlockKindUser || b.Kind == api.BlockKindAssistant {
-				return Said(b.Kind == api.BlockKindUser, b.Text, b.From, b.Time)
+				s := Said(b.Kind == api.BlockKindUser, b.Text, b.From, b.Time)
+				s.FromTerminal = b.FromTerminal
+				return s
 			}
 		}
 		return nil

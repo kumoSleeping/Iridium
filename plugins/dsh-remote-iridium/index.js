@@ -7,12 +7,12 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import z from '@deepseek-ai/schemastery'
-import { OmdAdapter } from './adapters/omd.js'
-import { dshMethods } from './dsh.js'
-import { Executor, iridiumKey, refused } from './executor.js'
-import { createFeatures, unfeaturedList } from './features.js'
-import { followHeld } from './held.js'
+import { createAttach } from './attach.js'
 import { bridgeEndpoint, createBridge } from './bridge.js'
+import { dshMethods, fileSession } from './dsh.js'
+import { Executor, iridiumKey, refused } from './executor.js'
+import { followHeld } from './held.js'
+import { OmdUltra } from './omd.js'
 
 export const name = 'remote-iridium'
 
@@ -57,7 +57,7 @@ function machineName() {
 }
 
 const base = (url) => url.replace(/\/+$/, '')
-const wsURL = (url) => base(url).replace(/^http/i, 'ws') + '/api/exec'
+const wsURL = (url) => base(url).replace(/^http/i, 'ws') + '/v1/internal/exec'
 
 /** Asks the Iridium to pair until a panel allows it: the TOKEN; null if denied, closed or stopped. */
 async function pair(url, hello, stopped, show) {
@@ -65,7 +65,7 @@ async function pair(url, hello, stopped, show) {
     if (stopped()) return null
     let req
     try {
-      const r = await fetch(`${base(url)}/api/exec/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(hello) })
+      const r = await fetch(`${base(url)}/v1/internal/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(hello) })
       if (r.status === 403) {
         show({ state: 'closed' })
         say(`${url} takes no pairing requests now (its settings): ask again with /iridium ${url}`)
@@ -92,8 +92,8 @@ async function pair(url, hello, stopped, show) {
       if (stopped()) return null
       let st
       try {
-        const r = await fetch(`${base(url)}/api/exec/pair/${encodeURIComponent(req.request)}`)
-        st = r.ok ? await r.json() : { status: r.status === 404 ? 'expired' : 'pending' }
+        const r = await fetch(`${base(url)}/v1/internal/pair/${encodeURIComponent(req.request)}`)
+        st = r.ok ? await r.json() : { status: r.status === 404 || r.status === 422 ? 'expired' : 'pending' }
       } catch {
         st = { status: 'pending' }
       }
@@ -169,10 +169,8 @@ export function secureURL(url) {
  * its agents may run them too (ir sh), not only a person on its page (default: no); unsynced, the
  * folders of the workspaces the Iridium does not list (switched off on the plugin's settings page;
  * a name in dsh's sidebar does too); ungrouped, whether it lists the sessions in none of the
- * workspaces (dsh's 未分组; default: yes); unfeatured, the features (features.js: other plugins'
- * switches on a session, OMD's Ultra) not offered to the Iridium, by id (default: none). The url,
- * unsynced, ungrouped and unfeatured are volatile: taken at once, without dsh starting the plugin
- * again.
+ * workspaces (dsh's 未分组; default: yes). The url, unsynced and ungrouped are volatile: taken at
+ * once, without dsh starting the plugin again.
  */
 export const Config = z.object({
   url: z.string().default('').volatile(),
@@ -183,7 +181,6 @@ export const Config = z.object({
   // A list; text with commas from an earlier build is taken too (unsyncedList).
   unsynced: z.union([z.array(z.string()), z.string()]).default([]).volatile(),
   ungrouped: z.boolean().default(true).volatile(),
-  unfeatured: z.union([z.array(z.string()), z.string()]).default([]).volatile(),
 })
 
 /** The workspaces kept from the Iridium, as the setting lists them (folders or names; a list, or
@@ -210,24 +207,42 @@ export function apply(ctx, config) {
   let run = null // { stop, url }: the loop for one url
   let offer = null // what this machine gives the Iridium: dsh's version, commands, roots
 
-  // Other plugins' switches on a session, for the Iridium's page (features.js), as the service
-  // iridiumFeatures; OMD's Ultra one of them, by a sub-plugin on while OMD is here. The page
-  // learns of a change by held.changed, over whichever connection is up.
-  const features = createFeatures({ unfeatured: () => unfeaturedList(volatile(config?.unfeatured)) })
-  ctx.provide('iridiumFeatures', features)
-  ctx.plugin(OmdAdapter)
-  // The dsh processes the Iridium starts here run their sessions' features themselves (session.js,
-  // which dsh.session's patch loads there): they tell them over this bridge.
-  const bridge = createBridge({ endpoint: bridgeEndpoint(state), changed: (s) => features.changed(s), log: say })
+  // What plugins hang on a session for the Iridium's page (attach.js), as the service iridium:
+  // this process's own, and those of the dsh processes the Iridium started here (session.js, over
+  // the bridge), sent on over whichever connection is up; a button pressed there comes back.
+  let bridge = null
+  const attach = createAttach({
+    send: (params) => run?.ex?.notify('session.attach', params) ?? false,
+    toProcess: (session, id, user) => bridge?.button(session, id, user),
+  })
+  ctx.provide('iridium', attach.service)
+  ctx.plugin(OmdUltra)
+  // Each session that begins in one of those processes is filed under its folder's workspace here
+  // (DSH Desktop's sidebar), once.
+  const filed = new Set()
+  bridge = createBridge({
+    endpoint: bridgeEndpoint(state),
+    started: (session, cwd) => {
+      if (filed.has(session)) return
+      filed.add(session)
+      fileSession(ctx, session, cwd).catch((e) => {
+        filed.delete(session)
+        say(`filing ${session} under its workspace: ${e.message}`)
+      })
+    },
+    attach: (session, place, content, owner) => attach.put(session, place, content, owner),
+    gone: (owner) => attach.drop(owner),
+    log: say,
+  })
   const sessionFile = path.join(state, 'session.patch.yml')
-  const follow = followHeld(ctx, features, (event, params) => run?.ex?.notify(event, params), { bridge })
+  const prepared = path.join(state, 'prepared')
+  const follow = followHeld(ctx, (event, params) => run?.ex?.notify(event, params))
   ctx.effect(() => () => {
     follow.stop()
-    features.dispose()
     bridge.close()
-  }, 'remote-iridium: features')
+  }, 'remote-iridium: the sessions\' parts')
   // A dsh with agents (DSH Desktop's, dsh web's) holds sessions; one without has nothing to say.
-  const caps = () => (ctx.get('agents') ? ['held', 'held.features'] : [])
+  const caps = () => [...(ctx.get('agents') ? ['held'] : []), 'agent.prepare', 'session.attach']
 
   function start() {
     run?.stop()
@@ -299,9 +314,16 @@ export function apply(ctx, config) {
         }
         if (stopped) return
         show({ state: 'paired', name: who.name })
-        // The models this dsh's settings give, for the sessions it starts (dsh.llm): keys may be in it.
+        // The models this dsh's settings give, for the sessions it starts (agent.prepare): keys may be in it.
         const llmFile = path.join(state, 'llm.patch.yml')
-        ex = new Executor({ url: wsURL(url), token, state: path.join(state, iridiumKey(url)), denied: [tokens, llmFile, sessionFile], roots: config?.roots ?? [], noShell, agentShell, agents: [dsh], caps, methods: dshMethods(ctx, () => ({ unsynced: unsyncedList(volatile(config?.unsynced)), ungrouped: volatile(config?.ungrouped) !== false }), { file: llmFile, scope: dsh.scope }, { features, follow, bridge, sessionFile }), program: who.program, ir: fileURLToPath(new URL('./ir.js', import.meta.url)), log: (m) => say(m) })
+        ex = new Executor({
+          url: wsURL(url), token, state: path.join(state, iridiumKey(url)), denied: [tokens, llmFile, sessionFile, prepared], roots: config?.roots ?? [], noShell, agentShell, agents: [dsh], caps,
+          methods: dshMethods(ctx, () => ({ unsynced: unsyncedList(volatile(config?.unsynced)), ungrouped: volatile(config?.ungrouped) !== false }), { file: llmFile, scope: dsh.scope }, { follow, bridge, sessionFile, dir: prepared }),
+          // Connected again: all that is attached, again; a button pressed on the page, to its plugin.
+          connected: () => attach.resend(),
+          events: { 'session.button': (p) => attach.button(p?.session, p?.id, p?.user) },
+          program: who.program, ir: fileURLToPath(new URL('./ir.js', import.meta.url)), log: (m) => say(m),
+        })
         const running = ex.run()
         // A TOKEN turned down (its Bot removed) is forgotten, and the machine pairs again.
         while (!stopped) {
@@ -380,11 +402,9 @@ export function apply(ctx, config) {
     start()
     return () => run?.stop()
   }, 'remote-iridium')
-  // The address changed on its settings page: ask the new one. A feature switched off or on
-  // there: the sessions the Iridium watches are looked at again.
+  // The address changed on its settings page: ask the new one.
   ctx.on('loader/volatile-update', () => {
     if (urlNow() !== run?.url) start()
-    features.changed(null)
   })
 
   ctx.inject(['commands', 'settings'], (ctx) => {

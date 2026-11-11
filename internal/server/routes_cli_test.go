@@ -18,6 +18,7 @@ import (
 // Bot, for that session; the session commands run, the Iridium's own machine's are refused, and
 // what a Bot may not do (Claude, not being the owner's) neither may it.
 func TestCLIAtMachine(t *testing.T) {
+	t.Parallel()
 	const tok = "irs_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 	var botID string
 	l := startWith(t, func(s *Server, _ config.Config, _ string) {
@@ -27,16 +28,15 @@ func TestCLIAtMachine(t *testing.T) {
 		}
 	})
 	var b api.Token
-	l.want(200, "socket", "POST", "/api/terminals/tokens", api.NewInvite{Name: "pc"}, &b)
-	botID = b.Terminal.ID
-	var own api.NewSessionReply
-	l.want(200, "socket", "POST", "/api/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "hello"}, &own)
-	l.waitReply("socket", own.ID, "ok: hello")
+	b = l.newApp("pc", false)
+	botID = b.App.ID
+	own := l.create(200, "socket", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "hello"})
+	l.waitReply("socket", own, "ok: hello")
 
 	run := func(token string, args ...string) (int, string, string, int) {
 		t.Helper()
 		body, _ := json.Marshal(api.CLIRun{Args: args, Cwd: "/x"})
-		req, _ := http.NewRequest("POST", l.base+"/api/cli", bytes.NewReader(body))
+		req, _ := http.NewRequest("POST", l.base+"/v1/internal/cli", bytes.NewReader(body))
 		req.Header.Set("Authorization", "Bearer "+token)
 		resp, err := l.web.Do(req)
 		if err != nil {
@@ -58,32 +58,32 @@ func TestCLIAtMachine(t *testing.T) {
 		return resp.StatusCode, out.String(), errs.String(), exit
 	}
 
-	if code, out, errs, exit := run(tok, "ls"); code != 200 || exit != 0 || !strings.Contains(out, own.ID[:8]) {
-		t.Fatalf("ls: %d %d %q %q", code, exit, out, errs)
+	if code, out, errs, exit := run(tok, "api", "channel.list"); code != 200 || exit != 0 || !strings.Contains(out, own[:8]) {
+		t.Fatalf("channel.list: %d %d %q %q", code, exit, out, errs)
 	}
-	if _, _, errs, exit := run(tok, "sh", "pc", "--", "id"); exit != 1 || !strings.Contains(errs, "Iridium's own machine") {
-		t.Errorf("sh from there: %d %q", exit, errs)
+	if _, _, errs, exit := run(tok, "run", "--", "id"); exit != 1 || !strings.Contains(errs, "runs on the host") {
+		t.Errorf("run from there: %d %q", exit, errs)
 	}
-	if _, _, errs, exit := run(tok, "cp", "a", "b"); exit != 1 || errs == "" {
-		t.Errorf("cp from there: %d %q", exit, errs)
+	if _, _, errs, exit := run(tok, "api", "POST", "internal/files/copy", "from=a", "to=b"); exit != 1 || errs == "" {
+		t.Errorf("copy from there: %d %q", exit, errs)
 	}
 	// Claude is the owner's own terminals': that Bot is not.
-	if _, _, errs, exit := run(tok, "send", own.ID[:8], "hi"); exit != 1 || errs == "" {
+	if _, _, errs, exit := run(tok, "api", "message.create", "channel_id="+own[:8], "_data.text=hi"); exit != 1 || errs == "" {
 		t.Errorf("send to Claude from a Bot not the owner's: %d %q", exit, errs)
 	}
-	if _, out, errs, exit := run(tok, "--help"); exit != 0 || !strings.Contains(out, "ir new") || strings.Contains(out, "ir secret") {
+	if _, out, errs, exit := run(tok, "--help"); exit != 0 || !strings.Contains(out, "ir api") || strings.Contains(out, "ir run [") {
 		t.Errorf("help there: %d %q %q", exit, out, errs)
 	}
 	// Not with a channel's own TOKEN, nor a session TOKEN no session has.
-	if code, _, _, _ := run(b.Token, "ls"); code != http.StatusForbidden {
-		t.Errorf("/api/cli with the Bot's TOKEN: %d", code)
+	if code, _, _, _ := run(b.Token, "api", "channel.list"); code != http.StatusForbidden {
+		t.Errorf("/v1/internal/cli with the Bot's TOKEN: %d", code)
 	}
-	if code, _, _, _ := run("irs_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB", "ls"); code != http.StatusUnauthorized {
+	if code, _, _, _ := run("irs_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB", "api", "channel.list"); code != http.StatusUnauthorized {
 		t.Errorf("an unknown session TOKEN: %d", code)
 	}
 	// Its Bot revoked: its sessions' TOKENs go with it.
-	l.want(200, "socket", "DELETE", "/api/terminals/"+botID, nil, nil)
-	if code, _, _, _ := run(tok, "ls"); code != http.StatusUnauthorized {
+	l.want(200, "socket", "DELETE", "/v1/internal/apps/"+botID, nil, nil)
+	if code, _, _, _ := run(tok, "api", "channel.list"); code != http.StatusUnauthorized {
 		t.Errorf("after the Bot is revoked: %d", code)
 	}
 }

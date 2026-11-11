@@ -21,7 +21,6 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/kumoSleeping/iridium/internal/api"
-	"github.com/kumoSleeping/iridium/internal/chat"
 	"github.com/kumoSleeping/iridium/internal/cli"
 	"github.com/kumoSleeping/iridium/internal/config"
 	"github.com/kumoSleeping/iridium/internal/discover"
@@ -30,6 +29,8 @@ import (
 	"github.com/kumoSleeping/iridium/internal/hold"
 	"github.com/kumoSleeping/iridium/internal/hub"
 	"github.com/kumoSleeping/iridium/internal/join"
+	"github.com/kumoSleeping/iridium/internal/machineid"
+	"github.com/kumoSleeping/iridium/internal/pricing"
 	"github.com/kumoSleeping/iridium/internal/push"
 	"github.com/kumoSleeping/iridium/internal/remote"
 	"github.com/kumoSleeping/iridium/internal/server"
@@ -131,7 +132,7 @@ func serve(args []string) int {
 	d := discover.New(do)
 	var srv *server.Server // names terminals in source tags, once it is there
 	tag := func(id string) string { return srv.Tag(id) }
-	executors := &remote.Hub{Logf: log.Printf}
+	executors := &remote.Hub{Logf: log.Printf, Self: machineid.Hash()}
 	// The harnesses' own channels (internal/harness): only here is an agent's own code wired in.
 	dshChannel := hdsh.New(hdsh.Options{Remote: executors, Logf: log.Printf})
 	defer dshChannel.Close()
@@ -164,27 +165,15 @@ func serve(args []string) int {
 	}
 	srv.Updater = newUpdater(cfg, h)
 	h.Set("update", srv.Updater.State())
+	srv.Prices = pricing.Open(state)
 	// Web Push's total switch is the config's: turning it writes the file (with the settings').
-	srv.Push, err = push.Open(push.Options{StateDir: state, Store: st, Manager: m, Enabled: cfg.Push, Mask: srv.MaskText, Save: func(on bool) error {
+	srv.Push, err = push.Open(push.Options{StateDir: state, Store: st, Manager: m, Enabled: cfg.Push, Mask: srv.MaskText, Sees: srv.LoginSees, Save: func(on bool) error {
 		return srv.SaveConfig(func(c *config.Config) { c.Push = on })
 	}})
 	if err != nil {
 		log.Print(err)
 		return 1
 	}
-	srv.Chat, err = chat.New(chat.Options{Manager: m, Store: st, StateDir: state, ChatDir: cfg.ChatDir, Guard: srv.ChatGuard(), Message: srv.Files().Message,
-		Terminal: srv.HasTerminal, BotsChanged: srv.BotsChanged,
-		Workspaces: func() ([]api.Workspace, error) {
-			if srv.Discover == nil {
-				return nil, nil
-			}
-			return srv.Discover.Workspaces()
-		}})
-	if err != nil {
-		log.Print(err)
-		return 1
-	}
-	defer srv.Chat.Close()
 	home, _ := os.UserHomeDir()
 	srv.Discover, srv.Folders = d, discover.DefaultFolders(home, state, filepath.Dir(*path))
 	if len(cfg.FolderRoots) > 0 {
@@ -199,7 +188,7 @@ func serve(args []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	go srv.Updater.Run(ctx)
-	go srv.SyncExtensions(ctx)
+	go srv.Prices.Run(ctx)
 	if err := srv.Serve(ctx, tcp, sock); err != nil {
 		log.Print(err)
 		return 1

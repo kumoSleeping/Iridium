@@ -2,108 +2,123 @@
 // that it loads without dsh's packages (the tests' run.mjs).
 import fs from 'node:fs'
 import path from 'node:path'
+import { bound, boundPatch } from './compose.js'
 import { RemoteError } from './executor.js'
 import { heldMethods } from './held.js'
 
+/** The agents it prepares launches of. */
+const AGENT = 'dsh'
+
 /**
- * What the dsh this plugin runs in knows, for the Iridium (its docs/exec.md "远端 DSH"): the
- * sessions it holds (held.js: held.list, held.send, held.get, held.set, and dsh.open, dsh.prompt
- * by their older names), with kept() what this plugin's settings keep from it (unsynced, the
- * workspaces, by folder or name; ungrouped false, the sessions in none of them) and o.features,
- * o.follow the feature registry and followHeld's (none: no features); dsh.attach {session, cwd},
- * the session filed under the workspace of its folder, made if there is none (a session the
- * Iridium started here, in DSH Desktop's sidebar); dsh.presets, the agent presets it registers;
- * dsh.bundles, its profile's bundles of other packages (profileBundles); dsh.llm, its models for
- * the sessions the Iridium starts here; dsh.session, this plugin's part in them (session.js).
+ * What the dsh this plugin runs in knows, for the Iridium (its docs/exec.md "远端 DSH", docs/next/
+ * plugin.md): the sessions it holds (held.js: held.list, held.send, held.get, held.set), with
+ * kept() what this plugin's settings keep from it (unsynced, the workspaces, by folder or name;
+ * ungrouped false, the sessions in none of them) and o.follow followHeld's; agent.presets, the
+ * agent presets it registers; agent.prepare, the patches a dsh process the Iridium starts here
+ * runs with: this dsh's models (llm: {file, scope}), a preset of its profile's bundles bound as
+ * Desktop binds it (compose.js; o.dir where it is written), and this plugin's part for the session
+ * (session.js, connected to o.bridge; o.sessionFile).
  */
 export function dshMethods(ctx, kept = () => ({ unsynced: [], ungrouped: true }), llm = {}, o = {}) {
+  const presets = async () => {
+    const reg = ctx.get('agentPresets')
+    if (!reg) throw new RemoteError('unsupported', 'no agent preset registry in this dsh')
+    try {
+      const out = []
+      for (const p of await reg.list()) {
+        const doc = await reg.readDocument(p.id)
+        out.push({
+          id: p.id,
+          ...(p.name ? { name: p.name } : {}),
+          ...(p.description ? { description: p.description } : {}),
+          plugins: doc?.content ?? '',
+          ...(p.broken ? { broken: String(p.broken) } : {}),
+        })
+      }
+      return { presets: out, default: reg.defaultId ?? '' }
+    } catch (e) {
+      throw new RemoteError('failed', e.message)
+    }
+  }
+  const write = (file, text) => {
+    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 })
+    fs.writeFileSync(file, text, { mode: 0o600 })
+    return file
+  }
+  const agentOf = (p, what) => {
+    if (p?.agent !== AGENT) throw new RemoteError('unsupported', `${what}: no agent ${p?.agent} here`)
+  }
   return {
-    ...heldMethods(ctx, o.features, kept, o.follow, o.bridge),
-    // The patch that puts this plugin's part for a session (session.js) into the dsh processes the
-    // Iridium starts here, connected to the bridge (o.bridge, at o.sessionFile): their features
-    // (a plugin's in that process, OMD's) answer the Iridium as Desktop's do. The secret stays here.
-    'dsh.session': async () => {
-      if (!o.bridge || !o.sessionFile) throw new RemoteError('unsupported', 'dsh.session')
-      try {
-        fs.mkdirSync(path.dirname(o.sessionFile), { recursive: true, mode: 0o700 })
-        fs.writeFileSync(o.sessionFile, sessionPatch(o.bridge), { mode: 0o600 })
-        return { patch: o.sessionFile }
-      } catch (e) {
-        throw new RemoteError('failed', e.message)
-      }
-    },
+    ...heldMethods(ctx, kept, o.follow),
     // The agent presets this dsh registers (its agentPresets registry: the shipped ones, a
-    // bundle's, the profile's own edits), each with its child plugin rows as YAML, which the
-    // Iridium runs process-wide through a patch; and the default, the one set in its settings.
-    'dsh.presets': async () => {
-      const reg = ctx.get('agentPresets')
-      if (!reg) throw new RemoteError('unsupported', 'no agent preset registry in this dsh')
-      try {
-        const presets = []
-        for (const p of await reg.list()) {
-          const doc = await reg.readDocument(p.id)
-          presets.push({
-            id: p.id,
-            ...(p.name ? { name: p.name } : {}),
-            ...(p.description ? { description: p.description } : {}),
-            plugins: doc?.content ?? '',
-            ...(p.broken ? { broken: String(p.broken) } : {}),
-          })
+    // bundle's, the profile's own edits), each with its child plugin rows as YAML; and the
+    // default, the one set in its settings.
+    'agent.presets': async (p) => {
+      agentOf(p, 'agent.presets')
+      return presets()
+    },
+    // The patches for a dsh process the Iridium starts here, in their order: this dsh's models;
+    // with a session, this plugin's part in it (and the session parts of the profile's other
+    // bundles), then its preset bound over the profile's bundles it names, if it names any
+    // (preset true: the Iridium adds no preset of its own; system, its system prompt, follows the
+    // preset's persona). Without a session: the models only (the Iridium's look at them).
+    'agent.prepare': async (p) => {
+      agentOf(p, 'agent.prepare')
+      const patches = []
+      if (llm.file && llm.scope && ctx.get('loader')?.entries) {
+        try {
+          patches.push(write(llm.file, llmPatch(ctx.get('loader'), baseIDs(llm.scope))))
+        } catch (e) {
+          throw new RemoteError('failed', `models: ${e.message}`)
         }
-        return { presets, default: reg.defaultId ?? '' }
-      } catch (e) {
-        throw new RemoteError('failed', e.message)
       }
-    },
-    // The bundles of the profile this dsh runs (its package.json's dsh.profile.bundles) besides
-    // dsh's own and this plugin, each with its patch files' text: a preset of theirs (OMD's) needs
-    // their layer in the Iridium's sessions, whose sdk profile has none of this one's bundles.
-    'dsh.bundles': async () => {
+      if (typeof p.session !== 'string' || !p.session) return { patches, preset: false }
+      if (!/^[A-Za-z0-9_-]{1,128}$/.test(p.session)) throw new RemoteError('bad_request', 'agent.prepare: a session id')
       const dir = ctx.get('profileContext')?.dir
-      if (!dir) throw new RemoteError('unsupported', 'no profile in this dsh')
+      let bundles = []
       try {
-        return { bundles: profileBundles(dir) }
+        bundles = dir ? profileBundles(dir) : []
       } catch (e) {
-        throw new RemoteError('failed', e.message)
+        throw new RemoteError('failed', `bundles: ${e.message}`)
       }
-    },
-    // This dsh's models and providers as its settings have them (the llm adapters' rows and the
-    // default model), for the Iridium's sessions here, whose sdk profile has none of this
-    // profile's settings: written as a patch beside this plugin's state, which they boot with. The
-    // Iridium gets its path only: keys in it stay here (the executor serves it to no one).
-    'dsh.llm': async () => {
-      if (!llm.file || !llm.scope) throw new RemoteError('unsupported', 'dsh.llm')
-      const loader = ctx.get('loader')
-      if (!loader?.entries) throw new RemoteError('unsupported', 'no loader in this dsh')
+      if (o.bridge && o.sessionFile) patches.push(write(o.sessionFile, sessionPatch(o.bridge)))
+      if (!ctx.get('agentPresets') || !llm.scope || !o.dir) return { patches, preset: false }
+      const { presets: list, default: def } = await presets()
+      const id = typeof p.preset === 'string' && p.preset ? p.preset : def
+      const preset = list.find((x) => x.id === id)
+      const binds = preset ? bound(preset, bundles) : []
+      if (!binds.length) return { patches, preset: false }
       try {
-        fs.mkdirSync(path.dirname(llm.file), { recursive: true, mode: 0o700 })
-        fs.writeFileSync(llm.file, llmPatch(loader, baseIDs(llm.scope)), { mode: 0o600 })
-        return { patch: llm.file }
+        const text = boundPatch(llm.scope, preset, typeof p.system === 'string' ? p.system : '', moduleURL('modules.mjs'), moduleURL('preset.mjs'), binds)
+        patches.push(write(path.join(o.dir, `${p.session}.patch.yml`), text))
       } catch (e) {
-        throw new RemoteError('failed', e.message)
+        throw new RemoteError('failed', `preset ${preset.id}: ${e.message}`)
       }
-    },
-    'dsh.attach': async (p) => {
-      if (typeof p.session !== 'string' || !p.session || typeof p.cwd !== 'string' || !path.isAbsolute(p.cwd))
-        throw new RemoteError('bad_request', 'dsh.attach: session and an absolute cwd')
-      const reg = ctx.get('workspaceRegistry')
-      if (!reg) throw new RemoteError('unsupported', 'no workspace registry in this dsh')
-      try {
-        const w = (await reg.resolveByPath(p.cwd)) ?? (await reg.create(p.cwd))
-        await w.attachSession(p.session)
-        return { workspace: w.id }
-      } catch (e) {
-        throw new RemoteError('failed', e.message)
-      }
+      return { patches, preset: true }
     },
   }
+}
+
+/** The file: URL of one of this plugin's modules for a bound preset (prepare/). */
+const moduleURL = (name) => new URL(`./prepare/${name}`, import.meta.url).href
+
+/**
+ * Files a session that began in a dsh process the Iridium started here under the workspace of its
+ * folder cwd in this dsh (DSH Desktop's sidebar), made if there is none.
+ */
+export async function fileSession(ctx, session, cwd) {
+  if (!path.isAbsolute(cwd)) throw new Error(`no absolute folder for ${session}`)
+  const reg = ctx.get('workspaceRegistry')
+  if (!reg) return
+  const w = (await reg.resolveByPath(cwd)) ?? (await reg.create(cwd))
+  await w.attachSession(session)
 }
 
 /** The patch that loads session.js in a session's dsh process, connected to bridge. */
 export function sessionPatch(bridge) {
   const q = (v) => JSON.stringify(v)
-  return [
-    "# dsh-remote-iridium: its part for the Iridium's sessions here (their features).",
+  const out = [
+    "# dsh-remote-iridium: its part for the Iridium's sessions here.",
     '# Generated; do not edit.',
     '- insert:',
     '    - id: remote-iridium-session',
@@ -111,7 +126,8 @@ export function sessionPatch(bridge) {
     '      config:',
     `        endpoint: ${q(bridge.endpoint)}`,
     `        secret: ${q(bridge.secret)}`,
-  ].join('\n') + '\n'
+  ]
+  return out.join('\n') + '\n'
 }
 
 /** This plugin's package name. */
@@ -120,7 +136,7 @@ const own = JSON.parse(fs.readFileSync(new URL('./package.json', import.meta.url
 /**
  * The bundles of the profile at dir besides dsh's own (@deepseek-ai/) and this plugin, by its
  * order: {name, version, patches}, patches the text of the files its dsh.bundle.patch lists. A
- * bundle not installed in the profile's node_modules (dsh's installation has it) is left out.
+ * bundle not installed in the profile's node_modules is left out.
  */
 export function profileBundles(dir) {
   const json = (f) => JSON.parse(fs.readFileSync(f, 'utf8'))

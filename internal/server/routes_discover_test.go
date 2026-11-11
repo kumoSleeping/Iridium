@@ -17,6 +17,7 @@ import (
 )
 
 func TestWorkspacesAndFolders(t *testing.T) {
+	t.Parallel()
 	// The session manager's discovery is this index: a session made goes in its group at once.
 	var d *discover.Index
 	s, _, work := setupWith(t, func(o *session.Options) {
@@ -41,34 +42,34 @@ func TestWorkspacesAndFolders(t *testing.T) {
 	os.MkdirAll(filepath.Join(work, ".git"), 0o700)
 	os.WriteFile(filepath.Join(work, "README"), nil, 0o600)
 	var fl api.Folders
-	if code := call(t, c, "GET", base+"/api/folders?path="+work, nil, &fl); code != 200 || !slices.Equal(fl.Folders, []string{"alpha", "Zed"}) || fl.Parent != root {
+	if code := call(t, c, "GET", base+"/v1/internal/folders?path="+work, nil, &fl); code != 200 || !slices.Equal(fl.Folders, []string{"alpha", "Zed"}) || fl.Parent != root {
 		t.Fatalf("folders: %d %+v", code, fl)
 	}
 	var made api.FolderReply
-	if code := call(t, c, "POST", base+"/api/folders", api.NewFolder{Path: work, Name: "proj"}, &made); code != 200 || made.Path != filepath.Join(work, "proj") {
+	if code := call(t, c, "POST", base+"/v1/internal/folders", api.NewFolder{Path: work, Name: "proj"}, &made); code != 200 || made.Path != filepath.Join(work, "proj") {
 		t.Fatalf("new folder: %d %+v", code, made)
 	}
-	if code := call(t, c, "POST", base+"/api/folders", api.NewFolder{Path: work, Name: "proj"}, nil); code != http.StatusConflict {
+	if code := call(t, c, "POST", base+"/v1/internal/folders", api.NewFolder{Path: work, Name: "proj"}, nil); code != http.StatusConflict {
 		t.Errorf("new folder twice: %d", code)
 	}
-	if code := call(t, c, "GET", base+"/api/folders?path=/", nil, nil); code != http.StatusForbidden {
+	if code := call(t, c, "GET", base+"/v1/internal/folders?path=/", nil, nil); code != http.StatusForbidden {
 		t.Errorf("outside the home: %d", code)
 	}
 
 	// Groups: none made by hand (the user, 2026-11-08); a session in a folder makes its group,
 	// which is renamed and listed.
-	if code := call(t, c, "POST", base+"/api/workspaces", map[string]string{"path": made.Path}, nil); code != http.StatusMethodNotAllowed {
+	if code := call(t, c, "POST", base+"/v1/internal/workspaces", map[string]string{"path": made.Path}, nil); code != http.StatusNotFound {
 		t.Errorf("a workspace made by hand: %d", code)
 	}
-	var created api.NewSessionReply
-	if code := call(t, c, "POST", base+"/api/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: made.Path, Text: "hi"}, &created); code != 200 {
+	created, code := createAt(t, c, base, api.NewSession{Agent: api.AgentClaude, Cwd: made.Path, Text: "hi"})
+	if code != 200 {
 		t.Fatalf("new session: %d", code)
 	}
 	var list []api.Workspace
 	var sessions []api.Session
 	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
-		call(t, c, "GET", base+"/api/workspaces", nil, &list)
-		call(t, c, "GET", base+"/api/sessions", nil, &sessions)
+		list, _ = d.Workspaces()
+		sessions = sessionsAt(t, c, base)
 		if len(list) == 1 && len(sessions) == 1 && sessions[0].Workspace == list[0].ID {
 			break
 		}
@@ -76,35 +77,23 @@ func TestWorkspacesAndFolders(t *testing.T) {
 	if len(list) != 1 || list[0].Name != "proj" || list[0].Path != made.Path || len(sessions) != 1 || sessions[0].Workspace != list[0].ID {
 		t.Fatalf("the session's group: %+v %+v", list, sessions)
 	}
-	if code := call(t, c, "PATCH", base+"/api/workspaces/"+strconv.FormatInt(list[0].ID, 10), api.WorkspacePatch{Name: new("Project")}, nil); code != 200 {
+	if code := call(t, c, "PATCH", base+"/v1/internal/guilds/"+strconv.FormatInt(list[0].ID, 10), api.GuildPatch{Name: new("Project"), Position: new(0)}, nil); code != 200 {
 		t.Errorf("rename: %d", code)
 	}
-	call(t, c, "GET", base+"/api/workspaces", nil, &list)
-	if len(list) != 1 || list[0].Name != "Project" || list[0].Hidden {
+	list, _ = d.Workspaces()
+	if len(list) != 1 || list[0].Name != "Project" {
 		t.Errorf("workspaces: %+v", list)
 	}
-	// Hidden, then shown again; its name left as it was.
-	wsURL := base + "/api/workspaces/" + strconv.FormatInt(list[0].ID, 10)
-	if code := call(t, c, "PATCH", wsURL, api.WorkspacePatch{Hidden: new(true)}, nil); code != 200 {
-		t.Errorf("hide: %d", code)
-	}
-	call(t, c, "GET", base+"/api/workspaces", nil, &list)
-	if len(list) != 1 || list[0].Name != "Project" || !list[0].Hidden {
-		t.Errorf("hidden: %+v", list)
-	}
-	if code := call(t, c, "PATCH", wsURL, api.WorkspacePatch{Hidden: new(false)}, nil); code != 200 {
-		t.Errorf("show: %d", code)
-	}
-	list = nil
-	call(t, c, "GET", base+"/api/workspaces", nil, &list)
-	if len(list) != 1 || list[0].Hidden {
-		t.Errorf("shown again: %+v", list)
+	// Opened on the page: a person's.
+	sessions = sessionsAt(t, c, base)
+	if len(sessions) != 1 || !sessions[0].Own {
+		t.Errorf("a session opened on the page not own: %+v", sessions)
 	}
 	yes, name := true, "named"
-	if code := call(t, c, "PATCH", base+"/api/sessions/"+created.ID, api.SessionPatch{Pinned: &yes, Name: &name}, nil); code != 200 {
+	if code := patchAt(t, c, base, created, api.SessionPatch{Pinned: &yes, Name: &name}); code != 200 {
 		t.Fatalf("patch: %d", code)
 	}
-	if code := call(t, c, "PATCH", base+"/api/sessions/00000000-0000-4000-8000-000000000000", api.SessionPatch{Pinned: &yes}, nil); code != http.StatusNotFound {
+	if code := patchAt(t, c, base, "00000000-0000-4000-8000-000000000000", api.SessionPatch{Pinned: &yes}); code != http.StatusUnprocessableEntity {
 		t.Errorf("patch of no session: %d", code)
 	}
 }
@@ -112,6 +101,7 @@ func TestWorkspacesAndFolders(t *testing.T) {
 // A session on disk from before Iridium watched is the archive: listed archived. Restored, it
 // is shown; archived again, it stays so till its transcript grows.
 func TestArchiveFound(t *testing.T) {
+	t.Parallel()
 	var d *discover.Index
 	var cfg config.Config
 	s, cfg, work := setupWith(t, func(o *session.Options) {
@@ -137,8 +127,7 @@ func TestArchiveFound(t *testing.T) {
 	c, base := srv.Client(), srv.URL
 	archived := func() bool {
 		t.Helper()
-		var l []api.Session
-		call(t, c, "GET", base+"/api/sessions", nil, &l)
+		l := sessionsAt(t, c, base)
 		for _, x := range l {
 			if x.ID == id {
 				return x.Archived
@@ -151,10 +140,10 @@ func TestArchiveFound(t *testing.T) {
 		t.Fatal("an old session is shown")
 	}
 	no, yes := false, true
-	if code := call(t, c, "PATCH", base+"/api/sessions/"+id, api.SessionPatch{Archived: &no}, nil); code != 200 || archived() {
+	if code := patchAt(t, c, base, id, api.SessionPatch{Archived: &no}); code != 200 || archived() {
 		t.Fatalf("restore: %d", code)
 	}
-	if code := call(t, c, "PATCH", base+"/api/sessions/"+id, api.SessionPatch{Archived: &yes}, nil); code != 200 || !archived() {
+	if code := patchAt(t, c, base, id, api.SessionPatch{Archived: &yes}); code != 200 || !archived() {
 		t.Fatalf("archive: %d", code)
 	}
 	d.Scan()

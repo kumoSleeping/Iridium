@@ -42,7 +42,7 @@ type Options struct {
 	PiSessions string // ~/.pi/agent/sessions
 	DshHome    string // $DSH_HOME, else ~/.dsh
 	Store      *store.Store
-	Hub        *hub.Hub // given the carried state "workspaces"; may be nil
+	Hub        *hub.Hub // given the carried state "guilds"; may be nil
 	Procs      Procs    // nil: the system's (/proc on Linux, sysctl on macOS)
 	UID        int      // whose processes count; -1: this process's
 	Logf       func(string, ...any)
@@ -228,9 +228,7 @@ func (x *Index) Start() error {
 		x.loadRemote()
 	}
 	x.Scan()
-	x.publishWorkspaces()
-	x.publishColors()
-	x.publishPlaces()
+	x.publishGuilds()
 	x.wg.Add(2)
 	go x.loop()
 	go x.settle()
@@ -516,7 +514,7 @@ func (x *Index) settle() {
 		x.changed, x.whole = map[string]bool{}, false
 		x.mu.Unlock()
 		if whole {
-			x.publishWorkspaces()
+			x.publishGuilds()
 		}
 		if (len(ids) > 0 || whole) && x.o.OnChange != nil {
 			slices.Sort(ids)
@@ -535,18 +533,6 @@ func (x *Index) Changed(ids ...string) {
 		x.whole = true
 	}
 	x.mu.Unlock()
-}
-
-func (x *Index) publishWorkspaces() {
-	if x.o.Hub == nil {
-		return
-	}
-	ws, err := x.Workspaces()
-	if err != nil {
-		x.o.Logf("discover: workspaces: %v", err)
-		return
-	}
-	x.o.Hub.Set("workspaces", ws)
 }
 
 // Sessions is every session found on disk, as the list has it; the overlay (names, pins,
@@ -619,7 +605,7 @@ func (x *Index) Found(id string) (api.Session, *transcript.File, bool) {
 	var f *transcript.File
 	if info, ok := agents.Get(e.agent); ok {
 		if f = x.files[id]; f == nil || f.Path() != e.path {
-			f = transcript.OpenAs(e.path, info.Format, x.o.Store.Source)
+			f = transcript.OpenAs(e.path, info.Format, x.o.Store.Sender)
 			x.files[id] = f
 		}
 	}

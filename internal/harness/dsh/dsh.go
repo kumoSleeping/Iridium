@@ -34,10 +34,8 @@ type Channel struct {
 
 	heldMu sync.Mutex
 	helds  map[string]*heldEntry // by session (Iridium's id)
-	many   map[string]bool       // machines told of more than maxFeatures on a session
 	told   []heldTold            // held.changed events not taken in yet
 	taking bool                  // a goroutine takes them in
-	filing map[string]bool       // sessions whose filing in Desktop's workspace is asked for (launch.go)
 
 	presetMu sync.Mutex
 	presets  map[string]presetList    // by machine
@@ -53,7 +51,6 @@ var (
 	_ harness.Stater   = (*Channel)(nil)
 	_ harness.Sender   = (*Channel)(nil)
 	_ harness.Setter   = (*Channel)(nil)
-	_ harness.Retuner  = (*Channel)(nil)
 	_ harness.Launcher = (*Channel)(nil)
 	_ harness.Models   = (*Channel)(nil)
 	_ harness.Presets  = (*Channel)(nil)
@@ -66,7 +63,7 @@ func New(o Options) *Channel {
 		o.Logf = func(string, ...any) {}
 	}
 	ctx, stop := context.WithCancel(context.Background())
-	c := &Channel{o: o, ctx: ctx, stop: stop, helds: map[string]*heldEntry{}, many: map[string]bool{}}
+	c := &Channel{o: o, ctx: ctx, stop: stop, helds: map[string]*heldEntry{}}
 	if o.Remote != nil {
 		o.Remote.Handle(eventHeldChanged, c.onHeld)
 	}

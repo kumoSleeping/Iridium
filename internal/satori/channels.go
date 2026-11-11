@@ -1,0 +1,326 @@
+package satori
+
+import (
+	"cmp"
+	"context"
+	"net/http"
+	"path/filepath"
+	"slices"
+	"strconv"
+	"strings"
+
+	"github.com/kumoSleeping/iridium/internal/agents"
+	"github.com/kumoSleeping/iridium/internal/api"
+)
+
+// Guilds: one per folder group of the web (api.Workspace, id its number), and Loose for the
+// sessions in none. Channels: the sessions, newest activity first; archived ones and subagents are
+// left out of channel.list (channel.get still gives them).
+
+// Loose is the guild of the sessions in no folder group.
+const (
+	Loose     = "loose"
+	LooseName = "未分组"
+	pageSize  = 100
+)
+
+func agentUser(a api.Agent) (User, bool) {
+	info, ok := agents.Get(a)
+	if !ok {
+		return User{}, false
+	}
+	return User{ID: string(a), Name: info.Name, IsBot: true}, true
+}
+
+// channelOf is session ss as a channel; its parent the channel it is under: the session it hangs
+// under (a subagent's, or its launcher's while not taken out, channel.create's data.parent_id),
+// else its folder's.
+func channelOf(ss api.Session) *Channel {
+	name := cmp.Or(ss.Name, ss.Title)
+	if name == "" && ss.Cwd != "" {
+		name = filepath.Base(ss.Cwd)
+	}
+	parent := ss.Parent
+	if parent == "" && !ss.Own {
+		parent = ss.Launcher
+	}
+	if parent == "" && ss.Cwd != "" {
+		parent = FolderPrefix + groupPath(ss)
+	}
+	return &Channel{ID: ss.ID, Type: ChannelText, Name: name, ParentID: parent}
+}
+
+// groupPath is the folder session ss is in as the list groups it: its cwd, "<machine>:<cwd>" at
+// another machine.
+func groupPath(ss api.Session) string {
+	if ss.Machine == "" {
+		return ss.Cwd
+	}
+	return ss.Machine + ":" + strings.ReplaceAll(ss.Cwd, `\`, "/")
+}
+
+// folders are the folders sessions l are in, as category channels, by first seen; their marks
+// from the backend.
+func (s *Service) folders(l []api.Session) []Channel {
+	marks := map[string]api.FolderMark{}
+	for _, m := range s.b.Marks() {
+		marks[m.Path] = m
+	}
+	seen := map[string]bool{}
+	var out []Channel
+	for _, ss := range l {
+		p := groupPath(ss)
+		if ss.Cwd == "" || seen[p] {
+			continue
+		}
+		seen[p] = true
+		m, ok := marks[p]
+		if !ok {
+			m = api.FolderMark{Path: p}
+		}
+		name := p[strings.LastIndexAny(p, `/\:`)+1:]
+		out = append(out, Channel{ID: FolderPrefix + p, Type: ChannelCategory, Name: cmp.Or(name, p), Mark: &m})
+	}
+	return out
+}
+
+// channelMasked is channelOf(ss), its name masked: as messages and events carry it.
+func (s *Service) channelMasked(ss api.Session) *Channel {
+	c := channelOf(ss)
+	c.Name = s.b.Mask(c.Name)
+	return c
+}
+
+// channelFull is session ss as a channel with Iridium's own of it (_data), its words masked.
+func (s *Service) channelFull(ss api.Session) Channel {
+	c := s.channelMasked(ss)
+	d := ss
+	d.Name, d.Title = s.b.Mask(d.Name), s.b.Mask(d.Title)
+	if d.Last != nil {
+		l := *d.Last
+		l.Text = s.b.Mask(l.Text)
+		d.Last = &l
+	}
+	c.Data = &d
+	return *c
+}
+
+// guildOf is the guild session ss is in.
+func (s *Service) guildOf(ss api.Session) *Guild {
+	if ss.Workspace == 0 {
+		return &Guild{ID: Loose, Name: LooseName}
+	}
+	g := &Guild{ID: strconv.FormatInt(ss.Workspace, 10)}
+	if ws, err := s.b.Workspaces(); err == nil {
+		if i := slices.IndexFunc(ws, func(w api.Workspace) bool { return w.ID == ss.Workspace }); i >= 0 {
+			g.Name = ws[i].Name
+		}
+	}
+	return g
+}
+
+// channel is session id, if c sees it.
+func (s *Service) channel(c Caller, id string) (*api.SessionState, error) {
+	if id == "" {
+		return nil, bad("channel_id")
+	}
+	id, err := s.sessionOf(c, id)
+	if err != nil {
+		return nil, err
+	}
+	if !s.b.Sees(c, id) {
+		return nil, errNoSession
+	}
+	st, err := s.b.Session(id)
+	if err != nil {
+		if status, _ := s.b.Fault(err); status == http.StatusNotFound || status == http.StatusUnprocessableEntity {
+			return nil, errNoSession
+		}
+		return nil, err
+	}
+	return st, nil
+}
+
+// sessionOf is the session id names for c (Resolver): the start of an id, or self.
+func (s *Service) sessionOf(c Caller, id string) (string, error) {
+	r, ok := s.b.(Resolver)
+	if !ok {
+		return id, nil
+	}
+	return r.Resolve(context.Background(), c, id)
+}
+
+// guildID is the guild id names for c: self is the guild of c's own session.
+func (s *Service) guildID(c Caller, id string) (string, error) {
+	if id != "self" {
+		return id, nil
+	}
+	st, err := s.channel(c, "self")
+	if err != nil {
+		return "", err
+	}
+	return s.guildOf(st.Session).ID, nil
+}
+
+func (s *Service) channelGet(ctx context.Context, c Caller, body []byte) (any, error) {
+	var req struct {
+		ChannelID string `json:"channel_id"`
+	}
+	if err := decode(body, &req); err != nil {
+		return nil, err
+	}
+	if strings.HasPrefix(req.ChannelID, FolderPrefix) {
+		return s.folder(ctx, c, req.ChannelID)
+	}
+	st, err := s.channel(c, req.ChannelID)
+	if err != nil {
+		return nil, err
+	}
+	return s.channelFull(st.Session), nil
+}
+
+// folder is the folder channel id, if c sees a session in it.
+func (s *Service) folder(ctx context.Context, c Caller, id string) (Channel, error) {
+	l, err := s.visible(ctx, c, false)
+	if err != nil {
+		return Channel{}, err
+	}
+	path := strings.TrimPrefix(id, FolderPrefix)
+	l = slices.DeleteFunc(l, func(ss api.Session) bool { return groupPath(ss) != path })
+	if f := s.folders(l); len(f) > 0 {
+		return f[0], nil
+	}
+	return Channel{}, refuse(http.StatusUnprocessableEntity, "no_such_channel", "no folder "+path)
+}
+
+// visible are the sessions c sees, newest first; archived ones and subagents only if all.
+func (s *Service) visible(ctx context.Context, c Caller, all bool) ([]api.Session, error) {
+	l, err := s.b.Sessions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := l[:0]
+	for _, ss := range l {
+		if (all || !ss.Archived && !ss.Subagent) && s.b.Sees(c, ss.ID) {
+			out = append(out, ss)
+		}
+	}
+	slices.SortStableFunc(out, func(a, b api.Session) int { return cmp.Compare(b.UpdatedAt, a.UpdatedAt) })
+	return out, nil
+}
+
+// page cuts l at token next (a decimal offset): the page and the next token.
+func page[T any](l []T, next string) ([]T, string, error) {
+	at := 0
+	if next != "" {
+		n, err := strconv.Atoi(next)
+		if err != nil || n < 0 {
+			return nil, "", bad("next")
+		}
+		at = min(n, len(l))
+	}
+	end := min(at+pageSize, len(l))
+	tok := ""
+	if end < len(l) {
+		tok = strconv.Itoa(end)
+	}
+	return l[at:end], tok, nil
+}
+
+func (s *Service) channelList(ctx context.Context, c Caller, body []byte) (any, error) {
+	var req struct {
+		GuildID string `json:"guild_id"`
+		Next    string `json:"next"`
+		// Data.All: archived sessions and subagents too (Iridium's own).
+		Data struct {
+			All bool `json:"all"`
+		} `json:"_data"`
+	}
+	if err := decode(body, &req); err != nil {
+		return nil, err
+	}
+	l, err := s.visible(ctx, c, req.Data.All)
+	if err != nil {
+		return nil, err
+	}
+	if req.GuildID, err = s.guildID(c, req.GuildID); err != nil {
+		return nil, err
+	}
+	var in []api.Session
+	for _, ss := range l {
+		if req.GuildID == "" || s.guildOf(ss).ID == req.GuildID {
+			in = append(in, ss)
+		}
+	}
+	// The folders first, then the sessions in them.
+	chans := s.folders(in)
+	for _, ss := range in {
+		chans = append(chans, s.channelFull(ss))
+	}
+	if req.GuildID != "" && len(chans) == 0 && !s.guildThere(c, req.GuildID) {
+		return nil, refuse(http.StatusUnprocessableEntity, "no_such_guild", "no guild "+req.GuildID)
+	}
+	p, next, err := page(chans, req.Next)
+	if err != nil {
+		return nil, err
+	}
+	return List[Channel]{Data: nonNil(p), Next: next}, nil
+}
+
+func nonNil[T any](l []T) []T {
+	if l == nil {
+		return []T{}
+	}
+	return l
+}
+
+// guilds are the folder groups c sees, then Loose.
+func (s *Service) guilds(c Caller) []Guild {
+	var out []Guild
+	if ws, err := s.b.Workspaces(); err == nil {
+		for _, w := range ws {
+			if s.b.SeesGuild(c, w) {
+				out = append(out, Guild{ID: strconv.FormatInt(w.ID, 10), Name: w.Name, Data: &w})
+			}
+		}
+	}
+	return append(out, Guild{ID: Loose, Name: LooseName})
+}
+
+func (s *Service) guildThere(c Caller, id string) bool {
+	return slices.ContainsFunc(s.guilds(c), func(g Guild) bool { return g.ID == id })
+}
+
+func (s *Service) guildList(_ context.Context, c Caller, body []byte) (any, error) {
+	var req struct {
+		Next string `json:"next"`
+	}
+	if err := decode(body, &req); err != nil {
+		return nil, err
+	}
+	p, next, err := page(s.guilds(c), req.Next)
+	if err != nil {
+		return nil, err
+	}
+	return List[Guild]{Data: nonNil(p), Next: next}, nil
+}
+
+func (s *Service) guildGet(_ context.Context, c Caller, body []byte) (any, error) {
+	var req struct {
+		GuildID string `json:"guild_id"`
+	}
+	if err := decode(body, &req); err != nil {
+		return nil, err
+	}
+	id, err := s.guildID(c, req.GuildID)
+	if err != nil {
+		return nil, err
+	}
+	req.GuildID = id
+	for _, g := range s.guilds(c) {
+		if g.ID == req.GuildID {
+			return g, nil
+		}
+	}
+	return nil, refuse(http.StatusUnprocessableEntity, "no_such_guild", "no guild "+req.GuildID)
+}

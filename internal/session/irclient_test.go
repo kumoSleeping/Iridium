@@ -20,16 +20,17 @@ import (
 )
 
 // The dsh plugin's ir (ir.js, put on the PATH by its executor's withIR, the address and the TOKEN
-// written in): an agent's `ir ...` goes to the Iridium's POST /api/cli with the session's TOKEN,
+// written in): an agent's `ir ...` goes to the Iridium's POST /v1/internal/cli with the session's TOKEN,
 // from the folder it ran in, even with no IRIDIUM_* in its commands' environment (dsh's have
 // none), and what comes back is written out as it comes, the exit code last.
 func TestPluginIR(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("node"); err != nil {
 		t.Skip("no node")
 	}
 	var got api.CLIRun
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/cli" || r.Header.Get("Authorization") != "Bearer irs_x" {
+		if r.URL.Path != "/v1/internal/cli" || r.Header.Get("Authorization") != "Bearer irs_x" {
 			http.Error(w, `{"error":"no"}`, http.StatusUnauthorized)
 			return
 		}
@@ -54,7 +55,7 @@ ex.withIR(env, process.argv[2] + '/holds/h1')
 const r = spawnSync('ir', ['ls', '--here'], { env: { PATH: env.PATH }, cwd: process.argv[4], encoding: 'utf8' })
 console.log(JSON.stringify({ status: r.status, out: r.stdout, err: r.stderr, url: env.IRIDIUM_URL }))
 `
-	cmd := exec.Command("node", "--input-type=module", "-e", script, "ws"+strings.TrimPrefix(srv.URL, "http")+"/api/exec", filepath.Join(t.TempDir(), "state"), filepath.Join(plugin, "ir.js"), work)
+	cmd := exec.Command("node", "--input-type=module", "-e", script, "ws"+strings.TrimPrefix(srv.URL, "http")+"/v1/internal/exec", filepath.Join(t.TempDir(), "state"), filepath.Join(plugin, "ir.js"), work)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("%v: %s", err, out)
@@ -79,6 +80,7 @@ func jsString(s string) string { b, _ := json.Marshal(s); return string(b) }
 // A session at a machine whose executor has ir: its TOKEN, given at each start, names it and
 // that machine; a TOKEN given before does not, nor one with another prefix.
 func TestSessionToken(t *testing.T) {
+	t.Parallel()
 	r := newRig(t, nil)
 	h := r.m.newHosted(meta{ID: "s1", Agent: api.AgentDsh, Cwd: "/w", Machine: "m1"})
 	if err := os.MkdirAll(h.dir, 0o700); err != nil {
@@ -116,6 +118,7 @@ func (f desktopFinder) Found(id string) (api.Session, *transcript.File, bool) {
 // A message for a dsh session DSH Desktop holds (open in it, its writer lock there): given to
 // Desktop's own agent of it through the plugin (dsh.prompt), with its source tag, not resumed here.
 func TestToDesktop(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("node"); err != nil {
 		t.Skip("no node")
 	}

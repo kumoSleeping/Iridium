@@ -43,12 +43,11 @@ const UnitPrefix = "iridium-hold-"
 // set it ("zh", "en"; "" leaves that line out).
 func SystemPrompt(lang string) string {
 	var b strings.Builder
-	b.WriteString("This session is hosted by Iridium. Use its ir command to start other agent sessions, message them, wait for their results and copy files across machines:\n\n")
+	b.WriteString("This session is hosted by Iridium. Its ir command reaches Iridium: other agent sessions (start them, message them, wait for them), files and command lines at the user's other computers, secrets.\n")
 	b.WriteString(irhelp.Agent())
-	b.WriteString(`Admin commands (invites, tokens, going public, updates): ir --help.
-
-Secrets: when you need a password or an API key, have the user type it in on the web page with ir secret set, and pass it into commands with ir run; never ask for it in the chat.
-Files: to show or hand the user a file, end your reply with a line [文件] ` + "`/absolute/path`" + ` per file; the page shows it as a picture or a download card. A path, a link or image syntax anywhere else is plain text.
+	b.WriteString(irhelp.Layers())
+	b.WriteString(`Secrets: never ask for one in the chat: ir api help secrets.
+Files: to show or hand the user a file, put the Markdown that ir api POST internal/links path=<path> prints in your reply: ![caption](ir:id) shows a picture, a video or a sound in place, [text](ir:id) is a file to download. Any other path, file:// link or local image is plain text.
 `)
 	b.WriteString(titleLine)
 	if name := langNames[lang]; name != "" {
@@ -59,13 +58,13 @@ Files: to show or hand the user a file, end your reply with a line [文件] ` + 
 
 // RemotePrompt is SystemPrompt for a session hosted at another machine: with ir (its executor
 // puts one there, wire.Hello.IRClient), the commands that ir has (irhelp.Remote); without, none.
-// No [文件] line: its files are that machine's, which the page does not serve.
+// No file links: its files are that machine's, which ir attach there does not reach.
 func RemotePrompt(lang string, ir bool) string {
 	var b strings.Builder
 	if ir {
 		b.WriteString("This session is hosted by Iridium and runs at another machine than Iridium's own. Use its ir command to start other agent sessions (here or at other machines), message them and wait for their results:\n\n")
 		b.WriteString(irhelp.Remote())
-		b.WriteString("\n")
+		b.WriteString(irhelp.Layers())
 	} else {
 		b.WriteString("This session is hosted by Iridium and runs at another machine than Iridium's own.\n")
 	}
@@ -76,7 +75,7 @@ func RemotePrompt(lang string, ir bool) string {
 	return b.String()
 }
 
-const titleLine = "Title: as your first action in a session, and again only when its subject changes, run ir rename \"<title>\": a short name for the specific thing and task, in the user's language, without punctuation, quotes or emoji. If the user named it, leave it.\n"
+const titleLine = "Title: as your first action in a session, and again only when its subject changes, run ir api channel.update channel_id=self data.name=\"<title>\": a short name for the specific thing and task, in the user's language, without punctuation, quotes or emoji. If the user named it, leave it.\n"
 
 var langNames = map[string]string{"zh": "Chinese", "en": "English"}
 
@@ -127,7 +126,8 @@ var (
 
 type Manager struct {
 	o      Options
-	shell  shells // command lines run at sessions' machines (shell.go)
+	att    attachments // what is attached to sessions' pages (attach.go)
+	shell  shells      // command lines run at sessions' machines (shell.go)
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -182,6 +182,7 @@ func New(o Options) (*Manager, error) {
 	if o.Remote != nil {
 		o.Remote.Dir = m.HoldDir
 		o.Remote.Changed = m.machineChanged
+		o.Remote.Handle(eventAttach, m.onAttach)
 	}
 	for _, c := range o.Channels {
 		c.Bind(host{m})
@@ -246,6 +247,19 @@ func (m *Manager) get(id string) (*Hosted, error) {
 	return h, nil
 }
 
+// TurnFrom is who began hosted session id's latest turn: the terminal, and the session whose agent
+// sent the message that began it, if one did. ok is false for a session Iridium does not host, or
+// one with no turn yet.
+func (m *Manager) TurnFrom(id string) (from, via string, ok bool) {
+	h, err := m.get(id)
+	if err != nil {
+		return "", "", false
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.turnFrom, h.turnVia, h.turnFrom != ""
+}
+
 // AgentID is the agent's own id for hosted session id where it is another (Codex's thread, made
 // after Iridium's id); "" otherwise. Discovery lists the session under it.
 func (m *Manager) AgentID(id string) string {
@@ -293,12 +307,14 @@ func (h *Hosted) discoveredAs() string {
 // Create starts a hosted session in req.Cwd and, if req.Text is given, sends it as the first
 // message from `from`. The id is the agent's own session id.
 func (m *Manager) Create(ctx context.Context, req api.NewSession, from string) (string, error) {
-	return m.create(ctx, req, from, "", nil)
+	return m.create(ctx, req, from, "", nil, req.Caller == "")
 }
 
 // create is Create, the session named name (else after its folder); prep, if any, runs on the
-// new id before its agent starts.
-func (m *Manager) create(ctx context.Context, req api.NewSession, from, name string, prep func(id string) error) (string, error) {
+// new id before its agent starts. byHand: put in req.Workspace as you put it (Own, if it has a
+// launcher); else as discovery would, so one an agent started (ir new --workspace) still hangs
+// under it.
+func (m *Manager) create(ctx context.Context, req api.NewSession, from, name string, prep func(id string) error, byHand bool) (string, error) {
 	if req.Agent == "" {
 		req.Agent = api.AgentClaude
 	}
@@ -368,15 +384,8 @@ func (m *Manager) create(ctx context.Context, req api.NewSession, from, name str
 	m.mu.Unlock()
 	h.newSession = true
 	h.show() // Iridium's own: shown from the start
-	if at := req.At; at != "" && machine == "" && !filepath.IsAbs(at) && strings.Contains(at, ":") && len(at) <= 4096 {
-		// A coordinator for a folder there: grouped by that folder as discovery groups (nested
-		// with it), not put in its group by hand.
-		if err := m.o.Store.SetAt(mt.ID, at); err != nil {
-			return mt.ID, err
-		}
-		m.intoGroupPrefer(mt.ID, at, req.Workspace)
-	} else if req.Workspace != 0 {
-		if err := m.o.Store.Move(mt.ID, req.Workspace); err != nil {
+	if req.Workspace != 0 {
+		if err := m.o.Store.Assign(mt.ID, req.Workspace, byHand); err != nil {
 			return mt.ID, err
 		}
 	} else {
@@ -414,12 +423,32 @@ func From(terminal, tag string) string {
 	return terminal + fromSep + tag
 }
 
-// source splits a sender into the terminal's ID and the tag the agent sees.
-func (m *Manager) source(from string) (terminal, tag string) {
-	if t, g, ok := strings.Cut(from, fromSep); ok {
-		return t, g
+// FromLogin is From for a login of an app (not ir_web's): its message counted to the app, the
+// login kept with it.
+func FromLogin(terminal, login, tag string) string {
+	if login == "" {
+		return From(terminal, tag)
 	}
-	return from, m.tagOf(from)
+	return terminal + fromSep + tag + fromSep + login
+}
+
+// viaOf is the session a message's tag says its agent sent it from ("ir:<session>"), else "".
+func viaOf(tag string) string {
+	id, _ := strings.CutPrefix(tag, "ir:")
+	if id == tag {
+		return ""
+	}
+	return id
+}
+
+// source splits a sender into the terminal's ID, the tag the agent sees and the login of the app
+// it came from (if one).
+func (m *Manager) source(from string) (terminal, tag, login string) {
+	if t, g, ok := strings.Cut(from, fromSep); ok {
+		g, login, _ = strings.Cut(g, fromSep)
+		return t, g, login
+	}
+	return from, m.tagOf(from), ""
 }
 
 // Interrupt stops the running turn; the agent stays.
@@ -487,16 +516,12 @@ func (m *Manager) List(ctx context.Context) ([]api.Session, error) {
 		for _, s := range found {
 			if !seen[s.ID] {
 				o := over[s.ID]
-				s.Name, s.Pinned, s.Workspace, s.Color, s.Order, s.At = o.Name, o.Pinned, o.Workspace, api.Color(o.Color), o.Order, o.At
+				s.Name, s.Pinned, s.Workspace, s.Color, s.Order = o.Name, o.Pinned, o.Workspace, api.Color(o.Color), o.Order
 				s.Archived = !vis.Shown(string(s.Agent), s.ID)
 				m.parentOf(&s)
+				s.Own = ownOf(s, o)
 				out = append(out, s)
 			}
-		}
-	}
-	if bots, err := m.o.Store.PointedAt(); err == nil {
-		for i := range out {
-			out[i].Bots = bots[out[i].ID]
 		}
 	}
 	slices.SortStableFunc(out, func(a, b api.Session) int {
@@ -644,10 +669,13 @@ func (m *Manager) program(a api.Agent) string {
 	return cmp.Or(m.o.Config.Programs[string(a)], string(a))
 }
 
-// Missing: agent a's program is not on the agents' PATH.
+// Missing: agent a's program is not on the agents' PATH, nor provided here otherwise.
 func (m *Manager) Missing(a api.Agent) bool {
-	_, err := agent.LookPath(m.program(a), m.agentEnv())
-	return err != nil
+	if _, err := agent.LookPath(m.program(a), m.agentEnv()); err == nil {
+		return false
+	}
+	p, ok := channelOf[harness.Provider](m, a)
+	return !ok || !p.ProvidedHere()
 }
 
 // agentEnv is what agents start from: the daemon's environment, with the config's PATH and,

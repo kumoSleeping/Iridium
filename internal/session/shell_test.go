@@ -82,6 +82,7 @@ func testShell(t *testing.T, m *Manager, id, cwd string) {
 }
 
 func TestShell(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("sh")
 	}
@@ -92,7 +93,7 @@ func TestShell(t *testing.T) {
 	}
 	r.waitState(id, "started", func(s *api.SessionState) bool { return s.Live })
 	testShell(t, r.m, id, r.cwd)
-	if _, err := r.m.MachineShell(bg, "", "true", ""); err == nil {
+	if _, _, err := r.m.MachineShell(bg, "", "true", "", true); err == nil {
 		t.Error("ir sh ran with no machine")
 	}
 }

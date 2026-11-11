@@ -13,6 +13,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/config"
 	"github.com/kumoSleeping/iridium/internal/files"
 	"github.com/kumoSleeping/iridium/internal/pathsafe"
+	"github.com/kumoSleeping/iridium/internal/place"
 	"github.com/kumoSleeping/iridium/internal/session"
 )
 
@@ -50,18 +51,19 @@ func (a sessionsOf) After(id string, at int64) (api.MessagePage, error) {
 func (s *Server) fileRoutes(mux *http.ServeMux, local bool) {
 	// Every terminal reads every session's files; one goes into a session only from a terminal
 	// that may use it (access.go: Claude's, the owner's own). The files service guards the paths.
-	mux.HandleFunc("GET /api/sessions/{id}/files/{ref}", s.fileGet)
-	mux.HandleFunc("GET /api/sessions/{id}/files/{ref}/thumb", s.fileThumb)
-	mux.HandleFunc("GET /api/sessions/{id}/files/{ref}/info", s.fileInfo)
-	mux.HandleFunc("POST /api/sessions/{id}/uploads", s.use(s.uploadCreate))
-	mux.HandleFunc("GET /api/uploads/{upload}", s.uploadGet)
-	mux.HandleFunc("PUT /api/uploads/{upload}", s.uploadPut)
-	mux.HandleFunc("POST /api/uploads/{upload}/complete", s.uploadComplete)
-	mux.HandleFunc("DELETE /api/uploads/{upload}", s.uploadCancel)
+	mux.HandleFunc("GET /v1/internal/sessions/{id}/files/{ref}", s.fileGet)
+	mux.HandleFunc("GET /v1/internal/sessions/{id}/files/{ref}/thumb", s.fileThumb)
+	mux.HandleFunc("GET /v1/internal/sessions/{id}/files/{ref}/info", s.fileInfo)
+	mux.HandleFunc("POST /v1/internal/sessions/{id}/uploads", s.use(s.uploadCreate))
+	mux.HandleFunc("GET /v1/internal/uploads/{upload}", s.uploadGet)
+	mux.HandleFunc("PUT /v1/internal/uploads/{upload}", s.uploadPut)
+	mux.HandleFunc("POST /v1/internal/uploads/{upload}/complete", s.uploadComplete)
+	mux.HandleFunc("DELETE /v1/internal/uploads/{upload}", s.uploadCancel)
 	if local {
-		mux.HandleFunc("POST /api/sessions/{id}/attach", s.use(s.attachPath))
-		mux.HandleFunc("GET /api/files", s.listDir)
-		mux.HandleFunc("POST /api/files/copy", s.copyFile)
+		mux.HandleFunc("POST /v1/internal/sessions/{id}/attach", s.use(s.attachPath))
+		mux.HandleFunc("POST /v1/internal/links", s.linkPath)
+		mux.HandleFunc("GET /v1/internal/files", s.listDir)
+		mux.HandleFunc("POST /v1/internal/files/copy", s.copyFile)
 	}
 }
 
@@ -100,8 +102,14 @@ func (s *Server) fileInfo(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	info, err := s.files.Info(p)
-	if err == nil {
+	var info api.FileRef
+	var err error
+	if ref := r.PathValue("ref"); files.IsLink(ref) {
+		info, err = s.files.LinkInfo(ref)
+	} else {
+		info, err = s.files.Info(p)
+	}
+	if err == nil && info.Sha256 == "" {
 		info.Sha256, err = s.files.Sum(p)
 	}
 	if err != nil {
@@ -187,7 +195,12 @@ func (s *Server) attachPath(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &req) {
 		return
 	}
-	info, err := s.files.Attach(r.PathValue("id"), req.Path)
+	p, err := s.hostPath(callerOf(r), req.Path)
+	if err != nil {
+		s.error(w, err)
+		return
+	}
+	info, err := s.files.Attach(r.PathValue("id"), p)
 	if err != nil {
 		s.fileError(w, err)
 		return
@@ -195,12 +208,39 @@ func (s *Server) attachPath(w http.ResponseWriter, r *http.Request) {
 	reply(w, http.StatusOK, info)
 }
 
+// linkPath gives a local file a link (ir attach), in the session ir runs in if it runs in one.
+func (s *Server) linkPath(w http.ResponseWriter, r *http.Request) {
+	var req api.AttachPath
+	if !readJSON(w, r, &req) {
+		return
+	}
+	p, err := s.hostPath(callerOf(r), req.Path)
+	if err != nil {
+		s.error(w, err)
+		return
+	}
+	l, err := s.files.Link(r.Header.Get(HeaderSession), p)
+	if err != nil {
+		s.fileError(w, err)
+		return
+	}
+	reply(w, http.StatusOK, l)
+}
+
 func (s *Server) listDir(w http.ResponseWriter, r *http.Request) {
 	if m := r.URL.Query().Get("machine"); m != "" {
 		s.listAt(w, r, m, r.URL.Query().Get("path"))
 		return
 	}
-	l, err := s.files.List(r.URL.Query().Get("path"))
+	p := r.URL.Query().Get("path")
+	if p != "" {
+		var err error
+		if p, err = s.hostPath(callerOf(r), p); err != nil {
+			s.error(w, err)
+			return
+		}
+	}
+	l, err := s.files.List(p)
 	if err != nil {
 		s.fileError(w, err)
 		return
@@ -214,6 +254,22 @@ func (s *Server) copyFile(w http.ResponseWriter, r *http.Request) {
 	var req api.Copy
 	if !readJSON(w, r, &req) {
 		return
+	}
+	// Each side as written (places.go): app:path at that app's computer, else a path here.
+	for _, side := range []struct{ machine, path *string }{{&req.FromMachine, &req.From}, {&req.ToMachine, &req.To}} {
+		if *side.machine != "" {
+			continue
+		}
+		if name, p, ok := place.Split(*side.path); ok && !place.IsHost(name) {
+			*side.machine, *side.path = name, p
+			continue
+		}
+		p, err := s.hostPath(callerOf(r), *side.path)
+		if err != nil {
+			s.error(w, err)
+			return
+		}
+		*side.path = p
 	}
 	if req.FromMachine != "" || req.ToMachine != "" {
 		s.copyAcross(w, r, req)
@@ -253,9 +309,9 @@ func (s *Server) copyFile(w http.ResponseWriter, r *http.Request) {
 func (s *Server) fileError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, files.ErrNoRef), errors.Is(err, files.ErrNoUpload), errors.Is(err, os.ErrNotExist), errors.Is(err, session.ErrNotFound):
-		fail(w, http.StatusNotFound, err.Error())
+		refuse(w, http.StatusUnprocessableEntity, "no_such_file", err.Error())
 	case errors.Is(err, pathsafe.ErrDenied), errors.Is(err, pathsafe.ErrOutside):
-		fail(w, http.StatusForbidden, err.Error())
+		refuse(w, http.StatusForbidden, "outside", err.Error())
 	case errors.Is(err, files.ErrExists), errors.Is(err, files.ErrOffset), errors.Is(err, files.ErrBusy),
 		errors.Is(err, files.ErrIncomplete), errors.Is(err, files.ErrDone):
 		fail(w, http.StatusConflict, err.Error())
@@ -263,6 +319,8 @@ func (s *Server) fileError(w http.ResponseWriter, err error) {
 		fail(w, http.StatusUnprocessableEntity, err.Error())
 	case errors.Is(err, files.ErrTooLarge), errors.Is(err, files.ErrTooLong):
 		fail(w, http.StatusRequestEntityTooLarge, err.Error())
+	case errors.Is(err, files.ErrChanged):
+		fail(w, http.StatusGone, err.Error())
 	case errors.Is(err, files.ErrNotImage):
 		fail(w, http.StatusUnsupportedMediaType, err.Error())
 	case errors.Is(err, files.ErrBad), errors.Is(err, files.ErrNotFile), errors.Is(err, pathsafe.ErrRelative):

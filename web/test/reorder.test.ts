@@ -1,7 +1,9 @@
 // Rows dragged to a new place (reorder.ts): the key a session is dropped at, and the groups' order.
+import type { Color } from "../src/api/types.gen";
 import { describe, expect, test } from "vitest";
 import type { Session } from "../src/api/types.gen";
-import { pinFolder, placeFolder, placeGroup, placeSession, sortList, withPlace } from "../src/reorder";
+import { pinFolder, placeFolder, placeGroup, placeSession, sortList } from "../src/reorder";
+import { colorsOf, placesOf, withGroupOrder, withMark } from "../src/guilds";
 import { buildTree, foldRest } from "../src/tree";
 
 const s = (id: string, updatedAt: number, more: Partial<Session> = {}) => ({ id, updatedAt, agent: "claude", cwd: "/w", status: "idle", hosted: false, live: false, ...more }) as Session;
@@ -42,7 +44,7 @@ describe("reorder", () => {
 });
 
 describe("folders", () => {
-  const f = (path: string, at: number) => ({ key: path, name: path, path, sessions: [{ id: path, updatedAt: at } as Session] });
+  const f = (path: string, at: number) => ({ key: path, name: path, path, sessions: [{ id: path, updatedAt: at } as Session], children: [] });
   const x = f("/w/x", 300);
   const y = f("/w/y", 200);
   const z = f("/w/z", 100);
@@ -59,29 +61,34 @@ describe("folders", () => {
     expect(placeFolder([p, y, z], z, p, "bottom", none, 0)).toEqual({ order: 300 - 1000, pinned: true });
     expect(pinFolder([p, y, z], z, none)).toEqual({ order: -700, pinned: true });
     expect(pinFolder([y, z], z, { groups: [], order: {}, pinned: [] })).toEqual({ pinned: true });
-    expect(withPlace(none, "/w/z", { order: 5, pinned: true })).toEqual({ groups: [], order: { "/w/z": 5 }, pinned: ["/w/x", "/w/z"] });
-    expect(withPlace({ groups: [], order: { "/w/x": 9 }, pinned: ["/w/x"] }, "/w/x", { order: 0, pinned: false })).toEqual({ groups: [], order: {}, pinned: [] });
   });
 
-  test("groups in their own order, whichever machine; 未归类 last", () => {
-    const ses = (id: string, cwd: string, more: Partial<Session>) => ({ id, cwd, updatedAt: 1, agent: "claude", status: "idle", hosted: false, live: false, ...more }) as Session;
+  test("the carried guilds: places and colours made from them, a mark put, the groups reordered", () => {
+    const ws = (id: number) => ({ id, name: `g${id}`, path: `/g${id}` });
+    const g = { guilds: [ws(1), ws(2)], folders: [{ path: "/w/x", pinned: true, color: "red" as const }] };
+    expect(placesOf(g)).toEqual({ groups: ["w1", "w2"], order: {}, pinned: ["/w/x"] });
+    expect(placesOf(g)).toBe(placesOf(g));
+    expect(colorsOf(g)).toEqual({ "/w/x": "red" });
+    const put = withMark(g, "/w/z", { order: 5, pinned: true });
+    expect(placesOf(put)).toEqual({ groups: ["w1", "w2"], order: { "/w/z": 5 }, pinned: ["/w/x", "/w/z"] });
+    expect(withMark(withMark(g, "/w/x", { pinned: false }), "/w/x", { color: "" as Color }).folders).toEqual([]);
+    expect(withGroupOrder(g, ["w2"]).guilds.map((w) => w.id)).toEqual([2, 1]);
+  });
+
+  test("groups in their own order, whichever machine; one 未归类, last", () => {
+    const ses = (id: string, cwd: string, more: Partial<Session>) => ({ id, cwd, updatedAt: 1, agent: "claude", status: "idle", hosted: true, live: false, ...more }) as Session;
     const wss = [{ id: 2, name: "dsh", path: "m:C:/w" }, { id: 1, name: "here", path: "/w" }];
-    const tree = buildTree([ses("a", "/w", { workspace: 1 }), ses("b", "C:\\w", { workspace: 2, machine: "m" }), ses("c", "/x", {}), ses("d", "C:\\x", { machine: "m" })], wss, "-", 0, undefined, ["m"]);
-    expect(tree.workspaces.map((w) => w.key)).toEqual(["w2", "w1", "w0", "w0:m"]);
-    // Dragged: the remote group above this machine's; a group at two machines, its rows apart.
-    const moved = buildTree([ses("a", "/w", { workspace: 1 }), ses("b", "C:\\w", { workspace: 2, machine: "m" }), ses("e", "C:\\w\\e", { workspace: 1, machine: "m" }), ses("c", "/x", {})], wss, "-", 0, undefined, ["m"], { groups: ["w2", "w1@m"], order: {}, pinned: [] });
-    expect(moved.workspaces.map((w) => w.key)).toEqual(["w2", "w1@m", "w1", "w0"]);
-  });
-
-  test("a coordinator of this machine's in the folder there it was opened for", () => {
-    const ses = (id: string, cwd: string, more: Partial<Session>) => ({ id, cwd, updatedAt: 1, agent: "claude", status: "idle", hosted: false, live: false, workspace: 1, ...more }) as Session;
-    const tree = buildTree([ses("a", "C:\\Code\\otc", { machine: "m" }), ses("c", "/home/u", { at: "m:C:/Code/otc" })], [{ id: 1, name: "Code", path: "m:C:/Code" }], "-", 0, undefined, ["m"]);
-    expect(tree.workspaces.map((w) => [w.key, w.rows.map((r) => (r.kind === "folder" ? `${r.f.name}:${r.f.sessions.map((x) => x.id)}` : r.s.id))])).toEqual([["w1", ["otc:a,c"]]]);
+    const tree = buildTree([ses("a", "/w", { workspace: 1 }), ses("b", "C:\\w", { workspace: 2, machine: "m", own: true }), ses("c", "/x", {}), ses("d", "C:\\x", { machine: "m", own: true })], wss, "-", 0);
+    expect(tree.workspaces.map((w) => w.key)).toEqual(["w2", "w1", "w0"]);
+    expect(tree.workspaces[2]!.rows.map((r) => (r.kind === "folder" ? r.f.path : r.s.id))).toEqual(["/x", "m:C:/x"]);
+    // Dragged: the remote group above this machine's; a stored key no longer listed keeps its place.
+    const moved = buildTree([ses("a", "/w", { workspace: 1 }), ses("b", "C:\\w", { workspace: 2, machine: "m", own: true }), ses("c", "/x", {})], wss, "-", 0, undefined, { groups: ["w1@m", "w1", "w2"], order: {}, pinned: [] });
+    expect(moved.workspaces.map((w) => w.key)).toEqual(["w1", "w2", "w0"]);
   });
 
   test("pinned folders above the sessions at the root", () => {
     const ses = (id: string, cwd: string) => ({ id, cwd, updatedAt: 1, agent: "claude", status: "idle", hosted: false, live: false, workspace: 1 }) as Session;
-    const tree = buildTree([ses("r", "/w"), ses("a", "/w/a"), ses("b", "/w/b")], [{ id: 1, name: "w", path: "/w" }], "-", 0, undefined, [], { groups: [], order: {}, pinned: ["/w/b"] });
+    const tree = buildTree([ses("r", "/w"), ses("a", "/w/a"), ses("b", "/w/b")], [{ id: 1, name: "w", path: "/w" }], "-", 0, undefined, { groups: [], order: {}, pinned: ["/w/b"] });
     expect(tree.workspaces[0]!.rows.map((r) => (r.kind === "session" ? r.s.id : r.f.name))).toEqual(["b", "r", "a"]);
   });
 });

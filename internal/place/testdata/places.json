@@ -1,0 +1,42 @@
+{
+  "apps": {"a1": "mac", "a2": "Win PC", "a3": "工作站", "a4": "dev.box"},
+  "split": [
+    {"in": "mac:~/x", "name": "mac", "path": "~/x"},
+    {"in": "mac:", "name": "mac", "path": ""},
+    {"in": "工作站:/srv/a:b", "name": "工作站", "path": "/srv/a:b"},
+    {"in": "Win PC:C:\\Users\\k", "name": "Win PC", "path": "C:\\Users\\k"},
+    {"in": "host:~/ir", "name": "host", "path": "~/ir"},
+    {"in": "C:\\Users\\k", "path": "C:\\Users\\k"},
+    {"in": "c:/x", "path": "c:/x"},
+    {"in": "/abs:path", "path": "/abs:path"},
+    {"in": "./a:b", "path": "./a:b"},
+    {"in": "~/a:b", "path": "~/a:b"},
+    {"in": ":x", "path": ":x"},
+    {"in": "plain", "path": "plain"},
+    {"in": "", "path": ""}
+  ],
+  "parse": [
+    {"in": "mac:/tmp", "self": "", "app": "a1", "path": "/tmp"},
+    {"in": "MAC:/tmp", "self": "", "app": "a1", "path": "/tmp"},
+    {"in": "dev.box:~", "self": "", "app": "a4", "path": "~"},
+    {"in": "host:~/ir", "self": "a1", "app": "", "path": "~/ir"},
+    {"in": "HOST:/x", "self": "a1", "app": "", "path": "/x"},
+    {"in": "主机:~/ir", "self": "a1", "app": "", "path": "~/ir"},
+    {"in": "本机:/", "self": "a2", "app": "", "path": "/"},
+    {"in": "~/ir", "self": "a1", "app": "a1", "path": "~/ir"},
+    {"in": "D:\\work", "self": "a2", "app": "a2", "path": "D:\\work"},
+    {"in": "/tmp", "self": "", "app": "", "path": "/tmp"},
+    {"in": "nope:/x", "self": "", "error": true}
+  ],
+  "format": [
+    {"app": "a1", "path": "/tmp", "out": "mac:/tmp"},
+    {"app": "a2", "path": "C:\\Users\\k", "out": "Win PC:C:\\Users\\k"},
+    {"app": "", "path": "~/ir", "out": "host:~/ir"},
+    {"app": "gone", "path": "/y", "out": "gone:/y"}
+  ],
+  "key": [
+    {"app": "a1", "path": "/tmp", "key": "a1:/tmp"},
+    {"app": "a2", "path": "C:\\Users\\k", "key": "a2:C:/Users/k", "back": "C:/Users/k"},
+    {"app": "", "path": "/home/k", "key": "/home/k"}
+  ]
+}

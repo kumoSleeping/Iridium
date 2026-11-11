@@ -13,6 +13,7 @@ import (
 // The TCP address serves the web app past the API, and the gate stands in front of both: with a
 // public origin a browser is sent to the login, the app's files included.
 func TestWebApp(t *testing.T) {
+	t.Parallel()
 	s, _, _ := setup(t)
 	s.App = webui.New(fstest.MapFS{
 		"index.html":      {Data: []byte("<!doctype html><title>Iridium</title>")},
@@ -34,8 +35,8 @@ func TestWebApp(t *testing.T) {
 	if w := get("/assets/app-1.js", ""); w.Code != 200 || !strings.Contains(w.Header().Get("Cache-Control"), "immutable") {
 		t.Fatalf("asset: %d %q", w.Code, w.Header().Get("Cache-Control"))
 	}
-	if w := get("/api/health", ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"ok":true`) {
-		t.Fatalf("health: %d %q", w.Code, w.Body.String())
+	if w := get("/v1/internal/agents", ""); w.Code != 200 || !strings.HasPrefix(w.Body.String(), "[") {
+		t.Fatalf("agents: %d %q", w.Code, w.Body.String())
 	}
 	if w := get("/_ir/api/session", ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"local":true`) {
 		t.Fatalf("gate session: %d %q", w.Code, w.Body.String())

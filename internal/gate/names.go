@@ -6,7 +6,7 @@ import (
 	"unicode"
 )
 
-// MaxNameLen is the longest endpoint name, in characters (runes).
+// MaxNameLen is the longest name of an app or a login, in characters (runes).
 const MaxNameLen = 12
 
 // Name errors. Their Code is what the API sends to pages.
@@ -15,6 +15,7 @@ var (
 	ErrNameTooLong  = &NameError{"too_long"}
 	ErrNameInvalid  = &NameError{"invalid"}
 	ErrNameReserved = &NameError{"reserved"}
+	ErrNameLetter   = &NameError{"letter"}
 	ErrNameTaken    = &NameError{"taken"}
 )
 
@@ -23,15 +24,17 @@ type NameError struct{ Code string }
 
 func (e *NameError) Error() string { return "gate: name " + strings.ReplaceAll(e.Code, "_", " ") }
 
-// reservedNames are taken by built-in endpoints (the local `ir` is 本机, shown as Ir; unknown
-// sources show as 未知), in both UI languages.
-var reservedNames = []string{"本机", "Ir", "未知", "local", "unknown"}
+// reservedNames are taken by what is built in: the host (主机, host; 本机 and local as it was
+// called), the app ir_web, Iridium itself (shown as Ir) and unknown sources (未知), in both UI
+// languages (docs/next/decisions.md 5).
+var reservedNames = []string{"host", "主机", "本机", "local", "ir_web", "Ir", "未知", "unknown"}
 
 // NormalizeName returns the stored form of a name, or why it cannot be one:
 // full-width ASCII becomes ASCII, spaces are trimmed and collapsed, and what remains must
 // be 1–12 letters, digits, marks, spaces or "-_.". Brackets, slashes, colons, the middle
 // dot and the like are refused because names appear in source tags like [名字] and
-// [QQ·张三] and in `ir` arguments like mac:~/dir.
+// [QQ·张三] and in `ir` arguments like mac:~/dir and 应用/登录. A single ASCII letter is refused
+// too: as a place's prefix it would read as a Windows drive (C:\dir).
 func NormalizeName(raw string) (string, error) {
 	var out []rune
 	space := false
@@ -55,6 +58,9 @@ func NormalizeName(raw string) (string, error) {
 	}
 	if len(out) > MaxNameLen {
 		return "", ErrNameTooLong
+	}
+	if len(out) == 1 && out[0] < 0x80 && unicode.IsLetter(out[0]) {
+		return "", ErrNameLetter
 	}
 	name := string(out)
 	for _, r := range reservedNames {
@@ -102,3 +108,6 @@ func nameCode(err error) string {
 	}
 	return ""
 }
+
+// NameCode is the reason code of a name error ("" if err is none).
+func NameCode(err error) string { return nameCode(err) }
