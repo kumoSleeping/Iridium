@@ -78,11 +78,12 @@ func (b satoriBackend) irCaller(cl caller) (satori.Caller, bool) {
 	}
 	id := cl.Identity
 	if !cl.socket {
-		o, ok := b.s.originOf(cl.session)
-		if !ok {
-			return satori.Caller{}, false
+		// Its turn's login; none known, the host's name. Either way only the name it speaks by:
+		// what it may do is its machine's (Self).
+		id = gate.HostIdentity
+		if o, ok := b.s.originOf(cl.session); ok {
+			id = o
 		}
-		id = o
 	}
 	sc := satori.Caller{App: id.App, AppName: b.s.Tag(id.App), Login: id.Login, LoginName: id.Name, Only: true, Self: cl}
 	switch {

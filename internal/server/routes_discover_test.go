@@ -57,7 +57,7 @@ func TestWorkspacesAndFolders(t *testing.T) {
 
 	// Groups: none made by hand (the user, 2026-11-08); a session in a folder makes its group,
 	// which is renamed and listed.
-	if code := call(t, c, "POST", base+"/v1/internal/workspaces", map[string]string{"path": made.Path}, nil); code != http.StatusMethodNotAllowed {
+	if code := call(t, c, "POST", base+"/v1/internal/workspaces", map[string]string{"path": made.Path}, nil); code != http.StatusNotFound {
 		t.Errorf("a workspace made by hand: %d", code)
 	}
 	var created api.NewSessionReply
@@ -67,7 +67,7 @@ func TestWorkspacesAndFolders(t *testing.T) {
 	var list []api.Workspace
 	var sessions []api.Session
 	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
-		call(t, c, "GET", base+"/v1/internal/workspaces", nil, &list)
+		list, _ = d.Workspaces()
 		call(t, c, "GET", base+"/v1/internal/sessions", nil, &sessions)
 		if len(list) == 1 && len(sessions) == 1 && sessions[0].Workspace == list[0].ID {
 			break
@@ -79,7 +79,7 @@ func TestWorkspacesAndFolders(t *testing.T) {
 	if code := call(t, c, "PATCH", base+"/v1/internal/workspaces/"+strconv.FormatInt(list[0].ID, 10), api.WorkspacePatch{Name: new("Project")}, nil); code != 200 {
 		t.Errorf("rename: %d", code)
 	}
-	call(t, c, "GET", base+"/v1/internal/workspaces", nil, &list)
+	list, _ = d.Workspaces()
 	if len(list) != 1 || list[0].Name != "Project" {
 		t.Errorf("workspaces: %+v", list)
 	}

@@ -68,7 +68,7 @@ ir public        # 在真正的终端里跑
 systemctl --user is-active iridium.service      # active
 ss -ltn | grep ':7810 '                         # 只听 127.0.0.1
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:7810/   # 200
-ir ls
+ir api channel.list
 ```
 
 ## 停和卸载

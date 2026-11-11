@@ -23,7 +23,6 @@ func (s *Server) discoverRoutes(mux *http.ServeMux) {
 	if s.Discover == nil {
 		return
 	}
-	mux.HandleFunc("GET /v1/internal/workspaces", s.workspaces)
 	// Folder groups are made as sessions go in them, never by hand (the user, 2026-11-08); a name is
 	// the panels' and 本机's to change; a session anyone's to name, colour, archive.
 	mux.HandleFunc("PATCH /v1/internal/workspaces/{id}", s.manages(s.renameWorkspace))
@@ -32,18 +31,6 @@ func (s *Server) discoverRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /v1/internal/folders/place", s.manages(s.placeFolder))
 	mux.HandleFunc("PATCH /v1/internal/sessions/{id}", s.patchSession)
 	mux.HandleFunc("PUT /v1/internal/colors", s.manages(s.folderColor))
-}
-
-func (s *Server) workspaces(w http.ResponseWriter, r *http.Request) {
-	ws, err := s.Discover.Workspaces()
-	if err != nil {
-		s.discoverError(w, err)
-		return
-	}
-	if c := callerOf(r); !c.Host() {
-		ws = s.scopeWorkspaces(s.permsFor(c), ws)
-	}
-	reply(w, http.StatusOK, ws)
 }
 
 func workspaceID(w http.ResponseWriter, r *http.Request) (int64, bool) {

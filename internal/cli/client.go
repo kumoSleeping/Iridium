@@ -21,6 +21,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/config"
 	"github.com/kumoSleeping/iridium/internal/place"
+	"github.com/kumoSleeping/iridium/internal/satori"
 )
 
 // env is one run of ir: where it writes, and its way to the daemon.
@@ -34,6 +35,8 @@ type env struct {
 	// after: where the page ended (its last block's at) when the message waited on was sent ("":
 	// not known), for a transcript that does not keep its id (dsh gives each prompt its own).
 	after string
+	// as: the login ir speaks Satori as, once meta named it (ir api).
+	as *satori.Login
 }
 
 func newEnv(stdout, stderr io.Writer) *env {

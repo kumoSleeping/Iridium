@@ -240,7 +240,20 @@ export const api = {
   agents: () => get<AgentInfo[]>("/v1/internal/agents"),
 
   // --- workspaces, folders, the session overlay ---
-  workspaces: () => get<Workspace[]>("/v1/internal/workspaces"),
+  /** The folder groups: Satori's guild.list, each guild's own in its _data (Loose has none). */
+  workspaces: async (): Promise<Workspace[]> => {
+    await whoKnown();
+    const out: Workspace[] = [];
+    let next: string | undefined;
+    do {
+      const r = await request("/v1/guild.list", { method: "POST", cache: "no-store", headers: { "content-type": "application/json" }, body: JSON.stringify(next ? { next } : {}) });
+      if (!r.ok) return fail(r);
+      const l = (await r.json()) as { data: { _data?: Workspace }[]; next?: string };
+      for (const g of l.data) if (g._data) out.push(g._data);
+      next = l.next;
+    } while (next);
+    return out;
+  },
   patchWorkspace: (id: number, p: WorkspacePatch) => writeAgain<{ ok: boolean }>("PATCH", `/v1/internal/workspaces/${id}`, p),
   /** The groups in the order they were dragged to: IDs first to last (reorder.ts). */
   /** Where a folder is put among those in its group, dragged or pinned (reorder.ts). */

@@ -58,29 +58,40 @@ Rhodium 的轻量 Go 版本：一个网页，管理主机和别的电脑上 agen
 - 前端按来源分组件（同一组件的变体）：
   - 面板发的：“你的话”气泡；来自别的面板时角上淡色设备图标。
   - 所有人发来的话（你的、别的会话的 agent、Bot、对等机器）都在右侧，和“你的话”同一边；左侧只有本会话 agent 自己说的（2026-11-06）。
-  - 别的会话 `ir send`、Bot 发的：来信卡片（logo/图标 + 名字，可跳转），不算“你的话”。
+  - 别的会话用 `ir api message.create` 发的、Bot 发的：来信卡片（logo/图标 + 名字，可跳转），不算“你的话”。
   - Iridium 自己写的（恢复提示等）：居中一行淡字。
 - 列表的“最近一句话”：只有面板发的写“你：”，来信写来源名。
 
 ## `ir`
 
-和 Iridium 同一个二进制，经本机 unix socket（0600）走网页那套接口。
+和 Iridium 同一个二进制，经本机 unix socket（0600）走网页那套接口。会话、消息、文件夹组用 Satori 的标准方法（`ir api`），Satori 没有的才是单独的命令（用户，2026-11-11：破坏性改，不留旧命令）。
 
 agent 用：
 
 ```
+ir api <方法> [键=值 | 键:=JSON]... [--text 文字|@-] [-a 文件]... [--grep 词] [--json] [--wait]
 ir new <agent> [位置] "任务"   开会话，返回 ID；位置 应用名:路径，不写前缀是自己所在的电脑
-ir send <id|应用/登录> "消息"   发给会话（回合进行中默认插话，--queue 排队）或一个登录
-ir wait <id>                   等回合结束，打印最后一段回复
-ir read <id> [-n 条数] [--full]  每条消息和它的最终回复，截短；默认最近 10 条，--full 整页原文
-ir ls | find <词> [--all]        列会话 | 按名字、标题、目录、最后一句找
-ir stop | archive | unarchive <id>
-ir rename [<id>] <名>           给会话起名，不写 id 是自己所在的
-ir ws [ls] | new <目录> [--name 名] | rename <ws> <新名> | rm <ws> | mv <id> <ws>
+ir wait <id> | stop <id>       等回合结束，打印最后一段回复 | 停掉 agent
+ir ws rename <组> <新名>        给文件夹组改名（组写 ID 或名字）
 ```
 
-- `new`、`send` 可加 `--wait`；可选 `--model`、`--approve`。`wait` 退出码：0 结束，2 需要你，1 出错/已退出。
-- `ws` 只列出和改名文件夹组（`ir ws [ls] | rename <组> <新名>`，组写 ID 或名字，重名要写 ID）；组不能手建、删除、挪会话（2026-11-08）。
+旧命令和 `ir api` 的对应：
+
+| 以前 | 现在 |
+| --- | --- |
+| `ir ls [--all] [--here]` | `ir api channel.list [_data.all:=true] [guild_id=self]` |
+| `ir find <词>` | `ir api channel.list --grep <词>`（归档的加 `_data.all:=true`） |
+| `ir read <id>` | `ir api message.list channel_id=<id>` |
+| `ir send <id> "消息" [-a 文件] [--queue]` | `ir api message.create channel_id=<id> --text "消息" [-a 文件] [_data.steer:=false]` |
+| `ir rename [<id>] <名>` | `ir api channel.update channel_id=<id>\|self data.name=<名>` |
+| `ir archive` / `unarchive <id>` | `ir api channel.delete channel_id=<id>`，或 `channel.update … _data.archived:=true\|false` |
+| `ir ws [ls]` | `ir api guild.list` |
+| `ir send 应用/登录 "提示"` | 删掉 |
+
+- `ir api`：方法名、参数照 Satori 原样；`键=值` 是字符串，`键:=JSON` 是任意 JSON（`true`、数字、对象），带点的键写进对象（`data.name`、`_data.archived`）。`channel_id` 可写会话 ID 的开头，`self` 是自己所在的会话；`guild_id=self` 是它的组。`--text` 是纯文字，`ir` 转义成 `content`（`@-` 读 stdin）；`-a` 是附件（`_data.attachments`）；`message.create` 自动带 `_data.caller`。用哪个登录说话由 `POST /v1/meta` 定（主机的 `ir` 是 `local/local`，agent 的是它那一回合的登录）。
+- 输出：列表一项一行（`channel.list` 同以前的 `ir ls`，子代理挂在父会话下；`guild.list` 是 ID、名字、位置），`message.list` 每条消息一行加它的最终回复，其余打 JSON；`--grep` 按词筛列表（每个词都要有，不分大小写），`--json` 原样输出。翻页的列表自动取完。
+- `new`、`message.create` 可加 `--wait`；`new` 可选 `--model`、`--approve`。`wait` 退出码：0 结束，2 需要你，1 出错/已退出。
+- 组不能手建、删除、挪会话（2026-11-08），只能改名。
 - 新会话进调用者的组（组的文件夹包含它的目录时），否则按目录归组；列表里挂在调用者下面（见“派出的会话”）。没有汇报、agent 间权限。
 - 不设上限：不限同时运行数、拉起数量、深度、调用频率；提示词里只写“在需要时”。
 - 托管会话的系统提示（英文，每次 agent 进程启动时现写，`session.SystemPrompt`）：一句说明 Iridium 和 `ir` 是干什么的，接着直接放 `ir --help` 里“Admin”之前给 agent 用的那部分（同一份 `irhelp.Help`），管理命令只说“见 `ir --help`”；再是凭据、交文件、起标题三句，最后一句用户的语言（网页设置里选的，没选过就是那台网页自己的）。原来只写“见 ir --help”，查本机托管会话：用 `ir` 的一大半先跑一次 `ir --help`，压缩后还会再跑，还被 auto 模式拦过，所以直接写进去（用户，2026-11-08）。`ir --help` 英文，不超过 20 行。
@@ -186,9 +197,9 @@ ir run [--secret 名,…] -- 命令 …   {{名}}、{{file:名}} 换进参数，
   - 文件夹选择器只有：顶上路径（每段能点；点当前那段就能直接输入路径，没有单独的铅笔键，2026-11-08）、只列文件夹（不列文件、不列隐藏目录、不写多余信息）、“新建文件夹”（列表里直接出一个输入框）、一个“选择”。
   - 新会话 = 选 agent（logo），目录默认是组的文件夹（要子目录就用同一个选择器；或点目录那一行右边的“新建子文件夹”，那一行变成输入框，回车就在这里（远端在那台机器上）建好并换成它，再选 agent；建好之前点的 agent 等它建好再开，没建成就不开，2026-11-10），然后直接进对话，光标在输入框。新会话（网页、`ir new`、Bot 开的都算）的名字是第一条消息的开头，之后由 agent 起名；发消息前不占位，页面显示灰色的“新会话”（库里不存，`ir ls` 里是空的），不再用文件夹名加编号（用户，2026-11-08）。你改过的名字不会被替换；`/clear` 开的新会话接着用你改过的名字，agent 起的不传。从别的会话里开的（`ir new`）记下是谁开的。
 - 组右键/长按：改名（就地输入）、复制路径、收起展开、通知（推送开着时）；没有删除（2026-11-08）。不想看一个远端组，用“归档这里的 N 个会话”（2026-11-10）。“未归类”只有通知（2026-11-07）。会话菜单里没有“移到工作区”。
-- 会话标题（用户，2026-11-08）：会话列表一个会话只有一行：名字（组看不出时带目录）、多久前、灯。名字依次取：你起的名 > agent 用 `ir rename` 起的名 > agent 最近一行 `[标题] …`（旧记录）> 第一句话开头 > 灰色“新会话”。
-  - 起名要快、准（用户，2026-11-08）：托管会话的系统提示让 agent 第一回合的第一个动作就 `ir rename "<名>"`，主题变了再起；不限字数，只要简短、具体到事和任务，不带标点、引号、emoji。提示原文：`Title: as your first action in a session, and again only when its subject changes, run ir rename "<title>": a short name for the specific thing and task, in the user's language, without punctuation, quotes or emoji. If the user named it, leave it.`
-  - 在会话里跑的 `ir rename` 记作 agent 起的：照 `[标题]` 行的规矩去引号和句尾标点、截到约 24 个汉字宽；你起过名就不改，退出码 1。人在终端里跑的算你起的。只是 `ir rename …` 一条命令（不接 `;`、`&&`、管道、`$(`、重定向）时 Iridium 直接批准，不弹确认；对话里不画这一步（回合中那一行也不画）。
+- 会话标题（用户，2026-11-08）：会话列表一个会话只有一行：名字（组看不出时带目录）、多久前、灯。名字依次取：你起的名 > agent 改名（`ir api channel.update`）起的名 > agent 最近一行 `[标题] …`（旧记录）> 第一句话开头 > 灰色“新会话”。
+  - 起名要快、准（用户，2026-11-08）：托管会话的系统提示让 agent 第一回合的第一个动作就 `ir api channel.update channel_id=self data.name="<名>"`，主题变了再起；不限字数，只要简短、具体到事和任务，不带标点、引号、emoji。提示原文：`Title: as your first action in a session, and again only when its subject changes, run ir rename "<title>": a short name for the specific thing and task, in the user's language, without punctuation, quotes or emoji. If the user named it, leave it.`
+  - 在会话里跑的改名（`channel.update` 的 `data.name`）记作 agent 起的：照 `[标题]` 行的规矩去引号和句尾标点、截到约 24 个汉字宽；你起过名就不改，退出码 1。人在终端里跑的算你起的。只是 `ir rename …` 一条命令（不接 `;`、`&&`、管道、`$(`、重定向）时 Iridium 直接批准，不弹确认；对话里不画这一步（回合中那一行也不画）。
   - `[标题]` 行：旧记录照认，从正文、最后一句、推送和 Bot 的回复里拿掉；流式输出时也不画。`/clear` 只把你起的名传下去。改提示后，正在跑的 agent 进程不变，下次启动才读新提示，那一回合缓存从头写一次。
 - 在哪干活（用户，2026-11-10）：一个会话往别处派过活时，对话顶上标题下面一排位置：自己的目录；派过活的位置（远端带头像），写挂着的子会话数，有在跑的亮灯；@ 过还没去的位置画淡、虚线框。点一个就跳到那几个子会话。在别的机器上的会话（包括派出去的）这一排总有，第一个就是它在哪台机器的哪个文件夹（头像 + 机器名 · 文件夹名）。本机的会话没派过活、也没 @ 过位置的不出这一排。位置那一排里第一个的图标和标题的字对齐。对话里 `ir new` 那一步下面是开出来的会话的卡片，`ir cp` 那一步写从哪到哪。（已做，2026-11-10：派过活的按子会话所在目录（机器:目录）分，链上再往下派的也算；派到自己目录的数在自己那一格上；@ 过的目录里已经派过的不另画；点自己的目录、@ 过的位置在列表里展开那个组，没有就开 “+”；链上有拖出来的（人开的）就断开，它下面的算它的，不算上面的；@ 只认已载入的消息。`ir new` 那一步折在一串里时，卡片在这串的行下面，展不展开都在；那一步跑完才有卡片）
 - 回复里交文件用文件链接（用户，2026-11-09）：agent 跑 `ir attach <路径>`，把打印的 `![说明](ir:id)`／`[文字](ir:id)` 写进正文该放的位置，图文混排；`ir attach` 当场报错（不存在、路径被拒），agent 自己能改。细节见 `docs/api.md`“文件链接”。旧写法（2026-11-06）：单独一行 `` [文件] `绝对路径` ``，旧记录和不读系统提示的会话照认，系统提示不再教。图片缩略图（约 1024px，点开原图），其余下载卡片，视频音频直接放；那一行从正文里拿掉。提到路径、链接、`![]()` 都只是文字，不出卡片；agent 转述的 `[附件]` 行也不算。只给对话里出现过的路径发链接。
@@ -239,7 +250,7 @@ ir run [--secret 名,…] -- 命令 …   {{名}}、{{file:名}} 换进参数，
 - Bot：发消息带附件（进会话目录的 `.iridium/uploads/`）；事件里带回复的文件列表（名字、大小、类型、引用），按引用取。
 - `ir`：
   - `ir cp <源> <目标>`，任一边可以是 `机器:路径`；先只做单个文件，目录以后用 tar 流。
-  - `ir send <id> "…" -a <文件>`：附件传到会话所在的机器。
+  - `ir api message.create channel_id=<id> --text "…" -a <文件>`：附件传到会话所在的机器。
   - `ir files 机器:目录`：只列一层，名字、大小、时间、类型。
   - 传输由 Iridium 做，不是 `ir` 进程；`ir` 被打断后，再跑一次同样的命令从断点接着传。
   - 给人看时有进度条；agent 调用时只打一行结果（路径、大小、sha256）。

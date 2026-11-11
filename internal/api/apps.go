@@ -100,22 +100,6 @@ type Login struct {
 	Perms *Perms `json:"perms,omitempty"`
 }
 
-// Notice is POST /v1/internal/apps/{id}/logins/{login}/notice (ir send 应用/登录): Text shown to the
-// login, no agent woken. Caller: the session it is from (ir's own, as Send's), if any.
-type Notice struct {
-	Text   string `json:"text"`
-	Caller string `json:"caller,omitempty"`
-}
-
-// NoticeReply is where a notice went: the login (its ID and name) and how many of its browsers
-// were pushed to.
-type NoticeReply struct {
-	App   string `json:"app"`
-	Login string `json:"login"`
-	Name  string `json:"name,omitempty"`
-	Sent  int    `json:"sent"`
-}
-
 // Device is what an app or login runs on, set in its settings (PUT /v1/internal/me/device, ir apps
 // device): a computer, the default, a laptop, a phone, or none shown (no badge).
 type Device string

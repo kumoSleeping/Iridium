@@ -783,24 +783,6 @@ export interface Login {
   perms?: Perms;
 }
 /**
- * Notice is POST /v1/internal/apps/{id}/logins/{login}/notice (ir send 应用/登录): Text shown to the
- * login, no agent woken. Caller: the session it is from (ir's own, as Send's), if any.
- */
-export interface Notice {
-  text: string;
-  caller?: string;
-}
-/**
- * NoticeReply is where a notice went: the login (its ID and name) and how many of its browsers
- * were pushed to.
- */
-export interface NoticeReply {
-  app: string;
-  login: string;
-  name?: string;
-  sent: number /* int */;
-}
-/**
  * Device is what an app or login runs on, set in its settings (PUT /v1/internal/me/device, ir apps
  * device): a computer, the default, a laptop, a phone, or none shown (no badge).
  */
@@ -1729,7 +1711,7 @@ export interface PushUnsubscribe {
  * PushMessage is a push's payload, as the service worker gets it.
  */
 export interface PushMessage {
-  kind: string; // needs_you | error | turn_end | compact | test | notice
+  kind: string; // needs_you | error | turn_end | compact | test | share
   session?: string;
   title: string;
   body: string;

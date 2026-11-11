@@ -33,8 +33,7 @@ type At struct {
 // files and command lines of the Iridium's own machine (cp, files, sh, run), its secrets
 // or its admin: a person on a panel, or ir on that machine, does those.
 var remoteCommands = map[string]bool{
-	"new": true, "send": true, "wait": true, "read": true, "ls": true, "find": true,
-	"share": true, "stop": true, "archive": true, "unarchive": true, "rename": true, "ws": true, "apps": true,
+	"api": true, "new": true, "wait": true, "share": true, "stop": true, "ws": true, "apps": true,
 }
 
 // RunAt runs ir with args for a session at another machine, through hc (the daemon's own API,

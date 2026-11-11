@@ -76,7 +76,7 @@ func RemotePrompt(lang string, ir bool) string {
 	return b.String()
 }
 
-const titleLine = "Title: as your first action in a session, and again only when its subject changes, run ir rename \"<title>\": a short name for the specific thing and task, in the user's language, without punctuation, quotes or emoji. If the user named it, leave it.\n"
+const titleLine = "Title: as your first action in a session, and again only when its subject changes, run ir api channel.update channel_id=self data.name=\"<title>\": a short name for the specific thing and task, in the user's language, without punctuation, quotes or emoji. If the user named it, leave it.\n"
 
 var langNames = map[string]string{"zh": "Chinese", "en": "English"}
 

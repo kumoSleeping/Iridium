@@ -6,20 +6,19 @@ import "strings"
 
 // Help is ir --help: at most 20 lines (plan "ir"). The agent part is before Admin.
 const Help = `ir: the host's Iridium on the command line (over its unix socket). An <id> may be its first few characters.
+  ir api <method> [key=value | key:=json]... [--text words|@-] [-a file]... [--grep word] [--json] [--wait]   Satori: channel.list|get|update|delete, message.create|list|get, guild.list|get, login.get, user.get, meta
+    channel_id: a session (<id>, self: yours); guild_id self: your group; a.b=… sets a's b. --text: the message as plain words (@-: stdin); -a: attach; --grep: filter a list; --json: the answer as is
+    ir api channel.list [_data.all:=true] | message.list channel_id=<id> | message.create channel_id=<id> --text "…" [--wait] | channel.update channel_id=self data.name="<title>" | channel.update channel_id=<id> _data.archived:=true|false | channel.delete channel_id=<id> | guild.list
   ir new <agent> [place] "task"       start a session, print its ID (--model, --approve <mode>, --workspace <group>); place: a folder, app:path at that app's computer, host:path
-  ir send <id> "message" [-a file]...  send a message, with attachments; ir send app/login "message": a notice shown to that login (ir apps logins), no agent woken
-  ir wait <id>                        wait for the turn to end, print its last reply
+  ir wait <id> | stop <id>            wait for the turn to end, print its last reply | stop its agent
   ir share app/login <id|folder|file> ["note"]   share a session, a place (app:path too) or a file (in your session) with a login that may use it
-  ir read <id> [-n count] [--full]    each message and its final reply, cut short (last 10; --full: the page as written)
-  ir ls | find <word> [--all]         list sessions | find by name, title, last thing said (--all: archived, finished subagents too; ls --here: your group's)
-  ir stop | archive | unarchive <id> | rename [<id>] <name>   stop its agent | archive | unarchive | name it (no <id>: your own session)
-  ir ws [ls] | rename <group> <name>   folder groups, made as sessions go in their folders (<group>: ID or name)
+  ir ws rename <group> <name>         rename a folder group (<group>: ID or name)
   ir cp <src> <dst> | files <dir> | attach <file>...   copy files, print path, size, sha256 | list one level: name, size, time, type | its ir: link, the Markdown to put the file in your reply
   ir sh <app>[:dir] -- command       run a command line at an app's computer (ir apps lists them; --cwd dir, --timeout 2m)
   ir secret ls | set <name> [--note text] | rm <name>   secrets: set has the user type the value on the web page
   ir run [--secret name,…] -- command …   {{name}}, {{file:name}} become the value, a temp file, and env vars; values in the output are masked
   ir usage [name|me] [-d days] [--by day,app,agent,model]   tokens and cost per day, app, agent, model
-  new and send take --wait to wait for the reply. send during a turn joins that turn (an agent's always does; a person at a terminal may add --queue to run it after). Exit codes: 0 done, 2 needs the user (a question, an approval), 1 error or exited. A path may be app:path (host:path, the host's)
+  new and message.create take --wait to wait for the reply. A message during a turn joins it (an agent's always does; a person's ir may set _data.steer:=false to run it after). Exit codes: 0 done, 2 needs the user (a question, an approval), 1 error or exited. A path may be app:path (host:path, the host's)
 Admin (an agent calling these never sees a secret, and never approves):
   ir apps [logins [app]] | agents <app> [agent=on|off] | rename <app> <name> | rm <app> | open [10m] | close   apps, the host and ir_web, their computers (system, agents, home) | their logins | the agents on or off there | rename | remove (a login: app/login) | take pairing requests for a while | stop
   ir needs | allow <id> | deny <id>   what waits for a person (apps and logins asking to join, invites, secrets): a person at the host decides
@@ -41,9 +40,9 @@ func Remote() string {
 	var b strings.Builder
 	b.WriteString("ir: the Iridium hosting this session, reached over HTTPS as this computer's app. An <id> may be its first few characters. A folder is this computer's.\n")
 	for _, l := range strings.Split(Agent(), "\n") {
-		for _, p := range []string{"  ir new ", "  ir send ", "  ir share ", "  ir wait ", "  ir read ", "  ir ls ", "  ir stop ", "  ir ws ", "  new and send "} {
+		for _, p := range []string{"  ir api ", "    ", "  ir new ", "  ir share ", "  ir wait ", "  ir ws ", "  new and message.create "} {
 			if strings.HasPrefix(l, p) {
-				if p == "  new and send " {
+				if p == "  new and message.create " {
 					l, _, _ = strings.Cut(l, ". A path may be")
 				}
 				b.WriteString(l + "\n")

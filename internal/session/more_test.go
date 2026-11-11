@@ -307,7 +307,8 @@ func TestRuleMatches(t *testing.T) {
 	}
 }
 
-// An agent naming its session (ir rename) is never asked about; anything chained to it is.
+// An agent naming its session (ir api channel.update channel_id=self data.name=…, the older ir
+// rename) is never asked about; anything chained to it is.
 func TestRenamesOnly(t *testing.T) {
 	for cmd, want := range map[string]bool{
 		`ir rename "会话命名"`:      true,
@@ -320,6 +321,13 @@ func TestRenamesOnly(t *testing.T) {
 		"ir rename x\nls":       false,
 		`ir ls`:                 false,
 		`irx rename x`:          false,
+		`ir api channel.update channel_id=self data.name="会话 命名"`:                true,
+		`ir api channel.update data.name=x channel_id=self`:                      true,
+		`ir api channel.update channel_id=self`:                                  false,
+		`ir api channel.update channel_id=1a2b data.name=x`:                      false,
+		`ir api channel.update channel_id=self data.name=x _data.archived:=true`: false,
+		`ir api channel.update channel_id=self data.name=x && rm -rf ~`:          false,
+		`ir api message.create channel_id=self data.name=x`:                      false,
 	} {
 		if got := renamesOnly(api.Ask{Kind: "permission", Tool: "Bash", Input: map[string]any{"command": cmd}}); got != want {
 			t.Errorf("%q: %v", cmd, got)

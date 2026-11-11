@@ -5,7 +5,7 @@ Iridium 自己的接口都在 `/v1/internal/` 下：Satori 规范的 internal �
 - HTTP：`127.0.0.1:7810`（配置 `listen`），给网页和应用，前面是 Passkey 门（`docs/gate.md`）。没配 `public.origin` 时只认本机的主机名（`localhost`、回环地址和配置 `hosts`），非 GET 请求带了别的 `Origin` 就拒绝，请求都算主机（带 TOKEN 的算那个应用）。配了以后每个请求都要网页登录或 TOKEN。
 - unix socket：`$XDG_RUNTIME_DIR/iridium/ir.sock`（0600），给主机上的 `ir`，不经过门，算主机。`ir` 认出是 agent 在调（环境里有 `CLAUDECODE`、`CODEX_THREAD_ID`、`IRIDIUM_SESSION`，或者没有终端）时带头 `X-Iridium-Agent: 1`，这时不回任何秘密（见“需要”）。`ir` 还带 `X-Iridium-Session`（它所在的会话：`IRIDIUM_SESSION` 或 agent 自己的会话变量）；那个会话是别的终端经 Iridium 开的，这个请求就算那个终端的：有没有 Claude 照它，记它的用量和来源（agent 在某个应用开的会话里调 `ir`，等于那个应用自己做）。
 
-来源：每条交给 agent 的消息开头是 `[终端名] `（`/` 开头的命令除外），名字取发送时终端的名字。库里记下这条输入是哪个终端（ID）发的、用的什么名字；读记录时服务端按 Iridium 自己写进去的输入认（Claude：发消息时给的 uuid；没有 ID 的 agent：`store.SourceByText` 比对输入记录），去掉前缀，消息块带 `from`（名字）和 `fromTerminal`（终端 ID，取头像用）。用量行按终端 ID 记，改名不丢。经 unix socket 的 `ir send`、`ir new` 只要带着它所在的会话（`X-Iridium-Session` 头，取自 `IRIDIUM_SESSION`、`CLAUDE_CODE_SESSION_ID` 等环境变量，或正文的 `caller`），前缀就是 `[ir:<会话 ID>] `，`from` 也是它，页面画成那个会话的来信（名字：会话改过的名字，否则“Claude · 工作区名或文件夹名”）；有没有 `X-Iridium-Agent` 都一样。终端（`fromTerminal`，记用量的）照旧：开那个会话的终端，否则本机。网页和 TOKEN 来的请求不认 `caller`。
+来源：每条交给 agent 的消息开头是 `[终端名] `（`/` 开头的命令除外），名字取发送时终端的名字。库里记下这条输入是哪个终端（ID）发的、用的什么名字；读记录时服务端按 Iridium 自己写进去的输入认（Claude：发消息时给的 uuid；没有 ID 的 agent：`store.SourceByText` 比对输入记录），去掉前缀，消息块带 `from`（名字）和 `fromTerminal`（终端 ID，取头像用）。用量行按终端 ID 记，改名不丢。经 unix socket 的 `ir api message.create`、`ir new` 只要带着它所在的会话（`X-Iridium-Session` 头，取自 `IRIDIUM_SESSION`、`CLAUDE_CODE_SESSION_ID` 等环境变量，或正文的 `caller`），前缀就是 `[ir:<会话 ID>] `，`from` 也是它，页面画成那个会话的来信（名字：会话改过的名字，否则“Claude · 工作区名或文件夹名”）；有没有 `X-Iridium-Agent` 都一样。终端（`fromTerminal`，记用量的）照旧：开那个会话的终端，否则本机。网页和 TOKEN 来的请求不认 `caller`。
 
 类型都在 `internal/api`。`go generate ./internal/api` 用 tygo 生成 `web/src/api/types.gen.ts`，前端只用它。生成的文件进库，改了 Go 的类型要一起重新生成提交；`scripts/check-types.sh`（CI、发布和 preflight 都跑）重新生成一遍，对不上就失败。
 
@@ -110,20 +110,19 @@ Iridium 自己的接口都在 `/v1/internal/` 下：Satori 规范的 internal �
   - 归档（`PATCH archived: true`）：去掉标记，记下记录当时的长度；之后长过这个长度（有了新活动）就自动回来。托管的另外像空闲回收那样停掉 agent；它退出时写的不算活动（退出后重记长度）。恢复（`archived: false`）：设上标记。没有按时间自动归档。
   - 旧版的归档标记迁移成“没标记”。
 - 归组（2026-11-08：组就是文件夹，`Workspace` 是组，不能手建）：会话第一次显示时（第一次活动）做一次，记在库里，不给归档里的做：拉起者的组（组的文件夹包含它的目录时；子代理总跟父会话）→ 包含它目录的最外层的组 → 用它的目录新建一个组。家目录和 `/` 的组（另一台机器不在线时，按路径认它的家目录）只收正好在那里的会话。之后每次归组都把落在别的组文件夹里的组并进最外层那个（子目录先建了组、父目录后建的，比如执行端的会话一次全看到）：自动归进去的会话移过去，空了的组删掉，有手动放进去的会话的组留着。在未归类（`workspace` 为 0）且不是你手动放过去的也再归一次；只有没目录的、远端 Desktop 里不在任何工作区的（`loose`）留在 0。自动归进别的机器的组的（执行端重新配对换了 ID；以前跨机器跟着拉起者归的）按自己的目录重归，子代理除外，它跟父会话（2026-11-10）。`POST /v1/internal/sessions` 开的托管会话当场归组，不等记录出现：拉起者的组包含它的目录就进那个组，否则按自己的目录（跨机器不再跟拉起者，2026-11-10）。手动移过的（`PATCH workspace`）不再自动动。
-- 人开的和挂着的（2026-11-10，`exec.md`“远端工作区”）：`Session.own` 由服务端算，是“人开的”的唯一依据。有 `launcher` 的：手动放过（拖出来、`detach`）才算；没有的：托管、且经创建开的（`openers` 表有它：网页“+”、终端里的 `ir new`、应用开的、`/clear`）。子代理、接管的（`ir send` 接过来的）、发现的都不算。有 `launcher`、不是子代理、不是 `own` 的挂在拉起者下面（页面画）。
+- 人开的和挂着的（2026-11-10，`exec.md`“远端工作区”）：`Session.own` 由服务端算，是“人开的”的唯一依据。有 `launcher` 的：手动放过（拖出来、`detach`）才算；没有的：托管、且经创建开的（`openers` 表有它：网页“+”、终端里的 `ir new`、应用开的、`/clear`）。子代理、接管的（发消息接过来的）、发现的都不算。有 `launcher`、不是子代理、不是 `own` 的挂在拉起者下面（页面画）。
 - 推送只给页面会列的会话：本机的、`own` 的、有 `launcher` 的（挂着的；拉起者不在、归档了、是子代理或没列出就当人开的）、所在组列出来的（组里有没归档的人开会话，或本机的会话），子代理随父会话。远端没人开过的组里的会话不推送。服务端和页面用同一套规则（`session.standOf` 与 `tree.ts` 的 `standing`，共用 `internal/session/testdata/standing.json`，2026-11-10）。
 - 状态：`hosted` 托管；`elsewhere` 在别处运行，只读（能看状态和消息页，发消息回 409）；其余是磁盘上空闲的。别处退出后，发消息就接成托管会话（`--resume`），前提是没有别的进程在用（Claude：`sessions/` 里没有活着的同 ID 进程；dsh：`session.lock` 能拿到 flock；Codex：写锁）。现在只能接 Claude 的。
 - 列表变了（新会话、记录长了、进程起停、改了覆盖层）攒 200ms 发一次 `list` 整份，变了的会话另发 `session:<id>`。
 
 | 请求 | 正文 → 回答 | 说明 |
 |---|---|---|
-| `GET /v1/internal/workspaces` | → `Workspace[]` | 文件夹组，和携带状态 `workspaces` 同一份（没有会话的也在，页面不列）。`only`：只收正好在它目录里的会话（`/`、家目录、远端的盘根和家目录、拆开过的），页面据此找一个位置在哪个组（2026-11-10） |
 | `PATCH /v1/internal/workspaces/{id}` | `{name?}` → `{ok}` | 改名（`hidden` 删掉，2026-11-10） |
 | `POST /v1/internal/workspaces/{id}/split` | → `{ok}` | 按子文件夹拆开：组只留它文件夹里直接的会话，子文件夹里的按各自文件夹重新归组（子文件夹的子文件夹仍进它的组），以后也不再收子文件夹（`flat`）。从拉起者下面拖出来的仍按手动放进自己目录的组，不挂回去（2026-11-10）。只有面板和本机 |
 | `PUT /v1/internal/groups/order` | `{keys}` → `{ok}` | 组的顺序（拖动或菜单上移下移）：`keys` 是会话列表里每个组那一行的键（`w<id>`，一个组一行；以前的 `w<id>@<机器>`、`w0:<机器>` 留在库里无害，2026-11-10），依次排在前，没列的随后；携带状态 `places` 的 `groups`。只有面板和本机能改 |
 | `PATCH /v1/internal/folders/place` | `FolderPlace` → `{ok}` | 文件夹在组里的位置：`path` 是分组用的路径（本机绝对路径，或 `机器:路径`）；`order` 同会话的，0 去掉；`pinned` 置顶（排在组根下的会话上面）。不给的字段不变；携带状态 `places` 的 `order`、`pinned`。只有面板和本机能改 |
 | `PUT /v1/internal/colors` | `FolderColor` → `{ok}` | 给文件夹打颜色标签（`red`、`orange`、`yellow`、`green`、`blue`、`purple`），`color` 为空就去掉；携带状态 `colors`（只给面板）是全部。会话的标签用 `PATCH /v1/internal/sessions/{id}` 的 `color` |
-| `PATCH /v1/internal/sessions/{id}` | `SessionPatch` → `{ok}` | 只改覆盖层，不碰 agent 的文件：`name`（空串去掉；带 `byAgent` 是会话里的 agent 起的，`ir rename` 这样发：去引号和句尾标点，不盖你起的名，盖不了回 409）、`pinned`、`archived`（归档或恢复，见上面的显示标记；挂在它下面的会话一路往下跟着归档或恢复，拖出来的不跟，`ir archive` 也是；2026-11-10）、`detach: true`（从拉起者下面拿出来：按自己的目录归组，最外层包含它的组，没有就新建，记成手动放的，此后 `own`）、`workspace`（移动，0 为未归类；移过就不再自动归类）、`order`（拖到的位置：列表按它排，代替最后活动时间，与 `updatedAt` 同为毫秒；0 去掉） |
+| `PATCH /v1/internal/sessions/{id}` | `SessionPatch` → `{ok}` | 只改覆盖层，不碰 agent 的文件：`name`（空串去掉；带 `byAgent` 是会话里的 agent 起的，会话里 agent 的改名这样发：去引号和句尾标点，不盖你起的名，盖不了回 409）、`pinned`、`archived`（归档或恢复，见上面的显示标记；挂在它下面的会话一路往下跟着归档或恢复，拖出来的不跟，`ir archive` 也是；2026-11-10）、`detach: true`（从拉起者下面拿出来：按自己的目录归组，最外层包含它的组，没有就新建，记成手动放的，此后 `own`）、`workspace`（移动，0 为未归类；移过就不再自动归类）、`order`（拖到的位置：列表按它排，代替最后活动时间，与 `updatedAt` 同为毫秒；0 去掉） |
 | `GET /v1/internal/folders?path=` | → `Folders` | 选择器：只列文件夹，不列隐藏的，按名字排；`path` 为空或 `~` 是家目录。`parent` 为空表示到顶了 |
 | `POST /v1/internal/folders` | `NewFolder` → `{path}` | 在 `path` 里新建文件夹 `name`（不能以 `.` 开头、不能带 `/`）。已有回 409 |
 | `GET /v1/internal/machines/{id}/dsh/workspaces` | → `DshWorkspace[]` | 那台机器上 dsh 的工作区（DSH Desktop 侧边栏那份，按它的顺序，文件夹已不在的不列），读不懂时用它会话所在的文件夹代替，最近的在前；路径用 `/`。`sessions` 是其中列出的会话数（不算子代理、这边归档的、不同步的）。新会话选文件夹时列在最上面，见 `docs/exec.md`“远端 DSH” |
@@ -163,7 +162,7 @@ Iridium 自己的接口都在 `/v1/internal/` 下：Satori 规范的 internal �
 
 | 请求 | 正文 → 回答 | 说明 |
 |---|---|---|
-| `POST /v1/internal/sessions/{id}/attach` | `{path}` → `FileRef` | 把本机文件当这个会话的附件（`ir send -a`），不复制 |
+| `POST /v1/internal/sessions/{id}/attach` | `{path}` → `FileRef` | 把本机文件当这个会话的附件（`ir api message.create -a`），不复制 |
 | `POST /v1/internal/links` | `{path}` → `FileLink` | 给本机文件一个文件链接（`ir attach`），见“文件链接” |
 | `GET /v1/internal/files?path=<目录>[&machine=<机器>]` | → `DirListing` | 列一层（`ir files`）；带 `machine` 是那台机器上的目录（它自己的写法，空是家目录） |
 | `POST /v1/internal/files/copy` | `{from, to, fromMachine?, toMachine?}` → NDJSON | 拷文件（`ir cp`）：每 250ms 一行 `CopyProgress`，最后一行带 `path`、`sha256` 或 `error`。由 Iridium 拷，`ir` 断了也接着拷；同样的请求再来就接上。一边在别的机器（`fromMachine`、`toMachine`）时：不接续，写到那边的先限 4MB（413），目标已有文件 409 |
@@ -181,11 +180,11 @@ Iridium 自己的接口都在 `/v1/internal/` 下：Satori 规范的 internal �
 - **路径检查**（`pathsafe.Guard`）：先解析符号链接（不存在的路径解析到最深的已有上层）再比允许的目录；写着的路径和解析后的都不能落在 Iridium 的状态和配置目录、`~/.ssh`、`~/.claude`（及 `CLAUDE_CONFIG_DIR`）、`~/.codex`（及 `CODEX_HOME`）、`~/.pi`、`~/.dsh`、`/proc` 里，状态目录的 `uploads/files` 例外。被拒是 403。
 ## `ir`（agent 用的部分）
 
-- 代码在 `internal/cli`，走上面这套接口；socket 用 `IRIDIUM_SOCKET`，没有就读配置（`IRIDIUM_CONFIG` 或默认位置）。
-- `<id>` 可只写开头（唯一即可）；`ir new`、`ir ls` 打印至少 8 位的短 ID。`ir ls` 只列有显示标记的，子代理只列还在工作的（没做完、父会话进程还在、5 分钟内写过），排在父会话下面；`ir ls --all` 连归档和做完的子代理一起列。`ir find <词>...` 在 ID、名字、标题、目录、最后一句里找（每个词都要有，不分大小写），归档的也找、标 `[归档]`。`ir archive`、`ir unarchive` 同会话列表菜单（`PATCH /v1/internal/sessions/{id}`）。`ir rename [<id>] <名>` 给会话起名，不写 id 是自己所在的；在会话里跑算 agent 起的（`byAgent`），见 `plan.md`“会话标题”。`ir read` 默认每条消息一行（截 80 字）加它的最终回复（截 300 字），最近 10 条，`-n` 改条数，`--full` 打整页原文。`机器:路径`、`机器/<id>`（机器是执行端，`plan.md`“别的机器”）除 `ir sh` 外现在报 `peer not connected`。
+- 代码在 `internal/cli`；socket 用 `IRIDIUM_SOCKET`，没有就读配置（`IRIDIUM_CONFIG` 或默认位置）。会话、消息、文件夹组走 Satori（`ir api`，`docs/satori.md`“ir”，命令对应见 `plan.md`“ir”），其余走上面这套接口。
+- `<id>` 可只写开头（唯一即可）；`ir new` 和列表打印至少 8 位的短 ID。`ir api channel.list` 不列归档和子代理，`_data.all:=true` 都列，子代理排在父会话下面；`--grep <词>` 在 ID、名字、标题、目录、最后一句里找（每个词都要有，不分大小写），归档的标 `[归档]`。`message.list` 每条消息一行（截 80 字）加它的最终回复（截 300 字）。改名在会话里跑算 agent 起的（`byAgent`），见 `plan.md`“会话标题”。
 - 输出给 agent 看：只打最后一段回复（`new --wait` 先一行 ID）；`cp` 一行 `路径 大小 sha256`；需要你时每个提问一行 `需要你：…`。进度只在 stderr 是终端时画。
-- `send`、`new` 不带 `--wait` 时等到 agent 接了这条消息（最多 15 秒）再返回，所以紧接着的 `ir wait` 等的是这一回合。
-- 回合在跑时 `ir send` 的话默认插进这一回合（和网页回车一样，2026-11-06 定）；`--wait` 等到这一回合结束，打印最后一段回复（可能还在说别的事）。加 `--queue` 进待发队列（只对人在终端里跑的 ir 有效；agent 跑的 `--queue` 不管用，总是插进，免得要人去点；2026-11-06）：不带 `--wait` 马上返回，带 `--wait` 等它发出去、再等它那一回合（队列暂停了就退出码 2）。`--steer` 还认，和默认一样。agent 在等额度时插话也进队列。
+- `message.create`、`new` 不带 `--wait` 时等到 agent 接了这条消息（最多 15 秒）再返回，所以紧接着的 `ir wait` 等的是这一回合。
+- 回合在跑时发的话默认插进这一回合（和网页回车一样，2026-11-06 定）；`--wait` 等到这一回合结束，打印最后一段回复（可能还在说别的事）。`_data.steer:=false` 进待发队列（只对人在终端里跑的 ir 有效；agent 的总是插进，免得要人去点；2026-11-06）：不带 `--wait` 马上返回，带 `--wait` 等它发出去、再等它那一回合（队列暂停了就退出码 2）。agent 在等额度时插话也进队列。
 - 退出码：0 结束，2 需要你，1 出错（agent 出错退出、回合中被停、`ir` 自己出错）。
 
 - `NewSession.caller`、`Send.caller`：`ir` 从环境变量（`IRIDIUM_SESSION`、`CLAUDE_CODE_SESSION_ID`、`CODEX_THREAD_ID`…）读到的调用者会话，记成新会话的 `launcher`（页面挂在它下面）；没给 `workspace` 时，调用者的组包含新会话的目录才进那个组，否则按自己的目录归组（2026-11-10）。
@@ -297,14 +296,7 @@ Web Push，总开关在配置 `push`，默认关。VAPID 密钥存在状态目�
 
 `PushRule{scope, target, mode, events?}`：`scope` 是 `workspace`（`target` 是工作区 ID，`"0"` 是没归类的）、`folder`（会话目录的绝对路径，只管这一个目录）、`session`（会话 ID）；`mode` 是 `on` 或 `off`；`events` 只跟 `on`。一个会话的事件：会话、文件夹、工作区里最近的那条规则说开还是关（都没有就开）；开的话，事件取最近一条带 `events` 的 `on` 规则的，没有就用 `defaults`。
 
-推送的内容（service worker 收到的 JSON）：`PushMessage{kind, session, title, body, tag}`，`kind` 是 `needs_you`、`error`、`turn_end`、`notice`、`share`、`test`；`tag` 是会话 ID。推送服务回 404/410 的订阅删掉。
-
-## 发给一个登录（`ir send 应用/登录`）
-
-`POST /v1/internal/apps/{app}/logins/{login}/notice`，`Notice{text, caller?}` → `NoticeReply`。人和 agent 的 `ir` 能发，应用的 TOKEN 不能（403）。
-
-- 网页的登录：作为 Web Push（`kind: notice`），标题是发出它的会话，点开到那个会话。对方要看得到那个会话（范围）。
-- 送不到时 422 `not_deliverable` 带原因：推送关着、对方没有开推送的浏览器、看不到发出它的会话、别的应用的登录（等它们走 Satori）。没有这个应用、登录：422 `no_such_app`、`no_such_login`。
+推送的内容（service worker 收到的 JSON）：`PushMessage{kind, session, title, body, tag}`，`kind` 是 `needs_you`、`error`、`turn_end`、`share`、`test`；`tag` 是会话 ID。推送服务回 404/410 的订阅删掉。
 
 ## 分享（`ir share`）
 
@@ -397,7 +389,7 @@ agent 调 `ir invite`、`ir secret set` 时秘密不进它的对话：变成一�
 
 - 需要里的 `secret_set`（`Need.note`、`replace`；允许时 `NeedAnswer.value` 带值，服务端存好，谁存的记点“存”的面板；回答和 `ConfirmState` 不带值）、`secret_use`（`Need.secrets`、`command`；允许 / 本会话一直允许（`NeedAnswer.forSession`）/ 拒绝，记在内存里，会话的进程停了就忘；`owner: true`，只有带 Claude 的面板或本机 `ir` 能允许；有 `always` 的凭据不给“本会话一直允许”）。
 - 要不要确认：本机由人跑的 `ir run` 直接用；agent 的，会话由本机、带 Claude 的终端开的（或不经 Iridium 开的）直接用，别的终端开的要确认；`always` 的每次都确认。范围不对直接 403，不弹确认。
-- 对话记录出接口前（会话列表、会话状态、消息页、整段原文、携带状态、Satori 的消息和事件、推送；`ir read`、`ir wait` 走的就是这些），已知的值（原样、URL 编码、base64）换成 `[secret:名]`；短于 6 个字符的不换（误伤太多）。
+- 对话记录出接口前（会话列表、会话状态、消息页、整段原文、携带状态、Satori 的消息和事件、推送；`ir api message.list`、`ir wait` 走的就是这些），已知的值（原样、URL 编码、base64）换成 `[secret:名]`；短于 6 个字符的不换（误伤太多）。
 - `ir run` 自己起子进程（同目录、同环境，加上凭据），stdout/stderr 照转，按最长值的长度留尾巴再打码；退出码照子进程。
 
 ## 公网入口

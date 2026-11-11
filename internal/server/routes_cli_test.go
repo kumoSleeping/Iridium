@@ -58,8 +58,8 @@ func TestCLIAtMachine(t *testing.T) {
 		return resp.StatusCode, out.String(), errs.String(), exit
 	}
 
-	if code, out, errs, exit := run(tok, "ls"); code != 200 || exit != 0 || !strings.Contains(out, own.ID[:8]) {
-		t.Fatalf("ls: %d %d %q %q", code, exit, out, errs)
+	if code, out, errs, exit := run(tok, "api", "channel.list"); code != 200 || exit != 0 || !strings.Contains(out, own.ID[:8]) {
+		t.Fatalf("channel.list: %d %d %q %q", code, exit, out, errs)
 	}
 	if _, _, errs, exit := run(tok, "sh", "pc", "--", "id"); exit != 1 || !strings.Contains(errs, "runs on the host") {
 		t.Errorf("sh from there: %d %q", exit, errs)
@@ -68,22 +68,22 @@ func TestCLIAtMachine(t *testing.T) {
 		t.Errorf("cp from there: %d %q", exit, errs)
 	}
 	// Claude is the owner's own terminals': that Bot is not.
-	if _, _, errs, exit := run(tok, "send", own.ID[:8], "hi"); exit != 1 || errs == "" {
+	if _, _, errs, exit := run(tok, "api", "message.create", "channel_id="+own.ID[:8], "--text", "hi"); exit != 1 || errs == "" {
 		t.Errorf("send to Claude from a Bot not the owner's: %d %q", exit, errs)
 	}
 	if _, out, errs, exit := run(tok, "--help"); exit != 0 || !strings.Contains(out, "ir new") || strings.Contains(out, "ir secret") {
 		t.Errorf("help there: %d %q %q", exit, out, errs)
 	}
 	// Not with a channel's own TOKEN, nor a session TOKEN no session has.
-	if code, _, _, _ := run(b.Token, "ls"); code != http.StatusForbidden {
+	if code, _, _, _ := run(b.Token, "api", "channel.list"); code != http.StatusForbidden {
 		t.Errorf("/v1/internal/cli with the Bot's TOKEN: %d", code)
 	}
-	if code, _, _, _ := run("irs_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB", "ls"); code != http.StatusUnauthorized {
+	if code, _, _, _ := run("irs_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB", "api", "channel.list"); code != http.StatusUnauthorized {
 		t.Errorf("an unknown session TOKEN: %d", code)
 	}
 	// Its Bot revoked: its sessions' TOKENs go with it.
 	l.want(200, "socket", "DELETE", "/v1/internal/apps/"+botID, nil, nil)
-	if code, _, _, _ := run(tok, "ls"); code != http.StatusUnauthorized {
+	if code, _, _, _ := run(tok, "api", "channel.list"); code != http.StatusUnauthorized {
 		t.Errorf("after the Bot is revoked: %d", code)
 	}
 }

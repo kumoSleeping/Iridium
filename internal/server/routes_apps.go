@@ -35,8 +35,6 @@ func (s *Server) appRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/internal/apps", s.apps)
 	mux.HandleFunc("DELETE /v1/internal/apps/{id}", s.approver(s.revoke))
 	mux.HandleFunc("DELETE /v1/internal/apps/{id}/logins/{login}", s.approver(s.removeLogin))
-	// ir send 应用/登录: a notice shown to one login (notice.go).
-	mux.HandleFunc("POST /v1/internal/apps/{id}/logins/{login}/notice", s.notice)
 	// What an app may use (agents, scope): whoever approves sets it (S2 enforces it).
 	mux.HandleFunc("PUT /v1/internal/apps/{id}/perms", s.approver(s.putAppPerms))
 	mux.HandleFunc("PUT /v1/internal/apps/{id}/logins/{login}/perms", s.approver(s.putLoginPerms))

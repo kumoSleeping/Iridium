@@ -1,10 +1,8 @@
 package cli
 
 import (
-	"cmp"
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -46,7 +44,9 @@ func cmdNew(e *env, args []string) int {
 		if err != nil {
 			return e.fail(err)
 		}
-		req.Workspace = w.ID
+		if req.Workspace, err = strconv.ParseInt(w, 10, 64); err != nil {
+			return e.failf("no workspace %s", o.group)
+		}
 	}
 	var created api.NewSessionReply
 	if err := e.do("POST", "/v1/internal/sessions", req, &created); err != nil {
@@ -60,100 +60,6 @@ func cmdNew(e *env, args []string) int {
 		return e.waitTurn(created.ID, anyInput)
 	}
 	return e.waitTaken(created.ID, anyInput)
-}
-
-// ir send <id> "message" [-a file]... [--queue]: while a turn runs the message joins it (steers),
-// as Enter does on the page (user 2026-11-06): what agents tell each other is wanted now, and
-// steering does not stop the turn. --queue waits in the queue for the turn to end instead, for a
-// person at a terminal only: an agent's message always joins (the daemon's send). --steer, the old
-// way to ask for it, is still taken. ir send 应用/登录 "message": a notice shown to that login,
-// no agent woken (sendNotice).
-func cmdSend(e *env, args []string) int {
-	o, err := parse(args, "wait attach steer queue")
-	if err != nil {
-		return e.fail(err)
-	}
-	if len(o.pos) > 0 && strings.Contains(o.pos[0], "/") {
-		return e.sendNotice(o)
-	}
-	if o.steer && o.queue {
-		return e.failf("--steer 和 --queue 只能选一个")
-	}
-	if len(o.pos) < 1 || len(o.pos) > 2 || (len(o.pos) == 1 && len(o.attach) == 0) {
-		return e.failf(`usage: ir send <id> "消息" [-a 文件]`)
-	}
-	id, err := e.resolve(o.pos[0])
-	if err != nil {
-		return e.fail(err)
-	}
-	req := api.Send{Caller: e.caller(), Steer: !o.queue}
-	if len(o.pos) == 2 {
-		req.Text = o.pos[1]
-	}
-	for _, a := range o.attach {
-		p, err := localPath(a)
-		if err != nil {
-			return e.fail(err)
-		}
-		var f api.FileRef
-		if err := e.do("POST", "/v1/internal/sessions/"+id+"/attach", api.AttachPath{Path: p}, &f); err != nil {
-			return e.failf("%s: %v", a, err)
-		}
-		req.Attachments = append(req.Attachments, f.Ref)
-	}
-	// What the page ends with now: a message given to DSH Desktop's agent is waited on by what
-	// comes after it.
-	var before api.MessagePage
-	if o.wait {
-		before, _ = e.latest(id)
-	}
-	var sent api.SendReply
-	if err := e.do("POST", "/v1/internal/sessions/"+id+"/send", req, &sent); err != nil {
-		return e.fail(err)
-	}
-	if sent.Desktop {
-		if !o.wait {
-			return exitDone
-		}
-		return e.waitMirrored(id, before)
-	}
-	if n := len(before.Blocks); n > 0 {
-		e.after = before.Blocks[n-1].At
-	}
-	if sent.Session != "" { // /clear: it goes on in a new session
-		fmt.Fprintln(e.out, short(sent.Session, e.ids()))
-		return exitDone
-	}
-	if sent.Queued {
-		if !o.wait {
-			return exitDone // it goes when the running turn ends
-		}
-		if code := e.waitQueued(id, sent.Input); code >= 0 {
-			return code
-		}
-	}
-	if o.wait {
-		return e.waitTurn(id, sent.Input)
-	}
-	return e.waitTaken(id, sent.Input)
-}
-
-// sendNotice is ir send 应用/登录 "message": shown to that login (a login of ir_web gets it as a
-// Web Push), waking no agent; what cannot get it is an error saying why.
-func (e *env) sendNotice(o opts) int {
-	if len(o.pos) != 2 || strings.TrimSpace(o.pos[1]) == "" || len(o.attach) > 0 || o.wait || o.queue || o.steer {
-		return e.failf(`usage: ir send 应用/登录 "消息"`)
-	}
-	app, login, _ := strings.Cut(o.pos[0], "/")
-	if app == "" || login == "" {
-		return e.failf(`usage: ir send 应用/登录 "消息"`)
-	}
-	var r api.NoticeReply
-	if err := e.do("POST", "/v1/internal/apps/"+url.PathEscape(app)+"/logins/"+url.PathEscape(login)+"/notice", api.Notice{Text: o.pos[1], Caller: e.caller()}, &r); err != nil {
-		return e.fail(err)
-	}
-	fmt.Fprintf(e.out, "已送到 %s/%s\n", app, cmp.Or(r.Name, r.Login))
-	return exitDone
 }
 
 // waitQueued waits for a queued message to leave the queue: -1 once it went to the agent, else
@@ -348,59 +254,7 @@ func (e *env) printAsks(asks []api.Ask) {
 	}
 }
 
-// ir read <id> [-n N] [--full]: by default each message of the latest page with the agent's final
-// reply to it, both cut short, the last N (10); a look at what a session did, not its record
-// (user 2026-11-06). --full: the page as written, tool calls a line each.
-func cmdRead(e *env, args []string) int {
-	o, err := parse(args, "n full")
-	if err != nil || len(o.pos) != 1 {
-		return e.failf("usage: ir read <id> [-n 条数] [--full]")
-	}
-	id, err := e.resolve(o.pos[0])
-	if err != nil {
-		return e.fail(err)
-	}
-	page, err := e.latest(id)
-	if err != nil {
-		return e.fail(err)
-	}
-	if o.full {
-		e.printPage(page)
-		return exitDone
-	}
-	var st api.SessionState
-	_ = e.do("GET", "/v1/internal/sessions/"+id, nil, &st)
-	st.Status = turnStatus(&st)
-	n := o.n
-	if n == 0 {
-		n = readCount
-	}
-	ts := turns(page.Blocks)
-	if len(ts) > n {
-		ts = ts[len(ts)-n:]
-	}
-	for i, t := range ts {
-		if t.asked != "" {
-			fmt.Fprintf(e.out, "> %s%s\n", fromTag(t.from), clip(t.asked, askLen))
-		}
-		switch {
-		case t.reply != "":
-			fmt.Fprintf(e.out, "  %s\n", clip(t.reply, replyLen))
-		case i == len(ts)-1 && busy(st.Status):
-			fmt.Fprintln(e.out, "  （进行中）")
-		case i == len(ts)-1 && st.Status == api.StatusWaiting:
-			fmt.Fprintln(e.out, "  （需要你）")
-		default:
-			fmt.Fprintln(e.out, "  （没有回复）")
-		}
-		if i < len(ts)-1 {
-			fmt.Fprintln(e.out)
-		}
-	}
-	return exitDone
-}
-
-// What ir read shows by default: how many messages, how much of each.
+// What ir api message.list shows of each message.
 const (
 	readCount = 10
 	askLen    = 80
@@ -447,56 +301,7 @@ func clip(text string, n int) string {
 	return text
 }
 
-// printPage is ir read --full: the page as written.
-func (e *env) printPage(page api.MessagePage) {
-	for _, b := range page.Blocks {
-		switch b.Kind {
-		case api.BlockKindUser:
-			fmt.Fprintf(e.out, "> %s%s\n\n", fromTag(b.From), strings.ReplaceAll(strings.TrimRight(b.Text, "\n"), "\n", "\n> "))
-		case api.BlockKindAssistant:
-			fmt.Fprintf(e.out, "%s\n\n", strings.TrimRight(b.Text, "\n"))
-		case api.BlockKindTool:
-			fmt.Fprintf(e.out, "· %s\n\n", b.Name)
-		case api.BlockKindSystem:
-			if b.Event == api.SystemEventCompact || b.Event == api.SystemEventInterrupted || b.Event == api.SystemEventAPIError {
-				fmt.Fprintf(e.out, "— %s\n\n", b.Event)
-			}
-		}
-	}
-}
-
-// subQuiet: how long a subagent may write nothing and still count as at work (the page's
-// SUB_QUIET): one its parent dropped never writes its final answer.
-const subQuiet = 5 * time.Minute
-
-// atWork: a subagent not done, written lately, whose parent's process is alive (not its turn:
-// background agents and workflows work on after it); as the sidebar shows them (user
-// 2026-11-06: a subagent is seen only while it works).
-func atWork(s api.Session, byID map[string]api.Session, now time.Time) bool {
-	p, ok := byID[s.Parent]
-	return !s.Done && ok && p.Live && p.Status != api.StatusError && now.Sub(time.UnixMilli(s.UpdatedAt)) < subQuiet
-}
-
-// listed is what ir ls and find show: without all, no archive and no subagent that is not at work.
-func (e *env) listed(all bool) ([]api.Session, []string, error) {
-	var list []api.Session
-	if err := e.do("GET", "/v1/internal/sessions", nil, &list); err != nil {
-		return nil, nil, err
-	}
-	ids := make([]string, len(list))
-	byID := make(map[string]api.Session, len(list))
-	for i, s := range list {
-		ids[i] = s.ID
-		byID[s.ID] = s
-	}
-	if !all {
-		now := time.Now()
-		list = slices.DeleteFunc(list, func(s api.Session) bool { return s.Archived || (s.Subagent && !atWork(s, byID, now)) })
-	}
-	return list, ids, nil
-}
-
-// line is a session's line in ir ls and find: id, agent, status, directory, name or title (a
+// line is a session's line in ir api channel.list: id, agent, status, directory, name or title (a
 // subagent's marked, an archived one too).
 func line(s api.Session, ids []string, home string, machines map[string]string) string {
 	cwd := s.Cwd
@@ -517,32 +322,6 @@ func line(s api.Session, ids []string, home string, machines map[string]string) 
 		title = "[归档] " + title
 	}
 	return fmt.Sprintf("%s\t%s\t%s\t%s\t%s", short(s.ID, ids), s.Agent, s.Status, cwd, title)
-}
-
-// ir ls [--all] [--here]: one session a line; the archive and the subagents done only with --all;
-// --here, those in the caller's group only (its own folder group, at whichever machine).
-func cmdLs(e *env, args []string) int {
-	o, err := parse(args, "all here")
-	if err != nil || len(o.pos) != 0 {
-		return e.failf("usage: ir ls [--all] [--here]")
-	}
-	list, ids, err := e.listed(o.all)
-	if err != nil {
-		return e.fail(err)
-	}
-	if o.here {
-		ws, err := e.groupOf(e.caller())
-		if err != nil {
-			return e.fail(err)
-		}
-		list = slices.DeleteFunc(list, func(s api.Session) bool { return s.Workspace != ws })
-	}
-	home := e.home()
-	names := e.machineNames()
-	for _, s := range underParents(list) {
-		fmt.Fprintln(e.out, line(s, ids, home, names))
-	}
-	return exitDone
 }
 
 // underParents is list with each subagent moved right after the session that started it, as
@@ -571,100 +350,11 @@ func underParents(list []api.Session) []api.Session {
 	return out
 }
 
-// ir find <words>... [--all]: the sessions whose id, name, title, directory or last words have
-// every word, case aside; each line as ir ls, then the last words. The archive is searched too
-// (it is where a session you look for often is); subagents done only with --all.
-func cmdFind(e *env, args []string) int {
-	o, err := parse(args, "all")
-	if err != nil || len(o.pos) == 0 {
-		return e.failf("usage: ir find <词>... [--all]")
-	}
-	var words []string
-	for _, p := range o.pos {
-		words = append(words, strings.Fields(strings.ToLower(p))...)
-	}
-	all, ids, err := e.listed(true)
-	if err != nil {
-		return e.fail(err)
-	}
-	shown, _, err := e.listed(o.all)
-	if err != nil {
-		return e.fail(err)
-	}
-	keep := make(map[string]bool, len(shown))
-	for _, s := range shown {
-		keep[s.ID] = true
-	}
-	home := e.home()
-	names := e.machineNames()
-	found := 0
-	for _, s := range all {
-		if !keep[s.ID] && !(s.Archived && !s.Subagent) {
-			continue
-		}
-		hay := strings.ToLower(strings.Join([]string{s.ID, s.Name, s.Title, s.Cwd, lastText(s)}, "\n"))
-		if !slices.ContainsFunc(words, func(w string) bool { return !strings.Contains(hay, w) }) {
-			found++
-			fmt.Fprintln(e.out, line(s, ids, home, names))
-			if t := lastText(s); t != "" {
-				fmt.Fprintf(e.out, "\t%s\n", clip(t, askLen))
-			}
-		}
-	}
-	if found == 0 {
-		return e.failf("没找到：%s", strings.Join(o.pos, " "))
-	}
-	return exitDone
-}
-
 func lastText(s api.Session) string {
 	if s.Last == nil {
 		return ""
 	}
 	return s.Last.Text
-}
-
-// ir archive | unarchive <id>: as the sidebar's menu does; an archived session is listed only by
-// ls --all (and find).
-func cmdArchive(e *env, args []string, archived bool) int {
-	o, err := parse(args, "")
-	if err != nil || len(o.pos) != 1 {
-		if archived {
-			return e.failf("usage: ir archive <id>")
-		}
-		return e.failf("usage: ir unarchive <id>")
-	}
-	id, err := e.resolve(o.pos[0])
-	if err != nil {
-		return e.fail(err)
-	}
-	if err := e.do("PATCH", "/v1/internal/sessions/"+id, api.SessionPatch{Archived: &archived}, nil); err != nil {
-		return e.fail(err)
-	}
-	return exitDone
-}
-
-// ir rename [<id>] <name>: names a session, the one it runs in when no id is given. Run from a
-// session, it is that agent's name for it, which a name the user gave stays over; else the user's.
-func cmdRename(e *env, args []string) int {
-	o, err := parse(args, "")
-	if err != nil || len(o.pos) < 1 || len(o.pos) > 2 {
-		return e.failf("usage: ir rename [<id>] <名>")
-	}
-	from := e.caller()
-	id := from
-	if len(o.pos) == 2 {
-		if id, err = e.resolve(o.pos[0]); err != nil {
-			return e.fail(err)
-		}
-	} else if id == "" {
-		return e.failf("不在会话里运行，要给出 <id>")
-	}
-	name := o.pos[len(o.pos)-1]
-	if err := e.do("PATCH", "/v1/internal/sessions/"+id, api.SessionPatch{Name: &name, ByAgent: from != ""}, nil); err != nil {
-		return e.fail(err)
-	}
-	return exitDone
 }
 
 // ir stop <id>

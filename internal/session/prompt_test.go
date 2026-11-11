@@ -7,7 +7,7 @@ import (
 
 func TestSystemPrompt(t *testing.T) {
 	p := SystemPrompt("zh")
-	for _, want := range []string{"ir send <id>", "ir secret set", "ir attach <path>", "](ir:id)", `ir rename "<title>"`, "ir --help.", "web settings: Chinese."} {
+	for _, want := range []string{"ir api <method>", "ir secret set", "ir attach <path>", "](ir:id)", `channel.update channel_id=self data.name="<title>"`, "ir --help.", "web settings: Chinese."} {
 		if !strings.Contains(p, want) {
 			t.Errorf("no %q in:\n%s", want, p)
 		}

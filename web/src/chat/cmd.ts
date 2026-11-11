@@ -57,7 +57,8 @@ export function cmdOfCall(t: { name?: string; input?: string }): Cmd | undefined
   return i && cmdOf(commandOf(i), typeof i.description === "string" ? i.description : undefined);
 }
 
-/** Whether a call is only an agent naming its session (ir rename): the chat leaves it out. */
+/** Whether a call is only an agent naming its session (ir api channel.update channel_id=self
+ *  data.name=…, or the older ir rename): the chat leaves it out. */
 export function renameOnly(t: { name?: string; input?: string }): boolean {
   const i = shellInput(t);
   return !!i && renames(commandOf(i));
@@ -68,7 +69,43 @@ function renames(command: string): boolean {
   const w = segs.length === 1 && !segs[0]!.out ? strip(segs[0]!.words) : undefined;
   if (!w) return false;
   const sh = shellArg(w);
-  return sh !== undefined ? renames(sh) : /^(ir|iridium)$/.test(name(w[0]!)) && w[1] === "rename";
+  return sh !== undefined ? renames(sh) : /^(ir|iridium)$/.test(name(w[0]!)) && (w[1] === "rename" || namesSelf(w.slice(2), w[1]));
+}
+
+/** ir api's words naming the session it runs in, and nothing else. */
+function namesSelf(args: string[], sub?: string): boolean {
+  return (
+    sub === "api" &&
+    args[0] === "channel.update" &&
+    args.includes("channel_id=self") &&
+    args.some((a) => a.startsWith("data.name=")) &&
+    args.slice(1).every((a) => a === "channel_id=self" || a.startsWith("data.name="))
+  );
+}
+
+/** An ir api call's sort, by its method (and what channel.update changes). */
+function irApiOf(method: string | undefined, args: string[]): Cmd | undefined {
+  switch (method) {
+    case "channel.list":
+      return args.some((a) => a === "--grep" || a.startsWith("--grep=")) ? "ir-find" : "ir-list";
+    case "channel.get":
+      return "ir-list";
+    case "message.create":
+      return "ir-send";
+    case "message.list":
+    case "message.get":
+      return "ir-read";
+    case "channel.delete":
+      return "ir-archive";
+    case "channel.update": {
+      const a = args.find((x) => x.startsWith("_data.archived:="));
+      return a === undefined ? "ir-rename" : a.endsWith("false") ? "ir-unarchive" : "ir-archive";
+    }
+    case "guild.list":
+    case "guild.get":
+      return "ir-ws";
+  }
+  return undefined;
 }
 
 /** An ir call's subcommand and the words after it (past cd, env, sudo, bash -c): the first ir the
@@ -213,7 +250,7 @@ function sortOf(cmd: string, args: string[], out: boolean): Cmd | undefined {
   switch (cmd) {
     case "ir":
     case "iridium":
-      return IR[sub ?? ""];
+      return sub === "api" ? irApiOf(pos[1], args) : IR[sub ?? ""];
     case "git":
       return gitOf(args);
     case "gh":

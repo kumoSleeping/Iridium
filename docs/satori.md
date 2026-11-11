@@ -21,14 +21,22 @@
 
 - `message.create {channel_id, content}`：发进会话（插入正在跑的回合），发送者显示为 `应用·登录`。`<img>`/`<file>` 的 `src` 是本登录在这个会话 `upload.create` 得到的 `internal:` 地址时，作为附件；`data:` 地址存成上传的文件再作附件；其余元素按意思转成文字。顶层的 `<message>` 各发一条。回 `[Message]`，`id` 是这条输入的 ID，拿去 `message.get` 能取到它（进了记录取记录里那块，还在排队取排队里的）。
 - `message.get`、`message.list`：记录的每一块是一条消息，内容见下面“记录”。`message.list` 是 BidiList，翻页标记是记录里行的偏移；`limit` 按块数、在行首截，可能略多；没有 `next` 时只能 `before`。多一个 `_data {start, end, more}`：这页从哪行起、读时记录到哪（下次 `direction: after` 从这里取新写的）、前面还有没有。`direction: after` 读到记录末尾时不带 `next`。网页读记录也走它。
-- `channel.get`、`channel.list {guild_id?, next?}`（不给 `guild_id` 是全部；不列归档和子 agent）、`guild.get`、`guild.list`（只列范围里的）、`login.get`、`user.get`。
-- `channel.update {channel_id, data: {name}}` 改名；`channel.delete {channel_id}` 归档（agent 停下，记录不删）。要能用这个会话。
+- `channel.get`、`channel.list {guild_id?, next?, _data?: {all}}`（不给 `guild_id` 是全部；不列归档和子 agent，`_data.all` 都列）、`guild.get`、`guild.list`（只列范围里的）、`login.get`、`user.get`。`channel.get`、`channel.list` 的每个 channel 带 `_data`：会话本身（同 `GET /v1/internal/sessions` 的一项，名字、标题、最后一句打码）；`guild.get`、`guild.list` 的 guild 带 `_data`：文件夹组（`path`、`only`），`loose` 没有。网页拿不到携带状态 `workspaces` 时用 `guild.list` 的 `_data`。
+- `channel.update {channel_id, data?: {name}, _data?: {archived}}` 改名，`_data.archived` 归档或恢复；`channel.delete {channel_id}` 归档（agent 停下，记录不删）。要能用这个会话。agent 改的名不盖人起的（409 `named`）。
 - `upload.create`：一个 multipart，带字段 `channel_id`，每个文件回 `internal:{应用}/{登录}/files/{会话}/{ref}`。网页用分块的 `/v1/internal/uploads`。
 - `POST /v1/meta`：本应用已批准的登录，`proxy_urls` 为空。`/v1/meta/*`（webhook）不做。
 - `GET /v1/proxy/internal:…`：只取本应用登录的文件。不是地址 400，不是本应用的登录 404，别的地址 403。
 - 不支持的标准接口（`message.delete` 等）照规范 404。
 
 错误体 `{code, message}`。404 只表示接口不存在；资源不存在 422 加原因码：`no_such_session`、`no_such_message`、`no_such_guild`、`no_such_user`、`no_such_file`、`no_such_ask`、`no_such_button`。
+
+## ir
+
+`ir api`（`internal/cli/api.go`，用法见 `plan.md`“ir”）走同样的 `/v1/`：本机 socket 上和远端会话的 `ir`（`POST /v1/internal/cli`）也挂着 Satori。
+
+- 用哪个登录说话：`POST /v1/meta` 只回一个。主机的 `ir` 是 `local/local`；agent 的是它那一回合的登录（主机开的就是 `local/local`）；远端会话的 `ir` 也是那一回合的登录，不知道时用 `local/local` 的名义。
+- 能做什么不看这个名义，看真正的调用方（`Caller.Self`），和 `/v1/internal` 一样：远端会话的 `ir` 按那台电脑的权限（再交上那一回合登录的），agent 的消息总是插话，agent 的改名不盖人起的。
+- 标准方法照样要 `Satori-Platform`、`Satori-User-ID`，`ir` 按 meta 带上。
 
 ## 记录
 
