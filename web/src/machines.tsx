@@ -10,7 +10,7 @@ import { useMachines } from "./data";
 import { remotePath } from "./tree";
 import { cn } from "./ui";
 
-/** An app's computer (GET /api/apps, its computer) as the page goes by it: its app's ID, name and
+/** An app's computer (GET /v1/internal/apps, its computer) as the page goes by it: its app's ID, name and
  *  avatar with it, the agents turned off there left out (data.ts useMachines). */
 export type Machine = Computer & { id: string; name: string; avatar?: string };
 

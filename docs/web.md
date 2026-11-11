@@ -13,13 +13,13 @@
 | 请求 | 去向 |
 |---|---|
 | `/_ir/*`（头像除外） | 网页层自己答：页面、`/_ir/health`、`/_ir/api/session`、Passkey 流程、登出 |
-| 带 `Authorization: Bearer` | 原样交给核心（应用、执行端 `/api/exec`、远端 `ir` `/api/cli`、配对、`/v1/events`），公网模式下响应改 private |
+| 带 `Authorization: Bearer` | 原样交给核心（应用、执行端 `/v1/internal/exec`、远端 `ir` `/v1/internal/cli`、配对、`/v1/events`），公网模式下响应改 private |
 | 网页关着 | 查 Host/Origin 后经 `gate.AsHost` 算主机 |
 | Cookie 有效 | 去掉 Cookie，设 `Authorization: Bearer <ir_web 的 TOKEN>`、`Satori-Platform: ir_web`、`Satori-User-ID: <登录 ID>`（浏览器自己带的这几个头一律替换），交给核心 |
 | 都没有，路径是开放的 | 不带身份交给核心（配对、`/v1/events`）或网页文件（图标、manifest） |
 | 其余 | 页面导航 302 到 `/_ir/login?next=…`，别的 401 |
 
-`/api`、`/v1`、`/_ir/avatar/` 交给核心，别的路径是网页文件（只给主机的页面和登录了的浏览器）。
+`/v1/internal`、`/v1`、`/_ir/avatar/` 交给核心，别的路径是网页文件（只给主机的页面和登录了的浏览器）。
 
 转发的请求网页层自己记着：登出、会话过期、登录被删时取消它们的 context，事件流和 WebSocket 跟着断；换公网地址时旧的那层全部取消。
 

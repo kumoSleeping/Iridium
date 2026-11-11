@@ -11,7 +11,7 @@ import (
 )
 
 // Tunables are the config's fields the settings page changes while the daemon runs (PUT
-// /api/settings): read through Manager.tuned, never Options.Config, so a change takes at once.
+// /v1/internal/settings): read through Manager.tuned, never Options.Config, so a change takes at once.
 type Tunables struct {
 	IdleReap    time.Duration // 0: never
 	CrashResume bool

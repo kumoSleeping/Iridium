@@ -78,10 +78,10 @@ func approve(t *testing.T, as adminEnv, allow bool) string {
 	t.Helper()
 	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(20 * time.Millisecond) {
 		var cs api.Needs
-		as.call("GET", "/api/needs", nil, &cs)
+		as.call("GET", "/v1/internal/needs", nil, &cs)
 		if len(cs.Pending) == 1 {
 			var raw json.RawMessage
-			if _, err := as.call("POST", "/api/needs/"+cs.Pending[0].ID, api.NeedAnswer{Allow: allow}, &raw); err != nil {
+			if _, err := as.call("POST", "/v1/internal/needs/"+cs.Pending[0].ID, api.NeedAnswer{Allow: allow}, &raw); err != nil {
 				t.Fatal(err)
 			}
 			return string(raw)
@@ -102,7 +102,7 @@ func agentRun(e adminEnv, args ...string) chan [3]string {
 	return got
 }
 
-// pairApp makes app name by pairing, the one way an app comes in (POST /api/pair), allowed by the
+// pairApp makes app name by pairing, the one way an app comes in (POST /v1/internal/pair), allowed by the
 // person: its TOKEN. claude: allowed as the owner's own.
 func pairApp(t *testing.T, person adminEnv, name string, claude bool) string {
 	t.Helper()
@@ -110,20 +110,20 @@ func pairApp(t *testing.T, person adminEnv, name string, claude bool) string {
 		t.Fatalf("apps open: %d %s", code, errs)
 	}
 	var p api.Pairing
-	if _, err := person.call("POST", "/api/pair", api.PairRequest{Name: name}, &p); err != nil {
+	if _, err := person.call("POST", "/v1/internal/pair", api.PairRequest{Name: name}, &p); err != nil {
 		t.Fatal(err)
 	}
 	var cs api.Needs
-	person.call("GET", "/api/needs", nil, &cs)
+	person.call("GET", "/v1/internal/needs", nil, &cs)
 	for _, c := range cs.Pending {
 		if c.Code == p.Code {
-			if _, err := person.call("POST", "/api/needs/"+c.ID, api.NeedAnswer{Allow: true, Owner: claude}, nil); err != nil {
+			if _, err := person.call("POST", "/v1/internal/needs/"+c.ID, api.NeedAnswer{Allow: true, Owner: claude}, nil); err != nil {
 				t.Fatal(err)
 			}
 		}
 	}
 	var st api.PairState
-	if _, err := person.call("GET", "/api/pair/"+p.Request, nil, &st); err != nil || st.Status != "allowed" {
+	if _, err := person.call("GET", "/v1/internal/pair/"+p.Request, nil, &st); err != nil || st.Status != "allowed" {
 		t.Fatalf("pairing %s: %+v %v", name, st, err)
 	}
 	return st.Token

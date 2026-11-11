@@ -19,7 +19,7 @@ const PairUsage = `ir pair <地址> --name <名字> --into <文件> [--type <类
   --type  显示用的类型，如 bot、script
 `
 
-// PairMain runs ir pair with args (after "pair"): an app's TOKEN by pairing (POST /api/pair), into
+// PairMain runs ir pair with args (after "pair"): an app's TOKEN by pairing (POST /v1/internal/pair), into
 // a file; never printed, so an agent that runs it does not see it.
 func PairMain(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("pair", flag.ContinueOnError)

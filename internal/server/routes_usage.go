@@ -11,10 +11,10 @@ import (
 	"github.com/kumoSleeping/iridium/internal/store"
 )
 
-// maxUsageDays is the most days GET /api/usage gives at once.
+// maxUsageDays is the most days GET /v1/internal/usage gives at once.
 const maxUsageDays = 366
 
-// usage is GET /api/usage?days=N&app=<ID, name or "me"> (terminal= as before 0.2): the last N
+// usage is GET /v1/internal/usage?days=N&app=<ID, name or "me"> (terminal= as before 0.2): the last N
 // days' (7 by default) usage by day, app, agent and model; by=hour: the last 24 hours' by hour, its days
 // "2006-01-02T15" (the 1 天 view, the user, 2026-11-08); by=weekhour: the N days' by weekday and
 // hour, the rows' days "1T14" (Monday, 14:00; 7 is Sunday; the heat map, the user, 2026-11-10).

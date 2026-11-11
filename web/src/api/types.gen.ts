@@ -18,7 +18,7 @@ export const AgentPi = "pi";
 export const AgentDsh = "dsh";
 export type Agent = typeof AgentClaude | typeof AgentCodex | typeof AgentPi | typeof AgentDsh;
 /**
- * AgentInfo is what an agent Iridium hosts can do (GET /api/agents).
+ * AgentInfo is what an agent Iridium hosts can do (GET /v1/internal/agents).
  */
 export interface AgentInfo {
   agent: Agent;
@@ -46,7 +46,7 @@ export interface AgentInfo {
   features?: string[];
   /**
    * Presets: its sessions take an agent preset (dsh: the tools and prompt a session runs with),
-   * at launch: a switch restarts the agent. Which, a session's: GET /api/sessions/{id}/presets.
+   * at launch: a switch restarts the agent. Which, a session's: GET /v1/internal/sessions/{id}/presets.
    */
   presets?: boolean;
   /**
@@ -232,7 +232,7 @@ export interface SessionState extends Session {
    */
   context?: ContextSummary;
   /**
-   * Tokens: what its turns read so far, as recorded (GET /api/usage counts the same rows);
+   * Tokens: what its turns read so far, as recorded (GET /v1/internal/usage counts the same rows);
    * absent before its first.
    */
   tokens?: InputTokens;
@@ -724,7 +724,7 @@ export interface App {
 }
 /**
  * Computer is an app's computer as its executor last said of itself (docs/exec.md "握手"): kept
- * in the store, so one away is listed too. GET /api/apps lists it with the app, to every caller.
+ * in the store, so one away is listed too. GET /v1/internal/apps lists it with the app, to every caller.
  */
 export interface Computer {
   os: string; // windows | darwin | linux
@@ -733,7 +733,7 @@ export interface Computer {
   sep: string;
   /**
    * Agents: those Iridium runs there, as it reported them; Off, turned off in its app's page
-   * (PUT /api/apps/{id}/agents): not started there, not offered for new sessions.
+   * (PUT /v1/internal/apps/{id}/agents): not started there, not offered for new sessions.
    */
   agents: ExecAgent[];
   online: boolean; // its executor is connected
@@ -753,7 +753,7 @@ export interface Computer {
   program?: string;
 }
 /**
- * AppAgents is PUT /api/apps/{id}/agents: the agents an app carries that are turned off there.
+ * AppAgents is PUT /v1/internal/apps/{id}/agents: the agents an app carries that are turned off there.
  * Any it reports later is on till turned off.
  */
 export interface AppAgents {
@@ -783,7 +783,7 @@ export interface Login {
   perms?: Perms;
 }
 /**
- * Notice is POST /api/apps/{id}/logins/{login}/notice (ir send 应用/登录): Text shown to the
+ * Notice is POST /v1/internal/apps/{id}/logins/{login}/notice (ir send 应用/登录): Text shown to the
  * login, no agent woken. Caller: the session it is from (ir's own, as Send's), if any.
  */
 export interface Notice {
@@ -801,7 +801,7 @@ export interface NoticeReply {
   sent: number /* int */;
 }
 /**
- * Device is what an app or login runs on, set in its settings (PUT /api/me/device, ir apps
+ * Device is what an app or login runs on, set in its settings (PUT /v1/internal/me/device, ir apps
  * device): a computer, the default, a laptop, a phone, or none shown (no badge).
  */
 export const DeviceComputer = "computer";
@@ -810,7 +810,7 @@ export const DevicePhone = "phone";
 export const DeviceNone = "none";
 export type Device = typeof DeviceComputer | typeof DeviceLaptop | typeof DevicePhone | typeof DeviceNone;
 /**
- * SetDevice is PUT /api/me/device and PUT /api/apps/{id}/device.
+ * SetDevice is PUT /v1/internal/me/device and PUT /v1/internal/apps/{id}/device.
  */
 export interface SetDevice {
   device: Device;
@@ -827,7 +827,7 @@ export interface PendingInvite {
   expiresAt?: number /* int64 */;
 }
 /**
- * Apps is GET /api/apps (ir apps): the host first, ir_web (with a public origin), the apps; the
+ * Apps is GET /v1/internal/apps (ir apps): the host first, ir_web (with a public origin), the apps; the
  * logins of ir_web; the invites not taken. Public (draft 二「消息」): any caller gets the apps
  * (names, types, avatars, online, computers) and the approved logins; their rules, perms and
  * usage, the logins waiting and the invites only one that manages (Full).
@@ -839,7 +839,7 @@ export interface Apps {
   full?: boolean;
 }
 /**
- * Me is GET /api/me: who calls. App: the app (HostID for the host, WebApp for a browser); Login:
+ * Me is GET /v1/internal/me: who calls. App: the app (HostID for the host, WebApp for a browser); Login:
  * the login of it, for ir_web the browser's. ID is the one its usage and rules are kept by.
  */
 export interface Me {
@@ -914,11 +914,11 @@ export const NeedSecretSet: NeedKind = "secret_set"; // an agent's ir secret set
 export const NeedSecretUse: NeedKind = "secret_use"; // an agent's ir run with credentials
 /**
  * NeedAsk: a session's question, approval or plan (Card), for whoever may use the session;
- * answered through the card (POST /api/sessions/{id}/answer), not POST /api/needs/{id}.
+ * answered through the card (POST /v1/internal/sessions/{id}/answer), not POST /v1/internal/needs/{id}.
  */
 export const NeedAsk: NeedKind = "ask";
 /**
- * NeedShare: something shared with this login (Share); DELETE /api/needs/{id} puts it away.
+ * NeedShare: something shared with this login (Share); DELETE /v1/internal/needs/{id} puts it away.
  */
 export const NeedShare: NeedKind = "share";
 /**
@@ -985,7 +985,7 @@ export interface Need {
   to?: string;
 }
 /**
- * Needs is the carried state "needs" (GET /api/needs): the pending ones, oldest first, as the
+ * Needs is the carried state "needs" (GET /v1/internal/needs): the pending ones, oldest first, as the
  * caller may see them: applications for a person on ir_web or at the host, asks of the sessions it
  * may use, what was shared with it.
  */
@@ -993,7 +993,7 @@ export interface Needs {
   pending: Need[];
 }
 /**
- * NeedAnswer is a person's answer to a Need (POST /api/needs/{id}).
+ * NeedAnswer is a person's answer to a Need (POST /v1/internal/needs/{id}).
  */
 export interface NeedAnswer {
   allow: boolean;
@@ -1023,7 +1023,7 @@ export interface NeedAnswer {
   agentsOff?: string[];
 }
 /**
- * PairRequest is what an app says of itself asking to pair (POST /api/pair; no login): its name,
+ * PairRequest is what an app says of itself asking to pair (POST /v1/internal/pair; no login): its name,
  * what it is shown as, and what it wants. An executor (ir join) says its machine too. Shell is
  * what it means to say in its hello (Computer's), so the card tells whether command lines would run
  * there; an older one says NoShell and AgentShell instead (shell: AgentShell without NoShell),
@@ -1055,8 +1055,8 @@ export interface ExecAgent {
 }
 /**
  * DshWorkspace is a folder a new dsh session at a machine may open in (GET
- * /api/machines/{id}/dsh/workspaces): one of dsh's workspaces there, as DSH Desktop's sidebar
- * has them, else a folder its sessions were in. Path is '/'-separated, as GET /api/folders gives.
+ * /v1/internal/machines/{id}/dsh/workspaces): one of dsh's workspaces there, as DSH Desktop's sidebar
+ * has them, else a folder its sessions were in. Path is '/'-separated, as GET /v1/internal/folders gives.
  * Sessions: how many of its sessions Iridium lists (not archived, not kept from it), subagents aside.
  */
 export interface DshWorkspace {
@@ -1073,7 +1073,7 @@ export interface Pairing {
   request: string;
 }
 /**
- * PairState is how a pairing request stands (GET /api/pair/{request}): pending, allowed (with the
+ * PairState is how a pairing request stands (GET /v1/internal/pair/{request}): pending, allowed (with the
  * TOKEN, given once), denied or expired.
  */
 export interface PairState {
@@ -1081,8 +1081,8 @@ export interface PairState {
   token?: string;
 }
 /**
- * PairWindow is whether apps may ask to pair now (GET /api/pairing, the carried state "pairing"):
- * open till Until (ms), else closed (0). PUT /api/pairing opens it for Minutes (10 if 0, at most
+ * PairWindow is whether apps may ask to pair now (GET /v1/internal/pairing, the carried state "pairing"):
+ * open till Until (ms), else closed (0). PUT /v1/internal/pairing opens it for Minutes (10 if 0, at most
  * 60), or closes it.
  */
 export interface PairWindow {
@@ -1115,7 +1115,7 @@ export interface Pending {
   need: Need;
 }
 /**
- * CatalogueEntry is an official app Iridium lists (GET /api/catalogue): what it is and how to
+ * CatalogueEntry is an official app Iridium lists (GET /v1/internal/catalogue): what it is and how to
  * install it, by system. Iridium installs nothing itself.
  */
 export interface CatalogueEntry {
@@ -1147,7 +1147,7 @@ export interface SetPublic {
   origin: string;
 }
 /**
- * PublicState is GET /api/public.
+ * PublicState is GET /v1/internal/public.
  */
 export interface PublicState {
   origin?: string;
@@ -1258,7 +1258,7 @@ export interface FeatureOption {
   name: string;
 }
 /**
- * SetFeature switches a feature on or off (PUT /api/sessions/{id}/features/{feature}), maybe at
+ * SetFeature switches a feature on or off (PUT /v1/internal/sessions/{id}/features/{feature}), maybe at
  * one of its options.
  */
 export interface SetFeature {
@@ -1336,7 +1336,7 @@ export interface CardAnswer {
   message?: string;
 }
 /**
- * CardReply is what answering a card did (POST /api/sessions/{id}/answer).
+ * CardReply is what answering a card did (POST /v1/internal/sessions/{id}/answer).
  */
 export interface CardReply {
   ok: boolean;
@@ -1361,7 +1361,7 @@ export interface Workspace {
   only?: boolean;
 }
 /**
- * GroupOrder lists the groups' rows in the order they were dragged to (PUT /api/groups/order), by
+ * GroupOrder lists the groups' rows in the order they were dragged to (PUT /v1/internal/groups/order), by
  * the key the page gives each: first to last, those left out after them.
  */
 export interface GroupOrder {
@@ -1380,7 +1380,7 @@ export interface Places {
   pinned: string[];
 }
 /**
- * FolderPlace puts a folder (PATCH /api/folders/place); a field left out stays. Order 0 takes its
+ * FolderPlace puts a folder (PATCH /v1/internal/folders/place); a field left out stays. Order 0 takes its
  * key off.
  */
 export interface FolderPlace {
@@ -1442,7 +1442,7 @@ export interface NewFolder {
   name: string;
   /**
    * Machine: at another machine's executor (its terminal ID); its paths '/'-separated, as
-   * GET /api/folders?machine= gives them.
+   * GET /v1/internal/folders?machine= gives them.
    */
   machine?: string;
 }
@@ -1458,7 +1458,7 @@ export interface FolderReply {
 
 /**
  * FileRef is a file a session's transcript names (in a reply, a message, a Write call) or a
- * message's attachment: GET /api/sessions/<session>/files/<ref>. A ref is only good for its
+ * message's attachment: GET /v1/internal/sessions/<session>/files/<ref>. A ref is only good for its
  * session, and only paths the session's transcript names (or its attachments) get one. A file
  * link's (FileLink): Ref is its id, good in any session, and Path "ir:<id>", as the reply has it.
  */
@@ -1524,7 +1524,7 @@ export interface AttachPath {
   path: string;
 }
 /**
- * FileLink is POST /api/links' answer (local ir only, ir attach <path>): the file, kept by
+ * FileLink is POST /v1/internal/links' answer (local ir only, ir attach <path>): the file, kept by
  * Iridium under a random id, and how a reply puts it in its words.
  */
 export interface FileLink {
@@ -1537,7 +1537,7 @@ export interface FileLink {
   markdown: string;
 }
 /**
- * DirEntry is one entry of GET /api/files?path=<dir> (local ir only): one level.
+ * DirEntry is one entry of GET /v1/internal/files?path=<dir> (local ir only): one level.
  */
 export interface DirEntry {
   name: string;
@@ -1550,7 +1550,7 @@ export interface DirListing {
   entries: DirEntry[];
 }
 /**
- * Copy copies a file (local ir only): POST /api/files/copy streams CopyProgress lines.
+ * Copy copies a file (local ir only): POST /v1/internal/files/copy streams CopyProgress lines.
  */
 export interface Copy {
   from: string;
@@ -1574,7 +1574,7 @@ export interface CopyProgress {
   error?: string;
 }
 /**
- * CLIRun is POST /api/cli: ir at another machine, run by an agent hosted there (its session's own
+ * CLIRun is POST /v1/internal/cli: ir at another machine, run by an agent hosted there (its session's own
  * TOKEN; docs/exec.md "远端的 ir"): its arguments and its working directory there.
  */
 export interface CLIRun {
@@ -1582,7 +1582,7 @@ export interface CLIRun {
   cwd: string;
 }
 /**
- * CLIOutput is one line of POST /api/cli's answer: what ir wrote, as it wrote it, and last its
+ * CLIOutput is one line of POST /v1/internal/cli's answer: what ir wrote, as it wrote it, and last its
  * exit code.
  */
 export interface CLIOutput {
@@ -1777,14 +1777,14 @@ export interface SecretUse {
   at: number /* int64 */;
 }
 /**
- * Secrets is GET /api/secrets: every secret by name, and the newest uses, newest first.
+ * Secrets is GET /v1/internal/secrets: every secret by name, and the newest uses, newest first.
  */
 export interface Secrets {
   secrets: SecretInfo[];
   uses: SecretUse[];
 }
 /**
- * SetSecret is PUT /api/secrets/{name}. Value "": one stored keeps its value (only what is said of
+ * SetSecret is PUT /v1/internal/secrets/{name}. Value "": one stored keeps its value (only what is said of
  * it changes); from an agent, a panel types it (202 Pending). Note, Scope, Always nil or "": as
  * they were (a new one: no note, all, false). Only a panel changes Scope and Always.
  */
@@ -1796,7 +1796,7 @@ export interface SetSecret {
   always?: boolean;
 }
 /**
- * UseSecrets is POST /api/secrets/use, for ir run alone: the session it runs in, the secrets it
+ * UseSecrets is POST /v1/internal/secrets/use, for ir run alone: the session it runs in, the secrets it
  * wants and the command's opening. Confirm: a secret-use confirmation that was allowed, to use it.
  */
 export interface UseSecrets {
@@ -1816,8 +1816,8 @@ export interface SecretValues {
 // source: settings.go
 
 /**
- * Settings is GET /api/settings: the config file's fields the settings page edits (plan "运行",
- * "推送", "网页"). PUT /api/settings takes a SettingsPatch and answers the whole again.
+ * Settings is GET /v1/internal/settings: the config file's fields the settings page edits (plan "运行",
+ * "推送", "网页"). PUT /v1/internal/settings takes a SettingsPatch and answers the whole again.
  */
 export interface Settings {
   /**
@@ -1839,7 +1839,7 @@ export interface Settings {
    */
   modes: { [key: string]: string};
   /**
-   * Push: Web Push's total switch (off by default); GET /api/web/push has the rest.
+   * Push: Web Push's total switch (off by default); GET /v1/internal/web/push has the rest.
    */
   push: boolean;
   /**
@@ -1885,7 +1885,7 @@ export const ShareOfReply: ShareWhat = "reply"; // one block of a session: Sessi
 export const ShareOfPlace: ShareWhat = "place"; // a folder: Place
 export const ShareOfFile: ShareWhat = "file"; // a file: Session, and Ref or Path
 /**
- * Share is something shared with one login (draft 二「消息」 分享; POST /api/share, ir share): a
+ * Share is something shared with one login (draft 二「消息」 分享; POST /v1/internal/share, ir share): a
  * session, a reply, a place or a file, who shared it and a note. Iridium checks the login may use
  * what is shared (a session's agent and scope; a place's or a file's scope); what it does with it
  * is its app's: a login of ir_web finds it among its needs (and a Web Push), another app's gets a
@@ -1913,7 +1913,7 @@ export interface Share {
   sharedAt?: number /* int64 */;
 }
 /**
- * ShareRequest is POST /api/share: what (Share's what and its refs; the rest Iridium fills) and to
+ * ShareRequest is POST /v1/internal/share: what (Share's what and its refs; the rest Iridium fills) and to
  * whom, "应用/登录" (an app's name or ID; ir_web for a login of the web). Caller: the session ir
  * runs in, as ir send has it.
  */
@@ -1939,7 +1939,7 @@ export interface ShareReply {
   pushed?: number /* int */;
 }
 /**
- * ShareTargets is GET /api/share/targets (what as ShareRequest's, in the query): the apps whose
+ * ShareTargets is GET /v1/internal/share/targets (what as ShareRequest's, in the query): the apps whose
  * logins may use it, each with those logins; the caller itself left out.
  */
 export interface ShareTargets {
@@ -1986,7 +1986,7 @@ export interface ShellOutput {
   err?: string; // once done: what could not run it, if anything
 }
 /**
- * ShellEvent is one line of an agent's ir sh streamed (POST /api/machines/{id}/shell asked with
+ * ShellEvent is one line of an agent's ir sh streamed (POST /v1/internal/machines/{id}/shell asked with
  * Accept: application/x-ndjson, at an executor that speaks run): what the command line wrote, as
  * it wrote it (Out its stdout, Err its stderr); last (Done), how it ended: its exit code, the
  * signal (without "SIG") that ended it, or Error, why it could not run or was cut off.
@@ -2004,7 +2004,7 @@ export interface ShellEvent {
 // source: update.go
 
 /**
- * UpdateState is the carried state "update" and GET /api/update: whether a newer Iridium is out
+ * UpdateState is the carried state "update" and GET /v1/internal/update: whether a newer Iridium is out
  * (plan "更新"). The page puts a dot on the settings gear while Available.
  */
 export interface UpdateState {
@@ -2040,7 +2040,7 @@ export interface UpdateState {
   error?: string;
 }
 /**
- * ApplyUpdate is POST /api/update. Force installs the latest even when it is not newer (a dev
+ * ApplyUpdate is POST /v1/internal/update. Force installs the latest even when it is not newer (a dev
  * build is never older than anything).
  */
 export interface ApplyUpdate {
@@ -2051,7 +2051,7 @@ export interface ApplyUpdate {
 // source: usage.go
 
 /**
- * Usage is GET /api/usage (ir usage): the tokens used in the last days, today the last, one row
+ * Usage is GET /v1/internal/usage (ir usage): the tokens used in the last days, today the last, one row
  * per local day, terminal, agent and model that used any. A terminal that does not manage sees
  * only its own.
  */

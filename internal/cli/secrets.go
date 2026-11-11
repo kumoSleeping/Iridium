@@ -42,7 +42,7 @@ func secretCmd(e adminEnv, args []string, stdout, stderr io.Writer) int {
 		if len(args) != 2 {
 			return usage()
 		}
-		if _, err := e.call("DELETE", "/api/secrets/"+url.PathEscape(args[1]), nil, nil); err != nil {
+		if _, err := e.call("DELETE", "/v1/internal/secrets/"+url.PathEscape(args[1]), nil, nil); err != nil {
 			return failed(stderr, "secret rm", err)
 		}
 		fmt.Fprintf(stdout, "删了 %s。\n", args[1])
@@ -74,7 +74,7 @@ func secretCmd(e adminEnv, args []string, stdout, stderr io.Writer) int {
 
 func secretLs(e adminEnv, stdout, stderr io.Writer) int {
 	var l api.Secrets
-	if _, err := e.call("GET", "/api/secrets", nil, &l); err != nil {
+	if _, err := e.call("GET", "/v1/internal/secrets", nil, &l); err != nil {
 		return failed(stderr, "secret ls", err)
 	}
 	if len(l.Secrets) == 0 {
@@ -131,7 +131,7 @@ func secretSet(e adminEnv, name string, note *string, stdout, stderr io.Writer) 
 		e.agent = true
 	}
 	var raw json.RawMessage
-	code, err := e.call("PUT", "/api/secrets/"+url.PathEscape(name), req, &raw)
+	code, err := e.call("PUT", "/v1/internal/secrets/"+url.PathEscape(name), req, &raw)
 	if err != nil {
 		return failed(stderr, "secret set", err)
 	}
@@ -349,7 +349,7 @@ func useSecrets(e adminEnv, names []string, command string, stderr io.Writer) (m
 	req := api.UseSecrets{Session: e.session, Names: names, Command: command}
 	for {
 		var raw json.RawMessage
-		code, err := e.call("POST", "/api/secrets/use", req, &raw)
+		code, err := e.call("POST", "/v1/internal/secrets/use", req, &raw)
 		if err != nil {
 			return nil, err
 		}
@@ -384,7 +384,7 @@ func useSecrets(e adminEnv, names []string, command string, stderr io.Writer) (m
 func waitState(e adminEnv, id string) (api.NeedState, error) {
 	for {
 		var st api.NeedState
-		if _, err := e.call("GET", "/api/needs/"+url.PathEscape(id)+"?wait=60", nil, &st); err != nil {
+		if _, err := e.call("GET", "/v1/internal/needs/"+url.PathEscape(id)+"?wait=60", nil, &st); err != nil {
 			return st, err
 		}
 		if st.State != "pending" {

@@ -49,7 +49,7 @@ func cmdShare(e *env, args []string) int {
 		}
 	}
 	var r api.ShareReply
-	if err := e.do("POST", "/api/share", req, &r); err != nil {
+	if err := e.do("POST", "/v1/internal/share", req, &r); err != nil {
 		return e.fail(err)
 	}
 	fmt.Fprintf(e.out, "已分享给 %s/%s\n", r.App, cmp.Or(r.Name, r.Login))

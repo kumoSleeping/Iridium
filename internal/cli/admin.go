@@ -189,7 +189,7 @@ func invite(e adminEnv, args []string, stdout, stderr io.Writer) int {
 		req.Name = args[0]
 	}
 	var raw json.RawMessage
-	code, err := e.call("POST", "/api/invites", req, &raw)
+	code, err := e.call("POST", "/v1/internal/invites", req, &raw)
 	if err != nil {
 		return failed(stderr, "invite", err)
 	}
@@ -237,7 +237,7 @@ func waitConfirm(e adminEnv, raw json.RawMessage, stdout, stderr io.Writer) int 
 	fmt.Fprintf(stdout, "%s要主机或网页登录允许：已发到“需要”（%s），%s 前有效。等待中\n", what, p.Need.ID, hhmm(p.Need.ExpiresAt))
 	for {
 		var st api.NeedState
-		if _, err := e.call("GET", "/api/needs/"+url.PathEscape(p.Need.ID)+"?wait=60", nil, &st); err != nil {
+		if _, err := e.call("GET", "/v1/internal/needs/"+url.PathEscape(p.Need.ID)+"?wait=60", nil, &st); err != nil {
 			return failed(stderr, "need", err)
 		}
 		switch st.State {
@@ -307,7 +307,7 @@ func apps(e adminEnv, args []string, stdout, stderr io.Writer) int {
 		var info struct {
 			Name string `json:"name"`
 		}
-		if _, err := e.call("PUT", "/api/apps/"+url.PathEscape(args[0])+"/profile", map[string]string{"name": args[1]}, &info); err != nil {
+		if _, err := e.call("PUT", "/v1/internal/apps/"+url.PathEscape(args[0])+"/profile", map[string]string{"name": args[1]}, &info); err != nil {
 			return failed(stderr, "apps rename", err)
 		}
 		fmt.Fprintf(stdout, "已改名：%s\n", info.Name)
@@ -323,7 +323,7 @@ func apps(e adminEnv, args []string, stdout, stderr io.Writer) int {
 		if len(args) != 1 {
 			return usage()
 		}
-		if _, err := e.call("DELETE", "/api/apps/"+url.PathEscape(args[0]), nil, nil); err != nil {
+		if _, err := e.call("DELETE", "/v1/internal/apps/"+url.PathEscape(args[0]), nil, nil); err != nil {
 			return failed(stderr, "apps rm", err)
 		}
 		fmt.Fprintf(stdout, "已删除 %s。\n", args[0])
@@ -341,7 +341,7 @@ func claudeMark(r api.Rules) string {
 
 func appsList(e adminEnv, stdout, stderr io.Writer) int {
 	var as api.Apps
-	if _, err := e.call("GET", "/api/apps", nil, &as); err != nil {
+	if _, err := e.call("GET", "/v1/internal/apps", nil, &as); err != nil {
 		return failed(stderr, "apps", err)
 	}
 	printApps(stdout, as)
@@ -423,7 +423,7 @@ func printApps(w io.Writer, as api.Apps) {
 // there; with arguments, turns those on or off first.
 func appsAgents(e adminEnv, args []string, stdout, stderr io.Writer) int {
 	var as api.Apps
-	if _, err := e.call("GET", "/api/apps", nil, &as); err != nil {
+	if _, err := e.call("GET", "/v1/internal/apps", nil, &as); err != nil {
 		return failed(stderr, "apps agents", err)
 	}
 	i := slices.IndexFunc(as.Apps, func(a api.App) bool {
@@ -455,7 +455,7 @@ func appsAgents(e adminEnv, args []string, stdout, stderr io.Writer) int {
 				req.Off = append(req.Off, x.Agent)
 			}
 		}
-		if _, err := e.call("PUT", "/api/apps/"+url.PathEscape(a.ID)+"/agents", req, nil); err != nil {
+		if _, err := e.call("PUT", "/v1/internal/apps/"+url.PathEscape(a.ID)+"/agents", req, nil); err != nil {
 			return failed(stderr, "apps agents", err)
 		}
 	}
@@ -478,7 +478,7 @@ func appsAgents(e adminEnv, args []string, stdout, stderr io.Writer) int {
 // appsLogins lists the logins (of app, "" all) and the invites not taken.
 func appsLogins(e adminEnv, app string, stdout, stderr io.Writer) int {
 	var as api.Apps
-	if _, err := e.call("GET", "/api/apps", nil, &as); err != nil {
+	if _, err := e.call("GET", "/v1/internal/apps", nil, &as); err != nil {
 		return failed(stderr, "apps logins", err)
 	}
 	if app != "" {
@@ -635,7 +635,7 @@ func profile(e adminEnv, args []string, stdout, stderr io.Writer) int {
 	}
 	if device != "" {
 		var d api.SetDevice
-		if _, err := e.call("PUT", "/api/apps/"+url.PathEscape(ref)+"/device", api.SetDevice{Device: api.Device(device)}, &d); err != nil {
+		if _, err := e.call("PUT", "/v1/internal/apps/"+url.PathEscape(ref)+"/device", api.SetDevice{Device: api.Device(device)}, &d); err != nil {
 			return failed(stderr, "profile", err)
 		}
 		if !changed {
@@ -649,7 +649,7 @@ func profile(e adminEnv, args []string, stdout, stderr io.Writer) int {
 		Name   string `json:"name"`
 		Avatar string `json:"avatar"`
 	}
-	if _, err := e.call("PUT", "/api/apps/"+url.PathEscape(ref)+"/profile", body, &info); err != nil {
+	if _, err := e.call("PUT", "/v1/internal/apps/"+url.PathEscape(ref)+"/profile", body, &info); err != nil {
 		return failed(stderr, "profile", err)
 	}
 	fmt.Fprintf(stdout, "已改：%s%s\n", info.Name, map[bool]string{true: "（有头像）", false: ""}[info.Avatar != ""])
@@ -683,7 +683,7 @@ func updateCmd(e adminEnv, args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	var st api.UpdateState
-	if _, err := e.call("POST", "/api/update/check", nil, &st); err != nil {
+	if _, err := e.call("POST", "/v1/internal/update/check", nil, &st); err != nil {
 		return failed(stderr, "update", err)
 	}
 	if !st.Available && !force {
@@ -695,7 +695,7 @@ func updateCmd(e adminEnv, args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 	fmt.Fprintf(stdout, "更新到 %s……\n", st.Latest)
-	if _, err := e.call("POST", "/api/update", api.ApplyUpdate{Force: force}, &st); err != nil {
+	if _, err := e.call("POST", "/v1/internal/update", api.ApplyUpdate{Force: force}, &st); err != nil {
 		return failed(stderr, "update", err)
 	}
 	fmt.Fprintf(stdout, "装好了 %s，服务在重启；托管的会话不受影响。\n", st.Latest)
@@ -714,7 +714,7 @@ func publicCmd(e adminEnv, args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	// The daemon sets public.origin at the end: make sure it is there before anything is made.
-	if _, err := e.call("GET", "/api/health", nil, nil); err != nil {
+	if _, err := e.call("GET", "/v1/internal/health", nil, nil); err != nil {
 		return failed(stderr, "public", err)
 	}
 	o, err := publicOptions(e, stdout)
@@ -793,13 +793,13 @@ func xdgConfig(home string) string {
 type daemon struct{ e adminEnv }
 
 func (d daemon) SetOrigin(_ context.Context, origin string) error {
-	_, err := d.e.call("PUT", "/api/public", api.SetPublic{Origin: origin}, nil)
+	_, err := d.e.call("PUT", "/v1/internal/public", api.SetPublic{Origin: origin}, nil)
 	return err
 }
 
 func (d daemon) Invite(context.Context) (string, time.Time, error) {
 	var inv api.Invite
-	if _, err := d.e.call("POST", "/api/invites", api.NewInvite{}, &inv); err != nil {
+	if _, err := d.e.call("POST", "/v1/internal/invites", api.NewInvite{}, &inv); err != nil {
 		return "", time.Time{}, err
 	}
 	return inv.URL, time.UnixMilli(inv.ExpiresAt), nil

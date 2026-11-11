@@ -26,37 +26,37 @@ func TestPerms(t *testing.T) {
 		}
 	}
 	var inA, inB api.NewSessionReply
-	l.want(200, "web", "POST", "/api/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: a, Text: "one"}, &inA)
-	l.want(200, "web", "POST", "/api/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: b, Text: "two"}, &inB)
+	l.want(200, "web", "POST", "/v1/internal/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: a, Text: "one"}, &inA)
+	l.want(200, "web", "POST", "/v1/internal/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: b, Text: "two"}, &inB)
 
 	app := l.newApp("bot", true)
-	l.want(200, "socket", "PUT", "/api/apps/bot/perms", api.Perms{Agents: []string{"*"}, Scope: []string{"主机:" + a}}, nil)
+	l.want(200, "socket", "PUT", "/v1/internal/apps/bot/perms", api.Perms{Agents: []string{"*"}, Scope: []string{"主机:" + a}}, nil)
 	var list []api.Session
-	l.want(200, app.Token, "GET", "/api/sessions", nil, &list)
+	l.want(200, app.Token, "GET", "/v1/internal/sessions", nil, &list)
 	if len(list) != 1 || list[0].ID != inA.ID {
 		t.Fatalf("listed out of scope: %+v", list)
 	}
-	l.want(200, app.Token, "GET", "/api/sessions/"+inA.ID, nil, nil)
+	l.want(200, app.Token, "GET", "/v1/internal/sessions/"+inA.ID, nil, nil)
 	// Satori sees the same: its channels are the sessions in scope.
 	if sb := (satoriBackend{l.s}); !sb.Sees(satori.Caller{App: app.App.ID}, inA.ID) || sb.Sees(satori.Caller{App: app.App.ID}, inB.ID) {
 		t.Fatal("Satori's channels out of scope")
 	}
-	l.want(422, app.Token, "GET", "/api/sessions/"+inB.ID, nil, nil)
-	l.want(422, app.Token, "GET", "/api/sessions/"+inB.ID+"/messages", nil, nil)
-	l.want(422, app.Token, "POST", "/api/sessions/"+inB.ID+"/stop", nil, nil)
+	l.want(422, app.Token, "GET", "/v1/internal/sessions/"+inB.ID, nil, nil)
+	l.want(422, app.Token, "GET", "/v1/internal/sessions/"+inB.ID+"/messages", nil, nil)
+	l.want(422, app.Token, "POST", "/v1/internal/sessions/"+inB.ID+"/stop", nil, nil)
 	// A new session only within its scope.
-	l.want(403, app.Token, "POST", "/api/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: b, Text: "x"}, nil)
+	l.want(403, app.Token, "POST", "/v1/internal/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: b, Text: "x"}, nil)
 	// The host sees both.
-	l.want(200, "socket", "GET", "/api/sessions/"+inB.ID, nil, nil)
+	l.want(200, "socket", "GET", "/v1/internal/sessions/"+inB.ID, nil, nil)
 
 	// An agent it may not use: the session it sees, it may not use.
-	l.want(200, "socket", "PUT", "/api/apps/bot/perms", api.Perms{Agents: []string{"codex"}, Scope: []string{"*"}}, nil)
-	l.want(200, app.Token, "GET", "/api/sessions/"+inB.ID, nil, nil)
+	l.want(200, "socket", "PUT", "/v1/internal/apps/bot/perms", api.Perms{Agents: []string{"codex"}, Scope: []string{"*"}}, nil)
+	l.want(200, app.Token, "GET", "/v1/internal/sessions/"+inB.ID, nil, nil)
 	var e api.Error
-	if l.want(403, app.Token, "PATCH", "/api/sessions/"+inB.ID, map[string]any{"name": "x"}, &e); e.Code != "no_permission" {
+	if l.want(403, app.Token, "PATCH", "/v1/internal/sessions/"+inB.ID, map[string]any{"name": "x"}, &e); e.Code != "no_permission" {
 		t.Fatalf("an agent it may not use: %+v", e)
 	}
-	l.want(403, app.Token, "POST", "/api/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: b, Text: "x"}, nil)
+	l.want(403, app.Token, "POST", "/v1/internal/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: b, Text: "x"}, nil)
 
 	// A login of the app: what both allow.
 	c := caller{Identity: gate.Identity{App: app.App.ID, Login: "u1", Name: "u1"}}
@@ -77,9 +77,9 @@ func TestPerms(t *testing.T) {
 		t.Fatalf("a login used an agent its app may not: %v", err)
 	}
 	// Set over HTTP by whoever approves, never by an app.
-	l.want(200, "socket", "PUT", "/api/apps/bot/logins/u1/perms", api.Perms{Agents: []string{"*"}, Scope: []string{"*"}}, nil)
-	l.want(403, app.Token, "PUT", "/api/apps/bot/logins/u1/perms", api.Perms{}, nil)
-	l.want(422, "socket", "PUT", "/api/apps/bot/logins/nobody/perms", api.Perms{}, nil)
+	l.want(200, "socket", "PUT", "/v1/internal/apps/bot/logins/u1/perms", api.Perms{Agents: []string{"*"}, Scope: []string{"*"}}, nil)
+	l.want(403, app.Token, "PUT", "/v1/internal/apps/bot/logins/u1/perms", api.Perms{}, nil)
+	l.want(422, "socket", "PUT", "/v1/internal/apps/bot/logins/nobody/perms", api.Perms{}, nil)
 }
 
 // Places: the app by name, the host by its names, a drive letter is no app.
@@ -126,7 +126,7 @@ func TestInvitePerms(t *testing.T) {
 func TestScopeFolders(t *testing.T) {
 	l := start(t)
 	app := l.newApp("bot", false)
-	l.want(200, "socket", "PUT", "/api/apps/bot/perms", api.Perms{Agents: []string{"*"}, Scope: []string{"主机:/w/in"}}, nil)
+	l.want(200, "socket", "PUT", "/v1/internal/apps/bot/perms", api.Perms{Agents: []string{"*"}, Scope: []string{"主机:/w/in"}}, nil)
 	c := caller{Identity: gate.Identity{App: app.App.ID, Name: "bot"}}
 	f := api.Folders{Path: "/w/in", Folders: []string{"deep"}}
 	if err := l.s.scopeFolders(c, gate.HostID, &f); err != nil || len(f.Folders) != 1 {

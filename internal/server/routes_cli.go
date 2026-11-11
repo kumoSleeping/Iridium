@@ -16,12 +16,12 @@ import (
 // there; the exit code.
 type CLIAt func(args []string, stdout, stderr io.Writer, hc *http.Client, machine, session, cwd string) int
 
-// cliRoutes: POST /api/cli, the ir of an agent hosted at another machine (docs/exec.md "远端的
+// cliRoutes: POST /v1/internal/cli, the ir of an agent hosted at another machine (docs/exec.md "远端的
 // ir"). It comes with its session's own TOKEN, so the caller is that machine's Bot for that
 // session; ir runs here, its requests answered by mux (the API as that Bot has it, not the
 // socket's), its output streamed back a line at a time.
 func (s *Server) cliRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/cli", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /v1/internal/cli", func(w http.ResponseWriter, r *http.Request) {
 		c := callerOf(r)
 		if c.session == "" || c.socket {
 			forbid(w, errIRAt)
@@ -47,7 +47,7 @@ func (s *Server) cliRoutes(mux *http.ServeMux) {
 	})
 }
 
-var errIRAt = cliError("POST /api/cli is the ir of a session at another machine, with that session's TOKEN")
+var errIRAt = cliError("POST /v1/internal/cli is the ir of a session at another machine, with that session's TOKEN")
 
 type cliError string
 

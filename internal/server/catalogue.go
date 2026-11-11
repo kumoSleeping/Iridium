@@ -2,7 +2,7 @@ package server
 
 import "github.com/kumoSleeping/iridium/internal/api"
 
-// catalogue is the official apps Iridium lists (GET /api/catalogue, draft 二「接入」): what each is
+// catalogue is the official apps Iridium lists (GET /v1/internal/catalogue, draft 二「接入」): what each is
 // and the commands that install it, by system. Iridium downloads, installs and runs none of them:
 // each pairs like any other app. {origin} in a command is this Iridium's address, as the page
 // fills it in.

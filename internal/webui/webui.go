@@ -5,7 +5,7 @@
 //
 // Mount (cmd/iridium, internal/server):
 //
-//	http.Serve(tcp, webui.Wrap(apiHandler)) // /api/ and /_ir/ go to apiHandler, the rest is the app
+//	http.Serve(tcp, webui.Wrap(apiHandler)) // /v1/ and /_ir/ go to apiHandler, the rest is the app
 package webui
 
 import (
@@ -159,7 +159,7 @@ func accepts(header, coding string) bool {
 	return false
 }
 
-// Wrap is the app in front of api: /api/ and /_ir/ go to api, their JSON gzipped for a browser
+// Wrap is the app in front of api: /v1/ and /_ir/ go to api, their JSON gzipped for a browser
 // that takes it (never an event stream: gzip holds events back till a block fills); the rest is
 // the app.
 func Wrap(api http.Handler) http.Handler {
@@ -169,7 +169,7 @@ func Wrap(api http.Handler) http.Handler {
 func WrapApp(api http.Handler, app http.Handler) http.Handler {
 	zipped := Gzip(api)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/api" || strings.HasPrefix(r.URL.Path, "/_ir/") {
+		if strings.HasPrefix(r.URL.Path, "/v1/") || r.URL.Path == "/v1" || strings.HasPrefix(r.URL.Path, "/_ir/") {
 			zipped.ServeHTTP(w, r)
 			return
 		}

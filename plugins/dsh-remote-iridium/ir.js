@@ -1,5 +1,5 @@
 // ir for an agent the Iridium hosts at this machine (Iridium's docs/exec.md "远端的 ir"): its
-// arguments and folder go to the Iridium's POST /api/cli with the session's own TOKEN
+// arguments and folder go to the Iridium's POST /v1/internal/cli with the session's own TOKEN
 // (IRIDIUM_URL, IRIDIUM_TOKEN, set as the executor started it), and the Iridium runs them as
 // this machine's Bot, for that session; what it writes comes back a line at a time. The executor
 // puts this on the agent's PATH as `ir` (ir, ir.cmd beside it).
@@ -16,7 +16,7 @@ const put = (stream, s) => (s ? new Promise((done) => (stream.write(s) ? done() 
 async function main() {
   let res
   try {
-    res = await fetch(url.replace(/\/+$/, '') + '/api/cli', {
+    res = await fetch(url.replace(/\/+$/, '') + '/v1/internal/cli', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify({ args: process.argv.slice(2), cwd: process.cwd() }),

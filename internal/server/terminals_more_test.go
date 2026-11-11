@@ -21,16 +21,16 @@ func TestAppSessionsAndAgents(t *testing.T) {
 		s.Folders = discover.DefaultFolders("/")
 	})
 	tok := l.newApp("nobot", false)
-	l.want(403, tok.Token, "POST", "/api/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "hi"}, nil)
+	l.want(403, tok.Token, "POST", "/v1/internal/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "hi"}, nil)
 
 	tok = l.newApp("bot", true)
 	bot, botID := tok.Token, tok.App.ID
 	var created api.NewSessionReply
-	l.want(200, bot, "POST", "/api/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "hi"}, &created)
+	l.want(200, bot, "POST", "/v1/internal/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "hi"}, &created)
 	sid := created.ID
 	l.waitReply(bot, sid, "ok: hi")
 	var page api.MessagePage
-	l.want(200, bot, "GET", "/api/sessions/"+sid+"/messages", nil, &page)
+	l.want(200, bot, "GET", "/v1/internal/sessions/"+sid+"/messages", nil, &page)
 	if page.Blocks[0].From != "bot" || page.Blocks[0].FromTerminal != botID || page.Blocks[0].Text != "hi" {
 		t.Fatalf("the app's message: %+v", page.Blocks[0])
 	}
@@ -41,42 +41,42 @@ func TestAppSessionsAndAgents(t *testing.T) {
 	waitUsage(t, l.s.st, botID)
 
 	// Files: out and in; a file there is not is no such file.
-	l.want(422, bot, "GET", "/api/sessions/"+sid+"/files/nope", nil, nil)
-	l.want(200, bot, "POST", "/api/sessions/"+sid+"/uploads", api.NewUpload{Name: "a.txt", Size: 3}, nil)
+	l.want(422, bot, "GET", "/v1/internal/sessions/"+sid+"/files/nope", nil, nil)
+	l.want(200, bot, "POST", "/v1/internal/sessions/"+sid+"/uploads", api.NewUpload{Name: "a.txt", Size: 3}, nil)
 
 	// An agent's ir in the app's session is the app: its usage, no managing.
 	as := "agent-in:" + sid
 	var sent api.SendReply
-	l.want(200, as, "POST", "/api/sessions/"+sid+"/send", api.Send{Text: "from inside"}, &sent)
+	l.want(200, as, "POST", "/v1/internal/sessions/"+sid+"/send", api.Send{Text: "from inside"}, &sent)
 	if id, tag, ok := l.s.st.Source(sent.Input); !ok || id != botID || tag != "ir:"+sid {
 		t.Errorf("the agent's message: %q %q %v", id, tag, ok)
 	}
 	// ir send names the session it runs in but no agent flag: still a letter from that session,
 	// still the app's to count.
-	l.want(200, "ir-in:"+sid, "POST", "/api/sessions/"+sid+"/send", api.Send{Text: "by ir send"}, &sent)
+	l.want(200, "ir-in:"+sid, "POST", "/v1/internal/sessions/"+sid+"/send", api.Send{Text: "by ir send"}, &sent)
 	if id, tag, ok := l.s.st.Source(sent.Input); !ok || id != botID || tag != "ir:"+sid {
 		t.Errorf("ir send's message: %q %q %v", id, tag, ok)
 	}
 	l.waitReply(bot, sid, "ok: by ir send")
-	l.want(200, bot, "GET", "/api/sessions/"+sid+"/messages", nil, &page)
+	l.want(200, bot, "GET", "/v1/internal/sessions/"+sid+"/messages", nil, &page)
 	if b := page.Blocks[len(page.Blocks)-2]; b.From != "ir:"+sid || b.FromTerminal != botID {
 		t.Errorf("ir send's block: %+v", b)
 	}
 	// The list is public; what manages it is not.
 	var pub api.Apps
-	if l.want(200, as, "GET", "/api/apps", nil, &pub); pub.Full || pub.Apps[0].UsedToday != 0 {
+	if l.want(200, as, "GET", "/v1/internal/apps", nil, &pub); pub.Full || pub.Apps[0].UsedToday != 0 {
 		t.Errorf("the public list: %+v", pub)
 	}
-	l.want(403, as, "DELETE", "/api/apps/nobot", nil, nil)
-	l.want(200, as, "GET", "/api/files?path="+l.work, nil, nil)
-	l.want(403, as, "PATCH", "/api/workspaces/1", api.WorkspacePatch{Name: new("x")}, nil)
+	l.want(403, as, "DELETE", "/v1/internal/apps/nobot", nil, nil)
+	l.want(200, as, "GET", "/v1/internal/files?path="+l.work, nil, nil)
+	l.want(403, as, "PATCH", "/v1/internal/workspaces/1", api.WorkspacePatch{Name: new("x")}, nil)
 	// One in a session 本机 opened stays 本机.
 	var mine api.NewSessionReply
-	l.want(200, "socket", "POST", "/api/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "mine"}, &mine)
+	l.want(200, "socket", "POST", "/v1/internal/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "mine"}, &mine)
 	l.waitReply("socket", mine.ID, "ok: mine")
-	l.want(200, "agent-in:"+mine.ID, "POST", "/api/sessions/"+mine.ID+"/send", api.Send{Text: "again"}, &sent)
+	l.want(200, "agent-in:"+mine.ID, "POST", "/v1/internal/sessions/"+mine.ID+"/send", api.Send{Text: "again"}, &sent)
 	if id, tag, _ := l.s.st.Source(sent.Input); id != "local" || tag != "ir:"+mine.ID {
 		t.Errorf("本机's session's agent: %q %q", id, tag)
 	}
-	l.want(200, "agent-in:"+mine.ID, "GET", "/api/apps", nil, nil)
+	l.want(200, "agent-in:"+mine.ID, "GET", "/v1/internal/apps", nil, nil)
 }

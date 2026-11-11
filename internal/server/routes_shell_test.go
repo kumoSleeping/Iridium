@@ -19,7 +19,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/session"
 )
 
-// An agent's ir sh (POST /api/machines/{id}/shell): streamed through run at an executor that
+// An agent's ir sh (POST /v1/internal/machines/{id}/shell): streamed through run at an executor that
 // speaks it, as a holder at one that does not or when not asked so; refused where its owner keeps
 // command lines off; the machine by its app's name now.
 func TestMachineShell(t *testing.T) {
@@ -29,7 +29,7 @@ func TestMachineShell(t *testing.T) {
 	join := func(name string, o executor.Options) string {
 		t.Helper()
 		tok := l.newApp(name, false)
-		o.URL, o.Token, o.State, o.Logf = "ws"+strings.TrimPrefix(l.base, "http")+"/api/exec", tok.Token, filepath.Join(t.TempDir(), "state"), t.Logf
+		o.URL, o.Token, o.State, o.Logf = "ws"+strings.TrimPrefix(l.base, "http")+"/v1/internal/exec", tok.Token, filepath.Join(t.TempDir(), "state"), t.Logf
 		exe, err := executor.New(o)
 		if err != nil {
 			t.Fatal(err)
@@ -54,7 +54,7 @@ func TestMachineShell(t *testing.T) {
 	sh := func(machine, line string, stream bool) (int, string, []api.ShellEvent) {
 		t.Helper()
 		b, _ := json.Marshal(api.ShellRun{Line: line})
-		req, _ := http.NewRequest("POST", "http://ir/api/machines/"+machine+"/shell", bytes.NewReader(b))
+		req, _ := http.NewRequest("POST", "http://ir/v1/internal/machines/"+machine+"/shell", bytes.NewReader(b))
 		req.Header.Set(HeaderAgent, "1")
 		if stream {
 			req.Header.Set("Accept", ndjson)
@@ -101,7 +101,7 @@ func TestMachineShell(t *testing.T) {
 		}
 		var o api.ShellOutput
 		for deadline := time.Now().Add(10 * time.Second); !o.Done && time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
-			l.want(200, "socket", "GET", "/api/shell/"+st.Run, nil, &o)
+			l.want(200, "socket", "GET", "/v1/internal/shell/"+st.Run, nil, &o)
 		}
 		if o.Data != "held\n" || o.Code == nil || *o.Code != 0 {
 			t.Errorf("%s held: %+v", m, o)

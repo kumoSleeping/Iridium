@@ -75,13 +75,13 @@ func TestChannelTokensAndProfiles(t *testing.T) {
 		q.noCookie = true
 		return h.do(q)
 	}
-	w := bot(req{method: "POST", path: "/api/chat/qq:private:1/input"})
+	w := bot(req{method: "POST", path: "/v1/internal/chat/qq:private:1/input"})
 	wantStatus(t, w, http.StatusOK)
 	if id := decode[appReply](t, w); id.App != info.ID || id.Login != "" || id.Name != "QQ" {
 		t.Fatalf("bot identity: %+v", id)
 	}
-	wantStatus(t, h.do(req{path: "/api/x", noCookie: true, header: map[string]string{"Authorization": "Bearer ir_" + strings.Repeat("x", 43)}}), http.StatusUnauthorized)
-	wantStatus(t, h.do(req{path: "/api/x", noCookie: true, header: map[string]string{"Authorization": "Bearer junk"}}), http.StatusUnauthorized)
+	wantStatus(t, h.do(req{path: "/v1/internal/x", noCookie: true, header: map[string]string{"Authorization": "Bearer ir_" + strings.Repeat("x", 43)}}), http.StatusUnauthorized)
+	wantStatus(t, h.do(req{path: "/v1/internal/x", noCookie: true, header: map[string]string{"Authorization": "Bearer junk"}}), http.StatusUnauthorized)
 
 	// The bot sets its own avatar and name (multipart).
 	var body bytes.Buffer
@@ -90,7 +90,7 @@ func TestChannelTokensAndProfiles(t *testing.T) {
 	fw, _ := mw.CreateFormFile("avatar", "bot.png")
 	fw.Write(encodePNG(halves(256, 256, 255)))
 	mw.Close()
-	w = bot(req{method: "PUT", path: "/api/me/profile", body: body.Bytes(), header: map[string]string{"Content-Type": mw.FormDataContentType()}})
+	w = bot(req{method: "PUT", path: "/v1/internal/me/profile", body: body.Bytes(), header: map[string]string{"Content-Type": mw.FormDataContentType()}})
 	wantStatus(t, w, http.StatusOK)
 	info = decode[gate.EndpointInfo](t, w)
 	if info.Name != "QQ Bot" || !strings.HasPrefix(info.Avatar, "/_ir/avatar/"+info.ID+"?v=") {
@@ -103,7 +103,7 @@ func TestChannelTokensAndProfiles(t *testing.T) {
 			mac = e
 		}
 	}
-	w = bot(req{method: "PUT", path: "/api/apps/" + mac.ID + "/profile", body: map[string]any{"name": "pwned"}})
+	w = bot(req{method: "PUT", path: "/v1/internal/apps/" + mac.ID + "/profile", body: map[string]any{"name": "pwned"}})
 	wantStatus(t, w, http.StatusForbidden)
 
 	// The panel sees the avatar; outsiders do not; the version URL is cacheable.
@@ -127,12 +127,12 @@ func TestChannelTokensAndProfiles(t *testing.T) {
 	} else {
 		h.secrets = append(h.secrets, other)
 	}
-	w = h.do(req{method: "PUT", path: "/api/apps/" + info.ID + "/profile", body: map[string]any{"name": "MAC"}})
+	w = h.do(req{method: "PUT", path: "/v1/internal/apps/" + info.ID + "/profile", body: map[string]any{"name": "MAC"}})
 	wantStatus(t, w, http.StatusUnprocessableEntity)
 	if r := decode[joinReply](t, w); r.NameError != "taken" {
 		t.Fatalf("rename to a taken name: %s", w.Body.String())
 	}
-	w = h.do(req{method: "PUT", path: "/api/apps/" + info.ID + "/profile", body: map[string]any{"name": "qq", "removeAvatar": true}})
+	w = h.do(req{method: "PUT", path: "/v1/internal/apps/" + info.ID + "/profile", body: map[string]any{"name": "qq", "removeAvatar": true}})
 	wantStatus(t, w, http.StatusOK)
 	if got := decode[gate.EndpointInfo](t, w); got.Name != "qq" || got.Avatar != "" {
 		t.Fatalf("after panel update: %+v", got)
@@ -141,17 +141,17 @@ func TestChannelTokensAndProfiles(t *testing.T) {
 
 	// The panel updates itself: case change of its own name, avatar as a data: URL.
 	data := "data:image/png;base64," + base64.StdEncoding.EncodeToString(encodePNG(halves(40, 40, 0)))
-	w = h.do(req{method: "PUT", path: "/api/me/profile", body: map[string]any{"name": "Mac", "avatar": data}})
+	w = h.do(req{method: "PUT", path: "/v1/internal/me/profile", body: map[string]any{"name": "Mac", "avatar": data}})
 	wantStatus(t, w, http.StatusOK)
 	if got := decode[gate.EndpointInfo](t, w); got.Name != "Mac" || got.Avatar == "" {
 		t.Fatalf("self update: %+v", got)
 	}
-	w = h.do(req{method: "PUT", path: "/api/me/profile", body: map[string]any{"avatar": base64.StdEncoding.EncodeToString([]byte("GIF89a"))}})
+	w = h.do(req{method: "PUT", path: "/v1/internal/me/profile", body: map[string]any{"avatar": base64.StdEncoding.EncodeToString([]byte("GIF89a"))}})
 	wantStatus(t, w, http.StatusUnprocessableEntity)
-	w = h.do(req{method: "PUT", path: "/api/me/profile", body: []byte("x"), header: map[string]string{"Content-Type": "text/plain"}})
+	w = h.do(req{method: "PUT", path: "/v1/internal/me/profile", body: []byte("x"), header: map[string]string{"Content-Type": "text/plain"}})
 	wantStatus(t, w, http.StatusUnsupportedMediaType)
 	// Cookie-authenticated profile writes need our origin.
-	w = h.do(req{method: "PUT", path: "/api/me/profile", body: map[string]any{"name": "evil"}, header: map[string]string{"Origin": "https://evil.example"}})
+	w = h.do(req{method: "PUT", path: "/v1/internal/me/profile", body: map[string]any{"name": "evil"}, header: map[string]string{"Origin": "https://evil.example"}})
 	wantStatus(t, w, http.StatusForbidden)
 
 	// Admin function, by name.
@@ -167,7 +167,7 @@ func TestChannelTokensAndProfiles(t *testing.T) {
 
 	// Re-issuing the token cuts off the old one and its connections.
 	var closed bool
-	r := httptest.NewRequest("GET", "/api/events", nil)
+	r := httptest.NewRequest("GET", "/v1/internal/events", nil)
 	r.Host = "ir.example.com"
 	r.Header.Set("Authorization", "Bearer "+tok)
 	h.chain(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -181,15 +181,15 @@ func TestChannelTokensAndProfiles(t *testing.T) {
 	if !closed {
 		t.Fatal("old token's connection still open")
 	}
-	wantStatus(t, bot(req{path: "/api/x"}), http.StatusUnauthorized)
+	wantStatus(t, bot(req{path: "/v1/internal/x"}), http.StatusUnauthorized)
 	tok = tok2
-	wantStatus(t, bot(req{path: "/api/x"}), http.StatusOK)
+	wantStatus(t, bot(req{path: "/v1/internal/x"}), http.StatusOK)
 
 	// Revoking the channel is always allowed.
 	if err := h.revoke("qq"); err != nil {
 		t.Fatal(err)
 	}
-	wantStatus(t, bot(req{path: "/api/x"}), http.StatusUnauthorized)
+	wantStatus(t, bot(req{path: "/v1/internal/x"}), http.StatusUnauthorized)
 	h.cookie = panelCookie
 	if _, code := h.whoami(); code != 200 {
 		t.Fatal("panel lost its session")
@@ -204,7 +204,7 @@ func TestChannelInLocalMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	do := func(auth string) *httptest.ResponseRecorder {
-		r := httptest.NewRequest("POST", "/api/x", nil)
+		r := httptest.NewRequest("POST", "/v1/internal/x", nil)
 		r.Host = "127.0.0.1:7810"
 		r.RemoteAddr = "127.0.0.1:1"
 		if auth != "" {
@@ -222,7 +222,7 @@ func TestChannelInLocalMode(t *testing.T) {
 	}
 	wantStatus(t, do("Bearer ir_"+strings.Repeat("A", 43)), http.StatusUnauthorized)
 	// 本机 has no stored profile.
-	r := httptest.NewRequest("PUT", "/api/me/profile", strings.NewReader(`{"name":"x"}`))
+	r := httptest.NewRequest("PUT", "/v1/internal/me/profile", strings.NewReader(`{"name":"x"}`))
 	r.Host = "127.0.0.1:7810"
 	r.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()

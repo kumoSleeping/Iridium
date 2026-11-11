@@ -28,7 +28,7 @@ func cmdApps(e *env, args []string) int {
 		return e.failf("usage: ir apps")
 	}
 	var as api.Apps
-	if err := e.do("GET", "/api/apps", nil, &as); err != nil {
+	if err := e.do("GET", "/v1/internal/apps", nil, &as); err != nil {
 		return e.fail(err)
 	}
 	printApps(e.out, as)
@@ -87,7 +87,7 @@ func cmdSh(e *env, args []string) int {
 	}
 	deadline := time.Now().Add(timeout)
 	// Streamed, at an executor that speaks run; else (an older one) a holder, read by polling.
-	resp, err := e.request("POST", "/api/machines/"+url.PathEscape(machine)+"/shell", api.ShellRun{Line: line, Cwd: cwd}, "Accept", ndjson)
+	resp, err := e.request("POST", "/v1/internal/machines/"+url.PathEscape(machine)+"/shell", api.ShellRun{Line: line, Cwd: cwd}, "Accept", ndjson)
 	if err != nil {
 		return e.fail(err)
 	}
@@ -102,7 +102,7 @@ func cmdSh(e *env, args []string) int {
 	var from int64
 	for wait := 100 * time.Millisecond; ; {
 		var o api.ShellOutput
-		if err := e.do("GET", "/api/shell/"+url.PathEscape(st.Run)+"?from="+strconv.FormatInt(from, 10), nil, &o); err != nil {
+		if err := e.do("GET", "/v1/internal/shell/"+url.PathEscape(st.Run)+"?from="+strconv.FormatInt(from, 10), nil, &o); err != nil {
 			return e.fail(err)
 		}
 		fmt.Fprint(e.out, o.Data)
@@ -120,7 +120,7 @@ func cmdSh(e *env, args []string) int {
 			return exitError
 		}
 		if time.Now().After(deadline) {
-			_ = e.do("DELETE", "/api/shell/"+url.PathEscape(st.Run), nil, nil)
+			_ = e.do("DELETE", "/v1/internal/shell/"+url.PathEscape(st.Run), nil, nil)
 			fmt.Fprintf(e.err, "ir: still running after %s: stopped (--timeout for more)\n", timeout)
 			return exitTimeout
 		}

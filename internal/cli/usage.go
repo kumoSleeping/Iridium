@@ -19,7 +19,7 @@ var usageDims = []string{"day", "app", "agent", "model"}
 const usageHelp = `用法：ir usage [名字|me] [-d 天数] [--by day,app,agent,model] [--json]
   默认最近 7 天、所有应用（不能管理的只看自己的），按天、应用、agent、模型分；--by 只按其中几样合起来。`
 
-// usageCmd is ir usage: the tokens used by day, app, agent and model (GET /api/usage).
+// usageCmd is ir usage: the tokens used by day, app, agent and model (GET /v1/internal/usage).
 func usageCmd(e adminEnv, args []string, stdout, stderr io.Writer) int {
 	q := url.Values{}
 	by := usageDims
@@ -77,7 +77,7 @@ func usageCmd(e adminEnv, args []string, stdout, stderr io.Writer) int {
 			q.Set("app", a)
 		}
 	}
-	path := "/api/usage"
+	path := "/v1/internal/usage"
 	if len(q) > 0 {
 		path += "?" + q.Encode()
 	}

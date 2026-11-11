@@ -305,7 +305,7 @@ const money = (currency: string, n: number) => {
   }
 };
 
-/** An agent's approval modes, in the order the key cycles them: as GET /api/agents lists them, else
+/** An agent's approval modes, in the order the key cycles them: as GET /v1/internal/agents lists them, else
  *  Claude's own. */
 const MODES: Partial<Record<Agent, string[]>> = { claude: ["manual", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"], codex: ["untrusted", "on-request", "granular", "auto"], pi: ["auto", "ask"] };
 type Mode = { id: string };
@@ -324,7 +324,7 @@ export function useMode(s: LiveSession) {
     setWant(m);
     try {
       await api.mode(s.id, m);
-      // Not every agent switches at once (GET /api/agents modeSwitch): say when it does.
+      // Not every agent switches at once (GET /v1/internal/agents modeSwitch): say when it does.
       if (info?.modeSwitch === "next turn") toast(t("mode.nextTurn"));
       else if (info?.modeSwitch === "restart") toast(t("mode.restart"));
     } catch (e) {

@@ -50,19 +50,19 @@ func (a sessionsOf) After(id string, at int64) (api.MessagePage, error) {
 func (s *Server) fileRoutes(mux *http.ServeMux, local bool) {
 	// Every terminal reads every session's files; one goes into a session only from a terminal
 	// that may use it (access.go: Claude's, the owner's own). The files service guards the paths.
-	mux.HandleFunc("GET /api/sessions/{id}/files/{ref}", s.fileGet)
-	mux.HandleFunc("GET /api/sessions/{id}/files/{ref}/thumb", s.fileThumb)
-	mux.HandleFunc("GET /api/sessions/{id}/files/{ref}/info", s.fileInfo)
-	mux.HandleFunc("POST /api/sessions/{id}/uploads", s.use(s.uploadCreate))
-	mux.HandleFunc("GET /api/uploads/{upload}", s.uploadGet)
-	mux.HandleFunc("PUT /api/uploads/{upload}", s.uploadPut)
-	mux.HandleFunc("POST /api/uploads/{upload}/complete", s.uploadComplete)
-	mux.HandleFunc("DELETE /api/uploads/{upload}", s.uploadCancel)
+	mux.HandleFunc("GET /v1/internal/sessions/{id}/files/{ref}", s.fileGet)
+	mux.HandleFunc("GET /v1/internal/sessions/{id}/files/{ref}/thumb", s.fileThumb)
+	mux.HandleFunc("GET /v1/internal/sessions/{id}/files/{ref}/info", s.fileInfo)
+	mux.HandleFunc("POST /v1/internal/sessions/{id}/uploads", s.use(s.uploadCreate))
+	mux.HandleFunc("GET /v1/internal/uploads/{upload}", s.uploadGet)
+	mux.HandleFunc("PUT /v1/internal/uploads/{upload}", s.uploadPut)
+	mux.HandleFunc("POST /v1/internal/uploads/{upload}/complete", s.uploadComplete)
+	mux.HandleFunc("DELETE /v1/internal/uploads/{upload}", s.uploadCancel)
 	if local {
-		mux.HandleFunc("POST /api/sessions/{id}/attach", s.use(s.attachPath))
-		mux.HandleFunc("POST /api/links", s.linkPath)
-		mux.HandleFunc("GET /api/files", s.listDir)
-		mux.HandleFunc("POST /api/files/copy", s.copyFile)
+		mux.HandleFunc("POST /v1/internal/sessions/{id}/attach", s.use(s.attachPath))
+		mux.HandleFunc("POST /v1/internal/links", s.linkPath)
+		mux.HandleFunc("GET /v1/internal/files", s.listDir)
+		mux.HandleFunc("POST /v1/internal/files/copy", s.copyFile)
 	}
 }
 

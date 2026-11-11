@@ -51,7 +51,7 @@ func TestSendQueueAndSteer(t *testing.T) {
 	e := newEnv(io.Discard, io.Discard)
 	full, err := e.resolve(sid)
 	if err == nil {
-		err = e.do("GET", "/api/sessions/"+full, nil, &st)
+		err = e.do("GET", "/v1/internal/sessions/"+full, nil, &st)
 	}
 	if err != nil || len(st.Queue) != 0 {
 		t.Errorf("agent --queue queued: %+v %v", st, err)

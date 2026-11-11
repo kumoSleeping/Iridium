@@ -30,10 +30,10 @@ import (
 // withSatori serves /v1/ by package satori, the rest by next.
 func (s *Server) withSatori(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// /v1/internal/<path>: Iridium's own API (Satori's "internal" routes, spec advanced/internal):
-		// the same as /api/<path>, for whoever speaks Satori. Satori-Platform and Satori-User-ID,
-		// if given, must be the caller's. (button is the Satori package's own.)
-		if rest, ok := strings.CutPrefix(r.URL.Path, "/v1/internal/"); ok && s.sat != nil && rest != "button" {
+		// /v1/internal/<path>: Iridium's own API (Satori's "internal" routes, spec advanced/internal),
+		// served by next. Satori-Platform and Satori-User-ID, if given, must be the caller's.
+		// (button is the Satori package's own.)
+		if rest, ok := strings.CutPrefix(r.URL.Path, "/v1/internal/"); ok && rest != "button" {
 			if c, ok := (satoriBackend{s}).Who(r); ok {
 				if p := r.Header.Get(satori.HeaderPlatform); p != "" && p != c.App {
 					refuse(w, http.StatusForbidden, "no_such_login", satori.HeaderPlatform+" is not this caller's")
@@ -44,10 +44,7 @@ func (s *Server) withSatori(next http.Handler) http.Handler {
 					return
 				}
 			}
-			r2 := r.Clone(r.Context())
-			r2.URL.Path = "/api/" + rest
-			r2.URL.RawPath = ""
-			next.ServeHTTP(w, r2)
+			next.ServeHTTP(w, r)
 			return
 		}
 		if s.sat != nil && (r.URL.Path == "/v1" || strings.HasPrefix(r.URL.Path, "/v1/")) {

@@ -24,7 +24,7 @@ export function iridiumKey(url) {
  *  Only 401 says so; a 403 is a refusal of something else (its reason in the code). */
 export async function refused(url, token) {
   try {
-    const r = await fetch(new URL('/api/exec', url.replace(/^ws/i, 'http')), { headers: { Authorization: `Bearer ${token}` } })
+    const r = await fetch(new URL('/v1/internal/exec', url.replace(/^ws/i, 'http')), { headers: { Authorization: `Bearer ${token}` } })
     return r.status === 401
   } catch {
     return false
@@ -333,7 +333,7 @@ function killTree(pid, hard) {
 }
 
 /**
- * The executor. Options: url (ws(s)://…/api/exec), token, state (its own directory), roots
+ * The executor. Options: url (ws(s)://…/v1/internal/exec), token, state (its own directory), roots
  * (directories files may be under; none: all but the denied), agents (Hello's), noShell (start
  * nothing but the agents: no command line runs here), agentShell (say the Iridium's agents may run
  * command lines here, ir sh, not only a person on its page), env ({name: value}; default

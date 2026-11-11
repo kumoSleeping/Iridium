@@ -41,7 +41,7 @@ func needsCmd(e adminEnv, args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	var ns api.Needs
-	if _, err := e.call("GET", "/api/needs", nil, &ns); err != nil {
+	if _, err := e.call("GET", "/v1/internal/needs", nil, &ns); err != nil {
 		return failed(stderr, "needs", err)
 	}
 	if len(ns.Pending) == 0 {
@@ -175,7 +175,7 @@ func allowCmd(e adminEnv, args []string, stdout, stderr io.Writer) int {
 		a.Value = v
 	}
 	var r api.NeedReply
-	if _, err := e.call("POST", "/api/needs/"+url.PathEscape(id), a, &r); err != nil {
+	if _, err := e.call("POST", "/v1/internal/needs/"+url.PathEscape(id), a, &r); err != nil {
 		return failed(stderr, "allow", err)
 	}
 	if r.State == "failed" {
@@ -197,7 +197,7 @@ func denyCmd(e adminEnv, args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, needsUsage)
 		return 2
 	}
-	if _, err := e.call("POST", "/api/needs/"+url.PathEscape(args[0]), api.NeedAnswer{}, nil); err != nil {
+	if _, err := e.call("POST", "/v1/internal/needs/"+url.PathEscape(args[0]), api.NeedAnswer{}, nil); err != nil {
 		return failed(stderr, "deny", err)
 	}
 	fmt.Fprintln(stdout, "已拒绝。")
@@ -207,7 +207,7 @@ func denyCmd(e adminEnv, args []string, stdout, stderr io.Writer) int {
 // findNeed is pending need id.
 func findNeed(e adminEnv, id string, out *api.Need) error {
 	var ns api.Needs
-	if _, err := e.call("GET", "/api/needs", nil, &ns); err != nil {
+	if _, err := e.call("GET", "/v1/internal/needs", nil, &ns); err != nil {
 		return err
 	}
 	for _, n := range ns.Pending {
@@ -252,7 +252,7 @@ func pairingCmd(e adminEnv, open bool, args []string, stdout, stderr io.Writer) 
 		req.Minutes = int((d + time.Minute - 1) / time.Minute)
 	}
 	var st api.PairWindow
-	if _, err := e.call("PUT", "/api/pairing", req, &st); err != nil {
+	if _, err := e.call("PUT", "/v1/internal/pairing", req, &st); err != nil {
 		return failed(stderr, "apps "+map[bool]string{true: "open", false: "close"}[open], err)
 	}
 	if st.Open {

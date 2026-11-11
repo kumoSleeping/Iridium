@@ -18,7 +18,7 @@ import (
 // The computers of the apps that run agents or command lines (docs/exec.md "握手"; draft 二「带
 // Agent」: no machines apart from apps): what each executor last said of itself (kept in the store,
 // so one away is listed too), whether it is connected now, which of its agents are turned off.
-// GET /api/apps lists them with their apps; the pages fetch it again on the carried "terminals".
+// GET /v1/internal/apps lists them with their apps; the pages fetch it again on the carried "terminals".
 
 // WatchMachines follows the executors' coming and going: what they say is kept, the pages hear.
 // Called once, after Remote is set and before serving.
@@ -166,7 +166,7 @@ func (s *Server) computers() map[string]*api.Computer {
 // computerOf is app id's computer; nil if it has none.
 func (s *Server) computerOf(id string) *api.Computer { return s.computers()[id] }
 
-// putAgents turns agents app {id} carries off or on (PUT /api/apps/{id}/agents): the ones listed
+// putAgents turns agents app {id} carries off or on (PUT /v1/internal/apps/{id}/agents): the ones listed
 // off, the rest on. One turned off is not started there, nor offered for new sessions; its sessions
 // running go on.
 func (s *Server) putAgents(w http.ResponseWriter, r *http.Request) {
@@ -214,7 +214,7 @@ func (s *Server) agentOff(id string, a api.Agent) error {
 }
 
 func (s *Server) machineRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("PUT /api/apps/{id}/agents", s.approver(s.putAgents))
-	mux.HandleFunc("GET /api/machines/{id}/dsh/workspaces", s.dshWorkspaces)
-	mux.HandleFunc("POST /api/machines/{id}/dsh/sync", s.dshSync)
+	mux.HandleFunc("PUT /v1/internal/apps/{id}/agents", s.approver(s.putAgents))
+	mux.HandleFunc("GET /v1/internal/machines/{id}/dsh/workspaces", s.dshWorkspaces)
+	mux.HandleFunc("POST /v1/internal/machines/{id}/dsh/sync", s.dshSync)
 }

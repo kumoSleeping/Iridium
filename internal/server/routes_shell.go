@@ -22,12 +22,12 @@ import (
 // shellRoutes: command lines run at a session's machine and folder, without its agent (docs/api.md
 // "命令"). Only panels and 本机: a Bot asks agents, it does not run commands.
 func (s *Server) shellRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/sessions/{id}/shell", s.manages(s.use(s.shellRun)))
-	mux.HandleFunc("GET /api/shell/{run}", s.shellers(s.shellRead))
-	mux.HandleFunc("DELETE /api/shell/{run}", s.shellers(s.shellStop))
+	mux.HandleFunc("POST /v1/internal/sessions/{id}/shell", s.manages(s.use(s.shellRun)))
+	mux.HandleFunc("GET /v1/internal/shell/{run}", s.shellers(s.shellRead))
+	mux.HandleFunc("DELETE /v1/internal/shell/{run}", s.shellers(s.shellStop))
 	// An agent's ir sh (draft 二「远端执行命令」: agents only, and the host): at an app's computer by
 	// ID or name, where its owner lets command lines run, in a folder within the caller's scope.
-	mux.HandleFunc("POST /api/machines/{id}/shell", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /v1/internal/machines/{id}/shell", func(w http.ResponseWriter, r *http.Request) {
 		if c := callerOf(r); !c.Host() && !c.agent && c.session == "" {
 			forbid(w, errors.New("command lines at another computer are agents' (ir sh)"))
 			return
@@ -50,7 +50,7 @@ func (s *Server) shellers(h http.HandlerFunc) http.HandlerFunc {
 
 // machineShell is an agent's ir sh. Asked with Accept: application/x-ndjson, at an executor that
 // speaks run, the command line's output streams back as ShellEvent lines as it comes, and its end
-// last; else it runs as a holder and its ShellStarted is the answer, read with GET /api/shell/{run}
+// last; else it runs as a holder and its ShellStarted is the answer, read with GET /v1/internal/shell/{run}
 // (an older executor: the dsh plugin's).
 func (s *Server) machineShell(w http.ResponseWriter, r *http.Request) {
 	var req api.ShellRun

@@ -1,6 +1,6 @@
 package api
 
-// Usage is GET /api/usage (ir usage): the tokens used in the last days, today the last, one row
+// Usage is GET /v1/internal/usage (ir usage): the tokens used in the last days, today the last, one row
 // per local day, terminal, agent and model that used any. A terminal that does not manage sees
 // only its own.
 type Usage struct {

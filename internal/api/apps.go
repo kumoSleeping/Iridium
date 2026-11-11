@@ -54,14 +54,14 @@ type App struct {
 }
 
 // Computer is an app's computer as its executor last said of itself (docs/exec.md "握手"): kept
-// in the store, so one away is listed too. GET /api/apps lists it with the app, to every caller.
+// in the store, so one away is listed too. GET /v1/internal/apps lists it with the app, to every caller.
 type Computer struct {
 	OS   string `json:"os"` // windows | darwin | linux
 	Arch string `json:"arch,omitempty"`
 	Home string `json:"home"`
 	Sep  string `json:"sep"`
 	// Agents: those Iridium runs there, as it reported them; Off, turned off in its app's page
-	// (PUT /api/apps/{id}/agents): not started there, not offered for new sessions.
+	// (PUT /v1/internal/apps/{id}/agents): not started there, not offered for new sessions.
 	Agents []ExecAgent `json:"agents"`
 	Online bool        `json:"online"` // its executor is connected
 	SeenAt int64       `json:"seenAt"` // when it last connected (ms)
@@ -74,7 +74,7 @@ type Computer struct {
 	Program string `json:"program,omitempty"`
 }
 
-// AppAgents is PUT /api/apps/{id}/agents: the agents an app carries that are turned off there.
+// AppAgents is PUT /v1/internal/apps/{id}/agents: the agents an app carries that are turned off there.
 // Any it reports later is on till turned off.
 type AppAgents struct {
 	Off []string `json:"off"`
@@ -100,7 +100,7 @@ type Login struct {
 	Perms *Perms `json:"perms,omitempty"`
 }
 
-// Notice is POST /api/apps/{id}/logins/{login}/notice (ir send 应用/登录): Text shown to the
+// Notice is POST /v1/internal/apps/{id}/logins/{login}/notice (ir send 应用/登录): Text shown to the
 // login, no agent woken. Caller: the session it is from (ir's own, as Send's), if any.
 type Notice struct {
 	Text   string `json:"text"`
@@ -116,7 +116,7 @@ type NoticeReply struct {
 	Sent  int    `json:"sent"`
 }
 
-// Device is what an app or login runs on, set in its settings (PUT /api/me/device, ir apps
+// Device is what an app or login runs on, set in its settings (PUT /v1/internal/me/device, ir apps
 // device): a computer, the default, a laptop, a phone, or none shown (no badge).
 type Device string
 
@@ -136,7 +136,7 @@ func (d Device) Valid() bool {
 	return false
 }
 
-// SetDevice is PUT /api/me/device and PUT /api/apps/{id}/device.
+// SetDevice is PUT /v1/internal/me/device and PUT /v1/internal/apps/{id}/device.
 type SetDevice struct {
 	Device Device `json:"device"`
 }
@@ -151,7 +151,7 @@ type PendingInvite struct {
 	ExpiresAt int64  `json:"expiresAt,omitempty"`
 }
 
-// Apps is GET /api/apps (ir apps): the host first, ir_web (with a public origin), the apps; the
+// Apps is GET /v1/internal/apps (ir apps): the host first, ir_web (with a public origin), the apps; the
 // logins of ir_web; the invites not taken. Public (draft 二「消息」): any caller gets the apps
 // (names, types, avatars, online, computers) and the approved logins; their rules, perms and
 // usage, the logins waiting and the invites only one that manages (Full).
@@ -162,7 +162,7 @@ type Apps struct {
 	Full    bool            `json:"full,omitempty"`
 }
 
-// Me is GET /api/me: who calls. App: the app (HostID for the host, WebApp for a browser); Login:
+// Me is GET /v1/internal/me: who calls. App: the app (HostID for the host, WebApp for a browser); Login:
 // the login of it, for ir_web the browser's. ID is the one its usage and rules are kept by.
 type Me struct {
 	ID        string `json:"id"`
@@ -227,9 +227,9 @@ const (
 	NeedSecretSet NeedKind = "secret_set" // an agent's ir secret set: a person types the value
 	NeedSecretUse NeedKind = "secret_use" // an agent's ir run with credentials
 	// NeedAsk: a session's question, approval or plan (Card), for whoever may use the session;
-	// answered through the card (POST /api/sessions/{id}/answer), not POST /api/needs/{id}.
+	// answered through the card (POST /v1/internal/sessions/{id}/answer), not POST /v1/internal/needs/{id}.
 	NeedAsk NeedKind = "ask"
-	// NeedShare: something shared with this login (Share); DELETE /api/needs/{id} puts it away.
+	// NeedShare: something shared with this login (Share); DELETE /v1/internal/needs/{id} puts it away.
 	NeedShare NeedKind = "share"
 )
 
@@ -277,14 +277,14 @@ type Need struct {
 	To    string `json:"to,omitempty"`
 }
 
-// Needs is the carried state "needs" (GET /api/needs): the pending ones, oldest first, as the
+// Needs is the carried state "needs" (GET /v1/internal/needs): the pending ones, oldest first, as the
 // caller may see them: applications for a person on ir_web or at the host, asks of the sessions it
 // may use, what was shared with it.
 type Needs struct {
 	Pending []Need `json:"pending"`
 }
 
-// NeedAnswer is a person's answer to a Need (POST /api/needs/{id}).
+// NeedAnswer is a person's answer to a Need (POST /v1/internal/needs/{id}).
 type NeedAnswer struct {
 	Allow bool `json:"allow"`
 	// Value: secret_set's value, typed by the person; stored, never given back.
@@ -301,7 +301,7 @@ type NeedAnswer struct {
 	AgentsOff []string `json:"agentsOff,omitempty"`
 }
 
-// PairRequest is what an app says of itself asking to pair (POST /api/pair; no login): its name,
+// PairRequest is what an app says of itself asking to pair (POST /v1/internal/pair; no login): its name,
 // what it is shown as, and what it wants. An executor (ir join) says its machine too. Shell is
 // what it means to say in its hello (Computer's), so the card tells whether command lines would run
 // there; an older one says NoShell and AgentShell instead (shell: AgentShell without NoShell),
@@ -331,8 +331,8 @@ type ExecAgent struct {
 }
 
 // DshWorkspace is a folder a new dsh session at a machine may open in (GET
-// /api/machines/{id}/dsh/workspaces): one of dsh's workspaces there, as DSH Desktop's sidebar
-// has them, else a folder its sessions were in. Path is '/'-separated, as GET /api/folders gives.
+// /v1/internal/machines/{id}/dsh/workspaces): one of dsh's workspaces there, as DSH Desktop's sidebar
+// has them, else a folder its sessions were in. Path is '/'-separated, as GET /v1/internal/folders gives.
 // Sessions: how many of its sessions Iridium lists (not archived, not kept from it), subagents aside.
 type DshWorkspace struct {
 	Title     string `json:"title"`
@@ -347,15 +347,15 @@ type Pairing struct {
 	Request string `json:"request"`
 }
 
-// PairState is how a pairing request stands (GET /api/pair/{request}): pending, allowed (with the
+// PairState is how a pairing request stands (GET /v1/internal/pair/{request}): pending, allowed (with the
 // TOKEN, given once), denied or expired.
 type PairState struct {
 	Status string `json:"status"`
 	Token  string `json:"token,omitempty"`
 }
 
-// PairWindow is whether apps may ask to pair now (GET /api/pairing, the carried state "pairing"):
-// open till Until (ms), else closed (0). PUT /api/pairing opens it for Minutes (10 if 0, at most
+// PairWindow is whether apps may ask to pair now (GET /v1/internal/pairing, the carried state "pairing"):
+// open till Until (ms), else closed (0). PUT /v1/internal/pairing opens it for Minutes (10 if 0, at most
 // 60), or closes it.
 type PairWindow struct {
 	Open    bool  `json:"open"`
@@ -385,7 +385,7 @@ type Pending struct {
 	Need Need `json:"need"`
 }
 
-// CatalogueEntry is an official app Iridium lists (GET /api/catalogue): what it is and how to
+// CatalogueEntry is an official app Iridium lists (GET /v1/internal/catalogue): what it is and how to
 // install it, by system. Iridium installs nothing itself.
 type CatalogueEntry struct {
 	ID          string        `json:"id"`
@@ -413,7 +413,7 @@ type SetPublic struct {
 	Origin string `json:"origin"`
 }
 
-// PublicState is GET /api/public.
+// PublicState is GET /v1/internal/public.
 type PublicState struct {
 	Origin   string `json:"origin,omitempty"`
 	Passkeys bool   `json:"passkeys"` // some login of ir_web has a passkey

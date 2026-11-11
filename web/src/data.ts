@@ -33,7 +33,7 @@ export function useWorkspaces(): { data: Workspace[] | null | undefined } {
 export const agentsQ = { queryKey: ["agents"], queryFn: orNone(api.agents), staleTime: Infinity };
 export const useAgents = () => useQuery(agentsQ);
 export const useAgent = (a: string) => useAgents().data?.find((x: AgentInfo) => x.agent === a);
-/** Push's keys and each workspace's events, the daemon's own (GET /api/web/push): the settings show them. */
+/** Push's keys and each workspace's events, the daemon's own (GET /v1/internal/web/push): the settings show them. */
 export const pushQ = { queryKey: ["push"], queryFn: orNone(api.push), staleTime: 30_000 };
 export const useSettings = () => useQuery({ queryKey: ["settings"], queryFn: orNone(api.settings), staleTime: 60_000 });
 /** The update: as the stream carries it, else as asked for. */
@@ -45,10 +45,10 @@ export function useUpdate(): { data: UpdateState | null | undefined } {
 /** The home folder, as the folder picker resolves ~. */
 export const useHome = () => useQuery({ queryKey: ["folders", "~"], queryFn: () => api.folders("~"), staleTime: 60_000, select: (f) => (setHome(f.path), f.path) });
 
-/** The host, as the page is with no gate in front (and while /api/me has not answered). */
+/** The host, as the page is with no gate in front (and while /v1/internal/me has not answered). */
 export const LOCAL_ME: Me = { id: "local", name: "主机", app: "local", host: true, public: false, usedToday: 0, rules: { claudeOwner: { by: "local", at: 0 } } };
 
-/** Who this page is: GET /api/me, else the gate's session (a login of ir_web), else the host. */
+/** Who this page is: GET /v1/internal/me, else the gate's session (a login of ir_web), else the host. */
 export const useMe = () =>
   useQuery({
     queryKey: ["me"],
@@ -72,7 +72,7 @@ export const manages = (me?: Me | null) => !!me && (!!me.host || !!me.web);
 let terminalsSeen: number | undefined;
 
 /** The apps (the host and ir_web among them) with their computers, the logins and the unused invites
- *  (GET /api/apps): what a message's source shows (avatar), the computers new sessions may start at
+ *  (GET /v1/internal/apps): what a message's source shows (avatar), the computers new sessions may start at
  *  (machines.tsx) and the settings' apps page. Every caller gets the public part; one that manages,
  *  all (full). */
 export function useApps() {

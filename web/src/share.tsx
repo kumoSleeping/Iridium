@@ -1,5 +1,5 @@
 // 分享到 ▸ (draft 四): a submenu of the apps whose logins may use the thing, each a submenu of
-// those logins; one picked shares it with that login (POST /api/share), Iridium having checked it
+// those logins; one picked shares it with that login (POST /v1/internal/share), Iridium having checked it
 // may use it.
 import { Menu } from "@base-ui/react/menu";
 import { useQuery } from "@tanstack/react-query";

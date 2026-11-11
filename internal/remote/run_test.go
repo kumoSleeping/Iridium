@@ -205,7 +205,7 @@ func TestExecMini(t *testing.T) {
 	hub := &remote.Hub{Logf: t.Logf}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		switch req.URL.Path {
-		case "/api/exec":
+		case "/v1/internal/exec":
 			switch mode.Load() {
 			case "403":
 				w.WriteHeader(http.StatusForbidden)
@@ -220,7 +220,7 @@ func TestExecMini(t *testing.T) {
 				return
 			}
 			hub.Serve(w, req, "m1", "mini")
-		case "/api/pair":
+		case "/v1/internal/pair":
 			pairs.Add(1)
 			w.WriteHeader(http.StatusForbidden)
 			io.WriteString(w, `{"code":"pair_closed"}`)

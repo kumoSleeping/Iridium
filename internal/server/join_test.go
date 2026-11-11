@@ -50,7 +50,7 @@ func (b *lockedBuffer) String() string {
 func TestJoin(t *testing.T) {
 	executors := &remote.Hub{Logf: t.Logf}
 	l := startWith(t, func(s *Server, _ config.Config, _ string) { s.Remote = executors })
-	l.want(200, "socket", "PUT", "/api/public", api.SetPublic{Origin: "https://ir.example.com"}, nil)
+	l.want(200, "socket", "PUT", "/v1/internal/public", api.SetPublic{Origin: "https://ir.example.com"}, nil)
 
 	// dsh as npm installs it on Unix: a link on PATH to the package's bin.js.
 	prefix := t.TempDir()
@@ -100,14 +100,14 @@ func TestJoin(t *testing.T) {
 		if time.Now().After(end) {
 			t.Fatalf("no pairing request; it said:\n%s", out.String())
 		}
-		l.want(200, "socket", "GET", "/api/needs", nil, &cs)
+		l.want(200, "socket", "GET", "/v1/internal/needs", nil, &cs)
 	}
 	cf := cs.Pending[0]
 	if cf.Kind != api.NeedAppJoin || cf.Pair == nil || cf.Pair.Type != "computer" || cf.Pair.Agents[0].Agent != "dsh" || cf.Pair.Agents[0].Version != "0.2.2" ||
 		!strings.Contains(out.String(), "配对码 "+cf.Code+"：") {
 		t.Fatalf("the card %+v %+v; it said:\n%s", cf, cf.Pair, out.String())
 	}
-	l.want(200, "socket", "POST", "/api/needs/"+cf.ID, api.NeedAnswer{Allow: true}, nil)
+	l.want(200, "socket", "POST", "/v1/internal/needs/"+cf.ID, api.NeedAnswer{Allow: true}, nil)
 	hi := online()
 	if len(hi.Agents) != 1 || hi.Agents[0].Agent != "dsh" || hi.Agents[0].Version != "0.2.2" || hi.Agents[0].Scope == "" ||
 		!strings.HasPrefix(hi.Program, "iridium ") || hi.Scratch == "" {
@@ -147,7 +147,7 @@ func TestJoin(t *testing.T) {
 	if n := strings.Count(out.String(), "配对码"); n != said {
 		t.Fatalf("paired again:\n%s", out.String())
 	}
-	l.want(200, "socket", "GET", "/api/needs", nil, &cs)
+	l.want(200, "socket", "GET", "/v1/internal/needs", nil, &cs)
 	if len(cs.Pending) != 0 {
 		t.Fatalf("asked again: %+v", cs.Pending)
 	}
@@ -155,7 +155,7 @@ func TestJoin(t *testing.T) {
 	<-done
 
 	// Its Bot removed: a resident forgets the TOKEN and ends, unpaired.
-	l.want(200, "socket", "DELETE", "/api/apps/win-pc", nil, nil)
+	l.want(200, "socket", "DELETE", "/v1/internal/apps/win-pc", nil, nil)
 	o.Resident = true
 	_, done = run(o)
 	select {

@@ -15,7 +15,7 @@ const (
 	AgentDsh    Agent = "dsh"
 )
 
-// AgentInfo is what an agent Iridium hosts can do (GET /api/agents).
+// AgentInfo is what an agent Iridium hosts can do (GET /v1/internal/agents).
 type AgentInfo struct {
 	Agent Agent  `json:"agent"`
 	Name  string `json:"name"`
@@ -33,7 +33,7 @@ type AgentInfo struct {
 	// ID (Claude: claude.ultracode).
 	Features []string `json:"features,omitempty"`
 	// Presets: its sessions take an agent preset (dsh: the tools and prompt a session runs with),
-	// at launch: a switch restarts the agent. Which, a session's: GET /api/sessions/{id}/presets.
+	// at launch: a switch restarts the agent. Which, a session's: GET /v1/internal/sessions/{id}/presets.
 	Presets bool `json:"presets,omitempty"`
 	// Missing: its program is not on the daemon's PATH (not installed): a new session is refused.
 	Missing bool `json:"missing,omitempty"`
@@ -176,7 +176,7 @@ type SessionState struct {
 	Queue []Queued `json:"queue"`
 	// Context: how full its context window was when last read; context:<id> has the parts.
 	Context *ContextSummary `json:"context,omitempty"`
-	// Tokens: what its turns read so far, as recorded (GET /api/usage counts the same rows);
+	// Tokens: what its turns read so far, as recorded (GET /v1/internal/usage counts the same rows);
 	// absent before its first.
 	Tokens *InputTokens `json:"tokens,omitempty"`
 	// QuotaUntil: the agent's quota ran out; Iridium goes on at this time (ms).

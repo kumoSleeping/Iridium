@@ -32,7 +32,7 @@ import (
 
 // Options configure an executor.
 type Options struct {
-	URL   string // ws(s)://…/api/exec
+	URL   string // ws(s)://…/v1/internal/exec
 	Token string
 	State string // its own directory: holders' files, scratch
 	// Roots are the directories files may be read and written under; none: all but the denied.

@@ -10,7 +10,7 @@ const (
 	ShareOfFile    ShareWhat = "file"  // a file: Session, and Ref or Path
 )
 
-// Share is something shared with one login (draft 二「消息」 分享; POST /api/share, ir share): a
+// Share is something shared with one login (draft 二「消息」 分享; POST /v1/internal/share, ir share): a
 // session, a reply, a place or a file, who shared it and a note. Iridium checks the login may use
 // what is shared (a session's agent and scope; a place's or a file's scope); what it does with it
 // is its app's: a login of ir_web finds it among its needs (and a Web Push), another app's gets a
@@ -35,7 +35,7 @@ type Share struct {
 	SharedAt    int64  `json:"sharedAt,omitempty"`
 }
 
-// ShareRequest is POST /api/share: what (Share's what and its refs; the rest Iridium fills) and to
+// ShareRequest is POST /v1/internal/share: what (Share's what and its refs; the rest Iridium fills) and to
 // whom, "应用/登录" (an app's name or ID; ir_web for a login of the web). Caller: the session ir
 // runs in, as ir send has it.
 type ShareRequest struct {
@@ -59,7 +59,7 @@ type ShareReply struct {
 	Pushed int    `json:"pushed,omitempty"`
 }
 
-// ShareTargets is GET /api/share/targets (what as ShareRequest's, in the query): the apps whose
+// ShareTargets is GET /v1/internal/share/targets (what as ShareRequest's, in the query): the apps whose
 // logins may use it, each with those logins; the caller itself left out.
 type ShareTargets struct {
 	Apps []ShareApp `json:"apps"`

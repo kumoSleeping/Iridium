@@ -12,19 +12,19 @@ import (
 // and its "always allow" rules (docs/api.md "会话设置", "待发队列").
 func (s *Server) sessionRoutes(mux *http.ServeMux) {
 	// What a terminal may use (access.go): Claude's sessions only the owner's own.
-	mux.HandleFunc("PUT /api/sessions/{id}/model", s.use(s.setModel))
-	mux.HandleFunc("PUT /api/sessions/{id}/mode", s.use(s.setMode))
-	mux.HandleFunc("PUT /api/sessions/{id}/effort", s.use(s.setEffort))
-	mux.HandleFunc("PUT /api/sessions/{id}/ultracode", s.use(s.setUltracode))
-	mux.HandleFunc("PUT /api/sessions/{id}/preset", s.use(s.setPreset))
-	mux.HandleFunc("GET /api/sessions/{id}/presets", s.presets)
-	mux.HandleFunc("PUT /api/sessions/{id}/features/{feature}", s.use(s.setFeature))
-	mux.HandleFunc("POST /api/sessions/{id}/continue", s.use(s.continueQueue))
-	mux.HandleFunc("POST /api/sessions/{id}/queue/{input}/steer", s.use(s.steer))
-	mux.HandleFunc("PUT /api/sessions/{id}/queue/{input}", s.use(s.editQueued))
-	mux.HandleFunc("DELETE /api/sessions/{id}/queue/{input}", s.use(s.deleteQueued))
-	mux.HandleFunc("GET /api/sessions/{id}/rules", s.rules)
-	mux.HandleFunc("DELETE /api/sessions/{id}/rules", s.use(s.clearRules))
+	mux.HandleFunc("PUT /v1/internal/sessions/{id}/model", s.use(s.setModel))
+	mux.HandleFunc("PUT /v1/internal/sessions/{id}/mode", s.use(s.setMode))
+	mux.HandleFunc("PUT /v1/internal/sessions/{id}/effort", s.use(s.setEffort))
+	mux.HandleFunc("PUT /v1/internal/sessions/{id}/ultracode", s.use(s.setUltracode))
+	mux.HandleFunc("PUT /v1/internal/sessions/{id}/preset", s.use(s.setPreset))
+	mux.HandleFunc("GET /v1/internal/sessions/{id}/presets", s.presets)
+	mux.HandleFunc("PUT /v1/internal/sessions/{id}/features/{feature}", s.use(s.setFeature))
+	mux.HandleFunc("POST /v1/internal/sessions/{id}/continue", s.use(s.continueQueue))
+	mux.HandleFunc("POST /v1/internal/sessions/{id}/queue/{input}/steer", s.use(s.steer))
+	mux.HandleFunc("PUT /v1/internal/sessions/{id}/queue/{input}", s.use(s.editQueued))
+	mux.HandleFunc("DELETE /v1/internal/sessions/{id}/queue/{input}", s.use(s.deleteQueued))
+	mux.HandleFunc("GET /v1/internal/sessions/{id}/rules", s.rules)
+	mux.HandleFunc("DELETE /v1/internal/sessions/{id}/rules", s.use(s.clearRules))
 	s.shellRoutes(mux)
 }
 

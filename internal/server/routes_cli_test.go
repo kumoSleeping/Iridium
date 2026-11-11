@@ -30,13 +30,13 @@ func TestCLIAtMachine(t *testing.T) {
 	b = l.newApp("pc", false)
 	botID = b.App.ID
 	var own api.NewSessionReply
-	l.want(200, "socket", "POST", "/api/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "hello"}, &own)
+	l.want(200, "socket", "POST", "/v1/internal/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "hello"}, &own)
 	l.waitReply("socket", own.ID, "ok: hello")
 
 	run := func(token string, args ...string) (int, string, string, int) {
 		t.Helper()
 		body, _ := json.Marshal(api.CLIRun{Args: args, Cwd: "/x"})
-		req, _ := http.NewRequest("POST", l.base+"/api/cli", bytes.NewReader(body))
+		req, _ := http.NewRequest("POST", l.base+"/v1/internal/cli", bytes.NewReader(body))
 		req.Header.Set("Authorization", "Bearer "+token)
 		resp, err := l.web.Do(req)
 		if err != nil {
@@ -76,13 +76,13 @@ func TestCLIAtMachine(t *testing.T) {
 	}
 	// Not with a channel's own TOKEN, nor a session TOKEN no session has.
 	if code, _, _, _ := run(b.Token, "ls"); code != http.StatusForbidden {
-		t.Errorf("/api/cli with the Bot's TOKEN: %d", code)
+		t.Errorf("/v1/internal/cli with the Bot's TOKEN: %d", code)
 	}
 	if code, _, _, _ := run("irs_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB", "ls"); code != http.StatusUnauthorized {
 		t.Errorf("an unknown session TOKEN: %d", code)
 	}
 	// Its Bot revoked: its sessions' TOKENs go with it.
-	l.want(200, "socket", "DELETE", "/api/apps/"+botID, nil, nil)
+	l.want(200, "socket", "DELETE", "/v1/internal/apps/"+botID, nil, nil)
 	if code, _, _, _ := run(tok, "ls"); code != http.StatusUnauthorized {
 		t.Errorf("after the Bot is revoked: %d", code)
 	}

@@ -31,11 +31,11 @@ func TestNeedsAsksAndShare(t *testing.T) {
 	pad := caller{Identity: gate.Identity{App: gate.WebApp, Login: padID}}
 
 	var cr api.NewSessionReply
-	l.want(200, "socket", "POST", "/api/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "please ASK"}, &cr)
+	l.want(200, "socket", "POST", "/v1/internal/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "please ASK"}, &cr)
 	var ask api.Need
 	for end := time.Now().Add(10 * time.Second); ask.ID == "" && time.Now().Before(end); time.Sleep(20 * time.Millisecond) {
 		var ns api.Needs
-		l.want(200, "socket", "GET", "/api/needs", nil, &ns)
+		l.want(200, "socket", "GET", "/v1/internal/needs", nil, &ns)
 		for _, n := range ns.Pending {
 			if n.Kind == api.NeedAsk {
 				ask = n
@@ -53,10 +53,10 @@ func TestNeedsAsksAndShare(t *testing.T) {
 	if f := l.s.streamFilter(u1); string(f("needs", mustJSON(l.s.asks.everything()))) != `{"pending":[]}` {
 		t.Fatal("u1's stream has the ask")
 	}
-	l.want(200, "socket", "POST", "/api/sessions/"+cr.ID+"/answer", api.CardAnswer{Card: ask.ID, Option: "allow"}, nil)
+	l.want(200, "socket", "POST", "/v1/internal/sessions/"+cr.ID+"/answer", api.CardAnswer{Card: ask.ID, Option: "allow"}, nil)
 	for end := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
 		var ns api.Needs
-		l.want(200, "socket", "GET", "/api/needs", nil, &ns)
+		l.want(200, "socket", "GET", "/v1/internal/needs", nil, &ns)
 		if len(ns.Pending) == 0 {
 			break
 		}
@@ -67,15 +67,15 @@ func TestNeedsAsksAndShare(t *testing.T) {
 
 	// Shares: checked against the login it goes to.
 	var e api.Error
-	if l.do("socket", "POST", "/api/share", api.ShareRequest{What: api.ShareOfSession, Session: cr.ID, To: "bot/u1"}, &e); e.Code != "not_usable" {
+	if l.do("socket", "POST", "/v1/internal/share", api.ShareRequest{What: api.ShareOfSession, Session: cr.ID, To: "bot/u1"}, &e); e.Code != "not_usable" {
 		t.Errorf("a Claude session to a codex-only login: %+v", e)
 	}
-	if l.do("socket", "POST", "/api/share", api.ShareRequest{What: api.ShareOfSession, Session: cr.ID, To: "bot/nobody"}, &e); e.Code != "no_such_login" {
+	if l.do("socket", "POST", "/v1/internal/share", api.ShareRequest{What: api.ShareOfSession, Session: cr.ID, To: "bot/nobody"}, &e); e.Code != "no_such_login" {
 		t.Errorf("no such login: %+v", e)
 	}
-	l.want(400, "socket", "POST", "/api/share", api.ShareRequest{What: "song", Session: cr.ID, To: "bot/u2"}, nil)
+	l.want(400, "socket", "POST", "/v1/internal/share", api.ShareRequest{What: "song", Session: cr.ID, To: "bot/u2"}, nil)
 	var tg api.ShareTargets
-	l.want(200, "socket", "GET", "/api/share/targets?what=session&session="+cr.ID, nil, &tg)
+	l.want(200, "socket", "GET", "/v1/internal/share/targets?what=session&session="+cr.ID, nil, &tg)
 	for _, a := range tg.Apps {
 		for _, x := range a.Logins {
 			if x.ID == "u1" {
@@ -84,13 +84,13 @@ func TestNeedsAsksAndShare(t *testing.T) {
 		}
 	}
 
-	if l.do("socket", "POST", "/api/share", api.ShareRequest{What: api.ShareOfSession, Session: cr.ID, To: "ir_web/pad"}, &e); e.Code != "not_usable" {
+	if l.do("socket", "POST", "/v1/internal/share", api.ShareRequest{What: api.ShareOfSession, Session: cr.ID, To: "ir_web/pad"}, &e); e.Code != "not_usable" {
 		t.Errorf("a Claude session to a login without Claude: %+v", e)
 	}
 	var cx api.NewSessionReply
-	l.want(200, "socket", "POST", "/api/sessions", api.NewSession{Agent: api.AgentCodex, Cwd: l.work, Text: "hi"}, &cx)
+	l.want(200, "socket", "POST", "/v1/internal/sessions", api.NewSession{Agent: api.AgentCodex, Cwd: l.work, Text: "hi"}, &cx)
 	var r api.ShareReply
-	l.want(200, "socket", "POST", "/api/share", api.ShareRequest{What: api.ShareOfSession, Session: cx.ID, To: "ir_web/pad", Note: "看看"}, &r)
+	l.want(200, "socket", "POST", "/v1/internal/share", api.ShareRequest{What: api.ShareOfSession, Session: cx.ID, To: "ir_web/pad", Note: "看看"}, &r)
 	if r.Login != padID {
 		t.Errorf("reply: %+v", r)
 	}
@@ -110,7 +110,7 @@ func TestNeedsAsksAndShare(t *testing.T) {
 	w.send(satori.OpIdentify, satori.Identify{Token: bot.Token})
 	var ready satori.Ready
 	w.read(&ready)
-	l.want(200, "socket", "POST", "/api/share", api.ShareRequest{What: api.ShareOfPlace, Place: "主机:" + l.work, To: "bot/u1", Note: "这里"}, nil)
+	l.want(200, "socket", "POST", "/v1/internal/share", api.ShareRequest{What: api.ShareOfPlace, Place: "主机:" + l.work, To: "bot/u1", Note: "这里"}, nil)
 	ev := w.event(func(ev satori.Event) bool { return ev.Type == "internal" })
 	if ev.XType != "ir.share" || ev.Login == nil || ev.Login.User.ID != "u1" || ev.XData.Share == nil || ev.XData.Share.Path != l.work || ev.XData.Share.Note != "这里" {
 		t.Fatalf("the event: %+v", ev)

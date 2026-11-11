@@ -139,7 +139,7 @@ export function ChatPage({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?:
     if (was?.id === id && s.next && s.next !== was.next) openChat(s.next);
   }, [id, !!s, s?.next]);
 
-  // Who sent what; this panel as /api/me has it (its name, avatar, device).
+  // Who sent what; this panel as /v1/internal/me has it (its name, avatar, device).
   const self = me ?? LOCAL_ME;
   const source = (b: { from?: string; fromTerminal?: string }) => sourceOf(b.from, b.fromTerminal, self, terminals, list ?? [], workspaces ?? [], s);
 

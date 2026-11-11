@@ -12,7 +12,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/gate"
 )
 
-// notice is POST /api/apps/{id}/logins/{login}/notice, ir send 应用/登录 (draft 二「消息」): text
+// notice is POST /v1/internal/apps/{id}/logins/{login}/notice, ir send 应用/登录 (draft 二「消息」): text
 // shown to one login, waking no agent. A login of ir_web gets it as a Web Push to its browsers;
 // another app's login has no way to get it yet (the Satori events come later): 422
 // not_deliverable, as when nothing would show it. A person, or an agent's ir; not an app's bare

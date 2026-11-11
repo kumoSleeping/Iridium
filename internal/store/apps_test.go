@@ -278,7 +278,7 @@ func TestMigrateToApps(t *testing.T) {
 	h := web.Handler(core, http.NotFoundHandler())
 	do := func(set func(*http.Request)) (gate.Identity, int) {
 		seen = gate.Identity{}
-		r := httptest.NewRequest("GET", origin+"/api/me", nil)
+		r := httptest.NewRequest("GET", origin+"/v1/internal/me", nil)
 		set(r)
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)

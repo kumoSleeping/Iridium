@@ -16,7 +16,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/remote/wire"
 )
 
-// ir pair asks at /api/pair as an app (its name and program, nothing of the machine), waits while
+// ir pair asks at /v1/internal/pair as an app (its name and program, nothing of the machine), waits while
 // pairing is closed, shows the code, and writes the TOKEN into the file, never to the output;
 // denied, it says so.
 func TestPairMain(t *testing.T) {
@@ -29,12 +29,12 @@ func TestPairMain(t *testing.T) {
 			closed--
 			w.WriteHeader(http.StatusForbidden)
 			json.NewEncoder(w).Encode(api.Error{Code: "pair_closed", Message: "closed"})
-		case denied && r.URL.Path == "/api/pair/r1":
+		case denied && r.URL.Path == "/v1/internal/pair/r1":
 			json.NewEncoder(w).Encode(api.PairState{Status: "denied"})
-		case r.Method == http.MethodPost && r.URL.Path == "/api/pair":
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/internal/pair":
 			json.NewDecoder(r.Body).Decode(&asked)
 			json.NewEncoder(w).Encode(api.Pairing{Code: "1234", Request: "r1"})
-		case r.URL.Path == "/api/pair/r1":
+		case r.URL.Path == "/v1/internal/pair/r1":
 			json.NewEncoder(w).Encode(api.PairState{Status: "allowed", Token: "ir_secret"})
 		default:
 			http.NotFound(w, r)

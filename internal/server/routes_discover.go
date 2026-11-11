@@ -18,20 +18,20 @@ import (
 // (docs/api.md "工作区和目录"). Only when the server has a discovery index; the folder picker always
 // (another machine's folders need none).
 func (s *Server) discoverRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/folders", s.folders)
-	mux.HandleFunc("POST /api/folders", s.makeFolder)
+	mux.HandleFunc("GET /v1/internal/folders", s.folders)
+	mux.HandleFunc("POST /v1/internal/folders", s.makeFolder)
 	if s.Discover == nil {
 		return
 	}
-	mux.HandleFunc("GET /api/workspaces", s.workspaces)
+	mux.HandleFunc("GET /v1/internal/workspaces", s.workspaces)
 	// Folder groups are made as sessions go in them, never by hand (the user, 2026-11-08); a name is
 	// the panels' and 本机's to change; a session anyone's to name, colour, archive.
-	mux.HandleFunc("PATCH /api/workspaces/{id}", s.manages(s.renameWorkspace))
-	mux.HandleFunc("PUT /api/groups/order", s.manages(s.orderGroups))
-	mux.HandleFunc("POST /api/workspaces/{id}/split", s.manages(s.splitWorkspace))
-	mux.HandleFunc("PATCH /api/folders/place", s.manages(s.placeFolder))
-	mux.HandleFunc("PATCH /api/sessions/{id}", s.patchSession)
-	mux.HandleFunc("PUT /api/colors", s.manages(s.folderColor))
+	mux.HandleFunc("PATCH /v1/internal/workspaces/{id}", s.manages(s.renameWorkspace))
+	mux.HandleFunc("PUT /v1/internal/groups/order", s.manages(s.orderGroups))
+	mux.HandleFunc("POST /v1/internal/workspaces/{id}/split", s.manages(s.splitWorkspace))
+	mux.HandleFunc("PATCH /v1/internal/folders/place", s.manages(s.placeFolder))
+	mux.HandleFunc("PATCH /v1/internal/sessions/{id}", s.patchSession)
+	mux.HandleFunc("PUT /v1/internal/colors", s.manages(s.folderColor))
 }
 
 func (s *Server) workspaces(w http.ResponseWriter, r *http.Request) {
@@ -129,7 +129,7 @@ func (e managerErr) Error() string        { return e.err.Error() }
 func (e managerErr) Unwrap() error        { return e.err }
 func (e managerErr) Is(target error) bool { return target == errPatchManager }
 
-// patch changes session id as req says (PATCH /api/sessions/{id}, Satori's channel.update and
+// patch changes session id as req says (PATCH /v1/internal/sessions/{id}, Satori's channel.update and
 // channel.delete).
 func (s *Server) patch(ctx context.Context, id string, req api.SessionPatch) error {
 	// Archiving is the shown marker's, and stops a hosted agent: the session manager's; the

@@ -49,7 +49,7 @@ type LoginInfo struct {
 	ID, Name string
 }
 
-// SendResult is what a message sent did, as POST /api/sessions/{id}/send answers it: its input's
+// SendResult is what a message sent did, as POST /v1/internal/sessions/{id}/send answers it: its input's
 // id, whether it waits in the queue, and the session it went to (another one after /clear).
 type SendResult = api.SendReply
 

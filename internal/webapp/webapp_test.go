@@ -121,11 +121,11 @@ func (h *harness) open(origin string) {
 			http.Error(w, "no identity", 500)
 			return
 		}
-		if r.URL.Path == "/api/me/profile" {
+		if r.URL.Path == "/v1/internal/me/profile" {
 			g.ServeProfile(w, r, "")
 			return
 		}
-		if rest, ok := strings.CutPrefix(r.URL.Path, "/api/apps/"); ok {
+		if rest, ok := strings.CutPrefix(r.URL.Path, "/v1/internal/apps/"); ok {
 			g.ServeProfile(w, r, strings.TrimSuffix(rest, "/profile"))
 			return
 		}
@@ -316,7 +316,7 @@ func (h *harness) login(a *authenticator, c *vcred) *httptest.ResponseRecorder {
 
 func (h *harness) whoami() (appReply, int) {
 	h.t.Helper()
-	w := h.do(req{path: "/api/whoami"})
+	w := h.do(req{path: "/v1/internal/whoami"})
 	if w.Code != http.StatusOK {
 		return appReply{}, w.Code
 	}
@@ -450,7 +450,7 @@ func TestRegisterAndLogin(t *testing.T) {
 	h.cookie = ""
 	wantStatus(t, h.login(phone, nil), http.StatusOK)
 	var closed bool
-	r := httptest.NewRequest("GET", "/api/events", nil)
+	r := httptest.NewRequest("GET", "/v1/internal/events", nil)
 	r.Host = "ir.example.com"
 	r.AddCookie(&http.Cookie{Name: CookieName, Value: h.cookie})
 	tracked := false
@@ -660,7 +660,7 @@ func TestSweeperClosesExpiredConnections(t *testing.T) {
 	a := &authenticator{t: t, origin: testOrigin}
 	wantStatus(t, h.join(a, h.setupToken(), ptr("mac")), http.StatusOK)
 	// A stream forwarded for the session ends with it (its context), wherever in the core it is.
-	r := httptest.NewRequest("GET", "/api/events", nil)
+	r := httptest.NewRequest("GET", "/v1/internal/events", nil)
 	r.Host = "ir.example.com"
 	r.AddCookie(&http.Cookie{Name: CookieName, Value: h.cookie})
 	streaming, ended := make(chan struct{}), make(chan struct{})
@@ -724,7 +724,7 @@ func TestLocalMode(t *testing.T) {
 		t.Fatal("setup file in local mode")
 	}
 	do := func(host, method, origin, site string) int {
-		r := httptest.NewRequest(method, "/api/x", nil)
+		r := httptest.NewRequest(method, "/v1/internal/x", nil)
 		r.Host = host
 		r.RemoteAddr = "127.0.0.1:5000"
 		if origin != "" {
@@ -780,17 +780,17 @@ func TestPublicHostAndOrigin(t *testing.T) {
 		host string
 		want int
 	}{
-		{"ok", req{method: "POST", path: "/api/x"}, "", 200},
-		{"default port", req{path: "/api/x"}, "ir.example.com:443", 200},
-		{"loopback host", req{path: "/api/x"}, "127.0.0.1:7810", 421},
+		{"ok", req{method: "POST", path: "/v1/internal/x"}, "", 200},
+		{"default port", req{path: "/v1/internal/x"}, "ir.example.com:443", 200},
+		{"loopback host", req{path: "/v1/internal/x"}, "127.0.0.1:7810", 421},
 		// A bearer token by a loopback name passes the host check (a local plugin), and is checked.
-		{"loopback with a token", req{path: "/api/x", header: map[string]string{"Authorization": "Bearer ir_nope"}}, "127.0.0.1:7810", 401},
-		{"other host with a token", req{path: "/api/x", header: map[string]string{"Authorization": "Bearer ir_nope"}}, "evil.example", 421},
-		{"other host", req{path: "/api/x"}, "evil.example", 421},
-		{"no origin", req{method: "POST", path: "/api/x", header: map[string]string{"Origin": ""}}, "", 403},
-		{"foreign origin", req{method: "POST", path: "/api/x", header: map[string]string{"Origin": "https://evil.example"}}, "", 403},
-		{"http origin", req{method: "POST", path: "/api/x", header: map[string]string{"Origin": "http://ir.example.com"}}, "", 403},
-		{"cross-site", req{method: "DELETE", path: "/api/x", header: map[string]string{"Sec-Fetch-Site": "same-site"}}, "", 403},
+		{"loopback with a token", req{path: "/v1/internal/x", header: map[string]string{"Authorization": "Bearer ir_nope"}}, "127.0.0.1:7810", 401},
+		{"other host with a token", req{path: "/v1/internal/x", header: map[string]string{"Authorization": "Bearer ir_nope"}}, "evil.example", 421},
+		{"other host", req{path: "/v1/internal/x"}, "evil.example", 421},
+		{"no origin", req{method: "POST", path: "/v1/internal/x", header: map[string]string{"Origin": ""}}, "", 403},
+		{"foreign origin", req{method: "POST", path: "/v1/internal/x", header: map[string]string{"Origin": "https://evil.example"}}, "", 403},
+		{"http origin", req{method: "POST", path: "/v1/internal/x", header: map[string]string{"Origin": "http://ir.example.com"}}, "", 403},
+		{"cross-site", req{method: "DELETE", path: "/v1/internal/x", header: map[string]string{"Sec-Fetch-Site": "same-site"}}, "", 403},
 		{"ws ok", req{path: "/ws", header: map[string]string{"Upgrade": "websocket", "Connection": "Upgrade", "Origin": testOrigin}}, "", 200},
 		{"ws foreign", req{path: "/ws", header: map[string]string{"Upgrade": "websocket", "Connection": "Upgrade", "Origin": "https://evil.example"}}, "", 403},
 		{"ws no origin", req{path: "/ws", header: map[string]string{"Upgrade": "websocket", "Connection": "Upgrade"}}, "", 403},

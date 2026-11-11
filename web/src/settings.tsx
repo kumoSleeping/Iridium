@@ -6,7 +6,7 @@
 // permissions (the 终端 page shows each terminal's) and the approval mode of new sessions (the
 // config file's, else each agent's own). Each a title and its control, no line explaining it;
 // no version shown, no head, signing out a plain row, asked once (the user, 2026-11-08). Every quota bar shows: nothing here hides one.
-// Changed is saved at once (GET/PUT /api/settings). Reaping idle agents and going on after a crash
+// Changed is saved at once (GET/PUT /v1/internal/settings). Reaping idle agents and going on after a crash
 // or a quota are not here: as the config file says, by default 1h and on (the user, 2026-11-07).
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, ChevronLeft, ChevronRight, LoaderCircle, LogOut, MonitorDown, RefreshCw, Share, SquarePlus } from "lucide-react";

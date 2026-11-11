@@ -34,12 +34,12 @@ func TestColors(t *testing.T) {
 	c, base := srv.Client(), srv.URL
 
 	var created api.NewSessionReply
-	if code := call(t, c, "POST", base+"/api/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: work}, &created); code != 200 {
+	if code := call(t, c, "POST", base+"/v1/internal/sessions", api.NewSession{Agent: api.AgentClaude, Cwd: work}, &created); code != 200 {
 		t.Fatalf("new session: %d", code)
 	}
 	color := func() api.Color {
 		var l []api.Session
-		call(t, c, "GET", base+"/api/sessions", nil, &l)
+		call(t, c, "GET", base+"/v1/internal/sessions", nil, &l)
 		if len(l) != 1 {
 			t.Fatalf("sessions: %+v", l)
 		}
@@ -54,14 +54,14 @@ func TestColors(t *testing.T) {
 		}
 	}
 	blue, none, bad := api.ColorBlue, api.Color(""), api.Color("pink")
-	if code := call(t, c, "PATCH", base+"/api/sessions/"+created.ID, api.SessionPatch{Color: &blue}, nil); code != 200 {
+	if code := call(t, c, "PATCH", base+"/v1/internal/sessions/"+created.ID, api.SessionPatch{Color: &blue}, nil); code != 200 {
 		t.Fatalf("tag: %d", code)
 	}
 	wait(api.ColorBlue)
-	if code := call(t, c, "PATCH", base+"/api/sessions/"+created.ID, api.SessionPatch{Color: &bad}, nil); code != http.StatusBadRequest {
+	if code := call(t, c, "PATCH", base+"/v1/internal/sessions/"+created.ID, api.SessionPatch{Color: &bad}, nil); code != http.StatusBadRequest {
 		t.Errorf("a colour that is none: %d", code)
 	}
-	if code := call(t, c, "PATCH", base+"/api/sessions/"+created.ID, api.SessionPatch{Color: &none}, nil); code != 200 {
+	if code := call(t, c, "PATCH", base+"/v1/internal/sessions/"+created.ID, api.SessionPatch{Color: &none}, nil); code != 200 {
 		t.Fatalf("untag: %d", code)
 	}
 	wait("")
@@ -71,19 +71,19 @@ func TestColors(t *testing.T) {
 		json.Unmarshal(s.hub.Get("colors"), &m)
 		return m
 	}
-	if code := call(t, c, "PUT", base+"/api/colors", api.FolderColor{Path: work + "/", Color: api.ColorGreen}, nil); code != 200 {
+	if code := call(t, c, "PUT", base+"/v1/internal/colors", api.FolderColor{Path: work + "/", Color: api.ColorGreen}, nil); code != 200 {
 		t.Fatalf("folder tag: %d", code)
 	}
 	if m := carried(); len(m) != 1 || m[work] != api.ColorGreen {
 		t.Errorf("carried: %+v", m)
 	}
-	if code := call(t, c, "PUT", base+"/api/colors", api.FolderColor{Path: "rel", Color: api.ColorGreen}, nil); code != http.StatusBadRequest {
+	if code := call(t, c, "PUT", base+"/v1/internal/colors", api.FolderColor{Path: "rel", Color: api.ColorGreen}, nil); code != http.StatusBadRequest {
 		t.Errorf("a folder not absolute: %d", code)
 	}
-	if code := call(t, c, "PUT", base+"/api/colors", api.FolderColor{Path: work, Color: bad}, nil); code != http.StatusBadRequest {
+	if code := call(t, c, "PUT", base+"/v1/internal/colors", api.FolderColor{Path: work, Color: bad}, nil); code != http.StatusBadRequest {
 		t.Errorf("a folder colour that is none: %d", code)
 	}
-	if code := call(t, c, "PUT", base+"/api/colors", api.FolderColor{Path: work}, nil); code != 200 {
+	if code := call(t, c, "PUT", base+"/v1/internal/colors", api.FolderColor{Path: work}, nil); code != 200 {
 		t.Fatalf("folder untag: %d", code)
 	}
 	if m := carried(); len(m) != 0 {

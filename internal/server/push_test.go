@@ -99,27 +99,27 @@ func TestPushOnAsk(t *testing.T) {
 	sub := api.PushSubscription{Endpoint: srv.URL}
 	sub.Keys.P256dh = base64.RawURLEncoding.EncodeToString(ua.PublicKey().Bytes())
 	sub.Keys.Auth = base64.RawURLEncoding.EncodeToString(auth)
-	if code := p.do("POST", "/api/web/push/subscriptions", sub, nil); code != 200 {
+	if code := p.do("POST", "/v1/internal/web/push/subscriptions", sub, nil); code != 200 {
 		t.Fatalf("subscribe: %d", code)
 	}
 	var sent map[string]int
-	if p.do("POST", "/api/web/push/test", nil, &sent); sent["sent"] != 1 || (<-got).Kind != "test" {
+	if p.do("POST", "/v1/internal/web/push/test", nil, &sent); sent["sent"] != 1 || (<-got).Kind != "test" {
 		t.Errorf("test push: %v", sent)
 	}
 	var created api.NewSessionReply
-	p.do("POST", "/api/sessions", api.NewSession{Cwd: p.work, Text: "hi"}, &created)
+	p.do("POST", "/v1/internal/sessions", api.NewSession{Cwd: p.work, Text: "hi"}, &created)
 	// A turn's end with the switch off: nothing (a push meanwhile would be the first got below).
 	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
 		var s api.SessionState
-		if p.do("GET", "/api/sessions/"+created.ID, nil, &s); s.Status == api.StatusIdle && s.Last != nil && s.Last.Text == "ok: hi" {
+		if p.do("GET", "/v1/internal/sessions/"+created.ID, nil, &s); s.Status == api.StatusIdle && s.Last != nil && s.Last.Text == "ok: hi" {
 			break
 		}
 		if time.Now().After(deadline) {
 			t.Fatal("no turn's end")
 		}
 	}
-	p.do("PUT", "/api/web/push", api.PushSwitch{Enabled: true}, nil)
-	p.do("POST", "/api/sessions/"+created.ID+"/send", api.Send{Text: "please ASK"}, nil)
+	p.do("PUT", "/v1/internal/web/push", api.PushSwitch{Enabled: true}, nil)
+	p.do("POST", "/v1/internal/sessions/"+created.ID+"/send", api.Send{Text: "please ASK"}, nil)
 	select {
 	case m := <-got:
 		if m.Kind != "needs_you" || m.Session != created.ID || !strings.Contains(m.Body, "ls") {
@@ -162,13 +162,13 @@ func TestPushPanelsOnly(t *testing.T) {
 		method, path string
 		body         any
 	}{
-		{"GET", "/api/web/push", nil},
-		{"PUT", "/api/web/push", api.PushSwitch{Enabled: true}},
-		{"PUT", "/api/web/push/defaults", api.PushEvents{NeedsYou: true}},
-		{"PUT", "/api/web/push/rules", api.PushRule{Scope: api.PushScopeWorkspace, Target: "0", Mode: api.PushModeOff}},
-		{"POST", "/api/web/push/subscriptions", sub},
-		{"DELETE", "/api/web/push/subscriptions", api.PushUnsubscribe{Endpoint: sub.Endpoint}},
-		{"POST", "/api/web/push/test", nil},
+		{"GET", "/v1/internal/web/push", nil},
+		{"PUT", "/v1/internal/web/push", api.PushSwitch{Enabled: true}},
+		{"PUT", "/v1/internal/web/push/defaults", api.PushEvents{NeedsYou: true}},
+		{"PUT", "/v1/internal/web/push/rules", api.PushRule{Scope: api.PushScopeWorkspace, Target: "0", Mode: api.PushModeOff}},
+		{"POST", "/v1/internal/web/push/subscriptions", sub},
+		{"DELETE", "/v1/internal/web/push/subscriptions", api.PushUnsubscribe{Endpoint: sub.Endpoint}},
+		{"POST", "/v1/internal/web/push/test", nil},
 	}
 	for _, as := range []string{bot.Token, "agent"} {
 		for _, r := range routes {
@@ -189,11 +189,11 @@ func TestPushPanelsOnly(t *testing.T) {
 
 	// Revoked: the terminal's subscriptions dropped, the others' kept.
 	mine := keyed("https://push.example.com/mine")
-	l.want(200, "web", "POST", "/api/web/push/subscriptions", mine, nil)
+	l.want(200, "web", "POST", "/v1/internal/web/push/subscriptions", mine, nil)
 	if err := l.s.st.AddPushSubscription(store.PushSubscription{Terminal: bot.App.ID, Endpoint: sub.Endpoint, Keys: `{}`}); err != nil {
 		t.Fatal(err)
 	}
-	l.want(200, "socket", "DELETE", "/api/apps/"+bot.App.ID, nil, nil)
+	l.want(200, "socket", "DELETE", "/v1/internal/apps/"+bot.App.ID, nil, nil)
 	subs, _ := l.s.st.PushSubscriptions()
 	if len(subs) != 1 || subs[0].Endpoint != mine.Endpoint {
 		t.Fatalf("after the revoke: %+v", subs)
@@ -204,11 +204,11 @@ func TestPushPanelsOnly(t *testing.T) {
 func TestQueueAndPushRoutes(t *testing.T) {
 	p := newPushRig(t)
 	var created api.NewSessionReply
-	p.do("POST", "/api/sessions", api.NewSession{Cwd: p.work, Text: "one WAIT"}, &created)
+	p.do("POST", "/v1/internal/sessions", api.NewSession{Cwd: p.work, Text: "one WAIT"}, &created)
 	id := created.ID
 	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
 		var s api.SessionState
-		p.do("GET", "/api/sessions/"+id, nil, &s)
+		p.do("GET", "/v1/internal/sessions/"+id, nil, &s)
 		if s.Status == api.StatusRunning {
 			break
 		}
@@ -217,42 +217,42 @@ func TestQueueAndPushRoutes(t *testing.T) {
 		}
 	}
 	var sent api.SendReply
-	if p.do("POST", "/api/sessions/"+id+"/send", api.Send{Text: "two"}, &sent); !sent.Queued {
+	if p.do("POST", "/v1/internal/sessions/"+id+"/send", api.Send{Text: "two"}, &sent); !sent.Queued {
 		t.Fatalf("not queued: %+v", sent)
 	}
-	if code := p.do("PUT", "/api/sessions/"+id+"/queue/"+sent.Input, api.EditQueued{Text: "two!"}, nil); code != 200 {
+	if code := p.do("PUT", "/v1/internal/sessions/"+id+"/queue/"+sent.Input, api.EditQueued{Text: "two!"}, nil); code != 200 {
 		t.Errorf("edit: %d", code)
 	}
-	if code := p.do("DELETE", "/api/sessions/"+id+"/queue/nope", nil, nil); code != 422 {
+	if code := p.do("DELETE", "/v1/internal/sessions/"+id+"/queue/nope", nil, nil); code != 422 {
 		t.Errorf("delete nothing: %d", code)
 	}
-	if code := p.do("POST", "/api/sessions/"+id+"/queue/"+sent.Input+"/steer", nil, nil); code != 200 {
+	if code := p.do("POST", "/v1/internal/sessions/"+id+"/queue/"+sent.Input+"/steer", nil, nil); code != 200 {
 		t.Errorf("steer: %d", code)
 	}
-	if code := p.do("PUT", "/api/sessions/"+id+"/mode", api.SetMode{Mode: "nope"}, nil); code != 400 {
+	if code := p.do("PUT", "/v1/internal/sessions/"+id+"/mode", api.SetMode{Mode: "nope"}, nil); code != 400 {
 		t.Errorf("bad mode: %d", code)
 	}
-	if code := p.do("POST", "/api/sessions/"+id+"/continue", nil, nil); code != 200 {
+	if code := p.do("POST", "/v1/internal/sessions/"+id+"/continue", nil, nil); code != 200 {
 		t.Errorf("continue: %d", code)
 	}
 	var rules []api.AllowRule
-	if code := p.do("GET", "/api/sessions/"+id+"/rules", nil, &rules); code != 200 || rules == nil {
+	if code := p.do("GET", "/v1/internal/sessions/"+id+"/rules", nil, &rules); code != 200 || rules == nil {
 		t.Errorf("rules: %d %v", code, rules)
 	}
 
 	var ps api.PushState
-	if p.do("GET", "/api/web/push", nil, &ps); ps.Enabled || len(ps.PublicKey) < 80 || len(ps.Rules) != 0 || !ps.Defaults.NeedsYou || !ps.Defaults.Error || !ps.Defaults.TurnEnd {
+	if p.do("GET", "/v1/internal/web/push", nil, &ps); ps.Enabled || len(ps.PublicKey) < 80 || len(ps.Rules) != 0 || !ps.Defaults.NeedsYou || !ps.Defaults.Error || !ps.Defaults.TurnEnd {
 		t.Errorf("push: %+v", ps)
 	}
 	ps = api.PushState{}
-	if code := p.do("PUT", "/api/web/push/defaults", api.PushEvents{NeedsYou: true, TurnEnd: true}, &ps); code != 200 || !ps.Defaults.TurnEnd || ps.Defaults.Error {
+	if code := p.do("PUT", "/v1/internal/web/push/defaults", api.PushEvents{NeedsYou: true, TurnEnd: true}, &ps); code != 200 || !ps.Defaults.TurnEnd || ps.Defaults.Error {
 		t.Errorf("defaults: %d %+v", code, ps)
 	}
-	if code := p.do("PUT", "/api/web/push/rules", api.PushRule{Scope: api.PushScopeWorkspace, Target: "0", Mode: api.PushModeOff}, nil); code != 200 {
+	if code := p.do("PUT", "/v1/internal/web/push/rules", api.PushRule{Scope: api.PushScopeWorkspace, Target: "0", Mode: api.PushModeOff}, nil); code != 200 {
 		t.Errorf("workspace rule: %d", code)
 	}
 	ps = api.PushState{}
-	p.do("PUT", "/api/web/push/rules", api.PushRule{Scope: api.PushScopeSession, Target: id, Mode: api.PushModeOn, Events: &api.PushEvents{Error: true}}, &ps)
+	p.do("PUT", "/v1/internal/web/push/rules", api.PushRule{Scope: api.PushScopeSession, Target: id, Mode: api.PushModeOn, Events: &api.PushEvents{Error: true}}, &ps)
 	if len(ps.Rules) != 2 {
 		t.Fatalf("rules: %+v", ps.Rules)
 	}
@@ -262,17 +262,17 @@ func TestQueueAndPushRoutes(t *testing.T) {
 	if _, on := push.Resolve(ps, 0, p.work, "other"); on {
 		t.Error("another session of the workspace off")
 	}
-	p.do("PUT", "/api/web/push/rules", api.PushRule{Scope: api.PushScopeWorkspace, Target: "0"}, nil)
-	if p.do("GET", "/api/web/push", nil, &ps); len(ps.Rules) != 1 || ps.Rules[0].Scope != api.PushScopeSession {
+	p.do("PUT", "/v1/internal/web/push/rules", api.PushRule{Scope: api.PushScopeWorkspace, Target: "0"}, nil)
+	if p.do("GET", "/v1/internal/web/push", nil, &ps); len(ps.Rules) != 1 || ps.Rules[0].Scope != api.PushScopeSession {
 		t.Errorf("inherit drops the rule: %+v", ps.Rules)
 	}
 	for _, bad := range []api.PushRule{{Scope: "node", Target: "x", Mode: api.PushModeOn}, {Scope: api.PushScopeWorkspace, Target: "-1", Mode: api.PushModeOn}, {Scope: api.PushScopeFolder, Target: "rel/dir", Mode: api.PushModeOff}, {Scope: api.PushScopeSession, Mode: api.PushModeOn}, {Scope: api.PushScopeSession, Target: id, Mode: "maybe"}} {
-		if code := p.do("PUT", "/api/web/push/rules", bad, nil); code != 400 {
+		if code := p.do("PUT", "/v1/internal/web/push/rules", bad, nil); code != 400 {
 			t.Errorf("%+v: %d", bad, code)
 		}
 	}
 	sub := api.PushSubscription{Endpoint: "http://insecure.example/x"}
-	if code := p.do("POST", "/api/web/push/subscriptions", sub, nil); code != 400 {
+	if code := p.do("POST", "/v1/internal/web/push/subscriptions", sub, nil); code != 400 {
 		t.Errorf("an http endpoint: %d", code)
 	}
 }
@@ -299,14 +299,14 @@ func TestNotice(t *testing.T) {
 		t.Helper()
 		e = api.Error{}
 		app, login, _ := strings.Cut(to, "/")
-		l.do(as, "POST", "/api/apps/"+app+"/logins/"+login+"/notice", body, &e)
+		l.do(as, "POST", "/v1/internal/apps/"+app+"/logins/"+login+"/notice", body, &e)
 		return e.Code
 	}
 	hi := api.Notice{Text: "跑完了"}
 	if c := code("socket", "ir_web/pad", hi); c != "not_deliverable" || !strings.Contains(e.Message, "Web Push is off") {
 		t.Errorf("push off: %+v", e)
 	}
-	l.want(200, "socket", "PUT", "/api/web/push", api.PushSwitch{Enabled: true}, nil)
+	l.want(200, "socket", "PUT", "/v1/internal/web/push", api.PushSwitch{Enabled: true}, nil)
 	if c := code("socket", "ir_web/pad", hi); c != "not_deliverable" || !strings.Contains(e.Message, "no browser") {
 		t.Errorf("no browser: %+v", e)
 	}
@@ -318,7 +318,7 @@ func TestNotice(t *testing.T) {
 	if c := code(bot.Token, "ir_web/pad", hi); c != "no_permission" {
 		t.Errorf("an app's TOKEN: %+v", e)
 	}
-	l.want(400, "socket", "POST", "/api/apps/ir_web/logins/pad/notice", api.Notice{Text: "  "}, nil)
+	l.want(400, "socket", "POST", "/v1/internal/apps/ir_web/logins/pad/notice", api.Notice{Text: "  "}, nil)
 
 	// A browser of pad's: the notice comes from the session ir runs in.
 	ua, _ := ecdh.P256().GenerateKey(rand.Reader)
@@ -342,9 +342,9 @@ func TestNotice(t *testing.T) {
 		t.Fatal(err)
 	}
 	var mine api.NewSessionReply
-	l.want(200, "socket", "POST", "/api/sessions", api.NewSession{Agent: api.AgentCodex, Cwd: l.work, Text: "hi"}, &mine)
+	l.want(200, "socket", "POST", "/v1/internal/sessions", api.NewSession{Agent: api.AgentCodex, Cwd: l.work, Text: "hi"}, &mine)
 	var r api.NoticeReply
-	l.want(200, "agent-in:"+mine.ID, "POST", "/api/apps/ir_web/logins/pad/notice", hi, &r)
+	l.want(200, "agent-in:"+mine.ID, "POST", "/v1/internal/apps/ir_web/logins/pad/notice", hi, &r)
 	if r.Sent != 1 || r.Login != padID || r.Name != "pad" {
 		t.Errorf("reply: %+v", r)
 	}
@@ -362,8 +362,8 @@ func TestNotice(t *testing.T) {
 func TestAnswerAtSession(t *testing.T) {
 	l := start(t)
 	var a api.NewSessionReply
-	l.want(200, "socket", "POST", "/api/sessions", api.NewSession{Agent: api.AgentCodex, Cwd: l.work, Text: "hi"}, &a)
-	l.want(400, "socket", "POST", "/api/sessions/"+a.ID+"/answer", api.CardAnswer{Card: "ask:other:1", Option: "allow"}, nil)
-	l.want(400, "socket", "POST", "/api/sessions/"+a.ID+"/answer", api.CardAnswer{Card: "pick:1", Option: "x"}, nil)
-	l.want(410, "socket", "POST", "/api/sessions/"+a.ID+"/answer", api.CardAnswer{Card: "ask:" + a.ID + ":none", Option: "allow"}, nil)
+	l.want(200, "socket", "POST", "/v1/internal/sessions", api.NewSession{Agent: api.AgentCodex, Cwd: l.work, Text: "hi"}, &a)
+	l.want(400, "socket", "POST", "/v1/internal/sessions/"+a.ID+"/answer", api.CardAnswer{Card: "ask:other:1", Option: "allow"}, nil)
+	l.want(400, "socket", "POST", "/v1/internal/sessions/"+a.ID+"/answer", api.CardAnswer{Card: "pick:1", Option: "x"}, nil)
+	l.want(410, "socket", "POST", "/v1/internal/sessions/"+a.ID+"/answer", api.CardAnswer{Card: "ask:" + a.ID + ":none", Option: "allow"}, nil)
 }

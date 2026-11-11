@@ -15,7 +15,7 @@
 | `user` | agent（`claude`、`codex`…，`is_bot`），以及说话的应用、登录、主机 |
 | `message` | 记录里的一块（人说的、agent 说的、思考、工具调用、系统行），`id` 是块的位置 `<偏移>.<序号>`；提问是 `ask:<会话>:<请求>` |
 
-鉴权：应用用 `Authorization: Bearer <应用 TOKEN>`（过 gate）。网页也是应用（一视同仁）：浏览器凭 cookie，`Satori-Platform: ir_web`、`Satori-User-ID: <登录 ID>`；没开公网时主机自己的页面是平台 `local` 的登录 `local`。这两种连接只代表这一个登录。会话 TOKEN 403 `no_login`。`Satori-Platform` 不是本应用 ID、没有 `Satori-User-ID`：403 `no_such_login`。新登录第一次说话：403 `login_pending`，产生“登录加入”需要（和 `/api` 一样）。
+鉴权：应用用 `Authorization: Bearer <应用 TOKEN>`（过 gate）。网页也是应用（一视同仁）：浏览器凭 cookie，`Satori-Platform: ir_web`、`Satori-User-ID: <登录 ID>`；没开公网时主机自己的页面是平台 `local` 的登录 `local`。这两种连接只代表这一个登录。会话 TOKEN 403 `no_login`。`Satori-Platform` 不是本应用 ID、没有 `Satori-User-ID`：403 `no_such_login`。新登录第一次说话：403 `login_pending`，产生“登录加入”需要（和 `/v1/internal/*` 一样）。
 
 ## HTTP `POST /v1/{资源}.{方法}`
 
@@ -23,7 +23,7 @@
 - `message.get`、`message.list`：记录的每一块是一条消息，内容见下面“记录”。`message.list` 是 BidiList，翻页标记是记录里行的偏移；`limit` 按块数、在行首截，可能略多；没有 `next` 时只能 `before`。多一个 `_data {start, end, more}`：这页从哪行起、读时记录到哪（下次 `direction: after` 从这里取新写的）、前面还有没有。`direction: after` 读到记录末尾时不带 `next`。网页读记录也走它。
 - `channel.get`、`channel.list {guild_id?, next?}`（不给 `guild_id` 是全部；不列归档和子 agent）、`guild.get`、`guild.list`（只列范围里的）、`login.get`、`user.get`。
 - `channel.update {channel_id, data: {name}}` 改名；`channel.delete {channel_id}` 归档（agent 停下，记录不删）。要能用这个会话。
-- `upload.create`：一个 multipart，带字段 `channel_id`，每个文件回 `internal:{应用}/{登录}/files/{会话}/{ref}`。网页仍用分块的 `/api/uploads`。
+- `upload.create`：一个 multipart，带字段 `channel_id`，每个文件回 `internal:{应用}/{登录}/files/{会话}/{ref}`。网页用分块的 `/v1/internal/uploads`。
 - `POST /v1/meta`：本应用已批准的登录，`proxy_urls` 为空。`/v1/meta/*`（webhook）不做。
 - `GET /v1/proxy/internal:…`：只取本应用登录的文件。不是地址 400，不是本应用的登录 404，别的地址 403。
 - 不支持的标准接口（`message.delete` 等）照规范 404。
@@ -50,9 +50,9 @@
 
 ## Iridium 自己的接口 `/v1/internal/*`
 
-照规范的 internal 路由（advanced/internal.md）：`/v1/internal/<路径>` 就是 Iridium 自己的 `/api/<路径>`（方法、正文、回答都一样，`docs/api.md`），给 Satori 没有的东西：工具块、待发队列、模型和模式、文件夹组、设置、应用管理……带了 `Satori-Platform`、`Satori-User-ID` 就必须是调用者自己的。网页全部走这里和标准方法，不再用 `/api`。
+照规范的 internal 路由（advanced/internal.md）：Iridium 自己的接口全在 `/v1/internal/<路径>`（`docs/api.md`），给 Satori 没有的东西：工具块、待发队列、模型和模式、文件夹组、设置、应用管理……带了 `Satori-Platform`、`Satori-User-ID` 就必须是调用者自己的。主机的 `ir` 经 unix socket 走同样的路径。网页只用这里和标准方法。
 
-`message.create` 多收一个 `_data`：`{steer?, attachments?, caller?}`（插话还是排队、上传好的引用），回答的 Message 也带 `_data`，是发送的结果（同 `POST /api/sessions/{id}/send` 的回答）。应用发的一律插话。
+`message.create` 多收一个 `_data`：`{steer?, attachments?, caller?}`（插话还是排队、上传好的引用），回答的 Message 也带 `_data`，是发送的结果（同 `POST /v1/internal/sessions/{id}/send` 的回答）。应用发的一律插话。
 
 ## WebSocket `/v1/events`
 
@@ -93,10 +93,11 @@
 
 ## 和规范不一样的地方
 
-- 资源不存在回 422 而不是 404（`/api` 也一样）。
+- 资源不存在回 422 而不是 404（`/v1/internal` 也一样）。
 - 按钮反过来：`interaction/button` 是登录按了 Iridium 发的按钮之后发出的；按下本身走 `/v1/internal/button`。
 - 没有 `guild-*`、`login-updated` 事件。`channel.update` 只能改名，`channel.delete` 是归档（不删记录）。
-- 没有 META 信令、webhook、`proxy_urls`；草稿、状态等自定义 op（≥6）还没有。
+- 没有 META 信令、webhook、`proxy_urls`。
+- 自定义 op：6 WATCH、7 STATE（见上），只给网页和主机的连接。
 - 发起登录不叫 `referrer`，放在 `_data.origin`，目前是应用 ID。服务端已按回合记下发起的登录（agent 的 `ir` 按它算权限），事件里还没带出来。
 - 权限：每个登录按“登录的 ∩ 应用的”权限；范围外的会话（channel）和文件夹组（guild）看不见。
 - `message.create` 里的 `<message>` 各发一条；`data:` 资源存成上传的文件；`https:` 资源不下载，转成文字。

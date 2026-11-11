@@ -34,7 +34,7 @@ func TestWebApp(t *testing.T) {
 	if w := get("/assets/app-1.js", ""); w.Code != 200 || !strings.Contains(w.Header().Get("Cache-Control"), "immutable") {
 		t.Fatalf("asset: %d %q", w.Code, w.Header().Get("Cache-Control"))
 	}
-	if w := get("/api/health", ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"ok":true`) {
+	if w := get("/v1/internal/health", ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"ok":true`) {
 		t.Fatalf("health: %d %q", w.Code, w.Body.String())
 	}
 	if w := get("/_ir/api/session", ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"local":true`) {

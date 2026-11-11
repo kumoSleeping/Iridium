@@ -86,7 +86,7 @@ type FeatureOption struct {
 	Name string `json:"name"`
 }
 
-// SetFeature switches a feature on or off (PUT /api/sessions/{id}/features/{feature}), maybe at
+// SetFeature switches a feature on or off (PUT /v1/internal/sessions/{id}/features/{feature}), maybe at
 // one of its options.
 type SetFeature struct {
 	On     bool   `json:"on"`
@@ -158,7 +158,7 @@ type CardAnswer struct {
 	Message string   `json:"message,omitempty"`
 }
 
-// CardReply is what answering a card did (POST /api/sessions/{id}/answer).
+// CardReply is what answering a card did (POST /v1/internal/sessions/{id}/answer).
 type CardReply struct {
 	OK bool `json:"ok"`
 }

@@ -217,7 +217,7 @@ func TestAgentCommands(t *testing.T) {
 		t.Errorf("wait with the ask open: %+v", r)
 	}
 	var ok map[string]any
-	if err := (&env{}).client(cfg).do("POST", "/api/sessions/"+full+"/answer", api.CardAnswer{Card: "ask:" + full + ":ask-1", Option: "allow"}, &ok); err != nil {
+	if err := (&env{}).client(cfg).do("POST", "/v1/internal/sessions/"+full+"/answer", api.CardAnswer{Card: "ask:" + full + ":ask-1", Option: "allow"}, &ok); err != nil {
 		t.Fatal(err)
 	}
 	if r := ir("wait", sid); r.code != 0 || r.out != "ok: please ASK\n" {
@@ -283,7 +283,7 @@ func TestAgentCommands(t *testing.T) {
 	// Archived, its agent stops: a send while it is still stopping meets no holder.
 	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
 		var st api.SessionState
-		if err := (&env{}).client(cfg).do("GET", "/api/sessions/"+full, nil, &st); err == nil && !st.Live {
+		if err := (&env{}).client(cfg).do("GET", "/v1/internal/sessions/"+full, nil, &st); err == nil && !st.Live {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -304,7 +304,7 @@ func TestAgentCommands(t *testing.T) {
 	if r := ir("ls"); !strings.HasSuffix(strings.TrimSpace(r.out), "\t会话命名") {
 		t.Errorf("ls after rename: %+v", r)
 	}
-	if err := (&env{}).client(cfg).do("PATCH", "/api/sessions/"+full, api.SessionPatch{Name: new("mine")}, nil); err != nil {
+	if err := (&env{}).client(cfg).do("PATCH", "/v1/internal/sessions/"+full, api.SessionPatch{Name: new("mine")}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if r := ir("rename", sid, "agent's"); r.code != 1 || !strings.Contains(r.err, "用户起的名") {

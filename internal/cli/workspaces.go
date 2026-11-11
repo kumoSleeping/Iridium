@@ -33,7 +33,7 @@ func cmdWs(e *env, args []string) int {
 		if err != nil {
 			return e.fail(err)
 		}
-		if err := e.do("PATCH", fmt.Sprintf("/api/workspaces/%d", w.ID), api.WorkspacePatch{Name: &rest[1]}, nil); err != nil {
+		if err := e.do("PATCH", fmt.Sprintf("/v1/internal/workspaces/%d", w.ID), api.WorkspacePatch{Name: &rest[1]}, nil); err != nil {
 			return e.fail(err)
 		}
 		return exitDone
@@ -45,11 +45,11 @@ func cmdWs(e *env, args []string) int {
 // with none shown is not listed, as in the sidebar.
 func wsLs(e *env) int {
 	var list []api.Workspace
-	if err := e.do("GET", "/api/workspaces", nil, &list); err != nil {
+	if err := e.do("GET", "/v1/internal/workspaces", nil, &list); err != nil {
 		return e.fail(err)
 	}
 	var sessions []api.Session
-	if err := e.do("GET", "/api/sessions", nil, &sessions); err != nil {
+	if err := e.do("GET", "/v1/internal/sessions", nil, &sessions); err != nil {
 		return e.fail(err)
 	}
 	n := map[int64]int{}
@@ -85,7 +85,7 @@ func tildeOf(path, home string) string {
 // workspace is the group arg names: its id, else its name (any case).
 func (e *env) workspace(arg string) (api.Workspace, error) {
 	var list []api.Workspace
-	if err := e.do("GET", "/api/workspaces", nil, &list); err != nil {
+	if err := e.do("GET", "/v1/internal/workspaces", nil, &list); err != nil {
 		return api.Workspace{}, err
 	}
 	if id, err := strconv.ParseInt(arg, 10, 64); err == nil {

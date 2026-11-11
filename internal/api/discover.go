@@ -12,7 +12,7 @@ type Workspace struct {
 	Only bool `json:"only,omitempty"`
 }
 
-// GroupOrder lists the groups' rows in the order they were dragged to (PUT /api/groups/order), by
+// GroupOrder lists the groups' rows in the order they were dragged to (PUT /v1/internal/groups/order), by
 // the key the page gives each: first to last, those left out after them.
 type GroupOrder struct {
 	Keys []string `json:"keys"`
@@ -29,7 +29,7 @@ type Places struct {
 	Pinned []string           `json:"pinned"`
 }
 
-// FolderPlace puts a folder (PATCH /api/folders/place); a field left out stays. Order 0 takes its
+// FolderPlace puts a folder (PATCH /v1/internal/folders/place); a field left out stays. Order 0 takes its
 // key off.
 type FolderPlace struct {
 	Path   string   `json:"path"`
@@ -83,7 +83,7 @@ type NewFolder struct {
 	Path string `json:"path"`
 	Name string `json:"name"`
 	// Machine: at another machine's executor (its terminal ID); its paths '/'-separated, as
-	// GET /api/folders?machine= gives them.
+	// GET /v1/internal/folders?machine= gives them.
 	Machine string `json:"machine,omitempty"`
 }
 

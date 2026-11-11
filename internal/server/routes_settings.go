@@ -17,8 +17,8 @@ import (
 // settingsRoutes are the settings page's (docs/api.md "设置"): the config file's fields it edits,
 // saved to the file and in force at once.
 func (s *Server) settingsRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/settings", s.manage(func(w http.ResponseWriter, r *http.Request) { reply(w, http.StatusOK, s.settings()) }))
-	mux.HandleFunc("PUT /api/settings", s.panelOnly(s.putSettings))
+	mux.HandleFunc("GET /v1/internal/settings", s.manage(func(w http.ResponseWriter, r *http.Request) { reply(w, http.StatusOK, s.settings()) }))
+	mux.HandleFunc("PUT /v1/internal/settings", s.panelOnly(s.putSettings))
 }
 
 // settings are the live values.

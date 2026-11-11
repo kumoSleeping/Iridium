@@ -24,7 +24,7 @@ func cmdCp(e *env, args []string) int {
 	if req.ToMachine, req.To, err = pathArg(o.pos[1]); err != nil {
 		return e.fail(err)
 	}
-	resp, err := e.request("POST", "/api/files/copy", req)
+	resp, err := e.request("POST", "/v1/internal/files/copy", req)
 	if err != nil {
 		return e.fail(err)
 	}
@@ -66,7 +66,7 @@ func cmdAttach(e *env, args []string) int {
 		p, err := localPath(a)
 		if err == nil {
 			var l api.FileLink
-			if err = e.do("POST", "/api/links", api.AttachPath{Path: p}, &l); err == nil {
+			if err = e.do("POST", "/v1/internal/links", api.AttachPath{Path: p}, &l); err == nil {
 				what := string(l.File.Kind)
 				if l.File.W > 0 && l.File.H > 0 {
 					what += fmt.Sprintf(" %d×%d", l.File.W, l.File.H)
@@ -113,7 +113,7 @@ func cmdFiles(e *env, args []string) int {
 		q += "&machine=" + url.QueryEscape(machine)
 	}
 	var l api.DirListing
-	if err := e.do("GET", "/api/files"+q, nil, &l); err != nil {
+	if err := e.do("GET", "/v1/internal/files"+q, nil, &l); err != nil {
 		return e.fail(err)
 	}
 	for _, en := range l.Entries {

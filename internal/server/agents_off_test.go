@@ -20,7 +20,7 @@ import (
 // gets all.
 func TestAgentsOffAndHomeScope(t *testing.T) {
 	l := startWith(t, func(s *Server, _ config.Config, _ string) { s.Remote = &remote.Hub{Self: "host-hash"}; s.WatchMachines() })
-	l.want(200, "socket", "PUT", "/api/public", api.SetPublic{Origin: "https://ir.example.com"}, nil)
+	l.want(200, "socket", "PUT", "/v1/internal/public", api.SetPublic{Origin: "https://ir.example.com"}, nil)
 	l.s.OpenPairing(0)
 	ask := func(req api.PairRequest) (api.Pairing, api.Need) {
 		t.Helper()
@@ -36,9 +36,9 @@ func TestAgentsOffAndHomeScope(t *testing.T) {
 		t.Fatalf("the home as the scope asked: %+v", nd.Wants)
 	}
 	// Allowed by another name, dsh off from the start.
-	l.want(200, "socket", "POST", "/api/needs/"+nd.ID, api.NeedAnswer{Allow: true, Name: "lab-pc", AgentsOff: []string{"dsh"}}, nil)
+	l.want(200, "socket", "POST", "/v1/internal/needs/"+nd.ID, api.NeedAnswer{Allow: true, Name: "lab-pc", AgentsOff: []string{"dsh"}}, nil)
 	var as api.Apps
-	l.want(200, "socket", "GET", "/api/apps", nil, &as)
+	l.want(200, "socket", "GET", "/v1/internal/apps", nil, &as)
 	i := slices.IndexFunc(as.Apps, func(a api.App) bool { return a.Name == "lab-pc" })
 	if i < 0 || as.Apps[i].Perms == nil || !slices.Equal(as.Apps[i].Perms.Scope, []string{"lab-pc:/home/lab"}) {
 		t.Fatalf("the home kept by the new name: %+v", as.Apps)
@@ -51,17 +51,17 @@ func TestAgentsOffAndHomeScope(t *testing.T) {
 	if len(nd.Pair.Agents) != 0 || !slices.Equal(nd.Wants.Scope, []string{"*"}) {
 		t.Fatalf("an app on the host: %+v %+v", nd.Pair, nd.Wants)
 	}
-	l.want(200, "socket", "POST", "/api/needs/"+nd.ID, api.NeedAnswer{Allow: false}, nil)
+	l.want(200, "socket", "POST", "/v1/internal/needs/"+nd.ID, api.NeedAnswer{Allow: false}, nil)
 	// No agents (a bot): all.
 	_, nd = ask(api.PairRequest{Name: "bot", Type: "bot"})
 	if !slices.Equal(nd.Wants.Scope, []string{"*"}) {
 		t.Fatalf("a bot: %+v", nd.Wants)
 	}
-	l.want(200, "socket", "POST", "/api/needs/"+nd.ID, api.NeedAnswer{Allow: false}, nil)
+	l.want(200, "socket", "POST", "/v1/internal/needs/"+nd.ID, api.NeedAnswer{Allow: false}, nil)
 
 	// An executor connects: its agents listed, dsh marked off.
 	app := l.newApp("box", false)
-	exe, err := executor.New(executor.Options{URL: "ws" + strings.TrimPrefix(l.base, "http") + "/api/exec", Token: app.Token, State: t.TempDir(), Logf: t.Logf,
+	exe, err := executor.New(executor.Options{URL: "ws" + strings.TrimPrefix(l.base, "http") + "/v1/internal/exec", Token: app.Token, State: t.TempDir(), Logf: t.Logf,
 		Agents: []wire.AgentInfo{{Agent: "dsh", Version: "0.2.2", Argv: []string{"node", "bin.js"}}}})
 	if err != nil {
 		t.Fatal(err)
@@ -74,7 +74,7 @@ func TestAgentsOffAndHomeScope(t *testing.T) {
 		t.Helper()
 		for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
 			var as api.Apps
-			l.want(200, "socket", "GET", "/api/apps", nil, &as)
+			l.want(200, "socket", "GET", "/v1/internal/apps", nil, &as)
 			for _, a := range as.Apps {
 				if a.ID == app.App.ID && a.Computer != nil && a.Computer.Online {
 					return a.Computer
@@ -89,11 +89,11 @@ func TestAgentsOffAndHomeScope(t *testing.T) {
 		t.Fatalf("on at first: %+v", c.Agents)
 	}
 	// Only who approves turns it off: not an agent, not an app.
-	l.want(403, "agent", "PUT", "/api/apps/box/agents", api.AppAgents{Off: []string{"dsh"}}, nil)
-	l.want(403, app.Token, "PUT", "/api/apps/box/agents", api.AppAgents{Off: []string{"dsh"}}, nil)
-	l.want(422, "socket", "PUT", "/api/apps/nope/agents", api.AppAgents{Off: []string{"dsh"}}, nil)
+	l.want(403, "agent", "PUT", "/v1/internal/apps/box/agents", api.AppAgents{Off: []string{"dsh"}}, nil)
+	l.want(403, app.Token, "PUT", "/v1/internal/apps/box/agents", api.AppAgents{Off: []string{"dsh"}}, nil)
+	l.want(422, "socket", "PUT", "/v1/internal/apps/nope/agents", api.AppAgents{Off: []string{"dsh"}}, nil)
 	var got api.AppAgents
-	l.want(200, "socket", "PUT", "/api/apps/box/agents", api.AppAgents{Off: []string{"dsh", "dsh", " "}}, &got)
+	l.want(200, "socket", "PUT", "/v1/internal/apps/box/agents", api.AppAgents{Off: []string{"dsh", "dsh", " "}}, &got)
 	if !slices.Equal(got.Off, []string{"dsh"}) {
 		t.Fatalf("set: %+v", got)
 	}
@@ -101,15 +101,15 @@ func TestAgentsOffAndHomeScope(t *testing.T) {
 		t.Fatalf("marked off: %+v", c.Agents)
 	}
 	var e api.Error
-	if l.want(403, "socket", "POST", "/api/sessions", api.NewSession{Agent: api.AgentDsh, Machine: "box", Cwd: "/"}, &e); !strings.Contains(e.Message, "turned off") {
+	if l.want(403, "socket", "POST", "/v1/internal/sessions", api.NewSession{Agent: api.AgentDsh, Machine: "box", Cwd: "/"}, &e); !strings.Contains(e.Message, "turned off") {
 		t.Fatalf("started though off: %+v", e)
 	}
 	// On again: no longer refused for being off.
-	l.want(200, "socket", "PUT", "/api/apps/box/agents", api.AppAgents{Off: nil}, nil)
+	l.want(200, "socket", "PUT", "/v1/internal/apps/box/agents", api.AppAgents{Off: nil}, nil)
 	if c := box(); c.Agents[0].Off {
 		t.Fatalf("on again: %+v", c.Agents)
 	}
-	if code := l.do("socket", "POST", "/api/sessions", api.NewSession{Agent: api.AgentDsh, Machine: "box", Cwd: "/"}, nil); code == 403 {
+	if code := l.do("socket", "POST", "/v1/internal/sessions", api.NewSession{Agent: api.AgentDsh, Machine: "box", Cwd: "/"}, nil); code == 403 {
 		t.Fatal("refused once on again")
 	}
 }

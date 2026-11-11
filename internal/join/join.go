@@ -334,9 +334,9 @@ func (o *Options) Run(ctx context.Context) error {
 
 func wsURL(base string) string {
 	if rest, ok := strings.CutPrefix(base, "http"); ok {
-		return "ws" + rest + "/api/exec"
+		return "ws" + rest + "/v1/internal/exec"
 	}
-	return base + "/api/exec"
+	return base + "/v1/internal/exec"
 }
 
 // token is the kept TOKEN, or a new one paired for and kept.
@@ -383,7 +383,7 @@ func (o *Options) pair(ctx context.Context) (string, error) {
 		name = MachineName()
 	}
 	who := api.PairRequest{Name: name, Type: "computer", OS: runtime.GOOS, Arch: runtime.GOARCH, Program: o.program(), Shell: &o.Shell, NoShell: !o.Shell, AgentShell: o.Shell}
-	const path = "/api/pair"
+	const path = "/v1/internal/pair"
 	if o.Bot {
 		who = api.PairRequest{Name: name, Type: o.Type, Program: o.Program}
 	} else {

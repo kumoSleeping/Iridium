@@ -158,7 +158,7 @@ export const NO_PLACES: Places = { groups: [], order: {}, pinned: [] };
 /** The carried "places": where the rows were put by hand, the groups' and the folders'. */
 export const usePlaces = () => useCarried<Places>("places") ?? NO_PLACES;
 
-/** The groups' rows' keys with key moved to edge of target: the order PUT /api/groups/order takes.
+/** The groups' rows' keys with key moved to edge of target: the order PUT /v1/internal/groups/order takes.
  *  stored: the order there was; shown: the rows as listed now (those not stored after the
  *  stored). A row stored but not listed now (none of its sessions shown) keeps its place. */
 export function placeGroup(stored: string[], shown: string[], key: string, target: string, edge: Edge): string[] {

@@ -21,11 +21,11 @@ import (
 )
 
 // Pairing (draft 二「接入」, decisions 6-11): the one way an app comes in, an executor (ir join)
-// or any other (ir pair). POST /api/pair, past the gate without a login, only while the window is
+// or any other (ir pair). POST /v1/internal/pair, past the gate without a login, only while the window is
 // open (ir apps open, or the web for 10 minutes): a code to show and a request to ask after. A
 // person sees an app_join need with the same code, or app_update when an app has the name already
 // (no other name is made up: the person updates that one, renames this one, or denies). Allowed,
-// the TOKEN waits for the asker's GET /api/pair/{request}, once.
+// the TOKEN waits for the asker's GET /v1/internal/pair/{request}, once.
 
 // Pairing limits: pending requests per source (an IP, an IPv6 /64) and in all; the body; how
 // long the window opens for by default and at most.
@@ -62,9 +62,9 @@ func openPath(r *http.Request) bool {
 	case (r.Method == http.MethodGet || r.Method == http.MethodHead) &&
 		(r.URL.Path == "/favicon.svg" || r.URL.Path == "/manifest.webmanifest" || strings.HasPrefix(r.URL.Path, "/icons/") && path.Clean(r.URL.Path) == r.URL.Path):
 		return true
-	case r.Method == http.MethodPost && r.URL.Path == "/api/pair":
+	case r.Method == http.MethodPost && r.URL.Path == "/v1/internal/pair":
 		return true
-	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/pair/"):
+	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/internal/pair/"):
 		return true
 	case r.Method == http.MethodGet && r.URL.Path == "/v1/events":
 		return true // Satori's IDENTIFY carries the TOKEN (package satori checks it)
@@ -73,11 +73,11 @@ func openPath(r *http.Request) bool {
 }
 
 func (s *Server) pairRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/pair", s.pairAsk)
-	mux.HandleFunc("GET /api/pair/{request}", s.pairState)
+	mux.HandleFunc("POST /v1/internal/pair", s.pairAsk)
+	mux.HandleFunc("GET /v1/internal/pair/{request}", s.pairState)
 	// The window: whoever may approve (the host's ir apps open, a login of ir_web that may).
-	mux.HandleFunc("GET /api/pairing", s.approver(func(w http.ResponseWriter, r *http.Request) { reply(w, http.StatusOK, s.pairWindow()) }))
-	mux.HandleFunc("PUT /api/pairing", s.approver(s.setPairing))
+	mux.HandleFunc("GET /v1/internal/pairing", s.approver(func(w http.ResponseWriter, r *http.Request) { reply(w, http.StatusOK, s.pairWindow()) }))
+	mux.HandleFunc("PUT /v1/internal/pairing", s.approver(s.setPairing))
 }
 
 // pairWindow is how the window stands now.

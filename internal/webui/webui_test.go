@@ -118,7 +118,7 @@ func TestNotBuilt(t *testing.T) {
 func TestWrap(t *testing.T) {
 	api := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/events":
+		case "/v1/internal/events":
 			w.Header().Set("Content-Type", "text/event-stream")
 			rc := http.NewResponseController(w)
 			if err := rc.SetWriteDeadline(time.Time{}); err != nil && !errors.Is(err, http.ErrNotSupported) {
@@ -133,7 +133,7 @@ func TestWrap(t *testing.T) {
 	})
 	h := WrapApp(api, New(build()))
 	// JSON, gzipped for a browser that takes it.
-	w := get(t, h, "/api/sessions", map[string]string{"Accept-Encoding": "gzip"})
+	w := get(t, h, "/v1/internal/sessions", map[string]string{"Accept-Encoding": "gzip"})
 	if w.Header().Get("Content-Encoding") != "gzip" {
 		t.Fatalf("json not gzipped: %v", w.Header())
 	}
@@ -141,11 +141,11 @@ func TestWrap(t *testing.T) {
 	if b, _ := io.ReadAll(zr); string(b) != `{"ok":true}` {
 		t.Errorf("json %q", b)
 	}
-	if w := get(t, h, "/api/sessions", nil); w.Header().Get("Content-Encoding") != "" || w.Body.String() != `{"ok":true}` {
+	if w := get(t, h, "/v1/internal/sessions", nil); w.Header().Get("Content-Encoding") != "" || w.Body.String() != `{"ok":true}` {
 		t.Errorf("plain json: %v %q", w.Header(), w.Body.String())
 	}
 	// The event stream never: gzip would hold events back.
-	w = get(t, h, "/api/events?sub=list", map[string]string{"Accept-Encoding": "gzip"})
+	w = get(t, h, "/v1/internal/events?sub=list", map[string]string{"Accept-Encoding": "gzip"})
 	if w.Header().Get("Content-Encoding") != "" || !strings.HasPrefix(w.Body.String(), "event: state") || !w.Flushed {
 		t.Errorf("stream: %v %q flushed=%v", w.Header(), w.Body.String(), w.Flushed)
 	}

@@ -1,7 +1,6 @@
 package server
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -112,7 +111,7 @@ func TestGuard(t *testing.T) {
 		{"POST", "127.0.0.1:7810", "http://evil.example", http.StatusForbidden},
 		{"POST", "127.0.0.1:7810", "http://127.0.0.1:7810", http.StatusBadRequest}, // let through, then a bad body
 	} {
-		path := "/api/sessions"
+		path := "/v1/internal/sessions"
 		req := httptest.NewRequest(c.method, "http://"+c.host+path, strings.NewReader("{"))
 		if c.origin != "" {
 			req.Header.Set("Origin", c.origin)
@@ -141,38 +140,24 @@ func TestTurnOverHTTP(t *testing.T) {
 	c := &http.Client{Timeout: 10 * time.Second}
 
 	var created api.NewSessionReply
-	if code := call(t, c, "POST", base+"/api/sessions", api.NewSession{Agent: "claude", Cwd: work}, &created); code != 200 || created.ID == "" {
+	if code := call(t, c, "POST", base+"/v1/internal/sessions", api.NewSession{Agent: "claude", Cwd: work}, &created); code != 200 || created.ID == "" {
 		t.Fatalf("create: %d %+v", code, created)
 	}
 	id := created.ID
-	if code := call(t, c, "GET", base+"/api/sessions/nope", nil, nil); code != 422 {
+	if code := call(t, c, "GET", base+"/v1/internal/sessions/nope", nil, nil); code != 422 {
 		t.Errorf("unknown session: %d", code)
 	}
 	// A key the daemon does not know is left out, and the stream says so; the rest goes on.
-	resp, err := http.Get(base + "/api/events?sub=list&sub=bad&sub=session:" + id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if ct := resp.Header.Get("Content-Type"); ct != "text/event-stream" {
-		t.Fatalf("content type %q", ct)
-	}
+	states := watchStates(t, base, nil, "list", "bad", "session:"+id)
 	events := make(chan [2]string, 100)
 	go func() {
-		sc := bufio.NewScanner(resp.Body)
-		name := ""
-		for sc.Scan() {
-			if v, ok := strings.CutPrefix(sc.Text(), "event: "); ok {
-				name = v
-			}
-			if v, ok := strings.CutPrefix(sc.Text(), "data: "); ok {
-				events <- [2]string{name, v}
-			}
+		for st := range states {
+			events <- [2]string{st.Type, string(st.Data)}
 		}
 	}()
 
 	var sent api.SendReply
-	if code := call(t, c, "POST", base+"/api/sessions/"+id+"/send", api.Send{Text: "hello"}, &sent); code != 200 || sent.Input == "" {
+	if code := call(t, c, "POST", base+"/v1/internal/sessions/"+id+"/send", api.Send{Text: "hello"}, &sent); code != 200 || sent.Input == "" {
 		t.Fatalf("send: %d", code)
 	}
 	var draft strings.Builder
@@ -219,15 +204,15 @@ func TestTurnOverHTTP(t *testing.T) {
 	}
 
 	var page api.MessagePage
-	call(t, c, "GET", base+"/api/sessions/"+id+"/messages", nil, &page)
+	call(t, c, "GET", base+"/v1/internal/sessions/"+id+"/messages", nil, &page)
 	if len(page.Blocks) != 2 || page.Blocks[0].From != "主机" || page.Blocks[0].Text != "hello" || page.End != last.End {
 		t.Fatalf("page: %+v", page)
 	}
 	var full api.FullText
-	if code := call(t, c, "GET", base+"/api/sessions/"+id+"/block?at="+page.Blocks[1].At, nil, &full); code != 200 || full.Text != "ok: hello" {
+	if code := call(t, c, "GET", base+"/v1/internal/sessions/"+id+"/block?at="+page.Blocks[1].At, nil, &full); code != 200 || full.Text != "ok: hello" {
 		t.Errorf("full: %d %+v", code, full)
 	}
-	if code := call(t, c, "GET", base+"/api/sessions/"+id+"/block?at=1.0", nil, nil); code != 422 {
+	if code := call(t, c, "GET", base+"/v1/internal/sessions/"+id+"/block?at=1.0", nil, nil); code != 422 {
 		t.Errorf("full at nothing: %d", code)
 	}
 	// The same API on the unix socket, as the local terminal.
@@ -238,14 +223,14 @@ func TestTurnOverHTTP(t *testing.T) {
 	uc := &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", cfg.SocketPath())
 	}}}
-	if code := call(t, uc, "POST", "http://ir/api/sessions/"+id+"/send", api.Send{Text: "again"}, nil); code != 200 {
+	if code := call(t, uc, "POST", "http://ir/v1/internal/sessions/"+id+"/send", api.Send{Text: "again"}, nil); code != 200 {
 		t.Fatalf("send over the socket: %d", code)
 	}
 	waitAfter := func(end int64) api.MessagePage {
 		t.Helper()
 		for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
 			var after api.MessagePage
-			call(t, uc, "GET", "http://ir/api/sessions/"+id+"/messages?after="+itoa(end), nil, &after)
+			call(t, uc, "GET", "http://ir/v1/internal/sessions/"+id+"/messages?after="+itoa(end), nil, &after)
 			if len(after.Blocks) == 2 {
 				return after
 			}
@@ -259,7 +244,7 @@ func TestTurnOverHTTP(t *testing.T) {
 		t.Errorf("after: %+v", after.Blocks)
 	}
 	// An agent's ir in another session: a letter from that session, still 本机's.
-	req, _ := http.NewRequest("POST", "http://ir/api/sessions/"+id+"/send", strings.NewReader(`{"text":"from a session"}`))
+	req, _ := http.NewRequest("POST", "http://ir/v1/internal/sessions/"+id+"/send", strings.NewReader(`{"text":"from a session"}`))
 	req.Header.Set(HeaderAgent, "1")
 	req.Header.Set(HeaderSession, "caller-1")
 	if resp, err := uc.Do(req); err != nil || resp.StatusCode != 200 {
@@ -269,23 +254,23 @@ func TestTurnOverHTTP(t *testing.T) {
 		t.Errorf("an agent's send: %+v", b)
 	}
 	// Ultracode, on the running agent (the fake Claude's model takes it).
-	if code := call(t, c, "PUT", base+"/api/sessions/"+id+"/ultracode", api.SetUltracode{Ultracode: true}, nil); code != 200 {
+	if code := call(t, c, "PUT", base+"/v1/internal/sessions/"+id+"/ultracode", api.SetUltracode{Ultracode: true}, nil); code != 200 {
 		t.Errorf("ultracode: %d", code)
 	}
 	var live api.SessionState
-	call(t, c, "GET", base+"/api/sessions/"+id, nil, &live)
+	call(t, c, "GET", base+"/v1/internal/sessions/"+id, nil, &live)
 	if live.Ultracode == nil || !live.Ultracode.On {
 		t.Errorf("ultracode state: %+v", live.Ultracode)
 	}
 	// The same as a feature; one it has not is a bad request.
-	if code := call(t, c, "PUT", base+"/api/sessions/"+id+"/features/claude.ultracode", api.SetFeature{On: false}, nil); code != 200 {
+	if code := call(t, c, "PUT", base+"/v1/internal/sessions/"+id+"/features/claude.ultracode", api.SetFeature{On: false}, nil); code != 200 {
 		t.Errorf("feature: %d", code)
 	}
-	call(t, c, "GET", base+"/api/sessions/"+id, nil, &live)
+	call(t, c, "GET", base+"/v1/internal/sessions/"+id, nil, &live)
 	if live.Ultracode == nil || live.Ultracode.On || len(live.Features) != 1 || live.Features[0].On {
 		t.Errorf("feature state: %+v %+v", live.Ultracode, live.Features)
 	}
-	if code := call(t, c, "PUT", base+"/api/sessions/"+id+"/features/x.other", api.SetFeature{On: true}, nil); code != 400 {
+	if code := call(t, c, "PUT", base+"/v1/internal/sessions/"+id+"/features/x.other", api.SetFeature{On: true}, nil); code != 400 {
 		t.Errorf("an unknown feature: %d", code)
 	}
 	// A second daemon on the same socket is refused.
@@ -294,15 +279,15 @@ func TestTurnOverHTTP(t *testing.T) {
 	}
 	// /clear is Iridium's: the reply names the session it goes on in, no input written.
 	var cleared api.SendReply
-	if code := call(t, c, "POST", base+"/api/sessions/"+id+"/send", api.Send{Text: "/clear"}, &cleared); code != 200 || cleared.Session == "" || cleared.Session == id || cleared.Input != "" {
+	if code := call(t, c, "POST", base+"/v1/internal/sessions/"+id+"/send", api.Send{Text: "/clear"}, &cleared); code != 200 || cleared.Session == "" || cleared.Session == id || cleared.Input != "" {
 		t.Fatalf("clear: %d %+v", code, cleared)
 	}
 	var again api.MessagePage
-	if call(t, c, "GET", base+"/api/sessions/"+cleared.Session+"/messages", nil, &again); len(again.Blocks) != 0 {
+	if call(t, c, "GET", base+"/v1/internal/sessions/"+cleared.Session+"/messages", nil, &again); len(again.Blocks) != 0 {
 		t.Errorf("the cleared session has words: %+v", again.Blocks)
 	}
 	// The old one's agent is stopping already (archived): stop the new one.
-	if code := call(t, c, "POST", base+"/api/sessions/"+cleared.Session+"/stop", nil, nil); code != 200 {
+	if code := call(t, c, "POST", base+"/v1/internal/sessions/"+cleared.Session+"/stop", nil, nil); code != 200 {
 		t.Errorf("stop: %d", code)
 	}
 	// Shutting down with the event stream still open ends it at once, and the socket goes. The

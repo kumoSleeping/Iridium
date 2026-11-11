@@ -21,7 +21,7 @@ import (
 )
 
 // At is where ir runs when it runs for an agent hosted at another machine (docs/exec.md "远端的
-// ir"): the ir there sends its arguments to POST /api/cli with its session's own TOKEN, and the
+// ir"): the ir there sends its arguments to POST /v1/internal/cli with its session's own TOKEN, and the
 // daemon runs them here, as that machine's Bot, for that session.
 type At struct {
 	Machine string // the Bot of the machine (its terminal ID)
@@ -102,10 +102,10 @@ type machine struct {
 	api.Computer
 }
 
-// machineOf is the computer of an app, by its ID or name (GET /api/apps lists them to any caller).
+// machineOf is the computer of an app, by its ID or name (GET /v1/internal/apps lists them to any caller).
 func (e *env) machineOf(arg string) (machine, error) {
 	var as api.Apps
-	if err := e.do("GET", "/api/apps", nil, &as); err != nil {
+	if err := e.do("GET", "/v1/internal/apps", nil, &as); err != nil {
 		return machine{}, err
 	}
 	for _, a := range as.Apps {
@@ -119,7 +119,7 @@ func (e *env) machineOf(arg string) (machine, error) {
 // machineNames is each app's name by its ID; none if they cannot be had.
 func (e *env) machineNames() map[string]string {
 	var as api.Apps
-	if e.do("GET", "/api/apps", nil, &as) != nil {
+	if e.do("GET", "/v1/internal/apps", nil, &as) != nil {
 		return nil
 	}
 	out := make(map[string]string, len(as.Apps))
@@ -146,7 +146,7 @@ func (e *env) groupOf(id string) (int64, error) {
 		return 0, errors.New("--here is for ir run in a session")
 	}
 	var list []api.Session
-	if err := e.do("GET", "/api/sessions", nil, &list); err != nil {
+	if err := e.do("GET", "/v1/internal/sessions", nil, &list); err != nil {
 		return 0, err
 	}
 	for _, s := range list {
@@ -158,11 +158,11 @@ func (e *env) groupOf(id string) (int64, error) {
 }
 
 // ForwardAt is ir at another machine (IRIDIUM_URL and IRIDIUM_TOKEN in its environment): its
-// arguments and folder go to url's POST /api/cli, what comes back is printed as it comes.
+// arguments and folder go to url's POST /v1/internal/cli, what comes back is printed as it comes.
 func ForwardAt(url, token string, args []string, stdout, stderr io.Writer) int {
 	cwd, _ := os.Getwd()
 	body, _ := json.Marshal(api.CLIRun{Args: args, Cwd: cwd})
-	req, err := http.NewRequestWithContext(context.Background(), "POST", strings.TrimRight(url, "/")+"/api/cli", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(context.Background(), "POST", strings.TrimRight(url, "/")+"/v1/internal/cli", bytes.NewReader(body))
 	if err != nil {
 		fmt.Fprintf(stderr, "ir: %v\n", err)
 		return exitError

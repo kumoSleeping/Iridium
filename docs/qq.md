@@ -1,6 +1,6 @@
 # QQ 桥（官方应用）
 
-> **0.2 起暂不可用。** Iridium 0.2 删了聊天层（`/api/chat/*`、`ir token`），QQ 桥要重写成 Satori 客户端（`docs/satori.md`）才能再用。下面是 0.1 的做法，留作重写时参考。
+> **0.2 起暂不可用。** 它用的是 0.1 的接口（`docs/legacy.md`），要重写成 Satori 客户端（`docs/satori.md`）才能再用。下面是 0.1 的做法，留作重写时参考。
 
 `iridium-qq`：QQ Bot，你和它们的私聊交给 Iridium 的会话。一台机器可以接多个 Bot，各是一个终端。不内置在 Iridium 里，和它同一个 Release 发布，要用时装。
 

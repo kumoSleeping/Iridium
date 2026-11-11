@@ -51,11 +51,11 @@ func TestOwnerFromPanels(t *testing.T) {
 			t.Errorf("%s: ownerSays %q, want %q", name, got, c.want)
 		}
 	}
-	l.want(200, "socket", "PUT", "/api/public", api.SetPublic{Origin: "https://ir.example.com"}, nil)
+	l.want(200, "socket", "PUT", "/v1/internal/public", api.SetPublic{Origin: "https://ir.example.com"}, nil)
 	claudeOf := func(name string) *api.OwnerConfirm {
 		t.Helper()
 		var as api.Apps
-		l.want(200, "socket", "GET", "/api/apps", nil, &as)
+		l.want(200, "socket", "GET", "/v1/internal/apps", nil, &as)
 		for _, i := range as.Invites {
 			if i.Name == name {
 				if !i.Claude {
@@ -94,11 +94,11 @@ func TestOwnerFromPanels(t *testing.T) {
 
 	// An agent's: a confirmation that says so, no secret.
 	var p api.Pending
-	l.want(202, "agent", "POST", "/api/invites", api.NewInvite{Name: "pad", Claude: true}, &p)
+	l.want(202, "agent", "POST", "/v1/internal/invites", api.NewInvite{Name: "pad", Claude: true}, &p)
 	if !p.Need.Owner {
 		t.Fatalf("pending: %+v", p.Need)
 	}
-	l.want(202, "agent-in:s", "POST", "/api/invites", api.NewInvite{Name: "pad2", Claude: true}, nil)
+	l.want(202, "agent-in:s", "POST", "/v1/internal/invites", api.NewInvite{Name: "pad2", Claude: true}, nil)
 	// Neither a login without Claude nor a page without a login allows it; it stays waiting.
 	if code := as(t, guest, l.s.approver(l.s.answerNeed), "POST", p.Need.ID, api.NeedAnswer{Allow: true}, nil); code != 403 {
 		t.Fatalf("a login without Claude allowed Claude: %d", code)
@@ -107,7 +107,7 @@ func TestOwnerFromPanels(t *testing.T) {
 		t.Fatalf("the page without a login allowed: %d", code)
 	}
 	var st api.NeedState
-	l.want(200, "agent", "GET", "/api/needs/"+p.Need.ID, nil, &st)
+	l.want(200, "agent", "GET", "/v1/internal/needs/"+p.Need.ID, nil, &st)
 	if st.State != "pending" || !st.Owner {
 		t.Fatalf("after the refusals: %+v", st)
 	}
@@ -119,13 +119,13 @@ func TestOwnerFromPanels(t *testing.T) {
 	if c := claudeOf("pad"); c == nil || c.By != "panel" {
 		t.Fatalf("allowed invite's Claude: %+v", c)
 	}
-	l.want(200, "agent", "GET", "/api/needs/"+p.Need.ID, nil, &st)
+	l.want(200, "agent", "GET", "/v1/internal/needs/"+p.Need.ID, nil, &st)
 	if st.State != "allowed" || !st.Owner {
 		t.Fatalf("the agent's view: %+v", st)
 	}
 
 	// A login that may not approve may not deny either (decision 15); one that may, does.
-	l.want(202, "agent", "POST", "/api/invites", api.NewInvite{Name: "pad3", Claude: true}, &p)
+	l.want(202, "agent", "POST", "/v1/internal/invites", api.NewInvite{Name: "pad3", Claude: true}, &p)
 	if code := as(t, guest, l.s.approver(l.s.answerNeed), "POST", p.Need.ID, api.NeedAnswer{Allow: false}, &ans); code != 403 {
 		t.Fatalf("a login without Claude denying: %d %+v", code, ans)
 	}
@@ -133,9 +133,9 @@ func TestOwnerFromPanels(t *testing.T) {
 		t.Fatalf("a login denying: %d %+v", code, ans)
 	}
 	// The host's ir allows one: marked local.
-	l.want(202, "agent", "POST", "/api/invites", api.NewInvite{Name: "pad4", Claude: true}, &p)
+	l.want(202, "agent", "POST", "/v1/internal/invites", api.NewInvite{Name: "pad4", Claude: true}, &p)
 	ans = api.NeedReply{}
-	l.want(200, "socket", "POST", "/api/needs/"+p.Need.ID, api.NeedAnswer{Allow: true}, &ans)
+	l.want(200, "socket", "POST", "/v1/internal/needs/"+p.Need.ID, api.NeedAnswer{Allow: true}, &ans)
 	if c := claudeOf("pad4"); ans.Invite == nil || c == nil || c.By != "local" {
 		t.Fatalf("the host allowing: %+v %+v", ans, c)
 	}

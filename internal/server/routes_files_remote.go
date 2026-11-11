@@ -22,7 +22,7 @@ import (
 // wire.MaxFrame in base64.
 const remoteWriteMax = 4 << 20
 
-// listAt is GET /api/files?machine=: one level of a folder at another machine, its own path.
+// listAt is GET /v1/internal/files?machine=: one level of a folder at another machine, its own path.
 func (s *Server) listAt(w http.ResponseWriter, r *http.Request, machine, path string) {
 	mc, hi := s.machineAt(w, machine)
 	if mc == nil {
@@ -77,7 +77,7 @@ func (sd side) base(p string) string {
 	return remote.Base(sd.sep, p)
 }
 
-// copyAcross is POST /api/files/copy with a side at another machine: the file read in pieces,
+// copyAcross is POST /v1/internal/files/copy with a side at another machine: the file read in pieces,
 // written beside its place and linked in here, or whole there (at most remoteWriteMax); never over
 // a file; to may be a directory, which takes from's name. The same lines as copyFile.
 func (s *Server) copyAcross(w http.ResponseWriter, r *http.Request, req api.Copy) {

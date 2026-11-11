@@ -12,7 +12,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/session"
 )
 
-// image is a picture a tool's result gave the model: GET /api/sessions/{id}/image?at=&n=. Its
+// image is a picture a tool's result gave the model: GET /v1/internal/sessions/{id}/image?at=&n=. Its
 // ETag is its content's, so a page shown again asks only whether it changed. 425: not in the
 // record yet, to ask again.
 func (s *Server) image(w http.ResponseWriter, r *http.Request) {

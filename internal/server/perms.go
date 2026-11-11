@@ -186,11 +186,11 @@ func (s *Server) checkPerms(c caller, a api.Agent, app, path string) error {
 	return nil
 }
 
-// sessionGuard checks every /api/sessions/{id}/… request before its route: GET (reading) needs
+// sessionGuard checks every /v1/internal/sessions/{id}/… request before its route: GET (reading) needs
 // the session in the caller's scope, the rest also its agent among the caller's.
 func (s *Server) sessionGuard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		rest, ok := strings.CutPrefix(r.URL.Path, "/api/sessions/")
+		rest, ok := strings.CutPrefix(r.URL.Path, "/v1/internal/sessions/")
 		if !ok || rest == "" || s.m == nil {
 			next.ServeHTTP(w, r)
 			return

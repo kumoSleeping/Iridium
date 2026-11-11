@@ -15,15 +15,15 @@ import (
 	"github.com/kumoSleeping/iridium/internal/gate"
 )
 
-// Share (draft 二「消息」 分享; POST /api/share, ir share): a session, a reply, a place or a file
+// Share (draft 二「消息」 分享; POST /v1/internal/share, ir share): a session, a reply, a place or a file
 // shared with one login, with who shared it and a note. The login must be able to use it: a
 // session's agent and scope (using's checks), the scope of a reply's session, of a place, of a
 // file. A login of ir_web finds it among its needs (a share need, till it puts it away or a day
 // passes) and gets a Web Push; another app's login gets a Satori event (internal, _type ir.share).
 
 func (s *Server) shareRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/share", s.share)
-	mux.HandleFunc("GET /api/share/targets", s.shareTargets)
+	mux.HandleFunc("POST /v1/internal/share", s.share)
+	mux.HandleFunc("GET /v1/internal/share/targets", s.shareTargets)
 }
 
 // errNotUsable: the login it would go to may not use what is shared.
@@ -208,7 +208,7 @@ func (s *Server) share(w http.ResponseWriter, r *http.Request) {
 	reply(w, http.StatusOK, out)
 }
 
-// shareTargets is GET /api/share/targets?what=&session=&at=&place=&ref=&path=: the apps whose
+// shareTargets is GET /v1/internal/share/targets?what=&session=&at=&place=&ref=&path=: the apps whose
 // logins may use it, each with those logins (not the caller).
 func (s *Server) shareTargets(w http.ResponseWriter, r *http.Request) {
 	c := callerOf(r)

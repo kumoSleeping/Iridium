@@ -1,5 +1,5 @@
 // The usage (plan "用量"): the tokens the turns used and what they cost, by day, terminal, agent
-// and model (GET /api/usage). One page (#/settings/usage, from the settings), one chart for
+// and model (GET /v1/internal/usage). One page (#/settings/usage, from the settings), one chart for
 // everyone (the user, 2026-11-08). Its measure (the user, 2026-11-10) is the cost at first (the
 // agent's own, else the model's maker's list price: the server's), or the tokens: the figure, the
 // bars, the order of the list and their parts all go by it. The figure's line under it has the

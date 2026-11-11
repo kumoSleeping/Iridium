@@ -23,7 +23,7 @@ type ShellOutput struct {
 	Err    string `json:"err,omitempty"` // once done: what could not run it, if anything
 }
 
-// ShellEvent is one line of an agent's ir sh streamed (POST /api/machines/{id}/shell asked with
+// ShellEvent is one line of an agent's ir sh streamed (POST /v1/internal/machines/{id}/shell asked with
 // Accept: application/x-ndjson, at an executor that speaks run): what the command line wrote, as
 // it wrote it (Out its stdout, Err its stderr); last (Done), how it ended: its exit code, the
 // signal (without "SIG") that ended it, or Error, why it could not run or was cut off.

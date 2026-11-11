@@ -49,7 +49,7 @@ func cmdNew(e *env, args []string) int {
 		req.Workspace = w.ID
 	}
 	var created api.NewSessionReply
-	if err := e.do("POST", "/api/sessions", req, &created); err != nil {
+	if err := e.do("POST", "/v1/internal/sessions", req, &created); err != nil {
 		return e.fail(err)
 	}
 	fmt.Fprintln(e.out, short(created.ID, e.ids()))
@@ -96,7 +96,7 @@ func cmdSend(e *env, args []string) int {
 			return e.fail(err)
 		}
 		var f api.FileRef
-		if err := e.do("POST", "/api/sessions/"+id+"/attach", api.AttachPath{Path: p}, &f); err != nil {
+		if err := e.do("POST", "/v1/internal/sessions/"+id+"/attach", api.AttachPath{Path: p}, &f); err != nil {
 			return e.failf("%s: %v", a, err)
 		}
 		req.Attachments = append(req.Attachments, f.Ref)
@@ -108,7 +108,7 @@ func cmdSend(e *env, args []string) int {
 		before, _ = e.latest(id)
 	}
 	var sent api.SendReply
-	if err := e.do("POST", "/api/sessions/"+id+"/send", req, &sent); err != nil {
+	if err := e.do("POST", "/v1/internal/sessions/"+id+"/send", req, &sent); err != nil {
 		return e.fail(err)
 	}
 	if sent.Desktop {
@@ -149,7 +149,7 @@ func (e *env) sendNotice(o opts) int {
 		return e.failf(`usage: ir send 应用/登录 "消息"`)
 	}
 	var r api.NoticeReply
-	if err := e.do("POST", "/api/apps/"+url.PathEscape(app)+"/logins/"+url.PathEscape(login)+"/notice", api.Notice{Text: o.pos[1], Caller: e.caller()}, &r); err != nil {
+	if err := e.do("POST", "/v1/internal/apps/"+url.PathEscape(app)+"/logins/"+url.PathEscape(login)+"/notice", api.Notice{Text: o.pos[1], Caller: e.caller()}, &r); err != nil {
 		return e.fail(err)
 	}
 	fmt.Fprintf(e.out, "已送到 %s/%s\n", app, cmp.Or(r.Name, r.Login))
@@ -161,7 +161,7 @@ func (e *env) sendNotice(o opts) int {
 func (e *env) waitQueued(id, input string) int {
 	for {
 		var st api.SessionState
-		if err := e.do("GET", "/api/sessions/"+id, nil, &st); err != nil {
+		if err := e.do("GET", "/v1/internal/sessions/"+id, nil, &st); err != nil {
 			return e.fail(err)
 		}
 		i := slices.IndexFunc(st.Queue, func(q api.Queued) bool { return q.ID == input })
@@ -210,7 +210,7 @@ func (e *env) waitTurn(id, input string) int {
 	var idleAt time.Time
 	for {
 		var st api.SessionState
-		if err := e.do("GET", "/api/sessions/"+id, nil, &st); err != nil {
+		if err := e.do("GET", "/v1/internal/sessions/"+id, nil, &st); err != nil {
 			p.clear()
 			return e.fail(err)
 		}
@@ -268,7 +268,7 @@ func (e *env) waitTurn(id, input string) int {
 func (e *env) waitTaken(id, input string) int {
 	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); time.Sleep(poll) {
 		var st api.SessionState
-		if err := e.do("GET", "/api/sessions/"+id, nil, &st); err != nil {
+		if err := e.do("GET", "/v1/internal/sessions/"+id, nil, &st); err != nil {
 			return e.fail(err)
 		}
 		if st.Status == api.StatusError {
@@ -286,7 +286,7 @@ func (e *env) waitTaken(id, input string) int {
 
 func (e *env) latest(id string) (api.MessagePage, error) {
 	var page api.MessagePage
-	err := e.do("GET", "/api/sessions/"+id+"/messages", nil, &page)
+	err := e.do("GET", "/v1/internal/sessions/"+id+"/messages", nil, &page)
 	return page, err
 }
 
@@ -369,7 +369,7 @@ func cmdRead(e *env, args []string) int {
 		return exitDone
 	}
 	var st api.SessionState
-	_ = e.do("GET", "/api/sessions/"+id, nil, &st)
+	_ = e.do("GET", "/v1/internal/sessions/"+id, nil, &st)
 	st.Status = turnStatus(&st)
 	n := o.n
 	if n == 0 {
@@ -480,7 +480,7 @@ func atWork(s api.Session, byID map[string]api.Session, now time.Time) bool {
 // listed is what ir ls and find show: without all, no archive and no subagent that is not at work.
 func (e *env) listed(all bool) ([]api.Session, []string, error) {
 	var list []api.Session
-	if err := e.do("GET", "/api/sessions", nil, &list); err != nil {
+	if err := e.do("GET", "/v1/internal/sessions", nil, &list); err != nil {
 		return nil, nil, err
 	}
 	ids := make([]string, len(list))
@@ -638,7 +638,7 @@ func cmdArchive(e *env, args []string, archived bool) int {
 	if err != nil {
 		return e.fail(err)
 	}
-	if err := e.do("PATCH", "/api/sessions/"+id, api.SessionPatch{Archived: &archived}, nil); err != nil {
+	if err := e.do("PATCH", "/v1/internal/sessions/"+id, api.SessionPatch{Archived: &archived}, nil); err != nil {
 		return e.fail(err)
 	}
 	return exitDone
@@ -661,7 +661,7 @@ func cmdRename(e *env, args []string) int {
 		return e.failf("不在会话里运行，要给出 <id>")
 	}
 	name := o.pos[len(o.pos)-1]
-	if err := e.do("PATCH", "/api/sessions/"+id, api.SessionPatch{Name: &name, ByAgent: from != ""}, nil); err != nil {
+	if err := e.do("PATCH", "/v1/internal/sessions/"+id, api.SessionPatch{Name: &name, ByAgent: from != ""}, nil); err != nil {
 		return e.fail(err)
 	}
 	return exitDone
@@ -677,7 +677,7 @@ func cmdStop(e *env, args []string) int {
 	if err != nil {
 		return e.fail(err)
 	}
-	if err := e.do("POST", "/api/sessions/"+id+"/stop", nil, nil); err != nil {
+	if err := e.do("POST", "/v1/internal/sessions/"+id+"/stop", nil, nil); err != nil {
 		return e.fail(err)
 	}
 	return exitDone

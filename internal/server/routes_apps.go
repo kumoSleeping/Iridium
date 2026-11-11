@@ -24,42 +24,42 @@ import (
 // apps), invites of ir_web, names and avatars, devices, removing, the needs (what waits for a
 // person), the catalogue and public.origin. An app comes by pairing only (pairing.go).
 func (s *Server) appRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/me", s.me)
-	mux.HandleFunc("PUT /api/me/profile", func(w http.ResponseWriter, r *http.Request) { s.gate().ServeProfile(w, r, "") })
+	mux.HandleFunc("GET /v1/internal/me", s.me)
+	mux.HandleFunc("PUT /v1/internal/me/profile", func(w http.ResponseWriter, r *http.Request) { s.gate().ServeProfile(w, r, "") })
 	// Another's: ir_web's logins and the host only (the gate checks).
-	mux.HandleFunc("PUT /api/apps/{id}/profile", func(w http.ResponseWriter, r *http.Request) { s.gate().ServeProfile(w, r, r.PathValue("id")) })
+	mux.HandleFunc("PUT /v1/internal/apps/{id}/profile", func(w http.ResponseWriter, r *http.Request) { s.gate().ServeProfile(w, r, r.PathValue("id")) })
 	// The device it runs on: its own, or (ir_web's logins and the host) another's.
-	mux.HandleFunc("PUT /api/me/device", func(w http.ResponseWriter, r *http.Request) { s.setDevice(w, r, "") })
-	mux.HandleFunc("PUT /api/apps/{id}/device", func(w http.ResponseWriter, r *http.Request) { s.setDevice(w, r, r.PathValue("id")) })
+	mux.HandleFunc("PUT /v1/internal/me/device", func(w http.ResponseWriter, r *http.Request) { s.setDevice(w, r, "") })
+	mux.HandleFunc("PUT /v1/internal/apps/{id}/device", func(w http.ResponseWriter, r *http.Request) { s.setDevice(w, r, r.PathValue("id")) })
 	// The list is public (draft 二「消息」); what manages them only to one that manages (apps).
-	mux.HandleFunc("GET /api/apps", s.apps)
-	mux.HandleFunc("DELETE /api/apps/{id}", s.approver(s.revoke))
-	mux.HandleFunc("DELETE /api/apps/{id}/logins/{login}", s.approver(s.removeLogin))
+	mux.HandleFunc("GET /v1/internal/apps", s.apps)
+	mux.HandleFunc("DELETE /v1/internal/apps/{id}", s.approver(s.revoke))
+	mux.HandleFunc("DELETE /v1/internal/apps/{id}/logins/{login}", s.approver(s.removeLogin))
 	// ir send 应用/登录: a notice shown to one login (notice.go).
-	mux.HandleFunc("POST /api/apps/{id}/logins/{login}/notice", s.notice)
+	mux.HandleFunc("POST /v1/internal/apps/{id}/logins/{login}/notice", s.notice)
 	// What an app may use (agents, scope): whoever approves sets it (S2 enforces it).
-	mux.HandleFunc("PUT /api/apps/{id}/perms", s.approver(s.putAppPerms))
-	mux.HandleFunc("PUT /api/apps/{id}/logins/{login}/perms", s.approver(s.putLoginPerms))
-	mux.HandleFunc("POST /api/invites", s.manage(s.invite))
+	mux.HandleFunc("PUT /v1/internal/apps/{id}/perms", s.approver(s.putAppPerms))
+	mux.HandleFunc("PUT /v1/internal/apps/{id}/logins/{login}/perms", s.approver(s.putLoginPerms))
+	mux.HandleFunc("POST /v1/internal/invites", s.manage(s.invite))
 	// An app asks for other permissions: an app_change need.
-	mux.HandleFunc("PUT /api/me/perms", s.askChange)
-	mux.HandleFunc("GET /api/needs", s.listNeeds) // needs_more.go
-	mux.HandleFunc("DELETE /api/needs/{id}", s.dropNeed)
-	mux.HandleFunc("POST /api/needs/{id}", s.approver(s.answerNeed))
+	mux.HandleFunc("PUT /v1/internal/me/perms", s.askChange)
+	mux.HandleFunc("GET /v1/internal/needs", s.listNeeds) // needs_more.go
+	mux.HandleFunc("DELETE /v1/internal/needs/{id}", s.dropNeed)
+	mux.HandleFunc("POST /v1/internal/needs/{id}", s.approver(s.answerNeed))
 	// How one went, never a secret: for whoever manages, and any ir on the socket (an agent's in a
 	// session an app opened waits for its ir run's too).
-	mux.HandleFunc("GET /api/needs/{id}", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /v1/internal/needs/{id}", func(w http.ResponseWriter, r *http.Request) {
 		if c := callerOf(r); !c.CanManage() && !c.socket {
 			forbid(w, errManageApps)
 			return
 		}
 		s.needState(w, r)
 	})
-	mux.HandleFunc("GET /api/catalogue", func(w http.ResponseWriter, r *http.Request) { reply(w, http.StatusOK, catalogue) })
-	mux.HandleFunc("GET /api/usage", s.usage) // routes_usage.go
-	mux.HandleFunc("GET /api/public", s.manage(s.publicState))
+	mux.HandleFunc("GET /v1/internal/catalogue", func(w http.ResponseWriter, r *http.Request) { reply(w, http.StatusOK, catalogue) })
+	mux.HandleFunc("GET /v1/internal/usage", s.usage) // routes_usage.go
+	mux.HandleFunc("GET /v1/internal/public", s.manage(s.publicState))
 	// Opening or closing ir_web: a person's ir at the host only (decision 3), never a login of it.
-	mux.HandleFunc("PUT /api/public", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("PUT /v1/internal/public", func(w http.ResponseWriter, r *http.Request) {
 		if !callerOf(r).machine() {
 			forbid(w, errors.New("only the host's ir sets public.origin"))
 			return
@@ -620,7 +620,7 @@ func (s *Server) needState(w http.ResponseWriter, r *http.Request) {
 	reply(w, http.StatusOK, st)
 }
 
-// askChange is an app asking for other permissions (PUT /api/me/perms): an app_change need, 202.
+// askChange is an app asking for other permissions (PUT /v1/internal/me/perms): an app_change need, 202.
 // Only an app's own TOKEN asks; what it has stays till a person allows it.
 func (s *Server) askChange(w http.ResponseWriter, r *http.Request) {
 	var p api.Perms

@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"net/http"
@@ -47,17 +46,17 @@ type Server struct {
 
 	turns        origins      // whose turn each session runs (origin.go)
 	terminalsSeq atomic.Int64 // the "terminals" state's count (terminalsChanged)
-	// CLI runs the ir of a session at another machine (POST /api/cli); nil: none.
+	// CLI runs the ir of a session at another machine (POST /v1/internal/cli); nil: none.
 	CLI CLIAt
 	// tokenFor stands in for the session manager's SessionToken in tests.
 	tokenFor func(tok string) (endpointID, session string, ok bool)
 	st       *store.Store
 	logf     func(string, ...any)
-	// ConfigPath is where PUT /api/public saves public.origin; "" saves it nowhere.
+	// ConfigPath is where PUT /v1/internal/public saves public.origin; "" saves it nowhere.
 	ConfigPath string
-	// Updater, if set, serves /api/update and carries the state "update".
+	// Updater, if set, serves /v1/internal/update and carries the state "update".
 	Updater *update.Updater
-	// Prices, if set, prices the usage the agents gave no cost (GET /api/usage).
+	// Prices, if set, prices the usage the agents gave no cost (GET /v1/internal/usage).
 	Prices *pricing.Catalog
 
 	cmu      sync.Mutex // one config change at a time (SaveConfig); guards cfg's settings
@@ -78,7 +77,7 @@ type Server struct {
 	Folders  discover.Folders
 	// App is the web app on the TCP address, past the API; nil is the embedded build (webui).
 	App http.Handler
-	// Remote, if set, takes executors' connections at /api/exec (docs/exec.md).
+	// Remote, if set, takes executors' connections at /v1/internal/exec (docs/exec.md).
 	Remote *remote.Hub
 
 	files *files.Service  // routes_files.go
@@ -141,10 +140,10 @@ func (s *Server) Close() {
 // Handler is the API. local: requests come from the unix socket, from the local ir.
 func (s *Server) Handler(local bool) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /v1/internal/health", func(w http.ResponseWriter, r *http.Request) {
 		reply(w, http.StatusOK, map[string]any{"ok": true})
 	})
-	mux.HandleFunc("GET /api/agents", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /v1/internal/agents", func(w http.ResponseWriter, r *http.Request) {
 		l := agents.Describe()
 		for i := range l {
 			l[i].Missing = s.m.Missing(l[i].Agent)
@@ -152,19 +151,19 @@ func (s *Server) Handler(local bool) http.Handler {
 		reply(w, http.StatusOK, l)
 	})
 	// What carries transcripts goes out with the credentials' values masked (routes_secrets.go).
-	mux.HandleFunc("GET /api/sessions", s.masked(s.list))
-	mux.HandleFunc("POST /api/sessions", s.create)
-	mux.HandleFunc("GET /api/sessions/{id}", s.masked(s.get))
-	mux.HandleFunc("GET /api/sessions/{id}/messages", s.masked(s.messages))
-	mux.HandleFunc("GET /api/sessions/{id}/block", s.masked(s.block))
-	mux.HandleFunc("GET /api/sessions/{id}/image", s.image)
-	mux.HandleFunc("POST /api/sessions/{id}/send", s.send)
-	mux.HandleFunc("POST /api/sessions/{id}/interrupt", s.use(s.interrupt))
-	mux.HandleFunc("POST /api/sessions/{id}/stop", s.use(s.stop))
-	mux.HandleFunc("POST /api/sessions/{id}/answer", s.use(s.answer))
-	mux.HandleFunc("POST /api/sessions/{id}/release", s.use(s.release))
+	mux.HandleFunc("GET /v1/internal/sessions", s.masked(s.list))
+	mux.HandleFunc("POST /v1/internal/sessions", s.create)
+	mux.HandleFunc("GET /v1/internal/sessions/{id}", s.masked(s.get))
+	mux.HandleFunc("GET /v1/internal/sessions/{id}/messages", s.masked(s.messages))
+	mux.HandleFunc("GET /v1/internal/sessions/{id}/block", s.masked(s.block))
+	mux.HandleFunc("GET /v1/internal/sessions/{id}/image", s.image)
+	mux.HandleFunc("POST /v1/internal/sessions/{id}/send", s.send)
+	mux.HandleFunc("POST /v1/internal/sessions/{id}/interrupt", s.use(s.interrupt))
+	mux.HandleFunc("POST /v1/internal/sessions/{id}/stop", s.use(s.stop))
+	mux.HandleFunc("POST /v1/internal/sessions/{id}/answer", s.use(s.answer))
+	mux.HandleFunc("POST /v1/internal/sessions/{id}/release", s.use(s.release))
 	// The session's agent's own commands (an app sets its menu from them).
-	mux.HandleFunc("GET /api/sessions/{id}/commands", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /v1/internal/sessions/{id}/commands", func(w http.ResponseWriter, r *http.Request) {
 		st, err := s.m.State(r.PathValue("id"))
 		if err != nil {
 			s.error(w, err)
@@ -172,7 +171,6 @@ func (s *Server) Handler(local bool) http.Handler {
 		}
 		reply(w, http.StatusOK, st.Commands)
 	})
-	mux.HandleFunc("GET /api/events", s.masked(s.events))
 	s.appRoutes(mux)
 	s.shareRoutes(mux) // share.go
 	s.secretRoutes(mux)
@@ -180,7 +178,7 @@ func (s *Server) Handler(local bool) http.Handler {
 	s.settingsRoutes(mux)
 	s.sessionRoutes(mux)
 	s.pushRoutes(mux)
-	mux.HandleFunc("GET /api/exec", s.execConnect)
+	mux.HandleFunc("GET /v1/internal/exec", s.execConnect)
 	s.pairRoutes(mux)
 	s.machineRoutes(mux)
 	s.discoverRoutes(mux)
@@ -373,7 +371,7 @@ func (e fileErr) Error() string        { return e.err.Error() }
 func (e fileErr) Unwrap() error        { return e.err }
 func (e fileErr) Is(target error) bool { return target == errFiles }
 
-// sendAs sends req into session id as c, from (the source tag): what POST /api/sessions/{id}/send
+// sendAs sends req into session id as c, from (the source tag): what POST /v1/internal/sessions/{id}/send
 // and Satori's message.create both do. /clear starts the session anew.
 func (s *Server) sendAs(ctx context.Context, c caller, from, id string, req api.Send) (api.SendReply, error) {
 	if err := s.checkSend(c, id); err != nil {
@@ -465,45 +463,7 @@ func (s *Server) release(w http.ResponseWriter, r *http.Request) {
 
 var stateKey = regexp.MustCompile(`^(list|quota|workspaces|places|colors|needs|pairing|update|terminals|machines|notes|(session|context):[0-9a-zA-Z_-]{1,128})$`)
 
-// events is the page's one event stream: ?sub=<key> for each state it wants (list, quota,
-// workspaces, colors, session:<id>, context:<id>, confirms, update, notes). See package hub. A key it
-// does not know, or one not for this caller (needs, pairing, colors and notes, but for a person on ir_web or at the host), does not fail the
-// stream: it is left out, and the stream's first events say so (StateEvent.Ignored).
-func (s *Server) events(w http.ResponseWriter, r *http.Request) {
-	keys := r.URL.Query()["sub"]
-	if len(keys) == 0 || len(keys) > 16 {
-		fail(w, http.StatusBadRequest, "name 1 to 16 states with sub=")
-		return
-	}
-	c := callerOf(r)
-	carried, ignored := s.stateKeys(c, keys)
-	keys = carried
-	if !s.mayWatch(w, c, keys) {
-		return
-	}
-	ctx, cancel := context.WithCancel(r.Context())
-	defer cancel()
-	defer s.gate().Track(r, cancel)() // the stream ends when its terminal is revoked or logs out
-	r = r.WithContext(ctx)
-	rc := http.NewResponseController(w)
-	_ = rc.SetWriteDeadline(time.Time{})
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
-	io.WriteString(w, "retry: 2000\n\n")
-	for _, e := range ignored {
-		b, _ := json.Marshal(e)
-		fmt.Fprintf(w, "event: state\ndata: %s\n\n", b)
-	}
-	_ = rc.Flush()
-	sub := s.hub.Subscribe(keys) // none it may carry: open all the same, pinging
-	defer sub.Close()
-	sub.Filter = s.streamFilter(c)
-	_ = sub.Serve(r.Context(), w, func() { _ = rc.Flush() })
-}
-
-// stateKeys splits the states an event stream asks for into those it carries and those it leaves
+// stateKeys splits the states a WATCH asks for into those it carries and those it leaves
 // out (unknown, or not this caller's: needs, pairing, colors and notes are a person's on ir_web
 // or at the host).
 func (s *Server) stateKeys(c caller, keys []string) (carried []string, ignored []api.StateEvent) {
@@ -520,7 +480,7 @@ func (s *Server) stateKeys(c caller, keys []string) (carried []string, ignored [
 	return carried, ignored
 }
 
-// watchStates sends c the states keys name (at most 16) and the drafts, as /api/events does,
+// watchStates sends c the states keys name (at most 16) and the drafts,
 // through emit ("state" or "draft", the JSON), till ctx ends: Satori's /v1/events for ir_web.
 func (s *Server) watchStates(ctx context.Context, c caller, keys []string, emit func(kind string, data []byte) error) error {
 	if len(keys) > 16 {
@@ -536,7 +496,13 @@ func (s *Server) watchStates(ctx context.Context, c caller, keys []string, emit 
 	sub := s.hub.Subscribe(carried)
 	defer sub.Close()
 	sub.Filter = s.streamFilter(c)
-	return sub.Run(ctx, emit, func() error { return nil }, func() {})
+	// A session's state carries its transcript's tail: the credentials' values masked, as every
+	// answer that carries a transcript is (routes_secrets.go).
+	masked := func(kind string, data []byte) error {
+		data = s.jsonMask().Mask(data)
+		return emit(kind, data)
+	}
+	return sub.Run(ctx, masked, func() error { return nil }, func() {})
 }
 
 func (s *Server) done(w http.ResponseWriter, err error) {

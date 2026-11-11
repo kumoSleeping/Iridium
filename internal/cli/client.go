@@ -29,7 +29,7 @@ type env struct {
 	sock     string
 	hc       *http.Client
 	tty      bool // stderr is a terminal: progress may be drawn there
-	// at: ir runs for a session at another machine (POST /api/cli, remote.go); nil on the socket.
+	// at: ir runs for a session at another machine (POST /v1/internal/cli, remote.go); nil on the socket.
 	at *At
 	// after: where the page ended (its last block's at) when the message waited on was sent ("":
 	// not known), for a transcript that does not keep its id (dsh gives each prompt its own).
@@ -280,7 +280,7 @@ func (e *env) resolve(arg string) (string, error) {
 		return "", errors.New("no session id")
 	}
 	var list []api.Session
-	if err := e.do("GET", "/api/sessions", nil, &list); err != nil {
+	if err := e.do("GET", "/v1/internal/sessions", nil, &list); err != nil {
 		return "", err
 	}
 	var hits []string
@@ -320,7 +320,7 @@ func short(id string, ids []string) string {
 
 func (e *env) ids() []string {
 	var list []api.Session
-	_ = e.do("GET", "/api/sessions", nil, &list)
+	_ = e.do("GET", "/v1/internal/sessions", nil, &list)
 	out := make([]string, len(list))
 	for i, s := range list {
 		out[i] = s.ID

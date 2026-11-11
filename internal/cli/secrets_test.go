@@ -15,9 +15,9 @@ func answer(t *testing.T, as adminEnv, kind api.NeedKind, a api.NeedAnswer) api.
 	t.Helper()
 	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(20 * time.Millisecond) {
 		var cs api.Needs
-		as.call("GET", "/api/needs", nil, &cs)
+		as.call("GET", "/v1/internal/needs", nil, &cs)
 		if len(cs.Pending) == 1 && cs.Pending[0].Kind == kind {
-			if _, err := as.call("POST", "/api/needs/"+cs.Pending[0].ID, a, nil); err != nil {
+			if _, err := as.call("POST", "/v1/internal/needs/"+cs.Pending[0].ID, a, nil); err != nil {
 				t.Fatal(err)
 			}
 			return cs.Pending[0]
@@ -94,7 +94,7 @@ func TestSecretCommands(t *testing.T) {
 	}
 
 	// Confirmed every time: ir run waits for the panel, then runs; denied, it does not.
-	if _, err := person.call("PUT", "/api/secrets/API_TOKEN", api.SetSecret{Always: new(true)}, nil); err != nil {
+	if _, err := person.call("PUT", "/v1/internal/secrets/API_TOKEN", api.SetSecret{Always: new(true)}, nil); err != nil {
 		t.Fatal(err)
 	}
 	got = agentRun(agent, "run", "--secret", "API_TOKEN", "--", "sh", "-c", `echo "v=$API_TOKEN"`)

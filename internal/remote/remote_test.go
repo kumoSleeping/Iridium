@@ -89,7 +89,7 @@ func (r *rig) newHub() *remote.Hub {
 }
 
 func (r *rig) startExecutor() {
-	url := "ws" + strings.TrimPrefix(r.srv.URL, "http") + "/api/exec"
+	url := "ws" + strings.TrimPrefix(r.srv.URL, "http") + "/v1/internal/exec"
 	if r.kind == "node" {
 		cmd := exec.Command("node", "../../plugins/dsh-remote-iridium/test/run.mjs", url, "tok", r.state)
 		cmd.Stderr = testWriter{r.t}

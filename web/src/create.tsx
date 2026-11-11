@@ -261,7 +261,7 @@ export const subName = (v: string) => {
  *  folder made (at its machine too), the folder then; its key beside the folder's line (the user,
  *  2026-11-10). */
 export function NewSession({ ws, folder, onFolder, onPick, busy, onMake }: { ws: string; folder: string; onFolder: () => void; onPick: (a: Agent, to?: Target) => void; busy: string | null; onMake?: (name: string) => Promise<boolean> }) {
-  // The agents the daemon can host (GET /api/agents); all four before it says. One not installed
+  // The agents the daemon can host (GET /v1/internal/agents); all four before it says. One not installed
   // is shown faded: picking it says so, no session is made.
   const info = useQuery({ ...agentsQ, refetchOnMount: "always" }).data; // installed since: the next open knows
   const agents = info?.map((a) => a.agent) ?? AGENTS;

@@ -26,7 +26,7 @@ func TestCopyAcrossMachines(t *testing.T) {
 	var tok api.Token
 	tok = l.newApp("pc", false)
 	there := t.TempDir()
-	exe, err := executor.New(executor.Options{URL: "ws" + strings.TrimPrefix(l.base, "http") + "/api/exec", Token: tok.Token, State: filepath.Join(there, "state"), Logf: t.Logf})
+	exe, err := executor.New(executor.Options{URL: "ws" + strings.TrimPrefix(l.base, "http") + "/v1/internal/exec", Token: tok.Token, State: filepath.Join(there, "state"), Logf: t.Logf})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +45,7 @@ func TestCopyAcrossMachines(t *testing.T) {
 	copyLast := func(req api.Copy) (int, api.CopyProgress) {
 		t.Helper()
 		b, _ := json.Marshal(req)
-		r, _ := http.NewRequest("POST", "http://ir/api/files/copy", bytes.NewReader(b))
+		r, _ := http.NewRequest("POST", "http://ir/v1/internal/files/copy", bytes.NewReader(b))
 		resp, err := l.sock.Do(r)
 		if err != nil {
 			t.Fatal(err)
@@ -90,9 +90,9 @@ func TestCopyAcrossMachines(t *testing.T) {
 	}
 	// A folder there.
 	var lst api.DirListing
-	l.want(200, "socket", "GET", "/api/files?machine=pc&path="+box, nil, &lst)
+	l.want(200, "socket", "GET", "/v1/internal/files?machine=pc&path="+box, nil, &lst)
 	if len(lst.Entries) != 1 || lst.Entries[0].Name != "a.txt" || lst.Entries[0].Size != 11 {
 		t.Errorf("listing there: %+v", lst)
 	}
-	l.want(422, "socket", "GET", "/api/files?machine=pc&path="+filepath.Join(box, "none"), nil, nil)
+	l.want(422, "socket", "GET", "/v1/internal/files?machine=pc&path="+filepath.Join(box, "none"), nil, nil)
 }

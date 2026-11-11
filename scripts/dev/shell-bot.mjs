@@ -20,7 +20,7 @@ const say = (m) => console.log(`${new Date().toISOString()} ${m}`)
 async function pair() {
   const hello = { name, os: process.platform === 'win32' ? 'windows' : process.platform, arch: process.arch, program, agents: [], agentShell: true }
   for (;;) {
-    const r = await fetch(`${url}/api/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(hello) })
+    const r = await fetch(`${url}/v1/internal/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(hello) })
     if (r.status === 403) {
       say('pairing is closed there (ir apps open, or 新建应用): waiting')
       await sleep(5000)
@@ -31,7 +31,7 @@ async function pair() {
     say(`pairing code ${req.code}: allow "${name}" on the Iridium page`)
     for (;;) {
       await sleep(2000)
-      const s = await fetch(`${url}/api/pair/${req.request}`)
+      const s = await fetch(`${url}/v1/internal/pair/${req.request}`)
       const st = s.ok ? await s.json() : { status: s.status === 404 || s.status === 422 ? 'expired' : 'pending' }
       if (st.status === 'allowed' && st.token) return st.token
       if (st.status === 'denied') throw new Error('declined')
@@ -61,7 +61,7 @@ for (;;) {
     fs.writeFileSync(tokenFile, token, { mode: 0o600 })
     say('paired')
   }
-  ex = new Executor({ url: url.replace(/^http/, 'ws') + '/api/exec', token, state, agents: [], agentShell: true, program, log: say })
+  ex = new Executor({ url: url.replace(/^http/, 'ws') + '/v1/internal/exec', token, state, agents: [], agentShell: true, program, log: say })
   const running = ex.run()
   // Its Bot removed on that Iridium: forget the TOKEN and pair again.
   for (;;) {

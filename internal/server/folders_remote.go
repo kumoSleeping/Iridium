@@ -137,7 +137,7 @@ func (s *Server) remoteMkdir(w http.ResponseWriter, r *http.Request, req api.New
 	reply(w, http.StatusOK, api.FolderReply{Path: pagePath(hi, p)})
 }
 
-// dshWorkspaces is GET /api/machines/{id}/dsh/workspaces: the folders a new dsh session there may
+// dshWorkspaces is GET /v1/internal/machines/{id}/dsh/workspaces: the folders a new dsh session there may
 // open in, dsh's own workspaces first (docs/exec.md "远端 DSH").
 func (s *Server) dshWorkspaces(w http.ResponseWriter, r *http.Request) {
 	mc, hi := s.machineAt(w, r.PathValue("id"))
@@ -161,7 +161,7 @@ func (s *Server) dshWorkspaces(w http.ResponseWriter, r *http.Request) {
 	reply(w, http.StatusOK, ws)
 }
 
-// dshSync is POST /api/machines/{id}/dsh/sync: the dsh there read again now, its workspaces and
+// dshSync is POST /v1/internal/machines/{id}/dsh/sync: the dsh there read again now, its workspaces and
 // sessions, models and presets (a remote group's menu; docs/exec.md "远端 DSH").
 func (s *Server) dshSync(w http.ResponseWriter, r *http.Request) {
 	mc, _ := s.machineAt(w, r.PathValue("id"))

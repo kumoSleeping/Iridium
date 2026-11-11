@@ -31,7 +31,7 @@ func TestForwardsBrowserAsWebLogin(t *testing.T) {
 	wantStatus(t, h.join(&authenticator{t: t, origin: testOrigin}, h.setupToken(), ptr("mac")), http.StatusOK)
 	me, _ := h.whoami()
 	srv, got := h.listen()
-	r := httptest.NewRequest("POST", "/api/x", nil)
+	r := httptest.NewRequest("POST", "/v1/internal/x", nil)
 	r.Host = "ir.example.com"
 	r.Header.Set("Origin", testOrigin)
 	r.Header.Set(HeaderPlatform, "qq")
@@ -83,7 +83,7 @@ func TestTokenPassesThrough(t *testing.T) {
 	h.secrets = append(h.secrets, tok)
 	srv, got := h.listen()
 	for _, host := range []string{"ir.example.com", "127.0.0.1:7810"} {
-		r := httptest.NewRequest("POST", "/api/x", nil)
+		r := httptest.NewRequest("POST", "/v1/internal/x", nil)
 		r.Host = host
 		r.Header.Set("Authorization", "Bearer "+tok)
 		r.Header.Set(HeaderUser, "u1")
@@ -109,7 +109,7 @@ func TestTokenPassesThrough(t *testing.T) {
 func TestOffIsHostPage(t *testing.T) {
 	h := newHarness(t, "")
 	srv, got := h.listen()
-	r := httptest.NewRequest("GET", "/api/x", nil)
+	r := httptest.NewRequest("GET", "/v1/internal/x", nil)
 	r.Host = "localhost:7810"
 	r.AddCookie(&http.Cookie{Name: CookieName, Value: gate.NewSecret()})
 	w := httptest.NewRecorder()

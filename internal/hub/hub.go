@@ -12,7 +12,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"sync"
 	"time"
 
@@ -189,25 +188,7 @@ func (s *Sub) poke() {
 	}
 }
 
-// Serve writes the stream as server-sent events until ctx ends or a write fails: "state" events
-// (api.StateEvent) and "draft" events (api.DraftEvent), and a comment every Ping. flush pushes
-// what was written to the reader.
-func (s *Sub) Serve(ctx context.Context, w io.Writer, flush func()) error {
-	return s.Run(ctx, func(event string, data []byte) error {
-		if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, data); err != nil {
-			return err
-		}
-		return nil
-	}, func() error {
-		if _, err := io.WriteString(w, ": ping\n\n"); err != nil {
-			return err
-		}
-		flush()
-		return nil
-	}, flush)
-}
-
-// Run is Serve for any transport: each "state" (api.StateEvent) and "draft" (api.DraftEvent) to
+// Run serves the subscription: each "state" (api.StateEvent) and "draft" (api.DraftEvent) to
 // emit, ping every Ping, flush after each batch.
 func (s *Sub) Run(ctx context.Context, emit func(event string, data []byte) error, pinged func() error, flush func()) error {
 	sent := map[string]time.Time{}

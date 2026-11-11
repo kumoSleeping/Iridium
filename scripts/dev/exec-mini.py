@@ -75,7 +75,7 @@ class WS:
         if u.scheme == "https":
             s = ssl.create_default_context().wrap_socket(s, server_hostname=u.hostname)
         key = base64.b64encode(os.urandom(16)).decode()
-        s.sendall((f"GET /api/exec HTTP/1.1\r\nHost: {u.netloc}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+        s.sendall((f"GET /v1/internal/exec HTTP/1.1\r\nHost: {u.netloc}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
                    f"Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\nUser-Agent: {UA['user-agent']}\r\nAuthorization: Bearer {token}\r\n\r\n").encode())
         self.r, self.s, self.lock = s.makefile("rb"), s, threading.Lock()
         status = self.r.readline()
@@ -495,7 +495,7 @@ def pair():
     body = json.dumps({"name": NAME, "os": OS, "arch": platform.machine(), "program": PROGRAM, "shell": SHELL,
                        "agents": [{"agent": a["agent"], "version": a["version"]} for a in agents()]}).encode()
     while True:
-        req = urllib.request.Request(URL + "/api/pair", data=body, headers={"content-type": "application/json", **UA})
+        req = urllib.request.Request(URL + "/v1/internal/pair", data=body, headers={"content-type": "application/json", **UA})
         try:
             r = json.load(urllib.request.urlopen(req))
         except urllib.error.HTTPError as e:
@@ -508,7 +508,7 @@ def pair():
         while True:
             time.sleep(2)
             try:
-                st = json.load(urllib.request.urlopen(urllib.request.Request(URL + "/api/pair/" + r["request"], headers=UA)))
+                st = json.load(urllib.request.urlopen(urllib.request.Request(URL + "/v1/internal/pair/" + r["request"], headers=UA)))
             except urllib.error.HTTPError as e:
                 st = {"status": "expired" if e.code in (404, 422) else "pending"}
             if st["status"] == "allowed" and st.get("token"):

@@ -326,7 +326,7 @@ func hasBearer(r *http.Request) bool {
 
 // toCore: the path is the core's (the API, Satori, avatars), not the page's files.
 func toCore(p string) bool {
-	return p == "/api" || strings.HasPrefix(p, "/api/") || p == "/v1" || strings.HasPrefix(p, "/v1/") ||
+	return p == "/v1" || strings.HasPrefix(p, "/v1/") ||
 		strings.HasPrefix(p, gate.AvatarPrefix)
 }
 

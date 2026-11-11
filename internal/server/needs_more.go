@@ -16,7 +16,7 @@ import (
 // The needs queue beyond the applications (k_glossary "需要"; draft 二「消息」): every session's
 // open asks (questions, approvals, plans) for the logins that may use the session, and what was
 // shared with a login of ir_web (share.go). The carried state "needs" holds them all; each stream
-// and GET /api/needs gets what its caller may see (needsFor): the applications for a person on
+// and GET /v1/internal/needs gets what its caller may see (needsFor): the applications for a person on
 // ir_web or at the host, as before; an ask for whoever may use its session; a share for its login.
 
 // ShareTTL is how long a share waits in its login's needs.
@@ -164,7 +164,7 @@ func (s *Server) streamFilter(c caller) func(key string, v []byte) []byte {
 	}
 }
 
-// listNeeds is GET /api/needs: what waits that the caller sees. Not an agent's ir.
+// listNeeds is GET /v1/internal/needs: what waits that the caller sees. Not an agent's ir.
 func (s *Server) listNeeds(w http.ResponseWriter, r *http.Request) {
 	c := callerOf(r)
 	if c.agent {
@@ -176,7 +176,7 @@ func (s *Server) listNeeds(w http.ResponseWriter, r *http.Request) {
 	reply(w, http.StatusOK, n)
 }
 
-// dropNeed is DELETE /api/needs/{id}: a share put away by its login.
+// dropNeed is DELETE /v1/internal/needs/{id}: a share put away by its login.
 func (s *Server) dropNeed(w http.ResponseWriter, r *http.Request) {
 	c := callerOf(r)
 	if !c.Web() || !s.more.dropShare(r.PathValue("id"), c.Login) {

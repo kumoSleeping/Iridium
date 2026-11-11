@@ -112,7 +112,7 @@ func TestSatori(t *testing.T) {
 	if code, e := l.satoriCall(app, "alice", "login.get", nil, nil); code != 403 || e.Code != "login_pending" {
 		t.Fatalf("a new login: %d %+v", code, e)
 	}
-	l.want(200, "socket", "POST", "/api/needs/"+l.pending().ID, api.NeedAnswer{Allow: true}, nil)
+	l.want(200, "socket", "POST", "/v1/internal/needs/"+l.pending().ID, api.NeedAnswer{Allow: true}, nil)
 	var lg satori.Login
 	if code, e := l.satoriCall(app, "alice", "login.get", nil, &lg); code != 200 || lg.Platform != app.App.ID || lg.User.ID != "alice" {
 		t.Fatalf("login.get: %d %+v %+v", code, e, lg)
@@ -145,7 +145,7 @@ func TestSatori(t *testing.T) {
 			t.Errorf("the host's login: %+v", hl)
 		}
 	}
-	// Iridium's own API under /v1/internal/: the same as /api/.
+	// Iridium's own API under /v1/internal/: the same as /v1/internal/.
 	var list []api.Session
 	if code := l.do("web", "GET", "/v1/internal/sessions", nil, &list); code != 200 {
 		t.Errorf("/v1/internal/sessions: %d", code)
@@ -158,7 +158,7 @@ func TestSatori(t *testing.T) {
 	}
 
 	var created api.NewSessionReply
-	l.want(200, "socket", "POST", "/api/sessions", api.NewSession{Agent: "claude", Cwd: l.work}, &created)
+	l.want(200, "socket", "POST", "/v1/internal/sessions", api.NewSession{Agent: "claude", Cwd: l.work}, &created)
 	id := created.ID
 	if code, e := l.satoriCall(app, "alice", "channel.get", map[string]string{"channel_id": "nope"}, nil); code != 422 || e.Code != "no_such_session" {
 		t.Errorf("no session: %d %+v", code, e)
@@ -298,10 +298,65 @@ func TestSatori(t *testing.T) {
 	}
 
 	// Removed: its stream closes.
-	l.want(200, "socket", "DELETE", "/api/apps/bridge", nil, nil)
+	l.want(200, "socket", "DELETE", "/v1/internal/apps/bridge", nil, nil)
 	for {
 		if _, err := w.read(nil); err != nil {
 			break
+		}
+	}
+}
+
+// watchStates opens Satori's stream at base as header says (none: the host's own page), asks for
+// keys in IDENTIFY and gives every STATE (op 7) as it comes; the channel closes with the stream.
+func watchStates(t *testing.T, base string, header http.Header, keys ...string) <-chan satori.State {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	dctx, dcancel := context.WithTimeout(ctx, 5*time.Second)
+	defer dcancel()
+	c, _, err := websocket.Dial(dctx, "ws"+strings.TrimPrefix(base, "http")+"/v1/events", &websocket.DialOptions{HTTPHeader: header})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c.CloseNow() })
+	b, _ := json.Marshal(map[string]any{"op": satori.OpIdentify, "body": satori.Identify{Watch: keys}})
+	if err := c.Write(dctx, websocket.MessageText, b); err != nil {
+		t.Fatal(err)
+	}
+	out := make(chan satori.State, 1000)
+	go func() {
+		defer close(out)
+		for {
+			_, b, err := c.Read(ctx)
+			if err != nil {
+				return
+			}
+			var sig satori.Signal
+			if json.Unmarshal(b, &sig) != nil || sig.Op != satori.OpState {
+				continue
+			}
+			var st satori.State
+			json.Unmarshal(sig.Body, &st)
+			out <- st
+		}
+	}()
+	return out
+}
+
+// firstState is the first "state" on ch, as its JSON.
+func firstState(t *testing.T, ch <-chan satori.State) string {
+	t.Helper()
+	for deadline := time.After(5 * time.Second); ; {
+		select {
+		case st, ok := <-ch:
+			if !ok {
+				t.Fatal("the stream closed before a state")
+			}
+			if st.Type == "state" {
+				return string(st.Data)
+			}
+		case <-deadline:
+			t.Fatal("no state on the stream")
 		}
 	}
 }

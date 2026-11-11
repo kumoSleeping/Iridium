@@ -92,16 +92,16 @@ func (m *maskedWriter) Flush() {
 func (m *maskedWriter) Unwrap() http.ResponseWriter { return m.ResponseWriter }
 
 func (s *Server) secretRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/secrets", s.listSecrets)
-	mux.HandleFunc("PUT /api/secrets/{name}", s.setSecret)
-	mux.HandleFunc("DELETE /api/secrets/{name}", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /v1/internal/secrets", s.listSecrets)
+	mux.HandleFunc("PUT /v1/internal/secrets/{name}", s.setSecret)
+	mux.HandleFunc("DELETE /v1/internal/secrets/{name}", func(w http.ResponseWriter, r *http.Request) {
 		if c := callerOf(r); !c.Host() || c.agent {
 			forbid(w, errHostSecrets)
 			return
 		}
 		s.deleteSecret(w, r)
 	})
-	mux.HandleFunc("POST /api/secrets/use", s.useSecrets)
+	mux.HandleFunc("POST /v1/internal/secrets/use", s.useSecrets)
 }
 
 // terminalName is terminal id's name, for lists; the ID if it is gone.

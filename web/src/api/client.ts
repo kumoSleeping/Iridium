@@ -71,7 +71,7 @@ import type { SecretInfo, Secrets, SetSecret, Usage } from "./types.gen";
 
 /** The gate's GET /_ir/api/session (docs/gate.md). */
 export type GateSession = { authenticated: boolean; name?: string; local?: boolean; setup?: boolean };
-/** What PUT /api/me/profile and /api/apps/{id}/profile answer: the app's or login's name and avatar. */
+/** What PUT /v1/internal/me/profile and /v1/internal/apps/{id}/profile answer: the app's or login's name and avatar. */
 export type Profile = { id: string; name: string; kind: string; avatar?: string };
 
 /** The answers shown. A failed one is not retried: the next state or the clock asks again. */
@@ -314,10 +314,10 @@ export const api = {
   checkUpdate: () => write<UpdateState>("POST", "/v1/internal/update/check"),
   applyUpdate: (force = false) => write<UpdateState>("POST", "/v1/internal/update", force ? ({ force } satisfies ApplyUpdate) : undefined),
 
-  // --- this terminal (GET /api/me), the gate's session, profile and logout ---
+  // --- this terminal (GET /v1/internal/me), the gate's session, profile and logout ---
   me: () => get<Me>("/v1/internal/me"),
   gateSession: () => get<GateSession>("/_ir/api/session"),
-  /** PUT /api/me/profile, or another app's or login's (internal/gate): multipart name, avatar, removeAvatar. */
+  /** PUT /v1/internal/me/profile, or another app's or login's (internal/gate): multipart name, avatar, removeAvatar. */
   profile: (p: { name?: string; avatar?: Blob; removeAvatar?: boolean }, of?: string) => {
     const f = new FormData();
     if (p.name !== undefined) f.set("name", p.name);
@@ -325,7 +325,7 @@ export const api = {
     if (p.removeAvatar) f.set("removeAvatar", "1");
     return write<Profile>("PUT", of ? `/v1/internal/apps/${enc(of)}/profile` : "/v1/internal/me/profile", f);
   },
-  /** PUT /api/me/device, or another app's or login's: the device it runs on. */
+  /** PUT /v1/internal/me/device, or another app's or login's: the device it runs on. */
   device: (device: SetDevice["device"], of?: string) => write<SetDevice>("PUT", of ? `/v1/internal/apps/${enc(of)}/device` : "/v1/internal/me/device", { device } satisfies SetDevice),
   logout: () => write<{ ok: boolean }>("POST", "/_ir/api/logout"),
 
@@ -333,20 +333,20 @@ export const api = {
   apps: () => get<Apps>("/v1/internal/apps"),
   invite: (name: string, claude?: boolean) => write<Invite>("POST", "/v1/internal/invites", { ...(name ? { name } : {}), ...(claude ? { claude } : {}) } satisfies NewInvite),
   revoke: (id: string) => write<{ ok: boolean }>("DELETE", `/v1/internal/apps/${enc(id)}`),
-  /** DELETE /api/apps/{app}/logins/{login}: another app's login asks again as it next speaks. */
+  /** DELETE /v1/internal/apps/{app}/logins/{login}: another app's login asks again as it next speaks. */
   removeLogin: (app: string, login: string) => write<{ ok: boolean }>("DELETE", `/v1/internal/apps/${enc(app)}/logins/${enc(login)}`),
-  /** PUT /api/apps/{id}/perms: what an app may use (agents, scope). */
+  /** PUT /v1/internal/apps/{id}/perms: what an app may use (agents, scope). */
   appPerms: (id: string, p: Perms) => write<Perms>("PUT", `/v1/internal/apps/${enc(id)}/perms`, p),
-  /** PUT /api/apps/{id}/agents: the agents an app carries turned off there. */
+  /** PUT /v1/internal/apps/{id}/agents: the agents an app carries turned off there. */
   appAgents: (id: string, off: string[]) => write<AppAgents>("PUT", `/v1/internal/apps/${enc(id)}/agents`, { off } satisfies AppAgents),
-  /** PUT /api/apps/{app}/logins/{login}/perms: what a login may use, within its app's. */
+  /** PUT /v1/internal/apps/{app}/logins/{login}/perms: what a login may use, within its app's. */
   loginPerms: (app: string, login: string, p: Perms) => write<Perms>("PUT", `/v1/internal/apps/${enc(app)}/logins/${enc(login)}/perms`, p),
-  /** PUT /api/pairing: the pairing window opened for minutes (10 by default) or closed. */
+  /** PUT /v1/internal/pairing: the pairing window opened for minutes (10 by default) or closed. */
   pairing: (open: boolean, minutes?: number) => write<PairWindow>("PUT", "/v1/internal/pairing", { open, ...(minutes ? { minutes } : {}) } satisfies PairWindow),
-  /** GET /api/catalogue: the official apps and the commands that install them. */
+  /** GET /v1/internal/catalogue: the official apps and the commands that install them. */
   catalogue: () => get<CatalogueEntry[]>("/v1/internal/catalogue"),
 
-  /** GET /api/usage: the last days' tokens by day, app, agent and model; terminal: one app only; by hour: the last 24 hours'; by weekhour: by weekday and hour. */
+  /** GET /v1/internal/usage: the last days' tokens by day, app, agent and model; terminal: one app only; by hour: the last 24 hours'; by weekhour: by weekday and hour. */
   usage: (days: number, terminal?: string, by?: "hour" | "weekhour") => get<Usage>(`/v1/internal/usage?days=${days}${terminal ? `&app=${enc(terminal)}` : ""}${by ? `&by=${by}` : ""}`),
   confirms: () => get<Needs>("/v1/internal/needs"),
   /** extra: a secret-set's value, a secret-use's "this session". */

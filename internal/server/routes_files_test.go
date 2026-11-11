@@ -34,7 +34,7 @@ func TestUploadSendAndFetch(t *testing.T) {
 	c := &http.Client{Timeout: 10 * time.Second}
 
 	var created api.NewSessionReply
-	if code := call(t, c, "POST", base+"/api/sessions", api.NewSession{Agent: "claude", Cwd: work, Caller: "some-caller"}, &created); code != 200 {
+	if code := call(t, c, "POST", base+"/v1/internal/sessions", api.NewSession{Agent: "claude", Cwd: work, Caller: "some-caller"}, &created); code != 200 {
 		t.Fatalf("create: %d", code)
 	}
 	id := created.ID
@@ -49,11 +49,11 @@ func TestUploadSendAndFetch(t *testing.T) {
 	sum := sha256.Sum256(data)
 
 	var up api.Upload
-	if code := call(t, c, "POST", base+"/api/sessions/"+id+"/uploads", api.NewUpload{Name: "shot.png", Size: int64(len(data))}, &up); code != 200 || up.ID == "" {
+	if code := call(t, c, "POST", base+"/v1/internal/sessions/"+id+"/uploads", api.NewUpload{Name: "shot.png", Size: int64(len(data))}, &up); code != 200 || up.ID == "" {
 		t.Fatalf("new upload: %d %+v", code, up)
 	}
 	put := func(off int, chunk []byte) (int, api.Upload) {
-		req, _ := http.NewRequest("PUT", base+"/api/uploads/"+up.ID+"?offset="+itoa(int64(off)), bytes.NewReader(chunk))
+		req, _ := http.NewRequest("PUT", base+"/v1/internal/uploads/"+up.ID+"?offset="+itoa(int64(off)), bytes.NewReader(chunk))
 		resp, err := c.Do(req)
 		if err != nil {
 			t.Fatal(err)
@@ -72,12 +72,12 @@ func TestUploadSendAndFetch(t *testing.T) {
 		t.Errorf("a chunk again: %d %+v", code, u)
 	}
 	var got api.Upload
-	call(t, c, "GET", base+"/api/uploads/"+up.ID, nil, &got)
+	call(t, c, "GET", base+"/v1/internal/uploads/"+up.ID, nil, &got)
 	if got.Received != int64(half) {
 		t.Errorf("received %d", got.Received)
 	}
 	put(half, data[half:])
-	if code := call(t, c, "POST", base+"/api/uploads/"+up.ID+"/complete", api.CompleteUpload{Sha256: hex.EncodeToString(sum[:])}, &got); code != 200 || got.File == nil {
+	if code := call(t, c, "POST", base+"/v1/internal/uploads/"+up.ID+"/complete", api.CompleteUpload{Sha256: hex.EncodeToString(sum[:])}, &got); code != 200 || got.File == nil {
 		t.Fatalf("complete: %d %+v", code, got)
 	}
 	placed := filepath.Join(work, ".iridium", "uploads", "shot.png")
@@ -86,12 +86,12 @@ func TestUploadSendAndFetch(t *testing.T) {
 	}
 
 	// Sent with a message: the agent sees the path, and the image itself.
-	if code := call(t, c, "POST", base+"/api/sessions/"+id+"/send", api.Send{Text: "look", Attachments: []string{got.File.Ref}}, nil); code != 200 {
+	if code := call(t, c, "POST", base+"/v1/internal/sessions/"+id+"/send", api.Send{Text: "look", Attachments: []string{got.File.Ref}}, nil); code != 200 {
 		t.Fatalf("send: %d", code)
 	}
 	var page api.MessagePage
 	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
-		call(t, c, "GET", base+"/api/sessions/"+id+"/messages", nil, &page)
+		call(t, c, "GET", base+"/v1/internal/sessions/"+id+"/messages", nil, &page)
 		if len(page.Blocks) == 2 {
 			break
 		}
@@ -114,7 +114,7 @@ func TestUploadSendAndFetch(t *testing.T) {
 		t.Errorf("no image block went to the agent")
 	}
 
-	resp, err := c.Get(base + "/api/sessions/" + id + "/files/" + got.File.Ref)
+	resp, err := c.Get(base + "/v1/internal/sessions/" + id + "/files/" + got.File.Ref)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,21 +124,21 @@ func TestUploadSendAndFetch(t *testing.T) {
 		t.Errorf("fetch: %d %v", resp.StatusCode, resp.Header)
 	}
 	var info api.FileRef
-	if code := call(t, c, "GET", base+"/api/sessions/"+id+"/files/"+got.File.Ref+"/info", nil, &info); code != 200 || info.Sha256 != hex.EncodeToString(sum[:]) {
+	if code := call(t, c, "GET", base+"/v1/internal/sessions/"+id+"/files/"+got.File.Ref+"/info", nil, &info); code != 200 || info.Sha256 != hex.EncodeToString(sum[:]) {
 		t.Errorf("info: %d %+v", code, info)
 	}
-	if code := call(t, c, "GET", base+"/api/sessions/"+id+"/files/"+got.File.Ref+"/thumb", nil, nil); code != 200 {
+	if code := call(t, c, "GET", base+"/v1/internal/sessions/"+id+"/files/"+got.File.Ref+"/thumb", nil, nil); code != 200 {
 		t.Errorf("thumb: %d", code)
 	}
-	if code := call(t, c, "GET", base+"/api/sessions/"+id+"/files/aaaaaaaaaaaaaaaa", nil, nil); code != 422 {
+	if code := call(t, c, "GET", base+"/v1/internal/sessions/"+id+"/files/aaaaaaaaaaaaaaaa", nil, nil); code != 422 {
 		t.Errorf("unknown ref: %d", code)
 	}
 	// Paths are for the local ir only, not the page.
-	if code := call(t, c, "GET", base+"/api/files?path="+work, nil, nil); code != 404 && code != 405 {
+	if code := call(t, c, "GET", base+"/v1/internal/files?path="+work, nil, nil); code != 404 && code != 405 {
 		t.Errorf("listing over TCP: %d", code)
 	}
-	if code := call(t, c, "POST", base+"/api/sessions/"+id+"/attach", api.AttachPath{Path: placed}, nil); code != 404 && code != 405 {
+	if code := call(t, c, "POST", base+"/v1/internal/sessions/"+id+"/attach", api.AttachPath{Path: placed}, nil); code != 404 && code != 405 {
 		t.Errorf("attach over TCP: %d", code)
 	}
-	call(t, c, "POST", base+"/api/sessions/"+id+"/stop", nil, nil)
+	call(t, c, "POST", base+"/v1/internal/sessions/"+id+"/stop", nil, nil)
 }

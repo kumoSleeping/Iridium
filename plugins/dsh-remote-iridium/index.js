@@ -57,7 +57,7 @@ function machineName() {
 }
 
 const base = (url) => url.replace(/\/+$/, '')
-const wsURL = (url) => base(url).replace(/^http/i, 'ws') + '/api/exec'
+const wsURL = (url) => base(url).replace(/^http/i, 'ws') + '/v1/internal/exec'
 
 /** Asks the Iridium to pair until a panel allows it: the TOKEN; null if denied, closed or stopped. */
 async function pair(url, hello, stopped, show) {
@@ -65,7 +65,7 @@ async function pair(url, hello, stopped, show) {
     if (stopped()) return null
     let req
     try {
-      const r = await fetch(`${base(url)}/api/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(hello) })
+      const r = await fetch(`${base(url)}/v1/internal/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(hello) })
       if (r.status === 403) {
         show({ state: 'closed' })
         say(`${url} takes no pairing requests now (its settings): ask again with /iridium ${url}`)
@@ -92,7 +92,7 @@ async function pair(url, hello, stopped, show) {
       if (stopped()) return null
       let st
       try {
-        const r = await fetch(`${base(url)}/api/pair/${encodeURIComponent(req.request)}`)
+        const r = await fetch(`${base(url)}/v1/internal/pair/${encodeURIComponent(req.request)}`)
         st = r.ok ? await r.json() : { status: r.status === 404 || r.status === 422 ? 'expired' : 'pending' }
       } catch {
         st = { status: 'pending' }

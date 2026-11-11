@@ -102,9 +102,9 @@ func (s *Server) webHandler(mux http.Handler) http.Handler {
 		app = webui.Handler()
 	}
 	core := s.gate().Wrap(s.withLogin(s.withSatori(webui.Gzip(mux))))
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return legacy(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.web().Handler(core, app).ServeHTTP(w, r)
-	})
+	}))
 }
 
 func (s *Server) gate() *gate.Gate { return s.g }
@@ -150,7 +150,7 @@ func (s *Server) newWeb(origin string) (*webapp.Web, error) {
 }
 
 // terminalsChanged tells the pages the apps changed (an app's avatar came, a login renamed, its
-// computer connected): they fetch GET /api/apps again. The key "terminals" carries a count,
+// computer connected): they fetch GET /v1/internal/apps again. The key "terminals" carries a count,
 // nothing of them.
 func (s *Server) terminalsChanged() {
 	s.hub.Set("terminals", s.terminalsSeq.Add(1))
@@ -372,7 +372,7 @@ func (s *Server) loginOf(info gate.EndpointInfo) api.Login {
 	}
 }
 
-// meOf is the caller as GET /api/me has it.
+// meOf is the caller as GET /v1/internal/me has it.
 func (s *Server) meOf(c caller, info gate.EndpointInfo) api.Me {
 	id := c.Identity
 	m := api.Me{ID: info.ID, Name: info.Name, App: id.App, Login: id.Login, Avatar: info.Avatar, Host: id.Host(), Web: id.Web(),

@@ -43,7 +43,7 @@ http.Serve(tcp, w.Handler(core, webui.Handler()))
 // unix socket 不经过这两层：handler 外层用 gate.NewContext(ctx, 主机身份)
 ```
 
-- `PUT /api/public` 只换网页层（新开一个 `webapp.Web`，旧的 `CloseAll()` 结束它转发的浏览器请求）；核心和应用的连接不动。
+- `PUT /v1/internal/public` 只换网页层（新开一个 `webapp.Web`，旧的 `CloseAll()` 结束它转发的浏览器请求）；核心和应用的连接不动。
 - 管理：`CreateApp`、`RenewToken`、`Access()`（应用和网页的登录）、`Find`、`Revoke`（ir_web 的登录先问网页层 `MayRemove`：最后一个有 Passkey 的不能删）、`UpdateProfile`、`CheckName`。
 
 ## 存储

@@ -14,7 +14,7 @@ tar xzf iridium-linux-amd64.tar.gz
 
 打开 `http://127.0.0.1:7810`。要从外面访问：`ir public`（Cloudflare Tunnel + Passkey）。更新在设置里点一下，或 `ir update`。
 
-MIT 许可。细节：[术语](GLOSSARY.md) · [部署](docs/deploy.md) · [接口](docs/api.md) · [应用的接口（Satori）](docs/satori.md) · [别的电脑](docs/exec.md) · [登录](docs/gate.md) · [设计](docs/plan.md)
+MIT 许可。细节：[术语](GLOSSARY.md) · [部署](docs/deploy.md) · [接口](docs/api.md) · [应用的接口（Satori）](docs/satori.md) · [别的电脑](docs/exec.md) · [登录](docs/gate.md) · [设计](docs/plan.md) · [旧接口](docs/legacy.md)
 
 ## 开发
 
