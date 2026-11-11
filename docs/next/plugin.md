@@ -14,7 +14,7 @@ ir 核心
 执行端（DSH Desktop 里的 dsh-remote-iridium；本机、远端一样，都经配对连上）
 ├─ 答 agent.presets / agent.prepare；起会话时登记到 Desktop 的工作区
 └─ 在 Desktop 和会话进程里提供服务 iridium：attach、onButton
-会话进程 ── omd-iridium（单独的包）：用 iridium 服务挂 Ultra、收按下
+会话进程 ── 插件里的 omd.js：用 iridium 服务挂 Ultra、收按下
 ```
 
 ## 核心
@@ -44,9 +44,9 @@ ir 核心
 - 服务 `iridium`（Desktop 进程和会话进程里都有）：`attach(session, place, content)`、`onButton((session, id, user) => …)`。会话进程里的经 `bridge.js` 交给 Desktop 里的，再经执行端连接给 ir。
 - 会话进程里有了会话，告诉 Desktop 里的，由它登记到工作区（代替 `dsh.attach`）。
 
-## omd-iridium
+## OMD 的 Ultra
 
-单独的包（`plugins/omd-iridium`，npm 上同版本发）。注入 `omd`、`iridium`：每个会话按 OMD 的状态挂 `<button id="omd.ultra" pressed? disabled? title>Ultra</button>` 和子模式按钮；按下就切换再重挂。dsh-remote-iridium 不认识 OMD。
+在 dsh-remote-iridium 里，一个子插件 `omd.js`（kumo，2026-11-11：并进来，只装一个插件）：注入 `omd`、`iridium`，没装 OMD 时不启用。每个会话按 OMD 的状态挂 `<button id="omd.ultra" pressed? disabled? title>Ultra</button>` 和子模式按钮；按下就切换再重挂。插件里只有这个文件认识 OMD，核心里没有。
 
 ## 验证（要有 Desktop 和 OMD 的机器）
 

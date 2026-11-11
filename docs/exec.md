@@ -226,7 +226,7 @@ agent 的 `ir sh`：每条命令一个新进程，不经托管进程，不写文
 - 来源：Iridium 自己（Claude 的 UltraCode，`from` 为 `ir`）；执行端（`m:<机器>`，事件 `session.attach {session, place, content}`：`session` 是那台机器上 agent 自己的会话 id，执行端在本机时是本机的会话，`content` 是字符串或按语言的 `{"zh": …, "en": …}`，空即去掉；执行端断开，它挂的都去掉，重连后它再挂）；应用（`a:<应用>`，`PUT /v1/internal/sessions/{id}/attach/{place}`）。
 - 限制：位置名 `a-z0-9-`，至多 16 字；一份至多 4KB；同一来源一个会话至多 4 段；存内存，重启后由挂的一方再挂。
 - 按下：网页 `POST /v1/internal/button {id: "att:<会话>:<from>:<按钮 id>"}`，权限同改强度。`ir` 的就地切换；执行端的发事件 `session.button {session, id, user: {id, name}}`；应用的发 `interaction/button`，只给这个应用。
-- dsh 插件：服务 `iridium`（Desktop 进程和会话进程里都有）`attach(session, place, content)`、`onButton(fn)`；会话进程里的经本地的桥（`bridge.js`）交给 Desktop 里的插件，再经执行端连接发给这边。插件不认识 OMD；OMD 的 Ultra 是另一个包 `omd-iridium`（`plugins/omd-iridium`），用这个服务挂键和子模式。
+- dsh 插件：服务 `iridium`（Desktop 进程和会话进程里都有）`attach(session, place, content)`、`onButton(fn)`；会话进程里的经本地的桥（`bridge.js`）交给 Desktop 里的插件，再经执行端连接发给这边。OMD 的 Ultra 在插件里一个子插件（`omd.js`，插件里唯一认识 OMD 的文件，注入 `omd`、`iridium`，没装 OMD 时不启用），用这个服务挂键和子模式；Ultra 开着时别处改了档位（dsh 的 `model/selection` 事件），它按新档位把 Ultra 重新打开（用户，2026-11-11：并进 dsh 插件，只装一个）。
 
 ## 通道（2026-11-09）
 

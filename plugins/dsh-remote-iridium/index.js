@@ -12,6 +12,7 @@ import { bridgeEndpoint, createBridge } from './bridge.js'
 import { dshMethods, fileSession } from './dsh.js'
 import { Executor, iridiumKey, refused } from './executor.js'
 import { followHeld } from './held.js'
+import { OmdUltra } from './omd.js'
 
 export const name = 'remote-iridium'
 
@@ -215,6 +216,7 @@ export function apply(ctx, config) {
     toProcess: (session, id, user) => bridge?.button(session, id, user),
   })
   ctx.provide('iridium', attach.service)
+  ctx.plugin(OmdUltra)
   // Each session that begins in one of those processes is filed under its folder's workspace here
   // (DSH Desktop's sidebar), once.
   const filed = new Set()

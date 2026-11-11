@@ -2,7 +2,6 @@
 // that it loads without dsh's packages (the tests' run.mjs).
 import fs from 'node:fs'
 import path from 'node:path'
-import { pathToFileURL } from 'node:url'
 import { bound, boundPatch } from './compose.js'
 import { RemoteError } from './executor.js'
 import { heldMethods } from './held.js'
@@ -82,7 +81,7 @@ export function dshMethods(ctx, kept = () => ({ unsynced: [], ungrouped: true })
       } catch (e) {
         throw new RemoteError('failed', `bundles: ${e.message}`)
       }
-      if (o.bridge && o.sessionFile) patches.push(write(o.sessionFile, sessionPatch(o.bridge, bundles)))
+      if (o.bridge && o.sessionFile) patches.push(write(o.sessionFile, sessionPatch(o.bridge)))
       if (!ctx.get('agentPresets') || !llm.scope || !o.dir) return { patches, preset: false }
       const { presets: list, default: def } = await presets()
       const id = typeof p.preset === 'string' && p.preset ? p.preset : def
@@ -115,15 +114,11 @@ export async function fileSession(ctx, session, cwd) {
   await w.attachSession(session)
 }
 
-/**
- * The patch that loads session.js in a session's dsh process, connected to bridge, and the
- * session part each of bundles names (its package.json's iridium.session: a module of it the
- * plugin in that process is).
- */
-export function sessionPatch(bridge, bundles = []) {
+/** The patch that loads session.js in a session's dsh process, connected to bridge. */
+export function sessionPatch(bridge) {
   const q = (v) => JSON.stringify(v)
   const out = [
-    "# dsh-remote-iridium: its part for the Iridium's sessions here, and the profile's bundles'.",
+    "# dsh-remote-iridium: its part for the Iridium's sessions here.",
     '# Generated; do not edit.',
     '- insert:',
     '    - id: remote-iridium-session',
@@ -132,10 +127,6 @@ export function sessionPatch(bridge, bundles = []) {
     `        endpoint: ${q(bridge.endpoint)}`,
     `        secret: ${q(bridge.secret)}`,
   ]
-  for (const b of bundles) {
-    if (!b.session) continue
-    out.push(`    - id: ${q(`remote-iridium-session-${b.name.replace(/[^A-Za-z0-9_-]+/g, '-')}`)}`, `      name: ${q(b.session)}`)
-  }
   return out.join('\n') + '\n'
 }
 
@@ -144,9 +135,8 @@ const own = JSON.parse(fs.readFileSync(new URL('./package.json', import.meta.url
 
 /**
  * The bundles of the profile at dir besides dsh's own (@deepseek-ai/) and this plugin, by its
- * order: {name, version, patches, session?}, patches the text of the files its dsh.bundle.patch
- * lists, session the file: URL of its part for a dsh process the Iridium starts (package.json's
- * iridium.session). A bundle not installed in the profile's node_modules is left out.
+ * order: {name, version, patches}, patches the text of the files its dsh.bundle.patch lists. A
+ * bundle not installed in the profile's node_modules is left out.
  */
 export function profileBundles(dir) {
   const json = (f) => JSON.parse(fs.readFileSync(f, 'utf8'))
@@ -162,13 +152,7 @@ export function profileBundles(dir) {
       if (path.relative(pkg, file).startsWith('..')) throw new Error(`${name}: patch ${f} is outside the package`)
       return fs.readFileSync(file, 'utf8')
     })
-    let session
-    if (typeof m.iridium?.session === 'string') {
-      const file = path.resolve(pkg, m.iridium.session)
-      if (path.relative(pkg, file).startsWith('..')) throw new Error(`${name}: iridium.session is outside the package`)
-      session = pathToFileURL(file).href
-    }
-    out.push({ name, ...(m.version ? { version: m.version } : {}), patches, ...(session ? { session } : {}) })
+    out.push({ name, ...(m.version ? { version: m.version } : {}), patches })
   }
   return out
 }

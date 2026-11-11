@@ -1,8 +1,8 @@
-// OMD's Ultra on the Iridium's page (index.js), over a fake OMD and a fake service iridium:
+// OMD's Ultra on the Iridium's page (omd.js), over a fake OMD and a fake service iridium:
 // node --test test/
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import * as omdIridium from '../index.js'
+import * as omdIridium from '../omd.js'
 
 const until = async (ok) => {
   for (let i = 0; i < 200 && !ok(); i++) await new Promise((r) => setTimeout(r, 5))

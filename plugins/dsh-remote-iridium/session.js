@@ -8,6 +8,7 @@ import net from 'node:net'
 import { lines } from './bridge.js'
 import { contentOf } from './attach.js'
 import { RemoteError } from './executor.js'
+import { OmdUltra } from './omd.js'
 
 export const name = 'remote-iridium-session'
 export const inject = ['agents']
@@ -66,6 +67,8 @@ export function apply(ctx, config) {
       return () => listeners.delete(fn)
     },
   })
+
+  ctx.plugin(OmdUltra)
 
   function connect() {
     if (stopped || !config?.endpoint) return

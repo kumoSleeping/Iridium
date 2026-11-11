@@ -18,6 +18,7 @@
     "session.js",
     "attach.js",
     "compose.js",
+    "omd.js",
     "prepare/",
     "executor.js",
     "ir.js",

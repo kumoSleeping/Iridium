@@ -48,6 +48,7 @@ test("a session's process: its sessions, what it attaches, a button back, gone w
     get: (name) => services[name],
     on: (name, fn) => (on[name] = fn),
     effect: (fn) => effects.push(fn()),
+    plugin: () => {}, // OMD's Ultra (omd.js): no OMD here
   }
   session.apply(ctx, { endpoint: bridge.endpoint, secret: bridge.secret })
   const pressed = []

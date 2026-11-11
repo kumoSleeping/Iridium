@@ -1,13 +1,13 @@
 // OMD's (oh-my-dsh, a third party's dsh plugin) Ultra on the Iridium's page: its collaboration
 // mode past the effort track, with a sub-mode and a level OMD picks for it, through OMD's own
-// service (omd.ultracode). It hangs a key at the place "effort" of each session here with the
-// service iridium (dsh-remote-iridium's: in DSH Desktop's process, and in a dsh process the
-// Iridium started here, whose patch loads this module too: package.json's iridium.session), and
-// a row of its sub-modes while on; a press switches it. Ultra on owns the effort: a level picked
+// service (omd.ultracode). It hangs a key at the place "effort" of each session here with this
+// plugin's service iridium (in DSH Desktop's process, and in a dsh process the Iridium started
+// here: index.js and session.js run it), and a row of its sub-modes while on; a press switches
+// it. A sub-plugin: on only while OMD is there (inject), and the only file here that knows OMD. Ultra on owns the effort: a level picked
 // in the Iridium is a plain model selection, which OMD takes for leaving Ultra, so it is turned
 // on again at the new level.
 
-export const name = 'omd-iridium'
+export const name = 'remote-iridium-omd'
 export const inject = ['omd', 'iridium']
 
 const SUBMODES = ['workflow', 'team', 'free']
@@ -143,7 +143,7 @@ export function apply(ctx, o = {}) {
   const on = (name, fn) => {
     try {
       const off = ctx.on(name, fn, { global: true })
-      if (typeof off === 'function') ctx.effect?.(() => off, `omd-iridium: ${name}`)
+      if (typeof off === 'function') ctx.effect?.(() => off, `remote-iridium-omd: ${name}`)
     } catch {}
   }
   on('agent/created', (e) => e?.agent?.id && render(e.agent.id))
@@ -197,5 +197,8 @@ export function apply(ctx, o = {}) {
       } catch {}
     }
     shown.clear()
-  }, 'omd-iridium')
+  }, 'remote-iridium-omd')
 }
+
+/** This file as a cordis sub-plugin (ctx.plugin). */
+export const OmdUltra = { name, inject, apply }

@@ -116,6 +116,7 @@ function startSession(dir, bridge) {
     get: (name) => services[name] ?? there.get(name),
     on: (name, fn) => (on[name] = fn),
     effect: (fn) => fn(),
+    plugin: () => {}, // OMD's Ultra (omd.js): no OMD in these tests
   }
   session.apply(ctx, { endpoint: bridge.endpoint, secret: bridge.secret })
   plugin(dir, ctx.get('iridium'))

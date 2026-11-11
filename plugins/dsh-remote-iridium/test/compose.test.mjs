@@ -97,14 +97,13 @@ test('the binder and modules files as the Iridium shipped them load in node', ()
   assert.match(preset, /export const name = 'iridium-preset'/)
 })
 
-test('agent.prepare: the models, the session parts, a preset of the bundles bound; presets as registered', async () => {
+test('agent.prepare: the models, the session part, a preset of the bundles bound; presets as registered', async () => {
   const sc = scope()
   const state = tmp()
   const profile = tmp()
-  write(profile, 'package.json', JSON.stringify({ dsh: { profile: { bundles: ['@deepseek-ai/dsh-web-app', 'oh-my-dsh', 'omd-iridium', 'dsh-remote-iridium'] } } }))
+  write(profile, 'package.json', JSON.stringify({ dsh: { profile: { bundles: ['@deepseek-ai/dsh-web-app', 'oh-my-dsh', 'dsh-remote-iridium'] } } }))
   write(profile, 'node_modules/oh-my-dsh/package.json', JSON.stringify({ name: 'oh-my-dsh', version: '1.3.9', dsh: { bundle: { patch: './p.yml' } } }))
   write(profile, 'node_modules/oh-my-dsh/p.yml', '- insert:\n    - id: oh-my-dsh\n      name: oh-my-dsh\n')
-  write(profile, 'node_modules/omd-iridium/package.json', JSON.stringify({ name: 'omd-iridium', iridium: { session: './index.js' } }))
   const reg = {
     list: async () => [{ id: 'standard' }, { id: 'omd-ptc', name: 'OMD PTC' }],
     readDocument: async (id) => ({ content: id === 'omd-ptc' ? PRESET.plugins : "- id: tool-fs\n  name: '@deepseek-ai/dsh-tool-fs'\n" }),
@@ -124,7 +123,7 @@ test('agent.prepare: the models, the session parts, a preset of the bundles boun
   let r = await m['agent.prepare']({ agent: 'dsh', session: 's1', cwd: '/w' })
   assert.deepEqual(r, { patches: [path.join(state, 'llm.patch.yml'), path.join(state, 'session.patch.yml')], preset: false })
   const sp = fs.readFileSync(path.join(state, 'session.patch.yml'), 'utf8')
-  assert.ok(sp.includes('id: "remote-iridium-session-omd-iridium"') && sp.includes(pathToFileURL(path.join(profile, 'node_modules/omd-iridium/index.js')).href), sp)
+  assert.ok(sp.includes('id: remote-iridium-session') && sp.includes('"/tmp/b.sock"'), sp)
   // OMD's: bound here, the Iridium's prompt after its persona.
   r = await m['agent.prepare']({ agent: 'dsh', session: 's2', preset: 'omd-ptc', system: 'Use ir.' })
   assert.equal(r.preset, true)
