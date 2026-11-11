@@ -268,16 +268,31 @@ func TestTurnOverHTTP(t *testing.T) {
 	if live.Ultracode == nil || !live.Ultracode.On {
 		t.Errorf("ultracode state: %+v", live.Ultracode)
 	}
-	// The same as a feature; one it has not is a bad request.
-	if code := call(t, c, "PUT", base+"/v1/internal/sessions/"+id+"/features/claude.ultracode", api.SetFeature{On: false}, nil); code != 200 {
-		t.Errorf("feature: %d", code)
+	// Its key, pressed: off; a button it has not is a bad request.
+	if len(live.Attached) != 1 || !strings.Contains(live.Attached[0].Content["en"], " pressed") {
+		t.Errorf("attached: %+v", live.Attached)
+	}
+	press := func(bid string) int {
+		b, _ := json.Marshal(map[string]string{"id": bid})
+		req, _ := http.NewRequest("POST", base+"/v1/internal/button", bytes.NewReader(b))
+		req.Header.Set(satori.HeaderPlatform, "local")
+		req.Header.Set(satori.HeaderUser, "local")
+		resp, err := c.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if code := press("att:" + id + ":ir:claude.ultracode"); code != 200 {
+		t.Errorf("the key pressed: %d", code)
 	}
 	call(t, c, "GET", base+"/v1/internal/sessions/"+id, nil, &live)
-	if live.Ultracode == nil || live.Ultracode.On || len(live.Features) != 1 || live.Features[0].On {
-		t.Errorf("feature state: %+v %+v", live.Ultracode, live.Features)
+	if live.Ultracode == nil || live.Ultracode.On || len(live.Attached) != 1 || strings.Contains(live.Attached[0].Content["en"], " pressed") {
+		t.Errorf("after the key: %+v %+v", live.Ultracode, live.Attached)
 	}
-	if code := call(t, c, "PUT", base+"/v1/internal/sessions/"+id+"/features/x.other", api.SetFeature{On: true}, nil); code != 400 {
-		t.Errorf("an unknown feature: %d", code)
+	if code := press("att:" + id + ":ir:x.other"); code != 400 {
+		t.Errorf("an unknown button: %d", code)
 	}
 	// A second daemon on the same socket is refused.
 	if _, _, err := s.Listen(); err == nil {

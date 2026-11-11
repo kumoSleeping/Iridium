@@ -2,82 +2,86 @@ package dsh
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/kumoSleeping/iridium/internal/agent"
+	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/harness"
+	"github.com/kumoSleeping/iridium/internal/remote"
 	"github.com/kumoSleeping/iridium/internal/remote/wire"
 )
 
-// fileFiled, in a session's hold directory: it is filed under DSH Desktop's workspace of its
-// folder there (or that dsh cannot file it).
-const fileFiled = "remote-filed"
+// prepareWait is how long agent.prepare may take: the plugin reads its profile and writes a few
+// files.
+const prepareWait = 20 * time.Second
+
+// hostOf is the executor that composes a dsh launch at machine ("": this computer) from its host's
+// settings (wire.CapPrepare: the dsh plugin in DSH Desktop); nil if none is connected. On this
+// computer, one that said it is on it (remote.Hub.Local).
+func (c *Channel) hostOf(machine string) *remote.Machine {
+	if c.o.Remote == nil {
+		return nil
+	}
+	if machine == "" {
+		return c.o.Remote.Local(wire.CapPrepare)
+	}
+	if mc := c.machine(machine); mc != nil && mc.Has(wire.CapPrepare) {
+		return mc
+	}
+	return nil
+}
 
 // Prepare gives a dsh launch what dsh takes at its start: its machine's models (the driver's
-// catalog), and at another machine its presets there, DSH Desktop's models and providers
-// (dsh.llm's patch) and the bundles of its profile, for a preset of theirs (dsh.bundles).
+// catalog), and where DSH Desktop's dsh plugin is connected (at that machine, or on this computer)
+// what Desktop composes: its presets, its models, a preset of its bundles, its own part in the
+// process (agent.presets, agent.prepare). On this computer the dsh run is Desktop's own.
 func (c *Channel) Prepare(ctx context.Context, r harness.Ref, o *agent.SpawnOptions) error {
 	if !ours(r) {
 		return nil
 	}
 	machine := r.Machine
 	o.Catalog = func() (agent.Catalog, error) { return c.Catalog(c.ctx, machine) }
-	if o.Remote != nil {
-		o.Remote.Presets = c.spawnPresets(ctx, machine)
-		if mc := c.machine(machine); mc != nil {
-			o.Remote.Patches = append(c.desktopLLM(ctx, mc), c.desktopSession(ctx, mc)...)
-			o.Remote.Bundles = c.desktopBundles(ctx, mc)
-		}
+	mc := c.hostOf(machine)
+	if mc == nil {
+		return nil
 	}
+	h := &agent.Host{
+		Presets: c.spawnPresets(ctx, machine),
+		Prepare: func(preset, system string) ([]string, bool, error) {
+			ctx, cancel := context.WithTimeout(ctx, prepareWait)
+			defer cancel()
+			rep, err := hostPrepare(ctx, mc, wire.PrepareParams{Session: o.Session, Cwd: o.Cwd, Preset: preset, System: system})
+			if err != nil {
+				return nil, false, err
+			}
+			if machine == "" {
+				for _, p := range rep.Patches {
+					if err := ownFile(p); err != nil {
+						return nil, false, err
+					}
+				}
+			}
+			return rep.Patches, rep.Preset, nil
+		},
+	}
+	if machine == "" {
+		ai, ok := mc.HostAgent(string(api.AgentDsh))
+		if !ok || len(ai.Argv) == 0 {
+			return nil // it runs no dsh of its own: the one here, as it ships
+		}
+		h.Argv, h.Package, h.Scope, h.Version = ai.Argv, ai.Package, ai.Scope, ai.Version
+	}
+	o.Host = h
 	return nil
 }
 
-// Recorded asks once that a dsh session at another machine, its transcript there now, be filed
-// under the workspace of its folder in the dsh the executor runs in (dsh.attach: DSH Desktop's
-// sidebar has it then). dir is its hold directory, where that it was is noted.
-func (c *Channel) Recorded(ctx context.Context, r harness.Ref, dir string) {
-	if !ours(r) || r.Machine == "" {
-		return
-	}
-	c.heldMu.Lock()
-	if c.filing == nil {
-		c.filing = map[string]bool{}
-	}
-	done := c.filing[r.ID]
-	c.filing[r.ID] = true
-	c.heldMu.Unlock()
-	marker := filepath.Join(dir, fileFiled)
-	if done {
-		return
-	}
-	if _, err := os.Stat(marker); err == nil {
-		return
-	}
-	mc := c.machine(r.Machine)
+// ProvidedHere: DSH Desktop's plugin on this computer runs a dsh of its own, which a launch here
+// takes.
+func (c *Channel) ProvidedHere() bool {
+	mc := c.hostOf("")
 	if mc == nil {
-		c.unfile(r.ID)
-		return
+		return false
 	}
-	go func() {
-		ctx, cancel := context.WithTimeout(c.ctx, 30*time.Second)
-		defer cancel()
-		err := desktopAttach(ctx, mc, r.As, r.Cwd)
-		if err != nil && !wire.IsCode(err, wire.CodeUnsupported) {
-			c.o.Logf("session %s: filing it under DSH Desktop's workspace: %v", r.ID, err)
-			c.unfile(r.ID) // the next look asks again
-			return
-		}
-		if err := os.WriteFile(marker, nil, 0o600); err != nil {
-			c.o.Logf("session %s: noting it filed: %v", r.ID, err)
-		}
-	}()
-}
-
-// unfile: session id's filing is to be asked for again.
-func (c *Channel) unfile(id string) {
-	c.heldMu.Lock()
-	delete(c.filing, id)
-	c.heldMu.Unlock()
+	ai, ok := mc.HostAgent(string(api.AgentDsh))
+	return ok && len(ai.Argv) > 0
 }

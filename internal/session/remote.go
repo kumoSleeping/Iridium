@@ -218,9 +218,6 @@ func (h *Hosted) findRemoteTranscript(mc *remote.Machine) (string, error) {
 	if err != nil || path == "" {
 		return rt.Local, err
 	}
-	if l, ok := channelOf[harness.Launcher](h.m, h.meta.Agent); ok {
-		l.Recorded(h.m.ctx, h.ref(), h.dir)
-	}
 	if path != rt.Path {
 		rt = remoteTranscript{Path: path, Local: filepath.Join(h.dir, "remote", remote.Base(hi.Sep, path))}
 		if err := writeJSON(filepath.Join(h.dir, fileRemoteTranscript), rt); err != nil {
@@ -266,8 +263,14 @@ func (h *Hosted) syncRemote() {
 	}
 }
 
-// machineChanged: an executor came or went; its sessions' lamps say so.
+// machineChanged: an executor came or went; its sessions' lamps say so. Gone, what it attached
+// goes with it (it attaches it again when it is back).
 func (m *Manager) machineChanged(id string) {
+	if mc := m.o.Remote.Find(id); mc != nil {
+		if _, online := mc.Hello(); !online {
+			m.Unattach(FromMachine(id))
+		}
+	}
 	m.mu.Lock()
 	var hs []*Hosted
 	for _, h := range m.hosted {

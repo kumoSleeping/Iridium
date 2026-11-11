@@ -53,9 +53,10 @@ const DEAD_AFTER = 70_000
 
 /** A connection: requests both ways, answered by id; events one way. */
 class Conn {
-  constructor(ws, onRequest) {
+  constructor(ws, onRequest, onEvent = () => {}) {
     this.ws = ws
     this.onRequest = onRequest
+    this.onEvent = onEvent
     this.next = 0
     this.waits = new Map()
     this.heard = Date.now()
@@ -85,7 +86,11 @@ class Conn {
     }
     this.heard = Date.now()
     if (f.event === 'ping') this.pinged = true
-    else if (f.method) {
+    else if (f.event) {
+      try {
+        this.onEvent(f.event, f.params ?? {})
+      } catch {}
+    } else if (f.method) {
       Promise.resolve()
         .then(() => this.onRequest(f.method, f.params ?? {}))
         .then(
@@ -340,8 +345,9 @@ function killTree(pid, hard) {
  * process.env, the hello gives it without secrets), denied (paths never served besides its own
  * and the agents' logins), program, log; methods, more requests it answers ({name: async
  * (params) => result}); caps, the optional parts of the protocol they make it speak (wire.Hello's
- * caps: held, held.features; a list, or a function giving it at each hello); ir, an ir for its
- * agents (ir.js, withIR).
+ * caps: held, agent.prepare, session.attach; a list, or a function giving it at each hello);
+ * events, the events from the Iridium it takes ({name: (params) => void}); connected, called once
+ * each connection has said hello; ir, an ir for its agents (ir.js, withIR).
  */
 export class Executor {
   constructor(o) {
@@ -418,7 +424,7 @@ export class Executor {
       ws.addEventListener('open', resolve, { once: true })
       ws.addEventListener('error', (e) => reject(new Error(e.message || 'cannot connect')), { once: true })
     })
-    const c = new Conn(ws, (m, p) => this.handle(c, m, p))
+    const c = new Conn(ws, (m, p) => this.handle(c, m, p), (e, p) => this.o.events?.[e]?.(p))
     this.conn = c
     let up = false
     try {
@@ -428,6 +434,11 @@ export class Executor {
       this.since = Date.now()
       this.error = ''
       this.log('connected')
+      try {
+        this.o.connected?.()
+      } catch (e) {
+        this.log(`connected: ${e.message}`)
+      }
       await c.closed
     } finally {
       if (this.conn === c) this.conn = null
@@ -452,7 +463,7 @@ export class Executor {
     }
   }
 
-  /** Sends event (params) to the Iridium if connected (held.changed); false if not. */
+  /** Sends event (params) to the Iridium if connected (held.changed, session.attach); false if not. */
   notify(event, params) {
     return this.conn?.notify(event, params) ?? false
   }

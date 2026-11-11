@@ -40,11 +40,6 @@ export interface AgentInfo {
    */
   ultracode: boolean;
   /**
-   * Features: the features (SessionState.Features) its sessions have before its agent runs, by
-   * ID (Claude: claude.ultracode).
-   */
-  features?: string[];
-  /**
    * Presets: its sessions take an agent preset (dsh: the tools and prompt a session runs with),
    * at launch: a switch restarts the agent. Which, a session's: GET /v1/internal/sessions/{id}/presets.
    */
@@ -249,14 +244,13 @@ export interface SessionState extends Session {
    */
   commands?: Command[];
   /**
-   * Ultracode: Claude's ultracode; absent for an agent without it. Features has it too.
+   * Ultracode: Claude's ultracode; absent for an agent without it. Attached has its key.
    */
   ultracode?: Ultracode;
   /**
-   * Features: its extra switches (Claude's UltraCode; at an executor whose DSH Desktop plugins
-   * add some, theirs); PUT features/{feature} switches one.
+   * Attached: what is attached to its page (Claude's UltraCode, a plugin's).
    */
-  features?: Feature[];
+  attached?: Attached[];
   /**
    * Next: its agent cleared itself (Claude's own /clear) and the conversation goes on in this
    * session; this one is archived, as it was before. The page open on it follows.
@@ -1214,40 +1208,24 @@ export interface Model {
   group?: string;
 }
 /**
- * Feature is an extra switch on a session, at the effort track's right (Place "effort", the one
- * place the page knows): Claude's UltraCode (ID claude.ultracode), or one a plugin adds where DSH
- * Desktop holds the session (ID "<plugin>.<name>", its Name, Hint and Reason in the user's
- * language). On: asked for (what the switch shows); Active: on and in effect; Available: it can be
- * switched now (Reason: why not). Options: what it runs as while on, Option the one picked. Tone
- * "warm": the switch's colour when on.
+ * Attached is a piece of a session's page that something attached (docs/next/plugin.md): Satori
+ * elements at Place ("effort": at the effort track's right, its first button the key, the rest
+ * its options while it is pressed), by From ("ir": Iridium's own, Claude's UltraCode; "m:<machine>":
+ * an executor's plugin; "a:<app>": an app), Content by language ("" for any). A button in it is
+ * pressed as "att:<session>:<from>:<its id>" (POST /v1/internal/button); <button> takes pressed,
+ * disabled and title too.
  */
-export interface Feature {
-  id: string;
-  name: string;
-  on: boolean;
-  active?: boolean;
-  available: boolean;
-  reason?: string;
-  hint?: string;
-  options?: FeatureOption[];
-  option?: string;
+export interface Attached {
   place: string;
-  tone?: string;
+  from: string;
+  content: { [key: string]: string};
 }
 /**
- * FeatureOption is one of a feature's options.
+ * Attach is PUT /v1/internal/sessions/{id}/attach/{place}: Content, Satori elements, or one a
+ * language ({"zh": …, "en": …}); empty takes it away.
  */
-export interface FeatureOption {
-  id: string;
-  name: string;
-}
-/**
- * SetFeature switches a feature on or off (PUT /v1/internal/sessions/{id}/features/{feature}), maybe at
- * one of its options.
- */
-export interface SetFeature {
-  on: boolean;
-  option?: string;
+export interface Attach {
+  content: any /* json.RawMessage */;
 }
 /**
  * SetModel, SetMode and SetEffort change a session's model, approval mode and thinking effort,

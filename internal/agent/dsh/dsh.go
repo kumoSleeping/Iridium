@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -238,8 +239,12 @@ func closed() chan struct{} {
 // through as they are.
 func (d *Driver) Spawn(o agent.SpawnOptions) (hold.Spec, error) {
 	env := agent.ForeignEnv(o.Env)
-	argv, err := o.Command("dsh", env)
-	if err != nil {
+	var argv []string
+	var err error
+	if o.Remote == nil && o.Host != nil && len(o.Host.Argv) > 0 {
+		argv = slices.Clone(o.Host.Argv) // the host's own dsh (DSH Desktop's, on this computer)
+		env = HostEnv(argv, env)
+	} else if argv, err = o.Command("dsh", env); err != nil {
 		return hold.Spec{}, err
 	}
 	mode := cmp.Or(o.Mode, DefaultMode)
@@ -256,16 +261,23 @@ func (d *Driver) Spawn(o agent.SpawnOptions) (hold.Spec, error) {
 		return hold.Spec{}, fmt.Errorf("dsh: %w", err)
 	}
 	var pkg Package
-	if r := o.Remote; r != nil {
+	switch {
+	case o.Remote != nil:
+		r := o.Remote
 		pkg = Package{Scope: r.Scope, Version: r.Version, Read: func(parts ...string) ([]byte, error) {
 			return r.ReadFile(r.Join(append([]string{r.Scope}, parts...)...))
 		}}
-	} else if pkg, err = FindPackage(argv[0]); err != nil {
-		return hold.Spec{}, fmt.Errorf("dsh: cannot build agent preset %q: %w", cmp.Or(o.Preset, DefaultPreset), err)
+	case o.Host != nil && len(o.Host.Argv) > 0:
+		// The host's own dsh: its patches are made for it.
+		pkg = Package{Root: o.Host.Package, Scope: o.Host.Scope, Version: o.Host.Version}
+	default:
+		if pkg, err = FindPackage(argv[0]); err != nil {
+			return hold.Spec{}, fmt.Errorf("dsh: cannot build agent preset %q: %w", cmp.Or(o.Preset, DefaultPreset), err)
+		}
 	}
 	list := pkg.Presets
-	if r := o.Remote; r != nil && r.Presets != nil {
-		list = r.Presets
+	if o.Host != nil && o.Host.Presets != nil {
+		list = o.Host.Presets
 	}
 	presets, def, err := list()
 	if err != nil {
@@ -275,35 +287,30 @@ func (d *Driver) Spawn(o agent.SpawnOptions) (hold.Spec, error) {
 	if err != nil {
 		return hold.Spec{}, err
 	}
-	modules, err := o.LaunchFile(ModulesFile, []byte(ModulesModule))
-	if err != nil {
-		return hold.Spec{}, fmt.Errorf("dsh: writing the preset's modules: %w", err)
-	}
-	// A preset of DSH Desktop's bundles binds to each session over their layers (bound.go).
-	var bound []agent.Bundle
-	if r := o.Remote; r != nil && r.Bundles != nil && len(externalPackages(preset)) > 0 {
-		bundles, err := r.Bundles()
-		if err != nil {
-			d.logf("dsh: %v", err)
+	// The host composes what it has (its models, a preset of its bundles, its own part in the
+	// process); the rest is the preset as dsh ships it, made here.
+	var hostPatches []string
+	presetIn := false
+	if o.Host != nil && o.Host.Prepare != nil {
+		if hostPatches, presetIn, err = o.Host.Prepare(preset.ID, suffix); err != nil {
+			return hold.Spec{}, fmt.Errorf("dsh: its host's launch: %w", err)
 		}
-		bound = Bound(preset, bundles)
 	}
-	var patch []byte
-	if len(bound) > 0 {
-		binder, err := o.LaunchFile(PresetFile, []byte(PresetModule))
+	var patches []string
+	if !presetIn {
+		modules, err := o.LaunchFile(ModulesFile, []byte(ModulesModule))
 		if err != nil {
-			return hold.Spec{}, fmt.Errorf("dsh: writing the preset's binder: %w", err)
+			return hold.Spec{}, fmt.Errorf("dsh: writing the preset's modules: %w", err)
 		}
-		patch, err = pkg.BoundPatch(preset, suffix, FileURL(modules), FileURL(binder), bound)
+		patch, err := pkg.Patch(preset, suffix, FileURL(modules))
 		if err != nil {
 			return hold.Spec{}, err
 		}
-	} else if patch, err = pkg.Patch(preset, suffix, FileURL(modules)); err != nil {
-		return hold.Spec{}, err
-	}
-	path, err := o.LaunchFile(PatchFile, patch)
-	if err != nil {
-		return hold.Spec{}, fmt.Errorf("dsh: writing the preset's patch: %w", err)
+		path, err := o.LaunchFile(PatchFile, patch)
+		if err != nil {
+			return hold.Spec{}, fmt.Errorf("dsh: writing the preset's patch: %w", err)
+		}
+		patches = append(patches, path)
 	}
 	cwd := o.Cwd
 	if cwd == "" && o.Remote == nil {
@@ -337,12 +344,19 @@ func (d *Driver) Spawn(o agent.SpawnOptions) (hold.Spec, error) {
 	d.env = env
 	d.mu.Unlock()
 	argv = append(argv, "--profile", "sdk")
-	if r := o.Remote; r != nil {
-		for _, p := range r.Patches {
-			argv = append(argv, "--patch", p)
-		}
+	for _, p := range append(hostPatches, patches...) {
+		argv = append(argv, "--patch", p)
 	}
-	return hold.Spec{Argv: append(argv, "--patch", path), Env: env, Cwd: o.Cwd}, nil
+	return hold.Spec{Argv: argv, Env: env, Cwd: o.Cwd}, nil
+}
+
+// HostEnv is env for argv, a host's own dsh: its program DSH Desktop's own executable (not node)
+// runs as node.
+func HostEnv(argv, env []string) []string {
+	if len(argv) > 0 && strings.TrimSuffix(strings.ToLower(filepath.Base(argv[0])), ".exe") != "node" {
+		return agent.SetEnv(env, "ELECTRON_RUN_AS_NODE", "1")
+	}
+	return env
 }
 
 // Attach connects agent process proc. One just spawned gets the handshake: initialize, then the

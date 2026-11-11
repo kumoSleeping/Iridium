@@ -29,9 +29,6 @@ type AgentInfo struct {
 	Quota            bool `json:"quota"`
 	// Ultracode: its sessions can turn ultracode on (Claude).
 	Ultracode bool `json:"ultracode"`
-	// Features: the features (SessionState.Features) its sessions have before its agent runs, by
-	// ID (Claude: claude.ultracode).
-	Features []string `json:"features,omitempty"`
 	// Presets: its sessions take an agent preset (dsh: the tools and prompt a session runs with),
 	// at launch: a switch restarts the agent. Which, a session's: GET /v1/internal/sessions/{id}/presets.
 	Presets bool `json:"presets,omitempty"`
@@ -185,11 +182,10 @@ type SessionState struct {
 	Tail *BlockTail `json:"tail,omitempty"`
 	// Commands: the slash commands its agent offers, as its last handshake named them.
 	Commands []Command `json:"commands,omitempty"`
-	// Ultracode: Claude's ultracode; absent for an agent without it. Features has it too.
+	// Ultracode: Claude's ultracode; absent for an agent without it. Attached has its key.
 	Ultracode *Ultracode `json:"ultracode,omitempty"`
-	// Features: its extra switches (Claude's UltraCode; at an executor whose DSH Desktop plugins
-	// add some, theirs); PUT features/{feature} switches one.
-	Features []Feature `json:"features,omitempty"`
+	// Attached: what is attached to its page (Claude's UltraCode, a plugin's).
+	Attached []Attached `json:"attached,omitempty"`
 	// Next: its agent cleared itself (Claude's own /clear) and the conversation goes on in this
 	// session; this one is archived, as it was before. The page open on it follows.
 	Next string `json:"next,omitempty"`

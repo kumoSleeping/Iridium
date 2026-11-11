@@ -217,18 +217,16 @@ func TestAppliedAndUltracode(t *testing.T) {
 	if s.Pick != "haiku" || s.Ultracode.Available || s.Ultracode.Active || !s.Ultracode.On {
 		t.Errorf("after the switch: pick %q ultracode %+v", s.Pick, s.Ultracode)
 	}
-	// The same as a feature.
-	if f := s.Features; len(f) != 1 || f[0].ID != "claude.ultracode" || f[0].Available || f[0].Active || !f[0].On || f[0].Place != "effort" || f[0].Tone != "warm" {
-		t.Errorf("features: %+v", f)
+	// Its key at the effort track: on, and why it does nothing now.
+	if a := s.Attached; len(a) != 1 || a[0].From != FromIR || a[0].Place != "effort" ||
+		!strings.Contains(a[0].Content["zh"], ` pressed title="已开，换到能用的模型才生效"`) || strings.Contains(a[0].Content["en"], "disabled") {
+		t.Errorf("attached: %+v", a)
 	}
 	if err := r.m.SetUltracode(bg, id, true); !errors.Is(err, ErrBadRequest) {
 		t.Errorf("ultracode on haiku: %v", err)
 	}
-	if err := r.m.SetFeature(bg, id, "claude.ultracode", api.SetFeature{On: true}); !errors.Is(err, ErrBadRequest) {
-		t.Errorf("ultracode on haiku, as a feature: %v", err)
-	}
-	if err := r.m.SetFeature(bg, id, "x.other", api.SetFeature{On: true}); !errors.Is(err, ErrBadRequest) {
-		t.Errorf("a feature it has not: %v", err)
+	if _, err := r.m.Press(bg, id, FromIR, "x.other", PressUser{}); !errors.Is(err, ErrBadRequest) {
+		t.Errorf("a button it has not: %v", err)
 	}
 	if err := r.m.SetUltracode(bg, id, false); err != nil {
 		t.Fatal(err)

@@ -362,6 +362,15 @@ func (b satoriBackend) Answer(ctx context.Context, c satori.Caller, a api.CardAn
 	return b.s.m.AnswerCard(ctx, a)
 }
 
+func (b satoriBackend) Press(ctx context.Context, c satori.Caller, sid, from, id string) (string, error) {
+	if _, err := b.s.using(callerAs(c), sid); err != nil {
+		return "", err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	return b.s.m.Press(ctx, sid, from, id, session.PressUser{ID: c.Login, Name: c.LoginName})
+}
+
 func (b satoriBackend) Upload(c satori.Caller, id, name string, size int64, body io.Reader) (string, error) {
 	s := b.s
 	if _, err := s.using(callerAs(c), id); err != nil {

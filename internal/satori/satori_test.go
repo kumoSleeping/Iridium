@@ -33,6 +33,7 @@ type fake struct {
 	blocks   map[string][]api.Block
 	sent     []string
 	answers  []api.CardAnswer
+	presses  []string // a button attached to a session's page: "<session> <from> <id>"
 	hidden   map[string]bool // sessions no login sees
 	created  []api.NewSession
 	patches  []api.SessionPatch
@@ -241,6 +242,16 @@ func (f *fake) Answer(_ context.Context, c Caller, a api.CardAnswer) error {
 	defer f.mu.Unlock()
 	f.answers = append(f.answers, a)
 	return nil
+}
+
+func (f *fake) Press(_ context.Context, c Caller, sid, from, id string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.presses = append(f.presses, sid+" "+from+" "+id)
+	if strings.HasPrefix(from, "a:") {
+		return strings.TrimPrefix(from, "a:"), nil
+	}
+	return "", nil
 }
 
 func (f *fake) Upload(c Caller, id, name string, size int64, body io.Reader) (string, error) {

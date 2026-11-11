@@ -38,8 +38,9 @@ type entry struct {
 	session string
 	ev      Event         // login left out; a message's content without its files
 	files   []api.FileRef // a message's files, written in for each login
-	// app, login: an event for that login alone (Share), whoever sees what session; about: one
-	// about that login (login-*), for every connection of the app (a login's own: its own only).
+	// app, login: an event for that login alone (Share), whoever sees what session; login "*":
+	// for the app, once a connection (a button it attached pressed); about: one about that login
+	// (login-*), for every connection of the app (a login's own: its own only).
 	app, login string
 	about      bool
 }
@@ -530,6 +531,16 @@ func (s *Service) deliver(ctx context.Context, cancel func(), cn *conn, done int
 						lg.SN = cn.sn(e.login)
 						ev.Login = &lg
 						if !send(LoginInfo{ID: e.login}, ev) {
+							return
+						}
+					}
+				case e.app != "" && e.login == "*":
+					if e.app == cn.app && len(logins) > 0 {
+						l := logins[0]
+						ev := s.render(e, cn.app, l.ID)
+						lg := loginOf(cn.app, l, cn.sn(l.ID), false)
+						ev.Login = &lg
+						if !send(l, ev) {
 							return
 						}
 					}

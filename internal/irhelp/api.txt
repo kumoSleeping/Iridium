@@ -36,7 +36,7 @@ GET internal/sessions/{id} - -> SessionState  live state; --wait: wait for the t
   --wait: until its turn ends, then its last reply; exit 2 when it waits for a person (asks: its questions; POST internal/button answers one).
 POST internal/sessions/{id}/interrupt - -> {ok}  end the current turn (Esc); the queue pauses
 POST internal/sessions/{id}/stop - -> {ok}  stop the agent process; the next message restarts it
-POST internal/button {id, option?, choices?, words?, message?} -> {}  answer an ask: id its card (asks[].card.id); or press a button (<card>#<option>)
+POST internal/button {id, option?, choices?, words?, message?} -> {}  answer an ask: id its card (asks[].card.id); or press a button (<card>#<option>; one attached: att:<session>:<from>:<id>, SessionState.attached)
 POST internal/files/copy {from, to} -> ndjson  copy a file: from, to are paths here or app:path at an app's computer; prints path, size, sha256; run again to resume; socket only
 POST internal/machines/{id}/shell {line, cwd?} -> output  a command line at an app's computer (id or name); --wait for its output and exit code; host or agents
 PATCH internal/guilds/{id} {name?, position?, split?} -> {ok}  rename a folder group, move it (0 first), split it by subfolder; host or web
@@ -62,7 +62,8 @@ PUT internal/sessions/{id}/model {model} -> {ok}  model ("" default; values in S
 PUT internal/sessions/{id}/mode {mode} -> {ok}  approval mode, one of SessionState.modes
 PUT internal/sessions/{id}/effort {effort} -> {ok}  thinking effort, one of SessionState.efforts
 PUT internal/sessions/{id}/ultracode {ultracode} -> {ok}  Claude only
-PUT internal/sessions/{id}/features/{feature} {on, option?} -> {ok}  toggle a feature in SessionState.features
+PUT internal/sessions/{id}/attach/{place} {content} -> {ok}  an app's Satori elements on the session's page (place effort); its buttons come back as interaction/button; apps only
+DELETE internal/sessions/{id}/attach/{place} - -> {ok}  take them away
 GET internal/sessions/{id}/presets - -> {presets, default}  dsh agent presets  view=presets.id,presets.name,default
 PUT internal/sessions/{id}/preset {preset} -> {ok}  dsh only, before the first message
 GET internal/sessions/{id}/rules - -> AllowRule[]  "always allow" rules of the session

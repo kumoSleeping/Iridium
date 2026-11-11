@@ -70,6 +70,23 @@ type SpawnOptions struct {
 	// Catalog: the models the agent offers where it runs, as it registers them (dsh: its
 	// providers'); nil, or an error: the driver's own idea.
 	Catalog func() (Catalog, error)
+	// Host: where the agent runs, its host composes its launch from its own settings (an
+	// executor's agent.prepare: dsh's DSH Desktop, docs/next/plugin.md); nil: the driver does.
+	Host *Host
+}
+
+// Host is an agent's host composing its launch (wire.CapPrepare).
+type Host struct {
+	// Presets are the agent presets it registers, and its default.
+	Presets func() ([]Preset, string, error)
+	// Prepare is what a launch of preset (system: Iridium's system prompt) takes: files where the
+	// agent runs, in order (dsh: --patch files); in, the preset (with system) is in them.
+	Prepare func(preset, system string) (files []string, in bool, err error)
+	// Argv, Package, Scope, Version: its own agent, run in place of the one found here (an
+	// executor on this computer; nil Argv: the usual one).
+	Argv           []string
+	Package, Scope string
+	Version        string
 }
 
 // Catalog is the models an agent registers where it runs (dsh: each provider's, Value
@@ -89,22 +106,6 @@ type Remote struct {
 	// ReadFile and WriteFile read and write a file there (small ones).
 	ReadFile  func(path string) ([]byte, error)
 	WriteFile func(path string, data []byte) error
-	// Patches are more --patch files there, before the driver's own (dsh: DSH Desktop's models and
-	// providers, the dsh plugin's dsh.llm).
-	Patches []string
-	// Presets are the agent presets the dsh there registers, and its default (the dsh plugin asks
-	// DSH Desktop's own registry); nil: read from its package's files.
-	Presets func() ([]Preset, string, error)
-	// Bundles are the bundles of DSH Desktop's profile there besides dsh's own (the dsh plugin's
-	// dsh.bundles), for a preset of theirs; nil: none known.
-	Bundles func() ([]Bundle, error)
-}
-
-// Bundle is a dsh bundle (a package whose patches compose a profile): its name and its patch
-// files' text.
-type Bundle struct {
-	Name    string
-	Patches []string
 }
 
 // Preset is an agent preset dsh registers (a @deepseek-ai/dsh-agent-preset row): its id, the

@@ -40,17 +40,9 @@ type Ref struct {
 // Source is who a message is from: the terminal, and the tag it is marked with.
 type Source struct{ Terminal, Tag string }
 
-// Change is one setting changed on a session: a model, an effort, or a feature switched.
+// Change is one setting changed on a session: a model or an effort.
 type Change struct {
 	Model, Effort string
-	Feature       *FeatureChange
-}
-
-// FeatureChange is feature ID switched On, at Option (one of its options; "" none).
-type FeatureChange struct {
-	ID     string
-	On     bool
-	Option string
 }
 
 // Host is what a channel asks the core (session.Manager is one).
@@ -121,11 +113,16 @@ type Retuner interface {
 	Retuned()
 }
 
-// Launcher fills a launch's options the agent's own way (its models' catalog, a patch, presets)
-// before the driver starts, and is told once its transcript is found there.
+// Launcher fills a launch's options the agent's own way (its models' catalog, its host's launch,
+// presets) before the driver starts.
 type Launcher interface {
 	Prepare(ctx context.Context, r Ref, o *agent.SpawnOptions) error
-	Recorded(ctx context.Context, r Ref, dir string)
+}
+
+// Provider says whether something on this computer provides the agent where its program is not
+// on the PATH (dsh: DSH Desktop's own, through its plugin).
+type Provider interface {
+	ProvidedHere() bool
 }
 
 // Models are the models an agent offers at a machine, as it says them (a probe), kept by the

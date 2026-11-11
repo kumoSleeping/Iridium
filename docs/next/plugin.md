@@ -1,30 +1,60 @@
-# 插件方案（暂存，第一期之后做）
+# 插件方案
 
-来源：pi 会话 137b56ed「ir 插件系统的可行性」，按审阅改过。一句话：**让插件自己报，别让 ir 去猜。** 判断标准：核心里任何一处“读那台电脑上某个文件的某个字段，来推断它在干什么”，都是下一个 `held.*`。
+kumo 定（2026-11-11）：撤掉只为 OMD 写的适配，换成 ir 的通用扩展，OMD 照样能用；核心里不留 OMD、也不留只有它用得到的东西。旧的 dsh 专用接口一并删，插件和 ir 一起升级。本机装了 DSH Desktop 和 OMD 的，ir 在本机起的 dsh 也带上 Desktop 的模型、OMD 的预设和 Ultra。
 
-## 现在的毛病（已对过代码）
+## 示意
 
-- `internal/discover/remote.go`（855 行）经 `fs.*` 读 DSH Desktop 的私有文件：项目目录 mtime、投影缓存、工作区注册表，每 10 分钟深扫；“不同步”靠 `norm()` 比工作区名字。
-- `held.*`（list/get/set/send/changed）一族同时答“谁在跑、能改什么、有什么开关”，靠缓存 10 秒、等 6 秒、改 23 秒、每 500ms 一次撑着；`harness/dsh/held.go` 501 行 + `session/channel.go` 216 行。另有 `dsh.open/prompt/llm/session/bundles/presets/attach`。
-- 为了 OMD 的 Ultra：插件在 Desktop 开 Unix socket（`bridge.js`），把 `session.js` 注进 ir 起的 dsh 子进程。
-- 网页：`web/src/chat/meters.tsx` 只画第一个开关；`disabled` 按 id 认 `NATIVE`。
+```
+网页 ── 位置 effort（画挂上来的元素）、按下按钮
+ir 核心
+├─ 挂元素：会话上的一段 Satori 元素，按位置放（核心不看内容）
+├─ 按钮转发：按下后交回挂它的一方
+├─ 执行端代拼命令行：agent.presets、agent.prepare（插件用 Desktop 的配置拼 patch）
+└─ 起进程照旧由 ir：本机 holder，远端 hold.start
+执行端（DSH Desktop 里的 dsh-remote-iridium；本机、远端一样，都经配对连上）
+├─ 答 agent.presets / agent.prepare；起会话时登记到 Desktop 的工作区
+└─ 在 Desktop 和会话进程里提供服务 iridium：attach、onButton
+会话进程 ── omd-iridium（单独的包）：用 iridium 服务挂 Ultra、收按下
+```
 
-## 改成
+## 核心
 
-1. **会话状态由跑它的一方推。** 状态里带 `owner`（主机，或某个带 Agent 的应用）、`status`、`model`、`effort`、`effortBy`、`features[]`；连上时一份快照，之后变化推送（Satori `channel-updated`）。ir 只校验、存内存、转发。改走 owner（`/v1/internal/sessions/{id}/features/{fid}` 等现有接口转给 owner），接管回 `granted`／`conflict`（写锁只有插件知道）。
-2. **开关是封闭的形状。** 插件只给数据：`kind`（switch/select/action/badge）、`place`、`tone` 是枚举，文字按 locale 一次给全、限长、每个资源有上限；越界整条丢。插件不写前端、不写 Tailwind。新控件 = ir 发版加一个枚举值。自己家的功能（Claude UltraCode）用字段 `keepOn` 表示，不按 id 判断。
-3. **工作区和会话由插件报。** “哪些不同步”是插件自己的设置，它在状态里报结果；核心对 dsh 只保留“记录文件在哪、长什么样”。
+1. **挂元素。** 一段 Satori 元素挂在会话的某个位置，可按语言给几份（`{"zh": …, "en": …}`）。来源三种：
+   - 执行端：执行端连接上的请求 `session.attach {session, place, content}`（`session` 是那台机器上 agent 自己的会话 id；`content` 空即去掉）。执行端断开，它挂的都去掉，重连后它再挂。
+   - 应用：`PUT /v1/internal/sessions/{id}/attach/{place}` `{content}`，`DELETE` 去掉；只限能用这个会话的第三方应用。
+   - 核心自己：Claude 的 UltraCode。
+   核心只限大小（一份 4KB）、个数（一方一个会话 4 段），存内存，放进会话状态 `attached: [{place, from, content}]`。按钮 id 改写成 `att:<会话>:<from>:<原 id>`，冒充不了提问卡片。
+2. **按钮转发。** 网页照旧 `POST /v1/internal/button {id}`。`att:` 开头的：核心自己的（UltraCode）就地切换；执行端的发事件 `session.button {session, id, user}`；应用的发 `interaction/button`，只给这个应用。
+3. **执行端代拼命令行。** 能力 `agent.prepare`：
+   - `agent.presets {agent}` → `{presets: [{id, name?, description?, plugins, broken?}], default}`（同旧的 `dsh.presets`）。
+   - `agent.prepare {agent, session?, cwd?, preset?, system?}` → `{patches: [路径], preset: bool}`：`--patch` 依次加在 `--profile sdk` 之后。`preset` true：预设（含 bundle、绑定、`system` 接在人设后）由它拼好，ir 不再加自己的预设 patch；false：ir 照旧拼 dsh 自带预设的 patch。没有 `session`：只要模型（探测模型列表用）。
+   - 执行端和 ir 在同一台电脑上（握手的 MachineID 同 ir 的）：ir 在本机起 dsh 也问它；它给的 patch 必须是本机用户自己的、别人不可写的普通文件，否则不用。
+4. **Desktop 拿着的会话**（`held.list/send/get/set/changed`）留着，去掉功能和“强度归谁管”：只剩列出、发话、模型和强度。
 
-## 和原方案不同的地方
+删：`api.Feature`、`PUT …/features/{id}`、网页的 `NATIVE`；`wire.Feature`、`CapHeldFeatures`、`HeldLive.Owner`；`dsh.open`、`dsh.prompt`、`dsh.llm`、`dsh.presets`、`dsh.bundles`、`dsh.session`、`dsh.attach`；`agent/dsh/bound.go`、`agent.Bundle`。老插件连上新 ir 只是个普通执行端，不报错。
 
-- **起进程默认仍由 ir 拼参数**（`ir join`、exec-mini、shell-bot 不用各自学 claude/codex/pi 的参数）；只有 dsh 这类自带配置的，由插件改写或接手。dsh 会话由插件起，OMD 的开关自然在 owner 那里，`bridge.js`、`session.js`、`dsh.bundles`、`dsh.session` 就不需要了。
-- **不做 manifest 校验、设置表单自动生成、市场**，等真有第三方再说。
-- 接口名照现有规矩：标准的走 Satori，ir 自己的走 `/v1/internal/<路径>`，不另起 `ir.*` 方法族。
-- 不留旧接口的回退：插件和 ir 一起升级。
+## 网页
 
-## 前提和顺序
+- 位置 `effort`：第一个 `<button>` 是强度滑条右边的键，其余的按钮在键按下时排成一行（子模式）。
+- `<button>` 多认 `pressed`（开着）、`disabled`、`title`（说明或原因）；别的应用不认识就忽略。
 
-1. Satori 的 `channel-*` 事件（第一期做）。
-2. 执行端的协议（`remote/wire`：hold、run、fs）并进应用链路。
-3. 状态推送和 owner；删 `held.*`、`dsh.*`、`harness` 里的对应部分、`discover/remote.go` 的爬取；dsh 插件改成推状态。
-4. 网页：画全部开关，`keepOn`。
+## dsh-remote-iridium
+
+- 删 `features.js`、`adapters/omd.js`；`dsh.*` 方法换成 `agent.presets`、`agent.prepare`。bound 的拼法（原 `bound.go`、`modules.go` 的改名）搬进来，结果和原来一致：omd-ptc 63 个工具。
+- 服务 `iridium`（Desktop 进程和会话进程里都有）：`attach(session, place, content)`、`onButton((session, id, user) => …)`。会话进程里的经 `bridge.js` 交给 Desktop 里的，再经执行端连接给 ir。
+- 会话进程里有了会话，告诉 Desktop 里的，由它登记到工作区（代替 `dsh.attach`）。
+
+## omd-iridium
+
+单独的包（`plugins/omd-iridium`，npm 上同版本发）。注入 `omd`、`iridium`：每个会话按 OMD 的状态挂 `<button id="omd.ultra" pressed? disabled? title>Ultra</button>` 和子模式按钮；按下就切换再重挂。dsh-remote-iridium 不认识 OMD。
+
+## 验证（要有 Desktop 和 OMD 的机器）
+
+- omd-ptc 在 ir 起的会话里 63 个工具，本机、远端都是。
+- Ultra 在 ir 起的会话和 Desktop 拿着的会话里都能切换，子模式也能。
+- Ultra 开着时在 ir 里改强度。
+
+## 不做
+
+- 会话 TOKEN 连 `/v1/events`：会话进程经执行端挂，用不到。
+- `discover/remote.go` 的爬取换成插件报：和 OMD 无关，以后再说。

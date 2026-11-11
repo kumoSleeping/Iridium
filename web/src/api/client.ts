@@ -44,7 +44,6 @@ import type {
   SetModel,
   SetPreset,
   Presets,
-  SetFeature,
   SetUltracode,
   Settings,
   SettingsPatch,
@@ -248,6 +247,8 @@ export const api = {
   shellStop: (run: string) => write<{ ok: boolean }>("DELETE", `/v1/internal/shell/${enc(run)}`),
   /** One of session id's asks answered by its card (docs/api.md "卡片"): an option, a choice per question, own words. */
   answer: (_id: string, a: CardAnswer) => sat<object>("internal/button", { id: a.card, option: a.option, choices: a.choices, words: a.words, message: a.message }),
+  /** A button attached to a session's page pressed (its id "att:<session>:<from>:<id>"). */
+  button: (id: string) => sat<object>("internal/button", { id }),
   /** A step Claude's auto mode denied, run again (session/release.go). */
   release: (id: string, toolUseId: string, dismiss?: boolean) => write<{ ok: boolean }>("POST", `/v1/internal/sessions/${enc(id)}/release`, { toolUseId, dismiss } satisfies Release),
   /** Satori's meta (advanced/meta.md): the page asks it only for its status, a 401 taking it to the login. */
@@ -321,7 +322,6 @@ export const api = {
   effort: (id: string, effort: string) => writeAgain<{ ok: boolean }>("PUT", `${S(id)}/effort`, { effort }),
   preset: (id: string, preset: string) => writeAgain<{ ok: boolean }>("PUT", `${S(id)}/preset`, { preset } satisfies SetPreset),
   presets: (id: string) => get<Presets>(`${S(id)}/presets`),
-  setFeature: (id: string, feature: string, f: SetFeature) => writeAgain<{ ok: boolean }>("PUT", `${S(id)}/features/${enc(feature)}`, f),
   ultracode: (id: string, on: boolean) => writeAgain<{ ok: boolean }>("PUT", `${S(id)}/ultracode`, { ultracode: on } satisfies SetUltracode),
   rules: (id: string) => get<AllowRule[]>(`${S(id)}/rules`),
   clearRules: (id: string) => write<{ ok: boolean }>("DELETE", `${S(id)}/rules`),

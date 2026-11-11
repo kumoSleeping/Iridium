@@ -126,7 +126,8 @@ var (
 
 type Manager struct {
 	o      Options
-	shell  shells // command lines run at sessions' machines (shell.go)
+	att    attachments // what is attached to sessions' pages (attach.go)
+	shell  shells      // command lines run at sessions' machines (shell.go)
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -181,6 +182,7 @@ func New(o Options) (*Manager, error) {
 	if o.Remote != nil {
 		o.Remote.Dir = m.HoldDir
 		o.Remote.Changed = m.machineChanged
+		o.Remote.Handle(eventAttach, m.onAttach)
 	}
 	for _, c := range o.Channels {
 		c.Bind(host{m})
@@ -667,10 +669,13 @@ func (m *Manager) program(a api.Agent) string {
 	return cmp.Or(m.o.Config.Programs[string(a)], string(a))
 }
 
-// Missing: agent a's program is not on the agents' PATH.
+// Missing: agent a's program is not on the agents' PATH, nor provided here otherwise.
 func (m *Manager) Missing(a api.Agent) bool {
-	_, err := agent.LookPath(m.program(a), m.agentEnv())
-	return err != nil
+	if _, err := agent.LookPath(m.program(a), m.agentEnv()); err == nil {
+		return false
+	}
+	p, ok := channelOf[harness.Provider](m, a)
+	return !ok || !p.ProvidedHere()
 }
 
 // agentEnv is what agents start from: the daemon's environment, with the config's PATH and,

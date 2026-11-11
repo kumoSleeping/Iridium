@@ -65,8 +65,6 @@ type Info struct {
 	Quota            bool
 	// Ultracode: its sessions can turn ultracode on (Claude; the driver is an agent.Ultracoder).
 	Ultracode bool
-	// Features: the features (api.Feature) its sessions have before it runs, by ID.
-	Features []string
 	// Holdable: a holder at an executor's machine may have its sessions (DSH Desktop, dsh's): the
 	// session layer asks it there about them (held.*), its model, level and features.
 	Holdable bool
@@ -136,7 +134,7 @@ var all = []Info{
 		// start in auto (the user's choice, 2026-11-05): Claude decides what to ask.
 		Modes:       []string{"manual", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"},
 		DefaultMode: "auto", ModeSwitch: "now", ContextBreakdown: true, Quota: true, Ultracode: true,
-		Features: []string{"claude.ultracode"}, Efforts: []string{"low", "medium", "high", "xhigh", "max"},
+		Efforts: []string{"low", "medium", "high", "xhigh", "max"},
 		New: func(emit func(agent.Event), logf func(string, ...any)) agent.Driver {
 			return claude.New(claude.Options{Emit: emit, Logf: logf})
 		},
@@ -364,7 +362,7 @@ func All() []Info { return slices.Clone(all) }
 func Describe() []api.AgentInfo {
 	out := make([]api.AgentInfo, 0, len(all))
 	for _, i := range all {
-		out = append(out, api.AgentInfo{Agent: i.Agent, Name: i.Name, Modes: slices.Clone(i.Modes), DefaultMode: i.DefaultMode, ModeSwitch: i.ModeSwitch, ContextBreakdown: i.ContextBreakdown, Quota: i.Quota, Ultracode: i.Ultracode, Features: slices.Clone(i.Features), Presets: i.Presets})
+		out = append(out, api.AgentInfo{Agent: i.Agent, Name: i.Name, Modes: slices.Clone(i.Modes), DefaultMode: i.DefaultMode, ModeSwitch: i.ModeSwitch, ContextBreakdown: i.ContextBreakdown, Quota: i.Quota, Ultracode: i.Ultracode, Presets: i.Presets})
 	}
 	return out
 }

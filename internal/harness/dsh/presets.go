@@ -11,13 +11,12 @@ import (
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/harness"
 	"github.com/kumoSleeping/iridium/internal/remote"
-	"github.com/kumoSleeping/iridium/internal/remote/wire"
 )
 
 // Agent presets (dsh's): those the dsh where a session runs registers, not a list of Iridium's own
-// (the user, 2026-11-08). At another machine, DSH Desktop's own registry through the dsh plugin
-// (dsh.presets: a bundle's and the profile's own too); an executor without it, and this machine,
-// the dsh package's files. Kept a short while.
+// (the user, 2026-11-08). Where DSH Desktop's dsh plugin is connected (at that machine, or on this
+// computer), Desktop's own registry (agent.presets: a bundle's and the profile's own too); else the
+// dsh package's files. Kept a short while.
 
 // presetsFor is how long a machine's presets are kept.
 const presetsFor = 30 * time.Second
@@ -59,6 +58,21 @@ func (c *Channel) Presets(ctx context.Context, machine string) ([]agent.Preset, 
 }
 
 func (c *Channel) readPresets(ctx context.Context, machine string) ([]agent.Preset, string, error) {
+	if mc := c.hostOf(machine); mc != nil {
+		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		r, err := hostPresets(ctx, mc)
+		if err != nil {
+			return nil, "", fmt.Errorf("dsh at %s: agent presets: %w", mc.ID(), err)
+		}
+		var out []agent.Preset
+		for _, p := range r.Presets {
+			if p.Broken == "" && p.ID != "" {
+				out = append(out, agent.Preset{ID: p.ID, Name: p.Name, Description: p.Description, Plugins: p.Plugins})
+			}
+		}
+		return out, r.Default, nil
+	}
 	if machine == "" {
 		h := c.h()
 		if h == nil {
@@ -87,19 +101,6 @@ func (c *Channel) readPresets(ctx context.Context, machine string) ([]agent.Pres
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	r, err := desktopPresets(ctx, mc)
-	if err == nil {
-		var out []agent.Preset
-		for _, p := range r.Presets {
-			if p.Broken == "" && p.ID != "" {
-				out = append(out, agent.Preset{ID: p.ID, Name: p.Name, Description: p.Description, Plugins: p.Plugins})
-			}
-		}
-		return out, r.Default, nil
-	}
-	if !wire.IsCode(err, wire.CodeUnsupported) {
-		return nil, "", fmt.Errorf("dsh at %s: agent presets: %w", machine, err)
-	}
 	ai, ok := mc.Agent(string(api.AgentDsh))
 	if !ok || ai.Scope == "" {
 		return nil, "", fmt.Errorf("%w: dsh (not at %s)", harness.ErrNotInstalled, machine)

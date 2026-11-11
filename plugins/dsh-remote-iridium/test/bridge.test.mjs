@@ -6,7 +6,7 @@ import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 import { bridgeEndpoint, createBridge } from '../bridge.js'
-import { createFeatures } from '../features.js'
+import { createAttach } from '../attach.js'
 import * as session from '../session.js'
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-'))
@@ -30,10 +30,17 @@ test('each plugin its own socket: one that closes leaves the next one\'s, a dead
   b.close()
 })
 
-test("a session's process: its sessions, its features answered through the bridge", async () => {
-  const changed = []
-  const bridge = createBridge({ endpoint: bridgeEndpoint(tmp()), changed: (s) => changed.push(s) })
-  const services = {}
+test("a session's process: its sessions, what it attaches, a button back, gone with it", async () => {
+  const started = []
+  const sent = []
+  const attach = createAttach({ send: (p) => sent.push(p), toProcess: (s, id, user) => bridge.button(s, id, user) })
+  const bridge = createBridge({
+    endpoint: bridgeEndpoint(tmp()),
+    started: (s, cwd) => started.push([s, cwd]),
+    attach: (s, place, content, owner) => attach.put(s, place, content, owner),
+    gone: (owner) => attach.drop(owner),
+  })
+  const services = { workingDirectory: { get: () => '/w' } }
   const on = {}
   const effects = []
   const ctx = {
@@ -41,32 +48,50 @@ test("a session's process: its sessions, its features answered through the bridg
     get: (name) => services[name],
     on: (name, fn) => (on[name] = fn),
     effect: (fn) => effects.push(fn()),
-    plugin: () => {},
   }
   session.apply(ctx, { endpoint: bridge.endpoint, secret: bridge.secret })
-  let mode = 'off'
-  services.iridiumFeatures.provide({
-    id: 'p.mode',
-    get: async () => ({ name: 'Mode', on: mode === 'on', available: true }),
-    set: async (_, { on }) => void (mode = on ? 'on' : 'off'),
-    ownsEffort: async () => mode === 'on',
-    effort: async () => 'max',
-    setEffort: async () => {},
-  })
-  on['agent/created']({ agent: { id: 's1' } })
+  const pressed = []
+  services.iridium.onButton((s, id, user) => pressed.push([s, id, user?.id]))
+  on['agent/created']({ agent: { id: 's1', session: {} } })
   await until(() => bridge.has('s1'))
-  assert.ok(changed.includes('s1'))
-  assert.deepEqual((await bridge.call('s1', 'live', { lang: 'en' })).features.map((f) => [f.id, f.on, f.available]), [['p.mode', false, true]])
-  await assert.rejects(bridge.call('s1', 'setEffort', { level: 'high' }), { code: 'unsupported' })
-  await bridge.call('s1', 'set', { id: 'p.mode', on: true })
-  const live = await bridge.call('s1', 'live', {})
-  assert.equal(live.owner, 'p.mode')
-  assert.equal(live.effort, 'max')
-  await bridge.call('s1', 'setEffort', { level: 'high' })
-  on['agent/disposed']({ agent: { id: 's1' } })
-  await until(() => !bridge.has('s1'))
+  await until(() => started.length === 1)
+  assert.deepEqual(started, [['s1', '/w']])
+  services.iridium.attach('s1', 'effort', { zh: '<button id="a">甲</button>', en: '<button id="a">A</button>' })
+  await until(() => sent.length === 1)
+  assert.deepEqual(sent[0], { session: 's1', place: 'effort', content: { zh: '<button id="a">甲</button>', en: '<button id="a">A</button>' } })
+  // The same again sends nothing; resend sends all.
+  services.iridium.attach('s1', 'effort', { zh: '<button id="a">甲</button>', en: '<button id="a">A</button>' })
+  attach.resend()
+  await until(() => sent.length === 2)
+  attach.button('s1', 'a', { id: 'u', name: 'U' })
+  await until(() => pressed.length === 1)
+  assert.deepEqual(pressed, [['s1', 'a', 'u']])
+  // The process gone: what it attached is taken away.
   for (const stop of effects) stop?.()
+  await until(() => sent.length === 3)
+  assert.deepEqual(sent[2], { session: 's1', place: 'effort', content: null })
+  assert.deepEqual(attach.attached(), [])
   bridge.close()
+})
+
+test('attach: places and contents checked, its own listeners told of a button', () => {
+  const sent = []
+  const a = createAttach({ send: (p) => sent.push(p) })
+  assert.throws(() => a.service.attach('s', 'Bad Place', 'x'))
+  assert.throws(() => a.service.attach('s', 'effort', 'x'.repeat(5000)))
+  assert.throws(() => a.service.attach('s', 'effort', 3))
+  a.service.attach('s', 'effort', '')
+  assert.deepEqual(sent, [])
+  a.service.attach('s', 'effort', { zh: '', en: 'x' })
+  assert.deepEqual(sent, [{ session: 's', place: 'effort', content: { en: 'x' } }])
+  const got = []
+  const off = a.service.onButton((s, id) => got.push(id))
+  a.button('s', 'b1', null)
+  off()
+  a.button('s', 'b2', null)
+  assert.deepEqual(got, ['b1'])
+  a.service.attach('s', 'effort', null)
+  assert.deepEqual(sent.at(-1), { session: 's', place: 'effort', content: null })
 })
 
 test("the session controller of a process without dsh's: a model selected on the session's agent", async () => {
@@ -76,8 +101,4 @@ test("the session controller of a process without dsh's: a model selected on the
   assert.deepEqual(await c.selectModel({ sessionId: 's1', provider: 'p', model: 'm', reasoningEffort: 'xhigh' }), { selected: { provider: 'p', model: 'm', reasoningEffort: 'xhigh' } })
   assert.deepEqual(picked, [{ provider: 'p', model: 'm', reasoningEffort: 'xhigh' }])
   await assert.rejects(c.selectModel({ sessionId: 's2', provider: 'p', model: 'm' }), { code: 'not_found' })
-})
-
-test('createFeatures is what the process provides', () => {
-  assert.equal(typeof createFeatures().offered, 'function')
 })

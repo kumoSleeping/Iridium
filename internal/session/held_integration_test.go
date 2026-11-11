@@ -2,7 +2,6 @@ package session
 
 import (
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,20 +11,16 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/kumoSleeping/iridium/internal/agent"
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/config"
-	"github.com/kumoSleeping/iridium/internal/harness"
 	"github.com/kumoSleeping/iridium/internal/remote"
 	"github.com/kumoSleeping/iridium/internal/remote/wire"
 )
 
-// A dsh session DSH Desktop holds, through the real plugin (test/run.mjs: its fake dsh and OMD):
-// without OMD there, no features, but its effort and model are set in Desktop (dsh's session
-// controller); with OMD, its Ultra is a feature, switched on (at the level OMD picks: none sent),
-// a sub-mode picked (Ultra's level kept), a level set while on (through OMD), off; switched in
-// Desktop, it is shown again (held.changed); one Desktop does not hold is shown, with the plugin's
-// reason, and not switched.
+// A dsh session DSH Desktop holds, through the real plugin (test/run.mjs: its fake dsh): its
+// effort and model are set in Desktop (dsh's session controller); what a plugin there attaches to
+// it is shown with it, a button pressed goes back to that plugin (session.button), and what it
+// takes away goes; the executor gone, all it attached goes, and comes again with it.
 func TestHeldPlugin(t *testing.T) {
 	t.Parallel()
 	if _, err := exec.LookPath("node"); err != nil {
@@ -64,17 +59,13 @@ func TestHeldPlugin(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = cmd.Process.Signal(syscall.SIGTERM); _ = cmd.Wait() })
 	waitFor(t, "the executor", func() bool { _, ok := hub.Machine("m1").Hello(); return ok })
-	if mc := hub.Machine("m1"); !mc.Has(wire.CapHeld) || !mc.Has(wire.CapHeldFeatures) {
+	if mc := hub.Machine("m1"); !mc.Has(wire.CapHeld) || !mc.Has(wire.CapAttach) || !mc.Has(wire.CapPrepare) {
 		t.Fatalf("caps: %v", mc.Caps())
 	}
 
-	// No OMD there: the model and the level Desktop runs at, no features.
 	st := r.waitState(id, "the holder's state", func(s *api.SessionState) bool { return s.EffortNow != "" })
-	if st.EffortNow != "high" || st.Effort != "high" || st.Model != "p/m" || len(st.Features) != 0 {
-		t.Fatalf("no OMD: effort %q/%q model %q features %+v", st.Effort, st.EffortNow, st.Model, st.Features)
-	}
-	if err := r.m.SetFeature(bg, id, "omd.ultra", api.SetFeature{On: true}); !errors.Is(err, ErrBadRequest) {
-		t.Errorf("a feature not there: %v", err)
+	if st.EffortNow != "high" || st.Effort != "high" || st.Model != "p/m" || len(st.Attached) != 0 {
+		t.Fatalf("effort %q/%q model %q attached %+v", st.Effort, st.EffortNow, st.Model, st.Attached)
 	}
 	// Set in Desktop, by dsh's session controller: the level on the model; a model without that
 	// level, none.
@@ -92,214 +83,26 @@ func TestHeldPlugin(t *testing.T) {
 	if _, err := r.m.get(id); err == nil {
 		t.Error("taken up here")
 	}
-	if st, _ = r.m.State(id); st.Model != "p/n" {
-		t.Errorf("after the model: model %q", st.Model)
-	}
 
-	// OMD there (its adapter registered as it comes): Ultra, off, at the model's level.
-	os.Remove(filepath.Join(desktop, "models.json"))
-	put("omd.json", `{"`+id+`":{"eligible":true,"mode":"off","submode":"free","teamAvailable":false,"selected":{"provider":"p","model":"m","reasoningEffort":"high"}}}`)
-	st = r.waitState(id, "OMD's Ultra", func(s *api.SessionState) bool { return len(s.Features) > 0 && s.EffortNow == "high" })
-	u := st.Features[0]
-	var opts []string
-	for _, o := range u.Options {
-		opts = append(opts, o.ID+"="+o.Name)
+	// A plugin there attaches a key to it (the service iridium): shown, in both languages.
+	put("attach.json", `{"`+id+`":{"effort":{"zh":"<button id=\"x.k\" pressed>键</button>","en":"<button id=\"x.k\" pressed>Key</button>"}}}`)
+	st = r.waitState(id, "attached", func(s *api.SessionState) bool { return len(s.Attached) == 1 })
+	if a := st.Attached[0]; a.From != "m:m1" || a.Place != "effort" || a.Content["zh"] != `<button id="x.k" pressed>键</button>` {
+		t.Fatalf("attached: %+v", a)
 	}
-	if len(st.Features) != 1 || u.ID != "omd.ultra" || u.Name != "Ultra" || u.On || u.Active || !u.Available || u.Option != "free" ||
-		u.Place != "effort" || u.Tone != "warm" || u.Hint != "OMD 的协作模式；子模式在下面选" ||
-		strings.Join(opts, " ") != "workflow=Workflow free=自由" || st.Model != "p/m" {
-		t.Fatalf("off: %+v model %q", st.Features, st.Model)
+	// Pressed: back to the plugin there, by its own id.
+	if _, err := r.m.Press(bg, id, "m:m1", "x.k", PressUser{ID: "local", Name: "本机"}); err != nil {
+		t.Fatal(err)
 	}
-	// Only a feature it has, at an option of its: nothing asked of OMD otherwise.
-	if err := r.m.SetFeature(bg, id, "omd.other", api.SetFeature{On: true}); !errors.Is(err, ErrBadRequest) {
-		t.Errorf("an unknown feature: %v", err)
-	}
-	if err := r.m.SetFeature(bg, id, "omd.ultra", api.SetFeature{On: true, Option: "team"}); !errors.Is(err, ErrBadRequest) {
-		t.Errorf("team, not available: %v", err)
-	}
-	if got := lines("modes.jsonl"); len(got) != 0 {
-		t.Fatalf("asked of OMD: %q", got)
-	}
-
-	ultra := func(s api.SessionState) api.Feature {
-		for _, f := range s.Features {
-			if f.ID == "omd.ultra" {
-				return f
-			}
-		}
-		return api.Feature{}
-	}
-	steps := []struct {
-		what string
-		set  func() error
-		want func(api.Feature, string) bool
-	}{
-		{"on", func() error { return r.m.SetFeature(bg, id, "omd.ultra", api.SetFeature{On: true}) },
-			func(u api.Feature, e string) bool { return u.On && u.Active && e == "xhigh" }},
-		{"a sub-mode", func() error { return r.m.SetFeature(bg, id, "omd.ultra", api.SetFeature{On: true, Option: "workflow"}) },
-			func(u api.Feature, e string) bool { return u.On && u.Option == "workflow" && e == "xhigh" }},
-		{"a level while on", func() error { return r.m.SetEffort(bg, id, "max") },
-			func(u api.Feature, e string) bool { return u.On && e == "max" }},
-		{"off", func() error { return r.m.SetFeature(bg, id, "omd.ultra", api.SetFeature{On: false}) },
-			func(u api.Feature, e string) bool { return !u.On && !u.Active && u.Option == "workflow" && e == "max" }},
-		{"a level while off", func() error { return r.m.SetEffort(bg, id, "low") },
-			func(u api.Feature, e string) bool { return !u.On && e == "low" }},
-	}
-	for _, s := range steps {
-		if err := s.set(); err != nil {
-			t.Errorf("%s: %v", s.what, err)
-			continue
-		}
-		st, _ := r.m.State(id)
-		if !s.want(ultra(*st), st.EffortNow) {
-			t.Errorf("%s: %+v effortNow %q", s.what, ultra(*st), st.EffortNow)
-		}
-	}
-	// What OMD was asked: on with no level (its own pick), the sub-mode at Ultra's, the level
-	// through it, off at the track's; each on the session's model. The level while off went by
-	// dsh's own selection.
-	modes := lines("modes.jsonl")
-	var asked []map[string]any
-	for _, l := range modes {
-		var x map[string]any
-		json.Unmarshal([]byte(l), &x)
-		asked = append(asked, x)
-	}
-	if len(asked) != 4 || asked[0]["mode"] != "ultra" || asked[0]["provider"] != "p" || asked[0]["model"] != "m" ||
-		asked[1]["submode"] != "workflow" || asked[1]["reasoningEffort"] != "xhigh" ||
-		asked[2]["mode"] != "ultra" || asked[2]["reasoningEffort"] != "max" ||
-		asked[3]["mode"] != "off" || asked[3]["reasoningEffort"] != "max" {
-		t.Errorf("asked of OMD: %q", modes)
-	} else if _, has := asked[0]["reasoningEffort"]; has {
-		t.Errorf("Ultra on asked at a level: %s", modes[0])
-	}
-	if sel := lines("selects.jsonl"); len(sel) != 3 || !strings.Contains(sel[2], `"reasoningEffort":"low"`) {
-		t.Errorf("selected: %q", sel)
-	}
-
-	// Switched in Desktop: the plugin tells (held.changed), the session is shown again.
-	put("omd.json", `{"`+id+`":{"eligible":true,"mode":"ultra","submode":"free","teamAvailable":true,"selected":{"provider":"p","model":"m","reasoningEffort":"xhigh"}}}`)
-	os.Remove(filepath.Join(desktop, "models.json"))
-	shown := func() api.SessionState {
-		var s api.SessionState
-		json.Unmarshal(r.hub.Get("session:"+id), &s)
-		return s
-	}
-	waitFor(t, "Ultra switched in Desktop shown", func() bool {
-		s := shown()
-		return ultra(s).On && ultra(s).Option == "free" && len(ultra(s).Options) == 3 && s.EffortNow == "xhigh"
+	waitFor(t, "the press there", func() bool {
+		b := lines("buttons.jsonl")
+		return len(b) == 1 && strings.Contains(b[0], `"session":"`+id+`"`) && strings.Contains(b[0], `"id":"x.k"`)
 	})
-
-	// Not held by Desktop: shown, not available, the plugin's reason; not switched. Still on and in
-	// effect (OMD keeps the mode with the session): the tag warm, as before.
-	f.setHeld(false)
-	put("open.json", `[]`)
-	st = r.waitState(id, "not held", func(s *api.SessionState) bool { return len(s.Features) == 1 && !s.Features[0].Available })
-	if u := st.Features[0]; u.Reason != "会话不在 DSH Desktop 里打开着，或没用 OMD 的预设" || !u.On || !u.Active || st.EffortNow != "" {
-		t.Errorf("not held: %+v effortNow %q", st.Features, st.EffortNow)
-	}
-	n := len(lines("modes.jsonl"))
-	if err := r.m.SetFeature(bg, id, "omd.ultra", api.SetFeature{On: false}); !errors.Is(err, ErrBadRequest) || !strings.Contains(err.Error(), "会话不在 DSH Desktop 里打开着") {
-		t.Errorf("set, not held: %v", err)
-	}
-	if len(lines("modes.jsonl")) != n {
-		t.Error("asked of OMD, not held")
-	}
-}
-
-// A dsh session Iridium started at the machine (not Desktop's: run by a dsh process of its own
-// there, the plugin's session.js in it, OMD too): its Ultra is that process's, available though
-// Desktop does not hold it; switched on at a sub-mode, the level the page shows is Ultra's and one
-// set goes to OMD there; off again.
-func TestHeldPluginSession(t *testing.T) {
-	t.Parallel()
-	if _, err := exec.LookPath("node"); err != nil {
-		t.Skip("no node")
-	}
-	const id = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
-	hub := &remote.Hub{Logf: t.Logf}
-	r := newRig(t, func(_ *config.Config, o *Options) {
-		o.Remote = hub
-		o.Discovery = &heldFinder{desktopFinder: desktopFinder{id}}
-	})
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) { hub.Serve(w, req, "m1", "pc") }))
-	t.Cleanup(srv.Close)
-	there := t.TempDir()
-	desktop := filepath.Join(there, "desktop")
-	proc := filepath.Join(desktop, "session")
-	os.MkdirAll(proc, 0o700)
-	put := func(name, s string) {
-		if err := os.WriteFile(filepath.Join(desktop, name), []byte(s), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	// Desktop has OMD but not the session; the session's process has both.
-	put("open.json", `[]`)
-	put("omd.json", `{}`)
-	put("session/session.json", `["`+id+`"]`)
-	put("session/omd.json", `{"`+id+`":{"eligible":true,"mode":"off","submode":"free","teamAvailable":true,"selected":{"provider":"p","model":"m","reasoningEffort":"high"}}}`)
-	agents, _ := json.Marshal([]wire.AgentInfo{{Agent: "dsh", Argv: []string{"dsh"}, Version: "0.2.2-rc.1", Home: filepath.Join(there, ".dsh")}})
-	cmd := exec.Command("node", "../../plugins/dsh-remote-iridium/test/run.mjs", "ws"+strings.TrimPrefix(srv.URL, "http"), "tok", filepath.Join(there, "executor"))
-	cmd.Env = append(os.Environ(), "IRIDIUM_TEST_AGENTS="+string(agents), "IRIDIUM_TEST_DSH="+desktop)
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = cmd.Process.Signal(syscall.SIGTERM); _ = cmd.Wait() })
-	waitFor(t, "the executor", func() bool { _, ok := hub.Machine("m1").Hello(); return ok })
-
-	// The patch for its dsh process: session.js, the bridge's address; served to no one.
-	launch := agent.SpawnOptions{Remote: &agent.Remote{}}
-	if err := r.m.o.Channels[api.AgentDsh].(harness.Launcher).Prepare(bg, harness.Ref{ID: id, As: id, Agent: api.AgentDsh, Machine: "m1"}, &launch); err != nil {
-		t.Fatal(err)
-	}
-	if p := launch.Remote.Patches; len(p) != 1 || p[0] != filepath.Join(desktop, "session.patch.yml") {
-		t.Fatalf("dsh.session: %q", p)
-	} else if b, _ := os.ReadFile(p[0]); !strings.Contains(string(b), "session.js\"\n") || !strings.Contains(string(b), "endpoint: ") {
-		t.Errorf("session patch:\n%s", b)
-	} else if _, err := hub.Machine("m1").ReadFile(bg, p[0], 1<<20); err == nil {
-		t.Error("the session patch was served")
-	}
-
-	st := r.waitState(id, "its process's Ultra", func(s *api.SessionState) bool { return len(s.Features) > 0 && s.Features[0].Available })
-	u := st.Features[0]
-	if len(st.Features) != 1 || u.ID != "omd.ultra" || u.On || len(u.Options) != 3 || st.EffortNow != "" {
-		t.Fatalf("off: %+v effort %q", st.Features, st.EffortNow)
-	}
-	modes := func() []string {
-		b, _ := os.ReadFile(filepath.Join(proc, "modes.jsonl"))
-		if s := strings.TrimSpace(string(b)); s != "" {
-			return strings.Split(s, "\n")
-		}
-		return nil
-	}
-	if err := r.m.SetFeature(bg, id, "omd.ultra", api.SetFeature{On: true, Option: "team"}); err != nil {
-		t.Fatal(err)
-	}
-	st = r.waitState(id, "Ultra on", func(s *api.SessionState) bool { return len(s.Features) > 0 && s.Features[0].On })
-	if st.Features[0].Option != "team" || st.EffortNow != "xhigh" || st.Effort != "xhigh" {
-		t.Errorf("on: %+v effort %q/%q", st.Features[0], st.Effort, st.EffortNow)
-	}
-	// A level set while on is Ultra's, set by OMD in that process.
-	if err := r.m.SetEffort(bg, id, "max"); err != nil {
-		t.Fatal(err)
-	}
-	if err := r.m.SetFeature(bg, id, "omd.ultra", api.SetFeature{On: false}); err != nil {
-		t.Fatal(err)
-	}
-	want := []string{
-		`{"session":"` + id + `","provider":"p","model":"m","mode":"ultra","submode":"team","expectedRevision":1}`,
-		`{"session":"` + id + `","provider":"p","model":"m","reasoningEffort":"max","mode":"ultra","expectedRevision":1}`,
-		`{"session":"` + id + `","provider":"p","model":"m","reasoningEffort":"max","mode":"off","expectedRevision":1}`,
-	}
-	if got := modes(); strings.Join(got, "\n") != strings.Join(want, "\n") {
-		t.Errorf("OMD there was asked:\n%s", strings.Join(got, "\n"))
-	}
-	st = r.waitState(id, "Ultra off", func(s *api.SessionState) bool { return len(s.Features) > 0 && !s.Features[0].On })
-	if st.EffortNow != "" {
-		t.Errorf("off: effort %q", st.EffortNow)
-	}
-	if b, _ := os.ReadFile(filepath.Join(desktop, "modes.jsonl")); len(b) > 0 {
-		t.Errorf("Desktop's OMD was asked: %s", b)
-	}
+	// The executor gone, what it attached goes; back, it attaches it again.
+	_ = cmd.Process.Signal(syscall.SIGUSR1)
+	r.waitState(id, "gone with it", func(s *api.SessionState) bool { return len(s.Attached) == 0 })
+	r.waitState(id, "again", func(s *api.SessionState) bool { return len(s.Attached) == 1 })
+	// Taken away there.
+	put("attach.json", `{}`)
+	r.waitState(id, "taken away", func(s *api.SessionState) bool { return len(s.Attached) == 0 })
 }

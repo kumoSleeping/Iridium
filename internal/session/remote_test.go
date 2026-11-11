@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"syscall"
 	"testing"
@@ -414,54 +413,6 @@ func TestRemoteCodex(t *testing.T) {
 	r.waitState(id, "stopped", func(s *api.SessionState) bool { return !s.Live })
 }
 
-// A dsh session Iridium started at a machine is filed under DSH Desktop's workspace of its folder
-// once its transcript is there (dsh.attach, the dsh plugin's), once; the plugin stands in for
-// DSH Desktop in a directory (run.mjs).
-func TestFileInDesktop(t *testing.T) {
-	t.Parallel()
-	if _, err := exec.LookPath("node"); err != nil {
-		t.Skip("no node")
-	}
-	hub := &remote.Hub{Logf: t.Logf}
-	r := newRig(t, func(_ *config.Config, o *Options) { o.Remote = hub })
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) { hub.Serve(w, req, "m1", "pc") }))
-	t.Cleanup(srv.Close)
-	there := t.TempDir()
-	work, home, desktop := filepath.Join(there, "work"), filepath.Join(there, ".dsh"), filepath.Join(there, "desktop")
-	os.MkdirAll(work, 0o700)
-	os.MkdirAll(desktop, 0o700)
-	os.WriteFile(filepath.Join(desktop, "open.json"), []byte("[]"), 0o600)
-	agents, _ := json.Marshal([]wire.AgentInfo{{Agent: "dsh", Argv: []string{"dsh"}, Version: "0.2.2-rc.1", Home: home}})
-	cmd := exec.Command("node", "../../plugins/dsh-remote-iridium/test/run.mjs", "ws"+strings.TrimPrefix(srv.URL, "http"), "tok", filepath.Join(there, "executor"))
-	cmd.Env = append(os.Environ(), "IRIDIUM_TEST_AGENTS="+string(agents), "IRIDIUM_TEST_DSH="+desktop)
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = cmd.Process.Signal(syscall.SIGTERM); _ = cmd.Wait() })
-	waitFor(t, "the executor", func() bool { _, ok := hub.Machine("m1").Hello(); return ok })
-
-	const id = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
-	h := r.m.newHosted(meta{ID: id, Agent: api.AgentDsh, Cwd: work, Created: time.Now().UnixMilli(), Machine: "m1"})
-	os.MkdirAll(h.dir, 0o700)
-	if p, err := h.findRemoteTranscript(hub.Machine("m1")); err != nil || p != "" {
-		t.Fatalf("before its transcript: %q %v", p, err)
-	}
-	dir := filepath.Join(home, "sessions", transcript.DshProjectDir(work), id)
-	os.MkdirAll(dir, 0o700)
-	os.WriteFile(filepath.Join(dir, "session.v4.jsonl.zstd"), []byte("x"), 0o600)
-	for range 2 {
-		if _, err := h.findRemoteTranscript(hub.Machine("m1")); err != nil {
-			t.Fatal(err)
-		}
-		waitFor(t, "filed", func() bool { _, err := os.Stat(filepath.Join(h.dir, "remote-filed")); return err == nil })
-	}
-	b, _ := os.ReadFile(filepath.Join(desktop, "attached.jsonl"))
-	if got := strings.TrimSpace(string(b)); got != `{"session":"`+id+`","cwd":"`+work+`"}` {
-		t.Errorf("attached: %s", got)
-	}
-}
-
 func presetIDs(l []agent.Preset) string {
 	ids := make([]string, len(l))
 	for i, p := range l {
@@ -521,18 +472,20 @@ func TestRemotePresets(t *testing.T) {
 	t.Cleanup(func() { _ = cmd.Process.Signal(syscall.SIGTERM); _ = cmd.Wait() })
 	waitFor(t, "the executor", func() bool { _, ok := hub.Machine("m1").Hello(); return ok })
 
-	// DSH Desktop's models: a patch there, of the base's llm rows as its settings have them, which
-	// sessions there boot with; the executor serves it to no one.
-	launch := agent.SpawnOptions{Remote: &agent.Remote{}}
+	// What DSH Desktop composes for a launch there (agent.prepare): its models, then its own
+	// part in the process; a preset of its own, here (preset false). The executor serves none.
+	launch := agent.SpawnOptions{Session: "x", Cwd: "/w", Remote: &agent.Remote{}}
 	if err := r.m.o.Channels[api.AgentDsh].(harness.Launcher).Prepare(bg, harness.Ref{ID: "x", As: "x", Agent: api.AgentDsh, Machine: "m1"}, &launch); err != nil {
 		t.Fatal(err)
 	}
-	// Then the plugin's part for the session's process (dsh.session).
-	llm := launch.Remote.Patches
-	if want := []string{filepath.Join(desktop, "llm.patch.yml"), filepath.Join(desktop, "session.patch.yml")}; !reflect.DeepEqual(llm, want) {
-		t.Fatalf("dsh.llm, dsh.session: %q", llm)
+	if launch.Host == nil {
+		t.Fatal("no host")
 	}
-	b, _ := os.ReadFile(llm[0])
+	patches, in, err := launch.Host.Prepare("standard", "Iridium's prompt")
+	if err != nil || in || len(patches) != 2 || patches[0] != filepath.Join(desktop, "llm.patch.yml") {
+		t.Fatalf("agent.prepare: %q %v %v", patches, in, err)
+	}
+	b, _ := os.ReadFile(patches[0])
 	for _, line := range []string{
 		"- id: llm-pi-ai\n  disabled: false\n  config: {\"providers\": [{\"id\": \"openrouter\", \"apiKey\": !!js \"process.env.OR_KEY\"}]}\n",
 		"- id: agent-default-model\n  config: {\"provider\": \"openrouter\", \"model\": \"x/y\"}\n",
@@ -544,14 +497,8 @@ func TestRemotePresets(t *testing.T) {
 	if strings.Contains(string(b), "llm-mine") || strings.Contains(string(b), "tool-web") {
 		t.Errorf("llm patch: rows not the base's llm ones:\n%s", b)
 	}
-	if _, err := hub.Machine("m1").ReadFile(bg, llm[0], 1<<20); err == nil {
+	if _, err := hub.Machine("m1").ReadFile(bg, patches[0], 1<<20); err == nil {
 		t.Error("the llm patch was served")
-	}
-
-	// Its profile's bundles of other packages, for a preset of theirs.
-	bundles, err := launch.Remote.Bundles()
-	if want := []agent.Bundle{{Name: "oh-my-dsh", Patches: []string{"- insert:\n    - id: oh-my-dsh\n      name: oh-my-dsh\n", "[]\n"}}}; err != nil || !reflect.DeepEqual(bundles, want) {
-		t.Errorf("dsh.bundles: %+v %v", bundles, err)
 	}
 
 	l, def, err := r.m.Presets(bg, api.AgentDsh, "m1")

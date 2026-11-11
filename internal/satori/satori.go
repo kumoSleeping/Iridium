@@ -118,6 +118,9 @@ type Backend interface {
 	EditQueued(c Caller, id, input string, text *string) error
 	// Answer answers an ask's card as c.
 	Answer(ctx context.Context, c Caller, a api.CardAnswer) error
+	// Press gives button id, attached to session sid's page from source from, pressed by c, back
+	// to where it came from; app: an app's, for its interaction/button.
+	Press(ctx context.Context, c Caller, sid, from, id string) (app string, err error)
 	// Upload stores a file for session id: its ref.
 	Upload(c Caller, id, name string, size int64, body io.Reader) (string, error)
 	// File is the path of file ref of session id, if c may take it.

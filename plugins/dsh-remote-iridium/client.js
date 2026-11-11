@@ -2,9 +2,7 @@
 // 通用 and 模型, not under 插件; the user, 2026-11-08), the same in dsh web and DSH Desktop, which
 // share this settings shell. On it: the Iridium's address (dsh's own settings form over the
 // entry's volatile `url`), and a switch for each of dsh's workspaces, whether the Iridium lists it
-// (the entry's volatile `unsynced`, their folders; written at once), and one for each feature it
-// offers the Iridium's page (the entry's volatile `unfeatured`, the ids switched off). Plain JS in
-// the shape dsh's module loader takes; React and the form parts are the page's own.
+// (the entry's volatile `unsynced`, their folders; written at once). Plain JS in the shape dsh's module loader takes; React and the form parts are the page's own.
 window.__ModuleLoader__.load({
   id: 'dsh-remote-iridium',
   factory: (require) => {
@@ -35,10 +33,6 @@ window.__ModuleLoader__.load({
       ungrouped: '未分组',
       ungroupedHint: '不在任何工作区里的会话',
       switchFailed: '未能保存，请重试。',
-      features: '提供给 Iridium 的附加功能',
-      featuresHint: '关闭的功能不在 Iridium 网页上出现。',
-      omdUltra: 'Ultra（OMD）',
-      omdUltraHint: 'OMD 的协作模式，装有 OMD 时可用',
     }
     const en = {
       title: 'Iridium',
@@ -59,10 +53,6 @@ window.__ModuleLoader__.load({
       ungrouped: 'Ungrouped',
       ungroupedHint: 'Sessions in no workspace',
       switchFailed: 'Not saved. Try again.',
-      features: 'Extras offered to Iridium',
-      featuresHint: 'A feature switched off does not show on the Iridium page.',
-      omdUltra: 'Ultra (OMD)',
-      omdUltraHint: "OMD's collaboration mode, with OMD installed",
     }
 
     // dsh's own look (its settings rows: --dsw-alias-* tokens, 14/12px type, hairline rules).
@@ -181,58 +171,10 @@ window.__ModuleLoader__.load({
       })
     }
 
-    // The features this plugin offers (features.js): those it ships an adapter for. The registry
-    // lives in the server half, which this page has no channel to; one switched off by another
-    // plugin's id is listed too, by its id, so it can be switched on again.
-    const FEATURES = [{ id: 'omd.ultra', name: 'omdUltra', hint: 'omdUltraHint' }]
-
-    /** A switch for each feature: on, the Iridium's page shows it. */
-    function Features(props) {
-      const { t } = props
-      const config = props.useIridiumConfig((s) => s)
-      const off = kept(config.value?.unfeatured)
-      const [busy, setBusy] = useState(null)
-      const [failed, setFailed] = useState(null)
-      const all = [...FEATURES.map((f) => ({ id: f.id, name: t(f.name), hint: t(f.hint) })), ...off.filter((id) => !FEATURES.some((f) => f.id === id)).map((id) => ({ id, name: id, hint: '' }))]
-      const flip = (id, on) => {
-        setBusy(id)
-        setFailed(null)
-        Promise.resolve(props.setUnfeatured(on ? off.filter((x) => x !== id) : [...off.filter((x) => x !== id), id]))
-          .then((ok) => ok || setFailed(id), () => setFailed(id))
-          .finally(() => setBusy(null))
-      }
-      return jsxs('section', {
-        children: [
-          jsx('h3', { style: st.heading, children: t('features') }),
-          jsx('p', { style: st.hint, children: t('featuresHint') }),
-          ...all.map((f) =>
-            jsxs(
-              'div',
-              {
-                style: st.row,
-                children: [
-                  jsxs('div', {
-                    style: st.text,
-                    children: [
-                      jsx('div', { style: st.name, title: f.name, children: f.name }),
-                      f.hint && jsx('div', { style: st.path, title: f.hint, children: f.hint }),
-                      failed === f.id && jsx('div', { style: st.error, role: 'alert', children: t('switchFailed') }),
-                    ],
-                  }),
-                  jsx(ui.Switch, { checked: !off.includes(f.id), label: f.name, disabled: !config.writable || busy !== null, onChange: (next) => flip(f.id, next) }),
-                ],
-              },
-              f.id,
-            ),
-          ),
-        ],
-      })
-    }
-
     function Page(props) {
       return jsxs('div', {
         style: st.page,
-        children: [jsxs('section', { children: [jsx('h3', { style: st.heading, children: props.t('connection') }), jsx(Connection, props)] }), jsx(Workspaces, props), jsx(Features, props)],
+        children: [jsxs('section', { children: [jsx('h3', { style: st.heading, children: props.t('connection') }), jsx(Connection, props)] }), jsx(Workspaces, props)],
       })
     }
 
@@ -313,7 +255,7 @@ window.__ModuleLoader__.load({
                 order: 50,
                 label: () => t('title'),
                 locale: NS,
-                inject: () => ({ hooks: { iridiumForm: store, iridiumConfig: scope, iridiumWorkspaces: ctx.workspaces.list }, ...form.actions(), setUnsynced: (list) => scope.set('unsynced', list), setUngrouped: (on) => scope.set('ungrouped', on), setUnfeatured: (list) => scope.set('unfeatured', list) }),
+                inject: () => ({ hooks: { iridiumForm: store, iridiumConfig: scope, iridiumWorkspaces: ctx.workspaces.list }, ...form.actions(), setUnsynced: (list) => scope.set('unsynced', list), setUngrouped: (on) => scope.set('ungrouped', on) }),
               },
               Page,
             ),

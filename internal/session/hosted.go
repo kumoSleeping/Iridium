@@ -1013,7 +1013,7 @@ func (h *Hosted) state(o store.Overlay, archived bool) api.SessionState {
 			u.Available = false // a CLI without get_settings: the driver refuses it
 		}
 		s.Ultracode = u
-		s.Features = append(s.Features, api.Feature{ID: ultracodeFeature, Name: "UltraCode", On: u.On, Active: u.Active, Available: u.Available, Place: featurePlace, Tone: "warm"})
+		s.Attached = append([]api.Attached{ultracodeAttached(u)}, s.Attached...)
 	}
 	for _, c := range h.commandsLocked() {
 		s.Commands = append(s.Commands, api.Command{Name: c.Name, Description: c.Description, ArgumentHint: c.ArgumentHint})

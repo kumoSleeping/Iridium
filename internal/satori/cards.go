@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/session"
@@ -203,6 +204,40 @@ func (s *Service) press(ctx context.Context, c Caller, id, words string) error {
 	return nil
 }
 
+// pressAttached is a button attached to a session's page pressed (rest: "<session>:<from>:<id>",
+// from "ir", "m:<machine>" or "a:<app>"): given back to where it came from; an app's as
+// interaction/button, to it alone.
+func (s *Service) pressAttached(ctx context.Context, c Caller, rest string) error {
+	sid, rest, _ := strings.Cut(rest, ":")
+	var from, id string
+	if after, ok := strings.CutPrefix(rest, "ir:"); ok {
+		from, id = "ir", after
+	} else if kind, after, ok := strings.Cut(rest, ":"); ok && (kind == "m" || kind == "a") {
+		who, bid, ok := strings.Cut(after, ":")
+		if !ok {
+			return refuse(http.StatusUnprocessableEntity, "no_such_button", "no button att:"+rest)
+		}
+		from, id = kind+":"+who, bid
+	}
+	if sid == "" || from == "" || id == "" {
+		return refuse(http.StatusUnprocessableEntity, "no_such_button", "no button att:"+rest)
+	}
+	st, err := s.channel(c, sid)
+	if err != nil {
+		return err
+	}
+	app, err := s.b.Press(ctx, c, st.ID, from, id)
+	if err != nil {
+		return err
+	}
+	if app != "" {
+		ev := Event{Type: "interaction/button", Timestamp: time.Now().UnixMilli(), Button: &Button{ID: id}, User: &User{ID: c.Login, Name: c.LoginName},
+			Channel: s.channelMasked(st.Session), Guild: s.guildOf(st.Session)}
+		s.out.add(entry{at: time.Now(), session: st.ID, ev: ev, app: app, login: "*"})
+	}
+	return nil
+}
+
 func (s *Service) forget(card string) {
 	s.mu.Lock()
 	delete(s.picks, card)
@@ -244,6 +279,14 @@ func (s *Service) serveInternal(w http.ResponseWriter, r *http.Request, name str
 	}
 	if req.ID == "" {
 		s.fail(w, bad("id"))
+		return
+	}
+	if rest, ok := strings.CutPrefix(req.ID, "att:"); ok {
+		if err := s.pressAttached(r.Context(), c, rest); err != nil {
+			s.fail(w, err)
+			return
+		}
+		reply(w, http.StatusOK, struct{}{})
 		return
 	}
 	if !strings.Contains(req.ID, "#") {

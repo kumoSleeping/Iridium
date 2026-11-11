@@ -148,10 +148,20 @@ func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, id, name string) {
 		if hi.Sep != "/" && hi.Sep != `\` {
 			return nil, &wire.Error{Code: wire.CodeBadRequest, Message: "sep must be / or \\"}
 		}
-		if h.Self != "" && hi.MachineID == h.Self && len(hi.Agents) > 0 {
-			// An app on the host: its agents are the host's own (decisions 22), not taken twice.
-			h.logf("executor %s (%s): on this computer: its agents are not taken", name, id)
+		if h.Self != "" && hi.MachineID == h.Self {
+			// An app on the host: its agents are the host's own (decisions 22), not taken twice;
+			// kept aside, for a launch here it composes (Local).
+			if len(hi.Agents) > 0 {
+				h.logf("executor %s (%s): on this computer: its agents are not taken", name, id)
+			}
+			m.mu.Lock()
+			m.local, m.hostAgents = true, hi.Agents
+			m.mu.Unlock()
 			hi.Agents = nil
+		} else {
+			m.mu.Lock()
+			m.local, m.hostAgents = false, nil
+			m.mu.Unlock()
 		}
 		select {
 		case helloed <- &hi:
@@ -211,6 +221,57 @@ type Machine struct {
 	relays map[string]*relay // by unit
 	runs   map[string]*Run   // command lines running there (run), by ID
 	change chan struct{}     // closed and replaced when the connection comes or goes
+	// local: it said it is on this computer (Hub.Self); hostAgents, its agents then.
+	local      bool
+	hostAgents []wire.AgentInfo
+}
+
+// Local is a connected executor on this computer that has cap (the newest, if more); nil if none.
+func (h *Hub) Local(cap string) *Machine {
+	h.mu.Lock()
+	ms := make([]*Machine, 0, len(h.machines))
+	for _, m := range h.machines {
+		ms = append(ms, m)
+	}
+	h.mu.Unlock()
+	for _, m := range ms {
+		m.mu.Lock()
+		local := m.local
+		m.mu.Unlock()
+		if local && m.Has(cap) {
+			return m
+		}
+	}
+	return nil
+}
+
+// IsLocal: the executor said it is on this computer (Hub.Self).
+func (m *Machine) IsLocal() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.local
+}
+
+// HostAgent is agent a as an executor on this computer has it (its agents are not taken as a
+// machine's: Local's).
+func (m *Machine) HostAgent(a string) (wire.AgentInfo, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, x := range m.hostAgents {
+		if x.Agent == a {
+			return x, true
+		}
+	}
+	return wire.AgentInfo{}, false
+}
+
+// Notify sends the executor event name; an error if it is not connected.
+func (m *Machine) Notify(ctx context.Context, name string, params any) error {
+	c, err := m.Conn()
+	if err != nil {
+		return err
+	}
+	return c.Notify(ctx, name, params)
 }
 
 // ID is the machine's terminal ID.

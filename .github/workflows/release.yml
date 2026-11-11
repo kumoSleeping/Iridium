@@ -97,3 +97,15 @@ jobs:
           npm install -g npm@latest --no-audit --no-fund
           npm version "${VERSION#v}" --no-git-tag-version --allow-same-version
           npm publish --access public
+      # OMD's Ultra for Iridium (plugins/omd-iridium), apart from the dsh plugin, which knows no
+      # OMD: the same version. Its first publish is by hand (npm takes Trusted Publishing only for
+      # a package it has); till then this step fails alone.
+      - name: omd plugin
+        if: ${{ !contains(github.ref_name, '-') }}
+        continue-on-error: true
+        working-directory: plugins/omd-iridium
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          npm version "${VERSION#v}" --no-git-tag-version --allow-same-version
+          npm publish --access public
