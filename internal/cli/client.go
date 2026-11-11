@@ -10,7 +10,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -379,5 +378,3 @@ func bytesStr(n int64) string {
 	}
 	return fmt.Sprintf("%d B", n)
 }
-
-func query(k, v string) string { return "?" + url.Values{k: {v}}.Encode() }

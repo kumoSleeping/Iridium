@@ -6,7 +6,6 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -33,7 +32,7 @@ type At struct {
 // files and command lines of the Iridium's own machine (cp, files, sh, run), its secrets
 // or its admin: a person on a panel, or ir on that machine, does those.
 var remoteCommands = map[string]bool{
-	"api": true, "new": true, "wait": true, "share": true, "stop": true, "ws": true, "apps": true,
+	"api": true, "new": true, "wait": true, "share": true, "apps": true,
 }
 
 // RunAt runs ir with args for a session at another machine, through hc (the daemon's own API,
@@ -113,47 +112,6 @@ func (e *env) machineOf(arg string) (machine, error) {
 		}
 	}
 	return machine{}, fmt.Errorf("no computer %s (ir apps lists them)", arg)
-}
-
-// machineNames is each app's name by its ID; none if they cannot be had.
-func (e *env) machineNames() map[string]string {
-	var as api.Apps
-	if e.do("GET", "/v1/internal/apps", nil, &as) != nil {
-		return nil
-	}
-	out := make(map[string]string, len(as.Apps))
-	for _, a := range as.Apps {
-		if !a.Host {
-			out[a.ID] = a.Name
-		}
-	}
-	return out
-}
-
-// home is the home folder ir ls writes as ~: this machine's; none for ir at another machine.
-func (e *env) home() string {
-	if e.at != nil {
-		return ""
-	}
-	h, _ := os.UserHomeDir()
-	return h
-}
-
-// groupOf is the group session id is in (0: none), for ir ls --here.
-func (e *env) groupOf(id string) (int64, error) {
-	if id == "" {
-		return 0, errors.New("--here is for ir run in a session")
-	}
-	var list []api.Session
-	if err := e.do("GET", "/v1/internal/sessions", nil, &list); err != nil {
-		return 0, err
-	}
-	for _, s := range list {
-		if s.ID == id {
-			return s.Workspace, nil
-		}
-	}
-	return 0, fmt.Errorf("no session %s", id)
 }
 
 // ForwardAt is ir at another machine (IRIDIUM_URL and IRIDIUM_TOKEN in its environment): its

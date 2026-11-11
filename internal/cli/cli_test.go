@@ -47,18 +47,65 @@ func TestHelp(t *testing.T) {
 	}
 }
 
-// What ir api shows: the turns of message.list, a subagent under its parent, words cut short.
+// What ir api shows: a list a line an item (a table of the fields named), an object a field a
+// line with its arrays' fields as tables, nothing empty, words cut short.
 func TestShown(t *testing.T) {
-	ts := turns([]api.Block{{Kind: api.BlockKindAssistant, Text: "carried on"}, {Kind: api.BlockKindUser, Text: "hi"}, {Kind: api.BlockKindAssistant, Text: "a"}, {Kind: api.BlockKindTool}, {Kind: api.BlockKindAssistant, Text: "final"}, {Kind: api.BlockKindUser, Text: "next"}})
-	if len(ts) != 3 || ts[0].asked != "" || ts[0].reply != "carried on" || ts[1].reply != "final" || ts[2].reply != "" {
-		t.Errorf("turns: %+v", ts)
+	show := func(c *apiCall, raw string) string {
+		var out bytes.Buffer
+		(&env{out: &out}).render(c, []byte(raw))
+		return out.String()
 	}
-	order := underParents([]api.Session{{ID: "k", Subagent: true, Parent: "p"}, {ID: "x"}, {ID: "p"}, {ID: "o", Subagent: true, Parent: "gone"}})
-	if got := []string{order[0].ID, order[1].ID, order[2].ID, order[3].ID}; !reflect.DeepEqual(got, []string{"x", "p", "k", "o"}) {
-		t.Errorf("underParents: %v", got)
+	c := &apiCall{method: "GET", path: "/v1/x/y", clip: 5}
+	if got := show(c, `[{"id":"a","name":"long name","on":false,"tags":["p","q"],"o":{"k":1}}]`); got != "id=a  name=long …(+4)  o.k=1  tags=p,q\n" {
+		t.Errorf("list: %q", got)
+	}
+	c.pick = []string{"id", "o"}
+	if got := show(c, `{"data":[{"id":"a","o":{"k":1}},{"id":"b"}],"next":"2"}`); got != "id\to\na\tk=1\nb\t-\n(next=2; --all takes every page)\n" {
+		t.Errorf("table: %q", got)
+	}
+	c.pick = []string{"n", "apps.id", "apps.logins.id"}
+	if got := show(c, `{"n":3,"apps":[{"id":"x","logins":[{"id":"l1"},{"id":"l2"}]}]}`); got != "n: 3\napps:\nid\tlogins.id\nx\tl1,l2\n" {
+		t.Errorf("object: %q", got)
+	}
+	c.pick, c.clip = []string{"content"}, 0
+	if got := show(c, `[{"content":"<iridium:user from=\"web\"/>hi &lt;b&gt;"},{"content":"done"}]`); got != "content\n> [web] hi <b>\ndone\n" {
+		t.Errorf("content: %q", got)
+	}
+	if got := show(c, `[{"content":"<iridium:tool id=\"1\" name=\"Bash\"><iridium:input>{&quot;command&quot;:&quot;ls&quot;}</iridium:input><iridium:result>out</iridium:result></iridium:tool>"}]`); got != "content\n[tool Bash] {\"command\":\"ls\"}\n" {
+		t.Errorf("tool: %q", got)
+	}
+	c.pick = []string{"a", "b"}
+	if got := show(c, `{"a":1,"b":""}`); got != "a: 1\n" {
+		t.Errorf("empty field: %q", got)
+	}
+	c.pick, c.grep = nil, []string{"done"}
+	if got := show(c, `[{"content":"hi"},{"content":"done"}]`); got != "content=done\n" {
+		t.Errorf("grep: %q", got)
 	}
 	if clip("a\n b  c", 3) != "a b…" {
 		t.Errorf("clip: %q", clip("a\n b  c", 3))
+	}
+}
+
+// ir api's arguments: a path or a Satori method, the method, the body, the query.
+func TestParseAPI(t *testing.T) {
+	c, err := parseAPI([]string{"internal/sessions/ab/model", "model=haiku", "n:=2", "a.b=c", "--pick", "id,x"})
+	if err != nil || c.method != "POST" || c.path != "/v1/internal/sessions/ab/model" || !reflect.DeepEqual(c.body, map[string]any{"model": "haiku", "n": 2.0, "a": map[string]any{"b": "c"}}) || !reflect.DeepEqual(c.pick, []string{"id", "x"}) {
+		t.Errorf("parse: %+v %v", c, err)
+	}
+	if c, err = parseAPI([]string{"PUT", "/v1/internal/x", "k=v"}); err != nil || c.method != "PUT" || c.path != "/v1/internal/x" {
+		t.Errorf("PUT: %+v %v", c, err)
+	}
+	if c, err = parseAPI([]string{"internal/usage", "days==3"}); err != nil || c.method != "GET" || c.path != "/v1/internal/usage?days=3" {
+		t.Errorf("query: %+v %v", c, err)
+	}
+	if c, err = parseAPI([]string{"channel.list", "--all"}); err != nil || !c.satori || c.method != "POST" || c.path != "/v1/channel.list" {
+		t.Errorf("satori: %+v %v", c, err)
+	}
+	for _, bad := range [][]string{{"GET", "internal/x", "k=v"}, {"PUT", "channel.list"}, {"internal/x", "--all"}, {"channel.list", "--wait"}, {"x/y", "nokey"}, {}} {
+		if _, err := parseAPI(bad); err == nil {
+			t.Errorf("%q: no error", bad)
+		}
 	}
 }
 
@@ -176,12 +223,12 @@ func TestAgentCommands(t *testing.T) {
 		}
 	}
 	prompt, err := os.ReadFile(filepath.Join(cfg.StatePath(), "hold", full, "system-prompt.md"))
-	if err != nil || !strings.Contains(string(prompt), "This session is hosted by Iridium.") || !strings.Contains(string(prompt), "ir api <method>") {
+	if err != nil || !strings.Contains(string(prompt), "This session is hosted by Iridium.") || !strings.Contains(string(prompt), "ir api [METHOD]") {
 		t.Errorf("system prompt %q %v", prompt, err)
 	}
 
 	send := func(id, text string, more ...string) result {
-		return ir(append([]string{"api", "message.create", "channel_id=" + id, "--text", text}, more...)...)
+		return ir(append([]string{"api", "message.create", "channel_id=" + id, "_data.text=" + text}, more...)...)
 	}
 	if r := send(sid, "again", "--wait"); r.code != 0 || r.out != "ok: again\n" {
 		t.Errorf("message.create --wait: %+v", r)
@@ -193,9 +240,9 @@ func TestAgentCommands(t *testing.T) {
 	if r := ir("wait", sid); r.code != 0 || r.out != "ok: third\n" {
 		t.Errorf("wait: %+v", r)
 	}
-	// --text is plain words: what looks like markup goes as it is.
+	// _data.text is plain words: what looks like markup goes as it is.
 	if r := send(sid, "a <b> & c", "--wait"); r.code != 0 || r.out != "ok: a <b> & c\n" {
-		t.Errorf("--text escaped: %+v", r)
+		t.Errorf("_data.text escaped: %+v", r)
 	}
 
 	// An ask: 2, and what it asks.
@@ -217,12 +264,13 @@ func TestAgentCommands(t *testing.T) {
 	// An attachment: its path in the message.
 	att := filepath.Join(work, "notes.txt")
 	os.WriteFile(att, []byte("notes"), 0o600)
-	if r := send(sid, "see", "-a", att, "--wait"); r.code != 0 || r.out != "ok: see\n\n[附件] `"+att+"`\n" {
-		t.Errorf("message.create -a: %+v", r)
+	if r := send(sid, "see", `_data.paths:=["`+att+`"]`, "--wait"); r.code != 0 || r.out != "ok: see\n\n[附件] `"+att+"`\n" {
+		t.Errorf("message.create _data.paths: %+v", r)
 	}
 
 	ls := func(more ...string) result { return ir(append([]string{"api", "channel.list"}, more...)...) }
-	if r := ls(); r.code != 0 || !strings.HasPrefix(r.out, sid+"\tclaude\tidle\t") || !strings.HasSuffix(r.out, "\thello\n") { // its first message names it
+	// A table of the view's fields; its first message names it.
+	if r := ls(); r.code != 0 || !strings.HasPrefix(r.out, "id\tname\t_data.status\t") || !strings.Contains(r.out, "\n"+full+"\thello\tidle\tclaude\t"+work+"\thello\n") {
 		t.Errorf("channel.list: %+v", r)
 	}
 	if r := ir("api", "channel.list", "--json"); r.code != 0 || !strings.HasPrefix(r.out, `{"data":[{"id":"`+full+`"`) || !strings.Contains(r.out, `"_data":{"id":"`+full+`"`) {
@@ -243,19 +291,19 @@ func TestAgentCommands(t *testing.T) {
 		st.Show("claude", full)
 		st.Close()
 	}
-	// message.list: each message and its final reply, cut short. ir runs in caller-session here, so
-	// what it sent is a letter from there.
-	if r := ir("api", "message.list", "channel_id="+sid[:6]); r.code != 0 || !strings.Contains(r.out, "> [ir:caller-session] hello\n  ok: hello\n") || !strings.Contains(r.out, "  ok: again\n") {
+	// message.list: a block a line, a person's after "> " and who. ir runs in caller-session here,
+	// so what it sent is a letter from there; a prefix of the id will do.
+	if r := ir("api", "message.list", "channel_id="+sid[:6]); r.code != 0 || !strings.Contains(r.out, "\t> [ir:caller-session] hello\n") || !strings.Contains(r.out, "\tok: again\n") {
 		t.Errorf("message.list: %+v", r)
 	}
 	if r := ir("api", "message.list", "channel_id="+sid, "--grep", "AGAIN"); r.code != 0 || strings.Contains(r.out, "hello") || strings.Count(r.out, "> ") != 1 {
 		t.Errorf("message.list --grep: %+v", r)
 	}
-	// --grep: by its words, case aside; nothing found is an error.
-	if r := ls("--grep", "OK: SEE"); r.code != 0 || !strings.HasPrefix(r.out, sid+"\t") {
+	// --grep: by its words, case aside, in every field; nothing found, nothing shown.
+	if r := ls("--grep", "OK: SEE"); r.code != 0 || !strings.Contains(r.out, "\n"+full+"\t") {
 		t.Errorf("channel.list --grep: %+v", r)
 	}
-	if r := ls("--grep", "no-such-words"); r.code != 1 || !strings.Contains(r.err, "没找到") {
+	if r := ls("--grep", "no-such-words"); r.code != 0 || r.out != "" {
 		t.Errorf("--grep nothing: %+v", r)
 	}
 	// Archived and back, as the sidebar's menu: out of the list, still there with _data.all.
@@ -265,7 +313,7 @@ func TestAgentCommands(t *testing.T) {
 	if r := ls(); strings.Contains(r.out, sid) {
 		t.Errorf("channel.list after channel.delete: %+v", r)
 	}
-	if r := ls("_data.all:=true", "--grep", "hello"); r.code != 0 || !strings.Contains(r.out, "[归档]") {
+	if r := ls("_data.all:=true", "--grep", "hello", "--pick", "id,_data.archived"); r.code != 0 || !strings.Contains(r.out, full+"\ttrue\n") {
 		t.Errorf("archived, found: %+v", r)
 	}
 	// Archived, its agent stops: a message while it is still stopping meets no holder.
@@ -289,7 +337,7 @@ func TestAgentCommands(t *testing.T) {
 	if r := ir("api", "channel.update", "channel_id="+sid, "data.name=「会话命名」。"); r.code != 0 {
 		t.Errorf("data.name: %+v", r)
 	}
-	if r := ls(); !strings.HasSuffix(strings.TrimSpace(r.out), "\t会话命名") {
+	if r := ls(); !strings.Contains(r.out, full+"\t会话命名\t") {
 		t.Errorf("channel.list after the name: %+v", r)
 	}
 	if err := (&env{}).client(cfg).do("PATCH", "/v1/internal/sessions/"+full, api.SessionPatch{Name: new("mine")}, nil); err != nil {
@@ -304,7 +352,7 @@ func TestAgentCommands(t *testing.T) {
 	if r := ir("wait", "ffffffff"); r.code != 1 || !strings.Contains(r.err, "no session") {
 		t.Errorf("unknown id: %+v", r)
 	}
-	// What ir api takes: a method; key=value or key:=json; --wait only for message.create.
+	// What ir api takes: a path or a method; k=v, k:=json or k==v; --wait only for message.create.
 	for _, bad := range [][]string{{"api"}, {"api", "channel.list", "nokey"}, {"api", "channel.list", "a:=nope"}, {"api", "channel.list", "--wait"}, {"api", "channel.list", "--text", "x"}} {
 		if r := ir(bad...); r.code != 1 || !strings.Contains(r.err, "usage: ir api") {
 			t.Errorf("%v: %+v", bad, r)
@@ -313,7 +361,7 @@ func TestAgentCommands(t *testing.T) {
 	if r := ir("api", "no.such"); r.code != 1 || !strings.Contains(r.err, "no API no.such") {
 		t.Errorf("no such method: %+v", r)
 	}
-	if r := ir("api", "login.get"); r.code != 0 || !strings.Contains(r.out, `"platform": "local"`) {
+	if r := ir("api", "login.get"); r.code != 0 || !strings.Contains(r.out, "platform: local\n") {
 		t.Errorf("login.get: %+v", r)
 	}
 
@@ -321,7 +369,7 @@ func TestAgentCommands(t *testing.T) {
 	if r := send(sid, "now crash", "--wait"); r.code != 1 || !strings.Contains(r.err, "ended badly") {
 		t.Errorf("crash: %+v", r)
 	}
-	if r := ir("stop", sid); r.code != 0 {
+	if r := ir("api", "POST", "internal/sessions/"+sid+"/stop"); r.code != 0 || r.out != "ok: true\n" {
 		t.Errorf("stop: %+v", r)
 	}
 	if r := ir("wait", "mac/"+sid); r.code != 1 || !strings.Contains(r.err, "no session mac/") {
@@ -342,8 +390,8 @@ func TestAgentCommands(t *testing.T) {
 	}
 	if r := ir("new", "claude", "host:"+work, ""); r.code != 0 {
 		t.Errorf("place at the host: %+v", r)
-	} else if ls := ls(); !strings.Contains(ls.out, "\thost:"+work) && !strings.Contains(ls.out, "\thost:~") {
-		t.Errorf("ls without the host's prefix: %q", ls.out)
+	} else if ls := ls(); strings.Count(ls.out, "\t"+work+"\t") != 2 {
+		t.Errorf("a folder at the host, as it is: %q", ls.out)
 	}
 }
 
@@ -366,12 +414,12 @@ func TestFileCommands(t *testing.T) {
 	if r := ir("cp", "mac:~/a", dst); r.code != 1 || !strings.Contains(r.err, "no executors here") {
 		t.Errorf("cp from another machine: %+v", r)
 	}
-	r := ir("files", work)
-	if r.code != 0 || !strings.HasPrefix(r.out, "a.bin\t100000\t") || !strings.Contains(r.out, "out/\t0\t") {
+	r := ir("api", "internal/files", "path=="+work)
+	if r.code != 0 || !strings.Contains(r.out, "entries:\nname\tsize\ttype\na.bin\t100000\tfile\n") || !strings.Contains(r.out, "out\t") {
 		t.Errorf("files: %+v", r)
 	}
 	home, _ := os.UserHomeDir()
-	if r := ir("files", filepath.Join(home, ".ssh")); r.code != 1 || !strings.Contains(r.err, "denied") {
+	if r := ir("api", "internal/files", "path=="+filepath.Join(home, ".ssh")); r.code != 1 || !strings.Contains(r.err, "denied") {
 		t.Errorf("files ~/.ssh: %+v", r)
 	}
 }
@@ -385,10 +433,10 @@ func (*env) client(cfg config.Config) *env {
 
 func (e *env) idsFrom(t *testing.T, cfg config.Config) []string { return e.client(cfg).ids() }
 
-// ir ws: a session makes its folder's group; listed, renamed by id or name; nothing else.
+// Folder groups: a session makes its folder's group; listed, renamed through the API.
 func TestWorkspaceCommands(t *testing.T) {
 	_, work := rig(t)
-	if r := ir("api", "guild.list"); r.code != 0 || r.out != "loose\t未分组\t\n" {
+	if r := ir("api", "guild.list"); r.code != 0 || r.out != "id\tname\t_data.path\nloose\t未分组\t-\n" {
 		t.Errorf("guild.list, no session: %+v", r)
 	}
 	dir := filepath.Join(work, "proj")
@@ -398,22 +446,21 @@ func TestWorkspaceCommands(t *testing.T) {
 		t.Fatalf("new: %+v", r)
 	}
 	r = ir("api", "guild.list")
-	if r.code != 0 || !strings.Contains(r.out, "\t"+filepath.Base(dir)+"\thost:"+dir+"\n") {
+	if r.code != 0 || !strings.Contains(r.out, "\t"+filepath.Base(dir)+"\t"+dir+"\n") {
 		t.Fatalf("guild.list: %+v", r)
 	}
-	id := strings.Split(r.out, "\t")[0]
-	if r := ir("ws", "rename", filepath.Base(dir), "Bee"); r.code != 0 {
-		t.Errorf("ws rename by name: %+v", r)
+	id := strings.Split(strings.Split(r.out, "\n")[1], "\t")[0]
+	if r := ir("api", "PATCH", "internal/workspaces/"+id, "name=Bee"); r.code != 0 {
+		t.Errorf("rename: %+v", r)
 	}
-	if r := ir("api", "guild.list"); !strings.HasPrefix(r.out, id+"\tBee\t") {
+	if r := ir("api", "guild.list"); !strings.Contains(r.out, "\n"+id+"\tBee\t") {
 		t.Errorf("guild.list after rename: %+v", r)
 	}
 	if r := ir("api", "guild.get", "guild_id="+id, "--json"); r.code != 0 || !strings.Contains(r.out, `"name":"Bee"`) {
 		t.Errorf("guild.get: %+v", r)
 	}
-	for _, args := range [][]string{{}, {"ls"}, {"new", dir}, {"rm", id}, {"mv", "x", id}, {"nope"}} {
-		if r := ir(append([]string{"ws"}, args...)...); r.code != 1 || !strings.Contains(r.err, "usage") {
-			t.Errorf("ws %v: %+v", args, r)
-		}
+	// ir new --workspace takes a group by its name.
+	if r := ir("new", "claude", work, "", "--workspace", "bee"); r.code != 0 {
+		t.Errorf("new --workspace: %+v", r)
 	}
 }

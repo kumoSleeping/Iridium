@@ -6,14 +6,12 @@ import "strings"
 
 // Help is ir --help: at most 20 lines (plan "ir"). The agent part is before Admin.
 const Help = `ir: the host's Iridium on the command line (over its unix socket). An <id> may be its first few characters.
-  ir api <method> [key=value | key:=json]... [--text words|@-] [-a file]... [--grep word] [--json] [--wait]   Satori: channel.list|get|update|delete, message.create|list|get, guild.list|get, login.get, user.get, meta
-    channel_id: a session (<id>, self: yours); guild_id self: your group; a.b=… sets a's b. --text: the message as plain words (@-: stdin); -a: attach; --grep: filter a list; --json: the answer as is
-    ir api channel.list [_data.all:=true] | message.list channel_id=<id> | message.create channel_id=<id> --text "…" [--wait] | channel.update channel_id=self data.name="<title>" | channel.update channel_id=<id> _data.archived:=true|false | channel.delete channel_id=<id> | guild.list
+  ir api [METHOD] <path|satori.method> [k=v | k:=json | k==query]... [@file|@-] [--pick a,b] [--grep word] [--all] [--clip N] [--json] [--wait]   the API as it is: internal/x is /v1/internal/x (GET, POST with a body), a bare name POST /v1/<name>
+    the answer a line an item, the route's main fields, cut short: --pick other fields, --clip 0 whole, --json as it came; ir api help [word]: the routes, their bodies and answers
   ir new <agent> [place] "task"       start a session, print its ID (--model, --approve <mode>, --workspace <group>); place: a folder, app:path at that app's computer, host:path
-  ir wait <id> | stop <id>            wait for the turn to end, print its last reply | stop its agent
+  ir wait <id>                       wait for the turn to end, print its last reply
   ir share app/login <id|folder|file> ["note"]   share a session, a place (app:path too) or a file (in your session) with a login that may use it
-  ir ws rename <group> <name>         rename a folder group (<group>: ID or name)
-  ir cp <src> <dst> | files <dir> | attach <file>...   copy files, print path, size, sha256 | list one level: name, size, time, type | its ir: link, the Markdown to put the file in your reply
+  ir cp <src> <dst> | attach <file>...   copy files, print path, size, sha256 | its ir: link, the Markdown to put the file in your reply
   ir sh <app>[:dir] -- command       run a command line at an app's computer (ir apps lists them; --cwd dir, --timeout 2m)
   ir secret ls | set <name> [--note text] | rm <name>   secrets: set has the user type the value on the web page
   ir run [--secret name,…] -- command …   {{name}}, {{file:name}} become the value, a temp file, and env vars; values in the output are masked
@@ -40,7 +38,7 @@ func Remote() string {
 	var b strings.Builder
 	b.WriteString("ir: the Iridium hosting this session, reached over HTTPS as this computer's app. An <id> may be its first few characters. A folder is this computer's.\n")
 	for _, l := range strings.Split(Agent(), "\n") {
-		for _, p := range []string{"  ir api ", "    ", "  ir new ", "  ir share ", "  ir wait ", "  ir ws ", "  new and message.create "} {
+		for _, p := range []string{"  ir api ", "    ", "  ir new ", "  ir share ", "  ir wait ", "  new and message.create "} {
 			if strings.HasPrefix(l, p) {
 				if p == "  new and message.create " {
 					l, _, _ = strings.Cut(l, ". A path may be")
@@ -50,6 +48,6 @@ func Remote() string {
 		}
 	}
 	b.WriteString("  ir apps                            the apps and their computers\n")
-	b.WriteString("  Not from here: cp, files, attach, sh, run, secret, usage and the admin commands; ask a session on the host.\n")
+	b.WriteString("  Not from here: cp, attach, sh, run, secret, usage, the socket only routes and the admin commands; ask a session on the host.\n")
 	return b.String()
 }

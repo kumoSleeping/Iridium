@@ -64,32 +64,34 @@ Rhodium 的轻量 Go 版本：一个网页，管理主机和别的电脑上 agen
 
 ## `ir`
 
-和 Iridium 同一个二进制，经本机 unix socket（0600）走网页那套接口。会话、消息、文件夹组用 Satori 的标准方法（`ir api`），Satori 没有的才是单独的命令（用户，2026-11-11：破坏性改，不留旧命令）。
+和 Iridium 同一个二进制，经本机 unix socket（0600）走网页那套接口。`ir api` 把请求原样发出去（透传，用户，2026-11-11）；只有在客户端做了事的才是单独的命令（`new`、`wait`、`cp`、`sh`、`run`、`share`、`attach`、凭据和管理）。
 
 agent 用：
 
 ```
-ir api <方法> [键=值 | 键:=JSON]... [--text 文字|@-] [-a 文件]... [--grep 词] [--json] [--wait]
+ir api [方法] <路径|satori.方法> [k=v | k:=JSON | k==查询]... [@文件|@-] [--pick a,b] [--grep 词] [--all] [--clip N] [--json] [--wait]
+ir api help [词]               接口说明（irhelp/api.txt）
 ir new <agent> [位置] "任务"   开会话，返回 ID；位置 应用名:路径，不写前缀是自己所在的电脑
-ir wait <id> | stop <id>       等回合结束，打印最后一段回复 | 停掉 agent
-ir ws rename <组> <新名>        给文件夹组改名（组写 ID 或名字）
+ir wait <id>                   等回合结束，打印最后一段回复
 ```
 
-旧命令和 `ir api` 的对应：
+以前的命令和现在的写法：
 
 | 以前 | 现在 |
 | --- | --- |
-| `ir ls [--all] [--here]` | `ir api channel.list [_data.all:=true] [guild_id=self]` |
-| `ir find <词>` | `ir api channel.list --grep <词>`（归档的加 `_data.all:=true`） |
+| `ir ls` / `find <词>` | `ir api channel.list [_data.all:=true] [guild_id=self] [--grep 词]` |
 | `ir read <id>` | `ir api message.list channel_id=<id>` |
-| `ir send <id> "消息" [-a 文件] [--queue]` | `ir api message.create channel_id=<id> --text "消息" [-a 文件] [_data.steer:=false]` |
-| `ir rename [<id>] <名>` | `ir api channel.update channel_id=<id>\|self data.name=<名>` |
-| `ir archive` / `unarchive <id>` | `ir api channel.delete channel_id=<id>`，或 `channel.update … _data.archived:=true\|false` |
-| `ir ws [ls]` | `ir api guild.list` |
-| `ir send 应用/登录 "提示"` | 删掉 |
+| `ir send <id> "消息" [-a 文件]` | `ir api message.create channel_id=<id> _data.text="消息" [_data.paths:='["/绝对/路径"]'] [--wait]` |
+| `ir rename` / `archive` | `ir api channel.update channel_id=<id>\|self data.name=<名>`、`channel.delete` |
+| `ir stop <id>` | `ir api POST internal/sessions/<id>/stop` |
+| `ir ws [ls]` / `ws rename` | `ir api guild.list`、`ir api PATCH internal/workspaces/<组> name=<名>` |
+| `ir files <目录>` | `ir api internal/files path==<绝对路径>` |
 
-- `ir api`：方法名、参数照 Satori 原样；`键=值` 是字符串，`键:=JSON` 是任意 JSON（`true`、数字、对象），带点的键写进对象（`data.name`、`_data.archived`）。`channel_id` 可写会话 ID 的开头，`self` 是自己所在的会话；`guild_id=self` 是它的组。`--text` 是纯文字，`ir` 转义成 `content`（`@-` 读 stdin）；`-a` 是附件（`_data.attachments`）；`message.create` 自动带 `_data.caller`。用哪个登录说话由 `POST /v1/meta` 定（主机的 `ir` 是 `local/local`，agent 的是它那一回合的登录）。
-- 输出：列表一项一行（`channel.list` 同以前的 `ir ls`，子代理挂在父会话下；`guild.list` 是 ID、名字、位置），`message.list` 每条消息一行加它的最终回复，其余打 JSON；`--grep` 按词筛列表（每个词都要有，不分大小写），`--json` 原样输出。翻页的列表自动取完。
+- 透传：`ir` 只补头（`X-Iridium-Session`，Satori 的登录头），不改请求。有 `/` 的是 `/v1/<路径>`（不带正文 GET，带了 POST，写了方法照写的）；没有的是 Satori 方法，`POST /v1/<方法>`。`k=v` 字符串，`k:=JSON` 任意 JSON，`k==v` 查询串，带点的键写进对象。
+- 原来 `ir` 替人做的搬进服务端，谁调都一样：会话 ID 的开头和 `self`（`/v1/internal/sessions/{id}/…` 和 `channel_id`；`guild_id=self`），`message.create` 的 `_data.text`（纯文字，服务端转义）和 `_data.paths`（主机上的文件，只认 socket），来源从 `X-Iridium-Session` 取（不用 `_data.caller`）。
+- 输出只在回答这一侧加工：列表一项一行，`view=` 指定的字段排成表（`--pick` 换别的），对象一字段一行、它里面的对象数组各成一张表；空值不打，每个值一行、截到 200 字（`--clip`）；Satori 消息的 `content` 转成文字（人说的前面 `> [来源]`，工具、思考、系统行标出来）。`--grep` 筛项，`--all` 跟着 `next` 取完，`--json` 原样。
+- 接口说明 `internal/irhelp/api.txt`：一个接口一行（方法 路径 正文 -> 回答 说明 view=）。前面“common”一段（会话、消息、组、停止、提问、应用、文件、用量）写进托管会话的系统提示，其余的 agent 用 `ir api help <词>` 查，平衡开头占用和调用次数（用户，2026-11-11）。测试核对它和服务端注册的路由一条不差。
+- `message.create` 不带 `--wait` 也等到 agent 接了这条再返回（最多 15 秒），紧接着的 `ir wait` 等的才是这一回合。
 - `new`、`message.create` 可加 `--wait`；`new` 可选 `--model`、`--approve`。`wait` 退出码：0 结束，2 需要你，1 出错/已退出。
 - 组不能手建、删除、挪会话（2026-11-08），只能改名。
 - 新会话进调用者的组（组的文件夹包含它的目录时），否则按目录归组；列表里挂在调用者下面（见“派出的会话”）。没有汇报、agent 间权限。
@@ -233,7 +235,7 @@ ir run [--secret 名,…] -- 命令 …   {{名}}、{{file:名}} 换进参数，
 - 不做节点（用户，2026-11-08）：不做两个 Iridium 之间对等互用。别的机器一律以执行端接入一个 Iridium，会话都由它托管，网页、`ir`、Bot 只连它；用哪台机器的 Claude、Codex 都在这一个 Iridium 上开。协议和做法见 `docs/exec.md`；实现有 dsh 插件和 `ir join`。
 - 接入单向：那台机器跑 `ir join <地址>` 申请，这边核对配对码后允许。主机上的应用不带 Agent（主机的 agent 只归主机）。
 - 第三方插件不进核心（用户，2026-11-09）：OMD（oh-my-dsh）这类 DSH Desktop 插件，Iridium 只收 dsh 插件经 `held.*` 给的通用数据（附加功能：开关、可用与否、名字、选项），不写认识它们的代码；翻译放在 dsh 插件的可选子插件里（`adapters/omd.js`），有那个插件才启用。见 `docs/exec.md`“附加功能”。
-- `ir` 认位置 `应用名:路径`：`ir new <agent> <位置>`、`ir sh`、`ir cp`、`ir files`。`ir sh` 经执行端的 `run`，老执行端退回 hold 方式。
+- `ir` 认位置 `应用名:路径`：`ir new <agent> <位置>`、`ir sh`、`ir cp`；列目录 `ir api internal/files path==… machine==<机器>`。`ir sh` 经执行端的 `run`，老执行端退回 hold 方式。
 - 平台（用户，2026-11-08）：Linux、Mac 发布完整的 Iridium，也能 `ir join`；Windows 版不再发布，Windows 用 dsh 插件接入（`ir join` 的 Windows 代码留着，要的人自己构建）。不做代码签名和公证：命令行下载、`iridium push`、自更新都不经浏览器，不会被 Gatekeeper 拦；Mac arm64 要的 ad-hoc 签名 Go 链接时自带。Mac 上服务用 launchd，holder 各有一个监管进程（见 `deploy.md` “macOS”）。
 - 用户要用的都在这一个二进制里（2026-11-06）：`iridium install`、`ir update`、`ir public`，以及 `iridium push <用户@主机>`（经 ssh 把自己装到另一个账号或机器、或换成新版）和 `iridium node new <账号>`（在本机建账号、装一个 Iridium，sudo 一次）。脚本只给从源码构建的开发者用。
 
@@ -250,8 +252,8 @@ ir run [--secret 名,…] -- 命令 …   {{名}}、{{file:名}} 换进参数，
 - Bot：发消息带附件（进会话目录的 `.iridium/uploads/`）；事件里带回复的文件列表（名字、大小、类型、引用），按引用取。
 - `ir`：
   - `ir cp <源> <目标>`，任一边可以是 `机器:路径`；先只做单个文件，目录以后用 tar 流。
-  - `ir api message.create channel_id=<id> --text "…" -a <文件>`：附件传到会话所在的机器。
-  - `ir files 机器:目录`：只列一层，名字、大小、时间、类型。
+  - `ir api message.create channel_id=<id> _data.text="…" _data.paths:='["<文件>"]'`：附件传到会话所在的机器。
+  - `ir api internal/files path==<目录> machine==<机器>`：只列一层，名字、大小、时间、类型。
   - 传输由 Iridium 做，不是 `ir` 进程；`ir` 被打断后，再跑一次同样的命令从断点接着传。
   - 给人看时有进度条；agent 调用时只打一行结果（路径、大小、sha256）。
 - 拷入拷出不设权限（2026-11-08）；单文件上限照旧；用量页另记每个交互终端传了多少字节。

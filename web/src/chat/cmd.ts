@@ -83,8 +83,16 @@ function namesSelf(args: string[], sub?: string): boolean {
   );
 }
 
-/** An ir api call's sort, by its method (and what channel.update changes). */
+/** An ir api call's sort, by its Satori method (and what channel.update changes), or by the
+ *  path of one of Iridium's own routes (internal/…). */
 function irApiOf(method: string | undefined, args: string[]): Cmd | undefined {
+  if (method?.includes("/")) {
+    const p = method.replace(/^\/?(v1\/)?/, "").split("?")[0]!;
+    if (/^internal\/sessions\/[^/]+\/(stop|interrupt)$/.test(p)) return "ir-stop";
+    if (/^internal\/files$/.test(p)) return "ir-files";
+    if (/^internal\/workspaces\//.test(p)) return "ir-ws";
+    return undefined;
+  }
   switch (method) {
     case "channel.list":
       return args.some((a) => a === "--grep" || a.startsWith("--grep=")) ? "ir-find" : "ir-list";
@@ -250,7 +258,7 @@ function sortOf(cmd: string, args: string[], out: boolean): Cmd | undefined {
   switch (cmd) {
     case "ir":
     case "iridium":
-      return sub === "api" ? irApiOf(pos[1], args) : IR[sub ?? ""];
+      return sub === "api" ? irApiOf(/^(GET|POST|PUT|PATCH|DELETE)$/.test(pos[1] ?? "") ? pos[2] : pos[1], args) : IR[sub ?? ""];
     case "git":
       return gitOf(args);
     case "gh":

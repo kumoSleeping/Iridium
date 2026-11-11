@@ -34,6 +34,8 @@
 
 `ir api`（`internal/cli/api.go`，用法见 `plan.md`“ir”）走同样的 `/v1/`：本机 socket 上和远端会话的 `ir`（`POST /v1/internal/cli`）也挂着 Satori。
 
+- Iridium 自己加的：`channel_id` 认 ID 开头和 `self`（`Resolver`，见 `api.md`“会话 ID”），`guild_id=self`；`message.create` 的 `_data.text` 代替 `content`（纯文字，这边转义），`_data.paths` 是主机上的文件（只认本机 socket 的 `ir`）。
+
 - 用哪个登录说话：`POST /v1/meta` 只回一个。主机的 `ir` 是 `local/local`；agent 的是它那一回合的登录（主机开的就是 `local/local`）；远端会话的 `ir` 也是那一回合的登录，不知道时用 `local/local` 的名义。
 - 能做什么不看这个名义，看真正的调用方（`Caller.Self`），和 `/v1/internal` 一样：远端会话的 `ir` 按那台电脑的权限（再交上那一回合登录的），agent 的消息总是插话，agent 的改名不盖人起的。
 - 标准方法照样要 `Satori-Platform`、`Satori-User-ID`，`ir` 按 meta 带上。

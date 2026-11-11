@@ -8,52 +8,25 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/satori"
 )
 
-// ir ws rename <group> <name>: a folder group renamed (the user, 2026-11-08: no workspaces to make
-// or delete; a group is the folder its sessions are in). ir api guild.list lists them; a group is
-// named by its id or its name.
-
-const wsUsage = "usage: ir ws rename <组> <新名>"
-
-func cmdWs(e *env, args []string) int {
-	o, err := parse(args, "")
-	if err != nil || len(o.pos) != 3 || o.pos[0] != "rename" {
-		return e.failf("%s", wsUsage)
-	}
-	id, err := e.workspace(o.pos[1])
-	if err != nil {
-		return e.fail(err)
-	}
-	if err := e.do("PATCH", "/v1/internal/workspaces/"+id, api.WorkspacePatch{Name: &o.pos[2]}, nil); err != nil {
-		return e.fail(err)
-	}
-	return exitDone
-}
-
-func tildeOf(path, home string) string {
-	if home != "" && (path == home || strings.HasPrefix(path, home+"/")) {
-		return "~" + strings.TrimPrefix(path, home)
-	}
-	return path
-}
-
-// workspace is the id of the group arg names, as guild.list has them: its id, else its name (any
-// case).
+// workspace is the id of the group arg names (ir new --workspace), as guild.list has them: its
+// id, else its name (any case).
 func (e *env) workspace(arg string) (string, error) {
-	raw, err := e.satori("guild.list", nil)
+	c := &apiCall{method: "POST", path: "/v1/guild.list", satori: true, body: map[string]any{}}
+	raw, err := e.call(c)
+	if err == nil {
+		raw, err = e.rest(c, raw)
+	}
 	if err != nil {
 		return "", err
 	}
-	gs, err := allPages(e, &apiCall{method: "guild.list", body: map[string]any{}}, raw, func(b []byte) ([]satori.Guild, string, error) {
-		var l satori.List[satori.Guild]
-		return l.Data, l.Next, json.Unmarshal(b, &l)
-	})
-	if err != nil {
+	var l satori.List[satori.Guild]
+	if err := json.Unmarshal(raw, &l); err != nil {
 		return "", err
 	}
+	gs := l.Data
 	gs = slices.DeleteFunc(gs, func(g satori.Guild) bool { return g.ID == satori.Loose })
 	for _, g := range gs {
 		if g.ID == arg {

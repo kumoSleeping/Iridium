@@ -27,15 +27,12 @@ func Main(args []string) int {
 
 // commands are ir's commands by name. Each gets its arguments after the name.
 var commands = map[string]func(e *env, args []string) int{
-	"api":    cmdAPI, // api.go: Satori with ir
+	"api":    cmdAPI, // api.go: the API as it is
 	"new":    cmdNew,
 	"share":  cmdShare, // share.go
 	"wait":   cmdWait,
-	"stop":   cmdStop,
 	"cp":     cmdCp,
-	"files":  cmdFiles,
 	"attach": cmdAttach, // files.go
-	"ws":     cmdWs,     // workspaces.go
 	"apps":   cmdApps,   // shell.go; at the host admin.go's
 	"sh":     cmdSh,
 }

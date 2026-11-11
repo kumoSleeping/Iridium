@@ -198,7 +198,7 @@ agent 的 `ir sh`：每条命令一个新进程，不经托管进程，不写文
 7. 一个 Go 写的参考执行端（`internal/remote/executor`），测试用；回放录制的假 dsh 在 `internal/testagent/dsh.go`。
 8. （已做）Claude 在执行端：驱动的 `Spawn` 按 `Remote` 走（系统提示文件写到那边），记录在那边的 `~/.claude/projects/` 用 `FindRemote` 找。只读那边的 `~/.claude`。项目目录名照 Claude 的规则（每个不是 ASCII 字母数字的 UTF-16 单元换成 `-`）；超过 200 的 Claude 会截断加哈希，这种找不到记录。没勾“本人的机器”的那台：新会话不列 Claude，接口也拒绝（403）。
 9. （已做，`internal/join`）`ir join <地址>`：二进制的执行端模式，复用 `internal/remote/executor`，配对、存 TOKEN、常驻（见“平台差异”）、找 agent（npm 的 `.cmd` 垫片解析成 `node` + 入口 js）。
-10. （已做）`ir cp`、`ir files` 认执行端的 `机器:路径`（`fs.read`/`fs.write`/`fs.list`），只给本机的 `ir`：读按 `MaxRead` 分块不限大小；写到那边是一次 `fs.write`，先限 4MB。`ir sh` 已做。
+10. （已做）`ir cp`、列目录（`GET /v1/internal/files?machine=`）认执行端的 `机器:路径`（`fs.read`/`fs.write`/`fs.list`），只给本机的 `ir`：读按 `MaxRead` 分块不限大小；写到那边是一次 `fs.write`，先限 4MB。`ir sh` 已做。
 11. （已做）执行端上的会话里 agent 调 `ir`，见“远端的 ir”。
 12. 任何 agent 都能在执行端跑（2026-11-08）：驱动不分本机和那边，程序取 `SpawnOptions.Command`（那边是握手的 `argv`），启动文件经 `LaunchFile`、系统提示经 `PromptFile`（那边写进 scratch）；agent 的不同只在注册表一行（`internal/agents`）：`FindRemote`（那边的记录在哪）、`HomeEnv`（握手给的家目录放进哪个变量）、`MinRemote`（最低版本）。已接：Claude、dsh、pi（已做，用 `scripts/dev/exec-mini.py` 在测试实例上实测：开会话、工具调用、记录镜像、执行端重启后续跑、停止）、Codex（2026-11-09，只有测试，实机待跑）。Codex 的家目录是那边的 `CODEX_HOME`，没有就 `~/.codex`；记录是 `sessions/YYYY/MM/DD/rollout-<那边本地时间>-<线程>.jsonl`，日期按那边的本地时间。线程 id 是 UUIDv7，前 48 位是毫秒时间：取它的 UTC 日期和前后各一天（任何时区的本地日期都在其中）三个目录，再看 `archived_sessions/`；不是 v7 的（旧版）从最新的日目录往回找，最多 400 个。没有线程（第一回合前）就没有记录；停了再开按线程 `thread/resume`。系统提示在这边读、经协议发过去，那边不写文件。测试：`internal/agents` 的 `TestCodexFindRemote`（三个日期、归档、旧 id、上限），`internal/session` 的 `TestRemoteCodex`（Go 参考执行端：用握手的 `argv` 和那边的 `CODEX_HOME` 启动、按线程找到记录并镜像；没有假的 Codex app-server，agent 是一个记下启动参数的 shell，回合没测）。
 13. 发现那边自己开的会话：dsh 的已做（见“远端 DSH”），不用执行端新增请求；Claude、pi 还没做。

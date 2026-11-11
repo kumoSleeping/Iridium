@@ -4,8 +4,6 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	"net/url"
-	"time"
 
 	"github.com/kumoSleeping/iridium/internal/api"
 )
@@ -92,36 +90,4 @@ func sizeOf(n int64) string {
 		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
 	}
 	return fmt.Sprintf("%.2f GB", float64(n)/(1<<30))
-}
-
-// ir files <dir>: one level, one entry a line: name, size, time, type.
-func cmdFiles(e *env, args []string) int {
-	o, err := parse(args, "")
-	if err != nil || len(o.pos) > 1 {
-		return e.failf("usage: ir files <目录>")
-	}
-	dir := "."
-	if len(o.pos) == 1 {
-		dir = o.pos[0]
-	}
-	machine, path, err := pathArg(dir)
-	if err != nil {
-		return e.fail(err)
-	}
-	q := query("path", path)
-	if machine != "" {
-		q += "&machine=" + url.QueryEscape(machine)
-	}
-	var l api.DirListing
-	if err := e.do("GET", "/v1/internal/files"+q, nil, &l); err != nil {
-		return e.fail(err)
-	}
-	for _, en := range l.Entries {
-		name := en.Name
-		if en.Type == "dir" {
-			name += "/"
-		}
-		fmt.Fprintf(e.out, "%s\t%d\t%s\t%s\n", name, en.Size, time.UnixMilli(en.Mtime).Format("2006-01-02 15:04"), en.Type)
-	}
-	return exitDone
 }

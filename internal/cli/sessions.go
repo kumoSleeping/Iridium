@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/kumoSleeping/iridium/internal/api"
-	"github.com/kumoSleeping/iridium/internal/place"
 )
 
 // Exit codes of wait (and new, send with --wait).
@@ -261,37 +260,6 @@ const (
 	replyLen  = 300
 )
 
-// turn is one message of yours and the agent's last words after it, before the next one.
-type turn struct{ asked, from, reply string }
-
-// turns are the page's messages with their final replies; words before the first message (a
-// page that starts in a turn) make one with nothing asked.
-func turns(blocks []api.Block) []turn {
-	var out []turn
-	for _, b := range blocks {
-		switch b.Kind {
-		case api.BlockKindUser:
-			out = append(out, turn{asked: b.Text, from: b.From})
-		case api.BlockKindAssistant:
-			if strings.TrimSpace(b.Text) == "" {
-				continue
-			}
-			if len(out) == 0 {
-				out = append(out, turn{})
-			}
-			out[len(out)-1].reply = b.Text
-		}
-	}
-	return out
-}
-
-func fromTag(from string) string {
-	if from == "" {
-		return ""
-	}
-	return "[" + from + "] "
-}
-
 // clip is text on one line, cut to n runes.
 func clip(text string, n int) string {
 	text = strings.Join(strings.Fields(text), " ")
@@ -299,78 +267,6 @@ func clip(text string, n int) string {
 		return string(r[:n]) + "…"
 	}
 	return text
-}
-
-// line is a session's line in ir api channel.list: id, agent, status, directory, name or title (a
-// subagent's marked, an archived one too).
-func line(s api.Session, ids []string, home string, machines map[string]string) string {
-	cwd := s.Cwd
-	if s.Machine == "" && home != "" && (cwd == home || strings.HasPrefix(cwd, home+"/")) {
-		cwd = "~" + strings.TrimPrefix(cwd, home)
-	}
-	cwd = place.Format(place.Place{App: s.Machine, Path: cwd}, func(id string) string { return machines[id] })
-	title := s.Name
-	if title == "" {
-		title = s.Title
-	}
-	if s.Subagent && s.Parent != "" {
-		title = "[子代理 ← " + short(s.Parent, ids) + "] " + title
-	} else if s.Subagent {
-		title = "[子代理] " + title
-	}
-	if s.Archived {
-		title = "[归档] " + title
-	}
-	return fmt.Sprintf("%s\t%s\t%s\t%s\t%s", short(s.ID, ids), s.Agent, s.Status, cwd, title)
-}
-
-// underParents is list with each subagent moved right after the session that started it, as
-// the sidebar puts it; one whose parent is not in list stays where it was.
-func underParents(list []api.Session) []api.Session {
-	in := make(map[string]bool, len(list))
-	for _, s := range list {
-		if !s.Subagent {
-			in[s.ID] = true
-		}
-	}
-	kids := map[string][]api.Session{}
-	for _, s := range list {
-		if s.Subagent && in[s.Parent] {
-			kids[s.Parent] = append(kids[s.Parent], s)
-		}
-	}
-	out := make([]api.Session, 0, len(list))
-	for _, s := range list {
-		if s.Subagent && in[s.Parent] {
-			continue
-		}
-		out = append(out, s)
-		out = append(out, kids[s.ID]...)
-	}
-	return out
-}
-
-func lastText(s api.Session) string {
-	if s.Last == nil {
-		return ""
-	}
-	return s.Last.Text
-}
-
-// ir stop <id>
-func cmdStop(e *env, args []string) int {
-	o, err := parse(args, "")
-	if err != nil || len(o.pos) != 1 {
-		return e.failf("usage: ir stop <id>")
-	}
-	id, err := e.resolve(o.pos[0])
-	if err != nil {
-		return e.fail(err)
-	}
-	if err := e.do("POST", "/v1/internal/sessions/"+id+"/stop", nil, nil); err != nil {
-		return e.fail(err)
-	}
-	return exitDone
 }
 
 // turnStatus is a session's status as a turn has it: waiting only on a step auto mode denied (its

@@ -17,7 +17,7 @@ func TestSendQueueAndSteer(t *testing.T) {
 	}
 	sid := strings.TrimSpace(r.out)
 	send := func(text string, more ...string) result {
-		return ir(append([]string{"api", "message.create", "channel_id=" + sid, "--text", text}, more...)...)
+		return ir(append([]string{"api", "message.create", "channel_id=" + sid, "_data.text=" + text}, more...)...)
 	}
 	if r := send("two", "--wait"); r.code != 0 || r.out != "ok: two\n" {
 		t.Errorf("steer: %+v", r)

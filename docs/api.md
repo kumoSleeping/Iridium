@@ -164,7 +164,7 @@ Iridium 自己的接口都在 `/v1/internal/` 下：Satori 规范的 internal �
 |---|---|---|
 | `POST /v1/internal/sessions/{id}/attach` | `{path}` → `FileRef` | 把本机文件当这个会话的附件（`ir api message.create -a`），不复制 |
 | `POST /v1/internal/links` | `{path}` → `FileLink` | 给本机文件一个文件链接（`ir attach`），见“文件链接” |
-| `GET /v1/internal/files?path=<目录>[&machine=<机器>]` | → `DirListing` | 列一层（`ir files`）；带 `machine` 是那台机器上的目录（它自己的写法，空是家目录） |
+| `GET /v1/internal/files?path=<目录>[&machine=<机器>]` | → `DirListing` | 列一层；带 `machine` 是那台机器上的目录（它自己的写法，空是家目录） |
 | `POST /v1/internal/files/copy` | `{from, to, fromMachine?, toMachine?}` → NDJSON | 拷文件（`ir cp`）：每 250ms 一行 `CopyProgress`，最后一行带 `path`、`sha256` 或 `error`。由 Iridium 拷，`ir` 断了也接着拷；同样的请求再来就接上。一边在别的机器（`fromMachine`、`toMachine`）时：不接续，写到那边的先限 4MB（413），目标已有文件 409 |
 | `POST /v1/internal/cli` | `CLIRun{args, cwd}` → NDJSON `CLIOutput` | 执行端上的会话里 agent 的 `ir`（只认会话 TOKEN，见 `docs/exec.md`“远端的 ir”）：这边照常跑这条 `ir`，算那台机器的 Bot、代表这个会话；输出按行流回（`out`、`err`），最后一行 `exit` |
 
@@ -180,8 +180,8 @@ Iridium 自己的接口都在 `/v1/internal/` 下：Satori 规范的 internal �
 - **路径检查**（`pathsafe.Guard`）：先解析符号链接（不存在的路径解析到最深的已有上层）再比允许的目录；写着的路径和解析后的都不能落在 Iridium 的状态和配置目录、`~/.ssh`、`~/.claude`（及 `CLAUDE_CONFIG_DIR`）、`~/.codex`（及 `CODEX_HOME`）、`~/.pi`、`~/.dsh`、`/proc` 里，状态目录的 `uploads/files` 例外。被拒是 403。
 ## `ir`（agent 用的部分）
 
-- 代码在 `internal/cli`；socket 用 `IRIDIUM_SOCKET`，没有就读配置（`IRIDIUM_CONFIG` 或默认位置）。会话、消息、文件夹组走 Satori（`ir api`，`docs/satori.md`“ir”，命令对应见 `plan.md`“ir”），其余走上面这套接口。
-- `<id>` 可只写开头（唯一即可）；`ir new` 和列表打印至少 8 位的短 ID。`ir api channel.list` 不列归档和子代理，`_data.all:=true` 都列，子代理排在父会话下面；`--grep <词>` 在 ID、名字、标题、目录、最后一句里找（每个词都要有，不分大小写），归档的标 `[归档]`。`message.list` 每条消息一行（截 80 字）加它的最终回复（截 300 字）。改名在会话里跑算 agent 起的（`byAgent`），见 `plan.md`“会话标题”。
+- 代码在 `internal/cli`；socket 用 `IRIDIUM_SOCKET`，没有就读配置（`IRIDIUM_CONFIG` 或默认位置）。`ir api` 原样透传（见 `plan.md`“ir”），接口说明在 `internal/irhelp/api.txt`。
+- 会话 ID（服务端认，2026-11-11）：`/v1/internal/sessions/{id}/…` 和 Satori 的 `channel_id` 可写 ID 的开头（唯一即可，不足 32 位才查），`self` 是调用者所在的会话（`X-Iridium-Session` 或会话 TOKEN；没有就 400）；`guild_id=self` 是它的组。几个会话同一个开头 400。改名在会话里跑算 agent 起的（`byAgent`），见 `plan.md`“会话标题”。
 - 输出给 agent 看：只打最后一段回复（`new --wait` 先一行 ID）；`cp` 一行 `路径 大小 sha256`；需要你时每个提问一行 `需要你：…`。进度只在 stderr 是终端时画。
 - `message.create`、`new` 不带 `--wait` 时等到 agent 接了这条消息（最多 15 秒）再返回，所以紧接着的 `ir wait` 等的是这一回合。
 - 回合在跑时发的话默认插进这一回合（和网页回车一样，2026-11-06 定）；`--wait` 等到这一回合结束，打印最后一段回复（可能还在说别的事）。`_data.steer:=false` 进待发队列（只对人在终端里跑的 ir 有效；agent 的总是插进，免得要人去点；2026-11-06）：不带 `--wait` 马上返回，带 `--wait` 等它发出去、再等它那一回合（队列暂停了就退出码 2）。agent 在等额度时插话也进队列。

@@ -213,7 +213,10 @@ describe("a shell call's sort", () => {
     expect(r("Bash", 'ir api channel.update channel_id=self data.name="会话 命名"')).toBe(true);
     expect(r("Bash", "ir api channel.update channel_id=1a2b data.name=x")).toBe(false);
     expect(r("Bash", "ir api channel.update channel_id=self data.name=x _data.archived:=true")).toBe(false);
-    expect(cmdOfCall({ name: "Bash", input: JSON.stringify({ command: "ir api message.create channel_id=1a2b --text hi" }) })).toBe("ir-send");
+    expect(cmdOfCall({ name: "Bash", input: JSON.stringify({ command: "ir api message.create channel_id=1a2b _data.text=hi" }) })).toBe("ir-send");
+    expect(cmdOfCall({ name: "Bash", input: JSON.stringify({ command: "ir api POST internal/sessions/1a2b/stop" }) })).toBe("ir-stop");
+    expect(cmdOfCall({ name: "Bash", input: JSON.stringify({ command: "ir api internal/files path==/tmp" }) })).toBe("ir-files");
+    expect(cmdOfCall({ name: "Bash", input: JSON.stringify({ command: "ir api PATCH internal/workspaces/3 name=x" }) })).toBe("ir-ws");
     expect(cmdOfCall({ name: "Bash", input: JSON.stringify({ command: "ir api channel.list --grep x" }) })).toBe("ir-find");
     expect(cmdOfCall({ name: "Bash", input: JSON.stringify({ command: "ir api channel.update channel_id=1a2b _data.archived:=false" }) })).toBe("ir-unarchive");
     expect(cmdOfCall({ name: "Bash", input: JSON.stringify({ command: "ir api message.list channel_id=1a2b" }) })).toBe("ir-read");
