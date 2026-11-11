@@ -13,14 +13,15 @@ export const drafts = new Set<(d: DraftEvent) => void>();
 export const opened = new Set<() => void>();
 
 let ws: WebSocket | null = null;
-let pinger: ReturnType<typeof setInterval> | undefined;
 let session: string | null = null;
 let retry: ReturnType<typeof setTimeout> | undefined;
 let soon: ReturnType<typeof setTimeout> | undefined;
 let started = false;
-/** When the stream last began opening, or the browser trying it again; how many round trips in a row failed. */
+/** When the stream last began opening, or the browser trying it again. */
 let since = 0;
-let missed = 0;
+/** When the PING waiting for its PONG went (null: none), and what gives up on it. */
+let pingAt: number | null = null;
+let late: ReturnType<typeof setTimeout> | undefined;
 
 const link = (l: Partial<Link>) => setCarried("link", { ...(getCarried<Link>("link") ?? { live: null, rtt: null }), ...l });
 
@@ -39,8 +40,10 @@ export const keysFor = (s: string | null) => [...ALWAYS, ...(s ? [`session:${s}`
 export const streamURL = () => `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/v1/events`;
 /** Satori's signals (protocol/events.md), and Iridium's own WATCH and STATE. */
 const OP = { event: 0, ping: 1, pong: 2, identify: 3, ready: 4, meta: 5, watch: 6, state: 7 } as const;
-/** How often the stream says it is there (Satori: every 10 seconds). */
-const PING = 10_000;
+/** How often the stream says it is there and the round trip is measured (Satori: a PING every 10
+ *  seconds); how long its PONG may take. */
+export const EVERY = 10_000;
+export const WAIT = 8_000;
 
 function onState(raw: string) {
   const e = JSON.parse(raw) as StateEvent;
@@ -53,9 +56,25 @@ function onState(raw: string) {
   setCarried(e.key, e.ignored ? null : e.value);
 }
 
+/** A PING on the open stream, one at a time; its PONG is the round trip, the top bar's dot. None
+ *  back within WAIT (a tunnel or a laptop's sleep that dropped it without a word): the stream is
+ *  taken as down and opened again. */
+function ping() {
+  const sock = ws;
+  if (!sock || sock.readyState !== WebSocket.OPEN || pingAt !== null) return;
+  pingAt = performance.now();
+  sock.send(JSON.stringify({ op: OP.ping }));
+  late = setTimeout(() => {
+    if (ws !== sock) return;
+    link({ live: false, rtt: null });
+    connect();
+  }, WAIT);
+}
+
 function connect() {
   clearTimeout(retry);
-  clearInterval(pinger);
+  clearTimeout(late);
+  pingAt = null;
   if (ws) {
     ws.onclose = null;
     ws.close();
@@ -66,16 +85,18 @@ function connect() {
   sock.onopen = () => {
     if (ws !== sock) return;
     sock.send(JSON.stringify({ op: OP.identify, body: { _watch: keysFor(session) } }));
-    pinger = setInterval(() => sock.readyState === WebSocket.OPEN && sock.send(JSON.stringify({ op: OP.ping })), PING);
   };
   sock.onmessage = (m) => {
     if (ws !== sock) return;
     const sig = JSON.parse(m.data as string) as { op: number; body?: { type?: string; data?: unknown } };
-    if (sig.op === OP.ready) {
-      missed = 0;
+    if (sig.op === OP.pong && pingAt !== null) {
+      link({ rtt: Math.round(performance.now() - pingAt) });
+      pingAt = null;
+      clearTimeout(late);
+    } else if (sig.op === OP.ready) {
       link({ live: true });
       opened.forEach((f) => f());
-      void measure();
+      ping();
     } else if (sig.op === OP.state && sig.body) {
       const raw = JSON.stringify(sig.body.data);
       if (sig.body.type === "state") onState(raw);
@@ -84,10 +105,12 @@ function connect() {
   };
   sock.onclose = () => {
     if (ws !== sock) return;
-    clearInterval(pinger);
+    clearTimeout(late);
+    pingAt = null;
     link({ live: false, rtt: null }); // back, it is measured afresh
     since = performance.now();
-    void api.health().catch(() => {}); // a 401 here takes the page to the login
+    // A browser does not say why an upgrade failed: one request finds a login that ran out (401).
+    void api.meta().catch(() => {});
     retry = setTimeout(connect, 3000);
   };
 }
@@ -112,49 +135,14 @@ export function follow(s: string | null) {
   soon = setTimeout(watch, 60);
 }
 
-/** How often the round trip is measured while the page is in front, and how long one may take. */
-export const EVERY = 10_000;
-export const WAIT = 8_000;
-
-let measuring: Promise<boolean> | undefined;
-/** The round trip of one small request, shown by the top bar's dot; whether it came back in time.
- *  One at a time: a request that hangs (a dead tunnel) is cut off at WAIT, not left to show the
- *  number from before. */
-export function measure(): Promise<boolean> {
-  return (measuring ??= (async () => {
-    const stop = new AbortController();
-    const cut = setTimeout(() => stop.abort(), WAIT);
-    const t = performance.now();
-    try {
-      // Not low priority: a request held back behind others is not the round trip.
-      await api.health({ signal: stop.signal });
-      link({ rtt: Math.round(performance.now() - t) });
-      return true;
-    } catch {
-      link({ rtt: null });
-      return false;
-    } finally {
-      clearTimeout(cut);
-      measuring = undefined;
-    }
-  })());
+/** One beat: a PING on the open stream (hidden too: it keeps the stream); a stream still opening
+ *  long after it began is opened again. */
+export function beat() {
+  if (!started) return;
+  if (ws?.readyState === WebSocket.OPEN) ping();
+  else if (ws?.readyState === WebSocket.CONNECTING && performance.now() - since > WAIT) connect();
 }
 
-/** One beat of the dot, while in front: the round trip again. A stream that looks open while two
- *  round trips in a row fail (a tunnel or a laptop's sleep that dropped it without a word) is taken
- *  as down and opened again; one still opening long after requests get through again is too. */
-export async function beat() {
-  if (!started || document.visibilityState !== "visible") return;
-  const live = getCarried<Link>("link")?.live;
-  const ok = await measure();
-  missed = ok ? 0 : missed + 1;
-  if (live && missed >= 2) {
-    missed = 0;
-    link({ live: false, rtt: null });
-    connect();
-  } else if (!live && ok && ws?.readyState !== WebSocket.OPEN && performance.now() - since > WAIT) connect();
-}
-
-// While in front, a beat every EVERY; back in front, at once.
-setInterval(() => void beat(), EVERY);
-document.addEventListener("visibilitychange", () => void beat());
+// A beat every EVERY; back in front, at once.
+setInterval(beat, EVERY);
+document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && beat());

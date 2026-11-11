@@ -140,9 +140,6 @@ func (s *Server) Close() {
 // Handler is the API. local: requests come from the unix socket, from the local ir.
 func (s *Server) Handler(local bool) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /v1/internal/health", func(w http.ResponseWriter, r *http.Request) {
-		reply(w, http.StatusOK, map[string]any{"ok": true})
-	})
 	mux.HandleFunc("GET /v1/internal/agents", func(w http.ResponseWriter, r *http.Request) {
 		l := agents.Describe()
 		for i := range l {

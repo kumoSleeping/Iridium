@@ -27,7 +27,6 @@ Iridium 自己的接口都在 `/v1/internal/` 下：Satori 规范的 internal �
 | `POST /v1/internal/sessions/{id}/answer` | `Answer` → `{ok}` | 回答提问：审批 `allow`（不许时可带 `message`；`always` 见“会话设置”）；选择题 `answers`（问题原文 → 选项 `label`）；计划确认 `allow` |
 | `POST /v1/internal/sessions/{id}/release` | `Release{toolUseId, dismiss?}` → `{ok}` | Claude auto 模式拦下一步后，临时切换至 manual（见“临时切换至 manual”）；`dismiss` 只拿掉它的卡。Claude 会话要有 Claude，agent 调用一律 403 |
 | `GET /v1/internal/agents` | → `AgentInfo[]` | 能开的 agent：审批模式（`modes`、`defaultMode`、`modeSwitch`：now / next turn / restart）、有没有上下文分项、有没有额度窗口、能不能开 ultracode（`ultracode`）、agent 起来之前会话就有的附加功能（`features`，按 id：Claude 是 `claude.ultracode`）、程序装没装（`missing`：PATH 上找不到；这时 `POST /v1/internal/sessions` 立刻 400，不等 agent 自更新那 30 秒，网页把它画淡，点了只提示未安装） |
-| `GET /v1/internal/health` | → `{ok}` | |
 | `GET /v1/internal/settings` | → `Settings` | 设置的配置项：空闲回收、崩溃续跑、额度续跑（这三项设置页不放，只改配置文件或经接口）、隐藏的额度条、各 agent 新会话的审批模式、推送总开关。管理权 |
 | `PUT /v1/internal/settings` | `SettingsPatch` → `Settings` | 只改给了的项，写进配置文件，马上生效。面板权 |
 

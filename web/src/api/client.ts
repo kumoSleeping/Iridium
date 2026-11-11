@@ -235,7 +235,8 @@ export const api = {
   answer: (id: string, a: CardAnswer) => write<CardReply>("POST", `${S(id)}/answer`, a),
   /** A step Claude's auto mode denied, run again (session/release.go). */
   release: (id: string, toolUseId: string, dismiss?: boolean) => write<{ ok: boolean }>("POST", `/v1/internal/sessions/${enc(id)}/release`, { toolUseId, dismiss } satisfies Release),
-  health: (init?: RequestInit) => get<{ ok: boolean }>("/v1/internal/health", init),
+  /** Satori's meta (advanced/meta.md): the page asks it only for its status, a 401 taking it to the login. */
+  meta: () => request("/v1/meta", { method: "POST" }),
   agents: () => get<AgentInfo[]>("/v1/internal/agents"),
 
   // --- workspaces, folders, the session overlay ---

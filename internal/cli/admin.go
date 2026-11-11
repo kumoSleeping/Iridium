@@ -714,7 +714,7 @@ func publicCmd(e adminEnv, args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	// The daemon sets public.origin at the end: make sure it is there before anything is made.
-	if _, err := e.call("GET", "/v1/internal/health", nil, nil); err != nil {
+	if _, err := e.call("GET", "/v1/internal/me", nil, nil); err != nil {
 		return failed(stderr, "public", err)
 	}
 	o, err := publicOptions(e, stdout)

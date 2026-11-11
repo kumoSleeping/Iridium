@@ -1,8 +1,12 @@
-// The top bar's dot against a mocked daemon and a fake WebSocket (Satori's /v1/events): the round trip measured again
-// at each beat, a drop that clears it, a request that hangs cut off, a stream that looks open but
-// is dead opened again. The tests follow on from each other, as the stream module is one per page.
+// The top bar's dot against a fake WebSocket (Satori's /v1/events): the round trip a PING's PONG,
+// measured as the stream opens and again at each beat; a drop that clears it and asks /v1/meta (a
+// login that ran out); a PONG that never comes, the stream opened again; a stream that hangs while
+// opening, opened again. The tests follow on from each other, as the stream module is one per page.
 import { describe, expect, test, vi } from "vitest";
 import { getCarried, type Link } from "../src/store";
+
+/** How the daemon answers a PING: after ms, or never. */
+let pong: { ms: number } | "hang" = { ms: 5 };
 
 class FakeWS {
   static CONNECTING = 0;
@@ -20,9 +24,15 @@ class FakeWS {
   }
   send(d: string) {
     this.sent.push(d);
+    if ((JSON.parse(d) as { op: number }).op === 1 && pong !== "hang") {
+      setTimeout(() => this.readyState === FakeWS.OPEN && this.onmessage?.({ data: '{"op":2,"body":{}}' }), pong.ms);
+    }
   }
   close() {
     this.readyState = FakeWS.CLOSED;
+  }
+  pings() {
+    return this.sent.filter((d) => (JSON.parse(d) as { op: number }).op === 1).length;
   }
   /** Opens, the page identifies, Iridium answers READY. */
   open() {
@@ -37,21 +47,17 @@ class FakeWS {
   }
 }
 
-/** How /api/health answers: after ms, or never (until cut off). */
-let health: { ms: number } | "hang" = { ms: 5 };
-let asked = 0;
+/** Every request the page made: method and path. */
+const asked: string[] = [];
 
 // Before the module loads, so its beat runs on these clocks.
 vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "performance", "Date"] });
 vi.stubGlobal("WebSocket", FakeWS);
-vi.stubGlobal("fetch", (_url: string, init: RequestInit = {}) => {
-  asked++;
-  return new Promise<Response>((ok, fail) => {
-    init.signal?.addEventListener("abort", () => fail(new DOMException("aborted", "AbortError")));
-    if (health !== "hang") setTimeout(() => ok(new Response('{"ok":true}', { status: 200 })), health.ms);
-  });
+vi.stubGlobal("fetch", (url: string, init: RequestInit = {}) => {
+  asked.push(`${init.method ?? "GET"} ${url}`);
+  return Promise.resolve(new Response('{"logins":[]}', { status: 200 }));
 });
-const { EVERY, WAIT, follow, measure } = await import("../src/stream");
+const { EVERY, WAIT, follow } = await import("../src/stream");
 
 const t0 = performance.now();
 
@@ -71,18 +77,20 @@ describe("link", () => {
     await wait(10);
     expect(link()).toEqual({ live: true, rtt: 5 });
 
-    health = { ms: 40 };
+    pong = { ms: 40 };
     await toBeat(100);
     expect(link()).toEqual({ live: true, rtt: 40 });
-    health = { ms: 7 };
+    pong = { ms: 7 };
     await toBeat(100);
     expect(link()).toEqual({ live: true, rtt: 7 });
+    expect(asked).toEqual([]); // no HTTP for any of it
 
     const es = last();
     expect(JSON.parse(es.sent[0]!)).toMatchObject({ op: 3, body: { _watch: expect.arrayContaining(["list"]) } });
     es.drop();
     expect(link()).toEqual({ live: false, rtt: null });
-    health = { ms: 12 };
+    expect(asked).toEqual(["POST /v1/meta"]); // a 401 would take the page to the login
+    pong = { ms: 12 };
     await wait(3000); // opened again
     expect(last()).not.toBe(es);
     last().open();
@@ -90,31 +98,28 @@ describe("link", () => {
     expect(link()).toEqual({ live: true, rtt: 12 });
   });
 
-  test("a request that hangs is cut off, one at a time; two in a row and the stream opens again", async () => {
+  test("a PONG that never comes: one PING at a time, and after WAIT the stream opens again", async () => {
     const es = last();
-    health = "hang";
-    const n = asked;
-    await toBeat(10); // its request hangs
-    void measure(); // the same request, not a second
-    expect(asked).toBe(n + 1);
-    await wait(WAIT);
-    expect(link()).toEqual({ live: true, rtt: null });
-    expect(last()).toBe(es);
+    pong = "hang";
+    const n = es.pings();
+    await toBeat(10); // its PING goes unanswered
+    expect(es.pings()).toBe(n + 1);
+    expect(link()).toEqual({ live: true, rtt: 12 });
 
-    await toBeat(WAIT + 10); // the next hangs too: taken as down, opened again
-    expect(asked).toBe(n + 2);
+    await wait(WAIT);
     expect(link()).toEqual({ live: false, rtt: null });
     expect(es.readyState).toBe(FakeWS.CLOSED);
+    expect(es.pings()).toBe(n + 1);
     const again = last();
     expect(again).not.toBe(es);
 
-    health = { ms: 9 };
+    pong = { ms: 9 };
     again.open();
     await wait(20);
     expect(link()).toEqual({ live: true, rtt: 9 });
   });
 
-  test("a stream still opening long after requests get through again is opened again", async () => {
+  test("a stream still opening long after it began is opened again", async () => {
     const es = last();
     await toBeat(EVERY - 5000);
     es.drop(); // dropped; the stream opened again never answers
