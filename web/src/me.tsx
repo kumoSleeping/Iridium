@@ -7,7 +7,7 @@ import { Laptop, Monitor, Moon, Sun } from "lucide-react";
 import { useEffect, type ReactNode } from "react";
 import type { Me } from "./api/types.gen";
 import { api, queryClient } from "./api/client";
-import { LOCAL_ME, useMe, useSettings } from "./data";
+import { LOCAL_ME, useMe, useSettings, useUpdate } from "./data";
 import { setLang, t, useLang, type Lang } from "./i18n";
 import { Avatar, cn, keep, kept, Tip } from "./ui";
 
@@ -21,11 +21,12 @@ export function initialTheme(): ThemePref {
 }
 
 /** Its avatar and name, the key to the 终端 panel (data-settings-key: the panel rises from it, app.tsx);
- *  a dot on the avatar while a newer release is out. code: the panel's code fetched, as a pointer
- *  comes near. */
+ *  a dot on the avatar while a newer release is out; the version at the key's right end (the user,
+ *  2026-11-11). code: the panel's code fetched, as a pointer comes near. */
 export function MeKey({ open, onOpen, dot, code }: { open: boolean; onOpen: () => void; dot?: boolean; code?: () => void }) {
   const me: Me = useMe().data ?? LOCAL_ME;
   const name = me.local ? t("me.local") : me.name;
+  const ver = useUpdate().data?.current;
   return (
     <Tip label={dot ? `${t("nav.me")} · ${t("settings.updateReady")}` : t("nav.me")} align="start">
       <button
@@ -41,7 +42,8 @@ export function MeKey({ open, onOpen, dot, code }: { open: boolean; onOpen: () =
           {me.local ? <LocalMark size={32} /> : <Avatar src={me.avatar} name={name} size={32} />}
           {dot && <span className="g-pop absolute -top-0.5 -right-0.5 size-2.5 rounded-full bg-err shadow-[0_0_0_1.5px_var(--paper)]" aria-hidden />}
         </span>
-        <span className="truncate text-md text-ink">{name}</span>
+        <span className="min-w-0 truncate text-md text-ink">{name}</span>
+        {ver && <span className="ml-auto shrink-0 pl-2 text-xs text-ink-3 tabular-nums">{ver}</span>}
       </button>
     </Tip>
   );
