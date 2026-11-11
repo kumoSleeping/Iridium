@@ -171,7 +171,7 @@ agent 的 `ir sh`：每条命令一个新进程，不经托管进程，不写文
 
 `scripts/dev/shell-bot.mjs`：开发者自己的 Mac 上测 `ir sh` 用的小脚本，不进发布包。它借用 dsh 插件的执行端，配对一次后只提供命令执行（`agentShell`，按 `shell` 开着算），不带 agent。这种 Bot 谁都能照协议写一个；不想写代码就用 `ir join <地址> --shell`，再在应用管理里把它带的 agent 全关掉，效果一样（`--no-agents` 已删，2026-11-11；旧常驻单元里还有的照收、不起作用）。
 
-`scripts/dev/exec-mini.py`：只用 Python 标准库（WebSocket 也是手写）的最小执行端，证明照协议就能接入：配对、握手报本机找到的 agent（默认 pi）、进程、文件、心跳、重连、`run`；默认只开自己的 agent，加 `--shell` 才执行命令。只有 401 才删 TOKEN 重新配对，403（带原因码）等一会儿再连。`python3 -I scripts/dev/exec-mini.py https://<Iridium> [名字] [agent…] [--shell]`。要带自己的 User-Agent：Cloudflare 拒 Python 默认的（1010）。
+`scripts/dev/exec-mini.py`：只用 Python 标准库（WebSocket 也是手写）的最小执行端，证明照协议就能接入：配对、握手报本机找到的 agent（默认 pi）、进程、文件、心跳、重连、`run`。可同时接多个 Iridium，配置在 `~/.iridium-exec-mini/config.json`：`add <地址> [--name] [--agents pi,…] [--shell] [--agent-shell]`、`on`/`off`/`rm <地址>`、`ls`；`run` 常驻，配置改了 2 秒内跟上，`off` 断开并结束那边起的进程。默认只开自己的 agent，加 `--shell` 才执行命令。只有 401 才删 TOKEN 重新配对，403（带原因码）等一会儿再连。单个前台：`python3 -I scripts/dev/exec-mini.py https://<Iridium> [名字] [agent…] [--shell]`。要带自己的 User-Agent：Cloudflare 拒 Python 默认的（1010）。
 
 ## dsh 插件
 
