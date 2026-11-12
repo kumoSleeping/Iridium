@@ -6,7 +6,7 @@
 // tokens: the figure, the bars, the order of the list all go by it. The figure's line under it has
 // the other measure, the turns and the cache's hit rate; under that the tokens' four parts, under
 // either measure, so switching moves nothing (no bar of them: the user, 2026-11-12). Below them a
-// line kept for what the page is narrowed to (a day, the logins in), as chips, scrolling sideways;
+// line kept for what the page is narrowed to (the harnesses, a day, the logins in), as chips, scrolling sideways;
 // the chart's switch at the figures' right, under the measure's. The chart is a bar a day stacked by login, each in its own
 // colour (its avatar's main colour, kept apart from the others': hues.ts), or a heat map of the
 // weekdays by hour in squares, the busiest hour over them, the range's days added up (none for 1 天: one day's
@@ -437,6 +437,20 @@ export function UsagePage() {
                 {/* What the page is narrowed to: a line kept for it, empty or not, so a chip coming
                     moves nothing; more than fit scroll sideways, with no bar (the user, 2026-11-12). */}
                 <div className="no-bar -mx-3 mt-1 flex h-6 items-center gap-1.5 overflow-x-auto px-3 text-xs tabular-nums">
+                  {/* The harnesses pressed out over the page: those left in, each its mark (the user,
+                      2026-11-12: a filter too). */}
+                  {hidden.size > 0 &&
+                    chip(
+                      "agents",
+                      harnesses.length === 1 ? t("usage.onlyName", { name: agentName(harnesses[0]!) }) : harnesses.map(agentName).join(" · "),
+                      () => (capture(), setHidden(new Set())),
+                      <span className="flex shrink-0 items-center gap-0.5">
+                        {harnesses.map((a) => (
+                          <Logo key={a} agent={a} size={11} />
+                        ))}
+                      </span>,
+                      "shrink-0",
+                    )}
                   {day && chip("day", dayLabel(day), () => setDay(null), undefined, "shrink-0")}
                   {!all &&
                     chip(
