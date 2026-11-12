@@ -808,7 +808,9 @@ function StacksSwap({ k, ...p }: StacksProps & { k: string }) {
   const [old, setOld] = useState<(StacksProps & { k: string }) | null>(null);
   const [fall, setFall] = useState(false);
   const prev = useRef<(StacksProps & { k: string }) | null>(null);
-  useEffect(() => {
+  // Before the paint: a passive effect let one frame go by with neither chart (the old gone, the
+  // new at nothing), a flash as the range changed (the user, 2026-11-12).
+  useLayoutEffect(() => {
     if (prev.current && prev.current.k !== k && !reduced()) {
       setOld(prev.current);
       setFall(false);
