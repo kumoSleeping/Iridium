@@ -781,18 +781,28 @@ function Stacks({ days, perDay, order, colors, on, name, sel, onSel, week, m, fa
                   className={cn("flex h-full min-w-0 flex-1 items-end justify-center outline-offset-1 transition-opacity duration-(--dur-2)", sel && !chosen ? "opacity-35 hover:opacity-60" : "hover:opacity-85")}
                 >
                   <span className={cn("flex w-full flex-col-reverse overflow-hidden rounded-t-[4px]", week ? "max-w-9" : "max-w-6")}>
-                    {stack.map((id) => {
-                      const x = day?.get(id);
-                      const h = risen && !fall && x && on(id) && max ? (m.value(x) / max) * room : 0;
-                      // A 1.5px gap over each part (its top border, see-through); none on a sliver.
-                      return (
-                        <span
-                          key={id}
-                          className={cn("block shrink-0 border-t-transparent bg-clip-content transition-[height,border-top-width]", fall ? "duration-(--dur-2) ease-(--ease-out)" : "duration-(--dur-3) ease-(--ease-out)")}
-                          style={{ height: h > 0 ? Math.max(2, h) : 0, borderTopWidth: h >= 6 ? 1.5 : 0, borderTopStyle: "solid", background: colors.get(id), backgroundClip: "content-box" } as CSSProperties}
-                        />
-                      );
-                    })}
+                    {(() => {
+                      const hs = stack.map((id) => {
+                        const x = day?.get(id);
+                        return risen && !fall && x && on(id) && max ? (m.value(x) / max) * room : 0;
+                      });
+                      return stack.map((id, j) => {
+                        const h = hs[j]!;
+                        // A 1.5px gap (its top border, see-through) between two parts each tall
+                        // enough to read as its own: a sliver sits flush on the one under it, the
+                        // bar's round top theirs together (the user, 2026-11-12: a gap under a
+                        // sliver left it a crooked cap). None over the top part.
+                        const next = hs.findIndex((v, i) => i > j && v > 0);
+                        const gap = h >= 6 && next >= 0 && hs[next]! >= 6;
+                        return (
+                          <span
+                            key={id}
+                            className={cn("block shrink-0 border-t-transparent bg-clip-content transition-[height,border-top-width]", fall ? "duration-(--dur-2) ease-(--ease-out)" : "duration-(--dur-3) ease-(--ease-out)")}
+                            style={{ height: h > 0 ? Math.max(2, h) : 0, borderTopWidth: gap ? 1.5 : 0, borderTopStyle: "solid", background: colors.get(id), backgroundClip: "content-box" } as CSSProperties}
+                          />
+                        );
+                      });
+                    })()}
                   </span>
                 </button>
               </Tip>
