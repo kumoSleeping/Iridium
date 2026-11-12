@@ -218,6 +218,7 @@ export const en: Dict = {
   "ctx.agents": "Subagents",
   "ctx.messages": "Messages",
   "ctx.reserve": "Compaction reserve",
+  "ctx.inUse": "Used",
   "ctx.free": "Free",
   "ctx.cacheHit": "Cache hits",
   "ctx.cacheRead": "Read from cache",

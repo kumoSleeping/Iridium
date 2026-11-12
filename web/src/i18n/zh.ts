@@ -218,6 +218,7 @@ export const zh = {
   "ctx.agents": "子 agent",
   "ctx.messages": "消息",
   "ctx.reserve": "压缩预留",
+  "ctx.inUse": "已用",
   "ctx.free": "空余",
   "ctx.cacheHit": "缓存命中",
   "ctx.cacheRead": "缓存读",

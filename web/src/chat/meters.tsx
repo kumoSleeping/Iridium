@@ -60,7 +60,7 @@ const TONE: Record<Exclude<CtxKind, "free" | "reserve">, string> = {
 const HATCH = "repeating-linear-gradient(135deg, var(--ink-4) 0 1.5px, transparent 1.5px 4px)";
 
 /** The parts in the bar's order: what is used, largest first, each in its category's colour; then
- *  the reserve, then free. */
+ *  the reserve, then free; with only a total, what is used and free. */
 type Part = { key: string; name: string; tokens: number; tone: string; ring?: boolean };
 export function ctxParts(c: Context): Part[] {
   const cats = c.categories ?? [];
@@ -69,6 +69,9 @@ export function ctxParts(c: Context): Part[] {
     const kind = ctxKind(x);
     return { key: x.id || x.name, name: ctxName(x), tokens: x.tokens, tone: TONE[kind === "free" || kind === "reserve" ? "other" : kind] };
   });
+  // Only a total (the agent tells no categories): what is used, one part, so the bar is there
+  // all the same (the user, 2026-11-12).
+  if (!parts.length && c.used > 0) parts.push({ key: "used", name: t("ctx.inUse"), tokens: c.used, tone: "var(--ink-2)" });
   for (const x of cats.filter((x) => x.kind === "buffer" && x.tokens > 0)) parts.push({ key: x.id || x.name, name: ctxName(x), tokens: x.tokens, tone: HATCH, ring: true });
   const free = cats.find((x) => x.kind === "free");
   const freeTokens = free?.tokens ?? (c.max ? Math.max(0, c.max - c.used - parts.filter((p) => p.ring).reduce((n, p) => n + p.tokens, 0)) : 0);

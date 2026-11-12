@@ -502,8 +502,11 @@ describe("context parts", () => {
     ]);
     expect(p.slice(0, 2).map((x) => x.tone)).toEqual(["var(--series-1)", "var(--series-3)"]);
   });
-  test("only a total: free is the rest", () => {
-    expect(ctxParts({ used: 300, max: 1000, at: 0 }).map((x) => [x.key, x.tokens])).toEqual([["free", 700]]);
+  test("only a total: used, and free the rest", () => {
+    expect(ctxParts({ used: 300, max: 1000, at: 0 }).map((x) => [x.key, x.tokens])).toEqual([
+      ["used", 300],
+      ["free", 700],
+    ]);
   });
 });
 
