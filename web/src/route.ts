@@ -81,12 +81,26 @@ export const route = () => current;
 export type At = { x: number; y: number; end?: boolean };
 let usageAt: At | null = null;
 export const usagePoint = () => usageAt;
+/** The computer the usage was asked for at (a session's there: an executor's app ID), "" everyone's. */
+let usageMachine = "";
+const machineSubs = new Set<() => void>();
+export const setUsageMachine = (m = "") => {
+  if (m === usageMachine) return;
+  usageMachine = m;
+  machineSubs.forEach((f) => f());
+};
+export const useUsageMachine = () =>
+  useSyncExternalStore(
+    (f) => (machineSubs.add(f), () => void machineSubs.delete(f)),
+    () => usageMachine,
+  );
 /** The usage: with the sidebar shown a panel at the point it was asked from, as a row's menu
  *  (app.tsx, the user, 2026-11-08); on a phone the sheet's 用量 page. Asked twice (a long press,
- *  then its contextmenu): once. */
-export function openUsage(at?: At) {
+ *  then its contextmenu): once. machine: a session's at another computer asks for that one's. */
+export function openUsage(at?: At, machine?: string) {
   if (current.name === "usage") return;
   usageAt = at ?? null;
+  setUsageMachine(machine);
   go({ name: "usage" }, over(current));
 }
 /** The settings and the terminals: a dialog over the chat, not a page of their own. */

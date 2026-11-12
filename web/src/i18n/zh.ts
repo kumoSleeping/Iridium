@@ -607,6 +607,8 @@ export const zh = {
   "usage.onlyName": "只看 {name}",
   "usage.onlyHint": "右键只看这个",
   "usage.model": "模型",
+  "usage.models": "模型明细",
+  "usage.modelsOf": "{name} 的模型",
   "usage.colHit": "命中",
   "toast.undo": "撤销",
   "note.title": "便签",

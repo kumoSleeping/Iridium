@@ -370,8 +370,8 @@ export const api = {
   /** PUT /v1/internal/pairing: the pairing window opened for minutes (10 by default) or closed. */
   pairing: (open: boolean, minutes?: number) => write<PairWindow>("PUT", "/v1/internal/pairing", { open, ...(minutes ? { minutes } : {}) } satisfies PairWindow),
 
-  /** GET /v1/internal/usage: the last days' tokens by day, app, agent and model; terminal: one app only; by hour: the last 24 hours'; by weekhour: by weekday and hour. */
-  usage: (days: number, terminal?: string, by?: "hour" | "weekhour") => get<Usage>(`/v1/internal/usage?days=${days}${terminal ? `&app=${enc(terminal)}` : ""}${by ? `&by=${by}` : ""}`),
+  /** GET /v1/internal/usage: the last days' tokens by day, app, agent and model; terminal: one app only; by hour: the last 24 hours'; by weekhour: by weekday and hour; machine: only the sessions at that computer (an executor's app ID). */
+  usage: (days: number, terminal?: string, by?: "hour" | "weekhour", machine?: string) => get<Usage>(`/v1/internal/usage?days=${days}${terminal ? `&app=${enc(terminal)}` : ""}${by ? `&by=${by}` : ""}${machine ? `&machine=${enc(machine)}` : ""}`),
   confirms: () => get<Needs>("/v1/internal/needs"),
   /** extra: a secret-set's value, a secret-use's "this session". */
   /** A share put away by the login it was for. */

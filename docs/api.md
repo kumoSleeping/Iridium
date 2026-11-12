@@ -321,7 +321,7 @@ Web Push，总开关在配置 `push`，默认关。VAPID 密钥存在状态目�
 | `PUT /v1/internal/apps/{id}/logins/{login}/perms` | `Perms` → `Perms` | 登录能用的（网页的登录 `id` 写 `ir_web`），在应用的之内起作用 |
 | `PUT /v1/internal/me/perms` | `Perms` | 应用申请改权限：一条 `app_change` 需要 |
 | `POST /v1/internal/invites` | `NewInvite` → `Invite` | 网页的一次性邀请（10 分钟），先要公网地址。`claude: true` 加入的登录带 Claude。agent 调的回 202 `Pending` |
-| `GET /v1/internal/usage?days=N&terminal=<ID、名字或 me>` | → `Usage` | 按日期、应用或登录、agent、模型合计的用量（`by=hour`、`by=weekhour` 同前）。看别人的要管理权 |
+| `GET /v1/internal/usage?days=N&terminal=<ID、名字或 me>` | → `Usage` | 按日期、应用或登录、agent、模型合计的用量（`by=hour`、`by=weekhour` 同前）；`machine=<应用>` 只算在那台电脑上的会话（页面从别的电脑上的会话打开用量时用）。看别人的要管理权 |
 
 ## 配对
 

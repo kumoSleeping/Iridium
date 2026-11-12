@@ -380,7 +380,7 @@ function Bar({ s, onSheet, onMe, spots, asked }: { s?: Session; onSheet?: () => 
   // The usage under ⋯, its right edge on ⋯'s, as the menu was (the user, 2026-11-08).
   const usageHere = () => {
     const b = more.current?.getBoundingClientRect();
-    openUsage(b && { x: b.right, y: b.bottom + 6, end: true });
+    openUsage(b && { x: b.right, y: b.bottom + 6, end: true }, s?.machine);
   };
   // ⋯'s items: making, the sheet and 我 on a phone, usage; then the session's own.
   const lead = [{ icon: <Plus size={15} />, label: t("menu.new"), run: () => requestAnimationFrame(() => setMaking(true)) }, ...(onSheet ? [{ icon: <ListTree size={15} />, label: t("nav.sidebar"), run: onSheet }] : []), ...(onMe ? [{ icon: <Settings size={15} />, label: t("nav.me"), run: onMe }] : []), { icon: <BarChart3 size={15} />, label: t("usage.title"), run: usageHere }];

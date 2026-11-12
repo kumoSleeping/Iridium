@@ -1,22 +1,26 @@
 // The usage (plan "用量"): the tokens the turns used and what they cost, by day, login, agent and
 // model (GET /v1/internal/usage). One page (#/settings/usage, from the settings), one chart for
-// everyone (the user, 2026-11-08). Its measure (the user, 2026-11-10) is the cost at first (the
-// agent's own, else the model's maker's list price: the server's), or the tokens: the figure, the
-// bars, the order of the list and their parts all go by it. The figure's line under it has the
-// other measure, the turns and the cache's hit rate; the tokens have their four parts in a bar
-// under it. Below them a line of its own: what the page is narrowed to (a day, the logins in), as
-// chips; the chart's switch sits by the measure's, above. The chart is a bar a day stacked by login, each in its
-// own colour, or a heat map of the weekdays by hour, the range's days added up (none for 1 天: one
-// day's hours are the bars). Under it the logins, the most first, each its bar in its colour: its
-// avatar (in its colour) takes it out of the chart and the total or puts it back; right-clicked or
-// held (phones) it is the only one left in (again: everyone); the row opens its models, each with
-// its cache's hit rate, tokens and cost. 全选 over the list and the chip put everyone back. A bar
-// pressed narrows the page to that day. With one login in, the bars are its models. Over it all,
-// the harnesses (the user, 2026-11-08): all four at first; pressed, one leaves the whole page or
-// comes back, and the last one taken out puts all four back.
+// everyone (the user, 2026-11-08); asked for at a session at another computer, that computer's
+// sessions only, its name by the title (the user, 2026-11-12). Its measure (the user, 2026-11-10)
+// is the cost at first (the agent's own, else the model's maker's list price: the server's), or the
+// tokens: the figure, the bars, the order of the list all go by it. The figure's line under it has
+// the other measure, the turns and the cache's hit rate; under that the tokens' four parts, under
+// either measure, so switching moves nothing (no bar of them: the user, 2026-11-12). Below them a
+// line of its own: what the page is narrowed to (a day, the logins in), as chips; the chart's
+// switch sits by the measure's, above. The chart is a bar a day stacked by login, each in its own
+// colour (its avatar's main colour, kept apart from the others': hues.ts), or a heat map of the
+// weekdays by hour filling the chart's height, the range's days added up (none for 1 天: one day's
+// hours are the bars). Under it the logins, the most first, each its bar in its colour: the row
+// pressed takes it out of the chart and the total or puts it back; right-clicked or held (phones)
+// it is the only one left in (again: everyone); the key at its right opens its models in a panel
+// over the page, each with its cache's hit rate, tokens and cost. 全选 over the list and the chip
+// put everyone back. A bar pressed narrows the page to that day. With one login in, the bars are
+// its models. Over it all, the harnesses (the user, 2026-11-08): all four at first; pressed, one
+// leaves the whole page or comes back, and the last one taken out puts all four back.
+import { Popover } from "@base-ui/react/popover";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, CircleHelp, LoaderCircle, UserX, X } from "lucide-react";
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent, type ReactNode } from "react";
 import { api } from "./api/client";
 import type { Agent, Usage, UsageRow } from "./api/types.gen";
 import { hitRate } from "./chat/meters";
@@ -24,7 +28,10 @@ import { t, useLang } from "./i18n";
 import { LocalMark } from "./me";
 import { motion, reduced } from "./motion";
 import { errText } from "./toast";
-import { agentName, AGENTS, Avatar, cn, keep, kept, Logo, Tip, tokens } from "./ui";
+import { hueColor, useHues } from "./hues";
+import { useMachines } from "./data";
+import { useUsageMachine } from "./route";
+import { agentName, AGENTS, Avatar, cn, keep, kept, Logo, PopSurface, Tip, tokens } from "./ui";
 
 export const dollars = (n: number) => (n >= 1000 ? `$${Math.round(n).toLocaleString("en-US")}` : n >= 100 ? `$${Math.round(n)}` : `$${n.toFixed(2)}`);
 
@@ -32,10 +39,10 @@ export const dollars = (n: number) => (n >= 1000 ? `$${Math.round(n).toLocaleStr
 const RANGES = [1, 7, 30] as const;
 
 /** The last days' usage. The last answer stays while another range loads. */
-const usageQ = (days: number) => ({ queryKey: ["usage", days], queryFn: () => api.usage(days, undefined, days === 1 ? "hour" : undefined), staleTime: 30_000 });
-const useUsage = (days: number) => useQuery({ ...usageQ(days), placeholderData: keepPreviousData });
+const usageQ = (days: number, machine = "") => ({ queryKey: ["usage", days, machine], queryFn: () => api.usage(days, undefined, days === 1 ? "hour" : undefined, machine || undefined), staleTime: 30_000 });
+const useUsage = (days: number, machine: string) => useQuery({ ...usageQ(days, machine), placeholderData: keepPreviousData });
 /** The last days' usage by weekday and hour: the heat map's. */
-const heatQ = (days: number) => ({ queryKey: ["usage", days, "weekhour"], queryFn: () => api.usage(days, undefined, "weekhour"), staleTime: 30_000 });
+const heatQ = (days: number, machine = "") => ({ queryKey: ["usage", days, machine, "weekhour"], queryFn: () => api.usage(days, undefined, "weekhour", machine || undefined), staleTime: 30_000 });
 const rangeName = (days: number) => (days === 1 ? t("usage.last24h") : t("usage.lastDays", { n: days }));
 
 type Sum = { turns: number; input: number; output: number; cacheRead: number; cacheWrite: number; cost: number };
@@ -157,15 +164,15 @@ const fnv = (s: string) => {
   return h >>> 0;
 };
 
-/** Each login's colour (the user, 2026-11-08), from its ID alone so it is the same on every
- *  device and range: the slot its ID hashes to, else the next free one, the IDs taken in order.
- *  Past eight, or who is not known: grey. */
+/** A login's models' colours (the logins' are their avatars', hues.ts), from their keys alone so
+ *  they are the same on every device and range: the slot a key hashes to, else the next free one,
+ *  the keys taken in order. Past eight, hues spread round the circle: never grey. */
 function paint(ids: string[]): Map<string, string> {
   const out = new Map<string, string>();
   const used = new Set<number>();
-  for (const id of [...ids].sort()) {
-    if (!id || used.size >= SLOTS) {
-      out.set(id, "var(--ink-4)");
+  for (const [n, id] of [...ids].sort().entries()) {
+    if (used.size >= SLOTS) {
+      out.set(id, hueColor((fnv(id) % 360) + n * 137.5));
       continue;
     }
     let i = fnv(id) % SLOTS;
@@ -273,31 +280,33 @@ export function UsagePage() {
   const [off, setOff] = useState<ReadonlySet<string>>(() => new Set());
   // The harnesses taken out of the whole page; none at first.
   const [hidden, setHidden] = useState<ReadonlySet<Agent>>(() => new Set());
-  // The logins whose models are open.
-  const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
-  const q = useUsage(days);
+  // Asked for at a session at another computer: that computer's sessions only, its name by the title.
+  const machine = useUsageMachine();
+  const at = useMachines().find((x) => x.id === machine);
+  const q = useUsage(days, machine);
   const u = q.data;
   const m = MEASURES[metric];
   // The range of what is shown: a range chosen shows only once its figures came, the page changing
   // all at once, the bars rising (the user, 2026-11-08: not half the old and half the new).
   const range = u ? (hourly(u.days[0] ?? "") ? 1 : u.days.length) : days;
   const heat = view === "heat" && range > 1;
-  const hq = useQuery({ ...heatQ(range), enabled: heat, placeholderData: keepPreviousData });
+  const hq = useQuery({ ...heatQ(range, machine), enabled: heat, placeholderData: keepPreviousData });
   // The other ranges asked for once this one is in: chosen, they are at hand.
   const qc = useQueryClient();
   const came = !!u;
   useEffect(() => {
     if (!came) return;
     const id = setTimeout(() => {
-      RANGES.forEach((n) => void qc.prefetchQuery(usageQ(n)));
-      if (view === "heat") RANGES.forEach((n) => n > 1 && void qc.prefetchQuery(heatQ(n)));
+      RANGES.forEach((n) => void qc.prefetchQuery(usageQ(n, machine)));
+      if (view === "heat") RANGES.forEach((n) => n > 1 && void qc.prefetchQuery(heatQ(n, machine)));
     }, 300);
     return () => clearTimeout(id);
-  }, [came, qc, view]);
+  }, [came, qc, view, machine]);
   const rows = useMemo(() => (u?.rows ?? []).filter((r) => !hidden.has(r.agent)), [u, hidden]);
   const s = useMemo(() => summarize(rows, day, m.value), [rows, day, m]);
-  // Colours from every login in the range, so a harness taken out recolours no one.
-  const ids = useMemo(() => [...new Set((u?.rows ?? []).map((r) => r.terminal))].join("\u0000"), [u]);
+  // Colours from every login in the range, so a harness taken out recolours no one: each its
+  // avatar's, apart from the others' (hues.ts).
+  const ids = useMemo(() => [...new Set((u?.rows ?? []).map((r) => r.terminal))].map((id) => [id, u?.terminals[id]?.avatar] as [string, string | undefined]), [u]);
   // The rows in the measure's order: reordered, each slides from where it was to where it is.
   const listRef = useRef<HTMLElement>(null);
   const spots = useRef(new Map<string, number>());
@@ -327,7 +336,7 @@ export function UsagePage() {
     spots.current = new Map(rows.map((r) => [r.dataset.row!, r.getBoundingClientRect().top]));
     orderKey.current = rows.map((r) => r.dataset.row).join(",");
   };
-  const colors = useMemo(() => paint(ids ? ids.split("\u0000") : []), [ids]);
+  const colors = useHues(ids);
   const harnesses = AGENTS.filter((a) => !hidden.has(a));
   const toggleHarness = (a: Agent) =>
     setHidden(harnesses.length === 1 && !hidden.has(a) ? new Set() : (o) => {
@@ -356,12 +365,6 @@ export function UsagePage() {
     if (!n.delete(id)) n.add(id);
     return n;
   });
-  const flip = (id: string) =>
-    setOpen((o) => {
-      const n = new Set(o);
-      if (!n.delete(id)) n.add(id);
-      return n;
-    });
   const sum = zero();
   for (const x of s.byLogin) if (on(x.id)) add(sum, x.sum);
   const whole = s.byLogin.reduce((a, x) => a + m.value(x.sum), 0);
@@ -379,7 +382,10 @@ export function UsagePage() {
   return (
     <div className="flex h-full flex-col">
       <header className="flex h-10.5 shrink-0 items-center gap-1 px-3 pt-1.5">
-        <h1 className="m-0 min-w-0 flex-1 truncate text-base font-semibold">{t("usage.title")}</h1>
+        <h1 className="m-0 min-w-0 flex-1 truncate text-base font-semibold">
+          {t("usage.title")}
+          {machine && <span className="font-normal text-ink-3"> · {at?.name ?? machine}</span>}
+        </h1>
         {/* Only once it has been a moment: a quick answer shows no spinner flashing. */}
         {(q.isFetching || (heat && hq.isFetching)) && u && <span className="g-fade mr-1.5 grid [animation-delay:200ms]"><LoaderCircle size={14} className="animate-spin text-ink-4" /></span>}
       </header>
@@ -438,7 +444,8 @@ export function UsagePage() {
                       "max-w-[9rem]",
                     )}
                 </div>
-                {metric === "tokens" && <Mix sum={sum} />}
+                {/* Under either measure: switched, the page keeps its height. */}
+                <Mix sum={sum} />
               </div>
             ) : (
               <div aria-hidden className="g-wait">
@@ -448,16 +455,11 @@ export function UsagePage() {
                 <div className="mt-0.5 flex h-6 items-center">
                   <span className="block h-2.5 w-40 rounded-full bg-fill" />
                 </div>
-                {metric === "tokens" && (
-                  <div className="mt-2 flex flex-col gap-1.5">
-                    <span className="block h-1.5 rounded-full bg-fill" />
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
-                      {[0, 1, 2, 3].map((i) => (
-                        <span key={i} className="block h-4 rounded-full bg-fill" />
-                      ))}
-                    </div>
-                  </div>
-                )}
+                <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-0.5">
+                  {[0, 1, 2, 3].map((i) => (
+                    <span key={i} className="block h-4 rounded-full bg-fill" />
+                  ))}
+                </div>
               </div>
             )}
             <div className="flex flex-col gap-1">
@@ -502,11 +504,9 @@ export function UsagePage() {
                 whole={whole}
                 on={on(x.id)}
                 many={many}
-                open={open.has(x.id)}
                 metric={metric}
                 onToggle={() => toggle(x.id)}
                 onOnly={() => only(x.id)}
-                onOpen={() => flip(x.id)}
               />
             ))}
           </section>
@@ -689,14 +689,11 @@ const MIX = [
   { key: "usage.output", of: (s: Sum) => s.output, tone: "var(--ink)" },
 ] as const;
 
-/** The tokens' four parts: a bar of them, the cache's reads first, and each one's figure. */
+/** The tokens' four parts, the cache's reads first, each one's figure (no bar of them: the user,
+ *  2026-11-12). */
 function Mix({ sum }: { sum: Sum }) {
-  const all = totalOf(sum);
   return (
-    <div className="g-fade mt-2 flex flex-col gap-1.5 tabular-nums">
-      <div className="flex h-1.5 gap-0.5 overflow-hidden rounded-full bg-fill" aria-hidden>
-        {all > 0 && MIX.map((p) => (p.of(sum) > 0 ? <span key={p.key} className="block h-full min-w-0.5 transition-[flex-grow] duration-(--dur-3) ease-(--ease-out)" style={{ flexGrow: p.of(sum) / all, background: p.tone }} /> : null))}
-      </div>
+    <div className="g-fade mt-2 tabular-nums">
       <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-xs text-ink-3">
         {MIX.map((p) => (
           <span key={p.key} className="flex min-w-0 items-center gap-1.5">
@@ -889,8 +886,10 @@ function Heat({ u, hidden, off, m, color }: { u: Usage | undefined; hidden: Read
   const c = at !== null ? cells[at] : undefined;
   return (
     <div className="g-fade flex flex-col gap-1">
-      <div role="group" aria-label={t("usage.heat")} className={cn("flex flex-col justify-end border-b border-fill-2 pb-1", !u && "g-wait")} style={{ height: CHART_H }} onPointerLeave={(e) => e.pointerType === "mouse" && setAt(null)}>
-        <div className="grid grid-cols-[1rem_1fr] gap-1.5">
+      {/* The squares fill the chart's height (the user, 2026-11-12: no room left empty over them):
+          a little taller than wide in a narrow panel. */}
+      <div role="group" aria-label={t("usage.heat")} className={cn("flex flex-col border-b border-fill-2 pb-1", !u && "g-wait")} style={{ height: CHART_H }} onPointerLeave={(e) => e.pointerType === "mouse" && setAt(null)}>
+        <div className="grid min-h-0 flex-1 grid-cols-[1rem_1fr] gap-1.5">
           <div className="grid grid-rows-7 gap-[3px] text-[10px] leading-none text-ink-4">
             {[1, 2, 3, 4, 5, 6, 7].map((wd) => (
               <span key={wd} className="flex items-center justify-end">
@@ -898,7 +897,7 @@ function Heat({ u, hidden, off, m, color }: { u: Usage | undefined; hidden: Read
               </span>
             ))}
           </div>
-          <div className="grid grid-cols-24 gap-[3px]">
+          <div className="grid grid-cols-24 grid-rows-7 gap-[3px]">
             {values.map((v, i) => (
               <button
                 key={i}
@@ -907,7 +906,7 @@ function Heat({ u, hidden, off, m, color }: { u: Usage | undefined; hidden: Read
                 aria-hidden
                 onPointerEnter={(e) => e.pointerType === "mouse" && setAt(i)}
                 onClick={() => setAt(at === i ? null : i)}
-                className={cn("aspect-square w-full rounded-[3px] transition-[background-color] duration-(--dur-3) ease-(--ease-out)", at === i && "outline-[1.5px] outline-offset-0 outline-ink outline-solid")}
+                className={cn("size-full rounded-[3px] transition-[background-color] duration-(--dur-3) ease-(--ease-out)", at === i && "outline-[1.5px] outline-offset-0 outline-ink outline-solid")}
                 style={{ background: shade(level(v)) }}
               />
             ))}
@@ -962,48 +961,6 @@ function Hit({ s }: { s: Sum }) {
   return <span style={h < LOW_HIT ? { color: "var(--need)" } : undefined}>{hitRate(s)}</span>;
 }
 
-/** The row's hit rate, with its models: it rises in as the first one lands and goes as the box
- *  closes (a figure that came and went at once read as a jump). */
-function HitTag({ open, hit, sep }: { open: boolean; hit: string; sep: boolean }) {
-  const [shown, setShown] = useState(open);
-  const [leaving, setLeaving] = useState(false);
-  const ref = useRef<HTMLSpanElement>(null);
-  useEffect(() => {
-    if (open) {
-      setShown(true);
-      setLeaving(false);
-      return;
-    }
-    if (!shown) return;
-    setLeaving(true);
-    const t = setTimeout(() => {
-      setShown(false);
-      setLeaving(false);
-    }, motion.dur(1));
-    return () => clearTimeout(t);
-  }, [open, shown]);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el || reduced()) return;
-    // Drawn out from the price's side to the left: the text is clipped at its left, so it shows
-    // from its right end (by the price) leftwards, sliding a little as it comes.
-    const a = el.animate(
-      leaving
-        ? [{ clipPath: "inset(0 0 0 0)", transform: "none" }, { clipPath: "inset(0 0 0 100%)", transform: "translateX(4px)" }]
-        : [{ clipPath: "inset(0 0 0 100%)", transform: "translateX(4px)" }, { clipPath: "inset(0 0 0 0)", transform: "none" }],
-      { duration: leaving ? motion.dur(1) : motion.dur(3), easing: motion.ease(leaving ? "in" : "out"), fill: "forwards" },
-    );
-    return () => a.cancel();
-  }, [leaving, shown]);
-  if (!shown || !hit) return null;
-  return (
-    <span ref={ref} className="inline-block">
-      {t("usage.hitShort", { n: hit })}
-      {sep ? " · " : ""}
-    </span>
-  );
-}
-
 /** The figure: another measure is another figure, so it comes again rather than glide. */
 function Figure({ text, k }: { text: string; k: string }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -1038,160 +995,95 @@ function ShareBar({ share, color }: { share: number; color: string }) {
   return <span ref={ref} className="block h-full rounded-full" style={{ width: `${share}%`, background: color }} />;
 }
 
-/** A login: its avatar tinted in its colour (pressed, out of the chart or back; right-clicked or
- *  held, the only one in), its name, the other measure and the measure, its part of everyone's in
- *  its colour. The row pressed opens its models: each one's hit rate, tokens and cost. */
-function LoginRow({ x, u, color, whole, on, many, open, metric, onToggle, onOnly, onOpen }: { x: LoginSum; u: Usage | undefined; color: string; whole: number; on: boolean; many: boolean; open: boolean; metric: Metric; onToggle: () => void; onOnly: () => void; onOpen: () => void }) {
+/** A login: its avatar, its name, the other measure and the measure, its part of everyone's in its
+ *  colour. The row pressed takes it out of the chart or puts it back; right-clicked or held, it is
+ *  the only one in (the user, 2026-11-12: as before its models folded open under it). Its models
+ *  are behind the key at its right, in a panel over the page (no row grows). */
+function LoginRow({ x, u, color, whole, on, many, metric, onToggle, onOnly }: { x: LoginSum; u: Usage | undefined; color: string; whole: number; on: boolean; many: boolean; metric: Metric; onToggle: () => void; onOnly: () => void }) {
   const w = who(u, x.id);
   const v = MEASURES[metric].value(x.sum);
   const cost = x.sum.cost > 0 ? dollars(x.sum.cost) : "";
   const main = metric === "cost" ? cost || "—" : tokens(totalOf(x.sum));
   const second = metric === "cost" ? tokens(totalOf(x.sum)) : cost;
-  const hit = hitRate(x.sum);
-  const avatarHold = useHold(onToggle, onOnly);
-  const detailId = useId();
-  const detail = useRef<HTMLDivElement>(null);
-  const first = useRef(true);
-  // Its height is animated by script (the chat's fold): a CSS grid-row transition does not move
-  // in every browser, and reduced motion goes straight there. Opened, the box makes room while its
-  // models land one after another, from the first (the user, 2026-11-11); closed, the box and what
-  // is in it go together.
-  useLayoutEffect(() => {
-    const el = detail.current;
-    if (!el) return;
-    if (first.current) {
-      first.current = false;
-      el.style.height = open ? "auto" : "0px";
-      el.style.opacity = open ? "1" : "0";
-      return;
-    }
-    if (reduced()) {
-      el.style.height = open ? "auto" : "0px";
-      el.style.opacity = open ? "1" : "0";
-      return;
-    }
-    const h = open ? el.scrollHeight : el.offsetHeight;
-    const from = open ? 0 : h;
-    const to = open ? h : 0;
-    el.style.height = `${from}px`;
-    el.style.opacity = "1";
-    const a = el.animate(
-      open
-        ? [{ height: `${from}px` }, { height: `${to}px` }]
-        : [
-            { height: `${from}px`, opacity: 1 },
-            { height: `${to}px`, opacity: 0 },
-          ],
-      { duration: motion.dur(3), easing: motion.ease("out"), fill: "forwards" },
-    );
-    // A model's cells are the grid's own items, behind a wrapper of "contents": moved together,
-    // they are its line. Each line comes a step after the one above it, the first at once.
-    const pops: Animation[] = [];
-    if (open) {
-      const lines = [...el.querySelectorAll("[data-model]")].map((r) => [...r.children] as HTMLElement[]);
-      lines.forEach((cells, i) => {
-        for (const c of cells) {
-          pops.push(
-            c.animate([{ opacity: 0, transform: "translateY(-4px)" }, { opacity: 1, transform: "none" }], {
-              duration: motion.dur(2),
-              easing: motion.ease("spring"),
-              delay: 40 + Math.min(i, 6) * 40,
-              fill: "backwards",
-            }),
-          );
-        }
-      });
-    }
-    void a.finished
-      .then(() => {
-        el.style.height = open ? "auto" : "0px";
-        el.style.opacity = open ? "1" : "0";
-        a.cancel();
-      })
-      .catch(() => {});
-    return () => {
-      a.cancel();
-      for (const p of pops) p.cancel();
-    };
-  }, [open]);
-  // Its colour as a tint of the avatar, not a ring.
-  const mark = (
-    <span className="grid size-8 shrink-0 place-items-center rounded-full">
-      {w.mark(26, color)}
-    </span>
+  const hold = useHold(onToggle, onOnly);
+  const body = (
+    <>
+      <span className="grid size-8 shrink-0 place-items-center">{w.mark(26, color)}</span>
+      <span className="flex min-w-0 flex-1 flex-col py-0.5">
+        <span className="flex w-full items-baseline gap-2">
+          <span className={cn("min-w-0 flex-1 truncate text-sm font-medium transition-opacity duration-(--dur-2)", !on && "opacity-45")}>{w.name}</span>
+          {!on && <span className="shrink-0 rounded-full bg-fill-2 px-1.5 text-[10px] leading-4 text-ink-3">{t("usage.outOfChart")}</span>}
+          <span className={cn("shrink-0 text-xs text-ink-3 tabular-nums transition-opacity duration-(--dur-2)", !on && "opacity-45")}>{second}</span>
+          <span className={cn("shrink-0 text-sm font-semibold tabular-nums transition-opacity duration-(--dur-2)", !on && "opacity-45")}>{main}</span>
+        </span>
+        <span className="mt-1.5 block h-1 w-full overflow-hidden rounded-full bg-fill" aria-hidden>
+          <ShareBar share={whole && v ? Math.max(1, (v / whole) * 100) : 0} color={color} />
+        </span>
+      </span>
+    </>
   );
   return (
-    <div data-row={x.id} className={cn("g-fade -mx-1.5 flex flex-col rounded-md px-1.5 transition-colors duration-(--dur-2)", open && "bg-fill")}>
-      <div className="flex min-w-0 items-center gap-2.5 py-1.5">
-        {many ? (
-          <Tip
-            label={
-              <span className="flex flex-col gap-0.5">
-                <span>{on ? t("usage.out") : t("usage.in")}</span>
-                <span className="text-[11px] text-ink-3">{t("usage.onlyHint")}</span>
-              </span>
-            }
-          >
-            <button type="button" aria-pressed={on} aria-label={w.name} {...avatarHold} className={cn("g-press shrink-0 rounded-full outline-offset-2 hover:bg-fill-2", PRESS)}>
-              {mark}
-            </button>
-          </Tip>
-        ) : (
-          mark
-        )}
-        <button
-          type="button"
-          aria-expanded={open}
-          aria-controls={detailId}
-          onClick={onOpen}
-          onContextMenu={(e) => e.preventDefault()}
-          className={cn("g-press flex min-w-0 flex-1 flex-col py-0.5 text-left outline-offset-2", PRESS)}
+    <div data-row={x.id} className="g-fade -mx-1.5 flex min-w-0 items-center gap-1">
+      {many ? (
+        <Tip
+          label={
+            <span className="flex flex-col gap-0.5">
+              <span>{on ? t("usage.out") : t("usage.in")}</span>
+              <span className="text-[11px] text-ink-3">{t("usage.onlyHint")}</span>
+            </span>
+          }
         >
-          <span className="flex w-full items-baseline gap-2">
-            <span className={cn("min-w-0 flex-1 truncate text-sm font-medium transition-opacity duration-(--dur-2)", !on && "opacity-45")}>{w.name}</span>
-            {!on && <span className="shrink-0 rounded-full bg-fill-2 px-1.5 text-[10px] leading-4 text-ink-3">{t("usage.outOfChart")}</span>}
-            <span className={cn("shrink-0 text-xs text-ink-3 tabular-nums transition-opacity duration-(--dur-2)", !on && "opacity-45")}>
-              <HitTag open={open} hit={hit} sep={!!second} />
-              {second}
-            </span>
-            <span className={cn("shrink-0 text-sm font-semibold tabular-nums transition-opacity duration-(--dur-2)", !on && "opacity-45")}>{main}</span>
-          </span>
-          <span className="mt-1.5 flex w-full items-center gap-2">
-            <span className={cn("block h-1 min-w-0 flex-1 overflow-hidden rounded-full", open ? "bg-fill-2" : "bg-fill")} aria-hidden>
-              <ShareBar share={whole && v ? Math.max(1, (v / whole) * 100) : 0} color={color} />
-            </span>
-            <ChevronRight size={12} aria-hidden className={cn("shrink-0 text-ink-4 transition-transform duration-(--dur-2)", open && "rotate-90", !on && "opacity-45")} />
-          </span>
-        </button>
-      </div>
-      <div
-        ref={detail}
-        id={detailId}
-        aria-hidden={!open || undefined}
-        inert={!open || undefined}
-        className="overflow-hidden"
-      >
-        <div className="pb-2 ml-[2.625rem] grid grid-cols-[0.875rem_minmax(0,1fr)_auto_auto_auto] items-center gap-x-2.5 gap-y-1 text-xs tabular-nums">
+          <button type="button" aria-pressed={on} aria-label={w.name} {...hold} className={cn("g-press flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-1.5 py-1.5 text-left outline-offset-1 transition-colors duration-(--dur-2) hover:bg-fill", PRESS)}>
+            {body}
+          </button>
+        </Tip>
+      ) : (
+        <div className="flex min-w-0 flex-1 items-center gap-2.5 px-1.5 py-1.5">{body}</div>
+      )}
+      <Models x={x} name={w.name} mark={w.mark(20, color)} />
+    </div>
+  );
+}
+
+/** A login's models, in a panel by the key at its row's right: each one's hit rate, tokens and
+ *  cost, and the login's own over them. */
+function Models({ x, name, mark }: { x: LoginSum; name: string; mark: ReactNode }) {
+  const hit = hitRate(x.sum);
+  const cost = x.sum.cost > 0 ? dollars(x.sum.cost) : "";
+  return (
+    <Popover.Root>
+      <Tip label={t("usage.models")}>
+        <Popover.Trigger
+          aria-label={t("usage.modelsOf", { name })}
+          className="g-press mr-0.5 grid size-7 shrink-0 place-items-center rounded-full text-ink-3 transition-colors duration-(--dur-2) hover:bg-fill hover:text-ink data-[popup-open]:bg-fill data-[popup-open]:text-ink pointer-coarse:size-9"
+        >
+          <ChevronRight size={14} />
+        </Popover.Trigger>
+      </Tip>
+      <PopSurface side="right" align="start" sideOffset={6} className="w-[min(320px,calc(100vw-16px))] p-3">
+        <div className="flex min-w-0 items-center gap-2 pb-2">
+          {mark}
+          <span className="min-w-0 flex-1 truncate text-sm font-medium">{name}</span>
+          <span className="shrink-0 text-xs text-ink-3 tabular-nums">{[hit && t("usage.hitShort", { n: hit }), tokens(totalOf(x.sum)), cost].filter(Boolean).join(" · ")}</span>
+        </div>
+        <div className="grid grid-cols-[0.875rem_minmax(0,1fr)_auto_auto_auto] items-center gap-x-2.5 gap-y-1 text-xs tabular-nums">
           <span />
           <span className="text-[11px] text-ink-4">{t("usage.model")}</span>
           <span className="text-right text-[11px] text-ink-4">{t("usage.colHit")}</span>
           <span className="text-right text-[11px] text-ink-4">{t("usage.tokensMetric")}</span>
           <span className="text-right text-[11px] text-ink-4">{t("usage.cost")}</span>
           {x.models.map((md) => (
-            // One line, its cells the grid's own: the wrapper is only the handle the fold moves.
-            <div key={md.key} data-model className="contents">
-              <ModelLine md={md} />
-            </div>
+            <ModelLine key={md.key} md={md} />
           ))}
         </div>
-      </div>
-    </div>
+      </PopSurface>
+    </Popover.Root>
   );
 }
 
 function ModelLine({ md }: { md: ModelSum }) {
   return (
-    <>
+    <div className="contents">
       <Logo agent={md.agent} size={13} />
       <span className="min-w-0 truncate text-ink-2" title={md.model}>
         {prettyModel(md.model, md.agent)}
@@ -1201,6 +1093,6 @@ function ModelLine({ md }: { md: ModelSum }) {
       </span>
       <span className="text-right text-ink-3">{tokens(totalOf(md.sum))}</span>
       <span className="text-right text-ink-2">{md.sum.cost > 0 ? dollars(md.sum.cost) : "—"}</span>
-    </>
+    </div>
   );
 }

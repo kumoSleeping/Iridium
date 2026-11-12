@@ -247,6 +247,16 @@ func (m *Manager) get(id string) (*Hosted, error) {
 	return h, nil
 }
 
+// MachineOf is hosted session id's computer: its executor's app ID, "" here; ok false for a
+// session Iridium does not host.
+func (m *Manager) MachineOf(id string) (machine string, ok bool) {
+	h, err := m.get(id)
+	if err != nil {
+		return "", false
+	}
+	return h.meta.Machine, true
+}
+
 // TurnFrom is who began hosted session id's latest turn: the terminal, and the session whose agent
 // sent the message that began it, if one did. ok is false for a session Iridium does not host, or
 // one with no turn yet.

@@ -18,7 +18,7 @@ import { t, useLang } from "./i18n";
 import { applyTheme, initialTheme, keepTheme, MeKey, useTellLang, type ThemePref } from "./me";
 import { motion, pageTurn } from "./motion";
 import { prefetch } from "./prefetch";
-import { close, go, onTurn, openChat, over, quietDialog, route, usagePoint, useRoute, type Route } from "./route";
+import { close, go, onTurn, openChat, over, quietDialog, route, setUsageMachine, usagePoint, useRoute, type Route } from "./route";
 import { Pager, TABS_H } from "./pager";
 import { atLeft, atRight, GRIP, Sheet } from "./sheet";
 import { HeadKeys, Sidebar } from "./sidebar";
@@ -201,7 +201,7 @@ export function App() {
   // A tab, or a swipe across: the sheet stays out, the back key going back to the sessions.
   // 终端 the left page, as a swipe up from the left brings it; the sessions the right (the user, 2026-11-08);
   // the usage between them (the user, 2026-11-08).
-  const toPage = (i: number) => (setSheetOut(true), i >= 2 && setNotesPage(i === 3), i === 0 ? go({ name: "settings" }, route().name === "usage") : i === 1 ? go({ name: "usage" }, over(route())) : over(route()) && close(under));
+  const toPage = (i: number) => (setSheetOut(true), i >= 2 && setNotesPage(i === 3), i === 0 ? go({ name: "settings" }, route().name === "usage") : i === 1 ? (setUsageMachine(), go({ name: "usage" }, over(route()))) : over(route()) && close(under));
   // Put away, the panel is drawn afresh once it is down: its first page, not renaming.
   const [setsRound, setSetsRound] = useState(0);
   useEffect(() => {

@@ -184,7 +184,7 @@ export function QuotaBars({ agent, machine, live, using, open, onOpenChange }: {
   const toUsage = (at?: { x: number; y: number }) => {
     const b = key.current?.getBoundingClientRect();
     onOpenChange?.(false);
-    openUsage(at ?? (b && { x: b.left, y: b.top - 8 }));
+    openUsage(at ?? (b && { x: b.left, y: b.top - 8 }), machine);
   };
   const lp = useLongPress(() => toUsage());
   const hold = { ...lp, onContextMenu: (e: MouseEvent) => (e.preventDefault(), toUsage({ x: e.clientX, y: e.clientY })) };

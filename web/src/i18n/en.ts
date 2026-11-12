@@ -607,6 +607,8 @@ export const en: Dict = {
   "usage.onlyName": "Only {name}",
   "usage.onlyHint": "Right-click: only this",
   "usage.model": "Model",
+  "usage.models": "Models",
+  "usage.modelsOf": "{name}'s models",
   "usage.colHit": "Hits",
   "toast.undo": "Undo",
   "note.title": "Notes",

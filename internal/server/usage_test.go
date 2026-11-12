@@ -103,6 +103,13 @@ func TestUsage(t *testing.T) {
 	l.want(403, bot, "GET", "/v1/internal/usage?terminal=local", nil, nil)
 	l.want(422, "socket", "GET", "/v1/internal/usage?app=nobody", nil, nil)
 	l.want(400, "socket", "GET", "/v1/internal/usage?days=0", nil, nil)
+	// At a computer: only its sessions' turns; none of these sessions is hosted at bot's.
+	var at api.Usage
+	l.want(200, "socket", "GET", "/v1/internal/usage?machine=bot", nil, &at)
+	if len(at.Rows) != 0 {
+		t.Fatalf("at bot's computer: %+v", at.Rows)
+	}
+	l.want(422, "socket", "GET", "/v1/internal/usage?machine=nobody", nil, nil)
 }
 
 // A row the agent gave no cost (or 0) is priced at its maker's list price; one it priced keeps it.

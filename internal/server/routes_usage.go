@@ -18,6 +18,8 @@ const maxUsageDays = 366
 // days' (7 by default) usage by day, app, agent and model; by=hour: the last 24 hours' by hour, its days
 // "2006-01-02T15" (the 1 天 view, the user, 2026-11-08); by=weekhour: the N days' by weekday and
 // hour, the rows' days "1T14" (Monday, 14:00; 7 is Sunday; the heat map, the user, 2026-11-10).
+// machine=<app ID or name>: only the turns of the sessions at that computer (an executor; a
+// session's usage key at another computer asks for its own, the user, 2026-11-12).
 // A row the agent gave no cost is priced at its maker's list price (s.Prices; the user, 2026-11-10). Without an app it is everyone's for those who
 // manage (ir_web's logins, the host), else the caller's own; another's only for those who manage.
 func (s *Server) usage(w http.ResponseWriter, r *http.Request) {
@@ -55,6 +57,24 @@ func (s *Server) usage(w http.ResponseWriter, r *http.Request) {
 		}
 		only = []string{info.ID}
 	}
+	var keep func(string) bool
+	if ref := r.URL.Query().Get("machine"); ref != "" {
+		info, ok := s.gate().Find(ref)
+		if !ok {
+			refuse(w, http.StatusUnprocessableEntity, "no_such_app", "no such app")
+			return
+		}
+		at := map[string]bool{}
+		keep = func(id string) bool {
+			v, seen := at[id]
+			if !seen {
+				mid, ok := s.m.MachineOf(id)
+				v = ok && mid == info.ID
+				at[id] = v
+			}
+			return v
+		}
+	}
 	now := time.Now()
 	y, m, d := now.Date()
 	n, step, format := days, func(i int) time.Time { return time.Date(y, m, d-days+1+i, 0, 0, 0, 0, time.Local) }, time.DateOnly
@@ -77,7 +97,7 @@ func (s *Server) usage(w http.ResponseWriter, r *http.Request) {
 	if s.Prices != nil {
 		price = s.Prices.Cost
 	}
-	got, err := s.st.UsageBy(step(0).UnixMilli(), bucket, price, only...)
+	got, err := s.st.UsageBy(step(0).UnixMilli(), bucket, price, keep, only...)
 	if err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
