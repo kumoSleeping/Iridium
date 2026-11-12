@@ -53,11 +53,19 @@ func Glance(path string, sources Sources) (Glimpse, error) {
 			return true
 		}
 		var l struct {
-			Cwd         string `json:"cwd"`
-			IsSidechain bool   `json:"isSidechain"`
-			SessionID   string `json:"sessionId"`
+			Type            string `json:"type"`
+			Cwd             string `json:"cwd"`
+			IsSidechain     bool   `json:"isSidechain"`
+			SessionID       string `json:"sessionId"`
+			ParentSessionID string `json:"parentSessionId"`
 		}
 		if json.Unmarshal(raw, &l) != nil {
+			return true
+		}
+		// A fork (the Agent tool's subagent_type "fork") opens on a reference to its parent's
+		// history, not a message: a subagent of that parent all the same.
+		if first && l.Type == "fork-context-ref" {
+			g.Sidechain, g.Parent = true, l.ParentSessionID
 			return true
 		}
 		if first && l.IsSidechain {

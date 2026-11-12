@@ -14,26 +14,21 @@ import (
 )
 
 // The needs queue beyond the applications (k_glossary "需要"; draft 二「消息」): every session's
-// open asks (questions, approvals, plans) for the logins that may use the session, and what was
-// shared with a login of ir_web (share.go). The carried state "needs" holds them all; each stream
-// and GET /v1/internal/needs gets what its caller may see (needsFor): the applications for a person on
-// ir_web or at the host, as before; an ask for whoever may use its session; a share for its login.
+// open asks (questions, approvals, plans) for the logins that may use the session. The carried
+// state "needs" holds them all; each stream and GET /v1/internal/needs gets what its caller may see
+// (needsFor): the applications for a person on ir_web or at the host, as before; an ask for
+// whoever may use its session.
 
-// ShareTTL is how long a share waits in its login's needs.
-const ShareTTL = 24 * time.Hour
-
-// moreNeeds are the needs kept beside the applications: shares and when each ask was first seen.
+// moreNeeds are the needs kept beside the applications: when each ask was first seen.
 type moreNeeds struct {
 	mu      sync.Mutex
-	shares  []api.Need
 	askSeen map[string]int64 // an ask's card: when it was first seen (ms)
 }
 
-// wireNeeds carries the sessions' asks and the shares in "needs", published again as asks open
-// and close.
+// wireNeeds carries the sessions' asks in "needs", published again as asks open and close.
 func (s *Server) wireNeeds() {
 	s.more = &moreNeeds{askSeen: map[string]int64{}}
-	s.asks.more = func() []api.Need { return append(s.askNeeds(), s.more.live()...) }
+	s.asks.more = s.askNeeds
 	s.m.Watch(func(n session.Notice) {
 		switch n.Kind {
 		case session.NoticeAsk, session.NoticeAskDone, session.NoticeStatus, session.NoticeTurnEnd, session.NoticeError:
@@ -69,42 +64,6 @@ func (s *Server) askNeeds() []api.Need {
 	return out
 }
 
-// live is the shares not expired.
-func (m *moreNeeds) live() []api.Need {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	now := time.Now().UnixMilli()
-	out := m.shares[:0:0]
-	keep := m.shares[:0]
-	for _, n := range m.shares {
-		if now < n.ExpiresAt {
-			keep = append(keep, n)
-			out = append(out, n)
-		}
-	}
-	m.shares = keep
-	return out
-}
-
-func (m *moreNeeds) addShare(n api.Need) {
-	m.mu.Lock()
-	m.shares = append(m.shares, n)
-	m.mu.Unlock()
-}
-
-// dropShare puts away share id of login to; false if it has none such.
-func (m *moreNeeds) dropShare(id, to string) bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for i, n := range m.shares {
-		if n.ID == id && n.To == to {
-			m.shares = append(m.shares[:i], m.shares[i+1:]...)
-			return true
-		}
-	}
-	return false
-}
-
 // mayUse reports whether c may use session st (answer it, send to it): using's checks.
 func (s *Server) mayUse(c caller, st api.Session) bool {
 	if c.Host() {
@@ -117,7 +76,7 @@ func (s *Server) mayUse(c caller, st api.Session) bool {
 }
 
 // needsFor is what of l caller c sees: applications for a person on ir_web or at the host, asks of
-// the sessions it may use, what was shared with it.
+// the sessions it may use.
 func (s *Server) needsFor(c caller, l []api.Need) []api.Need {
 	out := make([]api.Need, 0, len(l))
 	for _, n := range l {
@@ -128,10 +87,6 @@ func (s *Server) needsFor(c caller, l []api.Need) []api.Need {
 				continue
 			}
 			if st, err := s.m.State(n.Session); err == nil && s.mayUse(c, st.Session) {
-				out = append(out, n)
-			}
-		case api.NeedShare:
-			if c.Web() && n.To == c.Login {
 				out = append(out, n)
 			}
 		default:
@@ -174,15 +129,4 @@ func (s *Server) listNeeds(w http.ResponseWriter, r *http.Request) {
 	n := s.asks.everything()
 	n.Pending = s.needsFor(c, n.Pending)
 	reply(w, http.StatusOK, n)
-}
-
-// dropNeed is DELETE /v1/internal/needs/{id}: a share put away by its login.
-func (s *Server) dropNeed(w http.ResponseWriter, r *http.Request) {
-	c := callerOf(r)
-	if !c.Web() || !s.more.dropShare(r.PathValue("id"), c.Login) {
-		refuse(w, http.StatusUnprocessableEntity, "no_such_share", "no such share")
-		return
-	}
-	s.asks.publish()
-	reply(w, http.StatusOK, map[string]any{"ok": true})
 }

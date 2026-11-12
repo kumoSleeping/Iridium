@@ -66,7 +66,7 @@
 
 照规范的 internal 路由（advanced/internal.md）：Iridium 自己的接口全在 `/v1/internal/<路径>`（`docs/api.md`），给 Satori 没有的东西：工具块、待发队列、模型和模式、文件夹组、设置、应用管理……带了 `Satori-Platform`、`Satori-User-ID` 就必须是调用者自己的。主机的 `ir` 经 unix socket 走同样的路径。网页只用这里和标准方法。
 
-`message.create` 多收一个 `_data`：`{steer?, attachments?, caller?}`（插话还是排队、上传好的引用），回答的 Message 也带 `_data`，是发送的结果（`api.SendReply`：`input`、`queued`、`session`、`command`、`desktop`）。应用发的一律插话。
+`message.create` 多收一个 `_data`：`{steer?, attachments?, caller?, id?}`（插话还是排队、上传好的引用；`id` 是发送方自己定的消息 ID，小写 UUID，同一个 `id` 再发不会写第二遍，回答它当时的结果，丢了回答可以放心重发，网页每条都带），回答的 Message 也带 `_data`，是发送的结果（`api.SendReply`：`input`、`queued`、`session`、`command`、`desktop`）。应用发的一律插话。
 
 ## WebSocket `/v1/events`
 
@@ -91,7 +91,6 @@
 | `interaction/button` | 某个登录按了按钮 | — |
 | `channel-added` / `channel-updated` / `channel-removed` | 会话出现、改名或换组、归档或消失（看得见它的登录） | — |
 | `login-added` / `login-removed` | 本应用的登录被批准、被移除（发给本应用的连接；网页的连接只收自己的） | — |
-| `internal`（`_type: ir.share`） | 有人分享给这个登录（`docs/api.md` 分享）；只发给它 | `share`，`_data.share` 是 `Share` |
 
 `_type` 固定 `iridium`，`_data.origin` 是发起这个回合的应用或网页登录（知道时）。agent 说的话能在记录里找到时，`message.id` 就是块的位置；找不到时是 `live:…`，只能在 24 小时内用 `message.get` 取。
 
@@ -104,7 +103,7 @@
 
 ## 元素
 
-收发都用 Satori 元素（`internal/satori/elements.go`）。Iridium 发：文字、`<img>`/`<file>`（`internal:` 地址）、`<button>`、`<p>`、`<b>`。会话用 `<sharp>`，位置和文件用 `<a>`，不用 `<at>`（会真的提醒人）；收到的 `<at>` 只当文字。
+收发都用 Satori 元素（`internal/satori/elements.go`）。Iridium 发：文字、`<img>`/`<file>`（`internal:` 地址）、`<button>`、`<p>`、`<b>`。会话用 `<sharp>`，位置和文件用 `<a>`，不用 `<at>`（会真的提醒人）；收到的 `<at>` 只当文字，收到的 `<sharp>` 转成网页的写法 `[名字](ir:session/<id>)`（2026-11-12，`plan.md`“@”）。
 
 ## 和规范不一样的地方
 

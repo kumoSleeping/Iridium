@@ -21,12 +21,12 @@ export const compactSent = (s: Sent) => /^\/compact(\s|$)/.test(s.text.trim());
 
 /** Those sent not yet in the transcript: each finds its own among the user blocks written since it
  *  was sent, by its input id, else by its words; a /compact, the compaction written since. A
- *  failed one stays. */
+ *  failed one stays, unless its block came after all (only the answer was lost): by its id alone. */
 export function unsent(sent: Sent[], blocks: Block[]): Sent[] {
   let past = 0;
   return sent.filter((s) => {
     s.from = Math.max(s.from, past);
-    if (s.failed !== undefined) return true;
+    if (s.failed !== undefined) return !(s.input && blocks.some((b) => b.kind === "user" && b.id === s.input));
     if (compactSent(s)) return !blocks.some((b) => b.kind === "system" && b.event === "compact" && lineOf(b) >= s.from);
     const b = blocks.find((b) => b.kind === "user" && ((s.input && b.id === s.input) || (lineOf(b) >= s.from && b.text !== undefined && s.text && b.text.trim().startsWith(s.text.trim().slice(0, 200)))));
     if (!b) return true;
@@ -114,7 +114,7 @@ export class Messages {
     for (;;) {
       const from = this.end;
       const p = await this.get(this.id, { after: from });
-      if (p.end <= this.end) return;
+      if (p.end <= this.end) return this.recheck();
       // Two fetches may ask from the same place: each block goes in once.
       const added = p.blocks.filter((b) => lineOf(b) >= this.end);
       this.blocks = [...this.blocks, ...added];
@@ -149,6 +149,14 @@ export class Messages {
     }
     this.sent = unsent(this.sent, this.blocks);
     this.version++;
+  }
+
+  /** What was sent, checked again against the blocks it has: an answer (the input id) that came
+   *  after its block, a turn that ended with nothing new to fetch. */
+  recheck() {
+    const n = this.sent.length;
+    this.sent = unsent(this.sent, this.blocks);
+    if (this.sent.length !== n) this.version++;
   }
 
   /** The blocks the session's state carries (SessionState.tail, with the files they name), when
@@ -309,6 +317,9 @@ export function chatOf(id: string): Chat {
 
 export const peekChat = (id: string) => kept.get(id) ?? (early?.id === id ? early.it : undefined) ?? warm.get(id)?.it;
 export const keptChats = () => [...kept.values()];
+
+/** Sessions this page made, till their chat first draws its keys (chat/chat.tsx Under). */
+export const born = new Set<string>();
 
 /** Whether the browser asks to save data: then nothing is fetched ahead. */
 export const mayPrefetch = (nav: Navigator = navigator) => !(nav as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData;

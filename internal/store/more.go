@@ -19,6 +19,20 @@ func (s *Store) DeleteInput(id string) error {
 	return s.one(`DELETE FROM inputs WHERE id = ? AND state != 'sent'`, id)
 }
 
+// InputOf is input id's session and state, if the store has it.
+func (s *Store) InputOf(id string) (session, state string, ok bool) {
+	if s.db.QueryRow(`SELECT session, state FROM inputs WHERE id = ?`, id).Scan(&session, &state) != nil {
+		return "", "", false
+	}
+	return session, state, true
+}
+
+// ForgetInput drops input id whatever its state: one whose writing to the agent failed.
+func (s *Store) ForgetInput(id string) error {
+	_, err := s.db.Exec(`DELETE FROM inputs WHERE id = ?`, id)
+	return err
+}
+
 // MoveQueue moves the session's inputs in state from to state to (queued, paused).
 func (s *Store) MoveQueue(session, from, to string) error {
 	_, err := s.db.Exec(`UPDATE inputs SET state = ? WHERE session = ? AND state = ?`, to, session, from)

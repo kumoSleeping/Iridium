@@ -545,6 +545,11 @@ export interface Send {
    */
   attachments?: string[];
   caller?: string; // as NewSession's
+  /**
+   * ID is the input id the sender chose (a lowercase UUID): sent again, the same message, not
+   * written twice. None: one is made.
+   */
+  id?: string;
 }
 export interface SendReply {
   input: string; // the message's id (Claude: its uuid)
@@ -891,10 +896,6 @@ export const NeedSecretUse: NeedKind = "secret_use"; // an agent's ir run with c
  */
 export const NeedAsk: NeedKind = "ask";
 /**
- * NeedShare: something shared with this login (Share); DELETE /v1/internal/needs/{id} puts it away.
- */
-export const NeedShare: NeedKind = "share";
-/**
  * Need is what waits for a person (docs/next/k_glossary.md "需要"): an app's or a login's request,
  * or what an agent's ir asked for that only a person may give. It waits in the carried state
  * "needs" till the host or a login of ir_web that may approve answers it. No secrets.
@@ -951,16 +952,11 @@ export interface Need {
    */
   card?: Card;
   origin?: string;
-  /**
-   * Share: share, what was shared and by whom; To, the login of ir_web it is for.
-   */
-  share?: Share;
-  to?: string;
 }
 /**
  * Needs is the carried state "needs" (GET /v1/internal/needs): the pending ones, oldest first, as the
  * caller may see them: applications for a person on ir_web or at the host, asks of the sessions it
- * may use, what was shared with it.
+ * may use.
  */
 export interface Needs {
   pending: Need[];
@@ -1585,6 +1581,59 @@ export interface NoteFolderPatch {
 }
 
 //////////
+// source: public.go
+
+/**
+ * PublicLink is GET/POST /v1/internal/sessions/{id}/public: the session's public read-only link.
+ * Ready: the public address is set and the Passkey gate on, without which no link works. On: a
+ * link is there. URL: the link itself, only in the answer to the POST that made it (only its
+ * token's hash is kept). By: the app or login that made it; CreatedAt in ms.
+ */
+export interface PublicLink {
+  ready: boolean;
+  on: boolean;
+  url?: string;
+  by?: string;
+  createdAt?: number /* int64 */;
+}
+/**
+ * PublicPage is GET /p/{token}/api/messages: what was said in the session the link shows, a
+ * page of it, oldest first. ?before= the page before Before's offset; ?after= what came after
+ * End's. Only people's and the agent's words, credentials masked: no thinking, tools or system
+ * lines. Before: "" when there is nothing earlier.
+ */
+export interface PublicPage {
+  title: string;
+  agent: Agent;
+  status: Status;
+  messages: PublicMessage[];
+  before?: string;
+  end: number /* int64 */;
+}
+/**
+ * PublicMessage is one thing said: by a person (Role "user"; From, the name Iridium wrote it
+ * with, if any) or the agent ("agent"); its words, and the pictures it gave, each at its URL
+ * under the link.
+ */
+export interface PublicMessage {
+  at: string;
+  time?: number /* int64 */;
+  role: string;
+  from?: string;
+  text: string;
+  pictures?: PublicImage[];
+}
+/**
+ * PublicImage is a picture of a message: its URL under the link, name and size in pixels.
+ */
+export interface PublicImage {
+  url: string;
+  name?: string;
+  w?: number /* int */;
+  h?: number /* int */;
+}
+
+//////////
 // source: push.go
 
 /**
@@ -1654,7 +1703,7 @@ export interface PushUnsubscribe {
  * PushMessage is a push's payload, as the service worker gets it.
  */
 export interface PushMessage {
-  kind: string; // needs_you | error | turn_end | compact | test | share
+  kind: string; // needs_you | error | turn_end | compact | test
   session?: string;
   title: string;
   body: string;
@@ -1796,89 +1845,6 @@ export interface SettingsPatch {
   enterInTurn?: string;
   lang?: string;
   autoUpdate?: boolean;
-}
-
-//////////
-// source: share.go
-
-/**
- * ShareWhat is what a Share is of.
- */
-export type ShareWhat = string;
-export const ShareOfSession: ShareWhat = "session";
-export const ShareOfReply: ShareWhat = "reply"; // one block of a session: Session and At
-export const ShareOfPlace: ShareWhat = "place"; // a folder: Place
-export const ShareOfFile: ShareWhat = "file"; // a file: Session, and Ref or Path
-/**
- * Share is something shared with one login (draft 二「消息」 分享; POST /v1/internal/share, ir share): a
- * session, a reply, a place or a file, who shared it and a note. Iridium checks the login may use
- * what is shared (a session's agent and scope; a place's or a file's scope); what it does with it
- * is its app's: a login of ir_web finds it among its needs (and a Web Push), another app's gets a
- * Satori event (internal, _type ir.share).
- */
-export interface Share {
-  what: ShareWhat;
-  session?: string;
-  at?: string; // reply: the block's place
-  place?: string; // place: "应用名:路径"
-  ref?: string; // file: its ref in Session
-  path?: string; // file: its path (Iridium fills it from Ref); place: the folder's
-  note?: string;
-  /**
-   * Filled by Iridium: Machine, the app the place, file or session is at ("" the host's); Title,
-   * the session's name or title, a file's name or the reply's opening; From, the app or login of
-   * ir_web that shared it, FromName its name, FromSession the session whose agent did (ir share);
-   * At (ms) when.
-   */
-  machine?: string;
-  title?: string;
-  from?: string;
-  fromName?: string;
-  fromSession?: string;
-  sharedAt?: number /* int64 */;
-}
-/**
- * ShareRequest is POST /v1/internal/share: what (Share's what and its refs; the rest Iridium fills) and to
- * whom, "应用/登录" (an app's name or ID; ir_web for a login of the web). Caller: the session ir
- * runs in, as ir send has it.
- */
-export interface ShareRequest {
-  what: ShareWhat;
-  session?: string;
-  at?: string;
-  place?: string;
-  ref?: string;
-  path?: string;
-  note?: string;
-  to: string;
-  caller?: string;
-}
-/**
- * ShareReply is where a share went: the app and login (IDs, and the login's name), and for a login
- * of ir_web how many of its browsers were pushed to.
- */
-export interface ShareReply {
-  app: string;
-  login: string;
-  name?: string;
-  pushed?: number /* int */;
-}
-/**
- * ShareTargets is GET /v1/internal/share/targets (what as ShareRequest's, in the query): the apps whose
- * logins may use it, each with those logins; the caller itself left out.
- */
-export interface ShareTargets {
-  apps: ShareApp[];
-}
-export interface ShareApp {
-  id: string;
-  name: string;
-  logins: ShareLogin[];
-}
-export interface ShareLogin {
-  id: string;
-  name: string;
-  avatar?: string;
 }
 
 //////////

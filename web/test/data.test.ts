@@ -85,6 +85,27 @@ describe("api", () => {
   }, 10_000);
 });
 
+describe("a send lost on the way", () => {
+  test("goes again under its id, never without one", async () => {
+    vi.useFakeTimers();
+    try {
+      speakAs("ir_web", "u1");
+      let n = 0;
+      answer = () => (++n === 1 ? Promise.reject(new TypeError("dropped")) : json([{ _data: { input: "i-1" } }]));
+      const p = api.send("s1", "hi", undefined, false, "i-1");
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(await p).toEqual({ input: "i-1" });
+      expect(calls.map((c) => (c.body as { _data: unknown })._data)).toEqual([{ id: "i-1" }, { id: "i-1" }]);
+      calls = [];
+      n = 0;
+      await expect(api.send("s1", "hi")).rejects.toBeInstanceOf(TypeError);
+      expect(calls).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("the event stream", () => {
   test("names the list, the quota, the update, the confirmations and the open session with its context", () => {
     expect(keysFor(null)).toEqual(["list", "guilds", "quota", "update", "needs", "pairing", "terminals", "notes"]);
@@ -343,6 +364,19 @@ describe("Messages", () => {
     ];
     expect(unsent(sent, [blk(10, "user", "different", { id: "u1" }), blk(20, "user", "second")]).map((s) => s.key)).toEqual(["3"]);
     expect(unsent(sent.slice(1, 2), [blk(10, "user", "nope")]).map((s) => s.key)).toEqual(["2"]);
+    // Failed, but it went (only the answer was lost): its block, by its id, takes it.
+    const lost: Sent = { key: "4", text: "fourth", files: [], from: 0, input: "u4", failed: "no" };
+    expect(unsent([lost], [blk(10, "user", "fourth")])).toEqual([lost]);
+    expect(unsent([lost], [blk(10, "user", "fourth", { id: "u4" })])).toEqual([]);
+  });
+  test("what you sent is checked again as its answer comes and as a fetch brings nothing new", async () => {
+    const m = new Messages("s", async (_, q) => (q.after === undefined ? { blocks: [blk(0, "user", "[网页] said", { id: "u1" })], start: 0, end: 10, more: false } : { blocks: [], start: 10, end: 10, more: false }));
+    m.sent.push({ key: "1", text: "said", files: [], from: 0 });
+    await m.newer();
+    expect(m.sent).toHaveLength(1); // its words differ, its id not known yet
+    m.sent[0]!.input = "u1";
+    await m.newer();
+    expect(m.sent).toHaveLength(0);
   });
   test("chats kept lately: up to KEPT_BLOCKS blocks in all, the one asked for always", () => {
     const a = chatOf("keep-a");

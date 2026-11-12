@@ -1,6 +1,7 @@
 // An agent's words as Markdown (Streamdown, with the CJK fixes): quiet, no buttons of its own, code
-// blocks in their language's colours (hl.tsx) with a copy key, links only to http(s) and the reply's
-// file links (ir:<id>, files.tsx Linked). Raw HTML
+// blocks in their language's colours (hl.tsx) with a copy key, links only to http(s), the reply's
+// file links (ir:<id>, files.tsx Linked) and what it names (ir:session/…, ir:folder/…, mention.tsx
+// NamedLink); Iridium's Satori elements are read as those (refs.ts fromSatori). Raw HTML
 // shows as written: rehype-raw is not even bundled (vite.config.ts). One options object, so a
 // message is not drawn again for each piece of a draft (Streamdown's memo).
 import { cjk } from "@streamdown/cjk";
@@ -12,7 +13,8 @@ import { t } from "../i18n";
 import { cn } from "../ui";
 import { Linked, LinkFiles } from "./files";
 import { Code } from "./hl";
-import { draftWords } from "./refs";
+import { NamedLink } from "./mention";
+import { draftWords, fromSatori, refOf } from "./refs";
 
 function CodeBlock({ className, children }: ComponentProps<"code"> & ExtraProps) {
   const [copied, setCopied] = useState(false);
@@ -47,14 +49,18 @@ export const MARKDOWN: Partial<StreamdownProps> = {
     // Streamdown's own pre marks the code inside as a block (data-block): that one is ours.
     code: (p) => ("data-block" in p ? <CodeBlock {...p} /> : <defaultComponents.code {...p} />),
     img: (p) => (linkID(p.src) ? <Linked id={linkID(p.src)!} label={p.alt ?? ""} inline={false} /> : <defaultComponents.img {...p} />),
-    a: (p) => (linkID(p.href) ? <Linked id={linkID(p.href)!} label={textOf(p.children)} inline /> : <defaultComponents.a {...p} />),
+    a: (p) => {
+      if (linkID(p.href)) return <Linked id={linkID(p.href)!} label={textOf(p.children)} inline />;
+      const r = typeof p.href === "string" ? refOf(p.href, textOf(p.children)) : undefined;
+      return r ? <NamedLink m={r} /> : <defaultComponents.a {...p} />;
+    },
   },
   lineNumbers: false,
   linkSafety: { enabled: false },
   className: "prose-ir min-w-0",
   rehypePlugins: [],
   tableMaxHeight: 0,
-  urlTransform: (url, key, node) => (linkID(url) ? url : defaultUrlTransform(url, key, node)),
+  urlTransform: (url, key, node) => (linkID(url) || refOf(url, "") ? url : defaultUrlTransform(url, key, node)),
   allowElement: (e) => e.tagName !== "a" || /^(https?|ir):/i.test(String(e.properties.href ?? "")),
   unwrapDisallowed: true,
 };
@@ -93,7 +99,7 @@ export const Markdown = memo(function Markdown({ text, className, session, files
 export function Draft({ text, live }: { text: string; live: boolean }) {
   return (
     <Streamdown {...MARKDOWN} isAnimating={live} className="prose-ir min-w-0 text-md">
-      {draftWords(text, live)}
+      {draftWords(fromSatori(text), live)}
     </Streamdown>
   );
 }

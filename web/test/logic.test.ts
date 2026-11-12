@@ -10,7 +10,7 @@ import { shellLine } from "../src/chat/shell";
 import { crashParts } from "../src/chat/crash";
 import { levelName, restAt } from "../src/chat/effort";
 import { ctxParts, hitRate, modelView } from "../src/chat/meters";
-import { atSessions, attachedOf, atWord, leadingMentions, mentions, SID, sessionIds, shortId, sourceOf, type Who, withoutFiles, withoutNameLines, draftWords } from "../src/chat/refs";
+import { atSessions, attachedOf, atWord, boxAt, boxed, edited, fromSatori, MARK, mentions, outOf, sessionLink, wordsAt, SID, sessionIds, shortId, sourceOf, type Who, withoutFiles, withoutNameLines, draftWords } from "../src/chat/refs";
 import { t } from "../src/i18n";
 import { en } from "../src/i18n/en";
 import { zh } from "../src/i18n/zh";
@@ -43,6 +43,24 @@ describe("folded", () => {
       { name: "Read", n: 1, failed: 0 },
       { name: "Bash", n: 1, failed: 1 },
     ]);
+  });
+  test("a call that starts another agent is a line of its own, between two folds", () => {
+    const sh = (at: string, command: string) => b(at, "tool", { id: at, name: "Bash", input: JSON.stringify({ command }), result: { at, text: "ok" } });
+    const shown = folded([
+      b("0", "user", { text: "go" }),
+      b("1", "tool", { id: "1", name: "Read", input: '{"file_path":"/a"}', result: { at: "1", text: "x" } }),
+      b("2", "tool", { id: "2", name: "Agent", input: '{"description":"look"}', result: { at: "2", text: "ok" } }),
+      b("3", "tool", { id: "3", name: "Workflow", input: '{"script":"x"}', result: { at: "3", text: "ok" } }),
+      sh("4", "git status"),
+      sh("5", "ir api channel.create _data.agent=codex _data.cwd=. _data.text=hi"),
+      sh("6", "ls"),
+      b("7", "assistant", { text: "done" }),
+    ]);
+    const folds = shown.flatMap((s) => (s.kind === "fold" ? [s.steps.map((x) => x.at)] : []));
+    expect(folds).toEqual([["1"], ["2"], ["3"], ["4"], ["5"], ["6"]]);
+    // Steps around none fold as before.
+    const plain = folded([b("0", "user", { text: "go" }), sh("1", "ls"), sh("2", "ir api channel.list"), sh("3", "pwd")]);
+    expect(plain.flatMap((s) => (s.kind === "fold" ? [s.steps.length] : []))).toEqual([3]);
   });
   test("calls with no result at the end run on their own; empty thoughts go", () => {
     const shown = folded([b("0.0", "user", { text: "go" }), b("5.0", "thinking", { text: "  " }), b("10.0", "tool", { id: "a", name: "Bash", input: "{}" })]);
@@ -484,8 +502,11 @@ describe("context parts", () => {
     ]);
     expect(p.slice(0, 2).map((x) => x.tone)).toEqual(["var(--series-1)", "var(--series-3)"]);
   });
-  test("only a total: free is the rest", () => {
-    expect(ctxParts({ used: 300, max: 1000, at: 0 }).map((x) => [x.key, x.tokens])).toEqual([["free", 700]]);
+  test("only a total: used, and free the rest", () => {
+    expect(ctxParts({ used: 300, max: 1000, at: 0 }).map((x) => [x.key, x.tokens])).toEqual([
+      ["used", 300],
+      ["free", 700],
+    ]);
   });
 });
 
@@ -626,16 +647,40 @@ describe("shortId", () => {
 });
 
 describe("mentions", () => {
-  test("a dropped session's words, in either language, cut out of the text", () => {
-    expect(mentions("ask 「Fix the login」（Claude 会话 ca5187d2） now")).toEqual(["ask ", { kind: "session", title: "Fix the login", agent: "Claude", id: "ca5187d2", text: "「Fix the login」（Claude 会话 ca5187d2）" }, " now"]);
-    expect(mentions('"Run tests" (DeepSeek Harness session 1a2b3c4d-9)')).toEqual([{ kind: "session", title: "Run tests", agent: "DeepSeek Harness", id: "1a2b3c4d-9", text: '"Run tests" (DeepSeek Harness session 1a2b3c4d-9)' }]);
-    expect(mentions("plain 「quoted」 words (session 12)")).toEqual(["plain 「quoted」 words (session 12)"]);
+  test("a session's link cut out of the text", () => {
+    expect(mentions("ask [Fix the login](ir:session/ca5187d2) now")).toEqual(["ask ", { kind: "session", title: "Fix the login", id: "ca5187d2", text: "[Fix the login](ir:session/ca5187d2)" }, " now"]);
+    expect(mentions("[x](ir:session/a b)")).toEqual(["[x](ir:session/a b)"]);
+    expect(mentions("[a file](ir:abcdefghij) and [web](https://x.y)")).toEqual(["[a file](ir:abcdefghij) and [web](https://x.y)"]);
+    expect(sessionLink("Fix [the] login\nnow", "ca5187d2")).toBe("[Fix ［the］ login now](ir:session/ca5187d2)");
   });
-  test("the sessions named before the words, as the composer sends them", () => {
-    const a = "「A」（Claude 会话 ca5187d2）", b = "「B」（Codex 会话 1a2b3c4d）";
-    expect(leadingMentions(`${a} ${b} look at ${a}`)).toEqual({ named: [mentions(a)[0], mentions(b)[0]], words: `look at ${a}` });
-    expect(leadingMentions(a).words).toBe("");
-    expect(leadingMentions(`see ${a}`)).toEqual({ named: [], words: `see ${a}` });
+  test("Satori elements of Iridium's read as their links", () => {
+    expect(fromSatori('see <img src="ir:abcdefghij" title="plot"/> and <file src="ir:bcdefghijk" title="a.csv"/>')).toBe("see ![plot](ir:abcdefghij) and [a.csv](ir:bcdefghijk)");
+    expect(fromSatori('ask <sharp id="ca5187d2" name="Fix &amp; go"/> or <sharp id="1a2b3c4d">B</sharp>')).toBe("ask [Fix & go](ir:session/ca5187d2) or [B](ir:session/1a2b3c4d)");
+    expect(fromSatori('<a href="ir:folder//x y">x</a> <a href="https://a.b">web</a>')).toBe('[x](<ir:folder//x y>) <a href="https://a.b">web</a>');
+    expect(fromSatori('`<img src="ir:abcdefghij"/>`\n```\n<sharp id="ca5187d2"/>\n```')).toBe('`<img src="ir:abcdefghij"/>`\n```\n<sharp id="ca5187d2"/>\n```');
+    expect(fromSatori('<img src="https://x/y.png"/>')).toBe('<img src="https://x/y.png"/>');
+  });
+});
+
+describe("the composer's box", () => {
+  const a = "[A](ir:session/ca5187d2)";
+  test("a link shown as its mark and name", () => {
+    const b = boxed(`hi ${a} there`);
+    expect(b.value).toBe(`hi ${MARK}A there`);
+    expect(b.refs).toMatchObject([{ from: 3, to: 5, at: 3, end: 3 + a.length }]);
+    expect(wordsAt(b, 5)).toBe(3 + a.length);
+    expect(wordsAt(b, 4)).toBe(3);
+    expect(boxAt(b, 3 + a.length + 1)).toBe(6);
+    expect(outOf(b, 4)).toBe(5);
+  });
+  test("typing beside a link, inside it, one Backspace taking it whole", () => {
+    const w = `hi ${a} there`;
+    expect(edited(w, `hi ${MARK}A! there`)).toEqual({ words: `hi ${a}! there`, caret: 6 });
+    expect(edited(w, `hi ${MARK} there`)).toEqual({ words: "hi  there", caret: 3 });
+    expect(edited(w, `hi A there`)).toEqual({ words: "hi  there", caret: 3 });
+    expect(edited(w, `hi ${MARK}xA there`)).toEqual({ words: `hi ${a}x there`, caret: 6 });
+    expect(edited(w, `h`)).toEqual({ words: "h", caret: 1 });
+    expect(edited("x", `x ${a}`)).toEqual({ words: `x ${a}`, caret: 4 });
   });
 });
 

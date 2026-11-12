@@ -221,6 +221,25 @@ describe("a shell call's sort", () => {
     expect(cmdOfCall({ name: "Bash", input: JSON.stringify({ command: "ir api channel.list --grep x" }) })).toBe("ir-find");
     expect(cmdOfCall({ name: "Bash", input: JSON.stringify({ command: "ir api channel.update channel_id=1a2b _data.archived:=false" }) })).toBe("ir-unarchive");
     expect(cmdOfCall({ name: "Bash", input: JSON.stringify({ command: "ir api message.list channel_id=1a2b" }) })).toBe("ir-read");
+    // Iridium's own routes, by path and method (ir api help all).
+    const api = (c: string) => cmdOfCall({ name: "Bash", input: JSON.stringify({ command: `ir api ${c}` }) });
+    expect(api("POST internal/sessions _data.agent=claude _data.cwd=.")).toBe("ir-new");
+    expect(api("internal/sessions _data.agent=claude")).toBe("ir-new");
+    expect(api("GET internal/sessions/1a2b --wait")).toBe("ir-wait");
+    expect(api("internal/sessions/1a2b")).toBe("ir-list");
+    expect(api("POST internal/sessions/1a2b/interrupt")).toBe("ir-stop");
+    expect(api("PUT internal/sessions/1a2b/model model=x")).toBe("ir-settings");
+    expect(api("POST internal/sessions/1a2b/shell line=ls")).toBe("remote");
+    expect(api("POST internal/machines/box/shell line=ls --wait")).toBe("remote");
+    expect(api("POST internal/links path=/tmp/a.png")).toBe("ir-share");
+    expect(api("POST internal/files/copy from=a to=b:c")).toBe("ir-files");
+    expect(api("PUT internal/secrets/tok note=x --wait")).toBe("ir-secret");
+    expect(api("GET internal/usage days==7")).toBe("ir-usage");
+    expect(api("internal/apps")).toBe("ir-machines");
+    expect(api("PUT internal/apps/x/perms @-")).toBe("ir-access");
+    expect(api("POST internal/notes text=x")).toBe("ir-notes");
+    expect(api("POST internal/button id=c1 option=yes")).toBe("ir-answer");
+    expect(api("message.delete channel_id=a message_id=b")).toBe("delete");
     const shown = folded([
       { at: "0", kind: "user", text: "go" },
       { at: "1", kind: "tool", id: "a", name: "Bash", input: JSON.stringify({ command: "ir rename x" }) },

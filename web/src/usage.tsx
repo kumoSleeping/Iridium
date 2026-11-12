@@ -1,22 +1,25 @@
 // The usage (plan "用量"): the tokens the turns used and what they cost, by day, login, agent and
 // model (GET /v1/internal/usage). One page (#/settings/usage, from the settings), one chart for
-// everyone (the user, 2026-11-08). Its measure (the user, 2026-11-10) is the cost at first (the
-// agent's own, else the model's maker's list price: the server's), or the tokens: the figure, the
-// bars, the order of the list and their parts all go by it. The figure's line under it has the
-// other measure, the turns and the cache's hit rate; the tokens have their four parts in a bar
-// under it. Below them a line of its own: what the page is narrowed to (a day, the logins in), as
-// chips; the chart's switch sits by the measure's, above. The chart is a bar a day stacked by login, each in its
-// own colour, or a heat map of the weekdays by hour, the range's days added up (none for 1 天: one
-// day's hours are the bars). Under it the logins, the most first, each its bar in its colour: its
-// avatar (in its colour) takes it out of the chart and the total or puts it back; right-clicked or
-// held (phones) it is the only one left in (again: everyone); the row opens its models, each with
-// its cache's hit rate, tokens and cost. 全选 over the list and the chip put everyone back. A bar
-// pressed narrows the page to that day. With one login in, the bars are its models. Over it all,
-// the harnesses (the user, 2026-11-08): all four at first; pressed, one leaves the whole page or
-// comes back, and the last one taken out puts all four back.
+// everyone (the user, 2026-11-08); asked for at a session at another computer, that computer's
+// sessions only, its name by the title (the user, 2026-11-12). Its measure (the user, 2026-11-10)
+// is the cost at first (the agent's own, else the model's maker's list price: the server's), or the
+// tokens: the figure, the bars, the order of the list all go by it. The figure's line under it has
+// the other measure, the turns and the cache's hit rate; under that the tokens' four parts, under
+// either measure, so switching moves nothing (no bar of them: the user, 2026-11-12). Below them a
+// line kept for what the page is narrowed to (the harnesses, a day, the logins in), as chips, scrolling sideways;
+// the chart's switch at the figures' right, under the measure's. The chart is a bar a day stacked by login, each in its own
+// colour (its avatar's main colour, kept apart from the others': hues.ts), or a heat map of the
+// weekdays by hour in squares, the busiest hour over them, the range's days added up (none for 1 天: one day's
+// hours are the bars). Under it the logins, the most first, each its bar in its colour: the row
+// pressed takes it out of the chart and the total or puts it back; right-clicked or held (phones)
+// it is the only one left in (again: everyone); its avatar, pointed at, floats its models
+// in a panel over the page, each with its cache's hit rate, tokens and cost. The chip puts everyone back. A bar pressed narrows the page to that day. With one login in, the bars are
+// its models. Over it all, the harnesses (the user, 2026-11-08): all four at first; pressed, one
+// leaves the whole page or comes back, and the last one taken out puts all four back.
+import { Popover } from "@base-ui/react/popover";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, CircleHelp, LoaderCircle, UserX, X } from "lucide-react";
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent, type ReactNode } from "react";
+import { CircleHelp, LoaderCircle, UserX, X } from "lucide-react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent, type ReactNode } from "react";
 import { api } from "./api/client";
 import type { Agent, Usage, UsageRow } from "./api/types.gen";
 import { hitRate } from "./chat/meters";
@@ -24,7 +27,10 @@ import { t, useLang } from "./i18n";
 import { LocalMark } from "./me";
 import { motion, reduced } from "./motion";
 import { errText } from "./toast";
-import { agentName, AGENTS, Avatar, cn, keep, kept, Logo, Tip, tokens } from "./ui";
+import { hueColor, useHues } from "./hues";
+import { useMachines } from "./data";
+import { useUsageMachine } from "./route";
+import { agentName, AGENTS, Avatar, cn, keep, kept, Logo, PopSurface, Tip, tokens } from "./ui";
 
 export const dollars = (n: number) => (n >= 1000 ? `$${Math.round(n).toLocaleString("en-US")}` : n >= 100 ? `$${Math.round(n)}` : `$${n.toFixed(2)}`);
 
@@ -32,10 +38,10 @@ export const dollars = (n: number) => (n >= 1000 ? `$${Math.round(n).toLocaleStr
 const RANGES = [1, 7, 30] as const;
 
 /** The last days' usage. The last answer stays while another range loads. */
-const usageQ = (days: number) => ({ queryKey: ["usage", days], queryFn: () => api.usage(days, undefined, days === 1 ? "hour" : undefined), staleTime: 30_000 });
-const useUsage = (days: number) => useQuery({ ...usageQ(days), placeholderData: keepPreviousData });
+const usageQ = (days: number, machine = "") => ({ queryKey: ["usage", days, machine], queryFn: () => api.usage(days, undefined, days === 1 ? "hour" : undefined, machine || undefined), staleTime: 30_000 });
+const useUsage = (days: number, machine: string) => useQuery({ ...usageQ(days, machine), placeholderData: keepPreviousData });
 /** The last days' usage by weekday and hour: the heat map's. */
-const heatQ = (days: number) => ({ queryKey: ["usage", days, "weekhour"], queryFn: () => api.usage(days, undefined, "weekhour"), staleTime: 30_000 });
+const heatQ = (days: number, machine = "") => ({ queryKey: ["usage", days, machine, "weekhour"], queryFn: () => api.usage(days, undefined, "weekhour", machine || undefined), staleTime: 30_000 });
 const rangeName = (days: number) => (days === 1 ? t("usage.last24h") : t("usage.lastDays", { n: days }));
 
 type Sum = { turns: number; input: number; output: number; cacheRead: number; cacheWrite: number; cost: number };
@@ -157,15 +163,15 @@ const fnv = (s: string) => {
   return h >>> 0;
 };
 
-/** Each login's colour (the user, 2026-11-08), from its ID alone so it is the same on every
- *  device and range: the slot its ID hashes to, else the next free one, the IDs taken in order.
- *  Past eight, or who is not known: grey. */
+/** A login's models' colours (the logins' are their avatars', hues.ts), from their keys alone so
+ *  they are the same on every device and range: the slot a key hashes to, else the next free one,
+ *  the keys taken in order. Past eight, hues spread round the circle: never grey. */
 function paint(ids: string[]): Map<string, string> {
   const out = new Map<string, string>();
   const used = new Set<number>();
-  for (const id of [...ids].sort()) {
-    if (!id || used.size >= SLOTS) {
-      out.set(id, "var(--ink-4)");
+  for (const [n, id] of [...ids].sort().entries()) {
+    if (used.size >= SLOTS) {
+      out.set(id, hueColor((fnv(id) % 360) + n * 137.5));
       continue;
     }
     let i = fnv(id) % SLOTS;
@@ -273,31 +279,36 @@ export function UsagePage() {
   const [off, setOff] = useState<ReadonlySet<string>>(() => new Set());
   // The harnesses taken out of the whole page; none at first.
   const [hidden, setHidden] = useState<ReadonlySet<Agent>>(() => new Set());
-  // The logins whose models are open.
-  const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
-  const q = useUsage(days);
+  // The login whose models float out of its avatar: one at a time (the user, 2026-11-12: moved to
+  // another, the last one stayed).
+  const [peek, setPeek] = useState<string | null>(null);
+  // Asked for at a session at another computer: that computer's sessions only, its name by the title.
+  const machine = useUsageMachine();
+  const at = useMachines().find((x) => x.id === machine);
+  const q = useUsage(days, machine);
   const u = q.data;
   const m = MEASURES[metric];
   // The range of what is shown: a range chosen shows only once its figures came, the page changing
   // all at once, the bars rising (the user, 2026-11-08: not half the old and half the new).
   const range = u ? (hourly(u.days[0] ?? "") ? 1 : u.days.length) : days;
   const heat = view === "heat" && range > 1;
-  const hq = useQuery({ ...heatQ(range), enabled: heat, placeholderData: keepPreviousData });
+  const hq = useQuery({ ...heatQ(range, machine), enabled: heat, placeholderData: keepPreviousData });
   // The other ranges asked for once this one is in: chosen, they are at hand.
   const qc = useQueryClient();
   const came = !!u;
   useEffect(() => {
     if (!came) return;
     const id = setTimeout(() => {
-      RANGES.forEach((n) => void qc.prefetchQuery(usageQ(n)));
-      if (view === "heat") RANGES.forEach((n) => n > 1 && void qc.prefetchQuery(heatQ(n)));
+      RANGES.forEach((n) => void qc.prefetchQuery(usageQ(n, machine)));
+      if (view === "heat") RANGES.forEach((n) => n > 1 && void qc.prefetchQuery(heatQ(n, machine)));
     }, 300);
     return () => clearTimeout(id);
-  }, [came, qc, view]);
+  }, [came, qc, view, machine]);
   const rows = useMemo(() => (u?.rows ?? []).filter((r) => !hidden.has(r.agent)), [u, hidden]);
   const s = useMemo(() => summarize(rows, day, m.value), [rows, day, m]);
-  // Colours from every login in the range, so a harness taken out recolours no one.
-  const ids = useMemo(() => [...new Set((u?.rows ?? []).map((r) => r.terminal))].join("\u0000"), [u]);
+  // Colours from every login in the range, so a harness taken out recolours no one: each its
+  // avatar's, apart from the others' (hues.ts).
+  const ids = useMemo(() => [...new Set((u?.rows ?? []).map((r) => r.terminal))].map((id) => [id, u?.terminals[id]?.avatar] as [string, string | undefined]), [u]);
   // The rows in the measure's order: reordered, each slides from where it was to where it is.
   const listRef = useRef<HTMLElement>(null);
   const spots = useRef(new Map<string, number>());
@@ -327,7 +338,7 @@ export function UsagePage() {
     spots.current = new Map(rows.map((r) => [r.dataset.row!, r.getBoundingClientRect().top]));
     orderKey.current = rows.map((r) => r.dataset.row).join(",");
   };
-  const colors = useMemo(() => paint(ids ? ids.split("\u0000") : []), [ids]);
+  const colors = useHues(ids);
   const harnesses = AGENTS.filter((a) => !hidden.has(a));
   const toggleHarness = (a: Agent) =>
     setHidden(harnesses.length === 1 && !hidden.has(a) ? new Set() : (o) => {
@@ -356,19 +367,13 @@ export function UsagePage() {
     if (!n.delete(id)) n.add(id);
     return n;
   });
-  const flip = (id: string) =>
-    setOpen((o) => {
-      const n = new Set(o);
-      if (!n.delete(id)) n.add(id);
-      return n;
-    });
   const sum = zero();
   for (const x of s.byLogin) if (on(x.id)) add(sum, x.sum);
   const whole = s.byLogin.reduce((a, x) => a + m.value(x.sum), 0);
   const total = useGlide(m.value(sum), !!u, metric);
   const hit = hitRate(sum);
   const chip = (key: string, label: ReactNode, clear: () => void, mark?: ReactNode, className?: string) => (
-    <button key={key} type="button" onClick={clear} className={cn("g-pop g-press flex h-5 min-w-0 shrink items-center gap-1 rounded-full bg-fill px-2 text-ink-2 hover:bg-fill-2", className)}>
+    <button key={key} type="button" onClick={clear} className={cn("g-pop g-press flex h-5 min-w-0 items-center gap-1 rounded-full bg-fill px-2 text-ink-2 hover:bg-fill-2", className)}>
       {mark}
       <span className="truncate">{label}</span>
       <X size={11} className="shrink-0" />
@@ -379,7 +384,10 @@ export function UsagePage() {
   return (
     <div className="flex h-full flex-col">
       <header className="flex h-10.5 shrink-0 items-center gap-1 px-3 pt-1.5">
-        <h1 className="m-0 min-w-0 flex-1 truncate text-base font-semibold">{t("usage.title")}</h1>
+        <h1 className="m-0 min-w-0 flex-1 truncate text-base font-semibold">
+          {t("usage.title")}
+          {machine && <span className="font-normal text-ink-3"> · {at?.name ?? machine}</span>}
+        </h1>
         {/* Only once it has been a moment: a quick answer shows no spinner flashing. */}
         {(q.isFetching || (heat && hq.isFetching)) && u && <span className="g-fade mr-1.5 grid [animation-delay:200ms]"><LoaderCircle size={14} className="animate-spin text-ink-4" /></span>}
       </header>
@@ -400,45 +408,61 @@ export function UsagePage() {
                 <div className="flex items-end justify-between gap-2">
                   {/* The figure leads: proportional digits, as a figure that stands alone. */}
                   <Figure text={metric === "cost" ? dollars(total) : tokens(Math.round(total))} k={metric} />
-                  <div className="flex shrink-0 items-center gap-1.5">
+                  <Pills
+                    label={t("usage.metric")}
+                    value={metric}
+                    onChange={(v) => (capture(), setMetric(v))}
+                    options={[
+                      { value: "cost", label: t("usage.cost") },
+                      { value: "tokens", label: t("usage.tokensMetric") },
+                    ]}
+                  />
+                </div>
+                {/* The figures, the chart's switch at their right, under the measure's (the user,
+                    2026-11-12: not side by side). */}
+                <div className="mt-0.5 flex h-6 min-w-0 items-center gap-1.5 text-xs text-ink-3 tabular-nums">
+                  <span className="min-w-0 flex-1 truncate leading-6 whitespace-nowrap" title={figures}>{figures}</span>
+                  {range > 1 && (
                     <Pills
-                      label={t("usage.metric")}
-                      value={metric}
-                      onChange={(v) => (capture(), setMetric(v))}
+                      label={t("usage.view")}
+                      value={view}
+                      onChange={setView}
                       options={[
-                        { value: "cost", label: t("usage.cost") },
-                        { value: "tokens", label: t("usage.tokensMetric") },
+                        { value: "bars", label: t("usage.bars"), icon: <BarsIcon /> },
+                        { value: "heat", label: t("usage.heat"), icon: <HeatIcon /> },
                       ]}
                     />
-                    {range > 1 && (
-                      <Pills
-                        label={t("usage.view")}
-                        value={view}
-                        onChange={setView}
-                        options={[
-                          { value: "bars", label: t("usage.bars"), icon: <BarsIcon /> },
-                          { value: "heat", label: t("usage.heat"), icon: <HeatIcon /> },
-                        ]}
-                      />
-                    )}
-                  </div>
+                  )}
                 </div>
-                <div className="mt-0.5 flex h-6 min-w-0 items-center gap-1.5 text-xs text-ink-3 tabular-nums">
-                  {/* The figures lead, the chips after them; where the chips are long the figures
-                      truncate, so neither wraps and the chart stays put. */}
-                  <span className="min-w-0 flex-1 truncate leading-6 whitespace-nowrap" title={figures}>{figures}</span>
-                  {u && day && chip("day", dayLabel(day), () => setDay(null), undefined, "shrink-0")}
-                  {u &&
-                    !all &&
+                {/* What the page is narrowed to: a line kept for it, empty or not, so a chip coming
+                    moves nothing; more than fit scroll sideways, with no bar (the user, 2026-11-12). */}
+                <div className="no-bar -mx-3 mt-1 flex h-6 items-center gap-1.5 overflow-x-auto px-3 text-xs tabular-nums">
+                  {/* The harnesses pressed out over the page: those left in, each its mark (the user,
+                      2026-11-12: a filter too). */}
+                  {hidden.size > 0 &&
+                    chip(
+                      "agents",
+                      harnesses.length === 1 ? t("usage.onlyName", { name: agentName(harnesses[0]!) }) : harnesses.map(agentName).join(" · "),
+                      () => (capture(), setHidden(new Set())),
+                      <span className="flex shrink-0 items-center gap-0.5">
+                        {harnesses.map((a) => (
+                          <Logo key={a} agent={a} size={11} />
+                        ))}
+                      </span>,
+                      "shrink-0",
+                    )}
+                  {day && chip("day", dayLabel(day), () => setDay(null), undefined, "shrink-0")}
+                  {!all &&
                     chip(
                       "who",
                       solo !== undefined ? t("usage.onlyName", { name: who(u, solo).name }) : t("usage.picked", { n: shown.length }),
                       everyone,
                       solo !== undefined && <Dot color={colors.get(solo)!} on />,
-                      "max-w-[9rem]",
+                      "shrink-0",
                     )}
                 </div>
-                {metric === "tokens" && <Mix sum={sum} />}
+                {/* Under either measure: switched, the page keeps its height. */}
+                <Mix sum={sum} />
               </div>
             ) : (
               <div aria-hidden className="g-wait">
@@ -448,16 +472,12 @@ export function UsagePage() {
                 <div className="mt-0.5 flex h-6 items-center">
                   <span className="block h-2.5 w-40 rounded-full bg-fill" />
                 </div>
-                {metric === "tokens" && (
-                  <div className="mt-2 flex flex-col gap-1.5">
-                    <span className="block h-1.5 rounded-full bg-fill" />
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
-                      {[0, 1, 2, 3].map((i) => (
-                        <span key={i} className="block h-4 rounded-full bg-fill" />
-                      ))}
-                    </div>
-                  </div>
-                )}
+                <div className="mt-1 h-6" />
+                <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-0.5">
+                  {[0, 1, 2, 3].map((i) => (
+                    <span key={i} className="block h-4 rounded-full bg-fill" />
+                  ))}
+                </div>
               </div>
             )}
             <div className="flex flex-col gap-1">
@@ -472,13 +492,6 @@ export function UsagePage() {
           </section>
 
           <section ref={listRef} className="flex flex-col" aria-label={t("usage.sources")}>
-            {many && !all && (
-              <div className="mb-0.5 flex h-6 items-center justify-end text-xs text-ink-3">
-                <button type="button" onClick={everyone} className="g-press -mr-1.5 rounded-md px-1.5 py-0.5 text-ink-2 transition-colors duration-(--dur-2) hover:bg-fill hover:text-ink">
-                  {t("usage.selectAll")}
-                </button>
-              </div>
-            )}
             {u && s.order.length === 0 && <p className="g-fade m-0 py-6 text-center text-sm text-ink-3">{t("usage.none")}</p>}
             {!u && !q.isError && (
               <div aria-hidden className="g-wait">
@@ -502,11 +515,11 @@ export function UsagePage() {
                 whole={whole}
                 on={on(x.id)}
                 many={many}
-                open={open.has(x.id)}
                 metric={metric}
+                peek={peek === x.id}
+                onPeek={(o) => setPeek(o ? x.id : (c) => (c === x.id ? null : c))}
                 onToggle={() => toggle(x.id)}
                 onOnly={() => only(x.id)}
-                onOpen={() => flip(x.id)}
               />
             ))}
           </section>
@@ -689,14 +702,11 @@ const MIX = [
   { key: "usage.output", of: (s: Sum) => s.output, tone: "var(--ink)" },
 ] as const;
 
-/** The tokens' four parts: a bar of them, the cache's reads first, and each one's figure. */
+/** The tokens' four parts, the cache's reads first, each one's figure (no bar of them: the user,
+ *  2026-11-12). */
 function Mix({ sum }: { sum: Sum }) {
-  const all = totalOf(sum);
   return (
-    <div className="g-fade mt-2 flex flex-col gap-1.5 tabular-nums">
-      <div className="flex h-1.5 gap-0.5 overflow-hidden rounded-full bg-fill" aria-hidden>
-        {all > 0 && MIX.map((p) => (p.of(sum) > 0 ? <span key={p.key} className="block h-full min-w-0.5 transition-[flex-grow] duration-(--dur-3) ease-(--ease-out)" style={{ flexGrow: p.of(sum) / all, background: p.tone }} /> : null))}
-      </div>
+    <div className="g-fade mt-2 tabular-nums">
       <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-xs text-ink-3">
         {MIX.map((p) => (
           <span key={p.key} className="flex min-w-0 items-center gap-1.5">
@@ -723,17 +733,15 @@ function niceUnder(max: number) {
  *  total and each one's. week: each day's weekday under it, else the range's ends. */
 type StacksProps = { days: string[]; perDay: Map<string, Map<string, Sum>>; order: string[]; colors: Map<string, string>; on: (id: string) => boolean; name: (id: string) => string; sel: string | null; onSel: (d: string | null) => void; week: boolean; m: Measure };
 
-function Stacks({ days, perDay, order, colors, on, name, sel, onSel, week, m, risen: fixed, bare, fall }: StacksProps & { risen?: boolean; bare?: boolean; fall?: boolean }) {
+function Stacks({ days, perDay, order, colors, on, name, sel, onSel, week, m, fall }: StacksProps & { fall?: boolean }) {
   const hours = hourly(days[0] ?? "");
-  // Drawn first at nothing, the bars rise to their figures (their height's glide). A chart on its
-  // way out keeps them where they are (the swap's fade takes it from there).
-  const [up, setUp] = useState(false);
-  const risen = fixed ?? up;
+  // Drawn first at nothing, the bars rise to their figures (their height's glide); fall: down to
+  // nothing again, quicker, as the chart goes (StacksSwap).
+  const [risen, setUp] = useState(false);
   useEffect(() => {
-    if (fixed !== undefined) return;
     const f = requestAnimationFrame(() => setUp(true));
     return () => cancelAnimationFrame(f);
-  }, [fixed]);
+  }, []);
   // The parts keep one order whatever the measure: moved, they would lose their height's glide.
   const stack = useMemo(() => [...order].sort(), [order]);
   const room = CHART_H - 14; // the scale's label above the highest bar
@@ -773,18 +781,28 @@ function Stacks({ days, perDay, order, colors, on, name, sel, onSel, week, m, ri
                   className={cn("flex h-full min-w-0 flex-1 items-end justify-center outline-offset-1 transition-opacity duration-(--dur-2)", sel && !chosen ? "opacity-35 hover:opacity-60" : "hover:opacity-85")}
                 >
                   <span className={cn("flex w-full flex-col-reverse overflow-hidden rounded-t-[4px]", week ? "max-w-9" : "max-w-6")}>
-                    {stack.map((id) => {
-                      const x = day?.get(id);
-                      const h = risen && !fall && x && on(id) && max ? (m.value(x) / max) * room : 0;
-                      // A 1.5px gap over each part (its top border, see-through); none on a sliver.
-                      return (
-                        <span
-                          key={id}
-                          className="block shrink-0 border-t-transparent bg-clip-content transition-[height,border-top-width] duration-(--dur-3) ease-(--ease-out)"
-                          style={{ height: h > 0 ? Math.max(2, h) : 0, borderTopWidth: h >= 6 ? 1.5 : 0, borderTopStyle: "solid", background: colors.get(id), backgroundClip: "content-box" } as CSSProperties}
-                        />
-                      );
-                    })}
+                    {(() => {
+                      const hs = stack.map((id) => {
+                        const x = day?.get(id);
+                        return risen && !fall && x && on(id) && max ? (m.value(x) / max) * room : 0;
+                      });
+                      return stack.map((id, j) => {
+                        const h = hs[j]!;
+                        // A 1.5px gap (its top border, see-through) between two parts each tall
+                        // enough to read as its own: a sliver sits flush on the one under it, the
+                        // bar's round top theirs together (the user, 2026-11-12: a gap under a
+                        // sliver left it a crooked cap). None over the top part.
+                        const next = hs.findIndex((v, i) => i > j && v > 0);
+                        const gap = h >= 6 && next >= 0 && hs[next]! >= 6;
+                        return (
+                          <span
+                            key={id}
+                            className={cn("block shrink-0 border-t-transparent bg-clip-content transition-[height,border-top-width]", fall ? "duration-(--dur-2) ease-(--ease-out)" : "duration-(--dur-3) ease-(--ease-out)")}
+                            style={{ height: h > 0 ? Math.max(2, h) : 0, borderTopWidth: gap ? 1.5 : 0, borderTopStyle: "solid", background: colors.get(id), backgroundClip: "content-box" } as CSSProperties}
+                          />
+                        );
+                      });
+                    })()}
                   </span>
                 </button>
               </Tip>
@@ -792,8 +810,7 @@ function Stacks({ days, perDay, order, colors, on, name, sel, onSel, week, m, ri
           })}
         </div>
       </div>
-      {!bare &&
-        (week ? (
+      {week ? (
           <div className="flex gap-1.5 text-[11px] text-ink-3 tabular-nums">
             {days.map((d) => (
               <span key={d} className={cn("min-w-0 flex-1 truncate text-center transition-colors duration-(--dur-2)", (d === sel || (!sel && d === today)) && "font-medium text-ink-2")}>
@@ -806,44 +823,46 @@ function Stacks({ days, perDay, order, colors, on, name, sel, onSel, week, m, ri
             <span>{hours ? hourLabel(days[0]!) : dayLabel(days[0]!, false)}</span>
             <span>{hours ? t("usage.thisHour") : t("usage.today")}</span>
           </div>
-        ))}
+        )}
     </div>
   );
 }
 
-/** The chart, chosen anew: the one before slides down as the next rises. A range changes the bars'
- *  count, so they cannot glide to their new heights; without this the old ones vanish at once. */
-function StacksSwap({ k, ...p }: StacksProps & { k: string }) {
-  const [old, setOld] = useState<(StacksProps & { k: string }) | null>(null);
+/** The chart, chosen anew (a range: the bars' count changes, so they cannot glide to their new
+ *  heights; one login left: its models): one chart at a time in its place (the user, 2026-11-12:
+ *  two drawn over each other twitched). The one drawn falls to nothing as it was last drawn, then
+ *  the next rises; chosen back while it falls, it rises again where it is. The same chart takes new
+ *  figures in place, its bars gliding. */
+type SwapProps = StacksProps & { k: string };
+function StacksSwap(p: SwapProps) {
+  // The chart drawn (its k), and what it was last drawn with: what falls.
+  const [at, setAt] = useState(p.k);
   const [fall, setFall] = useState(false);
-  const prev = useRef<(StacksProps & { k: string }) | null>(null);
-  useEffect(() => {
-    if (prev.current && prev.current.k !== k && !reduced()) {
-      setOld(prev.current);
+  const last = useRef<SwapProps>(p);
+  const draw = at === p.k ? p : last.current;
+  useLayoutEffect(() => {
+    last.current = draw;
+  });
+  const latest = useRef(p.k);
+  latest.current = p.k;
+  useLayoutEffect(() => {
+    if (at === p.k) {
       setFall(false);
+      return;
     }
-    prev.current = { ...p, k };
-  }, [k]);
-  useEffect(() => {
-    if (!old) return;
-    // A frame at its own heights, then down: the bars slide to nothing, not vanish.
-    const f = requestAnimationFrame(() => setFall(true));
-    const t = setTimeout(() => setOld(null), motion.dur(3) + 60);
-    return () => {
-      cancelAnimationFrame(f);
-      clearTimeout(t);
-    };
-  }, [old]);
-  return (
-    <div className="relative">
-      {old && (
-        <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0">
-          <Stacks {...old} risen bare fall={fall} />
-        </div>
-      )}
-      <Stacks key={k} {...p} />
-    </div>
-  );
+    if (reduced()) {
+      setAt(p.k);
+      return;
+    }
+    setFall(true);
+    const t = setTimeout(() => {
+      setFall(false);
+      setAt(latest.current);
+      // Eased out, not in: --ease-in ends straight down, the last third of the fall in one frame.
+    }, motion.dur(2) + 20);
+    return () => clearTimeout(t);
+  }, [p.k, at]);
+  return <Stacks key={draw.k} {...draw} fall={fall} />;
 }
 
 /** The chart's height, whatever the range or view: another changes no height. */
@@ -870,7 +889,8 @@ function BarTip({ label, day, order, colors, on, name, m }: { label: string; day
 
 /** The heat map: a row a weekday (Monday first), a square an hour, the range's days added up (the
  *  user, 2026-11-10: when, not which day); five shades of one colour by the measure, the one
- *  login's when only one is in. Over a square (or tapped), the line under it says what it holds. */
+ *  login's when only one is in. The line over it says what the square under the pointer (or
+ *  tapped) holds, else the busiest hour's, with the shades' key. */
 function Heat({ u, hidden, off, m, color }: { u: Usage | undefined; hidden: ReadonlySet<Agent>; off: ReadonlySet<string>; m: Measure; color: string }) {
   const [at, setAt] = useState<number | null>(null);
   const cells = useMemo(() => {
@@ -886,10 +906,38 @@ function Heat({ u, hidden, off, m, color }: { u: Usage | undefined; hidden: Read
   const max = Math.max(0, ...values);
   const level = (v: number) => (v <= 0 || !max ? 0 : Math.min(4, Math.max(1, Math.ceil((v / max) * 4))));
   const shade = (k: number) => (k === 0 ? "var(--fill)" : k === 4 ? color : `color-mix(in srgb, ${color} ${[0, 30, 55, 80][k]}%, var(--fill))`);
-  const c = at !== null ? cells[at] : undefined;
+  // Over a square (or tapped) what it holds, else the busiest hour's.
+  const peak = max > 0 ? values.indexOf(max) : null;
+  const shown = at ?? peak;
+  const c = shown !== null ? cells[shown] : undefined;
   return (
     <div className="g-fade flex flex-col gap-1">
-      <div role="group" aria-label={t("usage.heat")} className={cn("flex flex-col justify-end border-b border-fill-2 pb-1", !u && "g-wait")} style={{ height: CHART_H }} onPointerLeave={(e) => e.pointerType === "mouse" && setAt(null)}>
+      {/* The squares stay square (the user, 2026-11-12); the room over them has the hour they say
+          and the shades' key, the squares at the bottom on the axis. */}
+      <div role="group" aria-label={t("usage.heat")} className={cn("flex flex-col justify-between border-b border-fill-2 pb-1", !u && "g-wait")} style={{ height: CHART_H }} onPointerLeave={(e) => e.pointerType === "mouse" && setAt(null)}>
+        <div className="flex h-5 min-w-0 items-center gap-2 text-[11px] text-ink-3 tabular-nums">
+          <span className="min-w-0 flex-1 truncate">
+            {c && shown !== null ? (
+              <>
+                {at === null && <span className="text-ink-4">{t("usage.peak")} </span>}
+                <span className="text-ink-2">
+                  {t("usage.heatCell", { w: weekdayName(Math.floor(shown / 24) + 1), h: shown % 24, h2: (shown % 24) + 1 })}
+                  {` · ${m.fmt(m.value(c))}`}
+                </span>
+                {m === MEASURES.cost ? ` · ${tokens(totalOf(c))}` : c.cost > 0 ? ` · ${dollars(c.cost)}` : ""}
+              </>
+            ) : (
+              t("usage.none")
+            )}
+          </span>
+          <span aria-hidden className="flex shrink-0 items-center gap-[3px] text-ink-4">
+            <span className="mr-0.5">{t("usage.less")}</span>
+            {[0, 1, 2, 3, 4].map((k) => (
+              <span key={k} className="block size-2 rounded-[2px] transition-[background-color] duration-(--dur-3)" style={{ background: shade(k) }} />
+            ))}
+            <span className="ml-0.5">{t("usage.more")}</span>
+          </span>
+        </div>
         <div className="grid grid-cols-[1rem_1fr] gap-1.5">
           <div className="grid grid-rows-7 gap-[3px] text-[10px] leading-none text-ink-4">
             {[1, 2, 3, 4, 5, 6, 7].map((wd) => (
@@ -914,21 +962,10 @@ function Heat({ u, hidden, off, m, color }: { u: Usage | undefined; hidden: Read
           </div>
         </div>
       </div>
-      {/* The hours under it; over a square, what it holds instead. */}
-      <div className="h-[16.5px] pl-[1.375rem] text-[11px] text-ink-3 tabular-nums">
-        {c && at !== null ? (
-          <span className="block truncate text-ink-2">
-            {t("usage.heatCell", { w: weekdayName(Math.floor(at / 24) + 1), h: at % 24, h2: (at % 24) + 1 })}
-            {` · ${m.fmt(m.value(c))}`}
-            <span className="text-ink-3">{m === MEASURES.cost ? ` · ${tokens(totalOf(c))}` : c.cost > 0 ? ` · ${dollars(c.cost)}` : ""}</span>
-          </span>
-        ) : (
-          <span className="flex justify-between">
-            {[0, 6, 12, 18, 24].map((h) => (
-              <span key={h}>{h}</span>
-            ))}
-          </span>
-        )}
+      <div className="flex h-[16.5px] justify-between pl-[1.375rem] text-[11px] text-ink-3 tabular-nums">
+        {[0, 6, 12, 18, 24].map((h) => (
+          <span key={h}>{h}</span>
+        ))}
       </div>
     </div>
   );
@@ -960,48 +997,6 @@ function Hit({ s }: { s: Sum }) {
   const h = hitOf(s);
   if (h === undefined) return <span className="text-ink-4">—</span>;
   return <span style={h < LOW_HIT ? { color: "var(--need)" } : undefined}>{hitRate(s)}</span>;
-}
-
-/** The row's hit rate, with its models: it rises in as the first one lands and goes as the box
- *  closes (a figure that came and went at once read as a jump). */
-function HitTag({ open, hit, sep }: { open: boolean; hit: string; sep: boolean }) {
-  const [shown, setShown] = useState(open);
-  const [leaving, setLeaving] = useState(false);
-  const ref = useRef<HTMLSpanElement>(null);
-  useEffect(() => {
-    if (open) {
-      setShown(true);
-      setLeaving(false);
-      return;
-    }
-    if (!shown) return;
-    setLeaving(true);
-    const t = setTimeout(() => {
-      setShown(false);
-      setLeaving(false);
-    }, motion.dur(1));
-    return () => clearTimeout(t);
-  }, [open, shown]);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el || reduced()) return;
-    // Drawn out from the price's side to the left: the text is clipped at its left, so it shows
-    // from its right end (by the price) leftwards, sliding a little as it comes.
-    const a = el.animate(
-      leaving
-        ? [{ clipPath: "inset(0 0 0 0)", transform: "none" }, { clipPath: "inset(0 0 0 100%)", transform: "translateX(4px)" }]
-        : [{ clipPath: "inset(0 0 0 100%)", transform: "translateX(4px)" }, { clipPath: "inset(0 0 0 0)", transform: "none" }],
-      { duration: leaving ? motion.dur(1) : motion.dur(3), easing: motion.ease(leaving ? "in" : "out"), fill: "forwards" },
-    );
-    return () => a.cancel();
-  }, [leaving, shown]);
-  if (!shown || !hit) return null;
-  return (
-    <span ref={ref} className="inline-block">
-      {t("usage.hitShort", { n: hit })}
-      {sep ? " · " : ""}
-    </span>
-  );
 }
 
 /** The figure: another measure is another figure, so it comes again rather than glide. */
@@ -1038,92 +1033,38 @@ function ShareBar({ share, color }: { share: number; color: string }) {
   return <span ref={ref} className="block h-full rounded-full" style={{ width: `${share}%`, background: color }} />;
 }
 
-/** A login: its avatar tinted in its colour (pressed, out of the chart or back; right-clicked or
- *  held, the only one in), its name, the other measure and the measure, its part of everyone's in
- *  its colour. The row pressed opens its models: each one's hit rate, tokens and cost. */
-function LoginRow({ x, u, color, whole, on, many, open, metric, onToggle, onOnly, onOpen }: { x: LoginSum; u: Usage | undefined; color: string; whole: number; on: boolean; many: boolean; open: boolean; metric: Metric; onToggle: () => void; onOnly: () => void; onOpen: () => void }) {
+/** A login: its avatar, its name, the other measure and the measure, its part of everyone's in its
+ *  colour. The row pressed takes it out of the chart or puts it back; right-clicked or held, it is
+ *  the only one in (the user, 2026-11-12: as before its models folded open under it); out, the whole row faint and grey. Its models
+ *  float out of its avatar, in a panel over the page (no row grows). */
+function LoginRow({ x, u, color, whole, on, many, metric, peek, onPeek, onToggle, onOnly }: { x: LoginSum; u: Usage | undefined; color: string; whole: number; on: boolean; many: boolean; metric: Metric; peek: boolean; onPeek: (o: boolean) => void; onToggle: () => void; onOnly: () => void }) {
   const w = who(u, x.id);
   const v = MEASURES[metric].value(x.sum);
   const cost = x.sum.cost > 0 ? dollars(x.sum.cost) : "";
   const main = metric === "cost" ? cost || "—" : tokens(totalOf(x.sum));
   const second = metric === "cost" ? tokens(totalOf(x.sum)) : cost;
-  const hit = hitRate(x.sum);
-  const avatarHold = useHold(onToggle, onOnly);
-  const detailId = useId();
-  const detail = useRef<HTMLDivElement>(null);
-  const first = useRef(true);
-  // Its height is animated by script (the chat's fold): a CSS grid-row transition does not move
-  // in every browser, and reduced motion goes straight there. Opened, the box makes room while its
-  // models land one after another, from the first (the user, 2026-11-11); closed, the box and what
-  // is in it go together.
-  useLayoutEffect(() => {
-    const el = detail.current;
-    if (!el) return;
-    if (first.current) {
-      first.current = false;
-      el.style.height = open ? "auto" : "0px";
-      el.style.opacity = open ? "1" : "0";
-      return;
-    }
-    if (reduced()) {
-      el.style.height = open ? "auto" : "0px";
-      el.style.opacity = open ? "1" : "0";
-      return;
-    }
-    const h = open ? el.scrollHeight : el.offsetHeight;
-    const from = open ? 0 : h;
-    const to = open ? h : 0;
-    el.style.height = `${from}px`;
-    el.style.opacity = "1";
-    const a = el.animate(
-      open
-        ? [{ height: `${from}px` }, { height: `${to}px` }]
-        : [
-            { height: `${from}px`, opacity: 1 },
-            { height: `${to}px`, opacity: 0 },
-          ],
-      { duration: motion.dur(3), easing: motion.ease("out"), fill: "forwards" },
-    );
-    // A model's cells are the grid's own items, behind a wrapper of "contents": moved together,
-    // they are its line. Each line comes a step after the one above it, the first at once.
-    const pops: Animation[] = [];
-    if (open) {
-      const lines = [...el.querySelectorAll("[data-model]")].map((r) => [...r.children] as HTMLElement[]);
-      lines.forEach((cells, i) => {
-        for (const c of cells) {
-          pops.push(
-            c.animate([{ opacity: 0, transform: "translateY(-4px)" }, { opacity: 1, transform: "none" }], {
-              duration: motion.dur(2),
-              easing: motion.ease("spring"),
-              delay: 40 + Math.min(i, 6) * 40,
-              fill: "backwards",
-            }),
-          );
-        }
-      });
-    }
-    void a.finished
-      .then(() => {
-        el.style.height = open ? "auto" : "0px";
-        el.style.opacity = open ? "1" : "0";
-        a.cancel();
-      })
-      .catch(() => {});
-    return () => {
-      a.cancel();
-      for (const p of pops) p.cancel();
-    };
-  }, [open]);
-  // Its colour as a tint of the avatar, not a ring.
-  const mark = (
-    <span className="grid size-8 shrink-0 place-items-center rounded-full">
-      {w.mark(26, color)}
+  const hold = useHold(onToggle, onOnly);
+  const text = (
+    // Out of the chart, the whole row fades and loses its colour, avatar and bar too (the user,
+    // 2026-11-12: plainly, as at first; no 已移出 badge).
+    <span className={cn("flex min-w-0 flex-1 flex-col py-0.5 transition-[opacity,filter] duration-(--dur-2)", !on && OUT)}>
+      <span className="flex w-full items-baseline gap-2">
+        <span className="min-w-0 flex-1 truncate text-sm font-medium">{w.name}</span>
+        <span className="shrink-0 text-xs text-ink-3 tabular-nums">{second}</span>
+        <span className="shrink-0 text-sm font-semibold tabular-nums">{main}</span>
+      </span>
+      <span className="mt-1.5 block h-1 w-full overflow-hidden rounded-full bg-fill" aria-hidden>
+        <ShareBar share={whole && v ? Math.max(1, (v / whole) * 100) : 0} color={color} />
+      </span>
     </span>
   );
+  const models = <Models open={peek} onOpen={onPeek} x={x} name={w.name} mark={<span className={cn("grid transition-[opacity,filter] duration-(--dur-2)", !on && OUT)}>{w.mark(26, color)}</span>} small={w.mark(20, color)} />;
   return (
-    <div data-row={x.id} className={cn("g-fade -mx-1.5 flex flex-col rounded-md px-1.5 transition-colors duration-(--dur-2)", open && "bg-fill")}>
-      <div className="flex min-w-0 items-center gap-2.5 py-1.5">
-        {many ? (
+    <div data-row={x.id} className="g-fade -mx-1.5 flex min-w-0 items-center">
+      {many ? (
+        <button type="button" aria-pressed={on} aria-label={w.name} {...hold} className={cn("g-press flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-1.5 py-1.5 text-left outline-offset-1 transition-colors duration-(--dur-2) hover:bg-fill", PRESS)}>
+          {models}
+          {/* The row's words over its figures only: over the avatar, its models instead. */}
           <Tip
             label={
               <span className="flex flex-col gap-0.5">
@@ -1132,66 +1073,69 @@ function LoginRow({ x, u, color, whole, on, many, open, metric, onToggle, onOnly
               </span>
             }
           >
-            <button type="button" aria-pressed={on} aria-label={w.name} {...avatarHold} className={cn("g-press shrink-0 rounded-full outline-offset-2 hover:bg-fill-2", PRESS)}>
-              {mark}
-            </button>
+            {text}
           </Tip>
-        ) : (
-          mark
-        )}
-        <button
-          type="button"
-          aria-expanded={open}
-          aria-controls={detailId}
-          onClick={onOpen}
-          onContextMenu={(e) => e.preventDefault()}
-          className={cn("g-press flex min-w-0 flex-1 flex-col py-0.5 text-left outline-offset-2", PRESS)}
-        >
-          <span className="flex w-full items-baseline gap-2">
-            <span className={cn("min-w-0 flex-1 truncate text-sm font-medium transition-opacity duration-(--dur-2)", !on && "opacity-45")}>{w.name}</span>
-            {!on && <span className="shrink-0 rounded-full bg-fill-2 px-1.5 text-[10px] leading-4 text-ink-3">{t("usage.outOfChart")}</span>}
-            <span className={cn("shrink-0 text-xs text-ink-3 tabular-nums transition-opacity duration-(--dur-2)", !on && "opacity-45")}>
-              <HitTag open={open} hit={hit} sep={!!second} />
-              {second}
-            </span>
-            <span className={cn("shrink-0 text-sm font-semibold tabular-nums transition-opacity duration-(--dur-2)", !on && "opacity-45")}>{main}</span>
-          </span>
-          <span className="mt-1.5 flex w-full items-center gap-2">
-            <span className={cn("block h-1 min-w-0 flex-1 overflow-hidden rounded-full", open ? "bg-fill-2" : "bg-fill")} aria-hidden>
-              <ShareBar share={whole && v ? Math.max(1, (v / whole) * 100) : 0} color={color} />
-            </span>
-            <ChevronRight size={12} aria-hidden className={cn("shrink-0 text-ink-4 transition-transform duration-(--dur-2)", open && "rotate-90", !on && "opacity-45")} />
-          </span>
         </button>
-      </div>
-      <div
-        ref={detail}
-        id={detailId}
-        aria-hidden={!open || undefined}
-        inert={!open || undefined}
-        className="overflow-hidden"
+      ) : (
+        <div className="flex min-w-0 flex-1 items-center gap-2.5 px-1.5 py-1.5">
+          {models}
+          {text}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** A login out of the chart: faint and grey. */
+const OUT = "opacity-35 grayscale";
+
+/** A login's avatar, and its models in a panel floating out of it (the user, 2026-11-12: no key
+ *  of their own): with the pointer over it only; each one's hit rate, tokens and cost, the login's
+ *  own over them. A press on the avatar is the row's. */
+function Models({ open, onOpen, x, name, mark, small }: { open: boolean; onOpen: (o: boolean) => void; x: LoginSum; name: string; mark: ReactNode; small: ReactNode }) {
+  const hit = hitRate(x.sum);
+  const cost = x.sum.cost > 0 ? dollars(x.sum.cost) : "";
+  return (
+    <Popover.Root open={open} onOpenChange={onOpen}>
+      <Popover.Trigger
+        nativeButton={false}
+        openOnHover
+        delay={120}
+        closeDelay={120}
+        render={<span />}
+        aria-label={t("usage.modelsOf", { name })}
+        // Only the pointer over it opens the panel (the user, 2026-11-12): a press is the row's, in
+        // or out of the chart (held or right-clicked: the only one), never the panel's (Base UI's
+        // press would pin it open, or close it).
+        onClick={(e) => e.preventBaseUIHandler()}
+        className="grid size-8 shrink-0 place-items-center rounded-full transition-transform duration-(--dur-2) ease-(--ease-out) hover:scale-110 data-[popup-open]:scale-110"
       >
-        <div className="pb-2 ml-[2.625rem] grid grid-cols-[0.875rem_minmax(0,1fr)_auto_auto_auto] items-center gap-x-2.5 gap-y-1 text-xs tabular-nums">
+        {mark}
+      </Popover.Trigger>
+      <PopSurface side="right" align="start" sideOffset={8} className="w-[min(320px,calc(100vw-16px))] p-3">
+        <div className="flex min-w-0 items-center gap-2 pb-2">
+          {small}
+          <span className="min-w-0 flex-1 truncate text-sm font-medium">{name}</span>
+          <span className="shrink-0 text-xs text-ink-3 tabular-nums">{[hit && t("usage.hitShort", { n: hit }), tokens(totalOf(x.sum)), cost].filter(Boolean).join(" · ")}</span>
+        </div>
+        <div className="grid grid-cols-[0.875rem_minmax(0,1fr)_auto_auto_auto] items-center gap-x-2.5 gap-y-1 text-xs tabular-nums">
           <span />
           <span className="text-[11px] text-ink-4">{t("usage.model")}</span>
           <span className="text-right text-[11px] text-ink-4">{t("usage.colHit")}</span>
           <span className="text-right text-[11px] text-ink-4">{t("usage.tokensMetric")}</span>
           <span className="text-right text-[11px] text-ink-4">{t("usage.cost")}</span>
           {x.models.map((md) => (
-            // One line, its cells the grid's own: the wrapper is only the handle the fold moves.
-            <div key={md.key} data-model className="contents">
-              <ModelLine md={md} />
-            </div>
+            <ModelLine key={md.key} md={md} />
           ))}
         </div>
-      </div>
-    </div>
+      </PopSurface>
+    </Popover.Root>
   );
 }
 
 function ModelLine({ md }: { md: ModelSum }) {
   return (
-    <>
+    <div className="contents">
       <Logo agent={md.agent} size={13} />
       <span className="min-w-0 truncate text-ink-2" title={md.model}>
         {prettyModel(md.model, md.agent)}
@@ -1201,6 +1145,6 @@ function ModelLine({ md }: { md: ModelSum }) {
       </span>
       <span className="text-right text-ink-3">{tokens(totalOf(md.sum))}</span>
       <span className="text-right text-ink-2">{md.sum.cost > 0 ? dollars(md.sum.cost) : "—"}</span>
-    </>
+    </div>
   );
 }

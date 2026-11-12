@@ -27,7 +27,7 @@ type needs struct {
 	hub *hub.Hub
 	mu  sync.Mutex
 	all map[string]*need
-	// more: the needs kept elsewhere (needs_more.go: sessions' asks, shares), carried with these.
+	// more: the needs kept elsewhere (needs_more.go: sessions' asks), carried with these.
 	more func() []api.Need
 	pub  sync.Mutex // one publish at a time: the last one set carries the latest
 	pmu  sync.Mutex

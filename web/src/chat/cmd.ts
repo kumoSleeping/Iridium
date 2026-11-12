@@ -21,6 +21,10 @@ export type Cmd =
   | "ir-secret"
   | "ir-usage"
   | "ir-bot"
+  | "ir-share"
+  | "ir-notes"
+  | "ir-settings"
+  | "ir-answer"
   | "git"
   | "git-commit"
   | "git-push"
@@ -84,13 +88,68 @@ function namesSelf(args: string[], sub?: string): boolean {
 }
 
 /** An ir api call's sort, by its Satori method (and what channel.update changes), or by the
- *  path of one of Iridium's own routes (internal/…). */
-function irApiOf(method: string | undefined, args: string[]): Cmd | undefined {
+ *  path of one of Iridium's own routes (internal/…) and its HTTP method (ir api help all). */
+function irApiOf(verb: string | undefined, method: string | undefined, args: string[]): Cmd | undefined {
+  const waits = args.includes("--wait");
   if (method?.includes("/")) {
-    const p = method.replace(/^\/?(v1\/)?/, "").split("?")[0]!;
-    if (/^internal\/sessions\/[^/]+\/(stop|interrupt)$/.test(p)) return "ir-stop";
-    if (/^internal\/files$/.test(p)) return "ir-files";
-    if (/^internal\/guilds\//.test(p)) return "ir-ws";
+    const p = method.replace(/^\/?(v1\/)?/, "").split("?")[0]!.replace(/\/$/, "");
+    const v = verb ?? (args.some((a) => a.startsWith("@") || (/^[\w.]+:?=/.test(a) && !/^[\w.]+==/.test(a))) ? "POST" : "GET");
+    const [, root = "", ...rest] = p.split("/");
+    const sub = rest.join("/");
+    switch (root) {
+      case "sessions": {
+        if (!sub) return v === "POST" ? "ir-new" : "ir-list";
+        const what = rest.slice(1).join("/");
+        if (!what) return waits ? "ir-wait" : "ir-list";
+        if (/^(stop|interrupt)$/.test(what)) return "ir-stop";
+        if (what === "continue" || /^queue\//.test(what)) return "ir-send";
+        if (what === "shell") return "remote";
+        if (/^(model|mode|effort|preset|ultracode|rules)$/.test(what)) return "ir-settings";
+        if (/^(uploads|attach|release)/.test(what)) return "ir-files";
+        return "ir-read"; // files, image, commands, presets
+      }
+      case "files":
+      case "folders":
+      case "uploads":
+        return "ir-files";
+      case "links":
+      case "share":
+        return "ir-share";
+      case "guilds":
+        return "ir-ws";
+      case "machines":
+        return rest[1] === "shell" ? "remote" : "ir-machines";
+      case "shell":
+        return "remote";
+      case "apps":
+        return /\/profile$/.test(sub) ? "ir-profile" : sub ? "ir-access" : "ir-machines";
+      case "exec":
+      case "agents":
+        return "ir-machines";
+      case "me":
+        return sub === "perms" ? "ir-access" : "ir-profile";
+      case "pair":
+      case "pairing":
+      case "invites":
+        return "ir-access";
+      case "secrets":
+        return "ir-secret";
+      case "notes":
+      case "note-folders":
+        return "ir-notes";
+      case "usage":
+        return "ir-usage";
+      case "settings":
+      case "web":
+        return "ir-settings";
+      case "button":
+      case "needs":
+        return "ir-answer";
+      case "update":
+        return "install";
+      case "public":
+        return "net";
+    }
     return undefined;
   }
   switch (method) {
@@ -101,12 +160,15 @@ function irApiOf(method: string | undefined, args: string[]): Cmd | undefined {
     case "channel.get":
       return "ir-list";
     case "message.create":
+    case "message.update":
       return "ir-send";
     case "message.list":
     case "message.get":
       return "ir-read";
     case "channel.delete":
       return "ir-archive";
+    case "message.delete":
+      return "delete";
     case "channel.update": {
       const a = args.find((x) => x.startsWith("_data.archived:="));
       return a === undefined ? "ir-rename" : a.endsWith("false") ? "ir-unarchive" : "ir-archive";
@@ -114,8 +176,19 @@ function irApiOf(method: string | undefined, args: string[]): Cmd | undefined {
     case "guild.list":
     case "guild.get":
       return "ir-ws";
+    case "upload.create":
+      return "ir-files";
+    case "login.get":
+    case "user.get":
+    case "meta":
+      return "ir-profile";
   }
   return undefined;
+}
+
+/** Whether an ir call starts a session: ir new, ir api channel.create or POST internal/sessions. */
+export function opensSession(t: { name?: string; input?: string }): boolean {
+  return cmdOfCall(t) === "ir-new";
 }
 
 /** An ir call's subcommand and the words after it (past cd, env, sudo, bash -c): the first ir the
@@ -158,7 +231,7 @@ export function cpOfCall(t: { name?: string; input?: string }): { from: CpSide; 
 export function newOfCall(t: { name?: string; input?: string; result?: { text?: string; error?: boolean } }): { id: string; agent: string } | undefined {
   if (!t.result || t.result.error) return undefined;
   const ir = irOfCall(t);
-  const created = ir?.sub === "api" && ir.args.includes("channel.create");
+  const created = ir?.sub === "api" && (ir.args.includes("channel.create") || cmdOfCall(t) === "ir-new");
   if (ir?.sub !== "new" && !created) return undefined;
   const id = (t.result.text ?? "").trimStart().split("\n", 1)[0]!.trim();
   const agent = created ? (ir.args.find((a) => a.startsWith("_data.agent="))?.slice(12) ?? "") : (positional(ir.args, NEW_VALUED)[0] ?? "");
@@ -262,7 +335,8 @@ function sortOf(cmd: string, args: string[], out: boolean): Cmd | undefined {
   switch (cmd) {
     case "ir":
     case "iridium":
-      return sub === "api" ? irApiOf(/^(GET|POST|PUT|PATCH|DELETE)$/.test(pos[1] ?? "") ? pos[2] : pos[1], args) : IR[sub ?? ""];
+      if (sub !== "api") return IR[sub ?? ""];
+      return /^(GET|POST|PUT|PATCH|DELETE)$/i.test(pos[1] ?? "") ? irApiOf(pos[1]!.toUpperCase(), pos[2], args) : irApiOf(undefined, pos[1], args);
     case "git":
       return gitOf(args);
     case "gh":

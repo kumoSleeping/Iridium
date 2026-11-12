@@ -219,6 +219,13 @@ var schema = []string{
 	`ALTER TABLE apps ADD COLUMN agents_off TEXT NOT NULL DEFAULT '';`,
 	// 30: the login of the app an input came from (not ir_web's: its terminal is its login).
 	`ALTER TABLE inputs ADD COLUMN login TEXT NOT NULL DEFAULT '';`,
+	// 31: a session's public read-only link (publiclinks.go): the token's hash, one per session.
+	`CREATE TABLE IF NOT EXISTS public_links (
+		session    TEXT PRIMARY KEY,
+		hash       TEXT NOT NULL UNIQUE,
+		creator    TEXT NOT NULL DEFAULT '',
+		created_at INTEGER NOT NULL
+	);`,
 }
 
 // steps run in Go after the migration of their version, in the same transaction.
@@ -703,14 +710,14 @@ type Price func(model string, input, output, cacheRead, cacheWrite int64) (float
 // UsageByDay sums the usage since at (ms) by local day, terminal, agent and model, oldest day
 // first; terminals given, only theirs.
 func (s *Store) UsageByDay(at int64, terminals ...string) ([]UsageDay, error) {
-	return s.UsageBy(at, func(t time.Time) string { return t.Format(time.DateOnly) }, nil, terminals...)
+	return s.UsageBy(at, func(t time.Time) string { return t.Format(time.DateOnly) }, nil, nil, terminals...)
 }
 
 // UsageBy is UsageByDay with the rows put in bucket's keys (UsageDay.Day) rather than days, and
 // each row without a cost of its own priced by price (nil: none), row by row, before they are
-// summed.
-func (s *Store) UsageBy(at int64, bucket func(time.Time) string, price Price, terminals ...string) ([]UsageDay, error) {
-	q := `SELECT at, terminal, agent, model, input, output, cache_read, cache_write, cost_usd FROM usage WHERE at >= ?`
+// summed; keep given, only the rows of the sessions it keeps.
+func (s *Store) UsageBy(at int64, bucket func(time.Time) string, price Price, keep func(session string) bool, terminals ...string) ([]UsageDay, error) {
+	q := `SELECT at, terminal, session, agent, model, input, output, cache_read, cache_write, cost_usd FROM usage WHERE at >= ?`
 	args := []any{at}
 	if len(terminals) > 0 {
 		q += ` AND terminal IN (?` + strings.Repeat(`, ?`, len(terminals)-1) + `)`
@@ -729,10 +736,14 @@ func (s *Store) UsageBy(at int64, bucket func(time.Time) string, price Price, te
 	for rows.Next() {
 		var ms int64
 		var k key
+		var sess string
 		var in, o, cr, cw int64
 		var cost sql.NullFloat64
-		if err := rows.Scan(&ms, &k.terminal, &k.agent, &k.model, &in, &o, &cr, &cw, &cost); err != nil {
+		if err := rows.Scan(&ms, &k.terminal, &sess, &k.agent, &k.model, &in, &o, &cr, &cw, &cost); err != nil {
 			return nil, err
+		}
+		if keep != nil && !keep(sess) {
+			continue
 		}
 		k.day = bucket(time.UnixMilli(ms))
 		i, ok := index[k]

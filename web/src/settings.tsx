@@ -262,7 +262,7 @@ const mb = (n: number) => (n >= 1 << 20 ? `${(n / (1 << 20)).toFixed(1)} MB` : `
 const STALE = 3_600_000;
 
 /** 检查更新, the update in one row (the user, 2026-11-09: no notice above the profile). Up to date,
- *  检查更新 with when it last looked and a key that looks and, finding a newer release, downloads it,
+ *  检查更新 with the version now (the user, 2026-11-12: not 已是最新; when it last looked in its tip) and a key that looks and, finding a newer release, downloads it,
  *  puts it in place and restarts, asking nothing more; the page then loads the new build (the user,
  *  2026-11-08). A newer one out, 版本 with its version and the 更新 key, or how far its
  *  download is, a hairline along the row's foot; pressing the title opens its notes, the current
@@ -356,11 +356,11 @@ function UpdateItem({ manages }: { manages: boolean }) {
   }
 
   const checked = u.checkedAt ? new Date(u.checkedAt).toLocaleString(lang === "zh" ? "zh-CN" : "en", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
-  const status = u.phase === "checking" || busy ? t("settings.checking") : u.phase === "failed" ? t("settings.checkFailed") : checked ? `${t("settings.upToDate")} · ${checked}` : "";
+  const status = u.phase === "checking" || busy ? t("settings.checking") : u.phase === "failed" ? t("settings.checkFailed") : u.current;
   return (
     <Item label={t("settings.check")}>
       <span className="flex items-center gap-1">
-        <Tip label={failed ? u.error : status}>
+        <Tip label={failed ? u.error : (status === u.current && checked) || status}>
           <span className={`max-w-40 truncate text-xs tabular-nums ${u.phase === "failed" ? "text-err" : "text-ink-3"}`}>{status}</span>
         </Tip>
         <IconKey label={t("settings.check")} disabled={spin} onClick={update} className="size-7">

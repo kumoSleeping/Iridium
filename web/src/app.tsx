@@ -10,7 +10,7 @@ import { Dialog } from "@base-ui/react/dialog";
 import { Toast } from "@base-ui/react/toast";
 import { Tooltip } from "@base-ui/react/tooltip";
 import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type ReactNode } from "react";
-import { api, queryClient } from "./api/client";
+import { queryClient } from "./api/client";
 import { watchTurns } from "./chats";
 import { CreatePopover, WsPlus } from "./create";
 import { agentsQ, pushQ, useApps, useHome, useMe, useSettings, useUpdate, useWorkspaces } from "./data";
@@ -18,7 +18,7 @@ import { t, useLang } from "./i18n";
 import { applyTheme, initialTheme, keepTheme, MeKey, useTellLang, type ThemePref } from "./me";
 import { motion, pageTurn } from "./motion";
 import { prefetch } from "./prefetch";
-import { close, go, onTurn, openChat, over, quietDialog, route, usagePoint, useRoute, type Route } from "./route";
+import { close, go, onTurn, openChat, over, quietDialog, route, setUsageMachine, usagePoint, useRoute, type Route } from "./route";
 import { Pager, TABS_H } from "./pager";
 import { atLeft, atRight, GRIP, Sheet } from "./sheet";
 import { HeadKeys, Sidebar } from "./sidebar";
@@ -201,7 +201,7 @@ export function App() {
   // A tab, or a swipe across: the sheet stays out, the back key going back to the sessions.
   // 终端 the left page, as a swipe up from the left brings it; the sessions the right (the user, 2026-11-08);
   // the usage between them (the user, 2026-11-08).
-  const toPage = (i: number) => (setSheetOut(true), i >= 2 && setNotesPage(i === 3), i === 0 ? go({ name: "settings" }, route().name === "usage") : i === 1 ? go({ name: "usage" }, over(route())) : over(route()) && close(under));
+  const toPage = (i: number) => (setSheetOut(true), i >= 2 && setNotesPage(i === 3), i === 0 ? go({ name: "settings" }, route().name === "usage") : i === 1 ? (setUsageMachine(), go({ name: "usage" }, over(route()))) : over(route()) && close(under));
   // Put away, the panel is drawn afresh once it is down: its first page, not renaming.
   const [setsRound, setSetsRound] = useState(0);
   useEffect(() => {
@@ -278,7 +278,7 @@ export function App() {
       }
       onSearch={() => setJumping((j) => !j)}
       confirms={confirms}
-      onConfirm={(c) => (c.session && list?.some((s) => s.id === c.session) ? openChat(c.session) : c.kind === "share" && c.share?.session ? (openChat(c.share.session), void api.dropNeed(c.id).catch(() => {})) : go({ name: c.kind.startsWith("secret_") ? "secrets" : "apps" }, over(r)))}
+      onConfirm={(c) => (c.session && list?.some((s) => s.id === c.session) ? openChat(c.session) : go({ name: c.kind.startsWith("secret_") ? "secrets" : "apps" }, over(r)))}
       chatCode={chatCode}
       panelsCode={loadPanels}
       createKey={(trigger) => <CreatePopover trigger={trigger} />}
@@ -337,7 +337,7 @@ export function App() {
         {(slide) =>
           page === "apps" ? (
             <div key="apps" className={cn(slide, "h-full")}>
-              <AppsPage onBack={back} />
+              <AppsPage onBack={back} side={!phone} />
             </div>
           ) : page === "secrets" ? (
             <div key="secrets" className={cn(slide, "h-full")}>

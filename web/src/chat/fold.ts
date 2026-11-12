@@ -2,7 +2,7 @@
 // said fold into one line; the calls still running at the end show on their own. Pure, for tests.
 import type { Block } from "../api/types.gen";
 import { t } from "../i18n";
-import { cmdOfCall, cpOfCall, renameOnly, type Cmd, type CpSide } from "./cmd";
+import { cmdOfCall, cpOfCall, opensSession, renameOnly, type Cmd, type CpSide } from "./cmd";
 
 export type Tool = Block & { kind: "tool" };
 export type Step = Block & { kind: "tool" | "thinking" };
@@ -23,18 +23,31 @@ export function folded(blocks: Block[]): Shown[] {
   while (all[end - 1]?.kind === "tool" || all[end - 1]?.kind === "thinking") end--;
   const running = new Set(all.slice(end).filter((b): b is Tool => b.kind === "tool" && !b.result));
   const shown: Shown[] = [];
+  // A step that starts another agent's session is a line of its own, never folded with the
+  // others (the user, 2026-11-12): the steps before it one fold, those after it another.
+  const alone = new Set<Shown>();
   for (const b of all) {
     if (b.kind === "tool" || b.kind === "thinking") {
       if (running.has(b as Tool)) continue;
       // An empty thought says nothing.
       if (b.kind === "thinking" && !b.text?.trim()) continue;
       const last = shown.at(-1);
-      if (last?.kind === "fold") last.steps.push(b as Step);
-      else shown.push({ kind: "fold", at: b.at, steps: [b as Step] });
+      const own = b.kind === "tool" && startsAgent(b);
+      if (!own && last?.kind === "fold" && !alone.has(last)) last.steps.push(b as Step);
+      else {
+        const f: Shown = { kind: "fold", at: b.at, steps: [b as Step] };
+        if (own) alone.add(f);
+        shown.push(f);
+      }
     } else shown.push(b as Shown);
   }
   return [...shown, ...[...running].map((tool) => ({ kind: "running" as const, at: tool.at, tool }))];
 }
+
+/** Whether a call starts another agent: Claude's Agent (Task) and Workflow, Codex's spawn_agent,
+ *  ir new and ir api's channel.create (POST internal/sessions). */
+export const startsAgent = (t: { name?: string; input?: string }): boolean => STARTS.has((t.name ?? "").toLowerCase()) || opensSession(t);
+const STARTS = new Set(["agent", "task", "workflow", "spawn_agent"]);
 
 export type Kind = "read" | "search" | "web" | "edit" | "command" | "agent" | "todo" | "ask" | "mcp" | "other" | "thinking";
 

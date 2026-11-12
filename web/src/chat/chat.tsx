@@ -4,7 +4,7 @@
 // from the transcript (GET messages, after= what the open session's state says was written); its
 // drafts from the stream. Loaded only once a chat opens or the page is idle.
 import { Menu } from "@base-ui/react/menu";
-import { BarChart3, Ellipsis, ListTree, Plus, Settings } from "lucide-react";
+import { BarChart3, Ellipsis, Globe, ListTree, Plus, Settings } from "lucide-react";
 import type { Status } from "../api/types.gen";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import type { SessionState as LiveSession } from "../api/types.gen";
@@ -12,14 +12,13 @@ import { api } from "../api/client";
 import { LinkDot } from "../link";
 import type { Session } from "../api/types.gen";
 import { WsPlus } from "../create";
-import { chatOf, compactSent, stateAhead, type Draft as Drafted, type Sent } from "../chats";
+import { born, chatOf, compactSent, stateAhead, type Draft as Drafted, type Sent } from "../chats";
 import { LOCAL_ME, useAgent, useMachines, useMe, useWhoList, useWorkspaces } from "../data";
 import { t, useLang } from "../i18n";
 import { pushIn } from "../motion";
 import { openChat, openUsage } from "../route";
 import { PULL } from "../sheet";
 import { MenuItems, Rename, sessionActions, sessionTags } from "../sidebar";
-import { ShareSubmenu } from "../share";
 import { useConfirms, useList, useSession } from "../store";
 import { drafts, opened } from "../stream";
 import { errText } from "../toast";
@@ -34,6 +33,7 @@ import { folded, type Tool } from "./fold";
 import { ToolDraft, Waiting } from "./live";
 import { Draft } from "./markdown";
 import { ContextRing, ModeKey, ModelKey, modelView, PresetKey, QuotaBars, useMode } from "./meters";
+import { PublicLink } from "./publiclink";
 import { Queue } from "./queue";
 import { ShellRuns } from "./shell";
 import { Crash } from "./crash";
@@ -103,13 +103,14 @@ export function ChatPage({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?:
     };
   }, [id]);
   // The transcript grew past what is shown: the blocks since, from the state's tail when it has
-  // them, else fetched.
+  // them, else fetched. Also as the first page comes: it may have been read before what the state
+  // says was written (a message sent as the chat opened), and nothing else asks again.
   const end = s?.end ?? 0;
   useEffect(() => {
     if (!log.loaded || end <= log.end) return;
     if (!log.fromTail(s?.tail)) return void log.newer().then(changed, () => {});
     changed();
-  }, [end]);
+  }, [end, log.loaded]);
   useEffect(() => void (real && log.procIs(real.proc), changed()), [real?.proc]);
   // The turn ended: what was drafted is in the transcript now. Only those drafted by then go: the
   // next turn (queued, sent at once) may begin to write while the page fetches.
@@ -216,14 +217,23 @@ export function ChatPage({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?:
     fly.current = sent.key;
     changed();
   };
+  // Again under its id: one that went after all is not sent twice.
   const retry = async (sent: Sent) => {
     sent.failed = undefined;
     changed();
     try {
-      sent.input = (await api.send(id, sent.text, sent.files.map((f) => f.ref))).input;
+      const r = await api.send(id, sent.text, sent.files.map((f) => f.ref), false, sent.input);
+      sent.input = r.input || sent.input;
+      sent.queued = r.queued || r.command;
     } catch (e) {
       sent.failed = errText(e);
     }
+    sentDone(sent);
+  };
+  // Answered: queued, it is the queue's; else its block may have come before the answer did.
+  const sentDone = (x: Sent) => {
+    log.sent = log.sent.filter((y) => y !== x || !x.queued);
+    log.recheck();
     changed();
   };
   const files = (e: DragEvent) => e.dataTransfer.types.includes("Files") && (e.preventDefault(), true);
@@ -321,7 +331,7 @@ export function ChatPage({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?:
           ) : elsewhere ? (
             <div className="glass float rest flex h-12 items-center justify-center rounded-[20px] text-sm text-ink-3">{t("chat.elsewhere")}</div>
           ) : (
-            <Under s={s} ghost={ghost} composer={composer} onSent={onSent} onSentDone={(x) => ((log.sent = log.sent.filter((y) => y !== x || !x.queued)), changed())} modelOpen={modelOpen} setModelOpen={setModelOpen} modeOpen={modeOpen} setModeOpen={setModeOpen} usageOpen={usageOpen} setUsageOpen={setUsageOpen} />
+            <Under s={s} ghost={ghost} composer={composer} onSent={onSent} onSentDone={sentDone} modelOpen={modelOpen} setModelOpen={setModelOpen} modeOpen={modeOpen} setModeOpen={setModeOpen} usageOpen={usageOpen} setUsageOpen={setUsageOpen} />
           )}
         </div>
       </div>
@@ -335,12 +345,21 @@ function Under({ s, ghost, composer, onSent, onSentDone, modelOpen, setModelOpen
   const mode = useMode(s);
   const agentInfo = useAgent(s.agent);
   const [ctxOpen, setCtxOpen] = useState(false);
+  // Made here just now (create.tsx useStart): its keys fade in, not the chat before's swapped for them.
+  const [fresh] = useState(() => born.has(s.id));
+  useEffect(() => void born.delete(s.id), [s.id]);
+  // The model as the agent says it, once: while its process starts, or runs and has not said it
+  // yet, the key waits, not the default's guess shown and then changed (默认模型, Opus, Haiku in
+  // a second, the user, 2026-11-12). Not for ever: an agent that never says shows the guess.
+  const modelKnown = useWaited(!!s.model || (!s.live && s.status !== "starting"), MODEL_WAIT);
   return (
     <>
       <Composer
         ref={composer}
         s={s}
-        turn={turning(s)}
+        fresh={fresh}
+        // Starting is no turn of yours: the key sends (it goes once the agent is up), not stops.
+        turn={turning(s) && s.status !== "starting"}
         onSent={onSent}
         onSentDone={onSentDone}
         cycleMode={mode.cycle}
@@ -353,7 +372,7 @@ function Under({ s, ghost, composer, onSent, onSentDone, modelOpen, setModelOpen
           <>
             {/* Not guessed from the row: the mode and the model come with the state, gliding in. */}
             {!ghost && <ModeKey mode={mode} open={modeOpen} onOpenChange={setModeOpen} />}
-            {!ghost && <ModelKey s={s} open={modelOpen} onOpenChange={setModelOpen} />}
+            {!ghost && modelKnown && <ModelKey s={s} open={modelOpen} onOpenChange={setModelOpen} />}
             {/* dsh: its preset, then its balance where the bars would be (the user, 2026-11-08). */}
             {agentInfo?.presets ? <PresetKey s={s} /> : null}
             <QuotaBars agent={s.agent} machine={s.machine} live={s.live} using={[s.model, s.pick, modelView(s).name]} open={usageOpen} onOpenChange={setUsageOpen} />
@@ -365,6 +384,20 @@ function Under({ s, ghost, composer, onSent, onSentDone, modelOpen, setModelOpen
   );
 }
 
+/** How long the model key waits for the agent to say its model. */
+const MODEL_WAIT = 3000;
+
+/** ready, or ms after it was first not: what waits for something that may never come. */
+function useWaited(ready: boolean, ms: number): boolean {
+  const [over, setOver] = useState(false);
+  useEffect(() => {
+    if (ready || over) return;
+    const t = setTimeout(() => setOver(true), ms);
+    return () => clearTimeout(t);
+  }, [ready, over, ms]);
+  return ready || over;
+}
+
 /** The top bar: the logo with its lamp, the name (its folder only as its tooltip, the user,
  *  2026-11-08); more. The link's dot is the bar's own, left of ⋯ (link.tsx). Under them, while
  *  there are any, the places it works in (spots, Where). */
@@ -374,17 +407,19 @@ function Bar({ s, onSheet, onMe, spots, asked }: { s?: Session; onSheet?: () => 
   const [renaming, setRenaming] = useState(false);
   // ⋯'s "new session": the "+" of the session's workspace, its folder already this one's, under ⋯.
   const [making, setMaking] = useState(false);
+  // ⋯'s 公开链接: its popover under ⋯.
+  const [publicOpen, setPublicOpen] = useState(false);
   // Not there as the bar was first drawn: faded in as it comes.
   const late = useRef(!s).current ? "g-fade" : "";
   const more = useRef<HTMLButtonElement>(null);
   // The usage under ⋯, its right edge on ⋯'s, as the menu was (the user, 2026-11-08).
   const usageHere = () => {
     const b = more.current?.getBoundingClientRect();
-    openUsage(b && { x: b.right, y: b.bottom + 6, end: true });
+    openUsage(b && { x: b.right, y: b.bottom + 6, end: true }, s?.machine);
   };
   // ⋯'s items: making, the sheet and 我 on a phone, usage; then the session's own.
   const lead = [{ icon: <Plus size={15} />, label: t("menu.new"), run: () => requestAnimationFrame(() => setMaking(true)) }, ...(onSheet ? [{ icon: <ListTree size={15} />, label: t("nav.sidebar"), run: onSheet }] : []), ...(onMe ? [{ icon: <Settings size={15} />, label: t("nav.me"), run: onMe }] : []), { icon: <BarChart3 size={15} />, label: t("usage.title"), run: usageHere }];
-  const acts = s ? sessionActions(s, () => setRenaming(true)) : [];
+  const acts = s ? [...sessionActions(s, () => setRenaming(true)), { icon: <Globe size={15} />, label: t("public.menu"), run: () => requestAnimationFrame(() => setPublicOpen(true)) }] : [];
   return (
     <header className="g-turn-stay vt-bar glass absolute inset-x-0 top-0 z-20 shadow-[0_0.5px_0_var(--edge)]">
       <div className="flex h-12 items-center gap-1 pr-2 pl-2 pointer-coarse:h-13">
@@ -444,10 +479,11 @@ function Bar({ s, onSheet, onMe, spots, asked }: { s?: Session; onSheet?: () => 
               </Tip>
               <Menu.Portal>
                 <Menu.Positioner side="bottom" align="end" sideOffset={6} collisionPadding={8} className="z-50">
-                  <MenuItems lead={lead} items={acts} tags={sessionTags(s)} foot={<ShareSubmenu thing={{ what: "session", session: s.id }} i={lead.length + acts.length} />} />
+                  <MenuItems lead={lead} items={acts} tags={sessionTags(s)} />
                 </Menu.Positioner>
               </Menu.Portal>
             </Menu.Root>
+            <PublicLink key={s.id} session={s.id} anchor={more} open={publicOpen} onOpenChange={setPublicOpen} />
           </span>
         )}
       </div>

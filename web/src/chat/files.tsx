@@ -1,14 +1,19 @@
 // The files a message gives (plan "网页": [文件] `path` lines, attachments): a picture as a thumbnail (about 1024px) that opens the
-// original, a video or a sound to play in place, anything else a card to download. Only paths the
-// server says the conversation named, and that exist, show; it serves them by the session.
+// original, a video or a sound to play in place, anything else a card to download. A text file
+// (Markdown, a table, code, plain text) pressed shows over the page, its download key beside; a PDF
+// opens in a tab of its own (2026-11-12, preview.tsx). Only paths the server says the conversation
+// named, and that exist, show; it serves them by the session.
 import { Dialog } from "@base-ui/react/dialog";
-import { Download, FileCode2, FileText, FileX2, X } from "lucide-react";
-import { Shareable } from "../share";
-import { createContext, useCallback, useContext, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
+import { Download, FileCode2, FileText, FileX2, LoaderCircle, X } from "lucide-react";
+import { createContext, lazy, Suspense, useCallback, useContext, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { api } from "../api/client";
+import { Copyable } from "./copyable";
 import type { FileRef } from "../api/types.gen";
 import { t } from "../i18n";
 import { cn, IconKey, Tip } from "../ui";
+import { previewKind, type PreviewKind } from "./preview-lib";
+
+const PreviewBody = lazy(() => import("./preview"));
 
 export const size = (n: number) => (n < 1024 ? `${n} B` : n < 1 << 20 ? `${(n / 1024).toFixed(1)} KB` : n < 1 << 30 ? `${(n / (1 << 20)).toFixed(1)} MB` : `${(n / (1 << 30)).toFixed(2)} GB`);
 
@@ -28,9 +33,9 @@ export const CODE = /\.(tsx?|jsx?|go|rs|py|css|json|ya?ml|toml|sh|md)$/i;
 
 function One({ session, f }: { session: string; f: FileRef }) {
   return (
-    <Shareable thing={{ what: "file", session, ref: f.ref }} copy={f.path || undefined}>
+    <Copyable copy={f.path || undefined}>
       <Bare session={session} f={f} />
-    </Shareable>
+    </Copyable>
   );
 }
 
@@ -40,7 +45,7 @@ function Bare({ session, f }: { session: string; f: FileRef }) {
   if (f.kind === "image") return <Picture src={f.thumb ? api.thumbURL(session, f.ref, 1024, f.mtime) : url} full={url} name={name} w={f.w} h={f.h} />;
   if (f.kind === "video") return <video controls preload="metadata" src={url} className="block w-full max-w-[480px] rounded-lg bg-fill shadow-[0_0_0_0.5px_var(--edge)]" aria-label={name} />;
   if (f.kind === "audio") return <audio controls preload="metadata" src={url} className="w-full max-w-[340px]" aria-label={name} />;
-  return <FileCard name={name} detail={size(f.size)} href={api.fileURL(session, f.ref, true, f.mtime)} code={CODE.test(f.name)} />;
+  return <FileCard name={name} detail={size(f.size)} href={api.fileURL(session, f.ref, true, f.mtime)} view={url} mime={f.mime} code={CODE.test(f.name)} />;
 }
 
 /** The pictures sent from this page, by the path they were uploaded to: what the copy on this device
@@ -100,10 +105,59 @@ export function Zoom({ full, name, children }: { full: string; name: string; chi
   );
 }
 
+/** A file's preview key (previewKind): children inside, pressed it shows the file over the page,
+ *  its download key beside; a PDF opens in a tab of its own. view: the file served inline, href:
+ *  to download. */
+export function Preview({ kind, name, view, href, className, label, tip, children }: { kind: PreviewKind; name: string; view: string; href: string; className?: string; label?: string; tip?: string; children: ReactNode }) {
+  const tipped = (key: ReactElement) => (tip ? <Tip label={tip}>{key}</Tip> : key);
+  if (kind === "pdf")
+    return tipped(
+      <a href={view} target="_blank" rel="noopener noreferrer" aria-label={label} className={className}>
+        {children}
+      </a>,
+    );
+  return (
+    <Dialog.Root>
+      {tipped(
+        <Dialog.Trigger aria-label={label} className={className}>
+          {children}
+        </Dialog.Trigger>,
+      )}
+      <Dialog.Portal>
+        <Dialog.Backdrop className="fixed inset-0 z-50 bg-paper/70 backdrop-blur-sm transition-opacity duration-(--dur-2) data-ending-style:opacity-0 data-starting-style:opacity-0" />
+        <Dialog.Popup className="g-unfold fixed top-1/2 left-1/2 z-50 flex max-h-[86vh] w-[min(960px,94vw)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl bg-paper text-ink shadow-(--shadow-float) outline-none">
+          <div className="flex h-12 shrink-0 items-center gap-2 border-b border-edge pr-2 pl-4">
+            <Dialog.Title className="min-w-0 flex-1 truncate text-sm font-medium">{name}</Dialog.Title>
+            <Tip label={t("msg.download")}>
+              <a href={href} download={name} aria-label={t("msg.download")} className="g-press grid size-8 place-items-center rounded-full text-ink-2 hover:bg-fill hover:text-ink">
+                <Download size={15} />
+              </a>
+            </Tip>
+            <Dialog.Close aria-label={t("msg.close")} className="g-press grid size-8 place-items-center rounded-full text-ink-2 hover:bg-fill hover:text-ink">
+              <X size={15} />
+            </Dialog.Close>
+          </div>
+          <div className="min-h-0 flex-1 overflow-auto overscroll-contain">
+            <Suspense
+              fallback={
+                <div className="grid min-h-40 place-items-center text-ink-3">
+                  <LoaderCircle size={18} className="animate-spin" />
+                </div>
+              }
+            >
+              <PreviewBody url={view} name={name} kind={kind} />
+            </Suspense>
+          </div>
+        </Dialog.Popup>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
 /** A file sent with your words, as its card was in the composer (as high as a session's beside it,
- *  mention.tsx MentionCard): its icon, its name, its size; pressed, it downloads. No href: not yet
- *  landed. */
-export function SentFile({ name, bytes, href }: { name: string; bytes?: number; href?: string }) {
+ *  mention.tsx MentionCard): its icon, its name, its size; pressed, its preview (view: served
+ *  inline), or it downloads. No href: not yet landed. */
+export function SentFile({ name, bytes, href, view, mime }: { name: string; bytes?: number; href?: string; view?: string; mime?: string }) {
   const Icon = CODE.test(name) ? FileCode2 : FileText;
   const body = (
     <>
@@ -116,6 +170,13 @@ export function SentFile({ name, bytes, href }: { name: string; bytes?: number; 
   );
   const box = "flex h-11 w-44 max-w-full items-center gap-2 rounded-lg bg-paper/70 px-2.5 text-left shadow-[0_0_0_0.5px_var(--edge)]";
   if (!href) return <span className={box}>{body}</span>;
+  const kind = view ? previewKind(name, mime) : undefined;
+  if (kind && view)
+    return (
+      <Preview kind={kind} name={name} view={view} href={href} tip={t(kind === "pdf" ? "msg.openTab" : "msg.preview")} className={cn("g-press hover:bg-paper", box)}>
+        {body}
+      </Preview>
+    );
   return (
     <Tip label={t("msg.download")}>
       <a href={href} download={name} className={cn("g-press hover:bg-paper", box)}>
@@ -126,11 +187,18 @@ export function SentFile({ name, bytes, href }: { name: string; bytes?: number; 
 }
 
 /** A file to download: its name, its size, the download key. Spans, as it may stand in a paragraph
- *  (a reply's file link). */
-export function FileCard({ name, detail, href, code, onRemove, progress }: { name: string; detail: string; href?: string; code?: boolean; onRemove?: () => void; progress?: number }) {
+ *  (a reply's file link). view: the file served inline; one that previews (previewKind) shows
+ *  pressed anywhere but its download key. */
+export function FileCard({ name, detail, href, view, mime, code, onRemove, progress }: { name: string; detail: string; href?: string; view?: string; mime?: string; code?: boolean; onRemove?: () => void; progress?: number }) {
   const Icon = code ? FileCode2 : FileText;
+  const kind = view && href ? previewKind(name, mime) : undefined;
   return (
-    <span className="relative my-1 flex w-full max-w-[340px] items-center gap-3 overflow-hidden rounded-lg py-2 pr-1.5 pl-3 shadow-[0_0_0_0.5px_var(--edge),0_0_0_1px_var(--edge)]">
+    <span className={cn("relative my-1 flex w-full max-w-[340px] items-center gap-3 overflow-hidden rounded-lg py-2 pr-1.5 pl-3 shadow-[0_0_0_0.5px_var(--edge),0_0_0_1px_var(--edge)]", kind && "has-[>.peek:hover]:bg-fill")}>
+      {kind && view && href && (
+        <Preview kind={kind} name={name} view={view} href={href} label={`${name} · ${t(kind === "pdf" ? "msg.openTab" : "msg.preview")}`} className="peek absolute inset-0 rounded-lg">
+          {null}
+        </Preview>
+      )}
       <Icon size={20} className="shrink-0 text-ink-3" />
       <span className="block min-w-0 flex-1">
         <span className="block truncate text-sm">{name}</span>
@@ -138,7 +206,7 @@ export function FileCard({ name, detail, href, code, onRemove, progress }: { nam
       </span>
       {href && (
         <Tip label={t("msg.download")}>
-          <a href={href} download={name} aria-label={t("msg.download")} className="g-press grid size-8 shrink-0 place-items-center rounded-md text-ink-2 hover:bg-fill hover:text-ink pointer-coarse:size-10">
+          <a href={href} download={name} aria-label={t("msg.download")} className="g-press relative grid size-8 shrink-0 place-items-center rounded-md text-ink-2 hover:bg-fill-2 hover:text-ink pointer-coarse:size-10">
             <Download size={16} />
           </a>
         </Tip>
@@ -167,7 +235,7 @@ export function LinkFiles({ session, files, children }: { session: string; files
 export const isLink = (f: FileRef) => f.path.startsWith("ir:");
 
 /** A file link where the reply puts it: ![caption](ir:id) a picture, a video or a sound in place (any
- *  other file a card); [text](ir:id) a file to download, in the line. Unknown: struck, its words
+ *  other file a card); [text](ir:id) a file in the line, to preview (previewKind) or download. Unknown: struck, its words
  *  kept; in a draft (no files yet) its words only. */
 export function Linked({ id, label, inline }: { id: string; label: string; inline: boolean }) {
   const it = useContext(Linkable);
@@ -184,9 +252,18 @@ export function Linked({ id, label, inline }: { id: string; label: string; inlin
     );
   if (inline) {
     const href = api.fileURL(it.session, f.ref, true, f.mtime);
+    const kind = previewKind(f.name, f.mime);
+    const link = "inline-flex items-baseline gap-1 rounded-sm text-ink underline decoration-ink-4 underline-offset-2 hover:decoration-ink-2";
+    if (kind)
+      return (
+        <Preview kind={kind} name={f.name} view={api.fileURL(it.session, f.ref, false, f.mtime)} href={href} tip={`${f.name} · ${size(f.size)}`} className={cn(link, "cursor-pointer text-left")}>
+          <FileText size={13} className="shrink-0 self-center text-ink-3" />
+          {label || f.name}
+        </Preview>
+      );
     return (
       <Tip label={`${f.name} · ${size(f.size)}`}>
-        <a href={href} download={f.name} className="inline-flex items-baseline gap-1 rounded-sm text-ink underline decoration-ink-4 underline-offset-2 hover:decoration-ink-2">
+        <a href={href} download={f.name} className={link}>
           <Download size={13} className="shrink-0 self-center text-ink-3" />
           {label || f.name}
         </a>

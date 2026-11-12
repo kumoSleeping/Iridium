@@ -395,7 +395,7 @@ func (s *Service) messageCreate(ctx context.Context, c Caller, body []byte) (any
 	for i, els := range groups {
 		o := req.Data
 		if i > 0 {
-			o.Attachments, o.Paths = nil, nil
+			o.Attachments, o.Paths, o.ID = nil, nil, "" // the id is the first message's
 		}
 		m, err := s.sendOne(ctx, c, st, els, o)
 		if err != nil {

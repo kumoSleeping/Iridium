@@ -145,6 +145,7 @@ func (s *Server) newWeb(origin string) (*webapp.Web, error) {
 		Hosts:        s.cfg.Hosts,
 		OnJoin:       s.joined,
 		Open:         openPath,
+		Viewer:       http.HandlerFunc(s.viewer),
 		Logger:       s.gateLog(),
 	})
 }

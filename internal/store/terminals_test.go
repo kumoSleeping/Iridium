@@ -2,6 +2,7 @@ package store
 
 import (
 	"testing"
+	"time"
 )
 
 func TestRulesOpenersTokens(t *testing.T) {
@@ -36,6 +37,13 @@ func TestRulesOpenersTokens(t *testing.T) {
 	}
 	if n, _ := s.TokensSince("z", 0); n != 0 {
 		t.Fatalf("none: %d", n)
+	}
+	// keep: only the sessions it keeps.
+	must(t, s.AddUsage(Usage{Terminal: "x", Session: "s2", Agent: "pi", Model: "m", Input: 7}))
+	day := func(time.Time) string { return "d" }
+	got, err := s.UsageBy(0, day, nil, func(id string) bool { return id == "s2" })
+	if err != nil || len(got) != 1 || got[0].Input != 7 || got[0].Agent != "pi" {
+		t.Fatalf("kept s2: %+v %v", got, err)
 	}
 }
 

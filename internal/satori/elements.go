@@ -459,15 +459,16 @@ func plain(b *strings.Builder, els []Element, ref func(e Element) string) {
 				b.WriteString(inner + " (" + href + ")")
 			}
 		case "sharp":
+			// A session as the page's composer names it (docs/plan.md "@"): [title](ir:session/<id>).
 			name := e.Attr("name")
 			if name == "" {
 				name = Plain(e.Children, ref)
 			}
-			if name != "" {
-				b.WriteString("#" + name + " (" + e.Attr("id") + ")")
-			} else {
-				b.WriteString("#" + e.Attr("id"))
+			if name == "" {
+				name = e.Attr("id")
 			}
+			name = strings.NewReplacer("[", "［", "]", "］", "\n", " ").Replace(name)
+			b.WriteString("[" + name + "](ir:session/" + e.Attr("id") + ")")
 		case "at":
 			name := e.Attr("name")
 			if name == "" {

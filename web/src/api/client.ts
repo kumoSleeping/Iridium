@@ -10,10 +10,8 @@ import type {
   CardAnswer,
   CompleteUpload,
   NeedAnswer,
-  ShareReply,
-  ShareRequest,
-  ShareTargets,
   NeedReply,
+  PublicLink,
   Needs,
   FolderReply,
   Folders,
@@ -167,6 +165,12 @@ export async function writeAgain<T>(method: string, url: string, body?: unknown)
   }
 }
 
+/** How long a send waits for its answer: past the daemon's own minute for one (an agent started at
+ *  another machine), so only a link gone dead runs it out. */
+const SEND_WAIT = 65_000;
+/** A request that ran out of time (AbortSignal.timeout). */
+export const noAnswer = (e: unknown) => e instanceof DOMException && e.name === "TimeoutError";
+
 const enc = encodeURIComponent;
 
 /** Text as a Satori message's content: its markup characters escaped (protocol/elements.md). */
@@ -226,20 +230,35 @@ export const api = {
     return { id: ch.id };
   },
   /** A message: queued while a turn runs (queued in the reply), or joining it with steer.
-   *  attachments: upload refs. */
-  send: async (id: string, text: string, attachments?: string[], steer = false): Promise<SendReply> => {
+   *  attachments: upload refs. input: its id, chosen here (a UUID): the transcript's block has it
+   *  as it comes, before the answer; lost on the way, the send goes again under it, never twice. */
+  send: async (id: string, text: string, attachments?: string[], steer = false, input?: string): Promise<SendReply> => {
     // Satori's message.create (docs/satori.md), as every app sends; Iridium's _data says whether it
     // joins the turn and which uploads go with it, and answers what the send did.
     await whoKnown();
-    const sent = await write<{ _data?: SendReply }[]>("POST", "/v1/message.create", {
+    const body = {
       channel_id: id,
       content: escapeSatori(text),
-      _data: { ...(steer ? { steer } : {}), ...(attachments?.length ? { attachments } : {}) },
-    });
-    return sent[0]?._data ?? { input: "" };
+      _data: { ...(steer ? { steer } : {}), ...(attachments?.length ? { attachments } : {}), ...(input ? { id: input } : {}) },
+    };
+    for (let tries = 1; ; tries++) {
+      try {
+        const sent = await write<{ _data?: SendReply }[]>("POST", "/v1/message.create", body, { signal: AbortSignal.timeout(SEND_WAIT) });
+        return sent[0]?._data ?? { input: input ?? "" };
+      } catch (e) {
+        const lost = e instanceof TypeError || noAnswer(e) || (e instanceof ApiError && (e.status === 502 || e.status === 503));
+        if (!input || !lost || tries === 3) throw e;
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+    }
   },
   interrupt: (id: string) => write<{ ok: boolean }>("POST", `${S(id)}/interrupt`),
   stop: (id: string) => write<{ ok: boolean }>("POST", `${S(id)}/stop`),
+  /** The session's public read-only link (docs/api.md "公开链接"): its state; made anew (its URL only
+   *  in this answer); revoked. */
+  publicLink: (id: string) => get<PublicLink>(`${S(id)}/public`),
+  makePublicLink: (id: string) => write<PublicLink>("POST", `${S(id)}/public`),
+  revokePublicLink: (id: string) => write<{ ok: boolean }>("DELETE", `${S(id)}/public`),
   /** A command line at the session's machine, in cwd ("": its folder) (docs/api.md "命令"). */
   shell: (id: string, line: string, cwd?: string) => write<ShellStarted>("POST", `${S(id)}/shell`, { line, ...(cwd ? { cwd } : {}) } satisfies ShellRun),
   shellRead: (run: string, from: number) => get<ShellOutput>(`/v1/internal/shell/${enc(run)}?from=${from}`),
@@ -370,15 +389,10 @@ export const api = {
   /** PUT /v1/internal/pairing: the pairing window opened for minutes (10 by default) or closed. */
   pairing: (open: boolean, minutes?: number) => write<PairWindow>("PUT", "/v1/internal/pairing", { open, ...(minutes ? { minutes } : {}) } satisfies PairWindow),
 
-  /** GET /v1/internal/usage: the last days' tokens by day, app, agent and model; terminal: one app only; by hour: the last 24 hours'; by weekhour: by weekday and hour. */
-  usage: (days: number, terminal?: string, by?: "hour" | "weekhour") => get<Usage>(`/v1/internal/usage?days=${days}${terminal ? `&app=${enc(terminal)}` : ""}${by ? `&by=${by}` : ""}`),
+  /** GET /v1/internal/usage: the last days' tokens by day, app, agent and model; terminal: one app only; by hour: the last 24 hours'; by weekhour: by weekday and hour; machine: only the sessions at that computer (an executor's app ID). */
+  usage: (days: number, terminal?: string, by?: "hour" | "weekhour", machine?: string) => get<Usage>(`/v1/internal/usage?days=${days}${terminal ? `&app=${enc(terminal)}` : ""}${by ? `&by=${by}` : ""}${machine ? `&machine=${enc(machine)}` : ""}`),
   confirms: () => get<Needs>("/v1/internal/needs"),
   /** extra: a secret-set's value, a secret-use's "this session". */
-  /** A share put away by the login it was for. */
-  dropNeed: (id: string) => write<{ ok: boolean }>("DELETE", `/v1/internal/needs/${enc(id)}`),
-  /** Something shared with a login (docs/api.md "分享"); targets: who may use it. */
-  share: (r: ShareRequest) => write<ShareReply>("POST", "/v1/internal/share", r),
-  shareTargets: (r: Omit<ShareRequest, "to" | "note">) => get<ShareTargets>(`/v1/internal/share/targets?${new URLSearchParams(Object.entries(r).filter(([, v]) => v) as [string, string][])}`),
   answerConfirm: (id: string, allow: boolean, extra?: Omit<NeedAnswer, "allow">) => write<NeedReply>("POST", `/v1/internal/needs/${enc(id)}`, { allow, ...extra } satisfies NeedAnswer),
 
   // --- the credentials (docs/api.md "凭据"): never a value back ---

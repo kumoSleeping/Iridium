@@ -42,7 +42,6 @@ func (s *Server) appRoutes(mux *http.ServeMux) {
 	// An app asks for other permissions: an app_change need.
 	mux.HandleFunc("PUT /v1/internal/me/perms", s.askChange)
 	mux.HandleFunc("GET /v1/internal/needs", s.listNeeds) // needs_more.go
-	mux.HandleFunc("DELETE /v1/internal/needs/{id}", s.dropNeed)
 	mux.HandleFunc("POST /v1/internal/needs/{id}", s.approver(s.answerNeed))
 	// How one went, never a secret: for whoever manages, and any ir on the socket (an agent's in a
 	// session an app opened waits for its ir run's too).

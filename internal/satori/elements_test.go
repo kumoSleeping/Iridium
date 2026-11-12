@@ -65,7 +65,7 @@ func TestPlain(t *testing.T) {
 			}
 			return e.Attr("title")
 		})
-	want := "look\nat this (https://x.y) and #build (s2), @kumo\nf.txt> q1\n> q2\nok"
+	want := "look\nat this (https://x.y) and [build](ir:session/s2), @kumo\nf.txt> q1\n> q2\nok"
 	if got != want || refs != 1 {
 		t.Errorf("Plain: %q (%d refs), want %q", got, refs, want)
 	}

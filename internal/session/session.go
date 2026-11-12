@@ -49,6 +49,7 @@ func SystemPrompt(lang string) string {
 	b.WriteString(`Secrets: never ask for one in the chat: ir api help secrets.
 Files: to show or hand the user a file, put the Markdown that ir api POST internal/links path=<path> prints in your reply: ![caption](ir:id) shows a picture, a video or a sound in place, [text](ir:id) is a file to download. Any other path, file:// link or local image is plain text.
 `)
+	b.WriteString(namesLine)
 	b.WriteString(titleLine)
 	if name := langNames[lang]; name != "" {
 		b.WriteString("The user's language, as set in the web settings: " + name + ".\n")
@@ -68,12 +69,17 @@ func RemotePrompt(lang string, ir bool) string {
 	} else {
 		b.WriteString("This session is hosted by Iridium and runs at another machine than Iridium's own.\n")
 	}
+	b.WriteString(namesLine)
 	b.WriteString(titleLine)
 	if name := langNames[lang]; name != "" {
 		b.WriteString("The user's language, as set in the web settings: " + name + ".\n")
 	}
 	return b.String()
 }
+
+// namesLine: how words name a session or a folder, as the page's composer writes them (docs/plan.md
+// "@") and draws them, in the user's words and in a reply.
+const namesLine = "Names: [title](ir:session/<id>) is a session, [name](ir:folder/<path>) a folder (<computer>:<path> at another), as the user's messages write them, shown as links to them. Satori's <img src=\"ir:id\"/>, <file src=\"ir:id\"/> and <sharp id name/> work too.\n"
 
 const titleLine = "Title: as your first action in a session, and again only when its subject changes, run ir api channel.update channel_id=self data.name=\"<title>\": a short name for the specific thing and task, in the user's language, without punctuation, quotes or emoji. If the user named it, leave it.\n"
 
@@ -245,6 +251,16 @@ func (m *Manager) get(id string) (*Hosted, error) {
 		return nil, ErrNotFound
 	}
 	return h, nil
+}
+
+// MachineOf is hosted session id's computer: its executor's app ID, "" here; ok false for a
+// session Iridium does not host.
+func (m *Manager) MachineOf(id string) (machine string, ok bool) {
+	h, err := m.get(id)
+	if err != nil {
+		return "", false
+	}
+	return h.meta.Machine, true
 }
 
 // TurnFrom is who began hosted session id's latest turn: the terminal, and the session whose agent

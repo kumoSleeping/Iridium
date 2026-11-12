@@ -12,28 +12,6 @@ import { atSessions } from "./refs";
 
 /** A place named: machine its ID (none for this machine), path '/'-separated, name as it is said. */
 export type NamedPlace = Place & { name: string };
-/** One thing named in the composer: a session by its ID, or a place. */
-export type Named = { kind: "session"; id: string } | ({ kind: "place" } & NamedPlace);
-
-/** What tells two named apart: a session's ID, a place's machine and path. */
-export const namedKey = (n: Named) => (n.kind === "session" ? n.id : `${n.machine ?? ""}:${n.path}`);
-
-/** What the composer kept of a draft's named: JSON, or the sessions' IDs space-joined as it was
- *  kept before places could be named. */
-export function namedOf(kept: string | null | undefined): Named[] {
-  if (!kept) return [];
-  if (kept.startsWith("[")) {
-    try {
-      const v: unknown = JSON.parse(kept);
-      if (Array.isArray(v))
-        return v.filter((x): x is Named => !!x && typeof x === "object" && ((x.kind === "session" && typeof x.id === "string") || (x.kind === "place" && typeof x.path === "string" && typeof x.name === "string")));
-    } catch {
-      return [];
-    }
-  }
-  return kept.split(" ").filter(Boolean).map((id) => ({ kind: "session", id }));
-}
-
 /** The place a group's or a folder's row dragged here is (PLACE_DRAG's data: {path, name}, path the
  *  page's); none if it is not one. */
 export function placeDropped(data: string): NamedPlace | undefined {

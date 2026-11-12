@@ -12,7 +12,7 @@ import { LOCAL_ME, useMe } from "./data";
 import { t } from "./i18n";
 import { LocalMark } from "./me";
 import { errText, toast } from "./toast";
-import { Avatar, IconKey, Tip, tokens } from "./ui";
+import { AvatarKey, IconKey, Tip, tokens } from "./ui";
 
 /** The devices a terminal may say it runs on, in the picker's order; none: no badge shown. */
 const DEVICES = ["computer", "laptop", "phone", "none"] as const satisfies readonly Device[];
@@ -77,11 +77,7 @@ export function Profile({ onPicture }: { onPicture: (url: string) => void }) {
         {me.host ? (
           <LocalMark size={44} />
         ) : (
-          <Tip label={t("me.avatar")}>
-            <button type="button" aria-label={t("me.avatar")} onClick={() => file.current?.click()} className="g-press grid rounded-full">
-              <Avatar src={me.avatar} name={name} size={44} />
-            </button>
-          </Tip>
+          <AvatarKey label={t("me.avatar")} onClick={() => file.current?.click()} src={me.avatar} name={name} size={44} />
         )}
         <DeviceKey />
       </span>
@@ -120,7 +116,8 @@ export function Profile({ onPicture }: { onPicture: (url: string) => void }) {
 
 /** The device this terminal runs on, for every panel to see: the badge on its messages' avatar. A
  *  key on the face's corner, as that badge is, its icon the device now; a press goes on to the next
- *  (the user, 2026-11-08). */
+ *  (the user, 2026-11-08). Under a pointer it inverts: a key, not a mark (the
+ *  user, 2026-11-12). */
 function DeviceKey() {
   const qc = useQueryClient();
   const me: Me = useMe().data ?? LOCAL_ME;
@@ -145,7 +142,7 @@ function DeviceKey() {
         type="button"
         aria-label={`${t("me.device")} · ${t(`device.${device}`)}`}
         onClick={() => void set(next)}
-        className="g-press absolute -right-[3px] -bottom-[3px] grid size-[20px] place-items-center rounded-full bg-fill-2 text-ink-2 shadow-[0_0_0_1.5px_var(--paper)] before:absolute before:-inset-2 before:content-[''] hover:text-ink"
+        className="g-press absolute -right-[3px] -bottom-[3px] grid size-[20px] place-items-center rounded-full bg-fill-2 text-ink-2 shadow-[0_0_0_1.5px_var(--paper)] before:absolute before:-inset-2 before:content-[''] hover:bg-ink hover:text-on-ink focus-visible:bg-ink focus-visible:text-on-ink"
       >
         <span key={device} className="g-pop grid place-items-center">
           {DEVICE_ICON[device](12)}

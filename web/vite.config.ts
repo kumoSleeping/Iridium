@@ -41,7 +41,8 @@ function later(): Plugin {
     apply: "build",
     transformIndexHtml: {
       order: "post",
-      handler(_, { bundle }) {
+      handler(_, { bundle, path, chunk }) {
+        if (path !== "/index.html") return []; // view.html (a public link's view) prefetches nothing
         const files = (from: string[], into = new Set<string>()): Set<string> => {
           for (const name of from) {
             const c = bundle![name];
@@ -54,7 +55,7 @@ function later(): Plugin {
         };
         const chunks = Object.values(bundle!).flatMap((c) => (c.type === "chunk" ? [c] : []));
         const part = (...ends: string[]) => ends.flatMap((p) => chunks.filter((c) => c.facadeModuleId?.endsWith(p)).map((c) => c.fileName));
-        const loaded = files(chunks.filter((c) => c.isEntry).map((c) => c.fileName));
+        const loaded = files(chunk ? [chunk.fileName] : []);
         const later = new Set<string>();
         for (const p of LATER) files(part(p), later);
         const content = [...later]
@@ -77,6 +78,9 @@ export default defineConfig({
     manifest: true,
     chunkSizeWarningLimit: 1024, // test/build.test.ts guards what is sent
     rolldownOptions: {
+      // The panel, and a public link's read-only view (src/view.tsx), served under /p/<token>/ with
+      // its files (internal/server/publiclink.go).
+      input: { index: `${import.meta.dirname}/index.html`, view: `${import.meta.dirname}/view.html` },
       output: {
         // The libraries apart from our code, so an update that changes only ours keeps their files'
         // names: those of the first screen in one file, those two or more later parts share in
@@ -91,6 +95,9 @@ export default defineConfig({
       },
     },
   },
+  // The files a script names (what a part loads ahead), by the script's own address: a public link's
+  // view takes them from under its link, the panel from /assets/ as before.
+  experimental: { renderBuiltUrl: (_, { hostType }) => (hostType === "js" ? { relative: true } : undefined) },
   resolve: {
     alias: {
       // Streamdown imports rehype-raw for its default plugins, which src/chat/markdown.tsx turns off:

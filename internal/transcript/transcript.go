@@ -781,7 +781,17 @@ func cut(s string, max int) string {
 	return s
 }
 
-func oneLine(s string) string { return strings.TrimSpace(space.ReplaceAllString(s, " ")) }
+// oneLine is s on one line, as a title or a last sentence shows it: Iridium's links (a file's
+// ir:<id>, a session's ir:session/…, a folder's ir:folder/…) their words alone.
+func oneLine(s string) string {
+	if strings.Contains(s, "](") {
+		s = irLink.ReplaceAllString(s, "$1")
+	}
+	return strings.TrimSpace(space.ReplaceAllString(s, " "))
+}
+
+// irLink is a Markdown link (or picture) to one of Iridium's: its words in the first group.
+var irLink = regexp.MustCompile(`!?\[([^\[\]\n]{0,200})\]\((?:<ir:[^<>\n]+>|ir:[^\s()<>]+)\)`)
 
 func cmpOr(a, b string) string {
 	if a != "" {

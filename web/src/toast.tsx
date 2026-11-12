@@ -2,7 +2,7 @@
 // error, a turn done elsewhere with a key to open it.
 import { Toast } from "@base-ui/react/toast";
 import { CircleAlert } from "lucide-react";
-import { ApiError } from "./api/client";
+import { ApiError, noAnswer } from "./api/client";
 import type { Agent } from "./api/types.gen";
 import { t } from "./i18n";
 import { Logo } from "./ui";
@@ -22,6 +22,7 @@ export function toast(title: string, opts: { description?: string; error?: boole
  *  as while it restarts), a bare status said as one; else the server's own words. */
 export const errText = (e: unknown) => {
   if (e instanceof TypeError) return t("err.offline");
+  if (noAnswer(e)) return t("err.noAnswer");
   if (e instanceof ApiError && /^\d+$/.test(e.message)) return e.status >= 502 && e.status <= 504 ? t("err.unavailable") : t("err.status", { code: e.status });
   return e instanceof Error ? e.message : String(e);
 };

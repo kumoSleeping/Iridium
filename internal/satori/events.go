@@ -38,7 +38,7 @@ type entry struct {
 	session string
 	ev      Event         // login left out; a message's content without its files
 	files   []api.FileRef // a message's files, written in for each login
-	// app, login: an event for that login alone (Share), whoever sees what session; login "*":
+	// app, login: an event for that login alone, whoever sees what session; login "*":
 	// for the app, once a connection (a button it attached pressed); about: one about that login
 	// (login-*), for every connection of the app (a login's own: its own only).
 	app, login string
@@ -271,21 +271,6 @@ func (s *Service) emit(ss api.Session, ev Event, files []api.FileRef, kind strin
 		ev.XType = ""
 	}
 	s.out.add(entry{at: time.Now(), session: ss.ID, ev: ev, files: files})
-}
-
-// Share sends login of app an internal event, _type ir.share, _data {kind: "share", share} (draft
-// 二「消息」 分享): something shared with it, which the server checked it may use; its channel the
-// session shared (or the reply's, the file's), if any. What the app does with it is its own.
-func (s *Service) Share(app, login string, ss *api.Session, sh api.Share) {
-	ev := Event{Type: "internal", Timestamp: time.Now().UnixMilli(), XType: "ir.share", XData: &EventData{Kind: "share", Share: &sh}}
-	if sh.From != "" {
-		ev.User = &User{ID: sh.From, Name: sh.FromName}
-	}
-	id := ""
-	if ss != nil {
-		ev.Channel, ev.Guild, id = s.channelMasked(*ss), s.guildOf(*ss), ss.ID
-	}
-	s.out.add(entry{at: time.Now(), session: id, ev: ev, app: app, login: login})
 }
 
 // resolve is the transcript's message for what the agent just said, if it is there: the last

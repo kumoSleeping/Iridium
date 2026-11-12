@@ -7,6 +7,7 @@ import { ChevronRight, Folder, FolderPlus, LoaderCircle } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import type { Workspace } from "./api/types.gen";
 import { api, missing } from "./api/client";
+import { born } from "./chats";
 import { openChat } from "./route";
 import type { Agent } from "./api/types.gen";
 import { t } from "./i18n";
@@ -402,6 +403,7 @@ export function useStart(opened: (id: string) => void) {
     setBusy(machine ? `${machine}/${agent}` : agent);
     try {
       const { id } = await api.create({ agent, cwd, ...(workspace ? { workspace } : {}), ...(machine ? { machine } : {}) });
+      born.add(id);
       opened(id);
     } catch (e) {
       toast(t("err.newSession"), { error: true, description: errText(e) });

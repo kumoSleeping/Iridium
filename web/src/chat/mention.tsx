@@ -6,7 +6,12 @@
 // were written. Each goes there. A place named (docs/plan.md "@", 2026-11-10) is a card of the same
 // kind: its folder (a cloud on it at another machine), its name, where it is; pressed, the list
 // shows it (places.ts).
-import { useLayoutEffect, useMemo, useRef, type RefObject } from "react";
+// Sessions and places named in what is written (docs/plan.md "@"; the user, 2026-11-12): a link of
+// Iridium's among the words (refs.ts Mention), where it was put, drawn there as a download link is:
+// its agent's logo (a folder for a place), its name, underlined; pressed, it goes there (a place:
+// the list shows it, places.ts). In the composer's box the same, under its letters (MentionMarks).
+// A step's sessions (ir new, ir send 4ceb1321) are cards under it (MentionCard, NamedCards).
+import { useLayoutEffect, useMemo, useRef, type ReactNode, type RefObject } from "react";
 import type { Agent, Session } from "../api/types.gen";
 import { openChat } from "../route";
 import { useList } from "../store";
@@ -15,32 +20,20 @@ import { t } from "../i18n";
 import { Folder, MessageSquare } from "lucide-react";
 import { CloudBadge, MachineFace, type Machine } from "../machines";
 import { openPlace, type Place } from "../places";
-import { AGENTS, agentName, cn, Logo, tilde, titleOf } from "../ui";
+import { AGENTS, agentName, cn, Logo, tilde, Tip, titleOf } from "../ui";
 import { baseName, nativeAt, type NamedPlace } from "./at";
-import { mentions, sessionIds, shortId, type Mention } from "./refs";
+import { boxed, MARK, mentions, placeLink, sessionIds, sessionLink, shortId, type Mention } from "./refs";
 
 /** How the composer names session to, among list: what a row dropped or picked after @ puts in. */
-export const mentionOf = (to: Session, list: Session[]) => t("composer.mention", { title: titleOf(to) || tilde(to.cwd), agent: agentName(to.agent), id: shortId(to.id, list.map((x) => x.id)) });
+export const mentionOf = (to: Session, list: Session[]) => sessionLink(titleOf(to) || tilde(to.cwd), shortId(to.id, list.map((x) => x.id)));
 
 /** How the composer names place p: a folder here by its path; one at another machine by the
- *  machine's name (its ID if the name has what would end it) and the path as it writes it. Its
- *  name without the marks that close it (" 」 as ” 』), on one line, at most 200 long, so it reads
- *  back (refs.ts mentions). */
+ *  machine's name (its ID if the name has what would end it) and the path as it writes it. */
 export function placeMention(p: NamedPlace, ms: Machine[]): string {
-  const name = sayable(p.name) || sayable(baseName(p.path)) || "/";
-  if (!p.machine) return t("composer.mentionFolder", { name, path: p.path });
+  const name = p.name || baseName(p.path) || "/";
+  if (!p.machine) return placeLink(name, p.path);
   const m = ms.find((x) => x.id === p.machine);
-  const machine = m && !/[\n:「」（）"()]/.test(m.name) ? m.name : p.machine;
-  return t("composer.mentionWorkspace", { name, machine, path: nativeAt(m, p.path) });
-}
-
-function sayable(name: string): string {
-  let out = "";
-  for (const c of name.replaceAll('"', "”").replaceAll("」", "』").replace(/\s+/g, " ").trim()) {
-    if (out.length + c.length > 200) break;
-    out += c;
-  }
-  return out;
+  return placeLink(name, nativeAt(m, p.path), m && !/[\s:/]/.test(m.name) ? m.name : p.machine);
 }
 
 /** The machine a mention names: by its ID, else its name in any case. */
@@ -87,9 +80,10 @@ export function PlaceLines({ name, remote, machine, machineName, path }: { name:
 /** Whether the words name a session or a place. */
 export const hasMention = (text: string) => mentions(text).some((p) => typeof p !== "string");
 
-/** Behind the composer's box, whose own letters are clear while it names a session: the same words
- *  in the same place, a mention on a soft ground, its agent and id faint. Only colours and grounds,
- *  never a width, so each letter lies under the caret's. Scrolls with the box. */
+/** Behind the composer's box, whose own letters are clear while it names something: the same words
+ *  in the same place (refs.ts boxed), each named one on a soft ground, its mark in the slot before
+ *  its name. Only colours and grounds, never a width, so each letter lies under the caret's.
+ *  Scrolls with the box. */
 export function MentionMarks({ text, box, className }: { text: string; box: RefObject<HTMLTextAreaElement | null>; className: string }) {
   const back = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -100,32 +94,86 @@ export function MentionMarks({ text, box, className }: { text: string; box: RefO
     el.addEventListener("scroll", sync);
     return () => el.removeEventListener("scroll", sync);
   }, [box, text]);
+  const b = boxed(text);
+  const parts: ReactNode[] = [];
+  let at = 0;
+  for (const r of b.refs) {
+    if (r.from > at) parts.push(b.value.slice(at, r.from));
+    parts.push(
+      <span key={r.from} className="mention-mark">
+        <span className="relative">
+          {MARK}
+          <span className="absolute inset-0 grid place-items-center">
+            <Mark m={r.m} size={14} />
+          </span>
+        </span>
+        {b.value.slice(r.from + 1, r.to)}
+      </span>,
+    );
+    at = r.to;
+  }
+  parts.push(b.value.slice(at));
   return (
     <div ref={back} aria-hidden className={cn("pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap text-ink [overflow-wrap:break-word]", className)}>
-      {mentions(text).map((p, i) =>
-        typeof p === "string" ? (
-          p
-        ) : (
-          <span key={i} className="mention-mark">
-            {p.text.slice(0, head(p))}
-            <span className="text-ink-3">{p.text.slice(head(p))}</span>
-          </span>
-        ),
-      )}
+      {parts}
       {/* A last empty line is as high as the box draws it. */}
       {"\u200b"}
     </div>
   );
 }
 
-/** The quoted title of a mention, before its agent and id (a place's, before its path). */
-function head(p: Mention) {
-  if (p.kind === "place") {
-    const i = p.text.indexOf("」（");
-    return i > 0 ? i + 1 : p.text.indexOf('" (') + 1 || p.text.length;
-  }
-  const i = p.text.endsWith("）") ? p.text.lastIndexOf("（") : p.text.lastIndexOf(" (");
-  return i > 0 ? i : p.text.length;
+/** A named one's mark: a session's agents' logos (one now; a channel of several, each), a place's
+ *  folder. */
+function Mark({ m, size }: { m: Mention; size: number }) {
+  const list = useList();
+  if (m.kind === "place") return <PlaceIcon remote={!!m.machine} size={size} />;
+  const s = list?.find((x) => x.id.startsWith(m.id));
+  const agents: Agent[] = s ? [s.agent] : m.agent ? AGENTS.filter((a) => a === m.agent || agentName(a) === m.agent) : [];
+  if (!agents.length) return <MessageSquare size={size} className="shrink-0 text-ink-3" />;
+  return (
+    <span className="inline-flex shrink-0">
+      {agents.map((a, i) => (
+        <Logo key={a} agent={a} size={size} className={cn(i > 0 && "-ml-1 rounded-full ring-1 ring-paper")} />
+      ))}
+    </span>
+  );
+}
+
+/** A session or a place named among the words: its mark, its name underlined, as a file link is;
+ *  pressed, it goes there. A session's name is the sidebar's now; one gone, or a place at a machine
+ *  not known, is its words faint. */
+export function NamedLink({ m }: { m: Mention }) {
+  const list = useList();
+  const ms = useMachines();
+  const s = m.kind === "session" ? list?.find((x) => x.id.startsWith(m.id)) : undefined;
+  const at = m.kind === "place" ? placeOf(m, ms) : undefined;
+  const name = m.kind === "place" ? m.name : (s && (titleOf(s) || tilde(s.cwd))) || m.title || m.id;
+  const go = s ? () => openChat(s.id) : at ? () => openPlace(at) : undefined;
+  const tip = m.kind === "place" ? `${m.machine ?? t("new.local")} · ${m.path}` : s ? `${agentName(s.agent)} · ${shortId(s.id, (list ?? []).map((x) => x.id))}` : t("composer.goneSession");
+  return (
+    <Tip label={tip}>
+      <button
+        type="button"
+        disabled={!go}
+        onClick={go}
+        className="inline-flex max-w-full items-baseline gap-1 rounded-sm align-baseline text-ink underline decoration-ink-4 underline-offset-2 enabled:hover:decoration-ink-2 disabled:text-ink-3 disabled:no-underline"
+      >
+        <span className="self-center">
+          <Mark m={m} size={14} />
+        </span>
+        <span className="min-w-0 [overflow-wrap:anywhere]">{name}</span>
+      </button>
+    </Tip>
+  );
+}
+
+/** Plain words (yours, a letter) with what they name drawn in place. */
+export function Worded({ text }: { text: string }) {
+  return (
+    <>
+      {mentions(text).map((p, i) => (typeof p === "string" ? p : <NamedLink key={i} m={p} />))}
+    </>
+  );
 }
 
 const CARD = "g-press flex h-11 w-44 max-w-full items-center gap-2 rounded-lg bg-paper/70 px-2.5 text-left shadow-[0_0_0_0.5px_var(--edge)] enabled:hover:bg-paper disabled:opacity-60";
@@ -151,7 +199,7 @@ function PlaceCard({ m }: { m: Extract<Mention, { kind: "place" }> }) {
 function SessionCard({ m }: { m: Extract<Mention, { kind: "session" }> }) {
   const list = useList();
   const s = list?.find((x) => x.id.startsWith(m.id));
-  const agent: Agent | undefined = s?.agent ?? AGENTS.find((a) => agentName(a) === m.agent);
+  const agent: Agent | undefined = s?.agent ?? AGENTS.find((a) => a === m.agent || agentName(a) === m.agent);
   const title = (s && (titleOf(s) || tilde(s.cwd))) || m.title;
   return (
     <button
@@ -164,7 +212,7 @@ function SessionCard({ m }: { m: Extract<Mention, { kind: "session" }> }) {
       <span className="min-w-0">
         <span className="block truncate text-sm text-ink">{title}</span>
         <span className="block truncate text-xs text-ink-3">
-          {agent ? agentName(agent) : m.agent} · {m.id}
+          {agent ? agentName(agent) : (m.agent ?? "")} · {m.id}
         </span>
       </span>
     </button>
@@ -172,7 +220,7 @@ function SessionCard({ m }: { m: Extract<Mention, { kind: "session" }> }) {
 }
 
 /** A session met by its id, as a mention names it. */
-const named = (s: Session, id: string, list: Session[]): Mention => ({ kind: "session", title: titleOf(s) || tilde(s.cwd), agent: agentName(s.agent), id: shortId(s.id, list.map((x) => x.id)), text: id });
+const named = (s: Session, id: string, list: Session[]): Mention => ({ kind: "session", title: titleOf(s) || tilde(s.cwd), agent: s.agent, id: shortId(s.id, list.map((x) => x.id)), text: id });
 
 /** The sessions and places text names, each once, in order: as the composer names them, and
  *  sessions by id (or the start of one, as ir prints it); also's too while it names few (ir new,
