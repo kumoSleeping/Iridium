@@ -5,9 +5,10 @@
 // logins (网页's: the browsers, and the unused invites as slots), rename, avatar, removal. 开放配对
 // opens pairing for 10 minutes, its key showing the time left; requests wait as cards on top, the
 // code checked against the one the app shows. No TOKEN is handed out here.
+import { Dialog } from "@base-ui/react/dialog";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { Check, ChevronLeft, ChevronRight, Link2, LoaderCircle, PencilLine, Plus, SlidersHorizontal, Trash2, X } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { ApiError, api } from "./api/client";
 import type { Agent, App, Apps, Computer, Login, Perms, PendingInvite, Rules } from "./api/types.gen";
 import { CardFrame, CardHead, MainKey, SecondKey } from "./card";
@@ -21,7 +22,7 @@ import { showSecret, useSecret } from "./secrets";
 import { Group } from "./settings";
 import { useConfirms, usePairing } from "./store";
 import { errText, toast } from "./toast";
-import { ago, Avatar, IconKey, Logo, Switch, Tip, tokens, typeMark } from "./ui";
+import { ago, Avatar, AvatarKey, cn, IconKey, Logo, Switch, Tip, tokens, typeMark } from "./ui";
 
 /** Claude: it was made the owner's own. Set then, never after (the user, 2026-11-08). */
 export const hasClaude = (r: Rules) => !!r.claudeOwner;
@@ -62,7 +63,9 @@ const ofWeb = (l: Login) => !l.app || l.app === "ir_web";
 
 type View = { kind: "list" } | { kind: "app"; id: string };
 
-export function AppsPage({ onBack }: { onBack: () => void }) {
+/** side: in the settings' dialog (a computer), an app's page opens in a panel of its own beside it,
+ *  the list staying (the user, 2026-11-12); on a phone, or with no room beside, it slides in. */
+export function AppsPage({ onBack, side }: { onBack: () => void; side?: boolean }) {
   useLang();
   const q = useApps();
   const [view, setView] = useState<View>({ kind: "list" });
@@ -78,7 +81,9 @@ export function AppsPage({ onBack }: { onBack: () => void }) {
   const pairing = until > now;
   const apps = q.data?.apps ?? [];
   const open = view.kind === "app" ? apps.find((a) => a.id === view.id) : undefined;
-  if (open && q.data)
+  const at = useBeside(!!side && !!open);
+  const list = () => setView({ kind: "list" });
+  if (open && q.data && !at)
     return (
       <div key={open.id} className="g-slide h-full">
         <AppPage app={open} data={q.data} machine={open.computer} onBack={() => setView({ kind: "list" })} />
@@ -91,24 +96,60 @@ export function AppsPage({ onBack }: { onBack: () => void }) {
       {q.isError && <p className="m-0 text-sm text-ink-3">{errText(q.error)}</p>}
       <section className="flex flex-col" aria-label={t("settings.terminals")}>
         {apps.map((a) => (
-          <AppRow key={a.id} a={a} machine={a.computer} onOpen={a.host ? undefined : () => setView({ kind: "app", id: a.id })} />
+          <AppRow key={a.id} a={a} machine={a.computer} on={!!at && a.id === open?.id} onOpen={a.host ? undefined : () => setView({ kind: "app", id: a.id })} />
         ))}
       </section>
+      {/* Nested in the settings' dialog: a press in it does not put the settings away; one outside
+          it (another row too) puts it away. */}
+      <Dialog.Root open={!!(open && at)} modal={false} onOpenChange={(o) => !o && list()}>
+        <Dialog.Portal>
+          <Dialog.Popup aria-label={open?.web ? t("term.panel") : open?.name} style={at} className="g-beside glass thick float fixed z-50 overflow-hidden rounded-lg text-ink outline-none">
+            {open && q.data && <AppPage key={open.id} app={open} data={q.data} machine={open.computer} onBack={list} closes />}
+          </Dialog.Popup>
+        </Dialog.Portal>
+      </Dialog.Root>
     </Page>
   );
 }
 
+/** Where an app's panel goes: right of the settings' dialog, its top and height; none when there
+ *  is no room there (then the page slides in within the dialog). */
+function useBeside(on: boolean): CSSProperties | undefined {
+  const [at, setAt] = useState<CSSProperties>();
+  useLayoutEffect(() => {
+    if (!on) return setAt(undefined);
+    const place = () => {
+      const r = document.querySelector("[data-settings-dialog]")?.getBoundingClientRect();
+      const left = r ? r.right + 8 : 0;
+      const w = Math.min(340, innerWidth - left - 8);
+      setAt(r && w >= 280 ? { left, top: r.top, width: w, height: r.height } : undefined);
+    };
+    place();
+    addEventListener("resize", place);
+    return () => removeEventListener("resize", place);
+  }, [on]);
+  return at;
+}
+
 /** A page of 应用管理: its header (back, title, its key) and its scrolling body. */
-function Page({ title, onBack, backLabel, busy, right, children }: { title: string; onBack: () => void; backLabel: string; busy?: boolean; right?: ReactNode; children: ReactNode }) {
+function Page({ title, onBack, backLabel, busy, right, closes, children }: { title: string; onBack: () => void; backLabel: string; busy?: boolean; right?: ReactNode; closes?: boolean; children: ReactNode }) {
   return (
     <div className="flex h-full flex-col">
-      <header className="flex h-10.5 shrink-0 items-center gap-1 px-1.5 pt-1.5">
-        <IconKey label={backLabel} onClick={onBack} tipSide="bottom" className="size-7">
-          <ChevronLeft size={16} />
-        </IconKey>
+      {/* closes: a panel of its own, beside the list: shut by an ✕ at its right, not a back key. */}
+      <header className={cn("flex h-10.5 shrink-0 items-center gap-1 px-1.5 pt-1.5", closes && "pl-3")}>
+        {!closes && (
+          <IconKey label={backLabel} onClick={onBack} tipSide="bottom" className="size-7">
+            <ChevronLeft size={16} />
+          </IconKey>
+        )}
         <h1 className="m-0 min-w-0 flex-1 truncate text-base font-semibold">{title}</h1>
         {busy && <LoaderCircle size={14} className="animate-spin text-ink-4" />}
         {right}
+        {closes && (
+          <IconKey label={t("nav.close")} onClick={onBack} tipSide="bottom" className="size-7">
+            <X size={15} />
+          </IconKey>
+        )}
       </header>
       <div className="no-bar min-h-0 flex-1 overflow-y-auto pt-2 pb-4">
         <div className="flex flex-col gap-5 px-3">{children}</div>
@@ -172,7 +213,7 @@ function Needs() {
 }
 
 /** One app in the list; it opens its page (not the host's). */
-function AppRow({ a, machine, onOpen }: { a: App; machine?: Computer; onOpen?: () => void }) {
+function AppRow({ a, machine, on, onOpen }: { a: App; machine?: Computer; on?: boolean; onOpen?: () => void }) {
   const me = useMe().data;
   const used = a.online ? t("term.online") : a.host ? t("term.localShort") : ago(a.lastSeenAt || a.createdAt || 0);
   const body = (
@@ -206,7 +247,7 @@ function AppRow({ a, machine, onOpen }: { a: App; machine?: Computer; onOpen?: (
   );
   const cls = "flex min-h-14 w-full items-center gap-3 rounded-lg px-2 text-left";
   return onOpen ? (
-    <button type="button" onClick={onOpen} className={`${cls} g-press hover:bg-fill`}>
+    <button type="button" onClick={onOpen} aria-pressed={on} className={cn(cls, "g-press hover:bg-fill", on && "bg-fill")}>
       {body}
     </button>
   ) : (
@@ -215,7 +256,7 @@ function AppRow({ a, machine, onOpen }: { a: App; machine?: Computer; onOpen?: (
 }
 
 /** An app's page: what it is, its permissions, what it carries, its logins, removal. */
-function AppPage({ app, data, machine, onBack }: { app: App; data: Apps; machine?: Computer; onBack: () => void }) {
+function AppPage({ app, data, machine, onBack, closes }: { app: App; data: Apps; machine?: Computer; onBack: () => void; closes?: boolean }) {
   const qc = useQueryClient();
   const [renaming, setRenaming] = useState(false);
   const [sure, setSure] = useState(false);
@@ -238,15 +279,13 @@ function AppPage({ app, data, machine, onBack }: { app: App; data: Apps; machine
   };
   const title = app.web ? t("term.panel") : app.name;
   return (
-    <Page title={title} onBack={onBack} backLabel={t("settings.terminals")}>
+    <Page title={title} onBack={onBack} backLabel={t("settings.terminals")} closes={closes}>
       <section className="flex flex-col gap-2">
         <div className="flex items-center gap-3 px-2">
           {app.web ? (
             <Avatar src={app.avatar} name={title} size={40} />
           ) : (
-            <button type="button" onClick={() => file.current?.click()} aria-label={t("term.avatar")} className="g-press rounded-full">
-              <Avatar src={app.avatar} name={app.name} size={40} type={app.type} />
-            </button>
+            <AvatarKey label={t("term.avatar")} onClick={() => file.current?.click()} src={app.avatar} name={app.name} size={40} type={app.type} />
           )}
           <span className="min-w-0 flex-1">
             <span className="flex items-center gap-2">

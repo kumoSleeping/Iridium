@@ -8,6 +8,7 @@
      g-slide    a panel's content arrives from the side (popover pages)
      g-sheet    on a phone, the sidebar rises from the foot over the composer (sheet.tsx, g-sink)
      g-dialog   the settings rise out of their key at the sidebar's foot (app.tsx)
+     g-beside   a panel of its own opens right of the settings (an app's, apps.tsx)
      g-fade     plain cross-fade
      g-wait     a placeholder of what is coming, of its size: comes after a moment, breathes
      g-swap     one icon for another in place, both drawn, cross-faded (a folder shut / open)
@@ -164,6 +165,25 @@
   transform: var(--unfold-from);
 }
 .g-dialog[data-ending-style] {
+  transition-duration: var(--dur-1);
+  transition-timing-function: var(--ease-in);
+}
+
+/* --- beside: a panel of its own right of the settings' dialog (apps.tsx), out of its left edge --- */
+.g-beside {
+  transform-origin: left center;
+  transition:
+    transform var(--dur-2) var(--ease-spring),
+    translate var(--dur-2) var(--ease-spring),
+    opacity var(--dur-2) var(--ease-out);
+}
+.g-beside[data-starting-style],
+.g-beside[data-ending-style] {
+  opacity: 0;
+  transform: var(--unfold-from);
+  translate: calc(-0.5 * var(--slide-x)) 0;
+}
+.g-beside[data-ending-style] {
   transition-duration: var(--dur-1);
   transition-timing-function: var(--ease-in);
 }

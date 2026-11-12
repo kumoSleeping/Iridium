@@ -392,7 +392,6 @@ export const en: Dict = {
   "settings.autoUpdate": "Automatic updates",
   "settings.check": "Check for updates",
   "settings.checking": "Checking",
-  "settings.upToDate": "up to date",
   "settings.downloading": "Downloading",
   "settings.restarting": "Restarting",
   "settings.updateFailed": "Update failed: {e}",

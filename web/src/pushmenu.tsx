@@ -110,7 +110,8 @@ export function PushItems({ st, levels, i = 0 }: { st: PushState; levels: PushLe
   );
 }
 
-/** 通知 in a folder's or a session's menu: a submenu of PushItems; the row's state at its end. */
+/** 通知 in a folder's or a session's menu: a submenu of PushItems; its own 开 or 关 at the row's end,
+ *  nothing when it follows the level above (the user, 2026-11-12). */
 export function PushSubmenu({ st, levels, i }: { st: PushState; levels: PushLevel[]; i: number }) {
   const on = st.enabled && pushOn(st, levels);
   const own = ruleAt(st, levels[0]!);
@@ -119,7 +120,7 @@ export function PushSubmenu({ st, levels, i }: { st: PushState; levels: PushLeve
       <Menu.SubmenuTrigger style={{ "--i": i } as CSSProperties} className="flex h-8 cursor-default items-center gap-2.5 rounded-md px-2.5 text-base outline-none select-none data-highlighted:bg-fill data-popup-open:bg-fill pointer-coarse:h-11">
         <span className="text-ink-2">{on ? <Bell size={15} /> : <BellOff size={15} />}</span>
         <span className="flex-1">{t("push.menu")}</span>
-        <span className="text-xs text-ink-3">{own ? (own.mode === "on" ? t("push.on") : t("push.off")) : t("push.inherit")}</span>
+        {own && <span className="text-xs text-ink-3">{own.mode === "on" ? t("push.on") : t("push.off")}</span>}
         <ChevronRight size={14} className="text-ink-4" />
       </Menu.SubmenuTrigger>
       <Menu.Portal>

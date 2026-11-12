@@ -392,7 +392,6 @@ export const zh = {
   "settings.autoUpdate": "自动更新",
   "settings.check": "检查更新",
   "settings.checking": "检查中",
-  "settings.upToDate": "已是最新",
   "settings.downloading": "下载中",
   "settings.restarting": "重启中",
   "settings.updateFailed": "更新失败：{e}",

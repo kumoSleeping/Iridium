@@ -2,7 +2,7 @@
 // popover shell, icon keys, agent logos with their status lamp, terminal avatars, switches.
 import { Popover } from "@base-ui/react/popover";
 import { Tooltip } from "@base-ui/react/tooltip";
-import { Bot, Monitor, Puzzle, ScrollText, type LucideIcon } from "lucide-react";
+import { Bot, Camera, Monitor, Puzzle, ScrollText, type LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ComponentProps, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import type { Agent, Status } from "./api/types.gen";
 import { t } from "./i18n";
@@ -356,7 +356,7 @@ export const typeMark = (type?: string) => (type ? TYPE_MARKS[type] : undefined)
 
 /** An app's or login's avatar, or its initial on a disc (tinted, when given a colour); an app
  *  carries its type's mark on the corner (type), or another mark (badge: a device, Monitor, Smartphone). */
-export function Avatar({ src, name, size = 20, type, badge, badgeSize, badgeLabel, tint, className }: { src?: string; name?: string; size?: number; type?: string; badge?: LucideIcon; badgeSize?: number; badgeLabel?: string; tint?: string; className?: string }) {
+export function Avatar({ src, name, size = 20, type, badge, badgeSize, badgeLabel, tint, over, className }: { src?: string; name?: string; size?: number; type?: string; badge?: LucideIcon; badgeSize?: number; badgeLabel?: string; tint?: string; over?: ReactNode; className?: string }) {
   const [broken, setBroken] = useState<string | null>(null);
   const typed = badge ? undefined : typeMark(type);
   const mark = badge ?? typed?.[0];
@@ -373,8 +373,29 @@ export function Avatar({ src, name, size = 20, type, badge, badgeSize, badgeLabe
           {[...(name ?? "?")][0]?.toUpperCase()}
         </span>
       )}
+      {over}
       {mark && <Badge icon={mark} size={badgeSize ?? Math.max(10, Math.round(size * 0.5))} label={label} />}
     </span>
+  );
+}
+
+/** An avatar that a press changes: under a pointer a shade over the face, the circle exactly, and a
+ *  camera on it; the type's mark stays on top (the user, 2026-11-12). */
+export function AvatarKey({ label, onClick, ...face }: { label: string; onClick: () => void } & Omit<ComponentProps<typeof Avatar>, "over" | "className">) {
+  const size = face.size ?? 20;
+  return (
+    <Tip label={label}>
+      <button type="button" aria-label={label} onClick={onClick} className="group g-press grid shrink-0 rounded-full">
+        <Avatar
+          {...face}
+          over={
+            <span className="absolute inset-0 grid place-items-center rounded-full bg-[oklch(0_0_0/0.45)] text-[oklch(1_0_0)] opacity-0 transition-opacity duration-(--dur-2) group-hover:opacity-100 group-focus-visible:opacity-100" aria-hidden>
+              <Camera size={Math.round(size * 0.4)} strokeWidth={2} />
+            </span>
+          }
+        />
+      </button>
+    </Tip>
   );
 }
 
