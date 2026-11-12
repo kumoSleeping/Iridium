@@ -455,17 +455,22 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
           aria-label={t("composer.placeholder")}
           onChange={(e) => {
             const el = e.target;
-            const r = edited(text, el.value);
+            const r = edited(text, el.value, el.selectionStart);
+            const want = boxed(r.words).value;
             type(r.words);
             setCaret(wordsAt(boxed(r.words), r.caret));
             // A link taken whole, or letters typed inside one: the box then differs from what it
-            // was given, its caret put where the words say.
-            if (boxed(r.words).value !== el.value || r.caret !== el.selectionStart) requestAnimationFrame(() => box.current?.setSelectionRange(r.caret, r.caret));
+            // was given, its caret put where the words say. Never while an input method composes
+            // (its letters would be split), nor once the box has moved on (a later key's caret).
+            if (want !== el.value && !composing && !(e.nativeEvent as InputEvent).isComposing) requestAnimationFrame(() => {
+              const b = box.current;
+              if (b && b.value === want) b.setSelectionRange(r.caret, r.caret);
+            });
           }}
           onSelect={(e) => {
             const el = e.currentTarget;
             // Not inside a name: the caret to its nearer edge.
-            if (el.selectionStart === el.selectionEnd) {
+            if (el.selectionStart === el.selectionEnd && !composing && el.value === shownBox.value) {
               const out = outOf(shownBox, el.selectionStart);
               if (out !== el.selectionStart) el.setSelectionRange(out, out);
             }
