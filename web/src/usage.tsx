@@ -6,15 +6,14 @@
 // tokens: the figure, the bars, the order of the list all go by it. The figure's line under it has
 // the other measure, the turns and the cache's hit rate; under that the tokens' four parts, under
 // either measure, so switching moves nothing (no bar of them: the user, 2026-11-12). Below them a
-// line of its own: what the page is narrowed to (a day, the logins in), as chips; the chart's
-// switch sits by the measure's, above. The chart is a bar a day stacked by login, each in its own
+// line kept for what the page is narrowed to (a day, the logins in), as chips, scrolling sideways;
+// the chart's switch at the figures' right, under the measure's. The chart is a bar a day stacked by login, each in its own
 // colour (its avatar's main colour, kept apart from the others': hues.ts), or a heat map of the
-// weekdays by hour filling the chart's height, the range's days added up (none for 1 天: one day's
+// weekdays by hour in squares, the busiest hour over them, the range's days added up (none for 1 天: one day's
 // hours are the bars). Under it the logins, the most first, each its bar in its colour: the row
 // pressed takes it out of the chart and the total or puts it back; right-clicked or held (phones)
 // it is the only one left in (again: everyone); the key at its right opens its models in a panel
-// over the page, each with its cache's hit rate, tokens and cost. 全选 over the list and the chip
-// put everyone back. A bar pressed narrows the page to that day. With one login in, the bars are
+// over the page, each with its cache's hit rate, tokens and cost. The chip puts everyone back. A bar pressed narrows the page to that day. With one login in, the bars are
 // its models. Over it all, the harnesses (the user, 2026-11-08): all four at first; pressed, one
 // leaves the whole page or comes back, and the last one taken out puts all four back.
 import { Popover } from "@base-ui/react/popover";
@@ -371,7 +370,7 @@ export function UsagePage() {
   const total = useGlide(m.value(sum), !!u, metric);
   const hit = hitRate(sum);
   const chip = (key: string, label: ReactNode, clear: () => void, mark?: ReactNode, className?: string) => (
-    <button key={key} type="button" onClick={clear} className={cn("g-pop g-press flex h-5 min-w-0 shrink items-center gap-1 rounded-full bg-fill px-2 text-ink-2 hover:bg-fill-2", className)}>
+    <button key={key} type="button" onClick={clear} className={cn("g-pop g-press flex h-5 min-w-0 items-center gap-1 rounded-full bg-fill px-2 text-ink-2 hover:bg-fill-2", className)}>
       {mark}
       <span className="truncate">{label}</span>
       <X size={11} className="shrink-0" />
@@ -406,42 +405,43 @@ export function UsagePage() {
                 <div className="flex items-end justify-between gap-2">
                   {/* The figure leads: proportional digits, as a figure that stands alone. */}
                   <Figure text={metric === "cost" ? dollars(total) : tokens(Math.round(total))} k={metric} />
-                  <div className="flex shrink-0 items-center gap-1.5">
+                  <Pills
+                    label={t("usage.metric")}
+                    value={metric}
+                    onChange={(v) => (capture(), setMetric(v))}
+                    options={[
+                      { value: "cost", label: t("usage.cost") },
+                      { value: "tokens", label: t("usage.tokensMetric") },
+                    ]}
+                  />
+                </div>
+                {/* The figures, the chart's switch at their right, under the measure's (the user,
+                    2026-11-12: not side by side). */}
+                <div className="mt-0.5 flex h-6 min-w-0 items-center gap-1.5 text-xs text-ink-3 tabular-nums">
+                  <span className="min-w-0 flex-1 truncate leading-6 whitespace-nowrap" title={figures}>{figures}</span>
+                  {range > 1 && (
                     <Pills
-                      label={t("usage.metric")}
-                      value={metric}
-                      onChange={(v) => (capture(), setMetric(v))}
+                      label={t("usage.view")}
+                      value={view}
+                      onChange={setView}
                       options={[
-                        { value: "cost", label: t("usage.cost") },
-                        { value: "tokens", label: t("usage.tokensMetric") },
+                        { value: "bars", label: t("usage.bars"), icon: <BarsIcon /> },
+                        { value: "heat", label: t("usage.heat"), icon: <HeatIcon /> },
                       ]}
                     />
-                    {range > 1 && (
-                      <Pills
-                        label={t("usage.view")}
-                        value={view}
-                        onChange={setView}
-                        options={[
-                          { value: "bars", label: t("usage.bars"), icon: <BarsIcon /> },
-                          { value: "heat", label: t("usage.heat"), icon: <HeatIcon /> },
-                        ]}
-                      />
-                    )}
-                  </div>
+                  )}
                 </div>
-                <div className="mt-0.5 flex h-6 min-w-0 items-center gap-1.5 text-xs text-ink-3 tabular-nums">
-                  {/* The figures lead, the chips after them; where the chips are long the figures
-                      truncate, so neither wraps and the chart stays put. */}
-                  <span className="min-w-0 flex-1 truncate leading-6 whitespace-nowrap" title={figures}>{figures}</span>
-                  {u && day && chip("day", dayLabel(day), () => setDay(null), undefined, "shrink-0")}
-                  {u &&
-                    !all &&
+                {/* What the page is narrowed to: a line kept for it, empty or not, so a chip coming
+                    moves nothing; more than fit scroll sideways, with no bar (the user, 2026-11-12). */}
+                <div className="no-bar -mx-3 mt-1 flex h-6 items-center gap-1.5 overflow-x-auto px-3 text-xs tabular-nums">
+                  {day && chip("day", dayLabel(day), () => setDay(null), undefined, "shrink-0")}
+                  {!all &&
                     chip(
                       "who",
                       solo !== undefined ? t("usage.onlyName", { name: who(u, solo).name }) : t("usage.picked", { n: shown.length }),
                       everyone,
                       solo !== undefined && <Dot color={colors.get(solo)!} on />,
-                      "max-w-[9rem]",
+                      "shrink-0",
                     )}
                 </div>
                 {/* Under either measure: switched, the page keeps its height. */}
@@ -455,6 +455,7 @@ export function UsagePage() {
                 <div className="mt-0.5 flex h-6 items-center">
                   <span className="block h-2.5 w-40 rounded-full bg-fill" />
                 </div>
+                <div className="mt-1 h-6" />
                 <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-0.5">
                   {[0, 1, 2, 3].map((i) => (
                     <span key={i} className="block h-4 rounded-full bg-fill" />
@@ -474,13 +475,6 @@ export function UsagePage() {
           </section>
 
           <section ref={listRef} className="flex flex-col" aria-label={t("usage.sources")}>
-            {many && !all && (
-              <div className="mb-0.5 flex h-6 items-center justify-end text-xs text-ink-3">
-                <button type="button" onClick={everyone} className="g-press -mr-1.5 rounded-md px-1.5 py-0.5 text-ink-2 transition-colors duration-(--dur-2) hover:bg-fill hover:text-ink">
-                  {t("usage.selectAll")}
-                </button>
-              </div>
-            )}
             {u && s.order.length === 0 && <p className="g-fade m-0 py-6 text-center text-sm text-ink-3">{t("usage.none")}</p>}
             {!u && !q.isError && (
               <div aria-hidden className="g-wait">
@@ -867,7 +861,8 @@ function BarTip({ label, day, order, colors, on, name, m }: { label: string; day
 
 /** The heat map: a row a weekday (Monday first), a square an hour, the range's days added up (the
  *  user, 2026-11-10: when, not which day); five shades of one colour by the measure, the one
- *  login's when only one is in. Over a square (or tapped), the line under it says what it holds. */
+ *  login's when only one is in. The line over it says what the square under the pointer (or
+ *  tapped) holds, else the busiest hour's, with the shades' key. */
 function Heat({ u, hidden, off, m, color }: { u: Usage | undefined; hidden: ReadonlySet<Agent>; off: ReadonlySet<string>; m: Measure; color: string }) {
   const [at, setAt] = useState<number | null>(null);
   const cells = useMemo(() => {
@@ -883,13 +878,39 @@ function Heat({ u, hidden, off, m, color }: { u: Usage | undefined; hidden: Read
   const max = Math.max(0, ...values);
   const level = (v: number) => (v <= 0 || !max ? 0 : Math.min(4, Math.max(1, Math.ceil((v / max) * 4))));
   const shade = (k: number) => (k === 0 ? "var(--fill)" : k === 4 ? color : `color-mix(in srgb, ${color} ${[0, 30, 55, 80][k]}%, var(--fill))`);
-  const c = at !== null ? cells[at] : undefined;
+  // Over a square (or tapped) what it holds, else the busiest hour's.
+  const peak = max > 0 ? values.indexOf(max) : null;
+  const shown = at ?? peak;
+  const c = shown !== null ? cells[shown] : undefined;
   return (
     <div className="g-fade flex flex-col gap-1">
-      {/* The squares fill the chart's height (the user, 2026-11-12: no room left empty over them):
-          a little taller than wide in a narrow panel. */}
-      <div role="group" aria-label={t("usage.heat")} className={cn("flex flex-col border-b border-fill-2 pb-1", !u && "g-wait")} style={{ height: CHART_H }} onPointerLeave={(e) => e.pointerType === "mouse" && setAt(null)}>
-        <div className="grid min-h-0 flex-1 grid-cols-[1rem_1fr] gap-1.5">
+      {/* The squares stay square (the user, 2026-11-12); the room over them has the hour they say
+          and the shades' key, the squares at the bottom on the axis. */}
+      <div role="group" aria-label={t("usage.heat")} className={cn("flex flex-col justify-between border-b border-fill-2 pb-1", !u && "g-wait")} style={{ height: CHART_H }} onPointerLeave={(e) => e.pointerType === "mouse" && setAt(null)}>
+        <div className="flex h-5 min-w-0 items-center gap-2 text-[11px] text-ink-3 tabular-nums">
+          <span className="min-w-0 flex-1 truncate">
+            {c && shown !== null ? (
+              <>
+                {at === null && <span className="text-ink-4">{t("usage.peak")} </span>}
+                <span className="text-ink-2">
+                  {t("usage.heatCell", { w: weekdayName(Math.floor(shown / 24) + 1), h: shown % 24, h2: (shown % 24) + 1 })}
+                  {` · ${m.fmt(m.value(c))}`}
+                </span>
+                {m === MEASURES.cost ? ` · ${tokens(totalOf(c))}` : c.cost > 0 ? ` · ${dollars(c.cost)}` : ""}
+              </>
+            ) : (
+              t("usage.none")
+            )}
+          </span>
+          <span aria-hidden className="flex shrink-0 items-center gap-[3px] text-ink-4">
+            <span className="mr-0.5">{t("usage.less")}</span>
+            {[0, 1, 2, 3, 4].map((k) => (
+              <span key={k} className="block size-2 rounded-[2px] transition-[background-color] duration-(--dur-3)" style={{ background: shade(k) }} />
+            ))}
+            <span className="ml-0.5">{t("usage.more")}</span>
+          </span>
+        </div>
+        <div className="grid grid-cols-[1rem_1fr] gap-1.5">
           <div className="grid grid-rows-7 gap-[3px] text-[10px] leading-none text-ink-4">
             {[1, 2, 3, 4, 5, 6, 7].map((wd) => (
               <span key={wd} className="flex items-center justify-end">
@@ -897,7 +918,7 @@ function Heat({ u, hidden, off, m, color }: { u: Usage | undefined; hidden: Read
               </span>
             ))}
           </div>
-          <div className="grid grid-cols-24 grid-rows-7 gap-[3px]">
+          <div className="grid grid-cols-24 gap-[3px]">
             {values.map((v, i) => (
               <button
                 key={i}
@@ -906,28 +927,17 @@ function Heat({ u, hidden, off, m, color }: { u: Usage | undefined; hidden: Read
                 aria-hidden
                 onPointerEnter={(e) => e.pointerType === "mouse" && setAt(i)}
                 onClick={() => setAt(at === i ? null : i)}
-                className={cn("size-full rounded-[3px] transition-[background-color] duration-(--dur-3) ease-(--ease-out)", at === i && "outline-[1.5px] outline-offset-0 outline-ink outline-solid")}
+                className={cn("aspect-square w-full rounded-[3px] transition-[background-color] duration-(--dur-3) ease-(--ease-out)", at === i && "outline-[1.5px] outline-offset-0 outline-ink outline-solid")}
                 style={{ background: shade(level(v)) }}
               />
             ))}
           </div>
         </div>
       </div>
-      {/* The hours under it; over a square, what it holds instead. */}
-      <div className="h-[16.5px] pl-[1.375rem] text-[11px] text-ink-3 tabular-nums">
-        {c && at !== null ? (
-          <span className="block truncate text-ink-2">
-            {t("usage.heatCell", { w: weekdayName(Math.floor(at / 24) + 1), h: at % 24, h2: (at % 24) + 1 })}
-            {` · ${m.fmt(m.value(c))}`}
-            <span className="text-ink-3">{m === MEASURES.cost ? ` · ${tokens(totalOf(c))}` : c.cost > 0 ? ` · ${dollars(c.cost)}` : ""}</span>
-          </span>
-        ) : (
-          <span className="flex justify-between">
-            {[0, 6, 12, 18, 24].map((h) => (
-              <span key={h}>{h}</span>
-            ))}
-          </span>
-        )}
+      <div className="flex h-[16.5px] justify-between pl-[1.375rem] text-[11px] text-ink-3 tabular-nums">
+        {[0, 6, 12, 18, 24].map((h) => (
+          <span key={h}>{h}</span>
+        ))}
       </div>
     </div>
   );
