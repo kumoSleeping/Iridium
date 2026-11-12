@@ -681,6 +681,10 @@ describe("the composer's box", () => {
     expect(edited(w, `hi ${MARK}xA there`)).toEqual({ words: `hi ${a}x there`, caret: 6 });
     expect(edited(w, `h`)).toEqual({ words: "h", caret: 1 });
     expect(edited("x", `x ${a}`)).toEqual({ words: `x ${a}`, caret: 4 });
+    // A letter typed before its like: the box's caret says which.
+    expect(edited("baa", "baaa", 2)).toEqual({ words: "baaa", caret: 2 });
+    expect(edited("bug", "bugg", 3)).toEqual({ words: "bugg", caret: 3 });
+    expect(edited("baa", "ba", 1)).toEqual({ words: "ba", caret: 1 });
   });
 });
 

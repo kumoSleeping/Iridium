@@ -239,14 +239,16 @@ export function boxAt(b: Boxed, i: number): number {
 
 /** The words after the box was edited from what boxed(words) gave to value: a mention the edit
  *  touches goes whole (one Backspace takes it), letters typed inside one go after it. caret: where
- *  the box's caret then is. */
-export function edited(words: string, value: string): { words: string; caret: number } {
+ *  the box's caret then is. at: the box's caret after the edit, which settles where letters
+ *  like their neighbours went (an a typed before an a). */
+export function edited(words: string, value: string, at?: number): { words: string; caret: number } {
   const b = boxed(words);
   const was = b.value;
-  let p = 0;
-  while (p < was.length && p < value.length && was[p] === value[p]) p++;
+  // What follows the caret is what was there; then what precedes the change.
   let s = 0;
-  while (s < was.length - p && s < value.length - p && was[was.length - 1 - s] === value[value.length - 1 - s]) s++;
+  while (s < was.length && s < value.length - (at ?? 0) && was[was.length - 1 - s] === value[value.length - 1 - s]) s++;
+  let p = 0;
+  while (p < was.length - s && p < value.length - s && was[p] === value[p]) p++;
   const typed = value.slice(p, value.length - s);
   let lo = p, hi = was.length - s;
   for (const r of b.refs) {
