@@ -22,7 +22,7 @@ import (
 
 // appRoutes are the apps' and their logins' (docs/api.md "应用"): who is calling, the list (ir
 // apps), invites of ir_web, names and avatars, devices, removing, the needs (what waits for a
-// person), the catalogue and public.origin. An app comes by pairing only (pairing.go).
+// person) and public.origin. An app comes by pairing only (pairing.go).
 func (s *Server) appRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/internal/me", s.me)
 	mux.HandleFunc("PUT /v1/internal/me/profile", func(w http.ResponseWriter, r *http.Request) { s.gate().ServeProfile(w, r, "") })
@@ -53,7 +53,6 @@ func (s *Server) appRoutes(mux *http.ServeMux) {
 		}
 		s.needState(w, r)
 	})
-	mux.HandleFunc("GET /v1/internal/catalogue", func(w http.ResponseWriter, r *http.Request) { reply(w, http.StatusOK, catalogue) })
 	mux.HandleFunc("GET /v1/internal/usage", s.usage) // routes_usage.go
 	mux.HandleFunc("GET /v1/internal/public", s.manage(s.publicState))
 	// Opening or closing ir_web: a person's ir at the host only (decision 3), never a login of it.

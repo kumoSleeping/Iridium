@@ -1099,32 +1099,6 @@ export interface Pending {
   need: Need;
 }
 /**
- * CatalogueEntry is an official app Iridium lists (GET /v1/internal/catalogue): what it is and how to
- * install it, by system. Iridium installs nothing itself.
- */
-export interface CatalogueEntry {
-  id: string;
-  name: string;
-  type: string; // as its app is shown once paired
-  description: Text;
-  install: InstallStep[];
-  url?: string; // where to read more
-}
-/**
- * InstallStep is a command that installs a catalogue entry on OS (windows | darwin | linux; "" any).
- */
-export interface InstallStep {
-  os?: string;
-  command: string;
-}
-/**
- * Text is a short text in Chinese and English.
- */
-export interface Text {
-  zh: string;
-  en: string;
-}
-/**
  * SetPublic sets public.origin ("" turns the public way in off). The gate restarts with it.
  */
 export interface SetPublic {

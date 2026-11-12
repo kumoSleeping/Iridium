@@ -354,9 +354,9 @@ const TYPE_MARKS: Record<string, [LucideIcon, Parameters<typeof t>[0]]> = {
 };
 export const typeMark = (type?: string) => (type ? TYPE_MARKS[type] : undefined);
 
-/** An app's or login's avatar, or its initial on a neutral disc; an app carries its type's mark on
- *  the corner (type), or another mark (badge: a device, Monitor, Smartphone). */
-export function Avatar({ src, name, size = 20, type, badge, badgeSize, badgeLabel, className }: { src?: string; name?: string; size?: number; type?: string; badge?: LucideIcon; badgeSize?: number; badgeLabel?: string; className?: string }) {
+/** An app's or login's avatar, or its initial on a disc (tinted, when given a colour); an app
+ *  carries its type's mark on the corner (type), or another mark (badge: a device, Monitor, Smartphone). */
+export function Avatar({ src, name, size = 20, type, badge, badgeSize, badgeLabel, tint, className }: { src?: string; name?: string; size?: number; type?: string; badge?: LucideIcon; badgeSize?: number; badgeLabel?: string; tint?: string; className?: string }) {
   const [broken, setBroken] = useState<string | null>(null);
   const typed = badge ? undefined : typeMark(type);
   const mark = badge ?? typed?.[0];
@@ -366,7 +366,10 @@ export function Avatar({ src, name, size = 20, type, badge, badgeSize, badgeLabe
       {src && broken !== src ? (
         <img src={src} alt="" draggable={false} onError={() => setBroken(src)} className="size-full rounded-full object-cover" style={{ boxShadow: "inset 0 0 0 0.5px var(--edge)" }} />
       ) : (
-        <span className="grid size-full place-items-center rounded-full bg-fill-2 font-medium text-ink-2 select-none" style={{ fontSize: Math.round(size * 0.45) }}>
+        <span
+          className="grid size-full place-items-center rounded-full font-medium select-none"
+          style={{ fontSize: Math.round(size * 0.45), background: tint ? `color-mix(in srgb, ${tint} 14%, var(--paper))` : "var(--fill-2)", color: tint ?? "var(--ink-2)" }}
+        >
           {[...(name ?? "?")][0]?.toUpperCase()}
         </span>
       )}

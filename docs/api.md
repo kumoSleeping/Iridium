@@ -300,7 +300,7 @@ Web Push，总开关在配置 `push`，默认关。VAPID 密钥存在状态目�
 
 ## 应用的接口
 
-应用用 **Satori with ir**：见 `docs/satori.md`。官方应用不由 Iridium 安装，`GET /v1/internal/catalogue` 只列安装命令（见“应用和登录”）。
+应用用 **Satori with ir**：见 `docs/satori.md`。官方应用不由 Iridium 安装（见“应用和登录”）。
 
 ## 应用和登录
 
@@ -321,7 +321,6 @@ Web Push，总开关在配置 `push`，默认关。VAPID 密钥存在状态目�
 | `PUT /v1/internal/apps/{id}/logins/{login}/perms` | `Perms` → `Perms` | 登录能用的（网页的登录 `id` 写 `ir_web`），在应用的之内起作用 |
 | `PUT /v1/internal/me/perms` | `Perms` | 应用申请改权限：一条 `app_change` 需要 |
 | `POST /v1/internal/invites` | `NewInvite` → `Invite` | 网页的一次性邀请（10 分钟），先要公网地址。`claude: true` 加入的登录带 Claude。agent 调的回 202 `Pending` |
-| `GET /v1/internal/catalogue` | → `CatalogueEntry[]` | 收录的官方应用和各系统的安装命令 |
 | `GET /v1/internal/usage?days=N&terminal=<ID、名字或 me>` | → `Usage` | 按日期、应用或登录、agent、模型合计的用量（`by=hour`、`by=weekhour` 同前）。看别人的要管理权 |
 
 ## 配对
@@ -330,7 +329,7 @@ Web Push，总开关在配置 `push`，默认关。VAPID 密钥存在状态目�
 
 | 请求 | 正文 → 回答 | 说明 |
 |---|---|---|
-| `GET /v1/internal/pairing`、`PUT /v1/internal/pairing` | `PairWindow` | 配对窗口：`{open, until}`；`PUT {open, minutes?}` 开（默认 10 分钟，最多 60）或关。能批的人。`ir apps open [时长]`、`ir apps close`；网页“新建应用”一进去就开。hub 键 `pairing` |
+| `GET /v1/internal/pairing`、`PUT /v1/internal/pairing` | `PairWindow` | 配对窗口：`{open, until}`；`PUT {open, minutes?}` 开（默认 10 分钟，最多 60）或关。能批的人。网页应用管理右上角的“开放配对”开，再点一下关。hub 键 `pairing` |
 | `POST /v1/internal/pair` | `PairRequest` → `Pairing` | 不用登录。窗口关着 403 `pair_closed`（本机 socket 来的不看窗口，`ir pair` 不给地址时）；带 `login {id, name?}` 的，批准时一并建好这个登录、已批准（已有的不动），ID 不合法 422 `bad_login`；每来源（IP，IPv6 按 /64）最多 4 个待批、总共 20 个，多了 403 `too_many_pending`；名字不合法 422 `bad_name`。回配对码 `code` 和 `request` |
 | `GET /v1/internal/pair/{request}` | → `PairState` | `pending`、`allowed`（带 `token`，只给一次）、`denied`、`expired`；不认识的 422 `no_such_request` |
 

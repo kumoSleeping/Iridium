@@ -129,7 +129,6 @@ PUT internal/apps/{id}/logins/{login}/perms {agents, scope} -> Perms  a login's;
 DELETE internal/apps/{id} - -> {ok}  remove an app, an ir_web login or an invite; person only
 DELETE internal/apps/{id}/logins/{login} - -> {ok}  remove a login; person only
 POST internal/invites {name?, claude?, perms?} -> Invite  a one-time ir_web link (10 min); an agent gets 202 {need}
-GET internal/catalogue - -> CatalogueEntry[]  official apps and their install commands  view=id,name,type,description
 GET internal/needs - -> Needs  waiting for a person; person only  view=pending.id,pending.kind,pending.name
 GET internal/needs/{id}?wait - -> NeedState  how a need went; wait up to 60 s
 POST internal/needs/{id} {allow, value?, forSession?, owner?, name?, perms?, agentsOff?} -> NeedReply  allow or deny; person only

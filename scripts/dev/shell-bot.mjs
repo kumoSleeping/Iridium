@@ -22,7 +22,7 @@ async function pair() {
   for (;;) {
     const r = await fetch(`${url}/v1/internal/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(hello) })
     if (r.status === 403) {
-      say('pairing is closed there (ir apps open, or 新建应用): waiting')
+      say('pairing is closed there (开放配对 in 应用管理): waiting')
       await sleep(5000)
       continue
     }

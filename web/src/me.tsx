@@ -50,9 +50,13 @@ export function MeKey({ open, onOpen, dot, code }: { open: boolean; onOpen: () =
 }
 
 /** 本机's mark in place of an avatar: the machine itself. */
-export function LocalMark({ size }: { size: number }) {
+export function LocalMark({ size, tint }: { size: number; tint?: string }) {
   return (
-    <span className="grid shrink-0 place-items-center rounded-full bg-fill-2 text-ink-2" style={{ width: size, height: size }} aria-hidden>
+    <span
+      className="grid shrink-0 place-items-center rounded-full"
+      style={{ width: size, height: size, background: tint ? `color-mix(in srgb, ${tint} 14%, var(--paper))` : "var(--fill-2)", color: tint ?? "var(--ink-2)" }}
+      aria-hidden
+    >
       <Laptop size={Math.round(size * 0.55)} strokeWidth={1.75} />
     </span>
   );

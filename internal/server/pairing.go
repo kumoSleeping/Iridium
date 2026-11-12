@@ -139,7 +139,7 @@ func (s *Server) pairAsk(w http.ResponseWriter, r *http.Request) {
 	// The window keeps strangers from asking; the host's own socket (ir pair here) asks with it
 	// shut. Either way a person allows it.
 	if !s.pairWindow().Open && !callerOf(r).socket {
-		refuse(w, http.StatusForbidden, "pair_closed", "pairing is closed: open it on the host (ir apps open) or in 应用管理")
+		refuse(w, http.StatusForbidden, "pair_closed", "pairing is closed: open it in 应用管理 on the host")
 		return
 	}
 	if m.Login != nil && !validLogin(m.Login.ID) {

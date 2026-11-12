@@ -52,6 +52,8 @@ if (!pending.some((c) => c.kind === "app_join")) {
   await sock("PUT", "/api/pairing", { open: true });
   await sock("POST", "/api/pair", { name: "qq-bot", type: "bot", program: "iridium-qq", wants: { agents: ["codex"], scope: ["*"] } });
 }
+// Open, so the key shows its time left: pairing is closed between runs.
+await sock("PUT", "/api/pairing", { open: true });
 
 const desk = { width: 1440, height: 900, deviceScaleFactor: 1 };
 const phone = { width: 390, height: 844, deviceScaleFactor: 2, isMobile: true, hasTouch: true };
@@ -102,11 +104,12 @@ shots.push(
   ["phone-me-dark-zh", phone, { theme: "dark", lang: "zh" }, "#/", click("aside button:has(> span + span.truncate)")],
   ["phone-settings-light-zh", phone, { theme: "light", lang: "zh" }, "#/settings"],
   ["desktop-solid-light-en", desk, { theme: "light", lang: "en" }, chat(PLAIN), click('button[aria-label^="Context"]'), [{ name: "prefers-reduced-transparency", value: "reduce" }]],
-  // 应用管理, the needs agents ask for, an app's page, 新建应用, an invite shown once.
+  // 应用管理, the needs agents ask for, an app's page, the pairing key, an invite shown once.
   ["desktop-terminals-light-zh", desk, { theme: "light", lang: "zh" }, "#/settings/apps"],
   ["desktop-terminals-dark-en", desk, { theme: "dark", lang: "en" }, "#/settings/apps"],
   ["desktop-app-light-zh", desk, { theme: "light", lang: "zh" }, "#/settings/apps", clickText("tg-bot")],
-  ["desktop-newapp-light-zh", desk, { theme: "light", lang: "zh" }, "#/settings/apps", click('button[aria-label="新建应用"]')],
+  ["desktop-pairing-light-zh", desk, { theme: "light", lang: "zh" }, "#/settings/apps"],
+  ["desktop-pairing-dark-en", desk, { theme: "dark", lang: "en" }, "#/settings/apps"],
   ["phone-terminals-light-zh", phone, { theme: "light", lang: "zh" }, "#/settings/apps"],
   ["desktop-confirm-light-zh", desk, { theme: "light", lang: "zh" }, chat(STYLE), click('[role="alertdialog"][aria-label="插件 TOKEN"] button[aria-expanded]')],
   ["phone-confirm-dark-en", phone, { theme: "dark", lang: "en" }, chat(STYLE)],

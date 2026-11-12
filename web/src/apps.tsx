@@ -2,17 +2,16 @@
 // with its avatar, name, type, whether it is online, when it was last active; one that carries
 // agents also its system and agents. The host is listed, not managed. A row opens the app's page:
 // its permissions (agents, scope), the agents it carries and whether command lines run there, its
-// logins (网页's: the browsers, and the unused invites as slots), rename, avatar, removal. 新建应用
-// opens pairing for 10 minutes and lists the official apps' install commands; requests wait as
-// cards on top, the code checked against the one the app shows. No TOKEN is handed out here.
-import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { Check, ChevronLeft, ChevronRight, Copy, Link2, LoaderCircle, PencilLine, Plus, SlidersHorizontal, Trash2, X } from "lucide-react";
+// logins (网页's: the browsers, and the unused invites as slots), rename, avatar, removal. 开放配对
+// opens pairing for 10 minutes, its key showing the time left; requests wait as cards on top, the
+// code checked against the one the app shows. No TOKEN is handed out here.
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { Check, ChevronLeft, ChevronRight, Link2, LoaderCircle, PencilLine, Plus, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ApiError, api } from "./api/client";
 import type { Agent, App, Apps, Computer, Login, Perms, PendingInvite, Rules } from "./api/types.gen";
 import { CardFrame, CardHead, MainKey, SecondKey } from "./card";
 import { ConfirmCard, saysOwner } from "./confirms";
-import { isPair } from "./confirmname";
 import { useApps, useMe } from "./data";
 import { t, useLang } from "./i18n";
 import { LocalMark } from "./me";
@@ -61,12 +60,22 @@ const nameError = (e: unknown) => {
 /** A login of ir_web (its logins come with app "" from before 0.2's other apps, or "ir_web"). */
 const ofWeb = (l: Login) => !l.app || l.app === "ir_web";
 
-type View = { kind: "list" } | { kind: "app"; id: string } | { kind: "new" };
+type View = { kind: "list" } | { kind: "app"; id: string };
 
 export function AppsPage({ onBack }: { onBack: () => void }) {
   useLang();
   const q = useApps();
   const [view, setView] = useState<View>({ kind: "list" });
+  const win = usePairing();
+  const until = win?.open ? (win.until ?? 0) : 0;
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (!until) return;
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [until]);
+  const pairing = until > now;
   const apps = q.data?.apps ?? [];
   const open = view.kind === "app" ? apps.find((a) => a.id === view.id) : undefined;
   if (open && q.data)
@@ -75,31 +84,9 @@ export function AppsPage({ onBack }: { onBack: () => void }) {
         <AppPage app={open} data={q.data} machine={open.computer} onBack={() => setView({ kind: "list" })} />
       </div>
     );
-  if (view.kind === "new")
-    return (
-      <div key="new" className="g-slide h-full">
-        <NewApp onBack={() => setView({ kind: "list" })} />
-      </div>
-    );
   return (
-    <Page
-      title={t("settings.terminals")}
-      onBack={onBack}
-      backLabel={t("nav.me")}
-      busy={q.isFetching}
-      right={
-        <Tip label={t("apps.new")} side="bottom">
-          <button
-            type="button"
-            aria-label={t("apps.new")}
-            onClick={() => setView({ kind: "new" })}
-            className="g-press grid size-7 place-items-center rounded-md text-ink-2 hover:bg-fill hover:text-ink pointer-coarse:size-10"
-          >
-            <Plus size={16} />
-          </button>
-        </Tip>
-      }
-    >
+    <Page title={t("settings.terminals")} onBack={onBack} backLabel={t("nav.me")} busy={q.isFetching} right={<PairingKey until={until} now={now} open={pairing} />}>
+      {pairing && <p className="m-0 px-1 text-xs text-ink-3">{t("apps.pairHint")}</p>}
       <Needs />
       {q.isError && <p className="m-0 text-sm text-ink-3">{errText(q.error)}</p>}
       <section className="flex flex-col" aria-label={t("settings.terminals")}>
@@ -111,7 +98,7 @@ export function AppsPage({ onBack }: { onBack: () => void }) {
   );
 }
 
-/** A page of 应用管理: its header (back, title, what is on its right) and its scrolling body. */
+/** A page of 应用管理: its header (back, title, its key) and its scrolling body. */
 function Page({ title, onBack, backLabel, busy, right, children }: { title: string; onBack: () => void; backLabel: string; busy?: boolean; right?: ReactNode; children: ReactNode }) {
   return (
     <div className="flex h-full flex-col">
@@ -130,9 +117,48 @@ function Page({ title, onBack, backLabel, busy, right, children }: { title: stri
   );
 }
 
-/** What waits for a person here: the needs (only pairing ones if pair) and a secret allowed here. */
-function Needs({ pair }: { pair?: boolean }) {
-  const needs = useConfirms().filter((c) => !pair || isPair(c));
+/** m:ss till until. */
+const left = (until: number, now: number) => {
+  const s = Math.max(0, Math.round((until - now) / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+};
+
+/** 开放配对: apps may ask to join for 10 minutes; the key shows the time left and closes it early.
+ *  Requests wait as cards above, the code checked against the one the app shows. */
+function PairingKey({ until, now, open }: { until: number; now: number; open: boolean }) {
+  const [busy, setBusy] = useState(false);
+  const set = async (on: boolean) => {
+    setBusy(true);
+    try {
+      await api.pairing(on);
+    } catch (e) {
+      toast(t("apps.pairing"), { error: true, description: errText(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const cls =
+    "g-press flex h-6 shrink-0 items-center gap-1.5 rounded-full bg-fill px-2 text-xs text-ink-2 tabular-nums hover:bg-fill-2 hover:text-ink disabled:opacity-50";
+  return open ? (
+    <Tip label={t("apps.pairClose")} side="bottom">
+      <button type="button" aria-label={t("apps.pairClose")} disabled={busy} onClick={() => void set(false)} className={cls}>
+        <span className="size-1.5 rounded-full bg-run" aria-hidden />
+        {t("apps.pairLeft", { left: left(until, now) })}
+      </button>
+    </Tip>
+  ) : (
+    <Tip label={t("apps.pairHint")} side="bottom">
+      <button type="button" disabled={busy} onClick={() => void set(true)} className={cls}>
+        <Link2 size={12} />
+        {t("apps.openPairing")}
+      </button>
+    </Tip>
+  );
+}
+
+/** What waits for a person here: the needs and a secret allowed here. */
+function Needs() {
+  const needs = useConfirms();
   const secretHere = useSecret()?.at === "terminals";
   if (needs.length === 0 && !secretHere) return null;
   return (
@@ -664,96 +690,5 @@ function Rename({ id, name: was, done }: { id: string; name: string; done: () =>
       }}
       className="no-ring h-7 w-36 min-w-0 rounded-md bg-fill px-2 text-base font-medium select-text"
     />
-  );
-}
-
-/** m:ss till until. */
-export const left = (until: number, now: number) => {
-  const s = Math.max(0, Math.round((until - now) / 1000));
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-};
-
-/** 新建应用: pairing opens for 10 minutes as it shows (closed early here); the official apps'
- *  install commands and ir pair for any other program; requests come in as cards on top. */
-function NewApp({ onBack }: { onBack: () => void }) {
-  const lang = useLang();
-  const win = usePairing();
-  const [now, setNow] = useState(Date.now());
-  const [err, setErr] = useState<string | null>(null);
-  const cat = useQuery({
-    queryKey: ["catalogue"],
-    queryFn: () => api.catalogue(),
-    staleTime: Infinity,
-  });
-  const opened = useRef(false);
-  const set = async (open: boolean) => {
-    try {
-      await api.pairing(open);
-      setErr(null);
-    } catch (e) {
-      setErr(errText(e));
-    }
-  };
-  useEffect(() => {
-    if (opened.current) return;
-    opened.current = true;
-    void set(true);
-  }, []);
-  const until = win?.open ? (win.until ?? 0) : 0;
-  const open = until > now;
-  useEffect(() => {
-    if (!until) return;
-    setNow(Date.now());
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, [until]);
-  const origin = location.origin;
-  return (
-    <Page title={t("apps.new")} onBack={onBack} backLabel={t("settings.terminals")}>
-      <div className="flex min-h-11 items-center gap-3 rounded-lg bg-fill px-3">
-        <span className={`size-2 shrink-0 rounded-full ${open ? "bg-run" : "bg-ink-4"}`} aria-hidden />
-        <span className="min-w-0 flex-1 text-sm tabular-nums">{open ? t("apps.pairOpen", { left: left(until, now) }) : (err ?? t("apps.pairClosed"))}</span>
-        {open ? <SecondKey onClick={() => void set(false)}>{t("apps.pairClose")}</SecondKey> : <MainKey onClick={() => void set(true)}>{t("apps.pairReopen")}</MainKey>}
-      </div>
-      <Needs pair />
-      <p className="m-0 px-1 text-xs text-ink-3">{t("apps.pairNote")}</p>
-      {(cat.data ?? []).map((c) => (
-        <Group key={c.id} title={c.name}>
-          <p className="m-0 mb-1.5 px-1 text-sm text-ink-2">{lang === "zh" ? c.description.zh : c.description.en}</p>
-          {c.install.map((s, i) => (
-            <Command key={i} label={s.os ? systems[s.os] : undefined} cmd={s.command.replaceAll("{origin}", origin)} />
-          ))}
-        </Group>
-      ))}
-      <Group title={t("apps.other")}>
-        <p className="m-0 mb-1.5 px-1 text-sm text-ink-2">{t("apps.otherHint")}</p>
-        <Command cmd={t("term.pairBotCmd", { at: origin })} />
-      </Group>
-    </Page>
-  );
-}
-
-/** A command to copy, under the system it is for. */
-function Command({ label, cmd }: { label?: string; cmd: string }) {
-  const [done, setDone] = useState(false);
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(cmd);
-      setDone(true);
-      setTimeout(() => setDone(false), 1500);
-    } catch (e) {
-      toast(t("apps.copy"), { error: true, description: errText(e) });
-    }
-  };
-  return (
-    <div className="flex flex-col gap-1 px-1 pb-1.5">
-      {label && <span className="text-xs text-ink-3">{label}</span>}
-      <div className="flex items-start gap-1 rounded-md bg-fill py-1 pr-1 pl-2">
-        <code className="min-w-0 flex-1 py-0.5 font-mono text-xs break-all select-all">{cmd}</code>
-        <IconKey label={done ? t("apps.copied") : t("apps.copy")} onClick={() => void copy()} className="size-6 shrink-0">
-          {done ? <Check size={13} /> : <Copy size={13} />}
-        </IconKey>
-      </div>
-    </div>
   );
 }

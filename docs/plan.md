@@ -9,7 +9,7 @@ Rhodium 的轻量 Go 版本：一个网页，管理主机和别的电脑上 agen
 ## 应用和登录（0.2）
 
 - 接入方都是**应用**，凭 TOKEN 访问；应用下面是**登录**（谁在说话）。主机不算应用，不可被管理；网页（`ir_web`）是内置应用，每个浏览器一个登录。见 `GLOSSARY.md`。
-- 应用只经**配对**进来：开放配对（`ir apps open` 或“新建应用”，10 分钟），申请方显示配对码，主机或能批的网页登录核对后允许。
+- 应用只经**配对**进来：开放配对（应用管理里的“开放配对”，10 分钟），申请方显示配对码，主机或能批的网页登录核对后允许。
 - **权限**：用哪些 agent、哪些文件夹（位置 `应用名:路径`）。能用的 = 登录的 ∩ 应用的；范围外的会话看不到，不能用的 agent 的会话只能看。
 - **Claude** 只给本人的应用和登录（Claude 用户协议），只在建的时候定：配对时允许为本人的，或 `ir invite --claude`。
 - 批申请的只有人：主机上的人，或有 Claude、权限全部的网页登录；agent 的 `ir` 一律不能批。
@@ -112,7 +112,7 @@ ir run [--secret 名,…] -- 命令 …
 
 ```
 ir apps [logins [应用]] | rename <应用> <新名> | rm <应用>   应用和登录；登录写 应用/登录
-ir apps open [时长] | close  开放配对（默认 10 分钟）或关掉；只有主机
+ir api PUT internal/pairing open:=true [minutes:=30]  开放配对（默认 10 分钟，最多 60）；open:=false 关掉；能批的人
 ir needs | allow <id> | deny <id>   等人决定的事：应用接入、更新配对、应用变更、登录加入…
 ir invite [名字] [--claude]  网页的一次性邀请链接；--claude 带 Claude
 ir join <地址> [--shell]     把这台电脑接入另一个 Iridium（执行端），对方核对配对码后允许
@@ -238,7 +238,7 @@ ir run [--secret 名,…] -- 命令 …   {{名}}、{{file:名}} 换进参数，
 - Web Push，总开关默认关；只给网页登录和主机（`/v1/internal/web/push/*`）。
 - 设置里一个总开关，开了才有别的；下面是默认事件：需要你、出错、任务完成，默认都开；不单列压缩：你手动压缩完成算任务完成，自动压缩不推（2026-11-08）。网页自己不再弹通知（只留 Web Push；未读点、标题数字、图标角标照旧，2026-11-08）。工作区、文件夹、会话右键各有自己的开关（跟随上级、开、关，开时可另选事件），近的说了算（2026-11-06）。
 - 应用的接口是 **Satori with ir**（`docs/satori.md`）：会话是 channel，文件夹组是 guild，登录是 login。Iridium 自己的接口在 `/v1/internal/*`（`docs/api.md`）。
-- 收录的官方应用（`GET /v1/internal/catalogue`）：`ir join`、dsh 插件、QQ 桥。Iridium 只列名字和安装命令，不下载、不运行。QQ 桥要重写成 Satori 客户端，在那之前不能用（`docs/qq.md`）。
+- 官方应用（`ir join`、dsh 插件、QQ 桥）的安装命令在各自的文档里（`docs/exec.md`、`docs/qq.md`）；Iridium 不下载、不运行。QQ 桥要重写成 Satori 客户端，在那之前不能用（`docs/qq.md`）。
 
 ## 别的机器
 

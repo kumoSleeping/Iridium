@@ -377,29 +377,6 @@ type Pending struct {
 	Need Need `json:"need"`
 }
 
-// CatalogueEntry is an official app Iridium lists (GET /v1/internal/catalogue): what it is and how to
-// install it, by system. Iridium installs nothing itself.
-type CatalogueEntry struct {
-	ID          string        `json:"id"`
-	Name        string        `json:"name"`
-	Type        string        `json:"type"` // as its app is shown once paired
-	Description Text          `json:"description"`
-	Install     []InstallStep `json:"install"`
-	URL         string        `json:"url,omitempty"` // where to read more
-}
-
-// InstallStep is a command that installs a catalogue entry on OS (windows | darwin | linux; "" any).
-type InstallStep struct {
-	OS      string `json:"os,omitempty"`
-	Command string `json:"command"`
-}
-
-// Text is a short text in Chinese and English.
-type Text struct {
-	Zh string `json:"zh"`
-	En string `json:"en"`
-}
-
 // SetPublic sets public.origin ("" turns the public way in off). The gate restarts with it.
 type SetPublic struct {
 	Origin string `json:"origin"`

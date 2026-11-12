@@ -49,7 +49,6 @@ import type {
   SettingsPatch,
   AppAgents,
   Apps,
-  CatalogueEntry,
   PairWindow,
   Perms,
   UpdateState,
@@ -370,8 +369,6 @@ export const api = {
   loginPerms: (app: string, login: string, p: Perms) => write<Perms>("PUT", `/v1/internal/apps/${enc(app)}/logins/${enc(login)}/perms`, p),
   /** PUT /v1/internal/pairing: the pairing window opened for minutes (10 by default) or closed. */
   pairing: (open: boolean, minutes?: number) => write<PairWindow>("PUT", "/v1/internal/pairing", { open, ...(minutes ? { minutes } : {}) } satisfies PairWindow),
-  /** GET /v1/internal/catalogue: the official apps and the commands that install them. */
-  catalogue: () => get<CatalogueEntry[]>("/v1/internal/catalogue"),
 
   /** GET /v1/internal/usage: the last days' tokens by day, app, agent and model; terminal: one app only; by hour: the last 24 hours'; by weekhour: by weekday and hour. */
   usage: (days: number, terminal?: string, by?: "hour" | "weekhour") => get<Usage>(`/v1/internal/usage?days=${days}${terminal ? `&app=${enc(terminal)}` : ""}${by ? `&by=${by}` : ""}`),

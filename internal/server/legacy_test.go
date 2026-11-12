@@ -29,6 +29,12 @@ func TestLegacyPaths(t *testing.T) {
 			t.Errorf("%s %s: 404", p[0], p[1])
 		}
 	}
+	// The catalogue went with 新建应用, and extensions was never a name here: no route.
+	for _, path := range []string{"/v1/internal/catalogue", "/v1/internal/extensions"} {
+		if code := l.do("web", "GET", path, nil, nil); code != http.StatusNotFound {
+			t.Errorf("GET %s: %d, want 404", path, code)
+		}
+	}
 	for _, as := range []string{"web", "socket"} {
 		for _, path := range []string{"/api/sessions", "/api/me", "/api"} {
 			var raw string

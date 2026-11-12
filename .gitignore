@@ -7,5 +7,8 @@ node_modules/
 /internal/webui/dist/*
 !/internal/webui/dist/.gitkeep
 .iridium/
+# CodeGraph's index and browser checks' scratch.
+.codegraph/
+.local/
 # The fake dsh package the dsh driver tests read.
 !internal/agent/dsh/testdata/pkg/node_modules/

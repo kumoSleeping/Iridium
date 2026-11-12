@@ -180,22 +180,3 @@ func TestApprovers(t *testing.T) {
 		t.Fatalf("no such need: %+v", e)
 	}
 }
-
-// The catalogue: the official apps, with how to install each, the dsh plugin and iridium-qq too.
-func TestCatalogue(t *testing.T) {
-	t.Parallel()
-	l := start(t)
-	var c []api.CatalogueEntry
-	l.want(200, "socket", "GET", "/v1/internal/catalogue", nil, &c)
-	ids := []string{}
-	for _, x := range c {
-		ids = append(ids, x.ID)
-		if x.Name == "" || x.Description.Zh == "" || x.Description.En == "" || len(x.Install) == 0 || x.Install[0].Command == "" {
-			t.Errorf("an entry: %+v", x)
-		}
-	}
-	if !slices.Equal(ids, []string{"computer", "dsh", "qq"}) {
-		t.Fatalf("entries: %v", ids)
-	}
-	l.want(404, "socket", "GET", "/v1/internal/extensions", nil, nil)
-}
