@@ -1,4 +1,4 @@
-// Listens for clicks. One page speaks a recording into a channel's voice (Chrome's fake microphone
+// Listens for clicks. One page speaks a recording into a folder group's voice (Chrome's fake microphone
 // fed a WAV), another hears it and hands over every sample it played; while it speaks, the
 // speaker mutes and unmutes, changes quality and noise suppression, and (JITTER=1) the listener's
 // link stalls and gives all at once, as a bad network does. What was played is written as a WAV
@@ -29,12 +29,16 @@ async function open(browser, name, before) {
   await page.setViewport({ width: 1280, height: 800 });
   await page.evaluateOnNewDocument(before, process.env.NOISE ?? "strong", process.env.QUALITY ?? "auto", !!process.env.JITTER);
   await page.goto(`${BASE}?lang=en#/s/${session}`, { waitUntil: "networkidle2" });
-  await (await page.waitForSelector('button[aria-label="Voice"], button[aria-label$="in voice"]', { timeout: 20_000 })).click();
+  // Into the voice of the first folder group: its "+", then 语音 in it.
+  await (await page.waitForSelector('button[aria-label^="New session in"]', { timeout: 20_000 })).click();
+  await (await page.waitForSelector("xpath/.//button[starts-with(normalize-space(.), 'Voice')]", { timeout: 20_000 })).click();
   await page.waitForSelector('button[aria-label="In voice"]', { timeout: 20_000 });
   return page;
 }
 /** A key of the open popover, by its words. */
 async function press(page, words, role = "button") {
+  // The microphone's key stands in the dock itself.
+  if (words === "Mute" || words === "Unmute") return void (await page.click(`button[aria-label="${words}"]`));
   if (!(await page.$("[data-voice]"))) await page.click('button[aria-label="In voice"]');
   const sel = role === "radio" ? `xpath/.//button[@role='radio'][normalize-space(.)='${words}']` : `xpath/.//button[contains(., '${words}')]`;
   await (await page.waitForSelector(sel, { timeout: 5000 })).click();

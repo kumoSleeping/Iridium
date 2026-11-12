@@ -61,7 +61,7 @@ const noop = () => () => {};
 export const useList = () => useCarried<Session[]>("list");
 export const useSession = (id: string | null) => useCarried<SessionState>(id ? `session:${id}` : null);
 export const useContextState = (id: string | null) => useCarried<Context>(id ? `context:${id}` : null);
-/** Who is in each channel's voice (voice/state.ts Rooms), by channel. */
+/** Who is in each folder group's voice (voice/state.ts Rooms), by the group's id. */
 export const useVoiceRooms = () => useCarried<Record<string, { id: number; name: string }[]>>("voice");
 export const useQuota = () => useCarried<Quota>("quota");
 /** Whether a newer Iridium is out, and how installing it goes. */

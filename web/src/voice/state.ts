@@ -1,4 +1,5 @@
-// The page's voice, as its keys show it (key.tsx): one room at a time, whichever chat is open.
+// The page's voice, as its keys show it (dock.tsx, key.tsx): one room at a time, a folder group's,
+// whichever chat is open.
 // The audio itself is engine.ts, loaded as a room is first joined.
 import { useSyncExternalStore } from "react";
 
@@ -117,5 +118,5 @@ export function setGate(db: number | null) {
  *  page drawn again. */
 export const micLevels = new Set<(db: number, mark: number, open: boolean) => void>();
 
-/** Who is in each channel's voice, by channel: the state "voice", for those not in it too. */
+/** Who is in each folder group's voice, by the group's id: the state "voice", for those not in it too. */
 export type Rooms = Record<string, Member[]>;

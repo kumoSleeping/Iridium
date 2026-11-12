@@ -15,7 +15,9 @@ import rnnoiseURL from "@sapphi-red/web-noise-suppressor/rnnoise.wasm?url";
 import rnnoiseSimdURL from "@sapphi-red/web-noise-suppressor/rnnoise_simd.wasm?url";
 import captureURL from "./capture.worklet.js?url&no-inline";
 import playURL from "./play.worklet.js?url&no-inline";
-import { getVoice, micLevels, NONE, setVoice, type Member } from "./state";
+import { t } from "../i18n";
+import { toast } from "../toast";
+import { getVoice, micLevels, NONE, setVoice, type Member, type Voice } from "./state";
 import { Clock, pack, pct, playout, since, low32, unpack } from "./wire";
 
 const RATE = 48000;
@@ -86,6 +88,12 @@ type Session = {
   retry?: ReturnType<typeof setTimeout>;
 };
 
+/** Out of any room, for what went wrong: said once, by a toast (the dock is gone with the room). */
+function failed(error: Exclude<Voice["error"], "">) {
+  setVoice({ status: "off", error, members: [], speaking: [] });
+  toast(t(`voice.err.${error}`), { error: true });
+}
+
 let cur: Session | null = null;
 /** Which join or leave is the last asked for: one still waiting on the microphone gives way. */
 let asked = 0;
@@ -96,7 +104,7 @@ export function supported() {
   return typeof AudioEncoder !== "undefined" && typeof AudioDecoder !== "undefined" && typeof AudioWorkletNode !== "undefined" && !!navigator.mediaDevices?.getUserMedia;
 }
 
-const url = (room: string) => `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/v1/internal/sessions/${encodeURIComponent(room)}/voice`;
+const url = (room: string) => `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/v1/internal/guilds/${encodeURIComponent(room)}/voice`;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** The microphone as the settings say: the echo always cancelled; the browser's noise suppression
@@ -123,7 +131,7 @@ export async function join(room: string) {
   if (cur?.room === room) return;
   leave();
   const mine = ++asked;
-  if (!supported()) return void setVoice({ room, status: "off", error: "unsupported" });
+  if (!supported()) return failed("unsupported");
   setVoice({ room, status: "joining", error: "", members: [], speaking: [], delays: {}, numbers: NONE, muted: false });
   // The context first, still within the press: a browser lets it sound only then.
   const ctx = new AudioContext({ sampleRate: RATE, latencyHint: "interactive" });
@@ -132,12 +140,12 @@ export async function join(room: string) {
     mic = await listen();
   } catch {
     void ctx.close();
-    return void setVoice({ status: "off", error: "mic" });
+    return failed("mic");
   }
   const stop = (error?: "unsupported" | "failed") => {
     mic.getTracks().forEach((t) => t.stop());
     void ctx.close();
-    if (error && asked === mine) setVoice({ status: "off", error });
+    if (error && asked === mine) failed(error);
   };
   if (asked !== mine) return stop();
   let rnnoise: RnnoiseWorkletNode | null = null;
@@ -486,7 +494,7 @@ export function leave(error: "" | "full" | "failed" = "") {
   const s = cur;
   cur = null;
   asked++;
-  if (!s) return void setVoice(error ? { status: "off", error } : null);
+  if (!s) return error ? failed(error) : setVoice(null);
   report(s);
   s.over = true;
   s.timers.forEach(clearInterval);
@@ -497,7 +505,8 @@ export function leave(error: "" | "full" | "failed" = "") {
   if (s.encoder.state !== "closed") s.encoder.close();
   for (const sp of s.speakers.values()) if (sp.decoder.state !== "closed") sp.decoder.close();
   void s.ctx.close();
-  setVoice(error ? { status: "off", error, members: [], speaking: [] } : null);
+  if (error) failed(error);
+  else setVoice(null);
 }
 
 /** Muted: the capture falls silent first, then nothing goes up and the microphone rests; back the

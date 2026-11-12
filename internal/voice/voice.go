@@ -1,4 +1,4 @@
-// Package voice is a channel's voice: the people in a session's room hear each other. One
+// Package voice is a folder group's voice: the people in the group's room hear each other. One
 // WebSocket a member (docs/voice.md): binary frames are audio, which the room passes on to the
 // others as they came, never decoded; text frames are its signals (who is in, muted, the clock).
 //

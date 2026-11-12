@@ -3,27 +3,37 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/kumoSleeping/iridium/internal/api"
+	"github.com/kumoSleeping/iridium/internal/config"
+	"github.com/kumoSleeping/iridium/internal/discover"
 	"github.com/kumoSleeping/iridium/internal/voice"
 )
 
-// A channel's voice: the page joins its session's room; who is in it is listed and carried as
-// the state "voice", gone as it leaves. An agent's ir may not join; a session not there has none.
+// A folder group's voice: the page joins the room of a group it sees; who is in it is listed and
+// carried as the state "voice", gone as it leaves. An agent's ir may not join; a group not there
+// has none.
 func TestVoice(t *testing.T) {
-	l := start(t)
-	id := l.create(200, "web", api.NewSession{Agent: api.AgentClaude, Cwd: l.work})
+	l := startWith(t, func(s *Server, cfg config.Config, work string) {
+		empty := t.TempDir()
+		s.Discover = discover.New(discover.Options{ClaudeDir: cfg.ClaudeHome, CodexHome: empty, PiSessions: empty, DshHome: empty, Store: s.st, Hub: s.hub, Procs: discover.ProcFS{Root: empty}, Logf: t.Logf})
+	})
+	group, err := l.s.st.CreateWorkspace("work", l.work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := strconv.FormatInt(group, 10)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	url := strings.Replace(l.base, "http", "ws", 1) + "/v1/internal/sessions/"
-	if _, resp, err := websocket.Dial(ctx, url+"nope/voice", nil); err == nil || resp == nil || resp.StatusCode < 400 {
-		t.Fatalf("a session not there has a room: %v", err)
+	url := strings.Replace(l.base, "http", "ws", 1) + "/v1/internal/guilds/"
+	if _, resp, err := websocket.Dial(ctx, url+"987654/voice", nil); err == nil || resp == nil || resp.StatusCode != 422 {
+		t.Fatalf("a group not there has a room: %v", err)
 	}
-	if code := l.do("agent", "GET", "/v1/internal/sessions/"+id+"/voice", nil, nil); code != 403 {
+	if code := l.do("agent", "GET", "/v1/internal/guilds/"+id+"/voice", nil, nil); code != 403 {
 		t.Fatalf("an agent's ir in voice: %d", code)
 	}
 	ws, _, err := websocket.Dial(ctx, url+id+"/voice", nil)
@@ -41,7 +51,7 @@ func TestVoice(t *testing.T) {
 		t.Fatalf("hello %s %v", b, err)
 	}
 	var members []voice.Member
-	l.want(200, "web", "GET", "/v1/internal/sessions/"+id+"/voice/members", nil, &members)
+	l.want(200, "web", "GET", "/v1/internal/guilds/"+id+"/voice/members", nil, &members)
 	if len(members) != 1 {
 		t.Fatalf("members %+v", members)
 	}

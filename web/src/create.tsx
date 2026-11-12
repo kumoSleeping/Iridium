@@ -16,6 +16,7 @@ import { agentsAt, atMachine, homeAt, MachineBadge, MachineFace, pageAt, type Ma
 import { onCreateAt } from "./places";
 import { errText, toast } from "./toast";
 import { AGENTS, agentName, cn, homeOf, IconKey, Logo, PopSurface, tilde, Tip } from "./ui";
+import { VoiceEntry } from "./voice/dock";
 
 const join = (dir: string, name: string) => (dir.endsWith("/") ? dir + name : `${dir}/${name}`);
 /** One folder's listing; prefetched before it is shown (the popover opening, a row hovered), so the
@@ -567,7 +568,15 @@ export function WsPlus({ w, trigger, open, setOpen, opened }: { w: Workspace; tr
         {/* Page to page, sliding the way you went: into the folder, back to the agents (the user, 2026-11-06). */}
         <div key={page} data-dir={page === "session" ? "back" : undefined} className={page !== "session" || stepped ? "g-slide" : ""}>
           {page === "session" ? (
-            <NewSession ws={w.name} folder={folder} busy={busy} onFolder={() => (setStepped(true), setPage("folder"))} onMake={sub.make} onPick={(a, to) => void sub.settled(to).then((at) => at && start(a, at.to?.cwd ?? at.folder, w.id, at.to?.m.id))} />
+            <>
+              <NewSession ws={w.name} folder={folder} busy={busy} onFolder={() => (setStepped(true), setPage("folder"))} onMake={sub.make} onPick={(a, to) => void sub.settled(to).then((at) => at && start(a, at.to?.cwd ?? at.folder, w.id, at.to?.m.id))} />
+              {/* The group's voice (the user, 2026-11-12: its way in is here). */}
+              {w.id > 0 && (
+                <div className="border-t-[0.5px] border-(--edge) p-1.5">
+                  <VoiceEntry guild={w.id} done={() => setOpen(false)} />
+                </div>
+              )}
+            </>
           ) : (
             <FolderPicker
               machine={there?.m}

@@ -40,6 +40,8 @@ POST internal/button {id, option?, choices?, words?, message?} -> {}  answer an 
 POST internal/files/copy {from, to} -> ndjson  copy a file: from, to are paths here or app:path at an app's computer; prints path, size, sha256; run again to resume; socket only
 POST internal/machines/{id}/shell {line, cwd?} -> output  a command line at an app's computer (id or name); --wait for its output and exit code; host or agents
 PATCH internal/guilds/{id} {name?, position?, split?} -> {ok}  rename a folder group, move it (0 first), split it by subfolder; host or web
+GET internal/guilds/{id}/voice - -> ws  the folder group's voice: a member's connection (docs/voice.md); a login only
+GET internal/guilds/{id}/voice/members - -> Member[]  who is in the group's voice  view=id,name,app,muted
 GET internal/apps - -> Apps  apps, computers, logins  view=apps.id,apps.name,apps.online,apps.computer.home,logins.id,logins.name
 GET internal/files?path&machine - -> DirListing  list a directory; socket only  view=entries.name,entries.size,entries.type
 GET internal/usage?days&app&by - -> Usage  tokens, cost; app=id|name|me, by=hour|weekhour  view=rows.day,rows.agent,rows.model,rows.output,rows.costUsd
@@ -59,8 +61,6 @@ GET internal/sessions/{id}/public - -> PublicLink  the session's public read-onl
 POST internal/sessions/{id}/public - -> PublicLink  make it (a new one replaces it): url only here; 403 not_public without the public address; person only
 DELETE internal/sessions/{id}/public - -> {ok}  revoke it at once; person only
 GET internal/sessions/{id}/commands - -> Command[]  the agent's slash commands  view=name,description
-GET internal/sessions/{id}/voice - -> ws  the channel's voice: a member's connection (docs/voice.md); a login only
-GET internal/sessions/{id}/voice/members - -> Member[]  who is in the channel's voice  view=id,name,app,muted
 
 # session settings
 PUT internal/sessions/{id}/model {model} -> {ok}  model ("" default; values in SessionState.models)

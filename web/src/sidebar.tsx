@@ -9,7 +9,7 @@
 // and at its foot the colour tags (colors.ts); a group's: rename, its path, 通知. The mouse resting
 // on a row fetches its chat ahead.
 import { Menu } from "@base-ui/react/menu";
-import { Archive, ArchiveRestore, ArrowDown, ArrowUp, Bot, Check, ChevronRight, Copy, Ellipsis, Ungroup, Folder, FolderOpen, ListIndentDecrease, Pencil, Pin, PinOff, Plus, RefreshCw, Square, Workflow as WorkflowIcon, AudioLines } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowDown, ArrowUp, Bot, Check, ChevronRight, Copy, Ellipsis, Ungroup, Folder, FolderOpen, ListIndentDecrease, Pencil, Pin, PinOff, Plus, RefreshCw, Square, Workflow as WorkflowIcon } from "lucide-react";
 import { ConfirmIcon, confirmName, confirmTitle } from "./confirmname";
 import { Fragment, lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode, type RefObject } from "react";
 import { api } from "./api/client";
@@ -30,7 +30,8 @@ import { PLACE_DRAG, SESSION_DRAG } from "./chat/refs";
 import { NoteMark, NotesAt, useNotes } from "./notekey";
 import { useUnread } from "./unread";
 import { CloudBadge, MachineFace, shownPath, useLate, useMachine, type Machine } from "./machines";
-import { getCarried, setCarried, useVoiceRooms } from "./store";
+import { getCarried, setCarried } from "./store";
+import { VoiceDock, VoiceMark } from "./voice/dock";
 import { dropMark, dropTarget, endDrag, listDrop, pinFolder, placeFolder, placeGroup as placeGroupKey, placeSession, sortList, startDrag, useDragged, useOver, type Dragged, type Edge, type Over } from "./reorder";
 
 const STEP = 18;
@@ -420,14 +421,19 @@ export function Sidebar(p: Props) {
           // see, darker when the row is hovered (the user, 2026-11-06).
           end={
             w.id !== 0 &&
-            !gone(w.root) &&
-            p.wsPlus(
+            !gone(w.root) && (
+              <>
+                {/* Who is in the group's voice; the way in is in its "+". */}
+                <VoiceMark guild={w.id} />
+                {p.wsPlus(
               w,
               <button type="button" onClick={(e) => e.stopPropagation()} aria-label={t("nav.newHere", { ws: w.name })} className="g-press -mr-1 grid size-6 place-items-center rounded-sm text-ink-3 group-hover:text-ink-2 hover:bg-fill-2 data-popup-open:bg-fill-2 data-popup-open:text-ink-2 pointer-coarse:size-8">
                 <Plus size={15} />
               </button>,
               plusOpen === w.key,
               (o) => setPlusOpen(o ? w.key : null),
+            )}
+              </>
             )
           }
         />
@@ -529,6 +535,8 @@ function Foot(p: Pick<Props, "me">) {
   return (
     <div className="flex h-14 shrink-0 items-center justify-between gap-2 px-2 pointer-coarse:h-16">
       <div className="flex min-w-0 flex-1">{p.me}</div>
+      {/* The voice this page is in, beside me; nothing while in none (the user, 2026-11-12). */}
+      <VoiceDock />
       <UpdateKey />
     </div>
   );
@@ -1000,19 +1008,8 @@ const SessionRow = memo(function SessionRow({ s, where, depth, flip, selected, o
       </span>
     </Tip>
   );
-  // People in its voice: said on its row, to those not in it too.
-  const talking = useVoiceRooms()?.[s.id]?.length ?? 0;
-  const voice = talking > 0 && (
-    <Tip label={t("voice.here", { n: talking })} side="bottom">
-      <span className="g-pop flex items-center gap-0.5 text-xs text-run tabular-nums">
-        <AudioLines size={12} />
-        {talking}
-      </span>
-    </Tip>
-  );
-  const end = slot || mark || lamp || away || folded || voice ? (
+  const end = slot || mark || lamp || away || folded ? (
     <span className="flex items-center gap-1.5">
-      {voice}
       {folded}
       {mark}
       {slot}

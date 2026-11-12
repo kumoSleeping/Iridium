@@ -6,7 +6,7 @@
 import { Menu } from "@base-ui/react/menu";
 import { BarChart3, Ellipsis, Globe, ListTree, Plus, Settings } from "lucide-react";
 import type { Status } from "../api/types.gen";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, lazy, Suspense } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import type { SessionState as LiveSession } from "../api/types.gen";
 import { api } from "../api/client";
 import { LinkDot } from "../link";
@@ -43,10 +43,7 @@ import { PlaceIcon, placeOf } from "./mention";
 import { spotsOf, type Spot } from "./where";
 import { Compaction, Pending, Running, Said } from "./said";
 import { Stick, toEnd } from "./stick";
-
-/** The bar's voice key (voice/key.tsx), a part of its own: the chat's code stays under its limit
- *  (test/build.test.ts); its place in the bar is kept till it comes. */
-const VoiceKey = lazy(() => import("../voice/key").then((m) => ({ default: m.VoiceKey })));
+import { VoiceDock } from "../voice/dock";
 
 const BUSY = new Set(["running", "compacting", "starting", "waiting"]);
 /** A turn is on: at work, or waiting on an ask. Waiting only on a step auto mode denied, the turn is
@@ -460,12 +457,8 @@ function Bar({ s, onSheet, onMe, spots, asked }: { s?: Session; onSheet?: () => 
         {onSheet && <LinkDot />}
         {/* ⋯'s place kept while the session comes: the dot beside it does not move as it does. */}
         {!s && <span aria-hidden className="size-8 shrink-0 pointer-coarse:size-10" />}
-        {/* The channel's voice; a subagent's session has none (nobody but its parent speaks there). */}
-        {s && !s.subagent && (
-          <Suspense fallback={<span aria-hidden className="size-8 shrink-0 pointer-coarse:size-10" />}>
-            <VoiceKey room={s.id} className={late} />
-          </Suspense>
-        )}
+        {/* On a phone the voice this page is in stands here: there is no foot beside me. */}
+        {onSheet && <VoiceDock side="bottom" />}
         {s && (
           <span className="relative grid">
             {/* Anchored on ⋯ itself, under it: clicks go through to ⋯. */}

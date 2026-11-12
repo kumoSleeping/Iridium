@@ -1,4 +1,4 @@
-// Two pages in one channel's voice on a test daemon, each with Chrome's fake microphone (a beep
+// Two pages in one folder group's voice on a test daemon, each with Chrome's fake microphone (a beep
 // a second): each must hear the other, and the numbers the popover measures are printed.
 //   CHROME=<chrome> node scripts/voice.mjs <base URL> [seconds]
 // The base is a test daemon's own page (scripts/test-deploy.sh up: no login). Never a real one.
@@ -48,7 +48,9 @@ async function member(name) {
   page.on("console", (m) => m.type() === "error" && !m.text().includes("cloudflareinsights") && errors.push(`${name}: ${m.text()}`));
   await page.setViewport({ width: 1280, height: 800 });
   await page.goto(`${BASE}?lang=en#/s/${session.id}`, { waitUntil: "networkidle2" });
-  await (await page.waitForSelector('button[aria-label="Voice"], button[aria-label$="in voice"]', { timeout: 10_000 })).click();
+  // Into the voice of the first folder group: its "+", then 语音 in it.
+  await (await page.waitForSelector('button[aria-label^="New session in"]', { timeout: 20_000 })).click();
+  await (await page.waitForSelector("xpath/.//button[starts-with(normalize-space(.), 'Voice')]", { timeout: 20_000 })).click();
   await page.waitForSelector('button[aria-label="In voice"]', { timeout: 20_000 });
   return page;
 }
@@ -82,8 +84,8 @@ try {
   console.log(`b, a at low: ${line(after)}`);
   if (after.down <= before) ok = false;
   // Muted: the other sees it. One leaves: the other sees that too.
-  await numbers(a);
-  await (await a.waitForSelector("xpath/.//button[contains(., 'Mute')]")).click();
+  await a.bringToFront();
+  await a.click('button[aria-label="Mute"]');
   await numbers(b);
   await b.waitForSelector('svg[aria-label="Muted"]', { timeout: 5000 });
   await numbers(a);
