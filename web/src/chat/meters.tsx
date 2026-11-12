@@ -71,7 +71,7 @@ export function ctxParts(c: Context): Part[] {
   });
   // Only a total (the agent tells no categories): what is used, one part, so the bar is there
   // all the same (the user, 2026-11-12).
-  if (!parts.length && c.used > 0) parts.push({ key: "used", name: t("ctx.inUse"), tokens: c.used, tone: "var(--ink-2)" });
+  if (!parts.length && c.used > 0) parts.push({ key: "used", name: t("ctx.inUse"), tokens: c.used, tone: "var(--series-1)" });
   for (const x of cats.filter((x) => x.kind === "buffer" && x.tokens > 0)) parts.push({ key: x.id || x.name, name: ctxName(x), tokens: x.tokens, tone: HATCH, ring: true });
   const free = cats.find((x) => x.kind === "free");
   const freeTokens = free?.tokens ?? (c.max ? Math.max(0, c.max - c.used - parts.filter((p) => p.ring).reduce((n, p) => n + p.tokens, 0)) : 0);
@@ -121,7 +121,7 @@ export function ContextRing({ session, summary, tokens, open, onOpenChange }: { 
         </div>
         {parts.length > 1 && <Meter parts={parts} label={k} />}
         {/* The cache: a section as the context's above it, its title and rate, a bar of what was
-            read from the cache, written to it, and neither, a line each (the user, 2026-11-12:
+            read from the cache, written to it, and neither in the context's colours, a line each (the user, 2026-11-12:
             not a footnote under a rule). */}
         {hit && tokens && (
           <section className="mt-4" aria-label={t("ctx.cacheHit")}>
@@ -137,12 +137,12 @@ export function ContextRing({ session, summary, tokens, open, onOpenChange }: { 
   );
 }
 
-/** What a session's input was: read from the cache, written to it, neither; in greys, the read the
- *  darkest, the uncached as the context's free. */
+/** What a session's input was: read from the cache, written to it, neither; in the chart's hues as
+ *  the context's parts are, the uncached as its free. */
 const cacheParts = (x: InputTokens): Part[] =>
   [
-    { key: "read", name: t("ctx.cacheRead"), tokens: x.cacheRead, tone: "var(--ctx-2)" },
-    { key: "write", name: t("ctx.cacheWrite"), tokens: x.cacheWrite, tone: "var(--ctx-5)" },
+    { key: "read", name: t("ctx.cacheRead"), tokens: x.cacheRead, tone: "var(--series-3)" },
+    { key: "write", name: t("ctx.cacheWrite"), tokens: x.cacheWrite, tone: "var(--series-2)" },
     { key: "input", name: t("ctx.uncached"), tokens: x.input, tone: "var(--fill-2)", ring: true },
   ].filter((p) => p.tokens > 0);
 
