@@ -146,7 +146,9 @@ const cacheParts = (x: InputTokens): Part[] =>
     { key: "input", name: t("ctx.uncached"), tokens: x.input, tone: "var(--fill-2)", ring: true },
   ].filter((p) => p.tokens > 0);
 
-/** A bar of parts, each its share in its tone, and under it a line each: its dot, name and size. */
+/** A bar of parts, each its share in its tone, every one a rounded rectangle of the same corners
+ *  (the user, 2026-11-12: not a half circle at the ends and square ones between), and under it a
+ *  line each: its dot, name and size. */
 function Meter({ parts, label }: { parts: Part[]; label: (n: number) => string }) {
   return (
     <>
@@ -154,8 +156,8 @@ function Meter({ parts, label }: { parts: Part[]; label: (n: number) => string }
         {parts.map((p, i) => (
           <Tip key={p.key} label={`${p.name} · ${label(p.tokens)}`}>
             <span
-              className={cn("g-fade h-full", i === 0 && "rounded-l-full", i === parts.length - 1 && "rounded-r-full")}
-              style={{ flexGrow: p.tokens, flexBasis: 0, minWidth: 3, background: p.tone, animationDelay: `${i * 20}ms` } as CSSProperties}
+              className="g-fade h-full rounded-[2px]"
+              style={{ flexGrow: p.tokens, flexBasis: 0, minWidth: 4, background: p.tone, animationDelay: `${i * 20}ms` } as CSSProperties}
             />
           </Tip>
         ))}
