@@ -37,10 +37,10 @@ test("hushed, the sound goes down to nothing and comes back without a step", () 
   expect(out.at(-1)).toBe(0.5);
 });
 
-test("the gate lets a voice at the microphone through whole, and shuts on what is far quieter", () => {
+test("the gate lets through what reaches the mark set, whole, and shuts on what does not", () => {
   const c = new Capture();
-  c.port.onmessage!({ data: { gate: true } });
-  // A voice, then a voice across the room (far quieter) for a second, then the voice again.
+  c.port.onmessage!({ data: { gate: true, mark: 0.05 } });
+  // A voice, then one across the room (under the mark) for a second, then the voice again.
   const out = through(c, [[0.3, 1], [0.02, 1], [0.3, 0.5]]);
   expect(steepest(out.slice(1.5 * RATE))).toBeLessThan(0.01); // shut and open again, never at a step
   expect(out[RATE / 2]).toBeCloseTo(0.3);
@@ -51,20 +51,15 @@ test("the gate lets a voice at the microphone through whole, and shuts on what i
   expect(out[Math.round(2 * RATE) + 960]).toBeGreaterThan(0.25);
   // Without the gate, all of it.
   const d = new Capture();
-  expect(through(d, [[0.03, 0.5]]).at(-1)).toBeCloseTo(0.03);
+  expect(through(d, [[0.02, 0.5]]).at(-1)).toBeCloseTo(0.02);
 });
 
-test("a mark set is the one used; by itself, the mark stays well over the room's noise", () => {
-  // Set high: a voice under it does not go out; over it, it does.
+test("the mark stays where it was set, however long a voice goes on, loud or soft", () => {
+  // Once a mark that found itself rose under a voice that kept on, and shut on it for good.
   const c = new Capture();
-  c.port.onmessage!({ data: { gate: true, mark: 0.2 } });
-  const out = through(c, [[0.1, 0.5], [0.3, 0.5]]);
-  expect(out[Math.round(0.4 * RATE)]).toBe(0);
-  expect(out.at(-1)).toBeCloseTo(0.3);
-  // By itself, in a loud room (a fan at 0.01, nobody speaking): shut, though over the lowest mark.
-  const d = new Capture();
-  d.port.onmessage!({ data: { gate: true } });
-  const room = through(d, [[0.01, 5], [0.2, 0.5]]);
-  expect(room[Math.round(4.9 * RATE)]).toBe(0);
-  expect(room.at(-1)).toBeCloseTo(0.2); // and a voice over the fan goes out
+  c.port.onmessage!({ data: { gate: true, mark: 0.01 } });
+  const out = through(c, [[0.3, 30], [0.03, 30]]);
+  expect(out[Math.round(29 * RATE)]).toBeCloseTo(0.3);
+  expect(out.at(-1)).toBeCloseTo(0.03);
+  expect(out.slice(RATE).every((x) => x > 0.02)).toBe(true);
 });

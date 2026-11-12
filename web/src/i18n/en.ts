@@ -59,7 +59,6 @@ export const en: Dict = {
   "voice.gain": "Auto gain",
   "voice.speaking": "Speaking",
   "voice.gate": "Gate",
-  "voice.gate.auto": "Auto",
   "voice.detail": "Network {net} · 95% {p95} · buffer {buffer} · round trip {rtt} · dropped {late} · unsent {unsent} · stalls {stalls}",
   "voice.inGroup": "In voice: {name}",
   "voice.count": "{n} here",

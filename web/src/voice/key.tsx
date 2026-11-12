@@ -33,57 +33,47 @@ function Choice<T extends string>({ label, values, value, name, onChange }: { la
 }
 
 /** The gate's bar: how loud the microphone is now (the fill, green while the gate is open) and
- *  the level it must reach (the handle). Dragged, the handle stays where it is put; "自动" at its
- *  end lets the level find itself again, the handle then moving with it. The fill and the moving
- *  handle are drawn by hand, some times a second, the popover not drawn again. */
-function Gate({ value }: { value: number | null }) {
+ *  the level it must reach (the handle), which stays where it is dragged. The fill is drawn by
+ *  hand, some times a second, the popover not drawn again. */
+function Gate({ value }: { value: number }) {
   const bar = useRef<HTMLDivElement>(null);
   const fill = useRef<HTMLDivElement>(null);
-  const knob = useRef<HTMLDivElement>(null);
-  const auto = value === null;
   const at = (db: number) => `${(Math.min(1, Math.max(0, (db - GATE_MIN) / (GATE_MAX - GATE_MIN))) * 100).toFixed(1)}%`;
   useEffect(() => {
-    const draw = (db: number, mark: number, open: boolean) => {
-      if (fill.current) {
-        fill.current.style.width = at(db);
-        fill.current.style.background = open ? "var(--run)" : "var(--ink-4)";
-      }
-      if (auto && knob.current) knob.current.style.left = at(mark);
+    const draw = (db: number, open: boolean) => {
+      if (!fill.current) return;
+      fill.current.style.width = at(db);
+      fill.current.style.background = open ? "var(--run)" : "var(--ink-4)";
     };
     micLevels.add(draw);
     return () => void micLevels.delete(draw);
-  }, [auto]);
+  }, []);
   const drag = (e: React.PointerEvent) => {
     const r = bar.current!.getBoundingClientRect();
     setGate(GATE_MIN + Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) * (GATE_MAX - GATE_MIN));
   };
   return (
-    <div className="flex items-center gap-2">
-      <div
-        ref={bar}
-        role="slider"
-        tabIndex={0}
-        aria-label={t("voice.gate")}
-        aria-valuemin={GATE_MIN}
-        aria-valuemax={GATE_MAX}
-        aria-valuenow={value ?? undefined}
-        aria-valuetext={auto ? t("voice.gate.auto") : `${value} dB`}
-        onPointerDown={(e) => (e.currentTarget.setPointerCapture(e.pointerId), drag(e))}
-        onPointerMove={(e) => e.buttons && drag(e)}
-        onKeyDown={(e) => {
-          const step = e.key === "ArrowRight" || e.key === "ArrowUp" ? 2 : e.key === "ArrowLeft" || e.key === "ArrowDown" ? -2 : 0;
-          if (step) setGate(Math.min(GATE_MAX, Math.max(GATE_MIN, (value ?? -40) + step)));
-        }}
-        className="relative h-7 min-w-0 flex-1 cursor-pointer touch-none pointer-coarse:h-9"
-      >
-        <div className="absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 overflow-hidden rounded-full bg-fill-2">
-          <div ref={fill} className="h-full w-0 rounded-full transition-[width] duration-75 ease-linear" />
-        </div>
-        <div ref={knob} style={auto ? undefined : { left: at(value) }} className={cn("absolute top-1/2 h-4 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full shadow-[0_0_0_0.5px_var(--edge)] transition-[left] duration-150", auto ? "bg-ink-3" : "bg-ink")} />
+    <div
+      ref={bar}
+      role="slider"
+      tabIndex={0}
+      aria-label={t("voice.gate")}
+      aria-valuemin={GATE_MIN}
+      aria-valuemax={GATE_MAX}
+      aria-valuenow={value}
+      aria-valuetext={`${value} dB`}
+      onPointerDown={(e) => (e.currentTarget.setPointerCapture(e.pointerId), drag(e))}
+      onPointerMove={(e) => e.buttons && drag(e)}
+      onKeyDown={(e) => {
+        const step = e.key === "ArrowRight" || e.key === "ArrowUp" ? 2 : e.key === "ArrowLeft" || e.key === "ArrowDown" ? -2 : 0;
+        if (step) setGate(value + step);
+      }}
+      className="relative h-7 min-w-0 cursor-pointer touch-none pointer-coarse:h-9"
+    >
+      <div className="absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 overflow-hidden rounded-full bg-fill-2">
+        <div ref={fill} className="h-full w-0 rounded-full" />
       </div>
-      <button type="button" aria-pressed={auto} onClick={() => setGate(null)} className={cn("g-press h-6 shrink-0 rounded-[5px] px-1.5 text-xs pointer-coarse:h-8", auto ? "bg-fill font-medium text-ink" : "text-ink-3 hover:text-ink-2")}>
-        {t("voice.gate.auto")}
-      </button>
+      <div style={{ left: at(value) }} className="absolute top-1/2 h-4 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-ink shadow-[0_0_0_0.5px_var(--edge)]" />
     </div>
   );
 }

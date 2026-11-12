@@ -17,7 +17,7 @@ import captureURL from "./capture.worklet.js?url&no-inline";
 import playURL from "./play.worklet.js?url&no-inline";
 import { t } from "../i18n";
 import { toast } from "../toast";
-import { getVoice, micLevels, NONE, setVoice, type Member, type Voice } from "./state";
+import { GATE_MIN, getVoice, micLevels, NONE, setVoice, type Member, type Voice } from "./state";
 import { Clock, pack, pct, playout, since, low32, unpack } from "./wire";
 
 const RATE = 48000;
@@ -43,6 +43,8 @@ const WINDOW = 30_000; // what the shown numbers cover
 const SPEAKING = 350; // heard this long ago, still speaking
 /** A frame this much later after the one before it than it was caught after it: the link stalled. */
 const STALL = 300;
+/** A coder with this many blocks or frames waiting has fallen behind. */
+const BEHIND = 8;
 /** A decoded chunk with a sample over this is a voice (not the hiss of a silent microphone). */
 const VOICED = 0.02;
 
@@ -203,11 +205,10 @@ export async function join(room: string) {
   };
   wire(s);
   let told = 0;
-  s.capture.port.onmessage = (e: MessageEvent<{ pcm: Float32Array<ArrayBuffer>; t: number; level: number; mark: number; open: boolean }>) => {
+  s.capture.port.onmessage = (e: MessageEvent<{ pcm: Float32Array<ArrayBuffer>; t: number; level: number; open: boolean }>) => {
     const { pcm, t } = e.data;
     // How loud, to the gate's bar: every third block.
-    const db = (x: number) => 20 * Math.log10(Math.max(x, 1e-5));
-    if (micLevels.size && ++told % 3 === 0) micLevels.forEach((f) => f(db(e.data.level), db(e.data.mark), e.data.open && !s.held));
+    if (micLevels.size && ++told % 3 === 0) micLevels.forEach((f) => f(20 * Math.log10(Math.max(e.data.level, 1e-5)), e.data.open && !s.held));
     const end = (t + pcm.length / RATE) * 1000;
     const second = Math.floor(t);
     if (second !== s.ctxSecond) {
@@ -224,6 +225,9 @@ export async function join(room: string) {
         break;
       }
     }
+    // An encoder that has fallen behind (a busy computer): this block is let go, not queued
+    // behind what it has not got to, which would only make everything after it later.
+    if (s.encoder.encodeQueueSize > BEHIND) return void s.total.unsent++;
     const data = new AudioData({ format: "f32-planar", sampleRate: RATE, numberOfFrames: pcm.length, numberOfChannels: 1, timestamp: Math.round(t * 1e6), data: pcm });
     s.fedEnd = end + s.ctxAt;
     s.encoder.encode(data);
@@ -244,12 +248,12 @@ function wire(s: Session) {
   if (getVoice().noise === "strong" && !s.rnnoise) setVoice({ noise: "browser" });
 }
 
-/** The gate as the settings say now: at the level dragged to, else found by itself. */
+/** The gate as the settings say now: at the level set; at the bar's lowest, not at all. */
 export function gate() {
   const s = cur;
   if (!s) return;
   const db = getVoice().gate;
-  s.capture.port.postMessage({ gate: true, mark: db === null ? null : 10 ** (db / 20) });
+  s.capture.port.postMessage({ gate: db > GATE_MIN, mark: 10 ** (db / 20) });
 }
 
 /** Whether this member is muted, to the room: by its key here, or the microphone from outside. */
@@ -455,6 +459,8 @@ function hear(s: Session, buf: ArrayBuffer) {
   sp.clock = f.clock;
   sp.at = now;
   s.total.frames++;
+  // A decoder that has fallen behind: this frame is let go (counted with those dropped as late).
+  if (sp.decoder.decodeQueueSize > BEHIND) return void s.total.late++;
   if (sp.decoder.state === "configured") sp.decoder.decode(new EncodedAudioChunk({ type: "key", timestamp: s.total.frames * 20_000, data: f.opus }));
 }
 

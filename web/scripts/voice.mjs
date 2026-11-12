@@ -57,11 +57,18 @@ async function member(name) {
 /** The popover, opened again if it closed as the page lost the front: what it measures
  *  (state.ts Numbers) and how many members it lists. */
 async function numbers(page) {
-  await page.bringToFront();
-  if (!(await page.$("[data-voice]"))) await page.click('button[aria-label="In voice"]');
-  await page.waitForSelector("[data-voice]");
-  await sleep(600);
-  return { ...JSON.parse(await page.$eval("[data-voice]", (e) => e.dataset.voice)), members: await page.$$eval("[data-voice]", (es) => es[0].parentElement.querySelectorAll("ul li").length) };
+  // Twice over: a popover shuts as its page loses the front, between finding it and reading it.
+  for (let i = 0; ; i++) {
+    try {
+      await page.bringToFront();
+      if (!(await page.$("[data-voice]"))) await page.click('button[aria-label="In voice"]');
+      await page.waitForSelector("[data-voice]");
+      await sleep(600);
+      return { ...JSON.parse(await page.$eval("[data-voice]", (e) => e.dataset.voice)), members: await page.$$eval("[data-voice]", (es) => es[0].parentElement.querySelectorAll("ul li").length) };
+    } catch (e) {
+      if (i >= 3) throw e;
+    }
+  }
 }
 const line = (n) => `end to end ${n.net + (n.buffer ?? 0) + n.out} ms | network ${n.net} ms · 95% ${n.net95} ms | buffer ${n.buffer} ms | round trip ${n.rtt} ms | ${n.kbps} kbps | up ${n.up} down ${n.down} | dropped·unsent·stalls ${n.late} · ${n.unsent} · ${n.stalls}`;
 try {

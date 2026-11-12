@@ -32,9 +32,9 @@ export type Voice = {
   noise: Noise;
   /** The browser evens out how loud the microphone is. */
   gain: boolean;
-  /** The level (dBFS) the microphone must reach for this member's voice to go out; null: found
-   *  by itself, from how loud this member speaks and how loud the room is. */
-  gate: number | null;
+  /** The level (dBFS) the microphone must reach for this member's voice to go out, as a person
+   *  set it; at GATE_MIN nothing is held back. */
+  gate: number;
   /** The members heard (or, self, sending) in the last moments. */
   speaking: number[];
   /** How late each of the others is heard here, mouth to ear about, ms, by member. */
@@ -43,6 +43,12 @@ export type Voice = {
 };
 
 export const NONE: Numbers = { rtt: null, net: null, net95: null, buffer: null, out: 0, late: 0, unsent: 0, stalls: 0, up: 0, down: 0, kbps: 0 };
+/** The levels the gate's bar runs between, dBFS. */
+export const GATE_MIN = -70;
+export const GATE_MAX = -10;
+/** Where the gate stands till it is dragged: under a voice at a microphone, over what the noise
+ *  suppression leaves of a room. */
+export const GATE_START = -50;
 /** What was last chosen on this device of a setting, one of its values; else its default. */
 function chosen<T extends string>(key: string, values: readonly T[], or: T): T {
   try {
@@ -56,13 +62,13 @@ function choose(key: string, v: string) {
     localStorage.setItem(`voice.${key}`, v);
   } catch {}
 }
-/** The gate's level as last dragged to; null: by itself. */
-function gateChosen(): number | null {
+/** The gate's level as last dragged to; else GATE_START. */
+function gateChosen(): number {
   try {
     const v = Number(localStorage.getItem("voice.gate") ?? NaN);
     if (v >= GATE_MIN && v <= GATE_MAX) return v;
   } catch {}
-  return null;
+  return GATE_START;
 }
 const off = (): Voice => ({ room: null, status: "off", error: "", self: 0, members: [], muted: false, quality: chosen("quality", QUALITIES, "auto"), noise: chosen("noise", NOISES, "strong"), gain: chosen("gain", ["on", "off"], "on") === "on", gate: gateChosen(), speaking: [], delays: {}, numbers: NONE });
 
@@ -104,19 +110,17 @@ export function setGain(on: boolean) {
   void load().then((e) => e.microphone());
 }
 
-/** The levels the gate's bar runs between, dBFS. */
-export const GATE_MIN = -70;
-export const GATE_MAX = -10;
-/** The gate's level, dragged to (dBFS), or null: by itself again. */
-export function setGate(db: number | null) {
-  choose("gate", db === null ? "auto" : String(Math.round(db)));
-  setVoice({ gate: db === null ? null : Math.round(db) });
+/** The gate's level, dragged to (dBFS). */
+export function setGate(db: number) {
+  const to = Math.round(Math.min(GATE_MAX, Math.max(GATE_MIN, db)));
+  if (to === voice.gate) return;
+  choose("gate", String(to));
+  setVoice({ gate: to });
   void load().then((e) => e.gate());
 }
-/** Told how loud the microphone is now (dBFS, before the gate), the gate's level in use and
- *  whether it is open, some times a second while in a room: the gate's bar draws them, without the
- *  page drawn again. */
-export const micLevels = new Set<(db: number, mark: number, open: boolean) => void>();
+/** Told how loud the microphone is now (dBFS, before the gate) and whether the gate is open, some
+ *  times a second while in a room: the gate's bar draws them, without the page drawn again. */
+export const micLevels = new Set<(db: number, open: boolean) => void>();
 
 /** Who is in each folder group's voice, by the group's id: the state "voice", for those not in it too. */
 export type Rooms = Record<string, Member[]>;

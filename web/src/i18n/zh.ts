@@ -59,7 +59,6 @@ export const zh = {
   "voice.gain": "自动增益",
   "voice.speaking": "说话中",
   "voice.gate": "门限",
-  "voice.gate.auto": "自动",
   "voice.detail": "网络 {net} · 95% {p95} · 缓冲 {buffer} · 往返 {rtt} · 丢弃 {late} · 未发 {unsent} · 卡顿 {stalls}",
   "voice.inGroup": "{name} 语音中",
   "voice.count": "{n} 人",
