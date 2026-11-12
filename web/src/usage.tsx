@@ -12,7 +12,7 @@
 // weekdays by hour in squares, the busiest hour over them, the range's days added up (none for 1 天: one day's
 // hours are the bars). Under it the logins, the most first, each its bar in its colour: the row
 // pressed takes it out of the chart and the total or puts it back; right-clicked or held (phones)
-// it is the only one left in (again: everyone); its avatar, pointed at or tapped, floats its models
+// it is the only one left in (again: everyone); its avatar, pointed at, floats its models
 // in a panel over the page, each with its cache's hit rate, tokens and cost. The chip puts everyone back. A bar pressed narrows the page to that day. With one login in, the bars are
 // its models. Over it all, the harnesses (the user, 2026-11-08): all four at first; pressed, one
 // leaves the whole page or comes back, and the last one taken out puts all four back.
@@ -1090,12 +1090,11 @@ function LoginRow({ x, u, color, whole, on, many, metric, peek, onPeek, onToggle
 const OUT = "opacity-35 grayscale";
 
 /** A login's avatar, and its models in a panel floating out of it (the user, 2026-11-12: no key
- *  of their own): over it with a mouse, tapped on a phone; each one's hit rate, tokens and cost, the
- *  login's own over them. The avatar's press is its own, not the row's. */
+ *  of their own): with the pointer over it only; each one's hit rate, tokens and cost, the login's
+ *  own over them. A press on the avatar is the row's. */
 function Models({ open, onOpen, x, name, mark, small }: { open: boolean; onOpen: (o: boolean) => void; x: LoginSum; name: string; mark: ReactNode; small: ReactNode }) {
   const hit = hitRate(x.sum);
   const cost = x.sum.cost > 0 ? dollars(x.sum.cost) : "";
-  const mine = (e: { stopPropagation: () => void }) => e.stopPropagation();
   return (
     <Popover.Root open={open} onOpenChange={onOpen}>
       <Popover.Trigger
@@ -1105,14 +1104,10 @@ function Models({ open, onOpen, x, name, mark, small }: { open: boolean; onOpen:
         closeDelay={120}
         render={<span />}
         aria-label={t("usage.modelsOf", { name })}
-        // A mouse's click would pin the panel open (Base UI's hover then press): it follows the
-        // pointer only. A finger's tap opens and closes it.
-        onClick={(e) => {
-          e.stopPropagation();
-          if ((e.nativeEvent as { pointerType?: string }).pointerType === "mouse") e.preventBaseUIHandler();
-        }}
-        onPointerDown={mine}
-        onContextMenu={mine}
+        // Only the pointer over it opens the panel (the user, 2026-11-12): a press is the row's, in
+        // or out of the chart (held or right-clicked: the only one), never the panel's (Base UI's
+        // press would pin it open, or close it).
+        onClick={(e) => e.preventBaseUIHandler()}
         className="grid size-8 shrink-0 place-items-center rounded-full transition-transform duration-(--dur-2) ease-(--ease-out) hover:scale-110 data-[popup-open]:scale-110"
       >
         {mark}
