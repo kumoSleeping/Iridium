@@ -34,8 +34,9 @@ func Built() fs.FS {
 	return sub
 }
 
-// CSP is the page's: its own scripts only, no frames.
-const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+// CSP is the page's: its own scripts only, no frames. WebAssembly from here may run (the voice's
+// noise suppression, RNNoise): 'wasm-unsafe-eval' lets that through and nothing else that evals.
+const CSP = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
 
 type file struct {
 	raw, br, gz []byte
@@ -83,6 +84,8 @@ func contentType(p string) string {
 		return "text/javascript; charset=utf-8"
 	case ".svg":
 		return "image/svg+xml"
+	case ".wasm":
+		return "application/wasm"
 	}
 	if t := mime.TypeByExtension(path.Ext(p)); t != "" {
 		return t

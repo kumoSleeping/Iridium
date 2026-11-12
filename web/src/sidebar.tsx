@@ -9,7 +9,7 @@
 // and at its foot the colour tags (colors.ts); a group's: rename, its path, 通知. The mouse resting
 // on a row fetches its chat ahead.
 import { Menu } from "@base-ui/react/menu";
-import { Archive, ArchiveRestore, ArrowDown, ArrowUp, Bot, Check, ChevronRight, Copy, Ellipsis, Ungroup, Folder, FolderOpen, ListIndentDecrease, Pencil, Pin, PinOff, Plus, RefreshCw, Square, Workflow as WorkflowIcon } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowDown, ArrowUp, Bot, Check, ChevronRight, Copy, Ellipsis, Ungroup, Folder, FolderOpen, ListIndentDecrease, Pencil, Pin, PinOff, Plus, RefreshCw, Square, Workflow as WorkflowIcon, AudioLines } from "lucide-react";
 import { ConfirmIcon, confirmName, confirmTitle } from "./confirmname";
 import { Fragment, lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode, type RefObject } from "react";
 import { api } from "./api/client";
@@ -30,7 +30,7 @@ import { PLACE_DRAG, SESSION_DRAG } from "./chat/refs";
 import { NoteMark, NotesAt, useNotes } from "./notekey";
 import { useUnread } from "./unread";
 import { CloudBadge, MachineFace, shownPath, useLate, useMachine, type Machine } from "./machines";
-import { getCarried, setCarried } from "./store";
+import { getCarried, setCarried, useVoiceRooms } from "./store";
 import { dropMark, dropTarget, endDrag, listDrop, pinFolder, placeFolder, placeGroup as placeGroupKey, placeSession, sortList, startDrag, useDragged, useOver, type Dragged, type Edge, type Over } from "./reorder";
 
 const STEP = 18;
@@ -1000,8 +1000,19 @@ const SessionRow = memo(function SessionRow({ s, where, depth, flip, selected, o
       </span>
     </Tip>
   );
-  const end = slot || mark || lamp || away || folded ? (
+  // People in its voice: said on its row, to those not in it too.
+  const talking = useVoiceRooms()?.[s.id]?.length ?? 0;
+  const voice = talking > 0 && (
+    <Tip label={t("voice.here", { n: talking })} side="bottom">
+      <span className="g-pop flex items-center gap-0.5 text-xs text-run tabular-nums">
+        <AudioLines size={12} />
+        {talking}
+      </span>
+    </Tip>
+  );
+  const end = slot || mark || lamp || away || folded || voice ? (
     <span className="flex items-center gap-1.5">
+      {voice}
       {folded}
       {mark}
       {slot}

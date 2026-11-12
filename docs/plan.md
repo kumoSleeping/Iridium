@@ -51,6 +51,10 @@ Rhodium 的轻量 Go 版本：一个网页，管理主机和别的电脑上 agen
 - 放进过的会话记在便签上，行尾显示它的 logo 和灯，点一下过去。
 - 库里存（`notes`、`note_folders`），事件流 `notes` 整份推送。没做：跳转框搜便签、快捷键随手记、断网先存、`ir note`、Bot 记。
 
+## 语音（用户，2026-11-12）
+
+会话带语音：看得见这个会话的登录进它的房间，互相听见；顶栏的语音键进出，会话列表上标着几人在里面。核心的能力（`/v1/internal/sessions/{id}/voice`，凭 TOKEN 和登录），音频走 WebSocket，Cloudflare 隧道下可用。归属、协议、降噪、测法、没做的见 `docs/voice.md`。
+
 ## 消息来源
 
 - 每条交给 agent 的消息开头带 `[名字]`，只给 agent 看。

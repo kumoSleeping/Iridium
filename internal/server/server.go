@@ -34,6 +34,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/store"
 	"github.com/kumoSleeping/iridium/internal/transcript"
 	"github.com/kumoSleeping/iridium/internal/update"
+	"github.com/kumoSleeping/iridium/internal/voice"
 	"github.com/kumoSleeping/iridium/internal/webapp"
 )
 
@@ -82,6 +83,12 @@ type Server struct {
 	sat   *satori.Service // /v1/: Satori with ir (satori.go)
 	// stopList stops giving Satori the session list (its channel events).
 	stopList func()
+
+	// The channels' voice (routes_voice.go); voiceNow is the state "voice": the members of each
+	// room with someone in it.
+	voice    *voice.Rooms
+	voiceMu  sync.Mutex
+	voiceNow map[string][]voice.Member
 }
 
 // New is the API over m. Apps and logins live in m's store; on the TCP address ir_web (package
@@ -92,6 +99,9 @@ func New(cfg config.Config, m *session.Manager, h *hub.Hub, logf func(string, ..
 		logf = log.Printf
 	}
 	s := &Server{cfg: cfg, m: m, hub: h, st: m.Store(), files: newFiles(cfg, m, logf), logf: logf}
+	s.voice = voice.New(logf)
+	s.voice.Changed = s.carryVoice
+	h.Set("voice", map[string][]voice.Member{})
 	s.asks = newNeeds(h)
 	s.pairs = newPairs()
 	s.publishPairing()
@@ -166,6 +176,7 @@ func (s *Server) Handler(local bool) http.Handler {
 	s.settingsRoutes(mux)
 	s.sessionRoutes(mux)
 	s.publicRoutes(mux) // publiclink.go
+	s.voiceRoutes(mux)
 	s.pushRoutes(mux)
 	mux.HandleFunc("GET /v1/internal/exec", s.execConnect)
 	s.pairRoutes(mux)
@@ -367,7 +378,7 @@ func (s *Server) release(w http.ResponseWriter, r *http.Request) {
 	s.done(w, s.m.Release(ctx, r.PathValue("id"), req.ToolUseID, req.Dismiss))
 }
 
-var stateKey = regexp.MustCompile(`^(list|quota|guilds|needs|pairing|update|terminals|machines|notes|(session|context):[0-9a-zA-Z_-]{1,128})$`)
+var stateKey = regexp.MustCompile(`^(list|quota|guilds|needs|pairing|update|terminals|machines|notes|voice|(session|context):[0-9a-zA-Z_-]{1,128})$`)
 
 // stateKeys splits the states a WATCH asks for into those it carries and those it leaves
 // out (unknown, or not this caller's: needs, pairing and notes are a person's on ir_web or at

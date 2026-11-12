@@ -59,6 +59,8 @@ GET internal/sessions/{id}/public - -> PublicLink  the session's public read-onl
 POST internal/sessions/{id}/public - -> PublicLink  make it (a new one replaces it): url only here; 403 not_public without the public address; person only
 DELETE internal/sessions/{id}/public - -> {ok}  revoke it at once; person only
 GET internal/sessions/{id}/commands - -> Command[]  the agent's slash commands  view=name,description
+GET internal/sessions/{id}/voice - -> ws  the channel's voice: a member's connection (docs/voice.md); a login only
+GET internal/sessions/{id}/voice/members - -> Member[]  who is in the channel's voice  view=id,name,app,muted
 
 # session settings
 PUT internal/sessions/{id}/model {model} -> {ok}  model ("" default; values in SessionState.models)
