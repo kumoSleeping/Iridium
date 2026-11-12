@@ -12,7 +12,7 @@ import { api } from "../api/client";
 import { LinkDot } from "../link";
 import type { Session } from "../api/types.gen";
 import { WsPlus } from "../create";
-import { chatOf, compactSent, stateAhead, type Draft as Drafted, type Sent } from "../chats";
+import { born, chatOf, compactSent, stateAhead, type Draft as Drafted, type Sent } from "../chats";
 import { LOCAL_ME, useAgent, useMachines, useMe, useWhoList, useWorkspaces } from "../data";
 import { t, useLang } from "../i18n";
 import { pushIn } from "../motion";
@@ -103,13 +103,14 @@ export function ChatPage({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?:
     };
   }, [id]);
   // The transcript grew past what is shown: the blocks since, from the state's tail when it has
-  // them, else fetched.
+  // them, else fetched. Also as the first page comes: it may have been read before what the state
+  // says was written (a message sent as the chat opened), and nothing else asks again.
   const end = s?.end ?? 0;
   useEffect(() => {
     if (!log.loaded || end <= log.end) return;
     if (!log.fromTail(s?.tail)) return void log.newer().then(changed, () => {});
     changed();
-  }, [end]);
+  }, [end, log.loaded]);
   useEffect(() => void (real && log.procIs(real.proc), changed()), [real?.proc]);
   // The turn ended: what was drafted is in the transcript now. Only those drafted by then go: the
   // next turn (queued, sent at once) may begin to write while the page fetches.
@@ -216,14 +217,23 @@ export function ChatPage({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?:
     fly.current = sent.key;
     changed();
   };
+  // Again under its id: one that went after all is not sent twice.
   const retry = async (sent: Sent) => {
     sent.failed = undefined;
     changed();
     try {
-      sent.input = (await api.send(id, sent.text, sent.files.map((f) => f.ref))).input;
+      const r = await api.send(id, sent.text, sent.files.map((f) => f.ref), false, sent.input);
+      sent.input = r.input || sent.input;
+      sent.queued = r.queued || r.command;
     } catch (e) {
       sent.failed = errText(e);
     }
+    sentDone(sent);
+  };
+  // Answered: queued, it is the queue's; else its block may have come before the answer did.
+  const sentDone = (x: Sent) => {
+    log.sent = log.sent.filter((y) => y !== x || !x.queued);
+    log.recheck();
     changed();
   };
   const files = (e: DragEvent) => e.dataTransfer.types.includes("Files") && (e.preventDefault(), true);
@@ -321,7 +331,7 @@ export function ChatPage({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?:
           ) : elsewhere ? (
             <div className="glass float rest flex h-12 items-center justify-center rounded-[20px] text-sm text-ink-3">{t("chat.elsewhere")}</div>
           ) : (
-            <Under s={s} ghost={ghost} composer={composer} onSent={onSent} onSentDone={(x) => ((log.sent = log.sent.filter((y) => y !== x || !x.queued)), changed())} modelOpen={modelOpen} setModelOpen={setModelOpen} modeOpen={modeOpen} setModeOpen={setModeOpen} usageOpen={usageOpen} setUsageOpen={setUsageOpen} />
+            <Under s={s} ghost={ghost} composer={composer} onSent={onSent} onSentDone={sentDone} modelOpen={modelOpen} setModelOpen={setModelOpen} modeOpen={modeOpen} setModeOpen={setModeOpen} usageOpen={usageOpen} setUsageOpen={setUsageOpen} />
           )}
         </div>
       </div>
@@ -335,12 +345,21 @@ function Under({ s, ghost, composer, onSent, onSentDone, modelOpen, setModelOpen
   const mode = useMode(s);
   const agentInfo = useAgent(s.agent);
   const [ctxOpen, setCtxOpen] = useState(false);
+  // Made here just now (create.tsx useStart): its keys fade in, not the chat before's swapped for them.
+  const [fresh] = useState(() => born.has(s.id));
+  useEffect(() => void born.delete(s.id), [s.id]);
+  // The model as the agent says it, once: while its process starts, or runs and has not said it
+  // yet, the key waits, not the default's guess shown and then changed (默认模型, Opus, Haiku in
+  // a second, the user, 2026-11-12). Not for ever: an agent that never says shows the guess.
+  const modelKnown = useWaited(!!s.model || (!s.live && s.status !== "starting"), MODEL_WAIT);
   return (
     <>
       <Composer
         ref={composer}
         s={s}
-        turn={turning(s)}
+        fresh={fresh}
+        // Starting is no turn of yours: the key sends (it goes once the agent is up), not stops.
+        turn={turning(s) && s.status !== "starting"}
         onSent={onSent}
         onSentDone={onSentDone}
         cycleMode={mode.cycle}
@@ -353,7 +372,7 @@ function Under({ s, ghost, composer, onSent, onSentDone, modelOpen, setModelOpen
           <>
             {/* Not guessed from the row: the mode and the model come with the state, gliding in. */}
             {!ghost && <ModeKey mode={mode} open={modeOpen} onOpenChange={setModeOpen} />}
-            {!ghost && <ModelKey s={s} open={modelOpen} onOpenChange={setModelOpen} />}
+            {!ghost && modelKnown && <ModelKey s={s} open={modelOpen} onOpenChange={setModelOpen} />}
             {/* dsh: its preset, then its balance where the bars would be (the user, 2026-11-08). */}
             {agentInfo?.presets ? <PresetKey s={s} /> : null}
             <QuotaBars agent={s.agent} machine={s.machine} live={s.live} using={[s.model, s.pick, modelView(s).name]} open={usageOpen} onOpenChange={setUsageOpen} />
@@ -363,6 +382,20 @@ function Under({ s, ghost, composer, onSent, onSentDone, modelOpen, setModelOpen
       />
     </>
   );
+}
+
+/** How long the model key waits for the agent to say its model. */
+const MODEL_WAIT = 3000;
+
+/** ready, or ms after it was first not: what waits for something that may never come. */
+function useWaited(ready: boolean, ms: number): boolean {
+  const [over, setOver] = useState(false);
+  useEffect(() => {
+    if (ready || over) return;
+    const t = setTimeout(() => setOver(true), ms);
+    return () => clearTimeout(t);
+  }, [ready, over, ms]);
+  return ready || over;
 }
 
 /** The top bar: the logo with its lamp, the name (its folder only as its tooltip, the user,

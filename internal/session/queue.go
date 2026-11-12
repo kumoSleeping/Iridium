@@ -1,8 +1,11 @@
 package session
 
 import (
+	"cmp"
 	"context"
 	"errors"
+	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -38,6 +41,19 @@ func (m *Manager) SendImages(ctx context.Context, id, text, from string, images 
 // A session found on disk is taken up first. A queued message's images wait in memory only: after
 // a restart it goes with its text, which names their files.
 func (m *Manager) SendWith(ctx context.Context, id, text, from string, steer bool, images ...agent.Image) (input string, queued bool, err error) {
+	return m.SendAs(ctx, id, "", text, from, steer, images...)
+}
+
+// inputID is what an input id a sender chooses looks like: a UUID, as Claude takes it.
+var inputID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+// SendAs is SendWith under the input id the sender chose (a UUID; "": one is made). The same id
+// sent again is the same message: it is not written twice, what became of it is answered (a
+// sender that lost the answer tries again safely). One whose writing failed may go again.
+func (m *Manager) SendAs(ctx context.Context, id, want, text, from string, steer bool, images ...agent.Image) (input string, queued bool, err error) {
+	if want != "" && !inputID.MatchString(want) {
+		return "", false, fmt.Errorf("%w: an input id is a lowercase UUID", ErrBadRequest)
+	}
 	if strings.TrimSpace(text) == "" {
 		return "", false, errors.New("an empty message")
 	}
@@ -58,13 +74,21 @@ func (m *Manager) SendWith(ctx context.Context, id, text, from string, steer boo
 	}
 	h.qmu.Lock()
 	defer h.qmu.Unlock()
+	if want != "" {
+		if session, state, ok := m.o.Store.InputOf(want); ok {
+			if session != h.id {
+				return "", false, fmt.Errorf("%w: input %s is another session's", ErrBadRequest, want)
+			}
+			return want, state != "sent", nil
+		}
+	}
 	h.shownLater()       // a message for it: out of the archive
 	if h.dropDenials() { // you went on: what auto mode denied before is let be
 		h.publish()
 		m.publishList()
 	}
 	terminal, tag, login := m.source(from)
-	in := store.Input{ID: newUUID(), Session: h.id, Terminal: terminal, Login: login, Tag: tag, Text: text, State: "sent"}
+	in := store.Input{ID: cmp.Or(want, newUUID()), Session: h.id, Terminal: terminal, Login: login, Tag: tag, Text: text, State: "sent"}
 	// Steering joins a running turn; while it waits for the quota there is none to join, so it waits too.
 	if (!steer && h.busy()) || h.quotaWait() {
 		in.State = "queued"
@@ -83,7 +107,14 @@ func (m *Manager) SendWith(ctx context.Context, id, text, from string, steer boo
 	if err := m.o.Store.AddInput(in); err != nil {
 		return "", false, err
 	}
-	return in.ID, false, h.write(ctx, in, images)
+	if err := h.write(ctx, in, images); err != nil {
+		// Not written: the same id sent again goes, not answered as gone.
+		if derr := m.o.Store.ForgetInput(in.ID); derr != nil {
+			m.o.Logf("session %s: forgetting input %s: %v", h.id, in.ID, derr)
+		}
+		return in.ID, false, err
+	}
+	return in.ID, false, nil
 }
 
 // queuedImages takes the images waiting with queued message id.

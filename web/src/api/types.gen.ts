@@ -545,6 +545,11 @@ export interface Send {
    */
   attachments?: string[];
   caller?: string; // as NewSession's
+  /**
+   * ID is the input id the sender chose (a lowercase UUID): sent again, the same message, not
+   * written twice. None: one is made.
+   */
+  id?: string;
 }
 export interface SendReply {
   input: string; // the message's id (Claude: its uuid)

@@ -438,3 +438,39 @@ func TestCarried(t *testing.T) {
 	})
 	// A new daemon has both from the disk: TestContextAndQuotaAfterRestart.
 }
+
+// A message under an id its sender chose, sent again (the answer lost on the way), is the same
+// message: written once, answered as it went; the id is the block's, so the page finds it.
+func TestSendAsOnce(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, nil)
+	id, _ := r.m.Create(bg, api.NewSession{Cwd: r.cwd, Text: "one"}, "网页")
+	r.waitState(id, "the first turn", func(s *api.SessionState) bool { return said(s, "ok: one") && s.Status == api.StatusIdle })
+	const want = "0b6c1f7e-3a54-4d2b-9a8e-5f1c2d3e4f50"
+	for i := range 2 {
+		in, queued, err := r.m.SendAs(bg, id, want, "two", "网页", false)
+		if err != nil || in != want || queued {
+			t.Fatalf("send %d: %q queued %v: %v", i, in, queued, err)
+		}
+	}
+	r.waitState(id, "the reply", func(s *api.SessionState) bool { return said(s, "ok: two") && s.Status == api.StatusIdle })
+	n := 0
+	for _, b := range r.messages(id) {
+		if b.Kind == api.BlockKindUser && b.Text == "two" {
+			n++
+			if b.ID != want {
+				t.Errorf("block id %q", b.ID)
+			}
+		}
+	}
+	if n != 1 {
+		t.Errorf("two written %d times", n)
+	}
+	if _, _, err := r.m.SendAs(bg, id, "not-a-uuid", "three", "网页", false); !errors.Is(err, ErrBadRequest) {
+		t.Errorf("a bad id: %v", err)
+	}
+	other, _ := r.m.Create(bg, api.NewSession{Cwd: r.cwd}, "网页")
+	if _, _, err := r.m.SendAs(bg, other, want, "two", "网页", false); !errors.Is(err, ErrBadRequest) {
+		t.Errorf("another session's id: %v", err)
+	}
+}

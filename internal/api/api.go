@@ -443,6 +443,9 @@ type Send struct {
 	// into the message, and images go to the agent as images too.
 	Attachments []string `json:"attachments,omitempty"`
 	Caller      string   `json:"caller,omitempty"` // as NewSession's
+	// ID is the input id the sender chose (a lowercase UUID): sent again, the same message, not
+	// written twice. None: one is made.
+	ID string `json:"id,omitempty"`
 }
 
 type SendReply struct {

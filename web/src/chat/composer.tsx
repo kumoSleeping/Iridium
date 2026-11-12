@@ -102,9 +102,11 @@ type Props = {
   tools?: ReactNode;
   /** The key at the far right, before send: the context ring. */
   end?: ReactNode;
+  /** A session just made here: its keys fade in, not taken over at once from the chat before. */
+  fresh?: boolean;
 };
 
-export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s, turn, onSent, onSentDone, cycleMode, openModel, openMode, openUsage, openContext, cleared, tools, end }, ref) {
+export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s, turn, onSent, onSentDone, cycleMode, openModel, openMode, openUsage, openContext, cleared, tools, end, fresh }, ref) {
   const [text, setText] = useState(() => kept(draftKey(s.id)) ?? "");
   const [atts, setAtts] = useState<Att[]>([]);
   // Sessions and places named: cards before the files, one piece each, a Backspace at the box's
@@ -172,6 +174,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
   // The keys under it glide as one changes width (UltraCode's mark, a longer name), never jump.
   const toolRow = useRef<HTMLDivElement>(null);
   useGlide(toolRow);
+  // The ring comes once the agent has said its context: faded in as the keys are.
+  const endKey = useRef<HTMLSpanElement>(null);
+  useGlide(endKey);
   useImperativeHandle(ref, () => ({
     focus: () => box.current?.focus(),
     put: (words) => (type([textNow.current, words].filter(Boolean).join("\n")), box.current?.focus()),
@@ -319,7 +324,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
     // server's thumbnail has come (chat/files.tsx previews).
     for (const a of atts) if (a.url && a.path) previews.set(a.path, a.url);
     const files = atts.map((a) => ({ ref: a.ref!, name: a.file.name, type: a.file.type, size: a.file.size, url: a.url }));
-    const sent: Sent = { key: crypto.randomUUID(), text: words, files, from: 0, steer: mode === "steer" };
+    // Its id chosen here: the transcript's block is found by it as it comes, whenever the answer does.
+    const sent: Sent = { key: crypto.randomUUID(), text: words, files, from: 0, input: crypto.randomUUID(), steer: mode === "steer" };
     type("");
     setAtts([]);
     setNamed(() => []);
@@ -327,7 +333,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
     // shows it, not a bubble; turned away, the words go back where they were typed.
     if (mode === "queue" && queues) {
       try {
-        await api.send(s.id, words, files.map((f) => f.ref));
+        await api.send(s.id, words, files.map((f) => f.ref), false, sent.input);
       } catch (e) {
         type([words, textNow.current].filter(Boolean).join("\n"));
         toast(t("err.queue"), { error: true, description: errText(e) });
@@ -336,8 +342,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
     }
     onSent(sent);
     try {
-      const r = await api.send(s.id, words, files.map((f) => f.ref), mode === "steer");
-      sent.input = r.input;
+      const r = await api.send(s.id, words, files.map((f) => f.ref), mode === "steer", sent.input);
+      sent.input = r.input || sent.input;
       // A turn began meanwhile: it waits in the queue, which shows it. A command the agent runs
       // itself (Codex's /compact) never comes in the transcript: the turn's lamp says it.
       sent.queued = r.queued || r.command;
@@ -491,10 +497,14 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
         <IconKey label={t("composer.attach")} onClick={() => picker.current?.click()}>
           <Paperclip size={17} />
         </IconKey>
-        <div ref={toolRow} className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div ref={toolRow} className={cn("flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden", fresh && "g-fade")}>
           {tools}
         </div>
-        {end && <span className="flex shrink-0">{end}</span>}
+        {end && (
+          <span ref={endKey} className={cn("flex shrink-0", fresh && "g-fade")}>
+            {end}
+          </span>
+        )}
         <Tip label={label}>
           <button
             type="button"

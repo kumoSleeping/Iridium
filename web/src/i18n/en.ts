@@ -296,6 +296,7 @@ export const en: Dict = {
   "err.offline": "Can't reach Iridium",
   "err.notYet": "This Iridium doesn't support it yet",
   "err.send": "Failed to send",
+  "err.noAnswer": "No response",
   "err.queue": "Failed to queue",
   "err.stop": "Failed to stop",
   "err.answer": "Failed to submit the answer",

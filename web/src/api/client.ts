@@ -167,6 +167,12 @@ export async function writeAgain<T>(method: string, url: string, body?: unknown)
   }
 }
 
+/** How long a send waits for its answer: past the daemon's own minute for one (an agent started at
+ *  another machine), so only a link gone dead runs it out. */
+const SEND_WAIT = 65_000;
+/** A request that ran out of time (AbortSignal.timeout). */
+export const noAnswer = (e: unknown) => e instanceof DOMException && e.name === "TimeoutError";
+
 const enc = encodeURIComponent;
 
 /** Text as a Satori message's content: its markup characters escaped (protocol/elements.md). */
@@ -226,17 +232,27 @@ export const api = {
     return { id: ch.id };
   },
   /** A message: queued while a turn runs (queued in the reply), or joining it with steer.
-   *  attachments: upload refs. */
-  send: async (id: string, text: string, attachments?: string[], steer = false): Promise<SendReply> => {
+   *  attachments: upload refs. input: its id, chosen here (a UUID): the transcript's block has it
+   *  as it comes, before the answer; lost on the way, the send goes again under it, never twice. */
+  send: async (id: string, text: string, attachments?: string[], steer = false, input?: string): Promise<SendReply> => {
     // Satori's message.create (docs/satori.md), as every app sends; Iridium's _data says whether it
     // joins the turn and which uploads go with it, and answers what the send did.
     await whoKnown();
-    const sent = await write<{ _data?: SendReply }[]>("POST", "/v1/message.create", {
+    const body = {
       channel_id: id,
       content: escapeSatori(text),
-      _data: { ...(steer ? { steer } : {}), ...(attachments?.length ? { attachments } : {}) },
-    });
-    return sent[0]?._data ?? { input: "" };
+      _data: { ...(steer ? { steer } : {}), ...(attachments?.length ? { attachments } : {}), ...(input ? { id: input } : {}) },
+    };
+    for (let tries = 1; ; tries++) {
+      try {
+        const sent = await write<{ _data?: SendReply }[]>("POST", "/v1/message.create", body, { signal: AbortSignal.timeout(SEND_WAIT) });
+        return sent[0]?._data ?? { input: input ?? "" };
+      } catch (e) {
+        const lost = e instanceof TypeError || noAnswer(e) || (e instanceof ApiError && (e.status === 502 || e.status === 503));
+        if (!input || !lost || tries === 3) throw e;
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+    }
   },
   interrupt: (id: string) => write<{ ok: boolean }>("POST", `${S(id)}/interrupt`),
   stop: (id: string) => write<{ ok: boolean }>("POST", `${S(id)}/stop`),

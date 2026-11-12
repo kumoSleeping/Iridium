@@ -322,7 +322,7 @@ func (s *Server) sendAs(ctx context.Context, c caller, from, id string, req api.
 	if err != nil {
 		return api.SendReply{}, fileErr{err}
 	}
-	input, queued, err := s.m.SendWith(ctx, id, text, from, req.Steer, images...)
+	input, queued, err := s.m.SendAs(ctx, id, req.ID, text, from, req.Steer, images...)
 	if err != nil {
 		return api.SendReply{}, err
 	}

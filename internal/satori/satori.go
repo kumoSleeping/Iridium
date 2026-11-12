@@ -66,6 +66,8 @@ type SendOpts struct {
 	Caller      string   `json:"caller,omitempty"`
 	Text        *string  `json:"text,omitempty"`
 	Paths       []string `json:"paths,omitempty"`
+	// ID: the input id the sender chose (api.Send's), for a send it may try again.
+	ID string `json:"id,omitempty"`
 }
 
 // Resolver is a Backend that takes a session's id as a caller may write it: the start of one,

@@ -66,7 +66,7 @@
 
 照规范的 internal 路由（advanced/internal.md）：Iridium 自己的接口全在 `/v1/internal/<路径>`（`docs/api.md`），给 Satori 没有的东西：工具块、待发队列、模型和模式、文件夹组、设置、应用管理……带了 `Satori-Platform`、`Satori-User-ID` 就必须是调用者自己的。主机的 `ir` 经 unix socket 走同样的路径。网页只用这里和标准方法。
 
-`message.create` 多收一个 `_data`：`{steer?, attachments?, caller?}`（插话还是排队、上传好的引用），回答的 Message 也带 `_data`，是发送的结果（`api.SendReply`：`input`、`queued`、`session`、`command`、`desktop`）。应用发的一律插话。
+`message.create` 多收一个 `_data`：`{steer?, attachments?, caller?, id?}`（插话还是排队、上传好的引用；`id` 是发送方自己定的消息 ID，小写 UUID，同一个 `id` 再发不会写第二遍，回答它当时的结果，丢了回答可以放心重发，网页每条都带），回答的 Message 也带 `_data`，是发送的结果（`api.SendReply`：`input`、`queued`、`session`、`command`、`desktop`）。应用发的一律插话。
 
 ## WebSocket `/v1/events`
 

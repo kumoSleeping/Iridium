@@ -330,7 +330,7 @@ func (b satoriBackend) Send(ctx context.Context, c satori.Caller, id, text strin
 		}
 		refs = append(refs, f.Ref)
 	}
-	req := api.Send{Text: text, Attachments: refs, Caller: o.Caller}
+	req := api.Send{Text: text, Attachments: refs, Caller: o.Caller, ID: o.ID}
 	// ir: it steers unless told to queue; an
 	// agent's always steers (queued, it would wait for a person).
 	if _, ok := c.Self.(caller); ok {

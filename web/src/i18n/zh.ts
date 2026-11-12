@@ -296,6 +296,7 @@ export const zh = {
   "err.offline": "无法连接 Iridium",
   "err.notYet": "当前版本的 Iridium 暂不支持此功能",
   "err.send": "发送失败",
+  "err.noAnswer": "无响应",
   "err.queue": "加入队列失败",
   "err.stop": "停止失败",
   "err.answer": "提交回答失败",
