@@ -714,17 +714,15 @@ function niceUnder(max: number) {
  *  total and each one's. week: each day's weekday under it, else the range's ends. */
 type StacksProps = { days: string[]; perDay: Map<string, Map<string, Sum>>; order: string[]; colors: Map<string, string>; on: (id: string) => boolean; name: (id: string) => string; sel: string | null; onSel: (d: string | null) => void; week: boolean; m: Measure };
 
-function Stacks({ days, perDay, order, colors, on, name, sel, onSel, week, m, risen: fixed, bare, fall }: StacksProps & { risen?: boolean; bare?: boolean; fall?: boolean }) {
+function Stacks({ days, perDay, order, colors, on, name, sel, onSel, week, m, fall }: StacksProps & { fall?: boolean }) {
   const hours = hourly(days[0] ?? "");
-  // Drawn first at nothing, the bars rise to their figures (their height's glide). A chart on its
-  // way out keeps them where they are (the swap's fade takes it from there).
-  const [up, setUp] = useState(false);
-  const risen = fixed ?? up;
+  // Drawn first at nothing, the bars rise to their figures (their height's glide); fall: down to
+  // nothing again, quicker, as the chart goes (StacksSwap).
+  const [risen, setUp] = useState(false);
   useEffect(() => {
-    if (fixed !== undefined) return;
     const f = requestAnimationFrame(() => setUp(true));
     return () => cancelAnimationFrame(f);
-  }, [fixed]);
+  }, []);
   // The parts keep one order whatever the measure: moved, they would lose their height's glide.
   const stack = useMemo(() => [...order].sort(), [order]);
   const room = CHART_H - 14; // the scale's label above the highest bar
@@ -771,7 +769,7 @@ function Stacks({ days, perDay, order, colors, on, name, sel, onSel, week, m, ri
                       return (
                         <span
                           key={id}
-                          className="block shrink-0 border-t-transparent bg-clip-content transition-[height,border-top-width] duration-(--dur-3) ease-(--ease-out)"
+                          className={cn("block shrink-0 border-t-transparent bg-clip-content transition-[height,border-top-width]", fall ? "duration-(--dur-2) ease-(--ease-out)" : "duration-(--dur-3) ease-(--ease-out)")}
                           style={{ height: h > 0 ? Math.max(2, h) : 0, borderTopWidth: h >= 6 ? 1.5 : 0, borderTopStyle: "solid", background: colors.get(id), backgroundClip: "content-box" } as CSSProperties}
                         />
                       );
@@ -783,8 +781,7 @@ function Stacks({ days, perDay, order, colors, on, name, sel, onSel, week, m, ri
           })}
         </div>
       </div>
-      {!bare &&
-        (week ? (
+      {week ? (
           <div className="flex gap-1.5 text-[11px] text-ink-3 tabular-nums">
             {days.map((d) => (
               <span key={d} className={cn("min-w-0 flex-1 truncate text-center transition-colors duration-(--dur-2)", (d === sel || (!sel && d === today)) && "font-medium text-ink-2")}>
@@ -797,46 +794,46 @@ function Stacks({ days, perDay, order, colors, on, name, sel, onSel, week, m, ri
             <span>{hours ? hourLabel(days[0]!) : dayLabel(days[0]!, false)}</span>
             <span>{hours ? t("usage.thisHour") : t("usage.today")}</span>
           </div>
-        ))}
+        )}
     </div>
   );
 }
 
-/** The chart, chosen anew: the one before slides down as the next rises. A range changes the bars'
- *  count, so they cannot glide to their new heights; without this the old ones vanish at once. */
-function StacksSwap({ k, ...p }: StacksProps & { k: string }) {
-  const [old, setOld] = useState<(StacksProps & { k: string }) | null>(null);
+/** The chart, chosen anew (a range: the bars' count changes, so they cannot glide to their new
+ *  heights; one login left: its models): one chart at a time in its place (the user, 2026-11-12:
+ *  two drawn over each other twitched). The one drawn falls to nothing as it was last drawn, then
+ *  the next rises; chosen back while it falls, it rises again where it is. The same chart takes new
+ *  figures in place, its bars gliding. */
+type SwapProps = StacksProps & { k: string };
+function StacksSwap(p: SwapProps) {
+  // The chart drawn (its k), and what it was last drawn with: what falls.
+  const [at, setAt] = useState(p.k);
   const [fall, setFall] = useState(false);
-  const prev = useRef<(StacksProps & { k: string }) | null>(null);
-  // Before the paint: a passive effect let one frame go by with neither chart (the old gone, the
-  // new at nothing), a flash as the range changed (the user, 2026-11-12).
+  const last = useRef<SwapProps>(p);
+  const draw = at === p.k ? p : last.current;
   useLayoutEffect(() => {
-    if (prev.current && prev.current.k !== k && !reduced()) {
-      setOld(prev.current);
+    last.current = draw;
+  });
+  const latest = useRef(p.k);
+  latest.current = p.k;
+  useLayoutEffect(() => {
+    if (at === p.k) {
       setFall(false);
+      return;
     }
-    prev.current = { ...p, k };
-  }, [k]);
-  useEffect(() => {
-    if (!old) return;
-    // A frame at its own heights, then down: the bars slide to nothing, not vanish.
-    const f = requestAnimationFrame(() => setFall(true));
-    const t = setTimeout(() => setOld(null), motion.dur(3) + 60);
-    return () => {
-      cancelAnimationFrame(f);
-      clearTimeout(t);
-    };
-  }, [old]);
-  return (
-    <div className="relative">
-      {old && (
-        <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0">
-          <Stacks {...old} risen bare fall={fall} />
-        </div>
-      )}
-      <Stacks key={k} {...p} />
-    </div>
-  );
+    if (reduced()) {
+      setAt(p.k);
+      return;
+    }
+    setFall(true);
+    const t = setTimeout(() => {
+      setFall(false);
+      setAt(latest.current);
+      // Eased out, not in: --ease-in ends straight down, the last third of the fall in one frame.
+    }, motion.dur(2) + 20);
+    return () => clearTimeout(t);
+  }, [p.k, at]);
+  return <Stacks key={draw.k} {...draw} fall={fall} />;
 }
 
 /** The chart's height, whatever the range or view: another changes no height. */
