@@ -219,6 +219,13 @@ var schema = []string{
 	`ALTER TABLE apps ADD COLUMN agents_off TEXT NOT NULL DEFAULT '';`,
 	// 30: the login of the app an input came from (not ir_web's: its terminal is its login).
 	`ALTER TABLE inputs ADD COLUMN login TEXT NOT NULL DEFAULT '';`,
+	// 31: a session's public read-only link (publiclinks.go): the token's hash, one per session.
+	`CREATE TABLE IF NOT EXISTS public_links (
+		session    TEXT PRIMARY KEY,
+		hash       TEXT NOT NULL UNIQUE,
+		creator    TEXT NOT NULL DEFAULT '',
+		created_at INTEGER NOT NULL
+	);`,
 }
 
 // steps run in Go after the migration of their version, in the same transaction.

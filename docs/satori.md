@@ -91,7 +91,6 @@
 | `interaction/button` | 某个登录按了按钮 | — |
 | `channel-added` / `channel-updated` / `channel-removed` | 会话出现、改名或换组、归档或消失（看得见它的登录） | — |
 | `login-added` / `login-removed` | 本应用的登录被批准、被移除（发给本应用的连接；网页的连接只收自己的） | — |
-| `internal`（`_type: ir.share`） | 有人分享给这个登录（`docs/api.md` 分享）；只发给它 | `share`，`_data.share` 是 `Share` |
 
 `_type` 固定 `iridium`，`_data.origin` 是发起这个回合的应用或网页登录（知道时）。agent 说的话能在记录里找到时，`message.id` 就是块的位置；找不到时是 `live:…`，只能在 24 小时内用 `message.get` 取。
 

@@ -4,7 +4,7 @@
 // from the transcript (GET messages, after= what the open session's state says was written); its
 // drafts from the stream. Loaded only once a chat opens or the page is idle.
 import { Menu } from "@base-ui/react/menu";
-import { BarChart3, Ellipsis, ListTree, Plus, Settings } from "lucide-react";
+import { BarChart3, Ellipsis, Globe, ListTree, Plus, Settings } from "lucide-react";
 import type { Status } from "../api/types.gen";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import type { SessionState as LiveSession } from "../api/types.gen";
@@ -19,7 +19,6 @@ import { pushIn } from "../motion";
 import { openChat, openUsage } from "../route";
 import { PULL } from "../sheet";
 import { MenuItems, Rename, sessionActions, sessionTags } from "../sidebar";
-import { ShareSubmenu } from "../share";
 import { useConfirms, useList, useSession } from "../store";
 import { drafts, opened } from "../stream";
 import { errText } from "../toast";
@@ -34,6 +33,7 @@ import { folded, type Tool } from "./fold";
 import { ToolDraft, Waiting } from "./live";
 import { Draft } from "./markdown";
 import { ContextRing, ModeKey, ModelKey, modelView, PresetKey, QuotaBars, useMode } from "./meters";
+import { PublicLink } from "./publiclink";
 import { Queue } from "./queue";
 import { ShellRuns } from "./shell";
 import { Crash } from "./crash";
@@ -407,6 +407,8 @@ function Bar({ s, onSheet, onMe, spots, asked }: { s?: Session; onSheet?: () => 
   const [renaming, setRenaming] = useState(false);
   // ⋯'s "new session": the "+" of the session's workspace, its folder already this one's, under ⋯.
   const [making, setMaking] = useState(false);
+  // ⋯'s 公开链接: its popover under ⋯.
+  const [publicOpen, setPublicOpen] = useState(false);
   // Not there as the bar was first drawn: faded in as it comes.
   const late = useRef(!s).current ? "g-fade" : "";
   const more = useRef<HTMLButtonElement>(null);
@@ -417,7 +419,7 @@ function Bar({ s, onSheet, onMe, spots, asked }: { s?: Session; onSheet?: () => 
   };
   // ⋯'s items: making, the sheet and 我 on a phone, usage; then the session's own.
   const lead = [{ icon: <Plus size={15} />, label: t("menu.new"), run: () => requestAnimationFrame(() => setMaking(true)) }, ...(onSheet ? [{ icon: <ListTree size={15} />, label: t("nav.sidebar"), run: onSheet }] : []), ...(onMe ? [{ icon: <Settings size={15} />, label: t("nav.me"), run: onMe }] : []), { icon: <BarChart3 size={15} />, label: t("usage.title"), run: usageHere }];
-  const acts = s ? sessionActions(s, () => setRenaming(true)) : [];
+  const acts = s ? [...sessionActions(s, () => setRenaming(true)), { icon: <Globe size={15} />, label: t("public.menu"), run: () => requestAnimationFrame(() => setPublicOpen(true)) }] : [];
   return (
     <header className="g-turn-stay vt-bar glass absolute inset-x-0 top-0 z-20 shadow-[0_0.5px_0_var(--edge)]">
       <div className="flex h-12 items-center gap-1 pr-2 pl-2 pointer-coarse:h-13">
@@ -477,10 +479,11 @@ function Bar({ s, onSheet, onMe, spots, asked }: { s?: Session; onSheet?: () => 
               </Tip>
               <Menu.Portal>
                 <Menu.Positioner side="bottom" align="end" sideOffset={6} collisionPadding={8} className="z-50">
-                  <MenuItems lead={lead} items={acts} tags={sessionTags(s)} foot={<ShareSubmenu thing={{ what: "session", session: s.id }} i={lead.length + acts.length} />} />
+                  <MenuItems lead={lead} items={acts} tags={sessionTags(s)} />
                 </Menu.Positioner>
               </Menu.Portal>
             </Menu.Root>
+            <PublicLink key={s.id} session={s.id} anchor={more} open={publicOpen} onOpenChange={setPublicOpen} />
           </span>
         )}
       </div>

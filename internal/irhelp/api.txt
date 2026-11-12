@@ -55,6 +55,9 @@ upload.create {channel_id} -> {field: url}  multipart: files for a session, each
 GET internal/agents - -> AgentInfo[]  agents that can start here, their modes  view=agent,modes,defaultMode,missing
 GET internal/sessions/{id}/image?at&n - -> image  the n-th image a tool result gave the model
 POST internal/sessions/{id}/release {toolUseId, dismiss?} -> {ok}  run a step auto mode denied under manual; person only
+GET internal/sessions/{id}/public - -> PublicLink  the session's public read-only link: ready (public address on), on, by, createdAt
+POST internal/sessions/{id}/public - -> PublicLink  make it (a new one replaces it): url only here; 403 not_public without the public address; person only
+DELETE internal/sessions/{id}/public - -> {ok}  revoke it at once; person only
 GET internal/sessions/{id}/commands - -> Command[]  the agent's slash commands  view=name,description
 
 # session settings
@@ -96,10 +99,6 @@ DELETE internal/uploads/{upload} - -> {ok}  cancel an upload
 POST internal/sessions/{id}/attach {path} -> FileRef  attach a local file to the session; socket only
 POST internal/cli {args, cwd} -> ndjson  ir of a session at another computer, by its TOKEN; not on the socket
 
-# share
-POST internal/share {what, to, session?, at?, place?, ref?, path?, note?} -> {app, login, name?, pushed?}  share with app/login
-GET internal/share/targets?what&session&at&place&ref&path - -> ShareTargets  who may get it  view=apps.id,apps.name,apps.logins.id
-
 # usage
 
 # secrets
@@ -132,7 +131,6 @@ POST internal/invites {name?, claude?, perms?} -> Invite  a one-time ir_web link
 GET internal/needs - -> Needs  waiting for a person; person only  view=pending.id,pending.kind,pending.name
 GET internal/needs/{id}?wait - -> NeedState  how a need went; wait up to 60 s
 POST internal/needs/{id} {allow, value?, forSession?, owner?, name?, perms?, agentsOff?} -> NeedReply  allow or deny; person only
-DELETE internal/needs/{id} - -> {ok}  dismiss a share sent to this ir_web login
 GET internal/pairing - -> PairWindow  pairing window; person only
 PUT internal/pairing {open, minutes?} -> PairWindow  open (10 min, 60 max) or close pairing; person only
 POST internal/pair {name, type?, os?, arch?, program?, agents?, shell?, noShell?, agentShell?, home?, machineId?, wants?} -> {code, request}  ask to pair

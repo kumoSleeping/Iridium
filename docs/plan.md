@@ -89,7 +89,6 @@ ir run [--secret 名,…] -- 命令 …
 | `ir update [--check]` | `ir api POST internal/update`、`POST internal/update/check` |
 | `ir new <agent> [位置] "任务" [--wait]` | `ir api channel.create _data.agent=<agent> _data.cwd=<位置> _data.text="任务" [--wait]` |
 | `ir attach <文件>` | `ir api POST internal/links path=<文件>` |
-| `ir share 应用/登录 <…>` | `ir api POST internal/share to=应用/登录 what=session\|place\|file …` |
 | `ir secret set/ls/rm` | `ir api PUT internal/secrets/<名> note=… --wait`、`internal/secrets`、`DELETE internal/secrets/<名>` |
 | `ir usage` | `ir api internal/usage days==7` |
 | `ir apps`、`profile`、`invite`、`needs`、`allow`、`deny` | `ir api internal/apps`、`PUT internal/apps/<id>/profile`、`POST internal/invites`、`internal/needs`、`POST internal/needs/<id> allow:=true` |

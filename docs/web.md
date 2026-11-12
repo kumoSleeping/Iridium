@@ -13,6 +13,7 @@
 | 请求 | 去向 |
 |---|---|
 | `/_ir/*`（头像除外） | 网页层自己答：页面、`/_ir/health`、`/_ir/api/session`、Passkey 流程、登出 |
+| `/p/<令牌>…` | 公开链接的只读页面（`Config.Viewer`，`docs/api.md` 公开链接）：只在开着时，不要登录；去掉 Cookie 和 Authorization，只收 GET/HEAD，不升级 WebSocket；关着 404 |
 | 带 `Authorization: Bearer` | 原样交给核心（应用、执行端 `/v1/internal/exec`、远端 `ir` `/v1/internal/cli`、配对、`/v1/events`），公网模式下响应改 private |
 | 网页关着 | 查 Host/Origin 后经 `gate.AsHost` 算主机 |
 | Cookie 有效 | 去掉 Cookie，设 `Authorization: Bearer <ir_web 的 TOKEN>`、`Satori-Platform: ir_web`、`Satori-User-ID: <登录 ID>`（浏览器自己带的这几个头一律替换），交给核心 |

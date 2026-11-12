@@ -5,7 +5,7 @@
 // asked with --owner (the new terminal gets Claude) only a panel that has Claude allows.
 // A credential's (plan "凭据"): secret-set has a password box, whose value goes to the daemon and
 // nowhere else; secret-use is allow, this session, or deny, and only the owner's own allows it.
-import { KeyRound, Link2, LockKeyhole, Share2, ShieldQuestion, Terminal as TermIcon } from "lucide-react";
+import { KeyRound, Link2, LockKeyhole, ShieldQuestion, Terminal as TermIcon } from "lucide-react";
 import { ConfirmIcon, confirmName, confirmTitle, isPair } from "./confirmname";
 import { useRef, useState, type ReactNode } from "react";
 import { api } from "./api/client";
@@ -29,7 +29,6 @@ export const saysOwner = (me?: Me) => !!me && !!me.web && !!me.rules.claudeOwner
 /** at: where it is drawn (the asking session's id, or "terminals"): the secret shows there. */
 export function ConfirmCard({ c, at: here }: { c: Need; at: string }) {
   if (c.kind === "ask") return <AskNeedCard c={c} />;
-  if (c.kind === "share") return <ShareCard c={c} />;
   if (c.kind === "secret_set") return <SecretSetCard c={c} />;
   if (c.kind === "secret_use") return <SecretUseCard c={c} />;
   if (isPair(c)) return <PairCard c={c} />;
@@ -575,55 +574,3 @@ function useWhoName(id?: string) {
   return who.find((w) => w.id === id)?.name ?? id;
 }
 
-/** Something shared with this login: open it (its session), or put it away. */
-function ShareCard({ c }: { c: Need }) {
-  const sh = c.share;
-  const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [leaving, setLeaving] = useState(false);
-  const drop = async () => {
-    setBusy(true);
-    try {
-      await api.dropNeed(c.id);
-      setLeaving(true);
-    } catch (e) {
-      toast(t("err.action"), { error: true, description: errText(e) });
-    } finally {
-      setBusy(false);
-    }
-  };
-  const go = () => {
-    if (sh?.session) openChat(sh.session);
-    void drop();
-  };
-  const where = sh?.path ? (sh.machine ? `${sh.machine}:${sh.path}` : sh.path) : undefined;
-  return (
-    <CardFrame label={confirmTitle(c)} leaving={leaving}>
-      <CardHead
-        icon={<Share2 size={16} />}
-        title={confirmTitle(c)}
-        tag={[sh ? t(`share.what.${sh.what}` as "share.what.session") : "", sh?.title].filter(Boolean).join(" · ")}
-        summary={sh?.note || where}
-        open={open}
-        setOpen={setOpen}
-        keys={
-          <>
-            <SecondKey disabled={busy} onClick={() => void drop()}>
-              {t("share.dismiss")}
-            </SecondKey>
-            {sh?.session && (
-              <MainKey disabled={busy} onClick={go}>
-                {t("share.open")}
-              </MainKey>
-            )}
-          </>
-        }
-      />
-      {open && (
-        <CardDetails>
-          <Facts rows={[...(sh?.note ? ([[t("share.note"), sh.note]] as [string, ReactNode][]) : []), ...(where ? ([[t("share.where"), <code className="font-mono text-xs break-all">{where}</code>]] as [string, ReactNode][]) : [])]} />
-        </CardDetails>
-      )}
-    </CardFrame>
-  );
-}

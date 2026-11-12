@@ -10,10 +10,8 @@ import type {
   CardAnswer,
   CompleteUpload,
   NeedAnswer,
-  ShareReply,
-  ShareRequest,
-  ShareTargets,
   NeedReply,
+  PublicLink,
   Needs,
   FolderReply,
   Folders,
@@ -256,6 +254,11 @@ export const api = {
   },
   interrupt: (id: string) => write<{ ok: boolean }>("POST", `${S(id)}/interrupt`),
   stop: (id: string) => write<{ ok: boolean }>("POST", `${S(id)}/stop`),
+  /** The session's public read-only link (docs/api.md "公开链接"): its state; made anew (its URL only
+   *  in this answer); revoked. */
+  publicLink: (id: string) => get<PublicLink>(`${S(id)}/public`),
+  makePublicLink: (id: string) => write<PublicLink>("POST", `${S(id)}/public`),
+  revokePublicLink: (id: string) => write<{ ok: boolean }>("DELETE", `${S(id)}/public`),
   /** A command line at the session's machine, in cwd ("": its folder) (docs/api.md "命令"). */
   shell: (id: string, line: string, cwd?: string) => write<ShellStarted>("POST", `${S(id)}/shell`, { line, ...(cwd ? { cwd } : {}) } satisfies ShellRun),
   shellRead: (run: string, from: number) => get<ShellOutput>(`/v1/internal/shell/${enc(run)}?from=${from}`),
@@ -390,11 +393,6 @@ export const api = {
   usage: (days: number, terminal?: string, by?: "hour" | "weekhour", machine?: string) => get<Usage>(`/v1/internal/usage?days=${days}${terminal ? `&app=${enc(terminal)}` : ""}${by ? `&by=${by}` : ""}${machine ? `&machine=${enc(machine)}` : ""}`),
   confirms: () => get<Needs>("/v1/internal/needs"),
   /** extra: a secret-set's value, a secret-use's "this session". */
-  /** A share put away by the login it was for. */
-  dropNeed: (id: string) => write<{ ok: boolean }>("DELETE", `/v1/internal/needs/${enc(id)}`),
-  /** Something shared with a login (docs/api.md "分享"); targets: who may use it. */
-  share: (r: ShareRequest) => write<ShareReply>("POST", "/v1/internal/share", r),
-  shareTargets: (r: Omit<ShareRequest, "to" | "note">) => get<ShareTargets>(`/v1/internal/share/targets?${new URLSearchParams(Object.entries(r).filter(([, v]) => v) as [string, string][])}`),
   answerConfirm: (id: string, allow: boolean, extra?: Omit<NeedAnswer, "allow">) => write<NeedReply>("POST", `/v1/internal/needs/${enc(id)}`, { allow, ...extra } satisfies NeedAnswer),
 
   // --- the credentials (docs/api.md "凭据"): never a value back ---

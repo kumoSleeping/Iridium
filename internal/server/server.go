@@ -64,7 +64,7 @@ type Server struct {
 	webToken string     // ir_web's own TOKEN, which it speaks to the core with
 	initErr  error      // ir_web for cfg.Public.Origin would not open; Listen gives it
 	asks     *needs     // what waits for a person (needs.go)
-	more     *moreNeeds // asks' first sightings, shares (needs_more.go)
+	more     *moreNeeds // asks' first sightings (needs_more.go)
 	pairs    *pairs     // apps asking to pair (pairing.go)
 	vault    *vault     // the credentials' masks and allowed uses (routes_secrets.go)
 
@@ -161,11 +161,11 @@ func (s *Server) Handler(local bool) http.Handler {
 		reply(w, http.StatusOK, st.Commands)
 	})
 	s.appRoutes(mux)
-	s.shareRoutes(mux) // share.go
 	s.secretRoutes(mux)
 	s.updateRoutes(mux)
 	s.settingsRoutes(mux)
 	s.sessionRoutes(mux)
+	s.publicRoutes(mux) // publiclink.go
 	s.pushRoutes(mux)
 	mux.HandleFunc("GET /v1/internal/exec", s.execConnect)
 	s.pairRoutes(mux)

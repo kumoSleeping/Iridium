@@ -161,12 +161,10 @@ type Event struct {
 }
 
 // EventData is what Iridium adds to an event: what the message is (reply, progress, ask, error,
-// user), and the app or login of ir_web that began the turn, if known. ir.share's: kind share and
-// the Share.
+// user), and the app or login of ir_web that began the turn, if known.
 type EventData struct {
-	Kind   string     `json:"kind,omitempty"`
-	Origin string     `json:"origin,omitempty"`
-	Share  *api.Share `json:"share,omitempty"`
+	Kind   string `json:"kind,omitempty"`
+	Origin string `json:"origin,omitempty"`
 }
 
 // List is a paged list.

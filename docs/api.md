@@ -283,20 +283,32 @@ Web Push，总开关在配置 `push`，默认关。VAPID 密钥存在状态目�
 
 `PushRule{scope, target, mode, events?}`：`scope` 是 `workspace`（`target` 是工作区 ID，`"0"` 是没归类的）、`folder`（会话目录的绝对路径，只管这一个目录）、`session`（会话 ID）；`mode` 是 `on` 或 `off`；`events` 只跟 `on`。一个会话的事件：会话、文件夹、工作区里最近的那条规则说开还是关（都没有就开）；开的话，事件取最近一条带 `events` 的 `on` 规则的，没有就用 `defaults`。
 
-推送的内容（service worker 收到的 JSON）：`PushMessage{kind, session, title, body, tag}`，`kind` 是 `needs_you`、`error`、`turn_end`、`share`、`test`；`tag` 是会话 ID。推送服务回 404/410 的订阅删掉。
+推送的内容（service worker 收到的 JSON）：`PushMessage{kind, session, title, body, tag}`，`kind` 是 `needs_you`、`error`、`turn_end`、`test`；`tag` 是会话 ID。推送服务回 404/410 的订阅删掉。
 
-## 分享（`ir share`）
+## 公开链接
 
-`POST /v1/internal/share`，`ShareRequest{what, session?, at?, place?, ref?, path?, note?, to}` → `ShareReply{app, login, name, pushed}`。`to` 是 `应用/登录`（网页登录是 `ir_web/登录`）。`what`：
+把一个会话只读地给公网上的人看：拿到链接的人看得到标题、agent 和对话里人和 agent 说的话（文字、所带图片），看不到思考、工具调用和结果、系统行；凭据照样遮掉。不能发消息，也没有别的权限。
 
-- `session`：对方要能用这个会话（范围加 agent）。
-- `reply`：会话的一块（`at`），对方要看得到会话。
-- `place`：`应用名:路径`，对方的范围要有它。
-- `file`：会话里的文件，`ref`，或本机会话的 `path`（随之附进会话）；对方要看得到会话，范围有这个文件。
+- 只在设了公网地址（Passkey 门开着）时能建、能看；关掉公网地址，已有的链接一起失效。
+- 建、撤：能用这个会话的人（主机、网页登录、应用的登录），agent 的 `ir` 不行（403）。每个会话一条，再建就换新的、旧的立即失效；撤销立即失效。
+- 库里只存令牌（32 字节随机）的哈希（表 `public_links`），链接只在建的那次回答里给一次。
 
-分享的人自己也要看得到。Iridium 补上 `machine`、`title`、`from`、`fromName`、`fromSession`、`sharedAt`。送达：网页登录收到一条 `share` 需要，推送开着时再推一条（`kind: share`）；别的应用的登录收到 Satori 事件 `internal`，`_type: ir.share`，`_data: {kind: share, share}`，只发给它。错误：422 `no_such_app`、`no_such_login`、`not_usable`；400 缺东西或分享给自己。
+| 请求 | 正文 → 回答 | 说明 |
+|---|---|---|
+| `GET /v1/internal/sessions/{id}/public` | → `PublicLink` | `{ready, on, by, createdAt}`；`ready` 是公网地址开着 |
+| `POST /v1/internal/sessions/{id}/public` | → `PublicLink` | 建（或换新），带 `url`。公网地址没开 403 `not_public` |
+| `DELETE /v1/internal/sessions/{id}/public` | → `{ok}` | 撤销 |
 
-`GET /v1/internal/share/targets?what=&session=&…` → `ShareTargets{apps: [{id, name, logins}]}`：能用它的应用和登录（不含自己），网页“分享到 ▸”用。
+看的那一边（网页层 `Config.Viewer`，不要登录、不设 Cookie、只收 GET/HEAD、回答 private 且不带 Referer）：
+
+| 路径 | 说明 |
+|---|---|
+| `/p/<令牌>` | 页面（`web/view.html`，单独的入口，不加载面板） |
+| `/p/<令牌>/api/messages` | `PublicPage{title, agent, status, messages, before, end}`，`messages` 是 `PublicMessage{at, time, role: user\|agent, from, text, pictures}`，旧的在前；`?before=<before>` 更早一页，`?after=<end>` 之后新来的（页面看得见时每 4 秒问一次） |
+| `/p/<令牌>/files/<at>/<ref>` | 那条消息带的图片（本机的会话才有；重新编码，不收 SVG） |
+| `/p/<令牌>/assets/…`、`/p/<令牌>/theme.js` | 页面自己的文件 |
+
+令牌不对、已撤、会话没了、公网地址关了：一律 404。令牌在别的路径（API、`/v1/events`、Cookie、Bearer）上什么也打不开。
 
 ## 应用的接口
 
@@ -349,14 +361,12 @@ Web Push，总开关在配置 `push`，默认关。VAPID 密钥存在状态目�
 等一个人决定的事，一个队列。申请（`app_join`、`app_update`、`app_change`、`login_join`、`invite`、`secret_set`、`secret_use`）内存里存 10 分钟，主机和网页登录看得到。另有：
 
 - `ask`：会话开着的提问、审批、计划，`id` 和 `card.id` 一样（`ask:<会话>:<请求>`），带 `session`、`card`、`origin`（发起这个回合的应用或登录）。只给能用这个会话的（范围加 agent，同 `using`）。用 `POST /v1/internal/button` 回答，不走 `POST /v1/internal/needs/{id}`。
-- `share`：分享给这个网页登录的东西（`share`），只给它自己，存 24 小时；`DELETE /v1/internal/needs/{id}` 收起。
 
 网页在应用管理和侧栏“需要你”里画成卡片（会话里的提问仍在会话里画，不重复）；`ir needs`、`ir allow <id>`、`ir deny <id>`。
 
 | 请求 | 正文 → 回答 | 说明 |
 |---|---|---|
 | `GET /v1/internal/needs` | → `Needs` | 按调用方过滤（见上）；agent 的 `ir` 403。hub 键 `needs` 每条流也按它的调用方过滤 |
-| `DELETE /v1/internal/needs/{id}` | → `{ok}` | 网页登录收起分享给自己的一条 |
 | `POST /v1/internal/needs/{id}` | `NeedAnswer` → `NeedReply` | 允许或拒绝。只有能批的：主机上的人，或有 Claude、agent 和范围都是全部的网页登录；agent 的 `ir` 一律 403。`perms`：给的权限（不超过申请的）；`name`：配对时改名；`owner`：本人的（得 Claude）；`value`、`forSession`：凭据用 |
 | `GET /v1/internal/needs/{id}?wait=<秒>` | → `NeedState` | 结果，从不带秘密 |
 

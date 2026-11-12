@@ -36,6 +36,7 @@ import (
 
 const (
 	Prefix          = "/_ir/"     // ir_web's own routes
+	ViewerPrefix    = "/p/"       // a public link's view (Config.Viewer)
 	CookieName      = "__Host-ir" // a login's session cookie
 	IdleTimeout     = 12 * time.Hour
 	AbsoluteTimeout = 7 * 24 * time.Hour
@@ -88,6 +89,12 @@ type Config struct {
 
 	// Open says which requests pass with no login, as no one (gate.Config.Open's).
 	Open func(*http.Request) bool
+
+	// Viewer serves a public link's read-only view (ViewerPrefix, docs/api.md "公开链接"): to
+	// anyone, with no login, only with a public origin; GET and HEAD only, never a WebSocket, the
+	// browser's cookie and any Authorization taken off, its answers private and sending no
+	// Referer. It checks the link's token itself. nil: those paths are 404.
+	Viewer http.Handler
 
 	Logger *slog.Logger
 	Now    func() time.Time
@@ -240,6 +247,9 @@ func (w *Web) Close() error {
 // Public reports whether a public origin is configured: ir_web is on.
 func (w *Web) Public() bool { return w.public }
 
+// Origin is the public origin ("https://ir.example.com"), "" with ir_web off.
+func (w *Web) Origin() string { return w.origin }
+
 // parseOrigin accepts a bare origin: https, or http on a loopback name.
 func parseOrigin(s string) (*url.URL, error) {
 	u, err := url.Parse(s)
@@ -352,6 +362,10 @@ func (w *Web) Handler(core, app http.Handler) http.Handler {
 			w.serveGate(rw, r)
 			return
 		}
+		if r.URL.Path == strings.TrimSuffix(ViewerPrefix, "/") || strings.HasPrefix(r.URL.Path, ViewerPrefix) {
+			w.serveViewer(rw, r)
+			return
+		}
 		if token { // an app's own: untouched, to the core
 			if w.public && !isUpgrade(r) {
 				rw = &privateWriter{ResponseWriter: rw}
@@ -393,6 +407,27 @@ func (w *Web) Handler(core, app http.Handler) http.Handler {
 			w.unauthenticated(rw, r)
 		}
 	})
+}
+
+// serveViewer is a public link's view (Config.Viewer): no login, no cookie, nothing but GET.
+func (w *Web) serveViewer(rw http.ResponseWriter, r *http.Request) {
+	if !w.public || w.cfg.Viewer == nil || isUpgrade(r) {
+		writeJSON(rw, http.StatusNotFound, apiError{"not_found"})
+		return
+	}
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		rw.Header().Set("Allow", "GET, HEAD")
+		writeJSON(rw, http.StatusMethodNotAllowed, apiError{"method_not_allowed"})
+		return
+	}
+	r = r.Clone(r.Context())
+	for _, h := range []string{"Cookie", "Authorization", HeaderPlatform, HeaderUser} {
+		r.Header.Del(h)
+	}
+	h := rw.Header()
+	h.Set("Referrer-Policy", "no-referrer")
+	h.Set("X-Robots-Tag", "noindex, nofollow")
+	w.cfg.Viewer.ServeHTTP(&privateWriter{ResponseWriter: rw}, r)
 }
 
 // stripped is r without ir_web's cookie: the core never sees one. (Satori-Platform and

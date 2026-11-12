@@ -369,12 +369,6 @@ func TestAgentCommands(t *testing.T) {
 	if r := ir("api", "internal/sessions/mac/"+sid, "--wait"); r.code != 1 || r.err == "" {
 		t.Errorf("machine/id: %+v", r)
 	}
-	// Sharing a session, a folder: to no login, an error saying so.
-	for _, what := range [][]string{{"what=session", "session=" + sid}, {"what=place", "place=" + work}} {
-		if r := ir(append([]string{"api", "POST", "internal/share", "to=ir_web/nobody", "note=看看"}, what...)...); r.code != 1 || !strings.Contains(r.err, "no such login") {
-			t.Errorf("share %s: %+v", what, r)
-		}
-	}
 	// A place at an app not there; the host's by its name.
 	if r := ir("api", "channel.create", "_data.agent=claude", "_data.cwd=mac:~/dir", "_data.text=x"); r.code != 1 || !strings.Contains(r.err, "no computer mac") {
 		t.Errorf("place at mac: %+v", r)

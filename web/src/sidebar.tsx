@@ -19,7 +19,6 @@ import { colorVar, COLORS, useFolderColors } from "./colors";
 import { ahead, behind } from "./chats";
 import { t, useLang } from "./i18n";
 import { useFlip } from "./motion";
-import { ShareSubmenu } from "./share";
 import { folderLevels, sessionLevels, usePushMenus, wsLevels, type PushLevel } from "./push";
 import { allFolders, folderSessions, foldersHolding, foldRest, groupHolding, machineOf, remotePath, type Folder as FolderNode, type Tree, type WsNode } from "./tree";
 import { createAt, onOpenPlace, type Place } from "./places";
@@ -816,12 +815,7 @@ function WsRow({ flip, id, name, root, sessions, hung, machine, remote, folders,
                   items={items}
                   // No 删除 (the user, 2026-11-08): a group is the folder its sessions are in; it
                   // goes once none is shown.
-                  foot={
-                    <>
-                      <ShareSubmenu thing={{ what: "place", place: `${machine?.name ?? "主机"}:${root}` }} i={items.length} />
-                      <PushFoot levels={wsLevels(id)} i={items.length + 1} />
-                    </>
-                  }
+                  foot={<PushFoot levels={wsLevels(id)} i={items.length} />}
                 />
               ) : (
                 push && (
@@ -1211,12 +1205,7 @@ function SessionMenu({ s, at, close, rename, detach }: { s: Session; at: { x: nu
           <MenuItems
             items={items}
             tags={sessionTags(s)}
-            foot={
-              <>
-                <ShareSubmenu thing={{ what: "session", session: s.id }} i={items.length} />
-                <PushFoot levels={sessionLevels(s)} i={items.length + 1} />
-              </>
-            }
+            foot={<PushFoot levels={sessionLevels(s)} i={items.length} />}
           />
         </Menu.Positioner>
       </Menu.Portal>

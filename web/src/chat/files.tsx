@@ -5,9 +5,9 @@
 // named, and that exist, show; it serves them by the session.
 import { Dialog } from "@base-ui/react/dialog";
 import { Download, FileCode2, FileText, FileX2, LoaderCircle, X } from "lucide-react";
-import { Shareable } from "../share";
 import { createContext, lazy, Suspense, useCallback, useContext, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { api } from "../api/client";
+import { Copyable } from "./copyable";
 import type { FileRef } from "../api/types.gen";
 import { t } from "../i18n";
 import { cn, IconKey, Tip } from "../ui";
@@ -33,9 +33,9 @@ export const CODE = /\.(tsx?|jsx?|go|rs|py|css|json|ya?ml|toml|sh|md)$/i;
 
 function One({ session, f }: { session: string; f: FileRef }) {
   return (
-    <Shareable thing={{ what: "file", session, ref: f.ref }} copy={f.path || undefined}>
+    <Copyable copy={f.path || undefined}>
       <Bare session={session} f={f} />
-    </Shareable>
+    </Copyable>
   );
 }
 
