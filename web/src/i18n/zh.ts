@@ -220,7 +220,9 @@ export const zh = {
   "ctx.reserve": "压缩预留",
   "ctx.free": "空余",
   "ctx.cacheHit": "缓存命中",
-  "ctx.cacheParts": "读 {read} · 写 {write} · 未缓存 {input}",
+  "ctx.cacheRead": "缓存读",
+  "ctx.cacheWrite": "缓存写",
+  "ctx.uncached": "未缓存",
 
   "quota.session": "5 小时",
   "quota.weekly": "7 天",

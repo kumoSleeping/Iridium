@@ -220,7 +220,9 @@ export const en: Dict = {
   "ctx.reserve": "Compaction reserve",
   "ctx.free": "Free",
   "ctx.cacheHit": "Cache hits",
-  "ctx.cacheParts": "read {read} · written {write} · uncached {input}",
+  "ctx.cacheRead": "Read from cache",
+  "ctx.cacheWrite": "Written to cache",
+  "ctx.uncached": "Uncached",
 
   "quota.session": "5-hour",
   "quota.weekly": "7-day",

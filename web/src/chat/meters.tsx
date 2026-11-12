@@ -116,40 +116,57 @@ export function ContextRing({ session, summary, tokens, open, onOpenChange }: { 
           <span className="text-sm font-semibold">{t("ctx.title")}</span>
           <span className="text-xs text-ink-3 tabular-nums">{t("ctx.used", { used: k(c.used), total: k(c.max) })}</span>
         </div>
-        {parts.length > 1 && (
-          <>
-            <div className="mt-2.5 flex h-2 gap-[2px]" role="img" aria-label={parts.map((p) => `${p.name} ${k(p.tokens)}`).join(", ")}>
-              {parts.map((p, i) => (
-                <Tip key={p.key} label={`${p.name} · ${k(p.tokens)}`}>
-                  <span
-                    className={cn("g-fade h-full", i === 0 && "rounded-l-full", i === parts.length - 1 && "rounded-r-full")}
-                    style={{ flexGrow: p.tokens, flexBasis: 0, minWidth: 3, background: p.tone, animationDelay: `${i * 20}ms` } as CSSProperties}
-                  />
-                </Tip>
-              ))}
-            </div>
-            <ul className="m-0 mt-3 grid list-none gap-1 p-0">
-              {parts.map((p) => (
-                <li key={p.key} className="flex items-center gap-2 text-sm">
-                  <span className="size-2 shrink-0 rounded-full" style={{ background: p.tone, boxShadow: p.ring ? "inset 0 0 0 1px var(--ink-4)" : undefined }} />
-                  <span className="flex-1 text-ink-2">{p.name}</span>
-                  <span className="text-ink tabular-nums">{k(p.tokens)}</span>
-                </li>
-              ))}
-            </ul>
-          </>
-        )}
+        {parts.length > 1 && <Meter parts={parts} label={k} />}
+        {/* The cache: a section as the context's above it, its title and rate, a bar of what was
+            read from the cache, written to it, and neither, a line each (the user, 2026-11-12:
+            not a footnote under a rule). */}
         {hit && tokens && (
-          <div className="mt-3 border-t border-edge pt-2.5">
-            <div className="flex items-baseline justify-between text-sm">
-              <span className="text-ink-2">{t("ctx.cacheHit")}</span>
-              <span className="text-ink tabular-nums">{hit}</span>
+          <section className="mt-4" aria-label={t("ctx.cacheHit")}>
+            <div className="flex items-baseline justify-between">
+              <span className="text-sm font-semibold">{t("ctx.cacheHit")}</span>
+              <span className="text-xs text-ink-3 tabular-nums">{hit}</span>
             </div>
-            <div className="mt-0.5 text-xs text-ink-3 tabular-nums">{t("ctx.cacheParts", { read: tok(tokens.cacheRead), write: tok(tokens.cacheWrite), input: tok(tokens.input) })}</div>
-          </div>
+            <Meter parts={cacheParts(tokens)} label={tok} />
+          </section>
         )}
       </PopSurface>
     </Popover.Root>
+  );
+}
+
+/** What a session's input was: read from the cache, written to it, neither; in greys, the read the
+ *  darkest, the uncached as the context's free. */
+const cacheParts = (x: InputTokens): Part[] =>
+  [
+    { key: "read", name: t("ctx.cacheRead"), tokens: x.cacheRead, tone: "var(--ctx-2)" },
+    { key: "write", name: t("ctx.cacheWrite"), tokens: x.cacheWrite, tone: "var(--ctx-5)" },
+    { key: "input", name: t("ctx.uncached"), tokens: x.input, tone: "var(--fill-2)", ring: true },
+  ].filter((p) => p.tokens > 0);
+
+/** A bar of parts, each its share in its tone, and under it a line each: its dot, name and size. */
+function Meter({ parts, label }: { parts: Part[]; label: (n: number) => string }) {
+  return (
+    <>
+      <div className="mt-2.5 flex h-2 gap-[2px]" role="img" aria-label={parts.map((p) => `${p.name} ${label(p.tokens)}`).join(", ")}>
+        {parts.map((p, i) => (
+          <Tip key={p.key} label={`${p.name} · ${label(p.tokens)}`}>
+            <span
+              className={cn("g-fade h-full", i === 0 && "rounded-l-full", i === parts.length - 1 && "rounded-r-full")}
+              style={{ flexGrow: p.tokens, flexBasis: 0, minWidth: 3, background: p.tone, animationDelay: `${i * 20}ms` } as CSSProperties}
+            />
+          </Tip>
+        ))}
+      </div>
+      <ul className="m-0 mt-3 grid list-none gap-1 p-0">
+        {parts.map((p) => (
+          <li key={p.key} className="flex items-center gap-2 text-sm">
+            <span className="size-2 shrink-0 rounded-full" style={{ background: p.tone, boxShadow: p.ring ? "inset 0 0 0 1px var(--ink-4)" : undefined }} />
+            <span className="flex-1 text-ink-2">{p.name}</span>
+            <span className="text-ink tabular-nums">{label(p.tokens)}</span>
+          </li>
+        ))}
+      </ul>
+    </>
   );
 }
 
