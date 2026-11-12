@@ -81,55 +81,97 @@ export function shortId(id: string, ids: string[]): string {
   return id;
 }
 
-/** A session named in a message, as a row dropped on the composer writes it (i18n
- *  composer.mention): 「title」（Claude 会话 1a2b3c4d）, or "title" (Claude session 1a2b3c4d). A
- *  place (composer.mentionFolder, composer.mentionWorkspace, docs/plan.md "@"): a folder here,
- *  文件夹「ir」（/home/otae/ir）, or one at another machine by its name, its path as it writes it,
- *  工作区「Ds_Benchmark」（otae-2:C:\Code\Ds_Benchmark）; folder "ir" (/home/otae/ir) and workspace
- *  "Ds_Benchmark" (otae-2:C:\Code\Ds_Benchmark) in English. machine: none for this machine. */
+/** A session or a place named in words (docs/plan.md "@", 2026-11-12): a link of Iridium's in the
+ *  words where it was put, the same written by you and by an agent. A session [title](ir:session/<id>),
+ *  its id or the start of one; a place [name](ir:folder/<where>), where a path here
+ *  (ir:folder//home/otae/ir) or <machine>:<path> at another (ir:folder/otae-2:C:\Code\Ds), the
+ *  path as that machine writes it, <…> round it when it has a space or a bracket. agent: a session's
+ *  agent where known without the list (an ir new step's). text: the link as written. */
 export type Mention =
-  | { kind: "session"; title: string; agent: string; id: string; text: string }
+  | { kind: "session"; title: string; id: string; agent?: string; text: string }
   | { kind: "place"; name: string; machine?: string; path: string; text: string };
-// A place's path may hold brackets: it ends at the last closing one before a space or the next
-// opening one (2026-11-10), so one after another, and words after, still part.
-const ZH_PATH = "([^\\n]{1,400}?)）(?![^\\s（]*）)";
-const EN_PATH = "([^\\n]{1,400}?)\\)(?![^\\s(]*\\))";
-// A machine's name may have spaces (My PC); it ends at the first colon (a name has none).
-const MACHINE = "([^\\n:「」（）\"()]{1,64}):";
-const MENTION = new RegExp(
-  [
-    `文件夹「([^」\\n]{1,200})」（(?=/)${ZH_PATH}`,
-    `工作区「([^」\\n]{1,200})」（${MACHINE}${ZH_PATH}`,
-    `folder "([^"\\n]{1,200})" \\((?=/)${EN_PATH}`,
-    `workspace "([^"\\n]{1,200})" \\(${MACHINE}${EN_PATH}`,
-    "「([^」\\n]{1,200})」（([^（）\\n]{1,40}?) 会话 ([0-9A-Za-z_-]{8,64})）",
-    '"([^"\\n]{1,200})" \\(([^()\\n]{1,40}?) session ([0-9A-Za-z_-]{8,64})\\)',
-  ].join("|"),
-  "g",
-);
 
-/** The mention a match of MENTION is, by which of its forms matched. */
-function mentionOf(m: RegExpMatchArray): Mention {
-  const g = m as unknown as (string | undefined)[];
-  const text = m[0];
-  if (g[1] !== undefined) return { kind: "place", name: g[1], path: g[2]!, text };
-  if (g[3] !== undefined) return { kind: "place", name: g[3], machine: g[4]!, path: g[5]!, text };
-  if (g[6] !== undefined) return { kind: "place", name: g[6], path: g[7]!, text };
-  if (g[8] !== undefined) return { kind: "place", name: g[8], machine: g[9]!, path: g[10]!, text };
-  return { kind: "session", title: g[11] ?? g[14]!, agent: g[12] ?? g[15]!, id: g[13] ?? g[16]!, text };
+const REF = /\[([^[\]\n]{0,200})\]\((?:<(ir:(?:session|folder)\/[^<>\n]+)>|(ir:(?:session|folder)\/[^\s()<>]+))\)/g;
+
+/** What an ir:session/… or ir:folder/… link names, its words label; none if it is not one. */
+export function refOf(url: string, label: string, text = ""): Mention | undefined {
+  const sid = /^ir:session\/([0-9A-Za-z_-]{4,64})$/.exec(url)?.[1];
+  if (sid) return { kind: "session", title: label, id: sid, text };
+  const where = /^ir:folder\/(.+)$/.exec(url)?.[1];
+  if (!where) return undefined;
+  if (where.startsWith("/")) return { kind: "place", name: label, path: where, text };
+  const i = where.indexOf(":");
+  const machine = where.slice(0, i), path = where.slice(i + 1);
+  return i > 0 && !machine.includes("/") && path ? { kind: "place", name: label, machine, path, text } : undefined;
 }
 
 /** A message's text cut at the sessions and places it names: plain runs and mentions, in order. */
 export function mentions(text: string): (string | Mention)[] {
+  if (!text.includes("](")) return text ? [text] : [];
   const out: (string | Mention)[] = [];
   let at = 0;
-  for (const m of text.matchAll(MENTION)) {
+  for (const m of text.matchAll(REF)) {
+    const r = refOf(m[2] ?? m[3]!, m[1]!, m[0]);
+    if (!r) continue;
     if (m.index > at) out.push(text.slice(at, m.index));
-    out.push(mentionOf(m));
+    out.push(r);
     at = m.index + m[0].length;
   }
   if (at < text.length) out.push(text.slice(at));
   return out;
+}
+
+/** A name as a link's words: on one line, no square brackets (as their full-width kin), at most 200. */
+function sayable(name: string): string {
+  return [...name.replaceAll("[", "［").replaceAll("]", "］").replace(/\s+/g, " ").trim()].slice(0, 200).join("");
+}
+
+/** How words name session id (its shortest start ir takes), titled title. */
+export const sessionLink = (title: string, id: string) => `[${sayable(title)}](ir:session/${id})`;
+
+/** How words name a place: here by its path; at another machine by machine (its name, or its ID if
+ *  the name has a colon, a slash or a space) and path as that machine writes it. */
+export function placeLink(name: string, path: string, machine?: string): string {
+  const where = machine ? `${machine}:${path}` : path;
+  const url = `ir:folder/${where.replace(/[<>\n]/g, "")}`;
+  return `[${sayable(name) || "/"}](${/[\s()]/.test(url) ? `<${url}>` : url})`;
+}
+
+const ATTR = /([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
+const unescape = (v: string) => v.replace(/&(lt|gt|quot|apos|amp);/g, (_, e: string) => ({ lt: "<", gt: ">", quot: '"', apos: "'", amp: "&" })[e]!);
+const attrs = (s: string) => Object.fromEntries([...s.matchAll(ATTR)].map((m) => [m[1]!, unescape(m[2] ?? m[3] ?? "")]));
+const SATORI = /<(img|image|video|audio|file)\b([^<>]*?)\/?>(?:<\/\1>)?|<sharp\b([^<>]*?)(?:\/>|>([^<>]*)<\/sharp>)|<a\b([^<>]*?)>([^<>]*)<\/a>/g;
+
+/** A reply's Satori elements of Iridium's as the Markdown they stand for (the system prompt lets an
+ *  agent write either): <img src="ir:id"/> (image, video, audio) a picture's link, <file
+ *  src="ir:id" title/> a file's, <sharp id name/> a session's, <a href="ir:…"> the link. Others,
+ *  and any in code, stay as written. */
+export function fromSatori(text: string): string {
+  if (!text.includes("<")) return text;
+  return text
+    .split(/(```[\s\S]*?(?:```|$)|`[^`\n]*`)/)
+    .map((part, i) =>
+      i % 2
+        ? part
+        : part.replace(SATORI, (all, file?: string, fa?: string, sa?: string, sk?: string, aa?: string, ak?: string) => {
+            if (file) {
+              const a = attrs(fa ?? "");
+              const id = /^ir:([a-z2-7]{10})$/.exec(a.src ?? "")?.[1];
+              if (!id) return all;
+              const words = (a.title ?? a.alt ?? "").replace(/[[\]\n]/g, " ");
+              return file === "file" ? `[${words}](ir:${id})` : `![${words}](ir:${id})`;
+            }
+            if (sa !== undefined) {
+              const a = attrs(sa);
+              return a.id && /^[0-9A-Za-z_-]{4,64}$/.test(a.id) ? sessionLink(a.name || unescape(sk ?? "") || a.id, a.id) : all;
+            }
+            const href = attrs(aa ?? "").href ?? "";
+            if (!/^ir:/.test(href)) return all;
+            const words = unescape(ak ?? "").replace(/[[\]\n]/g, " ");
+            return /[\s()]/.test(href) ? `[${words}](<${href}>)` : `[${words}](${href})`;
+          }),
+    )
+    .join("");
 }
 
 /** A place named in words, as the composer sends it: local, a folder here; remote, at the machine
@@ -147,19 +189,82 @@ export function placesIn(text: string): PlaceNamed[] {
   return out;
 }
 
-/** A message's text split as the composer put it together: the sessions named before the words
- *  (cards there, as they were in the composer), the words after them. */
-export function leadingMentions(text: string): { named: Mention[]; words: string } {
-  const named: Mention[] = [];
-  const parts = mentions(text);
-  let i = 0;
-  for (; i < parts.length; i++) {
-    const p = parts[i]!;
-    if (typeof p !== "string") named.push(p);
-    else if (p.trim()) break;
+/** The slot a mention's mark (an agent's logo, a folder) is drawn in, in the composer's box. */
+export const MARK = "\u2003";
+
+/** The composer's words as its box holds them (the user, 2026-11-12): each mention its mark's slot
+ *  and its name, the link behind it kept aside. refs: where each is, in value (from, to) and in
+ *  the words (at, end). */
+export type Boxed = { value: string; refs: { from: number; to: number; at: number; end: number; m: Mention }[] };
+
+export function boxed(words: string): Boxed {
+  let value = "";
+  let at = 0;
+  const refs: Boxed["refs"] = [];
+  for (const p of mentions(words)) {
+    if (typeof p === "string") {
+      value += p;
+      at += p.length;
+      continue;
+    }
+    const shown = MARK + (p.kind === "session" ? p.title : p.name);
+    refs.push({ from: value.length, to: value.length + shown.length, at, end: at + p.text.length, m: p });
+    value += shown;
+    at += p.text.length;
   }
-  if (!named.length) return { named, words: text };
-  return { named, words: parts.slice(i).map((p) => (typeof p === "string" ? p : p.text)).join("").trimStart() };
+  return { value, refs };
+}
+
+/** Where the box's position i is in the words (inside a mention: its start). */
+export function wordsAt(b: Boxed, i: number): number {
+  let d = 0;
+  for (const r of b.refs) {
+    if (r.from >= i) break;
+    if (r.to > i) return r.at;
+    d += r.end - r.at - (r.to - r.from);
+  }
+  return i + d;
+}
+
+/** Where the words' position i is in the box (inside a link: its start). */
+export function boxAt(b: Boxed, i: number): number {
+  let d = 0;
+  for (const r of b.refs) {
+    if (r.at >= i) break;
+    if (r.end > i) return r.from;
+    d += r.end - r.at - (r.to - r.from);
+  }
+  return i - d;
+}
+
+/** The words after the box was edited from what boxed(words) gave to value: a mention the edit
+ *  touches goes whole (one Backspace takes it), letters typed inside one go after it. caret: where
+ *  the box's caret then is. */
+export function edited(words: string, value: string): { words: string; caret: number } {
+  const b = boxed(words);
+  const was = b.value;
+  let p = 0;
+  while (p < was.length && p < value.length && was[p] === value[p]) p++;
+  let s = 0;
+  while (s < was.length - p && s < value.length - p && was[was.length - 1 - s] === value[value.length - 1 - s]) s++;
+  const typed = value.slice(p, value.length - s);
+  let lo = p, hi = was.length - s;
+  for (const r of b.refs) {
+    if (lo === hi) {
+      if (r.from < lo && lo < r.to) lo = hi = r.to;
+    } else if (r.from < hi && r.to > lo) {
+      lo = Math.min(lo, r.from);
+      hi = Math.max(hi, r.to);
+    }
+  }
+  const head = words.slice(0, wordsAt(b, lo)) + typed;
+  return { words: head + words.slice(wordsAt(b, hi)), caret: boxed(head).value.length };
+}
+
+/** The caret moved into a mention's name: to its nearer edge. */
+export function outOf(b: Boxed, i: number): number {
+  const r = b.refs.find((r) => r.from < i && i < r.to);
+  return r ? (i - r.from < r.to - i ? r.from : r.to) : i;
 }
 
 const LOCAL = (u: string) => !/^[a-z][a-z0-9+.-]*:/i.test(u) || u.startsWith("file:");

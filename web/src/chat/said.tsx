@@ -24,8 +24,8 @@ import { argOf, diffSum, foldLine, foldSaid, kindOf, runCmds, type Diff, type Ki
 import { Code } from "./hl";
 import { Markdown } from "./markdown";
 import { partialInput } from "./partial";
-import { machineNamed, MentionCard, NamedCards, useNamed } from "./mention";
-import { leadingMentions, type Mention, sessionOf, type Source, withoutFiles, withoutNameLines } from "./refs";
+import { machineNamed, MentionCard, NamedCards, Worded } from "./mention";
+import { fromSatori, type Mention, sessionOf, type Source, withoutFiles, withoutNameLines } from "./refs";
 import { MachineFace } from "../machines";
 import { useList } from "../store";
 import type { Agent } from "../api/types.gen";
@@ -138,25 +138,23 @@ function SendState({ state }: { state: Going }) {
   );
 }
 
-export const YouBubble = forwardRef<HTMLDivElement, { text: string; who: You; failed?: boolean; children?: ReactNode; time?: number; going?: Going }>(function YouBubble({ text: all, who, failed, children, time, going }, ref) {
-  // The sessions named before the words: cards with the files, as they were in the composer; those
-  // named among the words or by id the same cards, the words as written.
-  const text = useMemo(() => leadingMentions(all).words, [all]);
-  const named = useNamed(all);
-  const row = named.length + Children.count(children) > 0;
+export const YouBubble = forwardRef<HTMLDivElement, { text: string; who: You; failed?: boolean; children?: ReactNode; time?: number; going?: Going }>(function YouBubble({ text, who, failed, children, time, going }, ref) {
+  // What the words name, where they name it (Worded); the files in a row under them.
+  const row = Children.count(children) > 0;
   return (
     <Sender ref={ref} who={who} title={time ? clock(time) : undefined}>
       <div className="relative max-w-[min(560px,100%)] px-3.5 py-2">
         {going && <SendState state={going} />}
         <span data-bubble-bg className={cn("absolute inset-0 rounded-xl rounded-tr-sm bg-fill", failed && "shadow-[inset_0_0_0_1px_var(--err)]")} aria-hidden />
-        {text && <span className="relative block text-md whitespace-pre-wrap [overflow-wrap:anywhere]">{text}</span>}
+        {text && (
+          <span className="relative block text-md whitespace-pre-wrap [overflow-wrap:anywhere]">
+            <Worded text={text} />
+          </span>
+        )}
         {/* Not for no files: a message sent and the same one landed are as high (an empty list was
             a row of its own, the bubble shrinking as it landed). */}
         {row && (
           <span className={cn("relative flex flex-wrap gap-1.5", text && "mt-1")}>
-            {named.map((m, i) => (
-              <MentionCard key={i} m={m} />
-            ))}
             {children}
           </span>
         )}
@@ -202,19 +200,18 @@ export function Pending({ s, who, retry, drop, bubbleRef }: { s: Sent; who: You;
 /** A letter: from another session's ir, a plugin or a peer. Not your words: on the left, in a grey
  *  bubble as yours are (the user, 2026-11-06). */
 function Letter({ src, text, time, onJump, children }: { src: From; text: string; time?: number; onJump: (id: string) => void; children?: ReactNode }) {
-  // Its files as in your bubble (ir send -a): they were not shown at all. The sessions it names
-  // (ir send 4ceb1321 …) as cards before them, the words as written.
-  const named = useNamed(text);
-  const files = named.length + Children.count(children) > 0;
+  // Its files as in your bubble (ir send -a); what it names, where it names it.
+  const files = Children.count(children) > 0;
   return (
     <Sender who={src} title={time ? clock(time) : undefined} jump={src.session ? () => onJump(src.session!) : undefined}>
       <div className="max-w-[min(560px,100%)] min-w-0 rounded-xl rounded-tr-sm bg-fill px-3.5 py-2">
-        {text && <p className="m-0 text-md whitespace-pre-wrap [overflow-wrap:anywhere]">{text}</p>}
+        {text && (
+          <p className="m-0 text-md whitespace-pre-wrap [overflow-wrap:anywhere]">
+            <Worded text={text} />
+          </p>
+        )}
         {files && (
           <div className={cn("flex flex-wrap gap-1.5", text && "mt-1")}>
-            {named.map((m, i) => (
-              <MentionCard key={i} m={m} />
-            ))}
             {children}
           </div>
         )}
@@ -276,14 +273,12 @@ const SYSTEM: Record<string, Parameters<typeof t>[0]> = { compact: "sys.compact"
  *  give ([文件] `path`). */
 const Assistant = memo(function Assistant({ b, session }: { b: Block; session: string }) {
   const home = useHome().data;
-  const text = withoutFiles(withoutNameLines(b.text ?? ""), new Set(b.files?.map((f) => f.path)), home);
+  const text = withoutFiles(withoutNameLines(fromSatori(b.text ?? "")), new Set(b.files?.map((f) => f.path)), home);
   // A file link's file shows where the words put it; the rest (file lines) under them.
   const under = b.files?.filter((f) => !isLink(f)) ?? [];
   return (
     <div className="flex min-w-0 flex-col items-start gap-2 pr-6">
       {text && <Markdown text={text} className="w-full" session={session} files={b.files ?? undefined} />}
-      {/* The sessions it names by id (09eeb223), as cards: the words as written. */}
-      <NamedCards text={text} />
       {!!under.length && <Files session={session} files={under} />}
     </div>
   );

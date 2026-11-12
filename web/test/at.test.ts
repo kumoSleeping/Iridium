@@ -1,79 +1,56 @@
 import { describe, expect, test } from "vitest";
 import type { DshWorkspace, Session, Workspace } from "../src/api/types.gen";
 import type { Machine } from "../src/machines";
-import { arrowInto, atPath, atSections, baseName, namedOf, pathSection, typedPath } from "../src/chat/at";
+import { arrowInto, atPath, atSections, baseName, pathSection, typedPath } from "../src/chat/at";
 import { placeMention, placeOf } from "../src/chat/mention";
-import { leadingMentions, mentions, placesIn } from "../src/chat/refs";
-import { setLang } from "../src/i18n";
+import { mentions, placesIn } from "../src/chat/refs";
 
 const win = { id: "m1", name: "otae-2", os: "windows", home: "C:\\Users\\o", sep: "\\", agents: [{ agent: "dsh" }], online: true } as Machine;
 const mac = { id: "m2", name: "Book", os: "darwin", home: "/Users/k", sep: "/", agents: [{ agent: "claude" }], online: false } as Machine;
 
 describe("place mentions", () => {
-  test("a folder here and a workspace at another machine, in either language", () => {
-    expect(mentions("看 文件夹「ir」（/home/otae/ir） 吧")).toEqual(["看 ", { kind: "place", name: "ir", path: "/home/otae/ir", text: "文件夹「ir」（/home/otae/ir）" }, " 吧"]);
-    expect(mentions("工作区「Ds_Benchmark」（otae-2:C:\\Code\\Ds_Benchmark）")).toEqual([{ kind: "place", name: "Ds_Benchmark", machine: "otae-2", path: "C:\\Code\\Ds_Benchmark", text: "工作区「Ds_Benchmark」（otae-2:C:\\Code\\Ds_Benchmark）" }]);
-    expect(mentions('folder "ir" (/home/otae/ir) now')[0]).toMatchObject({ kind: "place", name: "ir", path: "/home/otae/ir" });
-    expect(mentions('workspace "Ds" (otae-2:C:\\Code\\Ds)')[0]).toMatchObject({ kind: "place", name: "Ds", machine: "otae-2", path: "C:\\Code\\Ds" });
+  test("a folder here and a workspace at another machine, as links", () => {
+    expect(mentions("看 [ir](ir:folder//home/otae/ir) 吧")).toEqual(["看 ", { kind: "place", name: "ir", path: "/home/otae/ir", text: "[ir](ir:folder//home/otae/ir)" }, " 吧"]);
+    expect(mentions("[Ds_Benchmark](ir:folder/otae-2:C:\\Code\\Ds_Benchmark)")).toEqual([{ kind: "place", name: "Ds_Benchmark", machine: "otae-2", path: "C:\\Code\\Ds_Benchmark", text: "[Ds_Benchmark](ir:folder/otae-2:C:\\Code\\Ds_Benchmark)" }]);
   });
-  test("brackets in a path, mentions side by side, words after", () => {
-    expect(mentions("文件夹「a（copy）」（/x/a（copy））")[0]).toMatchObject({ path: "/x/a（copy）" });
-    expect(mentions("文件夹「b」（/x/a（1）/b） 看看")[0]).toMatchObject({ path: "/x/a（1）/b" });
-    expect(mentions('folder "a (copy)" (/x/a (copy)) and more')[0]).toMatchObject({ path: "/x/a (copy)" });
-    const two = mentions("文件夹「a」（/x）文件夹「b」（/y），然后（看看）");
+  test("a path with spaces or brackets in <>, links side by side, words after", () => {
+    expect(mentions("[a (copy)](<ir:folder//x/a (copy)>)")[0]).toMatchObject({ path: "/x/a (copy)" });
+    const two = mentions("[a](ir:folder//x)[b](ir:folder//y)，然后（看看）");
     expect(two.slice(0, 2)).toMatchObject([{ path: "/x" }, { path: "/y" }]);
     expect(two[2]).toBe("，然后（看看）");
   });
   test("not a place", () => {
-    expect(mentions("文件夹「x」（relative/path）")).toEqual(["文件夹「x」（relative/path）"]);
-    expect(mentions("工作区「x」（no-machine）")).toEqual(["工作区「x」（no-machine）"]);
-  });
-  test("places and sessions before the words", () => {
-    const a = "文件夹「ir」（/home/otae/ir）", b = "「B」（Codex 会话 1a2b3c4d）", c = "工作区「Ds」（otae-2:C:\\Ds）";
-    const l = leadingMentions(`${a} ${b} ${c} look`);
-    expect(l.named.map((m) => m.kind)).toEqual(["place", "session", "place"]);
-    expect(l.words).toBe("look");
+    expect(mentions("[x](ir:folder/relative)")).toEqual(["[x](ir:folder/relative)"]);
+    expect(mentions("[x](ir:folder/a/b:c)")).toEqual(["[x](ir:folder/a/b:c)"]);
+    expect(mentions("文件夹「ir」（/home/otae/ir）")).toEqual(["文件夹「ir」（/home/otae/ir）"]);
   });
   test("placesIn: each once", () => {
-    expect(placesIn("文件夹「ir」（/home/otae/ir） 工作区「Ds」（OTAE-2:C:\\Ds） 工作区「Ds」（otae-2:C:\\Ds）")).toEqual([
+    expect(placesIn("[ir](ir:folder//home/otae/ir) [Ds](ir:folder/OTAE-2:C:\\Ds) [Ds](ir:folder/otae-2:C:\\Ds)")).toEqual([
       { kind: "local", path: "/home/otae/ir", name: "ir" },
       { kind: "remote", machine: "OTAE-2", path: "C:\\Ds", name: "Ds" },
     ]);
   });
-  test("sent as the page's language says, read back as the page's place", () => {
-    setLang("zh");
-    expect(placeMention({ path: "/home/otae/ir", name: "ir" }, [win])).toBe("文件夹「ir」（/home/otae/ir）");
-    expect(placeMention({ machine: "m1", path: "C:/Code/Ds_Benchmark", name: "Ds_Benchmark" }, [win])).toBe("工作区「Ds_Benchmark」（otae-2:C:\\Code\\Ds_Benchmark）");
-    setLang("en");
-    expect(placeMention({ machine: "m1", path: "C:/Code/Ds", name: "Ds" }, [win])).toBe('workspace "Ds" (otae-2:C:\\Code\\Ds)');
-    setLang("zh");
+  test("sent as a link, read back as the page's place", () => {
+    expect(placeMention({ path: "/home/otae/ir", name: "ir" }, [win])).toBe("[ir](ir:folder//home/otae/ir)");
+    expect(placeMention({ machine: "m1", path: "C:/Code/Ds_Benchmark", name: "Ds_Benchmark" }, [win])).toBe("[Ds_Benchmark](ir:folder/otae-2:C:\\Code\\Ds_Benchmark)");
     expect(placeOf({ machine: "OTAE-2", path: "C:\\Code\\Ds" }, [win])).toEqual({ machine: "m1", path: "C:/Code/Ds" });
     expect(placeOf({ machine: "gone", path: "/x" }, [win])).toBeUndefined();
     expect(placeOf({ path: "/x" }, [win])).toEqual({ path: "/x" });
   });
-  test("a machine whose name has a space: read back, in either language", () => {
+  test("a machine whose name has a space or a colon: by its ID", () => {
     const pc = { ...win, id: "m3", name: "My PC" };
-    for (const lang of ["zh", "en"] as const) {
-      setLang(lang);
-      const said = placeMention({ machine: "m3", path: "C:/Code/Ds", name: "Ds" }, [pc]);
-      expect(mentions(`${said} hi`)[0]).toMatchObject({ kind: "place", name: "Ds", machine: "My PC", path: "C:\\Code\\Ds" });
-      expect(placeOf(mentions(said)[0] as { machine: string; path: string }, [pc])).toEqual({ machine: "m3", path: "C:/Code/Ds" });
-    }
-    // One whose name has what would end it: by its ID.
-    expect(placeMention({ machine: "m4", path: "/x", name: "x" }, [{ ...mac, id: "m4", name: "a (b)" }])).toBe('workspace "x" (m4:/x)');
-    setLang("zh");
+    const said = placeMention({ machine: "m3", path: "C:/Code/Ds", name: "Ds" }, [pc]);
+    expect(said).toBe("[Ds](ir:folder/m3:C:\\Code\\Ds)");
+    expect(placeOf(mentions(`${said} hi`)[0] as { machine: string; path: string }, [pc])).toEqual({ machine: "m3", path: "C:/Code/Ds" });
+    expect(placeMention({ machine: "m4", path: "/x", name: "x" }, [{ ...mac, id: "m4", name: "a:b" }])).toBe("[x](ir:folder/m4:/x)");
   });
-  test("a name with the marks that close it, or too long: said so it reads back", () => {
-    for (const lang of ["zh", "en"] as const) {
-      setLang(lang);
-      for (const name of ['My "big" app', "a」b", "x".repeat(300)]) {
-        const said = placeMention({ machine: "m1", path: "C:/Code/big", name }, [win]);
-        expect(mentions(`${said} hi`)[0]).toMatchObject({ kind: "place", machine: "otae-2", path: "C:\\Code\\big" });
-        const here = placeMention({ path: "/w/big", name }, [win]);
-        expect(mentions(`${here} hi`)[0]).toMatchObject({ kind: "place", path: "/w/big" });
-      }
+  test("a name with brackets, or too long: said so it reads back", () => {
+    for (const name of ["My [big] app", "a」b", "x".repeat(300)]) {
+      const said = placeMention({ machine: "m1", path: "C:/Code/big dir", name }, [win]);
+      expect(mentions(`${said} hi`)[0]).toMatchObject({ kind: "place", machine: "otae-2", path: "C:\\Code\\big dir" });
+      const here = placeMention({ path: "/w/big", name }, [win]);
+      expect(mentions(`${here} hi`)[0]).toMatchObject({ kind: "place", path: "/w/big" });
     }
-    setLang("zh");
   });
 });
 
@@ -156,12 +133,5 @@ describe("the @ list", () => {
     expect(baseName("C:/")).toBe("C:");
     expect(baseName("/")).toBe("/");
     expect(baseName("/a/b/")).toBe("b");
-  });
-  test("a draft's named, kept as JSON or as the IDs kept before", () => {
-    expect(namedOf("ab12 cd34")).toEqual([{ kind: "session", id: "ab12" }, { kind: "session", id: "cd34" }]);
-    const n = [{ kind: "session", id: "x" }, { kind: "place", machine: "m1", path: "C:/a b", name: "a b" }];
-    expect(namedOf(JSON.stringify(n))).toEqual(n);
-    expect(namedOf("[broken")).toEqual([]);
-    expect(namedOf(null)).toEqual([]);
   });
 });

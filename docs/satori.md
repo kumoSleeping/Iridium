@@ -104,7 +104,7 @@
 
 ## 元素
 
-收发都用 Satori 元素（`internal/satori/elements.go`）。Iridium 发：文字、`<img>`/`<file>`（`internal:` 地址）、`<button>`、`<p>`、`<b>`。会话用 `<sharp>`，位置和文件用 `<a>`，不用 `<at>`（会真的提醒人）；收到的 `<at>` 只当文字。
+收发都用 Satori 元素（`internal/satori/elements.go`）。Iridium 发：文字、`<img>`/`<file>`（`internal:` 地址）、`<button>`、`<p>`、`<b>`。会话用 `<sharp>`，位置和文件用 `<a>`，不用 `<at>`（会真的提醒人）；收到的 `<at>` 只当文字，收到的 `<sharp>` 转成网页的写法 `[名字](ir:session/<id>)`（2026-11-12，`plan.md`“@”）。
 
 ## 和规范不一样的地方
 
