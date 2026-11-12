@@ -2,8 +2,8 @@
 // mode past the effort track, with a sub-mode and a level OMD picks for it, through OMD's own
 // service (omd.ultracode). It hangs a key at the place "effort" of each session here with this
 // plugin's service iridium (in DSH Desktop's process, and in a dsh process the Iridium started
-// here: index.js and session.js run it), and a row of its sub-modes while on; a press switches
-// it. A sub-plugin: on only while OMD is there (inject), and the only file here that knows OMD. Ultra on owns the effort: a level picked
+// here: index.js and session.js run it), and its sub-modes, each with its mark: the page shows one
+// key, off or the sub-mode on, a press the next (off, then each sub-mode, then off). A sub-plugin: on only while OMD is there (inject), and the only file here that knows OMD. Ultra on owns the effort: a level picked
 // in the Iridium is a plain model selection, which OMD takes for leaving Ultra, so it is turned
 // on again at the new level.
 
@@ -13,19 +13,30 @@ export const inject = ['omd', 'iridium']
 const SUBMODES = ['workflow', 'team', 'free']
 const KEY = 'omd.ultra'
 
+/** Each sub-mode's mark: lucide's workflow, users and infinity, drawn by the page in its own colour
+ *  (only the shape counts). */
+const svg = (body) =>
+  'data:image/svg+xml;base64,' +
+  btoa(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`)
+export const MARKS = {
+  workflow: svg('<rect width="8" height="8" x="3" y="3" rx="2"/><path d="M7 11v4a2 2 0 0 0 2 2h4"/><rect width="8" height="8" x="13" y="13" rx="2"/>'),
+  team: svg('<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><path d="M16 3.128a4 4 0 0 1 0 7.744"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><circle cx="9" cy="7" r="4"/>'),
+  free: svg('<path d="M6 16c5 0 7-8 12-8a4 4 0 0 1 0 8c-5 0-7-8-12-8a4 4 0 1 0 0 8"/>'),
+}
+
 /** How often the sessions shown are looked at again, for a change nothing here tells of. */
 const POLL = 5000
 
 export const texts = {
   zh: {
-    hint: 'OMD 的协作模式；子模式在下面选',
+    hint: 'OMD 的协作模式',
     unavailable: '会话未打开，或未用 OMD 的预设',
     workflow: 'Workflow',
     team: 'Agent Team',
     free: '自由',
   },
   en: {
-    hint: "OMD's collaboration mode; its sub-mode below",
+    hint: "OMD's collaboration mode",
     unavailable: 'Not open here, or not on an OMD preset',
     workflow: 'Workflow',
     team: 'Agent Team',
@@ -39,7 +50,7 @@ export const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
 /**
  * What hangs at "effort" for OMD's view v of a session ({eligible, mode, submode, teamAvailable,
  * reason?}), in each language: the key, pressed while on, disabled (its reason the title) while
- * it cannot be switched; while on, a button a sub-mode, the one picked pressed.
+ * it cannot be switched; while it can, a button a sub-mode with its mark, the one on pressed.
  */
 export function contentOf(v) {
   const on = v?.mode === 'ultra'
@@ -48,10 +59,11 @@ export function contentOf(v) {
   for (const [lang, t] of Object.entries(texts)) {
     const title = available ? t.hint : v?.reason ? String(v.reason) : t.unavailable
     let s = `<button id="${KEY}" type="action"${on ? ' pressed' : ''}${available ? '' : ' disabled'} title="${esc(title)}">Ultra</button>`
-    if (on) {
+    if (available) {
       for (const sub of SUBMODES) {
         if (sub === 'team' && !v.teamAvailable) continue
-        s += `<button id="${KEY}.${sub}" type="action"${(v.submode ?? 'free') === sub ? ' pressed' : ''}>${esc(t[sub])}</button>`
+        const cur = on && (v.submode ?? 'free') === sub
+        s += `<button id="${KEY}.${sub}" type="action"${cur ? ' pressed' : ''}><img src="${MARKS[sub]}"/>${esc(t[sub])}</button>`
       }
     }
     out[lang] = s

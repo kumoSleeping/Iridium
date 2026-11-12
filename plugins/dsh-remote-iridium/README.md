@@ -12,4 +12,4 @@
 - 状态在 `$DSH_HOME/remote-iridium/`：每个 Iridium 一份，`token/<主机>` 是它的 TOKEN，`<主机>/` 是它的进程。换到别的 Iridium 再换回来不用重新配对；删掉 `token/<主机>` 就重新配对。
 - Iridium 在本机起 dsh：`agent.presets` 给 Desktop 登记的预设；`agent.prepare` 给会话进程要加的 `--patch`：Desktop 的模型和供应商、本插件在会话进程里的部分（`session.js`），预设用到 Desktop 的 bundle（如 OMD 的 omd-ptc）时由本插件照 Desktop 的组合拼好（`compose.js`，`prepare/` 里的绑定和模块加载），Iridium 的系统提示接在预设人设后面。本机和 Iridium 在同一台电脑时也一样配对接入，Iridium 在本机起的 dsh 也问它。
 - 挂元素：插件经服务 `iridium`（`attach(session, place, content)`、`onButton(fn)`）往 Iridium 网页上的会话挂一段 Satori 元素（如思考强度旁的按钮），按下时 `fn(session, id, user)`。Desktop 里的直接经执行端连接发给 Iridium（事件 `session.attach`，重连后全部重发；按下是事件 `session.button`）；会话进程里的经本地的桥（`bridge.js`，Unix socket 或 Windows 命名管道，带口令）交给 Desktop 里的本插件。会话进程退出，它挂的一并撤掉。会话进程里有会话开始时，本插件把它登记到目录对应的工作区。
-- OMD 的 Ultra（`omd.js`）：装了 OMD 时，Iridium 网页的思考强度滑条右边有 Ultra 键，开着时下面一排子模式；Desktop 打开着的会话和 Iridium 在这台机器上起的都有。没装 OMD 时不启用。
+- OMD 的 Ultra（`omd.js`）：装了 OMD 时，Iridium 网页的思考强度滑条右边有 Ultra 键，按一下换一种：关、Workflow、（Agent Team、）自由；Desktop 打开着的会话和 Iridium 在这台机器上起的都有。没装 OMD 时不启用。
