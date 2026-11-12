@@ -279,6 +279,9 @@ export function UsagePage() {
   const [off, setOff] = useState<ReadonlySet<string>>(() => new Set());
   // The harnesses taken out of the whole page; none at first.
   const [hidden, setHidden] = useState<ReadonlySet<Agent>>(() => new Set());
+  // The login whose models float out of its avatar: one at a time (the user, 2026-11-12: moved to
+  // another, the last one stayed).
+  const [peek, setPeek] = useState<string | null>(null);
   // Asked for at a session at another computer: that computer's sessions only, its name by the title.
   const machine = useUsageMachine();
   const at = useMachines().find((x) => x.id === machine);
@@ -499,6 +502,8 @@ export function UsagePage() {
                 on={on(x.id)}
                 many={many}
                 metric={metric}
+                peek={peek === x.id}
+                onPeek={(o) => setPeek(o ? x.id : (c) => (c === x.id ? null : c))}
                 onToggle={() => toggle(x.id)}
                 onOnly={() => only(x.id)}
               />
@@ -1008,7 +1013,7 @@ function ShareBar({ share, color }: { share: number; color: string }) {
  *  colour. The row pressed takes it out of the chart or puts it back; right-clicked or held, it is
  *  the only one in (the user, 2026-11-12: as before its models folded open under it); out, the whole row faint and grey. Its models
  *  float out of its avatar, in a panel over the page (no row grows). */
-function LoginRow({ x, u, color, whole, on, many, metric, onToggle, onOnly }: { x: LoginSum; u: Usage | undefined; color: string; whole: number; on: boolean; many: boolean; metric: Metric; onToggle: () => void; onOnly: () => void }) {
+function LoginRow({ x, u, color, whole, on, many, metric, peek, onPeek, onToggle, onOnly }: { x: LoginSum; u: Usage | undefined; color: string; whole: number; on: boolean; many: boolean; metric: Metric; peek: boolean; onPeek: (o: boolean) => void; onToggle: () => void; onOnly: () => void }) {
   const w = who(u, x.id);
   const v = MEASURES[metric].value(x.sum);
   const cost = x.sum.cost > 0 ? dollars(x.sum.cost) : "";
@@ -1029,7 +1034,7 @@ function LoginRow({ x, u, color, whole, on, many, metric, onToggle, onOnly }: { 
       </span>
     </span>
   );
-  const models = <Models x={x} name={w.name} mark={<span className={cn("grid transition-[opacity,filter] duration-(--dur-2)", !on && OUT)}>{w.mark(26, color)}</span>} small={w.mark(20, color)} />;
+  const models = <Models open={peek} onOpen={onPeek} x={x} name={w.name} mark={<span className={cn("grid transition-[opacity,filter] duration-(--dur-2)", !on && OUT)}>{w.mark(26, color)}</span>} small={w.mark(20, color)} />;
   return (
     <div data-row={x.id} className="g-fade -mx-1.5 flex min-w-0 items-center">
       {many ? (
@@ -1063,12 +1068,12 @@ const OUT = "opacity-35 grayscale";
 /** A login's avatar, and its models in a panel floating out of it (the user, 2026-11-12: no key
  *  of their own): over it with a mouse, tapped on a phone; each one's hit rate, tokens and cost, the
  *  login's own over them. The avatar's press is its own, not the row's. */
-function Models({ x, name, mark, small }: { x: LoginSum; name: string; mark: ReactNode; small: ReactNode }) {
+function Models({ open, onOpen, x, name, mark, small }: { open: boolean; onOpen: (o: boolean) => void; x: LoginSum; name: string; mark: ReactNode; small: ReactNode }) {
   const hit = hitRate(x.sum);
   const cost = x.sum.cost > 0 ? dollars(x.sum.cost) : "";
   const mine = (e: { stopPropagation: () => void }) => e.stopPropagation();
   return (
-    <Popover.Root>
+    <Popover.Root open={open} onOpenChange={onOpen}>
       <Popover.Trigger
         nativeButton={false}
         openOnHover
@@ -1076,7 +1081,12 @@ function Models({ x, name, mark, small }: { x: LoginSum; name: string; mark: Rea
         closeDelay={120}
         render={<span />}
         aria-label={t("usage.modelsOf", { name })}
-        onClick={mine}
+        // A mouse's click would pin the panel open (Base UI's hover then press): it follows the
+        // pointer only. A finger's tap opens and closes it.
+        onClick={(e) => {
+          e.stopPropagation();
+          if ((e.nativeEvent as { pointerType?: string }).pointerType === "mouse") e.preventBaseUIHandler();
+        }}
         onPointerDown={mine}
         onContextMenu={mine}
         className="grid size-8 shrink-0 place-items-center rounded-full transition-transform duration-(--dur-2) ease-(--ease-out) hover:scale-110 data-[popup-open]:scale-110"
