@@ -24,6 +24,8 @@ func TestGlanceSubagentEnded(t *testing.T) {
 		stop    = `{"type":"user","isSidechain":true,"message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}`
 		stopUse = `{"type":"user","isSidechain":true,"message":{"role":"user","content":"[Request interrupted by user for tool use]"}}`
 		again   = `{"type":"user","isSidechain":true,"message":{"role":"user","content":"go on"}}`
+		// A fork's first line (Claude Code, 2026-11): its parent's history by reference.
+		forkRef = `{"type":"fork-context-ref","agentId":"a","parentSessionId":"p","parentLastUuid":"u","contextLength":111}`
 	)
 	cases := []struct {
 		name  string
@@ -39,6 +41,8 @@ func TestGlanceSubagentEnded(t *testing.T) {
 		{"stopped", []string{prompt, call, result, stop, attach}, true},
 		{"stopped in a tool call", []string{prompt, call, stopUse}, true},
 		{"stopped, then woken", []string{prompt, call, stop, again, call}, false},
+		{"a fork, at work", []string{forkRef, prompt, call}, false},
+		{"a fork, answered", []string{forkRef, prompt, call, result, answer}, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
