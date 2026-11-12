@@ -12,13 +12,13 @@
 // weekdays by hour in squares, the busiest hour over them, the range's days added up (none for 1 天: one day's
 // hours are the bars). Under it the logins, the most first, each its bar in its colour: the row
 // pressed takes it out of the chart and the total or puts it back; right-clicked or held (phones)
-// it is the only one left in (again: everyone); the key at its right opens its models in a panel
-// over the page, each with its cache's hit rate, tokens and cost. The chip puts everyone back. A bar pressed narrows the page to that day. With one login in, the bars are
+// it is the only one left in (again: everyone); its avatar, pointed at or tapped, floats its models
+// in a panel over the page, each with its cache's hit rate, tokens and cost. The chip puts everyone back. A bar pressed narrows the page to that day. With one login in, the bars are
 // its models. Over it all, the harnesses (the user, 2026-11-08): all four at first; pressed, one
 // leaves the whole page or comes back, and the last one taken out puts all four back.
 import { Popover } from "@base-ui/react/popover";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, CircleHelp, LoaderCircle, UserX, X } from "lucide-react";
+import { CircleHelp, LoaderCircle, UserX, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent, type ReactNode } from "react";
 import { api } from "./api/client";
 import type { Agent, Usage, UsageRow } from "./api/types.gen";
@@ -1007,8 +1007,8 @@ function ShareBar({ share, color }: { share: number; color: string }) {
 
 /** A login: its avatar, its name, the other measure and the measure, its part of everyone's in its
  *  colour. The row pressed takes it out of the chart or puts it back; right-clicked or held, it is
- *  the only one in (the user, 2026-11-12: as before its models folded open under it). Its models
- *  are behind the key at its right, in a panel over the page (no row grows). */
+ *  the only one in (the user, 2026-11-12: as before its models folded open under it); out, the whole row faint and grey. Its models
+ *  float out of its avatar, in a panel over the page (no row grows). */
 function LoginRow({ x, u, color, whole, on, many, metric, onToggle, onOnly }: { x: LoginSum; u: Usage | undefined; color: string; whole: number; on: boolean; many: boolean; metric: Metric; onToggle: () => void; onOnly: () => void }) {
   const w = who(u, x.id);
   const v = MEASURES[metric].value(x.sum);
@@ -1016,63 +1016,77 @@ function LoginRow({ x, u, color, whole, on, many, metric, onToggle, onOnly }: { 
   const main = metric === "cost" ? cost || "—" : tokens(totalOf(x.sum));
   const second = metric === "cost" ? tokens(totalOf(x.sum)) : cost;
   const hold = useHold(onToggle, onOnly);
-  const body = (
-    <>
-      <span className="grid size-8 shrink-0 place-items-center">{w.mark(26, color)}</span>
-      <span className="flex min-w-0 flex-1 flex-col py-0.5">
-        <span className="flex w-full items-baseline gap-2">
-          <span className={cn("min-w-0 flex-1 truncate text-sm font-medium transition-opacity duration-(--dur-2)", !on && "opacity-45")}>{w.name}</span>
-          {!on && <span className="shrink-0 rounded-full bg-fill-2 px-1.5 text-[10px] leading-4 text-ink-3">{t("usage.outOfChart")}</span>}
-          <span className={cn("shrink-0 text-xs text-ink-3 tabular-nums transition-opacity duration-(--dur-2)", !on && "opacity-45")}>{second}</span>
-          <span className={cn("shrink-0 text-sm font-semibold tabular-nums transition-opacity duration-(--dur-2)", !on && "opacity-45")}>{main}</span>
-        </span>
-        <span className="mt-1.5 block h-1 w-full overflow-hidden rounded-full bg-fill" aria-hidden>
-          <ShareBar share={whole && v ? Math.max(1, (v / whole) * 100) : 0} color={color} />
-        </span>
+  const text = (
+    // Out of the chart, the whole row fades and loses its colour, avatar and bar too (the user,
+    // 2026-11-12: plainly, as at first; no 已移出 badge).
+    <span className={cn("flex min-w-0 flex-1 flex-col py-0.5 transition-[opacity,filter] duration-(--dur-2)", !on && OUT)}>
+      <span className="flex w-full items-baseline gap-2">
+        <span className="min-w-0 flex-1 truncate text-sm font-medium">{w.name}</span>
+        <span className="shrink-0 text-xs text-ink-3 tabular-nums">{second}</span>
+        <span className="shrink-0 text-sm font-semibold tabular-nums">{main}</span>
       </span>
-    </>
+      <span className="mt-1.5 block h-1 w-full overflow-hidden rounded-full bg-fill" aria-hidden>
+        <ShareBar share={whole && v ? Math.max(1, (v / whole) * 100) : 0} color={color} />
+      </span>
+    </span>
   );
+  const models = <Models x={x} name={w.name} mark={<span className={cn("grid transition-[opacity,filter] duration-(--dur-2)", !on && OUT)}>{w.mark(26, color)}</span>} small={w.mark(20, color)} />;
   return (
-    <div data-row={x.id} className="g-fade -mx-1.5 flex min-w-0 items-center gap-1">
+    <div data-row={x.id} className="g-fade -mx-1.5 flex min-w-0 items-center">
       {many ? (
-        <Tip
-          label={
-            <span className="flex flex-col gap-0.5">
-              <span>{on ? t("usage.out") : t("usage.in")}</span>
-              <span className="text-[11px] text-ink-3">{t("usage.onlyHint")}</span>
-            </span>
-          }
-        >
-          <button type="button" aria-pressed={on} aria-label={w.name} {...hold} className={cn("g-press flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-1.5 py-1.5 text-left outline-offset-1 transition-colors duration-(--dur-2) hover:bg-fill", PRESS)}>
-            {body}
-          </button>
-        </Tip>
+        <button type="button" aria-pressed={on} aria-label={w.name} {...hold} className={cn("g-press flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-1.5 py-1.5 text-left outline-offset-1 transition-colors duration-(--dur-2) hover:bg-fill", PRESS)}>
+          {models}
+          {/* The row's words over its figures only: over the avatar, its models instead. */}
+          <Tip
+            label={
+              <span className="flex flex-col gap-0.5">
+                <span>{on ? t("usage.out") : t("usage.in")}</span>
+                <span className="text-[11px] text-ink-3">{t("usage.onlyHint")}</span>
+              </span>
+            }
+          >
+            {text}
+          </Tip>
+        </button>
       ) : (
-        <div className="flex min-w-0 flex-1 items-center gap-2.5 px-1.5 py-1.5">{body}</div>
+        <div className="flex min-w-0 flex-1 items-center gap-2.5 px-1.5 py-1.5">
+          {models}
+          {text}
+        </div>
       )}
-      <Models x={x} name={w.name} mark={w.mark(20, color)} />
     </div>
   );
 }
 
-/** A login's models, in a panel by the key at its row's right: each one's hit rate, tokens and
- *  cost, and the login's own over them. */
-function Models({ x, name, mark }: { x: LoginSum; name: string; mark: ReactNode }) {
+/** A login out of the chart: faint and grey. */
+const OUT = "opacity-35 grayscale";
+
+/** A login's avatar, and its models in a panel floating out of it (the user, 2026-11-12: no key
+ *  of their own): over it with a mouse, tapped on a phone; each one's hit rate, tokens and cost, the
+ *  login's own over them. The avatar's press is its own, not the row's. */
+function Models({ x, name, mark, small }: { x: LoginSum; name: string; mark: ReactNode; small: ReactNode }) {
   const hit = hitRate(x.sum);
   const cost = x.sum.cost > 0 ? dollars(x.sum.cost) : "";
+  const mine = (e: { stopPropagation: () => void }) => e.stopPropagation();
   return (
     <Popover.Root>
-      <Tip label={t("usage.models")}>
-        <Popover.Trigger
-          aria-label={t("usage.modelsOf", { name })}
-          className="g-press mr-0.5 grid size-7 shrink-0 place-items-center rounded-full text-ink-3 transition-colors duration-(--dur-2) hover:bg-fill hover:text-ink data-[popup-open]:bg-fill data-[popup-open]:text-ink pointer-coarse:size-9"
-        >
-          <ChevronRight size={14} />
-        </Popover.Trigger>
-      </Tip>
-      <PopSurface side="right" align="start" sideOffset={6} className="w-[min(320px,calc(100vw-16px))] p-3">
+      <Popover.Trigger
+        nativeButton={false}
+        openOnHover
+        delay={120}
+        closeDelay={120}
+        render={<span />}
+        aria-label={t("usage.modelsOf", { name })}
+        onClick={mine}
+        onPointerDown={mine}
+        onContextMenu={mine}
+        className="grid size-8 shrink-0 place-items-center rounded-full transition-transform duration-(--dur-2) ease-(--ease-out) hover:scale-110 data-[popup-open]:scale-110"
+      >
+        {mark}
+      </Popover.Trigger>
+      <PopSurface side="right" align="start" sideOffset={8} className="w-[min(320px,calc(100vw-16px))] p-3">
         <div className="flex min-w-0 items-center gap-2 pb-2">
-          {mark}
+          {small}
           <span className="min-w-0 flex-1 truncate text-sm font-medium">{name}</span>
           <span className="shrink-0 text-xs text-ink-3 tabular-nums">{[hit && t("usage.hitShort", { n: hit }), tokens(totalOf(x.sum)), cost].filter(Boolean).join(" · ")}</span>
         </div>
