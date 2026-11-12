@@ -44,6 +44,24 @@ describe("folded", () => {
       { name: "Bash", n: 1, failed: 1 },
     ]);
   });
+  test("a call that starts another agent is a line of its own, between two folds", () => {
+    const sh = (at: string, command: string) => b(at, "tool", { id: at, name: "Bash", input: JSON.stringify({ command }), result: { at, text: "ok" } });
+    const shown = folded([
+      b("0", "user", { text: "go" }),
+      b("1", "tool", { id: "1", name: "Read", input: '{"file_path":"/a"}', result: { at: "1", text: "x" } }),
+      b("2", "tool", { id: "2", name: "Agent", input: '{"description":"look"}', result: { at: "2", text: "ok" } }),
+      b("3", "tool", { id: "3", name: "Workflow", input: '{"script":"x"}', result: { at: "3", text: "ok" } }),
+      sh("4", "git status"),
+      sh("5", "ir api channel.create _data.agent=codex _data.cwd=. _data.text=hi"),
+      sh("6", "ls"),
+      b("7", "assistant", { text: "done" }),
+    ]);
+    const folds = shown.flatMap((s) => (s.kind === "fold" ? [s.steps.map((x) => x.at)] : []));
+    expect(folds).toEqual([["1"], ["2"], ["3"], ["4"], ["5"], ["6"]]);
+    // Steps around none fold as before.
+    const plain = folded([b("0", "user", { text: "go" }), sh("1", "ls"), sh("2", "ir api channel.list"), sh("3", "pwd")]);
+    expect(plain.flatMap((s) => (s.kind === "fold" ? [s.steps.length] : []))).toEqual([3]);
+  });
   test("calls with no result at the end run on their own; empty thoughts go", () => {
     const shown = folded([b("0.0", "user", { text: "go" }), b("5.0", "thinking", { text: "  " }), b("10.0", "tool", { id: "a", name: "Bash", input: "{}" })]);
     expect(shown.map((s) => s.kind)).toEqual(["user", "running"]);

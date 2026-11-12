@@ -5,7 +5,7 @@
 // peer sent; Iridium's own lines
 // centred and faint; the agent's words as Markdown with the files they name; tool calls and
 // thoughts folded to a line.
-import { Archive, ArchiveRestore, ArrowUpRight, BookOpen, Bot, BotMessageSquare, ChartColumn, Check, ChevronRight, CircleStop, CircleX, Clock, CloudDownload, CloudUpload, Copy, Cpu, Earth, FileCode, FileDiff, FilePen, Files as FilesIcon, FileText, FlaskConical, FolderGit2, FolderOpen, Folders, FoldVertical, GitBranch, GitCommitHorizontal, GitPullRequest, Globe, Hammer, History, Hourglass, KeyRound, Laptop, List, ListChecks, LoaderCircle, LockKeyhole, MessageCircleQuestionMark, MessageSquarePlus, Monitor, MonitorSmartphone, Network, Package, PencilLine, Plug, RotateCcw, RotateCw, Search, Send, ServerCog, Smartphone, SquareTerminal, Terminal, Trash2, type LucideIcon, UserRound, Workflow as WorkflowIcon, Wrench, X } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowUpRight, BookOpen, Bot, BotMessageSquare, ChartColumn, Check, ChevronRight, CircleStop, CircleX, Clock, CloudDownload, CloudUpload, Copy, Cpu, Earth, FileCode, FileDiff, FilePen, Files as FilesIcon, FileText, FlaskConical, FolderGit2, FolderOpen, Folders, FoldVertical, GitBranch, GitCommitHorizontal, GitPullRequest, Globe, Hammer, History, Hourglass, KeyRound, Laptop, Link2, List, ListChecks, LoaderCircle, LockKeyhole, MessageCircleQuestionMark, MessageSquarePlus, Monitor, MonitorSmartphone, MousePointerClick, Network, Package, PencilLine, Plug, RotateCcw, RotateCw, Search, Send, ServerCog, SlidersHorizontal, Smartphone, SquareTerminal, StickyNote, Terminal, Trash2, type LucideIcon, UserRound, Workflow as WorkflowIcon, Wrench, X } from "lucide-react";
 import { Shareable } from "../share";
 import { Children, forwardRef, memo, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Popover } from "@base-ui/react/popover";
@@ -390,6 +390,10 @@ const CMDS: Record<Cmd, LucideIcon> = {
   "ir-secret": LockKeyhole,
   "ir-usage": ChartColumn,
   "ir-bot": BotMessageSquare,
+  "ir-share": Link2,
+  "ir-notes": StickyNote,
+  "ir-settings": SlidersHorizontal,
+  "ir-answer": MousePointerClick,
   git: GitBranch,
   "git-commit": GitCommitHorizontal,
   "git-push": CloudUpload,
