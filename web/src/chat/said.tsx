@@ -168,7 +168,7 @@ export const YouBubble = forwardRef<HTMLDivElement, { text: string; who: You; fa
 function Attached({ session, f }: { session: string; f: FileRef }) {
   const url = api.fileURL(session, f.ref, false, f.mtime);
   if (f.kind === "image") return <Picture src={f.thumb ? api.thumbURL(session, f.ref, 256, f.mtime) : url} full={url} name={f.name} small under={previews.get(f.path)} w={f.w} h={f.h} />;
-  return <SentFile name={f.name} bytes={f.size} href={api.fileURL(session, f.ref, true, f.mtime)} />;
+  return <SentFile name={f.name} bytes={f.size} href={api.fileURL(session, f.ref, true, f.mtime)} view={url} mime={f.mime} />;
 }
 
 /** A message sent from here the transcript has yet to bring: its mark says where it is; not taken,
