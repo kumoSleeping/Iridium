@@ -505,7 +505,6 @@ export const en: Dict = {
   "term.nameOptional": "Name (optional)",
   "term.make": "Make",
   "apps.pairing": "Pairing",
-  "apps.pairHint": "Run ir join or ir pair on the computer or program that joins",
   "apps.loginCount": "{n} logins",
   "apps.type.computer": "Computer",
   "apps.type.bot": "Bot",

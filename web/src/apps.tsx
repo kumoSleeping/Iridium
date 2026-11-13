@@ -87,7 +87,6 @@ export function AppsPage({ onBack, side }: { onBack: () => void; side?: boolean 
     );
   return (
     <Page title={t("settings.terminals")} onBack={onBack} backLabel={t("nav.me")} busy={q.isFetching} right={<PairingKey open={pairing} />}>
-      {pairing && <p className="m-0 px-1 text-xs text-ink-3">{t("apps.pairHint")}</p>}
       <Needs />
       {q.isError && <p className="m-0 text-sm text-ink-3">{errText(q.error)}</p>}
       {q.data && (

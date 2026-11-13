@@ -127,7 +127,7 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	}
 	if *roots != "" {
 		for _, r := range strings.Split(*roots, ",") {
-			if r = strings.TrimSpace(r); r != "" {
+			if r = homePath(strings.Trim(strings.TrimSpace(r), `"'`)); r != "" {
 				abs, err := filepath.Abs(r)
 				if err != nil {
 					fmt.Fprintf(stderr, "ir join: %v\n", err)
@@ -519,4 +519,17 @@ func selfExe() string {
 		p = r
 	}
 	return p
+}
+
+// homePath is p with a leading ~ as the home directory: a quoted "~/work" reaches ir join as it
+// is, the shell expanding nothing inside quotes.
+func homePath(p string) string {
+	if p != "~" && !strings.HasPrefix(p, "~/") && !strings.HasPrefix(p, `~\`) {
+		return p
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return p
+	}
+	return filepath.Join(home, p[1:])
 }

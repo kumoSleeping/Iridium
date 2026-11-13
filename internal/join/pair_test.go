@@ -148,3 +148,13 @@ func TestPairEnvSocket(t *testing.T) {
 		}
 	}
 }
+
+// A root written "~/work" (quoted, so the shell left the ~) is under the home.
+func TestHomePath(t *testing.T) {
+	home, _ := os.UserHomeDir()
+	for in, want := range map[string]string{"~": home, "~/work": filepath.Join(home, "work"), "/srv/x": "/srv/x", "~x": "~x"} {
+		if got := homePath(in); got != want {
+			t.Errorf("%q: %q, want %q", in, got, want)
+		}
+	}
+}

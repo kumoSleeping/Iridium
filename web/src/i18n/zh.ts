@@ -505,7 +505,6 @@ export const zh = {
   "term.nameOptional": "名字（可不填）",
   "term.make": "生成",
   "apps.pairing": "配对",
-  "apps.pairHint": "在要接入的电脑或程序上运行 ir join 或 ir pair",
   "apps.loginCount": "{n} 个登录",
   "apps.type.computer": "电脑",
   "apps.type.bot": "Bot",
