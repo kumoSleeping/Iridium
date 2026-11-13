@@ -10,7 +10,7 @@ import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { Check, ChevronLeft, ChevronRight, Link2, LoaderCircle, PencilLine, Plus, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { Fragment, useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { ApiError, api } from "./api/client";
-import type { App, Apps, Computer, Login, Perms, PendingInvite, Rules } from "./api/types.gen";
+import type { Agent, App, Apps, Computer, Login, Perms, PendingInvite, Rules } from "./api/types.gen";
 import { CardFrame, CardHead, MainKey, SecondKey } from "./card";
 import { ConfirmCard, saysOwner } from "./confirms";
 import { useApps, useMe } from "./data";
@@ -23,7 +23,7 @@ import { showSecret, useSecret } from "./secrets";
 import { Group } from "./settings";
 import { useConfirms, usePairing } from "./store";
 import { errText, toast } from "./toast";
-import { ago, Avatar, AvatarKey, cn, IconKey, Logo, own, PopSurface, Switch, Tip, tokens, useLongPress, useMenuAt } from "./ui";
+import { agentName, AGENTS as AGENT_MARKS, ago, Avatar, AvatarKey, cn, IconKey, Logo, own, PopSurface, Switch, Tip, useLongPress, useMenuAt } from "./ui";
 import { MenuItems } from "./sidebar";
 
 /** Claude: it was made the owner's own. Set then, never after (the user, 2026-11-08). */
@@ -42,7 +42,8 @@ const isComputer = (a: App) => !!a.host || !!a.computer || a.type === "computer"
 const connectionsOf = (apps: App[], id: string) => apps.filter((a) => a.computer?.under === id);
 
 /** A machine's line: its system and agents, e.g. "Linux · claude 2.1 · codex". */
-const machineLine = (m: Computer) => [systems[m.os] ?? m.os, ...m.agents.filter((a) => !a.off).map((a) => [a.agent, a.version].filter(Boolean).join(" "))].filter(Boolean).join(" · ");
+/** A computer's agents, those not turned off, that have a mark. */
+const marked = (m: Computer) => m.agents.filter((a) => !a.off && (AGENT_MARKS as string[]).includes(a.agent));
 
 const clock = (ms: number) =>
   new Date(ms).toLocaleTimeString(document.documentElement.lang || undefined, {
@@ -255,9 +256,9 @@ function Seen({ a }: { a: App }) {
     <span className="flex min-w-0 items-center gap-1.5 text-xs text-ink-3 tabular-nums">
       {a.online ? <span className="size-1.5 shrink-0 rounded-full bg-run" aria-hidden /> : null}
       <span className="min-w-0 truncate">
-        {used} · {t("term.today", { n: tokens(a.usedToday) })}
+        {used}
         {a.web && a.logins ? <> · {t("apps.loginCount", { n: a.logins })}</> : null}
-        {a.computer && <> · {machineLine(a.computer)}</>}
+        {a.computer?.os && <> · {systems[a.computer.os] ?? a.computer.os}</>}
       </span>
     </span>
   );
@@ -314,12 +315,18 @@ function ItemRow({ a, inset }: { a: App; inset?: boolean }) {
           </span>
           <Seen a={a} />
         </span>
-        {hasClaude(a.rules) && (
-          <Tip label={t("term.claudeYes")}>
-            <span className="flex shrink-0">
-              <Logo agent="claude" size={13} />
-            </span>
-          </Tip>
+        {/* A computer's agents as their marks, the version in the tip. (Whether it may use the
+            owner's Claude is asked when it does: no mark for it here.) */}
+        {a.computer && marked(a.computer).length > 0 && (
+          <span className="flex shrink-0 items-center gap-1.5">
+            {marked(a.computer).map((x) => (
+              <Tip key={x.agent} label={[agentName(x.agent as Agent), x.version].filter(Boolean).join(" ")}>
+                <span className="grid shrink-0 place-items-center">
+                  <Logo agent={x.agent as Agent} size={14} />
+                </span>
+              </Tip>
+            ))}
+          </span>
         )}
         {!a.host && !renaming && (
           <IconKey label={t("term.renameIt")} onClick={() => setRenaming(true)} className="size-7">
@@ -413,7 +420,7 @@ function LoginRow({ l, app, remove, rename }: { l: Login; app: string; remove: (
           </span>
           <span className="flex items-center gap-1.5 text-xs text-ink-3 tabular-nums">
             {l.online ? <span className="size-1.5 shrink-0 rounded-full bg-run" aria-hidden /> : null}
-            {l.online ? t("term.online") : ago(l.lastSeenAt || l.createdAt || 0)} · {t("term.today", { n: tokens(l.usedToday) })}
+            {l.online ? t("term.online") : ago(l.lastSeenAt || l.createdAt || 0)}
           </span>
         </span>
         {hasClaude(l.rules) && (
