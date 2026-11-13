@@ -515,7 +515,7 @@ export const en: Dict = {
   "apps.conns": "Connections",
   "apps.connCount": "{n} connections",
   "apps.program": "Program",
-  "apps.on": "On",
+  "apps.on": "Part of",
   "apps.deleteComputer": "Remove computer",
   "apps.deleteConn": "Remove connection",
   "apps.carried": "Agents",
