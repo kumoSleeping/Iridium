@@ -7,7 +7,7 @@
 // cards on top, the code checked against the one the app shows. No TOKEN is handed out here.
 import { Menu } from "@base-ui/react/menu";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { Check, ChevronLeft, ChevronRight, Link2, LoaderCircle, PencilLine, Plus, SlidersHorizontal, Trash2, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Copy, Link2, LoaderCircle, PencilLine, Plus, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { ApiError, api } from "./api/client";
 import type { Agent, App, Apps, Computer, Login, Perms, PendingInvite, Rules } from "./api/types.gen";
@@ -15,7 +15,7 @@ import { CardFrame, CardHead, MainKey, SecondKey } from "./card";
 import { ConfirmCard, saysOwner } from "./confirms";
 import { useApps, useMe } from "./data";
 import { t, useLang } from "./i18n";
-import { CodeBlock } from "./chat/markdown";
+import { Code } from "./chat/hl";
 import { Segmented } from "./me";
 import { Crop } from "./profile";
 import { SecretHere } from "./secret";
@@ -122,64 +122,84 @@ export function AppsPage({ onBack }: { onBack: () => void }) {
 /** ir-computer's releases (scripts/release.sh): the latest, a bare binary each system. */
 const COMPUTER_DOWNLOAD = "https://github.com/kumoSleeping/Iridium/releases/latest/download/";
 
-/** The lines that make a computer join this Iridium (docs/exec.md "ir-computer"): fetch
- *  ir-computer, pair, start at login. The flags come first, in sight where a line is cut. */
-export function joinScript(os: "mac" | "win", at: string, flags = ""): string {
-  const run = `${flags} --install ${at}`.trim();
-  if (os === "mac")
+/** A computer's system, as its join line is written. */
+export type JoinOS = "mac" | "linux" | "win";
+
+/** The line that makes a computer join this Iridium (docs/exec.md "ir-computer"), one line: fetch
+ *  ir-computer, pair, start at login. The flags last, where the line is shown from. */
+export function joinScript(os: JoinOS, at: string, flags = ""): string {
+  const run = `--install ${at} ${flags}`.trim();
+  if (os === "win")
     return [
-      "mkdir -p ~/.local/bin &&",
-      `curl -fsSL -o ~/.local/bin/ir-computer ${COMPUTER_DOWNLOAD}ir-computer-darwin-$(uname -m | sed s/x86_64/amd64/) &&`,
-      "chmod +x ~/.local/bin/ir-computer &&",
-      `~/.local/bin/ir-computer ${run}`,
-    ].join("\n");
+      '$d = "$env:LOCALAPPDATA\\iridium"',
+      '$a = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "amd64" }',
+      "New-Item -ItemType Directory -Force $d | Out-Null",
+      `Invoke-WebRequest "${COMPUTER_DOWNLOAD}ir-computer-windows-$a.exe" -OutFile "$d\\ir-computer.exe"`,
+      `& "$d\\ir-computer.exe" ${run}`,
+    ].join("; ");
+  const arch = os === "mac" ? "$(uname -m | sed s/x86_64/amd64/)" : "$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')";
   return [
-    '$d = "$env:LOCALAPPDATA\\iridium"; New-Item -ItemType Directory -Force $d | Out-Null',
-    '$a = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "amd64" }',
-    `Invoke-WebRequest "${COMPUTER_DOWNLOAD}ir-computer-windows-$a.exe" -OutFile "$d\\ir-computer.exe"`,
-    `& "$d\\ir-computer.exe" ${run}`,
-  ].join("\n");
+    "mkdir -p ~/.local/bin",
+    `curl -fsSL -o ~/.local/bin/ir-computer ${COMPUTER_DOWNLOAD}ir-computer-${os === "mac" ? "darwin" : "linux"}-${arch}`,
+    "chmod +x ~/.local/bin/ir-computer",
+    `~/.local/bin/ir-computer ${run}`,
+  ].join(" && ");
 }
 
-/** The 电脑 group's +, a page: the lines to run on a computer, for its system; as they are, with
- *  only some folders, with commands. */
+/** The 电脑 group's +, a page: the line to run on a computer, for its system; as it is, with only
+ *  some folders, with commands. Each its copy key in its title's row; the line one line high,
+ *  scrolled sideways (to its end at first), no room kept beside it (docs/前端设计规范.md "命令"). */
 function AddComputer({ onBack }: { onBack: () => void }) {
-  const [os, setOs] = useState<"mac" | "win">(/Win/.test(navigator.platform) ? "win" : "mac");
+  const [os, setOs] = useState<JoinOS>(/Win/.test(navigator.platform) ? "win" : /Linux/.test(navigator.platform) ? "linux" : "mac");
   const at = location.origin;
-  const lang = os === "mac" ? "language-sh" : "language-powershell";
+  const system = (v: JoinOS, label: string) => ({ v, label, icon: <span className="px-1 text-xs">{label}</span> });
   return (
     <Page title={t("apps.addComputer")} onBack={onBack} backLabel={t("settings.terminals")}>
-      <Segmented
-        label={t("apps.system")}
-        value={os}
-        onChange={(v) => setOs(v as "mac" | "win")}
-        items={[
-          {
-            v: "mac",
-            label: "macOS",
-            icon: <span className="px-1 text-xs">macOS</span>,
-          },
-          {
-            v: "win",
-            label: "Windows",
-            icon: <span className="px-1 text-xs">Windows</span>,
-          },
-        ]}
-      />
+      <Segmented label={t("apps.system")} value={os} onChange={(v) => setOs(v as JoinOS)} items={[system("mac", "macOS"), system("linux", "Linux"), system("win", "Windows")]} />
       {(
         [
           ["apps.joinPlain", ""],
           ["apps.joinRoots", '--roots "~/work,~/notes"'],
           ["apps.joinShell", "--shell"],
         ] as const
-      ).map(([label, flags]) => (
-        <Group key={label} title={t(label)}>
-          <CodeBlock className={lang} wrap>
-            {joinScript(os, at, flags)}
-          </CodeBlock>
-        </Group>
-      ))}
+      ).map(([label, flags]) => {
+        const line = joinScript(os, at, flags);
+        return (
+          <Group key={label} title={t(label)} action={<CopyKey text={line} />}>
+            <Line text={line} lang={os === "win" ? "powershell" : "sh"} />
+          </Group>
+        );
+      })}
     </Page>
+  );
+}
+
+/** A command on one line, scrolled to its end: where the lines differ (the flags, the address). */
+function Line({ text, lang }: { text: string; lang: string }) {
+  const box = useRef<HTMLPreElement>(null);
+  useEffect(() => {
+    if (box.current) box.current.scrollLeft = box.current.scrollWidth;
+  }, [text]);
+  return (
+    <pre ref={box} className="no-bar m-0 overflow-x-auto rounded-md bg-fill px-3 py-2 text-[13px] whitespace-pre">
+      <code>
+        <Code text={text} lang={lang} />
+      </code>
+    </pre>
+  );
+}
+
+/** Copies text; a check for a moment after. */
+function CopyKey({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <IconKey
+      label={copied ? t("msg.copied") : t("msg.copy")}
+      onClick={() => void navigator.clipboard.writeText(text).then(() => (setCopied(true), setTimeout(() => setCopied(false), 1500)))}
+      className="-my-2 size-6 pointer-coarse:size-8"
+    >
+      {copied ? <Check size={13} /> : <Copy size={13} />}
+    </IconKey>
   );
 }
 
