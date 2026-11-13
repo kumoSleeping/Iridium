@@ -751,8 +751,8 @@ export interface Computer {
    */
   program?: string;
   /**
-   * Under: the same computer as app Under's (HostID for one on the host), whose page lists this
-   * app as one more of its connections; "" a computer of its own. By the machine its hello said.
+   * Under: the same computer as app Under's, the first paired there (HostID for one on the host):
+   * listed next to it; "" the first or only one. By the machine its hello said.
    */
   under?: string;
 }

@@ -1,5 +1,6 @@
 // The settings' 应用管理 (draft 四): two lists (k_glossary "电脑"). 应用: 网页 (ir_web) and the apps
-// that speak; 电脑: the host and the computers that joined, each connection of one under it. A row
+// that speak; 电脑: the host (as Iridium) and the computers that joined, one flat list, those on one
+// machine next to each other (docs/前端设计规范.md: no levels). A row
 // is its avatar, name, whether it is online, when last active (a computer's system and agents);
 // avatar and name are changed in place, removal is in its menu, and nothing opens but 网页's
 // logins and invites (docs/前端设计规范.md). 配对 is a switch, on till turned off; requests wait as
@@ -16,14 +17,14 @@ import { ConfirmCard, saysOwner } from "./confirms";
 import { useApps, useMe } from "./data";
 import { t, useLang } from "./i18n";
 import { CodeBlock } from "./chat/markdown";
-import { LocalMark, Segmented } from "./me";
+import { Segmented } from "./me";
 import { Crop } from "./profile";
 import { SecretHere } from "./secret";
 import { showSecret, useSecret } from "./secrets";
 import { Group } from "./settings";
 import { useConfirms, usePairing } from "./store";
 import { errText, toast } from "./toast";
-import { agentName, AGENTS as AGENT_MARKS, ago, Avatar, AvatarKey, cn, IconKey, Logo, own, PopSurface, Switch, Tip, useLongPress, useMenuAt } from "./ui";
+import { agentName, AGENTS as AGENT_MARKS, ago, Avatar, AvatarKey, cn, IconKey, IrMark, Logo, own, PopSurface, Switch, Tip, useLongPress, useMenuAt } from "./ui";
 import { MenuItems } from "./sidebar";
 
 /** Claude: it was made the owner's own. Set then, never after (the user, 2026-11-08). */
@@ -38,8 +39,8 @@ const systems: Record<string, string> = {
 /** A computer (k_glossary "电脑"): the host, or an app that paired as one or has said its system. */
 const isComputer = (a: App) => !!a.host || !!a.computer || a.type === "computer";
 
-/** A computer's other connections: the apps on the same machine (Computer.under). */
-const connectionsOf = (apps: App[], id: string) => apps.filter((a) => a.computer?.under === id);
+/** The apps on the same machine as id, after it (Computer.under): listed next to it, not under it. */
+const sameMachine = (apps: App[], id: string) => apps.filter((a) => a.computer?.under === id);
 
 /** A machine's line: its system and agents, e.g. "Linux · claude 2.1 · codex". */
 /** A computer's agents, those not turned off, that have a mark. */
@@ -74,15 +75,15 @@ export function AppsPage({ onBack, side }: { onBack: () => void; side?: boolean 
   const pop = !!side;
   const list = () => setView({ kind: "list" });
   const go = (id: string) => setView({ kind: "app", id });
-  // 网页 opens its logins and invites; an app or a computer has no page, its connections under it.
+  // 网页 opens its logins and invites; an app or a computer has no page.
   const row = (a: App) =>
     a.web ? (
       <AppRow key={a.id} a={a} on={pop && a.id === open?.id} onOpen={(e) => (setAnchor(e.currentTarget), go(a.id))} />
     ) : (
       <Fragment key={a.id}>
         <ItemRow a={a} />
-        {connectionsOf(apps, a.id).map((c) => (
-          <ItemRow key={c.id} a={c} inset />
+        {sameMachine(apps, a.id).map((c) => (
+          <ItemRow key={c.id} a={c} />
         ))}
       </Fragment>
     );
@@ -248,17 +249,16 @@ function AppRow({ a, on, onOpen }: { a: App; on?: boolean; onOpen: (e: MouseEven
   );
 }
 
-/** A row's second line: online or when last seen, today's use; 网页's logins, a computer's system and agents. */
+/** A row's second line: online or when last seen; 网页's logins, a computer's system. The host: its
+ *  system only. */
 function Seen({ a }: { a: App }) {
-  const used = a.online ? t("term.online") : a.host ? t("term.localShort") : ago(a.lastSeenAt || a.createdAt || 0);
+  const used = a.host ? "" : a.online ? t("term.online") : ago(a.lastSeenAt || a.createdAt || 0);
   return (
     // One line, cut at its end, never wrapped into columns (the panel is narrow).
     <span className="flex min-w-0 items-center gap-1.5 text-xs text-ink-3 tabular-nums">
-      {a.online ? <span className="size-1.5 shrink-0 rounded-full bg-run" aria-hidden /> : null}
+      {a.online && !a.host ? <span className="size-1.5 shrink-0 rounded-full bg-run" aria-hidden /> : null}
       <span className="min-w-0 truncate">
-        {used}
-        {a.web && a.logins ? <> · {t("apps.loginCount", { n: a.logins })}</> : null}
-        {a.computer?.os && <> · {systems[a.computer.os] ?? a.computer.os}</>}
+        {[used, a.web && a.logins ? t("apps.loginCount", { n: a.logins }) : "", a.computer?.os ? (systems[a.computer.os] ?? a.computer.os) : ""].filter(Boolean).join(" · ")}
       </span>
     </span>
   );
@@ -266,8 +266,8 @@ function Seen({ a }: { a: App }) {
 
 /** An app or a computer in the list, no page of its own (docs/前端设计规范.md): its avatar and name
  *  changed in place, removal in its menu (right click, a long press). The host: nothing to change.
- *  inset: a connection, under its computer. */
-function ItemRow({ a, inset }: { a: App; inset?: boolean }) {
+ *  The host is Iridium: its mark and name, nothing to change, the key's place kept (the rows line up). */
+function ItemRow({ a }: { a: App }) {
   const qc = useQueryClient();
   const me = useMe().data;
   const [renaming, setRenaming] = useState(false);
@@ -295,22 +295,22 @@ function ItemRow({ a, inset }: { a: App; inset?: boolean }) {
       toast(t("term.avatar"), { error: true, description: errText(e) });
     }
   };
-  const remove = t(a.computer?.under ? "apps.deleteConn" : isComputer(a) ? "apps.deleteComputer" : "apps.delete");
+  const remove = t(isComputer(a) ? "apps.deleteComputer" : "apps.delete");
   return (
-    <div className={cn("flex flex-col", inset && "pl-8")}>
+    <div className="flex flex-col">
       <div
         ref={box}
         {...(a.host ? {} : { ...lp, onContextMenu: (e: React.MouseEvent) => own(e) && (e.preventDefault(), setAt({ x: e.clientX, y: e.clientY })) })}
         className={cn("flex min-h-14 items-center gap-3 rounded-lg px-2", at && "bg-fill")}
       >
         {a.host ? (
-          <LocalMark size={32} />
+          <IrMark size={32} className="text-ink" />
         ) : (
           <AvatarKey label={t("term.avatar")} onClick={() => file.current?.click()} src={a.avatar} name={a.name} size={32} type={a.type} />
         )}
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-2">
-            {renaming ? <Rename id={a.id} name={a.name} done={() => setRenaming(false)} /> : <span className="truncate text-base font-medium">{a.host ? t("me.local") : a.name}</span>}
+            {renaming ? <Rename id={a.id} name={a.name} done={() => setRenaming(false)} /> : <span className="truncate text-base font-medium">{a.host ? "Iridium" : a.name}</span>}
             {a.id === me?.app && !a.host && <span className="shrink-0 text-xs text-ink-3">{t("term.this")}</span>}
           </span>
           <Seen a={a} />
@@ -328,10 +328,14 @@ function ItemRow({ a, inset }: { a: App; inset?: boolean }) {
             ))}
           </span>
         )}
-        {!a.host && !renaming && (
-          <IconKey label={t("term.renameIt")} onClick={() => setRenaming(true)} className="size-7">
-            <PencilLine size={14} />
-          </IconKey>
+        {a.host ? (
+          <span className="size-7 shrink-0 pointer-coarse:size-10" aria-hidden />
+        ) : (
+          !renaming && (
+            <IconKey label={t("term.renameIt")} onClick={() => setRenaming(true)} className="size-7">
+              <PencilLine size={14} />
+            </IconKey>
+          )
         )}
       </div>
       {picture && (

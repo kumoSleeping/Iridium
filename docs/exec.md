@@ -131,7 +131,7 @@ agent 的 `ir sh`：每条命令一个新进程，不经托管进程，不写文
 - 没有单独的“机器”：执行端就是一个带 Agent 的应用，`GET /v1/internal/apps` 里它的 `computer` 是最后一次 `hello` 报的情况加上在线、延迟。
 - 报上来的 agent 默认都开；应用详情的“带的 agent”里逐个开关（`PUT /v1/internal/apps/{id}/agents`），关掉的不在那里启动，也不在新会话里列。只做命令行的电脑：agent 全关、`shell` 开。
 - 新配对的带 Agent 应用默认范围是自己的家目录（`ir join` 报 `home`）；不带的默认全部。
-- 电脑与应用分组列出（2026-11-13）：配对申请带 `os` 的为电脑（`type` 固定为 `computer`），其余为应用。连接按 hello 的 `machineId` 归入电脑：同一台电脑的其余连接列在最早配对的一条之下（`computer.under`），主机上的列在主机之下。`machineId` 存于 `machines.info`，不新增表。
+- 电脑与应用分组列出（2026-11-13）：配对申请带 `os` 的为电脑（`type` 固定为 `computer`），其余为应用。连接按 hello 的 `machineId` 归入电脑：同一台电脑的其余连接带最早配对的那条的应用 ID（`computer.under`，主机上的带 `local`），列表据此把它们排在一起，平铺不分层级。`machineId` 存于 `machines.info`，不新增表。
 
 ## 网页（用户，2026-11-08）
 
