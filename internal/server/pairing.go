@@ -17,31 +17,29 @@ import (
 	"unicode/utf8"
 
 	"github.com/kumoSleeping/iridium/internal/api"
+	"github.com/kumoSleeping/iridium/internal/config"
 	"github.com/kumoSleeping/iridium/internal/gate"
 	"github.com/kumoSleeping/iridium/internal/satori"
 )
 
 // Pairing (draft 二「接入」, decisions 6-11): the one way an app comes in, an executor (ir join)
 // or any other (ir pair). POST /v1/internal/pair, past the gate without a login, only while the window is
-// open (ir apps open, or the web for 10 minutes): a code to show and a request to ask after. A
+// on (a switch in 应用管理, kept in the config till turned off): a code to show and a request to ask after. A
 // person sees an app_join need with the same code, or app_update when an app has the name already
 // (no other name is made up: the person updates that one, renames this one, or denies). Allowed,
 // the TOKEN waits for the asker's GET /v1/internal/pair/{request}, once.
 
-// Pairing limits: pending requests per source (an IP, an IPv6 /64) and in all; the body; how
-// long the window opens for by default and at most.
+// Pairing limits: pending requests per source (an IP, an IPv6 /64) and in all; the body.
 const (
 	pairPendingSource = 4
 	pairPending       = 20
 	pairBody          = 16 << 10
-	PairWindow        = 10 * time.Minute
-	pairWindowMax     = time.Hour
 )
 
 type pairs struct {
-	mu    sync.Mutex
-	reqs  map[string]*pairReq // by request
-	until time.Time           // the window is open till then
+	mu   sync.Mutex
+	reqs map[string]*pairReq // by request
+	open bool                // requests are taken (config.Pairing)
 }
 
 type pairReq struct {
@@ -76,38 +74,31 @@ func openPath(r *http.Request) bool {
 func (s *Server) pairRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/internal/pair", s.pairAsk)
 	mux.HandleFunc("GET /v1/internal/pair/{request}", s.pairState)
-	// The window: whoever may approve (the host's ir apps open, a login of ir_web that may).
+	// The switch: whoever may approve (the host's ir, a login of ir_web that may).
 	mux.HandleFunc("GET /v1/internal/pairing", s.approver(func(w http.ResponseWriter, r *http.Request) { reply(w, http.StatusOK, s.pairWindow()) }))
 	mux.HandleFunc("PUT /v1/internal/pairing", s.approver(s.setPairing))
 }
 
-// pairWindow is how the window stands now.
+// pairWindow is how the switch stands now.
 func (s *Server) pairWindow() api.PairWindow {
 	ps := s.pairs
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
-	if time.Now().Before(ps.until) {
-		return api.PairWindow{Open: true, Until: ps.until.UnixMilli()}
-	}
-	return api.PairWindow{}
+	return api.PairWindow{Open: ps.open}
 }
 
 func (s *Server) publishPairing() { s.hub.Set("pairing", s.pairWindow()) }
 
-// OpenPairing opens the window for d (PairWindow if 0, at most an hour), or closes it (d < 0).
-func (s *Server) OpenPairing(d time.Duration) api.PairWindow {
-	ps := s.pairs
-	ps.mu.Lock()
-	if d < 0 {
-		ps.until = time.Time{}
-	} else {
-		d = min(cmp.Or(d, PairWindow), pairWindowMax)
-		ps.until = time.Now().Add(d)
-		time.AfterFunc(d+50*time.Millisecond, s.publishPairing)
+// SetPairing turns taking pairing requests on or off, kept in the config.
+func (s *Server) SetPairing(open bool) (api.PairWindow, error) {
+	if err := s.SaveConfig(func(c *config.Config) { c.Pairing = open }); err != nil {
+		return s.pairWindow(), err
 	}
-	ps.mu.Unlock()
+	s.pairs.mu.Lock()
+	s.pairs.open = open
+	s.pairs.mu.Unlock()
 	s.publishPairing()
-	return s.pairWindow()
+	return s.pairWindow(), nil
 }
 
 func (s *Server) setPairing(w http.ResponseWriter, r *http.Request) {
@@ -115,16 +106,12 @@ func (s *Server) setPairing(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &req) {
 		return
 	}
-	if req.Minutes < 0 || req.Minutes > int(pairWindowMax/time.Minute) {
-		refuse(w, http.StatusUnprocessableEntity, "bad_minutes", "minutes: 1 to 60")
+	st, err := s.SetPairing(req.Open)
+	if err != nil {
+		s.error(w, err)
 		return
 	}
-	d := time.Duration(req.Minutes) * time.Minute
-	if !req.Open {
-		d = -1
-	}
-	st := s.OpenPairing(d)
-	s.logf("server: %s %s pairing", callerOf(r).Name, map[bool]string{true: "opened", false: "closed"}[st.Open])
+	s.logf("server: %s turned pairing %s", callerOf(r).Name, map[bool]string{true: "on", false: "off"}[st.Open])
 	reply(w, http.StatusOK, st)
 }
 
@@ -139,7 +126,7 @@ func (s *Server) pairAsk(w http.ResponseWriter, r *http.Request) {
 	// The window keeps strangers from asking; the host's own socket (ir pair here) asks with it
 	// shut. Either way a person allows it.
 	if !s.pairWindow().Open && !callerOf(r).socket {
-		refuse(w, http.StatusForbidden, "pair_closed", "pairing is closed: open it in 应用管理 on the host")
+		refuse(w, http.StatusForbidden, "pair_closed", "pairing is off: turn it on in 应用管理 on the host")
 		return
 	}
 	if m.Login != nil && !validLogin(m.Login.ID) {

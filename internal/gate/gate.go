@@ -236,18 +236,21 @@ func (g *Gate) Wrap(next http.Handler) http.Handler {
 // authorize identifies r by its bearer TOKEN; when it fails it has answered.
 func (g *Gate) authorize(w http.ResponseWriter, r *http.Request) (Identity, bool) {
 	now := g.now()
+	// A good TOKEN always passes: the limit is on failures, and others' at the same address (a
+	// shared NAT, ir_web's forwarded browsers) must not shut it out.
+	id, ok := g.identify(r, now)
+	if ok {
+		return id, true
+	}
 	key := ClientKey(r, g.ipHeader)
 	if d := g.lim.Wait(key, now); d > 0 {
 		tooMany(w, d)
 		return Identity{}, false
 	}
-	id, ok := g.identify(r, now)
-	if !ok {
-		g.lim.Fail(key, now)
-		g.log.Info("gate: bad bearer token", "client", key)
-		writeJSON(w, http.StatusUnauthorized, apiError{"unauthenticated"})
-	}
-	return id, ok
+	g.lim.Fail(key, now)
+	g.log.Info("gate: bad bearer token", "client", key)
+	writeJSON(w, http.StatusUnauthorized, apiError{"unauthenticated"})
+	return Identity{}, false
 }
 
 // identify finds the app behind r's bearer TOKEN, or the session whose own TOKEN it is.

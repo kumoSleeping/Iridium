@@ -56,7 +56,7 @@ func TestPairMain(t *testing.T) {
 		t.Fatalf("the file: %q %v", b, err)
 	}
 	if !strings.Contains(out.String(), "1234") || strings.Contains(out.String()+errs.String(), "ir_secret") ||
-		strings.Count(out.String()+errs.String(), "没有开放配对") != 1 {
+		strings.Count(out.String()+errs.String(), "没开配对") != 1 {
 		t.Fatalf("output: %s / %s", out.String(), errs.String())
 	}
 	denied = true

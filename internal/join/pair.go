@@ -22,7 +22,7 @@ import (
 const PairUsage = `ir pair [<地址>] --name <名字> (--into <文件> | --env <文件>:<变量>) [--login <ID>] [--type <类型>] [--program <程序>]
   替一个程序向 Iridium 申请接入：打印配对码，对方核对后允许，TOKEN 写进文件（0600），不打印。
   之后程序带 Authorization: Bearer <TOKEN> 访问，以登录 <ID> 说话（Satori-User-ID）。
-  不给地址：本机的 Iridium（经 socket，不用开放配对）。给了地址而对方没开放配对时一直等。
+  不给地址：本机的 Iridium（经 socket，不用打开配对）。给了地址而对方没开配对时一直等。
   --into   文件里只有 TOKEN
   --env    在 .env 文件里写入或替换一行 <变量>=<TOKEN>，如 --env .env:IR_TOKEN
   --login  随应用一并批准的登录，默认 bot；--login= 不带登录

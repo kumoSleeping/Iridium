@@ -1,6 +1,8 @@
 // A developer's test Bot, not shipped (docs/exec.md "开发测试用的 Bot"): pairs with an Iridium once,
 // then lets its agents run command lines on this machine (ir sh). No agents of its own; anyone can
 // write one like it. ir join <url> --shell, its agents turned off in 应用管理, does the same without Node.
+// Started when wanted, not kept running: it exits after IDLE minutes with nothing started (30 by
+// default, 0 never), and when the Iridium no longer takes its TOKEN (its Bot removed there).
 // node scripts/dev/shell-bot.mjs <iridium url> [name]
 import fs from 'node:fs'
 import os from 'node:os'
@@ -13,7 +15,8 @@ if (!/^https?:\/\//.test(url)) throw new Error('usage: node scripts/dev/shell-bo
 // One per Iridium: its TOKEN and holders' files under the Iridium's host, as ir join keeps them.
 const state = path.join(os.homedir(), '.iridium-shell-bot', iridiumKey(url))
 const tokenFile = path.join(state, 'token')
-const program = 'iridium-shell-bot 0.1'
+const program = 'iridium-shell-bot 0.2'
+const idle = Number(process.env.IDLE ?? 30) * 60000
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const say = (m) => console.log(`${new Date().toISOString()} ${m}`)
 
@@ -22,7 +25,7 @@ async function pair() {
   for (;;) {
     const r = await fetch(`${url}/v1/internal/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(hello) })
     if (r.status === 403) {
-      say('pairing is closed there (开放配对 in 应用管理): waiting')
+      say('pairing is closed there (配对 in 应用管理): waiting')
       await sleep(5000)
       continue
     }
@@ -53,23 +56,34 @@ try {
 fs.writeFileSync(lock, String(process.pid))
 
 let ex = null
-process.on('SIGTERM', () => (ex?.stop(), setTimeout(() => process.exit(0), 200)))
+const quit = (code) => (ex?.stop(), fs.rmSync(lock, { force: true }), setTimeout(() => process.exit(code), 200))
+process.on('SIGTERM', () => quit(0))
+process.on('SIGINT', () => quit(0))
+let token = fs.existsSync(tokenFile) ? fs.readFileSync(tokenFile, 'utf8').trim() : ''
+if (!token) {
+  token = await pair()
+  fs.writeFileSync(tokenFile, token, { mode: 0o600 })
+  say('paired')
+}
+ex = new Executor({ url: url.replace(/^http/, 'ws') + '/v1/internal/exec', token, state, agents: [], agentShell: true, program, log: say })
+// Idle: nothing started for a while, and nothing of its own still running.
+let last = Date.now()
+const handle = ex.handle.bind(ex)
+ex.handle = (c, method, p) => (method === 'hold.start' && (last = Date.now()), handle(c, method, p))
+void ex.run()
 for (;;) {
-  let token = fs.existsSync(tokenFile) ? fs.readFileSync(tokenFile, 'utf8').trim() : ''
-  if (!token) {
-    token = await pair()
-    fs.writeFileSync(tokenFile, token, { mode: 0o600 })
-    say('paired')
+  await sleep(60000)
+  if (!ex.conn && (await refused(url, token))) {
+    // Its Bot removed there: the TOKEN is no use any more; pair again by starting it again.
+    fs.rmSync(tokenFile, { force: true })
+    say('the Iridium no longer takes this machine: exiting')
+    quit(1)
+    break
   }
-  ex = new Executor({ url: url.replace(/^http/, 'ws') + '/v1/internal/exec', token, state, agents: [], agentShell: true, program, log: say })
-  const running = ex.run()
-  // Its Bot removed on that Iridium: forget the TOKEN and pair again.
-  for (;;) {
-    await sleep(60000)
-    if (!ex.conn && (await refused(url, token))) break
+  if (ex.running() > 0) last = Date.now()
+  if (idle > 0 && Date.now() - last >= idle) {
+    say(`idle for ${idle / 60000} minutes: exiting`)
+    quit(0)
+    break
   }
-  say('the Iridium no longer takes this machine: pairing again')
-  ex.stop()
-  await running
-  fs.rmSync(tokenFile, { force: true })
 }

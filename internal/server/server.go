@@ -104,6 +104,7 @@ func New(cfg config.Config, m *session.Manager, h *hub.Hub, logf func(string, ..
 	h.Set("voice", map[string][]voice.Member{})
 	s.asks = newNeeds(h)
 	s.pairs = newPairs()
+	s.pairs.open = cfg.Pairing
 	s.publishPairing()
 	s.vault = newVault()
 	s.reloadSecrets()

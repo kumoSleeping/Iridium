@@ -851,7 +851,7 @@ func TestRateLimit(t *testing.T) {
 	}
 	w := h.do(req{method: "POST", path: "/_ir/api/join/check", body: bad})
 	wantStatus(t, w, http.StatusTooManyRequests)
-	if w.Header().Get("Retry-After") != "900" {
+	if w.Header().Get("Retry-After") != "60" {
 		t.Fatalf("Retry-After %q", w.Header().Get("Retry-After"))
 	}
 	// Even a good token waits now.
@@ -872,8 +872,8 @@ func TestRateLimit(t *testing.T) {
 	if code := check("127.0.0.1:1", "192.0.2.1"); code != http.StatusForbidden {
 		t.Fatalf("cloudflared-forwarded other client: %d", code)
 	}
-	// The lock lifts after 15 minutes.
-	h.clock.Advance(15 * time.Minute)
+	// The lock lifts after a minute.
+	h.clock.Advance(time.Minute)
 	if code := check("198.51.100.7:1", ""); code != http.StatusForbidden {
 		t.Fatalf("after lockout: %d", code)
 	}

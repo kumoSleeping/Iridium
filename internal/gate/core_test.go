@@ -87,3 +87,50 @@ func TestCoreIsTokenOnly(t *testing.T) {
 		t.Errorf("ir_web's profile: %v", err)
 	}
 }
+
+// Bad TOKENs from an address make it wait; a good TOKEN from the same address (a shared NAT,
+// ir_web's forwarded browsers) still passes, on a request and in a stream's IDENTIFY.
+func TestGoodTokenPassesALockedClient(t *testing.T) {
+	st, err := OpenJSONStore(filepath.Join(t.TempDir(), "gate.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, err := New(Config{Store: st})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer g.Close()
+	_, tok, err := g.CreateApp("bot", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := g.Wrap(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	do := func(token string) int {
+		r := httptest.NewRequest("GET", "/v1/internal/me", nil)
+		r.RemoteAddr = "198.51.100.7:1"
+		r.Header.Set("Authorization", "Bearer "+token)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w.Code
+	}
+	bad := "ir_" + NewSecret()
+	for i := 0; i < maxFailures; i++ {
+		if code := do(bad); code != http.StatusUnauthorized {
+			t.Fatalf("bad token %d: %d", i, code)
+		}
+	}
+	if code := do(bad); code != http.StatusTooManyRequests {
+		t.Fatalf("locked bad token: %d", code)
+	}
+	if code := do(tok); code != http.StatusOK {
+		t.Fatalf("good token from the locked client: %d", code)
+	}
+	r := httptest.NewRequest("GET", "/v1/events", nil)
+	r.RemoteAddr = "198.51.100.7:1"
+	if _, ok := g.ByTokenFrom(r, tok); !ok {
+		t.Fatal("good token in a stream from the locked client")
+	}
+	if _, ok := g.ByTokenFrom(r, bad); ok {
+		t.Fatal("bad token in a stream")
+	}
+}

@@ -1062,13 +1062,10 @@ export interface PairState {
 }
 /**
  * PairWindow is whether apps may ask to pair now (GET /v1/internal/pairing, the carried state "pairing"):
- * open till Until (ms), else closed (0). PUT /v1/internal/pairing opens it for Minutes (10 if 0, at most
- * 60), or closes it.
+ * a switch, on till turned off (PUT /v1/internal/pairing), kept across restarts.
  */
 export interface PairWindow {
   open: boolean;
-  until?: number /* int64 */;
-  minutes?: number /* int */;
 }
 /**
  * NeedState is how a Need went, as the asker sees it: never a secret.

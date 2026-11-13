@@ -30,7 +30,7 @@ import { PLACE_DRAG, SESSION_DRAG } from "./chat/refs";
 import { NoteMark, NotesAt, useNotes } from "./notekey";
 import { useUnread } from "./unread";
 import { CloudBadge, MachineFace, shownPath, useLate, useMachine, type Machine } from "./machines";
-import { getCarried, setCarried } from "./store";
+import { getCarried, setCarried, useLink, useList } from "./store";
 import { VoiceDock, VoiceMark } from "./voice/dock";
 import { dropMark, dropTarget, endDrag, listDrop, pinFolder, placeFolder, placeGroup as placeGroupKey, placeSession, sortList, startDrag, useDragged, useOver, type Dragged, type Edge, type Over } from "./reorder";
 
@@ -499,7 +499,7 @@ export function Sidebar(p: Props) {
             {p.expanded("archive") && p.tree.archived.map((s) => row(s, 0))}
           </div>
         )}
-        {!p.tree.workspaces.length && !loose.length && <div className="g-fade px-2 pt-10 text-center text-sm text-ink-3">{t("nav.empty")}</div>}
+        {!p.tree.workspaces.length && !loose.length && <Empty />}
       </div>
       {!p.noFoot && <Foot me={p.me} />}
     </aside>
@@ -1296,4 +1296,12 @@ export function Marked({ color, children }: { color?: Color; children: ReactNode
       {children}
     </span>
   );
+}
+
+/** The list empty: no sessions, or none come yet because the stream is down (not that there are none). */
+function Empty() {
+  const listed = useList() !== undefined;
+  const down = useLink().live === false;
+  if (!listed && !down) return null;
+  return <div className="g-fade px-2 pt-10 text-center text-sm text-ink-3">{t(listed ? "nav.empty" : "nav.offline")}</div>;
 }

@@ -28,7 +28,7 @@ TCP 上的请求先过网页层（`internal/webapp`），再到核心的 `gate.W
 
 ## 防护
 
-- 坏 TOKEN 计失败：同一客户端 15 分钟内 10 次，锁 15 分钟（`ByTokenFrom` 也算）。客户端地址只在对端是回环时才信 `CF-Connecting-IP`；IPv6 按 /64。
+- 坏 TOKEN 计失败：同一客户端 1 分钟内 10 次，它的坏 TOKEN 等 1 分钟（`ByTokenFrom` 也算）。先验 TOKEN，好的一律放行：同一地址（共用出口、ir_web 转来的浏览器）别人的失败挡不住它。客户端地址只在对端是回环时才信 `CF-Connecting-IP`；IPv6 按 /64。
 - 长连接调 `Track(r, closeFn)`：应用或登录被删时调 `closeFn`。浏览器登出由网页层取消它转发的请求。
 - 日志不写 TOKEN。
 

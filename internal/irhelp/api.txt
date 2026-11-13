@@ -133,8 +133,8 @@ POST internal/invites {name?, claude?, perms?} -> Invite  a one-time ir_web link
 GET internal/needs - -> Needs  waiting for a person; person only  view=pending.id,pending.kind,pending.name
 GET internal/needs/{id}?wait - -> NeedState  how a need went; wait up to 60 s
 POST internal/needs/{id} {allow, value?, forSession?, owner?, name?, perms?, agentsOff?} -> NeedReply  allow or deny; person only
-GET internal/pairing - -> PairWindow  pairing window; person only
-PUT internal/pairing {open, minutes?} -> PairWindow  open (10 min, 60 max) or close pairing; person only
+GET internal/pairing - -> PairWindow  whether pairing is on; person only
+PUT internal/pairing {open} -> PairWindow  pairing on (till turned off) or off; person only
 POST internal/pair {name, type?, os?, arch?, program?, agents?, shell?, noShell?, agentShell?, home?, machineId?, wants?} -> {code, request}  ask to pair
 GET internal/pair/{request} - -> {status, token?}  pairing outcome; token given once
 GET internal/exec - -> ws  an executor's connection; its app TOKEN only
