@@ -488,8 +488,8 @@ export const zh = {
   "confirm.commands": "命令",
   "confirm.shell.none": "仅 agent",
   "confirm.shell.agents": "可执行命令（含 agent）",
-  "confirm.commands.none": "不执行，仅启动 agent",
-  "confirm.commands.agents": "网页上的命令和 agent 的 ir sh",
+  "confirm.commands.none": "关",
+  "confirm.commands.agents": "开",
 
   "secret.invite": "网页的邀请",
   "secret.token": "应用 TOKEN",
@@ -512,6 +512,7 @@ export const zh = {
   "apps.type.plugin": "插件",
   "apps.type.script": "脚本",
   "apps.computer": "电脑",
+  "apps.runs": "能力",
   "apps.conns": "连接",
   "apps.connCount": "{n} 条连接",
   "apps.on": "所在电脑",

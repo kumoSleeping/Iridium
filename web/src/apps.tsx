@@ -8,7 +8,7 @@
 // wait as cards on top, the code checked against the one the app shows. No TOKEN is handed out here.
 import { Dialog } from "@base-ui/react/dialog";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { Check, ChevronLeft, ChevronRight, Link2, LoaderCircle, PencilLine, Plus, SlidersHorizontal, Trash2, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Link2, LoaderCircle, PencilLine, Plus, SlidersHorizontal, SquareTerminal, Trash2, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { ApiError, api } from "./api/client";
 import type { Agent, App, Apps, Computer, Login, Perms, PendingInvite, Rules } from "./api/types.gen";
@@ -262,14 +262,18 @@ function AppPage({ app, data, machine, onBack, go, closes }: { app: App; data: A
     <Group title={t("apps.computer")}>
       {under && <Line label={t("apps.on")}>{under.host ? t("me.local") : under.name}</Line>}
       <Line label={t("confirm.system")}>{[systems[machine.os] ?? machine.os, machine.arch].filter(Boolean).join(" ") || "—"}</Line>
-      {app.host ? (
-        <Line label={t("apps.carried")}>{machine.agents.map((a) => a.agent).join(" · ") || t("apps.none")}</Line>
-      ) : machine.agents.length ? (
-        <CarriedAgents app={app.id} agents={machine.agents} />
-      ) : (
-        <Line label={t("apps.carried")}>{t("apps.none")}</Line>
-      )}
-      <Line label={t("confirm.commands")}>{t(`confirm.commands.${shellOf(machine)}`)}</Line>
+    </Group>
+  );
+  // What runs there, one row each: its agents (switched here, but the host's), then command lines
+  // (the computer's own setting, shown, not switched here).
+  const runs = machine && (
+    <Group title={t("apps.runs")}>
+      <CarriedAgents app={app.id} agents={machine.agents} fixed={app.host} />
+      <div className="flex min-h-9 items-center gap-3 px-2 text-sm">
+        <SquareTerminal size={14} className="shrink-0 text-ink-2" />
+        <span className="min-w-0 flex-1">{t("confirm.commands")}</span>
+        <span className="text-ink-3">{t(`confirm.commands.${shellOf(machine)}`)}</span>
+      </div>
     </Group>
   );
   const connections = conns.length > 0 && (
@@ -324,12 +328,14 @@ function AppPage({ app, data, machine, onBack, go, closes }: { app: App; data: A
       ) : app.host ? (
         <>
           {computer}
+          {runs}
           {connections}
         </>
       ) : (
         <>
           <PermsEditor perms={app.perms} save={(p) => api.appPerms(app.id, p)} />
           {computer}
+          {runs}
           {connections}
           {logins.length > 0 && (
             <Group title={t("apps.logins")}>
@@ -370,7 +376,7 @@ function AppPage({ app, data, machine, onBack, go, closes }: { app: App; data: A
 
 /** The agents an app carries, each switched on or off there: one off is not started there nor
  *  offered for new sessions. */
-function CarriedAgents({ app, agents }: { app: string; agents: Computer["agents"] }) {
+function CarriedAgents({ app, agents, fixed }: { app: string; agents: Computer["agents"]; fixed?: boolean }) {
   const qc = useQueryClient();
   const [busy, setBusy] = useState<string | null>(null);
   const set = async (agent: string, on: boolean) => {
@@ -389,11 +395,13 @@ function CarriedAgents({ app, agents }: { app: string; agents: Computer["agents"
     <>
       {agents.map((a) => (
         <div key={a.agent} className="flex min-h-9 items-center gap-3 px-2 text-sm">
-          <span className="w-20 shrink-0 text-ink-3">{a === agents[0] ? t("apps.carried") : ""}</span>
           <Logo agent={a.agent as Agent} size={14} />
-          <span className={`min-w-0 flex-1 truncate ${a.off ? "text-ink-3" : ""}`}>{[a.agent, a.version].filter(Boolean).join(" ")}</span>
+          <span className={`min-w-0 flex-1 truncate ${a.off ? "text-ink-3" : ""}`}>
+            {a.agent}
+            {a.version && <span className="ml-1.5 text-xs text-ink-3 tabular-nums">{a.version}</span>}
+          </span>
           {busy === a.agent && <LoaderCircle size={13} className="animate-spin text-ink-4" />}
-          <Switch label={a.agent} on={!a.off} disabled={!!busy} onChange={(on) => void set(a.agent, on)} />
+          {!fixed && <Switch label={a.agent} on={!a.off} disabled={!!busy} onChange={(on) => void set(a.agent, on)} />}
         </div>
       ))}
     </>

@@ -488,8 +488,8 @@ export const en: Dict = {
   "confirm.commands": "Commands",
   "confirm.shell.none": "Agents only",
   "confirm.shell.agents": "Runs commands, agents' too",
-  "confirm.commands.none": "None: it starts its agents only",
-  "confirm.commands.agents": "From the page, and agents' ir sh",
+  "confirm.commands.none": "Off",
+  "confirm.commands.agents": "On",
 
   "secret.invite": "Web invite",
   "secret.token": "App token",
@@ -512,6 +512,7 @@ export const en: Dict = {
   "apps.type.plugin": "Plugin",
   "apps.type.script": "Script",
   "apps.computer": "Computer",
+  "apps.runs": "Capabilities",
   "apps.conns": "Connections",
   "apps.connCount": "{n} connections",
   "apps.on": "Part of",
