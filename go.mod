@@ -3,6 +3,8 @@ module github.com/kumoSleeping/iridium
 go 1.27.3
 
 require (
+	github.com/coder/websocket v1.8.15
+	github.com/ebitengine/purego v0.11.3
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/go-webauthn/webauthn v0.18.2
 	github.com/klauspost/compress v1.20.3
@@ -13,7 +15,6 @@ require (
 )
 
 require (
-	github.com/coder/websocket v1.8.15 // indirect
 	github.com/dustin/go-humanize v1.1.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.4 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect

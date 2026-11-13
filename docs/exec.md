@@ -2,7 +2,7 @@
 
 “执行端”是协议名（exec）。接入方称为**电脑**，每个接入程序是电脑上的一条**连接**（`docs/next/k_glossary.md`“电脑”）。
 
-另一台机器（Windows、Mac、Linux）跑一个**执行端**：替这边启动 agent 进程、转发它的输入输出、读写文件。会话还是这边托管，网页、驱动、记录解析、卡片全部照旧。第一个实现是 dsh 插件 `dsh-remote-iridium`（2026-11-08 定）；第二个是 Iridium 二进制自己的 `ir join <地址>`（Linux、Mac；Windows 版不再发布，用 dsh 插件）。不做节点：别的机器都以执行端接入，见 `plan.md`“别的机器”（用户，2026-11-08）。
+另一台机器（Windows、Mac、Linux）跑一个**执行端**：替这边启动 agent 进程、转发它的输入输出、读写文件。会话还是这边托管，网页、驱动、记录解析、卡片全部照旧。第一个实现是 dsh 插件 `dsh-remote-iridium`（2026-11-08 定）；第二个是 Iridium 二进制自己的 `ir join <地址>`（Linux、Mac）；第三个是单独的小程序 `ir-computer <地址>`（Windows、Mac、Linux，2026-11-13，见“ir-computer”）。不做节点：别的机器都以执行端接入，见 `plan.md`“别的机器”（用户，2026-11-08）。
 
 执行端不懂会话、历史、审批，也不懂 agent 的协议：会话归这边托管，agent 的协议由这边现有的驱动讲。这边断开时，那边的回合照样跑完；断开期间不能发话、不能答审批。
 
@@ -160,12 +160,21 @@ agent 的 `ir sh`：每条命令一个新进程，不经托管进程，不写文
 | | Windows | Mac | Linux |
 |---|---|---|---|
 | 整棵进程树 | Job Object（或 `taskkill /T /F`） | 新进程组，`kill(-pgid)`，先 TERM 后 KILL | 同 Mac |
-| 常驻 | 插件跟着 `dsh web`；`ir join` 用登录时运行的计划任务（不用系统服务：SYSTEM 账户拿不到本人的 PATH 和 agent 登录） | 插件同左；`ir join` 用 launchd 用户代理 | 插件同左；`ir join` 用 systemd 用户单元 |
+| 常驻 | 插件跟着 `dsh web`；`ir join`、`ir-computer` 用登录时运行的计划任务（不用系统服务：SYSTEM 账户拿不到本人的 PATH 和 agent 登录） | 插件同左；`ir join`、`ir-computer` 用 launchd 用户代理 | 插件同左；`ir join`、`ir-computer` 用 systemd 用户单元 |
 | 换行 | 只认 `\n`，行尾的 `\r` 去掉 | `\n` | `\n` |
 | dsh 记录的目录名 | `C:\a\b` → `C-a-b`（`/ \ :` 换成 `-`） | `/Users/a` → `Users-a` | 同 Mac |
 | 编码 | UTF-8，不带 BOM | UTF-8 | UTF-8 |
 
 这边的路径处理不能用 `filepath`（它只懂本机）：远端路径一律按握手的 `sep` 处理。
+
+## ir-computer
+
+`cmd/ir-computer`（2026-11-13）：电脑一端的单独程序，不受“一个二进制”约束（`AGENTS.md`）。和 `ir join` 是同一套代码（`internal/join`），选项相同，另有 `--headless`（不显示图标）；握手和配对里的 `program` 是 `ir-computer <版本>`。登录时运行的项和 `ir join` 同名，换用时直接替换。
+
+- 图标：Windows 在通知区（`Shell_NotifyIconW`），Mac 在菜单栏（经 purego 调 AppKit，不用 cgo，主线程跑）；Linux 不显示。未连接时图标变淡。
+- 菜单：第一行是地址和状态（连接中、已连接、已断开、配对码 1234、未开配对），然后是打开（浏览器打开那个 Iridium）、登录时运行（开关：只增删登录项，不启停正在运行的这一份）、退出（正常退出，常驻的不会被重新拉起）。
+- 那边 agent 用的 `ir` 是它自己（按名字 `ir` 进命令行模式，Mac、Linux）。
+- 发布包里是裸二进制 `ir-computer-<系统>-<架构>`（Windows 带 `.exe`），一行脚本即可下载运行；`ir update` 不管它。Mac 用 curl 下载的不带隔离标记，arm64 由 Go 链接器做了临时签名，可直接运行。
 
 ## 开发测试用的连接
 

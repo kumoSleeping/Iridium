@@ -30,6 +30,8 @@ type resident struct {
 	log  string // where it writes; "" the journal (Linux)
 	dir  string // where its file goes: the systemd user units, LaunchAgents, the state (Windows)
 	user string // Windows: DOMAIN\user, whose logon starts it
+	prog string // ir join, ir-computer
+	tray bool   // it shows a tray: macOS runs it as an app's, not a background process
 }
 
 // runner runs a command, failing with its output.
@@ -50,11 +52,11 @@ func residentFor(o Options, unit string) resident {
 			exe = real
 		}
 	}
-	r := resident{goos: runtime.GOOS, name: unit, url: o.URL, path: os.Getenv("PATH")}
+	r := resident{goos: runtime.GOOS, name: unit, url: o.URL, path: os.Getenv("PATH"), prog: o.prog().Name, tray: o.prog().Tray != nil && !o.Headless}
 	if r.name == "" {
 		r.name = "iridium-join-" + o.key()
 	}
-	r.argv = []string{exe, "join", o.URL, "--resident", "--state", o.Base}
+	r.argv = append(append([]string{exe}, o.prog().Args...), o.URL, "--resident", "--state", o.Base)
 	if o.Name != "" {
 		r.argv = append(r.argv, "--name", o.Name)
 	}
@@ -63,6 +65,9 @@ func residentFor(o Options, unit string) resident {
 	}
 	if o.Shell {
 		r.argv = append(r.argv, "--shell")
+	}
+	if o.Headless {
+		r.argv = append(r.argv, "--headless")
 	}
 	home, _ := os.UserHomeDir()
 	switch r.goos {
@@ -164,6 +169,60 @@ func (r resident) uninstall(run runner) error {
 	return run("systemctl", "--user", "daemon-reload")
 }
 
+// enabled: it starts at login.
+func (r resident) enabled(run runner) bool {
+	if r.goos == "windows" {
+		return run("schtasks", "/Query", "/TN", r.name) == nil
+	}
+	_, err := os.Stat(r.file())
+	return err == nil
+}
+
+// setEnabled makes it start at login or not, the one running left as it is (its tray's switch):
+// what install does without starting it, what uninstall does without stopping it.
+func (r resident) setEnabled(run runner, on bool) error {
+	if !on {
+		switch r.goos {
+		case "windows":
+			return run("schtasks", "/Delete", "/TN", r.name, "/F")
+		case "darwin":
+			// Still loaded till logout: once it ends cleanly it is not started again.
+			return os.Remove(r.file())
+		}
+		_ = run("systemctl", "--user", "disable", r.name+".service")
+		if err := os.Remove(r.file()); err != nil {
+			return err
+		}
+		return run("systemctl", "--user", "daemon-reload")
+	}
+	if err := os.MkdirAll(r.dir, 0o700); err != nil {
+		return err
+	}
+	if r.log != "" {
+		if err := os.MkdirAll(filepath.Dir(r.log), 0o700); err != nil {
+			return err
+		}
+	}
+	switch r.goos {
+	case "windows":
+		if err := os.WriteFile(r.file(), r.taskXML(), 0o600); err != nil {
+			return err
+		}
+		defer os.Remove(r.file())
+		return run("schtasks", "/Create", "/TN", r.name, "/XML", r.file(), "/F")
+	case "darwin":
+		// launchd reads it at the next login.
+		return os.WriteFile(r.file(), []byte(r.plist()), 0o644)
+	}
+	if err := os.WriteFile(r.file(), []byte(r.unit()), 0o644); err != nil {
+		return err
+	}
+	if err := run("systemctl", "--user", "daemon-reload"); err != nil {
+		return err
+	}
+	return run("systemctl", "--user", "enable", r.name+".service")
+}
+
 // unit is the systemd user unit.
 func (r resident) unit() string {
 	words := make([]string, len(r.argv))
@@ -174,7 +233,7 @@ func (r resident) unit() string {
 	if r.path != "" {
 		env = "Environment=" + unitQuote("PATH="+r.path) + "\n"
 	}
-	return fmt.Sprintf(`# Written by ir join.
+	return fmt.Sprintf(`# Written by `+r.prog+`.
 [Unit]
 Description=Iridium executor for %s
 
@@ -209,6 +268,10 @@ func (r resident) plist() string {
 	for _, a := range r.argv {
 		args.WriteString("\n\t\t<string>" + xmlText(a) + "</string>")
 	}
+	kind := "Background"
+	if r.tray {
+		kind = "Interactive"
+	}
 	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -233,14 +296,14 @@ func (r resident) plist() string {
 	<key>ThrottleInterval</key>
 	<integer>10</integer>
 	<key>ProcessType</key>
-	<string>Background</string>
+	<string>%s</string>
 	<key>StandardOutPath</key>
 	<string>%s</string>
 	<key>StandardErrorPath</key>
 	<string>%s</string>
 </dict>
 </plist>
-`, xmlText(r.name), args.String(), xmlText(r.path), xmlText(r.log), xmlText(r.log))
+`, xmlText(r.name), args.String(), xmlText(r.path), kind, xmlText(r.log), xmlText(r.log))
 }
 
 // taskXML is the scheduled task, as schtasks /XML reads it (UTF-16): at this user's logon, as
@@ -262,7 +325,7 @@ func (r resident) taskXML() []byte {
 	s := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
-    <Description>Iridium executor for %s (ir join)</Description>
+    <Description>Iridium executor for %s (%s)</Description>
   </RegistrationInfo>
   <Triggers>
     <LogonTrigger>
@@ -300,7 +363,7 @@ func (r resident) taskXML() []byte {
     </Exec>
   </Actions>
 </Task>
-`, xmlText(r.url), who, who, xmlText(conhost), xmlText(strings.Join(args, " ")))
+`, xmlText(r.url), xmlText(r.prog), who, who, xmlText(conhost), xmlText(strings.Join(args, " ")))
 	s = strings.ReplaceAll(s, "\n", "\r\n")
 	u := utf16.Encode([]rune(s))
 	b := make([]byte, 2+2*len(u))

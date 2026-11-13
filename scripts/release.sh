@@ -1,11 +1,13 @@
 #!/bin/sh
 # Builds the release assets into a directory (the web app must be built already, npm run build in
 # web/): for each platform a static, stripped binary packed as iridium-<os>-<arch>.tar.gz (the
-# binary, README.md, LICENSE), the official QQ plugin as iridium-qq-<os>-<arch>.tar.gz, SHA256SUMS, and notes.md: the commits since the last tag (what the
+# binary, README.md, LICENSE), the official QQ plugin as iridium-qq-<os>-<arch>.tar.gz, ir-computer as
+# bare binaries ir-computer-<os>-<arch>[.exe], SHA256SUMS, and notes.md: the commits since the last tag (what the
 # settings page shows), then after the marker internal/update.NotesEnd the sizes and how to install.
 #
 #   scripts/release.sh v1.2.0 dist
 #   PLATFORMS="linux/amd64 linux/arm64"   which to build (default Linux and macOS, amd64 and arm64)
+#   COMPUTER_PLATFORMS="windows/amd64"    which ir-computer to build (default those and Windows)
 set -eu
 cd "$(dirname "$0")/.."
 version=${1:?usage: scripts/release.sh <version> <dir>}
@@ -50,8 +52,24 @@ for p in ${PLATFORMS:-linux/amd64 linux/arm64 darwin/arm64 darwin/amd64}; do
 	tar -C "$stage" -czf "$out/iridium-qq-$os-$arch.tar.gz" --owner=0 --group=0 --numeric-owner .
 	rm -rf "$stage"
 done
-# No Windows build: Windows joins through the dsh plugin (docs/plan.md "别的机器").
-(cd "$out" && sha256sum iridium-*.tar.gz >SHA256SUMS)
+# ir-computer: the program another computer runs to join (docs/exec.md), a bare binary each, so a
+# one-line script fetches and runs it. Windows too.
+{
+	echo
+	echo "| ir-computer | 二进制 |"
+	echo "|---|---|"
+} >>"$out/notes.md"
+for p in ${COMPUTER_PLATFORMS:-windows/amd64 windows/arm64 darwin/arm64 darwin/amd64 linux/amd64 linux/arm64}; do
+	os=${p%/*} arch=${p#*/}
+	ext=
+	[ "$os" = windows ] && ext=.exe
+	name=ir-computer-$os-$arch$ext
+	CGO_ENABLED=0 GOOS=$os GOARCH=$arch "$GO" build -trimpath \
+		-ldflags "-s -w -X github.com/kumoSleeping/iridium/internal/version.Version=$version" \
+		-o "$out/$name" ./cmd/ir-computer
+	echo "| $os/$arch | $(mib "$(size "$out/$name")") |" >>"$out/notes.md"
+done
+(cd "$out" && sha256sum iridium-*.tar.gz ir-computer-* >SHA256SUMS)
 {
 	echo
 	echo '安装：`tar xzf iridium-linux-amd64.tar.gz && ./iridium install -now`（macOS 用 iridium-darwin-arm64.tar.gz）；之后在设置里或 `ir update` 更新。'

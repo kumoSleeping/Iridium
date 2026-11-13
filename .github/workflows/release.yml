@@ -29,6 +29,7 @@ jobs:
           scripts/check-types.sh
           go vet ./...
           GOOS=darwin GOARCH=arm64 go vet ./...
+          GOOS=windows GOARCH=amd64 go vet ./cmd/ir-computer ./internal/join ./internal/remote/executor
           go test ./...
 
   build:
@@ -83,7 +84,7 @@ jobs:
         run: |
           pre=""
           case "$VERSION" in *-*) pre="--prerelease" ;; esac
-          gh release create "$VERSION" dist/*.tar.gz dist/SHA256SUMS \
+          gh release create "$VERSION" dist/*.tar.gz dist/ir-computer-* dist/SHA256SUMS \
             --title "$VERSION" --notes-file dist/notes.md $pre
       # The dsh plugin (plugins/dsh-remote-iridium) goes to npm at Iridium's version, so dsh's
       # 添加插件 takes it by name. Releases only. npm trusts this workflow (Trusted Publishing,

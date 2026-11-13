@@ -1,6 +1,7 @@
 package join
 
 import (
+	"context"
 	"encoding/binary"
 	"os"
 	"os/exec"
@@ -215,6 +216,51 @@ func TestResident(t *testing.T) {
 		if !strings.Contains(x, want) {
 			t.Errorf("the task has no %q:\n%s", want, x)
 		}
+	}
+}
+
+// ir-computer: run again at login by its own name, its tray kept; the switch in its tray adds
+// and removes the login entry, the running one left alone.
+func TestResidentComputer(t *testing.T) {
+	cfg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", cfg)
+	tray := func(context.Context, Tray) error { return nil }
+	o := Options{URL: "https://ir.example.com", Base: "/state/join", Prog: Program{Name: "ir-computer", Self: "ir-computer", Tray: tray}}
+	r := residentFor(o, "iridium-test-computer")
+	if r.argv[1] != "https://ir.example.com" || slices.Contains(r.argv, "--headless") || !r.tray {
+		t.Fatalf("argv %q tray %v", r.argv, r.tray)
+	}
+	r.goos = "darwin"
+	if p := r.plist(); !strings.Contains(p, "<string>Interactive</string>") {
+		t.Errorf("not interactive:\n%s", p)
+	}
+	o.Headless = true
+	if r := residentFor(o, "x"); !slices.Contains(r.argv, "--headless") || r.tray {
+		t.Errorf("headless: %q", r.argv)
+	}
+
+	var ran []string
+	run := func(name string, args ...string) error {
+		ran = append(ran, name+" "+strings.Join(args, " "))
+		return nil
+	}
+	r.goos = "linux"
+	r.dir = filepath.Join(cfg, "systemd", "user")
+	if r.enabled(run) {
+		t.Fatal("enabled before")
+	}
+	if err := r.setEnabled(run, true); err != nil {
+		t.Fatal(err)
+	}
+	if !r.enabled(run) || slices.ContainsFunc(ran, func(s string) bool { return strings.Contains(s, "restart") || strings.Contains(s, "--now") }) {
+		t.Fatalf("on: %v %q", r.enabled(run), ran)
+	}
+	ran = nil
+	if err := r.setEnabled(run, false); err != nil {
+		t.Fatal(err)
+	}
+	if r.enabled(run) || slices.ContainsFunc(ran, func(s string) bool { return strings.Contains(s, "--now") || strings.Contains(s, "stop") }) {
+		t.Fatalf("off: %v %q", r.enabled(run), ran)
 	}
 }
 

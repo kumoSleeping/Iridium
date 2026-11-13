@@ -57,7 +57,9 @@ type Options struct {
 	HTTPClient *http.Client
 	// Connected is told each time the hello is answered: the terminal name the Iridium knows it by.
 	Connected func(name string)
-	Logf      func(string, ...any)
+	// Disconnected is told each time a connection ends, before it dials again.
+	Disconnected func(err error)
+	Logf         func(string, ...any)
 }
 
 // ErrRefused: the Iridium turned the TOKEN down (401): its Bot is gone, connecting again is no use.
@@ -116,6 +118,9 @@ func (e *Executor) Run(ctx context.Context) error {
 			wait = time.Second
 		}
 		e.o.Logf("executor: connection ended: %v; again in %v", err, wait)
+		if e.o.Disconnected != nil {
+			e.o.Disconnected(err)
+		}
 		select {
 		case <-ctx.Done():
 		case <-time.After(wait):
