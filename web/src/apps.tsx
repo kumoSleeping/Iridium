@@ -1,5 +1,5 @@
 // The settings' 应用管理 (draft 四): two lists (k_glossary "电脑"). 应用: 网页 (ir_web) and the apps
-// that speak, each with its avatar, name, type, whether it is online, when it was last active.
+// that speak, each with its avatar, name, whether it is online, when it was last active.
 // 电脑: the host and the computers that joined, with their system and agents; apps on one machine
 // are one computer's connections, listed in its page, not apart. A row opens the page: an app's
 // permissions (agents, scope), the agents it carries and whether command lines run there, its
@@ -23,7 +23,7 @@ import { showSecret, useSecret } from "./secrets";
 import { Group } from "./settings";
 import { useConfirms, usePairing } from "./store";
 import { errText, toast } from "./toast";
-import { ago, Avatar, AvatarKey, cn, IconKey, Logo, Switch, Tip, tokens, typeMark } from "./ui";
+import { ago, Avatar, AvatarKey, cn, IconKey, Logo, Switch, Tip, tokens } from "./ui";
 
 /** Claude: it was made the owner's own. Set then, never after (the user, 2026-11-08). */
 export const hasClaude = (r: Rules) => !!r.claudeOwner;
@@ -32,14 +32,6 @@ const systems: Record<string, string> = {
   windows: "Windows",
   darwin: "macOS",
   linux: "Linux",
-};
-
-/** What an app is shown as: the host, 网页, or its type (电脑, Bot…), else 应用. */
-const typeName = (a: App) => {
-  if (a.host) return t("term.local");
-  if (a.web) return t("term.panel");
-  const m = typeMark(a.type);
-  return m ? t(m[1]) : a.type || t("term.channel");
 };
 
 /** A computer (k_glossary "电脑"): the host, or an app that paired as one or has said its system. */
@@ -207,7 +199,6 @@ function AppRow({ a, machine, conns, on, onOpen }: { a: App; machine?: Computer;
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-2">
           <span className="truncate text-base font-medium">{a.host ? t("me.local") : a.web ? t("term.panel") : a.name}</span>
-          {!a.web && !isComputer(a) && <span className="shrink-0 rounded-sm bg-fill-2 px-1.5 text-[11px] leading-[18px] text-ink-2">{typeName(a)}</span>}
           {a.id === me?.app && !a.host && !a.web && <span className="shrink-0 text-xs text-ink-3">{t("term.this")}</span>}
         </span>
         {/* One line, cut at its end, never wrapped into columns (the panel is narrow). */}
@@ -271,7 +262,6 @@ function AppPage({ app, data, machine, onBack, go, closes }: { app: App; data: A
     <Group title={t("apps.computer")}>
       {under && <Line label={t("apps.on")}>{under.host ? t("me.local") : under.name}</Line>}
       <Line label={t("confirm.system")}>{[systems[machine.os] ?? machine.os, machine.arch].filter(Boolean).join(" ") || "—"}</Line>
-      {!app.host && <Line label={t("apps.program")}>{machine.program || "—"}</Line>}
       {app.host ? (
         <Line label={t("apps.carried")}>{machine.agents.map((a) => a.agent).join(" · ") || t("apps.none")}</Line>
       ) : machine.agents.length ? (
@@ -303,7 +293,6 @@ function AppPage({ app, data, machine, onBack, go, closes }: { app: App; data: A
           <span className="min-w-0 flex-1">
             <span className="flex items-center gap-2">
               {renaming ? <Rename id={app.id} name={app.name} done={() => setRenaming(false)} /> : <span className="truncate text-base font-medium">{title}</span>}
-              {!app.web && !isComputer(app) && <span className="shrink-0 rounded-sm bg-fill-2 px-1.5 text-[11px] leading-[18px] text-ink-2">{typeName(app)}</span>}
               {!app.web && !app.host && !renaming && (
                 <IconKey label={t("term.renameIt")} onClick={() => setRenaming(true)} className="size-6">
                   <PencilLine size={13} />
