@@ -6,10 +6,10 @@
 // logins (网页's: the browsers, and the unused invites as slots), rename, avatar, removal; the
 // host's, its system, agents and connections only. 配对 is a switch, on till turned off; requests
 // wait as cards on top, the code checked against the one the app shows. No TOKEN is handed out here.
-import { Dialog } from "@base-ui/react/dialog";
+import { Popover } from "@base-ui/react/popover";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { Check, ChevronLeft, ChevronRight, Link2, LoaderCircle, PencilLine, Plus, SlidersHorizontal, Trash2, X } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { ApiError, api } from "./api/client";
 import type { Agent, App, Apps, Computer, Login, Perms, PendingInvite, Rules } from "./api/types.gen";
 import { CardFrame, CardHead, MainKey, SecondKey } from "./card";
@@ -23,7 +23,7 @@ import { showSecret, useSecret } from "./secrets";
 import { Group } from "./settings";
 import { useConfirms, usePairing } from "./store";
 import { errText, toast } from "./toast";
-import { ago, Avatar, AvatarKey, cn, IconKey, Logo, Switch, Tip, tokens } from "./ui";
+import { ago, Avatar, AvatarKey, cn, IconKey, Logo, PopSurface, Switch, Tip, tokens } from "./ui";
 
 /** Claude: it was made the owner's own. Set then, never after (the user, 2026-11-08). */
 export const hasClaude = (r: Rules) => !!r.claudeOwner;
@@ -62,21 +62,24 @@ const ofWeb = (l: Login) => !l.app || l.app === "ir_web";
 
 type View = { kind: "list" } | { kind: "app"; id: string };
 
-/** side: in the settings' dialog (a computer), an app's page opens in a panel of its own beside it,
- *  the list staying (the user, 2026-11-12); on a phone, or with no room beside, it slides in. */
+/** side: in the settings' dialog (a computer), an app's page is a popover out of its row, as every
+ *  other popup (ui.tsx PopSurface; docs/前端设计规范.md); on a phone it slides in. */
 export function AppsPage({ onBack, side }: { onBack: () => void; side?: boolean }) {
   useLang();
   const q = useApps();
   const [view, setView] = useState<View>({ kind: "list" });
+  const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const pairing = !!usePairing()?.open;
   const apps = q.data?.apps ?? [];
   const open = view.kind === "app" ? apps.find((a) => a.id === view.id) : undefined;
-  const at = useBeside(!!side && !!open);
+  const pop = !!side;
   const list = () => setView({ kind: "list" });
   const go = (id: string) => setView({ kind: "app", id });
-  const row = (a: App) => <AppRow key={a.id} a={a} machine={a.computer} conns={connectionsOf(apps, a.id).length} on={!!at && a.id === open?.id} onOpen={() => go(a.id)} />;
+  const row = (a: App) => (
+    <AppRow key={a.id} a={a} machine={a.computer} conns={connectionsOf(apps, a.id).length} on={pop && a.id === open?.id} onOpen={(e) => (setAnchor(e.currentTarget), go(a.id))} />
+  );
   const computers = apps.filter((a) => isComputer(a) && !a.computer?.under);
-  if (open && q.data && !at)
+  if (open && q.data && !pop)
     return (
       <div key={open.id} className="g-slide h-full">
         <AppPage app={open} data={q.data} machine={open.computer} onBack={list} go={go} />
@@ -93,64 +96,37 @@ export function AppsPage({ onBack, side }: { onBack: () => void; side?: boolean 
           <Group title={t("apps.computer")}>{computers.map(row)}</Group>
         </>
       )}
-      {/* Nested in the settings' dialog: a press in it does not put the settings away; one outside
-          it (another row too) puts it away. */}
-      <Dialog.Root open={!!(open && at)} modal={false} onOpenChange={(o) => !o && list()}>
-        <Dialog.Portal>
-          <Dialog.Popup aria-label={open?.web ? t("term.panel") : open?.name} style={at} className="g-beside glass thick float fixed z-50 overflow-hidden rounded-lg text-ink outline-none">
-            {/* Another row, or a connection, while it is open: the page slides in, as on a phone. */}
-            {open && q.data && (
-              <div key={open.id} className="g-slide h-full">
-                <AppPage app={open} data={q.data} machine={open.computer} onBack={list} go={go} closes />
-              </div>
-            )}
-          </Dialog.Popup>
-        </Dialog.Portal>
-      </Dialog.Root>
+      <Popover.Root open={pop && !!open} onOpenChange={(o) => !o && list()}>
+        <PopSurface anchor={anchor} side="right" sideOffset={20} className="flex max-h-[min(72dvh,620px,var(--available-height))] w-[min(340px,calc(100vw-16px))] flex-col overflow-hidden">
+          {/* A connection opened in it: the page slides in, as on a phone. */}
+          {open && q.data && (
+            <div key={open.id} className="g-slide flex min-h-0 flex-1 flex-col">
+              <AppPage app={open} data={q.data} machine={open.computer} onBack={list} go={go} closes />
+            </div>
+          )}
+        </PopSurface>
+      </Popover.Root>
     </Page>
   );
-}
-
-/** Where an app's panel goes: right of the settings' dialog, its top and height; none when there
- *  is no room there (then the page slides in within the dialog). */
-function useBeside(on: boolean): CSSProperties | undefined {
-  const [at, setAt] = useState<CSSProperties>();
-  useLayoutEffect(() => {
-    if (!on) return setAt(undefined);
-    const place = () => {
-      const r = document.querySelector("[data-settings-dialog]")?.getBoundingClientRect();
-      const left = r ? r.right + 8 : 0;
-      const w = Math.min(340, innerWidth - left - 8);
-      setAt(r && w >= 280 ? { left, top: r.top, width: w, height: r.height } : undefined);
-    };
-    place();
-    addEventListener("resize", place);
-    return () => removeEventListener("resize", place);
-  }, [on]);
-  return at;
 }
 
 /** A page of 应用管理: its header (back, title, its key) and its scrolling body. */
 function Page({ title, onBack, backLabel, busy, right, closes, children }: { title: string; onBack: () => void; backLabel: string; busy?: boolean; right?: ReactNode; closes?: boolean; children: ReactNode }) {
   return (
-    <div className="flex h-full flex-col">
-      {/* closes: a panel of its own, beside the list: shut by an ✕ at its right, not a back key. */}
-      <header className={cn("flex h-10.5 shrink-0 items-center gap-1 px-1.5 pt-1.5", closes && "pl-3")}>
-        {!closes && (
+    <div className="flex h-full min-h-0 flex-col">
+      {/* closes: a popover's, shut as any popover is (a press outside, Esc): no header, its name is
+          on its first row. */}
+      {!closes && (
+        <header className="flex h-10.5 shrink-0 items-center gap-1 px-1.5 pt-1.5">
           <IconKey label={backLabel} onClick={onBack} tipSide="bottom" className="size-7">
             <ChevronLeft size={16} />
           </IconKey>
-        )}
-        <h1 className="m-0 min-w-0 flex-1 truncate text-base font-semibold">{title}</h1>
-        {busy && <LoaderCircle size={14} className="animate-spin text-ink-4" />}
-        {right}
-        {closes && (
-          <IconKey label={t("nav.close")} onClick={onBack} tipSide="bottom" className="size-7">
-            <X size={15} />
-          </IconKey>
-        )}
-      </header>
-      <div className="no-bar min-h-0 flex-1 overflow-y-auto pt-2 pb-4">
+          <h1 className="m-0 min-w-0 flex-1 truncate text-base font-semibold">{title}</h1>
+          {busy && <LoaderCircle size={14} className="animate-spin text-ink-4" />}
+          {right}
+        </header>
+      )}
+      <div className={cn("no-bar min-h-0 flex-1 overflow-y-auto pb-4", closes ? "pt-3" : "pt-2")}>
         <div className="flex flex-col gap-5 px-3">{children}</div>
       </div>
     </div>
@@ -195,7 +171,7 @@ function Needs() {
 }
 
 /** One app or computer in the list; it opens its page. conns: a computer's other connections. */
-function AppRow({ a, machine, conns, on, onOpen }: { a: App; machine?: Computer; conns?: number; on?: boolean; onOpen?: () => void }) {
+function AppRow({ a, machine, conns, on, onOpen }: { a: App; machine?: Computer; conns?: number; on?: boolean; onOpen?: (e: MouseEvent<HTMLButtonElement>) => void }) {
   const me = useMe().data;
   const used = a.online ? t("term.online") : a.host ? t("term.localShort") : ago(a.lastSeenAt || a.createdAt || 0);
   const body = (

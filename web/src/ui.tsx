@@ -231,6 +231,7 @@ export function PopSurface({
   sideOffset = 8,
   initialFocus,
   finalFocus,
+  anchor,
 }: {
   children: ReactNode;
   className?: string;
@@ -239,10 +240,12 @@ export function PopSurface({
   sideOffset?: number;
   initialFocus?: ComponentProps<typeof Popover.Popup>["initialFocus"];
   finalFocus?: ComponentProps<typeof Popover.Popup>["finalFocus"];
+  /** What it unfolds out of, when not its trigger (a row it was opened from). */
+  anchor?: Element | null;
 }) {
   return (
     <Popover.Portal>
-      <Popover.Positioner side={side} align={align} sideOffset={sideOffset} collisionPadding={8} className="z-50">
+      <Popover.Positioner side={side} align={align} sideOffset={sideOffset} collisionPadding={8} anchor={anchor ?? undefined} className="z-50">
         <Popover.Popup initialFocus={initialFocus ?? ((type) => type === "keyboard")} finalFocus={finalFocus} className={cn("g-unfold glass thick float rounded-lg text-ink outline-none", className)}>
           {children}
         </Popover.Popup>
