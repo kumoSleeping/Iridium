@@ -98,7 +98,12 @@ export function AppsPage({ onBack, side }: { onBack: () => void; side?: boolean 
       <Dialog.Root open={!!(open && at)} modal={false} onOpenChange={(o) => !o && list()}>
         <Dialog.Portal>
           <Dialog.Popup aria-label={open?.web ? t("term.panel") : open?.name} style={at} className="g-beside glass thick float fixed z-50 overflow-hidden rounded-lg text-ink outline-none">
-            {open && q.data && <AppPage key={open.id} app={open} data={q.data} machine={open.computer} onBack={list} go={go} closes />}
+            {/* Another row, or a connection, while it is open: the page slides in, as on a phone. */}
+            {open && q.data && (
+              <div key={open.id} className="g-slide h-full">
+                <AppPage app={open} data={q.data} machine={open.computer} onBack={list} go={go} closes />
+              </div>
+            )}
           </Dialog.Popup>
         </Dialog.Portal>
       </Dialog.Root>
