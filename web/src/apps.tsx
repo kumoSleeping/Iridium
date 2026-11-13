@@ -6,10 +6,9 @@
 // logins and invites (docs/前端设计规范.md). 配对 is a switch, on till turned off; requests wait as
 // cards on top, the code checked against the one the app shows. No TOKEN is handed out here.
 import { Menu } from "@base-ui/react/menu";
-import { Popover } from "@base-ui/react/popover";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { Check, ChevronLeft, ChevronRight, Link2, LoaderCircle, PencilLine, Plus, SlidersHorizontal, Trash2, X } from "lucide-react";
-import { Fragment, useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { ApiError, api } from "./api/client";
 import type { Agent, App, Apps, Computer, Login, Perms, PendingInvite, Rules } from "./api/types.gen";
 import { CardFrame, CardHead, MainKey, SecondKey } from "./card";
@@ -24,7 +23,7 @@ import { showSecret, useSecret } from "./secrets";
 import { Group } from "./settings";
 import { useConfirms, usePairing } from "./store";
 import { errText, toast } from "./toast";
-import { agentName, AGENTS as AGENT_MARKS, ago, Avatar, AvatarKey, cn, IconKey, IrMark, Logo, own, PopSurface, Switch, Tip, useLongPress, useMenuAt } from "./ui";
+import { agentName, AGENTS as AGENT_MARKS, ago, Avatar, AvatarKey, cn, IconKey, IrMark, Logo, own, Switch, Tip, useLongPress, useMenuAt } from "./ui";
 import { MenuItems } from "./sidebar";
 
 /** Claude: it was made the owner's own. Set then, never after (the user, 2026-11-08). */
@@ -60,25 +59,22 @@ const nameError = (e: unknown) => {
 /** A login of ir_web (its logins come with app "" from before 0.2's other apps, or "ir_web"). */
 const ofWeb = (l: Login) => !l.app || l.app === "ir_web";
 
-type View = { kind: "list" } | { kind: "app"; id: string };
+type View = { kind: "list" } | { kind: "app"; id: string } | { kind: "add" };
 
-/** side: in the settings' dialog (a computer), an app's page is a popover out of its row, as every
- *  other popup (ui.tsx PopSurface; docs/前端设计规范.md); on a phone it slides in. */
-export function AppsPage({ onBack, side }: { onBack: () => void; side?: boolean }) {
+/** In the settings, what opens is a page of its own that slides in, with its way back; no popover
+ *  (docs/前端设计规范.md). */
+export function AppsPage({ onBack }: { onBack: () => void }) {
   useLang();
   const q = useApps();
   const [view, setView] = useState<View>({ kind: "list" });
-  const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const pairing = !!usePairing()?.open;
   const apps = q.data?.apps ?? [];
   const open = view.kind === "app" ? apps.find((a) => a.id === view.id) : undefined;
-  const pop = !!side;
   const list = () => setView({ kind: "list" });
-  const go = (id: string) => setView({ kind: "app", id });
   // 网页 opens its logins and invites; an app or a computer has no page.
   const row = (a: App) =>
     a.web ? (
-      <AppRow key={a.id} a={a} on={pop && a.id === open?.id} onOpen={(e) => (setAnchor(e.currentTarget), go(a.id))} />
+      <AppRow key={a.id} a={a} onOpen={() => setView({ kind: "app", id: a.id })} />
     ) : (
       <Fragment key={a.id}>
         <ItemRow a={a} />
@@ -88,10 +84,16 @@ export function AppsPage({ onBack, side }: { onBack: () => void; side?: boolean 
       </Fragment>
     );
   const computers = apps.filter((a) => isComputer(a) && !a.computer?.under);
-  if (open && q.data && !pop)
+  if (open && q.data)
     return (
       <div key={open.id} className="g-slide h-full">
         <AppPage data={q.data} onBack={list} />
+      </div>
+    );
+  if (view.kind === "add")
+    return (
+      <div className="g-slide h-full">
+        <AddComputer onBack={list} />
       </div>
     );
   return (
@@ -101,16 +103,18 @@ export function AppsPage({ onBack, side }: { onBack: () => void; side?: boolean 
       {q.data && (
         <>
           {apps.some((a) => !isComputer(a)) && <Group title={t("term.channel")}>{apps.filter((a) => !isComputer(a)).map(row)}</Group>}
-          <Group title={t("apps.computer")} action={<AddComputer />}>
+          <Group
+            title={t("apps.computer")}
+            action={
+              <IconKey label={t("apps.addComputer")} onClick={() => setView({ kind: "add" })} className="-my-2 size-6 pointer-coarse:size-8">
+                <Plus size={14} />
+              </IconKey>
+            }
+          >
             {computers.map(row)}
           </Group>
         </>
       )}
-      <Popover.Root open={pop && !!open} onOpenChange={(o) => !o && list()}>
-        <PopSurface anchor={anchor} side="right" sideOffset={20} className="flex max-h-[min(72dvh,620px,var(--available-height))] w-[min(340px,calc(100vw-16px))] flex-col overflow-hidden">
-          {open && q.data && <AppPage data={q.data} onBack={list} closes />}
-        </PopSurface>
-      </Popover.Root>
     </Page>
   );
 }
@@ -137,61 +141,61 @@ export function joinScript(os: "mac" | "win", at: string, flags = ""): string {
   ].join("\n");
 }
 
-/** The 电脑 group's +: the lines to run on a computer, for its system; as they are, with only some
- *  folders, with commands. */
-function AddComputer() {
+/** The 电脑 group's +, a page: the lines to run on a computer, for its system; as they are, with
+ *  only some folders, with commands. */
+function AddComputer({ onBack }: { onBack: () => void }) {
   const [os, setOs] = useState<"mac" | "win">(/Win/.test(navigator.platform) ? "win" : "mac");
   const at = location.origin;
   const lang = os === "mac" ? "language-sh" : "language-powershell";
   return (
-    <Popover.Root>
-      <Popover.Trigger render={<IconKey label={t("apps.addComputer")} className="-my-2 size-6 pointer-coarse:size-8" />}>
-        <Plus size={14} />
-      </Popover.Trigger>
-      <PopSurface side="bottom" align="end" className="flex max-h-[min(72dvh,620px,var(--available-height))] w-[min(420px,calc(100vw-16px))] flex-col gap-3 overflow-y-auto p-3 text-sm">
-        <Segmented
-          label={t("apps.system")}
-          value={os}
-          onChange={(v) => setOs(v as "mac" | "win")}
-          items={[
-            { v: "mac", label: "macOS", icon: <span className="px-1 text-xs">macOS</span> },
-            { v: "win", label: "Windows", icon: <span className="px-1 text-xs">Windows</span> },
-          ]}
-        />
-        {(
-          [
-            ["apps.joinPlain", ""],
-            ["apps.joinRoots", '--roots "~/work,~/notes"'],
-            ["apps.joinShell", "--shell"],
-          ] as const
-        ).map(([label, flags]) => (
-          <div key={label} className="flex flex-col gap-1">
-            <span className="text-xs text-ink-3">{t(label)}</span>
-            <CodeBlock className={lang}>{joinScript(os, at, flags)}</CodeBlock>
-          </div>
-        ))}
-      </PopSurface>
-    </Popover.Root>
+    <Page title={t("apps.addComputer")} onBack={onBack} backLabel={t("settings.terminals")}>
+      <Segmented
+        label={t("apps.system")}
+        value={os}
+        onChange={(v) => setOs(v as "mac" | "win")}
+        items={[
+          {
+            v: "mac",
+            label: "macOS",
+            icon: <span className="px-1 text-xs">macOS</span>,
+          },
+          {
+            v: "win",
+            label: "Windows",
+            icon: <span className="px-1 text-xs">Windows</span>,
+          },
+        ]}
+      />
+      {(
+        [
+          ["apps.joinPlain", ""],
+          ["apps.joinRoots", '--roots "~/work,~/notes"'],
+          ["apps.joinShell", "--shell"],
+        ] as const
+      ).map(([label, flags]) => (
+        <Group key={label} title={t(label)}>
+          <CodeBlock className={lang} wrap>
+            {joinScript(os, at, flags)}
+          </CodeBlock>
+        </Group>
+      ))}
+    </Page>
   );
 }
 
 /** A page of 应用管理: its header (back, title, its key) and its scrolling body. */
-function Page({ title, onBack, backLabel, busy, right, closes, children }: { title: string; onBack: () => void; backLabel: string; busy?: boolean; right?: ReactNode; closes?: boolean; children: ReactNode }) {
+function Page({ title, onBack, backLabel, busy, right, children }: { title: string; onBack: () => void; backLabel: string; busy?: boolean; right?: ReactNode; children: ReactNode }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {/* closes: a popover's, shut as any popover is (a press outside, Esc): no header, its name is
-          on its first row. */}
-      {!closes && (
-        <header className="flex h-10.5 shrink-0 items-center gap-1 px-1.5 pt-1.5">
-          <IconKey label={backLabel} onClick={onBack} tipSide="bottom" className="size-7">
-            <ChevronLeft size={16} />
-          </IconKey>
-          <h1 className="m-0 min-w-0 flex-1 truncate text-base font-semibold">{title}</h1>
-          {busy && <LoaderCircle size={14} className="animate-spin text-ink-4" />}
-          {right}
-        </header>
-      )}
-      <div className={cn("no-bar min-h-0 flex-1 overflow-y-auto pb-4", closes ? "pt-3" : "pt-2")}>
+      <header className="flex h-10.5 shrink-0 items-center gap-1 px-1.5 pt-1.5">
+        <IconKey label={backLabel} onClick={onBack} tipSide="bottom" className="size-7">
+          <ChevronLeft size={16} />
+        </IconKey>
+        <h1 className="m-0 min-w-0 flex-1 truncate text-base font-semibold">{title}</h1>
+        {busy && <LoaderCircle size={14} className="animate-spin text-ink-4" />}
+        {right}
+      </header>
+      <div className="no-bar min-h-0 flex-1 overflow-y-auto pt-2 pb-4">
         <div className="flex flex-col gap-5 px-3">{children}</div>
       </div>
     </div>
@@ -236,9 +240,9 @@ function Needs() {
 }
 
 /** 网页 in the list: it opens its logins and invites. */
-function AppRow({ a, on, onOpen }: { a: App; on?: boolean; onOpen: (e: MouseEvent<HTMLButtonElement>) => void }) {
+function AppRow({ a, onOpen }: { a: App; onOpen: () => void }) {
   return (
-    <button type="button" onClick={onOpen} aria-pressed={on} className={cn("g-press flex min-h-14 w-full items-center gap-3 rounded-lg px-2 text-left hover:bg-fill", on && "bg-fill")}>
+    <button type="button" onClick={onOpen} className="g-press flex min-h-14 w-full items-center gap-3 rounded-lg px-2 text-left hover:bg-fill">
       <Avatar src={a.avatar} name={t("term.panel")} size={32} />
       <span className="min-w-0 flex-1">
         <span className="block truncate text-base font-medium">{t("term.panel")}</span>
@@ -281,7 +285,9 @@ function ItemRow({ a }: { a: App }) {
     const r = box.current?.getBoundingClientRect();
     if (r) setAt({ x: r.left + 16, y: r.bottom });
   });
-  const anchor = at && { getBoundingClientRect: () => DOMRect.fromRect({ x: at.x, y: at.y, width: 0, height: 0 }) };
+  const anchor = at && {
+    getBoundingClientRect: () => DOMRect.fromRect({ x: at.x, y: at.y, width: 0, height: 0 }),
+  };
   const pick = (f: File | undefined) => {
     if (f) setPicture((old) => (old && URL.revokeObjectURL(old), URL.createObjectURL(f)));
   };
@@ -300,14 +306,15 @@ function ItemRow({ a }: { a: App }) {
     <div className="flex flex-col">
       <div
         ref={box}
-        {...(a.host ? {} : { ...lp, onContextMenu: (e: React.MouseEvent) => own(e) && (e.preventDefault(), setAt({ x: e.clientX, y: e.clientY })) })}
+        {...(a.host
+          ? {}
+          : {
+              ...lp,
+              onContextMenu: (e: React.MouseEvent) => own(e) && (e.preventDefault(), setAt({ x: e.clientX, y: e.clientY })),
+            })}
         className={cn("flex min-h-14 items-center gap-3 rounded-lg px-2", at && "bg-fill")}
       >
-        {a.host ? (
-          <IrMark size={32} className="text-ink" />
-        ) : (
-          <AvatarKey label={t("term.avatar")} onClick={() => file.current?.click()} src={a.avatar} name={a.name} size={32} type={a.type} />
-        )}
+        {a.host ? <IrMark size={32} className="text-ink" /> : <AvatarKey label={t("term.avatar")} onClick={() => file.current?.click()} src={a.avatar} name={a.name} size={32} type={a.type} />}
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-2">
             {renaming ? <Rename id={a.id} name={a.name} done={() => setRenaming(false)} /> : <span className="truncate text-base font-medium">{a.host ? "Iridium" : a.name}</span>}
@@ -367,7 +374,15 @@ function ItemRow({ a }: { a: App }) {
         <Menu.Root open={at !== null} onOpenChange={(o) => !o && setAt(null)}>
           <Menu.Portal>
             <Menu.Positioner anchor={anchor} side="bottom" align="start" sideOffset={4} collisionPadding={8} className="z-50">
-              <MenuItems items={[{ icon: <Trash2 size={15} />, label: remove, run: () => setSure(true) }]} />
+              <MenuItems
+                items={[
+                  {
+                    icon: <Trash2 size={15} />,
+                    label: remove,
+                    run: () => setSure(true),
+                  },
+                ]}
+              />
             </Menu.Positioner>
           </Menu.Portal>
         </Menu.Root>
@@ -376,11 +391,23 @@ function ItemRow({ a }: { a: App }) {
   );
 }
 
-/** 网页's page: its browsers, and the unused invites as slots. */
-function AppPage({ data, onBack, closes }: { data: Apps; onBack: () => void; closes?: boolean }) {
+/** 网页's page: its browsers, and the unused invites as slots; its + (top right) a new invite. */
+function AppPage({ data, onBack }: { data: Apps; onBack: () => void }) {
+  const me = useMe().data;
+  const [making, setMaking] = useState(false);
   const logins = data.logins.filter(ofWeb);
   return (
-    <Page title={t("term.panel")} onBack={onBack} backLabel={t("settings.terminals")} closes={closes}>
+    <Page
+      title={t("term.panel")}
+      onBack={onBack}
+      backLabel={t("settings.terminals")}
+      right={
+        <IconKey label={me?.public ? t("term.invite") : t("term.needPublic")} disabled={!me?.public || making} onClick={() => setMaking(true)} tipSide="bottom" className="size-7">
+          <Plus size={16} />
+        </IconKey>
+      }
+    >
+      {making && <InviteForm done={() => setMaking(false)} />}
       <WebLogins logins={logins} invites={data.invites} />
     </Page>
   );
@@ -455,11 +482,9 @@ function LoginRow({ l, app, remove, rename }: { l: Login; app: string; remove: (
   );
 }
 
-/** 网页's logins (the browsers' passkeys), its unused invites as slots, and a new invite. */
+/** 网页's logins (the browsers' passkeys) and its unused invites as slots. */
 function WebLogins({ logins, invites }: { logins: Login[]; invites: PendingInvite[] }) {
   const qc = useQueryClient();
-  const me = useMe().data;
-  const [making, setMaking] = useState(false);
   return (
     <Group title={t("apps.logins")}>
       {logins.map((l) => (
@@ -477,22 +502,6 @@ function WebLogins({ logins, invites }: { logins: Login[]; invites: PendingInvit
         </div>
       ))}
       <SecretHere at="terminals" />
-      {making ? (
-        <InviteForm done={() => setMaking(false)} />
-      ) : (
-        <button
-          type="button"
-          disabled={!me?.public}
-          onClick={() => setMaking(true)}
-          className="g-press flex min-h-10 items-center gap-3 rounded-md px-2 text-left text-sm hover:bg-fill disabled:opacity-45 disabled:hover:bg-transparent"
-        >
-          <Plus size={15} className="mx-1.5 shrink-0 text-ink-2" />
-          <span className="min-w-0 flex-1">
-            <span className="block">{t("term.invite")}</span>
-            <span className="block text-xs text-ink-3">{me?.public ? t("term.inviteHint") : t("term.needPublic")}</span>
-          </span>
-        </button>
-      )}
     </Group>
   );
 }

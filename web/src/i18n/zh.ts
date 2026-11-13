@@ -499,7 +499,6 @@ export const zh = {
   "secret.done": "关闭",
 
   "term.invite": "邀请新登录",
-  "term.inviteHint": "一次性链接和二维码，10 分钟内有效",
   "term.needPublic": "先上公网（ir public）才能邀请",
   "term.name": "名字",
   "term.nameOptional": "名字（可不填）",

@@ -337,7 +337,7 @@ export function App() {
         {(slide) =>
           page === "apps" ? (
             <div key="apps" className={cn(slide, "h-full")}>
-              <AppsPage onBack={back} side={!phone} />
+              <AppsPage onBack={back} />
             </div>
           ) : page === "secrets" ? (
             <div key="secrets" className={cn(slide, "h-full")}>

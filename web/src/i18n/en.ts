@@ -499,7 +499,6 @@ export const en: Dict = {
   "secret.done": "Close",
 
   "term.invite": "Invite a login",
-  "term.inviteHint": "A one-time link and QR code, 10 minutes",
   "term.needPublic": "Go public first (ir public) to invite",
   "term.name": "Name",
   "term.nameOptional": "Name (optional)",

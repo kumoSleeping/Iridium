@@ -16,7 +16,8 @@ import { Code } from "./hl";
 import { NamedLink } from "./mention";
 import { draftWords, fromSatori, refOf } from "./refs";
 
-export function CodeBlock({ className, children }: ComponentProps<"code"> & ExtraProps) {
+/** wrap: lines wrapped, not scrolled (a narrow page, lines to read whole). */
+export function CodeBlock({ className, children, wrap }: ComponentProps<"code"> & ExtraProps & { wrap?: boolean }) {
   const [copied, setCopied] = useState(false);
   const code = String(children ?? "").replace(/\n$/, "");
   const lang = /language-(\S+)/.exec(className ?? "")?.[1];
@@ -33,7 +34,7 @@ export function CodeBlock({ className, children }: ComponentProps<"code"> & Extr
       </button>
       {/* Its words clear of the key: a one-line block was written under it (the user, 2026-11-08).
           The language is the key's tip, not a label over the words. */}
-      <pre className="overflow-x-auto py-2.5 pr-10 pl-3 whitespace-pre">
+      <pre className={cn("py-2.5 pr-10 pl-3", wrap ? "break-all whitespace-pre-wrap" : "overflow-x-auto whitespace-pre")}>
         <code>
           <Code text={code} lang={lang} />
         </code>
