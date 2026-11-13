@@ -182,12 +182,15 @@ export function SettingsPage({ theme, setTheme, initial = "main" }: { theme: The
 }
 
 /** fold: shut till its title is pressed (the approval modes, the user, 2026-11-06). */
-export function Group({ title, children, fold }: { title: string; children: ReactNode; fold?: boolean }) {
+export function Group({ title, children, fold, action }: { title: string; children: ReactNode; fold?: boolean; action?: ReactNode }) {
   const [open, setOpen] = useState(!fold);
   if (!fold)
     return (
       <section className="flex flex-col">
-        <h2 className="m-0 mb-1 text-xs font-medium text-ink-3">{title}</h2>
+        <h2 className="m-0 mb-1 flex h-4 items-center text-xs font-medium text-ink-3">
+          <span className="min-w-0 flex-1 truncate">{title}</span>
+          {action}
+        </h2>
         {children}
       </section>
     );

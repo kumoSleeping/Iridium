@@ -15,7 +15,8 @@ import { CardFrame, CardHead, MainKey, SecondKey } from "./card";
 import { ConfirmCard, saysOwner } from "./confirms";
 import { useApps, useMe } from "./data";
 import { t, useLang } from "./i18n";
-import { LocalMark } from "./me";
+import { CodeBlock } from "./chat/markdown";
+import { LocalMark, Segmented } from "./me";
 import { Crop } from "./profile";
 import { SecretHere } from "./secret";
 import { showSecret, useSecret } from "./secrets";
@@ -98,7 +99,9 @@ export function AppsPage({ onBack, side }: { onBack: () => void; side?: boolean 
       {q.data && (
         <>
           {apps.some((a) => !isComputer(a)) && <Group title={t("term.channel")}>{apps.filter((a) => !isComputer(a)).map(row)}</Group>}
-          <Group title={t("apps.computer")}>{computers.map(row)}</Group>
+          <Group title={t("apps.computer")} action={<AddComputer />}>
+            {computers.map(row)}
+          </Group>
         </>
       )}
       <Popover.Root open={pop && !!open} onOpenChange={(o) => !o && list()}>
@@ -107,6 +110,66 @@ export function AppsPage({ onBack, side }: { onBack: () => void; side?: boolean 
         </PopSurface>
       </Popover.Root>
     </Page>
+  );
+}
+
+/** ir-computer's releases (scripts/release.sh): the latest, a bare binary each system. */
+const COMPUTER_DOWNLOAD = "https://github.com/kumoSleeping/Iridium/releases/latest/download/";
+
+/** The lines that make a computer join this Iridium (docs/exec.md "ir-computer"): fetch
+ *  ir-computer, pair, start at login; flags after the address. */
+export function joinScript(os: "mac" | "win", at: string, flags = ""): string {
+  const run = `${at}${flags} --install`;
+  if (os === "mac")
+    return [
+      "mkdir -p ~/.local/bin &&",
+      `curl -fsSL -o ~/.local/bin/ir-computer ${COMPUTER_DOWNLOAD}ir-computer-darwin-$(uname -m | sed s/x86_64/amd64/) &&`,
+      "chmod +x ~/.local/bin/ir-computer &&",
+      `~/.local/bin/ir-computer ${run}`,
+    ].join("\n");
+  return [
+    '$d = "$env:LOCALAPPDATA\\iridium"; New-Item -ItemType Directory -Force $d | Out-Null',
+    '$a = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "amd64" }',
+    `Invoke-WebRequest "${COMPUTER_DOWNLOAD}ir-computer-windows-$a.exe" -OutFile "$d\\ir-computer.exe"`,
+    `& "$d\\ir-computer.exe" ${run}`,
+  ].join("\n");
+}
+
+/** The 电脑 group's +: the lines to run on a computer, for its system; as they are, with only some
+ *  folders, with commands. */
+function AddComputer() {
+  const [os, setOs] = useState<"mac" | "win">(/Win/.test(navigator.platform) ? "win" : "mac");
+  const at = location.origin;
+  const lang = os === "mac" ? "language-sh" : "language-powershell";
+  return (
+    <Popover.Root>
+      <Popover.Trigger render={<IconKey label={t("apps.addComputer")} className="-my-2 size-6 pointer-coarse:size-8" />}>
+        <Plus size={14} />
+      </Popover.Trigger>
+      <PopSurface side="bottom" align="end" className="flex max-h-[min(72dvh,620px,var(--available-height))] w-[min(420px,calc(100vw-16px))] flex-col gap-3 overflow-y-auto p-3 text-sm">
+        <Segmented
+          label={t("apps.system")}
+          value={os}
+          onChange={(v) => setOs(v as "mac" | "win")}
+          items={[
+            { v: "mac", label: "macOS", icon: <span className="px-1 text-xs">macOS</span> },
+            { v: "win", label: "Windows", icon: <span className="px-1 text-xs">Windows</span> },
+          ]}
+        />
+        {(
+          [
+            ["apps.joinPlain", ""],
+            ["apps.joinRoots", ' --roots "~/work,~/notes"'],
+            ["apps.joinShell", " --shell"],
+          ] as const
+        ).map(([label, flags]) => (
+          <div key={label} className="flex flex-col gap-1">
+            <span className="text-xs text-ink-3">{t(label)}</span>
+            <CodeBlock className={lang}>{joinScript(os, at, flags)}</CodeBlock>
+          </div>
+        ))}
+      </PopSurface>
+    </Popover.Root>
   );
 }
 

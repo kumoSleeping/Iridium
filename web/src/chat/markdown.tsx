@@ -16,7 +16,7 @@ import { Code } from "./hl";
 import { NamedLink } from "./mention";
 import { draftWords, fromSatori, refOf } from "./refs";
 
-function CodeBlock({ className, children }: ComponentProps<"code"> & ExtraProps) {
+export function CodeBlock({ className, children }: ComponentProps<"code"> & ExtraProps) {
   const [copied, setCopied] = useState(false);
   const code = String(children ?? "").replace(/\n$/, "");
   const lang = /language-(\S+)/.exec(className ?? "")?.[1];
