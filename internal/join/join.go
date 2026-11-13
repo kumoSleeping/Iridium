@@ -412,7 +412,7 @@ func (o *Options) pair(ctx context.Context) (string, error) {
 		code, refusal, err := o.call(ctx, http.MethodPost, path, who, &p)
 		if err == nil && code == http.StatusForbidden && (refusal.Code == "pair_closed" || refusal.Code == "too_many_pending") {
 			if !closed {
-				o.say("%s 没有开放配对：在那边的应用管理里开放配对；等待中", o.where())
+				o.say("%s 没开配对：在那边的应用管理里打开配对；等待中", o.where())
 				closed = true
 			}
 			if !sleep(ctx, pairClosedWait) {

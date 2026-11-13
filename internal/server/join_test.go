@@ -94,7 +94,7 @@ func TestJoin(t *testing.T) {
 	}
 
 	cancel, done := run(o)
-	l.s.OpenPairing(0)
+	l.s.SetPairing(true)
 	var cs api.Needs
 	for end := time.Now().Add(10 * time.Second); len(cs.Pending) == 0; time.Sleep(20 * time.Millisecond) {
 		if time.Now().After(end) {

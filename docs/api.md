@@ -45,7 +45,7 @@ Iridium 自己的接口都在 `/v1/internal/` 下：Satori 规范的 internal �
 | `context:<id>` | `Context`：上下文用了多少、分项。回合结束、压缩后，回合中调用工具时最多 30 秒一次更新；存在托管目录，没进程时也有 |
 | `quota` | `Quota`：按 agent + 账号（Claude：邮箱和套餐）+ 机器（`machine`，执行端的会话是那台机器的登录）的额度窗口、读到的时间、`live` |
 | `needs` | `Needs`：等人处理的需要（见“需要”） |
-| `pairing` | `PairWindow`：配对窗口开到几点 |
+| `pairing` | `PairWindow`：配对开没开 |
 | `update` | `UpdateState`：有没有新版本、更新到哪一步 |
 | `terminals` | 一个计数：应用或机器变了，重新取 `GET /v1/internal/apps` |
 | `notes` | `Notes`：全部便签和便签夹 |
@@ -341,8 +341,8 @@ Web Push，总开关在配置 `push`，默认关。VAPID 密钥存在状态目�
 
 | 请求 | 正文 → 回答 | 说明 |
 |---|---|---|
-| `GET /v1/internal/pairing`、`PUT /v1/internal/pairing` | `PairWindow` | 配对窗口：`{open, until}`；`PUT {open, minutes?}` 开（默认 10 分钟，最多 60）或关。能批的人。网页应用管理右上角的“开放配对”开，再点一下关。hub 键 `pairing` |
-| `POST /v1/internal/pair` | `PairRequest` → `Pairing` | 不用登录。窗口关着 403 `pair_closed`（本机 socket 来的不看窗口，`ir pair` 不给地址时）；带 `login {id, name?}` 的，批准时一并建好这个登录、已批准（已有的不动），ID 不合法 422 `bad_login`；每来源（IP，IPv6 按 /64）最多 4 个待批、总共 20 个，多了 403 `too_many_pending`；名字不合法 422 `bad_name`。回配对码 `code` 和 `request` |
+| `GET /v1/internal/pairing`、`PUT /v1/internal/pairing` | `PairWindow` | 配对开关：`{open}`；`PUT {open}` 开或关，开着直到关上，存在配置（`pairing`）里。能批的人。网页应用管理右上角的“配对”开关。hub 键 `pairing` |
+| `POST /v1/internal/pair` | `PairRequest` → `Pairing` | 不用登录。配对关着 403 `pair_closed`（本机 socket 来的不看窗口，`ir pair` 不给地址时）；带 `login {id, name?}` 的，批准时一并建好这个登录、已批准（已有的不动），ID 不合法 422 `bad_login`；每来源（IP，IPv6 按 /64）最多 4 个待批、总共 20 个，多了 403 `too_many_pending`；名字不合法 422 `bad_name`。回配对码 `code` 和 `request` |
 | `GET /v1/internal/pair/{request}` | → `PairState` | `pending`、`allowed`（带 `token`，只给一次）、`denied`、`expired`；不认识的 422 `no_such_request` |
 
 申请带 `wants`（想要的权限），批准时只能少给（422 `too_wide`）。没带 `wants`、报了 agent 和 `home` 的（`ir join`）默认范围是自己的家目录 `应用名:家目录`（决定 17），批准时改名的跟着改；其余默认全部。`machineId` 和主机的一样就去掉它报的 agent。批准的答复可带 `agentsOff`：一开始就关掉的 agent。名字已有应用时是 `app_update`：允许即给那个应用换新 TOKEN，旧的作废、连接断开，用量和权限照旧；答复带 `name` 则作为新应用、用这个名字接入。

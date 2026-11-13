@@ -9,11 +9,13 @@ import (
 	"time"
 )
 
-// Failure limits, per client: this many failures within the window lock it out.
+// Failure limits, per client: this many failures within the window make it wait a minute. They
+// slow a client that keeps failing; they are no defence of their own (a TOKEN is 256 random bits, a
+// Passkey a signature), so a client that retries now and then never meets them.
 const (
 	maxFailures   = 10
-	failureWindow = 15 * time.Minute
-	lockout       = 15 * time.Minute
+	failureWindow = time.Minute
+	lockout       = time.Minute
 	maxBuckets    = 10000
 )
 

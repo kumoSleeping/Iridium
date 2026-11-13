@@ -85,9 +85,9 @@ func (l *live) pending() api.Need {
 	return ns.Pending[0]
 }
 
-// The window: closed at first (403 pair_closed); the host's ir opens it for 10 minutes, or as
-// long as it says (an hour at most), and closes it; an agent, an app and a login that may not
-// approve do neither.
+// The switch: off at first (403 pair_closed); the host's ir turns it on, and it stays on (in the
+// config, so across a restart) till turned off; an agent, an app and a login that may not approve
+// do neither.
 func TestPairWindow(t *testing.T) {
 	t.Parallel()
 	l := start(t)
@@ -101,20 +101,15 @@ func TestPairWindow(t *testing.T) {
 	l.want(403, "agent", "GET", "/v1/internal/pairing", nil, nil)
 	var w api.PairWindow
 	l.want(200, "socket", "PUT", "/v1/internal/pairing", api.PairWindow{Open: true}, &w)
-	if left := time.Until(time.UnixMilli(w.Until)); !w.Open || left < 9*time.Minute || left > 10*time.Minute {
-		t.Fatalf("opened: %+v", w)
+	if !w.Open || !l.s.cfg.Pairing {
+		t.Fatalf("on: %+v, config %v", w, l.s.cfg.Pairing)
 	}
-	l.want(200, "socket", "PUT", "/v1/internal/pairing", api.PairWindow{Open: true, Minutes: 30}, &w)
-	if left := time.Until(time.UnixMilli(w.Until)); left < 29*time.Minute || left > 30*time.Minute {
-		t.Fatalf("30 minutes: %+v", w)
-	}
-	l.want(422, "socket", "PUT", "/v1/internal/pairing", api.PairWindow{Open: true, Minutes: 61}, nil)
 	if code, p, _ := l.pairFrom("", api.PairRequest{Name: "bot"}); code != 200 || len(p.Code) != 4 {
 		t.Fatalf("open: %d %+v", code, p)
 	}
 	l.want(200, "socket", "PUT", "/v1/internal/pairing", api.PairWindow{}, &w)
-	if l.want(200, "socket", "GET", "/v1/internal/pairing", nil, &w); w.Open {
-		t.Fatalf("closed: %+v", w)
+	if l.want(200, "socket", "GET", "/v1/internal/pairing", nil, &w); w.Open || l.s.cfg.Pairing {
+		t.Fatalf("off: %+v", w)
 	}
 	if code, _, e := l.pairFrom("", api.PairRequest{Name: "bot2"}); code != 403 || e.Code != "pair_closed" {
 		t.Fatalf("closed again: %d %+v", code, e)
@@ -128,7 +123,7 @@ func TestPairLimits(t *testing.T) {
 	t.Parallel()
 	l := start(t)
 	l.want(200, "socket", "PUT", "/v1/internal/public", api.SetPublic{Origin: "https://ir.example.com"}, nil)
-	l.s.OpenPairing(0)
+	l.s.SetPairing(true)
 	if code, _, e := l.pairFrom("", api.PairRequest{Name: "a b/c"}); code != 422 || e.Code != "bad_name" || e.NameError != "invalid" {
 		t.Fatalf("a bad name: %d %+v", code, e)
 	}
@@ -328,7 +323,7 @@ func TestUpdatePairing(t *testing.T) {
 	t.Parallel()
 	l := start(t)
 	l.want(200, "socket", "PUT", "/v1/internal/public", api.SetPublic{Origin: "https://ir.example.com"}, nil)
-	l.s.OpenPairing(0)
+	l.s.SetPairing(true)
 	ask := func(name string, wants *api.Perms) (api.Pairing, api.Need) {
 		t.Helper()
 		code, p, e := l.pairFrom("", api.PairRequest{Name: name, Type: "bot", Program: "my-bot 1.0", Wants: wants})

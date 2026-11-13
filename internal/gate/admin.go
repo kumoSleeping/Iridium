@@ -231,19 +231,20 @@ func (g *Gate) Endpoint(id string) (EndpointInfo, bool) {
 
 // ByToken returns the app whose TOKEN tok is, whatever it has been renamed to since.
 // ByTokenFrom is ByToken for a TOKEN that came in a request's body (Satori's IDENTIFY), counted
-// against r's client as a bearer token is: a client that fails too often waits.
+// against r's client as a bearer token is: a good one always passes, a client that fails too
+// often waits.
 func (g *Gate) ByTokenFrom(r *http.Request, tok string) (EndpointInfo, bool) {
+	if info, ok := g.ByToken(tok); ok {
+		return info, true
+	}
 	now := g.now()
 	key := ClientKey(r, g.ipHeader)
 	if g.lim.Wait(key, now) > 0 {
 		return EndpointInfo{}, false
 	}
-	info, ok := g.ByToken(tok)
-	if !ok {
-		g.lim.Fail(key, now)
-		g.log.Info("gate: bad token in a stream", "client", key)
-	}
-	return info, ok
+	g.lim.Fail(key, now)
+	g.log.Info("gate: bad token in a stream", "client", key)
+	return EndpointInfo{}, false
 }
 
 func (g *Gate) ByToken(tok string) (EndpointInfo, bool) {

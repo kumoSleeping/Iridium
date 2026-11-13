@@ -30,7 +30,7 @@
 - 每次注册用新的随机 user handle、不带 excludeCredentials；登录用可发现凭证，不把凭证 ID 发给未登录的人；计数器回退就拒绝。
 - Cookie `__Host-ir`：HttpOnly、Secure、SameSite=Strict、Path=/。空闲 12 小时、最长 7 天。库里只存哈希（`web_sessions`）。
 - 非安全方法和 WebSocket 升级：Origin 必须是公网地址，`Sec-Fetch-Site` 有的话必须是 `same-origin`；本机模式 Origin 的主机要等于 Host，都没带（curl）就放行。
-- 失败限速（坏邀请、验证失败）：同一客户端 15 分钟 10 次，锁 15 分钟。
+- 失败限速（坏邀请、验证失败）：同一客户端 1 分钟 10 次，等 1 分钟。
 - 自己的响应 `no-store`，页面 CSP 只许本站脚本、样式，禁 iframe。
 
 ## 邀请

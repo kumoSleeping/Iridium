@@ -34,6 +34,8 @@ type Config struct {
 	Modes map[string]string `json:"modes,omitempty"`
 	// Push is Web Push's total switch, off by default.
 	Push bool `json:"push"`
+	// Pairing takes apps' requests to pair (a person still allows each); off by default.
+	Pairing bool `json:"pairing,omitempty"`
 	// QuotaHidden are the quota bars the page does not show, each "<agent>:<account>:<group>:<model>".
 	QuotaHidden []string `json:"quotaHidden,omitempty"`
 	// EnterInTurn is what the page's Enter does while a turn runs: "steer" ("" too) or "queue".

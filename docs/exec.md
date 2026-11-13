@@ -18,7 +18,7 @@
 ## 连接
 
 - 执行端主动连 `wss://<Iridium>/v1/internal/exec`（dsh 插件只接受 https，或到本机、内网地址的 http：公网的明文 http 拒绝），头 `Authorization: Bearer <TOKEN>`。执行端就是一个 Bot（提供机器的那种，见 `plan.md`“交互终端”）：用 Bot 的 TOKEN 接入，终端类型也显示“Bot”，名字就是机器名（≤12 字符）。Claude（用户，2026-11-08）：批准时勾了“本人的机器”的执行端才开 Claude，用那台机器上本人的登录、原样跑（不加 `--bare`），等于 `--owner`；这个勾只出现在带 Claude 的面板上。
-- 配对（用户，2026-11-08）：插件里只有服务器地址，没有 TOKEN，人人同一个包。第一次不带 TOKEN 连 `/v1/internal/pair`（门外不用登录的口，什么也不给），报机器名、系统、装了哪些 agent，两边显示同一个 4 位配对码；网页弹确认卡片“home-pc 请求接入（Windows · dsh 0.2.2）”，带 Passkey 的面板点允许后，TOKEN 经这条连接发给执行端，它存起来以后自己用。限速，同时最多几个待批，10 分钟没人管作废。插件和 `ir join` 用同一个口：`POST /v1/internal/pair` 带握手内容（同 `hello` 的 `name`、`os`、`arch`、`program`、`agents`、`noShell`、`agentShell`；卡片据此写“可执行命令”“可执行命令（含 agent）”或“仅 agent”），回 `{code, request}`；再轮询 `GET /v1/internal/pair/<request>`，等到允许（拿 TOKEN）或拒绝。不带 agent 的应用也用它（`ir pair`），见 `api.md`。设置里可停止接收申请，对方收到 403。
+- 配对（用户，2026-11-08）：插件里只有服务器地址，没有 TOKEN，人人同一个包。第一次不带 TOKEN 连 `/v1/internal/pair`（门外不用登录的口，什么也不给），报机器名、系统、装了哪些 agent，两边显示同一个 4 位配对码；网页弹确认卡片“home-pc 请求接入（Windows · dsh 0.2.2）”，带 Passkey 的面板点允许后，TOKEN 经这条连接发给执行端，它存起来以后自己用。限速，同时最多几个待批，10 分钟没人管作废。插件和 `ir join` 用同一个口：`POST /v1/internal/pair` 带握手内容（同 `hello` 的 `name`、`os`、`arch`、`program`、`agents`、`noShell`、`agentShell`；卡片据此写“可执行命令”“可执行命令（含 agent）”或“仅 agent”），回 `{code, request}`；再轮询 `GET /v1/internal/pair/<request>`，等到允许（拿 TOKEN）或拒绝。不带 agent 的应用也用它（`ir pair`），见 `api.md`。应用管理里一个开关（`配对`，开着直到关上，存在配置里，重启不变）；关着时对方收到 403。
 - 接入是单向的（用户，2026-11-08）：批准的一方能用申请方的 agent 和文件；反过来要对方也申请一次。
 - 一个 TOKEN 同时只有一条连接，新连上的顶掉旧的。
 - 断了执行端自己重连，退避 1 秒起、最多 30 秒。断开期间它启动的进程照跑，输出照写盘。
@@ -166,7 +166,7 @@ agent 的 `ir sh`：每条命令一个新进程，不经托管进程，不写文
 
 ## 开发测试用的 Bot
 
-`scripts/dev/shell-bot.mjs`：开发者自己的 Mac 上测 `ir sh` 用的小脚本，不进发布包。它借用 dsh 插件的执行端，配对一次后只提供命令执行（`agentShell`，按 `shell` 开着算），不带 agent。这种 Bot 谁都能照协议写一个；不想写代码就用 `ir join <地址> --shell`，再在应用管理里把它带的 agent 全关掉，效果一样（`--no-agents` 已删，2026-11-11；旧常驻单元里还有的照收、不起作用）。
+`scripts/dev/shell-bot.mjs`：开发者自己的 Mac 上测 `ir sh` 用的小脚本，不进发布包。它借用 dsh 插件的执行端，配对一次后只提供命令执行（`agentShell`，按 `shell` 开着算），不带 agent。用时再起：30 分钟没起过命令就退出（`IDLE=分钟`，0 不退），TOKEN 不被接受（401）也退出并删掉 TOKEN，下次启动重新配对。这种 Bot 谁都能照协议写一个；不想写代码就用 `ir join <地址> --shell`，再在应用管理里把它带的 agent 全关掉，效果一样（`--no-agents` 已删，2026-11-11；旧常驻单元里还有的照收、不起作用）。
 
 `scripts/dev/exec-mini.py`：只用 Python 标准库（WebSocket 也是手写）的最小执行端，证明照协议就能接入：配对、握手报本机找到的 agent（默认 pi）、进程、文件、心跳、重连、`run`。可同时接多个 Iridium，配置在 `~/.iridium-exec-mini/config.json`：`add <地址> [--name] [--agents pi,…] [--shell] [--agent-shell]`、`on`/`off`/`rm <地址>`、`ls`；`run` 常驻，配置改了 2 秒内跟上，`off` 断开并结束那边起的进程。默认只开自己的 agent，加 `--shell` 才执行命令。只有 401 才删 TOKEN 重新配对，403（带原因码）等一会儿再连。单个前台：`python3 -I scripts/dev/exec-mini.py https://<Iridium> [名字] [agent…] [--shell]`。要带自己的 User-Agent：Cloudflare 拒 Python 默认的（1010）。
 

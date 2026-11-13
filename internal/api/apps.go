@@ -342,12 +342,9 @@ type PairState struct {
 }
 
 // PairWindow is whether apps may ask to pair now (GET /v1/internal/pairing, the carried state "pairing"):
-// open till Until (ms), else closed (0). PUT /v1/internal/pairing opens it for Minutes (10 if 0, at most
-// 60), or closes it.
+// a switch, on till turned off (PUT /v1/internal/pairing), kept across restarts.
 type PairWindow struct {
-	Open    bool  `json:"open"`
-	Until   int64 `json:"until,omitempty"`
-	Minutes int   `json:"minutes,omitempty"`
+	Open bool `json:"open"`
 }
 
 // NeedState is how a Need went, as the asker sees it: never a secret.

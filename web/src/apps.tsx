@@ -2,9 +2,9 @@
 // with its avatar, name, type, whether it is online, when it was last active; one that carries
 // agents also its system and agents. The host is listed, not managed. A row opens the app's page:
 // its permissions (agents, scope), the agents it carries and whether command lines run there, its
-// logins (网页's: the browsers, and the unused invites as slots), rename, avatar, removal. 开放配对
-// opens pairing for 10 minutes, its key showing the time left; requests wait as cards on top, the
-// code checked against the one the app shows. No TOKEN is handed out here.
+// logins (网页's: the browsers, and the unused invites as slots), rename, avatar, removal. 配对 is a
+// switch, on till turned off; requests wait as cards on top, the code checked against the one the
+// app shows. No TOKEN is handed out here.
 import { Dialog } from "@base-ui/react/dialog";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { Check, ChevronLeft, ChevronRight, Link2, LoaderCircle, PencilLine, Plus, SlidersHorizontal, Trash2, X } from "lucide-react";
@@ -69,16 +69,7 @@ export function AppsPage({ onBack, side }: { onBack: () => void; side?: boolean 
   useLang();
   const q = useApps();
   const [view, setView] = useState<View>({ kind: "list" });
-  const win = usePairing();
-  const until = win?.open ? (win.until ?? 0) : 0;
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    if (!until) return;
-    setNow(Date.now());
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, [until]);
-  const pairing = until > now;
+  const pairing = !!usePairing()?.open;
   const apps = q.data?.apps ?? [];
   const open = view.kind === "app" ? apps.find((a) => a.id === view.id) : undefined;
   const at = useBeside(!!side && !!open);
@@ -90,7 +81,7 @@ export function AppsPage({ onBack, side }: { onBack: () => void; side?: boolean 
       </div>
     );
   return (
-    <Page title={t("settings.terminals")} onBack={onBack} backLabel={t("nav.me")} busy={q.isFetching} right={<PairingKey until={until} now={now} open={pairing} />}>
+    <Page title={t("settings.terminals")} onBack={onBack} backLabel={t("nav.me")} busy={q.isFetching} right={<PairingKey open={pairing} />}>
       {pairing && <p className="m-0 px-1 text-xs text-ink-3">{t("apps.pairHint")}</p>}
       <Needs />
       {q.isError && <p className="m-0 text-sm text-ink-3">{errText(q.error)}</p>}
@@ -158,15 +149,9 @@ function Page({ title, onBack, backLabel, busy, right, closes, children }: { tit
   );
 }
 
-/** m:ss till until. */
-const left = (until: number, now: number) => {
-  const s = Math.max(0, Math.round((until - now) / 1000));
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-};
-
-/** 开放配对: apps may ask to join for 10 minutes; the key shows the time left and closes it early.
- *  Requests wait as cards above, the code checked against the one the app shows. */
-function PairingKey({ until, now, open }: { until: number; now: number; open: boolean }) {
+/** 配对: a switch, on till turned off (kept across restarts). Requests wait as cards above, the
+ *  code checked against the one the app shows. */
+function PairingKey({ open }: { open: boolean }) {
   const [busy, setBusy] = useState(false);
   const set = async (on: boolean) => {
     setBusy(true);
@@ -178,22 +163,11 @@ function PairingKey({ until, now, open }: { until: number; now: number; open: bo
       setBusy(false);
     }
   };
-  const cls =
-    "g-press flex h-6 shrink-0 items-center gap-1.5 rounded-full bg-fill px-2 text-xs text-ink-2 tabular-nums hover:bg-fill-2 hover:text-ink disabled:opacity-50";
-  return open ? (
-    <Tip label={t("apps.pairClose")} side="bottom">
-      <button type="button" aria-label={t("apps.pairClose")} disabled={busy} onClick={() => void set(false)} className={cls}>
-        <span className="size-1.5 rounded-full bg-run" aria-hidden />
-        {t("apps.pairLeft", { left: left(until, now) })}
-      </button>
-    </Tip>
-  ) : (
-    <Tip label={t("apps.pairHint")} side="bottom">
-      <button type="button" disabled={busy} onClick={() => void set(true)} className={cls}>
-        <Link2 size={12} />
-        {t("apps.openPairing")}
-      </button>
-    </Tip>
+  return (
+    <label className="flex shrink-0 items-center gap-2 text-xs text-ink-2">
+      {t("apps.pairing")}
+      <Switch label={t("apps.pairing")} on={open} disabled={busy} onChange={(v) => void set(v)} />
+    </label>
   );
 }
 

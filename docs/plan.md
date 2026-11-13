@@ -9,7 +9,7 @@ Rhodium 的轻量 Go 版本：一个网页，管理主机和别的电脑上 agen
 ## 应用和登录（0.2）
 
 - 接入方都是**应用**，凭 TOKEN 访问；应用下面是**登录**（谁在说话）。主机不算应用，不可被管理；网页（`ir_web`）是内置应用，每个浏览器一个登录。见 `GLOSSARY.md`。
-- 应用只经**配对**进来：开放配对（应用管理里的“开放配对”，10 分钟），申请方显示配对码，主机或能批的网页登录核对后允许。
+- 应用只经**配对**进来：应用管理里的“配对”开关开着（开着直到关上），申请方显示配对码，主机或能批的网页登录核对后允许。
 - **权限**：用哪些 agent、哪些文件夹（位置 `应用名:路径`）。能用的 = 登录的 ∩ 应用的；范围外的会话看不到，不能用的 agent 的会话只能看。
 - **Claude** 只给本人的应用和登录（Claude 用户协议），只在建的时候定：配对时允许为本人的，或 `ir invite --claude`。
 - 批申请的只有人：主机上的人，或有 Claude、权限全部的网页登录；agent 的 `ir` 一律不能批。
@@ -115,11 +115,11 @@ ir run [--secret 名,…] -- 命令 …
 
 ```
 ir apps [logins [应用]] | rename <应用> <新名> | rm <应用>   应用和登录；登录写 应用/登录
-ir api PUT internal/pairing open:=true [minutes:=30]  开放配对（默认 10 分钟，最多 60）；open:=false 关掉；能批的人
+ir api PUT internal/pairing open:=true  打开配对（开着直到关上）；open:=false 关掉；能批的人
 ir needs | allow <id> | deny <id>   等人决定的事：应用接入、更新配对、应用变更、登录加入…
 ir invite [名字] [--claude]  网页的一次性邀请链接；--claude 带 Claude
 ir join <地址> [--shell]     把这台电脑接入另一个 Iridium（执行端），对方核对配对码后允许
-ir pair [地址] --name 名字 --into 文件|--env 文件:变量 [--login ID]   替程序申请接入（连同登录，默认 bot），允许后 TOKEN 写进文件，不打印；不给地址是本机，不用开放配对
+ir pair [地址] --name 名字 --into 文件|--env 文件:变量 [--login ID]   替程序申请接入（连同登录，默认 bot），允许后 TOKEN 写进文件，不打印；不给地址是本机，不用打开配对
 ir profile <名字> [--name 新名] [--avatar 图片] [--device computer|laptop|phone|none]
 ```
 
