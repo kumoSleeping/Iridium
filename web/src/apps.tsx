@@ -117,9 +117,9 @@ export function AppsPage({ onBack, side }: { onBack: () => void; side?: boolean 
 const COMPUTER_DOWNLOAD = "https://github.com/kumoSleeping/Iridium/releases/latest/download/";
 
 /** The lines that make a computer join this Iridium (docs/exec.md "ir-computer"): fetch
- *  ir-computer, pair, start at login; flags after the address. */
+ *  ir-computer, pair, start at login. The flags come first, in sight where a line is cut. */
 export function joinScript(os: "mac" | "win", at: string, flags = ""): string {
-  const run = `${at}${flags} --install`;
+  const run = `${flags} --install ${at}`.trim();
   if (os === "mac")
     return [
       "mkdir -p ~/.local/bin &&",
@@ -159,8 +159,8 @@ function AddComputer() {
         {(
           [
             ["apps.joinPlain", ""],
-            ["apps.joinRoots", ' --roots "~/work,~/notes"'],
-            ["apps.joinShell", " --shell"],
+            ["apps.joinRoots", '--roots "~/work,~/notes"'],
+            ["apps.joinShell", "--shell"],
           ] as const
         ).map(([label, flags]) => (
           <div key={label} className="flex flex-col gap-1">
