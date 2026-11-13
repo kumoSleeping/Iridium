@@ -512,7 +512,6 @@ export const zh = {
   "apps.type.plugin": "插件",
   "apps.type.script": "脚本",
   "apps.computer": "电脑",
-  "apps.runs": "能力",
   "apps.conns": "连接",
   "apps.connCount": "{n} 条连接",
   "apps.on": "所在电脑",

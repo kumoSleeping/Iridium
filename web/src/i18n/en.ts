@@ -512,7 +512,6 @@ export const en: Dict = {
   "apps.type.plugin": "Plugin",
   "apps.type.script": "Script",
   "apps.computer": "Computer",
-  "apps.runs": "Capabilities",
   "apps.conns": "Connections",
   "apps.connCount": "{n} connections",
   "apps.on": "Part of",
