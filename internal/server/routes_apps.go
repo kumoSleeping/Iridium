@@ -155,8 +155,10 @@ func (s *Server) apps(w http.ResponseWriter, r *http.Request) {
 	out := api.Apps{Apps: []api.App{}, Logins: []api.Login{}, Invites: []api.PendingInvite{}, Full: true}
 	computers := s.computers()
 	host, _ := s.gate().Endpoint(gate.HostID)
-	out.Apps = append(out.Apps, s.appOf(host))
-	web := api.App{ID: gate.WebApp, Name: gate.WebApp, Web: true, Rules: access.Default(), Device: api.DeviceComputer}
+	h := s.appOf(host)
+	h.Computer = s.hostComputer()
+	out.Apps = append(out.Apps, h)
+	web := api.App{ID: gate.WebApp, Name: gate.WebApp, Web: true, Rules: access.Default()}
 	var apps []api.App
 	for _, e := range a.Endpoints {
 		if e.Kind == gate.KindPanel {
@@ -356,6 +358,10 @@ func (s *Server) setDevice(w http.ResponseWriter, r *http.Request, ref string) {
 	}
 	if info.ID != c.ID() && !c.CanManage() {
 		forbid(w, errors.New("only ir_web's logins and the host set another's device"))
+		return
+	}
+	if info.Kind == gate.KindChannel && !info.Host() {
+		refuse(w, http.StatusUnprocessableEntity, "no_device", "only a browser and the host have a device")
 		return
 	}
 	if err := s.st.SetDevice(info.ID, string(req.Device)); err != nil {

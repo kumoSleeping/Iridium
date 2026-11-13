@@ -32,7 +32,7 @@ type OwnerConfirm struct {
 type App struct {
 	ID     string `json:"id"`
 	Name   string `json:"name"`
-	Type   string `json:"type,omitempty"`   // what it is shown as (computer…); display only
+	Type   string `json:"type,omitempty"`   // computer (it paired as one, saying its system), else what it is shown as (bot…)
 	Avatar string `json:"avatar,omitempty"` // URL for <img src>
 	// Host: the host, listed with the apps but not managed. Web: ir_web, the built-in app.
 	Host       bool  `json:"host,omitempty"`
@@ -46,15 +46,18 @@ type App struct {
 	// host's or ir_web's.
 	Perms     *Perms `json:"perms,omitempty"`
 	UsedToday int64  `json:"usedToday"` // tokens of the turns it started today
-	// Device: what it runs on, as the badge on its messages' avatar shows; the server always sets it.
+	// Device: what the host runs on, as the badge on its messages' avatar shows; a browser's own
+	// (Login.Device). Not another app's: a computer or a Bot has no device (k_glossary "电脑").
 	Device Device `json:"device,omitempty"`
-	// Computer: an app that runs agents or command lines (an executor, ir join): its computer, as
-	// it last said in its hello; nil for any other.
+	// Computer: a computer (docs/next/k_glossary.md "电脑"): the host's own, or what an app that
+	// runs agents or command lines (an executor: ir join, a dsh plugin) last said in its hello;
+	// nil for any other app.
 	Computer *Computer `json:"computer,omitempty"`
 }
 
-// Computer is an app's computer as its executor last said of itself (docs/exec.md "握手"): kept
-// in the store, so one away is listed too. GET /v1/internal/apps lists it with the app, to every caller.
+// Computer is a computer: the host's, or an app's as its executor last said of itself
+// (docs/exec.md "握手"), kept in the store, so one away is listed too. GET /v1/internal/apps lists
+// it with the app, to every caller. Code and routes call it a machine.
 type Computer struct {
 	OS   string `json:"os"` // windows | darwin | linux
 	Arch string `json:"arch,omitempty"`
@@ -72,7 +75,13 @@ type Computer struct {
 	Latency int64 `json:"latency,omitempty"`
 	// Program: what connects it, as its hello says (ir join and its version).
 	Program string `json:"program,omitempty"`
+	// Under: the same computer as app Under's (HostID for one on the host), whose page lists this
+	// app as one more of its connections; "" a computer of its own. By the machine its hello said.
+	Under string `json:"under,omitempty"`
 }
+
+// TypeComputer is the type of an app that paired as a computer (PairRequest.OS said).
+const TypeComputer = "computer"
 
 // AppAgents is PUT /v1/internal/apps/{id}/agents: the agents an app carries that are turned off there.
 // Any it reports later is on till turned off.
@@ -289,7 +298,7 @@ type NeedAnswer struct {
 // (its MachineID the host's) carries none.
 type PairRequest struct {
 	Name       string      `json:"name"`
-	Type       string      `json:"type,omitempty"` // computer, bot, script…: display only
+	Type       string      `json:"type,omitempty"` // bot, script…: what an app is shown as; one that says OS is a computer
 	OS         string      `json:"os,omitempty"`   // windows | darwin | linux
 	Arch       string      `json:"arch,omitempty"`
 	Program    string      `json:"program,omitempty"`

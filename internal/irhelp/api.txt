@@ -42,7 +42,7 @@ POST internal/machines/{id}/shell {line, cwd?} -> output  a command line at an a
 PATCH internal/guilds/{id} {name?, position?, split?} -> {ok}  rename a folder group, move it (0 first), split it by subfolder; host or web
 GET internal/guilds/{id}/voice - -> ws  the folder group's voice: a member's connection (docs/voice.md); a login only
 GET internal/guilds/{id}/voice/members - -> Member[]  who is in the group's voice  view=id,name,app,muted
-GET internal/apps - -> Apps  apps, computers, logins  view=apps.id,apps.name,apps.online,apps.computer.home,logins.id,logins.name
+GET internal/apps - -> Apps  apps, computers (the host's too; computer.under: one more connection of that app's computer), logins  view=apps.id,apps.name,apps.online,apps.computer.home,logins.id,logins.name
 GET internal/files?path&machine - -> DirListing  list a directory; socket only  view=entries.name,entries.size,entries.type
 GET internal/usage?days&app&by - -> Usage  tokens, cost; app=id|name|me, by=hour|weekhour  view=rows.day,rows.agent,rows.model,rows.output,rows.costUsd
 
@@ -123,7 +123,7 @@ PUT internal/me/profile {name?, avatar?, removeAvatar?} -> EndpointInfo  own nam
 PUT internal/me/device {device} -> {device}  own device: computer|laptop|phone|none
 PUT internal/me/perms {agents, scope} -> 202 {need}  an app asks for new permissions; apps only
 PUT internal/apps/{id}/profile {name?, avatar?, removeAvatar?} -> EndpointInfo  an app's name, avatar; host or web
-PUT internal/apps/{id}/device {device} -> {device}  an app's or login's device; host or web
+PUT internal/apps/{id}/device {device} -> {device}  a browser's or the host's device (an app has none); host or web
 PUT internal/apps/{id}/agents {off} -> {off}  agents turned off at an app's computer; person only
 PUT internal/apps/{id}/perms {agents, scope} -> Perms  an app's permissions; person only
 PUT internal/apps/{id}/logins/{login}/perms {agents, scope} -> Perms  a login's; person only

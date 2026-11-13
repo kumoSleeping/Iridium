@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"time"
@@ -13,6 +16,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/gate"
 	"github.com/kumoSleeping/iridium/internal/remote/wire"
+	"github.com/kumoSleeping/iridium/internal/version"
 )
 
 // The computers of the apps that run agents or command lines (docs/exec.md "握手"; draft 二「带
@@ -106,7 +110,7 @@ func (s *Server) machineSeen(id string) {
 		hi, ok = mc.Hello()
 	}
 	if ok && hi != nil {
-		m := api.Computer{OS: hi.OS, Arch: hi.Arch, Program: hi.Program, Home: hi.Home, Sep: hi.Sep, Agents: []api.ExecAgent{}, Shell: hi.ShellOn()}
+		m := keptComputer{Computer: api.Computer{OS: hi.OS, Arch: hi.Arch, Program: hi.Program, Home: hi.Home, Sep: hi.Sep, Agents: []api.ExecAgent{}, Shell: hi.ShellOn()}, MachineID: hi.MachineID}
 		for _, a := range hi.Agents {
 			// Only what Iridium runs at an executor.
 			if info, ok := agents.Get(api.Agent(a.Agent)); ok && info.FindRemote != nil {
@@ -122,8 +126,17 @@ func (s *Server) machineSeen(id string) {
 	s.terminalsChanged()
 }
 
+// keptComputer is what the store keeps of an executor: the API's Computer and the machine its
+// hello said (a hash, never listed), by which apps on one computer are told (Computer.Under).
+type keptComputer struct {
+	api.Computer
+	MachineID string `json:"machineId,omitempty"`
+}
+
 // computers is the computer of each app that has one, by its ID: as it last said, Claude only
 // at one allowed as the owner's own, the agents turned off there marked, whether it is connected.
+// Apps on one computer (one machine) are its connections: the host's own under the host, others
+// under the one that paired first (Under).
 func (s *Server) computers() map[string]*api.Computer {
 	out := map[string]*api.Computer{}
 	if s.st == nil {
@@ -134,10 +147,35 @@ func (s *Server) computers() map[string]*api.Computer {
 		s.logf("server: machines: %v", err)
 		return out
 	}
+	self := ""
+	if s.Remote != nil {
+		self = s.Remote.Self
+	}
+	first := map[string]string{} // machine: the app that paired first there
+	machineOf := map[string]string{}
 	for _, r := range rows {
-		var m api.Computer
-		if json.Unmarshal(r.Info, &m) != nil {
+		var k keptComputer
+		if json.Unmarshal(r.Info, &k) != nil || k.MachineID == "" {
 			continue
+		}
+		machineOf[r.Terminal] = k.MachineID
+		if was, ok := first[k.MachineID]; !ok || s.pairedBefore(r.Terminal, was) {
+			first[k.MachineID] = r.Terminal
+		}
+	}
+	for _, r := range rows {
+		var k keptComputer
+		if json.Unmarshal(r.Info, &k) != nil {
+			continue
+		}
+		m := k.Computer
+		if id := machineOf[r.Terminal]; id != "" {
+			switch {
+			case id == self:
+				m.Under = api.HostID
+			case first[id] != r.Terminal:
+				m.Under = first[id]
+			}
 		}
 		m.SeenAt = r.At
 		claude := access.HasClaude(s.rulesOf(r.Terminal, false))
@@ -161,6 +199,33 @@ func (s *Server) computers() map[string]*api.Computer {
 		out[r.Terminal] = &m
 	}
 	return out
+}
+
+// pairedBefore: app a paired before app b (by the ID, paired alike).
+func (s *Server) pairedBefore(a, b string) bool {
+	ia, _ := s.gate().Endpoint(a)
+	ib, _ := s.gate().Endpoint(b)
+	if !ia.CreatedAt.Equal(ib.CreatedAt) {
+		return ia.CreatedAt.Before(ib.CreatedAt)
+	}
+	return a < b
+}
+
+// hostComputer is the host's own computer: this system, the agents found here, command lines
+// on (a person's $ and agents' ir sh run here).
+func (s *Server) hostComputer() *api.Computer {
+	home, _ := os.UserHomeDir()
+	m := &api.Computer{OS: runtime.GOOS, Arch: runtime.GOARCH, Home: home, Sep: string(filepath.Separator), Agents: []api.ExecAgent{},
+		Online: true, SeenAt: time.Now().UnixMilli(), Shell: true, Program: "iridium " + version.Version}
+	if s.m == nil {
+		return m
+	}
+	for _, a := range agents.Describe() {
+		if !s.m.Missing(a.Agent) {
+			m.Agents = append(m.Agents, api.ExecAgent{Agent: string(a.Agent)})
+		}
+	}
+	return m
 }
 
 // computerOf is app id's computer; nil if it has none.

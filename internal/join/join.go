@@ -387,7 +387,7 @@ func (o *Options) pair(ctx context.Context) (string, error) {
 	if name == "" {
 		name = MachineName()
 	}
-	who := api.PairRequest{Name: name, Type: "computer", OS: runtime.GOOS, Arch: runtime.GOARCH, Program: o.program(), Shell: &o.Shell, NoShell: !o.Shell, AgentShell: o.Shell}
+	who := api.PairRequest{Name: name, Type: api.TypeComputer, OS: runtime.GOOS, Arch: runtime.GOARCH, Program: o.program(), Shell: &o.Shell, NoShell: !o.Shell, AgentShell: o.Shell}
 	const path = "/v1/internal/pair"
 	if o.Bot {
 		who = api.PairRequest{Name: name, Type: o.Type, Program: o.Program}

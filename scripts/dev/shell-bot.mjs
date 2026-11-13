@@ -1,8 +1,9 @@
-// A developer's test Bot, not shipped (docs/exec.md "开发测试用的 Bot"): pairs with an Iridium once,
-// then lets its agents run command lines on this machine (ir sh). No agents of its own; anyone can
-// write one like it. ir join <url> --shell, its agents turned off in 应用管理, does the same without Node.
-// Started when wanted, not kept running: it exits after IDLE minutes with nothing started (30 by
-// default, 0 never), and when the Iridium no longer takes its TOKEN (its Bot removed there).
+// ir join in Node, for a developer's tests, not shipped (docs/exec.md "开发测试用的连接"): joins this
+// computer to an Iridium once (a computer, k_glossary "电脑"), then lets its agents run command lines
+// here (ir sh). No agents of its own; anyone can write one like it. ir join <url> --shell, its
+// agents turned off in 应用管理, does the same without Node. Started when wanted, not kept running:
+// it exits after IDLE minutes with nothing started (30 by default, 0 never), and when the Iridium
+// no longer takes its TOKEN (removed there). The name: this computer's, unless given.
 // node scripts/dev/shell-bot.mjs <iridium url> [name]
 import fs from 'node:fs'
 import os from 'node:os'
@@ -10,7 +11,7 @@ import path from 'node:path'
 import { Executor, iridiumKey, refused } from '../../plugins/dsh-remote-iridium/executor.js'
 
 const url = (process.argv[2] || '').replace(/\/+$/, '')
-const name = process.argv[3] || 'mac-shell'
+const name = process.argv[3] || os.hostname().replace(/\.local$/, '')
 if (!/^https?:\/\//.test(url)) throw new Error('usage: node scripts/dev/shell-bot.mjs https://your-iridium [name]')
 // One per Iridium: its TOKEN and holders' files under the Iridium's host, as ir join keeps them.
 const state = path.join(os.homedir(), '.iridium-shell-bot', iridiumKey(url))
@@ -74,7 +75,7 @@ void ex.run()
 for (;;) {
   await sleep(60000)
   if (!ex.conn && (await refused(url, token))) {
-    // Its Bot removed there: the TOKEN is no use any more; pair again by starting it again.
+    // Removed there: the TOKEN is no use any more; pair again by starting it again.
     fs.rmSync(tokenFile, { force: true })
     say('the Iridium no longer takes this machine: exiting')
     quit(1)

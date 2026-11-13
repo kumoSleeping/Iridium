@@ -259,36 +259,37 @@ func waitUsage(t *testing.T, st *store.Store, id string) {
 	}
 }
 
-// A terminal's device: a computer until set; its own by /v1/internal/me/device, another's only from a
-// panel or 本机; by ID or name.
+// A device: the host's and a browser's, a computer until set; its own by /v1/internal/me/device,
+// another's only from a panel or the host. An app has none (k_glossary "电脑").
 func TestDevice(t *testing.T) {
 	t.Parallel()
 	l := start(t)
 	var tok api.Token
 	tok = l.newApp("bot", false)
-	bot, botID := tok.Token, tok.App.ID
+	bot := tok.Token
 	var me api.Me
 	l.want(200, bot, "GET", "/v1/internal/me", nil, &me)
-	if me.Device != api.DeviceComputer {
-		t.Fatalf("default device: %q", me.Device)
+	if me.Device != "" {
+		t.Fatalf("an app's device: %q", me.Device)
 	}
-	var got api.SetDevice
-	l.want(200, bot, "PUT", "/v1/internal/me/device", api.SetDevice{Device: api.DevicePhone}, &got)
-	if l.who("socket", botID).Device != api.DevicePhone || got.Device != api.DevicePhone {
-		t.Fatalf("own device: %+v", got)
-	}
+	l.want(422, bot, "PUT", "/v1/internal/me/device", api.SetDevice{Device: api.DevicePhone}, nil)
+	l.want(422, "socket", "PUT", "/v1/internal/apps/bot/device", api.SetDevice{Device: api.DeviceComputer}, nil)
 	l.want(400, bot, "PUT", "/v1/internal/me/device", api.SetDevice{Device: "tablet"}, nil)
 	l.want(403, bot, "PUT", "/v1/internal/apps/local/device", api.SetDevice{Device: api.DevicePhone}, nil)
 	l.want(422, "socket", "PUT", "/v1/internal/apps/nobody/device", api.SetDevice{Device: api.DevicePhone}, nil)
-	l.want(200, "socket", "PUT", "/v1/internal/apps/bot/device", api.SetDevice{Device: api.DeviceComputer}, &got)
+	l.want(200, "web", "GET", "/v1/internal/me", nil, &me)
+	if me.Device != api.DeviceComputer {
+		t.Fatalf("the host's default device: %+v", me)
+	}
+	var got api.SetDevice
 	l.want(200, "web", "PUT", "/v1/internal/me/device", api.SetDevice{Device: api.DevicePhone}, &got)
 	l.want(200, "web", "GET", "/v1/internal/me", nil, &me)
-	if me.ID != "local" || !me.Host || me.Device != api.DevicePhone {
+	if me.ID != "local" || !me.Host || me.Device != api.DevicePhone || got.Device != api.DevicePhone {
 		t.Fatalf("the host's device: %+v", me)
 	}
 	var as api.Apps
 	l.want(200, "socket", "GET", "/v1/internal/apps", nil, &as)
-	if len(as.Apps) != 2 || as.Apps[0].Device != api.DevicePhone || as.Apps[1].Device != api.DeviceComputer {
+	if len(as.Apps) != 2 || as.Apps[0].Device != api.DevicePhone || as.Apps[1].Device != "" {
 		t.Fatalf("listed: %+v", as.Apps)
 	}
 }

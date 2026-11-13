@@ -243,7 +243,7 @@ func TestExecPair(t *testing.T) {
 			l.want(200, "socket", "GET", "/v1/internal/apps", nil, &as)
 			var with []api.App
 			for _, a := range as.Apps {
-				if a.Computer != nil {
+				if a.Computer != nil && !a.Host {
 					with = append(with, a)
 				}
 			}
@@ -309,7 +309,7 @@ func TestExecPair(t *testing.T) {
 	// Its app removed, it is not listed.
 	l.want(200, "socket", "DELETE", "/v1/internal/apps/home-pc-2", nil, nil)
 	var as2 api.Apps
-	if l.want(200, "socket", "GET", "/v1/internal/apps", nil, &as2); slices.ContainsFunc(as2.Apps, func(a api.App) bool { return a.Computer != nil }) {
+	if l.want(200, "socket", "GET", "/v1/internal/apps", nil, &as2); slices.ContainsFunc(as2.Apps, func(a api.App) bool { return a.Computer != nil && !a.Host }) {
 		t.Fatalf("a removed machine: %+v", as2.Apps)
 	}
 	l.want(404, "socket", "GET", "/v1/internal/machines", nil, nil)

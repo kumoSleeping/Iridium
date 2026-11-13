@@ -225,8 +225,8 @@ func TestAdmin(t *testing.T) {
 	if code, out, errs := apiAs(agent, "PUT", "internal/apps/"+bot+"/profile", "avatar="+base64.StdEncoding.EncodeToString(img.Bytes())); code != 0 || !strings.Contains(out, "avatar") {
 		t.Fatalf("avatar: %d %q %q", code, out, errs)
 	}
-	if code, out, errs := apiAs(agent, "PUT", "internal/apps/"+bot+"/device", "device=phone"); code != 0 || !strings.Contains(out, "phone") {
-		t.Fatalf("device: %d %q %q", code, out, errs)
+	if code, _, errs := apiAs(agent, "PUT", "internal/apps/"+bot+"/device", "device=phone"); code != 1 || !strings.Contains(errs, "device") {
+		t.Fatalf("an app's device (it has none): %d %q", code, errs)
 	}
 	if code, _, _ := apiAs(agent, "PUT", "internal/apps/"+bot+"/device", "device=tablet"); code != 1 {
 		t.Fatal("a device that is none")

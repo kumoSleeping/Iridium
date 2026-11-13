@@ -690,7 +690,7 @@ export interface OwnerConfirm {
 export interface App {
   id: string;
   name: string;
-  type?: string; // what it is shown as (computer…); display only
+  type?: string; // computer (it paired as one, saying its system), else what it is shown as (bot…)
   avatar?: string; // URL for <img src>
   /**
    * Host: the host, listed with the apps but not managed. Web: ir_web, the built-in app.
@@ -709,18 +709,21 @@ export interface App {
   perms?: Perms;
   usedToday: number /* int64 */; // tokens of the turns it started today
   /**
-   * Device: what it runs on, as the badge on its messages' avatar shows; the server always sets it.
+   * Device: what the host runs on, as the badge on its messages' avatar shows; a browser's own
+   * (Login.Device). Not another app's: a computer or a Bot has no device (k_glossary "电脑").
    */
   device?: Device;
   /**
-   * Computer: an app that runs agents or command lines (an executor, ir join): its computer, as
-   * it last said in its hello; nil for any other.
+   * Computer: a computer (docs/next/k_glossary.md "电脑"): the host's own, or what an app that
+   * runs agents or command lines (an executor: ir join, a dsh plugin) last said in its hello;
+   * nil for any other app.
    */
   computer?: Computer;
 }
 /**
- * Computer is an app's computer as its executor last said of itself (docs/exec.md "握手"): kept
- * in the store, so one away is listed too. GET /v1/internal/apps lists it with the app, to every caller.
+ * Computer is a computer: the host's, or an app's as its executor last said of itself
+ * (docs/exec.md "握手"), kept in the store, so one away is listed too. GET /v1/internal/apps lists
+ * it with the app, to every caller. Code and routes call it a machine.
  */
 export interface Computer {
   os: string; // windows | darwin | linux
@@ -747,7 +750,16 @@ export interface Computer {
    * Program: what connects it, as its hello says (ir join and its version).
    */
   program?: string;
+  /**
+   * Under: the same computer as app Under's (HostID for one on the host), whose page lists this
+   * app as one more of its connections; "" a computer of its own. By the machine its hello said.
+   */
+  under?: string;
 }
+/**
+ * TypeComputer is the type of an app that paired as a computer (PairRequest.OS said).
+ */
+export const TypeComputer = "computer";
 /**
  * AppAgents is PUT /v1/internal/apps/{id}/agents: the agents an app carries that are turned off there.
  * Any it reports later is on till turned off.
@@ -1002,7 +1014,7 @@ export interface NeedAnswer {
  */
 export interface PairRequest {
   name: string;
-  type?: string; // computer, bot, script…: display only
+  type?: string; // bot, script…: what an app is shown as; one that says OS is a computer
   os?: string; // windows | darwin | linux
   arch?: string;
   program?: string;

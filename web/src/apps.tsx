@@ -1,10 +1,11 @@
-// The settings' 应用管理 (draft 四): the host, 网页 (ir_web) and the other apps in one list, each
-// with its avatar, name, type, whether it is online, when it was last active; one that carries
-// agents also its system and agents. The host is listed, not managed. A row opens the app's page:
-// its permissions (agents, scope), the agents it carries and whether command lines run there, its
-// logins (网页's: the browsers, and the unused invites as slots), rename, avatar, removal. 配对 is a
-// switch, on till turned off; requests wait as cards on top, the code checked against the one the
-// app shows. No TOKEN is handed out here.
+// The settings' 应用管理 (draft 四): two lists (k_glossary "电脑"). 应用: 网页 (ir_web) and the apps
+// that speak, each with its avatar, name, type, whether it is online, when it was last active.
+// 电脑: the host and the computers that joined, with their system and agents; apps on one machine
+// are one computer's connections, listed in its page, not apart. A row opens the page: an app's
+// permissions (agents, scope), the agents it carries and whether command lines run there, its
+// logins (网页's: the browsers, and the unused invites as slots), rename, avatar, removal; the
+// host's, its system, agents and connections only. 配对 is a switch, on till turned off; requests
+// wait as cards on top, the code checked against the one the app shows. No TOKEN is handed out here.
 import { Dialog } from "@base-ui/react/dialog";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { Check, ChevronLeft, ChevronRight, Link2, LoaderCircle, PencilLine, Plus, SlidersHorizontal, Trash2, X } from "lucide-react";
@@ -41,6 +42,12 @@ const typeName = (a: App) => {
   return m ? t(m[1]) : a.type || t("term.channel");
 };
 
+/** A computer (k_glossary "电脑"): the host, or an app that paired as one or has said its system. */
+const isComputer = (a: App) => !!a.host || !!a.computer || a.type === "computer";
+
+/** A computer's other connections: the apps on the same machine (Computer.under). */
+const connectionsOf = (apps: App[], id: string) => apps.filter((a) => a.computer?.under === id);
+
 /** Whether command lines run at a machine: none, a person's on the page, or agents' too (ir sh). */
 const shellOf = (m: Computer) => (m.shell ? "agents" : "none");
 
@@ -74,10 +81,13 @@ export function AppsPage({ onBack, side }: { onBack: () => void; side?: boolean 
   const open = view.kind === "app" ? apps.find((a) => a.id === view.id) : undefined;
   const at = useBeside(!!side && !!open);
   const list = () => setView({ kind: "list" });
+  const go = (id: string) => setView({ kind: "app", id });
+  const row = (a: App) => <AppRow key={a.id} a={a} machine={a.computer} conns={connectionsOf(apps, a.id).length} on={!!at && a.id === open?.id} onOpen={() => go(a.id)} />;
+  const computers = apps.filter((a) => isComputer(a) && !a.computer?.under);
   if (open && q.data && !at)
     return (
       <div key={open.id} className="g-slide h-full">
-        <AppPage app={open} data={q.data} machine={open.computer} onBack={() => setView({ kind: "list" })} />
+        <AppPage app={open} data={q.data} machine={open.computer} onBack={list} go={go} />
       </div>
     );
   return (
@@ -85,17 +95,18 @@ export function AppsPage({ onBack, side }: { onBack: () => void; side?: boolean 
       {pairing && <p className="m-0 px-1 text-xs text-ink-3">{t("apps.pairHint")}</p>}
       <Needs />
       {q.isError && <p className="m-0 text-sm text-ink-3">{errText(q.error)}</p>}
-      <section className="flex flex-col" aria-label={t("settings.terminals")}>
-        {apps.map((a) => (
-          <AppRow key={a.id} a={a} machine={a.computer} on={!!at && a.id === open?.id} onOpen={a.host ? undefined : () => setView({ kind: "app", id: a.id })} />
-        ))}
-      </section>
+      {q.data && (
+        <>
+          {apps.some((a) => !isComputer(a)) && <Group title={t("term.channel")}>{apps.filter((a) => !isComputer(a)).map(row)}</Group>}
+          <Group title={t("apps.computer")}>{computers.map(row)}</Group>
+        </>
+      )}
       {/* Nested in the settings' dialog: a press in it does not put the settings away; one outside
           it (another row too) puts it away. */}
       <Dialog.Root open={!!(open && at)} modal={false} onOpenChange={(o) => !o && list()}>
         <Dialog.Portal>
           <Dialog.Popup aria-label={open?.web ? t("term.panel") : open?.name} style={at} className="g-beside glass thick float fixed z-50 overflow-hidden rounded-lg text-ink outline-none">
-            {open && q.data && <AppPage key={open.id} app={open} data={q.data} machine={open.computer} onBack={list} closes />}
+            {open && q.data && <AppPage key={open.id} app={open} data={q.data} machine={open.computer} onBack={list} go={go} closes />}
           </Dialog.Popup>
         </Dialog.Portal>
       </Dialog.Root>
@@ -186,8 +197,8 @@ function Needs() {
   );
 }
 
-/** One app in the list; it opens its page (not the host's). */
-function AppRow({ a, machine, on, onOpen }: { a: App; machine?: Computer; on?: boolean; onOpen?: () => void }) {
+/** One app or computer in the list; it opens its page. conns: a computer's other connections. */
+function AppRow({ a, machine, conns, on, onOpen }: { a: App; machine?: Computer; conns?: number; on?: boolean; onOpen?: () => void }) {
   const me = useMe().data;
   const used = a.online ? t("term.online") : a.host ? t("term.localShort") : ago(a.lastSeenAt || a.createdAt || 0);
   const body = (
@@ -196,14 +207,15 @@ function AppRow({ a, machine, on, onOpen }: { a: App; machine?: Computer; on?: b
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-2">
           <span className="truncate text-base font-medium">{a.host ? t("me.local") : a.web ? t("term.panel") : a.name}</span>
-          {!a.web && <span className="shrink-0 rounded-sm bg-fill-2 px-1.5 text-[11px] leading-[18px] text-ink-2">{typeName(a)}</span>}
+          {!a.web && !isComputer(a) && <span className="shrink-0 rounded-sm bg-fill-2 px-1.5 text-[11px] leading-[18px] text-ink-2">{typeName(a)}</span>}
           {a.id === me?.app && !a.host && !a.web && <span className="shrink-0 text-xs text-ink-3">{t("term.this")}</span>}
         </span>
         {/* One line, cut at its end, never wrapped into columns (the panel is narrow). */}
         <span className="flex min-w-0 items-center gap-1.5 text-xs text-ink-3 tabular-nums">
           {a.online ? <span className="size-1.5 shrink-0 rounded-full bg-run" aria-hidden /> : null}
           <span className="min-w-0 truncate">
-            {used} · {t("term.today", { n: tokens(a.usedToday) })}
+            {used}
+            {conns ? <> · {t("apps.connCount", { n: conns + 1 })}</> : null} · {t("term.today", { n: tokens(a.usedToday) })}
             {a.web && a.logins ? <> · {t("apps.loginCount", { n: a.logins })}</> : null}
             {machine && <> · {machineLine(machine)}</>}
           </span>
@@ -229,8 +241,9 @@ function AppRow({ a, machine, on, onOpen }: { a: App; machine?: Computer; on?: b
   );
 }
 
-/** An app's page: what it is, its permissions, what it carries, its logins, removal. */
-function AppPage({ app, data, machine, onBack, closes }: { app: App; data: Apps; machine?: Computer; onBack: () => void; closes?: boolean }) {
+/** An app's page: what it is, its permissions, what it carries, its logins, removal; a computer's
+ *  also its other connections. The host's: its computer and connections only. */
+function AppPage({ app, data, machine, onBack, go, closes }: { app: App; data: Apps; machine?: Computer; onBack: () => void; go: (id: string) => void; closes?: boolean }) {
   const qc = useQueryClient();
   const [renaming, setRenaming] = useState(false);
   const [sure, setSure] = useState(false);
@@ -251,12 +264,38 @@ function AppPage({ app, data, machine, onBack, closes }: { app: App; data: Apps;
       toast(t("term.avatar"), { error: true, description: errText(e) });
     }
   };
-  const title = app.web ? t("term.panel") : app.name;
+  const title = app.web ? t("term.panel") : app.host ? t("me.local") : app.name;
+  const conns = connectionsOf(data.apps, app.id);
+  const under = machine?.under ? data.apps.find((a) => a.id === machine.under) : undefined;
+  const computer = machine && (
+    <Group title={t("apps.computer")}>
+      {under && <Line label={t("apps.on")}>{under.host ? t("me.local") : under.name}</Line>}
+      <Line label={t("confirm.system")}>{[systems[machine.os] ?? machine.os, machine.arch].filter(Boolean).join(" ") || "—"}</Line>
+      {!app.host && <Line label={t("apps.program")}>{machine.program || "—"}</Line>}
+      {app.host ? (
+        <Line label={t("apps.carried")}>{machine.agents.map((a) => a.agent).join(" · ") || t("apps.none")}</Line>
+      ) : machine.agents.length ? (
+        <CarriedAgents app={app.id} agents={machine.agents} />
+      ) : (
+        <Line label={t("apps.carried")}>{t("apps.none")}</Line>
+      )}
+      <Line label={t("confirm.commands")}>{t(`confirm.commands.${shellOf(machine)}`)}</Line>
+    </Group>
+  );
+  const connections = conns.length > 0 && (
+    <Group title={t("apps.conns")}>
+      {conns.map((a) => (
+        <AppRow key={a.id} a={a} machine={a.computer} onOpen={() => go(a.id)} />
+      ))}
+    </Group>
+  );
   return (
     <Page title={title} onBack={onBack} backLabel={t("settings.terminals")} closes={closes}>
       <section className="flex flex-col gap-2">
         <div className="flex items-center gap-3 px-2">
-          {app.web ? (
+          {app.host ? (
+            <LocalMark size={40} />
+          ) : app.web ? (
             <Avatar src={app.avatar} name={title} size={40} />
           ) : (
             <AvatarKey label={t("term.avatar")} onClick={() => file.current?.click()} src={app.avatar} name={app.name} size={40} type={app.type} />
@@ -264,8 +303,8 @@ function AppPage({ app, data, machine, onBack, closes }: { app: App; data: Apps;
           <span className="min-w-0 flex-1">
             <span className="flex items-center gap-2">
               {renaming ? <Rename id={app.id} name={app.name} done={() => setRenaming(false)} /> : <span className="truncate text-base font-medium">{title}</span>}
-              {!app.web && <span className="shrink-0 rounded-sm bg-fill-2 px-1.5 text-[11px] leading-[18px] text-ink-2">{typeName(app)}</span>}
-              {!app.web && !renaming && (
+              {!app.web && !isComputer(app) && <span className="shrink-0 rounded-sm bg-fill-2 px-1.5 text-[11px] leading-[18px] text-ink-2">{typeName(app)}</span>}
+              {!app.web && !app.host && !renaming && (
                 <IconKey label={t("term.renameIt")} onClick={() => setRenaming(true)} className="size-6">
                   <PencilLine size={13} />
                 </IconKey>
@@ -273,7 +312,7 @@ function AppPage({ app, data, machine, onBack, closes }: { app: App; data: Apps;
             </span>
             <span className="flex items-center gap-1.5 text-xs text-ink-3 tabular-nums">
               {app.online ? <span className="size-1.5 shrink-0 rounded-full bg-run" aria-hidden /> : null}
-              {app.online ? t("term.online") : ago(app.lastSeenAt || app.createdAt || 0)} · {t("term.today", { n: tokens(app.usedToday) })}
+              {app.online ? t("term.online") : app.host ? t("term.localShort") : ago(app.lastSeenAt || app.createdAt || 0)} · {t("term.today", { n: tokens(app.usedToday) })}
             </span>
           </span>
           {hasClaude(app.rules) && !app.web && (
@@ -293,16 +332,16 @@ function AppPage({ app, data, machine, onBack, closes }: { app: App; data: Apps;
       </section>
       {app.web ? (
         <WebLogins logins={logins} invites={data.invites} />
+      ) : app.host ? (
+        <>
+          {computer}
+          {connections}
+        </>
       ) : (
         <>
           <PermsEditor perms={app.perms} save={(p) => api.appPerms(app.id, p)} />
-          {machine && (
-            <Group title={t("apps.computer")}>
-              <Line label={t("confirm.system")}>{[systems[machine.os] ?? machine.os, machine.arch].filter(Boolean).join(" ") || "—"}</Line>
-              {machine.agents.length ? <CarriedAgents app={app.id} agents={machine.agents} /> : <Line label={t("apps.carried")}>{t("apps.none")}</Line>}
-              <Line label={t("confirm.commands")}>{t(`confirm.commands.${shellOf(machine)}`)}</Line>
-            </Group>
-          )}
+          {computer}
+          {connections}
           {logins.length > 0 && (
             <Group title={t("apps.logins")}>
               {logins.map((l) => (
@@ -330,7 +369,7 @@ function AppPage({ app, data, machine, onBack, closes }: { app: App; data: Apps;
             ) : (
               <button type="button" onClick={() => setSure(true)} className="g-press flex h-9 items-center gap-2 self-start rounded-md px-2 text-sm text-err hover:bg-fill">
                 <Trash2 size={15} />
-                {t("apps.delete")}
+                {t(machine?.under ? "apps.deleteConn" : isComputer(app) ? "apps.deleteComputer" : "apps.delete")}
               </button>
             )}
           </section>

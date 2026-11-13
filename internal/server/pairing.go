@@ -369,9 +369,13 @@ func cleanPair(m api.PairRequest) api.PairRequest {
 		m.OS = ""
 	}
 	m.Name = strings.TrimSpace(m.Name)
+	// A computer or an app, by what it says (k_glossary "电脑"): one that says its system is a
+	// computer, whatever its type says; no other is.
 	m.Type = truncRunes(strings.TrimSpace(m.Type), 16)
-	if m.Type == "" && m.OS != "" {
-		m.Type = "computer"
+	if m.OS != "" {
+		m.Type = api.TypeComputer
+	} else if m.Type == api.TypeComputer {
+		m.Type = ""
 	}
 	m.Arch, m.Program = truncRunes(m.Arch, 16), truncRunes(m.Program, 64)
 	m.Home, m.MachineID = truncRunes(strings.TrimSpace(m.Home), 1024), truncRunes(m.MachineID, 128)

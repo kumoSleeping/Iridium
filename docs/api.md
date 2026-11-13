@@ -316,7 +316,7 @@ Web Push，总开关在配置 `push`，默认关。VAPID 密钥存在状态目�
 
 ## 应用和登录
 
-主机（ID `local`，显示“主机”）不在表里，不可被管理。别的都是应用（表 `apps`，`type` 只用来显示），应用下面是登录（表 `logins`，主键 `(app, id)`，`approved_at` 为空即待批）。网页（`ir_web`）是内置应用：每个浏览器（一套 passkey）是它的一个登录，只在设了公网地址或已有登录时列出。每个应用、登录有设备 `device`（`computer`、`laptop`、`phone`、`none`）。
+主机（ID `local`，显示“主机”）不在表里，不可被管理。别的都是应用（表 `apps`，`type` 只用来显示），应用下面是登录（表 `logins`，主键 `(app, id)`，`approved_at` 为空即待批）。网页（`ir_web`）是内置应用：每个浏览器（一套 passkey）是它的一个登录，只在设了公网地址或已有登录时列出。设备 `device`（`computer`、`laptop`、`phone`、`none`）只有网页的登录和主机有；应用没有，设它 422 `no_device`。
 
 别的应用说话时用头 `Satori-User-ID`（或 `X-Iridium-Login`）指明登录；新的登录第一次说话回 403 `login_pending`，产生一条 `login_join` 需要；每个应用最多 20 个待批。
 
@@ -325,7 +325,7 @@ Web Push，总开关在配置 `push`，默认关。VAPID 密钥存在状态目�
 | `GET /v1/internal/me` | → `Me` | 调用者：`app`、`login`、`host`、`web`、`rules`、`public` |
 | `PUT /v1/internal/me/profile`、`PUT /v1/internal/apps/{id}/profile` | 资料 → `EndpointInfo` | 改名字、头像（见 `docs/gate.md`）。名字不合法 422 `bad_name`，带 `nameError`（`empty`、`too_long`、`invalid`、`reserved`、`letter`、`taken`） |
 | `PUT /v1/internal/me/device`、`PUT /v1/internal/apps/{id}/device` | `SetDevice` | 设备 |
-| `GET /v1/internal/apps` | → `Apps` | 应用（主机在最前、网页、其余）、登录（带 `perms`）、未用的邀请。没有秘密。谁都能调：不能管理的只拿公开部分（名字、类型、头像、在线、电脑，已批准的登录；不带 `rules`、`perms`、用量、待批的登录和邀请），能管理的 `full: true`。带 Agent 的应用（执行端）带 `computer`：系统、家目录、`sep`、报的 agent（关掉的 `off: true`）、`shell`、`online`、`latency`、`seenAt`。取代 `GET /v1/internal/machines` 和 hub 键 `machines`；电脑连上、断开、延迟变了都推 `terminals` |
+| `GET /v1/internal/apps` | → `Apps` | 应用（主机在最前、网页、其余）、登录（带 `perms`）、未用的邀请。没有秘密。谁都能调：不能管理的只拿公开部分（名字、类型、头像、在线、电脑，已批准的登录；不带 `rules`、`perms`、用量、待批的登录和邀请），能管理的 `full: true`。电脑带 `computer`：主机的是 Iridium 自己的（系统、家目录、找得到的 agent、`shell: true`）；执行端连接的是系统、家目录、`sep`、报的 agent（关掉的 `off: true`）、`shell`、`online`、`latency`、`seenAt`、`program`，和同一台电脑上的另一条连接时的 `under`（那台电脑的应用 ID，主机上的为 `local`）。取代 `GET /v1/internal/machines` 和 hub 键 `machines`；电脑连上、断开、延迟变了都推 `terminals` |
 | `PUT /v1/internal/apps/{id}/agents` | `AppAgents` → `AppAgents` | `{off: [...]}`：它带的 agent 里关掉哪些，其余开（新报的默认开）。关掉的不能在那里启动（新建、接管、重启都拒，403），网页新会话里不列；在跑的不停。能批的人。`ir apps agents <应用> [agent=on\|off …]` |
 | `DELETE /v1/internal/apps/{id}` | → `{ok}` | 删应用（连同 TOKEN、连接）或网页的登录、未用的邀请。只有人（主机、网页登录），agent 不行 |
 | `DELETE /v1/internal/apps/{id}/logins/{login}` | → `{ok}` | 删一个登录；别的应用的登录下次说话重新申请 |

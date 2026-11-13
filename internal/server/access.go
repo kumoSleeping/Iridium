@@ -354,10 +354,10 @@ func (s *Server) appOf(info gate.EndpointInfo) api.App {
 	a := api.App{
 		ID: info.ID, Name: info.Name, Type: info.Type, Avatar: info.Avatar, Online: info.Online,
 		CreatedAt: ms(info.CreatedAt), LastSeenAt: ms(info.LastSeenAt),
-		Rules: s.rulesOf(info.ID, false), UsedToday: s.usedToday(info.ID), Device: s.deviceOf(info.ID),
+		Rules: s.rulesOf(info.ID, false), UsedToday: s.usedToday(info.ID),
 	}
 	if info.Host() {
-		a.Host, a.Rules = true, access.Full()
+		a.Host, a.Rules, a.Device = true, access.Full(), s.deviceOf(info.ID)
 	}
 	return a
 }
@@ -377,7 +377,10 @@ func (s *Server) loginOf(info gate.EndpointInfo) api.Login {
 func (s *Server) meOf(c caller, info gate.EndpointInfo) api.Me {
 	id := c.Identity
 	m := api.Me{ID: info.ID, Name: info.Name, App: id.App, Login: id.Login, Avatar: info.Avatar, Host: id.Host(), Web: id.Web(),
-		Rules: s.rulesOf(info.ID, id.Host()), UsedToday: s.usedToday(info.ID), Device: s.deviceOf(info.ID), Public: s.web().Public()}
+		Rules: s.rulesOf(info.ID, id.Host()), UsedToday: s.usedToday(info.ID), Public: s.web().Public()}
+	if id.Host() || id.Web() {
+		m.Device = s.deviceOf(info.ID) // an app has none (k_glossary "电脑")
+	}
 	return m
 }
 
