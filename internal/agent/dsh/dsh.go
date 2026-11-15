@@ -48,7 +48,7 @@ const (
 	// LegacyProvider a model's set before models were dsh's ("deepseek-flash", no provider).
 	LegacyProvider = "deepseek-official"
 	DefaultModel   = LegacyProvider + "/deepseek-flash"
-	DefaultEffort  = "high" // what the adapter runs at when none is given
+	DefaultEffort  = "high" // what a session runs at when none is given: sent to dsh as such
 )
 
 // Commands are the slash commands the sdk server runs itself (session/query).
@@ -400,8 +400,12 @@ func (d *Driver) handshake(proc int, l launch, ready chan struct{}) {
 		}
 	}
 	params := map[string]any{"cwd": l.cwd, "provider": l.provider, "model": l.modelID, "approvalRequests": true, "capabilities": map[string]any{"userQuestions": true}}
-	if l.effort != "" {
-		params["reasoningEffort"] = l.effort
+	if e := l.effort; e != "" {
+		params["reasoningEffort"] = e
+	} else if m := modelIn(l.model, l.catalog); m == nil || (!m.NoEffort && slices.Contains(m.Efforts, DefaultEffort)) {
+		// Said, not left to dsh: without it some providers' models do not think at all (Mistral's
+		// DeepSeek), while the session shows DefaultEffort.
+		params["reasoningEffort"] = DefaultEffort
 	}
 	r, err := d.rpc(ctx, "initialize", params)
 	if err != nil {
