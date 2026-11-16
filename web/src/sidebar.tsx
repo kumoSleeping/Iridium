@@ -334,7 +334,7 @@ export function Sidebar(p: Props) {
             // (the user, 2026-11-06).
             plus={!gone(f.path) && p.wsPlus(
               { ...w, key: f.key, root: f.path },
-              <button type="button" onClick={(e) => e.stopPropagation()} aria-label={t("nav.newHere", { ws: f.name })} className="g-press -mr-1 grid size-6 place-items-center rounded-sm text-ink-3 group-hover:text-ink-2 hover:bg-fill-2 data-popup-open:bg-fill-2 data-popup-open:text-ink-2 pointer-coarse:size-8">
+              <button type="button" onClick={(e) => e.stopPropagation()} aria-label={t("nav.newHere", { ws: f.name })} className={plusKey(p.expanded(f.key))}>
                 <Plus size={15} />
               </button>,
               plusOpen === f.key,
@@ -369,8 +369,8 @@ export function Sidebar(p: Props) {
           place={placeGroup}
           up={up && (() => placeGroup(w.key, up.key, "top"))}
           down={down && (() => placeGroup(w.key, down.key, "bottom"))}
-          // Not its count: the "+" that opens a session here, always at the row's end, plain to
-          // see, darker when the row is hovered (the user, 2026-11-06).
+          // Not its count: the "+" that opens a session here, at the row's end (the user,
+          // 2026-11-06), seen while the group is open or the row hovered (plusKey).
           end={
             w.id !== 0 &&
             !gone(w.root) && (
@@ -379,7 +379,7 @@ export function Sidebar(p: Props) {
                 <VoiceMark guild={w.id} />
                 {p.wsPlus(
               w,
-              <button type="button" onClick={(e) => e.stopPropagation()} aria-label={t("nav.newHere", { ws: w.name })} className="g-press -mr-1 grid size-6 place-items-center rounded-sm text-ink-3 group-hover:text-ink-2 hover:bg-fill-2 data-popup-open:bg-fill-2 data-popup-open:text-ink-2 pointer-coarse:size-8">
+              <button type="button" onClick={(e) => e.stopPropagation()} aria-label={t("nav.newHere", { ws: w.name })} className={plusKey(open)}>
                 <Plus size={15} />
               </button>,
               plusOpen === w.key,
@@ -1274,3 +1274,8 @@ function Empty() {
   if (!listed && !down) return null;
   return <div className="g-fade px-2 pt-10 text-center text-sm text-ink-3">{t(listed ? "nav.empty" : "nav.offline")}</div>;
 }
+
+/** A group's or a folder's "+": seen while it is open, or while its row is hovered (a mouse only;
+ *  kumo, 2026-11-16); kept while its popover is. Unseen, it takes no press, its place kept. */
+const plusKey = (open: boolean) =>
+  cn("g-press -mr-1 grid size-6 place-items-center rounded-sm text-ink-3 group-hover:text-ink-2 hover:bg-fill-2 data-popup-open:bg-fill-2 data-popup-open:text-ink-2 pointer-coarse:size-8", !open && "invisible group-hover:visible data-popup-open:visible");
