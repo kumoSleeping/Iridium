@@ -26,3 +26,14 @@ export function turnsOf<T, W>(rows: Row<T, W>[]): Turn<T, W>[] {
   }
   return out;
 }
+
+/** A turn's rows split for its 过程 fold (said.tsx Earlier): those before its last words, when
+ *  they are more than one line already (words, or several rows); words, how many of them are
+ *  words. null: none to fold. */
+export function earlierOf<R>(rs: R[], isWords: (r: R) => boolean): { before: R[]; after: R[]; words: number } | null {
+  const last = rs.findLastIndex(isWords);
+  const before = last > 0 ? rs.slice(0, last) : [];
+  const words = before.filter(isWords).length;
+  if (!words && before.length < 2) return null;
+  return { before, after: rs.slice(last), words };
+}

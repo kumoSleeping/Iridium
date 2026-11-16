@@ -8,7 +8,7 @@ import { chatOf, KEPT_BLOCKS, Messages, unsent, watchTurns, type Sent } from "..
 import { Sha256 } from "../src/chat/sha256";
 import { nextChunk, upload } from "../src/chat/upload";
 import { getCarried, onCarried, setCarried } from "../src/store";
-import { keysFor, streamURL } from "../src/stream";
+import { also, carries, keysFor, streamURL } from "../src/stream";
 
 type Call = { method: string; url: string; body?: unknown; headers: Headers };
 let calls: Call[] = [];
@@ -114,6 +114,16 @@ describe("the event stream", () => {
     expect(keysFor("a", Array.from({ length: 40 }, (_, i) => `session:m${i}`))).toHaveLength(40);
     expect(keysFor("a").slice(-4)).toEqual(["session:a", "context:a", "viewers:a", "reads:a"]);
     expect(streamURL()).toMatch(/^wss?:\/\/.*\/v1\/events$/);
+  });
+  test("a channel's agents and the subagents at work ask for their states side by side", () => {
+    also(["session:sub1"], "subs");
+    also(["session:b", "context:b"]);
+    expect(carries("session:sub1") && carries("session:b")).toBe(true);
+    also([], "subs");
+    expect(carries("session:sub1")).toBe(false);
+    expect(carries("context:b")).toBe(true);
+    also([]);
+    expect(carries("session:b")).toBe(false);
   });
   test("the store: whole values, null drops, listeners told", () => {
     const told: string[] = [];

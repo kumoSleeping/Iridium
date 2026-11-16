@@ -5,13 +5,13 @@
 // drafts from the stream. Loaded only once a chat opens or the page is idle. One page, one agent
 // or several (kumo, 2026-11-15: 会话页不换页，多一个 agent 只是多一个成员): once its channel has
 // another agent, the others' words go in their places among its own (channel/side.ts, merge.ts),
-// their at-work frames under the words that called them; its subagents at work under the steps
-// that started them.
+// their at-work frames under the words that called them; its subagents at work each a turn of its
+// own at the end, drawn live from its record (SubTurn).
 import { Menu } from "@base-ui/react/menu";
 import { Popover } from "@base-ui/react/popover";
 import { BarChart3, Ellipsis, FolderOpen, Globe, ListTree, Plus, Settings } from "lucide-react";
 import type { Block, Status } from "../api/types.gen";
-import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type DragEvent, type ReactNode } from "react";
+import { lazy, Suspense, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type DragEvent, type ReactNode } from "react";
 import type { SessionState as LiveSession } from "../api/types.gen";
 import { api } from "../api/client";
 import { LinkDot } from "../link";
@@ -25,15 +25,15 @@ import { openChat, openUsage } from "../route";
 import { PULL } from "../sheet";
 import { MenuItems, Rename, sessionActions, sessionTags } from "../sidebar";
 import { useConfirms, useList, useSession } from "../store";
-import { drafts, opened } from "../stream";
+import { also, carries, drafts, opened } from "../stream";
 import { errText, toast } from "../toast";
 import { groupPath, working } from "../tree";
 import { agentName, cn, IrMark, Lamp, lampOf, Leaving, LogoLamp, LogoStack, PopSurface, sessionStatusText, tilde, Tip, titleOf, untitled } from "../ui";
 import { givenTurn, groupMessages, isMulti, type AgentRow, type GivenTurn, type Msg } from "./channel/lib";
-import { betweenAgents, callerOf, foreignOf, givenHere, held, HOLD, linesOf, marksAt, named as namedIn, ownAnchors, slotsOf, subsAt, type Anchor, type RowTime } from "./channel/merge";
+import { betweenAgents, callerOf, foreignOf, givenHere, held, HOLD, linesOf, marksAt, named as namedIn, ownAnchors, slotsOf, type Anchor, type RowTime } from "./channel/merge";
 import { LongWords } from "./longwords";
-import { dispatched } from "./dispatch";
-import { Dispatching, SubAtWork } from "./subwork";
+import { dispatched, type Start } from "./dispatch";
+import { Dispatching, SubFaceKey, SubHead, useSub } from "./subwork";
 import { alignBack, loadParts, sideReady, useSide } from "./channel/side";
 import { relays, type Relay } from "../satori";
 import { AgentFace } from "./channel/members";
@@ -71,7 +71,7 @@ import { placeDropped, type NamedPlace } from "./at";
 import { PlaceIcon, placeOf } from "./mention";
 import { spotsOf, type Spot } from "./where";
 import { Compaction, Earlier, Pending, Relayed, Running, Said, useWhenRow, When } from "./said";
-import { turnsOf, type Row } from "./turns";
+import { earlierOf, turnsOf, type Row } from "./turns";
 import { Stick, toEnd } from "./stick";
 import { VoiceDock } from "../voice/dock";
 
@@ -171,6 +171,15 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
   else if (had.current && !lost) setLost(true);
   if (real && lost) setLost(false);
   const [chat] = useState(() => chatOf(id));
+  // Its subagents at work (kumo, 2026-11-15: members that only read, no rows in the sidebar;
+  // 2026-11-16: each a turn of its own, outside its parent's, live as the agent's): their states
+  // on the stream beside the channel's agents', as far as it has room (SubTurn).
+  const subs = (list ?? []).filter((x) => x.subagent && x.parent === id && working(x, row, Date.now()));
+  const subKey = subs.map((x) => x.id).join(" ");
+  useEffect(() => {
+    also(subKey ? subKey.split(" ").map((x) => `session:${x}`) : [], "subs");
+    return () => also([], "subs");
+  }, [subKey]);
   const log = chat.log;
   const [, redraw] = useState(0);
   const changed = () => redraw((n) => n + 1);
@@ -446,13 +455,13 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
   // When each row was written, for the others' words to go in their places (merge.ts slotsOf):
   // steps folded have no time of their own (they go with the words after them), only since when
   // (a turn still at its steps has no words yet: what called it stays above them).
-  let rowTimes: RowTime[] = [];
+  const rowTimes: RowTime[] = [];
   const sent = dispatched(shown);
-  // The steps each row holds: a subagent at work goes under the call that started it.
-  const stepsOf: { key: string; steps: { id?: string; name?: string; input?: string }[] }[] = [];
+  // The steps each row holds, for the 过程 fold's count.
+  const stepsAt = new Map<string, number>();
   // The own agent's words by row, for the fold of words between agents.
   const wordsOf = new Map<string, string>();
-  let rows: Row<ReactNode, Works>[] = (busy ? shown.filter((b) => b.kind !== "running") : shown).flatMap((b) => {
+  const rows: Row<ReactNode, Works>[] = (busy ? shown.filter((b) => b.kind !== "running") : shown).flatMap((b) => {
     // A call from another channel it is in (chat/channel/lib givenTurn): Iridium's message on
     // the left, what follows its work there (Relayed).
     // As the record says it, a Satori forward (satori.ts relays); else read from its words.
@@ -460,7 +469,7 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
     // Its own channel's words forwarded to it: drawn from the log, by who said them.
     if (ready && b.kind === "user" && givenHere(id, relay, b.text)) return [];
     rowTimes.push(b.kind === "fold" ? { since: b.steps[0]?.time } : b.kind === "running" ? { since: b.tool.time } : b.time);
-    stepsOf.push({ key: b.at, steps: b.kind === "fold" ? b.steps.map((x) => ({ id: x.id, name: x.name, input: x.input })) : [] });
+    if (b.kind === "fold") stepsAt.set(b.at, b.steps.length);
     if (b.kind === "assistant") wordsOf.set(b.at, b.text ?? "");
     const given: GivenTurn | null = relay ? { seq: relay.seq, words: relay.msgs.at(-1)?.text ?? "", context: relay.context, ...(relay.channel !== id ? { channel: { id: relay.channel, name: relay.name } } : {}) } : b.kind === "user" ? givenTurn(b.text ?? "") : null;
     const time = b.kind === "user" ? b.time : undefined;
@@ -489,25 +498,6 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
         </div>
       ),
     });
-  }
-  // Its subagents at work (kumo, 2026-11-15: members that only read, no rows in the sidebar):
-  // each under the step that started it, coming in as one called does; those whose step is not
-  // shown, at the end.
-  const subs = (list ?? []).filter((x) => x.subagent && x.parent === id && working(x, row, Date.now()));
-  const placed = subsAt(stepsOf, subs);
-  if (placed.at.size) {
-    const r2: typeof rows = [];
-    const t2: typeof rowTimes = [];
-    rows.forEach((r, i) => {
-      r2.push(r);
-      t2.push(rowTimes[i]);
-      for (const x of placed.at.get(r.key) ?? []) {
-        r2.push({ key: `sub:${x.id}`, agent: true, node: <div key={`sub:${x.id}`} className="g-arrive"><div><SubAtWork s={x} /></div></div> });
-        t2.push(undefined);
-      }
-    });
-    rows = r2;
-    rowTimes = t2;
   }
   // The others' words (once its channel has another agent): each where it was said among the
   // own agent's rows, a speaker's in a row under one head (merge.ts); the read marks under the
@@ -618,7 +608,6 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
   const activity = <Activity stop={stop} calls={log.drafts.filter((d) => d.tool && !renamesDraft(d))} running={shown.flatMap((b) => (b.kind === "running" ? [b.tool] : []))} cwd={cwd} quiet={s.status !== "waiting" && !log.drafts.some((d) => !d.whole && !d.tool)} grew={grew} under={headless} />;
   // A turn's rows: those before its last words under one line once it has ended (Earlier), when
   // they are more than one line already (words, or several rows).
-  const stepsAt = new Map(stepsOf.map((x) => [x.key, x.steps.length]));
   // The turn at work as this page last saw it: once it ends, what it folds folds before you.
   // (none of its rows yet: the turn after the last row, keyed by it, turns.ts)
   const lastTurn = turns.at(-1);
@@ -633,15 +622,13 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
   const liveNow = busy && !waking && !!lastKey && ((!pendingShown && !compacting) || liveLast.current === lastKey);
   if (liveNow) liveLast.current = lastKey;
   const rowsOf = (rs: Row<ReactNode, Works>[], done: boolean, key: string) => {
-    const last = rs.findLastIndex((r) => wordsOf.has(r.key));
-    const before = last > 0 ? rs.slice(0, last) : [];
-    const words = before.filter((r) => wordsOf.has(r.key)).length;
-    if (!words && before.length < 2) return rs.map((r) => r.node);
+    const e = earlierOf(rs, (r) => wordsOf.has(r.key));
+    if (!e) return rs.map((r) => r.node);
     return [
-      <Earlier key={`earlier:${rs[0]!.key}`} done={done} fresh={key === liveTurn.current} words={words} steps={before.reduce((n, r) => n + (stepsAt.get(r.key) ?? 0), 0)}>
-        {before.map((r) => r.node)}
+      <Earlier key={`earlier:${rs[0]!.key}`} done={done} fresh={key === liveTurn.current} words={e.words} steps={e.before.reduce((n, r) => n + (stepsAt.get(r.key) ?? 0), 0)}>
+        {e.before.map((r) => r.node)}
       </Earlier>,
-      ...rs.slice(last).map((r) => r.node),
+      ...e.after.map((r) => r.node),
     ];
   };
   const turnNode = (x: (typeof turns)[number], i: number) =>
@@ -730,10 +717,12 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
               }}
             />
           )}
-          {placed.rest.map((x) => (
-            <div key={x.id} className="g-arrive -mt-2">
+          {/* Its subagents at work, each a turn of its own (kumo, 2026-11-16), coming in as one
+              called does; gone as it hands back, its hand-back the parent's (dispatched.tsx). */}
+          {subs.map((x) => (
+            <div key={x.id} className="g-arrive">
               <div>
-                <SubAtWork s={x} />
+                <SubTurn s={x} />
               </div>
             </div>
           ))}
@@ -1062,20 +1051,113 @@ type Works = { given: GivenTurn; relay?: Relay; time?: number };
  *  as small as a phone's). */
 /** call: 提及 in its face's menu, as another's face has it (kumo, 2026-11-16). */
 function AgentTurn({ channel, a, may, bars, talk, call, time, children }: { channel: string; a: AgentRow; may: boolean; bars?: ReactNode; talk?: () => void; call?: (nick: string) => void; time?: number; children: ReactNode }) {
-  const row = useWhenRow();
   return (
-    <div {...row} className={cn(row.className, "flex min-w-0 items-start gap-2.5")}>
-      <AgentFace channel={channel} a={a} may={may} talk={talk} call={call} />
-      <div className="flex min-w-0 flex-1 flex-col gap-5">
-        <div className="-mb-3.5 flex h-4 min-w-0 items-center gap-1.5">
+    <TurnFrame
+      face={<AgentFace channel={channel} a={a} may={may} talk={talk} call={call} />}
+      head={
+        <>
           {a.nick && <span className="shrink-0 text-xs font-medium text-ink-2">{a.nick}</span>}
           <span className={cn("min-w-0 truncate text-xs", a.nick ? "text-ink-4" : "font-medium text-ink-2")}>{a.name}</span>
           {bars}
           <When time={time} />
-        </div>
+        </>
+      }
+    >
+      {children}
+    </TurnFrame>
+  );
+}
+
+/** A turn's frame: the face at the left, the head's line over the rest. */
+function TurnFrame({ face, head, children }: { face: ReactNode; head: ReactNode; children: ReactNode }) {
+  const row = useWhenRow();
+  return (
+    <div {...row} className={cn(row.className, "flex min-w-0 items-start gap-2.5")}>
+      {face}
+      <div className="flex min-w-0 flex-1 flex-col gap-5">
+        <div className="-mb-3.5 flex h-4 min-w-0 items-center gap-1.5">{head}</div>
         {children}
       </div>
     </div>
+  );
+}
+
+/** Its blocks are drawn as the parent's own: who sent words is not asked (it is told only by
+ *  its parent, whose words to it are the parent's line, not here). */
+const noSource = () => ({ kind: "you" }) as ReturnType<ComponentProps<typeof Said>["source"]>;
+
+/** A subagent at work as its own turn (kumo, 2026-11-16: live as the agent's, outside its
+ *  parent's turn): its face (its card) and name, then what it has done and said, read from its
+ *  record as it grows (its state's end on the stream; the list's when the stream has no room
+ *  for it), folded as the agent's turn at work is; the call it runs, or the dots, at its end.
+ *  What it was told is its parent's line (→ task), not drawn again here. */
+function SubTurn({ s }: { s: Session }) {
+  useLang();
+  const { parent, d } = useContext(Dispatching);
+  const start: Start | undefined = s.call ? d?.starts.find((x) => x.id === s.call) : undefined;
+  const sub = useSub(parent ?? s.parent, { name: start?.name ?? "", model: start?.model, session: s });
+  const st = useSession(s.id);
+  const [chat] = useState(() => chatOf(s.id));
+  const log = chat.log;
+  const [, redraw] = useState(0);
+  const changed = () => redraw((n) => n + 1);
+  useEffect(() => {
+    let live = true;
+    const more = () => void log.newer().then(() => live && changed(), () => {});
+    if (!log.loaded || !fresh(log.came)) more();
+    opened.add(more);
+    return () => {
+      live = false;
+      opened.delete(more);
+    };
+  }, [s.id]);
+  // Its record grew: what came since.
+  const carried = carries(`session:${s.id}`);
+  const end = st?.end ?? 0;
+  useEffect(() => {
+    if (!log.loaded || (carried && end <= log.end)) return;
+    let live = true;
+    void log.newer().then(() => live && changed(), () => {});
+    return () => void (live = false);
+  }, [carried ? end : s.updatedAt, log.loaded]);
+  const shown = folded(log.blocks).filter((b) => b.kind !== "user");
+  const running = shown.flatMap((b) => (b.kind === "running" ? [b.tool] : []));
+  const rows = shown.filter((b) => b.kind !== "running");
+  const cwd = st?.cwd ?? s.cwd;
+  const node = (b: (typeof rows)[number]) => <Said key={b.at} b={b} session={s.id} cwd={cwd} source={noSource} onJump={openChat} />;
+  const e = earlierOf(rows, (b) => b.kind === "assistant");
+  const face = <SubFaceKey sub={sub} />;
+  const time = rows.map((b) => (b.kind === "fold" ? b.steps[0]?.time : "time" in b ? b.time : undefined)).find(Boolean);
+  const head = (
+    <SubHead name={sub.name}>
+      <When time={time} />
+    </SubHead>
+  );
+  const activity = (under: boolean) => <Activity calls={[]} running={running} cwd={cwd} quiet grew={`${s.id} ${log.end} ${running.length}`} under={under} />;
+  return (
+    <Dispatching.Provider value={{ parent: s.id, by: sub.name, d: dispatched(shown) }}>
+      <div role="group" aria-label={`${sub.name} · ${t("sub.working")}`} className="flex min-w-0 flex-col gap-5">
+        {rows.length ? (
+          <>
+            <TurnFrame face={face} head={head}>
+              {e
+                ? [
+                    <Earlier key="earlier" done={false} words={e.words} steps={e.before.reduce((n, b) => n + (b.kind === "fold" ? b.steps.length : 0), 0)}>
+                      {e.before.map(node)}
+                    </Earlier>,
+                    ...e.after.map(node),
+                  ]
+                : rows.map(node)}
+            </TurnFrame>
+            {activity(false)}
+          </>
+        ) : (
+          <TurnFrame face={face} head={head}>
+            {activity(true)}
+          </TurnFrame>
+        )}
+      </div>
+    </Dispatching.Provider>
   );
 }
 

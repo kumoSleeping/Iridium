@@ -2,7 +2,7 @@
 // 劳务派遣, 也算个人的): the parent's dispatch and its later words to it are the parent's words
 // addressed to it, a line that opens to the whole of them; what it hands back is one message
 // of its own, its face and name over it, folded when long. Which call, which notice goes with
-// which subagent: dispatch.ts. Its face, card and at-work frame: subwork.tsx.
+// which subagent: dispatch.ts. Its face and card: subwork.tsx; its turn at work: chat.tsx SubTurn.
 import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, ChevronRight, CircleX, LoaderCircle } from "lucide-react";
 import { useContext, useState } from "react";

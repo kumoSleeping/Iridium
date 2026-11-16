@@ -1,20 +1,19 @@
 // A harness's own subagent as a person in its parent's chat (kumo, 2026-11-15: subagents are
 // members that only read, no rows of theirs in the sidebar; 2026-11-16: 劳务派遣, 也算个人的):
-// its face (its logo with the subagent badge), its task as its name, its card, and the frame
-// it has while at work: what it said last, the dots. Gone as it is done: what it handed back
-// is a message of its own (dispatched.tsx).
+// its face (its logo with the subagent badge), its task as its name, its card. At work, a turn
+// of its own drawn live from its record (chat.tsx SubTurn); done, what it handed back is a
+// message of its own (dispatched.tsx).
 import { Popover } from "@base-ui/react/popover";
 import { Bot, ScrollText } from "lucide-react";
 import { createContext, useContext, useState } from "react";
 import type { Agent, Session } from "../api/types.gen";
-import { t, useLang } from "../i18n";
+import { t } from "../i18n";
 import { openChat } from "../route";
 import { useList } from "../store";
 import { working } from "../tree";
 import { cn, Lamp, Logo, PopSurface } from "../ui";
 import { CARD_POP, ProfileCard } from "./channel/profilecard";
-import { subFor, type Dispatched, type Start } from "./dispatch";
-import { Waiting } from "./live";
+import { subFor, type Dispatched } from "./dispatch";
 
 /** What a chat lends the subagents drawn in it: parent, its session; by, what its agent is
  *  called (who dispatched them); d, the dispatches on its page. */
@@ -110,27 +109,5 @@ export function SubHead({ name, children }: { name: string; children?: React.Rea
       <span className="shrink-0 text-xs text-ink-4">{t("sub.kind")}</span>
       {children}
     </span>
-  );
-}
-
-/** One at work: its face (its card), its head, what it said last and the dots, which pressed
- *  open its record. */
-export function SubAtWork({ s }: { s: Session }) {
-  useLang();
-  const { parent, d } = useContext(Dispatching);
-  const start: Start | undefined = s.call ? d?.starts.find((x) => x.id === s.call) : undefined;
-  const sub = useSub(parent ?? s.parent, { name: start?.name ?? "", model: start?.model, session: s });
-  const last = s.last?.role === "assistant" ? s.last.text.split("\n").find((l) => l.trim()) : undefined;
-  return (
-    <div className="flex w-full min-w-0 items-start gap-2.5" role="status" aria-label={`${sub.name} · ${t("sub.working")}`}>
-      <SubFaceKey sub={sub} />
-      <button type="button" onClick={() => openChat(s.id)} aria-label={t("channel.session")} className="g-press flex min-w-0 flex-1 flex-col gap-1.5 rounded-md text-left">
-        <SubHead name={sub.name} />
-        {last && <span className="truncate text-sm text-ink-3">{last}</span>}
-        <span className="flex h-7 items-center pointer-coarse:h-9">
-          <Waiting on quiet={`${s.id} ${s.updatedAt}`} />
-        </span>
-      </button>
-    </div>
   );
 }

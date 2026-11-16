@@ -3,7 +3,7 @@
 import { describe, expect, test } from "vitest";
 import type { ChannelMessage } from "../src/api/client";
 import { merge, msgOf, type Msg } from "../src/chat/channel/lib";
-import { betweenAgents, callerOf, FOLD_AT, FOLD_SHOW, foreignOf, givenHere, held, HOLD, linesOf, marksAt, named, ownAnchors, slotsOf, subsAt } from "../src/chat/channel/merge";
+import { betweenAgents, callerOf, FOLD_AT, FOLD_SHOW, foreignOf, givenHere, held, HOLD, linesOf, marksAt, named, ownAnchors, slotsOf } from "../src/chat/channel/merge";
 
 const OWN = "own";
 const said = (n: number, session: string, text = "hi", time = n * 10, data: ChannelMessage["_data"] = {}): Msg => msgOf({ id: String(n), content: text, user: { id: `agent:${session}`, name: "Claude", nick: session }, created_at: time, _data: { session, ...data } })!;
@@ -111,28 +111,6 @@ describe("the hand-over", () => {
     expect(callerOf([person(1, "@Pi-95790 hi")], "Pi-9579", "pi")).toBeUndefined();
     expect(callerOf([person(1, "@a.b+(c) go")], "a.b+(c)", "x")).toBe(1);
     expect(callerOf([person(1, "@axb go")], "a.b", "x")).toBeUndefined();
-  });
-});
-
-describe("subagents at work", () => {
-  const call = (description: string, name = "Agent") => ({ name, input: JSON.stringify({ description, prompt: "…" }) });
-  test("under the row holding the Agent call that started it, by its description; the rest at the end", () => {
-    const rows = [
-      { key: "1.0", steps: [call("count files")] },
-      { key: "2.0", steps: [] },
-      { key: "3.0", steps: [{ name: "Bash", input: "{}" }, call("lint", "Task")] },
-    ];
-    const { at, rest } = subsAt(rows, [{ id: "a", title: "count files" }, { id: "b", title: "lint" }, { id: "c", title: "not called here" }, { id: "d" }]);
-    expect(Object.fromEntries([...at].map(([k, ss]) => [k, ss.map((s) => s.id)]))).toEqual({ "1.0": ["a"], "3.0": ["b"] });
-    expect(rest.map((s) => s.id)).toEqual(["c", "d"]);
-  });
-  test("by the id of the call that started it first: two calls with one description each get their own", () => {
-    const rows = [
-      { key: "1.0", steps: [{ id: "t1", ...call("same") }] },
-      { key: "2.0", steps: [{ id: "t2", ...call("same") }] },
-    ];
-    const { at } = subsAt(rows, [{ id: "a", title: "same", call: "t1" }, { id: "b", title: "same", call: "t2" }]);
-    expect(Object.fromEntries([...at].map(([k, ss]) => [k, ss.map((s) => s.id)]))).toEqual({ "1.0": ["a"], "2.0": ["b"] });
   });
 });
 

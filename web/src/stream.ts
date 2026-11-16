@@ -34,8 +34,13 @@ const link = (l: Partial<Link>) => setCarried("link", { ...(getCarried<Link>("li
 const ALWAYS = ["list", "guilds", "quota", "update", "needs", "pairing", "terminals", "channels", "avatars", "cards", "voice", "ats", "memory", "roles"];
 /** How many states a stream carries at most (internal/server watchStates). */
 export const MAX_KEYS = 40;
-/** More states the open chat asks for, in the order it wants them: a channel's other agents. */
+/** More states the open chat asks for, in the order it wants them: a channel's other agents, then
+ *  its subagents at work; each source's own (also). */
 let extra: string[] = [];
+const extras = new Map<Extra, string[]>();
+/** Who asks for more states: a channel's other agents, the subagents at work in the open chat. */
+export type Extra = "agents" | "subs";
+const EXTRAS: Extra[] = ["agents", "subs"];
 /** What the stream last brought of each state every page carries, as it came: a stream opened
  *  again (each chat opened opens one) brings them all whole again, and one unchanged is not set
  *  again, the sidebar and the rest drawn again for nothing. Not the open session's: chats.ts
@@ -149,11 +154,15 @@ export function follow(s: string | null) {
   soon = setTimeout(watch, 60);
 }
 
-/** The open chat's other states (a channel's agents: their sessions, then their contexts), as far
- *  as the stream has room; [] once the chat is left. */
-export function also(keys: string[]) {
-  if (keys.join(" ") === extra.join(" ")) return;
-  extra = keys;
+/** The open chat's other states as from asks for them (a channel's agents: their sessions, then
+ *  their contexts; its subagents at work: their sessions), the agents' first, as far as the stream
+ *  has room; [] once the chat is left. */
+export function also(keys: string[], from: Extra = "agents") {
+  if (keys.length) extras.set(from, keys);
+  else extras.delete(from);
+  const all = [...new Set(EXTRAS.flatMap((x) => extras.get(x) ?? []))];
+  if (all.join(" ") === extra.join(" ")) return;
+  extra = all;
   if (!started) return;
   clearTimeout(soon);
   soon = setTimeout(watch, 60);

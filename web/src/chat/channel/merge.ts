@@ -1,7 +1,6 @@
 // One page for a session, one agent or several (kumo, 2026-11-15: 会话页不换页，多一个 agent 只是
 // 多一个成员): the own agent's record as its chat draws it, and what its channel's log has that the
 // record does not, each in its place by time. Pure: chat.tsx draws what these say.
-import { toldOf } from "../dispatch";
 import { givenTurn, type Msg } from "./lib";
 
 /** The log's messages the record does not hold: not the own agent's (its words are its record's),
@@ -119,27 +118,6 @@ export function callerOf(msgs: Msg[], nick: string, session: string): number | u
     if (calls.some((c) => c.test(m.text))) return m.n;
   }
   return undefined;
-}
-
-/** A subagent at work, under the step that started it (kumo, 2026-11-15: subagents are members
- *  that only read): the call that started it, by its id (Session.call, from Claude's meta), else
- *  the call that dispatched one of its title (dispatch.ts toldOf: Claude's Agent or Task by its
- *  description, Codex's spawn_agent by its path); by the row that holds the call. Those
- *  whose call is not among the rows (still running, on a page not loaded) go at the end (rest). */
-export function subsAt<S extends { id: string; title?: string; call?: string }>(rows: { key: string; steps: { id?: string; name?: string; input?: string }[] }[], subs: S[]): { at: Map<string, S[]>; rest: S[] } {
-  const at = new Map<string, S[]>();
-  const rest: S[] = [];
-  const task = (x: { name?: string; input?: string }) => {
-    const told = toldOf(x);
-    return told?.kind === "start" ? told.name : undefined;
-  };
-  for (const s of subs) {
-    const byCall = s.call ? rows.find((r) => r.steps.some((x) => x.id === s.call)) : undefined;
-    const row = byCall ?? (s.title ? rows.findLast((r) => r.steps.some((x) => task(x) === s.title)) : undefined);
-    if (row) at.set(row.key, [...(at.get(row.key) ?? []), s]);
-    else rest.push(s);
-  }
-  return { at, rest };
 }
 
 /** Who a message names: agents (by <at id="agent:…"/>, <at role="agent"/>, @全体Agent, or a nick
