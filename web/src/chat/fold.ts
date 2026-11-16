@@ -97,8 +97,10 @@ export function inputOf(input = ""): Record<string, unknown> {
     const v = JSON.parse(input);
     return v && typeof v === "object" ? v : {};
   } catch {
+    // Cut short (a long input, clipped by the server): its strings as far as they go, the last
+    // one too (a heredoc's command showed nothing, the user, 2026-11-16).
     const out: Record<string, unknown> = {};
-    for (const m of input.matchAll(/"(\w+)"\s*:\s*"((?:[^"\\]|\\.)*)"/g)) out[m[1]!] ??= m[2]!.replace(/\\n/g, "\n").replace(/\\(.)/g, "$1");
+    for (const m of input.matchAll(/"(\w+)"\s*:\s*"((?:[^"\\]|\\.)*)"?/g)) out[m[1]!] ??= m[2]!.replace(/\\n/g, "\n").replace(/\\(.)/g, "$1");
     return out;
   }
 }
@@ -238,15 +240,17 @@ export function foldLine(steps: Step[]): Run[] {
 
 /** The sorts of shell command the calls by this name in a fold run, each once with how many, in the
  *  order first run: one when they all run the same sort (or none, another tool's), else an icon
- *  each, ×n by it for more than one ("🔍×2 📄 Bash ×3", the user, 2026-11-09). */
-export function runCmds(steps: Step[], name: string): { cmd: Cmd | undefined; n: number }[] {
-  const out: { cmd: Cmd | undefined; n: number }[] = [];
+ *  each, ×n by it for more than one ("🔍×2 📄 Bash ×3", the user, 2026-11-09). The failed ones
+ *  a group of their own, its icon red (the user, 2026-11-13: pulled out, nothing else red). */
+export function runCmds(steps: Step[], name: string): { cmd: Cmd | undefined; n: number; failed: boolean }[] {
+  const out: { cmd: Cmd | undefined; n: number; failed: boolean }[] = [];
   for (const s of steps) {
     if (s.kind !== "tool" || s.name !== name) continue;
     const cmd = cmdOfCall(s);
-    const g = out.find((x) => x.cmd === cmd);
-    if (g) g.n++;
-    else out.push({ cmd, n: 1 });
+    const failed = !!s.result?.error;
+    let g = out.find((x) => x.cmd === cmd && x.failed === failed);
+    if (!g) out.push((g = { cmd, n: 0, failed }));
+    g.n++;
   }
   return out;
 }

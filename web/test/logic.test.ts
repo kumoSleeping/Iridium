@@ -74,8 +74,8 @@ describe("argOf", () => {
     expect(argOf({ name: "Bash", input: JSON.stringify({ command: "go test\n  ./..." }) })).toEqual({ arg: "go test ./...", code: true });
     expect(argOf({ name: "WebSearch", input: JSON.stringify({ query: "iridium" }) })).toEqual({ arg: "iridium", code: false });
   });
-  test("an input cut short is read for its first fields", () => {
-    expect(inputOf('{"command":"ls -la","description":"lis')).toEqual({ command: "ls -la" });
+  test("an input cut short is read as far as it goes, the last field too", () => {
+    expect(inputOf('{"command":"ls -la","description":"lis')).toEqual({ command: "ls -la", description: "lis" });
   });
 });
 
@@ -652,8 +652,8 @@ describe("windowFor", () => {
     expect(windowFor(w(), [])).toBe(true);
     expect(windowFor(w("Fable"), ["claude-fable-5-1"])).toBe(true);
     expect(windowFor(w("Fable"), [undefined, "default", "Fable 5.1"])).toBe(true);
-    expect(windowFor(w("Fable"), ["claude-opus-5-5", "opus", "Opus"])).toBe(false);
-    expect(windowFor(w("Fable"), [undefined, "", undefined])).toBe(false);
+    expect(windowFor(w("Fable"), ["claude-opus-5-5", "opus", "Opus"])).toBe(true);
+    expect(windowFor(w("Fable"), [undefined, "", undefined])).toBe(true);
     expect(windowFor(w("GPT-5.3-Codex-Spark"), ["gpt-5.3-codex-spark"])).toBe(true);
     expect(windowFor(w("GPT-5.3-Codex-Spark"), ["gpt-5.3-codex"])).toBe(false);
   });

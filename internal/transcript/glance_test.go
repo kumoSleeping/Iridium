@@ -74,6 +74,12 @@ func TestTaskLine(t *testing.T) {
 	if got := taskLine([]string{"<task-notification><status>killed</status><usage><agent_count>1</agent_count><duration_ms>4000</duration_ms></usage></task-notification>"}); got != "Task killed · 1 agent · 4s" {
 		t.Errorf("no summary: %q", got)
 	}
+	if got := taskLine([]string{"<task-notification><status>completed</status><summary>Background command \"Build\" completed (exit code 0)</summary></task-notification>"}); got != `Background command "Build" completed` {
+		t.Errorf("exit 0: %q", got)
+	}
+	if got := taskLine([]string{"<task-notification><status>failed</status><summary>Background command \"Build\" failed with exit code 1</summary></task-notification>"}); got != `Background command "Build" failed with exit code 1` {
+		t.Errorf("exit 1: %q", got)
+	}
 	if got := taskLine([]string{"nothing here"}); got != "" {
 		t.Errorf("not a notice: %q", got)
 	}

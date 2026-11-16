@@ -5,7 +5,7 @@
 // Markdown, approve or keep planning. A question: its options as keys, or your own words. Every
 // answer goes to the ask's card (POST /v1/internal/button), as an app's does.
 import { Menu } from "@base-ui/react/menu";
-import { Check, ChevronDown, ClipboardList, FilePen, Globe, LoaderCircle, MessageCircleQuestionMark, PenLine, ShieldAlert, ShieldQuestion, SquareTerminal } from "lucide-react";
+import { ArrowUp, Check, ChevronDown, ClipboardList, FilePen, Globe, LoaderCircle, MessageCircleQuestionMark, PenLine, ShieldAlert, ShieldQuestion, SquareTerminal } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { api } from "../api/client";
 import type { Ask, CardAnswer, Need, Denial } from "../api/types.gen";
@@ -15,7 +15,7 @@ import { SecretHere } from "../secret";
 import { useSecret } from "../secrets";
 import { t } from "../i18n";
 import { errText, toast } from "../toast";
-import { cn, tilde } from "../ui";
+import { cn, tilde, Tip } from "../ui";
 import { argOf, inputOf, kindOf } from "./fold";
 import { Markdown } from "./markdown";
 
@@ -286,6 +286,13 @@ function Question({ a, busy, send }: { a: Ask; busy: boolean; send: (r: Reply) =
         e.preventDefault();
         if (ready && !busy) send(reply());
       }}
+      // Enter sends from anywhere in the card, an option key focused too (Space picks it); not
+      // while an input method composes, nor with Shift.
+      onKeyDown={(e) => {
+        if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing || e.keyCode === 229) return;
+        e.preventDefault();
+        if (ready && !busy) send(reply());
+      }}
       className="flex flex-col gap-4"
     >
       {qs.map((q, i) => {
@@ -340,10 +347,14 @@ function Question({ a, busy, send }: { a: Ask; busy: boolean; send: (r: Reply) =
                   className="no-ring h-8 min-w-0 flex-1 bg-transparent text-sm placeholder:text-ink-3"
                 />
                 {last && (
-                  <button type="submit" disabled={busy || !ready} className="g-press flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-ink px-2.5 text-sm text-on-ink disabled:opacity-25 pointer-coarse:h-9">
-                    {busy && <LoaderCircle size={13} className="animate-spin" />}
-                    {t("ask.send")}
-                  </button>
+                  // The composer's send key: an arrow in a rounded square.
+                  <Tip label={t("ask.send")}>
+                    <button type="submit" aria-label={t("ask.send")} disabled={busy || !ready} className="group/send g-press grid size-8 shrink-0 place-items-center pointer-coarse:size-10">
+                      <span className="grid size-7 place-items-center rounded-[9px] bg-ink text-on-ink transition-opacity duration-(--dur-1) group-disabled/send:opacity-25 pointer-coarse:size-8 pointer-coarse:rounded-[10px]">
+                        {busy ? <LoaderCircle size={14} className="animate-spin" /> : <ArrowUp size={16} strokeWidth={2.25} />}
+                      </span>
+                    </button>
+                  </Tip>
                 )}
               </label>
             </div>

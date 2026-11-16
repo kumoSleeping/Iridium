@@ -709,7 +709,6 @@ function Fold({ steps, session, cwd }: { steps: Step[]; session: string; cwd: st
   if (one) return <StepView s={one} session={session} cwd={cwd} />;
   const runs = foldLine(steps);
   const diff = diffSum(runs);
-  const bad = steps.filter(failed).length;
   const opened = steps.flatMap((s) => (s.kind === "tool" && newOfCall(s)) || []);
   return (
     <div className="min-w-0">
@@ -718,26 +717,21 @@ function Fold({ steps, session, cwd }: { steps: Step[]; session: string; cwd: st
           <span className="min-w-0 truncate">
             {runs.map((r, i) => (
               <span key={i} className={cn(i > 0 && "ml-3")}>
-                {(r.name ? runCmds(steps, r.name) : [{ cmd: undefined, n: 1 }]).map((g, j, gs) => (
+                {(r.name ? runCmds(steps, r.name) : [{ cmd: undefined, n: 1, failed: false }]).map((g, j, gs) => (
                   <span key={j} className={cn("inline-block", j < gs.length - 1 ? "mr-1.5" : !isShell(r.name) && "mr-2")}>
-                    <KindIcon kind={r.name ? kindOf(r.name) : "thinking"} cmd={g.cmd} shell={isShell(r.name)} className="inline-block align-[-2.5px]" />
-                    {(gs.length > 1 || isShell(r.name)) && g.n > 1 && <span className="text-xs tabular-nums">×{g.n}</span>}
+                    <KindIcon kind={r.name ? kindOf(r.name) : "thinking"} cmd={g.cmd} shell={isShell(r.name)} failed={g.failed} className="inline-block align-[-2.5px]" />
+                    {(gs.length > 1 || isShell(r.name)) && g.n > 1 && <span className={cn("text-xs tabular-nums", g.failed && "text-err")}>×{g.n}</span>}
                   </span>
                 ))}
                 {/* A shell's run is its icons alone, each with how many (the user, 2026-11-09): no
-                    room after the last for a name, only the gap between runs. */}
+                    room after the last for a name, only the gap between runs. The failed calls an
+                    icon of their own, red, with how many (the user, 2026-11-13). */}
                 {!isShell(r.name) && <span className="text-ink-2">{r.name || t("msg.thinking")}</span>}
-                {!isShell(r.name) && r.n > 1 && <span className="tabular-nums"> ×{r.n}</span>}
+                {!isShell(r.name) && r.n > 1 && runCmds(steps, r.name).length < 2 && <span className="tabular-nums"> ×{r.n}</span>}
               </span>
             ))}
           </span>
           {diff && <DiffStat d={diff} />}
-          {bad > 0 && (
-            <span className="flex shrink-0 items-center gap-0.5 text-xs text-err tabular-nums">
-              <CircleX size={13} aria-label={t("msg.failed")} />
-              {bad > 1 && bad}
-            </span>
-          )}
           <ChevronRight size={13} className="fold-chev shrink-0 text-ink-4 transition-transform duration-(--dur-2) group-open/fold:rotate-90" />
         </summary>
         <div className="mt-0.5 ml-[7px] flex flex-col pl-3 shadow-[inset_1px_0_0_var(--edge)]">

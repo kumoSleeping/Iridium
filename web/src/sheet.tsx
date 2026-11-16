@@ -164,6 +164,8 @@ export function Sheet({ open, setOpen, size: want, raised, name, head = 0, from:
         const box = panel.current?.getBoundingClientRect();
         if (!box || !panel.current!.contains(el) || y - box.top > (now.current.head || HEAD) || el.closest("[role=slider], .touch-none")) return;
       } else {
+        // None while a card waits for an answer: the composer is away, the cards scroll (chat.tsx).
+        if (document.querySelector(`[${PULL}][data-asking]`)) return;
         // The composer's box too, while it has nothing to scroll: all of it, as it first is (the
         // user, 2026-11-07); grown past its height, it scrolls its words.
         const box = el.closest("textarea");

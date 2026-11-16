@@ -834,10 +834,11 @@ func cmpOr(a, b string) string {
 var (
 	taskTag   = regexp.MustCompile(`(?s)<(summary|status|agent_count|duration_ms)>(.*?)</`)
 	workflowW = regexp.MustCompile(`^Dynamic workflow\b`)
+	exitZero  = regexp.MustCompile(`\s*\(exit code 0\)`)
 )
 
-// taskLine is a task-notification as one line: its summary ("Dynamic workflow" said Workflow),
-// then how many agents it ran and for how long; "" when it says nothing.
+// taskLine is a task-notification as one line: its summary ("Dynamic workflow" said Workflow,
+// no "(exit code 0)": the user, 2026-11-15), then how many agents it ran and for how long; "" when it says nothing.
 func taskLine(parts []string) string {
 	tags := map[string]string{}
 	for _, m := range taskTag.FindAllStringSubmatch(strings.Join(parts, "\n"), -1) {
@@ -845,7 +846,7 @@ func taskLine(parts []string) string {
 			tags[m[1]] = strings.TrimSpace(m[2])
 		}
 	}
-	line := workflowW.ReplaceAllString(oneLine(tags["summary"]), "Workflow")
+	line := exitZero.ReplaceAllString(workflowW.ReplaceAllString(oneLine(tags["summary"]), "Workflow"), "")
 	if line == "" {
 		if tags["status"] == "" {
 			return ""

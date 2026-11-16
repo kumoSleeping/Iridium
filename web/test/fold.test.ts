@@ -249,10 +249,11 @@ describe("a shell call's sort", () => {
   });
   test("a fold's run of one name counts its calls by sort, in order", () => {
     const think: Step = { at: "t", kind: "thinking", text: "hmm" };
-    expect(runCmds([call("Bash", { command: "ir send a x" }), think, call("Read", { file_path: "/a" }), call("Bash", { command: "cd ~ && ir send b y" })], "Bash")).toEqual([{ cmd: "ir-send", n: 2 }]);
-    expect(runCmds([call("Bash", { command: "ir send a x" }), call("Bash", { command: "git status" }), call("Bash", { command: "ir send a x" })], "Bash")).toEqual([{ cmd: "ir-send", n: 2 }, { cmd: "git-status", n: 1 }]);
-    expect(runCmds([call("Bash", { command: "ir send a x" }), call("Bash", { command: "frobnicate" })], "Bash")).toEqual([{ cmd: "ir-send", n: 1 }, { cmd: undefined, n: 1 }]);
-    expect(runCmds([call("Read", { file_path: "/a" }), call("Read", { file_path: "/b" })], "Read")).toEqual([{ cmd: undefined, n: 2 }]);
+    expect(runCmds([call("Bash", { command: "ir send a x" }), think, call("Read", { file_path: "/a" }), call("Bash", { command: "cd ~ && ir send b y" })], "Bash")).toEqual([{ cmd: "ir-send", n: 2, failed: false }]);
+    expect(runCmds([call("Bash", { command: "ir send a x" }), call("Bash", { command: "git status" }), call("Bash", { command: "ir send a x" })], "Bash")).toEqual([{ cmd: "ir-send", n: 2, failed: false }, { cmd: "git-status", n: 1, failed: false }]);
+    expect(runCmds([call("Bash", { command: "ir send a x" }), call("Bash", { command: "frobnicate" })], "Bash")).toEqual([{ cmd: "ir-send", n: 1, failed: false }, { cmd: undefined, n: 1, failed: false }]);
+    expect(runCmds([call("Read", { file_path: "/a" }), call("Read", { file_path: "/b" })], "Read")).toEqual([{ cmd: undefined, n: 2, failed: false }]);
+    expect(runCmds([call("Bash", { command: "cat a" }, { result: { at: "r", text: "no", error: true } }), call("Bash", { command: "cat b" })], "Bash")).toEqual([{ cmd: "read", n: 1, failed: true }, { cmd: "read", n: 1, failed: false }]);
   });
 });
 
@@ -304,6 +305,10 @@ describe("an ir call's words (在哪干活)", () => {
     expect(cpOfCall(bash("ir cp a"))).toBeUndefined();
     expect(cpOfCall(bash("ir files ab"))).toBeUndefined();
     expect(argOf(bash("ir cp a.txt kumo-mac:~/"))).toEqual({ arg: "a.txt → kumo-mac:~/", code: true });
+  });
+  test("a shell input cut short: its command as far as it goes", () => {
+    const cut = '{\n  "command": "cd ~/x && python3 - <<\'EOF\'\\np=\'docs/a.md\'\\nold=\'- AI 的'
+    expect(argOf({ name: "Bash", input: cut })).toEqual({ arg: "cd ~/x && python3 - <<'EOF' p='docs/a.md' old='- AI 的", code: true });
   });
   test("ir new: the session it printed first, its agent past the options; none before it is done or as it failed", () => {
     expect(newOfCall(bash("ir new --model x claude --machine m ~/x 'go 1a2b3c4d'", { text: "9f8e7d6c\nanswer" }))).toEqual({ id: "9f8e7d6c", agent: "claude" });

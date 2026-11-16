@@ -26,8 +26,19 @@ export const lineOf = (b: { at: string }) => parseInt(b.at);
 /** A /compact you sent: no bubble, the chat's compaction line says it (chat/said.tsx Compaction). */
 export const compactSent = (s: Sent) => /^\/compact(\s|$)/.test(s.text.trim());
 
+/** Whether user block b is s by what it says, for an agent whose transcript keeps no input id
+ *  (pi): its words at the head; with none, attachments alone, the same files (a ref is the path's,
+ *  the upload's and the block's alike), or else a block of attachment lines alone. */
+const sameWords = (s: Sent, b: Block) => {
+  const text = s.text.trim();
+  if (text) return b.text !== undefined && b.text.trim().startsWith(text.slice(0, 200));
+  if (!s.files.length) return false;
+  if (s.files.every((f) => b.files?.some((g) => g.ref === f.ref))) return true;
+  return /^\[附件\] `/.test((b.text ?? "").trim());
+};
+
 /** Those sent not yet in the transcript: each finds its own among the user blocks written since it
- *  was sent, by its input id, else by its words; a /compact, the compaction written since. A
+ *  was sent, by its input id, else by its words (attachments alone: their files); a /compact, the compaction written since. A
  *  failed one stays, unless its block came after all (only the answer was lost): by its id alone. */
 export function unsent(sent: Sent[], blocks: Block[]): Sent[] {
   let past = 0;
@@ -35,7 +46,7 @@ export function unsent(sent: Sent[], blocks: Block[]): Sent[] {
     s.from = Math.max(s.from, past);
     if (s.failed !== undefined) return !(s.input && blocks.some((b) => b.kind === "user" && b.id === s.input));
     if (compactSent(s)) return !blocks.some((b) => b.kind === "system" && b.event === "compact" && lineOf(b) >= s.from);
-    const b = blocks.find((b) => b.kind === "user" && ((s.input && b.id === s.input) || (lineOf(b) >= s.from && b.text !== undefined && s.text && b.text.trim().startsWith(s.text.trim().slice(0, 200)))));
+    const b = blocks.find((b) => b.kind === "user" && ((s.input && b.id === s.input) || (lineOf(b) >= s.from && sameWords(s, b))));
     if (!b) return true;
     past = lineOf(b) + 1;
     return false;

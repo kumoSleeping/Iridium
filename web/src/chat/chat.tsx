@@ -55,6 +55,7 @@ const NotJoined = lazy(() => import("./channel/key").then((m) => ({ default: m.N
 const ChannelPage = lazy(() => import("./channel/page").then((m) => ({ default: m.ChannelPage })));
 import { MachineFace, shownPath } from "../machines";
 import { openPlace } from "../places";
+import { useSecret } from "../secrets";
 import { Asks, Denials } from "./asks";
 import { renameOnly } from "./cmd";
 import { Composer, type ComposerHandle } from "./composer";
@@ -196,6 +197,11 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
   const fromMembers = useMemo(() => (members?.members ?? []).flatMap((m) => (m.session ? [{ session: m.session, ...(m.agent ? { agent: m.agent } : {}), ...(m.nick ? { nick: m.nick } : {}) }] : [])), [members]);
   const chAgents = row ? row.agents : fromMembers;
   const side = useSide(id, chAgents ? { agents: chAgents } : undefined, may);
+  const ownNeeds = confirms.filter((c) => c.session === id && c.kind !== "ask");
+  // A card waiting for an answer (asks.tsx): the composer goes, and on a phone no swipe up brings
+  // the sheet (sheet.tsx), the cards scrolling instead (the user, 2026-11-15).
+  const secretHere = useSecret()?.at === id;
+  const asking = !!s?.asks.length || !!ownNeeds.length || secretHere;
 
   // The newest page, or what was kept; then what came since.
   useEffect(() => {
@@ -733,7 +739,7 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
       {/* Under the phone's sheet the stack stays where it is, covered, and is hidden once the sheet is
           up (its glass not drawn again as the chat moves under it); only one taller than the sheet,
           which would show over it or at its round corners, sinks (the user, 2026-11-06). */}
-      <div ref={stack} {...{ [PULL]: "" }} data-covered={sheet > 0 || undefined} data-sunk={(sheet > 0 && stackH > sheet - 16) || undefined} inert={sheet > 0} className="g-turn-stay g-sink vt-stack absolute inset-x-0 bottom-0 z-10 px-2.5 pb-[max(14px,calc(env(safe-area-inset-bottom)+6px))] sm:px-5">
+      <div ref={stack} {...{ [PULL]: "" }} data-asking={asking || undefined} data-covered={sheet > 0 || undefined} data-sunk={(sheet > 0 && stackH > sheet - 16) || undefined} inert={sheet > 0} className="g-turn-stay g-sink vt-stack absolute inset-x-0 bottom-0 z-10 px-2.5 pb-[max(14px,calc(env(safe-area-inset-bottom)+6px))] sm:px-5">
         {/* Paper from the composer's middle down: the conversation scrolled under it stops there. */}
         {!elsewhere && !s.subagent && <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-[calc(44px+max(14px,calc(env(safe-area-inset-bottom)+6px)))] bg-[linear-gradient(to_bottom,transparent,var(--paper)_14px)]" />}
         <div className="relative mx-auto max-w-(--chat-w)">
@@ -763,7 +769,7 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
             </>
           ) : (
             <div inert={!may} className={cn(!may && "opacity-60")}>
-              <Asks session={id} asks={s.asks} cwd={cwd} confirms={confirms.filter((c) => c.session === id && c.kind !== "ask")} />
+              <Asks session={id} asks={s.asks} cwd={cwd} confirms={ownNeeds} />
             </div>
           )}
           {s.subagent ? (
@@ -782,7 +788,12 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
               <NotJoined />
             </Suspense>
           ) : (
-            <Under s={s} ghost={ghost} composer={composer} onSent={onSent} onSentDone={sentDone} modelOpen={modelOpen} setModelOpen={setModelOpen} modeOpen={modeOpen} setModeOpen={setModeOpen} openContext={openContext} people={atRows} quote={quote ? { n: quote.n, who: nameOfMsg(quote), text: quote.text } : undefined} unquote={() => setQuote(null)} />
+            // Put away under the cards, kept as it was: it slides down out of the window and back.
+            <div aria-hidden={asking || undefined} inert={asking || undefined} className={cn("grid transition-[grid-template-rows,opacity] duration-(--dur-3) ease-(--ease-out)", asking ? "grid-rows-[0fr] opacity-0" : "grid-rows-[1fr]")}>
+              <div className="min-h-0">
+  <Under s={s} ghost={ghost} composer={composer} onSent={onSent} onSentDone={sentDone} modelOpen={modelOpen} setModelOpen={setModelOpen} modeOpen={modeOpen} setModeOpen={setModeOpen} openContext={openContext} people={atRows} quote={quote ? { n: quote.n, who: nameOfMsg(quote), text: quote.text } : undefined} unquote={() => setQuote(null)} />
+              </div>
+            </div>
           )}
         </div>
       </div>

@@ -382,6 +382,15 @@ describe("Messages", () => {
     expect(unsent([lost], [blk(10, "user", "fourth")])).toEqual([lost]);
     expect(unsent([lost], [blk(10, "user", "fourth", { id: "u4" })])).toEqual([]);
   });
+  test("attachments alone, no input id (pi): by their files, else a block of attachment lines", () => {
+    const file = { ref: "r1", name: "a.png", type: "image/png" };
+    const pic: Sent = { key: "5", text: "", files: [file], from: 10 };
+    const ref = { ref: "r1", name: "a.png", path: "/u/a.png", size: 1, mime: "image/png", kind: "image" } as never;
+    expect(unsent([pic], [blk(5, "user", "[附件] `/u/a.png`", { files: [ref] })])).toEqual([pic]); // before it was sent
+    expect(unsent([pic], [blk(20, "user", "hi")])).toEqual([pic]);
+    expect(unsent([pic], [blk(20, "user", "[附件] `/u/a.png`", { files: [ref] })])).toEqual([]);
+    expect(unsent([pic], [blk(20, "user", "[附件] `/u/b.png`")])).toEqual([]);
+  });
   test("what you sent is checked again as its answer comes and as a fetch brings nothing new", async () => {
     const m = new Messages("s", async (_, q) => (q.after === undefined ? { blocks: [blk(0, "user", "[网页] said", { id: "u1" })], start: 0, end: 10, more: false } : { blocks: [], start: 10, end: 10, more: false }));
     m.sent.push({ key: "1", text: "said", files: [], from: 0 });
