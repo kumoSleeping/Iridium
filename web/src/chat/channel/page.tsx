@@ -10,7 +10,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { Popover } from "@base-ui/react/popover";
 import { useQuery } from "@tanstack/react-query";
-import { Reply } from "lucide-react";
 import { api } from "../../api/client";
 import type { Block, ChannelReads, Reader, SessionState as LiveSession, Session } from "../../api/types.gen";
 import { stateAhead, type Sent } from "../../chats";
@@ -42,7 +41,7 @@ import { mayAct, useMembers } from "./gate";
 import { NotJoined } from "./key";
 import { MemberFace } from "./face";
 import { AgentFace } from "./members";
-import { PersonCard, useNamed } from "./person";
+import { PersonCard, PersonMenu, useNamed } from "./person";
 import { NickLink, Nicks, NickWords } from "./nick";
 
 // At work: in a turn. Not "starting" (its harness coming up, no turn yet: an invited agent's face
@@ -511,8 +510,15 @@ export function GroupView({ g, channel, agents, who, record, call, may, quote, q
     const by = who(a);
     return (
       <Copyable copy={m.text} quote={quote && (() => quote(m))}>
-        {m.quote !== undefined && <QuoteLine n={m.quote} q={quoted(m.quote)} right={by.mine} />}
-        <YouBubble text={m.text} who={by.who} left={!by.mine} time={m.time} words={<NickWords text={m.text} />} card={<PersonCard user={a.id} name={a.name} avatar={"avatar" in by.who ? by.who.avatar : undefined} dm={!by.mine} call={may && !by.mine ? call : undefined} />}>
+        <YouBubble
+          text={m.text}
+          who={by.who}
+          left={!by.mine}
+          time={m.time}
+          words={<NickWords text={m.text} />}
+          under={m.quote !== undefined && <QuoteLine n={m.quote} q={quoted(m.quote)} />}
+          menu={by.mine ? undefined : (at, close) => <PersonMenu user={a.id} name={a.name} call={may ? call : undefined} at={at} close={close} />}
+          card={<PersonCard user={a.id} name={a.name} avatar={"avatar" in by.who ? by.who.avatar : undefined} dm={!by.mine} call={may && !by.mine ? call : undefined} />}>
           {m.files.map((f) => (
             <Attached key={f.ref} session={channel} f={f} />
           ))}
@@ -540,12 +546,12 @@ export function GroupView({ g, channel, agents, who, record, call, may, quote, q
         {g.msgs.map((m) => (
           <div key={m.n} className={cn(m.kind === "error" && "text-err")}>
             {m.src ? <Work src={m.src} did={m.did} said={m.text} /> : m.did && <DidLine did={m.did} />}
-            {m.quote !== undefined && <QuoteLine n={m.quote} q={quoted(m.quote)} />}
             <Copyable copy={m.text} quote={quote && (() => quote(m))}>
               <LongWords fold={fold?.(m) ?? false} lines={linesOf(m.text)}>
                 <Assistant b={blockFor(m, agents)} session={a.session} />
               </LongWords>
             </Copyable>
+            {m.quote !== undefined && <QuoteLine n={m.quote} q={quoted(m.quote)} />}
           </div>
         ))}
       </div>
@@ -553,14 +559,13 @@ export function GroupView({ g, channel, agents, who, record, call, may, quote, q
   );
 }
 
-/** The message one answers, a quiet line over it: who said it, its first words. */
-function QuoteLine({ n, q, right }: { n: number; q?: { who: string; text: string }; right?: boolean }) {
+/** The message one answers, under the words that answer it, as chat apps put it (kumo,
+ *  2026-11-16: a line over the face read oddly): a small grey block, who said it and its words,
+ *  two lines at most; the number alone when the page has not got it. */
+function QuoteLine({ n, q }: { n: number; q?: { who: string; text: string } }) {
   return (
-    <div className={cn("mb-1 flex min-w-0 items-center gap-1.5 text-xs text-ink-3", right && "justify-end")}>
-      <Reply size={12} className="shrink-0" />
-      <span className="shrink-0">#{n}</span>
-      {q && <span className="shrink-0 font-medium text-ink-2">{q.who}</span>}
-      {q && <span className="max-w-[60%] min-w-0 truncate">{q.text}</span>}
+    <div className="mt-1 max-w-[min(560px,100%)] rounded-md bg-fill px-2.5 py-1.5 text-xs leading-[18px] text-ink-3">
+      <span className="line-clamp-2 [overflow-wrap:anywhere]">{q ? t("channel.quoteOf", { who: q.who, text: q.text }) : `#${n}`}</span>
     </div>
   );
 }

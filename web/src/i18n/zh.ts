@@ -350,6 +350,7 @@ export const zh = {
   "channel.read": "已读",
   "channel.dm": "私聊",
   "channel.talk": "发消息",
+  "channel.quoteOf": "{who}：{text}",
   "channel.call": "提及",
   "channel.atMembers": "频道成员",
   "channel.atAgents": "频道里的 agent",

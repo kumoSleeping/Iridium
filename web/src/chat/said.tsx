@@ -21,7 +21,7 @@ import { api } from "../api/client";
 import type { Block, FileRef, Result } from "../api/types.gen";
 import type { Sent } from "../chats";
 import { t } from "../i18n";
-import { agentName, Avatar, Badge, cn, IconKey, IrMark, Logo, PopSurface, tilde, Tip, titleOf } from "../ui";
+import { agentName, Avatar, Badge, cn, IconKey, IrMark, Logo, own, PopSurface, tilde, Tip, titleOf, useLongPress, useMenuAt } from "../ui";
 import { useHome, useMachines } from "../data";
 import { LocalMark } from "../me";
 import { go } from "../route";
@@ -145,8 +145,27 @@ function Face({ who }: { who: You | From }) {
 /** left: another's words in a channel others speak in too, on the left: only yours are on the
  *  right there (the user, 2026-11-13). */
 /** card: what its face opens, pressed (a person's card in a channel, chat/channel/person.tsx). */
-/** time: when it was said, after the name on the line the name already has. */
-const Sender = forwardRef<HTMLDivElement, { who: You | From; time?: number; jump?: () => void; left?: boolean; card?: ReactNode; children: ReactNode }>(function Sender({ who, time, jump, left, card, children }, ref) {
+/** time: when it was said, after the name on the line the name already has. menu: what the
+ *  face's right button (a finger held down) opens, at that point. under: under the bubble, the
+ *  message it answers (a quote), as chat apps put it. */
+type FaceMenu = (at: { x: number; y: number } | null, close: () => void) => ReactNode;
+const Sender = forwardRef<HTMLDivElement, { who: You | From; time?: number; jump?: () => void; left?: boolean; card?: ReactNode; menu?: FaceMenu; under?: ReactNode; children: ReactNode }>(function Sender({ who, time, jump, left, card, menu, under, children }, ref) {
+  const [menuAt, setMenuAt] = useMenuAt();
+  const faceKey = useRef<HTMLButtonElement>(null);
+  const lp = useLongPress(() => {
+    const r = faceKey.current?.getBoundingClientRect();
+    setMenuAt(r ? { x: r.left, y: r.bottom + 4 } : { x: 40, y: 80 });
+  });
+  const menuKeys = menu
+    ? {
+        ...lp,
+        onContextMenu: (e: React.MouseEvent) => {
+          if (!own(e)) return;
+          e.preventDefault();
+          setMenuAt({ x: e.clientX, y: e.clientY });
+        },
+      }
+    : {};
   const mine = who.kind === "you";
   const name = mine ? youName(who) : who.name;
   // A session's letter: its folder too, in the tip; the name is its title alone.
@@ -163,7 +182,7 @@ const Sender = forwardRef<HTMLDivElement, { who: You | From; time?: number; jump
         <Popover.Root>
           <Popover.Trigger
             render={
-              <button type="button" aria-label={tip} className="g-press grid shrink-0 rounded-full">
+              <button ref={faceKey} type="button" aria-label={tip} {...menuKeys} className="g-press grid shrink-0 rounded-full select-none [-webkit-touch-callout:none]">
                 {face}
               </button>
             }
@@ -200,7 +219,9 @@ const Sender = forwardRef<HTMLDivElement, { who: You | From; time?: number; jump
           {left && <When time={time} />}
         </div>
         {children}
+        {under}
       </div>
+      {menu?.(menuAt, () => setMenuAt(null))}
     </div>
   );
 });
@@ -221,11 +242,11 @@ function SendState({ state }: { state: Going }) {
 }
 
 /** words: the text drawn another way than Worded's (a channel's, its nicks too: chat/channel). */
-export const YouBubble = forwardRef<HTMLDivElement, { text: string; who: You; failed?: boolean; children?: ReactNode; time?: number; going?: Going; words?: ReactNode; left?: boolean; card?: ReactNode }>(function YouBubble({ text, who, failed, children, time, going, words, left, card }, ref) {
+export const YouBubble = forwardRef<HTMLDivElement, { text: string; who: You; failed?: boolean; children?: ReactNode; time?: number; going?: Going; words?: ReactNode; left?: boolean; card?: ReactNode; menu?: FaceMenu; under?: ReactNode }>(function YouBubble({ text, who, failed, children, time, going, words, left, card, menu, under }, ref) {
   // What the words name, where they name it (Worded); the files in a row under them.
   const row = Children.count(children) > 0;
   return (
-    <Sender ref={ref} who={who} left={left} card={card} time={time}>
+    <Sender ref={ref} who={who} left={left} card={card} menu={menu} under={under} time={time}>
       <div className="relative max-w-[min(560px,100%)] px-3.5 py-2">
         {going && <SendState state={going} />}
         <span data-bubble-bg className={cn("absolute inset-0 rounded-xl bg-fill", left ? "rounded-tl-sm" : "rounded-tr-sm", failed && "shadow-[inset_0_0_0_1px_var(--err)]")} aria-hidden />
@@ -494,8 +515,9 @@ export function Relayed({ given, relay, name, time, onJump, children }: { given:
   );
 }
 
-/** card: what a person's face opens (their card, chat.tsx), for one not the one looking. */
-export function Said({ b, session, cwd, source, onJump, card }: { b: Shown; session: string; cwd: string; source: (b: { from?: string; fromTerminal?: string }) => Source; onJump: (id: string) => void; card?: (b: Block) => ReactNode }) {
+/** card: what a person's face opens (their card, chat.tsx), for one not the one looking. left:
+ *  another person's words, on the left: only the one looking is on the right (kumo, 2026-11-16). */
+export function Said({ b, session, cwd, source, onJump, card, menu, left }: { b: Shown; session: string; cwd: string; source: (b: { from?: string; fromTerminal?: string }) => Source; onJump: (id: string) => void; card?: (b: Block) => ReactNode; menu?: (b: Block) => FaceMenu | undefined; left?: (b: Block) => boolean }) {
   switch (b.kind) {
     case "user": {
       const src = source(b);
@@ -514,7 +536,7 @@ export function Said({ b, session, cwd, source, onJump, card }: { b: Shown; sess
           </Letter>
         );
       return (
-        <YouBubble text={words} who={src} time={b.time} card={card?.(b)} words={<NickWords text={words} />}>
+        <YouBubble text={words} who={src} time={b.time} card={card?.(b)} menu={menu?.(b)} left={left?.(b)} words={<NickWords text={words} />}>
           {b.files?.map((f) => <Attached key={f.ref} session={session} f={f} />)}
         </YouBubble>
       );

@@ -37,7 +37,7 @@ import { Dispatching, SubAtWork } from "./subwork";
 import { alignBack, loadParts, sideReady, useSide } from "./channel/side";
 import { relays, type Relay } from "../satori";
 import { AgentFace } from "./channel/members";
-import { PersonCard, useNamed } from "./channel/person";
+import { PersonCard, PersonMenu, useNamed } from "./channel/person";
 import { Nicks } from "./channel/nick";
 import { closeEdit, useEditing } from "./channel/editing";
 import { EditBody } from "./channel/edit";
@@ -434,6 +434,21 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
     const own = user === self.id || (self.host && user === "local");
     return <PersonCard user={user} name={b.from || user} avatar={src.kind === "you" ? src.avatar : undefined} dm={!own} call={may && !own ? (name) => composer.current?.insert(`@${name}`) : undefined} />;
   };
+  // Another person's face's menu (kumo, 2026-11-16): 提及, 私聊, as the card has them.
+  const personMenu = (b: Block) => {
+    const user = b.fromLogin || b.fromTerminal;
+    if (!user || user === self.id || (self.host && user === "local")) return undefined;
+    const name = b.from || user;
+    return (at: { x: number; y: number } | null, close: () => void) => <PersonMenu user={user} name={name} call={may ? (n) => composer.current?.insert(`@${n}`) : undefined} at={at} close={close} />;
+  };
+  // Another login's words on the left, with the agents (kumo, 2026-11-16: every login was on the
+  // right). The machine's own (typed at its terminal, its ir, no sender) stay the owner's.
+  const othersWords = (b: Block) => {
+    const user = b.fromLogin || b.fromTerminal;
+    if (!user || user === self.id || user === "local") return false;
+    const src = source(b);
+    return src.kind === "you" && !src.local;
+  };
   // When each of the agent's rows was written: its turn's head says the first's.
   const times = new Map<string, number>();
   const began = (rs: { key: string }[]) => rs.map((r) => times.get(r.key)).find(Boolean);
@@ -465,7 +480,7 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
         key: b.at,
         agent: b.kind === "assistant" || b.kind === "fold" || b.kind === "running",
         ...(given?.channel ? { works: { given, relay, time } } : {}),
-        node: <Said key={b.at} b={b} session={id} cwd={cwd} source={source} onJump={openChat} card={personCard} />,
+        node: <Said key={b.at} b={b} session={id} cwd={cwd} source={source} onJump={openChat} card={personCard} menu={personMenu} left={othersWords} />,
       },
     ];
   });

@@ -350,6 +350,7 @@ export const en: Dict = {
   "channel.read": "Read",
   "channel.dm": "Direct message",
   "channel.talk": "Message",
+  "channel.quoteOf": "{who}: {text}",
   "channel.call": "Mention",
   "channel.atMembers": "Everyone in the channel",
   "channel.atAgents": "The channel's agents",

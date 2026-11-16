@@ -2,15 +2,17 @@
 // face pressed opens it, as an agent's does (members.tsx Card). Their face and name; 私聊, the
 // channel of the two of you (POST /v1/internal/dm), for a login or the host only (an app, an
 // author that is no login have none: the owner, 2026-11-14); and 提及, "@name" in the composer.
+import { Menu } from "@base-ui/react/menu";
 import { AtSign, MessageCircle, PencilLine } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { api } from "../../api/client";
 import type { ChannelMembers } from "../../api/types.gen";
 import { t } from "../../i18n";
 import { openChat } from "../../route";
 import { isComputer, useApps } from "../../data";
 import { errText, toast } from "../../toast";
-import { Avatar, isHost } from "../../ui";
+import { Avatar, cn, isHost } from "../../ui";
+import { ITEM, POPUP } from "./invite";
 import { mayDM, userOf, type AgentRow } from "./lib";
 import { SelfEdit } from "./edit";
 import { AgentCard } from "./members";
@@ -42,6 +44,39 @@ export function PersonCard({ user, name, avatar, app, call, dm: other = true }: 
   if (card?.mine) keys.push({ icon: <PencilLine size={14} />, label: t("profile.edit"), run: () => setEdit(true) });
   if (edit) return <SelfEdit back={() => setEdit(false)} />;
   return <ProfileCard face={<Avatar src={avatar ?? card?.avatar} name={name} size={56} host={isHost(user)} />} name={name} sub={app} intro={card?.intro} background={card?.background} keys={keys} />;
+}
+
+/** A person's face's menu, the right button or a finger held down (kumo, 2026-11-16: an agent's
+ *  face has one, a person's had none): 提及, 私聊, as their card has them. */
+export function PersonMenu({ user, name, call, dm: other = true, at, close }: { user: string; name: string; call?: (name: string) => void; dm?: boolean; at: { x: number; y: number } | null; close: () => void }) {
+  const dm = mayDM(user, useApps().data?.logins ?? []) && other;
+  const anchor = at && { getBoundingClientRect: () => DOMRect.fromRect({ x: at.x, y: at.y, width: 0, height: 0 }) };
+  // After a frame: the menu shuts first, and what opens is not shut with it.
+  const later = (f: () => void) => () => requestAnimationFrame(f);
+  const talk = () => void api.dm(user).then((r) => openChat(r.channel), (e) => toast(t("err.action"), { error: true, description: errText(e) }));
+  const items = [
+    call && { icon: <AtSign size={15} />, label: t("channel.call"), run: later(() => call(name)) },
+    dm && { icon: <MessageCircle size={15} />, label: t("channel.dm"), run: talk },
+  ].filter((x) => !!x);
+  if (!items.length) return null;
+  return (
+    <Menu.Root open={at !== null} onOpenChange={(o) => !o && close()}>
+      <Menu.Portal>
+        <Menu.Positioner anchor={anchor} side="bottom" align="start" sideOffset={4} collisionPadding={8} className="z-50">
+          <Menu.Popup finalFocus={false} className={cn(POPUP, "min-w-52 p-1.5")}>
+            <div className="g-stagger flex flex-col">
+              {items.map((x, i) => (
+                <Menu.Item key={x.label} onClick={x.run} style={{ "--i": i } as CSSProperties} className={ITEM}>
+                  <span className="text-ink-2">{x.icon}</span>
+                  <span className="flex-1">{x.label}</span>
+                </Menu.Item>
+              ))}
+            </div>
+          </Menu.Popup>
+        </Menu.Positioner>
+      </Menu.Portal>
+    </Menu.Root>
+  );
 }
 
 /** A channel's people and apps as an @ names them (peers of its agents): each login among its
