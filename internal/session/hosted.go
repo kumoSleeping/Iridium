@@ -202,6 +202,16 @@ type cached struct {
 	last  *api.LastSaid
 }
 
+// ranAs: model, as a session names it, is what it ran as last: none named, the default, or a
+// family of which last is one (Claude's "opus": "claude-opus-5-5"; "opus[1m]" too).
+func ranAs(model, last string) bool {
+	if model == "" || model == "default" || model == last {
+		return true
+	}
+	family, _, _ := strings.Cut(strings.ToLower(model), "[")
+	return !strings.ContainsAny(family, "-/.") && slices.Contains(strings.FieldsFunc(strings.ToLower(last), func(r rune) bool { return r == '-' || r == '/' || r == '.' }), family)
+}
+
 func (m *Manager) newHosted(mt meta) *Hosted {
 	h := &Hosted{m: m, meta: mt, id: mt.ID, dir: filepath.Join(m.holdRoot(), mt.ID), unit: m.o.UnitPrefix + mt.ID, model: mt.Model, mode: mt.Mode, lastActive: time.UnixMilli(mt.Created), shownAt: time.UnixMilli(mt.Created), turn: agent.Idle}
 	h.drv = m.newDriver(mt.Agent, h.onEvent)
@@ -213,10 +223,11 @@ func (m *Manager) newHosted(mt meta) *Hosted {
 		h.meta.Mode = cmp.Or(st.Mode, h.meta.Mode)
 		h.model, h.mode = h.meta.Model, h.meta.Mode
 	}
-	// One that names no model: the one it last ran (its usage), not nothing until it runs again
-	// (its name, its model's face; the user, 2026-11-16: a group's Claude showed its logo).
-	if h.model == "" || h.model == "default" {
-		h.model = cmp.Or(m.o.Store.LastModel(mt.ID), h.model)
+	// One that names no model, or a family of them (Claude's opus): the one it last ran (its
+	// usage), not nothing or the family's name until it runs again (its name, its model's face;
+	// the user, 2026-11-16: a group's Claude, and sessions of opus, showed the logo).
+	if last := m.o.Store.LastModel(mt.ID); last != "" && ranAs(h.model, last) {
+		h.model = last
 	}
 	h.rules, _ = m.o.Store.Rules(mt.ID)
 	if c := h.savedContext(); c != nil {
