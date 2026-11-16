@@ -106,6 +106,11 @@ describe("the hand-over", () => {
     // All the agents called at once: each held on that message as on its own @.
     expect(callerOf([person(1, "@全体Agent roll call")], "codex", "codex")).toBe(1);
     expect(callerOf([person(3, "@全体Agents")], "codex", "codex")).toBeUndefined();
+    // A nick with a "-" (a default one, Pi-9579) or a pattern's characters: matched as it is.
+    expect(callerOf([person(1, "@Pi-9579 hi")], "Pi-9579", "pi")).toBe(1);
+    expect(callerOf([person(1, "@Pi-95790 hi")], "Pi-9579", "pi")).toBeUndefined();
+    expect(callerOf([person(1, "@a.b+(c) go")], "a.b+(c)", "x")).toBe(1);
+    expect(callerOf([person(1, "@axb go")], "a.b", "x")).toBeUndefined();
   });
 });
 

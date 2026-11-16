@@ -108,7 +108,9 @@ export function held(h: Hold, shown: (seq: number) => boolean, writing: boolean,
  *  @全体成员, as the log's text has them), by another. */
 export function callerOf(msgs: Msg[], nick: string, session: string): number | undefined {
   if (!nick) return undefined;
-  const word = (w: string) => new RegExp(`(^|[^\\p{L}\\p{N}_-])@${w.replace(/[-]/g, "\\-")}(?![\\p{L}\\p{N}_-])`, "u");
+  // Escaped as a pattern's own characters: under "u" an escape that means nothing (\-) throws, and
+  // a default nick has a "-" (Pi-9579).
+  const word = (w: string) => new RegExp(`(^|[^\\p{L}\\p{N}_-])@${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}_-])`, "u");
   const calls = [word(nick), word("全体Agent"), word("全体成员")];
   for (let i = msgs.length - 1; i >= 0; i--) {
     const m = msgs[i]!;
