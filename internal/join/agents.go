@@ -16,7 +16,7 @@ import (
 
 // knownAgents are the agents looked for on PATH, by program name. The Iridium ignores those it
 // cannot drive at another machine yet.
-var knownAgents = []string{"dsh", "claude", "codex", "pi"}
+var knownAgents = []string{"dsh", "claude", "codex", "pi", "agy"}
 
 // FindAgents is the agents installed here, as the hello gives them. A Node program is started as
 // node and its entry script, never through npm's .cmd shim (docs/exec.md "握手").

@@ -8,7 +8,7 @@ channel.create {_data.agent?, _data.cwd, _data.text?, _data.model?, _data.mode?,
   data.parent_id: the session it hangs under on the page (its launcher). Not given: the session your ir runs in, so one you start is your child: listed under you, archived with you. To start one of its own: channel.update data.parent_id:=null after.
   _data.cwd: . is your own folder and a relative path goes from it; ~ and ~/x the home; host:path here; app:path at that app's computer (GET internal/apps), where it then runs; an absolute path as it is.
   guild_id: a folder group's id (guild.list), self yours; not given: its folder's group, yours when yours holds its folder.
-  _data.agent: not given: a channel with no agent of its own, listed in _data.cwd; agents join it (POST internal/channels/{id}/members) and people speak in it. Given: claude, codex, pi or dsh (GET internal/agents: those that can start here, their modes); _data.mode: one of them; model, effort, preset: the agent's own (SessionState.models, efforts; GET internal/sessions/{id}/presets).
+  _data.agent: not given: a channel with no agent of its own, listed in _data.cwd; agents join it (POST internal/channels/{id}/members) and people speak in it. Given: claude, codex, pi, dsh or agy (GET internal/agents: those that can start here, their modes); _data.mode: one of them; model, effort, preset: the agent's own (SessionState.models, efforts; GET internal/sessions/{id}/presets).
   _data.role: start it as a kept role (GET internal/roles): its agent, model, effort and card. _data.nick, _data.intro, _data.avatar, _data.background: its card from the start (ir api help profile).
   _data.text: its first message, from you: it reads [ir:<your session>] before it. ir prints the id, with text once the agent took it. Started from a session, it joins that session's channel: the text is then said to it there, its answer said there.
   --wait: holds your turn till its first turn ends, then prints its reply: for a session that does a job apart from your channel and reports to you. Not for an agent in your channel (one you invited or started there): its words are said in the channel and its answer to you calls you, so waiting only holds your turn and gets you words everyone has already seen.
@@ -73,7 +73,7 @@ GET internal/usage?days&app&by - -> Usage  tokens, cost; app=id|name|me, by=hour
 # satori
 meta - -> Meta  this app's approved logins; ir speaks as the first
 login.get - -> Login  the login ir speaks as
-user.get {user_id} -> User  an agent (claude, codex, pi, dsh), an app, a login or the host
+user.get {user_id} -> User  an agent (claude, codex, pi, dsh, agy), an app, a login or the host
 guild.get {guild_id} -> Guild  one folder group
 upload.create {channel_id} -> {field: url}  multipart: files for a session, each an internal: url for <img>/<file>
 

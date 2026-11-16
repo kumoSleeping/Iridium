@@ -159,7 +159,7 @@ func TestRemoteRows(t *testing.T) {
 func TestHomesAndSessionVars(t *testing.T) {
 	env := map[string]string{"DSH_HOME": "/srv/dsh", "CODEX_HOME": "/srv/codex"}
 	got := Homes("/home/u", func(k string) string { return env[k] })
-	for _, want := range []string{"/home/u/.claude", "/home/u/.codex", "/home/u/.pi", "/home/u/.dsh", "/srv/dsh", "/srv/codex"} {
+	for _, want := range []string{"/home/u/.claude", "/home/u/.codex", "/home/u/.pi", "/home/u/.dsh", "/home/u/.gemini", "/srv/dsh", "/srv/codex"} {
 		if !slices.Contains(got, want) {
 			t.Errorf("Homes lacks %s: %v", want, got)
 		}
@@ -169,7 +169,7 @@ func TestHomesAndSessionVars(t *testing.T) {
 			t.Errorf("%s: no HomeDir or SessionEnv", i.Agent)
 		}
 	}
-	want := []string{"IRIDIUM_SESSION", "CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "CODEX_SESSION_ID", "DSH_SESSION_ID", "PI_SESSION_ID"}
+	want := []string{"IRIDIUM_SESSION", "CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "CODEX_SESSION_ID", "DSH_SESSION_ID", "PI_SESSION_ID", "ANTIGRAVITY_CONVERSATION_ID"}
 	if vars := SessionVars(); !slices.Equal(vars, want) {
 		t.Errorf("SessionVars = %v, want %v (docs/api.md)", vars, want)
 	}

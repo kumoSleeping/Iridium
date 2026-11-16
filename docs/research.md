@@ -27,6 +27,7 @@ Iridium 读 `/proc/<pid>/environ`，按下表认出“谁拉起了这个会话�
 | Codex | `CODEX_THREAD_ID`、`CODEX_SESSION_ID`（主线程上两者相同）、`CODEX_VERSION`、`CODEX_APPLY_PATCH_PRESERVE_LINE_ENDINGS`；npm 包装另加 `CODEX_MANAGED_BY_NPM`、`CODEX_MANAGED_PACKAGE_ROOT`。`CODEX_CI` 只在模型调的命令里有（Rh `start-mid-turn`），用户 shell 命令里为空 | 实测 0.165.0：私有 app-server + 临时 `CODEX_HOME` + 临时线程，`thread/shellCommand` 跑 `env`，不调模型 |
 | pi | 所有子进程：`AI_AGENT=pi`、`PI_CODING_AGENT=true`（不带会话）。只有模型调的 `bash` 工具：`PI_SESSION_ID`、`PI_SESSION_FILE`、`PI_PROVIDER`、`PI_MODEL`、`PI_REASONING_LEVEL`（0.82.0 起）。rpc 的 `bash` 和 `!` 命令里没有 | 实测 1.4.0：`pi --mode rpc` 不发 prompt，发 rpc `bash` 跑 `env`；会话变量读 `docs/environment-variables.md` 和 CHANGELOG |
 | dsh | 模型调的 shell：`DSH_SESSION_ID`、`DSH_HOME`、`DSH_SHELL=1`、`DSH_PROFILE`、`DSH_PROFILE_DIR` | 源码文档 `packages/shell/shell-env/README.md`（v0.2.2-rc.1），未实测 |
+| agy | 模型调的命令：`ANTIGRAVITY_CONVERSATION_ID`（会话 ID）、`ANTIGRAVITY_AGENT=1`、`ANTIGRAVITY_APP_DATA_DIR`（它的目录）、`ANTIGRAVITY_PROJECT_ID`；拉起它的环境原样传下去 | 实测 1.5.9：`agy acp` 里让模型跑 `env` |
 
 - pi 一启动就改进程标题，`/proc/<pid>/cmdline` 只剩 `pi` 加空格（实测 1.4.0，同 Rh）。从 `/proc` 认 pi 不能看命令行。
 - 所以 pi 拉起的会话只能认出“是 pi 拉起的”，要知道哪段 pi 会话，只有模型的 `bash` 工具里才有 `PI_SESSION_ID`。

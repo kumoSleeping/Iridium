@@ -22,13 +22,11 @@ import (
 	"unicode"
 
 	"github.com/kumoSleeping/iridium/internal/access"
-	"github.com/kumoSleeping/iridium/internal/agents"
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/channel"
 	"github.com/kumoSleeping/iridium/internal/ctx/assemble"
 	"github.com/kumoSleeping/iridium/internal/deliver"
 	"github.com/kumoSleeping/iridium/internal/gate"
-	"github.com/kumoSleeping/iridium/internal/satori"
 	"github.com/kumoSleeping/iridium/internal/session"
 	"github.com/kumoSleeping/iridium/internal/store"
 )
@@ -283,9 +281,8 @@ func (s *Server) agentProfile(id string) api.Profile {
 	out := api.Profile{ID: store.AgentMember(id), Kind: api.CardKindAgent, Session: id, Name: s.ch.Nick(id), Intro: p.Intro, Role: s.st.RoleOf(id)}
 	st, err := s.m.State(id)
 	if err == nil {
-		info, _ := agents.Get(st.Agent)
 		out.Agent, out.Status = st.Agent, st.Status
-		out.Model = satori.AgentName(cmp.Or(info.Name, string(st.Agent)), *st)
+		out.Model = s.sessionName(st)
 	}
 	out.Avatar = s.AgentAvatar(id)
 	if _, v, ok := s.face(key, true, ""); ok {

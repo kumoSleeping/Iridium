@@ -7,6 +7,7 @@ const MODE_KEY: Record<string, Parameters<typeof t>[0]> = {
   manual: "mode.default",
   ask: "mode.default",
   acceptEdits: "mode.acceptEdits",
+  "accept-edits": "mode.acceptEdits",
   plan: "mode.plan",
   auto: "mode.auto",
   dontAsk: "mode.dontAsk",
@@ -27,11 +28,13 @@ export const modeName = (m: { id: string }) => (MODE_KEY[m.id] ? t(MODE_KEY[m.id
 const BUBBLE = "M7.9 20A9 9 0 1 0 4 16.1L2 22Z";
 const SHIELD = "M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z";
 const ASK = [BUBBLE, "M9.1 9a3 3 0 0 1 5.8 1c0 2-2.9 2.5-2.9 2.5", "M12 16.5h.01"];
+const ACCEPT_EDITS = ["M15 3.5a2.12 2.12 0 0 1 3 3L8.5 16 4 17.5 5.5 13Z", "m14 19 2 2 5-5"];
 const MARKS: Record<string, string[]> = {
   default: ASK,
   manual: ASK,
   ask: ASK,
-  acceptEdits: ["M15 3.5a2.12 2.12 0 0 1 3 3L8.5 16 4 17.5 5.5 13Z", "m14 19 2 2 5-5"],
+  acceptEdits: ACCEPT_EDITS,
+  "accept-edits": ACCEPT_EDITS,
   plan: ["M9 2h6a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1Z", "M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2", "M12 11h4", "M12 16h4", "M8 11h.01", "M8 16h.01"],
   auto: [SHIELD, "m9 12 2 2 4-4"],
   dontAsk: [SHIELD, "m9.5 9.5 5 5", "m14.5 9.5-5 5"],
@@ -46,8 +49,8 @@ const MARKS: Record<string, string[]> = {
 };
 
 /** A mode's mark for the agent, as that agent means it: Codex's auto is its own "never", asking
- *  nothing; pi's two modes have none (their names are short). */
-const markOf = (agent: string, id: string) => (agent === "pi" ? undefined : agent === "codex" && id === "auto" ? MARKS.never : MARKS[id]);
+ *  nothing, and agy's (every ask allowed by Iridium); pi's two modes have none (their names are short). */
+const markOf = (agent: string, id: string) => (agent === "pi" ? undefined : (agent === "codex" || agent === "agy") && id === "auto" ? MARKS.never : MARKS[id]);
 
 export const hasMark = (agent: string, id: string) => !!markOf(agent, id);
 

@@ -583,7 +583,7 @@ function InviteForm({ done }: { done: () => void }) {
 }
 
 /** The agents a permission list offers by name; others it was given show too. */
-const AGENTS = ["claude", "codex", "pi", "dsh"];
+const AGENTS = ["claude", "codex", "pi", "dsh", "agy"];
 const ALL = "*";
 const permsOf = (p?: Perms): Perms => p ?? { agents: [ALL], scope: [ALL] };
 const same = (a: string[], b: string[]) => a.length === b.length && a.every((v, i) => v === b[i]);

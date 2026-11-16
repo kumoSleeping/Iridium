@@ -17,7 +17,8 @@ Rhodium 的轻量 Go 版本：一个网页，管理主机和别的电脑上 agen
 
 ## 会话
 
-- agent：Claude、Codex、pi、dsh（DeepSeek Harness）。
+- agent：Claude、Codex、pi、dsh（DeepSeek Harness）、agy（Antigravity CLI，2026-11-16）。
+- agy：`agy acp`（ACP），一个会话一个进程。它的会话库是 SQLite 存 protobuf，读不了：Iridium 自己记（会话 hold 目录里的 `record.jsonl`，驱动在一段话、一次调用写完时交给会话层）；终端里开的 agy 会话从 `conversation_summaries.db` 列出（标题、目录），接管前没有内容，接管时 `session/load` 重放历史记下来。续接用 `session/resume`，之后重设模型、强度、模式（agy 会回到它的默认）。回合中发的话并进这一回合。没有额度接口：只显示订阅档。
 - 自动发现 agent 自己起的会话（agent 记录目录、`~/.claude/sessions/`、`/proc`），不建父子关系（子代理除外，见下）。
 - 没有“工作区”要先建（2026-11-08）：分组就是文件夹。会话第一次出现时归组：拉起者的组（组的文件夹包含它的目录时；子代理总跟父会话）→ 包含它目录的最外层的组 → 用它自己的目录新建一个组（名字取文件夹名）。子目录的组比父目录的先建时（2026-11-08），父目录的组一建好，子目录的组就并进去，成为它下面的子目录；手动放过的会话不动。家目录和 `/` 的组只收正好在那里的会话，免得一个会话把所有项目都收进去。以前在“未归类”的会话也按这条重新归组；只剩没有目录的会话在未归类。组里没有显示的会话就不列出来（组还在，改的名字、通知设置留着）。
 - 结构：组（文件夹）→ 子目录 → 会话；子目录写成相对组的路径（如 `web/api`），只有一个会话也显示（2026-11-06）；组目录下的会话直接列在组下。一个会话只属于一个组。子目录的上级目录也列着时（2026-11-10，之前最多两级），它挂在最近的那个下面、往里缩一级，名字写相对它的路径，中间没有会话的目录并进名字（如 `b/c`）；最多缩三级，更深的画在第三级。拖动、置顶在同一个上级文件夹里；文件夹的“归档这里的 N 个会话”连它里面文件夹的会话一起归档（挂在下面的派出会话也算进 N）。
@@ -154,7 +155,7 @@ ir run [--secret 名,…] -- 命令 …   {{名}}、{{file:名}} 换进参数，
 - 小卡片贴在输入框上方；不属于会话的列在会话列表最上面。标题 + 一行摘要 + 主次两个键，细节点开看。
 - 审批：工具名 + 参数摘要（命令等宽），允许 / 拒绝 / 本会话一直允许。
 - 拦下的一步：Claude auto 模式拦下的一步（它不问，直接拒）不一定要你管，它常换条路做成（2026-11-08）。回合结束后在对话末尾是压缩那样的一行“auto 拦了 N 步”，点开每步一张卡：理由 + 命令，“忽略 / 临时切换至 manual”两个键；发下一条消息就清掉。只有回合停在被拦的一步上（之后没做完别的调用）才算需要你，这时那行默认展开；回合结束的推送和 Bot 回复带一句“auto 拦了 N 步”。临时切换至 manual：只切进程的模式，不给 Claude 发消息、不叫它重做（原来叫“放行”，以用户名义发“请原样再做一次”，2026-11-08）；之后第一个问你的调用就算这一步（它可能换了做法），做完马上切回原模式（2026-11-08）；没有要问的，就在当时的回合（空闲时为下一回合）结束时切回。守护进程重启接管进程时接着算，不留在 manual。卡只记在守护进程内存里，重启就没了。
-- 默认自动审批：Claude `auto`，Codex 不询问的那档，pi 不审批（不加载审批扩展）。
+- 默认自动审批：Claude `auto`，Codex 不询问的那档，pi 不审批（不加载审批扩展），agy `auto`（agy 的 default，问的都由 Iridium 允许）。
 - 回合在跑时打的字：默认回车直接插话（并进这一回合，这一步做完就进去），Ctrl/⌘+Enter 排到下一回合；设置“运行中按回车”可以反过来（回车排队，Ctrl/⌘+Enter 插话，同 Claude Code 的 send now）。插话的话马上作为你的淡色气泡出现，下面写“插入中”，记录里有了才变实。待发队列两条以上有“一起发送”。 `ir send` 也一样默认插话，要排队加 `--queue`（agent 之间的话多半要马上看到；2026-11-06）；agent 发的不排队，`--queue` 也插进（免得要人去点；2026-11-06）。
 - 提及改用 `&`（用户，2026-11-13）：`@` 只用来叫频道成员（Satori 的 `<at>`，`docs/channels.md`“叫起谁”）；下面写的“@”列表、路径、→ 现在都是打 `&` 出来的。
 - @（用户，2026-11-10；取代 11-06、11-08 的提及）：@ 只是指一个东西，不送达、不通知、不授权（`docs/next/k_bot.md` 第 5 节）。能指的：会话、位置（本机的组、各台机器的工作区，没显示的也算）。终端这一轮不在列表里：还没定发出的写法（2026-11-10）。
@@ -216,7 +217,7 @@ ir run [--secret 名,…] -- 命令 …   {{名}}、{{file:名}} 换进参数，
 - 输入框下方一行：模型、额度条，上下文小环靠右。从输入框半腰往下垫一层纸色，滚到底下的对话文字止于此，不和这一行重叠。输入框里只有附件、文字、发送键，上下对齐。发送键是圆角正方形，和附件键的图标差不多大（2026-11-08）。
 - 模型键：写具体的模型（默认时也写，例如 Opus 5.5）和在用的思考强度，开了 UltraCode 加个小标。点开是模型列表，选了就收起；底下是强度滑条（像 Codex 的，按档吸附，能拖、能点档名、能用方向键）和 UltraCode 开关（只 Claude），调这两样面板不收（用户，2026-11-06）。DSH Desktop 拿着的会话上，插件给的附加功能（如 OMD 的 Ultra）也在这个位置（2026-11-09）。
 - 上下文小窗：模型后面一个小环，写用了多少；点开是分项占用的条形图（系统提示、工具、MCP、记忆文件、消息、空余、压缩预留），类似 Cursor 以前的。Claude 用 `get_context_usage`，回合结束、压缩后，以及回合中调用工具时（最多 30 秒一次）更新；Codex、pi 只有总数。
-- 额度条：输入框下方那一行、模型键之后，有几条额度放几条（例如 Claude 的 5 小时、7 天、7 天 Fable；Codex 的两个窗口）。短条加百分比，快满变色；点开弹窗（像 Claude Code 的 /usage）列出每个窗口的名字、进度条、百分比和重置时间，以及账号和读取时间。按 agent 和登录的账号认（来自 agent 报的账号和套餐），都显示，设置里不再能隐藏（2026-11-06）。没有进程在跑时显示上次的值并变淡。
+- 额度条：输入框下方那一行、模型键之后，有几条额度放几条（例如 Claude 的 5 小时、7 天、7 天 Fable，Fable 那条不论用哪个模型都显示（2026-11-15）；Codex 的两个窗口；Antigravity 的“Gemini 5 小时”“Gemini 7 天”和“Claude · GPT 5 小时”“Claude · GPT 7 天”，同它自己用量页的分组，只显示当前模型那组（2026-11-16；用 agy 的登录读 `retrieveUserQuotaSummary`，以 Antigravity 应用的身份问，同 CodexBar））。名字是 agent 的显示名 + 窗口 + 模型；Antigravity 的是模型族 + 窗口。短条加百分比，快满变色；点开弹窗（像 Claude Code 的 /usage）列出每个窗口的名字、进度条、百分比和重置时间，以及账号和读取时间。按 agent 和登录的账号认（来自 agent 报的账号和套餐），都显示，设置里不再能隐藏（2026-11-06）。没有进程在跑时显示上次的值并变淡。
 - 添加到主屏（2026-11-08）：图标就用现在的 “Ir”，名字 Iridium，不另设计。manifest 带 192/512 PNG 和 maskable 版，iOS 用 180 的 apple-touch-icon；图标和 manifest 不用登录也能取（浏览器取 manifest 不带 cookie，手机常从登录页添加），登录页也带它们。设置里 Web Push 上面一行：Chrome/Edge 是“添加到主屏幕”（电脑上“安装为应用”）加一个键；iOS 写“分享菜单”，Mac 上的 Safari 写“添加到程序坞 · 文件菜单”；已装好的、别的浏览器没有这一行。浏览器顶栏颜色跟页面的纸色，按选的主题。
 - 中英双语：跟浏览器，可改；自写 `t()`，`zh.ts` 为准，`en.ts` 键必须一致；排版按英文长度。
 
@@ -323,10 +324,10 @@ ir run [--secret 名,…] -- 命令 …   {{名}}、{{file:名}} 换进参数，
 
 - `claude -p` 子进程启动就写 `~/.claude/sessions/<pid>.json`（`entrypoint: sdk-cli`），环境里带拉起者的 `CLAUDE_CODE_SESSION_ID` 和 `CLAUDE_PID`。没发消息就退出：不写记录、不花额度、登记文件自己删掉。
 - Rhodium 已查清（直接照用）：
-  - 记录位置：Claude `~/.claude/projects/`；Codex `$CODEX_HOME/sessions/YYYY/MM/DD/`；pi `~/.pi/agent/sessions/`。
-  - 追加系统提示：Claude `--append-system-prompt-file` + `--system-prompt-snapshot off`；pi `--append-system-prompt`；Codex 开线程时的 `developerInstructions`。
-  - 审批：Claude `set_permission_mode`（要带 `--allow-dangerously-skip-permissions` 才能切到跳过）；Codex `approvalPolicy`；pi 没有，用 Rhodium 的审批扩展（`src/pi-approval.ts`）。
-  - 用量：Claude `get_usage` 和 `result`；pi `get_session_stats`；Codex `thread/tokenUsage/updated`。
+  - 记录位置：Claude `~/.claude/projects/`；Codex `$CODEX_HOME/sessions/YYYY/MM/DD/`；pi `~/.pi/agent/sessions/`；agy 由 Iridium 记（见“会话”）。
+  - 追加系统提示：Claude `--append-system-prompt-file` + `--system-prompt-snapshot off`；pi `--append-system-prompt`；Codex 开线程时的 `developerInstructions`；agy `session/new` 的 `_meta.antigravity.systemPrompt.append`（只认开会话时的）。
+  - 审批：Claude `set_permission_mode`（要带 `--allow-dangerously-skip-permissions` 才能切到跳过）；Codex `approvalPolicy`；pi 没有，用 Rhodium 的审批扩展（`src/pi-approval.ts`）；agy `session/set_config_option mode` 和 `session/request_permission`。
+  - 用量：Claude `get_usage` 和 `result`；pi `get_session_stats`；Codex `thread/tokenUsage/updated`；agy `session/prompt` 的回答和 `usage_update`。
   - Codex 给子进程设 `CODEX_THREAD_ID`、`CODEX_SESSION_ID`。
   - 起 agent 前去掉继承来的 `CLAUDECODE`、`CLAUDE_CODE_*` 等变量（Rhodium `src/agents.ts` 的过滤规则）。
 - Cloudflare 单个请求上限：Free、Pro 100MB，Business 200MB，Enterprise 最多 5GB。50MB 分块够用。

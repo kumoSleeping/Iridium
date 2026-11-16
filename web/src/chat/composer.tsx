@@ -80,7 +80,7 @@ const describe = (c: Command): Command => (c.description || !COMMON.includes(c.n
  *  /clear goes on in a new session. */
 export function commandsOf(s: LiveSession): Command[] {
   if (s.commands?.length) return s.commands.map(describe);
-  return COMMON.filter((n) => n !== "effort" && (n !== "usage" || s.agent !== "pi")).map((name) => describe({ name }));
+  return COMMON.filter((n) => n !== "effort" && (n !== "usage" || (s.agent !== "pi" && s.agent !== "agy"))).map((name) => describe({ name }));
 }
 
 type Att = { key: string; file: File; sent: number; ref?: string; path?: string; error?: string; url?: string; stop: AbortController };

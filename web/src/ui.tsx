@@ -3,11 +3,11 @@
 import { Popover } from "@base-ui/react/popover";
 import { Tooltip } from "@base-ui/react/tooltip";
 import { Bot, Camera, Monitor, Puzzle, ScrollText, UsersRound, type LucideIcon } from "lucide-react";
-import { Fragment, useCallback, useEffect, useRef, useState, useSyncExternalStore, type ComponentProps, type CSSProperties, type ReactElement, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, type ComponentProps, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { useLeaving } from "./motion";
 import type { Agent, Status } from "./api/types.gen";
 import { t } from "./i18n";
-import { CLAUDE, DSH, DSH_VIEWBOX, OPENAI, OPENAI_VIEWBOX, PI, PI_VIEWBOX } from "./logos";
+import { AGY, AGY_BLOBS, AGY_VIEWBOX, CLAUDE, DSH, DSH_VIEWBOX, OPENAI, OPENAI_VIEWBOX, PI, PI_VIEWBOX } from "./logos";
 
 export const cn = (...xs: (string | false | null | undefined)[]) => xs.filter(Boolean).join(" ");
 
@@ -260,11 +260,11 @@ export function Switch({ on, onChange, label, disabled, className }: { on: boole
   return <button type="button" role="switch" aria-checked={on} aria-label={label} disabled={disabled} onClick={() => onChange(!on)} className={cn("switch g-press", className)} />;
 }
 
-const AGENT_NAME: Record<Agent, string> = { claude: "Claude", codex: "Codex", pi: "pi", dsh: "DeepSeek Harness" };
+const AGENT_NAME: Record<Agent, string> = { claude: "Claude", codex: "Codex", pi: "pi", dsh: "DeepSeek Harness", agy: "Antigravity" };
 /** A token count, short: 980, 12.3k, 4.5M. */
 export const tokens = (n: number) => (n >= 1e9 ? `${(n / 1e9).toFixed(2)}B` : n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 100) / 10}k` : `${n}`);
 export const agentName = (a: Agent) => AGENT_NAME[a] ?? a;
-export const AGENTS: Agent[] = ["claude", "codex", "pi", "dsh"];
+export const AGENTS: Agent[] = ["claude", "codex", "pi", "dsh", "agy"];
 
 /** An agent's mark, the only coloured thing in a row. */
 export function Logo({ agent, size = 16, className }: { agent: Agent; size?: number; className?: string }) {
@@ -291,11 +291,41 @@ export function Logo({ agent, size = 16, className }: { agent: Agent; size?: num
         ))}
       </svg>
     );
+  if (agent === "agy") return <AgyMark className={className} style={style} />;
   // dsh: its own mark, the black whale of its web app's favicon (dsh-web-frontend), in the text colour
   // like Codex's: black on light, white on dark, as dsh draws it.
   return (
     <svg role="img" aria-label="DeepSeek Harness" viewBox={DSH_VIEWBOX} className={cn("shrink-0 text-ink", className)} style={style}>
       <path fill="currentColor" d={DSH} />
+    </svg>
+  );
+}
+
+/** Antigravity's mark: its arch, the colours blurred over it clipped to it; ids its own, as a page has many. */
+function AgyMark({ className, style }: { className?: string; style: CSSProperties }) {
+  const id = useId().replace(/[^\w-]/g, "");
+  return (
+    <svg role="img" aria-label="Antigravity" viewBox={AGY_VIEWBOX} className={cn("shrink-0", className)} style={style}>
+      <defs>
+        {AGY_BLOBS.map((b, i) => (
+          <filter key={i} id={`${id}f${i}`} x={b.box[0]} y={b.box[1]} width={b.box[2]} height={b.box[3]} filterUnits="userSpaceOnUse" colorInterpolationFilters="sRGB">
+            <feGaussianBlur stdDeviation={b.blur} />
+          </filter>
+        ))}
+        <mask id={`${id}m`} maskUnits="userSpaceOnUse" x="13" y="18" width="85" height="78" style={{ maskType: "alpha" }}>
+          <path d={AGY} fill="black" />
+        </mask>
+      </defs>
+      <g transform="translate(12 10)">
+        <path d={AGY} fill="#3186FF" />
+        <g mask={`url(#${id}m)`}>
+          {AGY_BLOBS.map((b, i) => (
+            <g key={i} filter={`url(#${id}f${i})`}>
+              {b.ellipse ? <ellipse {...b.ellipse} transform={b.transform} fill={b.fill} /> : <path d={b.d} transform={b.transform} fill={b.fill} />}
+            </g>
+          ))}
+        </g>
+      </g>
     </svg>
   );
 }

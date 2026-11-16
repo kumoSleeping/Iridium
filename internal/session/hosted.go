@@ -68,10 +68,14 @@ func (h *Hosted) findTranscript() (string, error) {
 	if !ok {
 		return "", fmt.Errorf("no agent %s", mt.Agent)
 	}
+	where := agents.Where{ID: mt.agentID(), Cwd: mt.Cwd, Env: h.m.agentEnv(), ClaudeHome: h.m.o.Config.ClaudeDir(), Record: filepath.Join(h.dir, transcript.OwnFile)}
+	if info.OwnRecord {
+		return info.Find(where) // here, wherever the agent runs
+	}
 	if mc := h.machine(); mc != nil {
 		return h.findRemoteTranscript(mc)
 	}
-	return info.Find(agents.Where{ID: mt.agentID(), Cwd: mt.Cwd, Env: h.m.agentEnv(), ClaudeHome: h.m.o.Config.ClaudeDir()})
+	return info.Find(where)
 }
 
 // seenMeta: the daemon had read process Proc's output up to Offset in out.log. What comes after
@@ -99,6 +103,12 @@ type Hosted struct {
 
 	startMu   sync.Mutex // one start at a time
 	replaying atomic.Bool
+	// fed: where in out.log the line the driver is fed ends, for the record Iridium keeps itself
+	// (agents.Info.OwnRecord); recorded: where its last line's output ended when this daemon
+	// first wrote to it (-1: none yet; unknown until then): nothing up to there is written again.
+	fed      atomic.Int64
+	recMu    sync.Mutex
+	recorded *int64
 
 	mu         sync.Mutex
 	newSession bool // never started: its usage so far is nothing
@@ -288,8 +298,15 @@ func (h *Hosted) launch(ctx context.Context, proc int) error {
 		return err
 	}
 	m.given(h.id, "", system)
+	// An agent whose record Iridium keeps resumes the session it named (Started) whether or not
+	// the record has it yet; where it has none (one taken up from the agent's store), the agent
+	// gives the history again.
+	resume, history := found != "", false
+	if info, _ := agents.Get(h.meta.Agent); info.OwnRecord && h.meta.agentID() != "" {
+		resume, history = true, found == ""
+	}
 	h.mu.Lock()
-	o := agent.SpawnOptions{Session: h.id, Resume: found != "", AgentSession: h.meta.agentID(), Cwd: h.meta.Cwd, Env: m.agentEnv(), Program: m.o.Config.Programs[string(h.meta.Agent)], SystemPromptFile: prompt,
+	o := agent.SpawnOptions{Session: h.id, Resume: resume, History: history, AgentSession: h.meta.agentID(), Cwd: h.meta.Cwd, Env: m.agentEnv(), Program: m.o.Config.Programs[string(h.meta.Agent)], SystemPromptFile: prompt,
 		Model: h.meta.Model, Mode: cmp.Or(h.meta.Mode, m.defaultMode(h.meta.Agent)), Effort: h.effort, Ultracode: h.ultracode, Preset: h.preset, CrashResume: h.crashResume && found != ""}
 	h.resuming, h.crashResume, h.turnSeen = o.CrashResume, false, false
 	h.mu.Unlock()
@@ -444,6 +461,7 @@ func (h *Hosted) loop(proc int, outStart, replay int64) {
 				continue
 			}
 			h.replaying.Store(l.Off < replay)
+			h.fed.Store(l.Off + l.Len)
 			h.drv.Feed(l.Data, l.Off < replay)
 		}
 		h.replaying.Store(false)
@@ -620,6 +638,12 @@ func (h *Hosted) onEvent(e agent.Event) {
 		h.mu.Unlock()
 		if !replay {
 			h.m.o.Hub.Draft(h.id, proc, n, e.Text)
+		}
+		return
+	case agent.Record:
+		h.mu.Unlock()
+		if !replay {
+			h.record(e.Entry)
 		}
 		return
 	case agent.MessageDone:

@@ -656,6 +656,11 @@ describe("windowFor", () => {
     expect(windowFor(w("Fable"), [undefined, "", undefined])).toBe(true);
     expect(windowFor(w("GPT-5.3-Codex-Spark"), ["gpt-5.3-codex-spark"])).toBe(true);
     expect(windowFor(w("GPT-5.3-Codex-Spark"), ["gpt-5.3-codex"])).toBe(false);
+    // Antigravity's, each shared by models: the share of the one in use.
+    expect(windowFor(w("Gemini"), ["gemini-3.8-flash"])).toBe(true);
+    expect(windowFor(w("Claude · GPT"), ["gemini-3.8-flash", "Gemini 3.8 Flash"])).toBe(false);
+    expect(windowFor(w("Claude · GPT"), ["gpt-oss-120b-medium"])).toBe(true);
+    expect(windowFor(w("Claude · GPT"), ["claude-opus-5-5"])).toBe(true);
   });
 });
 

@@ -211,6 +211,17 @@ func (x *Index) sessionsOf(pid int, p *proc, argv []string) []string {
 		if len(out) == 0 {
 			add(x.newestPi(x.o.Procs.Cwd(pid), p.st.Started))
 		}
+	case "agy":
+		// Its conversations' stores it has open: `agy acp` may serve several.
+		root := filepath.Join(x.o.AgyHome, "conversations") + "/"
+		for _, f := range x.o.Procs.Files(pid) {
+			if rest, ok := strings.CutPrefix(f, root); ok && strings.HasSuffix(rest, ".db") && !strings.Contains(rest, "/") {
+				add(strings.TrimSuffix(rest, ".db"))
+			}
+		}
+		if len(out) == 0 {
+			add(flagValue(argv, "--conversation"))
+		}
 	}
 	return out
 }

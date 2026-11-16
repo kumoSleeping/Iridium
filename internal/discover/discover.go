@@ -41,6 +41,7 @@ type Options struct {
 	CodexHome  string // $CODEX_HOME, else ~/.codex
 	PiSessions string // ~/.pi/agent/sessions
 	DshHome    string // $DSH_HOME, else ~/.dsh
+	AgyHome    string // ~/.gemini/antigravity-cli
 	Store      *store.Store
 	Hub        *hub.Hub // given the carried state "guilds"; may be nil
 	Procs      Procs    // nil: the system's (/proc on Linux, sysctl on macOS)
@@ -69,6 +70,7 @@ func Defaults(cfg config.Config) Options {
 		CodexHome:  filepath.Join(home, ".codex"),
 		PiSessions: filepath.Join(home, ".pi", "agent", "sessions"),
 		DshHome:    filepath.Join(home, ".dsh"),
+		AgyHome:    filepath.Join(home, ".gemini", "antigravity-cli"),
 		State:      cfg.StatePath(),
 		UID:        -1,
 	}
@@ -365,6 +367,12 @@ func (x *Index) sources() []source {
 		}},
 		{x.piDirs, x.piIn, func() []string { return []string{x.o.PiSessions} }},
 		{x.dshDirs, x.dshIn, func() []string { return []string{filepath.Join(x.o.DshHome, "sessions")} }},
+		{x.agyDirs, x.agyIn, func() []string {
+			if x.o.AgyHome == "" {
+				return nil
+			}
+			return []string{x.o.AgyHome}
+		}},
 	}
 }
 
@@ -603,7 +611,8 @@ func (x *Index) Found(id string) (api.Session, *transcript.File, bool) {
 		return api.Session{}, nil, false
 	}
 	var f *transcript.File
-	if info, ok := agents.Get(e.agent); ok {
+	// One whose record Iridium keeps (agy) has none until it is taken up.
+	if info, ok := agents.Get(e.agent); ok && !info.OwnRecord {
 		if f = x.files[id]; f == nil || f.Path() != e.path {
 			f = transcript.OpenAs(e.path, info.Format, x.o.Store.Sender)
 			x.files[id] = f

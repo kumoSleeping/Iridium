@@ -6,6 +6,7 @@ package agents
 import (
 	"cmp"
 	"log"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/kumoSleeping/iridium/internal/agent"
+	"github.com/kumoSleeping/iridium/internal/agent/agy"
 	"github.com/kumoSleeping/iridium/internal/agent/claude"
 	"github.com/kumoSleeping/iridium/internal/agent/codex"
 	"github.com/kumoSleeping/iridium/internal/agent/dsh"
@@ -30,6 +32,9 @@ type Where struct {
 	Cwd        string   // where it was started
 	Env        []string // the environment agents start from (CODEX_HOME, PI_CODING_AGENT_SESSION_DIR...)
 	ClaudeHome string   // Claude's directory
+	// Record is where the record Iridium keeps itself of the session is (OwnRecord), whether or
+	// not it is there yet.
+	Record string
 }
 
 // RemoteWhere says where to look for a session's transcript at an executor (docs/exec.md).
@@ -77,7 +82,14 @@ type Info struct {
 	// OwnID: the agent makes the session's id itself (Codex's thread) and reports it with
 	// Started; the session keeps it as the agent's id, beside its own.
 	OwnID bool
-	New   func(emit func(agent.Event), logf func(string, ...any)) agent.Driver
+	// OwnRecord: the agent keeps no transcript Iridium can read (agy), so Iridium keeps one itself
+	// (transcript.Own) from its driver's agent.Record events, here even for a session at an
+	// executor; Find gives it once it is there.
+	OwnRecord bool
+	// ModelNamed: its models' names say whose they are (agy's Gemini, Claude, GPT-OSS), so a
+	// session goes by its model's name alone, not after the agent's (satori.SessionName).
+	ModelNamed bool
+	New        func(emit func(agent.Event), logf func(string, ...any)) agent.Driver
 	// Find is the transcript of the session, "" if there is none yet.
 	Find   func(w Where) (string, error)
 	Format transcript.Format
@@ -237,6 +249,29 @@ var all = []Info{
 			return "", nil
 		},
 	},
+	{
+		// agy acp (1.5.9): the Agent Client Protocol; model, level and mode at once
+		// (session/set_config_option). Its store is SQLite of protobufs: Iridium keeps the record.
+		Agent: api.AgentAgy, Name: "Antigravity",
+		Modes: agy.Modes, DefaultMode: agy.DefaultMode, ModeSwitch: "now", Efforts: agy.Efforts, ModelEfforts: true,
+		Quota: true, OwnID: true, OwnRecord: true, ModelNamed: true,
+		New: func(emit func(agent.Event), logf func(string, ...any)) agent.Driver {
+			return agy.New(agy.Options{Emit: emit, Logf: logf})
+		},
+		Find: func(w Where) (string, error) {
+			if w.Record == "" {
+				return "", nil
+			}
+			if _, err := os.Stat(w.Record); err != nil {
+				return "", nil
+			}
+			return w.Record, nil
+		},
+		Format: transcript.Own,
+		// At an executor the record is still here: nothing of it to find there.
+		FindRemote: func(RemoteWhere) (string, error) { return "", nil },
+		HomeDir:    ".gemini", SessionEnv: []string{"ANTIGRAVITY_CONVERSATION_ID"},
+	},
 }
 
 // codexDayDirs bounds the walk for a thread whose id has no time in it: the newest day folders.
@@ -353,7 +388,7 @@ func SessionVars() []string {
 
 // sessionVarOrder is the order agents' session variables are believed in: dsh's before pi's (a
 // shell of dsh's model inside pi's names the nearer one).
-var sessionVarOrder = []api.Agent{api.AgentClaude, api.AgentCodex, api.AgentDsh, api.AgentPi}
+var sessionVarOrder = []api.Agent{api.AgentClaude, api.AgentCodex, api.AgentDsh, api.AgentPi, api.AgentAgy}
 
 // All is every agent's row, Claude first.
 func All() []Info { return slices.Clone(all) }

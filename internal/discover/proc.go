@@ -221,6 +221,8 @@ func agentOf(argv []string, exe string) string {
 			return "pi"
 		case "dsh":
 			return "dsh"
+		case "agy":
+			return "agy"
 		}
 	}
 	if strings.Contains(exe, "/claude/versions/") {

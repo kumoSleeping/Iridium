@@ -10,13 +10,14 @@ from this package alone, so it imports nothing of Iridium's own.
 */
 
 /**
- * Agent is the kind of agent: claude, codex, pi, dsh.
+ * Agent is the kind of agent: claude, codex, pi, dsh, agy (Antigravity CLI).
  */
 export const AgentClaude = "claude";
 export const AgentCodex = "codex";
 export const AgentPi = "pi";
 export const AgentDsh = "dsh";
-export type Agent = typeof AgentClaude | typeof AgentCodex | typeof AgentPi | typeof AgentDsh;
+export const AgentAgy = "agy";
+export type Agent = typeof AgentClaude | typeof AgentCodex | typeof AgentPi | typeof AgentDsh | typeof AgentAgy;
 /**
  * AgentInfo is what an agent Iridium hosts can do (GET /v1/internal/agents).
  */

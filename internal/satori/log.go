@@ -29,8 +29,14 @@ func (s *Service) agentOf(session string) *User {
 	if err != nil {
 		return &u
 	}
-	info, _ := agents.Get(st.Agent)
-	u.Name = AgentName(cmp.Or(info.Name, string(st.Agent)), *st)
+	if k, ok := s.b.(interface {
+		KnownModels(api.Agent, string) []api.Model
+	}); ok && len(st.Models) == 0 {
+		n := *st
+		n.Models = k.KnownModels(st.Agent, st.Machine)
+		st = &n
+	}
+	u.Name = SessionName(*st)
 	u.Nick = s.log.Nick(session)
 	// Its face, where it was given one (the backend's to say).
 	if a, ok := s.b.(interface{ AgentAvatar(session string) string }); ok {
@@ -39,10 +45,24 @@ func (s *Service) agentOf(session string) *User {
 	return &u
 }
 
+// SessionName is the name session st's agent goes by (AgentName): an agent whose models say whose
+// they are (agents.Info.ModelNamed: agy) by its model and effort alone, while it has a model.
+func SessionName(st api.SessionState) string {
+	info, _ := agents.Get(st.Agent)
+	harness := cmp.Or(info.Name, string(st.Agent))
+	if info.ModelNamed && st.Model != "" {
+		harness = ""
+	}
+	return AgentName(harness, st)
+}
+
 // AgentName is the name an agent goes by: its harness, the model it runs and the effort, as far
-// as they are known ("Claude Opus 5.5 High").
+// as they are known ("Claude Opus 5.5 High"); harness "": the model and the effort.
 func AgentName(harness string, st api.SessionState) string {
-	parts := []string{harness}
+	var parts []string
+	if harness != "" {
+		parts = append(parts, harness)
+	}
 	model := st.Model
 	for _, m := range st.Models {
 		if (m.Value == st.Model || m.Resolved == st.Model) && m.Name != "" {
@@ -54,7 +74,9 @@ func AgentName(harness string, st api.SessionState) string {
 	}
 	if model != "" {
 		// A harness's name is not said twice ("Claude Claude Opus").
-		model = strings.TrimSpace(strings.TrimPrefix(model, harness))
+		if harness != "" {
+			model = strings.TrimSpace(strings.TrimPrefix(model, harness))
+		}
 		if model != "" {
 			parts = append(parts, model)
 		}

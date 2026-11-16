@@ -15,6 +15,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/ctx/assemble"
 	"github.com/kumoSleeping/iridium/internal/hold"
+	"github.com/kumoSleeping/iridium/internal/transcript"
 )
 
 // State is where the agent's turn is. A turn begins when it leaves idle and ends when it is back.
@@ -78,6 +79,10 @@ type SpawnOptions struct {
 	// Host: where the agent runs, its host composes its launch from its own settings (an
 	// executor's agent.prepare: dsh's DSH Desktop, docs/next/plugin.md); nil: the driver does.
 	Host *Host
+	// History: Iridium keeps the session's record itself (agents.Info.OwnRecord) and has none of
+	// it yet, as for one taken up from the agent's own store: the agent is to give its history
+	// again, as Record events (agy: session/load rather than session/resume).
+	History bool
 }
 
 // Host is an agent's host composing its launch (wire.CapPrepare).
@@ -236,6 +241,11 @@ type (
 		Failed        bool
 	}
 	ProtocolError struct{ Reason, Detail string }
+	// Record: a piece of the conversation now whole (a message, a thought, a call, its result),
+	// for the record Iridium keeps itself of an agent that keeps none it can read
+	// (agents.Info.OwnRecord: agy). Off and Time are the session layer's to set. Before the
+	// MessageDone of the same message, which tells the page the record has it.
+	Record struct{ Entry transcript.Entry }
 	// GiveUp: the process can do nothing for the session (Codex could not open its thread): the host
 	// stops it, and Why is the session's error.
 	GiveUp struct{ Why string }
@@ -262,6 +272,7 @@ func (TurnUsage) event()      {}
 func (QuotaHit) event()       {}
 func (Compacted) event()      {}
 func (ProtocolError) event()  {}
+func (Record) event()         {}
 func (GiveUp) event()         {}
 
 // Model is a model the agent offers. Resolved: the full id Value runs (Claude's resolvedModel);

@@ -198,6 +198,11 @@ func (b satoriBackend) Sessions(ctx context.Context) ([]api.Session, error) { re
 
 func (b satoriBackend) Session(id string) (*api.SessionState, error) { return b.s.m.State(id) }
 
+// KnownModels are the models kept for agent a at machine, for a session that says none.
+func (b satoriBackend) KnownModels(a api.Agent, machine string) []api.Model {
+	return b.s.knownModels(a, machine)
+}
+
 func (b satoriBackend) Patch(ctx context.Context, c satori.Caller, id string, p api.SessionPatch) error {
 	cl := callerAs(c)
 	if _, err := b.s.using(cl, id); err != nil {

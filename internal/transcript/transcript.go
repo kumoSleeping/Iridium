@@ -60,7 +60,9 @@ type File struct {
 	zst *frames
 	// dsh: a dsh session file, whose title is its last session/title event, kept in title, and
 	// turn its last turn's state: 0 none yet, dshTurnOpen, dshTurnEnded.
-	dsh   bool
+	dsh bool
+	// own: Iridium's own record (own.go), whose title is its last title entry, kept in title.
+	own   bool
 	title string
 	turn  int8
 	// named: the title the agent's last title line gave (named.go), "" while none has.
@@ -84,7 +86,7 @@ func Open(path string, sources Sources) *File { return OpenAs(path, Claude, sour
 
 // OpenAs is the transcript at path, in format f. A path ending .zstd or .zst is read as zstd.
 func OpenAs(path string, f Format, sources Sources) *File {
-	file := &File{path: path, sources: sources, format: f, dsh: dshName.MatchString(filepath.Base(path))}
+	file := &File{path: path, sources: sources, format: f, dsh: dshName.MatchString(filepath.Base(path)), own: filepath.Base(path) == OwnFile}
 	if strings.HasSuffix(path, ".zstd") || strings.HasSuffix(path, ".zst") {
 		file.zst = &frames{}
 	}
@@ -153,6 +155,11 @@ func (f *File) refresh() error {
 		if long != nil {
 			line = append(long, line...)
 			long = nil
+		}
+		if f.own {
+			if t, ok := ownTitle(line); ok {
+				f.title = t
+			}
 		}
 		if f.dsh {
 			if t, ok := dshTitle(line); ok {
@@ -372,8 +379,8 @@ func (f *File) LastSaid() (*api.LastSaid, error) {
 	return &api.LastSaid{Role: string(b.Kind), Text: cut(oneLine(text), LastLen), From: b.From, FromTerminal: b.FromTerminal, At: b.Time}, nil
 }
 
-// Title is the title the agent's last title line gave (named.go); else, a dsh session's, the
-// title dsh gave it, where it did; else the opening of the first thing you said, on one line; ""
+// Title is the title the agent's last title line gave (named.go); else, a dsh session's or one
+// Iridium records itself (agy), the title the agent gave it, where it did; else the opening of the first thing you said, on one line; ""
 // if you said nothing.
 func (f *File) Title() (string, error) {
 	f.mu.Lock()
@@ -383,7 +390,7 @@ func (f *File) Title() (string, error) {
 	if named != "" {
 		return named, err
 	}
-	if f.dsh && (err != nil || t != "") {
+	if (f.dsh || f.own) && (err != nil || t != "") {
 		return cut(oneLine(t), TitleLen), err
 	}
 	b, err := f.walk(false, func(b api.Block) bool { return b.Kind == api.BlockKindUser })

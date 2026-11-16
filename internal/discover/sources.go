@@ -271,6 +271,8 @@ func (x *Index) glance(d onDisk) glimpse {
 		return x.glanceCodex(d)
 	case api.AgentPi:
 		return x.glancePi(d)
+	case api.AgentAgy:
+		return x.glanceAgy(d)
 	case api.AgentDsh:
 		g, _ := transcript.GlanceDsh(d.path, x.o.Store.Sender)
 		out := glimpse{cwd: g.Cwd, title: g.Title, last: g.Last, sub: g.Sidechain, parent: g.Parent, done: g.Ended}

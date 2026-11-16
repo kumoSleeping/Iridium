@@ -606,10 +606,9 @@ func (s *Server) membersOf(c caller, ch string) (api.ChannelMembers, error) {
 		am := api.ChannelMember{Member: m.Member, Session: m.Session, Nick: m.Nick, Recv: m.Recv, Send: m.Send, Seen: m.Seen}
 		if m.Agent() {
 			if st, err := s.m.State(m.Session); err == nil {
-				info, _ := agents.Get(st.Agent)
 				am.Agent, am.Status, am.Cwd, am.Machine = st.Agent, st.Status, st.Cwd, st.Machine
 				s.keepChoices(st)
-				am.Name = satori.AgentName(cmp.Or(info.Name, string(st.Agent)), *st)
+				am.Name = s.sessionName(st)
 			}
 			p := s.agentProfile(m.Session)
 			am.Intro, am.Avatar, am.Background, am.Role = p.Intro, p.Avatar, p.Background, p.Role
@@ -1225,6 +1224,25 @@ func (s *Server) askChoices(ctx context.Context, c caller, kind api.Agent, machi
 	return nil, nil
 }
 
+// knownModels are the models kept for agent a at machine (keepChoices); nil if none.
+func (s *Server) knownModels(a api.Agent, machine string) []api.Model {
+	var c api.AgentChoices
+	if kept := s.st.Kept(choicesKey(a, machine)); kept != "" && json.Unmarshal([]byte(kept), &c) == nil {
+		return c.Models
+	}
+	return nil
+}
+
+// sessionName is satori.SessionName of st, its model named from the models kept for its agent
+// where st has none (a session not running since the daemon started).
+func (s *Server) sessionName(st *api.SessionState) string {
+	n := *st
+	if len(n.Models) == 0 {
+		n.Models = s.knownModels(n.Agent, n.Machine)
+	}
+	return satori.SessionName(n)
+}
+
 func choicesKey(kind api.Agent, machine string) string {
 	return "choices:" + string(kind) + ":" + machine
 }
@@ -1261,8 +1279,7 @@ func (s *Server) agentName(id string) string {
 	if err != nil {
 		return ""
 	}
-	info, _ := agents.Get(st.Agent)
-	return satori.AgentName(cmp.Or(info.Name, string(st.Agent)), *st)
+	return s.sessionName(st)
 }
 
 // tellMembers says in channel ch that its members changed: a line of Iridium's own (text, for
@@ -1622,8 +1639,7 @@ func (s *Server) readsOf(ch string) api.ChannelReads {
 			}
 		}
 		if st, err := s.m.State(m.Session); err == nil {
-			info, _ := agents.Get(st.Agent)
-			rd.Agent, rd.Name = st.Agent, satori.AgentName(cmp.Or(info.Name, string(st.Agent)), *st)
+			rd.Agent, rd.Name = st.Agent, s.sessionName(st)
 		}
 		out.Readers = append(out.Readers, rd)
 	}
@@ -2261,8 +2277,7 @@ func (s *Server) deliverTo(ctx context.Context, ch, to string, seq int64, said, 
 	for _, a := range list {
 		ca := assemble.ChannelAgent{Nick: a.Nick}
 		if st, err := s.m.State(a.Session); err == nil {
-			info, _ := agents.Get(st.Agent)
-			ca.Name = satori.AgentName(cmp.Or(info.Name, string(st.Agent)), *st)
+			ca.Name = s.sessionName(st)
 		}
 		ca.Intro = head(s.st.Profile(store.ChannelProfileKey(a.Session)).Intro, 80)
 		cc.Agents = append(cc.Agents, ca)

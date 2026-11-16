@@ -5,7 +5,7 @@ package api
 
 //go:generate go run github.com/gzuidhof/tygo@v0.2.21 generate --config ../../tygo.yaml
 
-// Agent is the kind of agent: claude, codex, pi, dsh.
+// Agent is the kind of agent: claude, codex, pi, dsh, agy (Antigravity CLI).
 type Agent string
 
 const (
@@ -13,6 +13,7 @@ const (
 	AgentCodex  Agent = "codex"
 	AgentPi     Agent = "pi"
 	AgentDsh    Agent = "dsh"
+	AgentAgy    Agent = "agy"
 )
 
 // AgentInfo is what an agent Iridium hosts can do (GET /v1/internal/agents).

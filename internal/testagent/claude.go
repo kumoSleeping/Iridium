@@ -33,6 +33,9 @@ func Main() (code int, ok bool) {
 	if filepath.Base(os.Args[0]) == "codex" {
 		return Codex(), true
 	}
+	if filepath.Base(os.Args[0]) == "agy" {
+		return Agy(), true
+	}
 	if os.Getenv("IRIDIUM_FAKE_DSH") != "" {
 		return Dsh(), true
 	}
