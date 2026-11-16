@@ -8,7 +8,10 @@ import { givenTurn, type Msg } from "./lib";
  *  first block as far as it is loaded (since: none when the record is loaded to its start). */
 export function foreignOf(msgs: Msg[], own: string, inputs: ReadonlySet<string>, since?: number): Msg[] {
   return msgs.filter((m) => {
-    if (m.author.kind === "agent" && m.author.session === own) return false;
+    // The own agent's words are its record's, but for those it sent with ir on its way (an input
+    // of its own): its record has them as a step alone (the user, 2026-11-16: its words on the
+    // way did not show).
+    if (m.author.kind === "agent" && m.author.session === own) return !!m.input && !inputs.has(m.input);
     // A person's: sent (it has its input), unless given to it; read from its record (typed at its
     // terminal: no input), the record's.
     if (m.author.kind === "person" && (!m.input || inputs.has(m.input))) return false;

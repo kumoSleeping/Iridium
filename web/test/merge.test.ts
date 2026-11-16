@@ -29,6 +29,11 @@ describe("what of the log the record does not hold", () => {
     expect(held[0]!.input).toBe("in8");
     expect(foreignOf(held, OWN, new Set()).map((m) => m.n)).toEqual([8]);
   });
+  test("the own agent's words sent with ir on its way: kept, its record has them as a step alone", () => {
+    const sent = msgOf({ id: "6", content: "on my way", user: { id: `agent:${OWN}`, name: "Claude", nick: OWN }, created_at: 60, _data: { kind: "progress", input: "in6" } })!;
+    expect(foreignOf([said(2, OWN), sent], OWN, new Set()).map((m) => m.n)).toEqual([6]);
+    expect(foreignOf([sent], OWN, new Set(["in6"]))).toEqual([]);
+  });
   test("since: none older than the record's first block loaded", () => {
     expect(foreignOf([said(1, "codex"), said(2, "codex")], OWN, new Set(), 15).map((m) => m.n)).toEqual([2]);
   });

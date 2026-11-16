@@ -17,7 +17,8 @@ export type Author = { kind: "agent"; session: string; nick: string; name: strin
  *  out, the block; with ir, the lines from (where it was called) to to (where it spoke). */
 export type Src = { session: string; block?: string; from?: number; to?: number };
 
-/** input: a person's message, the input it was sent as (a session's record has it by that id). */
+/** input: a person's message, the input it was sent as (a session's record has it by that id);
+ *  an agent's sent with ir, the same. */
 export type Msg = { n: number; text: string; files: FileRef[]; time?: number; author: Author; kind?: string; did?: Did; event?: ChEvent; src?: Src; quote?: number; input?: string };
 
 /** The line of a block's at ("<line>.<n>"). */
@@ -177,7 +178,7 @@ export function msgOf(m: ChannelMessage): Msg | undefined {
   const author: Author = u?.id.startsWith(AGENT) ? { kind: "agent", session: u.id.slice(AGENT.length), nick: u.nick ?? "", name: u.name ?? "" } : !u || u.id === "iridium" ? { kind: "iridium" } : { kind: "person", id: u.id, name: u.name ?? "" };
   // The message it answers: Satori's <quote id/> at its start.
   const q = /^<quote id="(\d+)"\s*\/>/.exec(m.content);
-  return { n, text: b.text ?? "", files: b.files ?? [], author, ...(q ? { quote: Number(q[1]) } : {}), ...(m.created_at ? { time: m.created_at } : {}), ...(m._data?.kind ? { kind: m._data.kind } : {}), ...(author.kind === "person" && m._data?.input ? { input: m._data.input } : {}), ...(author.kind === "agent" && didOf(m.content) ? { did: didOf(m.content)! } : {}), ...(m._data?.event && typeof m._data.event === "object" ? { event: m._data.event as ChEvent } : {}), ...(author.kind === "agent" && m._data?.session ? { src: { session: m._data.session, ...(m._data.block ? { block: m._data.block } : {}), ...(m._data.from ? { from: m._data.from } : {}), ...(m._data.to ? { to: m._data.to } : {}) } } : {}) };
+  return { n, text: b.text ?? "", files: b.files ?? [], author, ...(q ? { quote: Number(q[1]) } : {}), ...(m.created_at ? { time: m.created_at } : {}), ...(m._data?.kind ? { kind: m._data.kind } : {}), ...(m._data?.input ? { input: m._data.input } : {}), ...(author.kind === "agent" && didOf(m.content) ? { did: didOf(m.content)! } : {}), ...(m._data?.event && typeof m._data.event === "object" ? { event: m._data.event as ChEvent } : {}), ...(author.kind === "agent" && m._data?.session ? { src: { session: m._data.session, ...(m._data.block ? { block: m._data.block } : {}), ...(m._data.from ? { from: m._data.from } : {}), ...(m._data.to ? { to: m._data.to } : {}) } } : {}) };
 }
 
 /** The key the work under a message from src is kept by (page.tsx Work; chats.ts firstScreen
