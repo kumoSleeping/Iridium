@@ -671,7 +671,6 @@ export const zh = {
   "term.setup": "首次设置链接",
   "term.unnamed": "没起名",
   "term.until": "{time} 前有效",
-  "term.claudeYes": "你自己的，可以用 Claude",
   "term.withClaudeHint": "确认这是你自己用的",
   "term.avatar": "更改头像",
   "term.renameIt": "改名",

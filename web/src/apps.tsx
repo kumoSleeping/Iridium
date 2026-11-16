@@ -10,7 +10,7 @@ import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { Check, ChevronLeft, ChevronRight, Copy, Link2, LoaderCircle, PencilLine, Plus, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { ApiError, api } from "./api/client";
-import type { Agent, App, Apps, Computer, Login, Perms, PendingInvite, Rules } from "./api/types.gen";
+import type { Agent, App, Apps, Computer, Login, Perms, PendingInvite } from "./api/types.gen";
 import { CardFrame, CardHead, MainKey, SecondKey } from "./card";
 import { ConfirmCard, saysOwner } from "./confirms";
 import { isComputer, useApps, useMe } from "./data";
@@ -24,10 +24,7 @@ import { Group } from "./settings";
 import { useConfirms, usePairing } from "./store";
 import { errText, toast } from "./toast";
 import { agentName, AGENTS as AGENT_MARKS, ago, Avatar, AvatarKey, cn, IconKey, IrMark, Logo, own, Switch, Tip, useLongPress, useMenuAt } from "./ui";
-import { MenuItems } from "./sidebar";
-
-/** Claude: it was made the owner's own. Set then, never after (the user, 2026-11-08). */
-export const hasClaude = (r: Rules) => !!r.claudeOwner;
+import { MenuItems, type MenuItem } from "./sidebar";
 
 const systems: Record<string, string> = {
   windows: "Windows",
@@ -298,44 +295,13 @@ function ItemRow({ a }: { a: App }) {
   const [renaming, setRenaming] = useState(false);
   const [sure, setSure] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [picture, setPicture] = useState<string | null>(null);
-  const file = useRef<HTMLInputElement>(null);
-  const box = useRef<HTMLDivElement>(null);
-  const [at, setAt] = useMenuAt();
-  const lp = useLongPress(() => {
-    const r = box.current?.getBoundingClientRect();
-    if (r) setAt({ x: r.left + 16, y: r.bottom });
-  });
-  const anchor = at && {
-    getBoundingClientRect: () => DOMRect.fromRect({ x: at.x, y: at.y, width: 0, height: 0 }),
-  };
-  const pick = (f: File | undefined) => {
-    if (f) setPicture((old) => (old && URL.revokeObjectURL(old), URL.createObjectURL(f)));
-  };
-  const dropPicture = () => setPicture((old) => (old && URL.revokeObjectURL(old), null));
-  const saveAvatar = async (blob: Blob) => {
-    try {
-      await api.profile({ avatar: blob }, a.id);
-      dropPicture();
-      void qc.invalidateQueries({ queryKey: ["apps"] });
-    } catch (e) {
-      toast(t("term.avatar"), { error: true, description: errText(e) });
-    }
-  };
+  const face = useFacePick(a.id);
+  const menu = useRowMenu();
   const remove = t(isComputer(a) ? "apps.deleteComputer" : "apps.delete");
   return (
     <div className="flex flex-col">
-      <div
-        ref={box}
-        {...(a.host
-          ? {}
-          : {
-              ...lp,
-              onContextMenu: (e: React.MouseEvent) => own(e) && (e.preventDefault(), setAt({ x: e.clientX, y: e.clientY })),
-            })}
-        className={cn("flex min-h-14 items-center gap-3 rounded-lg px-2", at && "bg-fill")}
-      >
-        {a.host ? <IrMark size={32} className="text-ink" /> : <AvatarKey label={t("term.avatar")} onClick={() => file.current?.click()} src={a.avatar} name={a.name} size={32} type={a.type} />}
+      <div {...(a.host ? {} : menu.on)} className={cn("flex min-h-14 items-center gap-3 rounded-lg px-2", menu.at && "bg-fill")}>
+        {a.host ? <IrMark size={32} className="text-ink" /> : <AvatarKey label={t("term.avatar")} onClick={face.open} src={a.avatar} name={a.name} size={32} type={a.type} />}
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-2">
             {renaming ? <Rename id={a.id} name={a.name} done={() => setRenaming(false)} /> : <span className="truncate text-base font-medium">{a.host ? "Iridium" : a.name}</span>}
@@ -353,11 +319,7 @@ function ItemRow({ a }: { a: App }) {
           )
         )}
       </div>
-      {picture && (
-        <div className="g-fade flex justify-center py-2">
-          <Crop src={picture} onCancel={dropPicture} onDone={(b) => void saveAvatar(b)} />
-        </div>
-      )}
+      {face.crop}
       {sure && (
         <div className="g-fade py-2">
           <CardFrame label={t("term.revokeTitle", { name: a.name })}>
@@ -377,26 +339,78 @@ function ItemRow({ a }: { a: App }) {
           </CardFrame>
         </div>
       )}
-      <input ref={file} type="file" accept="image/*" hidden onChange={(e) => (pick(e.target.files?.[0]), (e.target.value = ""))} />
-      {!a.host && (
-        <Menu.Root open={at !== null} onOpenChange={(o) => !o && setAt(null)}>
-          <Menu.Portal>
-            <Menu.Positioner anchor={anchor} side="bottom" align="start" sideOffset={4} collisionPadding={8} className="z-50">
-              <MenuItems
-                items={[
-                  {
-                    icon: <Trash2 size={15} />,
-                    label: remove,
-                    run: () => setSure(true),
-                  },
-                ]}
-              />
-            </Menu.Positioner>
-          </Menu.Portal>
-        </Menu.Root>
-      )}
+      {face.input}
+      {!a.host && menu.menu([{ icon: <Trash2 size={15} />, label: remove, run: () => setSure(true) }])}
     </div>
   );
+}
+
+/** A row's menu, at the pointer on a right click, under the row on a long press. */
+function useRowMenu() {
+  const [at, setAt] = useMenuAt();
+  const box = useRef<HTMLDivElement>(null);
+  const lp = useLongPress(() => {
+    const r = box.current?.getBoundingClientRect();
+    if (r) setAt({ x: r.left + 16, y: r.bottom });
+  });
+  const anchor = at && {
+    getBoundingClientRect: () => DOMRect.fromRect({ x: at.x, y: at.y, width: 0, height: 0 }),
+  };
+  return {
+    at,
+    on: {
+      ref: box,
+      ...lp,
+      onContextMenu: (e: React.MouseEvent) => own(e) && (e.preventDefault(), setAt({ x: e.clientX, y: e.clientY })),
+    },
+    menu: (items: MenuItem[]) => (
+      <Menu.Root open={at !== null} onOpenChange={(o) => !o && setAt(null)}>
+        <Menu.Portal>
+          <Menu.Positioner anchor={anchor} side="bottom" align="start" sideOffset={4} collisionPadding={8} className="z-50">
+            <MenuItems items={items} />
+          </Menu.Positioner>
+        </Menu.Portal>
+      </Menu.Root>
+    ),
+  };
+}
+
+/** A new face for app or login id: a picture chosen, cropped in place under the row, saved. */
+function useFacePick(id: string) {
+  const qc = useQueryClient();
+  const [picture, setPicture] = useState<string | null>(null);
+  const file = useRef<HTMLInputElement>(null);
+  const drop = () => setPicture((old) => (old && URL.revokeObjectURL(old), null));
+  const save = async (blob: Blob) => {
+    try {
+      await api.profile({ avatar: blob }, id);
+      drop();
+      void qc.invalidateQueries({ queryKey: ["apps"] });
+    } catch (e) {
+      toast(t("term.avatar"), { error: true, description: errText(e) });
+    }
+  };
+  return {
+    open: () => file.current?.click(),
+    input: (
+      <input
+        ref={file}
+        type="file"
+        accept="image/*"
+        hidden
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) setPicture((old) => (old && URL.revokeObjectURL(old), URL.createObjectURL(f)));
+          e.target.value = "";
+        }}
+      />
+    ),
+    crop: picture && (
+      <div className="g-fade flex justify-center py-2">
+        <Crop src={picture} onCancel={drop} onDone={(b) => void save(b)} />
+      </div>
+    ),
+  };
 }
 
 /** 网页's page: its browsers, and the unused invites as slots; its + (top right) a new invite. */
@@ -440,52 +454,47 @@ async function revoke(qc: QueryClient, id: string, name: string) {
   return ok;
 }
 
-/** A login: its avatar, name, when it was last active, waiting or not; renamed (ir_web's) or
- *  removed here. */
-function LoginRow({ l, app, remove, rename }: { l: Login; app: string; remove: () => void; rename?: boolean }) {
+/** A login, as an app's row: its avatar (pressed, a new one), name (its key renames it), when it
+ *  was last active, waiting or not; its permissions and removal in its menu (right click, a long
+ *  press). */
+function LoginRow({ l, app, remove }: { l: Login; app: string; remove: () => void }) {
   const me = useMe().data;
   const [renaming, setRenaming] = useState(false);
   const [perms, setPerms] = useState(false);
-  const narrowed = !!l.perms && !(l.perms.agents.includes("*") && l.perms.scope.includes("*"));
+  const face = useFacePick(l.id);
+  const menu = useRowMenu();
   return (
     <div className="flex flex-col">
-      <div className="flex min-h-12 items-center gap-3 px-2">
-        <Avatar src={l.avatar} name={l.name} size={28} />
+      <div {...menu.on} className={cn("flex min-h-12 items-center gap-3 rounded-lg px-2", menu.at && "bg-fill")}>
+        <AvatarKey label={t("term.avatar")} onClick={face.open} src={l.avatar} name={l.name} size={28} />
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-2">
             {renaming ? <Rename id={l.id} name={l.name} done={() => setRenaming(false)} /> : <span className="truncate text-base">{l.name}</span>}
             {l.id === me?.login && <span className="shrink-0 text-xs text-ink-3">{t("term.this")}</span>}
             {!l.approvedAt && <span className="shrink-0 rounded-sm bg-fill-2 px-1.5 text-[11px] leading-[18px] text-ink-2">{t("apps.pending")}</span>}
           </span>
-          <span className="flex items-center gap-1.5 text-xs text-ink-3 tabular-nums">
+          <span className="flex items-center gap-1.5 text-xs whitespace-nowrap text-ink-3 tabular-nums">
             {l.online ? <span className="size-1.5 shrink-0 rounded-full bg-run" aria-hidden /> : null}
             {l.online ? t("term.online") : ago(l.lastSeenAt || l.createdAt || 0)}
           </span>
         </span>
-        {hasClaude(l.rules) && (
-          <Tip label={t("term.claudeYes")}>
-            <span className="flex shrink-0">
-              <Logo agent="claude" size={13} />
-            </span>
-          </Tip>
-        )}
-        {rename && !renaming && (
+        {!renaming && (
           <IconKey label={t("term.renameIt")} onClick={() => setRenaming(true)} className="size-7">
             <PencilLine size={14} />
           </IconKey>
         )}
-        <IconKey label={t("apps.perms")} onClick={() => setPerms(!perms)} className={`size-7 ${narrowed ? "text-ink" : ""}`}>
-          <SlidersHorizontal size={14} />
-        </IconKey>
-        <IconKey label={t("apps.removeLogin")} onClick={remove} className="size-7">
-          <X size={15} />
-        </IconKey>
       </div>
+      {face.crop}
       {perms && (
         <div className="g-fade mb-2 ml-11 rounded-lg bg-fill/60 py-2">
           <PermsEditor title={t("apps.loginPerms")} perms={l.perms} save={(p) => api.loginPerms(app, l.id, p)} />
         </div>
       )}
+      {face.input}
+      {menu.menu([
+        { icon: <SlidersHorizontal size={15} />, label: t("apps.perms"), run: () => setPerms(!perms) },
+        { icon: <Trash2 size={15} />, label: t("apps.removeLogin"), run: remove },
+      ])}
     </div>
   );
 }
@@ -496,7 +505,7 @@ function WebLogins({ logins, invites }: { logins: Login[]; invites: PendingInvit
   return (
     <Group title={t("apps.logins")}>
       {logins.map((l) => (
-        <LoginRow key={l.id} l={l} app="ir_web" rename remove={() => void revoke(qc, l.id, l.name)} />
+        <LoginRow key={l.id} l={l} app="ir_web" remove={() => void revoke(qc, l.id, l.name)} />
       ))}
       {invites.map((i) => (
         <div key={i.id} className="flex min-h-10 items-center gap-3 px-2">

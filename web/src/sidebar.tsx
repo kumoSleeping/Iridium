@@ -1199,7 +1199,7 @@ function PushFoot({ levels, i }: { levels: PushLevel[]; i: number }) {
 /** A colour tag and how to set it ("" takes it off). */
 export type Tags = { value?: Color; set: (c: Color | "") => void };
 
-type MenuItem = { icon: ReactNode; label: string; run: () => void };
+export type MenuItem = { icon: ReactNode; label: string; run: () => void };
 
 /** A menu's items; lead: before the children, at its top; foot: after the items, over the tags. */
 export function MenuItems({ lead = [], items, tags, children, foot }: { lead?: MenuItem[]; items: MenuItem[]; tags?: Tags; children?: ReactNode; foot?: ReactNode }) {

@@ -671,7 +671,6 @@ export const en: Dict = {
   "term.setup": "First-run link",
   "term.unnamed": "Unnamed",
   "term.until": "till {time}",
-  "term.claudeYes": "Your own: it may use Claude",
   "term.withClaudeHint": "Says it is your own",
   "term.avatar": "Change avatar",
   "term.renameIt": "Rename",
