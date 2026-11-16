@@ -724,6 +724,10 @@ describe("@ in the composer", () => {
     expect(atWord("ask @sid", 8)).toEqual({ from: 4, q: "sid" });
     expect(atWord("ask @sid more", 8)).toEqual({ from: 4, q: "sid" });
     expect(atWord("mail a@b", 8)).toBeNull();
+    expect(atWord("你好@ku", 5)).toEqual({ from: 2, q: "ku" });
+    expect(atWord("好的，@", 4)).toEqual({ from: 3, q: "" });
+    expect(atWord("see x.y@z", 9)).toBeNull();
+    expect(atWord("看&sid", 5, "&")).toEqual({ from: 1, q: "sid" });
     expect(atWord("ask @sid more", 13)).toBeNull();
     expect(atWord("ask @si d", 7)).toEqual({ from: 4, q: "si" });
     // & names a session or a place; @ calls a member (the user, 2026-11-13).

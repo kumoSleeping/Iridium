@@ -391,9 +391,12 @@ export function draftWords(text: string, live: boolean): string {
 }
 
 /** The @word the caret ends, to name a session by (the composer's @ list): where its @ is and what
- *  follows it; none unless the @ starts the words or follows a space. */
+ *  follows it; none inside a word of Latin letters or digits, or an address. */
 export function atWord(text: string, caret: number, mark: "@" | "&" = "@"): { from: number; q: string } | null {
-  const m = (mark === "@" ? /(?:^|\s)@([^\s@]*)$/ : /(?:^|\s)&([^\s&]*)$/).exec(text.slice(0, caret));
+  // After anything but a Latin letter, a digit or what an address has in it: "你好@" opens it
+  // as "你好 @" does (kumo, 2026-11-16); "a@b" does not. A name picked gets a space before it
+  // (insertNick), as the server's @ wants.
+  const m = (mark === "@" ? /(?:^|[^A-Za-z0-9_.\-@/])@([^\s@]*)$/ : /(?:^|[^A-Za-z0-9_.\-&/])&([^\s&]*)$/).exec(text.slice(0, caret));
   return m ? { from: caret - m[1]!.length - 1, q: m[1]! } : null;
 }
 

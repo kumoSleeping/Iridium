@@ -648,13 +648,13 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
             x.kind === "one" ? (
               x.node
             ) : x.kind === "agent" ? (
-              <AgentTurn key={x.key} channel={id} a={i === turns.length - 1 && !headless ? face : resting} may={may} bars={bars(i === ctxTurn)} talk={talk} time={began(x.rows)}>
+              <AgentTurn key={x.key} channel={id} a={i === turns.length - 1 && !headless ? face : resting} may={may} call={may ? callAt : undefined} bars={bars(i === ctxTurn)} talk={talk} time={began(x.rows)}>
                 {rowsOf(x.rows, !(liveNow && i === turns.length - 1), x.key)}
               </AgentTurn>
             ) : (
               <Relayed key={x.key} given={x.works.given} relay={x.works.relay} name={nameOf(x.works.given)} time={x.works.time} onJump={openChat}>
                 {x.rows.length > 0 && (
-                  <AgentTurn channel={id} a={resting} may={may} bars={bars(i === ctxTurn)} talk={talk} time={began(x.rows)}>
+                  <AgentTurn channel={id} a={resting} may={may} call={may ? callAt : undefined} bars={bars(i === ctxTurn)} talk={talk} time={began(x.rows)}>
                     {rowsOf(x.rows, !(liveNow && i === turns.length - 1), x.key)}
                   </AgentTurn>
                 )}
@@ -703,7 +703,7 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
             </div>
           ) : log.loaded && (busy && !waking ? (
             headless ? (
-              <AgentTurn channel={id} a={face} may={may} bars={bars(false)} talk={talk}>
+              <AgentTurn channel={id} a={face} may={may} call={may ? callAt : undefined} bars={bars(false)} talk={talk}>
                 {activity}
               </AgentTurn>
             ) : (
@@ -1060,11 +1060,12 @@ type Works = { given: GivenTurn; relay?: Relay; time?: number };
  *  it runs as over the rest, as in a channel of several (chat/channel/page GroupView). */
 /** bars: its usage, after its model's name (the user, 2026-11-13: as the composer's foot had it,
  *  as small as a phone's). */
-function AgentTurn({ channel, a, may, bars, talk, time, children }: { channel: string; a: AgentRow; may: boolean; bars?: ReactNode; talk?: () => void; time?: number; children: ReactNode }) {
+/** call: 提及 in its face's menu, as another's face has it (kumo, 2026-11-16). */
+function AgentTurn({ channel, a, may, bars, talk, call, time, children }: { channel: string; a: AgentRow; may: boolean; bars?: ReactNode; talk?: () => void; call?: (nick: string) => void; time?: number; children: ReactNode }) {
   const row = useWhenRow();
   return (
     <div {...row} className={cn(row.className, "flex min-w-0 items-start gap-2.5")}>
-      <AgentFace channel={channel} a={a} may={may} talk={talk} />
+      <AgentFace channel={channel} a={a} may={may} talk={talk} call={call} />
       <div className="flex min-w-0 flex-1 flex-col gap-5">
         <div className="-mb-3.5 flex h-4 min-w-0 items-center gap-1.5">
           {a.nick && <span className="shrink-0 text-xs font-medium text-ink-2">{a.nick}</span>}
