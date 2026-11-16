@@ -28,7 +28,7 @@ import { useConfirms, useList, useSession } from "../store";
 import { also, carries, drafts, opened } from "../stream";
 import { errText, toast } from "../toast";
 import { groupPath, working } from "../tree";
-import { agentName, cn, IrMark, Lamp, lampOf, Leaving, LogoLamp, LogoStack, PopSurface, sessionStatusText, tilde, Tip, titleOf, untitled } from "../ui";
+import { agentName, cn, IrMark, Lamp, lampOf, Leaving, LogoLamp, PopSurface, sessionStatusText, tilde, Tip, titleOf, untitled } from "../ui";
 import { givenTurn, groupMessages, isMulti, type AgentRow, type GivenTurn, type Msg } from "./channel/lib";
 import { betweenAgents, callerOf, foreignOf, givenHere, held, HOLD, linesOf, marksAt, named as namedIn, ownAnchors, slotsOf, type Anchor, type RowTime } from "./channel/merge";
 import { LongWords } from "./longwords";
@@ -43,7 +43,7 @@ import { closeEdit, useEditing } from "./channel/editing";
 import { EditBody } from "./channel/edit";
 import { ChannelCard } from "./channel/channelcard";
 import { CARD_POP } from "./channel/profilecard";
-import { Face } from "./channel/face";
+import { Face, FaceStack } from "./channel/face";
 import { mayAct, useMembers } from "./channel/gate";
 // A channel's parts, fetched apart: ⋯'s 编辑资料 on a phone (ChannelMenu), those looking and the
 // members at the bar's right (TopRight), the line in the composer's place for one not joined.
@@ -865,8 +865,10 @@ function useWaited(ready: boolean, ms: number): boolean {
  *  there are any, the places it works in (spots, Where). */
 function Bar({ s, onSheet, onMe, spots, asked }: { s?: Session; onSheet?: () => void; onMe?: () => void; spots?: Spot[]; asked?: { session?: string }[] }) {
   const list = useList();
-  // A channel of several: its agents' logos, as its row in the list has them.
-  const stack = s && isMulti(s) ? s.agents!.map((a) => list?.find((x) => x.id === a.session)?.agent ?? a.agent ?? s.agent) : undefined;
+  // A channel of several: its agents' faces, as its row in the list has them (the list's row: a
+  // session's state has not its agents).
+  const of = s && (list?.find((x) => x.id === s.id) ?? s);
+  const stack = s && of && isMulti(of) ? of.agents!.map((a) => ({ id: a.session, nick: a.nick, agent: list?.find((x) => x.id === a.session)?.agent ?? a.agent ?? s.agent })) : undefined;
   const ws = useWorkspaces().data ?? [];
   const machines = useMachines();
   const [renaming, setRenaming] = useState(false);
@@ -903,7 +905,7 @@ function Bar({ s, onSheet, onMe, spots, asked }: { s?: Session; onSheet?: () => 
               )}
               {/* The channel's face, on a phone as on a computer (kumo, 2026-11-16: a phone could
                   not change the channel's face): its card, 编辑资料 in it. */}
-              <Tip label={stack ? s.agents!.map((a) => a.nick).join(" · ") : `${agentName(s.agent)} · ${sessionStatusText(s)}`} side="bottom">
+              <Tip label={stack ? stack.map((a) => a.nick).join(" · ") : `${agentName(s.agent)} · ${sessionStatusText(s)}`} side="bottom">
                 <FaceKey s={s} stack={stack} className={late} />
               </Tip>
               {renaming ? (
@@ -990,9 +992,9 @@ function EditAt({ id, anchor }: { id: string; anchor: React.RefObject<HTMLElemen
 /** The channel's face before the title, pressed: its card in a popover out of the face (kumo,
  *  2026-11-16: a face pops its card, it never opens a page; docs/前端设计规范.md); 编辑资料 is a
  *  key of the card, for one of its people. */
-function FaceKey({ s, stack, className, ...rest }: { s: Session; stack?: Session["agent"][] } & ComponentProps<"button">) {
+function FaceKey({ s, stack, className, ...rest }: { s: Session; stack?: { id: string; agent: Session["agent"] }[] } & ComponentProps<"button">) {
   const [open, setOpen] = useState(false);
-  const face = <LogoLamp agent={s.agent} status={lampOf(s)} size={18} mark={<Face key={s.id} id={s.id} agent={s.agent} size={18} channel none={stack && <LogoStack agents={stack} size={18} />} />} />;
+  const face = <LogoLamp agent={s.agent} status={lampOf(s)} size={18} mark={<Face key={s.id} id={s.id} agent={s.agent} size={18} channel none={stack && <FaceStack members={stack} size={18} />} />} />;
   // rest: what the tip around it gives its trigger.
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>

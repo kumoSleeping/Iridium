@@ -380,23 +380,6 @@ export function LogoLamp({ agent, status, size = 16, ir, mark }: { agent: Agent;
   );
 }
 
-/** The logos of a channel's agents, one over the next (the first three), where a session's one
- *  logo would be: each on a disc of the ground behind it, so the one under it is cut clean. */
-export function LogoStack({ agents, size = 16 }: { agents: Agent[]; size?: number }) {
-  const shown = agents.slice(0, 3);
-  const each = Math.round(size * 0.75);
-  const step = Math.round(each * (shown.length > 2 ? 0.5 : 0.66));
-  return (
-    <span className="inline-flex shrink-0 items-center" style={{ height: size }}>
-      {shown.map((a, i) => (
-        <span key={i} className="relative grid shrink-0 place-items-center rounded-[4px]" style={{ width: each + 2, height: each + 2, marginLeft: i ? step - each - 2 : 0, zIndex: shown.length - i, background: "var(--row-bg, var(--paper))" }}>
-          <Logo agent={a} size={each} />
-        </span>
-      ))}
-    </span>
-  );
-}
-
 /** The mark an app's type puts on its avatar's corner, and the type's name; none for a type not
  *  known (types are display only). */
 const TYPE_MARKS: Record<string, [LucideIcon, Parameters<typeof t>[0]]> = {

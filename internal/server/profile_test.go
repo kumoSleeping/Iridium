@@ -198,12 +198,21 @@ func given(t *testing.T, l *live, id string, n int) []store.Injection {
 }
 
 // A session's own channel has a card of its own (kumo, 2026-11-16): its face, intro and
-// background changed there are not its agent's; one it has not been given is its agent's.
+// background changed there are not its agent's; one it has not been given is its agent's, or
+// with several agents in it none: the page draws theirs (the user, 2026-11-16).
 func TestChannelCardApart(t *testing.T) {
 	t.Parallel()
-	l, ch, _ := two(t)
+	l, ch, second := two(t)
 	l.want(200, "web", "PATCH", "/v1/internal/members/claude", map[string]any{"avatar": "🤖", "intro": "the agent"}, nil)
 	var p api.Profile
+	l.want(200, "web", "GET", "/v1/internal/channels/"+ch+"/profile", nil, &p)
+	if p.Avatar != "" {
+		t.Errorf("the card of a channel of two agents, none of its own: %q", p.Avatar)
+	}
+	if _, _, ok := l.s.channelFace(ch, nil, false); ok {
+		t.Error("a face of a channel of two agents, none of its own")
+	}
+	l.want(200, "web", "DELETE", "/v1/internal/channels/"+ch+"/members/agent:"+second, nil, nil)
 	l.want(200, "web", "GET", "/v1/internal/channels/"+ch+"/profile", nil, &p)
 	agentFace, _, _ := l.s.face(store.ChannelProfileKey(ch), false, "")
 	if !strings.Contains(p.Avatar, "of=channel") || p.Intro != "" || p.Session != "" {

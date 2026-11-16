@@ -1431,11 +1431,15 @@ func (s *Server) roomKey(ch string) string {
 }
 
 // channelFace is channel ch's face (bg: its background) as a channel (GET …?of=channel): a
-// session's own channel's own, else its agent's, as it was before it had one.
+// session's own channel's own, else its agent's, as it was before it had one; one of several
+// agents without a face of its own has none: the page draws its agents' (the user, 2026-11-16).
 func (s *Server) channelFace(ch string, st *api.SessionState, bg bool) (image []byte, version string, ok bool) {
 	if key := s.roomKey(ch); key != store.ChannelProfileKey(ch) {
 		if img, v, ok := s.face(key, bg, ""); ok {
 			return img, v, true
+		}
+		if !bg && len(s.ch.Agents(ch)) > 1 {
+			return nil, "", false
 		}
 	}
 	if bg {

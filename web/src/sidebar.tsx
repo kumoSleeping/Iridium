@@ -25,10 +25,10 @@ import { createAt, onOpenPlace, type Place } from "./places";
 import { LinkDot } from "./link";
 import { errText, toast } from "./toast";
 import { manages, useMachines, useMe, useSaidLine, useUpdate } from "./data";
-import { agentName, ago, cn, fine, IconKey, IrMark, keep, kept, Lamp, lampOf, Logo, LogoStack, own, sessionStatusText, statusText, tilde, Tip, titleOf, untitled, useLongPress, useMenuAt, useMinute } from "./ui";
+import { agentName, ago, cn, fine, IconKey, IrMark, keep, kept, Lamp, lampOf, Logo, own, sessionStatusText, statusText, tilde, Tip, titleOf, untitled, useLongPress, useMenuAt, useMinute } from "./ui";
 import { PLACE_DRAG, SESSION_DRAG } from "./chat/refs";
 import { badge, isQuiet, setQuiet, useAt, useQuiet, useUnread } from "./unread";
-import { Face } from "./chat/channel/face";
+import { Face, FaceStack } from "./chat/channel/face";
 import { CloudBadge, MachineFace, shownPath, useLate, useMachine, type Machine } from "./machines";
 import { getCarried, setCarried, useCarried, useLink, useList } from "./store";
 import { channelLamp, isMulti } from "./chat/channel/lib";
@@ -838,13 +838,14 @@ function WsRename({ id, name, done }: { id: number; name: string; done: () => vo
  *  drew it: read by the rows as they draw, so that a name changing elsewhere draws none of them. */
 let saidNow: ReturnType<typeof useSaidLine> = () => undefined;
 
-/** A session's face in the list (the user, 2026-11-13): its channel's picture, round, else its
- *  agents' logos on a disc; what is unread of it a badge on its top right corner, red, or grey
+/** A session's face in the list (the user, 2026-11-13): its channel's picture, round, else (one of
+ *  several agents) their own faces (FaceStack; the user, 2026-11-16: not their logos), else its
+ *  agent's; what is unread of it a badge on its top right corner, red, or grey
  *  while it is quiet (unread.ts) and nothing unread names me, 99+ past 99. */
-function RowFace({ s, agents, unread, quiet }: { s: Session; agents?: Agent[]; unread: number; quiet: boolean }) {
-  const logo = agents ? <LogoStack agents={agents} size={22} /> : <Logo agent={s.agent} size={20} />;
+function RowFace({ s, group, unread, quiet }: { s: Session; group?: { id: string; agent: Agent }[]; unread: number; quiet: boolean }) {
+  const logo = group ? <FaceStack members={group} size={36} /> : <Logo agent={s.agent} size={20} />;
   return (
-    <span className="relative grid size-9 place-items-center rounded-full bg-fill">
+    <span className={cn("relative grid size-9 place-items-center rounded-full", !group && "bg-fill")}>
       <Face id={s.id} agent={s.agent} size={36} none={logo} className="place-items-center" low channel />
       {unread > 0 && (
         <span
@@ -993,7 +994,7 @@ const SessionRow = memo(function SessionRow({ s, where, depth, flip, selected, o
         icon={
           <Tip label={[multi ? multi.map((a, i) => `${agentName(members?.[i]?.agent ?? a.agent ?? s.agent)} ${a.nick ?? ""}`.trim()).join(", ") : agentName(s.agent), machine?.name, s.subagent && t("row.subagent"), away ? t("status.offline") : status !== "idle" && told].filter(Boolean).join(" · ")} side="bottom">
             <span className="relative grid">
-              <RowFace s={s} agents={multi?.map((a, i) => members?.[i]?.agent ?? a.agent ?? s.agent)} unread={unread} quiet={quiet && !at} />
+              <RowFace s={s} group={multi?.map((a, i) => ({ id: a.session, agent: members?.[i]?.agent ?? a.agent ?? s.agent }))} unread={unread} quiet={quiet && !at} />
               {remote && <CloudBadge label={machine?.name ?? t("nav.remoteFolder")} />}
               {/* A subagent: no word for it, a small agent badge on the logo's corner (the user, 2026-11-06). */}
               {s.subagent && (

@@ -56,3 +56,24 @@ export function MemberFace({ member, name, agent, size }: { member: string; name
   const app = d?.apps.find((a) => a.id === member.slice(0, i));
   return <Avatar src={login ? login.avatar : app?.avatar} name={name || login?.name || app?.name || member} size={size} host={isHost(member) || !!app?.host} />;
 }
+
+/** A channel of several agents with no face of its own (kumo's channels: the user, 2026-11-16):
+ *  its first two agents' own faces (their models'), one at the top left, one at the bottom right
+ *  over it, in a box size across; one alone, its face. */
+export function FaceStack({ members, size }: { members: { id: string; agent: Agent }[]; size: number }) {
+  const [a, b] = members;
+  if (!a) return null;
+  if (!b) return <Face id={a.id} agent={a.agent} size={size} logo={Math.round(size * 0.57)} />;
+  const each = Math.round(size * 0.66);
+  const disc = (m: typeof a, at: string) => (
+    <span className={cn("absolute grid place-items-center rounded-full bg-fill", at)} style={{ width: each, height: each, boxShadow: "0 0 0 1.5px var(--row-bg, var(--paper))" }}>
+      <Face id={m.id} agent={m.agent} size={each} logo={Math.round(each * 0.62)} />
+    </span>
+  );
+  return (
+    <span className="relative block shrink-0" style={{ width: size, height: size }}>
+      {disc(a, "top-0 left-0")}
+      {disc(b, "right-0 bottom-0")}
+    </span>
+  );
+}
