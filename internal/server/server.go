@@ -96,6 +96,8 @@ type Server struct {
 	avatarsSeq atomic.Int64
 	// cardsSeq: the state "cards", up by one at each change of a card (its name, intro, face).
 	cardsSeq atomic.Int64
+	// listDue: the list of sessions is to be made again shortly (listSoon).
+	listDue atomic.Bool
 	// memorySeq: the state "memory", up by one when an agent's memory changes; rolesSeq: the
 	// state "roles", when a role does.
 	memorySeq atomic.Int64
@@ -144,6 +146,8 @@ func New(cfg config.Config, m *session.Manager, h *hub.Hub, logf func(string, ..
 	m.SetChannelOf(s.channelOf)
 	m.SetSpawned(s.spawnedOf)
 	m.SetBare(s.bareChannels)
+	m.SetChannelLast(s.channelLast)
+	s.ch.OnAdded(s.channelAdded)
 	m.SetCleared(s.cleared)
 	m.SetCreated(func(ctx context.Context, id string, req api.NewSession) error {
 		c, _ := ctx.Value(cardCaller{}).(caller)

@@ -206,7 +206,8 @@ export interface LastSaid {
   fromTerminal?: string;
   at?: number /* int64 */;
   /**
-   * Nick: an agent's words in a channel of no agent of its own, who said them (its nick).
+   * Nick: an agent's words in a channel listed with what was said in it (one of no agent of
+   * its own, or with other agents in it), who said them (its nick).
    */
   nick?: string;
 }

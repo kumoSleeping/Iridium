@@ -68,6 +68,26 @@ func (m *Manager) HasIR(id string) bool {
 // with no agent: listed, named, pinned, grouped and archived as the sessions found on disk are.
 func (m *Manager) SetBare(f func() []api.Session) { m.bare.Store(&f) }
 
+// SetChannelLast has f give the last words a session is listed with when its channel says them
+// rather than its record: one with other agents in it, where people and the others speak too
+// (kumo, 2026-11-16). None: its record's.
+func (m *Manager) SetChannelLast(f func(id string) (*api.LastSaid, bool)) { m.chanLast.Store(&f) }
+
+// channelLast puts in s's last words as its channel has them, and when, unless its record's are
+// later: its agent's own may not be read into the channel yet.
+func (m *Manager) channelLast(s *api.Session) {
+	f := m.chanLast.Load()
+	if f == nil {
+		return
+	}
+	last, ok := (*f)(s.ID)
+	if !ok || (s.Last != nil && s.Last.At > last.At) {
+		return
+	}
+	s.Last = last
+	s.UpdatedAt = max(s.UpdatedAt, last.At)
+}
+
 func (m *Manager) bares() []api.Session {
 	if f := m.bare.Load(); f != nil {
 		return (*f)()

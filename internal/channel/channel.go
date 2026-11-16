@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kumoSleeping/iridium/internal/activity"
@@ -155,7 +156,13 @@ type Service struct {
 	// The members as written, all of them, read once and again after a change (members.go).
 	imu   sync.Mutex
 	index *index
+
+	added atomic.Pointer[func(Message)] // OnAdded
 }
+
+// OnAdded has f told each message as it is added to a channel (not one said a second time).
+// It is called where the message is written, maybe under a session's lock: it must not wait.
+func (s *Service) OnAdded(f func(Message)) { s.added.Store(&f) }
 
 // index is every membership written: a channel's rows, the channels each session is in beside
 // its own, the agents' nicks, and the channels that are no session's.
@@ -320,6 +327,9 @@ func (s *Service) add(m Message) (Message, bool, error) {
 		return read(old), false, err
 	}
 	m.Seq = seq
+	if f := s.added.Load(); f != nil {
+		(*f)(m)
+	}
 	return m, true, nil
 }
 

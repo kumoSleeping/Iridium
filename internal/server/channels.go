@@ -873,20 +873,70 @@ func (s *Server) bareChannels() []api.Session {
 		// Its last words under its name in the list, as a session's are (kumo, 2026-11-16: an
 		// agent's reply there was not shown): who said them, what.
 		if m, ok := s.ch.Latest(c.ID); ok {
-			last := &api.LastSaid{Role: "user", Text: head(m.Text, 200), From: m.Name, At: m.At}
-			if id, agent := store.SessionOfMember(m.Author); agent {
-				last.Role, last.From, last.Nick = "assistant", "", cmp.Or(s.ch.Nick(id), m.Name)
-			} else if _, login, ok := strings.Cut(m.Author, "/"); ok {
-				last.FromTerminal = login
-			} else {
-				last.FromTerminal = m.Author
-			}
-			row.Last = last
+			row.Last = s.lastSaid(m)
 		}
 		out = append(out, row)
 	}
 	return out
 }
+
+// lastSaid is message m as a row of the list shows it under its name: who said it, what.
+func (s *Server) lastSaid(m channel.Message) *api.LastSaid {
+	last := &api.LastSaid{Role: "user", Text: head(m.Text, 200), From: m.Name, At: m.At}
+	if id, agent := store.SessionOfMember(m.Author); agent {
+		last.Role, last.From, last.Nick = "assistant", "", cmp.Or(s.ch.Nick(id), m.Name)
+	} else if _, login, ok := strings.Cut(m.Author, "/"); ok {
+		last.FromTerminal = login
+	} else {
+		last.FromTerminal = m.Author
+	}
+	return last
+}
+
+// listsChannel: channel ch is listed with the last words said in it, not its own agent's: one
+// that is no session's, or a session's with other agents in it (kumo, 2026-11-16: the list
+// showed the agent's last words, not the channel's, the people's and the others' after them).
+func (s *Server) listsChannel(ch string) bool {
+	if _, bare := s.ch.Own(ch); bare {
+		return true
+	}
+	return len(s.ch.Agents(ch)) > 1
+}
+
+// channelLast are the last words said in session id's channel, if it is listed with them
+// (listsChannel) and a session's (a bare one's row is made whole by bareChannels).
+func (s *Server) channelLast(id string) (*api.LastSaid, bool) {
+	if _, bare := s.ch.Own(id); bare || !s.listsChannel(id) {
+		return nil, false
+	}
+	m, ok := s.ch.Latest(id)
+	if !ok {
+		return nil, false
+	}
+	return s.lastSaid(m), true
+}
+
+// channelAdded: message m was just written to its channel. Someone's words in a channel listed
+// with them make the list again, shortly: m's writer may hold a session's lock.
+func (s *Server) channelAdded(m channel.Message) {
+	if (m.Kind == channel.KindUser || m.Kind == channel.KindSaid) && s.listsChannel(m.Channel) {
+		s.listSoon()
+	}
+}
+
+// listSoon makes the list of sessions again in a moment, once for all asked for meanwhile.
+func (s *Server) listSoon() {
+	if s.listDue.Swap(true) {
+		return
+	}
+	time.AfterFunc(listDelay, func() {
+		s.listDue.Store(false)
+		s.m.PublishList()
+	})
+}
+
+// listDelay: how long listSoon gathers.
+const listDelay = 200 * time.Millisecond
 
 // createChannel makes a channel that is no session's as c (channel.create with no agent): in
 // req.Cwd, with the people and agents req.Members names; then req.Text, its first words, said

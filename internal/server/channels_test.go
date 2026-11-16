@@ -990,3 +990,40 @@ func TestBareChannelLast(t *testing.T) {
 		}
 	}
 }
+
+// A session's channel with other agents in it is listed with the last words said there, the
+// others' and the people's too, not its own agent's (kumo, 2026-11-16).
+func TestChannelLast(t *testing.T) {
+	t.Parallel()
+	l := start(t)
+	ch := l.create(200, "web", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "first"})
+	l.waitReply("web", ch, "ok: first")
+	l.want(200, "web", "POST", "/v1/internal/channels/"+ch+"/members", api.NewMember{Agent: api.AgentClaude, Nick: "fish"}, nil)
+	listed := func(what string, ok func(*api.LastSaid) bool) {
+		t.Helper()
+		for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+			var row *api.Session
+			for _, ss := range l.sessions("web") {
+				if ss.ID == ch {
+					row = &ss
+				}
+			}
+			if row != nil && row.Last != nil && ok(row.Last) {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("%s: the channel as listed: %+v", what, row)
+			}
+		}
+	}
+	// Another agent's reply, which its own agent's record has not.
+	l.send("web", ch, api.Send{Text: "@fish hello there"})
+	l.waitSaid("web", ch, "@fish ", "ok: #")
+	listed("fish's reply", func(last *api.LastSaid) bool {
+		return last.Role == "assistant" && last.Nick == "fish" && strings.HasPrefix(last.Text, "ok: #")
+	})
+	// A person's words that wake nobody.
+	l.want(200, "web", "PATCH", "/v1/internal/channels/"+ch+"/members/agent:"+ch, map[string]any{"recv": "at"}, nil)
+	l.send("web", ch, api.Send{Text: "just saying"})
+	listed("a person's words", func(last *api.LastSaid) bool { return last.Role == "user" && last.Text == "just saying" })
+}

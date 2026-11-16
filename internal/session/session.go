@@ -106,6 +106,7 @@ type Manager struct {
 	created  atomic.Pointer[func(ctx context.Context, id string, req api.NewSession) error]
 	selfOf   atomic.Pointer[func(id string) *assemble.Self]
 	bare     atomic.Pointer[func() []api.Session]
+	chanLast atomic.Pointer[func(string) (*api.LastSaid, bool)]
 	speaksIn atomic.Pointer[func(session, channel string) bool]
 }
 
@@ -506,6 +507,9 @@ func (m *Manager) List(ctx context.Context) ([]api.Session, error) {
 			s.Own = ownOf(s, o)
 			out = append(out, s)
 		}
+	}
+	for i := range out {
+		m.channelLast(&out[i])
 	}
 	slices.SortStableFunc(out, func(a, b api.Session) int {
 		if a.Pinned != b.Pinned {
