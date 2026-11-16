@@ -174,8 +174,8 @@ const Sender = forwardRef<HTMLDivElement, { who: You | From; time?: number; jump
   const face = <Face who={who} />;
   const press = jump ?? (mine && !left ? () => go({ name: "settings" }) : undefined);
   const row = useWhenRow();
-  // Every sender on the right, a letter as your words are: on the left it read as the agent's own
-  // (the user, 2026-11-06).
+  // Only the one looking on the right; everyone else, a letter too, on the left with the agents
+  // (kumo, 2026-11-16; before, every sender was on the right).
   return (
     <div ref={ref} {...row} className={cn(row.className, "flex items-start gap-2.5", left ? "pr-6 sm:pr-10" : "flex-row-reverse pl-6 sm:pl-10")}>
       {card ? (
@@ -301,14 +301,14 @@ export function Pending({ s, who, retry, drop, bubbleRef, words }: { s: Sent; wh
   );
 }
 
-/** A letter: from another session's ir, a plugin or a peer. Not your words: on the left, in a grey
- *  bubble as yours are (the user, 2026-11-06). */
+/** A letter: from another session's ir, a plugin or a peer. Not your words: on the left with the
+ *  agents, in a grey bubble as a person's are (kumo, 2026-11-16: it was on the right). */
 function Letter({ src, text, time, onJump, children }: { src: From; text: string; time?: number; onJump: (id: string) => void; children?: ReactNode }) {
   // Its files as in your bubble (ir send -a); what it names, where it names it.
   const files = Children.count(children) > 0;
   return (
-    <Sender who={src} time={time} jump={src.session ? () => onJump(src.session!) : undefined}>
-      <div className="max-w-[min(560px,100%)] min-w-0 rounded-xl rounded-tr-sm bg-fill px-3.5 py-2">
+    <Sender who={src} time={time} left jump={src.session ? () => onJump(src.session!) : undefined}>
+      <div className="max-w-[min(560px,100%)] min-w-0 rounded-xl rounded-tl-sm bg-fill px-3.5 py-2">
         {text && (
           <p className="m-0 text-md whitespace-pre-wrap [overflow-wrap:anywhere]">
             <Worded text={text} />
