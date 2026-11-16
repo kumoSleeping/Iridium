@@ -391,7 +391,7 @@ func TestLoadRecordsHistory(t *testing.T) {
 		upd(`{"sessionUpdate":"tool_call_update","toolCallId":"c1","name":"read_file","status":"completed"}`),
 		upd(`{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"hi"}}`),
 	)
-	r.answer(ld, openedJSON)
+	r.answer(ld, openedJSON) // no Hydrogen in its catalog: agy's own default stays
 	r.answer(r.next("session/set_config_option"), config("gemini-4-argon", "medium", "default"))
 	if err := r.d.waitReady(context.Background()); err != nil {
 		t.Fatal(err)
@@ -533,5 +533,34 @@ func TestWindows(t *testing.T) {
 	defer func() { Endpoint = "" }()
 	if _, err := Windows(context.Background(), t.TempDir(), "1.5.9"); err != ErrNoLogin {
 		t.Errorf("Windows without a login: %v", err)
+	}
+}
+
+// A session that names no model runs Iridium's default, Gemini 4 Hydrogen, and the catalog says
+// so where agy has it; agy's own default otherwise.
+func TestDefaultModel(t *testing.T) {
+	withH := strings.Replace(openedJSON, `{"value":"gemini-4-argon","name":"Gemini 4 Argon"},`, `{"value":"gemini-4-argon","name":"Gemini 4 Argon"},{"value":"gemini-4-hydrogen","name":"Gemini 4 Hydrogen"},`, 1)
+	withH = strings.Replace(withH, `{"modelId":"gemini-4-argon-low","name":"Gemini 4 Argon (Low)"},`, `{"modelId":"gemini-4-argon-low","name":"Gemini 4 Argon (Low)"},{"modelId":"gemini-4-hydrogen-xhigh","name":"Gemini 4 Hydrogen (XHigh)"},`, 1)
+	var o opened
+	if err := json.Unmarshal([]byte(withH), &o); err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range o.catalog() {
+		if m.Default != (m.Value == DefaultModel) {
+			t.Errorf("%s default %v", m.Value, m.Default)
+		}
+	}
+	r := newRig(t)
+	prog := filepath.Join(t.TempDir(), "agy")
+	_ = os.WriteFile(prog, nil, 0o700)
+	if _, err := r.d.Spawn(agent.SpawnOptions{Session: "ir-4", Cwd: "/w", Program: prog}); err != nil {
+		t.Fatal(err)
+	}
+	r.d.Attach(r.write, 1)
+	r.answer(r.next("initialize"), `{"protocolVersion":1}`)
+	r.answer(r.next("session/new"), withH)
+	c := r.next("session/set_config_option")
+	if p := c["params"].(map[string]any); p["configId"] != "model" || p["value"] != DefaultModel {
+		t.Fatalf("set_config_option %v", p)
 	}
 }

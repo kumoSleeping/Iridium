@@ -57,6 +57,10 @@ var Modes = []string{"auto", "default", "accept-edits", "plan"}
 // DefaultMode is the mode an empty one means: auto, asking nothing, as for every agent.
 const DefaultMode = "auto"
 
+// DefaultModel is the model a session that names none runs (agy's own default is Gemini 4 Argon;
+// Hydrogen, the user, 2026-11-16), where the account has it.
+const DefaultModel = "gemini-4-hydrogen"
+
 // Efforts are the thinking levels agy has (agy --help: --effort); each model takes some.
 var Efforts = []string{"low", "medium", "high", "xhigh", "max"}
 
@@ -346,6 +350,10 @@ func (o *opened) catalog() []agent.Model {
 		m.NoEffort = len(m.Efforts) == 0
 		out = append(out, m)
 	}
+	// Iridium's default, where agy has it, in place of agy's own.
+	if slices.ContainsFunc(out, func(m agent.Model) bool { return m.Value == DefaultModel }) {
+		def = DefaultModel
+	}
 	for i := range out {
 		out[i].Default = out[i].Value == def
 	}
@@ -406,6 +414,11 @@ func (d *Driver) open(proc int, w *open, ready chan struct{}) {
 		d.mu.Lock()
 		d.learnLocked(&o)
 		model, effort, mode := d.pick.model, d.pick.effort, d.mode
+		// None named: Iridium's default, where the account has it.
+		if model == "" && slices.ContainsFunc(d.models, func(m agent.Model) bool { return m.Value == DefaultModel }) {
+			model = DefaultModel
+			d.pick.model = model
+		}
 		d.mu.Unlock()
 		// agy goes back to its own default model, level and mode at every start.
 		if model != "" && model != d.modelNow() {
