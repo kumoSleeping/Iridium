@@ -18,7 +18,7 @@ import { LinkDot } from "../link";
 import type { Session } from "../api/types.gen";
 import { WsPlus } from "../create";
 import { born, chatOf, compactSent, firstScreen, fresh, isWhole, lineOf, stateAhead, type Draft as Drafted, type Sent } from "../chats";
-import { LOCAL_ME, useAgent, useMachines, useMe, useWhoList, useWorkspaces } from "../data";
+import { LOCAL_ME, useMachines, useMe, useWhoList, useWorkspaces } from "../data";
 import { t, useLang } from "../i18n";
 import { pushIn } from "../motion";
 import { openChat, openUsage } from "../route";
@@ -61,7 +61,7 @@ import { Composer, type ComposerHandle } from "./composer";
 import { folded, type Tool } from "./fold";
 import { StopKey, ToolDraft, Waiting } from "./live";
 import { Draft } from "./markdown";
-import { ContextRing, ModeKey, ModelKey, modelView, PresetKey, QuotaBars, useMode } from "./meters";
+import { ContextRing, ModeKey, ModelKey, modelView, QuotaBars, useMode } from "./meters";
 import { PublicLink } from "./publiclink";
 import { Queue } from "./queue";
 import { ShellRuns } from "./shell";
@@ -806,7 +806,6 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
 /** people: its channel's members an @ lists (chat/channel/person.tsx useNamed). */
 function Under({ s, ghost, composer, onSent, onSentDone, modelOpen, setModelOpen, modeOpen, setModeOpen, openContext, people, quote, unquote }: { s: LiveSession; ghost: boolean; composer: React.RefObject<ComposerHandle | null>; onSent: (x: Sent) => void; onSentDone: (x: Sent) => void; modelOpen: boolean; setModelOpen: (o: boolean) => void; modeOpen: boolean; setModeOpen: (o: boolean) => void; openContext: () => boolean; people: AgentRow[]; quote?: { n: number; who: string; text: string }; unquote?: () => void}) {
   const mode = useMode(s);
-  const agentInfo = useAgent(s.agent);
   // Made here just now (create.tsx useStart): its keys fade in, not the chat before's swapped for them.
   const [fresh] = useState(() => born.has(s.id));
   useEffect(() => void born.delete(s.id), [s.id]);
@@ -834,13 +833,14 @@ function Under({ s, ghost, composer, onSent, onSentDone, modelOpen, setModelOpen
         quote={quote}
         unquote={unquote}
         tools={
-          <>
-            {/* Not guessed from the row: the mode and the model come with the state, gliding in. */}
+          // No mode, model or preset keys under the composer, one agent or several (kumo,
+          // 2026-11-16: their being there at all was wrong): the agent's face's menu sets the mode
+          // and the model, the lineup and the invite pick the preset. Still there, unseen, for
+          // /mode and /model to open their menus where the keys were.
+          <span aria-hidden className="invisible flex w-0 overflow-hidden">
             {!ghost && <ModeKey mode={mode} open={modeOpen} onOpenChange={setModeOpen} />}
             {!ghost && modelKnown && <ModelKey s={s} open={modelOpen} onOpenChange={setModelOpen} />}
-            {/* dsh: its preset, then its balance where the bars would be (the user, 2026-11-08). */}
-            {agentInfo?.presets ? <PresetKey s={s} /> : null}
-          </>
+          </span>
         }
       />
     </>
