@@ -129,6 +129,11 @@ func TestPiTranscript(t *testing.T) {
 	if len(b) != 1 || b[0].From != "网页" || b[0].Text != "hi" {
 		t.Errorf("source: %+v", b)
 	}
+	// Another session's ir: its whole id, longer than a terminal's name.
+	b = Pi(0, []byte(`{"type":"message","message":{"role":"user","content":[{"type":"text","text":"[ir:d5e740ee-3ec7-4633-a6ed-3aa760be7384] 更新"}]}}`), Clip, func(string) (string, string, bool) { return "", "", false })
+	if len(b) != 1 || b[0].From != "ir:d5e740ee-3ec7-4633-a6ed-3aa760be7384" || b[0].Text != "更新" {
+		t.Errorf("another session's ir: %+v", b)
+	}
 	// An extension's [Image #n]: the paths again, as written.
 	b = Pi(0, []byte(`{"type":"message","message":{"role":"user","content":[{"type":"text","text":"songs\n\n[附件] `+"`[Image #1]`"+`\n[附件] `+"`[Image #2]`"+`\n\n[Image #1]: /u/a.png\n[Image #2]: /u/b.png"},{"type":"image","data":"x"}]}}`), Clip, nil)
 	if len(b) != 1 || b[0].Text != "songs\n\n[附件] `/u/a.png`\n[附件] `/u/b.png`" {

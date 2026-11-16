@@ -501,8 +501,8 @@ function AppNeedCard({ c }: { c: Need }) {
 }
 
 /** A session's ask in the needs list (k_glossary "需要"): one choice answers it here, through its
- *  card as the session's own panel does; one of more choices (several questions, many options)
- *  opens the session. */
+ *  card as the session's own panel does, when its keys fit a row (two, short); one of more choices
+ *  (several questions, many or long options) opens the session. */
 function AskNeedCard({ c }: { c: Need }) {
   const list = useList();
   const who = useWhoName(c.origin);
@@ -511,7 +511,8 @@ function AskNeedCard({ c }: { c: Need }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [leaving, setLeaving] = useState(false);
   const from = list?.find((s) => s.id === c.session);
-  const simple = !!card && (card.kind !== "question" || (card.summary.length <= 1 && !card.multi?.length));
+  const fits = !!card && card.options.length <= 2 && card.options.every((o) => [...o.text].length <= 8);
+  const simple = !!card && fits && (card.kind !== "question" || (card.summary.length <= 1 && !card.multi?.length));
   const answer = async (option: string) => {
     if (!card || !c.session) return;
     setBusy(option);

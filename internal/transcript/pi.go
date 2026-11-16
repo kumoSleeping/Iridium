@@ -20,9 +20,10 @@ import (
 var Pi Format = piBlocks
 
 // piSource is the source prefix Iridium writes before a message ("[name] "; names are at most
-// 12 characters). pi keeps no id of Iridium's with a message, so this is all that tells one: a
-// message you typed in pi's terminal starting so would read as from that name too.
-var piSource = regexp.MustCompile(`^\[([^\[\]\n]{1,12})\] `)
+// 12 characters; another session's ir writes "[ir:<its whole id>] "). pi keeps no id of
+// Iridium's with a message, so this is all that tells one: a message you typed in pi's terminal
+// starting so would read as from that name too.
+var piSource = regexp.MustCompile(`^\[([^\[\]\n]{1,12}|ir:[^\[\]\s]{1,64})\] `)
 
 type piLine struct {
 	Type      string `json:"type"`

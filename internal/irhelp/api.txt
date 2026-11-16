@@ -61,7 +61,8 @@ POST internal/sessions/{id}/interrupt - -> {ok}  end the current turn (Esc); the
 POST internal/sessions/{id}/stop - -> {ok}  stop the agent process; the next message restarts it
 POST internal/button {id, option?, choices?, words?, message?} -> {}  answer an ask: id its card (asks[].card.id); or press a button (<card>#<option>; one attached: att:<session>:<from>:<id>, SessionState.attached)
 POST internal/files/copy {from, to} -> ndjson  copy a file: from, to are paths here or app:path at an app's computer; prints path, size, sha256; run again to resume; socket only
-POST internal/machines/{id}/shell {line, cwd?} -> output  a command line at an app's computer (id or name); --wait for its output and exit code; host or agents
+POST internal/machines/{id}/shell {line, cwd?} -> output  a command line at an app's computer (id or name); --wait for its output and exit code; host or agents  [more]
+  A computer not there or not taking command lines: someone starts it there, when wanted. ir join <iridium url> --shell (any computer); a developer's Mac: node scripts/dev/shell-bot.mjs <iridium url> [name] in an Iridium checkout (default name: its host name; exits after 30 idle minutes, IDLE=0 keeps it; its TOKEN refused: exits, the next start pairs again with 配对 on). Say this to the person; you cannot start it from here.
 PATCH internal/guilds/{id} {name?, position?, split?} -> {ok}  rename a folder group, move it (0 first), split it by subfolder; host or web
 GET internal/guilds/{id}/voice - -> ws  the folder group's voice: a member's connection (docs/voice.md); a login only
 GET internal/guilds/{id}/voice/members - -> Member[]  who is in the group's voice  view=id,name,app,muted

@@ -159,6 +159,10 @@ func TestDshSourceAndModes(t *testing.T) {
 	if len(b) != 1 || b[0].From != "kumo" || b[0].Text != "你好" {
 		t.Errorf("tagged: %+v", b)
 	}
+	b = Dsh(1, []byte(`{"type":"user/message","seq":1,"time":5,"data":{"content":[{"text":"[ir:d5e740ee-3ec7-4633-a6ed-3aa760be7384] 更新","type":"text"}],"source":{"kind":"user"},"role":"user","id":"f4771296"}}`), Clip, none)
+	if len(b) != 1 || b[0].From != "ir:d5e740ee-3ec7-4633-a6ed-3aa760be7384" || b[0].Text != "更新" {
+		t.Errorf("another session's ir: %+v", b)
+	}
 	for _, text := range []string{"preset danger-full-access", "Plan mode off.", "Plan mode is already inactive.", "Plan mode entry cancelled.", "Leaving plan mode (applies from the next step).", "Entering plan mode (applies from the next step). Use /plan off to leave."} {
 		line := `{"type":"command/done","seq":1,"time":5,"data":{"commandId":"c","kind":"success","text":"` + text + `"}}`
 		if b := Dsh(1, []byte(line), Clip, nil); len(b) != 0 {

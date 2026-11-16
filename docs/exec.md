@@ -181,7 +181,7 @@ agent 的 `ir sh`：每条命令一个新进程，不经托管进程，不写文
 
 ## 开发测试用的连接
 
-`scripts/dev/shell-bot.mjs`：`ir join` 的 Node 实现，用于在开发者的 Mac 上测试 `ir sh`，不进发布包。它借用 dsh 插件的执行端，配对一次后只提供命令执行（`agentShell`，按 `shell` 开着算），不带 agent；名字默认取主机名。用时再起：30 分钟没起过命令就退出（`IDLE=分钟`，0 不退），TOKEN 不被接受（401）也退出并删掉 TOKEN，下次启动重新配对。这类连接可按协议自行实现；也可用 `ir join <地址> --shell`，再在应用管理中关闭它带的全部 agent，效果相同（`--no-agents` 已删，2026-11-11；旧常驻单元里还有的照收、不起作用）。
+`scripts/dev/shell-bot.mjs`：`ir join` 的 Node 实现，用于在开发者的 Mac 上测试 `ir sh`，不进发布包。它借用 dsh 插件的执行端，配对一次后只提供命令执行（`agentShell`，按 `shell` 开着算），不带 agent；名字默认取主机名；`ir api help` 的 `internal/machines/{id}/shell` 说明里也写了怎么起，agent 连不上那台时照着告诉人。用时再起：30 分钟没起过命令就退出（`IDLE=分钟`，0 不退），TOKEN 不被接受（401）也退出并删掉 TOKEN，下次启动重新配对。这类连接可按协议自行实现；也可用 `ir join <地址> --shell`，再在应用管理中关闭它带的全部 agent，效果相同（`--no-agents` 已删，2026-11-11；旧常驻单元里还有的照收、不起作用）。
 
 `scripts/dev/exec-mini.py`：只用 Python 标准库（WebSocket 也是手写）的最小执行端，证明照协议就能接入：配对、握手报本机找到的 agent（默认 pi）、进程、文件、心跳、重连、`run`。可同时接多个 Iridium，配置在 `~/.iridium-exec-mini/config.json`：`add <地址> [--name] [--agents pi,…] [--shell] [--agent-shell]`、`on`/`off`/`rm <地址>`、`ls`；`run` 常驻，配置改了 2 秒内跟上，`off` 断开并结束那边起的进程。默认只开自己的 agent，加 `--shell` 才执行命令。只有 401 才删 TOKEN 重新配对，403（带原因码）等一会儿再连。单个前台：`python3 -I scripts/dev/exec-mini.py https://<Iridium> [名字] [agent…] [--shell]`。要带自己的 User-Agent：Cloudflare 拒 Python 默认的（1010）。
 
