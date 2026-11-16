@@ -201,19 +201,20 @@ func (h *Hosted) releaseLocked(ctx context.Context, all bool) {
 		h.mu.Lock()
 		images := h.qimages[q.ID]
 		h.mu.Unlock()
-		err := h.write(ctx, queuedInput(h.id, q), images)
-		if err == nil {
-			err = h.m.o.Store.SetInputState(q.ID, "sent")
-		}
-		if err != nil {
+		if err := h.write(ctx, queuedInput(h.id, q), images); err != nil {
 			h.logf("queue: %v", err)
 			h.pauseLocked(due[i:])
 			return
 		}
+		// Out of the queue as soon as it is written: the agent may answer it before the store has
+		// it as sent, and a reply beside it still queued would show it twice.
 		h.mu.Lock()
 		h.queue = slices.DeleteFunc(h.queue, func(x api.Queued) bool { return x.ID == q.ID })
 		delete(h.qimages, q.ID)
 		h.mu.Unlock()
+		if err := h.m.o.Store.SetInputState(q.ID, "sent"); err != nil {
+			h.logf("queue: %v", err)
+		}
 	}
 	if len(due) > 0 {
 		h.publish()
@@ -300,14 +301,12 @@ func (m *Manager) Steer(ctx context.Context, id, input string) error {
 	if err := h.write(ctx, queuedInput(id, q), h.queuedImages(q.ID)); err != nil {
 		return err
 	}
-	if err := m.o.Store.SetInputState(q.ID, "sent"); err != nil {
-		return err
-	}
+	// Out of the queue as soon as it is written (releaseLocked).
 	h.mu.Lock()
 	h.queue = slices.DeleteFunc(h.queue, func(x api.Queued) bool { return x.ID == input })
 	h.mu.Unlock()
 	h.publish()
-	return nil
+	return m.o.Store.SetInputState(q.ID, "sent")
 }
 
 // EditQueued changes a queued message's text.
