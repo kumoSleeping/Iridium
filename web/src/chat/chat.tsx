@@ -230,6 +230,7 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
   const compacting = s?.status === "compacting" || log.sent.some((x) => x.failed === undefined && compactSent(x));
   // Counted from when the agent began (the daemon's time), not from when this page saw it.
   const liveTurn = useRef("");
+  const liveLast = useRef("");
   const compactSince = useRef(0);
   if (!compacting) compactSince.current = 0;
   else if (s?.compactingSince) compactSince.current = s.compactingSince;
@@ -598,6 +599,10 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
   // since): its face and name come first, the first call and the dots under them (kumo,
   // 2026-11-15), not in a row of their own.
   const pendingShown = pending.length > 0;
+  // Its harness coming up with nothing to answer (a session just made, no words yet): no turn,
+  // so no face nor dots, which came and went with nothing said (kumo, 2026-11-16). With words
+  // of yours waiting (sent, queued, or the last thing on the page), the turn is on its way.
+  const waking = s.status === "starting" && !pendingShown && !s.queue?.length && shown.at(-1)?.kind !== "user" && !log.drafts.length;
   const headless = busy && !compacting && (turns.at(-1)?.kind !== "agent" || pendingShown);
   // Its usage after its model's name, a strip of its own as small as a phone's (the user,
   // 2026-11-13): the context's ring, the quota's bars; each pressed, its popover.
@@ -628,7 +633,16 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
   // The turn at work as this page last saw it: once it ends, what it folds folds before you.
   // (none of its rows yet: the turn after the last row, keyed by it, turns.ts)
   const lastTurn = turns.at(-1);
-  if (busy && lastTurn) liveTurn.current = lastTurn.kind === "one" ? `${lastTurn.key}:a` : lastTurn.key;
+  if (busy && !waking && lastTurn) liveTurn.current = lastTurn.kind === "one" ? `${lastTurn.key}:a` : lastTurn.key;
+  // Whether the last turn is the one at work: its steps stay open only then. Not the turn before
+  // while what you sent waits for its block, nor while a /compact runs, nor as the harness comes
+  // up: busy alone opened the finished turn's steps and shut them again a moment later, the
+  // answer under them going down and up (kumo, 2026-11-16: on sending, on compacting). One at
+  // work before stays so through them (a message sent into its turn, a compaction within it).
+  const lastKey = lastTurn && lastTurn.kind !== "one" ? lastTurn.key : "";
+  if (!busy) liveLast.current = "";
+  const liveNow = busy && !waking && !!lastKey && ((!pendingShown && !compacting) || liveLast.current === lastKey);
+  if (liveNow) liveLast.current = lastKey;
   const rowsOf = (rs: Row<ReactNode, Works>[], done: boolean, key: string) => {
     const last = rs.findLastIndex((r) => wordsOf.has(r.key));
     const before = last > 0 ? rs.slice(0, last) : [];
@@ -646,13 +660,13 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
               x.node
             ) : x.kind === "agent" ? (
               <AgentTurn key={x.key} channel={id} a={i === turns.length - 1 && !headless ? face : resting} may={may} bars={bars(i === ctxTurn)} talk={talk} time={began(x.rows)}>
-                {rowsOf(x.rows, !(busy && i === turns.length - 1), x.key)}
+                {rowsOf(x.rows, !(liveNow && i === turns.length - 1), x.key)}
               </AgentTurn>
             ) : (
               <Relayed key={x.key} given={x.works.given} relay={x.works.relay} name={nameOf(x.works.given)} time={x.works.time} onJump={openChat}>
                 {x.rows.length > 0 && (
                   <AgentTurn channel={id} a={resting} may={may} bars={bars(i === ctxTurn)} talk={talk} time={began(x.rows)}>
-                    {rowsOf(x.rows, !(busy && i === turns.length - 1), x.key)}
+                    {rowsOf(x.rows, !(liveNow && i === turns.length - 1), x.key)}
                   </AgentTurn>
                 )}
               </Relayed>
@@ -661,7 +675,7 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
     <Nicks.Provider value={nicks}>
     <Dispatching.Provider value={dispatching}>
     <div className="relative h-full" data-chat-drop={id} onDragOver={(e) => files(e) || session(e) || place(e)} onDrop={drop}>
-      <Stick scroller={scroller} tail={grew} older={() => log.older().then(async (any) => (ready && log.blocks[0]?.time !== undefined && (await alignBack(ready.kept.log, log.more ? log.blocks[0].time : 0)) && changed(), any))} place={chat.place} bottom={stackH} quiet={agents.some((a) => !!stateOf(a.session)?.asks.length)} style={{ paddingTop: padTop, paddingBottom: stackH + 20 }}>
+      <Stick scroller={scroller} tail={grew} older={() => log.older(async (p) => void (ready && p.blocks[0]?.time !== undefined && (await alignBack(ready.kept.log, p.more ? p.blocks[0].time : 0))))} draw={changed} place={chat.place} bottom={stackH} quiet={agents.some((a) => !!stateOf(a.session)?.asks.length)} style={{ paddingTop: padTop, paddingBottom: stackH + 20 }}>
         <div className="mx-auto flex max-w-(--chat-w) flex-col gap-5 px-4 sm:px-6">
           {/* In a turn, the calls being written or run and the dots share one row at the end, as
               high whatever it shows: the conversation does not jump as a call is drafted, runs and
@@ -698,7 +712,7 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
               </div>
               {busy && stop}
             </div>
-          ) : log.loaded && (busy ? (
+          ) : log.loaded && (busy && !waking ? (
             headless ? (
               <AgentTurn channel={id} a={face} may={may} bars={bars(false)} talk={talk}>
                 {activity}

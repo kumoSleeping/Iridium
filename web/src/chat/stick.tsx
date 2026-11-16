@@ -37,7 +37,12 @@ const inner = (target: EventTarget | null, list: HTMLElement) => {
 
 /** quiet: no 新消息 key (an ask under it, the newest thing already in view: the key sat over it and
  *  could not be put away, the user 2026-11-08). */
-export function Stick({ tail, older, place, style, children, scroller, bottom, quiet }: { tail: unknown; older: () => Promise<boolean>; place: { top: number | null }; style?: CSSProperties; children: ReactNode; scroller?: RefObject<HTMLDivElement | null>; bottom: number; quiet?: boolean }) {
+/** draw: draws the page that holds the conversation again, now: the page before, once older has
+ *  brought it, is put in at once and the scroll moved by as much in the same frame. Stick's own
+ *  redraw draws nothing of it (its children are the page's), and drawn whenever the page next
+ *  drew, the page before came in unplaced: the conversation a page off for a frame, then gliding
+ *  back (as a chat opened, as a message was sent). */
+export function Stick({ tail, older, draw, place, style, children, scroller, bottom, quiet }: { tail: unknown; older: () => Promise<boolean>; draw: () => void; place: { top: number | null }; style?: CSSProperties; children: ReactNode; scroller?: RefObject<HTMLDivElement | null>; bottom: number; quiet?: boolean }) {
   const own = useRef<HTMLDivElement>(null);
   const list = scroller ?? own;
   const atEnd = useRef(place.top === null);
@@ -213,8 +218,11 @@ export function Stick({ tail, older, place, style, children, scroller, bottom, q
     try {
       while (el.isConnected && el.scrollTop < near(el) && (await older())) {
         const h = el.scrollHeight;
-        flushSync(() => redraw((n) => n + 1));
+        flushSync(() => (draw(), redraw((n) => n + 1)));
         el.scrollTop += el.scrollHeight - h;
+        // Placed here: what the column grew by is no push at the newest (follow).
+        height.current = (el.firstElementChild as HTMLElement | null)?.offsetHeight ?? 0;
+        if (atEnd.current) ours.current = el.scrollTop;
       }
     } finally {
       paging.current = false;
@@ -276,12 +284,19 @@ export function Stick({ tail, older, place, style, children, scroller, bottom, q
       if (["PageUp", "ArrowUp", "Home"].includes(e.key)) return void (atEnd.current && leave());
       if (["PageDown", "ArrowDown", "End", " "].includes(e.key)) down();
     };
+    // A fold whose height is a grid track's (said.tsx Earlier, a forward's rules) opens or shuts,
+    // pressed or as its turn ends: as a fold pressed (toggleFold), its own height glides and the
+    // end is only kept; shut at the newest it is not held as tall and settled after, the answer
+    // under it going up and then down (kumo, 2026-11-16).
+    const track = (e: TransitionEvent) => e.propertyName === "grid-template-rows" && (folding.current = Math.max(folding.current, performance.now() + motion.dur(3) + 100));
+    el.addEventListener("transitionrun", track);
     el.addEventListener("wheel", wheel, { passive: true });
     for (const k of ["touchstart", "touchmove", "touchend", "touchcancel"] as const) el.addEventListener(k, touch, { passive: true });
     el.addEventListener("keydown", key);
     return () => {
       ro.disconnect();
       clearTimeout(floorTimer.current);
+      el.removeEventListener("transitionrun", track);
       el.removeEventListener("wheel", wheel);
       for (const k of ["touchstart", "touchmove", "touchend", "touchcancel"] as const) el.removeEventListener(k, touch);
       el.removeEventListener("keydown", key);

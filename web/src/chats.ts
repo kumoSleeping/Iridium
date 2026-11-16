@@ -189,8 +189,10 @@ export class Messages {
   }
 
   /** The page before the blocks shown, asked for ahead if it was; then the one before that is asked
-   *  for. Says whether it brought any. */
-  async older(): Promise<boolean> {
+   *  for. Says whether it brought any. first: what is to be there before the page is shown (its
+   *  channel's log as far back), waited for with the page in hand and not yet among the blocks:
+   *  a draw meanwhile shows nothing of it. */
+  async older(first?: (p: MessagePage) => Promise<unknown>): Promise<boolean> {
     if (!this.more) return false;
     const start = this.start;
     this.prefetch();
@@ -201,6 +203,8 @@ export class Messages {
     } finally {
       if (this.ahead === ahead) this.ahead = null;
     }
+    if (this.start !== start) return true;
+    await first?.(p)?.catch(() => {});
     if (this.start !== start) return true;
     this.blocks = [...p.blocks.filter((b) => lineOf(b) < start), ...this.blocks];
     this.start = Math.min(start, p.start);

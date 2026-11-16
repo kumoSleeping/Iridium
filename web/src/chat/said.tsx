@@ -1057,8 +1057,10 @@ export function Earlier({ done, fresh, words, steps, children }: { done: boolean
     if (done !== was.current) setOpen(!done);
     was.current = done;
   }, [done]);
-  // Drawn as the steps' fold is (Fold; kumo, 2026-11-16: no design of its own): an icon, its name
-  // and how many, the chevron; open, what it holds under a rule.
+  // Its line drawn as the steps' fold's is (Fold; kumo, 2026-11-16: no design of its own): an
+  // icon, its name and how many, the chevron. Open, what it holds as it stood in the turn: no
+  // rule beside it, not set in (kumo, 2026-11-16: the rule is the steps' fold's alone; with one
+  // here too, a fold of steps in it stood behind two, and the turn's rows moved aside as it ended).
   return (
     <div className="flex min-w-0 flex-col">
       <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className={cn(ROW, "-my-0.5 w-full text-left")}>
@@ -1071,7 +1073,7 @@ export function Earlier({ done, fresh, words, steps, children }: { done: boolean
       </button>
       <div inert={!open || undefined} aria-hidden={!open || undefined} className={cn("grid transition-[grid-template-rows] duration-(--dur-2) ease-(--ease-out)", open ? "grid-rows-[1fr]" : "grid-rows-[0fr]")}>
         <div className="min-h-0 min-w-0 overflow-hidden">
-          <div className="mt-0.5 ml-[7px] flex min-w-0 flex-col gap-5 pt-4 pl-3 shadow-[inset_1px_0_0_var(--edge)]">{children}</div>
+          <div className="mt-0.5 flex min-w-0 flex-col gap-5 pt-4">{children}</div>
         </div>
       </div>
     </div>

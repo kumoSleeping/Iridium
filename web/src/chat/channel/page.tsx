@@ -267,7 +267,7 @@ export function ChannelPage({ id, sheet = 0, bar, record }: { id: string; sheet?
   return (
     <Nicks.Provider value={nicks}>
       <div className="relative h-full" data-chat-drop={id} onDragOver={(e) => files(e) || session(e) || place(e)} onDrop={drop}>
-        <Stick scroller={scroller} tail={grew} older={() => log.older().then((any) => (changed(), any))} place={entry.place} bottom={stackH} quiet={asking} style={{ paddingTop: padTop, paddingBottom: stackH + 20 }}>
+        <Stick scroller={scroller} tail={grew} older={() => log.older()} draw={changed} place={entry.place} bottom={stackH} quiet={asking} style={{ paddingTop: padTop, paddingBottom: stackH + 20 }}>
           <div className="mx-auto flex max-w-(--chat-w) flex-col gap-5 px-4 sm:px-6">
             {groups.map((g) => (
               <div key={g.key} className="relative flex min-w-0 flex-col">
