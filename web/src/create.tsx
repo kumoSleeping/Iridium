@@ -8,7 +8,6 @@ import { Bot, Check, ChevronDown, ChevronRight, Folder, FolderPlus, LoaderCircle
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import type { NewMember, NewSession as NewSessionReq, Workspace } from "./api/types.gen";
 import { api, missing } from "./api/client";
-import { born } from "./chats";
 import { openChat } from "./route";
 import type { Agent, Role } from "./api/types.gen";
 import { t } from "./i18n";
@@ -803,7 +802,6 @@ export function useStart(opened: (id: string) => void) {
     setBusy(as?.agents?.length ? "lineup" : as?.role ? `role:${as.role}` : machine ? `${machine}/${agent}` : agent);
     try {
       const { id } = await api.create(startRequest(agent, cwd, workspace, machine, people, as));
-      born.add(id);
       opened(id);
     } catch (e) {
       toast(t("err.newSession"), { error: true, description: errText(e) });

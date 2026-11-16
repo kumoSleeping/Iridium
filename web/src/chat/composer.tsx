@@ -30,7 +30,6 @@ import { atWord, boxAt, boxed, edited, outOf, wordsAt } from "./refs";
 import { arrowInto, atPath, atSections, pathSection, typedPath, type AtHead, type AtRow, type AtSection, type NamedPlace } from "./at";
 import { MachineFace, MachineLink, type Machine } from "../machines";
 import { foldersQ } from "../create";
-import { useGlide } from "../motion";
 import { CODE, previews, size, Zoom } from "./files";
 import { upload } from "./upload";
 import { findSecretish } from "./secretish";
@@ -107,10 +106,8 @@ type Props = {
   openContext: () => boolean;
   /** /clear went on in session id. */
   cleared: (id: string) => void;
-  /** The keys in the composer's foot, between attach and send: mode, model, quota, context. */
+  /** Unseen: the mode and model keys whose menus /mode and /model open (chat.tsx Under). */
   tools?: ReactNode;
-  /** A session just made here: its keys fade in, not taken over at once from the chat before. */
-  fresh?: boolean;
   /** A channel of several agents (chat/channel): these, which an @ lists and calls by nick; no /
    *  commands, no command lines, nothing of one agent's own. */
   nicks?: AgentRow[];
@@ -130,7 +127,7 @@ const everyoneRows = (): AgentRow[] => [
   { session: "", member: "agent:*", agent: "" as Agent, nick: ALL_AGENTS, name: t("channel.atAgents"), status: "idle", recv: "" },
 ];
 
-export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s, turn, onSent, onSentDone, cycleMode, openModel, openMode, openUsage, openContext, cleared, tools, fresh, nicks, quote, unquote, people }, ref) {
+export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s, turn, onSent, onSentDone, cycleMode, openModel, openMode, openUsage, openContext, cleared, tools, nicks, quote, unquote, people }, ref) {
   const multi = !!nicks;
   // The quote as last shown: its row keeps its words while it shuts.
   const lastQuote = useRef(quote);
@@ -202,8 +199,6 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
       }),
     );
   // The keys under it glide as one changes width (UltraCode's mark, a longer name), never jump.
-  const toolRow = useRef<HTMLDivElement>(null);
-  useGlide(toolRow);
   // The ring comes once the agent has said its context: faded in as the keys are.
   /** words put where the caret is, a space either side. */
   const insert = (words: string) => {
@@ -476,9 +471,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
         </ul>
         </div>
       </div>
-      {/* The words first, at least two lines high; then the foot: attach, the meters, the context
-          ring, send at the far right (the user, 2026-11-06). */}
-      <div className="px-3.5 pt-3">
+      {/* One row (kumo, 2026-11-16: no keys under it any more, the box smaller): attach, the
+          words, one line high and growing to their height, send at the far right; the keys at the
+          words' last line. */}
+      <div className="flex min-w-0 items-end gap-0.5 p-2">
         <input
           ref={picker}
           type="file"
@@ -489,8 +485,14 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
             e.target.value = "";
           }}
         />
+        {!noFiles && (
+          <IconKey label={t("composer.attach")} onClick={() => picker.current?.click()}>
+            <Paperclip size={17} />
+          </IconKey>
+        )}
         {/* What is named lies on a soft mark, its logo or folder in the slot before its name: the
             box's own letters clear over it. */}
+        <div className="min-w-0 flex-1 py-[1.5px] pointer-coarse:py-[5.5px]">
         <div className="relative">
         {marked && <MentionMarks text={text} box={box} className={BOX} />}
         <textarea
@@ -557,17 +559,12 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
             else return;
             e.preventDefault();
           }}
-          className={cn("no-ring relative block max-h-[220px] min-h-[52px] w-full resize-none bg-transparent placeholder:text-ink-3", BOX, marked && "text-transparent [caret-color:var(--ink)]")}
+          className={cn("no-ring relative block max-h-[220px] min-h-[29px] w-full resize-none bg-transparent placeholder:text-ink-3", BOX, marked && "text-transparent [caret-color:var(--ink)]")}
         />
         </div>
-      </div>
-      <div className="flex min-w-0 items-center gap-0.5 px-2 pt-0.5 pb-2">
-        {!noFiles && (
-          <IconKey label={t("composer.attach")} onClick={() => picker.current?.click()}>
-            <Paperclip size={17} />
-          </IconKey>
-        )}
-        <div ref={toolRow} className={cn("flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden", fresh && "g-fade")}>
+        </div>
+        {/* /mode and /model's menus, unseen, where their keys were (chat.tsx Under). */}
+        <div className="flex w-0 shrink-0">
           {tools}
         </div>
         <Tip label={label}>

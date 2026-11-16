@@ -17,7 +17,7 @@ import { api } from "../api/client";
 import { LinkDot } from "../link";
 import type { Session } from "../api/types.gen";
 import { WsPlus } from "../create";
-import { born, chatOf, compactSent, firstScreen, fresh, isWhole, lineOf, stateAhead, type Draft as Drafted, type Sent } from "../chats";
+import { chatOf, compactSent, firstScreen, fresh, isWhole, lineOf, stateAhead, type Draft as Drafted, type Sent } from "../chats";
 import { LOCAL_ME, useMachines, useMe, useWhoList, useWorkspaces } from "../data";
 import { t, useLang } from "../i18n";
 import { pushIn } from "../motion";
@@ -28,7 +28,7 @@ import { useConfirms, useList, useSession } from "../store";
 import { drafts, opened } from "../stream";
 import { errText, toast } from "../toast";
 import { groupPath, working } from "../tree";
-import { agentName, cn, Lamp, lampOf, Leaving, LogoLamp, LogoStack, PopSurface, sessionStatusText, tilde, Tip, titleOf, untitled } from "../ui";
+import { agentName, cn, IrMark, Lamp, lampOf, Leaving, LogoLamp, LogoStack, PopSurface, sessionStatusText, tilde, Tip, titleOf, untitled } from "../ui";
 import { givenTurn, groupMessages, isMulti, type AgentRow, type GivenTurn, type Msg } from "./channel/lib";
 import { betweenAgents, callerOf, foreignOf, givenHere, held, HOLD, linesOf, marksAt, named as namedIn, ownAnchors, slotsOf, subsAt, type Anchor, type RowTime } from "./channel/merge";
 import { LongWords } from "./longwords";
@@ -820,9 +820,6 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
 /** people: its channel's members an @ lists (chat/channel/person.tsx useNamed). */
 function Under({ s, ghost, composer, onSent, onSentDone, modelOpen, setModelOpen, modeOpen, setModeOpen, openContext, people, quote, unquote }: { s: LiveSession; ghost: boolean; composer: React.RefObject<ComposerHandle | null>; onSent: (x: Sent) => void; onSentDone: (x: Sent) => void; modelOpen: boolean; setModelOpen: (o: boolean) => void; modeOpen: boolean; setModeOpen: (o: boolean) => void; openContext: () => boolean; people: AgentRow[]; quote?: { n: number; who: string; text: string }; unquote?: () => void}) {
   const mode = useMode(s);
-  // Made here just now (create.tsx useStart): its keys fade in, not the chat before's swapped for them.
-  const [fresh] = useState(() => born.has(s.id));
-  useEffect(() => void born.delete(s.id), [s.id]);
   // The model as the agent says it, once: while its process starts, or runs and has not said it
   // yet, the key waits, not the default's guess shown and then changed (默认模型, Opus, Haiku in
   // a second, the user, 2026-11-12). Not for ever: an agent that never says shows the guess.
@@ -832,7 +829,6 @@ function Under({ s, ghost, composer, onSent, onSentDone, modelOpen, setModelOpen
       <Composer
         ref={composer}
         s={s}
-        fresh={fresh}
         // Starting is no turn yet: what is sent goes once the agent is up, and Esc stops nothing.
         turn={turning(s) && s.status !== "starting"}
         onSent={onSent}
@@ -909,17 +905,17 @@ function Bar({ s, onSheet, onMe, spots, asked }: { s?: Session; onSheet?: () => 
         <div className="flex min-w-0 flex-1 items-center gap-2.5 pl-2">
           {s && (
             <>
+              {/* On a phone Iridium's mark comes first, a key too: the session list's sheet, as ⋯'s
+                  first item (the user, 2026-11-06). Its tap area wider than it, the bar not moved. */}
+              {onSheet && (
+                <button type="button" aria-label={t("nav.sidebar")} onClick={onSheet} className={cn("g-press -m-2 grid place-items-center rounded-md p-2 hover:bg-fill", late)}>
+                  <IrMark size={18} className="text-ink" />
+                </button>
+              )}
+              {/* The channel's face, on a phone as on a computer (kumo, 2026-11-16: a phone could
+                  not change the channel's face): its card, 编辑资料 in it. */}
               <Tip label={stack ? s.agents!.map((a) => a.nick).join(" · ") : `${agentName(s.agent)} · ${sessionStatusText(s)}`} side="bottom">
-                {/* On a phone the logo is a key too: the session list's sheet, as ⋯'s first item (the
-                    user, 2026-11-06). Its tap area wider than it, the bar not moved. */}
-                {onSheet ? (
-                  <button type="button" aria-label={t("nav.sidebar")} onClick={onSheet} className={cn("g-press -m-2 grid place-items-center rounded-md p-2 hover:bg-fill", late)}>
-                    {/* Iridium's mark, not the agent's (the user, 2026-11-06): it opens the list. */}
-                    <LogoLamp agent={s.agent} status={lampOf(s)} size={18} ir />
-                  </button>
-                ) : (
-                  <FaceKey s={s} stack={stack} className={late} />
-                )}
+                <FaceKey s={s} stack={stack} className={late} />
               </Tip>
               {renaming ? (
                 <span className="min-w-0 flex-1">

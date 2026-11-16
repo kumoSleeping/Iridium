@@ -337,9 +337,6 @@ export function chatOf(id: string): Chat {
 export const peekChat = (id: string) => kept.get(id) ?? (early?.id === id ? early.it : undefined) ?? warm.get(id)?.it;
 export const keptChats = () => [...kept.values()];
 
-/** Sessions this page made, till their chat first draws its keys (chat/chat.tsx Under). */
-export const born = new Set<string>();
-
 /** Whether the browser asks to save data: then nothing is fetched ahead. */
 export const mayPrefetch = (nav: Navigator = navigator) => !(nav as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData;
 
