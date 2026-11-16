@@ -811,6 +811,14 @@ func (s *Store) SessionInput(session string) (input, cacheRead, cacheWrite int64
 	return
 }
 
+// LastModel is the model of session's last turn as its usage rows have it (of a turn's rows, the
+// one with the most input: a side model's, Claude's Haiku, has less); "" with none.
+func (s *Store) LastModel(session string) string {
+	var model string
+	_ = s.db.QueryRow(`SELECT model FROM usage WHERE session = ? AND model != '' ORDER BY at DESC, input + cache_read + cache_write DESC LIMIT 1`, session).Scan(&model)
+	return model
+}
+
 // UsageSince is every usage row since at (ms), oldest first.
 func (s *Store) UsageSince(at int64) ([]Usage, error) {
 	rows, err := s.db.Query(`SELECT at, terminal, session, agent, model, input, output, cache_read, cache_write, cost_usd FROM usage WHERE at >= ? ORDER BY at, id`, at)

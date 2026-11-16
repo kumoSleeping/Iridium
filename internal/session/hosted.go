@@ -213,6 +213,11 @@ func (m *Manager) newHosted(mt meta) *Hosted {
 		h.meta.Mode = cmp.Or(st.Mode, h.meta.Mode)
 		h.model, h.mode = h.meta.Model, h.meta.Mode
 	}
+	// One that names no model: the one it last ran (its usage), not nothing until it runs again
+	// (its name, its model's face; the user, 2026-11-16: a group's Claude showed its logo).
+	if h.model == "" || h.model == "default" {
+		h.model = cmp.Or(m.o.Store.LastModel(mt.ID), h.model)
+	}
 	h.rules, _ = m.o.Store.Rules(mt.ID)
 	if c := h.savedContext(); c != nil {
 		h.ctxSum = &api.ContextSummary{Used: c.Used, Max: c.Max, At: c.At}

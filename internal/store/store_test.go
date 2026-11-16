@@ -207,6 +207,16 @@ func TestInputsUsageOutbox(t *testing.T) {
 	if in, cr, cw, _ := s.SessionInput("none"); in+cr+cw != 0 {
 		t.Fatalf("no rows: %d %d %d", in, cr, cw)
 	}
+	// The last turn's model: of its rows (one time), the one with the most input, not a side model's.
+	must(t, s.AddUsage(Usage{At: 50, Session: "b", Agent: "claude", Model: "claude-opus-5-5", CacheRead: 9000}))
+	must(t, s.AddUsage(Usage{At: 90, Session: "b", Agent: "claude", Model: "claude-haiku-5-5", Input: 300}))
+	must(t, s.AddUsage(Usage{At: 90, Session: "b", Agent: "claude", Model: "claude-fable-5-2", Input: 20, CacheRead: 8000}))
+	if m := s.LastModel("b"); m != "claude-fable-5-2" {
+		t.Fatalf("last model: %q", m)
+	}
+	if m := s.LastModel("none"); m != "" {
+		t.Fatalf("no rows, a model: %q", m)
+	}
 
 	a, _ := s.Post("bot", "qq:1", "reply", `{}`)
 	b, _ := s.Post("bot", "qq:1", "status", `{}`)

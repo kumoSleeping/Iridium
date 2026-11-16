@@ -1,13 +1,14 @@
 // A member named among the words of a channel (docs/channels.md; agents, people and apps are
 // peers, the user, 2026-11-13): drawn as a session named is (mention.tsx NamedLink), the @ kept
-// in front (the user, 2026-11-12), its face (an agent's harness's logo, a person's or an app's
-// avatar) and its name, underlined; pressed, its card, the one its face opens. The names of all
+// in front (the user, 2026-11-12), its face (an agent's own, as beside its words, its model's
+// face.tsx; a person's or an app's avatar) and its name, underlined; pressed, its card, the one its face opens. The names of all
 // (全体成员, 全体Agent) a mark and the words, no key. One form, in a person's words and in an
 // agent's Markdown (chat/markdown.tsx, by the link lib.ts linkNicks makes of it).
 import { Popover } from "@base-ui/react/popover";
 import { Bot, Users } from "lucide-react";
 import { createContext, useContext, useState, type ReactNode } from "react";
-import { Avatar, Logo, PopSurface } from "../../ui";
+import { Avatar, PopSurface } from "../../ui";
+import { Face } from "./face";
 import { Worded } from "../mention";
 import { fromSatori } from "../refs";
 import { ALL_AGENTS, ALL_MEMBERS, nickParts, type AgentRow } from "./lib";
@@ -47,7 +48,7 @@ export function NickLink({ nick }: { nick: string }) {
         render={
           <button type="button" className={`${LINK} underline decoration-ink-4 underline-offset-2 hover:decoration-ink-2`}>
             <span className="-mr-0.5 text-ink-3">@</span>
-            <span className="self-center">{m.person ? <Avatar src={m.avatar} name={m.nick} size={14} /> : <Logo agent={m.agent} size={14} />}</span>
+            <span className="self-center">{m.person ? <Avatar src={m.avatar} name={m.nick} size={14} /> : <Face id={m.session} agent={m.agent} size={14} />}</span>
             <span className="min-w-0 [overflow-wrap:anywhere]">{m.nick}</span>
           </button>
         }
