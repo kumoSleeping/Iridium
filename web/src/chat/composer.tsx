@@ -85,9 +85,9 @@ export function commandsOf(s: LiveSession): Command[] {
 
 type Att = { key: string; file: File; sent: number; ref?: string; path?: string; error?: string; url?: string; stop: AbortController };
 
-/** put: words on a line of their own at the end; insert: at the caret, a space either side; name:
+/** insert: words at the caret, a space either side; name:
  *  a session (its ID) or a place named, a link where the caret is (a row dropped here, chat.tsx). */
-export type ComposerHandle = { focus: () => void; put: (text: string) => void; insert: (text: string) => void; attach: (files: File[]) => void; name: (to: string | NamedPlace) => void; box: () => HTMLTextAreaElement | null };
+export type ComposerHandle = { focus: () => void; insert: (text: string) => void; attach: (files: File[]) => void; name: (to: string | NamedPlace) => void; box: () => HTMLTextAreaElement | null };
 
 type Props = {
   s: LiveSession;
@@ -221,7 +221,6 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
   };
   useImperativeHandle(ref, () => ({
     focus: () => box.current?.focus(),
-    put: (words) => (type([textNow.current, words].filter(Boolean).join("\n")), box.current?.focus()),
     insert,
     attach,
     name: (to) => {

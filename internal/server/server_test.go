@@ -115,7 +115,7 @@ func TestGuard(t *testing.T) {
 		{"POST", "127.0.0.1:7810", "http://evil.example", http.StatusForbidden},
 		{"POST", "127.0.0.1:7810", "http://127.0.0.1:7810", http.StatusBadRequest}, // let through, then a bad body
 	} {
-		path := "/v1/internal/notes"
+		path := "/v1/internal/roles"
 		req := httptest.NewRequest(c.method, "http://"+c.host+path, strings.NewReader("{"))
 		if c.origin != "" {
 			req.Header.Set("Origin", c.origin)

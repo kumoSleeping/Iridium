@@ -22,7 +22,6 @@ export type Cmd =
   | "ir-usage"
   | "ir-bot"
   | "ir-share"
-  | "ir-notes"
   | "ir-settings"
   | "ir-answer"
   | "git"
@@ -134,9 +133,6 @@ function irApiOf(verb: string | undefined, method: string | undefined, args: str
         return "ir-access";
       case "secrets":
         return "ir-secret";
-      case "notes":
-      case "note-folders":
-        return "ir-notes";
       case "usage":
         return "ir-usage";
       case "settings":

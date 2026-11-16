@@ -174,7 +174,6 @@ func New(cfg config.Config, m *session.Manager, h *hub.Hub, logf func(string, ..
 	h.Set("update", s.updateState())
 	h.Set("terminals", int64(0))
 	s.atsChanged() // who was named and has not read it (ats.go)
-	s.carryNotes()
 	return s
 }
 
@@ -231,7 +230,6 @@ func (s *Server) Handler(local bool) http.Handler {
 	s.pairRoutes(mux)
 	s.machineRoutes(mux)
 	s.discoverRoutes(mux)
-	s.noteRoutes(mux)
 	s.fileRoutes(mux, local)
 	if !local {
 		s.cliRoutes(mux)
@@ -528,17 +526,17 @@ func (s *Server) release(w http.ResponseWriter, r *http.Request) {
 	s.done(w, s.m.Release(ctx, r.PathValue("id"), req.ToolUseID, req.Dismiss))
 }
 
-var stateKey = regexp.MustCompile(`^(list|quota|guilds|needs|pairing|update|terminals|machines|notes|voice|channels|avatars|ats|memory|roles|(session|context|reads|viewers):[0-9a-zA-Z_-]{1,128})$`)
+var stateKey = regexp.MustCompile(`^(list|quota|guilds|needs|pairing|update|terminals|machines|voice|channels|avatars|ats|memory|roles|(session|context|reads|viewers):[0-9a-zA-Z_-]{1,128})$`)
 
 // stateKeys splits the states a WATCH asks for into those it carries and those it leaves
-// out (unknown, or not this caller's: needs, pairing and notes are a person's on ir_web or at
-// the host).
+// out (unknown, or not this caller's: needs and pairing are a person's on ir_web or at the
+// host).
 func (s *Server) stateKeys(c caller, keys []string) (carried []string, ignored []api.StateEvent) {
 	for _, k := range keys {
 		switch {
 		case !stateKey.MatchString(k):
 			ignored = append(ignored, api.StateEvent{Key: k, Ignored: "unknown"})
-		case (k == "needs" || k == "pairing" || k == "notes") && !c.panel():
+		case (k == "needs" || k == "pairing") && !c.panel():
 			ignored = append(ignored, api.StateEvent{Key: k, Ignored: "forbidden"})
 		case !slices.Contains(carried, k):
 			carried = append(carried, k)

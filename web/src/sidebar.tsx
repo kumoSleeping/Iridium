@@ -27,7 +27,6 @@ import { errText, toast } from "./toast";
 import { manages, useMachines, useMe, useSaidLine, useUpdate } from "./data";
 import { agentName, ago, cn, fine, IconKey, IrMark, keep, kept, Lamp, lampOf, Logo, LogoStack, own, sessionStatusText, statusText, tilde, Tip, titleOf, untitled, useLongPress, useMenuAt, useMinute } from "./ui";
 import { PLACE_DRAG, SESSION_DRAG } from "./chat/refs";
-import { NoteMark, NotesAt, useNotes } from "./notekey";
 import { badge, isQuiet, setQuiet, useAt, useQuiet, useUnread } from "./unread";
 import { Face } from "./chat/channel/face";
 import { CloudBadge, MachineFace, shownPath, useLate, useMachine, type Machine } from "./machines";
@@ -673,9 +672,6 @@ function WsRow({ flip, id, name, root, sessions, hung, machine, remote, folders,
   const real = id !== 0 && manages(me);
   const [at, setAt] = useMenuAt();
   const [renaming, setRenaming] = useState(false);
-  // Its notes, where its menu was (notekey.tsx): those of its folder.
-  const [notesAt, setNotesAt] = useState<{ x: number; y: number } | null>(null);
-  const notes = useNotes() !== undefined && id !== 0;
   const lp = useLongPress(() => {
     const r = document.activeElement?.closest?.("[role=treeitem]")?.getBoundingClientRect();
     setAt(r ? { x: r.left + 40, y: r.bottom } : { x: 40, y: 40 });
@@ -686,7 +682,6 @@ function WsRow({ flip, id, name, root, sessions, hung, machine, remote, folders,
   const voice = useVoiceItem(id);
   const items = [
     ...(id > 0 ? [voice] : []),
-    ...(notes ? [{ icon: <NoteMark size={15} />, label: t("note.view"), run: () => setNotesAt(at) }] : []),
     // Those hung under its sessions go with them (the server's cascade): counted, not sent. The way
     // a group at another machine is no longer listed (the user, 2026-11-10).
     ...(sessions.length
@@ -789,7 +784,6 @@ function WsRow({ flip, id, name, root, sessions, hung, machine, remote, folders,
           </Menu.Portal>
         </Menu.Root>
       )}
-      {notes && <NotesAt root={root} at={notesAt} close={() => setNotesAt(null)} />}
     </>
   );
 }
@@ -1030,8 +1024,7 @@ const SessionRow = memo(function SessionRow({ s, where, depth, flip, selected, o
         sub={at ? <><span className="text-err">{t(at.everyone ? "row.atAll" : "row.atMe")}</span>{line ? ` ${line}` : ""}</> : line}
         face
         dim={dim}
-        // data-session: a note may be dropped on it (notes.tsx).
-        extra={{ ...lp, ...hover, ...drag, onClickCapture: lp.onClickCapture, "data-session": s.id }}
+        extra={{ ...lp, ...hover, ...drag, onClickCapture: lp.onClickCapture }}
       />
       <SessionMenu s={s} at={menuAt} close={() => setMenuAt(null)} rename={() => setRenaming(true)} />
     </>

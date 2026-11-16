@@ -177,8 +177,24 @@ var schema = []string{
 	// 17: no placeholder names (the user, 2026-11-08): auto marks a name the session's agent gave
 	// (ir rename) from now on.
 	`DELETE FROM names WHERE auto = 1;`,
-	// 18: notes and their folders (notes.go).
-	notesSchema,
+	// 18: notes and their folders; dropped by 42.
+	`CREATE TABLE note_folders (
+		id INTEGER PRIMARY KEY,
+		name TEXT NOT NULL,
+		pos REAL NOT NULL
+	);
+	CREATE TABLE notes (
+		id TEXT PRIMARY KEY,
+		folder INTEGER NOT NULL DEFAULT 0,
+		body TEXT NOT NULL,
+		pos REAL NOT NULL,
+		color TEXT NOT NULL DEFAULT '',
+		done_at INTEGER NOT NULL DEFAULT 0,
+		from_session TEXT NOT NULL DEFAULT '',
+		sessions TEXT NOT NULL DEFAULT '[]',
+		created_at INTEGER NOT NULL,
+		updated_at INTEGER NOT NULL
+	);`,
 	// 19: the root folder a note serves (the user, 2026-11-09): the composer lists those of its
 	// session's; "" (older notes) every one's.
 	`ALTER TABLE notes ADD COLUMN root TEXT NOT NULL DEFAULT '';`,
@@ -350,6 +366,9 @@ var schema = []string{
 		at      INTEGER NOT NULL
 	);
 	CREATE INDEX IF NOT EXISTS memories_owner ON memories (owner, id);`,
+	// 42: the notes gone (the user, 2026-11-16): their tables (18, 19).
+	`DROP TABLE IF EXISTS notes;
+	DROP TABLE IF EXISTS note_folders;`,
 }
 
 // steps run in Go after the migration of their version, in the same transaction.

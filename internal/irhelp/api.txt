@@ -157,15 +157,6 @@ GET internal/secrets - -> Secrets  no values; host only  view=secrets.name,secre
 DELETE internal/secrets/{name} - -> {ok}  host only, person only
 POST internal/secrets/use {names, command, session?, confirm?} -> {values}  ir run only; socket only; may be 202 {need}
 
-# notes (host or web)
-GET internal/notes - -> Notes  all  view=notes.id,notes.body,notes.done,folders.name
-POST internal/notes {id?, body, folder?, pos?, color?, from?, root?} -> Note  new note
-PATCH internal/notes/{id} {body?, folder?, pos?, color?, done?, session?} -> Note  edit a note
-DELETE internal/notes/{id} - -> {ok}  delete a note
-POST internal/note-folders {name?, pos?} -> NoteFolder  new note folder
-PATCH internal/note-folders/{id} {name?, pos?} -> {ok}  rename, move a note folder
-DELETE internal/note-folders/{id} - -> {ok}  delete a note folder; its notes move out
-
 # apps (admin)
 GET internal/me - -> Me  the caller: app, login, host, web, rules
 PUT internal/me/profile {name?, avatar?, removeAvatar?} -> EndpointInfo  own name, avatar (base64); not the host

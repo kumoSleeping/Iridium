@@ -47,7 +47,7 @@ export const listDrop = () => ({
 export const useOver = () => useSyncExternalStore(subscribe, () => over);
 /** That the row of id is the one dragged now: it fades while it is. */
 export const useDragged = (kind: Dragged["kind"], id: string) => useSyncExternalStore(subscribe, () => dragged?.kind === kind && dragged.id === id);
-/** The row's mark the list finds it by, to draw the line at: data-place (data-drop is a note's, notes.tsx). */
+/** The row's mark the list finds it by, to draw the line at: data-place. */
 export const dropMark = (d: Dragged) => `${d.kind}:${d.lane}:${d.id}`;
 
 /** What a row takes to be dropped on: by one of its kind and lane, not itself; also, by one of

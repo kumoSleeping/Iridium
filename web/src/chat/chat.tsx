@@ -277,17 +277,6 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
   });
 
   const composer = useRef<ComposerHandle>(null);
-  // A note put into this chat (notes.tsx putIntoSession): its words in the composer, on a line of
-  // their own; the event cancelled says it was taken.
-  useEffect(() => {
-    const put = (e: Event) => {
-      if (!composer.current) return;
-      composer.current.put((e as CustomEvent<string>).detail);
-      e.preventDefault();
-    };
-    addEventListener("ir:note", put);
-    return () => removeEventListener("ir:note", put);
-  }, []);
   const [modelOpen, setModelOpen] = useState(false);
   const [modeOpen, setModeOpen] = useState(false);
   // The context's popover, at the ring after the model name of the agent's latest turn (/context
@@ -674,7 +663,7 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
   return (
     <Nicks.Provider value={nicks}>
     <Dispatching.Provider value={dispatching}>
-    <div className="relative h-full" data-chat-drop={id} onDragOver={(e) => files(e) || session(e) || place(e)} onDrop={drop}>
+    <div className="relative h-full" onDragOver={(e) => files(e) || session(e) || place(e)} onDrop={drop}>
       <Stick scroller={scroller} tail={grew} older={() => log.older(async (p) => void (ready && p.blocks[0]?.time !== undefined && (await alignBack(ready.kept.log, p.more ? p.blocks[0].time : 0))))} draw={changed} place={chat.place} bottom={stackH} quiet={agents.some((a) => !!stateOf(a.session)?.asks.length)} style={{ paddingTop: padTop, paddingBottom: stackH + 20 }}>
         <div className="mx-auto flex max-w-(--chat-w) flex-col gap-5 px-4 sm:px-6">
           {/* In a turn, the calls being written or run and the dots share one row at the end, as

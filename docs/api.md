@@ -49,9 +49,8 @@ Iridium 自己的接口都在 `/v1/internal/` 下：Satori 规范的 internal �
 | `pairing` | `PairWindow`：配对开没开 |
 | `update` | `UpdateState`：有没有新版本、更新到哪一步 |
 | `terminals` | 一个计数：应用或机器变了，重新取 `GET /v1/internal/apps` |
-| `notes` | `Notes`：全部便签和便签夹 |
 
-不认识的键、不给这个连接的键（`needs`、`pairing`、`notes` 只给网页的登录和主机）不让 WATCH 失败：先为每个发一条 `state`，`{key, value: null, ignored: "unknown" | "forbidden"}`，其余照常。
+不认识的键、不给这个连接的键（`needs`、`pairing` 只给网页的登录和主机）不让 WATCH 失败：先为每个发一条 `state`，`{key, value: null, ignored: "unknown" | "forbidden"}`，其余照常。
 
 `list` 和会话按权限范围给。应用被移除、网页登录退出、`public.origin` 改了，连接就断开。值里的凭据打码（见“凭据”）。
 
@@ -118,20 +117,6 @@ Iridium 自己的接口都在 `/v1/internal/` 下：Satori 规范的 internal �
 | `GET /v1/internal/machines/{id}/dsh/workspaces` | → `DshWorkspace[]` | 那台机器上 dsh 的工作区（DSH Desktop 侧边栏那份，按它的顺序，文件夹已不在的不列），读不懂时用它会话所在的文件夹代替，最近的在前；路径用 `/`。`sessions` 是其中列出的会话数（不算子代理、这边归档的、不同步的）。新会话选文件夹时列在最上面，见 `docs/exec.md`“远端 DSH” |
 
 - 选择器默认只能在家目录里（配置 `folderRoots` 可改），先解析符号链接再比；`~/.ssh`、`~/.gnupg`、`~/.claude`、`~/.codex`、`~/.pi`、`~/.dsh` 和 Iridium 的状态、配置目录一律不给（403）。不存在 422 `no_such_path`。
-
-## 便签
-
-面板和本机的，同颜色标签。每次改动，携带状态 `notes` 整份重发。
-
-| 路由 | 请求 → 回复 | 说明 |
-|---|---|---|
-| `GET /v1/internal/notes` | → `Notes` | 全部 |
-| `POST /v1/internal/notes` | `NewNote` → `Note` | `id` 页面自己给（UUID），同一个 `id` 再发不重复建；`pos` 不给就放在它那一夹最上面 |
-| `PATCH /v1/internal/notes/{id}` | `NotePatch` → `Note` | 改正文、夹（0：不在夹里）、位置、颜色、完成；`session`：放进过的会话，记在 `sessions` 最后 |
-| `DELETE /v1/internal/notes/{id}` | → `{ok}` | |
-| `POST /v1/internal/note-folders` | `NoteFolderPatch` → `NoteFolder` | 只一层 |
-| `PATCH /v1/internal/note-folders/{id}` | `NoteFolderPatch` → `{ok}` | 改名、位置 |
-| `DELETE /v1/internal/note-folders/{id}` | → `{ok}` | 里面的便签移出夹 |
 
 ## 文件和上传
 

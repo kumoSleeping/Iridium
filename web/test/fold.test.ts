@@ -237,7 +237,6 @@ describe("a shell call's sort", () => {
     expect(api("GET internal/usage days==7")).toBe("ir-usage");
     expect(api("internal/apps")).toBe("ir-machines");
     expect(api("PUT internal/apps/x/perms @-")).toBe("ir-access");
-    expect(api("POST internal/notes text=x")).toBe("ir-notes");
     expect(api("POST internal/button id=c1 option=yes")).toBe("ir-answer");
     expect(api("message.delete channel_id=a message_id=b")).toBe("delete");
     const shown = folded([

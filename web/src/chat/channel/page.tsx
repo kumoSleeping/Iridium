@@ -184,15 +184,6 @@ export function ChannelPage({ id, sheet = 0, bar, record }: { id: string; sheet?
   }, [!!s]);
 
   const composer = useRef<ComposerHandle>(null);
-  useEffect(() => {
-    const put = (e: Event) => {
-      if (!composer.current) return;
-      composer.current.put((e as CustomEvent<string>).detail);
-      e.preventDefault();
-    };
-    addEventListener("ir:note", put);
-    return () => removeEventListener("ir:note", put);
-  }, []);
   const call = (nick: string) => composer.current?.insert(`@${nick}`);
   // Its members as words name them and as @ lists them (agents, people and apps: peers).
   const { named: nicks, others: peopleRows } = useNamed({ channel: id, agents, members, may, call, record });
@@ -266,7 +257,7 @@ export function ChannelPage({ id, sheet = 0, bar, record }: { id: string; sheet?
   if (!s) return <div className="relative h-full">{bar(row)}</div>;
   return (
     <Nicks.Provider value={nicks}>
-      <div className="relative h-full" data-chat-drop={id} onDragOver={(e) => files(e) || session(e) || place(e)} onDrop={drop}>
+      <div className="relative h-full" onDragOver={(e) => files(e) || session(e) || place(e)} onDrop={drop}>
         <Stick scroller={scroller} tail={grew} older={() => log.older()} draw={changed} place={entry.place} bottom={stackH} quiet={asking} style={{ paddingTop: padTop, paddingBottom: stackH + 20 }}>
           <div className="mx-auto flex max-w-(--chat-w) flex-col gap-5 px-4 sm:px-6">
             {groups.map((g) => (

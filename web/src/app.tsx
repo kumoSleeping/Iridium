@@ -21,7 +21,7 @@ import { prefetch, settled } from "./prefetch";
 import { prefetchRoles } from "./roles";
 import { close, go, onTurn, openChat, over, quietDialog, route, setUsageMachine, usagePoint, useRoute, type Route } from "./route";
 import { Pager, TABS_H } from "./pager";
-import { atLeft, atRight, GRIP, Sheet } from "./sheet";
+import { atLeft, GRIP, Sheet } from "./sheet";
 import { HeadKeys, Sidebar } from "./sidebar";
 import { useConfirms, useList } from "./store";
 import { follow } from "./stream";
@@ -58,7 +58,6 @@ const UsagePage = part(() => import("./usage").then((m) => m.UsagePage));
 type SetsPage = "settings" | "apps" | "secrets" | "roles" | "usage";
 const setsPageOf = (r: Route): SetsPage => (r.name === "apps" || r.name === "secrets" || r.name === "roles" || r.name === "usage" ? r.name : "settings");
 const Jump = part(() => import("./jump").then((m) => m.Jump));
-const NotesPanel = part(() => import("./notes").then((m) => m.NotesPanel));
 export const loadChat = ChatPage.load;
 // The address names a chat: its code and its first screen are asked for now, ahead of the first
 // draw, the list and the sidebar's faces (chats.ts firstScreen).
@@ -189,17 +188,10 @@ export function App() {
   // 2026-11-06). Put away, or brought to the sessions, the panel's route is left.
   // A swipe up from the left shows the 终端 page from its first px, not the sessions' turning to it
   // as it is let go (the user, 2026-11-08).
-  const [pulled, setPulled] = useState<"me" | "sessions" | "notes" | null>(null);
-  // The notes: on a phone the sheet's last page, brought by a swipe up from the right quarter (the
-  // user, 2026-11-09); on a computer only the composer's (chat/notekey.tsx).
-  const [notesPage, setNotesPage] = useState(false);
-  // Drawn once first shown, then kept, hidden: a note dragged away from them (to the sessions) is
-  // still theirs to drop.
-  const [notesSeen, setNotesSeen] = useState(false);
+  const [pulled, setPulled] = useState<"me" | "sessions" | null>(null);
   // Out, its page is the route's; going down, it stays as it was; coming up, the swipe's.
   const lastPage = useRef(2);
-  const sheetPage = sheetIsOut ? (setsOut ? (r.name === "usage" ? 1 : 0) : notesPage ? 3 : 2) : pulled ? (pulled === "me" ? 0 : pulled === "notes" ? 3 : 2) : lastPage.current;
-  if (!notesSeen && phone && sheetPage === 3) setNotesSeen(true);
+  const sheetPage = sheetIsOut ? (setsOut ? (r.name === "usage" ? 1 : 0) : 2) : pulled ? (pulled === "me" ? 0 : 2) : lastPage.current;
   lastPage.current = sheetPage;
   // Just come out too: its page set at once, not slid to as it rises.
   const wasOut = useRef(sheetIsOut);
@@ -208,14 +200,13 @@ export function App() {
   const setSheet = (o: boolean, x?: number) => {
     setPulled(null);
     if (o && x !== undefined && atLeft(x)) return go({ name: "settings" });
-    if (o && x !== undefined) setNotesPage(atRight(x));
     setSheetOut(o || !open);
     if (over(route())) close(under);
   };
   // A tab, or a swipe across: the sheet stays out, the back key going back to the sessions.
   // 终端 the left page, as a swipe up from the left brings it; the sessions the right (the user, 2026-11-08);
   // the usage between them (the user, 2026-11-08).
-  const toPage = (i: number) => (setSheetOut(true), i >= 2 && setNotesPage(i === 3), i === 0 ? go({ name: "settings" }, route().name === "usage") : i === 1 ? (setUsageMachine(), go({ name: "usage" }, over(route()))) : over(route()) && close(under));
+  const toPage = (i: number) => (setSheetOut(true), i === 0 ? go({ name: "settings" }, route().name === "usage") : i === 1 ? (setUsageMachine(), go({ name: "usage" }, over(route()))) : over(route()) && close(under));
   // Put away, the panel is drawn afresh once it is down: its first page, not renaming.
   const [setsRound, setSetsRound] = useState(0);
   useEffect(() => {
@@ -408,33 +399,24 @@ export function App() {
           {!phone && sidebar}
           {main}
           {phone && (
-            <Sheet open={sheetIsOut} setOpen={setSheet} size={!open ? "full" : "half"} raised={(jumping && !setsOut) || (notesPage && !setsOut && sheetIsOut)} name="phone" head={GRIP + TABS_H} from={() => true} onPull={(x) => setPulled(atLeft(x) ? "me" : atRight(x) ? "notes" : "sessions")} label={setsOut ? (r.name === "usage" ? t("usage.title") : t("nav.me")) : t("nav.sessions")} onHeight={setSheetH}>
+            <Sheet open={sheetIsOut} setOpen={setSheet} size={!open ? "full" : "half"} raised={jumping && !setsOut} name="phone" head={GRIP + TABS_H} from={() => true} onPull={(x) => setPulled(atLeft(x) ? "me" : "sessions")} label={setsOut ? (r.name === "usage" ? t("usage.title") : t("nav.me")) : t("nav.sessions")} onHeight={setSheetH}>
               <Pager
                 // The tabs' bar is px-3, the list's rows end 4px further right: its "+" in line with
                 // theirs (the user, 2026-11-08).
-                ends={[null, null, <span key="s" className="-mr-1 flex"><HeadKeys createKey={(trigger) => <CreatePopover trigger={trigger} />} /></span>, null]}
+                ends={[null, null, <span key="s" className="-mr-1 flex"><HeadKeys createKey={(trigger) => <CreatePopover trigger={trigger} />} /></span>]}
                 page={sheetPage}
                 still={turnStill}
                 onPage={toPage}
                 tabs={[
                   { label: <>{t("nav.me")}{update.data?.available && <span className="size-1.5 rounded-full bg-err" aria-hidden />}</>, aria: update.data?.available ? `${t("nav.me")} · ${t("settings.updateReady")}` : t("nav.me") },
                   { label: t("usage.title"), aria: t("usage.title") },
-                  // A note dragged and held on it turns to the sessions (notes.tsx).
-                  { label: t("nav.sessions"), aria: t("nav.sessions"), spring: true },
-                  { label: t("note.title"), aria: t("note.title") },
+                  { label: t("nav.sessions"), aria: t("nav.sessions") },
                 ]}
               >
                 {[
                   <div key="me" className="absolute inset-0">{seen && setsBody(setsPage ?? "settings")}</div>,
                   <div key="usage" className="absolute inset-0">{seen && usagePage()}</div>,
                   sidebar,
-                  <div key="notes" className="absolute inset-0">
-                    {notesSeen && (
-                      <Suspense>
-                        <NotesPanel />
-                      </Suspense>
-                    )}
-                  </div>,
                 ]}
               </Pager>
             </Sheet>

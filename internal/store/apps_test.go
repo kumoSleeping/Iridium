@@ -245,6 +245,10 @@ func TestMigrateToApps(t *testing.T) {
 	if s.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE name IN ('chat_pointers', 'chat_seen', 'bot_follows')`).Scan(&n); n != 0 {
 		t.Error("chat tables left")
 	}
+	// The notes' are gone too (42).
+	if s.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE name IN ('notes', 'note_folders')`).Scan(&n); n != 0 {
+		t.Error("notes tables left")
+	}
 	if s.db.QueryRow(`SELECT COUNT(*) FROM outbox`).Scan(&n); n != 0 {
 		t.Errorf("outbox: %d rows", n)
 	}

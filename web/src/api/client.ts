@@ -20,12 +20,6 @@ import type {
   MessagePage,
   NewFolder,
   NewInvite,
-  NewNote,
-  Note,
-  NoteFolder,
-  NoteFolderPatch,
-  NotePatch,
-  Notes,
   NewSession,
   NewUpload,
   Release,
@@ -387,16 +381,6 @@ export const api = {
   dshSync: (machine: string) => write<{ ok: boolean }>("POST", `/v1/internal/machines/${enc(machine)}/dsh/sync`),
   /** A session renamed, archived, pinned, tagged, put, moved or taken out from under its launcher: Satori's channel.update. */
   patch: (id: string, p: SessionPatch) => sat<object>("channel.update", channelPatch(id, p), true),
-
-  // --- notes (the carried state "notes" has them all) ---
-  notes: () => get<Notes>("/v1/internal/notes"),
-  /** id: the page's own, so one sent again is the same note. */
-  newNote: (n: NewNote) => writeAgain<Note>("POST", "/v1/internal/notes", n),
-  patchNote: (id: string, p: NotePatch) => writeAgain<Note>("PATCH", `/v1/internal/notes/${enc(id)}`, p),
-  deleteNote: (id: string) => writeAgain<{ ok: boolean }>("DELETE", `/v1/internal/notes/${enc(id)}`),
-  newNoteFolder: (p: NoteFolderPatch) => write<NoteFolder>("POST", "/v1/internal/note-folders", p),
-  patchNoteFolder: (id: number, p: NoteFolderPatch) => writeAgain<{ ok: boolean }>("PATCH", `/v1/internal/note-folders/${id}`, p),
-  deleteNoteFolder: (id: number) => writeAgain<{ ok: boolean }>("DELETE", `/v1/internal/note-folders/${id}`),
 
   // --- files in messages, uploads ---
   // v: the file's version (its mtime): a file written again at its path is another address, not

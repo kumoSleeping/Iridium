@@ -4,7 +4,7 @@ ir: the host's Iridium on the command line (over its unix socket).
   ir run [--secret name,…] -- command …   a command line with secrets in it ({{name}}, {{file:name}}, env vars); their values masked in its output
 ir api help, a layer at a time: read only what the next call needs, no more.
   1. The route known: ir api help <METHOD path | satori.method> (channel.create, GET internal/sessions/{id}): its line and notes; one marked [more] in a list has notes on its fields: read them before its first call.
-  2. Not known: ir api help <topic> (common, satori, sessions, profile, session settings, queue, shell, groups and folders, files, usage, secrets, notes, apps, settings), a line a route; or ir api help <words>, the routes and notes they are in.
+  2. Not known: ir api help <topic> (common, satori, sessions, profile, session settings, queue, shell, groups and folders, files, usage, secrets, apps, settings), a line a route; or ir api help <words>, the routes and notes they are in.
   Agents: another in this chat, invite it (POST internal/channels/self/members), then @ its nick; one apart, channel.create. ir api help alone: how ir api is written, the common routes; all: every route.
 Secrets: never ask for one in the chat: ir api help secrets.
 Files: to show or hand the user a file, put the Markdown that ir api POST internal/links path=<path> prints in your reply: ![caption](ir:id) shows a picture, a video or a sound in place, [text](ir:id) is a file to download. Any other path, file:// link or local image is plain text.
