@@ -196,3 +196,36 @@ func given(t *testing.T, l *live, id string, n int) []store.Injection {
 		}
 	}
 }
+
+// A session's own channel has a card of its own (kumo, 2026-11-16): its face, intro and
+// background changed there are not its agent's; one it has not been given is its agent's.
+func TestChannelCardApart(t *testing.T) {
+	t.Parallel()
+	l, ch, _ := two(t)
+	l.want(200, "web", "PATCH", "/v1/internal/members/claude", map[string]any{"avatar": "🤖", "intro": "the agent"}, nil)
+	var p api.Profile
+	l.want(200, "web", "GET", "/v1/internal/channels/"+ch+"/profile", nil, &p)
+	agentFace, _, _ := l.s.face(store.ChannelProfileKey(ch), false, "")
+	if !strings.Contains(p.Avatar, "of=channel") || p.Intro != "" || p.Session != "" {
+		t.Fatalf("the channel's card before it has its own: %+v", p)
+	}
+	if img, _, ok := l.s.channelFace(ch, nil, false); !ok || string(img) != string(agentFace) {
+		t.Errorf("its face before it has its own: %q, want the agent's", img)
+	}
+	l.want(200, "web", "PATCH", "/v1/internal/channels/"+ch, map[string]any{"avatar": "🏠", "intro": "the room"}, &p)
+	if p.Intro != "the room" {
+		t.Errorf("the channel's card: %+v", p)
+	}
+	if img, _, ok := l.s.channelFace(ch, nil, false); !ok || !strings.Contains(string(img), "🏠") {
+		t.Errorf("the channel's face: %q", img)
+	}
+	if img, _, _ := l.s.face(store.ChannelProfileKey(ch), false, ""); string(img) != string(agentFace) {
+		t.Errorf("the agent's face changed with the channel's: %q", img)
+	}
+	var mc api.MemberCard
+	l.want(200, "web", "GET", "/v1/internal/members/claude", nil, &mc)
+	if mc.Intro != "the agent" {
+		t.Errorf("the agent's card: %+v", mc)
+	}
+	l.want(200, "web", "GET", "/v1/internal/channels/"+ch+"/avatar?of=channel", nil, nil)
+}

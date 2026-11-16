@@ -1,5 +1,6 @@
-// Faces (docs/channels.md "头像"; the user, 2026-11-13): a channel's, which for a session is
-// its agent's. One with none of its own has the one last given to a session of its model; with
+// Faces (docs/channels.md "头像"; the user, 2026-11-13): a session's agent's, under the session's
+// id; a channel's as a channel (channel), a session's own channel's its own, else its agent's
+// (kumo, 2026-11-16). One with none of its own has the one last given to a session of its model; with
 // neither, the harness's logo.
 import { useState, type ReactNode } from "react";
 import type { Agent } from "../../api/types.gen";
@@ -7,12 +8,12 @@ import { useApps } from "../../data";
 import { useCarried } from "../../store";
 import { Avatar, cn, isHost, Logo } from "../../ui";
 
-/** The face of channel (session) id, round, size across; none given: the agent's logo, as
- *  large as logo, or what else stands for it. */
-export function Face({ id, agent, size, logo, className, none: instead, low }: { id: string; agent: Agent; size: number; logo?: number; className?: string; none?: ReactNode; low?: boolean }) {
+/** The face of session id's agent, or with channel of channel id as a channel; round, size
+ *  across; none given: the agent's logo, as large as logo, or what else stands for it. */
+export function Face({ id, agent, size, logo, className, none: instead, low, channel }: { id: string; agent: Agent; size: number; logo?: number; className?: string; none?: ReactNode; low?: boolean; channel?: boolean }) {
   // Asked again as any face changes (the carried state "avatars", a count).
   const v = useCarried<number>("avatars") ?? 0;
-  const src = `/v1/internal/channels/${encodeURIComponent(id)}/avatar?v=${v}`;
+  const src = `/v1/internal/channels/${encodeURIComponent(id)}/avatar?${channel ? "of=channel&" : ""}v=${v}`;
   const [none, setNone] = useState<string | null>(null);
   // Something else standing for it (wider than the face): shown until the picture has come.
   const [got, setGot] = useState<string | null>(null);

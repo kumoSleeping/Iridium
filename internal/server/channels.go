@@ -1379,8 +1379,8 @@ func (s *Server) memberPatch(w http.ResponseWriter, r *http.Request) {
 	reply(w, http.StatusOK, out)
 }
 
-// Faces (docs/channels.md "头像"): a channel's, which for a session's own channel is its
-// agent's. A session with none of its own has the one last given to a session of its model.
+// Faces (docs/channels.md "头像"): a channel's; a session's own channel's agent's under the
+// same id, and the channel's own beside it (?of=channel, roomKey). A session with none of its own has the one last given to a session of its model.
 
 func channelAvatarKey(id string) string { return "c:" + id }
 
@@ -1403,6 +1403,30 @@ func (s *Server) avatarOf(ch string, st *api.SessionState) (image []byte, versio
 	return s.face(store.ChannelProfileKey(ch), false, modelAvatarKey(st))
 }
 
+// roomKey is the key of channel ch's card as a channel: a session's own channel's apart from
+// its agent's (store.RoomProfileKey; kumo, 2026-11-16: the channel's face is not the agent's),
+// another channel's the one it always had.
+func (s *Server) roomKey(ch string) string {
+	if _, own := s.ch.Own(ch); own {
+		return store.ChannelProfileKey(ch)
+	}
+	return store.RoomProfileKey(ch)
+}
+
+// channelFace is channel ch's face (bg: its background) as a channel (GET …?of=channel): a
+// session's own channel's own, else its agent's, as it was before it had one.
+func (s *Server) channelFace(ch string, st *api.SessionState, bg bool) (image []byte, version string, ok bool) {
+	if key := s.roomKey(ch); key != store.ChannelProfileKey(ch) {
+		if img, v, ok := s.face(key, bg, ""); ok {
+			return img, v, true
+		}
+	}
+	if bg {
+		return s.face(store.ChannelProfileKey(ch), true, "")
+	}
+	return s.avatarOf(ch, st)
+}
+
 // AgentAvatar is where the face of session id's agent is fetched; "" if it has none.
 func (s *Server) AgentAvatar(id string) string {
 	st, err := s.m.State(id)
@@ -1422,6 +1446,9 @@ func (s *Server) avatarGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	img, v, ok := s.avatarOf(ch, st)
+	if r.URL.Query().Get("of") == "channel" {
+		img, v, ok = s.channelFace(ch, st, false)
+	}
 	if !ok {
 		refuse(w, http.StatusNotFound, "not_found", "no avatar")
 		return

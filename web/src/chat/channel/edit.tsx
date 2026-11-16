@@ -2,7 +2,7 @@
 // what a card turns into in its own popover (g-slide, back to the card at its top left), or what
 // pops out of a menu's item. An agent's: what it is called by, its intro, its face, its
 // background; the role it is kept as; what it chose to remember. A channel's own: its name in
-// place of the nick; for a session's channel the rest is its agent's. Each is saved as it is
+// place of the nick; a session's own channel's apart from its agent's (kumo, 2026-11-16). Each is saved as it is
 // changed. The face itself changes the face (docs/前端设计规范.md "点头像就是换头像"): a picture
 // chosen, cropped round as this panel's own avatar is (profile.tsx Crop). Yours (a person's):
 // SelfEdit, this panel's own profile (profile.tsx), in the same frame.
@@ -121,7 +121,7 @@ export function EditBody({ editing, back, done }: { editing: Editing; back?: () 
             <Tip label={t("profile.avatarChange")}>
               <button type="button" aria-label={t("profile.avatarChange")} onClick={() => file.current?.click()} className="group g-press absolute -bottom-7 left-3.5 grid size-[62px] place-items-center rounded-full bg-paper">
                 <span className="relative grid size-14 place-items-center overflow-hidden rounded-full bg-fill">
-                  <Face id={face} agent={kind} size={56} logo={30} />
+                  <Face id={face} agent={kind} size={56} logo={30} channel={!agent} />
                   <FaceChangeOver size={56} />
                 </span>
               </button>
@@ -141,7 +141,7 @@ export function EditBody({ editing, back, done }: { editing: Editing; back?: () 
             label={t("profile.avatar")}
             preview={
               <span className="grid size-7 place-items-center overflow-hidden rounded-full bg-fill">
-                <Face id={face} agent={kind} size={28} logo={16} />
+                <Face id={face} agent={kind} size={28} logo={16} channel={!agent} />
               </span>
             }
             set={(v) => save({ avatar: v })}

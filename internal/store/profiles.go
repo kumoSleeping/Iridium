@@ -11,6 +11,10 @@ import (
 // Profile keys: a session's agent and a channel share "c:<id>" (a session's channel has its id).
 func ChannelProfileKey(id string) string { return "c:" + id }
 
+// RoomProfileKey is the profile key of a session's own channel as a channel: its intro, face
+// and background, apart from its agent's (ChannelProfileKey; kumo, 2026-11-16).
+func RoomProfileKey(id string) string { return "g:" + id }
+
 // PersonProfileKey is the profile key of a person or an app, by its member ("<app>/<login>", "<app>").
 func PersonProfileKey(member string) string { return "u:" + member }
 

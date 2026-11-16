@@ -992,7 +992,7 @@ function EditAt({ id, anchor }: { id: string; anchor: React.RefObject<HTMLElemen
  *  key of the card, for one of its people. */
 function FaceKey({ s, stack, className, ...rest }: { s: Session; stack?: Session["agent"][] } & ComponentProps<"button">) {
   const [open, setOpen] = useState(false);
-  const face = <LogoLamp agent={s.agent} status={lampOf(s)} size={18} mark={<Face key={s.id} id={s.id} agent={s.agent} size={18} none={stack && <LogoStack agents={stack} size={18} />} />} />;
+  const face = <LogoLamp agent={s.agent} status={lampOf(s)} size={18} mark={<Face key={s.id} id={s.id} agent={s.agent} size={18} channel none={stack && <LogoStack agents={stack} size={18} />} />} />;
   // rest: what the tip around it gives its trigger.
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>

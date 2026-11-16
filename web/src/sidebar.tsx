@@ -845,7 +845,7 @@ function RowFace({ s, agents, unread, quiet }: { s: Session; agents?: Agent[]; u
   const logo = agents ? <LogoStack agents={agents} size={22} /> : <Logo agent={s.agent} size={20} />;
   return (
     <span className="relative grid size-9 place-items-center rounded-full bg-fill">
-      <Face id={s.id} agent={s.agent} size={36} none={logo} className="place-items-center" low />
+      <Face id={s.id} agent={s.agent} size={36} none={logo} className="place-items-center" low channel />
       {unread > 0 && (
         <span
           className={cn("g-pop absolute -top-1 -right-1.5 grid h-4 min-w-4 place-items-center rounded-full px-1 text-[10px] leading-none font-semibold tabular-nums", quiet ? "bg-ink-4" : "bg-err")}
