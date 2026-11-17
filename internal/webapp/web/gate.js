@@ -262,7 +262,6 @@ async function initJoin() {
     input.hidden = true;
     input.value = r.data.name;
     $('join').disabled = false;
-    $('join').focus();
     return;
   }
   if (r.data.name) {
