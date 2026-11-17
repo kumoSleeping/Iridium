@@ -16,9 +16,9 @@ import { openChat } from "../../route";
 import { useCarried, useList } from "../../store";
 import { working } from "../../tree";
 import { toast } from "../../toast";
-import { agentName, Avatar, cn, Lamp, Logo, PopSurface, Tip } from "../../ui";
+import { agentName, Avatar, cn, Lamp, PopSurface, Tip } from "../../ui";
 import { openEdit } from "./editing";
-import { MemberFace } from "./face";
+import { Face, MemberFace } from "./face";
 import { ContextMark } from "../meters";
 import { mayAct, useMembers } from "./gate";
 import { AgentKinds, ITEM, POPUP } from "./invite";
@@ -146,7 +146,7 @@ function MemberList({ id, ask }: { id: string; ask: (a: Ask) => void }) {
         const agent = m.agent ?? row?.agent ?? "claude";
         const a: AgentRow = { session: m.session!, member: m.member, agent, nick: m.nick ?? "", name: m.name ?? agentName(agent), status: m.status ?? row?.status ?? "idle", recv: m.recv };
         return (
-          <Sub key={m.member} icon={<Logo agent={agent} size={16} />} lead={<ContextMark session={m.session!} />} label={m.nick || agentName(agent)} now={t(m.recv === "all" ? "channel.recvAll" : "channel.recvAt")} i={0}>
+          <Sub key={m.member} icon={<Face id={m.session!} agent={agent} size={16} />} lead={<ContextMark session={m.session!} />} label={m.nick || agentName(agent)} now={t(m.recv === "all" ? "channel.recvAll" : "channel.recvAt")} i={0}>
             <MemberItems channel={id} a={a} may={may} call={lent.call} record={lent.record} ask={(kind) => ask({ kind, a })} />
           </Sub>
         );
