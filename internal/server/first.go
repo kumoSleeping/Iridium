@@ -45,7 +45,7 @@ type firstPage struct {
 type firstWork struct {
 	Session string            `json:"session"`
 	Block   string            `json:"block,omitempty"`
-	From    int64             `json:"from,omitempty"`
+	From    *int64            `json:"from,omitempty"`
 	To      int64             `json:"to,omitempty"`
 	Data    []json.RawMessage `json:"data"`
 }
@@ -88,11 +88,11 @@ func line(at string) int64 {
 // workAt picks the blocks under a message from the page of its agent's record around it, as the
 // page does (web chat/channel/lib.ts workOf): said with ir, those of lines from..to; said
 // straight out, those after the last thing the agent said or was given before the block.
-func workAt(blocks []api.Block, block string, from, to int64) []int {
+func workAt(blocks []api.Block, block string, from *int64, to int64) []int {
 	var out []int
-	if from > 0 && to > 0 {
+	if from != nil && *from >= 0 && to > 0 {
 		for i, b := range blocks {
-			if l := line(b.At); l >= from && l < to && b.Kind != "user" && b.Kind != "system" {
+			if l := line(b.At); l >= *from && l < to && b.Kind != "user" && b.Kind != "system" {
 				out = append(out, i)
 			}
 		}
@@ -239,7 +239,7 @@ type logHead struct {
 	Data *struct {
 		Session string `json:"session"`
 		Block   string `json:"block"`
-		From    int64  `json:"from"`
+		From    *int64 `json:"from"`
 		To      int64  `json:"to"`
 	} `json:"_data"`
 }
@@ -286,15 +286,19 @@ func firstWorks(ask func(method, path string, body any) (json.RawMessage, int), 
 			continue
 		}
 		d := m.Data
-		if d.Session == "" || d.Session == own || m.At < since || (d.From <= 0 && d.Block == "") {
+		if d.Session == "" || d.Session == own || m.At < since || (d.From == nil && d.Block == "") {
 			continue
 		}
-		key := d.Session + "\x00" + d.Block + "\x00" + strconv.FormatInt(d.From, 10) + "\x00" + strconv.FormatInt(d.To, 10)
+		from := "-"
+		if d.From != nil {
+			from = strconv.FormatInt(*d.From, 10)
+		}
+		key := d.Session + "\x00" + d.Block + "\x00" + from + "\x00" + strconv.FormatInt(d.To, 10)
 		if seen[key] {
 			continue
 		}
 		seen[key] = true
-		want = append(want, firstWork{Session: d.Session, Block: d.Block, From: max(d.From, 0), To: max(d.To, 0)})
+		want = append(want, firstWork{Session: d.Session, Block: d.Block, From: d.From, To: max(d.To, 0)})
 	}
 	var wg sync.WaitGroup
 	gate := make(chan struct{}, 8)
@@ -305,8 +309,8 @@ func firstWorks(ask func(method, path string, body any) (json.RawMessage, int), 
 			defer func() { <-gate }()
 			k := &want[i]
 			body := map[string]any{"channel_id": k.Session, "_data": map[string]any{"blocks": true}}
-			if k.From > 0 {
-				body["next"], body["direction"] = strconv.FormatInt(max(0, k.From-1), 10), "after"
+			if k.From != nil {
+				body["next"], body["direction"] = strconv.FormatInt(max(0, *k.From-1), 10), "after"
 			} else {
 				body["next"], body["direction"] = strconv.FormatInt(line(k.Block)+1, 10), "before"
 			}

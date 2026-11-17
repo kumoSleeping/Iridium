@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kumoSleeping/iridium/internal/api"
+	"github.com/kumoSleeping/iridium/internal/channel"
 	"github.com/kumoSleeping/iridium/internal/deliver"
 	"github.com/kumoSleeping/iridium/internal/satori"
 	"github.com/kumoSleeping/iridium/internal/session"
@@ -258,7 +259,7 @@ func TestChannelOfSeveral(t *testing.T) {
 		if raw, _ := json.Marshal(m.Data); strings.Contains(m.Content, "seen, @claude go on") && m.User.Nick == "claude2" {
 			var d satori.LogData
 			_ = json.Unmarshal(raw, &d)
-			pointed = d.Session == second && d.To > d.From
+			pointed = d.Session == second && d.To > 0 && (d.From == nil || d.To > *d.From)
 		}
 	}
 	if !pointed {
@@ -866,6 +867,24 @@ func TestDirect(t *testing.T) {
 	l.want(400, "socket", "POST", "/v1/internal/dm", map[string]string{"user": "local"}, nil)
 }
 
+// A session called before its record had anything: what it says there is from line 0, kept as
+// such (not dropped as "not known"); said where it was not called, from nothing.
+func TestSpokeFromZero(t *testing.T) {
+	k := calls{}
+	k.add("s1", called{Channel: "c1", Seq: 1, From: 0})
+	from := k.spoke("s1", "c1", 30)
+	if from == nil || *from != 0 {
+		t.Fatalf("from %v", from)
+	}
+	raw, _ := json.Marshal(channel.Data{Session: "s1", From: from, To: 30})
+	if !strings.Contains(string(raw), `"from":0`) {
+		t.Errorf("from 0 not kept: %s", raw)
+	}
+	if from := k.spoke("s1", "c2", 40); from != nil {
+		t.Errorf("not called there: from %v", from)
+	}
+}
+
 // An agent's open calls outlive a restart: kept in the store, read back by a new server's.
 func TestCallsKept(t *testing.T) {
 	t.Parallel()
@@ -873,8 +892,8 @@ func TestCallsKept(t *testing.T) {
 	any := func(called) bool { return true }
 	l.s.calls.add("s1", called{Channel: "c1", Seq: 4, From: 10})
 	again := calls{st: l.s.st}
-	if from := again.spoke("s1", "c1", 20); from != 10 {
-		t.Errorf("spoke after a restart: from %d", from)
+	if from := again.spoke("s1", "c1", 20); from == nil || *from != 10 {
+		t.Errorf("spoke after a restart: from %v", from)
 	}
 	fresh := calls{st: l.s.st}
 	if got := fresh.take("s1", any); len(got) != 1 || !got[0].Spoke || got[0].From != 20 {

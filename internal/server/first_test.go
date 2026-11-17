@@ -70,16 +70,20 @@ func TestFirstScreen(t *testing.T) {
 
 func TestWorkAt(t *testing.T) {
 	bs := []api.Block{{At: "1.0", Kind: "user"}, {At: "2.0", Kind: "thinking"}, {At: "3.0", Kind: "tool"}, {At: "4.0", Kind: "assistant", Text: "said"}, {At: "5.0", Kind: "tool"}, {At: "6.0", Kind: "assistant", Text: "last"}}
-	if got := workAt(bs, "6.0", 0, 0); len(got) != 1 || got[0] != 4 {
+	if got := workAt(bs, "6.0", nil, 0); len(got) != 1 || got[0] != 4 {
 		t.Errorf("before a block: %v", got)
 	}
-	if got := workAt(bs, "4.0", 0, 0); len(got) != 2 || got[0] != 1 || got[1] != 2 {
+	if got := workAt(bs, "4.0", nil, 0); len(got) != 2 || got[0] != 1 || got[1] != 2 {
 		t.Errorf("before a block, to the input: %v", got)
 	}
-	if got := workAt(bs, "", 1, 5); len(got) != 3 || got[0] != 1 || got[2] != 3 {
+	if got := workAt(bs, "", new(int64(1)), 5); len(got) != 3 || got[0] != 1 || got[2] != 3 {
 		t.Errorf("lines from..to: %v", got)
 	}
-	if got := workAt(bs, "", 2, 0); got != nil {
+	// A session called first, its record empty then: its stretch begins at line 0.
+	if got := workAt(bs, "", new(int64(0)), 5); len(got) != 3 || got[0] != 1 || got[2] != 3 {
+		t.Errorf("lines 0..to: %v", got)
+	}
+	if got := workAt(bs, "", new(int64(2)), 0); got != nil {
 		t.Errorf("no place: %v", got)
 	}
 }

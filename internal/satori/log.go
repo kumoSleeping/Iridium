@@ -201,7 +201,7 @@ type LogData struct {
 	Input   string `json:"input,omitempty"`
 	Session string `json:"session,omitempty"`
 	Block   string `json:"block,omitempty"`
-	From    int64  `json:"from,omitempty"`
+	From    *int64 `json:"from,omitempty"`
 	To      int64  `json:"to,omitempty"`
 	Card    string `json:"card,omitempty"`
 	// Event: what a note tells of (channel.Event).

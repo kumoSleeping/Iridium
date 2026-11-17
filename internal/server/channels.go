@@ -291,15 +291,16 @@ func (k *calls) current(session string) string {
 }
 
 // spoke: session's agent said something in channel, its record at line to by then. It gives
-// the line the stretch that led to it began at (0: not called there), and the next begins at to.
-func (k *calls) spoke(session, channel string, to int64) (from int64) {
+// the line the stretch that led to it began at (nil: not called there; 0 is a line, that of a
+// session called before its record had any), and the next begins at to.
+func (k *calls) spoke(session, channel string, to int64) (from *int64) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	cs := k.load(session)
 	for i := range cs {
 		if c := &cs[i]; c.Channel == channel {
-			if from == 0 || c.From < from {
-				from = c.From
+			if from == nil || c.From < *from {
+				from = new(c.From)
 			}
 			c.Spoke, c.From = true, to
 		}

@@ -486,7 +486,7 @@ function putFirst(id: string, f: First, log: Messages): void {
   // The work under the others' words, as page.tsx Work would have fetched it.
   const said = new Map(ch.msgs.flatMap((m) => (m.src ? [[workKey(m.src).join(" "), m.text] as const] : [])));
   for (const w of f.work ?? []) {
-    const src: Src = { session: w.session, ...(w.block ? { block: w.block } : {}), ...(w.from ? { from: w.from } : {}), ...(w.to ? { to: w.to } : {}) };
+    const src: Src = { session: w.session, ...(w.block ? { block: w.block } : {}), ...(typeof w.from === "number" ? { from: w.from } : {}), ...(w.to ? { to: w.to } : {}) };
     queryClient.setQueryData(workKey(src), workOf(w.blocks, src, said.get(workKey(src).join(" "))));
   }
 }
