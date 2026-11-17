@@ -439,6 +439,9 @@ func (b satoriBackend) MayReadRecord(c satori.Caller, id string) bool { return t
 
 func (b satoriBackend) AgentAvatar(id string) string { return b.s.AgentAvatar(id) }
 
+// SessionNow is the session id goes on as now, cleared (store.Now).
+func (b satoriBackend) SessionNow(id string) string { return b.s.st.Now(id) }
+
 func (b satoriBackend) Mask(text string) string { return b.s.MaskText(text) }
 
 func (b satoriBackend) Relay(session string, blk api.Block) (satori.Relay, bool) {

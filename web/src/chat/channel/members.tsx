@@ -179,9 +179,9 @@ function Pick({ icon, label, now, value, options, set, i }: { icon: ReactNode; l
   );
 }
 
-/** What a member's menu asks with a card or a popover at its anchor: 清空, 移出 (asked
- *  first), 注入记录. */
-export type AskKind = "clear" | "remove" | "given" | "edit";
+/** What a member's menu asks with a card or a popover at its anchor: 移出 (asked first),
+ *  注入记录, 编辑资料. */
+export type AskKind = "remove" | "given" | "edit";
 export type Ask = { kind: AskKind; a: AgentRow };
 
 /** The cards and the popover a member's menu opens, at anchor (the face; the members' key for
@@ -196,7 +196,6 @@ export function MemberAsks({ channel, anchor, asked, done }: { channel: string; 
   const set = (o: boolean) => !o && done();
   return (
     <>
-      <ClearAsk a={x.a} anchor={anchor} open={open("clear")} onOpenChange={set} />
       <RemoveAsk channel={channel} member={x.a.member} nick={x.a.nick} anchor={anchor} open={open("remove")} onOpenChange={set} />
       <At anchor={anchor} open={open("given")} onOpenChange={set} className="flex max-h-[min(720px,var(--available-height))] w-[min(720px,calc(100vw-16px))] flex-col">
         <Given a={x.a} />
@@ -256,10 +255,13 @@ function Items({ channel, a, s, may, call, record, ask }: Parameters<typeof Memb
     );
   // Each after a frame: the menu shuts first, and what opens is not shut with it.
   const later = (f: () => void) => () => requestAnimationFrame(f);
+  // 清空 asked in its own place: pressed, it turns red and asks again, the menu left open; pressed
+  // again, /clear (kumo, 2026-11-17: no card for it). The menu shut, it is as it was.
+  const [clearing, setClearing] = useState(false);
   // Its session: by the page's own way there; with none, opened, unless it is this one.
   const view = record ? () => record(a.session) : mine ? undefined : () => openChat(a.session);
-  const item = (i: number, icon: ReactNode, label: string, run: () => void, o: { tone?: string; disabled?: boolean; note?: string } = {}) => (
-    <Menu.Item key={label} onClick={run} disabled={o.disabled} style={{ "--i": i } as CSSProperties} className={cn(ITEM, o.tone, "data-disabled:text-ink-3")}>
+  const item = (i: number, icon: ReactNode, label: string, run: () => void, o: { tone?: string; disabled?: boolean; note?: string; key?: string; keep?: boolean } = {}) => (
+    <Menu.Item key={o.key ?? label} onClick={run} closeOnClick={!o.keep} disabled={o.disabled} style={{ "--i": i } as CSSProperties} className={cn(ITEM, o.tone, "data-disabled:text-ink-3")}>
       <span className={o.disabled ? "text-ink-4" : (o.tone ?? "text-ink-2")}>{icon}</span>
       <span className="flex-1">{label}</span>
       {o.note && <span className="pl-3 text-xs text-ink-3">{o.note}</span>}
@@ -268,7 +270,10 @@ function Items({ channel, a, s, may, call, record, ask }: Parameters<typeof Memb
   const draw: Record<MenuKey, (i: number, disabled?: boolean) => ReactNode> = {
     call: (i) => item(i, <AtSign size={15} />, t("channel.call"), later(() => call?.(a.nick))),
     compact: (i) => item(i, <FoldVertical size={15} />, t("channel.compact"), act(() => api.send(a.session, "/compact"), t("err.action"))),
-    clear: (i) => item(i, <Eraser size={15} />, t("channel.clear"), later(() => ask("clear"))),
+    clear: (i) =>
+      clearing
+        ? item(i, <Eraser size={15} />, t("channel.clearConfirm"), act(() => api.send(a.session, "/clear"), t("err.action")), { key: "clear", tone: "text-err", note: t("channel.clearHint") })
+        : item(i, <Eraser size={15} />, t("channel.clear"), () => setClearing(true), { key: "clear", keep: true }),
     // The composer's model menu itself (kumo, 2026-11-16): its models, the effort track, UltraCode.
     model: (i) => (
       <Menu.SubmenuRoot key="model">
@@ -325,44 +330,6 @@ function Items({ channel, a, s, may, call, record, ask }: Parameters<typeof Memb
   };
   const list = memberMenu({ may, own: mine, call: !!call && !!a.nick, models: m.models.length, modes: mode.modes.length, busy: BUSY.has(s.status), session: !!view });
   return <>{list.map((x, i) => draw[x.key](i, x.disabled))}</>;
-}
-
-/** 清空, asked first as 移出 is (docs/next/group.md "清空"): /clear to the agent's session, its
- *  own or one from another channel; its context starts over, its card stays. */
-function ClearAsk({ a, anchor, open, onOpenChange }: { a: AgentRow; anchor: RefObject<HTMLElement | null>; open: boolean; onOpenChange: (o: boolean) => void }) {
-  const [busy, setBusy] = useState(false);
-  const done = () => onOpenChange(false);
-  const clear = async () => {
-    setBusy(true);
-    try {
-      await api.send(a.session, "/clear");
-      done();
-    } catch (e) {
-      toast(t("err.action"), { error: true, description: errText(e) });
-    } finally {
-      setBusy(false);
-    }
-  };
-  const title = t("channel.clearTitle", { nick: a.nick || agentName(a.agent) });
-  return (
-    <At anchor={anchor} open={open} onOpenChange={onOpenChange} className="@container w-[min(340px,calc(100vw-16px))] p-2.5 pl-3">
-      <div role="alertdialog" aria-label={title}>
-        <CardHead
-          icon={<Eraser size={16} />}
-          title={title}
-          summary={t("channel.clearHint")}
-          keys={
-            <>
-              <SecondKey onClick={done}>{t("me.cancel")}</SecondKey>
-              <MainKey busy={busy} onClick={() => void clear()}>
-                {t("channel.clear")}
-              </MainKey>
-            </>
-          }
-        />
-      </div>
-    </At>
-  );
 }
 
 /** 移出, from wherever it is asked (the face's menu, the members' list at the bar's right): the

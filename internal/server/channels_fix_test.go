@@ -318,11 +318,34 @@ func TestChannelClearKeepsMembership(t *testing.T) {
 		t.Fatalf("send to the second: %d", code)
 	}
 	l.waitReply("web", second, "ok: work")
+	// Words of its in the channel before the clear.
+	code, br := l.send("web", ch, api.Send{Text: "@claude2 before"})
+	if code != 200 {
+		t.Fatalf("send: %d", code)
+	}
+	before := fmt.Sprintf("ok: #%d: @claude2 before", br.Seq)
+	l.waitSaid("web", ch, " @claude2 ", before)
+	l.idle(second)
 	code, r := l.send("web", second, api.Send{Text: "/clear"})
 	if code != 200 || r.Session == "" || r.Session == second {
 		t.Fatalf("clear: %d %+v", code, r)
 	}
 	next := r.Session
+	// Its words from before are the member's as it is now: the new session's, under its nick.
+	var page satori.BidiList[satori.Message]
+	l.wantSat(200, "web", "message.list", map[string]any{"channel_id": ch, "limit": 200}, &page)
+	found := false
+	for _, m := range page.Data {
+		if strings.Contains(m.Content, before) {
+			found = true
+			if m.User == nil || m.User.ID != "agent:"+next || m.User.Nick != "claude2" {
+				t.Errorf("its words from before the clear by %+v, not the new session %s", m.User, next)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("its words from before the clear are gone")
+	}
 	var ms api.ChannelMembers
 	l.want(200, "web", "GET", "/v1/internal/channels/"+ch+"/members", nil, &ms)
 	in := map[string]string{}
@@ -346,7 +369,7 @@ func TestChannelClearKeepsMembership(t *testing.T) {
 		t.Fatalf("send: %d", code)
 	}
 	l.waitSaid("web", ch, " @claude2 ", fmt.Sprintf("ok: #%d: @claude2 still there", sr.Seq))
-	if p := l.page("web", second); len(p.Blocks) > 2 {
+	if p := l.page("web", second); len(p.Blocks) > 4 {
 		t.Errorf("the old session was given more: %+v", p.Blocks)
 	}
 

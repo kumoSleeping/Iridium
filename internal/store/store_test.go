@@ -330,6 +330,9 @@ func TestMoveAgentProfile(t *testing.T) {
 	if b := s.Before("c", 3); len(b) != 2 || b[0].Session != "b" || b[1].Session != "a" {
 		t.Errorf("before: %+v", b)
 	}
+	if a, b, c, x := s.Now("a"), s.Now("b"), s.Now("c"), s.Now("x"); a != "c" || b != "c" || c != "c" || x != "x" {
+		t.Errorf("now: a %s, b %s, c %s, x %s", a, b, c, x)
+	}
 	// Kept as a role: what it remembered is the role's, and another session of the role has it.
 	if err := s.PutRole(Role{ID: "r1", Name: "fish", Agent: "dsh"}); err != nil {
 		t.Fatal(err)

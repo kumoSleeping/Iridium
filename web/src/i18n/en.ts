@@ -311,7 +311,7 @@ export const en: Dict = {
   "channel.members": "Members",
   "channel.invite": "Invite",
   "channel.clear": "Clear",
-  "channel.clearTitle": "Clear {nick}",
+  "channel.clearConfirm": "Confirm clear",
   "channel.clearHint": "Its context starts over",
   "channel.ownAgent": "The session's own agent",
   "profile.edit": "Edit profile",

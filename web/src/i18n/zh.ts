@@ -311,7 +311,7 @@ export const zh = {
   "channel.members": "成员",
   "channel.invite": "邀请",
   "channel.clear": "清空",
-  "channel.clearTitle": "清空 {nick}",
+  "channel.clearConfirm": "确认清空",
   "channel.clearHint": "上下文重新开始",
   "channel.ownAgent": "会话自己的 agent",
   "profile.edit": "编辑资料",

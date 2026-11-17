@@ -123,6 +123,21 @@ func (s *Store) AvatarVersions(prefix string) (map[string]string, error) {
 
 // ---- the sessions before a cleared one ----
 
+// Now is the session session goes on as now: the one it was cleared into, and on through each
+// cleared after (MoveAgent); session itself if it never was.
+func (s *Store) Now(session string) string {
+	seen := map[string]bool{session: true}
+	for range 64 {
+		var next string
+		if s.db.QueryRow(`SELECT session FROM session_before WHERE before = ? ORDER BY at DESC LIMIT 1`, session).Scan(&next) != nil || seen[next] {
+			break
+		}
+		seen[next] = true
+		session = next
+	}
+	return session
+}
+
 // Before are the sessions session went on from, the latest first: the one it was cleared from,
 // the one that was, at most limit of them.
 func (s *Store) Before(session string, limit int) []Cleared {

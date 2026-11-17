@@ -87,13 +87,19 @@ func AgentName(harness string, st api.SessionState) string {
 	return strings.Join(parts, " ")
 }
 
-// authorOf is who wrote m, as a user.
+// authorOf is who wrote m, as a user. An agent's session since cleared, as the one it goes on
+// as: its words are still that member's, its name and face, its card from them (kumo,
+// 2026-11-17: they came as a bare agent once its session was cleared).
 func (s *Service) authorOf(m channel.Message, agentsSeen map[string]*User) *User {
 	if id, ok := store.SessionOfMember(m.Author); ok {
 		if u := agentsSeen[id]; u != nil {
 			return u
 		}
-		u := s.agentOf(id)
+		now := id
+		if b, ok := s.b.(interface{ SessionNow(id string) string }); ok {
+			now = b.SessionNow(id)
+		}
+		u := s.agentOf(now)
 		if agentsSeen != nil {
 			agentsSeen[id] = u
 		}
