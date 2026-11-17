@@ -195,8 +195,17 @@ type joinRequest struct {
 }
 
 type joinReply struct {
-	Name      string `json:"name,omitempty"` // the inviter's suggestion
+	Name      string `json:"name,omitempty"` // the inviter's suggestion; the login's, for Add
 	NameError string `json:"nameError,omitempty"`
+	// Add: the link adds a passkey to the login Name, no new login: no name to choose.
+	Add bool `json:"add,omitempty"`
+}
+
+// boundLocked is the login invite inv adds a passkey to, if it is one, and whether that login is
+// still there.
+func (w *Web) boundLocked(inv Invite) (gate.EndpointInfo, bool) {
+	info, ok := w.core.Endpoint(inv.Login)
+	return info, ok && info.Kind == gate.KindPanel
 }
 
 // apiJoinCheck validates an invite token and, if given, a name (the page checks as you type).
@@ -208,7 +217,11 @@ func (w *Web) apiJoinCheck(rw http.ResponseWriter, r *http.Request, key string) 
 	w.mu.Lock()
 	inv, ok := w.inviteLocked(req.Token, w.now())
 	var reply joinReply
-	if ok {
+	if ok && inv.Login != "" {
+		var info gate.EndpointInfo
+		info, ok = w.boundLocked(inv)
+		reply.Name, reply.Add = info.Name, true
+	} else if ok {
 		reply.Name = inv.Name
 		if req.Name != nil {
 			_, err := w.checkNameLocked(*req.Name, inv.ID)
@@ -238,7 +251,11 @@ func (w *Web) apiJoinOptions(rw http.ResponseWriter, r *http.Request, key string
 	inv, ok := w.inviteLocked(req.Token, now)
 	var name string
 	var err error
-	if ok {
+	if ok && inv.Login != "" {
+		var info gate.EndpointInfo
+		info, ok = w.boundLocked(inv)
+		name = info.Name
+	} else if ok {
 		raw := inv.Name
 		if req.Name != nil {
 			raw = *req.Name
@@ -304,12 +321,6 @@ func (w *Web) apiJoinVerify(rw http.ResponseWriter, r *http.Request, key string)
 		writeJSON(rw, http.StatusForbidden, apiError{"invalid_invite"})
 		return
 	}
-	name, err := w.checkNameLocked(f.name, inv.ID)
-	if err != nil {
-		w.mu.Unlock()
-		writeJSON(rw, http.StatusConflict, joinReply{NameError: gate.NameCode(err)})
-		return
-	}
 	for _, c := range w.st.creds {
 		for _, pk := range c.Passkeys {
 			if bytes.Equal(pk.Credential.ID, cred.ID) {
@@ -318,6 +329,17 @@ func (w *Web) apiJoinVerify(rw http.ResponseWriter, r *http.Request, key string)
 				return
 			}
 		}
+	}
+	pk := Passkey{Credential: *cred, CreatedAt: now, LastUsedAt: now, UserHandle: f.handle, Platform: platformOf(r.UserAgent())}
+	if inv.Login != "" {
+		w.addPasskeyLocked(rw, r, key, inv, pk, now)
+		return
+	}
+	name, err := w.checkNameLocked(f.name, inv.ID)
+	if err != nil {
+		w.mu.Unlock()
+		writeJSON(rw, http.StatusConflict, joinReply{NameError: gate.NameCode(err)})
+		return
 	}
 	first := !w.core.HasWebLogin()
 	info, err := w.core.CreateWebLogin(name)
@@ -330,8 +352,8 @@ func (w *Web) apiJoinVerify(rw http.ResponseWriter, r *http.Request, key string)
 		}
 		return
 	}
-	c := Cred{Login: info.ID, UserHandle: f.handle, Passkeys: []Passkey{{Credential: *cred, CreatedAt: now, LastUsedAt: now}}}
-	token, s := w.newSessionLocked(info.ID, now)
+	c := Cred{Login: info.ID, UserHandle: f.handle, Passkeys: []Passkey{pk}}
+	token, s := w.newSessionLocked(info.ID, cred.ID, r, now)
 	// With a login there, the first-run link has done its part, whichever invite was used.
 	del := append(w.setupInvitesLocked(), inv.ID)
 	err = w.commitLocked(Change{DeleteInvites: del, Creds: []Cred{c}, Sessions: []Session{s}})
@@ -392,18 +414,17 @@ func (w *Web) apiLoginVerify(rw http.ResponseWriter, r *http.Request, key string
 		w.mu.Lock()
 		defer w.mu.Unlock()
 		for _, c := range w.st.creds {
-			if !bytes.Equal(c.UserHandle, userHandle) {
-				continue
-			}
-			info, live := w.core.Endpoint(c.Login)
-			if !live || info.Kind != gate.KindPanel {
-				continue
-			}
 			for _, pk := range c.Passkeys {
-				if bytes.Equal(pk.Credential.ID, rawID) {
-					login = c.Login
-					return waUser{name: info.Name, cred: c}, nil
+				if !bytes.Equal(pk.Credential.ID, rawID) || !bytes.Equal(pk.handle(c), userHandle) {
+					continue
 				}
+				info, live := w.core.Endpoint(c.Login)
+				if !live || info.Kind != gate.KindPanel {
+					continue
+				}
+				login = c.Login
+				// The library checks the handle against the user's: this passkey's.
+				return waUser{name: info.Name, cred: Cred{Login: c.Login, UserHandle: userHandle, Passkeys: []Passkey{pk}}}, nil
 			}
 		}
 		return nil, errUnknownCredential
@@ -436,7 +457,7 @@ func (w *Web) apiLoginVerify(rw http.ResponseWriter, r *http.Request, key string
 	c.Passkeys = slices.Clone(c.Passkeys)
 	c.Passkeys[i].Credential = *cred
 	c.Passkeys[i].LastUsedAt = now
-	token, s := w.newSessionLocked(login, now)
+	token, s := w.newSessionLocked(login, cred.ID, r, now)
 	err = w.commitLocked(Change{Creds: []Cred{c}, Sessions: []Session{s}})
 	w.mu.Unlock()
 	if err != nil {
@@ -446,6 +467,38 @@ func (w *Web) apiLoginVerify(rw http.ResponseWriter, r *http.Request, key string
 	w.core.Seen(login)
 	w.lim.Success(key)
 	w.log.Info("webapp: login logged in", "endpoint", login, "name", info.Name, "client", key)
+	http.SetCookie(rw, sessionCookie(token))
+	writeJSON(rw, http.StatusOK, map[string]any{"ok": true, "name": info.Name})
+}
+
+// addPasskeyLocked ends a join by a link to add a passkey (inv.Login): pk goes to that login, and
+// this browser is logged in as it. w.mu is held; it is released.
+func (w *Web) addPasskeyLocked(rw http.ResponseWriter, r *http.Request, key string, inv Invite, pk Passkey, now time.Time) {
+	info, ok := w.boundLocked(inv)
+	if !ok {
+		w.mu.Unlock()
+		writeJSON(rw, http.StatusForbidden, apiError{"invalid_invite"})
+		return
+	}
+	c := w.st.creds[inv.Login]
+	c.Login = inv.Login
+	if len(c.UserHandle) == 0 {
+		c.UserHandle = pk.UserHandle
+	}
+	c.Passkeys = append(slices.Clone(c.Passkeys), pk)
+	token, s := w.newSessionLocked(inv.Login, pk.Credential.ID, r, now)
+	err := w.commitLocked(Change{DeleteInvites: []string{inv.ID}, Creds: []Cred{c}, Sessions: []Session{s}})
+	w.mu.Unlock()
+	if err != nil {
+		writeJSON(rw, http.StatusInternalServerError, apiError{"internal"})
+		return
+	}
+	w.core.Seen(inv.Login)
+	w.lim.Success(key)
+	w.log.Info("webapp: passkey added", "endpoint", inv.Login, "name", info.Name, "client", key, "passkeys", len(c.Passkeys))
+	if w.cfg.OnPasskey != nil {
+		w.cfg.OnPasskey(inv.Login)
+	}
 	http.SetCookie(rw, sessionCookie(token))
 	writeJSON(rw, http.StatusOK, map[string]any{"ok": true, "name": info.Name})
 }

@@ -332,6 +332,9 @@ type Block struct {
 	FromTerminal string `json:"fromTerminal,omitempty"`
 	// FromLogin: the login of that app it came from, if one (ir_web's logins are FromTerminal).
 	FromLogin string `json:"fromLogin,omitempty"`
+	// FromDevice: the device a browser of ir_web sent it from (the passkey it logged in with),
+	// for the badge on its avatar; "" not known (that login's device now).
+	FromDevice Device `json:"fromDevice,omitempty"`
 	ID        string `json:"id,omitempty"` // tool, result: the call's id
 	// tool: Name, Input as JSON, and Result when it is on the same page.
 	Name   string  `json:"name,omitempty"`

@@ -10,7 +10,7 @@ import { shellLine } from "../src/chat/shell";
 import { crashParts } from "../src/chat/crash";
 import { levelName, restAt } from "../src/chat/effort";
 import { barRows, ctxParts, hitRate, modelView } from "../src/chat/meters";
-import { atSessions, attachedOf, atWord, boxAt, boxed, edited, fromSatori, MARK, mentions, outOf, sessionLink, wordsAt, SID, sessionIds, shortId, sourceOf, type Who, withoutFiles, withoutNameLines, draftWords } from "../src/chat/refs";
+import { atSessions, attachedOf, atWord, boxAt, boxed, edited, fromSatori, MARK, mentions, outOf, sessionLink, wordsAt, SID, sessionIds, shortId, sourceOf, type Who, withDevice, withoutFiles, withoutNameLines, draftWords } from "../src/chat/refs";
 import { t } from "../src/i18n";
 import { en } from "../src/i18n/en";
 import { zh } from "../src/i18n/zh";
@@ -164,6 +164,12 @@ describe("sourceOf", () => {
     // No list (yet): the host (本机 as 0.1 tagged it) is still yours; no device is a computer.
     expect(sourceOf("本机", "local", { id: "x", name: "x" }, [], sessions)).toMatchObject({ kind: "you", name: "Iridium", device: "computer", local: true });
     expect(sourceOf("x", "x", { id: "x", name: "x" }, [], sessions)).toMatchObject({ kind: "you", device: "computer" });
+  });
+  test("a person's words carry the device they were sent from (the passkey's), not the login's now", () => {
+    expect(withDevice(sourceOf("kumo-phone", "p", me, terminals, sessions), "laptop")).toMatchObject({ kind: "you", device: "laptop" });
+    expect(withDevice(sourceOf("kumo-phone", "p", me, terminals, sessions), undefined)).toMatchObject({ device: "phone" });
+    expect(withDevice(sourceOf(undefined, undefined, me, terminals, sessions), "phone")).toMatchObject({ local: true, device: "computer" });
+    expect(withDevice(sourceOf("QQ·张三", "q", me, terminals, sessions), "phone")).toMatchObject({ kind: "letter" });
   });
   test("letters: a plugin with its sender, another session's ir by its title as the sidebar has it, its workspace only when not this one's; Iridium's own line", () => {
     expect(sourceOf("QQ·张三", "q", me, terminals, sessions)).toMatchObject({ kind: "letter", name: "QQ·张三", avatar: "/q.png", channel: true });

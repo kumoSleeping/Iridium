@@ -4,12 +4,12 @@
 // (internal/deliver Mentions) and put into the composer; the agents listed under a channel's row;
 // a channel's lamp.
 import type { ChannelMessage } from "../../api/client";
-import type { Agent, FileRef, Session, Status } from "../../api/types.gen";
+import type { Agent, Device, FileRef, Session, Status } from "../../api/types.gen";
 import { blockOf } from "../../satori";
 
 /** Who said a message: an agent of the channel (its session, the nick it is called by, what it
  *  ran as), a person (their tag), or Iridium itself. */
-export type Author = { kind: "agent"; session: string; nick: string; name: string } | { kind: "person"; id: string; name: string } | { kind: "iridium" };
+export type Author = { kind: "agent"; session: string; nick: string; name: string } | { kind: "person"; id: string; name: string; device?: Device } | { kind: "iridium" };
 
 /** A message of a channel: n, its number there. kind: as its event said it (user, progress, reply,
  *  ask, error, note); the log itself does not say. */
@@ -175,7 +175,7 @@ export function msgOf(m: ChannelMessage): Msg | undefined {
   if (!Number.isInteger(n) || n <= 0) return undefined;
   const b = blockOf({ id: m.id, content: m.content, created_at: m.created_at });
   const u = m.user;
-  const author: Author = u?.id.startsWith(AGENT) ? { kind: "agent", session: u.id.slice(AGENT.length), nick: u.nick ?? "", name: u.name ?? "" } : !u || u.id === "iridium" ? { kind: "iridium" } : { kind: "person", id: u.id, name: u.name ?? "" };
+  const author: Author = u?.id.startsWith(AGENT) ? { kind: "agent", session: u.id.slice(AGENT.length), nick: u.nick ?? "", name: u.name ?? "" } : !u || u.id === "iridium" ? { kind: "iridium" } : { kind: "person", id: u.id, name: u.name ?? "", ...(m._data?.device ? { device: m._data.device } : {}) };
   // The message it answers: Satori's <quote id/> at its start.
   const q = /^<quote id="(\d+)"\s*\/>/.exec(m.content);
   return { n, text: b.text ?? "", files: b.files ?? [], author, ...(q ? { quote: Number(q[1]) } : {}), ...(m.created_at ? { time: m.created_at } : {}), ...(m._data?.kind ? { kind: m._data.kind } : {}), ...(m._data?.input ? { input: m._data.input } : {}), ...(author.kind === "agent" && didOf(m.content) ? { did: didOf(m.content)! } : {}), ...(m._data?.event && typeof m._data.event === "object" ? { event: m._data.event as ChEvent } : {}), ...(author.kind === "agent" && m._data?.session ? { src: { session: m._data.session, ...(m._data.block ? { block: m._data.block } : {}), ...(typeof m._data.from === "number" ? { from: m._data.from } : {}), ...(m._data.to ? { to: m._data.to } : {}) } } : {}) };

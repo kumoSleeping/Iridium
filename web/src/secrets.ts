@@ -5,14 +5,15 @@
 import { useSyncExternalStore } from "react";
 import type { Invite, Token } from "./api/types.gen";
 
-export type Secret = ({ invite: Invite } | { token: Token }) & { at: string; key: number };
+// passkey: the invite is a link that adds a passkey to a login (a device of it), no new login.
+export type Secret = ({ invite: Invite; passkey?: boolean } | { token: Token }) & { at: string; key: number };
 
 let current: Secret | null = null;
 const subs = new Set<() => void>();
 
 let n = 0;
 
-export function showSecret(s: ({ invite: Invite } | { token: Token }) & { at: string } | null) {
+export function showSecret(s: ({ invite: Invite; passkey?: boolean } | { token: Token }) & { at: string } | null) {
   current = s && { ...s, key: ++n };
   subs.forEach((f) => f());
 }

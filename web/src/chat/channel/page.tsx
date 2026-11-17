@@ -29,7 +29,7 @@ import { Copyable } from "../copyable";
 import { StopKey, Waiting } from "../live";
 import { ContextRing, modelView, QuotaBars } from "../meters";
 import { Queue } from "../queue";
-import { fromSatori, PLACE_DRAG, SESSION_DRAG, sourceOf, yours } from "../refs";
+import { fromSatori, PLACE_DRAG, SESSION_DRAG, sourceOf, withDevice, yours } from "../refs";
 import { Assistant, Attached, Line, MsgRow, Pending, Said, When, YouBubble } from "../said";
 import { folded } from "../fold";
 import { Stick, toEnd } from "../stick";
@@ -335,12 +335,12 @@ export function ChannelPage({ id, sheet = 0, bar, record }: { id: string; sheet?
 export type Who = (a: Extract<Msg["author"], { kind: "person" }>) => { who: ReturnType<typeof yours>; mine: boolean };
 export function personWho(self: Parameters<typeof sourceOf>[2], terminals: Parameters<typeof sourceOf>[3], list: Session[], workspaces: { id: number; name: string }[]): Who {
   return (m) => {
-    const src = sourceOf(m.name, m.id, self, terminals, list, workspaces);
+    const src = withDevice(sourceOf(m.name, m.id, self, terminals, list, workspaces), m.device);
     // The machine's own words (typed at its terminal, sent with its ir) are the host's.
     const mine = m.id === self.id || (!!self.host && (m.id === "local" || (src.kind === "you" && !!src.local)));
     if (src.kind === "you") return { who: src, mine };
     const known = terminals.find((x) => x.id === m.id);
-    return { who: yours(known ? { ...known, name: m.name || known.name } : { id: m.id, name: m.name, device: "none" }), mine };
+    return { who: yours(known ? { ...known, name: m.name || known.name, ...(m.device ? { device: m.device } : {}) } : { id: m.id, name: m.name, device: m.device ?? "none" }), mine };
   };
 }
 

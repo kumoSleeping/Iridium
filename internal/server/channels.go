@@ -2077,6 +2077,7 @@ func (s *Server) sendChannelAs(ctx context.Context, c caller, from, ch string, r
 		}
 		of.From = s.calls.spoke(sender, ch, of.To)
 	}
+	of.Device = s.deviceOfCaller(c)
 	seq := s.sat.Input(st.Session, req.ID, req.Text, u, lk.origin, of)
 	if seq == 0 {
 		return api.SendReply{}, errors.New("the channel did not take the message")

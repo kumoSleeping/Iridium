@@ -28,6 +28,9 @@
 
 - Passkey 的 rpID 是公网地址的主机名：换域名，所有 Passkey 作废。
 - 每次注册用新的随机 user handle、不带 excludeCredentials；登录用可发现凭证，不把凭证 ID 发给未登录的人；计数器回退就拒绝。
+- 一个登录可以有几个 Passkey，一台设备一个（用户，2026-11-17）。每个 Passkey 有自己的 user handle（之前建的沿用登录那一行的）；登录时按 handle 和凭证 ID 一起找。名字按 AAGUID 认提供方（iCloud 钥匙串、Google 密码管理器、Windows Hello…），认不出写建它的浏览器（"Mac · Chrome"）。
+- 设备：每个 Passkey 可以手设（电脑、笔记本、手机、不展示），没设是“自动”，按用它的浏览器（`Sec-CH-UA-Mobile`、User-Agent：手机、平板算手机，其余电脑）。同步的 Passkey 在手机和电脑上都能用，自动时各按各的浏览器。
+- 网页会话记下用哪个 Passkey 登录的和浏览器说的设备（`web_sessions.passkey`、`device`）。人发的消息记下当时的设备（`inputs.device`、频道消息 `_data.device`），头像角标照它画；登录的角标是它最近活跃的浏览器的。之前的会话不知道 Passkey，退回登录原来设的设备。
 - Cookie `__Host-ir`：HttpOnly、Secure、SameSite=Strict、Path=/。空闲 12 小时、最长 7 天。库里只存哈希（`web_sessions`）。
 - 非安全方法和 WebSocket 升级：Origin 必须是公网地址，`Sec-Fetch-Site` 有的话必须是 `same-origin`；本机模式 Origin 的主机要等于 Host，都没带（curl）就放行。
 - 失败限速（坏邀请、验证失败）：同一客户端 1 分钟 10 次，等 1 分钟。
@@ -39,10 +42,12 @@
 - 邀请占着的名字别的登录不能用；邀请可按 ID 或名字撤掉（`ir apps rm`）。
 - 首次：开着且还没有登录时，启动会在状态目录写 `setup-token`（0600，不过期的 join 链接）；每次重启换新的，有了登录就删掉。
 - 最后一个有 Passkey 的登录删不了（`MayRemove`，409 `last_passkey`）。
+- 加设备：给某个登录建一次性链接（`AddPasskeyLink`，同一个 `/_ir/join#…`，10 分钟，邀请带 `Login`）。打开不起名，页面写“添加到 <名字>”，建好的 Passkey 挂到那个登录下，这个浏览器以它登录；用掉才算。这种链接不在邀请列表里，登录删掉时一起作废。
+- 删 Passkey：用它登录的浏览器一起退出；一个登录至少留一个（409 `last_passkey`），要全删就删登录。
 
 ## 存储
 
-`Store`：`Creds`（登录的 user handle 和 Passkey，存在 `logins` 那一行的 `user_handle`、`passkeys` 两列）、`invites`、`web_sessions`。登录那一行是核心的，Passkey 跟着它走。
+`Store`：`Creds`（登录的 user handle 和 Passkey，存在 `logins` 那一行的 `user_handle`、`passkeys` 两列；Passkey 自己的 handle、设备、建它的浏览器在 `passkeys` 的 JSON 里）、`invites`（`login` 非空是加设备的链接）、`web_sessions`（带 `passkey`、`device`）。登录那一行是核心的，Passkey 跟着它走。
 
 ## 路由（都在 `/_ir/` 下）
 

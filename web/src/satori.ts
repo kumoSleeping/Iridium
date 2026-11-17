@@ -143,6 +143,7 @@ export function blockOf(m: SatoriMessage): Block {
   put(b, "from", str(a.from));
   put(b, "fromTerminal", str(a.terminal));
   put(b, "fromLogin", str(a.login));
+  put(b, "fromDevice", str(a.device) as Block["fromDevice"]);
   put(b, "id", str(a.id));
   put(b, "name", str(a.name));
   const kids = mark?.children ?? [];

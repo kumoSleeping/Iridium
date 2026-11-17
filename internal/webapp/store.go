@@ -13,15 +13,32 @@ import (
 	"github.com/kumoSleeping/iridium/internal/gate"
 )
 
-// Passkey is a WebAuthn credential of a login of ir_web. Credential holds only public data.
+// Passkey is a WebAuthn credential of a login of ir_web, one device of it (or the devices a
+// provider syncs it to). Credential holds only public data.
 type Passkey struct {
 	Credential webauthn.Credential `json:"credential"`
 	CreatedAt  time.Time           `json:"createdAt"`
 	LastUsedAt time.Time           `json:"lastUsedAt"`
+	// UserHandle: its own, random as it was made; empty for one made before a login had several,
+	// whose handle is its login's (Cred.UserHandle).
+	UserHandle []byte `json:"userHandle,omitempty"`
+	// Device: what it is on (api.Device), as set by hand; "" by the browser it is used in.
+	Device string `json:"device,omitempty"`
+	// Platform: the browser it was made in, "Mac · Chrome" (platformOf).
+	Platform string `json:"platform,omitempty"`
 }
 
-// Cred is what ir_web keeps to know a login by: its WebAuthn user handle (random per
-// registration) and its passkeys. The login itself (name, avatar) is the core's (package gate).
+// handle is the user handle pk was made with.
+func (pk Passkey) handle(c Cred) []byte {
+	if len(pk.UserHandle) > 0 {
+		return pk.UserHandle
+	}
+	return c.UserHandle
+}
+
+// Cred is what ir_web keeps to know a login by: its passkeys, each with its own WebAuthn user
+// handle (random per registration; UserHandle is the first's, from before). The login itself
+// (name, avatar) is the core's (package gate).
 type Cred struct {
 	Login      string    `json:"login"`
 	UserHandle []byte    `json:"userHandle,omitempty"`
@@ -35,7 +52,9 @@ type Invite struct {
 	Name  string `json:"name,omitempty"` // optional name chosen by the inviter; the joiner may change it
 	Setup bool   `json:"setup,omitempty"`
 	// Perms: what the login that joins may do (the server's JSON; ir_web does not read it).
-	Perms     []byte    `json:"perms,omitempty"`
+	Perms []byte `json:"perms,omitempty"`
+	// Login: an invite to add a passkey to this login (a device of it), not a new login.
+	Login     string    `json:"login,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 	ExpiresAt time.Time `json:"expiresAt"` // zero for the first-run setup token
 }
@@ -43,8 +62,12 @@ type Invite struct {
 // Session is a logged-in browser (a web session of a login). Hash is the SHA-256 (hex) of the
 // cookie's value.
 type Session struct {
-	Hash       string    `json:"hash"`
-	Login      string    `json:"login"`
+	Hash  string `json:"hash"`
+	Login string `json:"login"`
+	// Passkey: the credential ID it logged in with (nil for one from before); Device, what its
+	// browser said it is (deviceOfBrowser), for a passkey set to none by hand.
+	Passkey    []byte    `json:"passkey,omitempty"`
+	Device     string    `json:"device,omitempty"`
 	CreatedAt  time.Time `json:"createdAt"`
 	LastSeenAt time.Time `json:"lastSeenAt"`
 	ExpiresAt  time.Time `json:"expiresAt"` // absolute limit

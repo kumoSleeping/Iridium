@@ -51,13 +51,13 @@ import type {
   FolderPatch,
   GuildPatch,
 } from "./types.gen";
-import type { ShellOutput, ShellRun, ShellStarted } from "./types.gen";
+import type { Device, Passkeys, PasskeyDevice, ShellOutput, ShellRun, ShellStarted } from "./types.gen";
 import type { SecretInfo, Secrets, SetSecret, Usage } from "./types.gen";
 import type { AgentChoices, Block, ChannelMembers, ChannelReads, Injection, MemberPatch, NewMember } from "./types.gen";
 import type { MemberCard, Memory, Profile as Card, ProfilePatch, Self } from "./types.gen";
 
 /** A message of a channel's log (Satori's message.list): id its number there. */
-export type ChannelMessage = { id: string; content: string; created_at?: number; user?: { id: string; name?: string; nick?: string; is_bot?: boolean }; _data?: { kind?: string; event?: unknown; session?: string; block?: string; from?: number; to?: number; input?: string } };
+export type ChannelMessage = { id: string; content: string; created_at?: number; user?: { id: string; name?: string; nick?: string; is_bot?: boolean }; _data?: { kind?: string; event?: unknown; session?: string; block?: string; from?: number; to?: number; input?: string; device?: Device } };
 /** A page of a channel's log: start and end, the numbers of its first and last; more, earlier ones. */
 export type ChannelPage = { data: ChannelMessage[]; start: number; end: number; more: boolean };
 
@@ -456,6 +456,15 @@ export const api = {
   appAgents: (id: string, off: string[]) => write<AppAgents>("PUT", `/v1/internal/apps/${enc(id)}/agents`, { off } satisfies AppAgents),
   /** PUT /v1/internal/apps/{app}/logins/{login}/perms: what a login may use, within its app's. */
   loginPerms: (app: string, login: string, p: Perms) => write<Perms>("PUT", `/v1/internal/apps/${enc(app)}/logins/${enc(login)}/perms`, p),
+  /** A login of 网页's passkeys, one per device (docs/web.md "Passkey"), and its links to add one. */
+  passkeys: (login: string) => get<Passkeys>(`/v1/internal/apps/ir_web/logins/${enc(login)}/passkeys`),
+  /** A one-time link that adds a passkey to the login (shown once, with its QR code). */
+  addPasskey: (login: string) => write<Invite>("POST", `/v1/internal/apps/ir_web/logins/${enc(login)}/passkeys`),
+  /** What a passkey is on: a device, or "" by the browser it is used in. */
+  passkeyDevice: (login: string, id: string, device: Device | "") =>
+    write<{ ok: boolean }>("PUT", `/v1/internal/apps/ir_web/logins/${enc(login)}/passkeys/${enc(id)}/device`, { device: device as Device } satisfies PasskeyDevice),
+  removePasskey: (login: string, id: string) => write<{ ok: boolean }>("DELETE", `/v1/internal/apps/ir_web/logins/${enc(login)}/passkeys/${enc(id)}`),
+  dropPasskeyLink: (login: string, id: string) => write<{ ok: boolean }>("DELETE", `/v1/internal/apps/ir_web/logins/${enc(login)}/passkeys/links/${enc(id)}`),
   /** PUT /v1/internal/pairing: taking pairing requests, on or off till turned again. */
   pairing: (open: boolean) => write<PairWindow>("PUT", "/v1/internal/pairing", { open } satisfies PairWindow),
 

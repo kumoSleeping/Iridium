@@ -334,7 +334,7 @@ Web Push，总开关在配置 `push`，默认关。VAPID 密钥存在状态目�
 
 ## 应用和登录
 
-主机（ID `local`，显示“主机”）不在表里，不可被管理。别的都是应用（表 `apps`，`type` 只用来显示），应用下面是登录（表 `logins`，主键 `(app, id)`，`approved_at` 为空即待批）。网页（`ir_web`）是内置应用：每个浏览器（一套 passkey）是它的一个登录，只在设了公网地址或已有登录时列出。设备 `device`（`computer`、`laptop`、`phone`、`none`）仅网页的登录和主机有；为应用设置返回 422 `no_device`。
+主机（ID `local`，显示“主机”）不在表里，不可被管理。别的都是应用（表 `apps`，`type` 只用来显示），应用下面是登录（表 `logins`，主键 `(app, id)`，`approved_at` 为空即待批）。网页（`ir_web`）是内置应用：每个人是它的一个登录，一台设备一个 Passkey（`docs/web.md`），只在设了公网地址或已有登录时列出。设备 `device`（`computer`、`laptop`、`phone`、`none`）仅网页的登录和主机有；为应用设置返回 422 `no_device`。网页登录的 `device` 是它最近活跃的浏览器的；它自己 `PUT /v1/internal/me/device` 设的是当前这个 Passkey 的。人发的消息带 `fromDevice`（块、排队的消息；Satori 消息的 `device` 属性，频道消息的 `_data.device`）：发它的浏览器的设备。
 
 别的应用说话时用头 `Satori-User-ID`（或 `X-Iridium-Login`）指明登录；新的登录第一次说话回 403 `login_pending`，产生一条 `login_join` 需要；每个应用最多 20 个待批。
 
@@ -350,6 +350,11 @@ Web Push，总开关在配置 `push`，默认关。VAPID 密钥存在状态目�
 | `PUT /v1/internal/apps/{id}/perms` | `Perms` → `Perms` | 应用能用的，能批的人改 |
 | `PUT /v1/internal/apps/{id}/logins/{login}/perms` | `Perms` → `Perms` | 登录能用的（网页的登录 `id` 写 `ir_web`），在应用的之内起作用 |
 | `PUT /v1/internal/me/perms` | `Perms` | 应用申请改权限：一条 `app_change` 需要 |
+| `GET /v1/internal/apps/ir_web/logins/{login}/passkeys` | → `Passkeys` | 那个登录的 Passkey（`name`、`device`、`auto`、`current`、建和最近用的时间）和没用掉的加设备链接。那个登录自己，或能管理的人；agent 不行。下面几条同 |
+| `POST /v1/internal/apps/ir_web/logins/{login}/passkeys` | → `Invite` | 加设备的一次性链接（10 分钟，带二维码），先要公网地址 |
+| `PUT /v1/internal/apps/ir_web/logins/{login}/passkeys/{id}/device` | `PasskeyDevice` | 设备，`""` 是自动 |
+| `DELETE /v1/internal/apps/ir_web/logins/{login}/passkeys/{id}` | → `{ok}` | 删一个，用它登录的浏览器退出；最后一个 409 `last_passkey` |
+| `DELETE /v1/internal/apps/ir_web/logins/{login}/passkeys/links/{id}` | → `{ok}` | 撤掉没用的加设备链接 |
 | `POST /v1/internal/invites` | `NewInvite` → `Invite` | 网页的一次性邀请（10 分钟），先要公网地址。`claude: true` 加入的登录带 Claude。agent 调的回 202 `Pending` |
 | `GET /v1/internal/usage?days=N&terminal=<ID、名字或 me>` | → `Usage` | 按日期、应用或登录、agent、模型合计的用量（`by=hour`、`by=weekhour` 同前）；`machine=<应用>` 只算在那台电脑上的会话（页面从别的电脑上的会话打开用量时用）。看别人的要管理权 |
 

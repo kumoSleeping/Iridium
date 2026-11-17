@@ -430,6 +430,11 @@ export interface Block {
    * FromLogin: the login of that app it came from, if one (ir_web's logins are FromTerminal).
    */
   fromLogin?: string;
+  /**
+   * FromDevice: the device a browser of ir_web sent it from (the passkey it logged in with),
+   * for the badge on its avatar; "" not known (that login's device now).
+   */
+  fromDevice?: Device;
   id?: string; // tool, result: the call's id
   /**
    * tool: Name, Input as JSON, and Result when it is on the same page.
@@ -869,6 +874,44 @@ export type Device = typeof DeviceComputer | typeof DeviceLaptop | typeof Device
  * SetDevice is PUT /v1/internal/me/device and PUT /v1/internal/apps/{id}/device.
  */
 export interface SetDevice {
+  device: Device;
+}
+/**
+ * Passkey is a passkey of a login of ir_web: one device of it (docs/web.md "Passkey"). No key
+ * material. ID is its credential ID, base64url.
+ */
+export interface Passkey {
+  id: string;
+  name: string; // its provider (iCloud 钥匙串), else the browser it was made in
+  /**
+   * Device: what it shows as; Auto, not set by hand: by the browser it was last used in.
+   */
+  device: Device;
+  auto?: boolean;
+  current?: boolean; // the browser asking is logged in with it
+  createdAt: number /* int64 */;
+  lastUsedAt: number /* int64 */;
+}
+/**
+ * Passkeys is GET /v1/internal/apps/ir_web/logins/{login}/passkeys: its passkeys, oldest first,
+ * and its links to add one not used yet.
+ */
+export interface Passkeys {
+  passkeys: Passkey[];
+  links: PasskeyLink[];
+}
+/**
+ * PasskeyLink is a link to add a passkey to a login, not used yet (its secret is not listed).
+ */
+export interface PasskeyLink {
+  id: string;
+  createdAt: number /* int64 */;
+  expiresAt: number /* int64 */;
+}
+/**
+ * PasskeyDevice is PUT …/passkeys/{id}/device: a device, or "" by the browser it is used in.
+ */
+export interface PasskeyDevice {
   device: Device;
 }
 /**
@@ -1454,6 +1497,7 @@ export interface Queued {
    */
   fromTerminal?: string;
   fromLogin?: string; // and the login of that app, if one
+  fromDevice?: Device; // a browser's device (Block.FromDevice)
   paused?: boolean;
   at: number /* int64 */;
 }
@@ -2235,6 +2279,10 @@ export interface UseSecrets {
 export interface SecretValues {
   values: { [key: string]: string};
 }
+
+//////////
+// source: sender.go
+
 
 //////////
 // source: settings.go

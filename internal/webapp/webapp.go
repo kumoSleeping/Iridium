@@ -87,6 +87,8 @@ type Config struct {
 
 	// OnJoin runs after a new login registered, before its browser hears so.
 	OnJoin func(Joined)
+	// OnPasskey runs after a passkey was added to a login (by its link), before its browser hears so.
+	OnPasskey func(login string)
 
 	// Open says which requests pass with no login, as no one (gate.Config.Open's).
 	Open func(*http.Request) bool
@@ -451,6 +453,9 @@ func stripped(r *http.Request) *http.Request {
 // expiry, removal) or as ir_web is replaced (CloseAll).
 func (w *Web) forward(rw http.ResponseWriter, r *http.Request, session, login string, site http.HandlerFunc) {
 	ctx, cancel := context.WithCancel(r.Context())
+	if session != "" {
+		ctx = context.WithValue(ctx, sessionKey{}, session)
+	}
 	f := &inFlight{session: session, login: login, cancel: cancel}
 	w.reqMu.Lock()
 	w.reqs[f] = struct{}{}
@@ -553,11 +558,15 @@ func (w *Web) commitLocked(c Change) error {
 	return nil
 }
 
-func (w *Web) newSessionLocked(login string, now time.Time) (string, Session) {
+// newSessionLocked is a session of login in the browser r came from, logged in with passkey (a
+// credential ID).
+func (w *Web) newSessionLocked(login string, passkey []byte, r *http.Request, now time.Time) (string, Session) {
 	token := gate.NewSecret()
 	return token, Session{
 		Hash:       gate.HashSecret(token),
 		Login:      login,
+		Passkey:    passkey,
+		Device:     deviceOfBrowser(r),
 		CreatedAt:  now,
 		LastSeenAt: now,
 		ExpiresAt:  now.Add(AbsoluteTimeout),

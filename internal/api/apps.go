@@ -134,6 +134,38 @@ type SetDevice struct {
 	Device Device `json:"device"`
 }
 
+// Passkey is a passkey of a login of ir_web: one device of it (docs/web.md "Passkey"). No key
+// material. ID is its credential ID, base64url.
+type Passkey struct {
+	ID   string `json:"id"`
+	Name string `json:"name"` // its provider (iCloud 钥匙串), else the browser it was made in
+	// Device: what it shows as; Auto, not set by hand: by the browser it was last used in.
+	Device     Device `json:"device"`
+	Auto       bool   `json:"auto,omitempty"`
+	Current    bool   `json:"current,omitempty"` // the browser asking is logged in with it
+	CreatedAt  int64  `json:"createdAt"`
+	LastUsedAt int64  `json:"lastUsedAt"`
+}
+
+// Passkeys is GET /v1/internal/apps/ir_web/logins/{login}/passkeys: its passkeys, oldest first,
+// and its links to add one not used yet.
+type Passkeys struct {
+	Passkeys []Passkey     `json:"passkeys"`
+	Links    []PasskeyLink `json:"links"`
+}
+
+// PasskeyLink is a link to add a passkey to a login, not used yet (its secret is not listed).
+type PasskeyLink struct {
+	ID        string `json:"id"`
+	CreatedAt int64  `json:"createdAt"`
+	ExpiresAt int64  `json:"expiresAt"`
+}
+
+// PasskeyDevice is PUT …/passkeys/{id}/device: a device, or "" by the browser it is used in.
+type PasskeyDevice struct {
+	Device Device `json:"device"`
+}
+
 // PendingInvite is a slot for a login of ir_web not taken yet.
 type PendingInvite struct {
 	ID        string `json:"id"`

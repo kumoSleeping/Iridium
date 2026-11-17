@@ -469,7 +469,7 @@ func (s *Server) sendAs(ctx context.Context, c caller, from, id string, req api.
 		if tag := s.m.SourceTag(from); tag != "" {
 			u.Name = tag // the name the agent sees it under
 		}
-		seq = s.sat.Input(st.Session, req.ID, req.Text, u, c.ID())
+		seq = s.sat.Input(st.Session, req.ID, req.Text, u, c.ID(), channel.Data{Device: s.deviceOfCaller(c)})
 	}
 	named := s.names(id, seq, req.Text, answers, readerOf(c)) // the logins it names (ats.go)
 	input, queued, err := s.m.SendAs(ctx, id, req.ID, text, from, req.Steer, images...)

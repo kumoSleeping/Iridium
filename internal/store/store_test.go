@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/kumoSleeping/iridium/internal/api"
 	"os"
 	"path/filepath"
 	"sync"
@@ -360,5 +361,21 @@ func TestMoveAgentProfile(t *testing.T) {
 	}
 	if had, _ := s.ClearChannelAts("ch", "web/u", 5); !had {
 		t.Errorf("not cleared once read")
+	}
+}
+
+func TestInputDevice(t *testing.T) {
+	s, _ := open(t)
+	must(t, s.AddInput(Input{ID: "d1", Session: "a", Terminal: "web1", Device: "phone", Text: "hi", State: "sent"}))
+	must(t, s.AddInput(Input{ID: "d2", Session: "a", Terminal: "web1", Text: "old", State: "queued"}))
+	sender, tag, ok := s.Sender("d1")
+	if !ok || tag != "web1" || api.SenderDevice(sender) != "phone" {
+		t.Fatalf("sender %q %q %v", sender, tag, ok)
+	}
+	if term, login := api.SplitSender(sender); term != "web1" || login != "" {
+		t.Fatalf("split %q %q", term, login)
+	}
+	if q, _ := s.Queued("a"); len(q) != 1 || q[0].Device != "" {
+		t.Fatalf("queued %+v", q)
 	}
 }

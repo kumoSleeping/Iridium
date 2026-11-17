@@ -369,6 +369,13 @@ var schema = []string{
 	// 42: the notes gone (the user, 2026-11-16): their tables (18, 19).
 	`DROP TABLE IF EXISTS notes;
 	DROP TABLE IF EXISTS note_folders;`,
+	// 43: a login of ir_web on several devices (docs/web.md "Passkey"): an invite that adds a
+	// passkey to a login; the passkey a browser logged in with and the device its browser said;
+	// the device a message was sent from.
+	`ALTER TABLE invites ADD COLUMN login TEXT NOT NULL DEFAULT '';
+	ALTER TABLE web_sessions ADD COLUMN passkey BLOB;
+	ALTER TABLE web_sessions ADD COLUMN device TEXT NOT NULL DEFAULT '';
+	ALTER TABLE inputs ADD COLUMN device TEXT NOT NULL DEFAULT '';`,
 }
 
 // steps run in Go after the migration of their version, in the same transaction.
@@ -716,6 +723,7 @@ type Input struct {
 	Terminal string // who sent it: the interactive terminal's ID
 	Login    string // and the login of that app it came from, if one (not ir_web's: Terminal is it)
 	Tag      string // the source it is prefixed with, "[Tag] ": the terminal's name then; "" is Terminal
+	Device   string // the device a browser of ir_web sent it from (api.Device), "" not known
 	Text     string
 	State    string // queued, paused, sent
 	Created  int64
@@ -729,8 +737,8 @@ func (s *Store) AddInput(in Input) error {
 	if in.State == "sent" {
 		sent = in.Created
 	}
-	_, err := s.db.Exec(`INSERT INTO inputs (id, session, terminal, login, tag, text, state, created_at, sent_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		in.ID, in.Session, in.Terminal, in.Login, in.Tag, in.Text, in.State, in.Created, sent)
+	_, err := s.db.Exec(`INSERT INTO inputs (id, session, terminal, login, tag, device, text, state, created_at, sent_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		in.ID, in.Session, in.Terminal, in.Login, in.Tag, in.Device, in.Text, in.State, in.Created, sent)
 	return err
 }
 
@@ -753,18 +761,18 @@ func (s *Store) Source(id string) (terminal, tag string, ok bool) {
 }
 
 // Sender is Source for a transcript (transcript.Sources): the terminal with the login it came
-// from, if one, as api.Sender joins them.
+// from, if one, as api.Sender joins them, and the device, as api.WithDevice adds it.
 func (s *Store) Sender(id string) (terminal, tag string, ok bool) {
-	var login string
-	if s.db.QueryRow(`SELECT terminal, login, IIF(tag = '', terminal, tag) FROM inputs WHERE id = ?`, id).Scan(&terminal, &login, &tag) != nil {
+	var login, device string
+	if s.db.QueryRow(`SELECT terminal, login, device, IIF(tag = '', terminal, tag) FROM inputs WHERE id = ?`, id).Scan(&terminal, &login, &device, &tag) != nil {
 		return "", "", false
 	}
-	return api.Sender(terminal, login), tag, true
+	return api.WithDevice(api.Sender(terminal, login), device), tag, true
 }
 
 // Queued is the session's inputs not sent yet, oldest first.
 func (s *Store) Queued(session string) ([]Input, error) {
-	rows, err := s.db.Query(`SELECT id, session, terminal, login, tag, text, state, created_at FROM inputs WHERE session = ? AND state != 'sent' ORDER BY created_at, rowid`, session)
+	rows, err := s.db.Query(`SELECT id, session, terminal, login, tag, device, text, state, created_at FROM inputs WHERE session = ? AND state != 'sent' ORDER BY created_at, rowid`, session)
 	if err != nil {
 		return nil, err
 	}
@@ -772,7 +780,7 @@ func (s *Store) Queued(session string) ([]Input, error) {
 	var out []Input
 	for rows.Next() {
 		var in Input
-		if err := rows.Scan(&in.ID, &in.Session, &in.Terminal, &in.Login, &in.Tag, &in.Text, &in.State, &in.Created); err != nil {
+		if err := rows.Scan(&in.ID, &in.Session, &in.Terminal, &in.Login, &in.Tag, &in.Device, &in.Text, &in.State, &in.Created); err != nil {
 			return nil, err
 		}
 		out = append(out, in)

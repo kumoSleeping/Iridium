@@ -10,7 +10,7 @@
 import { Menu } from "@base-ui/react/menu";
 import { Popover } from "@base-ui/react/popover";
 import { BarChart3, Ellipsis, FolderOpen, Globe, ListTree, Plus, Settings } from "lucide-react";
-import type { Block, Status } from "../api/types.gen";
+import type { Block, Device, Status } from "../api/types.gen";
 import { lazy, memo, Suspense, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type DragEvent, type ReactNode } from "react";
 import type { SessionState as LiveSession } from "../api/types.gen";
 import { api } from "../api/client";
@@ -67,7 +67,7 @@ import { PublicLink } from "./publiclink";
 import { Queue } from "./queue";
 import { ShellRuns } from "./shell";
 import { Crash } from "./crash";
-import { placesIn, PLACE_DRAG, SESSION_DRAG, sourceOf, yours } from "./refs";
+import { placesIn, PLACE_DRAG, SESSION_DRAG, sourceOf, withDevice, yours } from "./refs";
 import { placeDropped, type NamedPlace } from "./at";
 import { PlaceIcon, placeOf } from "./mention";
 import { spotsOf, type Spot } from "./where";
@@ -265,7 +265,7 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
 
   // Who sent what; this panel as /v1/internal/me has it (its name, avatar, device).
   const self = me ?? LOCAL_ME;
-  const source = (b: { from?: string; fromTerminal?: string }) => sourceOf(b.from, b.fromTerminal, self, terminals, list ?? [], workspaces ?? [], s);
+  const source = (b: { from?: string; fromTerminal?: string; fromDevice?: Device }) => withDevice(sourceOf(b.from, b.fromTerminal, self, terminals, list ?? [], workspaces ?? [], s), b.fromDevice);
 
   // The bottom stack's height pads the conversation's end.
   const stack = useRef<HTMLDivElement>(null);

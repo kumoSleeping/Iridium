@@ -78,6 +78,9 @@ type Data struct {
 	Event *Event `json:"event,omitempty"`
 	// Activity: what the agent did between the last thing it said and this.
 	Activity *activity.Activity `json:"activity,omitempty"`
+	// Device: the device a person's browser sent it from (api.Device), for the badge on its
+	// avatar; "" not known.
+	Device string `json:"device,omitempty"`
 }
 
 // Event is something that happened to a channel, kept as a line of it. Type: "join" (an agent

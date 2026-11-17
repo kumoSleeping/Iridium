@@ -87,7 +87,8 @@ func (w *Web) CreateInvite(name string, perms []byte) (InviteLink, error) {
 	return InviteLink{ID: inv.ID, Name: name, URL: w.joinURL(token), ExpiresAt: inv.ExpiresAt}, nil
 }
 
-// Invites are the pending invites (the setup link only while ir_web has no login).
+// Invites are the pending invites for new logins (the setup link only while ir_web has no login);
+// not the links to add a passkey (PasskeyLinks).
 func (w *Web) Invites() []InviteInfo {
 	now := w.now()
 	login := w.core.HasWebLogin()
@@ -95,6 +96,9 @@ func (w *Web) Invites() []InviteInfo {
 	defer w.mu.Unlock()
 	out := []InviteInfo{}
 	for _, inv := range w.st.state().Invites {
+		if inv.Login != "" {
+			continue
+		}
 		if (inv.Setup && !login) || (!inv.Setup && now.Before(inv.ExpiresAt)) {
 			out = append(out, InviteInfo{ID: inv.ID, Name: inv.Name, Setup: inv.Setup, Perms: inv.Perms,
 				CreatedAt: inv.CreatedAt, ExpiresAt: inv.ExpiresAt})
@@ -145,13 +149,18 @@ func (w *Web) MayRemove(login string) error {
 }
 
 // Forget drops what ir_web kept of a login the core removed (its row, passkeys in it, is gone):
-// its web sessions end, and their requests with them.
+// its web sessions end, and their requests with them; its links to add a passkey go.
 func (w *Web) Forget(login string) {
 	w.mu.Lock()
 	var ch Change
 	for h, s := range w.st.sessions {
 		if s.Login == login {
 			ch.DeleteSessions = append(ch.DeleteSessions, h)
+		}
+	}
+	for id, inv := range w.st.invites {
+		if inv.Login == login {
+			ch.DeleteInvites = append(ch.DeleteInvites, id)
 		}
 	}
 	w.commitLocked(ch)

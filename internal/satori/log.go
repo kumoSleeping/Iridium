@@ -214,10 +214,12 @@ type LogData struct {
 	Event *channel.Event `json:"event,omitempty"`
 	// Quote: the number of the message it answers (its content's <quote id/>).
 	Quote int64 `json:"quote,omitempty"`
+	// Device: a person's, the device their browser sent it from (api.Device).
+	Device string `json:"device,omitempty"`
 }
 
 func logData(m channel.Message) LogData {
-	d := LogData{Kind: m.Kind, Session: m.D.Session, Block: m.D.Block, From: m.D.From, To: m.D.To, Card: m.D.Card, Event: m.D.Event, Quote: m.D.Quote}
+	d := LogData{Kind: m.Kind, Session: m.D.Session, Block: m.D.Block, From: m.D.From, To: m.D.To, Card: m.D.Card, Event: m.D.Event, Quote: m.D.Quote, Device: m.D.Device}
 	switch m.Kind {
 	case channel.KindUser:
 		if !strings.HasPrefix(m.Ref, "b:") {

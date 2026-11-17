@@ -122,9 +122,7 @@ func codexBlocks(off int64, raw []byte, max int, sources Sources) []api.Block {
 		b := api.Block{Kind: api.BlockKindUser, Text: text, ID: it.ClientID}
 		if sources != nil && it.ClientID != "" {
 			if terminal, tag, ok := sources(it.ClientID); ok {
-				b.From = tag
-				b.FromTerminal, b.FromLogin = api.SplitSender(terminal)
-				b.Text = strings.TrimPrefix(text, "["+tag+"] ")
+				fromSource(&b, text, terminal, tag)
 			}
 		}
 		add(b)

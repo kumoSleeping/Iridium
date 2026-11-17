@@ -58,6 +58,10 @@ export function sourceOf(from: string | undefined, terminal: string | undefined,
   return { kind: "letter", name: from, avatar: e?.avatar, channel: true, ...(e?.type ? { type: e.type } : {}) };
 }
 
+/** src with the device its words were sent from (a browser's passkey's), when it is a person's
+ *  and that is known: the badge on the face is that device, not the one the login is on now. */
+export const withDevice = (src: Source, device?: Device): Source => (device && src.kind === "you" && !src.local ? { ...src, device } : src);
+
 /** A session as the sender of a letter, as the sidebar calls it (the user, 2026-11-06): its given
  *  name, else the opening of its first message, else 新会话. Not its agent: its face is the
  *  agent's logo. Its workspace only when it is not here, the workspace of the chat shown (none

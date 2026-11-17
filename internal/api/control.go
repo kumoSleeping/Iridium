@@ -11,6 +11,7 @@ type Queued struct {
 	// FromTerminal is the sending terminal's ID.
 	FromTerminal string `json:"fromTerminal,omitempty"`
 	FromLogin    string `json:"fromLogin,omitempty"` // and the login of that app, if one
+	FromDevice   Device `json:"fromDevice,omitempty"` // a browser's device (Block.FromDevice)
 	Paused       bool   `json:"paused,omitempty"`
 	At           int64  `json:"at"`
 }

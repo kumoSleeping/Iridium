@@ -56,9 +56,7 @@ func ownBlocks(off int64, raw []byte, max int, sources Sources) []api.Block {
 		b.Kind, b.Text, b.ID = api.BlockKindUser, e.Text, e.ID
 		if sources != nil && e.ID != "" {
 			if terminal, tag, ok := sources(e.ID); ok {
-				b.From = tag
-				b.FromTerminal, b.FromLogin = api.SplitSender(terminal)
-				b.Text = strings.TrimPrefix(e.Text, "["+tag+"] ")
+				fromSource(&b, e.Text, terminal, tag)
 			}
 		}
 		if b.FromTerminal == api.SourceIridium {

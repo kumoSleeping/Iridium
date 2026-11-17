@@ -123,9 +123,7 @@ func dshBlocks(off int64, raw []byte, max int, sources Sources) []api.Block {
 		b := api.Block{Kind: api.BlockKindUser, Text: text, ID: id}
 		if sources != nil {
 			if terminal, tag, ok := sources(id); ok && id != "" {
-				b.From = tag
-				b.FromTerminal, b.FromLogin = api.SplitSender(terminal)
-				b.Text = strings.TrimPrefix(text, "["+tag+"] ")
+				fromSource(&b, text, terminal, tag)
 			} else if s := piSource.FindStringSubmatch(text); s != nil {
 				// dsh gives a prompt an id of its own (session/prompt takes none), so an id of
 				// Iridium's is seldom here: the tag Iridium wrote before it tells, as with pi.

@@ -33,6 +33,7 @@ func (s *Server) appRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /v1/internal/apps/{id}/device", func(w http.ResponseWriter, r *http.Request) { s.setDevice(w, r, r.PathValue("id")) })
 	// The list is public (draft 二「消息」); what manages them only to one that manages (apps).
 	mux.HandleFunc("GET /v1/internal/apps", s.apps)
+	s.passkeyRoutes(mux)
 	mux.HandleFunc("DELETE /v1/internal/apps/{id}", s.approver(s.revoke))
 	mux.HandleFunc("DELETE /v1/internal/apps/{id}/logins/{login}", s.approver(s.removeLogin))
 	// What an app may use (agents, scope): whoever approves sets it (S2 enforces it).
@@ -362,6 +363,16 @@ func (s *Server) setDevice(w http.ResponseWriter, r *http.Request, ref string) {
 	}
 	if info.Kind == gate.KindChannel && !info.Host() {
 		refuse(w, http.StatusUnprocessableEntity, "no_device", "only a browser and the host have a device")
+		return
+	}
+	// A browser's own (the settings' key): the passkey it logged in with, its device.
+	if pk := s.web().SessionPasskey(c.web); info.ID == c.ID() && pk != "" {
+		if err := s.web().SetPasskeyDevice(info.ID, pk, string(req.Device)); err != nil {
+			s.error(w, err)
+			return
+		}
+		s.terminalsChanged()
+		reply(w, http.StatusOK, api.SetDevice{Device: s.deviceOf(info.ID)})
 		return
 	}
 	if err := s.st.SetDevice(info.ID, string(req.Device)); err != nil {

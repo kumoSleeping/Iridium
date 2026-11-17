@@ -34,6 +34,8 @@ type caller struct {
 	socket  bool
 	agent   bool
 	session string
+	// web: the browser's session of ir_web (webapp.SessionOf) the request came in.
+	web string
 }
 
 // panel reports whether the caller may approve apps, widen permissions and see secrets: a person
@@ -73,7 +75,11 @@ func callerOf(r *http.Request) caller {
 	}
 	id, _ := gate.FromContext(r.Context())
 	// A session's own TOKEN: its agent's ir, at the machine (docs/exec.md "远端的 ir").
-	return caller{Identity: id, agent: id.Session != "", session: id.Session}
+	c := caller{Identity: id, agent: id.Session != "", session: id.Session}
+	if id.Web() {
+		c.web = webapp.SessionOf(r.Context())
+	}
+	return c
 }
 
 var localIdentity = gate.HostIdentity
@@ -148,6 +154,7 @@ func (s *Server) newWeb(origin string) (*webapp.Web, error) {
 		StateDir:     s.cfg.StatePath(),
 		Hosts:        s.cfg.Hosts,
 		OnJoin:       s.joined,
+		OnPasskey:    func(string) { s.terminalsChanged() },
 		Open:         openPath,
 		Viewer:       http.HandlerFunc(s.viewer),
 		Logger:       s.gateLog(),
@@ -199,6 +206,9 @@ func (s *Server) fromOf(c caller, callerSession string) string {
 		// A login of an app (not ir_web's): counted to the app, the login kept with the message.
 		if c.Login != "" && !c.Web() && !c.Host() {
 			return session.FromLogin(c.App, c.Login, sourceTag(satori.Caller{AppName: s.Tag(c.App), LoginName: c.Name}))
+		}
+		if d := s.deviceOfCaller(c); d != "" {
+			return session.FromDevice(c.ID(), d)
 		}
 		return c.ID()
 	}
@@ -355,12 +365,28 @@ func (s *Server) mayWatch(w http.ResponseWriter, c caller, keys []string) bool {
 	return true
 }
 
-// deviceOf is the device id is on: what it set, else a computer.
+// deviceOf is the device id is on: a login of ir_web's, that of its browser seen last (the
+// passkey it logged in with); else what it set, else a computer.
 func (s *Server) deviceOf(id string) api.Device {
+	if w := s.web(); w != nil {
+		if d := api.Device(w.LoginDevice(id)); d.Valid() {
+			return d
+		}
+	}
 	if d, _ := s.st.Device(id); api.Device(d).Valid() {
 		return api.Device(d)
 	}
 	return api.DeviceComputer
+}
+
+// deviceOfCaller is the device a person's browser of ir_web is on (its passkey's), "" for any
+// other caller or a browser logged in before passkeys were told apart.
+func (s *Server) deviceOfCaller(c caller) string {
+	w := s.web()
+	if c.web == "" || c.byAgent() || w == nil {
+		return ""
+	}
+	return w.SessionDevice(c.web)
 }
 
 // appOf is an app (or the host) as the API lists it, with Claude or not and today's use.

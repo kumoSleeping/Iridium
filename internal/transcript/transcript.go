@@ -39,6 +39,15 @@ const (
 // write.
 type Sources func(uuid string) (terminal, tag string, ok bool)
 
+// fromSource sets who sent b, a user message Iridium wrote: its sender (api.Sender, with the
+// device of api.WithDevice), the tag it went with, and its text without that tag.
+func fromSource(b *api.Block, text, sender, tag string) {
+	b.From = tag
+	b.FromTerminal, b.FromLogin = api.SplitSender(sender)
+	b.FromDevice = api.Device(api.SenderDevice(sender))
+	b.Text = strings.TrimPrefix(text, "["+tag+"] ")
+}
+
 // Format gives the blocks of one line of an agent's transcript: max is the characters to cut
 // texts to (-1: none); sources names the user messages Iridium wrote (may be nil).
 type Format func(off int64, raw []byte, max int, sources Sources) []api.Block
@@ -690,9 +699,7 @@ func blocksOf(off int64, raw []byte, max int, sources Sources) []api.Block {
 			b := api.Block{Kind: api.BlockKindUser, Text: text, ID: uuid}
 			if sources != nil && uuid != "" {
 				if terminal, tag, ok := sources(uuid); ok {
-					b.From = tag
-					b.FromTerminal, b.FromLogin = api.SplitSender(terminal)
-					b.Text = strings.TrimPrefix(text, "["+tag+"] ")
+					fromSource(&b, text, terminal, tag)
 				}
 			}
 			if b.FromTerminal == api.SourceIridium {

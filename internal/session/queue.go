@@ -88,8 +88,8 @@ func (m *Manager) SendAs(ctx context.Context, id, want, text, from string, steer
 		h.publish()
 		m.publishList()
 	}
-	terminal, tag, login := m.source(from)
-	in := store.Input{ID: cmp.Or(want, newUUID()), Session: h.id, Terminal: terminal, Login: login, Tag: tag, Text: text, State: "sent"}
+	terminal, tag, login, device := m.source(from)
+	in := store.Input{ID: cmp.Or(want, newUUID()), Session: h.id, Terminal: terminal, Login: login, Tag: tag, Device: device, Text: text, State: "sent"}
 	// Steering joins a running turn; while it waits for the quota there is none to join, so it waits too.
 	if (!steer && h.busy()) || h.quotaWait() {
 		in.State = "queued"
@@ -97,7 +97,7 @@ func (m *Manager) SendAs(ctx context.Context, id, want, text, from string, steer
 			return "", false, err
 		}
 		h.mu.Lock()
-		h.queue = append(h.queue, api.Queued{ID: in.ID, Text: text, From: in.Tag, FromTerminal: terminal, FromLogin: login, At: time.Now().UnixMilli()})
+		h.queue = append(h.queue, api.Queued{ID: in.ID, Text: text, From: in.Tag, FromTerminal: terminal, FromLogin: login, FromDevice: api.Device(device), At: time.Now().UnixMilli()})
 		if len(images) > 0 {
 			h.qimages[in.ID] = images
 		}
@@ -368,7 +368,7 @@ func (h *Hosted) loadQueue() {
 		if tag == "" {
 			tag = in.Terminal
 		}
-		h.queue = append(h.queue, api.Queued{ID: in.ID, Text: in.Text, From: tag, FromTerminal: in.Terminal, FromLogin: in.Login, Paused: in.State == "paused", At: in.Created})
+		h.queue = append(h.queue, api.Queued{ID: in.ID, Text: in.Text, From: tag, FromTerminal: in.Terminal, FromLogin: in.Login, FromDevice: api.Device(in.Device), Paused: in.State == "paused", At: in.Created})
 	}
 }
 
@@ -378,7 +378,7 @@ func queuedInput(session string, q api.Queued) store.Input {
 	if terminal == "" {
 		terminal = q.From
 	}
-	return store.Input{ID: q.ID, Session: session, Terminal: terminal, Login: q.FromLogin, Tag: q.From, Text: q.Text}
+	return store.Input{ID: q.ID, Session: session, Terminal: terminal, Login: q.FromLogin, Tag: q.From, Device: string(q.FromDevice), Text: q.Text}
 }
 
 // HandedInput is the input SendWith gives for a message handed to whoever holds the session
@@ -397,7 +397,7 @@ func (m *Manager) handOver(ctx context.Context, id, text, from string, steer, im
 	if !ok {
 		return false, nil
 	}
-	terminal, tag, _ := m.source(from)
+	terminal, tag, _, _ := m.source(from)
 	to, done, err := s.Send(ctx, r, text, harness.Source{Terminal: terminal, Tag: tag}, steer, images)
 	if done && err == nil {
 		m.o.Logf("session %s: handed to %s", id, to)

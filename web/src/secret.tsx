@@ -25,7 +25,8 @@ function SecretCard({ secret }: { secret: Secret }) {
   const copy = () => void navigator.clipboard?.writeText(value).then(() => (setCopied(true), setTimeout(() => setCopied(false), 1500)));
   const until = invite ? new Date(invite.expiresAt).toLocaleTimeString(lang === "zh" ? "zh-CN" : "en", { hour: "2-digit", minute: "2-digit" }) : "";
   const close = () => (setLeaving(true), setTimeout(() => showSecret(null), 140));
-  const title = invite ? t("secret.invite") : t("secret.token");
+  const passkey = "passkey" in secret && !!secret.passkey;
+  const title = invite ? t(passkey ? "secret.passkey" : "secret.invite") : t("secret.token");
   return (
     <CardFrame label={title} leaving={leaving}>
       <div className="flex items-start gap-2.5">
@@ -50,7 +51,7 @@ function SecretCard({ secret }: { secret: Secret }) {
                   {copied ? <Check size={15} /> : <Copy size={15} />}
                 </button>
               </div>
-              <p className="m-0 text-xs text-ink-3">{invite ? t("secret.inviteHint", { time: until }) : t("secret.tokenHint")}</p>
+              <p className="m-0 text-xs text-ink-3">{invite ? t(passkey ? "secret.passkeyHint" : "secret.inviteHint", { time: until }) : t("secret.tokenHint")}</p>
             </div>
           </div>
         </div>

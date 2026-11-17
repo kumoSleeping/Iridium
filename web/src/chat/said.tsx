@@ -18,7 +18,7 @@ import { CARD_POP } from "./channel/profilecard";
 import type { Relay } from "../satori";
 import { Popover } from "@base-ui/react/popover";
 import { api } from "../api/client";
-import type { Block, FileRef, Result } from "../api/types.gen";
+import type { Block, Device, FileRef, Result } from "../api/types.gen";
 import type { Sent } from "../chats";
 import { t } from "../i18n";
 import { agentName, Avatar, Badge, cn, IconKey, IrMark, Logo, own, PopSurface, tilde, Tip, titleOf, useLongPress, useMenuAt } from "../ui";
@@ -522,7 +522,7 @@ export function Relayed({ given, relay, name, time, onJump, children }: { given:
 
 /** card: what a person's face opens (their card, chat.tsx), for one not the one looking. left:
  *  another person's words, on the left: only the one looking is on the right (kumo, 2026-11-16). */
-export function Said({ b, session, cwd, source, onJump, card, menu, left }: { b: Shown; session: string; cwd: string; source: (b: { from?: string; fromTerminal?: string }) => Source; onJump: (id: string) => void; card?: (b: Block) => ReactNode; menu?: (b: Block) => FaceMenu | undefined; left?: (b: Block) => boolean }) {
+export function Said({ b, session, cwd, source, onJump, card, menu, left }: { b: Shown; session: string; cwd: string; source: (b: { from?: string; fromTerminal?: string; fromDevice?: Device }) => Source; onJump: (id: string) => void; card?: (b: Block) => ReactNode; menu?: (b: Block) => FaceMenu | undefined; left?: (b: Block) => boolean }) {
   switch (b.kind) {
     case "user": {
       const src = source(b);

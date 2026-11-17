@@ -14,6 +14,8 @@ const S = {
   setup: ['还没有 Passkey：在运行它的那个账号里跑 ir\u00a0invite', 'No passkey yet: run ir\u00a0invite in the account that runs it'],
   namePh: ['给这台设备起个名字', 'Name this device'],
   create: ['创建 Passkey', 'Create passkey'],
+  addTo: ['添加到 {name}', 'Add to {name}'],
+  addsNote: ['这台设备建一个 Passkey，以 {name} 登录', 'This device gets a passkey and signs in as {name}'],
   badLink: ['链接无效或已过期，请重新生成', 'This link is invalid or expired. Ask for a new one.'],
   name_taken: ['已被占用', 'Already taken'],
   name_reserved: ['这个名字保留给系统', 'Reserved name'],
@@ -251,6 +253,18 @@ async function initJoin() {
     e.preventDefault();
     if (!$('join').disabled) busy($('join'), join);
   };
+  if (r.data.add) {
+    // A link that adds a passkey to a login: no name to choose, the login's.
+    const adds = $('adds');
+    adds.replaceChildren(Object.assign(document.createElement('strong'), { textContent: t('addTo').replace('{name}', r.data.name) }),
+      Object.assign(document.createElement('span'), { textContent: t('addsNote').replace('{name}', r.data.name) }));
+    adds.hidden = false;
+    input.hidden = true;
+    input.value = r.data.name;
+    $('join').disabled = false;
+    $('join').focus();
+    return;
+  }
   if (r.data.name) {
     input.value = r.data.name;
     $('join').disabled = false;

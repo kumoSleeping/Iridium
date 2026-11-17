@@ -192,7 +192,7 @@ func (w webStore) Load() (webapp.State, error) {
 	if err := rows.Err(); err != nil {
 		return st, err
 	}
-	rows, err = db.Query(`SELECT id, hash, name, setup, perms, created_at, expires_at FROM invites ORDER BY created_at, id`)
+	rows, err = db.Query(`SELECT id, hash, name, setup, perms, login, created_at, expires_at FROM invites ORDER BY created_at, id`)
 	if err != nil {
 		return st, err
 	}
@@ -200,7 +200,7 @@ func (w webStore) Load() (webapp.State, error) {
 		var i webapp.Invite
 		var perms string
 		var created, expires int64
-		if err := rows.Scan(&i.ID, &i.Hash, &i.Name, &i.Setup, &perms, &created, &expires); err != nil {
+		if err := rows.Scan(&i.ID, &i.Hash, &i.Name, &i.Setup, &perms, &i.Login, &created, &expires); err != nil {
 			rows.Close()
 			return st, err
 		}
@@ -214,7 +214,7 @@ func (w webStore) Load() (webapp.State, error) {
 	if err := rows.Err(); err != nil {
 		return st, err
 	}
-	rows, err = db.Query(`SELECT hash, login, created_at, last_seen_at, expires_at FROM web_sessions ORDER BY created_at, hash`)
+	rows, err = db.Query(`SELECT hash, login, passkey, device, created_at, last_seen_at, expires_at FROM web_sessions ORDER BY created_at, hash`)
 	if err != nil {
 		return st, err
 	}
@@ -222,7 +222,7 @@ func (w webStore) Load() (webapp.State, error) {
 	for rows.Next() {
 		var l webapp.Session
 		var created, seen, expires int64
-		if err := rows.Scan(&l.Hash, &l.Login, &created, &seen, &expires); err != nil {
+		if err := rows.Scan(&l.Hash, &l.Login, &l.Passkey, &l.Device, &created, &seen, &expires); err != nil {
 			return st, err
 		}
 		l.CreatedAt, l.LastSeenAt, l.ExpiresAt = fromNanos(created), fromNanos(seen), fromNanos(expires)
@@ -263,19 +263,19 @@ func (w webStore) Apply(c webapp.Change) error {
 			}
 		}
 		for _, i := range c.Invites {
-			_, err := tx.Exec(`INSERT INTO invites (id, hash, name, setup, perms, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+			_, err := tx.Exec(`INSERT INTO invites (id, hash, name, setup, perms, login, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 				ON CONFLICT (id) DO UPDATE SET hash = excluded.hash, name = excluded.name, setup = excluded.setup,
-					perms = excluded.perms, created_at = excluded.created_at, expires_at = excluded.expires_at`,
-				i.ID, i.Hash, i.Name, i.Setup, string(i.Perms), nanos(i.CreatedAt), nanos(i.ExpiresAt))
+					perms = excluded.perms, login = excluded.login, created_at = excluded.created_at, expires_at = excluded.expires_at`,
+				i.ID, i.Hash, i.Name, i.Setup, string(i.Perms), i.Login, nanos(i.CreatedAt), nanos(i.ExpiresAt))
 			if err != nil {
 				return err
 			}
 		}
 		for _, l := range c.Sessions {
-			_, err := tx.Exec(`INSERT INTO web_sessions (hash, login, created_at, last_seen_at, expires_at) VALUES (?, ?, ?, ?, ?)
-				ON CONFLICT (hash) DO UPDATE SET login = excluded.login, created_at = excluded.created_at,
-					last_seen_at = excluded.last_seen_at, expires_at = excluded.expires_at`,
-				l.Hash, l.Login, nanos(l.CreatedAt), nanos(l.LastSeenAt), nanos(l.ExpiresAt))
+			_, err := tx.Exec(`INSERT INTO web_sessions (hash, login, passkey, device, created_at, last_seen_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+				ON CONFLICT (hash) DO UPDATE SET login = excluded.login, passkey = excluded.passkey, device = excluded.device,
+					created_at = excluded.created_at, last_seen_at = excluded.last_seen_at, expires_at = excluded.expires_at`,
+				l.Hash, l.Login, l.Passkey, l.Device, nanos(l.CreatedAt), nanos(l.LastSeenAt), nanos(l.ExpiresAt))
 			if err != nil {
 				return err
 			}

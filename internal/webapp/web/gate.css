@@ -101,6 +101,10 @@ input {
   border-radius: .75rem;
   outline: none; /* no focus outline on the text input */
 }
+/* A link that adds a passkey to a login: its name, in place of the field. */
+.adds { display: flex; flex-direction: column; gap: .25rem; text-align: center; margin-bottom: 1rem; }
+.adds strong { font-size: 1.05rem; font-weight: 600; }
+.adds span { font-size: .85rem; color: var(--muted); }
 input::placeholder { color: var(--muted); }
 input[aria-invalid=true] { color: var(--danger); }
 

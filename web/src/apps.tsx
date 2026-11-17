@@ -6,11 +6,11 @@
 // logins and invites (docs/前端设计规范.md). 配对 is a switch, on till turned off; requests wait as
 // cards on top, the code checked against the one the app shows. No TOKEN is handed out here.
 import { Menu } from "@base-ui/react/menu";
-import { useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { Check, ChevronLeft, ChevronRight, Copy, Link2, LoaderCircle, PencilLine, Plus, SlidersHorizontal, Trash2, X } from "lucide-react";
+import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { Check, ChevronLeft, ChevronRight, Copy, EyeOff, KeyRound, Laptop, Link2, LoaderCircle, Monitor, MonitorSmartphone, PencilLine, Plus, SlidersHorizontal, Smartphone, Trash2, X, type LucideIcon } from "lucide-react";
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { ApiError, api } from "./api/client";
-import type { Agent, App, Apps, Computer, Login, Perms, PendingInvite } from "./api/types.gen";
+import type { Agent, App, Apps, Computer, Device, Login, Passkey, PasskeyLink, Perms, PendingInvite } from "./api/types.gen";
 import { CardFrame, CardHead, MainKey, SecondKey } from "./card";
 import { ConfirmCard, saysOwner } from "./confirms";
 import { isComputer, useApps, useMe } from "./data";
@@ -417,7 +417,15 @@ function useFacePick(id: string) {
 function AppPage({ data, onBack }: { data: Apps; onBack: () => void }) {
   const me = useMe().data;
   const [making, setMaking] = useState(false);
+  const [keys, setKeys] = useState<string | null>(null);
   const logins = data.logins.filter(ofWeb);
+  const keysOf = keys ? logins.find((l) => l.id === keys) : undefined;
+  if (keysOf)
+    return (
+      <div key={keysOf.id} className="g-slide h-full">
+        <PasskeysPage login={keysOf} onBack={() => setKeys(null)} />
+      </div>
+    );
   return (
     <Page
       title={t("term.panel")}
@@ -430,7 +438,7 @@ function AppPage({ data, onBack }: { data: Apps; onBack: () => void }) {
       }
     >
       {making && <InviteForm done={() => setMaking(false)} />}
-      <WebLogins logins={logins} invites={data.invites} />
+      <WebLogins logins={logins} invites={data.invites} onPasskeys={me?.public ? setKeys : undefined} />
     </Page>
   );
 }
@@ -457,7 +465,7 @@ async function revoke(qc: QueryClient, id: string, name: string) {
 /** A login, as an app's row: its avatar (pressed, a new one), name (its key renames it), when it
  *  was last active, waiting or not; its permissions and removal in its menu (right click, a long
  *  press). */
-function LoginRow({ l, app, remove }: { l: Login; app: string; remove: () => void }) {
+function LoginRow({ l, app, remove, onPasskeys }: { l: Login; app: string; remove: () => void; onPasskeys?: () => void }) {
   const me = useMe().data;
   const [renaming, setRenaming] = useState(false);
   const [perms, setPerms] = useState(false);
@@ -466,7 +474,7 @@ function LoginRow({ l, app, remove }: { l: Login; app: string; remove: () => voi
   return (
     <div className="flex flex-col">
       <div {...menu.on} className={cn("flex min-h-12 items-center gap-3 rounded-lg px-2", menu.at && "bg-fill")}>
-        <AvatarKey label={t("term.avatar")} onClick={face.open} src={l.avatar} name={l.name} size={28} />
+        <AvatarKey label={t("term.avatar")} onClick={face.open} src={l.avatar} name={l.name} size={28} {...deviceBadge(l.device)} />
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-2">
             {renaming ? <Rename id={l.id} name={l.name} done={() => setRenaming(false)} /> : <span className="truncate text-base">{l.name}</span>}
@@ -476,6 +484,7 @@ function LoginRow({ l, app, remove }: { l: Login; app: string; remove: () => voi
           <span className="flex items-center gap-1.5 text-xs whitespace-nowrap text-ink-3 tabular-nums">
             {l.online ? <span className="size-1.5 shrink-0 rounded-full bg-run" aria-hidden /> : null}
             {l.online ? t("term.online") : ago(l.lastSeenAt || l.createdAt || 0)}
+            {onPasskeys && l.passkeys ? ` · ${t("passkey.count", { n: l.passkeys })}` : null}
           </span>
         </span>
         {!renaming && (
@@ -493,6 +502,7 @@ function LoginRow({ l, app, remove }: { l: Login; app: string; remove: () => voi
       {face.input}
       {menu.menu([
         { icon: <SlidersHorizontal size={15} />, label: t("apps.perms"), run: () => setPerms(!perms) },
+        ...(onPasskeys ? [{ icon: <KeyRound size={15} />, label: t("passkey.menu"), run: onPasskeys }] : []),
         { icon: <Trash2 size={15} />, label: t("apps.removeLogin"), run: remove },
       ])}
     </div>
@@ -500,12 +510,12 @@ function LoginRow({ l, app, remove }: { l: Login; app: string; remove: () => voi
 }
 
 /** 网页's logins (the browsers' passkeys) and its unused invites as slots. */
-function WebLogins({ logins, invites }: { logins: Login[]; invites: PendingInvite[] }) {
+function WebLogins({ logins, invites, onPasskeys }: { logins: Login[]; invites: PendingInvite[]; onPasskeys?: (login: string) => void }) {
   const qc = useQueryClient();
   return (
     <Group title={t("apps.logins")}>
       {logins.map((l) => (
-        <LoginRow key={l.id} l={l} app="ir_web" remove={() => void revoke(qc, l.id, l.name)} />
+        <LoginRow key={l.id} l={l} app="ir_web" remove={() => void revoke(qc, l.id, l.name)} onPasskeys={onPasskeys && (() => onPasskeys(l.id))} />
       ))}
       {invites.map((i) => (
         <div key={i.id} className="flex min-h-10 items-center gap-3 px-2">
@@ -520,6 +530,163 @@ function WebLogins({ logins, invites }: { logins: Login[]; invites: PendingInvit
       ))}
       <SecretHere at="terminals" />
     </Group>
+  );
+}
+
+/** The marks of the devices a browser of 网页 is on (api.Device); "none" shows none. */
+const DEVICE_MARKS: Record<Device, LucideIcon> = { computer: Monitor, laptop: Laptop, phone: Smartphone, none: EyeOff };
+const DEVICE_CHOICES: Device[] = ["computer", "laptop", "phone", "none"];
+
+/** A login's avatar's corner: the device it was last on (its browser's passkey's). */
+const deviceBadge = (d?: Device) => (d && d !== "none" ? { badge: DEVICE_MARKS[d], badgeLabel: t(`device.${d}`) } : {});
+
+/** A day as "11-10". */
+const day = (ms: number) => {
+  const d = new Date(ms);
+  return `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+
+/** A login's passkeys, one per device (docs/web.md "Passkey"): each its device's mark (pressed, a
+ *  menu to set it, or 自动: by the browser), when made and last used, its ✕ (not the last one's: a
+ *  login keeps one; remove the login instead). + top right: a one-time link that adds one, shown
+ *  once here; a link not used yet is a row of its own till it is. */
+function PasskeysPage({ login, onBack }: { login: Login; onBack: () => void }) {
+  useLang();
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ["passkeys", login.id], queryFn: () => api.passkeys(login.id) });
+  const at = `passkeys:${login.id}`;
+  const changed = () => {
+    void qc.invalidateQueries({ queryKey: ["passkeys", login.id] });
+    void qc.invalidateQueries({ queryKey: ["apps"] });
+  };
+  const add = async () => {
+    try {
+      showSecret({ invite: await api.addPasskey(login.id), passkey: true, at });
+      changed();
+    } catch (e) {
+      toast(t("passkey.add"), { error: true, description: errText(e) });
+    }
+  };
+  const keys = q.data?.passkeys ?? [];
+  return (
+    <Page
+      title={t("passkey.title", { name: login.name })}
+      onBack={onBack}
+      backLabel={t("term.panel")}
+      busy={q.isFetching}
+      right={
+        <IconKey label={t("passkey.add")} onClick={() => void add()} tipSide="bottom" className="size-7">
+          <Plus size={16} />
+        </IconKey>
+      }
+    >
+      <SecretHere at={at} />
+      {q.isError && <p className="m-0 text-sm text-ink-3">{errText(q.error)}</p>}
+      <section className="flex flex-col">
+        {keys.map((k) => (
+          <PasskeyRow key={k.id} login={login.id} k={k} last={keys.length === 1} changed={changed} />
+        ))}
+        {q.data?.links.map((l) => (
+          <PasskeyLinkRow key={l.id} login={login.id} l={l} changed={changed} />
+        ))}
+      </section>
+    </Page>
+  );
+}
+
+function PasskeyRow({ login, k, last, changed }: { login: string; k: Passkey; last: boolean; changed: () => void }) {
+  const Mark = DEVICE_MARKS[k.device] ?? Monitor;
+  const set = async (d: Device | "") => {
+    try {
+      await api.passkeyDevice(login, k.id, d);
+      changed();
+    } catch (e) {
+      toast(t("passkey.device"), { error: true, description: errText(e) });
+    }
+  };
+  const remove = async () => {
+    try {
+      await api.removePasskey(login, k.id);
+      toast(t("passkey.removed", { name: k.name }));
+      changed();
+    } catch (e) {
+      toast(t("passkey.remove"), { error: true, description: errText(e) });
+    }
+  };
+  const chosen: Device | "" = k.auto ? "" : k.device;
+  const item = (d: Device | "", Icon: LucideIcon, label: string, hint?: string) => (
+    <Menu.Item key={d || "auto"} onClick={() => void set(d)} className="flex min-h-8 cursor-default items-center gap-2.5 rounded-md px-2.5 py-1 text-base outline-none select-none data-highlighted:bg-fill pointer-coarse:min-h-11">
+      <Icon size={15} className="shrink-0 text-ink-2" />
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate">{label}</span>
+        {hint && <span className="text-xs text-ink-3">{hint}</span>}
+      </span>
+      {chosen === d && <Check size={15} className="shrink-0" />}
+    </Menu.Item>
+  );
+  return (
+    <div className="flex min-h-14 items-center gap-3 rounded-lg px-2">
+      <Menu.Root>
+        <Tip label={`${t("passkey.device")} · ${k.auto ? t("passkey.auto") : t(`device.${k.device}`)}`}>
+          <Menu.Trigger
+            aria-label={t("passkey.device")}
+            className="g-press grid size-8 shrink-0 place-items-center rounded-lg bg-fill text-ink-2 outline-none hover:bg-fill-2 focus-visible:ring-2 focus-visible:ring-edge data-popup-open:bg-fill-2 data-popup-open:text-ink"
+          >
+            <Mark size={16} />
+          </Menu.Trigger>
+        </Tip>
+        <Menu.Portal>
+          <Menu.Positioner side="bottom" align="start" sideOffset={4} collisionPadding={8} className="z-50">
+            <Menu.Popup finalFocus={false} className="g-unfold glass thick float max-w-[calc(100vw-16px)] min-w-48 rounded-lg p-1.5 text-ink outline-none">
+              <div className="flex flex-col">
+                {item("", MonitorSmartphone, t("passkey.auto"), t("passkey.autoHint"))}
+                <div className="mx-2 my-1 border-t border-edge" />
+                {DEVICE_CHOICES.map((d) => item(d, DEVICE_MARKS[d], t(`device.${d}`)))}
+              </div>
+            </Menu.Popup>
+          </Menu.Positioner>
+        </Menu.Portal>
+      </Menu.Root>
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-2">
+          <span className="truncate text-base">{k.name}</span>
+          {k.current && <span className="shrink-0 text-xs text-ink-3">{t("term.this")}</span>}
+        </span>
+        <span className="flex items-center gap-1.5 text-xs whitespace-nowrap text-ink-3 tabular-nums">
+          {k.auto && <span className="rounded-sm bg-fill px-1 text-[11px] leading-4 text-ink-2">{t("passkey.auto")}</span>}
+          <span className="truncate">
+            {t("passkey.made", { date: day(k.createdAt) })} · {t("passkey.used", { ago: ago(k.lastUsedAt) })}
+          </span>
+        </span>
+      </span>
+      {!last && (
+        <IconKey label={t("passkey.remove")} onClick={() => void remove()} className="size-7">
+          <X size={15} />
+        </IconKey>
+      )}
+    </div>
+  );
+}
+
+/** A link to add a passkey not used yet: 等待新设备, till when, its ✕ takes it back. */
+function PasskeyLinkRow({ login, l, changed }: { login: string; l: PasskeyLink; changed: () => void }) {
+  const drop = async () => {
+    try {
+      await api.dropPasskeyLink(login, l.id);
+      changed();
+    } catch (e) {
+      toast(t("err.revoke"), { error: true, description: errText(e) });
+    }
+  };
+  return (
+    <div className="flex min-h-12 items-center gap-3 px-2">
+      <Link2 size={15} className="mx-2 shrink-0 text-ink-3" />
+      <span className="min-w-0 flex-1 truncate text-base text-ink-2">{t("passkey.waiting")}</span>
+      <span className="text-xs text-ink-3 tabular-nums">{t("term.until", { time: clock(l.expiresAt) })}</span>
+      <IconKey label={t("term.revoke")} onClick={() => void drop()} className="size-7">
+        <X size={15} />
+      </IconKey>
+    </div>
   );
 }
 

@@ -405,6 +405,18 @@ func From(terminal, tag string) string {
 	return terminal + fromSep + tag
 }
 
+// FromDevice is from (From's, FromLogin's, or a terminal alone) with the device it was sent from,
+// a browser of ir_web's (api.Device): kept with the message for the badge on its avatar.
+func FromDevice(from, device string) string {
+	if device == "" {
+		return from
+	}
+	t, rest, _ := strings.Cut(from, fromSep)
+	tag, login, _ := strings.Cut(rest, fromSep)
+	login, _, _ = strings.Cut(login, fromSep)
+	return t + fromSep + tag + fromSep + login + fromSep + device
+}
+
 // FromLogin is From for a login of an app (not ir_web's): its message counted to the app, the
 // login kept with it.
 func FromLogin(terminal, login, tag string) string {
@@ -423,14 +435,18 @@ func viaOf(tag string) string {
 	return id
 }
 
-// source splits a sender into the terminal's ID, the tag the agent sees and the login of the app
-// it came from (if one).
-func (m *Manager) source(from string) (terminal, tag, login string) {
+// source splits a sender into the terminal's ID, the tag the agent sees, the login of the app it
+// came from (if one) and the device (FromDevice).
+func (m *Manager) source(from string) (terminal, tag, login, device string) {
 	if t, g, ok := strings.Cut(from, fromSep); ok {
 		g, login, _ = strings.Cut(g, fromSep)
-		return t, g, login
+		login, device, _ = strings.Cut(login, fromSep)
+		if g == "" {
+			g = m.tagOf(t)
+		}
+		return t, g, login, device
 	}
-	return from, m.tagOf(from), ""
+	return from, m.tagOf(from), "", ""
 }
 
 // Interrupt stops the running turn; the agent stays.
@@ -727,6 +743,6 @@ func NewChannelID() string { return newUUID() }
 
 // SourceTag is the name the agent sees a message from `from` under (Send's "[name] ").
 func (m *Manager) SourceTag(from string) string {
-	_, tag, _ := m.source(from)
+	_, tag, _, _ := m.source(from)
 	return tag
 }
