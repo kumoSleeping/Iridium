@@ -35,8 +35,8 @@ PUT internal/channels/{id}/people {people} -> ChannelMembers  who may speak in t
 PATCH internal/channels/{id}/members/{member} {nick?, recv?} -> ChannelMembers  rename a member (agent:<session>; its nick is the same in every channel), change what it receives (all: what people say; at: what names it); an agent: its own recv only, any member's nick
 POST internal/channels/{id}/follow {user, count?, seconds?} -> Follow  be given the next count (1) messages of user (a nick, a user id, * anyone) in the channel within seconds (600), named or not; an agent of the channel only
 GET internal/channels/{id}/avatar - -> image  the channel's face (a session's: its agent's); its own, else the one last given to a session of its model; 404 none
-PUT internal/channels/{id}/avatar {avatar} -> {ok}  give it a face: avatar a PNG, JPEG or WebP image in base64 (or the image itself as the body), at most 2 MB; a session's is kept for its model too; person only
-DELETE internal/channels/{id}/avatar - -> {ok}  take its own face away; person only
+PUT internal/channels/{id}/avatar {avatar} -> {ok}  give it a face: avatar a PNG, JPEG or WebP image in base64 (or the image itself as the body), at most 2 MB; a session's: its agent's face, kept for its model too. The channel's own face (the list's, the title's): PATCH internal/channels/{id} avatar=<image file>
+DELETE internal/channels/{id}/avatar - -> {ok}  take its own face away
 GET internal/channels/{id}/reads - -> ChannelReads  how far each member has read the channel: a person as they said, an agent as far as it was given; who read message n: those with seq >= n  view=readers.member,readers.name,readers.nick,readers.seq
 POST internal/channels/{id}/read {seq} -> ChannelReads  you have read the channel up to message seq (never back); person only
 GET internal/ats - -> ChannelAts  per channel, the first message that names you (@name, @全体成员, a quote of your words) and you have not read: {seq, everyone}; person only

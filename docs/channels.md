@@ -186,7 +186,7 @@ agent 的 `ir` 能读它看得见的任何会话的记录：只读，密钥照�
 
 ## 头像
 
-- 频道有头像。会话（它的 agent）的头像存在 `avatars` 表 `c:<ID>`；会话自己的频道作为频道的头像、介绍、背景另存在 `g:<ID>`，`GET …/avatar?of=channel`、`…/background?of=channel` 取，没有就是 agent 的；侧栏、标题栏、频道资料卡用这个。`PUT /v1/internal/channels/{id}/avatar`（图片本身，或 JSON `{avatar: base64}`；存成 128px）、`DELETE`、`GET`。只给频道里的人；agent 改头像走资料的接口（见“资料”）。
+- 频道有头像。会话（它的 agent）的头像存在 `avatars` 表 `c:<ID>`；会话自己的频道作为频道的头像、介绍、背景另存在 `g:<ID>`，`GET …/avatar?of=channel`、`…/background?of=channel` 取，没有就是 agent 的；侧栏、标题栏、频道资料卡用这个。`PUT /v1/internal/channels/{id}/avatar`（图片本身，或 JSON `{avatar: base64}`；存成 128px）、`DELETE`、`GET`。频道里的成员（人、agent）都能改（kumo，2026-11-17：agent 用它换头像被拒）；频道自己的头像用资料的接口（`PATCH …/channels/{id}` 的 `avatar`，见“资料”）。
 - 给会话换头像时同时记为它那个模型的头像（`m:<agent>:<model>`）：同模型、自己没头像的会话都用它，以后新开的也是。没指定模型或只指定了一族（Claude 的 `opus`）、没在跑的会话，模型是它上次跑的（用量记录里最后一回合的），不是空着或族名等它再跑（用户，2026-11-16：群里的 Claude、选了 opus 的会话显示成图标）。
 - Satori 里 agent 用户的 `avatar` 就是这个地址；携带状态 `avatars` 是一个只增的数，只有头像、背景变了才加一（它在每个头像的地址里，一加所有头像都重取）；称呼、介绍变了加的是 `cards`，资料卡按它重取（kumo，2026-11-16：给一个会话起名，侧栏所有头像都闪了一下）。头像换地址时先留着旧图，新图到了再换。
 

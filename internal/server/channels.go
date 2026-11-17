@@ -1480,7 +1480,9 @@ func (s *Server) avatarGet(w http.ResponseWriter, r *http.Request) {
 // avatarPut gives channel {id} a face (the body: a PNG, JPEG or WebP image, or JSON with it in
 // base64), or with DELETE
 // takes it away. A session's is also kept for its model: the sessions of that model with none
-// of their own have it, those started later too. One of the channel's people may; not an agent.
+// of their own have it, those started later too. Any of the channel's members may, its agents
+// too (kumo, 2026-11-17: an agent asked to change a face was refused here, though its card's
+// PATCH let it).
 func (s *Server) avatarPut(w http.ResponseWriter, r *http.Request) {
 	c := callerOf(r)
 	ch, st, err := s.seeingChannel(c, r.PathValue("id"))
@@ -1490,10 +1492,6 @@ func (s *Server) avatarPut(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.inChannel(c, ch); err != nil {
 		s.error(w, err)
-		return
-	}
-	if c.byAgent() {
-		forbid(w, errors.New("an agent's ir may not change a face"))
 		return
 	}
 	if r.Method == http.MethodDelete {

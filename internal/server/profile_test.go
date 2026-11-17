@@ -238,3 +238,15 @@ func TestChannelCardApart(t *testing.T) {
 	}
 	l.want(200, "web", "GET", "/v1/internal/channels/"+ch+"/avatar?of=channel", nil, nil)
 }
+
+// An agent changes a face with the face's own route too (kumo, 2026-11-17: it was refused there).
+func TestAgentPutsFace(t *testing.T) {
+	t.Parallel()
+	l, ch, second := two(t)
+	png := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+	l.want(200, "agent-in:"+second, "PUT", "/v1/internal/channels/"+ch+"/avatar", map[string]any{"avatar": png}, nil)
+	if _, _, ok := l.s.face(store.ChannelProfileKey(ch), false, ""); !ok {
+		t.Fatal("no face after an agent's PUT")
+	}
+	l.want(200, "agent-in:"+second, "DELETE", "/v1/internal/channels/"+ch+"/avatar", nil, nil)
+}
