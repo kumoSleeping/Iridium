@@ -69,11 +69,11 @@ function Shown({ src, under, alt, className, style }: { src: string; under?: str
  *  as the composer's and its own shape, as it was there. under: what shows till it has come.
  *  w, h: its size as the server read it: its place is kept as it loads, the conversation does not
  *  move (a chat opened the first time, its pictures not yet in the cache). */
-export function Picture({ src, full, name, small, under, w, h }: { src: string; full: string; name: string; small?: boolean; under?: string; w?: number; h?: number }) {
+export function Picture({ src, full, name, under, w, h }: { src: string; full: string; name: string; under?: string; w?: number; h?: number }) {
   return (
     <Zoom full={full} name={name}>
-      <button type="button" aria-label={`${name} · ${t("msg.openImage")}`} className={cn("g-press relative block overflow-hidden rounded-lg bg-fill shadow-[0_0_0_0.5px_var(--edge)]", small ? "h-14" : "w-full max-w-[340px]")}>
-        <Shown src={src} under={under} alt={name} style={w && h ? { aspectRatio: `${w} / ${h}` } : undefined} className={cn("block object-cover", small ? "h-full w-auto max-w-40 min-w-10" : "max-h-[420px] w-full")} />
+      <button type="button" aria-label={`${name} · ${t("msg.openImage")}`} className="g-press relative block w-full max-w-[340px] overflow-hidden rounded-lg bg-fill shadow-[0_0_0_0.5px_var(--edge)]">
+        <Shown src={src} under={under} alt={name} style={w && h ? { aspectRatio: `${w} / ${h}` } : undefined} className="block max-h-[420px] w-full object-cover" />
       </button>
     </Zoom>
   );

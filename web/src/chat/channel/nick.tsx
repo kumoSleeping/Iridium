@@ -1,7 +1,7 @@
 // A member named among the words of a channel (docs/channels.md; agents, people and apps are
 // peers, the user, 2026-11-13): drawn as a session named is (mention.tsx NamedLink), the @ kept
-// in front (the user, 2026-11-12), its face (an agent's own, as beside its words, its model's
-// face.tsx; a person's or an app's avatar) and its name, underlined; pressed, its card, the one its face opens. The names of all
+// in front (the user, 2026-11-12), its name, then its face (kumo, 2026-11-17; an agent's own, as
+// beside its words, its model's face.tsx; a person's or an app's avatar), underlined; pressed, its card, the one its face opens. The names of all
 // (全体成员, 全体Agent) a mark and the words, no key. One form, in a person's words and in an
 // agent's Markdown (chat/markdown.tsx, by the link lib.ts linkNicks makes of it).
 import { Popover } from "@base-ui/react/popover";
@@ -36,8 +36,8 @@ export function NickLink({ nick }: { nick: string }) {
     return (
       <span className={LINK}>
         <span className="-mr-0.5 text-ink-3">@</span>
-        <Mark size={13} className="shrink-0 self-center text-ink-2" />
         <span className="min-w-0 font-medium [overflow-wrap:anywhere]">{nick}</span>
+        <Mark size={13} className="shrink-0 self-center text-ink-2" />
       </span>
     );
   }
@@ -49,8 +49,8 @@ export function NickLink({ nick }: { nick: string }) {
         render={
           <button ref={key} type="button" className={`${LINK} underline decoration-ink-4 underline-offset-2 hover:decoration-ink-2`}>
             <span className="-mr-0.5 text-ink-3">@</span>
-            <span className="self-center">{m.person ? <Avatar src={m.avatar} name={m.nick} size={14} /> : <Face id={m.session} agent={m.agent} size={14} />}</span>
             <span className="min-w-0 [overflow-wrap:anywhere]">{m.nick}</span>
+            <span className="self-center">{m.person ? <Avatar src={m.avatar} name={m.nick} size={14} /> : <Face id={m.session} agent={m.agent} size={14} />}</span>
           </button>
         }
       />

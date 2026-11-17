@@ -227,6 +227,15 @@ const quotaTone = (pct: number) => (pct >= 95 ? ["bg-err", "text-err"] : pct >= 
 /** using: what the session names the model it uses (chat.tsx): a window of one model shows only
  *  where that model is in use. machine: where the session runs; the windows are that machine's
  *  login's (an executor's may be another account), not this one's. */
+/** The small bars' rows: one each; more than two, the agent's own windows side by side in the
+ *  first (Claude's 5 小时 and 7 天) and each model's in a row of its own after (kumo, 2026-11-17:
+ *  three stacked looked crowded). */
+export function barRows<W extends { group: string; model?: string }>(windows: W[]): W[][] {
+  if (windows.length <= 2) return windows.map((w) => [w]);
+  const all = windows.filter((w) => !w.model);
+  return [...(all.length ? [all] : []), ...windows.filter((w) => w.model).map((w) => [w])];
+}
+
 /** compact: the phone's bars wherever it is (after an agent's model name, the user, 2026-11-13);
  *  pressed, the popover. */
 export function QuotaBars({ agent, machine, live, using, open, onOpenChange, compact }: { agent: Agent; machine?: string; live: boolean; using: (string | undefined)[]; open?: boolean; onOpenChange?: (o: boolean) => void; compact?: boolean }) {
@@ -273,14 +282,18 @@ export function QuotaBars({ agent, machine, live, using, open, onOpenChange, com
                 <span className={cn("text-xs text-ink-3 tabular-nums transition-opacity", stale && "opacity-50")}>{balance.map((b) => money(b.currency, b.total)).join(" · ")}</span>
               ) : phone ? (
                 <span className={cn("flex w-9 flex-col gap-[3px] transition-opacity", stale && "opacity-50")}>
-                  {windows.map((w) => {
-                    const pct = Math.round(w.percent);
-                    return (
-                      <span key={quotaKey(q, w)} className="relative block h-[3px] overflow-hidden rounded-full bg-fill-2">
-                        <span className={cn("absolute inset-y-0 left-0 w-full origin-left rounded-full transition-transform duration-(--dur-3)", quotaTone(pct)[0])} style={{ transform: `scaleX(${Math.min(100, pct) / 100})` }} />
-                      </span>
-                    );
-                  })}
+                  {barRows(windows).map((row) => (
+                    <span key={row.map((w) => quotaKey(q, w)).join()} className="flex gap-[3px]">
+                      {row.map((w) => {
+                        const pct = Math.round(w.percent);
+                        return (
+                          <span key={quotaKey(q, w)} className="relative block h-[3px] min-w-0 flex-1 overflow-hidden rounded-full bg-fill-2">
+                            <span className={cn("absolute inset-y-0 left-0 w-full origin-left rounded-full transition-transform duration-(--dur-3)", quotaTone(pct)[0])} style={{ transform: `scaleX(${Math.min(100, pct) / 100})` }} />
+                          </span>
+                        );
+                      })}
+                    </span>
+                  ))}
                 </span>
               ) : (
                 <span className={cn("flex items-center gap-3 transition-opacity @max-md:gap-2", stale && "opacity-50")}>

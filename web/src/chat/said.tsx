@@ -243,35 +243,44 @@ function SendState({ state }: { state: Going }) {
 
 /** words: the text drawn another way than Worded's (a channel's, its nicks too: chat/channel). */
 export const YouBubble = forwardRef<HTMLDivElement, { text: string; who: You; failed?: boolean; children?: ReactNode; time?: number; going?: Going; words?: ReactNode; left?: boolean; card?: ReactNode; menu?: FaceMenu; under?: ReactNode }>(function YouBubble({ text, who, failed, children, time, going, words, left, card, menu, under }, ref) {
-  // What the words name, where they name it (Worded); the files in a row under them.
-  const row = Children.count(children) > 0;
+  // What the words name, where they name it (Worded); the files under the bubble, a picture as
+  // large as an agent's (kumo, 2026-11-17: one small in the bubble could not be made out).
+  const files = Children.count(children) > 0;
+  const bubble = !!text || !files;
   return (
     <Sender ref={ref} who={who} left={left} card={card} menu={menu} under={under} time={time}>
-      <div className="relative max-w-[min(560px,100%)] px-3.5 py-2">
-        {going && <SendState state={going} />}
-        <span data-bubble-bg className={cn("absolute inset-0 rounded-xl bg-fill", left ? "rounded-tl-sm" : "rounded-tr-sm", failed && "shadow-[inset_0_0_0_1px_var(--err)]")} aria-hidden />
-        {text && (
-          <span className="relative block text-md whitespace-pre-wrap [overflow-wrap:anywhere]">
-            {words ?? <Worded text={text} />}
-          </span>
-        )}
-        {/* Not for no files: a message sent and the same one landed are as high (an empty list was
-            a row of its own, the bubble shrinking as it landed). */}
-        {row && (
-          <span className={cn("relative flex flex-wrap gap-1.5", text && "mt-1")}>
-            {children}
-          </span>
-        )}
-      </div>
+      {bubble && (
+        <div className="relative max-w-[min(560px,100%)] px-3.5 py-2">
+          {going && <SendState state={going} />}
+          <span data-bubble-bg className={cn("absolute inset-0 rounded-xl bg-fill", left ? "rounded-tl-sm" : "rounded-tr-sm", failed && "shadow-[inset_0_0_0_1px_var(--err)]")} aria-hidden />
+          {text && (
+            <span className="relative block text-md whitespace-pre-wrap [overflow-wrap:anywhere]">
+              {words ?? <Worded text={text} />}
+            </span>
+          )}
+        </div>
+      )}
+      {files && <Sent left={left} going={bubble ? undefined : going}>{children}</Sent>}
     </Sender>
   );
 });
 
-/** A file in your words, as it was in the composer: a picture small, opening the original; any
- *  other its card. */
+/** A message's files under its bubble, as an agent's are (files.tsx Files): a column as wide as
+ *  a picture, on the sender's side. going: where it is, when there are no words to mark. */
+function Sent({ left, going, children }: { left?: boolean; going?: Going; children: ReactNode }) {
+  return (
+    <div className={cn("relative flex w-[340px] max-w-full flex-col gap-2", left ? "items-start" : "items-end")}>
+      {going && <SendState state={going} />}
+      {children}
+    </div>
+  );
+}
+
+/** A file in your words: a picture as an agent's (its copy here under it till the server's
+ *  thumbnail has come), opening the original; any other its card. */
 export function Attached({ session, f }: { session: string; f: FileRef }) {
   const url = api.fileURL(session, f.ref, false, f.mtime);
-  if (f.kind === "image") return <Picture src={f.thumb ? api.thumbURL(session, f.ref, 256, f.mtime) : url} full={url} name={f.name} small under={previews.get(f.path)} w={f.w} h={f.h} />;
+  if (f.kind === "image") return <Picture src={f.thumb ? api.thumbURL(session, f.ref, 1024, f.mtime) : url} full={url} name={f.name} under={previews.get(f.path)} w={f.w} h={f.h} />;
   return <SentFile name={f.name} bytes={f.size} href={api.fileURL(session, f.ref, true, f.mtime)} view={url} mime={f.mime} />;
 }
 
@@ -283,7 +292,7 @@ export function Pending({ s, who, retry, drop, bubbleRef, words }: { s: Sent; wh
     <div className="flex flex-col items-end gap-0.5">
       <YouBubble ref={bubbleRef} text={s.text} who={who} words={words} failed={s.failed !== undefined} going={s.failed !== undefined ? undefined : s.queued ? "queued" : s.steer ? "steering" : "sending"}>
         {s.files.map((f) =>
-          f.url ? <Picture key={f.ref} src={f.url} full={f.url} name={f.name} small /> : <SentFile key={f.ref} name={f.name} bytes={f.size} />,
+          f.url ? <Picture key={f.ref} src={f.url} full={f.url} name={f.name} /> : <SentFile key={f.ref} name={f.name} bytes={f.size} />,
         )}
       </YouBubble>
       {s.failed !== undefined && (
@@ -308,18 +317,14 @@ function Letter({ src, text, time, onJump, children }: { src: From; text: string
   const files = Children.count(children) > 0;
   return (
     <Sender who={src} time={time} left jump={src.session ? () => onJump(src.session!) : undefined}>
-      <div className="max-w-[min(560px,100%)] min-w-0 rounded-xl rounded-tl-sm bg-fill px-3.5 py-2">
-        {text && (
+      {(text || !files) && (
+        <div className="max-w-[min(560px,100%)] min-w-0 rounded-xl rounded-tl-sm bg-fill px-3.5 py-2">
           <p className="m-0 text-md whitespace-pre-wrap [overflow-wrap:anywhere]">
             <Worded text={text} />
           </p>
-        )}
-        {files && (
-          <div className={cn("flex flex-wrap gap-1.5", text && "mt-1")}>
-            {children}
-          </div>
-        )}
-      </div>
+        </div>
+      )}
+      {files && <Sent left>{children}</Sent>}
     </Sender>
   );
 }

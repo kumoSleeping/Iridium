@@ -9,7 +9,7 @@ import { commandsOf, keyMode, matching } from "../src/chat/composer";
 import { shellLine } from "../src/chat/shell";
 import { crashParts } from "../src/chat/crash";
 import { levelName, restAt } from "../src/chat/effort";
-import { ctxParts, hitRate, modelView } from "../src/chat/meters";
+import { barRows, ctxParts, hitRate, modelView } from "../src/chat/meters";
 import { atSessions, attachedOf, atWord, boxAt, boxed, edited, fromSatori, MARK, mentions, outOf, sessionLink, wordsAt, SID, sessionIds, shortId, sourceOf, type Who, withoutFiles, withoutNameLines, draftWords } from "../src/chat/refs";
 import { t } from "../src/i18n";
 import { en } from "../src/i18n/en";
@@ -480,6 +480,15 @@ describe("composer", () => {
     expect(commandsOf(pi).map((c) => c.name)).toEqual(["clear", "compact", "context", "model", "mode"]);
     const codex = commandsOf({ ...pi, agent: "codex", commands: [{ name: "clear" }, { name: "compact" }, { name: "effort" }, { name: "review", description: "own" }] });
     expect(codex.map((c) => [c.name, !!c.description])).toEqual([["clear", true], ["compact", true], ["effort", true], ["review", true]]);
+  });
+});
+
+describe("quota bar rows", () => {
+  test("two or fewer stacked; three: the agent's own side by side, then each model's", () => {
+    const five = { group: "session", percent: 1 }, week = { group: "weekly", percent: 2 }, fable = { group: "weekly", model: "Fable", percent: 3 };
+    expect(barRows([five, week])).toEqual([[five], [week]]);
+    expect(barRows([five, week, fable])).toEqual([[five, week], [fable]]);
+    expect(barRows([fable, five, week])).toEqual([[five, week], [fable]]);
   });
 });
 

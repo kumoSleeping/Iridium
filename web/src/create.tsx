@@ -20,7 +20,7 @@ import { effortName, picked, prefetchRoles, RoleFace, RoleLine, RoleModels, role
 import { validNick } from "./chat/channel/lib";
 import { ProfileCard } from "./chat/channel/profilecard";
 import { errText, toast } from "./toast";
-import { AGENTS, agentName, Avatar, cn, homeOf, IconKey, Logo, own, PopSurface, tilde, Tip, useLongPress, useMenuAt } from "./ui";
+import { AGENTS, agentName, Avatar, cn, homeOf, IconKey, Logo, own, PHONE, PopSurface, tilde, Tip, useLongPress, useMedia, useMenuAt } from "./ui";
 
 const join = (dir: string, name: string) => (dir.endsWith("/") ? dir + name : `${dir}/${name}`);
 /** One folder's listing; prefetched before it is shown (the popover opening, a row hovered), so the
@@ -314,6 +314,9 @@ export function NewSession({ ws, folder, onFolder, onPick, busy, onMake }: { ws:
   const dup = (x: Seat) => !!typed(x) && shown.some((y) => y !== x && typed(y).toLowerCase() === typed(x).toLowerCase());
   const bad = (x: Seat) => (!!typed(x) && !validNick(typed(x))) || dup(x);
   const lastRole = shown.find((x) => x.key === last && x.role);
+  // Its card beside the panel, by its row; where there is no room beside it (a phone), none.
+  const [roleRow, setRoleRow] = useState<HTMLDivElement | null>(null);
+  const wide = !useMedia(PHONE);
   const ready = bare === "on" || shown.length > 0;
   const start = () => {
     if (!ready || busy !== null) return;
@@ -435,12 +438,15 @@ export function NewSession({ ws, folder, onFolder, onPick, busy, onMake }: { ws:
         </Grow>
         {seats.map((x) => (
           <Grow key={x.key} open={!x.going}>
-            <SeatRow seat={x} at={at} recv={bare !== "off" || shown.length > 1 || x.recv !== "all"} own={bare === "off" && shown[0]?.key === x.key} bad={bad(x)} set={(p) => change(x.key, p)} remove={() => remove(x.key)} />
+            <SeatRow rowRef={x.key === lastRole?.key ? setRoleRow : undefined} seat={x} at={at} recv={bare !== "off" || shown.length > 1 || x.recv !== "all"} own={bare === "off" && shown[0]?.key === x.key} bad={bad(x)} set={(p) => change(x.key, p)} remove={() => remove(x.key)} />
           </Grow>
         ))}
       </div>
-      {/* The last role added: its card, as others will see it (kumo, 2026-11-16). */}
-      <Fold open={!!lastRole}>{lastRole?.role && <RolePreview role={picked(lastRole.role, lastRole.pick)} nick={typed(lastRole) && !bad(lastRole) ? typed(lastRole) : ""} at={at} />}</Fold>
+      {/* The last role added: its card, as others will see it (kumo, 2026-11-16), beside the
+          panel, not in it: in it, the panel grew and flipped above its key (kumo, 2026-11-17). */}
+      <RoleBeside open={wide && !!lastRole?.role && !!roleRow} anchor={roleRow}>
+        {lastRole?.role && <RolePreview role={picked(lastRole.role, lastRole.pick)} nick={typed(lastRole) && !bad(lastRole) ? typed(lastRole) : ""} at={at} />}
+      </RoleBeside>
       <Fold open={ready}>
         <button type="button" disabled={busy !== null} onClick={start} className="g-press mt-1 flex h-8 w-full items-center justify-center gap-1.5 rounded-md bg-fill text-sm hover:bg-fill-2 disabled:opacity-50 pointer-coarse:h-10">
           {busy !== null ? <LoaderCircle size={14} className="animate-spin" /> : <Play size={14} className="text-ink-2" />}
@@ -468,7 +474,7 @@ const member = (x: Seat): NewMember => ({ agent: x.agent, ...runs(x), ...(x.nick
  *  agents invited with it (agents). */
 export type As = Partial<ReturnType<typeof roleStart>> & { nick?: string; recv?: string; agents?: NewMember[] };
 
-/** What opens and shuts in the "+" (a role's card, 开始): its height glides, nothing jumps. */
+/** What opens and shuts in the "+" (开始): its height glides, nothing jumps. */
 function Fold({ open, children }: { open: boolean; children: ReactNode }) {
   return (
     <div aria-hidden={!open || undefined} inert={!open || undefined} className={cn("grid transition-[grid-template-rows,opacity] duration-(--dur-3) ease-(--ease-out)", open ? "grid-rows-[1fr]" : "grid-rows-[0fr] opacity-0")}>
@@ -607,7 +613,7 @@ const DraftModels = lazy(() => import("./chat/channel/pick").then((x) => ({ defa
  *  server's then), its model line (pressed: the model and effort menu, this once), what it
  *  receives (a key: 点名 or 全部; shown once there is more than one, or changed); its menu (right
  *  button, a finger held) to take it out. own: the session's own agent. */
-function SeatRow({ seat, at, recv, own: mine, bad, set, remove }: { seat: Seat; at: object; recv: boolean; own: boolean; bad: boolean; set: (p: Partial<Seat>) => void; remove: () => void }) {
+function SeatRow({ rowRef, seat, at, recv, own: mine, bad, set, remove }: { rowRef?: (el: HTMLDivElement | null) => void; seat: Seat; at: object; recv: boolean; own: boolean; bad: boolean; set: (p: Partial<Seat>) => void; remove: () => void }) {
   const m = useRowMenu();
   const asked = useQuery(choicesQ(seat.agent, at)).data;
   const role = seat.role && picked(seat.role, seat.pick);
@@ -616,7 +622,7 @@ function SeatRow({ seat, at, recv, own: mine, bad, set, remove }: { seat: Seat; 
   const kindLine = [model ?? agentName(seat.agent), seat.pick.effort ? effortName(seat.pick.effort) : ""].filter(Boolean).join(" · ");
   const recvLabel = t(seat.recv === "all" ? "new.recvAll" : "new.recvAt");
   return (
-    <div role="listitem" {...m.props} className="flex min-h-11 items-center gap-2 rounded-md px-1.5 py-1 pointer-coarse:min-h-13">
+    <div ref={rowRef} role="listitem" {...m.props} className="flex min-h-11 items-center gap-2 rounded-md px-1.5 py-1 pointer-coarse:min-h-13">
       {seat.role ? (
         <RoleFace role={seat.role} size={28} />
       ) : (
@@ -670,12 +676,32 @@ function SeatRow({ seat, at, recv, own: mine, bad, set, remove }: { seat: Seat; 
   );
 }
 
+/** What shows beside the panel, out of its row (anchor): to look at only, nothing on it to press
+ *  nor to focus, over nothing of the panel; the panel stays as it is. Its last words kept while
+ *  it shuts. */
+function RoleBeside({ open, anchor, children }: { open: boolean; anchor: Element | null; children: ReactNode }) {
+  const kept = useRef<ReactNode>(null);
+  if (open && children) kept.current = children;
+  return (
+    <Popover.Root open={open} modal={false}>
+      <Popover.Portal>
+        {/* Out from the panel's edge (its row is 6px in from it), the panel's own gap away. */}
+        <Popover.Positioner side="right" align="start" sideOffset={14} collisionPadding={8} anchor={anchor} className="pointer-events-none z-50">
+          <Popover.Popup initialFocus={false} finalFocus={false} aria-hidden className="g-unfold float w-[min(288px,calc(100vw-16px))] overflow-hidden rounded-lg bg-paper outline-none">
+            {open ? children : kept.current}
+          </Popover.Popup>
+        </Popover.Positioner>
+      </Popover.Portal>
+    </Popover.Root>
+  );
+}
+
 /** The card a session started as role will have (the one card, chat/channel/profilecard.tsx):
  *  its background, its face, its 称呼 (the one typed, else the role's name), its line, its
- *  intro. Nothing on it to press: the row above changes it. */
+ *  intro. Nothing on it to press: the row changes it. */
 function RolePreview({ role, nick, at }: { role: Role; nick: string; at: object }) {
   return (
-    <div key={role.id} className="g-fade mt-1 overflow-hidden rounded-lg bg-paper shadow-[0_0_0_0.5px_var(--edge)]">
+    <div key={role.id} className="g-fade">
       <ProfileCard face={<RoleFace role={role} size={56} />} name={nick || role.name} sub={<RoleLine role={role} at={at} logo className="min-w-0" />} intro={role.intro} background={role.background} keys={[]} />
     </div>
   );

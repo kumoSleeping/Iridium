@@ -14,7 +14,7 @@
 // own shape under a veil drawn back as it goes; nothing is sent till all are up.
 import { ArrowUp, Box, Brain, ChartPie, Eraser, FileCode2, FileText, FoldVertical, Gauge, LoaderCircle, Paperclip, Reply, ShieldCheck, X, type LucideIcon } from "lucide-react";
 import { useQueries, useQuery } from "@tanstack/react-query";
-import { forwardRef, Fragment, useEffect, useImperativeHandle, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { forwardRef, Fragment, useEffect, useImperativeHandle, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
 import type { Agent, Command, SessionState as LiveSession } from "../api/types.gen";
 import { runShell, shellLine, useShellable } from "./shell";
 import { api, missing } from "../api/client";
@@ -85,6 +85,19 @@ export function commandsOf(s: LiveSession): Command[] {
 
 type Att = { key: string; file: File; sent: number; ref?: string; path?: string; error?: string; url?: string; stop: AbortController };
 
+/** Each chat's files not yet sent, kept on this page while another chat is open (kumo,
+ *  2026-11-17: a picture attached was gone on coming back); an upload under way goes on into it. */
+const unsent = new Map<string, Att[]>();
+const unsentSubs = new Set<() => void>();
+const NO_ATTS: Att[] = [];
+const subscribeUnsent = (f: () => void) => (unsentSubs.add(f), () => void unsentSubs.delete(f));
+const setUnsent = (id: string, f: (a: Att[]) => Att[]) => {
+  const next = f(unsent.get(id) ?? NO_ATTS);
+  if (next.length) unsent.set(id, next);
+  else unsent.delete(id);
+  for (const x of unsentSubs) x();
+};
+
 /** insert: words at the caret, a space either side; name:
  *  a session (its ID) or a place named, a link where the caret is (a row dropped here, chat.tsx). */
 export type ComposerHandle = { focus: () => void; insert: (text: string) => void; attach: (files: File[]) => void; name: (to: string | NamedPlace) => void; box: () => HTMLTextAreaElement | null };
@@ -134,7 +147,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
   if (quote) lastQuote.current = quote;
   const shownQuote = quote ?? lastQuote.current;
   const [text, setText] = useState(() => kept(draftKey(s.id)) ?? "");
-  const [atts, setAtts] = useState<Att[]>([]);
+  const atts = useSyncExternalStore(subscribeUnsent, () => unsent.get(s.id) ?? NO_ATTS);
+  const sid = s.id;
+  const setAtts = (f: (a: Att[]) => Att[]) => setUnsent(sid, f);
   const [busy, setBusy] = useState(false);
   // The row pointed at in the open list; null: its first (in a typed path with a name begun, the
   // first folder that name finds).
@@ -358,7 +373,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
     // Its id chosen here: the transcript's block is found by it as it comes, whenever the answer does.
     const sent: Sent = { key: crypto.randomUUID(), text: words, files, from: 0, input: crypto.randomUUID(), steer: mode === "steer", ...(quote ? { quote: quote.n } : {}) };
     type("");
-    setAtts([]);
+    setAtts(() => []);
     unquote?.();
     // While a turn runs the server queues what is sent; steering joins the turn. Queued, the queue
     // shows it, not a bubble; turned away, the words go back where they were typed.
