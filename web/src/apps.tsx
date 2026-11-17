@@ -651,9 +651,9 @@ function PasskeyRow({ login, k, last, changed }: { login: string; k: Passkey; la
         <span className="flex items-center gap-2">
           <span className="truncate text-base">{k.name}</span>
           {k.current && <span className="shrink-0 text-xs text-ink-3">{t("term.this")}</span>}
+          {k.auto && <span className="shrink-0 rounded-sm bg-fill px-1 text-[11px] leading-4 text-ink-2">{t("passkey.auto")}</span>}
         </span>
         <span className="flex items-center gap-1.5 text-xs whitespace-nowrap text-ink-3 tabular-nums">
-          {k.auto && <span className="rounded-sm bg-fill px-1 text-[11px] leading-4 text-ink-2">{t("passkey.auto")}</span>}
           <span className="truncate">
             {t("passkey.made", { date: day(k.createdAt) })} · {t("passkey.used", { ago: ago(k.lastUsedAt) })}
           </span>
