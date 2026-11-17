@@ -743,7 +743,8 @@ func TestChannelAvatar(t *testing.T) {
 	if code := put("web", a, []byte("not an image")); code != 422 {
 		t.Errorf("not an image: %d", code)
 	}
-	if code := put("agent-in:"+a, a, png.Bytes()); code != 403 {
+	// An agent may too (kumo, 2026-11-17).
+	if code := put("agent-in:"+a, a, png.Bytes()); code != 200 {
 		t.Errorf("an agent: %d", code)
 	}
 	if code := put("web", a, png.Bytes()); code != 200 {
