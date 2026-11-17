@@ -3,6 +3,7 @@
 // picker: a breadcrumb you can tap or type into, folders only, an inline new folder, one key.
 import { Menu } from "@base-ui/react/menu";
 import { Popover } from "@base-ui/react/popover";
+import { Tooltip } from "@base-ui/react/tooltip";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bot, Check, ChevronDown, ChevronRight, Folder, FolderPlus, LoaderCircle, Play, UserMinus } from "lucide-react";
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
@@ -683,16 +684,17 @@ function RoleBeside({ open, anchor, children }: { open: boolean; anchor: Element
   const kept = useRef<ReactNode>(null);
   if (open && children) kept.current = children;
   return (
-    <Popover.Root open={open} modal={false}>
-      <Popover.Portal>
+    // A tooltip's, not a popover's: one nested in the panel took its Escape.
+    <Tooltip.Root open={open}>
+      <Tooltip.Portal>
         {/* Out from the panel's edge (its row is 6px in from it), the panel's own gap away. */}
-        <Popover.Positioner side="right" align="start" sideOffset={14} collisionPadding={8} anchor={anchor} className="pointer-events-none z-50">
-          <Popover.Popup initialFocus={false} finalFocus={false} aria-hidden className="g-unfold float w-[min(288px,calc(100vw-16px))] overflow-hidden rounded-lg bg-paper outline-none">
+        <Tooltip.Positioner side="right" align="start" sideOffset={14} collisionPadding={8} anchor={anchor} className="pointer-events-none z-50">
+          <Tooltip.Popup aria-hidden className="g-unfold float w-[min(288px,calc(100vw-16px))] overflow-hidden rounded-lg bg-paper outline-none">
             {open ? children : kept.current}
-          </Popover.Popup>
-        </Popover.Positioner>
-      </Popover.Portal>
-    </Popover.Root>
+          </Tooltip.Popup>
+        </Tooltip.Positioner>
+      </Tooltip.Portal>
+    </Tooltip.Root>
   );
 }
 
