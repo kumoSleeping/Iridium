@@ -123,6 +123,7 @@ export function Stick({ tail, older, draw, place, style, children, scroller, bot
     const was = el.scrollTop;
     el.scrollTop = bottomOf(el);
     ours.current = el.scrollTop;
+    mark(el);
     return el.scrollTop - was;
   };
   /** To the newest, gliding up by as far as that scrolled it (a message sent). */
@@ -198,6 +199,12 @@ export function Stick({ tail, older, draw, place, style, children, scroller, bot
     // The stack under it taller or shorter (the composer's lines), and all of the change.
     const dPad = live ? pad.current - padWas : 0;
     const d = live ? height.current - was + dPad : 0;
+    // All of the column's change above what is seen (a card far up filled in late, a picture there
+    // loading): what is seen from its top row to the end is as it was, so it is kept where it is,
+    // the end pinned; nothing held, nothing glides (otae-c, 2026-11-19: a card at the top of a long
+    // channel shrank seconds after it opened, and the end went up and then down again).
+    const a = anchor.current;
+    if (live && !dPad && height.current !== was && a && a.el.isConnected && col && Math.abs(lastTop.current - a.at) <= 1 && Math.abs(fromEnd(col, a.el) - a.h) < 0.5) return void pin(el);
     // The part of it that something moving of itself made: that is drawn by itself.
     const its = own ? d : d > 0 ? Math.min(d, Math.max(0, self)) : Math.max(d, Math.min(0, self));
     let push = d - its;
@@ -221,6 +228,24 @@ export function Stick({ tail, older, draw, place, style, children, scroller, bot
     pin(el);
     const by = before >= 0 ? el.scrollTop - before : 0;
     glide(push > 0 ? Math.min(push, Math.max(0, by)) : Math.max(push, Math.min(0, by)), settling);
+  };
+  /** The column's row at the top of what is seen as pin last put the end there (at: the scroll
+   *  then), and how far its top is from the column's end: what follow tells a change above what is
+   *  seen by. */
+  const anchor = useRef<{ el: Element; h: number; at: number } | null>(null);
+  const fromEnd = (col: HTMLElement, row: Element) => col.getBoundingClientRect().bottom - row.getBoundingClientRect().top;
+  const mark = (el: HTMLElement) => {
+    const col = colOf(el);
+    anchor.current = null;
+    if (!col) return;
+    const top = el.getBoundingClientRect().top;
+    // From the end up: the rows seen are the last few.
+    for (let row = col.lastElementChild; row; row = row.previousElementSibling) {
+      if (row.getBoundingClientRect().top <= top) {
+        anchor.current = { el: row, h: fromEnd(col, row), at: el.scrollTop };
+        return;
+      }
+    }
   };
   const glide = (by: number, settling = false) => {
     // A chat just opened settles in place (its pictures, the composer's cards): nothing glides. What
@@ -334,6 +359,9 @@ export function Stick({ tail, older, draw, place, style, children, scroller, bot
     // Only as the conversation grew: a draw that changed nothing in it (the page around it drawn
     // again) forces no layout of the whole page; what grows without it the observer below sees.
     if (!first && was === tail) return;
+    // The chat settles from its first draw, not from when it began to be made: a long one takes a
+    // while to draw, and what fills in meanwhile is still its opening.
+    if (first) born.current = performance.now();
     if (first && place.top !== null) el.scrollTop = place.top;
     else if (first || atEnd.current) follow(el, true);
     // Let go of at the very end (a wheel nudged up there, a box inside scrolled), and what came
