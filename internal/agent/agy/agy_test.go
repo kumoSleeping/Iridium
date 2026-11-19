@@ -646,3 +646,30 @@ func TestEchoAfterReplay(t *testing.T) {
 		t.Errorf("user records %v", users)
 	}
 }
+
+// The model the list marks default picked (the session layer sends "default"): agy is set to that
+// model by its id, not "default", which agy 1.5.10 refuses ("Unknown model ID: default").
+func TestSetModelDefault(t *testing.T) {
+	r := newRig(t)
+	r.open("")
+	for _, picked := range []string{"default", ""} {
+		done := make(chan error, 1)
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			done <- r.d.SetModel(ctx, picked)
+		}()
+		c := r.next("session/set_config_option")
+		cp := c["params"].(map[string]any)
+		if cp["configId"] != "model" || cp["value"] != "gemini-4-argon" {
+			t.Fatalf("SetModel(%q) sent %v, want the default model gemini-4-argon", picked, cp)
+		}
+		r.answer(c, config("gemini-4-argon", "medium", "default"))
+		if lv := r.next("session/set_config_option"); lv != nil {
+			r.answer(lv, config("gemini-4-argon", "low", "default"))
+		}
+		if err := <-done; err != nil {
+			t.Fatalf("SetModel(%q): %v", picked, err)
+		}
+	}
+}

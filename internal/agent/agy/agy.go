@@ -481,6 +481,19 @@ func (d *Driver) learnLocked(o *opened) {
 	}
 }
 
+// defaultModel is the model the list marks default (models): Iridium's where agy has it, else
+// agy's own; "" before agy has said its models.
+func (d *Driver) defaultModel() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for _, m := range d.models {
+		if m.Default {
+			return m.Value
+		}
+	}
+	return ""
+}
+
 func (d *Driver) modelNow() string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -678,6 +691,14 @@ func (d *Driver) SetModel(ctx context.Context, model string) error {
 	name, level := SplitEffort(model)
 	if err := d.waitReady(ctx); err != nil {
 		return err
+	}
+	// None named (the session layer says "default"): the one the list marks default. agy has no
+	// such id ("Unknown model ID: default" since 1.5.10), so picking Hydrogen did nothing.
+	if name == "" || name == "default" {
+		name = d.defaultModel()
+		if name == "" {
+			return nil
+		}
 	}
 	if err := d.setOption(ctx, "model", name); err != nil {
 		return err
