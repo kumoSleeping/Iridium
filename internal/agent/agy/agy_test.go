@@ -39,6 +39,8 @@ type rig struct {
 	out chan map[string]any
 	mu  sync.Mutex
 	evs []agent.Event
+	// wrote, if set, sees each line the driver writes as it writes it (agy answering at once).
+	wrote func(m map[string]any)
 }
 
 func newRig(t *testing.T) *rig {
@@ -72,6 +74,9 @@ func (r *rig) write(line []byte) error {
 	var m map[string]any
 	if err := json.Unmarshal(line, &m); err != nil {
 		r.t.Errorf("driver wrote no JSON: %s", line)
+	}
+	if r.wrote != nil {
+		r.wrote(m)
 	}
 	r.out <- m
 	return nil
@@ -671,5 +676,33 @@ func TestSetModelDefault(t *testing.T) {
 		if err := <-done; err != nil {
 			t.Fatalf("SetModel(%q): %v", picked, err)
 		}
+	}
+}
+
+// agy answers a turn's prompt before Send has the driver again (a fast fake under load, in CI):
+// the prompt is still in the record before the answer.
+func TestNoEchoAnsweredAtOnce(t *testing.T) {
+	r := newRig(t)
+	r.open("")
+	r.take()
+	r.wrote = func(m map[string]any) {
+		if m["method"] == "session/prompt" {
+			r.feed(
+				upd(`{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"ok"}}`),
+				`{"jsonrpc":"2.0","result":{"stopReason":"end_turn","usage":{"inputTokens":5,"outputTokens":2}},"id":"in-1"}`,
+			)
+		}
+	}
+	send(t, r.d, "in-1", "hello")
+	r.next("session/prompt")
+	var kinds []string
+	for _, e := range records(r.take()) {
+		kinds = append(kinds, e.Kind+":"+e.Text)
+	}
+	if want := []string{"user:hello", "assistant:ok"}; !slices.Equal(kinds, want) {
+		t.Errorf("records %v, want %v", kinds, want)
+	}
+	if r.d.State() != agent.Idle {
+		t.Error("not idle")
 	}
 }

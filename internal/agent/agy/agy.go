@@ -155,17 +155,22 @@ type Driver struct {
 	outstanding []string
 	// echoes: the texts of prompts recorded as they went out whose echo is still to come; agy
 	// before 1.5.10 says each prompt back (user_message_chunk), 1.5.10 no longer does.
-	echoes  []string
-	asks    []pendingAsk
-	tools   map[string]tool
-	text    strings.Builder // the message being written
-	thought strings.Builder // the thought being written
-	reply   string
-	title   string
-	context int
-	window  int
-	queue   []agent.Event
-	unknown map[string]int
+	echoes []string
+	// sent: a prompt that begins a turn, being written: agy says nothing of a turn before it has
+	// it, so whatever it says next finds it in the conversation first (its answer may come before
+	// Send has the lock again).
+	sent     struct{ id, text string }
+	draining bool // drainLocked: a goroutine is delivering the queue
+	asks     []pendingAsk
+	tools    map[string]tool
+	text     strings.Builder // the message being written
+	thought  strings.Builder // the thought being written
+	reply    string
+	title    string
+	context  int
+	window   int
+	queue    []agent.Event
+	unknown  map[string]int
 }
 
 func New(o Options) *Driver {
@@ -197,6 +202,7 @@ func (d *Driver) reset() {
 	d.state = agent.Idle
 	d.starting, d.loading = false, false
 	d.waiting, d.outstanding, d.asks, d.echoes = nil, nil, nil, nil
+	d.sent.id, d.sent.text = "", ""
 	d.text.Reset()
 	d.thought.Reset()
 	d.reply = ""
@@ -457,9 +463,7 @@ func (d *Driver) open(proc int, w *open, ready chan struct{}) {
 		d.emitLocked(agent.GiveUp{Why: why})
 	}
 	close(ready)
-	evs := d.take()
-	d.mu.Unlock()
-	d.flush(evs)
+	d.drainLocked()
 }
 
 // learnLocked takes in what opening the session said.
@@ -516,9 +520,7 @@ func (d *Driver) Detach() {
 	d.mu.Lock()
 	d.resetLocked()
 	d.w = nil
-	evs := d.take()
-	d.mu.Unlock()
-	d.flush(evs)
+	d.drainLocked()
 }
 
 func (d *Driver) State() agent.State {
@@ -577,6 +579,7 @@ func (d *Driver) Send(ctx context.Context, m agent.Message) error {
 	}
 	if !d.busy() {
 		d.starting = true
+		d.sent.id, d.sent.text = m.ID, text
 	}
 	d.waiting = append(d.waiting, m.ID)
 	d.outstanding = append(d.outstanding, m.ID)
@@ -586,6 +589,9 @@ func (d *Driver) Send(ctx context.Context, m agent.Message) error {
 	d.mu.Unlock()
 	if err := d.write(request(m.ID, "session/prompt", map[string]any{"sessionId": session, "prompt": blocks})); err != nil {
 		d.mu.Lock()
+		if d.sent.id == m.ID {
+			d.sent.id, d.sent.text = "", ""
+		}
 		delete(d.pending, m.ID)
 		d.waiting = slices.DeleteFunc(d.waiting, func(id string) bool { return id == m.ID })
 		d.outstanding = slices.DeleteFunc(d.outstanding, func(id string) bool { return id == m.ID })
@@ -597,12 +603,13 @@ func (d *Driver) Send(ctx context.Context, m agent.Message) error {
 	}
 	go func() { <-ch }() // the answer ends the turn in feed
 	d.mu.Lock()
-	if slices.Contains(d.waiting, m.ID) { // not already taken by its echo
+	if d.sent.id == m.ID {
+		d.sent.id, d.sent.text = "", ""
+	}
+	if slices.Contains(d.waiting, m.ID) { // not already taken by its echo, or what came after it
 		d.tookLocked(m.ID, text)
 	}
-	evs := d.take()
-	d.mu.Unlock()
-	d.flush(evs)
+	d.drainLocked()
 	return nil
 }
 
@@ -633,9 +640,7 @@ func (d *Driver) Interrupt(ctx context.Context) error {
 	for _, a := range asks {
 		d.emitLocked(agent.AskCancel{RequestID: a.ask.RequestID})
 	}
-	evs := d.take()
-	d.mu.Unlock()
-	d.flush(evs)
+	d.drainLocked()
 	for _, a := range asks {
 		_ = d.write(map[string]any{"jsonrpc": "2.0", "id": a.id, "result": map[string]any{"outcome": map[string]string{"outcome": "cancelled"}}})
 	}
@@ -679,9 +684,7 @@ func (d *Driver) Answer(ctx context.Context, a api.Answer) error {
 		d.move(agent.Running, "")
 	}
 	d.emitLocked(agent.AskCancel{RequestID: a.RequestID})
-	evs := d.take()
-	d.mu.Unlock()
-	d.flush(evs)
+	d.drainLocked()
 	return nil
 }
 
@@ -707,9 +710,7 @@ func (d *Driver) SetModel(ctx context.Context, model string) error {
 	d.pick.model = name
 	level = cmp.Or(level, d.pick.effort)
 	d.emitLocked(agent.Started{Session: d.session, Model: d.model, Effort: d.effort})
-	evs := d.take()
-	d.mu.Unlock()
-	d.flush(evs)
+	d.drainLocked()
 	if level == "" || !d.takes(name, level) {
 		return nil
 	}
@@ -742,9 +743,7 @@ func (d *Driver) SetEffort(ctx context.Context, level string) error {
 	d.mu.Lock()
 	d.pick.effort = level
 	d.emitLocked(agent.Started{Session: d.session, Model: d.model, Effort: d.effort})
-	evs := d.take()
-	d.mu.Unlock()
-	d.flush(evs)
+	d.drainLocked()
 	return nil
 }
 
@@ -930,9 +929,7 @@ func (d *Driver) Feed(line []byte, replay bool) {
 	d.mu.Lock()
 	answer := d.feed(line, replay)
 	w := d.w
-	evs := d.take()
-	d.mu.Unlock()
-	d.flush(evs)
+	d.drainLocked()
 	if answer != nil && w != nil {
 		go func() { _ = w(answer) }()
 	}
@@ -948,6 +945,14 @@ func (d *Driver) feed(line []byte, replay bool) []byte {
 	if len(line) == 0 || line[0] != '{' || json.Unmarshal(line, &f) != nil {
 		d.emitLocked(agent.ProtocolError{Reason: "bad_line", Detail: string(line[:min(len(line), 200)])})
 		return nil
+	}
+	// What agy says now comes after the prompt that begins a turn, still being written by Send.
+	if id := d.sent.id; id != "" && !replay && !d.loading {
+		text := d.sent.text
+		d.sent.id, d.sent.text = "", ""
+		if slices.Contains(d.waiting, id) {
+			d.tookLocked(id, text)
+		}
 	}
 	switch {
 	case f.Method != "" && len(f.ID) > 0:
@@ -1350,6 +1355,26 @@ func (d *Driver) take() []agent.Event {
 	q := d.queue
 	d.queue = nil
 	return q
+}
+
+// drainLocked delivers what is queued, in order, and lets go of d.mu (held as it is called). One
+// goroutine delivers at a time: one that finds another delivering leaves its events to it, which
+// goes on till none is left. Two delivering side by side (Send's and the feed's) put a prompt's
+// record after the answer to it.
+func (d *Driver) drainLocked() {
+	if d.draining {
+		d.mu.Unlock()
+		return
+	}
+	d.draining = true
+	for len(d.queue) > 0 {
+		evs := d.take()
+		d.mu.Unlock()
+		d.flush(evs)
+		d.mu.Lock()
+	}
+	d.draining = false
+	d.mu.Unlock()
 }
 
 func (d *Driver) flush(evs []agent.Event) {
