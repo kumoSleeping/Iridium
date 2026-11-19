@@ -557,15 +557,7 @@ func (m *Manager) List(ctx context.Context) ([]api.Session, error) {
 	for i := range out {
 		m.channelLast(&out[i])
 	}
-	slices.SortStableFunc(out, func(a, b api.Session) int {
-		if a.Pinned != b.Pinned {
-			if a.Pinned {
-				return -1
-			}
-			return 1
-		}
-		return cmp.Compare(sortKey(b), sortKey(a))
-	})
+	slices.SortFunc(out, listOrder)
 	m.markChannels(out)
 	// Who opened each (store "openers"): none recorded, none said.
 	if openers, err := m.o.Store.Openers(); err == nil {
@@ -574,6 +566,24 @@ func (m *Manager) List(ctx context.Context) ([]api.Session, error) {
 		}
 	}
 	return out, nil
+}
+
+// listOrder is the list's order: pinned first, then by sortKey, newest first; sessions alike in
+// both by id. Without the last, those alike (a parent's subagents, sessions of one moment) came in
+// the order of a map's walk, a new one each time: the list was another and sent to every page
+// again some times a second, half a megabyte each (otae-c, 2026-11-19: a long channel stalled
+// for a quarter of a second each time).
+func listOrder(a, b api.Session) int {
+	if a.Pinned != b.Pinned {
+		if a.Pinned {
+			return -1
+		}
+		return 1
+	}
+	if c := cmp.Compare(sortKey(b), sortKey(a)); c != 0 {
+		return c
+	}
+	return cmp.Compare(a.ID, b.ID)
 }
 
 // sortKey is what a session is sorted by in the list: where it was dragged to, else when it
