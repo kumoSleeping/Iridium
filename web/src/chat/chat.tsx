@@ -38,6 +38,7 @@ import { LongWords } from "./longwords";
 import { dispatched, type Start } from "./dispatch";
 import { Dispatching, SubFaceKey, SubHead, useSub } from "./subwork";
 import { alignBack, loadParts, sideReady, useSide } from "./channel/side";
+import { recalls } from "./react";
 import { relays, type Relay } from "../satori";
 import { AgentFace } from "./channel/members";
 import { PersonCard, PersonMenu, useNamed } from "./channel/person";
@@ -227,11 +228,15 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
     const back = () => (log.dropDrafts(), more());
     drafts.add(hear);
     opened.add(back);
+    // A block of its record taken back as a message of its channel (reactions.ts): out.
+    const gone = (ch: string) => void (ch === id && changed());
+    recalls.add(gone);
     return () => {
       live = false;
       clearTimeout(again);
       drafts.delete(hear);
       opened.delete(back);
+      recalls.delete(gone);
     };
   }, [id]);
   // The transcript grew past what is shown: the blocks since, from the state's tail when it has

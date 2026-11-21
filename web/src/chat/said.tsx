@@ -13,6 +13,7 @@ import { Dispatch, Sent as SentTo, TaskBack } from "./dispatched";
 import { handBack, toldOf } from "./dispatch";
 import { Children, forwardRef, memo, useContext, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { givenTurn, linkNicks, type GivenTurn } from "./channel/lib";
+import { reactionLine } from "./react";
 import { Nicks, NickWords } from "./channel/nick";
 import { CARD_POP } from "./channel/profilecard";
 import type { Relay } from "../satori";
@@ -530,10 +531,17 @@ export function Relayed({ given, relay, name, time, onJump, children }: { given:
 /** card: what a person's face opens (their card, chat.tsx), for one not the one looking. left:
  *  another person's words, on the left: only the one looking is on the right (kumo, 2026-11-16). */
 export function Said({ b, session, cwd, source, onJump, card, menu, left }: { b: Shown; session: string; cwd: string; source: (b: { from?: string; fromTerminal?: string; fromDevice?: Device }) => Source; onJump: (id: string) => void; card?: (b: Block) => ReactNode; menu?: (b: Block) => FaceMenu | undefined; left?: (b: Block) => boolean }) {
+  // In the record of the channel's own session, a block is a message of the channel too: reacted
+  // to and taken back as one (react.tsx). Not in another's record shown here (an agent's work).
+  const named = useContext(Nicks);
+  const here = named?.channel === session;
   switch (b.kind) {
     case "user": {
       const src = source(b);
       const text = b.text ?? "";
+      // A reaction its agent was given, alone in its channel: who put which emoji on what.
+      const rl = src.kind === "iridium" ? reactionLine(text) : null;
+      if (rl) return <Line>{`${rl.who} ${rl.emoji} ${rl.words}`}</Line>;
       if (src.kind === "iridium") return <Line icon={<RotateCcw size={12} />}>{text}</Line>;
       // The server writes each attachment as a line "[附件] `path`" (absolute): the file shows as itself instead.
       // A channel's message as the agent was given it (chat/channel/lib givenTurn): its words
@@ -547,15 +555,22 @@ export function Said({ b, session, cwd, source, onJump, card, menu, left }: { b:
             {b.files?.map((f) => <Attached key={f.ref} session={session} f={f} />)}
           </Letter>
         );
-      return (
+      const bubble = (
         <YouBubble text={words} who={src} time={b.time} card={card?.(b)} menu={menu?.(b)} left={left?.(b)} words={<NickWords text={words} />}>
           {b.files?.map((f) => <Attached key={f.ref} session={session} f={f} />)}
         </YouBubble>
       );
+      return here && !given ? (
+        <Copyable copy={words} act={{ channel: session, key: { at: b.at, ...(b.id ? { input: b.id } : {}) }, may: !!named.may, side: left?.(b) ? "left" : "right" }}>
+          {bubble}
+        </Copyable>
+      ) : (
+        bubble
+      );
     }
     case "assistant":
       return (
-        <Copyable copy={b.text ?? ""}>
+        <Copyable copy={b.text ?? ""} act={here ? { channel: session, key: { at: b.at }, may: !!named.may } : undefined}>
           <Assistant b={b} session={session} />
         </Copyable>
       );

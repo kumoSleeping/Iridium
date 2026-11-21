@@ -474,7 +474,8 @@ export const watchExtra = (channel: string, sessions: string[]) => {
 export type GivenTurn = { seq: number; words: string; context: string; channel?: { id: string; name: string } };
 
 export function givenTurn(text: string): GivenTurn | null {
-  const m = /^#(\d+): ([\s\S]*?)\n\n<channel-context>\n([\s\S]*)$/.exec(text);
+  // A reaction given is one too: "#n [who reacted 👍 to: …]" (docs/channels.md "表情").
+  const m = /^#(\d+)(?:: | (?=\[))([\s\S]*?)\n\n<channel-context>\n([\s\S]*)$/.exec(text);
   if (!m) return null;
   const c = /^You are \S+, called in the channel "([\s\S]*?)"(?: \(([0-9a-zA-Z_-]+)\))?, which people/.exec(m[3]!);
   // What Iridium added: the block's lines, and what follows it (how to read more).

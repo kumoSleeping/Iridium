@@ -47,6 +47,7 @@ import { OtherTurn } from "../atwork";
 import { AwayBox, useAway } from "../away";
 import { PersonCard, PersonMenu, useNamed } from "./person";
 import { NickLink, Nicks, NickWords } from "./nick";
+import { useRecalled } from "../reactions";
 
 // At work: in a turn. Not "starting" (its harness coming up, no turn yet: an invited agent's face
 // flashed up as if to speak and went; kumo, 2026-11-16).
@@ -127,8 +128,8 @@ export function ChannelPage({ id, sheet = 0, bar, record }: { id: string; sheet?
     const more = () => void log.newer().then(() => live && changed(), () => {});
     more();
     const hear = (e: SatoriEvent) => {
-      if (e.type !== "message-created" || e.channel?.id !== id || !e.message) return;
-      log.heard({ ...e.message, _data: { ...e._data, ...e.message._data } });
+      if ((e.type !== "message-created" && e.type !== "message-deleted") || e.channel?.id !== id || !e.message) return;
+      log.heard({ ...e.message, _data: { ...e._data, ...e.message._data } }, e.type === "message-deleted");
       changed();
     };
     events.add(hear);
@@ -471,14 +472,14 @@ export function GroupView({ g, channel, agents, who, record, call, may, quote, q
     const m = g.msgs[0]!;
     const by = who(a);
     return (
-      <Copyable copy={m.text} quote={quote && (() => quote(m))}>
+      <Copyable copy={m.text} quote={quote && (() => quote(m))} act={{ channel, seq: m.n, may, side: by.mine ? "right" : "left" }}>
         <YouBubble
           text={m.text}
           who={by.who}
           left={!by.mine}
           time={m.time}
           words={<NickWords text={m.text} />}
-          under={m.quote !== undefined && <QuoteLine n={m.quote} q={quoted(m.quote)} />}
+          under={m.quote !== undefined && <QuoteLine n={m.quote} q={quoted(m.quote)} channel={channel} />}
           menu={by.mine ? undefined : (at, close) => <PersonMenu user={a.id} name={a.name} call={may ? call : undefined} at={at} close={close} />}
           card={<PersonCard user={a.id} name={a.name} avatar={"avatar" in by.who ? by.who.avatar : undefined} dm={!by.mine} call={may && !by.mine ? call : undefined} />}>
           {m.files.map((f) => (
@@ -509,12 +510,12 @@ export function GroupView({ g, channel, agents, who, record, call, may, quote, q
         {g.msgs.map((m) => (
           <div key={m.n} className={cn(m.kind === "error" && "text-err")}>
             {m.src ? <Work src={m.src} did={m.did} said={m.text} channel={channel} /> : m.did && <DidLine did={m.did} />}
-            <Copyable copy={m.text} quote={quote && (() => quote(m))}>
+            <Copyable copy={m.text} quote={quote && (() => quote(m))} act={m.kind === "error" || m.kind === "ask" ? undefined : { channel, seq: m.n, may }}>
               <LongWords fold={fold?.(m) ?? false} lines={linesOf(m.text)}>
                 <Assistant b={blockFor(m, agents)} session={a.session} />
               </LongWords>
             </Copyable>
-            {m.quote !== undefined && <QuoteLine n={m.quote} q={quoted(m.quote)} />}
+            {m.quote !== undefined && <QuoteLine n={m.quote} q={quoted(m.quote)} channel={channel} />}
           </div>
         ))}
       </div>
@@ -536,10 +537,10 @@ function ScriptGroup({ g, name, channel, agents, quote, quoted }: { g: Group; na
         </div>
         {g.msgs.map((m) => (
           <div key={m.n}>
-            <Copyable copy={m.text} quote={quote && (() => quote(m))}>
+            <Copyable copy={m.text} quote={quote && (() => quote(m))} act={{ channel, seq: m.n, may: !!quote }}>
               <Assistant b={blockFor(m, agents)} session={channel} />
             </Copyable>
-            {m.quote !== undefined && <QuoteLine n={m.quote} q={quoted(m.quote)} />}
+            {m.quote !== undefined && <QuoteLine n={m.quote} q={quoted(m.quote)} channel={channel} />}
           </div>
         ))}
       </div>
@@ -549,11 +550,13 @@ function ScriptGroup({ g, name, channel, agents, quote, quoted }: { g: Group; na
 
 /** The message one answers, under the words that answer it, as chat apps put it (kumo,
  *  2026-11-16: a line over the face read oddly): a small grey block, who said it and its words,
- *  two lines at most; the number alone when the page has not got it. */
-function QuoteLine({ n, q }: { n: number; q?: { who: string; text: string } }) {
+ *  two lines at most; the number alone when the page has not got it; taken back, the number and
+ *  so (docs/channels.md "撤回"). */
+function QuoteLine({ n, q, channel }: { n: number; q?: { who: string; text: string }; channel: string }) {
+  const gone = useRecalled(channel, n);
   return (
     <div className="mt-1 max-w-[min(560px,100%)] rounded-md bg-fill px-2.5 py-1.5 text-xs leading-[18px] text-ink-3">
-      <span className="line-clamp-2 [overflow-wrap:anywhere]">{q ? t("channel.quoteOf", { who: q.who, text: q.text }) : `#${n}`}</span>
+      <span className="line-clamp-2 [overflow-wrap:anywhere]">{gone ? t("channel.quoteGone", { n }) : q ? t("channel.quoteOf", { who: q.who, text: q.text }) : `#${n}`}</span>
     </div>
   );
 }
@@ -570,6 +573,8 @@ function EventLine({ m, channel }: { m: Msg; channel: string }) {
   const d = useApps().data;
   const { whole } = useRecvLabel(channel);
   const words = { ...Object.fromEntries(EVENT_KEYS.map((k) => [k, t(`channel.event.${k}`)])), script: Object.fromEntries(Object.entries(SCRIPT_KEYS).map(([k, v]) => [k, t(`channel.event.${v}`)])), what: Object.fromEntries(WHAT_KEYS.map((k) => [k, t(`channel.what.${k}`)])), whatSep: t("channel.what.sep"), reasons: { 余额不足: t("channel.reason.balance"), 认证失败: t("channel.reason.auth"), 请求太频繁: t("channel.reason.rate") } } as unknown as EventWords;
+  // A message taken back: who did it (docs/channels.md "撤回").
+  if (m.event?.type === "recall") return <Line>{t("channel.event.recall", { by: m.event.by === "主机" ? "Iridium" : (m.event.by ?? "") })}</Line>;
   const parts = m.event && eventParts(m.event, words);
   if (!parts) return <Line>{m.text}</Line>;
   const apps = (d?.apps ?? []).map((a) => (a.web ? { ...a, name: t("term.panel") } : a));
