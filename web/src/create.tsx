@@ -291,6 +291,8 @@ export function NewSession({ ws, folder, onFolder, onPick, busy, onMake }: { ws:
   const next = useRef(0);
   const [last, setLast] = useState<number | null>(null);
   const shown = seats.filter((x) => !x.going);
+  const requiresBare = !!shown[0]?.m;
+  const bareOn = bare === "on" || requiresBare;
   // The other computers (kumo, 2026-11-18): their agents are offered under the folder's own. One
   // pressed joins the lineup at its computer's home, invited: it works there, away from the
   // channel's folder. Pressed first, it would be the session's own agent, which runs in the
@@ -311,11 +313,15 @@ export function NewSession({ ws, folder, onFolder, onPick, busy, onMake }: { ws:
   const change = (key: number, p: Partial<Seat>) => setSeats((ss) => ss.map((x) => (x.key === key ? { ...x, ...p } : x)));
   // Taken out: folded away first, then gone.
   const remove = (key: number) => {
+    // Match the receive default when a cross-computer agent is picked into an empty lineup.
+    const remaining = bare !== "on" && shown.length === 2 ? shown.find((x) => x.key !== key) : undefined;
+    if (remaining?.m && !remaining.recvChosen) change(remaining.key, { recv: RECV.all });
     change(key, { going: true });
     if (last === key) setLast(null);
     window.setTimeout(() => setSeats((ss) => ss.filter((x) => x.key !== key)), 320);
   };
   const toggleBare = () => {
+    if (requiresBare) return;
     if (bare === "on") {
       setBare("going");
       window.setTimeout(() => setBare("off"), 320);
@@ -328,7 +334,7 @@ export function NewSession({ ws, folder, onFolder, onPick, busy, onMake }: { ws:
   // Its card beside the panel, by its row; where there is no room beside it (a phone), none.
   const [roleRow, setRoleRow] = useState<HTMLDivElement | null>(null);
   const wide = !useMedia(PHONE);
-  const ready = bare === "on" || shown.length > 0;
+  const ready = bareOn || shown.length > 0;
   const start = () => {
     if (!ready || busy !== null) return;
     if (shown.some(bad)) return void toast(t(shown.some(dup) ? "channel.nickTaken" : "channel.nickBad"), { error: true });
@@ -337,7 +343,7 @@ export function NewSession({ ws, folder, onFolder, onPick, busy, onMake }: { ws:
     if (off) return void toast(t("new.offline", { name: off.m!.name }), { error: true });
     const to = there ? { m: there.m, cwd: there.cwd } : undefined;
     const ps = people ?? undefined;
-    if (bare === "on") return onPick("" as Agent, to, ps, shown.length ? { agents: shown.map(member) } : undefined);
+    if (bareOn) return onPick("" as Agent, to, ps, shown.length ? { agents: shown.map(member) } : undefined);
     const [first, ...rest] = shown;
     const as: As = { ...runs(first!), ...(typed(first!) ? { nick: typed(first!) } : {}), ...(!everyone(first!.recv) ? { recv: first!.recv } : {}), ...(rest.length ? { agents: rest.map(member) } : {}) };
     onPick(first!.agent, to, ps, as);
@@ -362,7 +368,6 @@ export function NewSession({ ws, folder, onFolder, onPick, busy, onMake }: { ws:
     if (n) void onMake(n).then((ok) => ok && box.current?.querySelector<HTMLButtonElement>("[role=group] button:not(:disabled)")?.focus());
   };
   const path = there ? tilde(pageAt(folder, machines)?.path ?? there.cwd, homeAt(there.m)) : tilde(folder);
-  let i = 0;
   if (whose === "gone")
     return (
       <div className="flex w-[min(288px,calc(100vw-16px))] p-1.5">
@@ -373,6 +378,14 @@ export function NewSession({ ws, folder, onFolder, onPick, busy, onMake }: { ws:
         </p>
       </div>
     );
+  // The folder's agent grid starts with the option to create a channel without its own agent.
+  const noAgent = (
+    <Tip label={t("new.noAgent")}>
+      <button type="button" aria-label={t("new.noAgent")} aria-pressed={bareOn} aria-disabled={requiresBare || undefined} disabled={busy !== null} onClick={toggleBare} className="g-press grid h-12 place-items-center rounded-md hover:bg-fill disabled:opacity-50 aria-disabled:opacity-50 aria-pressed:bg-fill pointer-coarse:h-14">
+        <Logo agent={"" as Agent} size={22} />
+      </button>
+    </Tip>
+  );
   return (
     <div ref={box} tabIndex={-1} className="flex w-[min(320px,calc(100vw-16px))] flex-col gap-1 p-1.5 outline-none">
       {naming !== null ? (
@@ -419,21 +432,14 @@ export function NewSession({ ws, folder, onFolder, onPick, busy, onMake }: { ws:
       {roles.length > 0 && <RolesRow roles={roles} at={at} add={(r) => add(r.agent, r)} />}
       {!there ? (
         <div role="group" aria-label={t("new.agent")} className="g-stagger grid grid-cols-5 gap-1">
-          {/* First, a channel with no agent (docs/channels.md; kumo, 2026-11-16: first): in the
-              lineup or not, pressed again to take it out. */}
-          <Tip label={t("new.noAgent")}>
-            <button type="button" aria-label={t("new.noAgent")} aria-pressed={bare === "on"} disabled={busy !== null} onClick={toggleBare} style={{ "--i": i++ } as CSSProperties} className="g-press grid h-12 place-items-center rounded-md hover:bg-fill disabled:opacity-50 aria-pressed:bg-fill pointer-coarse:h-14">
-              <Logo agent={"" as Agent} size={22} />
-            </button>
-          </Tip>
-          {agents.map((a) => {
-            const n = i++;
+          {noAgent}
+          {agents.map((a, i) => {
             // Each by its name and the model a new one will run (never "default", the user, 2026-11-16).
             return (
               <DraftNamed key={a} agent={a} at={NO_PLACE}>
                 {(name) => (
                   <Tip label={missing(a) ? t("new.notInstalled", { name: agentName(a) }) : name}>
-                    <button type="button" aria-label={name} disabled={busy !== null} onClick={() => add(a)} style={{ "--i": n } as CSSProperties} className="g-press grid h-12 place-items-center rounded-md hover:bg-fill disabled:opacity-50 pointer-coarse:h-14">
+                    <button type="button" aria-label={name} disabled={busy !== null} onClick={() => add(a)} style={{ "--i": i + 1 } as CSSProperties} className="g-press grid h-12 place-items-center rounded-md hover:bg-fill disabled:opacity-50 pointer-coarse:h-14">
                       <Logo agent={a} size={24} className={cn(missing(a) && "opacity-30 grayscale")} />
                     </button>
                   </Tip>
@@ -443,19 +449,19 @@ export function NewSession({ ws, folder, onFolder, onPick, busy, onMake }: { ws:
           })}
         </div>
       ) : (
-        <MachineAgents m={there.m} onPick={(a) => add(a)} />
+        <MachineAgents m={there.m} noAgent={noAgent} onPick={(a) => add(a)} />
       )}
       {others.map((m) => (
         <MachineAgents key={m.id} m={m} onPick={(a) => add(a, undefined, m)} />
       ))}
       {/* The lineup: each row glides open as it is added and shut as it is taken out. */}
       <div role="list" aria-label={t("new.lineup")} className="flex flex-col">
-        <Grow open={bare === "on"}>
-          {bare !== "off" && <BareRow remove={toggleBare} />}
+        <Grow open={bareOn}>
+          <BareRow remove={bareOn && !requiresBare ? toggleBare : undefined} />
         </Grow>
         {seats.map((x) => (
           <Grow key={x.key} open={!x.going}>
-            <SeatRow rowRef={x.key === lastRole?.key ? setRoleRow : undefined} seat={x} at={x.m ? { machine: x.m.id } : at} recv={bare !== "off" || shown.length > 1 || !everyone(x.recv)} own={bare === "off" && shown[0]?.key === x.key} bad={bad(x)} set={(p) => change(x.key, p)} remove={() => remove(x.key)} />
+            <SeatRow rowRef={x.key === lastRole?.key ? setRoleRow : undefined} seat={x} at={x.m ? { machine: x.m.id } : at} recv={bareOn || bare === "going" || shown.length > 1 || !everyone(x.recv)} own={!bareOn && shown[0]?.key === x.key} bad={bad(x)} set={(p) => change(x.key, p)} remove={() => remove(x.key)} />
           </Grow>
         ))}
       </div>
@@ -477,7 +483,7 @@ export function NewSession({ ws, folder, onFolder, onPick, busy, onMake }: { ws:
 /** One of the lineup: its agent, or a role (as which it starts); its model, effort, preset for
  *  this once (pick); its 称呼 ("": the server's); what it receives; going: being taken out. m:
  *  the computer it works at when that is not the folder's (its home there). */
-type Seat = { key: number; agent: Agent; role?: Role; pick: RolePick; nick: string; recv: Recv; going?: boolean; m?: Machine };
+type Seat = { key: number; agent: Agent; role?: Role; pick: RolePick; nick: string; recv: Recv; recvChosen?: boolean; going?: boolean; m?: Machine };
 
 /** Whether a seat's receive set is 全部 (every person's words), not 点名 (only what names it):
  *  the two the lineup offers (docs/channels.md "接收"). */
@@ -615,15 +621,15 @@ function useRowMenu() {
 
 /** The channel with no agent of its own, first in the lineup: its mark and name; its menu takes
  *  it out (as pressing it among the agents again). */
-function BareRow({ remove }: { remove: () => void }) {
+function BareRow({ remove }: { remove?: () => void }) {
   const m = useRowMenu();
   return (
-    <div role="listitem" {...m.props} className="flex h-10 items-center gap-2 rounded-md px-1.5 select-none pointer-coarse:h-12">
+    <div role="listitem" {...(remove && m.props)} className="flex h-10 items-center gap-2 rounded-md px-1.5 select-none pointer-coarse:h-12">
       <span className="grid size-6 shrink-0 place-items-center rounded-full bg-fill">
         <Logo agent={"" as Agent} size={14} />
       </span>
       <span className="min-w-0 flex-1 truncate text-sm">{t("new.noAgent")}</span>
-      <RowMenu at={m.menuAt} close={() => m.setMenuAt(null)} remove={() => (m.setMenuAt(null), remove())} />
+      {remove && <RowMenu at={m.menuAt} close={() => m.setMenuAt(null)} remove={() => (m.setMenuAt(null), remove())} />}
     </div>
   );
 }
@@ -643,6 +649,7 @@ function SeatRow({ rowRef, seat, at, recv, own: mine, bad, set, remove }: { rowR
   const kindLine = [model ?? agentName(seat.agent), seat.pick.effort ? effortName(seat.pick.effort) : "", seat.m?.name ?? ""].filter(Boolean).join(" · ");
   const all = everyone(seat.recv);
   const recvLabel = t(all ? "new.recvAll" : "new.recvAt");
+  const setRecv = (recv: Recv) => set({ recv, recvChosen: true });
   return (
     <div ref={rowRef} role="listitem" {...m.props} className="flex min-h-11 items-center gap-2 rounded-md px-1.5 py-1 pointer-coarse:min-h-13">
       {seat.role ? (
@@ -686,7 +693,7 @@ function SeatRow({ rowRef, seat, at, recv, own: mine, bad, set, remove }: { rowR
       {/* What it receives: pressed, the other (kumo, 2026-11-16: a choice, never assumed). */}
       {recv && (
         <Tip label={`${t("channel.recv")} · ${t(all ? "channel.recvAll" : "channel.recvAt")}`}>
-          <button type="button" aria-label={`${t("channel.recv")}: ${recvLabel}`} onClick={() => set({ recv: all ? RECV.at : RECV.all })} className="g-press h-6 shrink-0 rounded-full bg-fill px-2 text-xs text-ink-2 hover:bg-fill-2 pointer-coarse:h-8">
+          <button type="button" aria-label={`${t("channel.recv")}: ${recvLabel}`} onClick={() => setRecv(all ? RECV.at : RECV.all)} className="g-press h-6 shrink-0 rounded-full bg-fill px-2 text-xs text-ink-2 hover:bg-fill-2 pointer-coarse:h-8">
             <span key={String(all)} className="g-fade">
               {recvLabel}
             </span>
@@ -694,7 +701,7 @@ function SeatRow({ rowRef, seat, at, recv, own: mine, bad, set, remove }: { rowR
         </Tip>
       )}
       {mine && !recv && <span className="shrink-0 px-1 text-xs text-ink-4">{t("new.own")}</span>}
-      <RowMenu at={m.menuAt} close={() => m.setMenuAt(null)} recv={seat.recv} setRecv={(r) => set({ recv: r })} remove={() => (m.setMenuAt(null), remove())} />
+      <RowMenu at={m.menuAt} close={() => m.setMenuAt(null)} recv={seat.recv} setRecv={setRecv} remove={() => (m.setMenuAt(null), remove())} />
     </div>
   );
 }
@@ -810,7 +817,7 @@ function PeopleRow({ people, set }: { people: string[]; set: (p: string[]) => vo
 }
 
 /** Another machine's agents, under its face and name: a press adds one to the lineup. */
-function MachineAgents({ m, onPick }: { m: Machine; onPick: (a: Agent) => void }) {
+function MachineAgents({ m, onPick, noAgent }: { m: Machine; onPick: (a: Agent) => void; noAgent?: ReactElement }) {
   return (
     <div role="group" aria-label={m.name} className="flex flex-col gap-1">
       <div className={cn("flex items-center gap-1.5 px-2 pt-1 text-xs", m.online ? "text-ink-2" : "text-ink-4")}>
@@ -820,6 +827,7 @@ function MachineAgents({ m, onPick }: { m: Machine; onPick: (a: Agent) => void }
       </div>
       {!m.agents.length && <p className="m-0 flex h-9 items-center px-2 text-sm text-ink-3">{t("new.noAgents")}</p>}
       <div className="g-stagger grid grid-cols-4 gap-1">
+        {noAgent}
         {m.agents.map(({ agent }, i) => {
           const a = agent as Agent;
           const key = `${m.id}/${a}`;
@@ -828,7 +836,7 @@ function MachineAgents({ m, onPick }: { m: Machine; onPick: (a: Agent) => void }
             <DraftNamed key={key} agent={a} at={{ machine: m.id }}>
               {(name) => (
                 <Tip label={says(name)}>
-                  <button type="button" aria-label={says(name)} onClick={() => onPick(a)} style={{ "--i": i } as CSSProperties} className="g-press grid h-12 place-items-center rounded-md hover:bg-fill disabled:opacity-50 pointer-coarse:h-14">
+                  <button type="button" aria-label={says(name)} onClick={() => onPick(a)} style={{ "--i": noAgent ? i + 1 : i } as CSSProperties} className="g-press grid h-12 place-items-center rounded-md hover:bg-fill disabled:opacity-50 pointer-coarse:h-14">
                     <span className={cn("relative grid", !m.online && "opacity-30 grayscale")}>
                       <Logo agent={a} size={24} />
                       <MachineBadge m={m} size={13} />
