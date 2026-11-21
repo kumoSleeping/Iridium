@@ -1947,8 +1947,8 @@ func (s *Server) sendChannelAs(ctx context.Context, c caller, from, ch string, r
 			given = upTo
 		}
 	}
-	// Answering a message (<quote>): its agent is called as if named (docs/channels.md "叫起谁").
-	route := req.Text
+	// Answering a message (<quote>): kept with it, and given to whom it wakes; it calls no one
+	// (docs/channels.md "叫起谁": only the @ in the words do).
 	var quote int64
 	if req.Quote > 0 {
 		q, ok := s.ch.Get(ch, req.Quote)
@@ -1956,11 +1956,6 @@ func (s *Server) sendChannelAs(ctx context.Context, c caller, from, ch string, r
 			return api.SendReply{}, fmt.Errorf("%w: quote: no message %d in the channel", session.ErrBadRequest, req.Quote)
 		}
 		quote = q.Seq
-		if id, ok := store.SessionOfMember(q.Author); ok && id != sender {
-			if m, ok := by0(list, id); ok {
-				route += "\n@" + m.Nick
-			}
-		}
 	}
 	// An agent's words wake those subscribed to it only as its turn's last; on its way (and with
 	// ir), only whom they name.
@@ -1969,7 +1964,7 @@ func (s *Server) sendChannelAs(ctx context.Context, c caller, from, ch string, r
 	if sender != "" {
 		who.Member = store.AgentMember(sender)
 	}
-	routed, namedNicks, limit := s.wakes(route, who, lk, list)
+	routed, namedNicks, limit := s.wakes(req.Text, who, lk, list)
 	if limit > 0 && relay == nil {
 		return api.SendReply{}, errTooFar(limit)
 	}
@@ -2007,12 +2002,12 @@ func (s *Server) sendChannelAs(ctx context.Context, c caller, from, ch string, r
 	if seq == 0 {
 		return api.SendReply{}, errors.New("the channel did not take the message")
 	}
-	// The logins it names, or whose message it answers, have a mark (ats.go).
+	// The logins it names have a mark (ats.go).
 	author := ""
 	if sender == "" {
 		author = readerOf(c)
 	}
-	named := s.names(ch, seq, req.Text, quote, author)
+	named := s.names(ch, seq, req.Text, author)
 	// Said: a person's begins a new run.
 	if sender == "" {
 		lk = s.chain.person(ch, c.ID())
@@ -2194,6 +2189,7 @@ func whoOf(m channel.Message, by map[string]channel.Member) string {
 func (s *Server) deliverTo(ctx context.Context, ch, to string, seq int64, said, input, from string, images []agent.Image, lk link) (bool, error) {
 	// One at a time for an agent: each is given what it has not seen, once.
 	defer s.chain.lock(to)()
+	said = satori.ForwardWords(said) // a forward in it as lines
 	list, by := s.agentsOf(ch)
 	me, ok := by[to]
 	if !ok {
@@ -2277,7 +2273,7 @@ func (s *Server) deliverTo(ctx context.Context, ch, to string, seq int64, said, 
 	// The message it answers, if it answers one: a line of it before its words.
 	if m, ok := s.ch.Get(ch, seq); ok && m.D.Quote > 0 {
 		if q, ok := s.ch.Get(ch, m.D.Quote); ok {
-			cc.Quote = &assemble.Quote{Seq: q.Seq, Who: whoOf(q, by), Text: q.Text}
+			cc.Quote = &assemble.Quote{Seq: q.Seq, Who: whoOf(q, by), Text: satori.ForwardWords(q.Text)}
 		}
 	}
 	var before int64
@@ -2336,7 +2332,7 @@ func (s *Server) unread(ch string, me channel.Member, before int64, by map[strin
 			continue
 		}
 		id, agent := store.SessionOfMember(m.Author)
-		msgs = append(msgs, strategy.Msg{Seq: m.Seq, Who: whoOf(m, by), Agent: agent, Text: fileNames(m.Text, m.D.Files), At: m.At})
+		msgs = append(msgs, strategy.Msg{Seq: m.Seq, Who: whoOf(m, by), Agent: agent, Text: fileNames(satori.ForwardWords(m.Text), m.D.Files), At: m.At})
 		if me.Nick != "" && len(deliver.Mentions(m.Text, []string{me.Nick})) > 0 {
 			named = true
 		}
@@ -2391,7 +2387,7 @@ func (s *Server) routeSaid(m channel.Message) {
 	s.answer(sender, m)
 	// The logins it names (ats.go), once it is on its way to the agents it names: what is said
 	// after it is told after this returns.
-	defer s.names(m.Channel, m.Seq, m.Text, 0, "")
+	defer s.names(m.Channel, m.Seq, m.Text, "")
 	if m.D.Final {
 		go s.heard(m.Channel, m.Seq, m.Text, m.Author, s.ch.Nick(sender), s.chain.of(m.Channel, sender))
 	}

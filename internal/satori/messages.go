@@ -361,7 +361,8 @@ func cutAfter(bs []api.Block, limit int) (int, bool) {
 // messageCreate sends a message to a session: its text, files uploaded to it (<img>/<file> by
 // their internal: URL, or data: URLs, stored as uploads), the rest by what it says. A message that
 // begins with an input button's text answers that ask instead. <message> elements at the top
-// are each a message of its own, sent in turn (what lies between them too).
+// are each a message of its own, sent in turn (what lies between them too); a merged forward
+// (<message forward>) is part of the one it is in.
 func (s *Service) messageCreate(ctx context.Context, c Caller, body []byte) (any, error) {
 	var req struct {
 		ChannelID string   `json:"channel_id"`
@@ -384,7 +385,7 @@ func (s *Service) messageCreate(ctx context.Context, c Caller, body []byte) (any
 	var groups [][]Element
 	var loose []Element
 	for _, e := range Parse(req.Content) {
-		if e.Type != "message" {
+		if e.Type != "message" || e.Has("forward") {
 			loose = append(loose, e)
 			continue
 		}
@@ -432,6 +433,13 @@ func (s *Service) sendOne(ctx context.Context, c Caller, st *api.SessionState, e
 		}
 		return true
 	})
+	// A merged forward is kept as written: a page draws it as a card, an agent is given it as
+	// lines (ForwardWords).
+	for i, e := range els {
+		if e.Type == "message" && e.Has("forward") {
+			els[i] = Text(String([]Element{e}))
+		}
+	}
 	text := Plain(els, func(e Element) string {
 		src := e.Attr("src")
 		if app, login, path, ok := parseInternal(src); ok && app == c.App && login == c.Login {

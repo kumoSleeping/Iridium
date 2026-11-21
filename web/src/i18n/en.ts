@@ -165,6 +165,7 @@ export const en: Dict = {
   "view.loading": "Loading",
   "msg.quote": "Quote",
   "msg.unquote": "Remove quote",
+  "msg.fold": "Fold",
   "msg.copy": "Copy",
   "msg.copied": "Copied",
   "msg.toolsSaid": "Tool calls: {list}",

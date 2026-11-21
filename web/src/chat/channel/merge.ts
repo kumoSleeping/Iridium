@@ -145,7 +145,9 @@ export function named(text: string, nicks: ReadonlySet<string>): { agents: numbe
 /** Words between agents, folded when long (kumo, 2026-11-15: 给人的话不折): an agent's message
  *  that names only agents, or, naming none, one in a stretch an agent began (since its last word
  *  the latest to call it was an agent, no person spoke). Never: a person's, Iridium's, an ask, an
- *  error, one naming a person or all. msgs: the log in order; nicks: the agents', lower case. */
+ *  error, one naming a person or all. msgs: the log in order; nicks: the agents', lower case.
+ *  Read history is another rule (kumo, 2026-11-21): long words read before the latest rounds
+ *  fold whoever they were to (folds.ts). */
 export function betweenAgents(m: Msg, msgs: Msg[], nicks: ReadonlySet<string>): boolean {
   if (m.author.kind !== "agent" || m.kind === "ask" || m.kind === "error") return false;
   const n = named(m.text, nicks);

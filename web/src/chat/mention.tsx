@@ -24,7 +24,8 @@ import { AGENTS, agentName, cn, Logo, tilde, Tip, titleOf } from "../ui";
 import { baseName, nativeAt, type NamedPlace } from "./at";
 import { Face, FaceStack } from "./channel/face";
 import { isMulti } from "./channel/lib";
-import { boxed, MARK, mentions, placeLink, sessionIds, sessionLink, shortId, type Mention } from "./refs";
+import { mentions, placeLink, sessionIds, sessionLink, shortId, type Mention } from "./refs";
+import { boxed, MARK } from "./boxed";
 
 /** How the composer names session to, among list: what a row dropped or picked after @ puts in. */
 export const mentionOf = (to: Session, list: Session[]) => sessionLink(titleOf(to) || tilde(to.cwd), shortId(to.id, list.map((x) => x.id)));
@@ -84,9 +85,10 @@ export const hasMention = (text: string) => mentions(text).some((p) => typeof p 
 
 /** Behind the composer's box, whose own letters are clear while it names something: the same words
  *  in the same place (refs.ts boxed), each named one on a soft ground, its mark in the slot before
- *  its name. Only colours and grounds, never a width, so each letter lies under the caret's.
+ *  its name; a member named (names: those @ may name), its @ faint before its name, as words
+ *  draw it. Only colours and grounds, never a width, so each letter lies under the caret's.
  *  Scrolls with the box. */
-export function MentionMarks({ text, box, className }: { text: string; box: RefObject<HTMLTextAreaElement | null>; className: string }) {
+export function MentionMarks({ text, box, className, names }: { text: string; box: RefObject<HTMLTextAreaElement | null>; className: string; names?: readonly string[] }) {
   const back = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const el = box.current;
@@ -96,11 +98,21 @@ export function MentionMarks({ text, box, className }: { text: string; box: RefO
     el.addEventListener("scroll", sync);
     return () => el.removeEventListener("scroll", sync);
   }, [box, text]);
-  const b = boxed(text);
+  const b = boxed(text, names);
   const parts: ReactNode[] = [];
   let at = 0;
   for (const r of b.refs) {
     if (r.from > at) parts.push(b.value.slice(at, r.from));
+    if (r.m.kind === "nick") {
+      parts.push(
+        <span key={r.from} className="mention-mark">
+          <span className="text-ink-3">@</span>
+          {b.value.slice(r.from + 1, r.to)}
+        </span>,
+      );
+      at = r.to;
+      continue;
+    }
     parts.push(
       <span key={r.from} className="mention-mark">
         <span className="relative">

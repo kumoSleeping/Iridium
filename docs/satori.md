@@ -19,7 +19,7 @@
 
 ## HTTP `POST /v1/{资源}.{方法}`
 
-- `message.create {channel_id, content}`：发进会话（插入正在跑的回合），发送者显示为 `应用·登录`。`<img>`/`<file>` 的 `src` 是本登录在这个会话 `upload.create` 得到的 `internal:` 地址时，作为附件；`data:` 地址存成上传的文件再作附件；其余元素按意思转成文字。顶层的 `<message>` 各发一条。回 `[Message]`，`id` 是这条输入的 ID，拿去 `message.get` 能取到它（进了记录取记录里那块，还在排队取排队里的）。
+- `message.create {channel_id, content}`：发进会话（插入正在跑的回合），发送者显示为 `应用·登录`。`<img>`/`<file>` 的 `src` 是本登录在这个会话 `upload.create` 得到的 `internal:` 地址时，作为附件；`data:` 地址存成上传的文件再作附件；其余元素按意思转成文字。顶层的 `<message>` 各发一条；合并转发 `<message forward>` 不拆，和前后的话是一条，照原样记下（`docs/channels.md`“元素”）。回 `[Message]`，`id` 是这条输入的 ID，拿去 `message.get` 能取到它（进了记录取记录里那块，还在排队取排队里的）。
 - `message.get`、`message.list`：频道里说的话，一句一条，不含思考和工具调用。`message.list` 是 BidiList，翻页标记是消息的编号；`limit` 默认 50，至多 500；没有 `next` 时只能 `before`。多一个 `_data {start, end, more}`：这页第一条和最后一条的编号、前面还有没有。`_data.q` 给词时只回有这些词的消息（`docs/channels.md`“搜索”）。`message.get` 的 `message_id` 也认输入的 ID 和提问的卡片。
 - `POST /v1/internal/block.list`、`block.get`（参数同上）：一个会话自己的记录，一块一条消息，内容见下面“记录”；翻页标记是记录里行的偏移，`limit` 按块数、在行首截，可能略多。`_data {start, end, more}`：这页从哪行起、读时记录到哪、前面还有没有。网页读记录走它。agent 也能读别的会话的（只读，打码）。
 - `channel.get`、`channel.list {guild_id?, next?, _data?: {all}}`（不给 `guild_id` 是全部；先列文件夹，再列会话；不列归档和子 agent，`_data.all` 都列）、`guild.get`、`guild.list`（只列范围里的）、`guild.member.list {guild_id, next?}`、`guild.member.get {guild_id, user_id}`（组里各会话的 agent：`user` 是 `agent:<会话>`，带 `nick` 和 `joined_at`；再加本应用的登录。`_data.channel_id` 只列那个频道的成员，`joined_at` 是加入频道的时间，2026-11-13）、`login.get`、`user.get`。`channel.get`、`channel.list` 的每个 channel 带 `_data`：会话本身（同 `GET /v1/internal/sessions` 的一项，名字、标题、最后一句打码）；`guild.get`、`guild.list` 的 guild 带 `_data`：文件夹组（`path`、`only`），`loose` 没有。网页拿不到携带状态 `guilds` 时用 `guild.list` 的 `_data`。
@@ -117,7 +117,7 @@
 - 自定义 op：6 WATCH、7 STATE（见上），只给网页和主机的连接。
 - 发起登录不叫 `referrer`，放在 `_data.origin`，目前是应用 ID。服务端已按回合记下发起的登录（agent 的 `ir` 按它算权限），事件里还没带出来。
 - 权限：每个登录按“登录的 ∩ 应用的”权限；范围外的会话（channel）和文件夹组（guild）看不见。
-- `message.create` 里的 `<message>` 各发一条；`data:` 资源存成上传的文件；`https:` 资源不下载，转成文字。
+- `message.create` 里的 `<message>` 各发一条（`<message forward>` 除外）；`data:` 资源存成上传的文件；`https:` 资源不下载，转成文字。
 
 ## 接 Koishi 等框架
 

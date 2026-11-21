@@ -42,6 +42,10 @@ export const layoutMoves = (el: Element, ms: number) => el.dispatchEvent(new Cus
 /** Each chat's way to its newest, for what puts something at the end itself (a message sent). */
 const ends = new WeakMap<HTMLElement, () => void>();
 export const toEnd = (el: HTMLElement | null) => el && ends.get(el)?.();
+/** Each chat's way to let go of its newest, for what scrolls it up itself (a quoted message gone
+ *  to): what comes meanwhile does not pull it back down. */
+const goes = new WeakMap<HTMLElement, () => void>();
+export const letGo = (el: HTMLElement | null) => el && goes.get(el)?.();
 /** Whether a chat rests at its very newest: there, and not scrolled by the user for a while (not a
  *  fling that just got there). */
 const rests = new WeakMap<HTMLElement, () => boolean>();
@@ -384,6 +388,7 @@ export function Stick({ tail, older, draw, place, style, children, scroller, bot
     ro.observe(el);
     if (col) ro.observe(col);
     ends.set(el, () => ((atEnd.current = true), setFresh(false), toBottom(el)));
+    goes.set(el, leave);
     rests.set(el, () => atEnd.current && bottomOf(el) - el.scrollTop < 2 && performance.now() - moved.current > REST);
     lastTop.current = el.scrollTop;
     // What says the user is going up before the scroll comes: more coming meanwhile would put it
