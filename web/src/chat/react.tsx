@@ -6,7 +6,7 @@
 import { Menu } from "@base-ui/react/menu";
 import { Popover } from "@base-ui/react/popover";
 import { ChevronRight, SmilePlus, Undo2 } from "lucide-react";
-import { useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState } from "react";
 import { sat } from "../api/client";
 import { LOCAL_ME, useApps, useMe } from "../data";
 import { t } from "../i18n";
@@ -15,7 +15,7 @@ import { errText, toast } from "../toast";
 import { Avatar, cn, own, PopSurface, useLongPress } from "../ui";
 import { Face } from "./channel/face";
 import { acts } from "./copyable";
-import { EMOJI, recentEmoji, ROW, usedEmoji } from "./emoji";
+import { EMOJI, recentEmoji, ROW, ROWS, usedEmoji } from "./emoji";
 import { refOf, useBlockSeq, useReactions, type BlockOf, type ReactionSum, type Reactor } from "./reactions";
 
 export { reactionLine, recalls } from "./reactions";
@@ -58,14 +58,14 @@ export function ReactRows({ act }: { act: Act }) {
   const [recent] = useState(recentEmoji);
   if (!act.may || !id) return null;
   const has = (e: string) => list.some((r) => r.emoji === e && r.users.some(mine));
-  const key = (e: string, i?: number) => (
-    <Menu.Item key={e} onClick={() => toggle(act, id, e, has(e))} aria-label={e} aria-pressed={has(e)} style={i === undefined ? undefined : ({ "--i": i } as CSSProperties)} className={cn("grid size-8 cursor-default place-items-center rounded-md text-md leading-none outline-none select-none data-highlighted:bg-fill pointer-coarse:size-10", has(e) && "bg-fill-2")}>
+  const key = (e: string) => (
+    <Menu.Item key={e} onClick={() => toggle(act, id, e, has(e))} aria-label={e} aria-pressed={has(e)} className={cn("grid size-8 cursor-default place-items-center rounded-md text-md leading-none outline-none select-none data-highlighted:bg-fill pointer-coarse:size-10", has(e) && "bg-fill-2")}>
       {e}
     </Menu.Item>
   );
   return (
     <>
-      <div className="grid grid-cols-6 justify-items-center">{recent.slice(0, ROW * 2).map((e) => key(e))}</div>
+      <div className="grid grid-cols-6 justify-items-center">{recent.slice(0, ROW * ROWS).map(key)}</div>
       <Menu.SubmenuRoot>
         <Menu.SubmenuTrigger className={ITEM}>
           <span className="text-ink-2">
@@ -79,7 +79,7 @@ export function ReactRows({ act }: { act: Act }) {
             <Menu.Popup className={cn(POPUP, "no-bar max-h-[min(360px,var(--available-height))] w-[min(300px,calc(100vw-16px))] overflow-y-auto p-1.5")}>
               {EMOJI.map((g, i) => (
                 <div key={g.key} className={cn("grid grid-cols-8 justify-items-center", i > 0 && "mt-1 border-t border-edge pt-1")}>
-                  {g.list.map((e) => key(e))}
+                  {g.list.map(key)}
                 </div>
               ))}
             </Menu.Popup>
@@ -117,13 +117,20 @@ export function Reactions({ act }: { act: Act }) {
   const { seq, id } = useTarget(act);
   const list = useReactions(act.channel, seq);
   const mine = useMine();
-  // What was there stays while it shuts.
+  // What was there stays while it shuts; what came with the message is there at once, what
+  // comes later slides open.
   const last = useRef<ReactionSum[]>(list);
   if (list.length) last.current = list;
   const shown = list.length ? list : last.current;
+  const [open, setOpen] = useState(list.length > 0);
+  useEffect(() => {
+    if (!list.length) return setOpen(false);
+    const f = requestAnimationFrame(() => setOpen(true));
+    return () => cancelAnimationFrame(f);
+  }, [list.length > 0]);
   if (!shown.length) return null;
   return (
-    <div className={cn("grid transition-[grid-template-rows] duration-(--dur-2) ease-out", list.length ? "grid-rows-[1fr]" : "grid-rows-[0fr]")}>
+    <div className={cn("grid transition-[grid-template-rows] duration-(--dur-2) ease-out", open && list.length ? "grid-rows-[1fr]" : "grid-rows-[0fr]")}>
       <div className="min-h-0 overflow-hidden">
         <div className={cn("flex flex-wrap gap-1 pt-1.5", act.side === "left" && "pl-[38px]", act.side === "right" && "justify-end pr-[38px]")}>
           {shown.map((r) => (
