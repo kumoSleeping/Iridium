@@ -573,6 +573,28 @@ func TestChannelBare(t *testing.T) {
 	}
 }
 
+// A bare channel opened by a person can make its remote group appear in the sidebar.
+func TestRemoteBareChannelOwn(t *testing.T) {
+	t.Parallel()
+	l := start(t)
+	machine := l.newApp("remote-pc", false).App.ID
+	agent := l.create(200, "web", api.NewSession{Agent: api.AgentClaude, Cwd: l.work})
+	body := createBody(api.NewSession{Machine: machine, Cwd: l.work})
+	for _, c := range []struct {
+		as  string
+		own bool
+	}{
+		{"web", true},
+		{"agent-in:" + agent, false},
+	} {
+		var made satori.Channel
+		l.wantSat(200, c.as, "channel.create", body, &made)
+		if made.Data == nil || made.Data.Own != c.own {
+			t.Errorf("created as %s: %+v, want own %t", c.as, made.Data, c.own)
+		}
+	}
+}
+
 // An agent that speaks in a channel with ir is held to what it has seen of it: what it had not
 // seen comes back with its send; too far behind, it is told to read first. Its receive set
 // wakes it by who speaks; two subscribed to each other stop at MaxHops. The one that started an
