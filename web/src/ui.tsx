@@ -4,7 +4,6 @@ import { Popover } from "@base-ui/react/popover";
 import { Tooltip } from "@base-ui/react/tooltip";
 import { Bot, Camera, Check, Copy, Monitor, Puzzle, ScrollText, UsersRound, type LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type ComponentProps, type CSSProperties, type ReactElement, type ReactNode } from "react";
-import { useLeaving } from "./motion";
 import type { Agent, Status } from "./api/types.gen";
 import { t } from "./i18n";
 import { AGY, AGY_BLOBS, AGY_VIEWBOX, CLAUDE, DSH, DSH_VIEWBOX, OPENAI, OPENAI_VIEWBOX, PI, PI_VIEWBOX } from "./logos";
@@ -561,21 +560,4 @@ export function tilde(p: string, home = knownHome ?? homeOf(p)) {
 export function Arrive({ on, off, as = "g-arrive", className, children }: { on: boolean; off?: boolean; as?: "g-arrive" | "g-fade"; className?: string; children: ReactNode }) {
   const first = useRef(on);
   return <div className={cn(first.current && !off && as, className)}>{children}</div>;
-}
-
-/** A list whose items, once gone, fade where they were, then go (motion.ts useLeaving, .g-depart)
- *  rather than vanish. draw: an item, and whether it is leaving. */
-export function Leaving<T>({ items, keyOf, draw }: { items: T[]; keyOf: (x: T) => string; draw: (x: T, leaving: boolean) => ReactNode }) {
-  const all = useLeaving(items, keyOf);
-  return (
-    <>
-      {all.map(({ item, leaving }) =>
-        // The same two boxes either way (unseen by the layout till it leaves): drawn in another
-        // kind of box to leave, the item was taken out and put in again for its own fading out.
-        <div key={keyOf(item)} aria-hidden={leaving || undefined} className={leaving ? "g-depart" : "contents"}>
-          <div className={leaving ? undefined : "contents"}>{draw(item, leaving)}</div>
-        </div>,
-      )}
-    </>
-  );
 }

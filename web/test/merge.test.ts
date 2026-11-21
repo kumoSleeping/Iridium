@@ -3,7 +3,7 @@
 import { describe, expect, test } from "vitest";
 import type { ChannelMessage } from "../src/api/client";
 import { merge, msgOf, type Msg } from "../src/chat/channel/lib";
-import { betweenAgents, callerOf, FOLD_AT, FOLD_SHOW, foreignOf, givenHere, held, HOLD, linesOf, marksAt, named, ownAnchors, slotsOf } from "../src/chat/channel/merge";
+import { betweenAgents, boxSlot, callerOf, FOLD_AT, FOLD_SHOW, foreignOf, givenHere, held, HOLD, linesOf, marksAt, named, ownAnchors, slotsOf } from "../src/chat/channel/merge";
 
 const OWN = "own";
 const said = (n: number, session: string, text = "hi", time = n * 10, data: ChannelMessage["_data"] = {}): Msg => msgOf({ id: String(n), content: text, user: { id: `agent:${session}`, name: "Claude", nick: session }, created_at: time, _data: { session, ...data } })!;
@@ -39,34 +39,67 @@ describe("what of the log the record does not hold", () => {
   });
 });
 
-describe("in its place by time", () => {
-  test("before the first row later than it; after them all when none is", () => {
-    const slots = slotsOf([10, 20, 30], [{ time: 15 }, { time: 16 }, { time: 40 }]);
-    expect([...slots.entries()].map(([i, ms]) => [i, ms.map((m) => m.time)])).toEqual([
+describe("in its place: between turns, by when each began", () => {
+  const you = (time: number) => ({ time, agent: false });
+  const own = (time: number | undefined | { since?: number }) => ({ time, agent: true });
+  const at = (slots: Map<number, { time?: number; n?: number }[]>) => [...slots.entries()].map(([i, ms]) => [i, ms.map((m) => m.n ?? m.time)]);
+  test("before the first turn that began after it; after them all when none did", () => {
+    const slots = slotsOf([you(10), you(20), you(30)], [{ time: 15 }, { time: 16 }, { time: 40 }]);
+    expect(at(slots)).toEqual([
       [1, [15, 16]],
       [3, [40]],
     ]);
   });
-  test("a row with no time goes with the next that has one (a turn's thinking with its words); none after, as the one before; what is being written stays last", () => {
-    // Messages said between two turns go above the later turn's thinking, not under it.
-    expect([...slotsOf([10, undefined, 20], [{ time: 15 }, { time: 16 }]).keys()]).toEqual([1]);
-    expect([...slotsOf([undefined, 5], [{ time: 1 }]).keys()]).toEqual([0]);
-    expect([...slotsOf([10, undefined], [{ time: 12 }]).keys()]).toEqual([2]);
-    expect([...slotsOf([10, undefined, Infinity], [{ time: 12 }]).keys()]).toEqual([1]);
+  test("never inside a turn: said while it was on, it goes under all of it (kumo, 2026-11-21: @B while A worked cut A's turn in two)", () => {
+    // Your words at 10, the agent's steps since 11, its words at 20; @B said at 15.
+    expect([...slotsOf([you(10), own({ since: 11 }), own(20)], [{ time: 15 }]).keys()]).toEqual([3]);
   });
-  test("a turn still at its steps: what called it stays above them (seen: the steps so far under the turn before, the call under what you said)", () => {
-    // The turn before's words at 10, what you said to the channel at 15, the steps since 16:
-    // nothing with a time after them till the turn says something.
-    expect([...slotsOf([10, { since: 16 }], [{ time: 15 }]).keys()]).toEqual([1]);
-    // What another says meanwhile goes under them.
-    expect([...slotsOf([10, { since: 16 }], [{ time: 15 }, { time: 30 }]).keys()]).toEqual([1, 2]);
-    // A subagent at work under them is where they are.
-    expect([...slotsOf([10, { since: 16 }, undefined], [{ time: 15 }, { time: 30 }]).keys()]).toEqual([1, 3]);
-    // Once the turn's words came, the steps go with them, as ever.
-    expect([...slotsOf([10, { since: 16 }, 40], [{ time: 15 }, { time: 30 }]).keys()]).toEqual([1]);
+  test("it stays there as the turn goes on: more steps, words being written, the words whole, the draft gone before its block came", () => {
+    const m = [{ time: 30 }];
+    const steps = [you(10), own(12), own({ since: 16 })];
+    expect([...slotsOf(steps, m).keys()]).toEqual([3]);
+    expect([...slotsOf([...steps, own(Infinity)], m).keys()]).toEqual([4]);
+    expect([...slotsOf([...steps, own(40)], m).keys()]).toEqual([4]);
+    expect([...slotsOf([...steps, own(40), own({ since: 41 }), own(Infinity)], m).keys()]).toEqual([6]);
   });
-  test("one at the same time as a row goes after it", () => {
-    expect([...slotsOf([10, 20], [{ time: 10 }]).keys()]).toEqual([1]);
+  test("the next turn comes under it: what you say after is a turn that began later", () => {
+    expect([...slotsOf([you(10), own(20), you(50), own(60)], [{ time: 30 }]).keys()]).toEqual([2]);
+  });
+  test("a turn's rows with no time of their own are with it: none goes between them", () => {
+    expect([...slotsOf([own(10), own(undefined), own(20)], [{ time: 15 }, { time: 16 }]).keys()]).toEqual([3]);
+    expect([...slotsOf([own(undefined), own(5)], [{ time: 1 }]).keys()]).toEqual([0]);
+  });
+  test("only what is being written (no row with a time yet): what was said is above it", () => {
+    expect([...slotsOf([own(Infinity)], [{ time: 12 }]).keys()]).toEqual([0]);
+  });
+  test("a turn begun by the channel's words (a cut, drawn from the log): they are above it, what is said after under it", () => {
+    // The turn before at 10; #5 called the agent at 15, given to it at 16; #6 said at 30.
+    const rows = [own(10), own({ since: 17 }), own(40)];
+    const cuts = new Map([[1, { time: 16, seq: 5 }]]);
+    expect(at(slotsOf(rows, [{ n: 5, time: 15 }, { n: 6, time: 30 }], cuts))).toEqual([
+      [1, [5]],
+      [3, [6]],
+    ]);
+  });
+  test("by the log's numbers whatever the clocks say: what a turn was given is above it", () => {
+    // The agent's machine's clock is behind: it was given #5 "before" #5 was said.
+    const rows = [own(10), own({ since: 12 })];
+    const cuts = new Map([[1, { time: 11, seq: 5 }]]);
+    expect(at(slotsOf(rows, [{ n: 4, time: 14 }, { n: 5, time: 15 }, { n: 6, time: 16 }], cuts))).toEqual([
+      [1, [4, 5]],
+      [2, [6]],
+    ]);
+  });
+  test("a call that waited for the turn before to end: over the turn it began, with what was said meanwhile", () => {
+    const rows = [you(10), own(20), own(90), own({ since: 101 })];
+    const cuts = new Map([[3, { time: 100, seq: 5 }]]);
+    expect(at(slotsOf(rows, [{ n: 5, time: 15 }, { n: 6, time: 50 }, { n: 7, time: 120 }], cuts))).toEqual([
+      [3, [5, 6]],
+      [4, [7]],
+    ]);
+  });
+  test("one at the same time as a turn began goes after it", () => {
+    expect([...slotsOf([you(10), you(20)], [{ time: 10 }]).keys()]).toEqual([1]);
   });
 });
 
@@ -163,5 +196,23 @@ describe("its own channel's message given to the agent is the log's, drawn once"
     expect(givenHere("s1", undefined, "#14 is wrong")).toBe(false);
     expect(givenHere("s1", undefined, undefined)).toBe(false);
     expect(givenHere("s1", undefined, '#3: hi\n\n<channel-context>\nYou are claude8, called in the channel "x" (abc), which people and agents share.\n</channel-context>')).toBe(false);
+  });
+});
+
+describe("one at work is over what it has not read", () => {
+  test("under the last turn it has read, over those after; the agent's steps (no number) go with what is before them", () => {
+    // #3 said, the own agent's turn (no number), #7 and #8 said under it.
+    const seqs = [3, undefined, 7, 8];
+    expect(boxSlot(seqs, 8)).toBe(4);
+    expect(boxSlot(seqs, 7)).toBe(3);
+    expect(boxSlot(seqs, 5)).toBe(2);
+    expect(boxSlot(seqs, 0)).toBe(0);
+  });
+  test("it does not go down as more is said that it has not read", () => {
+    expect(boxSlot([3, undefined, 7], 5)).toBe(2);
+    expect(boxSlot([3, undefined, 7, 9, 10], 5)).toBe(2);
+  });
+  test("nothing numbered (one agent alone): at the end", () => {
+    expect(boxSlot([undefined, undefined], 0)).toBe(2);
   });
 });

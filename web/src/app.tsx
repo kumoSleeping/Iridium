@@ -16,7 +16,7 @@ import { CreatePopover, WsPlus } from "./create";
 import { agentsQ, LOCAL_ME, pushQ, useApps, useHome, useMe, useSettings, useUpdate, useWorkspaces } from "./data";
 import { t, useLang } from "./i18n";
 import { applyTheme, initialTheme, keepTheme, MeKey, useTellLang, type ThemePref } from "./me";
-import { motion, pageTurn } from "./motion";
+import { motion, movesAhead, pageTurn, usePaced } from "./motion";
 import { prefetch, settled } from "./prefetch";
 import { prefetchRoles } from "./roles";
 import { close, go, onTurn, openChat, over, quietDialog, route, setUsageMachine, usagePoint, useRoute, type Route } from "./route";
@@ -83,7 +83,7 @@ const loadPanels = () => {
 // once. Not after one failed: a module that failed to load stays failed in the browser.
 // What the "+" popover draws (its roles), asked for once idle, apart from the files: drawn
 // whole as it opens, nothing pushed in after (docs/前端设计规范.md "后到的不撑开").
-void settled().then(() => (prefetchRoles(), void queryClient.prefetchQuery(agentsQ)));
+void settled().then(() => (prefetchRoles(), movesAhead(), void queryClient.prefetchQuery(agentsQ)));
 void prefetch().then((all) => {
   if (!all) return;
   void loadChat().catch(() => {});
@@ -157,7 +157,10 @@ export function App() {
   // Each minute too: a subagent long quiet is let go.
   const minute = useMinute();
   const places = usePlaces();
-  const tree = useMemo(() => buildTree(list ?? [], ws.data ?? [], t("nav.unsorted"), Math.max(minute, Date.now()), undefined, places), [list, ws.data, t("nav.unsorted"), minute, places]);
+  const treeNow = useMemo(() => buildTree(list ?? [], ws.data ?? [], t("nav.unsorted"), Math.max(minute, Date.now()), undefined, places), [list, ws.data, t("nav.unsorted"), minute, places]);
+  // The list reorders at most once a beat as sessions work (motion.ts usePaced); what you did
+  // yourself (a row dragged, a session made) is drawn at once.
+  const tree = usePaced(treeNow, flat(treeNow).map((s) => s.id).join());
 
   useEffect(() => follow(open), [open]);
   // Unread, and the chats of turns that end off screen.

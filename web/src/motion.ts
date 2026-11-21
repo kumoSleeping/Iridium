@@ -1,5 +1,6 @@
-// The script half of the motion system (motion.css has the tokens and the CSS gestures): FLIP for rows
-// that move or appear, a sent message rising in, and the quick swap between two chats. All read
+// The script half of the motion system (motion.css has the tokens and the CSS gestures): rows that
+// change places (useMoves), order that changes of itself, paced (usePaced), a sent message rising
+// in, and the quick swap between two chats. All read
 // their timings from the CSS tokens and move only transform and opacity; with reduced motion they
 // fall back to a short fade.
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
@@ -30,42 +31,46 @@ export const motion = {
   ease: (k: "out" | "in" | "spring") => token(`--ease-${k}`, "ease-out"),
 };
 
-/** Reorder / unfold / fold for a list: rows marked data-flip="<key>" inside ref glide from their old
- *  place to the new one; rows that are new rise in. Positions are offsets inside the container, so
- *  scrolling does not count as movement. */
-export function useFlip(ref: RefObject<HTMLElement | null>, dep: unknown) {
-  const last = useRef(new Map<string, number>());
-  const first = useRef(true);
-  useLayoutEffect(() => {
-    const root = ref.current;
-    // Not shown (the jump box over it): every row reads as at the top, and the next move after
-    // had each fly down from there.
-    if (!root || root.offsetParent === null) return;
-    const now = new Map<string, number>();
-    const rows = root.querySelectorAll<HTMLElement>("[data-flip]");
-    const dur = motion.dur(3);
-    const ease = motion.ease("out");
-    const calm = reduced();
-    rows.forEach((el) => {
-      const key = el.dataset.flip!;
-      const top = el.offsetTop;
-      now.set(key, top);
-      if (first.current) return;
-      const was = last.current.get(key);
-      if (was === undefined) {
-        el.animate(calm ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 0, transform: "translateY(-4px)" }, { opacity: 1, transform: "none" }], {
-          duration: calm ? motion.dur(1) : motion.dur(2),
-          easing: ease,
-          delay: calm ? 0 : 40,
-          fill: "backwards",
-        });
-      } else if (was !== top && !calm) {
-        el.animate([{ transform: `translateY(${was - top}px)` }, { transform: "none" }], { duration: dur, easing: ease });
-      }
-    });
-    first.current = false;
-    last.current = now;
-  }, [dep, ref]);
+// The page's one way to move what changes place (docs/前端设计规范.md "动画协调"). Whatever draws
+// a list, the sidebar's rows or a conversation's turns, asks here; none animates a move of its own.
+
+/** Rows that change places (reorder, unfold, fold, one put between others): each marked
+ *  data-flip="<key>" inside ref glides from where it was drawn to where it now is, those that
+ *  swap passing each other, instead of all jumping at once. The returned function is called as
+ *  the list is drawn, with what its order is (a string): when that differs from the last drawn,
+ *  the rows are read where they are, before the change, and moved from there once it is drawn.
+ *  One already moving goes on from where it is. Draws that change no order cost nothing: what
+ *  only grows (a draft's next line) is not this one's to move. scope: which list this is, when
+ *  one place draws several in turn (a chat, then the next): none moves from where another's rows
+ *  were. enter: rows new to the list fade in. Only transform and opacity; with reduced motion
+ *  nothing glides. All of it is moves.ts, brought once the page has settled (not in the first
+ *  screen, whose size is kept: nothing changes places as it is first drawn). */
+let moves: typeof import("./moves") | undefined;
+export const movesAhead = () => void import("./moves").then((m) => (moves = m));
+export function useMoves(ref: RefObject<HTMLElement | null>, enter = false) {
+  const st = useRef({});
+  useLayoutEffect(() => moves?.drawn(st.current, ref.current, enter));
+  return (order: string, scope?: string) => moves?.draws(st.current, ref.current, order, scope);
+}
+
+/** A value whose order changes of itself (the sidebar's rows as sessions work), paced: order is
+ *  what its order is, as a string. While that is the same, the value is drawn as it comes (what a
+ *  row says is never late). A change of order is drawn at once when none was drawn in the last
+ *  beat, else at the beat's end, the latest then (those between are never drawn): a list several
+ *  sessions keep reordering moves once a beat, not at each one's every step. What the user did
+ *  (a row dragged, a session made) never waits (moves.ts paceWait). */
+export function usePaced<T>(value: T, order: string): T {
+  const held = useRef({ value, order, at: 0 });
+  const [, tick] = useState({});
+  const h = held.current;
+  let wait = 0;
+  if (order === h.order) h.value = value;
+  else if (!(wait = moves?.paceWait(h.at) ?? 0)) held.current = { value, order, at: performance.now() };
+  useEffect(() => {
+    const t = wait && setTimeout(tick, wait, {});
+    return () => clearTimeout(t);
+  });
+  return held.current.value;
 }
 
 /** Glide: a row whose keys change width (a key gains an icon, a name grows, a key comes or goes):
@@ -159,34 +164,4 @@ export function pageTurn(order: () => string[], on: () => boolean): Turn {
     if (still || !wait.some(Boolean)) return start();
     void Promise.race([Promise.all(wait), new Promise((r) => setTimeout(r, WAIT_FOR_PAGE))]).then(start);
   };
-}
-
-/** items, with those just gone kept a while where they were, marked leaving (drawn .g-depart: they
- *  fade), so that a row that goes does not vanish at once. key names an item. */
-export function useLeaving<T>(items: T[], key: (x: T) => string): { item: T; leaving: boolean }[] {
-  const last = useRef<{ item: T; leaving: boolean }[]>([]);
-  const gone = useRef(new Map<string, number>());
-  const [, tick] = useState(0);
-  const now = new Set(items.map(key));
-  const out: { item: T; leaving: boolean }[] = [];
-  // In the order they were: those still here as they are now, the gone where they stood.
-  const fresh = new Map(items.map((x) => [key(x), x]));
-  for (const x of last.current) {
-    const k = key(x.item);
-    if (now.has(k)) out.push({ item: fresh.get(k)!, leaving: false });
-    else {
-      if (!gone.current.has(k)) gone.current.set(k, Date.now());
-      if (Date.now() - gone.current.get(k)! < motion.dur(2)) out.push({ item: x.item, leaving: true });
-    }
-  }
-  for (const x of items) if (!out.some((o) => !o.leaving && key(o.item) === key(x))) out.push({ item: x, leaving: false });
-  for (const k of [...gone.current.keys()]) if (now.has(k) || !out.some((o) => o.leaving && key(o.item) === k)) gone.current.delete(k);
-  last.current = out;
-  const leaving = out.some((o) => o.leaving);
-  useEffect(() => {
-    if (!leaving) return;
-    const t = setTimeout(() => tick((n) => n + 1), motion.dur(2) + 20);
-    return () => clearTimeout(t);
-  });
-  return out;
 }

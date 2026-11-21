@@ -18,7 +18,7 @@ import { NO_GUILDS, placesOf, withGroupOrder, withMark, type Places } from "./gu
 import { colorVar, COLORS, useFolderColors } from "./colors";
 import { ahead, behind } from "./chats";
 import { t, useLang } from "./i18n";
-import { useFlip } from "./motion";
+import { useMoves } from "./motion";
 import { folderLevels, sessionLevels, usePushMenus, wsLevels, type PushLevel } from "./push";
 import { allFolders, folderSessions, foldersHolding, foldRest, groupHolding, machineOf, remotePath, type Folder as FolderNode, type Tree, type WsNode } from "./tree";
 import { createAt, onOpenPlace, type Place } from "./places";
@@ -161,7 +161,7 @@ export function Sidebar(p: Props) {
     return `${f.list.map((s) => s.id)}${f.rest ? `+${f.all}` : ""}`;
   };
   const shape = [loose.map((c) => c.id).join(","), ...p.tree.workspaces.map((w) => `${w.key}:${p.expanded(w.key)}:${foldShape(roots(w), w.key)}:${allFolders(tops(w)).map((f) => `${f.key}${p.expanded(f.key)}${foldShape(f.sessions, f.key)}`).join(",")}`), p.expanded("archive"), p.tree.archived.length].join("|");
-  useFlip(list, shape);
+  useMoves(list, true)(shape);
   // Dragged to a new place (reorder.ts): the sessions beside each other, by the key of their
   // group's root or folder, and the groups, as last drawn. The page shows the new order at once.
   const lanes = useRef(new Map<string, Session[]>());
@@ -640,7 +640,7 @@ function Row({ depth, flip, chevron, expanded, icon, label, end, selected, onCli
 
 /** The line where a dragged row goes (reorder.ts): one for the list, gliding from row to row as
  *  the mouse moves, fading in where it first shows and out where it was dropped, while the rows
- *  glide to their new places (useFlip). */
+ *  glide to their new places (useMoves). */
 function DropLine({ list }: { list: RefObject<HTMLDivElement | null> }) {
   const over = useOver();
   const [at, setAt] = useState({ x: 0, y: 0, w: 0, glide: false });
