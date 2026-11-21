@@ -97,11 +97,11 @@ func (m *Manager) bares() []api.Session {
 
 // ListBare puts a new channel that is no session's in the list: shown, and in its folder's group
 // (the caller's, if that holds the folder).
-func (m *Manager) ListBare(id, cwd, caller string) error {
+func (m *Manager) ListBare(id, machine, cwd, caller string) error {
 	if _, err := m.o.Store.Show("", id); err != nil {
 		return err
 	}
-	m.intoGroup(id, cwd, caller)
+	m.intoGroup(id, groupPath(machine, cwd), caller)
 	m.Refresh([]string{id})
 	return nil
 }

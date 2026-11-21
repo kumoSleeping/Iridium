@@ -22,6 +22,8 @@ func ownOf(s api.Session, o store.Overlay) bool {
 	switch {
 	case s.Subagent:
 		return false
+	case s.Bare:
+		return o.Opened
 	case s.Launcher != "":
 		return o.Manual
 	}
