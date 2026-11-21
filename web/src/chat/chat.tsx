@@ -650,8 +650,10 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
   if (liveSeen.current.id !== id) liveSeen.current = { id, idle: false, at: null };
   if (!busy && log.loaded) liveSeen.current.idle = true;
   liveSeen.current.at = liveAt(liveSeen.current.at, busy, ownKey, ownAt < turns.length - 1, liveSeen.current.idle);
-  // What you sent before the turn began is under those words too, and the turn it begins.
-  const tailAt = ownAt < 0 || liveSeen.current.at?.under || pendingBefore.length > 0 ? turns.length - 1 : ownAt;
+  // What you sent before the turn began is under those words too, and the turn it begins. At
+  // rest the row's place is the page's end, as ever (kept over the others' words it left a gap
+  // there, and went to and fro as a turn began).
+  const tailAt = !busy || ownAt < 0 || liveSeen.current.at?.under || pendingBefore.length > 0 ? turns.length - 1 : ownAt;
   const atEnd = turns[tailAt];
   // Where each one at work is drawn: an agent over what it has not read (merge.ts boxSlot: what
   // was given to it, what it said, what called it), a subagent after the turn it began at; in
@@ -728,7 +730,7 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
     return ch ? titleOf(ch) : (g.channel?.name ?? "");
   };
   // What changes as the conversation grows: it keeps to the bottom, the dots wait again.
-  const grew = `${log.blocks.at(-1)?.at} ${log.drafts.length} ${log.drafts.at(-1)?.text.length} ${log.drafts.at(-1)?.whole} ${log.sent.length} ${ready?.kept.log.end ?? 0} ${atWork.map((a) => `${a.session}:${stateOf(a.session)?.end ?? 0}`).join(",")} ${subs.map((x) => x.id).join(",")}`;
+  const grew = `${log.blocks.at(-1)?.at} ${log.drafts.length} ${log.drafts.at(-1)?.text.length} ${log.drafts.at(-1)?.whole} ${log.sent.length} ${ready?.kept.log.end ?? 0} ${atWork.map((a) => `${a.session}:${stateOf(a.session)?.end ?? 0}`).join(",")} ${subs.map((x) => `${x.id}:${x.updatedAt}`).join(",")}`;
   // The own agent's stop key, on its row at work; starting is no turn yet.
   const stop = may && s.status !== "starting" && !s.subagent && !elsewhere ? <StopKey session={id} esc /> : null;
   const activity = <Activity stop={stop} calls={log.drafts.filter((d) => d.tool && !renamesDraft(d))} running={shown.flatMap((b) => (b.kind === "running" ? [b.tool] : []))} cwd={cwd} quiet={s.status !== "waiting" && !log.drafts.some((d) => !d.whole && !d.tool)} grew={grew} under={headless} />;

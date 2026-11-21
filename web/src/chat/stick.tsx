@@ -24,6 +24,7 @@ const SETTLE = 600; // ms after a chat opens that what grows does not glide
 const REST = 500; // ms since the user last scrolled it that a chat at its newest is at rest there
 const HOLD = 350; // ms with nothing changing before the room what shrank at the newest left is closed
 const SLACK = 32; // px of such room that is not worth moving the conversation for: it stays till filled
+const NEW = 400; // ms after something new came that what grows or shrinks is still its doing
 const RESIZED = 400; // ms after the pane itself changed height (the keyboard) that nothing glides
 
 /** The glide's spring, critically damped: it comes to rest once, without a bounce, and one pushed
@@ -129,6 +130,11 @@ export function Stick({ tail, older, draw, place, style, children, scroller, bot
   const height = useRef(0);
   const pad = useRef(0);
   const born = useRef(performance.now());
+  // When something new last came to the conversation (its tail changed). What changes its height
+  // with nothing new (a picture loading late, a card filled in, a mark coming) moves nothing: the
+  // end is kept, at once, no glide and no room held (kumo, 2026-11-21: a page just opened, or a
+  // message just sent, went up and down by itself; still till something new is there to add).
+  const came = useRef(-1e9);
   // Where this put the scroll last, and when the user last scrolled: a chat at rest at its newest
   // may be swiped on to bring the phone's sheet (sheet.tsx).
   const ours = useRef(-1);
@@ -226,6 +232,7 @@ export function Stick({ tail, older, draw, place, style, children, scroller, bot
     const a = anchor.current;
     if (live && !dPad && height.current !== was && a && a.el.isConnected && col && Math.abs(lastTop.current - a.at) <= 1 && Math.abs(fromEnd(col, a.el) - a.h) < 0.5) return void pin(el);
     // The part of it that something moving of itself made: that is drawn by itself.
+    if (live && !own && !dPad && !settling && performance.now() - came.current > NEW) return void pin(el);
     const its = own ? d : d > 0 ? Math.min(d, Math.max(0, self)) : Math.max(d, Math.min(0, self));
     let push = d - its;
     // What the conversation itself shrank by is held as the floor: something in it may grow back.
@@ -398,6 +405,7 @@ export function Stick({ tail, older, draw, place, style, children, scroller, bot
     // Only as the conversation grew: a draw that changed nothing in it (the page around it drawn
     // again) forces no layout of the whole page; what grows without it the observer below sees.
     if (!first && was === tail) return;
+    came.current = performance.now();
     // The chat settles from its first draw, not from when it began to be made: a long one takes a
     // while to draw, and what fills in meanwhile is still its opening.
     if (first) born.current = performance.now();
