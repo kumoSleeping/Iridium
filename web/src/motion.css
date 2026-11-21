@@ -186,7 +186,7 @@ details[data-shut] > summary .fold-chev {
 .g-arrive > * {
   animation: g-rise var(--dur-2) var(--ease-out) both;
 }
-/* --- depart: what is in it fades out, then it is gone (motion.ts useLeaving); the room it leaves
+/* --- depart: what is in it fades out, then it is gone (moves.ts useLeaving); the room it leaves
    at the conversation's end is the chat's to close (stick.tsx, the floor), once, gliding. --- */
 .g-depart {
   pointer-events: none;

@@ -9,6 +9,13 @@ import { flushSync } from "react-dom";
 import { t } from "../i18n";
 import { motion, reduced } from "../motion";
 
+// Who else moves the conversation's rows, and for how long (moves.ts, brought apart from the first
+// screen; till it is here nothing else moves them).
+let lanes: typeof import("../moves") | undefined;
+void import("../moves").then((m) => (lanes = m));
+const freeIn = (el: Element, who: string) => lanes?.freeIn(el, who) ?? 0;
+const occupy = (el: Element, who: string, ms: number) => lanes?.occupy(el, who, ms);
+
 // How near the top the page before is put in: two screens, at least 600px. It was asked for ahead
 // (chats.ts), so this is drawing only.
 const near = (el: HTMLElement) => Math.max(600, el.clientHeight * 2);
@@ -86,7 +93,18 @@ export function Stick({ tail, older, draw, place, style, children, scroller, bot
   // is and keeps its speed (kumo, 2026-11-19: two agents called at once, each row that came began
   // the glide again from a standstill: it went a step, stood a frame, went a step), so a draft
   // growing line by line, or several rows coming one after another, flow on as one movement.
+  // One movement of the conversation at a time (kumo, 2026-11-21: never two at odds). What pushes
+  // the same way as the glide under way is that glide going on (above). What would move it the
+  // other way (the composer made shorter, the floor closed) waits till the glide is wholly done:
+  // held, the conversation drawn as far off its place meanwhile (the column's translate, which adds
+  // to the glide's transform), and glided from there once it is. Rows changing places in it
+  // (moves.ts) and the glide wait for each other the same way.
   const anim = useRef<Animation | null>(null);
+  const heldBy = useRef(0);
+  const setHeld = (col: HTMLElement, px: number) => {
+    heldBy.current = px;
+    col.style.translate = px ? `0 ${px}px` : "";
+  };
   const spring = useRef<Spring>({ y: 0, v: 0, t: 0 });
   /** When the pane itself last changed height, and its height then. */
   const paneH = useRef(0);
@@ -165,7 +183,9 @@ export function Stick({ tail, older, draw, place, style, children, scroller, bot
     if (!el || !floor.current) return;
     // Not under a finger, nor while something still moves of itself: then once that is over.
     for (const [m, r] of moving.current) if (!m.isConnected || performance.now() > r.till) moving.current.delete(m);
-    if (touching.current || moving.current.size) return settleSoon();
+    // Nor while the conversation glides, or rows in it change places: one movement at a time.
+    const col = colOf(el);
+    if (touching.current || moving.current.size || anim.current?.playState === "running" || (col && freeIn(col, "push"))) return settleSoon();
     const top = el.scrollTop;
     setFloor(0);
     // Let go of meanwhile, it may still have pulled the scroll up, at its foot: that glides too.
@@ -257,21 +277,39 @@ export function Stick({ tail, older, draw, place, style, children, scroller, bot
     // By the timeline's clock: where the one running is, is where the compositor draws it.
     const now = (document.timeline.currentTime as number | null) ?? performance.now();
     const w = springW();
-    const cur = anim.current?.playState === "running" ? springAt(spring.current, now, w) : { y: 0, v: 0 };
+    const running = anim.current?.playState === "running";
+    const cur = running ? springAt(spring.current, now, w) : { y: 0, v: 0 };
+    // Against the glide under way: held till that is done.
+    if (running && by * cur.y < 0 && Math.abs(cur.y) >= 0.5) return setHeld(col, heldBy.current + by);
     anim.current?.cancel();
     anim.current = null;
     const y = Math.max(-el.clientHeight, Math.min(el.clientHeight, cur.y + by));
     // Never past its place and back: at most as fast towards it as comes to rest there.
     const v = (cur.v + w * y) * y < 0 ? -w * y : cur.v;
-    if (Math.abs(y) < 0.5) return;
-    spring.current = { y, v, t: now };
+    if (Math.abs(y) < 0.5) {
+      // At its place with something held: that goes now.
+      const h = heldBy.current;
+      if (h) (setHeld(col, 0), glide(h, settling));
+      return;
+    }
+    // Rows changing places in it are let finish first: drawn where it is till then.
+    const wait = freeIn(col, "push");
+    spring.current = { y, v, t: now + wait };
     // The spring's path as linear keyframes, to rest (e^-9 of the way left).
     const T = 9 / w;
     const N = 24;
     const frames: Keyframe[] = [];
-    for (let i = 0; i < N; i++) frames.push({ transform: `translateY(${springAt(spring.current, now + (T * i) / N, w).y.toFixed(2)}px)` });
+    for (let i = 0; i < N; i++) frames.push({ transform: `translateY(${springAt(spring.current, now + wait + (T * i) / N, w).y.toFixed(2)}px)` });
     frames.push({ transform: "none" });
-    const a = col.animate(frames, { duration: T, easing: "linear" });
+    const a = col.animate(frames, { duration: T, easing: "linear", delay: wait, fill: "backwards" });
+    occupy(col, "push", wait + T);
+    // Done: what was held meanwhile glides from where it is drawn.
+    a.onfinish = () => {
+      const h = heldBy.current;
+      if (anim.current !== a || !h) return;
+      setHeld(col, 0);
+      glide(h, true);
+    };
     // Begun now, not when the page next has time for it: a page busy drawing what came (several
     // agents' rows) held each new glide at its first frame meanwhile.
     try {
@@ -325,9 +363,10 @@ export function Stick({ tail, older, draw, place, style, children, scroller, bot
     const col = el?.firstElementChild as HTMLElement | null;
     if (!el || !col || anim.current?.playState !== "running") return;
     const tr = getComputedStyle(col).transform;
-    const at = tr && tr !== "none" ? new DOMMatrixReadOnly(tr).m42 : 0;
+    const at = (tr && tr !== "none" ? new DOMMatrixReadOnly(tr).m42 : 0) + heldBy.current;
     anim.current.cancel();
     anim.current = null;
+    setHeld(col, 0);
     if (Math.abs(at) < 0.5) return;
     el.scrollTop -= at;
     kept.current = lastTop.current = el.scrollTop;
