@@ -291,6 +291,8 @@ export function NewSession({ ws, folder, onFolder, onPick, busy, onMake }: { ws:
   const next = useRef(0);
   const [last, setLast] = useState<number | null>(null);
   const shown = seats.filter((x) => !x.going);
+  const requiresBare = !!shown[0]?.m;
+  const bareOn = bare === "on" || requiresBare;
   // The other computers (kumo, 2026-11-18): their agents are offered under the folder's own. One
   // pressed joins the lineup at its computer's home, invited: it works there, away from the
   // channel's folder. Pressed first, it would be the session's own agent, which runs in the
@@ -316,6 +318,7 @@ export function NewSession({ ws, folder, onFolder, onPick, busy, onMake }: { ws:
     window.setTimeout(() => setSeats((ss) => ss.filter((x) => x.key !== key)), 320);
   };
   const toggleBare = () => {
+    if (requiresBare) return;
     if (bare === "on") {
       setBare("going");
       window.setTimeout(() => setBare("off"), 320);
@@ -328,7 +331,7 @@ export function NewSession({ ws, folder, onFolder, onPick, busy, onMake }: { ws:
   // Its card beside the panel, by its row; where there is no room beside it (a phone), none.
   const [roleRow, setRoleRow] = useState<HTMLDivElement | null>(null);
   const wide = !useMedia(PHONE);
-  const ready = bare === "on" || shown.length > 0;
+  const ready = bareOn || shown.length > 0;
   const start = () => {
     if (!ready || busy !== null) return;
     if (shown.some(bad)) return void toast(t(shown.some(dup) ? "channel.nickTaken" : "channel.nickBad"), { error: true });
@@ -337,7 +340,7 @@ export function NewSession({ ws, folder, onFolder, onPick, busy, onMake }: { ws:
     if (off) return void toast(t("new.offline", { name: off.m!.name }), { error: true });
     const to = there ? { m: there.m, cwd: there.cwd } : undefined;
     const ps = people ?? undefined;
-    if (bare === "on") return onPick("" as Agent, to, ps, shown.length ? { agents: shown.map(member) } : undefined);
+    if (bareOn) return onPick("" as Agent, to, ps, shown.length ? { agents: shown.map(member) } : undefined);
     const [first, ...rest] = shown;
     const as: As = { ...runs(first!), ...(typed(first!) ? { nick: typed(first!) } : {}), ...(!everyone(first!.recv) ? { recv: first!.recv } : {}), ...(rest.length ? { agents: rest.map(member) } : {}) };
     onPick(first!.agent, to, ps, as);
@@ -375,7 +378,7 @@ export function NewSession({ ws, folder, onFolder, onPick, busy, onMake }: { ws:
   // The folder's agent grid starts with the option to create a channel without its own agent.
   const noAgent = (
     <Tip label={t("new.noAgent")}>
-      <button type="button" aria-label={t("new.noAgent")} aria-pressed={bare === "on"} disabled={busy !== null} onClick={toggleBare} className="g-press grid h-12 place-items-center rounded-md hover:bg-fill disabled:opacity-50 aria-pressed:bg-fill pointer-coarse:h-14">
+      <button type="button" aria-label={t("new.noAgent")} aria-pressed={bareOn} aria-disabled={requiresBare || undefined} disabled={busy !== null} onClick={toggleBare} className="g-press grid h-12 place-items-center rounded-md hover:bg-fill disabled:opacity-50 aria-disabled:opacity-50 aria-pressed:bg-fill pointer-coarse:h-14">
         <Logo agent={"" as Agent} size={22} />
       </button>
     </Tip>
@@ -450,12 +453,12 @@ export function NewSession({ ws, folder, onFolder, onPick, busy, onMake }: { ws:
       ))}
       {/* The lineup: each row glides open as it is added and shut as it is taken out. */}
       <div role="list" aria-label={t("new.lineup")} className="flex flex-col">
-        <Grow open={bare === "on"}>
-          {bare !== "off" && <BareRow remove={toggleBare} />}
+        <Grow open={bareOn}>
+          <BareRow remove={bareOn && !requiresBare ? toggleBare : undefined} />
         </Grow>
         {seats.map((x) => (
           <Grow key={x.key} open={!x.going}>
-            <SeatRow rowRef={x.key === lastRole?.key ? setRoleRow : undefined} seat={x} at={x.m ? { machine: x.m.id } : at} recv={bare !== "off" || shown.length > 1 || !everyone(x.recv)} own={bare === "off" && shown[0]?.key === x.key} bad={bad(x)} set={(p) => change(x.key, p)} remove={() => remove(x.key)} />
+            <SeatRow rowRef={x.key === lastRole?.key ? setRoleRow : undefined} seat={x} at={x.m ? { machine: x.m.id } : at} recv={bareOn || bare === "going" || shown.length > 1 || !everyone(x.recv)} own={!bareOn && shown[0]?.key === x.key} bad={bad(x)} set={(p) => change(x.key, p)} remove={() => remove(x.key)} />
           </Grow>
         ))}
       </div>
@@ -615,15 +618,15 @@ function useRowMenu() {
 
 /** The channel with no agent of its own, first in the lineup: its mark and name; its menu takes
  *  it out (as pressing it among the agents again). */
-function BareRow({ remove }: { remove: () => void }) {
+function BareRow({ remove }: { remove?: () => void }) {
   const m = useRowMenu();
   return (
-    <div role="listitem" {...m.props} className="flex h-10 items-center gap-2 rounded-md px-1.5 select-none pointer-coarse:h-12">
+    <div role="listitem" {...(remove && m.props)} className="flex h-10 items-center gap-2 rounded-md px-1.5 select-none pointer-coarse:h-12">
       <span className="grid size-6 shrink-0 place-items-center rounded-full bg-fill">
         <Logo agent={"" as Agent} size={14} />
       </span>
       <span className="min-w-0 flex-1 truncate text-sm">{t("new.noAgent")}</span>
-      <RowMenu at={m.menuAt} close={() => m.setMenuAt(null)} remove={() => (m.setMenuAt(null), remove())} />
+      {remove && <RowMenu at={m.menuAt} close={() => m.setMenuAt(null)} remove={() => (m.setMenuAt(null), remove())} />}
     </div>
   );
 }
