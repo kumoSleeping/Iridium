@@ -362,7 +362,6 @@ export function NewSession({ ws, folder, onFolder, onPick, busy, onMake }: { ws:
     if (n) void onMake(n).then((ok) => ok && box.current?.querySelector<HTMLButtonElement>("[role=group] button:not(:disabled)")?.focus());
   };
   const path = there ? tilde(pageAt(folder, machines)?.path ?? there.cwd, homeAt(there.m)) : tilde(folder);
-  let i = 0;
   if (whose === "gone")
     return (
       <div className="flex w-[min(288px,calc(100vw-16px))] p-1.5">
@@ -373,6 +372,14 @@ export function NewSession({ ws, folder, onFolder, onPick, busy, onMake }: { ws:
         </p>
       </div>
     );
+  // The folder's agent grid starts with the option to create a channel without its own agent.
+  const noAgent = (
+    <Tip label={t("new.noAgent")}>
+      <button type="button" aria-label={t("new.noAgent")} aria-pressed={bare === "on"} disabled={busy !== null} onClick={toggleBare} className="g-press grid h-12 place-items-center rounded-md hover:bg-fill disabled:opacity-50 aria-pressed:bg-fill pointer-coarse:h-14">
+        <Logo agent={"" as Agent} size={22} />
+      </button>
+    </Tip>
+  );
   return (
     <div ref={box} tabIndex={-1} className="flex w-[min(320px,calc(100vw-16px))] flex-col gap-1 p-1.5 outline-none">
       {naming !== null ? (
@@ -419,21 +426,14 @@ export function NewSession({ ws, folder, onFolder, onPick, busy, onMake }: { ws:
       {roles.length > 0 && <RolesRow roles={roles} at={at} add={(r) => add(r.agent, r)} />}
       {!there ? (
         <div role="group" aria-label={t("new.agent")} className="g-stagger grid grid-cols-5 gap-1">
-          {/* First, a channel with no agent (docs/channels.md; kumo, 2026-11-16: first): in the
-              lineup or not, pressed again to take it out. */}
-          <Tip label={t("new.noAgent")}>
-            <button type="button" aria-label={t("new.noAgent")} aria-pressed={bare === "on"} disabled={busy !== null} onClick={toggleBare} style={{ "--i": i++ } as CSSProperties} className="g-press grid h-12 place-items-center rounded-md hover:bg-fill disabled:opacity-50 aria-pressed:bg-fill pointer-coarse:h-14">
-              <Logo agent={"" as Agent} size={22} />
-            </button>
-          </Tip>
-          {agents.map((a) => {
-            const n = i++;
+          {noAgent}
+          {agents.map((a, i) => {
             // Each by its name and the model a new one will run (never "default", the user, 2026-11-16).
             return (
               <DraftNamed key={a} agent={a} at={NO_PLACE}>
                 {(name) => (
                   <Tip label={missing(a) ? t("new.notInstalled", { name: agentName(a) }) : name}>
-                    <button type="button" aria-label={name} disabled={busy !== null} onClick={() => add(a)} style={{ "--i": n } as CSSProperties} className="g-press grid h-12 place-items-center rounded-md hover:bg-fill disabled:opacity-50 pointer-coarse:h-14">
+                    <button type="button" aria-label={name} disabled={busy !== null} onClick={() => add(a)} style={{ "--i": i + 1 } as CSSProperties} className="g-press grid h-12 place-items-center rounded-md hover:bg-fill disabled:opacity-50 pointer-coarse:h-14">
                       <Logo agent={a} size={24} className={cn(missing(a) && "opacity-30 grayscale")} />
                     </button>
                   </Tip>
@@ -443,7 +443,7 @@ export function NewSession({ ws, folder, onFolder, onPick, busy, onMake }: { ws:
           })}
         </div>
       ) : (
-        <MachineAgents m={there.m} onPick={(a) => add(a)} />
+        <MachineAgents m={there.m} noAgent={noAgent} onPick={(a) => add(a)} />
       )}
       {others.map((m) => (
         <MachineAgents key={m.id} m={m} onPick={(a) => add(a, undefined, m)} />
@@ -810,7 +810,7 @@ function PeopleRow({ people, set }: { people: string[]; set: (p: string[]) => vo
 }
 
 /** Another machine's agents, under its face and name: a press adds one to the lineup. */
-function MachineAgents({ m, onPick }: { m: Machine; onPick: (a: Agent) => void }) {
+function MachineAgents({ m, onPick, noAgent }: { m: Machine; onPick: (a: Agent) => void; noAgent?: ReactElement }) {
   return (
     <div role="group" aria-label={m.name} className="flex flex-col gap-1">
       <div className={cn("flex items-center gap-1.5 px-2 pt-1 text-xs", m.online ? "text-ink-2" : "text-ink-4")}>
@@ -820,6 +820,7 @@ function MachineAgents({ m, onPick }: { m: Machine; onPick: (a: Agent) => void }
       </div>
       {!m.agents.length && <p className="m-0 flex h-9 items-center px-2 text-sm text-ink-3">{t("new.noAgents")}</p>}
       <div className="g-stagger grid grid-cols-4 gap-1">
+        {noAgent}
         {m.agents.map(({ agent }, i) => {
           const a = agent as Agent;
           const key = `${m.id}/${a}`;
@@ -828,7 +829,7 @@ function MachineAgents({ m, onPick }: { m: Machine; onPick: (a: Agent) => void }
             <DraftNamed key={key} agent={a} at={{ machine: m.id }}>
               {(name) => (
                 <Tip label={says(name)}>
-                  <button type="button" aria-label={says(name)} onClick={() => onPick(a)} style={{ "--i": i } as CSSProperties} className="g-press grid h-12 place-items-center rounded-md hover:bg-fill disabled:opacity-50 pointer-coarse:h-14">
+                  <button type="button" aria-label={says(name)} onClick={() => onPick(a)} style={{ "--i": noAgent ? i + 1 : i } as CSSProperties} className="g-press grid h-12 place-items-center rounded-md hover:bg-fill disabled:opacity-50 pointer-coarse:h-14">
                     <span className={cn("relative grid", !m.online && "opacity-30 grayscale")}>
                       <Logo agent={a} size={24} />
                       <MachineBadge m={m} size={13} />
