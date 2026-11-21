@@ -314,8 +314,8 @@ export function NewSession({ ws, folder, onFolder, onPick, busy, onMake }: { ws:
   // Taken out: folded away first, then gone.
   const remove = (key: number) => {
     // Match the receive default when a cross-computer agent is picked into an empty lineup.
-    const remaining = bare !== "on" && shown.length === 2 ? shown.find((x) => x.key !== key) : undefined;
-    if (remaining?.m && !remaining.recvChosen) change(remaining.key, { recv: RECV.all });
+    const nextFirst = bare !== "on" && shown[0]?.key === key ? shown[1] : undefined;
+    if (nextFirst?.m && !nextFirst.recvChosen) change(nextFirst.key, { recv: RECV.all });
     change(key, { going: true });
     if (last === key) setLast(null);
     window.setTimeout(() => setSeats((ss) => ss.filter((x) => x.key !== key)), 320);
