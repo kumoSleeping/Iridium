@@ -271,3 +271,27 @@ func TestChannelAtPush(t *testing.T) {
 		}
 	}
 }
+
+// Another session's agent, not of the channel, writing to it with ir: the words are that agent's
+// (not the login its turn acts for, kumo 2026-11-21), and they reach the channel's own agent as a
+// letter does.
+func TestChannelLetterFromAnotherSession(t *testing.T) {
+	t.Parallel()
+	l := start(t)
+	ch := l.create(200, "web", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "first"})
+	l.waitReply("web", ch, "ok: first")
+	l.want(200, "web", "POST", "/v1/internal/channels/"+ch+"/members", api.NewMember{Agent: api.AgentClaude}, nil)
+	other := l.create(200, "web", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "elsewhere"})
+	l.waitReply("web", other, "ok: elsewhere")
+	var sent []satori.Message
+	l.wantSat(200, "agent-in:"+other, "message.create", map[string]any{"channel_id": ch, "content": "a letter"}, &sent)
+	if len(sent) != 1 {
+		t.Fatalf("sent: %+v", sent)
+	}
+	var got satori.Message
+	l.wantSat(200, "agent-in:"+other, "message.get", map[string]any{"channel_id": ch, "message_id": sent[0].ID}, &got)
+	if got.User == nil || got.User.ID != "agent:"+other {
+		t.Fatalf("in the log as: %+v", got.User)
+	}
+	l.waitSaid("web", ch, "@claude ", fmt.Sprintf("ok: #%s: a letter", sent[0].ID))
+}

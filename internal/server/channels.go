@@ -1928,6 +1928,14 @@ func (s *Server) sendChannelAs(ctx context.Context, c caller, from, ch string, r
 	if tag := s.m.SourceTag(from); tag != "" {
 		u.Name = tag
 	}
+	// Another session's agent, not of the channel, writing to it with ir: its words are that
+	// agent's, drawn and counted as its, not as the login its turn acts for (kumo, 2026-11-21: a
+	// letter from another session showed as his). Whom it wakes is as for a letter: as before.
+	outsider := ""
+	if sender == "" && c.session != "" && c.session != ch {
+		outsider = c.session
+		u = satori.User{ID: store.AgentMember(outsider)}
+	}
 	unseen := ""
 	var given int64 // how far the agent that speaks has been given the channel, once this is sent
 	if sender != "" {
@@ -1999,7 +2007,10 @@ func (s *Server) sendChannelAs(ctx context.Context, c caller, from, ch string, r
 		req.ID = session.NewInputID()
 	}
 	// An agent's words are an agent's (kind "said"), marked as sent; its turn's last are final.
-	of := channel.Data{Quote: quote, Sent: sender != "", Final: sender != "" && final}
+	of := channel.Data{Quote: quote, Sent: sender != "" || outsider != "", Final: sender != "" && final}
+	if outsider != "" {
+		of.Session = outsider
+	}
 	// Its files, as the page draws them (the words given to the agents name them already).
 	of.Files = s.files.Refs(ch, req.Attachments)
 	if sender != "" && sender != ch {
@@ -2024,11 +2035,18 @@ func (s *Server) sendChannelAs(ctx context.Context, c caller, from, ch string, r
 	if sender == "" {
 		author = readerOf(c)
 	}
+	if outsider != "" {
+		author = store.AgentMember(outsider)
+	}
 	named := s.names(ch, seq, req.Text, author)
 	// Said: a person's begins a new run.
 	if sender == "" {
 		lk = s.chain.person(ch, c.ID())
-		go s.heard(ch, seq, req.Text, readerOf(c), u.Name, lk)
+		if outsider != "" {
+			go s.heard(ch, seq, req.Text, author, cmp.Or(s.ch.Nick(outsider), s.m.SourceTag(from)), lk)
+		} else {
+			go s.heard(ch, seq, req.Text, readerOf(c), u.Name, lk)
+		}
 	} else {
 		if final {
 			go s.heard(ch, seq, req.Text, store.AgentMember(sender), s.ch.Nick(sender), lk)

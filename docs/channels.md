@@ -79,6 +79,7 @@
 - 谁能改：频道里任何成员（人或 agent）都能改任何 agent 的接收集：`ir api PATCH internal/channels/<频道>/members/agent:<会话> recv:='["*","agent:<会话>"]'`；频道里记一行（`recv` 事件）。给 agent 的频道说明里每个 agent 后面写着它的接收集（“woken by …”），有人设了接收集时附一句怎么改。
 - “跟随”（`follow`）已去掉，由接收集和脚本代替。
 - 发话：`ir api message.create channel_id=<频道> content='正文'`：单引号里可以多行，shell 不解释其中任何字符，正文里的 `'` 写成 `'\''`（kumo，2026-11-15：不再有 `k=@-`，只留这一种写法）。在自己所在的频道里这样发话，手动审批下也不弹审批（`session.speaksOnly`：只认这一条命令：`channel_id`、`content`（或 `_data.text`）各一个，值不带引号，或在单引号里，或在不含 `$`、反引号、`\` 的双引号里；带别的参数、接别的命令照常问）。
+- 别的会话的 agent（不是这个频道的成员）用 `ir` 发进来的话，记成那个 agent 说的（作者 `agent:<会话>`，`_data.session`），不是它那一回合代表的登录的；叫起谁照旧，和一封信一样（kumo，2026-11-21：这样的话显示成了他说的）。
 - 发送检查：agent 用 `ir` 发话时，它没读过的消息随回答一起给它（`_data.unseen`，`ir` 直接印出来），已读位置前移。没读过的超过 12 条，或其中有点到它的：不发，回 409 `behind`，正文是这些消息；读完再发。
 
 ## 给 agent 的上下文
