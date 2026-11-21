@@ -68,8 +68,8 @@ export function useSide(id: string, row: Pick<Session, "agents"> | undefined, ma
     if (!partsNow()) void loadParts().then(() => live && bump(), () => {});
     if (!fresh(kept.log.came)) more();
     const hear = (e: SatoriEvent) => {
-      if (e.type !== "message-created" || e.channel?.id !== id || !e.message) return;
-      kept.log.heard({ ...e.message, _data: { ...e._data, ...e.message._data } });
+      if ((e.type !== "message-created" && e.type !== "message-deleted") || e.channel?.id !== id || !e.message) return;
+      kept.log.heard({ ...e.message, _data: { ...e._data, ...e.message._data } }, e.type === "message-deleted");
       bump();
     };
     events.add(hear);

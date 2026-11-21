@@ -15,7 +15,7 @@
      g-swap     one icon for another in place, both drawn, cross-faded (a folder shut / open)
      g-lid      the archive bin's lid, hinged at its right end, springs up as it opens
      g-stagger  children of an unfolded menu rise one after another
-     reorder    FLIP of rows that moved (motion.ts useFlip)
+     reorder    rows that change places glide there (motion.ts useMoves)
      send       the sent message pushes the chat up and fades in (motion.ts pushIn)
      snap       a slider's knob and fill glide to the stop it snapped to (chat/effort.tsx); the
                 liquid in the fill flows on (chat/liquid.ts)
@@ -186,7 +186,7 @@ details[data-shut] > summary .fold-chev {
 .g-arrive > * {
   animation: g-rise var(--dur-2) var(--ease-out) both;
 }
-/* --- depart: what is in it fades out, then it is gone (motion.ts useLeaving); the room it leaves
+/* --- depart: what is in it fades out, then it is gone (moves.ts useLeaving); the room it leaves
    at the conversation's end is the chat's to close (stick.tsx, the floor), once, gliding. --- */
 .g-depart {
   pointer-events: none;

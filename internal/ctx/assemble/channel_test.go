@@ -32,6 +32,7 @@ In full, what was said since you last read the channel:
 Work since you last read the channel (tool calls counted; files as changed by editing tools, not by shell commands):
 claude: bash 7 (go 4, git 3), 1 failed · 2 files +123 −14 · read 2 · web 1 — /w/a.go, /w/b.go
 More of the channel: ir api message.list channel_id=self [next=<number> limit=<n>]; by words: ir api message.list channel_id=self _data.q="<words>"; one message whole: ir api message.get channel_id=self message_id=<number>.
+React to a message rather than answer it in words: ir api reaction.create channel_id=self message_id=<number> emoji=👍. A line "#<number> [who reacted 👍 to: …]" is someone's reaction to that message.
 </channel-context>`
 	if got := in.String(); got != want {
 		t.Errorf("got:\n%s\nwant:\n%s", got, want)
@@ -56,6 +57,24 @@ More of the channel: ir api message.list channel_id=self [next=<number> limit=<n
 	in, _ = ChannelTurn(Channel{You: "a", Agents: []ChannelAgent{{Nick: "a"}}}, 1, "hi", "")
 	if got := in.String(); got != "#1: hi\n\n<channel-context>\nYou are a in a channel shared with people and other agents. Its agents: a. Only what you say reaches the channel: your thinking and tool calls stay yours, and you do not see theirs. To call another agent, write @ and its name in what you say; without that no agent is called. Between agents, @ another only when you need its answer; when the exchange has said what it needs to, reply without @ and it ends there (agents passing it on without a person stop after a few turns anyway). After you @ an agent, end your turn: its answer comes in the channel, and one that answers you calls you. Do not restate what the channel already shows, nor ids, folders or states. To name one without calling it, write its name without @. Called with nothing to say (thanks, an acknowledgement): end your turn with ir api POST internal/sessions/self/interrupt; nothing is said for you.\n</channel-context>" {
 		t.Errorf("bare: %q", got)
+	}
+}
+
+// A reaction (docs/channels.md "表情"): its line, the message's words cut to a line, then the
+// channel's context, the messages taken back since in it; alone, the line only.
+func TestChannelReaction(t *testing.T) {
+	r := Reaction{Seq: 7, Who: "kumo", Emoji: "👍", Text: "the tests\npass " + strings.Repeat("x", 300)}
+	in, err := ChannelReaction(Channel{You: "a", Agents: []ChannelAgent{{Nick: "a"}}, Brief: true, Recalled: []int64{3, 5}}, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := in.String()
+	if !strings.HasPrefix(got, "#7 [kumo reacted 👍 to: the tests pass xxx") || !strings.Contains(got, "…]\n\n<channel-context>\nTaken back since you last read the channel, gone for everyone: #3, #5.\n") {
+		t.Errorf("got %q", got)
+	}
+	alone, _ := Reacted(Reaction{Seq: 2, Who: "kumo", Emoji: "🎉", Text: "done"})
+	if alone.String() != "#2 [kumo reacted 🎉 to: done]" {
+		t.Errorf("alone: %q", alone.String())
 	}
 }
 

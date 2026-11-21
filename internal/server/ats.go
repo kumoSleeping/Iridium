@@ -20,9 +20,9 @@ import (
 )
 
 // Who was named (docs/channels.md "有人 @ 我"): a message that names a login ("@name", Satori's
-// <at id/>), all the members ("@全体成员", <at type="all"/>), or answers one of its messages
-// (a quote) is kept as that login's mark on the channel (store "channel_ats": the first it has
-// not read), till it reads that far. The pages carry their own marks (the state "ats"), and
+// <at id/>) or all the members ("@全体成员", <at type="all"/>) is kept as that login's mark on
+// the channel (store "channel_ats": the first it has not read), till it reads that far; a quote
+// of its words is not (kumo, 2026-11-21). The pages carry their own marks (the state "ats"), and
 // the login is pushed the message whatever its rules say.
 
 // person is a login as words may name it. member: what its place in a channel is kept under
@@ -123,12 +123,12 @@ func namedIn(text string, names []string) map[string]bool {
 }
 
 // names notes whom message seq of channel ch names, among the logins that see it: text, its
-// words; quote, the message it answers (0: none); author, the member that said it ("": an
-// agent), which its own words do not name. Each is pushed it, and the pages are told. It gives
+// words; author, the member that said it ("": an agent), which its own words do not name. The
+// message it answers names no one (kumo, 2026-11-21: a quote is no @). Each is pushed it, and the pages are told. It gives
 // the members noted, for unnames. Called as the message is said, ahead of what answers it: the
 // first that names a login is the one kept.
-func (s *Server) names(ch string, seq int64, text string, quote int64, author string) []string {
-	if seq <= 0 || (quote <= 0 && !strings.Contains(text, "@") && !strings.Contains(text, "<at")) {
+func (s *Server) names(ch string, seq int64, text string, author string) []string {
+	if seq <= 0 || (!strings.Contains(text, "@") && !strings.Contains(text, "<at")) {
 		return nil
 	}
 	st, err := s.m.State(ch)
@@ -158,12 +158,6 @@ func (s *Server) names(ch string, seq int64, text string, quote int64, author st
 	}
 	said := namedIn(words, names)
 	all = all || said[strings.ToLower(deliver.AllMembers)]
-	// The one it answers: a person's message names that person.
-	if quote > 0 {
-		if q, ok := s.ch.Get(ch, quote); ok && q.Kind == channel.KindUser {
-			ids[q.Author] = true
-		}
-	}
 	var told []person
 	for _, p := range people {
 		if p.member == author {

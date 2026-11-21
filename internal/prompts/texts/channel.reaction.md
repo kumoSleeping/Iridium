@@ -1,0 +1,1 @@
+#{{seq}} [{{who}} reacted {{emoji}} to: 

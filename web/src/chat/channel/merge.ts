@@ -35,28 +35,46 @@ export function givenHere(own: string, relay: { channel: string } | undefined, t
  *  (steps folded, a subagent at work); Infinity: what is being written. */
 export type RowTime = number | undefined | { since?: number };
 
-/** Where each message goes among rows by their times (no time of its own: as the next row with
- *  one — a turn's thinking is written just before its words, so it goes with them, not with the
- *  turn before; with none after — the turn's steps while it is still at them, or one that ended
- *  on a step — since when it began itself, else as the row before; Infinity: at the end, what is
- *  being written): before the first row later than it, in the log's order. By the row it goes
- *  before (rows.length: after them all). */
-export function slotsOf<M extends { time?: number }>(times: RowTime[], ms: M[]): Map<number, M[]> {
-  const ahead: (number | undefined)[] = [];
-  let next: number | undefined;
-  for (let i = times.length - 1; i >= 0; i--) {
-    const t = times[i];
-    if (typeof t === "number") ahead[i] = next = t;
-    else ahead[i] = next ?? t?.since;
-  }
-  const eff: number[] = [];
+/** A row of the record for slotsOf: when it was written, and whether it is the agent's own (its
+ *  words, its steps, what it is writing) or what began a turn (your words, a call). */
+export type RowAt = { time: RowTime; agent: boolean };
+
+/** Where a turn begins with nothing drawn for it: its own channel's words as the agent was given
+ *  them (drawn from the log), before the row at that index. time: when it was given them; seq:
+ *  the log's number of the message it was given. */
+export type Cut = { time?: number; seq?: number };
+
+/** Where each message goes among the record's rows: between turns, never inside one (kumo,
+ *  2026-11-21: words to another agent, said while the own one worked, cut its turn in two, and
+ *  the half after them went back and forth as it wrote). A turn is what began it (a row not the
+ *  agent's, or a cut) and the agent's rows after it; it began when that was given (else at its
+ *  first row with a time, a fold's since; none known: as the turn before; only what is being
+ *  written: Infinity). A message goes before the first turn that began after it was said, in the
+ *  log's order; one said while a turn was on goes after all of that turn, and stays there as the
+ *  turn goes on above it and once it has ended. What a turn was given (its cut's seq) and all
+ *  the log has before that are above it, by the log's numbers, whatever the two clocks say. By
+ *  the row it goes before (rows.length: after them all). */
+export function slotsOf<M extends { time?: number; n?: number }>(rows: RowAt[], ms: M[], cuts?: ReadonlyMap<number, Cut>): Map<number, M[]> {
+  type Unit = { at: number; start: number; seq?: number };
+  const units: Unit[] = [];
   let last = -Infinity;
-  for (const t of ahead) eff.push(t === undefined ? last : (last = t === Infinity ? Infinity : Math.max(last, t)));
+  for (let i = 0; i < rows.length; i++) {
+    const cut = cuts?.get(i);
+    if (i > 0 && !cut && rows[i]!.agent) continue;
+    let start = cut?.time;
+    for (let j = i; start === undefined && j < rows.length && (j === i || (rows[j]!.agent && !cuts?.has(j))); j++) {
+      const t = rows[j]!.time;
+      start = typeof t === "number" ? t : t?.since;
+    }
+    last = start === undefined ? last : Math.max(last, start);
+    units.push({ at: i, start: last, ...(cut?.seq !== undefined ? { seq: cut.seq } : {}) });
+  }
   const out = new Map<number, M[]>();
   for (const m of ms) {
     const at = m.time ?? Infinity;
-    let i = eff.findIndex((t) => t > at);
-    if (i < 0) i = times.length;
+    const n = m.n;
+    const u = units.find((u) => (n !== undefined && u.seq !== undefined && n <= u.seq) || u.start > at);
+    const i = u ? u.at : rows.length;
     out.set(i, [...(out.get(i) ?? []), m]);
   }
   return out;
@@ -92,6 +110,22 @@ export function ownAnchors(msgs: Msg[], own: string, rows: { key: string; line: 
     if (key) out.push({ key, seq: m.n });
   }
   return out;
+}
+
+/** Where one at work is drawn among the page's turns (kumo, 2026-11-21: all at work were at the
+ *  very end, and what you sent was at once under several of them): over what it has not read.
+ *  seqs: each turn's first number in the log (undefined: none, the agent's steps; it goes with
+ *  what is before it); read: the last it has read (given to it, said by it, what called it). By
+ *  the turn it is drawn before (seqs.length: after them all). It goes down only as it reads on. */
+export function boxSlot(seqs: (number | undefined)[], read: number): number {
+  let k = seqs.length;
+  for (let i = seqs.length - 1; i >= 0; i--) {
+    const n = seqs[i];
+    if (n === undefined) continue;
+    if (n <= read) break;
+    k = i;
+  }
+  return k;
 }
 
 /** The hand-over (kumo, 2026-11-15): an agent called by a message is shown at work only once that
@@ -145,7 +179,9 @@ export function named(text: string, nicks: ReadonlySet<string>): { agents: numbe
 /** Words between agents, folded when long (kumo, 2026-11-15: 给人的话不折): an agent's message
  *  that names only agents, or, naming none, one in a stretch an agent began (since its last word
  *  the latest to call it was an agent, no person spoke). Never: a person's, Iridium's, an ask, an
- *  error, one naming a person or all. msgs: the log in order; nicks: the agents', lower case. */
+ *  error, one naming a person or all. msgs: the log in order; nicks: the agents', lower case.
+ *  Read history is another rule (kumo, 2026-11-21): long words read before the latest rounds
+ *  fold whoever they were to (folds.ts). */
 export function betweenAgents(m: Msg, msgs: Msg[], nicks: ReadonlySet<string>): boolean {
   if (m.author.kind !== "agent" || m.kind === "ask" || m.kind === "error") return false;
   const n = named(m.text, nicks);

@@ -16,8 +16,9 @@ import { CARD_POP } from "./profilecard";
 
 /** The channel's members as words may name them: its agents, its people and apps (person rows:
  *  their name as nick); names, all that an @ may name, the names of all among them; card, what a
- *  press on one opens (done: put it away). */
-export type Named = { agents: AgentRow[]; people: AgentRow[]; names: string[]; card: (m: AgentRow, done: () => void) => ReactNode };
+ *  press on one opens (done: put it away). channel: which channel; may: the one looking is one of
+ *  its people (it may react to a message there and take one back: react.tsx). */
+export type Named = { agents: AgentRow[]; people: AgentRow[]; names: string[]; card: (m: AgentRow, done: () => void) => ReactNode; channel?: string; may?: boolean };
 export const Nicks = createContext<Named | null>(null);
 
 /** All that an @ may name in a channel of these. */

@@ -96,6 +96,7 @@ type Server struct {
 	dms     dms     // the channels that are two people's (channels.go)
 	calls   calls   // the channels each agent was called in by a subscription (channels.go)
 	answers answers // what each agent writes, said in turn where it was called (channels.go)
+	recalls recalls // the channels a message was taken back in (reactions.go)
 	// channelsSeq: the state "channels", up by one at each change of a channel's members.
 	channelsSeq atomic.Int64
 	// scripts: the channels' scripts running and waiting (scripts.go); scriptsSeq, the state
@@ -450,11 +451,9 @@ func (s *Server) sendAs(ctx context.Context, c caller, from, id string, req api.
 		return s.sendChannel(ctx, c, from, id, req)
 	}
 	// One agent: the message it answers as quoted lines before the words.
-	var answers int64
 	if req.Quote > 0 {
 		if q, ok := s.ch.Get(id, req.Quote); ok {
-			req.Text = quoted(q.Text) + req.Text
-			answers = q.Seq
+			req.Text = quoted(satori.ForwardWords(q.Text)) + req.Text
 		}
 		req.Quote = 0
 	}
@@ -497,8 +496,8 @@ func (s *Server) sendAs(ctx context.Context, c caller, from, id string, req api.
 		}
 		seq = s.sat.Input(st.Session, req.ID, req.Text, u, c.ID(), channel.Data{Device: s.deviceOfCaller(c)})
 	}
-	named := s.names(id, seq, req.Text, answers, readerOf(c)) // the logins it names (ats.go)
-	input, queued, err := s.m.SendAs(ctx, id, req.ID, text, from, true, images...)
+	named := s.names(id, seq, req.Text, readerOf(c)) // the logins it names (ats.go)
+	input, queued, err := s.m.SendAs(ctx, id, req.ID, satori.ForwardWords(text), from, true, images...)
 	if err != nil {
 		if seq != 0 {
 			s.ch.Unsay(id, seq) // not sent: not said

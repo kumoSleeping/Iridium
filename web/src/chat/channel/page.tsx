@@ -22,7 +22,8 @@ import { PULL } from "../../sheet";
 import { getCarried, onCarried, setCarried, useCarried, useConfirms, useList, useSession } from "../../store";
 import { also, carries, events, opened, type SatoriEvent } from "../../stream";
 import { errText } from "../../toast";
-import { Arrive, agentName, cn, lampOf, Leaving, Logo, PopSurface } from "../../ui";
+import { Arrive, agentName, cn, lampOf, Logo, PopSurface } from "../../ui";
+import { Leaving } from "../../moves";
 import { Asks } from "../asks";
 import { placeDropped } from "../at";
 import { Composer, type ComposerHandle } from "../composer";
@@ -32,13 +33,18 @@ import { fromSatori, PLACE_DRAG, SESSION_DRAG, sourceOf, withDevice, yours } fro
 import { Assistant, Attached, Line, MsgRow, Pending, Said, When, YouBubble } from "../said";
 import { folded } from "../fold";
 import { Stick, toEnd } from "../stick";
-import { askQueue, groupMessages, readMarks, stillWaiting, watchExtra, type AgentRow, type Did, type Group, type Msg, type Src, lineOf, workOf, workKey, eventParts, personName, type EventWords } from "./lib";
+import { askQueue, groupMessages, quoteAt, readMarks, stillWaiting, watchExtra, type AgentRow, type Did, type Group, type Msg, type Src, lineOf, workOf, workKey, eventParts, personName, type EventWords } from "./lib";
 import { channelLog } from "./log";
 import { recvOf } from "./scripts";
 import { useRecvLabel } from "./recv";
 import { IrTag, ScriptFaceKey } from "./script";
 import { betweenAgents, linesOf } from "./merge";
-import { LongWords } from "../longwords";
+import { Foldable } from "../longwords";
+import { foldsOnce, useReadTo } from "../foldstate";
+import { longWords, oldRead } from "./folds";
+import { around, goTo, seqEl } from "./jump";
+import { Forwards, quoteText } from "../forwardcard";
+import { msgWords, withForwards } from "../forward";
 import { mayAct, useMembers } from "./gate";
 import { NotJoined } from "./key";
 import { MemberFace } from "./face";
@@ -47,6 +53,7 @@ import { OtherTurn } from "../atwork";
 import { AwayBox, useAway } from "../away";
 import { PersonCard, PersonMenu, useNamed } from "./person";
 import { NickLink, Nicks, NickWords } from "./nick";
+import { useRecalled } from "../reactions";
 
 // At work: in a turn. Not "starting" (its harness coming up, no turn yet: an invited agent's face
 // flashed up as if to speak and went; kumo, 2026-11-16).
@@ -127,8 +134,8 @@ export function ChannelPage({ id, sheet = 0, bar, record }: { id: string; sheet?
     const more = () => void log.newer().then(() => live && changed(), () => {});
     more();
     const hear = (e: SatoriEvent) => {
-      if (e.type !== "message-created" || e.channel?.id !== id || !e.message) return;
-      log.heard({ ...e.message, _data: { ...e._data, ...e.message._data } });
+      if ((e.type !== "message-created" && e.type !== "message-deleted") || e.channel?.id !== id || !e.message) return;
+      log.heard({ ...e.message, _data: { ...e._data, ...e.message._data } }, e.type === "message-deleted");
       changed();
     };
     events.add(hear);
@@ -223,14 +230,22 @@ export function ChannelPage({ id, sheet = 0, bar, record }: { id: string; sheet?
     const i = agents.findIndex((a) => a.session === session);
     return agents[i] ? <AgentBars a={agents[i]} st={states[i]} /> : null;
   };
-  // The message being answered (<quote>), over the composer till it is sent.
+  // The message being answered (<quote>), over the composer till it is sent; its author named
+  // at the composer's start, as QQ does (kumo, 2026-11-21): the @, not the quote, calls.
   const [quote, setQuote] = useState<Msg | null>(null);
   const nameOf = (m: Msg) => (m.author.kind === "agent" ? m.author.nick || m.author.name : m.author.kind === "person" || m.author.kind === "script" ? m.author.name : "Iridium");
-  const quoting = (m: Msg) => (setQuote(m), composer.current?.focus());
+  const quoting = (m: Msg) => {
+    setQuote(m);
+    const at = quoteAt(m, m.author.kind === "person" && who(m.author).mine);
+    if (at) composer.current?.atStart(at);
+    else composer.current?.focus();
+  };
   const quoted = (n: number) => {
     const m = log.msgs.find((x) => x.n === n);
-    return m ? { who: nameOf(m), text: m.text } : undefined;
+    return m ? { who: nameOf(m), text: quoteText(m) } : undefined;
   };
+  // A quote pressed: the message it answers, brought if the page has not got it (channel/jump.ts).
+  const jump = (n: number) => void goTo(scroller.current, () => seqEl(scroller.current, n), () => around(log, n), changed);
 
   // How far each member has read (docs/channels.md "已读"): asked once, then as the stream
   // brings it. This page has read what it shows: said as the log's end moves while it is seen,
@@ -256,6 +271,11 @@ export function ChannelPage({ id, sheet = 0, bar, record }: { id: string; sheet?
     return () => clearTimeout(timer);
   }, [id, end, may, seen]);
   const marks = useMemo(() => readMarks(groups, reads?.readers ?? [], members?.me), [groups, reads, members?.me]);
+  // Long words read before the latest rounds fold of themselves (channel/folds.ts), as each is
+  // first drawn once the place read to is known.
+  const readTo = useReadTo(id, reads?.readers, members?.me, log.loaded ? log.end : undefined);
+  const olds = useMemo(() => (readTo === undefined ? undefined : oldRead(log.msgs, readTo)), [log.msgs, readTo]);
+  const old = (m: Msg) => foldsOnce(id, `m${m.n}`, olds?.has(m.n));
   const working = agents.filter((a) => WORKING.has(a.status));
   const asking = agents.some((_, i) => states[i]?.asks.length);
   const stateAt = (session: string) => states[sessions.indexOf(session)];
@@ -270,7 +290,7 @@ export function ChannelPage({ id, sheet = 0, bar, record }: { id: string; sheet?
           <div className="mx-auto flex max-w-(--chat-w) flex-col gap-5 px-4 sm:px-6">
             {groups.map((g) => (
               <div key={g.key} className="relative flex min-w-0 flex-col">
-                <GroupView g={g} channel={id} agents={agents} who={who} record={record} call={call} may={may} quote={may ? quoting : undefined} quoted={quoted} bars={bars} fold={fold} />
+                <GroupView g={g} channel={id} agents={agents} who={who} record={record} call={call} may={may} quote={may ? quoting : undefined} quoted={quoted} bars={bars} fold={fold} old={old} jump={jump} />
                 {/* In the gap under it, over nothing: coming late, it moves nothing (docs/前端设计规范.md). */}
                 {SHOW_READS && marks.has(g.key) && <ReadMarks readers={marks.get(g.key)!} agents={agents} />}
               </div>
@@ -323,7 +343,7 @@ export function ChannelPage({ id, sheet = 0, bar, record }: { id: string; sheet?
             })}
             <AskQueue agents={agents} states={states} cwd={s.cwd} off={!may} />
             {!may ? <NotJoined /> : null}
-            {may && <Composer ref={composer} s={s} turn={false} nicks={agents} people={peopleRows} quote={quote ? { n: quote.n, who: nameOf(quote), text: quote.text } : undefined} unquote={() => setQuote(null)} onSent={onSent} onSentDone={changed} cycleMode={() => {}} openModel={() => {}} openMode={() => {}} openUsage={() => {}} openContext={() => false} cleared={openChat} />}
+            {may && <Composer ref={composer} s={s} turn={false} nicks={agents} people={peopleRows} quote={quote ? { n: quote.n, who: nameOf(quote), text: quoteText(quote) } : undefined} unquote={() => setQuote(null)} onSent={onSent} onSentDone={changed} cycleMode={() => {}} openModel={() => {}} openMode={() => {}} openUsage={() => {}} openContext={() => false} cleared={openChat} />}
           </div>
         </div>
       </div>
@@ -449,14 +469,16 @@ function blockFor(m: Msg, agents: AgentRow[]): Block {
   const had = blocks.get(m);
   if (had?.sig === sig) return had.b;
   // Satori's elements in the words (an <at>) as Markdown writes them.
-  const words = fromSatori(m.text, (session) => agents.find((a) => a.session === session)?.nick);
+  const words = fromSatori(msgWords(m).words, (session) => agents.find((a) => a.session === session)?.nick);
   const b: Block = { at: String(m.n), kind: "assistant", text: words, ...(m.files.length ? { files: m.files } : {}), ...(m.time ? { time: m.time } : {}) };
   blocks.set(m, { sig, b });
   return b;
 }
 
-/** One speaker's messages: a person's bubble; an agent's words under its head; Iridium's line. */
-export function GroupView({ g, channel, agents, who, record, call, may, quote, quoted, bars, fold }: { fold?: (m: Msg) => boolean; g: Group; channel: string; agents: AgentRow[]; who: Who; record: (session: string) => void; call: (nick: string) => void; may: boolean; quote?: (m: Msg) => void; quoted: (n: number) => { who: string; text: string } | undefined; bars: (session: string) => ReactNode }) {
+/** One speaker's messages: a person's bubble; an agent's words under its head; Iridium's line.
+ *  Each message by its number (data-seq, where a quote goes: jump), folding by hand or of itself
+ *  (old; fold: words between agents). */
+export function GroupView({ g, channel, agents, who, record, call, may, quote, quoted, bars, fold, old, jump }: { fold?: (m: Msg) => boolean; old?: (m: Msg) => boolean; jump?: (n: number) => void; g: Group; channel: string; agents: AgentRow[]; who: Who; record: (session: string) => void; call: (nick: string) => void; may: boolean; quote?: (m: Msg) => void; quoted: (n: number) => { who: string; text: string } | undefined; bars: (session: string) => ReactNode }) {
   const list = useList();
   const a = g.author;
   if (a.kind === "iridium")
@@ -470,25 +492,30 @@ export function GroupView({ g, channel, agents, who, record, call, may, quote, q
   if (a.kind === "person") {
     const m = g.msgs[0]!;
     const by = who(a);
+    const w = msgWords(m);
     return (
-      <Copyable copy={m.text} quote={quote && (() => quote(m))}>
-        <YouBubble
-          text={m.text}
-          who={by.who}
-          left={!by.mine}
-          time={m.time}
-          words={<NickWords text={m.text} />}
-          under={m.quote !== undefined && <QuoteLine n={m.quote} q={quoted(m.quote)} />}
-          menu={by.mine ? undefined : (at, close) => <PersonMenu user={a.id} name={a.name} call={may ? call : undefined} at={at} close={close} />}
-          card={<PersonCard user={a.id} name={a.name} avatar={"avatar" in by.who ? by.who.avatar : undefined} dm={!by.mine} call={may && !by.mine ? call : undefined} />}>
-          {m.files.map((f) => (
-            <Attached key={f.ref} session={channel} f={f} />
-          ))}
-        </YouBubble>
-      </Copyable>
+      <div data-seq={m.n}>
+        <Foldable scope={channel} id={`m${m.n}`} auto={old?.(m) ?? false} lines={linesOf(w.words)}>
+          {(wrap) => (
+            <Copyable copy={withForwards(w.words, w.forwards)} quote={quote && (() => quote(m))} act={{ channel, seq: m.n, may, side: by.mine ? "right" : "left" }}>
+              <YouBubble
+                text={w.words}
+                who={by.who}
+                left={!by.mine}
+                time={m.time}
+                words={wrap(<NickWords text={w.words} />)}
+                under={m.quote !== undefined && <QuoteLine n={m.quote} q={quoted(m.quote)} channel={channel} jump={jump} />}
+                menu={by.mine ? undefined : (at, close) => <PersonMenu user={a.id} name={a.name} call={may ? call : undefined} at={at} close={close} />}
+                card={<PersonCard user={a.id} name={a.name} avatar={"avatar" in by.who ? by.who.avatar : undefined} dm={!by.mine} call={may && !by.mine ? call : undefined} />}>
+                {[...m.files.map((f) => <Attached key={f.ref} session={channel} f={f} />), ...(w.forwards.length ? [<Forwards key="forwards" fs={w.forwards} />] : [])]}
+              </YouBubble>
+            </Copyable>
+          )}
+        </Foldable>
+      </div>
     );
   }
-  if (a.kind === "script") return <ScriptGroup g={g} name={a.name} channel={channel} agents={agents} quote={quote} quoted={quoted} />;
+  if (a.kind === "script") return <ScriptGroup g={g} name={a.name} channel={channel} agents={agents} quote={quote} quoted={quoted} old={old} jump={jump} />;
   const now = agents.find((x) => x.session === a.session);
   // One no longer in the channel: its harness as the list still has its session.
   const agent = now?.agent ?? list?.find((x) => x.id === a.session)?.agent;
@@ -506,17 +533,27 @@ export function GroupView({ g, channel, agents, who, record, call, may, quote, q
           {now && bars(now.session)}
           <When time={g.msgs[0]!.time} />
         </div>
-        {g.msgs.map((m) => (
-          <div key={m.n} className={cn(m.kind === "error" && "text-err")}>
-            {m.src ? <Work src={m.src} did={m.did} said={m.text} channel={channel} /> : m.did && <DidLine did={m.did} />}
-            <Copyable copy={m.text} quote={quote && (() => quote(m))}>
-              <LongWords fold={fold?.(m) ?? false} lines={linesOf(m.text)}>
-                <Assistant b={blockFor(m, agents)} session={a.session} />
-              </LongWords>
-            </Copyable>
-            {m.quote !== undefined && <QuoteLine n={m.quote} q={quoted(m.quote)} />}
-          </div>
-        ))}
+        {g.msgs.map((m) => {
+          const w = msgWords(m);
+          return (
+            <div key={m.n} data-seq={m.n} className={cn(m.kind === "error" && "text-err")}>
+              {m.src ? <Work src={m.src} did={m.did} said={m.text} channel={channel} /> : m.did && <DidLine did={m.did} />}
+              <Foldable scope={channel} id={`m${m.n}`} auto={((fold?.(m) ?? false) && longWords(w.words)) || (old?.(m) ?? false)} lines={linesOf(w.words)}>
+                {(wrap) => (
+                  <Copyable copy={withForwards(w.words, w.forwards)} quote={quote && (() => quote(m))} act={m.kind === "error" || m.kind === "ask" ? undefined : { channel, seq: m.n, may }}>
+                    {wrap(
+                      <>
+                        <Assistant b={blockFor(m, agents)} session={a.session} />
+                        <Forwards fs={w.forwards} />
+                      </>,
+                    )}
+                  </Copyable>
+                )}
+              </Foldable>
+              {m.quote !== undefined && <QuoteLine n={m.quote} q={quoted(m.quote)} channel={channel} jump={jump} />}
+            </div>
+          );
+        })}
       </div>
     </MsgRow>
   );
@@ -524,7 +561,7 @@ export function GroupView({ g, channel, agents, who, record, call, may, quote, q
 
 /** A script's messages (docs/channels.md "脚本"): its face (pressed, its card), its name and IR's
  *  tag over what it printed, as an agent's words are drawn. */
-function ScriptGroup({ g, name, channel, agents, quote, quoted }: { g: Group; name: string; channel: string; agents: AgentRow[]; quote?: (m: Msg) => void; quoted: (n: number) => { who: string; text: string } | undefined }) {
+function ScriptGroup({ g, name, channel, agents, quote, quoted, old, jump }: { g: Group; name: string; channel: string; agents: AgentRow[]; quote?: (m: Msg) => void; quoted: (n: number) => { who: string; text: string } | undefined; old?: (m: Msg) => boolean; jump?: (n: number) => void }) {
   return (
     <MsgRow className="flex min-w-0 items-start gap-2.5">
       <ScriptFaceKey channel={channel} name={name} />
@@ -534,14 +571,26 @@ function ScriptGroup({ g, name, channel, agents, quote, quoted }: { g: Group; na
           <IrTag />
           <When time={g.msgs[0]!.time} />
         </div>
-        {g.msgs.map((m) => (
-          <div key={m.n}>
-            <Copyable copy={m.text} quote={quote && (() => quote(m))}>
-              <Assistant b={blockFor(m, agents)} session={channel} />
-            </Copyable>
-            {m.quote !== undefined && <QuoteLine n={m.quote} q={quoted(m.quote)} />}
-          </div>
-        ))}
+        {g.msgs.map((m) => {
+          const w = msgWords(m);
+          return (
+            <div key={m.n} data-seq={m.n}>
+              <Foldable scope={channel} id={`m${m.n}`} auto={old?.(m) ?? false} lines={linesOf(w.words)}>
+                {(wrap) => (
+                  <Copyable copy={withForwards(w.words, w.forwards)} quote={quote && (() => quote(m))} act={{ channel, seq: m.n, may: !!quote }}>
+                    {wrap(
+                      <>
+                        <Assistant b={blockFor(m, agents)} session={channel} />
+                        <Forwards fs={w.forwards} />
+                      </>,
+                    )}
+                  </Copyable>
+                )}
+              </Foldable>
+              {m.quote !== undefined && <QuoteLine n={m.quote} q={quoted(m.quote)} channel={channel} jump={jump} />}
+            </div>
+          );
+        })}
       </div>
     </MsgRow>
   );
@@ -549,12 +598,17 @@ function ScriptGroup({ g, name, channel, agents, quote, quoted }: { g: Group; na
 
 /** The message one answers, under the words that answer it, as chat apps put it (kumo,
  *  2026-11-16: a line over the face read oddly): a small grey block, who said it and its words,
- *  two lines at most; the number alone when the page has not got it. */
-function QuoteLine({ n, q }: { n: number; q?: { who: string; text: string } }) {
+ * two lines at most; the number alone when the page has not got it; taken back, the number and
+ *  so (docs/channels.md "撤回"). Pressed, the message itself (jump; kumo, 2026-11-21). */
+function QuoteLine({ n, q, channel, jump }: { n: number; q?: { who: string; text: string }; channel: string; jump?: (n: number) => void }) {
+  const gone = useRecalled(channel, n);
+  const words = <span className="line-clamp-2 [overflow-wrap:anywhere]">{gone ? t("channel.quoteGone", { n }) : q ? t("channel.quoteOf", { who: q.who, text: q.text }) : `#${n}`}</span>;
+  const cls = "mt-1 block max-w-[min(560px,100%)] rounded-md bg-fill px-2.5 py-1.5 text-left text-xs leading-[18px] text-ink-3";
+  if (!jump || gone) return <div className={cls}>{words}</div>;
   return (
-    <div className="mt-1 max-w-[min(560px,100%)] rounded-md bg-fill px-2.5 py-1.5 text-xs leading-[18px] text-ink-3">
-      <span className="line-clamp-2 [overflow-wrap:anywhere]">{q ? t("channel.quoteOf", { who: q.who, text: q.text }) : `#${n}`}</span>
-    </div>
+    <button type="button" onClick={() => jump(n)} className={cn(cls, "g-press cursor-pointer hover:text-ink-2")}>
+      {words}
+    </button>
   );
 }
 
@@ -570,6 +624,8 @@ function EventLine({ m, channel }: { m: Msg; channel: string }) {
   const d = useApps().data;
   const { whole } = useRecvLabel(channel);
   const words = { ...Object.fromEntries(EVENT_KEYS.map((k) => [k, t(`channel.event.${k}`)])), script: Object.fromEntries(Object.entries(SCRIPT_KEYS).map(([k, v]) => [k, t(`channel.event.${v}`)])), what: Object.fromEntries(WHAT_KEYS.map((k) => [k, t(`channel.what.${k}`)])), whatSep: t("channel.what.sep"), reasons: { 余额不足: t("channel.reason.balance"), 认证失败: t("channel.reason.auth"), 请求太频繁: t("channel.reason.rate") } } as unknown as EventWords;
+  // A message taken back: who did it (docs/channels.md "撤回").
+  if (m.event?.type === "recall") return <Line>{t("channel.event.recall", { by: m.event.by === "主机" ? "Iridium" : (m.event.by ?? "") })}</Line>;
   const parts = m.event && eventParts(m.event, words);
   if (!parts) return <Line>{m.text}</Line>;
   const apps = (d?.apps ?? []).map((a) => (a.web ? { ...a, name: t("term.panel") } : a));

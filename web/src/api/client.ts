@@ -60,7 +60,13 @@ import type { MemberCard, Memory, Profile as Card, ProfilePatch, Self } from "./
 import type { NewScript, Script, ScriptPatch, ScriptRun } from "./types.gen";
 
 /** A message of a channel's log (Satori's message.list): id its number there. */
-export type ChannelMessage = { id: string; content: string; created_at?: number; user?: { id: string; name?: string; nick?: string; is_bot?: boolean }; _data?: { kind?: string; event?: unknown; session?: string; block?: string; from?: number; to?: number; input?: string; device?: Device; script?: string } };
+export type ChannelMessage = { id: string; content: string; created_at?: number; user?: { id: string; name?: string; nick?: string; is_bot?: boolean }; _data?: { kind?: string; event?: unknown; session?: string; block?: string; from?: number; to?: number; input?: string; device?: Device; script?: string; reactions?: ReactionSum[] } };
+/** One emoji on a message (docs/channels.md "表情"): who put it on, in that order. */
+export type ReactionSum = { emoji: string; count: number; users: { id: string; name?: string }[]; me?: boolean };
+/** Told what the page reads of a channel's log and of a session's record (chat/reactions.ts:
+ *  each message's reactions, which block is which message). */
+export const seenLog = new Set<(channel: string, ms: ChannelMessage[]) => void>();
+export const seenBlocks = new Set<(session: string, ms: (SatoriMessage & { _data?: { seq?: number; reactions?: ReactionSum[] } })[]) => void>();
 /** A page of a channel's log: start and end, the numbers of its first and last; more, earlier ones. */
 export type ChannelPage = { data: ChannelMessage[]; start: number; end: number; more: boolean };
 
@@ -199,7 +205,7 @@ function whoKnown(): Promise<void> {
 const S = (id: string) => `/v1/internal/sessions/${enc(id)}`;
 
 /** A Satori method (docs/satori.md), as the page's login: POST /v1/<method>. */
-async function sat<T>(method: string, body: unknown = {}, again = false): Promise<T> {
+export async function sat<T>(method: string, body: unknown = {}, again = false): Promise<T> {
   await whoKnown();
   return again ? writeAgain<T>("POST", `/v1/${method}`, body) : write<T>("POST", `/v1/${method}`, body);
 }
@@ -231,6 +237,8 @@ export const api = {
     const args = q.have ? `?record=0${q.since !== undefined ? `&since=${q.since}` : ""}` : "";
     const f = await get<{ session: SessionState; page?: RawPage<SatoriMessage>; members?: ChannelMembers; reads?: ChannelReads; log?: RawPage<ChannelMessage>; sessions?: Record<string, SessionState>; work?: { session: string; block?: string; from?: number; to?: number; data: SatoriMessage[] }[] }>(`${S(id)}/first${args}`, init);
     const at = (p: RawPage<unknown>) => ({ start: p._data?.start ?? 0, end: p._data?.end ?? 0, more: p._data?.more ?? false });
+    if (f.page) for (const fn of seenBlocks) fn(id, f.page.data);
+    if (f.log) for (const fn of seenLog) fn(id, f.log.data);
     return {
       session: f.session,
       ...(f.page ? { page: { blocks: f.page.data.map(blockOf), ...at(f.page) } } : {}),
@@ -256,23 +264,27 @@ export const api = {
     });
     if (!r.ok) return fail(r);
     const p = (await r.json()) as { data: SatoriMessage[]; _data?: { start: number; end: number; more: boolean } };
+    for (const fn of seenBlocks) fn(id, p.data);
     return { blocks: p.data.map(blockOf), start: p._data?.start ?? 0, end: p._data?.end ?? 0, more: p._data?.more ?? false };
   },
   /** A page of channel id's log, what was said there (Satori's message.list): the newest, the one
-   *  before number before, or what came after number after. */
-  channelMessages: async (id: string, q: { before?: number; after?: number; limit?: number } = {}): Promise<ChannelPage> => {
+   *  before number before, what came after number after, or that around number around (it and
+   *  those before it, it and those after). */
+  channelMessages: async (id: string, q: { before?: number; after?: number; around?: number; limit?: number } = {}): Promise<ChannelPage> => {
     await whoKnown();
-    const next = q.before ?? q.after;
+    const next = q.before ?? q.after ?? q.around;
     const r = await request("/v1/message.list", {
       method: "POST",
       cache: "no-store",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ channel_id: id, ...(q.limit ? { limit: q.limit } : {}), ...(next !== undefined && { next: String(next), direction: q.after !== undefined ? "after" : "before" }) }),
+      body: JSON.stringify({ channel_id: id, ...(q.limit ? { limit: q.limit } : {}), ...(next !== undefined && { next: String(next), direction: q.around !== undefined ? "around" : q.after !== undefined ? "after" : "before" }) }),
     });
     if (!r.ok) return fail(r);
     const p = (await r.json()) as { data: ChannelMessage[]; _data?: { start: number; end: number; more: boolean } };
+    for (const fn of seenLog) fn(id, p.data);
     return { data: p.data, start: p._data?.start ?? 0, end: p._data?.end ?? 0, more: p._data?.more ?? false };
   },
+
   // --- a channel's members (docs/channels.md) ---
   members: (id: string) => get<ChannelMembers>(`/v1/internal/channels/${enc(id)}/members`),
   addMember: (id: string, m: NewMember) => write<ChannelMembers>("POST", `/v1/internal/channels/${enc(id)}/members`, m, { signal: AbortSignal.timeout(SEND_WAIT) }),

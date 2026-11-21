@@ -69,23 +69,27 @@ func (m *Manager) HasIR(id string) bool {
 func (m *Manager) SetBare(f func() []api.Session) { m.bare.Store(&f) }
 
 // SetChannelLast has f give the last words a session is listed with when its channel says them
-// rather than its record: one with other agents in it, where people and the others speak too
-// (kumo, 2026-11-16). None: its record's.
-func (m *Manager) SetChannelLast(f func(id string) (*api.LastSaid, bool)) { m.chanLast.Store(&f) }
+// rather than its record (record: the record's): one with other agents in it, where people and
+// the others speak too (kumo, 2026-11-16); one whose last words were taken back (docs/channels.md
+// "撤回"). ok false: its record's; nil: none.
+func (m *Manager) SetChannelLast(f func(id string, record *api.LastSaid) (*api.LastSaid, bool)) {
+	m.chanLast.Store(&f)
+}
 
-// channelLast puts in s's last words as its channel has them, and when, unless its record's are
-// later: its agent's own may not be read into the channel yet.
+// channelLast puts in s's last words as its channel has them, and when.
 func (m *Manager) channelLast(s *api.Session) {
 	f := m.chanLast.Load()
 	if f == nil {
 		return
 	}
-	last, ok := (*f)(s.ID)
-	if !ok || (s.Last != nil && s.Last.At > last.At) {
+	last, ok := (*f)(s.ID, s.Last)
+	if !ok {
 		return
 	}
 	s.Last = last
-	s.UpdatedAt = max(s.UpdatedAt, last.At)
+	if last != nil {
+		s.UpdatedAt = max(s.UpdatedAt, last.At)
+	}
 }
 
 func (m *Manager) bares() []api.Session {

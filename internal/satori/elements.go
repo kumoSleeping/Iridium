@@ -440,6 +440,14 @@ func plain(b *strings.Builder, els []Element, ref func(e Element) string) {
 		case "br":
 			b.WriteByte('\n')
 		case "p", "message":
+			if e.Type == "message" && e.Has("forward") {
+				// A merged forward: a line for each message, who said it first (forwardText).
+				if b.Len() > 0 && !strings.HasSuffix(b.String(), "\n") {
+					b.WriteByte('\n')
+				}
+				b.WriteString(forwardText(e, ref))
+				continue
+			}
 			if b.Len() > 0 && !strings.HasSuffix(b.String(), "\n") {
 				b.WriteByte('\n')
 			}

@@ -750,8 +750,9 @@ func TestChannelAvatar(t *testing.T) {
 	l.want(200, "web", "GET", "/v1/internal/channels/"+a+"/avatar", nil, nil)
 }
 
-// Answering a message (<quote id/>) calls its agent as if named, and the agent is given a line
-// of it; @全体Agent calls every agent. In a session of one agent the quote is quoted lines.
+// Answering a message (<quote id/>) calls no one (kumo, 2026-11-21: only the @ in the words do);
+// the agent the words call is given a line of it. @全体Agent calls every agent. In a session of
+// one agent the quote is quoted lines.
 func TestChannelQuoteAndAll(t *testing.T) {
 	t.Parallel()
 	l := start(t)
@@ -772,16 +773,26 @@ func TestChannelQuoteAndAll(t *testing.T) {
 	if len(sent) != 1 {
 		t.Fatalf("sent: %+v", sent)
 	}
-	l.wantSat(200, "web", "message.create", map[string]any{"channel_id": ch, "content": `<quote id="` + sent[0].ID + `"/>tell me more`}, nil)
+	var noted []satori.Message
+	l.wantSat(200, "web", "message.create", map[string]any{"channel_id": ch, "content": `<quote id="` + sent[0].ID + `"/>just noting`}, &noted)
+	if len(noted) != 1 {
+		t.Fatalf("noted: %+v", noted)
+	}
+	l.wantSat(200, "web", "message.create", map[string]any{"channel_id": ch, "content": `<quote id="` + sent[0].ID + `"/>@claude2 tell me more`}, nil)
 	l.waitSaid("web", second, "@claude2 ", "tell me more")
-	if p := l.page("web", second); !strings.Contains(p.Blocks[len(p.Blocks)-2].Text+p.Blocks[len(p.Blocks)-1].Text, "[answering #"+sent[0].ID+" claude2: a thought of mine] tell me more") {
+	if p := l.page("web", second); !strings.Contains(p.Blocks[len(p.Blocks)-2].Text+p.Blocks[len(p.Blocks)-1].Text, "[answering #"+sent[0].ID+" claude2: a thought of mine] @claude2 tell me more") {
 		t.Errorf("the second was not given the quote: %+v", p.Blocks)
+	}
+	for _, b := range l.page("web", second).Blocks {
+		if b.Kind == api.BlockKindUser && strings.HasPrefix(b.Text, "#"+noted[0].ID+": ") {
+			t.Errorf("the quote alone called it: %q", b.Text)
+		}
 	}
 	var page satori.BidiList[satori.Message]
 	l.wantSat(200, "web", "message.list", map[string]any{"channel_id": ch, "limit": 3}, &page)
 	quotes := 0
 	for _, m := range page.Data {
-		if strings.HasPrefix(m.Content, `<quote id="`+sent[0].ID+`"/>tell me more`) {
+		if strings.HasPrefix(m.Content, `<quote id="`+sent[0].ID+`"/>@claude2 tell me more`) {
 			quotes++
 		}
 	}
@@ -830,12 +841,45 @@ func TestChannelQuoteAndAll(t *testing.T) {
 		}
 	}
 	if len(fwds) < 2 || !strings.Contains(fwds[0], `<iridium:relay channel="`+ch+`"`) || !strings.Contains(fwds[0], " full>You are claude2") ||
-		!strings.Contains(fwds[0], `<author id="local" name="Iridium"/>tell me more</message></message>`) ||
+		!strings.Contains(fwds[0], `<author id="local" name="Iridium"/>@claude2 tell me more</message></message>`) ||
 		again == "" || strings.Contains(again, " full") || !strings.HasSuffix(again, "@全体Agent roll call</message></message>") {
 		t.Errorf("forwards:\n%s", strings.Join(fwds, "\n"))
 	}
 	if !strings.Contains(given, `In the channel "`) || strings.Contains(given, "You are claude2") {
 		t.Errorf("given again with its standing words:\n%s\n%+v", given, p.Blocks)
+	}
+}
+
+// A merged forward (<message forward>) is one message, kept as written for the page; the agent
+// it calls reads it as lines, who said each.
+func TestChannelForward(t *testing.T) {
+	t.Parallel()
+	l := start(t)
+	ch := l.create(200, "web", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "first"})
+	l.waitReply("web", ch, "ok: first")
+	var ms api.ChannelMembers
+	l.want(200, "web", "POST", "/v1/internal/channels/"+ch+"/members", api.NewMember{Agent: api.AgentClaude}, &ms)
+	second := ms.Members[len(ms.Members)-1].Session
+	fwd := `<message forward><message><author id="u1" name="Ann"/>a &lt; b</message><message><author id="u2" name="Bob"/>yes</message></message>`
+	var sent []satori.Message
+	l.wantSat(200, "web", "message.create", map[string]any{"channel_id": ch, "content": "@claude2 see" + fwd}, &sent)
+	if len(sent) != 1 {
+		t.Fatalf("sent as %d messages: %+v", len(sent), sent)
+	}
+	l.waitSaid("web", ch, sent[0].ID+" ", satori.Escape(`see<message forward><message><author id="u1" name="Ann"/>a &lt; b</message>`))
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(30 * time.Millisecond) {
+		given := ""
+		for _, b := range l.page("web", second).Blocks {
+			if b.Kind == api.BlockKindUser && strings.HasPrefix(b.Text, "#"+sent[0].ID+": ") {
+				given = b.Text
+			}
+		}
+		if strings.Contains(given, "@claude2 see\n[聊天记录]\nAnn: a < b\nBob: yes") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the forward as given: %q", given)
+		}
 	}
 }
 

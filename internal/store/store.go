@@ -381,6 +381,9 @@ var schema = []string{
 	`UPDATE channel_members SET recv = '["*"]' WHERE member LIKE 'agent:%' AND recv = 'all';
 	UPDATE channel_members SET recv = '[]' WHERE member LIKE 'agent:%' AND recv != '' AND substr(recv, 1, 1) != '[';
 	` + scriptsSchema,
+	// 45: reactions on a channel's messages, and the messages taken back (reactions.go;
+	// docs/channels.md "表情" "撤回").
+	reactionsSchema,
 }
 
 // steps run in Go after the migration of their version, in the same transaction.

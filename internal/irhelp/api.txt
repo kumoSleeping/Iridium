@@ -48,7 +48,12 @@ POST internal/block.list {channel_id, next?, direction?, limit?, order?, _data.b
 POST internal/block.get {channel_id, message_id} -> Message  one block, untruncated
 POST internal/block.outline {channel_id, from?, to?, limit?} -> Outline  a session's record by turn: who asked and their first words, what the agent did (counts, files), its last words; at, end: the turn's blocks, to read whole with block.list (next=<the number before the dot>); from, to: lines of the record  view=turns.at,turns.from,turns.asked,turns.said
 message.update {channel_id, message_id, content?, _data.text?} -> {}  change a message you sent while it waits in the queue (message_id: message.create's id)
-message.delete {channel_id, message_id} -> {}  take back a message waiting in the queue
+message.delete {channel_id, message_id} -> {}  take back a message: one said in a channel (message_id its number) for everyone; one still waiting in the queue
+  Whoever may speak in the channel may take back any message said there, a person's or an agent's words (not an ask, not Iridium's own lines), with no time limit: its words and reactions go for everyone, the channel says who took it back, copies still queued for agents are withdrawn, and an agent that was given it is told its number the next time it is called there.
+reaction.create {channel_id, message_id, emoji} -> {}  put an emoji (one Unicode emoji, also emoji_id) on a message of the channel: the agents whose receive set has you get "#n [you reacted 👍 to: …]"
+reaction.delete {channel_id, message_id, emoji, user_id?} -> {}  take an emoji off a message: yours, or user_id's
+reaction.list {channel_id, message_id, emoji} -> List<User>  who put that emoji on the message; message.list and message.get give each message's in _data.reactions  view=id,name
+reaction.clear {channel_id, message_id, emoji?} -> {}  take every reaction (of that emoji) off a message
 message.create {channel_id, content?, _data.text?, _data.paths?, _data.attachments?} -> Message[]  send; joins a running turn (only a command, or words while the quota is out, wait: _data.queued)  view=id,_data.queued
   _data.text: plain words (the server escapes them); content: Satori elements as they are. The session reads [ir:<your session>] before it.
   _data.paths: files here to attach (relative: from your folder; socket only); _data.attachments: refs upload.create gave.

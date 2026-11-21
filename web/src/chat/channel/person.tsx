@@ -116,6 +116,8 @@ export function useNamed({ channel, agents, members, may, call, record, talk }: 
     () => ({
       agents,
       people,
+      channel,
+      may,
       names: namesOf(agents, people),
       card: (m, done) => {
         const name = (n: string) => (done(), fns.current.call(n));

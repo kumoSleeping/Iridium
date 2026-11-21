@@ -83,6 +83,22 @@ func Route(text string, from From, agents []Agent) Decision {
 	return d
 }
 
+// Reacts are the agents a reaction by from is given (docs/channels.md "表情"): those whose
+// receive set has from, as for words that name nobody; never from itself. A reaction names
+// nobody: @ in an emoji calls no one.
+func Reacts(from From, agents []Agent) []string {
+	var out []string
+	for _, a := range agents {
+		if from.Session != "" && a.Session == from.Session {
+			continue
+		}
+		if from.Member != "" && Receives(a.Recv, from.Member) {
+			out = append(out, a.Session)
+		}
+	}
+	return out
+}
+
 // Receives: an agent with receive set is woken by a message of sender ("agent:<session>", a
 // login "<app>/<login>") that names nobody.
 func Receives(set []string, sender string) bool {

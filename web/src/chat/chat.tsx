@@ -21,7 +21,8 @@ import { WsPlus } from "../create";
 import { chatOf, compactSent, firstScreen, fresh, isWhole, lineOf, stateAhead, waiting, type Draft as Drafted, type Sent } from "../chats";
 import { LOCAL_ME, useMachines, useMe, useWhoList, useWorkspaces } from "../data";
 import { t, useLang } from "../i18n";
-import { pushIn } from "../motion";
+import { pushIn, useMoves } from "../motion";
+import { useLeaving } from "../moves";
 import { openChat, openUsage } from "../route";
 import { PULL } from "../sheet";
 import { MenuItems, Rename, sessionActions, sessionTags } from "../sidebar";
@@ -29,15 +30,20 @@ import { useConfirms, useList, useSession } from "../store";
 import { also, carries, drafts, opened } from "../stream";
 import { errText, toast } from "../toast";
 import { groupPath, working } from "../tree";
-import { Arrive, agentName, cn, IrMark, Lamp, lampOf, Leaving, LogoLamp, PopSurface, sessionStatusText, tilde, Tip, titleOf, untitled } from "../ui";
-import { givenTurn, groupMessages, isMulti, type AgentRow, type GivenTurn, type Msg } from "./channel/lib";
+import { Arrive, agentName, cn, IrMark, Lamp, lampOf, LogoLamp, PopSurface, sessionStatusText, tilde, Tip, titleOf, untitled } from "../ui";
+import { givenTurn, groupMessages, isMulti, quoteAt, type AgentRow, type GivenTurn, type Msg } from "./channel/lib";
 import { recvOf } from "./channel/scripts";
 import { useScripts } from "./channel/script";
-import { betweenAgents, callerOf, foreignOf, givenHere, held, HOLD, linesOf, marksAt, named as namedIn, ownAnchors, slotsOf, type Anchor, type RowTime } from "./channel/merge";
-import { LongWords } from "./longwords";
+import { betweenAgents, boxSlot, callerOf, foreignOf, givenHere, held, HOLD, linesOf, marksAt, named as namedIn, ownAnchors, slotsOf, type Anchor, type Cut, type RowAt } from "./channel/merge";
+import { Foldable } from "./longwords";
+import { foldsOnce, useReadTo } from "./foldstate";
+import { longWords, oldRead } from "./channel/folds";
+import { goTo, seqEl } from "./channel/jump";
+import { quoteText } from "./forwardcard";
 import { dispatched, type Start } from "./dispatch";
 import { Dispatching, SubFaceKey, SubHead, useSub } from "./subwork";
 import { alignBack, loadParts, sideReady, useSide } from "./channel/side";
+import { recalls } from "./react";
 import { relays, type Relay } from "../satori";
 import { AgentFace } from "./channel/members";
 import { PersonCard, PersonMenu, useNamed } from "./channel/person";
@@ -74,7 +80,7 @@ import { placeDropped, type NamedPlace } from "./at";
 import { PlaceIcon, placeOf } from "./mention";
 import { spotsOf, type Spot } from "./where";
 import { Compaction, Earlier, Pending, Relayed, Said, When } from "./said";
-import { earlierOf, turnsOf, type Row } from "./turns";
+import { earlierOf, liveAt, rowPlace, slotAfter, tailOf, turnKey, turnsOf, type LiveAt, type Row } from "./turns";
 import { Stick, toEnd } from "./stick";
 import { Activity, OtherTurn, TurnFrame } from "./atwork";
 import { VoiceDock } from "../voice/dock";
@@ -227,11 +233,15 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
     const back = () => (log.dropDrafts(), more());
     drafts.add(hear);
     opened.add(back);
+    // A block of its record taken back as a message of its channel (reactions.ts): out.
+    const gone = (ch: string) => void (ch === id && changed());
+    recalls.add(gone);
     return () => {
       live = false;
       clearTimeout(again);
       drafts.delete(hear);
       opened.delete(back);
+      recalls.delete(gone);
     };
   }, [id]);
   // The transcript grew past what is shown: the blocks since, from the state's tail when it has
@@ -263,6 +273,16 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
   const dispatchingWas = useRef<{ parent: string; by: string; d: ReturnType<typeof dispatched> } | null>(null);
   const liveTurn = useRef("");
   const liveLast = useRef("");
+  /** The turn at work as this page follows it (turns.ts liveAt), and whether it saw the chat at rest. */
+  const liveSeen = useRef<{ id: string; idle: boolean; at: LiveAt | null }>({ id: "", idle: false, at: null });
+  const column = useRef<HTMLDivElement>(null);
+  // Turns that change places (the row at work going from over others' words to under them, words
+  // put between turns as the record catches up) glide there (motion.ts useMoves).
+  const moved = useMoves(column);
+  /** Those at work (the others, the subagents) in the order this page first saw them, and the
+   *  turn each subagent began at: none changes places with another as one or the other writes
+   *  (kumo, 2026-11-21); a subagent stays where it began, whatever is said under it. */
+  const boxSeen = useRef<{ id: string; n: Map<string, number>; at: Map<string, string> }>({ id: "", n: new Map(), at: new Map() });
   const compactSince = useRef(0);
   if (!compacting) compactSince.current = 0;
   else if (s?.compactingSince) compactSince.current = s.compactingSince;
@@ -414,7 +434,11 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
   const atRows = useMemo(() => [...nicks.agents, ...others], [nicks, others]);
   // The message being answered (<quote>), over the composer till it is sent.
   const [quote, setQuote] = useState<Msg | null>(null);
-  const quoteOf = useMemo(() => (quote ? { n: quote.n, who: nameOfMsg(quote), text: quote.text } : undefined), [quote]);
+  const quoteOf = useMemo(() => (quote ? { n: quote.n, who: nameOfMsg(quote), text: quoteText(quote) } : undefined), [quote]);
+  // Where the own agent's rows are by the log's numbers, as last drawn: a quote of one gone to.
+  const anchorsNow = useRef<Anchor[]>([]);
+  // How far its channel was read as it opened: long words read before the latest rounds fold.
+  const readTo = useReadTo(id, side.reads?.readers, members?.me, side.ready?.kept.log.loaded ? side.ready.kept.log.end : undefined);
   // What the composer is given to call, the same each draw and doing what they do now: the
   // composer and the bar (memo) are not drawn again with each piece of a draft.
   const acts = useRef({ onSent, sentDone, openContext: (): boolean => false });
@@ -487,7 +511,9 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
   // When each row was written, for the others' words to go in their places (merge.ts slotsOf):
   // steps folded have no time of their own (they go with the words after them), only since when
   // (a turn still at its steps has no words yet: what called it stays above them).
-  const rowTimes: RowTime[] = [];
+  const rowTimes: RowAt[] = [];
+  // Where a turn begins with its own channel's words, drawn from the log: before which row.
+  const cuts = new Map<number, Cut>();
   // The steps each row holds, for the 过程 fold's count.
   const stepsAt = new Map<string, number>();
   // The own agent's words by row, for the fold of words between agents.
@@ -498,8 +524,13 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
     // As the record says it, a Satori forward (satori.ts relays); else read from its words.
     const relay = b.kind === "user" ? relays.get(b) : undefined;
     // Its own channel's words forwarded to it: drawn from the log, by who said them.
-    if (ready && b.kind === "user" && givenHere(id, relay, b.text)) return [];
-    rowTimes.push(b.kind === "fold" ? { since: b.steps[0]?.time } : b.kind === "running" ? { since: b.tool.time } : b.time);
+    if (ready && b.kind === "user" && givenHere(id, relay, b.text)) {
+      const seq = relay?.seq ?? givenTurn(b.text ?? "")?.seq;
+      const was = cuts.get(rowTimes.length);
+      cuts.set(rowTimes.length, { time: b.time ?? was?.time, seq: seq ?? was?.seq });
+      return [];
+    }
+    rowTimes.push({ agent: b.kind === "assistant" || b.kind === "fold" || b.kind === "running", time: b.kind === "fold" ? { since: b.steps[0]?.time } : b.kind === "running" ? { since: b.tool.time } : b.time });
     if (b.kind === "fold") stepsAt.set(b.at, b.steps.length);
     if (b.kind === "assistant") wordsOf.set(b.at, b.text ?? "");
     const given: GivenTurn | null = relay ? { seq: relay.seq, words: relay.msgs.at(-1)?.text ?? "", context: relay.context, ...(relay.channel !== id ? { channel: { id: relay.channel, name: relay.name } } : {}) } : b.kind === "user" ? givenTurn(b.text ?? "") : null;
@@ -517,7 +548,7 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
   for (const d of log.drafts) {
     if (d.tool && (busy || renamesDraft(d))) continue;
     const key = `${d.proc}.${d.n}`;
-    rowTimes.push(Infinity);
+    rowTimes.push({ agent: true, time: Infinity });
     rows.push({
       key,
       agent: true,
@@ -538,9 +569,29 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
   const who = P && P.personWho(self, terminals, list ?? [], workspaces ?? []);
   const quoted = (n: number) => {
     const m = msgs.find((x) => x.n === n);
-    return m ? { who: nameOfMsg(m), text: m.text } : undefined;
+    return m ? { who: nameOfMsg(m), text: quoteText(m) } : undefined;
   };
-  const quoting = (m: Msg) => (setQuote(m), composer.current?.focus());
+  // Its author named at the composer's start, as QQ does (kumo, 2026-11-21): the @ calls.
+  const quoting = (m: Msg) => {
+    setQuote(m);
+    const at = quoteAt(m, m.author.kind === "person" && !!who?.(m.author).mine);
+    if (at) composer.current?.atStart(at);
+    else composer.current?.focus();
+  };
+  // The record's page before, with the log back as far (the chat's own paging, and a quote's).
+  const older = () => log.older(async (p) => void (ready && p.blocks[0]?.time !== undefined && (await alignBack(ready.kept.log, p.more ? p.blocks[0].time : 0))));
+  // A quote pressed: the message it answers, drawn from the log or the own agent's record, the
+  // pages before brought till it is (channel/jump.ts).
+  const jump = (n: number) => {
+    const find = () => {
+      const key = anchorsNow.current.find((a) => a.seq === n)?.key;
+      return seqEl(scroller.current, n) ?? (key ? (scroller.current?.querySelector<HTMLElement>(`[data-at="${CSS.escape(key)}"]`) ?? null) : null);
+    };
+    void goTo(scroller.current, find, older, changed, 40);
+  };
+  // Long words read before the latest rounds fold of themselves (channel/folds.ts).
+  const olds = ready && readTo !== undefined ? oldRead(msgs, readTo) : undefined;
+  const oldMsg = (m: Msg) => foldsOnce(id, `m${m.n}`, olds?.has(m.n));
   const barsOf = (session: string) => {
     const a = agents.find((x) => x.session === session);
     return a && P ? <P.AgentBars a={a} st={stateOf(session)} /> : null;
@@ -550,45 +601,46 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
   const nickSet = new Set(agents.map((a) => a.nick.toLowerCase()).filter(Boolean));
   const anchors: Anchor[] = [];
   const shownSeq = new Set<number>();
-  let lastGroup: { session?: string } | undefined;
   if (ready && P && who) {
     const inputs = new Set(log.blocks.flatMap((b) => (b.kind === "user" && b.id ? [b.id] : [])));
     const foreign = foreignOf(msgs, id, inputs, log.more ? log.blocks[0]?.time : undefined);
-    const slots = slotsOf(rowTimes, foreign);
+    const slots = slotsOf(rowTimes, foreign, cuts);
     merged = [];
     for (let i = 0; i <= rows.length; i++) {
       for (const g of groupMessages(slots.get(i) ?? [])) {
         const key = `ch:${g.key}`;
         anchors.push({ key, seq: g.msgs.at(-1)!.n });
         for (const m of g.msgs) shownSeq.add(m.n);
-        merged.push({ key, agent: false, node: <P.GroupView key={key} g={g} channel={id} agents={agents} who={who} record={openChat} call={callAt} may={may} quote={may ? quoting : undefined} quoted={quoted} bars={barsOf} fold={(m) => betweenAgents(m, msgs, nickSet)} /> });
+        merged.push({ key, agent: false, node: <P.GroupView key={key} g={g} channel={id} agents={agents} who={who} record={openChat} call={callAt} may={may} quote={may ? quoting : undefined} quoted={quoted} bars={barsOf} fold={(m) => betweenAgents(m, msgs, nickSet)} old={oldMsg} jump={jump} /> });
         groupAt.set(key, g);
-        if (i === rows.length) lastGroup = g.author.kind === "agent" ? { session: g.author.session } : {};
       }
-      if (i < rows.length) {
-        merged.push(rows[i]!);
-        lastGroup = undefined;
-      }
+      if (i < rows.length) merged.push(rows[i]!);
     }
     for (const a of ownAnchors(msgs, id, shown.map((b) => ({ key: b.at, line: lineOf(b), ...(b.kind === "user" && b.id ? { id: b.id } : {}) })))) {
       anchors.push(a);
       shownSeq.add(a.seq);
     }
   }
-  // The own agent's words in a stretch another agent began (its words to it, naming it and no
-  // person): words between agents, folded when long; a person's words end such a stretch.
-  if (ready && face.nick) {
+  anchorsNow.current = anchors;
+  // The own agent's words fold by hand (their menu's 折叠), and of themselves: in a stretch another
+  // agent began (its words to it, naming it and no person), words between agents, when long (a
+  // person's words end such a stretch); read before the latest rounds (channel/folds.ts).
+  {
     let byAgent = false;
     const me = new Set([face.nick.toLowerCase()]);
+    const seqOf = new Map(anchors.map((a) => [a.key, a.seq]));
     merged = merged.map((r) => {
       if (!r.agent) {
         const g = groupAt.get(r.key);
         const last = g?.msgs.at(-1);
-        byAgent = !!g && g.author.kind === "agent" && !!last && namedIn(last.text, me).agents > 0 && namedIn(last.text, nickSet).people === 0;
+        byAgent = !!face.nick && !!g && g.author.kind === "agent" && !!last && namedIn(last.text, me).agents > 0 && namedIn(last.text, nickSet).people === 0;
         return r;
       }
       const w = wordsOf.get(r.key);
-      return byAgent && w !== undefined ? { ...r, node: <LongWords key={r.key} fold lines={linesOf(w)}>{r.node}</LongWords> } : r;
+      if (w === undefined) return r;
+      const seq = seqOf.get(r.key);
+      const auto = (byAgent && longWords(w)) || (seq !== undefined && foldsOnce(id, `b${r.key}`, olds?.has(seq)));
+      return { ...r, node: <Foldable key={r.key} scope={id} id={`b${r.key}`} auto={auto} lines={linesOf(w)}>{(wrap) => wrap(r.node)}</Foldable> };
     });
   }
   const marks = ready ? marksAt(anchors, side.reads?.readers ?? [], members?.me) : new Map<string, never[]>();
@@ -627,7 +679,75 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
   const pendingAfter = pending.filter((x) => x.mid);
   // A turn another channel called (works) is the agent's too once it has rows: its row at work
   // goes on under them, not under a face and name again (kumo, 2026-11-18).
-  const atEnd = turns.at(-1);
+  // The turn at work is not ended by what others say meanwhile: their words go under it (merge.ts
+  // slotsOf), and it stays the one at work, its row at work under it and over them (kumo,
+  // 2026-11-21: words to another agent, once in the channel, were the page's last thing; the turn
+  // was drawn as ended, its steps folded, and a face at work came up again under them).
+  const ownAt = tailOf(turns, (k) => groupAt.has(k));
+  const ownTurn = turns[ownAt];
+  const ownKey = ownTurn ? turnKey(ownTurn) : "start:a";
+  if (liveSeen.current.id !== id) liveSeen.current = { id, idle: false, at: null };
+  if (!busy && log.loaded) liveSeen.current.idle = true;
+  liveSeen.current.at = liveAt(liveSeen.current.at, busy, ownKey, ownAt < turns.length - 1, liveSeen.current.idle);
+  // What you sent before the turn began is under those words too, and the turn it begins. At
+  // rest the row's place is the page's end, as ever (kept over the others' words it left a gap
+  // there, and went to and fro as a turn began).
+  const tailAt = !busy || ownAt < 0 || liveSeen.current.at?.under || pendingBefore.length > 0 ? turns.length - 1 : ownAt;
+  const atEnd = turns[tailAt];
+  // Where each one at work is drawn: an agent over what it has not read (merge.ts boxSlot: what
+  // was given to it, what it said, what called it), a subagent after the turn it began at; in
+  // the order they were first seen.
+  const seen = boxSeen.current.id === id ? boxSeen.current : (boxSeen.current = { id, n: new Map(), at: new Map() });
+  const rowTurn = new Map<string, number>();
+  turns.forEach((x, i) => (rowTurn.set(x.key, i), x.kind !== "one" && x.rows.forEach((r) => rowTurn.set(r.key, i))));
+  const turnSeq: (number | undefined)[] = turns.map(() => undefined);
+  for (const a of anchors) {
+    const i = rowTurn.get(a.key);
+    if (i !== undefined) turnSeq[i] = Math.min(turnSeq[i] ?? Infinity, a.seq);
+  }
+  const placeAt = (slot: number) => rowPlace(slot, tailAt, pendingBefore.length > 0);
+  const readOf = (a: AgentRow) => Math.max(side.reads?.readers.find((r) => r.member === a.member)?.seq ?? 0, callerOf(msgs, a.nick, a.session) ?? 0, msgs.findLast((m) => m.author.kind === "agent" && m.author.session === a.session)?.n ?? 0);
+  const lastKey0 = turns.length ? turnKey(turns[turns.length - 1]!) : "";
+  for (const k of [...atWork.map((a) => a.session), ...subs.map((x) => x.id)]) if (!seen.n.has(k)) (seen.n.set(k, seen.n.size), seen.at.set(k, lastKey0));
+  const boxes: Box[] = [
+    ...atWork.map((a) => {
+      const slot = boxSlot(turnSeq, readOf(a));
+      const above = turns[slot - 1];
+      const g = above && slot !== tailAt + 1 ? groupAt.get(above.key) : undefined;
+      const alone = !!g && g.author.kind === "agent" && g.author.session === a.session;
+      return {
+        key: a.session,
+        at: placeAt(slot),
+        before: turns[slot]?.key ?? "",
+        draw: (leaving: boolean) => (
+          <Arrive on={!alone} off={leaving} className="-mt-2">
+            <div>
+              <OtherTurn spoken={new Set(msgs.slice(-12).flatMap((m) => (m.author.kind === "agent" && m.author.session === a.session && m.text.trim() ? [m.text.trim()] : [])))} a={a} channel={id} st={stateOf(a.session)} said={msgs.findLast((m) => m.author.kind === "agent" && m.author.session === a.session && !!m.src)?.src} alone={alone} bars={barsOf(a.session)} call={may ? callAt : undefined} record={openChat} may={may} />
+            </div>
+          </Arrive>
+        ),
+      };
+    }),
+    ...subs.map((x) => {
+      const slot = slotAfter(turns, seen.at.get(x.id) ?? "");
+      return {
+        key: x.id,
+        at: placeAt(slot),
+        before: turns[slot]?.key ?? "",
+        draw: () => (
+          <div className="g-arrive">
+            <div>
+              <SubTurn s={x} />
+            </div>
+          </div>
+        ),
+      };
+    }),
+  ].sort((a, b) => seen.n.get(a.key)! - seen.n.get(b.key)!);
+  // Only as the arrangement changes (how many of the others' words are under the row at work,
+  // which turn each one at work is over): what comes at either end is the chat's own glide
+  // (stick.tsx).
+  moved(`${turns.length - 1 - tailAt} ${boxes.map((b) => `${b.key}<${b.before}`).join(" ")}`, id);
   const headless = busy && !compacting && (!(atEnd?.kind === "agent" || (atEnd?.kind === "works" && atEnd.rows.length > 0)) || pendingBefore.length > 0);
   // Its usage after its model's name, a strip of its own as small as a phone's (the user,
   // 2026-11-13): the context's ring, the quota's bars; each pressed, its popover.
@@ -649,7 +769,7 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
     return ch ? titleOf(ch) : (g.channel?.name ?? "");
   };
   // What changes as the conversation grows: it keeps to the bottom, the dots wait again.
-  const grew = `${log.blocks.at(-1)?.at} ${log.drafts.length} ${log.drafts.at(-1)?.text.length} ${log.drafts.at(-1)?.whole} ${log.sent.length} ${ready?.kept.log.end ?? 0} ${atWork.map((a) => `${a.session}:${stateOf(a.session)?.end ?? 0}`).join(",")} ${subs.map((x) => x.id).join(",")}`;
+  const grew = `${log.blocks.at(-1)?.at} ${log.drafts.length} ${log.drafts.at(-1)?.text.length} ${log.drafts.at(-1)?.whole} ${log.sent.length} ${ready?.kept.log.end ?? 0} ${atWork.map((a) => `${a.session}:${stateOf(a.session)?.end ?? 0}`).join(",")} ${subs.map((x) => `${x.id}:${x.updatedAt}`).join(",")}`;
   // The own agent's stop key, on its row at work; starting is no turn yet.
   const stop = may && s.status !== "starting" && !s.subagent && !elsewhere ? <StopKey session={id} esc /> : null;
   const activity = <Activity stop={stop} calls={log.drafts.filter((d) => d.tool && !renamesDraft(d))} running={shown.flatMap((b) => (b.kind === "running" ? [b.tool] : []))} cwd={cwd} quiet={s.status !== "waiting" && !log.drafts.some((d) => !d.whole && !d.tool)} grew={grew} under={headless} />;
@@ -657,7 +777,7 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
   // they are more than one line already (words, or several rows).
   // The turn at work as this page last saw it: once it ends, what it folds folds before you.
   // (none of its rows yet: the turn after the last row, keyed by it, turns.ts)
-  const lastTurn = turns.at(-1);
+  const lastTurn = atEnd;
   if (busy && !waking && lastTurn) liveTurn.current = lastTurn.kind === "one" ? `${lastTurn.key}:a` : lastTurn.key;
   // Whether the last turn is the one at work: its steps stay open only then. Not the turn before
   // while what you sent waits for its block, nor while a /compact runs, nor as the harness comes
@@ -683,14 +803,14 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
             x.kind === "one" ? (
               x.node
             ) : x.kind === "agent" ? (
-              <AgentTurn key={x.key} channel={id} a={i === turns.length - 1 && !headless ? face : resting} may={may} call={may ? callAt : undefined} bars={bars(i === ctxTurn)} talk={talk} time={began(x.rows)}>
-                {rowsOf(x.rows, !(liveNow && i === turns.length - 1), x.key)}
+              <AgentTurn key={x.key} channel={id} a={i === tailAt && !headless ? face : resting} may={may} call={may ? callAt : undefined} bars={bars(i === ctxTurn)} talk={talk} time={began(x.rows)}>
+                {rowsOf(x.rows, !(liveNow && i === tailAt), x.key)}
               </AgentTurn>
             ) : (
               <Relayed key={x.key} given={x.works.given} relay={x.works.relay} name={nameOf(x.works.given)} time={x.works.time} onJump={openChat}>
                 {x.rows.length > 0 && (
-                  <AgentTurn channel={id} a={i === turns.length - 1 && !headless ? face : resting} may={may} call={may ? callAt : undefined} bars={bars(i === ctxTurn)} talk={talk} time={began(x.rows)}>
-                    {rowsOf(x.rows, !(liveNow && i === turns.length - 1), x.key)}
+                  <AgentTurn channel={id} a={i === tailAt && !headless ? face : resting} may={may} call={may ? callAt : undefined} bars={bars(i === ctxTurn)} talk={talk} time={began(x.rows)}>
+                    {rowsOf(x.rows, !(liveNow && i === tailAt), x.key)}
                   </AgentTurn>
                 )}
               </Relayed>
@@ -701,18 +821,18 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
   // several agents writing at once the page lost its frames). stamp: what the turns are drawn
   // from but the drafts, each as it is (the same thing while unchanged); the last turn, and one
   // with a draft in it, are drawn each time.
-  const stamp: unknown[] = [id, log.blocks, s, list, members, may, self, terminals, workspaces, machines, nicks, P, ready, msgs, side.reads, ...side.states, busy, compacting, waking, liveNow, liveTurn.current, headless, turns[ctxTurn]?.key, ctxOpen, pendingShown, face.nick, face.name, face.status, cwd, document.documentElement.lang];
+  const stamp: unknown[] = [id, log.blocks, s, list, members, may, self, terminals, workspaces, machines, nicks, P, ready, msgs, side.reads, ...side.states, busy, compacting, waking, liveNow, liveTurn.current, headless, tailAt, turns[ctxTurn]?.key, ctxOpen, pendingShown, face.nick, face.name, face.status, cwd, document.documentElement.lang];
   if (stamp.length !== drawnTurns.current.stamp.length || stamp.some((v, i) => v !== drawnTurns.current.stamp[i])) drawnTurns.current = { stamp, nodes: new Map() };
   const drafted = new Set(log.drafts.map((d) => `${d.proc}.${d.n}`));
   const turnBox = (x: (typeof turns)[number], i: number) => {
-    const settled = i < turns.length - 1 && !(x.kind !== "one" && x.rows.some((r) => drafted.has(r.key)));
+    const settled = i !== tailAt && i < turns.length - 1 && !(x.kind !== "one" && x.rows.some((r) => drafted.has(r.key)));
     const was = settled ? drawnTurns.current.nodes.get(x.key) : undefined;
     if (was) return was;
     // Each turn in a box of its own, its read marks in the gap under it (over nothing: coming
     // late, they move nothing); the same box with none, so marks coming draw nothing again.
     const rs = marksOf(x.kind === "one" ? [x.key] : [...(x.kind === "works" ? [x.key] : []), ...x.rows.map((r) => r.key)]);
     const node = (
-      <div key={x.key} className="relative flex min-w-0 flex-col">
+      <div key={x.key} data-flip={x.key} className="relative flex min-w-0 flex-col">
         {turnNode(x, i)}
         {rs.length > 0 && P && P.SHOW_READS && <P.ReadMarks readers={rs} agents={agents} />}
       </div>
@@ -735,17 +855,27 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
     <Nicks.Provider value={nicks}>
     <Dispatching.Provider value={dispatching}>
     <div className="relative h-full" onDragOver={(e) => files(e) || session(e) || place(e)} onDrop={drop}>
-      <Stick scroller={scroller} tail={grew} older={() => log.older(async (p) => void (ready && p.blocks[0]?.time !== undefined && (await alignBack(ready.kept.log, p.more ? p.blocks[0].time : 0))))} draw={changed} place={chat.place} bottom={stackH} quiet={agents.some((a) => !!stateOf(a.session)?.asks.length)} style={{ paddingTop: padTop, paddingBottom: stackH + 20 }}>
-        <div className="mx-auto flex max-w-(--chat-w) flex-col gap-5 px-4 sm:px-6">
+      <Stick scroller={scroller} tail={grew} older={older} draw={changed} place={chat.place} bottom={stackH} quiet={agents.some((a) => !!stateOf(a.session)?.asks.length)} style={{ paddingTop: padTop, paddingBottom: stackH + 20 }}>
+        <div ref={column} className="mx-auto flex max-w-(--chat-w) flex-col gap-5 px-4 sm:px-6">
           {/* In a turn, the calls being written or run and the dots share one row at the end, as
               high whatever it shows: the conversation does not jump as a call is drafted, runs and
               folds into the line above (the user, 2026-11-06). */}
-          {turns.map(turnBox)}
-          {pendingBefore.map(pendingNode)}
-          {/* The turn's row, after what you sent: kept, one line high, even out of a turn, so a
-              message sent or the dots coming do not move the conversation (the user, 2026-11-06). */}
-          {/* Close under what is above it (the user, 2026-11-06): a call's line by the calls before. */}
-          {log.loaded && compacting ? (
+          <Rows
+            pieces={[
+              ...turns.map((x, i) => ({ at: i, node: turnBox(x, i) })),
+              ...pendingBefore.map((x) => ({ at: tailAt + 0.1, node: pendingNode(x) })),
+              // The turn's row, after what you sent: kept, one line high, even out of a turn, so a
+              // message sent or the dots coming do not move the conversation (the user,
+              // 2026-11-06). Close under what is above it: a call's line by the calls before.
+              // In a turn, the calls being written or run and the dots share this one row, as
+              // high whatever it shows: the conversation does not jump as a call is drafted,
+              // runs and folds into the line above. Under the turn at work, over what others
+              // said while it was on (merge.ts slotsOf).
+              {
+                at: tailAt + 0.2,
+                node: (
+                  <div key="work" data-flip="work" className="flex min-w-0 flex-col">
+                    {log.loaded && compacting ? (
             <div className="-mt-1 flex min-w-0 items-center">
               <div className="min-w-0 flex-1">
                 <Compaction since={compactSince.current} />
@@ -761,37 +891,13 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
               activity
             )
           ) : s.denials?.length ? <Denials session={id} denials={s.denials} cwd={cwd} stuck={s.status === "waiting" && !s.asks.length} /> : <div aria-hidden className="-mt-3 h-7 pointer-coarse:h-9" />)}
-          {pendingAfter.map(pendingNode)}
-          {/* The others at work (kumo, 2026-11-15): one called comes in under the words that
-              called it, once they are whole (g-arrive: its height opens, then it rises in), what it
-              has done so far under its face as on its own page (kumo, 2026-11-18); under its own
-              last words, no face again. */}
-          {/* One that goes with nothing said (ir's interrupt of itself) fades and closes (Leaving). */}
-          {P && (
-            <Leaving
-              items={atWork}
-              keyOf={(a) => a.session}
-              draw={(a, leaving) => {
-                const alone = !pending.length && lastGroup?.session === a.session;
-                return (
-                  <Arrive on={!alone} off={leaving} className="-mt-2">
-                    <div>
-                      <OtherTurn spoken={new Set(msgs.slice(-12).flatMap((m) => (m.author.kind === "agent" && m.author.session === a.session && m.text.trim() ? [m.text.trim()] : [])))} a={a} channel={id} st={stateOf(a.session)} said={msgs.findLast((m) => m.author.kind === "agent" && m.author.session === a.session && !!m.src)?.src} alone={alone} bars={barsOf(a.session)} call={may ? callAt : undefined} record={openChat} may={may} />
-                    </div>
-                  </Arrive>
-                );
-              }}
-            />
-          )}
-          {/* Its subagents at work, each a turn of its own (kumo, 2026-11-16), coming in as one
-              called does; gone as it hands back, its hand-back the parent's (dispatched.tsx). */}
-          {subs.map((x) => (
-            <div key={x.id} className="g-arrive">
-              <div>
-                <SubTurn s={x} />
-              </div>
-            </div>
-          ))}
+                  </div>
+                ),
+              },
+              ...pendingAfter.map((x) => ({ at: tailAt + 0.3, node: pendingNode(x) })),
+            ]}
+            boxes={P || subs.length ? boxes : NO_BOXES}
+          />
           {s.status === "error" && s.error && <Crash error={s.error} />}
         </div>
       </Stick>
@@ -1188,6 +1294,34 @@ function AgentTurn({ channel, a, may, bars, talk, call, time, children }: { chan
 /** Its blocks are drawn as the parent's own: who sent words is not asked (it is told only by
  *  its parent, whose words to it are the parent's line, not here). */
 const noSource = () => ({ kind: "you" }) as ReturnType<ComponentProps<typeof Said>["source"]>;
+
+/** One at work on the page: where it is drawn among the rows (turns.ts rowPlace), the turn it is
+ *  before (none: the end), and itself, leaving or not. */
+type Box = { key: string; at: number; before: string; draw: (leaving: boolean) => ReactNode };
+const NO_BOXES: Box[] = [];
+
+/** The conversation's rows in their order: the turns, what you sent, the row at work (pieces,
+ *  each a node with its key, at its place), and those at work among them (boxes), all of one
+ *  parent, so one that changes places is the same row moved (it is not made again, nor comes in
+ *  again) and glides there (motion.ts useMoves). One that goes fades where it was, then is gone
+ *  (useLeaving): the others at work come in under the words that called them (g-arrive), a
+ *  subagent as it is dispatched; gone as it hands back, its hand-back the parent's. */
+function Rows({ pieces, boxes }: { pieces: { at: number; node: ReactNode }[]; boxes: Box[] }) {
+  const all = useLeaving(boxes, (b) => b.key);
+  const rows = [
+    ...pieces,
+    ...all.map(({ item, leaving }) => ({
+      at: item.at,
+      node: (
+        <div key={`at:${item.key}`} data-flip={`at:${item.key}`} aria-hidden={leaving || undefined} className={cn("flex min-w-0 flex-col", leaving && "g-depart")}>
+          {item.draw(leaving)}
+        </div>
+      ),
+    })),
+  ];
+  // Stable: those at one place in the order given.
+  return <>{rows.map((r, i) => ({ r, i })).sort((a, b) => a.r.at - b.r.at || a.i - b.i).map((x) => x.r.node)}</>;
+}
 
 /** A subagent at work as its own turn (kumo, 2026-11-16: live as the agent's, outside its
  *  parent's turn): its face (its card) and name, then what it has done and said, read from its

@@ -237,6 +237,8 @@ type LogData struct {
 	Device string `json:"device,omitempty"`
 	// Script: a script of the channel's IR said it (its user "script:<name>").
 	Script string `json:"script,omitempty"`
+	// Reactions: the emoji put on it, each with who put it on (docs/channels.md "表情").
+	Reactions []ReactionSum `json:"reactions,omitempty"`
 }
 
 func logData(m channel.Message) LogData {
@@ -379,7 +381,9 @@ func (s *Service) messageGet(_ context.Context, c Caller, body []byte) (any, err
 	if !ok {
 		return nil, errNoMessage(req.MessageID)
 	}
-	return s.logMessage(c, m, s.channelMasked(st.Session), s.guildOf(st.Session), nil), nil
+	out := []Message{s.logMessage(c, m, s.channelMasked(st.Session), s.guildOf(st.Session), nil)}
+	s.withReactions(c, st.ID, out)
+	return out[0], nil
 }
 
 // ListLimit is how many messages a page of message.list holds when none is asked; ListMax, at most.
@@ -424,6 +428,7 @@ func (s *Service) messageList(_ context.Context, c Caller, body []byte) (any, er
 		if req.Order == "desc" {
 			slices.Reverse(out.Data)
 		}
+		s.withReactions(c, st.ID, out.Data)
 		return out, nil
 	}
 	dir := cmp.Or(req.Direction, "before")
@@ -504,5 +509,6 @@ func (s *Service) messageList(_ context.Context, c Caller, body []byte) (any, er
 	if req.Order == "desc" {
 		slices.Reverse(out.Data)
 	}
+	s.withReactions(c, st.ID, out.Data)
 	return out, nil
 }

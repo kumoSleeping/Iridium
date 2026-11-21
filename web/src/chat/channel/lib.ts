@@ -19,7 +19,8 @@ export type Author = { kind: "agent"; session: string; nick: string; name: strin
 export type Src = { session: string; block?: string; from?: number; to?: number };
 
 /** input: a person's message, the input it was sent as (a session's record has it by that id);
- *  an agent's sent with ir, the same. */
+ *  an agent's sent with ir, the same. A merged forward in its text is drawn apart (forward.ts
+ *  msgWords). */
 export type Msg = { n: number; text: string; files: FileRef[]; time?: number; author: Author; kind?: string; did?: Did; event?: ChEvent; src?: Src; quote?: number; input?: string };
 
 /** The line of a block's at ("<line>.<n>"). */
@@ -374,13 +375,29 @@ export function linkNicks(text: string, nicks: string[]): string {
   return out + text.slice(at);
 }
 
-/** "@nick " put into text over [a, b) (the caret, a selection, an @word being typed): a space
- *  before it unless at a line's start or after one; the caret after it. */
-export function insertNick(text: string, a: number, b: number, nick: string): { text: string; caret: number } {
+/** words put into text over [a, b) (the caret, a selection, an @word being typed): one space
+ *  before them unless at a line's start or after one, one after them (a space already there is
+ *  that one); the caret after it. The one way a mention goes into the composer: picked from the
+ *  @ list, a card's 提及, a quote's @, a session or a place named. */
+export function insertWords(text: string, a: number, b: number, words: string): { text: string; caret: number } {
   const head = text.slice(0, a);
   const before = head + (head && !/\s$/.test(head) ? " " : "");
-  const words = `@${nick} `;
-  return { text: before + words + text.slice(b).replace(/^ /, ""), caret: before.length + words.length };
+  return { text: `${before}${words} ${text.slice(b).replace(/^ /, "")}`, caret: before.length + words.length + 1 };
+}
+
+/** "@nick " put into text over [a, b), as insertWords. */
+export const insertNick = (text: string, a: number, b: number, nick: string) => insertWords(text, a, b, `@${nick}`);
+
+/** Whether text begins with @name, as a name standing by itself (case does not matter). */
+export const startsAt = (text: string, name: string) => nickSpans(text.trimStart(), [name]).some((s) => s.from === 0);
+
+/** The name a quote of m puts at the composer's start (kumo, 2026-11-21: as QQ does): an agent's
+ *  nick, a person's or an app's name; none for one's own words (mine), a script's, Iridium's. */
+export function quoteAt(m: Pick<Msg, "author">, mine: boolean): string | undefined {
+  const a = m.author;
+  if (a.kind === "agent") return a.nick || undefined;
+  if (a.kind === "person" && !mine) return a.name || undefined;
+  return undefined;
 }
 
 /** A member as the @ list and the words that name it show it: an agent; or (person) a login or
@@ -474,7 +491,8 @@ export const watchExtra = (channel: string, sessions: string[]) => {
 export type GivenTurn = { seq: number; words: string; context: string; channel?: { id: string; name: string } };
 
 export function givenTurn(text: string): GivenTurn | null {
-  const m = /^#(\d+): ([\s\S]*?)\n\n<channel-context>\n([\s\S]*)$/.exec(text);
+  // A reaction given is one too: "#n [who reacted 👍 to: …]" (docs/channels.md "表情").
+  const m = /^#(\d+)(?:: | (?=\[))([\s\S]*?)\n\n<channel-context>\n([\s\S]*)$/.exec(text);
   if (!m) return null;
   const c = /^You are \S+, called in the channel "([\s\S]*?)"(?: \(([0-9a-zA-Z_-]+)\))?, which people/.exec(m[3]!);
   // What Iridium added: the block's lines, and what follows it (how to read more).

@@ -89,4 +89,10 @@ const (
 	idChannelProfileIntro   = "channel.context.profile-intro"   // before a new intro
 	idChannelProfileNoIntro = "channel.context.profile-nointro" // an intro taken away
 	idChannelProfileImage   = "channel.context.profile-image"   // a new face or background
+
+	// Reactions and messages taken back (channel.go; docs/channels.md "表情" "撤回").
+	idChannelReaction    = "channel.reaction"         // a reaction it receives: the message's number, who, the emoji; then the message's words
+	idChannelReactionEnd = "channel.reaction-end"     // after those words
+	idChannelRecalled    = "channel.context.recalled" // the messages it was given that were taken back since
+	idChannelReact       = "channel.context.react"    // how to react to a message, what a reaction it gets looks like
 )

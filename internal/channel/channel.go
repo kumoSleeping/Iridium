@@ -139,7 +139,8 @@ type Data struct {
 // its old), "recv" (Member, Nick, Recv: its receive set now), "people" (Added, Removed: member strings; Everyone:
 // now everyone), "undelivered" (Seq not given to Nick), "stopped" (Seq not passed on: too many
 // agents in a row), "silent" (Member, Nick was called for Seq and said nothing in the channel;
-// Reason: why, when its turn ended in an error: 余额不足, an API's words…). By: who did it, by name.
+// Reason: why, when its turn ended in an error: 余额不足, an API's words…), "recall" (Seq was
+// taken back by Member: recall.go). By: who did it, by name.
 type Event struct {
 	Type     string   `json:"type"`
 	Member   string   `json:"member,omitempty"`

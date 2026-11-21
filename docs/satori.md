@@ -19,19 +19,21 @@
 
 ## HTTP `POST /v1/{资源}.{方法}`
 
-- `message.create {channel_id, content}`：发进会话（插入正在跑的回合），发送者显示为 `应用·登录`。`<img>`/`<file>` 的 `src` 是本登录在这个会话 `upload.create` 得到的 `internal:` 地址时，作为附件；`data:` 地址存成上传的文件再作附件；其余元素按意思转成文字。顶层的 `<message>` 各发一条。回 `[Message]`，`id` 是这条输入的 ID，拿去 `message.get` 能取到它（进了记录取记录里那块，还在排队取排队里的）。
+- `message.create {channel_id, content}`：发进会话（插入正在跑的回合），发送者显示为 `应用·登录`。`<img>`/`<file>` 的 `src` 是本登录在这个会话 `upload.create` 得到的 `internal:` 地址时，作为附件；`data:` 地址存成上传的文件再作附件；其余元素按意思转成文字。顶层的 `<message>` 各发一条；合并转发 `<message forward>` 不拆，和前后的话是一条，照原样记下（`docs/channels.md`“元素”）。回 `[Message]`，`id` 是这条输入的 ID，拿去 `message.get` 能取到它（进了记录取记录里那块，还在排队取排队里的）。
 - `message.get`、`message.list`：频道里说的话，一句一条，不含思考和工具调用。`message.list` 是 BidiList，翻页标记是消息的编号；`limit` 默认 50，至多 500；没有 `next` 时只能 `before`。多一个 `_data {start, end, more}`：这页第一条和最后一条的编号、前面还有没有。`_data.q` 给词时只回有这些词的消息（`docs/channels.md`“搜索”）。`message.get` 的 `message_id` 也认输入的 ID 和提问的卡片。
 - `POST /v1/internal/block.list`、`block.get`（参数同上）：一个会话自己的记录，一块一条消息，内容见下面“记录”；翻页标记是记录里行的偏移，`limit` 按块数、在行首截，可能略多。`_data {start, end, more}`：这页从哪行起、读时记录到哪、前面还有没有。网页读记录走它。agent 也能读别的会话的（只读，打码）。
 - `channel.get`、`channel.list {guild_id?, next?, _data?: {all}}`（不给 `guild_id` 是全部；先列文件夹，再列会话；不列归档和子 agent，`_data.all` 都列）、`guild.get`、`guild.list`（只列范围里的）、`guild.member.list {guild_id, next?}`、`guild.member.get {guild_id, user_id}`（组里各会话的 agent：`user` 是 `agent:<会话>`，带 `nick` 和 `joined_at`；再加本应用的登录。`_data.channel_id` 只列那个频道的成员，`joined_at` 是加入频道的时间，2026-11-13）、`login.get`、`user.get`。`channel.get`、`channel.list` 的每个 channel 带 `_data`：会话本身（同 `GET /v1/internal/sessions` 的一项，名字、标题、最后一句打码）；`guild.get`、`guild.list` 的 guild 带 `_data`：文件夹组（`path`、`only`），`loose` 没有。网页拿不到携带状态 `guilds` 时用 `guild.list` 的 `_data`。
 - `channel.create {guild_id?, data?: {name, parent_id}, _data: {agent, cwd, text?, model?, mode?, effort?, preset?}}`（2026-11-11）：开一个会话；不带 `_data.agent` 是建一个无 agent 的频道（`_data.cwd` 是它列在哪个文件夹，2026-11-13）。`guild_id` 是文件夹组（`self` 自己的；不给或 `loose` 按目录归组），`data.parent_id` 是拉起者（不给是发话的会话自己，`ir` 开的就挂在自己下面），`data.name` 是名字；`_data` 是 agent 怎么起。回这个会话的 Channel（同 `channel.get`），随后照常有 `channel-added`。`ir api channel.create` 先印 ID，带 `text` 等 agent 接了再返回，`--wait` 等到这一回合结束。
 - `channel.update {channel_id, data?: {name, parent_id}, _data?: {archived, pinned, color, order, workspace}}` 改名，`_data.archived` 归档或恢复（挂在它下面的一起），`pinned` 置顶，`color` 颜色标签（`red`…`purple`，空串去掉），`order` 拖到的位置（毫秒，0 去掉），`workspace` 手动放进那个组（0 未归类）；`data.parent_id` 设成 `null` 或它自己的文件夹，就从拉起者下面拿出来（此后算人开的），别的值 422 `parent_fixed`。文件夹（`folder:…`）只收 `_data.color`（本机的文件夹）、`pinned`、`order`，只有面板和本机能改。
-- `message.update {channel_id, message_id, content | _data.text}`、`message.delete {channel_id, message_id}`（2026-11-11）：改、撤回还在排队的一条（`message_id` 是 `message.create` 回的 ID，或频道里的编号）；已经交给 agent 的 422 `no_such_message`。多 agent 或无 agent 的频道里，改的是它叫起的每个 agent 队列里的那条。
+- `message.update {channel_id, message_id, content | _data.text}`（2026-11-11）：改还在排队的一条（`message_id` 是 `message.create` 回的 ID，或频道里的编号）；已经交给 agent 的 422 `no_such_message`。多 agent 或无 agent 的频道里，改的是它叫起的每个 agent 队列里的那条。
+- `message.delete {channel_id, message_id}`：撤回频道里的一条（`message_id` 是编号，也认输入的 ID 和 `b:<会话>:<块>`），所有人那里都没有了（`docs/channels.md`“撤回”）；还在排队的副本一并撤下。提问和 Iridium 自己的行 422 `no_such_message`；不是频道成员 403。还没进频道的输入照旧只从队列撤下。
+- `reaction.create {channel_id, message_id, emoji_id}`、`reaction.delete {…, user_id?}`（不给是自己的）、`reaction.clear {channel_id, message_id, emoji_id?}`、`reaction.list {channel_id, message_id, emoji_id}`（`List<User>`）：贴表情（`docs/channels.md`“表情”）。只收一个 Unicode 表情（也认 `emoji`），否则 400。`message.list`、`message.get` 的每条带 `_data.reactions`：`[{emoji, count, users, me}]`；`block.list` 里是频道消息的块带 `_data {seq, reactions}`。
 - `block.list` 带 `_data.blocks: true` 时，回答的 `_data.blocks` 另给这一页 Iridium 自己的块（`api.Block`，打码），`ir` 的 `--wait` 靠它读回复。
 - `channel.delete {channel_id}` 归档（agent 停下，记录不删）。要能用这个会话。agent 改的名不盖人起的（409 `named`）。
 - `upload.create`：一个 multipart，带字段 `channel_id`，每个文件回 `internal:{应用}/{登录}/files/{会话}/{ref}`。网页用分块的 `/v1/internal/uploads`。
 - `POST /v1/meta`：本应用已批准的登录，`proxy_urls` 为空。`/v1/meta/*`（webhook）不做。
 - `GET /v1/proxy/internal:…`：只取本应用登录的文件。不是地址 400，不是本应用的登录 404，别的地址 403。
-- 不支持的标准接口（`message.delete` 等）照规范 404。
+- 不支持的标准接口照规范 404。
 
 错误体 `{code, message}`。404 只表示接口不存在；资源不存在 422 加原因码：`no_such_session`、`no_such_message`、`no_such_guild`、`no_such_user`、`no_such_file`、`no_such_ask`、`no_such_button`。
 
@@ -91,6 +93,8 @@
 | `message-created` | agent 进程出错 | `error` |
 | `message-created` | Iridium 自己的一行（没转交、没送达） | `note` |
 | `message-updated` | 提问结束（答了或撤了）：去掉按钮，加“已结束” | `ask` |
+| `message-deleted` | 频道里的一条被撤回：`message.id` 是编号，`_data` 是它原来的（`kind`、`session`、`block`、`input`，没有内容），`user` 是作者，`operator` 是撤回的人 | 它原来的 |
+| `reaction-added` / `reaction-removed` | 有人贴上、撤下表情：`message.id` 是编号，`user` 是谁，`emoji {id, name}` 是那个表情 | — |
 | `interaction/button` | 某个登录按了按钮 | — |
 | `channel-added` / `channel-updated` / `channel-removed` | 会话出现、改名或换组、归档或消失（看得见它的登录） | — |
 | `login-added` / `login-removed` | 本应用的登录被批准、被移除（发给本应用的连接；网页的连接只收自己的） | — |
@@ -117,7 +121,7 @@
 - 自定义 op：6 WATCH、7 STATE（见上），只给网页和主机的连接。
 - 发起登录不叫 `referrer`，放在 `_data.origin`，目前是应用 ID。服务端已按回合记下发起的登录（agent 的 `ir` 按它算权限），事件里还没带出来。
 - 权限：每个登录按“登录的 ∩ 应用的”权限；范围外的会话（channel）和文件夹组（guild）看不见。
-- `message.create` 里的 `<message>` 各发一条；`data:` 资源存成上传的文件；`https:` 资源不下载，转成文字。
+- `message.create` 里的 `<message>` 各发一条（`<message forward>` 除外）；`data:` 资源存成上传的文件；`https:` 资源不下载，转成文字。
 
 ## 接 Koishi 等框架
 

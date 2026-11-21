@@ -35,11 +35,23 @@ export class ChannelLog {
     return this.msgs.at(-1)?.n ?? 0;
   }
 
+  /** The numbers taken back (docs/channels.md "撤回"): out of the log, and kept out of it; a line
+   *  of Iridium's own that says so too, the page not having heard it go. */
+  readonly recalled = new Set<number>();
+
   private put(more: Msg[]) {
-    const next = merge(this.msgs, more);
-    if (next === this.msgs) return;
+    for (const m of more) if (m.event?.type === "recall") this.recalled.add(m.event.seq!);
+    let next = merge(this.msgs, more);
+    if (this.recalled.size) next = next.filter((m) => !this.recalled.has(m.n));
+    if (next.length === this.msgs.length && next.every((m, i) => m === this.msgs[i])) return;
     this.msgs = next;
     this.version++;
+  }
+
+  /** Message n taken back: out, for good. */
+  drop(n: number) {
+    this.recalled.add(n);
+    this.put([]);
   }
 
   /** A page read elsewhere (the first screen's, chats.ts): the newest, with those before it that
@@ -89,8 +101,9 @@ export class ChannelLog {
   }
 
   /** A message an event brought: put in; one further on than the next number means some were
-   *  missed, and they are fetched. */
-  heard(m: ChannelMessage) {
+   *  missed, and they are fetched. A message taken back (message-deleted): out. */
+  heard(m: ChannelMessage, deleted = false) {
+    if (deleted) return this.drop(Number(m.id));
     const it = msgOf(m);
     if (!it || !this.loaded) return void this.newer().catch(() => {});
     const end = this.end;

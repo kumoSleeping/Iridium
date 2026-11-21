@@ -606,8 +606,8 @@ export interface Send {
    */
   id?: string;
   /**
-   * Quote: the number of the channel's message it answers (Satori's <quote id/>). In a channel
-   * of several agents, one whose message it is is called as if named.
+   * Quote: the number of the channel's message it answers (Satori's <quote id/>). It calls no
+   * one: the agents its words name are given it.
    */
   quote?: number /* int64 */;
 }

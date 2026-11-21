@@ -14,7 +14,7 @@
 // own shape under a veil drawn back as it goes; nothing is sent till all are up.
 import { ArrowUp, Box, Brain, ChartPie, Eraser, FileCode2, FileText, FoldVertical, Gauge, LoaderCircle, Paperclip, Reply, ShieldCheck, X, type LucideIcon } from "lucide-react";
 import { useQueries, useQuery } from "@tanstack/react-query";
-import { forwardRef, Fragment, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
+import { forwardRef, Fragment, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
 import type { Agent, Command, Script, SessionState as LiveSession } from "../api/types.gen";
 import { ScriptFace, useScripts } from "./channel/script";
 import { runShell, shellLine, useShellable } from "./shell";
@@ -26,15 +26,16 @@ import { stopTurn } from "./live";
 import { useList } from "../store";
 import { useHome, useMachines, useWorkspaces } from "../data";
 import { ago, agentName, cn, fine, IconKey, keep, kept, tilde, Tip, titleOf, useMinute } from "../ui";
-import { hasMention, MentionMarks, mentionOf, PlaceIcon, placeMention, SessionFace } from "./mention";
-import { atWord, boxAt, boxed, edited, outOf, wordsAt } from "./refs";
+import { MentionMarks, mentionOf, PlaceIcon, placeMention, SessionFace } from "./mention";
+import { atWord } from "./refs";
+import { boxAt, boxed, edited, outOf, wordsAt } from "./boxed";
 import { arrowInto, atPath, atSections, pathSection, typedPath, type AtHead, type AtRow, type AtSection, type NamedPlace } from "./at";
 import { MachineFace, MachineLink, type Machine } from "../machines";
 import { foldersQ } from "../create";
 import { CODE, previews, size, Zoom } from "./files";
 import { giveUp, upload } from "./upload";
 import { findSecretish } from "./secretish";
-import { ALL_AGENTS, ALL_MEMBERS, insertNick, matchAgents, type AgentRow } from "./channel/lib";
+import { ALL_AGENTS, ALL_MEMBERS, insertNick, insertWords, matchAgents, startsAt, type AgentRow } from "./channel/lib";
 import { NickList } from "./channel/nicklist";
 import { SaveSecret } from "./savesecret";
 
@@ -84,9 +85,10 @@ const setUnsent = (id: string, f: (a: Att[]) => Att[]) => {
   for (const x of unsentSubs) x();
 };
 
-/** insert: words at the caret, a space either side; name:
+/** insert: words at the caret, a space either side; atStart: @name at the words' start, unless
+ *  they begin with it (a quote's, as QQ does; kumo, 2026-11-21), the caret at their end; name:
  *  a session (its ID) or a place named, a link where the caret is (a row dropped here, chat.tsx). */
-export type ComposerHandle = { focus: () => void; insert: (text: string) => void; attach: (files: File[]) => void; name: (to: string | NamedPlace) => void; box: () => HTMLTextAreaElement | null };
+export type ComposerHandle = { focus: () => void; insert: (text: string) => void; atStart: (name: string) => void; attach: (files: File[]) => void; name: (to: string | NamedPlace) => void; box: () => HTMLTextAreaElement | null };
 
 type Props = {
   s: LiveSession;
@@ -147,13 +149,18 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
   const [caret, setCaret] = useState<number | null>(null);
   const box = useRef<HTMLTextAreaElement>(null);
   const picker = useRef<HTMLInputElement>(null);
-  const marked = hasMention(text);
-  const shownBox = boxed(text);
+  // What @ may name: each is one piece in the box, as a session named is (kumo, 2026-11-21).
+  const nameKey = [...(nicks ?? []).map((a) => a.nick), ...(people ?? []).map((p) => p.nick)].join("\n");
+  const names = useMemo(() => [...nameKey.split("\n"), ...(multi ? [ALL_MEMBERS, ALL_AGENTS] : [])].filter(Boolean), [nameKey, multi]);
+  const shownBox = boxed(text, names);
+  const marked = shownBox.refs.length > 0;
+  // Where the box's caret was last: an arrow stepping into a name goes on past it (boxed.ts outOf).
+  const selWas = useRef<number | undefined>(undefined);
   const textNow = useRef(text);
   textNow.current = text;
   /** The box's caret at the words' position i of words v, once the box shows them. */
   const caretAt = (v: string, i: number) => requestAnimationFrame(() => {
-    const at = boxAt(boxed(v), i);
+    const at = boxAt(boxed(v, names), i);
     box.current?.focus();
     box.current?.setSelectionRange(at, at);
   });
@@ -204,19 +211,24 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
     );
   // The keys under it glide as one changes width (UltraCode's mark, a longer name), never jump.
   // The ring comes once the agent has said its context: faded in as the keys are.
-  /** words put where the caret is, a space either side. */
+  /** words put where the caret is, a space either side (insertWords). */
   const insert = (words: string) => {
     const el = box.current;
     const v = textNow.current;
     // Where the caret was: a box keeps its selection when it loses focus.
-    const bx = boxed(v);
+    const bx = boxed(v, names);
     const a = el ? wordsAt(bx, el.selectionStart) : v.length;
     const b = el ? wordsAt(bx, el.selectionEnd) : v.length;
-    const before = v.slice(0, a) + (a > 0 && !/\s$/.test(v.slice(0, a)) ? " " : "");
-    const after = (/^\s/.test(v.slice(b)) ? "" : " ") + v.slice(b);
-    const next = before + words + after;
-    type(next);
-    caretAt(next, before.length + words.length + 1);
+    const next = insertWords(v, a, b, words);
+    type(next.text);
+    caretAt(next.text, next.caret);
+  };
+  /** @name at the words' start, unless they begin with it; the caret at their end. */
+  const atStart = (name: string) => {
+    const v = textNow.current;
+    const next = startsAt(v, name) ? v : insertNick(v, 0, 0, name).text;
+    if (next !== v) type(next);
+    caretAt(next, next.length);
   };
   /** How words name session id: its link; none for this one or one not listed. */
   const sessionWords = (id: string) => {
@@ -226,6 +238,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
   useImperativeHandle(ref, () => ({
     focus: () => box.current?.focus(),
     insert,
+    atStart,
     attach,
     name: (to) => {
       const words = typeof to === "string" ? sessionWords(to) : placeMention(to, machines);
@@ -288,11 +301,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
     if (!word) return;
     const end = caret ?? word.from;
     const words = r.kind === "session" ? sessionWords(r.s.id) : placeMention(r.p, machines);
-    const head = text.slice(0, word.from) + (words ? `${words} ` : "");
-    const next = head + text.slice(end).replace(/^ /, "");
-    type(next);
-    setCaret(head.length);
-    caretAt(next, head.length);
+    const next = words ? insertWords(text, word.from, end, words) : { text: text.slice(0, word.from) + text.slice(end).replace(/^ /, ""), caret: word.from };
+    type(next.text);
+    setCaret(next.caret);
+    caretAt(next.text, next.caret);
   };
   /** Into place r's folder: its path after the @, the list then the folders in it. */
   const enter = (r: AtRow) => {
@@ -486,7 +498,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
             box's own letters clear over it. */}
         <div className="min-w-0 flex-1 py-[1.5px] pointer-coarse:py-[5.5px]">
         <div className="relative">
-        {marked && <MentionMarks text={text} box={box} className={BOX} />}
+        {marked && <MentionMarks text={text} box={box} className={BOX} names={names} />}
         <textarea
           ref={box}
           rows={1}
@@ -499,10 +511,11 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
           aria-label={t("composer.placeholder")}
           onChange={(e) => {
             const el = e.target;
-            const r = edited(text, el.value, el.selectionStart);
-            const want = boxed(r.words).value;
+            const r = edited(text, el.value, el.selectionStart, names);
+            const want = boxed(r.words, names).value;
             type(r.words);
-            setCaret(wordsAt(boxed(r.words), r.caret));
+            selWas.current = r.caret;
+            setCaret(wordsAt(boxed(r.words, names), r.caret));
             // A link taken whole, or letters typed inside one: the box then differs from what it
             // was given, its caret put where the words say. Never while an input method composes
             // (its letters would be split), nor once the box has moved on (a later key's caret).
@@ -513,11 +526,12 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
           }}
           onSelect={(e) => {
             const el = e.currentTarget;
-            // Not inside a name: the caret to its nearer edge.
+            // Not inside a name: the caret past it, or to its nearer edge (outOf).
             if (el.selectionStart === el.selectionEnd && !composing && el.value === shownBox.value) {
-              const out = outOf(shownBox, el.selectionStart);
+              const out = outOf(shownBox, el.selectionStart, selWas.current);
               if (out !== el.selectionStart) el.setSelectionRange(out, out);
             }
+            selWas.current = el.selectionStart === el.selectionEnd ? el.selectionStart : undefined;
             setCaret(wordsAt(shownBox, el.selectionStart));
           }}
           onFocus={(e) => setCaret(wordsAt(shownBox, e.currentTarget.selectionStart))}
