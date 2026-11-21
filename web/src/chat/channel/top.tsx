@@ -12,8 +12,9 @@ import { api } from "../../api/client";
 import type { Agent, ChannelMembers, Viewer } from "../../api/types.gen";
 import { agentsQ, isComputer, useApps, useMachines } from "../../data";
 import { t, useLang } from "../../i18n";
+import { useMachine } from "../../machines";
 import { openChat } from "../../route";
-import { useCarried, useList } from "../../store";
+import { useCarried, useList, useSession } from "../../store";
 import { working } from "../../tree";
 import { toast } from "../../toast";
 import { agentName, Avatar, cn, Lamp, PopSurface, Tip } from "../../ui";
@@ -64,12 +65,17 @@ const check = (on: boolean) => <span className="grid size-3.5 place-items-center
 export function TopRight({ id }: { id: string }) {
   useLang();
   const qc = useQueryClient();
-  const kinds = (useQuery(agentsQ).data ?? []).filter((a) => !a.missing).map((a) => a.agent);
-  const machines = useMachines();
+  const list = useList();
+  // The first screen can arrive before the sidebar's list.
+  const row = useSession(id) ?? list?.find((x) => x.id === id);
+  const here = useMachine(row?.machine);
+  const local = (useQuery(agentsQ).data ?? []).filter((a) => !a.missing).map((a) => a.agent);
+  const kinds = row?.machine ? (here?.online ? here.agents.map((a) => a.agent as Agent) : []) : local;
+  const machines = useMachines(!!row?.machine);
   // The other computers' kinds too, where they would run (invite.tsx).
   const ahead = () => {
     prefetchChoices(qc, kinds, { channel: id });
-    for (const m of machines) if (m.online) prefetchChoices(qc, m.agents.map((a) => a.agent as Agent), { machine: m.id });
+    for (const m of machines) if (m.online && m.id !== row?.machine) prefetchChoices(qc, m.agents.map((a) => a.agent as Agent), { machine: m.id });
   };
   const members = useMembers(id);
   const viewers = useCarried<Viewer[]>(`viewers:${id}`) ?? [];
@@ -208,6 +214,9 @@ function MemberList({ id, ask, script }: { id: string; ask: (a: Ask) => void; sc
  *  submenu of its logins). */
 function Invite({ id }: { id: string }) {
   const qc = useQueryClient();
+  const list = useList();
+  const row = useSession(id) ?? list?.find((x) => x.id === id);
+  const here = useMachine(row?.machine);
   const members = useMembers(id);
   const d = useApps().data;
   const set = (ms: ChannelMembers) => void qc.setQueryData<ChannelMembers>(["members", id], ms);
@@ -221,7 +230,7 @@ function Invite({ id }: { id: string }) {
   const setPeople = (p: string[]) => run(() => api.setPeople(id, p));
   return (
       <Sub icon={<UserPlus size={15} />} label={t("channel.invite")} i={0}>
-        <div className={HEAD}>{t("channel.agents")}</div>
+        <div className={HEAD}>{row?.machine ? here?.name : t("term.local")}</div>
         <AgentKinds id={id} />
         {apps.map((a) => {
           const name = a.web ? t("term.panel") : a.name;

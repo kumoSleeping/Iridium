@@ -105,21 +105,22 @@ export function useApps() {
 export const isComputer = (a: Pick<App, "host" | "computer" | "type">) => !!a.host || !!a.computer || a.type === "computer";
 
 const NO_MACHINES: Machine[] = [];
-const machinesOf = new WeakMap<Apps, Machine[]>();
+const machinesOf = new WeakMap<Apps, { all: Machine[]; paired: Machine[] }>();
 /** The apps' computers as the page's machines (machines.tsx): connected or not; the agents turned
- *  off there left out (not offered for new sessions). */
-export function useMachines(): Machine[] {
+ *  off there left out (not offered for new sessions). Set includeHost to include Iridium. */
+export function useMachines(includeHost = false): Machine[] {
   const d = useApps().data;
   if (!d) return NO_MACHINES;
   let ms = machinesOf.get(d);
   if (!ms) {
-    ms = d.apps
-      .filter((a) => a.computer && !a.host)
-      .map((a) => ({ ...a.computer!, id: a.id, name: a.name, avatar: a.avatar, agents: a.computer!.agents.filter((x) => !x.off) }))
+    const all = d.apps
+      .filter((a) => a.computer)
+      .map((a) => ({ ...a.computer!, id: a.host ? "" : a.id, name: a.name, avatar: a.avatar, agents: a.computer!.agents.filter((x) => !x.off) }))
       .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+    ms = { all, paired: all.filter((m) => m.id) };
     machinesOf.set(d, ms);
   }
-  return ms;
+  return includeHost ? ms.all : ms.paired;
 }
 
 /** Everyone a message may come from: the apps and the host, and ir_web's logins (web). */

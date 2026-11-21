@@ -18,9 +18,9 @@ import { api } from "../../api/client";
 import type { Agent, ChannelMembers, Role } from "../../api/types.gen";
 import { agentsQ, useMachines } from "../../data";
 import { t, useLang } from "../../i18n";
-import { MachineFace, type Machine } from "../../machines";
+import { MachineFace, useMachine, type Machine } from "../../machines";
 import { picked, RoleFace, RoleLine, RoleModels, roleStart, useRoles, type RolePick } from "../../roles";
-import { useList } from "../../store";
+import { useList, useSession } from "../../store";
 import { toast } from "../../toast";
 import { AGENTS, cn, Logo } from "../../ui";
 import { memberError } from "./key";
@@ -58,20 +58,24 @@ export function useAdd(id: string) {
 export function AgentKinds({ id, from = 0 }: { id: string; from?: number }) {
   useLang();
   const row = useList()?.find((x) => x.id === id);
+  const machine = (useSession(id) ?? row)?.machine;
+  const here = useMachine(machine);
   const info = useQuery(agentsQ).data;
-  const kinds = info?.filter((a) => !a.missing).map((a) => a.agent) ?? AGENTS;
+  // At another computer, that computer's kinds; on Iridium, those installed here.
+  const kinds = machine ? (here?.agents.map((a) => a.agent as Agent) ?? []) : (info?.filter((a) => !a.missing).map((a) => a.agent) ?? AGENTS);
   const { busy, add } = useAdd(id);
   const full = (row?.agents?.length ?? 1) >= MAX_AGENTS;
+  const off = full || busy !== null || (!!machine && !here?.online);
   // The roles of the kinds it can add, first.
   const roles = useRoles().filter((r) => kinds.includes(r.agent));
   return (
     <>
       {roles.map((r, i) => (
-        <RoleRow key={r.id} id={id} role={r} i={from + i} off={full || busy !== null} busy={busy === `role:${r.id}`} add={add} />
+        <RoleRow key={r.id} id={id} role={r} i={from + i} off={off} busy={busy === `role:${r.id}`} add={add} />
       ))}
       {roles.length > 0 && <div role="separator" className="mx-2.5 my-1 border-t border-(--edge)" />}
       {kinds.map((k, i) => (
-        <Kind key={k} id={id} k={k} i={from + roles.length + i} off={full || busy !== null} busy={busy === k} add={add} />
+        <Kind key={k} id={id} k={k} i={from + roles.length + i} off={off} busy={busy === k} add={add} />
       ))}
     </>
   );
@@ -83,7 +87,8 @@ export function AgentKinds({ id, from = 0 }: { id: string; from?: number }) {
 export function MachineKinds({ id, from = 0 }: { id: string; from?: number }) {
   useLang();
   const row = useList()?.find((x) => x.id === id);
-  const others = useMachines().filter((m) => m.id !== row?.machine && m.agents.length > 0);
+  const machine = (useSession(id) ?? row)?.machine;
+  const others = useMachines(!!machine).filter((m) => m.id !== machine && m.agents.length > 0);
   const { busy, add } = useAdd(id);
   const full = (row?.agents?.length ?? 1) >= MAX_AGENTS;
   return (

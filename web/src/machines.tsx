@@ -8,10 +8,10 @@ import type { Computer } from "./api/types.gen";
 import { t } from "./i18n";
 import { useMachines } from "./data";
 import { remotePath } from "./tree";
-import { cn } from "./ui";
+import { cn, IrMark } from "./ui";
 
-/** An app's computer (GET /v1/internal/apps, its computer) as the page goes by it: its app's ID, name and
- *  avatar with it, the agents turned off there left out (data.ts useMachines). */
+/** An app's computer (GET /v1/internal/apps, its computer) as the page goes by it: its app's ID
+ *  (empty for Iridium), name and avatar with it, the agents turned off there left out (data.ts useMachines). */
 export type Machine = Computer & { id: string; name: string; avatar?: string };
 
 /** The machine a session or a folder group runs at: by ID, as the carried "machines" lists them. */
@@ -58,6 +58,7 @@ function WindowsMark({ size }: { size: number }) {
 
 /** A machine's face: its avatar, else its system's mark. */
 export function MachineFace({ m, size, className }: { m: Machine; size: number; className?: string }) {
+  if (!m.id) return <IrMark size={size} className={cn("text-ink", className)} />;
   if (m.avatar) return <img src={m.avatar} alt="" draggable={false} className={cn("shrink-0 rounded-full object-cover", className)} style={{ width: size, height: size }} />;
   const inner = Math.round(size * 0.66);
   return (
