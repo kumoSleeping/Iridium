@@ -313,6 +313,9 @@ export function NewSession({ ws, folder, onFolder, onPick, busy, onMake }: { ws:
   const change = (key: number, p: Partial<Seat>) => setSeats((ss) => ss.map((x) => (x.key === key ? { ...x, ...p } : x)));
   // Taken out: folded away first, then gone.
   const remove = (key: number) => {
+    // Match the receive default when a cross-computer agent is picked into an empty lineup.
+    const remaining = bare !== "on" && shown.length === 2 ? shown.find((x) => x.key !== key) : undefined;
+    if (remaining?.m && !remaining.recvChosen) change(remaining.key, { recv: RECV.all });
     change(key, { going: true });
     if (last === key) setLast(null);
     window.setTimeout(() => setSeats((ss) => ss.filter((x) => x.key !== key)), 320);
@@ -480,7 +483,7 @@ export function NewSession({ ws, folder, onFolder, onPick, busy, onMake }: { ws:
 /** One of the lineup: its agent, or a role (as which it starts); its model, effort, preset for
  *  this once (pick); its 称呼 ("": the server's); what it receives; going: being taken out. m:
  *  the computer it works at when that is not the folder's (its home there). */
-type Seat = { key: number; agent: Agent; role?: Role; pick: RolePick; nick: string; recv: Recv; going?: boolean; m?: Machine };
+type Seat = { key: number; agent: Agent; role?: Role; pick: RolePick; nick: string; recv: Recv; recvChosen?: boolean; going?: boolean; m?: Machine };
 
 /** Whether a seat's receive set is 全部 (every person's words), not 点名 (only what names it):
  *  the two the lineup offers (docs/channels.md "接收"). */
@@ -646,6 +649,7 @@ function SeatRow({ rowRef, seat, at, recv, own: mine, bad, set, remove }: { rowR
   const kindLine = [model ?? agentName(seat.agent), seat.pick.effort ? effortName(seat.pick.effort) : "", seat.m?.name ?? ""].filter(Boolean).join(" · ");
   const all = everyone(seat.recv);
   const recvLabel = t(all ? "new.recvAll" : "new.recvAt");
+  const setRecv = (recv: Recv) => set({ recv, recvChosen: true });
   return (
     <div ref={rowRef} role="listitem" {...m.props} className="flex min-h-11 items-center gap-2 rounded-md px-1.5 py-1 pointer-coarse:min-h-13">
       {seat.role ? (
@@ -689,7 +693,7 @@ function SeatRow({ rowRef, seat, at, recv, own: mine, bad, set, remove }: { rowR
       {/* What it receives: pressed, the other (kumo, 2026-11-16: a choice, never assumed). */}
       {recv && (
         <Tip label={`${t("channel.recv")} · ${t(all ? "channel.recvAll" : "channel.recvAt")}`}>
-          <button type="button" aria-label={`${t("channel.recv")}: ${recvLabel}`} onClick={() => set({ recv: all ? RECV.at : RECV.all })} className="g-press h-6 shrink-0 rounded-full bg-fill px-2 text-xs text-ink-2 hover:bg-fill-2 pointer-coarse:h-8">
+          <button type="button" aria-label={`${t("channel.recv")}: ${recvLabel}`} onClick={() => setRecv(all ? RECV.at : RECV.all)} className="g-press h-6 shrink-0 rounded-full bg-fill px-2 text-xs text-ink-2 hover:bg-fill-2 pointer-coarse:h-8">
             <span key={String(all)} className="g-fade">
               {recvLabel}
             </span>
@@ -697,7 +701,7 @@ function SeatRow({ rowRef, seat, at, recv, own: mine, bad, set, remove }: { rowR
         </Tip>
       )}
       {mine && !recv && <span className="shrink-0 px-1 text-xs text-ink-4">{t("new.own")}</span>}
-      <RowMenu at={m.menuAt} close={() => m.setMenuAt(null)} recv={seat.recv} setRecv={(r) => set({ recv: r })} remove={() => (m.setMenuAt(null), remove())} />
+      <RowMenu at={m.menuAt} close={() => m.setMenuAt(null)} recv={seat.recv} setRecv={setRecv} remove={() => (m.setMenuAt(null), remove())} />
     </div>
   );
 }
