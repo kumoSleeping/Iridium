@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -360,7 +361,8 @@ func (h *Hosted) allow(id string) {
 }
 
 func (h *Hosted) allowedLocked(a api.Ask) bool {
-	return renamesOnly(a) || looksUpOnly(a) || speaksOnly(a, func(ch string) bool { return ch == "self" || ch == h.id || h.m.speaks(h.id, ch) }) || slices.ContainsFunc(h.rules, func(r store.AllowRule) bool { return ruleMatches(r, a) })
+	in := func(ch string) bool { return ch == "self" || ch == h.id || h.m.speaks(h.id, ch) }
+	return renamesOnly(a) || looksUpOnly(a) || speaksOnly(a, in) || reactsOnly(a, in) || slices.ContainsFunc(h.rules, func(r store.AllowRule) bool { return ruleMatches(r, a) })
 }
 
 // renamesOnly: a shell call that only names the session (ir api channel.update channel_id=self
@@ -475,6 +477,46 @@ func speaksOnly(a api.Ask, in func(channel string) bool) bool {
 		}
 	}
 	return channels == 1 && words == 1
+}
+
+// reactsOnly: a shell call that only puts an emoji on a message of a channel the agent is in
+// (docs/channels.md "表情"), as speaksOnly speaks there: never asked about.
+//
+//	ir api reaction.create channel_id=<id> message_id=<number> emoji=👍      (or emoji_id=)
+func reactsOnly(a api.Ask, in func(channel string) bool) bool {
+	input, _ := a.Input.(map[string]any)
+	s, _ := input["command"].(string)
+	if s == "" {
+		s, _ = input["cmd"].(string)
+	}
+	if a.Kind != "permission" {
+		return false
+	}
+	f, ok := shellWords(strings.TrimSpace(s))
+	if !ok || len(f) != 6 || f[0] != "ir" || f[1] != "api" || f[2] != "reaction.create" {
+		return false
+	}
+	var channels, messages, emoji int
+	for _, w := range f[3:] {
+		k, v, _ := strings.Cut(w, "=")
+		switch k {
+		case "channel_id":
+			channels++
+			if !in(v) {
+				return false
+			}
+		case "message_id":
+			messages++
+			if _, err := strconv.ParseInt(v, 10, 64); err != nil {
+				return false
+			}
+		case "emoji", "emoji_id":
+			emoji++
+		default:
+			return false
+		}
+	}
+	return channels == 1 && messages == 1 && emoji == 1
 }
 
 // shellWords splits s as sh would into words, if it is one simple command whose words need

@@ -558,6 +558,28 @@ func TestSpeaksOnly(t *testing.T) {
 	}
 }
 
+// Reacting to a message of a channel the agent is in is never asked about either (docs/channels.md
+// "表情"): one command, its channel, its message's number and one emoji, nothing else.
+func TestReactsOnly(t *testing.T) {
+	t.Parallel()
+	in := func(ch string) bool { return ch == "self" || ch == "c1" }
+	for cmd, want := range map[string]bool{
+		`ir api reaction.create channel_id=c1 message_id=12 emoji=👍`:            true,
+		`ir api reaction.create emoji_id=🎉 channel_id=self message_id=3`:        true,
+		`ir api reaction.create channel_id=c1 message_id=12 emoji='❤️'`:          true,
+		`ir api reaction.create channel_id=c2 message_id=12 emoji=👍`:            false, // not a channel it is in
+		`ir api reaction.create channel_id=c1 message_id=x emoji=👍`:             false,
+		`ir api reaction.create channel_id=c1 message_id=12`:                    false,
+		`ir api reaction.create channel_id=c1 message_id=12 emoji=👍 user_id=x`:  false,
+		`ir api reaction.create channel_id=c1 message_id=12 emoji=👍; rm -rf ~`: false,
+		`ir api reaction.delete channel_id=c1 message_id=12 emoji=👍`:            false,
+	} {
+		if got := reactsOnly(api.Ask{Kind: "permission", Tool: "Bash", Input: map[string]any{"command": cmd}}, in); got != want {
+			t.Errorf("%q: %v", cmd, got)
+		}
+	}
+}
+
 // A stop the process does not follow is pressed: killed, then taken as ended, not asked again
 // for good.
 func TestStopPressed(t *testing.T) {

@@ -81,3 +81,22 @@ func TestRoute(t *testing.T) {
 		t.Error("an agent's words: only an entry of its own")
 	}
 }
+
+// A reaction goes to whom a message that names nobody would: those whose receive set has its
+// author; an agent's only to those subscribed to it, never to itself.
+func TestReacts(t *testing.T) {
+	agents := []Agent{{Session: "a", Nick: "a", Recv: []string{"*"}}, {Session: "b", Nick: "b", Recv: []string{}}, {Session: "c", Nick: "c", Recv: []string{"agent:a", "ir_web/kumo"}}}
+	for _, tc := range []struct {
+		from From
+		want string
+	}{
+		{From{Member: "ir_web/kumo"}, "a c"},
+		{From{Member: "ir_web/bob"}, "a"},
+		{From{Member: "agent:a", Session: "a"}, "c"},
+		{From{Member: "agent:c", Session: "c"}, ""},
+	} {
+		if got := strings.Join(Reacts(tc.from, agents), " "); got != tc.want {
+			t.Errorf("%+v: %q, want %q", tc.from, got, tc.want)
+		}
+	}
+}

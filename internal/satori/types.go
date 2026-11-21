@@ -165,6 +165,8 @@ type Event struct {
 	User      *User    `json:"user,omitempty"`
 	Operator  *User    `json:"operator,omitempty"`
 	Button    *Button  `json:"button,omitempty"`
+	// Emoji: reaction-added's and reaction-removed's (Satori's reaction resource).
+	Emoji *Emoji `json:"emoji,omitempty"`
 	// Iridium's own (Satori's extension fields): _type "iridium", _data an EventData.
 	XType string     `json:"_type,omitempty"`
 	XData *EventData `json:"_data,omitempty"`

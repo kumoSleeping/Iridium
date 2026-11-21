@@ -71,6 +71,9 @@ type Channel struct {
 	// called works, when that is not the channel's folder (the user, 2026-11-18). Both are said
 	// only when some agent works elsewhere.
 	Place, At string
+	// Recalled: the numbers of messages it was given that were taken back since it was last
+	// given something here (docs/channels.md "撤回").
+	Recalled []int64
 }
 
 // ChannelStaticKey names the standing words as they are for c, apart from the names and intros
@@ -162,7 +165,7 @@ func staticPieces(c Channel) []piece {
 		ps[0] = piece{parts: mustParts(ps[0], text(idChannelRecv))}
 	}
 	if c.Pull {
-		ps = append(ps, text(idChannelPull, "channel", self))
+		ps = append(ps, piece{parts: mustParts(text(idChannelPull, "channel", self), text(idChannelReact, "channel", self))})
 	}
 	return ps
 }
@@ -280,17 +283,53 @@ func channelPieces(c Channel, seq int64, said, input string) []piece {
 	if input != "" {
 		refs = []Ref{{Kind: "input", ID: input}}
 	}
-	// The channel as ir takes it: the agent's own is "self".
-	self := cmp.Or(c.ID, "self")
 	ps := []piece{text(idChannelMessage, "seq", n(seq))}
 	if q := c.Quote; q != nil {
-		w := strings.Join(strings.Fields(q.Text), " ")
-		if r := []rune(w); len(r) > QuoteCut {
-			w = string(r[:QuoteCut]) + "…"
-		}
-		ps = append(ps, text(idChannelQuote, "seq", n(q.Seq), "who", q.Who), words(w, Ref{Kind: "message", ID: n(q.Seq)}), text(idChannelQuoteEnd))
+		ps = append(ps, text(idChannelQuote, "seq", n(q.Seq), "who", q.Who), words(cut(q.Text, QuoteCut), Ref{Kind: "message", ID: n(q.Seq)}), text(idChannelQuoteEnd))
 	}
-	ps = append(ps, words(said, append(refs, Ref{Kind: "message", ID: n(seq)})...), text(idChannelOpen))
+	ps = append(ps, words(said, append(refs, Ref{Kind: "message", ID: n(seq)})...))
+	return append(ps, contextPieces(c)...)
+}
+
+// cut is words on one line, at most max characters of them.
+func cut(words string, max int) string {
+	w := strings.Join(strings.Fields(words), " ")
+	if r := []rune(w); len(r) > max {
+		w = string(r[:max]) + "…"
+	}
+	return w
+}
+
+// Reaction is an emoji put on message Seq (its words Text) by Who: what an agent that receives
+// Who is given (docs/channels.md "表情").
+type Reaction struct {
+	Seq        int64
+	Who, Emoji string
+	Text       string
+}
+
+// reactionPieces are the line of a reaction: "#seq [who reacted 👍 to: words]".
+func reactionPieces(r Reaction) []piece {
+	return []piece{text(idChannelReaction, "seq", n(r.Seq), "who", r.Who, "emoji", r.Emoji), words(cut(r.Text, QuoteCut), Ref{Kind: "message", ID: n(r.Seq)}), text(idChannelReactionEnd)}
+}
+
+// ChannelReaction is what an agent of a channel gets for a reaction: its line, then the
+// channel's context, as for a message.
+func ChannelReaction(c Channel, r Reaction) (Injection, error) {
+	return build(KindTurnPrefix, append(reactionPieces(r), contextPieces(c)...)...)
+}
+
+// Reacted is the line of a reaction alone: for the agent of a session that is its channel's only
+// one, which is given no channel's context.
+func Reacted(r Reaction) (Injection, error) {
+	return build(KindMessage, reactionPieces(r)...)
+}
+
+// contextPieces are the channel's context after the words that call the agent.
+func contextPieces(c Channel) []piece {
+	// The channel as ir takes it: the agent's own is "self".
+	self := cmp.Or(c.ID, "self")
+	ps := []piece{text(idChannelOpen)}
 	if c.Rename {
 		ps = append(ps, text(idChannelRename, "you", c.You))
 	}
@@ -302,6 +341,13 @@ func channelPieces(c Channel, seq int64, said, input string) []piece {
 		ps = append(ps, text(idChannelAgain, "name", cmp.Or(c.Name, c.ID), "channel", c.ID))
 	}
 	ps = append(ps, changePieces(c)...)
+	if len(c.Recalled) > 0 {
+		var seqs []string
+		for _, r := range c.Recalled {
+			seqs = append(seqs, "#"+n(r))
+		}
+		ps = append(ps, text(idChannelRecalled, "seqs", strings.Join(seqs, ", ")))
+	}
 	ps = append(ps, unseenPieces(c, self)...)
 	work := false
 	for _, w := range c.Work {

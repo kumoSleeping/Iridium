@@ -96,6 +96,7 @@ type Server struct {
 	dms     dms     // the channels that are two people's (channels.go)
 	calls   calls   // the channels each agent was called in by a subscription (channels.go)
 	answers answers // what each agent writes, said in turn where it was called (channels.go)
+	recalls recalls // the channels a message was taken back in (reactions.go)
 	// channelsSeq: the state "channels", up by one at each change of a channel's members.
 	channelsSeq atomic.Int64
 	// scripts: the channels' scripts running and waiting (scripts.go); scriptsSeq, the state

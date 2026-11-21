@@ -256,9 +256,28 @@ func (s *Service) blockList(_ context.Context, c Caller, body []byte) (any, erro
 	out := BidiList[Message]{Data: []Message{}, XData: &PageData{}}
 	guild := s.guildOf(st.Session)
 	var blocks []api.Block
+	// What was taken back in its channel is gone from its record too, for everyone (docs/channels.md
+	// "撤回"); the rest that is a message there too says its number and its reactions.
+	var refs []string
+	for _, p := range []*api.MessagePage{before, after} {
+		if p != nil {
+			for _, b := range p.Blocks {
+				refs = append(refs, blockRef(st.ID, b))
+			}
+		}
+	}
+	gone, ofRef := s.blockRefs(st.ID, refs)
 	add := func(bs []api.Block) {
 		for _, b := range bs {
-			out.Data = append(out.Data, s.messageOf(c, st.Session, b, guild))
+			ref := blockRef(st.ID, b)
+			if gone[ref] {
+				continue
+			}
+			m := s.messageOf(c, st.Session, b, guild)
+			if n, ok := ofRef[ref]; ok {
+				m.Data = &BlockData{Seq: n}
+			}
+			out.Data = append(out.Data, m)
 			if req.Data.Blocks {
 				blocks = append(blocks, s.maskBlock(b))
 			}
@@ -312,7 +331,42 @@ func (s *Service) blockList(_ context.Context, c Caller, body []byte) (any, erro
 	if req.Data.Blocks {
 		out.XData.Blocks = nonNil(blocks)
 	}
+	s.blockReactions(c, st.ID, out.Data)
 	return out, nil
+}
+
+// blockRefs are, for the channel of session id, the refs of its messages taken back, and the
+// numbers there of the messages refs are, as far as the channel has read the record in (it is
+// not read in for this: a session's channel is read whole the first time).
+func (s *Service) blockRefs(id string, refs []string) (gone map[string]bool, nums map[string]int64) {
+	if s.log == nil {
+		return nil, nil
+	}
+	gone, _ = s.log.RecalledRefs(id)
+	return gone, s.log.Numbers(id, refs)
+}
+
+// blockReactions puts the reactions on the blocks that are messages of the channel in their _data.
+func (s *Service) blockReactions(c Caller, id string, ms []Message) {
+	var seqs []int64
+	for _, m := range ms {
+		if d, ok := m.Data.(*BlockData); ok {
+			seqs = append(seqs, d.Seq)
+		}
+	}
+	if len(seqs) == 0 {
+		return
+	}
+	by := s.log.Reactions(id, seqs)
+	if len(by) == 0 {
+		return
+	}
+	me := s.me(c, id)
+	for _, m := range ms {
+		if d, ok := m.Data.(*BlockData); ok {
+			d.Reactions = sums(by[d.Seq], me)
+		}
+	}
 }
 
 // maskBlock is b with the credentials' values masked wherever they are in it.
@@ -619,7 +673,9 @@ func (s *Service) messageUpdate(_ context.Context, c Caller, body []byte) (any, 
 	return s.queued(c, req.ChannelID, req.MessageID, &text)
 }
 
-// messageDelete takes a message sent back while it waits in the queue.
+// messageDelete takes a message back: one said in a channel (by its number, or the input it was
+// sent as) for everyone (recall, docs/channels.md "撤回"); one that is no message of a channel
+// yet, from the queue it waits in.
 func (s *Service) messageDelete(_ context.Context, c Caller, body []byte) (any, error) {
 	var req struct {
 		ChannelID string `json:"channel_id"`
@@ -628,7 +684,23 @@ func (s *Service) messageDelete(_ context.Context, c Caller, body []byte) (any, 
 	if err := decode(body, &req); err != nil {
 		return nil, err
 	}
-	return s.queued(c, req.ChannelID, req.MessageID, nil)
+	acts, ok := s.b.(Acts)
+	if !ok || s.log == nil || req.MessageID == "" {
+		return s.queued(c, req.ChannelID, req.MessageID, nil)
+	}
+	st, err := s.channel(c, req.ChannelID)
+	if err != nil {
+		return nil, err
+	}
+	s.log.Touch(st.ID)
+	m, logged := s.logged(st.ID, req.MessageID)
+	if !logged {
+		return s.queued(c, req.ChannelID, req.MessageID, nil)
+	}
+	if err := s.recall(c, st, m, acts); err != nil {
+		return nil, err
+	}
+	return struct{}{}, nil
 }
 
 func (s *Service) queued(c Caller, channel, id string, text *string) (any, error) {

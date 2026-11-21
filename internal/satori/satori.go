@@ -35,7 +35,8 @@ const Adapter = "iridium"
 
 // Features are login.features: the APIs served.
 var Features = []string{"message.create", "message.get", "message.list", "message.update", "message.delete", "channel.get", "channel.list", "channel.create", "channel.update", "channel.delete",
-	"guild.get", "guild.list", "guild.member.get", "guild.member.list", "login.get", "user.get", "upload.create"}
+	"guild.get", "guild.list", "guild.member.get", "guild.member.list", "login.get", "user.get", "upload.create",
+	"reaction.create", "reaction.delete", "reaction.clear", "reaction.list"}
 
 // Caller is who a request comes from: an app (by its TOKEN) and, past the headers, its login.
 type Caller struct {
@@ -303,6 +304,10 @@ var methods = map[string]method{
 	"login.get":         (*Service).loginGet,
 	"user.get":          (*Service).userGet,
 	"upload.create":     nil, // multipart: served on its own
+	"reaction.create":   (*Service).reactionCreate,
+	"reaction.delete":   (*Service).reactionDelete,
+	"reaction.clear":    (*Service).reactionClear,
+	"reaction.list":     (*Service).reactionList,
 }
 
 // ServeHTTP serves /v1/: the API, the event stream, meta, the proxy and the internal routes.
