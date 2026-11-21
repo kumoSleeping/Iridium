@@ -296,7 +296,7 @@ export function NewSession({ ws, folder, onFolder, onPick, busy, onMake }: { ws:
   // channel's folder. Pressed first, it would be the session's own agent, which runs in the
   // session's folder: the channel with no agent of its own is taken with it instead (kumo,
   // 2026-11-18: not a message asking for another first), and it receives all, the only one there.
-  const others = machines.filter((m) => m.id !== there?.m.id && m.agents.length > 0);
+  const others = useMachines(!!there).filter((m) => m.id !== there?.m.id && m.agents.length > 0);
   const add = (agent: Agent, role?: Role, m?: Machine) => {
     const where = m ?? there?.m;
     if (where && !where.online) return void toast(t("new.offline", { name: where.name }), { error: true });

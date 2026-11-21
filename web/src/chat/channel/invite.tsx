@@ -88,7 +88,7 @@ export function MachineKinds({ id, from = 0 }: { id: string; from?: number }) {
   useLang();
   const row = useList()?.find((x) => x.id === id);
   const machine = (useSession(id) ?? row)?.machine;
-  const others = useMachines().filter((m) => m.id !== machine && m.agents.length > 0);
+  const others = useMachines(!!machine).filter((m) => m.id !== machine && m.agents.length > 0);
   const { busy, add } = useAdd(id);
   const full = (row?.agents?.length ?? 1) >= MAX_AGENTS;
   return (

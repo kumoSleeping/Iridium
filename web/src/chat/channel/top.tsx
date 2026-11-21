@@ -71,7 +71,7 @@ export function TopRight({ id }: { id: string }) {
   const here = useMachine(row?.machine);
   const local = (useQuery(agentsQ).data ?? []).filter((a) => !a.missing).map((a) => a.agent);
   const kinds = row?.machine ? (here?.online ? here.agents.map((a) => a.agent as Agent) : []) : local;
-  const machines = useMachines();
+  const machines = useMachines(!!row?.machine);
   // The other computers' kinds too, where they would run (invite.tsx).
   const ahead = () => {
     prefetchChoices(qc, kinds, { channel: id });
