@@ -1011,7 +1011,12 @@ func (s *Server) createChannelAs(ctx context.Context, c caller, req api.NewSessi
 	if err := s.ch.Create(store.Channel{ID: id, Cwd: req.Cwd, Machine: req.Machine, Creator: c.ID()}); err != nil {
 		return false, &createError{err}
 	}
-	if err := s.m.ListBare(id, req.Cwd, req.Caller); err != nil {
+	if req.Machine != "" && !c.byAgent() {
+		if err := s.st.SetOpener(id, c.ID()); err != nil {
+			s.logf("server: opener of %s: %v", id, err)
+		}
+	}
+	if err := s.m.ListBare(id, req.Machine, req.Cwd, req.Caller); err != nil {
 		s.logf("server: channel %s: listing it: %v", id, err)
 	}
 	if req.Workspace != 0 {
