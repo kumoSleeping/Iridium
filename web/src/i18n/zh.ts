@@ -165,6 +165,7 @@ export const zh = {
   "view.loading": "加载中",
   "msg.quote": "引用",
   "msg.unquote": "取消引用",
+  "msg.fold": "折叠",
   "msg.copy": "复制",
   "msg.copied": "已复制",
   "msg.recallSure": "确认撤回",

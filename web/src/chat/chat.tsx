@@ -30,11 +30,15 @@ import { also, carries, drafts, opened } from "../stream";
 import { errText, toast } from "../toast";
 import { groupPath, working } from "../tree";
 import { Arrive, agentName, cn, IrMark, Lamp, lampOf, Leaving, LogoLamp, PopSurface, sessionStatusText, tilde, Tip, titleOf, untitled } from "../ui";
-import { givenTurn, groupMessages, isMulti, type AgentRow, type GivenTurn, type Msg } from "./channel/lib";
+import { givenTurn, groupMessages, isMulti, quoteAt, type AgentRow, type GivenTurn, type Msg } from "./channel/lib";
 import { recvOf } from "./channel/scripts";
 import { useScripts } from "./channel/script";
 import { betweenAgents, callerOf, foreignOf, givenHere, held, HOLD, linesOf, marksAt, named as namedIn, ownAnchors, slotsOf, type Anchor, type RowTime } from "./channel/merge";
-import { LongWords } from "./longwords";
+import { Foldable } from "./longwords";
+import { foldsOnce, useReadTo } from "./foldstate";
+import { longWords, oldRead } from "./channel/folds";
+import { goTo, seqEl } from "./channel/jump";
+import { quoteText } from "./forwardcard";
 import { dispatched, type Start } from "./dispatch";
 import { Dispatching, SubFaceKey, SubHead, useSub } from "./subwork";
 import { alignBack, loadParts, sideReady, useSide } from "./channel/side";
@@ -419,7 +423,11 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
   const atRows = useMemo(() => [...nicks.agents, ...others], [nicks, others]);
   // The message being answered (<quote>), over the composer till it is sent.
   const [quote, setQuote] = useState<Msg | null>(null);
-  const quoteOf = useMemo(() => (quote ? { n: quote.n, who: nameOfMsg(quote), text: quote.text } : undefined), [quote]);
+  const quoteOf = useMemo(() => (quote ? { n: quote.n, who: nameOfMsg(quote), text: quoteText(quote) } : undefined), [quote]);
+  // Where the own agent's rows are by the log's numbers, as last drawn: a quote of one gone to.
+  const anchorsNow = useRef<Anchor[]>([]);
+  // How far its channel was read as it opened: long words read before the latest rounds fold.
+  const readTo = useReadTo(id, side.reads?.readers, members?.me, side.ready?.kept.log.loaded ? side.ready.kept.log.end : undefined);
   // What the composer is given to call, the same each draw and doing what they do now: the
   // composer and the bar (memo) are not drawn again with each piece of a draft.
   const acts = useRef({ onSent, sentDone, openContext: (): boolean => false });
@@ -543,9 +551,29 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
   const who = P && P.personWho(self, terminals, list ?? [], workspaces ?? []);
   const quoted = (n: number) => {
     const m = msgs.find((x) => x.n === n);
-    return m ? { who: nameOfMsg(m), text: m.text } : undefined;
+    return m ? { who: nameOfMsg(m), text: quoteText(m) } : undefined;
   };
-  const quoting = (m: Msg) => (setQuote(m), composer.current?.focus());
+  // Its author named at the composer's start, as QQ does (kumo, 2026-11-21): the @ calls.
+  const quoting = (m: Msg) => {
+    setQuote(m);
+    const at = quoteAt(m, m.author.kind === "person" && !!who?.(m.author).mine);
+    if (at) composer.current?.atStart(at);
+    else composer.current?.focus();
+  };
+  // The record's page before, with the log back as far (the chat's own paging, and a quote's).
+  const older = () => log.older(async (p) => void (ready && p.blocks[0]?.time !== undefined && (await alignBack(ready.kept.log, p.more ? p.blocks[0].time : 0))));
+  // A quote pressed: the message it answers, drawn from the log or the own agent's record, the
+  // pages before brought till it is (channel/jump.ts).
+  const jump = (n: number) => {
+    const find = () => {
+      const key = anchorsNow.current.find((a) => a.seq === n)?.key;
+      return seqEl(scroller.current, n) ?? (key ? (scroller.current?.querySelector<HTMLElement>(`[data-at="${CSS.escape(key)}"]`) ?? null) : null);
+    };
+    void goTo(scroller.current, find, older, changed, 40);
+  };
+  // Long words read before the latest rounds fold of themselves (channel/folds.ts).
+  const olds = ready && readTo !== undefined ? oldRead(msgs, readTo) : undefined;
+  const oldMsg = (m: Msg) => foldsOnce(id, `m${m.n}`, olds?.has(m.n));
   const barsOf = (session: string) => {
     const a = agents.find((x) => x.session === session);
     return a && P ? <P.AgentBars a={a} st={stateOf(session)} /> : null;
@@ -566,7 +594,7 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
         const key = `ch:${g.key}`;
         anchors.push({ key, seq: g.msgs.at(-1)!.n });
         for (const m of g.msgs) shownSeq.add(m.n);
-        merged.push({ key, agent: false, node: <P.GroupView key={key} g={g} channel={id} agents={agents} who={who} record={openChat} call={callAt} may={may} quote={may ? quoting : undefined} quoted={quoted} bars={barsOf} fold={(m) => betweenAgents(m, msgs, nickSet)} /> });
+        merged.push({ key, agent: false, node: <P.GroupView key={key} g={g} channel={id} agents={agents} who={who} record={openChat} call={callAt} may={may} quote={may ? quoting : undefined} quoted={quoted} bars={barsOf} fold={(m) => betweenAgents(m, msgs, nickSet)} old={oldMsg} jump={jump} /> });
         groupAt.set(key, g);
         if (i === rows.length) lastGroup = g.author.kind === "agent" ? { session: g.author.session } : {};
       }
@@ -580,20 +608,26 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
       shownSeq.add(a.seq);
     }
   }
-  // The own agent's words in a stretch another agent began (its words to it, naming it and no
-  // person): words between agents, folded when long; a person's words end such a stretch.
-  if (ready && face.nick) {
+  anchorsNow.current = anchors;
+  // The own agent's words fold by hand (their menu's 折叠), and of themselves: in a stretch another
+  // agent began (its words to it, naming it and no person), words between agents, when long (a
+  // person's words end such a stretch); read before the latest rounds (channel/folds.ts).
+  {
     let byAgent = false;
     const me = new Set([face.nick.toLowerCase()]);
+    const seqOf = new Map(anchors.map((a) => [a.key, a.seq]));
     merged = merged.map((r) => {
       if (!r.agent) {
         const g = groupAt.get(r.key);
         const last = g?.msgs.at(-1);
-        byAgent = !!g && g.author.kind === "agent" && !!last && namedIn(last.text, me).agents > 0 && namedIn(last.text, nickSet).people === 0;
+        byAgent = !!face.nick && !!g && g.author.kind === "agent" && !!last && namedIn(last.text, me).agents > 0 && namedIn(last.text, nickSet).people === 0;
         return r;
       }
       const w = wordsOf.get(r.key);
-      return byAgent && w !== undefined ? { ...r, node: <LongWords key={r.key} fold lines={linesOf(w)}>{r.node}</LongWords> } : r;
+      if (w === undefined) return r;
+      const seq = seqOf.get(r.key);
+      const auto = (byAgent && longWords(w)) || (seq !== undefined && foldsOnce(id, `b${r.key}`, olds?.has(seq)));
+      return { ...r, node: <Foldable key={r.key} scope={id} id={`b${r.key}`} auto={auto} lines={linesOf(w)}>{(wrap) => wrap(r.node)}</Foldable> };
     });
   }
   const marks = ready ? marksAt(anchors, side.reads?.readers ?? [], members?.me) : new Map<string, never[]>();
@@ -740,7 +774,7 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
     <Nicks.Provider value={nicks}>
     <Dispatching.Provider value={dispatching}>
     <div className="relative h-full" onDragOver={(e) => files(e) || session(e) || place(e)} onDrop={drop}>
-      <Stick scroller={scroller} tail={grew} older={() => log.older(async (p) => void (ready && p.blocks[0]?.time !== undefined && (await alignBack(ready.kept.log, p.more ? p.blocks[0].time : 0))))} draw={changed} place={chat.place} bottom={stackH} quiet={agents.some((a) => !!stateOf(a.session)?.asks.length)} style={{ paddingTop: padTop, paddingBottom: stackH + 20 }}>
+      <Stick scroller={scroller} tail={grew} older={older} draw={changed} place={chat.place} bottom={stackH} quiet={agents.some((a) => !!stateOf(a.session)?.asks.length)} style={{ paddingTop: padTop, paddingBottom: stackH + 20 }}>
         <div className="mx-auto flex max-w-(--chat-w) flex-col gap-5 px-4 sm:px-6">
           {/* In a turn, the calls being written or run and the dots share one row at the end, as
               high whatever it shows: the conversation does not jump as a call is drafted, runs and

@@ -158,15 +158,15 @@ func TestChannelAts(t *testing.T) {
 	l.waitReply("web", ch, "ok: and @"+host+" above all")
 	settle("web", "ann")
 
-	// An answer to her message names her; <at id> does too.
+	// An answer to her message does not name her (kumo, 2026-11-21: a quote is no @); <at id>
+	// does.
 	var sent []satori.Message
 	l.wantSat(200, "web", "message.create", map[string]any{"channel_id": ch, "content": fmt.Sprintf(`<quote id="%d"/>about that`, all)}, &sent)
 	if len(sent) == 0 {
 		t.Fatal("nothing sent")
 	}
-	q, _ := strconv.ParseInt(sent[len(sent)-1].ID, 10, 64)
-	if a := ats("ann"); a.Seq != q || a.Everyone {
-		t.Errorf("answered: %+v, want #%d", a, q)
+	if a := ats("ann"); a.Seq != 0 {
+		t.Errorf("answered: %+v, want none", a)
 	}
 	l.waitSaid("web", ch, "ok: ", "about that")
 	settle("ann")

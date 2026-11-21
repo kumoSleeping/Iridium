@@ -268,15 +268,16 @@ export const api = {
     return { blocks: p.data.map(blockOf), start: p._data?.start ?? 0, end: p._data?.end ?? 0, more: p._data?.more ?? false };
   },
   /** A page of channel id's log, what was said there (Satori's message.list): the newest, the one
-   *  before number before, or what came after number after. */
-  channelMessages: async (id: string, q: { before?: number; after?: number; limit?: number } = {}): Promise<ChannelPage> => {
+   *  before number before, what came after number after, or that around number around (it and
+   *  those before it, it and those after). */
+  channelMessages: async (id: string, q: { before?: number; after?: number; around?: number; limit?: number } = {}): Promise<ChannelPage> => {
     await whoKnown();
-    const next = q.before ?? q.after;
+    const next = q.before ?? q.after ?? q.around;
     const r = await request("/v1/message.list", {
       method: "POST",
       cache: "no-store",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ channel_id: id, ...(q.limit ? { limit: q.limit } : {}), ...(next !== undefined && { next: String(next), direction: q.after !== undefined ? "after" : "before" }) }),
+      body: JSON.stringify({ channel_id: id, ...(q.limit ? { limit: q.limit } : {}), ...(next !== undefined && { next: String(next), direction: q.around !== undefined ? "around" : q.after !== undefined ? "after" : "before" }) }),
     });
     if (!r.ok) return fail(r);
     const p = (await r.json()) as { data: ChannelMessage[]; _data?: { start: number; end: number; more: boolean } };

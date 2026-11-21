@@ -10,7 +10,7 @@ import { api } from "../api/client";
 import type { Block, Session } from "../api/types.gen";
 import { t } from "../i18n";
 import { cn, tokens as tokensText } from "../ui";
-import { linesOf } from "./channel/merge";
+import { FOLD_AT, linesOf } from "./channel/merge";
 import { Copyable } from "./copyable";
 import { backAt, firstWords, handBack, launchOf, messageOf, reportsOf, toldOf, tookText, type Start, type Told } from "./dispatch";
 import type { Tool } from "./fold";
@@ -22,30 +22,30 @@ import { Dispatching, SubFace, SubFaceKey, SubHead, useSub } from "./subwork";
 /** Text the page may have only the start of: more, where its whole is and how to read it. */
 type More = { session: string; at: string; length: number; read: (whole: string) => string };
 
-/** The whole of some words, once asked for (the key under them). */
+/** The whole of some words, once asked for (the key under them, or load: words folded ask for it
+ *  as they open, their fold's line the one key; kumo, 2026-11-21: 看全文（N 字）under 还有 N 行
+ *  was a second key for the same). failed: the line that says it could not be read. */
 function useWhole(text: string, more?: More) {
   const [whole, setWhole] = useState<string>();
   const [state, setState] = useState<"idle" | "busy" | "failed">("idle");
+  const load = () => {
+    if (!more || whole !== undefined || state === "busy") return;
+    setState("busy");
+    api.block(more.session, more.at).then(
+      (d) => (setWhole(more.read(d.text)), setState("idle")),
+      () => setState("failed"),
+    );
+  };
+  const failed = state === "failed" && <span className="text-xs text-err">{t("err.whole")}</span>;
   const key = more && whole === undefined && (
     <span className="flex items-center gap-2">
-      <button
-        type="button"
-        disabled={state === "busy"}
-        onClick={() => {
-          setState("busy");
-          api.block(more.session, more.at).then(
-            (d) => (setWhole(more.read(d.text)), setState("idle")),
-            () => setState("failed"),
-          );
-        }}
-        className="g-press rounded-sm text-xs text-ink-3 underline decoration-ink-4 underline-offset-2 hover:text-ink"
-      >
+      <button type="button" disabled={state === "busy"} onClick={load} className="g-press rounded-sm text-xs text-ink-3 underline decoration-ink-4 underline-offset-2 hover:text-ink">
         {state === "busy" ? <LoaderCircle size={12} className="inline animate-spin" /> : t("msg.whole", { n: more.length })}
       </button>
-      {state === "failed" && <span className="text-xs text-err">{t("err.whole")}</span>}
+      {failed}
     </span>
   );
-  return { text: whole ?? text, key };
+  return { text: whole ?? text, key, load, failed };
 }
 
 const LINE = "flex h-7 w-full min-w-0 cursor-default items-center gap-2 rounded-sm text-left text-sm text-ink-3 outline-none pointer-coarse:h-9";
@@ -130,10 +130,11 @@ export function HandBack({ at, start, name, session, took, used, time, failed, t
         </SubHead>
         {said.text ? (
           <Copyable copy={said.text}>
-            <LongWords fold lines={linesOf(said.text)}>
+            <LongWords fold lines={linesOf(said.text)} onOpen={said.load}>
               <Markdown text={said.text} className="w-full" />
             </LongWords>
-            {said.key}
+            {/* Folded, its line opens it whole: no key of its own beside it. */}
+            {linesOf(said.text) > FOLD_AT ? said.failed : said.key}
           </Copyable>
         ) : (
           // Its words come after the head: their folded height kept, so they push nothing.

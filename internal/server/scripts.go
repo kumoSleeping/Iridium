@@ -678,20 +678,10 @@ func (s *Server) scriptSay(x store.Script, text string, lk link, quote int64) (i
 	if seq == 0 {
 		return 0, errors.New("the channel did not take the message")
 	}
-	s.names(ch, seq, text, quote, "")
+	s.names(ch, seq, text, "")
 	list, _ := s.agentsOf(ch)
-	route := text
-	if quote > 0 {
-		if q, ok := s.ch.Get(ch, quote); ok {
-			if sid, ok := store.SessionOfMember(q.Author); ok {
-				if m, ok := by0(list, sid); ok {
-					route += "\n@" + m.Nick
-				}
-			}
-		}
-	}
 	who := deliver.From{Member: u.ID, Quiet: true}
-	wake, _, limit := s.wakes(route, who, lk, list)
+	wake, _, limit := s.wakes(text, who, lk, list)
 	if limit > 0 {
 		s.stopped(ch, seq, limit, lk.origin)
 		return seq, nil

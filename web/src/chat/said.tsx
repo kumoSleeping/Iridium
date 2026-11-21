@@ -6,7 +6,9 @@
 // centred and faint; the agent's words as Markdown with the files they name; tool calls and
 // thoughts folded to a line.
 import { LongWords } from "./longwords";
-import { linesOf } from "./channel/merge";
+import { FORWARD_CARD, ForwardHead, ForwardRow, Forwards } from "./forwardcard";
+import { msgWords, splitForwards, withForwards } from "./forward";
+import { FOLD_AT, linesOf } from "./channel/merge";
 import { Archive, ArchiveRestore, ArrowUpRight, BookOpen, Bot, BotMessageSquare, ChartColumn, Check, ChevronRight, CircleStop, CircleX, Clock, CloudDownload, CloudUpload, Copy, Cpu, Earth, FileCode, FileDiff, FilePen, Files as FilesIcon, FileText, FlaskConical, FolderGit2, FolderOpen, Folders, FoldVertical, GitBranch, GitCommitHorizontal, GitPullRequest, Globe, Hammer, History, Hourglass, KeyRound, Laptop, Link2, List, ListChecks, LoaderCircle, MessagesSquare, LockKeyhole, MessageCircleQuestionMark, MessageSquarePlus, Monitor, MonitorSmartphone, MousePointerClick, Network, Package, PencilLine, Plug, RotateCcw, RotateCw, Search, Send, ServerCog, SlidersHorizontal, Smartphone, SquareTerminal, Terminal, Trash2, type LucideIcon, UserRound, Workflow as WorkflowIcon, Wrench, X } from "lucide-react";
 import { Copyable } from "./copyable";
 import { Dispatch, Sent as SentTo, TaskBack } from "./dispatched";
@@ -433,13 +435,17 @@ export const Assistant = memo(function Assistant({ b, session }: { b: Block; ses
   const home = useHome().data;
   // The members of its channel it names (agents, people, apps: chat/channel/nick.tsx), links.
   const names = useContext(Nicks)?.names;
-  const said = withoutFiles(withoutNameLines(fromSatori(b.text ?? "")), new Set(b.files?.map((f) => f.path)), home);
+  // A merged forward in them: its card under them (forwardcard.tsx).
+  const fw = splitForwards(b.text ?? "");
+  const said = withoutFiles(withoutNameLines(fromSatori(fw.words)), new Set(b.files?.map((f) => f.path)), home);
   const text = names ? linkNicks(said, names) : said;
   // A file link's file shows where the words put it; the rest (file lines) under them.
   const under = b.files?.filter((f) => !isLink(f)) ?? [];
+  // data-at: where a quote of it is gone to on a session's page (channel/jump.ts).
   return (
-    <div className="flex min-w-0 flex-col items-start gap-2 pr-6">
+    <div data-at={b.at} className="flex min-w-0 flex-col items-start gap-2 pr-6">
       {text && <Markdown text={text} className="w-full" session={session} files={b.files ?? undefined} />}
+      <Forwards fs={fw.forwards} />
       {!!under.length && <Files session={session} files={under} />}
     </div>
   );
@@ -476,10 +482,9 @@ export function Relayed({ given, relay, name, time, onJump, children }: { given:
             <When time={time} />
           </div>
           {relay ? (
-            <div className="flex max-w-[min(560px,100%)] min-w-0 flex-col self-start rounded-xl rounded-tl-sm bg-fill px-3.5 py-2.5">
+            <div className={FORWARD_CARD}>
               <div className="mb-1.5 flex items-center gap-1.5 text-xs text-ink-3">
-                <MessagesSquare size={12} className="shrink-0" />
-                <span className="min-w-0 flex-1 truncate">{t("channel.forward", { n: relay.msgs.length })}</span>
+                <ForwardHead n={relay.msgs.length} />
                 {relay.full && relay.context && (
                   <button type="button" aria-expanded={rules} onClick={() => setRules(!rules)} className="flex shrink-0 items-center gap-0.5 rounded-sm text-ink-3 hover:text-ink-2">
                     {t("channel.rules")}
@@ -497,13 +502,13 @@ export function Relayed({ given, relay, name, time, onJump, children }: { given:
               <div className="flex min-w-0 flex-col gap-1">
                 {relay.msgs.map((m, i) => {
                   const last = i === relay.msgs.length - 1;
+                  // A forward said in the channel, as its lines (forward.ts).
+                  const w = msgWords(m);
+                  const text = withForwards(w.words, w.forwards);
                   return (
-                    <div key={m.id} className={cn("flex min-w-0 gap-2 text-sm", !last && "text-ink-3")}>
-                      <span className={cn("shrink-0 font-medium", last ? "text-ink-2" : "text-ink-3")}>{m.who}</span>
-                      <span className={cn("min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere]", !last && "line-clamp-3", m.turn && "italic")}>
-                        {last ? <Worded text={m.text} /> : m.text}
-                      </span>
-                    </div>
+                    <ForwardRow key={m.id} who={m.who} dim={!last} clamp={!last}>
+                      <span className={cn(m.turn && "italic")}>{last ? <Worded text={text} /> : text}</span>
+                    </ForwardRow>
                   );
                 })}
               </div>
@@ -900,9 +905,7 @@ function StepCard({ s, session }: { s: Step; session: string }) {
               {/* A subagent's result is its words to the agent, not to you: folded when long
                   (kumo, 2026-11-15: 子代理交回的结果折起). */}
               {s.result ? (
-                <LongWords fold={s.name === "Agent" || s.name === "Task"} lines={linesOf(s.result.text)}>
-                  <ResultView r={s.result} session={session} />
-                </LongWords>
+                <SubResult r={s.result} session={session} fold={s.name === "Agent" || s.name === "Task"} />
               ) : (
                 <span className="text-xs text-ink-3">{t("msg.noResult")}</span>
               )}
@@ -1002,9 +1005,23 @@ function ResultView({ r, session }: { r: Result; session: string }) {
   return <Clipped text={r.text} length={r.length} at={r.at} session={session} error={r.error} />;
 }
 
+/** What a step gave back, a subagent's folded when long: opened, its whole is brought with it, no
+ *  key of its own beside the fold's (kumo, 2026-11-21). */
+function SubResult({ r, session, fold }: { r: Result; session: string; fold: boolean }) {
+  const [opened, setOpened] = useState(false);
+  const lines = linesOf(r.text);
+  if (!fold || lines <= FOLD_AT) return <ResultView r={r} session={session} />;
+  return (
+    <LongWords fold lines={lines} onOpen={() => setOpened(true)}>
+      <Clipped text={r.text} length={r.length} at={r.at} session={session} error={r.error} asked={opened} />
+    </LongWords>
+  );
+}
+
 /** Text the page may have only the start of (length: the whole's), with a key to bring the whole.
- *  fields: an input, shown field by field; cap: inline in the conversation, scrolled past 20 lines. */
-function Clipped({ text, length, at, session, error, prose, fields, cap }: { text: string; length?: number; at: string; session: string; error?: boolean; prose?: boolean; fields?: boolean; cap?: boolean }) {
+ *  fields: an input, shown field by field; cap: inline in the conversation, scrolled past 20 lines.
+ *  asked: in a fold whose opening brings the whole (false till then): no key of its own. */
+function Clipped({ text, length, at, session, error, prose, fields, cap, asked }: { text: string; length?: number; at: string; session: string; error?: boolean; prose?: boolean; fields?: boolean; cap?: boolean; asked?: boolean }) {
   const [whole, setWhole] = useState<string>();
   const [state, setState] = useState<"idle" | "busy" | "failed">("idle");
   const more = () => {
@@ -1014,11 +1031,13 @@ function Clipped({ text, length, at, session, error, prose, fields, cap }: { tex
       () => setState("failed"),
     );
   };
+  const cut = length !== undefined && length > 0 && whole === undefined;
+  useEffect(() => void (asked && cut && state === "idle" && more()), [asked]);
   const shown = whole ?? text;
   return (
     <div className="grid min-w-0 gap-1">
       {prose ? <Markdown text={shown} className="text-sm text-ink-2" /> : fields ? <Fields text={shown} /> : <Pre text={pretty(shown)} error={error} cap={cap} lang="auto" />}
-      {length !== undefined && length > 0 && whole === undefined && (
+      {cut && asked === undefined && (
         <button type="button" onClick={more} disabled={state === "busy"} className="g-press justify-self-start rounded-sm text-xs text-ink-3 underline decoration-ink-4 underline-offset-2 hover:text-ink">
           {state === "busy" ? <LoaderCircle size={12} className="inline animate-spin" /> : t("msg.whole", { n: length })}
         </button>
