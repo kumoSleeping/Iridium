@@ -178,6 +178,10 @@ function RolePage({ role, onBack }: { role: Role; onBack: () => void }) {
   const [persona, setPersona] = useState(false);
   // A picture chosen for the face, being cropped round as 编辑资料's is (a page of its own).
   const [picture, setPicture] = useState<string | null>(null);
+  // The models' menu opens to the side with more room: under the row it is cut to what is left
+  // below, a row low on the page leaving room for two (otae, 2026-11-22: the others seemed gone).
+  const modelKey = useRef<HTMLButtonElement>(null);
+  const [up, setUp] = useState(false);
   const patch = async (p: RolePatch) => {
     try {
       const got = await api.patchRole(role.id, p);
@@ -251,12 +255,17 @@ function RolePage({ role, onBack }: { role: Role; onBack: () => void }) {
           <FacePick label={t("profile.background")} preview={<RoleBanner role={role} className="h-7 w-12 rounded-md" />} set={(background) => patch({ background })} />
           {v.models.length > 0 && (
             <Item label={t("composer.model")}>
-              <Menu.Root>
-                <Menu.Trigger aria-label={t("composer.model")} className="g-press flex h-7 max-w-48 min-w-0 cursor-default items-center gap-1 rounded-md bg-fill px-2.5 text-sm outline-none hover:bg-fill-2 data-popup-open:bg-fill-2">
+              <Menu.Root
+                onOpenChange={(open) => {
+                  const r = modelKey.current?.getBoundingClientRect();
+                  if (open && r) setUp(r.top + r.height / 2 > window.innerHeight / 2);
+                }}
+              >
+                <Menu.Trigger ref={modelKey} aria-label={t("composer.model")} className="g-press flex h-7 max-w-48 min-w-0 cursor-default items-center gap-1 rounded-md bg-fill px-2.5 text-sm outline-none hover:bg-fill-2 data-popup-open:bg-fill-2">
                   <span className="min-w-0 truncate">{v.name || roleModel(role, asked?.models)}</span>
                 </Menu.Trigger>
                 <Menu.Portal>
-                  <Menu.Positioner side="bottom" align="end" sideOffset={6} collisionPadding={8} className="z-50">
+                  <Menu.Positioner side={up ? "top" : "bottom"} align="end" sideOffset={6} collisionPadding={8} className="z-50">
                     <Menu.Popup finalFocus={false} className={cn(POPUP, "flex max-h-[min(560px,var(--available-height))] w-[min(280px,calc(100vw-16px))] flex-col")}>
                       {/* The models alone: the effort is the next row's. */}
                       <ModelList models={defaultFirst(v.models, v.def)} value={v.value} pickModel={(model) => void patch({ model })} levels={[]} level="" setEffort={async () => false} />

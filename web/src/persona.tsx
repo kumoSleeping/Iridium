@@ -88,12 +88,11 @@ export function PersonaEditor({ value, save }: { value?: string; save: (v: strin
         aria-label={t("profile.persona")}
         value={draft}
         maxLength={PersonaMax}
-        rows={10}
         onFocus={() => void (focused.current = true)}
         onBlur={() => ((focused.current = false), void put(draft))}
         onChange={(e) => (setDraft(e.target.value), setError(""))}
         onKeyDown={(e) => e.key === "Escape" && (e.preventDefault(), e.stopPropagation(), setDraft(value ?? ""), (e.target as HTMLElement).blur())}
-        className="no-ring min-h-40 w-full min-w-0 resize-y rounded-md bg-fill px-2.5 py-1.5 text-base leading-5 placeholder:text-ink-3"
+        className="no-ring h-72 w-full min-w-0 resize-none overflow-y-auto rounded-md bg-fill px-2.5 py-1.5 text-base leading-5 placeholder:text-ink-3"
       />
       {error && <p className="m-0 px-0.5 pt-1 text-xs text-err">{error}</p>}
       <HostPersonas take={(p) => (setDraft(p.text), void put(p.text))} />
