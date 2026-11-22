@@ -12,6 +12,7 @@ import type { FileRef } from "../api/types.gen";
 import { t } from "../i18n";
 import { cn, IconKey, Tip } from "../ui";
 import { previewKind, type PreviewKind } from "./preview-lib";
+import { Viewer } from "./zoom";
 
 const PreviewBody = lazy(() => import("./preview"));
 
@@ -83,26 +84,34 @@ export function Picture({ src, full, name, under, w, h }: { src: string; full: s
   );
 }
 
-/** children (a button) opens full over the page, to close by a click or download. */
+/** children (a button) opens full over the page, fit to the window, to look closer (zoom.tsx), shut
+ *  by a press beside it, Esc or its key, or download. */
 export function Zoom({ full, name, children }: { full: string; name: string; children: ReactElement }) {
+  const [open, setOpen] = useState(false);
   return (
-    <Dialog.Root>
+    <Dialog.Root open={open} onOpenChange={setOpen}>
       <Tip label={t("msg.openImage")}>
         <Dialog.Trigger render={children} />
       </Tip>
       <Dialog.Portal>
         <Dialog.Backdrop className="fixed inset-0 z-50 bg-paper/70 backdrop-blur-sm transition-opacity duration-(--dur-2) data-ending-style:opacity-0 data-starting-style:opacity-0" />
-        <Dialog.Popup className="g-unfold fixed top-1/2 left-1/2 z-50 max-h-[92vh] w-max max-w-[min(1600px,94vw)] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-xl shadow-(--shadow-float) outline-none">
+        <Dialog.Popup className="fixed inset-0 z-50 outline-none transition-[opacity,scale] duration-(--dur-2) ease-(--ease-out) data-ending-style:scale-[0.98] data-ending-style:opacity-0 data-starting-style:scale-[0.98] data-starting-style:opacity-0">
           <Dialog.Title className="sr-only">{name}</Dialog.Title>
-          <Dialog.Close className="block" aria-label={t("msg.close")}>
-            <img src={full} alt={name} className="block max-h-[92vh] max-w-full object-contain" />
-          </Dialog.Close>
-          <a href={full} download={name} aria-label={t("msg.download")} className="glass g-press absolute top-2 right-11 grid size-8 place-items-center rounded-full text-ink-2 hover:text-ink">
-            <Download size={15} />
-          </a>
-          <Dialog.Close aria-label={t("msg.close")} className="glass g-press absolute top-2 right-2 grid size-8 place-items-center rounded-full text-ink-2 hover:text-ink">
-            <X size={15} />
-          </Dialog.Close>
+          <Viewer
+            src={full}
+            name={name}
+            close={() => setOpen(false)}
+            corner={
+              <>
+                <a href={full} download={name} aria-label={t("msg.download")} className="glass g-press grid size-8 place-items-center rounded-full text-ink-2 hover:text-ink">
+                  <Download size={15} />
+                </a>
+                <Dialog.Close aria-label={t("msg.close")} className="glass g-press grid size-8 place-items-center rounded-full text-ink-2 hover:text-ink">
+                  <X size={15} />
+                </Dialog.Close>
+              </>
+            }
+          />
         </Dialog.Popup>
       </Dialog.Portal>
     </Dialog.Root>
