@@ -41,7 +41,7 @@ get() {
 }
 
 curl -fsSL -o "$tmp/SHA256SUMS" "${base}SHA256SUMS"
-echo "安装 Iridium $release（$os/$arch）"
+echo "安装 Iridium ${release}（$os/${arch}）"
 mkdir -p "$prefix"
 app=
 zip="iridium-app-darwin-$arch.zip"
@@ -108,7 +108,7 @@ esac
 if [ $# -gt 0 ]; then
 	exec "$prefix/iridium" ir "$@"
 fi
-echo "已安装：$prefix/iridium${app:+（$app）}"
+echo "已安装：$prefix/iridium${app:+（${app}）}"
 echo "接下来："
 echo "  ir start                      本机运行 Iridium（服务，开机自启）"
 if [ -n "$origin" ]; then

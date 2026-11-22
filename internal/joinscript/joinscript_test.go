@@ -157,3 +157,27 @@ func TestPs1(t *testing.T) {
 		t.Errorf("script:\n%s", b)
 	}
 }
+
+// A Mac's sh (bash 3.2) takes the bytes of a character past ASCII as part of a variable's name:
+// "$release（" is the variable "release\xef…", unbound under set -u (v0.2.49's install.sh stopped
+// there on every Mac). Every $name before such a character is written ${name}.
+func TestShNamesBeforeWideChars(t *testing.T) {
+	b, err := files.ReadFile("install.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for n, line := range strings.Split(string(b), "\n") {
+		for i := 0; i < len(line); i++ {
+			if line[i] != '$' {
+				continue
+			}
+			j := i + 1
+			for j < len(line) && (line[j] == '_' || line[j] >= 'a' && line[j] <= 'z' || line[j] >= 'A' && line[j] <= 'Z' || line[j] >= '0' && line[j] <= '9') {
+				j++
+			}
+			if j > i+1 && j < len(line) && line[j] >= 0x80 {
+				t.Errorf("install.sh:%d: %s stands before a character past ASCII: write ${…}", n+1, line[i:j])
+			}
+		}
+	}
+}
