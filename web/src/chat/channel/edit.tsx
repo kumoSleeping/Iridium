@@ -76,8 +76,10 @@ export function EditBody({ editing, back, done }: { editing: Editing; back?: () 
     void qc.invalidateQueries({ queryKey: ["members", channel] });
     void qc.invalidateQueries({ queryKey: ["card"] });
   };
-  // A picture chosen for the face, being cropped (in the popover, as a page of it).
+  // A picture chosen for the face, being cropped (in the popover, as a page of it); one for the
+  // background, its strip being chosen, the same way.
   const [picture, setPicture] = useState<string | null>(null);
+  const [banner, setBanner] = useState<string | null>(null);
   // Its persona open whole, as a page of the popover.
   const [persona, setPersona] = useState(false);
   const file = useRef<HTMLInputElement>(null);
@@ -95,6 +97,24 @@ export function EditBody({ editing, back, done }: { editing: Editing; back?: () 
     return (
       <div className="g-slide">
         <Crop src={picture} onCancel={() => setPicture(null)} onDone={cropped} />
+      </div>
+    );
+  if (banner)
+    return (
+      <div className="g-slide">
+        <Crop
+          banner
+          src={banner}
+          onCancel={() => setBanner(null)}
+          onDone={(b) =>
+            void asDataURL(b)
+              .then((v) => save({ background: v }))
+              .then(
+                () => setBanner(null),
+                (e) => toast(t("profile.background"), { error: true, description: memberError(e) }),
+              )
+          }
+        />
       </div>
     );
   if (persona && agent && p)
@@ -158,7 +178,7 @@ export function EditBody({ editing, back, done }: { editing: Editing; back?: () 
             set={(v) => save({ avatar: v })}
             upload={chosen}
           />
-          <FacePick label={t("profile.background")} preview={<BannerThumb src={p.background} />} set={(v) => save({ background: v })} />
+          <FacePick label={t("profile.background")} preview={<BannerThumb src={p.background} />} set={(v) => save({ background: v })} upload={(f) => setBanner(URL.createObjectURL(f))} />
           {session && <RoleRow session={session} role={p.role} name={name || agentName(kind)} again={() => void qc.invalidateQueries({ queryKey: key })} channel={channel} />}
           {session && <Memories session={session} done={done} />}
         </>

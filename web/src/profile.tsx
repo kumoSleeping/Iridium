@@ -9,11 +9,11 @@ import { useRef, useState, type ReactNode } from "react";
 import { ApiError, api } from "./api/client";
 import { IntroMax, type Device, type Me, type Profile as Card } from "./api/types.gen";
 import { LOCAL_ME, useMe } from "./data";
-import { BannerThumb, FacePick, Field } from "./facepick";
+import { asDataURL, BannerThumb, FacePick, Field } from "./facepick";
 import { t } from "./i18n";
 import { LocalMark } from "./me";
 import { errText, toast } from "./toast";
-import { AvatarKey, FaceChangeOver, IconKey, Tip, tokens } from "./ui";
+import { AvatarKey, cn, FaceChangeOver, IconKey, Tip, tokens } from "./ui";
 
 /** The devices a terminal may say it runs on, in the picker's order; none: no badge shown. */
 const DEVICES = ["computer", "laptop", "phone", "none"] as const satisfies readonly Device[];
@@ -134,10 +134,30 @@ export function ProfileMore() {
   };
   // Drawn before it has come, in its place: nothing under it is pushed down as it does.
   const p = q.data;
+  // A picture chosen for the background, its strip being chosen, in the background's place.
+  const [banner, setBanner] = useState<string | null>(null);
   return (
     <>
       <Field label={t("profile.intro")} value={p?.intro ?? ""} max={IntroMax} multi count save={(v) => save({ intro: v })} />
-      <FacePick label={t("profile.background")} preview={<BannerThumb src={p?.background} />} set={(v) => save({ background: v })} disabled={!p} />
+      {banner ? (
+        <div className="g-fade">
+          <Crop
+            banner
+            src={banner}
+            onCancel={() => setBanner(null)}
+            onDone={(b) =>
+              void asDataURL(b)
+                .then((background) => save({ background }))
+                .then(
+                  () => setBanner(null),
+                  (e) => toast(t("profile.background"), { error: true, description: errText(e) }),
+                )
+            }
+          />
+        </div>
+      ) : (
+        <FacePick label={t("profile.background")} preview={<BannerThumb src={p?.background} />} set={(v) => save({ background: v })} upload={(f) => setBanner(URL.createObjectURL(f))} disabled={!p} />
+      )}
     </>
   );
 }
@@ -188,39 +208,48 @@ export function AvatarCrop({ src, onBack }: { src: string; onBack: () => void })
 
 /** Round crop: drag to place, slide to zoom. Sent as a 256px PNG; the gate stores 128px. The picture
  *  always covers the circle: it cannot be dragged, nor zoomed back, to leave a gap (the user,
- *  2026-11-06). The preview is the picture whole, as drawn into the PNG. */
-export function Crop({ src, onCancel, onDone }: { src: string; onCancel: () => void; onDone: (b: Blob) => void }) {
+ *  2026-11-06). The preview is the picture whole, as drawn into the PNG. banner: a background's
+ *  strip instead (8:3, sent as the 720×270 the gate keeps, which then takes it whole; otae,
+ *  2026-11-22: it took the middle, with no say). */
+export function Crop({ src, onCancel, onDone, banner }: { src: string; onCancel: () => void; onDone: (b: Blob) => void; banner?: boolean }) {
   const [zoom, setZoom] = useState(1);
   const [pos, setPos] = useState({ x: 0, y: 0 });
   const [nat, setNat] = useState<{ w: number; h: number } | null>(null);
   const drag = useRef<{ x: number; y: number } | null>(null);
   const im = useRef<HTMLImageElement>(null);
-  const S = 176;
-  // Its size at zoom 1, covering the circle; how far it may go each way at a zoom.
-  const base = nat ? Math.max(S / nat.w, S / nat.h) : 1;
-  const w0 = nat ? nat.w * base : S;
-  const h0 = nat ? nat.h * base : S;
+  // The frame on the page, and what is sent: a circle, or a background's strip.
+  const W = banner ? 264 : 176;
+  const H = banner ? 99 : 176;
+  const OW = banner ? 720 : 256;
+  const OH = banner ? 270 : 256;
+  // Its size at zoom 1, covering the frame; how far it may go each way at a zoom.
+  const base = nat ? Math.max(W / nat.w, H / nat.h) : 1;
+  const w0 = nat ? nat.w * base : W;
+  const h0 = nat ? nat.h * base : H;
   const clamp = (p: { x: number; y: number }, z = zoom) => {
-    const mx = Math.max(0, (w0 * z - S) / 2);
-    const my = Math.max(0, (h0 * z - S) / 2);
+    const mx = Math.max(0, (w0 * z - W) / 2);
+    const my = Math.max(0, (h0 * z - H) / 2);
     return { x: Math.min(mx, Math.max(-mx, p.x)), y: Math.min(my, Math.max(-my, p.y)) };
   };
   const done = () => {
     const img = im.current!;
     const c = document.createElement("canvas");
-    c.width = c.height = 256;
+    c.width = OW;
+    c.height = OH;
     const g = c.getContext("2d")!;
-    const k = 256 / S;
+    const k = OW / W;
     const w = w0 * zoom;
     const h = h0 * zoom;
-    g.drawImage(img, ((S - w) / 2 + pos.x) * k, ((S - h) / 2 + pos.y) * k, w * k, h * k);
-    c.toBlob((b) => b && onDone(b), "image/png");
+    g.drawImage(img, ((W - w) / 2 + pos.x) * k, ((H - h) / 2 + pos.y) * k, w * k, h * k);
+    // A photo's strip as a JPEG: well under the 2 MB the gate takes.
+    if (banner) c.toBlob((b) => b && onDone(b), "image/jpeg", 0.9);
+    else c.toBlob((b) => b && onDone(b), "image/png");
   };
   return (
     <div className="flex flex-col items-center gap-3 p-3">
       <div
-        className="relative cursor-grab touch-none overflow-hidden rounded-full bg-fill active:cursor-grabbing"
-        style={{ width: S, height: S }}
+        className={cn("relative cursor-grab touch-none overflow-hidden bg-fill active:cursor-grabbing", banner ? "rounded-lg" : "rounded-full")}
+        style={{ width: W, height: H }}
         onPointerDown={(e) => {
           (e.target as HTMLElement).setPointerCapture(e.pointerId);
           drag.current = { x: e.clientX - pos.x, y: e.clientY - pos.y };
@@ -238,7 +267,7 @@ export function Crop({ src, onCancel, onDone }: { src: string; onCancel: () => v
           style={{ width: w0, height: h0, transform: `translate(-50%, -50%) translate(${pos.x}px, ${pos.y}px) scale(${zoom})` }}
         />
       </div>
-      <Slider.Root value={zoom} min={1} max={3} step={0.01} onValueChange={(v) => (setZoom(v as number), setPos((p) => clamp(p, v as number)))} aria-label={t("me.zoom")} className="w-44">
+      <Slider.Root value={zoom} min={1} max={3} step={0.01} onValueChange={(v) => (setZoom(v as number), setPos((p) => clamp(p, v as number)))} aria-label={t("me.zoom")} className={banner ? "w-56" : "w-44"}>
         <Slider.Control className="flex h-6 items-center">
           <Slider.Track className="h-1 w-full rounded-full bg-fill-2">
             <Slider.Indicator className="rounded-full bg-ink-3" />

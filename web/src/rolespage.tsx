@@ -7,7 +7,7 @@
 import { Menu } from "@base-ui/react/menu";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronLeft, ChevronRight, Plus, Trash2 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { api, ApiError } from "./api/client";
 import type { Agent, HostPersona, Role, RolePatch } from "./api/types.gen";
 import { CardFrame, CardHead, MainKey, SecondKey } from "./card";
@@ -178,6 +178,8 @@ function RolePage({ role, onBack }: { role: Role; onBack: () => void }) {
   const [persona, setPersona] = useState(false);
   // A picture chosen for the face, being cropped round as 编辑资料's is (a page of its own).
   const [picture, setPicture] = useState<string | null>(null);
+  // One chosen for the background, its strip being chosen.
+  const [banner, setBanner] = useState<string | null>(null);
   // The models' menu opens to the side with more room: under the row it is cut to what is left
   // below, a row low on the page leaving room for two (otae, 2026-11-22: the others seemed gone).
   const modelKey = useRef<HTMLButtonElement>(null);
@@ -206,9 +208,23 @@ function RolePage({ role, onBack }: { role: Role; onBack: () => void }) {
   const asked = useQuery(choicesQ(role.agent, placeOf(role))).data;
   const v = modelView({ agent: role.agent, models: asked?.models.length ? asked.models : undefined, efforts: asked?.efforts, pick: role.model, model: role.model, ran: asked?.ran, effortOwn: asked?.effort });
   const presets = asked?.presets?.presets ?? [];
+  // A crop as a page of its own: back to the role, what it is for in its title.
+  const cropPage = (title: string, back: () => void, crop: ReactNode) => (
+    <div className="g-slide flex h-full flex-col">
+      <header className="flex h-10.5 shrink-0 items-center gap-1 px-1.5 pt-1.5">
+        <IconKey label={role.name} onClick={back} tipSide="bottom" className="size-7">
+          <ChevronLeft size={16} />
+        </IconKey>
+        <h1 className="m-0 min-w-0 flex-1 truncate text-base font-semibold">{title}</h1>
+      </header>
+      <div className="no-bar min-h-0 flex-1 overflow-y-auto">{crop}</div>
+    </div>
+  );
   if (picture)
-    return (
-      <div className="g-slide flex h-full flex-col overflow-y-auto">
+    return cropPage(
+      t("profile.avatar"),
+      () => setPicture(null),
+      <>
         <Crop
           src={picture}
           onCancel={() => setPicture(null)}
@@ -218,7 +234,24 @@ function RolePage({ role, onBack }: { role: Role; onBack: () => void }) {
               .then((ok) => ok && setPicture(null))
           }
         />
-      </div>
+      </>,
+    );
+  if (banner)
+    return cropPage(
+      t("profile.background"),
+      () => setBanner(null),
+      <>
+        <Crop
+          banner
+          src={banner}
+          onCancel={() => setBanner(null)}
+          onDone={(b) =>
+            void asDataURL(b)
+              .then((background) => patch({ background }))
+              .then((ok) => ok && setBanner(null))
+          }
+        />
+      </>,
     );
   if (persona)
     return (
@@ -252,7 +285,7 @@ function RolePage({ role, onBack }: { role: Role; onBack: () => void }) {
           </Item>
           <PersonaRow value={role.persona} open={() => setPersona(true)} />
           <FacePick label={t("profile.avatar")} preview={<RoleFace role={role} size={28} />} set={(avatar) => patch({ avatar })} upload={(f) => setPicture(URL.createObjectURL(f))} />
-          <FacePick label={t("profile.background")} preview={<RoleBanner role={role} className="h-7 w-12 rounded-md" />} set={(background) => patch({ background })} />
+          <FacePick label={t("profile.background")} preview={<RoleBanner role={role} className="h-7 w-12 rounded-md" />} set={(background) => patch({ background })} upload={(f) => setBanner(URL.createObjectURL(f))} />
           {v.models.length > 0 && (
             <Item label={t("composer.model")}>
               <Menu.Root
