@@ -1988,7 +1988,7 @@ export const IntroMax = 200;
 /**
  * IntroMax is how many characters an intro may have; PersonaMax, a persona; MemoryMax, a memory.
  */
-export const PersonaMax = 2000;
+export const PersonaMax = 5000;
 /**
  * IntroMax is how many characters an intro may have; PersonaMax, a persona; MemoryMax, a memory.
  */

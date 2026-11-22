@@ -49,7 +49,7 @@ type ProfilePatch struct {
 // IntroMax is how many characters an intro may have; PersonaMax, a persona; MemoryMax, a memory.
 const (
 	IntroMax   = 200
-	PersonaMax = 2000
+	PersonaMax = 5000
 	MemoryMax  = 300
 )
 
