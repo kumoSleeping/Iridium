@@ -1241,11 +1241,11 @@ func (s *Server) nameChoices(out *api.AgentChoices, kind api.Agent, machine stri
 }
 
 // presetsWait is how long the presets of kind at machine are waited for before the kept ones
-// stand in (the host's registry: DSH Desktop's through its plugin, kept there half a minute).
+// stand in (an agent's host's registry, which its channel keeps half a minute).
 const presetsWait = 2 * time.Second
 
 // presetsAt are the presets kind has at machine now (otae, 2026-11-22: the list a session saw
-// before DSH Desktop was there stood in for Desktop's), kept for the next time; those kept last
+// before the agent's host was there stood in for the host's), kept for the next time; those kept last
 // while it does not answer; nil for a kind with none.
 func (s *Server) presetsAt(ctx context.Context, kind api.Agent, machine string) *api.Presets {
 	if info, _ := agents.Get(kind); !info.Presets {
