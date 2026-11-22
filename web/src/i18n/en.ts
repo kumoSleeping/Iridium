@@ -637,6 +637,8 @@ export const en: Dict = {
   "settings.pushOn": "Web Push",
   "settings.updateReady": "Update available",
   "settings.updateAsk": "Update to {v}",
+  "settings.failedShort": "Update failed",
+  "settings.updateGo": "Update and restart",
   "settings.updateTo": "Version {v}",
   "settings.update": "Update",
   "settings.current": "Current version {v}",

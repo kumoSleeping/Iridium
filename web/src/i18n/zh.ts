@@ -638,6 +638,8 @@ export const zh = {
   "settings.updateReady": "有新版本",
   "settings.updateTo": "新版本 {v}",
   "settings.updateAsk": "更新到 {v}",
+  "settings.failedShort": "更新失败",
+  "settings.updateGo": "更新并重启",
   "settings.update": "更新",
   "settings.current": "当前版本 {v}",
 

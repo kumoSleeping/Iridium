@@ -2,37 +2,31 @@
 // release is found.
 import { ArrowUpCircle, LoaderCircle } from "lucide-react";
 import { useState } from "react";
-import { api } from "./api/client";
 import { manages, useMe, useUpdate } from "./data";
 import { t } from "./i18n";
-import { errText, toast } from "./toast";
 import { Tip } from "./ui";
-import { expectUpgrade } from "./upgrade";
+import { UpdateAsk } from "./updateask";
 
 /** A newer release found (the daemon looks by itself): 更新, left of the settings key, for those who
- *  may update (the user, 2026-11-06). Pressed, the daemon puts it in place and restarts, and the page
- *  loads the new build; downloading still, it says how far. */
+ *  may update (the user, 2026-11-06). Pressed, the same ask as the settings' 版本 row (updateask.tsx;
+ *  otae, 2026-11-22: not at once); downloading still, it says how far. */
 export function UpdateKey() {
   const u = useUpdate().data;
   const me = useMe().data;
-  const [busy, setBusy] = useState(false);
+  const [ask, setAsk] = useState(false);
+  const [key, setKey] = useState<HTMLButtonElement | null>(null);
   if (!u?.available || !manages(me)) return null;
   const pct = u.phase === "downloading" && u.size ? Math.min(99, Math.floor(((u.got ?? 0) * 100) / u.size)) : null;
-  const going = busy || u.phase === "restarting";
-  const apply = () => {
-    setBusy(true);
-    expectUpgrade();
-    void api.applyUpdate().then(
-      () => setBusy(false),
-      (e) => (setBusy(false), expectUpgrade(false), toast(t("err.update"), { error: true, description: errText(e) })),
-    );
-  };
+  const going = u.phase === "restarting";
   return (
-    <Tip label={t("settings.updateTo", { v: u.latest ?? "" })}>
-      <button type="button" disabled={going || u.phase === "checking"} onClick={apply} className="g-pop g-press flex h-7 items-center gap-1.5 rounded-full bg-ink px-3 text-sm font-medium text-on-ink tabular-nums disabled:opacity-60">
-        {going ? <LoaderCircle size={13} className="animate-spin" /> : <ArrowUpCircle size={14} />}
-        {pct !== null ? `${pct}%` : t("settings.update")}
-      </button>
-    </Tip>
+    <>
+      <Tip label={t("settings.updateTo", { v: u.latest ?? "" })}>
+        <button ref={setKey} type="button" disabled={going || pct !== null || u.phase === "checking"} onClick={() => setAsk(true)} aria-haspopup="dialog" className="g-pop g-press flex h-7 items-center gap-1.5 rounded-full bg-ink px-3 text-sm font-medium text-on-ink tabular-nums disabled:opacity-60">
+          {going ? <LoaderCircle size={13} className="animate-spin" /> : <ArrowUpCircle size={14} />}
+          {pct !== null ? `${pct}%` : t("settings.update")}
+        </button>
+      </Tip>
+      <UpdateAsk u={u} anchor={key} open={ask} close={() => setAsk(false)} may side="top" align="start" />
+    </>
   );
 }
