@@ -1,7 +1,8 @@
 // 编辑资料 (docs/next/group.md "改资料", "资料卡"; kumo, 2026-11-16: never a page of its own):
 // what a card turns into in its own popover (g-slide, back to the card at its top left), or what
-// pops out of a menu's item. An agent's: what it is called by, its intro, its face, its
-// background; the role it is kept as; what it chose to remember. A channel's own: its name in
+// pops out of a menu's item. An agent's: what it is called by, its intro, its persona (a page of
+// the popover: persona.tsx), its face, its background; the role it is kept as; what it chose to
+// remember. A channel's own: its name in
 // place of the nick; a session's own channel's apart from its agent's (kumo, 2026-11-16). Each is saved as it is
 // changed. The face itself changes the face (docs/前端设计规范.md "点头像就是换头像"): a picture
 // chosen, cropped round as this panel's own avatar is (profile.tsx Crop). Yours (a person's):
@@ -12,6 +13,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api } from "../../api/client";
 import { IntroMax, type Agent, type Profile, type ProfilePatch } from "../../api/types.gen";
 import { asDataURL, BannerThumb, FacePick, Field } from "../../facepick";
+import { PersonaEditor, PersonaRow } from "../../persona";
 import { t, useLang } from "../../i18n";
 import { AvatarCrop, Crop, Profile as Own, ProfileMore } from "../../profile";
 import { openChat } from "../../route";
@@ -76,6 +78,8 @@ export function EditBody({ editing, back, done }: { editing: Editing; back?: () 
   };
   // A picture chosen for the face, being cropped (in the popover, as a page of it).
   const [picture, setPicture] = useState<string | null>(null);
+  // Its persona open whole, as a page of the popover.
+  const [persona, setPersona] = useState(false);
   const file = useRef<HTMLInputElement>(null);
   // Any size: the crop sends 256px.
   const chosen = (f: File) => setPicture(URL.createObjectURL(f));
@@ -92,6 +96,12 @@ export function EditBody({ editing, back, done }: { editing: Editing; back?: () 
       <div className="g-slide">
         <Crop src={picture} onCancel={() => setPicture(null)} onDone={cropped} />
       </div>
+    );
+  if (persona && agent && p)
+    return (
+      <Frame back={() => setPersona(false)} title={t("profile.persona")}>
+        <PersonaEditor value={p.persona} save={(v) => save({ persona: v })} />
+      </Frame>
     );
   return (
     <Frame back={back}>
@@ -136,6 +146,7 @@ export function EditBody({ editing, back, done }: { editing: Editing; back?: () 
             explain={memberError}
           />
           <Field label={t("profile.intro")} value={p.intro ?? ""} max={IntroMax} multi count save={(v) => save({ intro: v })} explain={memberError} />
+          {agent && <PersonaRow value={p.persona} open={() => setPersona(true)} />}
           {/* The face's other ways (an emoji, a colour, none); its picture cropped as the face's. */}
           <FacePick
             label={t("profile.avatar")}

@@ -79,16 +79,18 @@ const (
 	idSelfHelpers      = "self.helpers"       // its own subagents first, a session through ir when it must be one
 
 	// The cards of a channel (channel.go).
-	idChannelPeople         = "channel.context.people"          // the people that have an intro
-	idChannelScripts        = "channel.context.scripts"         // the scripts IR runs there
-	idChannelPlace          = "channel.context.place"           // the channel's folder, when an agent works elsewhere
-	idChannelAway           = "channel.context.away"            // the agent called is one that does
-	idChannelRecv           = "channel.context.recv"            // receive sets, and how to change one
-	idChannelProfiles       = "channel.context.profiles"        // heads the cards changed
-	idChannelProfileName    = "channel.context.profile-name"    // one renamed
-	idChannelProfileIntro   = "channel.context.profile-intro"   // before a new intro
-	idChannelProfileNoIntro = "channel.context.profile-nointro" // an intro taken away
-	idChannelProfileImage   = "channel.context.profile-image"   // a new face or background
+	idChannelPeople         = "channel.context.people"            // the people that have an intro
+	idChannelScripts        = "channel.context.scripts"           // the scripts IR runs there
+	idChannelPlace          = "channel.context.place"             // the channel's folder, when an agent works elsewhere
+	idChannelAway           = "channel.context.away"              // the agent called is one that does
+	idChannelRecv           = "channel.context.recv"              // receive sets, and how to change one
+	idChannelProfiles       = "channel.context.profiles"          // heads the cards changed
+	idChannelProfileName    = "channel.context.profile-name"      // one renamed
+	idChannelProfileIntro   = "channel.context.profile-intro"     // before a new intro
+	idChannelProfileNoIntro = "channel.context.profile-nointro"   // an intro taken away
+	idChannelProfilePersona = "channel.context.profile-persona"   // before its own new persona (only its own is told)
+	idChannelProfileNoPers  = "channel.context.profile-nopersona" // its own persona taken away
+	idChannelProfileImage   = "channel.context.profile-image"     // a new face or background
 
 	// Reactions and messages taken back (channel.go; docs/channels.md "表情" "撤回").
 	idChannelReaction    = "channel.reaction"         // a reaction it receives: the message's number, who, the emoji; then the message's words

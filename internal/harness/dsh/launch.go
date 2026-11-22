@@ -50,7 +50,11 @@ func (c *Channel) Prepare(ctx context.Context, r harness.Ref, o *agent.SpawnOpti
 		Prepare: func(preset, system string) ([]string, bool, error) {
 			ctx, cancel := context.WithTimeout(ctx, prepareWait)
 			defer cancel()
-			rep, err := hostPrepare(ctx, mc, wire.PrepareParams{Session: o.Session, Cwd: o.Cwd, Preset: preset, System: system})
+			p := wire.PrepareParams{Session: o.Session, Cwd: o.Cwd, Preset: preset, System: system}
+			if o.Persona && mc.Has(wire.CapPersona) {
+				p.Persona = wire.PersonaOwn
+			}
+			rep, err := hostPrepare(ctx, mc, p)
 			if err != nil {
 				return nil, false, err
 			}

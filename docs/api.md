@@ -288,6 +288,7 @@ Web Push，总开关在配置 `push`，默认关。VAPID 密钥存在状态目�
 | `GET /v1/internal/people/{id}/background` | 人的背景图 |
 | `POST /v1/internal/recall`、`POST /v1/internal/remember`、`GET /v1/internal/memory`、`DELETE /v1/internal/memory/{id}` | 查记录、记忆，见“记忆” |
 | `GET`、`POST /v1/internal/roles`、`PATCH`、`DELETE /v1/internal/roles/{id}`、`DELETE /v1/internal/sessions/{id}/role` | 角色，见“角色” |
+| `GET /v1/internal/personas` | `HostPersona[]`：各台电脑上 agent 的宿主给的人格（报了 `agent.personas` 的执行端，本机的在前，每台按 30 秒缓存），`{machine, machineName, agent, id, name, description?, text, from?}`，整段 `text` 拿来当设定；没有就是空表（otae，2026-11-22；`docs/exec.md`） |
 | `GET /v1/internal/channels/{id}/reads` | `ChannelReads {channel, end, readers[]}`：每个成员读到第几条（`docs/channels.md`“已读”） |
 | `POST /v1/internal/channels/{id}/read` | `Read {seq}`：我读到这条了；只给人。读到的位置之前点到我的标记一并清掉 |
 | `GET /v1/internal/ats` | `ChannelAts`：`{频道ID: ChannelAt {seq, everyone}}`，各频道里第一条点到我、我还没读的消息（`docs/channels.md`“有人 @ 我”）；`everyone`：只是 `@全体成员`。agent 的 `ir` 得到空的 |

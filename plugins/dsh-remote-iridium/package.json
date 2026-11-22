@@ -20,6 +20,7 @@
     "attach.js",
     "compose.js",
     "omd.js",
+    "persona.js",
     "prepare/",
     "executor.js",
     "ir.js",

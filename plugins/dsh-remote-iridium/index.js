@@ -243,7 +243,7 @@ export function apply(ctx, config) {
     bridge.close()
   }, 'remote-iridium: the sessions\' parts')
   // A dsh with agents (DSH Desktop's, dsh web's) holds sessions; one without has nothing to say.
-  const caps = () => [...(ctx.get('agents') ? ['held'] : []), 'agent.prepare', 'session.attach']
+  const caps = () => [...(ctx.get('agents') ? ['held'] : []), 'agent.prepare', 'session.attach', 'agent.personas', 'session.persona']
 
   function start() {
     run?.stop()

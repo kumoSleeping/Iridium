@@ -43,6 +43,8 @@ import (
 )
 
 type Server struct {
+	// personas: the agents' hosts' personas, kept a while (personas.go).
+	personas personasCache
 	cfg config.Config
 	m   *session.Manager
 	hub *hub.Hub

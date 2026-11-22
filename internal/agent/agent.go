@@ -76,6 +76,9 @@ type SpawnOptions struct {
 	// Host: where the agent runs, its host composes its launch from its own settings (an
 	// executor's agent.prepare: dsh's DSH Desktop, docs/next/plugin.md); nil: the driver does.
 	Host *Host
+	// Persona: the session has a persona of Iridium's (its profile's, in the system prompt): a
+	// host's own personas give way to it.
+	Persona bool
 	// History: Iridium keeps the session's record itself (agents.Info.OwnRecord) and has none of
 	// it yet, as for one taken up from the agent's own store: the agent is to give its history
 	// again, as Record events (agy: session/load rather than session/resume).

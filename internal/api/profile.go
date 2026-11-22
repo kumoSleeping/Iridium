@@ -13,13 +13,15 @@ const (
 // Profile is the card of a member or of a channel. ID: an agent's member ("agent:<session>"), a
 // person's or an app's user id, a channel's id. Name: what it is called by (an agent's nick, a
 // login's name, a channel's name). Avatar, Background: where the image is fetched ("/v1/…"), or
-// an emoji, or a colour ("#2f4f6f"); "" none. Model: what an agent runs as. Role: the role its
-// session was started as.
+// an emoji, or a colour ("#2f4f6f"); "" none. Persona: an agent's own words on how it works,
+// in its system prompt after its intro (otae, 2026-11-21). Model: what an agent runs as. Role:
+// the role its session was started as.
 type Profile struct {
 	ID         string `json:"id"`
 	Kind       string `json:"kind"`
 	Name       string `json:"name,omitempty"`
 	Intro      string `json:"intro,omitempty"`
+	Persona    string `json:"persona,omitempty"`
 	Avatar     string `json:"avatar,omitempty"`
 	Background string `json:"background,omitempty"`
 	Session    string `json:"session,omitempty"`
@@ -34,18 +36,21 @@ type Profile struct {
 // ProfilePatch changes a profile; a nil field stays. Nick and Name are the same thing (an
 // agent's is its nick, a channel's its name). Avatar, Background: an image (a data: URL or
 // base64; for the host's own ir, a file's path), an emoji, a colour ("#2f4f6f"), or "" for none.
+// Persona: an agent's alone.
 type ProfilePatch struct {
 	Nick       *string `json:"nick,omitempty"`
 	Name       *string `json:"name,omitempty"`
 	Intro      *string `json:"intro,omitempty"`
+	Persona    *string `json:"persona,omitempty"`
 	Avatar     *string `json:"avatar,omitempty"`
 	Background *string `json:"background,omitempty"`
 }
 
-// IntroMax is how many characters an intro may have; MemoryMax, a memory.
+// IntroMax is how many characters an intro may have; PersonaMax, a persona; MemoryMax, a memory.
 const (
-	IntroMax  = 200
-	MemoryMax = 300
+	IntroMax   = 200
+	PersonaMax = 2000
+	MemoryMax  = 300
 )
 
 // Self is what an agent's ir is told of itself (GET internal/me): its card, the channels it is
@@ -127,40 +132,55 @@ type MemberCard struct {
 }
 
 // Role is an agent kept to start sessions as: its name (the nick its sessions take), what it
-// runs (Agent, Model, Effort, Mode, Preset, at Machine), its card (Intro, Avatar, Background as
-// Profile's). ModelName: the model as shown.
+// runs (Agent, its default Model and dsh's Preset, at Machine), its card (Intro, Persona, Avatar,
+// Background as Profile's). ModelName: the model as shown. No effort and no mode: they are the
+// task's, chosen as a session starts (otae, 2026-11-21).
 type Role struct {
 	ID         string `json:"id"`
 	Name       string `json:"name"`
 	Agent      Agent  `json:"agent"`
 	Model      string `json:"model,omitempty"`
 	ModelName  string `json:"modelName,omitempty"`
-	Effort     string `json:"effort,omitempty"`
-	Mode       string `json:"mode,omitempty"`
 	Preset     string `json:"preset,omitempty"`
 	Machine    string `json:"machine,omitempty"`
 	Intro      string `json:"intro,omitempty"`
+	Persona    string `json:"persona,omitempty"`
 	Avatar     string `json:"avatar,omitempty"`
 	Background string `json:"background,omitempty"`
 	Memories   int    `json:"memories,omitempty"`
 }
 
-// NewRole keeps a role: from Session (its agent, model, effort and card as they are now; the
-// session is the role's from then on), else from the fields given.
+// HostPersona is a persona an agent's host has where it runs, to take as a persona of
+// Iridium's (GET internal/personas; docs/exec.md agent.personas): all of it from the host, none
+// when no host gives any. Machine: where (""; this computer), MachineName as shown; Text, the
+// whole of it; From, where it is from, as the host names it.
+type HostPersona struct {
+	Machine     string `json:"machine,omitempty"`
+	MachineName string `json:"machineName,omitempty"`
+	Agent       Agent  `json:"agent"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Text        string `json:"text"`
+	From        string `json:"from,omitempty"`
+}
+
+// NewRole keeps a role: from Session (its agent, model, preset and card as they are now; the
+// session is the role's from then on), else from the fields given (Name and Agent at least).
 type NewRole struct {
 	Session string `json:"session,omitempty"`
 	Role `tstype:",extends"`
 }
 
 // RolePatch changes a role; a nil field stays. Avatar, Background as ProfilePatch's. Session:
-// take the card and what it runs from this session, as it is now.
+// take the card from this session, as it is now (its name, intro, persona, face, background;
+// not its model or preset: those change here alone).
 type RolePatch struct {
 	Name       *string  `json:"name,omitempty"`
 	Model      *string  `json:"model,omitempty"`
-	Effort     *string  `json:"effort,omitempty"`
-	Mode       *string  `json:"mode,omitempty"`
 	Preset     *string  `json:"preset,omitempty"`
 	Intro      *string  `json:"intro,omitempty"`
+	Persona    *string  `json:"persona,omitempty"`
 	Avatar     *string  `json:"avatar,omitempty"`
 	Background *string  `json:"background,omitempty"`
 	Sort       *float64 `json:"sort,omitempty"`

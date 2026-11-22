@@ -17,7 +17,8 @@ import (
 	"github.com/kumoSleeping/iridium/internal/store"
 )
 
-// Roles (docs/channels.md "角色"): an agent, a model and a card kept to start sessions as. A
+// Roles (docs/channels.md "角色"): an agent, a model and a card kept to start sessions as; no
+// effort and no mode, which are the task's (otae, 2026-11-21). A
 // session started as a role takes its card (a copy: changed in the session, the role's stays)
 // and its name as its nick (with hex digits of its session's id after it while another session
 // has it: 克劳德大小姐-e444); what it
@@ -31,13 +32,15 @@ func (s *Server) roleRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /v1/internal/sessions/{id}/role", s.roleLeave)
 	mux.HandleFunc("GET /v1/internal/roles/{id}/avatar", s.roleFace)
 	mux.HandleFunc("GET /v1/internal/roles/{id}/background", s.roleFace)
+	mux.HandleFunc("GET /v1/internal/personas", s.personasGet)
 }
 
 // roleOut is role r as the API gives it.
 func (s *Server) roleOut(r store.Role) api.Role {
 	key := store.RoleProfileKey(r.ID)
-	out := api.Role{ID: r.ID, Name: r.Name, Agent: api.Agent(r.Agent), Model: r.Model, Effort: r.Effort, Mode: r.Mode, Preset: r.Preset, Machine: r.Machine,
-		Intro: s.st.Profile(key).Intro}
+	out := api.Role{ID: r.ID, Name: r.Name, Agent: api.Agent(r.Agent), Model: r.Model, Preset: r.Preset, Machine: r.Machine}
+	p := s.st.Profile(key)
+	out.Intro, out.Persona = p.Intro, p.Persona
 	info, _ := agents.Get(out.Agent)
 	out.ModelName = strings.TrimSpace(cmp.Or(info.Name, r.Agent) + " " + r.Model)
 	if _, v, ok := s.face(key, false, roleModelKey(r)); ok {
@@ -112,7 +115,7 @@ func (s *Server) roleFault(w http.ResponseWriter, err error) {
 	s.error(w, err)
 }
 
-// roleFrom fills r with what session id runs as now.
+// roleFrom fills r with what session id runs as now: its agent, model, preset and machine.
 func (s *Server) roleFrom(r *store.Role, id string) error {
 	st, err := s.m.State(id)
 	if err != nil {
@@ -125,7 +128,7 @@ func (s *Server) roleFrom(r *store.Role, id string) error {
 	if model == "default" {
 		model = st.Model
 	}
-	r.Agent, r.Model, r.Effort, r.Mode, r.Preset, r.Machine = string(st.Agent), model, cmp.Or(st.Effort, st.EffortNow), st.Mode, st.Preset, st.Machine
+	r.Agent, r.Model, r.Preset, r.Machine = string(st.Agent), model, st.Preset, st.Machine
 	return nil
 }
 
@@ -141,7 +144,7 @@ func (s *Server) rolePost(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &req) {
 		return
 	}
-	role := store.Role{ID: session.NewChannelID(), Name: strings.TrimSpace(req.Name), Agent: string(req.Agent), Model: req.Model, Effort: req.Effort, Mode: req.Mode, Preset: req.Preset, Machine: req.Machine,
+	role := store.Role{ID: session.NewChannelID(), Name: strings.TrimSpace(req.Name), Agent: string(req.Agent), Model: req.Model, Preset: req.Preset, Machine: req.Machine,
 		Sort: float64(s.rolesSeq.Add(1))}
 	if rs, err := s.st.Roles(); err == nil && len(rs) > 0 {
 		role.Sort = rs[len(rs)-1].Sort + 1
@@ -185,6 +188,9 @@ func (s *Server) rolePost(w http.ResponseWriter, r *http.Request) {
 		prof := store.Profile{}
 		var err error
 		if prof.Intro, err = intro(req.Intro); err == nil {
+			prof.Persona, err = persona(req.Persona)
+		}
+		if err == nil {
 			_, err = s.setFaces(c, key, &prof, strp(req.Avatar), strp(req.Background), "", "")
 		}
 		if err == nil {
@@ -200,7 +206,7 @@ func (s *Server) rolePost(w http.ResponseWriter, r *http.Request) {
 	reply(w, http.StatusOK, s.roleOut(role))
 }
 
-// keepCard makes session id's card the one kept under key (a role's): its intro, background
+// keepCard makes session id's card the one kept under key (a role's): its intro, persona, background
 // and the face it is drawn with, its own or, with none, its model's (kumo, 2026-11-17: a role
 // kept from a session that had its model's face had none).
 func (s *Server) keepCard(id, key string) error {
@@ -255,12 +261,11 @@ func (s *Server) rolePatch(w http.ResponseWriter, r *http.Request) {
 	}
 	key := store.RoleProfileKey(role.ID)
 	if p.Session != "" {
+		// 更新角色: the session's card, not what it runs (its model and preset change here alone;
+		// otae, 2026-11-21). Not its nick either: that may carry its id's digits.
 		id, err := s.sessionArg(r.Context(), c, p.Session)
 		if err == nil {
 			_, err = s.using(c, id)
-		}
-		if err == nil {
-			err = s.roleFrom(&role, id)
 		}
 		if err == nil {
 			err = s.keepCard(id, key)
@@ -283,7 +288,7 @@ func (s *Server) rolePatch(w http.ResponseWriter, r *http.Request) {
 	for _, f := range []struct {
 		to   *string
 		from *string
-	}{{&role.Model, p.Model}, {&role.Effort, p.Effort}, {&role.Mode, p.Mode}, {&role.Preset, p.Preset}} {
+	}{{&role.Model, p.Model}, {&role.Preset, p.Preset}} {
 		if f.from != nil {
 			*f.to = *f.from
 		}
@@ -299,6 +304,14 @@ func (s *Server) rolePatch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		prof.Intro = v
+	}
+	if p.Persona != nil {
+		v, err := persona(*p.Persona)
+		if err != nil {
+			s.error(w, err)
+			return
+		}
+		prof.Persona = v
 	}
 	if _, err := s.setFaces(c, key, &prof, p.Avatar, p.Background, "", ""); err != nil {
 		s.error(w, err)
@@ -358,7 +371,8 @@ func (s *Server) roleLeave(w http.ResponseWriter, r *http.Request) {
 	reply(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-// asRole fills what req leaves unsaid from the role it names; the role, if it names one.
+// asRole fills what req leaves unsaid from the role it names; the role, if it names one. Its
+// effort and mode are req's or the agent's own: a role keeps none.
 func (s *Server) asRole(req *api.NewSession) (*store.Role, error) {
 	if req.Role == "" {
 		return nil, nil
@@ -371,7 +385,7 @@ func (s *Server) asRole(req *api.NewSession) (*store.Role, error) {
 		return nil, fmt.Errorf("%w: role %s is %s, not %s", session.ErrBadRequest, role.Name, role.Agent, req.Agent)
 	}
 	req.Agent = api.Agent(role.Agent)
-	req.Model, req.Effort, req.Mode, req.Preset = cmp.Or(req.Model, role.Model), cmp.Or(req.Effort, role.Effort), cmp.Or(req.Mode, role.Mode), cmp.Or(req.Preset, role.Preset)
+	req.Model, req.Preset = cmp.Or(req.Model, role.Model), cmp.Or(req.Preset, role.Preset)
 	if req.Machine == "" && req.Cwd == "" {
 		req.Machine = role.Machine
 	}
@@ -406,7 +420,7 @@ func (s *Server) carded(c caller, id string, req api.NewSession) error {
 			return err
 		}
 	}
-	if req.Intro == "" && req.Avatar == "" && req.Background == "" {
+	if req.Intro == "" && req.Persona == "" && req.Avatar == "" && req.Background == "" {
 		return nil
 	}
 	prof := s.st.Profile(key)
@@ -416,6 +430,13 @@ func (s *Server) carded(c caller, id string, req api.NewSession) error {
 			return err
 		}
 		prof.Intro = v
+	}
+	if req.Persona != "" {
+		v, err := persona(req.Persona)
+		if err != nil {
+			return err
+		}
+		prof.Persona = v
 	}
 	if _, err := s.setFaces(c, key, &prof, strp(req.Avatar), strp(req.Background), req.Cwd, ""); err != nil {
 		return err
@@ -429,7 +450,7 @@ type cardCaller struct{}
 // selfText is what session id's agent is told of itself in its system prompt.
 func (s *Server) selfText(id string) *assemble.Self {
 	p := s.st.Profile(store.ChannelProfileKey(id))
-	out := &assemble.Self{Nick: s.ch.Nick(id), Intro: p.Intro, IR: true, Zone: time.Local}
+	out := &assemble.Self{Nick: s.ch.Nick(id), Intro: p.Intro, Persona: p.Persona, IR: true, Zone: time.Local}
 	const memories = 12
 	ms := s.memoriesOf(id, 0)
 	for i, m := range ms {

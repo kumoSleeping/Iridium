@@ -5,6 +5,7 @@ import path from 'node:path'
 import { bound, boundPatch } from './compose.js'
 import { RemoteError } from './executor.js'
 import { heldMethods } from './held.js'
+import { personaFor, personaLib, personaPatch, personasOf } from './persona.js'
 
 /** The agents it prepares launches of. */
 const AGENT = 'dsh'
@@ -17,7 +18,9 @@ const AGENT = 'dsh'
  * agent presets it registers; agent.prepare, the patches a dsh process the Iridium starts here
  * runs with: this dsh's models (llm: {file, scope}), a preset of its profile's bundles bound as
  * Desktop binds it (compose.js; o.dir where it is written), and this plugin's part for the session
- * (session.js, connected to o.bridge; o.sessionFile).
+ * (session.js, connected to o.bridge; o.sessionFile), and its persona (persona.js); agent.personas,
+ * the personas of its persona plugin (o.personaLib: that plugin's modules; else found in the
+ * profile it runs).
  */
 export function dshMethods(ctx, kept = () => ({ unsynced: [], ungrouped: true }), llm = {}, o = {}) {
   const presets = async () => {
@@ -45,6 +48,7 @@ export function dshMethods(ctx, kept = () => ({ unsynced: [], ungrouped: true })
     fs.writeFileSync(file, text, { mode: 0o600 })
     return file
   }
+  const lib = () => (o.personaLib ? o.personaLib() : personaLib(ctx.get('profileContext')?.dir))
   const agentOf = (p, what) => {
     if (p?.agent !== AGENT) throw new RemoteError('unsupported', `${what}: no agent ${p?.agent} here`)
   }
@@ -56,6 +60,16 @@ export function dshMethods(ctx, kept = () => ({ unsynced: [], ungrouped: true })
     'agent.presets': async (p) => {
       agentOf(p, 'agent.presets')
       return presets()
+    },
+    // The personas its persona plugin has (none: none), each whole, to take as a persona of the
+    // Iridium's (persona.js).
+    'agent.personas': async (p) => {
+      agentOf(p, 'agent.personas')
+      try {
+        return { personas: personasOf(ctx, await lib()) }
+      } catch (e) {
+        throw new RemoteError('failed', `personas: ${e.message}`)
+      }
     },
     // The patches for a dsh process the Iridium starts here, in their order: this dsh's models;
     // with a session, this plugin's part in it (and the session parts of the profile's other
@@ -82,6 +96,12 @@ export function dshMethods(ctx, kept = () => ({ unsynced: [], ungrouped: true })
         throw new RemoteError('failed', `bundles: ${e.message}`)
       }
       if (o.bridge && o.sessionFile) patches.push(write(o.sessionFile, sessionPatch(o.bridge)))
+      // Its persona: the Iridium's (persona "own"), else Desktop's for it; nothing without a
+      // persona plugin here.
+      if (o.dir) {
+        const cfg = personaFor(ctx, await lib(), p.session, p.persona === 'own')
+        if (cfg) patches.push(write(path.join(o.dir, `${p.session}.persona.patch.yml`), personaPatch(cfg)))
+      }
       if (!ctx.get('agentPresets') || !llm.scope || !o.dir) return { patches, preset: false }
       const { presets: list, default: def } = await presets()
       const id = typeof p.preset === 'string' && p.preset ? p.preset : def

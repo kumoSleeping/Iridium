@@ -7,11 +7,12 @@ import (
 )
 
 // Self is what a hosted agent is told of itself in its system prompt (docs/channels.md
-// "资料", "模糊记忆", "记忆"): the nick it goes by and its intro (its persona), what it chose to
+// "资料", "模糊记忆", "记忆"): the nick it goes by, its intro and its persona, what it chose to
 // remember, and what Iridium's records say of where it has been: the channels it is in, the
 // contexts it had before it was cleared. All of it from the records, none of it a summary.
 type Self struct {
-	Nick, Intro string
+	// Persona: its own words on how it works, as written, after its intro (otae, 2026-11-21).
+	Nick, Intro, Persona string
 	// Memory: the latest of what it chose to remember; More: how many more there are.
 	Memory []SelfMemory
 	More   int
@@ -69,6 +70,9 @@ func selfPieces(s *Self) []piece {
 	}
 	if s.Intro != "" {
 		ps = append(ps, text(idSelfIntro), words(s.Intro, Ref{Kind: "profile", ID: "intro"}), text(idNL))
+	}
+	if s.Persona != "" {
+		ps = append(ps, words(s.Persona, Ref{Kind: "profile", ID: "persona"}), text(idNL))
 	}
 	if len(s.Memory) > 0 {
 		ps = append(ps, text(idSelfMemory))

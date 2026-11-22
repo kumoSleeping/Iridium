@@ -55,10 +55,12 @@ type NewMember struct {
 	Preset  string `json:"preset,omitempty"`
 	Nick    string `json:"nick,omitempty"`
 	Recv    Recv   `json:"recv,omitempty"`
-	// Role: start it as this role (its id or name): the role's agent, model, effort and card,
-	// where the fields above say nothing. Intro, Avatar, Background: its card (ProfilePatch).
+	// Role: start it as this role (its id or name): the role's agent, model, preset and card,
+	// where the fields above say nothing; its effort and mode are these fields' or the agent's
+	// own. Intro, Persona, Avatar, Background: its card (ProfilePatch).
 	Role       string `json:"role,omitempty"`
 	Intro      string `json:"intro,omitempty"`
+	Persona    string `json:"persona,omitempty"`
 	Avatar     string `json:"avatar,omitempty"`
 	Background string `json:"background,omitempty"`
 	// Text: its first words, said in the channel by the one inviting it as "@nick text" once it

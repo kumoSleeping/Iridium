@@ -89,6 +89,9 @@ func TestProfileChangesTold(t *testing.T) {
 	given(t, l, second, 1)
 	l.want(200, "web", "PATCH", "/v1/internal/members/claude", map[string]any{"intro": "leads the work"}, nil)
 	l.want(200, "web", "PATCH", "/v1/internal/members/claude2", map[string]any{"nick": "tester"}, nil)
+	// A persona: its own it is told of whole, another's never (otae, 2026-11-21).
+	l.want(200, "web", "PATCH", "/v1/internal/members/claude", map[string]any{"persona": "another's ways"}, nil)
+	l.want(200, "web", "PATCH", "/v1/internal/members/tester", map[string]any{"persona": "short answers\nno guesses"}, nil)
 	// Its own change it is not told of.
 	l.want(200, "agent-in:"+second, "PATCH", "/v1/internal/self", map[string]any{"intro": "tests"}, nil)
 	l.wantSat(200, "web", "message.create", map[string]any{"channel_id": ch, "content": "@tester two"}, nil)
@@ -98,13 +101,19 @@ func TestProfileChangesTold(t *testing.T) {
 		t.Fatal(err)
 	}
 	var got []string
+	personas := 0
 	for _, part := range rec.Parts {
+		for _, r := range part.Refs {
+			if r.Kind == "profile" && r.ID == "persona" {
+				personas++
+			}
+		}
 		if strings.HasPrefix(part.Source, "prompts:channel.context.profile") {
 			got = append(got, strings.TrimPrefix(part.Source, "prompts:channel.context.")+":"+part.Values["who"]+">"+part.Values["to"])
 		}
 	}
 	slices.Sort(got)
-	if strings.Join(got, " ") != "profile-intro:claude> profile-name:claude2>tester profiles:>" {
+	if strings.Join(got, " ") != "profile-intro:claude> profile-name:claude2>tester profile-persona:> profiles:>" || personas != 1 {
 		t.Errorf("told of: %q", got)
 	}
 	if rec.Full {
@@ -178,6 +187,49 @@ func TestMemoryAndRoles(t *testing.T) {
 	l.want(200, "web", "DELETE", "/v1/internal/roles/"+role.ID, nil, nil)
 	if l.s.st.RoleOf(third) != "" {
 		t.Errorf("a session of a role gone")
+	}
+}
+
+// A role keeps no effort and no mode, and its model only as a default; one is made from its
+// name and agent alone; 更新角色 takes the session's card, not what it runs; a persona goes into
+// the system prompt after the intro (otae, 2026-11-21).
+func TestRolePersona(t *testing.T) {
+	t.Parallel()
+	l, ch, _ := two(t)
+	var role api.Role
+	l.want(400, "web", "POST", "/v1/internal/roles", api.NewRole{Role: api.Role{Name: "reviewer"}}, nil)
+	l.want(400, "web", "POST", "/v1/internal/roles", api.NewRole{Role: api.Role{Name: "reviewer", Agent: api.AgentClaude, Persona: strings.Repeat("长", api.PersonaMax+1)}}, nil)
+	l.want(200, "web", "POST", "/v1/internal/roles", api.NewRole{Role: api.Role{Name: "reviewer", Agent: api.AgentClaude, Intro: "reviews", Persona: "  only sure findings\nverdict first  "}}, &role)
+	if role.Persona != "only sure findings\nverdict first" || role.Intro != "reviews" || role.Model != "" {
+		t.Fatalf("a role made from nothing: %+v", role)
+	}
+	// Started as it: its card, the effort given for this once, else none of the role's.
+	one := l.create(200, "web", api.NewSession{Role: "reviewer", Cwd: l.work, Effort: "high"})
+	two := l.create(200, "web", api.NewSession{Role: "reviewer", Cwd: l.work})
+	if st, _ := l.s.m.State(one); st.Effort != "high" {
+		t.Errorf("the effort given: %q", st.Effort)
+	}
+	if st, _ := l.s.m.State(two); st.Effort != "" {
+		t.Errorf("an effort of the role's: %q", st.Effort)
+	}
+	self := l.s.selfText(two)
+	in, err := assemble.System(assemble.Where{Self: self})
+	text := in.String()
+	if err != nil || !strings.Contains(text, "reviews\nonly sure findings\nverdict first\n") {
+		t.Errorf("the system prompt: %v\n%s", err, text)
+	}
+	// 更新角色: the card comes back, the model does not; the role's name stays.
+	l.want(200, "web", "PATCH", "/v1/internal/members/"+l.s.ch.Nick(two), map[string]any{"persona": "be kind", "intro": "reviews gently"}, nil)
+	l.want(200, "web", "PATCH", "/v1/internal/roles/"+role.ID, map[string]any{"model": "sonnet"}, nil)
+	l.want(200, "web", "PATCH", "/v1/internal/roles/"+role.ID, api.RolePatch{Session: two}, &role)
+	if role.Persona != "be kind" || role.Intro != "reviews gently" || role.Model != "sonnet" || role.Name != "reviewer" {
+		t.Errorf("updated from its session: %+v", role)
+	}
+	// Kept from a session: no effort comes with it (the field is gone), its persona does.
+	l.want(200, "web", "PATCH", "/v1/internal/members/claude", map[string]any{"persona": "leads"}, nil)
+	l.want(200, "web", "POST", "/v1/internal/roles", api.NewRole{Session: ch}, &role)
+	if role.Persona != "leads" {
+		t.Errorf("kept from a session: %+v", role)
 	}
 }
 

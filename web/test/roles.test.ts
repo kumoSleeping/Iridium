@@ -5,7 +5,8 @@ import { startRequest } from "../src/create";
 import { setLang } from "../src/i18n";
 import { effortName, picked, roleLine, roleModel, roleStart } from "../src/roles";
 
-const fish: Role = { id: "r1", name: "大肥鱼", agent: "dsh", model: "deepseek/flash", modelName: "DeepSeek Harness deepseek/flash", effort: "high" };
+const fish: Role = { id: "r1", name: "大肥鱼", agent: "dsh", model: "deepseek/flash", modelName: "DeepSeek Harness deepseek/flash" };
+const started = picked(fish, { effort: "high" });
 const models: Model[] = [
   { value: "deepseek/pro", name: "Pro", default: true },
   { value: "deepseek/flash", name: "Flash", effortNames: { ultra: "Ultra" } },
@@ -13,16 +14,17 @@ const models: Model[] = [
 ] as Model[];
 
 describe("a role's line", () => {
-  test("agent, model by its kind's name, effort in the page's language", () => {
+  test("agent, model by its kind's name, the effort picked in the page's language", () => {
     setLang("en");
-    expect(roleLine(fish, models)).toBe("DeepSeek Harness · Flash · High");
+    expect(roleLine(started, models)).toBe("DeepSeek Harness · Flash · High");
     setLang("zh");
-    expect(roleLine(fish, models)).toBe("DeepSeek Harness · Flash · 高");
-    expect(roleLine(fish, models, false)).toBe("Flash · 高");
+    expect(roleLine(started, models)).toBe("DeepSeek Harness · Flash · 高");
+    expect(roleLine(started, models, false)).toBe("Flash · 高");
+    expect(roleLine(fish, models)).toBe("DeepSeek Harness · Flash");
   });
   test("the models not known yet: the model's id", () => {
     expect(roleModel(fish)).toBe("deepseek/flash");
-    expect(roleLine({ ...fish, effort: "" })).toBe("DeepSeek Harness · deepseek/flash");
+    expect(roleLine(fish)).toBe("DeepSeek Harness · deepseek/flash");
   });
   test("a model kept by the id it resolves to", () => {
     expect(roleModel({ ...fish, model: "deepseek/full-id" }, models)).toBe("Alias");
@@ -37,12 +39,13 @@ describe("a role's line", () => {
 });
 
 describe("starting as a role", () => {
-  test("unchanged: the role alone", () => {
+  test("unchanged: the role alone, its effort the agent's own", () => {
     expect(roleStart(fish)).toEqual({ role: "r1" });
     expect(roleStart(fish, { model: "", effort: "" })).toEqual({ role: "r1" });
-    expect(roleStart(fish, { model: "deepseek/flash", effort: "high" })).toEqual({ role: "r1" });
+    expect(roleStart(fish, { model: "deepseek/flash" })).toEqual({ role: "r1" });
   });
-  test("only what this once changes is sent", () => {
+  test("only what this once changes is sent; an effort picked always (the role keeps none)", () => {
+    expect(roleStart(fish, { effort: "high" })).toEqual({ role: "r1", effort: "high" });
     expect(roleStart(fish, { effort: "max" })).toEqual({ role: "r1", effort: "max" });
     expect(roleStart(fish, { model: "deepseek/pro", preset: "plan" })).toEqual({ role: "r1", model: "deepseek/pro", preset: "plan" });
   });

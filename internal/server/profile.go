@@ -272,13 +272,23 @@ func intro(v string) (string, error) {
 	return v, nil
 }
 
+// persona is v as a persona is kept: its lines as written (an agent's persona is read as it was
+// written into its system prompt), trimmed, at most PersonaMax characters.
+func persona(v string) (string, error) {
+	v = strings.TrimSpace(strings.ReplaceAll(v, "\r\n", "\n"))
+	if len([]rune(v)) > api.PersonaMax {
+		return "", fmt.Errorf("%w: persona: at most %d characters", session.ErrBadRequest, api.PersonaMax)
+	}
+	return v, nil
+}
+
 // ---- the cards ----
 
 // agentProfile is the card of session id's agent.
 func (s *Server) agentProfile(id string) api.Profile {
 	key := store.ChannelProfileKey(id)
 	p := s.st.Profile(key)
-	out := api.Profile{ID: store.AgentMember(id), Kind: api.CardKindAgent, Session: id, Name: s.ch.Nick(id), Intro: p.Intro, Role: s.st.RoleOf(id)}
+	out := api.Profile{ID: store.AgentMember(id), Kind: api.CardKindAgent, Session: id, Name: s.ch.Nick(id), Intro: p.Intro, Persona: p.Persona, Role: s.st.RoleOf(id)}
 	st, err := s.m.State(id)
 	if err == nil {
 		out.Agent, out.Status = st.Agent, st.Status
@@ -379,7 +389,7 @@ func (s *Server) profileNote(c caller, ch, member, nick string, what []string) {
 	if ch == "" || len(what) == 0 {
 		return
 	}
-	names := map[string]string{"nick": "称呼", "name": "名称", "intro": "介绍", "avatar": "头像", "background": "背景"}
+	names := map[string]string{"nick": "称呼", "name": "名称", "intro": "介绍", "persona": "设定", "avatar": "头像", "background": "背景"}
 	var parts []string
 	for _, w := range what {
 		parts = append(parts, names[w])
@@ -462,6 +472,16 @@ func (s *Server) patchAgent(c caller, id, in string, p api.ProfilePatch) error {
 		if v != prof.Intro {
 			prof.Intro = v
 			what = append(what, "intro")
+		}
+	}
+	if p.Persona != nil {
+		v, err := persona(*p.Persona)
+		if err != nil {
+			return err
+		}
+		if v != prof.Persona {
+			prof.Persona = v
+			what = append(what, "persona")
 		}
 	}
 	dir := ""
@@ -1055,6 +1075,7 @@ func (s *Server) saidBy(c caller, member, id string) []api.RecallHit {
 type card struct {
 	Name       string `json:"name,omitempty"`
 	Intro      string `json:"intro,omitempty"`
+	Persona    string `json:"persona,omitempty"` // the agent's own alone (cardsFor)
 	Avatar     string `json:"avatar,omitempty"`
 	Background string `json:"background,omitempty"`
 }
@@ -1062,7 +1083,7 @@ type card struct {
 // cardOf is the card under key, by name; its images by their versions.
 func (s *Server) cardOf(key, name string) card {
 	p := s.st.Profile(key)
-	c := card{Name: name, Intro: p.Intro, Avatar: p.Avatar, Background: p.Background}
+	c := card{Name: name, Intro: p.Intro, Persona: p.Persona, Avatar: p.Avatar, Background: p.Background}
 	if _, v, ok := s.face(key, false, ""); ok {
 		c.Avatar = v
 	}
@@ -1087,14 +1108,28 @@ func (s *Server) cardsIn(ch string) map[string]card {
 	return out
 }
 
+// cardsFor are the cards of channel ch as session to's agent is told of them: a persona is its
+// own agent's alone (otae, 2026-11-21), the others' are not told.
+func (s *Server) cardsFor(ch, to string) map[string]card {
+	out := s.cardsIn(ch)
+	for k, c := range out {
+		if k != store.AgentMember(to) && c.Persona != "" {
+			c.Persona = ""
+			out[k] = c
+		}
+	}
+	return out
+}
+
 // ProfileChange is a card changed since an agent was last told: Who ("" the channel), What
-// ("name", "intro", "avatar", "background"), From and To (words; none for an image).
+// ("name", "intro", "persona": its own, "avatar", "background"), From and To (words; none for
+// an image).
 type ProfileChange struct{ Who, What, From, To string }
 
 // profileChanges are the cards of channel ch that changed since session to's agent was last
 // told of them there; what it is told of now is kept. Nothing the first time.
 func (s *Server) profileChanges(ch, to string) []ProfileChange {
-	now := s.cardsIn(ch)
+	now := s.cardsFor(ch, to)
 	var was map[string]card
 	told := s.st.ProfileTold(to, ch)
 	enc, _ := json.Marshal(now)
@@ -1127,6 +1162,9 @@ func (s *Server) profileChanges(ch, to string) []ProfileChange {
 		if n.Intro != w.Intro {
 			out = append(out, ProfileChange{who, "intro", w.Intro, n.Intro})
 		}
+		if n.Persona != w.Persona {
+			out = append(out, ProfileChange{who, "persona", w.Persona, n.Persona})
+		}
 		if n.Avatar != w.Avatar {
 			out = append(out, ProfileChange{Who: who, What: "avatar"})
 		}
@@ -1146,7 +1184,7 @@ func (s *Server) toldNow(session, key string, what ...string) {
 		if told == "" || json.Unmarshal([]byte(told), &was) != nil {
 			continue
 		}
-		now, ok := s.cardsIn(ch)[key]
+		now, ok := s.cardsFor(ch, session)[key]
 		w, had := was[key]
 		if !ok || !had {
 			continue
@@ -1157,6 +1195,8 @@ func (s *Server) toldNow(session, key string, what ...string) {
 				w.Name = now.Name
 			case "intro":
 				w.Intro = now.Intro
+			case "persona":
+				w.Persona = now.Persona
 			case "avatar":
 				w.Avatar = now.Avatar
 			case "background":

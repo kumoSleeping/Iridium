@@ -98,12 +98,16 @@ func (h *Hello) ShellOn() bool {
 // holder). CapPrepare: agent.presets and agent.prepare (it composes an agent's launch from its
 // host's own settings). CapAttach: it sends session.attach and takes the event session.button.
 // CapGrant: grant (GrantParams), Roots in its hello, and it takes the event denied (DeniedEvent).
+// CapPersonas: agent.personas (the personas its host has, to take as a persona of Iridium's).
+// CapPersona: agent.prepare takes Persona (docs/exec.md "dsh 插件" 人格; otae, 2026-11-22).
 const (
-	CapHeld    = "held"
-	CapRun     = "run"
-	CapPrepare = "agent.prepare"
-	CapAttach  = "session.attach"
-	CapGrant   = "grant"
+	CapHeld     = "held"
+	CapRun      = "run"
+	CapPrepare  = "agent.prepare"
+	CapAttach   = "session.attach"
+	CapGrant    = "grant"
+	CapPersonas = "agent.personas"
+	CapPersona  = "session.persona"
 )
 
 // AgentInfo is an agent installed there and how to start it. Argv is the program part, to which
@@ -338,13 +342,40 @@ type Preset struct {
 
 // PrepareParams is agent.prepare: what a launch of Agent there takes from its host's settings.
 // Session (the agent's own id), Cwd, Preset and System (Iridium's system prompt) for a session;
-// no Session: for a look at its models only.
+// no Session: for a look at its models only. Persona (CapPersona): PersonaOwn, the session has a
+// persona of Iridium's (in System), and its host's own personas give way to it; how is the
+// host's. None: its host's as they are.
 type PrepareParams struct {
 	Agent   string `json:"agent"`
 	Session string `json:"session,omitempty"`
 	Cwd     string `json:"cwd,omitempty"`
 	Preset  string `json:"preset,omitempty"`
 	System  string `json:"system,omitempty"`
+	Persona string `json:"persona,omitempty"`
+}
+
+// PersonaOwn is PrepareParams.Persona for a session with a persona of Iridium's.
+const PersonaOwn = "own"
+
+// PersonasParams is agent.personas: the personas Agent's host has there.
+type PersonasParams struct {
+	Agent string `json:"agent"`
+}
+
+// PersonasReply answers agent.personas: the personas its host has, by its order; none: empty.
+type PersonasReply struct {
+	Personas []Persona `json:"personas"`
+}
+
+// Persona is one its host has: Text, the whole of it as one persona of Iridium's takes it (the
+// host puts its parts together; Iridium does not know them); From, where it is from, as shown
+// ("OMD 人格").
+type Persona struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Text        string `json:"text"`
+	From        string `json:"from,omitempty"`
 }
 
 // PrepareReply answers agent.prepare: Patches, files there the launch takes in order (dsh: each a

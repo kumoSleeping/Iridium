@@ -257,6 +257,25 @@ func (m *Machine) IsLocal() bool {
 	return m.local
 }
 
+// AgentNames are the agents the executor has: those it runs as a machine's, and on this computer
+// its host's own.
+func (m *Machine) AgentNames() []string {
+	var out []string
+	if hi, ok := m.Hello(); ok && hi != nil {
+		for _, a := range hi.Agents {
+			out = append(out, a.Agent)
+		}
+	}
+	m.mu.Lock()
+	for _, a := range m.hostAgents {
+		if !slices.Contains(out, a.Agent) {
+			out = append(out, a.Agent)
+		}
+	}
+	m.mu.Unlock()
+	return out
+}
+
 // HostAgent is agent a as an executor on this computer has it (its agents are not taken as a
 // machine's: Local's).
 func (m *Machine) HostAgent(a string) (wire.AgentInfo, bool) {

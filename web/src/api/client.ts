@@ -28,6 +28,8 @@ import type {
   PushState,
   Role,
   RolePatch,
+  NewRole,
+  HostPersona,
   PushSubscription,
   PushSwitch,
   SendReply,
@@ -302,6 +304,10 @@ export const api = {
   // --- roles (docs/channels.md "角色"): cards kept to start sessions as ---
   roles: () => get<Role[]>("/v1/internal/roles"),
   patchRole: (id: string, p: RolePatch) => write<Role>("PATCH", `/v1/internal/roles/${enc(id)}`, p),
+  /** A role made from what is given (设置 · 角色's +): its name and agent at least. */
+  newRole: (p: Omit<NewRole, "id" | "session">) => write<Role>("POST", "/v1/internal/roles", p),
+  /** The personas the agents' hosts give, to take as a persona (docs/exec.md agent.personas). */
+  personas: () => get<HostPersona[]>("/v1/internal/personas"),
   deleteRole: (id: string) => write<{ ok: boolean }>("DELETE", `/v1/internal/roles/${enc(id)}`),
   // --- cards (docs/next/group.md "资料卡"): a member's, a channel's, the one looking's own ---
   /** who: an agent's "agent:<session>", a person's login or app id. */

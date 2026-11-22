@@ -384,6 +384,11 @@ var schema = []string{
 	// 45: reactions on a channel's messages, and the messages taken back (reactions.go;
 	// docs/channels.md "表情" "撤回").
 	reactionsSchema,
+	// 46: an agent's persona beside its intro (docs/channels.md "资料" 设定); a role keeps no
+	// effort and no mode: they are the task's, chosen as a session starts (otae, 2026-11-21).
+	`ALTER TABLE profiles ADD COLUMN persona TEXT NOT NULL DEFAULT '';
+	ALTER TABLE roles DROP COLUMN effort;
+	ALTER TABLE roles DROP COLUMN mode;`,
 }
 
 // steps run in Go after the migration of their version, in the same transaction.

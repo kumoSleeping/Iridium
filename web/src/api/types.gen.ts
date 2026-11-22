@@ -577,13 +577,14 @@ export interface NewSession {
    */
   members?: ChannelSetup;
   /**
-   * Role: start it as this role (its id or name): the role's agent, model, effort, mode and
-   * card, where the fields above say nothing. Nick, Intro, Avatar, Background: its card
-   * (ProfilePatch), over the role's.
+   * Role: start it as this role (its id or name): the role's agent, model, preset and card,
+   * where the fields above say nothing; its effort and mode are these fields' or the agent's
+   * own. Nick, Intro, Persona, Avatar, Background: its card (ProfilePatch), over the role's.
    */
   role?: string;
   nick?: string;
   intro?: string;
+  persona?: string;
   avatar?: string;
   background?: string;
 }
@@ -1331,11 +1332,13 @@ export interface NewMember {
   nick?: string;
   recv?: Recv;
   /**
-   * Role: start it as this role (its id or name): the role's agent, model, effort and card,
-   * where the fields above say nothing. Intro, Avatar, Background: its card (ProfilePatch).
+   * Role: start it as this role (its id or name): the role's agent, model, preset and card,
+   * where the fields above say nothing; its effort and mode are these fields' or the agent's
+   * own. Intro, Persona, Avatar, Background: its card (ProfilePatch).
    */
   role?: string;
   intro?: string;
+  persona?: string;
   avatar?: string;
   background?: string;
   /**
@@ -1942,14 +1945,16 @@ export type CardKind = typeof CardKindAgent | typeof CardKindPerson | typeof Car
  * Profile is the card of a member or of a channel. ID: an agent's member ("agent:<session>"), a
  * person's or an app's user id, a channel's id. Name: what it is called by (an agent's nick, a
  * login's name, a channel's name). Avatar, Background: where the image is fetched ("/v1/…"), or
- * an emoji, or a colour ("#2f4f6f"); "" none. Model: what an agent runs as. Role: the role its
- * session was started as.
+ * an emoji, or a colour ("#2f4f6f"); "" none. Persona: an agent's own words on how it works,
+ * in its system prompt after its intro (otae, 2026-11-21). Model: what an agent runs as. Role:
+ * the role its session was started as.
  */
 export interface Profile {
   id: string;
   kind: string;
   name?: string;
   intro?: string;
+  persona?: string;
   avatar?: string;
   background?: string;
   session?: string;
@@ -1966,20 +1971,26 @@ export interface Profile {
  * ProfilePatch changes a profile; a nil field stays. Nick and Name are the same thing (an
  * agent's is its nick, a channel's its name). Avatar, Background: an image (a data: URL or
  * base64; for the host's own ir, a file's path), an emoji, a colour ("#2f4f6f"), or "" for none.
+ * Persona: an agent's alone.
  */
 export interface ProfilePatch {
   nick?: string;
   name?: string;
   intro?: string;
+  persona?: string;
   avatar?: string;
   background?: string;
 }
 /**
- * IntroMax is how many characters an intro may have; MemoryMax, a memory.
+ * IntroMax is how many characters an intro may have; PersonaMax, a persona; MemoryMax, a memory.
  */
 export const IntroMax = 200;
 /**
- * IntroMax is how many characters an intro may have; MemoryMax, a memory.
+ * IntroMax is how many characters an intro may have; PersonaMax, a persona; MemoryMax, a memory.
+ */
+export const PersonaMax = 2000;
+/**
+ * IntroMax is how many characters an intro may have; PersonaMax, a persona; MemoryMax, a memory.
  */
 export const MemoryMax = 300;
 /**
@@ -2068,8 +2079,9 @@ export interface MemberCard extends Profile {
 }
 /**
  * Role is an agent kept to start sessions as: its name (the nick its sessions take), what it
- * runs (Agent, Model, Effort, Mode, Preset, at Machine), its card (Intro, Avatar, Background as
- * Profile's). ModelName: the model as shown.
+ * runs (Agent, its default Model and dsh's Preset, at Machine), its card (Intro, Persona, Avatar,
+ * Background as Profile's). ModelName: the model as shown. No effort and no mode: they are the
+ * task's, chosen as a session starts (otae, 2026-11-21).
  */
 export interface Role {
   id: string;
@@ -2077,33 +2089,48 @@ export interface Role {
   agent: Agent;
   model?: string;
   modelName?: string;
-  effort?: string;
-  mode?: string;
   preset?: string;
   machine?: string;
   intro?: string;
+  persona?: string;
   avatar?: string;
   background?: string;
   memories?: number /* int */;
 }
 /**
- * NewRole keeps a role: from Session (its agent, model, effort and card as they are now; the
- * session is the role's from then on), else from the fields given.
+ * HostPersona is a persona an agent's host has where it runs, to take as a persona of
+ * Iridium's (GET internal/personas; docs/exec.md agent.personas): all of it from the host, none
+ * when no host gives any. Machine: where (""; this computer), MachineName as shown; Text, the
+ * whole of it; From, where it is from, as the host names it.
+ */
+export interface HostPersona {
+  machine?: string;
+  machineName?: string;
+  agent: Agent;
+  id: string;
+  name: string;
+  description?: string;
+  text: string;
+  from?: string;
+}
+/**
+ * NewRole keeps a role: from Session (its agent, model, preset and card as they are now; the
+ * session is the role's from then on), else from the fields given (Name and Agent at least).
  */
 export interface NewRole extends Role {
   session?: string;
 }
 /**
  * RolePatch changes a role; a nil field stays. Avatar, Background as ProfilePatch's. Session:
- * take the card and what it runs from this session, as it is now.
+ * take the card from this session, as it is now (its name, intro, persona, face, background;
+ * not its model or preset: those change here alone).
  */
 export interface RolePatch {
   name?: string;
   model?: string;
-  effort?: string;
-  mode?: string;
   preset?: string;
   intro?: string;
+  persona?: string;
   avatar?: string;
   background?: string;
   sort?: number /* float64 */;

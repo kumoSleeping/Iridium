@@ -207,6 +207,10 @@ func changePieces(c Channel) []piece {
 			ps = append(ps, text(idChannelProfileNoIntro, "who", who))
 		case ch.What == "intro":
 			ps = append(ps, text(idChannelProfileIntro, "who", who), words(ch.To, Ref{Kind: "profile", ID: "intro"}), text(idNL))
+		case ch.What == "persona" && ch.To == "":
+			ps = append(ps, text(idChannelProfileNoPers))
+		case ch.What == "persona":
+			ps = append(ps, text(idChannelProfilePersona), words(ch.To, Ref{Kind: "profile", ID: "persona"}), text(idNL))
 		case ch.What == "avatar":
 			ps = append(ps, text(idChannelProfileImage, "who", who, "what", "face"))
 		default:

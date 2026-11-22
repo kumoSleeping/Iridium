@@ -177,3 +177,37 @@ func TestLocalHost(t *testing.T) {
 		t.Errorf("a patch others may write: %v", err)
 	}
 }
+
+// A session with a persona of Iridium's tells its host so (agent.prepare persona "own"), only a
+// host that says it takes it (wire.CapPersona); one with none says nothing of it (otae,
+// 2026-11-22).
+func TestHostPersonaOwn(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	good := filepath.Join(dir, "good.yml")
+	os.WriteFile(good, []byte("[]\n"), 0o600)
+	for _, c := range []struct {
+		caps    []string
+		persona bool
+		want    bool
+	}{
+		{[]string{wire.CapPrepare, wire.CapPersona}, true, true},
+		{[]string{wire.CapPrepare, wire.CapPersona}, false, false},
+		{[]string{wire.CapPrepare}, true, false},
+	} {
+		hub := &remote.Hub{Logf: t.Logf, Self: "this-pc"}
+		r := newRig(t, func(_ *config.Config, o *Options) { o.Remote = hub })
+		f := startHolderAs(t, hub, c.caps, wire.HeldLive{}, "this-pc", []string{good})
+		launch := agent.SpawnOptions{Session: "x", Cwd: dir, Persona: c.persona}
+		if err := r.m.o.Channels[api.AgentDsh].(harness.Launcher).Prepare(bg, harness.Ref{ID: "x", As: "x", Agent: api.AgentDsh}, &launch); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := launch.Host.Prepare("omd-ptc", "sys"); err != nil {
+			t.Fatal(err)
+		}
+		asked := f.asked("agent.prepare")
+		if len(asked) != 1 || strings.Contains(asked[0], `"persona":"own"`) != c.want {
+			t.Errorf("caps %v, persona %v: asked %q", c.caps, c.persona, asked)
+		}
+	}
+}
