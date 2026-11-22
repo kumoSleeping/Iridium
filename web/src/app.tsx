@@ -27,7 +27,7 @@ import { HeadKeys, Sidebar } from "./sidebar";
 import { useConfirms, useList } from "./store";
 import { follow } from "./stream";
 import { ToastList, toasts } from "./toast";
-import { buildTree, flat } from "./tree";
+import { buildTree, flat, FOLD_STEP } from "./tree";
 import { usePlaces } from "./reorder";
 import { cn, holdMenu, IrMark, kept, keep, params, PHONE, useMedia, useMinute } from "./ui";
 import { watchUnread } from "./unread";
@@ -91,18 +91,24 @@ void prefetch().then((all) => {
   loadPanels();
 });
 
-/** Whether a sidebar group is open, as this device left it: all are, but 归档. */
+/** A record kept on this device by name; {} when there is none or it does not read. */
+const keptRecord = <T,>(name: string): Record<string, T> => {
+  try {
+    return JSON.parse(kept(name) ?? "{}");
+  } catch {
+    return {};
+  }
+};
+
+/** Whether a sidebar group is open, as this device left it: all are, but 归档. more: how many of
+ *  a folder's folded sessions (tree.ts foldMore) were opened beyond the first few, by its key;
+ *  showMore opens FOLD_STEP more, foldBack folds those of the keys given again. */
 function useExpanded() {
-  const [over, setOver] = useState<Record<string, boolean>>(() => {
-    try {
-      return JSON.parse(kept("expanded") ?? "{}");
-    } catch {
-      return {};
-    }
-  });
-  // Open unless folded, but the archive and the rest of a folder's sessions (tree.ts foldRest):
-  // those wait to be opened.
-  const shut = (k: string) => k === "archive" || k.startsWith("more:");
+  // "more:<key>" was once here too, all of a folder's rest opened at once: no longer read.
+  const [over, setOver] = useState(() => Object.fromEntries(Object.entries(keptRecord<boolean>("expanded")).filter(([k]) => !k.startsWith("more:"))));
+  const [opened, setOpened] = useState(() => keptRecord<number>("more"));
+  // Open unless folded, but the archive: it waits to be opened.
+  const shut = (k: string) => k === "archive";
   const expanded = (k: string) => over[k] ?? !shut(k);
   const toggle = (k: string) =>
     setOver((o) => {
@@ -110,7 +116,17 @@ function useExpanded() {
       keep("expanded", JSON.stringify(n));
       return n;
     });
-  return { expanded, toggle };
+  const setMore = (f: (o: Record<string, number>) => Record<string, number>) =>
+    setOpened((o) => {
+      const n = f(o);
+      if (n === o) return o;
+      keep("more", JSON.stringify(n));
+      return n;
+    });
+  const more = (k: string) => opened[k] ?? 0;
+  const showMore = (k: string) => setMore((o) => ({ ...o, [k]: (o[k] ?? 0) + FOLD_STEP }));
+  const foldBack = (keys: string[]) => setMore((o) => (keys.some((k) => o[k]) ? Object.fromEntries(Object.entries(o).filter(([k]) => !keys.includes(k))) : o));
+  return { expanded, toggle, more, showMore, foldBack };
 }
 
 export function App() {
@@ -154,7 +170,7 @@ export function App() {
   useMe();
   useApps(); // a message's source shows its app's or login's avatar
   const confirms = useConfirms();
-  const { expanded, toggle } = useExpanded();
+  const { expanded, toggle, more, showMore, foldBack } = useExpanded();
   // Each minute too: a subagent long quiet is let go.
   const minute = useMinute();
   const places = usePlaces();
@@ -279,6 +295,9 @@ export function App() {
       tree={tree}
       expanded={expanded}
       toggle={toggle}
+      more={more}
+      showMore={showMore}
+      foldBack={foldBack}
       selected={open ?? ""}
       onSelect={onSelect}
       noFoot={phone}

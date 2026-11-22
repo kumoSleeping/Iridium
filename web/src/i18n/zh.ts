@@ -79,6 +79,7 @@ export const zh = {
   "menu.moveUp": "上移",
   "menu.moveDown": "下移",
   "menu.unfold": "展开",
+  "menu.foldSessions": "折叠会话",
   "menu.archiveHere": "归档这里的 {n} 个会话",
   "nav.hungCount": "{n} 个派出的会话",
   "menu.pin": "置顶",

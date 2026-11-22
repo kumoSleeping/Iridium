@@ -349,6 +349,16 @@ export function foldRest(ss: Session[], kept: (s: Session) => boolean, n = FOLD_
   return shown.length >= ss.length - 1 ? { shown: ss, rest: 0 } : { shown, rest: ss.length - shown.length };
 }
 
+/** How many more "还有 N 个" opens a press (the user, 2026-11-22: a few at a time, not all). */
+export const FOLD_STEP = 5;
+
+/** foldRest with extra more opened by hand (FOLD_STEP a press). less: all are shown only because
+ *  of those, so the row at their foot folds them again. */
+export function foldMore(ss: Session[], kept: (s: Session) => boolean, extra: number): { shown: Session[]; rest: number; less: boolean } {
+  const f = foldRest(ss, kept, FOLD_SHOW + extra);
+  return { ...f, less: f.rest === 0 && extra > 0 && foldRest(ss, kept).rest > 0 };
+}
+
 /** A folder's sessions and its folders', as the sidebar shows them: the pinned folders, its own,
  *  the other folders. */
 export const folderSessions = (f: Folder): Session[] => [...f.children.filter((c) => c.pinned).flatMap(folderSessions), ...f.sessions, ...f.children.filter((c) => !c.pinned).flatMap(folderSessions)];

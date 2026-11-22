@@ -4,7 +4,7 @@ import { describe, expect, test } from "vitest";
 import type { Session } from "../src/api/types.gen";
 import { pinFolder, placeFolder, placeGroup, placeSession, sortList } from "../src/reorder";
 import { colorsOf, placesOf, withGroupOrder, withMark } from "../src/guilds";
-import { buildTree, foldRest } from "../src/tree";
+import { buildTree, foldMore, foldRest } from "../src/tree";
 
 const s = (id: string, updatedAt: number, more: Partial<Session> = {}) => ({ id, updatedAt, agent: "claude", cwd: "/w", status: "idle", hosted: false, live: false, ...more }) as Session;
 
@@ -102,5 +102,17 @@ describe("a folder's rest folded", () => {
     expect(f.rest).toBe(3);
     // Kept all but one: nothing folded.
     expect(foldRest(ss, (s) => s.id !== "s8").rest).toBe(0);
+  });
+  test("opened a few at a time, folded again at the foot", () => {
+    const many = Array.from({ length: 16 }, (_, i) => ({ id: `s${i}`, updatedAt: 100 - i }) as Session);
+    const none = () => false;
+    expect(foldMore(many, none, 0)).toMatchObject({ rest: 11, less: false });
+    expect(foldMore(many, none, 5)).toMatchObject({ rest: 6, less: false });
+    expect(foldMore(many, none, 5).shown).toHaveLength(10);
+    // One left would be a row hiding one: all, and the row folds them.
+    expect(foldMore(many, none, 10)).toMatchObject({ rest: 0, less: true });
+    expect(foldMore(many, none, 15)).toMatchObject({ rest: 0, less: true });
+    // Few enough to show without a row: nothing to fold.
+    expect(foldMore(many.slice(0, 6), none, 5)).toMatchObject({ rest: 0, less: false });
   });
 });

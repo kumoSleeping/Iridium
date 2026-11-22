@@ -9,7 +9,7 @@
 // and at its foot the colour tags (colors.ts); a group's: rename, its path, 通知. The mouse resting
 // on a row fetches its chat ahead.
 import { Menu } from "@base-ui/react/menu";
-import { Archive, ArchiveRestore, ArrowDown, ArrowUp, Bot, Check, ChevronRight, Copy, Ellipsis, Ungroup, Folder, FolderOpen, Moon, Pencil, Pin, PinOff, Plus, RefreshCw, Square } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowDown, ArrowUp, Bot, Check, ChevronRight, Copy, Ellipsis, Ungroup, Folder, FolderOpen, ListCollapse, Moon, Pencil, Pin, PinOff, Plus, RefreshCw, Square } from "lucide-react";
 import { ConfirmIcon, confirmName, confirmTitle } from "./confirmname";
 import { Fragment, lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode, type RefObject } from "react";
 import { api } from "./api/client";
@@ -20,7 +20,7 @@ import { ahead, behind } from "./chats";
 import { t, useLang } from "./i18n";
 import { useMoves } from "./motion";
 import { folderLevels, sessionLevels, usePushMenus, wsLevels, type PushLevel } from "./push";
-import { allFolders, folderSessions, foldersHolding, foldRest, groupHolding, machineOf, remotePath, type Folder as FolderNode, type Tree, type WsNode } from "./tree";
+import { allFolders, folderSessions, foldersHolding, foldMore, groupHolding, machineOf, remotePath, type Folder as FolderNode, type Tree, type WsNode } from "./tree";
 import { createAt, onOpenPlace, type Place } from "./places";
 import { LinkDot } from "./link";
 import { errText, toast } from "./toast";
@@ -49,6 +49,10 @@ type Props = {
   tree: Tree;
   expanded: (key: string) => boolean;
   toggle: (key: string) => void;
+  /** How many of a folder's folded sessions were opened beyond the first few (app.tsx useExpanded). */
+  more: (key: string) => number;
+  showMore: (key: string) => void;
+  foldBack: (keys: string[]) => void;
   selected: string;
   onSelect: (id: string) => void;
   phone: boolean;
@@ -152,17 +156,20 @@ export function Sidebar(p: Props) {
   // A folder, or a group's root, with many sessions: the first few and a row for the rest (tree.ts
   // foldRest), opened by hand; one open, pinned, at work or waiting on you shown wherever it is.
   const stays = (s: Session) => !!s.pinned || s.id === p.selected || asked.has(s.id) || BUSY.has(lampOf(s)) || lampOf(s) === "waiting";
+  // Opened a few at a time (tree.ts foldMore; the user, 2026-11-22: not all at once).
   const fold = (ss: Session[], key: string) => {
-    const f = foldRest(ss, stays);
-    const all = p.expanded(`more:${key}`);
-    return { list: all ? ss : f.shown, rest: f.rest, all };
+    const f = foldMore(ss, stays, p.more(key));
+    return { list: f.shown, rest: f.rest, less: f.less };
   };
   const roots = (w: WsNode) => w.rows.flatMap((r) => (r.kind === "session" ? [r.s] : []));
   const tops = (w: WsNode) => w.rows.flatMap((r) => (r.kind === "folder" ? [r.f] : []));
   const foldShape = (ss: Session[], key: string) => {
     const f = fold(ss, key);
-    return `${f.list.map((s) => s.id)}${f.rest ? `+${f.all}` : ""}`;
+    return `${f.list.map((s) => s.id)}${f.rest ? `+${f.rest}` : f.less ? "-" : ""}`;
   };
+  // 折叠会话 in a group's or a folder's menu: what was opened of the folded sessions in it, and
+  // in the folders in it, folded again; none when nothing is.
+  const foldBackOf = (keys: string[]) => (keys.some((k) => p.more(k) > 0) ? () => p.foldBack(keys) : undefined);
   // 归档 drawn ARCHIVE_STEP at a time, more as asked: all of it at once (some hundreds) held the
   // page for most of a second as it opened (kumo, 2026-11-23). Folded, it starts again from the first.
   const [archShown, setArchShown] = useState(ARCHIVE_STEP);
@@ -294,22 +301,22 @@ export function Sidebar(p: Props) {
   // Those hung under sessions, all of them: what archiving those archives too (the server's
   // cascade, SessionPatch.archived).
   const hungOf = (ss: Session[]) => ss.flatMap((s) => p.tree.hung.get(s.id) ?? []);
-  // The sessions of a folder or a group's root, those folded under one row: "还有 N 个" opens them,
-  // "收起" at their foot folds them again.
+  // The sessions of a folder or a group's root, those folded under one row: "还有 N 个" opens
+  // FOLD_STEP more a press; all open, "收起" at their foot folds them again.
   const folded = (ss: Session[], key: string, depth: number, draw: (s: Session) => ReactNode) => {
     const f = fold(ss, key);
     return (
       <>
         {f.list.map(draw)}
-        {f.rest > 0 && (
+        {(f.rest > 0 || f.less) && (
           <Row
             key={`more:${key}`}
             depth={depth}
             flip={`more:${key}`}
-            expanded={f.all}
-            onClick={() => p.toggle(`more:${key}`)}
+            expanded={!f.rest}
+            onClick={() => (f.rest ? p.showMore(key) : p.foldBack([key]))}
             icon={<Ellipsis size={15} className="text-ink-3" />}
-            label={<span className="text-ink-3">{f.all ? t("nav.less") : t("nav.more", { n: f.rest })}</span>}
+            label={<span className="text-ink-3">{f.rest ? t("nav.more", { n: f.rest }) : t("nav.less")}</span>}
           />
         )}
       </>
@@ -347,6 +354,7 @@ export function Sidebar(p: Props) {
             hung={hungOf(folderSessions(f))}
             open={p.expanded(f.key)}
             onToggle={() => p.toggle(f.key)}
+            foldBack={foldBackOf(allFolders([f]).map((x) => x.key))}
             lane={lane}
             place={placeFolderAt}
             pin={pinFolderOn}
@@ -386,6 +394,7 @@ export function Sidebar(p: Props) {
           folders={w.rows.some((r) => r.kind === "folder")}
           open={open}
           onToggle={() => p.toggle(w.key)}
+          foldBack={foldBackOf([w.key, ...allFolders(tops(w)).map((x) => x.key)])}
           wkey={w.key}
           place={placeGroup}
           up={up && (() => placeGroup(w.key, up.key, "top"))}
@@ -697,7 +706,7 @@ function DropLine({ list }: { list: RefObject<HTMLDivElement | null> }) {
 /** A group's row; its menu (right click, long-press): its sessions archived, as a folder's (the
  *  user, 2026-11-08: a group is a folder now), rename, its path copied, open or folded, 通知 while
  *  push is on. 未归类 itself (id 0): its sessions archived and its 通知. */
-function WsRow({ flip, id, name, root, sessions, hung, machine, remote, folders, open, onToggle, end, wkey, place, up, down }: { flip: string; id: number; name: string; root: string; sessions: Session[]; hung: Session[]; machine?: Machine; remote?: boolean; folders?: boolean; open: boolean; onToggle: () => void; end: ReactNode; wkey: string; place: (key: string, target: string, edge: Edge) => void; up?: () => void; down?: () => void }) {
+function WsRow({ flip, id, name, root, sessions, hung, machine, remote, folders, open, onToggle, foldBack, end, wkey, place, up, down }: { flip: string; id: number; name: string; root: string; sessions: Session[]; hung: Session[]; machine?: Machine; remote?: boolean; folders?: boolean; open: boolean; onToggle: () => void; foldBack?: () => void; end: ReactNode; wkey: string; place: (key: string, target: string, edge: Edge) => void; up?: () => void; down?: () => void }) {
   const machines = useMachines();
   const push = usePushMenus();
   const me = useMe().data;
@@ -716,6 +725,8 @@ function WsRow({ flip, id, name, root, sessions, hung, machine, remote, folders,
     ...(sessions.length
       ? [{ icon: <Archive size={15} />, label: t("menu.archiveHere", { n: sessions.length + hung.length }), sure: t("menu.archiveSure"), run: () => void Promise.all(sessions.map((s) => api.patch(s.id, { archived: true }))).then(() => toast(t("toast.archived")), failed) }]
       : []),
+    // What was opened of its folded sessions, folded again (the user, 2026-11-22).
+    ...(foldBack ? [{ icon: <ListCollapse size={15} />, label: t("menu.foldSessions"), run: foldBack }] : []),
     ...(real
       ? [
           { icon: <Pencil size={15} />, label: t("menu.rename"), run: () => setRenaming(true) },
@@ -1117,7 +1128,7 @@ export function sessionTags(s: Session): Tags {
 /** A folder's row in a workspace: its name, the "+" for a session in it; its menu (right click,
  *  long-press): a session here, its path copied, open or folded, its sessions archived, its colour
  *  tag. */
-function FolderRow({ f, ws, depth, label, hung, open, onToggle, newHere, plus, lane, place, pin }: { f: FolderNode; ws: number; depth: number; label: ReactNode; hung: Session[]; open: boolean; onToggle: () => void; newHere?: () => void; plus: ReactNode; lane: string; place: (path: string, target: FolderNode, edge: Edge, lane: string) => void; pin: (path: string, on: boolean) => void }) {
+function FolderRow({ f, ws, depth, label, hung, open, onToggle, foldBack, newHere, plus, lane, place, pin }: { f: FolderNode; ws: number; depth: number; label: ReactNode; hung: Session[]; open: boolean; onToggle: () => void; foldBack?: () => void; newHere?: () => void; plus: ReactNode; lane: string; place: (path: string, target: FolderNode, edge: Edge, lane: string) => void; pin: (path: string, on: boolean) => void }) {
   const machines = useMachines();
   const me = useMe().data;
   // Dragged among the folders of its group (reorder.ts): the panels' and 本机's, as a group.
@@ -1149,6 +1160,7 @@ function FolderRow({ f, ws, depth, label, hung, open, onToggle, newHere, plus, l
     ...(all.length
       ? [{ icon: <Archive size={15} />, label: t("menu.archiveHere", { n: all.length + hung.length }), sure: t("menu.archiveSure"), run: () => void Promise.all(all.map((s) => api.patch(s.id, { archived: true }))).then(done(t("toast.archived")), failed) }]
       : []),
+    ...(foldBack ? [{ icon: <ListCollapse size={15} />, label: t("menu.foldSessions"), run: foldBack }] : []),
     ...(newHere ? [{ icon: <Plus size={15} />, label: t("menu.newHere"), run: newHere }] : []),
     { icon: <Copy size={15} />, label: t("menu.copyPath"), run: () => void navigator.clipboard.writeText(shownPath(f.path, machines).real).then(done(t("toast.copied")), failed) },
     { icon: open ? <Folder size={15} /> : <FolderOpen size={15} />, label: open ? t("menu.fold") : t("menu.unfold"), run: onToggle },
