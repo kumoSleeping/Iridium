@@ -1251,14 +1251,28 @@ func (s *Server) presetsAt(ctx context.Context, kind api.Agent, machine string) 
 	if info, _ := agents.Get(kind); !info.Presets {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, presetsWait)
-	defer cancel()
-	if p, err := s.m.PagePresets(ctx, kind, machine); err == nil && len(p.Presets) > 0 {
+	ask := func(ctx context.Context, wait time.Duration) (*api.Presets, error) {
+		ctx, cancel := context.WithTimeout(ctx, wait)
+		defer cancel()
+		p, err := s.m.PagePresets(ctx, kind, machine)
+		if err != nil || len(p.Presets) == 0 {
+			return nil, err
+		}
 		if b, err := json.Marshal(p); err == nil {
 			_ = s.st.Keep("presets:"+string(kind)+":"+machine, string(b))
 		}
-		return &p
+		return &p, nil
 	}
+	if p, _ := ask(ctx, presetsWait); p != nil {
+		return p
+	}
+	// Slow the first time (its host reads each preset): asked on past this request, kept for the
+	// next.
+	go func() {
+		if _, err := ask(context.Background(), 30*time.Second); err != nil {
+			s.logf("server: presets of %s at %q: %v", kind, machine, err)
+		}
+	}()
 	return s.keptPresets(kind, machine)
 }
 
