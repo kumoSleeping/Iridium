@@ -134,7 +134,8 @@ agent 的 `ir sh`：每条命令一个新进程，不经托管进程，不写文
   - `held.set {session, model | effort}` → 同 `held.get`，改后的：每次只改一样，只对 Desktop 拿着的会话（否则 `not_found`）。经 dsh 的 `sessionController.selectModel`（同 Desktop 的模型选择）：换模型时新模型有原来的档位就保留。审批模式不经这里。
   - 事件 `held.changed {session, live}`：Desktop 里换了模型或档位；`live` 同 `held.get` 的回答，每个会话每秒最多两次。
   - `agent.presets {agent}` → `{presets: [{id, name?, description?, plugins, broken?}], default}`：插件所在 dsh 进程的 Agent 预设注册表（`agentPresets` 的 `list()`、`defaultId`，`plugins` 是 `readDocument` 给的子插件行 YAML）：这边按它列预设，自建和改过的预设也能用。
-  - `agent.prepare {agent, session?, cwd?, preset?, system?}` → `{patches, preset?}`（2026-11-11）：这边在那台机器上起 dsh（或探测模型）前问一次，插件按 Desktop 此刻的设置写几个补丁，只回路径，依次加在 `--profile sdk` 之后：Desktop 的模型（基础包里的 `dsh-llm*` 行和 `agent-default-model`，照它的配置和开关，`!!js` 原样）；预设用到 Desktop profile 里别的 bundle 时，整个预设（见下“第三方包的预设”，`system` 是这边的系统提示，接在预设人设后），`preset: true`；插件自己在会话进程里的那部分（`session.js`）。没有 `session` 时只给模型。里面可能有密钥和口令：文件只在那台机器上，执行端不对外读。插件起会话时顺手把它登记到 `cwd` 对应的工作区（没有就新建），Desktop 侧边栏里就有它。
+  - `agent.personas {agent}` → `{personas: [{id, name, description?, text, from?}]}`（otae，2026-11-22；`caps` 里报 `agent.personas` 才问）：插件所在 dsh 进程里能导入成设定的人格（见 `docs/channels.md`“角色”“从 dsh 人格导入”）。`text` 是插件拼好的整段正文，这边原样当设定，不知道它原来分几块；`from` 只用来在网页上写出处（“OMD 人格”）。没有可列的回空表。
+  - `agent.prepare {agent, session?, cwd?, preset?, system?, persona?}` → `{patches, preset?}`（2026-11-11）：这边在那台机器上起 dsh（或探测模型）前问一次，插件按 Desktop 此刻的设置写几个补丁，只回路径，依次加在 `--profile sdk` 之后：Desktop 的模型（基础包里的 `dsh-llm*` 行和 `agent-default-model`，照它的配置和开关，`!!js` 原样）；预设用到 Desktop profile 里别的 bundle 时，整个预设（见下“第三方包的预设”，`system` 是这边的系统提示，接在预设人设后），`preset: true`；插件自己在会话进程里的那部分（`session.js`）。没有 `session` 时只给模型。里面可能有密钥和口令：文件只在那台机器上，执行端不对外读。插件起会话时顺手把它登记到 `cwd` 对应的工作区（没有就新建），Desktop 侧边栏里就有它。`persona: "own"`（otae，2026-11-22；`caps` 里报 `session.persona` 才给）：这个会话有 Iridium 的设定（在 `system` 里），插件让 dsh 里别的人格对这个会话让位；怎么让是插件的事。不给时插件照常，dsh 里的人格跟 Desktop 此刻选的一样。
 
 ## 机器并进应用（0.2，2026-11-11）
 
@@ -211,6 +212,14 @@ agent 的 `ir sh`：每条命令一个新进程，不经托管进程，不写文
 第三方包的预设（2026-11-09；2026-11-11 起由插件拼）：Desktop 的预设可以来自 web profile 里的 bundle，例如 OMD 的 `omd-ptc`、`oh-my-dsh`，行名是 `oh-my-dsh/host/tool-pwsh` 这种。sdk profile 只从 dsh 安装目录和自己的目录找包，这些行原样放进去会加载失败。插件（`agent.prepare`）照 Desktop 的组合来：预设注册表、web 的禁用、那个 bundle 自己那层（去掉其中的预设声明）、这个预设的声明，再由一个小模块在每个会话创建时绑定这个预设（`agentPresets.recompose`，子代理随父会话）；包名改走找包的模块，在那台机器上按 dsh 的家目录去 `profiles/*/node_modules` 找。实测（dsh 0.2.2-rc.1、OMD 1.3.9）：`omd-ptc`、`oh-my-dsh` 都是 63 个工具。仍没有的：只在 Desktop 网页进程里有的（OMD 的 deepseek-workbench、extensions、rewind 要 `webServer`）。这边（`internal/agent/dsh`）只拼 dsh 自带的预设；没有插件时用不到第三方包的预设。
 
 本机（2026-11-11）：本机的 DSH Desktop 装了插件、配对到本机的 Iridium 时（握手的 `machineID` 同这边的，它的 agent 不当一台机器收），这边在本机起 dsh 和探测模型也问它（`agent.presets`、`agent.prepare`），用它握手报的 dsh（Desktop 自带的）起，所以本机的会话也有 Desktop 的模型、预设和 OMD。它给的补丁必须是本机用户自己的、别人不可写的普通文件，不是就不用（`internal/harness/dsh/ownfile_*.go`）。
+
+人格（otae，2026-11-22）：OMD 的人格写在它的主体里（`src/runtime.mjs` 起 `plugins/persona`），装了 OMD 的 Desktop 拼出来的会话都带着它；它在系统提示最后追加几段（段名 `dsh-persona:` 开头），数据按 profile 分开存（`~/.dsh/dsh-persona-plugin/<profile 目录的 sha256 前 16 位>/`）。所以 Iridium 起的会话（`--profile sdk`）用的是 sdk 那份，不是 Desktop（web）那份，在 Desktop 里换人格管不到它们。插件这样处理，只有插件里认识 OMD 的那个文件知道这些：
+- `agent.personas`：读 Desktop 的人格库（内置的、自建的、自定义的，不列“关闭人格”），身份一块在前，语言风格、沟通方式、回答呈现各加一个小标题接在后面，不带它每块附的英文范围说明。
+- `persona: "own"`：在会话进程里去掉 `dsh-persona:` 开头的段。OMD 改了段名就失效，结果是设定和它的人格叠在一起，不会出错。
+- 不给 `persona`：让会话进程读 Desktop 那份人格，和 Desktop 一致。
+- 没装插件的机器：这边自己拼补丁（`internal/agent/dsh`），不带 OMD，没有这些。插件旧、没报这两项能力：网页上没有导入，设定和 OMD 的人格叠在一起。
+
+插件以后从这个仓库独立出去（otae，2026-11-22）：这边只认本文写的协议，按握手的 `caps` 用，不比版本号；认识 OMD 和别的第三方包的代码只在插件里（`omd.js` 这类文件）。迁出时 release.yml 里发 npm 的那一步搬过去，插件用自己的版本号，安装说明的包地址跟着改。
 
 实测（2026-11-08）：Mac（arm64，Node 25）上 dsh 0.2.2-rc.1 的 `--profile sdk` 握手、开会话、`shutdown` 都和 Linux 一样，记录写在 `sessions/--<目录>--/<会话>/`。0.1.0 没有 sdk profile，执行端握手报的版本低于 0.2.2 时不给开 dsh。Windows 待测。
 
