@@ -119,6 +119,7 @@ DELETE internal/sessions/{id}/role - -> {ok}  the session is no role's from now 
 GET internal/roles/{id}/avatar - -> image  a role's face; 404 none
 GET internal/roles/{id}/background - -> image  a role's background; 404 none
 GET internal/roles - -> Role[]  the roles kept to start sessions as (channel.create _data.role=<name>; POST internal/channels/{id}/members role=<name>): name, agent, model, intro  view=name,agent,model,intro
+GET internal/personas - -> HostPersona[]  the personas the agents' hosts give where they run (dsh's persona plugin), each whole: one to take as a persona (persona=<its text>); none: empty  view=name,from,machineName,description
 
 # session settings
 PUT internal/sessions/{id}/model {model} -> {ok}  model ("" the agent's own, the one SessionState.models marks default; values in SessionState.models)
