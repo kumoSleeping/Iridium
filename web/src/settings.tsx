@@ -8,12 +8,13 @@
 // no version shown, no head, signing out a plain row, asked once (the user, 2026-11-08). Every quota bar shows: nothing here hides one.
 // Changed is saved at once (GET/PUT /v1/internal/settings). Reaping idle agents and going on after a crash
 // or a quota are not here: as the config file says, by default 1h and on (the user, 2026-11-07).
+import { Popover } from "@base-ui/react/popover";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowUpCircle, ChevronDown, ChevronLeft, ChevronRight, LoaderCircle, LogOut, MonitorDown, RefreshCw, Share, SquarePlus } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { api, ApiError } from "./api/client";
 import type { PushEvents, PushState, Settings, SettingsPatch, UpdateState } from "./api/types.gen";
-import { CardFrame, CardHead, MainKey, SecondKey } from "./card";
+import { MainKey, SecondKey } from "./card";
 import { manages as managesApps, pushQ, useApps, useMe, useSettings, useUpdate } from "./data";
 import { t, useLang } from "./i18n";
 import { install, useInstall } from "./install";
@@ -23,7 +24,7 @@ import { PUSH_EVENTS, subscribe } from "./pushmenu";
 import { go } from "./route";
 import { useConfirms } from "./store";
 import { errText, toast } from "./toast";
-import { cn, IconKey, intoView, Switch, Tip } from "./ui";
+import { cn, IconKey, PopSurface, Switch, Tip } from "./ui";
 import { expectUpgrade } from "./upgrade";
 
 /** The panel's own pages: the avatar's crop. */
@@ -255,8 +256,9 @@ const STALE = 3_600_000;
 
 /** 检查更新, the update in one row (the user, 2026-11-09: no notice above the profile). Up to date,
  *  检查更新 with the version now (the user, 2026-11-12: not 已是最新; when it last looked in its tip) and a key that looks; a newer
- *  release found, it asks first (otae, 2026-11-22: never updated by the look alone): a card under
- *  the row with the version, what is in it and its size, 取消 or 更新, which downloads it, puts it in
+ *  release found, it asks first (otae, 2026-11-22: never updated by the look alone): a popup out of
+ *  the 更新 key (over the list, taking no room in it: a card under the row made the settings
+ *  scroll) with the version, what is in it and its size, 取消 or 更新, which downloads it, puts it in
  *  place and restarts; the page then loads the new build (the user, 2026-11-08). A newer one out,
  *  版本 with its version and the 更新 key (the same card), or how far its download is, a hairline
  *  along the row's foot; pressing the title opens its notes, the current version and the size under
@@ -269,6 +271,8 @@ function UpdateItem({ manages }: { manages: boolean }) {
   const [open, setOpen] = useState(false);
   // Asking whether to update to the newer one found.
   const [ask, setAsk] = useState(false);
+  // The 更新 key, which the ask pops out of.
+  const [keyEl, setKeyEl] = useState<HTMLButtonElement | null>(null);
   const working = u?.phase === "checking" || u?.phase === "downloading" || u?.phase === "restarting";
   // asking: a newer one found is asked about (the key; not the look on opening).
   const look = (asking = false) => {
@@ -323,7 +327,7 @@ function UpdateItem({ manages }: { manages: boolean }) {
               <span className="w-9 text-right text-xs text-ink-3 tabular-nums">{pct}%</span>
             ) : manages ? (
               <Tip label={failed ? t("settings.updateFailed", { e: u.error ?? "" }) : t("settings.updateTo", { v: u.latest ?? "" })}>
-                <button type="button" disabled={spin || ask} onClick={() => setAsk(true)} className="g-press flex h-7 items-center gap-1.5 rounded-md bg-ink px-2.5 text-sm font-medium text-on-ink disabled:opacity-50">
+                <button ref={setKeyEl} type="button" disabled={spin} onClick={() => setAsk(true)} className="g-press flex h-7 items-center gap-1.5 rounded-md bg-ink px-2.5 text-sm font-medium text-on-ink disabled:opacity-50">
                   {spin && <LoaderCircle size={13} className="animate-spin" />}
                   {u.phase === "restarting" ? t("settings.restarting") : t("settings.update")}
                 </button>
@@ -337,29 +341,23 @@ function UpdateItem({ manages }: { manages: boolean }) {
             <div className="h-full bg-ink-3 transition-[width] duration-300 ease-out" style={{ width: `${pct}%` }} />
           </div>
         )}
-        {ask && manages && u.phase !== "restarting" && (
-          <div ref={intoView} className="g-fade pb-2">
-            <CardFrame label={t("settings.updateAsk", { v: u.latest ?? "" })}>
-              <CardHead
-                icon={<ArrowUpCircle size={16} />}
-                title={t("settings.updateAsk", { v: u.latest ?? "" })}
-                summary={
-                  <>
-                    {t("settings.current", { v: u.current })}
-                    {u.size ? ` · ${mb(u.size)}` : null}
-                  </>
-                }
-                extra={notes ? <p className="m-0 max-h-48 overflow-y-auto text-xs leading-5 whitespace-pre-wrap text-ink-2">{notes}</p> : undefined}
-                keys={
-                  <>
-                    <SecondKey onClick={() => setAsk(false)}>{t("me.cancel")}</SecondKey>
-                    <MainKey onClick={update}>{t("settings.update")}</MainKey>
-                  </>
-                }
-              />
-            </CardFrame>
-          </div>
-        )}
+        <Popover.Root open={ask && manages && u.phase !== "restarting" && !!keyEl} onOpenChange={(o) => !o && setAsk(false)}>
+          <PopSurface anchor={keyEl} side="top" align="end" className="flex max-h-[min(440px,var(--available-height))] w-[min(320px,calc(100vw-16px))] flex-col p-3">
+            <Popover.Title className="m-0 flex items-center gap-2 text-sm font-semibold">
+              <ArrowUpCircle size={15} className="shrink-0 text-ink-2" />
+              <span className="truncate">{t("settings.updateAsk", { v: u.latest ?? "" })}</span>
+            </Popover.Title>
+            <p className="m-0 mt-1 pl-[23px] text-xs text-ink-3 tabular-nums">
+              {t("settings.current", { v: u.current })}
+              {u.size ? ` · ${mb(u.size)}` : null}
+            </p>
+            {notes && <p className="no-bar m-0 mt-2.5 min-h-0 flex-1 overflow-y-auto pl-[23px] text-xs leading-5 whitespace-pre-wrap text-ink-2">{notes}</p>}
+            <div className="mt-3 flex shrink-0 justify-end gap-1.5">
+              <SecondKey onClick={() => setAsk(false)}>{t("me.cancel")}</SecondKey>
+              <MainKey onClick={update}>{t("settings.update")}</MainKey>
+            </div>
+          </PopSurface>
+        </Popover.Root>
         <div aria-hidden={!open || undefined} inert={!open || undefined} className={cn("grid transition-[grid-template-rows,opacity] duration-(--dur-3) ease-(--ease-out)", open ? "grid-rows-[1fr]" : "grid-rows-[0fr] opacity-0")}>
           <div className="min-h-0 overflow-hidden">
             <div className="flex flex-col gap-1 pb-2">
