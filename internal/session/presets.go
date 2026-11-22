@@ -60,6 +60,12 @@ func (m *Manager) SessionPresets(ctx context.Context, id string) (api.Presets, e
 		return api.Presets{}, err
 	}
 	m.warmModels(a, machine) // the page opened it: its models too
+	return m.PagePresets(ctx, a, machine)
+}
+
+// PagePresets are the agent presets agent a has at machine, and the default, as the page has
+// them.
+func (m *Manager) PagePresets(ctx context.Context, a api.Agent, machine string) (api.Presets, error) {
 	list, def, err := m.Presets(ctx, a, machine)
 	if err != nil {
 		return api.Presets{}, err

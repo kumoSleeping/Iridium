@@ -1194,7 +1194,7 @@ func (s *Server) agentChoices(w http.ResponseWriter, r *http.Request) {
 	// What one said last, kept (keepChoices), at once (kumo, 2026-11-15: the invite menu's models
 	// pop as the chat's own do); the sessions are asked after, for the next time.
 	if kept := s.st.Kept(choicesKey(kind, machine)); kept != "" && json.Unmarshal([]byte(kept), &out) == nil && len(out.Models) > 0 {
-		out.Presets = s.keptPresets(kind, machine)
+		out.Presets = s.presetsAt(r.Context(), kind, machine)
 		s.nameChoices(&out, kind, machine)
 		reply(w, http.StatusOK, out)
 		go func() {
@@ -1212,7 +1212,7 @@ func (s *Server) agentChoices(w http.ResponseWriter, r *http.Request) {
 	if got != nil {
 		out = *got
 	}
-	out.Presets = s.keptPresets(kind, machine)
+	out.Presets = s.presetsAt(r.Context(), kind, machine)
 	s.nameChoices(&out, kind, machine)
 	reply(w, http.StatusOK, out)
 }
@@ -1238,6 +1238,28 @@ func (s *Server) nameChoices(out *api.AgentChoices, kind api.Agent, machine stri
 		}
 	}
 	out.Models, out.Ran = append([]api.Model{{Value: ran, Name: ran}}, out.Models...), ran
+}
+
+// presetsWait is how long the presets of kind at machine are waited for before the kept ones
+// stand in (the host's registry: DSH Desktop's through its plugin, kept there half a minute).
+const presetsWait = 2 * time.Second
+
+// presetsAt are the presets kind has at machine now (otae, 2026-11-22: the list a session saw
+// before DSH Desktop was there stood in for Desktop's), kept for the next time; those kept last
+// while it does not answer; nil for a kind with none.
+func (s *Server) presetsAt(ctx context.Context, kind api.Agent, machine string) *api.Presets {
+	if info, _ := agents.Get(kind); !info.Presets {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, presetsWait)
+	defer cancel()
+	if p, err := s.m.PagePresets(ctx, kind, machine); err == nil && len(p.Presets) > 0 {
+		if b, err := json.Marshal(p); err == nil {
+			_ = s.st.Keep("presets:"+string(kind)+":"+machine, string(b))
+		}
+		return &p
+	}
+	return s.keptPresets(kind, machine)
 }
 
 // keptPresets are the presets a session of kind at machine listed last (askChoices); nil for
