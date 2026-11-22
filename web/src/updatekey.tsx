@@ -7,9 +7,10 @@ import { t } from "./i18n";
 import { Tip } from "./ui";
 import { UpdateAsk } from "./updateask";
 
-/** A newer release found (the daemon looks by itself): 更新, left of the settings key, for those who
- *  may update (the user, 2026-11-06). Pressed, the same ask as the settings' 版本 row (updateask.tsx;
- *  otae, 2026-11-22: not at once); downloading still, it says how far. */
+/** A newer release found (the daemon looks by itself): its version, left of the settings key, for
+ *  those who may update (the user, 2026-11-06). Pressed, the same ask as the settings' 版本 row
+ *  (updateask.tsx; otae, 2026-11-22: not at once; the version, not 更新: the ask's 更新并重启 is the
+ *  one key that updates); downloading still, it says how far. */
 export function UpdateKey() {
   const u = useUpdate().data;
   const me = useMe().data;
@@ -23,7 +24,7 @@ export function UpdateKey() {
       <Tip label={t("settings.updateTo", { v: u.latest ?? "" })}>
         <button ref={setKey} type="button" disabled={going || pct !== null || u.phase === "checking"} onClick={() => setAsk(true)} aria-haspopup="dialog" className="g-pop g-press flex h-7 items-center gap-1.5 rounded-full bg-ink px-3 text-sm font-medium text-on-ink tabular-nums disabled:opacity-60">
           {going ? <LoaderCircle size={13} className="animate-spin" /> : <ArrowUpCircle size={14} />}
-          {pct !== null ? `${pct}%` : t("settings.update")}
+          {pct !== null ? `${pct}%` : u.latest}
         </button>
       </Tip>
       <UpdateAsk u={u} anchor={key} open={ask} close={() => setAsk(false)} may side="top" align="start" />
