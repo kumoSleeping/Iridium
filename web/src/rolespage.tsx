@@ -16,7 +16,8 @@ import { choicesQ } from "./chat/choices";
 import { validNick } from "./chat/channel/lib";
 import { ModelList, modelView, presetName } from "./chat/meters";
 import { Choose } from "./choose";
-import { FacePick } from "./facepick";
+import { asDataURL, FacePick } from "./facepick";
+import { Crop } from "./profile";
 import { t, useLang } from "./i18n";
 import { agentsQ, useMachines } from "./data";
 import { HostPersonas, PersonaEditor, PersonaRow } from "./persona";
@@ -175,6 +176,8 @@ function RolePage({ role, onBack }: { role: Role; onBack: () => void }) {
   const [sure, setSure] = useState(false);
   const [busy, setBusy] = useState(false);
   const [persona, setPersona] = useState(false);
+  // A picture chosen for the face, being cropped round as 编辑资料's is (a page of its own).
+  const [picture, setPicture] = useState<string | null>(null);
   const patch = async (p: RolePatch) => {
     try {
       const got = await api.patchRole(role.id, p);
@@ -199,6 +202,20 @@ function RolePage({ role, onBack }: { role: Role; onBack: () => void }) {
   const asked = useQuery(choicesQ(role.agent, placeOf(role))).data;
   const v = modelView({ agent: role.agent, models: asked?.models.length ? asked.models : undefined, efforts: asked?.efforts, pick: role.model, model: role.model, ran: asked?.ran, effortOwn: asked?.effort });
   const presets = asked?.presets?.presets ?? [];
+  if (picture)
+    return (
+      <div className="g-slide flex h-full flex-col overflow-y-auto">
+        <Crop
+          src={picture}
+          onCancel={() => setPicture(null)}
+          onDone={(b) =>
+            void asDataURL(b)
+              .then((avatar) => patch({ avatar }))
+              .then((ok) => ok && setPicture(null))
+          }
+        />
+      </div>
+    );
   if (persona)
     return (
       <div className="g-slide flex h-full flex-col">
@@ -230,7 +247,7 @@ function RolePage({ role, onBack }: { role: Role; onBack: () => void }) {
             <Field key={role.intro ?? ""} value={role.intro ?? ""} label={t("profile.intro")} save={(intro) => patch({ intro })} lines maxLength={200} className="w-full py-1.5" />
           </Item>
           <PersonaRow value={role.persona} open={() => setPersona(true)} />
-          <FacePick label={t("profile.avatar")} preview={<RoleFace role={role} size={28} />} set={(avatar) => patch({ avatar })} />
+          <FacePick label={t("profile.avatar")} preview={<RoleFace role={role} size={28} />} set={(avatar) => patch({ avatar })} upload={(f) => setPicture(URL.createObjectURL(f))} />
           <FacePick label={t("profile.background")} preview={<RoleBanner role={role} className="h-7 w-12 rounded-md" />} set={(background) => patch({ background })} />
           {v.models.length > 0 && (
             <Item label={t("composer.model")}>
