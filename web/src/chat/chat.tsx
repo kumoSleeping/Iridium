@@ -335,9 +335,10 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
   const composer = useRef<ComposerHandle>(null);
   const [modelOpen, setModelOpen] = useState(false);
   const [modeOpen, setModeOpen] = useState(false);
-  // The context's popover, at the ring after the model name of the agent's latest turn (/context
-  // opens it).
-  const [ctxOpen, setCtxOpen] = useState(false);
+  // The context's popover, by the key of the turn whose ring it is at: /context opens it at the
+  // agent's latest turn. Each ring is controlled by it, so one opened stays the only one open as
+  // turns come after it, and closes on a press outside or Esc.
+  const [ctxAt, setCtxAt] = useState<string | null>(null);
   // By the blocks alone: a draft's next piece (ten a second) draws no settled row again.
   const shown = useMemo(() => folded(log.blocks), [log.blocks]);
   const sent = useMemo(() => dispatched(shown), [shown]);
@@ -754,12 +755,12 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
   // 2026-11-13): the context's ring, the quota's bars; each pressed, its popover.
   // The agent's latest turn: the ring /context opens. None yet: the command is the agent's.
   const ctxTurn = turns.findLastIndex((x) => x.kind === "agent" || (x.kind === "works" && x.rows.length > 0));
-  const openContext = () => ctxTurn >= 0 && !!s.context?.max && (setCtxOpen(true), true);
+  const openContext = () => ctxTurn >= 0 && !!s.context?.max && (setCtxAt(turns[ctxTurn]!.key), true);
   acts.current.openContext = openContext;
-  const bars = (last: boolean) =>
+  const bars = (key: string) =>
     s && (
       <span className="flex shrink-0 items-center">
-        <ContextRing session={s.id} summary={s.context} tokens={s.tokens} compact {...(last ? { open: ctxOpen, onOpenChange: setCtxOpen } : {})} />
+        <ContextRing session={s.id} summary={s.context} tokens={s.tokens} compact open={ctxAt === key} onOpenChange={(o) => setCtxAt(o ? key : (k) => (k === key ? null : k))} />
         <QuotaBars agent={s.agent} machine={s.machine} live={s.live} using={[s.model, s.pick, modelView(s).name]} compact />
       </span>
     );
@@ -804,13 +805,13 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
             x.kind === "one" ? (
               x.node
             ) : x.kind === "agent" ? (
-              <AgentTurn key={x.key} channel={id} a={i === tailAt && !headless ? face : resting} may={may} call={may ? callAt : undefined} bars={bars(i === ctxTurn)} talk={talk} time={began(x.rows)}>
+              <AgentTurn key={x.key} channel={id} a={i === tailAt && !headless ? face : resting} may={may} call={may ? callAt : undefined} bars={bars(x.key)} talk={talk} time={began(x.rows)}>
                 {rowsOf(x.rows, !(liveNow && i === tailAt), x.key)}
               </AgentTurn>
             ) : (
               <Relayed key={x.key} given={x.works.given} relay={x.works.relay} name={nameOf(x.works.given)} time={x.works.time} onJump={openChat}>
                 {x.rows.length > 0 && (
-                  <AgentTurn channel={id} a={i === tailAt && !headless ? face : resting} may={may} call={may ? callAt : undefined} bars={bars(i === ctxTurn)} talk={talk} time={began(x.rows)}>
+                  <AgentTurn channel={id} a={i === tailAt && !headless ? face : resting} may={may} call={may ? callAt : undefined} bars={bars(x.key)} talk={talk} time={began(x.rows)}>
                     {rowsOf(x.rows, !(liveNow && i === tailAt), x.key)}
                   </AgentTurn>
                 )}
@@ -822,7 +823,7 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
   // several agents writing at once the page lost its frames). stamp: what the turns are drawn
   // from but the drafts, each as it is (the same thing while unchanged); the last turn, and one
   // with a draft in it, are drawn each time.
-  const stamp: unknown[] = [id, log.blocks, s, list, members, may, self, terminals, workspaces, machines, nicks, P, ready, msgs, side.reads, ...side.states, busy, compacting, waking, liveNow, liveTurn.current, headless, tailAt, turns[ctxTurn]?.key, ctxOpen, pendingShown, face.nick, face.name, face.status, cwd, document.documentElement.lang];
+  const stamp: unknown[] = [id, log.blocks, s, list, members, may, self, terminals, workspaces, machines, nicks, P, ready, msgs, side.reads, ...side.states, busy, compacting, waking, liveNow, liveTurn.current, headless, tailAt, ctxAt, pendingShown, face.nick, face.name, face.status, cwd, document.documentElement.lang];
   if (stamp.length !== drawnTurns.current.stamp.length || stamp.some((v, i) => v !== drawnTurns.current.stamp[i])) drawnTurns.current = { stamp, nodes: new Map() };
   const drafted = new Set(log.drafts.map((d) => `${d.proc}.${d.n}`));
   const turnBox = (x: (typeof turns)[number], i: number) => {
@@ -885,7 +886,7 @@ function WholeChat({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: numbe
             </div>
           ) : log.loaded && (busy && !waking ? (
             headless ? (
-              <AgentTurn channel={id} a={face} may={may} call={may ? callAt : undefined} bars={bars(false)} talk={talk}>
+              <AgentTurn channel={id} a={face} may={may} call={may ? callAt : undefined} bars={bars("")} talk={talk}>
                 {activity}
               </AgentTurn>
             ) : (
