@@ -229,8 +229,8 @@ function RolePage({ role, onBack }: { role: Role; onBack: () => void }) {
           </IconKey>
           <h1 className="m-0 min-w-0 flex-1 truncate text-base font-semibold">{t("profile.persona")}</h1>
         </header>
-        <div className="no-bar min-h-0 flex-1 overflow-y-auto px-3 pt-2 pb-4">
-          <PersonaEditor value={role.persona} save={(v) => patch({ persona: v }).then((ok) => ok || Promise.reject(new Error(t("err.action"))))} />
+        <div className="flex min-h-0 flex-1 flex-col px-3 pt-2 pb-4">
+          <PersonaEditor fill value={role.persona} save={(v) => patch({ persona: v }).then((ok) => ok || Promise.reject(new Error(t("err.action"))))} />
         </div>
       </div>
     );

@@ -35,11 +35,11 @@ export function PersonaRow({ value, open, className }: { value?: string; open: (
 const whence = (p: HostPersona) => [p.from, p.machineName].filter(Boolean).join(" · ");
 
 /** The personas the hosts give, each a row; take: one pressed. None: nothing drawn. */
-export function HostPersonas({ take }: { take: (p: HostPersona) => void }) {
+export function HostPersonas({ take, className }: { take: (p: HostPersona) => void; className?: string }) {
   const list = useQuery(hostPersonasQ).data ?? [];
   if (!list.length) return null;
   return (
-    <section className="flex flex-col pt-3">
+    <section className={cn("flex flex-col pt-3", className)}>
       <h3 className="m-0 mb-1 text-xs font-medium text-ink-3">{t("profile.personaImport")}</h3>
       {list.map((p) => (
         <button key={`${p.machine ?? ""}\n${p.agent}\n${p.id}`} type="button" onClick={() => take(p)} className="g-press -mx-1.5 flex min-h-11 flex-col justify-center rounded-md px-1.5 py-1 text-left hover:bg-fill">
@@ -55,8 +55,10 @@ export function HostPersonas({ take }: { take: (p: HostPersona) => void }) {
 }
 
 /** A persona written whole: saved as it is left, if changed (Enter is a line's end); the hosts'
- *  personas under it, one pressed put in place of what is written and saved. */
-export function PersonaEditor({ value, save }: { value?: string; save: (v: string) => Promise<unknown> }) {
+ *  personas under it, one pressed put in place of what is written and saved. Never dragged to a
+ *  size (otae, 2026-11-22): fill, it takes its page's height (the settings), the hosts' list under
+ *  it scrolling apart; else a fixed height (编辑资料's popover). */
+export function PersonaEditor({ value, save, fill }: { value?: string; save: (v: string) => Promise<unknown>; fill?: boolean }) {
   const [draft, setDraft] = useState(value ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -78,8 +80,8 @@ export function PersonaEditor({ value, save }: { value?: string; save: (v: strin
   };
   const n = [...draft].length;
   return (
-    <div className="flex flex-col">
-      <div className="flex items-baseline gap-2 pb-1.5">
+    <div className={cn("flex flex-col", fill && "min-h-0 flex-1")}>
+      <div className="flex shrink-0 items-baseline gap-2 pb-1.5">
         <span className="min-w-0 flex-1 truncate text-xs text-ink-3">{t("profile.personaHint")}</span>
         {busy && <LoaderCircle size={12} className="animate-spin self-center text-ink-3" />}
         <span className={cn("text-xs tabular-nums", n > PersonaMax ? "text-err" : "text-ink-3")}>{`${n}/${PersonaMax}`}</span>
@@ -92,10 +94,10 @@ export function PersonaEditor({ value, save }: { value?: string; save: (v: strin
         onBlur={() => ((focused.current = false), void put(draft))}
         onChange={(e) => (setDraft(e.target.value), setError(""))}
         onKeyDown={(e) => e.key === "Escape" && (e.preventDefault(), e.stopPropagation(), setDraft(value ?? ""), (e.target as HTMLElement).blur())}
-        className="no-ring h-72 w-full min-w-0 resize-none overflow-y-auto rounded-md bg-fill px-2.5 py-1.5 text-base leading-5 placeholder:text-ink-3"
+        className={cn("no-ring no-bar w-full min-w-0 resize-none overflow-y-auto rounded-lg bg-fill-2 px-3 py-2.5 text-sm leading-6 placeholder:text-ink-3", fill ? "min-h-40 flex-1" : "h-72")}
       />
-      {error && <p className="m-0 px-0.5 pt-1 text-xs text-err">{error}</p>}
-      <HostPersonas take={(p) => (setDraft(p.text), void put(p.text))} />
+      {error && <p className="m-0 shrink-0 px-0.5 pt-1 text-xs text-err">{error}</p>}
+      <HostPersonas take={(p) => (setDraft(p.text), void put(p.text))} className={cn(fill && "no-bar max-h-[40%] shrink-0 overflow-y-auto")} />
     </div>
   );
 }
