@@ -636,6 +636,7 @@ export const en: Dict = {
   "settings.installMac": "File menu",
   "settings.pushOn": "Web Push",
   "settings.updateReady": "Update available",
+  "settings.updateAsk": "Update to {v}",
   "settings.updateTo": "Version {v}",
   "settings.update": "Update",
   "settings.current": "Current version {v}",

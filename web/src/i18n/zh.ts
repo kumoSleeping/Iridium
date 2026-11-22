@@ -637,6 +637,7 @@ export const zh = {
   "settings.pushOn": "Web Push",
   "settings.updateReady": "有新版本",
   "settings.updateTo": "新版本 {v}",
+  "settings.updateAsk": "更新到 {v}",
   "settings.update": "更新",
   "settings.current": "当前版本 {v}",
 
