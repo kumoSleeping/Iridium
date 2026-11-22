@@ -6,7 +6,7 @@ import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 import { dshMethods } from '../dsh.js'
-import { apply, personaFor, personaLib, personaPatch, personasOf, personaText, withPersona } from '../persona.js'
+import { apply, holdPersona, modulesOf, personaFor, personaLib, personaPatch, personasOf, personaText } from '../persona.js'
 
 /** A fake of the plugin's modules (OMD's plugins/persona/src/shared), as files in a profile. */
 const PERSONALITY = `
@@ -71,23 +71,31 @@ test("a session's persona: the Iridium's, else Desktop's for it", async () => {
   const lib = await personaLib(profile())
   const ctx = ctxOf({ dshPersona: service({ identityPrompt: 'Global.' }, { chosen: { identity: 'Mine.' } }) })
   assert.deepEqual(personaFor(ctx, lib, 's', true), { own: true })
-  assert.deepEqual(personaFor(ctx, lib, 's', false), { sections: [{ name: 'dsh-persona:identity', text: 'Global.\n\nScope.' }] })
-  assert.deepEqual(personaFor(ctx, lib, 'chosen', false), { sections: [{ name: 'dsh-persona:identity', text: 'Mine.\n\nScope.' }] })
+  assert.deepEqual(personaFor(ctx, lib, 's', false), { modules: { identity: 'Global.', style: '', communication: '', presentation: '' } })
+  assert.deepEqual(personaFor(ctx, lib, 'chosen', false), { modules: { identity: 'Mine.', style: '', communication: '', presentation: '' } })
   assert.match(personaPatch({ own: true }), /id: remote-iridium-persona\n {6}name: "file:.*persona\.js"\n {6}config: \{"own":true\}\n$/)
 })
 
-test("in the session's process: the plugin's sections out, its mark in, whichever runs first", async () => {
-  const base = { sections: [{ name: 'harness', text: 'H' }] }
-  const omd = { name: 'dsh-persona:identity', text: 'sdk store' }
-  const mark = { name: 'dsh-persona:applied', text: '', interpolate: false }
-  // Run inside the plugin's (it adds after): its mark makes it add nothing.
-  assert.deepEqual(withPersona(base, { own: true }), { sections: [base.sections[0], mark] })
-  // Run outside it (it has added): its sections taken out, Desktop's put in.
-  const desk = { name: 'dsh-persona:identity', text: 'Desktop' }
-  assert.deepEqual(withPersona({ sections: [...base.sections, omd] }, { sections: [desk] }), { sections: [base.sections[0], { ...desk, interpolate: false }, mark] })
-  let hook
-  apply({ on: (name, fn, o) => (assert.equal(name, 'system-prompt/assemble'), assert.ok(o.global), (hook = fn)) }, { own: true })
-  assert.deepEqual(await hook(null, {}, async () => ({ sections: [omd] })), { sections: [mark] })
+test("in the session's process: every ask of the plugin's service answered with the persona held", async () => {
+  // As OMD 1.9 has it: forPrompt (its presets' main prompt) asks forSession, as its sections do.
+  const service = { forSession: (s) => ({ preset: 'custom', modules: { identity: 'sdk store default', style: 'S' } }) }
+  service.forPrompt = (s) => service.forSession(s)
+  const off = modulesOf({ own: true })
+  assert.deepEqual(off, { identity: '', style: '', communication: '', presentation: '' })
+  const back = holdPersona(service, off)
+  assert.deepEqual(service.forPrompt({ id: 'x' }), { preset: 'custom', modules: off })
+  assert.deepEqual(service.forSession({ id: 'x' }).modules, off)
+  back()
+  assert.equal(service.forSession({ id: 'x' }).modules.identity, 'sdk store default')
+  assert.deepEqual(modulesOf({ modules: { identity: 'Desktop' } }), { identity: 'Desktop', style: '', communication: '', presentation: '' })
+  assert.equal(modulesOf({}), null)
+  // apply: held once the service is there, put back as the plugin goes.
+  let effect
+  const ctx = { inject: (deps, fn) => (assert.deepEqual(deps, ['dshPersona']), fn({ get: () => service, effect: (f) => (effect = f()) })) }
+  apply(ctx, { own: true })
+  assert.equal(service.forPrompt({ id: 'y' }).modules.identity, '')
+  effect()
+  assert.equal(service.forPrompt({ id: 'y' }).modules.identity, 'sdk store default')
 })
 
 test('agent.personas and agent.prepare through the methods', async () => {
@@ -100,7 +108,7 @@ test('agent.personas and agent.prepare through the methods', async () => {
   assert.deepEqual(own.patches, [path.join(dir, 'abc.persona.patch.yml')])
   assert.match(fs.readFileSync(own.patches[0], 'utf8'), /config: \{"own":true\}/)
   const desk = await m['agent.prepare']({ agent: 'dsh', session: 'abc' })
-  assert.match(fs.readFileSync(desk.patches[0], 'utf8'), /"sections":\[\{"name":"dsh-persona:identity","text":"G\.\\n\\nScope\."\}\]/)
+  assert.match(fs.readFileSync(desk.patches[0], 'utf8'), /config: \{"modules":\{"identity":"G\.","style":"","communication":"","presentation":""\}\}/)
   // No persona plugin: no patch, no personas.
   const none = dshMethods(ctxOf({}), undefined, {}, { dir, personaLib: async () => null })
   assert.deepEqual((await none['agent.prepare']({ agent: 'dsh', session: 'abc', persona: 'own' })).patches, [])

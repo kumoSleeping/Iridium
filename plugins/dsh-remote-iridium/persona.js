@@ -7,11 +7,12 @@
 // together here: the Iridium does not know them); and, for a session the Iridium starts here, a
 // patch (personaPatch) that loads this file in that process with what its persona is to be:
 //   own: the session has a persona of the Iridium's (in its system prompt): the plugin's give way;
-//   sections: Desktop's for this session as the plugin itself would add them (Desktop's choice for
-//     it, else Desktop's global one), in place of the ones the plugin there reads from the sdk
-//     profile's own store (none: no persona).
-// In that process (apply): on each assembly of the system prompt, the plugin's sections out, these
-// in, and its own mark that it applied, so it adds none (a section named dsh-persona:applied).
+//   modules: Desktop's for this session (Desktop's choice for it, else Desktop's global one), in
+//     place of what the plugin there reads from the sdk profile's own store.
+// In that process (apply): the plugin's service answers every ask for this process's persona with
+// those (own: all empty, as its "关闭人格"). Every way the plugin puts a persona in a prompt asks
+// it so: its sections at the prompt's end, and OMD's own presets, which write it into their head
+// (1.9: oh-my-dsh:persona, through forPrompt, which asks forSession).
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -25,9 +26,8 @@ const PLACES = [
   { dir: '@gulagala001/dsh-persona-plugin/src/shared', from: 'Persona' },
 ]
 
-/** The prefix of the plugin's sections, and its mark that it applied. */
-const PREFIX = 'dsh-persona:'
-const APPLIED = 'dsh-persona:applied'
+/** A persona of none: every part empty (the plugin's own "off"). */
+const OFF = Object.freeze({ identity: '', style: '', communication: '', presentation: '' })
 
 /** The parts after the first, in their order: each under its own heading. */
 const PARTS = ['style', 'communication', 'presentation']
@@ -88,15 +88,15 @@ export function personasOf(ctx, lib) {
 
 /**
  * What a session the Iridium starts here takes (agent.prepare): own, its persona is the Iridium's;
- * else Desktop's sections for it (its choice for session, else the global one), as the plugin
- * adds them. null: no persona plugin here, nothing to change.
+ * else Desktop's modules for it (its choice for session, else the global one). null: no persona
+ * plugin here, nothing to change.
  */
 export function personaFor(ctx, lib, session, own) {
   const service = ctx.get('dshPersona')
   if (!service || !lib) return null
   if (own) return { own: true }
-  const assembly = lib.prompt.applyPersonality({ sections: [] }, { agent: { session: { id: session, header: {} } } }, service)
-  return { sections: (assembly?.sections ?? []).filter((s) => typeof s?.name === 'string' && typeof s.text === 'string').map((s) => ({ name: s.name, text: s.text })) }
+  const modules = service.forSession({ id: session, header: {} })?.modules ?? {}
+  return { modules: Object.fromEntries(Object.keys(OFF).map((k) => [k, typeof modules[k] === 'string' ? modules[k] : ''])) }
 }
 
 /** The patch that loads this file in a session's dsh process with config (personaFor's). */
@@ -112,15 +112,31 @@ export function personaPatch(config) {
   return out.join('\n') + '\n'
 }
 
-/** The system prompt's sections with config's persona in place of the plugin's. */
-export function withPersona(assembly, config) {
-  if (!assembly || !Array.isArray(assembly.sections)) return assembly
-  const kept = assembly.sections.filter((s) => !(typeof s?.name === 'string' && s.name.startsWith(PREFIX)))
-  const ours = config?.own ? [] : (config?.sections ?? []).map((s) => ({ name: s.name, text: s.text, interpolate: false }))
-  return { ...assembly, sections: [...kept, ...ours, { name: APPLIED, text: '', interpolate: false }] }
+/** The modules a process's persona is to be, as config says; none: as the plugin has them. */
+export const modulesOf = (config) => (config?.own ? OFF : config?.modules && typeof config.modules === 'object' ? { ...OFF, ...config.modules } : null)
+
+/**
+ * service (the plugin's dshPersona) answering with modules for every session, till the returned
+ * function puts it back.
+ */
+export function holdPersona(service, modules) {
+  const own = service.forSession
+  service.forSession = function (session) {
+    return { ...own.call(this, session), modules: { ...modules } }
+  }
+  return () => {
+    service.forSession = own
+  }
 }
 
-/** In a session's dsh process: its persona as config says, on each assembly of its prompt. */
+/** In a session's dsh process: its persona as config says, once the plugin's service is there. */
 export function apply(ctx, config) {
-  ctx.on('system-prompt/assemble', async (_initial, _context, next) => withPersona(await next(), config), { global: true })
+  const modules = modulesOf(config)
+  if (!modules) return
+  ctx.inject(['dshPersona'], (ctx) => {
+    const service = ctx.get('dshPersona')
+    if (typeof service?.forSession !== 'function') return
+    const back = holdPersona(service, modules)
+    ctx.effect(() => back, 'remote-iridium: the persona held')
+  })
 }

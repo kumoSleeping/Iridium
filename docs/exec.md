@@ -213,10 +213,10 @@ agent 的 `ir sh`：每条命令一个新进程，不经托管进程，不写文
 
 本机（2026-11-11）：本机的 DSH Desktop 装了插件、配对到本机的 Iridium 时（握手的 `machineID` 同这边的，它的 agent 不当一台机器收），这边在本机起 dsh 和探测模型也问它（`agent.presets`、`agent.prepare`），用它握手报的 dsh（Desktop 自带的）起，所以本机的会话也有 Desktop 的模型、预设和 OMD。它给的补丁必须是本机用户自己的、别人不可写的普通文件，不是就不用（`internal/harness/dsh/ownfile_*.go`）。
 
-人格（otae，2026-11-22）：OMD 的人格写在它的主体里（`src/runtime.mjs` 起 `plugins/persona`），装了 OMD 的 Desktop 拼出来的会话都带着它；它在系统提示最后追加几段（段名 `dsh-persona:` 开头），数据按 profile 分开存（`~/.dsh/dsh-persona-plugin/<profile 目录的 sha256 前 16 位>/`）。所以 Iridium 起的会话（`--profile sdk`）用的是 sdk 那份，不是 Desktop（web）那份，在 Desktop 里换人格管不到它们。插件这样处理，只有插件里认识 OMD 的那个文件知道这些：
+人格（otae，2026-11-22）：OMD 的人格写在它的主体里（`src/runtime.mjs` 起 `plugins/persona`），装了 OMD 的 Desktop 拼出来的会话都带着它；它进系统提示有两条路：在最后追加几段（段名 `dsh-persona:` 开头），用 OMD 自己的预设时（1.9 起）写进开头的身份段（`oh-my-dsh:persona`）；两条都向它的服务（`dshPersona`）的 `forSession` 要这个会话的人格。数据按 profile 分开存（`~/.dsh/dsh-persona-plugin/<profile 目录的 sha256 前 16 位>/`）。所以 Iridium 起的会话（`--profile sdk`）用的是 sdk 那份，不是 Desktop（web）那份，在 Desktop 里换人格管不到它们。插件这样处理，只有插件里认识 OMD 的那个文件知道这些：
 - `agent.personas`：读 Desktop 的人格库（内置的、自建的、自定义的，不列“关闭人格”），身份一块在前，语言风格、沟通方式、回答呈现各加一个小标题接在后面，不带它每块附的英文范围说明。
-- `persona: "own"`：在会话进程里去掉 `dsh-persona:` 开头的段。OMD 改了段名就失效，结果是设定和它的人格叠在一起，不会出错。
-- 不给 `persona`：让会话进程读 Desktop 那份人格，和 Desktop 一致。
+- `persona: "own"`：会话进程里接管人格服务的 `forSession`，对这个进程的会话都答“全空”（同它的“关闭人格”），两条路都拿不到人格（2026-11-22 实测 OMD 1.9.2：只去掉末尾的段时，OMD 预设开头的身份照旧在）。
+- 不给 `persona`：插件在 Desktop 里取这个会话的人格（Desktop 给它选的，否则全局的），会话进程的 `forSession` 答它，和 Desktop 一致。
 - 没装插件的机器：这边自己拼补丁（`internal/agent/dsh`），不带 OMD，没有这些。插件旧、没报这两项能力：网页上没有导入，设定和 OMD 的人格叠在一起。
 
 插件以后从这个仓库独立出去（otae，2026-11-22）：这边只认本文写的协议，按握手的 `caps` 用，不比版本号；认识 OMD 和别的第三方包的代码只在插件里（`omd.js` 这类文件）。迁出时 release.yml 里发 npm 的那一步搬过去，插件用自己的版本号，安装说明的包地址跟着改。
