@@ -635,6 +635,15 @@ func (u *ui) login(w *mygo.Window, arg string) {
 		return
 	}
 	c, _ := loadConfig()
+	// One in the list and logged in, typed or pasted again: opened, its login kept. Logged in
+	// anew it asked for the browser's allow again (StarFreedomX, 2026-11-23).
+	if s := c.server(a); s != nil && invite == "" && (s.LoggedIn || s.Local && loopback(s.URL)) {
+		st := state(c)
+		st["done"] = a
+		reply(w, st)
+		u.switchTo(a)
+		return
+	}
 	if c.server(a) == nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		err := isIridium(ctx, a)
