@@ -110,8 +110,9 @@ export function Login() {
       const server = typeof d.server === "string" ? d.server : undefined;
       if (typeof d.code === "string") {
         setNote({ text: `在浏览器中核对代码 ${d.code} 后允许`, server });
-        // An address typed is in the list now: its wait is its row's, the field put away.
-        if (server) setBusy((b) => (b === "+" ? server : b));
+        // An address typed is in the list now: its wait is its row's, the field put away. One
+        // the app began (an Iridium's window at its login page, gui.go needlogin) spins its row too.
+        if (server) setBusy((b) => (b === "+" || b === "" ? server : b));
       }
       // Logged in (gui.go "done"): the wait over, its spinner and its code gone (kumo,
       // 2026-11-22: it spun on, and the next 添加服务器 spun before anything was typed).

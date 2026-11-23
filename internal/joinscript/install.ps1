@@ -114,6 +114,9 @@
         $s = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk)
         $s.TargetPath = $exe
         $s.WorkingDirectory = $prefix
+        # Minimised: iridium.exe is a console program (its CLI), its console let go as the app starts;
+        # shown, it flashed up first.
+        $s.WindowStyle = 7
         $s.Save()
     } catch { Write-Host "No Start menu entry: $_" }
     # Not exit: run through iex, that would close the person's window.

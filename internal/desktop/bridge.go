@@ -63,11 +63,15 @@ function fire(){window.dispatchEvent(new Event("wails:runtime-config-ready"))}
 if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",fire);else fire();
 })();` + css(`[data-app-drag]{--app-region:drag}`)
 
-// css is JavaScript that puts style in the page as it starts.
+// css is JavaScript that puts style in the page as it starts. WebView2 runs the preload before the
+// document has its <html> (WebKit after): appended to nothing it threw, and the rest of the preload
+// after it never ran (QGI, 2026-11-23: on Windows no window dragged, and no page error was logged).
+// So the style waits for the element there.
 func css(style string) string {
 	b, _ := json.Marshal(style)
 	return `(function(){var s=document.createElement("style");s.textContent=` + string(b) +
-		`;(document.head||document.documentElement).appendChild(s)})();`
+		`;function put(){var p=document.head||document.documentElement;if(!p)return false;p.appendChild(s);return true}` +
+		`if(!put()){var o=new MutationObserver(function(){if(put())o.disconnect()});o.observe(document,{childList:true})}})();`
 }
 
 // replies go to the pages in order, one at a time, off the main thread: a page's Eval waits for

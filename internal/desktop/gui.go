@@ -379,10 +379,18 @@ func (u *ui) message(w *mygo.Window, msg, origin string, logf func(string, ...an
 		}
 	case "needlogin":
 		// The Iridium's login page, in the app: the app's own instead (its passkey is in the browser).
-		// Its window is given up (a window shows an Iridium's page only); the picker logs in.
+		// Its window is given up (a window shows an Iridium's page only); the picker logs in, at
+		// once: the window gone and nothing more looked like a crash, the login only at the next
+		// press (QGI, 2026-11-23, an Iridium first opened in a new app).
 		if _, err := updateConfig(func(c *Config) { c.Current = server; c.server(server).LoggedIn = false }); err == nil {
 			u.vacate(u.nameOf(w))
 			u.showPicker()
+			u.mu.Lock()
+			p := u.picker
+			u.mu.Unlock()
+			if p != nil {
+				go u.login(p, server)
+			}
 		}
 	case "hello":
 		reply(w, u.hello(c, server))
@@ -604,74 +612,80 @@ func (u *ui) local(w *mygo.Window, verb, arg string) {
 			_, _ = updateConfig(func(c *Config) { c.Me = me })
 		}
 	case "login":
-		go func() {
-			// An invite link (…/_ir/join…): its Iridium's address, the invite registered in the
-			// browser on the way to the app's login (kumo, 2026-11-22: pasted, handled).
-			invite := ""
-			if o, ok := inviteOrigin(arg); ok {
-				invite, arg = strings.TrimSpace(arg), o
-			}
-			a, err := normalize(arg)
-			if err != nil {
-				reply(w, map[string]string{"error": "地址无效"})
-				return
-			}
-			c, _ := loadConfig()
-			if c.server(a) == nil {
-				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-				err := isIridium(ctx, a)
-				cancel()
-				if err != nil {
-					reply(w, map[string]string{"error": err.Error()})
-					return
-				}
-				// Typed here by the person: in the list, shown; joined only by its switch.
-				if c, err = updateConfig(func(c *Config) { c.add(a) }); err != nil {
-					reply(w, map[string]string{"error": err.Error()})
-					return
-				}
-				u.joins.Sync(c)
-				u.redraw()
-				st := state(c)
-				st["added"] = true
-				reply(w, st)
-			}
-			name := c.Name
-			if name == "" {
-				name = join.MachineName()
-			}
-			open := mygo.Shell.OpenExternal
-			if invite != "" {
-				me := c.Me.Name
-				if me == "" {
-					cu, _ := user.Current()
-					me = ownName(cu)
-				}
-				open = func(appURL string) error { return mygo.Shell.OpenExternal(inviteFor(invite, appURL, me)) }
-			}
-			browserLogin(a, name, open, func(m map[string]string) {
-				m["server"] = a
-				reply(w, m)
-			}, func(link, who string) {
-				_, _ = updateConfig(func(c *Config) {
-					if s := c.server(a); s != nil {
-						s.LoggedIn = true
-						if who != "" {
-							s.Name = who
-						}
-					}
-					c.Current = a
-				})
-				// The picker's wait is over: its spinner and its code go (kumo, 2026-11-22: it spun
-				// on after the login, and the next 添加服务器 began spinning at once).
-				c, _ := loadConfig()
-				st := state(c)
-				st["done"] = a
-				reply(w, st)
-				u.openIn(a, link)
-			})
-		}()
+		go u.login(w, arg)
 	}
+}
+
+// login logs the window in to arg (an address, or an invite link) from the system's browser: arg
+// put in the list first if it is not there, w (the picker) told the code to check and, once the
+// person allows it, that it is done; the Iridium is then opened.
+func (u *ui) login(w *mygo.Window, arg string) {
+	state := u.pageState
+	// An invite link (…/_ir/join…): its Iridium's address, the invite registered in the
+	// browser on the way to the app's login (kumo, 2026-11-22: pasted, handled).
+	invite := ""
+	if o, ok := inviteOrigin(arg); ok {
+		invite, arg = strings.TrimSpace(arg), o
+	}
+	a, err := normalize(arg)
+	if err != nil {
+		reply(w, map[string]string{"error": "地址无效"})
+		return
+	}
+	c, _ := loadConfig()
+	if c.server(a) == nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		err := isIridium(ctx, a)
+		cancel()
+		if err != nil {
+			reply(w, map[string]string{"error": err.Error()})
+			return
+		}
+		// Typed here by the person: in the list, shown; joined only by its switch.
+		if c, err = updateConfig(func(c *Config) { c.add(a) }); err != nil {
+			reply(w, map[string]string{"error": err.Error()})
+			return
+		}
+		u.joins.Sync(c)
+		u.redraw()
+		st := state(c)
+		st["added"] = true
+		reply(w, st)
+	}
+	name := c.Name
+	if name == "" {
+		name = join.MachineName()
+	}
+	open := mygo.Shell.OpenExternal
+	if invite != "" {
+		me := c.Me.Name
+		if me == "" {
+			cu, _ := user.Current()
+			me = ownName(cu)
+		}
+		open = func(appURL string) error { return mygo.Shell.OpenExternal(inviteFor(invite, appURL, me)) }
+	}
+	browserLogin(a, name, open, func(m map[string]string) {
+		m["server"] = a
+		reply(w, m)
+	}, func(link, who string) {
+		_, _ = updateConfig(func(c *Config) {
+			if s := c.server(a); s != nil {
+				s.LoggedIn = true
+				if who != "" {
+					s.Name = who
+				}
+			}
+			c.Current = a
+		})
+		// The picker's wait is over: its spinner and its code go (kumo, 2026-11-22: it spun
+		// on after the login, and the next 添加服务器 began spinning at once).
+		c, _ := loadConfig()
+		st := state(c)
+		st["done"] = a
+		reply(w, st)
+		u.openIn(a, link)
+	})
 }
 
 // pageState is what the app's own page shows: the Iridiums in the list, with who the window is at
