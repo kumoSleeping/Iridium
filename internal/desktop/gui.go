@@ -413,6 +413,7 @@ func (u *ui) message(w *mygo.Window, msg, origin string, logf func(string, ...an
 		if arg == server {
 			return // not the one the page is on: from another's
 		}
+		stopLogin(arg)
 		if c, err := updateConfig(func(c *Config) { c.remove(arg) }); err == nil {
 			u.joins.Sync(c)
 			u.gone(arg)
@@ -517,6 +518,7 @@ func (u *ui) local(w *mygo.Window, verb, arg string) {
 		c, _ := loadConfig()
 		reply(w, state(c))
 	case "remove":
+		stopLogin(arg)
 		if c, err := updateConfig(func(c *Config) { c.remove(arg) }); err == nil {
 			u.joins.Sync(c)
 			u.gone(arg)
@@ -669,6 +671,10 @@ func (u *ui) login(w *mygo.Window, arg string) {
 		m["server"] = a
 		reply(w, m)
 	}, func(link, who string) {
+		if c, _ := loadConfig(); c.server(a) == nil {
+			reply(w, state(c)) // removed as it was allowed: not opened
+			return
+		}
 		_, _ = updateConfig(func(c *Config) {
 			if s := c.server(a); s != nil {
 				s.LoggedIn = true

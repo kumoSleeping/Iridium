@@ -28,21 +28,33 @@ type loginStart struct {
 	URL  string `json:"url"`
 }
 
-// logins: one at a time for each Iridium; a new one ends the one before.
+// logins: one at a time; a new one, to any Iridium, ends the one before. The picker shows one
+// wait, and a new address pressed while an old one waited did nothing (StarFreedomX, 2026-11-23).
 var logins = struct {
-	mu sync.Mutex
-	m  map[string]context.CancelFunc
-}{m: map[string]context.CancelFunc{}}
+	mu   sync.Mutex
+	at   string
+	stop context.CancelFunc
+}{}
+
+// stopLogin ends the wait for server's login, if one waits (its Iridium removed from the list).
+func stopLogin(server string) {
+	logins.mu.Lock()
+	defer logins.mu.Unlock()
+	if logins.at == server && logins.stop != nil {
+		logins.stop()
+		logins.at, logins.stop = "", nil
+	}
+}
 
 // browserLogin asks server for a login, opens its page in the browser, tells said the code to
 // check, and once the person allows it calls done with the address that logs the web view in.
 func browserLogin(server, name string, open func(string) error, said func(map[string]string), done func(link, who string)) {
 	ctx, cancel := context.WithTimeout(context.Background(), 11*time.Minute)
 	logins.mu.Lock()
-	if stop := logins.m[server]; stop != nil {
-		stop()
+	if logins.stop != nil {
+		logins.stop()
 	}
-	logins.m[server] = cancel
+	logins.at, logins.stop = server, cancel
 	logins.mu.Unlock()
 	go func() {
 		defer cancel()
