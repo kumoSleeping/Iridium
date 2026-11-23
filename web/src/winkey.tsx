@@ -1,12 +1,13 @@
 // The desktop app's window keys (internal/desktop/chrome.go): the windows have no title bar, their
-// keys are the pages' own, the top bar's own icon keys (kumo, 2026-11-22: no round marks). Two of
-// them, no minimise: full screen and close. Full screen is each system's own (kumo, 2026-11-22): a
-// Mac's full screen (its green button), Windows' maximise and back.
-import { Maximize2, Minimize2, Square, Copy, X } from "lucide-react";
+// keys are the pages' own, the top bar's own icon keys (kumo, 2026-11-22: no round marks). Three:
+// minimise (QGI and kumo, 2026-11-23: a window had no way down to the task bar or the Dock), full
+// screen, close. Full screen is each system's own (kumo, 2026-11-22): a Mac's full screen (its green
+// button), Windows' maximise and back.
+import { Maximize2, Minimize2, Minus, Square, Copy, X } from "lucide-react";
 import { t } from "./i18n";
 import { cn, IconKey } from "./ui";
 
-/** Full screen (a Mac) or maximise (Windows, Linux), then close. ask: the app asked a key's verb. */
+/** Minimise, full screen (a Mac) or maximise (Windows, Linux), close. ask: the app asked a key's verb. */
 export function WinKeyPair({
   mac,
   full,
@@ -23,6 +24,9 @@ export function WinKeyPair({
       data-win-keys=""
       className={cn("flex shrink-0 items-center gap-0.5", className)}
     >
+      <IconKey label={t("app.min")} tipSide="bottom" onClick={() => ask("min")}>
+        <Minus size={15} />
+      </IconKey>
       {mac ? (
         <IconKey
           label={full ? t("app.unfull") : t("app.full")}

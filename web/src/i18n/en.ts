@@ -897,6 +897,7 @@ export const en: Dict = {
   "usage.colHit": "Hits",
   "toast.undo": "Undo",
   "app.title": "Iridium app",
+  "app.min": "Minimise",
   "app.max": "Maximise",
   "app.restore": "Restore",
   "app.full": "Full screen",

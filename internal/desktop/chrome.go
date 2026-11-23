@@ -11,10 +11,10 @@ import (
 
 // The windows' frame (kumo, 2026-11-22): no title bar on any system. The window's keys are drawn
 // by the page itself at its top right, its top bar's icon keys (web/src/winkey.tsx, the picker's
-// in web/src/appwin); a Mac's own three buttons are hidden. Two keys, no minimise: full screen and
-// close. Full screen is each system's own: a Mac's full screen (its green button), Windows'
-// maximise (kumo, 2026-11-22). The page's top bar drags the window (chromeJS); on Windows and
-// Linux, where the window has no frame of its own, mygo resizes it from its edges.
+// in web/src/appwin); a Mac's own three buttons are hidden. Three: minimise (QGI and kumo,
+// 2026-11-23), full screen (a Mac's own, its green button's; Windows' maximise), close.
+// The page's top bar drags the window (chromeJS); on Windows and Linux, where the window has no
+// frame of its own, mygo resizes it from its edges.
 
 // bare is o with no title bar: on a Mac a titled window whose bar and buttons are hidden (a
 // frameless one misbehaved there: docs/app.md "窗口框架"), elsewhere a frameless one, the
@@ -29,14 +29,16 @@ func bare(o mygo.WindowOptions) mygo.WindowOptions {
 	return o
 }
 
-// winKey is a window key pressed in a page: full (a Mac's full screen), max (maximised or back),
-// close, reload.
+// winKey is a window key pressed in a page: min, full (a Mac's full screen), max
+// (maximised or back), close, reload.
 func (u *ui) winKey(w *mygo.Window, key string) {
 	if w == nil {
 		return
 	}
 	name := u.nameOf(w)
 	switch key {
+	case "min":
+		w.Minimize()
 	case "max":
 		w.ToggleMaximize()
 	case "full":
@@ -154,7 +156,7 @@ if(ours||!document.body||!document.getElementById("root")||!document.getElementB
 var d=document.createElement("div");d.id="ir-strip";d.setAttribute("data-app-drag","");
 d.style.cssText="position:fixed;top:0;left:0;right:0;height:"+H+"px;z-index:2147483647;display:flex;justify-content:flex-end;align-items:center;gap:2px;padding-right:6px;box-sizing:border-box;background:Canvas;color:CanvasText";
 var k=document.createElement("span");k.setAttribute("data-win-keys","app");k.style.cssText="display:flex;gap:2px";
-[[mac?"full":"max",mac?"\u2922":"\u25a1"],["close","\u2715"]].forEach(function(x){var b=document.createElement("button");b.type="button";b.setAttribute("aria-label",x[0]);b.textContent=x[1];
+[["min","\u2013"],[mac?"full":"max",mac?"\u2922":"\u25a1"],["close","\u2715"]].forEach(function(x){var b=document.createElement("button");b.type="button";b.setAttribute("aria-label",x[0]);b.textContent=x[1];
 b.style.cssText="width:28px;height:24px;border-radius:6px;border:0;padding:0;cursor:default;background:none;color:inherit;opacity:.6;font:13px system-ui";b.onclick=function(){inv("ir:win:"+x[0])};k.appendChild(b)});
 d.appendChild(k);document.body.appendChild(d);document.documentElement.style.setProperty("--ir-strip",H+"px")}
 setInterval(plain,1000);

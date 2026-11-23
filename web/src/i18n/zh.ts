@@ -897,6 +897,7 @@ export const zh = {
   "usage.colHit": "命中",
   "toast.undo": "撤销",
   "app.title": "Iridium 应用",
+  "app.min": "最小化",
   "app.max": "最大化",
   "app.restore": "还原",
   "app.full": "全屏",
