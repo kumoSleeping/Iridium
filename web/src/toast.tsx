@@ -1,7 +1,7 @@
 // Light toasts (plan "风格": frosted, popping in), one manager for the page: an action's receipt or
 // error, a turn done elsewhere with a key to open it.
 import { Toast } from "@base-ui/react/toast";
-import { CircleAlert } from "lucide-react";
+import { CircleAlert, Download, LoaderCircle } from "lucide-react";
 import { ApiError, noAnswer } from "./api/client";
 import type { Agent } from "./api/types.gen";
 import { t } from "./i18n";
@@ -9,12 +9,13 @@ import { Logo } from "./ui";
 
 export const toasts = Toast.createToastManager();
 
-type Data = { agent?: Agent; jump?: string; error?: boolean; undo?: () => void };
+/** mark: the icon before the words: busy (a spinner, as a download goes), download (one done). */
+type Data = { agent?: Agent; jump?: string; error?: boolean; undo?: () => void; mark?: "busy" | "download" };
 
 /** A toast: title, maybe a line after it; error ones stay 8 s. undo: a key that takes back what
  *  was done, the toast staying 6 s. */
-export function toast(title: string, opts: { description?: string; error?: boolean; agent?: Agent; jump?: string; timeout?: number; undo?: () => void } = {}): string {
-  return toasts.add({ title, description: opts.description, timeout: opts.timeout ?? (opts.error ? 8000 : opts.undo ? 6000 : 2500), data: { agent: opts.agent, jump: opts.jump, error: opts.error, undo: opts.undo } satisfies Data });
+export function toast(title: string, opts: { description?: string; error?: boolean; agent?: Agent; jump?: string; timeout?: number; undo?: () => void; mark?: Data["mark"] } = {}): string {
+  return toasts.add({ title, description: opts.description, timeout: opts.timeout ?? (opts.error ? 8000 : opts.undo ? 6000 : 2500), data: { agent: opts.agent, jump: opts.jump, error: opts.error, undo: opts.undo, mark: opts.mark } satisfies Data });
 }
 
 /** An error's words for a toast. */
@@ -35,6 +36,8 @@ export function ToastList({ onJump }: { onJump: (id: string) => void }) {
       <Toast.Root key={toast.id} toast={toast} className="g-pop-t glass thick float flex h-10 max-w-full items-center gap-2.5 rounded-full pr-1.5 pl-3.5 text-sm text-ink">
         {d?.agent && <Logo agent={d.agent} size={15} />}
         {d?.error && <CircleAlert size={15} className="shrink-0 text-err" />}
+        {d?.mark === "busy" && <LoaderCircle size={15} className="shrink-0 animate-spin text-ink-3" />}
+        {d?.mark === "download" && <Download size={15} className="shrink-0 text-ink-3" />}
         <Toast.Title className="min-w-0 truncate font-medium" />
         <Toast.Description className="min-w-0 shrink truncate text-ink-2" />
         {d?.undo ? (

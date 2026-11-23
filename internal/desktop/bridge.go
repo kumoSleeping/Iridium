@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"path/filepath"
 	"runtime"
 	"sync"
 	"time"
@@ -272,20 +273,32 @@ func guard(w *mygo.Window, origin string) {
 			go func() { _ = mygo.Shell.OpenExternal(e.URL) }()
 		}
 	})
-	// Each download in the log, its end too; one that failed (an .exe the web view's SmartScreen
-	// stopped, with no word of it: QGI, 2026-11-23) goes to the system's browser, whose own
-	// download asks what the web view could not.
-	p.OnWillDownload(func(e *mygo.DownloadEvent) { appLog()("download %s → %s", pathOf(e.URL), e.Path) })
+	// Each download in the log, its end too, and told to the page as it starts and ends (its toast:
+	// web/src/irapp.ts; the web view shows none, and a download went on unseen: QGI, 2026-11-23).
+	// One that failed (an .exe the web view's SmartScreen stopped, with no word of it) goes to the
+	// system's browser, whose own download asks what the web view could not.
+	tell := func(u, name, state string) {
+		reply(w, map[string]any{"download": map[string]string{"id": u, "name": name, "state": state}})
+	}
+	p.OnWillDownload(func(e *mygo.DownloadEvent) {
+		appLog()("download %s → %s", pathOf(e.URL), e.Path)
+		tell(e.URL, filepath.Base(e.Path), "start")
+	})
 	p.OnDownloadDone(func(d *mygo.Download) {
+		name := filepath.Base(d.Path)
 		switch {
 		case d.Err == nil && d.Path != "":
 			appLog()("download %s done", pathOf(d.URL))
+			tell(d.URL, name, "done")
 			go mygo.Shell.ShowItemInFolder(d.Path)
 		case d.Err != nil:
 			appLog()("download %s failed: %v; in the browser instead", pathOf(d.URL), d.Err)
+			tell(d.URL, name, "failed")
 			if u, err := url.Parse(d.URL); err == nil && (u.Scheme == "http" || u.Scheme == "https") {
 				go func() { _ = mygo.Shell.OpenExternal(d.URL) }()
 			}
+		default:
+			tell(d.URL, name, "gone")
 		}
 	})
 	p.SetPermissionHandler(func(r mygo.PermissionRequest) bool {

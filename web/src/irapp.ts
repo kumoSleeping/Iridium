@@ -3,6 +3,8 @@
 // list, this computer's terms for this one, the app's own), and asks things of it; what would give
 // this Iridium more of the computer the app asks the person in a dialog of its own, never here.
 import { useSyncExternalStore } from "react";
+import { t } from "./i18n";
+import { toast, toasts } from "./toast";
 
 /** An Iridium in the app's list, with this computer as joined to it. */
 export type AppServer = {
@@ -51,8 +53,64 @@ export function ask(verb: string, arg = "") {
   return bridge()?.invoke(`ir:${verb}${arg ? ":" + arg : ""}`);
 }
 
+/** A download the app tells of (bridge.go guard): its toast, by the download's id, as it goes. The
+ *  web view shows none of its own (QGI, 2026-11-23: a download went on unseen). */
+type Download = {
+  id: string;
+  name: string;
+  state: "start" | "done" | "failed" | "gone";
+};
+const downloads = new Map<string, string>();
+function showDownload(d: Download) {
+  const was = downloads.get(d.id);
+  if (d.state === "start") {
+    if (was) toasts.close(was);
+    downloads.set(
+      d.id,
+      toast(t("app.downloading"), {
+        description: d.name,
+        mark: "busy",
+        timeout: 0,
+      }),
+    );
+    return;
+  }
+  downloads.delete(d.id);
+  if (d.state === "gone") return void (was && toasts.close(was));
+  const next: {
+    title: string;
+    description: string;
+    timeout: number;
+    data: { mark?: "download"; error?: boolean };
+  } =
+    d.state === "done"
+      ? {
+          title: t("app.downloaded"),
+          description: d.name,
+          timeout: 2500,
+          data: { mark: "download" as const },
+        }
+      : {
+          title: t("app.downloadFailed"),
+          description: t("app.inBrowser"),
+          timeout: 8000,
+          data: { error: true },
+        };
+  if (was) toasts.update(was, next);
+  else
+    toast(next.title, {
+      description: next.description,
+      timeout: next.timeout,
+      ...next.data,
+    });
+}
+
 window.addEventListener("ir-app", (e) => {
-  const d = (e as CustomEvent).detail as Partial<AppState> & { max?: boolean };
+  const d = (e as CustomEvent).detail as Partial<AppState> & {
+    max?: boolean;
+    download?: Download;
+  };
+  if (d.download) return showDownload(d.download);
   // The window maximised or not (chrome.go followMax): its key's look alone.
   if (typeof d.max === "boolean") {
     max = d.max;
