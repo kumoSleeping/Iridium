@@ -43,6 +43,14 @@ func originOf(raw string) string {
 	return p.Scheme + "://" + p.Host
 }
 
+// pathOf is a URL's path alone, for the log (no query: whatever a link carries stays out of it).
+func pathOf(raw string) string {
+	if p, err := url.Parse(raw); err == nil {
+		return p.Path
+	}
+	return ""
+}
+
 // ownPage: is origin the app's own pages' (mygo's frontend: mygo://localhost, or on Windows
 // http://mygo.localhost)?
 func ownPage(origin string) bool {
@@ -264,9 +272,20 @@ func guard(w *mygo.Window, origin string) {
 			go func() { _ = mygo.Shell.OpenExternal(e.URL) }()
 		}
 	})
+	// Each download in the log, its end too; one that failed (an .exe the web view's SmartScreen
+	// stopped, with no word of it: QGI, 2026-11-23) goes to the system's browser, whose own
+	// download asks what the web view could not.
+	p.OnWillDownload(func(e *mygo.DownloadEvent) { appLog()("download %s → %s", pathOf(e.URL), e.Path) })
 	p.OnDownloadDone(func(d *mygo.Download) {
-		if d.Err == nil && d.Path != "" {
+		switch {
+		case d.Err == nil && d.Path != "":
+			appLog()("download %s done", pathOf(d.URL))
 			go mygo.Shell.ShowItemInFolder(d.Path)
+		case d.Err != nil:
+			appLog()("download %s failed: %v; in the browser instead", pathOf(d.URL), d.Err)
+			if u, err := url.Parse(d.URL); err == nil && (u.Scheme == "http" || u.Scheme == "https") {
+				go func() { _ = mygo.Shell.OpenExternal(d.URL) }()
+			}
 		}
 	})
 	p.SetPermissionHandler(func(r mygo.PermissionRequest) bool {
