@@ -237,21 +237,22 @@ func (u *ui) hideOnClose(w *mygo.Window) {
 	})
 }
 
+// pageLog is the app's log (appLog), for what has no logf handed to it.
+var pageLog = sync.OnceValue(appLog)
+
 // guard sets up the page of a window on the Iridium at origin ("": the app's own pages):
 //
 //   - its title stays the window's (the Iridium's name here, retitle), not the page's <title>;
 //   - a link to another site opens in the browser, the window staying on its Iridium (Wails let
 //     the page go there, and did nothing for target=_blank: kumo, 2026-11-23);
-//   - a download is saved in Downloads, then shown in Finder or Explorer (Wails dropped them);
+//   - a download is saved in Downloads (one from its Iridium fetched by the app, its toast saying
+//     how far: download.go), then shown in Finder or Explorer (Wails dropped them);
 //   - the microphone, the camera and notifications are its own Iridium's (voice rooms), nothing
 //     else is; no other page gets anything;
 //   - its web process gone (killed by the system: WebKit's 8 GB a page, kumo, 2026-11-23, the
 //     window white from then on, its keys dead with the page), the page is loaded again, and
 //     the log says so. Not one gone again within a minute: that page does not stay up, and the
 //     window is left as it is rather than loaded over and over.
-// pageLog is the app's log (appLog), for what has no logf handed to it.
-var pageLog = sync.OnceValue(appLog)
-
 func guard(w *mygo.Window, origin string) {
 	p := w.Page()
 	var gone time.Time
@@ -287,19 +288,19 @@ func guard(w *mygo.Window, origin string) {
 		reply(w, map[string]any{"download": d})
 	}
 	failed := func(raw, name string, err error) {
-		appLog()("download %s failed: %v; in the browser instead", pathOf(raw), err)
+		pageLog()("download %s failed: %v; in the browser instead", pathOf(raw), err)
 		tell(raw, name, "failed", -1)
 		if u, err := url.Parse(raw); err == nil && (u.Scheme == "http" || u.Scheme == "https") {
 			go func() { _ = mygo.Shell.OpenExternal(raw) }()
 		}
 	}
 	done := func(raw, path string) {
-		appLog()("download %s done", pathOf(raw))
+		pageLog()("download %s done", pathOf(raw))
 		tell(raw, filepath.Base(path), "done", -1)
 		go mygo.Shell.ShowItemInFolder(path)
 	}
 	p.OnWillDownload(func(e *mygo.DownloadEvent) {
-		appLog()("download %s → %s", pathOf(e.URL), e.Path)
+		pageLog()("download %s → %s", pathOf(e.URL), e.Path)
 		name := filepath.Base(e.Path)
 		if origin == "" || e.Path == "" || originOf(e.URL) != origin {
 			tell(e.URL, name, "start", -1)
