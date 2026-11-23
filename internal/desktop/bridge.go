@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 	"path/filepath"
 	"runtime"
@@ -273,32 +274,67 @@ func guard(w *mygo.Window, origin string) {
 			go func() { _ = mygo.Shell.OpenExternal(e.URL) }()
 		}
 	})
-	// Each download in the log, its end too, and told to the page as it starts and ends (its toast:
-	// web/src/irapp.ts; the web view shows none, and a download went on unseen: QGI, 2026-11-23).
-	// One that failed (an .exe the web view's SmartScreen stopped, with no word of it) goes to the
-	// system's browser, whose own download asks what the web view could not.
-	tell := func(u, name, state string) {
-		reply(w, map[string]any{"download": map[string]string{"id": u, "name": name, "state": state}})
+	// Each download in the log, its end too, and told to the page as it starts, goes and ends (its
+	// toast: web/src/irapp.ts; the web view shows none, and a download went on unseen: QGI,
+	// 2026-11-23). One from the window's own Iridium the app fetches itself (download.go), saying
+	// how far it is; others are the web view's. One that failed goes to the system's browser, whose
+	// own download asks what the app could not.
+	tell := func(u, name, state string, pct int) {
+		d := map[string]any{"id": u, "name": name, "state": state}
+		if pct >= 0 {
+			d["pct"] = pct
+		}
+		reply(w, map[string]any{"download": d})
+	}
+	failed := func(raw, name string, err error) {
+		appLog()("download %s failed: %v; in the browser instead", pathOf(raw), err)
+		tell(raw, name, "failed", -1)
+		if u, err := url.Parse(raw); err == nil && (u.Scheme == "http" || u.Scheme == "https") {
+			go func() { _ = mygo.Shell.OpenExternal(raw) }()
+		}
+	}
+	done := func(raw, path string) {
+		appLog()("download %s done", pathOf(raw))
+		tell(raw, filepath.Base(path), "done", -1)
+		go mygo.Shell.ShowItemInFolder(path)
 	}
 	p.OnWillDownload(func(e *mygo.DownloadEvent) {
 		appLog()("download %s → %s", pathOf(e.URL), e.Path)
-		tell(e.URL, filepath.Base(e.Path), "start")
+		name := filepath.Base(e.Path)
+		if origin == "" || e.Path == "" || originOf(e.URL) != origin {
+			tell(e.URL, name, "start", -1)
+			return
+		}
+		e.PreventDefault()
+		raw, path := e.URL, e.Path
+		tell(raw, name, "start", 0)
+		go func() {
+			var cs []*http.Cookie
+			if list, err := mygo.Cookies.List(mygo.CookieFilter{URL: raw}); err == nil {
+				for _, c := range list {
+					cs = append(cs, &http.Cookie{Name: c.Name, Value: c.Value})
+				}
+			}
+			err := fetch(context.Background(), raw, path, cs, func(got, total int64) {
+				if total > 0 {
+					tell(raw, name, "progress", int(got*100/total))
+				}
+			})
+			if err != nil {
+				failed(raw, name, err)
+				return
+			}
+			done(raw, path)
+		}()
 	})
 	p.OnDownloadDone(func(d *mygo.Download) {
-		name := filepath.Base(d.Path)
 		switch {
 		case d.Err == nil && d.Path != "":
-			appLog()("download %s done", pathOf(d.URL))
-			tell(d.URL, name, "done")
-			go mygo.Shell.ShowItemInFolder(d.Path)
+			done(d.URL, d.Path)
 		case d.Err != nil:
-			appLog()("download %s failed: %v; in the browser instead", pathOf(d.URL), d.Err)
-			tell(d.URL, name, "failed")
-			if u, err := url.Parse(d.URL); err == nil && (u.Scheme == "http" || u.Scheme == "https") {
-				go func() { _ = mygo.Shell.OpenExternal(d.URL) }()
-			}
+			failed(d.URL, filepath.Base(d.Path), d.Err)
 		default:
-			tell(d.URL, name, "gone")
+			tell(d.URL, filepath.Base(d.Path), "gone", -1)
 		}
 	})
 	p.SetPermissionHandler(func(r mygo.PermissionRequest) bool {

@@ -38,7 +38,7 @@ export function ToastList({ onJump }: { onJump: (id: string) => void }) {
         {d?.error && <CircleAlert size={15} className="shrink-0 text-err" />}
         {d?.mark === "busy" && <LoaderCircle size={15} className="shrink-0 animate-spin text-ink-3" />}
         {d?.mark === "download" && <Download size={15} className="shrink-0 text-ink-3" />}
-        <Toast.Title className="min-w-0 truncate font-medium" />
+        <Toast.Title className="min-w-0 truncate font-medium tabular-nums" />
         <Toast.Description className="min-w-0 shrink truncate text-ink-2" />
         {d?.undo ? (
           <Toast.Close onClick={d.undo} className="g-press ml-1 h-7 shrink-0 rounded-full bg-fill px-3 text-xs font-medium hover:bg-fill-2">

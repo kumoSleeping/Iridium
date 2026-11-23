@@ -58,7 +58,8 @@ export function ask(verb: string, arg = "") {
 type Download = {
   id: string;
   name: string;
-  state: "start" | "done" | "failed" | "gone";
+  state: "start" | "progress" | "done" | "failed" | "gone";
+  pct?: number;
 };
 const downloads = new Map<string, string>();
 function showDownload(d: Download) {
@@ -73,6 +74,12 @@ function showDownload(d: Download) {
         timeout: 0,
       }),
     );
+    return;
+  }
+  if (d.state === "progress") {
+    // How far, in its title (下载中 37%): the app fetches it, the web view says nothing of it.
+    if (was)
+      toasts.update(was, { title: `${t("app.downloading")} ${d.pct ?? 0}%` });
     return;
   }
   downloads.delete(d.id);
