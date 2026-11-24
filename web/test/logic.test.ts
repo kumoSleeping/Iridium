@@ -197,6 +197,13 @@ describe("sourceOf", () => {
     expect(sourceOf("ir:gone1234567", "local", me, terminals, sessions)).toEqual({ kind: "letter", name: "gone1234", channel: false });
     expect(sourceOf("Iridium", "Iridium", me, terminals, sessions)).toEqual({ kind: "iridium" });
   });
+  test("bare channel and spawned solo agent letters resolve their custom face and title", () => {
+    const bare = { id: "ch1", agent: "" as Session["agent"], bare: true, cwd: "/w", name: "refactor", status: "idle", hosted: true, live: false, updatedAt: 0, agents: [{ session: "ag1", agent: "agy", nick: "Neon" }] } as Session;
+    const spawned = { id: "ag1", agent: "agy", cwd: "/w", status: "idle", hosted: true, live: false, updatedAt: 0, spawned: { by: "local", channel: "ch1" } } as Session;
+    const all = [...sessions, bare, spawned];
+    expect(sourceOf("ir:ag1", "me", me, terminals, all)).toEqual({ kind: "letter", name: "refactor", channel: false, agent: "agy", session: "ch1", face: "ag1", where: "/w" });
+    expect(sourceOf("ir:ch1", "me", me, terminals, all)).toEqual({ kind: "letter", name: "refactor", channel: false, agent: "agy", session: "ch1", face: "ag1", where: "/w" });
+  });
   test("a subagent's prompt is its parent's: by the parent's name, a workflow's with its name", () => {
     expect(sourceOf(undefined, undefined, me, terminals, sessions, ws, { subagent: true, parent: "s2", workspace: 3 })).toEqual({ kind: "letter", name: t("session.new"), channel: false, agent: "claude", session: "s2", where: "/home/k/Iridium" });
     expect(sourceOf(undefined, undefined, me, terminals, sessions, ws, { subagent: true, parent: "s1", workflow: { run: "r", name: "review" } })).toEqual({ kind: "letter", name: "holder · review", channel: false, agent: "codex", session: "s1", workflow: true, where: "/w" });

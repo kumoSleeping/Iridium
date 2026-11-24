@@ -5,7 +5,7 @@ import { speakAs } from "../src/api/client";
 import { chatOf, peekChat, stateAhead, warmed, warmTo } from "../src/chats";
 import { getCarried, setCarried } from "../src/store";
 import { buildTree } from "../src/tree";
-import { MADE_MAX, PER_WORKSPACE, pick, workspaceOf } from "../src/warm";
+import { MADE_MAX, PER_WORKSPACE, pick, WARM_MAX, workspaceOf } from "../src/warm";
 
 const NOW = 10_000_000;
 const ses = (id: string, over: Partial<Session> = {}): Session => ({ id, agent: "claude", cwd: "/a", status: "idle", hosted: true, live: false, workspace: 1, updatedAt: NOW, ...over });
@@ -47,6 +47,18 @@ describe("pick", () => {
     expect([...pick(done, tree(done), null, 1, NOW).keys()]).toEqual(A10);
     const many = [...main, ...Array.from({ length: 20 }, (_, i) => ses(`s${i}`, { subagent: true, parent: "a0", updatedAt: NOW - 100 - i }))];
     expect(pick(many, tree(many), null, 1, NOW).size).toBe(PER_WORKSPACE + MADE_MAX);
+  });
+  test("capped across many workspaces at WARM_MAX, keeping the latest workspaces first", () => {
+    const manyWss = Array.from({ length: 6 }, (_, i) => ({ id: i + 1, name: `W${i + 1}`, path: `/w${i + 1}` })) as never;
+    const all = Array.from({ length: 6 }, (_, w) =>
+      Array.from({ length: 10 }, (_, i) => ses(`w${w + 1}_${i}`, { cwd: `/w${w + 1}`, workspace: w + 1, updatedAt: NOW - w * 100 - i })),
+    ).flat();
+    const picked = [...pick(all, buildTree(all, manyWss, "none", NOW), null, 6, NOW).keys()];
+    expect(picked.length).toBe(WARM_MAX);
+    // Last workspace (6) first, then the most recent others (1, 2).
+    expect(picked.slice(0, 10)).toEqual(Array.from({ length: 10 }, (_, i) => `w6_${i}`));
+    expect(picked.slice(10, 20)).toEqual(Array.from({ length: 10 }, (_, i) => `w1_${i}`));
+    expect(picked.slice(20, 30)).toEqual(Array.from({ length: 10 }, (_, i) => `w2_${i}`));
   });
 });
 

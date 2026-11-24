@@ -30,28 +30,28 @@
      up, rows changing places, a fold, a row of reactions, the composer's rows, a chat swapped);
      fade: anything that comes or goes in place; a reveal is a move whose content fades in over
      its last REVEAL (motion.ts reveal), or the other way round as it goes. The dur-n are these. */
-  --move: 160ms;
-  --fade: 100ms;
-  --reveal: 40ms;
+  --move: 220ms;
+  --fade: 150ms;
+  --reveal: 110ms;
   --dur-1: var(--fade); /* fade, press */
   --dur-2: var(--move); /* unfold, pop, fold */
   --dur-3: var(--move); /* slide, reorder */
-  --dur-4: 220ms; /* a long way */
-  --stagger: 12ms;
+  --dur-4: 280ms; /* a long way */
+  --stagger: 14ms;
 
-  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
-  --ease-in: cubic-bezier(0.55, 0, 1, 0.45);
-  --ease-spring: cubic-bezier(0.34, 1.32, 0.64, 1); /* slight overshoot */
+  --ease-out: cubic-bezier(0.25, 0.85, 0.35, 1);
+  --ease-in: cubic-bezier(0.4, 0, 0.8, 0.6);
+  --ease-spring: cubic-bezier(0.2, 0.9, 0.3, 1); /* damped soft settle, no jelly overshoot */
 
-  --unfold-from: scale(0.9);
-  --pop-from: scale(0.92) translateY(4px);
-  --slide-x: 24px;
+  --unfold-from: scale(0.96);
+  --pop-from: scale(0.96) translateY(3px);
+  --slide-x: 20px;
 
   /* turn: how far the chats drift as they swap, down the sidebar or up */
-  --turn-dur: 120ms; /* the next coming in */
-  --turn-out-dur: 80ms; /* the one before going, as the next comes */
+  --turn-dur: 160ms; /* the next coming in */
+  --turn-out-dur: 100ms; /* the one before going, as the next comes */
   --turn-gap: 0ms; /* both at once: the whole swap is --turn-dur */
-  --turn-in: 8px;
+  --turn-in: 6px;
   --turn-out: 4px;
 }
 
@@ -69,7 +69,7 @@
 }
 .g-unfold[data-ending-style] {
   transition-duration: var(--dur-1);
-  transition-timing-function: var(--ease-in);
+  transition-timing-function: var(--ease-out);
 }
 
 /* A popover's inside going to a new height as what is in it changes (said.tsx Grown). */
@@ -82,7 +82,7 @@
   animation: g-pop-in var(--dur-2) var(--ease-spring) both;
 }
 .g-pop[data-leaving] {
-  animation: g-pop-out var(--dur-1) var(--ease-in) both;
+  animation: g-pop-out var(--dur-1) var(--ease-out) both;
 }
 /* Base UI surfaces (toasts) that pop */
 .g-pop-t {
@@ -97,7 +97,7 @@
 }
 .g-pop-t[data-ending-style] {
   transition-duration: var(--dur-1);
-  transition-timing-function: var(--ease-in);
+  transition-timing-function: var(--ease-out);
 }
 @keyframes g-pop-in {
   from {
@@ -180,7 +180,7 @@
 }
 .g-dialog[data-ending-style] {
   transition-duration: var(--dur-1);
-  transition-timing-function: var(--ease-in);
+  transition-timing-function: var(--ease-out);
 }
 
 /* --- reveal: room opened, then what is in it (kumo, 2026-11-23: not both at once, its rows

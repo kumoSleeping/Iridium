@@ -28,12 +28,12 @@ function token(name: string, fallback: string) {
 const ms = (v: string) => (v.endsWith("ms") ? parseFloat(v) : parseFloat(v) * 1000);
 
 export const motion = {
-  dur: (n: 1 | 2 | 3 | 4) => ms(token(`--dur-${n}`, ["100ms", "160ms", "160ms", "220ms"][n - 1])),
+  dur: (n: 1 | 2 | 3 | 4) => ms(token(`--dur-${n}`, ["150ms", "220ms", "220ms", "280ms"][n - 1])),
   /** The three times (motion.css): a change of place or height; a coming or going in place; the
    *  part of a move its content fades in over (a reveal). */
-  move: () => ms(token("--move", "160ms")),
-  fade: () => ms(token("--fade", "100ms")),
-  reveal: () => ms(token("--reveal", "40ms")),
+  move: () => ms(token("--move", "220ms")),
+  fade: () => ms(token("--fade", "150ms")),
+  reveal: () => ms(token("--reveal", "110ms")),
   ease: (k: "out" | "in" | "spring") => token(`--ease-${k}`, "ease-out"),
 };
 
@@ -154,6 +154,12 @@ const WAIT_FOR_PAGE = 100;
  *  seen as it is made, filled in as its page comes, not waited for and then passed over. */
 const RAPID = 400;
 
+/** Whether the engine is WebKit (Safari, macOS WKWebView, iOS): AppleWebKit without Blink.
+ *  On macOS WebKit, document.startViewTransition leaks tens of megabytes of unmapped graphics
+ *  memory per call that are never reclaimed; chat switches animate the incoming log pane directly. */
+export const isWebKit = (ua = typeof navigator !== "undefined" ? navigator.userAgent : "") =>
+  /AppleWebKit/i.test(ua) && !/Chrome|Chromium|Edg|OPR|Android/i.test(ua);
+
 /** Moves to a chat. Chat to chat, or from nothing open, on a computer: the main pane swaps quickly
  *  (motion.css "turn"), the old one fading out as the next fades in with a short drift, up as you go
  *  down the sidebar, down as you go up. order: the sessions as the sidebar lists them; on: whether
@@ -196,7 +202,8 @@ export function pageTurn(order: () => string[], on: () => boolean): Turn {
     // Out of the settings: the chat under them is drawn already.
     if (to.name !== "chat" || (from.name !== "chat" && from.name !== "home") || (from.name === "chat" && from.id === to.id) || document.hidden) return draw();
     const still = !!document.querySelector("[data-still]");
-    const turns = on() && !!doc.startViewTransition && !still;
+    const webkit = isWebKit();
+    const turns = on() && !still && (webkit || !!doc.startViewTransition);
     const ids = order();
     const a = from.name === "chat" ? ids.indexOf(from.id) : -1;
     const b = ids.indexOf(to.id);
@@ -222,6 +229,17 @@ export function pageTurn(order: () => string[], on: () => boolean): Turn {
       // and a press in that frame skipped it: the chat it was to draw was never seen.
       if (rapid && turning) (turning as { skipTransition?: () => void }).skipTransition?.();
       if (!turns || rapid) return draw();
+      if (webkit) {
+        flushSync(draw);
+        const log = document.querySelector<HTMLElement>('.g-turn [role="log"]');
+        const dist = parseFloat(token("--turn-in", "8px")) || 0;
+        const dy = dir === "next" ? dist : -dist;
+        log?.animate?.(
+          reduced() || !dy ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 0, transform: `translateY(${dy}px)` }, { opacity: 1, transform: "none" }],
+          { duration: ms(token("--turn-dur", "120ms")), easing: motion.ease("out") },
+        );
+        return;
+      }
       root.dataset.turn = dir;
       const vt = doc.startViewTransition!(() => flushSync(draw));
       turning = vt;

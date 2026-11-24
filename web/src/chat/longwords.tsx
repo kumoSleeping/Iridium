@@ -11,7 +11,7 @@ import { motion, reduced } from "../motion";
 import { moveLog } from "../motionlog";
 import { layoutMoves } from "./stick";
 import { cn } from "../ui";
-import { FOLD_AT, FOLD_SHOW } from "./channel/merge";
+import { FOLD_AT, FOLD_SHOW } from "./channel/folds";
 import { FoldMenu, useFold, type Fold } from "./foldstate";
 
 /** One of the words' lines: 15px type on 23px lines. */

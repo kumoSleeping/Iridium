@@ -47,7 +47,6 @@ test("a row's room opened or shut by CSS only where it is listed", () => {
     "chat/channel/members.tsx",
     "chat/channel/profilecard.tsx",
     "chat/channel/script.tsx",
-    "chat/chat.tsx",
     "chat/composer.tsx",
     "chat/dispatched.tsx",
     "chat/forwardcard.tsx",

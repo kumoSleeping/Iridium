@@ -3,11 +3,11 @@
 import { Popover } from "@base-ui/react/popover";
 import { Tooltip } from "@base-ui/react/tooltip";
 import { Bot, Camera, Check, Copy, Monitor, Puzzle, ScrollText, UsersRound, type LucideIcon } from "lucide-react";
-import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type ComponentProps, type CSSProperties, type ReactElement, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentProps, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import type { Agent, Status } from "./api/types.gen";
 import { t } from "./i18n";
 import { useCarried } from "./store";
-import { AGY, AGY_BLOBS, AGY_VIEWBOX, CLAUDE, DSH, DSH_VIEWBOX, OPENAI, OPENAI_VIEWBOX, PI, PI_VIEWBOX } from "./logos";
+import { AGY_DATA_URI, CLAUDE, DSH, DSH_VIEWBOX, OPENAI, OPENAI_VIEWBOX, PI, PI_VIEWBOX } from "./logos";
 
 export const cn = (...xs: (string | false | null | undefined)[]) => xs.filter(Boolean).join(" ");
 
@@ -394,33 +394,10 @@ export function Logo({ agent, size = 16, className }: { agent: Agent; size?: num
   );
 }
 
-/** Antigravity's mark: its arch, the colours blurred over it clipped to it; ids its own, as a page has many. */
+/** Antigravity's mark as one cached image: shared across all rows instead of ten inline SVG blur
+ *  filters per instance (which leaked graphics memory in WebKit). */
 function AgyMark({ className, style }: { className?: string; style: CSSProperties }) {
-  const id = useId().replace(/[^\w-]/g, "");
-  return (
-    <svg role="img" aria-label="Antigravity" viewBox={AGY_VIEWBOX} className={cn("shrink-0", className)} style={style}>
-      <defs>
-        {AGY_BLOBS.map((b, i) => (
-          <filter key={i} id={`${id}f${i}`} x={b.box[0]} y={b.box[1]} width={b.box[2]} height={b.box[3]} filterUnits="userSpaceOnUse" colorInterpolationFilters="sRGB">
-            <feGaussianBlur stdDeviation={b.blur} />
-          </filter>
-        ))}
-        <mask id={`${id}m`} maskUnits="userSpaceOnUse" x="13" y="18" width="85" height="78" style={{ maskType: "alpha" }}>
-          <path d={AGY} fill="black" />
-        </mask>
-      </defs>
-      <g transform="translate(12 10)">
-        <path d={AGY} fill="#3186FF" />
-        <g mask={`url(#${id}m)`}>
-          {AGY_BLOBS.map((b, i) => (
-            <g key={i} filter={`url(#${id}f${i})`}>
-              {b.ellipse ? <ellipse {...b.ellipse} transform={b.transform} fill={b.fill} /> : <path d={b.d} transform={b.transform} fill={b.fill} />}
-            </g>
-          ))}
-        </g>
-      </g>
-    </svg>
-  );
+  return <img src={AGY_DATA_URI} alt="Antigravity" draggable={false} className={cn("shrink-0 select-none", className)} style={style} />;
 }
 
 const STATUS_KEY = {

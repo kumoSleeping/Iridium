@@ -1140,6 +1140,18 @@ func TestChannelSaidFiles(t *testing.T) {
 	}
 	l.wantSat(200, "agent-in:"+guest, "message.create", map[string]any{"channel_id": ch, "content": "here " + lk.Markdown}, nil)
 	l.waitSaid("web", ch, "@guest here", `<img src="internal:`, "/"+lk.File.Ref+`"`, `title="sent.png"`)
+
+	// Sent with ir and _data.attachments (or _data.paths): attached under the target channel, so
+	// its <img> URL points at the channel, not the caller's own session.
+	att, err := l.s.files.Attach(ch, png("attached.png"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.wantSat(200, "agent-in:"+guest, "message.create", map[string]any{"channel_id": ch, "_data": map[string]any{"text": "attached", "attachments": []string{att.Ref}}}, nil)
+	l.waitSaid("web", ch, "attached", "/files/"+ch+"/"+att.Ref+`"`, `title="attached.png"`)
+	if code := l.do("web", "GET", "/v1/internal/sessions/"+ch+"/files/"+att.Ref, nil, nil); code != 200 {
+		t.Fatalf("get attached file: %d", code)
+	}
 }
 
 // An agent that works in another folder than the channel's (the user, 2026-11-18): it is told

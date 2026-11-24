@@ -139,15 +139,16 @@ type Props = {
   cleared: (id: string) => void;
   /** Unseen: the mode and model keys whose menus /mode and /model open (chat.tsx Under). */
   tools?: ReactNode;
-  /** A channel of several agents (chat/channel): these, which an @ lists and calls by nick; no /
-   *  commands, no command lines, nothing of one agent's own. */
+  /** When the channel has exactly one agent, its session: enables agent slash commands, /model,
+   *  /mode, /clear, /stop, Shift+Tab mode cycling and Esc to stop its turn. */
+  solo?: LiveSession;
+  /** The channel's agents, which @ lists and calls by nick. */
   nicks?: AgentRow[];
   /** The message being answered (Satori's <quote>): shown over the words, sent with them;
    *  unquote: put it away (Esc, or once sent). */
   quote?: { n: number; who: string; text: string };
   unquote?: () => void;
-  /** The channel's people and apps, which @ names beside its agents (peers, the user, 2026-11-13);
-   *  in one agent's chat (no nicks), all its @ lists: the agent by its nick, the people. */
+  /** The channel's people and apps, which @ names beside its agents (peers, the user, 2026-11-13). */
   people?: AgentRow[];
 };
 
@@ -158,8 +159,9 @@ const everyoneRows = (): AgentRow[] => [
   { session: "", member: "agent:*", agent: "" as Agent, nick: ALL_AGENTS, name: t("channel.atAgents"), status: "idle", on: [] },
 ];
 
-export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s, turn, onSent, onSentDone, cycleMode, openModel, openMode, openUsage, openContext, cleared, tools, nicks, quote, unquote, people }, ref) {
-  const multi = !!nicks;
+export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s, solo, turn, onSent, onSentDone, cycleMode, openModel, openMode, openUsage, openContext, cleared, tools, nicks, quote, unquote, people }, ref) {
+  const hasSolo = !!solo;
+  const multi = (nicks?.length ?? 0) > 1;
   // The quote as last shown: its row keeps its words while it shuts.
   const lastQuote = useRef(quote);
   if (quote) lastQuote.current = quote;
@@ -181,7 +183,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
   const picker = useRef<HTMLInputElement>(null);
   // What @ may name: each is one piece in the box, as a session named is (kumo, 2026-11-21).
   const nameKey = [...(nicks ?? []).map((a) => a.nick), ...(people ?? []).map((p) => p.nick)].join("\n");
-  const names = useMemo(() => [...nameKey.split("\n"), ...(multi ? [ALL_MEMBERS, ALL_AGENTS] : [])].filter(Boolean), [nameKey, multi]);
+  const hasEveryone = multi || (nicks !== undefined && ((nicks.length + (people?.length ?? 0)) > 1));
+  const names = useMemo(() => [...nameKey.split("\n"), ...(hasEveryone ? [ALL_MEMBERS, ALL_AGENTS] : [])].filter(Boolean), [nameKey, hasEveryone]);
   const shownBox = boxed(text, names);
   const marked = shownBox.refs.length > 0;
   // Where the box's caret was last: an arrow stepping into a name goes on past it (boxed.ts outOf).
@@ -301,25 +304,22 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
   const sizable = shownAtts.some((a) => a.small !== null);
   const wholeSize = shownAtts.reduce((n, a) => n + (a.small !== null ? a.orig.size : 0), 0);
 
-  const commands = commandsOf(s);
-  // The commands of the channel's scripts (docs/channels.md "脚本"): "/name" goes to the script,
-  // in a channel of several too.
+  const commands = solo ? commandsOf(solo) : [];
+  // The commands of the channel's scripts (docs/channels.md "命令"): "/name" goes to the script.
   const scriptCmds = scriptCommands(useScripts(s.id));
-  // Nothing typed after the /: the common ones first, then the agent's own, then the scripts',
-  // under their heads.
-  const cmds: Cmd[] = multi ? scriptCmds : [...commands.filter(isCommon), ...commands.filter((c) => !isCommon(c)), ...scriptCmds];
+  // Nothing typed after the /: with a sole agent, common + agent commands + channel scripts;
+  // otherwise channel scripts alone.
+  const cmds: Cmd[] = hasSolo ? [...commands.filter(isCommon), ...commands.filter((c) => !isCommon(c)), ...scriptCmds] : scriptCmds;
   const list = /^\/\S*$/.test(text) && text !== shut ? (text === "/" ? cmds : matching(cmds, text.slice(1))) : [];
   const sessions = useList();
   const machines = useMachines();
   const workspaces = useWorkspaces().data ?? [];
   const home = useHome().data; // ~ typed after the @ is this; named, a whole path
-  // & names a session or a place; @ calls a member of a channel of several, by nick, or all of
-  // them (Satori's <at>; the user, 2026-11-13).
+  // & names a session or a place; @ calls a member of the channel, by nick, or all of them.
   const open = caret !== null && text !== shut && !list.length;
   const word = open ? atWord(text, caret, "&") : null;
-  const nickWord = (multi || !!people?.length) && open ? atWord(text, caret) : null;
-  // The names of all only among several agents.
-  const nickOpts = nickWord ? matchAgents([...(nicks ?? []), ...(people ?? []), ...(multi ? everyoneRows() : [])], nickWord.q) : [];
+  const nickWord = (!!nicks?.length || !!people?.length) && open ? atWord(text, caret) : null;
+  const nickOpts = nickWord ? matchAgents([...(nicks ?? []), ...(people ?? []), ...(hasEveryone ? everyoneRows() : [])], nickWord.q) : [];
   const nickSel = nickOpts.length ? Math.min(at ?? 0, nickOpts.length - 1) : 0;
   const call = (r: AgentRow) => {
     if (!nickWord) return;
@@ -375,18 +375,19 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
   const empty = !text.trim() && !atts.length;
   const shellable = useShellable(s);
 
-  /** Page-handled commands: true when done here. */
+  /** Page-handled commands for the channel's sole agent: true when done here. */
   const own = (words: string) => {
+    if (!solo) return false;
     const w = words.trim().toLowerCase();
     if (w === "/model" || w === "/effort") return (type(""), openModel(), true);
     if (w === "/mode") return (type(""), openMode(), true);
     if (w === "/usage") return (type(""), openUsage(), true);
-    if (w === "/stop") return (type(""), void stopTurn(s.id), true);
+    if (w === "/stop") return (type(""), void stopTurn(solo.id), true);
     if (w === "/clear" || w === "/new") return (type(""), void clear(), true);
     if (w === "/context") {
       if (openContext()) return (type(""), true);
       // Claude says it itself; the others have nothing to say before a turn.
-      if (s.agent !== "claude") return (type(""), toast(t("cmd.noContext")), true);
+      if (solo.agent !== "claude") return (type(""), toast(t("cmd.noContext")), true);
     }
     return false;
   };
@@ -406,15 +407,15 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
   const go = async () => {
     if (busy || uploading || empty) return;
     if (atts.some((a) => a.error)) return toast(t("err.upload"), { error: true });
-    // $ and a command line: run at the session's machine, not sent to the agent (shell.tsx).
-    const line = shellable && !multi && !atts.length ? shellLine(text) : null;
+    // $ and a command line: run at the channel's machine, not sent to an agent (shell.tsx).
+    const line = shellable && !atts.length ? shellLine(text) : null;
     if (line) {
       type("");
       setBusy(true);
       return void runShell(s, line).finally(() => setBusy(false));
     }
     const typed = text.trim();
-    if (!multi && !atts.length && own(typed)) return;
+    if (hasSolo && !atts.length && own(typed)) return;
     // The words as they are, the links in them what the agent reads.
     const words = typed;
     // A picture's copy here stays: the bubble shows it while sending, and once landed till the
@@ -455,7 +456,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
   // The palette beside the composer, not in it: a frosted layer inside another sees only that one.
   return (
     <div className="relative">
-      {list.length > 0 && <Palette list={list} at={Math.min(at ?? 0, list.length - 1)} agent={s.agent} grouped={text === "/"} point={setAt} pick={(c) => (!c.script && own(`/${c.name}`) ? undefined : (type(`/${c.name} `), box.current?.focus()))} />}
+      {list.length > 0 && <Palette list={list} at={Math.min(at ?? 0, list.length - 1)} agent={solo?.agent ?? s.agent} grouped={text === "/"} point={setAt} pick={(c) => (!c.script && own(`/${c.name}`) ? undefined : (type(`/${c.name} `), box.current?.focus()))} />}
       {atOpen && <AtList sections={sections} at={sel} point={setAt} pick={name} />}
       {nickOpts.length > 0 && <NickList rows={nickOpts} at={nickSel} point={setAt} pick={call} />}
       {secretish && (
@@ -621,11 +622,11 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ s,
             else if (e.key === "ArrowRight" && word && into(opts[sel], e.currentTarget, e.shiftKey || e.ctrlKey || e.metaKey || e.altKey)) enter(opts[sel]!);
             else if ((shown || atOpen) && e.key === "Escape") setShut(text);
             else if (quote && (e.key === "Escape" || (e.key === "Backspace" && !text && e.currentTarget.selectionStart === 0))) unquote?.();
-            else if (e.key === "Tab" && e.shiftKey) cycleMode();
+            else if (e.key === "Tab" && e.shiftKey && hasSolo) cycleMode();
             // Enter sends on a computer (Ctrl or ⌘ with it on a phone); in an empty box it does nothing.
-            // Esc stops the session's own agent's turn, as its stop key does.
+            // Esc stops the sole agent's turn, as its stop key does.
             else if (e.key === "Enter" && !e.shiftKey && (fine() || e.ctrlKey || e.metaKey)) void (empty || go());
-            else if (e.key === "Escape" && turn) void stopTurn(s.id);
+            else if (e.key === "Escape" && solo && turn) void stopTurn(solo.id);
             else return;
             e.preventDefault();
           }}

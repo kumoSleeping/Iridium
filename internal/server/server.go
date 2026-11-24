@@ -452,10 +452,59 @@ func (s *Server) sendAs(ctx context.Context, c caller, from, id string, req api.
 		return s.sayCommand(c, from, id, req)
 	}
 	// A channel of several agents: said there, given to those it wakes (channels.go). A command
-	// is the agent's own that it is sent to, as ever.
+	// is the sole agent's own when the channel has one agent.
 	command := strings.HasPrefix(strings.TrimSpace(req.Text), "/")
 	if _, own := s.ch.Own(id); own {
-		command = false // no agent of its own to run one: words as any
+		// In a bare channel with exactly one agent, /clear replaces that agent session in place
+		// (keeping the channel and its history) and agent slash commands route straight to it.
+		if solo := s.soloAgent(id); command && solo != "" {
+			if session.IsClear(req.Text) {
+				if err := s.checkSend(c, solo); err != nil {
+					return api.SendReply{}, err
+				}
+				if err := s.inChannel(c, id); err != nil {
+					return api.SendReply{}, err
+				}
+				via := c.session
+				if via == "" && c.socket {
+					via = req.Caller
+				}
+				nid, err := s.m.Clear(ctx, solo, from)
+				if nid != "" && nid != solo {
+					if err := s.st.SetOpener(nid, c.ID()); err != nil {
+						s.logf("server: opener of %s: %v", nid, err)
+					}
+					s.noteOrigin(c, nid, via)
+				}
+				return api.SendReply{Session: id, Command: true}, err
+			}
+			if s.m.IsCommand(solo, req.Text) {
+				if err := s.checkSend(c, solo); err != nil {
+					return api.SendReply{}, err
+				}
+				if err := s.inChannel(c, id); err != nil {
+					return api.SendReply{}, err
+				}
+				via := c.session
+				if via == "" && c.socket {
+					via = req.Caller
+				}
+				s.noteOrigin(c, solo, via)
+				text, images, err := s.files.Message(id, req.Text, req.Attachments)
+				if err != nil {
+					return api.SendReply{}, fileErr{err}
+				}
+				if req.ID == "" {
+					req.ID = session.NewInputID()
+				}
+				input, queued, err := s.m.SendAs(ctx, solo, req.ID, satori.ForwardWords(text), from, true, images...)
+				if err != nil {
+					return api.SendReply{}, err
+				}
+				return api.SendReply{Input: input, Queued: queued, Command: s.m.RunsItself(solo, text)}, nil
+			}
+		}
+		command = false // no sole agent to run it: words as any
 	}
 	// Among several, only a command of the channel's own agent is its alone; words that merely
 	// begin with a slash ("/home/x is broken @codex") are said in the channel as any.
@@ -473,9 +522,13 @@ func (s *Server) sendAs(ctx context.Context, c caller, from, id string, req api.
 		}
 		held, texts = s.heldWords(id), t
 	}
-	// One agent: the message it answers as quoted lines before the words.
+	// Keep the original words and quote ref for the channel log; prepend quoted lines only to
+	// what is handed to the agent.
+	rawText := req.Text
+	var quote int64
 	if req.Quote > 0 {
 		if q, ok := s.ch.Get(id, req.Quote); ok {
+			quote = q.Seq
 			req.Text = quoted(satori.ForwardWords(q.Text)) + req.Text
 		}
 		req.Quote = 0
@@ -517,9 +570,9 @@ func (s *Server) sendAs(ctx context.Context, c caller, from, id string, req api.
 		if tag := s.m.SourceTag(from); tag != "" {
 			u.Name = tag // the name the agent sees it under
 		}
-		seq = s.sat.Input(st.Session, req.ID, req.Text, u, c.ID(), channel.Data{Device: s.deviceOfCaller(c)})
+		seq = s.sat.Input(st.Session, req.ID, rawText, u, c.ID(), channel.Data{Device: s.deviceOfCaller(c), Quote: quote, Files: s.files.Refs(id, req.Attachments)})
 	}
-	named := s.names(id, seq, req.Text, readerOf(c)) // the logins it names (ats.go)
+	named := s.names(id, seq, rawText, readerOf(c)) // the logins it names (ats.go)
 	input, queued, err := s.m.SendAs(ctx, id, req.ID, held+satori.ForwardWords(text)+s.onText(texts), from, true, images...)
 	if err != nil {
 		if seq != 0 {
@@ -529,7 +582,7 @@ func (s *Server) sendAs(ctx context.Context, c caller, from, id string, req api.
 		return api.SendReply{}, err
 	}
 	if seq != 0 {
-		go s.heard(id, seq, req.Text, readerOf(c), u.Name, s.chain.of(id, "")) // its scripts
+		go s.heard(id, seq, rawText, readerOf(c), u.Name, s.chain.of(id, "")) // its scripts
 	}
 	if input == session.HandedInput {
 		return api.SendReply{Desktop: true, Seq: seq}, nil

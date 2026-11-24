@@ -11,7 +11,7 @@ import { titleOf } from "../ui";
  *  Iridium's own line. local: 本机 (the machine's terminal, or this page with no gate). */
 export type Source =
   | { kind: "you"; name: string; avatar?: string; device: Device; local?: boolean }
-  | { kind: "letter"; name: string; avatar?: string; channel: boolean; type?: string; agent?: Agent; session?: string; workflow?: boolean; where?: string }
+  | { kind: "letter"; name: string; avatar?: string; channel: boolean; type?: string; agent?: Agent; session?: string; face?: string; workflow?: boolean; where?: string }
   | { kind: "iridium" };
 
 /** What sourceOf needs to know of who sent a message: an app, a login of ir_web (web), or the host. */
@@ -40,11 +40,18 @@ export function sourceOf(from: string | undefined, terminal: string | undefined,
     const named = of.workflow?.name ? (name ? `${name} · ${of.workflow.name}` : of.workflow.name) : name;
     return { kind: "letter", name: named, channel: false, ...(p ? { agent: p.agent, session: p.id, where: p.cwd } : of.parent ? { session: of.parent } : {}), ...wf };
   }
-  // Another session's ir: that session, its agent's logo, a key to go there.
+  // Another session's ir: that session, its face, a key to go there.
   const id = from && /^(?:ir|session):(.+)$/.exec(from)?.[1];
   if (id) {
     const s = sessions.find((s) => s.id === id || s.id.startsWith(id));
-    return s ? { kind: "letter", name: senderName(s, workspaces, here), channel: false, agent: s.agent, session: s.id, where: s.cwd } : { kind: "letter", name: id.slice(0, 8), channel: false };
+    if (!s) return { kind: "letter", name: id.slice(0, 8), channel: false };
+    const solo = s.bare && s.agents?.length === 1 ? s.agents[0] : undefined;
+    const host = s.spawned?.channel ? sessions.find((x) => x.id === s.spawned!.channel) : undefined;
+    const named = !s.name && !s.title && host ? host : s;
+    const agent = s.agent || (solo ? (sessions.find((x) => x.id === solo.session)?.agent ?? solo.agent) : undefined);
+    const jump = host?.bare && host.agents?.length === 1 ? host.id : s.id;
+    const face = solo ? solo.session : s.id;
+    return { kind: "letter", name: senderName(named, workspaces, here), channel: false, ...(agent ? { agent } : {}), session: jump, ...(face !== jump ? { face } : {}), where: s.cwd };
   }
   const local = terminals.find((x) => x.host) ?? (me.host ? me : HOST);
   if (!from) return yours(local);

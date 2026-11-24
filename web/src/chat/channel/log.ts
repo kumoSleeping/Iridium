@@ -161,12 +161,10 @@ const kept = new Map<string, Kept>();
 // another chat opened and this one again, the message was gone, then came back with a jump).
 const KEPT = 32;
 
-/** Channels seen here with another agent: the log stays in once it was, so their words do not
- *  go as an agent leaves (and come back as it returns). */
-export const several = new Set<string>();
-
 /** The log of channel id if it is held and its newest page has come. */
 export const heldLog = (id: string) => (kept.get(id)?.log.loaded ? kept.get(id)!.log : undefined);
+export const keptChannelIds = () => [...kept.keys()];
+export const anyUnsentChannel = () => [...kept.values()].some((c) => c.sent.some((s) => s.failed !== undefined));
 
 export function channelLog(id: string): Kept {
   let it = kept.get(id);

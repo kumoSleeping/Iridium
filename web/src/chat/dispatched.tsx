@@ -10,7 +10,7 @@ import { api } from "../api/client";
 import type { Block, Session } from "../api/types.gen";
 import { t } from "../i18n";
 import { cn, tokens as tokensText } from "../ui";
-import { FOLD_AT, linesOf } from "./channel/merge";
+import { FOLD_AT, linesOf } from "./channel/folds";
 import { Copyable } from "./copyable";
 import { backAt, firstWords, handBack, launchOf, messageOf, reportsOf, toldOf, tookText, type Start, type Told } from "./dispatch";
 import type { Tool } from "./fold";

@@ -382,7 +382,7 @@ export function App() {
       <FileBrowserHandle.Provider value={filesAllowed ? filesHandle : null}>
         <Suspense fallback={<Waiting />}>
           {under.name === "chat" ? (
-            <ChatPage key={under.id} id={under.id} sheet={below} onSheet={phone ? onSheet : undefined} onMe={phone ? onMe : undefined} />
+            <ChatPage key={`${under.id}:${under.record ? "r" : "c"}`} id={under.id} record={under.record} sheet={below} onSheet={phone ? onSheet : undefined} onMe={phone ? onMe : undefined} />
           ) : (
             <Empty below={below} />
           )}

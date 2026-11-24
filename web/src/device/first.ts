@@ -28,7 +28,9 @@ export const listFromDevice = () => restored !== undefined && getCarried("list")
 /** Puts back what was kept, before the page is first drawn; a state already there is left. */
 export function restore() {
   try {
-    const kept = JSON.parse(localStorage.getItem(KEY) ?? "null") as Record<string, unknown> | null;
+    const raw = localStorage.getItem(KEY);
+    if (raw !== null) lastSaved = raw;
+    const kept = JSON.parse(raw ?? "null") as Record<string, unknown> | null;
     if (!kept) return;
     for (const k of chatsKept() ? [...FACES, ...ROWS] : FACES) if (kept[k] !== undefined && getCarried(k) === undefined) setCarried(k, kept[k]);
     if (getCarried("list") === kept.list) restored = kept.list;
@@ -37,7 +39,11 @@ export function restore() {
   }
 }
 
+/** How long to wait before persisting changes while the page stays open: pagehide and
+ *  visibilitychange flush immediately, so active streaming does not rewrite SQLite every 2s. */
+const SAVE_DELAY = 30_000;
 let due: ReturnType<typeof setTimeout> | undefined;
+let lastSaved: string | undefined;
 // Let go (forgetFirst): nothing written again till the page is loaded anew.
 let gone = false;
 function save() {
@@ -48,8 +54,16 @@ function save() {
     const v = getCarried(k);
     if (v !== undefined) out[k] = v;
   }
+  let raw: string;
   try {
-    localStorage.setItem(KEY, JSON.stringify(out));
+    raw = JSON.stringify(out);
+  } catch {
+    return;
+  }
+  if (raw === lastSaved) return;
+  try {
+    localStorage.setItem(KEY, raw);
+    lastSaved = raw;
   } catch {
     // Full or refused: the next start waits for the stream.
   }
@@ -60,7 +74,7 @@ function save() {
 export function watch() {
   const keys = new Set([...FACES, ...ROWS]);
   onCarried((k) => {
-    if (keys.has(k) && due === undefined) due = setTimeout(save, 2000);
+    if (keys.has(k) && due === undefined) due = setTimeout(save, SAVE_DELAY);
   });
   addEventListener("pagehide", () => due !== undefined && (clearTimeout(due), save()));
   document.addEventListener("visibilitychange", () => document.visibilityState === "hidden" && due !== undefined && (clearTimeout(due), save()));
@@ -77,6 +91,7 @@ export function keepChats(on: boolean) {
 /** All of it let go (the login ended). */
 export function forgetFirst() {
   gone = true;
+  lastSaved = undefined;
   if (due !== undefined) clearTimeout(due), (due = undefined);
   try {
     localStorage.removeItem(KEY);

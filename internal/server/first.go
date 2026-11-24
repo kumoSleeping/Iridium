@@ -13,10 +13,10 @@ import (
 	"github.com/kumoSleeping/iridium/internal/satori"
 )
 
-// A session's first screen in one answer (GET /v1/internal/sessions/{id}/first): what its page
-// asked for one by one and drew as each came (its state, its record's newest page, its
-// channel's members; with another agent in the channel: how far each has read, the log as far
-// back as the record's page goes, the other agents' states and the work under their words).
+// A channel's first screen in one answer (GET /v1/internal/sessions/{id}/first): its state,
+// its members, how far each has read, its log's newest page, its agents' states and the work
+// under their words; for a transcript-only view (?record=1, a subagent, or elsewhere), its
+// state and its record's newest page alone.
 // Each part is the answer of the API it stands for, asked here as the caller, so what a caller
 // may read and how it is masked are those APIs' own; a part that failed is left out, and the
 // page asks for it as before.
@@ -159,16 +159,20 @@ func (s *Server) first(w http.ResponseWriter, r *http.Request) {
 	sessionPath := func(x string) string { return "/v1/internal/sessions/" + url.PathEscape(x) }
 	channelPath := "/v1/internal/channels/" + url.PathEscape(id)
 
-	// Its state, its record's newest page (not for a page that has it: record=0), its members.
+	// Its state, and either its record (?record=1) or its channel's members, reads and newest log.
 	q := r.URL.Query()
+	recordOnly := q.Get("record") == "1"
 	var out firstScreen
 	var stateCode int
 	var wg sync.WaitGroup
 	wg.Go(func() { out.Session, stateCode = ask("GET", sessionPath(id), nil) })
-	if q.Get("record") != "0" {
+	if recordOnly {
 		wg.Go(func() { out.Page = ok(ask("POST", "/v1/internal/block.list", map[string]any{"channel_id": id})) })
+	} else {
+		wg.Go(func() { out.Members = ok(ask("GET", channelPath+"/members", nil)) })
+		wg.Go(func() { out.Reads = ok(ask("GET", channelPath+"/reads", nil)) })
+		wg.Go(func() { out.Log = firstLog(ask, id, 0, false) })
 	}
-	wg.Go(func() { out.Members = ok(ask("GET", channelPath+"/members", nil)) })
 	wg.Wait()
 	if stateCode != http.StatusOK {
 		// No such session, or not the caller's to see: as its state's API says it.
@@ -178,8 +182,24 @@ func (s *Server) first(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(out.Session)
 		return
 	}
+	if recordOnly {
+		reply(w, http.StatusOK, out)
+		return
+	}
+	// Subagents and external (elsewhere) sessions are read-only transcripts, not channels.
+	var meta struct {
+		Subagent bool       `json:"subagent"`
+		Status   api.Status `json:"status"`
+	}
+	if json.Unmarshal(out.Session, &meta) == nil && (meta.Subagent || meta.Status == api.StatusElsewhere) {
+		out.Page = ok(ask("POST", "/v1/internal/block.list", map[string]any{"channel_id": id}))
+		out.Reads, out.Log = nil, nil
+		reply(w, http.StatusOK, out)
+		return
+	}
 
-	// With another agent in its channel: the channel's side.
+	// Its agents' states (other than id, which is already in Session) and the work under all
+	// agents' words in the log.
 	var ms api.ChannelMembers
 	_ = json.Unmarshal(out.Members, &ms)
 	var others []string
@@ -189,25 +209,6 @@ func (s *Server) first(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if len(others) > 0 {
-		// How far back the page shows the others' words: to its record's first block, or all of
-		// them when the record is whole (since: as a page that has the record says it).
-		since, known := int64(0), false
-		if v := q.Get("since"); v != "" {
-			since, _ = strconv.ParseInt(v, 10, 64)
-			known = true
-		} else if out.Page != nil {
-			var p firstPage
-			var head struct {
-				At int64 `json:"created_at"`
-			}
-			if json.Unmarshal(out.Page, &p) == nil && len(p.Data) > 0 && json.Unmarshal(p.Data[0], &head) == nil && head.At > 0 {
-				known = true
-				if p.XData.More {
-					since = head.At
-				}
-			}
-		}
-		wg.Go(func() { out.Reads = ok(ask("GET", channelPath+"/reads", nil)) })
 		var mu sync.Mutex
 		out.Sessions = map[string]json.RawMessage{}
 		for _, x := range others {
@@ -219,14 +220,11 @@ func (s *Server) first(w http.ResponseWriter, r *http.Request) {
 				}
 			})
 		}
-		wg.Go(func() {
-			out.Log = firstLog(ask, id, since, known)
-			if out.Log != nil {
-				out.Work = firstWorks(ask, out.Log, id, since)
-			}
-		})
-		wg.Wait()
 	}
+	if out.Log != nil {
+		wg.Go(func() { out.Work = firstWorks(ask, out.Log, "", 0) })
+	}
+	wg.Wait()
 	reply(w, http.StatusOK, out)
 }
 

@@ -144,10 +144,12 @@ function Mark({ m, size }: { m: Mention; size: number }) {
 /** A session's face, size across, as the list draws its row's (sidebar.tsx RowFace). */
 export function SessionFace({ s, list, size }: { s: Session; list: Session[]; size: number }) {
   const group = isMulti(s) ? s.agents!.map((a) => ({ id: a.session, agent: list.find((x) => x.id === a.session)?.agent ?? a.agent ?? s.agent })) : undefined;
-  const logo = group ? <FaceStack members={group} size={size} /> : <Logo agent={s.agent} size={Math.round(size * 0.86)} />;
+  const soloRow = s.bare && s.agents?.length === 1 ? s.agents[0] : undefined;
+  const soloAgent = soloRow ? (list.find((x) => x.id === soloRow.session)?.agent ?? soloRow.agent ?? s.agent) : s.agent;
+  const logo = group ? <FaceStack members={group} size={size} /> : soloRow ? <Face id={soloRow.session} agent={soloAgent} size={size} logo={Math.round(size * 0.86)} /> : <Logo agent={s.agent} size={Math.round(size * 0.86)} />;
   return (
     <span className={cn("grid shrink-0 place-items-center rounded-full", !group && "bg-fill")} style={{ width: size, height: size }}>
-      <Face id={s.id} agent={s.agent} size={size} none={logo} className="place-items-center" channel />
+      <Face id={s.id} agent={soloAgent} size={size} none={logo} className="place-items-center" channel />
     </span>
   );
 }

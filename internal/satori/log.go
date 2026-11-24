@@ -140,13 +140,21 @@ func (s *Service) logFiles(m channel.Message) []api.FileRef {
 	return out
 }
 
+// fileOwner is the session whose files m's attachments live under: messages sent with ir
+// (_data.paths / _data.attachments) attach to the channel they are sent to; replies taken in
+// from an agent's transcript keep their files under the agent's own session.
+func fileOwner(m channel.Message) string {
+	if m.D.Sent {
+		return m.Channel
+	}
+	return cmp.Or(m.D.Session, m.Channel)
+}
+
 // logMessage is m as c reads it: its files as c's login may fetch them.
 func (s *Service) logMessage(c Caller, m channel.Message, ch *Channel, guild *Guild, seen map[string]*User) Message {
 	out := Message{ID: strconv.FormatInt(m.Seq, 10), Content: s.logContent(m), Channel: ch, Guild: guild,
 		User: s.authorOf(m, seen), CreatedAt: m.At, UpdatedAt: m.Edited, Data: logData(m)}
-	// Its files, of the agent's session that said it, else the channel's own (a person's
-	// attachments: kumo, 2026-11-16).
-	out.Content += fileElements(c.App, c.Login, cmp.Or(m.D.Session, m.Channel), s.logFiles(m))
+	out.Content += fileElements(c.App, c.Login, fileOwner(m), s.logFiles(m))
 	// The files' paths only for the pages (ir_web, the host): an app gets the counts.
 	out.Content += activityElement(s.placed(m), c.Only)
 	return out
@@ -283,7 +291,7 @@ func (s *Service) tell(m channel.Message, kind, origin string, denied int) {
 		msg.Content = Escape(s.b.Mask(strings.TrimSpace(m.Text + fmt.Sprintf("\n\n（auto 拦了 %d 步）", denied))))
 	}
 	msg.Content += activityElement(m.D.Activity, false)
-	s.emitOf(st.Session, m.D.Session, Event{Type: "message-created", Message: &msg, User: msg.User}, s.logFiles(m), kind, origin)
+	s.emitOf(st.Session, fileOwner(m), Event{Type: "message-created", Message: &msg, User: msg.User}, s.logFiles(m), kind, origin)
 	// What an agent said in its turn; what it sent with ir went to whom it names as it was sent.
 	if s.onSaid != nil && m.Kind == channel.KindSaid && !m.D.Sent {
 		s.onSaid(m)

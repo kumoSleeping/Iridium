@@ -3,7 +3,7 @@ import { partialInput, tail } from "../src/chat/partial";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import type { Block } from "../src/api/types.gen";
 import { cmdOf, cmdOfCall, cpOfCall, irOfCall, newOfCall, renameOnly } from "../src/chat/cmd";
-import { argOf, diffOf, diffSum, diffText, folded, foldLine, foldSaid, lineDiff, patchDiff, pictureName, runCmds, type Step } from "../src/chat/fold";
+import { argOf, diffOf, diffSum, diffText, folded, foldKey, foldLine, foldSaid, foldSpan, lineDiff, patchDiff, pictureName, runCmds, unifiedDiff, type Step } from "../src/chat/fold";
 import { setLang } from "../src/i18n";
 
 const call = (name: string, input: unknown, more: Partial<Omit<Block, "kind">> = {}): Step => ({ at: `${name}.${Math.random()}`, kind: "tool", name, input: typeof input === "string" ? input : JSON.stringify(input), result: { at: "r", text: "ok" }, ...more });
@@ -91,6 +91,16 @@ describe("a fold's line", () => {
       setLang("zh");
       expect(foldSaid(foldLine(steps))).toBe("工具调用：Bash ×2、思考、Edit ×3 +2 −3、Write +10、2 个出错");
     });
+  });
+  test("foldSpan and foldKey stay stable across draft → running → completed steps", () => {
+    const timed: Step[] = [
+      { at: "1.0", kind: "tool", id: "toolu_1", name: "Bash", input: "{}", time: 1000, result: { at: "2.0", text: "ok", time: 2500 } },
+      { at: "3.0", kind: "tool", id: "toolu_2", name: "Read", input: "{}", time: 3000, result: { at: "4.0", text: "ok", time: 5200 } },
+    ];
+    expect(foldSpan(timed)).toBe(4200);
+    expect(foldKey([], [], [{ tool: { id: "toolu_1" } }])).toBe("fold:toolu_1");
+    expect(foldKey([], [{ at: "1.0", kind: "tool", id: "toolu_1", name: "Bash" }])).toBe("fold:toolu_1");
+    expect(foldKey(timed)).toBe("fold:toolu_1");
   });
 });
 
@@ -317,5 +327,30 @@ describe("an ir call's words (在哪干活)", () => {
     expect(newOfCall(bash("ir new codex 'go'", { text: "no such agent", error: true }))).toBeUndefined();
     expect(newOfCall(bash("ir new codex 'go'", { text: "usage: ir new <agent>" }))).toBeUndefined();
     expect(newOfCall(bash("ir send ab 'go'", { text: "9f8e7d6c" }))).toBeUndefined();
+  });
+});
+
+describe("unifiedDiff for Edit cards", () => {
+  test("keeps shared prefix/suffix as context and marks middle deletions/additions", () => {
+    expect(unifiedDiff("a\nb\nc\nd", "a\nb1\nb2\nd")).toEqual([
+      { kind: "eq", line: "a" },
+      { kind: "del", line: "b" },
+      { kind: "del", line: "c" },
+      { kind: "add", line: "b1" },
+      { kind: "add", line: "b2" },
+      { kind: "eq", line: "d" },
+    ]);
+  });
+  test("handles pure insertions and deletions", () => {
+    expect(unifiedDiff("a\nc", "a\nb\nc")).toEqual([
+      { kind: "eq", line: "a" },
+      { kind: "add", line: "b" },
+      { kind: "eq", line: "c" },
+    ]);
+    expect(unifiedDiff("a\nb\nc", "a\nc")).toEqual([
+      { kind: "eq", line: "a" },
+      { kind: "del", line: "b" },
+      { kind: "eq", line: "c" },
+    ]);
   });
 });

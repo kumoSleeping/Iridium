@@ -10,13 +10,13 @@ import { queryClient } from "../api/client";
 import type { Block, ChannelMembers, ChannelReads, Session, SessionState } from "../api/types.gen";
 import { heldChats, lineOf, peekChat, type Chat } from "../chats";
 import { workKey, type Msg } from "../chat/channel/lib";
-import { channelLog, heldLog, several } from "../chat/channel/log";
+import { channelLog, heldLog, keptChannelIds } from "../chat/channel/log";
 import { getCarried, onCarried, setCarried } from "../store";
 import { listFromDevice } from "./first";
 import { asked, db, done, drop, entries, getConf } from "./store";
 
 /** The copy's format: one that is not this is dropped whole. */
-export const FORMAT = 1;
+export const FORMAT = 2;
 /** As much of the record as its newest page (internal/transcript PageMessages, PageBlocks). */
 const PAGE_MESSAGES = 20;
 const PAGE_BLOCKS = 200;
@@ -28,7 +28,7 @@ export type Copy = {
   v: number;
   at: number;
   session?: SessionState;
-  page: { blocks: Block[]; start: number; end: number; more: boolean };
+  page?: { blocks: Block[]; start: number; end: number; more: boolean };
   members?: ChannelMembers;
   reads?: ChannelReads;
   chan?: { msgs: Msg[]; more: boolean };
@@ -40,7 +40,7 @@ const keyOf = (id: string) => `chat:${id}`;
 
 /** The newest page of blocks, as the server makes one: back to PAGE_MESSAGES things said or
  *  PAGE_BLOCKS blocks, begun at a line's first block. */
-export function newestPage(blocks: Block[], start: number, more: boolean): Copy["page"] {
+export function newestPage(blocks: Block[], start: number, more: boolean): NonNullable<Copy["page"]> {
   let i = blocks.length;
   let said = 0;
   while (i > 0 && blocks.length - i < PAGE_BLOCKS && said < PAGE_MESSAGES) {
@@ -53,22 +53,27 @@ export function newestPage(blocks: Block[], start: number, more: boolean): Copy[
   return { blocks: kept, start: i > 0 && kept.length ? lineOf(kept[0]!) : start, end, more: i > 0 || more };
 }
 
-/** What this device keeps of chat it now; null if nothing worth it (its page not come, or the
+/** What this device keeps of channel id now; null if nothing worth it (its page not come, or the
  *  copy put in not yet checked against the server's). */
-export function copyOf(id: string, it: Chat, now = Date.now()): Copy | null {
-  const log = it.log;
-  if (!log.loaded || log.restored || !log.blocks.length) return null;
-  const page = newestPage(log.blocks, log.start, log.more);
-  page.end = log.end;
-  const c: Copy = { key: keyOf(id), v: FORMAT, at: now, page };
+export function copyOf(id: string, it?: Chat, now = Date.now()): Copy | null {
+  const ch = heldLog(id);
+  const log = it?.log;
+  const hasCh = !!ch && ch.loaded && !ch.restored;
+  const hasRec = !!log && log.loaded && !log.restored && log.blocks.length > 0;
+  if (!hasCh && !hasRec) return null;
+  const c: Copy = { key: keyOf(id), v: FORMAT, at: now };
+  if (hasRec && !hasCh) {
+    const page = newestPage(log!.blocks, log!.start, log!.more);
+    page.end = log!.end;
+    c.page = page;
+  }
   const st = getCarried<SessionState>(`session:${id}`);
   if (st) c.session = st;
   const members = queryClient.getQueryData<ChannelMembers>(["members", id]);
   if (members) c.members = members;
-  const ch = several.has(id) ? heldLog(id) : undefined;
-  if (ch && !ch.restored) {
-    const msgs = ch.msgs.slice(-CHANNEL_MESSAGES);
-    c.chan = { msgs, more: ch.more || ch.msgs.length > msgs.length };
+  if (hasCh) {
+    const msgs = ch!.msgs.slice(-CHANNEL_MESSAGES);
+    c.chan = { msgs, more: ch!.more || ch!.msgs.length > msgs.length };
     const reads = getCarried<ChannelReads>(`reads:${id}`);
     if (reads) c.reads = reads;
     const sessions: Record<string, SessionState> = {};
@@ -88,8 +93,8 @@ export function copyOf(id: string, it: Chat, now = Date.now()): Copy | null {
   return c;
 }
 
-/** Puts this device's copy of session id's chat into it, if there is one and chats are kept:
- *  says whether it did. Its record's page only into one that has none yet. */
+/** Puts this device's copy of channel id's chat into memory, if there is one and chats are kept:
+ *  says whether it did. */
 export async function restore(id: string, it: Chat): Promise<boolean> {
   const conf = await getConf();
   if (!conf.chats) return false;
@@ -108,15 +113,13 @@ export async function restore(id: string, it: Chat): Promise<boolean> {
   }
   const key = `session:${id}`;
   if (c.session && !getCarried(key)) setCarried(key, c.session);
-  // Its record's page, unless one is held already (warmed, read ahead): that one is the server's.
-  if (!it.log.loaded) {
+  if (c.page && !it.log.loaded) {
     it.log.take(c.page);
     it.log.restored = true;
     it.log.came = 0;
   }
   if (c.members && !queryClient.getQueryData(["members", id])) queryClient.setQueryData(["members", id], c.members);
   if (c.chan) {
-    several.add(id);
     channelLog(id).log.restore(c.chan.msgs, c.chan.more);
     if (c.reads && !getCarried(`reads:${id}`)) setCarried(`reads:${id}`, c.reads);
     for (const [x, st] of Object.entries(c.sessions ?? {})) if (!getCarried(`session:${x}`)) setCarried(`session:${x}`, st);
@@ -139,7 +142,7 @@ async function used(key: string) {
 
 /** The version of each chat as last written, by session: one unchanged is not written again. */
 const written = new Map<string, string>();
-const versionOf = (id: string, it: Chat) => `${it.log.version}.${heldLog(id)?.version ?? 0}`;
+const versionOf = (id: string, it?: Chat) => `${it?.log.version ?? 0}.${heldLog(id)?.version ?? 0}`;
 
 /** Writes the copies of these chats (those kept in memory, by default) that changed. */
 export async function save(ids?: string[]) {
@@ -149,8 +152,9 @@ export async function save(ids?: string[]) {
   if (!d) return;
   const now = Date.now();
   const copies: Copy[] = [];
-  for (const it of ids ? ids.map((id) => peekChat(id)).filter((c): c is Chat => !!c) : heldChats()) {
-    const id = it.log.id;
+  const allIds = ids ?? [...new Set([...keptChannelIds(), ...heldChats().map((c) => c.log.id)])];
+  for (const id of allIds) {
+    const it = peekChat(id);
     const v = versionOf(id, it);
     if (written.get(id) === v) continue;
     const c = copyOf(id, it, now);
@@ -224,7 +228,7 @@ export function watch() {
     for (const s of list) {
       const before = was.get(s.id);
       was.set(s.id, s.status);
-      if (before && BUSY.has(before) && !BUSY.has(s.status) && peekChat(s.id)) ended.push(s.id);
+      if (before && BUSY.has(before) && !BUSY.has(s.status) && (heldLog(s.id) || peekChat(s.id))) ended.push(s.id);
     }
     if (ended.length) soon(ended);
     if (Date.now() - unloading > 10_000) {
@@ -240,6 +244,6 @@ export function watch() {
   setInterval(() => {
     const list = getCarried<Session[]>("list") ?? [];
     const busy = new Set(list.filter((s) => BUSY.has(s.status)).map((s) => s.id));
-    soon(heldChats().map((c) => c.log.id).filter((id) => !busy.has(id)));
+    soon([...new Set([...keptChannelIds(), ...heldChats().map((c) => c.log.id)])].filter((id) => !busy.has(id)));
   }, IDLE_EVERY);
 }

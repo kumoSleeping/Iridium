@@ -22,9 +22,9 @@ const SLACK = 32; // px of room not worth bringing the conversation down for: le
 const QUIET = 250; // ms with nothing changing, the turn over, before the room kept under the conversation is closed: a turn ends in several draws (its box gone, its answer come, its steps folded), and the room is closed for all of them once
 
 /** The follow's spring, critically damped: it comes to rest once, without a bounce, and one whose
- *  end moves on while it runs goes on at the speed it had. W: its stiffness, per ms: at rest (all
- *  but half a percent of the way) in one move's time (motion.css --move), as every other move is. */
-const springW = (quick = true) => 7.5 / (quick ? motion.move() : motion.move() * FOLLOW);
+ *  end moves on while it runs goes on at the speed it had. W: its stiffness, per ms: at rest in
+ *  one move's time (motion.css --move), softening the landing without dragging. */
+const springW = (quick = true) => 6.2 / (quick ? motion.move() : motion.move() * FOLLOW);
 /** How many moves' time what comes of itself takes to come to rest (the agent's lines, a row, a
  *  picture): slower than the lines come, so the conversation never stands between them: one
  *  movement, its speed kept (kumo, 2026-11-23). What the user does (a message sent, the composer's
@@ -204,7 +204,7 @@ export function Stick({ tail, older, draw, place, style, children, scroller, bot
    *  theirs, in one move's time, and what shrank comes down at once. USER: as long as a fold
    *  pressed takes to open or shut (motion.css --move and --fade), and a frame or two. */
   const actedAt = useRef(-1e9);
-  const USER = 400;
+  const USER = 500;
   /** Each row's height as last seen, for the record: which row it was that changed with no one
    *  saying why. */
   const rowsH = useRef(new Map<Element, number>());
@@ -246,8 +246,40 @@ export function Stick({ tail, older, draw, place, style, children, scroller, bot
    *  shutting, a fold pressed, long words opened), each with its height as last read, and till
    *  when at most: its change is drawn by itself, frame by frame, and the end is only kept under
    *  it (neither room kept for it nor followed after it: what is under a fold shutting went up
-   *  with it and came down again once the room was closed). */
-  const moving = useRef(new Map<HTMLElement, { h: number; till: number }>());
+   *  with it and came down again once the room was closed). When a fold collapses while detached
+   *  but closer to the bottom than its own height (0 < gap < h0), blend interpolates scrollTop
+   *  proportionally across the whole collapse so it never pulls from below and then hits the
+   *  bottom floor halfway through (kumo, 2026-11-24). */
+  const moving = useRef(new Map<HTMLElement, { h: number; till: number; blend?: { h0: number; span: number; startTop: number; deficit: number } }>());
+  const clearBlend = () => {
+    for (const r of moving.current.values()) r.blend = undefined;
+  };
+  const hasBlend = () => {
+    for (const r of moving.current.values()) if (r.blend) return true;
+    return false;
+  };
+  const blendMove = (el: HTMLElement) => {
+    for (const [m, r] of moving.current) {
+      const b = r.blend;
+      if (!b) continue;
+      if (!m.isConnected) {
+        r.blend = undefined;
+        continue;
+      }
+      const h = m.getBoundingClientRect().height;
+      // Re-opened mid-collapse: stop blending and expand downward normally.
+      if (h > r.h + 0.5) {
+        r.blend = undefined;
+        continue;
+      }
+      const p = Math.min(1, Math.max(0, (b.h0 - h) / b.span));
+      const end = bottomOf(el);
+      const target = Math.max(0, Math.min(end, b.startTop - b.deficit * p));
+      put(el, target);
+      lastTop.current = el.scrollTop;
+      if (p >= 0.999) r.blend = undefined;
+    }
+  };
   /** By how much those grew (or shrank) since last read; those done or gone are let go. */
   const movedBy = () => {
     let by = 0;
@@ -261,14 +293,25 @@ export function Stick({ tail, older, draw, place, style, children, scroller, bot
     return by;
   };
   /** m's height changes of itself from now, for ms at most. */
-  const moves = (m: HTMLElement, ms: number) => {
+  const moves = (m: HTMLElement, ms: number, fresh = false, targetH = 0) => {
     const el = list.current;
     if (!el || !colOf(el)?.contains(m)) return;
+    const h0 = m.getBoundingClientRect().height;
+    const span = Math.max(0, h0 - targetH);
+    const gap0 = Math.max(0, bottomOf(el) - el.scrollTop);
+    const blend = !atEnd.current && span > 1 && gap0 > 1 && gap0 < span ? { h0, span, startTop: el.scrollTop, deficit: span - gap0 } : undefined;
     const r = moving.current.get(m);
-    if (r) return void (r.till = performance.now() + ms);
+    if (r) {
+      r.till = performance.now() + ms;
+      if (fresh) {
+        r.h = h0;
+        r.blend = blend;
+      }
+      return;
+    }
     // What the column has changed by and was not seen yet is its already (a transition is a frame
     // in when it says it runs).
-    moving.current.set(m, { h: m.getBoundingClientRect().height, till: performance.now() + ms });
+    moving.current.set(m, { h: h0, till: performance.now() + ms, blend });
     const col = colOf(el);
     const d = tall(col) - height.current;
     if (Math.abs(d) > 0.01) (moving.current.get(m)!.h -= d), follow(el, "own-height");
@@ -284,7 +327,13 @@ export function Stick({ tail, older, draw, place, style, children, scroller, bot
     pad.current = padOf(el);
     paneH.current = el.clientHeight;
     whyNow.current = why;
-    if (!atEnd.current) return;
+    // Keep tracked own-height elements in sync with height.current while detached, so re-attaching
+    // mid- or post-transition never dumps a stale delta into follow() as a fake shrink/grow bounce.
+    if (!atEnd.current) {
+      blendMove(el);
+      movedBy();
+      return;
+    }
     // The first page into an empty chat, the page before put in, the pane itself another height
     // (the keyboard, the window), a chat still settling as it opens, no motion wanted: in place.
     const settling = performance.now() - born.current < SETTLE && why !== "tail";
@@ -358,12 +407,12 @@ export function Stick({ tail, older, draw, place, style, children, scroller, bot
   const toggleFold = (d: HTMLDetailsElement) => {
     if (d.dataset.anim !== undefined) return;
     const opening = !d.open;
+    const sum = d.querySelector(":scope > summary") as HTMLElement | null;
     moveLog("stick.fold", opening ? "fold-open" : "fold-shut");
-    moves(d, motion.move() + motion.fade() + 100);
+    moves(d, motion.move() + motion.fade() + 100, true, opening ? 0 : (sum?.offsetHeight ?? 0));
     const from = d.offsetHeight;
     if (opening) d.open = true;
     else d.dataset.shut = "";
-    const sum = d.querySelector(":scope > summary") as HTMLElement | null;
     const to = opening ? d.offsetHeight : (sum?.offsetHeight ?? 0);
     // As a reveal (motion.css g-reveal): opening, the room first, its rows fading in over its last
     // part; shutting, the rows fading out first, then the room.
@@ -488,20 +537,22 @@ export function Stick({ tail, older, draw, place, style, children, scroller, bot
     const down = () => !atEnd.current && atFoot(el) && hold();
     const wheel = (e: WheelEvent) => {
       if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+      clearBlend();
       if (e.deltaY > 0) return down();
       if (atEnd.current && !inner(e.target, el)) leave();
     };
     const touch = (e: TouchEvent) => {
       const p = e.touches[0];
       if (!p) return;
+      if (e.type === "touchmove" && Math.abs(p.clientY - y) > 2) clearBlend();
       if (e.type === "touchmove" && p.clientY - y > 2 && atEnd.current && bottomOf(el) > 0 && !inner(e.target, el)) leave();
       if (e.type === "touchmove" && y - p.clientY > 2) down();
       y = p.clientY;
     };
     const key = (e: KeyboardEvent) => {
       if ((e.target as Element).closest?.("textarea, input")) return;
-      if (["PageUp", "ArrowUp", "Home"].includes(e.key)) return void (atEnd.current && leave());
-      if (["PageDown", "ArrowDown", "End", " "].includes(e.key)) down();
+      if (["PageUp", "ArrowUp", "Home"].includes(e.key)) return void (clearBlend(), atEnd.current && leave());
+      if (["PageDown", "ArrowDown", "End", " "].includes(e.key)) (clearBlend(), down());
     };
     // For the record (motionlog.ts): what in the conversation changes its own height or moves by
     // an animation of its own.
@@ -510,7 +561,7 @@ export function Stick({ tail, older, draw, place, style, children, scroller, bot
       const r = e.target instanceof HTMLElement && moving.current.get(e.target);
       if (r) r.till = performance.now() + 60;
     };
-    const told = (e: Event) => e.target instanceof HTMLElement && (moveLog("layoutMoves", "own-height", { note: nameOf(e.target) }), moves(e.target, (e as CustomEvent<number>).detail + 100));
+    const told = (e: Event) => e.target instanceof HTMLElement && (moveLog("layoutMoves", "own-height", { note: nameOf(e.target) }), moves(e.target, (e as CustomEvent<number>).detail + 100, true));
     const animates = (e: AnimationEvent) => moveLog("css.animation", e.animationName, { note: e.target instanceof HTMLElement ? nameOf(e.target) : "" });
     el.addEventListener("transitionrun", runs);
     el.addEventListener("transitionend", ran);
@@ -556,6 +607,8 @@ export function Stick({ tail, older, draw, place, style, children, scroller, bot
     // Where this put it, or is putting it, is no move of the user's (who goes up by the wheel, a
     // finger or a key, seen before the scroll comes).
     if (atEnd.current && (frame.current || Math.abs(top - ours.current) <= 1)) return;
+    const gapNow = bottomOf(el) - top;
+    if (!atEnd.current && hasBlend() && Math.abs(top - ours.current) <= 1 && gapNow > 0.5) return;
     // Nor where the browser pulled it to as the conversation got shorter: that is taken in first
     // (the scroll's event comes before the observer's word of it; read as the user's, the scroll
     // place was left a little short of the end, and the conversation went down and came back).
@@ -575,7 +628,21 @@ export function Stick({ tail, older, draw, place, style, children, scroller, bot
     } else if ((gap < END && d >= 0) || gap <= 1) atEnd.current = true; // at the very end too as what shrank below pulled it there
     // The user's own scrolling near the end (a smooth scroll down still on its way as it comes
     // within END): the scroll place is theirs, and what comes next is followed from there.
-    if (atEnd.current) (setFresh(false), (ours.current = top), !wasAtEnd && mark(el), closeSoon());
+    // Sync height/moving on re-attach so a shrink that clamped scrollTop to gap <= 1 is already
+    // absorbed and never triggers a room spacer + follow spring bounce (kumo, 2026-11-24).
+    if (atEnd.current) {
+      if (!wasAtEnd) {
+        clearBlend();
+        height.current = tall(col);
+        pad.current = padOf(el);
+        paneH.current = el.clientHeight;
+        movedBy();
+        mark(el);
+      }
+      setFresh(false);
+      ours.current = top;
+      closeSoon();
+    }
     // Gone up from the newest: the room kept under it is let go, unseen from here.
     else if (room.current && gap > room.current + 1) setRoom(0);
     void back().catch(() => {});

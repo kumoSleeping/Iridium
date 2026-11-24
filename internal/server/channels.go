@@ -589,6 +589,15 @@ func (s *Server) multi(ch string) bool {
 	return len(s.ch.Agents(ch)) > 1
 }
 
+// soloAgent returns the single agent session in channel ch, or "" if ch has 0 or 2+ agents.
+func (s *Server) soloAgent(ch string) string {
+	as := s.ch.Agents(ch)
+	if len(as) == 1 {
+		return as[0]
+	}
+	return ""
+}
+
 // seeingChannel is the channel ch names (its id, the start of it, or self: the caller's own) if
 // c sees it.
 func (s *Server) seeingChannel(c caller, ch string) (string, *api.SessionState, error) {

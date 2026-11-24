@@ -28,15 +28,16 @@ export function ChannelCard({ id, agent, done }: { id: string; agent: Agent; don
   const q = useQuery({ queryKey: ["profile", id, ""], queryFn: () => api.channelProfile(id) as unknown as Promise<Profile>, staleTime: 5_000, retry: false });
   if (edit) return <EditBody editing={{ channel: id }} back={() => setEdit(false)} done={done} />;
   const p = q.data;
-  // Of several agents, with no face of its own: theirs (the user, 2026-11-16).
+  // Of several agents, with no face of its own: theirs; of one agent in a bare channel: its face.
   const group = members?.members.filter((m) => m.session && m.agent).map((m) => ({ id: m.session!, agent: m.agent! })) ?? [];
   const several = group.length > 1;
+  const sole = !agent && group.length === 1 ? group[0] : undefined;
   const keys: CardKey[] = may ? [{ icon: <PencilLine size={14} />, label: t("profile.edit"), run: () => setEdit(true) }] : [];
   return (
     <ProfileCard
       face={
         <span className={cn("grid size-14 place-items-center rounded-full", !several && "bg-fill")}>
-          <Face id={id} agent={agent} size={56} logo={30} channel none={several ? <FaceStack members={group} size={56} /> : undefined} />
+          <Face id={id} agent={sole?.agent ?? agent} size={56} logo={30} channel none={several ? <FaceStack members={group} size={56} /> : sole ? <Face id={sole.id} agent={sole.agent} size={56} logo={30} /> : undefined} />
         </span>
       }
       name={p?.name || (row ? titleOf(row) : "")}

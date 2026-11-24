@@ -27,3 +27,10 @@ export const AGY_BLOBS: AgyBlob[] = [
   {blur: 9.29385, box: [34.2604, -28.457, 116.701, 104.506], ellipse: {cx: 92.611, cy: 23.7962, rx: 44.2411, ry: 27.5016}, transform: "rotate(34.0763 92.611 23.7962)", fill: "#FC413D"},
   {blur: 11.5027, box: [-15.1522, -15.9493, 77.2941, 91.076], ellipse: {cx: 23.4949, cy: 29.5887, rx: 23.7071, ry: 13.7869}, transform: "rotate(112.516 23.4949 29.5887)", fill: "#FFEE48"},
 ];
+
+/** Antigravity's mark as one data-URI SVG image: rendered once and shared across every row,
+ *  instead of instantiating ten <feGaussianBlur> filters per inline <svg> (WebKit allocates
+ *  ~1.2 MB of graphics memory per inline instance and retains part of it after unmount). */
+export const AGY_DATA_URI = `data:image/svg+xml,${encodeURIComponent(
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${AGY_VIEWBOX}"><defs>${AGY_BLOBS.map((b, i) => `<filter id="f${i}" x="${b.box[0]}" y="${b.box[1]}" width="${b.box[2]}" height="${b.box[3]}" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="${b.blur}"/></filter>`).join("")}<mask id="m" maskUnits="userSpaceOnUse" x="13" y="18" width="85" height="78" style="mask-type:alpha"><path d="${AGY}" fill="black"/></mask></defs><g transform="translate(12 10)"><path d="${AGY}" fill="#3186FF"/><g mask="url(#m)">${AGY_BLOBS.map((b, i) => `<g filter="url(#f${i})">${b.ellipse ? `<ellipse cx="${b.ellipse.cx}" cy="${b.ellipse.cy}" rx="${b.ellipse.rx}" ry="${b.ellipse.ry}"${b.transform ? ` transform="${b.transform}"` : ""} fill="${b.fill}"/>` : `<path d="${b.d}"${b.transform ? ` transform="${b.transform}"` : ""} fill="${b.fill}"/>`}</g>`).join("")}</g></g></svg>`,
+)}`;

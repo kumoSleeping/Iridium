@@ -343,10 +343,9 @@ export function NewSession({ ws, folder, onFolder, onPick, busy, onMake }: { ws:
     if (off) return void toast(t("new.offline", { name: off.m!.name }), { error: true });
     const to = there ? { m: there.m, cwd: there.cwd } : undefined;
     const ps = people ?? undefined;
-    if (bareOn) return onPick("" as Agent, to, ps, shown.length ? { agents: shown.map(member) } : undefined);
-    const [first, ...rest] = shown;
-    const as: As = { ...runs(first!), ...(typed(first!) ? { nick: typed(first!) } : {}), ...(!everyone(first!.recv) ? { on: [] } : {}), ...(rest.length ? { agents: rest.map(member) } : {}) };
-    onPick(first!.agent, to, ps, as);
+    // Every new chat is a channel (bare: true with 0, 1, or several agents): no single-chat
+    // session-bound channel, so /clear replaces the agent in place while keeping the channel.
+    onPick("" as Agent, to, ps, shown.length ? { agents: shown.map(member) } : undefined);
   };
   // A subfolder being named, in the folder's line (the user, 2026-11-10). What it holds now is read
   // by its blur too: Enter or Escape has closed it by then.

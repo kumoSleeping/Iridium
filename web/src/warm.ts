@@ -15,6 +15,9 @@ import { keep, kept } from "./ui";
 export const PER_WORKSPACE = 10;
 /** How many sessions agents made are warmed at most, the latest first. */
 export const MADE_MAX = 12;
+/** How many sessions are warmed in all across workspaces, so a server with dozens of workspaces
+ *  does not hold hundreds of chats and decoded thumbnails in memory. */
+export const WARM_MAX = 30;
 
 /** Whether an agent made s and it works now: a subagent at work, or a session another started,
  *  in its turn. */
@@ -41,7 +44,10 @@ export function pick(all: Session[], tree: Tree, open: string | null, lastWs: nu
   const others = places.filter((p) => p !== first).sort((a, b) => b.latest - a.latest);
   const byMade = all.filter((s) => s.id !== open && made(s, byId, now)).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, MADE_MAX);
   const want = new Map<string, number>();
-  for (const s of [...(first?.sessions ?? []), ...byMade, ...others.flatMap((p) => p.sessions)]) if (!want.has(s.id)) want.set(s.id, s.updatedAt);
+  for (const s of [...(first?.sessions ?? []), ...byMade, ...others.flatMap((p) => p.sessions)]) {
+    if (want.size >= WARM_MAX) break;
+    if (!want.has(s.id)) want.set(s.id, s.updatedAt);
+  }
   return want;
 }
 

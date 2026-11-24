@@ -237,10 +237,9 @@ type RawPage<T> = { data: T[]; _data?: { start: number; end: number; more: boole
 export const api = {
   // --- served (docs/api.md) ---
   session: (id: string, init?: RequestInit) => get<SessionState>(S(id), init),
-  /** have: the page holds the record already (its page is left out); since: how far back the
-   *  others' words are to go then (the record's first block's time; 0: all of them). */
-  first: async (id: string, q: { have?: boolean; since?: number } = {}, init?: RequestInit): Promise<First> => {
-    const args = q.have ? `?record=0${q.since !== undefined ? `&since=${q.since}` : ""}` : "";
+  /** record: true asks for the session's raw transcript alone (TranscriptView). */
+  first: async (id: string, q: { record?: boolean } = {}, init?: RequestInit): Promise<First> => {
+    const args = q.record ? "?record=1" : "";
     const f = await get<{ session: SessionState; page?: RawPage<SatoriMessage>; members?: ChannelMembers; reads?: ChannelReads; log?: RawPage<ChannelMessage>; sessions?: Record<string, SessionState>; work?: { session: string; block?: string; from?: number; to?: number; data: SatoriMessage[] }[] }>(`${S(id)}/first${args}`, init);
     const at = (p: RawPage<unknown>) => ({ start: p._data?.start ?? 0, end: p._data?.end ?? 0, more: p._data?.more ?? false });
     if (f.page) for (const fn of seenBlocks) fn(id, f.page.data);

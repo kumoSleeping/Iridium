@@ -282,3 +282,76 @@ export function foldSaid(runs: Run[]): string {
   if (bad) said.push(t("msg.failedN", { n: bad }));
   return t("msg.toolsSaid", { list: said.join(t("msg.sep")) });
 }
+
+/** Total elapsed ms from the first timed step to the last timed result/step, if positive. */
+export function foldSpan(steps: Step[]): number | undefined {
+  const first = steps.find((s) => s.time)?.time;
+  const last = steps.findLast((s) => (s.kind === "tool" && s.result?.time) || s.time);
+  const end = last && ((last.kind === "tool" && last.result?.time) || last.time);
+  return first && end && end > first ? end - first : undefined;
+}
+
+/** Stable React key for a tool fold across draft → running → completed steps, so a live fold
+ *  stays one mounted instance as its first call finishes and later calls arrive. */
+export function foldKey(steps: Step[], running: Tool[] = [], calls: { tool?: { id: string } }[] = []): string | undefined {
+  const s0 = steps[0];
+  if (s0) return s0.kind === "tool" && s0.id ? `fold:${s0.id}` : s0.at;
+  const r0 = running[0];
+  if (r0) return r0.id ? `fold:${r0.id}` : r0.at;
+  const c0 = calls[0]?.tool?.id;
+  return c0 ? `fold:${c0}` : undefined;
+}
+
+export type DiffLine = { kind: "eq" | "del" | "add"; line: string };
+
+/** Unified line diff between oldText and newText: trims common prefix/suffix first, then runs
+ *  LCS DP for bounded middle slices (falling back to delete-then-add on very large diffs). */
+export function unifiedDiff(oldText: string, newText: string): DiffLine[] {
+  const a = oldText.split("\n");
+  const b = newText.split("\n");
+  let head = 0;
+  while (head < a.length && head < b.length && a[head] === b[head]) head++;
+  let tail = 0;
+  while (tail < a.length - head && tail < b.length - head && a[a.length - 1 - tail] === b[b.length - 1 - tail]) tail++;
+  const out: DiffLine[] = [];
+  for (let i = 0; i < head; i++) out.push({ kind: "eq", line: a[i]! });
+  const am = a.slice(head, a.length - tail);
+  const bm = b.slice(head, b.length - tail);
+  const m = am.length;
+  const n = bm.length;
+  if (m === 0) {
+    for (const line of bm) out.push({ kind: "add", line });
+  } else if (n === 0) {
+    for (const line of am) out.push({ kind: "del", line });
+  } else if (m * n > 40_000) {
+    for (const line of am) out.push({ kind: "del", line });
+    for (const line of bm) out.push({ kind: "add", line });
+  } else {
+    const w = n + 1;
+    const dp = new Int32Array((m + 1) * w);
+    for (let i = m - 1; i >= 0; i--) {
+      for (let j = n - 1; j >= 0; j--) {
+        dp[i * w + j] = am[i] === bm[j] ? dp[(i + 1) * w + (j + 1)]! + 1 : Math.max(dp[(i + 1) * w + j]!, dp[i * w + (j + 1)]!);
+      }
+    }
+    let i = 0;
+    let j = 0;
+    while (i < m && j < n) {
+      if (am[i] === bm[j]) {
+        out.push({ kind: "eq", line: am[i]! });
+        i++;
+        j++;
+      } else if (dp[(i + 1) * w + j]! >= dp[i * w + (j + 1)]!) {
+        out.push({ kind: "del", line: am[i]! });
+        i++;
+      } else {
+        out.push({ kind: "add", line: bm[j]! });
+        j++;
+      }
+    }
+    while (i < m) out.push({ kind: "del", line: am[i++]! });
+    while (j < n) out.push({ kind: "add", line: bm[j++]! });
+  }
+  for (let i = a.length - tail; i < a.length; i++) out.push({ kind: "eq", line: a[i]! });
+  return out;
+}

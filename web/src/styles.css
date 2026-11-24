@@ -272,6 +272,32 @@ body {
 .no-bar::-webkit-scrollbar {
   display: none;
 }
+/* Inner scroll of an expanded tool fold: reserve a whisper-thin 4px gutter so crossing from
+   non-scrolling to scrolling never shifts row durations horizontally, while staying invisible
+   until hovered or overflowing. */
+.steps-scroll {
+  scrollbar-width: thin;
+  scrollbar-gutter: stable;
+  scrollbar-color: transparent transparent;
+}
+.steps-scroll[data-over],
+.steps-scroll:hover {
+  scrollbar-color: var(--fill-2) transparent;
+}
+.steps-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+.steps-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.steps-scroll::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: transparent;
+}
+.steps-scroll[data-over]::-webkit-scrollbar-thumb,
+.steps-scroll:hover::-webkit-scrollbar-thumb {
+  background: var(--fill-2);
+}
 
 /* a tool kind's icon in the chat */
 .k-tint {

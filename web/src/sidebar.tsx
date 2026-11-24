@@ -885,11 +885,11 @@ let saidNow: ReturnType<typeof useSaidLine> = () => undefined;
  *  several agents) their own faces (FaceStack; the user, 2026-11-16: not their logos), else its
  *  agent's; what is unread of it a badge on its top right corner, red, or grey
  *  while it is quiet (unread.ts) and nothing unread names me, 99+ past 99. */
-function RowFace({ s, group, unread, quiet }: { s: Session; group?: { id: string; agent: Agent }[]; unread: number; quiet: boolean }) {
-  const logo = group ? <FaceStack members={group} size={36} /> : <Logo agent={s.agent} size={20} />;
+function RowFace({ s, group, solo, unread, quiet }: { s: Session; group?: { id: string; agent: Agent }[]; solo?: { id: string; agent: Agent }; unread: number; quiet: boolean }) {
+  const logo = group ? <FaceStack members={group} size={36} /> : solo ? <Face id={solo.id} agent={solo.agent} size={36} logo={20} low /> : <Logo agent={s.agent} size={20} />;
   return (
     <span className={cn("relative grid size-9 place-items-center rounded-full", !group && "bg-fill")}>
-      <Face id={s.id} agent={s.agent} size={36} none={logo} className="place-items-center" low channel />
+      <Face id={s.id} agent={solo?.agent ?? s.agent} size={36} none={logo} className="place-items-center" low channel />
       {unread > 0 && (
         <span
           className={cn("g-pop absolute -top-1 -right-1.5 grid h-4 min-w-4 place-items-center rounded-full px-1 text-[10px] leading-none font-semibold tabular-nums", quiet ? "bg-ink-4" : "bg-err")}
@@ -914,14 +914,18 @@ const SessionRow = memo(function SessionRow({ s, where, depth, flip, selected, o
   const now = useMinute();
   const title = titleOf(s);
   // A confirmation its agent asked for waits on you too, while it is not at work.
-  // A channel of several agents (chat/channel): their logos one over the next, their nicks on a
-  // second line, its lamp theirs: lit while any of them works.
+  // A channel's agents (one or several): its lamp is theirs, lit while any of them works.
   const all = useCarried<Session[]>(s.agents?.length ? "list" : null);
-  const multi = isMulti(s) ? s.agents! : undefined;
-  const members = multi?.map((a) => all?.find((x) => x.id === a.session));
+  const ags = s.agents;
+  const multi = isMulti(s) ? ags! : undefined;
+  const allMembers = ags?.map((a) => all?.find((x) => x.id === a.session));
+  const members = multi ? allMembers : undefined;
+  const soloRow = s.bare && ags?.length === 1 ? ags[0] : undefined;
+  const soloAgent = soloRow ? (allMembers?.[0]?.agent ?? soloRow.agent ?? s.agent) : undefined;
+  const solo = soloRow && soloAgent ? { id: soloRow.session, agent: soloAgent } : undefined;
   // Its channel's other agents at work, or its subagents (no rows of their own, kumo 2026-11-15):
   // its lamp says so.
-  const base = channelLamp(lampOf(s), [...(members ?? []).flatMap((m) => (m && m.id !== s.id ? [lampOf(m)] : [])), ...(kidsAt ? (["running"] as const) : [])]);
+  const base = channelLamp(lampOf(s), [...(allMembers ?? []).flatMap((m) => (m && m.id !== s.id ? [lampOf(m)] : [])), ...(kidsAt ? (["running"] as const) : [])]);
   const status = asked && !BUSY.has(base) ? "waiting" : base;
   const told = status !== base ? statusText("waiting") : base !== lampOf(s) ? statusText(base) : sessionStatusText(s);
   // How long ago it was last active (its turn ended, it was last written to), but in a turn. Unread,
@@ -941,8 +945,8 @@ const SessionRow = memo(function SessionRow({ s, where, depth, flip, selected, o
   // agent by its nick, else its kind; nothing said yet, its agents.
   const nicks = multi?.map((a) => a.nick).filter(Boolean).join(" · ");
   // A channel of no agent of its own: the agent that spoke there, by its nick (s.last.nick).
-  const speaker = s.last?.nick || s.agents?.find((a) => a.session === s.id)?.nick || agentName(s.agent);
-  const line = s.last ? (s.last.role === "user" ? saidNow(s.last, s) : `${speaker}: ${s.last.text}`) : nicks || (s.bare ? "" : agentName(s.agent));
+  const speaker = s.last?.nick || s.agents?.find((a) => a.session === s.id)?.nick || agentName(solo?.agent ?? s.agent);
+  const line = s.last ? (s.last.role === "user" ? saidNow(s.last, s) : `${speaker}: ${s.last.text}`) : nicks || (solo ? agentName(solo.agent) : s.bare ? "" : agentName(s.agent));
   const [menuAt, setMenuAt] = useMenuAt();
   // Its menu made as it is first opened (ui.tsx useEver), not shut with every row of the list.
   const menuEver = useEver(menuAt !== null);
@@ -1034,9 +1038,9 @@ const SessionRow = memo(function SessionRow({ s, where, depth, flip, selected, o
         faded={s.archived}
         aria={`${title}, ${told}${s.color ? `, ${t("color.tagged", { color: t(`color.${s.color}`) })}` : ""}${unread ? `, ${t("status.unreadCount", { n: badge(unread) })}` : ""}${at ? `, ${t(at.everyone ? "row.atAll" : "row.atMe")}` : ""}${quiet ? `, ${t("menu.quiet")}` : ""}`}
         icon={
-          <Tip label={[multi ? multi.map((a, i) => `${agentName(members?.[i]?.agent ?? a.agent ?? s.agent)} ${a.nick ?? ""}`.trim()).join(", ") : agentName(s.agent), machine?.name, s.subagent && t("row.subagent"), away ? t("status.offline") : status !== "idle" && told].filter(Boolean).join(" · ")} side="bottom">
+          <Tip label={[multi ? multi.map((a, i) => `${agentName(members?.[i]?.agent ?? a.agent ?? s.agent)} ${a.nick ?? ""}`.trim()).join(", ") : agentName(solo?.agent ?? s.agent), machine?.name, s.subagent && t("row.subagent"), away ? t("status.offline") : status !== "idle" && told].filter(Boolean).join(" · ")} side="bottom">
             <span className="relative grid">
-              <RowFace s={s} group={multi?.map((a, i) => ({ id: a.session, agent: members?.[i]?.agent ?? a.agent ?? s.agent }))} unread={unread} quiet={quiet && !at} />
+              <RowFace s={s} group={multi?.map((a, i) => ({ id: a.session, agent: members?.[i]?.agent ?? a.agent ?? s.agent }))} solo={solo} unread={unread} quiet={quiet && !at} />
               {remote && <CloudBadge label={machine?.name ?? t("nav.remoteFolder")} />}
               {/* A subagent: no word for it, a small agent badge on the logo's corner (the user, 2026-11-06). */}
               {s.subagent && (

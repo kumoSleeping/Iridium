@@ -19,7 +19,7 @@ import { ModeMark, modeName } from "../../modes";
 import { useList, useSession } from "../../store";
 import { errText, toast } from "../../toast";
 import { openChat } from "../../route";
-import { agentName, cn, Lamp, Logo, own, PopSurface, sessionStatusText, useEver, useLongPress, useMenuAt, usePointAnchor } from "../../ui";
+import { agentName, cn, Lamp, own, PopSurface, sessionStatusText, useEver, useLongPress, useMenuAt, usePointAnchor } from "../../ui";
 import { levelName } from "../effort";
 import { LongWords } from "../longwords";
 import { MODEL_POPUP, SessionModels, useModelMenu, useMode } from "../meters";
@@ -446,7 +446,7 @@ function Given({ a }: { a: AgentRow }) {
   return (
     <>
       <div className="flex h-10 shrink-0 items-center gap-2 px-3.5">
-        <Logo agent={a.agent} size={16} />
+        <Face id={a.session} agent={a.agent} size={18} logo={16} />
         <span className="min-w-0 flex-1 truncate text-sm font-semibold">
           {t("channel.given")} · {a.nick}
         </span>

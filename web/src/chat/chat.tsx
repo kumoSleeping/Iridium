@@ -1,181 +1,88 @@
-// A session's chat (plan "网页", web/sample): a frosted top bar, the conversation by source, newest at
-// the bottom and paged back as you scroll up, the agent's words as it writes them, and the bottom
-// stack: the queue, the confirmation cards, the composer, the mode and model keys. Its blocks come
-// from the transcript (GET messages, after= what the open session's state says was written); its
-// drafts from the stream. Loaded only once a chat opens or the page is idle. One page, one agent
-// or several (kumo, 2026-11-15: 会话页不换页，多一个 agent 只是多一个成员): once its channel has
-// another agent, the others' words go in their places among its own (channel/side.ts, merge.ts),
-// their at-work frames under the words that called them; its subagents at work each a turn of its
-// own at the end, drawn live from its record (SubTurn).
+// The chat pane: every conversation (0, 1, or several agents) is drawn by ChannelPage, backed by
+// the channel's log alone — no separate single-chat page, no transcript/channel merging.
+// Read-only TranscriptView serves subagents, external (elsewhere) sessions, and viewing an agent's
+// raw session record (?record=1).
 import { Menu } from "@base-ui/react/menu";
 import { Popover } from "@base-ui/react/popover";
-import { BarChart3, Ellipsis, FolderOpen, Globe, ListTree, Plus, Settings } from "lucide-react";
-import type { Block, Device, Status } from "../api/types.gen";
-import { lazy, memo, Suspense, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type CSSProperties, type DragEvent, type ReactNode } from "react";
-import { flushSync } from "react-dom";
-import type { SessionState as LiveSession } from "../api/types.gen";
-import { api, queryClient } from "../api/client";
+import { ArrowLeft, BarChart3, Ellipsis, FolderOpen, Globe, ListTree, Plus, Settings } from "lucide-react";
+import { lazy, memo, Suspense, useContext, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
+import type { Device, Session, SessionState as LiveSession } from "../api/types.gen";
+import { queryClient } from "../api/client";
 import { AppKey, WinKeys } from "../appkey";
-import { LinkDot } from "../link";
-import type { Session } from "../api/types.gen";
+import { chatOf, firstScreen, fresh, stateAhead, type Draft as Drafted } from "../chats";
 import { WsPlus } from "../create";
-import { chatOf, peekChat, compactSent, firstScreen, fresh, isWhole, lineOf, stateAhead, waiting, type Draft as Drafted, type Sent } from "../chats";
 import { LOCAL_ME, useMachines, useMe, useWhoList, useWorkspaces } from "../data";
 import { t, useLang } from "../i18n";
-import { fadeIn, pushIn, pushing, useMoves } from "../motion";
-import { useLeaving } from "../moves";
-import { openChat, openUsage } from "../route";
-import { PULL } from "../sheet";
+import { LinkDot } from "../link";
+import { shownPath } from "../machines";
+import { back as goBack, openChat, openRecord, openUsage } from "../route";
 import { MenuItems, Rename, sessionActions, sessionTags } from "../sidebar";
-import { useConfirms, useList, useSession } from "../store";
-import { also, carries, drafts, opened } from "../stream";
-import { errText, toast } from "../toast";
-import { groupPath, working } from "../tree";
-import { Arrive, agentName, cn, IrMark, Lamp, lampOf, LogoLamp, PopSurface, sessionStatusText, tilde, Tip, titleOf, untitled } from "../ui";
-import { givenTurn, groupMessages, isMulti, liveParts, quoteAt, type AgentRow, type GivenTurn, type Msg } from "./channel/lib";
-import { onOf } from "./channel/scripts";
-import { useScripts } from "./channel/script";
-import { betweenAgents, boxSlot, callerOf, foreignOf, givenHere, held, HOLD, linesOf, marksAt, named as namedIn, ownAnchors, slotsOf, type Anchor, type Cut, type RowAt } from "./channel/merge";
-import { Foldable } from "./longwords";
-import { foldsOnce, useReadTo } from "./foldstate";
-import { longWords, oldRead } from "./channel/folds";
-import { goTo, seqEl } from "./channel/jump";
-import { quoteText } from "./forwardcard";
-import { dispatched, type Start } from "./dispatch";
-import { Dispatching, SubFaceKey, SubHead, useSub } from "./subwork";
-import { alignBack, loadParts, sideReady, useSide } from "./channel/side";
-import { recalls } from "./react";
-import { relays, type Relay } from "../satori";
-import { AgentFace } from "./channel/members";
-import { PersonCard, PersonMenu, useNamed } from "./channel/person";
-import { Nicks } from "./channel/nick";
-import { closeEdit, useEditing } from "./channel/editing";
-import { EditBody } from "./channel/edit";
-import { ChannelCard } from "./channel/channelcard";
-import { CARD_POP } from "./channel/profilecard";
-import { Face, FaceStack } from "./channel/face";
-import { mayAct, useMembers } from "./channel/gate";
-// A channel's parts, fetched apart: ⋯'s 编辑资料 on a phone (ChannelMenu), those looking and the
-// members at the bar's right (TopRight), the line in the composer's place for one not joined.
-const ChannelMenu = lazy(() => import("./channel/top"));
-// 编辑资料, the page drawn over the chat while a card is being changed (channel/edit.tsx).
-const TopRight = lazy(() => import("./channel/top").then((m) => ({ default: m.TopRight })));
-const NotJoined = lazy(() => import("./channel/key").then((m) => ({ default: m.NotJoined })));
-// A channel of several agents: its own code, fetched as one is first opened.
-const ChannelPage = lazy(() => import("./channel/page").then((m) => ({ default: m.ChannelPage })));
-import { MachineFace, shownPath } from "../machines";
-import { openPlace } from "../places";
-import { useSecret } from "../secrets";
-import { Asks, Denials } from "./asks";
-import { renameOnly } from "./cmd";
-import { Composer, type ComposerHandle } from "./composer";
-import { folded } from "./fold";
-import { StopKey, ToolDraft } from "./live";
-import { ContextRing, ModeKey, ModelKey, modelView, QuotaBars, useMode } from "./meters";
-import { PublicLink, publicLinkQ } from "./publiclink";
-import { ShellRuns } from "./shell";
-import { Crash } from "./crash";
-import { attachedOf, placesIn, PLACE_DRAG, SESSION_DRAG, sourceOf, withDevice, yours } from "./refs";
-import { placeDropped, type NamedPlace } from "./at";
-import { PlaceIcon, placeOf } from "./mention";
-import { spotsOf, type Spot } from "./where";
-import { Compaction, Earlier, Pending, Relayed, Said, When, type AsDraft } from "./said";
-import { earlierOf, liveAt, rowPlace, slotAfter, tailOf, turnKey, turnsOf, type LiveAt, type Row } from "./turns";
-import { Stick, toEnd } from "./stick";
-import { Activity, OtherTurn, TurnFrame } from "./atwork";
+import { useList, useSession } from "../store";
+import { carries, drafts, opened } from "../stream";
+import { toast } from "../toast";
+import { groupPath } from "../tree";
+import { agentName, cn, IrMark, lampOf, LogoLamp, PopSurface, sessionStatusText, tilde, Tip, titleOf, untitled } from "../ui";
 import { VoiceDock } from "../voice/dock";
+import { Activity, TurnFrame } from "./atwork";
+import { ChannelCard } from "./channel/channelcard";
+import { EditBody } from "./channel/edit";
+import { closeEdit, useEditing } from "./channel/editing";
+import { Face, FaceStack } from "./channel/face";
+import { isMulti } from "./channel/lib";
+import { ChannelPage } from "./channel/page";
+import { CARD_POP } from "./channel/profilecard";
+import { renameOnly } from "./cmd";
+import { Crash } from "./crash";
+import { dispatched, type Start } from "./dispatch";
+import { folded, foldKey } from "./fold";
+import { Draft } from "./markdown";
+import { PublicLink, publicLinkQ } from "./publiclink";
+import { sourceOf, withDevice } from "./refs";
+import { Said, When } from "./said";
+import { Stick } from "./stick";
+import { Dispatching, SubFaceKey, SubHead, useSub } from "./subwork";
 
-/** How many turns of a conversation are drawn as it opens, and how many more each time. */
-const FIRST_TURNS = 20;
-const MORE_TURNS = 20;
+// Top bar's channel controls, loaded lazily: ⋯'s 编辑资料 on a phone (ChannelMenu) and the
+// viewers/members keys at the bar's right (TopRight).
+const ChannelMenu = lazy(() => import("./channel/top"));
+const TopRight = lazy(() => import("./channel/top").then((m) => ({ default: m.TopRight })));
 
 const BUSY = new Set(["running", "compacting", "starting", "waiting"]);
-/** Another agent of the channel at work: its frame under the conversation. */
-// At work: in a turn. Not "starting" (its harness coming up, no turn yet: an invited agent's face
-// flashed up as if to speak and went; kumo, 2026-11-16).
-const WORKING = new Set(["running", "compacting"]);
-/** A turn is on: at work, or waiting on an ask. Waiting only on a step auto mode denied, the turn is
- *  over (session/release.go): no stop key, no activity row. */
 const turning = (s: { status: string; asks: unknown[]; denials?: unknown[] }) => BUSY.has(s.status) && !(s.status === "waiting" && !s.asks.length && !!s.denials?.length);
-
-/** The bottom stack's height as last measured: a chat opens padded by it, not by a guess and then
- *  moved (one frame drawn short or long, the conversation jumping after). */
-let lastStackH = 140;
-
-/** A session's state before the stream (or chats.ts stateAhead) brings it, from its row: the chat is
- *  drawn whole at once, its composer and conversation, its keys after (ghost). */
 const ghostOf = (row: Session): LiveSession => ({ ...row, asks: [], tasks: [], denials: [], queue: [], end: 0, proc: -1 });
+const renamesDraft = (d: Drafted) => !!d.tool && renameOnly({ name: d.tool.name, input: d.text });
 
 /** sheet: on a phone, the sidebar's sheet is out this tall (sheet.tsx): the bottom stack sinks out
- *  under it; the conversation stays where it is, not pushed up with it (the user, 2026-11-06). onSheet: on a phone, brings it out,
- *  from the bar's ⋯ menu; onMe, there too, this terminal's own sheet (个人). */
-export function ChatPage({ id, sheet = 0, onSheet, onMe }: { id: string; sheet?: number; onSheet?: () => void; onMe?: () => void }) {
+ *  under it. record: true opens the read-only TranscriptView for this session. */
+export function ChatPage({ id, record, sheet = 0, onSheet, onMe }: { id: string; record?: boolean; sheet?: number; onSheet?: () => void; onMe?: () => void }) {
   const list = useList();
   const row = list?.find((x) => x.id === id);
-  // A session's page is this chat, one agent or several (kumo, 2026-11-15: 会话页不换页，多一个
-  // agent 只是多一个成员): another agent is one more member, its words in their place among the
-  // own agent's. A channel that is no session's (no agent of its own): the channel's page.
-  if (row?.bare)
-    return (
-      <>
-        <Suspense
-          fallback={
-            <div className="relative h-full">
-              <Bar s={row} onSheet={onSheet} onMe={onMe} />
-            </div>
-          }
-        >
-          <ChannelPage key="channel" id={id} sheet={sheet} record={openChat} bar={(s) => <Bar s={s} onSheet={onSheet} onMe={onMe} />} />
-        </Suspense>
-        </>
-    );
+  const real = useSession(id);
+  const s = real ?? row;
+  if (record || s?.subagent || s?.status === "elsewhere") {
+    return <TranscriptView key="record" id={id} sheet={sheet} onSheet={onSheet} onMe={onMe} onBack={record ? goBack : undefined} />;
+  }
   return (
-    <>
-      <OneChat key="one" id={id} sheet={sheet} onSheet={onSheet} onMe={onMe} />
-    </>
+    <ChannelPage
+      key="channel"
+      id={id}
+      sheet={sheet}
+      record={openRecord}
+      bar={(cur) => <Bar s={cur} onSheet={onSheet} onMe={onMe} />}
+      subTurn={(sub) => <SubTurn s={sub} />}
+    />
   );
 }
 
-
-
-/** A session's chat, drawn once its first screen is in (chats.ts firstScreen: its state, its
- *  record, its members, its channel's side, in one answer): whole at once, not its record and
- *  then the others' words and their work as each comes; with another agent in its channel, the
- *  code that draws the others too. Until then its bar alone; one seen before draws at once. */
-function OneChat(p: { id: string; sheet?: number; onSheet?: () => void; onMe?: () => void }) {
-  const [whole, setWhole] = useState(() => isWhole(p.id) && sideReady(p.id));
-  // Asked for as the page is made: the chat under it, drawn at once now, asks for nothing of it apart.
-  useState(() => void (isWhole(p.id) || firstScreen(p.id)));
-  const row = useList()?.find((x) => x.id === p.id);
-  useEffect(() => {
-    if (whole) return;
-    let live = true;
-    // The others' code with it, when the list says already there are others.
-    if (isMulti(row)) void loadParts().catch(() => {});
-    void (isWhole(p.id) ? Promise.resolve() : firstScreen(p.id))
-      .then(() => (sideReady(p.id) ? undefined : loadParts()))
-      .then(() => live && setWhole(true), () => live && setWhole(true));
-    return () => void (live = false);
-  }, [p.id]);
-  // Not whole yet: its bar and its composer all the same, the conversation alone waited for
-  // (kumo, 2026-11-24: the composer went away as a chat not yet fetched was turned to, and came
-  // back with its first screen; what does not change with the chat is not drawn again for it).
-  return <WholeChat {...p} hold={!whole} />;
-}
-
-/** A session's chat: its own agent's record, and, once its channel has another agent, what the
- *  others say in their places among it (chat/channel/side.ts, merge.ts). */
-/** hold: its first screen has not come: all of it but the conversation is drawn. */
-function WholeChat({ id, sheet = 0, onSheet, onMe, hold }: { id: string; sheet?: number; onSheet?: () => void; onMe?: () => void; hold?: boolean }) {
+/** Minimal read-only transcript viewer for subagents, external (elsewhere) sessions, and inspecting
+ *  an agent's raw session record (?record=1). Never touches channelLog or merging. */
+function TranscriptView({ id, sheet = 0, onSheet, onMe, onBack }: { id: string; sheet?: number; onSheet?: () => void; onMe?: () => void; onBack?: () => void }) {
   useLang();
-  const real = useSession(id);
   const list = useList();
   const row = list?.find((x) => x.id === id);
-  const ghost = !real && !!row;
-  const ghostS = useMemo(() => row && ghostOf(row), [row]);
-  const s = real ?? ghostS;
-  // Gone only once asked and not there, or there and then not: a session just made is in no list
-  // yet, and is not to show "no such session" as it opens.
+  const real = useSession(id);
+  const ghost = useMemo(() => row && ghostOf(row), [row]);
+  const s = real ?? ghost;
   const [lost, setLost] = useState(false);
   useEffect(() => {
     if (!real) void stateAhead(id).then((there) => !there && setLost(true));
@@ -184,1099 +91,155 @@ function WholeChat({ id, sheet = 0, onSheet, onMe, hold }: { id: string; sheet?:
   if (real) had.current = true;
   else if (had.current && !lost) setLost(true);
   if (real && lost) setLost(false);
-  const [chat] = useState(() => {
-    const c = chatOf(id);
-    // Opened at its end: drawn from its last turns again, however far up it was gone before.
-    if (c.place.top === null) (c.place.from = undefined), (c.place.n = undefined);
-    return c;
-  });
-  // Its subagents at work (kumo, 2026-11-15: members that only read, no rows in the sidebar;
-  // 2026-11-16: each a turn of its own, outside its parent's, live as the agent's): their states
-  // on the stream beside the channel's agents', as far as it has room (SubTurn).
-  const subs = (list ?? []).filter((x) => x.subagent && x.parent === id && working(x, row, Date.now()));
-  const subKey = subs.map((x) => x.id).join(" ");
-  useEffect(() => {
-    also(subKey ? subKey.split(" ").map((x) => `session:${x}`) : [], "subs");
-    return () => also([], "subs");
-  }, [subKey]);
+  const [chat] = useState(() => chatOf(id));
   const log = chat.log;
   const [, redraw] = useState(0);
   const changed = () => redraw((n) => n + 1);
   const me = useMe().data;
+  const self = me ?? LOCAL_ME;
   const terminals = useWhoList();
   const workspaces = useWorkspaces().data;
-  const confirms = useConfirms();
-  // Its channel's members (docs/channels.md; their key is at the bar's right): one not of its
-  // people reads, and neither speaks nor answers.
-  const members = useMembers(id);
-  const may = mayAct(members);
-  // Its channel, once it has another agent: the log, the others' states, the reads (side.ts).
-  // Its agents as the list has them; before the list came, as its members do.
-  const fromMembers = useMemo(() => (members?.members ?? []).flatMap((m) => (m.session ? [{ session: m.session, ...(m.agent ? { agent: m.agent } : {}), ...(m.nick ? { nick: m.nick } : {}) }] : [])), [members]);
-  const chAgents = row ? row.agents : fromMembers;
-  const scripted = (useScripts(id)?.length ?? 0) > 0;
-  const side = useSide(id, chAgents ? { agents: chAgents } : undefined, may, scripted);
-  const ownNeeds = confirms.filter((c) => c.session === id && c.kind !== "ask");
-  // A card waiting for an answer (asks.tsx): the composer goes, and on a phone no swipe up brings
-  // the sheet (sheet.tsx), the cards scrolling instead (the user, 2026-11-15).
-  const secretHere = useSecret()?.at === id;
-  const asking = !!s?.asks.length || !!ownNeeds.length || secretHere;
+  const scroller = useRef<HTMLDivElement>(null);
 
-  // The newest page, or what was kept; then what came since.
   useEffect(() => {
     let live = true;
-    // A first page that did not come (the network a moment away) is asked for again, a little
-    // later each time: nothing else would, and the chat stayed empty.
-    let tries = 0;
-    let again = 0;
-    const more = () =>
-      void (chat.coming ?? log.newer()).then(
-        () => live && changed(),
-        () => {
-          if (live && !log.loaded && tries < 6) again = window.setTimeout(more, Math.min(8000, 500 * 2 ** tries++));
-        },
-      );
-    // Read just now (its first screen, or ahead of the turn to it): not again.
-    if (chat.coming || !fresh(log.came)) more();
+    const more = () => void (log.loaded ? log.newer() : firstScreen(id, chat, undefined, true).then(() => (log.loaded ? undefined : log.newer()))).then(() => live && changed(), () => {});
+    if (!fresh(log.came)) more();
     const hear = (d: { session: string }) => d.session === id && (log.wrote(d as never), changed());
     const back = () => (log.dropDrafts(), more());
     drafts.add(hear);
     opened.add(back);
-    // A block of its record taken back as a message of its channel (reactions.ts): out.
-    const gone = (ch: string) => void (ch === id && changed());
-    recalls.add(gone);
     return () => {
       live = false;
-      clearTimeout(again);
       drafts.delete(hear);
       opened.delete(back);
-      recalls.delete(gone);
     };
   }, [id]);
-  // The transcript grew past what is shown: the blocks since, from the state's tail when it has
-  // them, else fetched. Also as the first page comes: it may have been read before what the state
-  // says was written (a message sent as the chat opened), and nothing else asks again.
+
   const end = s?.end ?? 0;
   useEffect(() => {
     if (!log.loaded || end <= log.end) return;
     if (!log.fromTail(s?.tail)) return void log.newer().then(changed, () => {});
     changed();
   }, [end, log.loaded]);
-  useEffect(() => void (real && log.procIs(real.proc), changed()), [real?.proc]);
-  // The turn ended: what was drafted is in the transcript now. Only those drafted by then go: the
-  // next turn (queued, sent at once) may begin to write while the page fetches.
+  useEffect(() => void (real && (log.procIs(real.proc), changed())), [real?.proc]);
+
   const busy = !!s && turning(s);
   const wasBusy = useRef(busy);
   useEffect(() => {
     if (wasBusy.current && !busy) {
       const upTo = log.mark();
-      // A /compact that wrote no compaction (it had nothing to compact) is done too.
-      void log.newer().then(() => (log.dropDrafts(upTo), (log.sent = log.sent.filter((x) => x.failed !== undefined || !compactSent(x))), changed()), () => {});
+      void log.newer().then(() => (log.dropDrafts(upTo), changed()), () => {});
     }
     wasBusy.current = busy;
   }, [busy]);
-  // Compacting, or a /compact on its way: the compaction's line, since when.
-  const compacting = s?.status === "compacting" || log.sent.some((x) => x.failed === undefined && compactSent(x));
-  // Counted from when the agent began (the daemon's time), not from when this page saw it.
-  const drawnTurns = useRef<{ stamp: unknown[]; nodes: Map<string, ReactNode> }>({ stamp: [], nodes: new Map() });
-  const dispatchingWas = useRef<{ parent: string; by: string; d: ReturnType<typeof dispatched> } | null>(null);
-  const liveTurn = useRef("");
-  const liveLast = useRef("");
-  /** The turn at work as this page follows it (turns.ts liveAt), and whether it saw the chat at rest. */
-  const liveSeen = useRef<{ id: string; idle: boolean; at: LiveAt | null }>({ id: "", idle: false, at: null });
-  const column = useRef<HTMLDivElement>(null);
-  /** The first turn drawn, among the turns as last drawn (their keys). */
-  const drawnFrom = useRef<{ from: number; keys: string[] }>({ from: 0, keys: [] });
-  /** MORE_TURNS more of the turns before; says whether there were any. */
-  const drawMore = () => {
-    const { from, keys } = drawnFrom.current;
-    if (from <= 0) return false;
-    const f = Math.max(0, from - MORE_TURNS);
-    chat.place.from = keys[f];
-    chat.place.n = keys.length - f;
-    drawnFrom.current = { from: f, keys };
-    return true;
-  };
-  // What is drawn as it opens does not fill the pane (short turns): more, before it is painted.
-  useLayoutEffect(() => {
-    const el = scroller.current;
-    const col = column.current;
-    // Not while the conversation is held back (its first screen not come): nothing of it is drawn.
-    if (!hold && el && col && col.offsetHeight < el.clientHeight * 1.25 && drawMore()) changed();
-  });
-  // How high the row at work was while the agent was at work, for what takes its place as the
-  // turn is stopped (stopped, below).
-  const workBusy = useRef(false);
-  // The turn's end as this page saw it: whether it was at work at the last draw, the record's last
-  // row then, and when it came to rest with that row still the last.
-  const rest = useRef({ busy: false, last: "", at: -1e9, with: "" });
-  const workH = useRef({ id: "", h: 0 });
-  useLayoutEffect(() => {
-    if (workH.current.id !== id) workH.current = { id, h: 0 };
-    const row = workBusy.current ? column.current?.querySelector<HTMLElement>(':scope > [data-flip="work"]') : null;
-    if (row) workH.current.h = row.offsetHeight;
-  });
-  // Turns that change places (the row at work going from over others' words to under them, words
-  // put between turns as the record catches up) glide there (motion.ts useMoves).
-  const moved = useMoves(column);
-  /** Those at work (the others, the subagents) in the order this page first saw them, and the
-   *  turn each subagent began at: none changes places with another as one or the other writes
-   *  (kumo, 2026-11-21); a subagent stays where it began, whatever is said under it. */
-  const boxSeen = useRef<{ id: string; n: Map<string, number>; at: Map<string, string> }>({ id: "", n: new Map(), at: new Map() });
-  const compactSince = useRef(0);
-  if (!compacting) compactSince.current = 0;
-  else if (s?.compactingSince) compactSince.current = s.compactingSince;
-  else if (!compactSince.current) compactSince.current = Date.now();
-  // Its agent cleared itself (Claude's own /clear): the conversation goes on in another session,
-  // and the page with it, as after Iridium's /clear. Only as it happens here, not on opening one
-  // that went on before.
-  const seenNext = useRef<{ id: string; next?: string } | null>(null);
-  useEffect(() => {
-    if (!s) return;
-    const was = seenNext.current;
-    seenNext.current = { id, next: s.next };
-    if (was?.id === id && s.next && s.next !== was.next) openChat(s.next);
-  }, [id, !!s, s?.next]);
 
-  // Who sent what; this panel as /v1/internal/me has it (its name, avatar, device).
-  const self = me ?? LOCAL_ME;
-  const source = (b: { from?: string; fromTerminal?: string; fromDevice?: Device }) => withDevice(sourceOf(b.from, b.fromTerminal, self, terminals, list ?? [], workspaces ?? [], s), b.fromDevice);
-
-  // The bottom stack's height pads the conversation's end.
-  const stack = useRef<HTMLDivElement>(null);
-  const [stackH, setStackH] = useState(lastStackH);
-  useLayoutEffect(() => {
-    const el = stack.current;
-    if (!el) return;
-    // Measured now, before the first paint, then as it changes.
-    const measure = () => setStackH((lastStackH = el.offsetHeight));
-    measure();
-    // Drawn at once, in the frame the stack changed in: drawn whenever React next got to it, the
-    // conversation's padding was a frame behind the stack (the composer a line taller over the
-    // last message; emptied, the conversation a frame lower and back).
-    const ro = new ResizeObserver(() => flushSync(measure));
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [!!s]); // the stack is drawn only once the session or its row has come
-
-  // A message sent: at the bottom, the conversation pushed up by it (the chat's glide) as it fades in.
-  const bubbles = useRef(new Map<string, HTMLDivElement>());
-  const fly = useRef<string | null>(null);
-  const scroller = useRef<HTMLDivElement>(null);
-  // When each one sent began to come in, by its input id: its own row, come from the record in the
-  // middle of that, goes on from where the bubble was (motion.ts pushIn), not drawn whole at once.
-  const flew = useRef(new Map<string, number>());
-  useLayoutEffect(() => {
-    const el = fly.current && bubbles.current.get(fly.current);
-    if (el) {
-      const x = log.sent.find((y) => y.key === fly.current);
-      fly.current = null;
-      toEnd(scroller.current);
-      const t = pushIn(el);
-      if (x?.input) flew.current.set(x.input, t);
-    }
-    for (const [input, t] of flew.current) {
-      if (!pushing(t)) {
-        flew.current.delete(input);
-        continue;
-      }
-      const b = log.blocks.findLast((y) => y.kind === "user" && y.id === input);
-      const row = b && column.current?.querySelector<HTMLElement>(`[data-flip="${CSS.escape(String(b.at))}"]`);
-      if (!row) continue;
-      flew.current.delete(input);
-      pushIn(row, t);
-    }
-  });
-
-  const composer = useRef<ComposerHandle>(null);
-  const [modelOpen, setModelOpen] = useState(false);
-  const [modeOpen, setModeOpen] = useState(false);
-  // The context's popover, by the key of the turn whose ring it is at: /context opens it at the
-  // agent's latest turn. Each ring is controlled by it, so one opened stays the only one open as
-  // turns come after it, and closes on a press outside or Esc.
-  const [ctxAt, setCtxAt] = useState<string | null>(null);
-  // By the blocks alone: a draft's next piece (ten a second) draws no settled row again. Calls
-  // run only while the turn does: one left without a result as it ends (stopped in the middle of
-  // it) is a step of the fold, not a call running on under the page.
   const shown = useMemo(() => folded(log.blocks, busy), [log.blocks, busy]);
-  const sent = useMemo(() => dispatched(shown), [shown]);
-  const cwd = s?.cwd ?? row?.cwd ?? "";
-  // 在哪干活 under the title (plan, 2026-11-10): the places this one sent sessions to, and those its
-  // messages name (as far as they are loaded), as the page has them.
-  const machines = useMachines();
-  const said = `${log.blocks.length}.${log.blocks[0]?.at}.${log.blocks.at(-1)?.at}.${log.sent.length}`;
-  const named = useMemo(() => {
-    const texts = [...log.blocks.filter((b) => b.kind === "user").map((b) => b.text ?? ""), ...log.sent.map((x) => x.text)];
-    const out: NamedPlace[] = [];
-    for (const p of texts.flatMap(placesIn)) {
-      const at = placeOf(p, machines);
-      if (at && !out.some((o) => o.machine === at.machine && o.path === at.path)) out.push({ ...at, name: p.name });
-    }
-    return out;
-  }, [said, machines]);
-  const spots = useMemo(() => (row ? spotsOf(row, list ?? [], named, workspaces ?? []) : []), [row, list, named, workspaces]);
-  // The bar's 48px and a gap.
-  const padTop = 64;
 
-  const onSent = (sent: Sent) => {
-    sent.from = log.end;
-    // Into a turn already on: it goes under the turn's row, which stays where it is.
-    sent.mid = busy;
-    log.sent.push(sent);
-    fly.current = sent.key;
-    changed();
-  };
-  // Again under its id: one that went after all is not sent twice.
-  const retry = async (sent: Sent) => {
-    sent.failed = undefined;
-    changed();
-    try {
-      const r = await api.send(id, sent.text, sent.files.map((f) => f.ref), sent.input, sent.quote);
-      sent.input = r.input || sent.input;
-      sent.seq = r.seq;
-      sent.queued = r.queued;
-      sent.gone = r.command && !r.queued;
-    } catch (e) {
-      sent.failed = errText(e);
-    }
-    sentDone(sent);
-  };
-  // Answered: its block may have come before the answer did.
-  const sentDone = (x: Sent) => {
-    x.at = Date.now();
-    // Failed, it is shown so, even if it was taken for come (kumo, 2026-11-23: a message shown as
-    // sent that the agent never had): never a failure with nothing to show it.
-    if (x.failed !== undefined && !log.sent.includes(x)) log.sent.push(x);
-    log.recheck();
-    changed();
-  };
-  const files = (e: DragEvent) => e.dataTransfer.types.includes("Files") && (e.preventDefault(), true);
-  // A session's row dropped here (sidebar.tsx): named in the composer, for this one to write to it
-  // with ir (the user, 2026-11-06): a card among the attachments, one piece (the user, 2026-11-08).
-  const session = (e: DragEvent) => e.dataTransfer.types.includes(SESSION_DRAG) && (e.preventDefault(), (e.dataTransfer.dropEffect = "copy"), true);
-  // A group's or a folder's row (2026-11-10): that place named, as @ names it.
-  const place = (e: DragEvent) => e.dataTransfer.types.includes(PLACE_DRAG) && (e.preventDefault(), (e.dataTransfer.dropEffect = "copy"), true);
-  const drop = (e: DragEvent) => {
-    if (files(e)) return composer.current?.attach([...e.dataTransfer.files]);
-    if (place(e)) {
-      const p = placeDropped(e.dataTransfer.getData(PLACE_DRAG));
-      return p && composer.current?.name(p);
-    }
-    if (!session(e)) return;
-    const to = list?.find((x) => x.id === e.dataTransfer.getData(SESSION_DRAG));
-    if (!to || to.id === id) return;
-    composer.current?.name(to.id);
-  };
-
-  // The agent as its face shows it (the user, 2026-11-13: both sides have a face from the start,
-  // not only once a second agent is in): its nick and what it runs as from the members.
-  const mine = members?.members.find((m) => m.session === id);
-  const faceRow: AgentRow | undefined = s && { session: id, member: `agent:${id}`, agent: s.agent, nick: mine?.nick ?? "", name: mine?.name ?? agentName(s.agent), status: lampOf(s), on: onOf(mine?.on) };
-  // 发消息 on its own agent's card: the composer here.
-  const talk = () => composer.current?.focus();
-  // Its members as words name them and as the composer's @ lists them (agents, people and apps
-  // are peers): the agent by its nick, the people of its channel.
-  // The channel's agents, its own as its face has it, once it has another; else its own alone.
-  const agents: AgentRow[] = !faceRow
-    ? []
-    : !side.on
-      ? [faceRow]
-      : [
-          faceRow,
-          ...(chAgents ?? []).flatMap((a): AgentRow[] => {
-            if (a.session === id) return [];
-            const m = members?.members.find((x) => x.session === a.session);
-            const of = side.states[side.sessions.indexOf(a.session)] ?? list?.find((x) => x.id === a.session);
-            const agent = of?.agent ?? m?.agent ?? a.agent ?? "claude";
-            return [{ session: a.session, member: `agent:${a.session}`, agent, nick: m?.nick ?? a.nick ?? "", name: m?.name ?? agentName(agent), status: of ? lampOf(of) : (m?.status ?? "idle"), on: onOf(m?.on) }];
-          }),
-        ];
-  const stateOf = (session: string): LiveSession | undefined => (session === id ? s : side.states[side.sessions.indexOf(session)]);
-  const callAt = (name: string) => composer.current?.insert(`@${name}`);
-  const { named: nicks, others } = useNamed({ channel: id, agents: agents.filter((a) => a.nick), members, may, call: callAt, talk });
-  const atRows = useMemo(() => [...nicks.agents, ...others], [nicks, others]);
-  // The message being answered (<quote>), over the composer till it is sent.
-  const [quote, setQuote] = useState<Msg | null>(null);
-  const quoteOf = useMemo(() => (quote ? { n: quote.n, who: nameOfMsg(quote), text: quoteText(quote) } : undefined), [quote]);
-  // Where the own agent's rows are by the log's numbers, as last drawn: a quote of one gone to.
-  const anchorsNow = useRef<Anchor[]>([]);
-  // How far its channel was read as it opened: long words read before the latest rounds fold.
-  const readTo = useReadTo(id, side.reads?.readers, members?.me, side.ready?.kept.log.loaded ? side.ready.kept.log.end : undefined);
-  // What the composer is given to call, the same each draw and doing what they do now: the
-  // composer and the bar (memo) are not drawn again with each piece of a draft.
-  const acts = useRef({ onSent, sentDone, openContext: (): boolean => false });
-  acts.current.onSent = onSent;
-  acts.current.sentDone = sentDone;
-  const [under] = useState(() => ({ onSent: (x: Sent) => acts.current.onSent(x), onSentDone: (x: Sent) => acts.current.sentDone(x), openContext: () => acts.current.openContext(), unquote: () => setQuote(null) }));
-  // The others at work, and since when this page has seen each at work: one called is shown at
-  // work only once what called it is on the page (merge.ts held), at most HOLD after.
-  const othersAt = agents.filter((a) => a.session !== id && WORKING.has(stateOf(a.session)?.status ?? ""));
-  const atSince = useRef(new Map<string, number>());
-  // How far each of the others at work has been given the channel (givenOf, below), as last known.
-  const givenAt = useRef(new Map<string, number>());
-  // What each had been given as this page first saw it at work: its turn is cut only at what it
-  // was given after that.
-  const givenFrom = useRef(new Map<string, number>());
-  const plainAt = useRef(new Map<string, number>());
-  /** The message of this channel a block of an agent's record is, given to it. */
-  const givenSeq = (b: Block): number | undefined => {
-    const relay = relays.get(b);
-    return givenHere(id, relay, b.text) ? (relay?.seq ?? givenTurn(b.text ?? "")?.seq) : undefined;
-  };
-  for (const a of othersAt) if (!atSince.current.has(a.session)) atSince.current.set(a.session, Date.now());
-  for (const k of [...atSince.current.keys()]) if (!othersAt.some((a) => a.session === k)) atSince.current.delete(k);
-  const [, tick] = useState(0);
-  const atKey = othersAt.map((a) => a.session).join(" ");
-  useEffect(() => {
-    if (!atKey) return;
-    const timer = setTimeout(() => tick((n) => n + 1), HOLD);
-    return () => clearTimeout(timer);
-  }, [atKey]);
-  // The log back as far as the record is loaded: no gap of the others' words at its top.
-  const firstTime = log.blocks[0]?.time;
-  useEffect(() => {
-    const kept = side.ready?.kept;
-    if (kept && firstTime !== undefined) void alignBack(kept.log, log.more ? firstTime : 0).then((any) => any && changed());
-  }, [!!side.ready, firstTime]);
-
-  if (!s || !faceRow) {
+  if (!s) {
     const gone = lost && list !== undefined && !row;
     return (
       <div className="relative h-full">
-        <Bar s={row} onSheet={onSheet} onMe={onMe} />
+        <Bar s={row} onSheet={onSheet} onMe={onMe} onBack={onBack} recordOnly />
         {gone && <p className="g-fade m-0 pt-24 text-center text-sm text-ink-3">{t("chat.gone")}</p>}
       </div>
     );
   }
+
+  const cwd = s.cwd ?? row?.cwd ?? "";
+  const running = shown.flatMap((b) => (b.kind === "running" ? [b.tool] : []));
+  const rows = shown.filter((b) => b.kind !== "running");
+  const textDrafts = log.drafts.filter((d) => !d.tool && d.text.trim());
+  const toolDrafts = log.drafts.filter((d) => d.tool && !renamesDraft(d));
+  const source = (b: { from?: string; fromTerminal?: string; fromDevice?: Device }) => withDevice(sourceOf(b.from, b.fromTerminal, self, terminals, list ?? [], workspaces ?? [], s), b.fromDevice);
   const elsewhere = s.status === "elsewhere";
-  const face = faceRow;
-  // Its lamp only on the face of the turn that is on.
-  const resting: AgentRow = { ...face, status: "idle" };
-  // Another person's face opens their card (people and agents are peers, the user, 2026-11-13):
-  // their Satori user id, a login's (an app's) or the panel login's.
-  // Your own face the same card as others see (kumo, 2026-11-16: not the settings): no 私聊, no
-  // 提及; 编辑资料 in it.
-  const personCard = (b: Block) => {
-    const user = b.fromLogin || b.fromTerminal;
-    if (!user) return undefined;
-    const src = source(b);
-    const own = user === self.id || (self.host && user === "local");
-    return <PersonCard user={user} name={b.from || user} avatar={src.kind === "you" ? src.avatar : undefined} dm={!own} call={may && !own ? (name) => composer.current?.insert(`@${name}`) : undefined} />;
-  };
-  // Another person's face's menu (kumo, 2026-11-16): 提及, 私聊, as the card has them.
-  const personMenu = (b: Block) => {
-    const user = b.fromLogin || b.fromTerminal;
-    if (!user || user === self.id || (self.host && user === "local")) return undefined;
-    const name = b.from || user;
-    return (at: { x: number; y: number } | null, close: () => void) => <PersonMenu user={user} name={name} call={may ? (n) => composer.current?.insert(`@${n}`) : undefined} at={at} close={close} />;
-  };
-  // Another login's words on the left, with the agents (kumo, 2026-11-16: every login was on the
-  // right). The machine's own (typed at its terminal, its ir, no sender) stay the owner's.
-  const othersWords = (b: Block) => {
-    const user = b.fromLogin || b.fromTerminal;
-    if (!user || user === self.id || user === "local") return false;
-    const src = source(b);
-    return src.kind === "you" && !src.local;
-  };
-  // When each of the agent's rows was written: its turn's head says the first's.
-  const times = new Map<string, number>();
-  const began = (rs: { key: string }[]) => rs.map((r) => times.get(r.key)).find(Boolean);
-  const ready = side.ready;
-  // When each row was written, for the others' words to go in their places (merge.ts slotsOf):
-  // steps folded have no time of their own (they go with the words after them), only since when
-  // (a turn still at its steps has no words yet: what called it stays above them).
-  const rowTimes: RowAt[] = [];
-  // Where a turn begins with its own channel's words, drawn from the log: before which row.
-  const cuts = new Map<number, Cut>();
-  // The steps each row holds, for the 过程 fold's count.
-  const stepsAt = new Map<string, number>();
-  // The own agent's words by row, for the fold of words between agents.
-  const wordsOf = new Map<string, string>();
-  const rows: Row<ReactNode, Works>[] = (busy ? shown.filter((b) => b.kind !== "running") : shown).flatMap((b) => {
-    // A call from another channel it is in (chat/channel/lib givenTurn): Iridium's message on
-    // the left, what follows its work there (Relayed).
-    // As the record says it, a Satori forward (satori.ts relays); else read from its words.
-    const relay = b.kind === "user" ? relays.get(b) : undefined;
-    // Its own channel's words forwarded to it: drawn from the log, by who said them.
-    if (ready && b.kind === "user" && givenHere(id, relay, b.text)) {
-      const seq = relay?.seq ?? givenTurn(b.text ?? "")?.seq;
-      const was = cuts.get(rowTimes.length);
-      cuts.set(rowTimes.length, { time: b.time ?? was?.time, seq: seq ?? was?.seq });
-      return [];
-    }
-    rowTimes.push({ agent: b.kind === "assistant" || b.kind === "fold" || b.kind === "running", time: b.kind === "fold" ? { since: b.steps[0]?.time } : b.kind === "running" ? { since: b.tool.time } : b.time });
-    // What this page saw written keeps the draft's key and is drawn as the draft was (said.tsx
-    // Assistant): the same thing as it becomes its block, nothing of it drawn anew.
-    const wasDraft = b.kind === "assistant" ? log.draftOf(b.at) : undefined;
-    const key = wasDraft ?? b.at;
-    if (b.kind === "fold") stepsAt.set(b.at, b.steps.length);
-    if (b.kind === "assistant") wordsOf.set(key, b.text ?? "");
-    const given: GivenTurn | null = relay ? { seq: relay.seq, words: relay.msgs.at(-1)?.text ?? "", context: relay.context, ...(relay.channel !== id ? { channel: { id: relay.channel, name: relay.name } } : {}) } : b.kind === "user" ? givenTurn(b.text ?? "") : null;
-    const time = b.kind === "user" ? b.time : undefined;
-    if (b.kind !== "user" && "time" in b && b.time) times.set(key, b.time);
-    return [
-      {
-        key,
-        agent: b.kind === "assistant" || b.kind === "fold" || b.kind === "running",
-        ...(given?.channel ? { works: { given, relay, time } } : {}),
-        node: <Said key={key} b={b} session={id} cwd={cwd} source={source} onJump={openChat} card={personCard} menu={personMenu} left={othersWords} draft={wasDraft ? asDraft(`${id}:${wasDraft}`, false) : undefined} />,
-      },
-    ];
-  });
-  for (const d of log.drafts) {
-    if (d.tool && (busy || renamesDraft(d))) continue;
-    const key = `${d.proc}.${d.n}`;
-    // Words as its block will be: where the turn's rows are split (Earlier) and what is put
-    // around them is the same before and after it is whole, nothing moved as the turn ends.
-    if (!d.tool) wordsOf.set(key, d.text);
-    rowTimes.push({ agent: true, time: Infinity });
-    rows.push({
-      key,
-      agent: true,
-      node: d.tool ? (
-        <ToolDraft key={key} name={d.tool.name} input={d.text} whole />
-      ) : (
-        // Faded in as it first comes, not again as it goes from the turn's row at work into the
-        // turn (draftRef).
-        <Said key={key} b={{ kind: "assistant", at: key, text: d.text } as Block & { kind: "assistant" }} session={id} cwd={cwd} source={source} onJump={openChat} card={personCard} menu={personMenu} left={othersWords} draft={asDraft(`${id}:${key}`, !d.whole && busy)} />
-      ),
-    });
-  }
-  // The others' words (once its channel has another agent): each where it was said among the
-  // own agent's rows, a speaker's in a row under one head (merge.ts); the read marks under the
-  // last row each member has read, the own rows known by the log's numbers.
-  const msgs = ready?.kept.log.msgs ?? NO_MSGS;
-  const P = ready?.parts;
-  const who = P && P.personWho(self, terminals, list ?? [], workspaces ?? []);
-  const quoted = (n: number) => {
-    const m = msgs.find((x) => x.n === n);
-    return m ? { who: nameOfMsg(m), text: quoteText(m) } : undefined;
-  };
-  // Its author named at the composer's start, as QQ does (kumo, 2026-11-21): the @ calls.
-  const quoting = (m: Msg) => {
-    setQuote(m);
-    const at = quoteAt(m, m.author.kind === "person" && !!who?.(m.author).mine);
-    if (at) composer.current?.atStart(at);
-    else composer.current?.focus();
-  };
-  // The record's page before, with the log back as far (the chat's own paging, and a quote's).
-  const olderPage = () => log.older(async (p) => void (ready && p.blocks[0]?.time !== undefined && (await alignBack(ready.kept.log, p.more ? p.blocks[0].time : 0))));
-  // The turns held and not yet drawn first, each lot in a task of its own (what is on the page is
-  // painted first); then the page before.
-  const older = async () => {
-    if (drawnFrom.current.from <= 0) return olderPage();
-    await new Promise<void>((r) => {
-      const go = () => (clearTimeout(late), r());
-      const late = window.setTimeout(go, 120);
-      requestAnimationFrame(() => setTimeout(go, 0));
-    });
-    return drawMore() || olderPage();
-  };
-  // A quote pressed: the message it answers, drawn from the log or the own agent's record, the
-  // pages before brought till it is (channel/jump.ts).
-  const jump = (n: number) => {
-    const find = () => {
-      const key = anchorsNow.current.find((a) => a.seq === n)?.key;
-      return seqEl(scroller.current, n) ?? (key ? (scroller.current?.querySelector<HTMLElement>(`[data-at="${CSS.escape(key)}"]`) ?? null) : null);
-    };
-    void goTo(scroller.current, find, older, changed, 40);
-  };
-  // Long words read before the latest rounds fold of themselves (channel/folds.ts).
-  const olds = ready && readTo !== undefined ? oldRead(msgs, readTo) : undefined;
-  const oldMsg = (m: Msg) => foldsOnce(id, `m${m.n}`, olds?.has(m.n));
-  const barsOf = (session: string) => {
-    const a = agents.find((x) => x.session === session);
-    return a && P ? <P.AgentBars a={a} st={stateOf(session)} /> : null;
-  };
-  const readOf = (a: AgentRow) => givenAt.current.get(a.session) ?? Math.max(side.reads?.readers.find((r) => r.member === a.member)?.seq ?? 0, callerOf(msgs, a.nick, a.session) ?? 0, msgs.findLast((m) => m.author.kind === "agent" && m.author.session === a.session)?.n ?? 0);
-  // Each of the others at work, cut where it was given something more (lib.ts liveParts).
-  const cutOf = new Map<string, { spoken: Set<string>; said: Msg["src"]; parts: { after: number; before: number; blocks: Block[] }[]; after: number }>();
-  const cutSeqs = new Set<number>();
-  let merged = rows;
-  const groupAt = new Map<string, ReturnType<typeof groupMessages>[number]>();
-  const nickSet = new Set(agents.map((a) => a.nick.toLowerCase()).filter(Boolean));
-  const anchors: Anchor[] = [];
-  const shownSeq = new Set<number>();
-  if (ready && P && who) {
-    const inputs = new Set(log.blocks.flatMap((b) => (b.kind === "user" && b.id ? [b.id] : [])));
-    // Each of the others at work stays where it was set to work, and works there (kumo,
-    // 2026-11-23: one said a line and went down under the other, who said a line and went down
-    // under it; and a message naming one went up over it before it had been given it). Its place
-    // is under what it was given: what called it as it began, then what the server says it has
-    // been given since (its place read, never a name in a message's words). What it says
-    // meanwhile is drawn there with its work, from its own record, not down among the others'
-    // words: once it is given something more, or stops, those words are the channel's as any.
-    // Given, by its own record: the server counts as given what still waits for its turn to take
-    // it, and words sent into a turn went over all of it at once, the steps done before them too
-    // (kumo, 2026-11-23). As it began, before its record says anything: what called it.
-    for (const a of othersAt) {
-      const read = side.reads?.readers.find((r) => r.member === a.member)?.seq ?? 0;
-      const was = givenAt.current.get(a.session) ?? Math.max(read, callerOf(msgs, a.nick, a.session) ?? 0);
-      if (!givenFrom.current.has(a.session)) givenFrom.current.set(a.session, was);
-      const taken = (peekChat(a.session)?.log.blocks ?? []).reduce((n, b) => Math.max(n, (b.kind === "user" && givenSeq(b)) || 0), 0);
-      // What it says itself is the channel's as it is said, as the server's place has it: on
-      // through its own words, up to the first thing of another's it has not taken (left at what
-      // its record was given, each thing it said stayed in its work till its turn ended, then
-      // came into the channel too, and the page dropped by as much as that went away; measured
-      // 2026-11-24, 958 px at a turn's end).
-      let given = Math.max(was, taken);
-      for (const m of msgs) {
-        if (m.n <= given || m.author.kind === "iridium") continue;
-        if (m.author.kind !== "agent" || m.author.session !== a.session) break;
-        given = m.n;
-      }
-      if (given > 0) givenAt.current.set(a.session, given);
-    }
-    for (const k of [...givenFrom.current.keys()]) if (!othersAt.some((a) => a.session === k)) (givenFrom.current.delete(k), plainAt.current.delete(k));
-    for (const k of [...givenAt.current.keys()]) if (!othersAt.some((a) => a.session === k)) givenAt.current.delete(k);
-    for (const a of othersAt) {
-      const spoken = new Set(msgs.slice(-12).flatMap((m) => (m.author.kind === "agent" && m.author.session === a.session && m.n <= readOf(a) && m.text.trim() ? [m.text.trim()] : [])));
-      const said = msgs.findLast((m) => m.author.kind === "agent" && m.author.session === a.session && m.n <= readOf(a) && !!m.src)?.src;
-      const from = givenFrom.current.get(a.session) ?? Infinity;
-      const cut = liveParts(peekChat(a.session)?.log.blocks ?? [], givenSeq, said, (x) => spoken.has(x));
-      const parts = cut.parts.filter((p) => p.before > from);
-      cutOf.set(a.session, { spoken, said, parts, after: cut.after });
-      for (const p of parts) cutSeqs.add(p.before);
-      // And before what it has yet to take: said after what it works on, it waits under its work,
-      // not in one bubble with what that work answers.
-      const given = givenAt.current.get(a.session);
-      const next = given === undefined ? undefined : msgs.find((m) => m.n > given)?.n;
-      if (next !== undefined) cutSeqs.add(next);
-    }
-    // A speaker's words in a row are one group, but not across what an agent was doing between
-    // them: its work till then goes between.
-    const groupsIn = (ms: Msg[]) => {
-      const runs: Msg[][] = [];
-      for (const m of ms) (cutSeqs.has(m.n) || !runs.length ? runs.push([m]) : runs.at(-1)!.push(m));
-      return runs.flatMap((r) => groupMessages(r));
-    };
-    const atPlace = (m: Msg) => m.author.kind === "agent" && m.n > (givenAt.current.get(m.author.session) ?? Infinity);
-    const foreign = foreignOf(msgs, id, inputs, log.more ? log.blocks[0]?.time : undefined).filter((m) => !atPlace(m));
-    const slots = slotsOf(rowTimes, foreign, cuts);
-    merged = [];
-    for (let i = 0; i <= rows.length; i++) {
-      for (const g of groupsIn(slots.get(i) ?? [])) {
-        const key = `ch:${g.key}`;
-        anchors.push({ key, seq: g.msgs.at(-1)!.n });
-        for (const m of g.msgs) shownSeq.add(m.n);
-        merged.push({ key, agent: false, node: <P.GroupView key={key} g={g} channel={id} agents={agents} who={who} record={openChat} call={callAt} may={may} quote={may ? quoting : undefined} quoted={quoted} bars={barsOf} fold={(m) => betweenAgents(m, msgs, nickSet)} old={oldMsg} jump={jump} /> });
-        groupAt.set(key, g);
-      }
-      if (i < rows.length) merged.push(rows[i]!);
-    }
-    for (const a of ownAnchors(msgs, id, shown.map((b) => ({ key: b.at, line: lineOf(b), ...(b.kind === "user" && b.id ? { id: b.id } : {}) })))) {
-      anchors.push(a);
-      shownSeq.add(a.seq);
-    }
-  }
-  anchorsNow.current = anchors;
-  // The own agent's words fold by hand (their menu's 折叠), and of themselves: in a stretch another
-  // agent began (its words to it, naming it and no person), words between agents, when long (a
-  // person's words end such a stretch); read before the latest rounds (channel/folds.ts).
-  {
-    let byAgent = false;
-    const me = new Set([face.nick.toLowerCase()]);
-    const seqOf = new Map(anchors.map((a) => [a.key, a.seq]));
-    merged = merged.map((r) => {
-      if (!r.agent) {
-        const g = groupAt.get(r.key);
-        const last = g?.msgs.at(-1);
-        byAgent = !!face.nick && !!g && g.author.kind === "agent" && !!last && namedIn(last.text, me).agents > 0 && namedIn(last.text, nickSet).people === 0;
-        return r;
-      }
-      const w = wordsOf.get(r.key);
-      if (w === undefined) return r;
-      const seq = seqOf.get(r.key);
-      const auto = (byAgent && longWords(w)) || (seq !== undefined && foldsOnce(id, `b${r.key}`, olds?.has(seq)));
-      return { ...r, node: <Foldable key={r.key} scope={id} id={`b${r.key}`} auto={auto} lines={linesOf(w)}>{(wrap) => wrap(r.node)}</Foldable> };
-    });
-  }
-  const marks = ready ? marksAt(anchors, side.reads?.readers ?? [], members?.me) : new Map<string, never[]>();
-  // Its subagents as people (subwork.tsx): which call, which notice is whose, who dispatched them.
-  const dispatchedBy = face.nick || face.name;
-  // The same while nothing of it has changed: those that read it are not drawn again for nothing.
-  const dw = dispatchingWas.current;
-  const dispatching = dw && dw.parent === id && dw.by === dispatchedBy && dw.d === sent ? dw : (dispatchingWas.current = { parent: id, by: dispatchedBy, d: sent });
-  const marksOf = (keys: string[]) => keys.flatMap((k) => marks.get(k) ?? []);
-  // What of yours the log has said already (sent to the channel, not given to its own agent):
-  // drawn from the log, no bubble of its own.
-  const inLog = (x: Sent) => !!ready && x.failed === undefined && msgs.some((m) => (!!x.seq && m.n === x.seq) || (!!x.input && m.input === x.input));
-  // What the server keeps for the turn's end or the quota waits as a bubble of yours (chats.ts).
-  // Not what a channel gave its agent ("#n: … <channel-context>"): that is said in the channel
-  // already, and is no words of yours to draw again, raw.
-  log.sent = waiting(log.sent, (s.queue ?? []).filter((q) => !/^#\d+: [\s\S]*<channel-context>/.test(q.text)).map((q) => ({ id: q.id, text: attachedOf(q.text).words || q.text })), log.end, Date.now(), (input) => log.blocks.some((b) => b.kind === "user" && b.id === input));
-  const pending = log.sent.filter((x) => (x.failed !== undefined || !compactSent(x)) && !inLog(x));
-  // The others at work, each once what called it is on the page (the hand-over, merge.ts held).
-  const ownWriting = busy && log.drafts.some((d) => !d.tool && !d.whole);
-  const now = Date.now();
-  const atWork = othersAt.filter((a) => !held({ since: atSince.current.get(a.session) ?? now, called: callerOf(msgs, a.nick, a.session) }, (n) => shownSeq.has(n), ownWriting, now));
-  // A turn begun with nothing of the agent's under its face yet (what you sent last, or nothing
-  // since): its face and name come first, the first call and the dots under them (kumo,
-  // 2026-11-15), not in a row of their own.
-  const pendingShown = pending.length > 0;
-  // Its harness coming up with nothing to answer (a session just made, no words yet): no turn,
-  // so no face nor dots, which came and went with nothing said (kumo, 2026-11-16). With words
-  // of yours waiting (sent, queued, or the last thing on the page), the turn is on its way.
-  const waking = s.status === "starting" && !pendingShown && !s.queue?.length && shown.at(-1)?.kind !== "user" && !log.drafts.length;
-  // What you sent into a turn already on waits under that turn's row and takes nothing from it:
-  // the turn is not cut in two, its row put under words the agent has not taken yet, and joined
-  // again as they go to the queue or into the transcript (kumo, 2026-11-17). Only words sent
-  // before the turn began are what it answers: its face comes under them.
-  const pendingBefore = pending.filter((x) => !x.mid);
-  const pendingAfter = pending.filter((x) => x.mid);
-  // What the agent writes for words of yours its record has yet to bring is the turn they begin:
-  // under them, in the row at work under its face, not in the turn before, above them, to be moved
-  // down once they come (kumo, 2026-11-23: the answer came in over what was just sent).
-  const drafting = new Set(log.drafts.map((d) => `${d.proc}.${d.n}`));
-  const ahead: ReactNode[] = [];
-  const allTurns = turnsOf(pendingBefore.length && drafting.size ? merged.filter((r) => !(drafting.has(r.key) && ahead.push(r.node))) : merged);
-  // A turn stopped: its line (回合已中断) is drawn where the row at work was, that row as high as
-  // it was, not as a row more over it: there was room for it already, and nothing moves (kumo,
-  // 2026-11-23: the conversation went up a little as each turn was stopped). Once something
-  // comes after it, it is a row of the conversation as any.
-  const lastShown = shown.at(-1);
-  const stoppedAt = !busy && !pending.length && lastShown?.kind === "system" && lastShown.event === "interrupted" ? lastShown.at : null;
-  const lastOne = allTurns.at(-1);
-  const stopped = stoppedAt !== null && lastOne?.kind === "one" && lastOne.key === stoppedAt ? lastOne : null;
-  const turns = stopped ? allTurns.slice(0, -1) : allTurns;
-  workBusy.current = busy;
-  // A long conversation is drawn from its end: the last FIRST_TURNS turns as it opens, the ones
-  // before as they are gone up to (Stick's paging, which asks for the pages before only once
-  // all the turns held are drawn), a few each time. Every turn was drawn at once: a channel of
-  // 388 turns took 0.7 s to make and 0.2 s to take away, and as long again each time anything
-  // it is drawn from changed (measured 2026-11-23). Kept by the first turn drawn, so what comes
-  // at the end takes nothing away at the top; and with the chat, so one left gone up comes back
-  // as it was.
-  let from = chat.place.from === undefined ? -1 : turns.findIndex((x) => x.key === chat.place.from);
-  if (from < 0) from = Math.max(0, turns.length - (chat.place.n ?? FIRST_TURNS));
-  if (log.loaded && turns.length) (chat.place.from = turns[from]?.key), (chat.place.n = turns.length - from);
-  drawnFrom.current = { from, keys: turns.map((x) => x.key) };
-  // Come to rest with nothing new in the record (stopped: its line comes a moment after): the row
-  // at work stays as high till that line is there, not a line high for a frame in between, the
-  // conversation dropped and brought up again.
-  const lastAt = lastShown?.at ?? "";
-  if (busy) rest.current = { ...rest.current, busy: true, last: lastAt };
-  else if (rest.current.busy) rest.current = { busy: false, last: rest.current.last, at: performance.now(), with: rest.current.last };
-  const justRested = !busy && !stopped && !pending.length && lastAt === rest.current.with && performance.now() - rest.current.at < 1500 && workH.current.id === id && workH.current.h > 16;
-  // A turn another channel called (works) is the agent's too once it has rows: its row at work
-  // goes on under them, not under a face and name again (kumo, 2026-11-18).
-  // The turn at work is not ended by what others say meanwhile: their words go under it (merge.ts
-  // slotsOf), and it stays the one at work, its row at work under it and over them (kumo,
-  // 2026-11-21: words to another agent, once in the channel, were the page's last thing; the turn
-  // was drawn as ended, its steps folded, and a face at work came up again under them).
-  const ownAt = tailOf(turns, (k) => groupAt.has(k));
-  const ownTurn = turns[ownAt];
-  const ownKey = ownTurn ? turnKey(ownTurn) : "start:a";
-  if (liveSeen.current.id !== id) liveSeen.current = { id, idle: false, at: null };
-  if (!busy && log.loaded) liveSeen.current.idle = true;
-  liveSeen.current.at = liveAt(liveSeen.current.at, busy, ownKey, ownAt < turns.length - 1, liveSeen.current.idle);
-  // What you sent before the turn began is under those words too, and the turn it begins. At
-  // rest the row's place is the page's end, as ever (kept over the others' words it left a gap
-  // there, and went to and fro as a turn began).
-  const tailAt = !busy || ownAt < 0 || liveSeen.current.at?.under || pendingBefore.length > 0 ? turns.length - 1 : ownAt;
-  const atEnd = turns[tailAt];
-  // Where each one at work is drawn: an agent over what it has not read (merge.ts boxSlot: what
-  // was given to it, what it said, what called it), a subagent after the turn it began at; in
-  // the order they were first seen.
-  const seen = boxSeen.current.id === id ? boxSeen.current : (boxSeen.current = { id, n: new Map(), at: new Map() });
-  const rowTurn = new Map<string, number>();
-  turns.forEach((x, i) => (rowTurn.set(x.key, i), x.kind !== "one" && x.rows.forEach((r) => rowTurn.set(r.key, i))));
-  const turnSeq: (number | undefined)[] = turns.map(() => undefined);
-  for (const a of anchors) {
-    const i = rowTurn.get(a.key);
-    if (i !== undefined) turnSeq[i] = Math.min(turnSeq[i] ?? Infinity, a.seq);
-  }
-  const placeAt = (slot: number) => rowPlace(slot, tailAt, pendingBefore.length > 0);
-  // The turn each message is in, for what was done before it was given.
-  const seqTurn = new Map<number, number>();
-  for (const [key, g] of groupAt) {
-    const i = rowTurn.get(key);
-    if (i !== undefined) for (const m of g.msgs) seqTurn.set(m.n, i);
-  }
-  const lastKey0 = turns.length ? turnKey(turns[turns.length - 1]!) : "";
-  // One at work, cut where it was given something more (lib.ts liveParts): what it did before
-  // stays over that message, a part at rest under the key it had while it was the one at work
-  // (the same thing, not made again, nor moved); what it does since comes under the message.
-  const workBoxes = atWork.flatMap((a): Box[] => {
-    const { spoken, said, parts, ...cut } = cutOf.get(a.session) ?? { spoken: new Set<string>(), said: undefined, parts: [], after: 0 };
-    const its = peekChat(a.session)?.log;
-    // Its key alone for the part that was at work as its record first came: that one stays the
-    // same thing as it comes to rest; each one after is known by what it began at.
-    if (its?.loaded && !plainAt.current.has(a.session)) plainAt.current.set(a.session, parts[0]?.after ?? cut.after);
-    const plain = plainAt.current.get(a.session);
-    const keyOf = (after: number) => (plain === undefined || after === plain ? a.session : `${a.session}@${after}`);
-    const turn = (alone: boolean, past?: Block[]) => (
-      <OtherTurn spoken={spoken} a={a} channel={id} st={stateOf(a.session)} said={said} alone={alone} bars={past ? null : barsOf(a.session)} call={may ? callAt : undefined} record={openChat} may={may} past={past} grown={changed} />
-    );
-    const slot = boxSlot(turnSeq, readOf(a));
-    const above = turns[slot - 1];
-    const g = above && slot !== tailAt + 1 ? groupAt.get(above.key) : undefined;
-    const alone = !!g && g.author.kind === "agent" && g.author.session === a.session;
-    return [
-      ...parts.map((p) => {
-        const at = seqTurn.get(p.before) ?? boxSlot(turnSeq, p.before - 1);
-        return {
-          key: keyOf(p.after),
-          at: placeAt(at),
-          before: turns[at]?.key ?? "",
-          draw: (leaving: boolean) => (
-            <Arrive on off={leaving} className="-mt-2">
-              <div>{turn(false, p.blocks)}</div>
-            </Arrive>
-          ),
-        };
-      }),
-      {
-        key: keyOf(cut.after),
-        at: placeAt(slot),
-        before: turns[slot]?.key ?? "",
-        draw: (leaving: boolean) => (
-          <Arrive on={!alone} off={leaving} className="-mt-2">
-            <div>{turn(alone)}</div>
-          </Arrive>
-        ),
-      },
-    ];
-  });
-  for (const k of [...workBoxes.map((b) => b.key), ...subs.map((x) => x.id)]) if (!seen.n.has(k)) (seen.n.set(k, seen.n.size), seen.at.set(k, lastKey0));
-  const boxes: Box[] = [
-    ...workBoxes,
-    ...subs.map((x) => {
-      const slot = slotAfter(turns, seen.at.get(x.id) ?? "");
-      return {
-        key: x.id,
-        at: placeAt(slot),
-        before: turns[slot]?.key ?? "",
-        draw: () => (
-          <div className="g-arrive">
-            <div>
-              <SubTurn s={x} />
-            </div>
-          </div>
-        ),
-      };
-    }),
-  ].sort((a, b) => seen.n.get(a.key)! - seen.n.get(b.key)!);
-  // Only as the arrangement changes (how many of the others' words are under the row at work,
-  // which turn each one at work is over): what comes at either end is the chat's own glide
-  // (stick.tsx).
-  moved(`${turns.length - 1 - tailAt} ${boxes.map((b) => `${b.key}<${b.before}`).join(" ")}`, id);
-  const headless = busy && !compacting && (!(atEnd?.kind === "agent" || (atEnd?.kind === "works" && atEnd.rows.length > 0)) || pendingBefore.length > 0);
-  // Its usage after its model's name, a strip of its own as small as a phone's (the user,
-  // 2026-11-13): the context's ring, the quota's bars; each pressed, its popover.
-  // The agent's latest turn: the ring /context opens. None yet: the command is the agent's.
-  const ctxTurn = turns.findLastIndex((x) => x.kind === "agent" || (x.kind === "works" && x.rows.length > 0));
-  const openContext = () => ctxTurn >= 0 && !!s.context?.max && (setCtxAt(turns[ctxTurn]!.key), true);
-  acts.current.openContext = openContext;
-  const bars = (key: string) =>
-    s && (
-      <span className="flex shrink-0 items-center">
-        <ContextRing session={s.id} summary={s.context} tokens={s.tokens} compact open={ctxAt === key} onOpenChange={(o) => setCtxAt(o ? key : (k) => (k === key ? null : k))} />
-        <QuotaBars agent={s.agent} machine={s.machine} live={s.live} using={[s.model, s.pick, modelView(s).name]} compact />
-      </span>
-    );
-  // The channel as the list names it now: what the agent was given may be its id (not named
-  // then) or an older name.
-  const nameOf = (g: GivenTurn) => {
-    const ch = list?.find((x) => x.id === g.channel?.id);
-    return ch ? titleOf(ch) : (g.channel?.name ?? "");
-  };
-  // What changes as the conversation grows: it keeps to the bottom, the dots wait again.
-  const grew = `${log.blocks.at(-1)?.at} ${log.drafts.length} ${log.drafts.at(-1)?.text.length} ${log.drafts.at(-1)?.whole} ${log.sent.length} ${ready?.kept.log.end ?? 0} ${atWork.map((a) => `${a.session}:${stateOf(a.session)?.end ?? 0}`).join(",")} ${subs.map((x) => `${x.id}:${x.updatedAt}`).join(",")}`;
-  // The own agent's stop key, on its row at work; starting is no turn yet.
-  const stop = may && s.status !== "starting" && !s.subagent && !elsewhere ? <StopKey session={id} esc /> : null;
-  const activity = <Activity stop={stop} calls={log.drafts.filter((d) => d.tool && !renamesDraft(d))} running={shown.flatMap((b) => (b.kind === "running" ? [b.tool] : []))} cwd={cwd} quiet={s.status !== "waiting" && !log.drafts.some((d) => !d.whole && !d.tool)} grew={grew} under={headless} />;
-  // A turn's rows: those before its last words under one line once it has ended (Earlier), when
-  // they are more than one line already (words, or several rows).
-  // The turn at work as this page last saw it: once it ends, what it folds folds before you.
-  // (none of its rows yet: the turn after the last row, keyed by it, turns.ts)
-  const lastTurn = atEnd;
-  if (busy && !waking && lastTurn) liveTurn.current = lastTurn.kind === "one" ? `${lastTurn.key}:a` : lastTurn.key;
-  // Whether the last turn is the one at work: its steps stay open only then. Not the turn before
-  // while what you sent waits for its block, nor while a /compact runs, nor as the harness comes
-  // up: busy alone opened the finished turn's steps and shut them again a moment later, the
-  // answer under them going down and up (kumo, 2026-11-16: on sending, on compacting). One at
-  // work before stays so through them (a message sent into its turn, a compaction within it).
-  const lastKey = lastTurn && lastTurn.kind !== "one" ? lastTurn.key : "";
-  if (!busy) liveLast.current = "";
-  const liveNow = busy && !waking && !!lastKey && ((!pendingShown && !compacting) || liveLast.current === lastKey);
-  if (liveNow) liveLast.current = lastKey;
-  const rowsOf = (rs: Row<ReactNode, Works>[], done: boolean, key: string) => {
-    const e = earlierOf(rs, (r) => wordsOf.has(r.key));
-    // A turn going on: all its rows in the one place from its first row (Earlier's after).
-    if (!e && (done || !rs.length)) return rs.map((r) => r.node);
-    const before = e?.before ?? [];
-    return (
-      <Earlier key={`earlier:${rs[0]!.key}`} done={done} bare={!e} fresh={key === liveTurn.current} words={e?.words ?? 0} steps={before.reduce((n, r) => n + (stepsAt.get(r.key) ?? 0), 0)} after={(e?.after ?? rs).map((r) => r.node)}>
-        {before.map((r) => r.node)}
-      </Earlier>
-    );
-  };
-  const turnNode = (x: (typeof turns)[number], i: number) =>
-            x.kind === "one" ? (
-              x.node
-            ) : x.kind === "agent" ? (
-              <AgentTurn key={x.key} channel={id} a={i === tailAt && !headless ? face : resting} may={may} call={may ? callAt : undefined} bars={bars(x.key)} talk={talk} time={began(x.rows)}>
-                {rowsOf(x.rows, !(liveNow && i === tailAt), x.key)}
-              </AgentTurn>
-            ) : (
-              <Relayed key={x.key} given={x.works.given} relay={x.works.relay} name={nameOf(x.works.given)} time={x.works.time} onJump={openChat}>
-                {x.rows.length > 0 && (
-                  <AgentTurn channel={id} a={i === tailAt && !headless ? face : resting} may={may} call={may ? callAt : undefined} bars={bars(x.key)} talk={talk} time={began(x.rows)}>
-                    {rowsOf(x.rows, !(liveNow && i === tailAt), x.key)}
-                  </AgentTurn>
-                )}
-              </Relayed>
-            );
-  // A turn drawn before stays as it was drawn while nothing it is drawn from has changed: all
-  // that a draft's next piece changes is the turn being written (kumo, 2026-11-17: each piece, ten
-  // a second, drew the whole conversation again, every face with its card, menu and tip, and with
-  // several agents writing at once the page lost its frames). stamp: what the turns are drawn
-  // from but the drafts, each as it is (the same thing while unchanged); the last turn, and one
-  // with a draft in it, are drawn each time.
-  const stamp: unknown[] = [id, log.blocks, s, list, members, may, self, terminals, workspaces, machines, nicks, P, ready, msgs, side.reads, ...side.states, busy, compacting, waking, liveNow, liveTurn.current, headless, tailAt, ctxAt, pendingShown, face.nick, face.name, face.status, cwd, document.documentElement.lang];
-  if (stamp.length !== drawnTurns.current.stamp.length || stamp.some((v, i) => v !== drawnTurns.current.stamp[i])) drawnTurns.current = { stamp, nodes: new Map() };
-  const drafted = new Set(log.drafts.map((d) => `${d.proc}.${d.n}`));
-  const turnBox = (x: (typeof turns)[number], i: number) => {
-    const settled = i !== tailAt && i < turns.length - 1 && !(x.kind !== "one" && x.rows.some((r) => drafted.has(r.key)));
-    const was = settled ? drawnTurns.current.nodes.get(x.key) : undefined;
-    if (was) return was;
-    // Each turn in a box of its own, its read marks in the gap under it (over nothing: coming
-    // late, they move nothing); the same box with none, so marks coming draw nothing again.
-    const rs = marksOf(x.kind === "one" ? [x.key] : [...(x.kind === "works" ? [x.key] : []), ...x.rows.map((r) => r.key)]);
-    const node = (
-      <div key={x.key} data-flip={x.key} className="relative flex min-w-0 flex-col">
-        {turnNode(x, i)}
-        {rs.length > 0 && P && P.SHOW_READS && <P.ReadMarks readers={rs} agents={agents} />}
-      </div>
-    );
-    if (settled) drawnTurns.current.nodes.set(x.key, node);
-    return node;
-  };
-  const pendingNode = (x: Sent) => (
-    <Pending
-      key={x.key}
-      s={x}
-      who={yours(self)}
-      bubbleRef={(el) => void (el ? bubbles.current.set(x.key, el) : bubbles.current.delete(x.key))}
-      retry={() => retry(x)}
-      drop={() => ((log.sent = log.sent.filter((y) => y !== x)), changed())}
-      takeBack={x.queued && x.waited && x.input ? () => api.unqueue(id, x.input!).then(() => ((x.gone = true), changed())) : undefined}
-    />
-  );
+  const hasFooter = s.subagent || elsewhere;
+  const bottomH = hasFooter ? 72 : 24;
+  const grew = `${log.blocks.at(-1)?.at} ${log.drafts.length} ${log.drafts.at(-1)?.text.length}`;
+
   return (
-    <Nicks.Provider value={nicks}>
-    <Dispatching.Provider value={dispatching}>
-    <div className="relative h-full" onDragOver={(e) => files(e) || session(e) || place(e)} onDrop={drop}>
-      <Stick key={hold ? "hold" : "whole"} scroller={scroller} tail={grew} older={older} held={from > 0} busy={busy || othersAt.length > 0 || subs.length > 0} draw={changed} place={chat.place} bottom={stackH} quiet={agents.some((a) => !!stateOf(a.session)?.asks.length)} style={{ paddingTop: padTop, paddingBottom: stackH + 20 }}>
-        <div ref={column} data-column className="mx-auto flex max-w-(--chat-w) flex-col gap-5 px-4 [--depart-gap:1.25rem] sm:px-6">
-          {/* In a turn, the calls being written or run and the dots share one row at the end, as
-              high whatever it shows: the conversation does not jump as a call is drafted, runs and
-              folds into the line above (the user, 2026-11-06). */}
-          {!hold && <Rows
-            pieces={[
-              ...turns.flatMap((x, i) => (i < from ? [] : [{ at: i, node: turnBox(x, i) }])),
-              ...pendingBefore.map((x) => ({ at: tailAt + 0.1, node: pendingNode(x) })),
-              // The turn's row, after what you sent: kept, one line high, even out of a turn, so a
-              // message sent or the dots coming do not move the conversation (the user,
-              // 2026-11-06). Close under what is above it: a call's line by the calls before.
-              // In a turn, the calls being written or run and the dots share this one row, as
-              // high whatever it shows: the conversation does not jump as a call is drafted,
-              // runs and folds into the line above. Under the turn at work, over what others
-              // said while it was on (merge.ts slotsOf).
-              {
-                at: tailAt + 0.2,
-                node: (
-                  <div key="work" data-flip="work" className="flex min-w-0 flex-col">
-                    {log.loaded && compacting ? (
-            <div className="-mt-1 flex min-w-0 items-center">
-              <div className="min-w-0 flex-1">
-                <Compaction since={compactSince.current} />
-              </div>
-              {busy && stop}
+    <div className="relative h-full">
+      <Stick scroller={scroller} tail={grew} older={() => log.older()} busy={busy} draw={changed} place={chat.place} bottom={bottomH} style={{ paddingTop: 64, paddingBottom: bottomH + 20 }}>
+        <div data-column className="mx-auto flex max-w-(--chat-w) flex-col gap-5 px-4 sm:px-6">
+          {rows.map((b) => (
+            <Said key={b.kind === "fold" ? (foldKey(b.steps) ?? b.at) : b.at} b={b} session={id} cwd={cwd} source={source} onJump={openChat} />
+          ))}
+          {textDrafts.map((d) => (
+            <div key={`${d.proc}.${d.n}`} className="g-fade min-w-0 pr-6">
+              <Draft text={d.text} live={!d.whole && busy} />
             </div>
-          ) : log.loaded && (busy && !waking ? (
-            headless ? (
-              <AgentTurn channel={id} a={face} may={may} call={may ? callAt : undefined} bars={bars("")} talk={talk}>
-                {ahead}
-                {activity}
-              </AgentTurn>
-            ) : (
-              activity
-            )
-          ) : s.denials?.length ? <Denials session={id} denials={s.denials} cwd={cwd} stuck={s.status === "waiting" && !s.asks.length} /> : stopped ? <div className="grid content-center" style={{ minHeight: workH.current.id === id ? workH.current.h : 0 }}>{stopped.node}</div> : justRested ? <div aria-hidden style={{ minHeight: workH.current.h }} /> : <div aria-hidden className="-mt-3 h-7 pointer-coarse:h-9" />)}
-                  </div>
-                ),
-              },
-              ...pendingAfter.map((x) => ({ at: tailAt + 0.3, node: pendingNode(x) })),
-            ]}
-            boxes={P || subs.length ? (from > 0 ? boxes.filter((b) => b.at >= from - 0.5) : boxes) : NO_BOXES}
-          />}
+          ))}
+          {log.loaded && busy && (
+            <Activity calls={toolDrafts} running={running} cwd={cwd} quiet={s.status !== "waiting" && !textDrafts.some((d) => !d.whole)} grew={grew} under />
+          )}
           {s.status === "error" && s.error && <Crash error={s.error} />}
         </div>
       </Stick>
-      <Bar s={s} onSheet={onSheet} onMe={onMe} spots={spots} asked={confirms} />
-      {/* Under the phone's sheet the stack stays where it is, covered, and is hidden once the sheet is
-          up (its glass not drawn again as the chat moves under it); only one taller than the sheet,
-          which would show over it or at its round corners, sinks (the user, 2026-11-06). */}
-      <div ref={stack} {...{ [PULL]: "" }} data-asking={asking || undefined} data-covered={sheet > 0 || undefined} data-sunk={(sheet > 0 && stackH > sheet - 16) || undefined} inert={sheet > 0} className="g-turn-stay g-sink vt-stack absolute inset-x-0 bottom-0 z-10 px-2.5 pb-[max(14px,calc(env(safe-area-inset-bottom)+6px))] sm:px-5">
-        {/* Paper from the composer's middle down: the conversation scrolled under it stops there. */}
-        {!elsewhere && !s.subagent && <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-[calc(44px+max(14px,calc(env(safe-area-inset-bottom)+6px)))] bg-[linear-gradient(to_bottom,transparent,var(--paper)_14px)]" />}
-        <div className="relative mx-auto max-w-(--chat-w)">
-          {!s.subagent && !elsewhere && <ShellRuns s={s} />}
-          {P ? (
-            // Several agents: all the asks as one queue, the oldest open (docs/channels.md "提问").
-            <>
-              {agents.map((a) => {
-                const needs = confirms.filter((c) => c.session === a.session && c.kind !== "ask");
-                return needs.length ? (
-                  <P.Of key={a.session} a={a} off={!may}>
-                    <Asks session={a.session} asks={[]} cwd={stateOf(a.session)?.cwd ?? cwd} confirms={needs} />
-                  </P.Of>
-                ) : null;
-              })}
-              <P.AskQueue agents={agents} states={agents.map((a) => stateOf(a.session))} cwd={cwd} off={!may} />
-            </>
-          ) : (
-            <div inert={!may} className={cn(!may && "opacity-60")}>
-              <Asks session={id} asks={s.asks} cwd={cwd} confirms={ownNeeds} />
-            </div>
-          )}
-          {s.subagent ? (
-            <div className="glass float rest flex h-12 items-center justify-center gap-1 rounded-[20px] text-sm text-ink-3">
-              {t("chat.subagent")}
-              {s.parent && (
-                <button type="button" className="cursor-pointer text-ink-2 underline-offset-2 hover:underline" onClick={() => openChat(s.parent!)}>
-                  {t("chat.subagentParent")}
-                </button>
-              )}
-            </div>
-          ) : elsewhere ? (
-            <div className="glass float rest flex h-12 items-center justify-center rounded-[20px] text-sm text-ink-3">{t("chat.elsewhere")}</div>
-          ) : !may ? (
-            <Suspense fallback={<div className="h-12" />}>
-              <NotJoined />
-            </Suspense>
-          ) : (
-            // Put away under the cards, kept as it was: it slides down out of the window and back.
-            <div aria-hidden={asking || undefined} inert={asking || undefined} className={cn("grid transition-opacity duration-(--dur-3) ease-(--ease-out)", asking ? "grid-rows-[0fr] opacity-0" : "grid-rows-[1fr]")}>
-              <div className="min-h-0">
-  <Under s={s} ghost={ghost} composer={composer} onSent={under.onSent} onSentDone={under.onSentDone} modelOpen={modelOpen} setModelOpen={setModelOpen} modeOpen={modeOpen} setModeOpen={setModeOpen} openContext={under.openContext} people={atRows} quote={quoteOf} unquote={under.unquote} />
+      <Bar s={s} onSheet={onSheet} onMe={onMe} onBack={onBack} recordOnly />
+      {hasFooter && (
+        <div inert={sheet > 0} className="g-turn-stay g-sink vt-stack absolute inset-x-0 bottom-0 z-10 px-2.5 pb-[max(14px,calc(env(safe-area-inset-bottom)+6px))] sm:px-5">
+          <div className="relative mx-auto max-w-(--chat-w)">
+            {s.subagent ? (
+              <div className="glass float rest flex h-12 items-center justify-center gap-1 rounded-[20px] text-sm text-ink-3">
+                {t("chat.subagent")}
+                {s.parent && (
+                  <button type="button" className="cursor-pointer text-ink-2 underline-offset-2 hover:underline" onClick={() => openChat(s.parent!)}>
+                    {t("chat.subagentParent")}
+                  </button>
+                )}
               </div>
-            </div>
-          )}
+            ) : (
+              <div className="glass float rest flex h-12 items-center justify-center rounded-[20px] text-sm text-ink-3">{t("chat.elsewhere")}</div>
+            )}
+          </div>
         </div>
-      </div>
+      )}
     </div>
-    </Dispatching.Provider>
-    </Nicks.Provider>
   );
 }
 
-/** The composer, with in its foot the approval-mode key (back, its name alone, the user,
- *  2026-11-08) and the model key, then send. Its usage (the context's ring, the quota's bars) is
- *  after the agent's model name over its turns (the user, 2026-11-13), not here. */
-/** people: its channel's members an @ lists (chat/channel/person.tsx useNamed). */
-const Under = memo(function Under({ s, ghost, composer, onSent, onSentDone, modelOpen, setModelOpen, modeOpen, setModeOpen, openContext, people, quote, unquote }: { s: LiveSession; ghost: boolean; composer: React.RefObject<ComposerHandle | null>; onSent: (x: Sent) => void; onSentDone: (x: Sent) => void; modelOpen: boolean; setModelOpen: (o: boolean) => void; modeOpen: boolean; setModeOpen: (o: boolean) => void; openContext: () => boolean; people: AgentRow[]; quote?: { n: number; who: string; text: string }; unquote?: () => void}) {
-  const mode = useMode(s);
-  // The model as the agent says it, once: while its process starts, or runs and has not said it
-  // yet, the key waits, not the default's guess shown and then changed (默认模型, Opus, Haiku in
-  // a second, the user, 2026-11-12). Not for ever: an agent that never says shows the guess.
-  const modelKnown = useWaited(!!s.model || (!s.live && s.status !== "starting"), MODEL_WAIT);
-  return (
-    <>
-      <Composer
-        ref={composer}
-        s={s}
-        // Starting is no turn yet: what is sent goes once the agent is up, and Esc stops nothing.
-        turn={turning(s) && s.status !== "starting"}
-        onSent={onSent}
-        onSentDone={onSentDone}
-        cycleMode={mode.cycle}
-        openModel={() => setModelOpen(true)}
-        openMode={() => setModeOpen(true)}
-        openUsage={() => openUsage(undefined, s.machine)}
-        openContext={openContext}
-        cleared={openChat}
-        people={people}
-        quote={quote}
-        unquote={unquote}
-        tools={
-          // No mode, model or preset keys under the composer, one agent or several (kumo,
-          // 2026-11-16: their being there at all was wrong): the agent's face's menu sets the mode
-          // and the model, the lineup and the invite pick the preset. Still there, unseen, for
-          // /mode and /model to open their menus where the keys were.
-          <span aria-hidden className="invisible flex w-0 overflow-hidden">
-            {!ghost && <ModeKey mode={mode} open={modeOpen} onOpenChange={setModeOpen} />}
-            {!ghost && modelKnown && <ModelKey s={s} open={modelOpen} onOpenChange={setModelOpen} />}
-          </span>
-        }
-      />
-    </>
-  );
-});
-
-/** How long the model key waits for the agent to say its model. */
-const MODEL_WAIT = 3000;
-
-/** ready, or ms after it was first not: what waits for something that may never come. */
-function useWaited(ready: boolean, ms: number): boolean {
-  const [over, setOver] = useState(false);
-  useEffect(() => {
-    if (ready || over) return;
-    const t = setTimeout(() => setOver(true), ms);
-    return () => clearTimeout(t);
-  }, [ready, over, ms]);
-  return ready || over;
-}
-
-/** The top bar: the logo with its lamp, the name (its folder is ⋯'s first row, which copies it);
- *  more. The link's dot is the bar's own, left of ⋯ (link.tsx). After the name, while
- *  there are any, the places it works in (spots, Where). */
-const Bar = memo(function Bar({ s, onSheet, onMe, spots, asked }: { s?: Session; onSheet?: () => void; onMe?: () => void; spots?: Spot[]; asked?: { session?: string }[] }) {
+/** The top bar: optional back button (TranscriptView), the channel/agent face, the name, members
+ *  and more. */
+const Bar = memo(function Bar({ s, onSheet, onMe, onBack, recordOnly }: { s?: Session; onSheet?: () => void; onMe?: () => void; onBack?: () => void; recordOnly?: boolean }) {
   const list = useList();
-  // A channel of several: its agents' faces, as its row in the list has them (the list's row: a
-  // session's state has not its agents).
   const of = s && (list?.find((x) => x.id === s.id) ?? s);
   const stack = s && of && isMulti(of) ? of.agents!.map((a) => ({ id: a.session, nick: a.nick, agent: list?.find((x) => x.id === a.session)?.agent ?? a.agent ?? s.agent })) : undefined;
+  const soloRow = s && of && of.bare && of.agents?.length === 1 ? of.agents[0] : undefined;
+  const soloAgent = soloRow ? (list?.find((x) => x.id === soloRow.session)?.agent ?? soloRow.agent ?? s?.agent) : undefined;
+  const solo = soloRow && soloAgent ? { id: soloRow.session, agent: soloAgent } : undefined;
   const ws = useWorkspaces().data ?? [];
   const machines = useMachines();
   const [renaming, setRenaming] = useState(false);
-  // ⋯'s "new session": the "+" of the session's workspace, its folder already this one's, under ⋯.
   const [making, setMaking] = useState(false);
-  // ⋯'s 公开链接: its popover under ⋯.
   const [publicOpen, setPublicOpen] = useState(false);
-  // Not there as the bar was first drawn: faded in as it comes.
   const late = useRef(!s).current ? "g-fade" : "";
   const more = useRef<HTMLButtonElement>(null);
-  // The usage under ⋯, its right edge on ⋯'s, as the menu was (the user, 2026-11-08).
   const usageHere = () => {
     const b = more.current?.getBoundingClientRect();
     openUsage(b && { x: b.right, y: b.bottom + 6, end: true }, s?.machine);
   };
-  // Its folder, ⋯'s first row (not the title's tooltip: a phone has no hover); pressed, copied.
   const folder = s ? (s.machine ? shownPath(groupPath(s), machines).real : tilde(s.cwd)) : "";
   const where = folder ? [{ icon: <FolderOpen size={15} />, label: folder, run: () => void navigator.clipboard.writeText(folder).then(() => toast(t("toast.copied")), () => {}) }] : [];
-  // ⋯'s items: its folder; making, the sheet and 我 on a phone, usage; then the session's own.
   const lead = [...where, { icon: <Plus size={15} />, label: t("menu.new"), run: () => requestAnimationFrame(() => setMaking(true)) }, ...(onSheet ? [{ icon: <ListTree size={15} />, label: t("nav.sidebar"), run: onSheet }] : []), ...(onMe ? [{ icon: <Settings size={15} />, label: t("nav.me"), run: onMe }] : []), { icon: <BarChart3 size={15} />, label: t("usage.title"), run: usageHere }];
   const acts = s ? [...sessionActions(s, () => setRenaming(true)), { icon: <Globe size={15} />, label: t("public.menu"), run: () => void Promise.race([queryClient.prefetchQuery(publicLinkQ(s.id)), new Promise((r) => setTimeout(r, 300))]).then(() => setPublicOpen(true)) }] : [];
   return (
     <header data-app-drag className="g-turn-stay vt-bar glass absolute inset-x-0 top-0 z-20 shadow-[0_0.5px_0_var(--edge)]">
       <div className="flex h-12 items-center gap-1 pr-2 pl-2 pointer-coarse:h-13">
         <div className="flex min-w-0 flex-1 items-center gap-2.5 pl-2">
+          {onBack && (
+            <button type="button" aria-label={t("nav.back")} onClick={onBack} className="g-press -ml-1 grid size-8 shrink-0 place-items-center rounded-md text-ink-2 hover:bg-fill hover:text-ink pointer-coarse:size-10">
+              <ArrowLeft size={17} />
+            </button>
+          )}
           {s && (
             <>
-              {/* On a phone Iridium's mark comes first, a key too: the session list's sheet, as ⋯'s
-                  first item (the user, 2026-11-06). Its tap area wider than it, the bar not moved. */}
-              {onSheet && (
+              {onSheet && !onBack && (
                 <button type="button" aria-label={t("nav.sidebar")} onClick={onSheet} className={cn("g-press -m-2 grid place-items-center rounded-md p-2 hover:bg-fill", late)}>
                   <IrMark size={18} className="text-ink" />
                 </button>
               )}
-              {/* The channel's face, on a phone as on a computer (kumo, 2026-11-16: a phone could
-                  not change the channel's face): its card, 编辑资料 in it. */}
-              <Tip label={stack ? stack.map((a) => a.nick).join(" · ") : `${agentName(s.agent)} · ${sessionStatusText(s)}`} side="bottom">
-                <FaceKey s={s} stack={stack} className={late} />
+              <Tip label={stack ? stack.map((a) => a.nick).join(" · ") : `${agentName(solo?.agent ?? s.agent)} · ${sessionStatusText(s)}`} side="bottom">
+                <FaceKey s={s} stack={stack} solo={solo} className={late} />
               </Tip>
               {renaming ? (
                 <span className="min-w-0 flex-1">
@@ -1287,24 +250,19 @@ const Bar = memo(function Bar({ s, onSheet, onMe, spots, asked }: { s?: Session;
                   {titleOf(s)}
                 </h1>
               )}
-              {!renaming && !!spots?.length && <Where spots={spots} asked={asked ?? []} phone={!!onSheet} />}
             </>
           )}
         </div>
-        {s && (
+        {s && !recordOnly && (
           <Suspense fallback={null}>
             <TopRight id={s.id} />
           </Suspense>
         )}
-        {/* With the sidebar shown, the link's dot is at its top (sidebar.tsx). */}
         {onSheet && <LinkDot />}
-        {/* ⋯'s place kept while the session comes: the dot beside it does not move as it does. */}
         {!s && <span aria-hidden className="size-8 shrink-0 pointer-coarse:size-10" />}
-        {/* On a phone the voice this page is in stands here: there is no foot beside me. */}
         {onSheet && <VoiceDock side="bottom" />}
         {s && (
           <span className="relative grid">
-            {/* Anchored on ⋯ itself, under it: clicks go through to ⋯. */}
             <WsPlus
               key={s.id}
               w={{ id: s.workspace ?? 0, name: ws.find((w) => w.id === s.workspace)?.name ?? "", path: groupPath(s) }}
@@ -1326,20 +284,19 @@ const Bar = memo(function Bar({ s, onSheet, onMe, spots, asked }: { s?: Session;
               <Menu.Portal>
                 <Menu.Positioner side="bottom" align="end" sideOffset={6} collisionPadding={8} className="z-50">
                   <MenuItems lead={lead} items={acts} tags={sessionTags(s)}>
-                    <Suspense fallback={null}>
-                      <ChannelMenu id={s.id} from={lead.length} face={!!onSheet} />
-                    </Suspense>
+                    {!recordOnly && (
+                      <Suspense fallback={null}>
+                        <ChannelMenu id={s.id} from={lead.length} face={!!onSheet} />
+                      </Suspense>
+                    )}
                   </MenuItems>
                 </Menu.Positioner>
               </Menu.Portal>
             </Menu.Root>
             <PublicLink key={`public:${s.id}`} session={s.id} anchor={more} open={publicOpen} onOpenChange={setPublicOpen} />
-            {/* ⋯'s 编辑资料 (on a phone, where the title's face is Iridium's mark): out of ⋯. */}
             <EditAt id={s.id} anchor={more} />
           </span>
         )}
-        {/* The app's key and the window's keys, in the app (appkey.tsx): together at the bar's far
-            right, after ⋯ (kumo, 2026-11-23). */}
         <AppKey />
         <WinKeys />
       </div>
@@ -1347,11 +304,9 @@ const Bar = memo(function Bar({ s, onSheet, onMe, spots, asked }: { s?: Session;
   );
 });
 
-/** 编辑资料 asked from a menu with no face to open out of (⋯ on a phone; editing.ts): the same
- *  as a card's, out of anchor. */
+/** 编辑资料 asked from a menu with no face to open out of (⋯ on a phone; editing.ts). */
 function EditAt({ id, anchor }: { id: string; anchor: React.RefObject<HTMLElement | null> }) {
   const editing = useEditing(id);
-  // The last one asked stays drawn while it folds away.
   const last = useRef(editing);
   if (editing) last.current = editing;
   return (
@@ -1363,13 +318,11 @@ function EditAt({ id, anchor }: { id: string; anchor: React.RefObject<HTMLElemen
   );
 }
 
-/** The channel's face before the title, pressed: its card in a popover out of the face (kumo,
- *  2026-11-16: a face pops its card, it never opens a page; docs/前端设计规范.md); 编辑资料 is a
- *  key of the card, for one of its people. */
-function FaceKey({ s, stack, className, ...rest }: { s: Session; stack?: { id: string; agent: Session["agent"] }[] } & ComponentProps<"button">) {
+/** The channel's face before the title, pressed: its card in a popover out of the face. */
+function FaceKey({ s, stack, solo, className, ...rest }: { s: Session; stack?: { id: string; agent: Session["agent"] }[]; solo?: { id: string; agent: Session["agent"] } } & ComponentProps<"button">) {
   const [open, setOpen] = useState(false);
-  const face = <LogoLamp agent={s.agent} status={lampOf(s)} size={18} mark={<Face key={s.id} id={s.id} agent={s.agent} size={18} channel none={stack && <FaceStack members={stack} size={18} />} />} />;
-  // rest: what the tip around it gives its trigger.
+  const fallback = stack ? <FaceStack members={stack} size={18} /> : solo ? <Face id={solo.id} agent={solo.agent} size={18} /> : undefined;
+  const face = <LogoLamp agent={solo?.agent ?? s.agent} status={lampOf(s)} size={18} mark={<Face key={s.id} id={s.id} agent={solo?.agent ?? s.agent} size={18} channel none={fallback} />} />;
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
       <Popover.Trigger
@@ -1380,172 +333,15 @@ function FaceKey({ s, stack, className, ...rest }: { s: Session; stack?: { id: s
         }
       />
       <PopSurface className={CARD_POP}>
-        <ChannelCard id={s.id} agent={s.agent} done={() => setOpen(false)} />
+        <ChannelCard id={s.id} agent={solo?.agent ?? s.agent} done={() => setOpen(false)} />
       </PopSurface>
     </Popover.Root>
   );
 }
 
-/** A chip's lamp for the sessions sent there: amber while one needs you, else green while one
- *  works, else none (as a launcher folded in the list shows them). */
-function lampFor(ss: Session[], asked: { session?: string }[]): Status {
-  if (ss.some((s) => lampOf(s) === "waiting" || asked.some((c) => c.session === s.id))) return "waiting";
-  return ss.some((s) => ["running", "compacting", "starting"].includes(lampOf(s))) ? "running" : "idle";
-}
-
-/** 在哪干活 (plan, 2026-11-10; kumo, 2026-11-18: in the title's row, after the name, not a row of
- *  its own). Chips, scrolled sideways when they do not fit, the name kept before them: its own
- *  folder; the places it sent sessions to (another machine's with its face), how many, their lamp,
- *  pressed the first of them; those it named and sent none to, faint, dashed. Its own and those
- *  named, pressed, show in the list (places.ts openPlace). A place at another machine is named by
- *  the machine alone, by its folder where two of them are at one machine; the rest is its tip's.
- *  phone: the marks alone, one over the next, pressed a menu of the places. */
-function Where({ spots, asked, phone }: { spots: Spot[]; asked: { session?: string }[]; phone?: boolean }) {
-  const ms = useMachines();
-  const rows = spots.map((x) => {
-    const shown = shownPath(x.place.machine ? `${x.place.machine}:${x.place.path}` : x.place.path, ms);
-    const m = shown.m;
-    const where = m ? `${m.name} ${shown.real}` : tilde(shown.real);
-    const n = x.sessions.length;
-    const alone = !!m && spots.filter((y) => y.place.machine === x.place.machine).length === 1;
-    return {
-      x,
-      m,
-      n,
-      where,
-      name: m && alone ? m.name : x.name,
-      lamp: n ? lampFor(x.sessions, asked) : ("idle" as Status),
-      run: () => (x.kind === "sent" ? openChat(x.sessions[0]!.id) : openPlace(x.place)),
-      mark: (size: number) => (m && x.kind !== "named" ? <MachineFace m={m} size={size} className={cn(!m.online && "opacity-50 grayscale")} /> : <PlaceIcon remote={!!x.place.machine} label={m?.name} size={size - 1} />),
-    };
-  });
-  if (phone) {
-    const lamp: Status = rows.some((r) => r.lamp === "waiting") ? "waiting" : rows.some((r) => r.lamp === "running") ? "running" : "idle";
-    return (
-      <Menu.Root>
-        <Menu.Trigger
-          render={
-            <button type="button" aria-label={t("chat.where")} className="g-press g-fade -my-2 flex h-10 shrink-0 items-center gap-1.5 rounded-md px-1 data-popup-open:bg-fill">
-              <span className="flex items-center">
-                {rows.slice(0, 4).map((r, i) => (
-                  <span key={`${r.x.kind}:${r.x.key}`} className={cn("grid size-6 place-items-center rounded-full bg-fill shadow-[0_0_0_1.5px_var(--paper)]", i > 0 && "-ml-2")} style={{ zIndex: 4 - i }}>
-                    {r.mark(13)}
-                  </span>
-                ))}
-              </span>
-              {lamp !== "idle" && <Lamp status={lamp} />}
-            </button>
-          }
-        />
-        <Menu.Portal>
-          <Menu.Positioner side="bottom" align="start" sideOffset={6} collisionPadding={8} className="z-50">
-            <Menu.Popup finalFocus={false} className="g-unfold glass thick float max-w-[calc(100vw-16px)] min-w-48 rounded-lg p-1.5 text-ink outline-none">
-              <div className="g-stagger flex flex-col">
-                {rows.map((r, i) => (
-                  <Menu.Item key={`${r.x.kind}:${r.x.key}`} onClick={r.run} style={{ "--i": i } as CSSProperties} className="flex h-11 cursor-default items-center gap-2.5 rounded-md px-2.5 text-base outline-none select-none data-highlighted:bg-fill">
-                    {r.mark(16)}
-                    <span className={cn("min-w-0 flex-1 truncate", r.x.kind === "named" && "text-ink-3")}>{r.where}</span>
-                    {r.n > 0 && <span className="text-sm text-ink-3 tabular-nums">{r.n}</span>}
-                    {r.lamp !== "idle" && <Lamp status={r.lamp} />}
-                  </Menu.Item>
-                ))}
-              </div>
-            </Menu.Popup>
-          </Menu.Positioner>
-        </Menu.Portal>
-      </Menu.Root>
-    );
-  }
-  return (
-    <div role="list" aria-label={t("chat.where")} className="g-fade flex min-w-0 shrink-[99] items-center gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-      {rows.map((r) => (
-        <Tip key={`${r.x.kind}:${r.x.key}`} label={r.x.kind === "named" ? `${r.where}，${t("chat.whereNamed")}` : r.n ? `${r.where}，${t("nav.hungCount", { n: r.n })}` : r.where} side="bottom">
-          <button
-            type="button"
-            role="listitem"
-            onClick={r.run}
-            className={cn("g-press flex h-6 shrink-0 items-center gap-1.5 rounded-full px-2 text-xs transition-colors duration-(--dur-2)", r.x.kind === "named" ? "border border-dashed border-edge text-ink-3 hover:text-ink-2" : "bg-fill text-ink-2 hover:bg-fill-2 hover:text-ink")}
-          >
-            {r.mark(14)}
-            <span className="max-w-40 truncate">{r.name}</span>
-            {r.n > 0 && <span className="text-ink-3 tabular-nums">{r.n}</span>}
-            {r.lamp !== "idle" && <Lamp status={r.lamp} />}
-          </button>
-        </Tip>
-      ))}
-    </div>
-  );
-}
-
-
-type Works = { given: GivenTurn; relay?: Relay; time?: number };
-
-/** Who said a message of the channel's log, by name. */
-const nameOfMsg = (m: Msg) => (m.author.kind === "agent" ? m.author.nick || m.author.name : m.author.kind === "person" || m.author.kind === "script" ? m.author.name : "Iridium");
-
-/** No log (a channel of one agent): the same one each time. */
-const NO_MSGS: Msg[] = [];
-
-/** What the agent did and said on end, under its face: the face at the left, its nick and what
- *  it runs as over the rest, as in a channel of several (chat/channel/page GroupView). */
-/** bars: its usage, after its model's name (the user, 2026-11-13: as the composer's foot had it,
- *  as small as a phone's). */
-/** call: 提及 in its face's menu, as another's face has it (kumo, 2026-11-16). */
-function AgentTurn({ channel, a, may, bars, talk, call, time, children }: { channel: string; a: AgentRow; may: boolean; bars?: ReactNode; talk?: () => void; call?: (nick: string) => void; time?: number; children: ReactNode }) {
-  return (
-    <TurnFrame
-      face={<AgentFace channel={channel} a={a} may={may} talk={talk} call={call} />}
-      head={
-        <>
-          {a.nick && <span className="shrink-0 text-xs font-medium text-ink-2">{a.nick}</span>}
-          <span className={cn("min-w-0 truncate text-xs", a.nick ? "text-ink-4" : "font-medium text-ink-2")}>{a.name}</span>
-          {bars}
-          <When time={time} />
-        </>
-      }
-    >
-      {children}
-    </TurnFrame>
-  );
-}
-
-/** Its blocks are drawn as the parent's own: who sent words is not asked (it is told only by
- *  its parent, whose words to it are the parent's line, not here). */
 const noSource = () => ({ kind: "you" }) as ReturnType<ComponentProps<typeof Said>["source"]>;
 
-/** One at work on the page: where it is drawn among the rows (turns.ts rowPlace), the turn it is
- *  before (none: the end), and itself, leaving or not. */
-type Box = { key: string; at: number; before: string; draw: (leaving: boolean) => ReactNode };
-const NO_BOXES: Box[] = [];
-
-/** The conversation's rows in their order: the turns, what you sent, the row at work (pieces,
- *  each a node with its key, at its place), and those at work among them (boxes), all of one
- *  parent, so one that changes places is the same row moved (it is not made again, nor comes in
- *  again) and glides there (motion.ts useMoves). One that goes fades where it was, then is gone
- *  (useLeaving): the others at work come in under the words that called them (g-arrive), a
- *  subagent as it is dispatched; gone as it hands back, its hand-back the parent's. */
-function Rows({ pieces, boxes }: { pieces: { at: number; node: ReactNode }[]; boxes: Box[] }) {
-  const all = useLeaving(boxes, (b) => b.key);
-  const rows = [
-    ...pieces,
-    ...all.map(({ item, leaving }) => ({
-      at: item.at,
-      node: (
-        <div key={`at:${item.key}`} data-flip={`at:${item.key}`} aria-hidden={leaving || undefined} className={cn("flex min-w-0 flex-col", leaving && "g-depart")}>
-          {item.draw(leaving)}
-        </div>
-      ),
-    })),
-  ];
-  // Stable: those at one place in the order given.
-  return <>{rows.map((r, i) => ({ r, i })).sort((a, b) => a.r.at - b.r.at || a.i - b.i).map((x) => x.r.node)}</>;
-}
-
-/** A subagent at work as its own turn (kumo, 2026-11-16: live as the agent's, outside its
- *  parent's turn): its face (its card) and name, then what it has done and said, read from its
- *  record as it grows (its state's end on the stream; the list's when the stream has no room
- *  for it), folded as the agent's turn at work is; the call it runs, or the dots, at its end.
- *  What it was told is its parent's line (→ task), not drawn again here. */
+/** A subagent at work as its own turn under the conversation. */
 function SubTurn({ s }: { s: Session }) {
   useLang();
   const { parent, d } = useContext(Dispatching);
@@ -1566,7 +362,6 @@ function SubTurn({ s }: { s: Session }) {
       opened.delete(more);
     };
   }, [s.id]);
-  // Its record grew: what came since.
   const carried = carries(`session:${s.id}`);
   const end = st?.end ?? 0;
   useEffect(() => {
@@ -1579,8 +374,7 @@ function SubTurn({ s }: { s: Session }) {
   const running = shown.flatMap((b) => (b.kind === "running" ? [b.tool] : []));
   const rows = shown.filter((b) => b.kind !== "running");
   const cwd = st?.cwd ?? s.cwd;
-  const node = (b: (typeof rows)[number]) => <Said key={b.at} b={b} session={s.id} cwd={cwd} source={noSource} onJump={openChat} />;
-  const e = earlierOf(rows, (b) => b.kind === "assistant");
+  const node = (b: (typeof rows)[number]) => <Said key={b.kind === "fold" ? (foldKey(b.steps) ?? b.at) : b.at} b={b} session={s.id} cwd={cwd} source={noSource} onJump={openChat} />;
   const face = <SubFaceKey sub={sub} />;
   const time = rows.map((b) => (b.kind === "fold" ? b.steps[0]?.time : "time" in b ? b.time : undefined)).find(Boolean);
   const head = (
@@ -1595,9 +389,7 @@ function SubTurn({ s }: { s: Session }) {
         {rows.length ? (
           <>
             <TurnFrame face={face} head={head}>
-              <Earlier key="earlier" done={false} bare={!e} words={e?.words ?? 0} steps={(e?.before ?? []).reduce((n, b) => n + (b.kind === "fold" ? b.steps.length : 0), 0)} after={(e?.after ?? rows).map(node)}>
-                {(e?.before ?? []).map(node)}
-              </Earlier>
+              {rows.map(node)}
             </TurnFrame>
             {activity(false)}
           </>
@@ -1609,35 +401,4 @@ function SubTurn({ s }: { s: Session }) {
       </div>
     </Dispatching.Provider>
   );
-}
-
-/** A call being written that only names the session (ir rename): left out, as its block is. */
-const renamesDraft = (d: Drafted) => !!d.tool && renameOnly({ name: d.tool.name, input: d.text });
-
-/** Each draft (session:proc.n) fades in as it first comes, from when it first did (the timeline's
- *  time): drawn again in another place meanwhile (from the turn's row at work into the turn) it
- *  goes on from where it was, not again from nothing. One ref a draft, kept: a new one each draw
- *  would be called again each draw. */
-const draftsSeen = new Map<string, { at: number; ref: (el: HTMLElement | null) => void }>();
-/** How a draft, or the block it became, is drawn (said.tsx AsDraft): one thing a draft and state,
- *  kept, so that what is drawn from it is not drawn again for nothing. */
-const asDrafts = new Map<string, AsDraft>();
-function asDraft(key: string, live: boolean): AsDraft {
-  const k = `${key} ${live}`;
-  let d = asDrafts.get(k);
-  if (!d) {
-    if (asDrafts.size > 1000) asDrafts.clear();
-    asDrafts.set(k, (d = { live, rise: draftRef(key) }));
-  }
-  return d;
-}
-function draftRef(key: string) {
-  let d = draftsSeen.get(key);
-  if (!d) {
-    if (draftsSeen.size > 500) draftsSeen.clear();
-    const at = (document.timeline.currentTime as number | null) ?? performance.now();
-    d = { at, ref: (el) => void (el && fadeIn(el, at)) };
-    draftsSeen.set(key, d);
-  }
-  return d.ref;
 }
