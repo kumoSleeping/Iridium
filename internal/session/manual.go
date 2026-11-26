@@ -15,49 +15,51 @@ import (
 // a person, with ir, to switch it to manual approval for a while (AskManual). The ask is one of the
 // session's asks, of kind "manual", carried and answered as the others are; only a person answers
 // it (the server sees to that). Approved, the process goes to manual mode (a release, release.go)
-// till the turn ends or the minutes pass; refused, nothing changes. No answer within the minutes,
-// or the turn over first: it is withdrawn, as refused.
+// till the turn ends or a person has answered its steps (at most three; kumo, 2026-11-26: steps,
+// not minutes); refused, nothing changes. No answer within manualWait, or the turn over first: it
+// is withdrawn, as refused.
 
 // AskManual is the kind of the ask.
 const AskManual = "manual"
 
-// The minutes an agent may give (ManualAsk.Minutes): at least, at most, none given.
+// The steps an agent may give (ManualAsk.Steps): at least, at most, none given.
 const (
 	manualMin     = 1
-	manualMax     = 10
-	manualDefault = 10
+	manualMax     = 3
+	manualDefault = 3
 )
 
-// manualMinute is a minute of a manual ask's: shorter in the tests.
-var manualMinute = time.Minute
+// manualWait is how long a manual ask waits for its answer (Claude's Bash waits ten minutes at
+// most): shorter in the tests.
+var manualWait = 10 * time.Minute
 
 // manualAsk is the latest manual ask of a session's: its state (api.ManualState's, or answering:
-// being approved), done closed once it is over; until: its wait's end, approved its mode's;
-// timer: the wait for its answer.
+// being approved), done closed once it is over; steps: how many steps manual mode lasts at most;
+// until: its wait's end; timer: the wait for its answer.
 type manualAsk struct {
-	req     string
-	minutes int
-	until   time.Time
-	state   string
-	done    chan struct{}
-	timer   *time.Timer
+	req   string
+	steps int
+	until time.Time
+	state string
+	done  chan struct{}
+	timer *time.Timer
 }
 
 func (a *manualAsk) view() api.ManualState {
-	st := api.ManualState{RequestID: a.req, State: a.state, Minutes: a.minutes}
+	st := api.ManualState{RequestID: a.req, State: a.state, Steps: a.steps}
 	if a.state == "answering" {
 		st.State = "pending" // being approved: the mode is being switched
 	}
-	if st.State == "pending" || st.State == "approved" {
+	if st.State == "pending" {
 		st.Until = a.until.UnixMilli()
 	}
 	return st
 }
 
 // AskManual opens session id's ask for manual approval, its agent's (Claude's, live): reason, a
-// line; minutes, how long it waits and manual mode lasts at most. One already pending is given
-// back as it is.
-func (m *Manager) AskManual(ctx context.Context, id, reason string, minutes int) (api.ManualState, error) {
+// line; steps, how many steps asked of a person manual mode lasts at most. One already pending is
+// given back as it is.
+func (m *Manager) AskManual(ctx context.Context, id, reason string, steps int) (api.ManualState, error) {
 	h, err := m.get(id)
 	if err != nil {
 		return api.ManualState{}, err
@@ -69,11 +71,11 @@ func (m *Manager) AskManual(ctx context.Context, id, reason string, minutes int)
 	if reason == "" {
 		return api.ManualState{}, fmt.Errorf("%w: say why: reason", ErrBadRequest)
 	}
-	if minutes == 0 {
-		minutes = manualDefault
+	if steps == 0 {
+		steps = manualDefault
 	}
-	if minutes < manualMin || minutes > manualMax {
-		return api.ManualState{}, fmt.Errorf("%w: minutes: %d to %d", ErrBadRequest, manualMin, manualMax)
+	if steps < manualMin || steps > manualMax {
+		return api.ManualState{}, fmt.Errorf("%w: steps: %d to %d", ErrBadRequest, manualMin, manualMax)
 	}
 	h.mu.Lock()
 	if !h.live {
@@ -90,15 +92,15 @@ func (m *Manager) AskManual(ctx context.Context, id, reason string, minutes int)
 		h.mu.Unlock()
 		return api.ManualState{}, fmt.Errorf("%w: in %s mode already: each step not allowed by a rule is asked", ErrBadRequest, mode)
 	}
-	a := &manualAsk{req: AskManual + "-" + newUUID(), minutes: minutes, until: time.Now().Add(time.Duration(minutes) * manualMinute), state: "pending", done: make(chan struct{})}
-	ask := api.Ask{RequestID: a.req, Kind: AskManual, Input: map[string]any{"reason": reason, "minutes": minutes}, Description: reason}
+	a := &manualAsk{req: AskManual + "-" + newUUID(), steps: steps, until: time.Now().Add(manualWait), state: "pending", done: make(chan struct{})}
+	ask := api.Ask{RequestID: a.req, Kind: AskManual, Input: map[string]any{"reason": reason, "steps": steps}, Description: reason}
 	h.asks = append(h.asks, ask)
 	h.manual = a
 	a.timer = time.AfterFunc(time.Until(a.until), func() { h.manualOver(a, "expired") })
 	st := a.view()
 	from, via := h.turnFrom, h.turnVia
 	h.mu.Unlock()
-	h.logf("its agent asks for manual mode for %d minutes: %s", minutes, reason)
+	h.logf("its agent asks for manual mode for %d steps: %s", steps, reason)
 	h.publish()
 	m.publishList()
 	m.notify(Notice{Session: id, Kind: NoticeAsk, Ask: &ask, From: from, Via: via})
@@ -161,7 +163,7 @@ func (h *Hosted) endManualLocked(a *manualAsk, state string) bool {
 	return true
 }
 
-// manualOver ends manual ask a unanswered (its minutes passed): withdrawn.
+// manualOver ends manual ask a unanswered (its wait passed): withdrawn.
 func (h *Hosted) manualOver(a *manualAsk, state string) {
 	h.mu.Lock()
 	if a.state != "pending" || !h.endManualLocked(a, state) {
@@ -184,7 +186,7 @@ func (h *Hosted) manualTurnOverLocked(note func(Notice)) {
 }
 
 // answerManual answers manual ask request: allow, the process goes to manual mode (a release)
-// till the turn ends or its minutes pass; else nothing changes.
+// till the turn ends or its steps are answered; else nothing changes.
 func (h *Hosted) answerManual(ctx context.Context, request string, allow bool) error {
 	h.mu.Lock()
 	a := h.manual
@@ -223,11 +225,10 @@ func (h *Hosted) answerManual(ctx context.Context, request string, allow bool) e
 	now := time.Now()
 	busy := h.turn != "" && h.turn != agent.Idle
 	h.mode = releaseMode
-	h.setRelLocked(&released{prev: prev, at: now, during: busy, until: now.Add(time.Duration(a.minutes) * manualMinute)})
-	a.until = h.rel.until
+	h.setRelLocked(&released{prev: prev, at: now, during: busy, left: a.steps})
 	h.endManualLocked(a, "approved")
 	h.mu.Unlock()
-	h.logf("manual mode approved for %d minutes (from %s mode)", a.minutes, prev)
+	h.logf("manual mode approved for %d steps (from %s mode)", a.steps, prev)
 	h.publish()
 	h.m.publishList()
 	h.m.notify(Notice{Session: h.id, Kind: NoticeAskDone, RequestID: a.req})

@@ -83,7 +83,7 @@ function Decide({ a, cwd, busy, send }: { a: Ask; cwd: string; busy: boolean; se
   const input = JSON.stringify(a.input ?? {});
   const plan = a.kind === "plan" ? String(inputOf(input).plan ?? "") : "";
   const manual = a.kind === "manual";
-  const minutes = manual ? Number(inputOf(input).minutes ?? 0) : 0;
+  const steps = manual ? Number(inputOf(input).steps ?? 0) : 0;
   const { arg } = plan ? { arg: plan.split("\n").find((l) => l.trim())?.replace(/^#+\s*/, "") ?? "" } : manual ? { arg: a.description ?? "" } : argOf({ name: a.tool, input }, cwd);
   const icon = a.kind === "plan" ? <ClipboardList size={16} /> : manual ? <Hand size={16} /> : (ICON[kindOf(a.tool)] ?? <ShieldQuestion size={16} />);
   const details = a.kind === "plan" || manual ? null : JSON.stringify(a.input ?? {}, null, 2);
@@ -93,7 +93,7 @@ function Decide({ a, cwd, busy, send }: { a: Ask; cwd: string; busy: boolean; se
       <CardHead
         icon={icon}
         title={titleOf(a)}
-        tag={a.kind === "permission" ? a.tool : manual && minutes ? t("ask.manualMinutes", { n: minutes }) : undefined}
+        tag={a.kind === "permission" ? a.tool : manual && steps ? t("ask.manualSteps", { n: steps }) : undefined}
         summary={arg || a.description || a.tool}
         mono={a.kind === "permission"}
         open={open}

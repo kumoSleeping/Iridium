@@ -640,22 +640,22 @@ export interface SendReply {
 }
 /**
  * ManualAsk is Claude asking a person to switch it to manual approval for a while (POST
- * internal/sessions/self/manual; docs/api.md "临时切换至 manual"): why, in a line; Minutes: how long
- * it waits for the answer and, approved, how long manual mode lasts at most (1 to 30, 10 if none).
+ * internal/sessions/self/manual; docs/api.md "临时切换至 manual"): why, in a line; Steps: approved,
+ * how many steps asked of a person manual mode lasts at most (1 to 3, 3 if none).
  */
 export interface ManualAsk {
   reason: string;
-  minutes?: number /* int */;
+  steps?: number /* int */;
 }
 /**
  * ManualState is how a ManualAsk stands: pending (Until: when the wait ends, ms); approved (manual
- * mode till the turn ends, or Until); refused; expired (no answer in time, or the turn ended
+ * mode till the turn ends, or Steps steps are answered); refused; expired (no answer in time, or the turn ended
  * first). The ask is an Ask of kind "manual", RequestID its id.
  */
 export interface ManualState {
   requestId: string;
   state: string;
-  minutes: number /* int */;
+  steps: number /* int */;
   until?: number /* int64 */;
 }
 /**

@@ -562,7 +562,7 @@ export const en: Dict = {
   "ask.web": "Fetch from the web",
   "ask.useTool": "Use a tool",
   "ask.manual": "Switch to manual approval",
-  "ask.manualMinutes": "{n} min at most",
+  "ask.manualSteps": "{n} steps at most",
   "ask.agree": "Agree",
   "ask.refuse": "Refuse",
   "ask.plan": "Confirm the plan",

@@ -27,10 +27,10 @@ func TestManualAsk(t *testing.T) {
 	// A person does not ask it, nor an agent for another session.
 	l.want(403, "web", "POST", "/v1/internal/sessions/"+id+"/manual", api.ManualAsk{Reason: "x"}, nil)
 	l.want(403, "agent", "POST", "/v1/internal/sessions/"+id+"/manual", api.ManualAsk{Reason: "x"}, nil)
-	l.want(400, "agent-in:"+id, "POST", "/v1/internal/sessions/self/manual", api.ManualAsk{Reason: "x", Minutes: 99}, nil)
+	l.want(400, "agent-in:"+id, "POST", "/v1/internal/sessions/self/manual", api.ManualAsk{Reason: "x", Steps: 99}, nil)
 	var ms api.ManualState
 	l.want(200, "agent-in:"+id, "POST", "/v1/internal/sessions/self/manual", api.ManualAsk{Reason: "npx is needed"}, &ms)
-	if ms.State != "pending" || ms.Minutes != 10 || ms.RequestID == "" {
+	if ms.State != "pending" || ms.Steps != 3 || ms.RequestID == "" {
 		t.Fatalf("asked: %+v", ms)
 	}
 	card := session.AskCardID(id, ms.RequestID)

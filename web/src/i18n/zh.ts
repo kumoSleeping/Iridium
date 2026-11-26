@@ -562,7 +562,7 @@ export const zh = {
   "ask.web": "访问网页",
   "ask.useTool": "用工具",
   "ask.manual": "切换至手动审批",
-  "ask.manualMinutes": "最长 {n} 分钟",
+  "ask.manualSteps": "最多 {n} 步",
   "ask.agree": "同意",
   "ask.refuse": "拒绝",
   "ask.plan": "确认计划",

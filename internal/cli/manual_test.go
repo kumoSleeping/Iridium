@@ -72,7 +72,7 @@ func TestManualWait(t *testing.T) {
 	}
 	select {
 	case r := <-done:
-		if r.code != 0 || !strings.HasPrefix(r.out, "approved: manual approval till this turn ends or 10 minutes pass") {
+		if r.code != 0 || !strings.HasPrefix(r.out, "approved: manual approval till this turn ends or 3 steps are answered") {
 			t.Fatalf("--wait: %+v", r)
 		}
 	case <-time.After(20 * time.Second):

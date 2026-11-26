@@ -304,8 +304,12 @@ func (m *Manager) Answer(ctx context.Context, id string, a api.Answer) error {
 		h.mu.Unlock()
 		a.Allow, a.Message = true, ""
 	}
+	step := m.AskKind(id, a.RequestID) == "permission"
 	if err := h.drv.Answer(ctx, a); err != nil {
 		return err
+	}
+	if step {
+		h.releaseStep()
 	}
 	if a.Always {
 		h.allowMatching()

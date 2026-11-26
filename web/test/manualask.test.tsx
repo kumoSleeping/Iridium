@@ -16,11 +16,11 @@ function draw(node: ReactNode): HTMLDivElement {
   return host;
 }
 
-test("a manual ask: its reason, its minutes, agree or refuse", () => {
-  const a: Ask = { requestId: "manual-1", kind: "manual", tool: "", input: { reason: "npx is needed to build", minutes: 10 }, description: "npx is needed to build" };
+test("a manual ask: its reason, its steps, agree or refuse", () => {
+  const a: Ask = { requestId: "manual-1", kind: "manual", tool: "", input: { reason: "npx is needed to build", steps: 3 }, description: "npx is needed to build" };
   const el = draw(<Asks session="s1" asks={[a]} cwd="/w" />);
   const text = el.textContent ?? "";
-  for (const s of [t("ask.manual"), "npx is needed to build", t("ask.manualMinutes", { n: 10 }), t("ask.agree"), t("ask.refuse")]) expect(text).toContain(s);
+  for (const s of [t("ask.manual"), "npx is needed to build", t("ask.manualSteps", { n: 3 }), t("ask.agree"), t("ask.refuse")]) expect(text).toContain(s);
   expect(text).not.toContain(t("ask.always"));
   expect(el.querySelector("input")).toBeNull();
 });

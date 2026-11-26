@@ -32,7 +32,7 @@ func (s *Server) askManual(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &req) {
 		return
 	}
-	st, err := s.m.AskManual(r.Context(), id, req.Reason, req.Minutes)
+	st, err := s.m.AskManual(r.Context(), id, req.Reason, req.Steps)
 	if err != nil {
 		s.error(w, err)
 		return

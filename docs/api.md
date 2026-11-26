@@ -23,7 +23,7 @@ Iridium 自己的接口都在 `/v1/internal/` 下：Satori 规范的 internal �
 | `POST /v1/internal/sessions/{id}/interrupt` | → `{ok}` | 停掉当前回合（Esc），agent 留着。队列暂停 |
 | `POST /v1/internal/sessions/{id}/tasks/{task}/stop` | → `{ok}` | 停掉一个后台任务（`tasks[].stop` 为真的才行，Claude 的 `stop_task`），回合和别的任务照常 |
 | `POST /v1/internal/sessions/{id}/stop` | → `{ok}` | 停掉 agent 进程（关 stdin，写完记录自己退出）。会话还在，下一条消息再拉起。队列暂停 |
-| `POST /v1/internal/sessions/{id}/manual` | `ManualAsk{reason, minutes?}` → `ManualState` | Claude 的 auto 模式拦下它要的一步时，请人临时切换至手动审批（见“临时切换至 manual”）；只有会话自己的 agent（`self`）能问，别人 403 |
+| `POST /v1/internal/sessions/{id}/manual` | `ManualAsk{reason, steps?}` → `ManualState` | Claude 的 auto 模式拦下它要的一步时，请人临时切换至手动审批（见“临时切换至 manual”）；只有会话自己的 agent（`self`）能问，别人 403 |
 | `GET /v1/internal/sessions/{id}/manual?wait=` | — → `ManualState` | 最近一次的结果：`pending`、`approved`、`refused`、`expired`；`wait` 最多等 60 秒 |
 | `GET /v1/internal/agents` | → `AgentInfo[]` | 能开的 agent：审批模式（`modes`、`defaultMode`、`modeSwitch`：now / next turn / restart）、有没有上下文分项、有没有额度窗口、能不能开 ultracode（`ultracode`）、程序装没装（`missing`：PATH 上找不到；这时 `channel.create` 立刻 400，不等 agent 自更新那 30 秒，网页把它画淡，点了只提示未安装） |
 | `GET /v1/internal/settings` | → `Settings` | 设置的配置项：空闲回收（设置页不放，只改配置文件或经接口）、隐藏的额度条、各 agent 新会话的审批模式。管理权 |
@@ -224,7 +224,7 @@ agent 用 `ir sh <机器>[:目录] [--cwd 目录] [--timeout 2m] -- 命令`（`P
   - `attached`：挂在会话页面上的元素（2026-11-11），每段 `{place, from, content}`：`content` 按语言（`""` 不分语言），`from` 是 `ir`（Claude 的 UltraCode）、`m:<机器>`（执行端的插件，如 OMD 的 Ultra）或 `a:<应用>`。`place` 现在网页只画 `effort`：第一个按钮是强度滑条右边的键，其余的在键按下时排在滑条下面一行。按钮按下：`POST /v1/internal/button {id: "att:<会话>:<from>:<按钮 id>"}`。见 `docs/exec.md`“挂元素”。
   - 面板里选了模型就收起；强度滑条和挂在 `effort` 的键（UltraCode 等）在面板底下，调了不收。
 - 本会话一直允许：`answer` 带 `always: true`（或卡片选 `always`）。记下工具和 `Ask.pattern`（Claude 自己建议的规则，例如 `ls *`；没有时 shell 命令取第一个词加 ` *`，别的工具不带模式＝这个工具全部）。之后这个会话里匹配的审批自动允许，不通知、不出卡片。
-- 临时切换至 manual（kumo，2026-11-25）：Claude 的 auto 模式分类器拦下的一步不经 Iridium，直接回给模型（结果开头是 `Permission for this action was denied by the Claude Code auto mode classifier`），在页面上就是一步失败的调用（红色），没有单独的卡。Claude 真要这一步时，自己用 `ir api POST internal/sessions/self/manual reason=… --wait` 请人切换（系统提示里只给 Claude 这一句）：会话多一个 `kind: "manual"` 的 ask，像别的 ask 一样作为频道的一条消息、在输入框位置出卡片（同意 / 拒绝），并像 @ 一样叫那个频道里最近说话的人（没有就叫主机）。只有人能答，agent 答一律 403。`minutes` 1–10，默认 10（Claude 的 Bash 最长等 10 分钟）：既是等回答的时长，也是手动模式最长持续的时长；没人答、回合先结束或进程退出，就撤回，算拒绝（`expired`）。同意：运行中的进程切到 `manual`（不写进会话设置，进程重启就回到原模式），到这个回合结束或分钟数到了（先到为准）切回原模式，中间被问过的调用不提前结束它；期间手动换了模式就不切回。切换记在 hold 目录的 `release.json`（含结束时间）：守护进程重启接管仍在 manual 的同一进程时接着算，新进程就删掉。拒绝：什么都不变。`--wait` 等到结果，输出一行（同意退出码 0，否则 1）。回合结束的 Bot 回复仍带“auto 拦了 N 步”。
+- 临时切换至 manual（kumo，2026-11-25）：Claude 的 auto 模式分类器拦下的一步不经 Iridium，直接回给模型（结果开头是 `Permission for this action was denied by the Claude Code auto mode classifier`），在页面上就是一步失败的调用（红色），没有单独的卡。Claude 真要这一步时，自己用 `ir api POST internal/sessions/self/manual reason=… --wait` 请人切换（系统提示里只给 Claude 这一句）：会话多一个 `kind: "manual"` 的 ask，像别的 ask 一样作为频道的一条消息、在输入框位置出卡片（同意 / 拒绝），并像 @ 一样叫那个频道里最近说话的人（没有就叫主机）。只有人能答，agent 答一律 403。`steps` 1–3，默认 3（kumo，2026-11-26：按步数，不按分钟）：手动模式最多持续到人答完这么多步审批（同意、拒绝都算一步；规则自动放行的不算）。等回答最长 10 分钟（Claude 的 Bash 最长等 10 分钟）；没人答、回合先结束或进程退出，就撤回，算拒绝（`expired`）。同意：运行中的进程切到 `manual`（不写进会话设置，进程重启就回到原模式），到这个回合结束或步数答完（先到为准）切回原模式；期间手动换了模式就不切回。切换记在 hold 目录的 `release.json`（含结束时间）：守护进程重启接管仍在 manual 的同一进程时接着算，新进程就删掉。拒绝：什么都不变。`--wait` 等到结果，输出一行（同意退出码 0，否则 1）。回合结束的 Bot 回复仍带“auto 拦了 N 步”。
 - 匹配：`*` 是任意一段字；`前缀:*` 同 `前缀*`。shell 命令里有 `;`、`&&`、`||`、`|`、`` ` ``、`$(`、换行的，一律不按模式放行。
 
 ## 设置

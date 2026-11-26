@@ -13,7 +13,7 @@ import (
 // A release: the running process put in manual mode for a while, a person having approved its
 // agent's ask for it (manual.go): only the process, the session's setting stays, so a restart is
 // back in its own mode. It ends with the turn under way when it was approved (none under way: the
-// next), or when its minutes pass, whichever comes first; then the mode goes back, unless a person
+// next), or when a person has answered its steps (released.left), whichever comes first; then the mode goes back, unless a person
 // set one meanwhile. A step auto mode denied is a failed call like any other: Claude may ask for
 // this (kumo, 2026-11-25). A release is kept on disk (fileRelease): a daemon taking the process up
 // goes on with it, rather than leave the process in manual mode.
@@ -25,30 +25,26 @@ const releaseMode = "manual"
 const fileRelease = "release.json"
 
 // releaseMeta is a release on disk: the process it put in manual mode, the mode to go back to,
-// when it ends at the latest (ms).
+// the steps it has left (0: one of before the steps, ending with its turn alone).
 type releaseMeta struct {
-	Proc  int    `json:"proc"`
-	Prev  string `json:"prev"`
-	Until int64  `json:"until,omitempty"`
+	Proc int    `json:"proc"`
+	Prev string `json:"prev"`
+	Left int    `json:"left,omitempty"`
 }
 
 // released is a release under way: the mode to go back to; at: when it began; during: a turn
-// was under way then, its end ends the release; until: it ends then at the latest (its timer).
+// was under way then, its end ends the release; left: the steps a person may still answer in it,
+// the last ending it (0: no such end).
 type released struct {
 	prev   string
 	at     time.Time
 	during bool
-	until  time.Time
-	timer  *time.Timer
+	left   int
 }
 
-// setRelLocked starts a release, or ends it (nil), on disk too. Its end, at the latest, is timed.
+// setRelLocked starts a release, or ends it (nil), on disk too.
 func (h *Hosted) setRelLocked(r *released) {
-	h.dropRelLocked()
 	h.rel = r
-	if r != nil && !r.until.IsZero() && h.m != nil {
-		r.timer = time.AfterFunc(time.Until(r.until), func() { h.releaseDue(r) })
-	}
 	if h.dir == "" {
 		return
 	}
@@ -57,27 +53,25 @@ func (h *Hosted) setRelLocked(r *released) {
 		_ = os.Remove(path)
 		return
 	}
-	m := releaseMeta{Proc: h.proc, Prev: r.prev}
-	if !r.until.IsZero() {
-		m.Until = r.until.UnixMilli()
-	}
-	if err := writeJSON(path, m); err != nil {
+	if err := writeJSON(path, releaseMeta{Proc: h.proc, Prev: r.prev, Left: r.left}); err != nil {
 		h.logf("release: %v", err)
 	}
 }
 
 // dropRelLocked forgets the release under way, if any, leaving its file.
-func (h *Hosted) dropRelLocked() {
-	if r := h.rel; r != nil && r.timer != nil {
-		r.timer.Stop()
-	}
-	h.rel = nil
-}
+func (h *Hosted) dropRelLocked() { h.rel = nil }
 
-// releaseDue: release r's minutes passed; if it is still under way, the mode goes back.
-func (h *Hosted) releaseDue(r *released) {
+// releaseStep: a person answered a step asked in manual mode. It is one of the release's, if one
+// with steps is under way; its last, the mode goes back.
+func (h *Hosted) releaseStep() {
 	h.mu.Lock()
-	if h.rel != r {
+	r := h.rel
+	if r == nil || r.left == 0 {
+		h.mu.Unlock()
+		return
+	}
+	if r.left--; r.left > 0 {
+		h.setRelLocked(r)
 		h.mu.Unlock()
 		return
 	}
@@ -85,14 +79,14 @@ func (h *Hosted) releaseDue(r *released) {
 	mode := h.backLocked(r)
 	h.mu.Unlock()
 	if mode != "" {
-		h.logf("manual mode's minutes passed: back to %s mode", mode)
+		h.logf("manual mode's steps answered: back to %s mode", mode)
 		h.restoreMode(mode)
 	}
 }
 
 // helloReleaseLocked: process proc said hello in mode. The process an earlier daemon put in manual
 // mode for a release, taken up, is in it still: the release goes on (from now, the turn under way
-// ending it; its minutes as they were). Else none is under way.
+// ending it; its steps as they were left). Else none is under way.
 func (h *Hosted) helloReleaseLocked(proc int, mode string) {
 	h.dropRelLocked()
 	if h.dir == "" {
@@ -105,11 +99,7 @@ func (h *Hosted) helloReleaseLocked(proc int, mode string) {
 		return
 	}
 	busy := h.turn != "" && h.turn != agent.Idle
-	r := &released{prev: m.Prev, at: time.Now(), during: busy}
-	if m.Until != 0 {
-		r.until = time.UnixMilli(m.Until)
-	}
-	h.setRelLocked(r)
+	h.setRelLocked(&released{prev: m.Prev, at: time.Now(), during: busy, left: m.Left})
 	h.mode = releaseMode
 	h.logf("manual mode goes on (back to %s mode after)", m.Prev)
 }

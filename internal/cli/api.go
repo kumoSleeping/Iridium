@@ -564,7 +564,7 @@ func (e *env) waitManual(path string, st api.ManualState) int {
 	}
 	switch st.State {
 	case "approved":
-		fmt.Fprintf(e.out, "approved: manual approval till this turn ends or %d minutes pass; run the step again, it is asked\n", st.Minutes)
+		fmt.Fprintf(e.out, "approved: manual approval till this turn ends or %d steps are answered; run the step again, it is asked\n", st.Steps)
 		return exitDone
 	case "refused":
 		fmt.Fprintln(e.out, "refused: the mode stays")
