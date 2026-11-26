@@ -267,7 +267,9 @@ func (m *Manager) foreignState(id string, over map[string]store.Overlay) (*api.S
 		o = m.o.Store.Overlay(id)
 	}
 	s.Name, s.Pinned, s.Workspace, s.Color = o.Name, o.Pinned, o.Workspace, api.Color(o.Color)
-	s.Archived = !m.visibility().Shown(string(s.Agent), s.ID)
+	// Its own marker alone, as a hosted one's is read (shown): not every marker for one session.
+	r, ok, _ := m.o.Store.ShownRow(string(s.Agent), s.ID)
+	s.Archived = !(ok && r.Shown)
 	m.parentOf(&s)
 	s.Own = ownOf(s, o)
 	st := &api.SessionState{Session: s, Asks: []api.Ask{}, Tasks: []api.Task{}}
