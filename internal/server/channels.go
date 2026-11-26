@@ -1695,9 +1695,14 @@ type viewers struct {
 }
 
 // viewing: c has channel ch open on a page, until the func it gives is called. The pages are
-// told who is looking (the carried state "viewers:<ch>").
+// told who is looking (the carried state "viewers:<ch>"). Not the host's login, as among the
+// readers (readsOf): a page at the host (the local page, a tool through the socket) is Iridium
+// itself, no one looking.
 func (s *Server) viewing(c caller, ch string) func() {
 	me, name := memberOf(c), s.satoriUser(c).Name
+	if strings.HasPrefix(me, gate.HostID+"/") {
+		return func() {}
+	}
 	change := func(by int) {
 		s.viewers.mu.Lock()
 		if s.viewers.of == nil {

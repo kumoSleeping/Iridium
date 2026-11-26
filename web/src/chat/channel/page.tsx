@@ -30,7 +30,7 @@ import { Copyable } from "../copyable";
 import { Crash } from "../crash";
 import { ContextRing, ModeKey, ModelKey, modelView, QuotaBars, useMode } from "../meters";
 import { fromSatori, PLACE_DRAG, SESSION_DRAG, sourceOf, withDevice, yours, type Source } from "../refs";
-import { Assistant, Attached, clock, Compaction, Letter, Line, MsgRow, Pending, When, YouBubble } from "../said";
+import { Assistant, Attached, clock, Compaction, Gutter, Letter, Line, MsgRow, Pending, When, YouBubble } from "../said";
 import { ShellRuns } from "../shell";
 import { Stick, toEnd } from "../stick";
 import { justMade } from "./adding";
@@ -716,14 +716,14 @@ export const GroupView = memo(function GroupView({ g, channel, agents, who, reco
         </span>
       )}
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-        <div className={cn("flex h-4 min-w-0 items-center gap-1.5", g.bare && "hidden")}>
+        <div data-lead="" className={cn("flex h-4 min-w-0 items-center gap-1.5", g.bare && "hidden")}>
           <span className="shrink-0 text-xs font-medium text-ink-2">{now?.nick || a.nick}</span>
           <span className="min-w-0 truncate text-xs text-ink-4">{/* What it runs as now; that not known just now (its kind's name alone: its state between
               two turns, a limit hit), what its message says it ran as, not the bare kind: the
               line shortened and the row jumped (kumo, 2026-11-25). */}
             {now?.name && !(a.name && a.name.length > now.name.length && now.name === agentName(now.agent)) ? now.name : a.name}</span>
           {now && bars(now.session)}
-          <When time={msgs[0]?.time} />
+          <When time={msgs[0]?.time} n={msgs[0]?.n} lead />
         </div>
         {msgs.map((m) => {
           const w = msgWords(m);
@@ -735,10 +735,14 @@ export const GroupView = memo(function GroupView({ g, channel, agents, who, reco
             <div
               key={m.n}
               data-seq={m.n}
+              // Its own time and number beside it, over it; the first's are on the head (When lead).
+              data-lead={m === msgs[0] && !g.bare ? "" : undefined}
+              className="group/line relative"
               // Come by an event: in as a bubble sent from here comes (kumo, 2026-11-24), its
               // head with it where it is the first of its sender's run.
               ref={(el) => void (el && born?.delete(m.n) && pushIn(m === msgs[0] ? (el.closest<HTMLElement>("[data-row]") ?? el) : el))}
             >
+              {(m !== msgs[0] || g.bare) && <Gutter time={m.time} n={m.n} />}
               {/* What an older message says was done before it, where the one before has no line of its own for it. */}
               {/* No work of its own (said before messages carried it, or a twin where it was called): its steps from its record, by the span it says, as before. */}
               {!m.work && !hidden?.has(m.n) && (m.did || (m.src?.from !== undefined && !!m.src.to)) && line({ ...(m.did ? { did: m.did } : {}), ...(m.src?.from !== undefined && m.src.to ? { span: { from: m.src.from, to: m.src.to } } : {}) })}
@@ -786,6 +790,7 @@ function PersonLine({ m, a, bare, channel, who, call, may, quote, quoted, old, j
                 src={by.who}
                 text={w.words}
                 time={m.time}
+                n={m.n}
                 onJump={openChat}
                 bare={bare}
                 words={wrap(<NickWords text={w.words} />)}
@@ -801,6 +806,7 @@ function PersonLine({ m, a, bare, channel, who, call, may, quote, quoted, old, j
                 who={by.who}
                 left={!by.mine}
                 time={m.time}
+                n={m.n}
                 bare={bare}
                 words={wrap(<NickWords text={w.words} />)}
                 under={under}
@@ -824,14 +830,15 @@ function ScriptGroup({ msgs, bare, channel, agents, quote, quoted, old, jump }: 
     <MsgRow className="flex min-w-0 items-start gap-2.5">
       {bare ? <span className="w-7 shrink-0" /> : <ServerFace size={28} />}
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-        <div className={cn("flex h-4 min-w-0 items-center gap-1.5", bare && "hidden")}>
+        <div data-lead="" className={cn("flex h-4 min-w-0 items-center gap-1.5", bare && "hidden")}>
           <span className="min-w-0 truncate text-xs font-medium text-ink-2">Iridium</span>
-          <When time={msgs[0]?.time} />
+          <When time={msgs[0]?.time} n={msgs[0]?.n} lead />
         </div>
         {msgs.map((m) => {
           const w = msgWords(m);
           return (
-            <div key={m.n} data-seq={m.n}>
+            <div key={m.n} data-seq={m.n} data-lead={m === msgs[0] && !bare ? "" : undefined} className="group/line relative">
+              {(m !== msgs[0] || bare) && <Gutter time={m.time} n={m.n} />}
               <Foldable scope={channel} id={`m${m.n}`} auto={old?.(m) ?? false} lines={linesOf(w.words)}>
                 {(wrap) => (
                   <Copyable copy={withForwards(w.words, w.forwards)} quote={quote && (() => quote(m))} act={{ channel, seq: m.n, may: !!quote }}>

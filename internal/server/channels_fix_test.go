@@ -761,3 +761,23 @@ func TestReadsOfOneAgent(t *testing.T) {
 		t.Errorf("reads: %+v", reads)
 	}
 }
+
+// A page at the host (the local page, a tool through the socket) is Iridium itself: not among
+// who is looking at a channel, as it is not among its readers; a person on ir_web is.
+func TestViewersNotHost(t *testing.T) {
+	t.Parallel()
+	l := start(t)
+	done := l.s.viewing(caller{Identity: localIdentity}, "ch")
+	if v := l.s.viewersOf("ch"); len(v) != 0 {
+		t.Errorf("the host looking: %+v", v)
+	}
+	done()
+	web := l.s.viewing(caller{Identity: gate.Identity{App: gate.WebApp, Login: "u1", Name: "u1"}}, "ch")
+	if v := l.s.viewersOf("ch"); len(v) != 1 || v[0].Member != "ir_web/u1" && !strings.HasSuffix(v[0].Member, "/u1") {
+		t.Errorf("a person looking: %+v", v)
+	}
+	web()
+	if v := l.s.viewersOf("ch"); len(v) != 0 {
+		t.Errorf("gone: %+v", v)
+	}
+}

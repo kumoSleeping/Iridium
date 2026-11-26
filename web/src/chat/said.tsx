@@ -57,10 +57,30 @@ export const clock = (ms?: number) => {
 };
 
 /** When a message was said, on its head's inner side (beside the name, toward the middle; kumo,
- *  2026-11-16): not shown till a pointer is over its row (WhenRow), or a finger presses the row's
- *  blank, which shows it till pressed again. Its place is kept: showing it moves nothing. */
-export const When = ({ time }: { time?: number }) =>
-  time ? <span className="shrink-0 text-xs leading-4 text-ink-4 tabular-nums opacity-0 transition-opacity duration-(--dur-2) group-hover/msg:opacity-100 group-data-[when]/msg:opacity-100">{clock(time)}</span> : null;
+ *  2026-11-16), its number in the channel before it (n; kumo, 2026-11-26): not shown till a
+ *  pointer is over its row (WhenRow), or a finger presses the row's blank, which shows it till
+ *  pressed again. Its place is kept: showing it moves nothing. lead: the head of a run of several
+ *  messages (an agent's): shown over the head or the first message alone ([data-lead]), each
+ *  other one with its own (Gutter). */
+export const When = ({ time, n, lead }: { time?: number; n?: number; lead?: boolean }) =>
+  time ? (
+    <span className={cn("shrink-0 text-xs leading-4 text-ink-4 tabular-nums opacity-0 transition-opacity duration-(--dur-2) group-data-[when]/msg:opacity-100", lead ? "group-has-[[data-lead]:hover]/msg:opacity-100" : "group-hover/msg:opacity-100")}>
+      {n !== undefined ? `#${n} ${clock(time)}` : clock(time)}
+    </span>
+  ) : null;
+
+/** The time and number of a message with no head of its own (one under another's head: kumo,
+ *  2026-11-26, a pointer over it showed none, or the first's), in the empty place of the face
+ *  beside it, as Slack does: shown over the message itself (group/line), or as When is by a
+ *  press. Put in an element that is relative; right: the face's place on the right. slot: put in
+ *  that place itself (a sender's row of its own, group/msg), not beside it. */
+export const Gutter = ({ time, n, right, slot }: { time?: number; n?: number; right?: boolean; slot?: boolean }) =>
+  time || n !== undefined ? (
+    <span aria-hidden className={cn("pointer-events-none absolute top-0.5 flex w-7 flex-col text-[11px] leading-4 whitespace-nowrap text-ink-4 tabular-nums opacity-0 transition-opacity duration-(--dur-2) group-data-[when]/msg:opacity-100", slot ? "group-hover/msg:opacity-100" : "group-hover/line:opacity-100", slot ? (right ? "left-0 items-start" : "right-0 items-end") : right ? "left-full ml-2.5 items-start" : "right-full mr-2.5 items-end")}>
+      {time ? <span>{clock(time)}</span> : null}
+      {n !== undefined && <span>#{n}</span>}
+    </span>
+  ) : null;
 
 /** Whether a press at e is on a message's blank: not on its words, a key, a link, a picture, code
  *  or a bubble, and no words being selected. */
@@ -160,7 +180,7 @@ function Face({ who }: { who: You | From }) {
  *  message it answers (a quote), as chat apps put it. bare: under the head of the one before it
  *  from the same sender (docs/next/ui.md §1.5): no face nor name, their room kept. */
 type FaceMenu = (at: { x: number; y: number } | null, close: () => void) => ReactNode;
-const Sender = forwardRef<HTMLDivElement, { who: You | From; time?: number; jump?: () => void; left?: boolean; card?: ReactNode; menu?: FaceMenu; under?: ReactNode; bare?: boolean; children: ReactNode }>(function Sender({ who, time, jump, left, card, menu, under, bare, children }, ref) {
+const Sender = forwardRef<HTMLDivElement, { who: You | From; time?: number; n?: number; jump?: () => void; left?: boolean; card?: ReactNode; menu?: FaceMenu; under?: ReactNode; bare?: boolean; children: ReactNode }>(function Sender({ who, time, n, jump, left, card, menu, under, bare, children }, ref) {
   const [menuAt, setMenuAt] = useMenuAt();
   const menuEver = useEver(menuAt !== null);
   // The face's card, made as it is first opened (useEver).
@@ -197,7 +217,9 @@ const Sender = forwardRef<HTMLDivElement, { who: You | From; time?: number; jump
   return (
     <div ref={ref} {...row} className={cn(row.className, "flex items-start gap-2.5", left ? "pr-6 sm:pr-10" : "flex-row-reverse pl-6 sm:pl-10")}>
       {bare ? (
-        <span aria-hidden className="w-7 shrink-0" />
+        <span className="relative w-7 shrink-0 self-stretch">
+          <Gutter time={time} n={n} right={!left} slot />
+        </span>
       ) : card ? (
         <>
           <button ref={faceKey} type="button" aria-label={tip} aria-haspopup="dialog" aria-expanded={carded} {...menuKeys} onPointerDown={(e) => ((cardWas.current = carded), menu && lp.onPointerDown(e))} onClick={() => (setCarded(!(cardWas.current ?? carded)), (cardWas.current = null))} className="g-press grid shrink-0 rounded-full select-none [-webkit-touch-callout:none]">
@@ -227,7 +249,7 @@ const Sender = forwardRef<HTMLDivElement, { who: You | From; time?: number; jump
       <div className={cn("flex min-w-0 flex-col gap-1", left ? "items-start" : "items-end")}>
         <div className={cn("flex max-w-full min-w-0 items-center gap-1", bare && "hidden")}>
           {/* The time on the inner side: after the name on the left, before it on the right. */}
-          {!left && <When time={time} />}
+          {!left && <When time={time} n={n} />}
           {jump ? (
             <button type="button" onClick={jump} className="group flex min-w-0 items-center gap-0.5 rounded-sm px-0.5 text-xs leading-4 text-ink-3 hover:text-ink-2">
               <span className="min-w-0 truncate">{name}</span>
@@ -236,7 +258,7 @@ const Sender = forwardRef<HTMLDivElement, { who: You | From; time?: number; jump
           ) : (
             <span className="min-w-0 truncate px-0.5 text-xs leading-4 text-ink-3">{name}</span>
           )}
-          {left && <When time={time} />}
+          {left && <When time={time} n={n} />}
         </div>
         {children}
         {under}
@@ -263,13 +285,13 @@ function SendState({ state }: { state: Going }) {
 }
 
 /** words: the text drawn another way than Worded's (a channel's, its nicks too: chat/channel). */
-export const YouBubble = forwardRef<HTMLDivElement, { text: string; who: You; failed?: boolean; children?: ReactNode; time?: number; going?: Going; words?: ReactNode; left?: boolean; card?: ReactNode; menu?: FaceMenu; under?: ReactNode; bare?: boolean }>(function YouBubble({ text, who, failed, children, time, going, words, left, card, menu, under, bare }, ref) {
+export const YouBubble = forwardRef<HTMLDivElement, { text: string; who: You; failed?: boolean; children?: ReactNode; time?: number; n?: number; going?: Going; words?: ReactNode; left?: boolean; card?: ReactNode; menu?: FaceMenu; under?: ReactNode; bare?: boolean }>(function YouBubble({ text, who, failed, children, time, n, going, words, left, card, menu, under, bare }, ref) {
   // What the words name, where they name it (Worded); the files under the bubble, a picture as
   // large as an agent's (kumo, 2026-11-17: one small in the bubble could not be made out).
   const files = Children.count(children) > 0;
   const bubble = !!text || !files;
   return (
-    <Sender ref={ref} who={who} left={left} card={card} menu={menu} under={under} time={time} bare={bare}>
+    <Sender ref={ref} who={who} left={left} card={card} menu={menu} under={under} time={time} n={n} bare={bare}>
       {bubble && (
         <div className="relative max-w-[min(560px,100%)] px-3.5 py-2">
           {going && <SendState state={going} />}
@@ -342,11 +364,11 @@ export function Pending({ s, who, retry, drop, takeBack, bubbleRef, words, bare,
 
 /** A letter: from another session's ir, a plugin or a peer. Not your words: on the left with the
  *  agents, in a grey bubble as a person's are (kumo, 2026-11-16: it was on the right). */
-export function Letter({ src, text, time, onJump, words, under, card, menu, bare, children }: { src: From; text: string; time?: number; onJump: (id: string) => void; words?: ReactNode; under?: ReactNode; card?: ReactNode; menu?: FaceMenu; bare?: boolean; children?: ReactNode }) {
+export function Letter({ src, text, time, n, onJump, words, under, card, menu, bare, children }: { src: From; text: string; time?: number; n?: number; onJump: (id: string) => void; words?: ReactNode; under?: ReactNode; card?: ReactNode; menu?: FaceMenu; bare?: boolean; children?: ReactNode }) {
   // Its files as in your bubble (ir send -a); what it names, where it names it.
   const files = Children.count(children) > 0;
   return (
-    <Sender who={src} time={time} left jump={!card && src.session ? () => onJump(src.session!) : undefined} card={card} menu={menu} under={under} bare={bare}>
+    <Sender who={src} time={time} n={n} left jump={!card && src.session ? () => onJump(src.session!) : undefined} card={card} menu={menu} under={under} bare={bare}>
       {(text || !files) && (
         <div className="max-w-[min(560px,100%)] min-w-0 rounded-xl rounded-tl-sm bg-fill px-3.5 py-2">
           <p className="m-0 text-md whitespace-pre-wrap [overflow-wrap:anywhere]">
