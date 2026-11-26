@@ -1237,8 +1237,7 @@ func (h *Hosted) state(o store.Overlay, archived bool) api.SessionState {
 }
 
 func (h *Hosted) publish() {
-	over, _ := h.m.o.Store.Overlays()
-	s := h.state(over[h.id], !h.shown())
+	s := h.state(h.m.o.Store.Overlay(h.id), !h.shown())
 	h.m.o.Hub.Set("session:"+h.id, s)
 	h.mu.Lock()
 	changed := s.Status != h.lamp

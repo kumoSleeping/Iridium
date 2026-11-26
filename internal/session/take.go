@@ -262,10 +262,10 @@ func (m *Manager) foreignState(id string, over map[string]store.Overlay) (*api.S
 	if !ok {
 		return nil, ErrNotFound
 	}
-	if over == nil {
-		over, _ = m.o.Store.Overlays()
-	}
 	o := over[id]
+	if over == nil {
+		o = m.o.Store.Overlay(id)
+	}
 	s.Name, s.Pinned, s.Workspace, s.Color = o.Name, o.Pinned, o.Workspace, api.Color(o.Color)
 	s.Archived = !m.visibility().Shown(string(s.Agent), s.ID)
 	m.parentOf(&s)
@@ -355,9 +355,7 @@ func (m *Manager) publishStates(ids []string) {
 func (m *Manager) intoGroup(id, cwd, caller string) {
 	var prefer int64
 	if caller != "" {
-		if over, err := m.o.Store.Overlays(); err == nil {
-			prefer = over[caller].Workspace
-		}
+		prefer = m.o.Store.Overlay(caller).Workspace
 	}
 	g, ok := m.o.Discovery.(grouper)
 	if !ok {

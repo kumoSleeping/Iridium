@@ -413,6 +413,9 @@ var schema = []string{
 	`CREATE TABLE IF NOT EXISTS favorite_names (member TEXT PRIMARY KEY, name TEXT NOT NULL);`,
 }
 
+// idleConns is how many connections to the database are kept open while unused.
+const idleConns = 16
+
 // steps run in Go after the migration of their version, in the same transaction.
 var steps = map[int]func(*sql.Tx) error{5: claudeForFirstPanel, 35: indexChannelMessages, 37: nicksOfSessions}
 
@@ -435,6 +438,9 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Connections are kept, not opened anew for each burst (database/sql keeps two): a new one
+	// reads the schema and has no page of the file yet.
+	db.SetMaxIdleConns(idleConns)
 	if err := backup(db, path); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("store %s: a copy before the upgrade: %w", path, err)
@@ -563,6 +569,24 @@ type Overlay struct {
 	Order float64
 	// Opened: Iridium opened it through a create, of a terminal (SetOpener).
 	Opened bool
+}
+
+// Overlay is session's overlay alone, each table read by its key: what a caller that wants one
+// session's asks for, not Overlays (every row of six tables, for each call: the main instance's
+// load of 2026-11-26, State asked for each agent of each message of a page).
+func (s *Store) Overlay(session string) Overlay {
+	var o Overlay
+	_ = s.db.QueryRow(`SELECT
+		IFNULL((SELECT name FROM names WHERE session = ?1), ''),
+		IFNULL((SELECT auto FROM names WHERE session = ?1), 0),
+		EXISTS (SELECT 1 FROM pins WHERE session = ?1),
+		IFNULL((SELECT workspace FROM assignments WHERE session = ?1), 0),
+		IFNULL((SELECT manual FROM assignments WHERE session = ?1), 0),
+		IFNULL((SELECT color FROM session_colors WHERE session = ?1), ''),
+		IFNULL((SELECT at FROM session_order WHERE session = ?1), 0.0),
+		EXISTS (SELECT 1 FROM openers WHERE session = ?1)`, session).
+		Scan(&o.Name, &o.AgentNamed, &o.Pinned, &o.Workspace, &o.Manual, &o.Color, &o.Order, &o.Opened)
+	return o
 }
 
 // Overlays is every session's overlay, by session id.

@@ -417,3 +417,30 @@ func TestReceiveSetsBecomeSubscriptions(t *testing.T) {
 		}
 	}
 }
+
+// Overlay is what Overlays has under the session, read alone; nothing for one with none.
+func TestOverlayOne(t *testing.T) {
+	t.Parallel()
+	s, err := Open(filepath.Join(t.TempDir(), "iridium.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.SetName("a", "named"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`INSERT INTO pins (session, at) VALUES ('a', 1); INSERT INTO session_colors (session, color) VALUES ('a', 'red');
+		INSERT INTO session_order (session, at) VALUES ('b', 2.5); INSERT INTO openers (session, terminal, at) VALUES ('b', 't', 1);
+		INSERT INTO names (session, name, auto) VALUES ('b', 'by its agent', 1); INSERT INTO assignments (session, workspace, manual, at) VALUES ('b', NULL, 1, 1)`); err != nil {
+		t.Fatal(err)
+	}
+	all, err := s.Overlays()
+	if err != nil || len(all) != 2 {
+		t.Fatalf("all: %+v %v", all, err)
+	}
+	for _, id := range []string{"a", "b", "none"} {
+		if got := s.Overlay(id); got != all[id] {
+			t.Errorf("%s: %+v, of all %+v", id, got, all[id])
+		}
+	}
+}

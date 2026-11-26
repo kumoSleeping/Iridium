@@ -199,11 +199,7 @@ func (h *Hosted) titleNow(words string) (assemble.Injection, bool) {
 	if !due || channelTurn.MatchString(words) || h.meta.ForChannel || h.m.inChannel(h.id) {
 		return assemble.Injection{}, false
 	}
-	over, err := h.m.o.Store.Overlays()
-	if err != nil {
-		return assemble.Injection{}, false
-	}
-	o := over[h.id]
+	o := h.m.o.Store.Overlay(h.id)
 	h.mu.Lock()
 	h.titleTurns, h.titleAfterCompact = 0, false
 	h.mu.Unlock()

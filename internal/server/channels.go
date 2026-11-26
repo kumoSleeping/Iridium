@@ -2598,11 +2598,7 @@ func (s *Server) titleNow(ch, to, said string, list []deliver.Agent, me channel.
 	if !s.m.TitleDue(to) {
 		return assemble.Injection{}, false
 	}
-	over, err := s.st.Overlays()
-	if err != nil {
-		return assemble.Injection{}, false
-	}
-	o := over[ch]
+	o := s.st.Overlay(ch)
 	if o.Name != "" && !o.AgentNamed {
 		return assemble.Injection{}, false
 	}
@@ -2613,6 +2609,7 @@ func (s *Server) titleNow(ch, to, said string, list []deliver.Agent, me channel.
 		}
 	}
 	var t assemble.Injection
+	var err error
 	if ch == to {
 		t, err = assemble.TitleNow(title)
 	} else {

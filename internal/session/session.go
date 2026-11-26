@@ -624,8 +624,7 @@ func (m *Manager) State(id string) (*api.SessionState, error) {
 		return st, err
 	}
 	m.warmModels(h.meta.Agent, h.meta.Machine)
-	over, _ := m.o.Store.Overlays()
-	s := h.state(over[id], !h.shown())
+	s := h.state(m.o.Store.Overlay(id), !h.shown())
 	return &s, nil
 }
 
