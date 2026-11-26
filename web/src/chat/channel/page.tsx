@@ -332,7 +332,7 @@ export function ChannelPage({ id, sheet = 0, bar, record }: { id: string; sheet?
       who={yours(self)}
       bare={bare}
       words={<NickWords text={x.text} />}
-      under={x.quote !== undefined ? <QuoteLine n={x.quote} q={quoted(x.quote)} channel={id} jump={jump} /> : undefined}
+      quote={x.quote !== undefined ? <Quoted n={x.quote} q={quoted(x.quote)} channel={id} jump={jump} /> : undefined}
       bubbleRef={(el) => void (el ? bubbles.current.set(x.key, el) : bubbles.current.delete(x.key))}
       retry={() => retry(x)}
       drop={() => (log.unsend(x), changed())}
@@ -745,6 +745,11 @@ export const GroupView = memo(function GroupView({ g, channel, agents, who, reco
               {/* Its process ended badly: the channel's message of it, said as such (the line under
                   the conversation it was is gone: kumo, 2026-11-25). */}
               {said && m.kind === "error" && <Crash error={w.words} at="said" />}
+              {m.quote !== undefined && (
+                <div className="mb-1">
+                  <Quoted n={m.quote} q={quoted(m.quote)} channel={channel} jump={jump} />
+                </div>
+              )}
               {said && m.kind !== "error" && (
                 <Foldable scope={channel} id={`m${m.n}`} auto={!seen && (((fold?.(m) ?? false) && longWords(w.words)) || (old?.(m) ?? false))} lines={linesOf(w.words)}>
                   {(wrap) => (
@@ -760,7 +765,6 @@ export const GroupView = memo(function GroupView({ g, channel, agents, who, reco
                 </Foldable>
               )}
               {m.work && line({ work: m.work })}
-              {m.quote !== undefined && <QuoteLine n={m.quote} q={quoted(m.quote)} channel={channel} jump={jump} />}
             </div>
           );
         })}
@@ -775,7 +779,7 @@ function PersonLine({ m, a, bare, channel, who, call, may, quote, quoted, old, j
   const by = who(a);
   const w = msgWords(m);
   const body = [...m.files.map((f) => <Attached key={f.ref} session={channel} f={f} />), ...(w.forwards.length ? [<Forwards key="forwards" fs={w.forwards} />] : [])];
-  const under = m.quote !== undefined ? <QuoteLine n={m.quote} q={quoted(m.quote)} channel={channel} jump={jump} /> : undefined;
+  const over = m.quote !== undefined ? <Quoted n={m.quote} q={quoted(m.quote)} channel={channel} jump={jump} /> : undefined;
   return (
     <div data-seq={m.n}>
       <Foldable scope={channel} id={`m${m.n}`} auto={old?.(m) ?? false} lines={linesOf(w.words)}>
@@ -789,7 +793,7 @@ function PersonLine({ m, a, bare, channel, who, call, may, quote, quoted, old, j
                 onJump={openChat}
                 bare={bare}
                 words={wrap(<NickWords text={w.words} />)}
-                under={under}
+                quote={over}
                 menu={by.who.channel ? (at, close) => <PersonMenu user={a.id} name={a.name} call={may ? call : undefined} at={at} close={close} /> : undefined}
                 card={by.who.channel ? <PersonCard user={a.id} name={a.name} avatar={by.who.avatar} dm={false} call={may ? call : undefined} /> : undefined}
               >
@@ -803,7 +807,7 @@ function PersonLine({ m, a, bare, channel, who, call, may, quote, quoted, old, j
                 time={m.time}
                 bare={bare}
                 words={wrap(<NickWords text={w.words} />)}
-                under={under}
+                quote={over}
                 menu={by.mine ? undefined : (at, close) => <PersonMenu user={a.id} name={a.name} call={may ? call : undefined} at={at} close={close} />}
                 card={<PersonCard user={a.id} name={a.name} avatar={by.who.avatar} dm={!by.mine} call={may && !by.mine ? call : undefined} />}
               >
@@ -832,6 +836,11 @@ function ScriptGroup({ msgs, bare, channel, agents, quote, quoted, old, jump }: 
           const w = msgWords(m);
           return (
             <div key={m.n} data-seq={m.n}>
+              {m.quote !== undefined && (
+                <div className="mb-1">
+                  <Quoted n={m.quote} q={quoted(m.quote)} channel={channel} jump={jump} />
+                </div>
+              )}
               <Foldable scope={channel} id={`m${m.n}`} auto={old?.(m) ?? false} lines={linesOf(w.words)}>
                 {(wrap) => (
                   <Copyable copy={withForwards(w.words, w.forwards)} quote={quote && (() => quote(m))} act={{ channel, seq: m.n, may: !!quote }}>
@@ -844,7 +853,7 @@ function ScriptGroup({ msgs, bare, channel, agents, quote, quoted, old, jump }: 
                   </Copyable>
                 )}
               </Foldable>
-              {m.quote !== undefined && <QuoteLine n={m.quote} q={quoted(m.quote)} channel={channel} jump={jump} />}
+
             </div>
           );
         })}
@@ -853,18 +862,36 @@ function ScriptGroup({ msgs, bare, channel, agents, quote, quoted, old, jump }: 
   );
 }
 
-/** The message one answers, under the words that answer it, as chat apps put it (kumo,
- *  2026-11-16: a line over the face read oddly): a small grey block, who said it and its words,
- * two lines at most; the number alone when the page has not got it; taken back, the number and
- *  so (docs/channels.md "撤回"). Pressed, the message itself (jump; kumo, 2026-11-21). */
-function QuoteLine({ n, q, channel, jump }: { n: number; q?: { who: string; text: string }; channel: string; jump?: (n: number) => void }) {
+/** The message one answers, over the words that answer it and touching them, as chat apps put
+ *  it: in a person's bubble at its top, over an agent's words (kumo, 2026-11-26: a grey block
+ *  under them, in a run of several, was not told from the next one's). One line, a bar on its
+ *  left, who said it and its words; the number alone when the page has not got it; taken back,
+ *  the number and so (docs/channels.md "撤回"). Pressed, the message itself (jump). */
+/** Words for a line of their own: Markdown's marks (bold, code, heads, lists, quotes) dropped, one line. */
+const plain = (text: string) => text.replace(/^\s{0,3}(#{1,6}|>|[-*+]|\d+\.)\s+/gm, "").replace(/\*\*|__|`/g, "").replace(/\s+/g, " ").trim();
+
+function Quoted({ n, q, channel, jump }: { n: number; q?: { who: string; text: string }; channel: string; jump?: (n: number) => void }) {
   const gone = useRecalled(channel, n);
-  const words = <span className="line-clamp-2 [overflow-wrap:anywhere]">{gone ? t("channel.quoteGone", { n }) : q ? t("channel.quoteOf", { who: q.who, text: q.text }) : `#${n}`}</span>;
-  const cls = "mt-1 block max-w-[min(560px,100%)] rounded-md bg-fill px-2.5 py-1.5 text-left text-xs leading-[18px] text-ink-3";
-  if (!jump || gone) return <div className={cls}>{words}</div>;
+  const words = gone ? (
+    t("channel.quoteGone", { n })
+  ) : q ? (
+    <>
+      <span className="font-medium text-ink-2">{q.who}</span> {plain(q.text)}
+    </>
+  ) : (
+    `#${n}`
+  );
+  const body = (
+    <>
+      <span aria-hidden className="w-0.5 shrink-0 rounded-full bg-ink-4" />
+      <span className="min-w-0 truncate">{words}</span>
+    </>
+  );
+  const cls = "flex max-w-[min(560px,100%)] min-w-0 items-stretch gap-1.5 text-left text-xs leading-[18px] text-ink-3";
+  if (!jump || gone) return <div className={cls}>{body}</div>;
   return (
     <button type="button" onClick={() => jump(n)} className={cn(cls, "g-press cursor-pointer hover:text-ink-2")}>
-      {words}
+      {body}
     </button>
   );
 }

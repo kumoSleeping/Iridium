@@ -156,11 +156,10 @@ function Face({ who }: { who: You | From }) {
  *  right there (the user, 2026-11-13). */
 /** card: what its face opens, pressed (a person's card in a channel, chat/channel/person.tsx). */
 /** time: when it was said, after the name on the line the name already has. menu: what the
- *  face's right button (a finger held down) opens, at that point. under: under the bubble, the
- *  message it answers (a quote), as chat apps put it. bare: under the head of the one before it
+ *  face's right button (a finger held down) opens, at that point. bare: under the head of the one before it
  *  from the same sender (docs/next/ui.md §1.5): no face nor name, their room kept. */
 type FaceMenu = (at: { x: number; y: number } | null, close: () => void) => ReactNode;
-const Sender = forwardRef<HTMLDivElement, { who: You | From; time?: number; jump?: () => void; left?: boolean; card?: ReactNode; menu?: FaceMenu; under?: ReactNode; bare?: boolean; children: ReactNode }>(function Sender({ who, time, jump, left, card, menu, under, bare, children }, ref) {
+const Sender = forwardRef<HTMLDivElement, { who: You | From; time?: number; jump?: () => void; left?: boolean; card?: ReactNode; menu?: FaceMenu; bare?: boolean; children: ReactNode }>(function Sender({ who, time, jump, left, card, menu, bare, children }, ref) {
   const [menuAt, setMenuAt] = useMenuAt();
   const menuEver = useEver(menuAt !== null);
   // The face's card, made as it is first opened (useEver).
@@ -239,7 +238,6 @@ const Sender = forwardRef<HTMLDivElement, { who: You | From; time?: number; jump
           {left && <When time={time} />}
         </div>
         {children}
-        {under}
       </div>
       {menuEver && menu?.(menuAt, () => setMenuAt(null))}
     </div>
@@ -263,17 +261,19 @@ function SendState({ state }: { state: Going }) {
 }
 
 /** words: the text drawn another way than Worded's (a channel's, its nicks too: chat/channel). */
-export const YouBubble = forwardRef<HTMLDivElement, { text: string; who: You; failed?: boolean; children?: ReactNode; time?: number; going?: Going; words?: ReactNode; left?: boolean; card?: ReactNode; menu?: FaceMenu; under?: ReactNode; bare?: boolean }>(function YouBubble({ text, who, failed, children, time, going, words, left, card, menu, under, bare }, ref) {
+export const YouBubble = forwardRef<HTMLDivElement, { text: string; who: You; failed?: boolean; children?: ReactNode; time?: number; going?: Going; words?: ReactNode; left?: boolean; card?: ReactNode; menu?: FaceMenu; quote?: ReactNode; bare?: boolean }>(function YouBubble({ text, who, failed, children, time, going, words, left, card, menu, quote, bare }, ref) {
   // What the words name, where they name it (Worded); the files under the bubble, a picture as
   // large as an agent's (kumo, 2026-11-17: one small in the bubble could not be made out).
   const files = Children.count(children) > 0;
   const bubble = !!text || !files;
   return (
-    <Sender ref={ref} who={who} left={left} card={card} menu={menu} under={under} time={time} bare={bare}>
+    <Sender ref={ref} who={who} left={left} card={card} menu={menu} time={time} bare={bare}>
+      {!bubble && quote}
       {bubble && (
         <div className="relative max-w-[min(560px,100%)] px-3.5 py-2">
           {going && <SendState state={going} />}
           <span data-bubble-bg className={cn("absolute inset-0 rounded-xl bg-fill", left ? "rounded-tl-sm" : "rounded-tr-sm", failed && "shadow-[inset_0_0_0_1px_var(--err)]")} aria-hidden />
+          {quote && <span className="relative mb-1 block">{quote}</span>}
           {text && (
             <span className="relative block text-md whitespace-pre-wrap [overflow-wrap:anywhere]">
               {words ?? <Worded text={text} />}
@@ -308,13 +308,13 @@ export function Attached({ session, f }: { session: string; f: FileRef }) {
 /** A message sent from here the log has yet to bring: its mark says where it is; not taken, red
  *  with a retry. Once the server has answered (s.at), nothing shows beside the bubble ("Taken,
  *  nothing"). bare: under the head of the one before it, its own not drawn. */
-/** under: what goes under the bubble once it has landed (the message it answers), there from its
+/** quote: the message it answers, over its words in the bubble, there from its
  *  first frame: it came only with the landed one, which jumped as it did (kumo, 2026-11-25). */
-export function Pending({ s, who, retry, drop, takeBack, bubbleRef, words, bare, under }: { s: Sent; who: You; retry: () => Promise<void>; drop: () => void; takeBack?: () => Promise<unknown>; bubbleRef?: (el: HTMLDivElement | null) => void; words?: ReactNode; bare?: boolean; under?: ReactNode }) {
+export function Pending({ s, who, retry, drop, takeBack, bubbleRef, words, bare, quote }: { s: Sent; who: You; retry: () => Promise<void>; drop: () => void; takeBack?: () => Promise<unknown>; bubbleRef?: (el: HTMLDivElement | null) => void; words?: ReactNode; bare?: boolean; quote?: ReactNode }) {
   const [busy, setBusy] = useState(false);
   return (
     <div className="flex flex-col items-end gap-0.5">
-      <YouBubble ref={bubbleRef} text={s.text} who={who} words={words} bare={bare} under={under} failed={s.failed !== undefined} going={s.failed !== undefined ? undefined : s.queued ? "queued" : s.at !== undefined || s.left !== undefined ? undefined : "sending"}>
+      <YouBubble ref={bubbleRef} text={s.text} who={who} words={words} bare={bare} quote={quote} failed={s.failed !== undefined} going={s.failed !== undefined ? undefined : s.queued ? "queued" : s.at !== undefined || s.left !== undefined ? undefined : "sending"}>
         {s.files.map((f) =>
           f.url ? <Picture key={f.ref} src={f.url} full={f.url} name={f.name} w={f.w} h={f.h} /> : <SentFile key={f.ref} name={f.name} bytes={f.size} />,
         )}
@@ -342,13 +342,15 @@ export function Pending({ s, who, retry, drop, takeBack, bubbleRef, words, bare,
 
 /** A letter: from another session's ir, a plugin or a peer. Not your words: on the left with the
  *  agents, in a grey bubble as a person's are (kumo, 2026-11-16: it was on the right). */
-export function Letter({ src, text, time, onJump, words, under, card, menu, bare, children }: { src: From; text: string; time?: number; onJump: (id: string) => void; words?: ReactNode; under?: ReactNode; card?: ReactNode; menu?: FaceMenu; bare?: boolean; children?: ReactNode }) {
+export function Letter({ src, text, time, onJump, words, quote, card, menu, bare, children }: { src: From; text: string; time?: number; onJump: (id: string) => void; words?: ReactNode; quote?: ReactNode; card?: ReactNode; menu?: FaceMenu; bare?: boolean; children?: ReactNode }) {
   // Its files as in your bubble (ir send -a); what it names, where it names it.
   const files = Children.count(children) > 0;
   return (
-    <Sender who={src} time={time} left jump={!card && src.session ? () => onJump(src.session!) : undefined} card={card} menu={menu} under={under} bare={bare}>
+    <Sender who={src} time={time} left jump={!card && src.session ? () => onJump(src.session!) : undefined} card={card} menu={menu} bare={bare}>
+      {!(text || !files) && quote}
       {(text || !files) && (
         <div className="max-w-[min(560px,100%)] min-w-0 rounded-xl rounded-tl-sm bg-fill px-3.5 py-2">
+          {quote && <span className="mb-1 block">{quote}</span>}
           <p className="m-0 text-md whitespace-pre-wrap [overflow-wrap:anywhere]">
             {words ?? <Worded text={text} />}
           </p>

@@ -50,9 +50,18 @@ export async function goTo(scroller: HTMLElement | null, find: () => HTMLElement
   spot(el);
 }
 
-/** A moment's soft ground under el, fading out. */
+/** Where the message pressed to is, a moment, gone by itself (kumo, 2026-11-26: a dark ground as
+ *  wide as the row, with a ring, staying more than a second, was too much): a bubble's own ground
+ *  a step deeper, an agent's words a faint ground just round them, fading out in under a second. */
 function spot(el: HTMLElement) {
-  const fill = getComputedStyle(document.documentElement).getPropertyValue("--fill-2").trim() || "rgba(127,127,127,.16)";
-  el.style.borderRadius = "12px";
-  el.animate([{ backgroundColor: fill, boxShadow: `0 0 0 6px ${fill}` }, { backgroundColor: fill, boxShadow: `0 0 0 6px ${fill}`, offset: 0.4 }, { backgroundColor: "transparent", boxShadow: "0 0 0 6px transparent" }], { duration: motion.dur(4) * 4, easing: motion.ease("out"), delay: reduced() ? 0 : motion.dur(3) });
+  const bubble = el.querySelector<HTMLElement>("[data-bubble-bg]");
+  const css = getComputedStyle(document.documentElement);
+  const tone = (bubble ? css.getPropertyValue("--fill-2") : css.getPropertyValue("--fill")).trim() || "rgba(127,127,127,.12)";
+  const at = { duration: motion.dur(4) * 2, easing: motion.ease("out"), delay: reduced() ? 0 : motion.dur(3) };
+  if (bubble) {
+    const own = getComputedStyle(bubble).backgroundColor;
+    return void bubble.animate([{ backgroundColor: tone }, { backgroundColor: tone, offset: 0.25 }, { backgroundColor: own }], at);
+  }
+  el.style.borderRadius = "8px";
+  el.animate([{ backgroundColor: tone, boxShadow: `0 0 0 4px ${tone}` }, { backgroundColor: tone, boxShadow: `0 0 0 4px ${tone}`, offset: 0.25 }, { backgroundColor: "transparent", boxShadow: "0 0 0 4px transparent" }], at);
 }
