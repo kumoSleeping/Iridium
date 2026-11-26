@@ -197,8 +197,10 @@ export function Stick({ tail, older, draw, place, style, children, scroller, bot
       if (row && to < maxOf(el) - 48) (put(el, Math.max(0, to)), stay("unread"));
       else if (s.following) put(el, maxOf(el));
       else el.scrollTop = place.top!;
-    } else if (was === tail) return;
-    else if (s.following && late !== lateWas.current) stay("late");
+    } else if (s.following && late !== lateWas.current) stay("late");
+    // Late is looked at first: a message written on in this device's copy brings its steps alone,
+    // the tail the same, and it was followed down to (kumo, 2026-11-26).
+    else if (was === tail) return;
     else if (!s.following) atFoot(el) ? follow() : setFresh(true);
     lateWas.current = late;
     // The page before is asked for near the top: opened, or read up there. Not at each draw while

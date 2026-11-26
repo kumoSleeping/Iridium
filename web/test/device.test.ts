@@ -121,5 +121,19 @@ describe("a chat's copy", async () => {
     log.take({ data: [msg(1, "a"), msg(3, "c"), msg(4, "d")], start: 1, end: 4, more: false } as never);
     expect(log.msgs.map((m) => m.n)).toEqual([1, 3, 4]);
     expect(log.restored).toBe(false);
+    expect(log.late).toBe(1);
+  });
+
+  test("the channel's copy: its last message written on since is late too; the same, not", async () => {
+    const msg = (n: number, text: string) => ({ id: String(n), content: text, user: { id: "u", name: "u" }, _data: {} });
+    const { msgOf } = await import("../src/chat/channel/lib");
+    const grown = new ChannelLog("c", async () => ({ data: [], start: 0, end: 0, more: false }) as never);
+    grown.restore([msgOf(msg(1, "a") as never)!, msgOf(msg(2, "b") as never)!], false);
+    grown.take({ data: [msg(1, "a"), msg(2, "b and more")], start: 1, end: 2, more: false } as never);
+    expect(grown.late).toBe(1);
+    const same = new ChannelLog("c", async () => ({ data: [], start: 0, end: 0, more: false }) as never);
+    same.restore([msgOf(msg(1, "a") as never)!, msgOf(msg(2, "b") as never)!], false);
+    same.take({ data: [msg(1, "a"), msg(2, "b")], start: 1, end: 2, more: false } as never);
+    expect(same.late).toBe(0);
   });
 });

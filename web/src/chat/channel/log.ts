@@ -82,7 +82,10 @@ export class ChannelLog {
   }
 
   /** How many times the server's page brought messages past this device's copy: said while the
-   *  page was away, come all at once as it is opened (the view does not go down to them: stick.tsx). */
+   *  page was away, come all at once as it is opened (the view does not go down to them: stick.tsx).
+   *  The copy's last message grown since (an agent's, written on and its steps after it, the page
+   *  loaded again in its turn) as well: the reader scrolls to it, the page does not (kumo,
+   *  2026-11-26: loaded again, it glided down by itself). */
   late = 0;
   /** The messages put in from this device's copy (device/chats.ts), not yet the server's. */
   restored = false;
@@ -101,6 +104,9 @@ export class ChannelLog {
     if (this.restored) {
       this.restored = false;
       const was = this.end;
+      const last = this.msgs.at(-1);
+      const tail = (m?: Msg) => m && JSON.stringify([m.text, m.files.length, m.work, m.did, m.writing ?? false]);
+      const lastWas = tail(last);
       this.more = p.more;
       const next = read(p.data);
       const theirs = new Map(next.map((m) => [m.n, JSON.stringify(m)]));
@@ -109,7 +115,7 @@ export class ChannelLog {
       const same = this.msgs.every((m) => m.n < from || theirs.get(m.n) === JSON.stringify(m));
       if (!same) this.msgs = this.msgs.filter((m) => m.n < from || (this.touched.get(m.n) ?? 0) > since);
       this.put(next, since);
-      if (was && this.end > was) this.late++;
+      if ((was && this.end > was) || (last && tail(this.msgs.find((m) => m.n === last.n)) !== lastWas)) this.late++;
       this.came = Date.now();
       return;
     }
