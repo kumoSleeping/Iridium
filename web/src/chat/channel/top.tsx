@@ -188,9 +188,9 @@ export function TopRight({ id }: { id: string }) {
   );
 }
 
-/** The members: who is looking first, if any; each agent a submenu, the menu its face has (members.tsx MemberItems; what it
+/** The members: each agent a submenu, the menu its face has (members.tsx MemberItems; what it
  *  asks with, ask, drawn by the bar); the commands of its IR,
- *  each pressed its card (script), and 新建脚本; then 邀请. */
+ *  each pressed its card (script), and 新建脚本; who is looking under the agents; then 邀请. */
 function MemberList({ id, viewers, ask, script, inviteFirst, done }: { id: string; viewers: Viewer[]; ask: (a: Ask) => void; script: (p: ScriptPage) => void; inviteFirst?: boolean; done: () => void }) {
   const list = useList();
   const scripts = useScripts(id) ?? [];
@@ -209,7 +209,7 @@ function MemberList({ id, viewers, ask, script, inviteFirst, done }: { id: strin
     if (plus && inviteFirst) invite();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plus, inviteFirst]);
-  const first = viewers.length > 0 ? t("channel.viewing") : agents.length > 0 ? t("channel.agents") : "";
+  const first = agents.length > 0 ? t("channel.agents") : viewers.length > 0 ? t("channel.viewing") : "";
   const head = (label: string) =>
     plus && label === first ? (
       <div className="flex items-center">
@@ -229,17 +229,6 @@ function MemberList({ id, viewers, ask, script, inviteFirst, done }: { id: strin
           <InviteBody id={id} done={done} />
         </PageOf>
       )}
-      {viewers.length > 0 && (
-        <>
-          {head(t("channel.viewing"))}
-          {viewers.map((v) => (
-            <div key={v.member} className="flex h-8 items-center gap-2.5 px-2.5 text-base pointer-coarse:h-9">
-              <MemberFace member={v.member} name={v.name} size={18} />
-              <span className="min-w-0 flex-1 truncate">{v.name}</span>
-            </div>
-          ))}
-        </>
-      )}
       {/* No agents, no head for them (kumo, 2026-11-25). */}
       {agents.length > 0 && head(t("channel.agents"))}
       {agents.map((m) => {
@@ -252,6 +241,18 @@ function MemberList({ id, viewers, ask, script, inviteFirst, done }: { id: strin
           </Sub>
         );
       })}
+      {/* Who is looking under the agents (kumo, 2026-11-27): one coming or going moves no row above. */}
+      {viewers.length > 0 && (
+        <>
+          {head(t("channel.viewing"))}
+          {viewers.map((v) => (
+            <div key={v.member} className="flex h-8 items-center gap-2.5 px-2.5 text-base pointer-coarse:h-9">
+              <MemberFace member={v.member} name={v.name} size={18} />
+              <span className="min-w-0 flex-1 truncate">{v.name}</span>
+            </div>
+          ))}
+        </>
+      )}
       {/* Its subagents at work are in the work key's panel (workkey.tsx; kumo + Neon, 2026-11-26). */}
       {/* The channel's commands (docs/channels.md "命令"), if it has any: a row each, pressed its
           card. What wakes an agent is not listed here (kumo, 2026-11-24): it is the agent's own,
