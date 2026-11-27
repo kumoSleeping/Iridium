@@ -20,6 +20,9 @@ func TestMissedReplySaid(t *testing.T) {
 	}
 	l.waitReply("web", second, "ok: the answer")
 	l.idle(second)
+	// Its turn's end done with first: else, handled late, it closed the call put below as one
+	// its turn never answered, before the missed reply was looked for (on a loaded box).
+	l.settled(second)
 	count := func() (n int) {
 		for _, m := range l.said("web", ch) {
 			if strings.Contains(m, "ok: the answer") {
@@ -42,5 +45,23 @@ func TestMissedReplySaid(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 	if n := count(); n != 1 {
 		t.Fatalf("said %d times: %v", n, l.said("web", ch))
+	}
+}
+
+// settled waits until what session id's turns brought is done with: the notices handled, its
+// answers (the turn's end) run.
+func (l *live) settled(id string) {
+	l.t.Helper()
+	l.s.sat.Settled(5 * time.Second)
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		l.s.answers.mu.Lock()
+		n := len(l.s.answers.of[id])
+		l.s.answers.mu.Unlock()
+		if n == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			l.t.Fatalf("%s: answers still waiting", id)
+		}
 	}
 }

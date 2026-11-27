@@ -439,6 +439,7 @@ func (s *Service) messageGet(_ context.Context, c Caller, body []byte) (any, err
 		}
 		return nil, errNoMessage(req.MessageID)
 	}
+	s.Settled(settleWait)
 	s.log.Touch(st.ID)
 	m, ok := s.logged(st.ID, req.MessageID)
 	if !ok {
@@ -448,6 +449,10 @@ func (s *Service) messageGet(_ context.Context, c Caller, body []byte) (any, err
 	s.withReactions(c, st.ID, out)
 	return out[0], nil
 }
+
+// settleWait is how long message.list and message.get wait for the notices before them
+// (Settled): what a turn just ended said is read whole.
+const settleWait = 2 * time.Second
 
 // ListLimit is how many messages a page of message.list holds when none is asked; ListMax, at most.
 const (
@@ -476,6 +481,7 @@ func (s *Service) messageList(_ context.Context, c Caller, body []byte) (any, er
 	if err != nil {
 		return nil, err
 	}
+	s.Settled(settleWait)
 	if q := strings.TrimSpace(req.Data.Q); q != "" {
 		// Iridium's own: the messages that have these words, the latest of them; not paged.
 		found, err := s.log.Search(st.ID, q, min(max(req.Limit, 0), ListMax))
