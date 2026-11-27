@@ -7,7 +7,59 @@ import (
 	"strings"
 )
 
-const desktopInstallFile = "dsh-desktop-install.json"
+const (
+	desktopInstallFile = "dsh-desktop-install.json"
+	desktopManualFile  = "dsh-desktop-manual.json"
+)
+
+type manualDesktopConfig struct {
+	Path string `json:"path,omitempty"`
+}
+
+// LoadManualDesktopPath reads the user-configured fallback Desktop path from StateDir.
+func LoadManualDesktopPath(stateDir string) string {
+	if stateDir == "" {
+		return ""
+	}
+	b, err := os.ReadFile(filepath.Join(stateDir, desktopManualFile))
+	if err != nil {
+		return ""
+	}
+	var cfg manualDesktopConfig
+	if json.Unmarshal(b, &cfg) != nil {
+		return ""
+	}
+	return strings.TrimSpace(cfg.Path)
+}
+
+// SaveManualDesktopPath persists (or clears when p == "") the fallback Desktop path in StateDir.
+func SaveManualDesktopPath(stateDir, p string) error {
+	if stateDir == "" {
+		return nil
+	}
+	path := filepath.Join(stateDir, desktopManualFile)
+	p = strings.TrimSpace(p)
+	if p == "" {
+		err := os.Remove(path)
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		return err
+	}
+	b, err := json.Marshal(manualDesktopConfig{Path: p})
+	if err != nil {
+		return err
+	}
+	b = append(b, '\n')
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
 
 // DesktopInstall describes a local DSH Desktop installation capable of launching dsh-desktop-host
 // headless via ELECTRON_RUN_AS_NODE=1.

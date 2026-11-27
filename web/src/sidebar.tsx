@@ -9,7 +9,7 @@
 // (colors.ts); a group's: rename, its path. The mouse resting
 // on a row fetches its chat ahead.
 import { Menu } from "@base-ui/react/menu";
-import { Archive, ArchiveRestore, Bookmark, BookmarkMinus, BookmarkX, Bot, Check, ChevronRight, Copy, Ellipsis, Ungroup, Folder, FolderOpen, ListCollapse, Moon, Pencil, Pin, PinOff, Plus, RefreshCw, Square, FolderPlus } from "lucide-react";
+import { Archive, ArchiveRestore, Bookmark, BookmarkMinus, BookmarkX, Bot, Check, ChevronRight, Copy, Ellipsis, Ungroup, Folder, FolderOpen, ListCollapse, Moon, Pencil, Pin, PinOff, Plus, Search, Square, FolderPlus } from "lucide-react";
 import { ConfirmIcon, confirmName, confirmTitle } from "./confirmname";
 import { Fragment, lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactElement, type ReactNode, type RefObject } from "react";
 import { api } from "./api/client";
@@ -638,12 +638,28 @@ export function SideKey({ label, onClick, className }: { label: string; onClick?
   );
 }
 
-/** The file browser (a channel in a folder no group holds is made in it: no "+" here, kumo,
- *  2026-11-25). On a phone the keys stand right of the
- *  sheet's tabs. The jump box is a keyboard's (nav.searchKey, the user, 2026-11-08). */
-export function HeadKeys(p: Pick<Props, "filesKey">) {
+/** Search (Jump box, ⌘K / Ctrl+K) and the file browser. On a phone the keys stand right of the
+ *  sheet's tabs. */
+export function HeadKeys(p: Pick<Props, "filesKey" | "searching" | "onSearch" | "panelsCode">) {
+  const tip = `${t("nav.search")} ${t("nav.searchKey")}`;
   return (
     <span className="flex shrink-0 items-center gap-0.5">
+      <Tip label={tip}>
+        <button
+          type="button"
+          data-search-key=""
+          aria-label={t("nav.search")}
+          aria-pressed={p.searching}
+          onPointerEnter={p.panelsCode}
+          onClick={p.onSearch}
+          className={cn(
+            "g-press grid size-8 shrink-0 place-items-center rounded-md text-ink-3 hover:bg-fill hover:text-ink pointer-coarse:size-10",
+            p.searching && "bg-fill text-ink",
+          )}
+        >
+          <Search size={17} />
+        </button>
+      </Tip>
       {p.filesKey}
     </span>
   );
@@ -879,15 +895,6 @@ function WsRow({ flip, id, name, root, sessions, hung, machine, remote, folders,
           // Taken apart at its folder, its subfolders groups of their own (the user, 2026-11-09).
           ...(folders ? [{ icon: <Ungroup size={15} />, label: t("menu.split"), run: () => void api.patchGuild(id, { split: true }).then(() => toast(t("toast.split", { ws: name })), failed) }] : []),
         ]
-      : []),
-    // A group at a machine with dsh: what its dsh offers read again now, its workspaces and
-    // sessions, models and presets with DSH Desktop's settings (the user, 2026-11-09: here, not in
-    // the head's switch).
-    ...(machine?.agents.some((a) => a.agent === "dsh")
-      ? [{ icon: <RefreshCw size={15} />, label: t("menu.syncDsh"), run: () => {
-          toast(t("toast.syncing"));
-          void api.dshSync(machine.id).then(() => toast(t("toast.synced", { m: machine.name })), (e: unknown) => toast(t("err.sync"), { error: true, description: errText(e) }));
-        } }]
       : []),
   ];
   const menu = items.length > 0 || !!tags;

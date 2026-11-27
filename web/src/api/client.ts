@@ -3,8 +3,11 @@
 import { QueryClient } from "@tanstack/react-query";
 import { blockOf, type SatoriMessage } from "../satori";
 import type {
+  ComputerAgentConfig,
+  ComputerAgentState,
   DshWorkspace,
   DirListing,
+  ExternalSession,
   AgentInfo,
   AllowRule,
   ApplyUpdate,
@@ -417,7 +420,12 @@ export const api = {
   mkdir: (f: NewFolder) => write<FolderReply>("POST", "/v1/internal/folders", f),
   /** dsh's workspaces at another machine (DSH Desktop's), else its sessions' folders: '/'-separated. */
   dshWorkspaces: (machine: string) => get<DshWorkspace[]>(`/v1/internal/computers/${enc(machine)}/dsh/workspaces`),
-  dshSync: (machine: string) => write<{ ok: boolean }>("POST", `/v1/internal/computers/${enc(machine)}/dsh/sync`),
+  /** Per-computer agent settings (sync new sessions toggle, host manual path fallback). */
+  putAgentConfig: (computer: string, agent: string, p: ComputerAgentConfig) => write<ComputerAgentState>("PUT", `/v1/internal/computers/${enc(computer)}/${enc(agent)}/config`, p),
+  /** On-demand search of unsynced sessions held by external host apps (DSH Desktop). */
+  searchExternal: (q: string, limit = 30, signal?: AbortSignal) => get<ExternalSession[]>(`/v1/internal/external/sessions?${new URLSearchParams({ q, limit: String(limit) })}`, { signal }),
+  /** Adopt an unsynced external session into Iridium's list. */
+  adoptExternal: (s: ExternalSession) => write<{ id: string; ok: boolean }>("POST", "/v1/internal/external/adopt", s),
   /** A session renamed, archived, pinned, tagged, put, moved or taken out from under its launcher: Satori's channel.update. */
   patch: (id: string, p: SessionPatch) => sat<object>("channel.update", channelPatch(id, p), true),
 

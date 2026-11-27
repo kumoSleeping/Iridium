@@ -88,7 +88,10 @@ func (c *Channel) ProvidedHere() bool {
 		return true
 	}
 	if c.o.StateDir != "" {
-		if _, ok := DiscoverDesktop(DesktopDiscoverOptions{StateDir: c.o.StateDir}); ok {
+		if _, ok := DiscoverDesktop(DesktopDiscoverOptions{
+			StateDir:   c.o.StateDir,
+			ManualPath: LoadManualDesktopPath(c.o.StateDir),
+		}); ok {
 			return true
 		}
 	}

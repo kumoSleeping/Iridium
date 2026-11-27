@@ -378,10 +378,41 @@ type PairLogin struct {
 }
 
 // ExecAgent is an agent an executor has. Off: turned off at that app (Computer's only).
+// Sync: non-nil when the agent supports "sync new sessions" on that computer.
+// PathNeeded/Path: manual install path fallback on the host computer when the host app
+// is neither connected nor auto-discovered.
 type ExecAgent struct {
-	Agent   string `json:"agent"`
-	Version string `json:"version,omitempty"`
-	Off     bool   `json:"off,omitempty"`
+	Agent      string `json:"agent"`
+	Version    string `json:"version,omitempty"`
+	Off        bool   `json:"off,omitempty"`
+	Sync       *bool  `json:"sync,omitempty"`
+	PathNeeded bool   `json:"pathNeeded,omitempty"`
+	Path       string `json:"path,omitempty"`
+}
+
+// ComputerAgentConfig is PUT /v1/internal/computers/{id}/{agent}/config.
+type ComputerAgentConfig struct {
+	Sync *bool   `json:"sync,omitempty"`
+	Path *string `json:"path,omitempty"`
+}
+
+// ComputerAgentState answers PUT /v1/internal/computers/{id}/{agent}/config.
+type ComputerAgentState struct {
+	Sync       *bool  `json:"sync,omitempty"`
+	PathNeeded bool   `json:"pathNeeded,omitempty"`
+	Path       string `json:"path,omitempty"`
+}
+
+// ExternalSession is an unsynced session found on demand in an external host app
+// (GET /v1/internal/external/sessions) and passed to POST /v1/internal/external/adopt.
+type ExternalSession struct {
+	ID        string `json:"id"`
+	Agent     Agent  `json:"agent"`
+	Machine   string `json:"machine,omitempty"` // "" = host
+	Cwd       string `json:"cwd,omitempty"`
+	Title     string `json:"title,omitempty"`
+	UpdatedAt int64  `json:"updatedAt,omitempty"`
+	Archived  bool   `json:"archived,omitempty"`
 }
 
 // DshWorkspace is a folder a new dsh session at a machine may open in (GET

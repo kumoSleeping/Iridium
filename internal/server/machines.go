@@ -182,6 +182,11 @@ func (s *Server) computers() map[string]*api.Computer {
 		off, _ := s.st.AgentsOff(r.Terminal)
 		for i := range m.Agents {
 			m.Agents[i].Off = slices.Contains(off, m.Agents[i].Agent)
+			if s.m != nil {
+				if st, ok := s.m.AgentComputerState(api.Agent(m.Agents[i].Agent), r.Terminal); ok {
+					m.Agents[i].Sync = st.Sync
+				}
+			}
 		}
 		if m.Agents == nil {
 			m.Agents = []api.ExecAgent{}
@@ -221,11 +226,23 @@ func (s *Server) hostComputer() *api.Computer {
 	}
 	for _, a := range agents.Describe() {
 		if !s.m.Missing(a.Agent) {
-			m.Agents = append(m.Agents, api.ExecAgent{Agent: string(a.Agent)})
+			ea := api.ExecAgent{Agent: string(a.Agent)}
+			if st, ok := s.m.AgentComputerState(a.Agent, ""); ok {
+				ea.Sync = st.Sync
+				ea.PathNeeded = st.PathNeeded
+				ea.Path = st.Path
+				if st.Version != "" {
+					ea.Version = st.Version
+				}
+			}
+			m.Agents = append(m.Agents, ea)
 		}
 	}
 	return m
 }
+
+// TerminalsChanged notifies connected web clients that computer/app state changed.
+func (s *Server) TerminalsChanged() { s.terminalsChanged() }
 
 // computerOf is app id's computer; nil if it has none.
 func (s *Server) computerOf(id string) *api.Computer { return s.computers()[id] }
@@ -283,6 +300,9 @@ func (s *Server) machineRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/internal/computers/{id}/grant", s.approver(s.postGrant))
 	mux.HandleFunc("GET /v1/internal/computers/{id}/{agent}/workspaces", s.agentWorkspaces)
 	mux.HandleFunc("POST /v1/internal/computers/{id}/{agent}/sync", s.agentSync)
+	mux.HandleFunc("PUT /v1/internal/computers/{id}/{agent}/config", s.approver(s.putAgentConfig))
+	mux.HandleFunc("GET /v1/internal/external/sessions", s.panelOnly(s.searchExternal))
+	mux.HandleFunc("POST /v1/internal/external/adopt", s.panelOnly(s.adoptExternal))
 	// The routes' names before 0.2.60 (machines/{id}/…), answered as computers/{id}/… still.
 	mux.Handle("/v1/internal/machines/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r2 := r.Clone(r.Context())

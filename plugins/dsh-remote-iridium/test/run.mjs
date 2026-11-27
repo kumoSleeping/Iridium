@@ -45,7 +45,11 @@ if (dir) {
   const ctx = fakeDsh(dir)
   attach = createAttach({ send: (p) => ex?.notify('session.attach', p) ?? false })
   plugin(dir, attach.service)
-  desktop = createDesktop(ctx, (e, p) => ex?.notify(e, p), { sync: () => read(dir, 'sync.json', false) === true, gather: 0 })
+  desktop = createDesktop(ctx, (e, p) => ex?.notify(e, p), {
+    sync: () => read(dir, 'sync.json', false) === true,
+    setSync: (on) => fs.writeFileSync(path.join(dir, 'sync.json'), JSON.stringify(!!on)),
+    gather: 0,
+  })
   methods = { ...dshMethods(ctx), ...desktop.methods }
 }
 ex = new Executor({

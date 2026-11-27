@@ -406,9 +406,12 @@ func (x *Index) ToldSessions(ctx context.Context, machine string, p DesktopSessi
 	x.told(ctx, machine, p, false)
 }
 
-// Adopt takes in a session of machine's picked in a search: told of, and shown whatever the
-// switch says. An error if its transcript is not found there.
+// Adopt takes in a session of machine's ("": this computer's) picked in a search: told of, and
+// shown whatever the switch says. An error if its transcript is not found there.
 func (x *Index) Adopt(ctx context.Context, machine string, s DesktopSession) error {
+	if machine == "" {
+		return x.adoptLocal(s.ID)
+	}
 	if x.hub == nil {
 		return fmt.Errorf("no machine %q", machine)
 	}

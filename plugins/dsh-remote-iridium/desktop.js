@@ -169,6 +169,15 @@ export function createDesktop(ctx, emit, o = {}) {
       sessions.sort((a, b) => (b.last ?? 0) - (a.last ?? 0))
       return { sessions }
     },
+    'desktop.config.set': async (p) => {
+      if (typeof p?.syncNewSessions === 'boolean') {
+        if (!o.setSync) throw new RemoteError('unsupported', 'syncNewSessions cannot be changed here')
+        await o.setSync(p.syncNewSessions)
+      }
+      const c = config()
+      emit('desktop.config', c)
+      return c
+    },
     'desktop.freeze': async () => {
       if (!o.freeze) throw new RemoteError('unsupported', 'not a windowless dsh of the Iridium\'s')
       return o.freeze()

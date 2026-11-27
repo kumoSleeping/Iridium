@@ -30,6 +30,11 @@ type Options struct {
 	// EnsureHeadless, when set, overrides Headless.Ensure for tests.
 	EnsureHeadless func(ctx context.Context) (string, bool)
 
+	// Discovery hooks for per-computer "sync new sessions" and on-demand session adopt.
+	GetSync func(machine string) bool
+	SetSync func(machine string, on bool)
+	Adopt   func(ctx context.Context, machine string, s DesktopSession) error
+
 	// Optional event hooks (called off the WS reader goroutine).
 	OnWorkspaces func(machine string, params json.RawMessage)
 	OnSessions   func(machine string, params json.RawMessage)
@@ -60,13 +65,15 @@ type Channel struct {
 }
 
 var (
-	_ harness.Stater    = (*Channel)(nil)
-	_ harness.Launcher  = (*Channel)(nil)
-	_ harness.LocalHost = (*Channel)(nil)
-	_ harness.Provider  = (*Channel)(nil)
-	_ harness.Models    = (*Channel)(nil)
-	_ harness.Presets   = (*Channel)(nil)
-	_ harness.Syncer    = (*Channel)(nil)
+	_ harness.Stater          = (*Channel)(nil)
+	_ harness.Launcher        = (*Channel)(nil)
+	_ harness.LocalHost       = (*Channel)(nil)
+	_ harness.Provider        = (*Channel)(nil)
+	_ harness.Models          = (*Channel)(nil)
+	_ harness.Presets         = (*Channel)(nil)
+	_ harness.Syncer          = (*Channel)(nil)
+	_ harness.ComputerStater  = (*Channel)(nil)
+	_ harness.SessionSearcher = (*Channel)(nil)
 )
 
 // New is dsh's channel; it registers event handlers on o.Remote for DSH Desktop updates.
@@ -81,7 +88,10 @@ func New(o Options) *Channel {
 	} else if o.StateDir != "" && o.Remote != nil {
 		c.headless = NewHeadless(HeadlessOptions{
 			Find: func() (string, bool) {
-				inst, ok := DiscoverDesktop(DesktopDiscoverOptions{StateDir: o.StateDir})
+				inst, ok := DiscoverDesktop(DesktopDiscoverOptions{
+					StateDir:   o.StateDir,
+					ManualPath: LoadManualDesktopPath(o.StateDir),
+				})
 				return inst.Exe, ok
 			},
 			Home: transcript.DshHome(os.Environ()),

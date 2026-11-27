@@ -1,6 +1,7 @@
 package discover
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -71,5 +72,13 @@ func TestDshDesktopSync(t *testing.T) {
 	r.x.Scan()
 	if !r.shown(api.AgentDsh, "desk") || r.shown(api.AgentDsh, "desk2") {
 		t.Errorf("on: desk shown %v, desk2 (not touched since) shown %v", r.shown(api.AgentDsh, "desk"), r.shown(api.AgentDsh, "desk2"))
+	}
+	// Adopting an unsynced local Desktop session shows it immediately, even when sync is turned off.
+	r.x.SetSync("", false)
+	if err := r.x.Adopt(context.Background(), "", DesktopSession{ID: "desk2"}); err != nil {
+		t.Fatalf("local Adopt: %v", err)
+	}
+	if !r.shown(api.AgentDsh, "desk2") {
+		t.Fatal("desk2 should be shown after local Adopt")
 	}
 }

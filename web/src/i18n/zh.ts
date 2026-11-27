@@ -74,7 +74,6 @@ export const zh = {
 
   "menu.rename": "改名",
   "menu.split": "按子文件夹拆开",
-  "menu.syncDsh": "同步 DSH",
   "game.open": "Game",
   "game.quit": "退出游戏",
   "menu.home": "回到主页",
@@ -592,8 +591,6 @@ export const zh = {
   "toast.stopped": "已停掉",
   "toast.archived": "已归档",
   "toast.split": "已拆开 {ws}",
-  "toast.syncing": "同步中",
-  "toast.synced": "已同步 {m} 的 DSH",
   "toast.restored": "已恢复",
 
   "err.unavailable": "服务暂不可用，请稍后重试",
@@ -605,7 +602,6 @@ export const zh = {
   "err.stop": "停止失败",
   "err.answer": "提交回答失败",
   "err.action": "操作失败",
-  "err.sync": "同步失败",
   "err.rename": "重命名失败",
   "err.mode": "切换审批模式失败",
   "err.model": "切换模型失败",
@@ -653,6 +649,10 @@ export const zh = {
   "jump.placeholder": "会话名、目录或说过的话",
   "jump.none": "没有对上的会话",
   "jump.you": "你：",
+  "jump.unsynced": "未同步的会话",
+  "jump.adopt": "拉入",
+  "jump.adopting": "拉入中",
+  "err.adopt": "拉入失败",
 
   "me.local": "Iridium",
   "me.localHint": "只在 Iridium 这台用，没开 Passkey",
@@ -1034,6 +1034,12 @@ export const zh = {
   "channel.bringBack": "恢复",
   "manage.link": "链接",
   "manage.linkHidden": "已隐藏",
+  "manage.syncNew": "同步新会话",
+  "manage.desktopPath": "Desktop 路径",
+  "manage.desktopPathPlaceholder": "DeepSeek Harness 安装目录",
+  "manage.save": "保存",
+  "manage.saved": "已保存",
+  "err.config": "保存失败",
 } as const;
 
 export type Key = keyof typeof zh;

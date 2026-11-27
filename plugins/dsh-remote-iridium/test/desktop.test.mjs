@@ -42,7 +42,8 @@ test('workspaces, and the sessions open told of as dsh says they change', async 
   const f = fake()
   assert.deepEqual(workspacesOf(f.ctx), { workspaces: [{ id: 'w1', title: 'proj', path: '/p', sessions: ['s1'], updatedAt: Date.parse('2026-11-27T00:00:00.000Z') }], archived: ['s9'] })
   const sent = []
-  const d = createDesktop(f.ctx, (e, p) => sent.push([e, p]), { sync: () => true, gather: 0 })
+  let sync = true
+  const d = createDesktop(f.ctx, (e, p) => sent.push([e, p]), { sync: () => sync, setSync: (v) => (sync = !!v), gather: 0 })
   f.agent('s1', 'running')
   f.agent('sub', 'idle', { origin: 'subagent', parentSession: 's1' })
   f.fire('agent/status', {})
@@ -63,6 +64,9 @@ test('workspaces, and the sessions open told of as dsh says they change', async 
   // On demand: a search, or all.
   assert.deepEqual((await d.methods['desktop.sessions']({ query: 'old' })).sessions, [{ id: 'old', cwd: '/o', last: 1, updatedAt: 1 }])
   assert.equal((await d.methods['desktop.sessions']({})).sessions[0].title, 'Old one')
+  assert.deepEqual(await d.methods['desktop.config.set']({ syncNewSessions: false }), { syncNewSessions: false })
+  assert.equal(sync, false)
+  assert.deepEqual(sent.at(-1), ['desktop.config', { syncNewSessions: false }])
   await assert.rejects(d.methods['desktop.freeze'](), /not a windowless/)
 })
 

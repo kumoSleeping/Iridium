@@ -2,8 +2,10 @@ package discover
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/kumoSleeping/iridium/internal/api"
@@ -20,8 +22,9 @@ import (
 
 // syncState is this computer's "sync new sessions", kept in the state directory.
 type syncState struct {
-	On bool  `json:"on"`
-	At int64 `json:"at,omitempty"` // ms, when it was set on
+	On      bool     `json:"on"`
+	At      int64    `json:"at,omitempty"` // ms, when it was set on
+	Adopted []string `json:"adopted,omitempty"`
 }
 
 // freshFor: a session's file younger than this may not be filed yet (Desktop writes its registry
@@ -30,32 +33,19 @@ const freshFor = 3 * time.Second
 
 func (x *Index) syncPath() string { return filepath.Join(x.o.State, "dsh-desktop-sync.json") }
 
-// localSync is this computer's switch, and since when it is on.
-func (x *Index) localSync() (on bool, at int64) {
-	x.syncMu.Lock()
-	defer x.syncMu.Unlock()
-	if x.sync == nil {
-		x.sync = &syncState{}
-		if x.o.State != "" {
-			if b, err := os.ReadFile(x.syncPath()); err == nil {
-				_ = json.Unmarshal(b, x.sync)
-			}
-		}
-	}
-	return x.sync.On, x.sync.At
-}
-
-func (x *Index) setLocalSync(on bool) {
-	if was, _ := x.localSync(); was == on {
+func (x *Index) loadSyncLocked() {
+	if x.sync != nil {
 		return
 	}
-	x.syncMu.Lock()
-	x.sync = &syncState{On: on}
-	if on {
-		x.sync.At = time.Now().UnixMilli()
+	x.sync = &syncState{}
+	if x.o.State != "" {
+		if b, err := os.ReadFile(x.syncPath()); err == nil {
+			_ = json.Unmarshal(b, x.sync)
+		}
 	}
-	b, _ := json.Marshal(x.sync)
-	x.syncMu.Unlock()
+}
+
+func (x *Index) saveSync(b []byte) {
 	if x.o.State == "" {
 		return
 	}
@@ -67,6 +57,75 @@ func (x *Index) setLocalSync(on bool) {
 	if err != nil {
 		x.o.Logf("discover: keeping the sync switch: %v", err)
 	}
+}
+
+// localSync is this computer's switch, and since when it is on.
+func (x *Index) localSync() (on bool, at int64) {
+	x.syncMu.Lock()
+	defer x.syncMu.Unlock()
+	x.loadSyncLocked()
+	return x.sync.On, x.sync.At
+}
+
+func (x *Index) localAdopted(id string) bool {
+	x.syncMu.Lock()
+	defer x.syncMu.Unlock()
+	x.loadSyncLocked()
+	return slices.Contains(x.sync.Adopted, id)
+}
+
+func (x *Index) setLocalSync(on bool) {
+	x.syncMu.Lock()
+	x.loadSyncLocked()
+	if x.sync.On == on {
+		x.syncMu.Unlock()
+		return
+	}
+	x.sync.On = on
+	x.sync.At = 0
+	if on {
+		x.sync.At = time.Now().UnixMilli()
+	}
+	b, _ := json.Marshal(x.sync)
+	x.syncMu.Unlock()
+	x.saveSync(b)
+}
+
+// adoptLocal shows a local DSH Desktop session picked in search, whatever the sync switch says.
+func (x *Index) adoptLocal(id string) error {
+	if !validID(id) {
+		return fmt.Errorf("%w: invalid session %q", os.ErrNotExist, id)
+	}
+	x.mu.Lock()
+	e := x.entries[id]
+	x.mu.Unlock()
+	if e == nil {
+		x.scanDisk()
+		x.mu.Lock()
+		e = x.entries[id]
+		x.mu.Unlock()
+	}
+	if e == nil {
+		return fmt.Errorf("%w: session %s", os.ErrNotExist, id)
+	}
+	x.syncMu.Lock()
+	x.loadSyncLocked()
+	var b []byte
+	if !slices.Contains(x.sync.Adopted, id) {
+		x.sync.Adopted = append(x.sync.Adopted, id)
+		b, _ = json.Marshal(x.sync)
+	}
+	x.syncMu.Unlock()
+	if len(b) > 0 {
+		x.saveSync(b)
+	}
+	if x.o.Store != nil {
+		if _, err := x.o.Store.Show(string(e.agent), id); err != nil {
+			x.o.Logf("discover: showing adopted %s: %v", id, err)
+		}
+	}
+	x.Changed(id)
+	return nil
 }
 
 // localRegistry is this computer's workspace registry as last read: the sessions it files.
@@ -111,6 +170,9 @@ func (x *Index) desktopFiled(id string) bool {
 // f was not seen before; with the switch off, a file that young is not judged yet.
 func (x *Index) desktopKept(f onDisk, g glimpse, mtime time.Time, first bool) bool {
 	if f.agent != api.AgentDsh || x.o.DshHome == "" {
+		return false
+	}
+	if x.localAdopted(f.id) || (g.sub && g.parent != "" && x.localAdopted(g.parent)) {
 		return false
 	}
 	on, at := x.localSync()

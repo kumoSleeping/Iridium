@@ -544,7 +544,7 @@ export function App() {
               <Pager
                 // The tabs' bar is px-3, the list's rows end 4px further right: its "+" in line with
                 // theirs (the user, 2026-11-08).
-                ends={[<span key="s" className="-mr-1 flex"><HeadKeys filesKey={filesKey} /></span>]}
+                ends={[<span key="s" className="-mr-1 flex"><HeadKeys filesKey={filesKey} searching={jumping} onSearch={() => setJumping((j) => !j)} panelsCode={loadPanels} /></span>]}
                 page={0}
                 still={turnStill}
                 onPage={toPage}

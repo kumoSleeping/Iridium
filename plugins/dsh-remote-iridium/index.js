@@ -222,8 +222,22 @@ export function apply(ctx, config) {
   // What the dsh tells of: models, presets, workspaces, sessions; the hand-over of a windowless one.
   const headless = process.env.IRIDIUM_DESKTOP_HEADLESS === '1'
   const freeze = headless ? createFreeze(ctx, { refuse: inproc.refuse, log: say }) : null
+  let syncOverride = null
+  const syncNow = () => (syncOverride !== null ? syncOverride : volatile(config?.syncNewSessions) === true)
+  const setSync = async (on) => {
+    syncOverride = !!on
+    const settings = ctx.get('settings')
+    if (settings?.update) {
+      try {
+        await settings.update(ENTRY, { syncNewSessions: !!on })
+      } catch (e) {
+        say(`syncNewSessions: ${e?.message ?? e}`)
+      }
+    }
+  }
   const desktop = createDesktop(ctx, broadcast, {
-    sync: () => volatile(config?.syncNewSessions) === true,
+    sync: syncNow,
+    setSync,
     freeze,
     config: () => ({ exe: process.execPath, ...(process.argv[1] ? { hostEntry: process.argv[1] } : {}), ...(dsh?.scope ? { scope: dsh.scope } : {}) }),
   })
@@ -258,7 +272,10 @@ export function apply(ctx, config) {
       program: `dsh-remote-iridium ${version()}`, ir: fileURLToPath(new URL('./ir.js', import.meta.url)), log: (m) => say(m),
       ...o,
     })
-  ctx.on('loader/volatile-update', () => desktop.tellConfig())
+  ctx.on('loader/volatile-update', () => {
+    syncOverride = null
+    desktop.tellConfig()
+  })
 
   /** The Iridium on this computer, while its setting says so: connected whenever one runs. */
   function startLocal() {

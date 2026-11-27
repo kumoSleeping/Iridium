@@ -141,6 +141,16 @@ func desktopFreeze(ctx context.Context, mc *remote.Machine) (DesktopFreezeReply,
 	return r, err
 }
 
+type desktopConfigSetParams struct {
+	SyncNewSessions *bool `json:"syncNewSessions,omitempty"`
+}
+
+func desktopConfigSet(ctx context.Context, mc *remote.Machine, p desktopConfigSetParams) (DesktopConfigEvent, error) {
+	var r DesktopConfigEvent
+	err := mc.Call(ctx, "desktop.config.set", p, &r)
+	return r, err
+}
+
 func hostPresets(ctx context.Context, mc *remote.Machine) (wire.PresetsReply, error) {
 	var r wire.PresetsReply
 	err := mc.Call(ctx, "agent.presets", wire.PresetsParams{Agent: string(api.AgentDsh)}, &r)

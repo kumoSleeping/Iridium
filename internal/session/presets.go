@@ -1,6 +1,7 @@
 package session
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"slices"
@@ -103,4 +104,57 @@ func (m *Manager) Sync(ctx context.Context, a api.Agent, machine string) error {
 		return fmt.Errorf("%w: %s has nothing to sync", ErrBadRequest, a)
 	}
 	return s.Sync(ctx, machine)
+}
+
+// AgentComputerState returns per-computer state reported by agent a's channel (harness.ComputerStater).
+func (m *Manager) AgentComputerState(a api.Agent, machine string) (harness.ComputerState, bool) {
+	cs, ok := channelOf[harness.ComputerStater](m, a)
+	if !ok {
+		return harness.ComputerState{}, false
+	}
+	return cs.ComputerState(machine), true
+}
+
+// SetAgentComputerConfig updates per-computer configuration via agent a's channel (harness.ComputerStater).
+func (m *Manager) SetAgentComputerConfig(ctx context.Context, a api.Agent, machine string, cfg harness.ComputerConfig) (harness.ComputerState, error) {
+	cs, ok := channelOf[harness.ComputerStater](m, a)
+	if !ok {
+		return harness.ComputerState{}, fmt.Errorf("%w: %s has no computer settings", ErrBadRequest, a)
+	}
+	return cs.SetComputerConfig(ctx, machine, cfg)
+}
+
+// SearchExternal queries all channels that support on-demand external session search.
+func (m *Manager) SearchExternal(ctx context.Context, query string, limit int) ([]api.ExternalSession, error) {
+	var all []api.ExternalSession
+	for _, ch := range m.o.Channels {
+		ss, ok := ch.(harness.SessionSearcher)
+		if !ok {
+			continue
+		}
+		got, err := ss.SearchExternal(ctx, query, limit)
+		if err != nil {
+			continue
+		}
+		all = append(all, got...)
+	}
+	slices.SortFunc(all, func(a, b api.ExternalSession) int {
+		if d := cmp.Compare(b.UpdatedAt, a.UpdatedAt); d != 0 {
+			return d
+		}
+		return cmp.Compare(a.ID, b.ID)
+	})
+	if limit > 0 && len(all) > limit {
+		all = all[:limit]
+	}
+	return all, nil
+}
+
+// AdoptExternal adopts an unsynced external session via its agent's channel.
+func (m *Manager) AdoptExternal(ctx context.Context, s api.ExternalSession) error {
+	ss, ok := channelOf[harness.SessionSearcher](m, s.Agent)
+	if !ok {
+		return fmt.Errorf("%w: %s cannot adopt external sessions", ErrBadRequest, s.Agent)
+	}
+	return ss.AdoptExternal(ctx, s)
 }

@@ -2,12 +2,17 @@ package server
 
 import (
 	"context"
+	"errors"
 	"net/http"
+	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/kumoSleeping/iridium/internal/agents"
 	"github.com/kumoSleeping/iridium/internal/api"
+	"github.com/kumoSleeping/iridium/internal/harness"
 	"github.com/kumoSleeping/iridium/internal/remote"
 	"github.com/kumoSleeping/iridium/internal/remote/wire"
 )
@@ -190,6 +195,95 @@ func (s *Server) agentSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reply(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// putAgentConfig is PUT /v1/internal/computers/{id}/{agent}/config: updates per-computer agent
+// configuration (e.g. "sync new sessions" toggle or host manual app path fallback).
+func (s *Server) putAgentConfig(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	machine := id
+	if id == api.HostID {
+		machine = ""
+	} else {
+		if info, ok := s.gate().Find(id); !ok || s.computerOf(info.ID) == nil {
+			refuse(w, http.StatusUnprocessableEntity, "no_such_computer", "no such computer")
+			return
+		} else {
+			machine = info.ID
+		}
+	}
+	ag := api.Agent(r.PathValue("agent"))
+	if _, ok := agents.Get(ag); !ok {
+		refuse(w, http.StatusUnprocessableEntity, "no_such_agent", "no agent "+string(ag))
+		return
+	}
+	var req api.ComputerAgentConfig
+	if !readJSON(w, r, &req) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	st, err := s.m.SetAgentComputerConfig(ctx, ag, machine, harness.ComputerConfig{Sync: req.Sync, Path: req.Path})
+	if err != nil {
+		if errors.Is(err, harness.ErrBadRequest) {
+			fail(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		s.error(w, err)
+		return
+	}
+	s.terminalsChanged()
+	reply(w, http.StatusOK, api.ComputerAgentState{Sync: st.Sync, PathNeeded: st.PathNeeded, Path: st.Path})
+}
+
+// searchExternal is GET /v1/internal/external/sessions?q&limit: searches unsynced sessions in
+// external host apps on demand.
+func (s *Server) searchExternal(w http.ResponseWriter, r *http.Request) {
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	limit := 30
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 && n <= 100 {
+			limit = n
+		}
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	items, err := s.m.SearchExternal(ctx, q, limit)
+	if err != nil {
+		s.error(w, err)
+		return
+	}
+	if items == nil {
+		items = []api.ExternalSession{}
+	}
+	reply(w, http.StatusOK, items)
+}
+
+// adoptExternal is POST /v1/internal/external/adopt: brings an unsynced external session picked in
+// search into Iridium's session list.
+func (s *Server) adoptExternal(w http.ResponseWriter, r *http.Request) {
+	var req api.ExternalSession
+	if !readJSON(w, r, &req) {
+		return
+	}
+	if req.ID == "" || req.Agent == "" {
+		fail(w, http.StatusBadRequest, "id and agent required")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	if err := s.m.AdoptExternal(ctx, req); err != nil {
+		switch {
+		case errors.Is(err, harness.ErrBadRequest):
+			fail(w, http.StatusBadRequest, err.Error())
+		case errors.Is(err, os.ErrNotExist):
+			refuse(w, http.StatusUnprocessableEntity, "no_such_session", err.Error())
+		default:
+			s.remoteError(w, err)
+		}
+		return
+	}
+	reply(w, http.StatusOK, map[string]any{"id": req.ID, "ok": true})
 }
 
 func (s *Server) remoteError(w http.ResponseWriter, err error) {

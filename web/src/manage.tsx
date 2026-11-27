@@ -11,7 +11,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, FolderOpen, Link2, Monitor, PencilLine, Plus, X, Trash2 } from "lucide-react";
 import { useLayoutEffect, useState, type ReactNode } from "react";
 import { api } from "./api/client";
-import type { Agent, App, Computer, Login, Need, Perms, PendingInvite, Role } from "./api/types.gen";
+import type { Agent, App, Computer, ExecAgent, Login, Need, Perms, PendingInvite, Role } from "./api/types.gen";
 import { AddComputer, clock, nameError, ofWeb, OpenFolder, PasskeyList, passkeysQ, Rename, usePasskeys, revoke, setOwner, systems, useFacePick, useGrant } from "./apps";
 import { MainKey, SecondKey } from "./card";
 import { ConfirmCard, ConfirmIcon, confirmName, confirmTitle } from "./confirms";
@@ -989,6 +989,7 @@ const idleName = (v: string) => (v === "0" ? t("manage.off") : v === "30m" ? t("
 
 function AgentDetail({ a, computers }: { a: Agent; computers: App[] }) {
   const [role, setRole] = useState("");
+  const [comp, setComp] = useState("");
   const roles = useRoles().filter((r) => r.agent === a);
   const me = useMe().data;
   const info = useAgents().data?.find((x) => x.agent === a);
@@ -1026,16 +1027,36 @@ function AgentDetail({ a, computers }: { a: Agent; computers: App[] }) {
         <Block title={t("manage.computers")}>
           {there.map((c) => {
             const x = c.computer!.agents.find((y) => y.agent === a)!;
+            const foldable = x.sync !== undefined || !!x.pathNeeded;
+            const line = (
+              <>
+                {!c.host && <Seen online={c.online} at={Math.max(c.computer?.seenAt ?? 0, c.lastSeenAt ?? 0)} />}
+                {x.version && <span>{x.version}</span>}
+                <span>{osName(c.computer)}</span>
+                <span className={cn("w-4 shrink-0 text-right", x.off ? "text-ink-4" : "text-ink-2")}>{x.off ? t("manage.off") : t("manage.on")}</span>
+              </>
+            );
+            if (!foldable) {
+              return (
+                <div key={c.id} className="flex min-h-11 items-center gap-3">
+                  <ComputerFace a={c} size={24} />
+                  <span className={cn("min-w-0 flex-1 truncate text-sm", !c.host && !c.online && "text-ink-3")}>{c.host ? "Iridium" : c.name}</span>
+                  <span className="flex shrink-0 items-center gap-1.5 text-xs text-ink-3 tabular-nums">{line}</span>
+                </div>
+              );
+            }
             return (
-              <div key={c.id} className="flex min-h-11 items-center gap-3">
-                <ComputerFace a={c} size={24} />
-                <span className={cn("min-w-0 flex-1 truncate text-sm", !c.host && !c.online && "text-ink-3")}>{c.host ? "Iridium" : c.name}</span>
-                <span className="flex shrink-0 items-center gap-1.5 text-xs text-ink-3 tabular-nums">
-                  {!c.host && <Seen online={c.online} at={Math.max(c.computer?.seenAt ?? 0, c.lastSeenAt ?? 0)} />}
-                  {x.version && <span>{x.version}</span>}
-                  <span>{osName(c.computer)}</span>
-                </span>
-                <span className={cn("w-4 shrink-0 text-right text-xs", x.off ? "text-ink-4" : "text-ink-2")}>{x.off ? t("manage.off") : t("manage.on")}</span>
+              <div key={c.id} className="flex flex-col">
+                <FoldRow
+                  face={<ComputerFace a={c} size={24} />}
+                  name={<span className={cn(!c.host && !c.online && "text-ink-3")}>{c.host ? "Iridium" : c.name}</span>}
+                  line={line}
+                  open={comp === c.id}
+                  onClick={() => setComp(comp === c.id ? "" : c.id)}
+                />
+                <Unfold open={comp === c.id}>
+                  <AgentComputerFold computer={c} agent={a} info={x} />
+                </Unfold>
               </div>
             );
           })}
@@ -1057,6 +1078,99 @@ function AgentDetail({ a, computers }: { a: Agent; computers: App[] }) {
           </Unfold>
         </div>
       </Block>
+    </div>
+  );
+}
+
+/** Per-computer agent settings unfolded under a computer row in AgentDetail: "sync new sessions"
+ *  toggle (bidirectional with the host app) and, only when the local host app is neither connected
+ *  nor auto-discovered, the manual install path fallback. */
+function AgentComputerFold({ computer, agent, info }: { computer: App; agent: Agent; info: ExecAgent }) {
+  const qc = useQueryClient();
+  const [syncOn, setSyncOn] = useState(!!info.sync);
+  const [savingSync, setSavingSync] = useState(false);
+  const [pathVal, setPathVal] = useState(info.path ?? "");
+  const [savingPath, setSavingPath] = useState(false);
+
+  // Follow live updates from the host app (e.g. toggled on Desktop).
+  const [seenSync, setSeenSync] = useState(info.sync);
+  if (info.sync !== seenSync) {
+    setSeenSync(info.sync);
+    setSyncOn(!!info.sync);
+  }
+  const [seenPath, setSeenPath] = useState(info.path);
+  if (info.path !== seenPath) {
+    setSeenPath(info.path);
+    setPathVal(info.path ?? "");
+  }
+
+  const toggleSync = async (next: boolean) => {
+    setSyncOn(next);
+    setSavingSync(true);
+    try {
+      const got = await api.putAgentConfig(computer.id, agent, { sync: next });
+      if (got.sync !== undefined) setSyncOn(got.sync);
+      void qc.invalidateQueries({ queryKey: ["apps"] });
+    } catch (e) {
+      setSyncOn(!next);
+      toast(t("err.config"), { error: true, description: errText(e) });
+    } finally {
+      setSavingSync(false);
+    }
+  };
+
+  const dirty = pathVal.trim() !== (info.path ?? "").trim();
+  const savePath = async () => {
+    if (!dirty || savingPath) return;
+    setSavingPath(true);
+    try {
+      const got = await api.putAgentConfig(computer.id, agent, { path: pathVal.trim() });
+      setPathVal(got.path ?? "");
+      void qc.invalidateQueries({ queryKey: ["apps"] });
+      toast(t("manage.saved"));
+    } catch (e) {
+      toast(t("err.config"), { error: true, description: errText(e) });
+    } finally {
+      setSavingPath(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col pl-9 pr-1">
+      {info.sync !== undefined && (
+        <Field label={t("manage.syncNew")}>
+          <Switch on={syncOn} disabled={savingSync} onChange={(v) => void toggleSync(v)} label={t("manage.syncNew")} />
+        </Field>
+      )}
+      {info.pathNeeded && (
+        <div className="flex flex-col gap-1.5 py-2 sm:flex-row sm:items-center sm:gap-3">
+          <label htmlFor={`path-${computer.id}-${agent}`} className="shrink-0 text-sm whitespace-nowrap">
+            {t("manage.desktopPath")}
+          </label>
+          <div className="flex min-w-0 flex-1 items-center gap-1.5 sm:justify-end">
+            <input
+              id={`path-${computer.id}-${agent}`}
+              type="text"
+              value={pathVal}
+              disabled={savingPath}
+              placeholder={t("manage.desktopPathPlaceholder")}
+              onChange={(e) => setPathVal(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && void savePath()}
+              className="h-8 min-w-0 flex-1 rounded-md bg-fill px-2.5 font-mono text-xs text-ink placeholder:text-ink-3 sm:max-w-[310px]"
+            />
+            {dirty && (
+              <button
+                type="button"
+                disabled={savingPath}
+                onClick={() => void savePath()}
+                className="g-press h-8 shrink-0 rounded-md bg-ink px-2.5 text-xs font-medium text-paper disabled:opacity-50"
+              >
+                {t("manage.save")}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -159,6 +159,33 @@ type Syncer interface {
 	Sync(ctx context.Context, machine string) error
 }
 
+// ComputerState is per-computer configuration state reported by an agent channel (e.g.
+// "sync new sessions" toggle and optional manual host-app path fallback on the host).
+type ComputerState struct {
+	Sync       *bool
+	PathNeeded bool
+	Path       string
+	Version    string
+}
+
+// ComputerConfig updates per-computer configuration for an agent channel.
+type ComputerConfig struct {
+	Sync *bool
+	Path *string
+}
+
+// ComputerStater reports and updates per-computer agent settings (sync switch, manual path).
+type ComputerStater interface {
+	ComputerState(machine string) ComputerState
+	SetComputerConfig(ctx context.Context, machine string, cfg ComputerConfig) (ComputerState, error)
+}
+
+// SessionSearcher searches and adopts unsynced sessions held by external host apps.
+type SessionSearcher interface {
+	SearchExternal(ctx context.Context, query string, limit int) ([]api.ExternalSession, error)
+	AdoptExternal(ctx context.Context, s api.ExternalSession) error
+}
+
 // Set is the channels by agent.
 type Set map[api.Agent]Channel
 

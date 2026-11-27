@@ -147,6 +147,9 @@ GET internal/folders?path&machine - -> Folders  subfolders (home by default)  vi
 POST internal/folders {path, name, machine?} -> {path}  make a folder
 GET internal/computers/{id}/{agent}/workspaces - -> DshWorkspace[]  agent workspaces at that computer  view=title,path,sessions
 POST internal/computers/{id}/{agent}/sync - -> {ok}  re-read the agent at that computer
+PUT internal/computers/{id}/{agent}/config {sync?, path?} -> ComputerAgentState  set per-computer agent settings (sync new sessions, host manual path)
+GET internal/external/sessions?q&limit - -> ExternalSession[]  search unsynced sessions in external host apps on demand
+POST internal/external/adopt {id, agent, machine?, cwd?, title?, updatedAt?, archived?} -> {id, ok}  adopt an unsynced external session into Iridium
 
 # files
 GET internal/web/files?path&machine - -> DirListing  list a directory in the login's scope (allowed root or home by default); person only  view=entries.name,entries.size,entries.type

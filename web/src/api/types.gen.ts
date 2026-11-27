@@ -1191,11 +1191,45 @@ export interface PairLogin {
 }
 /**
  * ExecAgent is an agent an executor has. Off: turned off at that app (Computer's only).
+ * Sync: non-nil when the agent supports "sync new sessions" on that computer.
+ * PathNeeded/Path: manual install path fallback on the host computer when the host app
+ * is neither connected nor auto-discovered.
  */
 export interface ExecAgent {
   agent: string;
   version?: string;
   off?: boolean;
+  sync?: boolean;
+  pathNeeded?: boolean;
+  path?: string;
+}
+/**
+ * ComputerAgentConfig is PUT /v1/internal/computers/{id}/{agent}/config.
+ */
+export interface ComputerAgentConfig {
+  sync?: boolean;
+  path?: string;
+}
+/**
+ * ComputerAgentState answers PUT /v1/internal/computers/{id}/{agent}/config.
+ */
+export interface ComputerAgentState {
+  sync?: boolean;
+  pathNeeded?: boolean;
+  path?: string;
+}
+/**
+ * ExternalSession is an unsynced session found on demand in an external host app
+ * (GET /v1/internal/external/sessions) and passed to POST /v1/internal/external/adopt.
+ */
+export interface ExternalSession {
+  id: string;
+  agent: Agent;
+  machine?: string; // "" = host
+  cwd?: string;
+  title?: string;
+  updatedAt?: number /* int64 */;
+  archived?: boolean;
 }
 /**
  * DshWorkspace is a folder a new dsh session at a machine may open in (GET
