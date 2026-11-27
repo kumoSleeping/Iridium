@@ -2,6 +2,8 @@
 // for and relays them, and serves files under the roots it allows. It follows the reference
 // executor in Go (internal/remote/executor); this file has no dsh in it, index.js has.
 import { spawn, execFile } from 'node:child_process'
+import { PassThrough } from 'node:stream'
+import { INPROC } from './inproc.js'
 import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
@@ -193,6 +195,7 @@ class Holder {
     const err = fs.openSync(path.join(this.dir, ERR), 'a', 0o600)
     if (spec.stopGraceMs > 0) this.grace = spec.stopGraceMs
     const env = startEnv(spec.env, this.ex.env)
+    if (spec.argv[0] === INPROC && this.ex.o.inproc) return this.startHere(spec, env, out, err)
     this.ex.withIR(env, this.dir)
     let child
     try {
@@ -235,6 +238,38 @@ class Holder {
       this.finish(signal ? { from: 'agent', code: null, signal: signal.replace(/^SIG/, '') } : { from: 'agent', code, signal: null })
     })
     return child.pid ?? 0
+  }
+
+  /** A hold served in this process (inproc.js): no child; its streams stand for one's stdio. */
+  startHere(spec, env, out, err) {
+    if (!env.IRIDIUM_URL && env.IRIDIUM_TOKEN) env.IRIDIUM_URL = this.ex.irURL()
+    const close = () => {
+      try {
+        fs.closeSync(out)
+        fs.closeSync(err)
+      } catch {}
+    }
+    const pid = (this.ex.inprocPid = (this.ex.inprocPid ?? 0) + 1)
+    // Lines written before it is up wait in its input; a stop then ends it as it comes up.
+    const input = new PassThrough()
+    let stopped = null
+    this.child = { pid, inproc: true, stdin: input, stop: (hard) => (stopped = hard ? 'hard' : stopped ?? 'soft') }
+    this.ex.o.inproc
+      .start({ hold: this.id, argv: spec.argv, env, input, out, err, exited: (x) => (close(), this.finish(x)) })
+      .then(
+        (c) => {
+          this.child = { ...c, pid, inproc: true, stdin: input }
+          if (stopped) c.stop(stopped === 'hard')
+        },
+        (e) => {
+          try {
+            fs.writeSync(err, `cannot start in this dsh: ${e?.message ?? e}\n`)
+          } catch {}
+          close()
+          this.finish({ from: 'agent', code: CANNOT_START, signal: null })
+        },
+      )
+    return pid
   }
 
   write(seq, line) {
@@ -301,6 +336,7 @@ class Holder {
   stop(hard) {
     const child = this.child
     if (!child || this.exit) return
+    if (child.inproc) return child.stop(hard)
     if (hard) return killTree(child.pid, true)
     try {
       child.stdin.end()
@@ -479,10 +515,7 @@ export class Executor {
    */
   withIR(env, dir) {
     if (!this.o.ir || !env.IRIDIUM_TOKEN) return
-    if (!env.IRIDIUM_URL) {
-      const u = new URL(this.o.url)
-      env.IRIDIUM_URL = `${u.protocol === 'wss:' ? 'https:' : 'http:'}//${u.host}`
-    }
+    if (!env.IRIDIUM_URL) env.IRIDIUM_URL = this.irURL()
     const bin = path.join(dir, 'bin')
     try {
       fs.mkdirSync(bin, { recursive: true, mode: 0o700 })
@@ -500,6 +533,12 @@ export class Executor {
     // Windows names it Path, as often as PATH.
     const key = Object.keys(env).find((k) => k.toUpperCase() === 'PATH') ?? 'PATH'
     env[key] = env[key] ? bin + path.delimiter + env[key] : bin
+  }
+
+  /** The Iridium's address, as this connection reaches it. */
+  irURL() {
+    const u = new URL(this.o.url)
+    return `${u.protocol === 'wss:' ? 'https:' : 'http:'}//${u.host}`
   }
 
   /** How many processes it started still run. */
