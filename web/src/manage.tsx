@@ -28,13 +28,14 @@ import { t, useLang } from "./i18n";
 import { modeName } from "./modes";
 import { Pills } from "./pills";
 import { RoleFace, RoleLine, useRoles } from "./roles";
-import { NewRolePage, placeOf, RolePage } from "./rolespage";
+import { NewRoleFold, placeOf, RoleFold } from "./rolespage";
+import { Field, Unfold } from "./rows";
 import { type ManageTab } from "./route";
 import { SecretHere } from "./secret";
 import { showSecret } from "./secrets";
 import { useConfirms, usePairing } from "./store";
 import { errText, toast } from "./toast";
-import { agentName, ago, Avatar, AvatarKey, cn, FaceChangeOver, IconKey, intoView, IrMark, Logo, ServerFace, SureKey, Switch, Tip } from "./ui";
+import { agentName, ago, Avatar, AvatarKey, cn, FaceChangeOver, IconKey, IrMark, Logo, ServerFace, SureKey, Switch, Tip } from "./ui";
 import { useQuery } from "./api/query";
 
 /** Where a secret made here (an invite's link) shows. */
@@ -296,44 +297,6 @@ function Head({ face, name, figures, keys }: { face: ReactNode; name: ReactNode;
       <span className="min-w-0 flex-1 truncate text-2xl font-semibold">{name}</span>
       {figures && <span className="flex shrink-0 items-center gap-3 text-xs text-ink-3 tabular-nums">{figures}</span>}
       {keys}
-    </div>
-  );
-}
-
-/** A setting's line: its name at the left, its value or control at the right, one line (kumo,
- *  2026-11-27: no column of names beside the values); pressed (onClick), what
- *  is under it unfolds below (kumo, 2026-11-27: nothing inside goes to a page of its own; there is
- *  room), its chevron turned down while open. */
-function Field({ label, children, onClick, open }: { label: ReactNode; children: ReactNode; onClick?: () => void; open?: boolean }) {
-  const body = (
-    <>
-      <span className="shrink-0 text-sm whitespace-nowrap">{label}</span>
-      <span className="flex min-w-0 flex-1 items-center justify-end gap-2 text-sm text-ink-2">{children}</span>
-      {onClick && <ChevronRight size={15} className={cn("shrink-0 text-ink-4 transition-transform duration-(--dur-2) ease-(--ease-out)", open && "rotate-90")} />}
-    </>
-  );
-  return onClick ? (
-    <button type="button" onClick={onClick} aria-expanded={open} className="g-press -mx-2 flex min-h-11 items-center gap-3 rounded-md px-2 text-left hover:bg-wash">
-      {body}
-    </button>
-  ) : (
-    <div className="flex min-h-11 items-center gap-3">{body}</div>
-  );
-}
-
-/** What a line opens, unfolding under it (its height slides; shut, it stays drawn till folded),
- *  scrolled into sight as it opens. */
-function Unfold({ open, children }: { open: boolean; children: ReactNode }) {
-  const [shown, setShown] = useState(open);
-  if (open && !shown) setShown(true);
-  return (
-    <div
-      aria-hidden={!open || undefined}
-      inert={!open || undefined}
-      onTransitionEnd={(e) => e.target === e.currentTarget && (open ? intoView(e.currentTarget) : setShown(false))}
-      className={cn("grid transition-[grid-template-rows,opacity] duration-(--dur-3) ease-(--ease-out)", open ? "grid-rows-[1fr]" : "grid-rows-[0fr] opacity-0")}
-    >
-      <div className="min-h-0 overflow-hidden">{shown && <div className="pb-2">{children}</div>}</div>
     </div>
   );
 }
@@ -1059,18 +1022,14 @@ function AgentDetail({ a, computers }: { a: Agent; computers: App[] }) {
             <div key={r.id} className="flex flex-col">
               <FoldRow face={<RoleFace role={r} size={24} />} name={r.name} line={<RoleLine role={r} at={placeOf(r)} className="truncate" />} open={role === r.id} onClick={() => setRole(role === r.id ? "" : r.id)} />
               <Unfold open={role === r.id}>
-                <div className="-mx-3">
-                  <RolePage role={r} />
-                </div>
+                <RoleFold role={r} gone={() => setRole("")} />
               </Unfold>
             </div>
           ))}
         <div className="flex flex-col">
           <FoldRow face={<Draft />} name={<span className="text-ink-3">{t("role.new")}</span>} open={role === NEW_ROLE_HERE} onClick={() => setRole(role === NEW_ROLE_HERE ? "" : NEW_ROLE_HERE)} />
           <Unfold open={role === NEW_ROLE_HERE}>
-            <div className="-mx-3">
-              <NewRolePage agent={a} made={(r: Role) => setRole(r.id)} />
-            </div>
+            <NewRoleFold key={String(role === NEW_ROLE_HERE)} agent={a} made={(r: Role) => setRole(r.id)} />
           </Unfold>
         </div>
       </Block>

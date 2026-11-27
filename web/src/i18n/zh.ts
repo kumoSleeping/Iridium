@@ -498,8 +498,6 @@ export const zh = {
   "role.none": "无角色",
   "role.options": "模型与思考强度",
   "role.delete": "删除角色",
-  "role.deleteTitle": "删除角色 {name}",
-  "role.deleteHint": "记忆一并删除",
   "role.new": "新建角色",
   "role.create": "创建",
   "role.agent": "Agent",
@@ -1030,6 +1028,7 @@ export const zh = {
   "manage.requests": "请求",
   "manage.pairCode": "配对码",
   "manage.carried": "带的 Agent",
+  "role.deleteSure": "确认删除",
 } as const;
 
 export type Key = keyof typeof zh;

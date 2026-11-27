@@ -498,8 +498,6 @@ export const en: Dict = {
   "role.none": "No roles",
   "role.options": "Model and effort",
   "role.delete": "Delete role",
-  "role.deleteTitle": "Delete role {name}",
-  "role.deleteHint": "Its memory is deleted too",
   "role.new": "New role",
   "role.create": "Create",
   "role.agent": "Agent",
@@ -1030,4 +1028,5 @@ export const en: Dict = {
   "manage.requests": "Requests",
   "manage.pairCode": "Code",
   "manage.carried": "Agents it brings",
+  "role.deleteSure": "Confirm delete",
 };
