@@ -276,10 +276,14 @@ type LogData struct {
 	// for a page to put in place of its composer till it is answered (docs/next/ui.md). None once
 	// it is over: the message-updated that says so has none.
 	Ask json.RawMessage `json:"ask,omitempty"`
+	// Answer: an ask's message once a person answered it: who and what (channel.Answer).
+	Answer *channel.Answer `json:"answer,omitempty"`
+	// Asked: an ask's message, what it asked (channel.Asked), kept once it is over.
+	Asked *channel.Asked `json:"asked,omitempty"`
 }
 
 func logData(m channel.Message) LogData {
-	d := LogData{Writing: m.D.Writing, Kind: m.Kind, Session: m.D.Session, Block: m.D.Block, From: m.D.From, To: m.D.To, Card: m.D.Card, Event: m.D.Event, Quote: m.D.Quote, Device: m.D.Device, Script: m.D.Script}
+	d := LogData{Writing: m.D.Writing, Kind: m.Kind, Session: m.D.Session, Block: m.D.Block, From: m.D.From, To: m.D.To, Card: m.D.Card, Event: m.D.Event, Quote: m.D.Quote, Device: m.D.Device, Script: m.D.Script, Answer: m.D.Answer, Asked: m.D.Asked}
 	switch m.Kind {
 	case channel.KindUser:
 		if !strings.HasPrefix(m.Ref, "b:") {

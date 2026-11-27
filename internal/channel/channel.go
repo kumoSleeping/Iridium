@@ -221,6 +221,12 @@ type Data struct {
 	Quote int64 `json:"quote,omitempty"`
 	// Card: an ask's card id.
 	Card string `json:"card,omitempty"`
+	// Answer: an ask's, once a person answered it: who and what (kumo, 2026-11-27: each said by
+	// whom, in the conversation). None: open still, or over unanswered.
+	Answer *Answer `json:"answer,omitempty"`
+	// Asked: an ask's, what it asked, kept past its close (the ask itself goes with it): drawn
+	// as a line in the conversation once answered or over.
+	Asked *Asked `json:"asked,omitempty"`
 	// Event: what a line of Iridium's own tells of (a member joined, left…), for a page to say
 	// in its own words; the message's text says it too.
 	Event *Event `json:"event,omitempty"`
@@ -239,6 +245,25 @@ type Data struct {
 	// Work: what the agent did after saying it (or, of a KindWork, before it said anything),
 	// counted live.
 	Work *Work `json:"work,omitempty"`
+}
+
+// Answer is how an ask was answered: By, the member who did (a login's id), Name as it was
+// then; Option, the option's id (allow, deny, always…; "" for words alone); Label, what was
+// chosen in words, as its key said it; At (ms).
+type Answer struct {
+	By     string `json:"by,omitempty"`
+	Name   string `json:"name,omitempty"`
+	Option string `json:"option,omitempty"`
+	Label  string `json:"label,omitempty"`
+	At     int64  `json:"at"`
+}
+
+// Asked is what an ask asked: its kind (permission, plan, question, manual), its tool, its
+// card's first line under the title (a command, a path, a reason, a question).
+type Asked struct {
+	Kind    string `json:"kind,omitempty"`
+	Tool    string `json:"tool,omitempty"`
+	Summary string `json:"summary,omitempty"`
 }
 
 // Work is what an agent does after a message of its turn, as the message carries it: Steps

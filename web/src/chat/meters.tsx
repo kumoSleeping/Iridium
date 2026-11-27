@@ -17,7 +17,7 @@ import { t, useLang } from "../i18n";
 import { useContextState } from "../store";
 import { errText, toast } from "../toast";
 import { agentName, ago, cn, PHONE, PopSurface, Tip, tokens as tok, useLongPress, useMedia, useMinute, MenuPortal } from "../ui";
-import { choicesQ } from "./choices";
+import { choicesQ, rememberEffort } from "./choices";
 import { EffortSlider, levelName, noteLevelNames } from "./effort";
 import { hasMark, ModeMark, modeName } from "../modes";
 import { openUsage } from "../route";
@@ -649,6 +649,9 @@ export function useModelMenu(s: LiveSession) {
   const setEffort = async (effort: string) => {
     try {
       await api.effort(s.id, effort);
+      // The next of its kind started with it too (kumo, 2026-11-27: set high here, a new Claude
+      // came at medium): not only one picked as it was added.
+      rememberEffort(s.agent, effort);
       return true;
     } catch (e) {
       toast(t("err.effort"), { error: true, description: errText(e) });

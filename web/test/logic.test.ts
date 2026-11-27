@@ -777,10 +777,12 @@ describe("@ in the composer", () => {
     expect(atWord("@", 1)).toEqual({ from: 0, q: "" });
     expect(atWord("ask @sid", 8)).toEqual({ from: 4, q: "sid" });
     expect(atWord("ask @sid more", 8)).toEqual({ from: 4, q: "sid" });
-    expect(atWord("mail a@b", 8)).toBeNull();
+    expect(atWord("几个 Todo@", 8)).toEqual({ from: 7, q: "" });
+    expect(atWord("mail a@b", 8)).toEqual({ from: 6, q: "b" });
+    expect(atWord("a_@b", 4)).toBeNull();
     expect(atWord("你好@ku", 5)).toEqual({ from: 2, q: "ku" });
     expect(atWord("好的，@", 4)).toEqual({ from: 3, q: "" });
-    expect(atWord("see x.y@z", 9)).toBeNull();
+    expect(atWord("see x.@z", 8)).toBeNull();
     expect(atWord("看&sid", 5, "&")).toEqual({ from: 1, q: "sid" });
     expect(atWord("ask @sid more", 13)).toBeNull();
     expect(atWord("ask @si d", 7)).toEqual({ from: 4, q: "si" });

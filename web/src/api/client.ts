@@ -58,7 +58,11 @@ import type { NewScript, Script, ScriptPatch, ScriptRun } from "./types.gen";
 import type { GitHubBinding, GitHubDevice, GitHubDeviceState, GitHubList, SetGitHub } from "./types.gen";
 
 /** A message of a channel's log (Satori's message.list): id its number there. */
-export type ChannelMessage = { id: string; content: string; created_at?: number; user?: { id: string; name?: string; nick?: string; is_bot?: boolean }; _data?: { kind?: string; ask?: unknown; card?: string; event?: unknown; session?: string; block?: string; from?: number; to?: number; input?: string; device?: Device; script?: string; reactions?: ReactionSum[]; writing?: boolean } };
+export type ChannelMessage = { id: string; content: string; created_at?: number; user?: { id: string; name?: string; nick?: string; is_bot?: boolean }; _data?: { kind?: string; ask?: unknown; card?: string; event?: unknown; session?: string; block?: string; from?: number; to?: number; input?: string; device?: Device; script?: string; reactions?: ReactionSum[]; writing?: boolean; answer?: AskAnswer; asked?: Asked } };
+/** How an ask was answered (channel.Answer): who, the option's id, what was chosen in words. */
+export type AskAnswer = { by?: string; name?: string; option?: string; label?: string; at: number };
+/** What an ask asked, kept past its close (channel.Asked). */
+export type Asked = { kind?: string; tool?: string; summary?: string };
 /** One emoji on a message (docs/channels.md "表情"): who put it on, in that order. */
 export type ReactionSum = { emoji: string; count: number; users: { id: string; name?: string }[]; me?: boolean };
 /** Told what the page reads of a channel's log and of a session's record (chat/reactions.ts:

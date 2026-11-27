@@ -127,7 +127,7 @@ export function ManagePage({ tab, theme, setTheme }: { tab: ManageTab; theme: Th
         </Group>
       )}
       <Group>
-        <Row face={<IrMark size={24} round className="text-ink" />} name="Ir" on={lit === IR} onClick={() => setSel(IR)} />
+        <Row face={<IrMark size={24} className="text-ink" />} name="Iridium" on={lit === IR} onClick={() => setSel(IR)} />
       </Group>
       {manages && (
         <Group title={t("manage.members")}>
@@ -200,18 +200,26 @@ export function ManagePage({ tab, theme, setTheme }: { tab: ManageTab; theme: Th
 
   return (
     <div ref={root} className="relative flex min-h-0 flex-1 flex-col">
-      <header className="flex h-12 shrink-0 items-center gap-1 px-3 pointer-coarse:h-13">
-        {/* No title at its top left (kumo, 2026-11-27). */}
-        <Dialog.Title className="sr-only">{t("manage.title")}</Dialog.Title>
-        <span className="flex-1" />
-        <Dialog.Close render={<IconKey label={t("nav.close")} className="-mr-1" />}>
+      {/* No title at its top left (kumo, 2026-11-27). Wide: no band of its own over the halves
+          (kumo, 2026-11-27: the top needless), the close key at the right of the right half's
+          head (Head leaves it room). */}
+      <Dialog.Title className="sr-only">{t("manage.title")}</Dialog.Title>
+      {wide ? (
+        <Dialog.Close render={<IconKey label={t("nav.close")} className="absolute top-[22px] right-3 z-10" />}>
           <X size={17} />
         </Dialog.Close>
-      </header>
+      ) : (
+        <header className="flex h-12 shrink-0 items-center gap-1 px-3 pointer-coarse:h-13">
+          <span className="flex-1" />
+          <Dialog.Close render={<IconKey label={t("nav.close")} className="-mr-1" />}>
+            <X size={17} />
+          </Dialog.Close>
+        </header>
+      )}
       {wide ? (
         <div className="grid min-h-0 flex-1 grid-cols-[16rem_minmax(0,1fr)] gap-2">
-          <div className="no-bar -mt-12 flex min-h-0 flex-col overflow-y-auto border-r border-rail-edge bg-rail px-2 pt-12 pb-4">{list}</div>
-          <div className="no-bar min-h-0 overflow-y-auto pt-1 pr-5 pb-6 pl-2">{detail}</div>
+          <div className="no-bar flex min-h-0 flex-col overflow-y-auto border-r border-rail-edge bg-rail px-2 pt-3 pb-4">{list}</div>
+          <div data-wide="" className="group/detail no-bar min-h-0 overflow-y-auto pt-3 pr-5 pb-6 pl-2">{detail}</div>
         </div>
       ) : at ? (
         <div key={at} className="g-slide flex min-h-0 flex-1 flex-col">
@@ -291,7 +299,7 @@ function Seen({ online, at }: { online: boolean; at: number }) {
  *  its keys after them. */
 function Head({ face, name, figures, keys }: { face: ReactNode; name: ReactNode; figures?: ReactNode; keys?: ReactNode }) {
   return (
-    <div className="flex min-h-16 items-center gap-3 border-b border-edge pb-3">
+    <div className="flex min-h-16 items-center gap-3 border-b border-edge pb-3 group-data-[wide]/detail:pr-10">
       <span className="grid shrink-0 place-items-center">{face}</span>
       <span className="min-w-0 flex-1 truncate text-2xl font-semibold">{name}</span>
       {figures && <span className="flex shrink-0 items-center gap-3 text-xs text-ink-3 tabular-nums">{figures}</span>}
@@ -430,7 +438,7 @@ function IrDetail({ theme, setTheme }: { theme: ThemePref; setTheme: (v: ThemePr
   const [cache, setCache] = useState(false);
   return (
     <div className="flex flex-col">
-      <Head face={<IrMark size={40} round className="text-ink" />} name="Ir" />
+      <Head face={<IrMark size={40} className="text-ink" />} name="Iridium" />
       <Block>
         <Field label={t("me.theme")}>
           <ThemeSwitch theme={theme} setTheme={setTheme} />

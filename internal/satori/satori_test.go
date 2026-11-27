@@ -754,6 +754,12 @@ func TestAskButtons(t *testing.T) {
 	if len(r.f.answers) != 1 || r.f.answers[0].Card != card || r.f.answers[0].Option != "allow" {
 		t.Fatalf("answered: %+v", r.f.answers)
 	}
+	// Who answered and how, on the ask's message in the channel, with what it asked.
+	if l, ok := r.s.log.ByRef("s1", card); !ok || l.D.Answer == nil || l.D.Answer.By != "u2" || l.D.Answer.Option != "allow" || l.D.Answer.Label != "允许" {
+		t.Errorf("the answer kept: %v %+v", ok, l.D.Answer)
+	} else if a := l.D.Asked; a == nil || a.Kind != "permission" || a.Tool != "Bash" || a.Summary != "ls" {
+		t.Errorf("what it asked: %+v", a)
+	}
 	w.want(OpEvent, &ev)
 	if ev.Type != "interaction/button" || ev.Button.ID != card+"#allow" || ev.User.ID != "u2" {
 		t.Fatalf("interaction/button: %+v", ev)
