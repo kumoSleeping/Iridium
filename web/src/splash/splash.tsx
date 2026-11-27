@@ -118,6 +118,16 @@ export function Splash({ show = true, fig = null, scene = "", className }: { sho
       // there, the drag not taken (kumo, 2026-11-26).
       if (!playing && ev.pointerType === "touch" && ev.clientY - r.top < Math.max(120, r.height * 0.2)) return;
       touching = ev.pointerType === "touch";
+      if (!touching) {
+        // Mouse/pen drag on the splash (kumo, 2026-11-26): blur inputs, prevent native drag
+        // selection and I-beam cursor over text underneath (WebKit/WKWebView).
+        if (document.activeElement instanceof HTMLElement && document.activeElement.matches("input, textarea")) {
+          document.activeElement.blur();
+        }
+        ev.preventDefault();
+        window.getSelection()?.removeAllRanges();
+      }
+      document.documentElement.dataset.slicing = "1";
       e.tap(ev.clientX - r.left, ev.clientY - r.top);
       e.hold(true);
     };
@@ -134,12 +144,14 @@ export function Splash({ show = true, fig = null, scene = "", className }: { sho
     const free = (ev: Event) => {
       // A finger's pointer is cancelled as the page would scroll: it is let go by touchend alone.
       if (touching && ev.type === "pointercancel") return;
+      delete document.documentElement.dataset.slicing;
       e.hold(false);
       if (touching || ev.type.startsWith("touch")) (touching = false), e.near(-1, -1);
     };
-    window.addEventListener("pointerdown", press, { passive: true });
+    window.addEventListener("pointerdown", press, { passive: false });
     window.addEventListener("pointerup", free, { passive: true });
     window.addEventListener("pointercancel", free, { passive: true });
+    window.addEventListener("blur", free);
     window.addEventListener("touchmove", drag, { passive: false });
     window.addEventListener("touchend", free, { passive: true });
     window.addEventListener("touchcancel", free, { passive: true });
@@ -150,10 +162,12 @@ export function Splash({ show = true, fig = null, scene = "", className }: { sho
       window.removeEventListener("pointerdown", press);
       window.removeEventListener("pointerup", free);
       window.removeEventListener("pointercancel", free);
+      window.removeEventListener("blur", free);
       window.removeEventListener("touchmove", drag);
       window.removeEventListener("touchend", free);
       window.removeEventListener("touchcancel", free);
       delete document.documentElement.dataset.playing;
+      delete document.documentElement.dataset.slicing;
       e.stop();
       eng.current = null;
     };

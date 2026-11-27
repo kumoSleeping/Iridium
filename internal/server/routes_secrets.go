@@ -10,7 +10,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/kumoSleeping/iridium/internal/access"
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/gate"
 	"github.com/kumoSleeping/iridium/internal/secrets"
@@ -55,6 +54,13 @@ func (s *Server) reloadSecrets() {
 	vals, err := s.st.SecretValues()
 	if err != nil {
 		s.logf("server: secrets: %v", err)
+	}
+	// The GitHub tokens too (routes_github.go).
+	if vals == nil {
+		vals = map[string]string{}
+	}
+	for n, v := range s.st.GitHubTokens() {
+		vals[n] = v
 	}
 	s.vault.json.Store(secrets.NewMasker(vals, secrets.MinShown, true))
 	s.vault.text.Store(secrets.NewMasker(vals, secrets.MinShown, false))
@@ -116,7 +122,11 @@ func (s *Server) terminalName(id string) string {
 }
 
 func (s *Server) secretInfo(sec store.Secret, uses map[string]int, last map[string]store.SecretUse) api.SecretInfo {
-	info := api.SecretInfo{Name: sec.Name, Note: sec.Note, Scope: api.SecretScope(sec.Scope), Workspaces: sec.Workspaces, Always: sec.Always,
+	scope := api.SecretScope(sec.Scope)
+	if scope != api.ScopeWorkspaces {
+		scope = api.ScopeAll // "owner", before 2026-11-27, is all now
+	}
+	info := api.SecretInfo{Name: sec.Name, Note: sec.Note, Scope: scope, Workspaces: sec.Workspaces, Always: sec.Always,
 		By: s.terminalName(sec.By), CreatedAt: sec.CreatedAt, UpdatedAt: sec.UpdatedAt, Uses: uses[sec.Name]}
 	if u, ok := last[sec.Name]; ok {
 		su := s.secretUse(u)
@@ -165,7 +175,7 @@ func (s *Server) listSecrets(w http.ResponseWriter, r *http.Request) {
 var errHostSecrets = errors.New("credentials are the host's alone")
 
 func validScope(sc api.SecretScope) bool {
-	return sc == "" || sc == api.ScopeAll || sc == api.ScopeWorkspaces || sc == api.ScopeOwner
+	return sc == "" || sc == api.ScopeAll || sc == api.ScopeWorkspaces
 }
 
 // setSecret stores or replaces a secret: from a panel or a person's ir at once, from a channel
@@ -189,7 +199,7 @@ func (s *Server) setSecret(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "the note is too long (200 characters at most)")
 		return
 	case !validScope(req.Scope):
-		fail(w, http.StatusBadRequest, `scope is "all", "workspaces" or "owner"`)
+		fail(w, http.StatusBadRequest, `scope is "all" or "workspaces"`)
 		return
 	}
 	c := callerOf(r)
@@ -281,9 +291,10 @@ func (s *Server) deleteSecret(w http.ResponseWriter, r *http.Request) {
 	reply(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-// ownSession reports whether session (the caller's) is the owner's own: run by a person at the
-// machine, opened by none through Iridium or by 本机, or by a terminal that has Claude.
-func (s *Server) ownSession(c caller, session string) bool {
+// knownSession reports whether session (the caller's) uses credentials without a confirmation: run
+// by a person at the machine, opened by none through Iridium or by the host, or by an app or login
+// still there. Claude's sessions are as any other's.
+func (s *Server) knownSession(c caller, session string) bool {
 	if c.machine() {
 		return true
 	}
@@ -294,8 +305,8 @@ func (s *Server) ownSession(c caller, session string) bool {
 	if id == "" || id == gate.HostID {
 		return true
 	}
-	info, ok := s.gate().Endpoint(id)
-	return ok && access.HasClaude(s.rulesOf(info.ID, false))
+	_, ok := s.gate().Endpoint(id)
+	return ok
 }
 
 // useSecrets gives ir run the values it asked for, if their scopes let the session have them and
@@ -333,7 +344,7 @@ func (s *Server) useSecrets(w http.ResponseWriter, r *http.Request) {
 	if utf8.RuneCountInString(command) > 120 {
 		command = string([]rune(command)[:119]) + "…"
 	}
-	own := s.ownSession(c, session)
+	own := s.knownSession(c, session)
 	var need []string
 	always := false
 	for _, n := range names {
@@ -348,11 +359,6 @@ func (s *Server) useSecrets(w http.ResponseWriter, r *http.Request) {
 		}
 		if !c.machine() {
 			switch api.SecretScope(sec.Scope) {
-			case api.ScopeOwner:
-				if !own {
-					forbid(w, errors.New(n+" is only for the sessions the owner's own terminals opened"))
-					return
-				}
 			case api.ScopeWorkspaces:
 				st, err := s.m.State(session)
 				if err != nil || !slices.Contains(sec.Workspaces, st.Workspace) {
@@ -367,7 +373,7 @@ func (s *Server) useSecrets(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if len(need) > 0 && !s.vault.use(req.Confirm, session, need) {
-		cf := s.asks.addNeed(api.Need{Kind: api.NeedSecretUse, Secrets: need, Command: command, Always: always, Owner: true, Asker: c.Name, Session: session})
+		cf := s.asks.addNeed(api.Need{Kind: api.NeedSecretUse, Secrets: need, Command: command, Always: always, Asker: c.Name, Session: session})
 		s.logf("server: %s asks a person to use %s, need %s", c.Name, strings.Join(need, ", "), cf.ID)
 		reply(w, http.StatusAccepted, api.Pending{Need: cf})
 		return

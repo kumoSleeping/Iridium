@@ -189,7 +189,7 @@ func useSecrets(e adminEnv, names []string, command string, stderr io.Writer) (m
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, err
 		}
-		fmt.Fprintf(stderr, "ir run：用 %s 要主机或带 Claude 的网页登录允许：已发到“需要”，%s 前有效。等确认……\n", strings.Join(p.Need.Secrets, "、"), hhmm(p.Need.ExpiresAt))
+		fmt.Fprintf(stderr, "ir run：用 %s 要主机或网页登录允许：已发到“需要”，%s 前有效。等确认……\n", strings.Join(p.Need.Secrets, "、"), hhmm(p.Need.ExpiresAt))
 		st, err := waitState(e, p.Need.ID)
 		if err != nil {
 			return nil, err

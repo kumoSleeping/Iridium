@@ -2,7 +2,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { api, queryClient } from "../src/api/client";
-import { clearFavorites, favoriteAt, setFavorite, setFavoritesName, useFavorites, useFavoritesName } from "../src/favorites";
+import { clearFavorites, favoriteAt, inOpenFavorites, setFavorite, setFavoritesName, useFavorites, useFavoritesName } from "../src/favorites";
 import { setCarried } from "../src/store";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -30,6 +30,13 @@ describe("favorites", () => {
     expect(got).toHaveBeenCalled();
     expect(seen.at(-1)).toEqual(["B"]);
     expect(JSON.parse(localStorage.getItem("favorites")!)).toEqual({ channels: ["B"] });
+  });
+
+  // otae-c, 2026-11-26: a favourite opened opened its own folder far below as well.
+  test("one opened from the favourites in sight: its own group left as it is", () => {
+    expect(inOpenFavorites("a", true, ["a", "b"])).toBe(true);
+    expect(inOpenFavorites("a", false, ["a", "b"])).toBe(false); // the block folded: its group opens
+    expect(inOpenFavorites("c", true, ["a", "b"])).toBe(false);
   });
 
   test("a favourite moved, or one from elsewhere put, at a row's edge", () => {

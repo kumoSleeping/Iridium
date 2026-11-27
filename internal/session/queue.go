@@ -121,6 +121,49 @@ func (m *Manager) SendAs(ctx context.Context, id, want, text, from string, steer
 	return in.ID, false, nil
 }
 
+// SendIfRunning steers line into session id only if its agent is live and actively running a
+// turn right now. It never starts a stopped process, never queues into an idle session, and
+// leaves turn attribution (lastFrom, titleTurns, queue) untouched. Used for live channel
+// overhearing so a busy agent sees relevant unmentioned human messages without false wakes.
+func (m *Manager) SendIfRunning(ctx context.Context, id, want string, line assemble.Injection) (bool, error) {
+	if want != "" && !inputID.MatchString(want) {
+		return false, fmt.Errorf("%w: an input id is a lowercase UUID", ErrBadRequest)
+	}
+	if strings.TrimSpace(line.String()) == "" {
+		return false, errors.New("an empty message")
+	}
+	h, err := m.get(id)
+	if err != nil {
+		return false, nil
+	}
+	h.qmu.Lock()
+	defer h.qmu.Unlock()
+	h.mu.Lock()
+	running := h.live && h.drv != nil && h.turn == agent.Running
+	drv, ready := h.drv, h.ready
+	h.mu.Unlock()
+	if !running {
+		return false, nil
+	}
+	select {
+	case <-ready:
+	default:
+		return false, nil
+	}
+	h.mu.Lock()
+	still := h.live && h.drv == drv && h.turn == agent.Running
+	h.mu.Unlock()
+	if !still {
+		return false, nil
+	}
+	msgID := cmp.Or(want, newUUID())
+	if err := drv.Send(ctx, agent.Message{ID: msgID, Text: line, Human: false}); err != nil {
+		return false, err
+	}
+	h.m.given(h.id, msgID, line)
+	return true, nil
+}
+
 // queuedImages takes the images waiting with queued message id.
 func (h *Hosted) queuedImages(id string) []agent.Image {
 	h.mu.Lock()

@@ -127,8 +127,8 @@ func agentRun(e adminEnv, args ...string) chan [3]string {
 }
 
 // pairApp makes app name by pairing, the one way an app comes in (POST /v1/internal/pair), allowed by the
-// person: its TOKEN. claude: allowed as the owner's own.
-func pairApp(t *testing.T, person adminEnv, name string, claude bool) string {
+// person: its TOKEN.
+func pairApp(t *testing.T, person adminEnv, name string) string {
 	t.Helper()
 	if code, _, errs := apiAs(person, "PUT", "internal/pairing", "open:=true"); code != 0 {
 		t.Fatalf("pairing open: %d %s", code, errs)
@@ -141,7 +141,7 @@ func pairApp(t *testing.T, person adminEnv, name string, claude bool) string {
 	person.call("GET", "/v1/internal/needs", nil, &cs)
 	for _, c := range cs.Pending {
 		if c.Code == p.Code {
-			if _, err := person.call("POST", "/v1/internal/needs/"+c.ID, api.NeedAnswer{Allow: true, Owner: claude}, nil); err != nil {
+			if _, err := person.call("POST", "/v1/internal/needs/"+c.ID, api.NeedAnswer{Allow: true}, nil); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -162,8 +162,8 @@ func TestAdmin(t *testing.T) {
 			t.Errorf("ir %s is still there", gone)
 		}
 	}
-	pairApp(t, person, "bot", false)
-	pairApp(t, person, "bot2", false)
+	pairApp(t, person, "bot")
+	pairApp(t, person, "bot2")
 
 	// Invites need a public origin; then a person gets the link and an agent does not: its asks a
 	// person, and --wait hears only how it went.

@@ -50,7 +50,7 @@ func (a sessionsOf) After(id string, at int64) (api.MessagePage, error) {
 // attaching, listing and copying by path; on HTTP, read-only browsing within a login's scope.
 func (s *Server) fileRoutes(mux *http.ServeMux, local bool) {
 	// Every terminal reads every session's files; one goes into a session only from a terminal
-	// that may use it (access.go: Claude's, the owner's own). The files service guards the paths.
+	// that may use it (its Perms). The files service guards the paths.
 	mux.HandleFunc("GET /v1/internal/sessions/{id}/files/{ref}", s.fileGet)
 	mux.HandleFunc("GET /v1/internal/sessions/{id}/files/{ref}/thumb", s.fileThumb)
 	mux.HandleFunc("GET /v1/internal/sessions/{id}/files/{ref}/info", s.fileInfo)

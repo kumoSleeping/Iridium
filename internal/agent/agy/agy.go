@@ -188,6 +188,13 @@ type Driver struct {
 	window   int
 	queue    []agent.Event
 	unknown  map[string]int
+	// compacting: the /compact sent (its id), from when and the context then: agy says nothing
+	// of a compaction but the prompt's answer (agy 1.5.10), so the turn is one until that.
+	compacting struct {
+		id     string
+		since  time.Time
+		before int
+	}
 }
 
 type joinedPrompt struct {
@@ -674,6 +681,12 @@ func (d *Driver) tookLocked(id, text string) {
 		d.sealLocked()
 		d.take1(id)
 		d.reply = ""
+		if strings.TrimSpace(text) == "/compact" {
+			// Shown as a compaction (its rule), not as your /compact.
+			d.compacting.id, d.compacting.since, d.compacting.before = id, time.Now(), d.context
+			d.move(agent.Compacting, id)
+			return
+		}
 		d.move(agent.Running, id)
 		if text != "" {
 			d.emitLocked(agent.Record{Entry: transcript.Entry{Kind: string(api.BlockKindUser), Text: text, ID: id}, Sent: true})
@@ -1133,6 +1146,10 @@ func (d *Driver) response(f *frame, replay bool) {
 		}
 		return
 	}
+	compacted := id != "" && id == d.compacting.id
+	if compacted {
+		d.compactedLocked(s.StopReason)
+	}
 	last := false
 	if i := slices.Index(d.outstanding, id); i >= 0 {
 		d.outstanding = slices.Delete(d.outstanding, i, i+1)
@@ -1141,6 +1158,9 @@ func (d *Driver) response(f *frame, replay bool) {
 		last = s.Usage != nil || s.StopReason != "end_turn"
 	}
 	if !last {
+		if compacted && d.state == agent.Compacting {
+			d.move(agent.Running, "") // one sent while it compacted runs now
+		}
 		// One joined the turn (agy 1.5.10 says no more of it). It comes in where what is being
 		// written ends (sealLocked), at once if nothing is.
 		d.due++
@@ -1179,10 +1199,26 @@ func (d *Driver) settled() {
 	if d.state == agent.Idle {
 		return
 	}
+	only := d.state == agent.Compacting
 	d.state = agent.Idle
 	d.emitLocked(agent.StateChange{State: agent.Idle})
-	d.emitLocked(agent.TurnEnd{Reply: d.reply})
+	d.emitLocked(agent.TurnEnd{Reply: d.reply, CompactOnly: only})
 	d.reply = ""
+}
+
+// compactedLocked: the /compact's answer came, how it stopped: a compaction recorded, or one
+// that failed (interrupted).
+func (d *Driver) compactedLocked(stop string) {
+	c := d.compacting
+	d.compacting.id = ""
+	if stop != "end_turn" {
+		d.emitLocked(agent.Compacted{Failed: true})
+		return
+	}
+	d.record(transcript.Entry{Kind: string(api.BlockKindSystem), Event: string(api.SystemEventCompact),
+		Compact: &api.Compaction{Before: c.before, Ms: time.Since(c.since).Milliseconds()}})
+	d.emitLocked(agent.Compacted{Before: c.before})
+	d.context = 0 // known again with the next answer
 }
 
 // serverRequest: agy asks. A permission is put to you, or allowed at once in auto; one fed again

@@ -779,10 +779,11 @@ func (s *Service) syncUser(ch, session string, b api.Block, alone, first bool) (
 	return s.add(m)
 }
 
-// Given: text is what an agent was given of a channel (assemble.ChannelTurn): the words under
-// their number, then the channel's context.
+// Given: text is what an agent was given of a channel (assemble.ChannelTurn or ChannelOverhear):
+// the words under their number with the channel's context, or an overheard live message.
 func Given(text string) bool {
-	return strings.HasPrefix(text, "#") && strings.Contains(text, "\n<channel-context")
+	return (strings.HasPrefix(text, "#") && strings.Contains(text, "\n<channel-context")) ||
+		strings.HasPrefix(text, "<channel-overhear>")
 }
 
 // isOtherChannelInput reports whether a user block in session's own transcript was actually

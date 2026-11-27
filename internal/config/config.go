@@ -53,6 +53,13 @@ type Config struct {
 	Public Public `json:"public,omitzero"`
 	// Update is where new versions are looked for.
 	Update Update `json:"update,omitzero"`
+	// GitHub is the OAuth App people bind their GitHub accounts through.
+	GitHub GitHub `json:"github,omitzero"`
+}
+
+type GitHub struct {
+	// ClientID is the OAuth App's (its device flow on, no secret); "" is Iridium's own.
+	ClientID string `json:"clientId,omitempty"`
 }
 
 type Uploads struct {

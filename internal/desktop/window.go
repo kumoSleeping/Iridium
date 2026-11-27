@@ -47,21 +47,21 @@ func (u *ui) updateChanged() {
 	was := u.toldReady
 	u.toldReady = ready
 	type shown struct {
-		w      *mygo.Window
+		p      *mygo.Page
 		server string
 	}
-	var ws []shown
-	for _, w := range u.wins {
-		ws = append(ws, shown{w, u.shows[u.names[w]]})
+	var ps []shown
+	for _, pane := range u.panes {
+		ps = append(ps, shown{pane.page(), u.shows[pane.name]})
 	}
 	u.mu.Unlock()
 	if ready == was {
 		return
 	}
 	c, _ := loadConfig()
-	for _, s := range ws {
-		if s.server != "" {
-			reply(s.w, u.hello(c, s.server))
+	for _, s := range ps {
+		if s.server != "" && s.p != nil {
+			reply(s.p, u.hello(c, s.server))
 		}
 	}
 }
@@ -105,9 +105,9 @@ func (u *ui) syncRuntime(logf func(string, ...any)) {
 	}
 }
 
-// keepFrame: a window on an Iridium opens where and as large as one was last (Config.Frame, given
-// as it is made), and that is kept as w moves and resizes.
-func (u *ui) keepFrame(w *mygo.Window) {
+// keepFrame: a window opens where and as large as it was last (the main window's Config.Frame, an
+// Iridium's own Config.Away), given as it is made; keep is given that as w moves and resizes.
+func (u *ui) keepFrame(w *mygo.Window, keep func(Frame)) {
 	var mu sync.Mutex
 	var t *time.Timer
 	save := func() {
@@ -125,7 +125,7 @@ func (u *ui) keepFrame(w *mygo.Window) {
 			}
 			x, y := w.Position()
 			ww, h := w.Size()
-			_, _ = updateConfig(func(c *Config) { c.Frame = Frame{X: x, Y: y, W: ww, H: h} })
+			keep(Frame{X: x, Y: y, W: ww, H: h})
 		})
 	}
 	w.OnMove(save)

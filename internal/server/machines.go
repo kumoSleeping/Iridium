@@ -134,8 +134,8 @@ type keptComputer struct {
 	MachineID string `json:"machineId,omitempty"`
 }
 
-// computers is the computer of each app that has one, by its ID: as it last said, Claude only
-// at one allowed as the owner's own, the agents turned off there marked, whether it is connected.
+// computers is the computer of each app that has one, by its ID: as it last said, the agents
+// turned off there marked, whether it is connected.
 // Apps on one computer (one machine) are its connections: the host's own under the host, others
 // under the one that paired first (Under).
 func (s *Server) computers() map[string]*api.Computer {
@@ -179,8 +179,6 @@ func (s *Server) computers() map[string]*api.Computer {
 			}
 		}
 		m.SeenAt = r.At
-		claude := access.HasClaude(s.rulesOf(r.Terminal, false))
-		m.Agents = slices.DeleteFunc(m.Agents, func(a api.ExecAgent) bool { return a.Agent == string(api.AgentClaude) && !claude })
 		off, _ := s.st.AgentsOff(r.Terminal)
 		for i := range m.Agents {
 			m.Agents[i].Off = slices.Contains(off, m.Agents[i].Agent)

@@ -1,15 +1,9 @@
-// Package access is what the interactive terminals may do (plan "交互终端"). Everything, every
-// terminal alike (the user, 2026-11-08), but Claude: Claude's terms give it only to the owner's own
-// terminals. A terminal is found the owner's own as it is made (本机 always, the first panel, an
-// invite or a token made --owner by a person) and that never changes. Without Claude a terminal
-// still sees Claude's sessions; it may not start one, write to one, or answer one.
+// Package access is what the interactive terminals may do (plan "交互终端"): everything, every
+// terminal alike (the user, 2026-11-08), Claude as any other agent; what an app or login may use
+// is its Perms (agents and folders, internal/server/perms.go).
 package access
 
-import (
-	"errors"
-
-	"github.com/kumoSleeping/iridium/internal/api"
-)
+import "errors"
 
 // Denied is what a check refuses; the server answers 403.
 type Denied struct{ Reason string }
@@ -22,44 +16,5 @@ func IsDenied(err error) bool {
 	return errors.As(err, &d)
 }
 
-// Errors the checks give.
-var (
-	ErrClaude = &Denied{"claude is only for the owner's own apps and logins, found so as each was made (ir invite --claude, a pairing allowed as the owner's own)"}
-	ErrManage = &Denied{"only ir_web's logins and the host manage this"}
-)
-
-// Full is 本机's: the owner's machine, so Claude.
-func Full() api.Rules {
-	return api.Rules{ClaudeOwner: &api.OwnerConfirm{By: api.HostID}}
-}
-
-// Default is a terminal's that was not made the owner's own: no Claude.
-func Default() api.Rules { return api.Rules{} }
-
-// Ways a terminal was found the owner's own (api.OwnerConfirm.By).
-const (
-	ByLocal = api.HostID // a person's ir on the machine
-	ByFirst = "first"    // the first panel registered
-	ByPanel = "panel"    // a person on a panel that has Claude (or that confirmed an agent's ask)
-)
-
-// HasClaude reports whether r gives its terminal Claude.
-func HasClaude(r api.Rules) bool { return r.ClaudeOwner != nil }
-
-// WithClaude is r with Claude, found the owner's own by (ByLocal, ByFirst, ByPanel) at at (ms). One
-// that has it already keeps how it got it.
-func WithClaude(r api.Rules, by string, at int64) api.Rules {
-	if !HasClaude(r) {
-		r.ClaudeOwner = &api.OwnerConfirm{By: by, At: at}
-	}
-	return r
-}
-
-// Agent checks that r lets its terminal use agent a: any but Claude ("" is Claude), which needs
-// the owner's own.
-func Agent(r api.Rules, a api.Agent) error {
-	if (a == "" || a == api.AgentClaude) && !HasClaude(r) {
-		return ErrClaude
-	}
-	return nil
-}
+// ErrManage refuses managing to one that may not.
+var ErrManage = &Denied{"only ir_web's logins and the host manage this"}

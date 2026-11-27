@@ -50,8 +50,12 @@ const usage = `usage: ir <command>   (iridium is the same program: iridium ir <c
 `
 
 func main() {
-	if strings.TrimSuffix(strings.ToLower(filepath.Base(os.Args[0])), ".exe") == "ir" {
+	switch strings.TrimSuffix(strings.ToLower(filepath.Base(os.Args[0])), ".exe") {
+	case "ir":
 		os.Exit(irMain(os.Args[1:]))
+	case "gh":
+		// An agent's gh (ghenv): the real one, as the person its turn is for.
+		os.Exit(irMain(append([]string{"github", "gh"}, os.Args[1:]...)))
 	}
 	args := os.Args[1:]
 	// Opened from the Finder, an older macOS adds -psn_<process serial number>.

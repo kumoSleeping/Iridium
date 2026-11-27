@@ -94,7 +94,7 @@ export function PersonaEditor({ value, save, fill }: { value?: string; save: (v:
         onBlur={() => ((focused.current = false), void put(draft))}
         onChange={(e) => (setDraft(e.target.value), setError(""))}
         onKeyDown={(e) => e.key === "Escape" && (e.preventDefault(), e.stopPropagation(), setDraft(value ?? ""), (e.target as HTMLElement).blur())}
-        className={cn("no-ring no-bar w-full min-w-0 resize-none overflow-y-auto rounded-lg bg-fill-2 px-3 py-2.5 text-sm leading-6 placeholder:text-ink-3", fill ? "min-h-40 flex-1" : "h-72")}
+        className={cn("no-ring no-bar w-full min-w-0 resize-none overflow-y-auto rounded-md bg-fill px-3 py-2.5 text-sm leading-6 placeholder:text-ink-3 focus:bg-fill-2", fill ? "min-h-40 flex-1" : "h-72")}
       />
       {error && <p className="m-0 shrink-0 px-0.5 pt-1 text-xs text-err">{error}</p>}
       <HostPersonas take={(p) => (setDraft(p.text), void put(p.text))} className={cn(fill && "no-bar max-h-[40%] shrink-0 overflow-y-auto")} />

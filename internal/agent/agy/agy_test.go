@@ -902,3 +902,56 @@ func TestAutoPermissionMidTurnPromptRetry(t *testing.T) {
 		t.Errorf("unexpected TurnEnd: %+v", errs)
 	}
 }
+
+// /compact: agy says nothing of a compaction but the prompt's answer (agy 1.5.10, seen
+// 2026-11-27), so the turn is a compaction until it: its rule recorded, not your /compact; one
+// sent while it compacts runs after it.
+func TestCompact(t *testing.T) {
+	r := newRig(t)
+	r.open("")
+	r.feed(upd(`{"sessionUpdate":"usage_update","used":332394,"size":1048576}`))
+	r.take()
+	send(t, r.d, "in-1", "/compact")
+	r.next("session/prompt")
+	if r.d.State() != agent.Compacting {
+		t.Fatalf("state %v", r.d.State())
+	}
+	send(t, r.d, "in-2", "next")
+	r.next("session/prompt")
+	evs := r.take()
+	if ts := find[agent.TurnStart](evs); len(ts) != 1 || ts[0].Input != "in-1" {
+		t.Errorf("TurnStart %v", ts)
+	}
+	r.feed(`{"jsonrpc":"2.0","result":{"stopReason":"end_turn"},"id":"in-1"}`)
+	evs = append(evs, r.take()...)
+	if c := find[agent.Compacted](evs); len(c) != 1 || c[0].Before != 332394 || c[0].Failed {
+		t.Errorf("Compacted %+v", c)
+	}
+	if r.d.State() != agent.Running || len(find[agent.TurnEnd](evs)) != 0 {
+		t.Fatalf("after the compaction: %v", r.d.State())
+	}
+	r.feed(
+		upd(`{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"ok"}}`),
+		`{"jsonrpc":"2.0","result":{"stopReason":"end_turn","usage":{"inputTokens":5,"outputTokens":2}},"id":"in-2"}`,
+	)
+	evs = append(evs, r.take()...)
+	rec := records(evs)
+	if len(rec) != 3 || rec[0].Event != "compact" || rec[0].Compact == nil || rec[0].Compact.Before != 332394 || rec[1].Text != "next" || rec[2].Text != "ok" {
+		t.Errorf("records %s", mustJSON(rec))
+	}
+	if te := find[agent.TurnEnd](evs); len(te) != 1 || te[0].CompactOnly {
+		t.Errorf("TurnEnd %+v", te)
+	}
+
+	// Alone, the turn only compacted.
+	send(t, r.d, "in-3", "/compact")
+	r.next("session/prompt")
+	r.feed(`{"jsonrpc":"2.0","result":{"stopReason":"end_turn"},"id":"in-3"}`)
+	evs = r.take()
+	if te := find[agent.TurnEnd](evs); len(te) != 1 || !te[0].CompactOnly || r.d.State() != agent.Idle {
+		t.Errorf("TurnEnd %+v, state %v", te, r.d.State())
+	}
+	if st := find[agent.StateChange](evs); len(st) == 0 || st[0].State != agent.Compacting {
+		t.Errorf("StateChange %+v", st)
+	}
+}

@@ -18,7 +18,7 @@ import { t, useLang } from "../../i18n";
 import { pushIn, pushing } from "../../motion";
 import { openChat, openUsage } from "../../route";
 import { PULL } from "../../sheet";
-import { getCarried, onCarried, setCarried, useCarried, useConfirms, useList, useSession } from "../../store";
+import { getCarried, onCarried, setCarried, useCarried, useConfirms, useList, useListRow, useSession } from "../../store";
 import { also, carries, events, opened, type SatoriEvent } from "../../stream";
 import { errText, toast } from "../../toast";
 import { agentName, cn, lampOf, PopSurface, ServerFace } from "../../ui";
@@ -30,6 +30,9 @@ import { Copyable } from "../copyable";
 import { Crash } from "../crash";
 import { ContextRing, ModeKey, ModelKey, modelView, QuotaBars, useMode } from "../meters";
 import { fromSatori, PLACE_DRAG, SESSION_DRAG, sourceOf, withDevice, yours, type Source } from "../refs";
+import { shownAs } from "../files";
+import { Gallery } from "../gallery";
+import { shotsOf, type Said } from "../gallery-lib";
 import { Assistant, Attached, clock, Compaction, Gutter, Letter, Line, MsgRow, Pending, When, YouBubble } from "../said";
 import { ShellRuns } from "../shell";
 import { Stick, toEnd } from "../stick";
@@ -46,6 +49,7 @@ import { betweenAgents, linesOf, longWords, oldRead } from "./folds";
 import { Foldable } from "../longwords";
 import { foldsOnce, useReadTo } from "../foldstate";
 import { around, goTo, seqEl } from "./jump";
+import { LazyRows } from "./lazyrows";
 import { Forwards, quoteText } from "../forwardcard";
 import { msgWords, withForwards } from "../forward";
 import { mayAct, useMembers } from "./gate";
@@ -446,20 +450,24 @@ export function ChannelPage({ id, sheet = 0, bar, record }: { id: string; sheet?
   return (
     <Nicks.Provider value={nicks}>
      <SeqRefs.Provider value={seqs}>
+     <Gallery shots={() => shotsOf(log.msgs.flatMap((m) => saidOf(m, id)), (session, f) => api.fileURL(session, f.ref, false, f.mtime), shownAs)}>
       <div className="relative h-full" onDragOver={(e) => files(e) || session(e) || place(e)} onDrop={drop}>
         {/* Nothing said yet: the pane's splash is told so (splash/splash.tsx). */}
         <ChannelSplash id={id} show={!hold && !sent.length && (log.loaded ? !log.msgs.length : justMade(id))} last={agents.at(-1)} agents={agents.length} />
         <Stick key={hold ? "hold" : "whole"} scroller={scroller} tail={grew} older={() => log.older()} draw={changed} place={entry.place} keep={id} openAt={openAt} late={log.late} onFollow={setAtEnd} bottom={stackH} quiet={asking} style={{ paddingTop: padTop, paddingBottom: stackH + 20 }}>
           <div data-column className="mx-auto flex max-w-(--chat-w) flex-col gap-5 px-4 [--depart-gap:1.25rem] sm:px-6">
-            {!hold &&
-              groups.map((g) => (
-                <div key={g.key} className="relative flex min-w-0 flex-col">
+            {!hold && (
+              <LazyRows owner={log} rows={groups} same={sameRow} place={entry.place} className="relative flex min-w-0 flex-col">
+                {(g) => (
+                 <>
                   {g.mark !== undefined && <TimeMark at={g.mark} />}
                   <GroupView g={g} channel={id} agents={rowAgents} who={fx.who} record={record} call={fx.call} may={may} quote={may ? fx.quoting : undefined} quoted={fx.quoted} bars={fx.bars} barsSig={barsSig} fold={fx.fold} old={fx.old} olds={olds} jump={fx.jump} wrote={log.wrote} born={log.born} hidden={hidden} pending={fx.pending} />
                   {/* In the gap under it, over nothing: coming late, it moves nothing (docs/前端设计规范.md). */}
                   {SHOW_READS && marks.has(g.key) && <ReadMarks readers={marks.get(g.key)!} agents={agents} />}
-                </div>
-              ))}
+                 </>
+                )}
+              </LazyRows>
+            )}
             {!hold && log.loaded && compacting && (
               <div className="-mt-1">
                 <Compaction since={compactSince.current} />
@@ -503,6 +511,7 @@ export function ChannelPage({ id, sheet = 0, bar, record }: { id: string; sheet?
           </div>
         </div>
       </div>
+     </Gallery>
      </SeqRefs.Provider>
     </Nicks.Provider>
   );
@@ -656,6 +665,16 @@ export function AskQueue({ agents, states, asks, cwd, off }: { agents: AgentRow[
 /** A message as the block an agent's words are drawn from (said.tsx Assistant, which makes the
  *  members they name links): kept per message, so one drawn is not drawn again. */
 const blocks = new WeakMap<Msg, { sig: string; b: Block }>();
+/** A message as its pictures are drawn (gallery-lib.ts), its files served as GroupView serves them:
+ *  an agent's by its session, unless it answers an input of the channel's; any other's by the
+ *  channel. None for Iridium's lines and a crash. */
+function saidOf(m: Msg, channel: string): Said[] {
+  if (!m.files.length || m.kind === "error" || m.author.kind === "iridium") return [];
+  if (m.author.kind === "person") return [{ words: "", files: m.files, session: channel, person: true }];
+  const session = m.author.kind === "agent" && !m.input ? m.author.session : channel;
+  return [{ words: fromSatori(msgWords(m).words), files: m.files, session, person: false }];
+}
+
 function blockFor(m: Msg, agents: AgentRow[]): Block {
   const nicks = agents.map((a) => a.nick);
   const sig = nicks.join(" ");
@@ -698,9 +717,14 @@ function sameGroup(a: GroupProps, b: GroupProps): boolean {
   return true;
 }
 
+/** Whether a group is what it was when its row's height was taken (lazyrows.tsx): its rows the
+ *  same ones, under the same head and time. */
+const sameRow = (a: Group<Sent>, b: Group<Sent>) => a.key === b.key && a.author === b.author && a.bare === b.bare && a.mark === b.mark && a.lines.length === b.lines.length && a.lines.every((x, i) => x.key === b.lines[i]!.key && x.m === b.lines[i]!.m && x.sent === b.lines[i]!.sent);
+
 export const GroupView = memo(function GroupView({ g, channel, agents, who, record, call, may, quote, quoted, bars, fold, old, jump, wrote, born, hidden, pending }: GroupProps) {
-  const list = useList();
   const a = g.author;
+  // Its own row of the list alone: not drawn again as any other session changes.
+  const listed = useListRow(a?.kind === "agent" ? a.session : undefined);
   const msgs = g.lines.flatMap((l) => (l.m ? [l.m] : []));
   if (a?.kind === "iridium") return <EventLines msgs={msgs} channel={channel} may={may} />;
   if (!a || a.kind === "person")
@@ -712,7 +736,7 @@ export const GroupView = memo(function GroupView({ g, channel, agents, who, reco
   if (a.kind === "script") return <ScriptGroup msgs={msgs} bare={g.bare} channel={channel} agents={agents} quote={quote} quoted={quoted} old={old} jump={jump} />;
   const now = agents.find((x) => x.session === a.session);
   // One no longer in the channel, or an outsider writing via ir: its harness as the list has it.
-  const agent = now?.agent ?? list?.find((x) => x.id === a.session)?.agent;
+  const agent = now?.agent ?? listed?.agent;
   return (
     <MsgRow className="flex min-w-0 items-start gap-2.5">
       {g.bare ? (

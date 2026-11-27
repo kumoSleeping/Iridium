@@ -27,12 +27,12 @@ func TestManualWait(t *testing.T) {
 		t.Fatalf("channel.create: %+v", r)
 	}
 	prompt, err := os.ReadFile(filepath.Join(cfg.StatePath(), "hold", sid, "system-prompt.md"))
-	if err != nil || !strings.Contains(string(prompt), "internal/sessions/self/manual") {
+	if err != nil || !strings.Contains(string(prompt), "internal/sessions/"+sid+"/manual") {
 		t.Errorf("system prompt %q %v", prompt, err)
 	}
 	t.Setenv("IRIDIUM_SESSION", sid)
 	done := make(chan result, 1)
-	go func() { done <- ir("api", "POST", "internal/sessions/self/manual", "reason=npx is needed", "--wait") }()
+	go func() { done <- ir("api", "POST", "internal/sessions/"+sid+"/manual", "reason=npx is needed", "--wait") }()
 
 	// The person answers, at the socket (no agent, no session).
 	sock := cfg.SocketPath()

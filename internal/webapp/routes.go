@@ -354,7 +354,6 @@ func (w *Web) apiJoinVerify(rw http.ResponseWriter, r *http.Request, key string)
 		writeJSON(rw, http.StatusConflict, joinReply{NameError: gate.NameCode(err)})
 		return
 	}
-	first := !w.core.HasWebLogin()
 	info, err := w.core.CreateWebLogin(name)
 	if err != nil {
 		w.mu.Unlock()
@@ -377,9 +376,9 @@ func (w *Web) apiJoinVerify(rw http.ResponseWriter, r *http.Request, key string)
 		return
 	}
 	w.removeSetupFile()
-	w.log.Info("webapp: login joined", "endpoint", info.ID, "name", info.Name, "client", key, "setup", inv.Setup, "perms", len(inv.Perms) > 0, "first", first)
+	w.log.Info("webapp: login joined", "endpoint", info.ID, "name", info.Name, "client", key, "setup", inv.Setup, "perms", len(inv.Perms) > 0)
 	if w.cfg.OnJoin != nil {
-		w.cfg.OnJoin(Joined{Endpoint: info, Perms: inv.Perms, First: first})
+		w.cfg.OnJoin(Joined{Endpoint: info, Perms: inv.Perms})
 	}
 	http.SetCookie(rw, sessionCookie(token))
 	writeJSON(rw, http.StatusOK, map[string]any{"ok": true, "name": info.Name})

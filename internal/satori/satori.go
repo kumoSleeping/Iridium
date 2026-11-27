@@ -73,8 +73,8 @@ type SendOpts struct {
 	Quote int64 `json:"-"`
 }
 
-// Resolver is a Backend that takes a session's id as a caller may write it: the start of one,
-// or "self", the caller's own (docs/api.md "会话 ID"). Without it ids are taken as they are.
+// Resolver is a Backend that takes a session's id as a caller may write it: whole or the start
+// of one (docs/api.md "会话 ID"). Without it ids are taken as they are.
 type Resolver interface {
 	Resolve(ctx context.Context, c Caller, id string) (string, error)
 }

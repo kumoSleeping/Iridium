@@ -391,11 +391,15 @@ html[data-turn]::view-transition-old(page) {
 html[data-turn]::view-transition-new(page) {
   animation: turn-in var(--turn-dur) var(--ease-out) var(--turn-gap) both;
 }
-html[data-turn="next"] {
+/* On the snapshots themselves, not on html: a custom property set there is inherited, and every
+   element of the page was styled again as a turn began and as it ended. */
+html[data-turn="next"]::view-transition-old(page),
+html[data-turn="next"]::view-transition-new(page) {
   --turn-from: var(--turn-in);
   --turn-to: calc(var(--turn-out) * -1);
 }
-html[data-turn="prev"] {
+html[data-turn="prev"]::view-transition-old(page),
+html[data-turn="prev"]::view-transition-new(page) {
   --turn-from: calc(var(--turn-in) * -1);
   --turn-to: var(--turn-out);
 }
@@ -582,7 +586,7 @@ html[data-turn] .vt-drawer {
       transform: none;
     }
   }
-  html[data-turn] {
+  :root {
     --turn-in: 0px;
     --turn-out: 0px;
   }

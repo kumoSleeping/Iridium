@@ -393,10 +393,12 @@ func TestRuleMatches(t *testing.T) {
 	}
 }
 
-// An agent naming its session (ir api channel.update channel_id=self data.name=…, the older ir
-// rename) is never asked about; anything chained to it is.
+// An agent naming its session or a channel it is in (ir api channel.update channel_id=<id>
+// data.name=…, the older ir rename) is never asked about; anything chained to it is, and so is
+// self, which ir takes no more.
 func TestRenamesOnly(t *testing.T) {
 	t.Parallel()
+	in := func(ch string) bool { return ch == "s1" || ch == "c1" }
 	for cmd, want := range map[string]bool{
 		`ir rename "会话命名"`:      true,
 		`ir rename x`:           true,
@@ -408,19 +410,22 @@ func TestRenamesOnly(t *testing.T) {
 		"ir rename x\nls":       false,
 		`ir ls`:                 false,
 		`irx rename x`:          false,
-		`ir api channel.update channel_id=self data.name="会话 命名"`:                true,
-		`ir api channel.update data.name=x channel_id=self`:                      true,
-		`ir api channel.update channel_id=self`:                                  false,
-		`ir api channel.update channel_id=1a2b data.name=x`:                      false,
-		`ir api channel.update channel_id=self data.name=x _data.archived:=true`: false,
-		`ir api channel.update channel_id=self data.name=x && rm -rf ~`:          false,
-		`ir api message.create channel_id=self data.name=x`:                      false,
+		`ir api channel.update channel_id=s1 data.name="会话 命名"`:                true,
+		`ir api channel.update data.name=x channel_id=c1`:                      true,
+		`ir api channel.update channel_id=s1`:                                  false,
+		`ir api channel.update channel_id=1a2b data.name=x`:                    false,
+		`ir api channel.update channel_id=self data.name=x`:                    false,
+		`ir api channel.update data.name=x`:                                    false,
+		`ir api channel.update channel_id=s1 channel_id=x data.name=x`:         false,
+		`ir api channel.update channel_id=s1 data.name=x _data.archived:=true`: false,
+		`ir api channel.update channel_id=s1 data.name=x && rm -rf ~`:          false,
+		`ir api message.create channel_id=s1 data.name=x`:                      false,
 	} {
-		if got := renamesOnly(api.Ask{Kind: "permission", Tool: "Bash", Input: map[string]any{"command": cmd}}); got != want {
+		if got := renamesOnly(api.Ask{Kind: "permission", Tool: "Bash", Input: map[string]any{"command": cmd}}, in); got != want {
 			t.Errorf("%q: %v", cmd, got)
 		}
 	}
-	if renamesOnly(api.Ask{Kind: "question", Input: map[string]any{"command": "ir rename x"}}) {
+	if renamesOnly(api.Ask{Kind: "question", Input: map[string]any{"command": "ir rename x"}}, in) {
 		t.Error("a question")
 	}
 }
@@ -505,10 +510,10 @@ func TestSendAsOnce(t *testing.T) {
 // chained to it, its words an argument or a quoted here-document.
 func TestSpeaksOnly(t *testing.T) {
 	t.Parallel()
-	in := func(ch string) bool { return ch == "self" || ch == "c1" }
+	in := func(ch string) bool { return ch == "s1" || ch == "c1" }
 	for cmd, want := range map[string]bool{
 		`ir api message.create channel_id=c1 content="done, see the file"`:               true,
-		`ir api message.create channel_id=self _data.text=ok`:                            true,
+		`ir api message.create channel_id=s1 _data.text=ok`:                              true,
 		`ir api message.create content="@claude2 look" channel_id=c1`:                    true,
 		"ir api message.create channel_id=c1 content='words; $(rm -rf ~) `x` | y\nmore'": true, // single quotes: the shell reads none of it
 		"ir api message.create channel_id=c1 content='it'\\''s fine'":                    true,
@@ -546,10 +551,10 @@ func TestSpeaksOnly(t *testing.T) {
 // "表情"): one command, its channel, its message's number and one emoji, nothing else.
 func TestReactsOnly(t *testing.T) {
 	t.Parallel()
-	in := func(ch string) bool { return ch == "self" || ch == "c1" }
+	in := func(ch string) bool { return ch == "s1" || ch == "c1" }
 	for cmd, want := range map[string]bool{
 		`ir api reaction.create channel_id=c1 message_id=12 emoji=👍`:           true,
-		`ir api reaction.create emoji_id=🎉 channel_id=self message_id=3`:       true,
+		`ir api reaction.create emoji_id=🎉 channel_id=s1 message_id=3`:         true,
 		`ir api reaction.create channel_id=c1 message_id=12 emoji='❤️'`:        true,
 		`ir api reaction.create channel_id=c2 message_id=12 emoji=👍`:           false, // not a channel it is in
 		`ir api reaction.create channel_id=c1 message_id=x emoji=👍`:            false,

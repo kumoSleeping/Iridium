@@ -16,6 +16,7 @@ import { choicesQ, draftDefault, type At } from "./chat/choices";
 import { t } from "./i18n";
 import { zh, type Key } from "./i18n/zh";
 import { getCarried, useCarried } from "./store";
+import { keptQuery } from "./data";
 import { agentName, cn, Logo } from "./ui";
 
 /** The model and effort menu an agent not yet started has (the invite menu's): fetched when a
@@ -31,7 +32,7 @@ export function useRoles(): Role[] {
 }
 
 /** The roles as asked for, by the carried "roles" count. */
-const rolesQ = (v: number) => ({ queryKey: ["roles", v], queryFn: () => api.roles().catch((e) => (missing(e) ? [] : Promise.reject(e))), staleTime: 30_000 });
+const rolesQ = (v: number) => ({ queryKey: ["roles", v], staleTime: 30_000, ...keptQuery("roles", () => api.roles().catch((e) => (missing(e) ? [] : Promise.reject(e)))) });
 
 /** The roles asked for ahead (kumo, 2026-11-16: a row that comes after the "+" opened pushes
  *  the popover; docs/前端设计规范.md "后到的不撑开"): once the page is idle, and as the "+"

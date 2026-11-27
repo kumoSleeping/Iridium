@@ -21,7 +21,8 @@ func TestOwn(t *testing.T) {
 		`{"o":50,"t":1004,"kind":"result","id":"c1","text":"a.txt\n"}`,
 		`{"o":60,"t":1005,"kind":"assistant","text":"Done."}`,
 		`{"o":70,"t":1006,"kind":"system","event":"interrupted","text":"Interrupted"}`,
-		`{"o":80,"t":1007,"kind":"later-kind","text":"?"}`,
+		`{"o":75,"t":1007,"kind":"system","event":"compact","compact":{"before":332394,"ms":15000}}`,
+		`{"o":80,"t":1008,"kind":"later-kind","text":"?"}`,
 	}
 	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -37,7 +38,7 @@ func TestOwn(t *testing.T) {
 		kinds = append(kinds, string(b.Kind))
 	}
 	// The tool's result goes with its call on the same page.
-	if got := strings.Join(kinds, " "); got != "user thinking tool assistant system" {
+	if got := strings.Join(kinds, " "); got != "user thinking tool assistant system system" {
 		t.Fatalf("blocks %s: %+v", got, page.Blocks)
 	}
 	u := page.Blocks[0]
@@ -49,6 +50,9 @@ func TestOwn(t *testing.T) {
 	}
 	if s := page.Blocks[4]; s.Event != api.SystemEventInterrupted {
 		t.Errorf("system %+v", s)
+	}
+	if c := page.Blocks[5]; c.Event != api.SystemEventCompact || c.Compact == nil || c.Compact.Before != 332394 || c.Compact.Ms != 15000 {
+		t.Errorf("compaction %+v", c) // no words of its own
 	}
 	if title, _ := f.Title(); title != "Fixing It" {
 		t.Errorf("title %q", title)

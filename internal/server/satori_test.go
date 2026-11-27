@@ -107,7 +107,7 @@ func TestSatori(t *testing.T) {
 		empty := t.TempDir()
 		s.Discover = discover.New(discover.Options{ClaudeDir: cfg.ClaudeHome, CodexHome: empty, PiSessions: empty, DshHome: empty, Store: s.st, Hub: s.hub, Procs: discover.ProcFS{Root: empty}, Logf: t.Logf})
 	})
-	app := l.newApp("bridge", true)
+	app := l.newApp("bridge")
 
 	// A login the first time: login_pending, as anywhere; allowed, it speaks.
 	if code, e := l.satoriCall(app, "alice", "login.get", nil, nil); code != 403 || e.Code != "login_pending" {

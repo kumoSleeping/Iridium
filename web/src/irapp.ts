@@ -38,6 +38,7 @@ export type AppState = {
   };
   title?: string; // this Iridium's name in the app (its windows' titles); "": Iridium
   os?: string; // the app's system: darwin, windows, linux
+  rail?: boolean; // the app's own key is its window's rail (internal/desktop/rail.go): none here
   error?: string; // what the last ask came to
   notice?: string;
   code?: string; // a browser login's code to check
@@ -121,6 +122,8 @@ window.addEventListener("ir-app", (e) => {
     download?: Download;
   };
   if (d.download) return showDownload(d.download);
+  // Favorites and the pages side by side: crossfav.ts's, not the app's state.
+  if ("favs" in d || "favput" in d || "favdrop" in d || "assemble" in d || "sidebarW" in d) return;
   // The window maximised or not (chrome.go followMax): its key's look alone.
   if (typeof d.max === "boolean") {
     max = d.max;

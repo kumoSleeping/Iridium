@@ -93,8 +93,8 @@ func New(o Options) *Driver {
 	return &Driver{emitFn: o.Emit, prefix: o.IDPrefix, logf: o.Logf, pending: map[string]chan ctlResponse{}, state: agent.Idle, caps: map[string]bool{}, unknown: map[string]int{}}
 }
 
-// titleRule lets a hosted session name itself, and nothing else of the channel.
-const titleRule = "Bash(ir api channel.update channel_id=self:*)"
+// titleRule lets hosted session id name itself, and nothing else of the channel.
+func titleRule(id string) string { return "Bash(ir api channel.update channel_id=" + id + ":*)" }
 
 // Spawn gives the holder's spec. Never --bare: it skips the subscription login. No
 // --setting-sources: the user's settings, plugins, skills, MCP servers and hooks load as in a
@@ -129,7 +129,10 @@ func (d *Driver) Spawn(o agent.SpawnOptions) (hold.Spec, error) {
 	// The title the system prompt asks for (session.titleLine) is let through here: auto mode's
 	// classifier does not count the system prompt as the user asking, and refused it. The rule
 	// joins the user's own; it does not replace them.
-	settings := map[string]any{"permissions": map[string]any{"allow": []string{titleRule}}}
+	settings := map[string]any{}
+	if o.Session != "" {
+		settings["permissions"] = map[string]any{"allow": []string{titleRule(o.Session)}}
+	}
 	if o.Ultracode != nil {
 		// Not --effort ultracode, which pins xhigh; false too, over the user's own settings.
 		settings["ultracode"] = *o.Ultracode

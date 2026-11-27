@@ -32,12 +32,12 @@ export function useWorkspaces(): { data: Workspace[] | null | undefined } {
   const q = useQuery({ queryKey: ["workspaces"], queryFn: orNone(api.workspaces), staleTime: Infinity, enabled: carried === undefined });
   return { data: carried ?? q.data };
 }
-export const agentsQ = { queryKey: ["agents"], queryFn: orNone(api.agents), staleTime: Infinity };
+export const agentsQ = { queryKey: ["agents"], staleTime: 3_600_000, ...keptQuery("agents", orNone(api.agents)) };
 /** One's own card: 编辑资料 of one's own card. */
 export const selfQ = { queryKey: ["self"], queryFn: () => api.self(), retry: false };
 export const useAgents = () => useQuery(agentsQ);
 export const useAgent = (a: string) => useAgents().data?.find((x: AgentInfo) => x.agent === a);
-export const useSettings = () => useQuery({ queryKey: ["settings"], queryFn: orNone(api.settings), staleTime: 60_000 });
+export const useSettings = () => useQuery({ queryKey: ["settings"], staleTime: 60_000, ...keptQuery("settings", orNone(api.settings)) });
 /** The update: as the stream carries it, else as asked for. */
 export function useUpdate(): { data: UpdateState | null | undefined } {
   const carried = useUpdateState();
@@ -48,7 +48,7 @@ export function useUpdate(): { data: UpdateState | null | undefined } {
 export const useHome = () => useQuery({ queryKey: ["folders", "~"], queryFn: () => api.folders("~"), staleTime: 60_000, select: (f) => (setHome(f.path), f.path) });
 
 /** The host, as the page is with no gate in front (and while /v1/internal/me has not answered). */
-export const LOCAL_ME: Me = { id: "local", name: "Iridium", app: "local", host: true, public: false, usedToday: 0, rules: { claudeOwner: { by: "local", at: 0 } } };
+export const LOCAL_ME: Me = { id: "local", name: "Iridium", app: "local", host: true, public: false, usedToday: 0 };
 
 /** What this browser kept from the page before, for its first draw: who this is, whose faces the
  *  messages have. A channel is drawn from this device's copy at once as the page loads; without
@@ -69,6 +69,17 @@ function keep<T>(key: string, v: T): T {
     // A full or closed store: not kept.
   }
   return v;
+}
+/** A query kept in this browser too (kumo, 2026-11-27: 管理 and the usage drew empty, then filled
+ *  as their answers came): drawn at once from the copy the page before kept, asked afresh at once
+ *  all the same, the answer kept again. name: its place in the store. */
+export function keptQuery<T>(name: string, fn: () => Promise<T>) {
+  const key = `ir:q1:${name}`;
+  return {
+    queryFn: async () => keep(key, await fn()),
+    initialData: () => kept<T>(key),
+    initialDataUpdatedAt: 0,
+  };
 }
 const ME_KEY = "ir:me1";
 const WHO_KEY = "ir:who1";
@@ -127,7 +138,7 @@ export function useApps() {
     terminalsSeen = changed; // once for all the hook's users
     if (!first) void qc.invalidateQueries({ queryKey: ["apps"] });
   }, [changed, qc]);
-  return useQuery({ queryKey: ["apps"], queryFn: orNone(api.apps), staleTime: 60_000, enabled: may });
+  return useQuery({ queryKey: ["apps"], staleTime: 60_000, enabled: may, ...keptQuery("apps", orNone(api.apps)) });
 }
 
 /** A computer (k_glossary "电脑"): the host, or an app that paired as one or has said its system.

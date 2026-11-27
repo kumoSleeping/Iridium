@@ -151,7 +151,7 @@ var all = []Info{
 			return claude.New(claude.Options{Emit: emit, Logf: logf})
 		},
 		Find: func(w Where) (string, error) { return transcript.Find(w.ClaudeHome, w.ID) },
-		// At an executor (docs/exec.md), under the owner's own login there: the session's project
+		// At an executor (docs/exec.md), under the login there: the session's project
 		// directory, by its cwd. One cut short by Claude (a path past 200) is not found.
 		FindRemote: func(w RemoteWhere) (string, error) {
 			if !transcript.ValidID(w.ID) {
@@ -178,7 +178,7 @@ var all = []Info{
 	{
 		Agent: api.AgentCodex, Name: "Codex",
 		Modes: codex.Modes, DefaultMode: codex.DefaultMode, ModeSwitch: "next turn", Quota: true, OwnID: true,
-		Efforts: []string{"minimal", "low", "medium", "high", "xhigh"},
+		Efforts: []string{"minimal", "low", "medium", "high", "xhigh", "max", "ultra"},
 		New: func(emit func(agent.Event), logf func(string, ...any)) agent.Driver {
 			return codex.New(codex.Options{Emit: emit, Logf: logf})
 		},

@@ -11,7 +11,7 @@
 import { Menu } from "@base-ui/react/menu";
 import { Archive, ArchiveRestore, Bookmark, BookmarkMinus, BookmarkX, Bot, Check, ChevronRight, Copy, Ellipsis, Ungroup, Folder, FolderOpen, ListCollapse, Moon, Pencil, Pin, PinOff, Plus, RefreshCw, Square, FolderPlus } from "lucide-react";
 import { ConfirmIcon, confirmName, confirmTitle } from "./confirmname";
-import { Fragment, lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode, type RefObject } from "react";
+import { Fragment, lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactElement, type ReactNode, type RefObject } from "react";
 import { api } from "./api/client";
 import type { Agent, Color, Guilds, Need, Session } from "./api/types.gen";
 import { NO_GUILDS, placesOf, withGroupOrder, withMark, type Places } from "./guilds";
@@ -29,12 +29,14 @@ import { manages, useMachines, useMe, useSaidLine, useUpdate } from "./data";
 import { agentName, ago, cn, fine, IconKey, IrMark, keep, kept, Lamp, lampOf, Logo, own, sessionStatusText, statusText, tilde, Tip, titleOf, useEver, untitled, useLongPress, useMenuAt, useMinute, usePointAnchor, MenuPortal } from "./ui";
 import { AppName } from "./appkey";
 import { MAKING, patchSessions } from "./pending";
-import { clearFavorites, isFavorite, placeFavorite, setFavorite, setFavoritesColor, setFavoritesName, useFavorites, useFavoritesColor, useFavoritesName } from "./favorites";
+import { clearFavorites, favoriteAt, inOpenFavorites, isFavorite, placeFavorite, setFavorite, setFavoritesColor, setFavoritesName, useFavorites, useFavoritesColor, useFavoritesName } from "./favorites";
+import { crossAsk, crossOrder, favKey, keyId, keyServer, tellFavs, tellSide, useCross, type FavItem, type FavServer } from "./crossfav";
+import { useApp } from "./irapp";
 import { PLACE_DRAG, SESSION_DRAG } from "./chat/refs";
-import { badge, isQuiet, setQuiet, useAt, useQuiet, useUnread } from "./unread";
+import { atOf, badge, isQuiet, onUnread, setQuiet, unreadOf, useAt, useQuiet, useUnread } from "./unread";
 import { Face, FaceStack } from "./chat/channel/face";
 import { CloudBadge, MachineFace, shownPath, useLate, useMachine, type Machine } from "./machines";
-import { getCarried, setCarried, useCarried, useLink, useList } from "./store";
+import { getCarried, setCarried, useCarried, useLink, useList, useListed } from "./store";
 import { channelLamp, isMulti } from "./chat/channel/lib";
 import { useVoiceItem, VoiceDock, VoiceMark } from "./voice/dock";
 import { ANY, dropMark, dropTarget, endDrag, listDrop, pinFolder, placeFolder, placeGroup as placeGroupKey, placeSession, startDrag, touchDrag, useDragged, useOver, type Dragged, type Edge, type Over } from "./reorder";
@@ -87,7 +89,9 @@ type Props = {
  *  user, 2026-11-06). The width is --sidebar-w on the page too: the settings dialog sizes by it. */
 const WIDTH = { min: 220, max: 640, start: 292 };
 const WIDTH_KEY = "ir.sidebarWidth";
-const clampWidth = (w: number) => Math.round(Math.min(WIDTH.max, innerWidth * 0.6, Math.max(WIDTH.min, w)));
+// Beside another page in the desktop app (crossfav.ts, part side) the page is the list alone, as
+// wide as it: no share of the page's width to keep for the chat.
+const clampWidth = (w: number) => Math.round(Math.min(WIDTH.max, document.documentElement.dataset.irPart === "side" ? Infinity : innerWidth * 0.6, Math.max(WIDTH.min, w)));
 
 /** The line to the main pane, fading out toward its top and its foot; dragged, it sets how wide
  *  the sidebar is, within WIDTH; a double click puts it back; ← → by a step on the keyboard. */
@@ -193,6 +197,47 @@ export function Sidebar(p: Props) {
     const s = everyone?.find((x) => x.id === id);
     return s && !s.archived && !s.subagent ? [s] : [];
   });
+  // In the desktop app, every Iridium's favorites in one order (crossfav.ts): this one's told to
+  // the app, the others' drawn among them, each with its Iridium's face after its name.
+  useTellFavs(favs);
+  const cross = useCross();
+  useEffect(() => void (cross && tellSide(width)), [width, !!cross]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Dragged by the app's own line while beside another page (its own line hidden then).
+  useEffect(() => {
+    const h = (e: Event) => {
+      const v = clampWidth((e as CustomEvent<number>).detail);
+      setWidth(v);
+      keep(WIDTH_KEY, String(v));
+    };
+    window.addEventListener("ir-side-width", h);
+    return () => window.removeEventListener("ir-side-width", h);
+  }, []);
+  type Fav = { key: string; s: Session; item?: never; srv?: never } | { key: string; s?: never; item: FavItem; srv: FavServer };
+  const mixed: Fav[] | null = cross
+    ? (() => {
+        const own = new Map(favs.map((s) => [favKey(cross.self, s.id), s]));
+        const others = new Map(Object.entries(cross.items).flatMap(([server, items]) => (server === cross.self || !cross.servers[server] ? [] : items.map((it) => [favKey(server, it.id), { item: it, srv: cross.servers[server]! }] as const))));
+        const out: Fav[] = [];
+        for (const k of cross.order) {
+          const s = own.get(k);
+          if (s) (out.push({ key: k, s }), own.delete(k));
+          else if (others.has(k)) out.push({ key: k, ...others.get(k)! });
+        }
+        for (const [k, s] of own) out.push({ key: k, s });
+        return out;
+      })()
+    : null;
+  // A row dropped among them (one of them, or one of this Iridium's from anywhere): the order told
+  // to the app, which has each Iridium put its own so; one not favoured yet is, here.
+  const placeCross = useCallback(
+    (dragged: string, target: string, edge: Edge) => {
+      if (!cross || !mixed) return;
+      const dk = dragged.includes("#") ? dragged : favKey(cross.self, dragged);
+      if (!dragged.includes("#") && !isFavorite(dragged)) setFavorite(dragged, true);
+      crossOrder(favoriteAt(mixed.map((f) => f.key), dk, target, edge));
+    },
+    [cross, mixed],
+  );
   const favOpen = p.expanded(FAV);
   const shape = [favs.length ? `${favOpen}:${favOpen ? favs.map((s) => s.id).join(",") : ""}` : "", loose.map((c) => c.id).join(","), ...p.tree.workspaces.map((w) => `${w.key}:${p.expanded(w.key)}:${foldShape(roots(w), w.key)}:${allFolders(tops(w)).map((f) => `${f.key}${p.expanded(f.key)}${foldShape(f.sessions, f.key)}`).join(",")}`), archOpen, p.tree.archived.length, archShown].join("|");
   useMoves(list, true)(shape);
@@ -278,8 +323,14 @@ export function Sidebar(p: Props) {
   // group and folders opened, the list scrolled to it. A session in a group far down was opened
   // and nowhere to be seen (kumo, 2026-11-23). A row already in sight stays where it is.
   const selListed = listed.has(p.selected) && !hungAt.has(p.selected);
+  // Opened from my favorites (in sight there): its row there in sight, its group left as it is.
+  const selFav = inOpenFavorites(p.selected, favOpen, favs.map((s) => s.id));
   useEffect(() => {
     if (!selListed || p.searching) return;
+    if (selFav) {
+      requestAnimationFrame(() => list.current?.querySelector(`[data-flip="${CSS.escape(`fav:${p.selected}`)}"]`)?.scrollIntoView({ block: "nearest", behavior: "smooth" }));
+      return;
+    }
     const { tree, expanded, toggle } = now.current;
     const w = tree.workspaces.find((x) => x.rows.some((r) => (r.kind === "session" ? r.s.id === p.selected : folderSessions(r.f).some((s) => s.id === p.selected))));
     if (!w) return;
@@ -454,7 +505,7 @@ export function Sidebar(p: Props) {
   );
 
   const aside = (
-    <aside className={cn("relative flex h-full flex-col select-none [-webkit-touch-callout:none]", p.phone ? "w-full" : "shrink-0")} style={p.phone ? undefined : { width }}>
+    <aside className={cn("relative flex h-full flex-col select-none [-webkit-touch-callout:none]", p.phone ? "w-full" : "shrink-0 bg-rail [--row-bg:var(--rail)]")} style={p.phone ? undefined : { width }}>
       {!p.phone && <Divider width={width} setWidth={setWidth} />}
       {head}
       {/* While searching, the jump box in the tree's place; the tree stays mounted, hidden, and
@@ -464,7 +515,33 @@ export function Sidebar(p: Props) {
         <DropLine list={list} />
         {/* My favorites, first (favorites.ts): there while it holds any. A session dragged from
             anywhere onto its row goes first in it, onto one of its rows beside that one. */}
-        {favs.length > 0 && (
+        {mixed && mixed.length > 0 && (
+          <div className="mt-1" role="group">
+            <FavHead open={favOpen} onToggle={() => p.toggle(FAV)} first={favs[0]?.id ?? ""} />
+            {favOpen &&
+              mixed.map((f) =>
+                f.s ? (
+                  <SessionRow
+                    key={`fav:${f.s.id}`}
+                    s={f.s}
+                    depth={0}
+                    flip={`fav:${f.s.id}`}
+                    selected={p.selected === f.s.id}
+                    onSelect={p.onSelect}
+                    chatCode={p.chatCode}
+                    kidsAt={!!p.tree.kids.get(f.s.id)?.length || !!p.tree.runs.get(f.s.id)?.length}
+                    asked={asked.has(f.s.id)}
+                    lane={FAV}
+                    anyLane
+                    place={(id, target, edge) => placeCross(id, favKey(cross!.self, target.id), edge)}
+                  />
+                ) : (
+                  <CrossRow key={`fav:${f.key}`} k={f.key} item={f.item} srv={f.srv} place={placeCross} />
+                ),
+              )}
+          </div>
+        )}
+        {!mixed && favs.length > 0 && (
           <div className="mt-1" role="group">
             <FavHead open={favOpen} onToggle={() => p.toggle(FAV)} first={favs[0]!.id} />
             {favOpen &&
@@ -536,6 +613,7 @@ export function Sidebar(p: Props) {
   // the rows cut in half); the box kept, the list in it keeping its own width.
   return (
     <div
+      data-ir-side=""
       inert={p.shut || undefined}
       className={cn("relative h-full shrink-0", p.shut && "overflow-hidden")}
       style={{ width: p.shut ? 0 : width }}
@@ -703,8 +781,9 @@ function Row({ depth, flip, chevron, expanded, icon, label, end, selected, onCli
       }}
       className={cn(
         "group relative flex cursor-default rounded-md pr-2 transition-opacity duration-(--dur-2) select-none",
-        // The row open: a fill of its own, a step darker than a hover's, its words as any row's (kumo, 2026-11-26: no bold).
-        selected ? "bg-fill-2 [--row-bg:var(--fill-2)]" : "hover:bg-fill hover:[--row-bg:var(--fill)]",
+        // The row open: white paper lifted off the rail; under the pointer a faint wash of ink (kumo,
+        // 2026-11-27, 设计's 方案一; styles.css --picked); its words as any row's (2026-11-26: no bold).
+        selected ? "g-picked [--row-bg:var(--picked)]" : "hover:g-picked",
         face ? "items-center py-1.5 pointer-coarse:py-2" : two ? "items-start py-[5px] pointer-coarse:py-2" : "h-[30px] items-center pointer-coarse:h-10",
         faded && "opacity-60",
         dim && "opacity-40",
@@ -1014,7 +1093,7 @@ let saidNow: ReturnType<typeof useSaidLine> = () => undefined;
 function RowFace({ s, group, solo, unread, quiet }: { s: Session; group?: { id: string; agent: Agent }[]; solo?: { id: string; agent: Agent }; unread: number; quiet: boolean }) {
   const logo = group ? <FaceStack members={group} size={36} /> : solo ? <Face id={solo.id} agent={solo.agent} size={36} logo={20} low /> : <Logo agent={s.agent} size={20} />;
   return (
-    <span className={cn("relative grid size-9 place-items-center rounded-full", !group && "bg-fill")}>
+    <span className={cn("relative grid size-9 place-items-center rounded-full", !group && "g-disc")}>
       <Face id={s.id} agent={solo?.agent ?? s.agent} size={36} none={logo} className="place-items-center" low channel />
       {unread > 0 && (
         <span
@@ -1025,6 +1104,184 @@ function RowFace({ s, group, solo, unread, quiet }: { s: Session; group?: { id: 
         </span>
       )}
     </span>
+  );
+}
+
+// Small data: URLs of this Iridium's favorited sessions' faces (by their versioned URL), so
+// another Iridium's sidebar shows the channel's or agent's real face without cross-origin cookies.
+const favFaceCache = new Map<string, string>();
+const favFaceLoading = new Set<string>();
+function readFavFace(src: string, done: () => void): string {
+  const hit = favFaceCache.get(src);
+  if (hit !== undefined) return hit;
+  if (favFaceLoading.has(src) || typeof fetch !== "function" || typeof createImageBitmap !== "function") return "";
+  favFaceLoading.add(src);
+  void fetch(src)
+    .then((r) => (r.ok ? r.blob() : null))
+    .then(async (blob) => {
+      if (!blob) return "";
+      const bmp = await createImageBitmap(blob);
+      try {
+        const s = Math.min(bmp.width, bmp.height);
+        const cv = document.createElement("canvas");
+        cv.width = 72;
+        cv.height = 72;
+        cv.getContext("2d")?.drawImage(bmp, (bmp.width - s) / 2, (bmp.height - s) / 2, s, s, 0, 0, 72, 72);
+        const out = cv.toDataURL("image/webp", 0.82);
+        return out.startsWith("data:image/") ? out : cv.toDataURL("image/jpeg", 0.82);
+      } finally {
+        bmp.close();
+      }
+    })
+    .then((data) => {
+      favFaceCache.set(src, data);
+      if (data) done();
+    })
+    .catch(() => favFaceCache.set(src, ""))
+    .finally(() => favFaceLoading.delete(src));
+  return "";
+}
+
+/** The versioned face URL of session s (channel's own, else solo agent's, else session's), or ""
+ *  when the server says it has none. */
+function favFaceUrl(s: Session, faces: Record<string, string> | undefined, count: number): string {
+  const ch = faces?.[`c:${s.id}`];
+  if (ch) return `/v1/internal/channels/${encodeURIComponent(s.id)}/avatar?of=channel&v=${ch}`;
+  const soloId = s.bare && s.agents?.length === 1 ? s.agents[0]!.session : s.id;
+  const own = faces?.[soloId];
+  if (own) return `/v1/internal/channels/${encodeURIComponent(soloId)}/avatar?v=${own}`;
+  if (ch === "" && own === "") return "";
+  if (ch !== "") return `/v1/internal/channels/${encodeURIComponent(s.id)}/avatar?of=channel&v=n${count}`;
+  return "";
+}
+
+/** This Iridium's favorites told to the desktop app (crossfav.ts), as their rows show them: again
+ *  as they change, or what is unread does. Nothing in a browser. */
+function useTellFavs(favs: Session[]) {
+  const inApp = !!useApp();
+  const faces = useCarried<Record<string, string>>("faces");
+  const avatars = useCarried<number>("avatars") ?? 0;
+  const [tick, setTick] = useState(0);
+  useEffect(() => onUnread(() => setTick((n) => n + 1)), []);
+  useEffect(() => {
+    if (!inApp) return;
+    const bump = () => setTick((n) => n + 1);
+    tellFavs(
+      favs.map((s) => {
+        const speaker = s.last?.nick || s.agents?.find((a) => a.session === s.id)?.nick || agentName(s.agent);
+        const at = atOf(s.id);
+        const src = favFaceUrl(s, faces, avatars);
+        const face = src ? readFavFace(src, bump) : "";
+        return {
+          id: s.id,
+          title: titleOf(s),
+          untitled: untitled(s) || undefined,
+          agent: s.agent,
+          status: lampOf(s),
+          unread: unreadOf(s.id),
+          quiet: isQuiet(s.id) || undefined,
+          at: at ? (at.everyone ? "all" : "me") : undefined,
+          line: s.last ? (s.last.role === "user" ? (saidNow(s.last, s) ?? "") : `${speaker}: ${s.last.text}`) : s.bare ? "" : agentName(s.agent),
+          updatedAt: s.updatedAt,
+          color: s.color || undefined,
+          face: face || undefined,
+        } satisfies FavItem;
+      }),
+    );
+  });
+  void tick;
+}
+
+/** Another Iridium's face, as a machine's is after a row's name (MachineFace): its own, else its
+ *  name's first letter. */
+function ServerFace({ srv, size = 14, className }: { srv: FavServer; size?: number; className?: string }) {
+  return srv.face ? (
+    <img src={srv.face} alt="" width={size} height={size} className={cn("shrink-0 rounded-full object-cover", className)} />
+  ) : (
+    <span className={cn("grid shrink-0 place-items-center rounded-full bg-fill-2 text-[9px] leading-none font-semibold text-ink-2", className)} style={{ width: size, height: size }}>
+      {srv.local ? "Ir" : [...srv.title][0]?.toUpperCase()}
+    </span>
+  );
+}
+
+/** A favorite of another Iridium (crossfav.ts), as a session's row is drawn (SessionRow): its
+ *  agent's mark, its unread count on it, its name with its Iridium's face after it, who said what
+ *  last, its time or its lamp. Pressed, it is shown beside this list (the app's assemble.go);
+ *  its menu: 打开, 在新窗口打开, 取消收藏 (taken off that Iridium's favorites). Dragged among the
+ *  favorites, it moves there. */
+function CrossRow({ k, item, srv, place }: { k: string; item: FavItem; srv: FavServer; place: (dragged: string, target: string, edge: Edge) => void }) {
+  useLang();
+  const now = useMinute();
+  const [menuAt, setMenuAt] = useMenuAt();
+  const anchor = usePointAnchor(menuAt);
+  const server = keyServer(k);
+  const id = keyId(k);
+  const busy = BUSY.has(item.status);
+  const fresh = item.unread > 0 && (!item.quiet || !!item.at) && item.status === "idle";
+  const when = item.updatedAt > 0 && <span className={cn("text-xs whitespace-nowrap tabular-nums", fresh ? "font-medium text-ink" : "text-ink-4")}>{ago(item.updatedAt, now, true)}</span>;
+  const dim = useDragged("s", k);
+  const items: MenuItem[] = [
+    { icon: <ChevronRight size={15} />, label: t("menu.openHere"), run: () => crossAsk("open", server, id) },
+    { icon: <Copy size={15} />, label: t("menu.openWindow"), run: () => crossAsk("away", server, id) },
+    { icon: <BookmarkMinus size={15} />, label: t("menu.unfavorite"), run: () => crossAsk("drop", server, id) },
+  ];
+  return (
+    <>
+      <Row
+        depth={0}
+        flip={`fav:${k}`}
+        selected={false}
+        onClick={() => crossAsk("open", server, id)}
+        aria={`${item.title}, ${srv.title}${item.unread ? `, ${t("status.unreadCount", { n: badge(item.unread) })}` : ""}`}
+        icon={
+          <span className="relative grid size-9 place-items-center rounded-full g-disc">
+            {item.face ? <img src={item.face} alt="" draggable={false} className="size-9 rounded-full object-cover" /> : <Logo agent={item.agent as Agent} size={20} />}
+            {item.unread > 0 && (
+              <span
+                className={cn("g-pop absolute -top-1 -right-1.5 grid h-4 min-w-4 place-items-center rounded-full px-1 text-[10px] leading-none font-semibold tabular-nums", item.quiet && !item.at ? "bg-ink-4" : "bg-err")}
+                style={{ color: "rgb(255 255 255 / 0.92)", boxShadow: "0 0 0 1.5px var(--row-bg, var(--paper))" }}
+              >
+                {badge(item.unread)}
+              </span>
+            )}
+          </span>
+        }
+        label={
+          <span className="flex min-w-0 items-baseline">
+            <Marked color={item.color}>{item.untitled ? <span className="text-ink-3">{item.title}</span> : item.title}</Marked>
+            <Tip label={srv.title} side="bottom">
+              <ServerFace srv={srv} className="ml-1.5 -translate-y-[1.5px] self-center" />
+            </Tip>
+          </span>
+        }
+        end={busy || item.status !== "idle" ? <Lamp status={item.status} /> : when || undefined}
+        sub={item.at ? <><span className="text-err">{t(item.at === "all" ? "row.atAll" : "row.atMe")}</span>{item.line ? ` ${item.line}` : ""}</> : item.line}
+        face
+        dim={dim}
+        extra={{
+          onContextMenu: (e: React.MouseEvent) => {
+            if (!own(e)) return;
+            e.preventDefault();
+            setMenuAt({ x: e.clientX, y: e.clientY });
+          },
+          draggable: fine(),
+          onDragStart: (e: React.DragEvent) => {
+            e.dataTransfer.setData("text/plain", item.title);
+            e.dataTransfer.effectAllowed = "move";
+            startDrag({ kind: "s", id: k, lane: FAV }, e.currentTarget as HTMLElement);
+          },
+          onDragEnd: endDrag,
+          ...dropTarget("s", k, FAV, (d: Dragged, edge) => place(d.id, k, edge), undefined, true),
+        }}
+      />
+      <Menu.Root open={menuAt !== null} onOpenChange={(o) => !o && setMenuAt(null)}>
+        <MenuPortal>
+          <Menu.Positioner anchor={anchor} side="bottom" align="start" sideOffset={4} collisionPadding={8} className="z-50">
+            <MenuItems items={items} />
+          </Menu.Positioner>
+        </MenuPortal>
+      </Menu.Root>
+    </>
   );
 }
 
@@ -1041,10 +1298,11 @@ const SessionRow = memo(function SessionRow({ s, where, depth, flip, selected, o
   const title = titleOf(s);
   // A confirmation its agent asked for waits on you too, while it is not at work.
   // A channel's agents (one or several): its lamp is theirs, lit while any of them works.
-  const all = useCarried<Session[]>(s.agents?.length ? "list" : null);
   const ags = s.agents;
   const multi = isMulti(s) ? ags! : undefined;
-  const allMembers = ags?.map((a) => all?.find((x) => x.id === a.session));
+  // Those of the list alone: the row is drawn again as one of them changes, not as any row does.
+  const agIds = useMemo(() => ags?.map((a) => a.session), [ags]);
+  const allMembers = useListed(agIds);
   const members = multi ? allMembers : undefined;
   const soloRow = s.bare && ags?.length === 1 ? ags[0] : undefined;
   const soloAgent = soloRow ? (allMembers?.[0]?.agent ?? soloRow.agent ?? s.agent) : undefined;
@@ -1390,7 +1648,7 @@ export function MenuItems({ lead = [], items, tags, children, foot, label, final
     };
     const label = (
       <>
-        <span className={red ? "text-err" : "text-ink-2"}>{it.icon}</span>
+        {it.icon != null && <span className={red ? "text-err" : "text-ink-2"}>{it.icon}</span>}
         <span className="min-w-0 truncate">{red ? it.sure : it.label}</span>
       </>
     );

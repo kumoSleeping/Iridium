@@ -35,6 +35,8 @@ type Entry struct {
 	// Content: result, the pictures it gave the model, as content blocks ({type: image, data,
 	// mimeType}: what pictures reads), beside its Text.
 	Content json.RawMessage `json:"content,omitempty"`
+	// Compact: system, a compaction's figures.
+	Compact *api.Compaction `json:"compact,omitempty"`
 }
 
 // Entry kinds besides api.BlockKind's: the agent's own title for the session.
@@ -89,10 +91,10 @@ func ownBlocks(off int64, raw []byte, max int, sources Sources) []api.Block {
 		b.Text, b.Length = clip(e.Text, max)
 		b.Images = pictures(e.Content, max < 0)
 	case api.BlockKindSystem:
-		if strings.TrimSpace(e.Text) == "" {
+		if strings.TrimSpace(e.Text) == "" && e.Compact == nil {
 			return nil
 		}
-		b.Kind, b.Event = api.BlockKindSystem, api.SystemEvent(e.Event)
+		b.Kind, b.Event, b.Compact = api.BlockKindSystem, api.SystemEvent(e.Event), e.Compact
 		b.Text, b.Length = clip(e.Text, max)
 	default:
 		return nil // a title, or a kind of a later Iridium

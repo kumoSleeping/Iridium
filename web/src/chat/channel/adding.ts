@@ -33,3 +33,13 @@ export const listKept = (id: string) => still.has(id);
 // there from its first draw, the empty pane's own going on in it: splash/).
 const made = new Set<string>();
 export const justMade = (id: string) => made.has(id);
+
+// The phone's ⋯ 添加 Agent (kumo, 2026-11-26): the panel the computer's + opens, at the bar's right.
+const pressed = new Set<(id: string) => void>();
+/** Open channel id's 添加 Agent panel. */
+export const pressAdd = (id: string) => pressed.forEach((f) => f(id));
+/** Told as one is pressed. Returns what stops it. */
+export function onPressAdd(fn: (id: string) => void): () => void {
+  pressed.add(fn);
+  return () => void pressed.delete(fn);
+}

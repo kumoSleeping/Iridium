@@ -12,7 +12,7 @@ import { WinKeyPair } from "./winkey";
 
 export function AppKey() {
   const app = useApp();
-  if (!app) return null;
+  if (!app || app.rail) return null;
   return (
     <IconKey
       label={t("app.title")}

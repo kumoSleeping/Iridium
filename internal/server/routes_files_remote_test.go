@@ -25,7 +25,7 @@ func TestCopyAcrossMachines(t *testing.T) {
 	hub := &remote.Hub{}
 	l := startWith(t, func(s *Server, _ config.Config, _ string) { s.Remote = hub; s.WatchMachines() })
 	var tok api.Token
-	tok = l.newApp("pc", false)
+	tok = l.newApp("pc")
 	there := t.TempDir()
 	exe, err := executor.New(executor.Options{URL: "ws" + strings.TrimPrefix(l.base, "http") + "/v1/internal/exec", Token: tok.Token, State: filepath.Join(there, "state"), Logf: t.Logf})
 	if err != nil {

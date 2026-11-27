@@ -8,7 +8,7 @@ const fish: Role = { id: "r1", name: "大肥鱼", agent: "dsh", model: "deepseek
 const started = picked(fish, { effort: "high" });
 const models: Model[] = [
   { value: "deepseek/pro", name: "Pro", default: true },
-  { value: "deepseek/flash", name: "Flash", effortNames: { ultra: "Ultra" } },
+  { value: "deepseek/flash", name: "Flash", effortNames: { future: "Future" } },
   { value: "alias", name: "Alias", resolved: "deepseek/full-id" },
 ] as Model[];
 
@@ -32,8 +32,8 @@ describe("a role's line", () => {
     expect(roleLine({ id: "r2", name: "x", agent: "claude" })).toBe("Claude");
   });
   test("an effort the page has no name for: the model's name of it, else as it is", () => {
-    expect(effortName("ultra", models[1])).toBe("Ultra");
-    expect(effortName("ultra")).toBe("ultra");
+    expect(effortName("future", models[1])).toBe("Future");
+    expect(effortName("future")).toBe("future");
   });
 });
 

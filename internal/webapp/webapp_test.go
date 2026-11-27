@@ -560,10 +560,9 @@ func TestInviteExpiry(t *testing.T) {
 	wantStatus(t, h.do(req{method: "POST", path: "/_ir/api/join/check", body: joinRequest{Token: tokenOf(t, inv.URL)}}), http.StatusForbidden)
 }
 
-// Joined says which panel is the owner's own: the first one, and one whose invite said --owner;
-// any other is not. Once a panel is there, the setup link is gone and not listed, whichever
-// invite the panel came by.
-func TestJoinedOwnerAndSetup(t *testing.T) {
+// Joined carries the invite's perms. Once a panel is there, the setup link is gone and not
+// listed, whichever invite the panel came by.
+func TestJoinedPermsAndSetup(t *testing.T) {
 	h := newHarness(t, testOrigin)
 	h.setupToken()
 	first, _ := h.w.CreateInvite("", nil) // a plain invite, used while the setup link waits
@@ -574,21 +573,21 @@ func TestJoinedOwnerAndSetup(t *testing.T) {
 	if acc := h.access(); len(acc.Invites) != 0 {
 		t.Fatalf("invites after the first panel: %+v", acc.Invites)
 	}
-	owner, _ := h.w.CreateInvite("pad", []byte(`{"x":1}`))
+	given, _ := h.w.CreateInvite("pad", []byte(`{"x":1}`))
 	plain, _ := h.w.CreateInvite("", nil)
 	if acc := h.access(); len(acc.Invites) != 2 || (len(acc.Invites[0].Perms) > 0) != (acc.Invites[0].Name == "pad") || (len(acc.Invites[1].Perms) > 0) != (acc.Invites[1].Name == "pad") {
 		t.Fatalf("invite's perms not listed: %+v", acc.Invites)
 	}
 	h.cookie = ""
-	wantStatus(t, h.join(&authenticator{t: t, origin: testOrigin}, tokenOf(t, owner.URL), nil), http.StatusOK)
+	wantStatus(t, h.join(&authenticator{t: t, origin: testOrigin}, tokenOf(t, given.URL), nil), http.StatusOK)
 	h.cookie = ""
 	wantStatus(t, h.join(&authenticator{t: t, origin: testOrigin}, tokenOf(t, plain.URL), ptr("guest")), http.StatusOK)
 	if len(h.joined) != 3 {
 		t.Fatalf("joined: %+v", h.joined)
 	}
-	for i, want := range []Joined{{First: true}, {Perms: []byte(`{"x":1}`)}, {}} {
+	for i, want := range []Joined{{}, {Perms: []byte(`{"x":1}`)}, {}} {
 		j := h.joined[i]
-		if string(j.Perms) != string(want.Perms) || j.First != want.First || j.Endpoint.Kind != gate.KindPanel || j.Endpoint.ApprovedAt.IsZero() {
+		if string(j.Perms) != string(want.Perms) || j.Endpoint.Kind != gate.KindPanel || j.Endpoint.ApprovedAt.IsZero() {
 			t.Errorf("join %d (%s): %+v", i, j.Endpoint.Name, j)
 		}
 	}

@@ -509,7 +509,7 @@ type SendReply struct {
 }
 
 // ManualAsk is Claude asking a person to switch it to manual approval for a while (POST
-// internal/sessions/self/manual; docs/api.md "临时切换至 manual"): why, in a line; Steps: approved,
+// internal/sessions/<id>/manual; docs/api.md "临时切换至 manual"): why, in a line; Steps: approved,
 // how many steps asked of a person manual mode lasts at most (1 to 3, 3 if none).
 type ManualAsk struct {
 	Reason string `json:"reason"`

@@ -55,12 +55,44 @@ type Config struct {
 	// LoginItemGone: the login item a former 登录时打开 left was taken away (dropLoginItem).
 	LoginItemGone bool    `json:"loginItemGone,omitempty"`
 	Zoom          float64 `json:"zoom,omitempty"` // the window's, as last set (⌘= ⌘- ⌘0); 0: 1
-	Frame         Frame   `json:"frame,omitzero"` // the window's place and size, as last left
+	Frame         Frame   `json:"frame,omitzero"` // the main window's place and size, as last left
+	// Away: the Iridiums in windows of their own (mainwin.go), opened again at the next start.
+	Away []Away `json:"away,omitempty"`
 	// NoServer: no Iridium of this computer's own (ir server off, ir start --no-server).
 	NoServer bool `json:"noServer,omitempty"`
 	// Me: who the person at the window says they are on the app's first page (kumo, 2026-11-22):
 	// this computer's Iridium's host is given it, and an invite registers under the name.
 	Me Me `json:"me,omitzero"`
+}
+
+// Away is an Iridium in a window of its own, where and as large as that window was last.
+type Away struct {
+	URL   string `json:"url"`
+	Frame Frame  `json:"frame,omitzero"`
+}
+
+// setAway puts address's window of its own in the list (on), with its frame if one is given,
+// or takes it out.
+func (c *Config) setAway(address string, on bool, f Frame) {
+	i := slices.IndexFunc(c.Away, func(a Away) bool { return a.URL == address })
+	switch {
+	case !on && i >= 0:
+		c.Away = slices.Delete(c.Away, i, i+1)
+	case on && i < 0:
+		c.Away = append(c.Away, Away{URL: address, Frame: f})
+	case on && f.W > 0:
+		c.Away[i].Frame = f
+	}
+}
+
+// away is address's window of its own; nil: none.
+func (c Config) away(address string) *Away {
+	for i := range c.Away {
+		if c.Away[i].URL == address {
+			return &c.Away[i]
+		}
+	}
+	return nil
 }
 
 // Me is the app's first page's: a name, a face (a data: URL of the cropped image).
@@ -205,6 +237,7 @@ func (c *Config) setOff(address string, off bool) {
 
 func (c *Config) remove(address string) {
 	c.Servers = slices.DeleteFunc(c.Servers, func(s Server) bool { return s.URL == address })
+	c.setAway(address, false, Frame{})
 	if c.Current == address {
 		c.Current = ""
 	}

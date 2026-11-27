@@ -50,10 +50,7 @@ func (s *Server) profileRoutes(mux *http.ServeMux) {
 	s.roleRoutes(mux)
 }
 
-// here is the channel "here" names for c: the one its agent is working for (called there),
-// else its own.
-const here = "here"
-
+// hereOf is the channel c's agent is working for (called there), else its own session.
 func (s *Server) hereOf(c caller) string {
 	if c.session == "" {
 		return ""
@@ -632,8 +629,9 @@ func (s *Server) memberCardPatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in := r.URL.Query().Get("channel")
-	if in == here {
-		in = s.hereOf(c)
+	if in == self || in == here {
+		s.error(w, s.noAlias(c, in))
+		return
 	}
 	if err := s.patchAgent(c, id, in, p); err != nil {
 		s.profileFault(w, err)
@@ -644,13 +642,8 @@ func (s *Server) memberCardPatch(w http.ResponseWriter, r *http.Request) {
 	reply(w, http.StatusOK, out)
 }
 
-// channelArg is the channel {id} names for c: "here", or as seeingChannel.
+// channelArg is the channel {id} names for c, as seeingChannel.
 func (s *Server) channelArg(c caller, id string) (string, error) {
-	if id == here {
-		if id = s.hereOf(c); id == "" {
-			return "", errSelf
-		}
-	}
 	ch, _, err := s.seeingChannel(c, id)
 	return ch, err
 }

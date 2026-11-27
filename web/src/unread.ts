@@ -48,6 +48,8 @@ const changed = () => {
   told.forEach((f) => f());
 };
 const listen = (f: () => void) => (told.add(f), () => void told.delete(f));
+/** Calls f as the counts change; returns what stops it. */
+export const onUnread = listen;
 
 /** How much of session id is unread: 0 none. */
 export function useUnread(id: string): number {

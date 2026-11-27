@@ -47,8 +47,8 @@ func (u *ui) askEach(ctx context.Context, server, by string, items []executor.It
 		Width: 360, Height: 150 + 44*len(items), DisableResize: true, AlwaysOnTop: true,
 		DisableMaximize: true, DisableMinimize: true,
 	}))
-	guard(win, "")
-	u.named(win, "ask")
+	guard(win.Page(), "")
+	u.named(win.Page(), "ask")
 	asks.mu.Lock()
 	asks.win = win
 	asks.mu.Unlock()

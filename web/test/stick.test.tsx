@@ -107,4 +107,31 @@ describe("a chat at its end", () => {
     c.draw(<p>one</p>, 2);
     expect(c.el.scrollTop).toBe(c.max());
   });
+
+  test("scrolled up without new messages shows the scroll-to-bottom button, hides back at end", () => {
+    const c = open(<p>one</p>);
+    const btn = () => c.el.parentElement!.querySelector("button");
+    expect(btn()).toBeNull();
+    act(() => void c.el.dispatchEvent(new WheelEvent("wheel", { deltaY: -50 })));
+    c.el.scrollTop = c.max() - 200;
+    act(() => void c.el.dispatchEvent(new Event("scroll")));
+    expect(btn()).not.toBeNull();
+    expect(btn()!.textContent).toBe("");
+    // Returning to the bottom hides it again.
+    c.el.scrollTop = c.max();
+    act(() => void c.el.dispatchEvent(new Event("scroll")));
+    expect(btn()).toBeNull();
+  });
+
+  test("a new message while scrolled up shows the newer label on the button", () => {
+    const c = open(<p>one</p>, 1);
+    const btn = () => c.el.parentElement!.querySelector("button");
+    act(() => void c.el.dispatchEvent(new WheelEvent("wheel", { deltaY: -50 })));
+    c.el.scrollTop = c.max() - 200;
+    act(() => void c.el.dispatchEvent(new Event("scroll")));
+    c.draw(<p>two</p>, 2);
+    expect(btn()?.textContent).toBeTruthy();
+    act(() => btn()!.click());
+    expect(btn()).toBeNull();
+  });
 });

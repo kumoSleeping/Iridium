@@ -6,7 +6,7 @@
 import { api } from "./api/client";
 import type { DraftEvent, Session, StateEvent } from "./api/types.gen";
 import { fromServer } from "./pending";
-import { getCarried, setCarried, type Link } from "./store";
+import { getCarried, setCarried, sharedRows, type Link } from "./store";
 
 /** Told each draft event. */
 export const drafts = new Set<(d: DraftEvent) => void>();
@@ -47,6 +47,8 @@ let extra: string[] = [];
  *  again, the sidebar and the rest drawn again for nothing. Not the open session's: chats.ts
  *  stateAhead sets those apart from the stream. */
 const lastRaw = new Map<string, string>();
+/** The list's rows as last brought, with their JSON. */
+const listRows = new Map<string, { raw: string; row: Session }>();
 /** The keys the daemon said it does not carry, and why ("unknown", "forbidden"). */
 export const ignored = new Map<string, string>();
 export const keysFor = (s: string | null, more: string[] = []) => [...new Set([...ALWAYS, ...(s ? [`session:${s}`, `context:${s}`] : []), ...more, ...(s ? [`viewers:${s}`, `reads:${s}`] : [])])].slice(0, MAX_KEYS);
@@ -73,7 +75,8 @@ function onState(raw: string) {
   // none said does not take away what the page asked for itself (chats.ts firstScreen).
   if (!e.ignored && e.value == null && e.key.startsWith("reads:") && getCarried(e.key)) return;
   // The list: the changes made here and not in it yet drawn over it (pending.ts).
-  setCarried(e.key, e.ignored ? null : e.key === "list" && Array.isArray(e.value) ? fromServer(e.value as Session[]) : e.value);
+  // Its rows that are as they were stay the objects they were (store.ts sharedRows).
+  setCarried(e.key, e.ignored ? null : e.key === "list" && Array.isArray(e.value) ? fromServer(sharedRows(e.value as Session[], listRows)) : e.value);
 }
 
 /** A PING on the open stream, one at a time; its PONG is the round trip, the top bar's dot. None

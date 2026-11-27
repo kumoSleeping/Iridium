@@ -13,7 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kumoSleeping/iridium/internal/access"
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/config"
 	"github.com/kumoSleeping/iridium/internal/store"
@@ -146,20 +145,18 @@ func (l *live) waitReply(as, id, text string) {
 	}
 }
 
-// What terminals may do (access.go): everything, but Claude only the owner's own, set as the
-// terminal is made and never after. Without it a terminal sees Claude's sessions, nothing more.
-func TestClaudeOnlyRule(t *testing.T) {
+// What apps may do: everything, Claude as any agent (within their Perms). Every app sees every
+// session.
+func TestAppsAndClaude(t *testing.T) {
 	t.Parallel()
 	l := start(t)
 	// 本机's own session, from the page.
 	mine := l.create(200, "web", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "mine"})
 	l.waitReply("web", mine, "ok: mine")
 
-	// A plugin made without --owner: no Claude.
-	var tok api.Token
-	tok = l.newApp("bot", false)
+	tok := l.newApp("bot")
 	bot, botID := tok.Token, tok.App.ID
-	if !strings.HasPrefix(bot, "ir_") || tok.App.Rules.ClaudeOwner != nil {
+	if !strings.HasPrefix(bot, "ir_") {
 		t.Fatalf("token: %+v", tok.App)
 	}
 	var me api.Me
@@ -168,23 +165,13 @@ func TestClaudeOnlyRule(t *testing.T) {
 		t.Fatalf("me: %+v", me)
 	}
 
-	// It sees 本机's Claude session and reads it, but may not use it nor start one.
-	var list []api.Session
-	list = l.sessions(bot)
+	// It sees 本机's Claude session and reads it.
+	list := l.sessions(bot)
 	if len(list) != 1 || list[0].ID != mine {
 		t.Fatalf("its list: %+v", list)
 	}
 	l.want(200, bot, "GET", "/v1/internal/sessions/"+mine, nil, nil)
 	l.wantSat(200, bot, "message.list", map[string]any{"channel_id": mine}, nil)
-	if code, _ := l.send(bot, mine, api.Send{Text: "hi"}); code != 403 {
-		t.Errorf("send: %d", code)
-	}
-	l.want(403, bot, "POST", "/v1/internal/sessions/"+mine+"/stop", nil, nil)
-	if code := l.answer(bot, api.CardAnswer{Card: "ask:" + mine + ":x", Option: "allow"}); code != 403 {
-		t.Errorf("answer: %d", code)
-	}
-	l.want(403, bot, "PUT", "/v1/internal/sessions/"+mine+"/mode", api.SetMode{Mode: "manual"}, nil)
-	l.create(403, bot, api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "x"})
 	if raw := l.wantRaw(200, bot, "GET", "/v1/internal/sessions/"+mine, nil); !strings.Contains(raw, mine) {
 		t.Errorf("the session: %.300s", raw)
 	}
@@ -199,17 +186,9 @@ func TestClaudeOnlyRule(t *testing.T) {
 	if code := l.do("socket", "PUT", "/v1/internal/apps/"+botID+"/rules", map[string]any{"rules": map[string]any{}}, nil); code != 404 && code != 405 {
 		t.Errorf("the rules route: %d", code)
 	}
-	if code, _ := l.send(bot, mine, api.Send{Text: "hi"}); code != 403 {
-		t.Errorf("send: %d", code)
-	}
 
-	// One made --owner by a person at the machine: Claude, and nothing held back (no approvals
-	// forced, every command).
-	var own api.Token
-	own = l.newApp("mybot", true)
-	if own.App.Rules.ClaudeOwner == nil || own.App.Rules.ClaudeOwner.By != "local" {
-		t.Fatalf("owner token: %+v", own.App)
-	}
+	// Another app runs Claude, nothing held back (no approvals forced, every command).
+	own := l.newApp("mybot")
 	its := l.create(200, own.Token, api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "hello"})
 	l.waitReply(own.Token, its, "ok: hello")
 	meta, _ := os.ReadFile(filepath.Join(l.cfg.StatePath(), "hold", its, "session.json"))
@@ -226,13 +205,13 @@ func TestClaudeOnlyRule(t *testing.T) {
 	}
 	st := l.s.st
 	waitUsage(t, st, own.App.ID)
-	// The one without Claude sees the owner's plugin's session too.
+	// The first app sees it too.
 	l.want(200, bot, "GET", "/v1/internal/sessions/"+its, nil, nil)
 
 	var as api.Apps
 	l.want(200, "agent", "GET", "/v1/internal/apps", nil, &as)
 	// The host first; no ir_web without a public origin.
-	if len(as.Apps) != 3 || !as.Apps[0].Host || as.Apps[0].Name != "Iridium" || as.Apps[0].Rules.ClaudeOwner == nil || as.Apps[1].Web || as.Apps[2].Web {
+	if len(as.Apps) != 3 || !as.Apps[0].Host || as.Apps[0].Name != "Iridium" || as.Apps[1].Web || as.Apps[2].Web {
 		t.Fatalf("apps: %+v", as)
 	}
 
@@ -246,9 +225,6 @@ func TestClaudeOnlyRule(t *testing.T) {
 	}
 	l.want(200, "socket", "DELETE", "/v1/internal/apps/mybot", nil, nil)
 	l.want(401, own.Token, "GET", "/v1/internal/me", nil, nil)
-	if _, ok, _ := st.TerminalRules(own.App.ID); ok {
-		t.Error("the revoked terminal's row stayed")
-	}
 }
 
 func waitUsage(t *testing.T, st *store.Store, id string) {
@@ -269,7 +245,7 @@ func TestDevice(t *testing.T) {
 	t.Parallel()
 	l := start(t)
 	var tok api.Token
-	tok = l.newApp("bot", false)
+	tok = l.newApp("bot")
 	bot := tok.Token
 	var me api.Me
 	l.want(200, bot, "GET", "/v1/internal/me", nil, &me)
@@ -430,18 +406,13 @@ func TestPublicOrigin(t *testing.T) {
 	l.want(200, "web", "GET", "/v1/internal/agents", nil, nil)
 }
 
-// newApp makes app name as a pairing allowed would, with Claude or not (said by a person at the
-// host): its TOKEN. Pairing is the one way in (docs/next/decisions.md 9); tests take this short cut.
-func (l *live) newApp(name string, claude bool) api.Token {
+// newApp makes app name as a pairing allowed would: its TOKEN. Pairing is the one way in
+// (docs/next/decisions.md 9); tests take this short cut.
+func (l *live) newApp(name string) api.Token {
 	l.t.Helper()
 	info, tok, err := l.s.gate().CreateNewToken(name)
 	if err != nil {
 		l.t.Fatal(err)
-	}
-	if claude {
-		if err := l.s.giveClaude(info, access.ByLocal); err != nil {
-			l.t.Fatal(err)
-		}
 	}
 	return api.Token{App: l.s.appOf(info), Token: tok}
 }

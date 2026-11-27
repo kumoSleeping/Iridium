@@ -30,6 +30,8 @@ export const far = (left: number, pane: number) => pane > 0 && left > pane;
 const HAND = 160;
 /** The key to go down, from far up: put this short of the end, the rest eased. */
 const NEAR = 96;
+/** How far above the end before the scroll-to-bottom button appears without new messages. */
+const AWAY = 48;
 /** How near the top the page before is put in: two screens, at least 600px. */
 const near = (el: HTMLElement) => Math.max(600, el.clientHeight * 2);
 /** Whether the browser keeps what is seen in place as what is over it changes (CSS scroll
@@ -101,9 +103,14 @@ const inner = (target: EventTarget | null, list: HTMLElement) => {
 type Mark = { el: Element; seq?: string; off: number };
 const topRow = (el: HTMLElement, col: Element) => {
   const { top, bottom } = el.getBoundingClientRect();
-  const rows = col.querySelector("[data-seq]") ? col.querySelectorAll<HTMLElement>("[data-seq]") : (col.children as HTMLCollectionOf<HTMLElement>);
+  // Only in the column's rows that reach under the pane's top: every message over it was measured
+  // for nothing, and one in a row far off (lazyrows.tsx: not laid out) was laid out to be.
+  const under = function* (): Generator<HTMLElement> {
+    if (!col.querySelector("[data-seq]")) return yield* col.children as HTMLCollectionOf<HTMLElement>;
+    for (const c of col.children) if (c.getBoundingClientRect().bottom > top) yield* c.matches("[data-seq]") ? [c as HTMLElement] : c.querySelectorAll<HTMLElement>("[data-seq]");
+  };
   let pick: HTMLElement | null = null;
-  for (const r of rows) {
+  for (const r of under()) {
     const b = r.getBoundingClientRect();
     if (!b.height || b.bottom <= top) continue;
     if (b.top < top - 0.5) pick = r;
@@ -142,6 +149,7 @@ export function Stick({ tail, older, draw, place, style, children, scroller, bot
   const own = useRef<HTMLDivElement>(null);
   const list = scroller ?? own;
   const [fresh, setFresh] = useState(false);
+  const [away, setAway] = useState(false);
   const [, redraw] = useState(0);
   // following: the reader's; left: px to the end as this last put it; ours: where this put the
   // scroll (to the part of a px); mark: without the browser's anchoring, the top row and its place.
@@ -206,8 +214,15 @@ export function Stick({ tail, older, draw, place, style, children, scroller, bot
   const run = () => void (!s.frame && s.following && ((s.last = performance.now()), (s.frame = requestAnimationFrame(step))));
   const told = useRef(onFollow);
   told.current = onFollow;
-  const leave = () => (s.following && moveLog("stick.leave", "reader"), (s.following = false), stop(), told.current?.(false));
-  const follow = () => ((s.following = true), setFresh(false), told.current?.(true));
+  const syncAway = (el: HTMLElement) => setAway(!s.following && maxOf(el) - el.scrollTop > AWAY);
+  const leave = () => {
+    if (s.following) moveLog("stick.leave", "reader");
+    s.following = false;
+    stop();
+    told.current?.(false);
+    if (list.current) syncAway(list.current);
+  };
+  const follow = () => ((s.following = true), setFresh(false), setAway(false), told.current?.(true));
   /** What came is not gone down to (kumo, 2026-11-26: said while the reader was away, it is theirs
    *  to go to): the view stays, the key to go down shown. */
   const stay = (why: string) => (moveLog("stick.stay", why), (s.following = false), stop(), setFresh(true), told.current?.(false));
@@ -281,14 +296,14 @@ export function Stick({ tail, older, draw, place, style, children, scroller, bot
         // Where it was left, its row as far under the pane's top as it was; the reader's to scroll.
         put(el, Math.min(maxOf(el), Math.max(0, el.scrollTop + kept.getBoundingClientRect().top - el.getBoundingClientRect().top - stored!.off)));
         if (atFoot(el)) follow();
-        else ((s.following = false), told.current?.(false));
+        else ((s.following = false), told.current?.(false), syncAway(el));
       } else if (first && stored) {
         // Its row not here (gone, or older than the page has): at the end, as any.
         if (!s.following) follow();
         put(el, maxOf(el));
       } else if (row && to < maxOf(el) - 48) (put(el, Math.max(0, to)), stay("unread"));
       else if (s.following) put(el, maxOf(el));
-      else el.scrollTop = place.top!;
+      else ((el.scrollTop = place.top!), syncAway(el));
     } else if (s.following && late !== lateWas.current) stay("late");
     // Late is looked at first: a message written on in this device's copy brings its steps alone,
     // the tail the same, and it was followed down to (kumo, 2026-11-26).
@@ -320,11 +335,12 @@ export function Stick({ tail, older, draw, place, style, children, scroller, bot
       // Not held off by a person's scrolling: a trackpad's glide still sends wheels after it, and
       // the end went down and came back (kumo, 2026-11-25: 贴底时直接往上).
       if (s.following) pane ? pin(el, "pane") : sizing(el) ? pin(el, "own") : far(leftOf(el), el.clientHeight) && !hands() ? pin(el, "far") : run();
+      else syncAway(el);
       mark(el);
     });
     ro.observe(el);
     if (el.firstElementChild) ro.observe(el.firstElementChild);
-    chats.set(el, { toEnd: () => goDown("send"), letGo: leave, rests: () => s.following && !s.frame && atFoot(el), down: (by) => (leave(), put(el, Math.max(0, el.scrollTop - by))) });
+    chats.set(el, { toEnd: () => goDown("send"), letGo: leave, rests: () => s.following && !s.frame && atFoot(el), down: (by) => (leave(), put(el, Math.max(0, el.scrollTop - by)), syncAway(el)) });
     // The reader's way up, seen before the scroll comes; down at the very end, where none comes.
     const wheel = (e: WheelEvent) => {
       s.hand = performance.now();
@@ -392,6 +408,7 @@ export function Stick({ tail, older, draw, place, style, children, scroller, bot
     // The scrollbar dragged up lets go; the end reached again, by any way, follows.
     if (s.following && s.drag && el.scrollTop < s.ours - 1) leave();
     else if (!s.following && atFoot(el)) follow();
+    else syncAway(el);
     mark(el);
     // Following, it is at its end (gone up, it lets go first): nothing read for the page before.
     if (!s.following) void back().catch(() => {});
@@ -405,10 +422,19 @@ export function Stick({ tail, older, draw, place, style, children, scroller, bot
       <div ref={list} role="log" aria-label={t("chat.log")} onScroll={scrolled} className={cn("gapless absolute inset-0 overflow-y-auto [scrollbar-gutter:stable_both-edges]", eased && !sending && "g-room")} style={style}>
         {children}
       </div>
-      {fresh && !quiet && (
-        <button type="button" onClick={() => goDown("key")} className="g-pop g-press glass thick float absolute left-1/2 z-10 flex h-8 -translate-x-1/2 items-center gap-1.5 rounded-full px-3 text-xs font-medium text-ink" style={{ bottom: bottom + 10 }}>
-          {t("chat.newer")}
-          <ArrowDown size={13} />
+      {(fresh || away) && !quiet && (
+        <button
+          type="button"
+          onClick={() => goDown("key")}
+          aria-label={fresh ? t("chat.newer") : t("chat.bottom")}
+          className={cn(
+            "g-pop g-press glass thick float absolute left-1/2 z-10 flex h-8 -translate-x-1/2 items-center justify-center rounded-full text-xs font-medium text-ink",
+            fresh ? "gap-1.5 px-3" : "w-8 pointer-coarse:size-9",
+          )}
+          style={{ bottom: bottom + 10 }}
+        >
+          {fresh && t("chat.newer")}
+          <ArrowDown size={fresh ? 13 : 15} />
         </button>
       )}
     </>

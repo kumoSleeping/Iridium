@@ -103,9 +103,9 @@ function patchFavorites(p: FavoritesPatch, shown: Partial<Favorites>) {
 
 const now = () => mine ?? queryClient.getQueryData<Favorites>(KEY)?.channels ?? NONE;
 
-/** Makes my favorites list: drawn so at once, then put; what the server says back goes into the
+/** Makes my favorites list (the desktop app asks it too: crossfav.ts): drawn so at once, then put; what the server says back goes into the
  *  cache before the local list gives way to it, so the list never steps back. A failed put: as it was. */
-function put(list: string[]) {
+export function put(list: string[]) {
   mine = list;
   emit();
   void queryClient.cancelQueries({ queryKey: KEY });
@@ -124,6 +124,11 @@ function put(list: string[]) {
 }
 
 export const isFavorite = (id: string) => now().includes(id);
+
+/** Whether the session opened is in sight among my favorites (their block open, it among them):
+ *  its own group and folders are then not opened for it (otae-c, 2026-11-26: opened from the
+ *  favorites, its folder far below opened too). */
+export const inOpenFavorites = (id: string, open: boolean, favs: readonly string[]) => open && favs.includes(id);
 
 /** Favoured (last of them) or taken off. */
 export const setFavorite = (id: string, on: boolean) => {

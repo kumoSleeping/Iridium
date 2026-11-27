@@ -23,7 +23,7 @@
 - `message.get`、`message.list`：频道里说的话，一句一条，不含思考和工具调用。`message.list` 是 BidiList，翻页标记是消息的编号；`limit` 默认 50，至多 500；没有 `next` 时只能 `before`。多一个 `_data {start, end, more}`：这页第一条和最后一条的编号、前面还有没有。`_data.q` 给词时只回有这些词的消息（`docs/channels.md`“搜索”）。`message.get` 的 `message_id` 也认输入的 ID 和提问的卡片。
 - `POST /v1/internal/block.list`、`block.get`（参数同上）：一个会话自己的记录，一块一条消息，内容见下面“记录”；翻页标记是记录里行的偏移，`limit` 按块数、在行首截，可能略多。`_data {start, end, more}`：这页从哪行起、读时记录到哪、前面还有没有。网页读记录走它。agent 也能读别的会话的（只读，打码）。
 - `channel.get`、`channel.list {guild_id?, next?, _data?: {all}}`（不给 `guild_id` 是全部；先列文件夹，再列会话；不列归档和子 agent，`_data.all` 都列）、`guild.get`、`guild.list`（只列范围里的）、`guild.member.list {guild_id, next?}`、`guild.member.get {guild_id, user_id}`（组里各会话的 agent：`user` 是 `agent:<会话>`，带 `nick` 和 `joined_at`；再加本应用的登录。`_data.channel_id` 只列那个频道的成员，`joined_at` 是加入频道的时间，2026-11-13）、`login.get`、`user.get`。`channel.get`、`channel.list` 的每个 channel 带 `_data`：会话本身（同 `GET /v1/internal/sessions` 的一项，名字、标题、最后一句打码）；`guild.get`、`guild.list` 的 guild 带 `_data`：文件夹组（`path`、`only`），`loose` 没有。网页拿不到携带状态 `guilds` 时用 `guild.list` 的 `_data`。
-- `channel.create {guild_id?, data?: {name, parent_id}, _data: {agent, cwd, text?, model?, mode?, effort?, preset?}}`（2026-11-11）：开一个会话；不带 `_data.agent` 是建一个无 agent 的频道（`_data.cwd` 是它列在哪个文件夹，2026-11-13）。`guild_id` 是文件夹组（`self` 自己的；不给或 `loose` 按目录归组），`data.parent_id` 是拉起者（不给是发话的会话自己，`ir` 开的就挂在自己下面），`data.name` 是名字；`_data` 是 agent 怎么起。回这个会话的 Channel（同 `channel.get`），随后照常有 `channel-added`。`ir api channel.create` 先印 ID，带 `text` 等 agent 接了再返回，`--wait` 等到这一回合结束。
+- `channel.create {guild_id?, data?: {name, parent_id}, _data: {agent, cwd, text?, model?, mode?, effort?, preset?}}`（2026-11-11）：开一个会话；不带 `_data.agent` 是建一个无 agent 的频道（`_data.cwd` 是它列在哪个文件夹，2026-11-13）。`guild_id` 是文件夹组（不给或 `loose` 按目录归组），`data.parent_id` 是拉起者（不给是发话的会话自己，`ir` 开的就挂在自己下面），`data.name` 是名字；`_data` 是 agent 怎么起。回这个会话的 Channel（同 `channel.get`），随后照常有 `channel-added`。`ir api channel.create` 先印 ID，带 `text` 等 agent 接了再返回，`--wait` 等到这一回合结束。
 - `channel.update {channel_id, data?: {name, parent_id}, _data?: {archived, pinned, color, order, workspace}}` 改名，`_data.archived` 归档或恢复（挂在它下面的一起），`pinned` 置顶，`color` 颜色标签（`red`…`purple`，空串去掉），`order` 拖到的位置（毫秒，0 去掉），`workspace` 手动放进那个组（0 未归类）；`data.parent_id` 设成 `null` 或它自己的文件夹，就从拉起者下面拿出来（此后算人开的），别的值 422 `parent_fixed`。文件夹（`folder:…`）只收 `_data.color`（本机的文件夹）、`pinned`、`order`，只有面板和本机能改。
 - `message.update {channel_id, message_id, content | _data.text}`（2026-11-11）：改还在排队的一条（`message_id` 是 `message.create` 回的 ID，或频道里的编号）；已经交给 agent 的 422 `no_such_message`。多 agent 或无 agent 的频道里，改的是它叫起的每个 agent 队列里的那条。
 - `message.delete {channel_id, message_id}`：撤回频道里的一条（`message_id` 是编号，也认输入的 ID 和 `b:<会话>:<块>`），所有人那里都没有了（`docs/channels.md`“撤回”）；还在排队的副本一并撤下。提问和 Iridium 自己的行 422 `no_such_message`；不是频道成员 403。还没进频道的输入照旧只从队列撤下。
@@ -41,7 +41,7 @@
 
 `ir api`（`internal/cli/api.go`，用法见 `plan.md`“ir”）走同样的 `/v1/`：本机 socket 上和远端会话的 `ir`（`POST /v1/internal/cli`）也挂着 Satori。
 
-- Iridium 自己加的：`channel_id` 认 ID 开头和 `self`（`Resolver`，见 `api.md`“会话 ID”），`guild_id=self`；`message.create` 的 `_data.text` 代替 `content`（纯文字，这边转义），`_data.paths` 是主机上的文件（只认本机 socket 的 `ir`）。
+- Iridium 自己加的：`channel_id` 认 ID 开头（`Resolver`，见 `api.md`“会话 ID”；不认 `self`）；`message.create` 的 `_data.text` 代替 `content`（纯文字，这边转义），`_data.paths` 是主机上的文件（只认本机 socket 的 `ir`）。
 
 - 用哪个登录说话：`POST /v1/meta` 只回一个。主机的 `ir` 是 `local/local`；agent 的是它那一回合的登录（主机开的就是 `local/local`）；远端会话的 `ir` 也是那一回合的登录，不知道时用 `local/local` 的名义。
 - 能做什么不看这个名义，看真正的调用方（`Caller.Self`），和 `/v1/internal` 一样：远端会话的 `ir` 按那台电脑的权限（再交上那一回合登录的），agent 的消息总是插话，agent 的改名不盖人起的。

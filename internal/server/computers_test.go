@@ -32,10 +32,10 @@ func TestComputers(t *testing.T) {
 		go func() { _ = exe.Run(ctx); close(done) }()
 		t.Cleanup(func() { cancel(); <-done; exe.Close() })
 	}
-	first := l.newApp("first", false)
+	first := l.newApp("first")
 	time.Sleep(5 * time.Millisecond)
-	second := l.newApp("second", false)
-	here := l.newApp("here", false)
+	second := l.newApp("second")
+	here := l.newApp("here")
 	run(second.Token, "m1")
 	run(first.Token, "m1")
 	run(here.Token, "host-hash")

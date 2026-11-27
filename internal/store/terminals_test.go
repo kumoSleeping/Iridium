@@ -5,16 +5,8 @@ import (
 	"time"
 )
 
-func TestRulesOpenersTokens(t *testing.T) {
+func TestDevicesOpenersTokens(t *testing.T) {
 	s, _ := open(t)
-	if _, ok, err := s.TerminalRules("x"); ok || err != nil {
-		t.Fatalf("no rules: %v %v", ok, err)
-	}
-	must(t, s.SetTerminalRules("x", []byte(`{"a":1}`)))
-	must(t, s.SetTerminalRules("x", []byte(`{"a":2}`)))
-	if r, ok, err := s.TerminalRules("x"); !ok || err != nil || string(r) != `{"a":2}` {
-		t.Fatalf("rules %s %v %v", r, ok, err)
-	}
 	// The host's device: none, then set and set again.
 	if d, err := s.Device("local"); d != "" || err != nil {
 		t.Fatalf("no device: %q %v", d, err)
