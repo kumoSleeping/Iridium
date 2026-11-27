@@ -2,7 +2,7 @@
 // answered with before the server is; a fresh answer kept over it.
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { api } from "../src/api/client";
-import { draftName } from "../src/chat/choices";
+import { draftEffort, draftName, lastEffort, rememberEffort } from "../src/chat/choices";
 import { choicesQ, defaultFirst, draftDefault } from "../src/chat/channel/pick";
 
 afterEach(() => (localStorage.clear(), vi.restoreAllMocks()));
@@ -50,5 +50,34 @@ describe("a new agent's model", () => {
     // The kind's row: its name and that model; not known, the name alone.
     expect(draftName("pi", { models: plain, efforts: [], ran: "b/y" })).toBe("pi · Y");
     expect(draftName("pi", undefined)).toBe("pi");
+  });
+});
+
+describe("remembered starting effort", () => {
+  const asked = {
+    models: [
+      { value: "opus", name: "Opus", resolved: "claude-opus-5-5", default: true, efforts: ["low", "medium", "high", "xhigh", "max"] },
+      { value: "sonnet", name: "Sonnet", efforts: ["low", "medium", "high", "max"] },
+      { value: "haiku", name: "Haiku", noEffort: true },
+    ],
+    efforts: ["low", "medium", "high"],
+  };
+  test("kept per agent kind in this browser", () => {
+    expect(lastEffort("claude")).toBe("");
+    rememberEffort("claude", "high");
+    expect(lastEffort("claude")).toBe("high");
+    expect(lastEffort("codex")).toBe("");
+    rememberEffort("claude", "medium");
+    expect(lastEffort("claude")).toBe("medium");
+    rememberEffort("claude", "");
+    expect(lastEffort("claude")).toBe("medium");
+  });
+  test("sent only when the target model takes that level", () => {
+    expect(draftEffort(asked, "", "high")).toBe("high");
+    expect(draftEffort(asked, "claude-opus-5-5", "xhigh")).toBe("xhigh");
+    expect(draftEffort(asked, "sonnet", "xhigh")).toBe("");
+    expect(draftEffort(asked, "haiku", "high")).toBe("");
+    expect(draftEffort(undefined, "", "high")).toBe("high");
+    expect(draftEffort(asked, "", "")).toBe("");
   });
 });
