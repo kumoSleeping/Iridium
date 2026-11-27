@@ -5,6 +5,7 @@ import { flushSync } from "react-dom";
 import { api, type ChannelMessage, type ChannelPage } from "../../api/client";
 import { motion, reduced } from "../../motion";
 import { letGo } from "../stick";
+import { drawAllRows } from "./lazyrows";
 import type { ChannelLog } from "./log";
 
 type Get = (id: string, q: { around?: number; after?: number; limit?: number }) => Promise<ChannelPage>;
@@ -33,7 +34,11 @@ export async function around(log: ChannelLog, n: number, get: Get = (id, q) => a
 }
 
 /** Message n as drawn under root (its data-seq). */
-export const seqEl = (root: ParentNode | null | undefined, n: number) => root?.querySelector<HTMLElement>(`[data-seq="${n}"]`) ?? null;
+export const seqEl = (root: ParentNode | null | undefined, n: number) => {
+  const find = () => root?.querySelector<HTMLElement>(`[data-seq="${n}"]`) ?? null;
+  // One in a row not drawn yet (a conversation just come back to, lazyrows.tsx): drawn first.
+  return find() ?? (drawAllRows(root) ? find() : null);
+};
 
 /** Goes to what find gives in the chat scroller: none yet, more brings more of the log (false:
  *  nothing came), drawn at once (draw), at most tries times. */

@@ -9,7 +9,7 @@ import { Popover } from "@base-ui/react/popover";
 import { ChevronRight, FoldVertical, Plug } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode, type RefObject } from "react";
 import type { Block, SessionState } from "../api/types.gen";
-import { useCarried } from "../store";
+import { useCarriedPick } from "../store";
 import { t, useLang } from "../i18n";
 import { cn, keep, kept, PHONE, PopSurface, useEver } from "../ui";
 import { moveDown } from "./stick";
@@ -218,8 +218,10 @@ export function WorkLine({ channel, n, session, work, did, span, may, esc }: { c
     };
   }, [card?.open, card?.key, card?.el]);
   // Its compactions: the one going on now (the agent's own state), and those in what it did.
-  const st = useCarried<SessionState>(`session:${session}`);
-  const compacting = running && st?.status === "compacting";
+  // Only whether it compacts, and since when; only while it runs: a line of work done is not
+  // drawn again at each thing its agent's state says (its tokens, as it writes).
+  const since = useCarriedPick<SessionState, number>(running ? `session:${session}` : null, (st) => (st?.status === "compacting" ? (st.compactingSince ?? 0) : -1));
+  const compacting = running && since >= 0;
   const compacted = useMemo(() => (blocks ?? []).filter((b) => b.kind === "system" && b.event === "compact"), [blocks]);
   const parts = did && !work ? didParts(did) : [];
   // An older message's span read and nothing in it: no line.
@@ -310,7 +312,7 @@ export function WorkLine({ channel, n, session, work, did, span, may, esc }: { c
         {compacted.map((b) => (
           <Compact key={b.at} done={b} />
         ))}
-        {compacting && <Compact since={st?.compactingSince} />}
+        {compacting && <Compact since={since || undefined} />}
         {/* What was done, by its sorts, as before (kumo, 2026-11-24): each pressed opens its own
             steps alone. */}
         {!one && runs.length > 0 && all && (
