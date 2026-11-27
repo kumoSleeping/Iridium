@@ -1031,6 +1031,8 @@ export const zh = {
   "role.deleteSure": "确认删除",
   "channel.archived": "归档",
   "channel.bringBack": "恢复",
+  "manage.link": "链接",
+  "manage.linkHidden": "已隐藏",
 } as const;
 
 export type Key = keyof typeof zh;

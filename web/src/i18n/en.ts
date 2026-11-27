@@ -1031,4 +1031,6 @@ export const en: Dict = {
   "role.deleteSure": "Confirm delete",
   "channel.archived": "Archived",
   "channel.bringBack": "Bring back",
+  "manage.link": "Link",
+  "manage.linkHidden": "Hidden",
 };

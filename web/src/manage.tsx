@@ -31,11 +31,10 @@ import { RoleFace, RoleLine, useRoles } from "./roles";
 import { NewRoleFold, placeOf, RoleFold } from "./rolespage";
 import { Field, Unfold } from "./rows";
 import { type ManageTab } from "./route";
-import { SecretHere } from "./secret";
-import { showSecret } from "./secrets";
+import { showSecret, useSecret } from "./secrets";
 import { useConfirms, usePairing } from "./store";
 import { errText, toast } from "./toast";
-import { agentName, ago, Avatar, AvatarKey, cn, FaceChangeOver, IconKey, IrMark, Logo, ServerFace, SureKey, Switch, Tip } from "./ui";
+import { agentName, ago, Avatar, AvatarKey, cn, CopyKey, FaceChangeOver, IconKey, IrMark, Logo, ServerFace, SureKey, Switch, Tip } from "./ui";
 import { useQuery } from "./api/query";
 
 /** Where a secret made here (an invite's link) shows. */
@@ -644,10 +643,35 @@ function InviteDetail({ i, gone }: { i: PendingInvite; gone: () => void }) {
           </SureKey>
         }
       />
-      <div className="@container pt-3">
-        <SecretHere at={HERE} />
-      </div>
+      <InviteLink id={i.id} />
     </div>
+  );
+}
+
+/** An invite's link, as the window draws a line: its copy key at the right of its name, the link
+ *  on one line under it (sideways when long), its QR code under that. Shown only where it was just
+ *  made (the server keeps no link): after that, the state alone. */
+function InviteLink({ id }: { id: string }) {
+  const secret = useSecret();
+  const inv = secret && "invite" in secret && secret.at === HERE && secret.invite.id === id ? secret.invite : null;
+  if (!inv)
+    return (
+      <Block>
+        <Field label={t("manage.link")}>
+          <span className="text-ink-3">{t("manage.linkHidden")}</span>
+        </Field>
+      </Block>
+    );
+  return (
+    <Block>
+      <Field label={t("manage.link")}>
+        <CopyKey text={inv.url} />
+      </Field>
+      <code data-secret className="no-bar block overflow-x-auto rounded-md bg-fill px-3 py-2 font-mono text-xs leading-5 whitespace-nowrap text-ink select-all">
+        {inv.url}
+      </code>
+      {inv.qr && <img src={inv.qr} alt={t("secret.qr")} width={140} height={140} className="mt-3 rounded-md bg-white p-1.5 [image-rendering:pixelated]" />}
+    </Block>
   );
 }
 
