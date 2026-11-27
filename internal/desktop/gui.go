@@ -725,7 +725,7 @@ func (u *ui) login(p *mygo.Page, arg string) {
 	if s := c.server(a); s != nil && invite == "" && (s.LoggedIn || s.Local && loopback(s.URL)) {
 		st := state(c)
 		st["done"] = a
-		reply(w, st)
+		reply(p, st)
 		u.switchTo(a)
 		return
 	}
@@ -766,7 +766,7 @@ func (u *ui) login(p *mygo.Page, arg string) {
 		reply(p, m)
 	}, func(link, who string) {
 		if c, _ := loadConfig(); c.server(a) == nil {
-			reply(w, state(c)) // removed as it was allowed: not opened
+			reply(p, state(c)) // removed as it was allowed: not opened
 			return
 		}
 		_, _ = updateConfig(func(c *Config) {
