@@ -10,7 +10,7 @@
 // own pixels as blurred as its fit; otae-c, 2026-11-27). A transform scales it only while it is
 // moved by hand or eased, from what is laid out to what is asked.
 //
-// Among others (gallery.tsx), a swipe across it at fit steps to the one before or after, and its
+// Among others (gallery.tsx), a swipe across it at fit (a finger, a pen) steps to the one before or after, and its
 // thumbnail stands where it will be till it has come.
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { cn } from "../ui";
@@ -187,8 +187,8 @@ export function Viewer({ src, name, close, corner, under, size, step, foot }: { 
     }
     gesture.current = null;
     setLive(false);
-    // Swiped across at fit, by one finger or the mouse: the one before or after.
-    if (step && g?.moved && !g.dist && !g.two && e.type !== "pointercancel" && now.current.scale <= 1) {
+    // Swiped across at fit, by a finger or a pen: the one before or after (a mouse has the keys).
+    if (step && e.pointerType !== "mouse" && g?.moved && !g.dist && !g.two && e.type !== "pointercancel" && now.current.scale <= 1) {
       const dx = e.clientX - g.from.x;
       if (Math.abs(dx) > 48 && Math.abs(dx) > 1.5 * Math.abs(e.clientY - g.from.y)) step(dx < 0 ? 1 : -1);
       return;

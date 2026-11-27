@@ -35,7 +35,8 @@ const side = "glass g-press absolute top-1/2 z-10 grid size-10 -translate-y-1/2 
  *  without its key, and its place at the foot. Shut by a press beside it, Esc, Space or its key. */
 function PictureWindow({ setOpen, shot, at, of, step }: { setOpen: (o: boolean) => void; shot: Shot; at?: number; of?: number; step?: (d: -1 | 1) => void }) {
   const many = step && at !== undefined && of !== undefined && of > 1;
-  // ← and → on the window: a first or last picture's key gone with the focus, they still step.
+  // ← and → on the window, as they go down (the popup stops them on their way up: Base UI's), so
+  // with the focus gone with a first or last picture's key they still step.
   useEffect(() => {
     if (!many) return;
     const keys = (e: KeyboardEvent) => {
@@ -43,8 +44,8 @@ function PictureWindow({ setOpen, shot, at, of, step }: { setOpen: (o: boolean) 
       e.preventDefault();
       step(e.key === "ArrowLeft" ? -1 : 1);
     };
-    window.addEventListener("keydown", keys);
-    return () => window.removeEventListener("keydown", keys);
+    window.addEventListener("keydown", keys, true);
+    return () => window.removeEventListener("keydown", keys, true);
   }, [many, step]);
   return (
     <DialogPortal>
@@ -114,7 +115,12 @@ export function Gallery({ shots, children }: { shots: () => Shot[]; children: Re
   const opener = useMemo<Opener>(
     () => ({
       open: (f) => {
-        if (!list.current().some((s) => s.full === f)) return false;
+        const all = list.current();
+        const at = all.findIndex((s) => s.full === f);
+        if (at < 0) return false;
+        // The one after it, ahead, for the first step.
+        const next = all[at + 1];
+        if (next) new Image().src = next.full;
         setFull(f);
         setOpen(true);
         return true;

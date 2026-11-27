@@ -25,7 +25,8 @@ const pic = (full: string) => (
   </Zoom>
 );
 const press = (el: Element | null | undefined) => act(() => void (el as HTMLElement).click());
-const key = (k: string) => act(() => void window.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true })));
+// From inside the popup, as a key pressed there goes (its popup stops arrows on their way up).
+const key = (k: string) => act(() => void (document.querySelector("a[download]") ?? document.body).dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true })));
 const shown = () => document.querySelector<HTMLImageElement>("img[alt]:not([alt=''])")?.getAttribute("src");
 const side = (label: string) => document.querySelector(`button[aria-label="${label}"]`);
 
