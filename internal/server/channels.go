@@ -2454,6 +2454,9 @@ func (s *Server) sendChannelAs(ctx context.Context, c caller, from, ch string, r
 		s.unnames(ch, seq, named)
 		return api.SendReply{}, firstErr
 	}
+	if s.multi(ch) && sender == "" && outsider == "" && len(namedNicks) == 0 {
+		s.overhear(ctx, ch, seq, req.Text, of.Files, u.Name, wake, list)
+	}
 	if sender != "" {
 		// Sent: it has what came back with the answer, and its own words where they follow.
 		if seq == given+1 {
@@ -2800,6 +2803,80 @@ func (s *Server) deliverAs(ctx context.Context, ch, to string, seq int64, said, 
 	}
 	s.chain.pass(ch, to, lk)
 	return queued, nil
+}
+
+// overhear delivers a short, marked excerpt of an unmentioned human channel message to any agent
+// of ch that is actively running a turn for ch right now and was not already woken by it.
+// Attachments are listed by filename only, long text is clipped, and idle agents are untouched.
+func (s *Server) overhear(ctx context.Context, ch string, seq int64, raw string, files []api.FileRef, who string, wake []string, list []deliver.Agent) {
+	body := fileNames(satori.ForwardWords(raw), files)
+	if strings.TrimSpace(body) == "" {
+		return
+	}
+	at := time.Now().UnixMilli()
+	if m, ok := s.ch.Get(ch, seq); ok && m.At > 0 {
+		at = m.At
+	}
+	for _, a := range list {
+		if slices.Contains(wake, a.Session) {
+			continue
+		}
+		s.overhearOne(ctx, ch, a.Session, seq, who, at, body)
+	}
+}
+
+func (s *Server) overhearOne(ctx context.Context, ch, to string, seq int64, who string, at int64, body string) {
+	defer s.chain.lock(to)()
+	_, by := s.agentsOf(ch)
+	me, ok := by[to]
+	if !ok {
+		return
+	}
+	if me.Direct() {
+		if ch != to {
+			return
+		}
+	} else if s.calls.current(to) != ch {
+		return
+	}
+	pull := s.m.HasIR(to)
+	if st, err := s.m.State(to); err == nil && st.Machine != "" && !pull {
+		pull = false
+	}
+	chID := ch
+	if me.Direct() {
+		chID = ""
+	}
+	in, err := assemble.ChannelOverhear(assemble.Overhear{
+		Channel: chID,
+		Seq:     seq,
+		Who:     who,
+		At:      at,
+		Text:    body,
+		Pull:    pull,
+		Zone:    time.Local,
+	})
+	if err != nil {
+		return
+	}
+	unseen, _, _, _, _, uerr := s.unread(ch, me, seq, by)
+	id := session.NewInputID()
+	sent, err := s.m.SendIfRunning(ctx, to, id, in)
+	if err != nil {
+		s.logf("server: channel %s: overhear %d to %s: %v", ch, seq, to, err)
+		return
+	}
+	if !sent {
+		return
+	}
+	if rec, err := json.Marshal(in.Record()); err == nil {
+		if err := s.st.AddInjection(store.Injection{Session: to, Channel: ch, Input: id, Seq: seq, At: at, Record: string(rec)}); err != nil {
+			s.logf("server: channel %s: keeping overhear %d to %s: %v", ch, seq, to, err)
+		}
+	}
+	if uerr == nil && len(unseen) == 0 {
+		s.seen(ch, to, seq)
+	}
 }
 
 // unread are the messages of ch that me has not seen, below number before (0: all there are),

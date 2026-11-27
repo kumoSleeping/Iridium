@@ -116,4 +116,9 @@ const (
 	idChannelReactionEnd = "channel.reaction-end"     // after those words
 	idChannelRecalled    = "channel.context.recalled" // the messages it was given that were taken back since
 	idChannelReact       = "channel.context.react"    // how to react to a message, what a reaction it gets looks like
+
+	// Live channel messages overheard by a running agent (channel.go).
+	idChannelOverhear      = "channel.overhear"
+	idChannelOverhearBare  = "channel.overhear.bare"
+	idChannelOverhearClose = "channel.overhear.close"
 )

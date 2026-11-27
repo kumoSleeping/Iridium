@@ -33,3 +33,21 @@ type GitHubToken struct {
 	Login  string `json:"login"`
 	Token  string `json:"token"`
 }
+
+// GitHubDevice is POST /v1/internal/github/device: a binding begun by GitHub's device flow. The
+// person opens URI and types Code there; the page asks POST /v1/internal/github/device/{id} every
+// Interval seconds till it is done or Expires (ms).
+type GitHubDevice struct {
+	ID       string `json:"id"`
+	Code     string `json:"code"`
+	URI      string `json:"uri"`
+	Interval int    `json:"interval"`
+	Expires  int64  `json:"expires"`
+}
+
+// GitHubDeviceState is POST /v1/internal/github/device/{id}: State "waiting" (not yet allowed
+// at GitHub), "done" (Binding made), "expired" or "denied" (begin again).
+type GitHubDeviceState struct {
+	State   string         `json:"state"`
+	Binding *GitHubBinding `json:"binding,omitempty"`
+}

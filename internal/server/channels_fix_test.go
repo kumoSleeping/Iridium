@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -376,14 +377,20 @@ func TestChannelSeenOnlyWhatWasGiven(t *testing.T) {
 	if code != 200 || call.Queued {
 		t.Fatalf("a message joining its turn: %d %+v", code, call)
 	}
-	code, between := l.send("web", ch, api.Send{Text: "said meanwhile"})
-	if code != 200 {
-		t.Fatalf("send meanwhile: %d", code)
+	// Another agent speaks meanwhile (without @ing claude2, so neither woken nor overheard).
+	var betweenMsgs []satori.Message
+	l.wantSat(200, "agent-in:"+ch, "message.create", map[string]any{"channel_id": ch, "content": "said meanwhile"}, &betweenMsgs)
+	var betweenSeq int64
+	if len(betweenMsgs) > 0 {
+		betweenSeq, _ = strconv.ParseInt(betweenMsgs[0].ID, 10, 64)
+	}
+	if betweenSeq == 0 {
+		t.Fatalf("send meanwhile: %+v", betweenMsgs)
 	}
 	l.waitSaid("web", ch, " @claude2 ", fmt.Sprintf("ok: #%d: @claude2 join in", call.Seq))
 	l.noCalls(second)
-	if seen := l.seenOf(ch, second); seen >= between.Seq {
-		t.Errorf("read to %d by the reply said for it; said meanwhile is %d, never given", seen, between.Seq)
+	if seen := l.seenOf(ch, second); seen >= betweenSeq {
+		t.Errorf("read to %d by the reply said for it; said meanwhile is %d, never given", seen, betweenSeq)
 	}
 	code, next := l.send("web", ch, api.Send{Text: "@claude2 once more"})
 	if code != 200 {

@@ -1025,4 +1025,11 @@ export const en: Dict = {
   "manage.invite": "Invite",
   "manage.inviteApp": "Invite an app",
   "manage.default": "Default",
+  "github.usePaste": "Use a token instead",
+  "github.authorize": "Authorize on GitHub",
+  "github.open": "Enter this code on GitHub",
+  "github.waiting": "Waiting for GitHub",
+  "github.expired": "Expired",
+  "github.denied": "Denied",
+  "github.rebind": "Bind again",
 };

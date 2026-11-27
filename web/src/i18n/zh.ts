@@ -1025,6 +1025,13 @@ export const zh = {
   "manage.invite": "邀请",
   "manage.inviteApp": "邀请应用",
   "manage.default": "默认",
+  "github.usePaste": "改用令牌",
+  "github.authorize": "在 GitHub 授权",
+  "github.open": "打开 GitHub 输入此码",
+  "github.waiting": "等待 GitHub 确认",
+  "github.expired": "已过期",
+  "github.denied": "已拒绝",
+  "github.rebind": "重新绑定",
 } as const;
 
 export type Key = keyof typeof zh;

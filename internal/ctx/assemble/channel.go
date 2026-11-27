@@ -455,3 +455,49 @@ func ChannelBehind(c Channel, count int, named bool) (Injection, error) {
 func ChannelSilent(nick, name string, seq int64) (Injection, error) {
 	return build(KindMessage, text(idChannelSilent, "nick", nick, "name", name, "seq", n(seq)))
 }
+
+// OverhearCut is the most characters of a live overheard channel message given inline; the rest
+// is fetched with ir api message.get when relevant.
+const OverhearCut = 400
+
+// Overhear is a live human message in a channel that did not @ a running agent, passed as a
+// short excerpt while the agent works. Channel is "" when the channel is the agent's own (self).
+type Overhear struct {
+	Channel string
+	Seq     int64
+	Who     string
+	At      int64
+	Text    string
+	Pull    bool
+	Zone    *time.Location
+}
+
+// ChannelOverhear formats a live overheard message wrapped in <channel-overhear>, clipped to
+// OverhearCut runes with an ir api message.get pointer when Pull is true.
+func ChannelOverhear(o Overhear) (Injection, error) {
+	zone := o.Zone
+	if zone == nil {
+		zone = time.UTC
+	}
+	headID := idChannelOverhear
+	if !o.Pull {
+		headID = idChannelOverhearBare
+	}
+	body, left := o.Text, 0
+	if r := []rune(body); len(r) > OverhearCut {
+		body, left = string(r[:OverhearCut]), len(r)-OverhearCut
+	}
+	ps := []piece{
+		text(headID, "seq", n(o.Seq), "who", o.Who, "time", time.UnixMilli(o.At).In(zone).Format("01-02 15:04")),
+		words(body, Ref{Kind: "message", ID: n(o.Seq)}),
+	}
+	if left > 0 {
+		if o.Pull {
+			ps = append(ps, text(idChannelCut, "left", strconv.Itoa(left), "seq", n(o.Seq), "channel", cmp.Or(o.Channel, "self")))
+		} else {
+			ps = append(ps, words("…"))
+		}
+	}
+	ps = append(ps, text(idChannelOverhearClose))
+	return build(KindMessage, ps...)
+}
