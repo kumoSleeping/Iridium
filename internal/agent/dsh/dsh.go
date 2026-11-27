@@ -156,19 +156,20 @@ type Driver struct {
 
 	modeMu sync.Mutex // one mode change at a time
 
-	mu      sync.Mutex
-	w       agent.Writer
-	proc    int
-	seq     int
-	pending map[string]*call
-	spawned bool // the process attaching next was just spawned: hand it the handshake
-	next    launch
-	session string
-	mode    string // the mode the session should be in
-	ready   chan struct{}
-	failed  error         // the handshake failed
-	gone    chan struct{} // closed when the attached process ends
-	ending  bool          // shut down for an interrupt
+	mu       sync.Mutex
+	draining bool // drainLocked: a goroutine is delivering the queue
+	w        agent.Writer
+	proc     int
+	seq      int
+	pending  map[string]*call
+	spawned  bool // the process attaching next was just spawned: hand it the handshake
+	next     launch
+	session  string
+	mode     string // the mode the session should be in
+	ready    chan struct{}
+	failed   error         // the handshake failed
+	gone     chan struct{} // closed when the attached process ends
+	ending   bool          // shut down for an interrupt
 
 	model, effort, version string        // the process's (model: "<provider>/<model>")
 	catalog                agent.Catalog // the models dsh offered at the last spawn
@@ -539,9 +540,7 @@ func (d *Driver) handshake(proc int, l launch, ready chan struct{}) {
 	}
 	d.emitLocked(agent.Started{Session: l.session, Model: d.model, Effort: cmp.Or(d.effort, DefaultEffort)})
 	mode := d.mode
-	evs := d.take()
-	d.mu.Unlock()
-	d.flush(evs)
+	d.drainLocked()
 	// A new session in plan mode plans over Iridium's default preset, which it leaves plan mode to.
 	if mode == "plan" && !resumed {
 		if err := d.applyMode(ctx, DefaultMode); err != nil {
@@ -552,13 +551,13 @@ func (d *Driver) handshake(proc int, l launch, ready chan struct{}) {
 		d.emit(agent.ProtocolError{Reason: "mode", Detail: err.Error()})
 	}
 	d.mu.Lock()
-	same := d.proc == proc
-	h := agent.Hello{Version: cmp.Or(l.version, info.ServerInfo.Version), Mode: d.mode, Models: slices.Clone(l.catalog.Models), Commands: slices.Clone(Commands)}
-	d.mu.Unlock()
-	close(ready)
-	if same {
-		d.emit(h)
+	// Queued before ready, as agy's: what a message sent once it is ready brings (its TurnStart)
+	// comes after it, never before (TestTurn: [Started TurnStart … Hello]).
+	if d.proc == proc {
+		d.emitLocked(agent.Hello{Version: cmp.Or(l.version, info.ServerInfo.Version), Mode: d.mode, Models: slices.Clone(l.catalog.Models), Commands: slices.Clone(Commands)})
 	}
+	close(ready)
+	d.drainLocked()
 }
 
 // waitReady waits for the handshake.
@@ -588,9 +587,7 @@ func (d *Driver) Detach() {
 	d.w = nil
 	close(d.gone)
 	d.gone = make(chan struct{})
-	evs := d.take()
-	d.mu.Unlock()
-	d.flush(evs)
+	d.drainLocked()
 }
 
 func (d *Driver) resetLocked() {
@@ -805,9 +802,7 @@ func (d *Driver) Answer(ctx context.Context, a api.Answer) error {
 		d.move(agent.Running, "")
 	}
 	d.emitLocked(agent.AskCancel{RequestID: a.RequestID})
-	evs := d.take()
-	d.mu.Unlock()
-	d.flush(evs)
+	d.drainLocked()
 	return nil
 }
 
@@ -1085,9 +1080,7 @@ func (d *Driver) Feed(line []byte, replay bool) {
 	d.mu.Lock()
 	answer := d.feed(line, replay)
 	w := d.w
-	evs := d.take()
-	d.mu.Unlock()
-	d.flush(evs)
+	d.drainLocked()
 	if answer != nil && w != nil && !replay {
 		go func() { _ = w(answer) }()
 	}
@@ -1690,6 +1683,25 @@ func (d *Driver) take() []agent.Event {
 	q := d.queue
 	d.queue = nil
 	return q
+}
+
+// drainLocked delivers what is queued, in order, and lets go of d.mu (held as it is called). One
+// goroutine delivers at a time (as agy's and codex's): each delivering its own take, the
+// opening's Hello and a fed line's Started could come out the wrong way round (TestTurn, -race).
+func (d *Driver) drainLocked() {
+	if d.draining {
+		d.mu.Unlock()
+		return
+	}
+	d.draining = true
+	for len(d.queue) > 0 {
+		evs := d.take()
+		d.mu.Unlock()
+		d.flush(evs)
+		d.mu.Lock()
+	}
+	d.draining = false
+	d.mu.Unlock()
 }
 
 func (d *Driver) flush(evs []agent.Event) {
