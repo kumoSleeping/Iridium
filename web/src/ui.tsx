@@ -435,13 +435,13 @@ export function PopSurface({
 function Placed({ children, side, align, sideOffset, anchor, still }: { children: ReactNode; side: "top" | "bottom" | "left" | "right"; align: "start" | "center" | "end"; sideOffset: number; anchor?: Element | { getBoundingClientRect: () => DOMRect } | null; still?: boolean }) {
   const [box] = useState(() => (still && anchor ? anchor.getBoundingClientRect() : null));
   const at = useMemo(() => (box ? { getBoundingClientRect: () => box } : undefined), [box]);
-  // A still one's side is chosen once, as it opens: over its anchor where under it there is little
-  // room and more over it. Not turned over after: what it holds grows and shrinks as it is read
-  // (a step's card), and it went under, over, under (kumo, 2026-11-25).
+  // A still one's side is chosen once, as it opens: toward the side with more room, its anchor's
+  // middle against the window's (kumo, 2026-11-27; it went under with 450px left there). Not
+  // turned over after: what it holds grows and shrinks as it is read (a step's card), and it went
+  // under, over, under (kumo, 2026-11-25).
   const [sure] = useState(() => {
     if (!box || side !== "bottom" || typeof window === "undefined") return side;
-    const under = window.innerHeight - box.bottom;
-    return under < 320 && box.top > under ? "top" : side;
+    return box.top + box.height / 2 > window.innerHeight / 2 ? "top" : side;
   });
   return (
     <Popover.Positioner side={box ? sure : side} align={align} sideOffset={sideOffset} collisionPadding={8} collisionAvoidance={box ? { side: "none", align: "shift" } : undefined} anchor={at ?? anchor ?? undefined} className="z-50">

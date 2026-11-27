@@ -51,7 +51,9 @@ export function Where({ place, short }: { place?: Place; short?: boolean }) {
   const path = m ? shownPath(`${m.id}:${place.path.replaceAll("\\", "/")}`, ms).label : tilde(place.path);
   const name = m?.name ?? place.machine ?? folderName(place.path);
   return (
-    <span className="mr-1 flex min-w-0 shrink items-center gap-1.5" title={`${place.machine ? `${name}:` : ""}${place.path}`}>
+    // Short (a work line's head): kept whole, its name capped; the step after it gives way, not
+    // run over by it (StarFreedomX, 2026-11-27: the name under the step's icon).
+    <span className={cn("mr-1 flex items-center gap-1.5", short ? "shrink-0" : "min-w-0 shrink")} title={`${place.machine ? `${name}:` : ""}${place.path}`}>
       {m ? <MachineFace m={m} size={16} className={cn(!m.online && "opacity-50 grayscale")} /> : <Folder size={14} className="shrink-0" aria-hidden />}
       <span className={cn("shrink-0 truncate font-medium text-ink-2", short ? "max-w-40" : "max-w-[55%]")}>{name}</span>
       {m && <Link m={m} />}

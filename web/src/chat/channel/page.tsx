@@ -23,7 +23,7 @@ import { also, carries, events, opened, type SatoriEvent } from "../../stream";
 import { errText, toast } from "../../toast";
 import { agentName, cn, lampOf, PopSurface, ServerFace } from "../../ui";
 import { useSecret } from "../../secrets";
-import { Asks } from "../asks";
+import { AskDone, AskInline, Asks } from "../asks";
 import { placeDropped } from "../at";
 import { Composer, type ComposerHandle } from "../composer";
 import { Copyable } from "../copyable";
@@ -396,7 +396,18 @@ export function ChannelPage({ id, sheet = 0, bar, record }: { id: string; sheet?
   const secretAt = useSecret()?.at;
   const secretHere = secretAt === id || (!!solo && secretAt === solo.session);
   // The asks open, as the channel's messages say (an ask's message carries it while it is open).
-  const asks = useMemo(() => openAsks(log.msgs, agents.map((a) => ({ session: a.session, asks: stateAt(a.session)?.asks ?? [] }))), [log.msgs, agents.map((a) => `${a.session}:${(stateAt(a.session)?.asks ?? []).map((x) => x.requestId).join(",")}`).join(" ")]);
+  // Those with a message of theirs are drawn in it (GroupView); only one with none (its message
+  // not come yet) over the composer still.
+  const asks = useMemo(() => {
+    const open = openAsks(log.msgs, agents.map((a) => ({ session: a.session, asks: stateAt(a.session)?.asks ?? [] })));
+    const said = new Set(log.msgs.flatMap((m) => (m.kind === "ask" && m.card ? [m.card] : [])));
+    const out = new Map<string, Ask[]>();
+    for (const [k, v] of open) {
+      const left = v.filter((a) => !said.has(a.card?.id ?? `ask:${k}:${a.requestId}`));
+      if (left.length) out.set(k, left);
+    }
+    return out;
+  }, [log.msgs, agents.map((a) => `${a.session}:${(stateAt(a.session)?.asks ?? []).map((x) => x.requestId).join(",")}`).join(" ")]);
   const asking = agents.some((a) => !!asks.get(a.session)?.length) || agents.some((a) => confirms.some((c) => c.session === a.session && c.kind !== "ask")) || secretHere;
   // A compaction is said on the agent's own line of work, with its steps (work.tsx; kumo,
   // 2026-11-26); the rule across the channel only where there is no such line going (a /compact
@@ -777,6 +788,8 @@ export const GroupView = memo(function GroupView({ g, channel, agents, who, reco
               ref={(el) => void (el && born?.delete(m.n) && pushIn(m === msgs[0] ? (el.closest<HTMLElement>("[data-row]") ?? el) : el))}
             >
               {(m !== msgs[0] || g.bare) && <Gutter time={m.time} n={m.n} />}
+              {/* An ask: its card while open, a line once over, who answered it there. */}
+              {m.kind === "ask" && (m.ask ? <AskInline session={a.session} ask={m.ask} cwd={listed?.cwd ?? ""} off={!may} /> : <AskDone asked={m.asked} answer={m.answer} text={m.text} />)}
               {/* What an older message says was done before it, where the one before has no line of its own for it. */}
               {/* No work of its own (said before messages carried it, or a twin where it was called): its steps from its record, by the span it says, as before. */}
               {!m.work && !hidden?.has(m.n) && (m.did || (m.src?.from !== undefined && !!m.src.to)) && line({ ...(m.did ? { did: m.did } : {}), ...(m.src?.from !== undefined && m.src.to ? { span: { from: m.src.from, to: m.src.to } } : {}) })}
@@ -788,7 +801,7 @@ export const GroupView = memo(function GroupView({ g, channel, agents, who, reco
                   <Quoted n={m.quote} q={quoted(m.quote)} channel={channel} jump={jump} />
                 </div>
               )}
-              {said && m.kind !== "error" && (
+              {said && m.kind !== "error" && m.kind !== "ask" && (
                 <Foldable scope={channel} id={`m${m.n}`} auto={!seen && (((fold?.(m) ?? false) && longWords(w.words)) || (old?.(m) ?? false))} lines={linesOf(w.words)}>
                   {(wrap) => (
                     <Copyable copy={withForwards(w.words, w.forwards)} quote={quote && (() => quote(m))} act={m.kind === "error" || m.kind === "ask" ? undefined : { channel, seq: m.n, may }}>

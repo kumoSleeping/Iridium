@@ -24,7 +24,8 @@ type Q = { question: string; header?: string; options: { label: string; descript
 /** What a key press answers: an option of the card's, or a choice per question and own words. */
 type Reply = { option?: string; choices?: string[]; words?: string[]; message?: string };
 
-export function Asks({ session, asks, cwd, confirms = [] }: { session: string; asks: Ask[]; cwd: string; confirms?: Need[] }) {
+/** Answering session's asks: the one being answered (busy), the one going away (leaving). */
+function useAnswer(session: string, toasts = true) {
   const [busy, setBusy] = useState<string | null>(null);
   const [leaving, setLeaving] = useState<string | null>(null);
   const answer = async (a: Ask, r: Reply) => {
@@ -33,13 +34,72 @@ export function Asks({ session, asks, cwd, confirms = [] }: { session: string; a
       await api.answer(session, { card: a.card?.id ?? `ask:${session}:${a.requestId}`, ...r } satisfies CardAnswer);
       setLeaving(a.requestId);
       setTimeout(() => setLeaving(null), 140);
-      if (a.kind === "permission") toast(r.option === "deny" ? t("toast.denied") : t("toast.allowed"), { description: r.option === "always" ? t("ask.always") : undefined });
+      if (toasts && a.kind === "permission") toast(r.option === "deny" ? t("toast.denied") : t("toast.allowed"), { description: r.option === "always" ? t("ask.always") : undefined });
     } catch (e) {
       toast(t("err.answer"), { error: true, description: errText(e) });
     } finally {
       setBusy(null);
     }
   };
+  return { busy, leaving, answer };
+}
+
+/** An ask in the conversation, among its agent's words (kumo, 2026-11-27: in it, not over the
+ *  composer; the head over its run says whose): open, its card, flat, keys and all; off: shown,
+ *  not to be answered. No toast: the line it becomes says it. */
+export function AskInline({ session, ask, cwd, off }: { session: string; ask: Ask; cwd: string; off?: boolean }) {
+  const { busy, answer } = useAnswer(session, false);
+  const b = busy === ask.requestId;
+  return (
+    <div inert={off} role="alertdialog" aria-label={titleOf(ask)} className={cn("@container rounded-lg border border-edge p-2.5 pl-3", off && "opacity-60")}>
+      {ask.kind === "question" ? <Question a={ask} busy={b} send={(r) => void answer(ask, r)} /> : <Decide a={ask} cwd={cwd} busy={b} send={(r) => void answer(ask, r)} />}
+    </div>
+  );
+}
+
+/** What an answer's option says done, by its id and the ask's kind; "" for one that is its own
+ *  words (a question's). */
+function doneWord(kind: string | undefined, option: string | undefined): string {
+  switch (option) {
+    case "allow":
+      return kind === "manual" ? t("ask.didAgree") : t("ask.didAllow");
+    case "deny":
+      return kind === "manual" ? t("ask.didRefuse") : t("ask.didDeny");
+    case "always":
+      return t("ask.didAlways");
+    case "approve":
+      return t("ask.didApprove");
+    case "reject":
+      return t("ask.didKeepPlanning");
+  }
+  return "";
+}
+
+/** An ask over, as a line among its agent's words: what it asked (its kind's icon and title, its
+ *  command, path or reason), then how it went and who answered it (kumo, 2026-11-27), 已结束 for
+ *  one no person answered. asked: what it asked as its message keeps it; text: its message's
+ *  words, for one from before that was kept. */
+export function AskDone({ asked, answer, text }: { asked?: { kind?: string; tool?: string; summary?: string }; answer?: { name?: string; option?: string; label?: string }; text: string }) {
+  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+  const a = { requestId: "", kind: asked?.kind ?? "permission", tool: asked?.tool ?? lines[0] ?? "" } as Ask;
+  const summary = asked?.summary ?? lines[1] ?? "";
+  const icon = a.kind === "plan" ? <ClipboardList size={14} /> : a.kind === "manual" ? <Hand size={14} /> : a.kind === "question" ? <MessageCircleQuestionMark size={14} /> : ICON_SMALL[kindOf(a.tool)] ?? <ShieldQuestion size={14} />;
+  const word = answer ? doneWord(a.kind, answer.option) || answer.label || "" : t("ask.over");
+  const no = answer?.option === "deny" || answer?.option === "reject";
+  return (
+    <div className="flex h-7 min-w-0 items-center gap-1.5 text-sm text-ink-3 pointer-coarse:h-9">
+      <span className="shrink-0">{icon}</span>
+      <span className="shrink-0 text-ink-2">{a.kind === "permission" && a.tool ? a.tool : titleOf(a)}</span>
+      {summary && <span className={cn("min-w-0 flex-1 truncate", a.kind === "permission" && "font-mono text-[13px]")}>{summary}</span>}
+      {!summary && <span className="flex-1" />}
+      <span className={cn("shrink-0 pl-2 text-xs", no ? "text-err" : "text-ink-3")}>{word}</span>
+      {answer?.name && <span className="max-w-32 shrink-0 truncate text-xs text-ink-4">{answer.name}</span>}
+    </div>
+  );
+}
+
+export function Asks({ session, asks, cwd, confirms = [] }: { session: string; asks: Ask[]; cwd: string; confirms?: Need[] }) {
+  const { busy, leaving, answer } = useAnswer(session);
   const secretHere = useSecret()?.at === session;
   if (!asks.length && !confirms.length && !secretHere) return null;
   return (
@@ -64,6 +124,11 @@ const ICON: Record<string, ReactNode> = {
   command: <SquareTerminal size={16} />,
   edit: <FilePen size={16} />,
   web: <Globe size={16} />,
+};
+const ICON_SMALL: Record<string, ReactNode> = {
+  command: <SquareTerminal size={14} />,
+  edit: <FilePen size={14} />,
+  web: <Globe size={14} />,
 };
 
 function titleOf(a: Ask): string {
