@@ -69,10 +69,14 @@ func newInstance(name string, sa *windows.SecurityAttributes, first bool) (windo
 
 // pipeInput is what the holder reads: the lines of every client, one whole line at a time.
 type pipeInput struct {
-	r      *io.PipeReader
-	w      *io.PipeWriter
-	mu     sync.Mutex
-	closed atomic.Bool
+	name      string
+	r         *io.PipeReader
+	w         *io.PipeWriter
+	mu        sync.Mutex
+	conns     map[*os.File]struct{}
+	closed    atomic.Bool
+	closeOnce sync.Once
+	done      chan struct{}
 }
 
 func openInput(dir string) (io.ReadCloser, error) {
@@ -86,15 +90,24 @@ func openInput(dir string) (io.ReadCloser, error) {
 		return nil, fmt.Errorf("the input pipe %s: %w", name, err)
 	}
 	r, w := io.Pipe()
-	p := &pipeInput{r: r, w: w}
+	p := &pipeInput{name: name, r: r, w: w, conns: map[*os.File]struct{}{}, done: make(chan struct{})}
 	go p.serve(name, sa, h)
 	return p, nil
 }
 
 // serve waits for a client on h, hands it to a reader, and opens the next instance.
 func (p *pipeInput) serve(name string, sa *windows.SecurityAttributes, h windows.Handle) {
-	for !p.closed.Load() {
+	defer close(p.done)
+	for {
+		if p.closed.Load() {
+			windows.CloseHandle(h)
+			return
+		}
 		err := windows.ConnectNamedPipe(h, nil)
+		if p.closed.Load() {
+			windows.CloseHandle(h)
+			return
+		}
 		if err != nil && !errors.Is(err, windows.ERROR_PIPE_CONNECTED) {
 			windows.CloseHandle(h)
 			if p.closed.Load() {
@@ -102,7 +115,19 @@ func (p *pipeInput) serve(name string, sa *windows.SecurityAttributes, h windows
 			}
 			time.Sleep(100 * time.Millisecond)
 		} else {
-			go p.read(os.NewFile(uintptr(h), name))
+			f := os.NewFile(uintptr(h), name)
+			p.mu.Lock()
+			if p.closed.Load() {
+				p.mu.Unlock()
+				f.Close()
+				return
+			}
+			p.conns[f] = struct{}{}
+			p.mu.Unlock()
+			go p.read(f)
+		}
+		if p.closed.Load() {
+			return
 		}
 		if h, err = newInstance(name, sa, false); err != nil {
 			p.w.CloseWithError(err)
@@ -113,7 +138,12 @@ func (p *pipeInput) serve(name string, sa *windows.SecurityAttributes, h windows
 
 // read passes a client's whole lines on; a line it leaves unfinished is dropped.
 func (p *pipeInput) read(f *os.File) {
-	defer f.Close()
+	defer func() {
+		p.mu.Lock()
+		delete(p.conns, f)
+		p.mu.Unlock()
+		f.Close()
+	}()
 	r := bufio.NewReaderSize(f, 64<<10)
 	for {
 		line, err := r.ReadBytes('\n')
@@ -138,8 +168,28 @@ func (p *pipeInput) Read(b []byte) (int, error) {
 }
 
 func (p *pipeInput) Close() error {
-	p.closed.Store(true)
-	return p.r.CloseWithError(os.ErrClosed)
+	var err error
+	p.closeOnce.Do(func() {
+		p.closed.Store(true)
+		err = p.r.CloseWithError(os.ErrClosed)
+		p.mu.Lock()
+		for f := range p.conns {
+			_ = f.Close()
+		}
+		p.mu.Unlock()
+		// Wake serve()'s blocking ConnectNamedPipe so the last server handle closes cleanly and a
+		// subsequent holder on the same directory can create FILE_FLAG_FIRST_PIPE_INSTANCE.
+		if pName, perr := windows.UTF16PtrFromString(p.name); perr == nil {
+			if c, cerr := windows.CreateFile(pName, windows.GENERIC_WRITE, 0, nil, windows.OPEN_EXISTING, 0, 0); cerr == nil {
+				_ = windows.CloseHandle(c)
+			}
+		}
+		select {
+		case <-p.done:
+		case <-time.After(time.Second):
+		}
+	})
+	return err
 }
 
 // groupAttr starts the agent in a process group of its own: Ctrl+Break reaches it alone.

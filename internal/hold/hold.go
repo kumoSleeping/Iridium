@@ -78,6 +78,9 @@ func Main(args []string) int {
 	return 2
 }
 
+// OpenInput opens the hold directory's input channel (a Unix FIFO or a Windows named pipe).
+func OpenInput(dir string) (io.ReadCloser, error) { return openInput(dir) }
+
 // Run holds one agent process in dir until it exits, then writes the exit file. SIGTERM closes the
 // agent's stdin, so an idle agent exits by itself; if it has not after the grace, its process
 // group gets SIGTERM, then SIGKILL. The holder's own exit code is 0 whenever it wrote the exit file.

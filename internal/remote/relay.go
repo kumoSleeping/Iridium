@@ -117,6 +117,11 @@ func (l Launcher) relay(unit string) *relay {
 	if r != nil {
 		return r
 	}
+	if strings.HasPrefix(m.id, LocalExecID+"-") {
+		if _, online := m.Hello(); !online {
+			return nil // a per-connection local-exec ID never reconnects after its process exits
+		}
+	}
 	dir := m.hub.Dir(unit)
 	var rm relayMeta
 	if readJSON(filepath.Join(dir, FileRemote), &rm) != nil || rm.Machine != m.id {
@@ -149,12 +154,12 @@ type relay struct {
 	ended  bool
 	wake   chan struct{}
 	quit   chan struct{}
-	fifo   *os.File
+	fifo   io.ReadCloser
 	outMu  sync.Mutex // out.log appends, one at a time
 }
 
 func (m *Machine) newRelay(unit, dir string, rm relayMeta) (*relay, error) {
-	fifo, err := os.OpenFile(filepath.Join(dir, hold.FileIn), os.O_RDWR, 0)
+	fifo, err := hold.OpenInput(dir)
 	if err != nil {
 		return nil, err
 	}

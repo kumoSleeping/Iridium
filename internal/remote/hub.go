@@ -16,6 +16,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/kumoSleeping/iridium/internal/hold"
 	"github.com/kumoSleeping/iridium/internal/version"
 )
 
@@ -450,6 +451,8 @@ func (m *Machine) connect(c *wire.Conn, hi *wire.Hello) {
 }
 
 // disconnect forgets c if it is the machine's connection; false if a newer one replaced it.
+// For a local-exec connection (whose holds run in-process and die with it, and whose ID is
+// per-connection), active relays are ended immediately so hosted sessions cleanly return to idle.
 func (m *Machine) disconnect(c *wire.Conn) bool {
 	m.mu.Lock()
 	if m.conn != c {
@@ -459,8 +462,27 @@ func (m *Machine) disconnect(c *wire.Conn) bool {
 	m.conn = nil
 	close(m.change)
 	m.change = make(chan struct{})
+	var endRelays []*relay
+	localExec := m.localExec
+	if localExec {
+		for _, r := range m.relays {
+			endRelays = append(endRelays, r)
+		}
+	}
 	m.mu.Unlock()
+	for _, r := range endRelays {
+		r.end(hold.Exit{From: "holder"}, "local host disconnected")
+	}
 	m.hub.notifyChanged(m.id)
+	if localExec {
+		m.hub.mu.Lock()
+		m.mu.Lock()
+		if m.conn == nil && len(m.relays) == 0 && m.hub.machines[m.id] == m {
+			delete(m.hub.machines, m.id)
+		}
+		m.mu.Unlock()
+		m.hub.mu.Unlock()
+	}
 	return true
 }
 
