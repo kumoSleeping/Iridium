@@ -305,7 +305,7 @@ function Field({ label, children, onClick, open }: { label: ReactNode; children:
     </>
   );
   return onClick ? (
-    <button type="button" onClick={onClick} aria-expanded={open} className="g-press -mx-2 flex min-h-11 items-center gap-3 rounded-md px-2 text-left hover:g-picked">
+    <button type="button" onClick={onClick} aria-expanded={open} className="g-press -mx-2 flex min-h-11 items-center gap-3 rounded-md px-2 text-left hover:bg-wash">
       {body}
     </button>
   ) : (
@@ -334,7 +334,7 @@ function Unfold({ open, children }: { open: boolean; children: ReactNode }) {
  *  what it holds unfolds under it. */
 function FoldRow({ face, name, line, open, onClick }: { face: ReactNode; name: ReactNode; line?: ReactNode; open: boolean; onClick: () => void }) {
   return (
-    <button type="button" onClick={onClick} aria-expanded={open} className="g-press -mx-2 flex min-h-11 items-center gap-3 rounded-md px-2 text-left hover:g-picked">
+    <button type="button" onClick={onClick} aria-expanded={open} className="g-press -mx-2 flex min-h-11 items-center gap-3 rounded-md px-2 text-left hover:bg-wash">
       {face}
       <span className="min-w-0 flex-1 truncate text-sm">{name}</span>
       {line && <span className="flex min-w-0 shrink items-center gap-1.5 truncate text-xs text-ink-3 tabular-nums">{line}</span>}
@@ -684,7 +684,7 @@ function PasskeysFold({ login }: { login: Login }) {
   return (
     <div className="flex flex-col">
       <PasskeyList login={login} />
-      <button type="button" onClick={() => void add()} className="g-press -mx-2 flex min-h-10 items-center gap-2 rounded-md px-2 text-left text-sm text-ink-2 hover:g-picked">
+      <button type="button" onClick={() => void add()} className="g-press -mx-2 flex min-h-10 items-center gap-2 rounded-md px-2 text-left text-sm text-ink-2 hover:bg-wash">
         <Plus size={15} className="text-ink-3" />
         {t("passkey.add")}
       </button>
@@ -881,7 +881,7 @@ function ComputerDetail({ a, want = "" }: { a: App; want?: string }) {
               <div className="flex flex-col gap-2">
                 <SecretsPane adding={adding} done={() => setAdding(false)} />
                 {!adding && (
-                  <button type="button" onClick={() => setAdding(true)} className="g-press -mx-2 flex min-h-10 items-center gap-2 rounded-md px-2 text-left text-sm text-ink-2 hover:g-picked">
+                  <button type="button" onClick={() => setAdding(true)} className="g-press -mx-2 flex min-h-10 items-center gap-2 rounded-md px-2 text-left text-sm text-ink-2 hover:bg-wash">
                     <Plus size={15} className="text-ink-3" />
                     {t("manage.newSecret")}
                   </button>
