@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -139,14 +140,50 @@ func (s *Server) recalledFor(session, ch string, seen int64) []int64 {
 		return nil
 	}
 	var out []int64
-	// since-1: one taken back in the millisecond it was last given something may be after it;
-	// told twice then, rather than never.
+	var told map[int64]bool
+	// since-1: one taken back in the millisecond it was last given something may be after it.
+	// One taken back as that was given (after its stamp, before it was looked for) was told
+	// then and is after it too: what it was told already is not told again
+	// (TestReactionsAndRecall, told twice on a loaded CI box).
 	for _, r := range s.ch.Recalls(ch, since-1) {
-		if r.Seq <= seen {
+		if r.Seq > seen {
+			continue
+		}
+		if told == nil {
+			told = s.toldRecalled(session, ch)
+		}
+		if !told[r.Seq] {
 			out = append(out, r.Seq)
 		}
 	}
 	return out
+}
+
+// toldRecalled are the numbers of messages of channel ch that session's agent was told were
+// taken back, in what it was last given there (the records kept of it).
+func (s *Server) toldRecalled(session, ch string) map[int64]bool {
+	told := map[int64]bool{}
+	rows, err := s.st.Injections(session, 20)
+	if err != nil {
+		return told
+	}
+	for _, in := range rows {
+		var rec assemble.Record
+		if in.Channel != ch || json.Unmarshal([]byte(in.Record), &rec) != nil {
+			continue
+		}
+		for _, p := range rec.Parts {
+			if !strings.HasSuffix(p.Source, "channel.context.recalled") {
+				continue
+			}
+			for _, f := range strings.Split(p.Values["seqs"], ",") {
+				if n, err := strconv.ParseInt(strings.TrimPrefix(strings.TrimSpace(f), "#"), 10, 64); err == nil {
+					told[n] = true
+				}
+			}
+		}
+	}
+	return told
 }
 
 // recalls are the channels some message was taken back in: only theirs are looked at for it.
