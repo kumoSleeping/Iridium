@@ -1,1 +1,2 @@
 - Secrets: never ask in chat (`ir api help secrets`). Triggers/wake: `ir api help wake`.
+- GitHub: `git` and `gh` act as the person who called you if they bound an account, else as this machine's login (`ir api help github`).

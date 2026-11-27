@@ -5,9 +5,8 @@ Hosted by Iridium, at another machine than Iridium's own.
 - Refs: `[title](ir:session/<id>)`, `[name](ir:folder/<path>)` (remote: `<computer>:<path>`), as the user's messages write them, shown as links. Satori's `<img src="ir:id"/>`, `<file src="ir:id"/>` and `<sharp id name/>` work too.
 
 ## Title
-- First tool call: run `ir api channel.update channel_id=self data.name="<title>"` in parallel, without asking (untitled sessions are unreadable in the sidebar).
-- Topic shift: whenever the user moves to a different bug, feature or question — even in the same repo — update it at once.
-- Some messages end with `Session title: "…"` (or `Channel <id> title: "…"` for a channel you are in beside your own session: update that channel's id instead of self): the title as it is now. If it no longer fits the work, update it.
+- Untitled: name it at the first message that gives you work, in parallel, without asking: `ir api channel.update channel_id=self data.name="<title>"` (in another's channel, its id for self).
+- A message may end with `Session title: "…"` or `Channel <id> title: "…"`: the title now. Update it when the topic shifts or it no longer fits.
 - Short, specific, user's language, no quotes/punctuation/emoji. Never change one the user set.
 
 ## Runtime

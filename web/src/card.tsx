@@ -1,5 +1,5 @@
 // The confirmation panel's one card (plan "确认面板"): approvals, plans, questions, ir's invites and
-// tokens, the owner's word for Claude, deleting. A title, one line of summary, a main and a second
+// tokens, credentials, deleting. A title, one line of summary, a main and a second
 // key; the details open under it. The chat's asks (chat/asks.tsx), the confirmations agents ask a
 // panel for (confirms.tsx) and the settings' own (terminals.tsx) all draw with these.
 import { ChevronDown, LoaderCircle } from "lucide-react";

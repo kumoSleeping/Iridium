@@ -19,6 +19,17 @@
   --fill: oklch(0.955 0 0);
   --fill-2: oklch(0.92 0 0);
   --edge: oklch(0 0 0 / 0.08);
+  /* A list's chosen row and the ground under the list (kumo, 2026-11-27, 设计's 方案一 on the paper
+     as it was: no darker rail): the chosen row lifted as white paper, a hairline and a soft
+     shadow; a row under the pointer the same (kumo, 2026-11-27: a fainter one did not show); a mark's round ground
+     paper with a hairline, not grey. One set for the sidebar, 管理 and every list that picks. */
+  --rail: var(--paper);
+  --rail-edge: oklch(0 0 0 / 0.055);
+  --picked: oklch(1 0 0);
+  --picked-shadow: 0 0 0 0.5px oklch(0 0 0 / 0.1), 0 1px 2px oklch(0 0 0 / 0.06), 0 4px 10px -3px oklch(0 0 0 / 0.08);
+  --wash: oklch(0 0 0 / 0.036);
+  --disc: oklch(0.996 0 0);
+  --disc-edge: oklch(0 0 0 / 0.08);
   /* Glass: a tint and how much of it; frosted, it lets the rest through. Solid (a view
      transition's snapshot, reduced transparency) is that same tint laid on paper, worked out from
      it, never written apart: two values for one surface drift, and the bar went a shade darker for
@@ -96,6 +107,13 @@
   --fill: oklch(0.235 0 0);
   --fill-2: oklch(0.285 0 0);
   --edge: oklch(1 0 0 / 0.09);
+  --rail: var(--paper);
+  --rail-edge: oklch(1 0 0 / 0.06);
+  --picked: oklch(0.235 0 0);
+  --picked-shadow: inset 0 0.5px 0 oklch(1 0 0 / 0.11), 0 0 0 0.5px oklch(1 0 0 / 0.08), 0 2px 6px oklch(0 0 0 / 0.35);
+  --wash: oklch(1 0 0 / 0.045);
+  --disc: oklch(0.21 0 0);
+  --disc-edge: oklch(1 0 0 / 0.09);
   --glass-tint: oklch(0.225 0 0);
   --glass-thick-tint: oklch(0.235 0 0);
   --glass-a: 72%;
@@ -135,6 +153,11 @@
   --color-fill: var(--fill);
   --color-fill-2: var(--fill-2);
   --color-edge: var(--edge);
+  --color-rail: var(--rail);
+  --color-rail-edge: var(--rail-edge);
+  --color-wash: var(--wash);
+  --color-picked: var(--picked);
+  --color-disc: var(--disc);
   --color-on-ink: var(--on-ink);
   --color-run: var(--run);
   --color-need: var(--need);
@@ -851,4 +874,15 @@ html[data-playing="1"] main *,
 html[data-slicing="1"],
 html[data-slicing="1"] * {
   cursor: default;
+}
+
+/* A list's chosen row: white paper lifted off the rail (see --picked). */
+@utility g-picked {
+  background-color: var(--picked);
+  box-shadow: var(--picked-shadow);
+}
+/* A mark's round ground: paper with a hairline (see --disc). */
+@utility g-disc {
+  background-color: var(--disc);
+  box-shadow: inset 0 0 0 0.5px var(--disc-edge);
 }

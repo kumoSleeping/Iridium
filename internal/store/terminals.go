@@ -1,15 +1,5 @@
 package store
 
-import (
-	"database/sql"
-	"encoding/json"
-	"errors"
-	"fmt"
-
-	"github.com/kumoSleeping/iridium/internal/access"
-	"github.com/kumoSleeping/iridium/internal/api"
-)
-
 // terminalsSchema is migration 3. The tables of migration 1 for terminals were placeholders and
 // never written; the gate's endpoints take their place (docs/gate.md "存储接口"). Permissions have
 // no foreign key: the built-in 本机 is no row, and the gate deletes a terminal in the same
@@ -66,72 +56,9 @@ const devicesSchema = `CREATE TABLE devices (
 		device TEXT NOT NULL
 	);`
 
-// ownerSchema is migration 5: an invite made with ir invite --owner says so. Its step,
-// claudeForFirstPanel, gives the first panel Claude.
+// ownerSchema is migration 5: an invite made with ir invite --owner said so (Claude for the owner's
+// own, gone 2026-11-27: the permissions table and this column are no longer read).
 const ownerSchema = `ALTER TABLE invites ADD COLUMN owner INTEGER NOT NULL DEFAULT 0;`
-
-// claudeForFirstPanel is migration 5's step, run once: Claude only for the owner's own terminals,
-// and the first panel registered is the owner's (plan "交互终端"). Panels from before the rule have
-// Claude only if a panel turned it on; when none has it, the earliest registered gets it.
-func claudeForFirstPanel(tx *sql.Tx) error {
-	rows, err := tx.Query(`SELECT t.id, IFNULL(p.rules, '') FROM terminals t LEFT JOIN permissions p ON p.terminal = t.id
-		WHERE t.kind = 'panel' ORDER BY t.created_at, t.id`)
-	if err != nil {
-		return err
-	}
-	type panel struct {
-		id    string
-		rules api.Rules
-	}
-	var panels []panel
-	for rows.Next() {
-		var id, raw string
-		if err := rows.Scan(&id, &raw); err != nil {
-			rows.Close()
-			return err
-		}
-		r := access.Default()
-		if raw != "" {
-			if err := json.Unmarshal([]byte(raw), &r); err != nil {
-				rows.Close()
-				return fmt.Errorf("rules of %s: %w", id, err)
-			}
-		}
-		panels = append(panels, panel{id, r})
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil || len(panels) == 0 {
-		return err
-	}
-	for _, p := range panels {
-		if access.HasClaude(p.rules) {
-			return nil
-		}
-	}
-	b, err := json.Marshal(access.WithClaude(panels[0].rules, access.ByFirst, now()))
-	if err != nil {
-		return err
-	}
-	_, err = tx.Exec(`INSERT INTO permissions (terminal, rules) VALUES (?, ?) ON CONFLICT (terminal) DO UPDATE SET rules = excluded.rules`, panels[0].id, string(b))
-	return err
-}
-
-// TerminalRules is the permission table (JSON) of an app, a login or the host by its storage ID
-// (gate.Identity.ID), ok false when it has none of its own. Until S2 splits them, the apps' and the
-// logins' are in one table, by ID.
-func (s *Store) TerminalRules(terminal string) (rules []byte, ok bool, err error) {
-	err = s.db.QueryRow(`SELECT rules FROM permissions WHERE terminal = ?`, terminal).Scan(&rules)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, false, nil
-	}
-	return rules, err == nil, err
-}
-
-// SetTerminalRules stores terminal's permission table (JSON).
-func (s *Store) SetTerminalRules(terminal string, rules []byte) error {
-	_, err := s.db.Exec(`INSERT INTO permissions (terminal, rules) VALUES (?, ?) ON CONFLICT (terminal) DO UPDATE SET rules = excluded.rules`, terminal, string(rules))
-	return err
-}
 
 // SetOpener records that terminal opened session.
 func (s *Store) SetOpener(session, terminal string) error {

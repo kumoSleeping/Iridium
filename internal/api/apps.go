@@ -11,23 +11,6 @@ const HostID = "local"
 // WebApp is the built-in app ir_web's ID: there only with a public origin.
 const WebApp = "ir_web"
 
-// Rules is what an app or login may do: everything, all alike, but Claude (the user, 2026-11-08).
-// Stored as before, the other fields of old tables are no longer read. S2 puts permissions in place.
-type Rules struct {
-	// ClaudeOwner: it is the owner's own (Claude's terms), so it may use Claude. Set as it was
-	// made, by the server only, and never changed. Without it, it sees Claude's sessions but may
-	// not start, write to or answer one.
-	ClaudeOwner *OwnerConfirm `json:"claudeOwner,omitempty"`
-}
-
-// OwnerConfirm is how, and when (ms), an app or login was found the owner's own.
-type OwnerConfirm struct {
-	// By: "local" (a person's ir at the host), "panel" (a person on a login of ir_web that has
-	// Claude, or one that confirmed an agent's ask) or "first" (the first login of ir_web).
-	By string `json:"by"`
-	At int64  `json:"at"`
-}
-
 // App is an app as listed, or the host (Host) or ir_web (Web) beside them. No secrets.
 type App struct {
 	ID     string `json:"id"`
@@ -47,7 +30,6 @@ type App struct {
 	Connections int   `json:"connections,omitempty"` // its live connections (a Bot's)
 	CreatedAt   int64 `json:"createdAt,omitempty"`
 	LastSeenAt  int64 `json:"lastSeenAt,omitempty"`
-	Rules       Rules `json:"rules"`
 	// Perms: what an app was given as it paired (nil: all, as one paired before 0.2). Not the
 	// host's or ir_web's.
 	Perms     *Perms `json:"perms,omitempty"`
@@ -135,7 +117,6 @@ type Login struct {
 	CreatedAt   int64  `json:"createdAt,omitempty"`
 	LastSeenAt  int64  `json:"lastSeenAt,omitempty"`
 	ApprovedAt  int64  `json:"approvedAt,omitempty"` // 0: waits to be approved
-	Rules       Rules  `json:"rules"`
 	UsedToday   int64  `json:"usedToday"`
 	Device      Device `json:"device,omitempty"`
 	// Perms: what it was given (nil: all); what it may use is this within its app's.
@@ -203,15 +184,14 @@ type PasskeyDevice struct {
 type PendingInvite struct {
 	ID        string `json:"id"`
 	Name      string `json:"name,omitempty"`
-	Setup     bool   `json:"setup,omitempty"`  // the first-run link in the state directory
-	Claude    bool   `json:"claude,omitempty"` // the login gets Claude
+	Setup     bool   `json:"setup,omitempty"` // the first-run link in the state directory
 	CreatedAt int64  `json:"createdAt"`
 	ExpiresAt int64  `json:"expiresAt,omitempty"`
 }
 
 // Apps is GET /v1/internal/apps (ir apps): the host first, ir_web (with a public origin), the apps; the
 // logins of ir_web; the invites not taken. Public (draft 二「消息」): any caller gets the apps
-// (names, types, avatars, online, computers) and the approved logins; their rules, perms and
+// (names, types, avatars, online, computers) and the approved logins; their perms and
 // usage, the logins waiting and the invites only one that manages (Full).
 type Apps struct {
 	Apps    []App           `json:"apps"`
@@ -233,18 +213,15 @@ type Me struct {
 	// Iridium's.
 	Named     bool   `json:"named,omitempty"`
 	Web       bool   `json:"web,omitempty"` // a login of ir_web
-	Rules     Rules  `json:"rules"`
 	UsedToday int64  `json:"usedToday"`
 	Device    Device `json:"device,omitempty"`
 	Public    bool   `json:"public"` // a public origin is set: passkeys are on
 }
 
-// NewInvite asks for a slot for a new login of ir_web (ir invite [name] [--claude]). Claude: the
-// login gets Claude, the owner's own; only a person at the host or on a login of ir_web that has
-// Claude may say so. An agent's goes to a confirmation that only such a login (or the host) allows.
+// NewInvite asks for a slot for a new login of ir_web. An agent's goes to a confirmation that one
+// who may approve (or the host) allows.
 type NewInvite struct {
-	Name   string `json:"name,omitempty"`
-	Claude bool   `json:"claude,omitempty"`
+	Name string `json:"name,omitempty"`
 	// Perms: what the login that takes it may use (nil: all); set as the slot is made.
 	Perms *Perms `json:"perms,omitempty"`
 }
@@ -267,7 +244,7 @@ type Token struct {
 }
 
 // Perms is what an app or login asks for or is given (0.2 "权限"): the agents it may use and the
-// places it may use, each ["*"] for all. Plain data till S2 checks it; Claude stays Rules'.
+// places it may use, each ["*"] for all. Claude is an agent like the others.
 type Perms struct {
 	Agents []string `json:"agents"`
 	Scope  []string `json:"scope"`
@@ -304,7 +281,6 @@ type Need struct {
 	// Name: the invite's name; secret_set: the secret's; app_join: the name the app asks for;
 	// app_update, app_change: the app's; login_join: the login's.
 	Name      string `json:"name,omitempty"`
-	Owner     bool   `json:"owner,omitempty"`   // it gets Claude; only one that has Claude allows it
 	Asker     string `json:"asker"`             // who asked (the app or login, or 主机)
 	Session   string `json:"session,omitempty"` // the session whose agent asked, if known
 	CreatedAt int64  `json:"createdAt"`
@@ -363,8 +339,6 @@ type NeedAnswer struct {
 	Value string `json:"value,omitempty"`
 	// ForSession: secret_use allowed for the rest of the session (till it stops).
 	ForSession bool `json:"forSession,omitempty"`
-	// Owner: app_join allowed as the owner's own: the app has Claude. Only one that has Claude says so.
-	Owner bool `json:"owner,omitempty"`
 	// Name: app_join, app_update allowed as a new app by this name in place of the one asked for.
 	Name string `json:"name,omitempty"`
 	// Perms: app_join, app_change, what it gets: within Need.Wants. nil: as asked.
@@ -446,7 +420,6 @@ type NeedState struct {
 	Kind      NeedKind `json:"kind"`
 	State     string   `json:"state"` // pending | allowed | denied | expired | failed
 	Name      string   `json:"name,omitempty"`
-	Owner     bool     `json:"owner,omitempty"`     // it was asked with --claude
 	ExpiresAt int64    `json:"expiresAt,omitempty"` // allowed invite: until when the link works
 	Error     string   `json:"error,omitempty"`
 }

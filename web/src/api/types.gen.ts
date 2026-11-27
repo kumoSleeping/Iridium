@@ -739,29 +739,6 @@ export const HostID = "local";
  */
 export const WebApp = "ir_web";
 /**
- * Rules is what an app or login may do: everything, all alike, but Claude (the user, 2026-11-08).
- * Stored as before, the other fields of old tables are no longer read. S2 puts permissions in place.
- */
-export interface Rules {
-  /**
-   * ClaudeOwner: it is the owner's own (Claude's terms), so it may use Claude. Set as it was
-   * made, by the server only, and never changed. Without it, it sees Claude's sessions but may
-   * not start, write to or answer one.
-   */
-  claudeOwner?: OwnerConfirm;
-}
-/**
- * OwnerConfirm is how, and when (ms), an app or login was found the owner's own.
- */
-export interface OwnerConfirm {
-  /**
-   * By: "local" (a person's ir at the host), "panel" (a person on a login of ir_web that has
-   * Claude, or one that confirmed an agent's ask) or "first" (the first login of ir_web).
-   */
-  by: string;
-  at: number /* int64 */;
-}
-/**
  * App is an app as listed, or the host (Host) or ir_web (Web) beside them. No secrets.
  */
 export interface App {
@@ -788,7 +765,6 @@ export interface App {
   connections?: number /* int */; // its live connections (a Bot's)
   createdAt?: number /* int64 */;
   lastSeenAt?: number /* int64 */;
-  rules: Rules;
   /**
    * Perms: what an app was given as it paired (nil: all, as one paired before 0.2). Not the
    * host's or ir_web's.
@@ -904,7 +880,6 @@ export interface Login {
   createdAt?: number /* int64 */;
   lastSeenAt?: number /* int64 */;
   approvedAt?: number /* int64 */; // 0: waits to be approved
-  rules: Rules;
   usedToday: number /* int64 */;
   device?: Device;
   /**
@@ -972,14 +947,13 @@ export interface PendingInvite {
   id: string;
   name?: string;
   setup?: boolean; // the first-run link in the state directory
-  claude?: boolean; // the login gets Claude
   createdAt: number /* int64 */;
   expiresAt?: number /* int64 */;
 }
 /**
  * Apps is GET /v1/internal/apps (ir apps): the host first, ir_web (with a public origin), the apps; the
  * logins of ir_web; the invites not taken. Public (draft 二「消息」): any caller gets the apps
- * (names, types, avatars, online, computers) and the approved logins; their rules, perms and
+ * (names, types, avatars, online, computers) and the approved logins; their perms and
  * usage, the logins waiting and the invites only one that manages (Full).
  */
 export interface Apps {
@@ -1005,19 +979,16 @@ export interface Me {
    */
   named?: boolean;
   web?: boolean; // a login of ir_web
-  rules: Rules;
   usedToday: number /* int64 */;
   device?: Device;
   public: boolean; // a public origin is set: passkeys are on
 }
 /**
- * NewInvite asks for a slot for a new login of ir_web (ir invite [name] [--claude]). Claude: the
- * login gets Claude, the owner's own; only a person at the host or on a login of ir_web that has
- * Claude may say so. An agent's goes to a confirmation that only such a login (or the host) allows.
+ * NewInvite asks for a slot for a new login of ir_web. An agent's goes to a confirmation that one
+ * who may approve (or the host) allows.
  */
 export interface NewInvite {
   name?: string;
-  claude?: boolean;
   /**
    * Perms: what the login that takes it may use (nil: all); set as the slot is made.
    */
@@ -1046,7 +1017,7 @@ export interface Token {
 }
 /**
  * Perms is what an app or login asks for or is given (0.2 "权限"): the agents it may use and the
- * places it may use, each ["*"] for all. Plain data till S2 checks it; Claude stays Rules'.
+ * places it may use, each ["*"] for all. Claude is an agent like the others.
  */
 export interface Perms {
   agents: string[];
@@ -1090,7 +1061,6 @@ export interface Need {
    * app_update, app_change: the app's; login_join: the login's.
    */
   name?: string;
-  owner?: boolean; // it gets Claude; only one that has Claude allows it
   asker: string; // who asked (the app or login, or 主机)
   session?: string; // the session whose agent asked, if known
   createdAt: number /* int64 */;
@@ -1172,10 +1142,6 @@ export interface NeedAnswer {
    * ForSession: secret_use allowed for the rest of the session (till it stops).
    */
   forSession?: boolean;
-  /**
-   * Owner: app_join allowed as the owner's own: the app has Claude. Only one that has Claude says so.
-   */
-  owner?: boolean;
   /**
    * Name: app_join, app_update allowed as a new app by this name in place of the one asked for.
    */
@@ -1273,7 +1239,6 @@ export interface NeedState {
   kind: NeedKind;
   state: string; // pending | allowed | denied | expired | failed
   name?: string;
-  owner?: boolean; // it was asked with --claude
   expiresAt?: number /* int64 */; // allowed invite: until when the link works
   error?: string;
 }
@@ -1355,6 +1320,11 @@ export interface ChannelMembers {
    * Warn: what a change just made may lead to (a loop of subscriptions), a line each.
    */
   warn?: string[];
+  /**
+   * Archived: its agents taken out and archived (移出并归档) whose sessions are still in the
+   * archive, newest first; POST …/archived/{member} brings one back (kumo, 2026-11-27).
+   */
+  archived?: ChannelMember[];
 }
 /**
  * NewMember adds an agent to a channel: Session, a session there is; else a new session of
@@ -1964,6 +1934,68 @@ export interface CLIOutput {
 }
 
 //////////
+// source: github.go
+
+/**
+ * GitHubBinding is a person's GitHub account (docs/api.md "GitHub"): Member, the login it is
+ * bound to (a login of ir_web, or "local" the host); Name, what that login goes by; Login, ID,
+ * Avatar, the account's; At, when it was bound (ms). Never the token.
+ */
+export interface GitHubBinding {
+  member: string;
+  name?: string;
+  login: string;
+  id: number /* int64 */;
+  avatar?: string;
+  at: number /* int64 */;
+}
+/**
+ * GitHubList is GET /v1/internal/github: the bindings; Mine, the caller's own login (whose a
+ * bind or unbind is); Turn, whose git and gh an agent's turn now runs as ("" none: the machine's
+ * own).
+ */
+export interface GitHubList {
+  bindings: GitHubBinding[];
+  mine?: string;
+  turn?: string;
+}
+/**
+ * SetGitHub is PUT /v1/internal/github: the caller's login's token, checked with GitHub first.
+ */
+export interface SetGitHub {
+  token: string;
+}
+/**
+ * GitHubToken is GET /v1/internal/github/token, for an agent's git and gh alone (ir github):
+ * the token of the turn's login (or of User, asked by name), and its account; none bound: 204.
+ */
+export interface GitHubToken {
+  member: string;
+  login: string;
+  token: string;
+}
+/**
+ * GitHubDevice is POST /v1/internal/github/device: a binding begun by GitHub's device flow. The
+ * person opens URI and types Code there; the page asks POST /v1/internal/github/device/{id} every
+ * Interval seconds till it is done or Expires (ms).
+ */
+export interface GitHubDevice {
+  id: string;
+  code: string;
+  uri: string;
+  interval: number /* int */;
+  expires: number /* int64 */;
+}
+/**
+ * GitHubDeviceState is POST /v1/internal/github/device/{id}: State "waiting" (not yet allowed
+ * at GitHub), "done" (Binding made), "expired" or "denied" (begin again).
+ */
+export interface GitHubDeviceState {
+  state: string;
+  binding?: GitHubBinding;
+}
+
+//////////
 // source: profile.go
 
 export const CardKindAgent = "agent";
@@ -2295,13 +2327,12 @@ export interface ScriptTry {
 // source: secrets.go
 
 /**
- * SecretScope is which sessions may use a secret: all, those in some workspaces, or only those the
- * owner's own terminals (本机, those that have Claude) opened.
+ * SecretScope is which sessions may use a secret: all, or those in some workspaces. A scope stored
+ * as "owner" (before 2026-11-27) is all.
  */
 export type SecretScope = string;
 export const ScopeAll: SecretScope = "all";
 export const ScopeWorkspaces: SecretScope = "workspaces";
-export const ScopeOwner: SecretScope = "owner";
 /**
  * SecretInfo is a secret as listed: never its value.
  */
@@ -2311,7 +2342,7 @@ export interface SecretInfo {
   scope: SecretScope;
   workspaces: number /* int64 */[]; // scope workspaces: which
   /**
-   * Always: every use is confirmed on a panel, the owner's own sessions' too.
+   * Always: every use is confirmed on a panel.
    */
   always?: boolean;
   by?: string; // the terminal that stored it, by name

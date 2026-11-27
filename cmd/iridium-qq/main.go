@@ -275,8 +275,8 @@ func setup(root, bot string, args []string) int {
 		return fail(err)
 	}
 	if qqbridge.Token(home) == "" || tokenDead(home, c) {
-		fmt.Printf("向 Iridium 要 Bot TOKEN（终端名 %s，带 Claude）……\n", c.Name)
-		cmd := exec.Command("ir", "token", c.Name, "--owner", "--into", filepath.Join(home, qqbridge.TokenFile))
+		fmt.Printf("向 Iridium 要 Bot TOKEN（终端名 %s）……\n", c.Name)
+		cmd := exec.Command("ir", "token", c.Name, "--into", filepath.Join(home, qqbridge.TokenFile))
 		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 		if err := cmd.Run(); err != nil || qqbridge.Token(home) == "" {
 			fmt.Fprintf(os.Stderr, "没拿到 TOKEN；之后再运行 iridium-qq setup --bot %s。\n", id)

@@ -11,9 +11,8 @@ import (
 	"github.com/kumoSleeping/iridium/internal/discover"
 )
 
-// An app's requests are its own, by its TOKEN: Claude only if it was made the owner's own,
-// nothing else held back; its tag, its usage; files in and out. What an agent does through ir in
-// its session is the app's too.
+// An app's requests are its own, by its TOKEN: nothing held back (Claude as any agent); its tag,
+// its usage; files in and out. What an agent does through ir in its session is the app's too.
 func TestAppSessionsAndAgents(t *testing.T) {
 	t.Parallel()
 	l := startWith(t, func(s *Server, cfg config.Config, work string) {
@@ -21,10 +20,7 @@ func TestAppSessionsAndAgents(t *testing.T) {
 		s.Discover = discover.New(discover.Options{ClaudeDir: cfg.ClaudeHome, CodexHome: empty, PiSessions: empty, DshHome: empty, Store: s.st, Hub: s.hub, Procs: discover.ProcFS{Root: empty}, Logf: t.Logf})
 		s.Folders = discover.DefaultFolders("/")
 	})
-	tok := l.newApp("nobot", false)
-	l.create(403, tok.Token, api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "hi"})
-
-	tok = l.newApp("bot", true)
+	tok := l.newApp("bot")
 	bot, botID := tok.Token, tok.App.ID
 	created := l.create(200, bot, api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "hi"})
 	sid := created

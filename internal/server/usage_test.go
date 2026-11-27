@@ -18,7 +18,7 @@ func TestUsage(t *testing.T) {
 	t.Parallel()
 	l := start(t)
 	var tok api.Token
-	tok = l.newApp("bot", false)
+	tok = l.newApp("bot")
 	bot, botID := tok.Token, tok.App.ID
 	st := l.s.st
 	now := time.Now()

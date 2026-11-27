@@ -1,11 +1,11 @@
-// The settings' 凭据 page (plan "凭据", docs/api.md "凭据"): every credential by name — its note,
-// who may use it, when it was last used — never its value. + stores a new one; a row's menu (a right
+// 管理's 凭据 (plan "凭据", docs/api.md "凭据"): every credential by name — its note,
+// who may use it, when it was last used — never its value. 新建 stores a new one; a row's menu (a right
 // click or a long press) deletes it, nothing else. What agents' ir asked for of credentials waits
 // on top.
 import { useQueryClient } from "@tanstack/react-query";
 import { useQuery } from "./api/query";
 import { Menu } from "@base-ui/react/menu";
-import { ChevronLeft, ChevronUp, LoaderCircle, LockKeyhole, Plus, Trash2 } from "lucide-react";
+import { LoaderCircle, LockKeyhole, Trash2 } from "lucide-react";
 import { useRef, useState } from "react";
 import { api } from "./api/client";
 import type { SecretInfo, SecretScope } from "./api/types.gen";
@@ -14,49 +14,36 @@ import { t, useLang } from "./i18n";
 import { MenuItems } from "./sidebar";
 import { useConfirms } from "./store";
 import { errText, toast } from "./toast";
-import { ago, cn, IconKey, own, useLongPress, useMenuAt, usePointAnchor, MenuPortal } from "./ui";
+import { ago, cn, own, useLongPress, useMenuAt, usePointAnchor, MenuPortal } from "./ui";
 
 export const secretsQ = { queryKey: ["secrets"], queryFn: api.secrets, staleTime: 30_000 };
 const NAME = /^[A-Z][A-Z0-9_]{0,63}$/;
 const BOX = "h-9 w-full min-w-0 rounded-md bg-fill px-2.5 text-sm outline-none placeholder:text-ink-3 focus:bg-fill-2 pointer-coarse:h-11";
 
-export function SecretsPage({ onBack }: { onBack: () => void }) {
+/** The credentials, in 管理 (manage.tsx): what waits on top, a new one being stored (its 新建),
+ *  then each by name. */
+export function SecretsPane({ adding, done }: { adding: boolean; done: () => void }) {
   useLang();
   const q = useQuery(secretsQ);
   const confirms = useConfirms().filter((c) => c.kind === "secret_set" || c.kind === "secret_use");
-  const [adding, setAdding] = useState(false);
   const list = q.data?.secrets ?? [];
   return (
-    <div className="flex h-full flex-col">
-      <header className="flex h-10.5 shrink-0 items-center gap-1 px-1.5 pt-1.5">
-        <IconKey label={t("nav.me")} onClick={onBack} tipSide="bottom" className="size-7">
-          <ChevronLeft size={16} />
-        </IconKey>
-        <h1 className="m-0 min-w-0 flex-1 truncate text-base font-semibold">{t("secrets.title")}</h1>
-        {q.isFetching && <LoaderCircle size={14} className="animate-spin text-ink-4" />}
-        <IconKey label={adding ? t("nav.close") : t("secrets.new")} onClick={() => setAdding(!adding)} tipSide="bottom" className="size-7">
-          {adding ? <ChevronUp size={16} /> : <Plus size={16} />}
-        </IconKey>
-      </header>
-      <div className="no-bar min-h-0 flex-1 overflow-y-auto pt-2 pb-4">
-        <div className="flex flex-col gap-5 px-3">
-          {confirms.length > 0 && (
-            <div className="flex flex-col gap-2">
-              {confirms.map((c) => (
-                <ConfirmCard key={c.id} c={c} at="secrets" />
-              ))}
-            </div>
-          )}
-          {adding && <NewSecret done={() => setAdding(false)} />}
-          {q.isError && <p className="m-0 text-sm text-ink-3">{errText(q.error)}</p>}
-          {q.data && !list.length && !adding && <p className="m-0 text-sm text-ink-3">{t("secrets.none")}</p>}
-          <section className="flex flex-col" aria-label={t("secrets.title")}>
-            {list.map((s) => (
-              <SecretRow key={s.name} s={s} />
-            ))}
-          </section>
+    <div className="flex flex-col gap-5">
+      {confirms.length > 0 && (
+        <div className="flex flex-col gap-2">
+          {confirms.map((c) => (
+            <ConfirmCard key={c.id} c={c} at="secrets" />
+          ))}
         </div>
-      </div>
+      )}
+      {adding && <NewSecret done={done} />}
+      {q.isError && <p className="m-0 text-sm text-ink-3">{errText(q.error)}</p>}
+      {q.data && !list.length && !adding && <p className="m-0 text-sm text-ink-3">{t("secrets.none")}</p>}
+      <section className="flex flex-col" aria-label={t("secrets.title")}>
+        {list.map((s) => (
+          <SecretRow key={s.name} s={s} />
+        ))}
+      </section>
     </div>
   );
 }
@@ -103,7 +90,7 @@ function NewSecret({ done }: { done: () => void }) {
   );
 }
 
-const scopeLabel = (s: SecretScope) => (s === "workspaces" ? t("secrets.scopeWorkspaces") : s === "owner" ? t("secrets.scopeOwner") : t("secrets.scopeAll"));
+const scopeLabel = (s: SecretScope) => (s === "workspaces" ? t("secrets.scopeWorkspaces") : t("secrets.scopeAll"));
 
 /** One credential's row. Its menu, a right click or a long press away, only deletes it (asked
  *  under the row: a value deleted is gone for good). */

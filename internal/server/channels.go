@@ -738,6 +738,7 @@ func (s *Server) channelRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/internal/channels/{id}/members", s.memberAdd)
 	mux.HandleFunc("PATCH /v1/internal/channels/{id}/members/{member}", s.memberPatch)
 	mux.HandleFunc("DELETE /v1/internal/channels/{id}/members/{member}", s.memberRemove)
+	mux.HandleFunc("POST /v1/internal/channels/{id}/archived/{member}", s.memberRestore)
 	mux.HandleFunc("PUT /v1/internal/channels/{id}/people", s.peoplePut)
 	mux.HandleFunc("GET /v1/internal/channels/{id}/avatar", s.avatarGet)
 	mux.HandleFunc("PUT /v1/internal/channels/{id}/avatar", s.avatarPut)
@@ -898,6 +899,7 @@ func (s *Server) membersOf(c caller, ch string) (api.ChannelMembers, error) {
 		out.Members = append(out.Members, am)
 	}
 	out.Multi = s.multi(ch)
+	out.Archived = s.archivedOf(ch)
 	return out, nil
 }
 
@@ -1710,7 +1712,7 @@ func (s *Server) tellMembers(c caller, ch, text string, ev channel.Event) int64 
 // for.
 func (s *Server) greet(c caller, ch, id string, seq int64) {
 	by := s.satoriUser(c).Name
-	words := fmt.Sprintf("%s 邀请你加入了这个频道。用一两句话跟大家打个招呼，说说你是谁。", cmp.Or(by, "Iridium"))
+	words := cmp.Or(by, "Iridium") + greetAsk
 	lk := s.chain.person(ch, c.ID())
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -1720,6 +1722,10 @@ func (s *Server) greet(c caller, ch, id string, seq int64) {
 		}
 	}()
 }
+
+// greetAsk is how greet's words end, after who invited it: a greeting is no work to title the
+// channel by (titleNow).
+const greetAsk = " 邀请你加入了这个频道。用一两句话跟大家打个招呼，说说你是谁。"
 
 // DefaultPeople are a new channel's people when its maker names none (the user, 2026-11-13):
 // the panel's logins and the host's own (its terminal, its ir), no Bot's; the one that makes it
@@ -2138,6 +2144,9 @@ func (s *Server) memberRemove(w http.ResponseWriter, r *http.Request) {
 		s.memberFault(w, err)
 		return
 	}
+	if r.URL.Query().Get("archive") == "1" && was.Agent() {
+		s.keepArchived(ch, was)
+	}
 	if was.Agent() {
 		s.tellMembers(c, ch, fmt.Sprintf("@%s 离开了频道", was.Nick), channel.Event{Type: "leave", Member: member, Nick: was.Nick})
 	}
@@ -2190,7 +2199,7 @@ func (s *Server) agentsOf(ch string) ([]deliver.Agent, map[string]channel.Member
 }
 
 // sendChannel says req in channel ch (several agents) as c and gives it to the agents it wakes.
-// A person needs the right to use each agent the message names (Claude: the owner's own); one
+// A person needs the right to use each agent the message names; one
 // that would merely receive everything is passed over without it.
 func (s *Server) sendChannel(ctx context.Context, c caller, from, ch string, req api.Send) (api.SendReply, error) {
 	return s.sendChannelAs(ctx, c, from, ch, req, nil)
@@ -2450,6 +2459,9 @@ func (s *Server) sendChannelAs(ctx context.Context, c caller, from, ch string, r
 		s.unnames(ch, seq, named)
 		return api.SendReply{}, firstErr
 	}
+	if s.multi(ch) && sender == "" && outsider == "" && len(namedNicks) == 0 {
+		s.overhear(ctx, ch, seq, req.Text, of.Files, u.Name, wake, list)
+	}
 	if sender != "" {
 		// Sent: it has what came back with the answer, and its own words where they follow.
 		if seq == given+1 {
@@ -2595,7 +2607,7 @@ func (s *Server) titleNow(ch, to, said string, list []deliver.Agent, me channel.
 	if at := deliver.Mentions(said, nicks); len(at) > 0 && !strings.EqualFold(at[0], me.Nick) {
 		return assemble.Injection{}, false
 	}
-	if !s.m.TitleDue(to) {
+	if strings.HasSuffix(said, greetAsk) {
 		return assemble.Injection{}, false
 	}
 	o := s.st.Overlay(ch)
@@ -2607,6 +2619,11 @@ func (s *Server) titleNow(ch, to, said string, list []deliver.Agent, me channel.
 		if c := s.m.Called(ch); c != ch {
 			title = c
 		}
+	}
+	// One with no title yet is told so at each message, not every few (kumo, 2026-11-26: a
+	// channel stayed untitled through its first four).
+	if title != "" && !s.m.TitleDue(to) {
+		return assemble.Injection{}, false
 	}
 	var t assemble.Injection
 	var err error
@@ -2791,6 +2808,80 @@ func (s *Server) deliverAs(ctx context.Context, ch, to string, seq int64, said, 
 	}
 	s.chain.pass(ch, to, lk)
 	return queued, nil
+}
+
+// overhear delivers a short, marked excerpt of an unmentioned human channel message to any agent
+// of ch that is actively running a turn for ch right now and was not already woken by it.
+// Attachments are listed by filename only, long text is clipped, and idle agents are untouched.
+func (s *Server) overhear(ctx context.Context, ch string, seq int64, raw string, files []api.FileRef, who string, wake []string, list []deliver.Agent) {
+	body := fileNames(satori.ForwardWords(raw), files)
+	if strings.TrimSpace(body) == "" {
+		return
+	}
+	at := time.Now().UnixMilli()
+	if m, ok := s.ch.Get(ch, seq); ok && m.At > 0 {
+		at = m.At
+	}
+	for _, a := range list {
+		if slices.Contains(wake, a.Session) {
+			continue
+		}
+		s.overhearOne(ctx, ch, a.Session, seq, who, at, body)
+	}
+}
+
+func (s *Server) overhearOne(ctx context.Context, ch, to string, seq int64, who string, at int64, body string) {
+	defer s.chain.lock(to)()
+	_, by := s.agentsOf(ch)
+	me, ok := by[to]
+	if !ok {
+		return
+	}
+	if me.Direct() {
+		if ch != to {
+			return
+		}
+	} else if s.calls.current(to) != ch {
+		return
+	}
+	pull := s.m.HasIR(to)
+	if st, err := s.m.State(to); err == nil && st.Machine != "" && !pull {
+		pull = false
+	}
+	chID := ch
+	if me.Direct() {
+		chID = ""
+	}
+	in, err := assemble.ChannelOverhear(assemble.Overhear{
+		Channel: chID,
+		Seq:     seq,
+		Who:     who,
+		At:      at,
+		Text:    body,
+		Pull:    pull,
+		Zone:    time.Local,
+	})
+	if err != nil {
+		return
+	}
+	unseen, _, _, _, _, uerr := s.unread(ch, me, seq, by)
+	id := session.NewInputID()
+	sent, err := s.m.SendIfRunning(ctx, to, id, in)
+	if err != nil {
+		s.logf("server: channel %s: overhear %d to %s: %v", ch, seq, to, err)
+		return
+	}
+	if !sent {
+		return
+	}
+	if rec, err := json.Marshal(in.Record()); err == nil {
+		if err := s.st.AddInjection(store.Injection{Session: to, Channel: ch, Input: id, Seq: seq, At: at, Record: string(rec)}); err != nil {
+			s.logf("server: channel %s: keeping overhear %d to %s: %v", ch, seq, to, err)
+		}
+	}
+	if uerr == nil && len(unseen) == 0 {
+		s.seen(ch, to, seq)
+	}
 }
 
 // unread are the messages of ch that me has not seen, below number before (0: all there are),
@@ -3543,4 +3634,117 @@ func (t *twins) drop(session string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	delete(t.by, session)
+}
+
+// ---- the agents a channel archived ----
+
+// An agent taken out and archived (移出并归档) is remembered by the channel it left, with its
+// nick and what woke it, so its 归档 lists it and one press brings it back to work there (kumo,
+// 2026-11-27): its session out of the archive and in the channel again, in one step.
+
+type archivedMember struct {
+	At   int64         `json:"at"`
+	Nick string        `json:"nick"`
+	On   []api.Trigger `json:"on,omitempty"`
+}
+
+func archivedKey(ch, member string) string { return "archived:" + ch + "/" + member }
+
+func (s *Server) keepArchived(ch string, m channel.Member) {
+	b, _ := json.Marshal(archivedMember{At: time.Now().UnixMilli(), Nick: m.Nick, On: m.On()})
+	if err := s.st.Keep(archivedKey(ch, m.Member), string(b)); err != nil {
+		s.logf("server: channel %s: keeping %s as archived: %v", ch, m.Member, err)
+	}
+}
+
+// archivedOf are ch's archived agents whose sessions are still in the archive, newest first.
+func (s *Server) archivedOf(ch string) []api.ChannelMember {
+	kept, err := s.st.KeptUnder(archivedKey(ch, ""))
+	if err != nil || len(kept) == 0 {
+		return nil
+	}
+	type one struct {
+		at int64
+		m  api.ChannelMember
+	}
+	var all []one
+	for k, v := range kept {
+		var a archivedMember
+		if v == "" || json.Unmarshal([]byte(v), &a) != nil {
+			continue
+		}
+		member := strings.TrimPrefix(k, archivedKey(ch, ""))
+		id, ok := store.SessionOfMember(member)
+		if !ok || s.ch.Speaks(ch, id) {
+			continue
+		}
+		st, err := s.m.State(id)
+		if err != nil || !st.Archived {
+			continue
+		}
+		am := api.ChannelMember{Member: member, Session: id, Nick: a.Nick, On: a.On, Agent: st.Agent, Status: st.Status, Cwd: st.Cwd, Machine: st.Machine, Name: s.sessionName(st)}
+		p := s.agentProfile(id)
+		am.Avatar, am.Role = p.Avatar, p.Role
+		all = append(all, one{a.At, am})
+	}
+	slices.SortFunc(all, func(a, b one) int { return cmp.Compare(b.at, a.at) })
+	out := make([]api.ChannelMember, len(all))
+	for i, o := range all {
+		out[i] = o.m
+	}
+	return out
+}
+
+// memberRestore brings an archived agent of the channel back: its session out of the archive,
+// in the channel again under its nick, woken as it was.
+func (s *Server) memberRestore(w http.ResponseWriter, r *http.Request) {
+	c := callerOf(r)
+	ch, st, err := s.seeingChannel(c, r.PathValue("id"))
+	if err != nil {
+		s.error(w, err)
+		return
+	}
+	if err := s.inChannel(c, ch); err != nil {
+		s.error(w, err)
+		return
+	}
+	if c.byAgent() {
+		forbid(w, errors.New("an agent's ir may not change a channel's members"))
+		return
+	}
+	member := r.PathValue("member")
+	var a archivedMember
+	id, ok := store.SessionOfMember(member)
+	if v := s.st.Kept(archivedKey(ch, member)); !ok || v == "" || json.Unmarshal([]byte(v), &a) != nil {
+		refuse(w, http.StatusUnprocessableEntity, "no_such_member", "not an agent this channel archived")
+		return
+	}
+	if _, err := s.using(c, id); err != nil {
+		s.error(w, err)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+	if err := s.m.ArchiveTree(ctx, id, false); err != nil {
+		s.error(w, err)
+		return
+	}
+	if _, err := s.addAgent(ctx, c, ch, st, api.NewMember{Session: id, Nick: a.Nick, On: a.On}); err != nil {
+		_ = s.m.ArchiveTree(ctx, id, true) // not back after all: archived as it was
+		s.memberFault(w, err)
+		return
+	}
+	if err := s.st.Keep(archivedKey(ch, member), ""); err != nil {
+		s.logf("server: channel %s: forgetting %s as archived: %v", ch, member, err)
+	}
+	if m, ok := s.memberRow(ch, member); ok {
+		s.tellMembers(c, ch, fmt.Sprintf("@%s 加入了频道", m.Nick), channel.Event{Type: "join", Member: m.Member, Nick: m.Nick, Name: s.agentName(id)})
+	}
+	out, err := s.membersOf(c, ch)
+	if err != nil {
+		s.fault(w, err)
+		return
+	}
+	s.membersChanged()
+	reply(w, http.StatusOK, out)
 }

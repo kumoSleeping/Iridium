@@ -15,7 +15,7 @@ func TestNeedsAsks(t *testing.T) {
 	t.Parallel()
 	l := start(t)
 	now := time.Now()
-	bot := l.newApp("bot", true)
+	bot := l.newApp("bot")
 	for _, id := range []string{"u1", "u2"} {
 		l.s.st.AddLogin(bot.App.ID, id, id, 20, now)
 		if ok, err := l.s.st.ApproveLogin(bot.App.ID, id, now); !ok || err != nil {

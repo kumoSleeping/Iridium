@@ -70,7 +70,7 @@ func TestAgentsOffAndHomeScope(t *testing.T) {
 	l.want(200, "socket", "POST", "/v1/internal/needs/"+nd.ID, api.NeedAnswer{Allow: false}, nil)
 
 	// An executor connects: its agents listed, dsh marked off.
-	app := l.newApp("box", false)
+	app := l.newApp("box")
 	exe, err := executor.New(executor.Options{URL: "ws" + strings.TrimPrefix(l.base, "http") + "/v1/internal/exec", Token: app.Token, State: t.TempDir(), Logf: t.Logf,
 		Agents: []wire.AgentInfo{{Agent: "dsh", Version: "0.2.2", Argv: []string{"node", "bin.js"}}}})
 	if err != nil {

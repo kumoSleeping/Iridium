@@ -95,7 +95,7 @@ func TestPairWindow(t *testing.T) {
 	if code, _, e := l.pairFrom("", api.PairRequest{Name: "bot"}); code != 403 || e.Code != "pair_closed" {
 		t.Fatalf("closed: %d %+v", code, e)
 	}
-	app := l.newApp("other", true)
+	app := l.newApp("other")
 	l.want(403, "agent", "PUT", "/v1/internal/pairing", api.PairWindow{Open: true}, nil)
 	l.want(403, app.Token, "PUT", "/v1/internal/pairing", api.PairWindow{Open: true}, nil)
 	l.want(403, "agent", "GET", "/v1/internal/pairing", nil, nil)
@@ -158,8 +158,8 @@ func TestPairLimits(t *testing.T) {
 }
 
 // An executor with no TOKEN asks to pair past the gate; the person at the host sees the code and
-// allows it as the owner's own machine, by another name (an app has its name: no name is made up);
-// the executor alone gets the TOKEN, once, as a new app that has Claude. Denied, it hears so.
+// allows it by another name (an app has its name: no name is made up); the executor alone gets the
+// TOKEN, once, as a new app. Denied, it hears so.
 func TestExecPair(t *testing.T) {
 	t.Parallel()
 	l := startWith(t, func(s *Server, _ config.Config, _ string) { s.Remote = &remote.Hub{}; s.WatchMachines() })
@@ -168,7 +168,7 @@ func TestExecPair(t *testing.T) {
 		t.Fatalf("no login: %d", code)
 	}
 	l.want(200, "socket", "PUT", "/v1/internal/pairing", api.PairWindow{Open: true}, nil)
-	old := l.newApp("home-pc", false)
+	old := l.newApp("home-pc")
 
 	hello := api.PairRequest{Name: "home-pc", OS: "windows", Arch: "x64", Program: "dsh-remote-iridium 0.1.0", Agents: []api.ExecAgent{{Agent: "dsh", Version: "0.2.2"}}, AgentShell: true}
 	var p api.Pairing
@@ -190,8 +190,8 @@ func TestExecPair(t *testing.T) {
 		cf.Pair.OS != "windows" || cf.Pair.Agents[0].Version != "0.2.2" || cf.Pair.Shell == nil || !*cf.Pair.Shell || cf.Pair.AgentShell {
 		t.Fatalf("the card: %+v %+v", cf, cf.Pair)
 	}
-	// An agent may not answer; the person at the host allows it as the owner's own, by a free name.
-	l.want(403, "agent", "POST", "/v1/internal/needs/"+cf.ID, api.NeedAnswer{Allow: true, Owner: true, Name: "home-pc-2"}, nil)
+	// An agent may not answer; the person at the host allows it, by a free name.
+	l.want(403, "agent", "POST", "/v1/internal/needs/"+cf.ID, api.NeedAnswer{Allow: true, Name: "home-pc-2"}, nil)
 	var bad api.Error
 	l.want(422, "socket", "POST", "/v1/internal/needs/"+cf.ID, api.NeedAnswer{Allow: true, Name: "主机"}, &bad)
 	if bad.Code != "bad_name" {
@@ -199,7 +199,7 @@ func TestExecPair(t *testing.T) {
 	}
 	var ans api.NeedReply
 	var raw string
-	if code := l.do("socket", "POST", "/v1/internal/needs/"+cf.ID, api.NeedAnswer{Allow: true, Owner: true, Name: "home-pc-2"}, &raw); code != 200 {
+	if code := l.do("socket", "POST", "/v1/internal/needs/"+cf.ID, api.NeedAnswer{Allow: true, Name: "home-pc-2"}, &raw); code != 200 {
 		t.Fatalf("allow: %d %s", code, raw)
 	}
 	json.Unmarshal([]byte(raw), &ans)
@@ -214,7 +214,7 @@ func TestExecPair(t *testing.T) {
 		t.Fatalf("the TOKEN twice: %d", code)
 	}
 	var me api.Me
-	if code := l.public("GET", "/v1/internal/me", st.Token, nil, &me); code != 200 || me.Name != "home-pc-2" || me.Rules.ClaudeOwner == nil {
+	if code := l.public("GET", "/v1/internal/me", st.Token, nil, &me); code != 200 || me.Name != "home-pc-2" {
 		t.Fatalf("the executor's app: %d %+v", code, me)
 	}
 	if code := l.public("GET", "/v1/internal/me", old.Token, nil, nil); code != 200 {
@@ -263,7 +263,7 @@ func TestExecPair(t *testing.T) {
 	var pub api.Apps
 	if l.public("GET", "/v1/internal/apps", st.Token, nil, &pub); pub.Full || len(pub.Invites) != 0 ||
 		!slices.ContainsFunc(pub.Apps, func(a api.App) bool {
-			return a.ID == m.ID && a.Computer != nil && a.Perms == nil && a.Rules.ClaudeOwner == nil
+			return a.ID == m.ID && a.Computer != nil && a.Perms == nil
 		}) {
 		t.Fatalf("the public list: %+v", pub)
 	}
@@ -291,11 +291,10 @@ func TestExecPair(t *testing.T) {
 	exe.Close()
 	machine(false)
 	l.want(409, "socket", "GET", "/v1/internal/folders?machine="+m.ID+"&path=~", nil, nil)
-	// Claude: at the owner's own machine (away now: not a refusal), never at another Bot.
+	// Claude at the machine as any agent (away now: not a refusal).
 	if code := l.sat("socket", "channel.create", createBody(api.NewSession{Agent: api.AgentClaude, Machine: "home-pc-2", Cwd: "/"}), nil); code == 403 {
-		t.Fatal("claude refused at the owner's own machine")
+		t.Fatal("claude refused at the machine")
 	}
-	l.create(403, "socket", api.NewSession{Agent: api.AgentClaude, Machine: "home-pc", Cwd: "/"})
 
 	// Denied.
 	l.public("POST", "/v1/internal/pair", "", api.PairRequest{Name: "lab"}, &p)
@@ -356,7 +355,7 @@ func TestUpdatePairing(t *testing.T) {
 	l.want(200, "socket", "POST", "/v1/internal/needs/"+cf.ID, api.NeedAnswer{Allow: true, Perms: &less}, nil)
 	first := token(p)
 	var me api.Me
-	if code := l.public("GET", "/v1/internal/me", first, nil, &me); code != 200 || me.Name != "helper" || me.Rules.ClaudeOwner != nil {
+	if code := l.public("GET", "/v1/internal/me", first, nil, &me); code != 200 || me.Name != "helper" {
 		t.Fatalf("the app: %d %+v", code, me)
 	}
 	id := me.ID
@@ -472,7 +471,7 @@ func TestRevokeDropsExecutor(t *testing.T) {
 	l := startWith(t, func(s *Server, _ config.Config, _ string) { s.Remote = hub; s.WatchMachines() })
 	l.want(200, "socket", "PUT", "/v1/internal/public", api.SetPublic{Origin: "https://ir.example.com"}, nil)
 	var tok api.Token
-	tok = l.newApp("pc", false)
+	tok = l.newApp("pc")
 	exe, err := executor.New(executor.Options{URL: "ws" + strings.TrimPrefix(l.base, "http") + "/v1/internal/exec", Token: tok.Token, State: t.TempDir(), Logf: t.Logf})
 	if err != nil {
 		t.Fatal(err)

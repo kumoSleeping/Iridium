@@ -14,7 +14,6 @@ import { Tooltip } from "@base-ui/react/tooltip";
 import { BarChart3, Ellipsis, FolderOpen, Gamepad2, ListTree, Settings } from "lucide-react";
 import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type ReactNode } from "react";
 import { api, queryClient } from "./api/client";
-import { InPopup } from "./api/query";
 import { firstScreen, watchTurns } from "./chats";
 import { NewHere } from "./create";
 import { onCreateAt, type BrowseAt } from "./places";
@@ -28,7 +27,7 @@ import { motion, movesAhead, pageTurn, usePaced } from "./motion";
 import { prefetch, settled } from "./prefetch";
 import { prefetchRoles } from "./roles";
 import { quotaQ } from "./quota";
-import { back as stepBack, close, go, onTurn, openChat, openUsage, over, quietDialog, route, useRoute, type Route } from "./route";
+import { back as stepBack, close, go, onTurn, needTab, openChat, openManage, openUsage, over, quietDialog, route, useRoute, type ManageTab, type Route } from "./route";
 import { Pager, TABS_H } from "./pager";
 import { atLeft, GRIP, PULL, Sheet } from "./sheet";
 import { LinkDot } from "./link";
@@ -79,9 +78,7 @@ function part<P extends object>(get: () => Promise<ComponentType<P>>) {
 }
 const ChatPage = part(() => import("./chat/chat").then((m) => m.ChatPage));
 const SettingsPage = part(() => import("./settings").then((m) => m.SettingsPage));
-const AppsPage = part(() => import("./apps").then((m) => m.AppsPage));
-const SecretsPage = part(() => import("./credentials").then((m) => m.SecretsPage));
-const RolesPage = part(() => import("./rolespage").then((m) => m.RolesPage));
+const ManagePage = part(() => import("./manage").then((m) => m.ManagePage));
 const CachePage = part(() => import("./device/page").then((m) => m.CachePage));
 const UsagePage = part(() => import("./usage").then((m) => m.UsagePage));
 const PaneSplash = lazy(() => import("./splash/splash").then((m) => ({ default: m.PaneSplash })));
@@ -97,11 +94,11 @@ function GameMount() {
 const FileBrowserKey = part(() => import("./filebrowser-key").then((m) => m.FileBrowserKey));
 const FileBrowser = part(() => loadFileBrowser().then((m) => m.default));
 /** The page of the settings' dialog a route is: the settings, or one of their own pages. */
-type SetsPage = "settings" | "apps" | "secrets" | "roles" | "cache";
-const setsPageOf = (r: Route): SetsPage => (r.name === "apps" || r.name === "secrets" || r.name === "roles" || r.name === "cache" ? r.name : "settings");
-/** The settings' dialog (the phone's 设置 page) is open: a route over the chat, but the usage,
- *  a window of its own. */
-const inSets = (r: Route) => over(r) && r.name !== "usage";
+type SetsPage = "settings" | "cache";
+const setsPageOf = (r: Route): SetsPage => (r.name === "cache" ? r.name : "settings");
+/** The settings' dialog (the phone's 设置 page) is open: a route over the chat, but the usage and
+ *  管理, windows of their own. */
+const inSets = (r: Route) => over(r) && r.name !== "usage" && r.name !== "manage";
 const Jump = part(() => import("./jump").then((m) => m.Jump));
 export const loadChat = ChatPage.load;
 // The address names a chat: its code and its first screen are asked for now, ahead of the first
@@ -115,7 +112,7 @@ export const loadChat = ChatPage.load;
 /** The settings and the jump box, their code run, the settings' answers asked: once idle, or a
  *  pointer on their key. */
 const loadPanels = () => {
-  for (const p of [SettingsPage, AppsPage, SecretsPage, RolesPage, CachePage, UsagePage, Jump]) void p.load().catch(() => {});
+  for (const p of [SettingsPage, ManagePage, CachePage, UsagePage, Jump]) void p.load().catch(() => {});
   void queryClient.prefetchQuery(agentsQ);
   void queryClient.prefetchQuery({ ...selfQ, staleTime: 30_000 });
   // The credentials' rows too: their page slid in empty and filled after.
@@ -205,11 +202,14 @@ export function App() {
   // down, once it has been open.
   // The usage is a window over the whole page (kumo, 2026-11-25): under it the sheet stays as it
   // was, its 设置 page too when the usage was asked for over it (the chat's ⋯ above the sheet).
-  const usageOpen = r.name === "usage";
+  const usageOpen = r.name === "usage" || r.name === "manage";
   const setsWas = useRef(false);
   if (!usageOpen) setsWas.current = phone && inSets(r);
   const setsOut = usageOpen ? setsWas.current : phone && inSets(r);
   const [setsPage, setSetsPage] = useState<SetsPage | null>(null);
+  // 管理 keeps the part it showed while it goes (its route already left).
+  const manageWas = useRef<ManageTab | null>(null);
+  if (r.name === "manage") manageWas.current = r.tab;
   if (inSets(r) && setsPage !== setsPageOf(r)) setSetsPage(setsPageOf(r));
   // One sheet on a phone, two pages in it: the sessions and the 终端 panel (the user, 2026-11-08),
   // the panel shown while its route is open.
@@ -277,23 +277,17 @@ export function App() {
   const [pulled, setPulled] = useState<"me" | "sessions" | null>(null);
   // Drawn as it is first pulled too: dragged up before it had ever been out, it came up empty.
   if (phone && pulled && !seen) setSeen(true);
-  // Out, its page is the route's; going down, it stays as it was; coming up, the swipe's.
-  const lastPage = useRef(1);
-  const sheetPage = sheetIsOut ? (setsOut ? 0 : 1) : pulled ? (pulled === "me" ? 0 : 1) : lastPage.current;
-  lastPage.current = sheetPage;
   // Just come out too: its page set at once, not slid to as it rises.
   const wasOut = useRef(sheetIsOut);
   const turnStill = !sheetIsOut || !wasOut.current;
   useEffect(() => void (wasOut.current = sheetIsOut));
-  const setSheet = (o: boolean, x?: number) => {
+  const setSheet = (o: boolean) => {
     setPulled(null);
-    if (o && x !== undefined && atLeft(x)) return go({ name: "settings" });
     setSheetOut(o);
     if (inSets(route())) close(under);
   };
-  // A tab, or a swipe across: the sheet stays out, the back key going back to the sessions.
-  // 终端 the left page, as a swipe up from the left brings it; the sessions the right (the user, 2026-11-08).
-  const toPage = (i: number) => (setSheetOut(true), i === 0 ? go({ name: "settings" }) : inSets(route()) && close(under));
+  // One page now (kumo, 2026-11-27: on a phone 管理 is the settings): the sessions.
+  const toPage = () => setSheetOut(true);
   // Put away, the panel is drawn afresh once it is down: its first page, not renaming.
   const [setsRound, setSetsRound] = useState(0);
   useEffect(() => {
@@ -355,15 +349,19 @@ export function App() {
   sheetNowFn.current = setSheet;
   // Pressed again while it is out, it is put away (kumo, 2026-11-25: no swipe brings or puts it away).
   const onSheet = useCallback(() => sheetNowFn.current(!sheetNow.current), []);
-  const onMe = useCallback(() => go({ name: "settings" }), []);
+  // On a phone the me key opens 管理 at Ir, its settings (kumo, 2026-11-27); on a computer the
+  // small panel rising from it, as before.
+  const onMe = useCallback(() => (phoneNow.current ? openManage("ir") : go({ name: "settings" })), []);
   // The rows' own, the same each draw: a row is drawn again only as it changes (sidebar.tsx).
   const phoneNow = useRef(phone);
   phoneNow.current = phone;
   const onSelect = useCallback((id: string) => (openChat(id), phoneNow.current && setSheetOut(false)), []);
   const chatCode = useCallback(() => void loadChat().catch(() => {}), []);
 
-  const onSettings = () => (inSets(r) ? close(under) : go({ name: "settings" }));
-  const me = <MeKey open={inSets(r)} onOpen={onSettings} dot={!!update.data?.available} code={loadPanels} />;
+  // The settings' own routes (an old link, a key that still goes there) on a phone: 管理's Ir.
+  useEffect(() => void (phone && inSets(r) && openManage("ir")), [phone, r]);
+  const onSettings = () => (phone ? openManage("ir") : inSets(r) ? close(under) : go({ name: "settings" }));
+  const me = <MeKey open={inSets(r)} onOpen={onSettings} dot={!!update.data?.available || confirms.length > 0} code={loadPanels} manage={phone ? undefined : () => openManage()} />;
   const session = open ? list?.find((s) => s.id === open) : undefined;
   // Sidebar key and chat folder links share one dialog; bumping filesRound remounts a fresh
   // browser on each open, even if reopened mid-exit.
@@ -416,7 +414,7 @@ export function App() {
       }
       onSearch={() => setJumping((j) => !j)}
       confirms={confirms}
-      onConfirm={(c) => (c.session && list?.some((s) => s.id === c.session) ? openChat(c.session) : go({ name: c.kind.startsWith("secret_") ? "secrets" : "apps" }, over(r)))}
+      onConfirm={(c) => (c.session && list?.some((s) => s.id === c.session) ? openChat(c.session) : openManage(needTab(c.kind)))}
       chatCode={chatCode}
       panelsCode={loadPanels}
       filesKey={filesKey}
@@ -465,17 +463,27 @@ export function App() {
   // 2026-11-08: going in, the dialog neither grows nor shrinks); opened on them first, they fit.
   const settingsH = useRef<number | undefined>(undefined);
   if (dialogPage === "settings" && fit.h !== undefined) settingsH.current = fit.h;
-  const boxH = (dialogPage === "apps" || dialogPage === "secrets" || dialogPage === "roles" || dialogPage === "cache") && settingsH.current !== undefined ? settingsH.current : fit.h;
+  const boxH = dialogPage === "cache" && settingsH.current !== undefined ? settingsH.current : fit.h;
   const settingsStyle: CSSProperties | undefined = settingsAt && boxH !== undefined && room !== undefined ? { ...settingsAt, height: `min(${boxH}px, ${typeof room === "number" ? `${room}px` : room})` } : settingsAt;
   // The usage: the file browser's own window over the page (kumo, 2026-11-25), in a portrait
   // layout as tall as it is there. One height whatever is chosen in it, room enough, more scrolling
   // within (kumo, 2026-11-25: never taller or shorter for a choice). Closed, the step that opened it
   // is gone back.
   const usageWindow = (
-    <Dialog.Root open={usageOpen} onOpenChange={(o) => !o && route().name === "usage" && stepBack()}>
+    <Dialog.Root open={r.name === "usage"} onOpenChange={(o) => !o && route().name === "usage" && stepBack()}>
       <FileWindow className={cn("@container", phone ? "h-[min(640px,86dvh)]" : "h-[min(720px,90dvh)]")}>
         <Suspense fallback={<Waiting />}>
           <UsagePage />
+        </Suspense>
+      </FileWindow>
+    </Dialog.Root>
+  );
+  // 管理: the usage's window, as tall (kumo, 2026-11-27).
+  const manageWindow = (
+    <Dialog.Root open={r.name === "manage"} onOpenChange={(o) => !o && route().name === "manage" && stepBack()}>
+      <FileWindow className={cn("@container", phone ? "h-[min(640px,86dvh)]" : "h-[min(720px,90dvh)]")}>
+        <Suspense fallback={<Waiting />}>
+          <ManagePage tab={r.name === "manage" ? r.tab : (manageWas.current ?? "accounts")} theme={theme} setTheme={setThemeKept} />
         </Suspense>
       </FileWindow>
     </Dialog.Root>
@@ -484,19 +492,7 @@ export function App() {
     <Suspense fallback={<Waiting />}>
       <SetsPages page={page}>
         {(slide) =>
-          page === "apps" ? (
-            <div key="apps" className={cn(slide, "h-full")}>
-              <AppsPage onBack={back} />
-            </div>
-          ) : page === "secrets" ? (
-            <div key="secrets" className={cn(slide, "h-full")}>
-              <SecretsPage onBack={back} />
-            </div>
-          ) : page === "roles" ? (
-            <div key="roles" className={cn(slide, "h-full")}>
-              <RolesPage onBack={back} />
-            </div>
-          ) : page === "cache" ? (
+          page === "cache" ? (
             <div key="cache" className={cn(slide, "h-full")}>
               <CachePage onBack={back} />
             </div>
@@ -548,20 +544,13 @@ export function App() {
               <Pager
                 // The tabs' bar is px-3, the list's rows end 4px further right: its "+" in line with
                 // theirs (the user, 2026-11-08).
-                ends={[null, <span key="s" className="-mr-1 flex"><HeadKeys filesKey={filesKey} /></span>]}
-                page={sheetPage}
+                ends={[<span key="s" className="-mr-1 flex"><HeadKeys filesKey={filesKey} /></span>]}
+                page={0}
                 still={turnStill}
                 onPage={toPage}
-                tabs={[
-                  { label: <>{t("nav.me")}{update.data?.available && <span className="size-1.5 rounded-full bg-err" aria-hidden />}</>, aria: update.data?.available ? `${t("nav.me")} · ${t("settings.updateReady")}` : t("nav.me") },
-                  { label: t("nav.sessions"), aria: t("nav.sessions") },
-                ]}
+                tabs={[{ label: t("nav.sessions"), aria: t("nav.sessions") }]}
               >
-                {[
-                  // The sheet's own pages, drawn as it is first pulled: a popup's (api/query.ts).
-                  <div key="me" className="absolute inset-0"><InPopup value>{seen && setsBody(setsPage ?? "settings")}</InPopup></div>,
-                  sidebar,
-                ]}
+                {[sidebar]}
               </Pager>
             </Sheet>
           )}
@@ -569,6 +558,7 @@ export function App() {
         {settings}
         {filesWindow}
         {usageWindow}
+        {manageWindow}
         <Toast.Portal>
           <Toast.Viewport className={cn("fixed top-[60px] left-1/2 z-60 flex w-[min(400px,calc(100vw-24px))] -translate-x-1/2 flex-col items-center gap-2 outline-none")}>
             <ToastList onJump={(id) => openChat(id)} />

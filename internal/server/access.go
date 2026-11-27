@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -37,8 +36,7 @@ type caller struct {
 	session string
 	// script: the script of a channel the local ir runs in ("<channel>/<name>", HeaderScript).
 	script string
-	// far: the computer's app whose session TOKEN it came by (withAgent): Claude is its only if
-	// that app is the owner's own (rulesFor).
+	// far: the computer's app whose session TOKEN it came by (withAgent).
 	far string
 	// web: the browser's session of ir_web (webapp.SessionOf) the request came in.
 	web string
@@ -55,23 +53,6 @@ func (c caller) byAgent() bool { return c.agent || c.session != "" }
 
 // machine reports whether a person at the host sent it: ir over the socket, not run by an agent.
 func (c caller) machine() bool { return c.socket && c.Host() && !c.agent }
-
-// ownerSays is how the caller may say a terminal is the owner's own and give it Claude (Claude's
-// terms: the owner's own terminals only), "" if it may not: a person at the machine (ByLocal), or
-// a person on a passkey panel that has Claude, being the owner's own itself (ByPanel). Never an
-// agent, not even in a session such a panel opened: its --owner waits for one of these to confirm
-// it. Nor the local page (no public origin): anything on the machine reaches it, an agent too.
-func (s *Server) ownerSays(c caller) string {
-	switch {
-	case c.agent:
-		return ""
-	case c.machine():
-		return access.ByLocal
-	case c.panel() && c.Web() && access.HasClaude(s.rulesFor(c)):
-		return access.ByPanel
-	}
-	return ""
-}
 
 type callerKey struct{}
 
@@ -93,7 +74,7 @@ var localIdentity = gate.HostIdentity
 // withAgent makes a session's own TOKEN (its agent's ir at another computer, docs/exec.md "远端的
 // ir") the caller an agent's ir on the host's socket is: the host, or the login its session's
 // turn is for (kumo, 2026-11-18: not its computer's app, whose rights kept it from the host, the
-// other computers and the sessions it works with), but for Claude (far). Not the socket's: what only reads the host's
+// other computers and the sessions it works with). Not the socket's: what only reads the host's
 // own paths, and the credentials, stay the socket's.
 func (s *Server) withAgent(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -268,29 +249,6 @@ func (s *Server) Tag(terminal string) string {
 	return ""
 }
 
-// rulesFor is what the caller may do: Claude or not.
-func (s *Server) rulesFor(c caller) api.Rules {
-	r := s.rulesOf(c.ID(), c.Host())
-	// An agent at a computer that is not the owner's own: all but Claude (Claude's terms).
-	if c.far != "" && !access.HasClaude(s.rulesOf(c.far, false)) {
-		r.ClaudeOwner = nil
-	}
-	return r
-}
-
-func (s *Server) rulesOf(id string, local bool) api.Rules {
-	if local || id == gate.HostID {
-		return access.Full()
-	}
-	if b, ok, err := s.st.TerminalRules(id); ok && err == nil {
-		var r api.Rules
-		if json.Unmarshal(b, &r) == nil {
-			return r
-		}
-	}
-	return access.Default()
-}
-
 // startOfDay is local midnight today, in ms.
 func startOfDay() int64 {
 	y, m, d := time.Now().Date()
@@ -308,8 +266,8 @@ func forbid(w http.ResponseWriter, err error) bool {
 	return false
 }
 
-// using is session id if the caller may use it: any but a Claude session, which only the owner's
-// own terminals may (start, write to, answer, steer). Every terminal sees every session.
+// using is session id if the caller may use it (start, write to, answer, steer): one whose agent
+// and folder its Perms allow. Every terminal sees every session.
 func (s *Server) using(c caller, id string) (*api.SessionState, error) {
 	st, err := s.m.State(id)
 	if err != nil {
@@ -322,9 +280,7 @@ func (s *Server) using(c caller, id string) (*api.SessionState, error) {
 		if st.Bare {
 			return st, nil // no agent of its own to have the right to: whoever sees it uses it
 		}
-		if err = access.Agent(s.rulesFor(c), st.Agent); err == nil {
-			err = s.checkPerms(c, st.Agent, st.Machine, st.Cwd)
-		}
+		err = s.checkPerms(c, st.Agent, st.Machine, st.Cwd)
 	}
 	return st, err
 }
@@ -372,16 +328,13 @@ func (s *Server) manages(h http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// checkCreate checks a new session: Claude's only for the owner's own.
+// checkCreate checks a new session: its agent and folder within the caller's Perms.
 func (s *Server) checkCreate(c caller, req *api.NewSession) error {
 	if err := s.checkMachine(req); err != nil {
 		return err
 	}
 	if c.Host() && c.far == "" {
 		return nil
-	}
-	if err := access.Agent(s.rulesFor(c), req.Agent); err != nil {
-		return err
 	}
 	app := gate.HostID
 	if req.Machine != "" {
@@ -392,8 +345,8 @@ func (s *Server) checkCreate(c caller, req *api.NewSession) error {
 	return s.checkPerms(c, req.Agent, app, req.Cwd)
 }
 
-// checkMachine: Claude runs at another machine only if it was allowed as the owner's own
-// (docs/exec.md "连接"), and no agent turned off there (its app's page), whoever asks.
+// checkMachine: a session at another machine runs no agent turned off there (its app's page),
+// whoever asks.
 func (s *Server) checkMachine(req *api.NewSession) error {
 	if req.Machine == "" {
 		return nil
@@ -401,9 +354,6 @@ func (s *Server) checkMachine(req *api.NewSession) error {
 	info, ok := s.gate().Find(req.Machine)
 	if !ok || info.Kind != gate.KindChannel || info.Host() {
 		return fmt.Errorf("no machine %q", req.Machine)
-	}
-	if err := access.Agent(s.rulesOf(info.ID, false), req.Agent); err != nil {
-		return err
 	}
 	return s.agentOff(info.ID, req.Agent)
 }
@@ -448,15 +398,15 @@ func (s *Server) deviceOfCaller(c caller) string {
 	return w.SessionDevice(c.web)
 }
 
-// appOf is an app (or the host) as the API lists it, with Claude or not and today's use.
+// appOf is an app (or the host) as the API lists it, with today's use.
 func (s *Server) appOf(info gate.EndpointInfo) api.App {
 	a := api.App{
 		ID: info.ID, Name: info.Name, Type: info.Type, Avatar: info.Avatar,
 		Online: info.Online > 0 || info.Host(), Connections: info.Online, CreatedAt: ms(info.CreatedAt), LastSeenAt: ms(info.LastSeenAt),
-		Rules: s.rulesOf(info.ID, false), UsedToday: s.usedToday(info.ID),
+		UsedToday: s.usedToday(info.ID),
 	}
 	if info.Host() {
-		a.Host, a.Rules, a.Device = true, access.Full(), s.deviceOf(info.ID)
+		a.Host, a.Device = true, s.deviceOf(info.ID)
 		a.Named = s.gate().HostNamed()
 	}
 	return a
@@ -468,7 +418,7 @@ func (s *Server) loginOf(info gate.EndpointInfo) api.Login {
 	return api.Login{
 		App: gate.WebApp, ID: info.ID, Name: info.Name, Avatar: info.Avatar, Passkeys: passkeys,
 		Sessions: sessions, Online: info.Online > 0, Connections: info.Online, CreatedAt: ms(info.CreatedAt), LastSeenAt: ms(info.LastSeenAt),
-		ApprovedAt: ms(info.ApprovedAt), Rules: s.rulesOf(info.ID, false), UsedToday: s.usedToday(info.ID), Device: s.deviceOf(info.ID),
+		ApprovedAt: ms(info.ApprovedAt), UsedToday: s.usedToday(info.ID), Device: s.deviceOf(info.ID),
 		Perms: s.loginPermsOf(gate.WebApp, info.ID),
 	}
 }
@@ -477,7 +427,7 @@ func (s *Server) loginOf(info gate.EndpointInfo) api.Login {
 func (s *Server) meOf(c caller, info gate.EndpointInfo) api.Me {
 	id := c.Identity
 	m := api.Me{ID: info.ID, Name: info.Name, App: id.App, Login: id.Login, Avatar: info.Avatar, Host: id.Host(), Web: id.Web(),
-		Rules: s.rulesOf(info.ID, id.Host()), UsedToday: s.usedToday(info.ID), Public: s.web().Public()}
+		UsedToday: s.usedToday(info.ID), Public: s.web().Public()}
 	if id.Host() || id.Web() {
 		m.Device = s.deviceOf(info.ID) // an app has none (k_glossary "电脑")
 	}

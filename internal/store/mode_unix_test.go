@@ -9,6 +9,8 @@ import (
 	"testing"
 )
 
+// The database and its -wal and -shm are 0600 whatever the umask; an older one is brought down
+// to 0600.
 func TestDatabaseMode(t *testing.T) {
 	old := syscall.Umask(0o022)
 	defer syscall.Umask(old)
@@ -16,7 +18,7 @@ func TestDatabaseMode(t *testing.T) {
 	files := []string{path, path + "-wal", path + "-shm"}
 	check := func(s *Store) {
 		t.Helper()
-		must(t, s.SetTerminalRules("x", []byte("{}"))) // something in the WAL
+		must(t, s.SetDevice("local", "phone")) // something in the WAL
 		for _, p := range files {
 			fi, err := os.Stat(p)
 			if err != nil {

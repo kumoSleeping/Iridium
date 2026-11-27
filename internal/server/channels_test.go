@@ -413,7 +413,7 @@ func TestChannelPeople(t *testing.T) {
 	l := start(t)
 	ch := l.create(200, "web", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "first"})
 	l.waitReply("web", ch, "ok: first")
-	bot := l.newApp("bot", true).Token
+	bot := l.newApp("bot").Token
 	// New: the panel's and the host's, no Bot's (the user, 2026-11-13); everyone, once chosen.
 	if code, _ := l.send(bot, ch, api.Send{Text: "from the bot"}); code != 403 {
 		t.Fatalf("a Bot speaks in a new channel: %d", code)
@@ -561,7 +561,7 @@ func TestChannelBare(t *testing.T) {
 		t.Fatalf("members with an agent: %+v", ms)
 	}
 	agent, nick := ms.Members[2].Session, ms.Members[2].Nick
-	bot := l.newApp("bot", true).Token
+	bot := l.newApp("bot").Token
 	l.want(200, "web", "PUT", "/v1/internal/channels/"+ch+"/people", api.People{People: []string{"*"}}, nil)
 	var sent []satori.Message
 	l.wantSat(200, bot, "message.create", map[string]any{"channel_id": ch, "content": `<at id="agent:` + agent + `"/> look at this`}, &sent)
@@ -600,7 +600,7 @@ func TestChannelBare(t *testing.T) {
 func TestRemoteBareChannelOwn(t *testing.T) {
 	t.Parallel()
 	l := start(t)
-	machine := l.newApp("remote-pc", false).App.ID
+	machine := l.newApp("remote-pc").App.ID
 	agent := l.create(200, "web", api.NewSession{Agent: api.AgentClaude, Cwd: l.work})
 	body := createBody(api.NewSession{Machine: machine, Cwd: l.work})
 	for _, c := range []struct {
@@ -964,7 +964,7 @@ func TestChannelForward(t *testing.T) {
 func TestDirect(t *testing.T) {
 	t.Parallel()
 	l := start(t)
-	bot := l.newApp("bot", true).Token
+	bot := l.newApp("bot").Token
 	var a, b struct {
 		Channel string `json:"channel"`
 	}
@@ -1302,7 +1302,7 @@ func TestMemberSeesItsChannel(t *testing.T) {
 	if away == "" || near == "" {
 		t.Fatalf("members: %+v", ms)
 	}
-	app := l.newApp("far", true)
+	app := l.newApp("far")
 	l.want(200, "socket", "PUT", "/v1/internal/apps/far/perms", api.Perms{Agents: []string{"*"}, Scope: []string{"主机:" + a}}, nil)
 	state := func(id string) api.Session {
 		st, err := l.s.m.State(id)
@@ -1596,4 +1596,45 @@ func TestRemoveAndArchive(t *testing.T) {
 	}
 	// An agent's ir may not.
 	l.want(403, "agent-in:"+ch, "DELETE", "/v1/internal/channels/"+ch+"/members/agent:"+ch+"?archive=1", nil, nil)
+}
+
+// The channel's 归档 (kumo, 2026-11-27): an agent taken out and archived is listed with the
+// members, and one request brings it back: out of the archive, in again under its nick.
+func TestArchivedBack(t *testing.T) {
+	t.Parallel()
+	l, ch, second := two(t)
+	var ms api.ChannelMembers
+	l.want(200, "web", "GET", "/v1/internal/channels/"+ch+"/members", nil, &ms)
+	nick := ""
+	for _, m := range ms.Members {
+		if m.Member == "agent:"+second {
+			nick = m.Nick
+		}
+	}
+	l.want(200, "web", "DELETE", "/v1/internal/channels/"+ch+"/members/agent:"+second+"?archive=1", nil, &ms)
+	if len(ms.Archived) != 1 || ms.Archived[0].Session != second || ms.Archived[0].Nick != nick || nick == "" {
+		t.Fatalf("archived: %+v (nick %q)", ms.Archived, nick)
+	}
+	l.want(403, "agent-in:"+ch, "POST", "/v1/internal/channels/"+ch+"/archived/agent:"+second, nil, nil)
+	ms = api.ChannelMembers{}
+	l.want(200, "web", "POST", "/v1/internal/channels/"+ch+"/archived/agent:"+second, nil, &ms)
+	back := false
+	for _, m := range ms.Members {
+		back = back || (m.Member == "agent:"+second && m.Nick == nick)
+	}
+	if !back || len(ms.Archived) != 0 {
+		t.Fatalf("not back: %+v", ms)
+	}
+	var st api.SessionState
+	if l.want(200, "web", "GET", "/v1/internal/sessions/"+second, nil, &st); st.Archived {
+		t.Errorf("still archived: %+v", st.Session)
+	}
+	// Once only.
+	l.want(422, "web", "POST", "/v1/internal/channels/"+ch+"/archived/agent:"+second, nil, nil)
+	// Out again without archiving: not in the 归档.
+	ms = api.ChannelMembers{}
+	l.want(200, "web", "DELETE", "/v1/internal/channels/"+ch+"/members/agent:"+second, nil, &ms)
+	if len(ms.Archived) != 0 {
+		t.Fatalf("listed without being archived: %+v", ms.Archived)
+	}
 }

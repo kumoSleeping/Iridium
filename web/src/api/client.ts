@@ -55,6 +55,7 @@ import type { Quota, SecretInfo, Secrets, SetSecret, Usage } from "./types.gen";
 import type { AgentChoices, Block, ChannelMembers, ChannelReads, Injection, MemberPatch, NewMember } from "./types.gen";
 import type { Favorites, FavoritesPatch, MemberCard, Memory, Profile as Card, ProfilePatch, Self } from "./types.gen";
 import type { NewScript, Script, ScriptPatch, ScriptRun } from "./types.gen";
+import type { GitHubBinding, GitHubDevice, GitHubDeviceState, GitHubList, SetGitHub } from "./types.gen";
 
 /** A message of a channel's log (Satori's message.list): id its number there. */
 export type ChannelMessage = { id: string; content: string; created_at?: number; user?: { id: string; name?: string; nick?: string; is_bot?: boolean }; _data?: { kind?: string; ask?: unknown; card?: string; event?: unknown; session?: string; block?: string; from?: number; to?: number; input?: string; device?: Device; script?: string; reactions?: ReactionSum[]; writing?: boolean } };
@@ -288,6 +289,8 @@ export const api = {
   addMember: (id: string, m: NewMember) => write<ChannelMembers>("POST", `/v1/internal/channels/${enc(id)}/members`, m, { signal: AbortSignal.timeout(SEND_WAIT) }),
   patchMember: (id: string, member: string, p: MemberPatch) => write<ChannelMembers>("PATCH", `/v1/internal/channels/${enc(id)}/members/${enc(member)}`, p),
   /** archive: its session archived in the same step (the list never has it out and not yet archived). */
+  /** An agent the channel took out and archived, back: out of the archive, in the channel again. */
+  restoreMember: (id: string, member: string) => write<ChannelMembers>("POST", `/v1/internal/channels/${enc(id)}/archived/${enc(member)}`),
   removeMember: (id: string, member: string, archive = false) => write<ChannelMembers>("DELETE", `/v1/internal/channels/${enc(id)}/members/${enc(member)}${archive ? "?archive=1" : ""}`),
   // --- the scripts of a channel's IR (docs/channels.md "脚本") ---
   scripts: (id: string) => get<Script[]>(`/v1/internal/channels/${enc(id)}/scripts`),
@@ -486,7 +489,7 @@ export const api = {
 
   // --- the apps and their logins (docs/api.md "应用"), the confirmations agents ask for ---
   apps: () => get<Apps>("/v1/internal/apps"),
-  invite: (name: string, claude?: boolean) => write<Invite>("POST", "/v1/internal/invites", { ...(name ? { name } : {}), ...(claude ? { claude } : {}) } satisfies NewInvite),
+  invite: (name: string) => write<Invite>("POST", "/v1/internal/invites", { ...(name ? { name } : {}) } satisfies NewInvite),
   revoke: (id: string) => write<{ ok: boolean }>("DELETE", `/v1/internal/apps/${enc(id)}`),
   /** DELETE /v1/internal/apps/{app}/logins/{login}: another app's login asks again as it next speaks. */
   removeLogin: (app: string, login: string) => write<{ ok: boolean }>("DELETE", `/v1/internal/apps/${enc(app)}/logins/${enc(login)}`),
@@ -524,6 +527,14 @@ export const api = {
   secrets: () => get<Secrets>("/v1/internal/secrets"),
   putSecret: (name: string, s: SetSecret) => write<SecretInfo>("PUT", `/v1/internal/secrets/${enc(name)}`, s),
   deleteSecret: (name: string) => write<{ ok: boolean }>("DELETE", `/v1/internal/secrets/${enc(name)}`),
+
+  // --- GitHub (docs/api.md "GitHub"): a login's account; never its token back ---
+  github: () => get<GitHubList>("/v1/internal/github"),
+  bindGitHub: (token: string) => write<GitHubBinding>("PUT", "/v1/internal/github", { token } satisfies SetGitHub),
+  /** GitHub's device flow: a code to type at GitHub, then asked again till it is allowed. */
+  githubDevice: () => write<GitHubDevice>("POST", "/v1/internal/github/device"),
+  githubDeviceState: (id: string) => write<GitHubDeviceState>("POST", `/v1/internal/github/device/${enc(id)}`),
+  unbindGitHub: (member?: string) => write<{ ok: boolean }>("DELETE", member ? `/v1/internal/github/${enc(member)}` : "/v1/internal/github"),
 };
 
 /** Whether an error is the route not being there (an older daemon, a part turned off): the page

@@ -3,7 +3,7 @@
 Iridium 自己的接口都在 `/v1/internal/` 下：Satori 规范的 internal 路由（advanced/internal.md），Satori 的标准方法、事件和对应关系见 `docs/satori.md`。带了 `Satori-Platform`、`Satori-User-ID` 就必须是调用者自己的（否则 403 `no_such_login`）。两个入口，路径相同：
 
 - HTTP：`127.0.0.1:7810`（配置 `listen`），给网页和应用，前面是 Passkey 门（`docs/gate.md`）。没配 `public.origin` 时只认本机的主机名（`localhost`、回环地址和配置 `hosts`），非 GET 请求带了别的 `Origin` 就拒绝，请求都算主机（带 TOKEN 的算那个应用）。配了以后每个请求都要网页登录或 TOKEN。
-- unix socket：`$XDG_RUNTIME_DIR/iridium/ir.sock`（0600），给主机上的 `ir`，不经过门，算主机。`ir` 认出是 agent 在调（环境里有 `CLAUDECODE`、`CODEX_THREAD_ID`、`IRIDIUM_SESSION`，或者没有终端）时带头 `X-Iridium-Agent: 1`，这时不回任何秘密（见“需要”）。`ir` 还带 `X-Iridium-Session`（它所在的会话：`IRIDIUM_SESSION` 或 agent 自己的会话变量）；那个会话是别的终端经 Iridium 开的，这个请求就算那个终端的：有没有 Claude 照它，记它的用量和来源（agent 在某个应用开的会话里调 `ir`，等于那个应用自己做）。
+- unix socket：`$XDG_RUNTIME_DIR/iridium/ir.sock`（0600），给主机上的 `ir`，不经过门，算主机。`ir` 认出是 agent 在调（环境里有 `CLAUDECODE`、`CODEX_THREAD_ID`、`IRIDIUM_SESSION`，或者没有终端）时带头 `X-Iridium-Agent: 1`，这时不回任何秘密（见“需要”）。`ir` 还带 `X-Iridium-Session`（它所在的会话：`IRIDIUM_SESSION` 或 agent 自己的会话变量）；那个会话是别的终端经 Iridium 开的，这个请求就算那个终端的：权限照它，记它的用量和来源（agent 在某个应用开的会话里调 `ir`，等于那个应用自己做）。
 
 来源：每条交给 agent 的消息开头是 `[终端名] `（`/` 开头的命令除外），名字取发送时终端的名字。库里记下这条输入是哪个终端（ID）发的、用的什么名字；读记录时服务端按 Iridium 自己写进去的输入认（Claude：发消息时给的 uuid；没有 ID 的 agent：`store.SourceByText` 比对输入记录），去掉前缀，消息块带 `from`（名字）和 `fromTerminal`（终端 ID，取头像用）。用量行按终端 ID 记，改名不丢。经 unix socket 的 `ir api message.create`、`ir new` 只要带着它所在的会话（`X-Iridium-Session` 头，取自 `IRIDIUM_SESSION`、`CLAUDE_CODE_SESSION_ID` 等环境变量，或正文的 `caller`），前缀就是 `[ir:<会话 ID>] `，`from` 也是它，页面画成那个会话的来信（名字：会话改过的名字，否则“Claude · 工作区名或文件夹名”）；有没有 `X-Iridium-Agent` 都一样。终端（`fromTerminal`，记用量的）照旧：开那个会话的终端，否则本机。网页和 TOKEN 来的请求不认 `caller`。
 
@@ -306,7 +306,7 @@ Web Push 已删（kumo，2026-11-26）：没有 `/v1/internal/web/push/*`，配�
 | `GET /v1/internal/me` | → `Me` | 调用者：`app`、`login`、`host`、`web`、`rules`、`public` |
 | `PUT /v1/internal/me/profile`、`PUT /v1/internal/apps/{id}/profile` | 资料 → `EndpointInfo` | 改名字、头像（见 `docs/gate.md`）。本机登录（`local`）也能改（2026-11-22）：没设时叫 Iridium、用 Iridium 的标；设了以后 `Me.named`、`App.named` 为真，网页照普通登录画它。名字不合法 422 `bad_name`，带 `nameError`（`empty`、`too_long`、`invalid`、`reserved`、`letter`、`taken`） |
 | `PUT /v1/internal/me/device`、`PUT /v1/internal/apps/{id}/device` | `SetDevice` | 设备 |
-| `GET /v1/internal/apps` | → `Apps` | 应用（主机在最前、网页、其余）、登录（带 `perms`）、未用的邀请。没有秘密。谁都能调：不能管理的只拿公开部分（名字、类型、头像、在线、电脑，已批准的登录；不带 `rules`、`perms`、用量、待批的登录和邀请），能管理的 `full: true`。电脑带 `computer`。主机：系统、家目录、本机可用的 agent、`shell: true`。执行端连接：系统、家目录、`sep`、上报的 agent（关闭的为 `off: true`）、`shell`、`latency`、`seenAt`、`program`。`online` 在应用上，所有应用一个意思：现在能用（电脑：执行端连着；Bot：有连接，连接数是 `connections`；网页：有登录开着；主机：总是），假也写出。电脑的 `type` 一律 `computer`；`owner` 是这台电脑属于谁（网页的一个登录，`{id, name}`）：配对时是批准它的那个登录，之后可改（`PUT /v1/internal/apps/{id}/owner {login?, clear?}`，不给 login 就是自己）。电脑的路由是 `/v1/internal/computers/{id}/…`，0.2.60 之前的 `machines/{id}/…` 照旧能用（kumo，2026-11-23：一个东西一个词，在线一个意思）；与其他连接同属一台电脑时带 `under`，值为其中最早配对的那条的应用 ID（主机为 `local`），网页据此排在一起。取代 `GET /v1/internal/machines` 和 hub 键 `machines`；电脑连上、断开、延迟变了都推 `terminals` |
+| `GET /v1/internal/apps` | → `Apps` | 应用（主机在最前、网页、其余）、登录（带 `perms`）、未用的邀请。没有秘密。谁都能调：不能管理的只拿公开部分（名字、类型、头像、在线、电脑，已批准的登录；不带 `perms`、用量、待批的登录和邀请），能管理的 `full: true`。电脑带 `computer`。主机：系统、家目录、本机可用的 agent、`shell: true`。执行端连接：系统、家目录、`sep`、上报的 agent（关闭的为 `off: true`）、`shell`、`latency`、`seenAt`、`program`。`online` 在应用上，所有应用一个意思：现在能用（电脑：执行端连着；Bot：有连接，连接数是 `connections`；网页：有登录开着；主机：总是），假也写出。电脑的 `type` 一律 `computer`；`owner` 是这台电脑属于谁（网页的一个登录，`{id, name}`）：配对时是批准它的那个登录，之后可改（`PUT /v1/internal/apps/{id}/owner {login?, clear?}`，不给 login 就是自己）。电脑的路由是 `/v1/internal/computers/{id}/…`，0.2.60 之前的 `machines/{id}/…` 照旧能用（kumo，2026-11-23：一个东西一个词，在线一个意思）；与其他连接同属一台电脑时带 `under`，值为其中最早配对的那条的应用 ID（主机为 `local`），网页据此排在一起。取代 `GET /v1/internal/machines` 和 hub 键 `machines`；电脑连上、断开、延迟变了都推 `terminals` |
 | `PUT /v1/internal/apps/{id}/agents` | `AppAgents` → `AppAgents` | `{off: [...]}`：它带的 agent 里关掉哪些，其余开（新报的默认开）。关掉的不能在那里启动（新建、接管、重启都拒，403），网页新会话里不列；在跑的不停。能批的人。`ir apps agents <应用> [agent=on\|off …]` |
 | `DELETE /v1/internal/apps/{id}` | → `{ok}` | 删应用（连同 TOKEN、连接）或网页的登录、未用的邀请。只有人（主机、网页登录），agent 不行 |
 | `DELETE /v1/internal/apps/{id}/logins/{login}` | → `{ok}` | 删一个登录；别的应用的登录下次说话重新申请 |
@@ -318,7 +318,7 @@ Web Push 已删（kumo，2026-11-26）：没有 `/v1/internal/web/push/*`，配�
 | `PUT /v1/internal/apps/ir_web/logins/{login}/passkeys/{id}/device` | `PasskeyDevice` | 设备，`""` 是自动 |
 | `DELETE /v1/internal/apps/ir_web/logins/{login}/passkeys/{id}` | → `{ok}` | 删一个，用它登录的浏览器退出；最后一个 409 `last_passkey` |
 | `DELETE /v1/internal/apps/ir_web/logins/{login}/passkeys/links/{id}` | → `{ok}` | 撤掉没用的加设备链接 |
-| `POST /v1/internal/invites` | `NewInvite` → `Invite` | 网页的一次性邀请（10 分钟），先要公网地址。`claude: true` 加入的登录带 Claude。agent 调的回 202 `Pending` |
+| `POST /v1/internal/invites` | `NewInvite` → `Invite` | 网页的一次性邀请（10 分钟），先要公网地址。agent 调的回 202 `Pending` |
 | `GET /v1/internal/usage?days=N&terminal=<ID、名字或 me>` | → `Usage` | 按日期、应用或登录、agent、模型合计的用量（`by=hour`、`by=weekhour` 同前）；`machine=<应用>` 只算在那台电脑上的会话（页面从别的电脑上的会话打开用量时用）。看别人的要管理权 |
 | `GET /v1/internal/quota` | → `Quota` | 按 agent + 账号（Claude：邮箱和套餐）+ 机器（`machine`，执行端的会话是那台机器的登录）的额度窗口或余额（dsh）、读到的时间 `at`、`live`（有进程在跑）。能读到的：Claude 5 小时、7 天和单个模型的窗口；Codex 各窗口；agy 按模型组；dsh 余额；pi 没有。不推送：网页每分钟取一次，取不到就显示上次读到是多久前（kumo，2026-11-24）。管理权 |
 
@@ -343,7 +343,7 @@ Web Push 已删（kumo，2026-11-26）：没有 `/v1/internal/web/push/*`，配�
 - agent 的 `ir`（带会话的调用）另外看得到它所在的频道，和同频道别的 agent 的会话，只读（2026-11-18）；对别人的会话能做什么仍按范围。
 - 范围外的会话不存在：列表里没有，hub 的 `list`、`session:`、`context:` 过滤掉，按 ID 访问回“没有这个会话”。
 - 范围内、agent 不在能用之列的会话只能看：开、发、答、停、改名、归档、改设置一律 403 `no_permission`。所有 `/v1/internal/sessions/{id}/…` 都在路由前统一查（GET 查范围，其余加查 agent）。
-- Claude 另外要“本人的”（`rules.claudeOwner`：`{by, at}`），只在建应用、登录时由服务端写（配对时允许为本人的、`ir invite --claude`）。
+- Claude 和别的 agent 一样只看权限（2026-11-27 起没有“本人的”，旧库里的 `claudeOwner` 不再读）。
 
 ## 需要（`Need`）
 
@@ -356,7 +356,7 @@ Web Push 已删（kumo，2026-11-26）：没有 `/v1/internal/web/push/*`，配�
 | 请求 | 正文 → 回答 | 说明 |
 |---|---|---|
 | `GET /v1/internal/needs` | → `Needs` | 按调用方过滤（见上）；agent 的 `ir` 403。hub 键 `needs` 每条流也按它的调用方过滤 |
-| `POST /v1/internal/needs/{id}` | `NeedAnswer` → `NeedReply` | 允许或拒绝。只有能批的：主机上的人，或有 Claude、agent 和范围都是全部的网页登录；agent 的 `ir` 一律 403。`perms`：给的权限（不超过申请的）；`name`：配对时改名；`owner`：本人的（得 Claude）；`value`、`forSession`：凭据用 |
+| `POST /v1/internal/needs/{id}` | `NeedAnswer` → `NeedReply` | 允许或拒绝。只有能批的：主机上的人，或 agent 和范围都是全部的网页登录；agent 的 `ir` 一律 403。`perms`：给的权限（不超过申请的）；`name`：配对时改名；`value`、`forSession`：凭据用 |
 | `GET /v1/internal/needs/{id}?wait=<秒>` | → `NeedState` | 结果，从不带秘密 |
 
 agent 调 `ir invite`、`ir secret set` 时秘密不进它的对话：变成一条需要，允许后链接只给点允许的那一处，agent 只拿到结果。
@@ -372,10 +372,29 @@ agent 调 `ir invite`、`ir secret set` 时秘密不进它的对话：变成一�
 | `DELETE /v1/internal/secrets/{name}` | → `{ok}` | 要管理权；agent 调的也行 |
 | `POST /v1/internal/secrets/use` | `UseSecrets` → `SecretValues` | 只给 `ir run`，只走 unix socket：会话、名字、命令开头。查范围；要确认时回 202 `Pending`，`ir run` 等到同意后带 `confirm`（确认的 ID）再取，一个确认只能用一次。值只交给 `ir` 进程，它不打印 |
 
-- 需要里的 `secret_set`（`Need.note`、`replace`；允许时 `NeedAnswer.value` 带值，服务端存好，谁存的记点“存”的面板；回答和 `ConfirmState` 不带值）、`secret_use`（`Need.secrets`、`command`；允许 / 本会话一直允许（`NeedAnswer.forSession`）/ 拒绝，记在内存里，会话的进程停了就忘；`owner: true`，只有带 Claude 的面板或本机 `ir` 能允许；有 `always` 的凭据不给“本会话一直允许”）。
-- 要不要确认：本机由人跑的 `ir run` 直接用；agent 的，会话由本机、带 Claude 的终端开的（或不经 Iridium 开的）直接用，别的终端开的要确认；`always` 的每次都确认。范围不对直接 403，不弹确认。
+- 需要里的 `secret_set`（`Need.note`、`replace`；允许时 `NeedAnswer.value` 带值，服务端存好，谁存的记点“存”的面板；回答和 `ConfirmState` 不带值）、`secret_use`（`Need.secrets`、`command`；允许 / 本会话一直允许（`NeedAnswer.forSession`）/ 拒绝，记在内存里，会话的进程停了就忘；有 `always` 的凭据不给“本会话一直允许”）。
+- 要不要确认：本机由人跑的 `ir run` 直接用；agent 的，会话不经 Iridium 开的、或开它的应用和登录还在的直接用（哪个 agent 都一样），开它的已删的要确认；`always` 的每次都确认。范围不对直接 403，不弹确认。
 - 对话记录出接口前（会话列表、会话状态、消息页、整段原文、携带状态、Satori 的消息和事件；`ir api message.list`、`ir wait` 走的就是这些），已知的值（原样、URL 编码、base64）换成 `[secret:名]`；短于 6 个字符的不换（误伤太多）。
 - `ir run` 自己起子进程（同目录、同环境，加上凭据），stdout/stderr 照转，按最长值的长度留尾巴再打码；退出码照子进程。
+
+## GitHub
+
+每个人把自己的 GitHub 账号绑到自己的登录上（网页登录或本机），本机代理的 git、gh 自动以「这一轮为谁跑」的人的身份用（`originOf`），代理不用管。
+
+- 存：meta 表 `github:<登录 ID>`，令牌与凭据同样加密（附加数据是键名）；绑定时先用 `GET https://api.github.com/user` 验过。令牌也进凭据的遮挡。
+- 代理环境（`internal/ghenv`，只本机代理，执行器上的不加）：`GIT_CONFIG_*` 给 `credential.https://github.com.helper` 先放一个空值、再放 `iridium ir github credential`；PATH 最前是 `<状态目录>/bin`，里面 `gh` 链到 iridium（以 gh 名启动即 `ir github gh`）。都不碰用户自己的文件。
+- 每次用时现取令牌：没人绑（或这一轮不为人跑），git 交回原来的凭据助手（`git credential fill`，去掉 Iridium 加的配置），gh 用它自己的登录。`IR_GITHUB_USER=<名字或 GitHub 用户名>` 换成另一个已绑定的人；找不到就报错。git 存/删我们给的凭据时不转给别的助手。
+- 不改提交作者。
+- 绑定走 GitHub 设备码（kumo 2026-11-27）：用 Iridium 的 OAuth App（kumoSleeping 名下，Client ID 写在程序里，配置 `github.clientId` 可换成自己的；不用 secret，不需要回调地址，内网也能用）。服务器向 GitHub 要码，页面显示码和 github.com/login/device，按 GitHub 给的间隔再问服务器；设备码只留在服务器内存里。权限 `repo read:org workflow`，令牌不过期。粘贴令牌留作备用。
+
+| 路由 | 说明 |
+|---|---|
+| `GET /v1/internal/github` | `GitHubList`：绑定（不含令牌）、`mine`（调用者的登录）、`turn`（代理这一轮用谁的） |
+| `PUT /v1/internal/github` | `SetGitHub` → `GitHubBinding`：绑自己的；面板或本机，代理不行 |
+| `POST /v1/internal/github/device` | → `GitHubDevice`：开始设备码绑定（自己的）；面板或本机 |
+| `POST /v1/internal/github/device/{id}` | → `GitHubDeviceState`：`waiting`、`done`（带绑定）、`expired`、`denied`；早于间隔不去问 GitHub |
+| `DELETE /v1/internal/github[/{member}]` | 解绑，默认自己的；面板或本机 |
+| `GET /v1/internal/github/token?user=` | `GitHubToken`：只给代理的 `ir`（有会话）或本机 `ir`；没绑 204 |
 
 ## 公网入口
 

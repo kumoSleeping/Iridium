@@ -6,16 +6,17 @@
 import { Menu } from "@base-ui/react/menu";
 import { useQueryClient } from "@tanstack/react-query";
 import { useQuery } from "../../api/query";
-import { Check, PencilLine, Plus, Users } from "lucide-react";
+import { Archive, Check, PencilLine, Plus, Users } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { api } from "../../api/client";
-import type { Agent, ChannelMembers, Script, Viewer } from "../../api/types.gen";
-import { agentsQ, isComputer, useApps, useMachines } from "../../data";
+import type { Agent, ChannelMember, ChannelMembers, Script, Viewer } from "../../api/types.gen";
+import { agentsQ, isComputer, useApps, useMachines, useMe } from "../../data";
 import { t, useLang } from "../../i18n";
 import { useMachine } from "../../machines";
 import { prefetchRoles } from "../../roles";
 import { useCarried, useList, useSession } from "../../store";
-import { toast } from "../../toast";
+import { errText, toast } from "../../toast";
+import { change } from "../../pending";
 import { agentName, Avatar, cn, Tip, MenuPortal } from "../../ui";
 import { openEdit } from "./editing";
 import { Face, MemberFace } from "./face";
@@ -23,7 +24,7 @@ import { ContextMark } from "../meters";
 import { mayAct, useMembers } from "./gate";
 import { AddAgents, ITEM, POPUP, type Wake } from "./invite";
 import { Deeper, PageOf, Paged, usePaged, usePages } from "./pages";
-import { onAskAdd, takeAdd } from "./adding";
+import { onAskAdd, onPressAdd, takeAdd } from "./adding";
 import { prefetchChoices } from "./pick";
 import { useAhead } from "../../prefetch";
 import { memberError } from "./key";
@@ -85,7 +86,13 @@ export function TopRight({ id }: { id: string }) {
     for (const m of machines) if (m.online && m.id !== row?.machine) prefetchChoices(qc, m.agents.map((a) => a.agent as Agent), { machine: m.id });
   };
   const keyAhead = useAhead(ahead, [id, kinds.join(" "), members?.members.length]);
-  const viewers = useCarried<Viewer[]>(`viewers:${id}`) ?? [];
+  // Who is looking, the one looking counted in from the first draw (kumo, 2026-11-26): as the page
+  // comes back its own viewing is not told yet, the key not the bare icon meanwhile. Not the
+  // host's own page: it is no one looking (server viewing).
+  const told = useCarried<Viewer[]>(`viewers:${id}`) ?? [];
+  const meRow = useMe().data;
+  const mine = members?.me;
+  const viewers = mine && meRow && !meRow.host && !mine.startsWith("local/") && !told.some((v) => v.member === mine) ? [{ member: mine, name: meRow.name, pages: 1, since: Date.now() }, ...told] : told;
   // What an agent's menu asks with from the list (清空, 移出, 注入记录): the cards the face's
   // menu asks with, under the members' key.
   const key = useRef<HTMLButtonElement>(null);
@@ -107,6 +114,8 @@ export function TopRight({ id }: { id: string }) {
     return onAskAdd(take);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, may, phone]);
+  // ⋯'s 添加 Agent on a phone: the computer's + panel, under the members' key.
+  useEffect(() => onPressAdd((at) => at === id && may && (ahead(), setAdding(true))));
   // Asked for as the bar is drawn: the list and each card open whole.
   useScripts(id);
   return (
@@ -152,19 +161,21 @@ export function TopRight({ id }: { id: string }) {
         </MenuPortal>
       </Menu.Root>
       {/* 邀请, a key of its own (kumo, 2026-11-25): what it opens is the agents to add and the people. */}
-      {may && !phone && (
+      {may && (
         <Menu.Root open={adding} onOpenChange={(open) => (setAdding(open), open && ahead())}>
-          <Tip label={t("channel.invite")} side="bottom">
-            <Menu.Trigger
-              render={
-                <button type="button" aria-label={t("channel.invite")} {...keyAhead} className="g-press grid size-8 place-items-center rounded-md text-ink-2 hover:bg-fill hover:text-ink data-popup-open:bg-fill pointer-coarse:size-10">
-                  <Plus size={16} />
-                </button>
-              }
-            />
-          </Tip>
+          {!phone && (
+            <Tip label={t("channel.invite")} side="bottom">
+              <Menu.Trigger
+                render={
+                  <button type="button" aria-label={t("channel.invite")} {...keyAhead} className="g-press grid size-8 place-items-center rounded-md text-ink-2 hover:bg-fill hover:text-ink data-popup-open:bg-fill pointer-coarse:size-10">
+                    <Plus size={16} />
+                  </button>
+                }
+              />
+            </Tip>
+          )}
           <MenuPortal>
-            <Menu.Positioner side="bottom" align="end" sideOffset={6} collisionPadding={8} className="z-50">
+            <Menu.Positioner anchor={phone ? key : undefined} side="bottom" align="end" sideOffset={6} collisionPadding={8} className="z-50">
               <Menu.Popup finalFocus={false} className={cn(POPUP, SUB, "w-[min(344px,calc(100vw-16px))]")}>
                 <Invite id={id} done={() => setAdding(false)} />
               </Menu.Popup>
@@ -178,9 +189,9 @@ export function TopRight({ id }: { id: string }) {
   );
 }
 
-/** The members: who is looking first, if any; each agent a submenu, the menu its face has (members.tsx MemberItems; what it
+/** The members: each agent a submenu, the menu its face has (members.tsx MemberItems; what it
  *  asks with, ask, drawn by the bar); the commands of its IR,
- *  each pressed its card (script), and 新建脚本; then 邀请. */
+ *  each pressed its card (script), and 新建脚本; who is looking under the agents; then 邀请. */
 function MemberList({ id, viewers, ask, script, inviteFirst, done }: { id: string; viewers: Viewer[]; ask: (a: Ask) => void; script: (p: ScriptPage) => void; inviteFirst?: boolean; done: () => void }) {
   const list = useList();
   const scripts = useScripts(id) ?? [];
@@ -189,6 +200,15 @@ function MemberList({ id, viewers, ask, script, inviteFirst, done }: { id: strin
   const agents = (members?.members ?? []).filter((m) => m.session);
   // What the channel's page lends: its composer's @, its way to a session's record.
   const lent = actsOf(id);
+  const qc = useQueryClient();
+  const bringBack = async (m: ChannelMember) => {
+    try {
+      const ms = await change(m.session!, { archived: false }, () => api.restoreMember(id, m.member));
+      qc.setQueryData<ChannelMembers>(["members", id], ms);
+    } catch (e) {
+      toast(t("err.action"), { error: true, description: errText(e) });
+    }
+  };
   // The phone's +: at the first row's end, 邀请 its next page (kumo + Neon, 2026-11-26), with no
   // 返回 at its head: as the computer's + opens it, its computers' row at the top (kumo, 2026-11-26).
   const pages = usePages();
@@ -199,7 +219,7 @@ function MemberList({ id, viewers, ask, script, inviteFirst, done }: { id: strin
     if (plus && inviteFirst) invite();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plus, inviteFirst]);
-  const first = viewers.length > 0 ? t("channel.viewing") : agents.length > 0 ? t("channel.agents") : "";
+  const first = agents.length > 0 ? t("channel.agents") : viewers.length > 0 ? t("channel.viewing") : "";
   const head = (label: string) =>
     plus && label === first ? (
       <div className="flex items-center">
@@ -219,17 +239,6 @@ function MemberList({ id, viewers, ask, script, inviteFirst, done }: { id: strin
           <InviteBody id={id} done={done} />
         </PageOf>
       )}
-      {viewers.length > 0 && (
-        <>
-          {head(t("channel.viewing"))}
-          {viewers.map((v) => (
-            <div key={v.member} className="flex h-8 items-center gap-2.5 px-2.5 text-base pointer-coarse:h-9">
-              <MemberFace member={v.member} name={v.name} size={18} />
-              <span className="min-w-0 flex-1 truncate">{v.name}</span>
-            </div>
-          ))}
-        </>
-      )}
       {/* No agents, no head for them (kumo, 2026-11-25). */}
       {agents.length > 0 && head(t("channel.agents"))}
       {agents.map((m) => {
@@ -242,11 +251,35 @@ function MemberList({ id, viewers, ask, script, inviteFirst, done }: { id: strin
           </Sub>
         );
       })}
+      {/* Who is looking under the agents (kumo, 2026-11-27): one coming or going moves no row above. */}
+      {viewers.length > 0 && (
+        <>
+          {head(t("channel.viewing"))}
+          {viewers.map((v) => (
+            <div key={v.member} className="flex h-8 items-center gap-2.5 px-2.5 text-base pointer-coarse:h-9">
+              <MemberFace member={v.member} name={v.name} size={18} />
+              <span className="min-w-0 flex-1 truncate">{v.name}</span>
+            </div>
+          ))}
+        </>
+      )}
       {/* Its subagents at work are in the work key's panel (workkey.tsx; kumo + Neon, 2026-11-26). */}
       {/* The channel's commands (docs/channels.md "命令"), if it has any: a row each, pressed its
           card. What wakes an agent is not listed here (kumo, 2026-11-24): it is the agent's own,
           in its 唤醒 and its 编辑资料. */}
       <Commands id={id} scripts={scripts} script={script} />
+      {/* Its agents taken out and archived (kumo, 2026-11-27), at the foot: one pressed back at work here. */}
+      {may && (members?.archived?.length ?? 0) > 0 && (
+        <Sub icon={<Archive size={15} />} label={t("channel.archived")} now={String(members!.archived!.length)} i={0}>
+          {members!.archived!.map((m) => (
+            <Menu.Item key={m.member} onClick={() => void bringBack(m)} className={ITEM}>
+              <Face id={m.session!} agent={m.agent ?? "claude"} size={16} />
+              <span className="min-w-0 flex-1 truncate">{m.nick || agentName(m.agent ?? "claude")}</span>
+              <span className="shrink-0 text-xs text-ink-3">{t("channel.bringBack")}</span>
+            </Menu.Item>
+          ))}
+        </Sub>
+      )}
       {/* No 人 / 所有人 here (kumo, 2026-11-16), no 邀请 (kumo, 2026-11-25): the + beside the key. */}
     </>
   );

@@ -30,7 +30,7 @@ import { LocalMark } from "./me";
 import { motion, reduced } from "./motion";
 import { errText } from "./toast";
 import { hueColor, useHues } from "./hues";
-import { useMachines } from "./data";
+import { keptQuery, useMachines } from "./data";
 import { useUsageMachine } from "./route";
 import { agentName, AGENTS, Avatar, cn, IconKey, keep, kept, Logo, PopSurface, Tip, tokens } from "./ui";
 import { Pills } from "./pills";
@@ -41,7 +41,7 @@ export const dollars = (n: number) => (n >= 1000 ? `$${Math.round(n).toLocaleStr
 const RANGES = [1, 7, 30] as const;
 
 /** The last days' usage. The last answer stays while another range loads. */
-const usageQ = (days: number, machine = "") => ({ queryKey: ["usage", days, machine], queryFn: () => api.usage(days, undefined, days === 1 ? "hour" : undefined, machine || undefined), staleTime: 30_000 });
+const usageQ = (days: number, machine = "") => ({ queryKey: ["usage", days, machine], staleTime: 30_000, ...keptQuery(`usage:${days}:${machine}`, () => api.usage(days, undefined, days === 1 ? "hour" : undefined, machine || undefined)) });
 const useUsage = (days: number, machine: string) => useQuery({ ...usageQ(days, machine), placeholderData: keepPreviousData });
 /** The last days' usage by weekday and hour: the heat map's. */
 const heatQ = (days: number, machine = "") => ({ queryKey: ["usage", days, machine, "weekhour"], queryFn: () => api.usage(days, undefined, "weekhour", machine || undefined), staleTime: 30_000 });
@@ -518,10 +518,10 @@ export function UsagePage() {
       {/* The title's line as the file browser's; the page's two choices on it with the room, else
           on a line of their own under it, as plain words and marks (the user, 2026-11-08). */}
       <header className="flex h-12 shrink-0 items-center gap-1 px-3 pointer-coarse:h-13">
-        <Dialog.Title className="m-0 min-w-0 flex-1 truncate text-sm font-semibold">
-          {t("usage.title")}
-          {machine && <span className="font-normal text-ink-3"> · {at?.name ?? machine}</span>}
-        </Dialog.Title>
+        {/* No title at its top left (kumo, 2026-11-27): the window says what it is; another
+            computer's, its name in its place. */}
+        <Dialog.Title className="sr-only">{machine ? `${t("usage.title")} · ${at?.name ?? machine}` : t("usage.title")}</Dialog.Title>
+        <span className="min-w-0 flex-1 truncate text-sm text-ink-3">{machine && (at?.name ?? machine)}</span>
         {/* Only once it has been a moment: a quick answer shows no spinner flashing. */}
         {(q.isFetching || (heat && hq.isFetching)) && u && <span className="g-fade mr-1.5 grid [animation-delay:200ms]"><LoaderCircle size={14} className="animate-spin text-ink-4" /></span>}
         {wide && (
@@ -598,8 +598,9 @@ export function UsagePage() {
                       {metricPills}
                     </div>
                     {/* The figures, the chart's switch at their right, under the measure's (the user,
-                        2026-11-12: not side by side). */}
-                    <div className="mt-0.5 flex h-6 min-w-0 items-center gap-1.5 text-xs text-ink-3 tabular-nums">
+                        2026-11-12: not side by side). On touch devices Pills is h-7 + p-0.5 (32px),
+                        so the row needs h-8 and extra top gap to keep the two pills apart. */}
+                    <div className="mt-1.5 flex h-6 min-w-0 items-center gap-1.5 text-xs text-ink-3 tabular-nums pointer-coarse:mt-2 pointer-coarse:h-8">
                       <span className="min-w-0 flex-1 truncate leading-6 whitespace-nowrap" title={figures}>{figures}</span>
                       {viewPills}
                     </div>
@@ -614,7 +615,7 @@ export function UsagePage() {
                     <div className="flex h-9 items-center">
                       <span className="block h-7 w-24 rounded-md bg-fill" />
                     </div>
-                    <div className="mt-0.5 flex h-6 items-center">
+                    <div className="mt-1.5 flex h-6 items-center pointer-coarse:mt-2 pointer-coarse:h-8">
                       <span className="block h-2.5 w-40 rounded-full bg-fill" />
                     </div>
                     <div className="mt-1 h-6" />

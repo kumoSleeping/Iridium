@@ -43,7 +43,7 @@ func TestNamedIn(t *testing.T) {
 func TestChannelAts(t *testing.T) {
 	t.Parallel()
 	l := start(t)
-	bot := l.newApp("bot", true)
+	bot := l.newApp("bot")
 	if ok, err := l.s.st.AddApprovedLogin(bot.App.ID, "ann", "Ann", time.Now()); !ok || err != nil {
 		t.Fatal(ok, err)
 	}
@@ -185,7 +185,7 @@ func TestChannelAts(t *testing.T) {
 func TestChannelAtsAmongSeveral(t *testing.T) {
 	t.Parallel()
 	l := start(t)
-	bot := l.newApp("bot", true)
+	bot := l.newApp("bot")
 	if ok, err := l.s.st.AddApprovedLogin(bot.App.ID, "ann", "Ann", time.Now()); !ok || err != nil {
 		t.Fatal(ok, err)
 	}

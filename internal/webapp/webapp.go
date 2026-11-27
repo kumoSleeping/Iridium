@@ -106,12 +106,10 @@ type Config struct {
 	Now    func() time.Time
 }
 
-// Joined is a login of ir_web just registered: Perms, its invite's (Invite.Perms); First, no
-// other login of ir_web was there (the owner's own, by the first-run setup or the first invite).
+// Joined is a login of ir_web just registered: Perms, its invite's (Invite.Perms).
 type Joined struct {
 	Endpoint gate.EndpointInfo
 	Perms    []byte
-	First    bool
 }
 
 // Web is ir_web: the middleware in front of the core, and the WebAuthn relying party.

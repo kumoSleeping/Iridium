@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kumoSleeping/iridium/internal/access"
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/session"
 )
@@ -69,7 +68,7 @@ func (s *Server) mayUse(c caller, st api.Session) bool {
 	if c.Host() {
 		return true
 	}
-	if !s.sees(s.permsFor(c), st) || access.Agent(s.rulesFor(c), st.Agent) != nil {
+	if !s.sees(s.permsFor(c), st) {
 		return false
 	}
 	return s.checkPerms(c, st.Agent, st.Machine, st.Cwd) == nil

@@ -33,7 +33,7 @@ func TestSecrets(t *testing.T) {
 	// Credentials are the host's and ir_web's logins' to list, set and delete (decision 14): an
 	// app does none of it.
 	var tok api.Token
-	tok = l.newApp("bot", false)
+	tok = l.newApp("bot")
 	bot := tok.Token
 	l.want(403, bot, "PUT", "/v1/internal/secrets/BOT_KEY", api.SetSecret{Value: "abcdefgh"}, nil)
 	l.want(403, bot, "GET", "/v1/internal/secrets", nil, nil)
@@ -74,21 +74,19 @@ func TestSecrets(t *testing.T) {
 		t.Fatalf("uses: %+v", list)
 	}
 
-	// A session a terminal not known to be the owner's opened: a confirmation only the owner's own
-	// may allow. (The fake agent is Claude, which only the owner's own open: one opens it and is
-	// revoked after.)
-	var own api.Token
-	own = l.newApp("gone", true)
-	its := l.create(200, own.Token, api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "token " + val + " here"})
+	// A session an app opened: at once, Claude's as any other's. Once the app is gone, a
+	// confirmation.
+	gone := l.newApp("gone")
+	its := l.create(200, gone.Token, api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "token " + val + " here"})
 	l.waitReply("web", its, "ok: token [secret:GITHUB_TOKEN] here") // masked already
-	l.want(200, "socket", "DELETE", "/v1/internal/apps/gone", nil, nil)
 	in := "agent-in:" + its
 	one := api.UseSecrets{Names: []string{"GITHUB_TOKEN"}, Command: "gh auth"}
+	l.want(200, in, "POST", "/v1/internal/secrets/use", one, nil)
+	l.want(200, "socket", "DELETE", "/v1/internal/apps/gone", nil, nil)
 	l.want(202, in, "POST", "/v1/internal/secrets/use", one, &p)
-	if p.Need.Kind != api.NeedSecretUse || !p.Need.Owner || p.Need.Session != its || p.Need.Command != "gh auth" || len(p.Need.Secrets) != 1 {
+	if p.Need.Kind != api.NeedSecretUse || p.Need.Session != its || p.Need.Command != "gh auth" || len(p.Need.Secrets) != 1 {
 		t.Fatalf("use pending: %+v", p.Need)
 	}
-	l.want(403, "web", "POST", "/v1/internal/needs/"+p.Need.ID, api.NeedAnswer{Allow: true}, nil) // the local page is not the owner's say
 	l.want(200, "socket", "POST", "/v1/internal/needs/"+p.Need.ID, api.NeedAnswer{Allow: true}, nil)
 	once := one
 	once.Confirm = p.Need.ID
@@ -98,7 +96,7 @@ func TestSecrets(t *testing.T) {
 	l.want(200, in, "POST", "/v1/internal/secrets/use", one, nil) // for the rest of the session
 	l.want(200, in, "POST", "/v1/internal/secrets/use", one, nil)
 
-	// Every time: the owner's own session asks too, and "this session" does not hold.
+	// Every time: any session asks, and "this session" does not hold.
 	l.want(200, "web", "PUT", "/v1/internal/secrets/GITHUB_TOKEN", api.SetSecret{Always: ptr(true)}, nil)
 	l.want(202, "agent", "POST", "/v1/internal/secrets/use", one, &p)
 	if !p.Need.Always {
@@ -108,10 +106,8 @@ func TestSecrets(t *testing.T) {
 	l.want(202, "agent", "POST", "/v1/internal/secrets/use", one, nil)
 	l.want(200, "socket", "POST", "/v1/internal/secrets/use", one, nil) // a person at the machine: at once
 
-	// Owner only: the channel's session may not, not even through a confirmation.
-	l.want(200, "web", "PUT", "/v1/internal/secrets/NAS_PASSWORD", api.SetSecret{Scope: api.ScopeOwner}, nil)
-	l.want(403, in, "POST", "/v1/internal/secrets/use", api.UseSecrets{Names: []string{"NAS_PASSWORD"}}, nil)
-	l.want(200, "agent", "POST", "/v1/internal/secrets/use", api.UseSecrets{Names: []string{"NAS_PASSWORD"}}, nil)
+	// No "owner" scope any more.
+	l.want(400, "web", "PUT", "/v1/internal/secrets/NAS_PASSWORD", api.SetSecret{Scope: "owner"}, nil)
 	// Some workspaces: the session is in none.
 	l.want(200, "web", "PUT", "/v1/internal/secrets/NAS_PASSWORD", api.SetSecret{Scope: api.ScopeWorkspaces, Workspaces: []int64{99}}, nil)
 	l.want(403, "agent-in:"+its, "POST", "/v1/internal/secrets/use", api.UseSecrets{Names: []string{"NAS_PASSWORD"}}, nil)

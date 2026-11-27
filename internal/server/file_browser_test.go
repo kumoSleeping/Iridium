@@ -50,7 +50,7 @@ func TestFileBrowserAccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	l.want(http.StatusForbidden, "web", "GET", route+"/content?path="+url.QueryEscape(private), nil, nil)
-	app := l.newApp("browse", false)
+	app := l.newApp("browse")
 	l.want(http.StatusForbidden, app.Token, "GET", list, nil, nil)
 	l.want(http.StatusForbidden, app.Token, "GET", content, nil, nil)
 }
@@ -76,7 +76,7 @@ func TestFileBrowserScope(t *testing.T) {
 		}
 	}
 
-	tok := l.newApp("pc", false)
+	tok := l.newApp("pc")
 	exe, err := executor.New(executor.Options{
 		URL:   "ws" + strings.TrimPrefix(l.base, "http") + "/v1/internal/exec",
 		Token: tok.Token, State: t.TempDir(), Roots: []string{shared}, Logf: t.Logf,

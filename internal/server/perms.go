@@ -18,8 +18,8 @@ import (
 
 // Permissions (draft 二「权限」, decisions 14-19): what an app or a login may use, its agents and
 // its scope (places "应用名:路径", or all). What a caller may use is its login's within its app's
-// (checked as they meet: the intersection). The host may use all. Claude stays the owner's own
-// (access.Rules): Perms narrow it further, never widen it.
+// (checked as they meet: the intersection). The host may use all. Claude is an agent like the
+// others.
 //
 // A session is out of scope when its place (the app it runs at, its folder) is in none of the
 // scope's places: it is not there for the caller (not listed, not found). A session of an agent

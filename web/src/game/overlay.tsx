@@ -20,6 +20,8 @@ import { closeGame } from "./open";
 const MARKS: Cast[] = (["claude", "codex", "pi", "dsh", "agy"] as const).map((agent) => ({ agent }));
 /** How long it comes and goes, ms (styles.css game-* the same). */
 const IN = 450, OUT = 420;
+// How long the count stays before a press takes the game away (kumo, 2026-11-26).
+const SEE = 1000;
 
 let back: number | undefined;
 
@@ -56,8 +58,9 @@ export default function GameLayer() {
     tone.observe(root, { attributes: true, attributeFilter: ["data-theme", "class", "style"] });
 
     // over: the game ended, its count shown: a press anywhere goes back to the chat (kumo,
-    // 2026-11-26), not waited out.
-    let on = false, gone = false, over = false, raf = 0, tries = 0;
+    // 2026-11-26), not waited out. ending: just ended, a press then is the one still cutting
+    // (kumo, 2026-11-26: a tap right after the bomb left before the count was seen): let pass.
+    let on = false, gone = false, over = false, ending = false, raf = 0, tries = 0;
     const timers: number[] = [];
     const leave = () => {
       if (gone) return;
@@ -71,7 +74,10 @@ export default function GameLayer() {
     // On at once: as soon as the letters are drawn (the engine says no till then).
     const go = () => {
       if (gone || on) return;
-      on = e.play(leave, () => (over = true));
+      on = e.play(leave, () => {
+        ending = true;
+        timers.push(window.setTimeout(() => ((ending = false), (over = true)), SEE));
+      });
       if (!on && tries++ < 180) raf = requestAnimationFrame(go);
     };
     raf = requestAnimationFrame(() => {
@@ -93,6 +99,7 @@ export default function GameLayer() {
     const press = (ev: PointerEvent) => {
       ev.stopPropagation();
       if ((ev.target as Element | null)?.closest?.("button")) return;
+      if (ending) return;
       if (over) return leave();
       touching = ev.pointerType === "touch";
       e.tap(...at(ev.clientX, ev.clientY));

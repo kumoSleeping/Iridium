@@ -5,7 +5,7 @@ import { ChevronLeft, Trash2 } from "lucide-react";
 import { useEffect } from "react";
 import { t, useLang } from "../i18n";
 import { Pills } from "../pills";
-import { Item } from "../settings";
+import { Item } from "../rows";
 import { cn, IconKey, SureKey, Switch } from "../ui";
 import { ahead, bytes, changeConf, clearCat, useDevice } from "./state";
 import { DEFAULTS, type Cat } from "./store";
@@ -18,9 +18,8 @@ const NAMES: Record<Cat, { label: Parameters<typeof t>[0]; n: Parameters<typeof 
   chat: { label: "cache.chats", n: "cache.nChats" },
 };
 
-/** A page of the settings' dialog as the roles' and the credentials' are (app.tsx SetsPages): the
- *  dialog keeps the settings' height going in, neither growing nor shrinking. */
-export function CachePage({ onBack }: { onBack: () => void }) {
+/** The cache's rows (by kind, how long, how much, the chats), for its page and 管理's Ir. */
+export function CacheRows() {
   useLang();
   const d = useDevice();
   // Read ahead as its row was pressed; again now, for what came in the meantime.
@@ -45,6 +44,28 @@ export function CachePage({ onBack }: { onBack: () => void }) {
     );
   };
   return (
+    <>
+      {kind("image")}
+      {kind("face")}
+      {kind("chat")}
+      <Item label={t("cache.days")} below>
+        <Pills label={t("cache.days")} value={String(conf.days)} onChange={(v) => void changeConf({ ...conf, days: Number(v) })} options={DAYS.map((n) => ({ value: String(n), label: t("usage.days", { n }) }))} />
+      </Item>
+      <Item label={t("cache.cap")} below>
+        <Pills label={t("cache.cap")} value={String(conf.capMB)} onChange={(v) => void changeConf({ ...conf, capMB: Number(v) })} options={CAPS.map((n) => ({ value: String(n), label: n >= 1000 ? `${n / 1000} GB` : `${n} MB` }))} />
+      </Item>
+      <Item label={t("cache.keepChats")}>
+        <Switch label={t("cache.keepChats")} on={conf.chats} onChange={(v) => void changeConf({ ...conf, chats: v })} />
+      </Item>
+    </>
+  );
+}
+
+/** A page of the settings' dialog as the roles' and the credentials' are (app.tsx SetsPages): the
+ *  dialog keeps the settings' height going in, neither growing nor shrinking. */
+export function CachePage({ onBack }: { onBack: () => void }) {
+  useLang();
+  return (
     <div className="flex h-full flex-col" data-dir="back">
       <header className="flex h-10.5 shrink-0 items-center gap-1 px-1.5 pt-1.5">
         <IconKey label={t("nav.me")} onClick={onBack} tipSide="bottom" className="size-7">
@@ -54,18 +75,7 @@ export function CachePage({ onBack }: { onBack: () => void }) {
       </header>
       <div className="no-bar min-h-0 flex-1 overflow-y-auto pt-2 pb-4">
         <div className="flex flex-col px-3">
-          {kind("image")}
-          {kind("face")}
-          {kind("chat")}
-          <Item label={t("cache.days")} below>
-            <Pills label={t("cache.days")} value={String(conf.days)} onChange={(v) => void changeConf({ ...conf, days: Number(v) })} options={DAYS.map((n) => ({ value: String(n), label: t("usage.days", { n }) }))} />
-          </Item>
-          <Item label={t("cache.cap")} below>
-            <Pills label={t("cache.cap")} value={String(conf.capMB)} onChange={(v) => void changeConf({ ...conf, capMB: Number(v) })} options={CAPS.map((n) => ({ value: String(n), label: n >= 1000 ? `${n / 1000} GB` : `${n} MB` }))} />
-          </Item>
-          <Item label={t("cache.keepChats")}>
-            <Switch label={t("cache.keepChats")} on={conf.chats} onChange={(v) => void changeConf({ ...conf, chats: v })} />
-          </Item>
+          <CacheRows />
         </div>
       </div>
     </div>

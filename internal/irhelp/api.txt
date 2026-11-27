@@ -44,6 +44,7 @@ POST internal/channels/{id}/continue {seq} -> {ok}  go on where agents passing m
 GET internal/ats - -> ChannelAts  per channel, the first message that names you (@name, @全体成员, a quote of your words) and you have not read: {seq, everyone}; person only
 POST internal/dm {user} -> {channel}  the channel of you and one person (a login's user id; "local" the host): the same two, the same one; no agent, the two its people
 DELETE internal/channels/{id}/members/{member} {archive?} -> ChannelMembers  take a member out; its session stays as it is, or archive=1: archived in the same step (those hung under it too); person only
+POST internal/channels/{id}/archived/{member} - -> ChannelMembers  bring back an agent the channel took out and archived (ChannelMembers.archived): out of the archive, in the channel again under its nick; person only
 GET internal/sessions/{id}/injections - -> Injection[]  what the agent was given by the channel, newest first: where each part came from  view=id,seq,at
 POST internal/block.list {channel_id, next?, direction?, limit?, order?, _data.blocks?} -> BidiList<Message>  a session's own record, a message a block (thinking, tool calls too)  view=id,content
   _data.blocks:=true: the page's blocks as Iridium keeps them too, in _data.blocks (kind, text, from, tool calls).
@@ -170,6 +171,16 @@ GET internal/secrets - -> Secrets  no values; host only  view=secrets.name,secre
 DELETE internal/secrets/{name} - -> {ok}  host only, person only
 POST internal/secrets/use {names, command, session?, confirm?} -> {values}  ir run only; socket only; may be 202 {need}
 
+# github
+GET internal/github - -> GitHubList  the GitHub accounts people bound to their logins; turn: whose your git and gh act as now (none: this machine's own login)  view=bindings.name,bindings.login,turn
+  Your git (github.com) and gh are already signed in as the person whose message your turn runs for, at each use: just run them. Not as them but as another bound person: IR_GITHUB_USER=<name or GitHub login> git push … (or gh …). Never gh auth login, never a token in chat. ir github alone prints the same list.
+PUT internal/github {token} -> GitHubBinding  bind your own login to the account of a GitHub token (checked with GitHub first); person only, from a panel or the host
+POST internal/github/device - -> GitHubDevice  begin binding by GitHub's link: a code to type at its uri; person only, from a panel or the host
+POST internal/github/device/{id} - -> GitHubDeviceState  ask whether GitHub allowed it: waiting, done (its binding), expired, denied; every interval seconds
+DELETE internal/github - -> {ok}  unbind your own; person only
+DELETE internal/github/{member} - -> {ok}  unbind another's; person only
+GET internal/github/token?user - -> GitHubToken  the token your git and gh use (ir github alone; 204 none bound)
+
 # apps (admin)
 GET internal/me - -> Me  the caller: app, login, host, web, rules
 PUT internal/me/profile {name?, avatar?, removeAvatar?} -> EndpointInfo  own name, avatar (base64); the host's too: unset it is Iridium
@@ -184,10 +195,10 @@ PUT internal/apps/{id}/perms {agents, scope} -> Perms  an app's permissions; per
 PUT internal/apps/{id}/logins/{login}/perms {agents, scope} -> Perms  a login's; person only
 DELETE internal/apps/{id} - -> {ok}  remove an app, an ir_web login or an invite; person only
 DELETE internal/apps/{id}/logins/{login} - -> {ok}  remove a login; person only
-POST internal/invites {name?, claude?, perms?} -> Invite  a one-time ir_web link (10 min); an agent gets 202 {need}
+POST internal/invites {name?, perms?} -> Invite  a one-time ir_web link (10 min); an agent gets 202 {need}
 GET internal/needs - -> Needs  waiting for a person; person only  view=pending.id,pending.kind,pending.name
 GET internal/needs/{id}?wait - -> NeedState  how a need went; wait up to 60 s
-POST internal/needs/{id} {allow, value?, forSession?, owner?, name?, perms?, agentsOff?} -> NeedReply  allow or deny; person only
+POST internal/needs/{id} {allow, value?, forSession?, name?, perms?, agentsOff?} -> NeedReply  allow or deny; person only
 GET internal/pairing - -> PairWindow  whether pairing is on; person only
 PUT internal/pairing {open} -> PairWindow  pairing on (till turned off) or off; person only
 POST internal/pair {name, type?, os?, arch?, program?, agents?, shell?, noShell?, agentShell?, home?, machineId?, wants?} -> {code, request}  ask to pair

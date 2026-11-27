@@ -18,14 +18,14 @@ import type { Agent, ChannelMembers, Role, Trigger } from "../../api/types.gen";
 import { agentsQ, useMachines } from "../../data";
 import { t, useLang } from "../../i18n";
 import { MachineFace, type Machine } from "../../machines";
-import { RoleFace, RoleLine, roleStart, useRoles } from "../../roles";
+import { picked, RoleFace, RoleLine, roleStart, useRoles, type RoleNow } from "../../roles";
 import { useList, useSession } from "../../store";
 import { toast } from "../../toast";
 import { AGENTS, agentName, cn, Logo, MenuPortal, useLongPress } from "../../ui";
 import { useMembers } from "./gate";
 import { memberError } from "./key";
 import { Deeper, usePages } from "./pages";
-import { choicesQ, draftDefault, draftName, type At } from "../choices";
+import { choicesQ, draftDefault, draftEffort, draftName, rememberEffort, useLastEffort, type At } from "../choices";
 import { CARD_POP, ProfileCard } from "./profilecard";
 import { DraftModels } from "./pick";
 import { ahead as figAhead } from "../../splash/engine";
@@ -161,7 +161,7 @@ export function AddAgents({ id, wake, setWake, done, apps }: { id: string; wake:
       <div className="grid">
         <div inert={onApps || undefined} className={cn("col-start-1 row-start-1 flex min-w-0 flex-col", onApps && "invisible")}>
       {roles.map((r, i) => (
-        <RoleRow key={r.id} role={r} at={to ? { machine: to.id } : { channel: id }} i={i} off={off || !has.includes(r.agent) || (!!r.machine && r.machine !== picked)} busy={busy === `role:${r.id}`} add={() => void add(r.agent, "", "", "", roleStart(r), to)} {...waking} />
+        <RoleRow key={r.id} role={r} at={to ? { machine: to.id } : { channel: id }} i={i} off={off || !has.includes(r.agent) || (!!r.machine && r.machine !== picked)} busy={busy === `role:${r.id}`} add={(effort) => void add(r.agent, "", "", "", roleStart(r, { effort }), to)} {...waking} />
       ))}
       {roles.length > 0 && <div role="separator" className="mx-2.5 my-1 border-t border-(--edge)" />}
       {kinds.map((k, i) => (
@@ -182,9 +182,13 @@ export function AddAgents({ id, wake, setWake, done, apps }: { id: string; wake:
  *  as it is added; its model and effort are changed on the member afterwards). Pressed, it adds
  *  one as the role; pointed at, its card beside it (RolePreview), 添加 there too. In the phone's
  *  layout (Paged): pressed, its card is the panel's next page, added from there. */
-function RoleRow({ role, at, i, off, busy, add, wake, setWake }: { role: Role; at: At; i: number; off: boolean; busy: boolean; add: () => void } & Waking) {
+function RoleRow({ role, at, i, off, busy, add, wake, setWake }: { role: Role; at: At; i: number; off: boolean; busy: boolean; add: (effort: string) => void } & Waking) {
   const pages = usePages();
   const held = useHeld();
+  const asked = useQuery(choicesQ(role.agent, at)).data;
+  const effort = draftEffort(asked, role.model ?? "", useLastEffort(role.agent));
+  const shown = effort ? picked(role, { effort }) : role;
+  const addRole = () => add(effort);
   const style = { "--i": i } as CSSProperties;
   const cls = cn(ITEM, "data-disabled:opacity-40");
   const of: Fig = { key: `role:${role.id}:${role.avatar ?? ""}`, src: role.avatar || undefined, agent: role.agent };
@@ -201,19 +205,19 @@ function RoleRow({ role, at, i, off, busy, add, wake, setWake }: { role: Role; a
         {/* Its card inside the panel's padding, its corners round as the panel's rows. */}
         <Points fig={of} />
         <div className="overflow-hidden rounded-md">
-          <RolePreview role={role} at={at} off={off} busy={busy} add={() => (add(), pages.pop())} wake={wake} setWake={setWake} />
+          <RolePreview role={shown} at={at} off={off} busy={busy} add={() => (addRole(), pages.pop())} wake={wake} setWake={setWake} />
         </div>
       </Deeper>
     );
   return (
     <Menu.SubmenuRoot open={held.open} onOpenChange={held.set}>
-      <Menu.SubmenuTrigger disabled={off} onClick={held.press(add)} style={style} className={cls} {...fig} {...held.keys}>
+      <Menu.SubmenuTrigger disabled={off} onClick={held.press(addRole)} style={style} className={cls} {...fig} {...held.keys}>
         {row}
       </Menu.SubmenuTrigger>
       <MenuPortal>
         <Menu.Positioner className="z-50" sideOffset={4} collisionPadding={8}>
           <Menu.Popup className={cn(POPUP, CARD_POP)}>
-            <RolePreview role={role} at={at} off={off} busy={busy} add={add} wake={wake} setWake={setWake} />
+            <RolePreview role={shown} at={at} off={off} busy={busy} add={addRole} wake={wake} setWake={setWake} />
           </Menu.Popup>
         </Menu.Positioner>
       </MenuPortal>
@@ -223,7 +227,7 @@ function RoleRow({ role, at, i, off, busy, add, wake, setWake }: { role: Role; a
 
 /** A template as its card shows it, to be seen, not changed (kumo, 2026-11-25): its face, name,
  *  what it runs as, its persona; 添加 under them. */
-export function RolePreview({ role, at, off, busy, add, wake, setWake }: { role: Role; at: At; off: boolean; busy: boolean; add: () => void } & Partial<Waking>) {
+export function RolePreview({ role, at, off, busy, add, wake, setWake }: { role: RoleNow; at: At; off: boolean; busy: boolean; add: () => void } & Partial<Waking>) {
   return (
     <ProfileCard
       face={<RoleFace role={role} size={56} />}
@@ -245,7 +249,9 @@ function Kind({ id, k, m, lacks, i, off, busy, add, wake, setWake }: { id: strin
   const held = useHeld();
   // Where its models are asked: the channel's own place, or the computer it would run at.
   const at = m ? { machine: m.id } : { channel: id };
-  const [p, setP] = useState<{ model: string; effort: string; preset?: string }>({ model: "", effort: "" });
+  const remembered = useLastEffort(k);
+  const [p, setP] = useState<{ model: string; effort?: string; preset?: string }>({ model: "" });
+  const effort = p.effort ?? remembered;
   const asked = useQuery({ ...choicesQ(k, at), enabled: !lacks }).data;
   const { send } = draftDefault(asked);
   const row = (
@@ -256,14 +262,22 @@ function Kind({ id, k, m, lacks, i, off, busy, add, wake, setWake }: { id: strin
   );
   const style = { "--i": i } as CSSProperties;
   const cls = cn(ITEM, "data-disabled:opacity-40");
-  const plain = () => void add(k, p.model || send, p.effort, p.preset, undefined, m);
+  const plain = () => void add(k, p.model || send, draftEffort(asked, p.model || send, effort), p.preset, undefined, m);
+  const pick = (x: { model?: string; effort?: string; preset?: string }) => {
+    if (x.effort) rememberEffort(k, x.effort);
+    if (x.model !== undefined) {
+      void add(k, x.model, draftEffort(asked, x.model, x.effort ?? effort), p.preset, undefined, m);
+      return;
+    }
+    setP({ ...p, ...x });
+  };
   const of: Fig = { key: `kind:${k}`, agent: k };
   const fig = pointing(of);
   if (pages && asked?.models.length)
     return (
       <Deeper row={row} title={agentName(k)} i={i} popup="" disabled={off}>
         <Points fig={of} />
-        <KindPage k={k} at={at} add={(model, effort, preset) => (void add(k, model || send, effort, preset, undefined, m), pages.pop())} off={off} wake={wake} setWake={setWake} />
+        <KindPage k={k} at={at} add={(model, eff, preset) => (void add(k, model || send, draftEffort(asked, model || send, eff), preset, undefined, m), pages.pop())} off={off} wake={wake} setWake={setWake} />
       </Deeper>
     );
   if (!asked?.models.length)
@@ -280,7 +294,7 @@ function Kind({ id, k, m, lacks, i, off, busy, add, wake, setWake }: { id: strin
       <MenuPortal>
         <Menu.Positioner className="z-50" sideOffset={4} collisionPadding={8}>
           <Menu.Popup className={cn(POPUP, "flex max-h-[min(560px,var(--available-height))] w-[min(300px,calc(100vw-16px))] flex-col p-1.5")}>
-            <DraftModels agent={k} at={at} model={p.model} effort={p.effort} preset={p.preset} set={(x) => (x.model !== undefined ? void add(k, x.model, p.effort, p.preset, undefined, m) : setP({ ...p, ...x }))} />
+            <DraftModels agent={k} at={at} model={p.model} effort={effort} preset={p.preset} set={pick} />
             <AddFoot add={plain} off={off} wake={wake} setWake={setWake} />
           </Menu.Popup>
         </Menu.Positioner>
@@ -292,11 +306,21 @@ function Kind({ id, k, m, lacks, i, off, busy, add, wake, setWake }: { id: strin
 /** A kind's models as the panel's page (the phone's layout: no menu beside the row): one picked
  *  adds it with that one (add), the effort set first. */
 function KindPage({ k, at, add, off, wake, setWake }: { k: Agent; at: At; add: (model: string, effort: string, preset?: string) => void; off: boolean } & Waking) {
-  const [p, setP] = useState<{ model: string; effort: string; preset?: string }>({ model: "", effort: "" });
+  const remembered = useLastEffort(k);
+  const [p, setP] = useState<{ model: string; effort?: string; preset?: string }>({ model: "" });
+  const effort = p.effort ?? remembered;
+  const pick = (x: { model?: string; effort?: string; preset?: string }) => {
+    if (x.effort) rememberEffort(k, x.effort);
+    if (x.model !== undefined) {
+      add(x.model, x.effort ?? effort, p.preset);
+      return;
+    }
+    setP({ ...p, ...x });
+  };
   return (
     <>
-      <DraftModels agent={k} at={at} model={p.model} effort={p.effort} preset={p.preset} set={(x) => (x.model !== undefined ? add(x.model, p.effort, p.preset) : setP({ ...p, ...x }))} />
-      <AddFoot add={() => add(p.model, p.effort, p.preset)} off={off} wake={wake} setWake={setWake} />
+      <DraftModels agent={k} at={at} model={p.model} effort={effort} preset={p.preset} set={pick} />
+      <AddFoot add={() => add(p.model, effort, p.preset)} off={off} wake={wake} setWake={setWake} />
     </>
   );
 }

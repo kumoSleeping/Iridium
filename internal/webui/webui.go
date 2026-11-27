@@ -36,7 +36,8 @@ func Built() fs.FS {
 
 // CSP is the page's: its own scripts only, no frames. WebAssembly from here may run (the voice's
 // noise suppression, RNNoise): 'wasm-unsafe-eval' lets that through and nothing else that evals.
-const CSP = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+// Pictures from here, and a bound GitHub account's avatar from GitHub's.
+const CSP = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://avatars.githubusercontent.com; media-src 'self' blob:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
 
 type file struct {
 	raw, br, gz []byte

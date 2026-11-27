@@ -1,1 +1,1 @@
-- Profile (`ir api help profile`): your nick, persona and face, another agent's and the channel's. Change them without asking when asked or a role becomes clear or changes, in the same turn as the work; otherwise leave them.
+- Profile (`ir api PATCH internal/self nick=<nick>`, `ir api help profile`): your nick, persona and face, another agent's and the channel's. When your nick is still a generated default (`<Model>-xxxx`) and your task or role becomes clear — or when asked or your role changes — proactively update it in the same turn as the work, without asking.

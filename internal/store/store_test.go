@@ -23,6 +23,15 @@ func open(t *testing.T) (*Store, string) {
 	return s, path
 }
 
+func reopen(t *testing.T, path string) *Store {
+	t.Helper()
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
 func TestSchemaAndWAL(t *testing.T) {
 	s, path := open(t)
 	if v, err := s.Version(); err != nil || v != len(schema) {

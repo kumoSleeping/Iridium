@@ -1,92 +1,65 @@
-// The settings' 应用管理 (draft 四): two lists (k_glossary "电脑"). 应用: 网页 (ir_web) and the apps
-// that speak; 电脑: the host (as Iridium) and the computers that joined, one flat list, those on one
-// machine next to each other (docs/前端设计规范.md: no levels). A row
-// is its avatar, name, whether it is online, when last active (a computer's system and agents);
-// avatar and name are changed in place, removal is in its menu, and nothing opens but 网页's
-// logins and invites (docs/前端设计规范.md). 配对 is a switch, on till turned off; requests wait as
-// cards on top, the code checked against the one the app shows. No TOKEN is handed out here.
+// What 管理 (manage.tsx) takes of the old 应用管理: adding a computer (its join line), a computer's
+// folders, a login's passkeys, renaming in place, removing, and the helpers they share. 配对's
+// requests and a grant's wait as cards (confirms.tsx). No TOKEN is handed out here.
 import { Menu } from "@base-ui/react/menu";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useQuery } from "./api/query";
 import {
   Check,
   ChevronLeft,
-  ChevronRight,
   EyeOff,
   FolderOpen,
-  KeyRound,
   Laptop,
   Link2,
   LoaderCircle,
   Monitor,
   MonitorSmartphone,
-  PencilLine,
   Plus,
-  SlidersHorizontal,
   Smartphone,
-  SquareTerminal,
   Trash2,
-  UserRound,
-  UserRoundX,
-  X,
-  type LucideIcon,
-} from "lucide-react";
-import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+  type LucideIcon } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ApiError, api } from "./api/client";
 import type {
-  Agent,
   App,
-  Apps,
   Computer,
   Device,
   Login,
   MachineGrant,
   Passkey,
   SetOwner,
-  PasskeyLink,
-  Perms,
-  PendingInvite,
-} from "./api/types.gen";
+  PasskeyLink } from "./api/types.gen";
 import { CardFrame, CardHead, MainKey, SecondKey } from "./card";
-import { ConfirmCard, saysOwner } from "./confirms";
-import { isComputer, useApps, useMe } from "./data";
 import { t, useLang } from "./i18n";
 import { Code } from "./chat/hl";
 import { Segmented } from "./me";
 import { Crop } from "./profile";
 import { SecretHere } from "./secret";
-import { showSecret, useSecret } from "./secrets";
-import { Group, Item } from "./settings";
-import { useConfirms, usePairing } from "./store";
+import { showSecret } from "./secrets";
+import { Group, Item } from "./rows";
 import { errText, toast, toasts } from "./toast";
-import { agentName, AGENTS as AGENT_MARKS, ago, Avatar, AvatarKey, cn, CopyKey, IconKey, FaceChangeOver, ServerFace, Logo, own, Switch, Tip, useLongPress, useMenuAt, usePointAnchor, intoView, SureKey, MenuPortal } from "./ui";
+import { agentName, AGENTS as AGENT_MARKS, ago, CopyKey, IconKey, Logo, own, Switch, Tip, useLongPress, useMenuAt, usePointAnchor, intoView, SureKey, MenuPortal } from "./ui";
 import { MenuItems, type MenuItem } from "./sidebar";
 
-/** ir_web, the built-in app whose logins are people with a passkey; a computer's owner is one. */
-const WEB_APP = "ir_web";
-
-const systems: Record<string, string> = {
+export const systems: Record<string, string> = {
   windows: "Windows",
   darwin: "macOS",
   linux: "Linux",
 };
 
-/** The apps on the same machine as id, after it (Computer.under): listed next to it, not under it. */
-const sameMachine = (apps: App[], id: string) =>
-  apps.filter((a) => a.computer?.under === id);
 
 /** A machine's line: its system and agents, e.g. "Linux · claude 2.1 · codex". */
 /** A computer's agents, those not turned off, that have a mark. */
-const marked = (m: Computer) =>
+export const marked = (m: Computer) =>
   m.agents.filter((a) => !a.off && (AGENT_MARKS as string[]).includes(a.agent));
 
-const clock = (ms: number) =>
+export const clock = (ms: number) =>
   new Date(ms).toLocaleTimeString(document.documentElement.lang || undefined, {
     hour: "2-digit",
     minute: "2-digit",
   });
 
-const nameError = (e: unknown) => {
+export const nameError = (e: unknown) => {
   const code =
     e instanceof ApiError
       ? (e.body as { nameError?: string } | undefined)?.nameError
@@ -99,97 +72,7 @@ const nameError = (e: unknown) => {
 };
 
 /** A login of ir_web (its logins come with app "" from before 0.2's other apps, or "ir_web"). */
-const ofWeb = (l: Login) => !l.app || l.app === "ir_web";
-
-type View = { kind: "list" } | { kind: "app"; id: string } | { kind: "add" };
-
-/** In the settings, what opens is a page of its own that slides in, with its way back; no popover
- *  (docs/前端设计规范.md). */
-export function AppsPage({ onBack }: { onBack: () => void }) {
-  useLang();
-  const q = useApps();
-  const [view, setView] = useState<View>({ kind: "list" });
-  const pairing = !!usePairing()?.open;
-  const apps = q.data?.apps ?? [];
-  const open =
-    view.kind === "app" ? apps.find((a) => a.id === view.id) : undefined;
-  // Back from a page of its own, the list slides in from the other side; first shown, it does not.
-  const moved = useRef(false);
-  if (view.kind !== "list") moved.current = true;
-  const list = () => setView({ kind: "list" });
-  // 网页 opens its logins and invites; an app or a computer has no page.
-  const row = (a: App) =>
-    a.web ? (
-      <AppRow
-        key={a.id}
-        a={a}
-        onOpen={() => setView({ kind: "app", id: a.id })}
-      />
-    ) : (
-      <Fragment key={a.id}>
-        <ItemRow a={a} />
-        {sameMachine(apps, a.id).map((c) => (
-          <ItemRow key={c.id} a={c} />
-        ))}
-      </Fragment>
-    );
-  const computers = apps.filter((a) => isComputer(a) && !a.computer?.under);
-  if (open && q.data)
-    return (
-      <div key={open.id} className="g-slide h-full">
-        <AppPage data={q.data} onBack={list} />
-      </div>
-    );
-  if (view.kind === "add")
-    return (
-      <div className="g-slide h-full">
-        <AddComputer onBack={list} />
-      </div>
-    );
-  return (
-    <div
-      key="list"
-      className={cn("h-full", moved.current && "g-slide")}
-      data-dir="back"
-    >
-      <Page
-        title={t("settings.terminals")}
-        onBack={onBack}
-        backLabel={t("nav.me")}
-        busy={q.isFetching}
-        right={<PairingKey open={pairing} />}
-      >
-        <Needs />
-        {q.isError && (
-          <p className="m-0 text-sm text-ink-3">{errText(q.error)}</p>
-        )}
-        {q.data && (
-          <>
-            {apps.some((a) => !isComputer(a)) && (
-              <Group title={t("term.channel")}>
-                {apps.filter((a) => !isComputer(a)).map(row)}
-              </Group>
-            )}
-            <Group
-              title={t("apps.computer")}
-              action={
-                <IconKey
-                  label={t("apps.addComputer")}
-                  onClick={() => setView({ kind: "add" })}
-                  className="-my-2 size-6 pointer-coarse:size-8"
-                >
-                  <Plus size={14} />
-                </IconKey>
-              }
-            >
-              {computers.map(row)}
-            </Group>
-          </>
-        )}
-      </Page>
-    </div>
-  );
-}
+export const ofWeb = (l: Login) => !l.app || l.app === "ir_web";
 
 /** A computer's system, as its join line is written: macOS and Linux one (sh), Windows another. */
 export type JoinOS = "unix" | "win";
@@ -265,7 +148,7 @@ export function irLine(os: JoinOS, at: string, j: JoinTerms): string {
  *  agent, the folders, downloads through this Iridium. Under them two lines, each with its copy key
  *  in its title's row, one line high, scrolled sideways (to its end at first): for a computer
  *  without ir (the install script, then ir) and for one with it. */
-function AddComputer({ onBack }: { onBack: () => void }) {
+export function AddComputer({ onBack }: { onBack: () => void }) {
   const [os, setOs] = useState<JoinOS>(
     /Win/.test(navigator.platform) ? "win" : "unix",
   );
@@ -412,276 +295,8 @@ function Page({
   );
 }
 
-/** 配对: a switch, on till turned off (kept across restarts). Requests wait as cards above, the
- *  code checked against the one the app shows. */
-function PairingKey({ open }: { open: boolean }) {
-  const [busy, setBusy] = useState(false);
-  const set = async (on: boolean) => {
-    setBusy(true);
-    try {
-      await api.pairing(on);
-    } catch (e) {
-      toast(t("apps.pairing"), { error: true, description: errText(e) });
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <label className="flex shrink-0 items-center gap-2 text-xs text-ink-2">
-      {t("apps.pairing")}
-      <Switch
-        label={t("apps.pairing")}
-        on={open}
-        disabled={busy}
-        onChange={(v) => void set(v)}
-      />
-    </label>
-  );
-}
-
-/** What waits for a person here: the needs and a secret allowed here. */
-function Needs() {
-  const needs = useConfirms();
-  const secretHere = useSecret()?.at === "terminals";
-  if (needs.length === 0 && !secretHere) return null;
-  return (
-    <div className="flex flex-col gap-2">
-      <SecretHere at="terminals" />
-      {needs.map((c) => (
-        <ConfirmCard key={c.id} c={c} at="terminals" />
-      ))}
-    </div>
-  );
-}
-
-/** 网页 in the list: it opens its logins and invites. */
-function AppRow({ a, onOpen }: { a: App; onOpen: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onOpen}
-      className="g-press flex min-h-14 w-full items-center gap-3 rounded-lg px-2 text-left hover:bg-fill"
-    >
-      <Avatar src={a.avatar} name={t("term.panel")} size={32} />
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-base font-medium">
-          {t("term.panel")}
-        </span>
-        <Seen a={a} />
-      </span>
-      <ChevronRight size={15} className="shrink-0 text-ink-4" />
-    </button>
-  );
-}
-
-/** A row's second line: online or when last seen; whose computer it is (its owner's face and
- *  name, kumo 2026-11-23: a computer and the login it is of told together); 网页's logins, a
- *  computer's system, then the agents it brings as their marks (no versions). Always one line, every
- *  row the same height: what has no room scrolls sideways, nothing cut, no "·" between (the user,
- *  2026-11-16). The host: its system and agents only. */
-function Seen({ a }: { a: App }) {
-  // One meaning for every app, the server's (App.online): it can be used now.
-  const online = a.online;
-  const owner = useApps().data?.logins.find(
-    (l) => l.app === WEB_APP && l.id === a.owner?.id,
-  );
-  const used = a.host
-    ? ""
-    : online
-      ? t("term.online")
-      : ago(
-          Math.max(a.computer?.seenAt ?? 0, a.lastSeenAt ?? 0) ||
-            a.createdAt ||
-            0,
-        );
-  const agents = a.computer ? marked(a.computer) : [];
-  const words = [
-    used,
-    a.web && a.logins ? t("apps.loginCount", { n: a.logins }) : "",
-    a.computer?.os ? (systems[a.computer.os] ?? a.computer.os) : "",
-    !a.host && a.computer?.shell ? t("apps.shell") : "",
-  ].filter(Boolean);
-  return (
-    <span className="no-bar flex min-w-0 items-center gap-2.5 overflow-x-auto text-xs whitespace-nowrap text-ink-3 tabular-nums">
-      {online && !a.host ? (
-        <span
-          className="-mr-1 size-1.5 shrink-0 rounded-full bg-run"
-          aria-hidden
-        />
-      ) : null}
-      {words.slice(0, 1).map((w) => (
-        <span key={w} className="shrink-0">
-          {w}
-        </span>
-      ))}
-      {a.owner && (
-        <span className="flex shrink-0 items-center gap-1">
-          <Avatar src={owner?.avatar} name={a.owner.name} size={12} />
-          {t("apps.ownedBy", { name: owner?.name ?? a.owner.name })}
-        </span>
-      )}
-      {words.slice(1).map((w) => (
-        <span key={w} className="shrink-0">
-          {w}
-        </span>
-      ))}
-      {agents.length > 0 && (
-        <span className="flex shrink-0 items-center gap-1.5">
-          {agents.map((x) => (
-            <Tip key={x.agent} label={agentName(x.agent as Agent)}>
-              <Logo agent={x.agent as Agent} size={12} />
-            </Tip>
-          ))}
-        </span>
-      )}
-    </span>
-  );
-}
-
-/** An app or a computer in the list, no page of its own (docs/前端设计规范.md): its avatar and name
- *  changed in place, removal in its menu (right click, a long press). The host: nothing to change.
- *  The host is Iridium: its mark and name, nothing to change, the key's place kept (the rows line up). */
-function ItemRow({ a }: { a: App }) {
-  const qc = useQueryClient();
-  const me = useMe().data;
-  const [renaming, setRenaming] = useState(false);
-  const [folders, setFolders] = useState(false);
-  const face = useFacePick((b) =>
-    api
-      .profile({ avatar: b }, a.id)
-      .then(() => qc.invalidateQueries({ queryKey: ["apps"] })),
-  );
-  const hostFace = useFacePick((b) => api.serverFace(b), t("apps.serverFace"));
-  const menu = useRowMenu();
-  const remove = t(isComputer(a) ? "apps.deleteComputer" : "apps.delete");
-  const grant = useGrant(a);
-  const m = a.computer;
-  // What a person here may change of a computer that takes grants, connected (docs/exec.md "放开").
-  const grants: MenuItem[] =
-    !a.host && m?.grant && a.online
-      ? [
-          m.shell
-            ? {
-                icon: <SquareTerminal size={15} />,
-                label: t("grant.shellOff"),
-                run: () => void grant({ shell: false }),
-              }
-            : {
-                icon: <SquareTerminal size={15} />,
-                label: t("grant.shellOn"),
-                run: () => void grant({ shell: true }),
-              },
-          {
-            icon: <FolderOpen size={15} />,
-            label: t("grant.addFolder"),
-            run: () => setFolders(true),
-          },
-        ]
-      : [];
-  return (
-    <div className="flex flex-col">
-      <div
-        {...(a.host ? {} : menu.on)}
-        className={cn(
-          "flex min-h-14 items-center gap-3 rounded-lg px-2",
-          menu.at && "bg-fill",
-        )}
-      >
-        {a.host ? (
-          // This Iridium's face, as it stands among others (the desktop app's list, the login
-          // page): a press changes it (kumo, 2026-11-23).
-          <Tip label={t("apps.serverFace")}>
-            <button
-              type="button"
-              aria-label={t("apps.serverFace")}
-              onClick={hostFace.open}
-              className="group g-press grid shrink-0 rounded-full"
-            >
-              <ServerFace size={32} over={<FaceChangeOver size={32} />} />
-            </button>
-          </Tip>
-        ) : (
-          <AvatarKey
-            label={t("term.avatar")}
-            onClick={face.open}
-            src={a.avatar}
-            name={a.name}
-            size={32}
-            type={a.type}
-          />
-        )}
-        <span className="min-w-0 flex-1">
-          <span className="flex items-center gap-2">
-            {renaming ? (
-              <Rename id={a.id} name={a.name} done={() => setRenaming(false)} />
-            ) : (
-              <span className="truncate text-base font-medium">
-                {a.host ? "Iridium" : a.name}
-              </span>
-            )}
-            {a.id === me?.app && !a.host && (
-              <span className="shrink-0 text-xs text-ink-3">
-                {t("term.this")}
-              </span>
-            )}
-          </span>
-          <Seen a={a} />
-        </span>
-        {a.host ? (
-          <span
-            className="size-7 shrink-0 pointer-coarse:size-10"
-            aria-hidden
-          />
-        ) : (
-          !renaming && (
-            <IconKey
-              label={t("term.renameIt")}
-              onClick={() => setRenaming(true)}
-              className="size-7"
-            >
-              <PencilLine size={14} />
-            </IconKey>
-          )
-        )}
-      </div>
-      {face.crop}
-      {hostFace.crop}
-      {folders && m && (
-        <OpenFolder a={a} m={m} grant={grant} done={() => setFolders(false)} />
-      )}
-      {face.input}
-      {hostFace.input}
-      {!a.host &&
-        menu.menu([
-          ...grants,
-          ...(m && me?.web && me.login
-            ? [
-                a.owner?.id === me.login
-                  ? {
-                      icon: <UserRoundX size={15} />,
-                      label: t("apps.notMine"),
-                      run: () => void setOwner(qc, a.id, { clear: true }),
-                    }
-                  : {
-                      icon: <UserRound size={15} />,
-                      label: t("apps.mine"),
-                      run: () => void setOwner(qc, a.id, {}),
-                    },
-              ]
-            : []),
-          {
-            icon: <Trash2 size={15} />,
-            label: remove,
-            sure: t("term.revokeSure"),
-            run: () => void revoke(qc, a.id, a.name),
-          },
-        ])}
-    </div>
-  );
-}
-
 /** Makes computer id the caller's (or o's), or nobody's. */
-async function setOwner(qc: QueryClient, id: string, o: SetOwner) {
+export async function setOwner(qc: QueryClient, id: string, o: SetOwner) {
   try {
     await api.setOwner(id, o);
     void qc.invalidateQueries({ queryKey: ["apps"] });
@@ -692,7 +307,7 @@ async function setOwner(qc: QueryClient, id: string, o: SetOwner) {
 
 /** Asks computer a's for g (api.grantMachine): anything more is confirmed at its terminal, which
  *  the toast says while it waits; true once given. */
-function useGrant(a: App) {
+export function useGrant(a: App) {
   const qc = useQueryClient();
   return async (g: MachineGrant) => {
     const more = g.shell === true || !!g.roots?.length;
@@ -726,7 +341,7 @@ function useGrant(a: App) {
 
 /** 开放文件夹, under a computer's row: the folders it serves now, and a whole path there to add
  *  (confirmed at its terminal). Enter adds it, Escape closes. */
-function OpenFolder({
+export function OpenFolder({
   a,
   m,
   grant,
@@ -878,57 +493,8 @@ export function useFacePick(
   };
 }
 
-/** 网页's page: its browsers, and the unused invites as slots; its + (top right) a new invite. */
-function AppPage({ data, onBack }: { data: Apps; onBack: () => void }) {
-  const me = useMe().data;
-  const [making, setMaking] = useState(false);
-  const [keys, setKeys] = useState<string | null>(null);
-  const logins = data.logins.filter(ofWeb);
-  const keysOf = keys ? logins.find((l) => l.id === keys) : undefined;
-  if (keysOf)
-    return (
-      <div key={keysOf.id} className="g-slide h-full">
-        <PasskeysPage login={keysOf} onBack={() => setKeys(null)} />
-      </div>
-    );
-  return (
-    <Page
-      title={t("term.panel")}
-      onBack={onBack}
-      backLabel={t("settings.terminals")}
-      right={
-        <IconKey
-          label={me?.public ? t("term.invite") : t("term.needPublic")}
-          disabled={!me?.public || making}
-          onClick={() => setMaking(true)}
-          tipSide="bottom"
-          className="size-7"
-        >
-          <Plus size={16} />
-        </IconKey>
-      }
-    >
-      {making && <InviteForm done={() => setMaking(false)} />}
-      <WebLogins
-        logins={logins}
-        invites={data.invites}
-        onPasskeys={me?.public ? setKeys : undefined}
-      />
-    </Page>
-  );
-}
-
-/** Rows under a title (a login's permissions, opened inline), else a plain list. */
-function Rows({ title, children }: { title?: string; children: ReactNode }) {
-  return title ? (
-    <Group title={title}>{children}</Group>
-  ) : (
-    <section className="flex flex-col">{children}</section>
-  );
-}
-
 /** Removes app, ir_web's login or invite id; false if it failed. */
-async function revoke(qc: QueryClient, id: string, name: string) {
+export async function revoke(qc: QueryClient, id: string, name: string) {
   let ok = true;
   try {
     await api.revoke(id);
@@ -941,197 +507,6 @@ async function revoke(qc: QueryClient, id: string, name: string) {
   return ok;
 }
 
-/** A login, as an app's row: its avatar (pressed, a new one), name (its key renames it), when it
- *  was last active, waiting or not; its permissions and removal in its menu (right click, a long
- *  press). */
-function LoginRow({
-  l,
-  app,
-  remove,
-  onPasskeys,
-}: {
-  l: Login;
-  app: string;
-  remove: () => void;
-  onPasskeys?: () => void;
-}) {
-  const qc = useQueryClient();
-  const me = useMe().data;
-  // The computers that are this login's (App.owner), told on its row as its own row tells whose.
-  const mine = (useApps().data?.apps ?? []).filter(
-    (a) => app === WEB_APP && a.owner?.id === l.id,
-  );
-  const [renaming, setRenaming] = useState(false);
-  const [perms, setPerms] = useState(false);
-  const face = useFacePick((b) =>
-    api
-      .profile({ avatar: b }, l.id)
-      .then(() => qc.invalidateQueries({ queryKey: ["apps"] })),
-  );
-  const menu = useRowMenu();
-  return (
-    <div className="flex flex-col">
-      <div
-        {...menu.on}
-        className={cn(
-          "flex min-h-12 items-center gap-3 rounded-lg px-2",
-          menu.at && "bg-fill",
-        )}
-      >
-        <AvatarKey
-          label={t("term.avatar")}
-          onClick={face.open}
-          src={l.avatar}
-          name={l.name}
-          size={28}
-          {...deviceBadge(l.device)}
-        />
-        <span className="min-w-0 flex-1">
-          <span className="flex items-center gap-2">
-            {renaming ? (
-              <Rename id={l.id} name={l.name} done={() => setRenaming(false)} />
-            ) : (
-              <span className="truncate text-base">{l.name}</span>
-            )}
-            {l.id === me?.login && (
-              <span className="shrink-0 text-xs text-ink-3">
-                {t("term.this")}
-              </span>
-            )}
-            {!l.approvedAt && (
-              <span className="shrink-0 rounded-sm bg-fill-2 px-1.5 text-[11px] leading-[18px] text-ink-2">
-                {t("apps.pending")}
-              </span>
-            )}
-          </span>
-          <span className="no-bar flex min-w-0 items-center gap-1.5 overflow-x-auto text-xs whitespace-nowrap text-ink-3 tabular-nums">
-            {l.online ? (
-              <span
-                className="size-1.5 shrink-0 rounded-full bg-run"
-                aria-hidden
-              />
-            ) : null}
-            {l.online
-              ? t("term.online")
-              : ago(l.lastSeenAt || l.createdAt || 0)}
-            {onPasskeys && l.passkeys
-              ? ` · ${t("passkey.count", { n: l.passkeys })}`
-              : null}
-            {mine.map((c) => (
-              <span key={c.id} className="flex shrink-0 items-center gap-1">
-                <Monitor size={12} className="text-ink-4" aria-hidden />
-                {c.name}
-              </span>
-            ))}
-          </span>
-        </span>
-        {!renaming && (
-          <IconKey
-            label={t("term.renameIt")}
-            onClick={() => setRenaming(true)}
-            className="size-7"
-          >
-            <PencilLine size={14} />
-          </IconKey>
-        )}
-      </div>
-      {face.crop}
-      {perms && (
-        <div
-          ref={intoView}
-          className="g-fade mb-2 ml-11 rounded-lg bg-fill/60 py-2"
-        >
-          <PermsEditor
-            title={t("apps.loginPerms")}
-            perms={l.perms}
-            save={(p) => api.loginPerms(app, l.id, p)}
-          />
-        </div>
-      )}
-      {face.input}
-      {menu.menu([
-        {
-          icon: <SlidersHorizontal size={15} />,
-          label: t("apps.perms"),
-          run: () => setPerms((on) => !on),
-        },
-        ...(onPasskeys
-          ? [
-              {
-                icon: <KeyRound size={15} />,
-                label: t("passkey.menu"),
-                run: onPasskeys,
-              },
-            ]
-          : []),
-        {
-          icon: <Trash2 size={15} />,
-          label: t("apps.removeLogin"),
-          sure: t("term.revokeSure"),
-          run: remove,
-        },
-      ])}
-    </div>
-  );
-}
-
-/** 网页's logins (the browsers' passkeys) and its unused invites as slots. */
-function WebLogins({
-  logins,
-  invites,
-  onPasskeys,
-}: {
-  logins: Login[];
-  invites: PendingInvite[];
-  onPasskeys?: (login: string) => void;
-}) {
-  const qc = useQueryClient();
-  return (
-    <Group title={t("apps.logins")}>
-      {logins.map((l) => (
-        <LoginRow
-          key={l.id}
-          l={l}
-          app="ir_web"
-          remove={() => void revoke(qc, l.id, l.name)}
-          onPasskeys={onPasskeys && (() => onPasskeys(l.id))}
-        />
-      ))}
-      {invites.map((i) => (
-        <div key={i.id} className="flex min-h-10 items-center gap-3 px-2">
-          <Link2 size={15} className="mx-1.5 shrink-0 text-ink-3" />
-          <span className="min-w-0 flex-1 truncate text-base">
-            {i.setup
-              ? t("term.setup")
-              : i.name || (
-                  <span className="text-ink-3">{t("term.unnamed")}</span>
-                )}
-          </span>
-          {i.claude && (
-            <span className="shrink-0 text-xs text-ink-3">
-              {t("term.withClaude")}
-            </span>
-          )}
-          {i.expiresAt ? (
-            <span className="text-xs text-ink-3 tabular-nums">
-              {t("term.until", { time: clock(i.expiresAt) })}
-            </span>
-          ) : null}
-          <SureKey
-            label={t("term.revoke")}
-            sure={t("term.revokeSure")}
-            run={() => void revoke(qc, i.id, i.name || t("term.unnamed"))}
-            className="size-7"
-          >
-            <Trash2 size={14} />
-          </SureKey>
-        </div>
-      ))}
-      <SecretHere at="terminals" />
-    </Group>
-  );
-}
-
 /** The marks of the devices a browser of 网页 is on (api.Device); "none" shows none. */
 const DEVICE_MARKS: Record<Device, LucideIcon> = {
   computer: Monitor,
@@ -1142,7 +517,7 @@ const DEVICE_MARKS: Record<Device, LucideIcon> = {
 const DEVICE_CHOICES: Device[] = ["computer", "laptop", "phone", "none"];
 
 /** A login's avatar's corner: the device it was last on (its browser's passkey's). */
-const deviceBadge = (d?: Device) =>
+export const deviceBadge = (d?: Device) =>
   d && d !== "none"
     ? { badge: DEVICE_MARKS[d], badgeLabel: t(`device.${d}`) }
     : {};
@@ -1157,13 +532,13 @@ const day = (ms: number) => {
  *  menu to set it, or 自动: by the browser), when made and last used, its ✕ (not the last one's: a
  *  login keeps one; remove the login instead). + top right: a one-time link that adds one, shown
  *  once here; a link not used yet is a row of its own till it is. */
-function PasskeysPage({ login, onBack }: { login: Login; onBack: () => void }) {
-  useLang();
+/** A login's passkeys, asked for ahead by whatever shows their count. */
+export const passkeysQ = (id: string) => ({ queryKey: ["passkeys", id], queryFn: () => api.passkeys(id) });
+
+/** A login's passkeys and the links waiting for a new device; add: a link for one more. */
+export function usePasskeys(login: Login) {
   const qc = useQueryClient();
-  const q = useQuery({
-    queryKey: ["passkeys", login.id],
-    queryFn: () => api.passkeys(login.id),
-  });
+  const q = useQuery(passkeysQ(login.id));
   const at = `passkeys:${login.id}`;
   const changed = () => {
     void qc.invalidateQueries({ queryKey: ["passkeys", login.id] });
@@ -1177,7 +552,33 @@ function PasskeysPage({ login, onBack }: { login: Login; onBack: () => void }) {
       toast(t("passkey.add"), { error: true, description: errText(e) });
     }
   };
+  return { q, at, changed, add };
+}
+
+/** The rows of a login's passkeys, a new device's link shown once above them. */
+export function PasskeyList({ login }: { login: Login }) {
+  useLang();
+  const { q, at, changed } = usePasskeys(login);
   const keys = q.data?.passkeys ?? [];
+  return (
+    <>
+      <SecretHere at={at} />
+      {q.isError && <p className="m-0 text-sm text-ink-3">{errText(q.error)}</p>}
+      <section className="flex flex-col">
+        {keys.map((k) => (
+          <PasskeyRow key={k.id} login={login.id} k={k} last={keys.length === 1} changed={changed} />
+        ))}
+        {q.data?.links.map((l) => (
+          <PasskeyLinkRow key={l.id} login={login.id} l={l} changed={changed} />
+        ))}
+      </section>
+    </>
+  );
+}
+
+export function PasskeysPage({ login, onBack }: { login: Login; onBack: () => void }) {
+  useLang();
+  const { q, add } = usePasskeys(login);
   return (
     <Page
       title={t("passkey.title", { name: login.name })}
@@ -1185,34 +586,12 @@ function PasskeysPage({ login, onBack }: { login: Login; onBack: () => void }) {
       backLabel={t("term.panel")}
       busy={q.isFetching}
       right={
-        <IconKey
-          label={t("passkey.add")}
-          onClick={() => void add()}
-          tipSide="bottom"
-          className="size-7"
-        >
+        <IconKey label={t("passkey.add")} onClick={() => void add()} tipSide="bottom" className="size-7">
           <Plus size={16} />
         </IconKey>
       }
     >
-      <SecretHere at={at} />
-      {q.isError && (
-        <p className="m-0 text-sm text-ink-3">{errText(q.error)}</p>
-      )}
-      <section className="flex flex-col">
-        {keys.map((k) => (
-          <PasskeyRow
-            key={k.id}
-            login={login.id}
-            k={k}
-            last={keys.length === 1}
-            changed={changed}
-          />
-        ))}
-        {q.data?.links.map((l) => (
-          <PasskeyLinkRow key={l.id} login={login.id} l={l} changed={changed} />
-        ))}
-      </section>
+      <PasskeyList login={login} />
     </Page>
   );
 }
@@ -1381,218 +760,8 @@ function PasskeyLinkRow({
   );
 }
 
-/** A new login slot of 网页: named; the link then shows once, here. */
-function InviteForm({ done }: { done: () => void }) {
-  const qc = useQueryClient();
-  const me = useMe().data;
-  const [name, setName] = useState("");
-  const [withClaude, setWithClaude] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const canClaude = saysOwner(me);
-  const make = async () => {
-    setBusy(true);
-    try {
-      showSecret({
-        invite: await api.invite(name.trim(), canClaude && withClaude),
-        at: "terminals",
-      });
-      done();
-      void qc.invalidateQueries({ queryKey: ["apps"] });
-    } catch (e) {
-      toast(t("err.invite"), { error: true, description: nameError(e) });
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <form
-      className="g-fade flex flex-col gap-2 rounded-lg bg-fill p-2.5"
-      onSubmit={(e) => {
-        e.preventDefault();
-        void make();
-      }}
-    >
-      <input
-        autoFocus
-        value={name}
-        maxLength={12}
-        onChange={(e) => setName(e.target.value)}
-        placeholder={t("term.nameOptional")}
-        aria-label={t("term.name")}
-        className="no-ring h-9 rounded-md bg-fill-2 px-2.5 text-base placeholder:text-ink-3"
-      />
-      {canClaude && (
-        <div className="flex items-center gap-2 px-0.5">
-          <span className="min-w-0 flex-1">
-            <span className="block text-sm">{t("term.withClaude")}</span>
-            <span className="block text-xs text-ink-3">
-              {t("term.withClaudeHint")}
-            </span>
-          </span>
-          <Switch
-            label={t("term.withClaude")}
-            on={withClaude}
-            onChange={setWithClaude}
-          />
-        </div>
-      )}
-      <div className="flex justify-end gap-2">
-        <SecondKey onClick={done}>{t("me.cancel")}</SecondKey>
-        <MainKey type="submit" busy={busy}>
-          {t("term.make")}
-        </MainKey>
-      </div>
-    </form>
-  );
-}
-
-/** The agents a permission list offers by name; others it was given show too. */
-const AGENTS = ["claude", "codex", "pi", "dsh", "agy"];
-const ALL = "*";
-const permsOf = (p?: Perms): Perms => p ?? { agents: [ALL], scope: [ALL] };
-const same = (a: string[], b: string[]) =>
-  a.length === b.length && a.every((v, i) => v === b[i]);
-
-/** What an app may use: its agents (all, or some) and its scope (all, or places "应用名:路径").
- *  Changed here, saved by whoever approves. */
-function PermsEditor({
-  perms,
-  save: put,
-  title,
-}: {
-  perms?: Perms;
-  save: (p: Perms) => Promise<Perms>;
-  title?: string;
-}) {
-  const qc = useQueryClient();
-  const was = permsOf(perms);
-  const [p, setP] = useState<Perms>(was);
-  const [place, setPlace] = useState("");
-  const [busy, setBusy] = useState(false);
-  // By what it says, not which object: each fetch of the apps brings a new one, and what was being
-  // changed here was thrown away by any of them (a rename, a face, the window focused again).
-  const said = JSON.stringify(was);
-  useEffect(() => setP(permsOf(perms)), [said]); // eslint-disable-line react-hooks/exhaustive-deps
-  const dirty = !same(p.agents, was.agents) || !same(p.scope, was.scope);
-  const allAgents = p.agents.includes(ALL);
-  const allScope = p.scope.includes(ALL);
-  const flipAgent = (a: string, on: boolean) =>
-    setP({
-      ...p,
-      agents: on
-        ? [...p.agents.filter((x) => x !== ALL), a]
-        : p.agents.filter((x) => x !== a),
-    });
-  const addPlace = () => {
-    const v = place.trim();
-    if (v && !p.scope.includes(v))
-      setP({ ...p, scope: [...p.scope.filter((x) => x !== ALL), v] });
-    setPlace("");
-  };
-  const save = async () => {
-    setBusy(true);
-    try {
-      setP(await put(p));
-      toast(t("apps.saved"));
-      void qc.invalidateQueries({ queryKey: ["apps"] });
-    } catch (e) {
-      toast(t("apps.perms"), { error: true, description: errText(e) });
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <Rows title={title}>
-      <div className="flex min-h-10 items-center gap-2 px-2">
-        <span className="min-w-0 flex-1 text-sm">{t("apps.allAgents")}</span>
-        <Switch
-          label={t("apps.allAgents")}
-          on={allAgents}
-          onChange={(on) => setP({ ...p, agents: on ? [ALL] : [] })}
-        />
-      </div>
-      {!allAgents && (
-        <div className="g-fade flex flex-wrap gap-1.5 px-2 pb-2">
-          {[...new Set([...AGENTS, ...p.agents])].map((a) => {
-            const on = p.agents.includes(a);
-            return (
-              <button
-                key={a}
-                type="button"
-                aria-pressed={on}
-                onClick={() => flipAgent(a, !on)}
-                className={`g-press flex h-7 items-center gap-1 rounded-full px-2.5 text-sm ${on ? "bg-ink text-on-ink" : "bg-fill text-ink-2 hover:bg-fill-2"}`}
-              >
-                {on && <Check size={13} />}
-                {a}
-              </button>
-            );
-          })}
-        </div>
-      )}
-      <div className="flex min-h-10 items-center gap-2 px-2">
-        <span className="min-w-0 flex-1 text-sm">{t("apps.allScope")}</span>
-        <Switch
-          label={t("apps.allScope")}
-          on={allScope}
-          onChange={(on) => setP({ ...p, scope: on ? [ALL] : [] })}
-        />
-      </div>
-      {!allScope && (
-        <div className="g-fade flex flex-col gap-1 px-2 pb-2">
-          {p.scope.length === 0 && (
-            <p className="m-0 text-xs text-ink-3">{t("apps.scopeNone")}</p>
-          )}
-          {p.scope.map((s) => (
-            <div key={s} className="flex min-h-8 items-center gap-2">
-              <code className="min-w-0 flex-1 truncate font-mono text-xs">
-                {s}
-              </code>
-              <IconKey
-                label={t("apps.scopeRemove")}
-                onClick={() =>
-                  setP({ ...p, scope: p.scope.filter((x) => x !== s) })
-                }
-                className="size-6"
-              >
-                <X size={13} />
-              </IconKey>
-            </div>
-          ))}
-          <form
-            className="flex gap-1.5"
-            onSubmit={(e) => {
-              e.preventDefault();
-              addPlace();
-            }}
-          >
-            <input
-              value={place}
-              onChange={(e) => setPlace(e.target.value)}
-              placeholder={t("apps.scopePlaceholder")}
-              aria-label={t("apps.scopeAdd")}
-              className="no-ring h-8 min-w-0 flex-1 rounded-md bg-fill px-2.5 font-mono text-xs placeholder:font-sans placeholder:text-ink-3"
-            />
-            <SecondKey type="submit" disabled={!place.trim()}>
-              {t("apps.scopeAdd")}
-            </SecondKey>
-          </form>
-        </div>
-      )}
-      {dirty && (
-        <div className="g-fade flex justify-end gap-2 px-2">
-          <SecondKey onClick={() => setP(was)}>{t("apps.reset")}</SecondKey>
-          <MainKey busy={busy} onClick={() => void save()}>
-            {t("apps.save")}
-          </MainKey>
-        </div>
-      )}
-    </Rows>
-  );
-}
-
 /** The name in place, chosen whole: Enter or leaving saves it, Escape keeps the old one. */
-function Rename({
+export function Rename({
   id,
   name: was,
   done,

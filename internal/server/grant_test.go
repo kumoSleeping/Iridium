@@ -32,7 +32,7 @@ func TestMachineGrant(t *testing.T) {
 	var told []executor.Denial
 	var asked []string
 	answer := true
-	tok := l.newApp("box", false)
+	tok := l.newApp("box")
 	exe, err := executor.New(executor.Options{
 		URL: "ws" + strings.TrimPrefix(l.base, "http") + "/v1/internal/exec", Token: tok.Token, State: filepath.Join(t.TempDir(), "state"), Logf: t.Logf,
 		Roots: []string{root},

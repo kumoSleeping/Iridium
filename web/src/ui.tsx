@@ -1,5 +1,6 @@
 // Shared pieces (from the style sample, web/sample): tooltips that also open on long-press, the
 // popover shell, icon keys, agent logos with their status lamp, terminal avatars, switches.
+import { PatternFace } from "./pattern";
 import { Dialog } from "@base-ui/react/dialog";
 import { Menu } from "@base-ui/react/menu";
 import { Popover } from "@base-ui/react/popover";
@@ -540,21 +541,27 @@ export function IrMark({ size = 16, className, ground = "currentColor", round }:
  *  others (the desktop app's list, the login page): round. None set: Iridium's mark in the circle.
  *  One set: the face, Iridium's mark small at its bottom right, a rounded square (kumo,
  *  2026-11-23). */
+/** Whether the host's face at an address loaded: known for the page's life, so a face drawn again
+ *  (a window resized, a pane mounted anew) starts as it was, not as an empty circle till the
+ *  answer comes back (kumo, 2026-11-27). */
+const serverFaces = new Map<string, boolean>();
+
 export function ServerFace({ size = 32, over }: { size?: number; over?: ReactNode }) {
   const v = useCarried<number>("avatars") ?? 0;
   const src = `/v1/internal/face?v=${v}`;
-  const [broken, setBroken] = useState<string | null>(null);
-  const has = broken !== src;
+  const [, seen] = useState(0);
+  const known = serverFaces.get(src);
   const mark = Math.max(12, Math.round(size * 0.4));
+  // Not known yet: Iridium's mark, the picture loading unseen over it, shown once it has come.
+  const tell = (ok: boolean) => (serverFaces.set(src, ok), seen((n) => n + 1));
   return (
     <span className="relative inline-block shrink-0" style={{ width: size, height: size }}>
-      {has ? (
-        <img src={src} alt="" draggable={false} onError={() => setBroken(src)} className="size-full rounded-full object-cover" style={{ boxShadow: "inset 0 0 0 0.5px var(--edge)" }} />
-      ) : (
-        <IrMark size={size} round className="text-ink" />
+      {known !== true && <IrMark size={size} round className="text-ink" />}
+      {known !== false && (
+        <img src={src} alt="" draggable={false} onLoad={() => known || tell(true)} onError={() => tell(false)} className={cn("size-full rounded-full object-cover", known ? "" : "absolute inset-0 opacity-0")} style={{ boxShadow: "inset 0 0 0 0.5px var(--edge)" }} />
       )}
       {over}
-      {has && (
+      {known === true && (
         <span className="absolute -right-0.5 -bottom-0.5 grid rounded-[30%] bg-paper p-px">
           <IrMark size={mark} className="text-ink" />
         </span>
@@ -593,7 +600,7 @@ export const isHost = (member: string) => member === "local" || member.startsWit
 
 /** An app's or login's avatar (host: Iridium's mark), or its initial on a disc (tinted, when given a colour); an app
  *  carries its type's mark on the corner (type), or another mark (badge: a device, Monitor, Smartphone). */
-export function Avatar({ src, name, size = 20, type, badge, badgeSize, badgeLabel, tint, over, className, host }: { src?: string; name?: string; size?: number; type?: string; badge?: LucideIcon; badgeSize?: number; badgeLabel?: string; tint?: string; over?: ReactNode; className?: string; host?: boolean }) {
+export function Avatar({ src, name, size = 20, type, badge, badgeSize, badgeLabel, tint, over, className, host, pattern }: { src?: string; name?: string; size?: number; type?: string; badge?: LucideIcon; badgeSize?: number; badgeLabel?: string; tint?: string; over?: ReactNode; className?: string; host?: boolean; pattern?: string }) {
   const [broken, setBroken] = useState<string | null>(null);
   const typed = badge ? undefined : typeMark(type);
   const mark = badge ?? typed?.[0];
@@ -605,6 +612,9 @@ export function Avatar({ src, name, size = 20, type, badge, badgeSize, badgeLabe
         <IrMark size={size} className="text-ink" />
       ) : src && broken !== src ? (
         <img src={src} alt="" draggable={false} onError={() => setBroken(src)} className="size-full rounded-full object-cover" style={{ boxShadow: "inset 0 0 0 0.5px var(--edge)" }} />
+      ) : pattern ? (
+        // None of its own: a face made from the seed, not a letter (kumo, 2026-11-27).
+        <PatternFace seed={pattern} size={size} />
       ) : (
         <span
           className="grid size-full place-items-center rounded-full font-medium select-none"

@@ -264,6 +264,7 @@ func (s *Server) Handler(local bool) http.Handler {
 	})
 	s.appRoutes(mux)
 	s.secretRoutes(mux)
+	s.githubRoutes(mux)
 	s.updateRoutes(mux)
 	s.settingsRoutes(mux)
 	s.sessionRoutes(mux)

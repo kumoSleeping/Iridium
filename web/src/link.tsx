@@ -35,12 +35,11 @@ export function LinkDot({ className, side = "bottom" }: { className?: string; si
     );
   const label = link.live === false ? t("top.offline") : link.rtt !== null ? t("top.online", { ms: link.rtt }) : t("top.connecting");
   const tone = link.live === false ? "bg-err" : link.rtt === null ? "bg-ink-4" : link.rtt < 500 ? "bg-run" : link.rtt <= 2000 ? "bg-need" : "bg-err";
-  // Close after the name, little room (kumo, 2026-11-26): the dot and the number a gap of 4px,
-  // the number small, its ms smaller and fainter on the same baseline.
+  // Close after the name, little room (kumo, 2026-11-26): the number, its ms smaller and fainter
+  // on its baseline, then the dot (kumo, 2026-11-26: the dot behind).
   return (
     <Tip label={label} side={side} tap>
       <span className={cn("-ml-1 flex items-center gap-1 text-[11px] leading-none text-ink-3 tabular-nums", className)} role="status" aria-label={label}>
-        <span className={cn("size-1.5 shrink-0 rounded-full transition-colors duration-(--dur-2)", tone)} />
         {link.live === false ? (
           t("top.offlineShort")
         ) : link.rtt !== null ? (
@@ -49,6 +48,7 @@ export function LinkDot({ className, side = "bottom" }: { className?: string; si
             <span className="text-[9px] text-ink-4">ms</span>
           </span>
         ) : null}
+        <span className={cn("size-1.5 shrink-0 rounded-full transition-colors duration-(--dur-2)", tone)} />
       </span>
     </Tip>
   );

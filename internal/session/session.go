@@ -27,6 +27,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/config"
 	"github.com/kumoSleeping/iridium/internal/ctx/assemble"
+	"github.com/kumoSleeping/iridium/internal/ghenv"
 	"github.com/kumoSleeping/iridium/internal/harness"
 	"github.com/kumoSleeping/iridium/internal/hub"
 	"github.com/kumoSleeping/iridium/internal/platform"
@@ -91,6 +92,10 @@ type Manager struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+
+	// ghOnce, ghExe, ghShim: GitHub in the agents' environment (githubEnv).
+	ghOnce        sync.Once
+	ghExe, ghShim string
 
 	mu     sync.Mutex
 	hosted map[string]*Hosted
@@ -799,6 +804,25 @@ func (m *Manager) agentEnv() []string {
 		env = agent.SetEnv(env, "CLAUDE_CONFIG_DIR", m.o.Config.ClaudeHome)
 	}
 	return env
+}
+
+// githubEnv is env with GitHub as the turn's person (ghenv): git's helper, Iridium's gh. Only
+// from the iridium binary itself (a test's binary is no ir).
+func (m *Manager) githubEnv(env []string) []string {
+	m.ghOnce.Do(func() {
+		exe, err := os.Executable()
+		if err != nil {
+			return
+		}
+		if b := strings.ToLower(filepath.Base(exe)); !strings.HasPrefix(b, "iridium") {
+			return
+		}
+		m.ghExe = exe
+		if dir := filepath.Join(m.o.Config.StatePath(), "bin"); ghenv.Shim(dir, exe) {
+			m.ghShim = dir
+		}
+	})
+	return ghenv.Env(env, m.ghExe, m.ghShim)
 }
 
 func (m *Manager) newDriver(a api.Agent, emit func(agent.Event)) agent.Driver {

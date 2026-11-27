@@ -61,7 +61,7 @@ func TestGateStore(t *testing.T) {
 	bot := gate.Endpoint{ID: "bbbbbbbbbbbbbbbb", Name: "bot", Kind: gate.KindChannel, Type: "computer", TokenHash: "abc", CreatedAt: t0.Add(time.Second)}
 	other := gate.Endpoint{ID: "cccccccccccccccc", Name: "mac", Kind: gate.KindChannel, CreatedAt: t0.Add(2 * time.Second)}
 	setup := webapp.Invite{ID: "setup", Hash: "h0", Setup: true, CreatedAt: t0}
-	inv := webapp.Invite{ID: "invite01", Hash: "h1", Name: "pad", Perms: []byte(`{"claudeOwner":{"by":"local","at":1}}`), CreatedAt: t0, ExpiresAt: t0.Add(10 * time.Minute)}
+	inv := webapp.Invite{ID: "invite01", Hash: "h1", Name: "pad", Perms: []byte(`{"_perms":{"agents":["pi"],"scope":["*"]}}`), CreatedAt: t0, ExpiresAt: t0.Add(10 * time.Minute)}
 	login := webapp.Session{Hash: "s1", Login: panel.ID, CreatedAt: t0, LastSeenAt: t0, ExpiresAt: t0.Add(7 * 24 * time.Hour)}
 	if err := web.Apply(webapp.Change{Creds: []webapp.Cred{cred}}); err == nil {
 		t.Error("passkeys for a login not there")
@@ -108,14 +108,10 @@ func TestGateStore(t *testing.T) {
 		t.Errorf("passkeys after a rename: %+v", st.Creds)
 	}
 
-	// An update, a deletion with its rules, all in one change; then from a new connection.
-	must(t, s.SetTerminalRules(bot.ID, []byte(`{"agents":["pi"]}`)))
+	// An update and a deletion, all in one change; then from a new connection.
 	bot.Name, bot.TokenHash = "bot2", "def"
 	must(t, g.Apply(gate.Change{DeleteEndpoints: []string{bot.ID}, Endpoints: []gate.Endpoint{other}}))
 	must(t, web.Apply(webapp.Change{DeleteInvites: []string{inv.ID}, DeleteSessions: []string{"s1"}}))
-	if _, ok, _ := s.TerminalRules(bot.ID); ok {
-		t.Error("rules outlived their app")
-	}
 	if d, _ := s.Device(bot.ID); d != "" {
 		t.Errorf("the device outlived its app: %q", d)
 	}
@@ -209,13 +205,7 @@ func TestMigrateToApps(t *testing.T) {
 	if len(wst.Sessions) != 1 || wst.Sessions[0].Login != f.Mac {
 		t.Errorf("web sessions: %+v", wst.Sessions)
 	}
-	// Permissions, usage, openers, devices by the same IDs.
-	if r, ok := rulesOf(t, s, f.Mac); !ok || r.ClaudeOwner == nil || r.ClaudeOwner.By != "first" {
-		t.Errorf("mac's rules: %+v", r)
-	}
-	if r, ok := rulesOf(t, s, f.QQ); !ok || r.ClaudeOwner == nil {
-		t.Errorf("qq's rules: %+v", r)
-	}
+	// Usage, openers, devices by the same IDs.
 	if n, _ := s.TokensSince(f.Mac, 0); n != 100 {
 		t.Errorf("mac's usage: %d", n)
 	}
