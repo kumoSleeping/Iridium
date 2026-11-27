@@ -1,19 +1,22 @@
-// GitHub on a login's row in 应用管理 (kumo, 2026-11-27: only a GitHub mark there for now, pressed
-// its details; the page is to be redone): the account a person bound, whose git and gh their
-// agents' turns act as (docs/api.md "GitHub"). One's own row, unbound, has the mark faint: pressed,
-// binding, by GitHub's link (its device flow), or a token pasted.
-import { Popover } from "@base-ui/react/popover";
+// GitHub in 管理 (manage.tsx): the account a person bound, whose git and gh their agents' turns act
+// as (docs/api.md "GitHub"), as what its line unfolds, in the window's own way: one line, the
+// words at the left and the keys at the right (kumo, 2026-11-27: not a popover's card dropped
+// in). Bound: when, and 重新绑定 (one's own) and 解绑. Binding: by GitHub's link (its device flow:
+// the code shown here, typed at github.com/login/device, the server asked again at GitHub's pace
+// till it is allowed), or a token pasted.
 import { useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, LoaderCircle, Unlink } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, ApiError } from "./api/client";
 import type { GitHubDevice, GitHubList } from "./api/types.gen";
 import { useQuery } from "./api/query";
+import { keptQuery } from "./data";
 import { MainKey, SecondKey } from "./card";
 import { t } from "./i18n";
-import { ago, Avatar, cn, CopyKey, PopSurface, SureKey, Tip } from "./ui";
+import { ago, Avatar, CopyKey, SureKey } from "./ui";
 
-const githubQ = { queryKey: ["github"], queryFn: () => api.github(), staleTime: 60_000 };
+/** Kept across reloads (data.ts keptQuery): the line drawn whole at once. */
+export const githubQ = { queryKey: ["github"], staleTime: 60_000, ...keptQuery("github", () => api.github()) };
 
 /** GitHub's mark (its octocat outline is not among the icons). */
 export function GitHubMark({ size = 15, className }: { size?: number; className?: string }) {
@@ -24,85 +27,66 @@ export function GitHubMark({ size = 15, className }: { size?: number; className?
   );
 }
 
-/** The GitHub mark of member's row: bound, its account; one's own unbound (mine), faint, binding. */
-export function GitHubKey({ member, mine }: { member: string; mine: boolean }) {
-  const d = useQuery<GitHubList>(githubQ).data;
-  const b = d?.bindings.find((x) => x.member === member);
-  const [open, setOpen] = useState(false);
-  if (!d || (!b && !mine)) return null;
-  const label = b ? `GitHub · @${b.login}` : t("github.bind");
+/** A bound account as its line's value: its GitHub avatar and @login. */
+export function GitHubWho({ login, avatar }: { login: string; avatar?: string }) {
   return (
-    <Popover.Root open={open} onOpenChange={setOpen}>
-      <Tip label={label}>
-        <Popover.Trigger aria-label={label} className={cn("g-press grid size-7 shrink-0 place-items-center rounded-md hover:bg-fill data-popup-open:bg-fill", b ? "text-ink-2 hover:text-ink" : "text-ink-4 hover:text-ink-2")}>
-          <GitHubMark size={15} />
-        </Popover.Trigger>
-      </Tip>
-      <PopSurface align="end" className="w-[min(300px,calc(100vw-16px))] p-3">
-        {b && <Bound member={member} mine={mine} done={() => setOpen(false)} />}
-        {!b && <Bind done={() => setOpen(false)} />}
-      </PopSurface>
-    </Popover.Root>
+    <span className="flex min-w-0 items-center gap-1.5">
+      <Avatar src={avatar} name={login} size={18} />
+      <span className="truncate">@{login}</span>
+    </span>
   );
 }
 
-export function Bound({ member, mine, done }: { member: string; mine: boolean; done: () => void }) {
+const LINE = "flex min-h-11 items-center gap-2";
+const TEXT_KEY = "shrink-0 px-1 text-sm text-ink-3 hover:text-ink-2";
+const errOf = (e: unknown) => (e instanceof ApiError ? e.message : String(e));
+
+/** What member's GitHub line unfolds: bound, when, and its keys; else binding (mine: one's own,
+ *  the only one a person binds). */
+export function GitHubFold({ member, mine }: { member: string; mine: boolean }) {
   const qc = useQueryClient();
   const b = useQuery<GitHubList>(githubQ).data?.bindings.find((x) => x.member === member);
   const [again, setAgain] = useState(false);
-  if (!b) return null;
-  const unbind = () =>
-    void (mine ? api.unbindGitHub() : api.unbindGitHub(member)).then(() => (qc.invalidateQueries({ queryKey: ["github"] }), done()));
-  return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-center gap-2.5">
-        <Avatar src={b.avatar} name={b.login} size={32} />
-        <span className="min-w-0 flex-1">
-          <a href={`https://github.com/${b.login}`} target="_blank" rel="noreferrer" className="block truncate text-sm font-medium hover:underline">
-            @{b.login}
-          </a>
-          <span className="block text-xs text-ink-3">{t("github.boundAt", { when: ago(b.at) })}</span>
-        </span>
-        <SureKey label={t("github.unbind")} sure={t("github.unbindSure")} run={unbind} className="size-8">
+  if (b && !again)
+    return (
+      <div className={LINE}>
+        <a href={`https://github.com/${b.login}`} target="_blank" rel="noreferrer" className="flex min-w-0 flex-1 items-center gap-1 truncate text-sm text-ink-3 hover:text-ink-2">
+          {t("github.boundAt", { when: ago(b.at) })}
+          <ExternalLink size={12} className="shrink-0" />
+        </a>
+        {mine && <SecondKey onClick={() => setAgain(true)}>{t("github.rebind")}</SecondKey>}
+        <SureKey label={t("github.unbind")} sure={t("github.unbindSure")} run={() => void (mine ? api.unbindGitHub() : api.unbindGitHub(member)).then(() => qc.invalidateQueries({ queryKey: ["github"] }))} className="size-8">
           <Unlink size={15} />
         </SureKey>
       </div>
-      <p className="m-0 text-xs text-ink-3">{t("github.what")}</p>
-      {mine && (again ? <Bind done={done} /> : <SecondKey onClick={() => setAgain(true)}>{t("github.rebind")}</SecondKey>)}
-    </div>
-  );
+    );
+  if (!mine) return null;
+  return <Bind done={() => setAgain(false)} cancel={b ? () => setAgain(false) : undefined} />;
 }
 
-/** Binding: by GitHub's link (its device flow: a code typed at github.com/login/device, kumo
- *  2026-11-27), the page asking the server again at GitHub's pace till it is allowed; a token
- *  pasted the other way, under it. */
-export function Bind({ done }: { done: () => void }) {
-  const [paste, setPaste] = useState(false);
-  return paste ? (
-    <PasteToken done={done} />
-  ) : (
-    <div className="flex flex-col gap-2">
-      <DeviceBind done={done} />
-      <button type="button" onClick={() => setPaste(true)} className="self-start text-xs text-ink-3 underline-offset-2 hover:text-ink-2 hover:underline">
-        {t("github.usePaste")}
-      </button>
-    </div>
-  );
-}
-
-function DeviceBind({ done }: { done: () => void }) {
+/** Binding, by GitHub's link first; cancel: back to the account bound. */
+function Bind({ done, cancel }: { done: () => void; cancel?: () => void }) {
   const qc = useQueryClient();
+  const [paste, setPaste] = useState(false);
   const [flow, setFlow] = useState<GitHubDevice | null>(null);
   const [state, setState] = useState<"" | "waiting" | "expired" | "denied">("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [token, setToken] = useState("");
+  const bound = () => (qc.invalidateQueries({ queryKey: ["github"] }), done());
   const begin = () => {
     setBusy(true);
     setErr("");
     api.githubDevice().then(
       (d) => (setFlow(d), setState("waiting"), setBusy(false)),
-      (e) => (setErr(e instanceof ApiError ? e.message : String(e)), setBusy(false)),
+      (e) => (setErr(errOf(e)), setBusy(false)),
     );
+  };
+  const put = () => {
+    if (!token.trim() || busy) return;
+    setBusy(true);
+    setErr("");
+    api.bindGitHub(token.trim()).then(bound, (e) => (setBusy(false), setErr(errOf(e))));
   };
   // Asked again at GitHub's pace while it waits; gone when the page is.
   useEffect(() => {
@@ -112,11 +96,11 @@ function DeviceBind({ done }: { done: () => void }) {
       api.githubDeviceState(flow.id).then(
         (s) => {
           if (!live) return;
-          if (s.state === "done") return void (qc.invalidateQueries({ queryKey: ["github"] }), done());
-          setState(s.state === "expired" || s.state === "denied" ? s.state : "waiting");
+          if (s.state === "done") return void bound();
           if (s.state === "waiting") setFlow({ ...flow });
+          else setState(s.state === "denied" ? "denied" : "expired");
         },
-        (e) => live && (setErr(e instanceof ApiError ? e.message : String(e)), setState("expired")),
+        (e) => live && (setErr(errOf(e)), setState("expired")),
       );
     }, flow.interval * 1000);
     return () => {
@@ -124,79 +108,52 @@ function DeviceBind({ done }: { done: () => void }) {
       clearTimeout(timer);
     };
   }, [flow, state]); // eslint-disable-line react-hooks/exhaustive-deps
-  if (!flow || state !== "waiting")
+  if (paste)
     return (
-      <div className="flex flex-col gap-2">
-        <span className="text-sm font-medium">{t("github.bind")}</span>
-        {state && <span className="text-xs text-ink-3">{t(state === "denied" ? "github.denied" : "github.expired")}</span>}
-        {err && <span className="text-xs text-err">{err}</span>}
-        <MainKey busy={busy} onClick={begin} className="self-start">
-          <GitHubMark size={14} />
-          {t("github.authorize")}
-        </MainKey>
-      </div>
-    );
-  const copy = () => void navigator.clipboard?.writeText(flow.code).catch(() => {});
-  return (
-    <div className="flex flex-col gap-2">
-      <span className="text-sm font-medium">{t("github.bind")}</span>
-      <div className="flex items-center gap-1.5 rounded-md bg-fill px-3 py-2">
-        <code className="min-w-0 flex-1 font-mono text-xl font-semibold tracking-widest select-all">{flow.code}</code>
-        <CopyKey text={flow.code} />
-      </div>
-      <a href={flow.uri} target="_blank" rel="noreferrer" onClick={copy} className="g-press flex h-9 items-center justify-center gap-1.5 rounded-md bg-ink text-sm font-medium text-on-ink">
-        <GitHubMark size={14} />
-        {t("github.open")}
-        <ExternalLink size={13} />
-      </a>
-      <span className="flex items-center gap-1.5 text-xs text-ink-3">
-        <LoaderCircle size={12} className="animate-spin" />
-        {t("github.waiting")}
-      </span>
-    </div>
-  );
-}
-
-function PasteToken({ done }: { done: () => void }) {
-  const qc = useQueryClient();
-  const [token, setToken] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
-  const go = () => {
-    if (!token.trim() || busy) return;
-    setBusy(true);
-    setErr("");
-    api.bindGitHub(token.trim()).then(
-      () => (qc.invalidateQueries({ queryKey: ["github"] }), done()),
-      (e) => (setBusy(false), setErr(e instanceof ApiError ? e.message : String(e))),
-    );
-  };
-  return (
-    <div className="flex flex-col gap-2">
-      <span className="text-sm font-medium">{t("github.bind")}</span>
-      <input
-        autoFocus
-        type="password"
-        autoComplete="off"
-        value={token}
-        placeholder={t("github.token")}
-        aria-label={t("github.token")}
-        onChange={(e) => setToken(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.nativeEvent.isComposing) return;
-          if (e.key === "Enter") go();
+      <form
+        className={LINE}
+        onSubmit={(e) => {
+          e.preventDefault();
+          put();
         }}
-        className="no-ring h-8 w-full min-w-0 rounded-md bg-fill px-2 font-mono text-[13px] select-text"
-      />
-      <span className="text-xs text-ink-3">
-        {t("github.tokenHint")}{" "}
-        <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noreferrer" className="text-ink-2 underline-offset-2 hover:underline">
-          {t("github.newToken")}
+      >
+        <input autoFocus type="password" autoComplete="off" value={token} placeholder={t("github.token")} aria-label={t("github.token")} onChange={(e) => setToken(e.target.value)} className="no-ring h-8 min-w-0 flex-1 rounded-md bg-fill px-2.5 font-mono text-[13px] select-text" />
+        <button type="button" onClick={() => (setPaste(false), setErr(""))} className={TEXT_KEY}>
+          {t("me.cancel")}
+        </button>
+        <MainKey type="submit" busy={busy} disabled={!token.trim()}>
+          {t("github.bindKey")}
+        </MainKey>
+      </form>
+    );
+  if (flow && state === "waiting")
+    return (
+      <div className={LINE}>
+        <code className="font-mono text-lg font-semibold tracking-widest select-all">{flow.code}</code>
+        <CopyKey text={flow.code} />
+        <span className="flex min-w-0 flex-1 items-center justify-end gap-1.5 truncate text-sm text-ink-3">
+          <LoaderCircle size={13} className="shrink-0 animate-spin" />
+          {t("github.waiting")}
+        </span>
+        <a href={flow.uri} target="_blank" rel="noreferrer" onClick={() => void navigator.clipboard?.writeText(flow.code).catch(() => {})} className="g-press flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-ink px-3 text-sm font-medium text-on-ink pointer-coarse:h-10">
+          {t("github.open")}
+          <ExternalLink size={13} />
         </a>
-      </span>
-      {err && <span className="text-xs text-err">{err}</span>}
-      <MainKey busy={busy} disabled={!token.trim()} onClick={go} className="self-end">
-        {t("github.bindKey")}
+      </div>
+    );
+  return (
+    <div className={LINE}>
+      <span className={err ? "min-w-0 flex-1 truncate text-sm text-err" : "min-w-0 flex-1 truncate text-sm text-ink-3"}>{err || (state === "denied" ? t("github.denied") : state === "expired" ? t("github.expired") : "")}</span>
+      {cancel && (
+        <button type="button" onClick={cancel} className={TEXT_KEY}>
+          {t("me.cancel")}
+        </button>
+      )}
+      <button type="button" onClick={() => (setPaste(true), setErr(""))} className={TEXT_KEY}>
+        {t("github.usePaste")}
+      </button>
+      <MainKey busy={busy} onClick={begin}>
+        {t("github.authorize")}
       </MainKey>
     </div>
   );

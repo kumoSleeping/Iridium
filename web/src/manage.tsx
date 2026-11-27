@@ -16,13 +16,13 @@ import { AddComputer, clock, deviceBadge, nameError, ofWeb, OpenFolder, PasskeyL
 import { MainKey, SecondKey } from "./card";
 import { ConfirmCard } from "./confirms";
 import { SecretsPane, secretsQ } from "./credentials";
-import { isComputer, keptQuery, manages as managesApps, useAgents, useApps, useMe, useSettings } from "./data";
+import { isComputer, manages as managesApps, useAgents, useApps, useMe, useSettings } from "./data";
 import { CacheRows } from "./device/page";
 import { ahead as cacheAhead } from "./device/state";
 import { CacheTotal } from "./device/total";
 import { LangSwitch, ThemeSwitch, type ThemePref } from "./me";
 import { InstallItem, SignOut, UpdateItem } from "./system";
-import { Bind, Bound, GitHubMark } from "./github";
+import { GitHubFold, GitHubMark, GitHubWho, githubQ } from "./github";
 import { t, useLang } from "./i18n";
 import { modeName } from "./modes";
 import { Pills } from "./pills";
@@ -647,17 +647,15 @@ function LoginDetail({ l }: { l: Login }) {
         )}
         {(gh || mine) && (
           <>
-          <Field label="GitHub" onClick={() => flip("github")} open={open === "github"}>
+          <Field label={<span className="flex items-center gap-1.5"><GitHubMark size={14} />GitHub</span>} onClick={() => flip("github")} open={open === "github"}>
             {gh ? (
-              <span className="flex items-center gap-1.5">
-                <GitHubMark size={14} />@{gh.login}
-              </span>
+              <GitHubWho login={gh.login} avatar={gh.avatar} />
             ) : (
               <span className="text-ink-3">{t("manage.unbound")}</span>
             )}
           </Field>
           <Unfold open={open === "github"}>
-            <div className="max-w-sm">{gh ? <Bound member={l.id} mine={mine} done={() => {}} /> : <Bind done={() => setOpen("")} />}</div>
+            <GitHubFold member={l.id} mine={mine} />
           </Unfold>
           </>
         )}
@@ -692,7 +690,6 @@ function PasskeysFold({ login }: { login: Login }) {
   );
 }
 
-const githubQ = { queryKey: ["github"], staleTime: 60_000, ...keptQuery("github", () => api.github()) };
 
 function AppDetail({ a, logins }: { a: App; logins: Login[] }) {
   const qc = useQueryClient();
@@ -892,17 +889,15 @@ function ComputerDetail({ a, want = "" }: { a: App; want?: string }) {
         )}
         {a.host && (gh || me?.host) && (
           <>
-            <Field label="GitHub" onClick={() => flip("github")} open={sub === "github"}>
+            <Field label={<span className="flex items-center gap-1.5"><GitHubMark size={14} />GitHub</span>} onClick={() => flip("github")} open={sub === "github"}>
               {gh ? (
-                <span className="flex items-center gap-1.5">
-                  <GitHubMark size={14} />@{gh.login}
-                </span>
+                <GitHubWho login={gh.login} avatar={gh.avatar} />
               ) : (
                 <span className="text-ink-3">{t("manage.unbound")}</span>
               )}
             </Field>
             <Unfold open={sub === "github"}>
-              <div className="max-w-sm">{gh ? <Bound member="local" mine={!!me?.host} done={() => {}} /> : <Bind done={() => setSub("")} />}</div>
+              <GitHubFold member="local" mine={!!me?.host} />
             </Unfold>
           </>
         )}
