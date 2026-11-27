@@ -9,15 +9,15 @@
 import { Dialog } from "@base-ui/react/dialog";
 import { Menu } from "@base-ui/react/menu";
 import { useQueryClient } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, FolderOpen, KeyRound, Link2, LoaderCircle, Monitor, PencilLine, Plus, UserPlus, Waypoints, X, Trash2, Bot } from "lucide-react";
+import { ChevronLeft, ChevronRight, FolderOpen, KeyRound, Link2, Monitor, PencilLine, Plus, UserPlus, Waypoints, X, Trash2, Bot } from "lucide-react";
 import { useLayoutEffect, useState, type ReactNode } from "react";
 import { api } from "./api/client";
 import type { Agent, App, Computer, Login, Perms, PendingInvite, Role } from "./api/types.gen";
-import { AddComputer, clock, deviceBadge, nameError, ofWeb, OpenFolder, PasskeysPage, Rename, revoke, setOwner, systems, useFacePick, useGrant } from "./apps";
+import { AddComputer, clock, deviceBadge, nameError, ofWeb, OpenFolder, PasskeyList, passkeysQ, Rename, usePasskeys, revoke, setOwner, systems, useFacePick, useGrant } from "./apps";
 import { MainKey, SecondKey } from "./card";
 import { ConfirmCard, saysOwner } from "./confirms";
 import { SecretsPane, secretsQ } from "./credentials";
-import { isComputer, manages as managesApps, useAgents, useApps, useMe, useSettings } from "./data";
+import { isComputer, keptQuery, manages as managesApps, useAgents, useApps, useMe, useSettings } from "./data";
 import { Bind, Bound, GitHubMark } from "./github";
 import { t, useLang } from "./i18n";
 import { modeName } from "./modes";
@@ -30,7 +30,7 @@ import { showSecret } from "./secrets";
 import { MenuItems } from "./sidebar";
 import { useConfirms, usePairing } from "./store";
 import { errText, toast } from "./toast";
-import { agentName, ago, Avatar, AvatarKey, cn, FaceChangeOver, IconKey, Logo, MenuPortal, ServerFace, SureKey, Switch, Tip } from "./ui";
+import { agentName, ago, Avatar, AvatarKey, cn, FaceChangeOver, IconKey, intoView, Logo, MenuPortal, ServerFace, SureKey, Switch, Tip } from "./ui";
 import { useQuery } from "./api/query";
 
 /** Where a secret made here (an invite's link) shows. */
@@ -52,8 +52,7 @@ function useWide() {
 }
 
 /** What is chosen: a row of the list ("l:" a login, "i:" an invite, "p:" an app, "c:" a computer,
- *  "a:" an agent), a page under one ("r:" a role, SECRETS), or a row being made (NEW_*). */
-const SECRETS = "secrets";
+ *  "a:" an agent), or a row being made (NEW_*). What is under one unfolds in its detail. */
 const NEW_INVITE = "new:invite";
 const NEW_COMPUTER = "new:computer";
 const NEW_ROLE = "new:role";
@@ -79,8 +78,7 @@ export function ManagePage({ tab }: { tab: ManageTab }) {
   const firstOf = (x: ManageTab): string => {
     const mine = logins.find((l) => l.id === me?.login) ?? logins[0];
     if (x === "apps" && apps[0]) return `p:${apps[0].id}`;
-    if (x === "computers" && host) return `c:${host.id}`;
-    if (x === "secrets" && me?.host) return SECRETS;
+    if ((x === "computers" || x === "secrets") && host) return `c:${host.id}`;
     if ((x === "agents" || x === "roles" || !mine) && infos[0]) return `a:${infos[0].agent}`;
     return mine ? `l:${mine.id}` : "";
   };
@@ -91,18 +89,18 @@ export function ManagePage({ tab }: { tab: ManageTab }) {
   const [was, setWas] = useState(tab);
   if (tab !== was) (setWas(tab), setSel(""), setAsked(true));
   const at = sel || (wide || asked ? firstOf(tab) : "");
-  const [k, id] = at.startsWith("new:") || at === SECRETS ? [at, ""] : [at.slice(0, 1), at.slice(2)];
+  // Iridium's 凭据 asked for from outside (the route's, 新建's): unfolded there, a new one being added.
+  const [want, setWant] = useState(tab === "secrets" ? "show:0" : "");
+  if (tab !== was && tab === "secrets") setWant(`show:${Date.now()}`);
+  const [k, id] = at.startsWith("new:") ? [at, ""] : [at.slice(0, 1), at.slice(2)];
   const login = k === "l" ? logins.find((l) => l.id === id) : undefined;
   const invite = k === "i" ? invites.find((i) => i.id === id) : undefined;
   const app = k === "p" ? apps.find((a) => a.id === id) : undefined;
   const computer = k === "c" ? computers.find((a) => a.id === id) : undefined;
   const agent = k === "a" ? infos.find((x) => x.agent === id)?.agent : undefined;
-  const role = k === "r" ? roles.find((r) => r.id === id) : undefined;
   // One removed (here or elsewhere): back to none chosen.
-  if (sel && data && !sel.startsWith("new:") && sel !== SECRETS && !login && !invite && !app && !computer && !agent && !role) setSel("");
-  // The row lit for what is chosen: a page's, its owner's.
-  const lit = role ? `a:${role.agent}` : at === SECRETS && host ? `c:${host.id}` : at;
-  const back = () => (setSel(role ? `a:${role.agent}` : at === SECRETS && host && wide ? `c:${host.id}` : ""), !wide && !role && setAsked(false));
+  if (sel && data && !sel.startsWith("new:") && !login && !invite && !app && !computer && !agent) setSel("");
+  const lit = at;
 
   const list = (
     <>
@@ -148,10 +146,8 @@ export function ManagePage({ tab }: { tab: ManageTab }) {
       </div>
     ) : at === NEW_ROLE ? (
       <div className="-mx-3">
-        <NewRolePage made={(r: Role) => setSel(`r:${r.id}`)} />
+        <NewRolePage made={(r: Role) => setSel(`a:${r.agent}`)} />
       </div>
-    ) : at === SECRETS ? (
-      <SecretsSub onBack={back} />
     ) : login ? (
       <LoginDetail key={login.id} l={login} />
     ) : invite ? (
@@ -159,15 +155,9 @@ export function ManagePage({ tab }: { tab: ManageTab }) {
     ) : app ? (
       <AppDetail key={app.id} a={app} logins={appLogins(app.id)} />
     ) : computer ? (
-      <ComputerDetail key={computer.id} a={computer} open={setSel} />
+      <ComputerDetail key={computer.id} a={computer} want={computer.host ? want : ""} />
     ) : agent ? (
-      <AgentDetail key={agent} a={agent} computers={computers} open={setSel} />
-    ) : role ? (
-      <Sub title={role.name} tag={agentName(role.agent)} onBack={back}>
-        <div className="-mx-3">
-          <RolePage key={role.id} role={role} />
-        </div>
-      </Sub>
+      <AgentDetail key={agent} a={agent} computers={computers} />
     ) : null;
 
   const makes = [
@@ -175,37 +165,34 @@ export function ManagePage({ tab }: { tab: ManageTab }) {
     manages && { icon: <Waypoints size={15} />, label: pairing ? t("manage.stopPairing") : t("manage.pairApp"), run: () => void api.pairing(!pairing).catch((e) => toast(t("apps.pairing"), { error: true, description: errText(e) })) },
     manages && { icon: <Monitor size={15} />, label: t("manage.addComputer"), run: () => setSel(NEW_COMPUTER) },
     { icon: <Bot size={15} />, label: t("role.new"), run: () => setSel(NEW_ROLE) },
-    me?.host && { icon: <KeyRound size={15} />, label: t("manage.newSecret"), run: () => setSel(SECRETS) },
+    me?.host && host && { icon: <KeyRound size={15} />, label: t("manage.newSecret"), run: () => (setSel(`c:${host.id}`), setWant(`new:${Date.now()}`)) },
   ].filter((x) => !!x);
   const add = !at.startsWith("new:") && <AddMenu items={makes} pairing={pairing} />;
-  const needs = <Needs skip={at === SECRETS} />;
+  const needs = <Needs skip={!!computer?.host} />;
 
   return (
     <div ref={root} className="relative flex min-h-0 flex-1 flex-col">
       <header className="flex h-12 shrink-0 items-center gap-1 px-3 pointer-coarse:h-13">
         <Dialog.Title className="m-0 min-w-0 flex-1 truncate text-sm font-semibold">{t("manage.title")}</Dialog.Title>
-        {q.isFetching && <span className="g-fade mr-1.5 grid [animation-delay:200ms]"><LoaderCircle size={14} className="animate-spin text-ink-4" /></span>}
         <Dialog.Close render={<IconKey label={t("nav.close")} className="-mr-1" />}>
           <X size={17} />
         </Dialog.Close>
       </header>
       {wide ? (
-        <div className="grid min-h-0 flex-1 grid-cols-[16rem_minmax(0,1fr)] gap-4">
+        <div className="grid min-h-0 flex-1 grid-cols-[16rem_minmax(0,1fr)] gap-2">
           <div className="no-bar flex min-h-0 flex-col overflow-y-auto pb-20 pl-3">{list}</div>
-          <div className="no-bar min-h-0 overflow-y-auto pt-1 pr-5 pb-20">
+          <div className="no-bar min-h-0 overflow-y-auto pt-1 pr-5 pb-20 pl-2">
             {needs}
             {detail}
           </div>
         </div>
       ) : at ? (
         <div key={at} className="g-slide flex min-h-0 flex-1 flex-col">
-          {!role && at !== SECRETS && (
-            <div className="flex h-9 shrink-0 items-center px-1.5">
-              <IconKey label={t("nav.back")} onClick={() => (setSel(""), setAsked(false))} className="size-8">
-                <ChevronLeft size={17} />
-              </IconKey>
-            </div>
-          )}
+          <div className="flex h-9 shrink-0 items-center px-1.5">
+            <IconKey label={t("nav.back")} onClick={() => (setSel(""), setAsked(false))} className="size-8">
+              <ChevronLeft size={17} />
+            </IconKey>
+          </div>
           <div className="no-bar min-h-0 flex-1 overflow-y-auto px-4 pb-6">{detail}</div>
         </div>
       ) : (
@@ -300,22 +287,53 @@ function Head({ face, name, figures, keys }: { face: ReactNode; name: ReactNode;
   );
 }
 
-/** A setting's line: its name at the left, its value or control after it; pressed (onClick), a
- *  page of the right half. */
-function Field({ label, children, onClick }: { label: ReactNode; children: ReactNode; onClick?: () => void }) {
+/** A setting's line: its name at the left, its value or control after it; pressed (onClick), what
+ *  is under it unfolds below (kumo, 2026-11-27: nothing inside goes to a page of its own; there is
+ *  room), its chevron turned down while open. */
+function Field({ label, children, onClick, open }: { label: ReactNode; children: ReactNode; onClick?: () => void; open?: boolean }) {
   const body = (
     <>
       <span className="w-24 shrink-0 text-sm whitespace-nowrap text-ink-3">{label}</span>
       <span className="flex min-w-0 flex-1 items-center gap-2 text-sm">{children}</span>
-      {onClick && <ChevronRight size={15} className="shrink-0 text-ink-4" />}
+      {onClick && <ChevronRight size={15} className={cn("shrink-0 text-ink-4 transition-transform duration-(--dur-2) ease-(--ease-out)", open && "rotate-90")} />}
     </>
   );
   return onClick ? (
-    <button type="button" onClick={onClick} className="g-press -mx-2 flex min-h-11 items-center gap-3 rounded-md px-2 text-left hover:bg-fill/60">
+    <button type="button" onClick={onClick} aria-expanded={open} className="g-press -mx-2 flex min-h-11 items-center gap-3 rounded-md px-2 text-left hover:bg-fill/60">
       {body}
     </button>
   ) : (
     <div className="flex min-h-11 items-center gap-3">{body}</div>
+  );
+}
+
+/** What a line opens, unfolding under it (its height slides; shut, it stays drawn till folded),
+ *  scrolled into sight as it opens. */
+function Unfold({ open, children }: { open: boolean; children: ReactNode }) {
+  const [shown, setShown] = useState(open);
+  if (open && !shown) setShown(true);
+  return (
+    <div
+      aria-hidden={!open || undefined}
+      inert={!open || undefined}
+      onTransitionEnd={(e) => e.target === e.currentTarget && (open ? intoView(e.currentTarget) : setShown(false))}
+      className={cn("grid transition-[grid-template-rows,opacity] duration-(--dur-3) ease-(--ease-out)", open ? "grid-rows-[1fr]" : "grid-rows-[0fr] opacity-0")}
+    >
+      <div className="min-h-0 overflow-hidden">{shown && <div className="pb-2">{children}</div>}</div>
+    </div>
+  );
+}
+
+/** One of a list in a detail (an app's login, an agent's role): its face, name and line; pressed,
+ *  what it holds unfolds under it. */
+function FoldRow({ face, name, line, open, onClick }: { face: ReactNode; name: ReactNode; line?: ReactNode; open: boolean; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} aria-expanded={open} className="g-press -mx-2 flex min-h-11 items-center gap-3 rounded-md px-2 text-left hover:bg-fill/60">
+      {face}
+      <span className="min-w-0 flex-1 truncate text-sm">{name}</span>
+      {line && <span className="flex min-w-0 shrink items-center gap-1.5 truncate text-xs text-ink-3 tabular-nums">{line}</span>}
+      <ChevronRight size={15} className={cn("shrink-0 text-ink-4 transition-transform duration-(--dur-2) ease-(--ease-out)", open && "rotate-90")} />
+    </button>
   );
 }
 
@@ -326,24 +344,6 @@ function Block({ title, children }: { title?: string; children: ReactNode }) {
       {title && <span className="pt-1 text-[11px] leading-4 text-ink-4">{title}</span>}
       {children}
     </section>
-  );
-}
-
-/** A page of the right half: its title after the way back, the list left as it is. */
-function Sub({ title, tag, onBack, right, children }: { title: string; tag?: string; onBack: () => void; right?: ReactNode; children: ReactNode }) {
-  return (
-    <div className="g-slide flex flex-col">
-      <div className="flex min-h-12 items-center gap-1 border-b border-edge pb-2">
-        <IconKey label={t("nav.back")} onClick={onBack} className="-ml-1.5 size-7">
-          <ChevronLeft size={16} />
-        </IconKey>
-        <span className="truncate text-base font-semibold">{title}</span>
-        {tag && <span className="truncate text-sm text-ink-3">{tag}</span>}
-        <span className="flex-1" />
-        {right}
-      </div>
-      <div className="flex flex-col pt-2">{children}</div>
-    </div>
   );
 }
 
@@ -361,25 +361,6 @@ function Needs({ skip }: { skip?: boolean }) {
   );
 }
 
-/** 凭据, a page under Iridium: its list, + adding one. */
-function SecretsSub({ onBack }: { onBack: () => void }) {
-  const [adding, setAdding] = useState(false);
-  return (
-    <Sub
-      title={t("manage.secrets")}
-      tag="Iridium"
-      onBack={onBack}
-      right={
-        <IconKey label={t("manage.newSecret")} onClick={() => setAdding(!adding)} className="size-7">
-          <Plus size={16} />
-        </IconKey>
-      }
-    >
-      <SecretsPane adding={adding} done={() => setAdding(false)} />
-    </Sub>
-  );
-}
-
 // --- who may use what ---
 
 /** The agents a permission list offers by name; others it was given show too. */
@@ -387,23 +368,27 @@ const AGENTS: Agent[] = ["claude", "codex", "dsh", "pi", "agy"];
 const ALL = "*";
 const permsOf = (p?: Perms): Perms => p ?? { agents: [ALL], scope: [ALL] };
 
-/** An agent as a key: its mark and name, both faint when it is off (no dot after them: kumo,
- *  2026-11-27). */
-function AgentDot({ a, on, onClick }: { a: string; on: boolean; onClick?: () => void }) {
-  const body = (
-    <>
+/** An agent as a line of its own (kumo, 2026-11-27: side by side there was no room for more):
+ *  its mark and name, faint when off; its switch at the right, or the state as words. */
+function AgentLine({ a, on, onChange }: { a: string; on: boolean; onChange?: (on: boolean) => void }) {
+  return (
+    <span className="flex h-9 items-center gap-2 pointer-coarse:h-11">
       <span className={cn("grid transition-[opacity,filter] duration-(--dur-2)", !on && "opacity-35 grayscale")}>
-        <Logo agent={a as Agent} size={14} />
+        <Logo agent={a as Agent} size={15} />
       </span>
-      <span className={cn("transition-colors duration-(--dur-2)", on ? "text-ink" : "text-ink-4")}>{agentName(a as Agent)}</span>
-    </>
+      <span className={cn("min-w-0 flex-1 truncate transition-colors duration-(--dur-2)", on ? "text-ink" : "text-ink-3")}>{agentName(a as Agent)}</span>
+      {onChange ? <Switch label={agentName(a as Agent)} on={on} onChange={onChange} /> : <span className={cn("text-xs", on ? "text-ink-2" : "text-ink-4")}>{on ? t("manage.on") : t("manage.off")}</span>}
+    </span>
   );
-  return onClick ? (
-    <button type="button" aria-pressed={on} onClick={onClick} className="g-press -mx-1 flex h-7 items-center gap-1.5 rounded-full px-1.5 text-sm hover:bg-fill">
-      {body}
-    </button>
-  ) : (
-    <span className="flex h-7 items-center gap-1.5 text-sm">{body}</span>
+}
+
+/** The agents, one a line, under their name at the left. */
+function AgentLines({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex items-start gap-3 py-1">
+      <span className="flex h-9 w-24 shrink-0 items-center text-sm whitespace-nowrap text-ink-3 pointer-coarse:h-11">{t("manage.agent")}</span>
+      <span className="flex min-w-0 flex-1 flex-col text-sm">{children}</span>
+    </div>
   );
 }
 
@@ -447,13 +432,11 @@ function Access({ perms, save }: { perms?: Perms; save: (p: Perms) => Promise<Pe
   };
   return (
     <>
-      <Field label={t("manage.agent")}>
-        <span className="flex flex-wrap items-center gap-x-3">
-          {shown.map((a) => (
-            <AgentDot key={a} a={a} on={isOn(a)} onClick={() => flip(a)} />
-          ))}
-        </span>
-      </Field>
+      <AgentLines>
+        {shown.map((a) => (
+          <AgentLine key={a} a={a} on={isOn(a)} onChange={() => flip(a)} />
+        ))}
+      </AgentLines>
       <Field label={t("manage.folders")} onClick={() => setFolders(!folders)}>
         <span className="truncate">{allScope ? t("manage.all") : p.scope.length ? p.scope.join("、") : t("apps.scopeNone")}</span>
       </Field>
@@ -599,22 +582,12 @@ function LoginDetail({ l }: { l: Login }) {
   const me = useMe().data;
   const apps = useApps().data?.apps ?? [];
   const gh = useQuery(githubQ).data?.bindings.find((b) => b.member === l.id);
-  const [sub, setSub] = useState<"" | "passkeys" | "github">("");
+  const [open, setOpen] = useState<"" | "passkeys" | "github">("");
+  const flip = (x: "passkeys" | "github") => setOpen((o) => (o === x ? "" : x));
+  useQuery({ ...passkeysQ(l.id), enabled: !!me?.public }); // asked ahead: it unfolds whole
   const face = useFacePick((b) => api.profile({ avatar: b }, l.id).then(() => qc.invalidateQueries({ queryKey: ["apps"] })));
   const mine = l.id === me?.login;
   const computers = apps.filter((a) => a.owner?.id === l.id);
-  if (sub === "passkeys")
-    return (
-      <div className="g-slide -mx-3">
-        <PasskeysPage login={l} onBack={() => setSub("")} />
-      </div>
-    );
-  if (sub === "github")
-    return (
-      <Sub title="GitHub" tag={l.name} onBack={() => setSub("")}>
-        <div className="max-w-sm pt-2">{gh ? <Bound member={l.id} mine={mine} done={() => {}} /> : <Bind done={() => setSub("")} />}</div>
-      </Sub>
-    );
   return (
     <div className="flex flex-col">
       <Head
@@ -640,12 +613,18 @@ function LoginDetail({ l }: { l: Login }) {
       </Block>
       <Block>
         {me?.public && (
-          <Field label={t("manage.passkeys")} onClick={() => setSub("passkeys")}>
-            {l.passkeys ? t("manage.count", { n: l.passkeys }) : <span className="text-ink-3">{t("manage.none")}</span>}
-          </Field>
+          <>
+            <Field label={t("manage.passkeys")} onClick={() => flip("passkeys")} open={open === "passkeys"}>
+              {l.passkeys ? t("manage.count", { n: l.passkeys }) : <span className="text-ink-3">{t("manage.none")}</span>}
+            </Field>
+            <Unfold open={open === "passkeys"}>
+              <PasskeysFold login={l} />
+            </Unfold>
+          </>
         )}
         {(gh || mine) && (
-          <Field label="GitHub" onClick={() => setSub("github")}>
+          <>
+          <Field label="GitHub" onClick={() => flip("github")} open={open === "github"}>
             {gh ? (
               <span className="flex items-center gap-1.5">
                 <GitHubMark size={14} />@{gh.login}
@@ -654,6 +633,10 @@ function LoginDetail({ l }: { l: Login }) {
               <span className="text-ink-3">{t("manage.unbound")}</span>
             )}
           </Field>
+          <Unfold open={open === "github"}>
+            <div className="max-w-sm pl-27">{gh ? <Bound member={l.id} mine={mine} done={() => {}} /> : <Bind done={() => setOpen("")} />}</div>
+          </Unfold>
+          </>
         )}
         {computers.length > 0 && (
           <Field label={t("manage.computers")}>
@@ -672,28 +655,26 @@ function LoginDetail({ l }: { l: Login }) {
   );
 }
 
-const githubQ = { queryKey: ["github"], queryFn: () => api.github(), staleTime: 60_000 };
+/** A login's passkeys under their line: a new device's link first, then each one. */
+function PasskeysFold({ login }: { login: Login }) {
+  const { add } = usePasskeys(login);
+  return (
+    <div className="flex flex-col pl-27">
+      <PasskeyList login={login} />
+      <button type="button" onClick={() => void add()} className="g-press -mx-2 flex min-h-10 items-center gap-2 rounded-md px-2 text-left text-sm text-ink-2 hover:bg-fill/60">
+        <Plus size={15} className="text-ink-3" />
+        {t("passkey.add")}
+      </button>
+    </div>
+  );
+}
+
+const githubQ = { queryKey: ["github"], staleTime: 60_000, ...keptQuery("github", () => api.github()) };
 
 function AppDetail({ a, logins }: { a: App; logins: Login[] }) {
   const qc = useQueryClient();
   const [sub, setSub] = useState("");
   const face = useFacePick((b) => api.profile({ avatar: b }, a.id).then(() => qc.invalidateQueries({ queryKey: ["apps"] })));
-  const login = logins.find((l) => l.id === sub);
-  if (login)
-    return (
-      <Sub
-        title={login.name}
-        tag={a.name}
-        onBack={() => setSub("")}
-        right={
-          <SureKey label={t("apps.removeLogin")} sure={t("term.revokeSure")} run={() => void revoke(qc, login.id, login.name).then(() => setSub(""))} className="size-8">
-            <Trash2 size={15} />
-          </SureKey>
-        }
-      >
-        <Access perms={login.perms} save={(p) => api.loginPerms(a.id, login.id, p)} />
-      </Sub>
-    );
   return (
     <div className="flex flex-col">
       <Head
@@ -718,14 +699,20 @@ function AppDetail({ a, logins }: { a: App; logins: Login[] }) {
       {logins.length > 0 && (
         <Block title={t("manage.logins")}>
           {logins.map((l) => (
-            <button key={l.id} type="button" onClick={() => setSub(l.id)} className="g-press -mx-2 flex min-h-11 items-center gap-3 rounded-md px-2 text-left hover:bg-fill/60">
-              <Avatar src={l.avatar} name={l.name} size={24} />
-              <span className="min-w-0 flex-1 truncate text-sm">{l.name}</span>
-              <span className="flex shrink-0 items-center gap-1.5 text-xs text-ink-3 tabular-nums">
-                <Seen online={l.online} at={l.lastSeenAt || l.createdAt || 0} />
-              </span>
-              <ChevronRight size={15} className="shrink-0 text-ink-4" />
-            </button>
+            <div key={l.id} className="flex flex-col">
+              <FoldRow face={<Avatar src={l.avatar} name={l.name} size={24} />} name={l.name} line={<Seen online={l.online} at={l.lastSeenAt || l.createdAt || 0} />} open={sub === l.id} onClick={() => setSub(sub === l.id ? "" : l.id)} />
+              <Unfold open={sub === l.id}>
+                <div className="flex flex-col pl-9">
+                  <Access perms={l.perms} save={(p) => api.loginPerms(a.id, l.id, p)} />
+                  <Field label={t("apps.removeLogin")}>
+                    <span className="flex-1" />
+                    <SureKey label={t("apps.removeLogin")} sure={t("term.revokeSure")} run={() => void revoke(qc, l.id, l.name).then(() => setSub(""))} className="size-8">
+                      <Trash2 size={15} />
+                    </SureKey>
+                  </Field>
+                </div>
+              </Unfold>
+            </div>
           ))}
         </Block>
       )}
@@ -749,14 +736,22 @@ function ComputerFace({ a, size }: { a: App; size: number }) {
   return a.host ? <ServerFace size={size} /> : <Avatar src={a.avatar} name={a.name} size={size} type={a.type} />;
 }
 
-function ComputerDetail({ a, open }: { a: App; open: (sel: string) => void }) {
+/** want: asked from outside (the route's 凭据, 新建's credential), as "<what>:<count>": 凭据
+ *  unfolded, a new one being added too. */
+function ComputerDetail({ a, want = "" }: { a: App; want?: string }) {
   const qc = useQueryClient();
   const me = useMe().data;
   const owner = useApps().data?.logins.find((l) => ofWeb(l) && l.id === a.owner?.id);
   const gh = useQuery(githubQ).data?.bindings.find((b) => b.member === "local");
   const grant = useGrant(a);
   const [folders, setFolders] = useState(false);
-  const [sub, setSub] = useState<"" | "github">("");
+  // A credential waiting on a person: 凭据 open, its card there (the needs above leave it out).
+  const asks = useConfirms().some((c) => c.kind.startsWith("secret_"));
+  const [sub, setSub] = useState<"" | "github" | "secrets">(want || (a.host && asks) ? "secrets" : "");
+  const [adding, setAdding] = useState(want.startsWith("new"));
+  const [wanted, setWanted] = useState(want);
+  if (want !== wanted) (setWanted(want), want && (setSub("secrets"), setAdding(want.startsWith("new"))));
+  const flip = (x: "github" | "secrets") => setSub((o) => (o === x ? "" : x));
   const face = useFacePick((b) => api.profile({ avatar: b }, a.id).then(() => qc.invalidateQueries({ queryKey: ["apps"] })));
   const hostFace = useFacePick((b) => api.serverFace(b), t("apps.serverFace"));
   const s = useSettings().data;
@@ -769,12 +764,6 @@ function ComputerDetail({ a, open }: { a: App; open: (sel: string) => void }) {
     );
   const m = a.computer;
   const may = !a.host && !!m?.grant && a.online;
-  if (sub === "github")
-    return (
-      <Sub title="GitHub" tag="Iridium" onBack={() => setSub("")}>
-        <div className="max-w-sm pt-2">{gh ? <Bound member="local" mine={!!me?.host} done={() => {}} /> : <Bind done={() => setSub("")} />}</div>
-      </Sub>
-    );
   return (
     <div className="flex flex-col">
       <Head
@@ -815,18 +804,12 @@ function ComputerDetail({ a, open }: { a: App; open: (sel: string) => void }) {
       {face.input}
       {hostFace.input}
       <Block>
-        {m && (
-          <Field label={t("manage.agent")}>
-            <span className="flex flex-wrap items-center gap-x-3">
-              {m.agents.map((x) => (
-                <Tip key={x.agent} label={x.version ? `${agentName(x.agent as Agent)} ${x.version}` : agentName(x.agent as Agent)}>
-                  <span>
-                    <AgentDot a={x.agent} on={!x.off} />
-                  </span>
-                </Tip>
-              ))}
-            </span>
-          </Field>
+        {m && m.agents.length > 0 && (
+          <AgentLines>
+            {m.agents.map((x) => (
+              <AgentLine key={x.agent} a={x.agent} on={!x.off} />
+            ))}
+          </AgentLines>
         )}
         {!a.host && m && (
           <Field label={t("apps.shell")}>
@@ -860,20 +843,38 @@ function ComputerDetail({ a, open }: { a: App; open: (sel: string) => void }) {
           </Field>
         )}
         {a.host && me?.host && (
-          <Field label={t("manage.secrets")} onClick={() => open(SECRETS)}>
-            {secrets?.length ? t("manage.count", { n: secrets.length }) : <span className="text-ink-3">{t("manage.none")}</span>}
-          </Field>
+          <>
+            <Field label={t("manage.secrets")} onClick={() => flip("secrets")} open={sub === "secrets"}>
+              {secrets?.length ? t("manage.count", { n: secrets.length }) : <span className="text-ink-3">{t("manage.none")}</span>}
+            </Field>
+            <Unfold open={sub === "secrets"}>
+              <div className="flex flex-col gap-2 pl-27">
+                <SecretsPane adding={adding} done={() => setAdding(false)} />
+                {!adding && (
+                  <button type="button" onClick={() => setAdding(true)} className="g-press -mx-2 flex min-h-10 items-center gap-2 rounded-md px-2 text-left text-sm text-ink-2 hover:bg-fill/60">
+                    <Plus size={15} className="text-ink-3" />
+                    {t("manage.newSecret")}
+                  </button>
+                )}
+              </div>
+            </Unfold>
+          </>
         )}
         {a.host && (gh || me?.host) && (
-          <Field label="GitHub" onClick={() => setSub("github")}>
-            {gh ? (
-              <span className="flex items-center gap-1.5">
-                <GitHubMark size={14} />@{gh.login}
-              </span>
-            ) : (
-              <span className="text-ink-3">{t("manage.unbound")}</span>
-            )}
-          </Field>
+          <>
+            <Field label="GitHub" onClick={() => flip("github")} open={sub === "github"}>
+              {gh ? (
+                <span className="flex items-center gap-1.5">
+                  <GitHubMark size={14} />@{gh.login}
+                </span>
+              ) : (
+                <span className="text-ink-3">{t("manage.unbound")}</span>
+              )}
+            </Field>
+            <Unfold open={sub === "github"}>
+              <div className="max-w-sm pl-27">{gh ? <Bound member="local" mine={!!me?.host} done={() => {}} /> : <Bind done={() => setSub("")} />}</div>
+            </Unfold>
+          </>
         )}
       </Block>
     </div>
@@ -886,7 +887,8 @@ function ComputerDetail({ a, open }: { a: App; open: (sel: string) => void }) {
 const IDLE = ["0", "30m", "1h", "4h"] as const;
 const idleName = (v: string) => (v === "0" ? t("manage.off") : v === "30m" ? t("manage.minutes", { n: 30 }) : v.endsWith("h") ? t("manage.hours", { n: Number(v.slice(0, -1)) }) : v);
 
-function AgentDetail({ a, computers, open }: { a: Agent; computers: App[]; open: (sel: string) => void }) {
+function AgentDetail({ a, computers }: { a: Agent; computers: App[] }) {
+  const [role, setRole] = useState("");
   const roles = useRoles().filter((r) => r.agent === a);
   const me = useMe().data;
   const info = useAgents().data?.find((x) => x.agent === a);
@@ -942,12 +944,14 @@ function AgentDetail({ a, computers, open }: { a: Agent; computers: App[]; open:
       {roles.length > 0 && (
         <Block title={t("manage.roles")}>
           {roles.map((r) => (
-            <button key={r.id} type="button" onClick={() => open(`r:${r.id}`)} className="g-press -mx-2 flex min-h-11 items-center gap-3 rounded-md px-2 text-left hover:bg-fill/60">
-              <RoleFace role={r} size={24} />
-              <span className="min-w-0 flex-1 truncate text-sm">{r.name}</span>
-              <RoleLine role={r} at={placeOf(r)} className="min-w-0 shrink truncate text-xs text-ink-3" />
-              <ChevronRight size={15} className="shrink-0 text-ink-4" />
-            </button>
+            <div key={r.id} className="flex flex-col">
+              <FoldRow face={<RoleFace role={r} size={24} />} name={r.name} line={<RoleLine role={r} at={placeOf(r)} className="truncate" />} open={role === r.id} onClick={() => setRole(role === r.id ? "" : r.id)} />
+              <Unfold open={role === r.id}>
+                <div className="-mx-3">
+                  <RolePage role={r} />
+                </div>
+              </Unfold>
+            </div>
           ))}
         </Block>
       )}

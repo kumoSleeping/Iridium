@@ -532,13 +532,13 @@ const day = (ms: number) => {
  *  menu to set it, or 自动: by the browser), when made and last used, its ✕ (not the last one's: a
  *  login keeps one; remove the login instead). + top right: a one-time link that adds one, shown
  *  once here; a link not used yet is a row of its own till it is. */
-export function PasskeysPage({ login, onBack }: { login: Login; onBack: () => void }) {
-  useLang();
+/** A login's passkeys, asked for ahead by whatever shows their count. */
+export const passkeysQ = (id: string) => ({ queryKey: ["passkeys", id], queryFn: () => api.passkeys(id) });
+
+/** A login's passkeys and the links waiting for a new device; add: a link for one more. */
+export function usePasskeys(login: Login) {
   const qc = useQueryClient();
-  const q = useQuery({
-    queryKey: ["passkeys", login.id],
-    queryFn: () => api.passkeys(login.id),
-  });
+  const q = useQuery(passkeysQ(login.id));
   const at = `passkeys:${login.id}`;
   const changed = () => {
     void qc.invalidateQueries({ queryKey: ["passkeys", login.id] });
@@ -552,7 +552,33 @@ export function PasskeysPage({ login, onBack }: { login: Login; onBack: () => vo
       toast(t("passkey.add"), { error: true, description: errText(e) });
     }
   };
+  return { q, at, changed, add };
+}
+
+/** The rows of a login's passkeys, a new device's link shown once above them. */
+export function PasskeyList({ login }: { login: Login }) {
+  useLang();
+  const { q, at, changed } = usePasskeys(login);
   const keys = q.data?.passkeys ?? [];
+  return (
+    <>
+      <SecretHere at={at} />
+      {q.isError && <p className="m-0 text-sm text-ink-3">{errText(q.error)}</p>}
+      <section className="flex flex-col">
+        {keys.map((k) => (
+          <PasskeyRow key={k.id} login={login.id} k={k} last={keys.length === 1} changed={changed} />
+        ))}
+        {q.data?.links.map((l) => (
+          <PasskeyLinkRow key={l.id} login={login.id} l={l} changed={changed} />
+        ))}
+      </section>
+    </>
+  );
+}
+
+export function PasskeysPage({ login, onBack }: { login: Login; onBack: () => void }) {
+  useLang();
+  const { q, add } = usePasskeys(login);
   return (
     <Page
       title={t("passkey.title", { name: login.name })}
@@ -560,34 +586,12 @@ export function PasskeysPage({ login, onBack }: { login: Login; onBack: () => vo
       backLabel={t("term.panel")}
       busy={q.isFetching}
       right={
-        <IconKey
-          label={t("passkey.add")}
-          onClick={() => void add()}
-          tipSide="bottom"
-          className="size-7"
-        >
+        <IconKey label={t("passkey.add")} onClick={() => void add()} tipSide="bottom" className="size-7">
           <Plus size={16} />
         </IconKey>
       }
     >
-      <SecretHere at={at} />
-      {q.isError && (
-        <p className="m-0 text-sm text-ink-3">{errText(q.error)}</p>
-      )}
-      <section className="flex flex-col">
-        {keys.map((k) => (
-          <PasskeyRow
-            key={k.id}
-            login={login.id}
-            k={k}
-            last={keys.length === 1}
-            changed={changed}
-          />
-        ))}
-        {q.data?.links.map((l) => (
-          <PasskeyLinkRow key={l.id} login={login.id} l={l} changed={changed} />
-        ))}
-      </section>
+      <PasskeyList login={login} />
     </Page>
   );
 }

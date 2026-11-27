@@ -28,9 +28,10 @@ export function MeKey({ open, onOpen, dot, code, manage }: { open: boolean; onOp
   const me: Me = useMe().data ?? LOCAL_ME;
   const local = me.host && !me.named; // the host as Iridium; named, as its own (Me.named)
   const name = local ? t("me.local") : me.name;
-  // 管理's key at the pill's right end, over it (kumo, 2026-11-27): a key of its own, not in the button.
+  // 管理's key at the pill's right end, over it (kumo, 2026-11-27): a key of its own, not in the
+  // button; shown as the pointer is over the pill or the key has the focus (a touch screen, always).
   return (
-    <div className="relative flex w-full min-w-0">
+    <div className="group/me relative flex w-full min-w-0">
     <Tip label={dot ? `${t("nav.me")} · ${t("settings.updateReady")}` : t("nav.me")} align="start">
       <button
         type="button"
@@ -50,7 +51,7 @@ export function MeKey({ open, onOpen, dot, code, manage }: { open: boolean; onOp
       </button>
     </Tip>
     {manage && (
-      <IconKey label={t("manage.open")} onClick={manage} className="absolute top-1/2 right-1.5 size-8 -translate-y-1/2 pointer-coarse:size-9">
+      <IconKey label={t("manage.open")} onClick={manage} className="absolute top-1/2 right-1.5 size-8 -translate-y-1/2 opacity-0 transition-opacity duration-(--dur-2) group-hover/me:opacity-100 focus-visible:opacity-100 pointer-coarse:size-9 pointer-coarse:opacity-100">
         <LayoutGrid size={16} />
       </IconKey>
     )}

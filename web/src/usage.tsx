@@ -30,7 +30,7 @@ import { LocalMark } from "./me";
 import { motion, reduced } from "./motion";
 import { errText } from "./toast";
 import { hueColor, useHues } from "./hues";
-import { useMachines } from "./data";
+import { keptQuery, useMachines } from "./data";
 import { useUsageMachine } from "./route";
 import { agentName, AGENTS, Avatar, cn, IconKey, keep, kept, Logo, PopSurface, Tip, tokens } from "./ui";
 import { Pills } from "./pills";
@@ -41,7 +41,7 @@ export const dollars = (n: number) => (n >= 1000 ? `$${Math.round(n).toLocaleStr
 const RANGES = [1, 7, 30] as const;
 
 /** The last days' usage. The last answer stays while another range loads. */
-const usageQ = (days: number, machine = "") => ({ queryKey: ["usage", days, machine], queryFn: () => api.usage(days, undefined, days === 1 ? "hour" : undefined, machine || undefined), staleTime: 30_000 });
+const usageQ = (days: number, machine = "") => ({ queryKey: ["usage", days, machine], staleTime: 30_000, ...keptQuery(`usage:${days}:${machine}`, () => api.usage(days, undefined, days === 1 ? "hour" : undefined, machine || undefined)) });
 const useUsage = (days: number, machine: string) => useQuery({ ...usageQ(days, machine), placeholderData: keepPreviousData });
 /** The last days' usage by weekday and hour: the heat map's. */
 const heatQ = (days: number, machine = "") => ({ queryKey: ["usage", days, machine, "weekhour"], queryFn: () => api.usage(days, undefined, "weekhour", machine || undefined), staleTime: 30_000 });
