@@ -43,6 +43,13 @@ var Modes = []string{"read-only", "workspace-write", "danger-full-access", "plan
 // DefaultMode never asks: dsh's danger-full-access (dsh's own default is workspace-write).
 const DefaultMode = "danger-full-access"
 
+// InprocArgv0 is argv[0] for a hold served inside DSH Desktop's own process (no child process,
+// no --profile sdk, no --patch files).
+const (
+	InprocArgv0 = "@dsh-desktop"
+	SystemFile  = "system.md"
+)
+
 const (
 	// LegacyProvider and DefaultModel are a session's route when dsh's catalog cannot be had, and
 	// LegacyProvider a model's set before models were dsh's ("deepseek-flash", no provider).
@@ -239,6 +246,15 @@ func closed() chan struct{} {
 // through as they are.
 func (d *Driver) Spawn(o agent.SpawnOptions) (hold.Spec, error) {
 	env := agent.ForeignEnv(o.Env)
+	mode := cmp.Or(o.Mode, DefaultMode)
+	if !slices.Contains(Modes, mode) {
+		return hold.Spec{}, fmt.Errorf("dsh: no approval mode %q (%s)", mode, strings.Join(Modes, ", "))
+	}
+	inproc := (o.Host != nil && (o.Host.Inproc || (len(o.Host.Argv) > 0 && o.Host.Argv[0] == InprocArgv0))) ||
+		(o.Remote != nil && len(o.Remote.Argv) > 0 && o.Remote.Argv[0] == InprocArgv0)
+	if inproc {
+		return d.spawnInproc(o, env, mode)
+	}
 	var argv []string
 	var err error
 	if o.Remote == nil && o.Host != nil && len(o.Host.Argv) > 0 {
@@ -246,10 +262,6 @@ func (d *Driver) Spawn(o agent.SpawnOptions) (hold.Spec, error) {
 		env = HostEnv(argv, env)
 	} else if argv, err = o.Command("dsh", env); err != nil {
 		return hold.Spec{}, err
-	}
-	mode := cmp.Or(o.Mode, DefaultMode)
-	if !slices.Contains(Modes, mode) {
-		return hold.Spec{}, fmt.Errorf("dsh: no approval mode %q (%s)", mode, strings.Join(Modes, ", "))
 	}
 	if o.SystemPromptFile == "" {
 		return hold.Spec{}, errors.New("dsh: the agent preset needs a directory for its patch")
@@ -347,6 +359,75 @@ func (d *Driver) Spawn(o agent.SpawnOptions) (hold.Spec, error) {
 	for _, p := range append(hostPatches, patches...) {
 		argv = append(argv, "--patch", p)
 	}
+	return hold.Spec{Argv: argv, Env: env, Cwd: o.Cwd}, nil
+}
+
+// spawnInproc builds the hold spec for a session served inside DSH Desktop's own process:
+// argv[0] is "@dsh-desktop", with --preset (new sessions only), --system (written via LaunchFile),
+// --persona own (when Iridium supplies its own persona), and --keep-model (when resuming without
+// an explicit model so Desktop's current selection is not overwritten). No --profile sdk, no patch.
+func (d *Driver) spawnInproc(o agent.SpawnOptions, env []string, mode string) (hold.Spec, error) {
+	suffix := ""
+	if o.SystemPromptFile != "" {
+		if b, err := os.ReadFile(o.SystemPromptFile); err == nil {
+			suffix = string(b)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return hold.Spec{}, fmt.Errorf("dsh: %w", err)
+		}
+	}
+	argv := []string{InprocArgv0}
+	if !o.Resume && o.Preset != "" {
+		argv = append(argv, "--preset", o.Preset)
+	}
+	if strings.TrimSpace(suffix) != "" {
+		path, err := o.LaunchFile(SystemFile, []byte(suffix))
+		if err != nil {
+			return hold.Spec{}, fmt.Errorf("dsh: writing system prompt: %w", err)
+		}
+		argv = append(argv, "--system", path)
+	}
+	if o.Persona {
+		argv = append(argv, "--persona", "own")
+	}
+	explicitModel := o.Model != "" && o.Model != "default"
+	if o.Resume && !explicitModel {
+		argv = append(argv, "--keep-model")
+	}
+	cwd := o.Cwd
+	if cwd == "" && o.Remote == nil {
+		cwd, _ = os.Getwd()
+	}
+	var cat agent.Catalog
+	if o.Catalog != nil {
+		if c, err := o.Catalog(); err == nil {
+			cat = c
+		} else {
+			d.logf("dsh: its models: %v", err)
+		}
+	}
+	model := o.Model
+	if !explicitModel {
+		model = cmp.Or(cat.Default, DefaultModel)
+	}
+	provider, id := Route(model, cat)
+	model = provider + "/" + id
+	if m := modelIn(model, cat); o.Effort != "" && m != nil && !m.NoEffort && !slices.Contains(m.Efforts, o.Effort) {
+		return hold.Spec{}, fmt.Errorf("dsh: %s has no effort %q (%s)", model, o.Effort, strings.Join(m.Efforts, ", "))
+	}
+	version := ""
+	if o.Remote != nil && o.Remote.Version != "" {
+		version = o.Remote.Version
+	} else if o.Host != nil && o.Host.Version != "" {
+		version = o.Host.Version
+	}
+	d.mu.Lock()
+	d.spawned = true
+	d.catalog = cat
+	d.next = launch{session: o.Session, cwd: cwd, model: model, provider: provider, modelID: id, effort: o.Effort, version: version, resume: o.Resume, catalog: cat}
+	d.session, d.mode = o.Session, mode
+	env = agent.SetEnv(env, "IRIDIUM_SESSION", o.Session)
+	d.env = env
+	d.mu.Unlock()
 	return hold.Spec{Argv: argv, Env: env, Cwd: o.Cwd}, nil
 }
 

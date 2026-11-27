@@ -17,12 +17,7 @@ func TestCoreNamesNoHarness(t *testing.T) {
 	root := filepath.Join(filepath.Dir(here), "..")
 	core := []string{"session", "server", "cli", "remote"}
 	banned := regexp.MustCompile(`api\.AgentDsh|internal/agent/dsh"|internal/dshhome"|CapHeld|DSH Desktop|"held\.|"dsh\.`)
-	pending := map[string]string{
-		"server/folders_remote.go": "the /dsh/ routes, till the channel mounts them",
-		"cli/sessions.go":          "SendReply.Desktop's wait, till the reply names the holder",
-		"remote/fs.go":             "DshOpen, till remote discovery of dsh moves to the channel",
-		"remote/wire/proto.go":     "the dsh plugin's wire types, till remote discovery of dsh moves",
-	}
+	pending := map[string]string{}
 	for _, pkg := range core {
 		err := filepath.WalkDir(filepath.Join(root, pkg), func(path string, d os.DirEntry, err error) error {
 			if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {

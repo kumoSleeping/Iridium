@@ -124,17 +124,6 @@ func (m *Machine) Mkdir(ctx context.Context, path string) error {
 	return m.Call(ctx, "fs.mkdir", wire.PathParams{Path: path}, nil)
 }
 
-// DshOpen is the sessions open in the dsh the executor runs in (DSH Desktop's, through the dsh
-// plugin): held.list; an error of wire.CodeUnsupported from one without CapHeld.
-func (m *Machine) DshOpen(ctx context.Context) (wire.HeldListReply, error) {
-	var r wire.HeldListReply
-	if !m.Has(wire.CapHeld) {
-		return r, &wire.Error{Code: wire.CodeUnsupported, Message: "held.list"}
-	}
-	err := m.Call(ctx, "held.list", struct{}{}, &r)
-	return r, err
-}
-
 // headSize is how much of a mirrored file's start is checked for its being the same file.
 const headSize = 4096
 

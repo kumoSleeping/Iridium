@@ -6,11 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -22,9 +19,11 @@ import (
 	"github.com/kumoSleeping/iridium/internal/remote/executor"
 	"github.com/kumoSleeping/iridium/internal/remote/wire"
 	"github.com/kumoSleeping/iridium/internal/store"
+	"github.com/kumoSleeping/iridium/internal/transcript"
 )
 
-// remoteRig is an index with an executor connected whose dsh home is a temp directory.
+// remoteRig is an index with an executor connected whose dsh home is a temp directory. What the
+// dsh plugin would tell of is told by hand (told): the Go executor serves the files.
 type remoteRig struct {
 	t     *testing.T
 	x     *Index
@@ -33,23 +32,9 @@ type remoteRig struct {
 	home  string // dsh's there
 	work  string // a folder there
 	state string
-	dsh   string // the node executor's stand-in for the dsh it runs in (run.mjs); "" for the Go one
 }
 
-// executors runs test with each executor: the Go one, and the dsh plugin's (what DSH Desktop runs)
-// if node is there.
-func executors(t *testing.T, test func(t *testing.T, kind string)) {
-	for _, k := range []string{"go", "node"} {
-		t.Run(k, func(t *testing.T) {
-			if _, err := exec.LookPath("node"); k == "node" && err != nil {
-				t.Skip("no node")
-			}
-			test(t, k)
-		})
-	}
-}
-
-func newRemoteRig(t *testing.T, kind string) *remoteRig {
+func newRemoteRig(t *testing.T) *remoteRig {
 	t.Helper()
 	there := t.TempDir()
 	r := &remoteRig{t: t, hub: &remote.Hub{Logf: t.Logf}, home: filepath.Join(there, ".dsh"), work: filepath.Join(there, "work"), state: t.TempDir()}
@@ -58,19 +43,7 @@ func newRemoteRig(t *testing.T, kind string) *remoteRig {
 	t.Cleanup(srv.Close)
 	url := "ws" + strings.TrimPrefix(srv.URL, "http")
 	agents := []wire.AgentInfo{{Agent: "dsh", Argv: []string{"dsh"}, Version: "0.2.2-rc.1", Home: r.home}}
-	if kind == "node" {
-		b, _ := json.Marshal(agents)
-		r.dsh = filepath.Join(there, "desktop")
-		os.MkdirAll(r.dsh, 0o700)
-		r.setOpen()
-		cmd := exec.Command("node", "../../plugins/dsh-remote-iridium/test/run.mjs", url, "tok", filepath.Join(there, "executor"))
-		cmd.Env = append(os.Environ(), "IRIDIUM_TEST_AGENTS="+string(b), "IRIDIUM_TEST_DSH="+r.dsh)
-		cmd.Stderr = os.Stderr
-		if err := cmd.Start(); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = cmd.Process.Signal(syscall.SIGTERM); _ = cmd.Wait() })
-	} else {
+	{
 		exe, err := executor.New(executor.Options{URL: url, State: filepath.Join(there, "executor"), Logf: t.Logf, Agents: agents})
 		if err != nil {
 			t.Fatal(err)
@@ -101,29 +74,25 @@ func newRemoteRig(t *testing.T, kind string) *remoteRig {
 	return r
 }
 
-// setOpen says which sessions DSH Desktop has open (the node executor's dsh.open).
-func (r *remoteRig) setOpen(ids ...string) {
-	b, _ := json.Marshal(append([]string{}, ids...))
-	os.WriteFile(filepath.Join(r.dsh, "open.json"), b, 0o600)
-}
-
-// setRunning says which of those have their agent at work there.
-func (r *remoteRig) setRunning(ids ...string) {
-	b, _ := json.Marshal(append([]string{}, ids...))
-	os.WriteFile(filepath.Join(r.dsh, "running.json"), b, 0o600)
-}
-
 func (r *remoteRig) index() *Index {
 	x := New(Options{Store: r.st, State: r.state, Logf: r.t.Logf, RemoteScan: time.Hour})
 	x.SetRemote(r.hub)
 	return x
 }
 
-func (r *remoteRig) scan() {
+// told is the machine's dsh telling of sessions (EventSessions).
+func (r *remoteRig) told(ss ...DesktopSession) {
 	r.t.Helper()
-	if err := r.x.ScanMachine(context.Background(), "m1"); err != nil {
+	r.x.ToldSessions(context.Background(), "m1", DesktopSessions{Sessions: ss})
+}
+
+func (r *remoteRig) shown(id string) bool {
+	r.t.Helper()
+	vis, err := r.st.Visibility()
+	if err != nil {
 		r.t.Fatal(err)
 	}
+	return vis.Shown("dsh", id)
 }
 
 func (r *remoteRig) sessions() map[string]api.Session {
@@ -196,39 +165,57 @@ func quote(s string) string {
 	return `"` + strings.ReplaceAll(strings.ReplaceAll(s, `\`, `\\`), `"`, `\"`) + `"`
 }
 
-// dsh's sessions at a machine (docs/exec.md "远端 DSH"): all listed, with the folder and title
-// its projection cache says (else its header's), subagents as such, the ones archived in DSH
-// Desktop archived; its workspaces for a new session; a transcript mirrored when read.
-func TestRemoteDshSessions(t *testing.T) { executors(t, testRemoteDshSessions) }
-
-func testRemoteDshSessions(t *testing.T, kind string) {
-	r := newRemoteRig(t, kind)
+// dsh's sessions at a machine (docs/exec.md "远端 DSH"): nothing is listed till its dsh tells of
+// it; one told of is listed with the folder and title said, a subagent as its header says, and
+// shown only if taken in or, with the machine's sync on, active since; its workspaces for a new
+// session; a transcript mirrored when read.
+func TestRemoteDshSessions(t *testing.T) {
+	r := newRemoteRig(t)
 	r.session("--x-work--", "s1", zlines(t, `{"type":"session","cwd":`+quote(r.work)+`}`, `{"type":"event","seq":1}`))
-	r.summary("s1", r.work, "fix the build")
 	r.session("--x-work--", "s2", zlines(t, `{"type":"session","cwd":`+quote(r.work)+`,"origin":"subagent","parentSession":"s1"}`))
 	r.session("--x-old--", "s3", zlines(t, `{"type":"session","cwd":`+quote(r.work)+`}`))
 	os.MkdirAll(filepath.Join(r.home, "sessions", "--x-work--", "s4"), 0o700) // not written yet
 	r.registry("s3", r.work, filepath.Join(r.work, "gone"))
-	r.scan()
+	if err := r.x.ScanMachine(context.Background(), "m1"); err != nil || len(r.sessions()) != 0 {
+		t.Fatalf("found by looking: %+v %v", r.sessions(), err)
+	}
 
+	// Told of with the sync off: listed (the archive), not shown.
+	r.told(DesktopSession{ID: "s1", Cwd: r.work, Title: "fix the build", Last: time.Now().UnixMilli()}, DesktopSession{ID: "s4", Cwd: r.work})
 	got := r.sessions()
-	s1, s2 := got["s1"], got["s2"]
-	if len(got) != 3 || s1.Machine != "m1" || s1.Cwd != r.work || s1.Title != "fix the build" || s1.Agent != api.AgentDsh || s1.Offline {
+	s1 := got["s1"]
+	if len(got) != 1 || s1.Machine != "m1" || s1.Cwd != r.work || s1.Title != "fix the build" || s1.Agent != api.AgentDsh || s1.Offline {
 		t.Fatalf("sessions %+v", got)
 	}
-	if !s2.Subagent || s2.Parent != "s1" || s2.Cwd != r.work {
-		t.Errorf("subagent %+v", s2)
+	if r.shown("s1") {
+		t.Error("shown with the sync off")
 	}
-	vis, _ := r.st.Visibility()
-	if !vis.Shown("dsh", "s1") || !vis.Shown("dsh", "s2") || vis.Shown("dsh", "s3") {
-		t.Errorf("shown: s1 %v s2 %v s3 %v", vis.Shown("dsh", "s1"), vis.Shown("dsh", "s2"), vis.Shown("dsh", "s3"))
+	// On: what was active before stays out, what is active after comes in, its subagent with it;
+	// one archived in DSH Desktop does not.
+	r.x.SetSync("m1", true)
+	r.x.remotes["m1"].SyncAt += 10_000 // past the files' times (write moves them on)
+	if !r.x.Sync("m1") || r.x.Sync("") {
+		t.Errorf("sync: m1 %v, here %v", r.x.Sync("m1"), r.x.Sync(""))
+	}
+	r.told(DesktopSession{ID: "s1", Last: time.Now().Add(-time.Hour).UnixMilli()})
+	if r.shown("s1") {
+		t.Error("shown for what it did before the sync was on")
+	}
+	later := time.Now().Add(time.Minute).UnixMilli()
+	r.told(DesktopSession{ID: "s1", Last: later}, DesktopSession{ID: "s2", Last: later}, DesktopSession{ID: "s3", Last: later, Archived: true})
+	got = r.sessions()
+	if s2 := got["s2"]; len(got) != 3 || !s2.Subagent || s2.Parent != "s1" || s2.Cwd != r.work {
+		t.Errorf("sessions %+v", got)
+	}
+	if !r.shown("s1") || !r.shown("s2") || r.shown("s3") {
+		t.Errorf("shown: s1 %v s2 %v s3 %v", r.shown("s1"), r.shown("s2"), r.shown("s3"))
 	}
 	ws, err := r.x.DshWorkspaces(context.Background(), "pc")
 	if err != nil || len(ws) != 1 || ws[0].Path != r.work || ws[0].Title != "work" {
 		t.Fatalf("workspaces %+v %v", ws, err)
 	}
 
-	// Read: mirrored here, then kept up as it grows there.
+	// Read: mirrored here, then kept up as it grows there, when told of or read again.
 	_, f, ok := r.x.Found("s1")
 	if !ok || f == nil {
 		t.Fatal("s1 not found")
@@ -241,99 +228,81 @@ func testRemoteDshSessions(t *testing.T, kind string) {
 		t.Fatalf("mirror: %d %v", n, err)
 	}
 	r.session("--x-work--", "s1", zlines(t, `{"type":"session","cwd":`+quote(r.work)+`}`, `{"type":"event","seq":1}`, `{"type":"event","seq":2}`))
-	r.summary("s1", r.work, "fix the build again")
-	r.scan()
+	r.x.remotes["m1"].Sessions["s1"].looked = time.Time{}
+	r.told(DesktopSession{ID: "s1", Title: "fix the build again"})
 	if m, _ := f.Size(); m <= n || r.sessions()["s1"].Title != "fix the build again" {
 		t.Errorf("after growth: %d (was %d), %+v", m, n, r.sessions()["s1"])
 	}
 
-	// Archived in DSH Desktop since: archived here too.
-	r.registry("s1", r.work)
-	r.scan()
-	if vis, _ := r.st.Visibility(); vis.Shown("dsh", "s1") {
+	// Archived in DSH Desktop since: archived here too, as its workspaces say or as it is told of.
+	r.x.ToldWorkspaces("m1", DesktopWorkspaces{Archived: []string{"s1"}})
+	if r.shown("s1") {
 		t.Error("s1 archived there, shown here")
 	}
+	r.told(DesktopSession{ID: "s1", Last: later + 1})
+	if r.shown("s1") {
+		t.Error("s1 archived there, shown again by its activity")
+	}
 
-	// A restart lists them before the machine is looked at again; gone there, gone here.
+	// A restart lists them before the machine says anything; deleted there, gone here.
 	r.x = r.index()
 	r.x.loadRemote()
-	if len(r.sessions()) != 3 {
-		t.Fatalf("after a restart %+v", r.sessions())
+	if len(r.sessions()) != 3 || !r.x.Sync("m1") {
+		t.Fatalf("after a restart %+v, sync %v", r.sessions(), r.x.Sync("m1"))
 	}
-	os.RemoveAll(filepath.Join(r.home, "sessions", "--x-old--"))
-	os.Chtimes(filepath.Join(r.home, "sessions"), time.Now().Add(time.Hour), time.Now().Add(time.Hour))
-	r.scan()
+	r.x.ToldSessions(context.Background(), "m1", DesktopSessions{Gone: []string{"s3"}})
 	if _, ok := r.sessions()["s3"]; ok || len(r.sessions()) != 2 {
 		t.Errorf("s3 gone there: %+v", r.sessions())
 	}
 }
 
-// A subagent there is done once its summary says its turn ended. A directory still without a
-// transcript is looked in again only while new, else now and then (dsh leaves empty ones behind).
-func TestRemoteDshSubagentEnded(t *testing.T) { executors(t, testRemoteDshSubagentEnded) }
-
-func testRemoteDshSubagentEnded(t *testing.T, kind string) {
-	r := newRemoteRig(t, kind)
-	r.session("--x-work--", "s1", zlines(t, `{"type":"session","cwd":`+quote(r.work)+`}`))
-	r.session("--x-work--", "s2", zlines(t, `{"type":"session","cwd":`+quote(r.work)+`,"origin":"subagent","parentSession":"s1"}`, `{"type":"turn/start","seq":1}`))
-	os.MkdirAll(filepath.Join(r.home, "sessions", "--x-work--", "s3"), 0o700)
-	r.scan()
-	if s := r.sessions()["s2"]; !s.Subagent || s.Done {
-		t.Fatalf("at work: %+v", s)
-	}
-	turn := func(open string) {
-		r.write(filepath.Join(r.home, "storages", "session_projcache", "sessions", "s2.json"),
-			`{"version":7,"record":{"identity":{"cwd":`+quote(r.work)+`},"rows":{"title":{"ver":1,"seq":2,"val":"sub"},"turnBoundary":{"ver":2,"seq":2,"val":{"openTurnStartSeq":`+open+`,"lastTurn":1}}}}}`)
-	}
-	turn("1")
-	r.scan()
-	if s := r.sessions()["s2"]; s.Done || s.Title != "sub" {
-		t.Errorf("its turn open: %+v", s)
-	}
-	turn("null")
-	r.scan()
-	if s := r.sessions()["s2"]; !s.Done {
-		t.Errorf("its turn over: %+v", s)
-	}
-
-	// s3 empty, long seen: not looked in till the next deep look.
-	r.x.remoteMu.Lock()
-	r.x.remotes["m1"].Sessions["s3"].Seen = 0
-	r.x.remoteMu.Unlock()
-	p := filepath.Join(r.home, "sessions", "--x-work--", "s3", "session.v4.jsonl.zstd")
-	if err := os.WriteFile(p, []byte(zlines(t, `{"type":"session","cwd":`+quote(r.work)+`}`)), 0o600); err != nil {
+// A session picked in a search is taken in whatever the switch says, found in the directory dsh
+// keeps its folder's sessions in; one that is not there is an error.
+func TestRemoteDshAdopt(t *testing.T) {
+	r := newRemoteRig(t)
+	r.session(transcript.DshProjectDir(r.work), "s1", zlines(t, `{"type":"session","cwd":`+quote(r.work)+`}`))
+	if err := r.x.Adopt(context.Background(), "pc", DesktopSession{ID: "s1", Cwd: r.work, Title: "old work", Archived: true}); err != nil {
 		t.Fatal(err)
 	}
-	r.scan()
-	if _, ok := r.sessions()["s3"]; ok {
-		t.Error("an empty directory long seen looked in again")
+	if s := r.sessions()["s1"]; s.Title != "old work" || !r.shown("s1") {
+		t.Errorf("taken in: %+v, shown %v", s, r.shown("s1"))
 	}
-	r.x.remoteMu.Lock()
-	r.x.remotes["m1"].Deep = 0
-	r.x.remoteMu.Unlock()
-	r.scan()
-	if _, ok := r.sessions()["s3"]; !ok {
-		t.Error("not found by the deep look")
+	if d := r.x.remotes["m1"].Sessions["s1"]; d.Project != transcript.DshProjectDir(r.work) {
+		t.Errorf("its directory: %q", d.Project)
+	}
+	if err := r.x.Adopt(context.Background(), "m1", DesktopSession{ID: "none", Cwd: r.work}); err == nil || r.shown("none") {
+		t.Errorf("one not there: %v", err)
+	}
+	// Archived here by the user: its activity there brings it back only with the sync on.
+	if err := r.st.Hide("dsh", "s1", 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	later := time.Now().Add(time.Minute).UnixMilli()
+	r.told(DesktopSession{ID: "s1", Last: later})
+	if r.shown("s1") {
+		t.Error("back with the sync off")
+	}
+	r.x.SetSync("m1", true)
+	time.Sleep(5 * time.Millisecond) // after it was archived here
+	r.told(DesktopSession{ID: "s1", Last: later + 1})
+	if !r.shown("s1") {
+		t.Error("not back with the sync on")
 	}
 }
 
 // Without a registry dsh knows, the folders of its sessions stand in for its workspaces.
-func TestRemoteDshWorkspacesFallback(t *testing.T) { executors(t, testRemoteDshWorkspacesFallback) }
-
-func testRemoteDshWorkspacesFallback(t *testing.T, kind string) {
-	r := newRemoteRig(t, kind)
+func TestRemoteDshWorkspacesFallback(t *testing.T) {
+	r := newRemoteRig(t)
 	other := filepath.Join(filepath.Dir(r.work), "other")
 	r.session("--x-work--", "s1", zlines(t, `{"type":"session","cwd":`+quote(r.work)+`}`))
 	r.session("--x-other--", "s2", zlines(t, `{"type":"session","cwd":`+quote(other)+`}`))
 	r.session("--x-other--", "s3", zlines(t, `{"type":"session","cwd":`+quote(other)+`}`))
 	r.session("--x-other--", "s3a", zlines(t, `{"type":"session","cwd":`+quote(other)+`,"origin":"subagent","parentSession":"s3"}`))
 	r.write(filepath.Join(r.home, "storages", "workspace.json"), `{"unit":{"name":"workspace","version":9}}`)
-	ws, err := r.x.DshWorkspaces(context.Background(), "m1")
-	if err != nil || len(ws) != 2 {
-		t.Fatalf("%+v %v", ws, err)
-	}
-	if ws[0].Path != other && ws[0].Path != r.work {
-		t.Errorf("%+v", ws)
+	for _, s := range []DesktopSession{{ID: "s1", Cwd: r.work}, {ID: "s2", Cwd: other}, {ID: "s3", Cwd: other}, {ID: "s3a", Cwd: other}} {
+		if err := r.x.Adopt(context.Background(), "m1", s); err != nil {
+			t.Fatal(err)
+		}
 	}
 	// Each with how many of its sessions are listed: subagents aside, archived ones aside.
 	count := func() map[string]int {
@@ -347,7 +316,7 @@ func testRemoteDshWorkspacesFallback(t *testing.T, kind string) {
 		}
 		return out
 	}
-	if n := count(); n[other] != 2 || n[r.work] != 1 {
+	if n := count(); len(n) != 2 || n[other] != 2 || n[r.work] != 1 {
 		t.Errorf("sessions: %v", n)
 	}
 	if err := r.st.Hide(string(api.AgentDsh), "s2", 0, 0); err != nil {
@@ -358,133 +327,67 @@ func testRemoteDshWorkspacesFallback(t *testing.T, kind string) {
 	}
 }
 
-// A session open in DSH Desktop is shown run elsewhere and not resumed here, as the dsh plugin says
-// (dsh.open); an executor that cannot say (the Go one) leaves them as they are.
-func TestRemoteDshOpen(t *testing.T) { executors(t, testRemoteDshOpen) }
-
-func testRemoteDshOpen(t *testing.T, kind string) {
-	r := newRemoteRig(t, kind)
+// A session open in DSH Desktop is shown run elsewhere while its agent works there, held while it
+// is only loaded, as the machine's dsh says (the event, taken off the hub); none once it is away.
+func TestRemoteDshOpen(t *testing.T) {
+	r := newRemoteRig(t)
 	r.session("--x-work--", "s1", zlines(t, `{"type":"session","cwd":`+quote(r.work)+`}`))
-	r.scan()
-	if kind == "node" {
-		r.setOpen("s1", "unmade")
-		r.setRunning("s1")
-	}
-	r.x.pollOpen("m1")
-	s := r.sessions()["s1"]
-	err := r.x.Free("s1")
-	if kind == "go" {
-		if s.Status != api.StatusIdle || s.Live || err != nil || !r.x.noOpen["m1"] {
-			t.Fatalf("go: %+v, free %v, not asked again %v", s, err, r.x.noOpen["m1"])
+	r.x.SetRemote(r.hub)             // the events' handlers
+	say := func(p DesktopSessions) { // as the hub's handler does, then waited for
+		t.Helper()
+		done := make(chan struct{})
+		r.x.enqueue("m1", func() { r.x.ToldSessions(context.Background(), "m1", p) })
+		r.x.enqueue("m1", func() { close(done) })
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			t.Fatal("not taken")
 		}
-		return
 	}
+	say(DesktopSessions{Sessions: []DesktopSession{{ID: "s1", Cwd: r.work, Open: true, Running: true}}})
 	// Shown as run elsewhere; not barred: dsh's writer lock there says whether it may be resumed.
-	if s.Status != api.StatusElsewhere || !s.Live || err != nil {
-		t.Fatalf("open in DSH Desktop: %+v, free %v", s, err)
+	if s := r.sessions()["s1"]; s.Status != api.StatusElsewhere || !s.Live || r.x.Free("s1") != nil {
+		t.Fatalf("at work in DSH Desktop: %+v", s)
 	}
-	// Still loaded there, its agent idle (Desktop keeps what it opened till it quits): not shown as
-	// elsewhere (the user, 2026-11-09), but held: a message goes to its agent there.
-	r.setRunning()
-	r.x.pollOpen("m1")
+	// Still loaded there, its agent idle: not shown as elsewhere (the user, 2026-11-09), but held.
+	say(DesktopSessions{Sessions: []DesktopSession{{ID: "s1", Open: true}}})
 	if s := r.sessions()["s1"]; s.Status != api.StatusIdle || s.Live || !r.x.HeldElsewhere("s1") {
 		t.Errorf("loaded, idle there: %+v, held %v", s, r.x.HeldElsewhere("s1"))
 	}
-	r.setOpen()
-	r.x.pollOpen("m1")
-	if s := r.sessions()["s1"]; s.Status != api.StatusIdle || s.Live || r.x.Free("s1") != nil || r.x.HeldElsewhere("s1") {
+	// All that is open named, s1 not among it: closed.
+	say(DesktopSessions{Full: true})
+	if s := r.sessions()["s1"]; s.Status != api.StatusIdle || s.Live || r.x.HeldElsewhere("s1") {
 		t.Errorf("closed there: %+v", s)
 	}
 }
 
-// Workspaces the dsh plugin's settings keep from Iridium (dsh.open's unsynced): their sessions are
-// not listed, nor offered for a new session, at once; listed again once taken off.
-func TestRemoteDshUnsynced(t *testing.T) { executors(t, testRemoteDshUnsynced) }
-
-func testRemoteDshUnsynced(t *testing.T, kind string) {
-	if kind != "node" {
-		return // only the plugin says
-	}
-	r := newRemoteRig(t, kind)
-	other := filepath.Join(r.work, "other")
-	os.MkdirAll(other, 0o700)
+// The sessions in none of DSH Desktop's workspaces there are its loose ones, as it tells them.
+func TestRemoteDshLoose(t *testing.T) {
+	r := newRemoteRig(t)
 	r.session("--x-work--", "s1", zlines(t, `{"type":"session","cwd":`+quote(r.work)+`}`))
-	r.session("--x-other--", "s2", zlines(t, `{"type":"session","cwd":`+quote(other)+`}`))
-	r.session("--x-other--", "s3", zlines(t, `{"type":"session","cwd":`+quote(other)+`}`))
-	r.session("--x-other--", "s3a", zlines(t, `{"type":"session","cwd":`+quote(other)+`,"origin":"subagent","parentSession":"s3"}`))
-	r.write(filepath.Join(r.home, "storages", "workspace.json"),
-		`{"unit":{"name":"workspace","version":2},"global":{"initialized":true,"workspaceIds":["w0","w1"],"archivedSessionIds":[],"pinnedSessionIds":[]},"tables":{"workspaces":{`+
-			`"w0":{"path":`+quote(r.work)+`,"title":"Secret","sessionIds":["s1"],"createdAt":"2026-11-01T00:00:00.000Z","updatedAt":"2026-11-02T00:00:00.000Z"},`+
-			`"w1":{"path":`+quote(other)+`,"title":"Open","sessionIds":["s2"],"createdAt":"2026-11-01T00:00:00.000Z","updatedAt":"2026-11-02T00:00:00.000Z"}}}}`)
-	r.setOpen()
-	r.scan()
-	if s := r.sessions(); len(s) != 4 {
-		t.Fatalf("before: %+v", s)
+	r.session("--x-work--", "s2", zlines(t, `{"type":"session","cwd":`+quote(r.work)+`}`))
+	r.told(DesktopSession{ID: "s1", Cwd: r.work}, DesktopSession{ID: "s2", Cwd: r.work})
+	if s := r.sessions(); s["s1"].Loose || s["s2"].Loose {
+		t.Errorf("its workspaces not known: %+v", s)
 	}
-	if ws, err := r.x.DshWorkspaces(context.Background(), "m1"); err != nil || len(ws) != 2 || ws[0].Sessions != 1 || ws[1].Sessions != 1 {
-		t.Errorf("workspaces with their sessions: %+v %v", ws, err)
+	var p DesktopWorkspaces
+	json.Unmarshal([]byte(`{"workspaces":[{"id":"w0","title":"Work","path":`+quote(r.work)+`,"sessions":["s1"]}]}`), &p)
+	r.x.ToldWorkspaces("m1", p)
+	if s := r.sessions(); s["s1"].Loose || !s["s2"].Loose {
+		t.Errorf("s2 in none: %+v", s)
 	}
-	unsynced := func(names ...string) {
-		b, _ := json.Marshal(append([]string{}, names...))
-		os.WriteFile(filepath.Join(r.dsh, "unsynced.json"), b, 0o600)
-		r.x.pollOpen("m1")
-	}
-	titles := func() (out []string) {
-		ws, err := r.x.DshWorkspaces(context.Background(), "m1")
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, w := range ws {
-			out = append(out, w.Title)
-		}
-		return out
-	}
-	unsynced(" secret ")
-	if s := r.sessions(); len(s) != 3 || s["s1"].ID != "" {
-		t.Errorf("Secret kept from Iridium: %+v", s)
-	}
-	if got := titles(); !slices.Equal(got, []string{"Open"}) {
-		t.Errorf("workspaces for a new session: %v", got)
-	}
-	r.scan() // a look after keeps it out
-	if s := r.sessions(); len(s) != 3 || s["s1"].ID != "" {
-		t.Errorf("after a look: %+v", s)
-	}
-	unsynced()
-	if s := r.sessions(); len(s) != 4 {
-		t.Errorf("synced again: %+v", s)
-	}
-	// By its folder too.
-	unsynced(strings.ToUpper(other) + "/")
-	if s := r.sessions(); len(s) != 3 || s["s2"].ID != "" { // s3 is in no workspace: still listed
-		t.Errorf("by its folder: %+v", s)
-	}
-	// DSH's 未分组 kept too: s3, in no workspace, and its subagent.
-	unsynced()
-	os.WriteFile(filepath.Join(r.dsh, "ungrouped.json"), []byte("false"), 0o600)
-	r.x.pollOpen("m1")
-	if s := r.sessions(); len(s) != 2 || s["s3"].ID != "" || s["s3a"].ID != "" {
-		t.Errorf("未分组 kept: %+v", s)
-	}
-	r.scan()
-	if s := r.sessions(); len(s) != 2 {
-		t.Errorf("未分组 kept, after a look: %+v", s)
-	}
-	os.Remove(filepath.Join(r.dsh, "ungrouped.json"))
-	r.x.pollOpen("m1")
-	if s := r.sessions(); len(s) != 4 {
-		t.Errorf("未分组 synced again: %+v", s)
+	ws, err := r.x.DshWorkspaces(context.Background(), "m1")
+	if err != nil || len(ws) != 1 || ws[0].Title != "Work" {
+		t.Errorf("workspaces as told: %+v %v", ws, err)
 	}
 }
 
 // A machine whose Bot is gone (revoked, or paired again under a new one): what was found there is
 // no more listed, nor read back at a restart.
-func TestRemoteDshGone(t *testing.T) { executors(t, testRemoteDshGone) }
-
-func testRemoteDshGone(t *testing.T, kind string) {
-	r := newRemoteRig(t, kind)
+func TestRemoteDshGone(t *testing.T) {
+	r := newRemoteRig(t)
 	r.session("--x-work--", "s1", zlines(t, `{"type":"session","cwd":`+quote(r.work)+`}`))
-	r.scan()
+	r.told(DesktopSession{ID: "s1", Cwd: r.work})
 	// Read back as Iridium starts, its executor not connected yet.
 	later := func() int {
 		x := New(Options{Store: r.st, State: r.state, Logf: t.Logf})

@@ -9,9 +9,11 @@ import (
 	"testing"
 
 	"github.com/kumoSleeping/iridium/internal/agent"
+	agentdsh "github.com/kumoSleeping/iridium/internal/agent/dsh"
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/config"
 	"github.com/kumoSleeping/iridium/internal/harness"
+	hdsh "github.com/kumoSleeping/iridium/internal/harness/dsh"
 	"github.com/kumoSleeping/iridium/internal/remote"
 	"github.com/kumoSleeping/iridium/internal/remote/wire"
 )
@@ -26,9 +28,9 @@ func TestAttach(t *testing.T) {
 	hub := &remote.Hub{Logf: t.Logf}
 	r := newRig(t, func(_ *config.Config, o *Options) {
 		o.Remote = hub
-		o.Discovery = &heldFinder{desktopFinder: desktopFinder{id}}
+		o.Discovery = &heldFinder{desktopFinder: desktopFinder{id: id}}
 	})
-	x := startHolder(t, hub, []string{wire.CapAttach}, wire.HeldLive{})
+	x := startHolder(t, hub, []string{wire.CapAttach})
 	attach := func(session, place string, content any) {
 		t.Helper()
 		b, _ := json.Marshal(content)
@@ -129,17 +131,13 @@ func fmtMap(m map[string]string) string {
 }
 
 // DSH Desktop's plugin on this computer (its hello's machine is this one's): a dsh launched here
-// takes its presets, its patches and its own dsh; a patch others may write is not taken.
+// runs in-process (@dsh-desktop) and takes its presets and models directly from Desktop.
 func TestLocalHost(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	good, bad := filepath.Join(dir, "good.yml"), filepath.Join(dir, "bad.yml")
-	os.WriteFile(good, []byte("[]\n"), 0o600)
-	os.WriteFile(bad, []byte("[]\n"), 0o600)
-	os.Chmod(bad, 0o666)
 	hub := &remote.Hub{Logf: t.Logf, Self: "this-pc"}
 	r := newRig(t, func(_ *config.Config, o *Options) { o.Remote = hub })
-	startHolderAs(t, hub, []string{wire.CapPrepare}, wire.HeldLive{}, "this-pc", []string{good})
+	startHolderAs(t, hub, []string{hdsh.CapInproc}, "this-pc")
 	if mc := hub.Machine("m1"); !mc.IsLocal() || len(mc.Caps()) == 0 {
 		t.Fatalf("not local: %v", mc.Caps())
 	}
@@ -152,62 +150,39 @@ func TestLocalHost(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := launch.Host
-	if h == nil || strings.Join(h.Argv, " ") != "/desktop/node /desktop/dsh/lib/bin.js" || h.Scope != "/desktop/scope" {
+	if h == nil || !h.Inproc || strings.Join(h.Argv, " ") != agentdsh.InprocArgv0 {
 		t.Fatalf("host: %+v", h)
 	}
 	if l, def, err := h.Presets(); err != nil || def != "omd-ptc" || len(l) != 1 {
 		t.Errorf("presets: %+v %q %v", l, def, err)
 	}
-	if p, in, err := h.Prepare("omd-ptc", "sys"); err != nil || !in || len(p) != 1 || p[0] != good {
-		t.Errorf("prepare: %q %v %v", p, in, err)
-	}
-	startHolderAs(t, hub, []string{wire.CapPrepare}, wire.HeldLive{}, "this-pc", []string{bad})
-	// The machine's hello was there before this one came (the first's): till the hub has this
-	// one, a launch may still find the first, whose patch is good (it failed so on CI).
-	var err error
-	waitFor(t, "the second holder", func() bool {
-		launch = agent.SpawnOptions{Session: "y", Cwd: dir}
-		if e := ch.Prepare(bg, harness.Ref{ID: "y", As: "y", Agent: api.AgentDsh}, &launch); e != nil {
-			t.Fatal(e)
-		}
-		_, _, err = launch.Host.Prepare("omd-ptc", "")
-		return err != nil
-	})
-	if err == nil || !strings.Contains(err.Error(), "not this user's own file") {
-		t.Errorf("a patch others may write: %v", err)
+	lh := r.m.o.Channels[api.AgentDsh].(harness.LocalHost)
+	if id, ok := lh.LocalExecutor(bg, harness.Ref{ID: "x", As: "x", Agent: api.AgentDsh}); !ok || id != "m1" {
+		t.Errorf("LocalExecutor: %q %v", id, ok)
 	}
 }
 
-// A session with a persona of Iridium's tells its host so (agent.prepare persona "own"), only a
-// host that says it takes it (wire.CapPersona); one with none says nothing of it (otae,
-// 2026-11-22).
+// A session with a persona of Iridium's passes --persona own in the @dsh-desktop hold argv.
 func TestHostPersonaOwn(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	good := filepath.Join(dir, "good.yml")
-	os.WriteFile(good, []byte("[]\n"), 0o600)
-	for _, c := range []struct {
-		caps    []string
-		persona bool
-		want    bool
-	}{
-		{[]string{wire.CapPrepare, wire.CapPersona}, true, true},
-		{[]string{wire.CapPrepare, wire.CapPersona}, false, false},
-		{[]string{wire.CapPrepare}, true, false},
-	} {
+	sys := filepath.Join(dir, "sys.md")
+	os.WriteFile(sys, []byte("sys\n"), 0o600)
+	for _, persona := range []bool{true, false} {
 		hub := &remote.Hub{Logf: t.Logf, Self: "this-pc"}
 		r := newRig(t, func(_ *config.Config, o *Options) { o.Remote = hub })
-		f := startHolderAs(t, hub, c.caps, wire.HeldLive{}, "this-pc", []string{good})
-		launch := agent.SpawnOptions{Session: "x", Cwd: dir, Persona: c.persona}
+		startHolderAs(t, hub, []string{hdsh.CapInproc, wire.CapPersona}, "this-pc")
+		launch := agent.SpawnOptions{Session: "x", Cwd: dir, SystemPromptFile: sys, Persona: persona}
 		if err := r.m.o.Channels[api.AgentDsh].(harness.Launcher).Prepare(bg, harness.Ref{ID: "x", As: "x", Agent: api.AgentDsh}, &launch); err != nil {
 			t.Fatal(err)
 		}
-		if _, _, err := launch.Host.Prepare("omd-ptc", "sys"); err != nil {
+		spec, err := agentdsh.New(agentdsh.Options{}).Spawn(launch)
+		if err != nil {
 			t.Fatal(err)
 		}
-		asked := f.asked("agent.prepare")
-		if len(asked) != 1 || strings.Contains(asked[0], `"persona":"own"`) != c.want {
-			t.Errorf("caps %v, persona %v: asked %q", c.caps, c.persona, asked)
+		has := strings.Contains(strings.Join(spec.Argv, " "), "--persona own")
+		if has != persona {
+			t.Errorf("persona %v: argv %q", persona, spec.Argv)
 		}
 	}
 }

@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -26,6 +27,9 @@ const (
 	// their terminal (api.SourceIridium), never by the tag.
 	HostID   = "local"
 	HostName = "Iridium"
+	// LocalExecApp is the identity App of a local loopback executor authenticated via the
+	// per-user local-exec credential file (only accepted on GET /v1/internal/exec from loopback).
+	LocalExecApp = "local-exec"
 	// WebApp is the built-in app ir_web (package webapp): an app row of its own, with a TOKEN; a
 	// browser with a passkey is one of its logins. It speaks for a login with Satori-User-ID.
 	WebApp = "ir_web"
@@ -50,8 +54,13 @@ type Config struct {
 	OnRevoke func(endpointID string)
 
 	// SessionToken resolves a session's own bearer token (one with its prefix, never a channel's):
-	// the channel whose machine the session runs at, and the session. nil: none is taken.
+	// the channel whose machine the session runs at (or HostID for a local session), and the
+	// session. nil: none is taken.
 	SessionToken func(token string) (endpointID, session string, ok bool)
+
+	// LocalExecToken checks a local loopback executor's bearer token (irl_… from the state
+	// directory credential file). Only ever checked for direct loopback GET /v1/internal/exec.
+	LocalExecToken func(token string) bool
 
 	// OnTerminals runs, on its own goroutine, after a terminal came, went, or changed what the
 	// pages show of it (name, kind, avatar); not on a last-seen time alone.
@@ -258,10 +267,17 @@ func (g *Gate) authorize(w http.ResponseWriter, r *http.Request) (Identity, bool
 // identify finds the app behind r's bearer TOKEN, or the session whose own TOKEN it is.
 func (g *Gate) identify(r *http.Request, now time.Time) (Identity, bool) {
 	tok, _ := bearer(r)
+	if g.cfg.LocalExecToken != nil && r.Method == http.MethodGet && r.URL.Path == "/v1/internal/exec" &&
+		strings.HasPrefix(tok, "irl_") && isDirectLoopback(r) && g.cfg.LocalExecToken(tok) {
+		return Identity{App: LocalExecApp, Name: HostName}, true
+	}
 	if g.cfg.SessionToken != nil && strings.HasPrefix(tok, sessionTokenPrefix) {
 		id, session, found := g.cfg.SessionToken(tok)
 		if !found {
 			return Identity{}, false
+		}
+		if id == HostID {
+			return Identity{App: HostID, Name: HostName, Session: session}, true
 		}
 		g.mu.Lock()
 		e, live := g.st.endpoints[id]
@@ -292,6 +308,20 @@ func (g *Gate) identify(r *http.Request, now time.Time) (Identity, bool) {
 }
 
 func identityOf(e Endpoint) Identity { return infoOf(e).Identity() }
+
+// isDirectLoopback reports whether r came directly from loopback (not forwarded through a tunnel
+// or reverse proxy such as cloudflared).
+func isDirectLoopback(r *http.Request) bool {
+	if r.Header.Get("CF-Connecting-IP") != "" || r.Header.Get("X-Forwarded-For") != "" {
+		return false
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
 
 // commitLocked persists c, then applies it in memory. g.mu must be held.
 func (g *Gate) commitLocked(c Change) error {

@@ -81,8 +81,14 @@ type Hello struct {
 	// HTTPS with the session's own TOKEN (hold.start's env IRIDIUM_TOKEN; docs/exec.md "远端的
 	// ir"): IRIDIUM_URL is set there to the address it connected to, unless the env has one.
 	IRClient bool `json:"irClient,omitempty"`
-	// Caps: the optional parts of the protocol it speaks (CapHeld…); none from an older one.
+	// Caps: the optional parts of the protocol it speaks (CapRun…); none from an older one.
 	Caps []string `json:"caps,omitempty"`
+	// Headless: a windowless local host started as an offline fallback (yields when the real
+	// desktop app connects).
+	Headless bool `json:"headless,omitempty"`
+	// PID: the executor's own process id when it runs agents in-process: sessions held by this
+	// process are ones Iridium drives through it.
+	PID int `json:"pid,omitempty"`
 }
 
 // ShellOn: command lines run there (Shell; from an older executor, AgentShell without NoShell).
@@ -93,17 +99,13 @@ func (h *Hello) ShellOn() bool {
 	return h.AgentShell && !h.NoShell
 }
 
-// Caps an executor may say in Hello. CapHeld: held.list, held.send, held.get, held.set and the
-// event held.changed. CapRun: run, run.stop and the events run.out, run.exit (else ir sh runs as a
-// holder). CapPrepare: agent.presets and agent.prepare (it composes an agent's launch from its
-// host's own settings). CapAttach: it sends session.attach and takes the event session.button.
+// Caps an executor may say in Hello. CapRun: run, run.stop and the events run.out, run.exit (else
+// ir sh runs as a holder). CapAttach: it sends session.attach and takes the event session.button.
 // CapGrant: grant (GrantParams), Roots in its hello, and it takes the event denied (DeniedEvent).
 // CapPersonas: agent.personas (the personas its host has, to take as a persona of Iridium's).
-// CapPersona: agent.prepare takes Persona (docs/exec.md "dsh 插件" 人格; otae, 2026-11-22).
+// CapPersona: host supports per-session persona override (--persona own).
 const (
-	CapHeld     = "held"
 	CapRun      = "run"
-	CapPrepare  = "agent.prepare"
 	CapAttach   = "session.attach"
 	CapGrant    = "grant"
 	CapPersonas = "agent.personas"
@@ -267,74 +269,20 @@ type WriteFileParams struct {
 // MaxRead is the most one fs.read returns.
 const MaxRead = 4 << 20
 
-// Optional (docs/exec.md "远端 DSH"): an agent's host there (the dsh plugin: the dsh it runs in, DSH
-// Desktop). Another executor answers CodeUnsupported.
-
-// HeldListReply answers held.list: the sessions open in that dsh
-// process now (held: DSH Desktop has them loaded, its writer lock); Unsynced, the workspaces the
-// plugin's settings keep from the Iridium (their folders or names); UnsyncedUngrouped, the
-// sessions in none of them (dsh's 未分组) kept too.
-type HeldListReply struct {
-	Sessions []string `json:"sessions"`
-	// Running: those of Sessions whose agent there works now (a turn, or one waiting on an
-	// approval or an answer); nil from a plugin that does not say (all of them, then).
-	Running           []string `json:"running,omitempty"`
-	Unsynced          []string `json:"unsynced,omitempty"`
-	UnsyncedUngrouped bool     `json:"unsyncedUngrouped,omitempty"`
-}
-
-// HeldSendParams is held.send: a message for a session the dsh
-// there holds (open in DSH Desktop), which the Iridium cannot resume: its agent there takes it, a
-// next turn or (Steer) into the running one. CodeNotFound: no agent of it lives there.
-type HeldSendParams struct {
-	Session string `json:"session"`
-	Text    string `json:"text"`
-	Steer   bool   `json:"steer,omitempty"`
-}
-
-// HeldGetParams is held.get: session's live state there.
-type HeldGetParams struct {
-	Session string `json:"session"`
-}
-
-// HeldSetParams is held.set: one of Model ("<provider>/<model>") or Effort changed on a held
-// session; the reply is HeldLive after it. CodeNotFound: not held there.
-type HeldSetParams struct {
-	Session string `json:"session"`
-	Model   string `json:"model,omitempty"`
-	Effort  string `json:"effort,omitempty"`
-}
-
-// HeldLive is a session as the holder there runs it now. Held: it has the session loaded; Model
-// ("<provider>/<model>") and Effort, the level it runs at, only then.
-type HeldLive struct {
-	Held   bool   `json:"held"`
-	Model  string `json:"model,omitempty"`
-	Effort string `json:"effort,omitempty"`
-}
-
-// HeldChanged is the event held.changed: session's live state changed there (its model or effort
-// changed in DSH Desktop); at most two a second per session.
-type HeldChanged struct {
-	Session string   `json:"session"`
-	Live    HeldLive `json:"live"`
-}
-
 // PresetsParams is agent.presets: the agent presets Agent has there.
 type PresetsParams struct {
 	Agent string `json:"agent"`
 }
 
-// PresetsReply answers agent.presets: the agent presets its host registers (dsh: DSH Desktop's
-// agentPresets registry: shipped, a bundle's, the profile's own edits), by its order, and its
-// default (the user's pick in its settings, else the deployment's).
+// PresetsReply answers agent.presets: the agent presets its host registers, by its order, and its
+// default.
 type PresetsReply struct {
 	Presets []Preset `json:"presets"`
 	Default string   `json:"default"`
 }
 
-// Preset is one registered preset: Plugins, its child plugin rows as YAML (the registry's read);
-// Broken, why it cannot compose a session there, if it cannot.
+// Preset is one registered preset: Plugins, its child plugin rows as YAML; Broken, why it cannot
+// compose a session there, if it cannot.
 type Preset struct {
 	ID          string `json:"id"`
 	Name        string `json:"name,omitempty"`
@@ -342,23 +290,6 @@ type Preset struct {
 	Plugins     string `json:"plugins"`
 	Broken      string `json:"broken,omitempty"`
 }
-
-// PrepareParams is agent.prepare: what a launch of Agent there takes from its host's settings.
-// Session (the agent's own id), Cwd, Preset and System (Iridium's system prompt) for a session;
-// no Session: for a look at its models only. Persona (CapPersona): PersonaOwn, the session has a
-// persona of Iridium's (in System), and its host's own personas give way to it; how is the
-// host's. None: its host's as they are.
-type PrepareParams struct {
-	Agent   string `json:"agent"`
-	Session string `json:"session,omitempty"`
-	Cwd     string `json:"cwd,omitempty"`
-	Preset  string `json:"preset,omitempty"`
-	System  string `json:"system,omitempty"`
-	Persona string `json:"persona,omitempty"`
-}
-
-// PersonaOwn is PrepareParams.Persona for a session with a persona of Iridium's.
-const PersonaOwn = "own"
 
 // PersonasParams is agent.personas: the personas Agent's host has there.
 type PersonasParams struct {
@@ -370,23 +301,14 @@ type PersonasReply struct {
 	Personas []Persona `json:"personas"`
 }
 
-// Persona is one its host has: Text, the whole of it as one persona of Iridium's takes it (the
-// host puts its parts together; Iridium does not know them); From, where it is from, as shown
-// ("OMD 人格").
+// Persona is one its host has: Text, the whole of it as one persona of Iridium's takes it; From,
+// where it is from, as shown.
 type Persona struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 	Text        string `json:"text"`
 	From        string `json:"from,omitempty"`
-}
-
-// PrepareReply answers agent.prepare: Patches, files there the launch takes in order (dsh: each a
-// --patch after --profile sdk); Preset, the preset (System with it) is in them, so Iridium adds
-// none of its own. Keys may be in them: they stay there, served to no one.
-type PrepareReply struct {
-	Patches []string `json:"patches"`
-	Preset  bool     `json:"preset,omitempty"`
 }
 
 // AttachParams is session.attach, from the executor: Content (Satori elements; a string, or one

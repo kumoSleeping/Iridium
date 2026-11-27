@@ -235,7 +235,7 @@ var all = []Info{
 		Format: transcript.Dsh,
 		// The first with the sdk profile.
 		HomeEnv: "DSH_HOME", MinRemote: "0.2.2",
-		HomeDir: ".dsh", HomeVars: []string{"DSH_HOME"}, SessionEnv: []string{"DSH_SESSION_ID"},
+		HomeDir: ".dsh", HomeVars: []string{"DSH_HOME"}, SessionEnv: []string{"DSH_IRIDIUM_SESSION", "DSH_SESSION_ID"},
 		FindRemote: func(w RemoteWhere) (string, error) {
 			home := cmp.Or(agent.GetEnv(w.Env, "DSH_HOME"), w.Join(w.User, ".dsh"))
 			dir := w.Join(home, "sessions", transcript.DshProjectDir(w.Cwd), w.ID)
@@ -384,6 +384,23 @@ func SessionVars() []string {
 		}
 	}
 	return out
+}
+
+// ForwardEnv returns the Iridium URL and per-session token (irs_…) for `ir` forwarding via
+// POST /v1/internal/cli: IRIDIUM_URL/IRIDIUM_TOKEN first, then host-scoped pairs injected by
+// in-process agent shells (such as DSH_IRIDIUM_URL/DSH_IRIDIUM_TOKEN).
+func ForwardEnv(getenv func(string) string) (url, token string) {
+	pairs := [][2]string{
+		{"IRIDIUM_URL", "IRIDIUM_TOKEN"},
+		{"DSH_IRIDIUM_URL", "DSH_IRIDIUM_TOKEN"},
+	}
+	for _, p := range pairs {
+		u, tok := getenv(p[0]), getenv(p[1])
+		if u != "" && strings.HasPrefix(tok, "irs_") {
+			return u, tok
+		}
+	}
+	return "", ""
 }
 
 // sessionVarOrder is the order agents' session variables are believed in: dsh's before pi's (a

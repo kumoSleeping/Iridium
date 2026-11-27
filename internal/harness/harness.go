@@ -125,6 +125,13 @@ type Provider interface {
 	ProvidedHere() bool
 }
 
+// LocalHost says whether a session on this computer should run through a local executor
+// (its machine ID in remote.Hub, e.g. a local app connected over loopback WS) rather than
+// spawning a local OS child directly.
+type LocalHost interface {
+	LocalExecutor(ctx context.Context, r Ref) (machineID string, ok bool)
+}
+
 // Models are the models an agent offers at a machine, as it says them (a probe), kept by the
 // channel. Warm asks again in the background if what is kept is old.
 type Models interface {

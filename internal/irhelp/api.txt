@@ -145,8 +145,8 @@ DELETE internal/shell/{run} - -> {ok}  stop a command line
 # groups and folders
 GET internal/folders?path&machine - -> Folders  subfolders (home by default)  view=path,parent,folders
 POST internal/folders {path, name, machine?} -> {path}  make a folder
-GET internal/computers/{id}/dsh/workspaces - -> DshWorkspace[]  dsh workspaces at that computer  view=title,path,sessions
-POST internal/computers/{id}/dsh/sync - -> {ok}  re-read the dsh at that computer
+GET internal/computers/{id}/{agent}/workspaces - -> DshWorkspace[]  agent workspaces at that computer  view=title,path,sessions
+POST internal/computers/{id}/{agent}/sync - -> {ok}  re-read the agent at that computer
 
 # files
 GET internal/web/files?path&machine - -> DirListing  list a directory in the login's scope (allowed root or home by default); person only  view=entries.name,entries.size,entries.type

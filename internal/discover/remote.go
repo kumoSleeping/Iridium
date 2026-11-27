@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,108 +16,170 @@ import (
 	"github.com/kumoSleeping/iridium/internal/dshhome"
 	"github.com/kumoSleeping/iridium/internal/remote"
 	"github.com/kumoSleeping/iridium/internal/remote/wire"
+	"github.com/kumoSleeping/iridium/internal/store"
 	"github.com/kumoSleeping/iridium/internal/transcript"
 )
 
-// dsh's sessions at other machines (docs/exec.md "远端 DSH"): each connected executor with dsh
-// is looked at through its file requests every RemoteScan, what changed only: its sessions/
-// project directories (by their mtime), the projection cache (one small document per session:
-// folder, title, last message) and the workspace registry. A transcript is fetched only when
-// its session is opened (Fetch), then kept up as it grows. All of them are listed, the ones
-// archived in DSH Desktop in the archive; what was found is kept in the state directory, so a
-// restart or a machine away lists them still.
+// dsh's sessions at other machines (docs/exec.md "远端 DSH"). Nothing there is looked for: the
+// dsh plugin in DSH Desktop tells of its sessions as they change (ToldSessions: the ones followed,
+// and with its "sync new sessions" on the ones active since), of its workspaces (ToldWorkspaces)
+// and of that switch (SetSync); one picked in a search is taken in (Adopt). A session told of is
+// looked at once there (one directory: its transcript's name and size), its transcript fetched
+// only when it is opened (Fetch). What is known is kept in the state directory, so a restart or a
+// machine away lists them still.
 
-// dshAt is what was found of dsh at one machine; kept as JSON (State/remote-dsh/<id>.json).
+// The executor's events discovery takes itself (SetRemote), and what they carry.
+const (
+	EventSessions   = "desktop.sessions.changed"
+	EventWorkspaces = "desktop.workspaces.changed"
+	EventConfig     = "desktop.config"
+)
+
+// DesktopSession is one session as its machine's dsh tells of it (unified schema with harness/dsh).
+type DesktopSession struct {
+	ID          string `json:"id"`
+	WorkspaceID string `json:"workspaceId,omitempty"`
+	Cwd         string `json:"cwd,omitempty"`
+	Title       string `json:"title,omitempty"`
+	Last        int64  `json:"last,omitempty"` // ms, its last message
+	UpdatedAt   int64  `json:"updatedAt,omitempty"`
+	Sub         bool   `json:"sub,omitempty"`
+	Parent      string `json:"parent,omitempty"`
+	Ended       bool   `json:"ended,omitempty"` // its last turn ended
+	// Open: loaded in DSH Desktop; Running: its agent at work.
+	Open     bool `json:"open,omitempty"`
+	Running  bool `json:"running,omitempty"`
+	Archived bool `json:"archived,omitempty"`
+}
+
+// DesktopSessions is EventSessions: the sessions that changed, and those deleted there. Full: it
+// names every session open there, so one it does not name is open no more.
+type DesktopSessions struct {
+	Full     bool             `json:"full,omitempty"`
+	Sessions []DesktopSession `json:"sessions"`
+	Gone     []string         `json:"gone,omitempty"`
+}
+
+// DesktopWorkspaces is EventWorkspaces: DSH Desktop's workspaces in its order, and the sessions
+// archived there.
+type DesktopWorkspaces struct {
+	Workspaces []struct {
+		ID        string   `json:"id"`
+		Title     string   `json:"title"`
+		Path      string   `json:"path"`
+		Sessions  []string `json:"sessions"`
+		UpdatedAt int64    `json:"updatedAt,omitempty"`
+	} `json:"workspaces"`
+	Archived []string `json:"archived,omitempty"`
+}
+
+// DesktopConfig is EventConfig, what of it is discovery's: the "sync new sessions" switch.
+type DesktopConfig struct {
+	Sync *bool `json:"syncNewSessions,omitempty"`
+}
+
+// dshAt is what is known of dsh at one machine; kept as JSON (State/remote-dsh/<id>.json).
 type dshAt struct {
 	Home     string                    `json:"home"` // its DSH_HOME there
 	Sep      string                    `json:"sep"`
-	Projects map[string]int64          `json:"projects"` // sessions/ project directory → its mtime when listed
 	Sessions map[string]*remoteSession `json:"sessions"`
-	// The workspace registry, as last read (nil if it is not there or not known); RegistryAt:
-	// its mtime then. Gone: its workspaces whose folder is not there.
+	// The workspace registry, as last told or read (nil if not known); RegistryAt: the file's
+	// mtime when read, 0 if told. Gone: its workspaces whose folder is not there.
 	Registry   *dshhome.Registry `json:"registry,omitempty"`
 	RegistryAt int64             `json:"registryAt,omitempty"`
 	Gone       map[string]bool   `json:"gone,omitempty"`
-	// Deep: when sessions without a summary were last looked at one by one.
-	Deep int64 `json:"deep,omitempty"`
-	// Unsynced: the workspaces the dsh plugin's settings keep from Iridium (names or folders, as
-	// its dsh.open last said): their sessions are not listed, nor offered for a new one.
-	Unsynced []string `json:"unsynced,omitempty"`
-	// NoLoose: the sessions in none of its workspaces (DSH's 未分组) are kept from Iridium too.
-	NoLoose bool `json:"noLoose,omitempty"`
-}
-
-// unsynced: workspace w is one of those d.Unsynced names, by its title or its folder (the
-// folder's whole path or its name; case and separators aside).
-func (d *dshAt) unsynced(w dshhome.Workspace) bool {
-	norm := func(s string) string {
-		return strings.TrimRight(strings.ToLower(strings.ReplaceAll(strings.TrimSpace(s), `\`, "/")), "/")
-	}
-	for _, u := range d.Unsynced {
-		if u := norm(u); u != "" && (u == norm(w.Title) || u == norm(w.Path) || u == norm(remote.Base(d.Sep, w.Path))) {
-			return true
-		}
-	}
-	return false
-}
-
-// unsyncedSessions is the sessions kept from Iridium: those in the workspaces kept, and with
-// NoLoose those in none (and their subagents, which no workspace lists).
-func (d *dshAt) unsyncedSessions() map[string]bool {
-	if d.Registry == nil || len(d.Unsynced) == 0 && !d.NoLoose {
-		return nil
-	}
-	out := map[string]bool{}
-	filed := map[string]bool{}
-	for _, w := range d.Registry.Workspaces {
-		kept := d.unsynced(w)
-		for _, id := range w.Sessions {
-			filed[id] = true
-			if kept {
-				out[id] = true
-			}
-		}
-	}
-	if d.NoLoose {
-		for id, s := range d.Sessions {
-			if !s.Sub && !filed[id] {
-				out[id] = true
-			}
-		}
-	}
-	for id, s := range d.Sessions {
-		if s.Sub && out[s.Parent] {
-			out[id] = true
-		}
-	}
-	return out
+	// Sync: its "sync new sessions" is on, since SyncAt (ms): a session active after that is shown.
+	Sync   bool  `json:"sync,omitempty"`
+	SyncAt int64 `json:"syncAt,omitempty"`
 }
 
 // remoteSession is one session's transcript there and what is known of it.
 type remoteSession struct {
-	Project string `json:"project"` // its directory under sessions/
-	File    string `json:"file"`    // the transcript's name in <project>/<id>/
-	Size    int64  `json:"size"`    // its size there
-	Mtime   int64  `json:"mtime"`   // ms
-	Summary int64  `json:"summary"` // the summary's mtime when read; 0: none
-	Cwd     string `json:"cwd"`
-	Title   string `json:"title,omitempty"`
-	Last    int64  `json:"last,omitempty"`
-	Headed  bool   `json:"headed,omitempty"` // its header was read: Sub and Parent are known
-	Sub     bool   `json:"sub,omitempty"`
-	Parent  string `json:"parent,omitempty"`
-	Ended   bool   `json:"ended,omitempty"` // its summary says its last turn ended
-	Seen    int64  `json:"seen,omitempty"`  // ms, when its directory was first seen; 0: long ago
+	Project  string `json:"project"` // its directory under sessions/
+	File     string `json:"file"`    // the transcript's name in <project>/<id>/
+	Size     int64  `json:"size"`    // its size there
+	Mtime    int64  `json:"mtime"`   // ms
+	Cwd      string `json:"cwd"`
+	Title    string `json:"title,omitempty"`
+	Last     int64  `json:"last,omitempty"`
+	Headed   bool   `json:"headed,omitempty"` // its header was read: Sub and Parent are known
+	Sub      bool   `json:"sub,omitempty"`
+	Parent   string `json:"parent,omitempty"`
+	Ended    bool   `json:"ended,omitempty"`
+	Archived bool   `json:"archived,omitempty"` // as its machine said
+	looked   time.Time
 }
 
 const (
-	remoteDeep    = 10 * time.Minute // sessions without a summary looked at one by one
-	remoteCalls   = 8                // file requests at once, at one machine
-	remoteFetchIn = 2 * time.Second  // a session's transcript is mirrored at most this often when read
+	remoteCalls   = 8               // file requests at once, at one machine
+	remoteFetchIn = 2 * time.Second // a session is looked at there, its transcript mirrored, at most this often
+	remoteAway    = 5 * time.Second // how often machines gone away are noticed (nothing is asked of them)
 )
 
-// SetRemote gives the executors whose dsh sessions are listed; before Start.
-func (x *Index) SetRemote(h *remote.Hub) { x.hub = h }
+// SetRemote gives the executors whose dsh sessions are listed, and takes their events of them;
+// before Start, and before they connect.
+func (x *Index) SetRemote(h *remote.Hub) {
+	x.hub = h
+	h.Handle(EventSessions, func(machine string, params json.RawMessage) {
+		var p DesktopSessions
+		if json.Unmarshal(params, &p) == nil && !x.here(machine) {
+			x.enqueue(machine, func() { x.ToldSessions(x.ctx, machine, p) })
+		}
+	})
+	h.Handle(EventWorkspaces, func(machine string, params json.RawMessage) {
+		var p DesktopWorkspaces
+		if json.Unmarshal(params, &p) == nil && !x.here(machine) {
+			x.enqueue(machine, func() { x.ToldWorkspaces(machine, p) })
+		}
+	})
+	h.Handle(EventConfig, func(machine string, params json.RawMessage) {
+		var p DesktopConfig
+		if json.Unmarshal(params, &p) != nil || p.Sync == nil {
+			return
+		}
+		if x.here(machine) {
+			machine = ""
+		}
+		x.enqueue(machine, func() { x.SetSync(machine, *p.Sync) })
+	})
+}
+
+// here: machine is an executor on this computer (DSH Desktop here): its sessions are this disk's.
+func (x *Index) here(machine string) bool {
+	return x.hub != nil && x.hub.Machine(machine).IsLocal()
+}
+
+// enqueue runs f after what machine's events before it asked for, off the connection's reader.
+func (x *Index) enqueue(machine string, f func()) {
+	x.remoteMu.Lock()
+	x.queue[machine] = append(x.queue[machine], f)
+	run := !x.working[machine] && x.ctx.Err() == nil
+	if run {
+		x.working[machine] = true
+		x.wg.Add(1)
+	}
+	x.remoteMu.Unlock()
+	if !run {
+		return
+	}
+	go func() {
+		defer x.wg.Done()
+		for {
+			x.remoteMu.Lock()
+			q := x.queue[machine]
+			if len(q) == 0 || x.ctx.Err() != nil {
+				delete(x.working, machine)
+				delete(x.queue, machine)
+				x.remoteMu.Unlock()
+				return
+			}
+			f := q[0]
+			x.queue[machine] = q[1:]
+			x.remoteMu.Unlock()
+			f()
+		}
+	}()
+}
 
 func (x *Index) remoteDir() string { return filepath.Join(x.o.State, "remote-dsh") }
 
@@ -148,7 +209,7 @@ func (x *Index) loadRemote() {
 		x.remoteMu.Lock()
 		x.remotes[id] = &d
 		x.remoteMu.Unlock()
-		x.putRemote(id, &d, nil)
+		x.putRemote(id, &d)
 	}
 }
 
@@ -235,35 +296,27 @@ func (x *Index) saveRemote(machine string, d *dshAt) {
 	}
 }
 
-// remoteLoop looks at each connected machine every RemoteScan, and at once at one just come.
+// remoteLoop notices machines gone: one away has no session open, one whose app is gone is
+// forgotten. Nothing is asked of them.
 func (x *Index) remoteLoop() {
 	defer x.wg.Done()
-	tick := time.NewTicker(5 * time.Second)
+	tick := time.NewTicker(remoteAway)
 	defer tick.Stop()
-	last := map[string]time.Time{}
+	var dropped time.Time
 	for {
-		x.dropGone()
-		for _, id := range x.hub.Online() {
-			x.pollOpen(id)
-			if time.Since(last[id]) < x.o.RemoteScan {
-				continue
-			}
-			last[id] = time.Now()
-			ctx, cancel := context.WithTimeout(x.ctx, 5*time.Minute)
-			if err := x.ScanMachine(ctx, id); err != nil && !errors.Is(err, wire.ErrOffline) && x.ctx.Err() == nil {
-				x.o.Logf("discover: dsh at %s: %v", id, err)
-			}
-			cancel()
+		if time.Since(dropped) >= x.o.RemoteScan {
+			dropped = time.Now()
+			x.dropGone()
 		}
-		for id := range last {
-			if mc := x.hub.Machine(id); mc != nil {
-				if _, ok := mc.Hello(); !ok {
-					delete(last, id) // looked at again as soon as it is back
-					x.setOpen(id, nil, nil)
-					x.remoteMu.Lock()
-					delete(x.noOpen, id) // asked again: it may be another version then
-					x.remoteMu.Unlock()
-				}
+		x.mu.Lock()
+		var with []string
+		for id := range x.open {
+			with = append(with, id)
+		}
+		x.mu.Unlock()
+		for _, id := range with {
+			if _, ok := x.hub.Machine(id).Hello(); !ok {
+				x.setOpen(id, nil, nil)
 			}
 		}
 		select {
@@ -272,66 +325,6 @@ func (x *Index) remoteLoop() {
 		case <-tick.C:
 		}
 	}
-}
-
-// pollOpen asks machine id's dsh which sessions are open in it now (dsh.open, the dsh plugin's):
-// those are shown run elsewhere, not to be resumed here. One that cannot say is not asked again
-// until it connects anew.
-func (x *Index) pollOpen(id string) {
-	mc := x.hub.Machine(id)
-	x.remoteMu.Lock()
-	skip := x.noOpen[id]
-	x.remoteMu.Unlock()
-	if _, _, ok := dshHome(mc); skip || !ok {
-		return
-	}
-	ctx, cancel := context.WithTimeout(x.ctx, 10*time.Second)
-	defer cancel()
-	r, err := mc.DshOpen(ctx)
-	if wire.IsCode(err, wire.CodeUnsupported) {
-		x.remoteMu.Lock()
-		x.noOpen[id] = true
-		x.remoteMu.Unlock()
-		return
-	}
-	if err != nil {
-		return // as it was: the next poll
-	}
-	open := map[string]bool{}
-	for _, s := range r.Sessions {
-		open[s] = true
-	}
-	var busy map[string]bool
-	if r.Running != nil {
-		busy = map[string]bool{}
-		for _, s := range r.Running {
-			busy[s] = true
-		}
-	}
-	x.setOpen(id, open, busy)
-	x.setUnsynced(id, r.Unsynced, r.UnsyncedUngrouped)
-}
-
-// setUnsynced notes the workspaces machine's dsh plugin keeps from Iridium; if they changed, its
-// sessions are listed again as they say.
-func (x *Index) setUnsynced(machine string, names []string, noLoose bool) {
-	x.remoteMu.Lock()
-	d := x.remotes[machine]
-	same := d == nil || slices.Equal(d.Unsynced, names) && d.NoLoose == noLoose
-	x.remoteMu.Unlock()
-	if same {
-		return
-	}
-	defer x.lockMachine(machine)()
-	x.remoteMu.Lock()
-	d = x.remotes[machine]
-	x.remoteMu.Unlock()
-	if d == nil {
-		return
-	}
-	d.Unsynced, d.NoLoose = names, noLoose
-	x.putRemote(machine, d, d.Registry)
-	x.saveRemote(machine, d)
 }
 
 // setOpen notes the sessions open in machine's dsh, and of those the running ones (busy; nil: not
@@ -381,153 +374,305 @@ func dshHome(mc *remote.Machine) (home, sep string, ok bool) {
 	return cmp.Or(dshhome.Home(ai.Home, hi.Env), remote.Join(hi.Sep, hi.Home, ".dsh")), hi.Sep, true
 }
 
-// ScanMachine looks at dsh's sessions at machine id now: what changed since the last look.
+// at is what is known of dsh at machine, made if it is connected and nothing is known yet; nil if
+// it has no dsh, or is away and unknown. A home that moved starts anew. machine's lock held.
+func (x *Index) at(machine string) *dshAt {
+	home, sep, ok := dshHome(x.hub.Machine(machine))
+	x.remoteMu.Lock()
+	defer x.remoteMu.Unlock()
+	d := x.remotes[machine]
+	switch {
+	case d == nil && !ok:
+		return nil
+	case d == nil, ok && (d.Home != home || d.Sep != sep):
+		was := d
+		d = &dshAt{Home: home, Sep: sep, Sessions: map[string]*remoteSession{}}
+		if was != nil {
+			d.Sync, d.SyncAt = was.Sync, was.SyncAt
+		}
+		x.remotes[machine] = d
+	}
+	return d
+}
+
+// ToldSessions takes what machine's dsh said of its sessions: each is looked at there (its
+// transcript's name and size, at most every remoteFetchIn), listed, and shown if it may be
+// (remoteShown).
+func (x *Index) ToldSessions(ctx context.Context, machine string, p DesktopSessions) {
+	if x.hub == nil {
+		return
+	}
+	defer x.lockMachine(machine)()
+	x.told(ctx, machine, p, false)
+}
+
+// Adopt takes in a session of machine's picked in a search: told of, and shown whatever the
+// switch says. An error if its transcript is not found there.
+func (x *Index) Adopt(ctx context.Context, machine string, s DesktopSession) error {
+	if x.hub == nil {
+		return fmt.Errorf("no machine %q", machine)
+	}
+	mc := x.hub.Find(machine)
+	if mc == nil {
+		return fmt.Errorf("no machine %q", machine)
+	}
+	if _, online := mc.Hello(); !online {
+		return fmt.Errorf("%w: %s", wire.ErrOffline, machine)
+	}
+	defer x.lockMachine(mc.ID())()
+	d := x.told(ctx, mc.ID(), DesktopSessions{Sessions: []DesktopSession{s}}, true)
+	if d == nil || d.Sessions[s.ID] == nil || d.Sessions[s.ID].File == "" {
+		return fmt.Errorf("%w: session %s at %s", os.ErrNotExist, s.ID, machine)
+	}
+	return nil
+}
+
+// told is ToldSessions and Adopt (adopt: its sessions are shown whatever the switch says);
+// machine's lock held.
+func (x *Index) told(ctx context.Context, machine string, p DesktopSessions, adopt bool) *dshAt {
+	d := x.at(machine)
+	if d == nil {
+		return nil
+	}
+	mc := x.hub.Machine(machine)
+	x.mu.Lock()
+	open, busy := map[string]bool{}, map[string]bool{}
+	if !p.Full {
+		for id := range x.open[machine] {
+			open[id] = true
+		}
+		for id := range x.busy[machine] {
+			busy[id] = true
+		}
+	}
+	x.mu.Unlock()
+	for _, id := range p.Gone {
+		delete(d.Sessions, id)
+		delete(open, id)
+		delete(busy, id)
+	}
+	type one struct {
+		id       string
+		s        *remoteSession
+		archived bool // before
+		size     int64
+	}
+	var all []one
+	run := limiter(remoteCalls)
+	for _, t := range p.Sessions {
+		if !validID(t.ID) {
+			continue
+		}
+		s := d.Sessions[t.ID]
+		if s == nil {
+			s = &remoteSession{}
+			d.Sessions[t.ID] = s
+		}
+		all = append(all, one{t.ID, s, s.Archived, s.Size})
+		if t.Cwd != "" && t.Cwd != s.Cwd {
+			s.Cwd, s.Project, s.File, s.Headed = t.Cwd, "", "", false
+		}
+		s.Title, s.Last = cmp.Or(t.Title, s.Title), max(s.Last, t.Last)
+		s.Sub, s.Parent = s.Sub || t.Sub, cmp.Or(t.Parent, s.Parent)
+		s.Ended, s.Archived = t.Ended, t.Archived
+		delete(open, t.ID)
+		delete(busy, t.ID)
+		if t.Open || t.Running {
+			open[t.ID] = true
+		}
+		if t.Running {
+			busy[t.ID] = true
+		}
+		if s.File == "" || time.Since(s.looked) >= remoteFetchIn {
+			run(func() { x.lookRemote(ctx, mc, d, t.ID, s) })
+		}
+	}
+	run(nil)
+	x.putRemote(machine, d)
+	x.setOpen(machine, open, busy)
+	x.saveRemote(machine, d)
+	for _, o := range all {
+		x.remoteShown(d, o.id, o.s, o.archived, adopt)
+		x.follow(ctx, mc, machine, d, o.id, o.s, o.size)
+	}
+	return d
+}
+
+// follow brings the mirror of a session read here before up to its transcript there, if that
+// grew past was.
+func (x *Index) follow(ctx context.Context, mc *remote.Machine, machine string, d *dshAt, id string, s *remoteSession, was int64) {
+	if s.File == "" || s.Size == was {
+		return
+	}
+	local := x.mirrorPath(machine, id, s.File)
+	if _, err := os.Stat(local); err != nil {
+		return
+	}
+	if err := mc.Mirror(ctx, d.there(id, s), local); err != nil {
+		x.o.Logf("discover: mirroring %s from %s: %v", id, machine, err)
+	}
+	x.Changed(id)
+}
+
+// there is session id's transcript at its machine.
+func (d *dshAt) there(id string, s *remoteSession) string {
+	return remote.Join(d.Sep, append(append([]string{d.Home}, dshhome.SessionsDir...), s.Project, id, s.File)...)
+}
+
+// ToldWorkspaces takes DSH Desktop's workspaces at machine as it said them: a session archived
+// there since is archived here, the ones in none of them are its loose ones.
+func (x *Index) ToldWorkspaces(machine string, p DesktopWorkspaces) {
+	if x.hub == nil {
+		return
+	}
+	defer x.lockMachine(machine)()
+	d := x.at(machine)
+	if d == nil {
+		return
+	}
+	r := dshhome.Registry{Archived: map[string]bool{}}
+	for _, w := range p.Workspaces {
+		if w.ID != "" && w.Path != "" {
+			r.Workspaces = append(r.Workspaces, dshhome.Workspace{ID: w.ID, Title: w.Title, Path: w.Path, Sessions: w.Sessions, UpdatedAt: w.UpdatedAt})
+		}
+	}
+	for _, id := range p.Archived {
+		r.Archived[id] = true
+	}
+	x.setRegistry(machine, d, &r, 0)
+	x.saveRemote(machine, d)
+}
+
+// setRegistry makes r machine's registry (at: its file's mtime, 0 if told): the list follows, and
+// the sessions archived there since are archived here.
+func (x *Index) setRegistry(machine string, d *dshAt, r *dshhome.Registry, at int64) {
+	was := d.Registry
+	d.Registry, d.RegistryAt, d.Gone = r, at, nil
+	x.putRemote(machine, d)
+	if r == nil {
+		return
+	}
+	for id := range r.Archived {
+		if s := d.Sessions[id]; s != nil && (was == nil || !was.Archived[id]) {
+			x.remoteShown(d, id, s, false, false)
+		}
+	}
+}
+
+// SetSync sets machine's "sync new sessions" ("": this computer's, dshsync.go): on, its dsh's
+// sessions active from now are shown as they are told of; off, only those taken in (Adopt) and
+// Iridium's own.
+func (x *Index) SetSync(machine string, on bool) {
+	if machine == "" {
+		x.setLocalSync(on)
+		return
+	}
+	if x.hub == nil {
+		return
+	}
+	defer x.lockMachine(machine)()
+	d := x.at(machine)
+	if d == nil || d.Sync == on {
+		return
+	}
+	d.Sync, d.SyncAt = on, 0
+	if on {
+		d.SyncAt = time.Now().UnixMilli()
+	}
+	x.saveRemote(machine, d)
+}
+
+// Sync is machine's "sync new sessions" ("": this computer's).
+func (x *Index) Sync(machine string) bool {
+	if machine == "" {
+		on, _ := x.localSync()
+		return on
+	}
+	x.remoteMu.Lock()
+	defer x.remoteMu.Unlock()
+	d := x.remotes[machine]
+	return d != nil && d.Sync
+}
+
+// ScanMachine looks again now at what is known of dsh at machine id (asked for: a "sync now"):
+// its registry, and its sessions that are listed. It finds no session: those are told of.
 func (x *Index) ScanMachine(ctx context.Context, id string) error {
 	if x.hub == nil {
 		return nil
 	}
 	mc := x.hub.Machine(id)
-	home, sep, ok := dshHome(mc)
-	if !ok {
+	if _, _, ok := dshHome(mc); !ok {
 		return nil
 	}
 	defer x.lockMachine(id)()
-	x.remoteMu.Lock()
-	old := x.remotes[id]
-	x.remoteMu.Unlock()
-	d := &dshAt{Home: home, Sep: sep, Projects: map[string]int64{}, Sessions: map[string]*remoteSession{}}
-	if old != nil && old.Home == home && old.Sep == sep {
-		d.Registry, d.RegistryAt, d.Gone, d.Deep, d.Unsynced, d.NoLoose = old.Registry, old.RegistryAt, old.Gone, old.Deep, old.Unsynced, old.NoLoose
-	} else {
-		old = &dshAt{Projects: map[string]int64{}, Sessions: map[string]*remoteSession{}}
+	d := x.at(id)
+	if d == nil {
+		return nil
 	}
-	join := func(elem ...string) string { return remote.Join(sep, elem...) }
-	sessionsDir := join(append([]string{home}, dshhome.SessionsDir...)...)
-	projects, err := mc.List(ctx, sessionsDir)
-	if wire.IsCode(err, wire.CodeNotFound) {
-		projects, err = nil, nil // no session yet
-	}
-	if err != nil {
-		return err
-	}
-	summaries := map[string]int64{}
-	if ents, err := mc.List(ctx, join(append([]string{home}, dshhome.SummaryDir...)...)); err == nil {
-		for _, e := range ents {
-			if sid, ok := strings.CutSuffix(e.Name, ".json"); ok && e.Type == "file" {
-				summaries[sid] = e.Mtime
-			}
+	x.scanRegistry(ctx, id, mc, d, false)
+	var vis store.Visibility
+	if x.o.Store != nil {
+		var err error
+		if vis, err = x.o.Store.Visibility(); err != nil {
+			return err
 		}
-	} else if !wire.IsCode(err, wire.CodeNotFound) {
-		return err
 	}
-	deep := time.Since(time.UnixMilli(d.Deep)) >= remoteDeep
-	if deep {
-		d.Deep = time.Now().UnixMilli()
-	}
-	// Each project directory: listed again only if its mtime moved (a session made or gone in it).
-	type look struct {
-		id string
-		s  *remoteSession
-	}
-	var looks []look
-	var mu sync.Mutex
+	sizes := map[string]int64{}
 	run := limiter(remoteCalls)
-	for _, p := range projects {
-		if p.Type != "dir" || !strings.HasPrefix(p.Name, "--") {
-			continue
-		}
-		d.Projects[p.Name] = p.Mtime
-		kept, listed := old.Projects[p.Name]
-		if listed && kept == p.Mtime {
-			for sid, s := range old.Sessions {
-				if s.Project == p.Name {
-					c := *s
-					d.Sessions[sid] = &c
-				}
-			}
-			continue
-		}
-		run(func() {
-			ents, err := mc.List(ctx, join(sessionsDir, p.Name))
-			mu.Lock()
-			defer mu.Unlock()
-			if err != nil {
-				delete(d.Projects, p.Name) // listed again next time
-				for sid, s := range old.Sessions {
-					if s.Project == p.Name {
-						c := *s
-						d.Sessions[sid] = &c
-					}
-				}
-				return
-			}
-			for _, e := range ents {
-				if e.Type != "dir" || !validID(e.Name) {
-					continue
-				}
-				if s := old.Sessions[e.Name]; s != nil && s.Project == p.Name {
-					c := *s
-					d.Sessions[e.Name] = &c
-				} else {
-					d.Sessions[e.Name] = &remoteSession{Project: p.Name, Seen: time.Now().UnixMilli()}
-				}
-			}
-		})
-	}
-	run(nil)
-	if ctx.Err() != nil {
-		return ctx.Err()
-	}
-	// Each session whose summary changed, new ones, subagents at work (their summary may say
-	// nothing till they end; the list shows them while they write), and now and then those with
-	// no summary: its transcript's name and size, its summary, its header once. A directory still
-	// without a transcript is looked in each time only while new: dsh leaves empty ones behind,
-	// thousands at a machine, which made each look take minutes (2026-11-09).
-	now := time.Now().UnixMilli()
 	for sid, s := range d.Sessions {
-		sum, has := summaries[sid]
-		if s.File == "" && !deep && now-s.Seen >= remoteDeep.Milliseconds() {
+		if vis != nil && !vis.Shown(string(api.AgentDsh), sid) {
 			continue
 		}
-		working := s.Sub && !s.Ended && now-max(s.Mtime, s.Last) < remoteDeep.Milliseconds()
-		if s.File != "" && (has && sum == s.Summary || !has && !deep) && !working {
-			continue
-		}
-		looks = append(looks, look{sid, s})
-	}
-	for _, l := range looks {
-		run(func() { x.lookRemote(ctx, mc, join, home, l.id, l.s, summaries[l.id]) })
+		sizes[sid] = s.Size
+		run(func() { x.lookRemote(ctx, mc, d, sid, s) })
 	}
 	run(nil)
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	x.scanRegistry(ctx, mc, d, false)
-	x.remoteMu.Lock()
-	x.remotes[id] = d
-	x.remoteMu.Unlock()
-	x.putRemote(id, d, old.Registry)
+	x.putRemote(id, d)
 	x.saveRemote(id, d)
-	// Mirrors of sessions read here follow them.
-	for sid, s := range d.Sessions {
-		if o := old.Sessions[sid]; s.File == "" || o != nil && o.Size == s.Size && o.Mtime == s.Mtime {
-			continue
-		}
-		local := x.mirrorPath(id, sid, s.File)
-		if _, err := os.Stat(local); err == nil {
-			if err := mc.Mirror(ctx, join(sessionsDir, s.Project, sid, s.File), local); err != nil {
-				x.o.Logf("discover: mirroring %s from %s: %v", sid, id, err)
-			}
-			x.Changed(sid)
-		}
+	for sid, was := range sizes {
+		x.follow(ctx, mc, id, d, sid, d.Sessions[sid], was)
 	}
 	return nil
 }
 
-// lookRemote reads what changed of one session there into s.
-func (x *Index) lookRemote(ctx context.Context, mc *remote.Machine, join func(...string) string, home, id string, s *remoteSession, summary int64) {
-	dir := join(append(append([]string{home}, dshhome.SessionsDir...), s.Project, id)...)
-	ents, err := mc.List(ctx, dir)
+// lookRemote looks at one session there: its transcript's name, size and time, and once its
+// header (a subagent's parent; its folder, if none was told). Its directory is the one dsh keeps
+// its folder's sessions in; a session whose folder is not known is looked for under each.
+func (x *Index) lookRemote(ctx context.Context, mc *remote.Machine, d *dshAt, id string, s *remoteSession) {
+	sessions := remote.Join(d.Sep, append([]string{d.Home}, dshhome.SessionsDir...)...)
+	list := func(project string) ([]wire.Entry, error) {
+		return mc.List(ctx, remote.Join(d.Sep, sessions, project, id))
+	}
+	project := s.Project
+	if project == "" && s.Cwd != "" {
+		project = transcript.DshProjectDir(s.Cwd)
+	}
+	var ents []wire.Entry
+	err := error(os.ErrNotExist)
+	if project != "" {
+		ents, err = list(project)
+	}
+	if err != nil && (project == "" || wire.IsCode(err, wire.CodeNotFound)) {
+		ps, perr := mc.List(ctx, sessions)
+		if perr != nil {
+			return
+		}
+		for _, p := range ps {
+			if p.Type != "dir" || p.Name == project {
+				continue
+			}
+			if ents, err = list(p.Name); err == nil {
+				project = p.Name
+				break
+			}
+			if ctx.Err() != nil {
+				return
+			}
+		}
+	}
 	if err != nil {
 		return
 	}
@@ -543,18 +688,12 @@ func (x *Index) lookRemote(ctx context.Context, mc *remote.Machine, join func(..
 	if best == "" {
 		return
 	}
-	if best != s.File {
+	if best != s.File || project != s.Project {
 		s.Headed = false
 	}
-	s.File, s.Size, s.Mtime = best, sizes[best].Size, sizes[best].Mtime
-	if summary != 0 && summary != s.Summary {
-		b, err := mc.ReadFile(ctx, join(append(append([]string{home}, dshhome.SummaryDir...), id+".json")...), 1<<20)
-		if sum, perr := dshhome.ParseSummary(b); err == nil && perr == nil {
-			s.Cwd, s.Title, s.Last, s.Ended, s.Summary = sum.Cwd, sum.Title, sum.Last, sum.Ended, summary
-		}
-	}
+	s.Project, s.File, s.Size, s.Mtime, s.looked = project, best, sizes[best].Size, sizes[best].Mtime, time.Now()
 	if !s.Headed {
-		path := join(dir, best)
+		path := d.there(id, s)
 		for _, n := range []int64{8 << 10, dshhome.HeadBytes} {
 			b, err := mc.ReadAt(ctx, path, 0, n)
 			if err != nil {
@@ -573,14 +712,14 @@ func (x *Index) lookRemote(ctx context.Context, mc *remote.Machine, join func(..
 	}
 }
 
-// scanRegistry reads the workspace registry again if it changed, and then (or if folders, as
-// for a new session's choice) which of its workspaces' folders are gone.
-func (x *Index) scanRegistry(ctx context.Context, mc *remote.Machine, d *dshAt, folders bool) {
+// scanRegistry reads the workspace registry there again if its file changed, and then (or if
+// folders, as for a new session's choice) which of its workspaces' folders are gone.
+func (x *Index) scanRegistry(ctx context.Context, machine string, mc *remote.Machine, d *dshAt, folders bool) {
 	path := remote.Join(d.Sep, append([]string{d.Home}, dshhome.RegistryPath...)...)
 	st, err := mc.Stat(ctx, path)
 	if err != nil {
-		if wire.IsCode(err, wire.CodeNotFound) {
-			d.Registry, d.RegistryAt, d.Gone = nil, 0, nil
+		if wire.IsCode(err, wire.CodeNotFound) && d.RegistryAt != 0 {
+			x.setRegistry(machine, d, nil, 0)
 		}
 		return
 	}
@@ -591,10 +730,11 @@ func (x *Index) scanRegistry(ctx context.Context, mc *remote.Machine, d *dshAt, 
 		}
 		r, err := dshhome.ParseRegistry(b)
 		if err != nil {
-			d.Registry, d.RegistryAt, d.Gone = nil, st.Mtime, nil // another dsh's: the sessions' folders stand in
+			x.setRegistry(machine, d, nil, st.Mtime) // another dsh's: the sessions' folders stand in
 			return
 		}
-		d.Registry, d.RegistryAt, folders = &r, st.Mtime, true
+		x.setRegistry(machine, d, &r, st.Mtime)
+		folders = true
 	}
 	if d.Registry == nil || !folders {
 		return
@@ -648,12 +788,8 @@ func (x *Index) lockMachine(machine string) func() {
 	return l.Unlock
 }
 
-// putRemote makes the index's entries of machine what d has, and their shown markers follow:
-// a session first seen is shown unless DSH Desktop archived it; one archived there since the
-// last look (was: the registry then) is archived here too; one archived that grew comes back.
-func (x *Index) putRemote(machine string, d *dshAt, was *dshhome.Registry) {
-	archived := func(r *dshhome.Registry, id string) bool { return r != nil && r.Archived[id] }
-	kept := d.unsyncedSessions() // kept from Iridium: not listed
+// putRemote makes the index's entries of machine what d has.
+func (x *Index) putRemote(machine string, d *dshAt) {
 	var filed map[string]bool
 	if d.Registry != nil {
 		filed = map[string]bool{}
@@ -664,6 +800,7 @@ func (x *Index) putRemote(machine string, d *dshAt, was *dshhome.Registry) {
 		}
 	}
 	x.mu.Lock()
+	defer x.mu.Unlock()
 	was0, known0 := x.filed[machine]
 	if filed == nil {
 		delete(x.filed, machine)
@@ -671,40 +808,36 @@ func (x *Index) putRemote(machine string, d *dshAt, was *dshhome.Registry) {
 		x.filed[machine] = filed
 	}
 	for id, e := range x.entries {
-		if s := d.Sessions[id]; e.machine == machine && (s == nil || s.File == "" || s.Cwd == "" || kept[id]) {
+		if s := d.Sessions[id]; e.machine == machine && (s == nil || s.File == "" || s.Cwd == "") {
 			delete(x.entries, id)
 			delete(x.files, id)
 			x.changed[id] = true
 		}
 	}
-	var marks []func()
 	for id, s := range d.Sessions {
-		if s.File == "" || s.Cwd == "" || kept[id] {
-			continue // not written yet, or unreadable (looked at again next time); or kept from Iridium
+		if s.File == "" || s.Cwd == "" {
+			continue // not written yet, or not found there (looked at again when told of)
 		}
 		e := &entry{
 			onDisk:  onDisk{id: id, agent: api.AgentDsh, path: x.mirrorPath(machine, id, s.File)},
 			glimpse: glimpse{cwd: s.Cwd, title: s.Title, sub: s.Sub, parent: s.Parent, done: s.Sub && s.Ended},
 			size:    s.Size, mtime: time.UnixMilli(max(s.Mtime, s.Last)),
-			machine: machine, there: remote.Join(d.Sep, append(append([]string{d.Home}, dshhome.SessionsDir...), s.Project, id, s.File)...),
+			machine: machine, there: d.there(id, s),
 		}
 		if o := x.entries[id]; o == nil || o.machine != machine || o.size != e.size || o.mtime != e.mtime || o.title != e.title || o.cwd != e.cwd || o.path != e.path || o.done != e.done || (known0 && !e.sub && !was0[id]) != x.loose(e) {
 			x.changed[id] = true
 		}
 		x.entries[id] = e
-		gone, wasGone := archived(d.Registry, id), archived(was, id)
-		marks = append(marks, func() { x.remoteShown(id, s.Size, gone, wasGone) })
-	}
-	x.mu.Unlock()
-	for _, f := range marks {
-		f()
 	}
 }
 
-// remoteShown sets or takes off a remote session's marker (see putRemote).
-func (x *Index) remoteShown(id string, size int64, archived, wasArchived bool) {
+// remoteShown sets or takes off the marker of session id at a machine. Archived in DSH Desktop
+// since it was last told of (wasArchived: it was before): archived here. Else shown if taken in
+// (adopt); or, with the machine's sync on, if it was active after that was set, and after it was
+// archived here if it was. A subagent goes as its parent does.
+func (x *Index) remoteShown(d *dshAt, id string, s *remoteSession, wasArchived, adopt bool) {
 	st := x.o.Store
-	if st == nil {
+	if st == nil || s.File == "" {
 		return
 	}
 	agent := string(api.AgentDsh)
@@ -713,14 +846,28 @@ func (x *Index) remoteShown(id string, size int64, archived, wasArchived bool) {
 		x.o.Logf("discover: %v", err)
 		return
 	}
+	archived := s.Archived || d.Registry != nil && d.Registry.Archived[id]
+	active := max(s.Mtime, s.Last)
+	synced := d.Sync && active > d.SyncAt
+	if s.Sub && s.Parent != "" && !adopt {
+		p, pok, _ := st.ShownRow(agent, s.Parent)
+		synced = pok && p.Shown
+	}
 	changed := false
 	switch {
-	case !ok && archived, ok && r.Shown && archived && !wasArchived, ok && r.Legacy:
-		err = st.Hide(agent, id, size, 0)
-		changed = !ok || r.Shown
-	case !ok:
+	case ok && r.Legacy:
+		err = st.Hide(agent, id, s.Size, 0)
+		changed = r.Shown
+	case archived && !adopt:
+		if ok && r.Shown && !wasArchived {
+			err = st.Hide(agent, id, s.Size, 0)
+			changed = true
+		}
+	case ok && r.Shown:
+	case adopt:
 		changed, err = st.Show(agent, id)
-	case !r.Shown && !archived && size > r.Size && time.Now().UnixMilli() >= r.QuietUntil:
+	case !synced:
+	case !ok, active > r.At && time.Now().UnixMilli() >= r.QuietUntil:
 		changed, err = st.Show(agent, id)
 	}
 	if err != nil {
@@ -752,6 +899,9 @@ func (x *Index) Fetch(ctx context.Context, id string) error {
 	x.fetched[id] = time.Now()
 	x.fetchMu.Unlock()
 	mc := x.hub.Find(machine)
+	if mc == nil {
+		mc = x.hub.Machine(machine)
+	}
 	online := false
 	if mc != nil {
 		_, online = mc.Hello()
@@ -762,6 +912,20 @@ func (x *Index) Fetch(ctx context.Context, id string) error {
 		}
 		return fmt.Errorf("%w: %s", wire.ErrOffline, machine)
 	}
+	// As it is there now (it may have grown, or moved to a newer format's file, since told of).
+	unlock := x.lockMachine(mc.ID())
+	x.remoteMu.Lock()
+	d := x.remotes[mc.ID()]
+	x.remoteMu.Unlock()
+	if d != nil && d.Sessions[id] != nil {
+		s := d.Sessions[id]
+		x.lookRemote(ctx, mc, d, id, s)
+		if s.File != "" {
+			x.putRemote(mc.ID(), d)
+			there, local = d.there(id, s), x.mirrorPath(mc.ID(), id, s.File)
+		}
+	}
+	unlock()
 	before, _ := os.Stat(local)
 	if err := mc.Mirror(ctx, there, local); err != nil {
 		if _, serr := os.Stat(local); serr == nil {
@@ -792,25 +956,13 @@ func (x *Index) DshWorkspaces(ctx context.Context, machine string) ([]api.DshWor
 		}
 		return []api.DshWorkspace{}, nil // no dsh there
 	}
-	x.remoteMu.Lock()
-	d := x.remotes[mc.ID()]
-	x.remoteMu.Unlock()
-	if d == nil {
-		if err := x.ScanMachine(ctx, mc.ID()); err != nil {
-			return nil, err
-		}
-		x.remoteMu.Lock()
-		d = x.remotes[mc.ID()]
-		x.remoteMu.Unlock()
-		if d == nil {
-			return []api.DshWorkspace{}, nil
-		}
-	}
 	defer x.lockMachine(mc.ID())()
-	x.remoteMu.Lock()
-	d = x.remotes[mc.ID()]
-	x.remoteMu.Unlock()
-	x.scanRegistry(ctx, mc, d, true) // as it is now, its folders looked at
+	d := x.at(mc.ID())
+	if d == nil {
+		return []api.DshWorkspace{}, nil
+	}
+	x.scanRegistry(ctx, mc.ID(), mc, d, true) // as it is now, its folders looked at
+	x.saveRemote(mc.ID(), d)
 	// Listed: a session of its there, not a subagent, not archived here.
 	vis, err := x.o.Store.Visibility()
 	if err != nil {
@@ -823,7 +975,7 @@ func (x *Index) DshWorkspaces(ctx context.Context, machine string) ([]api.DshWor
 	out := []api.DshWorkspace{}
 	if d.Registry != nil {
 		for _, w := range d.Registry.Workspaces {
-			if !d.Gone[w.ID] && !d.unsynced(w) {
+			if !d.Gone[w.ID] {
 				n := 0
 				for _, id := range w.Sessions {
 					if listed(id) {
@@ -845,9 +997,6 @@ func (x *Index) DshWorkspaces(ctx context.Context, machine string) ([]api.DshWor
 		}
 	}
 	for cwd, at := range latest {
-		if d.unsynced(dshhome.Workspace{Title: remote.Base(d.Sep, cwd), Path: cwd}) {
-			continue
-		}
 		out = append(out, api.DshWorkspace{Title: remote.Base(d.Sep, cwd), Path: cwd, UpdatedAt: at, Sessions: count[cwd]})
 	}
 	slices.SortFunc(out, func(a, b api.DshWorkspace) int { return cmp.Compare(b.UpdatedAt, a.UpdatedAt) })

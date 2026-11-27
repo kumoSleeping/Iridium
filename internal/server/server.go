@@ -85,7 +85,9 @@ type Server struct {
 	// App is the web app on the TCP address, past the API; nil is the embedded build (webui).
 	App http.Handler
 	// Remote, if set, takes executors' connections at /v1/internal/exec (docs/exec.md).
-	Remote *remote.Hub
+	Remote       *remote.Hub
+	localExec    atomic.Pointer[remote.LocalExecAuth]
+	localExecSeq atomic.Int64
 
 	// bin: ir-computer as served here (binaries()).
 	bin     *joinscript.Binaries
@@ -221,6 +223,9 @@ func New(cfg config.Config, m *session.Manager, h *hub.Hub, logf func(string, ..
 
 // Close closes ir_web and the gate and stops Satori's events.
 func (s *Server) Close() {
+	if a := s.localExec.Swap(nil); a != nil {
+		_ = a.Close()
+	}
 	if w := s.web(); w != nil {
 		w.Close()
 	}
@@ -314,6 +319,13 @@ func (s *Server) Listen() (tcp, unix net.Listener, err error) {
 	if err != nil {
 		tcp.Close()
 		return nil, nil, err
+	}
+	if ws := remote.LocalExecWSURL(tcp.Addr().String()); ws != "" && s.cfg.StatePath() != "" {
+		if a, lerr := remote.WriteLocalExec(s.cfg.StatePath(), ws); lerr == nil {
+			s.localExec.Store(a)
+		} else {
+			s.logf("server: local-exec credential file: %v", lerr)
+		}
 	}
 	return tcp, unix, nil
 }
@@ -775,14 +787,28 @@ func refuse(w http.ResponseWriter, status int, code, msg string) {
 	reply(w, status, api.Error{Code: code, Message: msg})
 }
 
+func (s *Server) matchLocalExec(tok string) bool {
+	if a := s.localExec.Load(); a != nil {
+		return a.Match(tok)
+	}
+	return false
+}
+
 // execConnect takes an executor's WebSocket (docs/exec.md): a terminal with a TOKEN, as which the
-// machine is known.
+// machine is known, or a local loopback executor authenticated via the state-dir credential file.
 func (s *Server) execConnect(w http.ResponseWriter, r *http.Request) {
 	if s.Remote == nil {
 		refuse(w, http.StatusUnprocessableEntity, "not_here", "no executors here")
 		return
 	}
 	c := callerOf(r)
+	if c.App == gate.LocalExecApp {
+		// Give each local-exec connection a distinct Hub ID so a newly launched real desktop app
+		// does not sever a yielding headless host's active WebSocket before freeze/drain finishes.
+		id := fmt.Sprintf("%s-%d", remote.LocalExecID, s.localExecSeq.Add(1))
+		s.Remote.ServeLocal(w, r, id, c.Name)
+		return
+	}
 	if c.Login != "" || c.Host() || c.socket || c.session != "" {
 		refuse(w, http.StatusForbidden, "no_permission", "an executor connects with a TOKEN")
 		return

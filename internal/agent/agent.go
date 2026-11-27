@@ -82,8 +82,11 @@ type SpawnOptions struct {
 	History bool
 }
 
-// Host is an agent's host composing its launch (wire.CapPrepare).
+// Host is an agent's host composing its launch or serving it in-process.
 type Host struct {
+	// Inproc: the session runs inside the host's own process (e.g. @dsh-desktop over streams):
+	// no --profile sdk, no --patch files, no child process.
+	Inproc bool
 	// Presets are the agent presets it registers, and its default.
 	Presets func() ([]Preset, string, error)
 	// Prepare is what a launch of preset (system: Iridium's system prompt) takes: files where the
@@ -351,7 +354,7 @@ func (u *Usage) Since(before *Usage) map[string]ModelUsage {
 // Every CLAUDE_CODE_ variable goes but the crash-resume switch, which the driver sets itself;
 // CLAUDE_JOB_DIR too, the parent's job directory (Claude 2.1.318 hands it down; Rhodium's list
 // predates it). IRIDIUM_SESSION and RHODIUM_SLOT go too: Iridium sets its own.
-var parentSession = regexp.MustCompile(`^(CLAUDECODE|CLAUDE_CODE_.*|CLAUDE_PID|CLAUDE_EFFORT|CLAUDE_JOB_DIR|CODEX_(THREAD_ID|SESSION_ID|CI|VERSION|APPLY_PATCH_PRESERVE_LINE_ENDINGS)|AI_AGENT|HERDR_.*|IRIDIUM_SESSION|RHODIUM_SLOT)$`)
+var parentSession = regexp.MustCompile(`^(CLAUDECODE|CLAUDE_CODE_.*|CLAUDE_PID|CLAUDE_EFFORT|CLAUDE_JOB_DIR|CODEX_(THREAD_ID|SESSION_ID|CI|VERSION|APPLY_PATCH_PRESERVE_LINE_ENDINGS)|AI_AGENT|HERDR_.*|IRIDIUM_SESSION|DSH_IRIDIUM_(URL|TOKEN|SESSION)|RHODIUM_SLOT)$`)
 
 // CleanEnv is env without what a parent session hands down.
 func CleanEnv(env []string) []string {

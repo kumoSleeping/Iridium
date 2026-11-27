@@ -56,7 +56,7 @@ type Options struct {
 	ProcScan time.Duration // how often /proc is looked at; 0 is 3s
 	Settle   time.Duration // changes are told together after this; 0 is 200ms
 	// State: Iridium's state directory, where what other machines' dsh has is kept (remote.go);
-	// RemoteScan: how often each is looked at, 0 is 30s.
+	// RemoteScan: how often what is kept of machines whose app is gone is dropped, 0 is 30s.
 	State      string
 	RemoteScan time.Duration
 }
@@ -106,7 +106,7 @@ type running struct {
 	start    uint64
 	agent    api.Agent
 	launcher string // the session that started it, if known
-	ours     bool   // Iridium hosts it: IRIDIUM_SESSION is its own id
+	ours     bool   // Iridium hosts it: IRIDIUM_SESSION is its own id; or a local executor's own process (Hub.LocalPIDs) holds it
 	name     string // Claude: the name the user gave it
 	needs    string // Claude: what it waits on you for in its terminal, if it does
 }
@@ -150,16 +150,22 @@ type Index struct {
 	scanLocks map[string]*sync.Mutex // by machine
 	fetchMu   sync.Mutex
 	fetched   map[string]time.Time // by session
+	// queue: what each machine's events asked for, done in their order (enqueue); working: by
+	// whom; remoteMu.
+	queue   map[string][]func()
+	working map[string]bool
 	// open: the sessions open in each machine's own dsh (DSH Desktop), as it last said; x.mu.
-	// noOpen: the machines that cannot say (remoteLoop's).
 	open map[string]map[string]bool
-	// busy: of those, the ones whose agent there runs now; none for a machine whose plugin does
-	// not say (all open ones count as running then); x.mu.
-	busy   map[string]map[string]bool
-	noOpen map[string]bool
+	// busy: of those, the ones whose agent there runs now; x.mu.
+	busy map[string]map[string]bool
 	// filed: the sessions in one of DSH Desktop's workspaces at each machine, as its registry
 	// last read had them (none for a machine whose registry is not known); x.mu.
 	filed map[string]map[string]bool
+
+	// This computer's DSH Desktop (dshsync.go).
+	syncMu sync.Mutex
+	sync   *syncState
+	reg    localRegistry
 }
 
 // SetAlias tells the index the agent's own id of a session Iridium hosts under another (Codex's
@@ -211,7 +217,8 @@ func New(o Options) *Index {
 		files: map[string]*transcript.File{}, changed: map[string]bool{},
 		dshKeys: map[string]string{},
 		remotes: map[string]*dshAt{}, scanLocks: map[string]*sync.Mutex{}, fetched: map[string]time.Time{},
-		open: map[string]map[string]bool{}, busy: map[string]map[string]bool{}, noOpen: map[string]bool{}, filed: map[string]map[string]bool{},
+		queue: map[string][]func(){}, working: map[string]bool{},
+		open: map[string]map[string]bool{}, busy: map[string]map[string]bool{}, filed: map[string]map[string]bool{},
 	}
 }
 
@@ -488,7 +495,9 @@ func (x *Index) look(f onDisk) bool {
 	x.entries[f.id] = &entry{onDisk: f, glimpse: g, size: st.Size(), mtime: st.ModTime()}
 	x.changed[f.id] = true
 	x.mu.Unlock()
-	x.activity(f.agent, f.id, st.Size(), st.ModTime(), e != nil && e.path == f.path && st.Size() > e.size)
+	if !x.desktopKept(f, g, st.ModTime(), e == nil) {
+		x.activity(f.agent, f.id, st.Size(), st.ModTime(), e != nil && e.path == f.path && st.Size() > e.size)
+	}
 	return e == nil
 }
 
@@ -640,6 +649,9 @@ func (x *Index) Free(id string) error {
 	}
 	if live && !r.ours {
 		return fmt.Errorf("%w (process %d)", ErrBusy, r.pid)
+	}
+	if live && x.hostPIDs()[r.pid] {
+		return nil // held by a local executor that runs it in itself (DSH Desktop): driven through it
 	}
 	for _, c := range x.claudeRegistry() {
 		if c.SessionID == id && x.alive(c) {

@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 
+	"github.com/kumoSleeping/iridium/internal/agents"
 	"github.com/kumoSleeping/iridium/internal/irhelp"
 )
 
@@ -16,10 +16,10 @@ import (
 const Help = irhelp.Help
 
 // Main runs ir with args, giving the exit code.
-// At another machine, in a session hosted there (IRIDIUM_URL and the session's own TOKEN in its
-// environment), ir goes to that Iridium over HTTPS (remote.go).
+// At another machine, or in an in-process agent session (IRIDIUM_URL/IRIDIUM_TOKEN or a host
+// agent's scoped equivalent such as DSH_IRIDIUM_*), ir goes to that Iridium over HTTP (remote.go).
 func Main(args []string) int {
-	if url, tok := os.Getenv("IRIDIUM_URL"), os.Getenv("IRIDIUM_TOKEN"); url != "" && strings.HasPrefix(tok, "irs_") {
+	if url, tok := agents.ForwardEnv(os.Getenv); url != "" && tok != "" {
 		return ForwardAt(url, tok, args, os.Stdout, os.Stderr)
 	}
 	return run(args, os.Stdout, os.Stderr)

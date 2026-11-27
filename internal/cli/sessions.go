@@ -215,9 +215,9 @@ func clip(text string, n int) string {
 	return text
 }
 
-// waitMirrored waits for a turn DSH Desktop runs (a message given to its agent): no turn of
-// Iridium's to watch, so for a reply after the page's end before, in the mirrored transcript, and
-// that page still for a while (the turn may go on); then prints it.
+// waitMirrored waits for a turn run by a remote host: no turn of Iridium's to watch, so for a
+// reply after the page's end before, in the mirrored transcript, and that page still for a while
+// (the turn may go on); then prints it.
 func (e *env) waitMirrored(id string, before api.MessagePage) int {
 	p := e.progress()
 	defer p.clear()
@@ -255,7 +255,7 @@ func (e *env) waitMirrored(id string, before api.MessagePage) int {
 			fmt.Fprintln(e.out, strings.TrimRight(reply, "\n"))
 			return exitDone
 		}
-		p.status("DSH Desktop")
+		p.status("remote")
 		time.Sleep(poll)
 	}
 }

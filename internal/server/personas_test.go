@@ -71,11 +71,11 @@ func TestHostPersonas(t *testing.T) {
 	if got == nil || len(got) != 0 {
 		t.Fatalf("with no host: %+v", got)
 	}
-	asked := fakeHost(t, hub, "m1", []string{wire.CapPrepare, wire.CapPersonas}, []wire.Persona{
+	asked := fakeHost(t, hub, "m1", []string{wire.CapAttach, wire.CapPersonas}, []wire.Persona{
 		{ID: "overclock", Name: "超频", Description: "冷静", Text: "你是超频。\n\n## 语言风格\n直接", From: "OMD"},
 		{ID: "empty", Name: "空", Text: ""},
 	})
-	older := fakeHost(t, hub, "m2", []string{wire.CapPrepare}, []wire.Persona{{ID: "x", Name: "x", Text: "x"}})
+	older := fakeHost(t, hub, "m2", []string{wire.CapAttach}, []wire.Persona{{ID: "x", Name: "x", Text: "x"}})
 	l.want(200, "web", "GET", "/v1/internal/personas", nil, &got)
 	if len(got) != 1 || got[0].ID != "overclock" || got[0].Text != "你是超频。\n\n## 语言风格\n直接" || got[0].Machine != "m1" || got[0].Agent != api.AgentDsh || got[0].From != "OMD" {
 		t.Fatalf("the personas: %+v", got)

@@ -144,6 +144,7 @@ func (s *Server) openGate() error {
 	g, err := gate.New(gate.Config{
 		Store:          s.st.Gate(),
 		SessionToken:   s.sessionToken,
+		LocalExecToken: s.matchLocalExec,
 		OnRevoke:       s.revoked,
 		OnTerminals:    s.terminalsChanged,
 		Open:           openPath,

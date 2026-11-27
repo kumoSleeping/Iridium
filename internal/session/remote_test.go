@@ -238,7 +238,8 @@ func TestTakeRemoteDsh(t *testing.T) {
 	sums := filepath.Join(home, "storages", "session_projcache", "sessions")
 	os.MkdirAll(sums, 0o700)
 	os.WriteFile(filepath.Join(sums, id+".json"), []byte(`{"version":7,"record":{"identity":{"cwd":"`+work+`"},"rows":{"title":{"ver":1,"seq":1,"val":"from desktop"}}}}`), 0o600)
-	if err := d.ScanMachine(bg, "m1"); err != nil {
+	// Picked in a search of DSH Desktop's sessions there: taken in.
+	if err := d.Adopt(bg, "m1", discover.DesktopSession{ID: id, Cwd: work, Title: "from desktop"}); err != nil {
 		t.Fatal(err)
 	}
 	l, _ := r.m.List(bg)
@@ -287,24 +288,13 @@ func TestTakeRemoteDsh(t *testing.T) {
 	}
 	r.waitState(id, "stopped", func(s *api.SessionState) bool { return !s.Live })
 
-	// 同步 DSH (a remote group's menu): a session Desktop made since is listed now, not at the next
-	// look; the machine's models are probed again, not taken as kept.
-	const id2 = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
-	dir2 := filepath.Join(home, "sessions", transcript.DshProjectDir(work), id2)
-	os.MkdirAll(dir2, 0o700)
-	fx, _ := os.ReadFile(fixture)
-	os.WriteFile(filepath.Join(dir2, "session.v4.jsonl.zstd"), fx, 0o600)
-	os.WriteFile(filepath.Join(sums, id2+".json"), []byte(`{"version":7,"record":{"identity":{"cwd":"`+work+`"},"rows":{"title":{"ver":1,"seq":1,"val":"made since"}}}}`), 0o600)
-	if _, _, ok := r.m.found(id2); ok {
-		t.Fatal("listed before a look")
-	}
+	// 同步 DSH (a remote group's menu): the machine's models are probed again, not taken as kept.
+	// (A session Desktop made since is not looked for: its dsh tells of it, discover's
+	// ToldSessions.)
 	ch := r.m.o.Channels[api.AgentDsh].(*hdsh.Channel)
 	before := ch.ProbedAt("m1")
 	if err := r.m.Sync(bg, api.AgentDsh, "m1"); err != nil {
 		t.Fatal(err)
-	}
-	if _, _, ok := r.m.found(id2); !ok {
-		t.Error("synced: the new session not listed")
 	}
 	after := ch.ProbedAt("m1")
 	if !after.After(before) {
@@ -421,9 +411,9 @@ func presetIDs(l []agent.Preset) string {
 	return strings.Join(ids, " ")
 }
 
-// At a machine with the dsh plugin, the presets are DSH Desktop's own registry's (dsh.presets): a
-// bundle's or the user's too, by its order, the default its settings pick; a broken one is left
-// out. A session started there runs the preset's rows as the registry has them.
+// At a machine with the dsh plugin speaking dsh.inproc, presets come from Desktop's registry
+// (agent.presets), models come from desktop.models, broken presets are rejected, and Prepare sets
+// Host.Inproc without agent.prepare or patch files.
 func TestRemotePresets(t *testing.T) {
 	t.Parallel()
 	if _, err := exec.LookPath("node"); err != nil {
@@ -442,29 +432,10 @@ func TestRemotePresets(t *testing.T) {
 		{"id": "mine", "name": "Mine", "description": "My own", "plugins": "- id: persona\n  name: '@deepseek-ai/dsh-persona'\n  config:\n    prefix: You are mine.\n- id: tool-web\n  name: '@deepseek-ai/dsh-tool-web'\n"},
 		{"id": "gone", "plugins": "", "broken": "missing service"}]}`
 	os.WriteFile(filepath.Join(desktop, "presets.json"), []byte(presets), 0o600)
-	// Its loader's rows: DSH Desktop's settings of its models (a pi-ai provider, the default).
-	entries := `[
-		{"id": "llm-pi-ai", "name": "@deepseek-ai/dsh-llm-pi-ai", "disabled": false, "config": {"providers": [{"id": "openrouter", "apiKey": {"__jsExpr": "process.env.OR_KEY"}}]}},
-		{"id": "agent-default-model", "name": "@deepseek-ai/dsh-agent-default-model", "config": {"provider": "openrouter", "model": "x/y"}},
-		{"id": "llm-mine", "name": "@deepseek-ai/dsh-llm-mine", "config": {}},
-		{"id": "tool-web", "name": "@deepseek-ai/dsh-tool-web"}]`
-	os.WriteFile(filepath.Join(desktop, "entries.json"), []byte(entries), 0o600)
-	// Its profile's bundles: dsh's own, a third party's (OMD), the plugin itself, one not installed.
-	profile := filepath.Join(desktop, "profile")
-	for f, data := range map[string]string{
-		"package.json":                                    `{"dsh": {"profile": {"bundles": ["@deepseek-ai/dsh-base", "oh-my-dsh", "dsh-remote-iridium", "gone"]}}}`,
-		"node_modules/oh-my-dsh/package.json":             `{"name": "oh-my-dsh", "version": "1.3.9", "dsh": {"bundle": {"patch": ["./cordis.patch.yml", "./presets/cordis.patch.yml"]}}}`,
-		"node_modules/oh-my-dsh/cordis.patch.yml":         "- insert:\n    - id: oh-my-dsh\n      name: oh-my-dsh\n",
-		"node_modules/oh-my-dsh/presets/cordis.patch.yml": "[]\n",
-		"node_modules/dsh-remote-iridium/package.json":    `{"name": "dsh-remote-iridium", "dsh": {"bundle": {"patch": "./cordis.patch.yml"}}}`,
-	} {
-		os.MkdirAll(filepath.Dir(filepath.Join(profile, f)), 0o700)
-		os.WriteFile(filepath.Join(profile, f), []byte(data), 0o600)
-	}
-	scope, _ := filepath.Abs("../agent/dsh/testdata/pkg/node_modules/@deepseek-ai")
-	agents, _ := json.Marshal([]wire.AgentInfo{{Agent: "dsh", Argv: []string{"dsh"}, Version: "0.2.2-rc.1", Scope: scope, Home: filepath.Join(there, ".dsh")}})
+	os.WriteFile(filepath.Join(desktop, "models.json"), []byte(`{"default":"openrouter/x/y","models":[{"value":"openrouter/x/y","name":"XY"}]}`), 0o600)
+	agents, _ := json.Marshal([]wire.AgentInfo{{Agent: "dsh", Argv: []string{"@dsh-desktop"}, Version: "0.2.2-rc.5", Home: filepath.Join(there, ".dsh")}})
 	cmd := exec.Command("node", "../../plugins/dsh-remote-iridium/test/run.mjs", "ws"+strings.TrimPrefix(srv.URL, "http"), "tok", filepath.Join(there, "executor"))
-	cmd.Env = append(os.Environ(), "IRIDIUM_TEST_AGENTS="+string(agents), "IRIDIUM_TEST_DSH="+desktop)
+	cmd.Env = append(os.Environ(), "IRIDIUM_TEST_AGENTS="+string(agents), "IRIDIUM_TEST_DSH="+desktop, `IRIDIUM_TEST_INPROC=["/bin/true"]`)
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
@@ -472,33 +443,16 @@ func TestRemotePresets(t *testing.T) {
 	t.Cleanup(func() { _ = cmd.Process.Signal(syscall.SIGTERM); _ = cmd.Wait() })
 	waitFor(t, "the executor", func() bool { _, ok := hub.Machine("m1").Hello(); return ok })
 
-	// What DSH Desktop composes for a launch there (agent.prepare): its models, then its own
-	// part in the process; a preset of its own, here (preset false). The executor serves none.
-	launch := agent.SpawnOptions{Session: "x", Cwd: "/w", Remote: &agent.Remote{}}
+	launch := agent.SpawnOptions{Session: "x", Cwd: "/w", Remote: &agent.Remote{Argv: []string{"@dsh-desktop"}}}
 	if err := r.m.o.Channels[api.AgentDsh].(harness.Launcher).Prepare(bg, harness.Ref{ID: "x", As: "x", Agent: api.AgentDsh, Machine: "m1"}, &launch); err != nil {
 		t.Fatal(err)
 	}
-	if launch.Host == nil {
-		t.Fatal("no host")
+	if launch.Host == nil || !launch.Host.Inproc || launch.Host.Prepare != nil {
+		t.Fatalf("expected inproc host without agent.prepare, got %+v", launch.Host)
 	}
-	patches, in, err := launch.Host.Prepare("standard", "Iridium's prompt")
-	if err != nil || in || len(patches) != 2 || patches[0] != filepath.Join(desktop, "llm.patch.yml") {
-		t.Fatalf("agent.prepare: %q %v %v", patches, in, err)
-	}
-	b, _ := os.ReadFile(patches[0])
-	for _, line := range []string{
-		"- id: llm-pi-ai\n  disabled: false\n  config: {\"providers\": [{\"id\": \"openrouter\", \"apiKey\": !!js \"process.env.OR_KEY\"}]}\n",
-		"- id: agent-default-model\n  config: {\"provider\": \"openrouter\", \"model\": \"x/y\"}\n",
-	} {
-		if !strings.Contains(string(b), line) {
-			t.Errorf("llm patch, no %q:\n%s", line, b)
-		}
-	}
-	if strings.Contains(string(b), "llm-mine") || strings.Contains(string(b), "tool-web") {
-		t.Errorf("llm patch: rows not the base's llm ones:\n%s", b)
-	}
-	if _, err := hub.Machine("m1").ReadFile(bg, patches[0], 1<<20); err == nil {
-		t.Error("the llm patch was served")
+	cat, err := launch.Catalog()
+	if err != nil || cat.Default != "openrouter/x/y" || len(cat.Models) != 1 {
+		t.Fatalf("desktop.models: %+v %v", cat, err)
 	}
 
 	l, def, err := r.m.Presets(bg, api.AgentDsh, "m1")
@@ -508,11 +462,9 @@ func TestRemotePresets(t *testing.T) {
 	if _, err := r.m.checkPreset(bg, api.AgentDsh, "m1", "gone"); !errors.Is(err, ErrBadRequest) {
 		t.Errorf("a broken preset: %v", err)
 	}
-	// What the launch makes of it: the registry's rows, persona folded in.
-	mine, _ := dsh.FindPreset(l, "mine")
-	pkg := dsh.Package{Scope: scope}
-	b, err = pkg.Patch(mine, "", "")
-	if err != nil || !strings.Contains(string(b), "    personaPrefix: You are mine.\n") || !strings.Contains(string(b), "    - id: iridium-tool-web\n") {
-		t.Errorf("patch: %v\n%s", err, b)
+	// Spawn inproc uses @dsh-desktop --preset mine without any --patch.
+	spec, err := dsh.New(dsh.Options{}).Spawn(agent.SpawnOptions{Session: "x", Cwd: "/w", Preset: "mine", Host: launch.Host, Remote: launch.Remote})
+	if err != nil || len(spec.Argv) < 3 || spec.Argv[0] != "@dsh-desktop" || spec.Argv[1] != "--preset" || spec.Argv[2] != "mine" {
+		t.Fatalf("inproc spawn: %+v %v", spec, err)
 	}
 }

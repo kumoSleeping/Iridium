@@ -147,9 +147,9 @@ func (s *Server) remoteMkdir(w http.ResponseWriter, r *http.Request, req api.New
 	reply(w, http.StatusOK, api.FolderReply{Path: pagePath(hi, p)})
 }
 
-// dshWorkspaces is GET /v1/internal/machines/{id}/dsh/workspaces: the folders a new dsh session there may
-// open in, dsh's own workspaces first (docs/exec.md "远端 DSH").
-func (s *Server) dshWorkspaces(w http.ResponseWriter, r *http.Request) {
+// agentWorkspaces is GET /v1/internal/computers/{id}/{agent}/workspaces: the folders a new session
+// of agent there may open in, the host's own workspaces first.
+func (s *Server) agentWorkspaces(w http.ResponseWriter, r *http.Request) {
 	mc, hi := s.machineAt(w, r.PathValue("id"))
 	if mc == nil {
 		return
@@ -171,20 +171,21 @@ func (s *Server) dshWorkspaces(w http.ResponseWriter, r *http.Request) {
 	reply(w, http.StatusOK, ws)
 }
 
-// dshSync is POST /v1/internal/machines/{id}/dsh/sync: the dsh there read again now, its workspaces and
-// sessions, models and presets (a remote group's menu; docs/exec.md "远端 DSH").
-func (s *Server) dshSync(w http.ResponseWriter, r *http.Request) {
+// agentSync is POST /v1/internal/computers/{id}/{agent}/sync: refreshes workspaces, models, and
+// presets for agent at the remote computer.
+func (s *Server) agentSync(w http.ResponseWriter, r *http.Request) {
 	mc, _ := s.machineAt(w, r.PathValue("id"))
 	if mc == nil {
 		return
 	}
-	if _, ok := mc.Agent(string(api.AgentDsh)); !ok {
-		refuse(w, http.StatusUnprocessableEntity, "no_such_agent", "no dsh at "+mc.ID())
+	ag := api.Agent(r.PathValue("agent"))
+	if _, ok := mc.Agent(string(ag)); !ok {
+		refuse(w, http.StatusUnprocessableEntity, "no_such_agent", "no "+string(ag)+" at "+mc.ID())
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
 	defer cancel()
-	if err := s.m.Sync(ctx, api.AgentDsh, mc.ID()); err != nil {
+	if err := s.m.Sync(ctx, ag, mc.ID()); err != nil {
 		s.remoteError(w, err)
 		return
 	}

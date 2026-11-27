@@ -15,7 +15,6 @@ import (
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/harness"
 	"github.com/kumoSleeping/iridium/internal/remote"
-	"github.com/kumoSleeping/iridium/internal/remote/wire"
 )
 
 // dsh's models (the user, 2026-11-08: not a list of Iridium's own): those its sdk profile
@@ -29,10 +28,28 @@ const (
 )
 
 type catalogEntry struct {
-	at   time.Time
-	cat  agent.Catalog
-	err  error
-	busy chan struct{} // closed when the probe running ends
+	at     time.Time
+	cat    agent.Catalog
+	err    error
+	inproc bool          // fetched via desktop.models; stays valid until desktop.models.changed
+	busy   chan struct{} // closed when the fetch/probe running ends
+}
+
+// putCatalog stores a catalog pushed by desktop.models.changed.
+func (c *Channel) putCatalog(machine string, cat agent.Catalog) {
+	c.presetMu.Lock()
+	if c.catalogs == nil {
+		c.catalogs = map[string]*catalogEntry{}
+	}
+	c.catalogs[machine] = &catalogEntry{at: time.Now(), cat: cat, inproc: true}
+	c.presetMu.Unlock()
+}
+
+// invalidateCatalog clears the cached catalog for machine so the next read fetches fresh data.
+func (c *Channel) invalidateCatalog(machine string) {
+	c.presetMu.Lock()
+	delete(c.catalogs, machine)
+	c.presetMu.Unlock()
 }
 
 // Catalog is the models dsh offers at machine ("": this one).
@@ -40,9 +57,10 @@ func (c *Channel) Catalog(ctx context.Context, machine string) (agent.Catalog, e
 	return c.catalog(ctx, machine, false)
 }
 
-// catalog is Catalog; force: probed now, not the one kept (after one running ends).
+// catalog is Catalog; force: fetched now, not the one kept (after one running ends).
 func (c *Channel) catalog(ctx context.Context, machine string, force bool) (agent.Catalog, error) {
 	for {
+		inprocMC := c.inprocHost(machine)
 		c.presetMu.Lock()
 		if c.catalogs == nil {
 			c.catalogs = map[string]*catalogEntry{}
@@ -58,7 +76,16 @@ func (c *Channel) catalog(ctx context.Context, machine string, force bool) (agen
 				return agent.Catalog{}, ctx.Err()
 			}
 		}
-		if e != nil && !force && (e.err == nil && time.Since(e.at) < catalogFor || e.err != nil && time.Since(e.at) < catalogFailFor) {
+		fresh := false
+		if e != nil && !force {
+			if inprocMC != nil && e.inproc && e.err == nil {
+				// Event-driven: desktop.models stays fresh until desktop.models.changed arrives.
+				fresh = true
+			} else if inprocMC == nil && ((e.err == nil && time.Since(e.at) < catalogFor) || (e.err != nil && time.Since(e.at) < catalogFailFor)) {
+				fresh = true
+			}
+		}
+		if fresh {
 			c.presetMu.Unlock()
 			return e.cat, e.err
 		}
@@ -68,16 +95,76 @@ func (c *Channel) catalog(ctx context.Context, machine string, force bool) (agen
 			c.catalogs[machine].cat = e.cat
 		}
 		c.presetMu.Unlock()
-		cat, err := c.probeCatalog(ctx, machine)
+		var (
+			cat agent.Catalog
+			err error
+		)
+		if inprocMC != nil {
+			cat, err = c.fetchInprocCatalog(ctx, inprocMC)
+		} else {
+			cat, err = c.probeCatalog(ctx, machine)
+		}
 		if err != nil {
 			c.o.Logf("dsh: its models at %q: %v", machine, err)
 		}
 		c.presetMu.Lock()
-		c.catalogs[machine] = &catalogEntry{at: time.Now(), cat: cat, err: err}
+		c.catalogs[machine] = &catalogEntry{at: time.Now(), cat: cat, err: err, inproc: inprocMC != nil}
 		c.presetMu.Unlock()
 		close(busy)
 		return cat, err
 	}
+}
+
+func (c *Channel) fetchInprocCatalog(ctx context.Context, mc *remote.Machine) (agent.Catalog, error) {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	rep, err := desktopModels(ctx, mc)
+	if err != nil {
+		return agent.Catalog{}, err
+	}
+	return rep.toCatalog(), nil
+}
+
+// Workspaces queries desktop.workspaces from an in-process Desktop host at machine.
+func (c *Channel) Workspaces(ctx context.Context, machine string) ([]DesktopWorkspace, error) {
+	mc := c.inprocHost(machine)
+	if mc == nil {
+		return nil, harness.ErrOffline
+	}
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	rep, err := desktopWorkspaces(ctx, mc)
+	if err != nil {
+		return nil, err
+	}
+	return rep.Workspaces, nil
+}
+
+// SearchSessions queries desktop.sessions (on-demand list/search) from an in-process Desktop host.
+func (c *Channel) SearchSessions(ctx context.Context, machine, query string, limit int) ([]DesktopSession, error) {
+	mc := c.inprocHost(machine)
+	if mc == nil {
+		return nil, harness.ErrOffline
+	}
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	rep, err := desktopSessions(ctx, mc, DesktopSessionsParams{Query: query, Limit: limit})
+	if err != nil {
+		return nil, err
+	}
+	return rep.Sessions, nil
+}
+
+// Freeze asks an in-process Desktop host (typically a headless fallback) to freeze
+// storage.backend.json writes before handing off to real DSH Desktop.
+func (c *Channel) Freeze(ctx context.Context, machine string) (DesktopFreezeReply, error) {
+	mc := c.inprocHost(machine)
+	if mc == nil {
+		return DesktopFreezeReply{}, harness.ErrOffline
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	return desktopFreeze(ctx, mc)
 }
 
 // probeCatalog runs dsh's probe at machine, as a unit of its own, and reads what it printed.
@@ -117,7 +204,7 @@ func (c *Channel) probeCatalog(ctx context.Context, machine string) (agent.Catal
 			return agent.Catalog{}, err
 		}
 		home, _ := os.UserHomeDir()
-		run = harness.Run{Argv: append(argv, agentdsh.ProbeArgs(patch, c.hostModels(ctx, "")...)...), Env: env, Cwd: home}
+		run = harness.Run{Argv: append(argv, agentdsh.ProbeArgs(patch)...), Env: env, Cwd: home}
 	} else {
 		mc := c.machine(machine)
 		if mc == nil {
@@ -140,7 +227,7 @@ func (c *Channel) probeCatalog(ctx context.Context, machine string) (agent.Catal
 			return agent.Catalog{}, err
 		}
 		info, _ := agents.Get(api.AgentDsh)
-		argv := append(append([]string{}, ai.Argv...), agentdsh.ProbeArgs(patch, c.hostModels(ctx, machine)...)...)
+		argv := append(append([]string{}, ai.Argv...), agentdsh.ProbeArgs(patch)...)
 		run = harness.Run{Argv: argv, Env: info.RemoteEnv(hi.Env, ai.Home), Cwd: hi.Home}
 	}
 	out, errOut, err := h.RunOnce(ctx, machine, run)
@@ -160,30 +247,12 @@ func (c *Channel) probeCatalog(ctx context.Context, machine string) (agent.Catal
 	return cat, nil
 }
 
-// hostModels are the --patch files that give a dsh process at machine DSH Desktop's models and
-// providers (the user, 2026-11-08: synced with Desktop's), where its dsh plugin is connected
-// (agent.prepare without a session); none if it is not.
-func (c *Channel) hostModels(ctx context.Context, machine string) []string {
-	mc := c.hostOf(machine)
-	if mc == nil {
-		return nil
+// State populates s with the cached model catalog for session r's machine.
+func (c *Channel) State(r harness.Ref, s *api.SessionState) {
+	if !ours(r) {
+		return
 	}
-	ctx, cancel := context.WithTimeout(ctx, prepareWait)
-	defer cancel()
-	r, err := hostPrepare(ctx, mc, wire.PrepareParams{})
-	if err != nil {
-		c.o.Logf("dsh: DSH Desktop's models (%s): %v", mc.ID(), err)
-		return nil
-	}
-	if machine == "" {
-		for _, p := range r.Patches {
-			if err := ownFile(p); err != nil {
-				c.o.Logf("dsh: DSH Desktop's models: %v", err)
-				return nil
-			}
-		}
-	}
-	return r.Patches
+	c.catalogState(r.Machine, s)
 }
 
 // Cached is dsh's models at machine as last probed, stale or not; false if never had.
@@ -197,13 +266,13 @@ func (c *Channel) Cached(machine string) (agent.Catalog, bool) {
 	return e.cat, true
 }
 
-// Warm probes dsh's models at machine in the background if they are not fresh, then shows them
-// in its dsh sessions whose agent has not said its own (not started yet): the page offers a model
-// before the first message (the user, 2026-11-09).
+// Warm fetches dsh's models at machine in the background if they are not cached/fresh, then shows
+// them in its dsh sessions whose agent has not said its own.
 func (c *Channel) Warm(machine string) {
+	inproc := c.inprocHost(machine) != nil
 	c.presetMu.Lock()
 	e := c.catalogs[machine]
-	fresh := e != nil && (e.busy != nil || e.err == nil && time.Since(e.at) < catalogFor || e.err != nil && time.Since(e.at) < catalogFailFor)
+	fresh := e != nil && (e.busy != nil || (inproc && e.inproc && e.err == nil) || (!inproc && (e.err == nil && time.Since(e.at) < catalogFor || e.err != nil && time.Since(e.at) < catalogFailFor)))
 	c.presetMu.Unlock()
 	if fresh || c.h() == nil {
 		return

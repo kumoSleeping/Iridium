@@ -109,6 +109,7 @@ func (x *Index) scanProcs() {
 			p.sessions = x.sessionsOf(pid, p, argv)
 		}
 	}
+	hosts := x.hostPIDs()
 	found := map[string]running{}
 	for pid, p := range all {
 		for _, s := range p.sessions {
@@ -117,7 +118,7 @@ func (x *Index) scanProcs() {
 			own := env["IRIDIUM_SESSION"]
 			// A hosted Codex runs its thread under Iridium's id for the session.
 			mine := own != "" && own != s && x.aliasOf(own) == s
-			r.ours = own == s || mine
+			r.ours = own == s || mine || hosts[pid]
 			for _, k := range launchVars {
 				if v := env[k]; v != "" && v != s && !(mine && v == own) {
 					r.launcher = v
@@ -246,4 +247,13 @@ func contains(l []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// hostPIDs are the local executors' own processes (Hub.LocalPIDs): a session one holds runs in
+// it for Iridium (DSH Desktop's, through the dsh plugin), not elsewhere.
+func (x *Index) hostPIDs() map[int]bool {
+	if x.hub == nil {
+		return nil
+	}
+	return x.hub.LocalPIDs()
 }

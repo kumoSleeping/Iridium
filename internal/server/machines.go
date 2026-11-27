@@ -281,8 +281,8 @@ func (s *Server) machineRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /v1/internal/apps/{id}/agents", s.approver(s.putAgents))
 	mux.HandleFunc("PUT /v1/internal/apps/{id}/owner", s.approver(s.putOwner))
 	mux.HandleFunc("POST /v1/internal/computers/{id}/grant", s.approver(s.postGrant))
-	mux.HandleFunc("GET /v1/internal/computers/{id}/dsh/workspaces", s.dshWorkspaces)
-	mux.HandleFunc("POST /v1/internal/computers/{id}/dsh/sync", s.dshSync)
+	mux.HandleFunc("GET /v1/internal/computers/{id}/{agent}/workspaces", s.agentWorkspaces)
+	mux.HandleFunc("POST /v1/internal/computers/{id}/{agent}/sync", s.agentSync)
 	// The routes' names before 0.2.60 (machines/{id}/…), answered as computers/{id}/… still.
 	mux.Handle("/v1/internal/machines/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r2 := r.Clone(r.Context())

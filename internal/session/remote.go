@@ -59,9 +59,24 @@ func (h *Hosted) machine() *remote.Machine {
 	return h.m.o.Remote.Machine(h.meta.Machine)
 }
 
+// viaMachine is the local executor currently running a local session's proc; nil for OS launcher.
+func (h *Hosted) viaMachine() *remote.Machine {
+	if h.meta.Machine != "" || h.m.o.Remote == nil {
+		return nil
+	}
+	via, _ := h.via.Load().(string)
+	if via == "" {
+		return nil
+	}
+	return h.m.o.Remote.Machine(via)
+}
+
 // offline: the session runs at an executor not connected now.
 func (h *Hosted) offline() bool {
 	mc := h.machine()
+	if mc == nil {
+		mc = h.viaMachine()
+	}
 	if mc == nil {
 		return false
 	}
@@ -73,7 +88,20 @@ func (h *Hosted) launcher() platform.Launcher {
 	if mc := h.machine(); mc != nil {
 		return mc.Launcher()
 	}
+	if mc := h.viaMachine(); mc != nil {
+		return mc.Launcher()
+	}
 	return h.m.o.Launcher
+}
+
+// issueLocalIRToken generates a fresh per-session irs_ token for a local session executed inside a
+// local host process; the executor sets IRIDIUM_URL from its own loopback connection address.
+func (h *Hosted) issueLocalIRToken(env []string) ([]string, error) {
+	tok := IRTokenPrefix + base64.RawURLEncoding.EncodeToString(randomBytes(32))
+	if err := os.WriteFile(filepath.Join(h.dir, fileIRToken), []byte(tokenHash(tok)), 0o600); err != nil {
+		return nil, err
+	}
+	return agent.SetEnv(env, "IRIDIUM_TOKEN", tok), nil
 }
 
 // groupPath is the folder the session is grouped by: its cwd, or for one at an executor
@@ -295,8 +323,9 @@ func readJSONFile(path string, v any) error {
 	return json.Unmarshal(b, v)
 }
 
-// SessionToken is the session whose own TOKEN tok is (an ir at its executor), and that executor,
-// as the gate asks (gate.Config.SessionToken); ok false for none.
+// SessionToken is the session whose own TOKEN tok is (an ir at its executor or in a local
+// in-process agent), and that executor ("local" for a session on this computer), as the gate asks
+// (gate.Config.SessionToken); ok false for none.
 func (m *Manager) SessionToken(tok string) (machine, session string, ok bool) {
 	if !strings.HasPrefix(tok, IRTokenPrefix) {
 		return "", "", false
@@ -305,14 +334,15 @@ func (m *Manager) SessionToken(tok string) (machine, session string, ok bool) {
 	m.mu.Lock()
 	list := make([]*Hosted, 0, len(m.hosted))
 	for _, h := range m.hosted {
-		if h.meta.Machine != "" {
-			list = append(list, h)
-		}
+		list = append(list, h)
 	}
 	m.mu.Unlock()
 	for _, h := range list {
 		b, err := os.ReadFile(filepath.Join(h.dir, fileIRToken))
 		if err == nil && subtle.ConstantTimeCompare(b, []byte(want)) == 1 {
+			if h.meta.Machine == "" {
+				return "local", h.id, true
+			}
 			return h.meta.Machine, h.id, true
 		}
 	}

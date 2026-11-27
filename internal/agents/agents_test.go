@@ -169,11 +169,45 @@ func TestHomesAndSessionVars(t *testing.T) {
 			t.Errorf("%s: no HomeDir or SessionEnv", i.Agent)
 		}
 	}
-	want := []string{"IRIDIUM_SESSION", "CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "CODEX_SESSION_ID", "DSH_SESSION_ID", "PI_SESSION_ID", "ANTIGRAVITY_CONVERSATION_ID"}
+	want := []string{"IRIDIUM_SESSION", "CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "CODEX_SESSION_ID", "DSH_IRIDIUM_SESSION", "DSH_SESSION_ID", "PI_SESSION_ID", "ANTIGRAVITY_CONVERSATION_ID"}
 	if vars := SessionVars(); !slices.Equal(vars, want) {
 		t.Errorf("SessionVars = %v, want %v (docs/api.md)", vars, want)
 	}
 	if len(sessionVarOrder) != len(all) {
 		t.Errorf("sessionVarOrder lacks an agent: %v", sessionVarOrder)
+	}
+}
+
+func TestForwardEnv(t *testing.T) {
+	u, tok := ForwardEnv(func(k string) string {
+		return map[string]string{
+			"DSH_IRIDIUM_URL":   "http://127.0.0.1:7810",
+			"DSH_IRIDIUM_TOKEN": "irs_abc123",
+		}[k]
+	})
+	if u != "http://127.0.0.1:7810" || tok != "irs_abc123" {
+		t.Fatalf("got (%q, %q), want dsh fallback", u, tok)
+	}
+	// IRIDIUM_* takes precedence over DSH_IRIDIUM_* when valid.
+	u, tok = ForwardEnv(func(k string) string {
+		return map[string]string{
+			"IRIDIUM_URL":       "https://ir.example.com",
+			"IRIDIUM_TOKEN":     "irs_primary",
+			"DSH_IRIDIUM_URL":   "http://127.0.0.1:7810",
+			"DSH_IRIDIUM_TOKEN": "irs_secondary",
+		}[k]
+	})
+	if u != "https://ir.example.com" || tok != "irs_primary" {
+		t.Fatalf("got (%q, %q), want IRIDIUM_* precedence", u, tok)
+	}
+	// Non-irs_ token is ignored.
+	u, tok = ForwardEnv(func(k string) string {
+		return map[string]string{
+			"DSH_IRIDIUM_URL":   "http://127.0.0.1:7810",
+			"DSH_IRIDIUM_TOKEN": "ir_not_session",
+		}[k]
+	})
+	if u != "" || tok != "" {
+		t.Fatalf("expected empty for non-irs token, got (%q, %q)", u, tok)
 	}
 }

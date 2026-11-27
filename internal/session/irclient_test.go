@@ -104,7 +104,10 @@ func TestSessionToken(t *testing.T) {
 }
 
 // desktopFinder stands in for discovery: one dsh session at m1, open in DSH Desktop there.
-type desktopFinder struct{ id string }
+type desktopFinder struct {
+	id  string
+	cwd string
+}
 
 func (f desktopFinder) Sessions(context.Context) ([]api.Session, error) { return nil, nil }
 func (f desktopFinder) Free(string) error                               { return nil }
@@ -112,28 +115,53 @@ func (f desktopFinder) Found(id string) (api.Session, *transcript.File, bool) {
 	if id != f.id {
 		return api.Session{}, nil, false
 	}
-	return api.Session{ID: id, Agent: api.AgentDsh, Machine: "m1", Status: api.StatusElsewhere, Live: true, Cwd: `C:\w`}, nil, true
+	cwd := f.cwd
+	if cwd == "" {
+		cwd = `C:\w`
+	}
+	return api.Session{ID: id, Agent: api.AgentDsh, Machine: "m1", Status: api.StatusElsewhere, Live: true, Cwd: cwd}, nil, true
 }
 
-// A message for a dsh session DSH Desktop holds (open in it, its writer lock there): given to
-// Desktop's own agent of it through the plugin (dsh.prompt), with its source tag, not resumed here.
+// A dsh session on a remote Desktop speaking dsh.inproc runs through an @dsh-desktop hold (no
+// held.send forwarding, no --profile sdk or --patch files): the fake inproc handler receives the
+// @dsh-desktop argv directly.
 func TestToDesktop(t *testing.T) {
 	t.Parallel()
 	if _, err := exec.LookPath("node"); err != nil {
 		t.Skip("no node")
 	}
 	const id = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+	there := t.TempDir()
 	hub := &remote.Hub{Logf: t.Logf}
-	r := newRig(t, func(_ *config.Config, o *Options) { o.Remote = hub; o.Discovery = desktopFinder{id} })
+	r := newRig(t, func(_ *config.Config, o *Options) { o.Remote = hub; o.Discovery = desktopFinder{id: id, cwd: there} })
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) { hub.Serve(w, req, "m1", "pc") }))
 	t.Cleanup(srv.Close)
-	there := t.TempDir()
 	desktop := filepath.Join(there, "desktop")
 	os.MkdirAll(desktop, 0o700)
 	os.WriteFile(filepath.Join(desktop, "open.json"), []byte(`["`+id+`"]`), 0o600)
-	agents, _ := json.Marshal([]wire.AgentInfo{{Agent: "dsh", Argv: []string{"dsh"}, Version: "0.2.2-rc.1", Home: filepath.Join(there, ".dsh")}})
+	os.WriteFile(filepath.Join(desktop, "models.json"), []byte(`{"default":"p/m","models":[{"value":"p/m","name":"M"}]}`), 0o600)
+	argvFile := filepath.Join(there, "inproc-argv.json")
+	script := filepath.Join(there, "fake-inproc.mjs")
+	os.WriteFile(script, []byte(`
+import fs from 'node:fs'
+import readline from 'node:readline'
+fs.writeFileSync(`+jsonStr(argvFile)+`, process.env.IRIDIUM_TEST_INPROC_ARGV || '[]')
+const rl = readline.createInterface({ input: process.stdin })
+rl.on('line', (line) => {
+  if (!line.trim()) return
+  const msg = JSON.parse(line)
+  if (msg.id === undefined) return
+  let result = {}
+  if (msg.method === 'initialize') result = { serverInfo: { version: '0.2.2-rc.5' } }
+  else if (msg.method === 'session/prompt') result = { promptId: 'p1' }
+  process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result }) + '\n')
+  if (msg.method === 'shutdown') process.exit(0)
+})
+`), 0o600)
+	inprocCmd, _ := json.Marshal([]string{"node", script})
+	agents, _ := json.Marshal([]wire.AgentInfo{{Agent: "dsh", Argv: []string{"@dsh-desktop"}, Version: "0.2.2-rc.5", Home: filepath.Join(there, ".dsh")}})
 	cmd := exec.Command("node", "../../plugins/dsh-remote-iridium/test/run.mjs", "ws"+strings.TrimPrefix(srv.URL, "http"), "tok", filepath.Join(there, "executor"))
-	cmd.Env = append(os.Environ(), "IRIDIUM_TEST_AGENTS="+string(agents), "IRIDIUM_TEST_DSH="+desktop)
+	cmd.Env = append(os.Environ(), "IRIDIUM_TEST_AGENTS="+string(agents), "IRIDIUM_TEST_DSH="+desktop, "IRIDIUM_TEST_INPROC="+string(inprocCmd))
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
@@ -144,12 +172,23 @@ func TestToDesktop(t *testing.T) {
 	if _, _, err := r.m.SendWith(bg, id, "go on", "web", false); err != nil {
 		t.Fatal(err)
 	}
-	b, _ := os.ReadFile(filepath.Join(desktop, "prompts.jsonl"))
-	var got struct{ Session, How, Text, Source string }
-	if err := json.Unmarshal(b, &got); err != nil || got.Session != id || got.How != "followup" || !strings.HasSuffix(got.Text, "] go on") || got.Source != "user" {
-		t.Errorf("given to Desktop's agent: %s (%v)", b, err)
+	waitFor(t, "inproc hold started", func() bool {
+		b, err := os.ReadFile(argvFile)
+		return err == nil && len(b) > 2
+	})
+	b, _ := os.ReadFile(argvFile)
+	var argv []string
+	if err := json.Unmarshal(b, &argv); err != nil || len(argv) == 0 || argv[0] != "@dsh-desktop" {
+		t.Fatalf("expected @dsh-desktop inproc argv, got %s (%v)", b, err)
 	}
-	if _, err := r.m.get(id); err == nil {
-		t.Error("taken up here too")
+	for _, bad := range []string{"--profile", "--patch"} {
+		if strings.Contains(string(b), bad) {
+			t.Errorf("inproc argv must not include %s: %s", bad, b)
+		}
 	}
+}
+
+func jsonStr(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
 }

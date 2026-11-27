@@ -91,10 +91,13 @@ type seenMeta struct {
 }
 
 // procMeta: proc goes up by one each start; outStart is where its output begins in out.log.
+// Via names the local executor (remote.Hub machine ID) when a session on this computer runs
+// through a local host process rather than the OS launcher directly.
 type procMeta struct {
-	Proc     int   `json:"proc"`
-	OutStart int64 `json:"outStart"`
-	Started  int64 `json:"started"`
+	Proc     int    `json:"proc"`
+	OutStart int64  `json:"outStart"`
+	Started  int64  `json:"started"`
+	Via      string `json:"via,omitempty"`
 }
 
 // Hosted is one session Iridium hosts.
@@ -118,6 +121,7 @@ type Hosted struct {
 	// first wrote to it (-1: none yet; unknown until then): nothing up to there is written again.
 	fed      atomic.Int64
 	recMu    sync.Mutex
+	via      atomic.Value // string: local executor machine ID for the active proc ("" = local OS launcher); read under h.mu too
 	recorded *int64
 
 	mu         sync.Mutex
@@ -142,25 +146,25 @@ type Hosted struct {
 	// shownAt: when the session last did something, as the list says (UpdatedAt): a turn begun or
 	// ended, a process started. Unlike lastActive, not a daemon's restart taking it up, nor the
 	// output replayed then (the user, 2026-11-06: every session read "just now" after a deploy).
-	shownAt   time.Time
-	lastFrom  string // who sent the last message: whose turn an agent's own turn is counted to
-	lastVia   string // the session whose agent sent it, if one did
-	compact   bool   // the last message was /compact: the compaction that follows was asked for
+	shownAt  time.Time
+	lastFrom string // who sent the last message: whose turn an agent's own turn is counted to
+	lastVia  string // the session whose agent sent it, if one did
+	compact  bool   // the last message was /compact: the compaction that follows was asked for
 	// titleTurns: messages since the session's title was last put after one (titleNow);
 	// titleAfterCompact: a compaction since, the title is put after the next.
 	titleTurns        int
 	titleAfterCompact bool
-	turnFrom  string // who began the running turn
-	turnVia   string // the session whose agent began it, if one did
-	draftN    int
-	toolDraft string        // the tool call draft draftN is being written as, if one is
-	toolName  string        // its tool's name
-	ready     chan struct{} // closed once the process said its use so far (attached)
-	base      *agent.Usage  // the session's use as of the last result, for each turn's share
-	file       *transcript.File
-	end        int64
-	hasUserAt  bool
-	lastUserAt int64
+	turnFrom          string // who began the running turn
+	turnVia           string // the session whose agent began it, if one did
+	draftN            int
+	toolDraft         string        // the tool call draft draftN is being written as, if one is
+	toolName          string        // its tool's name
+	ready             chan struct{} // closed once the process said its use so far (attached)
+	base              *agent.Usage  // the session's use as of the last result, for each turn's share
+	file              *transcript.File
+	end               int64
+	hasUserAt         bool
+	lastUserAt        int64
 	// mirroredAt: when the transcript's mirror was last brought up to date (remote.go).
 	mirroredAt time.Time
 	said       cached
@@ -290,6 +294,17 @@ func (h *Hosted) start(ctx context.Context) error {
 
 func (h *Hosted) launch(ctx context.Context, proc int) error {
 	m := h.m
+	// Determine if a local session should run via a local executor (e.g. an in-process host
+	// connected over loopback WS) before checking/starting the holder unit.
+	via := ""
+	if h.meta.Machine == "" && m.o.Remote != nil {
+		if lh, ok := channelOf[harness.LocalHost](m, h.meta.Agent); ok {
+			if id, ok := lh.LocalExecutor(ctx, h.ref()); ok {
+				via = id
+			}
+		}
+	}
+	h.via.Store(via)
 	// The last unit may still be ending (its ExecStopPost running): systemd takes no second one
 	// of the name meanwhile.
 	for i := 0; ; i++ {
@@ -350,6 +365,11 @@ func (h *Hosted) launch(ctx context.Context, proc int) error {
 		if err := h.remoteSpawn(mc, &o); err != nil {
 			return err
 		}
+	} else if via != "" {
+		var err error
+		if o.Env, err = h.issueLocalIRToken(o.Env); err != nil {
+			return err
+		}
 	}
 	if l, ok := channelOf[harness.Launcher](m, h.meta.Agent); ok {
 		if err := l.Prepare(m.ctx, h.ref(), &o); err != nil {
@@ -373,7 +393,7 @@ func (h *Hosted) launch(ctx context.Context, proc int) error {
 		return err
 	}
 	_ = os.Remove(filepath.Join(h.dir, fileStop))
-	pm := procMeta{Proc: proc, OutStart: hold.OutSize(h.dir), Started: time.Now().UnixMilli()}
+	pm := procMeta{Proc: proc, OutStart: hold.OutSize(h.dir), Started: time.Now().UnixMilli(), Via: via}
 	if err := writeJSON(filepath.Join(h.dir, fileProc), pm); err != nil {
 		return err
 	}
@@ -418,6 +438,7 @@ func (h *Hosted) adopt() error {
 		return nil // never started
 	}
 	h.proc = pm.Proc
+	h.via.Store(pm.Via)
 	st, err := h.launcher().State(h.m.ctx, h.unit)
 	if err != nil {
 		return err

@@ -207,21 +207,16 @@ agent 的 `ir sh`：每条命令一个新进程，不经托管进程，不写文
 
 ## dsh 插件
 
-一个 cordis 插件，npm 包 `dsh-remote-iridium`，到 v0.2.54 为止每次发版由 release.yml 用同一版本号发到 npm（Trusted Publishing，不用 TOKEN），2026-11-23 起这里不再发；在 `dsh web` 的“添加插件”里填包名即可装（或 `dsh plugin --profile web add dsh-remote-iridium`），跟着 `dsh web` 常驻：连这边、实现上面的必需部分。它不碰 dsh 自己的会话，每个会话照旧是一个 `dsh --profile sdk --patch …` 子进程（预设和系统提示按进程，`internal/agent/dsh/preset.go`）。
+一个 cordis 插件（`plugins/dsh-remote-iridium`），在 DSH Desktop / `dsh web` 里运行。2026-11-27 重写后，有会话控制器时不再为每个会话另起 `dsh --profile sdk --patch` 子进程，也不再做 `held.*` 转交与 `agent.prepare` 拼补丁：
 
-第三方包的预设（2026-11-09；2026-11-11 起由插件拼）：Desktop 的预设可以来自 web profile 里的 bundle，例如 OMD 的 `omd-ptc`、`oh-my-dsh`，行名是 `oh-my-dsh/host/tool-pwsh` 这种。sdk profile 只从 dsh 安装目录和自己的目录找包，这些行原样放进去会加载失败。插件（`agent.prepare`）照 Desktop 的组合来：预设注册表、web 的禁用、那个 bundle 自己那层（去掉其中的预设声明）、这个预设的声明，再由一个小模块在每个会话创建时绑定这个预设（`agentPresets.recompose`，子代理随父会话）；包名改走找包的模块，在那台机器上按 dsh 的家目录去 `profiles/*/node_modules` 找；这样载入的包引用 dsh 自己的包（`@deepseek-ai/*`，bundle 的 peer 依赖）时，在 profile 里找不到的从正在运行的 dsh 包里找（`module.registerHooks`；2026-11-22，OMD 1.9.2 在 rc.5 下起不来）。实测（dsh 0.2.2-rc.1、OMD 1.3.9）：`omd-ptc`、`oh-my-dsh` 都是 63 个工具。仍没有的：只在 Desktop 网页进程里有的（OMD 的 deepseek-workbench、extensions、rewind 要 `webServer`）。这边（`internal/agent/dsh`）只拼 dsh 自带的预设；没有插件时用不到第三方包的预设。
+- **进程内运行（`dsh.inproc`）**：插件在 `hello` 报能力 `dsh.inproc`、`argv: ["@dsh-desktop"]` 和本进程 `pid`。`hold.start` 的 `argv[0] == "@dsh-desktop"` 时，插件在 Desktop 进程内起一份 dsh 自带 SDK JSON-RPC 服务（`inproc.js`，用流替代子进程 stdio），通过 Desktop 的 `sessionController` 创建或续接会话——同一会话在进程内只有一个 agent，与 Desktop 界面共用模型、预设、工作区与 OMD 插件，没有写锁冲突。新会话自动登记进对应目录的工作区；续接时若驱动没有显式指定模型则传 `--keep-model`，不覆盖 Desktop 里当前选的模型。审批与提问经 `AbortSignal.any` 与 Desktop 界面并行竞速，先答的一方生效并立刻收起另一方的卡片。
+- **本机直连与离线兜底**：本机 Iridium 启动时在状态目录写 `local-exec.json`（Unix `0600`、Windows 单用户受保护 DACL，含 loopback WS 地址与随机 `irl_` token，退出清理；仅本机直连 loopback `GET /v1/internal/exec` 认它，拒带 `CF-Connecting-IP`/`X-Forwarded-For`）。插件的 `local.js` 自动发现并免配对连上本机 Iridium。本机 Desktop 未打开且其 `profiles/desktop` 装了本插件时，`internal/harness/dsh/headless.go` 按「hello 持久化 > 运行进程 > 系统应用索引（Windows Uninstall 注册表 / macOS mdfind / Linux `.desktop`）> 默认路径」找到 Desktop，以 `ELECTRON_RUN_AS_NODE=1` + `IRIDIUM_DESKTOP_HEADLESS=1` 无窗口拉起 `dsh-desktop-host`；真 Desktop 上线后发 `desktop.freeze` 冻结其 `storage.backend.json` 写盘、等在途回合结束平滑退出。未装插件或 Desktop 运行未连上时退回 `dsh --profile sdk`。
+- **会话隔离**：系统提示按会话挂到 `systemPrompt.section`；`ir` 身份经 `ctx.shellEnv` 按会话注入 `DSH_IRIDIUM_URL` / `DSH_IRIDIUM_TOKEN` / `DSH_IRIDIUM_SESSION`（不碰全局 `process.env`，`ir` 本体与 `ir.js` 均识别）；Iridium 侧设定人格时 `argv` 传 `--persona own`，`persona.js` 仅对该会话屏蔽 DSH / OMD 自带人格。
+- **事件驱动（零业务轮询）**：模型目录由 `desktop.models` 与 `desktop.models.changed` 维护（不再每 3 分钟起探测子进程）；预设由 `agent.presets` 与 `desktop.presets.changed` 维护；工作区、会话与开关由 `desktop.workspaces.changed`、`desktop.sessions.changed`、`desktop.config` 推送；未同步会话经 `desktop.sessions` 按需搜索并 `Adopt`。`omd.js` 改为事件去抖，去掉 5 秒定时器。
 
-本机（2026-11-11）：本机的 DSH Desktop 装了插件、配对到本机的 Iridium 时（握手的 `machineID` 同这边的，它的 agent 不当一台机器收），这边在本机起 dsh 和探测模型也问它（`agent.presets`、`agent.prepare`），用它握手报的 dsh（Desktop 自带的）起，所以本机的会话也有 Desktop 的模型、预设和 OMD。它给的补丁必须是本机用户自己的、别人不可写的普通文件，不是就不用（`internal/harness/dsh/ownfile_*.go`）。
+插件以后从这个仓库独立出去（otae，2026-11-22）：这边只认协议，按握手的 `caps` 用，不比版本号；认识 OMD 和别的第三方包的代码只在插件里（`omd.js`）。2026-11-23（kumo）：release.yml 发 npm 的那一步和 `plugins/plugins_test.go` 已从这里删掉。
 
-人格（otae，2026-11-22）：OMD 的人格写在它的主体里（`src/runtime.mjs` 起 `plugins/persona`），装了 OMD 的 Desktop 拼出来的会话都带着它；它进系统提示有两条路：在最后追加几段（段名 `dsh-persona:` 开头），用 OMD 自己的预设时（1.9 起）写进开头的身份段（`oh-my-dsh:persona`）；两条都向它的服务（`dshPersona`）的 `forSession` 要这个会话的人格。数据按 profile 分开存（`~/.dsh/dsh-persona-plugin/<profile 目录的 sha256 前 16 位>/`）。所以 Iridium 起的会话（`--profile sdk`）用的是 sdk 那份，不是 Desktop（web）那份，在 Desktop 里换人格管不到它们。插件这样处理，只有插件里认识 OMD 的那个文件知道这些：
-- `agent.personas`：读 Desktop 的人格库（内置的、自建的、自定义的，不列“关闭人格”），身份一块在前，语言风格、沟通方式、回答呈现各加一个小标题接在后面，不带它每块附的英文范围说明。
-- `persona: "own"`：会话进程里接管人格服务的 `forSession`，对这个进程的会话都答“全空”（同它的“关闭人格”），两条路都拿不到人格（2026-11-22 实测 OMD 1.9.2：只去掉末尾的段时，OMD 预设开头的身份照旧在）。
-- 不给 `persona`：插件在 Desktop 里取这个会话的人格（Desktop 给它选的，否则全局的），会话进程的 `forSession` 答它，和 Desktop 一致。
-- 没装插件的机器：这边自己拼补丁（`internal/agent/dsh`），不带 OMD，没有这些。插件旧、没报这两项能力：网页上没有导入，设定和 OMD 的人格叠在一起。
-
-插件以后从这个仓库独立出去（otae，2026-11-22）：这边只认本文写的协议，按握手的 `caps` 用，不比版本号；认识 OMD 和别的第三方包的代码只在插件里（`omd.js` 这类文件）。迁出时 release.yml 里发 npm 的那一步搬过去，插件用自己的版本号，安装说明的包地址跟着改。2026-11-23（kumo）：release.yml 发 npm 的那一步和在 Go 测试里跑插件测试的 `plugins/plugins_test.go` 已从这里删掉，插件的检查和发布归它自己的仓库。
-
-实测（2026-11-08）：Mac（arm64，Node 25）上 dsh 0.2.2-rc.1 的 `--profile sdk` 握手、开会话、`shutdown` 都和 Linux 一样，记录写在 `sessions/--<目录>--/<会话>/`。0.1.0 没有 sdk profile，执行端握手报的版本低于 0.2.2 时不给开 dsh。Windows 待测。
+实测（2026-11-27，dsh 0.2.2-rc.5）：本机直连、进程内开会话、`/permission`、会话内 `ir` 身份、与网页双向竞速审批、回合中断续接、设置页均端到端通过。
 
 ## 这边要做的
 

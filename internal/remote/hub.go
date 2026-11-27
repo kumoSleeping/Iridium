@@ -35,21 +35,41 @@ type Hub struct {
 	// NameOf is an app's name now, by its ID, for Find; nil: the name it connected with.
 	NameOf func(id string) string
 
-	mu       sync.Mutex
-	machines map[string]*Machine
-	handlers map[string]func(machine string, params json.RawMessage)
+	mu        sync.Mutex
+	machines  map[string]*Machine
+	handlers  map[string][]func(machine string, params json.RawMessage)
+	onChanged []func(id string)
 }
 
-// Handle has fn called with each event named event from an executor (its machine's terminal ID),
-// one a harness's channel speaks (held.changed). It is called on the connection's reading
-// goroutine: it must not wait on the executor. Set before executors connect.
+// Handle registers fn to be called with each event named event from an executor (its machine's
+// terminal ID). Multiple handlers may be registered for the same event. Called on the connection's
+// reading goroutine: it must not wait on the executor. Set before executors connect.
 func (h *Hub) Handle(event string, fn func(machine string, params json.RawMessage)) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.handlers == nil {
-		h.handlers = map[string]func(string, json.RawMessage){}
+		h.handlers = map[string][]func(string, json.RawMessage){}
 	}
-	h.handlers[event] = fn
+	h.handlers[event] = append(h.handlers[event], fn)
+}
+
+// OnChanged registers an additional callback invoked when any machine connects or disconnects.
+func (h *Hub) OnChanged(fn func(id string)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.onChanged = append(h.onChanged, fn)
+}
+
+func (h *Hub) notifyChanged(id string) {
+	if h.Changed != nil {
+		h.Changed(id)
+	}
+	h.mu.Lock()
+	cbs := slices.Clone(h.onChanged)
+	h.mu.Unlock()
+	for _, fn := range cbs {
+		fn(id)
+	}
 }
 
 func (h *Hub) logf(format string, a ...any) {
@@ -127,6 +147,16 @@ func (h *Hub) Online() []string {
 // Serve takes an executor's connection for terminal id (named name), until it ends. A newer
 // connection of the same terminal replaces it.
 func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, id, name string) {
+	h.serve(w, r, id, name, false)
+}
+
+// ServeLocal takes a local-credential executor connection on this computer (zero pairing): its
+// agents are always treated as the host's own (m.local = true), even if Hub.Self is unset.
+func (h *Hub) ServeLocal(w http.ResponseWriter, r *http.Request, id, name string) {
+	h.serve(w, r, id, name, true)
+}
+
+func (h *Hub) serve(w http.ResponseWriter, r *http.Request, id, name string, forceLocal bool) {
 	ws, err := websocket.Accept(w, r, nil)
 	if err != nil {
 		return
@@ -153,19 +183,19 @@ func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, id, name string) {
 		if hi.Sep != "/" && hi.Sep != `\` {
 			return nil, &wire.Error{Code: wire.CodeBadRequest, Message: "sep must be / or \\"}
 		}
-		if h.Self != "" && hi.MachineID == h.Self {
+		if forceLocal || (h.Self != "" && hi.MachineID == h.Self) {
 			// An app on the host: its agents are the host's own (decisions 22), not taken twice;
 			// kept aside, for a launch here it composes (Local).
 			if len(hi.Agents) > 0 {
 				h.logf("executor %s (%s): on this computer: its agents are not taken", name, id)
 			}
 			m.mu.Lock()
-			m.local, m.hostAgents = true, hi.Agents
+			m.local, m.localExec, m.hostAgents = true, forceLocal, hi.Agents
 			m.mu.Unlock()
 			hi.Agents = nil
 		} else {
 			m.mu.Lock()
-			m.local, m.hostAgents = false, nil
+			m.local, m.localExec, m.hostAgents = false, false, nil
 			m.mu.Unlock()
 		}
 		select {
@@ -226,13 +256,51 @@ type Machine struct {
 	relays map[string]*relay // by unit
 	runs   map[string]*Run   // command lines running there (run), by ID
 	change chan struct{}     // closed and replaced when the connection comes or goes
-	// local: it said it is on this computer (Hub.Self); hostAgents, its agents then.
+	// local: it said it is on this computer (Hub.Self or ServeLocal); localExec: connected via
+	// the local loopback credential file; hostAgents: its agents then.
 	local      bool
+	localExec  bool
 	hostAgents []wire.AgentInfo
 }
 
-// Local is a connected executor on this computer that has cap (the newest, if more); nil if none.
+// Local is a connected executor on this computer that has cap. When multiple local connections
+// exist (e.g. a real app alongside a yielding headless fallback, or a self-tunnelled remote
+// connection alongside local-exec), it prefers direct local-exec and non-headless connections.
 func (h *Hub) Local(cap string) *Machine {
+	h.mu.Lock()
+	ms := make([]*Machine, 0, len(h.machines))
+	for _, m := range h.machines {
+		ms = append(ms, m)
+	}
+	h.mu.Unlock()
+	var best *Machine
+	bestScore := -1
+	for _, m := range ms {
+		m.mu.Lock()
+		local := m.local
+		localExec := m.localExec
+		hi := m.hello
+		online := m.conn != nil
+		m.mu.Unlock()
+		if !local || !online || !m.Has(cap) {
+			continue
+		}
+		score := 0
+		if hi != nil && !hi.Headless {
+			score += 2
+		}
+		if localExec {
+			score += 1
+		}
+		if score > bestScore {
+			best, bestScore = m, score
+		}
+	}
+	return best
+}
+
+// LocalHeadless is a connected headless executor on this computer that has cap; nil if none.
+func (h *Hub) LocalHeadless(cap string) *Machine {
 	h.mu.Lock()
 	ms := make([]*Machine, 0, len(h.machines))
 	for _, m := range h.machines {
@@ -242,12 +310,34 @@ func (h *Hub) Local(cap string) *Machine {
 	for _, m := range ms {
 		m.mu.Lock()
 		local := m.local
+		hi := m.hello
+		online := m.conn != nil
 		m.mu.Unlock()
-		if local && m.Has(cap) {
+		if local && online && hi != nil && hi.Headless && m.Has(cap) {
 			return m
 		}
 	}
 	return nil
+}
+
+// LocalPIDs are the processes of the executors connected on this computer that said theirs
+// (Hello.PID): agents they run in themselves are Iridium's to drive through them.
+func (h *Hub) LocalPIDs() map[int]bool {
+	h.mu.Lock()
+	ms := make([]*Machine, 0, len(h.machines))
+	for _, m := range h.machines {
+		ms = append(ms, m)
+	}
+	h.mu.Unlock()
+	out := map[int]bool{}
+	for _, m := range ms {
+		m.mu.Lock()
+		if m.local && m.conn != nil && m.hello != nil && m.hello.PID > 0 {
+			out[m.hello.PID] = true
+		}
+		m.mu.Unlock()
+	}
+	return out
 }
 
 // IsLocal: the executor said it is on this computer (Hub.Self).
@@ -356,9 +446,7 @@ func (m *Machine) connect(c *wire.Conn, hi *wire.Hello) {
 	for _, r := range relays {
 		r.connected(c, states)
 	}
-	if m.hub.Changed != nil {
-		m.hub.Changed(m.id)
-	}
+	m.hub.notifyChanged(m.id)
 }
 
 // disconnect forgets c if it is the machine's connection; false if a newer one replaced it.
@@ -372,9 +460,7 @@ func (m *Machine) disconnect(c *wire.Conn) bool {
 	close(m.change)
 	m.change = make(chan struct{})
 	m.mu.Unlock()
-	if m.hub.Changed != nil {
-		m.hub.Changed(m.id)
-	}
+	m.hub.notifyChanged(m.id)
 	return true
 }
 
@@ -411,14 +497,16 @@ func (m *Machine) Call(ctx context.Context, method string, params, out any) erro
 	return err
 }
 
-// event is an event from the executor: one a channel handles (Hub.Handle), else for the relay
-// of its holder.
+// event is an event from the executor: ones channels/discovery handle (Hub.Handle), else for the
+// relay of its holder.
 func (m *Machine) event(name string, params json.RawMessage) {
 	m.hub.mu.Lock()
-	f := m.hub.handlers[name]
+	fns := slices.Clone(m.hub.handlers[name])
 	m.hub.mu.Unlock()
-	if f != nil {
-		f(m.id, params)
+	if len(fns) > 0 {
+		for _, f := range fns {
+			f(m.id, params)
+		}
 		return
 	}
 	if name == "run.out" || name == "run.exit" {
