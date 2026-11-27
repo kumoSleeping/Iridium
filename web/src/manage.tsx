@@ -259,7 +259,7 @@ function AgentFace({ a, size }: { a: Agent; size: number }) {
  *  soft ground. */
 function Row({ face, name, line, on, onClick, faint }: { face: ReactNode; name: ReactNode; line?: ReactNode; on: boolean; onClick: () => void; faint?: boolean }) {
   return (
-    <button type="button" onClick={onClick} aria-current={on || undefined} className={cn("g-press flex h-10 w-full shrink-0 items-center gap-2.5 rounded-lg px-2 text-left pointer-coarse:h-12", on ? "g-picked" : "hover:bg-wash")}>
+    <button type="button" onClick={onClick} aria-current={on || undefined} className={cn("g-press flex h-10 w-full shrink-0 items-center gap-2.5 rounded-lg px-2 text-left pointer-coarse:h-12", on ? "g-picked" : "hover:g-hovered")}>
       <span className="grid shrink-0 place-items-center">{face}</span>
       <span className={cn("min-w-0 flex-1 truncate text-sm", faint && "text-ink-3")}>{name}</span>
       {line && <span className="flex shrink-0 items-center gap-1.5 text-xs whitespace-nowrap text-ink-3 tabular-nums">{line}</span>}
@@ -305,7 +305,7 @@ function Field({ label, children, onClick, open }: { label: ReactNode; children:
     </>
   );
   return onClick ? (
-    <button type="button" onClick={onClick} aria-expanded={open} className="g-press -mx-2 flex min-h-11 items-center gap-3 rounded-md px-2 text-left hover:bg-wash">
+    <button type="button" onClick={onClick} aria-expanded={open} className="g-press -mx-2 flex min-h-11 items-center gap-3 rounded-md px-2 text-left hover:g-hovered">
       {body}
     </button>
   ) : (
@@ -334,7 +334,7 @@ function Unfold({ open, children }: { open: boolean; children: ReactNode }) {
  *  what it holds unfolds under it. */
 function FoldRow({ face, name, line, open, onClick }: { face: ReactNode; name: ReactNode; line?: ReactNode; open: boolean; onClick: () => void }) {
   return (
-    <button type="button" onClick={onClick} aria-expanded={open} className="g-press -mx-2 flex min-h-11 items-center gap-3 rounded-md px-2 text-left hover:bg-wash">
+    <button type="button" onClick={onClick} aria-expanded={open} className="g-press -mx-2 flex min-h-11 items-center gap-3 rounded-md px-2 text-left hover:g-hovered">
       {face}
       <span className="min-w-0 flex-1 truncate text-sm">{name}</span>
       {line && <span className="flex min-w-0 shrink items-center gap-1.5 truncate text-xs text-ink-3 tabular-nums">{line}</span>}
@@ -697,7 +697,7 @@ function PasskeysFold({ login }: { login: Login }) {
   return (
     <div className="flex flex-col">
       <PasskeyList login={login} />
-      <button type="button" onClick={() => void add()} className="g-press -mx-2 flex min-h-10 items-center gap-2 rounded-md px-2 text-left text-sm text-ink-2 hover:bg-wash">
+      <button type="button" onClick={() => void add()} className="g-press -mx-2 flex min-h-10 items-center gap-2 rounded-md px-2 text-left text-sm text-ink-2 hover:g-hovered">
         <Plus size={15} className="text-ink-3" />
         {t("passkey.add")}
       </button>
@@ -894,7 +894,7 @@ function ComputerDetail({ a, want = "" }: { a: App; want?: string }) {
               <div className="flex flex-col gap-2">
                 <SecretsPane adding={adding} done={() => setAdding(false)} />
                 {!adding && (
-                  <button type="button" onClick={() => setAdding(true)} className="g-press -mx-2 flex min-h-10 items-center gap-2 rounded-md px-2 text-left text-sm text-ink-2 hover:bg-wash">
+                  <button type="button" onClick={() => setAdding(true)} className="g-press -mx-2 flex min-h-10 items-center gap-2 rounded-md px-2 text-left text-sm text-ink-2 hover:g-hovered">
                     <Plus size={15} className="text-ink-3" />
                     {t("manage.newSecret")}
                   </button>

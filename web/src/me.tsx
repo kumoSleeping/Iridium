@@ -40,7 +40,7 @@ export function MeKey({ open, onOpen, dot, code, manage }: { open: boolean; onOp
         onClick={onOpen}
         onPointerEnter={code}
         onFocus={code}
-        className={cn("g-press flex h-11 w-full min-w-0 items-center gap-2.5 rounded-full pl-1.5 pointer-coarse:h-12 pointer-coarse:pl-2", manage ? "pr-11" : "pr-3", open ? "g-picked" : "hover:bg-wash")}
+        className={cn("g-press flex h-11 w-full min-w-0 items-center gap-2.5 rounded-full pl-1.5 pointer-coarse:h-12 pointer-coarse:pl-2", manage ? "pr-11" : "pr-3", open ? "g-picked" : "hover:g-hovered")}
       >
         {/* A grid, not inline: no line's descent under the face, which sits centred in the key. */}
         <span className="relative grid shrink-0">

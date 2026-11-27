@@ -783,7 +783,7 @@ function Row({ depth, flip, chevron, expanded, icon, label, end, selected, onCli
         "group relative flex cursor-default rounded-md pr-2 transition-opacity duration-(--dur-2) select-none",
         // The row open: white paper lifted off the rail; under the pointer a faint wash of ink (kumo,
         // 2026-11-27, 设计's 方案一; styles.css --picked); its words as any row's (2026-11-26: no bold).
-        selected ? "g-picked [--row-bg:var(--picked)]" : "hover:bg-wash",
+        selected ? "g-picked [--row-bg:var(--picked)]" : "hover:g-hovered",
         face ? "items-center py-1.5 pointer-coarse:py-2" : two ? "items-start py-[5px] pointer-coarse:py-2" : "h-[30px] items-center pointer-coarse:h-10",
         faded && "opacity-60",
         dim && "opacity-40",
