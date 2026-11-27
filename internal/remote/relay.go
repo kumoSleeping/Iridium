@@ -193,7 +193,14 @@ func (r *relay) poke() {
 }
 
 func (r *relay) run() {
-	go r.pump()
+	// in.log is opened here, not in pump: made by then, nothing is written into the hold
+	// directory long after the relay started (a test's temp dir being removed, CI 11-23).
+	in, err := os.OpenFile(filepath.Join(r.dir, hold.FileInLog), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o600)
+	if err != nil {
+		r.logf("in.log: %v", err)
+	} else {
+		go r.pump(in)
+	}
 	go r.loop()
 	if c, err := r.m.Conn(); err == nil {
 		hi, _ := r.m.Hello()
@@ -207,12 +214,7 @@ func (r *relay) run() {
 
 // pump records each line of the input pipe in in.log (out.log's size, a space, the line), as the
 // local holder does, and wakes the sender.
-func (r *relay) pump() {
-	in, err := os.OpenFile(filepath.Join(r.dir, hold.FileInLog), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o600)
-	if err != nil {
-		r.logf("in.log: %v", err)
-		return
-	}
+func (r *relay) pump(in *os.File) {
 	defer in.Close()
 	br := bufio.NewReaderSize(r.fifo, 64<<10)
 	for {
