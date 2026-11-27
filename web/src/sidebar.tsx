@@ -11,7 +11,7 @@
 import { Menu } from "@base-ui/react/menu";
 import { Archive, ArchiveRestore, Bookmark, BookmarkMinus, BookmarkX, Bot, Check, ChevronRight, Copy, Ellipsis, Ungroup, Folder, FolderOpen, ListCollapse, Moon, Pencil, Pin, PinOff, Plus, RefreshCw, Square, FolderPlus } from "lucide-react";
 import { ConfirmIcon, confirmName, confirmTitle } from "./confirmname";
-import { Fragment, lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode, type RefObject } from "react";
+import { Fragment, lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactElement, type ReactNode, type RefObject } from "react";
 import { api } from "./api/client";
 import type { Agent, Color, Guilds, Need, Session } from "./api/types.gen";
 import { NO_GUILDS, placesOf, withGroupOrder, withMark, type Places } from "./guilds";
@@ -36,7 +36,7 @@ import { PLACE_DRAG, SESSION_DRAG } from "./chat/refs";
 import { atOf, badge, isQuiet, onUnread, setQuiet, unreadOf, useAt, useQuiet, useUnread } from "./unread";
 import { Face, FaceStack } from "./chat/channel/face";
 import { CloudBadge, MachineFace, shownPath, useLate, useMachine, type Machine } from "./machines";
-import { getCarried, setCarried, useCarried, useLink, useList } from "./store";
+import { getCarried, setCarried, useCarried, useLink, useList, useListed } from "./store";
 import { channelLamp, isMulti } from "./chat/channel/lib";
 import { useVoiceItem, VoiceDock, VoiceMark } from "./voice/dock";
 import { ANY, dropMark, dropTarget, endDrag, listDrop, pinFolder, placeFolder, placeGroup as placeGroupKey, placeSession, startDrag, touchDrag, useDragged, useOver, type Dragged, type Edge, type Over } from "./reorder";
@@ -1298,10 +1298,11 @@ const SessionRow = memo(function SessionRow({ s, where, depth, flip, selected, o
   const title = titleOf(s);
   // A confirmation its agent asked for waits on you too, while it is not at work.
   // A channel's agents (one or several): its lamp is theirs, lit while any of them works.
-  const all = useCarried<Session[]>(s.agents?.length ? "list" : null);
   const ags = s.agents;
   const multi = isMulti(s) ? ags! : undefined;
-  const allMembers = ags?.map((a) => all?.find((x) => x.id === a.session));
+  // Those of the list alone: the row is drawn again as one of them changes, not as any row does.
+  const agIds = useMemo(() => ags?.map((a) => a.session), [ags]);
+  const allMembers = useListed(agIds);
   const members = multi ? allMembers : undefined;
   const soloRow = s.bare && ags?.length === 1 ? ags[0] : undefined;
   const soloAgent = soloRow ? (allMembers?.[0]?.agent ?? soloRow.agent ?? s.agent) : undefined;

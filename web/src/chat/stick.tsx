@@ -103,9 +103,14 @@ const inner = (target: EventTarget | null, list: HTMLElement) => {
 type Mark = { el: Element; seq?: string; off: number };
 const topRow = (el: HTMLElement, col: Element) => {
   const { top, bottom } = el.getBoundingClientRect();
-  const rows = col.querySelector("[data-seq]") ? col.querySelectorAll<HTMLElement>("[data-seq]") : (col.children as HTMLCollectionOf<HTMLElement>);
+  // Only in the column's rows that reach under the pane's top: every message over it was measured
+  // for nothing, and one in a row far off (lazyrows.tsx: not laid out) was laid out to be.
+  const under = function* (): Generator<HTMLElement> {
+    if (!col.querySelector("[data-seq]")) return yield* col.children as HTMLCollectionOf<HTMLElement>;
+    for (const c of col.children) if (c.getBoundingClientRect().bottom > top) yield* c.matches("[data-seq]") ? [c as HTMLElement] : c.querySelectorAll<HTMLElement>("[data-seq]");
+  };
   let pick: HTMLElement | null = null;
-  for (const r of rows) {
+  for (const r of under()) {
     const b = r.getBoundingClientRect();
     if (!b.height || b.bottom <= top) continue;
     if (b.top < top - 0.5) pick = r;

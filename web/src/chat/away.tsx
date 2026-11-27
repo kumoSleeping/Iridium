@@ -6,16 +6,17 @@ import { useMachines } from "../data";
 import { t } from "../i18n";
 import { LINK_COLOR, MachineFace, shownPath, useLink, type Machine } from "../machines";
 import type { Place } from "../places";
-import { useList } from "../store";
+import { useListRow } from "../store";
 import { cn, tilde } from "../ui";
 import { awayOf, folderName } from "./awayof";
 
 /** Where session works when that is not channel's folder: both as the list has them. */
 export function useAway(channel: string, session: string): Place | undefined {
-  const list = useList();
-  if (channel === session) return undefined;
-  const home = list?.find((x) => x.id === channel);
-  const at = list?.find((x) => x.id === session);
+  // Its two rows alone: a message's line is not drawn again as any other session changes.
+  const own = channel === session;
+  const home = useListRow(own ? undefined : channel);
+  const at = useListRow(own ? undefined : session);
+  if (own) return undefined;
   // Known only while both rows are listed. As last known meanwhile (the list not come yet, a row
   // gone from it while its computer's link is down): what was in the box stays in it, not out of
   // it and in again each time the link comes and goes (kumo, 2026-11-19).
