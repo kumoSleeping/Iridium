@@ -194,6 +194,7 @@ type Driver struct {
 	compactDone chan struct{}
 	compactAt   int // the context before a compaction item
 	queue       []agent.Event
+	draining    bool // drainLocked: a goroutine is delivering the queue
 	unknown     map[string]int
 }
 
@@ -376,9 +377,7 @@ func (d *Driver) open(proc int, w *open, ready chan struct{}) {
 		d.emitLocked(agent.GiveUp{Why: why})
 	}
 	close(ready)
-	evs := d.take()
-	d.mu.Unlock()
-	d.flush(evs)
+	d.drainLocked()
 }
 
 func agentVersion(ua string) string {
@@ -431,9 +430,7 @@ func (d *Driver) Detach() {
 	d.mu.Lock()
 	d.resetLocked()
 	d.w = nil
-	evs := d.take()
-	d.mu.Unlock()
-	d.flush(evs)
+	d.drainLocked()
 }
 
 func (d *Driver) reset() {
@@ -592,9 +589,7 @@ func (d *Driver) startCompact(ctx context.Context, input string) error {
 	d.compactDone = make(chan struct{})
 	thread := d.thread
 	d.emitLocked(agent.Taken{InputID: input})
-	evs := d.take()
-	d.mu.Unlock()
-	d.flush(evs)
+	d.drainLocked()
 	if _, err := d.call(ctx, "thread/compact/start", map[string]any{"threadId": thread}); err != nil {
 		d.mu.Lock()
 		d.endCompactLocked()
@@ -667,9 +662,7 @@ func (d *Driver) Answer(ctx context.Context, a api.Answer) error {
 		d.move(agent.Running, "")
 	}
 	d.emitLocked(agent.AskCancel{RequestID: a.RequestID})
-	evs := d.take()
-	d.mu.Unlock()
-	d.flush(evs)
+	d.drainLocked()
 	if p.ask.Kind == "permission" && !a.Allow && a.Message != "" && thread != "" {
 		expected, _ := p.params["turnId"].(string)
 		if expected == "" {
@@ -758,9 +751,7 @@ func (d *Driver) SetModel(ctx context.Context, model string) error {
 	d.pick.model, d.pick.effort = m.ID, effort
 	d.model = m.ID
 	d.emitLocked(agent.Started{Session: d.thread, Model: m.ID, Effort: cmp.Or(effort, m.DefaultEffort)})
-	evs := d.take()
-	d.mu.Unlock()
-	d.flush(evs)
+	d.drainLocked()
 	return nil
 }
 
@@ -1022,9 +1013,7 @@ func (d *Driver) Feed(line []byte, replay bool) {
 	d.mu.Lock()
 	answer := d.feed(line, replay)
 	w := d.w
-	evs := d.take()
-	d.mu.Unlock()
-	d.flush(evs)
+	d.drainLocked()
 	if answer != nil && w != nil {
 		go func() { _ = w(answer) }()
 	}
@@ -1470,6 +1459,25 @@ func (d *Driver) take() []agent.Event {
 	q := d.queue
 	d.queue = nil
 	return q
+}
+
+// drainLocked delivers what is queued, in order, and lets go of d.mu (held as it is called). One
+// goroutine delivers at a time (as agy's): the opening's Hello and a fed thread/start's Started,
+// each delivered by its own, came out the wrong way round (TestTurn, TestCompact on CI).
+func (d *Driver) drainLocked() {
+	if d.draining {
+		d.mu.Unlock()
+		return
+	}
+	d.draining = true
+	for len(d.queue) > 0 {
+		evs := d.take()
+		d.mu.Unlock()
+		d.flush(evs)
+		d.mu.Lock()
+	}
+	d.draining = false
+	d.mu.Unlock()
 }
 
 func (d *Driver) flush(evs []agent.Event) {
