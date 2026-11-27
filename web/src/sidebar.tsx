@@ -407,6 +407,8 @@ export function Sidebar(p: Props) {
     const folderEl = (f: FolderNode, lane: string, level: number): ReactNode => {
       const at = Math.min(level, MAX_IN);
       const first = f.sessions[0];
+      const fOpen = p.expanded(f.key);
+      const fKeys = allFolders([f]).map((x) => x.key);
       return (
         <div key={f.key} role="group">
           <FolderRow
@@ -414,9 +416,10 @@ export function Sidebar(p: Props) {
             depth={at}
             label={level === 0 && w.id === 0 ? <FolderLabel path={f.path} /> : f.name}
             hung={hungOf(folderSessions(f))}
-            open={p.expanded(f.key)}
-            onToggle={() => p.toggle(f.key)}
-            foldBack={foldBackOf(allFolders([f]).map((x) => x.key))}
+            open={fOpen}
+            // Folding a folder folds any expanded sessions inside it too (otae-c, 2026-11-27).
+            onToggle={() => (fOpen && p.foldBack(fKeys), p.toggle(f.key))}
+            foldBack={foldBackOf(fKeys)}
             lane={lane}
             place={placeFolderAt}
             pin={pinFolderOn}
@@ -425,14 +428,14 @@ export function Sidebar(p: Props) {
             // (the user, 2026-11-06).
             plus={!gone(f.path) && p.wsPlus(
               { ...w, key: f.key, root: f.path },
-              <button type="button" onClick={(e) => e.stopPropagation()} aria-label={t("nav.newHere", { ws: f.name })} className={plusKey(p.expanded(f.key))}>
+              <button type="button" onClick={(e) => e.stopPropagation()} aria-label={t("nav.newHere", { ws: f.name })} className={plusKey(fOpen)}>
                 <Plus size={15} />
               </button>,
               plusOpen === f.key,
               (o) => setPlusOpen(o ? f.key : null),
             )}
           />
-          {p.expanded(f.key) && (
+          {fOpen && (
             <>
               {f.children.flatMap((c) => (c.pinned ? [folderEl(c, f.key, level + 1)] : []))}
               {folded(f.sessions, f.key, at + 1, (s) => row(s, at + 1, !!w.machine, undefined, f.key, first && f.children.length > 0 ? dropMark({ kind: "s", id: first.id, lane: f.key }) : undefined))}
@@ -442,6 +445,7 @@ export function Sidebar(p: Props) {
         </div>
       );
     };
+    const wKeys = [w.key, ...allFolders(tops(w)).map((x) => x.key)];
     return (
       <div key={w.key} className={apart ? "mt-4" : "mt-1"} role="group">
         <WsRow
@@ -455,8 +459,8 @@ export function Sidebar(p: Props) {
           root={w.root}
           folders={w.rows.some((r) => r.kind === "folder")}
           open={open}
-          onToggle={() => p.toggle(w.key)}
-          foldBack={foldBackOf([w.key, ...allFolders(tops(w)).map((x) => x.key)])}
+          onToggle={() => (open && p.foldBack(wKeys), p.toggle(w.key))}
+          foldBack={foldBackOf(wKeys)}
           newSub={w.id !== 0 && !gone(w.root) ? () => setPlusOpen(w.key) : undefined}
           wkey={w.key}
           place={placeGroup}
