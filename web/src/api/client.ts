@@ -289,6 +289,8 @@ export const api = {
   addMember: (id: string, m: NewMember) => write<ChannelMembers>("POST", `/v1/internal/channels/${enc(id)}/members`, m, { signal: AbortSignal.timeout(SEND_WAIT) }),
   patchMember: (id: string, member: string, p: MemberPatch) => write<ChannelMembers>("PATCH", `/v1/internal/channels/${enc(id)}/members/${enc(member)}`, p),
   /** archive: its session archived in the same step (the list never has it out and not yet archived). */
+  /** An agent the channel took out and archived, back: out of the archive, in the channel again. */
+  restoreMember: (id: string, member: string) => write<ChannelMembers>("POST", `/v1/internal/channels/${enc(id)}/archived/${enc(member)}`),
   removeMember: (id: string, member: string, archive = false) => write<ChannelMembers>("DELETE", `/v1/internal/channels/${enc(id)}/members/${enc(member)}${archive ? "?archive=1" : ""}`),
   // --- the scripts of a channel's IR (docs/channels.md "脚本") ---
   scripts: (id: string) => get<Script[]>(`/v1/internal/channels/${enc(id)}/scripts`),

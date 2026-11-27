@@ -1029,6 +1029,8 @@ export const zh = {
   "manage.pairCode": "配对码",
   "manage.carried": "带的 Agent",
   "role.deleteSure": "确认删除",
+  "channel.archived": "归档",
+  "channel.bringBack": "恢复",
 } as const;
 
 export type Key = keyof typeof zh;

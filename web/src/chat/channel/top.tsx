@@ -6,16 +6,17 @@
 import { Menu } from "@base-ui/react/menu";
 import { useQueryClient } from "@tanstack/react-query";
 import { useQuery } from "../../api/query";
-import { Check, PencilLine, Plus, Users } from "lucide-react";
+import { Archive, Check, PencilLine, Plus, Users } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { api } from "../../api/client";
-import type { Agent, ChannelMembers, Script, Viewer } from "../../api/types.gen";
+import type { Agent, ChannelMember, ChannelMembers, Script, Viewer } from "../../api/types.gen";
 import { agentsQ, isComputer, useApps, useMachines, useMe } from "../../data";
 import { t, useLang } from "../../i18n";
 import { useMachine } from "../../machines";
 import { prefetchRoles } from "../../roles";
 import { useCarried, useList, useSession } from "../../store";
-import { toast } from "../../toast";
+import { errText, toast } from "../../toast";
+import { change } from "../../pending";
 import { agentName, Avatar, cn, Tip, MenuPortal } from "../../ui";
 import { openEdit } from "./editing";
 import { Face, MemberFace } from "./face";
@@ -199,6 +200,15 @@ function MemberList({ id, viewers, ask, script, inviteFirst, done }: { id: strin
   const agents = (members?.members ?? []).filter((m) => m.session);
   // What the channel's page lends: its composer's @, its way to a session's record.
   const lent = actsOf(id);
+  const qc = useQueryClient();
+  const bringBack = async (m: ChannelMember) => {
+    try {
+      const ms = await change(m.session!, { archived: false }, () => api.restoreMember(id, m.member));
+      qc.setQueryData<ChannelMembers>(["members", id], ms);
+    } catch (e) {
+      toast(t("err.action"), { error: true, description: errText(e) });
+    }
+  };
   // The phone's +: at the first row's end, 邀请 its next page (kumo + Neon, 2026-11-26), with no
   // 返回 at its head: as the computer's + opens it, its computers' row at the top (kumo, 2026-11-26).
   const pages = usePages();
@@ -258,6 +268,18 @@ function MemberList({ id, viewers, ask, script, inviteFirst, done }: { id: strin
           card. What wakes an agent is not listed here (kumo, 2026-11-24): it is the agent's own,
           in its 唤醒 and its 编辑资料. */}
       <Commands id={id} scripts={scripts} script={script} />
+      {/* Its agents taken out and archived (kumo, 2026-11-27), at the foot: one pressed back at work here. */}
+      {may && (members?.archived?.length ?? 0) > 0 && (
+        <Sub icon={<Archive size={15} />} label={t("channel.archived")} now={String(members!.archived!.length)} i={0}>
+          {members!.archived!.map((m) => (
+            <Menu.Item key={m.member} onClick={() => void bringBack(m)} className={ITEM}>
+              <Face id={m.session!} agent={m.agent ?? "claude"} size={16} />
+              <span className="min-w-0 flex-1 truncate">{m.nick || agentName(m.agent ?? "claude")}</span>
+              <span className="shrink-0 text-xs text-ink-3">{t("channel.bringBack")}</span>
+            </Menu.Item>
+          ))}
+        </Sub>
+      )}
       {/* No 人 / 所有人 here (kumo, 2026-11-16), no 邀请 (kumo, 2026-11-25): the + beside the key. */}
     </>
   );

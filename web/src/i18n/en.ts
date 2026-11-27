@@ -1029,4 +1029,6 @@ export const en: Dict = {
   "manage.pairCode": "Code",
   "manage.carried": "Agents it brings",
   "role.deleteSure": "Confirm delete",
+  "channel.archived": "Archived",
+  "channel.bringBack": "Bring back",
 };

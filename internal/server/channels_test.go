@@ -1597,3 +1597,44 @@ func TestRemoveAndArchive(t *testing.T) {
 	// An agent's ir may not.
 	l.want(403, "agent-in:"+ch, "DELETE", "/v1/internal/channels/"+ch+"/members/agent:"+ch+"?archive=1", nil, nil)
 }
+
+// The channel's 归档 (kumo, 2026-11-27): an agent taken out and archived is listed with the
+// members, and one request brings it back: out of the archive, in again under its nick.
+func TestArchivedBack(t *testing.T) {
+	t.Parallel()
+	l, ch, second := two(t)
+	var ms api.ChannelMembers
+	l.want(200, "web", "GET", "/v1/internal/channels/"+ch+"/members", nil, &ms)
+	nick := ""
+	for _, m := range ms.Members {
+		if m.Member == "agent:"+second {
+			nick = m.Nick
+		}
+	}
+	l.want(200, "web", "DELETE", "/v1/internal/channels/"+ch+"/members/agent:"+second+"?archive=1", nil, &ms)
+	if len(ms.Archived) != 1 || ms.Archived[0].Session != second || ms.Archived[0].Nick != nick || nick == "" {
+		t.Fatalf("archived: %+v (nick %q)", ms.Archived, nick)
+	}
+	l.want(403, "agent-in:"+ch, "POST", "/v1/internal/channels/"+ch+"/archived/agent:"+second, nil, nil)
+	ms = api.ChannelMembers{}
+	l.want(200, "web", "POST", "/v1/internal/channels/"+ch+"/archived/agent:"+second, nil, &ms)
+	back := false
+	for _, m := range ms.Members {
+		back = back || (m.Member == "agent:"+second && m.Nick == nick)
+	}
+	if !back || len(ms.Archived) != 0 {
+		t.Fatalf("not back: %+v", ms)
+	}
+	var st api.SessionState
+	if l.want(200, "web", "GET", "/v1/internal/sessions/"+second, nil, &st); st.Archived {
+		t.Errorf("still archived: %+v", st.Session)
+	}
+	// Once only.
+	l.want(422, "web", "POST", "/v1/internal/channels/"+ch+"/archived/agent:"+second, nil, nil)
+	// Out again without archiving: not in the 归档.
+	ms = api.ChannelMembers{}
+	l.want(200, "web", "DELETE", "/v1/internal/channels/"+ch+"/members/agent:"+second, nil, &ms)
+	if len(ms.Archived) != 0 {
+		t.Fatalf("listed without being archived: %+v", ms.Archived)
+	}
+}

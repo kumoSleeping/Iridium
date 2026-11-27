@@ -1320,6 +1320,11 @@ export interface ChannelMembers {
    * Warn: what a change just made may lead to (a loop of subscriptions), a line each.
    */
   warn?: string[];
+  /**
+   * Archived: its agents taken out and archived (移出并归档) whose sessions are still in the
+   * archive, newest first; POST …/archived/{member} brings one back (kumo, 2026-11-27).
+   */
+  archived?: ChannelMember[];
 }
 /**
  * NewMember adds an agent to a channel: Session, a session there is; else a new session of

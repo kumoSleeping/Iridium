@@ -44,6 +44,7 @@ POST internal/channels/{id}/continue {seq} -> {ok}  go on where agents passing m
 GET internal/ats - -> ChannelAts  per channel, the first message that names you (@name, @全体成员, a quote of your words) and you have not read: {seq, everyone}; person only
 POST internal/dm {user} -> {channel}  the channel of you and one person (a login's user id; "local" the host): the same two, the same one; no agent, the two its people
 DELETE internal/channels/{id}/members/{member} {archive?} -> ChannelMembers  take a member out; its session stays as it is, or archive=1: archived in the same step (those hung under it too); person only
+POST internal/channels/{id}/archived/{member} - -> ChannelMembers  bring back an agent the channel took out and archived (ChannelMembers.archived): out of the archive, in the channel again under its nick; person only
 GET internal/sessions/{id}/injections - -> Injection[]  what the agent was given by the channel, newest first: where each part came from  view=id,seq,at
 POST internal/block.list {channel_id, next?, direction?, limit?, order?, _data.blocks?} -> BidiList<Message>  a session's own record, a message a block (thinking, tool calls too)  view=id,content
   _data.blocks:=true: the page's blocks as Iridium keeps them too, in _data.blocks (kind, text, from, tool calls).
