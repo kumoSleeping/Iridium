@@ -9,7 +9,7 @@ import { Menu } from "@base-ui/react/menu";
 import { change } from "../../pending";
 import { Popover } from "@base-ui/react/popover";
 import { useQueryClient } from "@tanstack/react-query";
-import { AtSign, MessageCircle, Box, Check, CircleStop, FoldVertical, Mail, PencilLine, ScrollText, ShieldCheck, UserMinus } from "lucide-react";
+import { AtSign, ChevronRight, LayoutGrid, MessageCircle, Box, Check, CircleStop, FoldVertical, Mail, PencilLine, ScrollText, ShieldCheck, UserMinus } from "lucide-react";
 import { useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { api } from "../../api/client";
 import { stopTurn } from "../live";
@@ -30,10 +30,10 @@ import { useAhead } from "../../prefetch";
 import { memberError } from "./key";
 import { ownAgent, type AgentRow } from "./lib";
 import { memberMenu, type MenuKey } from "./menu";
-import { recvWords, useRecvName, useRecvOptions } from "./recv";
+import { recvWords, useRecvGroups, useRecvName, type RecvApp } from "./recv";
 import { fromOf, hasMore, recvLabel, toggle, withFrom } from "./scripts";
 import { CARD_POP, ProfileCard, type CardKey } from "./profilecard";
-import { Deeper, Paged } from "./pages";
+import { Deeper, Paged, usePages } from "./pages";
 
 const ITEM = "flex h-8 cursor-default items-center gap-2.5 rounded-md px-2.5 text-base outline-none select-none data-highlighted:bg-fill data-popup-open:bg-fill pointer-coarse:h-9";
 const POPUP = "g-unfold glass thick float rounded-lg text-ink outline-none";
@@ -189,18 +189,79 @@ function Pick({ icon, label, now, value, options, set, i }: { icon: ReactNode; l
 }
 
 /** 唤醒 (docs/channels.md "唤醒"): whose words wake it. What names it always does (its row
- *  checked, not to be pressed); then every member, the channel's people, its other agents, each
- *  pressed in or out, the menu left open. The rest of what wakes it is in 编辑资料 (onedit.tsx). */
+ *  checked, not to be pressed); then every member, web logins, other agents; non-web apps live
+ *  under the bottom 应用 entry, switching pages in place (never a 3rd-level popup; kumo, 2026-11-27).
+ *  The rest of what wakes it is in 编辑资料 (onedit.tsx). */
 function WakePick({ channel, a, set, i }: { channel: string; a: AgentRow; set: (on: Trigger[]) => void; i: number }) {
-  const options = useRecvOptions(channel, a.session);
+  const outer = usePages();
+  const { main, apps } = useRecvGroups(channel, a.session);
   const name = useRecvName(channel);
   const from = fromOf(a.on);
+  const flip = (entry: string) => () => set(withFrom(a.on, toggle(from, entry)));
   const row = (key: string, on: boolean, face: ReactNode, label: string, run?: () => void, j = 0) => (
     <Menu.Item key={key} closeOnClick={false} disabled={!run} onClick={run} style={{ "--i": j } as CSSProperties} className={cn(ITEM, "data-disabled:text-ink-2")}>
       <span className="grid size-3.5 shrink-0 place-items-center text-ink">{on && <Check size={14} />}</span>
       {face}
       <span className="min-w-0 flex-1 truncate">{label}</span>
     </Menu.Item>
+  );
+  const appHits = (app: RecvApp) => (app.direct ? (from.includes(app.direct) ? 1 : 0) : (app.all && from.includes(app.all) ? 1 : 0) + app.logins.filter((l) => from.includes(l.entry)).length);
+  const appsHits = apps.reduce((n, x) => n + appHits(x), 0);
+  const body = (
+    <div className="g-stagger flex flex-col">
+      {row("@", true, <AtSign size={15} className="shrink-0 text-ink-2" />, t("on.at"))}
+      {main.map((o, j) => row(o.entry, from.includes(o.entry), o.face, o.label, flip(o.entry), j + 1))}
+      {apps.length > 0 && (
+        <>
+          <div role="separator" className="mx-2.5 my-1 border-t border-(--edge)" />
+          <Deeper
+            bare
+            title={t("channel.app")}
+            i={main.length + 1}
+            popup=""
+            row={
+              <>
+                <span className="grid size-3.5 shrink-0 place-items-center text-ink">{appsHits > 0 && <Check size={14} />}</span>
+                <LayoutGrid size={15} className="shrink-0 text-ink-2" />
+                <span className="min-w-0 flex-1 truncate">{t("channel.app")}</span>
+                {appsHits > 0 && <span className="text-xs text-ink-3 tabular-nums">{appsHits}</span>}
+                <ChevronRight size={14} className="shrink-0 text-ink-4" />
+              </>
+            }
+          >
+            <div className="g-stagger flex flex-col">
+              {apps.map((app, j) =>
+                app.direct ? (
+                  row(app.direct, from.includes(app.direct), app.face, app.name, flip(app.direct), j)
+                ) : (
+                  <Deeper
+                    key={app.id}
+                    bare
+                    title={app.name}
+                    i={j}
+                    popup=""
+                    row={
+                      <>
+                        <span className="grid size-3.5 shrink-0 place-items-center text-ink">{appHits(app) > 0 && <Check size={14} />}</span>
+                        {app.face}
+                        <span className="min-w-0 flex-1 truncate">{app.name}</span>
+                        {appHits(app) > 0 && <span className="text-xs text-ink-3 tabular-nums">{appHits(app)}</span>}
+                        <ChevronRight size={14} className="shrink-0 text-ink-4" />
+                      </>
+                    }
+                  >
+                    <div className="g-stagger flex flex-col">
+                      {app.all && row(app.all, from.includes(app.all), app.face, t("channel.everyone"), flip(app.all), 0)}
+                      {app.logins.map((l, k) => row(l.entry, from.includes(l.entry), l.face, l.label, flip(l.entry), k + (app.all ? 1 : 0)))}
+                    </div>
+                  </Deeper>
+                ),
+              )}
+            </div>
+          </Deeper>
+        </>
+      )}
+    </div>
   );
   return (
     <Deeper
@@ -215,12 +276,9 @@ function WakePick({ channel, a, set, i }: { channel: string; a: AgentRow; set: (
       }
       title={t("channel.recv")}
       i={i}
-      popup={cn(POPUP, "no-bar max-h-[min(480px,var(--available-height))] min-w-52 max-w-[calc(100vw-16px)] overflow-y-auto p-1.5")}
+      popup={cn(POPUP, "no-bar max-h-[min(480px,var(--available-height))] min-w-52 max-w-[calc(100vw-16px)] overflow-x-hidden overflow-y-auto p-1.5")}
     >
-      <div className="g-stagger flex flex-col">
-        {row("@", true, <AtSign size={15} className="shrink-0 text-ink-2" />, t("on.at"))}
-        {options.map((o, j) => row(o.entry, from.includes(o.entry), o.face, o.label, () => set(withFrom(a.on, toggle(from, o.entry))), j + 1))}
-      </div>
+      {outer ? body : <Paged force>{body}</Paged>}
     </Deeper>
   );
 }

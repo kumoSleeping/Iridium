@@ -39,10 +39,11 @@ function Layer({ place, first, children }: { place: Place; first?: boolean; chil
   );
 }
 
-/** A menu whose next levels are its pages in the phone's layout. The list and every page under
- *  the one shown stay drawn: what they were left at is kept. */
-export function Paged({ children }: { children: ReactNode }) {
-  const paged = usePaged();
+/** A menu whose next levels are its pages in the phone's layout (or everywhere when force is set,
+ *  so a submenu switches pages in place instead of opening a third-level popup). The list and
+ *  every page under the one shown stay drawn: what they were left at is kept. */
+export function Paged({ force, children }: { force?: boolean; children: ReactNode }) {
+  const paged = usePaged() || !!force;
   const [stack, setStack] = useState<Page[]>([]);
   // The page gone back from, drawn till it is out.
   const [gone, setGone] = useState<Page | null>(null);
