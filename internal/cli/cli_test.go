@@ -86,6 +86,29 @@ func TestShown(t *testing.T) {
 	if clip("a\n b  c", 3) != "a b…" {
 		t.Errorf("clip: %q", clip("a\n b  c", 3))
 	}
+	// message.get and internal/block.get default to whole, multiline content.
+	long := "line 1\n" + strings.Repeat("字", 250) + "\nline 3"
+	mc, err := parseAPI([]string{"message.get", "channel_id=ch", "message_id=1"})
+	if err != nil || mc.clip != 0 {
+		t.Fatalf("message.get parse: %+v %v", mc, err)
+	}
+	if got := show(mc, `{"id":"1","content":"`+strings.ReplaceAll(long, "\n", `\n`)+`"}`); got != "content:\n"+long+"\nid: 1\n" {
+		t.Errorf("message.get multiline: %q", got)
+	}
+	if got := show(mc, `{"id":"1","content":"one line"}`); got != "content: one line\nid: 1\n" {
+		t.Errorf("message.get single line: %q", got)
+	}
+	bc, err := parseAPI([]string{"internal/block.get", "channel_id=ch", "message_id=1"})
+	if err != nil || bc.clip != 0 {
+		t.Fatalf("block.get parse: %+v %v", bc, err)
+	}
+	mcClip, err := parseAPI([]string{"message.get", "channel_id=ch", "message_id=1", "--clip", "6"})
+	if err != nil || mcClip.clip != 6 {
+		t.Fatalf("message.get explicit clip: %+v %v", mcClip, err)
+	}
+	if got := show(mcClip, `{"content":"line 1\nline 2"}`); got != "content: line 1…(+7)\n" {
+		t.Errorf("message.get clipped: %q", got)
+	}
 }
 
 // ir api's arguments: a path or a Satori method, the method, the body, the query.

@@ -97,6 +97,7 @@ func cmdAPI(e *env, args []string) int {
 
 func parseAPI(args []string) (*apiCall, error) {
 	c := &apiCall{body: map[string]any{}, query: url.Values{}, clip: clipLen}
+	clipSet := false
 	val := func(i *int, name string) (string, error) {
 		if _, v, ok := strings.Cut(args[*i], "="); ok {
 			return v, nil
@@ -138,6 +139,7 @@ func parseAPI(args []string) (*apiCall, error) {
 			if c.clip, err = strconv.Atoi(v); err != nil || c.clip < 0 {
 				return nil, fmt.Errorf("--clip takes a count, not %q", v)
 			}
+			clipSet = true
 		case strings.HasPrefix(a, "--"):
 			return nil, fmt.Errorf("no flag %s here", a)
 		case method == "" && c.path == "" && isVerb(a):
@@ -197,6 +199,10 @@ func parseAPI(args []string) (*apiCall, error) {
 	// And a session's record (block.list, block.get, block.outline).
 	if button || strings.HasPrefix(c.path, "/v1/internal/block.") {
 		c.satori = true
+	}
+	// Fetching one message or block in full defaults to no clipping unless --clip was given.
+	if !clipSet && isWholeMessage(c.path) {
+		c.clip = 0
 	}
 	if c.all && (!c.satori || button) {
 		return nil, errors.New("--all is for Satori's lists (their next)")
@@ -655,8 +661,18 @@ func (e *env) render(c *apiCall, raw []byte) {
 		own = append(own, f)
 	}
 	if len(own) > 0 || len(order) == 0 {
+		whole := isWholeMessage(c.path)
 		for _, x := range pickOf(flat(m), own) {
 			if x.v != nil && (len(own) > 0 || x.v != false) {
+				if whole && isContent(x.k) {
+					v := c.showWhole(x)
+					if strings.Contains(v, "\n") {
+						fmt.Fprintf(e.out, "%s:\n%s\n", x.k, v)
+					} else {
+						fmt.Fprintf(e.out, "%s: %s\n", x.k, v)
+					}
+					continue
+				}
 				fmt.Fprintf(e.out, "%s: %s\n", x.k, c.show(x))
 			}
 		}
@@ -844,6 +860,25 @@ func noIndex(k string) string {
 		}
 	}
 	return strings.Join(out, ".")
+}
+
+// isWholeMessage reports whether path fetches a single message or block whose content should
+// default to untruncated multiline output.
+func isWholeMessage(path string) bool {
+	p, _, _ := strings.Cut(path, "?")
+	return p == "/v1/message.get" || p == "/v1/internal/block.get"
+}
+
+// showWhole preserves line breaks of a single message's content, cutting to c.clip runes if set.
+func (c *apiCall) showWhole(x kv) string {
+	if x.v == nil {
+		return ""
+	}
+	t := strings.TrimSpace(x.text())
+	if r := []rune(t); c.clip > 0 && len(r) > c.clip {
+		return string(r[:c.clip]) + fmt.Sprintf("…(+%d)", len(r)-c.clip)
+	}
+	return t
 }
 
 // show is a value on one line, cut to c.clip runes (0: whole).
