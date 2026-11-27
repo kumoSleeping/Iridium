@@ -33,7 +33,9 @@ func TestSourceTags(t *testing.T) {
 	}
 	r.waitState(id, "the second reply", func(s *api.SessionState) bool { return s.Last != nil && s.Last.Text == "ok: again" })
 	inLog, _ := os.ReadFile(filepath.Join(r.cfg.StatePath(), "hold", id, hold.FileInLog))
-	for _, want := range []string{`"text":"[mac] hello"`, `"text":"/compact"`, `"text":"[renamed] again"`} {
+	// "again" may be written after the compaction is over: the session's title then goes after
+	// it (titleNow), so its words are matched without their end.
+	for _, want := range []string{`"text":"[mac] hello"`, `"text":"/compact"`, `"text":"[renamed] again`} {
 		if !strings.Contains(string(inLog), want) {
 			t.Errorf("in.log has no %s: %s", want, inLog)
 		}
