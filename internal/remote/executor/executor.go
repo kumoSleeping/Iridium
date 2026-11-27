@@ -253,6 +253,22 @@ func (e *Executor) Close() {
 	for _, cmd := range cmds {
 		killTree(cmd, true)
 	}
+	// Each killed hold's exit is written as its process is reaped: wait for that, so that
+	// nothing is written into the state folder after Close.
+	end := time.After(5 * time.Second)
+	for _, h := range hs {
+		h.mu.Lock()
+		started := h.cmd != nil
+		h.mu.Unlock()
+		if !started {
+			continue
+		}
+		select {
+		case <-h.ended:
+		case <-end:
+			return
+		}
+	}
 }
 
 // Drop ends the connection now (it connects again): as when the network goes.
