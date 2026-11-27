@@ -91,8 +91,8 @@ GET internal/agents/{agent}/choices?machine&channel - -> AgentChoices  the model
 GET internal/agents - -> AgentInfo[]  agents that can start here, their modes  view=agent,modes,defaultMode,missing
 GET internal/sessions/{id}/first?record&since - -> {session, page?, members?, reads?, log?, sessions?, work?}  a session's first screen in one answer, each part as its own API gives it: state, the record's newest page, members; with another agent in the channel also reads, the log, the others' states and the work under their words
 GET internal/sessions/{id}/image?at&n - -> image  the n-th image a tool result gave the model
-POST internal/sessions/{id}/manual {reason, minutes?} -> ManualState  Claude, id: your session's: auto mode denied a step you need; ask the person to switch you to manual approval for a while (a card above their composer, they are called as by an @); --wait waits for the answer
-  minutes: 1 to 10, 10 if not given: how long it waits for the answer, and manual mode lasts at most. Approved: each step not allowed by a rule is asked of the person till this turn ends, then the mode is back; run the step again. Refused, or no answer in time (it is withdrawn): the mode stays. Only a person answers it.
+POST internal/sessions/{id}/manual {reason, steps?} -> ManualState  Claude, id: your session's: auto mode denied a step you need; ask the person to switch you to manual approval for a while (a card above their composer, they are called as by an @); --wait waits for the answer
+  steps: 1 to 3, 3 if not given: how many steps asked of the person manual mode lasts at most; it waits up to 10 minutes for the answer. Approved: each step not allowed by a rule is asked of the person till that many are answered or this turn ends, then the mode is back; run the step again. Refused, or no answer in time (it is withdrawn): the mode stays. Only a person answers it.
 GET internal/sessions/{id}/manual?wait - -> ManualState  how the latest ask stands: pending, approved, refused, expired; wait up to 60 s
 GET internal/sessions/{id}/commands - -> Command[]  the agent's slash commands  view=name,description
 
