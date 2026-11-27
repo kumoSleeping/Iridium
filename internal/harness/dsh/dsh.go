@@ -4,7 +4,7 @@
 // presets (presets.go), what a launch there gets from Desktop (launch.go), and the pictures its
 // sessions' records name by attachment (image.go). The core asks it
 // through harness's capabilities and never names dsh; it speaks to the dsh plugin at an executor
-// (plugins/dsh-remote-iridium) in held.* and dsh.* (docs/exec.md "远端 DSH").
+// (dsh-remote-iridium, github.com/otae-1204/dsh-remote-iridium) in held.* and dsh.* (docs/exec.md "远端 DSH").
 package dsh
 
 import (

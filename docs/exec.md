@@ -208,14 +208,14 @@ agent 的 `ir sh`：每条命令一个新进程，不经托管进程，不写文
 
 ## dsh 插件
 
-一个 cordis 插件（`plugins/dsh-remote-iridium`），在 DSH Desktop / `dsh web` 里运行。2026-11-27 重写后，有会话控制器时不再为每个会话另起 `dsh --profile sdk --patch` 子进程，也不再做 `held.*` 转交与 `agent.prepare` 拼补丁：
+一个 cordis 插件 `dsh-remote-iridium`（自己的仓库 [otae-1204/dsh-remote-iridium](https://github.com/otae-1204/dsh-remote-iridium)，npm 同名），在 DSH Desktop / `dsh web` 里运行。2026-11-27 重写后，有会话控制器时不再为每个会话另起 `dsh --profile sdk --patch` 子进程，也不再做 `held.*` 转交与 `agent.prepare` 拼补丁：
 
 - **进程内运行（`dsh.inproc`）**：插件在 `hello` 报能力 `dsh.inproc`、`argv: ["@dsh-desktop"]` 和本进程 `pid`。`hold.start` 的 `argv[0] == "@dsh-desktop"` 时，插件在 Desktop 进程内起一份 dsh 自带 SDK JSON-RPC 服务（`inproc.js`，用流替代子进程 stdio），通过 Desktop 的 `sessionController` 创建或续接会话——同一会话在进程内只有一个 agent，与 Desktop 界面共用模型、预设、工作区与 OMD 插件，没有写锁冲突。新会话自动登记进对应目录的工作区；续接时若驱动没有显式指定模型则传 `--keep-model`，不覆盖 Desktop 里当前选的模型。审批与提问经 `AbortSignal.any` 与 Desktop 界面并行竞速，先答的一方生效并立刻收起另一方的卡片。
 - **本机直连与离线兜底**：本机 Iridium 启动时在状态目录写 `local-exec.json`（Unix `0600`、Windows 单用户受保护 DACL，含 loopback WS 地址与随机 `irl_` token，退出清理；仅本机直连 loopback `GET /v1/internal/exec` 认它，拒带 `CF-Connecting-IP`/`X-Forwarded-For`）。插件的 `local.js` 自动发现并免配对连上本机 Iridium。本机 Desktop 未打开且其 `profiles/desktop` 装了本插件时，`internal/harness/dsh/headless.go` 按「hello 持久化 > 运行进程 > 系统应用索引（Windows Uninstall 注册表 / macOS mdfind / Linux `.desktop`）> 默认路径」找到 Desktop，以 `ELECTRON_RUN_AS_NODE=1` + `IRIDIUM_DESKTOP_HEADLESS=1` 无窗口拉起 `dsh-desktop-host`；真 Desktop 上线后发 `desktop.freeze` 冻结其 `storage.backend.json` 写盘、等在途回合结束平滑退出。未装插件或 Desktop 运行未连上时退回 `dsh --profile sdk`。
 - **会话隔离**：系统提示按会话挂到 `systemPrompt.section`；`ir` 身份经 `ctx.shellEnv` 按会话注入 `DSH_IRIDIUM_URL` / `DSH_IRIDIUM_TOKEN` / `DSH_IRIDIUM_SESSION`（不碰全局 `process.env`，`ir` 本体与 `ir.js` 均识别）；Iridium 侧设定人格时 `argv` 传 `--persona own`，`persona.js` 仅对该会话屏蔽 DSH / OMD 自带人格。
 - **事件驱动（零业务轮询）**：模型目录由 `desktop.models` 与 `desktop.models.changed` 维护（不再每 3 分钟起探测子进程）；预设由 `agent.presets` 与 `desktop.presets.changed` 维护；工作区、会话与开关由 `desktop.workspaces.changed`、`desktop.sessions.changed`、`desktop.config` 推送；未同步会话经 `desktop.sessions` 按需搜索并 `Adopt`。`omd.js` 改为事件去抖，去掉 5 秒定时器。
 
-插件以后从这个仓库独立出去（otae，2026-11-22）：这边只认协议，按握手的 `caps` 用，不比版本号；认识 OMD 和别的第三方包的代码只在插件里（`omd.js`）。2026-11-23（kumo）：release.yml 发 npm 的那一步和 `plugins/plugins_test.go` 已从这里删掉。
+插件从这个仓库独立出去（otae，2026-11-22 定，2026-11-27 拆出，历史一并带走）：这边只认协议，按握手的 `caps` 用，不比版本号；认识 OMD 和别的第三方包的代码只在插件里（`omd.js`）。2026-11-23（kumo）：release.yml 发 npm 的那一步和 `plugins/plugins_test.go` 已从这里删掉；插件在它的仓库按标签发 npm。这边几个测试把插件当执行端跑（`internal/testagent` 的 `DSHPlugin`）：环境变量 `IRIDIUM_DSH_PLUGIN` 指插件的检出目录，没设就跳过；CI 另检出插件仓库并设上。
 
 实测（2026-11-27，dsh 0.2.2-rc.5）：本机直连、进程内开会话、`/permission`、会话内 `ir` 身份、与网页双向竞速审批、回合中断续接、设置页均端到端通过。
 
@@ -256,7 +256,7 @@ agent 的 `ir sh`：每条命令一个新进程，不经托管进程，不写文
 - 隐藏：撤了（2026-11-10）：组列不列由里面有没有人开的会话定，组的 `hidden`（库、`PATCH`）删掉。
 - 同步（用户，2026-11-09）：远端组右键菜单的“同步 DSH”（那台机器装了 dsh 才有，`POST /v1/internal/computers/{id}/dsh/sync`）立刻重读那台机器：工作区和会话（不等 30 秒的扫描）、模型和供应商（带 Desktop 此刻的设置重新探测，不用 3 分钟的缓存）、预设；那台机器的会话随即刷新。在跑的 agent 用的还是启动时的，下次启动才换。
 - 新会话：目录选择器在装了 dsh 的远端机器上，最上面列它的工作区（`GET /v1/internal/computers/{id}/dsh/workspaces`），每行名字、路径、会话数，点一下就在那里开（2026-11-10，见“远端工作区”）。
-- 插件在 Desktop 进程里用 dsh 自己的服务：`sessions.list()`、`agents.get()`、`sessionController.selectModel`（`plugins/dsh-remote-iridium/held.js`），`workspaceRegistry` 的 `resolveByPath`、`create`、`attachSession`。`ir join` 没有 `held.list`：不显示 Desktop 里开着的。
+- 插件在 Desktop 进程里用 dsh 自己的服务：`sessions.list()`、`agents.get()`、`sessionController.selectModel`（插件的 `held.js`），`workspaceRegistry` 的 `resolveByPath`、`create`、`attachSession`。`ir join` 没有 `held.list`：不显示 Desktop 里开着的。
 
 ## 挂元素（2026-11-11）
 

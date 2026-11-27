@@ -4,11 +4,15 @@
 // agents turned off in 应用管理, does the same without Node. Started when wanted, not kept running:
 // it exits after IDLE minutes with nothing started (30 by default, 0 never), and when the Iridium
 // no longer takes its TOKEN (removed there). The name: this computer's, unless given.
-// node scripts/dev/shell-bot.mjs <iridium url> [name]
+// Its executor is the dsh plugin's (github.com/otae-1204/dsh-remote-iridium): IRIDIUM_DSH_PLUGIN, its checkout.
+// IRIDIUM_DSH_PLUGIN=<checkout> node scripts/dev/shell-bot.mjs <iridium url> [name]
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { Executor, iridiumKey, refused } from '../../plugins/dsh-remote-iridium/executor.js'
+import { pathToFileURL } from 'node:url'
+
+if (!process.env.IRIDIUM_DSH_PLUGIN) throw new Error('IRIDIUM_DSH_PLUGIN: the dsh plugin\'s checkout (github.com/otae-1204/dsh-remote-iridium)')
+const { Executor, iridiumKey, refused } = await import(pathToFileURL(path.resolve(process.env.IRIDIUM_DSH_PLUGIN, 'executor.js')).href)
 
 const url = (process.argv[2] || '').replace(/\/+$/, '')
 const name = process.argv[3] || os.hostname().replace(/\.local$/, '')

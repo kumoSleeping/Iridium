@@ -12,3 +12,4 @@ node_modules/
 .local/
 # The fake dsh package the dsh driver tests read.
 !internal/agent/dsh/testdata/pkg/node_modules/
+.dsh-remote-iridium/
