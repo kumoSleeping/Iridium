@@ -148,6 +148,7 @@ func (s *Service) render(e entry, app, login string) Event {
 func (s *Service) Notice(n session.Notice) {
 	s.qmu.Lock()
 	s.queue = append(s.queue, noticed{n, time.Now()})
+	s.noticedN++
 	s.qmu.Unlock()
 	select {
 	case s.qwake <- struct{}{}:
@@ -165,12 +166,43 @@ func (s *Service) work() {
 		for _, n := range q {
 			s.handle(n.Notice, n.at)
 		}
+		if len(q) > 0 {
+			s.qmu.Lock()
+			s.handledN += uint64(len(q))
+			close(s.caught)
+			s.caught = make(chan struct{})
+			s.qmu.Unlock()
+		}
 		select {
 		case <-s.stop:
 			return
 		case <-s.qwake:
 		}
 	}
+}
+
+// Settled waits, at most for wait, until the notices that came before it are handled: what a
+// turn that ended said is in the channels' log then (a reply read right after its turn's end was
+// only its first piece, or missing: TestSendJoinsTurn on a loaded box). Never from the notices'
+// own goroutine.
+func (s *Service) Settled(wait time.Duration) {
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	s.qmu.Lock()
+	want := s.noticedN
+	for s.handledN < want {
+		caught := s.caught
+		s.qmu.Unlock()
+		select {
+		case <-caught:
+		case <-timer.C:
+			return
+		case <-s.done:
+			return
+		}
+		s.qmu.Lock()
+	}
+	s.qmu.Unlock()
 }
 
 // noticed is a notice and when it came.

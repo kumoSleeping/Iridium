@@ -175,9 +175,13 @@ type Service struct {
 	qmu   sync.Mutex
 	queue []noticed
 	qwake chan struct{}
-	stop  chan struct{}
-	done  chan struct{}
-	once  sync.Once
+	// noticedN, handledN: how many notices came and were handled; caught is closed (and made anew)
+	// as more are handled (Settled).
+	noticedN, handledN uint64
+	caught             chan struct{}
+	stop               chan struct{}
+	done               chan struct{}
+	once               sync.Once
 
 	ch  channels
 	log *channel.Service // what was said in the channels (Channels)
@@ -262,7 +266,7 @@ func New(b Backend, logf func(string, ...any)) *Service {
 	if logf == nil {
 		logf = log.Printf
 	}
-	s := &Service{b: b, logf: logf, out: newOutbox(logf), qwake: make(chan struct{}, 1), stop: make(chan struct{}), done: make(chan struct{}),
+	s := &Service{b: b, logf: logf, out: newOutbox(logf), qwake: make(chan struct{}, 1), caught: make(chan struct{}), stop: make(chan struct{}), done: make(chan struct{}),
 		held: map[string]channel.Message{}, heard: map[string]int64{}, origin: map[string]string{}, started: map[string]time.Time{}, picks: map[string]map[int][]string{}, words: map[string]map[int]string{}, live: map[string]*saying{}}
 	go s.work()
 	return s
