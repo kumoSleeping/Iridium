@@ -10,7 +10,7 @@ import { Check, PencilLine, Plus, Users } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { api } from "../../api/client";
 import type { Agent, ChannelMembers, Script, Viewer } from "../../api/types.gen";
-import { agentsQ, isComputer, useApps, useMachines } from "../../data";
+import { agentsQ, isComputer, useApps, useMachines, useMe } from "../../data";
 import { t, useLang } from "../../i18n";
 import { useMachine } from "../../machines";
 import { prefetchRoles } from "../../roles";
@@ -23,7 +23,7 @@ import { ContextMark } from "../meters";
 import { mayAct, useMembers } from "./gate";
 import { AddAgents, ITEM, POPUP, type Wake } from "./invite";
 import { Deeper, PageOf, Paged, usePaged, usePages } from "./pages";
-import { onAskAdd, takeAdd } from "./adding";
+import { onAskAdd, onPressAdd, takeAdd } from "./adding";
 import { prefetchChoices } from "./pick";
 import { useAhead } from "../../prefetch";
 import { memberError } from "./key";
@@ -85,7 +85,13 @@ export function TopRight({ id }: { id: string }) {
     for (const m of machines) if (m.online && m.id !== row?.machine) prefetchChoices(qc, m.agents.map((a) => a.agent as Agent), { machine: m.id });
   };
   const keyAhead = useAhead(ahead, [id, kinds.join(" "), members?.members.length]);
-  const viewers = useCarried<Viewer[]>(`viewers:${id}`) ?? [];
+  // Who is looking, the one looking counted in from the first draw (kumo, 2026-11-26): as the page
+  // comes back its own viewing is not told yet, the key not the bare icon meanwhile. Not the
+  // host's own page: it is no one looking (server viewing).
+  const told = useCarried<Viewer[]>(`viewers:${id}`) ?? [];
+  const meRow = useMe().data;
+  const mine = members?.me;
+  const viewers = mine && meRow && !meRow.host && !mine.startsWith("local/") && !told.some((v) => v.member === mine) ? [{ member: mine, name: meRow.name, pages: 1, since: Date.now() }, ...told] : told;
   // What an agent's menu asks with from the list (清空, 移出, 注入记录): the cards the face's
   // menu asks with, under the members' key.
   const key = useRef<HTMLButtonElement>(null);
@@ -107,6 +113,8 @@ export function TopRight({ id }: { id: string }) {
     return onAskAdd(take);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, may, phone]);
+  // ⋯'s 添加 Agent on a phone: the computer's + panel, under the members' key.
+  useEffect(() => onPressAdd((at) => at === id && may && (ahead(), setAdding(true))));
   // Asked for as the bar is drawn: the list and each card open whole.
   useScripts(id);
   return (
@@ -152,19 +160,21 @@ export function TopRight({ id }: { id: string }) {
         </MenuPortal>
       </Menu.Root>
       {/* 邀请, a key of its own (kumo, 2026-11-25): what it opens is the agents to add and the people. */}
-      {may && !phone && (
+      {may && (
         <Menu.Root open={adding} onOpenChange={(open) => (setAdding(open), open && ahead())}>
-          <Tip label={t("channel.invite")} side="bottom">
-            <Menu.Trigger
-              render={
-                <button type="button" aria-label={t("channel.invite")} {...keyAhead} className="g-press grid size-8 place-items-center rounded-md text-ink-2 hover:bg-fill hover:text-ink data-popup-open:bg-fill pointer-coarse:size-10">
-                  <Plus size={16} />
-                </button>
-              }
-            />
-          </Tip>
+          {!phone && (
+            <Tip label={t("channel.invite")} side="bottom">
+              <Menu.Trigger
+                render={
+                  <button type="button" aria-label={t("channel.invite")} {...keyAhead} className="g-press grid size-8 place-items-center rounded-md text-ink-2 hover:bg-fill hover:text-ink data-popup-open:bg-fill pointer-coarse:size-10">
+                    <Plus size={16} />
+                  </button>
+                }
+              />
+            </Tip>
+          )}
           <MenuPortal>
-            <Menu.Positioner side="bottom" align="end" sideOffset={6} collisionPadding={8} className="z-50">
+            <Menu.Positioner anchor={phone ? key : undefined} side="bottom" align="end" sideOffset={6} collisionPadding={8} className="z-50">
               <Menu.Popup finalFocus={false} className={cn(POPUP, SUB, "w-[min(344px,calc(100vw-16px))]")}>
                 <Invite id={id} done={() => setAdding(false)} />
               </Menu.Popup>

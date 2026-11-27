@@ -43,6 +43,7 @@ import { SystemPrompt } from "./context";
 import { givenOf } from "./given";
 import { Said } from "./said";
 import { Stick } from "./stick";
+import { pressAdd } from "./channel/adding";
 
 // Top bar's channel controls, loaded lazily: ⋯'s 编辑资料 on a phone (ChannelMenu) and the
 // viewers/members keys at the bar's right (TopRight).
@@ -224,7 +225,7 @@ const Bar = memo(function Bar({ s, onSheet, onMe, onSide, onBack, recordOnly }: 
   const moreAhead = useAhead(ChannelMenu.ahead, []);
   const usageHere = () => openUsage(s?.machine);
   // 回到主页 (kumo, 2026-11-25): the pane with no chat open, its splash.
-  const lead = [{ icon: <House size={15} />, label: t("menu.home"), run: () => go({ name: "home" }) }, { icon: <Plus size={15} />, label: t("menu.new"), run: () => s && void newChannel(groupPath(s), machines, s.workspace ?? undefined).then((id) => id && openChat(id)) }, ...(onSheet ? [{ icon: <ListTree size={15} />, label: t("nav.sidebar"), run: onSheet }] : []), ...(onMe ? [{ icon: <Settings size={15} />, label: t("nav.me"), run: onMe }] : []), { icon: <BarChart3 size={15} />, label: t("usage.title"), run: usageHere }, { icon: <Gamepad2 size={15} />, label: t("game.open"), run: openGame }];
+  const lead = [{ icon: <House size={15} />, label: t("menu.home"), run: () => go({ name: "home" }) }, onSheet ? { icon: <Plus size={15} />, label: t("channel.addAgent"), run: () => s && requestAnimationFrame(() => pressAdd(s.id)) } : { icon: <Plus size={15} />, label: t("menu.new"), run: () => s && void newChannel(groupPath(s), machines, s.workspace ?? undefined).then((id) => id && openChat(id)) }, ...(onSheet ? [{ icon: <ListTree size={15} />, label: t("nav.sidebar"), run: onSheet }] : []), ...(onMe ? [{ icon: <Settings size={15} />, label: t("nav.me"), run: onMe }] : []), { icon: <BarChart3 size={15} />, label: t("usage.title"), run: usageHere }, { icon: <Gamepad2 size={15} />, label: t("game.open"), run: openGame }];
   const acts = s ? [...sessionActions(s, () => setRenaming(true))] : [];
   return (
     <header data-app-drag className="g-turn-stay vt-bar glass absolute inset-x-0 top-0 z-20 shadow-[0_0.5px_0_var(--edge)]">
