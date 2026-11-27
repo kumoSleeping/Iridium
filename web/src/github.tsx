@@ -46,7 +46,7 @@ export function GitHubKey({ member, mine }: { member: string; mine: boolean }) {
   );
 }
 
-function Bound({ member, mine, done }: { member: string; mine: boolean; done: () => void }) {
+export function Bound({ member, mine, done }: { member: string; mine: boolean; done: () => void }) {
   const qc = useQueryClient();
   const b = useQuery<GitHubList>(githubQ).data?.bindings.find((x) => x.member === member);
   const [again, setAgain] = useState(false);
@@ -73,7 +73,7 @@ function Bound({ member, mine, done }: { member: string; mine: boolean; done: ()
   );
 }
 
-function Bind({ done }: { done: () => void }) {
+export function Bind({ done }: { done: () => void }) {
   const qc = useQueryClient();
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);

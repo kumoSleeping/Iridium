@@ -7,7 +7,7 @@
 import { Menu } from "@base-ui/react/menu";
 import { useQueryClient } from "@tanstack/react-query";
 import { useQuery } from "./api/query";
-import { Check, ChevronLeft, ChevronRight, Plus, Trash2 } from "lucide-react";
+import { Check, ChevronLeft, Trash2 } from "lucide-react";
 import { useRef, useState, type ReactNode } from "react";
 import { api, ApiError } from "./api/client";
 import type { Agent, HostPersona, Role, RolePatch } from "./api/types.gen";
@@ -22,62 +22,13 @@ import { Crop } from "./profile";
 import { t, useLang } from "./i18n";
 import { agentsQ, useMachines } from "./data";
 import { HostPersonas, PersonaEditor, PersonaRow } from "./persona";
-import { RoleFace, RoleLine, roleModel, useRoles } from "./roles";
-import { Item } from "./settings";
+import { RoleFace, roleModel } from "./roles";
+import { Item } from "./rows";
 import { errText, toast } from "./toast";
 import { agentName, cn, IconKey, intoView, MenuPortal } from "./ui";
 
 const BOX = "no-ring min-w-0 rounded-md bg-fill px-2.5 text-sm outline-none placeholder:text-ink-3 focus:bg-fill-2";
 const POPUP = "g-unfold glass thick float rounded-lg p-1.5 text-ink outline-none";
-
-export function RolesPage({ onBack }: { onBack: () => void }) {
-  useLang();
-  const roles = useRoles();
-  const [open, setOpen] = useState<string | null>(null);
-  const role = roles.find((r) => r.id === open);
-  // Back from a role's page the list slides in from the other side; first shown, it does not.
-  const moved = useRef(false);
-  if (role) moved.current = true;
-  if (open === NEW) moved.current = true;
-  if (role) return <RolePage key={role.id} role={role} onBack={() => setOpen(null)} />;
-  if (open === NEW) return <NewRolePage onBack={() => setOpen(null)} made={(r) => setOpen(r.id)} />;
-  return (
-    <div className={cn("flex h-full flex-col", moved.current && "g-slide")} data-dir="back">
-      <header className="flex h-10.5 shrink-0 items-center gap-1 px-1.5 pt-1.5">
-        <IconKey label={t("nav.me")} onClick={onBack} tipSide="bottom" className="size-7">
-          <ChevronLeft size={16} />
-        </IconKey>
-        <h1 className="m-0 min-w-0 flex-1 truncate text-base font-semibold">{t("role.title")}</h1>
-        <IconKey label={t("role.new")} onClick={() => setOpen(NEW)} tipSide="bottom" className="size-7">
-          <Plus size={16} />
-        </IconKey>
-      </header>
-      <div className="no-bar min-h-0 flex-1 overflow-y-auto pt-2 pb-4">
-        <div className="flex flex-col px-1.5">
-          {!roles.length && <p className="m-0 px-1.5 text-sm text-ink-3">{t("role.none")}</p>}
-          {roles.map((r) => (
-            <button key={r.id} type="button" onClick={() => setOpen(r.id)} className="g-press flex min-h-12 items-center gap-2.5 rounded-lg px-1.5 py-1 text-left hover:bg-fill">
-              <RoleFace role={r} size={28} />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-medium">{r.name}</span>
-                <RoleLine role={r} at={placeOf(r)} className="block truncate text-xs text-ink-3" />
-              </span>
-              {!!r.memories && (
-                <span className="shrink-0 text-xs text-ink-3 tabular-nums">
-                  {t("profile.memory")} {r.memories}
-                </span>
-              )}
-              <ChevronRight size={15} className="shrink-0 text-ink-4" />
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/** The page open in place of the list for a new role. */
-const NEW = "\u0000new";
 
 /** The agents a role may be at machine (""; the host): those it runs and has on, the host's
  *  installed ones. */
@@ -91,7 +42,8 @@ function useKinds(machine: string): Agent[] {
 /** A new role: its name and its agent (where it runs, with more than one computer); a host's
  *  persona taken gives its name where none is typed, and its persona (no intro: a role has none). Made, its own
  *  page in place of this one. */
-function NewRolePage({ onBack, made }: { onBack: () => void; made: (r: Role) => void }) {
+/** onBack: its way back, if it has one of its own (管理 gives it the list beside it). */
+export function NewRolePage({ onBack, made }: { onBack?: () => void; made: (r: Role) => void }) {
   useLang();
   const qc = useQueryClient();
   const ms = useMachines(true);
@@ -123,10 +75,12 @@ function NewRolePage({ onBack, made }: { onBack: () => void; made: (r: Role) => 
   return (
     <div className="g-slide flex h-full flex-col">
       <header className="flex h-10.5 shrink-0 items-center gap-1 px-1.5 pt-1.5">
-        <IconKey label={t("role.title")} onClick={onBack} tipSide="bottom" className="size-7">
-          <ChevronLeft size={16} />
-        </IconKey>
-        <h1 className="m-0 min-w-0 flex-1 truncate text-base font-semibold">{t("role.new")}</h1>
+        {onBack && (
+          <IconKey label={t("role.title")} onClick={onBack} tipSide="bottom" className="size-7">
+            <ChevronLeft size={16} />
+          </IconKey>
+        )}
+        <h1 className={cn("m-0 min-w-0 flex-1 truncate text-base font-semibold", !onBack && "pl-1.5")}>{t("role.new")}</h1>
         <IconKey label={t("role.create")} disabled={!ok} onClick={() => void create()} tipSide="bottom" className="size-7">
           <Check size={16} />
         </IconKey>
@@ -164,14 +118,14 @@ function NewRolePage({ onBack, made }: { onBack: () => void; made: (r: Role) => 
 }
 
 /** Where a role's agent runs: its machine, else here. */
-const placeOf = (r: Role) => (r.machine ? { machine: r.machine } : NO_PLACE);
+export const placeOf = (r: Role) => (r.machine ? { machine: r.machine } : NO_PLACE);
 const NO_PLACE = {};
 
 /** What a refused change says: a name taken or not one, else the server's words. */
 const refused = (e: unknown) => (e instanceof ApiError && e.status === 409 ? t("channel.nickTaken") : e instanceof ApiError && e.status === 400 && /^name:/.test(e.message) ? t("channel.nickBad") : errText(e));
 
 /** One role's page. */
-function RolePage({ role, onBack }: { role: Role; onBack: () => void }) {
+export function RolePage({ role, onBack }: { role: Role; onBack?: () => void }) {
   useLang();
   const qc = useQueryClient();
   const [sure, setSure] = useState(false);
@@ -252,10 +206,12 @@ function RolePage({ role, onBack }: { role: Role; onBack: () => void }) {
   return (
     <div className="g-slide flex h-full flex-col">
       <header className="flex h-10.5 shrink-0 items-center gap-1 px-1.5 pt-1.5">
-        <IconKey label={t("role.title")} onClick={onBack} tipSide="bottom" className="size-7">
-          <ChevronLeft size={16} />
-        </IconKey>
-        <h1 className="m-0 min-w-0 flex-1 truncate text-base font-semibold">{role.name}</h1>
+        {onBack && (
+          <IconKey label={t("role.title")} onClick={onBack} tipSide="bottom" className="size-7">
+            <ChevronLeft size={16} />
+          </IconKey>
+        )}
+        <h1 className={cn("m-0 min-w-0 flex-1 truncate text-base font-semibold", !onBack && "pl-1.5")}>{role.name}</h1>
       </header>
       <div className="no-bar min-h-0 flex-1 overflow-y-auto pt-2 pb-4">
         <div className="flex flex-col px-3">

@@ -13,15 +13,16 @@ import { api } from "./api/client";
 import type { UpdateState } from "./api/types.gen";
 import { CacheTotal } from "./device/total";
 import { ahead as cacheAhead } from "./device/state";
-import { manages as managesApps, useApps, useMe, useUpdate } from "./data";
+import { manages as managesApps, useMe, useUpdate } from "./data";
 import { t, useLang } from "./i18n";
 import { install, useInstall } from "./install";
 import { LangSwitch, ThemeSwitch, type ThemePref } from "./me";
 import { AvatarCrop, Profile } from "./profile";
-import { go } from "./route";
+import { go, openManage } from "./route";
 import { useConfirms } from "./store";
 import { errText, toast } from "./toast";
 import { cn, IconKey, Tip } from "./ui";
+import { Item } from "./rows";
 import { UpdateAsk } from "./updateask";
 
 /** The panel's own pages: the avatar's crop. */
@@ -34,7 +35,6 @@ export function SettingsPage({ theme, setTheme, initial = "main", shown = true }
   const lang = useLang();
   const me = useMe().data;
   const manages = managesApps(me);
-  const terminals = useApps().data?.apps ?? [];
   const confirms = useConfirms();
   const [page, setPage] = useState<Page>(initial);
   const [picture, setPicture] = useState<string | null>(null);
@@ -75,72 +75,18 @@ export function SettingsPage({ theme, setTheme, initial = "main", shown = true }
           <Item label={t("me.lang")}>
             <LangSwitch lang={lang} />
           </Item>
-          {manages &&
-            nav(
-              t("settings.terminalsRow"),
-              () => go({ name: "apps" }),
-              <>
-                {confirms.length > 0 && <span className="size-2 shrink-0 rounded-full bg-need" aria-label={t("nav.needsYou")} />}
-                {terminals.length > 0 && <span className="text-xs text-ink-3 tabular-nums">{terminals.length}</span>}
-              </>,
-            )}
-          {me?.host && nav(t("secrets.title"), () => go({ name: "secrets" }))}
-          {nav(t("role.title"), () => go({ name: "roles" }))}
+          {/* 应用管理, 凭据 and 角色 in one window (kumo, 2026-11-27). */}
+          {nav(
+            t("manage.title"),
+            () => openManage(manages ? "accounts" : "roles"),
+            confirms.length > 0 && <span className="size-2 shrink-0 rounded-full bg-need" aria-label={t("nav.needsYou")} />,
+          )}
           {nav(t("cache.title"), () => go({ name: "cache" }), <CacheTotal />, cacheAhead)}
           <InstallItem />
           <UpdateItem manages={manages} shown={shown} />
           {me && !me.host && <SignOut />}
         </div>
       </div>
-    </div>
-  );
-}
-
-/** fold: shut till its title is pressed (the approval modes, the user, 2026-11-06). */
-export function Group({ title, children, fold, action }: { title: string; children: ReactNode; fold?: boolean; action?: ReactNode }) {
-  const [open, setOpen] = useState(!fold);
-  if (!fold)
-    return (
-      <section className="flex flex-col">
-        <h2 className="m-0 mb-1 flex h-4 items-center text-xs font-medium text-ink-3">
-          <span className="min-w-0 flex-1 truncate">{title}</span>
-          {action}
-        </h2>
-        {children}
-      </section>
-    );
-  return (
-    <section className="flex flex-col">
-      <h2 className="m-0 mb-1 text-xs font-medium text-ink-3">
-        <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="-mx-1 flex items-center gap-1 rounded-sm px-1 hover:text-ink-2">
-          {title}
-          <ChevronRight size={12} className="transition-transform duration-(--dur-2) ease-(--ease-out)" style={{ transform: open ? "rotate(90deg)" : undefined }} />
-        </button>
-      </h2>
-      {open && <div className="g-fade flex flex-col">{children}</div>}
-    </section>
-  );
-}
-
-/** below: its control under the words, the whole width (a select whose options are long). */
-export function Item({ label, hint, children, below }: { label: ReactNode; hint?: ReactNode; children: ReactNode; below?: boolean }) {
-  if (below)
-    return (
-      <div className="flex flex-col gap-1.5 py-1.5">
-        <div>
-          <div className="text-sm">{label}</div>
-          {hint && <div className="text-xs text-ink-3">{hint}</div>}
-        </div>
-        {children}
-      </div>
-    );
-  return (
-    <div className="flex min-h-10 items-center gap-3 py-1">
-      <div className="min-w-0 flex-1">
-        <div className="text-sm">{label}</div>
-        {hint && <div className="text-xs text-ink-3">{hint}</div>}
-      </div>
-      <div className="flex shrink-0 items-center">{children}</div>
     </div>
   );
 }

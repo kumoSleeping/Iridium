@@ -5,7 +5,7 @@ import { ChevronLeft, Trash2 } from "lucide-react";
 import { useEffect } from "react";
 import { t, useLang } from "../i18n";
 import { Pills } from "../pills";
-import { Item } from "../settings";
+import { Item } from "../rows";
 import { cn, IconKey, SureKey, Switch } from "../ui";
 import { ahead, bytes, changeConf, clearCat, useDevice } from "./state";
 import { DEFAULTS, type Cat } from "./store";
