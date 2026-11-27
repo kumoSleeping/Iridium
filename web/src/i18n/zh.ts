@@ -115,6 +115,7 @@ export const zh = {
 
   "chat.log": "对话",
   "chat.newer": "新消息",
+  "chat.bottom": "回到底部",
   "chat.writingCall": "正在写…",
   "chat.working": "正在工作",
   "chat.moreLines": "还有 {n} 行",

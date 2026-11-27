@@ -115,6 +115,7 @@ export const en: Dict = {
 
   "chat.log": "Conversation",
   "chat.newer": "New messages",
+  "chat.bottom": "Scroll to bottom",
   "chat.writingCall": "Writing…",
   "chat.working": "Working",
   "chat.moreLines": "{n} more lines",

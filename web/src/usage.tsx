@@ -598,8 +598,9 @@ export function UsagePage() {
                       {metricPills}
                     </div>
                     {/* The figures, the chart's switch at their right, under the measure's (the user,
-                        2026-11-12: not side by side). */}
-                    <div className="mt-0.5 flex h-6 min-w-0 items-center gap-1.5 text-xs text-ink-3 tabular-nums">
+                        2026-11-12: not side by side). On touch devices Pills is h-7 + p-0.5 (32px),
+                        so the row needs h-8 and extra top gap to keep the two pills apart. */}
+                    <div className="mt-1.5 flex h-6 min-w-0 items-center gap-1.5 text-xs text-ink-3 tabular-nums pointer-coarse:mt-2 pointer-coarse:h-8">
                       <span className="min-w-0 flex-1 truncate leading-6 whitespace-nowrap" title={figures}>{figures}</span>
                       {viewPills}
                     </div>
@@ -614,7 +615,7 @@ export function UsagePage() {
                     <div className="flex h-9 items-center">
                       <span className="block h-7 w-24 rounded-md bg-fill" />
                     </div>
-                    <div className="mt-0.5 flex h-6 items-center">
+                    <div className="mt-1.5 flex h-6 items-center pointer-coarse:mt-2 pointer-coarse:h-8">
                       <span className="block h-2.5 w-40 rounded-full bg-fill" />
                     </div>
                     <div className="mt-1 h-6" />
