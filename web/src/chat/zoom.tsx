@@ -3,6 +3,12 @@
 // pointer, two fingers on a phone too; zoomed, the wheel and a drag move it; a double press goes
 // to its own pixels (or twice its fit) and back. A press beside it shuts it; on it, only at fit
 // and not after a drag. The scale, while zoomed, at the foot: pressed, back to fit.
+//
+// At rest the scale is in the picture's own width and height, laid out, and the transform only
+// moves it: the browser draws it at that size, from the file. Scaled by a transform it was drawn
+// once, fit to the window, and that drawing stretched (Chrome, the Windows app: a picture at its
+// own pixels as blurred as its fit; otae-c, 2026-11-27). A transform scales it only while it is
+// moved by hand or eased, from what is laid out to what is asked.
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { cn } from "../ui";
 import { bound, maxScale, ORIGIN, zoomAt, type Pt } from "./zoom-lib";
@@ -18,6 +24,11 @@ export function Viewer({ src, name, close, corner }: { src: string; name: string
   // Moved by hand now (a drag, two fingers, the wheel): no easing, it follows.
   const [live, setLive] = useState(false);
   const [fit, setFit] = useState(0); // the fit's share of the picture's own pixels
+  // The picture fit to the window (scale 1), from its own size and the window's; none until it loads.
+  const [base, setBase] = useState({ w: 0, h: 0 });
+  const baseNow = useRef(base);
+  // The scale laid out (its width and height); the transform has the rest, scale / drawn.
+  const [drawn, setDrawn] = useState(1);
   const now = useRef({ scale: 1, offset: ORIGIN });
   now.current = { scale, offset };
   const pointers = useRef(new Map<number, Pointer>());
@@ -35,9 +46,10 @@ export function Viewer({ src, name, close, corner }: { src: string; name: string
     const el = img.current;
     const st = stage.current;
     if (!el || !st) return;
-    const ratio = el.naturalWidth ? el.offsetWidth / el.naturalWidth : 1;
+    const b = baseNow.current;
+    const ratio = el.naturalWidth && b.w ? b.w / el.naturalWidth : 1;
     const next = Math.min(Math.max(s, 1), maxScale(ratio));
-    const off = next <= 1 ? ORIGIN : bound(o, next, el.offsetWidth, el.offsetHeight, st.clientWidth, st.clientHeight);
+    const off = next <= 1 ? ORIGIN : bound(o, next, b.w, b.h, st.clientWidth, st.clientHeight);
     now.current = { scale: next, offset: off };
     setScale(next);
     setOffset(off);
@@ -47,7 +59,7 @@ export function Viewer({ src, name, close, corner }: { src: string; name: string
     (s: number, at: Pt) => {
       const { scale: from, offset: o } = now.current;
       const el = img.current;
-      const top = el?.naturalWidth ? maxScale(el.offsetWidth / el.naturalWidth) : 5;
+      const top = el?.naturalWidth && baseNow.current.w ? maxScale(baseNow.current.w / el.naturalWidth) : 5;
       const to = Math.min(Math.max(s, 1), top);
       set(to, zoomAt(o, from, to, at));
     },
@@ -55,7 +67,16 @@ export function Viewer({ src, name, close, corner }: { src: string; name: string
   );
   const measure = () => {
     const el = img.current;
-    if (el?.naturalWidth) setFit(el.offsetWidth / el.naturalWidth);
+    const st = stage.current;
+    if (!el?.naturalWidth || !el.naturalHeight || !st) return;
+    // As the classes below fit it: the window less its margins, never past its own pixels.
+    const wide = window.matchMedia("(width >= 40rem)").matches;
+    const k = Math.min(1, (st.clientWidth - (wide ? 128 : 64)) / el.naturalWidth, (st.clientHeight - (wide ? 128 : 96)) / el.naturalHeight);
+    if (!(k > 0)) return;
+    const b = { w: el.naturalWidth * k, h: el.naturalHeight * k };
+    baseNow.current = b;
+    setBase(b);
+    setFit(k);
   };
 
   // The wheel is taken from the page (not passive): Ctrl (a pinch) zooms, otherwise, zoomed, moves.
@@ -161,7 +182,7 @@ export function Viewer({ src, name, close, corner }: { src: string; name: string
       lastTap.current = null;
       clearTimeout(shutLater.current);
       const el = img.current!;
-      const own = el.naturalWidth ? el.naturalWidth / el.offsetWidth : 2;
+      const own = el.naturalWidth && baseNow.current.w ? el.naturalWidth / baseNow.current.w : 2;
       if (now.current.scale > 1) set(1, ORIGIN);
       else zoomTo(own > 1.1 ? own : 2, fromMiddle(e.clientX, e.clientY));
       return;
@@ -177,7 +198,19 @@ export function Viewer({ src, name, close, corner }: { src: string; name: string
   const shutLater = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => () => clearTimeout(shutLater.current), []);
 
+  // Still for a moment (its easing over), the scale goes into its size: drawn anew, sharp.
+  const moving = live || scale !== drawn;
+  useEffect(() => {
+    if (live || scale === drawn || !base.w) return;
+    const h = setTimeout(() => setDrawn(scale), 170);
+    return () => clearTimeout(h);
+  }, [live, scale, drawn, base.w]);
+
   const zoomed = scale > 1.001;
+  const rest = base.w ? scale / drawn : scale;
+  const transform = [zoomed ? `translate(${offset.x}px, ${offset.y}px)` : "", Math.abs(rest - 1) > 1e-6 ? `scale(${rest})` : ""].join(" ").trim();
+  // Laid out at drawn, its margins taking the growth back: its place is its fit's, in the middle.
+  const laid = base.w ? { width: base.w * drawn, height: base.h * drawn, maxWidth: "none", maxHeight: "none", margin: `${(-base.h * (drawn - 1)) / 2}px ${(-base.w * (drawn - 1)) / 2}px` } : undefined;
   return (
     <div
       ref={stage}
@@ -193,8 +226,13 @@ export function Viewer({ src, name, close, corner }: { src: string; name: string
         alt={name}
         draggable={false}
         onLoad={measure}
-        style={{ transform: zoomed ? `translate(${offset.x}px, ${offset.y}px) scale(${scale})` : undefined }}
-        className={cn("block max-h-[calc(100dvh-96px)] max-w-[calc(100vw-64px)] object-contain shadow-(--shadow-float) [will-change:transform] sm:max-h-[calc(100dvh-128px)] sm:max-w-[calc(100vw-128px)]", !live && "transition-transform duration-150 ease-out")}
+        style={{ ...laid, transform: transform || undefined }}
+        className={cn(
+          "block max-h-[calc(100dvh-96px)] max-w-[calc(100vw-64px)] object-contain shadow-(--shadow-float) sm:max-h-[calc(100dvh-128px)] sm:max-w-[calc(100vw-128px)]",
+          moving && "[will-change:transform]",
+          // Eased only toward a scale asked; the one laid out takes its place at once.
+          !live && scale !== drawn && "transition-transform duration-150 ease-out",
+        )}
       />
       {corner && <div className="absolute top-4 right-4 z-10 flex gap-1.5">{corner}</div>}
       {zoomed && fit > 0 && (
