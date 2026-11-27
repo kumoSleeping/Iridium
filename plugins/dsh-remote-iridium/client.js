@@ -1,8 +1,10 @@
 // dsh-remote-iridium, browser half: a page of its own in dsh's settings (a settings.section, beside
 // 通用 and 模型, not under 插件; the user, 2026-11-08), the same in dsh web and DSH Desktop, which
-// share this settings shell. On it: the Iridium's address (dsh's own settings form over the
-// entry's volatile `url`), and a switch for each of dsh's workspaces, whether the Iridium lists it
-// (the entry's volatile `unsynced`, their folders; written at once). Plain JS in the shape dsh's module loader takes; React and the form parts are the page's own.
+// share this settings shell. On it: whether it connects to the Iridium on this computer (the
+// entry's volatile `local`), another Iridium's address (dsh's own settings form over the entry's
+// volatile `url`), and whether the sessions begun here show in the Iridium (`syncNewSessions`);
+// the switches written at once. Plain JS in the shape dsh's module loader takes; React and the form
+// parts are the page's own.
 window.__ModuleLoader__.load({
   id: 'dsh-remote-iridium',
   factory: (require) => {
@@ -17,7 +19,9 @@ window.__ModuleLoader__.load({
     const zh = {
       title: 'Iridium',
       connection: '连接',
-      url: 'Iridium 地址',
+      local: '本机 Iridium',
+      sync: '同步新会话',
+      url: '其他 Iridium 地址',
       urlHint: '例如 https://ir.example.com。保存后在 Iridium 网页上批准；配对码和连接状态用 /iridium 查看。',
       overridden: '已覆盖',
       reset: '恢复默认',
@@ -27,17 +31,14 @@ window.__ModuleLoader__.load({
       save: '保存',
       saving: '保存中…',
       saveFailed: '未能保存设置。',
-      workspaces: '同步到 Iridium 的工作区',
-      workspacesHint: '关闭的工作区，其会话不在 Iridium 中列出，在 Iridium 新建会话时也不可选。',
-      loading: '加载中…',
-      ungrouped: '未分组',
-      ungroupedHint: '不在任何工作区里的会话',
       switchFailed: '未能保存，请重试。',
     }
     const en = {
       title: 'Iridium',
       connection: 'Connection',
-      url: 'Iridium address',
+      local: 'Iridium on this computer',
+      sync: 'Sync new sessions',
+      url: 'Another Iridium',
       urlHint: 'For example https://ir.example.com. Once saved, allow the request on the Iridium page; /iridium shows the pairing code and the connection.',
       overridden: 'Overridden',
       reset: 'Reset to default',
@@ -47,11 +48,6 @@ window.__ModuleLoader__.load({
       save: 'Save',
       saving: 'Saving…',
       saveFailed: 'The settings were not saved.',
-      workspaces: 'Workspaces synced to Iridium',
-      workspacesHint: 'Sessions in a workspace switched off are not listed in Iridium, and new sessions there cannot pick it.',
-      loading: 'Loading…',
-      ungrouped: 'Ungrouped',
-      ungroupedHint: 'Sessions in no workspace',
       switchFailed: 'Not saved. Try again.',
     }
 
@@ -68,10 +64,6 @@ window.__ModuleLoader__.load({
       error: { marginTop: 4, color: 'var(--dsw-alias-state-error-primary)', fontSize: 12, lineHeight: '18px' },
     }
 
-    /** The folders kept from the Iridium, as the entry has them (a list; text from an earlier build). */
-    const kept = (v) => (Array.isArray(v) ? v : String(v ?? '').split(/[,，;；\n]/)).map((x) => String(x).trim()).filter(Boolean)
-    /** The same folder, as Windows and dsh may write it differently. */
-    const same = (a, b) => a.replaceAll('\\', '/').replace(/\/+$/, '').toLowerCase() === b.replaceAll('\\', '/').replace(/\/+$/, '').toLowerCase()
 
     // The address and its 保存 on one line (the user, 2026-11-08): dsh's own field, its parts laid
     // in a grid with the button beside the input. By element only: dsh's class names are hashes
@@ -118,63 +110,48 @@ window.__ModuleLoader__.load({
       })
     }
 
-    /** A switch for each of dsh's workspaces: on, the Iridium lists it. */
-    function Workspaces(props) {
-      const { t } = props
-      const items = props.useIridiumWorkspaces((s) => s.items)
-      const ready = props.useIridiumWorkspaces((s) => s.phase === 'ready')
+    /** A switch of the entry's, written at once: key, its default. */
+    function Switch(props) {
+      const { t, k, def } = props
       const config = props.useIridiumConfig((s) => s)
-      const off = kept(config.value?.unsynced)
-      const [busy, setBusy] = useState(null)
-      const [failed, setFailed] = useState(null)
-      // Kept by its folder, or by its name as an earlier build let it be typed (the Iridium takes both).
-      const is = (p, w) => same(p, w.path) || (!!w.title && p.toLowerCase() === w.title.toLowerCase())
-      // One write at a time; a failed one says so on its row.
-      const write = (key, done) => {
-        setBusy(key)
-        setFailed(null)
-        done()
-          .then((ok) => ok || setFailed(key), () => setFailed(key))
-          .finally(() => setBusy(null))
+      const [busy, setBusy] = useState(false)
+      const [failed, setFailed] = useState(false)
+      const on = config.value?.[k] ?? def
+      const flip = (next) => {
+        setBusy(true)
+        setFailed(false)
+        Promise.resolve(props.setSwitch(k, next))
+          .then((ok) => ok === false && setFailed(true), () => setFailed(true))
+          .finally(() => setBusy(false))
       }
-      const flip = (w, on) => write(w.path, () => props.setUnsynced(on ? off.filter((p) => !is(p, w)) : [...off.filter((p) => !is(p, w)), w.path]))
-      const row = (key, name, sub, on, onChange) =>
-        jsxs(
-          'div',
-          {
-            style: st.row,
+      return jsxs('div', {
+        style: st.row,
+        children: [
+          jsxs('div', {
+            style: st.text,
             children: [
-              jsxs('div', {
-                style: st.text,
-                children: [
-                  jsx('div', { style: st.name, title: name, children: name }),
-                  jsx('div', { style: st.path, title: sub, children: sub }),
-                  failed === key && jsx('div', { style: st.error, role: 'alert', children: t('switchFailed') }),
-                ],
-              }),
-              jsx(ui.Switch, { checked: on, label: name, disabled: !config.writable || busy !== null, onChange }),
+              jsx('div', { style: st.name, children: t(props.label) }),
+              failed && jsx('div', { style: st.error, role: 'alert', children: t('switchFailed') }),
             ],
-          },
-          key,
-        )
-      // DSH's 未分组 too: the sessions in none of the workspaces, many of them one-off chats, kept
-      // from the Iridium by one switch (the user, 2026-11-08).
-      const UNGROUPED = ':ungrouped' // no folder's path
-      const rows = !ready
-        ? [jsx('div', { style: st.note, role: 'status', children: t('loading') }, 'loading')]
-        : [
-            ...items.map((w) => row(w.path, w.title || w.path, w.path, !off.some((p) => is(p, w)), (next) => flip(w, next))),
-            row(UNGROUPED, t('ungrouped'), t('ungroupedHint'), config.value?.ungrouped !== false, (next) => write(UNGROUPED, () => props.setUngrouped(next))),
-          ]
-      return jsxs('section', {
-        children: [jsx('h3', { style: st.heading, children: t('workspaces') }), jsx('p', { style: st.hint, children: t('workspacesHint') }), ...rows],
+          }),
+          jsx(ui.Switch, { checked: on, label: t(props.label), disabled: !config.writable || busy, onChange: flip }),
+        ],
       })
     }
 
     function Page(props) {
       return jsxs('div', {
         style: st.page,
-        children: [jsxs('section', { children: [jsx('h3', { style: st.heading, children: props.t('connection') }), jsx(Connection, props)] }), jsx(Workspaces, props)],
+        children: [
+          jsxs('section', {
+            children: [
+              jsx('h3', { style: st.heading, children: props.t('connection') }),
+              jsx(Switch, { ...props, k: 'local', def: true, label: 'local' }),
+              jsx(Connection, props),
+              jsx(Switch, { ...props, k: 'syncNewSessions', def: false, label: 'sync' }),
+            ],
+          }),
+        ],
       })
     }
 
@@ -194,45 +171,10 @@ window.__ModuleLoader__.load({
       })
     }
 
-    const inject = ['slots', 'locale', 'configForms', 'workspaces', 'sessions']
-
-    /**
-     * A session another dsh process made here (the Iridium's), filed under a workspace by this
-     * plugin (dsh.attach): the workspace lists it at once, but this window's session list is
-     * pulled only as its own sessions change, so it would show once the window is reloaded. When a
-     * workspace names a session the list does not have, the list is pulled again, and looked at
-     * again a moment later (a pull already under way may have begun before the session was
-     * there); at most three times for each, so one gone from disk does not pull it over and over.
-     */
-    function followFiled(ctx) {
-      const tries = new Map()
-      let timer = null
-      const check = (wait = 500) => {
-        if (timer !== null) return
-        timer = setTimeout(() => {
-          timer = null
-          const ws = ctx.workspaces.list.getSnapshot()
-          const ss = ctx.sessions.list.getSnapshot()
-          if (ws.phase !== 'ready' || ss.phase === 'pending') return
-          const missing = ws.items.flatMap((w) => w.sessionIds ?? []).filter((id) => !ss.byId[id] && (tries.get(id) ?? 0) < 3)
-          if (!missing.length) return
-          for (const id of missing) tries.set(id, (tries.get(id) ?? 0) + 1)
-          Promise.resolve(ctx.sessions.refresh())
-            .catch(() => {})
-            .finally(() => check(2000))
-        }, wait)
-      }
-      const offs = [ctx.workspaces.list.subscribe(() => check()), ctx.sessions.list.subscribe(() => check())]
-      check()
-      return () => {
-        clearTimeout(timer)
-        for (const off of offs) if (typeof off === 'function') off()
-      }
-    }
+    const inject = ['slots', 'locale', 'configForms']
 
     function apply(ctx) {
       ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'remote-iridium: dictionaries')
-      ctx.effect(() => followFiled(ctx), 'remote-iridium: sessions filed here')
       ctx.effect(() => {
         const tag = document.createElement('style')
         tag.dataset.pluginCss = 'remote-iridium'
@@ -255,7 +197,7 @@ window.__ModuleLoader__.load({
                 order: 50,
                 label: () => t('title'),
                 locale: NS,
-                inject: () => ({ hooks: { iridiumForm: store, iridiumConfig: scope, iridiumWorkspaces: ctx.workspaces.list }, ...form.actions(), setUnsynced: (list) => scope.set('unsynced', list), setUngrouped: (on) => scope.set('ungrouped', on) }),
+                inject: () => ({ hooks: { iridiumForm: store, iridiumConfig: scope }, ...form.actions(), setSwitch: (k, on) => scope.set(k, on) }),
               },
               Page,
             ),

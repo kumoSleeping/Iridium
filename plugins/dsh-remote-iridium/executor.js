@@ -487,18 +487,28 @@ export class Executor {
 
   hello() {
     const caps = (typeof this.o.caps === 'function' ? this.o.caps() : this.o.caps) ?? []
+    // Its own process, where it runs agents in itself (inproc.js): the sessions it holds are the
+    // Iridium's to drive through it.
+    const pid = typeof this.o.pid === 'function' ? this.o.pid() : this.o.pid
     return {
       protocol: PROTOCOL, program: this.o.program ?? 'dsh-remote-iridium', os: process.platform === 'win32' ? 'windows' : process.platform,
       arch: process.arch, home: os.homedir(), sep: path.sep, scratch: path.join(this.state, 'scratch'),
       env: helloEnv(this.env),
-      agents: this.o.agents ?? [], holds: [...this.holds.values()].map((h) => h.state()),
+      agents: this.agents(), holds: [...this.holds.values()].map((h) => h.state()),
       shell: !this.o.noShell,
       ...(this.o.noShell ? { noShell: true } : {}),
       ...(this.o.agentShell ? { agentShell: true } : {}),
       ...(this.o.ir ? { irClient: true } : {}),
       ...(this.o.machineId ? { machineId: this.o.machineId } : {}),
       ...(caps.length ? { caps } : {}),
+      ...(this.o.headless ? { headless: true } : {}),
+      ...(pid ? { pid } : {}),
     }
+  }
+
+  /** The agents it has (o.agents, or what o.agents() says now). */
+  agents() {
+    return (typeof this.o.agents === 'function' ? this.o.agents() : this.o.agents) ?? []
   }
 
   /** Sends event (params) to the Iridium if connected (held.changed, session.attach); false if not. */
@@ -573,7 +583,7 @@ export class Executor {
       case 'hold.start': {
         if (!p.hold || /[\\/.]/.test(p.hold) || !Array.isArray(p.argv) || !p.argv.length) throw bad('bad hold.start')
         // With noShell, only an argv beginning with one of the agents' own.
-        if (this.o.noShell && !(this.o.agents ?? []).some((a) => a.argv?.length && a.argv.every((x, i) => p.argv[i] === x)))
+        if (this.o.noShell && !this.agents().some((a) => a.argv?.length && a.argv.every((x, i) => p.argv[i] === x)))
           throw new RemoteError('denied', 'only its agents start here')
         let h = this.holds.get(p.hold)
         if (h) return { pid: h.child?.pid ?? 0 }
@@ -637,7 +647,7 @@ export class Executor {
       const rel = path.relative(fold(root), fold(real))
       return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))
     }
-    for (const d of deniedPaths(this.env, this.o.agents ?? [], [path.join(this.state, 'token'), ...(this.o.denied ?? [])])) {
+    for (const d of deniedPaths(this.env, this.agents(), [path.join(this.state, 'token'), ...(this.o.denied ?? [])])) {
       if (under(d)) throw new RemoteError('denied', p)
     }
     const roots = this.o.roots ?? []

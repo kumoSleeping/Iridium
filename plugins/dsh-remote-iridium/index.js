@@ -1,19 +1,23 @@
-// dsh-remote-iridium: a cordis plugin for dsh's web profile that makes this machine an executor
-// of an Iridium (Iridium docs/exec.md). The first time it asks the Iridium to pair, showing a code
-// to match on the page; once a panel allows it, it keeps the TOKEN and connects by itself. Each
-// session the Iridium starts here is a `dsh --profile sdk` child of this process.
+// dsh-remote-iridium: a cordis plugin for DSH Desktop (and dsh's web profile) that makes this
+// machine an executor of an Iridium (Iridium docs/exec.md), and DSH Desktop the place its dsh
+// sessions run: each one the Iridium starts here runs in this very process (inproc.js), the same
+// agent Desktop's window shows. It reaches the Iridium on this computer by itself (local.js), and
+// another by its address: the first time it asks that one to pair, showing a code to match on the
+// page; once a panel allows it, it keeps the TOKEN and connects by itself.
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import z from '@deepseek-ai/schemastery'
 import { createAttach } from './attach.js'
-import { bridgeEndpoint, createBridge } from './bridge.js'
-import { dshMethods, fileSession } from './dsh.js'
+import { createDesktop, createFreeze } from './desktop.js'
+import { dshMethods } from './dsh.js'
 import { Executor, iridiumKey, refused } from './executor.js'
-import { followHeld } from './held.js'
+import { createInproc, INPROC } from './inproc.js'
+import { stateDir, watchLocal } from './local.js'
 import { machineID } from './machine.js'
 import { OmdUltra } from './omd.js'
+import { ownPersona } from './persona.js'
 
 export const name = 'remote-iridium'
 
@@ -163,38 +167,32 @@ export function secureURL(url) {
 }
 
 /**
- * Config: url, the Iridium (https://…), set on its page in dsh's settings (client.js), with
- * `/iridium <url>`, or in the profile; name, this machine's (default: its host name); roots, the
- * directories the Iridium may read and write files under (default: all but the denied); shell,
- * whether command lines from the Iridium run here, not only dsh (default: yes); agentShell, whether
- * its agents may run them too (ir sh), not only a person on its page (default: no); unsynced, the
- * folders of the workspaces the Iridium does not list (switched off on the plugin's settings page;
- * a name in dsh's sidebar does too); ungrouped, whether it lists the sessions in none of the
- * workspaces (dsh's 未分组; default: yes). The url, unsynced and ungrouped are volatile: taken at
- * once, without dsh starting the plugin again.
+ * Config: url, another Iridium (https://…), set on its page in dsh's settings (client.js), with
+ * `/iridium <url>`, or in the profile; local, whether it connects to the Iridium on this computer
+ * (default: yes), localState that one's state directory (default: IRIDIUM_STATE, else Iridium's
+ * own); name, this machine's (default: its host name); roots, the directories an Iridium may read
+ * and write files under (default: all but the denied); shell, whether command lines from it run
+ * here, not only dsh (default: yes); agentShell, whether its agents may run them too (ir sh), not
+ * only a person on its page (default: no); syncNewSessions, whether the sessions begun in Desktop
+ * show in the Iridium (default: no; it tells them so). url, local and syncNewSessions are
+ * volatile: taken at once, without dsh starting the plugin again.
  */
 export const Config = z.object({
   url: z.string().default('').volatile(),
+  local: z.boolean().default(true).volatile(),
+  localState: z.string().default(''),
   name: z.string(),
   roots: z.array(z.string()),
   shell: z.boolean().default(true),
   agentShell: z.boolean().default(false),
-  // A list; text with commas from an earlier build is taken too (unsyncedList).
-  unsynced: z.union([z.array(z.string()), z.string()]).default([]).volatile(),
-  ungrouped: z.boolean().default(true).volatile(),
+  syncNewSessions: z.boolean().default(false).volatile(),
 })
-
-/** The workspaces kept from the Iridium, as the setting lists them (folders or names; a list, or
- *  text with commas as an earlier build kept it). */
-export function unsyncedList(v) {
-  const all = Array.isArray(v) ? v : String(v ?? '').split(/[,，;；\n]/)
-  return [...new Set(all.map((x) => String(x).trim()).filter(Boolean))]
-}
 
 export function apply(ctx, config) {
   const home = process.env.DSH_HOME || path.join(os.homedir(), '.dsh')
   // Each Iridium its own TOKEN (token/<host>) and holders (<host>/): one set aside for another is
-  // there again when it comes back, unpaired only if that Iridium removed it.
+  // there again when it comes back, unpaired only if that Iridium removed it. The one on this
+  // computer: local/.
   const state = path.join(home, 'remote-iridium')
   const tokens = path.join(state, 'token')
   const tokenOf = (url) => path.join(tokens, iridiumKey(url))
@@ -205,45 +203,95 @@ export function apply(ctx, config) {
     return iridiumURL(s.match(/https?:\/\/\S+/i)?.[0] ?? s) ?? s
   }
   let status = { state: 'idle' }
-  let run = null // { stop, url }: the loop for one url
+  let run = null // { stop, url, ex }: the loop for one url
+  let local = null // { stop, ex }: the Iridium on this computer
   let offer = null // what this machine gives the Iridium: dsh's version, commands, roots
+  const conns = () => [run?.ex, local?.ex].filter(Boolean)
+  const broadcast = (event, params) => conns().reduce((sent, ex) => ex.notify(event, params) || sent, false)
 
-  // What plugins hang on a session for the Iridium's page (attach.js), as the service iridium:
-  // this process's own, and those of the dsh processes the Iridium started here (session.js, over
-  // the bridge), sent on over whichever connection is up; a button pressed there comes back.
-  let bridge = null
-  const attach = createAttach({
-    send: (params) => run?.ex?.notify('session.attach', params) ?? false,
-    toProcess: (session, id, user) => bridge?.button(session, id, user),
+  let dsh = null
+  try {
+    dsh = { agent: 'dsh', ...findDsh(), home }
+  } catch (e) {
+    say(e.message)
+  }
+  // The sessions an Iridium starts here run in this process (inproc.js), where dsh has a session
+  // controller: DSH Desktop's, dsh web's. Once it is there the connections say so again.
+  const persona = ownPersona(ctx)
+  const inproc = createInproc(ctx, { scope: dsh?.scope, log: say, persona, ready: () => conns().forEach((ex) => ex.drop()) })
+  // What the dsh tells of: models, presets, workspaces, sessions; the hand-over of a windowless one.
+  const headless = process.env.IRIDIUM_DESKTOP_HEADLESS === '1'
+  const freeze = headless ? createFreeze(ctx, { refuse: inproc.refuse, log: say }) : null
+  const desktop = createDesktop(ctx, broadcast, {
+    sync: () => volatile(config?.syncNewSessions) === true,
+    freeze,
+    config: () => ({ exe: process.execPath, ...(process.argv[1] ? { hostEntry: process.argv[1] } : {}), ...(dsh?.scope ? { scope: dsh.scope } : {}) }),
   })
+  // What plugins hang on a session for the Iridium's page (attach.js), as the service iridium,
+  // sent on over whichever connection is up; a button pressed there comes back.
+  const attach = createAttach({ send: (params) => broadcast('session.attach', params) })
   ctx.provide('iridium', attach.service)
   ctx.plugin(OmdUltra)
-  // Each session that begins in one of those processes is filed under its folder's workspace here
-  // (DSH Desktop's sidebar), once.
-  const filed = new Set()
-  bridge = createBridge({
-    endpoint: bridgeEndpoint(state),
-    started: (session, cwd) => {
-      if (filed.has(session)) return
-      filed.add(session)
-      fileSession(ctx, session, cwd).catch((e) => {
-        filed.delete(session)
-        say(`filing ${session} under its workspace: ${e.message}`)
-      })
-    },
-    attach: (session, place, content, owner) => attach.put(session, place, content, owner),
-    gone: (owner) => attach.drop(owner),
-    log: say,
-  })
-  const sessionFile = path.join(state, 'session.patch.yml')
-  const prepared = path.join(state, 'prepared')
-  const follow = followHeld(ctx, (event, params) => run?.ex?.notify(event, params))
-  ctx.effect(() => () => {
-    follow.stop()
-    bridge.close()
-  }, 'remote-iridium: the sessions\' parts')
-  // A dsh with agents (DSH Desktop's, dsh web's) holds sessions; one without has nothing to say.
-  const caps = () => [...(ctx.get('agents') ? ['held'] : []), 'agent.prepare', 'session.attach', 'agent.personas', 'session.persona']
+  // ir for the sessions' shell calls: on the PATH of this process (last: an ir of the computer's
+  // own comes first), it takes the session's Iridium and TOKEN from DSH_IRIDIUM_* (inproc.js).
+  irOnPath(path.join(state, 'bin'))
+
+  const agents = () => {
+    if (!dsh) return []
+    if (inproc.available()) return [{ agent: 'dsh', argv: [INPROC], version: dsh.version, scope: dsh.scope, home }]
+    return [dsh]
+  }
+  const caps = () => [...(inproc.available() ? ['dsh.inproc'] : []), 'session.attach', 'agent.personas']
+  const methods = { ...dshMethods(ctx), ...desktop.methods }
+  const noShell = () => config?.shell === false
+  const agentShell = () => !noShell() && config?.agentShell === true
+  const executor = (o) =>
+    new Executor({
+      roots: config?.roots ?? [], noShell: noShell(), agentShell: agentShell(), agents, caps, machineId: machineID(), headless,
+      methods, inproc, denied: [tokens], pid: () => (inproc.available() ? process.pid : 0),
+      // Connected again: all that is attached and all it tells of, again.
+      connected: () => {
+        attach.resend()
+        desktop.tellAll()
+      },
+      events: { 'session.button': (p) => attach.button(p?.session, p?.id, p?.user) },
+      program: `dsh-remote-iridium ${version()}`, ir: fileURLToPath(new URL('./ir.js', import.meta.url)), log: (m) => say(m),
+      ...o,
+    })
+  ctx.on('loader/volatile-update', () => desktop.tellConfig())
+
+  /** The Iridium on this computer, while its setting says so: connected whenever one runs. */
+  function startLocal() {
+    local?.stop()
+    local = null
+    if (volatile(config?.local) === false) return
+    const dir = config?.localState || stateDir()
+    let ex = null
+    const stop = watchLocal(
+      dir,
+      (v) => {
+        ex?.stop()
+        ex = executor({ url: v.ws, token: v.token, state: path.join(state, 'local') })
+        ex.run()
+        say(`the Iridium on this computer: ${v.ws}`)
+      },
+      () => {
+        ex?.stop()
+        ex = null
+      },
+    )
+    local = {
+      dir,
+      get ex() {
+        return ex
+      },
+      stop() {
+        stop()
+        ex?.stop()
+        ex = null
+      },
+    }
+  }
 
   function start() {
     run?.stop()
@@ -251,7 +299,6 @@ export function apply(ctx, config) {
     const url = urlNow()
     if (!url) {
       status = { state: 'no-url' }
-      say('no url set: set the Iridium address on the Iridium page of dsh\'s settings, or type /iridium https://your-iridium')
       return
     }
     if (!iridiumURL(url)) {
@@ -282,26 +329,20 @@ export function apply(ctx, config) {
       },
     }
     ;(async () => {
-      let dsh
-      try {
-        dsh = { agent: 'dsh', ...findDsh(), home }
-      } catch (e) {
-        show({ state: 'error', error: e.message })
-        say(e.message)
+      if (!dsh) {
+        show({ state: 'error', error: 'no dsh found in this process' })
         return
       }
       // What it asks with is what its hello will say: the Iridium's card shows the agents and
       // whether command lines would run here.
-      const noShell = config?.shell === false
-      const agentShell = !noShell && config?.agentShell === true
       const machineId = machineID()
       const who = {
         name: config?.name || machineName(), os: process.platform === 'win32' ? 'windows' : process.platform, arch: process.arch,
         program: `dsh-remote-iridium ${version()}`, agents: [{ agent: 'dsh', version: dsh.version }],
-        ...(noShell ? { noShell } : {}), ...(agentShell ? { agentShell } : {}),
+        ...(noShell() ? { noShell: true } : {}), ...(agentShell() ? { agentShell: true } : {}),
         ...(machineId ? { machineId } : {}),
       }
-      offer = { dsh: dsh.version, noShell, agentShell, roots: config?.roots ?? [] }
+      offer = { dsh: dsh.version, noShell: noShell(), agentShell: agentShell(), roots: config?.roots ?? [] }
       if (older(dsh.version, MIN_DSH)) say(`dsh ${dsh.version} is older than ${MIN_DSH}: the Iridium starts no dsh here`)
       for (;;) {
         let token = null
@@ -317,16 +358,7 @@ export function apply(ctx, config) {
         }
         if (stopped) return
         show({ state: 'paired', name: who.name })
-        // The models this dsh's settings give, for the sessions it starts (agent.prepare): keys may be in it.
-        const llmFile = path.join(state, 'llm.patch.yml')
-        ex = new Executor({
-          url: wsURL(url), token, state: path.join(state, iridiumKey(url)), denied: [tokens, llmFile, sessionFile, prepared], roots: config?.roots ?? [], noShell, agentShell, agents: [dsh], caps, machineId,
-          methods: dshMethods(ctx, () => ({ unsynced: unsyncedList(volatile(config?.unsynced)), ungrouped: volatile(config?.ungrouped) !== false }), { file: llmFile, scope: dsh.scope }, { follow, bridge, sessionFile, dir: prepared }),
-          // Connected again: all that is attached, again; a button pressed on the page, to its plugin.
-          connected: () => attach.resend(),
-          events: { 'session.button': (p) => attach.button(p?.session, p?.id, p?.user) },
-          program: who.program, ir: fileURLToPath(new URL('./ir.js', import.meta.url)), log: (m) => say(m),
-        })
+        ex = executor({ url: wsURL(url), token, state: path.join(state, iridiumKey(url)) })
         const running = ex.run()
         // A TOKEN turned down (its Bot removed) is forgotten, and the machine pairs again.
         while (!stopped) {
@@ -354,11 +386,23 @@ export function apply(ctx, config) {
     return [`agent：${dsh}`, `命令：${commands}`, `文件：${roots}`]
   }
 
+  /** The state of both: the Iridium on this computer, then the one at the address. */
   function describe() {
+    return [localLine(), remoteLine()].filter(Boolean).join('\n')
+  }
+
+  function localLine() {
+    if (!local) return '本机 Iridium：未启用'
+    const ex = local.ex
+    if (!ex) return '本机 Iridium：未运行'
+    return `本机 Iridium：${connection(ex).replace(/^连接：/, '')}`
+  }
+
+  function remoteLine() {
     const at = status.url ? `（${status.url}）` : ''
     switch (status.state) {
       case 'no-url':
-        return '未设置 Iridium 地址。在设置的 Iridium 一页填写，或输入 /iridium https://你的-iridium'
+        return ''
       case 'bad-url':
         return `不是 Iridium 地址：${status.url}。用法：/iridium https://你的-iridium`
       case 'insecure-url':
@@ -376,7 +420,7 @@ export function apply(ctx, config) {
       case 'revoked':
         return `已被 Iridium 移除${at}，重新申请中`
       case 'paired':
-        return [`已接入${at}，名为 ${run?.ex?.name || status.name}`, connection(), ...offered(), running()].filter(Boolean).join('\n')
+        return [`已接入${at}，名为 ${run?.ex?.name || status.name}`, connection(run?.ex), ...offered(), running()].filter(Boolean).join('\n')
       case 'error':
         return `无法启动：${status.error}`
       default:
@@ -385,8 +429,7 @@ export function apply(ctx, config) {
   }
 
   /** The connection: up since when, or down since when and why. */
-  function connection() {
-    const ex = run?.ex
+  function connection(ex) {
     if (!ex) return '连接：连接中'
     const span = ex.since ? ago(Date.now() - ex.since) : ''
     if (ex.conn) return span ? `连接：已连接 ${span}` : '连接：已连接'
@@ -395,19 +438,24 @@ export function apply(ctx, config) {
     return `连接：已断开${span ? ` ${span}` : ''}，重连中${why}`
   }
 
-  /** The sessions' processes it runs now. */
+  /** The Iridium's sessions it runs now. */
   function running() {
-    const n = run?.ex?.running() ?? 0
-    return n ? `进程：${n} 个运行中` : '进程：无'
+    const n = conns().reduce((n, ex) => n + ex.running(), 0)
+    return n ? `会话：${n} 个运行中` : ''
   }
 
   ctx.effect(() => {
+    startLocal()
     start()
-    return () => run?.stop()
+    return () => {
+      run?.stop()
+      local?.stop()
+    }
   }, 'remote-iridium')
-  // The address changed on its settings page: ask the new one.
+  // Its settings changed: the address asked anew, the one on this computer on or off.
   ctx.on('loader/volatile-update', () => {
     if (urlNow() !== run?.url) start()
+    if ((volatile(config?.local) !== false) !== !!local) startLocal()
   })
 
   ctx.inject(['commands', 'settings'], (ctx) => {
@@ -461,4 +509,28 @@ function version() {
   } catch {
     return '0'
   }
+}
+
+/**
+ * Puts ir (ir.js, run by this process's own executable as node) in dir, and dir at the end of this
+ * process's PATH, which the sessions' shell calls get: an Iridium session's ir takes its Iridium
+ * and TOKEN from the DSH_IRIDIUM_* its calls get (inproc.js).
+ */
+function irOnPath(dir) {
+  const ir = fileURLToPath(new URL('./ir.js', import.meta.url))
+  try {
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
+    const node = process.execPath
+    const asNode = path.basename(node).toLowerCase().replace(/\.exe$/, '') !== 'node'
+    const sh = asNode ? 'ELECTRON_RUN_AS_NODE=1 ' : ''
+    fs.writeFileSync(path.join(dir, 'ir'), `#!/bin/sh\n${sh}exec ${JSON.stringify(node)} ${JSON.stringify(ir)} "$@"\n`, { mode: 0o700 })
+    const cmd = asNode ? 'set "ELECTRON_RUN_AS_NODE=1"\r\n' : ''
+    fs.writeFileSync(path.join(dir, 'ir.cmd'), `@echo off\r\nsetlocal\r\n${cmd}"${node}" "${ir}" %*\r\n`, { mode: 0o600 })
+  } catch (e) {
+    say(`ir for the sessions: ${e.message}`)
+    return
+  }
+  const key = Object.keys(process.env).find((k) => k.toUpperCase() === 'PATH') ?? 'PATH'
+  const parts = (process.env[key] ?? '').split(path.delimiter)
+  if (!parts.includes(dir)) process.env[key] = [...parts.filter(Boolean), dir].join(path.delimiter)
 }

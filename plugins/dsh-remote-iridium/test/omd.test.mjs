@@ -47,7 +47,7 @@ test('the key and its sub-modes with their marks, switched by a press; Ultra kep
     s2: { eligible: false, mode: 'off', reason: 'not on an OMD preset', selected: sel },
   }
   const f = fake(views)
-  omdIridium.apply(f.ctx, { poll: 60_000 })
+  omdIridium.apply(f.ctx, { gather: 0 })
   await until(() => f.attached.size === 2)
   const { MARKS } = omdIridium
   const subs = (on) => [['workflow', 'Workflow'], ['free', 'Free']].map(([id, t]) => `<button id="omd.ultra.${id}" type="action"${id === on ? ' pressed' : ''}><img src="${MARKS[id]}"/>${t}</button>`).join('')

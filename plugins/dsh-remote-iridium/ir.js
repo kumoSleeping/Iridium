@@ -1,10 +1,11 @@
 // ir for an agent the Iridium hosts at this machine (Iridium's docs/exec.md "远端的 ir"): its
 // arguments and folder go to the Iridium's POST /v1/internal/cli with the session's own TOKEN
-// (IRIDIUM_URL, IRIDIUM_TOKEN, set as the executor started it), and the Iridium runs them as
-// this machine's Bot, for that session; what it writes comes back a line at a time. The executor
-// puts this on the agent's PATH as `ir` (ir, ir.cmd beside it).
-const url = process.env.IRIDIUM_URL
-const token = process.env.IRIDIUM_TOKEN
+// (IRIDIUM_URL, IRIDIUM_TOKEN, set as the executor started it; DSH_IRIDIUM_URL, DSH_IRIDIUM_TOKEN
+// as dsh gives a shell call of a session run in DSH Desktop's process), and the Iridium runs them
+// as this machine's Bot, for that session; what it writes comes back a line at a time. The
+// executor puts this on the agent's PATH as `ir` (ir, ir.cmd beside it).
+const env = process.env
+const [url, token] = env.DSH_IRIDIUM_TOKEN ? [env.DSH_IRIDIUM_URL, env.DSH_IRIDIUM_TOKEN] : [env.IRIDIUM_URL, env.IRIDIUM_TOKEN]
 if (!url || !token) {
   process.stderr.write('ir: no Iridium here (IRIDIUM_URL, IRIDIUM_TOKEN)\n')
   process.exit(1)

@@ -35,7 +35,8 @@ export async function loadSdk(scope) {
   return { Server: desktopServer(server.HarnessSdkJsonRpcServer), Transport: protocol.JsonRpcLineTransport }
 }
 
-/** What a hold's argv after INPROC says: --preset <id> (a new session's), --system <file>. */
+/** What a hold's argv after INPROC says: --preset <id> (a new session's), --system <file>,
+ *  --persona own (its persona is the Iridium's), --keep-model (resumed with the model it has). */
 export function inprocArgs(argv) {
   const o = {}
   for (let i = 1; i < argv.length; i++) {
@@ -43,6 +44,8 @@ export function inprocArgs(argv) {
     const v = argv[i + 1]
     if (k === '--preset' && v !== undefined) (o.preset = v), i++
     else if (k === '--system' && v !== undefined) (o.system = v), i++
+    else if (k === '--persona' && v !== undefined) (o.persona = v), i++
+    else if (k === '--keep-model') o.keepModel = true
   }
   return o
 }
@@ -98,6 +101,7 @@ function desktopServer(Base) {
         if (r?.error) throw r.error
         agent = r.agent
       } else {
+        if (this.o.refuse?.()) throw new Error('this dsh hands its sessions over to DSH Desktop: no new session here')
         const live = ctx.agents.get(sessionId)
         if (live || (await ctx.get('sessionPersistence')?.stat(sessionId)))
           throw new Error(`session "${sessionId}" already exists`)
@@ -111,7 +115,7 @@ function desktopServer(Base) {
         agent = ctx.agents.get(sessionId)
         if (!agent) throw new Error(`no agent of the new session "${sessionId}"`)
       }
-      this.route(agent)
+      if (!(resume && this.o.keepModel)) this.route(agent)
       const detach = this.o.attach?.(agent) ?? (() => {})
       const rec = {
         handle: {
@@ -169,7 +173,7 @@ const noProvider = (e) => e?.code === 'NO_PROVIDER'
  * Iridium's ask is cancelled when Desktop does. An answer of nobody (no window open) waits for the
  * other side.
  */
-function race(req, next, ask) {
+export function race(req, next, ask) {
   const desk = new AbortController()
   const ir = new AbortController()
   const orig = req.signal
@@ -227,17 +231,21 @@ function race(req, next, ask) {
 }
 
 /**
- * The holds run in this process. ctx: the plugin's; scope: the dsh's @deepseek-ai; log. start()
+ * The holds run in this process. ctx: the plugin's; scope: the dsh's @deepseek-ai; log; persona:
+ * persona.js's ownPersona (a session whose persona is the Iridium's), if any; ready(), once holds
+ * can run here. start()
  * serves one: {hold, argv, env, input (its stdin), out (fd of its out.log), err (fd), exited(x)};
  * returns {stop(hard)}.
  */
-export function createInproc(ctx, { scope, log = () => {} } = {}) {
+export function createInproc(ctx, { scope, log = () => {}, persona = null, ready = () => {} } = {}) {
   const servers = new Set()
+  let refused = false // handed over to Desktop (desktop.freeze): no session made here
   // dsh's SDK server reads its services as properties: a context that has them injected, while
   // they are there (Desktop's session controller comes up after this plugin).
   let here = null
   ctx.inject(['agents', 'workingDirectory', 'sessionController'], (c) => {
     here = c
+    setImmediate(ready)
     c.effect(() => () => {
       if (here === c) here = null
     }, 'remote-iridium: inproc services')
@@ -303,6 +311,14 @@ export function createInproc(ctx, { scope, log = () => {} } = {}) {
     /** Whether holds run here: this dsh has a session controller (Desktop's, dsh web's). */
     available: () => here !== null,
 
+    /** No session is made here from now on (handed over to Desktop). */
+    refuse: () => {
+      refused = true
+    },
+
+    /** How many holds it serves. */
+    serving: () => servers.size,
+
     async start({ hold, argv, env = {}, input, out, err, exited }) {
       const o = inprocArgs(argv)
       let system = ''
@@ -327,6 +343,7 @@ export function createInproc(ctx, { scope, log = () => {} } = {}) {
           ids.set(String(agent.session.id), { url: env.IRIDIUM_URL ?? '', token: env.IRIDIUM_TOKEN, session: session ?? '' })
           offs.push(() => ids.delete(String(agent.session.id)))
         }
+        if (o.persona === 'own' && persona) offs.push(persona.own(String(agent.session.id)))
         const sp = agent.ctx?.get?.('systemPrompt')
         if (system.trim() && sp) {
           try {
@@ -338,7 +355,7 @@ export function createInproc(ctx, { scope, log = () => {} } = {}) {
         return () => offs.forEach((f) => typeof f === 'function' && f())
       }
       if (!here) throw new Error('this dsh has no session controller (not DSH Desktop nor dsh web)')
-      const server = new Server(here, transport, { preset: o.preset, attach })
+      const server = new Server(here, transport, { preset: o.preset, keepModel: o.keepModel, attach, refuse: () => refused })
       servers.add(server)
       let ended = false
       const end = async (x) => {

@@ -4,21 +4,15 @@
 // With none in this dsh, it gives nothing and changes nothing.
 //
 // In DSH Desktop's process: agent.personas, the personas Desktop has (each whole, its parts put
-// together here: the Iridium does not know them); and, for a session the Iridium starts here, a
-// patch (personaPatch) that loads this file in that process with what its persona is to be:
-//   own: the session has a persona of the Iridium's (in its system prompt): the plugin's give way;
-//   modules: Desktop's for this session (Desktop's choice for it, else Desktop's global one), in
-//     place of what the plugin there reads from the sdk profile's own store.
-// In that process (apply): the plugin's service answers every ask for this process's persona with
-// those (own: all empty, as its "关闭人格"). Every way the plugin puts a persona in a prompt asks
-// it so: its sections at the prompt's end, and OMD's own presets, which write it into their head
-// (1.9: oh-my-dsh:persona, through forPrompt, which asks forSession).
+// together here: the Iridium does not know them); and the sessions the Iridium runs here with a
+// persona of its own (in its system prompt), for which the plugin's gives way (ownPersona: its
+// service answers for them with none, as its "关闭人格"). Every way the plugin puts a persona in a
+// prompt asks it so: its sections at the prompt's end, and OMD's own presets, which write it into
+// their head (1.9: oh-my-dsh:persona, through forPrompt, which asks forSession).
 
 import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
-
-export const name = 'remote-iridium-persona'
 
 /** Where its modules are under a profile's node_modules, and what the page calls each. */
 const PLACES = [
@@ -87,56 +81,32 @@ export function personasOf(ctx, lib) {
 }
 
 /**
- * What a session the Iridium starts here takes (agent.prepare): own, its persona is the Iridium's;
- * else Desktop's modules for it (its choice for session, else the global one). null: no persona
- * plugin here, nothing to change.
+ * In DSH Desktop's process, the sessions whose persona is the Iridium's (inproc.js: --persona own):
+ * the plugin's service answers for them with none, for every other session as it would.
+ * own(session) puts one in; it returns the function that takes it out.
  */
-export function personaFor(ctx, lib, session, own) {
-  const service = ctx.get('dshPersona')
-  if (!service || !lib) return null
-  if (own) return { own: true }
-  const modules = service.forSession({ id: session, header: {} })?.modules ?? {}
-  return { modules: Object.fromEntries(Object.keys(OFF).map((k) => [k, typeof modules[k] === 'string' ? modules[k] : ''])) }
-}
-
-/** The patch that loads this file in a session's dsh process with config (personaFor's). */
-export function personaPatch(config) {
-  const out = [
-    "# dsh-remote-iridium: the persona of the Iridium's session here.",
-    '# Generated; do not edit.',
-    '- insert:',
-    '    - id: remote-iridium-persona',
-    `      name: ${JSON.stringify(new URL('./persona.js', import.meta.url).href)}`,
-    `      config: ${JSON.stringify(config)}`,
-  ]
-  return out.join('\n') + '\n'
-}
-
-/** The modules a process's persona is to be, as config says; none: as the plugin has them. */
-export const modulesOf = (config) => (config?.own ? OFF : config?.modules && typeof config.modules === 'object' ? { ...OFF, ...config.modules } : null)
-
-/**
- * service (the plugin's dshPersona) answering with modules for every session, till the returned
- * function puts it back.
- */
-export function holdPersona(service, modules) {
-  const own = service.forSession
-  service.forSession = function (session) {
-    return { ...own.call(this, session), modules: { ...modules } }
-  }
-  return () => {
-    service.forSession = own
-  }
-}
-
-/** In a session's dsh process: its persona as config says, once the plugin's service is there. */
-export function apply(ctx, config) {
-  const modules = modulesOf(config)
-  if (!modules) return
+export function ownPersona(ctx) {
+  const ids = new Map() // session → how many holds said so
   ctx.inject(['dshPersona'], (ctx) => {
     const service = ctx.get('dshPersona')
     if (typeof service?.forSession !== 'function') return
-    const back = holdPersona(service, modules)
-    ctx.effect(() => back, 'remote-iridium: the persona held')
+    const was = service.forSession
+    service.forSession = function (session) {
+      const r = was.call(this, session)
+      return ids.has(String(session?.id)) ? { ...r, modules: { ...OFF } } : r
+    }
+    ctx.effect(() => () => {
+      service.forSession = was
+    }, 'remote-iridium: the Iridium\'s personas')
   })
+  return {
+    own(session) {
+      ids.set(session, (ids.get(session) ?? 0) + 1)
+      return () => {
+        const n = (ids.get(session) ?? 1) - 1
+        if (n > 0) ids.set(session, n)
+        else ids.delete(session)
+      }
+    },
+  }
 }

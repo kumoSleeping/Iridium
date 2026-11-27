@@ -2,7 +2,7 @@
 // mode past the effort track, with a sub-mode and a level OMD picks for it, through OMD's own
 // service (omd.ultracode). It hangs a key at the place "effort" of each session here with this
 // plugin's service iridium (in DSH Desktop's process, and in a dsh process the Iridium started
-// here: index.js and session.js run it), and its sub-modes, each with its mark: the page shows one
+// here: index.js runs it), and its sub-modes, each with its mark: the page shows one
 // key, off or the sub-mode on, a press the next (off, then each sub-mode, then off). A sub-plugin: on only while OMD is there (inject), and the only file here that knows OMD. Ultra on owns the effort: a level picked
 // in the Iridium is a plain model selection, which OMD takes for leaving Ultra, so it is turned
 // on again at the new level.
@@ -24,8 +24,8 @@ export const MARKS = {
   free: svg('<path d="M6 16c5 0 7-8 12-8a4 4 0 0 1 0 8c-5 0-7-8-12-8a4 4 0 1 0 0 8"/>'),
 }
 
-/** How often the sessions shown are looked at again, for a change nothing here tells of. */
-const POLL = 5000
+/** How long a session's events are gathered before it is looked at again. */
+const GATHER = 200
 
 export const texts = {
   zh: {
@@ -167,20 +167,26 @@ export function apply(ctx, o = {}) {
       iridium.attach(id, 'effort', null)
     } catch {}
   })
+  // A session looked at again shortly after its events (OMD's Ultra switched in Desktop's window
+  // writes some): once for a burst of them.
+  const soon = new Map() // session → timer
+  const later = (id) => {
+    if (soon.has(id)) return
+    const t = setTimeout(() => {
+      soon.delete(id)
+      render(id)
+    }, o.gather ?? GATHER)
+    t.unref?.()
+    soon.set(id, t)
+  }
   // A model selected: OMD's own (Ultra switched) or a level picked elsewhere (in the Iridium: a
   // plain selection, which takes OMD's Ultra off): Ultra was on, it is on again at that level.
-  // A session first heard of by its events (it began before this plugin did): shown once.
-  const seen = new Set()
   on('session/event', (session, event) => {
     const id = session?.id
-    if (!id) return
-    if (!seen.has(id) && !shown.has(id) && live(id)) {
-      seen.add(id)
-      render(id)
-    }
-    if (event?.type !== 'model/selection') return
+    if (!id || !live(id)) return
+    if (event?.type !== 'model/selection') return later(id)
     const was = shown.get(id)
-    if (busy.has(id) || !was?.on) return void render(id)
+    if (busy.has(id) || !was?.on) return later(id)
     switching(id, async () => {
       const v = await omd.inspect(id)
       if (v?.mode === 'ultra') return
@@ -189,19 +195,13 @@ export function apply(ctx, o = {}) {
     }).catch(() => {})
   })
 
-  // The sessions open here now, and again now and then.
-  const sweep = () => {
-    const ids = new Set(shown.keys())
-    try {
-      for (const s of ctx.get('sessions')?.list?.() ?? []) if (live(s.id)) ids.add(s.id)
-    } catch {}
-    for (const id of ids) render(id)
-  }
-  sweep()
-  const timer = setInterval(sweep, o.poll ?? POLL)
-  timer.unref?.()
+  // The sessions open here now.
+  try {
+    for (const s of ctx.get('sessions')?.list?.() ?? []) if (live(s.id)) render(s.id)
+  } catch {}
   ctx.effect?.(() => () => {
-    clearInterval(timer)
+    for (const t of soon.values()) clearTimeout(t)
+    soon.clear()
     offButton()
     for (const id of shown.keys()) {
       try {

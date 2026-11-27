@@ -1,6 +1,6 @@
 {
   "name": "dsh-remote-iridium",
-  "description": "Run Iridium's sessions on this machine: it pairs with an Iridium and starts dsh for the sessions hosted there.",
+  "description": "Runs Iridium's dsh sessions in DSH Desktop: it connects to the Iridium on this computer by itself, pairs with another, and serves the sessions those start here in Desktop's own process.",
   "version": "0.1.0",
   "type": "module",
   "main": "index.js",
@@ -14,14 +14,12 @@
     "index.js",
     "machine.js",
     "dsh.js",
-    "held.js",
-    "bridge.js",
-    "session.js",
+    "desktop.js",
+    "inproc.js",
+    "local.js",
     "attach.js",
-    "compose.js",
     "omd.js",
     "persona.js",
-    "prepare/",
     "executor.js",
     "ir.js",
     "secrets.js",
@@ -45,7 +43,6 @@
     "client": {
       "inject": [
         "@deepseek-ai/dsh-client-locale",
-        "@deepseek-ai/dsh-api-workspace-controller",
         "@deepseek-ai/dsh-client-ui-settings",
         "@deepseek-ai/dsh-client-ui-plugin-manager"
       ],
