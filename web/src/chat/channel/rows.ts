@@ -6,7 +6,7 @@ import type { Ask } from "../../api/types.gen";
 import type { Author, Msg } from "./lib";
 
 /** A message as compared: one read again the same changes nothing. */
-const sig = (m: Msg) => JSON.stringify([m.n, m.text, m.files, m.time, m.author, m.kind, m.did, m.work, m.writing, m.event, m.src, m.quote, m.input, m.card, m.ask]);
+const sig = (m: Msg) => JSON.stringify([m.n, m.text, m.files, m.time, m.author, m.kind, m.did, m.work, m.writing, m.event, m.src, m.quote, m.input, m.card, m.ask, m.answer, m.asked]);
 
 /** have with more put in: each number once, in order. A reading replaces what was held, but what it
  *  does not say (the kind, where it is from in its agent's record, a person's input id) stays as

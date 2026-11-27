@@ -257,6 +257,12 @@ func (s *Service) handle(n session.Notice, at time.Time) {
 		m.User = s.agentOf(n.Session)
 		for _, ch := range s.askChannels(n.Session) {
 			l, noted := s.noteIn(ch, n.Session, channel.KindAsk, Plain(Parse(m.Content), nil), m.ID, n.From)
+			if noted {
+				// What it asked, kept past its close: drawn as a line of the conversation then.
+				if r, ok := s.log.Revise(ch, l.Seq, nil, func(d *channel.Data) { d.Asked = s.askedOf(st.Session.ID, *n.Ask) }, ""); ok {
+					l = r
+				}
+			}
 			mc := m
 			s.emitTo(toWhole, false, s.channelSession(ch), "", Event{Type: "message-created", Message: &mc, User: mc.User}, nil, "ask", n.From)
 			// To a page: the channel's own message of it, under its number, with the ask itself:

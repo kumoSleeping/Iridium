@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kumoSleeping/iridium/internal/api"
+	"github.com/kumoSleeping/iridium/internal/channel"
 	"github.com/kumoSleeping/iridium/internal/session"
 )
 
@@ -199,6 +200,7 @@ func (s *Service) press(ctx context.Context, c Caller, id, words string) error {
 			return err
 		}
 		s.forget(card)
+		s.noteAnswer(st.ID, cd, c, *ans)
 	}
 	s.emit(st.Session, Event{Type: "interaction/button", Button: &Button{ID: id}, User: &User{ID: c.Login, Name: c.LoginName}}, nil, "")
 	return nil
@@ -356,14 +358,21 @@ func (s *Service) serveInternal(w http.ResponseWriter, r *http.Request, name str
 			return
 		}
 		st, err := s.askState(c, id)
+		var cd *api.Card
+		ans := api.CardAnswer{Card: req.ID, Option: req.Option, Choices: req.Choices, Words: req.Words, Message: req.Message}
 		if err == nil {
-			err = s.b.Answer(r.Context(), c, api.CardAnswer{Card: req.ID, Option: req.Option, Choices: req.Choices, Words: req.Words, Message: req.Message})
+			// The card as it stood, for what was chosen in its words (noteAnswer).
+			if j := slices.IndexFunc(st.Asks, func(a api.Ask) bool { return cardID(st.ID, a.RequestID) == req.ID }); j >= 0 {
+				cd = session.CardOf(st.ID, st.Asks[j])
+			}
+			err = s.b.Answer(r.Context(), c, ans)
 		}
 		if err != nil {
 			s.fail(w, err)
 			return
 		}
 		s.forget(req.ID)
+		s.noteAnswer(st.ID, cd, c, ans)
 		s.emit(st.Session, Event{Type: "interaction/button", Button: &Button{ID: req.ID}, User: &User{ID: c.Login, Name: c.LoginName}}, nil, "")
 		reply(w, http.StatusOK, struct{}{})
 		return
@@ -373,4 +382,66 @@ func (s *Service) serveInternal(w http.ResponseWriter, r *http.Request, name str
 		return
 	}
 	reply(w, http.StatusOK, struct{}{})
+}
+
+// noteAnswer keeps how ask card cd (nil: not known) of session id was answered, by c, on its
+// message in each channel it was told in, and tells the pages there (kumo, 2026-11-27: each
+// ask in the conversation says who answered it, and how).
+func (s *Service) noteAnswer(id string, cd *api.Card, c Caller, a api.CardAnswer) {
+	if s.log == nil || c.Login == "" {
+		return
+	}
+	ans := channel.Answer{By: c.Login, Name: c.LoginName, Option: a.Option, Label: answerLabel(cd, a), At: time.Now().UnixMilli()}
+	for _, ch := range s.askChannels(id) {
+		l, ok := s.log.ByRef(ch, a.Card)
+		if !ok {
+			continue
+		}
+		m, ok := s.log.Revise(ch, l.Seq, nil, func(d *channel.Data) { x := ans; d.Answer = &x }, "")
+		if !ok {
+			continue
+		}
+		lm := Message{ID: strconv.FormatInt(m.Seq, 10), Content: s.logContent(m), User: s.authorOf(m, nil), CreatedAt: m.At, UpdatedAt: ans.At, Data: logData(m)}
+		s.emitTo(toLive, false, s.channelSession(ch), "", Event{Type: "message-updated", Message: &lm, User: lm.User}, nil, "ask", "")
+	}
+}
+
+// answerLabel is what answer a chose of card cd, in its keys' words: the option's, the options'
+// picked, else the words given.
+func answerLabel(cd *api.Card, a api.CardAnswer) string {
+	text := func(id string) string {
+		if cd != nil {
+			if k := slices.IndexFunc(cd.Options, func(o api.CardOption) bool { return o.ID == id }); k >= 0 {
+				return cd.Options[k].Text
+			}
+		}
+		return id
+	}
+	var out []string
+	if a.Option != "" {
+		out = append(out, text(a.Option))
+	}
+	for _, c := range a.Choices {
+		out = append(out, text(c))
+	}
+	for _, w := range a.Words {
+		if w = strings.TrimSpace(w); w != "" {
+			out = append(out, w)
+		}
+	}
+	if m := strings.TrimSpace(a.Message); m != "" {
+		out = append(out, m)
+	}
+	return strings.Join(out, " · ")
+}
+
+// askedOf is what ask a of session id asked, as its message keeps it (channel.Asked), masked
+// as the card's message is.
+func (s *Service) askedOf(id string, a api.Ask) *channel.Asked {
+	cd := session.CardOf(id, a)
+	out := &channel.Asked{Kind: a.Kind, Tool: a.Tool}
+	if len(cd.Summary) > 0 {
+		out.Summary = s.b.Mask(cd.Summary[0])
+	}
+	return out
 }
