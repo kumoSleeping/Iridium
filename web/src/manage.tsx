@@ -16,7 +16,12 @@ import { AddComputer, clock, deviceBadge, nameError, ofWeb, OpenFolder, PasskeyL
 import { MainKey, SecondKey } from "./card";
 import { ConfirmCard, saysOwner } from "./confirms";
 import { SecretsPane, secretsQ } from "./credentials";
-import { isComputer, keptQuery, manages as managesApps, useAgents, useApps, useMe, useSettings } from "./data";
+import { isComputer, keptQuery, manages as managesApps, useAgents, useApps, useMe, useSettings, useUpdate } from "./data";
+import { CacheRows } from "./device/page";
+import { ahead as cacheAhead } from "./device/state";
+import { CacheTotal } from "./device/total";
+import { LangSwitch, ThemeSwitch, type ThemePref } from "./me";
+import { InstallItem, SignOut, UpdateItem } from "./system";
 import { Bind, Bound, GitHubMark } from "./github";
 import { t, useLang } from "./i18n";
 import { modeName } from "./modes";
@@ -28,7 +33,7 @@ import { SecretHere } from "./secret";
 import { showSecret } from "./secrets";
 import { useConfirms, usePairing } from "./store";
 import { errText, toast } from "./toast";
-import { agentName, ago, Avatar, AvatarKey, cn, FaceChangeOver, IconKey, intoView, Logo, ServerFace, SureKey, Switch, Tip } from "./ui";
+import { agentName, ago, Avatar, AvatarKey, cn, FaceChangeOver, IconKey, intoView, IrMark, Logo, ServerFace, SureKey, Switch, Tip } from "./ui";
 import { useQuery } from "./api/query";
 
 /** Where a secret made here (an invite's link) shows. */
@@ -55,8 +60,9 @@ const NEW_INVITE = "new:invite";
 const NEW_COMPUTER = "new:computer";
 const NEW_ROLE = "new:role";
 const NEW_APP = "new:app";
+const IR = "ir";
 
-export function ManagePage({ tab }: { tab: ManageTab }) {
+export function ManagePage({ tab, theme, setTheme }: { tab: ManageTab; theme: ThemePref; setTheme: (v: ThemePref) => void }) {
   useLang();
   const [root, wide] = useWide();
   const q = useApps();
@@ -66,6 +72,7 @@ export function ManagePage({ tab }: { tab: ManageTab }) {
   const infos = (useAgents().data ?? []).filter((x) => !x.missing);
   const roles = useRoles();
   const pairing = !!usePairing()?.open;
+  const upd = useUpdate().data;
   const all = useComputers();
   const computers = manages ? all : [];
   const host = computers.find((a) => a.host);
@@ -76,6 +83,7 @@ export function ManagePage({ tab }: { tab: ManageTab }) {
   // The row a part of the old routes (#/settings/apps …, a need's) stands for.
   const firstOf = (x: ManageTab): string => {
     const mine = logins.find((l) => l.id === me?.login) ?? logins[0];
+    if (x === "ir") return IR;
     if (x === "apps" && apps[0]) return `p:${apps[0].id}`;
     if ((x === "computers" || x === "secrets") && host) return `c:${host.id}`;
     if ((x === "agents" || x === "roles" || !mine) && infos[0]) return `a:${infos[0].agent}`;
@@ -84,21 +92,21 @@ export function ManagePage({ tab }: { tab: ManageTab }) {
   // Nothing chosen yet: the row the route stands for, worked out as the data comes (an old route's
   // part opens its row on a narrow window too, till the way back is taken).
   const [sel, setSel] = useState("");
-  const [asked, setAsked] = useState(tab !== "accounts");
+  const [asked, setAsked] = useState(tab !== "accounts" && tab !== "ir");
   const [was, setWas] = useState(tab);
   if (tab !== was) (setWas(tab), setSel(""), setAsked(true));
   const at = sel || (wide || asked ? firstOf(tab) : "");
   // Iridium's 凭据 asked for from outside (the route's, 新建's): unfolded there, a new one being added.
   const [want, setWant] = useState(tab === "secrets" ? "show:0" : "");
   if (tab !== was && tab === "secrets") setWant(`show:${Date.now()}`);
-  const [k, id] = at.startsWith("new:") ? [at, ""] : [at.slice(0, 1), at.slice(2)];
+  const [k, id] = at.startsWith("new:") || at === IR ? [at, ""] : [at.slice(0, 1), at.slice(2)];
   const login = k === "l" ? logins.find((l) => l.id === id) : undefined;
   const invite = k === "i" ? invites.find((i) => i.id === id) : undefined;
   const app = k === "p" ? apps.find((a) => a.id === id) : undefined;
   const computer = k === "c" ? computers.find((a) => a.id === id) : undefined;
   const agent = k === "a" ? infos.find((x) => x.agent === id)?.agent : undefined;
   // One removed (here or elsewhere): back to none chosen.
-  if (sel && data && !sel.startsWith("new:") && !login && !invite && !app && !computer && !agent) setSel("");
+  if (sel && data && !sel.startsWith("new:") && sel !== IR && !login && !invite && !app && !computer && !agent) setSel("");
   const lit = at;
 
   const pair = (on: boolean) => void api.pairing(on).catch((e) => toast(t("apps.pairing"), { error: true, description: errText(e) }));
@@ -106,6 +114,11 @@ export function ManagePage({ tab }: { tab: ManageTab }) {
   // window): pressed, it is the row being made, its form at the right.
   const list = (
     <>
+      {/* This page and the Iridium it talks to (kumo, 2026-11-27): 外观, 语言, 缓存, 更新; on a
+          phone the only settings there are. Oneself is among the members. */}
+      <Group>
+        <Row face={<IrMark size={24} round className="text-ink" />} name="Ir" line={upd?.current} on={lit === IR} onClick={() => setSel(IR)} />
+      </Group>
       {manages && (
         <Group title={t("manage.members")}>
           {logins.map((l) => (
@@ -145,7 +158,9 @@ export function ManagePage({ tab }: { tab: ManageTab }) {
   );
 
   const detail =
-    at === NEW_INVITE ? (
+    at === IR ? (
+      <IrDetail theme={theme} setTheme={setTheme} />
+    ) : at === NEW_INVITE ? (
       <NewInvite done={(made) => setSel(made ? `i:${made}` : "")} />
     ) : at === NEW_APP ? (
       <div className="flex flex-col">
@@ -181,7 +196,9 @@ export function ManagePage({ tab }: { tab: ManageTab }) {
   return (
     <div ref={root} className="relative flex min-h-0 flex-1 flex-col">
       <header className="flex h-12 shrink-0 items-center gap-1 px-3 pointer-coarse:h-13">
-        <Dialog.Title className="m-0 min-w-0 flex-1 truncate text-sm font-semibold">{t("manage.title")}</Dialog.Title>
+        {/* No title at its top left (kumo, 2026-11-27). */}
+        <Dialog.Title className="sr-only">{t("manage.title")}</Dialog.Title>
+        <span className="flex-1" />
         <Dialog.Close render={<IconKey label={t("nav.close")} className="-mr-1" />}>
           <X size={17} />
         </Dialog.Close>
@@ -214,10 +231,10 @@ export function ManagePage({ tab }: { tab: ManageTab }) {
 }
 
 /** A group of the list, its name small and faint over it (成列的对象 get a title). */
-function Group({ title, children }: { title: string; children: ReactNode }) {
+function Group({ title, children }: { title?: string; children: ReactNode }) {
   return (
     <section className="flex flex-col pt-3">
-      <span className="px-2 pb-1 text-[11px] leading-4 text-ink-4">{title}</span>
+      {title && <span className="px-2 pb-1 text-[11px] leading-4 text-ink-4">{title}</span>}
       {children}
     </section>
   );
@@ -353,6 +370,39 @@ function Needs({ skip }: { skip?: boolean }) {
       {needs.map((c) => (
         <ConfirmCard key={c.id} c={c} at="terminals" />
       ))}
+    </div>
+  );
+}
+
+// --- Ir ---
+
+/** This page's and its Iridium's: how it looks, its language, what this device keeps, the update,
+ *  installing it, signing out. */
+function IrDetail({ theme, setTheme }: { theme: ThemePref; setTheme: (v: ThemePref) => void }) {
+  const lang = useLang();
+  const me = useMe().data;
+  const upd = useUpdate().data;
+  const [cache, setCache] = useState(false);
+  return (
+    <div className="flex flex-col">
+      <Head face={<IrMark size={40} round className="text-ink" />} name="Ir" figures={upd?.current ? <span>{upd.current}</span> : undefined} />
+      <Block>
+        <Field label={t("me.theme")}>
+          <ThemeSwitch theme={theme} setTheme={setTheme} />
+        </Field>
+        <Field label={t("me.lang")}>
+          <LangSwitch lang={lang} />
+        </Field>
+        <Field label={t("cache.title")} onClick={() => (cacheAhead(), setCache(!cache))} open={cache}>
+          <CacheTotal />
+        </Field>
+        <Unfold open={cache}>
+          <CacheRows />
+        </Unfold>
+        <InstallItem />
+        <UpdateItem manages={managesApps(me)} shown />
+        {me && !me.host && <SignOut />}
+      </Block>
     </div>
   );
 }

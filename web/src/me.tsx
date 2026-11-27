@@ -51,7 +51,7 @@ export function MeKey({ open, onOpen, dot, code, manage }: { open: boolean; onOp
       </button>
     </Tip>
     {manage && (
-      <IconKey label={t("manage.open")} onClick={manage} className="absolute top-1/2 right-1.5 size-8 -translate-y-1/2 opacity-0 transition-opacity duration-(--dur-2) group-hover/me:opacity-100 focus-visible:opacity-100 pointer-coarse:size-9 pointer-coarse:opacity-100">
+      <IconKey label={t("manage.open")} onClick={manage} className="absolute top-1/2 right-1.5 size-8 -translate-y-1/2 text-ink-4 opacity-0 transition-[opacity,color] hover:text-ink-2 duration-(--dur-2) group-hover/me:opacity-100 focus-visible:opacity-100 pointer-coarse:size-9 pointer-coarse:opacity-100">
         <LayoutGrid size={16} />
       </IconKey>
     )}

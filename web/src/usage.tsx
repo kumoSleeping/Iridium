@@ -518,10 +518,10 @@ export function UsagePage() {
       {/* The title's line as the file browser's; the page's two choices on it with the room, else
           on a line of their own under it, as plain words and marks (the user, 2026-11-08). */}
       <header className="flex h-12 shrink-0 items-center gap-1 px-3 pointer-coarse:h-13">
-        <Dialog.Title className="m-0 min-w-0 flex-1 truncate text-sm font-semibold">
-          {t("usage.title")}
-          {machine && <span className="font-normal text-ink-3"> · {at?.name ?? machine}</span>}
-        </Dialog.Title>
+        {/* No title at its top left (kumo, 2026-11-27): the window says what it is; another
+            computer's, its name in its place. */}
+        <Dialog.Title className="sr-only">{machine ? `${t("usage.title")} · ${at?.name ?? machine}` : t("usage.title")}</Dialog.Title>
+        <span className="min-w-0 flex-1 truncate text-sm text-ink-3">{machine && (at?.name ?? machine)}</span>
         {/* Only once it has been a moment: a quick answer shows no spinner flashing. */}
         {(q.isFetching || (heat && hq.isFetching)) && u && <span className="g-fade mr-1.5 grid [animation-delay:200ms]"><LoaderCircle size={14} className="animate-spin text-ink-4" /></span>}
         {wide && (

@@ -4,7 +4,7 @@
 import { useSyncExternalStore } from "react";
 
 /** The 管理 window's parts (kumo, 2026-11-27): one window over the page, as the usage is. */
-export const MANAGE_TABS = ["accounts", "apps", "computers", "agents", "roles", "secrets"] as const;
+export const MANAGE_TABS = ["ir", "accounts", "apps", "computers", "agents", "roles", "secrets"] as const;
 export type ManageTab = (typeof MANAGE_TABS)[number];
 
 export type Route = { name: "home" } | { name: "chat"; id: string; record?: boolean } | { name: "settings" } | { name: "manage"; tab: ManageTab } | { name: "cache" } | { name: "usage" };

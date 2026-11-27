@@ -14,7 +14,6 @@ import { Tooltip } from "@base-ui/react/tooltip";
 import { BarChart3, Ellipsis, FolderOpen, Gamepad2, ListTree, Settings } from "lucide-react";
 import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type ReactNode } from "react";
 import { api, queryClient } from "./api/client";
-import { InPopup } from "./api/query";
 import { firstScreen, watchTurns } from "./chats";
 import { NewHere } from "./create";
 import { onCreateAt, type BrowseAt } from "./places";
@@ -278,23 +277,17 @@ export function App() {
   const [pulled, setPulled] = useState<"me" | "sessions" | null>(null);
   // Drawn as it is first pulled too: dragged up before it had ever been out, it came up empty.
   if (phone && pulled && !seen) setSeen(true);
-  // Out, its page is the route's; going down, it stays as it was; coming up, the swipe's.
-  const lastPage = useRef(1);
-  const sheetPage = sheetIsOut ? (setsOut ? 0 : 1) : pulled ? (pulled === "me" ? 0 : 1) : lastPage.current;
-  lastPage.current = sheetPage;
   // Just come out too: its page set at once, not slid to as it rises.
   const wasOut = useRef(sheetIsOut);
   const turnStill = !sheetIsOut || !wasOut.current;
   useEffect(() => void (wasOut.current = sheetIsOut));
-  const setSheet = (o: boolean, x?: number) => {
+  const setSheet = (o: boolean) => {
     setPulled(null);
-    if (o && x !== undefined && atLeft(x)) return go({ name: "settings" });
     setSheetOut(o);
     if (inSets(route())) close(under);
   };
-  // A tab, or a swipe across: the sheet stays out, the back key going back to the sessions.
-  // 终端 the left page, as a swipe up from the left brings it; the sessions the right (the user, 2026-11-08).
-  const toPage = (i: number) => (setSheetOut(true), i === 0 ? go({ name: "settings" }) : inSets(route()) && close(under));
+  // One page now (kumo, 2026-11-27: on a phone 管理 is the settings): the sessions.
+  const toPage = () => setSheetOut(true);
   // Put away, the panel is drawn afresh once it is down: its first page, not renaming.
   const [setsRound, setSetsRound] = useState(0);
   useEffect(() => {
@@ -356,15 +349,19 @@ export function App() {
   sheetNowFn.current = setSheet;
   // Pressed again while it is out, it is put away (kumo, 2026-11-25: no swipe brings or puts it away).
   const onSheet = useCallback(() => sheetNowFn.current(!sheetNow.current), []);
-  const onMe = useCallback(() => go({ name: "settings" }), []);
+  // On a phone the me key opens 管理 at Ir, its settings (kumo, 2026-11-27); on a computer the
+  // small panel rising from it, as before.
+  const onMe = useCallback(() => (phoneNow.current ? openManage("ir") : go({ name: "settings" })), []);
   // The rows' own, the same each draw: a row is drawn again only as it changes (sidebar.tsx).
   const phoneNow = useRef(phone);
   phoneNow.current = phone;
   const onSelect = useCallback((id: string) => (openChat(id), phoneNow.current && setSheetOut(false)), []);
   const chatCode = useCallback(() => void loadChat().catch(() => {}), []);
 
-  const onSettings = () => (inSets(r) ? close(under) : go({ name: "settings" }));
-  const me = <MeKey open={inSets(r)} onOpen={onSettings} dot={!!update.data?.available} code={loadPanels} manage={() => openManage()} />;
+  // The settings' own routes (an old link, a key that still goes there) on a phone: 管理's Ir.
+  useEffect(() => void (phone && inSets(r) && openManage("ir")), [phone, r]);
+  const onSettings = () => (phone ? openManage("ir") : inSets(r) ? close(under) : go({ name: "settings" }));
+  const me = <MeKey open={inSets(r)} onOpen={onSettings} dot={!!update.data?.available} code={loadPanels} manage={phone ? undefined : () => openManage()} />;
   const session = open ? list?.find((s) => s.id === open) : undefined;
   // Sidebar key and chat folder links share one dialog; bumping filesRound remounts a fresh
   // browser on each open, even if reopened mid-exit.
@@ -486,7 +483,7 @@ export function App() {
     <Dialog.Root open={r.name === "manage"} onOpenChange={(o) => !o && route().name === "manage" && stepBack()}>
       <FileWindow className={cn("@container", phone ? "h-[min(640px,86dvh)]" : "h-[min(720px,90dvh)]")}>
         <Suspense fallback={<Waiting />}>
-          <ManagePage tab={r.name === "manage" ? r.tab : (manageWas.current ?? "accounts")} />
+          <ManagePage tab={r.name === "manage" ? r.tab : (manageWas.current ?? "accounts")} theme={theme} setTheme={setThemeKept} />
         </Suspense>
       </FileWindow>
     </Dialog.Root>
@@ -547,20 +544,13 @@ export function App() {
               <Pager
                 // The tabs' bar is px-3, the list's rows end 4px further right: its "+" in line with
                 // theirs (the user, 2026-11-08).
-                ends={[null, <span key="s" className="-mr-1 flex"><HeadKeys filesKey={filesKey} /></span>]}
-                page={sheetPage}
+                ends={[<span key="s" className="-mr-1 flex"><HeadKeys filesKey={filesKey} /></span>]}
+                page={0}
                 still={turnStill}
                 onPage={toPage}
-                tabs={[
-                  { label: <>{t("nav.me")}{update.data?.available && <span className="size-1.5 rounded-full bg-err" aria-hidden />}</>, aria: update.data?.available ? `${t("nav.me")} · ${t("settings.updateReady")}` : t("nav.me") },
-                  { label: t("nav.sessions"), aria: t("nav.sessions") },
-                ]}
+                tabs={[{ label: t("nav.sessions"), aria: t("nav.sessions") }]}
               >
-                {[
-                  // The sheet's own pages, drawn as it is first pulled: a popup's (api/query.ts).
-                  <div key="me" className="absolute inset-0"><InPopup value>{seen && setsBody(setsPage ?? "settings")}</InPopup></div>,
-                  sidebar,
-                ]}
+                {[sidebar]}
               </Pager>
             </Sheet>
           )}

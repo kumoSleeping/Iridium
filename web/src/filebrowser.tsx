@@ -165,7 +165,7 @@ export default function FileBrowser({ machine: initialMachine, path: initialPath
         {file && <IconKey label={t("browse.toFolder")} className="@min-[620px]:hidden" onClick={() => setSelected(null)}><ArrowLeft size={17} /></IconKey>}
         {/* Its name an icon, the one of the key that opens it (kumo, 2026-11-25); said to a reader. */}
         <Dialog.Title className="flex min-w-0 flex-1 items-center text-sm font-semibold">
-          {within ? t("new.subFolder") : <><FolderOpen size={17} aria-hidden className="text-ink-2" /><span className="sr-only">{t("browse.title")}</span></>}
+          {within ? t("new.subFolder") : <span className="sr-only">{t("browse.title")}</span>}
         </Dialog.Title>
         {!within && <Choose
           label={t("device.computer")}
