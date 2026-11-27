@@ -385,11 +385,14 @@ agent 调 `ir invite`、`ir secret set` 时秘密不进它的对话：变成一�
 - 代理环境（`internal/ghenv`，只本机代理，执行器上的不加）：`GIT_CONFIG_*` 给 `credential.https://github.com.helper` 先放一个空值、再放 `iridium ir github credential`；PATH 最前是 `<状态目录>/bin`，里面 `gh` 链到 iridium（以 gh 名启动即 `ir github gh`）。都不碰用户自己的文件。
 - 每次用时现取令牌：没人绑（或这一轮不为人跑），git 交回原来的凭据助手（`git credential fill`，去掉 Iridium 加的配置），gh 用它自己的登录。`IR_GITHUB_USER=<名字或 GitHub 用户名>` 换成另一个已绑定的人；找不到就报错。git 存/删我们给的凭据时不转给别的助手。
 - 不改提交作者。
+- 绑定走 GitHub 设备码（kumo 2026-11-27）：用 Iridium 的 OAuth App（kumoSleeping 名下，Client ID 写在程序里，配置 `github.clientId` 可换成自己的；不用 secret，不需要回调地址，内网也能用）。服务器向 GitHub 要码，页面显示码和 github.com/login/device，按 GitHub 给的间隔再问服务器；设备码只留在服务器内存里。权限 `repo read:org workflow`，令牌不过期。粘贴令牌留作备用。
 
 | 路由 | 说明 |
 |---|---|
 | `GET /v1/internal/github` | `GitHubList`：绑定（不含令牌）、`mine`（调用者的登录）、`turn`（代理这一轮用谁的） |
 | `PUT /v1/internal/github` | `SetGitHub` → `GitHubBinding`：绑自己的；面板或本机，代理不行 |
+| `POST /v1/internal/github/device` | → `GitHubDevice`：开始设备码绑定（自己的）；面板或本机 |
+| `POST /v1/internal/github/device/{id}` | → `GitHubDeviceState`：`waiting`、`done`（带绑定）、`expired`、`denied`；早于间隔不去问 GitHub |
 | `DELETE /v1/internal/github[/{member}]` | 解绑，默认自己的；面板或本机 |
 | `GET /v1/internal/github/token?user=` | `GitHubToken`：只给代理的 `ir`（有会话）或本机 `ir`；没绑 204 |
 

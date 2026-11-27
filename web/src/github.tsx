@@ -1,17 +1,17 @@
 // GitHub on a login's row in 应用管理 (kumo, 2026-11-27: only a GitHub mark there for now, pressed
 // its details; the page is to be redone): the account a person bound, whose git and gh their
 // agents' turns act as (docs/api.md "GitHub"). One's own row, unbound, has the mark faint: pressed,
-// the token to bind with.
+// binding, by GitHub's link (its device flow), or a token pasted.
 import { Popover } from "@base-ui/react/popover";
 import { useQueryClient } from "@tanstack/react-query";
-import { Unlink } from "lucide-react";
-import { useState } from "react";
+import { ExternalLink, LoaderCircle, Unlink } from "lucide-react";
+import { useEffect, useState } from "react";
 import { api, ApiError } from "./api/client";
-import type { GitHubList } from "./api/types.gen";
+import type { GitHubDevice, GitHubList } from "./api/types.gen";
 import { useQuery } from "./api/query";
 import { MainKey, SecondKey } from "./card";
 import { t } from "./i18n";
-import { ago, Avatar, cn, PopSurface, SureKey, Tip } from "./ui";
+import { ago, Avatar, cn, CopyKey, PopSurface, SureKey, Tip } from "./ui";
 
 const githubQ = { queryKey: ["github"], queryFn: () => api.github(), staleTime: 60_000 };
 
@@ -68,12 +68,96 @@ function Bound({ member, mine, done }: { member: string; mine: boolean; done: ()
         </SureKey>
       </div>
       <p className="m-0 text-xs text-ink-3">{t("github.what")}</p>
-      {mine && (again ? <Bind done={done} /> : <SecondKey onClick={() => setAgain(true)}>{t("github.replace")}</SecondKey>)}
+      {mine && (again ? <Bind done={done} /> : <SecondKey onClick={() => setAgain(true)}>{t("github.rebind")}</SecondKey>)}
     </div>
   );
 }
 
-function Bind({ done }: { done: () => void }) {
+/** Binding: by GitHub's link (its device flow: a code typed at github.com/login/device, kumo
+ *  2026-11-27), the page asking the server again at GitHub's pace till it is allowed; a token
+ *  pasted the other way, under it. */
+export function Bind({ done }: { done: () => void }) {
+  const [paste, setPaste] = useState(false);
+  return paste ? (
+    <PasteToken done={done} />
+  ) : (
+    <div className="flex flex-col gap-2">
+      <DeviceBind done={done} />
+      <button type="button" onClick={() => setPaste(true)} className="self-start text-xs text-ink-3 underline-offset-2 hover:text-ink-2 hover:underline">
+        {t("github.usePaste")}
+      </button>
+    </div>
+  );
+}
+
+function DeviceBind({ done }: { done: () => void }) {
+  const qc = useQueryClient();
+  const [flow, setFlow] = useState<GitHubDevice | null>(null);
+  const [state, setState] = useState<"" | "waiting" | "expired" | "denied">("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const begin = () => {
+    setBusy(true);
+    setErr("");
+    api.githubDevice().then(
+      (d) => (setFlow(d), setState("waiting"), setBusy(false)),
+      (e) => (setErr(e instanceof ApiError ? e.message : String(e)), setBusy(false)),
+    );
+  };
+  // Asked again at GitHub's pace while it waits; gone when the page is.
+  useEffect(() => {
+    if (!flow || state !== "waiting") return;
+    let live = true;
+    const timer = setTimeout(() => {
+      api.githubDeviceState(flow.id).then(
+        (s) => {
+          if (!live) return;
+          if (s.state === "done") return void (qc.invalidateQueries({ queryKey: ["github"] }), done());
+          setState(s.state === "expired" || s.state === "denied" ? s.state : "waiting");
+          if (s.state === "waiting") setFlow({ ...flow });
+        },
+        (e) => live && (setErr(e instanceof ApiError ? e.message : String(e)), setState("expired")),
+      );
+    }, flow.interval * 1000);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [flow, state]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!flow || state !== "waiting")
+    return (
+      <div className="flex flex-col gap-2">
+        <span className="text-sm font-medium">{t("github.bind")}</span>
+        {state && <span className="text-xs text-ink-3">{t(state === "denied" ? "github.denied" : "github.expired")}</span>}
+        {err && <span className="text-xs text-err">{err}</span>}
+        <MainKey busy={busy} onClick={begin} className="self-start">
+          <GitHubMark size={14} />
+          {t("github.authorize")}
+        </MainKey>
+      </div>
+    );
+  const copy = () => void navigator.clipboard?.writeText(flow.code).catch(() => {});
+  return (
+    <div className="flex flex-col gap-2">
+      <span className="text-sm font-medium">{t("github.bind")}</span>
+      <div className="flex items-center gap-1.5 rounded-md bg-fill px-3 py-2">
+        <code className="min-w-0 flex-1 font-mono text-xl font-semibold tracking-widest select-all">{flow.code}</code>
+        <CopyKey text={flow.code} />
+      </div>
+      <a href={flow.uri} target="_blank" rel="noreferrer" onClick={copy} className="g-press flex h-9 items-center justify-center gap-1.5 rounded-md bg-ink text-sm font-medium text-on-ink">
+        <GitHubMark size={14} />
+        {t("github.open")}
+        <ExternalLink size={13} />
+      </a>
+      <span className="flex items-center gap-1.5 text-xs text-ink-3">
+        <LoaderCircle size={12} className="animate-spin" />
+        {t("github.waiting")}
+      </span>
+    </div>
+  );
+}
+
+function PasteToken({ done }: { done: () => void }) {
   const qc = useQueryClient();
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);

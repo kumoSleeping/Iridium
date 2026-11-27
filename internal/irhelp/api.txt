@@ -174,6 +174,8 @@ POST internal/secrets/use {names, command, session?, confirm?} -> {values}  ir r
 GET internal/github - -> GitHubList  the GitHub accounts people bound to their logins; turn: whose your git and gh act as now (none: this machine's own login)  view=bindings.name,bindings.login,turn
   Your git (github.com) and gh are already signed in as the person whose message your turn runs for, at each use: just run them. Not as them but as another bound person: IR_GITHUB_USER=<name or GitHub login> git push … (or gh …). Never gh auth login, never a token in chat. ir github alone prints the same list.
 PUT internal/github {token} -> GitHubBinding  bind your own login to the account of a GitHub token (checked with GitHub first); person only, from a panel or the host
+POST internal/github/device - -> GitHubDevice  begin binding by GitHub's link: a code to type at its uri; person only, from a panel or the host
+POST internal/github/device/{id} - -> GitHubDeviceState  ask whether GitHub allowed it: waiting, done (its binding), expired, denied; every interval seconds
 DELETE internal/github - -> {ok}  unbind your own; person only
 DELETE internal/github/{member} - -> {ok}  unbind another's; person only
 GET internal/github/token?user - -> GitHubToken  the token your git and gh use (ir github alone; 204 none bound)

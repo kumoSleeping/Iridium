@@ -995,6 +995,13 @@ export const zh = {
   "app.computerName": "这台电脑",
   "app.runLocal": "在本机运行 Iridium",
   "app.run": "运行",
+  "github.usePaste": "改用令牌",
+  "github.authorize": "在 GitHub 授权",
+  "github.open": "打开 GitHub 输入此码",
+  "github.waiting": "等待 GitHub 确认",
+  "github.expired": "已过期",
+  "github.denied": "已拒绝",
+  "github.rebind": "重新绑定",
 } as const;
 
 export type Key = keyof typeof zh;

@@ -11,7 +11,6 @@ import (
 
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/gate"
-	"github.com/kumoSleeping/iridium/internal/store"
 )
 
 // GitHub (docs/api.md "GitHub", kumo 2026-11-27): a person binds their own GitHub account to their
@@ -33,6 +32,8 @@ func (s *Server) githubRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /v1/internal/github", s.unbindGitHub)
 	mux.HandleFunc("DELETE /v1/internal/github/{member}", s.unbindGitHub)
 	mux.HandleFunc("GET /v1/internal/github/token", s.githubToken)
+	mux.HandleFunc("POST /v1/internal/github/device", s.beginGitHubDevice)
+	mux.HandleFunc("POST /v1/internal/github/device/{id}", s.pollGitHubDevice)
 }
 
 // githubMember is the binding a caller's own is kept under: its login's ID, the host's "local".
@@ -91,18 +92,12 @@ func (s *Server) bindGitHub(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
-	who, err := githubUser(ctx, tok)
+	b, err := s.keepGitHub(ctx, githubMember(c), tok)
 	if err != nil {
 		refuse(w, http.StatusUnprocessableEntity, "bad_token", err.Error())
 		return
 	}
-	g := store.GitHub{Member: githubMember(c), Login: who.Login, ID: who.ID, Avatar: who.Avatar, At: time.Now().UnixMilli()}
-	if err := s.st.PutGitHub(g, tok); err != nil {
-		s.error(w, err)
-		return
-	}
-	s.reloadSecrets()
-	reply(w, http.StatusOK, api.GitHubBinding{Member: g.Member, Name: s.terminalName(g.Member), Login: g.Login, ID: g.ID, Avatar: g.Avatar, At: g.At})
+	reply(w, http.StatusOK, b)
 }
 
 // unbindGitHub: one's own; a person on a panel any (a trusted team: kumo, 2026-11-26).

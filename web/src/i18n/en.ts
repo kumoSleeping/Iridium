@@ -995,4 +995,11 @@ export const en: Dict = {
   "app.computerName": "This computer",
   "app.runLocal": "Run Iridium on this computer",
   "app.run": "Run",
+  "github.usePaste": "Use a token instead",
+  "github.authorize": "Authorize on GitHub",
+  "github.open": "Enter this code on GitHub",
+  "github.waiting": "Waiting for GitHub",
+  "github.expired": "Expired",
+  "github.denied": "Denied",
+  "github.rebind": "Bind again",
 };

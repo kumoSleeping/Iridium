@@ -2004,6 +2004,26 @@ export interface GitHubToken {
   login: string;
   token: string;
 }
+/**
+ * GitHubDevice is POST /v1/internal/github/device: a binding begun by GitHub's device flow. The
+ * person opens URI and types Code there; the page asks POST /v1/internal/github/device/{id} every
+ * Interval seconds till it is done or Expires (ms).
+ */
+export interface GitHubDevice {
+  id: string;
+  code: string;
+  uri: string;
+  interval: number /* int */;
+  expires: number /* int64 */;
+}
+/**
+ * GitHubDeviceState is POST /v1/internal/github/device/{id}: State "waiting" (not yet allowed
+ * at GitHub), "done" (Binding made), "expired" or "denied" (begin again).
+ */
+export interface GitHubDeviceState {
+  state: string;
+  binding?: GitHubBinding;
+}
 
 //////////
 // source: profile.go
