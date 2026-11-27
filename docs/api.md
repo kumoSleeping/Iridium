@@ -157,7 +157,7 @@ Iridium 自己的接口都在 `/v1/internal/` 下：Satori 规范的 internal �
 ## `ir`（agent 用的部分）
 
 - 代码在 `internal/cli`；socket 用 `IRIDIUM_SOCKET`，没有就读配置（`IRIDIUM_CONFIG` 或默认位置）。`ir api` 原样透传（见 `plan.md`“ir”），接口说明在 `internal/irhelp/api.txt`。
-- 会话 ID（服务端认，2026-11-11）：`/v1/internal/sessions/{id}/…` 和 Satori 的 `channel_id` 可写 ID 的开头（唯一即可，不足 32 位才查），`self` 是调用者所在的会话（`X-Iridium-Session` 或会话 TOKEN；没有就 400）；`guild_id=self` 是它的组。几个会话同一个开头 400。改名在会话里跑算 agent 起的（`byAgent`），见 `plan.md`“会话标题”。
+- 会话 ID（服务端认，2026-11-11）：`/v1/internal/sessions/{id}/…` 和 Satori 的 `channel_id` 可写 ID 的开头（唯一即可，不足 32 位才查）。几个会话同一个开头 400。没有 `self`、`here` 这类代称（kumo，2026-11-27：同一个 `self` 在 `interrupt` 里是 agent 自己、在 `members` 里却该是它说话的频道，agent 想写进频道的写进了自己的会话；名字就是名字）：写了回 400，说明里给出该写的 ID（调用者的会话，和它正被叫起的频道）。agent 的提示里直接写着它会话的 ID（系统提示 `Session:`）和频道的 ID（频道上下文），命令照抄。改名在会话里跑算 agent 起的（`byAgent`），见 `plan.md`“会话标题”。
 - 输出给 agent 看：只打最后一段回复（`new --wait` 先一行 ID）；`cp` 一行 `路径 大小 sha256`；需要你时每个提问一行 `需要你：…`。进度只在 stderr 是终端时画。
 - `message.create`、`new` 不带 `--wait` 时等到 agent 接了这条消息（最多 15 秒）再返回，所以紧接着的 `ir wait` 等的是这一回合。
 - 回合在跑时发的话插进这一回合（和网页回车一样；2026-11-19 起没有“排到回合结束”的选项，`_data.steer` 已去掉）；`--wait` 等到这一回合结束，打印最后一段回复（可能还在说别的事）。只有命令（`/compact` 等）和等额度时发的话进待发队列：不带 `--wait` 马上返回，带 `--wait` 等它发出去、再等它那一回合（队列暂停了就退出码 2）。
@@ -224,7 +224,7 @@ agent 用 `ir sh <机器>[:目录] [--cwd 目录] [--timeout 2m] -- 命令`（`P
   - `attached`：挂在会话页面上的元素（2026-11-11），每段 `{place, from, content}`：`content` 按语言（`""` 不分语言），`from` 是 `ir`（Claude 的 UltraCode）、`m:<机器>`（执行端的插件，如 OMD 的 Ultra）或 `a:<应用>`。`place` 现在网页只画 `effort`：第一个按钮是强度滑条右边的键，其余的在键按下时排在滑条下面一行。按钮按下：`POST /v1/internal/button {id: "att:<会话>:<from>:<按钮 id>"}`。见 `docs/exec.md`“挂元素”。
   - 面板里选了模型就收起；强度滑条和挂在 `effort` 的键（UltraCode 等）在面板底下，调了不收。
 - 本会话一直允许：`answer` 带 `always: true`（或卡片选 `always`）。记下工具和 `Ask.pattern`（Claude 自己建议的规则，例如 `ls *`；没有时 shell 命令取第一个词加 ` *`，别的工具不带模式＝这个工具全部）。之后这个会话里匹配的审批自动允许，不通知、不出卡片。
-- 临时切换至 manual（kumo，2026-11-25）：Claude 的 auto 模式分类器拦下的一步不经 Iridium，直接回给模型（结果开头是 `Permission for this action was denied by the Claude Code auto mode classifier`），在页面上就是一步失败的调用（红色），没有单独的卡。Claude 真要这一步时，自己用 `ir api POST internal/sessions/self/manual reason=… --wait` 请人切换（系统提示里只给 Claude 这一句）：会话多一个 `kind: "manual"` 的 ask，像别的 ask 一样作为频道的一条消息、在输入框位置出卡片（同意 / 拒绝），并像 @ 一样叫那个频道里最近说话的人（没有就叫主机）。只有人能答，agent 答一律 403。`minutes` 1–10，默认 10（Claude 的 Bash 最长等 10 分钟）：既是等回答的时长，也是手动模式最长持续的时长；没人答、回合先结束或进程退出，就撤回，算拒绝（`expired`）。同意：运行中的进程切到 `manual`（不写进会话设置，进程重启就回到原模式），到这个回合结束或分钟数到了（先到为准）切回原模式，中间被问过的调用不提前结束它；期间手动换了模式就不切回。切换记在 hold 目录的 `release.json`（含结束时间）：守护进程重启接管仍在 manual 的同一进程时接着算，新进程就删掉。拒绝：什么都不变。`--wait` 等到结果，输出一行（同意退出码 0，否则 1）。回合结束的 Bot 回复仍带“auto 拦了 N 步”。
+- 临时切换至 manual（kumo，2026-11-25）：Claude 的 auto 模式分类器拦下的一步不经 Iridium，直接回给模型（结果开头是 `Permission for this action was denied by the Claude Code auto mode classifier`），在页面上就是一步失败的调用（红色），没有单独的卡。Claude 真要这一步时，自己用 `ir api POST internal/sessions/<自己的 ID>/manual reason=… --wait` 请人切换（系统提示里只给 Claude 这一句）：会话多一个 `kind: "manual"` 的 ask，像别的 ask 一样作为频道的一条消息、在输入框位置出卡片（同意 / 拒绝），并像 @ 一样叫那个频道里最近说话的人（没有就叫主机）。只有人能答，agent 答一律 403。`minutes` 1–10，默认 10（Claude 的 Bash 最长等 10 分钟）：既是等回答的时长，也是手动模式最长持续的时长；没人答、回合先结束或进程退出，就撤回，算拒绝（`expired`）。同意：运行中的进程切到 `manual`（不写进会话设置，进程重启就回到原模式），到这个回合结束或分钟数到了（先到为准）切回原模式，中间被问过的调用不提前结束它；期间手动换了模式就不切回。切换记在 hold 目录的 `release.json`（含结束时间）：守护进程重启接管仍在 manual 的同一进程时接着算，新进程就删掉。拒绝：什么都不变。`--wait` 等到结果，输出一行（同意退出码 0，否则 1）。回合结束的 Bot 回复仍带“auto 拦了 N 步”。
 - 匹配：`*` 是任意一段字；`前缀:*` 同 `前缀*`。shell 命令里有 `;`、`&&`、`||`、`|`、`` ` ``、`$(`、换行的，一律不按模式放行。
 
 ## 设置

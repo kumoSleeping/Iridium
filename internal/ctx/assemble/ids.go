@@ -34,31 +34,32 @@ const (
 	idWhereRemote      = "where.remote"       // at {{computer}}: how paths are written from there
 
 	// A channel of several agents (channel.go).
-	idChannelMessage    = "channel.message" // before the words: the message's number
-	idChannelQuote      = "channel.quote"   // then the message it answers: its number, who said it
-	idChannelQuoteEnd   = "channel.quote-end"
-	idChannelGuest      = "channel.context.guest"      // who it is in a channel it is in by a subscription, and how it speaks there
-	idChannelGuestBare  = "channel.context.guest-bare" // the same for an agent with no ir
-	idChannelAgain      = "channel.context.again"      // in place of those, given before: which channel this is
-	idChannelAgainID    = "channel.context.again-id"   // the same when the channel has no custom name (avoid repeating its id)
-	idChannelRename     = "channel.context.rename"     // its nick is a default one: name itself first
-	idChannelSendUnseen = "channel.send.unseen"        // heads what an agent's ir is answered with: said since it last read
-	idChannelSendBehind = "channel.send.behind"        // its ir refused: too far behind
-	idChannelSendNamed  = "channel.send.named"         // its ir refused: something unseen names it
-	idChannelSilent     = "channel.silent"             // to the agent that started one that said nothing where it was called
-	idChannelOpen       = "channel.context.open"       // the block of what the channel said
-	idChannelMembers    = "channel.context.members"    // who the agent is there, who else, how to call
-	idChannelSkipped    = "channel.context.skipped"    // the earliest messages, not shown
-	idChannelListed     = "channel.context.listed"     // heads the turns listed
-	idChannelTurn       = "channel.context.turn"       // a turn in one line
-	idChannelAnswered   = "channel.context.answered"   // who answered in it
-	idChannelFull       = "channel.context.full"       // heads the messages in full
-	idChannelLine       = "channel.context.line"       // before a message in full: its number, who, when
-	idChannelLineDid    = "channel.context.line-did"   // then what its agent did before saying it
-	idChannelLineEnd    = "channel.context.line-end"
-	idChannelWork       = "channel.context.work"       // heads what each agent did since
-	idChannelWorkLine   = "channel.context.work-line"  // an agent's line of it
-	idChannelWorkFile   = "channel.context.work-files" // the files it changed
+	idChannelMessage     = "channel.message" // before the words: the message's number
+	idChannelQuote       = "channel.quote"   // then the message it answers: its number, who said it
+	idChannelQuoteEnd    = "channel.quote-end"
+	idChannelGuest       = "channel.context.guest"        // who it is in a channel it is in by a subscription, and how it speaks there
+	idChannelGuestBare   = "channel.context.guest-bare"   // the same for an agent with no ir
+	idChannelAgain       = "channel.context.again"        // in place of those, given before: which channel this is
+	idChannelAgainID     = "channel.context.again-id"     // the same when the channel has no custom name (avoid repeating its id)
+	idChannelRename      = "channel.context.rename"       // its nick is a default one: name itself first
+	idChannelSendUnseen  = "channel.send.unseen"          // heads what an agent's ir is answered with: said since it last read
+	idChannelSendBehind  = "channel.send.behind"          // its ir refused: too far behind
+	idChannelSendNamed   = "channel.send.named"           // its ir refused: something unseen names it
+	idChannelSilent      = "channel.silent"               // to the agent that started one that said nothing where it was called
+	idChannelOpen        = "channel.context.open"         // the block of what the channel said
+	idChannelMembers     = "channel.context.members"      // who the agent is there, who else, how to call
+	idChannelMembersBare = "channel.context.members-bare" // the same without ir: no id to write
+	idChannelSkipped     = "channel.context.skipped"      // the earliest messages, not shown
+	idChannelListed      = "channel.context.listed"       // heads the turns listed
+	idChannelTurn        = "channel.context.turn"         // a turn in one line
+	idChannelAnswered    = "channel.context.answered"     // who answered in it
+	idChannelFull        = "channel.context.full"         // heads the messages in full
+	idChannelLine        = "channel.context.line"         // before a message in full: its number, who, when
+	idChannelLineDid     = "channel.context.line-did"     // then what its agent did before saying it
+	idChannelLineEnd     = "channel.context.line-end"
+	idChannelWork        = "channel.context.work"       // heads what each agent did since
+	idChannelWorkLine    = "channel.context.work-line"  // an agent's line of it
+	idChannelWorkFile    = "channel.context.work-files" // the files it changed
 
 	// What an agent did, in few words (activity.go).
 	idDidBash      = "activity.bash"
@@ -78,6 +79,7 @@ const (
 	// What an agent is told of itself (self.go).
 	idSelfSection      = "self.section"       // heads the Collaboration & Memory section
 	idSelfWho          = "self.who"           // the nick it goes by
+	idSelfSession      = "self.session"       // its session's id: what ir takes for it
 	idSelfPersona      = "self.persona"       // before its persona's words
 	idSelfMemory       = "self.memory"        // heads what it chose to remember
 	idSelfMemoryLine   = "self.memory-line"   // before one memory: when, where from

@@ -7,7 +7,7 @@ import (
 )
 
 func TestSelfStopped(t *testing.T) {
-	stop := `{"command":"ir api POST internal/sessions/self/interrupt","description":"End turn"}`
+	stop := `{"command":"ir api POST internal/sessions/0b5e2c1a-7d3f-4e8a-9c21-5f6a7b8c9d0e/interrupt","description":"End turn"}`
 	said := "The user doesn't want to proceed with this tool use. The tool use was rejected. Correction to the text above: this call was stopped while running, not refused before it ran."
 	paired := paired([]api.Block{
 		{At: "1.0", Kind: api.BlockKindTool, ID: "a", Name: "Bash", Input: stop},

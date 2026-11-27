@@ -9,7 +9,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/session"
 )
 
-// Claude asks for manual approval itself (POST internal/sessions/self/manual): only its own
+// Claude asks for manual approval itself (POST internal/sessions/<its id>/manual): only its own
 // agent asks; the ask is the channel's message, and calls the person who spoke there as an @
 // does; an agent cannot answer it, a person can; approved, manual mode till the turn ends.
 func TestManualAsk(t *testing.T) {
@@ -27,9 +27,9 @@ func TestManualAsk(t *testing.T) {
 	// A person does not ask it, nor an agent for another session.
 	l.want(403, "web", "POST", "/v1/internal/sessions/"+id+"/manual", api.ManualAsk{Reason: "x"}, nil)
 	l.want(403, "agent", "POST", "/v1/internal/sessions/"+id+"/manual", api.ManualAsk{Reason: "x"}, nil)
-	l.want(400, "agent-in:"+id, "POST", "/v1/internal/sessions/self/manual", api.ManualAsk{Reason: "x", Minutes: 99}, nil)
+	l.want(400, "agent-in:"+id, "POST", "/v1/internal/sessions/"+id+"/manual", api.ManualAsk{Reason: "x", Minutes: 99}, nil)
 	var ms api.ManualState
-	l.want(200, "agent-in:"+id, "POST", "/v1/internal/sessions/self/manual", api.ManualAsk{Reason: "npx is needed"}, &ms)
+	l.want(200, "agent-in:"+id, "POST", "/v1/internal/sessions/"+id+"/manual", api.ManualAsk{Reason: "npx is needed"}, &ms)
 	if ms.State != "pending" || ms.Minutes != 10 || ms.RequestID == "" {
 		t.Fatalf("asked: %+v", ms)
 	}
@@ -61,14 +61,14 @@ func TestManualAsk(t *testing.T) {
 	if code := l.answer("agent", api.CardAnswer{Card: card, Option: session.OptionAllow}); code != 403 {
 		t.Fatalf("an agent answered: %d", code)
 	}
-	l.want(200, "agent-in:"+id, "GET", "/v1/internal/sessions/self/manual", nil, &ms)
+	l.want(200, "agent-in:"+id, "GET", "/v1/internal/sessions/"+id+"/manual", nil, &ms)
 	if ms.State != "pending" {
 		t.Fatalf("after the agents: %+v", ms)
 	}
 	if code := l.answer("web", api.CardAnswer{Card: card, Option: session.OptionAllow}); code != 200 {
 		t.Fatalf("the person: %d", code)
 	}
-	l.want(200, "agent-in:"+id, "GET", "/v1/internal/sessions/self/manual?wait=10", nil, &ms)
+	l.want(200, "agent-in:"+id, "GET", "/v1/internal/sessions/"+id+"/manual?wait=10", nil, &ms)
 	if ms.State != "approved" {
 		t.Fatalf("approved: %+v", ms)
 	}

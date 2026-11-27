@@ -359,8 +359,9 @@ func TestAgentCommands(t *testing.T) {
 	if r := ir("api", "channel.update", "channel_id="+sid, "data.name=agent's"); r.code != 1 || !strings.Contains(r.err, "用户起的名") {
 		t.Errorf("a name over the user's: %+v", r)
 	}
-	if r := ir("api", "channel.update", "channel_id=self", "data.name=own"); r.code != 1 || !strings.Contains(r.err, "no such session") {
-		t.Errorf("self, not a session: %+v", r)
+	// self is no id: refused, the id to write in its place told.
+	if r := ir("api", "channel.update", "channel_id=self", "data.name=own"); r.code != 1 || !strings.Contains(r.err, "this session is caller-session") {
+		t.Errorf("self: %+v", r)
 	}
 	if r := ir("api", "internal/sessions/ffffffff", "--wait"); r.code != 1 || !strings.Contains(r.err, "no such session") {
 		t.Errorf("unknown id: %+v", r)

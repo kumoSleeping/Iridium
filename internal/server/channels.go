@@ -1226,7 +1226,7 @@ func (s *Server) listsChannel(ch string) bool {
 
 // inSharedChannel reports whether session id belongs to a multi-agent or bare channel (or was
 // spawned for one), so its system prompt describes shared-channel rules instead of asking it to
-// rename channel_id=self.
+// name its own session.
 func (s *Server) inSharedChannel(id string) bool {
 	return s.multi(id) || len(s.ch.In(id)) > 0 || s.spawnedOf(id) != nil
 }
@@ -2321,7 +2321,7 @@ func (s *Server) sendChannelAs(ctx context.Context, c caller, from, ch string, r
 			if err != nil {
 				return api.SendReply{}, err
 			}
-			cc := assemble.Channel{Plan: strategy.Fold(msgs, strategy.Default), Zone: time.Local, Did: did}
+			cc := assemble.Channel{Plan: strategy.Fold(msgs, strategy.Default), Zone: time.Local, Did: did, Session: sender}
 			if !me.Direct() {
 				cc.ID = ch
 			}
@@ -2675,7 +2675,7 @@ func (s *Server) deliverAs(ctx context.Context, ch, to string, seq int64, said, 
 	if err != nil {
 		return false, err
 	}
-	cc := assemble.Channel{You: me.Nick, Plan: strategy.Fold(unseen, strategy.Default), Pull: true, Zone: time.Local, Did: did}
+	cc := assemble.Channel{You: me.Nick, Plan: strategy.Fold(unseen, strategy.Default), Pull: true, Zone: time.Local, Did: did, Session: to}
 	if !me.Direct() {
 		// In it by a subscription: told which channel this is of and that what it writes is said
 		// there as it writes it; with ir, also that ir is for speaking elsewhere.
@@ -2848,12 +2848,9 @@ func (s *Server) overhearOne(ctx context.Context, ch, to string, seq int64, who 
 	if st, err := s.m.State(to); err == nil && st.Machine != "" && !pull {
 		pull = false
 	}
-	chID := ch
-	if me.Direct() {
-		chID = ""
-	}
 	in, err := assemble.ChannelOverhear(assemble.Overhear{
-		Channel: chID,
+		Channel: ch,
+		Session: to,
 		Seq:     seq,
 		Who:     who,
 		At:      at,

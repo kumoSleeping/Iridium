@@ -369,8 +369,14 @@ func TestChannelOfSeveral(t *testing.T) {
 	if code := l.sat("agent-in:"+ch, "internal/block.list", map[string]any{"channel_id": ch}, nil); code != 200 {
 		t.Errorf("an agent reading its own record: %d", code)
 	}
-	if code := l.sat("agent-in:"+ch, "message.list", map[string]any{"channel_id": "self"}, nil); code != 200 {
+	if code := l.sat("agent-in:"+ch, "message.list", map[string]any{"channel_id": ch}, nil); code != 200 {
 		t.Errorf("an agent reading its channel: %d", code)
+	}
+	// self and here are no ids (kumo, 2026-11-27): refused, not taken for the caller's own.
+	for _, w := range []string{"self", "here"} {
+		if code := l.sat("agent-in:"+second, "message.list", map[string]any{"channel_id": w}, nil); code != 400 {
+			t.Errorf("channel_id=%s: %d", w, code)
+		}
 	}
 	if code := l.sat("agent-in:"+second, "message.list", map[string]any{"channel_id": ch}, nil); code != 200 {
 		t.Errorf("an agent reading a channel it is in: %d", code)
@@ -646,7 +652,7 @@ func TestChannelSendCheckAndRecv(t *testing.T) {
 	// A little behind: sent, and what it had not seen comes back; then nothing more to see.
 	code, r, raw := say("agent-in:"+guest, ch, "hello all")
 	if code != 200 || !r.Said || !strings.Contains(r.Unseen, "Sent. Said in the channel since you last read it") || !strings.Contains(r.Unseen, "]: first\n") ||
-		!strings.Contains(r.Unseen, "message.get channel_id="+ch) && strings.Contains(r.Unseen, "channel_id=self") {
+		strings.Contains(r.Unseen, "channel_id=self") {
 		t.Fatalf("the first send: %d %+v %s", code, r, raw)
 	}
 	if code, r, _ = say("agent-in:"+guest, ch, "and again"); code != 200 || r.Unseen != "" {

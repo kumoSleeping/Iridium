@@ -612,7 +612,7 @@ func (s *Server) interrupt(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 	id := r.PathValue("id")
-	// An agent ending its own turn (ir api POST internal/sessions/self/interrupt; kumo,
+	// An agent ending its own turn (ir api POST internal/sessions/<its id>/interrupt; kumo,
 	// 2026-11-16): called with nothing to say, it says nothing. The calls it was answering are
 	// closed as answered: nothing is said for it, no line that it said nothing.
 	if c := callerOf(r); c.session != "" && c.session == id {

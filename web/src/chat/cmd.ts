@@ -60,8 +60,8 @@ export function cmdOfCall(t: { name?: string; input?: string }): Cmd | undefined
   return i && cmdOf(commandOf(i), typeof i.description === "string" ? i.description : undefined);
 }
 
-/** Whether a call is only an agent naming its session (ir api channel.update channel_id=self
- *  data.name=…, or the older ir rename): the chat leaves it out. */
+/** Whether a call is only an agent naming its session or a channel (ir api channel.update
+ *  channel_id=<id> data.name=…, or the older ir rename): the chat leaves it out. */
 export function renameOnly(t: { name?: string; input?: string }): boolean {
   const i = shellInput(t);
   return !!i && renames(commandOf(i));
@@ -75,14 +75,14 @@ function renames(command: string): boolean {
   return sh !== undefined ? renames(sh) : /^(ir|iridium)$/.test(name(w[0]!)) && (w[1] === "rename" || namesSelf(w.slice(2), w[1]));
 }
 
-/** ir api's words naming the session it runs in, and nothing else. */
+/** ir api's words naming one channel, and nothing else. */
 function namesSelf(args: string[], sub?: string): boolean {
   return (
     sub === "api" &&
     args[0] === "channel.update" &&
-    args.includes("channel_id=self") &&
+    args.filter((a) => a.startsWith("channel_id=")).length === 1 &&
     args.some((a) => a.startsWith("data.name=")) &&
-    args.slice(1).every((a) => a === "channel_id=self" || a.startsWith("data.name="))
+    args.slice(1).every((a) => /^channel_id=[^=]+$/.test(a) || a.startsWith("data.name="))
   );
 }
 

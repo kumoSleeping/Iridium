@@ -14,10 +14,11 @@ export type Shown = (Block & { kind: "user" | "assistant" | "system" }) | { kind
  *  over (what an agent did before its words in a channel, a part of its turn given something more
  *  after it): a call there with no result is one whose result never came (the agent stopped in the
  *  middle of it, its limit out), and it is a step like any other, not a call running for hours. */
-/** An agent stopping its own turn (ir api POST internal/sessions/self/interrupt) is stopped in that
+/** An agent stopping its own turn (ir api POST internal/sessions/<its id>/interrupt; self in older
+ *  records) is stopped in that
  *  call, which its record has as an error: not a failure when its result says it was stopped
  *  (kumo, 2026-11-26). The server's rule (internal/transcript/selfstop.go) for a result paired here. */
-const SELF_STOP = /\bir\s+api\s+(?:POST\s+)?\/?(?:v1\/)?internal\/sessions\/self\/interrupt\b/;
+const SELF_STOP = /\bir\s+api\s+(?:POST\s+)?\/?(?:v1\/)?internal\/sessions\/[\w.-]+\/interrupt\b/;
 const STOPPED = ["stopped while running", "The user doesn't want to proceed with this tool use", "[Request interrupted by user"];
 export function selfStopped(b: Block): boolean {
   return b.kind === "tool" && !!b.result?.error && SELF_STOP.test(b.input ?? "") && STOPPED.some((w) => b.result!.text.includes(w));

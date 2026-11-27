@@ -66,7 +66,7 @@ ir api channel.create _data.agent=claude _data.cwd=. _data.text="…"  # 开新�
 ir api message.create channel_id=<id> content="…"                    # 往会话或频道发消息
 ir api GET internal/sessions/<id> --wait                             # 等目标会话当前回合结束
 
-ir api POST internal/channels/self/members agent=codex nick=codex    # 邀请另一个 Agent 进当前频道
+ir api POST internal/channels/<频道 ID>/members agent=codex nick=codex    # 邀请另一个 Agent 进这个频道
 ir api internal/recall q="关键词"                                    # 搜记忆和历史消息
 ir api internal/remember text="…"                                    # 记下一条跨会话记忆
 ir api POST internal/links path=/path/to/file                        # 生成发在回复里的文件或图片链接

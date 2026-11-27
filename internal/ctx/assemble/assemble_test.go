@@ -63,18 +63,18 @@ func golden(t *testing.T, name string, in Injection, err error) {
 func TestSystemGolden(t *testing.T) {
 	t.Parallel()
 	for lang, name := range map[string]string{"zh": "zh", "en": "en", "": "none"} {
-		in, err := System(Where{Lang: lang})
+		in, err := System(Where{Session: "s-1", Lang: lang})
 		golden(t, "system."+name, in, err)
 		if in.Kind() != KindSystem {
 			t.Errorf("kind %q", in.Kind())
 		}
-		in, err = System(Where{Remote: true, IR: true, Lang: lang})
+		in, err = System(Where{Session: "s-1", Remote: true, IR: true, Lang: lang})
 		golden(t, "remote.ir."+name, in, err)
-		in, err = System(Where{Remote: true, Lang: lang})
+		in, err = System(Where{Session: "s-1", Remote: true, Lang: lang})
 		golden(t, "remote.noir."+name, in, err)
 	}
 	// A language without a name: no line, as for none.
-	in, err := System(Where{Lang: "fr"})
+	in, err := System(Where{Session: "s-1", Lang: "fr"})
 	golden(t, "system.none", in, err)
 }
 
@@ -84,12 +84,12 @@ func TestSystemManual(t *testing.T) {
 	for _, c := range []struct {
 		w    Where
 		told bool
-	}{{Where{Auto: true}, true}, {Where{Auto: true, Remote: true, IR: true}, true}, {Where{Auto: true, Remote: true}, false}, {Where{}, false}} {
+	}{{Where{Session: "s-1", Auto: true}, true}, {Where{Session: "s-1", Auto: true, Remote: true, IR: true}, true}, {Where{Session: "s-1", Auto: true, Remote: true}, false}, {Where{}, false}} {
 		in, err := System(c.w)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := strings.Contains(in.String(), "internal/sessions/self/manual"); got != c.told {
+		if got := strings.Contains(in.String(), "internal/sessions/s-1/manual"); got != c.told {
 			t.Errorf("%+v: told %v", c.w, got)
 		}
 	}
@@ -134,7 +134,7 @@ func TestOtherTexts(t *testing.T) {
 
 func TestRecord(t *testing.T) {
 	t.Parallel()
-	in, err := System(Where{Lang: "zh"})
+	in, err := System(Where{Session: "s-1", Lang: "zh"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +142,7 @@ func TestRecord(t *testing.T) {
 	for _, p := range in.Parts() {
 		sources = append(sources, p.Source)
 	}
-	want := "prompts:iridium.open prompts:host.intro prompts:cli prompts:cli.host prompts:cli.discover prompts:host.secrets-files prompts:shell.ir prompts:links prompts:links.files prompts:names prompts:title prompts:self.section prompts:self.helpers prompts:runtime prompts:lang prompts:iridium.close"
+	want := "prompts:iridium.open prompts:host.intro prompts:cli prompts:cli.host prompts:cli.discover prompts:host.secrets-files prompts:shell.ir prompts:links prompts:links.files prompts:names prompts:title prompts:self.section prompts:self.helpers prompts:runtime prompts:lang prompts:self.session prompts:iridium.close"
 	if got := strings.Join(sources, " "); got != want {
 		t.Errorf("parts %s", got)
 	}
@@ -224,11 +224,11 @@ func TestTypicalGolden(t *testing.T) {
 	t.Parallel()
 	self := &Self{Nick: "Claude-1234", IR: true, Memory: []SelfMemory{{At: 1764000000000, From: "#12", Text: "kumo wants short UI copy"}},
 		Channels: []SelfChannel{{ID: "ch-uuid", Name: "ir 问题", At: 1764000000000, With: []string{"Codex-5678"}, Last: "build fixed"}}}
-	in, err := System(Where{IR: true, Lang: "zh", Self: self, Auto: true, Folder: "/home/k/ir", OS: "linux"})
+	in, err := System(Where{Session: "s-1", IR: true, Lang: "zh", Self: self, Auto: true, Folder: "/home/k/ir", OS: "linux"})
 	golden(t, "typical.system", in, err)
 	var p strategy.Plan
 	p.Full = []strategy.Full{{Msg: strategy.Msg{Seq: 2, Who: "kumo", Text: "CI is red since this morning", At: 3600_000}}}
-	in, err = ChannelTurn(Channel{Rename: true, ID: "ch-uuid", Name: "ir 问题", You: "Claude-1234", Pull: true,
+	in, err = ChannelTurn(Channel{Session: "s-1", Rename: true, ID: "ch-uuid", Name: "ir 问题", You: "Claude-1234", Pull: true,
 		Agents: []ChannelAgent{{Nick: "Claude-1234", Agent: "claude", Model: "opus"}, {Nick: "Codex-5678", Agent: "codex", Model: "gpt-5", Effort: "low", Recv: "every message"}},
 		Plan:   p}, 3, "@Claude-1234 why does the build fail?", "in-3")
 	golden(t, "typical.channel", in, err)

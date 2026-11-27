@@ -640,7 +640,7 @@ export interface SendReply {
 }
 /**
  * ManualAsk is Claude asking a person to switch it to manual approval for a while (POST
- * internal/sessions/self/manual; docs/api.md "临时切换至 manual"): why, in a line; Minutes: how long
+ * internal/sessions/<id>/manual; docs/api.md "临时切换至 manual"): why, in a line; Minutes: how long
  * it waits for the answer and, approved, how long manual mode lasts at most (1 to 30, 10 if none).
  */
 export interface ManualAsk {

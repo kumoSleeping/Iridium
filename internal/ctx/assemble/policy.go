@@ -25,6 +25,9 @@ type Where struct {
 	// Folder: the folder it runs in, as written there; "": not said. OS: that computer's system
 	// ("linux", "darwin", "windows"). Computer: its name, at another machine (Remote).
 	Folder, OS, Computer string
+	// Session is the session's id, which the commands it is told name it by: ir takes no "self"
+	// (kumo, 2026-11-27).
+	Session string
 }
 
 // systems are the systems' names as an agent is told them.
@@ -76,14 +79,14 @@ func systemPieces(w Where) []piece {
 		}
 		ps = append(ps, text(idShellIR))
 		if w.Auto {
-			ps = append(ps, text(idHostManual))
+			ps = append(ps, text(idHostManual, "session", w.Session))
 		}
 	}
 	ps = append(ps, text(idLinks))
 	if !w.Remote {
 		ps = append(ps, text(idLinksFiles))
 	}
-	ps = append(ps, text(idNames), text(idTitle))
+	ps = append(ps, text(idNames), text(idTitle, "session", w.Session))
 	if ir {
 		ps = append(ps, collabPieces(w.Self)...)
 	}
@@ -91,6 +94,9 @@ func systemPieces(w Where) []piece {
 	runtime = append(runtime, wherePieces(w)...)
 	if name := langs[w.Lang]; name != "" {
 		runtime = append(runtime, text(idLang).filled("language", name))
+	}
+	if w.Session != "" {
+		runtime = append(runtime, text(idSelfSession, "session", w.Session))
 	}
 	runtime = append(runtime, selfPieces(w.Self)...)
 	if len(runtime) > 0 {

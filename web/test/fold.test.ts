@@ -221,7 +221,9 @@ describe("a shell call's sort", () => {
     expect(r("Bash", "ir ls")).toBe(false);
     expect(r("Read", "ir rename x")).toBe(false);
     expect(r("Bash", 'ir api channel.update channel_id=self data.name="会话 命名"')).toBe(true);
-    expect(r("Bash", "ir api channel.update channel_id=1a2b data.name=x")).toBe(false);
+    expect(r("Bash", "ir api channel.update channel_id=1a2b data.name=x")).toBe(true);
+    expect(r("Bash", "ir api channel.update channel_id=1a2b channel_id=3c data.name=x")).toBe(false);
+    expect(r("Bash", "ir api channel.update data.name=x")).toBe(false);
     expect(r("Bash", "ir api channel.update channel_id=self data.name=x _data.archived:=true")).toBe(false);
     expect(cmdOfCall({ name: "Bash", input: JSON.stringify({ command: "ir api message.create channel_id=1a2b _data.text=hi" }) })).toBe("ir-send");
     expect(cmdOfCall({ name: "Bash", input: JSON.stringify({ command: "ir api POST internal/sessions/1a2b/stop" }) })).toBe("ir-stop");
@@ -361,6 +363,7 @@ describe("selfStopped", () => {
   const call = (input: string, text: string, error = true): Block => ({ at: "1.0", kind: "tool", id: "c", name: "Bash", input, result: { at: "2.0", text, error } });
   test("an agent stopping itself: no failure, paired here too", () => {
     expect(selfStopped(call(stop, said))).toBe(true);
+    expect(selfStopped(call(stop.replace("/self/", "/0b5e2c1a-7d3f/"), said))).toBe(true); // by its id; self in older records
     const [s] = folded([{ at: "1.0", kind: "tool", id: "c", name: "Bash", input: stop }, { at: "2.0", kind: "result", id: "c", text: said, error: true }], false);
     expect(s?.kind).toBe("fold");
     expect(JSON.stringify(s)).not.toContain('"error":true');

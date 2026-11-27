@@ -368,19 +368,19 @@ func (h *Hosted) allow(id string) {
 }
 
 func (h *Hosted) allowedLocked(a api.Ask) bool {
-	in := func(ch string) bool { return ch == "self" || ch == h.id || h.m.speaks(h.id, ch) }
-	return renamesOnly(a) || looksUpOnly(a) || speaksOnly(a, in) || reactsOnly(a, in) || slices.ContainsFunc(h.rules, func(r store.AllowRule) bool { return ruleMatches(r, a) })
+	in := func(ch string) bool { return ch == h.id || h.m.speaks(h.id, ch) }
+	return renamesOnly(a, in) || looksUpOnly(a) || speaksOnly(a, in) || reactsOnly(a, in) || slices.ContainsFunc(h.rules, func(r store.AllowRule) bool { return ruleMatches(r, a) })
 }
 
-// renamesOnly: a shell call that only names the session (ir api channel.update channel_id=self
-// data.name=…, plan "会话标题"; the older ir rename), which the system prompt has every agent run:
-// never asked about. Whatever chains, pipes, substitutes or redirects is asked about as any
-// command is, and so is one that sets anything else.
-func renamesOnly(a api.Ask) bool {
-	in, _ := a.Input.(map[string]any)
-	s, _ := in["command"].(string)
+// renamesOnly: a shell call that only names the session or a channel it is in (in: ir api
+// channel.update channel_id=<id> data.name=…, plan "会话标题"; the older ir rename), which the
+// system prompt has every agent run: never asked about. Whatever chains, pipes, substitutes or
+// redirects is asked about as any command is, and so is one that sets anything else.
+func renamesOnly(a api.Ask, in func(string) bool) bool {
+	input, _ := a.Input.(map[string]any)
+	s, _ := input["command"].(string)
 	if s == "" {
-		s, _ = in["cmd"].(string)
+		s, _ = input["cmd"].(string)
 	}
 	s = strings.TrimSpace(s)
 	if a.Kind != "permission" || strings.ContainsAny(s, ";|&`$<>\n\\") {
@@ -390,18 +390,24 @@ func renamesOnly(a api.Ask) bool {
 	if len(f) >= 3 && f[0] == "ir" && f[1] == "rename" {
 		return true
 	}
-	if len(f) < 5 || f[0] != "ir" || f[1] != "api" || f[2] != "channel.update" || !slices.Contains(f, "channel_id=self") {
+	if len(f) < 5 || f[0] != "ir" || f[1] != "api" || f[2] != "channel.update" {
 		return false
 	}
-	named := false
+	named, ch := false, 0
 	for _, w := range f[3:] {
 		named = named || strings.HasPrefix(w, "data.name=")
-		if strings.HasPrefix(w, "-") || strings.HasPrefix(w, "_data") || strings.HasPrefix(w, "content") ||
-			(strings.HasPrefix(w, "channel_id") && w != "channel_id=self") {
+		if strings.HasPrefix(w, "channel_id") {
+			id, ok := strings.CutPrefix(w, "channel_id=")
+			if !ok || !in(id) {
+				return false
+			}
+			ch++
+		}
+		if strings.HasPrefix(w, "-") || strings.HasPrefix(w, "_data") || strings.HasPrefix(w, "content") {
 			return false
 		}
 	}
-	return named
+	return named && ch == 1
 }
 
 // looksUpOnly: a shell call that only reads Iridium's records of the agent itself or keeps a

@@ -286,7 +286,7 @@ agent 的 `ir sh`：每条命令一个新进程，不经托管进程，不写文
 
 跨机器的多 agent 协同：本机的主 agent 经 @ 知道远端的位置，用 `ir new <agent> 应用名:路径` 给那边的 dsh 派活、看结果、搬文件；派出的会话挂在它下面（“远端工作区”）。那边的会话也能回过来找它。
 
-- `ir new <agent> 应用名:路径 "任务"` 在那台机器上开（路径按那边的写法，`~` 和空是那边的家目录；`host:路径` 是主机；不带前缀是调用者自己那台）。`--machine <机器>` 还认，不再写进帮助。`--workspace <组>` 放进指定的组。会话里跑的，新会话挂在拉起者下面。`ir api channel.list guild_id=self` 只列自己组的会话；`channel.list`、`guild.list` 的目录一律带前缀：`host:~/ir`、`mac:/Users/k/x`。位置的写法见 `internal/place`（网页 `web/src/places.ts`，同一张用例表）。
+- `ir new <agent> 应用名:路径 "任务"` 在那台机器上开（路径按那边的写法，`~` 和空是那边的家目录；`host:路径` 是主机；不带前缀是调用者自己那台）。`--machine <机器>` 还认，不再写进帮助。`--workspace <组>` 放进指定的组。会话里跑的，新会话挂在拉起者下面。`ir api channel.list guild_id=<组>` 只列那个组的会话；`channel.list`、`guild.list` 的目录一律带前缀：`host:~/ir`、`mac:/Users/k/x`。位置的写法见 `internal/place`（网页 `web/src/places.ts`，同一张用例表）。
 - 那边的 `ir`：执行端握手声明 `irClient`，这边每次在那边启动 agent 时生成一个只属于这个会话的 TOKEN（前缀 `irs_`，托管目录只存它的哈希，重启一次换一个），经 `IRIDIUM_TOKEN` 给执行端；执行端在这个会话的托管目录里放一个 `ir`（`holds/<会话>/bin/`），排在它 PATH 的最前面，地址（自己连的那个，`IRIDIUM_URL` 给了就用它）和 TOKEN 直接写在里面：agent 跑的命令不一定拿得到它的环境变量（dsh 跑命令就不带 `IRIDIUM_*`，2026-11-08 实测）。dsh 插件的是 `ir.js`（`ir`、`ir.cmd` 用插件所在的 node 跑；DSH Desktop 里是它自己的程序，带 `ELECTRON_RUN_AS_NODE`）；`ir join` 的是这个二进制本身（脚本再执行 `bin/.ir/ir` 这个链接，按名字 `ir` 进命令行模式）。
 - 那边的 `ir` 只转发：把参数和当前目录发到 `POST /v1/internal/cli`，这边照常跑 `ir`，输出一行一行流回去，最后是退出码。请求算那台机器的 Bot 发的、代表这个会话：Bot 的规则照旧，算 agent 发的（消息并进对方当前回合，不能答应切换至手动审批的请求），信里写成来自这个会话。Bot 被删，它的会话 TOKEN 一起失效。
 - 那边能用的：`new`（不带前缀的目录是那边的，带前缀可开到别的机器）、`send`、`wait`、`read`、`ls`、`find`、`stop`、`archive`、`unarchive`、`rename`、`ws`、`apps`。不能用：`cp`、`files`、`sh`、`run`、`secret`、`bot`、`usage` 和管理命令，这些碰的是 Iridium 所在机器的文件、命令和秘密，留给本机的会话和面板。

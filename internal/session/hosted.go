@@ -310,7 +310,7 @@ func (h *Hosted) launch(ctx context.Context, proc int) error {
 		return err
 	}
 	prompt := filepath.Join(h.dir, filePrompt)
-	where := assemble.Where{Lang: m.tuned().Lang, Self: m.self(h.id), Folder: h.meta.Cwd, OS: runtime.GOOS, Auto: h.meta.Agent == api.AgentClaude}
+	where := assemble.Where{Session: h.id, Lang: m.tuned().Lang, Self: m.self(h.id), Folder: h.meta.Cwd, OS: runtime.GOOS, Auto: h.meta.Agent == api.AgentClaude}
 	if mc := h.machine(); mc != nil {
 		hi, _ := mc.Hello()
 		where.Remote, where.IR, where.OS = true, hi != nil && hi.IRClient, ""
