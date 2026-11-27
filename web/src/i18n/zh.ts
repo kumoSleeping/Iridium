@@ -1032,7 +1032,8 @@ export const zh = {
   "manage.roleCount": "{n} 个角色",
   "manage.newSecret": "新建凭据",
   "manage.open": "管理",
-  "manage.newPairing": "新建配对",
+  "manage.invite": "邀请",
+  "manage.inviteApp": "邀请应用",
   "manage.default": "默认",
 } as const;
 

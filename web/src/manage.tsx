@@ -7,7 +7,6 @@
 // key at the foot's right: a menu of what may be made, which comes as a row at the top of its group
 // till it is made. Changed is saved at once.
 import { Dialog } from "@base-ui/react/dialog";
-import { Menu } from "@base-ui/react/menu";
 import { useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, FolderOpen, Link2, Monitor, PencilLine, Plus, X, Trash2 } from "lucide-react";
 import { useLayoutEffect, useState, type ReactNode } from "react";
@@ -27,10 +26,9 @@ import { NewRolePage, placeOf, RolePage } from "./rolespage";
 import { type ManageTab } from "./route";
 import { SecretHere } from "./secret";
 import { showSecret } from "./secrets";
-import { MenuItems, type MenuItem } from "./sidebar";
 import { useConfirms, usePairing } from "./store";
 import { errText, toast } from "./toast";
-import { agentName, ago, Avatar, AvatarKey, cn, FaceChangeOver, IconKey, intoView, Logo, MenuPortal, ServerFace, SureKey, Switch, Tip } from "./ui";
+import { agentName, ago, Avatar, AvatarKey, cn, FaceChangeOver, IconKey, intoView, Logo, ServerFace, SureKey, Switch, Tip } from "./ui";
 import { useQuery } from "./api/query";
 
 /** Where a secret made here (an invite's link) shows. */
@@ -56,6 +54,7 @@ function useWide() {
 const NEW_INVITE = "new:invite";
 const NEW_COMPUTER = "new:computer";
 const NEW_ROLE = "new:role";
+const NEW_APP = "new:app";
 
 export function ManagePage({ tab }: { tab: ManageTab }) {
   useLang();
@@ -102,37 +101,45 @@ export function ManagePage({ tab }: { tab: ManageTab }) {
   if (sel && data && !sel.startsWith("new:") && !login && !invite && !app && !computer && !agent) setSel("");
   const lit = at;
 
+  const pair = (on: boolean) => void api.pairing(on).catch((e) => toast(t("apps.pairing"), { error: true, description: errText(e) }));
+  // Each group ends in a line of its own to make one (kumo, 2026-11-27: no key floating over the
+  // window): pressed, it is the row being made, its form at the right.
   const list = (
     <>
       {manages && (
         <Group title={t("manage.members")}>
-          {at === NEW_INVITE && <Row face={<Pending />} name={t("manage.newInvite")} line={t("manage.notMade")} on onClick={() => {}} />}
           {logins.map((l) => (
             <Row key={l.id} face={<Avatar src={l.avatar} name={l.name} size={24} {...deviceBadge(l.device)} />} name={l.name} line={<><Seen online={l.online} at={l.lastSeenAt || l.createdAt || 0} />{!l.approvedAt && <span>{t("apps.pending")}</span>}</>} on={lit === `l:${l.id}`} onClick={() => setSel(`l:${l.id}`)} />
           ))}
+          {invites.map((i) => (
+            <Row key={i.id} face={<Pending />} name={i.setup ? t("term.setup") : i.name || t("manage.unusedInvite")} faint line={i.expiresAt ? t("term.until", { time: clock(i.expiresAt) }) : undefined} on={lit === `i:${i.id}`} onClick={() => setSel(`i:${i.id}`)} />
+          ))}
+          {me?.public && <AddRow label={t("manage.invite")} on={at === NEW_INVITE} onClick={() => setSel(NEW_INVITE)} />}
+        </Group>
+      )}
+      {manages && (
+        <Group title={t("manage.apps")}>
           {apps.map((a) => {
             const n = appLogins(a.id).length;
             return <Row key={a.id} face={<Avatar src={a.avatar} name={a.name} size={24} type={a.type} />} name={a.name} line={n > 1 ? t("apps.loginCount", { n }) : <Seen online={a.online} at={a.lastSeenAt || a.createdAt || 0} />} on={lit === `p:${a.id}`} onClick={() => setSel(`p:${a.id}`)} />;
           })}
-          {invites.map((i) => (
-            <Row key={i.id} face={<Pending />} name={i.setup ? t("term.setup") : i.name || t("manage.unusedInvite")} faint line={i.expiresAt ? t("term.until", { time: clock(i.expiresAt) }) : undefined} on={lit === `i:${i.id}`} onClick={() => setSel(`i:${i.id}`)} />
-          ))}
+          <AddRow label={t("manage.invite")} on={at === NEW_APP} onClick={() => (setSel(NEW_APP), pairing || pair(true))} />
         </Group>
       )}
-      {(computers.length > 0 || at === NEW_COMPUTER) && (
+      {manages && (
         <Group title={t("manage.computers")}>
-          {at === NEW_COMPUTER && <Row face={<Draft />} name={t("manage.newComputer")} line={t("manage.waitJoin")} on onClick={() => {}} />}
           {computers.map((a) => (
             <Row key={a.id} face={<ComputerFace a={a} size={24} />} name={a.host ? "Iridium" : a.name} line={<>{!a.host && <Seen online={a.online} at={Math.max(a.computer?.seenAt ?? 0, a.lastSeenAt ?? 0) || a.createdAt || 0} />}<span>{osName(a.computer)}</span></>} on={lit === `c:${a.id}`} onClick={() => setSel(`c:${a.id}`)} />
           ))}
+          <AddRow label={t("manage.invite")} on={at === NEW_COMPUTER} onClick={() => setSel(NEW_COMPUTER)} />
         </Group>
       )}
       <Group title={t("manage.agents")}>
-        {at === NEW_ROLE && <Row face={<Draft />} name={t("role.new")} on onClick={() => {}} />}
         {infos.map((x) => {
           const n = roles.filter((r) => r.agent === x.agent).length;
           return <Row key={x.agent} face={<AgentFace a={x.agent} size={24} />} name={agentName(x.agent)} line={n ? t("manage.roleCount", { n }) : undefined} on={lit === `a:${x.agent}`} onClick={() => setSel(`a:${x.agent}`)} />;
         })}
+        <AddRow label={t("role.new")} on={at === NEW_ROLE} onClick={() => setSel(NEW_ROLE)} />
       </Group>
     </>
   );
@@ -140,6 +147,15 @@ export function ManagePage({ tab }: { tab: ManageTab }) {
   const detail =
     at === NEW_INVITE ? (
       <NewInvite done={(made) => setSel(made ? `i:${made}` : "")} />
+    ) : at === NEW_APP ? (
+      <div className="flex flex-col">
+        <Head face={<Draft size={40} />} name={t("manage.inviteApp")} />
+        <Block>
+          <Field label={t("apps.pairing")}>
+            <Switch label={t("apps.pairing")} on={pairing} onChange={pair} />
+          </Field>
+        </Block>
+      </div>
     ) : at === NEW_COMPUTER ? (
       <div className="-mx-3">
         <AddComputer onBack={() => setSel("")} />
@@ -160,18 +176,6 @@ export function ManagePage({ tab }: { tab: ManageTab }) {
       <AgentDetail key={agent} a={agent} computers={computers} />
     ) : null;
 
-  // 新建's menu follows the list's group chosen (kumo, 2026-11-27): a member's, a computer's, an
-  // agent's things to make, each "新建 …", words alone.
-  const group = k === "c" ? "computers" : k === "a" ? "agents" : k === "l" || k === "i" || k === "p" ? "members" : "";
-  const pair = () => void (pairing || api.pairing(true).catch((e) => toast(t("apps.pairing"), { error: true, description: errText(e) })));
-  const makes = [
-    group === "members" && manages && me?.public && { icon: null, label: t("manage.newInvite"), run: () => setSel(NEW_INVITE) },
-    group === "members" && manages && { icon: null, label: t("manage.newPairing"), run: pair },
-    group === "computers" && manages && { icon: null, label: t("manage.newComputer"), run: () => setSel(NEW_COMPUTER) },
-    group === "computers" && me?.host && host && { icon: null, label: t("manage.newSecret"), run: () => (setSel(`c:${host.id}`), setWant(`new:${Date.now()}`)) },
-    group === "agents" && { icon: null, label: t("role.new"), run: () => setSel(NEW_ROLE) },
-  ].filter((x) => !!x);
-  const add = !at.startsWith("new:") && makes.length > 0 && <AddMenu items={makes} />;
   const needs = <Needs skip={!!computer?.host} />;
 
   return (
@@ -184,8 +188,8 @@ export function ManagePage({ tab }: { tab: ManageTab }) {
       </header>
       {wide ? (
         <div className="grid min-h-0 flex-1 grid-cols-[16rem_minmax(0,1fr)] gap-2">
-          <div className="no-bar flex min-h-0 flex-col overflow-y-auto pb-20 pl-3">{list}</div>
-          <div className="no-bar min-h-0 overflow-y-auto pt-1 pr-5 pb-20 pl-2">
+          <div className="no-bar flex min-h-0 flex-col overflow-y-auto pb-4 pl-3">{list}</div>
+          <div className="no-bar min-h-0 overflow-y-auto pt-1 pr-5 pb-6 pl-2">
             {needs}
             {detail}
           </div>
@@ -200,12 +204,11 @@ export function ManagePage({ tab }: { tab: ManageTab }) {
           <div className="no-bar min-h-0 flex-1 overflow-y-auto px-4 pb-6">{detail}</div>
         </div>
       ) : (
-        <div className="no-bar min-h-0 flex-1 overflow-y-auto px-3 pb-20" data-dir="back">
+        <div className="no-bar min-h-0 flex-1 overflow-y-auto px-3 pb-6" data-dir="back">
           <div className="px-1">{needs}</div>
           {list}
         </div>
       )}
-      {add}
     </div>
   );
 }
@@ -220,29 +223,16 @@ function Group({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-/** 新建, at the window's foot on the right: a menu of what may be made, opening to its left; it says
- *  nothing else (kumo, 2026-11-27: pairing is turned off at Iridium's). */
-function AddMenu({ items }: { items: MenuItem[] }) {
-  return (
-    <Menu.Root>
-      <Menu.Trigger className="g-press absolute right-4 bottom-4 z-10 flex h-9 items-center gap-1.5 rounded-full bg-ink px-4 text-sm font-medium text-on-ink shadow-(--shadow-float) outline-none pointer-coarse:h-11">
-        <Plus size={15} />
-        {t("manage.new")}
-      </Menu.Trigger>
-      <MenuPortal>
-        <Menu.Positioner side="left" align="end" sideOffset={8} collisionPadding={8} className="z-50">
-          <MenuItems items={items} />
-        </Menu.Positioner>
-      </MenuPortal>
-    </Menu.Root>
-  );
+/** A group's last line: a plus and what it makes, faint till it is the row being made. */
+function AddRow({ label, on, onClick }: { label: string; on: boolean; onClick: () => void }) {
+  return <Row face={<Draft />} name={label} faint={!on} on={on} onClick={onClick} />;
 }
 
 /** A row being made: a plus in a faint circle. */
-function Draft() {
+function Draft({ size = 24 }: { size?: number }) {
   return (
-    <span className="grid size-6 place-items-center rounded-full bg-fill text-ink-3">
-      <Plus size={13} />
+    <span className="grid place-items-center rounded-full bg-fill text-ink-3" style={{ width: size, height: size }}>
+      <Plus size={Math.round(size * 0.55)} />
     </span>
   );
 }
