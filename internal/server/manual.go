@@ -17,7 +17,7 @@ import (
 
 // Manual approval asked for (session/manual.go; kumo, 2026-11-25): Claude whose auto mode denied a
 // step it needs asks a person to switch it to manual approval for a while (POST
-// internal/sessions/self/manual, ir api's --wait waiting for the answer). Its ask is carried as
+// internal/sessions/<id>/manual, ir api's --wait waiting for the answer). Its ask is carried as
 // any ask is, and calls the person as an @ does (askCalls); only a person answers it
 // (satoriBackend.Answer).
 
@@ -25,7 +25,7 @@ import (
 func (s *Server) askManual(w http.ResponseWriter, r *http.Request) {
 	c, id := callerOf(r), r.PathValue("id")
 	if c.session != id {
-		forbid(w, errors.New("only the session's own agent asks for manual approval (internal/sessions/self/manual)"))
+		forbid(w, errors.New("only the session's own agent asks for manual approval (internal/sessions/<id>/manual)"))
 		return
 	}
 	var req api.ManualAsk

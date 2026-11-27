@@ -150,7 +150,7 @@ func (s *Service) channel(c Caller, id string) (*api.SessionState, error) {
 	return st, nil
 }
 
-// sessionOf is the session id names for c (Resolver): the start of an id, or self.
+// sessionOf is the session id names for c (Resolver): the start of an id.
 func (s *Service) sessionOf(c Caller, id string) (string, error) {
 	r, ok := s.b.(Resolver)
 	if !ok {
@@ -159,16 +159,14 @@ func (s *Service) sessionOf(c Caller, id string) (string, error) {
 	return r.Resolve(context.Background(), c, id)
 }
 
-// guildID is the guild id names for c: self is the guild of c's own session.
+// guildID is the guild id names for c: an id as it is; self, once c's own session's guild, is
+// refused as the Resolver refuses it for a channel (kumo, 2026-11-27: a name is a name).
 func (s *Service) guildID(c Caller, id string) (string, error) {
 	if id != "self" {
 		return id, nil
 	}
-	st, err := s.channel(c, "self")
-	if err != nil {
-		return "", err
-	}
-	return s.guildOf(st.Session).ID, nil
+	_, err := s.sessionOf(c, id)
+	return "", err
 }
 
 func (s *Service) channelGet(ctx context.Context, c Caller, body []byte) (any, error) {

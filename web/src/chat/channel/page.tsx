@@ -30,6 +30,9 @@ import { Copyable } from "../copyable";
 import { Crash } from "../crash";
 import { ContextRing, ModeKey, ModelKey, modelView, QuotaBars, useMode } from "../meters";
 import { fromSatori, PLACE_DRAG, SESSION_DRAG, sourceOf, withDevice, yours, type Source } from "../refs";
+import { shownAs } from "../files";
+import { Gallery } from "../gallery";
+import { shotsOf, type Said } from "../gallery-lib";
 import { Assistant, Attached, clock, Compaction, Gutter, Letter, Line, MsgRow, Pending, When, YouBubble } from "../said";
 import { ShellRuns } from "../shell";
 import { Stick, toEnd } from "../stick";
@@ -447,6 +450,7 @@ export function ChannelPage({ id, sheet = 0, bar, record }: { id: string; sheet?
   return (
     <Nicks.Provider value={nicks}>
      <SeqRefs.Provider value={seqs}>
+     <Gallery shots={() => shotsOf(log.msgs.flatMap((m) => saidOf(m, id)), (session, f) => api.fileURL(session, f.ref, false, f.mtime), shownAs)}>
       <div className="relative h-full" onDragOver={(e) => files(e) || session(e) || place(e)} onDrop={drop}>
         {/* Nothing said yet: the pane's splash is told so (splash/splash.tsx). */}
         <ChannelSplash id={id} show={!hold && !sent.length && (log.loaded ? !log.msgs.length : justMade(id))} last={agents.at(-1)} agents={agents.length} />
@@ -507,6 +511,7 @@ export function ChannelPage({ id, sheet = 0, bar, record }: { id: string; sheet?
           </div>
         </div>
       </div>
+     </Gallery>
      </SeqRefs.Provider>
     </Nicks.Provider>
   );
@@ -660,6 +665,16 @@ export function AskQueue({ agents, states, asks, cwd, off }: { agents: AgentRow[
 /** A message as the block an agent's words are drawn from (said.tsx Assistant, which makes the
  *  members they name links): kept per message, so one drawn is not drawn again. */
 const blocks = new WeakMap<Msg, { sig: string; b: Block }>();
+/** A message as its pictures are drawn (gallery-lib.ts), its files served as GroupView serves them:
+ *  an agent's by its session, unless it answers an input of the channel's; any other's by the
+ *  channel. None for Iridium's lines and a crash. */
+function saidOf(m: Msg, channel: string): Said[] {
+  if (!m.files.length || m.kind === "error" || m.author.kind === "iridium") return [];
+  if (m.author.kind === "person") return [{ words: "", files: m.files, session: channel, person: true }];
+  const session = m.author.kind === "agent" && !m.input ? m.author.session : channel;
+  return [{ words: fromSatori(msgWords(m).words), files: m.files, session, person: false }];
+}
+
 function blockFor(m: Msg, agents: AgentRow[]): Block {
   const nicks = agents.map((a) => a.nick);
   const sig = nicks.join(" ");

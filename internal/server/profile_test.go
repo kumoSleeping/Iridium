@@ -51,7 +51,7 @@ func TestProfileCards(t *testing.T) {
 	if !found {
 		t.Errorf("the members: %+v", ms.Members)
 	}
-	// Another agent's, by its nick; the channel's own, as "here".
+	// Another agent's, by its nick. "here" is no id.
 	l.want(200, "agent-in:"+second, "PATCH", "/v1/internal/members/claude", map[string]any{"avatar": "🐟"}, &p)
 	if p.Session != ch || !strings.Contains(p.Avatar, "v=g") {
 		t.Errorf("another's card: %+v", p)

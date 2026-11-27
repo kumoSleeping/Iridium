@@ -491,6 +491,7 @@ func (u *ui) message(p *mygo.Page, msg, origin string, logf func(string, ...any)
 		if arg == server {
 			return // not the one the page is on: from another's
 		}
+		stopLogin(arg)
 		if c, err := updateConfig(func(c *Config) { c.remove(arg) }); err == nil {
 			u.joins.Sync(c)
 			u.gone(arg)
@@ -602,6 +603,7 @@ func (u *ui) local(p *mygo.Page, verb, arg string) {
 		c, _ := loadConfig()
 		reply(p, state(c))
 	case "remove":
+		stopLogin(arg)
 		if c, err := updateConfig(func(c *Config) { c.remove(arg) }); err == nil {
 			u.joins.Sync(c)
 			u.gone(arg)
@@ -718,6 +720,15 @@ func (u *ui) login(p *mygo.Page, arg string) {
 		return
 	}
 	c, _ := loadConfig()
+	// One in the list and logged in, typed or pasted again: opened, its login kept. Logged in
+	// anew it asked for the browser's allow again (StarFreedomX, 2026-11-23).
+	if s := c.server(a); s != nil && invite == "" && (s.LoggedIn || s.Local && loopback(s.URL)) {
+		st := state(c)
+		st["done"] = a
+		reply(w, st)
+		u.switchTo(a)
+		return
+	}
 	if c.server(a) == nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		err := isIridium(ctx, a)
@@ -754,6 +765,10 @@ func (u *ui) login(p *mygo.Page, arg string) {
 		m["server"] = a
 		reply(p, m)
 	}, func(link, who string) {
+		if c, _ := loadConfig(); c.server(a) == nil {
+			reply(w, state(c)) // removed as it was allowed: not opened
+			return
+		}
 		_, _ = updateConfig(func(c *Config) {
 			if s := c.server(a); s != nil {
 				s.LoggedIn = true

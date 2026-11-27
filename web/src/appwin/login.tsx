@@ -138,6 +138,15 @@ export function Login() {
       if (Array.isArray(d.servers)) {
         const s = d as unknown as State;
         setSt(s);
+        // A server removed while its login waited: its wait gone with it (gui.go stopLogin).
+        // Kept, it held every later 连接 back with nothing shown (StarFreedomX, 2026-11-23).
+        const left = (b: string) =>
+          b === "" ||
+          b === "+" ||
+          b === "local" ||
+          s.servers.some((x) => x.url === b);
+        setBusy((b) => (left(b) ? b : ""));
+        setNote((n) => (n?.server && !left(n.server) ? null : n));
         if (s.me) setMe((m) => ({ ...s.me, ...m }));
         setPart((p) => p ?? (s.servers.length === 0 ? "who" : "add"));
       }
@@ -166,7 +175,9 @@ export function Login() {
   const asked = part && typeof part === "object" ? part.server : undefined;
   const chosen = granted.some((s) => s.url === asked) ? asked : granted[0]?.url;
   const login = (to: string, key: string) => {
-    if (busy || !to) return;
+    // A login waiting in the browser gives way to a new one (login.go: one at a time); an
+    // address still being checked, or the same one again, does not.
+    if (!to || busy === "+" || busy === "local" || busy === to) return;
     setBusy(key);
     setNote(null);
     if (!ask("ir:login:" + to))

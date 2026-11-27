@@ -52,7 +52,7 @@ func TitleNow(title string) (Injection, error) {
 }
 
 // TitleNowOf is TitleNow for channel ch, one the agent is in beside its own session: which
-// channel it is said, the agent's own being "self" to it.
+// channel it is said.
 func TitleNowOf(title, ch string) (Injection, error) {
 	if title == "" {
 		return build(KindMessage, text(idTitleNoneOf, "channel", ch))

@@ -10,27 +10,36 @@ import (
 	"github.com/kumoSleeping/iridium/internal/session"
 )
 
-// Session ids as the caller writes them (docs/api.md "会话 ID"): a unique start of one, or self,
-// the session the caller's ir runs in. ir passes what it is given (ir api); the server takes it
-// here, for the routes under /v1/internal/sessions/ and Satori's channel_id alike.
+// Session ids as the caller writes them (docs/api.md "会话 ID"): whole, or a unique start of
+// one. ir passes what it is given (ir api); the server takes it here, for the routes under
+// /v1/internal/sessions/ and Satori's channel_id alike.
 
-// self names the caller's own session.
-const self = "self"
+// Words that once stood for an id (self: the caller's session; here: the channel its agent works
+// for), taken no more (kumo, 2026-11-27): the same word named the agent in one route and the
+// channel it speaks in in another, and what an agent meant for the channel went to its own
+// session. A name is a name: an id is written as it is.
+const self, here = "self", "here"
 
 // fullID: an id this long is taken as it is (the page always sends whole ids).
 const fullID = 32
 
-// errSelf: self, from a caller with no session.
-var errSelf = fmt.Errorf("%w: self is the session ir runs in; this caller runs in none", session.ErrBadRequest)
+// noAlias is the refusal of self or here (arg) from c: the ids to write instead.
+func (s *Server) noAlias(c caller, arg string) error {
+	if c.session == "" {
+		return fmt.Errorf("%w: %s is not an id; write the id", session.ErrBadRequest, arg)
+	}
+	msg := fmt.Sprintf("%s is not an id; write the id: this session is %s", arg, c.session)
+	if ch := s.hereOf(c); ch != c.session {
+		msg += ", the channel you are called in " + ch
+	}
+	return fmt.Errorf("%w: %s", session.ErrBadRequest, msg)
+}
 
-// sessionArg is the session arg names for c: its own for self, the one whose id it is or starts,
-// else arg as it is (the route says it is not there). Two ids starting so: an error.
+// sessionArg is the session arg names for c: the one whose id it is or starts, else arg as it
+// is (the route says it is not there). Two ids starting so, self or here: an error.
 func (s *Server) sessionArg(ctx context.Context, c caller, arg string) (string, error) {
-	if arg == self {
-		if c.session == "" {
-			return "", errSelf
-		}
-		return c.session, nil
+	if arg == self || arg == here {
+		return "", s.noAlias(c, arg)
 	}
 	if arg == "" || len(arg) >= fullID {
 		return arg, nil

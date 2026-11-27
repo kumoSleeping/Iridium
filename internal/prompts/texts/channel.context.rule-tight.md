@@ -1,2 +1,2 @@
 - Keep it tight: don't restate visible context, IDs, paths or states.
-- Interrupt: nothing to add (thanks/ack)? Write nothing and run `ir api POST internal/sessions/self/interrupt`. If another agent here is clearly looping, off track or about to do harm (never one doing valid work), stop it with `ir api POST internal/sessions/<nick>/interrupt` and say why in one line.
+- Interrupt: nothing to add (thanks/ack)? Write nothing and run `ir api POST internal/sessions/{{session}}/interrupt`. If another agent here is clearly looping, off track or about to do harm (never one doing valid work), stop it with `ir api POST internal/sessions/<nick>/interrupt` and say why in one line.

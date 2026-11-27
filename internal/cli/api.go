@@ -499,12 +499,9 @@ func (e *env) apiSend(c *apiCall) int {
 		_ = json.Unmarshal(c.raw, &b)
 		arg = b.ChannelID
 	}
-	id := e.caller()
-	if arg != "self" {
-		var err error
-		if id, err = e.resolve(arg); err != nil {
-			return e.fail(err)
-		}
+	id, err := e.resolve(arg)
+	if err != nil {
+		return e.fail(err)
 	}
 	before, _ := e.latest(id)
 	raw, err := e.call(c)
