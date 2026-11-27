@@ -292,14 +292,15 @@ function Head({ face, name, figures, keys }: { face: ReactNode; name: ReactNode;
   );
 }
 
-/** A setting's line: its name at the left, its value or control after it; pressed (onClick), what
+/** A setting's line: its name at the left, its value or control at the right, one line (kumo,
+ *  2026-11-27: no column of names beside the values); pressed (onClick), what
  *  is under it unfolds below (kumo, 2026-11-27: nothing inside goes to a page of its own; there is
  *  room), its chevron turned down while open. */
 function Field({ label, children, onClick, open }: { label: ReactNode; children: ReactNode; onClick?: () => void; open?: boolean }) {
   const body = (
     <>
-      <span className="w-24 shrink-0 text-sm whitespace-nowrap text-ink-3">{label}</span>
-      <span className="flex min-w-0 flex-1 items-center gap-2 text-sm">{children}</span>
+      <span className="shrink-0 text-sm whitespace-nowrap">{label}</span>
+      <span className="flex min-w-0 flex-1 items-center justify-end gap-2 text-sm text-ink-2">{children}</span>
       {onClick && <ChevronRight size={15} className={cn("shrink-0 text-ink-4 transition-transform duration-(--dur-2) ease-(--ease-out)", open && "rotate-90")} />}
     </>
   );
@@ -387,14 +388,9 @@ function AgentLine({ a, on, onChange }: { a: string; on: boolean; onChange?: (on
   );
 }
 
-/** The agents, one a line, under their name at the left. */
+/** The agents, one a line, with no name over them: their marks say what they are. */
 function AgentLines({ children }: { children: ReactNode }) {
-  return (
-    <div className="flex items-start gap-3 py-1">
-      <span className="flex h-9 w-24 shrink-0 items-center text-sm whitespace-nowrap text-ink-3 pointer-coarse:h-11">{t("manage.agent")}</span>
-      <span className="flex min-w-0 flex-1 flex-col text-sm">{children}</span>
-    </div>
-  );
+  return <div className="flex flex-col py-1 text-sm">{children}</div>;
 }
 
 /** Agent and 目录 of a login or an app: an agent's dot pressed turns it on or off, saved at once;
@@ -446,7 +442,7 @@ function Access({ perms, save }: { perms?: Perms; save: (p: Perms) => Promise<Pe
         <span className="truncate">{allScope ? t("manage.all") : p.scope.length ? p.scope.join("、") : t("apps.scopeNone")}</span>
       </Field>
       {folders && (
-        <div className="g-fade flex flex-col gap-1 pb-2 pl-27">
+        <div className="g-fade flex flex-col gap-1 pb-2">
           <div className="flex min-h-9 items-center gap-2">
             <span className="min-w-0 flex-1 text-sm">{t("apps.allScope")}</span>
             <Switch label={t("apps.allScope")} on={allScope} onChange={(on) => void put({ ...p, scope: on ? [ALL] : [] })} />
@@ -639,7 +635,7 @@ function LoginDetail({ l }: { l: Login }) {
             )}
           </Field>
           <Unfold open={open === "github"}>
-            <div className="max-w-sm pl-27">{gh ? <Bound member={l.id} mine={mine} done={() => {}} /> : <Bind done={() => setOpen("")} />}</div>
+            <div className="max-w-sm">{gh ? <Bound member={l.id} mine={mine} done={() => {}} /> : <Bind done={() => setOpen("")} />}</div>
           </Unfold>
           </>
         )}
@@ -664,7 +660,7 @@ function LoginDetail({ l }: { l: Login }) {
 function PasskeysFold({ login }: { login: Login }) {
   const { add } = usePasskeys(login);
   return (
-    <div className="flex flex-col pl-27">
+    <div className="flex flex-col">
       <PasskeyList login={login} />
       <button type="button" onClick={() => void add()} className="g-press -mx-2 flex min-h-10 items-center gap-2 rounded-md px-2 text-left text-sm text-ink-2 hover:bg-fill/60">
         <Plus size={15} className="text-ink-3" />
@@ -824,7 +820,7 @@ function ComputerDetail({ a, want = "" }: { a: App; want?: string }) {
         )}
         {!a.host && m && (
           <Field label={t("manage.folders")}>
-            <span className="min-w-0 flex-1 truncate">{m.roots?.length ? m.roots.join("、") : t("grant.allFolders")}</span>
+            <span className="min-w-0 truncate">{m.roots?.length ? m.roots.join("、") : t("grant.allFolders")}</span>
             {may && (
               <IconKey label={t("grant.addFolder")} onClick={() => setFolders(true)} className="size-7">
                 <FolderOpen size={14} />
@@ -837,7 +833,7 @@ function ComputerDetail({ a, want = "" }: { a: App; want?: string }) {
       <Block>
         {!a.host && m && (
           <Field label={t("manage.owner")}>
-            <span className="min-w-0 flex-1 truncate">{a.owner ? (owner?.name ?? a.owner.name) : <span className="text-ink-3">{t("manage.none")}</span>}</span>
+            <span className="min-w-0 truncate">{a.owner ? (owner?.name ?? a.owner.name) : <span className="text-ink-3">{t("manage.none")}</span>}</span>
             {me?.web && me.login && (
               <SecondKey onClick={() => void setOwner(qc, a.id, a.owner?.id === me.login ? { clear: true } : {})}>{a.owner?.id === me.login ? t("apps.notMine") : t("apps.mine")}</SecondKey>
             )}
@@ -860,7 +856,7 @@ function ComputerDetail({ a, want = "" }: { a: App; want?: string }) {
               {secrets?.length ? t("manage.count", { n: secrets.length }) : <span className="text-ink-3">{t("manage.none")}</span>}
             </Field>
             <Unfold open={sub === "secrets"}>
-              <div className="flex flex-col gap-2 pl-27">
+              <div className="flex flex-col gap-2">
                 <SecretsPane adding={adding} done={() => setAdding(false)} />
                 {!adding && (
                   <button type="button" onClick={() => setAdding(true)} className="g-press -mx-2 flex min-h-10 items-center gap-2 rounded-md px-2 text-left text-sm text-ink-2 hover:bg-fill/60">
@@ -884,7 +880,7 @@ function ComputerDetail({ a, want = "" }: { a: App; want?: string }) {
               )}
             </Field>
             <Unfold open={sub === "github"}>
-              <div className="max-w-sm pl-27">{gh ? <Bound member="local" mine={!!me?.host} done={() => {}} /> : <Bind done={() => setSub("")} />}</div>
+              <div className="max-w-sm">{gh ? <Bound member="local" mine={!!me?.host} done={() => {}} /> : <Bind done={() => setSub("")} />}</div>
             </Unfold>
           </>
         )}
