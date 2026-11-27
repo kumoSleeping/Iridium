@@ -19,14 +19,14 @@
   --fill: oklch(0.955 0 0);
   --fill-2: oklch(0.92 0 0);
   --edge: oklch(0 0 0 / 0.08);
-  /* A list's chosen row and the ground under the list (kumo, 2026-11-27, 设计's 方案一): the list
-     a shade under the paper, the chosen row lifted from it as white paper, a hairline and a soft
+  /* A list's chosen row and the ground under the list (kumo, 2026-11-27, 设计's 方案一 on the paper
+     as it was: no darker rail): the chosen row lifted as white paper, a hairline and a soft
      shadow; a row under the pointer a faint wash of ink, not a grey block; a mark's round ground
      paper with a hairline, not grey. One set for the sidebar, 管理 and every list that picks. */
-  --rail: oklch(0.967 0 0);
+  --rail: var(--paper);
   --rail-edge: oklch(0 0 0 / 0.055);
   --picked: oklch(1 0 0);
-  --picked-shadow: 0 0 0 0.5px oklch(0 0 0 / 0.065), 0 1px 2px oklch(0 0 0 / 0.04), 0 3px 8px -2px oklch(0 0 0 / 0.045);
+  --picked-shadow: 0 0 0 0.5px oklch(0 0 0 / 0.1), 0 1px 2px oklch(0 0 0 / 0.06), 0 4px 10px -3px oklch(0 0 0 / 0.08);
   --wash: oklch(0 0 0 / 0.036);
   --disc: oklch(0.996 0 0);
   --disc-edge: oklch(0 0 0 / 0.08);
@@ -107,7 +107,7 @@
   --fill: oklch(0.235 0 0);
   --fill-2: oklch(0.285 0 0);
   --edge: oklch(1 0 0 / 0.09);
-  --rail: oklch(0.148 0 0);
+  --rail: var(--paper);
   --rail-edge: oklch(1 0 0 / 0.06);
   --picked: oklch(0.235 0 0);
   --picked-shadow: inset 0 0.5px 0 oklch(1 0 0 / 0.11), 0 0 0 0.5px oklch(1 0 0 / 0.08), 0 2px 6px oklch(0 0 0 / 0.35);
