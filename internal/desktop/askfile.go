@@ -35,6 +35,21 @@ func windowOpen() bool {
 	return false
 }
 
+// writeWhole writes path as a whole: made under another name and renamed, so the other side
+// never reads it half written (an empty ask was marked done and never answered: TestAskWindow
+// on CI; a half answer read as no).
+func writeWhole(path string, b []byte) error {
+	tmp := filepath.Join(filepath.Dir(path), ".part-"+filepath.Base(path))
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
 // askWindow asks the window about items; one answer each, false where none.
 func askWindow(ctx context.Context, server, by string, items []executor.Item) []bool {
 	no := make([]bool, len(items))
@@ -45,7 +60,7 @@ func askWindow(ctx context.Context, server, by string, items []executor.Item) []
 	id := strconv.Itoa(os.Getpid()) + "-" + strconv.FormatInt(askSeq.Add(1), 10)
 	ask, answer := filepath.Join(d, "ask-"+id+".json"), filepath.Join(d, "answer-"+id+".json")
 	b, _ := json.Marshal(askFile{Server: server, By: by, Items: items})
-	if os.WriteFile(ask, b, 0o600) != nil {
+	if writeWhole(ask, b) != nil {
 		return no
 	}
 	defer os.Remove(ask)
@@ -89,7 +104,7 @@ func answerAsks(ctx context.Context, ask func(ctx context.Context, server, by st
 				}
 				yes := ask(ctx, a.Server, a.By, a.Items)
 				out, _ := json.Marshal(yes)
-				_ = os.WriteFile(filepath.Join(d, "answer-"+id+".json"), out, 0o600)
+				_ = writeWhole(filepath.Join(d, "answer-"+id+".json"), out)
 			}
 		}
 		select {

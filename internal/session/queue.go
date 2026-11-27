@@ -164,15 +164,6 @@ func (m *Manager) SendIfRunning(ctx context.Context, id, want string, line assem
 	return true, nil
 }
 
-// queuedImages takes the images waiting with queued message id.
-func (h *Hosted) queuedImages(id string) []agent.Image {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	im := h.qimages[id]
-	delete(h.qimages, id)
-	return im
-}
-
 // busy: a message now would join a running turn, or wait behind others.
 func (h *Hosted) busy() bool {
 	h.mu.Lock()
@@ -299,26 +290,47 @@ func (h *Hosted) releaseLocked(ctx context.Context, all bool) {
 	}
 	h.mu.Unlock()
 	for i, q := range due {
-		h.mu.Lock()
-		images := h.qimages[q.ID]
-		h.mu.Unlock()
+		// Out of the queue before it is written: the agent may answer it (and its turn end be
+		// shown) before this goes on, and a reply beside it still queued would show it twice.
+		at, images := h.unqueue(q.ID)
 		if err := h.write(ctx, queuedInput(h.id, q), images); err != nil {
 			h.logf("queue: %v", err)
+			h.requeue(at, q, images)
 			h.pauseLocked(due[i:])
 			return
 		}
-		// Out of the queue as soon as it is written: the agent may answer it before the store has
-		// it as sent, and a reply beside it still queued would show it twice.
-		h.mu.Lock()
-		h.queue = slices.DeleteFunc(h.queue, func(x api.Queued) bool { return x.ID == q.ID })
-		delete(h.qimages, q.ID)
-		h.mu.Unlock()
 		if err := h.m.o.Store.SetInputState(q.ID, "sent"); err != nil {
 			h.logf("queue: %v", err)
 		}
 	}
 	if len(due) > 0 {
 		h.publish()
+	}
+}
+
+// unqueue takes input out of h's queue: where it was, and its images.
+func (h *Hosted) unqueue(input string) (int, []agent.Image) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	at := slices.IndexFunc(h.queue, func(x api.Queued) bool { return x.ID == input })
+	if at >= 0 {
+		h.queue = slices.Delete(h.queue, at, at+1)
+	}
+	images := h.qimages[input]
+	delete(h.qimages, input)
+	return at, images
+}
+
+// requeue puts q back where unqueue took it from, as it could not be written.
+func (h *Hosted) requeue(at int, q api.Queued, images []agent.Image) {
+	if at < 0 {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.queue = slices.Insert(h.queue, min(at, len(h.queue)), q)
+	if images != nil {
+		h.qimages[q.ID] = images
 	}
 }
 
@@ -399,13 +411,12 @@ func (m *Manager) Steer(ctx context.Context, id, input string) error {
 	if i < 0 {
 		return store.ErrNoInput
 	}
-	if err := h.write(ctx, queuedInput(id, q), h.queuedImages(q.ID)); err != nil {
+	// Out of the queue before it is written (releaseLocked).
+	at, images := h.unqueue(q.ID)
+	if err := h.write(ctx, queuedInput(id, q), images); err != nil {
+		h.requeue(at, q, images)
 		return err
 	}
-	// Out of the queue as soon as it is written (releaseLocked).
-	h.mu.Lock()
-	h.queue = slices.DeleteFunc(h.queue, func(x api.Queued) bool { return x.ID == input })
-	h.mu.Unlock()
 	h.publish()
 	return m.o.Store.SetInputState(q.ID, "sent")
 }

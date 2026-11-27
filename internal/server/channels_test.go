@@ -821,7 +821,9 @@ func TestChannelQuoteAndAll(t *testing.T) {
 		}
 	}
 	var page satori.BidiList[satori.Message]
-	l.wantSat(200, "web", "message.list", map[string]any{"channel_id": ch, "limit": 3}, &page)
+	// Not the last few alone: the first agent's answer to the line before, and its work, may
+	// come after it.
+	l.wantSat(200, "web", "message.list", map[string]any{"channel_id": ch, "limit": 20}, &page)
 	quotes := 0
 	for _, m := range page.Data {
 		if strings.HasPrefix(m.Content, `<quote id="`+sent[0].ID+`"/>@claude2 tell me more`) {

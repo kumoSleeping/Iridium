@@ -211,17 +211,18 @@ func TestChannelAtsAmongSeveral(t *testing.T) {
 	// Both agents were called, and say it back.
 	l.waitSaid("web", ch, "@claude ", fmt.Sprintf("ok: #%d: @全体成员 meeting", r.Seq))
 	l.waitSaid("web", ch, "@claude2 ", fmt.Sprintf("ok: #%d: @全体成员 meeting", r.Seq))
+	// They say it back to each other till the channel pauses them: still only once both are idle,
+	// nothing more is said, and she has read it all (a mark noted after she read that far is not
+	// kept), a while.
+	end := int64(-1)
 	for quiet := 0; quiet < 5; time.Sleep(50 * time.Millisecond) {
 		var s1, s2 api.SessionState
 		l.want(200, "web", "GET", "/v1/internal/sessions/"+ch, nil, &s1)
 		l.want(200, "web", "GET", "/v1/internal/sessions/"+second, nil, &s2)
-		if mark().Seq != 0 {
-			l.asLogin(bot.Token, "ann", "POST", "/v1/internal/channels/"+ch+"/read", api.Read{Seq: 1 << 40}, nil)
-			quiet = 0
-			continue
-		}
-		if s1.Status != api.StatusIdle || s2.Status != api.StatusIdle {
-			quiet = 0
+		had := mark().Seq != 0
+		l.asLogin(bot.Token, "ann", "POST", "/v1/internal/channels/"+ch+"/read", api.Read{Seq: 1 << 40}, nil)
+		if e := l.s.ch.End(ch); had || e != end || s1.Status != api.StatusIdle || s2.Status != api.StatusIdle {
+			end, quiet = e, 0
 			continue
 		}
 		quiet++

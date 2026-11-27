@@ -48,6 +48,9 @@ func testSecretsStayThere(t *testing.T, kind string) {
 		t.Fatal(err)
 	}
 	waitFor(t, "output", func() bool { return strings.Contains(readOut(dir), "\n") })
+	// Its end too: the relay writes the exit file as it comes, else after the test (and into its
+	// temp dir as that is removed).
+	waitFor(t, "exit", func() bool { e, _ := hold.ReadExit(dir); return e != nil })
 	if got, want := readOut(dir), "k="+value+" s=s9 o=unset i=\n"; got != want {
 		t.Fatalf("out.log %q, want %q", got, want)
 	}

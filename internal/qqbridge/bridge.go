@@ -362,11 +362,15 @@ func (b *Bridge) chat(openid string) *ChatState {
 
 // flush sends what waited for the owner's next message.
 func (b *Bridge) flush(ctx context.Context, openid string) {
+	// Under sendMu: a send that found no quota as this message came puts what it had among the
+	// waiting before it is taken, not just after (where it waited for the message after this).
+	b.sendMu.Lock()
 	b.mu.Lock()
 	cs := b.chat(openid)
 	w := cs.Waiting
 	cs.Waiting = nil
 	b.mu.Unlock()
+	b.sendMu.Unlock()
 	if len(w) == 0 {
 		return
 	}

@@ -173,11 +173,14 @@ type ChannelAt struct {
 }
 
 // AddChannelAt notes that message seq of channel names reader, unless an earlier one that it
-// has not read is noted already; one that named everyone gives way to one that names the reader.
+// has not read is noted already, or it has read that far (an agent's words are noted a moment
+// after they are in the channel, and may have been read by then); one that named everyone gives
+// way to one that names the reader.
 func (s *Store) AddChannelAt(channel, reader string, seq int64, everyone bool) error {
-	_, err := s.db.Exec(`INSERT INTO channel_ats (channel, reader, seq, everyone) VALUES (?, ?, ?, ?)
+	_, err := s.db.Exec(`INSERT INTO channel_ats (channel, reader, seq, everyone)
+		SELECT ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM channel_reads WHERE channel = ? AND reader = ? AND seq >= ?)
 		ON CONFLICT (channel, reader) DO UPDATE SET everyone = 0 WHERE channel_ats.everyone = 1 AND excluded.everyone = 0`,
-		channel, reader, seq, everyone)
+		channel, reader, seq, everyone, channel, reader, seq)
 	return err
 }
 

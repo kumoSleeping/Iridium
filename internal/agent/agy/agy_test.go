@@ -146,6 +146,33 @@ func (r *rig) open(mode string) {
 	if err := r.d.waitReady(context.Background()); err != nil {
 		r.t.Fatal(err)
 	}
+	r.opened()
+}
+
+// opened waits till the opening's events are delivered: ready is closed before its goroutine
+// delivers Started and Hello, and what Send queues meanwhile is left to that goroutine, so a
+// take right after a send would find nothing yet (TestNoEcho on a loaded CI box).
+func (r *rig) opened() {
+	r.t.Helper()
+	for end := time.Now().Add(3 * time.Second); ; {
+		r.d.mu.Lock()
+		done := !r.d.draining && len(r.d.queue) == 0
+		r.d.mu.Unlock()
+		if done && len(find[agent.Hello](r.peek())) > 0 {
+			return
+		}
+		if time.Now().After(end) {
+			r.t.Fatal("the opening's events were not delivered")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// peek is the events so far, kept.
+func (r *rig) peek() []agent.Event {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.evs)
 }
 
 func cmpOr(a, b string) string {
@@ -601,6 +628,7 @@ func TestSignedOut(t *testing.T) {
 	if err := r.d.waitReady(context.Background()); err == nil {
 		t.Fatal("open went well")
 	}
+	r.opened()
 	if g := find[agent.GiveUp](r.take()); len(g) != 1 || g[0].Why != ErrSignedOut.Error() {
 		t.Errorf("GiveUp %v", g)
 	}
@@ -693,6 +721,18 @@ func TestDefaultModel(t *testing.T) {
 	if p := c["params"].(map[string]any); p["configId"] != "model" || p["value"] != DefaultModel {
 		t.Fatalf("set_config_option %v", p)
 	}
+	// The rest answered: else the opening goroutine waits on, and logs after the test ends.
+	r.answer(c, config(DefaultModel, "medium", "default"))
+	for {
+		select {
+		case m := <-r.out:
+			r.answer(m, config(DefaultModel, "medium", "default"))
+			continue
+		case <-r.d.ready:
+		}
+		break
+	}
+	r.opened()
 }
 
 // A message sent while a process taken up is still being fed again: the end of a turn fed again

@@ -82,8 +82,6 @@ describe("warmTo", () => {
     vi.unstubAllGlobals();
     for (const id of ["w1", "w2", "v1", "v2"]) setCarried(`session:${id}`, null);
   });
-  // A first screen looks for this device's copy first (its code loaded the first time).
-  const settle = () => new Promise((r) => setTimeout(r, 150));
 
   test("a state the stream brought meanwhile is not put over; one asked for again only as it is not there", async () => {
     let answer: () => void = () => {};
@@ -112,7 +110,9 @@ describe("warmTo", () => {
   });
   test("one not wanted goes; one visited is kept, and asks for the page before as you scroll", async () => {
     warmTo(new Map([["v1", 1], ["v2", 1]]));
-    await settle();
+    // Its first screen in: a fixed wait was too short on a loaded box (the device code loads
+    // first, 200ms and more there).
+    await vi.waitFor(() => expect(peekChat("v1")?.log.loaded).toBe(true), { timeout: 3000 });
     const it = peekChat("v1");
     expect(chatOf("v1")).toBe(it);
     warmTo(new Map([["v1", 1]]));
