@@ -3220,21 +3220,25 @@ func (a *answers) add(session string, do func()) {
 	}
 }
 
+// run does what is queued for session's agent, in order, until none is left. The queue is gone
+// as the last is done, under the same lock: an add that finds none starts the next run, and is
+// never taken by this one too (it let go of an emptied queue before it left once; the add between
+// started a second run, both did the same one, and the second sliced an empty queue: a panic).
 func (a *answers) run(session string) {
 	defer a.wg.Done()
 	for {
 		a.mu.Lock()
-		q := a.of[session]
-		if len(q) == 0 {
+		do := a.of[session][0]
+		a.mu.Unlock()
+		do()
+		a.mu.Lock()
+		rest := a.of[session][1:]
+		if len(rest) == 0 {
 			delete(a.of, session)
 			a.mu.Unlock()
 			return
 		}
-		do := q[0]
-		a.mu.Unlock()
-		do()
-		a.mu.Lock()
-		a.of[session] = a.of[session][1:]
+		a.of[session] = rest
 		a.mu.Unlock()
 	}
 }
