@@ -18,6 +18,7 @@ import (
 	hdsh "github.com/kumoSleeping/iridium/internal/harness/dsh"
 	"github.com/kumoSleeping/iridium/internal/remote"
 	"github.com/kumoSleeping/iridium/internal/remote/wire"
+	"github.com/kumoSleeping/iridium/internal/testagent"
 )
 
 // The real dsh plugin (test/run.mjs) speaking dsh.inproc, desktop.* and session.attach: models
@@ -55,7 +56,7 @@ func TestInprocPlugin(t *testing.T) {
 	put("models.json", `{"default":"p/m","models":[{"value":"p/m","name":"Model M","efforts":["low","high"]},{"value":"p/n","name":"Model N"}]}`)
 	put("workspaces.json", `{"workspaces":[{"id":"ws1","title":"IR","path":"/work/ir","sessions":["`+id+`"]}]}`)
 	agents, _ := json.Marshal([]wire.AgentInfo{{Agent: "dsh", Argv: []string{"@dsh-desktop"}, Version: "0.2.2-rc.5", Home: filepath.Join(there, ".dsh")}})
-	cmd := exec.Command("node", "../../plugins/dsh-remote-iridium/test/run.mjs", "ws"+strings.TrimPrefix(srv.URL, "http"), "tok", filepath.Join(there, "executor"))
+	cmd := exec.Command("node", filepath.Join(testagent.DSHPlugin(t), "test", "run.mjs"), "ws"+strings.TrimPrefix(srv.URL, "http"), "tok", filepath.Join(there, "executor"))
 	cmd.Env = append(os.Environ(), "IRIDIUM_TEST_AGENTS="+string(agents), "IRIDIUM_TEST_DSH="+desktop, `IRIDIUM_TEST_INPROC=["/bin/true"]`)
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {

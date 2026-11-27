@@ -1,5 +1,0 @@
-- insert:
-    - id: remote-iridium
-      name: 'dsh-remote-iridium'
-      config:
-        url: ''

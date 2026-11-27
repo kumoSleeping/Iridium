@@ -39,6 +39,12 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      # The dsh plugin, its own repository since 2026-11-27: the executor some tests run against
+      # this side (internal/testagent DSHPlugin).
+      - uses: actions/checkout@v4
+        with:
+          repository: otae-1204/dsh-remote-iridium
+          path: .dsh-remote-iridium
       - uses: actions/setup-node@v4 # the node executor under test
         with:
           node-version: 24
@@ -64,6 +70,8 @@ jobs:
           GOOS=darwin GOARCH=arm64 go vet ./...
           GOOS=windows GOARCH=amd64 go vet ./...
       - name: test
+        env:
+          IRIDIUM_DSH_PLUGIN: ${{ github.workspace }}/.dsh-remote-iridium
         run: go test ./...
       - uses: actions/cache/save@v4
         if: inputs.save-cache && steps.cache.outputs.cache-hit != 'true'

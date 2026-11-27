@@ -15,7 +15,7 @@ Iridium 是一个纯 Go 写成的轻量服务（单个二进制，内嵌网页�
 - **角色卡与跨会话记忆**
   给 Agent 设好头像、背景、简介与行为设定（支持直接导入 DSH Desktop / OMD 的人格），存成可复用的**角色**。Agent 可以主动把重要结论写进持久记忆（`remember`），跨会话、跨频道随时检索（`recall`）。
 - **把别的电脑接进来**
-  其他 Mac、Linux 或 Windows 电脑跑一条 `ir join`（或装上 `dsh-remote-iridium` 插件），核对配对码就能接入。在这边就能直接开那台电脑上的 Agent、读写文件、跑命令（`ir sh`）或同步 DSH Desktop 工作区，各台机器的密钥留在当地。
+  其他 Mac、Linux 或 Windows 电脑跑一条 `ir join`（或装上 [`dsh-remote-iridium`](https://github.com/otae-1204/dsh-remote-iridium) 插件），核对配对码就能接入。在这边就能直接开那台电脑上的 Agent、读写文件、跑命令（`ir sh`）或同步 DSH Desktop 工作区，各台机器的密钥留在当地。
 - **安全的公网访问与凭据注入**
   默认只监听本机 `127.0.0.1:7810`。需要从外面连入时，`ir public` 一键配好 Cloudflare Tunnel 并开启 Passkey 登录，也支持为单个会话生成只读的公开分享链接。密码和 API Key 加密存在凭据库里，Agent 通过 `ir run` 带进命令，输出和聊天记录里自动打码。
 - **开放的 Satori 接口**

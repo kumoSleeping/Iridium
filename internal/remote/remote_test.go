@@ -20,6 +20,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/remote"
 	"github.com/kumoSleeping/iridium/internal/remote/executor"
 	"github.com/kumoSleeping/iridium/internal/remote/wire"
+	"github.com/kumoSleeping/iridium/internal/testagent"
 )
 
 // rig is a hub behind an HTTP server, and an executor connected to it.
@@ -53,8 +54,8 @@ func kinds(t *testing.T, test func(t *testing.T, kind string)) {
 func eachKind(t *testing.T, test func(t *testing.T, kind string)) {
 	for _, k := range []string{"go", "node"} {
 		t.Run(k, func(t *testing.T) {
-			if _, err := exec.LookPath("node"); k == "node" && err != nil {
-				t.Skip("no node")
+			if k == "node" {
+				testagent.DSHPlugin(t)
 			}
 			test(t, k)
 		})
@@ -99,7 +100,7 @@ func (r *rig) newHub() *remote.Hub {
 func (r *rig) startExecutor() {
 	url := "ws" + strings.TrimPrefix(r.srv.URL, "http") + "/v1/internal/exec"
 	if r.kind == "node" {
-		cmd := exec.Command("node", "../../plugins/dsh-remote-iridium/test/run.mjs", url, "tok", r.state)
+		cmd := exec.Command("node", filepath.Join(testagent.DSHPlugin(r.t), "test", "run.mjs"), url, "tok", r.state)
 		cmd.Stderr = testWriter{r.t}
 		if err := cmd.Start(); err != nil {
 			r.t.Fatal(err)

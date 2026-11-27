@@ -26,6 +26,7 @@ import (
 	"github.com/kumoSleeping/iridium/internal/remote"
 	"github.com/kumoSleeping/iridium/internal/remote/executor"
 	"github.com/kumoSleeping/iridium/internal/remote/wire"
+	"github.com/kumoSleeping/iridium/internal/testagent"
 	"github.com/kumoSleeping/iridium/internal/transcript"
 )
 
@@ -434,7 +435,7 @@ func TestRemotePresets(t *testing.T) {
 	os.WriteFile(filepath.Join(desktop, "presets.json"), []byte(presets), 0o600)
 	os.WriteFile(filepath.Join(desktop, "models.json"), []byte(`{"default":"openrouter/x/y","models":[{"value":"openrouter/x/y","name":"XY"}]}`), 0o600)
 	agents, _ := json.Marshal([]wire.AgentInfo{{Agent: "dsh", Argv: []string{"@dsh-desktop"}, Version: "0.2.2-rc.5", Home: filepath.Join(there, ".dsh")}})
-	cmd := exec.Command("node", "../../plugins/dsh-remote-iridium/test/run.mjs", "ws"+strings.TrimPrefix(srv.URL, "http"), "tok", filepath.Join(there, "executor"))
+	cmd := exec.Command("node", filepath.Join(testagent.DSHPlugin(t), "test", "run.mjs"), "ws"+strings.TrimPrefix(srv.URL, "http"), "tok", filepath.Join(there, "executor"))
 	cmd.Env = append(os.Environ(), "IRIDIUM_TEST_AGENTS="+string(agents), "IRIDIUM_TEST_DSH="+desktop, `IRIDIUM_TEST_INPROC=["/bin/true"]`)
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
