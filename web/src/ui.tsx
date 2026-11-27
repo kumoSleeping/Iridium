@@ -1,5 +1,6 @@
 // Shared pieces (from the style sample, web/sample): tooltips that also open on long-press, the
 // popover shell, icon keys, agent logos with their status lamp, terminal avatars, switches.
+import { PatternFace } from "./pattern";
 import { Dialog } from "@base-ui/react/dialog";
 import { Menu } from "@base-ui/react/menu";
 import { Popover } from "@base-ui/react/popover";
@@ -599,7 +600,7 @@ export const isHost = (member: string) => member === "local" || member.startsWit
 
 /** An app's or login's avatar (host: Iridium's mark), or its initial on a disc (tinted, when given a colour); an app
  *  carries its type's mark on the corner (type), or another mark (badge: a device, Monitor, Smartphone). */
-export function Avatar({ src, name, size = 20, type, badge, badgeSize, badgeLabel, tint, over, className, host }: { src?: string; name?: string; size?: number; type?: string; badge?: LucideIcon; badgeSize?: number; badgeLabel?: string; tint?: string; over?: ReactNode; className?: string; host?: boolean }) {
+export function Avatar({ src, name, size = 20, type, badge, badgeSize, badgeLabel, tint, over, className, host, pattern }: { src?: string; name?: string; size?: number; type?: string; badge?: LucideIcon; badgeSize?: number; badgeLabel?: string; tint?: string; over?: ReactNode; className?: string; host?: boolean; pattern?: string }) {
   const [broken, setBroken] = useState<string | null>(null);
   const typed = badge ? undefined : typeMark(type);
   const mark = badge ?? typed?.[0];
@@ -611,6 +612,9 @@ export function Avatar({ src, name, size = 20, type, badge, badgeSize, badgeLabe
         <IrMark size={size} className="text-ink" />
       ) : src && broken !== src ? (
         <img src={src} alt="" draggable={false} onError={() => setBroken(src)} className="size-full rounded-full object-cover" style={{ boxShadow: "inset 0 0 0 0.5px var(--edge)" }} />
+      ) : pattern ? (
+        // None of its own: a face made from the seed, not a letter (kumo, 2026-11-27).
+        <PatternFace seed={pattern} size={size} />
       ) : (
         <span
           className="grid size-full place-items-center rounded-full font-medium select-none"

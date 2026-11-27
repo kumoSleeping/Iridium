@@ -10,9 +10,10 @@ import { ApiError, api } from "./api/client";
 import { type Device, type Me } from "./api/types.gen";
 import { LOCAL_ME, useMe } from "./data";
 import { t } from "./i18n";
+import { FaceGlow } from "./glow";
 import { LocalMark } from "./me";
 import { errText, toast } from "./toast";
-import { AvatarKey, cn, FaceChangeOver, IconKey, Tip, tokens } from "./ui";
+import { Avatar, AvatarKey, cn, FaceChangeOver, IconKey, Tip, tokens } from "./ui";
 
 /** The devices a terminal may say it runs on, in the picker's order; none: no badge shown. */
 const DEVICES = ["computer", "laptop", "phone", "none"] as const satisfies readonly Device[];
@@ -60,8 +61,14 @@ export function Profile({ onPicture }: { onPicture: (url: string) => void }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(me.name);
   const file = useRef<HTMLInputElement>(null);
+  const glow = local ? <LocalMark size={20} /> : <Avatar src={me.avatar} name={name} size={20} pattern={me.id} />;
   return (
-    <div className="flex items-center gap-3 py-1">
+    <div className="flex flex-col">
+      {/* A band over it, the face blurred and spread across, as a member's card has (kumo,
+          2026-11-27); the face on its lower edge, ringed in the panel's ground. */}
+      <div className="relative -mx-3 -mt-2.5 h-16 shrink-0 overflow-hidden bg-fill-2">
+        <FaceGlow>{glow}</FaceGlow>
+      </div>
       <input
         ref={file}
         type="file"
@@ -73,22 +80,22 @@ export function Profile({ onPicture }: { onPicture: (url: string) => void }) {
           e.target.value = "";
         }}
       />
-      {/* The face: a press changes it (本机 has none to change). On its corner the device it runs
-          on, a key of its own: a press goes on to the next (the user, 2026-11-08). A grid, not
-          inline: the face and its box one circle, no line's descent under it. */}
-      <span className="relative grid shrink-0">
+      {/* The face: a press changes it. On its corner the device it runs on, a key of its own: a
+          press goes on to the next (the user, 2026-11-08). */}
+      <span className={cn("relative -mt-8 grid shrink-0 self-start bg-paper p-[3px] shadow-[0_1px_3px_var(--edge)]", local ? "rounded-[30%]" : "rounded-full")}>
         {local ? (
           <Tip label={t("me.avatar")}>
             <button type="button" aria-label={t("me.avatar")} onClick={() => file.current?.click()} className="group g-press relative grid shrink-0 rounded-full">
-              <LocalMark size={44} />
-              <FaceChangeOver size={44} />
+              <LocalMark size={52} />
+              <FaceChangeOver size={52} />
             </button>
           </Tip>
         ) : (
-          <AvatarKey label={t("me.avatar")} onClick={() => file.current?.click()} src={me.avatar} name={name} size={44} />
+          <AvatarKey label={t("me.avatar")} onClick={() => file.current?.click()} src={me.avatar} name={name} size={52} pattern={me.id} />
         )}
         <DeviceKey />
       </span>
+      <div className="flex items-center gap-3 py-1">
       {editing ? (
         <input
           autoFocus
@@ -118,6 +125,7 @@ export function Profile({ onPicture }: { onPicture: (url: string) => void }) {
           <PencilLine size={15} />
         </IconKey>
       )}
+      </div>
     </div>
   );
 }

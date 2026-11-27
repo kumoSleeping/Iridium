@@ -44,7 +44,7 @@ export function MeKey({ open, onOpen, dot, code, manage }: { open: boolean; onOp
       >
         {/* A grid, not inline: no line's descent under the face, which sits centred in the key. */}
         <span className="relative grid shrink-0">
-          {local ? <LocalMark size={32} /> : <Avatar src={me.avatar} name={name} size={32} />}
+          {local ? <LocalMark size={32} /> : <Avatar src={me.avatar} name={name} size={32} pattern={me.id} />}
           {dot && <span className="g-pop absolute -top-0.5 -right-0.5 size-2.5 rounded-full bg-err shadow-[0_0_0_1.5px_var(--paper)]" aria-hidden />}
         </span>
         <span className="min-w-0 truncate text-md text-ink">{name}</span>
