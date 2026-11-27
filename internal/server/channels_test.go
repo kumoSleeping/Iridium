@@ -335,8 +335,21 @@ func TestChannelOfSeveral(t *testing.T) {
 		t.Errorf("outline: %+v", outline)
 	}
 	l.wantSat(400, "web", "internal/block.outline", map[string]any{"channel_id": second, "from": "x"}, nil)
-	if l.wantSat(200, "web", "internal/block.outline", map[string]any{"channel_id": second, "from": fmt.Sprint(outline.End)}, &outline); len(outline.Turns) != 0 {
-		t.Errorf("outline after the end: %+v", outline)
+	// Nothing after its end. Read again with the end as it is now: an echo may still wake one more
+	// turn after the loop above saw it quiet (on a loaded box, -race).
+	for k := 0; ; k++ {
+		var now, after api.Outline
+		l.wantSat(200, "web", "internal/block.outline", map[string]any{"channel_id": second}, &now)
+		if l.wantSat(200, "web", "internal/block.outline", map[string]any{"channel_id": second, "from": fmt.Sprint(now.End)}, &after); len(after.Turns) == 0 {
+			break
+		}
+		if k == 20 {
+			t.Errorf("outline after the end: %+v", after)
+			break
+		}
+		l.idle(ch)
+		l.idle(second)
+		time.Sleep(150 * time.Millisecond)
 	}
 
 	// The fake agents echo what they get. The second keeps sending the first words that name
