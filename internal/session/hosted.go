@@ -544,9 +544,25 @@ func (h *Hosted) loop(proc int, outStart, replay int64) {
 		}
 		saved, savedAt = time.Now(), off
 	}
+	// Caught up with what an earlier daemon saw: a message sent meanwhile, queued behind the turn
+	// the replay had running, goes now if that turn ended (a replayed end releases nothing).
+	caught := replay <= outStart
 	var looked, read time.Time
 	for {
 		n := feed()
+		if !caught && tail.Offset() >= replay {
+			caught = true
+			h.mu.Lock()
+			idle := h.live && h.turn == agent.Idle
+			h.mu.Unlock()
+			if idle {
+				go func() {
+					ctx, cancel := context.WithTimeout(h.m.ctx, time.Minute)
+					defer cancel()
+					h.release(ctx, false)
+				}()
+			}
+		}
 		if time.Since(read) > h.m.o.ReadEvery {
 			h.readTranscript()
 			read = time.Now()
