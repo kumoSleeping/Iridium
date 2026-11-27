@@ -3,6 +3,7 @@ package assemble
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kumoSleeping/iridium/internal/activity"
 	"github.com/kumoSleeping/iridium/internal/ctx/strategy"
@@ -129,6 +130,39 @@ func TestChannelReaction(t *testing.T) {
 	alone, _ := Reacted(Reaction{Seq: 2, Who: "kumo", Emoji: "🎉", Text: "done"})
 	if alone.String() != "#2 [kumo reacted 🎉 to: done]" {
 		t.Errorf("alone: %q", alone.String())
+	}
+}
+
+func TestChannelOverhear(t *testing.T) {
+	at := time.Date(2026, 1, 1, 1, 2, 0, 0, time.UTC).UnixMilli()
+	in, err := ChannelOverhear(Overhear{Channel: "ch-1", Seq: 12, Who: "kumo", At: at, Text: "hover also", Pull: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := in.String()
+	for _, want := range []string{"<channel-overhear>", "did not @ you", "internal/sessions/self/interrupt", "#12 [kumo · 01-01 01:02]: hover also", "</channel-overhear>"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+
+	// Long message clipped to OverhearCut with message.get pointer.
+	long := strings.Repeat("a", OverhearCut+25)
+	in, err = ChannelOverhear(Overhear{Channel: "ch-1", Seq: 13, Who: "kumo", At: at, Text: long, Pull: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := in.String(); !strings.Contains(got, "[…25 more characters: ir api message.get channel_id=ch-1 message_id=13]") {
+		t.Errorf("clipped overhear: %q", got)
+	}
+
+	// Bare agent (no ir): no interrupt/message.get hint, ellipsis on clip.
+	in, err = ChannelOverhear(Overhear{Channel: "", Seq: 14, Who: "kumo", At: at, Text: long, Pull: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := in.String(); strings.Contains(got, "ir api") || !strings.Contains(got, "…\n</channel-overhear>") {
+		t.Errorf("bare overhear: %q", got)
 	}
 }
 

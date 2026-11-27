@@ -381,10 +381,16 @@ var (
 	space   = regexp.MustCompile(`\s+`)
 )
 
+func isOverhearBlock(b api.Block) bool {
+	return b.Kind == api.BlockKindUser && strings.HasPrefix(strings.TrimSpace(b.Text), "<channel-overhear>")
+}
+
 // LastSaid is the last thing you or the agent said, on one line, Markdown's marks for headings,
 // bold, code and links taken off; nil if nothing was said.
 func (f *File) LastSaid() (*api.LastSaid, error) {
-	b, err := f.walk(true, func(b api.Block) bool { return b.Kind == api.BlockKindUser || b.Kind == api.BlockKindAssistant })
+	b, err := f.walk(true, func(b api.Block) bool {
+		return (b.Kind == api.BlockKindUser && !isOverhearBlock(b)) || b.Kind == api.BlockKindAssistant
+	})
 	if b == nil || err != nil {
 		return nil, err
 	}
@@ -408,7 +414,7 @@ func (f *File) Title() (string, error) {
 	if (f.dsh || f.own) && (err != nil || t != "") {
 		return cut(oneLine(t), TitleLen), err
 	}
-	b, err := f.walk(false, func(b api.Block) bool { return b.Kind == api.BlockKindUser })
+	b, err := f.walk(false, func(b api.Block) bool { return b.Kind == api.BlockKindUser && !isOverhearBlock(b) })
 	if b == nil || err != nil {
 		return "", err
 	}
