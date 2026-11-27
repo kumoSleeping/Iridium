@@ -1030,5 +1030,13 @@ export const en: Dict = {
   "manage.idle": "Stop when idle",
   "manage.computerCount": "{n} computers",
   "manage.approval": "Approval",
+  "manage.members": "Members",
+  "manage.roleCount": "Roles {n}",
+  "manage.inviteMember": "Invite a member",
+  "manage.pairApp": "Pair an app",
+  "manage.stopPairing": "Stop pairing",
+  "manage.addComputer": "Add a computer",
+  "manage.newSecret": "New credential",
+  "manage.open": "Manage",
   "manage.default": "Default",
 };

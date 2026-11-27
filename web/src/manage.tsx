@@ -1,21 +1,22 @@
-// 管理 (kumo, 2026-11-27): 应用管理, 角色 and 凭据 in one window over the page, drawn as the usage
-// is (usage.tsx): its parts as words on the title's line (账号 · 应用 · 电脑 · Agent · 角色 · 凭据),
-// on a narrow window a line of their own under it. Each part is two halves: its list on the left,
-// the one chosen on the right; nothing opens a level deeper but a page of the right half
-// (通行密钥, GitHub, a login of an app), which keeps the list where it is. A narrow window shows
-// one half at a time, the chosen one sliding in with its way back. 新建 is one key at the foot's
-// right, the same place everywhere: what it makes is a row at the top of the list till it is made.
-// Changed is saved at once: an agent's dot pressed, a folder added, an approval mode chosen.
+// 管理 (kumo, 2026-11-27): one window over the page, drawn as the usage is (usage.tsx). No parts
+// along its top (kumo: too many): one list at the left in three groups, 成员 (web logins, apps,
+// unused invites), 电脑 (Iridium first) and Agent; the one chosen at the right. What belongs to one
+// of them is in its detail: an agent's roles under it, the credentials and the idle stop under
+// Iridium. A page of the right half (通行密钥, GitHub, a role, 凭据) keeps the list where it is; a
+// narrow window shows one half at a time, the chosen one sliding in with its way back. 新建 is one
+// key at the foot's right: a menu of what may be made, which comes as a row at the top of its group
+// till it is made. Changed is saved at once.
 import { Dialog } from "@base-ui/react/dialog";
+import { Menu } from "@base-ui/react/menu";
 import { useQueryClient } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, FolderOpen, Link2, LoaderCircle, Monitor, PencilLine, Plus, Trash2, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, FolderOpen, KeyRound, Link2, LoaderCircle, Monitor, PencilLine, Plus, UserPlus, Waypoints, X, Trash2, Bot } from "lucide-react";
 import { useLayoutEffect, useState, type ReactNode } from "react";
 import { api } from "./api/client";
 import type { Agent, App, Computer, Login, Perms, PendingInvite, Role } from "./api/types.gen";
 import { AddComputer, clock, deviceBadge, nameError, ofWeb, OpenFolder, PasskeysPage, Rename, revoke, setOwner, systems, useFacePick, useGrant } from "./apps";
 import { MainKey, SecondKey } from "./card";
 import { ConfirmCard, saysOwner } from "./confirms";
-import { SecretsPane } from "./credentials";
+import { SecretsPane, secretsQ } from "./credentials";
 import { isComputer, manages as managesApps, useAgents, useApps, useMe, useSettings } from "./data";
 import { Bind, Bound, GitHubMark } from "./github";
 import { t, useLang } from "./i18n";
@@ -23,28 +24,19 @@ import { modeName } from "./modes";
 import { Pills } from "./pills";
 import { RoleFace, RoleLine, useRoles } from "./roles";
 import { NewRolePage, placeOf, RolePage } from "./rolespage";
-import { MANAGE_TABS, needTab, openManage, type ManageTab } from "./route";
+import { type ManageTab } from "./route";
 import { SecretHere } from "./secret";
 import { showSecret } from "./secrets";
+import { MenuItems } from "./sidebar";
 import { useConfirms, usePairing } from "./store";
 import { errText, toast } from "./toast";
-import { agentName, ago, Avatar, AvatarKey, cn, FaceChangeOver, IconKey, Logo, ServerFace, SureKey, Switch, Tip } from "./ui";
+import { agentName, ago, Avatar, AvatarKey, cn, FaceChangeOver, IconKey, Logo, MenuPortal, ServerFace, SureKey, Switch, Tip } from "./ui";
 import { useQuery } from "./api/query";
 
 /** Where a secret made here (an invite's link) shows. */
 const HERE = "manage";
-/** The row being made, at the top of a list. */
-const NEW = "\u0000new";
 /** Two halves from this width of the window on (the usage's). */
 const WIDE = 640;
-const TAB_KEY: Record<ManageTab, Parameters<typeof t>[0]> = {
-  accounts: "manage.accounts",
-  apps: "manage.apps",
-  computers: "manage.computers",
-  agents: "manage.agents",
-  roles: "manage.roles",
-  secrets: "manage.secrets",
-};
 
 function useWide() {
   const [el, setEl] = useState<HTMLDivElement | null>(null);
@@ -59,148 +51,226 @@ function useWide() {
   return [setEl, wide] as const;
 }
 
-/** The parts one may see: the accounts, apps and computers those who manage; the credentials the
- *  host; the agents and roles everyone. */
-function useTabs(): ManageTab[] {
+/** What is chosen: a row of the list ("l:" a login, "i:" an invite, "p:" an app, "c:" a computer,
+ *  "a:" an agent), a page under one ("r:" a role, SECRETS), or a row being made (NEW_*). */
+const SECRETS = "secrets";
+const NEW_INVITE = "new:invite";
+const NEW_COMPUTER = "new:computer";
+const NEW_ROLE = "new:role";
+
+export function ManagePage({ tab }: { tab: ManageTab }) {
+  useLang();
+  const [root, wide] = useWide();
+  const q = useApps();
+  const data = q.data;
   const me = useMe().data;
   const manages = managesApps(me);
-  return MANAGE_TABS.filter((x) => (x === "accounts" || x === "apps" || x === "computers" ? manages : x === "secrets" ? !!me?.host : true));
-}
+  const infos = (useAgents().data ?? []).filter((x) => !x.missing);
+  const roles = useRoles();
+  const pairing = !!usePairing()?.open;
+  const all = useComputers();
+  const computers = manages ? all : [];
+  const host = computers.find((a) => a.host);
+  const logins = manages ? (data?.logins ?? []).filter(ofWeb) : [];
+  const apps = manages ? (data?.apps ?? []).filter((a) => !isComputer(a) && !a.web && !a.host) : [];
+  const invites = manages ? (data?.invites ?? []) : [];
+  const appLogins = (id: string) => (data?.logins ?? []).filter((l) => l.app === id);
+  // The row a part of the old routes (#/settings/apps …, a need's) stands for.
+  const firstOf = (x: ManageTab): string => {
+    const mine = logins.find((l) => l.id === me?.login) ?? logins[0];
+    if (x === "apps" && apps[0]) return `p:${apps[0].id}`;
+    if (x === "computers" && host) return `c:${host.id}`;
+    if (x === "secrets" && me?.host) return SECRETS;
+    if ((x === "agents" || x === "roles" || !mine) && infos[0]) return `a:${infos[0].agent}`;
+    return mine ? `l:${mine.id}` : "";
+  };
+  // Nothing chosen yet: the row the route stands for, worked out as the data comes (an old route's
+  // part opens its row on a narrow window too, till the way back is taken).
+  const [sel, setSel] = useState("");
+  const [asked, setAsked] = useState(tab !== "accounts");
+  const [was, setWas] = useState(tab);
+  if (tab !== was) (setWas(tab), setSel(""), setAsked(true));
+  const at = sel || (wide || asked ? firstOf(tab) : "");
+  const [k, id] = at.startsWith("new:") || at === SECRETS ? [at, ""] : [at.slice(0, 1), at.slice(2)];
+  const login = k === "l" ? logins.find((l) => l.id === id) : undefined;
+  const invite = k === "i" ? invites.find((i) => i.id === id) : undefined;
+  const app = k === "p" ? apps.find((a) => a.id === id) : undefined;
+  const computer = k === "c" ? computers.find((a) => a.id === id) : undefined;
+  const agent = k === "a" ? infos.find((x) => x.agent === id)?.agent : undefined;
+  const role = k === "r" ? roles.find((r) => r.id === id) : undefined;
+  // One removed (here or elsewhere): back to none chosen.
+  if (sel && data && !sel.startsWith("new:") && sel !== SECRETS && !login && !invite && !app && !computer && !agent && !role) setSel("");
+  // The row lit for what is chosen: a page's, its owner's.
+  const lit = role ? `a:${role.agent}` : at === SECRETS && host ? `c:${host.id}` : at;
+  const back = () => (setSel(role ? `a:${role.agent}` : at === SECRETS && host && wide ? `c:${host.id}` : ""), !wide && !role && setAsked(false));
 
-export function ManagePage({ tab: asked }: { tab: ManageTab }) {
-  useLang();
-  const tabs = useTabs();
-  const tab = tabs.includes(asked) ? asked : (tabs[0] ?? "roles");
-  const [root, wide] = useWide();
-  const busy = useApps().isFetching;
-  const parts = <Tabs tabs={tabs} value={tab} onChange={(x) => openManage(x)} />;
+  const list = (
+    <>
+      {manages && (
+        <Group title={t("manage.members")}>
+          {at === NEW_INVITE && <Row face={<Pending />} name={t("manage.newInvite")} line={t("manage.notMade")} on onClick={() => {}} />}
+          {logins.map((l) => (
+            <Row key={l.id} face={<Avatar src={l.avatar} name={l.name} size={24} {...deviceBadge(l.device)} />} name={l.name} line={<><Seen online={l.online} at={l.lastSeenAt || l.createdAt || 0} />{!l.approvedAt && <span>{t("apps.pending")}</span>}</>} on={lit === `l:${l.id}`} onClick={() => setSel(`l:${l.id}`)} />
+          ))}
+          {apps.map((a) => {
+            const n = appLogins(a.id).length;
+            return <Row key={a.id} face={<Avatar src={a.avatar} name={a.name} size={24} type={a.type} />} name={a.name} line={n > 1 ? t("apps.loginCount", { n }) : <Seen online={a.online} at={a.lastSeenAt || a.createdAt || 0} />} on={lit === `p:${a.id}`} onClick={() => setSel(`p:${a.id}`)} />;
+          })}
+          {invites.map((i) => (
+            <Row key={i.id} face={<Pending />} name={i.setup ? t("term.setup") : i.name || t("manage.unusedInvite")} faint line={i.expiresAt ? t("term.until", { time: clock(i.expiresAt) }) : undefined} on={lit === `i:${i.id}`} onClick={() => setSel(`i:${i.id}`)} />
+          ))}
+        </Group>
+      )}
+      {(computers.length > 0 || at === NEW_COMPUTER) && (
+        <Group title={t("manage.computers")}>
+          {at === NEW_COMPUTER && <Row face={<Draft />} name={t("manage.newComputer")} line={t("manage.waitJoin")} on onClick={() => {}} />}
+          {computers.map((a) => (
+            <Row key={a.id} face={<ComputerFace a={a} size={24} />} name={a.host ? "Iridium" : a.name} line={<>{!a.host && <Seen online={a.online} at={Math.max(a.computer?.seenAt ?? 0, a.lastSeenAt ?? 0) || a.createdAt || 0} />}<span>{osName(a.computer)}</span></>} on={lit === `c:${a.id}`} onClick={() => setSel(`c:${a.id}`)} />
+          ))}
+        </Group>
+      )}
+      <Group title={t("manage.agents")}>
+        {at === NEW_ROLE && <Row face={<Draft />} name={t("role.new")} on onClick={() => {}} />}
+        {infos.map((x) => {
+          const n = roles.filter((r) => r.agent === x.agent).length;
+          return <Row key={x.agent} face={<AgentFace a={x.agent} size={24} />} name={agentName(x.agent)} line={n ? t("manage.roleCount", { n }) : undefined} on={lit === `a:${x.agent}`} onClick={() => setSel(`a:${x.agent}`)} />;
+        })}
+      </Group>
+    </>
+  );
+
+  const detail =
+    at === NEW_INVITE ? (
+      <NewInvite done={(made) => setSel(made ? `i:${made}` : "")} />
+    ) : at === NEW_COMPUTER ? (
+      <div className="-mx-3">
+        <AddComputer onBack={() => setSel("")} />
+      </div>
+    ) : at === NEW_ROLE ? (
+      <div className="-mx-3">
+        <NewRolePage made={(r: Role) => setSel(`r:${r.id}`)} />
+      </div>
+    ) : at === SECRETS ? (
+      <SecretsSub onBack={back} />
+    ) : login ? (
+      <LoginDetail key={login.id} l={login} />
+    ) : invite ? (
+      <InviteDetail key={invite.id} i={invite} gone={() => setSel("")} />
+    ) : app ? (
+      <AppDetail key={app.id} a={app} logins={appLogins(app.id)} />
+    ) : computer ? (
+      <ComputerDetail key={computer.id} a={computer} open={setSel} />
+    ) : agent ? (
+      <AgentDetail key={agent} a={agent} computers={computers} open={setSel} />
+    ) : role ? (
+      <Sub title={role.name} tag={agentName(role.agent)} onBack={back}>
+        <div className="-mx-3">
+          <RolePage key={role.id} role={role} />
+        </div>
+      </Sub>
+    ) : null;
+
+  const makes = [
+    manages && me?.public && { icon: <UserPlus size={15} />, label: t("manage.inviteMember"), run: () => setSel(NEW_INVITE) },
+    manages && { icon: <Waypoints size={15} />, label: pairing ? t("manage.stopPairing") : t("manage.pairApp"), run: () => void api.pairing(!pairing).catch((e) => toast(t("apps.pairing"), { error: true, description: errText(e) })) },
+    manages && { icon: <Monitor size={15} />, label: t("manage.addComputer"), run: () => setSel(NEW_COMPUTER) },
+    { icon: <Bot size={15} />, label: t("role.new"), run: () => setSel(NEW_ROLE) },
+    me?.host && { icon: <KeyRound size={15} />, label: t("manage.newSecret"), run: () => setSel(SECRETS) },
+  ].filter((x) => !!x);
+  const add = !at.startsWith("new:") && <AddMenu items={makes} pairing={pairing} />;
+  const needs = <Needs skip={at === SECRETS} />;
+
   return (
     <div ref={root} className="relative flex min-h-0 flex-1 flex-col">
       <header className="flex h-12 shrink-0 items-center gap-1 px-3 pointer-coarse:h-13">
         <Dialog.Title className="m-0 min-w-0 flex-1 truncate text-sm font-semibold">{t("manage.title")}</Dialog.Title>
-        {busy && <span className="g-fade mr-1.5 grid [animation-delay:200ms]"><LoaderCircle size={14} className="animate-spin text-ink-4" /></span>}
-        {wide && <div className="mr-2">{parts}</div>}
+        {q.isFetching && <span className="g-fade mr-1.5 grid [animation-delay:200ms]"><LoaderCircle size={14} className="animate-spin text-ink-4" /></span>}
         <Dialog.Close render={<IconKey label={t("nav.close")} className="-mr-1" />}>
           <X size={17} />
         </Dialog.Close>
       </header>
-      {!wide && <div className="no-bar flex h-9 shrink-0 items-center overflow-x-auto px-3">{parts}</div>}
-      <Part key={tab} tab={tab} wide={wide} />
-    </div>
-  );
-}
-
-/** The parts, as the usage's days: words, the chosen one on a soft pill that slides to it. */
-function Tabs({ tabs, value, onChange }: { tabs: ManageTab[]; value: ManageTab; onChange: (x: ManageTab) => void }) {
-  const at = Math.max(0, tabs.indexOf(value));
-  return (
-    <div role="tablist" aria-label={t("manage.title")} className="relative -ml-1 grid shrink-0" style={{ gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))` }}>
-      <span aria-hidden className="absolute inset-y-0 left-0 rounded-full bg-fill transition-transform duration-(--dur-3) ease-(--ease-out)" style={{ width: `${100 / tabs.length}%`, transform: `translateX(${at * 100}%)` }} />
-      {tabs.map((x) => (
-        <button
-          key={x}
-          type="button"
-          role="tab"
-          aria-selected={x === value}
-          onClick={() => onChange(x)}
-          className={cn("g-press relative h-7 px-3 text-xs whitespace-nowrap transition-colors duration-(--dur-2) pointer-coarse:h-9", x === value ? "font-medium text-ink" : "text-ink-3 hover:text-ink")}
-        >
-          {t(TAB_KEY[x])}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function Part({ tab, wide }: { tab: ManageTab; wide: boolean }) {
-  switch (tab) {
-    case "accounts":
-      return <Accounts wide={wide} />;
-    case "apps":
-      return <Apps wide={wide} />;
-    case "computers":
-      return <Computers wide={wide} />;
-    case "agents":
-      return <Agents wide={wide} />;
-    case "roles":
-      return <Roles wide={wide} />;
-    case "secrets":
-      return <Secrets />;
-  }
-}
-
-// --- the frame of a part ---
-
-/** A part's two halves. sel: the row chosen ("" none); on a wide window the first is chosen till
- *  another is. detail: the right half for it; foot: under the list (the agents' settings); add:
- *  the 新建 key's, or its own key. */
-function Split({ wide, sel, first, onBack, list, detail, foot, add, needs }: { wide: boolean; sel: string; first?: string; onBack: () => void; list: ReactNode; detail: ReactNode; foot?: ReactNode; add?: ReactNode; needs?: ReactNode }) {
-  const open = !!sel || (wide && !!first);
-  if (wide)
-    return (
-      <>
+      {wide ? (
         <div className="grid min-h-0 flex-1 grid-cols-[16rem_minmax(0,1fr)] gap-4">
-          <div className="no-bar flex min-h-0 flex-col overflow-y-auto pt-1 pb-20 pl-2">
-            <div className="flex flex-col">{list}</div>
-            {foot && <div className="mx-2 mt-3 flex flex-col border-t border-edge pt-2">{foot}</div>}
-          </div>
+          <div className="no-bar flex min-h-0 flex-col overflow-y-auto pb-20 pl-3">{list}</div>
           <div className="no-bar min-h-0 overflow-y-auto pt-1 pr-5 pb-20">
             {needs}
-            {open && detail}
+            {detail}
           </div>
         </div>
-        {add}
-      </>
-    );
-  if (open)
-    return (
-      <div className="g-slide flex min-h-0 flex-1 flex-col">
-        <div className="flex h-9 shrink-0 items-center px-1.5">
-          <IconKey label={t("nav.back")} onClick={onBack} className="size-8">
-            <ChevronLeft size={17} />
-          </IconKey>
+      ) : at ? (
+        <div key={at} className="g-slide flex min-h-0 flex-1 flex-col">
+          {!role && at !== SECRETS && (
+            <div className="flex h-9 shrink-0 items-center px-1.5">
+              <IconKey label={t("nav.back")} onClick={() => (setSel(""), setAsked(false))} className="size-8">
+                <ChevronLeft size={17} />
+              </IconKey>
+            </div>
+          )}
+          <div className="no-bar min-h-0 flex-1 overflow-y-auto px-4 pb-6">{detail}</div>
         </div>
-        <div className="no-bar min-h-0 flex-1 overflow-y-auto px-4 pb-6">{detail}</div>
-      </div>
-    );
-  return (
-    <>
-      <div className="no-bar min-h-0 flex-1 overflow-y-auto px-1.5 pt-1 pb-20" data-dir="back">
-        {needs && <div className="px-1.5">{needs}</div>}
-        <div className="flex flex-col">{list}</div>
-        {foot && <div className="mx-1.5 mt-3 flex flex-col border-t border-edge pt-2">{foot}</div>}
-      </div>
+      ) : (
+        <div className="no-bar min-h-0 flex-1 overflow-y-auto px-3 pb-20" data-dir="back">
+          <div className="px-1">{needs}</div>
+          {list}
+        </div>
+      )}
       {add}
-    </>
+    </div>
   );
 }
 
-/** 新建, at the window's foot on the right. */
-function AddKey({ label = t("manage.new"), onClick, on, disabled }: { label?: string; onClick: () => void; on?: boolean; disabled?: boolean }) {
+/** A group of the list, its name small and faint over it (成列的对象 get a title). */
+function Group({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      aria-pressed={on}
-      className={cn("g-press absolute right-4 bottom-4 z-10 flex h-9 items-center gap-1.5 rounded-full px-4 text-sm font-medium shadow-(--shadow-float) disabled:opacity-40 pointer-coarse:h-11", on ? "bg-fill-2 text-ink" : "bg-ink text-on-ink")}
-    >
-      {!on && <Plus size={15} />}
-      {label}
-    </button>
+    <section className="flex flex-col pt-3">
+      <span className="px-2 pb-1 text-[11px] leading-4 text-ink-4">{title}</span>
+      {children}
+    </section>
   );
 }
 
-/** A row of a list: its face, name and line; chosen, on a soft ground. */
-function Row({ face, name, line, on, onClick, end }: { face: ReactNode; name: ReactNode; line?: ReactNode; on: boolean; onClick: () => void; end?: ReactNode }) {
+/** 新建, at the window's foot on the right: a menu of what may be made. Pairing open, it says so. */
+function AddMenu({ items, pairing }: { items: { icon: ReactNode; label: string; run: () => void }[]; pairing: boolean }) {
   return (
-    <button type="button" onClick={onClick} aria-current={on || undefined} className={cn("g-press flex min-h-13 w-full items-center gap-3 rounded-lg px-2 text-left", on ? "bg-fill" : "hover:bg-fill/60")}>
+    <Menu.Root>
+      <Menu.Trigger className="g-press absolute right-4 bottom-4 z-10 flex h-9 items-center gap-1.5 rounded-full bg-ink px-4 text-sm font-medium text-on-ink shadow-(--shadow-float) outline-none pointer-coarse:h-11">
+        <Plus size={15} />
+        {pairing ? t("manage.pairing") : t("manage.new")}
+      </Menu.Trigger>
+      <MenuPortal>
+        <Menu.Positioner side="top" align="end" sideOffset={8} collisionPadding={8} className="z-50">
+          <MenuItems items={items} />
+        </Menu.Positioner>
+      </MenuPortal>
+    </Menu.Root>
+  );
+}
+
+/** A row being made: a plus in a faint circle. */
+function Draft() {
+  return (
+    <span className="grid size-6 place-items-center rounded-full bg-fill text-ink-3">
+      <Plus size={13} />
+    </span>
+  );
+}
+
+function AgentFace({ a, size }: { a: Agent; size: number }) {
+  return (
+    <span className="grid place-items-center rounded-full bg-fill" style={{ width: size, height: size }}>
+      <Logo agent={a} size={Math.round(size / 2)} />
+    </span>
+  );
+}
+
+/** A row of the list, one line: its face and name, its state faint at the right; chosen, on a
+ *  soft ground. */
+function Row({ face, name, line, on, onClick, faint }: { face: ReactNode; name: ReactNode; line?: ReactNode; on: boolean; onClick: () => void; faint?: boolean }) {
+  return (
+    <button type="button" onClick={onClick} aria-current={on || undefined} className={cn("g-press flex h-10 w-full shrink-0 items-center gap-2.5 rounded-lg px-2 text-left pointer-coarse:h-12", on ? "bg-fill" : "hover:bg-fill/60")}>
       <span className="grid shrink-0 place-items-center">{face}</span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-medium">{name}</span>
-        {line && <span className="no-bar flex min-w-0 items-center gap-1.5 overflow-x-auto text-xs whitespace-nowrap text-ink-3 tabular-nums">{line}</span>}
-      </span>
-      {end}
+      <span className={cn("min-w-0 flex-1 truncate text-sm", faint && "text-ink-3")}>{name}</span>
+      {line && <span className="flex shrink-0 items-center gap-1.5 text-xs whitespace-nowrap text-ink-3 tabular-nums">{line}</span>}
     </button>
   );
 }
@@ -235,7 +305,7 @@ function Head({ face, name, figures, keys }: { face: ReactNode; name: ReactNode;
 function Field({ label, children, onClick }: { label: ReactNode; children: ReactNode; onClick?: () => void }) {
   const body = (
     <>
-      <span className="w-20 shrink-0 text-sm text-ink-3">{label}</span>
+      <span className="w-24 shrink-0 text-sm whitespace-nowrap text-ink-3">{label}</span>
       <span className="flex min-w-0 flex-1 items-center gap-2 text-sm">{children}</span>
       {onClick && <ChevronRight size={15} className="shrink-0 text-ink-4" />}
     </>
@@ -277,16 +347,36 @@ function Sub({ title, tag, onBack, right, children }: { title: string; tag?: str
   );
 }
 
-/** What waits for a person in a part: its needs (a pairing, a grant, a login's approval) as cards. */
-function Needs({ tab }: { tab: ManageTab }) {
-  const needs = useConfirms().filter((c) => needTab(c.kind) === tab);
+/** What waits for a person (a pairing, a grant, a login's approval) as cards; skip: the
+ *  credentials' own, shown in their page. */
+function Needs({ skip }: { skip?: boolean }) {
+  const needs = useConfirms().filter((c) => !(skip && c.kind.startsWith("secret_")));
   if (!needs.length) return null;
   return (
-    <div className="flex flex-col gap-2 pb-3">
+    <div className="flex flex-col gap-2 pt-2 pb-3">
       {needs.map((c) => (
         <ConfirmCard key={c.id} c={c} at="terminals" />
       ))}
     </div>
+  );
+}
+
+/** 凭据, a page under Iridium: its list, + adding one. */
+function SecretsSub({ onBack }: { onBack: () => void }) {
+  const [adding, setAdding] = useState(false);
+  return (
+    <Sub
+      title={t("manage.secrets")}
+      tag="Iridium"
+      onBack={onBack}
+      right={
+        <IconKey label={t("manage.newSecret")} onClick={() => setAdding(!adding)} className="size-7">
+          <Plus size={16} />
+        </IconKey>
+      }
+    >
+      <SecretsPane adding={adding} done={() => setAdding(false)} />
+    </Sub>
   );
 }
 
@@ -297,15 +387,15 @@ const AGENTS: Agent[] = ["claude", "codex", "dsh", "pi", "agy"];
 const ALL = "*";
 const permsOf = (p?: Perms): Perms => p ?? { agents: [ALL], scope: [ALL] };
 
-/** An agent as a key: its mark and name, a dot after them filled when it is on (the usage's). */
+/** An agent as a key: its mark and name, both faint when it is off (no dot after them: kumo,
+ *  2026-11-27). */
 function AgentDot({ a, on, onClick }: { a: string; on: boolean; onClick?: () => void }) {
   const body = (
     <>
-      <span className={cn("grid", !on && "opacity-40 grayscale")}>
+      <span className={cn("grid transition-[opacity,filter] duration-(--dur-2)", !on && "opacity-35 grayscale")}>
         <Logo agent={a as Agent} size={14} />
       </span>
-      <span className={on ? "text-ink" : "text-ink-3"}>{agentName(a as Agent)}</span>
-      <span aria-hidden className="block size-2 shrink-0 rounded-full" style={{ color: "var(--ink-2)", background: on ? "var(--ink-2)" : "transparent", boxShadow: "inset 0 0 0 1.5px currentColor" }} />
+      <span className={cn("transition-colors duration-(--dur-2)", on ? "text-ink" : "text-ink-4")}>{agentName(a as Agent)}</span>
     </>
   );
   return onClick ? (
@@ -368,7 +458,7 @@ function Access({ perms, save }: { perms?: Perms; save: (p: Perms) => Promise<Pe
         <span className="truncate">{allScope ? t("manage.all") : p.scope.length ? p.scope.join("、") : t("apps.scopeNone")}</span>
       </Field>
       {folders && (
-        <div className="g-fade flex flex-col gap-1 pb-2 pl-23">
+        <div className="g-fade flex flex-col gap-1 pb-2 pl-27">
           <div className="flex min-h-9 items-center gap-2">
             <span className="min-w-0 flex-1 text-sm">{t("apps.allScope")}</span>
             <Switch label={t("apps.allScope")} on={allScope} onChange={(on) => void put({ ...p, scope: on ? [ALL] : [] })} />
@@ -418,58 +508,13 @@ function Name({ id, name, fixed }: { id: string; name: string; fixed?: boolean }
   );
 }
 
-// --- 账号 ---
-
-function Accounts({ wide }: { wide: boolean }) {
-  const data = useApps().data;
-  const me = useMe().data;
-  const [sel, setSel] = useState("");
-  const logins = (data?.logins ?? []).filter(ofWeb);
-  const invites = data?.invites ?? [];
-  const first = logins.find((l) => l.id === me?.login)?.id ?? logins[0]?.id;
-  const at = sel || (wide ? (first ?? "") : "");
-  const login = logins.find((l) => l.id === at);
-  const invite = invites.find((i) => i.id === at);
-  // One removed (here or elsewhere): back to the first.
-  if (sel && sel !== NEW && data && !login && !invite) setSel("");
-  const list = (
-    <>
-      {at === NEW && <Row face={<Pending />} name={t("manage.newInvite")} line={t("manage.notMade")} on onClick={() => {}} />}
-      {logins.map((l) => (
-        <Row key={l.id} face={<Avatar src={l.avatar} name={l.name} size={32} {...deviceBadge(l.device)} />} name={l.name} line={<><Seen online={l.online} at={l.lastSeenAt || l.createdAt || 0} />{!l.approvedAt && <span>· {t("apps.pending")}</span>}</>} on={l.id === at} onClick={() => setSel(l.id)} />
-      ))}
-      {invites.map((i) => (
-        <Row key={i.id} face={<Pending />} name={i.setup ? t("term.setup") : i.name || t("manage.unusedInvite")} line={i.expiresAt ? t("term.until", { time: clock(i.expiresAt) }) : undefined} on={i.id === at} onClick={() => setSel(i.id)} />
-      ))}
-    </>
-  );
-  const detail =
-    at === NEW ? (
-      <NewInvite done={(id) => setSel(id ?? "")} />
-    ) : login ? (
-      <LoginDetail key={login.id} l={login} />
-    ) : invite ? (
-      <InviteDetail key={invite.id} i={invite} gone={() => setSel("")} />
-    ) : null;
-  return (
-    <Split
-      wide={wide}
-      sel={sel}
-      first={first}
-      onBack={() => setSel("")}
-      list={list}
-      detail={detail}
-      needs={<Needs tab="accounts" />}
-      add={at !== NEW && <AddKey onClick={() => setSel(NEW)} disabled={!me?.public} label={me?.public ? t("manage.new") : t("term.needPublic")} />}
-    />
-  );
-}
+// --- 成员 ---
 
 /** An invite's face: a link's mark in a faint circle. */
 function Pending() {
   return (
-    <span className="grid size-8 place-items-center rounded-full bg-fill text-ink-3">
-      <Link2 size={14} />
+    <span className="grid size-6 place-items-center rounded-full bg-fill text-ink-3">
+      <Link2 size={12} />
     </span>
   );
 }
@@ -629,52 +674,6 @@ function LoginDetail({ l }: { l: Login }) {
 
 const githubQ = { queryKey: ["github"], queryFn: () => api.github(), staleTime: 60_000 };
 
-// --- 应用 ---
-
-function Apps({ wide }: { wide: boolean }) {
-  const data = useApps().data;
-  const pairing = !!usePairing()?.open;
-  const [sel, setSel] = useState("");
-  const [busy, setBusy] = useState(false);
-  const apps = (data?.apps ?? []).filter((a) => !isComputer(a) && !a.web && !a.host);
-  const first = apps[0]?.id;
-  const at = sel || (wide ? (first ?? "") : "");
-  const app = apps.find((a) => a.id === at);
-  if (sel && data && !app) setSel("");
-  const logins = (id: string) => (data?.logins ?? []).filter((l) => l.app === id);
-  const pair = async () => {
-    setBusy(true);
-    try {
-      await api.pairing(!pairing);
-    } catch (e) {
-      toast(t("apps.pairing"), { error: true, description: errText(e) });
-    } finally {
-      setBusy(false);
-    }
-  };
-  const list = (
-    <>
-      {data && !apps.length && <p className="m-0 px-2 py-3 text-sm text-ink-3">{t("manage.noApps")}</p>}
-      {apps.map((a) => {
-        const n = logins(a.id).length;
-        return <Row key={a.id} face={<Avatar src={a.avatar} name={a.name} size={32} type={a.type} />} name={a.name} line={<><Seen online={a.online} at={a.lastSeenAt || a.createdAt || 0} />{n > 1 && <span>· {t("apps.loginCount", { n })}</span>}</>} on={a.id === at} onClick={() => setSel(a.id)} />;
-      })}
-    </>
-  );
-  return (
-    <Split
-      wide={wide}
-      sel={sel}
-      first={first}
-      onBack={() => setSel("")}
-      list={list}
-      detail={app && <AppDetail key={app.id} a={app} logins={logins(app.id)} />}
-      needs={<Needs tab="apps" />}
-      add={<AddKey onClick={() => void pair()} on={pairing} disabled={busy} label={pairing ? t("manage.pairing") : t("manage.pair")} />}
-    />
-  );
-}
-
 function AppDetail({ a, logins }: { a: App; logins: Login[] }) {
   const qc = useQueryClient();
   const [sub, setSub] = useState("");
@@ -750,56 +749,7 @@ function ComputerFace({ a, size }: { a: App; size: number }) {
   return a.host ? <ServerFace size={size} /> : <Avatar src={a.avatar} name={a.name} size={size} type={a.type} />;
 }
 
-function Computers({ wide }: { wide: boolean }) {
-  const computers = useComputers();
-  const [sel, setSel] = useState("");
-  const first = computers[0]?.id;
-  const at = sel || (wide ? (first ?? "") : "");
-  const c = computers.find((a) => a.id === at);
-  if (sel && sel !== NEW && computers.length && !c) setSel("");
-  const list = (
-    <>
-      {at === NEW && (
-        <Row
-          face={
-            <span className="grid size-8 place-items-center rounded-full bg-fill text-ink-3">
-              <Plus size={15} />
-            </span>
-          }
-          name={t("manage.newComputer")}
-          line={t("manage.waitJoin")}
-          on
-          onClick={() => {}}
-        />
-      )}
-      {computers.map((a) => (
-        <Row key={a.id} face={<ComputerFace a={a} size={32} />} name={a.host ? "Iridium" : a.name} line={<>{!a.host && <Seen online={a.online} at={Math.max(a.computer?.seenAt ?? 0, a.lastSeenAt ?? 0) || a.createdAt || 0} />}<span>{osName(a.computer)}</span></>} on={a.id === at} onClick={() => setSel(a.id)} />
-      ))}
-    </>
-  );
-  return (
-    <Split
-      wide={wide}
-      sel={sel}
-      first={first}
-      onBack={() => setSel("")}
-      list={list}
-      detail={
-        at === NEW ? (
-          <div className="-mx-3">
-            <AddComputer onBack={() => setSel("")} />
-          </div>
-        ) : (
-          c && <ComputerDetail key={c.id} a={c} />
-        )
-      }
-      needs={<Needs tab="computers" />}
-      add={at !== NEW && <AddKey onClick={() => setSel(NEW)} />}
-    />
-  );
-}
-
-function ComputerDetail({ a }: { a: App }) {
+function ComputerDetail({ a, open }: { a: App; open: (sel: string) => void }) {
   const qc = useQueryClient();
   const me = useMe().data;
   const owner = useApps().data?.logins.find((l) => ofWeb(l) && l.id === a.owner?.id);
@@ -809,6 +759,14 @@ function ComputerDetail({ a }: { a: App }) {
   const [sub, setSub] = useState<"" | "github">("");
   const face = useFacePick((b) => api.profile({ avatar: b }, a.id).then(() => qc.invalidateQueries({ queryKey: ["apps"] })));
   const hostFace = useFacePick((b) => api.serverFace(b), t("apps.serverFace"));
+  const s = useSettings().data;
+  const secrets = useQuery({ ...secretsQ, enabled: !!a.host && !!me?.host }).data?.secrets;
+  const idle = s?.idleReap ?? "1h";
+  const setIdle = (v: string) =>
+    void api.putSettings({ idleReap: v }).then(
+      (got) => qc.setQueryData(["settings"], got),
+      (e) => toast(t("manage.idle"), { error: true, description: errText(e) }),
+    );
   const m = a.computer;
   const may = !a.host && !!m?.grant && a.online;
   if (sub === "github")
@@ -896,6 +854,16 @@ function ComputerDetail({ a }: { a: App }) {
             )}
           </Field>
         )}
+        {a.host && me?.host && s && (
+          <Field label={t("manage.idle")}>
+            <Pills label={t("manage.idle")} value={idle} onChange={setIdle} options={[...new Set([...IDLE, idle])].map((v) => ({ value: v, label: idleName(v) }))} />
+          </Field>
+        )}
+        {a.host && me?.host && (
+          <Field label={t("manage.secrets")} onClick={() => open(SECRETS)}>
+            {secrets?.length ? t("manage.count", { n: secrets.length }) : <span className="text-ink-3">{t("manage.none")}</span>}
+          </Field>
+        )}
         {a.host && (gh || me?.host) && (
           <Field label="GitHub" onClick={() => setSub("github")}>
             {gh ? (
@@ -918,50 +886,8 @@ function ComputerDetail({ a }: { a: App }) {
 const IDLE = ["0", "30m", "1h", "4h"] as const;
 const idleName = (v: string) => (v === "0" ? t("manage.off") : v === "30m" ? t("manage.minutes", { n: 30 }) : v.endsWith("h") ? t("manage.hours", { n: Number(v.slice(0, -1)) }) : v);
 
-function Agents({ wide }: { wide: boolean }) {
-  const me = useMe().data;
-  const infos = (useAgents().data ?? []).filter((x) => !x.missing);
-  const computers = useComputers();
-  const s = useSettings().data;
-  const qc = useQueryClient();
-  const [sel, setSel] = useState("");
-  const first = infos[0]?.agent;
-  const at = sel || (wide ? (first ?? "") : "");
-  const info = infos.find((x) => x.agent === at);
-  const at_ = (a: string) => computers.filter((c) => c.computer?.agents.some((x) => x.agent === a && !x.off));
-  const idle = s?.idleReap ?? "1h";
-  const setIdle = (v: string) =>
-    void api.putSettings({ idleReap: v }).then(
-      (got) => qc.setQueryData(["settings"], got),
-      (e) => toast(t("manage.idle"), { error: true, description: errText(e) }),
-    );
-  const list = infos.map((x) => {
-    const n = at_(x.agent).length;
-    return (
-      <Row
-        key={x.agent}
-        face={
-          <span className="grid size-8 place-items-center rounded-full bg-fill">
-            <Logo agent={x.agent} size={16} />
-          </span>
-        }
-        name={agentName(x.agent)}
-        line={n ? t("manage.computerCount", { n }) : undefined}
-        on={x.agent === at}
-        onClick={() => setSel(x.agent)}
-      />
-    );
-  });
-  const foot = me?.host && s && (
-    <div className="flex flex-col gap-1.5 px-2 py-1">
-      <span className="text-sm text-ink-3">{t("manage.idle")}</span>
-      <Pills label={t("manage.idle")} value={idle} onChange={setIdle} options={[...new Set([...IDLE, idle])].map((v) => ({ value: v, label: idleName(v) }))} />
-    </div>
-  );
-  return <Split wide={wide} sel={sel} first={first} onBack={() => setSel("")} list={list} foot={foot} detail={info && <AgentDetail key={info.agent} a={info.agent} computers={computers} />} />;
-}
-
-function AgentDetail({ a, computers }: { a: Agent; computers: App[] }) {
+function AgentDetail({ a, computers, open }: { a: Agent; computers: App[]; open: (sel: string) => void }) {
+  const roles = useRoles().filter((r) => r.agent === a);
   const me = useMe().data;
   const info = useAgents().data?.find((x) => x.agent === a);
   const s = useSettings().data;
@@ -988,7 +914,9 @@ function AgentDetail({ a, computers }: { a: Agent; computers: App[] }) {
       {me?.host && s && info && info.modes.length > 1 && (
         <Block>
           <Field label={t("manage.approval")}>
-            <Pills label={t("manage.approval")} value={mode} onChange={setMode} options={[{ value: "", label: t("manage.default") }, ...info.modes.map((m) => ({ value: m, label: modeName({ id: m }) }))]} />
+            <span className="no-bar -my-1 min-w-0 overflow-x-auto overflow-y-hidden py-1 [&_button]:whitespace-nowrap">
+              <Pills label={t("manage.approval")} value={mode} onChange={setMode} options={[{ value: "", label: t("manage.default") }, ...info.modes.map((m) => ({ value: m, label: modeName({ id: m }) }))]} />
+            </span>
           </Field>
         </Block>
       )}
@@ -1005,73 +933,25 @@ function AgentDetail({ a, computers }: { a: Agent; computers: App[] }) {
                   {x.version && <span>{x.version}</span>}
                   <span>{osName(c.computer)}</span>
                 </span>
-                <span aria-label={x.off ? t("manage.off") : t("manage.on")} className="block size-2.5 shrink-0 rounded-full" style={{ color: "var(--ink-2)", background: x.off ? "transparent" : "var(--ink-2)", boxShadow: "inset 0 0 0 1.5px currentColor" }} />
+                <span className={cn("w-4 shrink-0 text-right text-xs", x.off ? "text-ink-4" : "text-ink-2")}>{x.off ? t("manage.off") : t("manage.on")}</span>
               </div>
             );
           })}
+        </Block>
+      )}
+      {roles.length > 0 && (
+        <Block title={t("manage.roles")}>
+          {roles.map((r) => (
+            <button key={r.id} type="button" onClick={() => open(`r:${r.id}`)} className="g-press -mx-2 flex min-h-11 items-center gap-3 rounded-md px-2 text-left hover:bg-fill/60">
+              <RoleFace role={r} size={24} />
+              <span className="min-w-0 flex-1 truncate text-sm">{r.name}</span>
+              <RoleLine role={r} at={placeOf(r)} className="min-w-0 shrink truncate text-xs text-ink-3" />
+              <ChevronRight size={15} className="shrink-0 text-ink-4" />
+            </button>
+          ))}
         </Block>
       )}
     </div>
   );
 }
 
-// --- 角色 ---
-
-function Roles({ wide }: { wide: boolean }) {
-  const roles = useRoles();
-  const [sel, setSel] = useState("");
-  const first = roles[0]?.id;
-  const at = sel || (wide ? (first ?? "") : "");
-  const role = roles.find((r) => r.id === at);
-  if (sel && sel !== NEW && !role) setSel("");
-  const list = (
-    <>
-      {at === NEW && (
-        <Row
-          face={
-            <span className="grid size-8 place-items-center rounded-full bg-fill text-ink-3">
-              <Plus size={15} />
-            </span>
-          }
-          name={t("role.new")}
-          on
-          onClick={() => {}}
-        />
-      )}
-      {!roles.length && at !== NEW && <p className="m-0 px-2 py-3 text-sm text-ink-3">{t("role.none")}</p>}
-      {roles.map((r) => (
-        <Row key={r.id} face={<RoleFace role={r} size={32} />} name={r.name} line={<RoleLine role={r} at={placeOf(r)} className="truncate" />} on={r.id === at} onClick={() => setSel(r.id)} />
-      ))}
-    </>
-  );
-  // The role's own page, as it was in the settings, its way back the list's.
-  const detail =
-    at === NEW ? (
-      <div className="-mx-3">
-        <NewRolePage made={(r: Role) => setSel(r.id)} />
-      </div>
-    ) : (
-      role && (
-        <div className="-mx-3">
-          <RolePage key={role.id} role={role} />
-        </div>
-      )
-    );
-  return <Split wide={wide} sel={sel} first={first} onBack={() => setSel("")} list={list} detail={detail} add={at !== NEW && <AddKey onClick={() => setSel(NEW)} />} />;
-}
-
-// --- 凭据 ---
-
-function Secrets() {
-  const [adding, setAdding] = useState(false);
-  return (
-    <>
-      <div className="no-bar min-h-0 flex-1 overflow-y-auto px-4 pt-2 pb-20">
-        <div className="mx-auto max-w-2xl">
-          <SecretsPane adding={adding} done={() => setAdding(false)} />
-        </div>
-      </div>
-      <AddKey onClick={() => setAdding(!adding)} on={adding} label={adding ? t("me.cancel") : t("manage.new")} />
-    </>
-  );
-}

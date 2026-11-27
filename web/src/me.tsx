@@ -3,14 +3,14 @@
 // its profile and every setting, one panel for both (the user, 2026-11-07). Local-only with no
 // Passkey, it is 本机. Also the bits the panel and the pages share: the theme, the language, the
 // segmented control, 本机's mark.
-import { Monitor, Moon, Sun } from "lucide-react";
+import { LayoutGrid, Monitor, Moon, Sun } from "lucide-react";
 import { useEffect, type ReactNode } from "react";
 import type { Me } from "./api/types.gen";
 import { api, queryClient } from "./api/client";
 import { LOCAL_ME, useMe, useSettings } from "./data";
 import { setLang, t, useLang, type Lang } from "./i18n";
 import { tellTheme } from "./irapp";
-import { Avatar, cn, IrMark, keep, kept, Tip } from "./ui";
+import { Avatar, cn, IconKey, IrMark, keep, kept, Tip } from "./ui";
 
 export type ThemePref = "light" | "dark" | "auto";
 
@@ -24,11 +24,13 @@ export function initialTheme(): ThemePref {
 /** Its avatar and name, the key to the 终端 panel (data-settings-key: the panel rises from it, app.tsx);
  *  a dot on the avatar while a newer release is out; no version (the panel's 检查更新 says it, the user,
  *  2026-11-12). code: the panel's code fetched, as a pointer comes near. */
-export function MeKey({ open, onOpen, dot, code }: { open: boolean; onOpen: () => void; dot?: boolean; code?: () => void }) {
+export function MeKey({ open, onOpen, dot, code, manage }: { open: boolean; onOpen: () => void; dot?: boolean; code?: () => void; manage?: () => void }) {
   const me: Me = useMe().data ?? LOCAL_ME;
   const local = me.host && !me.named; // the host as Iridium; named, as its own (Me.named)
   const name = local ? t("me.local") : me.name;
+  // 管理's key at the pill's right end, over it (kumo, 2026-11-27): a key of its own, not in the button.
   return (
+    <div className="relative flex w-full min-w-0">
     <Tip label={dot ? `${t("nav.me")} · ${t("settings.updateReady")}` : t("nav.me")} align="start">
       <button
         type="button"
@@ -37,7 +39,7 @@ export function MeKey({ open, onOpen, dot, code }: { open: boolean; onOpen: () =
         onClick={onOpen}
         onPointerEnter={code}
         onFocus={code}
-        className={cn("g-press flex h-11 w-full min-w-0 items-center gap-2.5 rounded-full pr-3 pl-1.5 hover:bg-fill pointer-coarse:h-12 pointer-coarse:pl-2", open && "bg-fill")}
+        className={cn("g-press flex h-11 w-full min-w-0 items-center gap-2.5 rounded-full pl-1.5 hover:bg-fill pointer-coarse:h-12 pointer-coarse:pl-2", manage ? "pr-11" : "pr-3", open && "bg-fill")}
       >
         {/* A grid, not inline: no line's descent under the face, which sits centred in the key. */}
         <span className="relative grid shrink-0">
@@ -47,6 +49,12 @@ export function MeKey({ open, onOpen, dot, code }: { open: boolean; onOpen: () =
         <span className="min-w-0 truncate text-md text-ink">{name}</span>
       </button>
     </Tip>
+    {manage && (
+      <IconKey label={t("manage.open")} onClick={manage} className="absolute top-1/2 right-1.5 size-8 -translate-y-1/2 pointer-coarse:size-9">
+        <LayoutGrid size={16} />
+      </IconKey>
+    )}
+    </div>
   );
 }
 

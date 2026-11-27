@@ -1030,6 +1030,14 @@ export const zh = {
   "manage.idle": "空闲停止",
   "manage.computerCount": "{n} 台电脑",
   "manage.approval": "审批",
+  "manage.members": "成员",
+  "manage.roleCount": "{n} 个角色",
+  "manage.inviteMember": "邀请成员",
+  "manage.pairApp": "配对应用",
+  "manage.stopPairing": "停止配对",
+  "manage.addComputer": "加电脑",
+  "manage.newSecret": "新凭据",
+  "manage.open": "管理",
   "manage.default": "默认",
 } as const;
 

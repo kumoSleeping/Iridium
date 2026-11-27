@@ -364,7 +364,7 @@ export function App() {
   const chatCode = useCallback(() => void loadChat().catch(() => {}), []);
 
   const onSettings = () => (inSets(r) ? close(under) : go({ name: "settings" }));
-  const me = <MeKey open={inSets(r)} onOpen={onSettings} dot={!!update.data?.available} code={loadPanels} />;
+  const me = <MeKey open={inSets(r)} onOpen={onSettings} dot={!!update.data?.available} code={loadPanels} manage={() => openManage()} />;
   const session = open ? list?.find((s) => s.id === open) : undefined;
   // Sidebar key and chat folder links share one dialog; bumping filesRound remounts a fresh
   // browser on each open, even if reopened mid-exit.
