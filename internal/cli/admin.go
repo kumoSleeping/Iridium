@@ -77,6 +77,7 @@ func socketClient(path string) *http.Client {
 var adminCommands = map[string]func(adminEnv, []string, io.Writer, io.Writer) int{
 	"public": publicCmd,
 	"run":    runCmd,
+	"github": githubCmd, // github.go
 }
 
 // call sends one request to the daemon and decodes its JSON reply into out; it gives the status.
@@ -123,7 +124,7 @@ func (e adminEnv) call(method, path string, body any, out any) (int, error) {
 		}
 		return resp.StatusCode, errors.New(resp.Status)
 	}
-	if out != nil {
+	if out != nil && len(data) > 0 {
 		if err := json.Unmarshal(data, out); err != nil {
 			return resp.StatusCode, err
 		}

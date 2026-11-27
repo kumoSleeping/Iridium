@@ -56,6 +56,13 @@ func (s *Server) reloadSecrets() {
 	if err != nil {
 		s.logf("server: secrets: %v", err)
 	}
+	// The GitHub tokens too (routes_github.go).
+	if vals == nil {
+		vals = map[string]string{}
+	}
+	for n, v := range s.st.GitHubTokens() {
+		vals[n] = v
+	}
 	s.vault.json.Store(secrets.NewMasker(vals, secrets.MinShown, true))
 	s.vault.text.Store(secrets.NewMasker(vals, secrets.MinShown, false))
 }

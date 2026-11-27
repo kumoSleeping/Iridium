@@ -56,6 +56,7 @@ import { Segmented } from "./me";
 import { Crop } from "./profile";
 import { SecretHere } from "./secret";
 import { showSecret, useSecret } from "./secrets";
+import { GitHubKey } from "./github";
 import { Group, Item } from "./settings";
 import { useConfirms, usePairing } from "./store";
 import { errText, toast, toasts } from "./toast";
@@ -628,10 +629,10 @@ function ItemRow({ a }: { a: App }) {
           <Seen a={a} />
         </span>
         {a.host ? (
-          <span
-            className="size-7 shrink-0 pointer-coarse:size-10"
-            aria-hidden
-          />
+          // The host's own GitHub (本机's agents' turns): bound or bound from here.
+          <span className="grid size-7 shrink-0 place-items-center pointer-coarse:size-10">
+            <GitHubKey member="local" mine={!!me?.host} />
+          </span>
         ) : (
           !renaming && (
             <IconKey
@@ -1025,6 +1026,7 @@ function LoginRow({
             ))}
           </span>
         </span>
+        <GitHubKey member={l.id} mine={l.id === me?.login} />
         {!renaming && (
           <IconKey
             label={t("term.renameIt")}

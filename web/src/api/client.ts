@@ -55,6 +55,7 @@ import type { Quota, SecretInfo, Secrets, SetSecret, Usage } from "./types.gen";
 import type { AgentChoices, Block, ChannelMembers, ChannelReads, Injection, MemberPatch, NewMember } from "./types.gen";
 import type { Favorites, FavoritesPatch, MemberCard, Memory, Profile as Card, ProfilePatch, Self } from "./types.gen";
 import type { NewScript, Script, ScriptPatch, ScriptRun } from "./types.gen";
+import type { GitHubBinding, GitHubList, SetGitHub } from "./types.gen";
 
 /** A message of a channel's log (Satori's message.list): id its number there. */
 export type ChannelMessage = { id: string; content: string; created_at?: number; user?: { id: string; name?: string; nick?: string; is_bot?: boolean }; _data?: { kind?: string; ask?: unknown; card?: string; event?: unknown; session?: string; block?: string; from?: number; to?: number; input?: string; device?: Device; script?: string; reactions?: ReactionSum[]; writing?: boolean } };
@@ -524,6 +525,11 @@ export const api = {
   secrets: () => get<Secrets>("/v1/internal/secrets"),
   putSecret: (name: string, s: SetSecret) => write<SecretInfo>("PUT", `/v1/internal/secrets/${enc(name)}`, s),
   deleteSecret: (name: string) => write<{ ok: boolean }>("DELETE", `/v1/internal/secrets/${enc(name)}`),
+
+  // --- GitHub (docs/api.md "GitHub"): a login's account; never its token back ---
+  github: () => get<GitHubList>("/v1/internal/github"),
+  bindGitHub: (token: string) => write<GitHubBinding>("PUT", "/v1/internal/github", { token } satisfies SetGitHub),
+  unbindGitHub: (member?: string) => write<{ ok: boolean }>("DELETE", member ? `/v1/internal/github/${enc(member)}` : "/v1/internal/github"),
 };
 
 /** Whether an error is the route not being there (an older daemon, a part turned off): the page

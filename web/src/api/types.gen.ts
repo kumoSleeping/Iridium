@@ -1964,6 +1964,48 @@ export interface CLIOutput {
 }
 
 //////////
+// source: github.go
+
+/**
+ * GitHubBinding is a person's GitHub account (docs/api.md "GitHub"): Member, the login it is
+ * bound to (a login of ir_web, or "local" the host); Name, what that login goes by; Login, ID,
+ * Avatar, the account's; At, when it was bound (ms). Never the token.
+ */
+export interface GitHubBinding {
+  member: string;
+  name?: string;
+  login: string;
+  id: number /* int64 */;
+  avatar?: string;
+  at: number /* int64 */;
+}
+/**
+ * GitHubList is GET /v1/internal/github: the bindings; Mine, the caller's own login (whose a
+ * bind or unbind is); Turn, whose git and gh an agent's turn now runs as ("" none: the machine's
+ * own).
+ */
+export interface GitHubList {
+  bindings: GitHubBinding[];
+  mine?: string;
+  turn?: string;
+}
+/**
+ * SetGitHub is PUT /v1/internal/github: the caller's login's token, checked with GitHub first.
+ */
+export interface SetGitHub {
+  token: string;
+}
+/**
+ * GitHubToken is GET /v1/internal/github/token, for an agent's git and gh alone (ir github):
+ * the token of the turn's login (or of User, asked by name), and its account; none bound: 204.
+ */
+export interface GitHubToken {
+  member: string;
+  login: string;
+  token: string;
+}
+
+//////////
 // source: profile.go
 
 export const CardKindAgent = "agent";

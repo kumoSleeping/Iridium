@@ -377,6 +377,22 @@ agent 调 `ir invite`、`ir secret set` 时秘密不进它的对话：变成一�
 - 对话记录出接口前（会话列表、会话状态、消息页、整段原文、携带状态、Satori 的消息和事件；`ir api message.list`、`ir wait` 走的就是这些），已知的值（原样、URL 编码、base64）换成 `[secret:名]`；短于 6 个字符的不换（误伤太多）。
 - `ir run` 自己起子进程（同目录、同环境，加上凭据），stdout/stderr 照转，按最长值的长度留尾巴再打码；退出码照子进程。
 
+## GitHub
+
+每个人把自己的 GitHub 账号绑到自己的登录上（网页登录或本机），本机代理的 git、gh 自动以「这一轮为谁跑」的人的身份用（`originOf`），代理不用管。
+
+- 存：meta 表 `github:<登录 ID>`，令牌与凭据同样加密（附加数据是键名）；绑定时先用 `GET https://api.github.com/user` 验过。令牌也进凭据的遮挡。
+- 代理环境（`internal/ghenv`，只本机代理，执行器上的不加）：`GIT_CONFIG_*` 给 `credential.https://github.com.helper` 先放一个空值、再放 `iridium ir github credential`；PATH 最前是 `<状态目录>/bin`，里面 `gh` 链到 iridium（以 gh 名启动即 `ir github gh`）。都不碰用户自己的文件。
+- 每次用时现取令牌：没人绑（或这一轮不为人跑），git 交回原来的凭据助手（`git credential fill`，去掉 Iridium 加的配置），gh 用它自己的登录。`IR_GITHUB_USER=<名字或 GitHub 用户名>` 换成另一个已绑定的人；找不到就报错。git 存/删我们给的凭据时不转给别的助手。
+- 不改提交作者。
+
+| 路由 | 说明 |
+|---|---|
+| `GET /v1/internal/github` | `GitHubList`：绑定（不含令牌）、`mine`（调用者的登录）、`turn`（代理这一轮用谁的） |
+| `PUT /v1/internal/github` | `SetGitHub` → `GitHubBinding`：绑自己的；面板或本机，代理不行 |
+| `DELETE /v1/internal/github[/{member}]` | 解绑，默认自己的；面板或本机 |
+| `GET /v1/internal/github/token?user=` | `GitHubToken`：只给代理的 `ir`（有会话）或本机 `ir`；没绑 204 |
+
 ## 公网入口
 
 | 请求 | 正文 → 回答 | 说明 |

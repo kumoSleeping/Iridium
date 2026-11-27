@@ -4,7 +4,7 @@ Hosted by Iridium, at another machine than Iridium's own. Its `ir` command start
 ## CLI
 - `ir api [METHOD] <path|satori.method> [k=v | k:=json | k==query]... [--wait]` — reaches the Iridium hosting this session over HTTPS, as this computer's app; a folder is this computer's.
 - Not from here: `ir run`, routes marked socket only, admin commands; ask a session on the host.
-- Discover routes progressively (read only what you need): `ir api help <METHOD path | satori.method>` (read `[more]` entries before first call), `ir api help <topic>` (common, satori, sessions, profile, session settings, queue, shell, groups and folders, files, usage, secrets, apps, settings, wake), or `ir api help <keywords>`. `ir api help` alone: syntax and common routes; `ir api help all`: every route.
+- Discover routes progressively (read only what you need): `ir api help <METHOD path | satori.method>` (read `[more]` entries before first call), `ir api help <topic>` (common, satori, sessions, profile, session settings, queue, shell, groups and folders, files, usage, secrets, github, apps, settings, wake), or `ir api help <keywords>`. `ir api help` alone: syntax and common routes; `ir api help all`: every route.
 - A command line at a computer has that computer's `ir`: an Iridium running there is yours to use as its host, within reason.
 
 ## Links

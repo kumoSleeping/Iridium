@@ -342,7 +342,7 @@ func (h *Hosted) launch(ctx context.Context, proc int) error {
 		resume, history = true, found == ""
 	}
 	h.mu.Lock()
-	o := agent.SpawnOptions{Persona: where.Self != nil && where.Self.Persona != "", Session: h.id, Resume: resume, History: history, AgentSession: h.meta.agentID(), Cwd: h.meta.Cwd, Env: m.agentEnv(), Program: m.o.Config.Programs[string(h.meta.Agent)], SystemPromptFile: prompt,
+	o := agent.SpawnOptions{Persona: where.Self != nil && where.Self.Persona != "", Session: h.id, Resume: resume, History: history, AgentSession: h.meta.agentID(), Cwd: h.meta.Cwd, Env: m.githubEnv(m.agentEnv()), Program: m.o.Config.Programs[string(h.meta.Agent)], SystemPromptFile: prompt,
 		Model: h.meta.Model, Mode: cmp.Or(h.meta.Mode, m.defaultMode(h.meta.Agent)), Effort: h.effort, Ultracode: h.ultracode, Preset: h.preset}
 	h.turnSeen = false
 	h.mu.Unlock()
