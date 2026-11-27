@@ -116,14 +116,19 @@ func (m *Manager) SetArchived(ctx context.Context, id string, on bool) error {
 		m.publishList()
 		return nil
 	}
-	h.hidSeq.Add(1)
 	live := h.isLive()
 	quiet := int64(0)
 	if live {
 		// It may write as it ends: that is not activity (ended notes the size again).
 		quiet = time.Now().Add(2*m.o.Config.StopGrace.D() + 15*time.Second).UnixMilli()
 	}
-	if err := h.hide(quiet); err != nil {
+	// Under shownMu, as shownLater looks at hidSeq and shows: else one that looked before this
+	// showed after it, and the archive was undone (TestArchiveHosted, TestSatoriOnSocket).
+	h.shownMu.Lock()
+	h.hidSeq.Add(1)
+	err = h.hide(quiet)
+	h.shownMu.Unlock()
+	if err != nil {
 		return err
 	}
 	h.publish()
