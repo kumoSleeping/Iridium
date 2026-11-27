@@ -1710,7 +1710,7 @@ func (s *Server) tellMembers(c caller, ch, text string, ev channel.Event) int64 
 // for.
 func (s *Server) greet(c caller, ch, id string, seq int64) {
 	by := s.satoriUser(c).Name
-	words := fmt.Sprintf("%s 邀请你加入了这个频道。用一两句话跟大家打个招呼，说说你是谁。", cmp.Or(by, "Iridium"))
+	words := cmp.Or(by, "Iridium") + greetAsk
 	lk := s.chain.person(ch, c.ID())
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -1720,6 +1720,10 @@ func (s *Server) greet(c caller, ch, id string, seq int64) {
 		}
 	}()
 }
+
+// greetAsk is how greet's words end, after who invited it: a greeting is no work to title the
+// channel by (titleNow).
+const greetAsk = " 邀请你加入了这个频道。用一两句话跟大家打个招呼，说说你是谁。"
 
 // DefaultPeople are a new channel's people when its maker names none (the user, 2026-11-13):
 // the panel's logins and the host's own (its terminal, its ir), no Bot's; the one that makes it
@@ -2595,7 +2599,7 @@ func (s *Server) titleNow(ch, to, said string, list []deliver.Agent, me channel.
 	if at := deliver.Mentions(said, nicks); len(at) > 0 && !strings.EqualFold(at[0], me.Nick) {
 		return assemble.Injection{}, false
 	}
-	if !s.m.TitleDue(to) {
+	if strings.HasSuffix(said, greetAsk) {
 		return assemble.Injection{}, false
 	}
 	o := s.st.Overlay(ch)
@@ -2607,6 +2611,11 @@ func (s *Server) titleNow(ch, to, said string, list []deliver.Agent, me channel.
 		if c := s.m.Called(ch); c != ch {
 			title = c
 		}
+	}
+	// One with no title yet is told so at each message, not every few (kumo, 2026-11-26: a
+	// channel stayed untitled through its first four).
+	if title != "" && !s.m.TitleDue(to) {
+		return assemble.Injection{}, false
 	}
 	var t assemble.Injection
 	var err error
