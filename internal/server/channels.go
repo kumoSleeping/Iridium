@@ -1016,7 +1016,7 @@ func (s *Server) addAgent(ctx context.Context, c caller, ch string, st *api.Sess
 		}
 	} else {
 		ns := api.NewSession{Agent: req.Agent, Cwd: cmp.Or(req.Cwd, st.Cwd), Machine: st.Machine, Model: req.Model, Mode: req.Mode,
-			Effort: req.Effort, Preset: req.Preset, Role: req.Role, Avatar: req.Avatar, ForChannel: true}
+			Effort: req.Effort, Preset: req.Preset, Attach: req.Attach, Role: req.Role, Avatar: req.Avatar, ForChannel: true}
 		if req.Cwd != "" {
 			ns.Machine = req.Machine
 		} else if req.Machine != "" && req.Machine != st.Machine {
@@ -1505,6 +1505,7 @@ func (s *Server) agentChoices(w http.ResponseWriter, r *http.Request) {
 	// pop as the chat's own do); the sessions are asked after, for the next time.
 	if kept := s.st.Kept(choicesKey(kind, machine)); kept != "" && json.Unmarshal([]byte(kept), &out) == nil && len(out.Models) > 0 {
 		out.Presets = s.presetsAt(r.Context(), kind, machine)
+		out.Attached = s.m.StartKeys(kind, machine)
 		s.nameChoices(&out, kind, machine)
 		reply(w, http.StatusOK, out)
 		// One asking of a kind at a place at a time: each makes the whole list, and a menu's
@@ -1529,6 +1530,7 @@ func (s *Server) agentChoices(w http.ResponseWriter, r *http.Request) {
 		out = *got
 	}
 	out.Presets = s.presetsAt(r.Context(), kind, machine)
+	out.Attached = s.m.StartKeys(kind, machine)
 	s.nameChoices(&out, kind, machine)
 	reply(w, http.StatusOK, out)
 }

@@ -27,7 +27,7 @@ import { memberError } from "./key";
 import { Deeper, usePages } from "./pages";
 import { choicesQ, draftDefault, draftEffort, draftName, rememberEffort, useLastEffort, type At } from "../choices";
 import { CARD_POP, ProfileCard } from "./profilecard";
-import { DraftModels } from "./pick";
+import { DraftModels, type Draft } from "./pick";
 import { ahead as figAhead } from "../../splash/engine";
 import { panelGone, point, unpoint, type Fig } from "../../splash/figure";
 
@@ -73,15 +73,16 @@ const wakeOn = (w: Wake, me?: string): Trigger[] => (w === "all" ? [{ message: {
 /** Adds an agent to channel id and keeps the members it answers with; it says hello as it
  *  joins (greet; kumo, 2026-11-16). as: as a role (what
  *  roleStart gives; busy is then "role:<id>"). m: at that computer, in its home folder (busy:
- *  "<machine>/<agent>"). wake: what wakes it beside its @ (Wake; none given, only its @). */
+ *  "<machine>/<agent>"). wake: what wakes it beside its @ (Wake; none given, only its @). attach:
+ *  the key it starts with pressed (a button's id, pick.tsx). */
 export function useAdd(id: string, wake?: Wake, done?: () => void) {
   const qc = useQueryClient();
   const me = useMembers(id)?.me;
   const [busy, setBusy] = useState<string | null>(null);
-  const add = async (agent: Agent, model: string, effort: string, preset = "", as?: ReturnType<typeof roleStart>, m?: Machine) => {
+  const add = async (agent: Agent, model: string, effort: string, preset = "", as?: ReturnType<typeof roleStart>, m?: Machine, attach = "") => {
     setBusy(as ? `role:${as.role}` : m ? `${m.id}/${agent}` : agent);
     try {
-      qc.setQueryData<ChannelMembers>(["members", id], await api.addMember(id, { ...(as ?? { agent, ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(preset ? { preset } : {}) }), ...(m ? { machine: m.id, cwd: m.home } : {}), ...(wake ? { on: wakeOn(wake, me) } : {}), greet: true }));
+      qc.setQueryData<ChannelMembers>(["members", id], await api.addMember(id, { ...(as ?? { agent, ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(preset ? { preset } : {}) }), ...(attach ? { attach } : {}), ...(m ? { machine: m.id, cwd: m.home } : {}), ...(wake ? { on: wakeOn(wake, me) } : {}), greet: true }));
       // Added: the panel goes, its menus with it (kumo, 2026-11-25: it stayed over the channel).
       done?.();
     } catch (e) {
@@ -250,7 +251,7 @@ function Kind({ id, k, m, lacks, i, off, busy, add, wake, setWake }: { id: strin
   // Where its models are asked: the channel's own place, or the computer it would run at.
   const at = m ? { machine: m.id } : { channel: id };
   const remembered = useLastEffort(k);
-  const [p, setP] = useState<{ model: string; effort?: string; preset?: string }>({ model: "" });
+  const [p, setP] = useState<{ model: string } & Draft>({ model: "" });
   const effort = p.effort ?? remembered;
   const asked = useQuery({ ...choicesQ(k, at), enabled: !lacks }).data;
   const { send } = draftDefault(asked);
@@ -262,11 +263,11 @@ function Kind({ id, k, m, lacks, i, off, busy, add, wake, setWake }: { id: strin
   );
   const style = { "--i": i } as CSSProperties;
   const cls = cn(ITEM, "data-disabled:opacity-40");
-  const plain = () => void add(k, p.model || send, draftEffort(asked, p.model || send, effort), p.preset, undefined, m);
-  const pick = (x: { model?: string; effort?: string; preset?: string }) => {
+  const plain = () => void add(k, p.model || send, draftEffort(asked, p.model || send, effort), p.preset, undefined, m, p.attach);
+  const pick = (x: Draft) => {
     if (x.effort) rememberEffort(k, x.effort);
     if (x.model !== undefined) {
-      void add(k, x.model, draftEffort(asked, x.model, x.effort ?? effort), p.preset, undefined, m);
+      void add(k, x.model, draftEffort(asked, x.model, x.effort ?? effort), p.preset, undefined, m, p.attach);
       return;
     }
     setP({ ...p, ...x });
@@ -277,7 +278,7 @@ function Kind({ id, k, m, lacks, i, off, busy, add, wake, setWake }: { id: strin
     return (
       <Deeper row={row} title={agentName(k)} i={i} popup="" disabled={off}>
         <Points fig={of} />
-        <KindPage k={k} at={at} add={(model, eff, preset) => (void add(k, model || send, draftEffort(asked, model || send, eff), preset, undefined, m), pages.pop())} off={off} wake={wake} setWake={setWake} />
+        <KindPage k={k} at={at} add={(model, eff, preset, attach) => (void add(k, model || send, draftEffort(asked, model || send, eff), preset, undefined, m, attach), pages.pop())} off={off} wake={wake} setWake={setWake} />
       </Deeper>
     );
   if (!asked?.models.length)
@@ -294,7 +295,7 @@ function Kind({ id, k, m, lacks, i, off, busy, add, wake, setWake }: { id: strin
       <MenuPortal>
         <Menu.Positioner className="z-50" sideOffset={4} collisionPadding={8}>
           <Menu.Popup className={cn(POPUP, "flex max-h-[min(560px,var(--available-height))] w-[min(300px,calc(100vw-16px))] flex-col p-1.5")}>
-            <DraftModels agent={k} at={at} model={p.model} effort={effort} preset={p.preset} set={pick} />
+            <DraftModels agent={k} at={at} model={p.model} effort={effort} preset={p.preset} attach={p.attach ?? ""} set={pick} />
             <AddFoot add={plain} off={off} wake={wake} setWake={setWake} />
           </Menu.Popup>
         </Menu.Positioner>
@@ -305,22 +306,22 @@ function Kind({ id, k, m, lacks, i, off, busy, add, wake, setWake }: { id: strin
 
 /** A kind's models as the panel's page (the phone's layout: no menu beside the row): one picked
  *  adds it with that one (add), the effort set first. */
-function KindPage({ k, at, add, off, wake, setWake }: { k: Agent; at: At; add: (model: string, effort: string, preset?: string) => void; off: boolean } & Waking) {
+function KindPage({ k, at, add, off, wake, setWake }: { k: Agent; at: At; add: (model: string, effort: string, preset?: string, attach?: string) => void; off: boolean } & Waking) {
   const remembered = useLastEffort(k);
-  const [p, setP] = useState<{ model: string; effort?: string; preset?: string }>({ model: "" });
+  const [p, setP] = useState<{ model: string } & Draft>({ model: "" });
   const effort = p.effort ?? remembered;
-  const pick = (x: { model?: string; effort?: string; preset?: string }) => {
+  const pick = (x: Draft) => {
     if (x.effort) rememberEffort(k, x.effort);
     if (x.model !== undefined) {
-      add(x.model, x.effort ?? effort, p.preset);
+      add(x.model, x.effort ?? effort, p.preset, p.attach);
       return;
     }
     setP({ ...p, ...x });
   };
   return (
     <>
-      <DraftModels agent={k} at={at} model={p.model} effort={effort} preset={p.preset} set={pick} />
-      <AddFoot add={() => add(p.model, effort, p.preset)} off={off} wake={wake} setWake={setWake} />
+      <DraftModels agent={k} at={at} model={p.model} effort={effort} preset={p.preset} attach={p.attach ?? ""} set={pick} />
+      <AddFoot add={() => add(p.model, effort, p.preset, p.attach)} off={off} wake={wake} setWake={setWake} />
     </>
   );
 }

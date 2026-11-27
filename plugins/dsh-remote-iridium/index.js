@@ -16,7 +16,7 @@ import { Executor, iridiumKey, refused } from './executor.js'
 import { createInproc, INPROC } from './inproc.js'
 import { stateDir, watchLocal } from './local.js'
 import { machineID } from './machine.js'
-import { OmdUltra } from './omd.js'
+import { applyStartKey, OmdUltra, startKeys } from './omd.js'
 import { ownPersona } from './persona.js'
 
 export const name = 'remote-iridium'
@@ -218,7 +218,11 @@ export function apply(ctx, config) {
   // The sessions an Iridium starts here run in this process (inproc.js), where dsh has a session
   // controller: DSH Desktop's, dsh web's. Once it is there the connections say so again.
   const persona = ownPersona(ctx)
-  const inproc = createInproc(ctx, { scope: dsh?.scope, log: say, persona, ready: () => conns().forEach((ex) => ex.drop()) })
+  // A new session's start key (OMD's Ultra) is turned on there, before its first turn.
+  const inproc = createInproc(ctx, {
+    scope: dsh?.scope, log: say, persona, ready: () => conns().forEach((ex) => ex.drop()),
+    startKey: (agent, id) => applyStartKey(ctx, String(agent.session.id), id),
+  })
   // What the dsh tells of: models, presets, workspaces, sessions; the hand-over of a windowless one.
   const headless = process.env.IRIDIUM_DESKTOP_HEADLESS === '1'
   const freeze = headless ? createFreeze(ctx, { refuse: inproc.refuse, log: say }) : null
@@ -239,6 +243,7 @@ export function apply(ctx, config) {
     sync: syncNow,
     setSync,
     freeze,
+    keys: () => startKeys(ctx),
     config: () => ({ exe: process.execPath, ...(process.argv[1] ? { hostEntry: process.argv[1] } : {}), ...(dsh?.scope ? { scope: dsh.scope } : {}) }),
   })
   // What plugins hang on a session for the Iridium's page (attach.js), as the service iridium,
@@ -266,7 +271,7 @@ export function apply(ctx, config) {
       // Connected again: all that is attached and all it tells of, again.
       connected: () => {
         attach.resend()
-        desktop.tellAll()
+        desktop.tellAll().catch((e) => say(`desktop: ${e?.message ?? e}`))
       },
       events: { 'session.button': (p) => attach.button(p?.session, p?.id, p?.user) },
       program: `dsh-remote-iridium ${version()}`, ir: fileURLToPath(new URL('./ir.js', import.meta.url)), log: (m) => say(m),
@@ -274,7 +279,7 @@ export function apply(ctx, config) {
     })
   ctx.on('loader/volatile-update', () => {
     syncOverride = null
-    desktop.tellConfig()
+    desktop.tellConfig().catch(() => {})
   })
 
   /** The Iridium on this computer, while its setting says so: connected whenever one runs. */

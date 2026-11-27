@@ -1,12 +1,55 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { inprocArgs, race } from '../inproc.js'
+import { desktopServer, inprocArgs, race } from '../inproc.js'
 
 const later = (ms, v, fail) => new Promise((ok, no) => setTimeout(() => (fail ? no(v) : ok(v)), ms))
 
 test("a hold's argv", () => {
   assert.deepEqual(inprocArgs(['@dsh-desktop', '--preset', 'omd', '--system', '/s.md', '--persona', 'own', '--keep-model']), { preset: 'omd', system: '/s.md', persona: 'own', keepModel: true })
   assert.deepEqual(inprocArgs(['@dsh-desktop']), {})
+  assert.deepEqual(inprocArgs(['@dsh-desktop', '--preset', 'omd', '--attach', 'omd.ultra.workflow']), { preset: 'omd', attach: 'omd.ultra.workflow' })
+  assert.deepEqual(inprocArgs(['@dsh-desktop', '--attach']), {})
+})
+
+/** dsh's SDK server as far as a hold's createSession uses it, over a fake Desktop. */
+function server(o) {
+  const steps = []
+  const agents = new Map()
+  const agent = (id) => ({
+    session: { id },
+    status: 'idle',
+    model: { current: () => ({ provider: 'deepseek', model: 'old' }), select: (s) => steps.push(['route', s.model]) },
+  })
+  const ctx = {
+    agents,
+    get: (n) =>
+      n === 'sessionController'
+        ? {
+            create: async ({ sessionId }) => (steps.push(['create', sessionId]), agents.set(sessionId, agent(sessionId)), { sessionId }),
+            resolveAgent: async (id) => (agents.set(id, agent(id)), { agent: agents.get(id) }),
+          }
+        : undefined,
+  }
+  class Base {
+    constructor(c) {
+      Object.assign(this, { ctx: c, disposers: [() => {}, () => {}], userQuestions: { unregister() {} }, sessions: new Map(), cwd: '/p', provider: 'deepseek', model: 'v4' })
+    }
+  }
+  const S = desktopServer(Base)
+  return { s: new S(ctx, { request() {}, notify() {} }, o), steps }
+}
+
+test('a new session made with its start key, after its route, before its first turn; never on resume', async () => {
+  const logs = []
+  const { s, steps } = server({ startKey: async (agent) => steps.push(['key', agent.session.id]), log: (m) => logs.push(m) })
+  await s.createSession('n1', false)
+  assert.deepEqual(steps, [['create', 'n1'], ['route', 'v4'], ['key', 'n1']])
+  await s.createSession('r1', true)
+  assert.deepEqual(steps.at(-1), ['route', 'v4'])
+  // A key that fails: logged, the session made all the same.
+  const f = server({ startKey: async () => Promise.reject(new Error('no OMD preset')), log: (m) => logs.push(m) })
+  assert.ok((await f.s.createSession('n2', false)).handle.agent)
+  assert.deepEqual(logs, ['start key: no OMD preset'])
 })
 
 test("the Iridium answers first: its answer, Desktop's card withdrawn", async () => {

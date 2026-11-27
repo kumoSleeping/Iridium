@@ -18,7 +18,9 @@
 //   attach.json     what a plugin here hangs on sessions ({session: {place: content}}: the service
 //                   iridium's attach, synced every 200ms: one gone from it is taken away);
 //   buttons.jsonl   each button pressed for it (session.button: {session, id, user});
-//   sync.json       its "sync new sessions" switch (true/false).
+//   sync.json       its "sync new sessions" switch (true/false);
+//   keys.json       the keys a new session may start with (desktop.config's keys: [{place, from,
+//                   content, presets?}]; none: not told).
 // SIGUSR1 drops the connection (it connects again); SIGUSR2 tells all again as dsh's events would
 // (desktop.*.changed); SIGTERM stops it and its processes.
 import { spawn } from 'node:child_process'
@@ -48,6 +50,7 @@ if (dir) {
   desktop = createDesktop(ctx, (e, p) => ex?.notify(e, p), {
     sync: () => read(dir, 'sync.json', false) === true,
     setSync: (on) => fs.writeFileSync(path.join(dir, 'sync.json'), JSON.stringify(!!on)),
+    ...(fs.existsSync(path.join(dir, 'keys.json')) ? { keys: async () => read(dir, 'keys.json', []) } : {}),
     gather: 0,
   })
   methods = { ...dshMethods(ctx), ...desktop.methods }

@@ -5,7 +5,8 @@
 // here: index.js runs it), and its sub-modes, each with its mark: the page shows one
 // key, off or the sub-mode on, a press the next (off, then each sub-mode, then off). A sub-plugin: on only while OMD is there (inject), and the only file here that knows OMD. Ultra on owns the effort: a level picked
 // in the Iridium is a plain model selection, which OMD takes for leaving Ultra, so it is turned
-// on again at the new level.
+// on again at the new level. The same key, off, is one a new session may start with (startKeys,
+// told in desktop.config; applyStartKey, at its first launch).
 
 export const name = 'remote-iridium-omd'
 export const inject = ['omd', 'iridium']
@@ -210,6 +211,48 @@ export function apply(ctx, o = {}) {
     }
     shown.clear()
   }, 'remote-iridium-omd')
+}
+
+/** The plugin rows whose presence makes an agent preset OMD's (its Workflow), and dsh's Agent Team. */
+const WORKFLOW = 'oh-my-dsh/host/tool-workflow'
+const TEAM = '@deepseek-ai/dsh-tool-agent-team'
+
+/**
+ * OMD's Ultra as a key a new session may start with (desktop.config's keys), off: its sub-modes
+ * as OMD offers them (Agent Team while dsh's is loaded and running, as OMD's cold check), for the
+ * agent presets with OMD's Workflow on (presets: all, when the registry cannot tell). None without
+ * OMD, or with no such preset. Read through ctx at each call: OMD may come and go.
+ */
+export async function startKeys(ctx) {
+  try {
+    if (!ctx.get('omd')?.ultracode) return []
+    const teamAvailable =
+      !!ctx.get('agentTeams') &&
+      [...(ctx.get('loader')?.entries?.() ?? [])].some((e) => e?.options?.name === TEAM && !e.disabled && e.fiber?.state === 2)
+    const key = { place: 'effort', from: '', content: contentOf({ eligible: true, mode: 'off', teamAvailable }) }
+    const reg = ctx.get('agentPresets')
+    if (typeof reg?.compositionInventory !== 'function') return [key]
+    const presets = []
+    for (const p of (await reg.compositionInventory()) ?? []) {
+      if (p?.broken != null || !Array.isArray(p.rows)) continue
+      if (p.rows.some((r) => r?.moduleName === WORKFLOW && r.enabled === true)) presets.push(String(p.id))
+    }
+    return presets.length ? [{ ...key, presets }] : []
+  } catch {
+    return []
+  }
+}
+
+/**
+ * The start key pressed for a new session (id: the head, on at OMD's own sub-mode; or a sub-mode),
+ * turned on before its first turn. Other ids, or no OMD: nothing.
+ */
+export async function applyStartKey(ctx, session, id) {
+  const omd = ctx.get('omd')
+  if (!omd?.ultracode || typeof id !== 'string') return
+  if (id === KEY) return ultra(omd).select(session, true)
+  const sub = id.startsWith(KEY + '.') ? id.slice(KEY.length + 1) : ''
+  if (SUBMODES.includes(sub)) return ultra(omd).select(session, true, { option: sub })
 }
 
 /** This file as a cordis sub-plugin (ctx.plugin). */

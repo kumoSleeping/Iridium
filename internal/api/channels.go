@@ -60,6 +60,7 @@ type NewMember struct {
 	Mode    string    `json:"mode,omitempty"`
 	Effort  string    `json:"effort,omitempty"`
 	Preset  string    `json:"preset,omitempty"`
+	Attach  string    `json:"attach,omitempty"`
 	Nick    string    `json:"nick,omitempty"`
 	On      []Trigger `json:"on,omitempty"`
 	// Role: start it as this role (its id or name): the role's agent, model, preset and card,
@@ -215,4 +216,7 @@ type AgentChoices struct {
 	Presets *Presets `json:"presets,omitempty"`
 	Ran     string   `json:"ran,omitempty"`
 	Effort  string   `json:"effort,omitempty"`
+	// Attached: the keys a new session may start with, as a running one's (SessionState.Attached),
+	// all off (Claude's UltraCode, OMD's Ultra): a pick is one button's id (NewSession.Attach).
+	Attached []Attached `json:"attached,omitempty"`
 }

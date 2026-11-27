@@ -10,7 +10,7 @@ type Queued struct {
 	From string `json:"from"` // the sender's name, as the agent saw it
 	// FromTerminal is the sending terminal's ID.
 	FromTerminal string `json:"fromTerminal,omitempty"`
-	FromLogin    string `json:"fromLogin,omitempty"` // and the login of that app, if one
+	FromLogin    string `json:"fromLogin,omitempty"`  // and the login of that app, if one
 	FromDevice   Device `json:"fromDevice,omitempty"` // a browser's device (Block.FromDevice)
 	Paused       bool   `json:"paused,omitempty"`
 	At           int64  `json:"at"`
@@ -71,6 +71,9 @@ type Attached struct {
 	Place   string            `json:"place"`
 	From    string            `json:"from"`
 	Content map[string]string `json:"content"`
+	// Presets: a key a session may start with (AgentChoices.Attached) is for these presets alone
+	// (dsh's); none: any.
+	Presets []string `json:"presets,omitempty"`
 }
 
 // Attach is PUT /v1/internal/sessions/{id}/attach/{place}: Content, Satori elements, or one a

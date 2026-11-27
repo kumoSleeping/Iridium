@@ -126,6 +126,10 @@ type Hosted struct {
 
 	mu         sync.Mutex
 	newSession bool // never started: its usage so far is nothing
+	// unborn: its agent has no session of it yet (none on record at its last launch, no turn
+	// since): its start keys are Iridium's to show, their pick (kept under pickKey) given at launch.
+	unborn     bool
+	pick       string
 	in         *hold.Input
 	proc       int
 	live       bool
@@ -246,6 +250,7 @@ func (m *Manager) newHosted(mt meta) *Hosted {
 		h.model = last
 	}
 	h.rules, _ = m.o.Store.Rules(mt.ID)
+	h.pick = m.o.Store.Kept(pickKey(mt.ID))
 	if c := h.savedContext(); c != nil {
 		h.ctxSum = &api.ContextSummary{Used: c.Used, Max: c.Max, At: c.At}
 	}
@@ -360,6 +365,10 @@ func (h *Hosted) launch(ctx context.Context, proc int) error {
 	o := agent.SpawnOptions{Persona: where.Self != nil && where.Self.Persona != "", Session: h.id, Resume: resume, History: history, AgentSession: h.meta.agentID(), Cwd: h.meta.Cwd, Env: m.githubEnv(m.agentEnv()), Program: m.o.Config.Programs[string(h.meta.Agent)], SystemPromptFile: prompt,
 		Model: h.meta.Model, Mode: cmp.Or(h.meta.Mode, m.defaultMode(h.meta.Agent)), Effort: h.effort, Ultracode: h.ultracode, Preset: h.preset}
 	h.turnSeen = false
+	h.unborn = !resume
+	if h.unborn {
+		o.Attach = h.launchPickLocked()
+	}
 	h.mu.Unlock()
 	if mc := h.machine(); mc != nil {
 		if err := h.remoteSpawn(mc, &o); err != nil {
@@ -835,7 +844,12 @@ func (h *Hosted) onEvent(e agent.Event) {
 		if !replay {
 			h.shownAt = h.lastActive
 		}
-		h.hadTurn, h.turnSeen = true, true
+		h.hadTurn, h.turnSeen, h.unborn = true, true, false
+		if !replay && h.pick != "" {
+			// Given at its launch; its agent's own key has the say from now on.
+			h.pick = ""
+			go func(id string) { _ = h.m.o.Store.Keep(pickKey(id), "") }(h.id)
+		}
 		if !replay {
 			h.turnAt = time.Now()
 			h.turnDenied = 0
@@ -1232,6 +1246,8 @@ func (h *Hosted) state(o store.Overlay, archived bool) api.SessionState {
 		}
 		s.Ultracode = u
 		s.Attached = append([]api.Attached{ultracodeAttached(u)}, s.Attached...)
+	} else if keys := h.startKeysLocked(&s); keys != nil {
+		s.Attached = append(keys, s.Attached...)
 	}
 	for _, c := range h.commandsLocked() {
 		s.Commands = append(s.Commands, api.Command{Name: c.Name, Description: c.Description, ArgumentHint: c.ArgumentHint})

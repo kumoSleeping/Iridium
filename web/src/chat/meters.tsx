@@ -10,7 +10,7 @@ import { useQuery } from "../api/query";
 import { Fragment, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import type { SessionState as LiveSession } from "../api/types.gen";
 import { api } from "../api/client";
-import type { Agent, AgentQuota, Context, ContextCategory, InputTokens, Model, Preset } from "../api/types.gen";
+import type { Agent, AgentQuota, Attached, Context, ContextCategory, InputTokens, Model, Preset } from "../api/types.gen";
 import { parse, type El } from "../satori";
 import { useAgent } from "../data";
 import { t, useLang } from "../i18n";
@@ -542,7 +542,7 @@ export function modelView(s: ModelOf, want?: string | null) {
 /** A button attached at the effort track (Claude's UltraCode, a plugin's: what the session's
  *  `attached` says, docs/next/plugin.md): pressed as "att:<session>:<from>:<id>"; its mark a data:
  *  image in it (<img>). */
-type AttachedKey = { press: string; label: string; pressed: boolean; disabled: boolean; title?: string; icon?: string };
+export type AttachedKey = { press: string; label: string; pressed: boolean; disabled: boolean; title?: string; icon?: string };
 
 /** The <img> in a button, a data: image: its mark. Nothing fetched from elsewhere. */
 const iconIn = (els: El[]): string | undefined => {
@@ -583,7 +583,12 @@ const textIn = (els: El[]): string => els.map((e) => (e.type === "text" ? (e.tex
  *  else the first). */
 export function attachedKeys(s: LiveSession, place: string, lang: string): AttachedKey[] {
   const a = (s.attached ?? []).find((x) => x.place === place);
-  if (!a) return [];
+  return a ? keysIn(a, lang, (id) => `att:${s.id}:${a.from}:${id}`) : [];
+}
+
+/** The buttons of a, in lang (else the one for any, else the first); press: what one presses, by
+ *  its id. */
+function keysIn(a: Attached, lang: string, press: (id: string) => string): AttachedKey[] {
   const c = a.content;
   const text = c[lang] ?? c[""] ?? Object.values(c)[0] ?? "";
   const out: AttachedKey[] = [];
@@ -592,7 +597,7 @@ export function attachedKeys(s: LiveSession, place: string, lang: string): Attac
       if (e.type === "button" && typeof e.attrs.id === "string") {
         const title = e.attrs.title;
         out.push({
-          press: `att:${s.id}:${a.from}:${e.attrs.id}`,
+          press: press(e.attrs.id),
           label: textIn(e.children).trim() || e.attrs.id,
           pressed: e.attrs.pressed !== undefined && e.attrs.pressed !== "false",
           disabled: e.attrs.disabled !== undefined && e.attrs.disabled !== "false",
@@ -606,6 +611,65 @@ export function attachedKeys(s: LiveSession, place: string, lang: string): Attac
   return out;
 }
 
+/** The key at place a new session may start with (AgentChoices.attached: Claude's UltraCode, OMD's
+ *  Ultra), all off as sent, shown with pick ("" none, else the press of one of its buttons): the
+ *  head pressed with any, the one picked pressed. A key for some presets alone, under another
+ *  (preset; "" not known: fits): its head disabled, no pick shown (fits false). */
+export function startKeys(attached: Attached[] | undefined, place: string, lang: string, pick: string, preset: string, press: (id: string) => string): { keys: AttachedKey[]; fits: boolean } {
+  const a = attached?.find((x) => x.place === place);
+  if (!a) return { keys: [], fits: true };
+  const fits = !a.presets?.length || !preset || a.presets.includes(preset);
+  const on = fits ? pick : "";
+  const keys = keysIn(a, lang, press).map((x, i) => ({ ...x, pressed: i === 0 ? on !== "" : x.press === on, disabled: x.disabled || (i === 0 && !fits) }));
+  return { keys, fits };
+}
+
+/** The pick a press of start keys' key makes (keyCycle): the head alone on or off, else the next
+ *  sub-mode; the last one passed, none. */
+export function nextPick(keys: AttachedKey[]): string | undefined {
+  const c = keyCycle(keys);
+  const head = keys[0];
+  if (!c || !head) return undefined;
+  return c.next === head ? (c.want[head.press] ? head.press : "") : c.next.press;
+}
+
+/** The key at the effort track's right for keys (a session's, a new agent's: chat/channel/pick.tsx):
+ *  the first button the key; the rest its sub-modes, shown in it one at a time, a press the next
+ *  (the user, 2026-11-11: no row of them under the track). press: the button to press and what
+ *  that turns on and off. featTag: its name beside the level while on. */
+export function featKeys(keys: AttachedKey[], press: (next: AttachedKey, want: Record<string, boolean>) => void) {
+  const feat = keys[0];
+  const cycle = keyCycle(keys);
+  const cur = cycle?.cur;
+  const name = feat && [feat.label, cur?.label].filter(Boolean).join(" · ");
+  const tip = feat && [name, feat.title].filter(Boolean).join(" · ");
+  // One key, its mark, pressed or not (the user, 2026-11-06); lit warm when on. A plugin's the
+  // same (the user, 2026-11-09).
+  const featKey = feat && (
+    <Tip label={tip}>
+      <button
+        type="button"
+        aria-pressed={feat.pressed}
+        aria-label={name}
+        disabled={feat.disabled}
+        onClick={() => cycle && press(cycle.next, cycle.want)}
+        className={cn("g-press grid size-7 shrink-0 place-items-center rounded-md transition-colors duration-(--dur-2) disabled:opacity-40 pointer-coarse:size-10", feat.pressed ? "bg-fill text-[#ff4a17] hover:bg-fill-2" : "text-ink-4 hover:bg-fill hover:text-ink-2")}
+      >
+        <span key={cur?.press ?? ""} className="g-pop grid place-items-center">
+          <KeyMark icon={cur?.icon ?? feat.icon} size={16} className={cn("transition-transform duration-(--dur-2) ease-(--ease-spring)", feat.pressed && "scale-110")} />
+        </span>
+      </button>
+    </Tip>
+  );
+  // On: said in words beside the level too (the user, 2026-11-06).
+  const featTag = feat?.pressed && (
+    <span key={name} className="g-fade text-xs font-medium text-[#ff4a17]">
+      {name}
+    </span>
+  );
+  return { feat, cur, name, featKey, featTag };
+}
+
 /** A session's model menu, wherever it is opened (the composer's key, an agent's face's menu:
  *  kumo, 2026-11-16, one menu, the same in both): its models (those a session of its kind said
  *  last, before its own agent says), the effort track, its features (UltraCode). What a pick
@@ -616,15 +680,16 @@ export function useModelMenu(s: LiveSession) {
   const [want, setWant] = useState<{ value: string; sent: string } | null>(null);
   // A key pressed shows at once, till the session says it is so (or the press failed).
   const [pressWant, setPressWant] = useState<Record<string, boolean>>({});
-  const info = useAgent(s.agent);
   if (want !== null && ((s.pick ?? "") === want.sent || s.model === want.value)) setWant(null);
   // Its agent has not said its models yet (not started): those a session of its kind there said
   // last, the one it will run among them.
   const said = !!s.models?.length;
   const asked = useQuery({ ...choicesQ(s.agent, { machine: s.machine || undefined }), enabled: !said }).data;
-  const base = attachedKeys(s, "effort", lang);
-  // Before its agent runs (none attached yet), Claude's UltraCode, off.
-  if (!base.length && info?.ultracode) base.push({ press: "", label: t("composer.ultracode"), pressed: false, disabled: false, title: t("composer.ultracodeHint") });
+  const info = useAgent(s.agent);
+  const own = attachedKeys(s, "effort", lang);
+  // Before its agent runs (none attached yet), Claude's UltraCode, off: a press goes to Iridium's
+  // own ("ir"). Another agent's start keys are the session's own state's (the server's, with its pick).
+  const base = own.length || !info?.ultracode ? own : startKeys(asked?.attached, "effort", lang, "", s.preset || asked?.presets?.default || "", (id) => `att:${s.id}:ir:${id}`).keys;
   const keys = base.map((x) => (x.press in pressWant ? { ...x, pressed: pressWant[x.press] } : x));
   const reached = Object.keys(pressWant).filter((p) => {
     const x = base.find((y) => y.press === p);
@@ -659,44 +724,13 @@ export function useModelMenu(s: LiveSession) {
   const press = async (x: AttachedKey, want: Record<string, boolean>) => {
     setPressWant((m) => ({ ...m, ...want }));
     try {
-      if (x.press) await api.button(x.press);
-      else await api.ultracode(s.id, !!want[x.press]);
+      await api.button(x.press);
     } catch (e) {
       setPressWant((m) => Object.fromEntries(Object.entries(m).filter(([p]) => !(p in want))));
       toast(t("err.feature", { name: x.label }), { error: true, description: errText(e) });
     }
   };
-  // The first button the key at the track's right; the rest its sub-modes, shown in it one at a
-  // time, a press the next (the user, 2026-11-11: no row of them under the track).
-  const feat = keys[0];
-  const cycle = keyCycle(keys);
-  const cur = cycle?.cur;
-  const name = feat && [feat.label, cur?.label].filter(Boolean).join(" · ");
-  const tip = feat && [name, feat.title].filter(Boolean).join(" · ");
-  // One key, its mark, pressed or not (the user, 2026-11-06); lit warm when on. A plugin's the
-  // same (the user, 2026-11-09).
-  const featKey = feat && (
-    <Tip label={tip}>
-      <button
-        type="button"
-        aria-pressed={feat.pressed}
-        aria-label={name}
-        disabled={feat.disabled}
-        onClick={() => cycle && void press(cycle.next, cycle.want)}
-        className={cn("g-press grid size-7 shrink-0 place-items-center rounded-md transition-colors duration-(--dur-2) disabled:opacity-40 pointer-coarse:size-10", feat.pressed ? "bg-fill text-[#ff4a17] hover:bg-fill-2" : "text-ink-4 hover:bg-fill hover:text-ink-2")}
-      >
-        <span key={cur?.press ?? ""} className="g-pop grid place-items-center">
-          <KeyMark icon={cur?.icon ?? feat.icon} size={16} className={cn("transition-transform duration-(--dur-2) ease-(--ease-spring)", feat.pressed && "scale-110")} />
-        </span>
-      </button>
-    </Tip>
-  );
-  // On: said in words beside the level too (the user, 2026-11-06).
-  const featTag = feat?.pressed && (
-    <span key={name} className="g-fade text-xs font-medium text-[#ff4a17]">
-      {name}
-    </span>
-  );
+  const { feat, cur, name, featKey, featTag } = featKeys(keys, (x, w) => void press(x, w));
   const on = feat?.pressed ? [feat] : [];
   return { v, models, levels, level, label, name, feat, cur, on, featKey, featTag, pickModel, setEffort };
 }

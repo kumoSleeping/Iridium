@@ -36,7 +36,8 @@ export async function loadSdk(scope) {
 }
 
 /** What a hold's argv after INPROC says: --preset <id> (a new session's), --system <file>,
- *  --persona own (its persona is the Iridium's), --keep-model (resumed with the model it has). */
+ *  --persona own (its persona is the Iridium's), --keep-model (resumed with the model it has),
+ *  --attach <id> (the start key a new session is made with: a button id of desktop.config's keys). */
 export function inprocArgs(argv) {
   const o = {}
   for (let i = 1; i < argv.length; i++) {
@@ -45,6 +46,7 @@ export function inprocArgs(argv) {
     if (k === '--preset' && v !== undefined) (o.preset = v), i++
     else if (k === '--system' && v !== undefined) (o.system = v), i++
     else if (k === '--persona' && v !== undefined) (o.persona = v), i++
+    else if (k === '--attach' && v !== undefined) (o.attach = v), i++
     else if (k === '--keep-model') o.keepModel = true
   }
   return o
@@ -61,7 +63,7 @@ const sessionOf = (method, p) =>
  * Desktop's window (createInproc). Stopped, it cancels a turn its sessions run but leaves their
  * agents to Desktop.
  */
-function desktopServer(Base) {
+export function desktopServer(Base) {
   return class DesktopSdkServer extends Base {
     constructor(ctx, transport, o) {
       const own = new Set() // sessions it opened or opens
@@ -116,6 +118,14 @@ function desktopServer(Base) {
         if (!agent) throw new Error(`no agent of the new session "${sessionId}"`)
       }
       if (!(resume && this.o.keepModel)) this.route(agent)
+      // A new session's start key, on before its first turn; one that fails leaves it off.
+      if (!resume && this.o.startKey) {
+        try {
+          await this.o.startKey(agent)
+        } catch (e) {
+          this.o.log?.(`start key: ${e?.message ?? e}`)
+        }
+      }
       const detach = this.o.attach?.(agent) ?? (() => {})
       const rec = {
         handle: {
@@ -233,11 +243,11 @@ export function race(req, next, ask) {
 /**
  * The holds run in this process. ctx: the plugin's; scope: the dsh's @deepseek-ai; log; persona:
  * persona.js's ownPersona (a session whose persona is the Iridium's), if any; ready(), once holds
- * can run here. start()
+ * can run here; startKey(agent, id), the start key id pressed for a new session (--attach). start()
  * serves one: {hold, argv, env, input (its stdin), out (fd of its out.log), err (fd), exited(x)};
  * returns {stop(hard)}.
  */
-export function createInproc(ctx, { scope, log = () => {}, persona = null, ready = () => {} } = {}) {
+export function createInproc(ctx, { scope, log = () => {}, persona = null, ready = () => {}, startKey = null } = {}) {
   const servers = new Set()
   let refused = false // handed over to Desktop (desktop.freeze): no session made here
   // dsh's SDK server reads its services as properties: a context that has them injected, while
@@ -355,7 +365,10 @@ export function createInproc(ctx, { scope, log = () => {}, persona = null, ready
         return () => offs.forEach((f) => typeof f === 'function' && f())
       }
       if (!here) throw new Error('this dsh has no session controller (not DSH Desktop nor dsh web)')
-      const server = new Server(here, transport, { preset: o.preset, keepModel: o.keepModel, attach, refuse: () => refused })
+      const server = new Server(here, transport, {
+        preset: o.preset, keepModel: o.keepModel, attach, refuse: () => refused,
+        ...(o.attach && startKey ? { startKey: (agent) => startKey(agent, o.attach), log: (m) => log(`${hold}: ${m}`) } : {}),
+      })
       servers.add(server)
       let ended = false
       const end = async (x) => {

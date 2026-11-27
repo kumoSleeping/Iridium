@@ -58,6 +58,9 @@ type Channel struct {
 	presets  map[string]presetList    // by machine
 	catalogs map[string]*catalogEntry // by machine
 
+	keyMu sync.Mutex
+	keys  map[string]startKeys // what desktop.config last told (keys.go), by executor id
+
 	imageMu    sync.Mutex
 	images     map[string][]byte // pictures read (image.go), by sha256
 	imageOrder []string          // their sums, oldest first
@@ -74,6 +77,7 @@ var (
 	_ harness.Syncer          = (*Channel)(nil)
 	_ harness.ComputerStater  = (*Channel)(nil)
 	_ harness.SessionSearcher = (*Channel)(nil)
+	_ harness.StartKeyer      = (*Channel)(nil)
 )
 
 // New is dsh's channel; it registers event handlers on o.Remote for DSH Desktop updates.
@@ -136,10 +140,16 @@ func (c *Channel) onMachineChanged(id string) {
 		return
 	}
 	mc := c.o.Remote.Machine(id)
-	if mc == nil || !mc.IsLocal() {
+	if mc == nil {
 		return
 	}
 	hi, online := mc.Hello()
+	if !online {
+		c.dropKeys(id)
+	}
+	if !mc.IsLocal() {
+		return
+	}
 	if online && mc.Has(CapInproc) {
 		c.localMu.Lock()
 		_, seen := c.localUp[id]
@@ -220,6 +230,16 @@ func (c *Channel) onDesktopConfig(machine string, params json.RawMessage) {
 		return
 	}
 	key := c.machineKey(machine)
+	if c.putKeys(machine, key, cfg.Keys) {
+		// The sessions there not started yet show the keys as now told.
+		if h := c.h(); h != nil {
+			go func() {
+				for _, id := range h.Sessions(api.AgentDsh, key) {
+					h.ShowAgain(id)
+				}
+			}()
+		}
+	}
 	if key == "" && c.o.StateDir != "" {
 		go c.persistDesktopPath(cfg)
 	}

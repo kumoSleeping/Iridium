@@ -363,9 +363,11 @@ func (d *Driver) Spawn(o agent.SpawnOptions) (hold.Spec, error) {
 }
 
 // spawnInproc builds the hold spec for a session served inside DSH Desktop's own process:
-// argv[0] is "@dsh-desktop", with --preset (new sessions only), --system (written via LaunchFile),
-// --persona own (when Iridium supplies its own persona), and --keep-model (when resuming without
-// an explicit model so Desktop's current selection is not overwritten). No --profile sdk, no patch.
+// argv[0] is "@dsh-desktop", with --preset (new sessions only), --attach (new sessions only: the
+// start key's button id, OMD's Ultra, pressed before the first turn), --system (written via
+// LaunchFile), --persona own (when Iridium supplies its own persona), and --keep-model (when
+// resuming without an explicit model so Desktop's current selection is not overwritten). No
+// --profile sdk, no patch.
 func (d *Driver) spawnInproc(o agent.SpawnOptions, env []string, mode string) (hold.Spec, error) {
 	suffix := ""
 	if o.SystemPromptFile != "" {
@@ -378,6 +380,9 @@ func (d *Driver) spawnInproc(o agent.SpawnOptions, env []string, mode string) (h
 	argv := []string{InprocArgv0}
 	if !o.Resume && o.Preset != "" {
 		argv = append(argv, "--preset", o.Preset)
+	}
+	if !o.Resume && o.Attach != "" {
+		argv = append(argv, "--attach", o.Attach)
 	}
 	if strings.TrimSpace(suffix) != "" {
 		path, err := o.LaunchFile(SystemFile, []byte(suffix))

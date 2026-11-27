@@ -142,9 +142,14 @@ func TestChannelOfSeveral(t *testing.T) {
 	if len(choices.Models) != len(first.Models) || choices.Models == nil || choices.Efforts == nil {
 		t.Errorf("choices: %+v, the session's %+v", choices, first.Models)
 	}
-	l.want(200, "web", "GET", "/v1/internal/agents/pi/choices", nil, &choices)
-	if len(choices.Models) != 0 {
-		t.Errorf("choices of a kind that never ran: %+v", choices)
+	// The keys it may start with: Claude's UltraCode, off.
+	if a := choices.Attached; len(a) != 1 || a[0].From != session.FromIR || !strings.Contains(a[0].Content["en"], `id="claude.ultracode"`) || strings.Contains(a[0].Content["en"], "pressed") {
+		t.Errorf("start keys: %+v", a)
+	}
+	var pi api.AgentChoices
+	l.want(200, "web", "GET", "/v1/internal/agents/pi/choices", nil, &pi)
+	if len(pi.Models) != 0 || pi.Attached != nil {
+		t.Errorf("choices of a kind that never ran: %+v", pi)
 	}
 	// What was kept is answered at once, with the presets kept beside, no session of it asked.
 	_ = l.s.st.Keep(choicesKey(api.AgentDsh, ""), `{"models":[{"value":"flash","name":"Flash"}],"efforts":[]}`)

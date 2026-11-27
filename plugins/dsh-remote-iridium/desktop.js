@@ -1,7 +1,7 @@
 // What the dsh this plugin runs in (DSH Desktop's process, a dsh web profile) tells the Iridium
 // (its docs/exec.md "DSH Desktop"), asked (desktop.* requests) and as it changes (desktop.*
 // events): its models, its agent presets, its workspaces, its open sessions, the plugin's "sync new
-// sessions" switch; and, in a windowless one the Iridium started, the hand-over to Desktop
+// sessions" switch, the keys a new session may start with; and, in a windowless one the Iridium started, the hand-over to Desktop
 // (desktop.freeze). Nothing is polled: dsh's own events say when to tell again.
 import { RemoteError } from './executor.js'
 
@@ -91,7 +91,8 @@ export function openSessions(ctx) {
 
 /**
  * desktop.* for the executor (methods) and its events (sent by emit(event, params) while
- * connected). o: sync() the "sync new sessions" switch; config() what else desktop.config says;
+ * connected). o: sync() the "sync new sessions" switch; keys() the keys a new session may start
+ * with (async, api.Attached's; none given: not told); config() what else desktop.config says;
  * freeze() the hand-over of a windowless one ({frozen, running}).
  */
 export function createDesktop(ctx, emit, o = {}) {
@@ -111,7 +112,16 @@ export function createDesktop(ctx, emit, o = {}) {
   const tellModels = () => later('desktop.models.changed', () => modelsOf(ctx))
   const tellPresets = () => later('desktop.presets.changed', () => ({}))
   const tellWorkspaces = () => later('desktop.workspaces.changed', () => workspacesOf(ctx))
-  const config = () => ({ syncNewSessions: !!o.sync?.(), ...(o.config?.() ?? {}) })
+  const keys = async () => {
+    try {
+      const k = await o.keys()
+      return Array.isArray(k) ? k : []
+    } catch {
+      return []
+    }
+  }
+  const config = async () => ({ syncNewSessions: !!o.sync?.(), ...(o.keys ? { keys: await keys() } : {}), ...(o.config?.() ?? {}) })
+  const tellConfig = () => later('desktop.config', config)
 
   const on = (name, fn) => {
     try {
@@ -126,7 +136,9 @@ export function createDesktop(ctx, emit, o = {}) {
     if (event?.type === 'session/title' || event?.type === 'user/message' || event?.type === 'turn/end') tellSessions()
   })
   for (const e of ['llm/models-updated', 'llm/adapters-updated']) on(e, tellModels)
-  on('plugin-manager/changed', () => (tellPresets(), tellModels()))
+  on('plugin-manager/changed', () => (tellPresets(), tellModels(), tellConfig()))
+  // Plugins turned on or off, presets edited (the start keys: OMD, its presets, Agent Team).
+  for (const e of ['loader/config-update', 'settings/document-updated']) on(e, tellConfig)
   on('domain/changed', (change) => {
     // The workspace registry's (sessions filed, archived): dsh's storage domains all say this.
     if (!change?.domain || /workspace/i.test(String(change.domain))) tellWorkspaces()
@@ -136,9 +148,9 @@ export function createDesktop(ctx, emit, o = {}) {
     pending.clear()
   }, 'remote-iridium-desktop: pending')
 
-  /** All of it again, as on a new connection. */
-  const tellAll = () => {
-    emit('desktop.config', config())
+  /** All of it again, as on a new connection: the config first. */
+  const tellAll = async () => {
+    emit('desktop.config', await config())
     emit('desktop.workspaces.changed', workspacesOf(ctx))
     emit('desktop.sessions.changed', { full: true, sessions: openSessions(ctx) })
     tellModels()
@@ -174,7 +186,7 @@ export function createDesktop(ctx, emit, o = {}) {
         if (!o.setSync) throw new RemoteError('unsupported', 'syncNewSessions cannot be changed here')
         await o.setSync(p.syncNewSessions)
       }
-      const c = config()
+      const c = await config()
       emit('desktop.config', c)
       return c
     },
@@ -183,7 +195,7 @@ export function createDesktop(ctx, emit, o = {}) {
       return o.freeze()
     },
   }
-  return { methods, tellAll, tellConfig: () => emit('desktop.config', config()), tellSessions }
+  return { methods, tellAll, tellConfig: async () => emit('desktop.config', await config()), tellSessions }
 }
 
 /**

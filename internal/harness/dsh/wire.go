@@ -109,6 +109,9 @@ type DesktopConfigEvent struct {
 	HostEntry       string `json:"hostEntry,omitempty"`
 	RuntimeDir      string `json:"runtimeDir,omitempty"`
 	Scope           string `json:"scope,omitempty"`
+	// Keys: the keys a new session there may start with (OMD's Ultra), all off, each with the
+	// presets it is for; none: OMD not loaded.
+	Keys []api.Attached `json:"keys,omitempty"`
 }
 
 // DesktopFreezeReply answers desktop.freeze (sent to a headless host before handing off to real Desktop).

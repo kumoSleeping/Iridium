@@ -41,8 +41,9 @@ export const prefetchRoles = () => void queryClient.prefetchQuery(rolesQ(getCarr
 const NONE: Role[] = [];
 
 /** What a start as a role takes for that one session: its model and preset ("" or none: the
- *  role's), its effort ("" or none: the agent's own). */
-export type RolePick = { model?: string; effort?: string; preset?: string };
+ *  role's), its effort ("" or none: the agent's own), the key it starts with pressed (attach: a
+ *  button's id; "" or none, none). */
+export type RolePick = { model?: string; effort?: string; preset?: string; attach?: string };
 
 /** A role as it would start: the role, and the effort of that start. */
 export type RoleNow = Role & { effort?: string };
@@ -66,12 +67,13 @@ export const roleLine = (role: RoleNow, models?: Model[], agent = true) => [agen
 
 /** What starting as role sends, in a new session (NewSession) or an invite (NewMember): the
  *  role, and only what pick changes of it. */
-export function roleStart(role: Role, pick: RolePick = {}): { role: string; model?: string; effort?: string; preset?: string } {
+export function roleStart(role: Role, pick: RolePick = {}): { role: string; model?: string; effort?: string; preset?: string; attach?: string } {
   const differs = (v: string | undefined, own: string | undefined) => (v && v !== (own ?? "") ? v : undefined);
   const model = differs(pick.model, role.model);
   const effort = pick.effort || undefined;
   const preset = differs(pick.preset, role.preset);
-  return { role: role.id, ...(model && { model }), ...(effort && { effort }), ...(preset && { preset }) };
+  const attach = pick.attach || undefined;
+  return { role: role.id, ...(model && { model }), ...(effort && { effort }), ...(preset && { preset }), ...(attach && { attach }) };
 }
 
 /** A role's face, round: its own, else its agent's logo. */
@@ -98,7 +100,7 @@ export function RoleLine({ role, at, logo, className }: { role: RoleNow; at: At;
   );
 }
 
-/** The model and effort a start as role takes, in a menu's popup: the role's model ticked till
+/** The model, effort and start key a start as role takes, in a menu's popup: the role's model ticked till
  *  changed, the agent's own effort till one is picked, as for any agent. A model picked or a
  *  level let go of is told (set), nothing is started. */
 export function RoleModels({ role, at, pick, set }: { role: Role; at: At; pick: RolePick; set: (p: RolePick) => void }) {
@@ -107,7 +109,7 @@ export function RoleModels({ role, at, pick, set }: { role: Role; at: At; pick: 
   return (
     <Suspense fallback={<LoaderCircle size={15} className="mx-auto my-2.5 animate-spin text-ink-4" />}>
       {/* The agent's own default comes as "": named here, the role's model being another. */}
-      <DraftModels agent={role.agent} at={at} model={now.model ?? ""} effort={now.effort ?? ""} preset={now.preset} set={(x) => set({ ...pick, ...x, ...(x.model === "" ? { model: draftDefault(asked).def?.value ?? "" } : {}) })} />
+      <DraftModels agent={role.agent} at={at} model={now.model ?? ""} effort={now.effort ?? ""} preset={now.preset} attach={pick.attach ?? ""} set={(x) => set({ ...pick, ...x, ...(x.model === "" ? { model: draftDefault(asked).def?.value ?? "" } : {}) })} />
     </Suspense>
   );
 }

@@ -37,7 +37,6 @@ import type {
   SetModel,
   SetPreset,
   Presets,
-  SetUltracode,
   Settings,
   SettingsPatch,
   AppAgents,
@@ -465,7 +464,6 @@ export const api = {
   effort: (id: string, effort: string) => writeAgain<{ ok: boolean }>("PUT", `${S(id)}/effort`, { effort }),
   preset: (id: string, preset: string) => writeAgain<{ ok: boolean }>("PUT", `${S(id)}/preset`, { preset } satisfies SetPreset),
   presets: (id: string) => get<Presets>(`${S(id)}/presets`),
-  ultracode: (id: string, on: boolean) => writeAgain<{ ok: boolean }>("PUT", `${S(id)}/ultracode`, { ultracode: on } satisfies SetUltracode),
   rules: (id: string) => get<AllowRule[]>(`${S(id)}/rules`),
   clearRules: (id: string) => write<{ ok: boolean }>("DELETE", `${S(id)}/rules`),
 

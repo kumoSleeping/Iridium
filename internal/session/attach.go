@@ -218,9 +218,13 @@ func (m *Manager) Press(ctx context.Context, sid, from, id string, u PressUser) 
 // ultracodeButton is Claude's UltraCode's key's id.
 const ultracodeButton = "claude.ultracode"
 
-// pressOwn is a button of Iridium's own pressed: UltraCode switched.
+// pressOwn is a button of Iridium's own pressed: UltraCode switched, or a start key's pick
+// changed (startkeys.go).
 func (m *Manager) pressOwn(ctx context.Context, id, button string) error {
 	if button != ultracodeButton {
+		if done, err := m.pressStart(id, button); done {
+			return err
+		}
 		return fmt.Errorf("%w: no button %q", ErrBadRequest, button)
 	}
 	st, err := m.State(id)

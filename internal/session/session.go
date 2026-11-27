@@ -351,6 +351,9 @@ func (m *Manager) create(ctx context.Context, req api.NewSession, from, name str
 			return "", err
 		}
 	}
+	if err := m.startPick(mt.ID, req.Agent, machine, req.Attach); err != nil {
+		return "", err
+	}
 	if prep != nil {
 		if err := prep(mt.ID); err != nil {
 			return "", err
@@ -372,7 +375,9 @@ func (m *Manager) create(ctx context.Context, req api.NewSession, from, name str
 	m.mu.Lock()
 	m.hosted[mt.ID] = h
 	m.mu.Unlock()
-	h.newSession = true
+	h.mu.Lock()
+	h.newSession, h.unborn = true, true
+	h.mu.Unlock()
 	h.show() // Iridium's own: shown from the start
 	if req.Workspace != 0 {
 		if err := m.o.Store.Assign(mt.ID, req.Workspace, byHand); err != nil {

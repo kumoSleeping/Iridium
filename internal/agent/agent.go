@@ -64,6 +64,9 @@ type SpawnOptions struct {
 	Effort           string // the thinking effort; empty: the agent's default
 	Ultracode        *bool  // Claude's ultracode; nil: never set, the user's own settings hold
 	Preset           string // the agent preset (dsh's tools and prompt); empty: the agent's default
+	// Attach: a key the session was started with pressed (api.NewSession.Attach: a button's id of
+	// its channel's StartKeys), given on its first launch alone; empty: none.
+	Attach string
 	// Remote: the agent runs at an executor (docs/exec.md), not here: Cwd and Env are its, and
 	// nothing of the agent is looked up on this machine. nil: here.
 	Remote *Remote

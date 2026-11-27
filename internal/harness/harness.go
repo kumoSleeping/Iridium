@@ -146,6 +146,15 @@ type Presets interface {
 	Presets(ctx context.Context, machine string) ([]agent.Preset, string, error)
 }
 
+// StartKeyer: the keys (api.Attached at a place, as a running session's: OMD's Ultra) a session
+// of the agent at machine may be started with, all off, each with the presets it is for (Presets;
+// none: any), as last told (not asked: called with a session's lock held); none: nil.
+// DefaultPreset is the preset a session given none runs with there, as known now ("": not known).
+type StartKeyer interface {
+	StartKeys(machine string) []api.Attached
+	DefaultPreset(machine string) string
+}
+
 // Imager reads a picture a session's record names by a handle of its agent's own (dsh's
 // attachments) instead of carrying it, where the session runs. done false: not a handle of its;
 // the core has none to show.

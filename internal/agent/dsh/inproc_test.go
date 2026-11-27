@@ -110,3 +110,29 @@ func hasArgPair(argv []string, k, v string) bool {
 	}
 	return false
 }
+
+func TestSpawnInprocAttachFirstLaunchOnly(t *testing.T) {
+	dir := t.TempDir()
+	host := &agent.Host{Inproc: true, Argv: []string{InprocArgv0}}
+	spec, err := New(Options{}).Spawn(agent.SpawnOptions{Session: "s1", Cwd: dir, Attach: "omd.ultra.team", Host: host})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasArgPair(spec.Argv, "--attach", "omd.ultra.team") {
+		t.Fatalf("first launch: missing --attach omd.ultra.team in %v", spec.Argv)
+	}
+	spec, err = New(Options{}).Spawn(agent.SpawnOptions{Session: "s1", Cwd: dir, Resume: true, Attach: "omd.ultra.team", Host: host})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(spec.Argv, "--attach") {
+		t.Fatalf("resume must not pass --attach: %v", spec.Argv)
+	}
+	spec, err = New(Options{}).Spawn(agent.SpawnOptions{Session: "s2", Cwd: dir, Host: host})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(spec.Argv, "--attach") {
+		t.Fatalf("no key: must not pass --attach: %v", spec.Argv)
+	}
+}

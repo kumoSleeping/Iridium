@@ -58,7 +58,7 @@ test('workspaces, and the sessions open told of as dsh says they change', async 
       { id: 'sub', cwd: '/p', title: 't sub', last: 5, updatedAt: 5, sub: true, parent: 's1', open: true, ended: true },
     ],
   })
-  d.tellAll()
+  await d.tellAll()
   assert.deepEqual(sent.slice(-3).map(([e]) => e), ['desktop.config', 'desktop.workspaces.changed', 'desktop.sessions.changed'])
   assert.deepEqual(sent.find(([e]) => e === 'desktop.config')[1], { syncNewSessions: true })
   // On demand: a search, or all.
@@ -88,4 +88,24 @@ test("the hand-over: stores written no more, no session made, the process ends o
   f.fire('agent/status', {})
   await new Promise((r) => setImmediate(() => setImmediate(r)))
   assert.equal(exited, 0)
+})
+
+test('the keys a new session may start with, in desktop.config, told again as plugins change', async () => {
+  const f = fake()
+  const sent = []
+  let keys = [{ place: 'effort', from: '', content: { en: '<button id="omd.ultra">Ultra</button>' }, presets: ['omd'] }]
+  const d = createDesktop(f.ctx, (e, p) => sent.push([e, p]), { sync: () => false, keys: async () => keys, gather: 0 })
+  await d.tellAll()
+  assert.deepEqual(sent[0], ['desktop.config', { syncNewSessions: false, keys }])
+  assert.deepEqual(sent.slice(0, 3).map(([e]) => e), ['desktop.config', 'desktop.workspaces.changed', 'desktop.sessions.changed'])
+  keys = []
+  f.fire('loader/config-update')
+  f.fire('plugin-manager/changed', {}) // gathered: one event
+  await new Promise((r) => setTimeout(r, 20))
+  const configs = sent.filter(([e]) => e === 'desktop.config')
+  assert.equal(configs.length, 2)
+  assert.deepEqual(configs[1][1], { syncNewSessions: false, keys: [] })
+  // One that fails: none.
+  const d2 = createDesktop(f.ctx, () => {}, { keys: async () => { throw new Error('no') } })
+  assert.deepEqual(await d2.methods['desktop.config.set']({}), { syncNewSessions: false, keys: [] })
 })

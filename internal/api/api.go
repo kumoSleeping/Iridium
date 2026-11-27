@@ -446,6 +446,10 @@ type NewSession struct {
 	Mode   string `json:"mode,omitempty"`
 	Effort string `json:"effort,omitempty"`
 	Preset string `json:"preset,omitempty"`
+	// Attach: a key it starts with pressed (AgentChoices.Attached: one button's id there, as
+	// "claude.ultracode", "omd.ultra.workflow"); before its first message a press of the keys
+	// shown changes it.
+	Attach string `json:"attach,omitempty"`
 	// Workspace: the workspace it goes in (0: as discovery classifies its folder; the caller's if
 	// that holds it).
 	Workspace int64 `json:"workspace,omitempty"`
