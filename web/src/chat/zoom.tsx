@@ -9,14 +9,27 @@
 // once, fit to the window, and that drawing stretched (Chrome, the Windows app: a picture at its
 // own pixels as blurred as its fit; otae-c, 2026-11-27). A transform scales it only while it is
 // moved by hand or eased, from what is laid out to what is asked.
+//
+// Among others (gallery.tsx), a swipe across it at fit steps to the one before or after, and its
+// thumbnail stands where it will be till it has come.
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { cn } from "../ui";
 import { bound, maxScale, ORIGIN, zoomAt, type Pt } from "./zoom-lib";
 
 type Pointer = { x: number; y: number };
 
-/** corner: keys at the top right of the picture as it shows, kept inside the window. */
-export function Viewer({ src, name, close, corner }: { src: string; name: string; close: () => void; corner?: ReactNode }) {
+/** The share of its own pixels a picture w × h is fit at in a window vw × vh: the window less the
+ *  margins its classes below keep, never past its own pixels. */
+function fitIn(w: number, h: number, vw: number, vh: number): number {
+  const wide = window.matchMedia("(width >= 40rem)").matches;
+  return Math.min(1, (vw - (wide ? 128 : 64)) / w, (vh - (wide ? 128 : 96)) / h);
+}
+
+/** corner: keys at the top right of the picture as it shows, kept inside the window. under: what
+ *  shows till it has come, at its fit by size (its own, as the server read it). step: among others,
+ *  to the one before (-1) or after (1), by a swipe at fit. foot: at the foot while it is not
+ *  zoomed (its scale is there then). */
+export function Viewer({ src, name, close, corner, under, size, step, foot }: { src: string; name: string; close: () => void; corner?: ReactNode; under?: string; size?: { w: number; h: number }; step?: (d: -1 | 1) => void; foot?: ReactNode }) {
   const stage = useRef<HTMLDivElement>(null);
   const img = useRef<HTMLImageElement>(null);
   const [scale, setScale] = useState(1);
@@ -32,8 +45,9 @@ export function Viewer({ src, name, close, corner }: { src: string; name: string
   const now = useRef({ scale: 1, offset: ORIGIN });
   now.current = { scale, offset };
   const pointers = useRef(new Map<number, Pointer>());
-  // on: it began on the picture (once captured, the stage is every event's target).
-  const gesture = useRef<{ from: Pointer; offset: Pt; dist?: number; scale?: number; moved: boolean; on?: boolean } | null>(null);
+  // on: it began on the picture (once captured, the stage is every event's target); two: two
+  // fingers had it.
+  const gesture = useRef<{ from: Pointer; offset: Pt; dist?: number; scale?: number; moved: boolean; on?: boolean; two?: boolean } | null>(null);
   const lastTap = useRef<{ t: number; x: number; y: number } | null>(null);
   const wheelEnd = useRef<ReturnType<typeof setTimeout>>(undefined);
 
@@ -69,9 +83,8 @@ export function Viewer({ src, name, close, corner }: { src: string; name: string
     const el = img.current;
     const st = stage.current;
     if (!el?.naturalWidth || !el.naturalHeight || !st) return;
-    // As the classes below fit it: the window less its margins, never past its own pixels.
-    const wide = window.matchMedia("(width >= 40rem)").matches;
-    const k = Math.min(1, (st.clientWidth - (wide ? 128 : 64)) / el.naturalWidth, (st.clientHeight - (wide ? 128 : 96)) / el.naturalHeight);
+    // As the classes below fit it.
+    const k = fitIn(el.naturalWidth, el.naturalHeight, st.clientWidth, st.clientHeight);
     if (!(k > 0)) return;
     const b = { w: el.naturalWidth * k, h: el.naturalHeight * k };
     baseNow.current = b;
@@ -169,11 +182,17 @@ export function Viewer({ src, name, close, corner }: { src: string; name: string
     if (pointers.current.size > 0) {
       // One finger of two lifted: the other goes on moving it, from here.
       const [p] = [...pointers.current.values()] as [Pointer];
-      gesture.current = { from: p, offset: now.current.offset, moved: true };
+      gesture.current = { from: p, offset: now.current.offset, moved: true, two: true };
       return;
     }
     gesture.current = null;
     setLive(false);
+    // Swiped across at fit, by one finger or the mouse: the one before or after.
+    if (step && g?.moved && !g.dist && !g.two && e.type !== "pointercancel" && now.current.scale <= 1) {
+      const dx = e.clientX - g.from.x;
+      if (Math.abs(dx) > 48 && Math.abs(dx) > 1.5 * Math.abs(e.clientY - g.from.y)) step(dx < 0 ? 1 : -1);
+      return;
+    }
     if (!g || g.moved || e.type === "pointercancel") return;
     // A press: two close together zoom; one beside the picture, or on it at fit, shuts it.
     const t = e.timeStamp;
@@ -210,6 +229,8 @@ export function Viewer({ src, name, close, corner }: { src: string; name: string
   const rest = base.w ? scale / drawn : scale;
   const transform = [zoomed ? `translate(${offset.x}px, ${offset.y}px)` : "", Math.abs(rest - 1) > 1e-6 ? `scale(${rest})` : ""].join(" ").trim();
   // Laid out at drawn, its margins taking the growth back: its place is its fit's, in the middle.
+  // Its thumbnail at its fit, till it has come.
+  const k = !base.w && under && size ? fitIn(size.w, size.h, stage.current?.clientWidth ?? window.innerWidth, stage.current?.clientHeight ?? window.innerHeight) : 0;
   const laid = base.w ? { width: base.w * drawn, height: base.h * drawn, maxWidth: "none", maxHeight: "none", margin: `${(-base.h * (drawn - 1)) / 2}px ${(-base.w * (drawn - 1)) / 2}px` } : undefined;
   return (
     <div
@@ -220,6 +241,7 @@ export function Viewer({ src, name, close, corner }: { src: string; name: string
       onPointerCancel={up}
       className={cn("absolute inset-0 grid touch-none place-items-center overflow-hidden select-none", zoomed && (live ? "cursor-grabbing" : "cursor-grab"))}
     >
+      {k > 0 && <img src={under} alt="" aria-hidden draggable={false} style={{ width: size!.w * k, height: size!.h * k }} className="pointer-events-none block object-contain shadow-(--shadow-float) [grid-area:1/1]" />}
       <img
         ref={img}
         src={src}
@@ -228,13 +250,14 @@ export function Viewer({ src, name, close, corner }: { src: string; name: string
         onLoad={measure}
         style={{ ...laid, transform: transform || undefined }}
         className={cn(
-          "block max-h-[calc(100dvh-96px)] max-w-[calc(100vw-64px)] object-contain shadow-(--shadow-float) sm:max-h-[calc(100dvh-128px)] sm:max-w-[calc(100vw-128px)]",
+          "block max-h-[calc(100dvh-96px)] [grid-area:1/1] max-w-[calc(100vw-64px)] object-contain shadow-(--shadow-float) sm:max-h-[calc(100dvh-128px)] sm:max-w-[calc(100vw-128px)]",
           moving && "[will-change:transform]",
           // Eased only toward a scale asked; the one laid out takes its place at once.
           !live && scale !== drawn && "transition-transform duration-150 ease-out",
         )}
       />
       {corner && <div className="absolute top-4 right-4 z-10 flex gap-1.5">{corner}</div>}
+      {!zoomed && foot}
       {zoomed && fit > 0 && (
         <button type="button" onClick={() => set(1, ORIGIN)} className="glass g-pop absolute bottom-4 left-1/2 h-8 -translate-x-1/2 rounded-full px-3 text-sm text-ink-2 tabular-nums hover:text-ink">
           {Math.round(fit * scale * 100)}%

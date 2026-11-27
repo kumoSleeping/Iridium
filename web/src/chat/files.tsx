@@ -11,9 +11,9 @@ import { Copyable } from "./copyable";
 import type { FileRef } from "../api/types.gen";
 import { FileWindow } from "../file-window";
 import { t } from "../i18n";
-import { cn, IconKey, Tip, DialogPortal } from "../ui";
+import { cn, IconKey, Tip } from "../ui";
+import { LonePicture, spaceShuts, useGallery } from "./gallery";
 import { previewKind, type PreviewKind } from "./preview-lib";
-import { Viewer } from "./zoom";
 
 const PreviewBody = lazy(() => import("./preview"));
 
@@ -110,46 +110,22 @@ export function Picture({ src, full, name, under, w, h }: { src: string; full: s
   );
 }
 
-/** Space shuts a preview, as Quick Look does on a Mac (kumo, 2026-11-23); not where one types. */
-const spaceShuts = (close: () => void) => (e: React.KeyboardEvent) => {
-  if (e.key !== " " || e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
-  const t = e.target as HTMLElement;
-  if (t.closest("input,textarea,select,[contenteditable=''],[contenteditable=true]")) return;
-  e.preventDefault();
-  close();
-};
-
 /** children (a button) opens full over the page, fit to the window, to look closer (zoom.tsx), shut
- *  by a press beside it, Esc, Space or its key, or download. */
+ *  by a press beside it, Esc, Space or its key, or download. One of a conversation's pictures opens
+ *  in its viewer, among the others (gallery.tsx); any other alone. */
 export function Zoom({ full, name, children }: { full: string; name: string; children: ReactElement }) {
   const [open, setOpen] = useState(false);
+  const gallery = useGallery();
+  const change = (o: boolean) => {
+    if (o && gallery?.open(full)) return;
+    setOpen(o);
+  };
   return (
-    <Dialog.Root open={open} onOpenChange={setOpen}>
+    <LonePicture open={open} setOpen={change} full={full} name={name}>
       <Tip label={t("msg.openImage")}>
         <Dialog.Trigger render={children} />
       </Tip>
-      <DialogPortal>
-        <Dialog.Backdrop className="fixed inset-0 z-50 bg-paper/70 backdrop-blur-sm transition-opacity duration-(--dur-2) data-ending-style:opacity-0 data-starting-style:opacity-0" />
-        <Dialog.Popup onKeyDown={spaceShuts(() => setOpen(false))} className="fixed inset-0 z-50 outline-none transition-[opacity,scale] duration-(--dur-2) ease-(--ease-out) data-ending-style:scale-[0.98] data-ending-style:opacity-0 data-starting-style:scale-[0.98] data-starting-style:opacity-0">
-          <Dialog.Title className="sr-only">{name}</Dialog.Title>
-          <Viewer
-            src={full}
-            name={name}
-            close={() => setOpen(false)}
-            corner={
-              <>
-                <a href={full} download={name} aria-label={t("msg.download")} className="glass g-press grid size-8 place-items-center rounded-full text-ink-2 hover:text-ink">
-                  <Download size={15} />
-                </a>
-                <Dialog.Close aria-label={t("msg.close")} className="glass g-press grid size-8 place-items-center rounded-full text-ink-2 hover:text-ink">
-                  <X size={15} />
-                </Dialog.Close>
-              </>
-            }
-          />
-        </Dialog.Popup>
-      </DialogPortal>
-    </Dialog.Root>
+    </LonePicture>
   );
 }
 

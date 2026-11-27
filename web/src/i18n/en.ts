@@ -149,6 +149,8 @@ export const en: Dict = {
   "device.laptop": "Laptop",
   "device.none": "Don't show",
   "msg.openImage": "Open original",
+  "msg.prevImage": "Previous",
+  "msg.nextImage": "Next",
   "msg.showPictures": "Show pictures",
   "msg.hidePictures": "Hide pictures",
   "msg.unsent": "Not sent to the model",

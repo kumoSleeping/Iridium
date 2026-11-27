@@ -149,6 +149,8 @@ export const zh = {
   "device.laptop": "笔记本",
   "device.none": "不展示",
   "msg.openImage": "看原图",
+  "msg.prevImage": "上一张",
+  "msg.nextImage": "下一张",
   "msg.showPictures": "展开图片",
   "msg.hidePictures": "收起图片",
   "msg.unsent": "未发给模型",
