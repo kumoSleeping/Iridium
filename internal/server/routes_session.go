@@ -12,7 +12,7 @@ import (
 // sessionRoutes: a session's model, mode, effort, ultracode, preset, what an app attaches to its
 // page, its queue and its "always allow" rules (docs/api.md "会话设置", "待发队列").
 func (s *Server) sessionRoutes(mux *http.ServeMux) {
-	// What a terminal may use (access.go): Claude's sessions only the owner's own.
+	// What a terminal may use: its Perms (perms.go).
 	mux.HandleFunc("PUT /v1/internal/sessions/{id}/model", s.use(s.setModel))
 	mux.HandleFunc("PUT /v1/internal/sessions/{id}/mode", s.use(s.setMode))
 	mux.HandleFunc("PUT /v1/internal/sessions/{id}/effort", s.use(s.setEffort))

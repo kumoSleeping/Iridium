@@ -1,13 +1,12 @@
 package api
 
-// SecretScope is which sessions may use a secret: all, those in some workspaces, or only those the
-// owner's own terminals (本机, those that have Claude) opened.
+// SecretScope is which sessions may use a secret: all, or those in some workspaces. A scope stored
+// as "owner" (before 2026-11-27) is all.
 type SecretScope string
 
 const (
 	ScopeAll        SecretScope = "all"
 	ScopeWorkspaces SecretScope = "workspaces"
-	ScopeOwner      SecretScope = "owner"
 )
 
 // SecretInfo is a secret as listed: never its value.
@@ -16,7 +15,7 @@ type SecretInfo struct {
 	Note       string      `json:"note,omitempty"`
 	Scope      SecretScope `json:"scope"`
 	Workspaces []int64     `json:"workspaces"` // scope workspaces: which
-	// Always: every use is confirmed on a panel, the owner's own sessions' too.
+	// Always: every use is confirmed on a panel.
 	Always    bool       `json:"always,omitempty"`
 	By        string     `json:"by,omitempty"` // the terminal that stored it, by name
 	CreatedAt int64      `json:"createdAt"`

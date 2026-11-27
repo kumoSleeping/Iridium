@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kumoSleeping/iridium/internal/access"
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/gate"
 	"github.com/kumoSleeping/iridium/internal/webapp"
@@ -49,7 +48,7 @@ func (l *live) asLogin(token, login, method, path string, body, out any) int {
 func TestLoginJoin(t *testing.T) {
 	t.Parallel()
 	l := start(t)
-	app := l.newApp("qq", false)
+	app := l.newApp("qq")
 	var e api.Error
 	if code := l.asLogin(app.Token, "u1", "GET", "/v1/internal/me", nil, &e); code != 403 || e.Code != "login_pending" || e.Message == "" {
 		t.Fatalf("a new login: %d %+v", code, e)
@@ -103,7 +102,7 @@ func TestLoginJoin(t *testing.T) {
 	if code := l.asLogin("ir_nope", "u1", "GET", "/v1/internal/me", nil, &e); code != 401 || e.Code != "unauthenticated" {
 		t.Fatalf("a bad TOKEN: %d %+v", code, e)
 	}
-	other := l.newApp("busy", false)
+	other := l.newApp("busy")
 	for i := range 20 {
 		if code := l.asLogin(other.Token, fmt.Sprint("p", i), "GET", "/v1/internal/me", nil, &e); code != 403 || e.Code != "login_pending" {
 			t.Fatalf("login %d: %d %+v", i, code, e)
@@ -118,15 +117,13 @@ func TestLoginJoin(t *testing.T) {
 }
 
 // Who approves (decision 15): a person at the host, or on a login of ir_web that may use every
-// agent (Claude too) everywhere. Never an agent's ir, an app, a login without Claude or one kept to
-// some places.
+// agent everywhere. Never an agent's ir, an app, or a login kept to some places.
 func TestApprovers(t *testing.T) {
 	t.Parallel()
 	l := start(t)
 	panel := func(id string) gate.EndpointInfo { return gate.EndpointInfo{ID: id, Name: id, Kind: gate.KindPanel} }
-	claude, _ := json.Marshal(access.WithClaude(access.Default(), access.ByLocal, 1))
-	l.s.joined(webapp.Joined{Endpoint: panel("owner0000000000a"), Perms: claude})
-	l.s.joined(webapp.Joined{Endpoint: panel("kept00000000000a"), Perms: claude})
+	l.s.joined(webapp.Joined{Endpoint: panel("owner0000000000a")})
+	l.s.joined(webapp.Joined{Endpoint: panel("kept00000000000a")})
 	l.s.joined(webapp.Joined{Endpoint: panel("guest0000000000a")})
 	kept, _ := json.Marshal(api.Perms{Agents: []string{"*"}, Scope: []string{"pc:/work"}})
 	if _, err := l.s.st.AddLogin(gate.WebApp, "kept00000000000a", "kept", 20, time.Now()); err != nil {
@@ -146,7 +143,7 @@ func TestApprovers(t *testing.T) {
 		"agent in web": {caller{Identity: web("owner0000000000a").Identity, socket: true, agent: true, session: "s"}, false},
 		"owner":        {web("owner0000000000a"), true},
 		"kept":         {web("kept00000000000a"), false},
-		"guest":        {web("guest0000000000a"), false},
+		"guest":        {web("guest0000000000a"), true},
 		"app":          {caller{Identity: gate.Identity{App: "app0000000000000", Name: "bot"}}, false},
 	} {
 		if got := l.s.mayApprove(c.c); got != c.want {
@@ -154,7 +151,7 @@ func TestApprovers(t *testing.T) {
 		}
 	}
 	// Over HTTP: an agent and an app are refused with a code; the host's ir lists them.
-	app := l.newApp("bot", false)
+	app := l.newApp("bot")
 	var e api.Error
 	if l.want(403, "agent", "POST", "/v1/internal/needs/x", api.NeedAnswer{}, &e); e.Code != "no_permission" {
 		t.Fatalf("an agent: %+v", e)

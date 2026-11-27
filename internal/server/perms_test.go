@@ -29,7 +29,7 @@ func TestPerms(t *testing.T) {
 	inA := l.create(200, "web", api.NewSession{Agent: api.AgentClaude, Cwd: a, Text: "one"})
 	inB := l.create(200, "web", api.NewSession{Agent: api.AgentClaude, Cwd: b, Text: "two"})
 
-	app := l.newApp("bot", true)
+	app := l.newApp("bot")
 	l.want(200, "socket", "PUT", "/v1/internal/apps/bot/perms", api.Perms{Agents: []string{"*"}, Scope: []string{"主机:" + a}}, nil)
 	var list []api.Session
 	list = l.sessions(app.Token)
@@ -88,7 +88,7 @@ func TestPerms(t *testing.T) {
 func TestParsePlace(t *testing.T) {
 	t.Parallel()
 	l := start(t)
-	app := l.newApp("pc", false)
+	app := l.newApp("pc")
 	for in, want := range map[string][2]string{
 		"pc:/work":    {app.App.ID, "/work"},
 		"主机:/srv":     {gate.HostID, "/srv"},
@@ -130,7 +130,7 @@ func TestInvitePerms(t *testing.T) {
 func TestScopeFolders(t *testing.T) {
 	t.Parallel()
 	l := start(t)
-	app := l.newApp("bot", false)
+	app := l.newApp("bot")
 	l.want(200, "socket", "PUT", "/v1/internal/apps/bot/perms", api.Perms{Agents: []string{"*"}, Scope: []string{"主机:/w/in"}}, nil)
 	c := caller{Identity: gate.Identity{App: app.App.ID, Name: "bot"}}
 	f := api.Folders{Path: "/w/in", Folders: []string{"deep"}}

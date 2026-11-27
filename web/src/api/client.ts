@@ -487,7 +487,7 @@ export const api = {
 
   // --- the apps and their logins (docs/api.md "应用"), the confirmations agents ask for ---
   apps: () => get<Apps>("/v1/internal/apps"),
-  invite: (name: string, claude?: boolean) => write<Invite>("POST", "/v1/internal/invites", { ...(name ? { name } : {}), ...(claude ? { claude } : {}) } satisfies NewInvite),
+  invite: (name: string) => write<Invite>("POST", "/v1/internal/invites", { ...(name ? { name } : {}) } satisfies NewInvite),
   revoke: (id: string) => write<{ ok: boolean }>("DELETE", `/v1/internal/apps/${enc(id)}`),
   /** DELETE /v1/internal/apps/{app}/logins/{login}: another app's login asks again as it next speaks. */
   removeLogin: (app: string, login: string) => write<{ ok: boolean }>("DELETE", `/v1/internal/apps/${enc(app)}/logins/${enc(login)}`),

@@ -106,7 +106,7 @@ func TestAskInEveryChannel(t *testing.T) {
 	l.want(200, "web", "PUT", "/v1/internal/channels/"+room+"/people", api.People{People: []string{"*"}}, nil)
 
 	// An app with no right to Claude: it cannot use the agent's session.
-	bot := l.newApp("bot", false)
+	bot := l.newApp("bot")
 	var me satori.Meta
 	l.sat(bot.Token, "meta", nil, &me) // its login
 	w := l.satoriDial(nil)

@@ -2194,7 +2194,7 @@ func (s *Server) agentsOf(ch string) ([]deliver.Agent, map[string]channel.Member
 }
 
 // sendChannel says req in channel ch (several agents) as c and gives it to the agents it wakes.
-// A person needs the right to use each agent the message names (Claude: the owner's own); one
+// A person needs the right to use each agent the message names; one
 // that would merely receive everything is passed over without it.
 func (s *Server) sendChannel(ctx context.Context, c caller, from, ch string, req api.Send) (api.SendReply, error) {
 	return s.sendChannelAs(ctx, c, from, ch, req, nil)

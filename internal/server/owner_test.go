@@ -35,7 +35,7 @@ func TestComputerOwner(t *testing.T) {
 		}
 		nd := l.pending()
 		l.s.asks.take(nd.ID)
-		tok, err := l.s.pairAllowed(nd, api.NeedAnswer{Allow: true}, "", pairer)
+		tok, err := l.s.pairAllowed(nd, api.NeedAnswer{Allow: true}, pairer)
 		if err != nil {
 			t.Fatal(err)
 		}

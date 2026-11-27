@@ -48,7 +48,7 @@ export function useUpdate(): { data: UpdateState | null | undefined } {
 export const useHome = () => useQuery({ queryKey: ["folders", "~"], queryFn: () => api.folders("~"), staleTime: 60_000, select: (f) => (setHome(f.path), f.path) });
 
 /** The host, as the page is with no gate in front (and while /v1/internal/me has not answered). */
-export const LOCAL_ME: Me = { id: "local", name: "Iridium", app: "local", host: true, public: false, usedToday: 0, rules: { claudeOwner: { by: "local", at: 0 } } };
+export const LOCAL_ME: Me = { id: "local", name: "Iridium", app: "local", host: true, public: false, usedToday: 0 };
 
 /** What this browser kept from the page before, for its first draw: who this is, whose faces the
  *  messages have. A channel is drawn from this device's copy at once as the page loads; without

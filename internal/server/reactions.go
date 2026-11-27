@@ -87,7 +87,7 @@ func (s *Server) giveReaction(c caller, who satori.User, ch string, seq int64, e
 	sender := session.From(api.SourceIridium, api.SourceIridium)
 	for _, t := range targets {
 		if from.Session == "" && !passes(from) {
-			// A person wakes only the agents it may use (Claude: the owner's own).
+			// A person wakes only the agents it may use.
 			if _, err := s.using(c, t); err != nil {
 				continue
 			}

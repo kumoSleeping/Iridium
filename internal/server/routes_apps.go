@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kumoSleeping/iridium/internal/access"
 	"github.com/kumoSleeping/iridium/internal/api"
 	"github.com/kumoSleeping/iridium/internal/config"
 	"github.com/kumoSleeping/iridium/internal/gate"
@@ -110,7 +109,7 @@ func (s *Server) approver(h http.HandlerFunc) http.HandlerFunc {
 var errApprove = errors.New("only the host, or a login of ir_web that may use every agent everywhere, approves")
 
 // mayApprove: the caller may answer needs and open pairing (decision 15): a person at the host, or
-// on a login of ir_web that may use all agents (Claude too) with the whole scope. Never an agent.
+// on a login of ir_web that may use all agents with the whole scope. Never an agent.
 func (s *Server) mayApprove(c caller) bool {
 	switch {
 	case c.agent || c.session != "":
@@ -118,9 +117,6 @@ func (s *Server) mayApprove(c caller) bool {
 	case c.Host():
 		return true
 	case !c.Web():
-		return false
-	}
-	if !access.HasClaude(s.rulesFor(c)) {
 		return false
 	}
 	if p := s.loginPerms(c.ID()); p != nil {
@@ -163,7 +159,7 @@ func (s *Server) apps(w http.ResponseWriter, r *http.Request) {
 	h.Computer = s.hostComputer()
 	out.Apps = append(out.Apps, h)
 	// Ir-Web wears the host's face (kumo, 2026-11-26): the same Iridium, through a browser.
-	web := api.App{ID: gate.WebApp, Name: gate.WebApp, Web: true, Avatar: h.Avatar, Rules: access.Default()}
+	web := api.App{ID: gate.WebApp, Name: gate.WebApp, Web: true, Avatar: h.Avatar}
 	var apps []api.App
 	for _, e := range a.Endpoints {
 		if e.Kind == gate.KindPanel {
@@ -201,10 +197,10 @@ func (s *Server) apps(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, l := range others {
 		out.Logins = append(out.Logins, api.Login{App: l.App, ID: l.ID, Name: l.Name, CreatedAt: ms(l.CreatedAt),
-			LastSeenAt: ms(l.LastActive), ApprovedAt: ms(l.ApprovedAt), Rules: s.rulesOf(l.App, false), Perms: s.loginPermsOf(l.App, l.ID)})
+			LastSeenAt: ms(l.LastActive), ApprovedAt: ms(l.ApprovedAt), Perms: s.loginPermsOf(l.App, l.ID)})
 	}
 	for _, i := range s.web().Invites() {
-		out.Invites = append(out.Invites, api.PendingInvite{ID: i.ID, Name: i.Name, Setup: i.Setup, Claude: permsClaude(i.Perms),
+		out.Invites = append(out.Invites, api.PendingInvite{ID: i.ID, Name: i.Name, Setup: i.Setup,
 			CreatedAt: ms(i.CreatedAt), ExpiresAt: ms(i.ExpiresAt)})
 	}
 	if !callerOf(r).CanManage() {
@@ -409,10 +405,6 @@ func (s *Server) invite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c := callerOf(r)
-	if req.Claude && c.panel() && s.ownerSays(c) == "" {
-		forbid(w, errOwnerFlag)
-		return
-	}
 	if !s.web().Public() {
 		refuse(w, http.StatusForbidden, "not_public", "no public origin: ir_web needs one for its passkeys (ir public)")
 		return
@@ -422,7 +414,7 @@ func (s *Server) invite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !c.panel() {
-		s.ask(w, c, api.NeedInvite, req.Name, req.Claude)
+		s.ask(w, c, api.NeedInvite, req.Name)
 		return
 	}
 	// A login slot is made by whoever approves (a narrowed login may not invite a wider one).
@@ -430,11 +422,7 @@ func (s *Server) invite(w http.ResponseWriter, r *http.Request) {
 		forbid(w, errApprove)
 		return
 	}
-	by := ""
-	if req.Claude {
-		by = s.ownerSays(c)
-	}
-	inv, err := s.makeInvite(req.Name, by, req.Perms)
+	inv, err := s.makeInvite(req.Name, req.Perms)
 	if err != nil {
 		s.gateDone(w, err)
 		return
@@ -442,39 +430,23 @@ func (s *Server) invite(w http.ResponseWriter, r *http.Request) {
 	reply(w, http.StatusOK, inv)
 }
 
-// ask turns an agent's request for a secret into a need for a person: 202 and no secret. owner
-// (Claude): only a login of ir_web that has Claude, or the host, may allow it (answerNeed).
-func (s *Server) ask(w http.ResponseWriter, c caller, kind api.NeedKind, name string, owner bool) {
-	cf := s.asks.add(kind, name, owner, c.Name, c.session)
-	s.logf("server: %s asks a person for a %s (%s, owner %v), need %s", c.Name, kind, name, owner, cf.ID)
+// ask turns an agent's request for a secret into a need for a person: 202 and no secret.
+func (s *Server) ask(w http.ResponseWriter, c caller, kind api.NeedKind, name string) {
+	cf := s.asks.add(kind, name, c.Name, c.session)
+	s.logf("server: %s asks a person for a %s (%s), need %s", c.Name, kind, name, cf.ID)
 	reply(w, http.StatusAccepted, api.Pending{Need: cf})
 }
 
-// errOwnerSecret answers allowing a secret-use from a login that has no Claude itself.
-var errOwnerSecret = errors.New("only a person at the host or on a login of ir_web that has Claude lets a session use the credentials")
-
-// errOwnerFlag answers giving Claude from a login that has no Claude itself.
-var errOwnerFlag = errors.New("only a person at the host or on a login of ir_web that has Claude gives Claude")
-
-// makeInvite makes a slot for a login of ir_web; claudeBy (ownerSays's, "" none): the login that
-// takes it gets Claude, as that one said (joined).
-func (s *Server) makeInvite(name, claudeBy string, given *api.Perms) (*api.Invite, error) {
-	// The invite keeps the login's rules (Claude) and, beside them, what it may use (_perms).
-	slot := struct {
-		api.Rules
-		Perms *api.Perms `json:"_perms,omitempty"`
-	}{Rules: access.Default()}
-	if claudeBy != "" {
-		slot.Rules = access.WithClaude(access.Default(), claudeBy, time.Now().UnixMilli())
-	}
+// makeInvite makes a slot for a login of ir_web; given: what the login that takes it may use
+// (nil: all), kept with the invite (_perms) and given as it joins.
+func (s *Server) makeInvite(name string, given *api.Perms) (*api.Invite, error) {
+	var perms []byte
 	if given != nil {
 		p := cleanPerms(given)
-		slot.Perms = &p
-	}
-	var perms []byte
-	if claudeBy != "" || given != nil {
 		var err error
-		if perms, err = json.Marshal(slot); err != nil {
+		if perms, err = json.Marshal(struct {
+			Perms *api.Perms `json:"_perms"`
+		}{&p}); err != nil {
 			return nil, err
 		}
 	}
@@ -490,43 +462,10 @@ func (s *Server) makeInvite(name, claudeBy string, given *api.Perms) (*api.Invit
 	return out, nil
 }
 
-// permsClaude: an invite's perms give Claude.
-func permsClaude(perms []byte) bool {
-	var r api.Rules
-	return len(perms) > 0 && json.Unmarshal(perms, &r) == nil && access.HasClaude(r)
-}
-
-// giveClaude turns Claude on for app or login info: it is the owner's own, as by says.
-func (s *Server) giveClaude(info gate.EndpointInfo, by string) error {
-	r := s.rulesOf(info.ID, false)
-	if access.HasClaude(r) {
-		return nil
-	}
-	b, err := json.Marshal(access.WithClaude(r, by, time.Now().UnixMilli()))
-	if err != nil {
-		return err
-	}
-	if err := s.st.SetTerminalRules(info.ID, b); err != nil {
-		return err
-	}
-	s.logf("server: claude for %s (%s), the owner's own (%s)", info.Name, info.ID, by)
-	return nil
-}
-
-// joined is the gate's word that a login of ir_web registered: it takes its invite's perms; the
-// first one is the owner's own and gets Claude.
+// joined is the gate's word that a login of ir_web registered: it takes its invite's perms.
 func (s *Server) joined(j webapp.Joined) {
-	if j.First {
-		if err := s.giveClaude(j.Endpoint, access.ByFirst); err != nil {
-			s.logf("server: claude for the new login %s: %v", j.Endpoint.ID, err)
-		}
-		return
-	}
 	if len(j.Perms) == 0 {
 		return
-	}
-	if err := s.st.SetTerminalRules(j.Endpoint.ID, j.Perms); err != nil {
-		s.logf("server: the perms of the new login %s: %v", j.Endpoint.ID, err)
 	}
 	var slot struct {
 		Perms *api.Perms `json:"_perms"`
@@ -554,21 +493,11 @@ func (s *Server) answerNeed(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	c := callerOf(r)
-	by := s.ownerSays(c)
 	// What a person may not give, or an answer that cannot stand, leaves the need waiting for one
 	// that may. Denying it is anyone's who answers.
 	cf, ok := s.asks.peek(id)
 	if ok && a.Allow {
 		switch {
-		case cf.Kind == api.NeedAppJoin && a.Owner && by == "":
-			forbid(w, errOwnerFlag)
-			return
-		case cf.Owner && by == "" && cf.Kind == api.NeedSecretUse:
-			forbid(w, errOwnerSecret)
-			return
-		case cf.Owner && by == "":
-			forbid(w, errOwnerFlag)
-			return
 		case cf.Kind == api.NeedSecretSet && (a.Value == "" || len(a.Value) > secrets.MaxValue):
 			refuse(w, http.StatusUnprocessableEntity, "bad_value", "type the value (64 KiB at most)")
 			return
@@ -583,11 +512,7 @@ func (s *Server) answerNeed(w http.ResponseWriter, r *http.Request) {
 		refuse(w, http.StatusUnprocessableEntity, "no_such_need", "no such need waiting")
 		return
 	}
-	owner := by
-	if !cf.Owner {
-		by = ""
-	}
-	st := api.NeedState{ID: id, Kind: cf.Kind, Name: cf.Name, Owner: cf.Owner, State: "denied"}
+	st := api.NeedState{ID: id, Kind: cf.Kind, Name: cf.Name, State: "denied"}
 	out := api.NeedReply{}
 	var err error
 	switch {
@@ -596,7 +521,7 @@ func (s *Server) answerNeed(w http.ResponseWriter, r *http.Request) {
 		_, err = s.st.DeleteLogin(cf.App.ID, cf.Login)
 	case !a.Allow:
 	case cf.Kind == api.NeedInvite:
-		out.Invite, err = s.makeInvite(cf.Name, by, nil)
+		out.Invite, err = s.makeInvite(cf.Name, nil)
 		if err == nil {
 			st.Name, st.ExpiresAt = out.Invite.Name, out.Invite.ExpiresAt
 		}
@@ -607,7 +532,7 @@ func (s *Server) answerNeed(w http.ResponseWriter, r *http.Request) {
 	case cf.Kind == api.NeedAppJoin, cf.Kind == api.NeedAppUpdate:
 		// The TOKEN goes to the asker alone, by its request; the person never sees it.
 		var tok *api.Token
-		if tok, err = s.pairAllowed(cf, a, owner, pairerOf(c)); err == nil {
+		if tok, err = s.pairAllowed(cf, a, pairerOf(c)); err == nil {
 			s.pairToken(id, tok.Token)
 			st.Name = tok.App.Name
 		}

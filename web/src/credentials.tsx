@@ -90,7 +90,7 @@ function NewSecret({ done }: { done: () => void }) {
   );
 }
 
-const scopeLabel = (s: SecretScope) => (s === "workspaces" ? t("secrets.scopeWorkspaces") : s === "owner" ? t("secrets.scopeOwner") : t("secrets.scopeAll"));
+const scopeLabel = (s: SecretScope) => (s === "workspaces" ? t("secrets.scopeWorkspaces") : t("secrets.scopeAll"));
 
 /** One credential's row. Its menu, a right click or a long press away, only deletes it (asked
  *  under the row: a value deleted is gone for good). */

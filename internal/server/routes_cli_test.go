@@ -15,8 +15,7 @@ import (
 )
 
 // ir at another machine (docs/exec.md "远端的 ir"): its session's TOKEN makes it that machine's
-// Bot, for that session; the session commands run, the Iridium's own machine's are refused, and
-// what a Bot may not do (Claude, not being the owner's) neither may it.
+// Bot, for that session; the session commands run, the Iridium's own machine's are refused.
 func TestCLIAtMachine(t *testing.T) {
 	t.Parallel()
 	const tok = "irs_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
@@ -28,7 +27,7 @@ func TestCLIAtMachine(t *testing.T) {
 		}
 	})
 	var b api.Token
-	b = l.newApp("pc", false)
+	b = l.newApp("pc")
 	botID = b.App.ID
 	own := l.create(200, "socket", api.NewSession{Agent: api.AgentClaude, Cwd: l.work, Text: "hello"})
 	l.waitReply("socket", own, "ok: hello")
@@ -73,10 +72,6 @@ func TestCLIAtMachine(t *testing.T) {
 	}
 	if _, _, errs, exit := run(tok, "api", "POST", "internal/files/copy", "from=a", "to=b"); exit != 1 || errs == "" {
 		t.Errorf("copy from there: %d %q", exit, errs)
-	}
-	// Claude is the owner's own terminals': that Bot is not.
-	if _, _, errs, exit := run(tok, "api", "message.create", "channel_id="+own[:8], "_data.text=hi"); exit != 1 || errs == "" {
-		t.Errorf("send to Claude from a Bot not the owner's: %d %q", exit, errs)
 	}
 	if _, out, errs, exit := run(tok, "--help"); exit != 0 || !strings.Contains(out, "ir api") || strings.Contains(out, "ir run [") {
 		t.Errorf("help there: %d %q %q", exit, out, errs)

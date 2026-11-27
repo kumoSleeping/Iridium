@@ -19,7 +19,7 @@
 
 ## 连接
 
-- 执行端主动连 `wss://<Iridium>/v1/internal/exec`（dsh 插件只接受 https，或到本机、内网地址的 http：公网的明文 http 拒绝），头 `Authorization: Bearer <TOKEN>`。执行端就是一个 Bot（提供机器的那种，见 `plan.md`“交互终端”）：用 Bot 的 TOKEN 接入，终端类型也显示“Bot”，名字就是机器名（≤12 字符）。Claude（用户，2026-11-08）：批准时勾了“本人的机器”的执行端才开 Claude，用那台机器上本人的登录、原样跑（不加 `--bare`），等于 `--owner`；这个勾只出现在带 Claude 的面板上。
+- 执行端主动连 `wss://<Iridium>/v1/internal/exec`（dsh 插件只接受 https，或到本机、内网地址的 http：公网的明文 http 拒绝），头 `Authorization: Bearer <TOKEN>`。执行端就是一个 Bot（提供机器的那种，见 `plan.md`“交互终端”）：用 Bot 的 TOKEN 接入，终端类型也显示“Bot”，名字就是机器名（≤12 字符）。Claude 和别的 agent 一样：用那台机器上的登录、原样跑（不加 `--bare`）。
 - 配对（用户，2026-11-08）：插件里只有服务器地址，没有 TOKEN，人人同一个包。第一次不带 TOKEN 连 `/v1/internal/pair`（门外不用登录的口，什么也不给），报机器名、系统、装了哪些 agent，两边显示同一个 4 位配对码；网页弹确认卡片“home-pc 请求接入（Windows · dsh 0.2.2）”，带 Passkey 的面板点允许后，TOKEN 经这条连接发给执行端，它存起来以后自己用。限速，同时最多几个待批，10 分钟没人管作废。插件和 `ir join` 用同一个口：`POST /v1/internal/pair` 带握手内容（同 `hello` 的 `name`、`os`、`arch`、`program`、`agents`、`noShell`、`agentShell`；卡片据此写“可执行命令”“可执行命令（含 agent）”或“仅 agent”），回 `{code, request}`；再轮询 `GET /v1/internal/pair/<request>`，等到允许（拿 TOKEN）或拒绝。不带 agent 的应用也用它（`ir pair`），见 `api.md`。应用管理里一个开关（`配对`，开着直到关上，存在配置里，重启不变）；关着时对方收到 403。
 - 接入是单向的（用户，2026-11-08）：批准的一方能用申请方的 agent 和文件；反过来要对方也申请一次。
 - 一个 TOKEN 同时只有一条连接，新连上的顶掉旧的。
@@ -193,7 +193,7 @@ agent 的 `ir sh`：每条命令一个新进程，不经托管进程，不写文
 - 经服务器下载（`proxy`）：`<地址>/install/<文件>` 免登录，文件是这个发布的压缩包、macOS 应用、`SHA256SUMS`；第一次有人要时从 GitHub 取、校验后存在 `<state>/install/<版本>/`，旧版本的删掉；不预先取。不是发布版的 302 到 GitHub 的 latest。
 - 连上后跟上版本（用户，2026-11-17）：只当执行端时，握手的回答带这边的版本（`HelloReply.version`），两边是不同的发布版就下载那个版本的压缩包（默认 GitHub；`--proxy` 接入的经这边），按 `SHA256SUMS` 校验，取出 `iridium`，确认它说的版本对，替换正在运行的自己（Windows 先改名为 `.old`；在 `Iridium.app` 里的，换完用 `codesign --force --deep -s -` 把整个应用重新签名），再问“现在重启？”；y 就原样参数重新运行，否则下次运行时生效。同一个进程里还跑着 Iridium 时不这样做：跟着那个 Iridium 自己的更新。
 - 那边 agent 用的 `ir` 是它自己（按名字 `ir` 进命令行模式）。
-- 那边 agent 的 `ir` 和主机上 agent 的 `ir` 权限一样（kumo，2026-11-18；此前按那台电脑的应用权限算，看不到主机、别的电脑和同频道的会话）：主机的，或这一回合所属登录的。只有两样不同：Claude 仍只给“本人的”电脑（Claude 的条款）；只在套接字上有的（凭据 `ir run`、读主机本地路径的 `files`）仍没有。
+- 那边 agent 的 `ir` 和主机上 agent 的 `ir` 权限一样（kumo，2026-11-18；此前按那台电脑的应用权限算，看不到主机、别的电脑和同频道的会话）：主机的，或这一回合所属登录的。只有一样不同：只在套接字上有的（凭据 `ir run`、读主机本地路径的 `files`）仍没有。
 - 主机上的命令行：`POST /v1/internal/computers/host/shell`，给不在主机上的 agent 用（它自己的工具只够得到它那台电脑）。别的电脑上的会话，提示词的 `Where:` 一行写了这条命令。
 - Mac 用 curl 下载的不带隔离标记，可直接运行；从终端起，文件夹的访问授权算在终端名下。
 
@@ -234,7 +234,7 @@ agent 的 `ir sh`：每条命令一个新进程，不经托管进程，不写文
 5. `/v1/internal/exec` 端点、TOKEN、在线状态；会话断开时状态灯显示“已断开”，不当作停止。
 6. 网页：新会话选机器；列表标机器名。
 7. 一个 Go 写的参考执行端（`internal/remote/executor`），测试用；回放录制的假 dsh 在 `internal/testagent/dsh.go`。
-8. （已做）Claude 在执行端：驱动的 `Spawn` 按 `Remote` 走（系统提示文件写到那边），记录在那边的 `~/.claude/projects/` 用 `FindRemote` 找。只读那边的 `~/.claude`。项目目录名照 Claude 的规则（每个不是 ASCII 字母数字的 UTF-16 单元换成 `-`）；超过 200 的 Claude 会截断加哈希，这种找不到记录。没勾“本人的机器”的那台：新会话不列 Claude，接口也拒绝（403）。
+8. （已做）Claude 在执行端：驱动的 `Spawn` 按 `Remote` 走（系统提示文件写到那边），记录在那边的 `~/.claude/projects/` 用 `FindRemote` 找。只读那边的 `~/.claude`。项目目录名照 Claude 的规则（每个不是 ASCII 字母数字的 UTF-16 单元换成 `-`）；超过 200 的 Claude 会截断加哈希，这种找不到记录。
 9. （已做，`internal/join`）`ir join <地址>`：二进制的执行端模式，复用 `internal/remote/executor`，配对、存 TOKEN、常驻（见“平台差异”）、找 agent（npm 的 `.cmd` 垫片解析成 `node` + 入口 js）。
 10. （已做）`ir cp`、列目录（`GET /v1/internal/files?machine=`）认执行端的 `机器:路径`（`fs.read`/`fs.write`/`fs.list`），只给本机的 `ir`：读按 `MaxRead` 分块不限大小；写到那边是一次 `fs.write`，先限 4MB。`ir sh` 已做。
 11. （已做）执行端上的会话里 agent 调 `ir`，见“远端的 ir”。
@@ -288,7 +288,7 @@ agent 的 `ir sh`：每条命令一个新进程，不经托管进程，不写文
 
 - `ir new <agent> 应用名:路径 "任务"` 在那台机器上开（路径按那边的写法，`~` 和空是那边的家目录；`host:路径` 是主机；不带前缀是调用者自己那台）。`--machine <机器>` 还认，不再写进帮助。`--workspace <组>` 放进指定的组。会话里跑的，新会话挂在拉起者下面。`ir api channel.list guild_id=self` 只列自己组的会话；`channel.list`、`guild.list` 的目录一律带前缀：`host:~/ir`、`mac:/Users/k/x`。位置的写法见 `internal/place`（网页 `web/src/places.ts`，同一张用例表）。
 - 那边的 `ir`：执行端握手声明 `irClient`，这边每次在那边启动 agent 时生成一个只属于这个会话的 TOKEN（前缀 `irs_`，托管目录只存它的哈希，重启一次换一个），经 `IRIDIUM_TOKEN` 给执行端；执行端在这个会话的托管目录里放一个 `ir`（`holds/<会话>/bin/`），排在它 PATH 的最前面，地址（自己连的那个，`IRIDIUM_URL` 给了就用它）和 TOKEN 直接写在里面：agent 跑的命令不一定拿得到它的环境变量（dsh 跑命令就不带 `IRIDIUM_*`，2026-11-08 实测）。dsh 插件的是 `ir.js`（`ir`、`ir.cmd` 用插件所在的 node 跑；DSH Desktop 里是它自己的程序，带 `ELECTRON_RUN_AS_NODE`）；`ir join` 的是这个二进制本身（脚本再执行 `bin/.ir/ir` 这个链接，按名字 `ir` 进命令行模式）。
-- 那边的 `ir` 只转发：把参数和当前目录发到 `POST /v1/internal/cli`，这边照常跑 `ir`，输出一行一行流回去，最后是退出码。请求算那台机器的 Bot 发的、代表这个会话：Bot 的规则照旧（没勾“本人的机器”的不能开 Claude、不能给 Claude 会话发消息），算 agent 发的（消息并进对方当前回合，不能答应切换至手动审批的请求），信里写成来自这个会话。Bot 被删，它的会话 TOKEN 一起失效。
+- 那边的 `ir` 只转发：把参数和当前目录发到 `POST /v1/internal/cli`，这边照常跑 `ir`，输出一行一行流回去，最后是退出码。请求算那台机器的 Bot 发的、代表这个会话：Bot 的规则照旧，算 agent 发的（消息并进对方当前回合，不能答应切换至手动审批的请求），信里写成来自这个会话。Bot 被删，它的会话 TOKEN 一起失效。
 - 那边能用的：`new`（不带前缀的目录是那边的，带前缀可开到别的机器）、`send`、`wait`、`read`、`ls`、`find`、`stop`、`archive`、`unarchive`、`rename`、`ws`、`apps`。不能用：`cp`、`files`、`sh`、`run`、`secret`、`bot`、`usage` 和管理命令，这些碰的是 Iridium 所在机器的文件、命令和秘密，留给本机的会话和面板。
 - 系统提示：执行端有 `ir` 的，给那边能用的命令（`irhelp.Remote`）；没有的，不提 `ir`。都不教文件链接（那边的 `ir` 没有 `attach`，文件网页取不到）。
 

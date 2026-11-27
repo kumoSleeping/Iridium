@@ -151,7 +151,7 @@ var all = []Info{
 			return claude.New(claude.Options{Emit: emit, Logf: logf})
 		},
 		Find: func(w Where) (string, error) { return transcript.Find(w.ClaudeHome, w.ID) },
-		// At an executor (docs/exec.md), under the owner's own login there: the session's project
+		// At an executor (docs/exec.md), under the login there: the session's project
 		// directory, by its cwd. One cut short by Claude (a path past 200) is not found.
 		FindRemote: func(w RemoteWhere) (string, error) {
 			if !transcript.ValidID(w.ID) {

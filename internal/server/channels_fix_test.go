@@ -30,7 +30,7 @@ func TestChannelWakeOrigin(t *testing.T) {
 	if o, ok := l.s.originOf(second); !ok || !o.Host() {
 		t.Fatalf("the second agent's turn before anyone woke it: %+v %v", o, ok)
 	}
-	bot := l.newApp("bot", true).Token
+	bot := l.newApp("bot").Token
 	l.want(200, "web", "PUT", "/v1/internal/channels/"+ch+"/people", api.People{People: []string{"*"}}, nil)
 	code, r := l.send(bot, ch, api.Send{Text: "@claude2 from the bot"})
 	if code != 200 {
@@ -399,10 +399,11 @@ func TestChannelRecvAfterRefusal(t *testing.T) {
 	l.want(200, "web", "PUT", "/v1/internal/channels/"+ch+"/people", api.People{People: []string{"*"}}, nil)
 	every := onFrom("*")
 	l.want(200, "agent-in:"+second, "PATCH", "/v1/internal/channels/"+ch+"/members/agent:"+second, api.MemberPatch{On: &every}, nil)
-	// A Bot with no right to Claude names it: refused.
-	bot := l.newApp("bot", false).Token
+	// A Bot whose perms leave Claude out names it: refused.
+	bot := l.newApp("bot").Token
+	l.want(200, "socket", "PUT", "/v1/internal/apps/bot/perms", api.Perms{Agents: []string{"codex"}, Scope: []string{"*"}}, nil)
 	if code, _ := l.send(bot, ch, api.Send{Text: "@claude for you"}); code != 403 {
-		t.Fatalf("a Bot without Claude names it: %d", code)
+		t.Fatalf("a Bot without the right to Claude names it: %d", code)
 	}
 	code, r := l.send("web", ch, api.Send{Text: "the next one said"})
 	if code != 200 {
@@ -600,7 +601,7 @@ func TestChannelSlashWords(t *testing.T) {
 func TestDirectSeenByItsTwo(t *testing.T) {
 	t.Parallel()
 	l := start(t)
-	bot := l.newApp("bot", true)
+	bot := l.newApp("bot")
 	// The Bot sees one folder only: not the home folder the channel is listed in.
 	scope, _ := json.Marshal(api.Perms{Agents: []string{"*"}, Scope: []string{"local:" + l.work}})
 	if err := l.s.st.SetAppPerms(bot.App.ID, scope); err != nil {
@@ -644,7 +645,7 @@ func TestDirectSeenByItsTwo(t *testing.T) {
 		t.Errorf("listed to its two: the Bot %v, the host %v", listed(bot.Token), listed("socket"))
 	}
 	// Anyone else, though it sees every folder: not there.
-	other := l.newApp("other", true).Token
+	other := l.newApp("other").Token
 	if code := l.asLogin(other, "", "GET", "/v1/internal/channels/"+dm+"/members", nil, nil); code != 422 {
 		t.Errorf("one who is not of the two reads its members: %d", code)
 	}
@@ -758,8 +759,9 @@ func TestChannelMemberRights(t *testing.T) {
 		l.want(403, as, "DELETE", "/v1/internal/channels/"+ch+"/members/agent:"+second, nil, nil)
 		l.want(200, as, "PATCH", "/v1/internal/channels/"+ch+"/members/agent:"+second, api.MemberPatch{Nick: &nick}, nil)
 	}
-	// A Bot with no right to Claude is one of the people, and may not rename a Claude session.
-	bot := l.newApp("bot", false).Token
+	// A Bot whose perms leave Claude out is one of the people, and may not rename a Claude session.
+	bot := l.newApp("bot").Token
+	l.want(200, "socket", "PUT", "/v1/internal/apps/bot/perms", api.Perms{Agents: []string{"codex"}, Scope: []string{"*"}}, nil)
 	other := "bots"
 	if code := l.asLogin(bot, "", "PATCH", "/v1/internal/channels/"+ch+"/members/agent:"+second, api.MemberPatch{Nick: &other}, nil); code != 403 {
 		t.Errorf("a nick set by one with no right to the session: %d", code)

@@ -1,18 +1,17 @@
 // A confirmation an agent's ir asked a panel for (docs/api.md "确认"): a new panel's invite or a
 // plugin's token, which must not reach the agent. Its card sits above the asking session's
 // composer and on the settings' 终端 page, and the sidebar lists it under 需要你. Allowed, the
-// secret goes to this panel alone, in a card where this one was (secret.tsx); the agent only learns how it went. One
-// asked with --owner (the new terminal gets Claude) only a panel that has Claude allows.
+// secret goes to this panel alone, in a card where this one was (secret.tsx); the agent only learns how it went.
 // A credential's (plan "凭据"): secret-set has a password box, whose value goes to the daemon and
-// nowhere else; secret-use is allow, this session, or deny, and only the owner's own allows it.
+// nowhere else; secret-use is allow, this session, or deny.
 import { KeyRound, Link2, LockKeyhole, ShieldQuestion, Terminal as TermIcon } from "lucide-react";
 import { ConfirmIcon, confirmName, confirmTitle, isPair } from "./confirmname";
 import { useRef, useState, type ReactNode } from "react";
 import { api } from "./api/client";
-import type { Agent, ExecAgent, Need, Me, Perms } from "./api/types.gen";
+import type { Agent, ExecAgent, Need, Perms } from "./api/types.gen";
 import type { Machine } from "./machines";
 import { CardDetails, CardFrame, CardHead, Facts, MainKey, SecondKey } from "./card";
-import { useMachines, useMe, useWhoList } from "./data";
+import { useMachines, useWhoList } from "./data";
 import { t, useLang } from "./i18n";
 import { openChat } from "./route";
 import { showSecret } from "./secrets";
@@ -21,10 +20,6 @@ import { errText, toast } from "./toast";
 import { agentName, ago, Switch, titleOf } from "./ui";
 
 export { confirmTitle, confirmName, ConfirmIcon };
-
-/** This terminal may say a new one is the owner's own (--owner): a passkey panel that has Claude
- *  itself. The server checks the same (ownerSays); 本机's ir may too. */
-export const saysOwner = (me?: Me) => !!me && !!me.web && !!me.rules.claudeOwner;
 
 /** at: where it is drawn (the asking session's id, or "terminals"): the secret shows there. */
 export function ConfirmCard({ c, at: here }: { c: Need; at: string }) {
@@ -40,8 +35,6 @@ export function ConfirmCard({ c, at: here }: { c: Need; at: string }) {
 function SecretGiveCard({ c, at: here }: { c: Need; at: string }) {
   const lang = useLang();
   const list = useList();
-  const me = useMe().data;
-  const blocked = !!c.owner && !saysOwner(me);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<"allow" | "deny" | null>(null);
   const [leaving, setLeaving] = useState(false);
@@ -67,8 +60,8 @@ function SecretGiveCard({ c, at: here }: { c: Need; at: string }) {
       <CardHead
         icon={c.kind === "invite" ? <Link2 size={16} /> : <KeyRound size={16} />}
         title={confirmTitle(c)}
-        tag={c.owner ? [c.name, t("term.withClaude")].filter(Boolean).join(" · ") : c.name}
-        summary={blocked ? t("confirm.ownerElsewhere") : t("confirm.asked", { who })}
+        tag={c.name}
+        summary={t("confirm.asked", { who })}
         open={open}
         setOpen={setOpen}
         keys={
@@ -76,7 +69,7 @@ function SecretGiveCard({ c, at: here }: { c: Need; at: string }) {
             <SecondKey disabled={!!busy} onClick={() => void answer(false)}>
               {t("ask.deny")}
             </SecondKey>
-            <MainKey busy={busy === "allow"} disabled={!!busy || blocked} onClick={() => void answer(true)}>
+            <MainKey busy={busy === "allow"} disabled={!!busy} onClick={() => void answer(true)}>
               {t("confirm.allow")}
             </MainKey>
           </>
@@ -92,7 +85,6 @@ function SecretGiveCard({ c, at: here }: { c: Need; at: string }) {
             ]}
           />
           <p className="m-0 text-xs break-words text-ink-3">{t("confirm.inviteHint")}</p>
-          {c.owner && <p className="m-0 text-xs text-ink-3">{blocked ? t("confirm.ownerElsewhere") : t("confirm.ownerHint")}</p>}
         </CardDetails>
       )}
     </CardFrame>
@@ -244,11 +236,9 @@ function MachineGrantCard({ c }: { c: Need }) {
   );
 }
 
-/** ir run in a session another terminal opened (or of a secret confirmed every time): allow it
- *  once, for the rest of the session, or not. Only the owner's own allows it. */
+/** ir run in a session whose opener is gone (or of a secret confirmed every time): allow it once,
+ *  for the rest of the session, or not. */
 function SecretUseCard({ c }: { c: Need }) {
-  const me = useMe().data;
-  const blocked = !saysOwner(me);
   const { who, facts } = useAsked(c);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<"allow" | "session" | "deny" | null>(null);
@@ -273,8 +263,8 @@ function SecretUseCard({ c }: { c: Need }) {
         icon={<TermIcon size={16} />}
         title={confirmTitle(c)}
         tag={names}
-        mono={!blocked}
-        summary={blocked ? t("secrets.ownerElsewhere") : c.command || t("confirm.asked", { who })}
+        mono
+        summary={c.command || t("confirm.asked", { who })}
         open={open}
         setOpen={setOpen}
         keys={
@@ -283,11 +273,11 @@ function SecretUseCard({ c }: { c: Need }) {
               {t("ask.deny")}
             </SecondKey>
             {!c.always && (
-              <SecondKey disabled={!!busy || blocked} onClick={() => void answer(true, true)}>
+              <SecondKey disabled={!!busy} onClick={() => void answer(true, true)}>
                 {t("secrets.forSession")}
               </SecondKey>
             )}
-            <MainKey busy={busy === "allow"} disabled={!!busy || blocked} onClick={() => void answer(true)}>
+            <MainKey busy={busy === "allow"} disabled={!!busy} onClick={() => void answer(true)}>
               {t("secrets.allowOnce")}
             </MainKey>
           </>
@@ -320,22 +310,18 @@ export const machineLine = (c: Need) =>
     .join(" · ");
 
 /** An app asks to pair (draft 二「接入」): allowed when its code matches the one shown there; the
- *  TOKEN goes to it, never to this page. app_join: a login that has Claude may say it is the owner's
- *  own, which then has Claude. app_update: an app by that name is there; allowing gives it a new
- *  TOKEN (the old one void, its usage and permissions as they were). */
+ *  TOKEN goes to it, never to this page. app_update: an app by that name is there; allowing gives
+ *  it a new TOKEN (the old one void, its usage and permissions as they were). */
 function PairCard({ c }: { c: Need }) {
-  const me = useMe().data;
   const computer = !!c.pair?.os;
   const update = c.kind === "app_update";
   const { facts } = useAsked(c);
-  const [own, setOwn] = useState(false);
   const [asNew, setAsNew] = useState(false);
   const [newName, setNewName] = useState("");
   const [struck, setStruck] = useState<string[]>([]);
   // The agents it carries, struck: turned off there from the start (app_join).
   const [off, setOff] = useState<string[]>([]);
   const carried = (!update && c.pair?.agents?.map((a) => a.agent)) || [];
-  const canOwn = saysOwner(me) && (!update || asNew);
   const given = c.wants && struck.length ? { agents: c.wants.agents.filter((a) => !struck.includes(`a:${a}`)), scope: c.wants.scope.filter((p) => !struck.includes(`s:${p}`)) } : undefined;
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<"allow" | "deny" | null>(null);
@@ -344,7 +330,7 @@ function PairCard({ c }: { c: Need }) {
     setBusy(allow ? "allow" : "deny");
     try {
       const name = update && asNew ? newName.trim() : "";
-      const r = await api.answerConfirm(c.id, allow, allow ? { owner: canOwn && own, ...(name ? { name } : {}), ...(given ? { perms: given } : {}), ...(off.length ? { agentsOff: off } : {}) } : undefined);
+      const r = await api.answerConfirm(c.id, allow, allow ? { ...(name ? { name } : {}), ...(given ? { perms: given } : {}), ...(off.length ? { agentsOff: off } : {}) } : undefined);
       setLeaving(true);
       if (r.state === "failed") toast(t("err.confirm"), { error: true, description: r.error });
       else toast(allow ? t("confirm.pairDone", { name: r.name ?? (name || c.name) ?? "" }) : t("toast.denied"));
@@ -392,15 +378,6 @@ function PairCard({ c }: { c: Need }) {
             {m?.login && <p className="m-0 text-xs text-ink-3">{t("confirm.pairLogin", { login: m.login.name || m.login.id })}</p>}
             {carried.length > 0 && <Carried agents={carried} off={off} setOff={setOff} />}
             {(!update || asNew) && c.wants && <Wants wants={c.wants} struck={struck} setStruck={setStruck} />}
-            {canOwn && (
-              <div className="g-fade flex items-center gap-2">
-                <span className="min-w-0 flex-1">
-                  <span className="block text-sm">{computer ? t("confirm.pairOwner") : t("term.withClaude")}</span>
-                  <span className="block text-xs text-ink-3">{computer ? t("confirm.pairOwnerHint") : t("confirm.pairBotOwnerHint")}</span>
-                </span>
-                <Switch label={computer ? t("confirm.pairOwner") : t("term.withClaude")} on={own} onChange={setOwn} />
-              </div>
-            )}
           </>
         }
       />

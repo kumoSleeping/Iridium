@@ -85,7 +85,7 @@ func TestSettings(t *testing.T) {
 
 	// A channel sees none of it; an agent's ir reads but does not change it.
 	var tok api.Token
-	tok = l.newApp("bot", false)
+	tok = l.newApp("bot")
 	l.want(403, tok.Token, "GET", "/v1/internal/settings", nil, nil)
 	l.want(403, tok.Token, "PUT", "/v1/internal/settings", api.SettingsPatch{IdleReap: &never}, nil)
 	l.want(200, "agent", "GET", "/v1/internal/settings", nil, nil)

@@ -14,7 +14,7 @@ import { api } from "./api/client";
 import type { Agent, App, Computer, Login, Perms, PendingInvite, Role } from "./api/types.gen";
 import { AddComputer, clock, deviceBadge, nameError, ofWeb, OpenFolder, PasskeyList, passkeysQ, Rename, usePasskeys, revoke, setOwner, systems, useFacePick, useGrant } from "./apps";
 import { MainKey, SecondKey } from "./card";
-import { ConfirmCard, saysOwner } from "./confirms";
+import { ConfirmCard } from "./confirms";
 import { SecretsPane, secretsQ } from "./credentials";
 import { isComputer, keptQuery, manages as managesApps, useAgents, useApps, useMe, useSettings } from "./data";
 import { CacheRows } from "./device/page";
@@ -540,15 +540,12 @@ function Pending() {
 
 function NewInvite({ done }: { done: (id?: string) => void }) {
   const qc = useQueryClient();
-  const me = useMe().data;
   const [name, setName] = useState("");
-  const [withClaude, setWithClaude] = useState(false);
   const [busy, setBusy] = useState(false);
-  const canClaude = saysOwner(me);
   const make = async () => {
     setBusy(true);
     try {
-      const inv = await api.invite(name.trim(), canClaude && withClaude);
+      const inv = await api.invite(name.trim());
       showSecret({ invite: inv, at: HERE });
       await qc.invalidateQueries({ queryKey: ["apps"] });
       done(inv.id);
@@ -570,11 +567,6 @@ function NewInvite({ done }: { done: (id?: string) => void }) {
         <Field label={t("term.name")}>
           <input autoFocus value={name} maxLength={12} onChange={(e) => setName(e.target.value)} placeholder={t("manage.nameLater")} aria-label={t("term.name")} className="no-ring h-9 w-full min-w-0 rounded-md bg-fill px-2.5 text-sm placeholder:text-ink-3" />
         </Field>
-        {canClaude && (
-          <Field label={t("term.withClaude")}>
-            <Switch label={t("term.withClaude")} on={withClaude} onChange={setWithClaude} />
-          </Field>
-        )}
       </Block>
       <div className="flex justify-end gap-2 pt-3">
         <SecondKey onClick={() => done()}>{t("me.cancel")}</SecondKey>
@@ -604,11 +596,6 @@ function InviteDetail({ i, gone }: { i: PendingInvite; gone: () => void }) {
       <div className="@container pt-3">
         <SecretHere at={HERE} />
       </div>
-      {i.claude && (
-        <Block>
-          <Field label={t("term.withClaude")}>{t("manage.yes")}</Field>
-        </Block>
-      )}
     </div>
   );
 }

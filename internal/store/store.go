@@ -417,7 +417,7 @@ var schema = []string{
 const idleConns = 16
 
 // steps run in Go after the migration of their version, in the same transaction.
-var steps = map[int]func(*sql.Tx) error{5: claudeForFirstPanel, 35: indexChannelMessages, 37: nicksOfSessions}
+var steps = map[int]func(*sql.Tx) error{35: indexChannelMessages, 37: nicksOfSessions}
 
 type Store struct {
 	db *sql.DB

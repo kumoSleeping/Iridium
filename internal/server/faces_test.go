@@ -90,7 +90,7 @@ func TestFacesKeptForGood(t *testing.T) {
 	}
 
 	// A login that sees no folder sees none of the faces.
-	bot := l.newApp("bot", true)
+	bot := l.newApp("bot")
 	now := time.Now()
 	l.s.st.AddLogin(bot.App.ID, "u1", "u1", 20, now)
 	if ok, err := l.s.st.ApproveLogin(bot.App.ID, "u1", now); !ok || err != nil {

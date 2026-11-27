@@ -48,8 +48,8 @@ func newNeeds(h *hub.Hub) *needs {
 	return cs
 }
 
-func (cs *needs) add(kind api.NeedKind, name string, owner bool, asker, session string) api.Need {
-	return cs.addNeed(api.Need{Kind: kind, Name: name, Owner: owner, Asker: asker, Session: session})
+func (cs *needs) add(kind api.NeedKind, name, asker, session string) api.Need {
+	return cs.addNeed(api.Need{Kind: kind, Name: name, Asker: asker, Session: session})
 }
 
 // addNeed adds c, given its ID and times.
@@ -60,7 +60,7 @@ func (cs *needs) addNeed(c api.Need) api.Need {
 	c.ID, c.CreatedAt, c.ExpiresAt = hex.EncodeToString(b), now.UnixMilli(), now.Add(NeedTTL).UnixMilli()
 	cs.mu.Lock()
 	cs.pruneLocked(now)
-	cs.all[c.ID] = &need{c: c, state: api.NeedState{ID: c.ID, Kind: c.Kind, State: "pending", Name: c.Name, Owner: c.Owner}, done: make(chan struct{})}
+	cs.all[c.ID] = &need{c: c, state: api.NeedState{ID: c.ID, Kind: c.Kind, State: "pending", Name: c.Name}, done: make(chan struct{})}
 	cs.mu.Unlock()
 	cs.publish()
 	return c

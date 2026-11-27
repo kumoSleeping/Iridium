@@ -192,10 +192,10 @@ PUT internal/apps/{id}/perms {agents, scope} -> Perms  an app's permissions; per
 PUT internal/apps/{id}/logins/{login}/perms {agents, scope} -> Perms  a login's; person only
 DELETE internal/apps/{id} - -> {ok}  remove an app, an ir_web login or an invite; person only
 DELETE internal/apps/{id}/logins/{login} - -> {ok}  remove a login; person only
-POST internal/invites {name?, claude?, perms?} -> Invite  a one-time ir_web link (10 min); an agent gets 202 {need}
+POST internal/invites {name?, perms?} -> Invite  a one-time ir_web link (10 min); an agent gets 202 {need}
 GET internal/needs - -> Needs  waiting for a person; person only  view=pending.id,pending.kind,pending.name
 GET internal/needs/{id}?wait - -> NeedState  how a need went; wait up to 60 s
-POST internal/needs/{id} {allow, value?, forSession?, owner?, name?, perms?, agentsOff?} -> NeedReply  allow or deny; person only
+POST internal/needs/{id} {allow, value?, forSession?, name?, perms?, agentsOff?} -> NeedReply  allow or deny; person only
 GET internal/pairing - -> PairWindow  whether pairing is on; person only
 PUT internal/pairing {open} -> PairWindow  pairing on (till turned off) or off; person only
 POST internal/pair {name, type?, os?, arch?, program?, agents?, shell?, noShell?, agentShell?, home?, machineId?, wants?} -> {code, request}  ask to pair

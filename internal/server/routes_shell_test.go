@@ -29,7 +29,7 @@ func TestMachineShell(t *testing.T) {
 	l := serveLive(t, s, cfg, work, func(s *Server, _ config.Config, _ string) { s.Remote = hub; s.WatchMachines() })
 	join := func(name string, o executor.Options) string {
 		t.Helper()
-		tok := l.newApp(name, false)
+		tok := l.newApp(name)
 		o.URL, o.Token, o.State, o.Logf = "ws"+strings.TrimPrefix(l.base, "http")+"/v1/internal/exec", tok.Token, filepath.Join(t.TempDir(), "state"), t.Logf
 		exe, err := executor.New(o)
 		if err != nil {
