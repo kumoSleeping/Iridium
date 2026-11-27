@@ -219,15 +219,17 @@ const TEAM = '@deepseek-ai/dsh-tool-agent-team'
 
 /**
  * OMD's Ultra as a key a new session may start with (desktop.config's keys), off: its sub-modes
- * as OMD offers them (Agent Team while dsh's is loaded and running, as OMD's cold check), for the
+ * as OMD offers them (Agent Team while dsh's is loaded, running and on for new sessions), for the
  * agent presets with OMD's Workflow on (presets: all, when the registry cannot tell). None without
  * OMD, or with no such preset. Read through ctx at each call: OMD may come and go.
  */
 export async function startKeys(ctx) {
   try {
     if (!ctx.get('omd')?.ultracode) return []
+    // A new session is in team mode only where dsh turns it on for each new one (its
+    // defaultEnabled); else Agent Team is not there at its first turn.
     const teamAvailable =
-      !!ctx.get('agentTeams') &&
+      ctx.get('agentTeams')?.defaultEnabled === true &&
       [...(ctx.get('loader')?.entries?.() ?? [])].some((e) => e?.options?.name === TEAM && !e.disabled && e.fiber?.state === 2)
     const key = { place: 'effort', from: '', content: contentOf({ eligible: true, mode: 'off', teamAvailable }) }
     const reg = ctx.get('agentPresets')

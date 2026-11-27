@@ -104,7 +104,7 @@ function cold({ omd = true, teams = true, team = { disabled: false, state: 2 }, 
           },
         }
       : undefined,
-    agentTeams: teams ? {} : undefined,
+    agentTeams: teams ? { defaultEnabled: teams !== 'off' } : undefined,
     loader: { entries: () => [{ options: { name: 'other' }, fiber: { state: 2 } }, ...(team ? [{ options: { name: '@deepseek-ai/dsh-tool-agent-team' }, disabled: team.disabled, fiber: { state: team.state } }] : [])] },
     agentPresets: inventory === undefined ? undefined : { compositionInventory: async () => inventory },
   }
@@ -120,13 +120,13 @@ const inventory = [
   { id: 'plain', rows: [{ moduleName: 'x', enabled: true }] },
 ]
 
-test('start keys: OMD\'s Ultra, off, for its presets; Agent Team while dsh\'s runs', async () => {
+test('start keys: OMD\'s Ultra, off, for its presets; Agent Team while dsh\'s runs, on for new sessions', async () => {
   const { startKeys, contentOf } = omdIridium
   const k = await startKeys(cold({ inventory }).ctx)
   assert.deepEqual(k, [{ place: 'effort', from: '', content: contentOf({ eligible: true, mode: 'off', teamAvailable: true }), presets: ['omd'] }])
   assert.match(k[0].content.en, /omd\.ultra\.team/)
   assert.doesNotMatch(k[0].content.en, /pressed|disabled/)
-  for (const o of [{ teams: false }, { team: { disabled: true, state: 2 } }, { team: { disabled: false, state: 1 } }, { team: null }]) {
+  for (const o of [{ teams: false }, { teams: 'off' }, { team: { disabled: true, state: 2 } }, { team: { disabled: false, state: 1 } }, { team: null }]) {
     const [x] = await startKeys(cold({ inventory, ...o }).ctx)
     assert.doesNotMatch(x.content.en, /omd\.ultra\.team/, JSON.stringify(o))
     assert.match(x.content.en, /omd\.ultra\.workflow/)
