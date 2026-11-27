@@ -1089,7 +1089,8 @@ let saidNow: ReturnType<typeof useSaidLine> = () => undefined;
 /** A session's face in the list (the user, 2026-11-13): its channel's picture, round, else (one of
  *  several agents) their own faces (FaceStack; the user, 2026-11-16: not their logos), else its
  *  agent's; what is unread of it a badge on its top right corner, red, or grey
- *  while it is quiet (unread.ts) and nothing unread names me, 99+ past 99. */
+ *  while it is quiet (unread.ts) and nothing unread names me, or archived (StarFreedomX,
+ *  2026-11-27), 99+ past 99. */
 function RowFace({ s, group, solo, unread, quiet }: { s: Session; group?: { id: string; agent: Agent }[]; solo?: { id: string; agent: Agent }; unread: number; quiet: boolean }) {
   const logo = group ? <FaceStack members={group} size={36} /> : solo ? <Face id={solo.id} agent={solo.agent} size={36} logo={20} low /> : <Logo agent={s.agent} size={20} />;
   return (
@@ -1426,7 +1427,7 @@ const SessionRow = memo(function SessionRow({ s, where, depth, flip, selected, o
         icon={
           <Tip label={[multi ? multi.map((a, i) => `${agentName(members?.[i]?.agent ?? a.agent ?? s.agent)} ${a.nick ?? ""}`.trim()).join(", ") : agentName(solo?.agent ?? s.agent), machine?.name, s.subagent && t("row.subagent"), away ? t("status.offline") : status !== "idle" && told].filter(Boolean).join(" · ")} side="bottom">
             <span className="relative grid">
-              <RowFace s={s} group={multi?.map((a, i) => ({ id: a.session, agent: members?.[i]?.agent ?? a.agent ?? s.agent }))} solo={solo} unread={unread} quiet={quiet && !at} />
+              <RowFace s={s} group={multi?.map((a, i) => ({ id: a.session, agent: members?.[i]?.agent ?? a.agent ?? s.agent }))} solo={solo} unread={unread} quiet={(quiet && !at) || !!s.archived} />
               {remote && <CloudBadge label={machine?.name ?? t("nav.remoteFolder")} />}
               {/* A subagent: no word for it, a small agent badge on the logo's corner (the user, 2026-11-06). */}
               {s.subagent && (

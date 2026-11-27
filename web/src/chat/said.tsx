@@ -57,6 +57,22 @@ export const clock = (ms?: number) => {
   return f.format(ms);
 };
 
+/** The day of ms where it is not today (StarFreedomX, 2026-11-27: a time alone, no day): 11月25日,
+ *  Nov 25; the year too where it is not this one. */
+const days = new Map<string, Intl.DateTimeFormat>();
+export const dayOf = (ms?: number) => {
+  if (!ms) return "";
+  const d = new Date(ms);
+  const now = new Date();
+  if (d.toDateString() === now.toDateString()) return "";
+  const l = document.documentElement.lang === "en" ? "en" : "zh-CN";
+  const other = d.getFullYear() !== now.getFullYear();
+  const key = `${l} ${other}`;
+  let f = days.get(key);
+  if (!f) days.set(key, (f = new Intl.DateTimeFormat(l, other ? { year: "numeric", month: "short", day: "numeric" } : { month: "short", day: "numeric" })));
+  return f.format(ms);
+};
+
 /** When a message was said, on its head's inner side (beside the name, toward the middle; kumo,
  *  2026-11-16), its number in the channel before it (n; kumo, 2026-11-26): not shown till a
  *  pointer is over its row (WhenRow), or a finger presses the row's blank (where there is no
@@ -66,7 +82,7 @@ export const clock = (ms?: number) => {
 export const When = ({ time, n, lead }: { time?: number; n?: number; lead?: boolean }) =>
   time ? (
     <span className={cn("shrink-0 text-xs leading-4 text-ink-4 tabular-nums opacity-0 transition-opacity duration-(--dur-2) group-data-[when]/msg:opacity-100", lead ? "group-has-[[data-lead]:hover]/msg:opacity-100 group-has-[[data-lead][data-when]]/msg:opacity-100" : "group-hover/msg:opacity-100")}>
-      {n !== undefined ? `#${n} ${clock(time)}` : clock(time)}
+      {[n !== undefined && `#${n}`, dayOf(time), clock(time)].filter(Boolean).join(" ")}
     </span>
   ) : null;
 
@@ -80,6 +96,7 @@ export const Gutter = ({ time, n, right, slot }: { time?: number; n?: number; ri
     <span aria-hidden className={cn("pointer-events-none absolute top-0.5 flex w-max min-w-7 flex-col text-[10px] leading-[13px] whitespace-nowrap text-ink-4 tabular-nums opacity-0 transition-opacity duration-(--dur-2)", slot ? "group-hover/msg:opacity-100 group-data-[when]/msg:opacity-100" : "group-hover/line:opacity-100 group-data-[when]/line:opacity-100", slot ? (right ? "left-0 items-start" : "right-0 items-end") : right ? "left-full ml-2.5 items-start" : "right-full mr-2.5 items-end")}>
       {/* As the head's, its number first (kumo, 2026-11-26: the time over it read the other way). */}
       {n !== undefined && <span>#{n}</span>}
+      {time && dayOf(time) ? <span>{dayOf(time)}</span> : null}
       {time ? <span>{clock(time)}</span> : null}
     </span>
   ) : null;
