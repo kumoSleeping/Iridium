@@ -9,7 +9,7 @@
 import { Dialog } from "@base-ui/react/dialog";
 import { Menu } from "@base-ui/react/menu";
 import { useQueryClient } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, FolderOpen, KeyRound, Link2, Monitor, PencilLine, Plus, UserPlus, Waypoints, X, Trash2, Bot } from "lucide-react";
+import { ChevronLeft, ChevronRight, FolderOpen, Link2, Monitor, PencilLine, Plus, X, Trash2 } from "lucide-react";
 import { useLayoutEffect, useState, type ReactNode } from "react";
 import { api } from "./api/client";
 import type { Agent, App, Computer, Login, Perms, PendingInvite, Role } from "./api/types.gen";
@@ -27,7 +27,7 @@ import { NewRolePage, placeOf, RolePage } from "./rolespage";
 import { type ManageTab } from "./route";
 import { SecretHere } from "./secret";
 import { showSecret } from "./secrets";
-import { MenuItems } from "./sidebar";
+import { MenuItems, type MenuItem } from "./sidebar";
 import { useConfirms, usePairing } from "./store";
 import { errText, toast } from "./toast";
 import { agentName, ago, Avatar, AvatarKey, cn, FaceChangeOver, IconKey, intoView, Logo, MenuPortal, ServerFace, SureKey, Switch, Tip } from "./ui";
@@ -160,14 +160,18 @@ export function ManagePage({ tab }: { tab: ManageTab }) {
       <AgentDetail key={agent} a={agent} computers={computers} />
     ) : null;
 
+  // 新建's menu follows the list's group chosen (kumo, 2026-11-27): a member's, a computer's, an
+  // agent's things to make, each "新建 …", words alone.
+  const group = k === "c" ? "computers" : k === "a" ? "agents" : k === "l" || k === "i" || k === "p" ? "members" : "";
+  const pair = () => void (pairing || api.pairing(true).catch((e) => toast(t("apps.pairing"), { error: true, description: errText(e) })));
   const makes = [
-    manages && me?.public && { icon: <UserPlus size={15} />, label: t("manage.inviteMember"), run: () => setSel(NEW_INVITE) },
-    manages && { icon: <Waypoints size={15} />, label: t("manage.pairApp"), run: () => void (pairing || api.pairing(true).catch((e) => toast(t("apps.pairing"), { error: true, description: errText(e) }))) },
-    manages && { icon: <Monitor size={15} />, label: t("manage.addComputer"), run: () => setSel(NEW_COMPUTER) },
-    { icon: <Bot size={15} />, label: t("role.new"), run: () => setSel(NEW_ROLE) },
-    me?.host && host && { icon: <KeyRound size={15} />, label: t("manage.newSecret"), run: () => (setSel(`c:${host.id}`), setWant(`new:${Date.now()}`)) },
+    group === "members" && manages && me?.public && { icon: null, label: t("manage.newInvite"), run: () => setSel(NEW_INVITE) },
+    group === "members" && manages && { icon: null, label: t("manage.newPairing"), run: pair },
+    group === "computers" && manages && { icon: null, label: t("manage.newComputer"), run: () => setSel(NEW_COMPUTER) },
+    group === "computers" && me?.host && host && { icon: null, label: t("manage.newSecret"), run: () => (setSel(`c:${host.id}`), setWant(`new:${Date.now()}`)) },
+    group === "agents" && { icon: null, label: t("role.new"), run: () => setSel(NEW_ROLE) },
   ].filter((x) => !!x);
-  const add = !at.startsWith("new:") && <AddMenu items={makes} />;
+  const add = !at.startsWith("new:") && makes.length > 0 && <AddMenu items={makes} />;
   const needs = <Needs skip={!!computer?.host} />;
 
   return (
@@ -216,9 +220,9 @@ function Group({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-/** 新建, at the window's foot on the right: a menu of what may be made; it says nothing else (kumo,
- *  2026-11-27: pairing is turned off at Iridium's). */
-function AddMenu({ items }: { items: { icon: ReactNode; label: string; run: () => void }[] }) {
+/** 新建, at the window's foot on the right: a menu of what may be made, opening to its left; it says
+ *  nothing else (kumo, 2026-11-27: pairing is turned off at Iridium's). */
+function AddMenu({ items }: { items: MenuItem[] }) {
   return (
     <Menu.Root>
       <Menu.Trigger className="g-press absolute right-4 bottom-4 z-10 flex h-9 items-center gap-1.5 rounded-full bg-ink px-4 text-sm font-medium text-on-ink shadow-(--shadow-float) outline-none pointer-coarse:h-11">
@@ -226,7 +230,7 @@ function AddMenu({ items }: { items: { icon: ReactNode; label: string; run: () =
         {t("manage.new")}
       </Menu.Trigger>
       <MenuPortal>
-        <Menu.Positioner side="top" align="end" sideOffset={8} collisionPadding={8} className="z-50">
+        <Menu.Positioner side="left" align="end" sideOffset={8} collisionPadding={8} className="z-50">
           <MenuItems items={items} />
         </Menu.Positioner>
       </MenuPortal>

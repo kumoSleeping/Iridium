@@ -1646,7 +1646,7 @@ export function MenuItems({ lead = [], items, tags, children, foot, label, final
     };
     const label = (
       <>
-        <span className={red ? "text-err" : "text-ink-2"}>{it.icon}</span>
+        {it.icon != null && <span className={red ? "text-err" : "text-ink-2"}>{it.icon}</span>}
         <span className="min-w-0 truncate">{red ? it.sure : it.label}</span>
       </>
     );

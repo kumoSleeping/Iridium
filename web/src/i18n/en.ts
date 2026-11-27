@@ -1030,10 +1030,8 @@ export const en: Dict = {
   "manage.approval": "Approval",
   "manage.members": "Members",
   "manage.roleCount": "Roles {n}",
-  "manage.inviteMember": "Invite a member",
-  "manage.pairApp": "Pair an app",
-  "manage.addComputer": "Add a computer",
   "manage.newSecret": "New credential",
   "manage.open": "Manage",
+  "manage.newPairing": "New pairing",
   "manage.default": "Default",
 };
