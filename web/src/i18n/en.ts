@@ -1027,4 +1027,7 @@ export const en: Dict = {
   "github.expired": "Expired",
   "github.denied": "Denied",
   "github.rebind": "Bind again",
+  "manage.requests": "Requests",
+  "manage.pairCode": "Code",
+  "manage.carried": "Agents it brings",
 };

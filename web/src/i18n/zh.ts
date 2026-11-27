@@ -1027,6 +1027,9 @@ export const zh = {
   "github.expired": "已过期",
   "github.denied": "已拒绝",
   "github.rebind": "重新绑定",
+  "manage.requests": "请求",
+  "manage.pairCode": "配对码",
+  "manage.carried": "带的 Agent",
 } as const;
 
 export type Key = keyof typeof zh;

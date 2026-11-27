@@ -361,7 +361,7 @@ export function App() {
   // The settings' own routes (an old link, a key that still goes there) on a phone: 管理's Ir.
   useEffect(() => void (phone && inSets(r) && openManage("ir")), [phone, r]);
   const onSettings = () => (phone ? openManage("ir") : inSets(r) ? close(under) : go({ name: "settings" }));
-  const me = <MeKey open={inSets(r)} onOpen={onSettings} dot={!!update.data?.available} code={loadPanels} manage={phone ? undefined : () => openManage()} />;
+  const me = <MeKey open={inSets(r)} onOpen={onSettings} dot={!!update.data?.available || confirms.length > 0} code={loadPanels} manage={phone ? undefined : () => openManage()} />;
   const session = open ? list?.find((s) => s.id === open) : undefined;
   // Sidebar key and chat folder links share one dialog; bumping filesRound remounts a fresh
   // browser on each open, even if reopened mid-exit.

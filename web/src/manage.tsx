@@ -11,10 +11,11 @@ import { useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, FolderOpen, Link2, Monitor, PencilLine, Plus, X, Trash2 } from "lucide-react";
 import { useLayoutEffect, useState, type ReactNode } from "react";
 import { api } from "./api/client";
-import type { Agent, App, Computer, Login, Perms, PendingInvite, Role } from "./api/types.gen";
-import { AddComputer, clock, deviceBadge, nameError, ofWeb, OpenFolder, PasskeyList, passkeysQ, Rename, usePasskeys, revoke, setOwner, systems, useFacePick, useGrant } from "./apps";
+import type { Agent, App, Computer, Login, Need, Perms, PendingInvite, Role } from "./api/types.gen";
+import { AddComputer, clock, nameError, ofWeb, OpenFolder, PasskeyList, passkeysQ, Rename, usePasskeys, revoke, setOwner, systems, useFacePick, useGrant } from "./apps";
 import { MainKey, SecondKey } from "./card";
-import { ConfirmCard } from "./confirms";
+import { ConfirmCard, ConfirmIcon, confirmName, confirmTitle } from "./confirms";
+import { isPair } from "./confirmname";
 import { SecretsPane, secretsQ } from "./credentials";
 import { isComputer, manages as managesApps, useAgents, useApps, useMe, useSettings } from "./data";
 import { CacheRows } from "./device/page";
@@ -71,6 +72,7 @@ export function ManagePage({ tab, theme, setTheme }: { tab: ManageTab; theme: Th
   const infos = (useAgents().data ?? []).filter((x) => !x.missing);
   const roles = useRoles();
   const pairing = !!usePairing()?.open;
+  const needs = useConfirms();
   const all = useComputers();
   const computers = manages ? all : [];
   const host = computers.find((a) => a.host);
@@ -103,8 +105,9 @@ export function ManagePage({ tab, theme, setTheme }: { tab: ManageTab; theme: Th
   const app = k === "p" ? apps.find((a) => a.id === id) : undefined;
   const computer = k === "c" ? computers.find((a) => a.id === id) : undefined;
   const agent = k === "a" ? infos.find((x) => x.agent === id)?.agent : undefined;
-  // One removed (here or elsewhere): back to none chosen.
-  if (sel && data && !sel.startsWith("new:") && sel !== IR && !login && !invite && !app && !computer && !agent) setSel("");
+  const need = k === "q" ? needs.find((c) => c.id === id) : undefined;
+  // One removed or answered (here or elsewhere): back to none chosen.
+  if (sel && data && !sel.startsWith("new:") && sel !== IR && !login && !invite && !app && !computer && !agent && !need) setSel("");
   const lit = at;
 
   const pair = (on: boolean) => void api.pairing(on).catch((e) => toast(t("apps.pairing"), { error: true, description: errText(e) }));
@@ -114,13 +117,22 @@ export function ManagePage({ tab, theme, setTheme }: { tab: ManageTab; theme: Th
     <>
       {/* This page and the Iridium it talks to (kumo, 2026-11-27): 外观, 语言, 缓存, 更新; on a
           phone the only settings there are. Oneself is among the members. */}
+      {/* What waits for a person, a list of its own at the top (kumo, 2026-11-27: not cards over
+          the detail); the avatar at the sidebar's foot has a dot while any does. */}
+      {needs.length > 0 && (
+        <Group title={t("manage.requests")}>
+          {needs.map((c) => (
+            <Row key={c.id} face={<NeedFace c={c} size={24} />} name={confirmTitle(c)} line={isPair(c) && c.code ? t("confirm.pairCode", { code: c.code }) : confirmName(c)} on={lit === `q:${c.id}`} onClick={() => setSel(`q:${c.id}`)} />
+          ))}
+        </Group>
+      )}
       <Group>
         <Row face={<IrMark size={24} round className="text-ink" />} name="Ir" on={lit === IR} onClick={() => setSel(IR)} />
       </Group>
       {manages && (
         <Group title={t("manage.members")}>
           {logins.map((l) => (
-            <Row key={l.id} face={<Avatar src={l.avatar} name={l.name} size={24} {...deviceBadge(l.device)} />} name={l.name} line={<><Seen online={l.online} at={l.lastSeenAt || l.createdAt || 0} />{!l.approvedAt && <span>{t("apps.pending")}</span>}</>} on={lit === `l:${l.id}`} onClick={() => setSel(`l:${l.id}`)} />
+            <Row key={l.id} face={<Avatar src={l.avatar} name={l.name} size={24} />} name={l.name} line={<><Seen online={l.online} at={l.lastSeenAt || l.createdAt || 0} />{!l.approvedAt && <span>{t("apps.pending")}</span>}</>} on={lit === `l:${l.id}`} onClick={() => setSel(`l:${l.id}`)} />
           ))}
           {invites.map((i) => (
             <Row key={i.id} face={<Pending />} name={i.setup ? t("term.setup") : i.name || t("manage.unusedInvite")} faint line={i.expiresAt ? t("term.until", { time: clock(i.expiresAt) }) : undefined} on={lit === `i:${i.id}`} onClick={() => setSel(`i:${i.id}`)} />
@@ -132,7 +144,7 @@ export function ManagePage({ tab, theme, setTheme }: { tab: ManageTab; theme: Th
         <Group title={t("manage.apps")}>
           {apps.map((a) => {
             const n = appLogins(a.id).length;
-            return <Row key={a.id} face={<Avatar src={a.avatar} name={a.name} size={24} type={a.type} />} name={a.name} line={n > 1 ? t("apps.loginCount", { n }) : <Seen online={a.online} at={a.lastSeenAt || a.createdAt || 0} />} on={lit === `p:${a.id}`} onClick={() => setSel(`p:${a.id}`)} />;
+            return <Row key={a.id} face={<Avatar src={a.avatar} name={a.name} size={24} />} name={a.name} line={n > 1 ? t("apps.loginCount", { n }) : <Seen online={a.online} at={a.lastSeenAt || a.createdAt || 0} />} on={lit === `p:${a.id}`} onClick={() => setSel(`p:${a.id}`)} />;
           })}
           <AddRow label={t("manage.invite")} on={at === NEW_APP} onClick={() => (setSel(NEW_APP), pairing || pair(true))} />
         </Group>
@@ -182,9 +194,9 @@ export function ManagePage({ tab, theme, setTheme }: { tab: ManageTab; theme: Th
       <ComputerDetail key={computer.id} a={computer} want={computer.host ? want : ""} />
     ) : agent ? (
       <AgentDetail key={agent} a={agent} computers={computers} />
+    ) : need ? (
+      <NeedDetail key={need.id} c={need} />
     ) : null;
-
-  const needs = <Needs skip={!!computer?.host} />;
 
   return (
     <div ref={root} className="relative flex min-h-0 flex-1 flex-col">
@@ -199,10 +211,7 @@ export function ManagePage({ tab, theme, setTheme }: { tab: ManageTab; theme: Th
       {wide ? (
         <div className="grid min-h-0 flex-1 grid-cols-[16rem_minmax(0,1fr)] gap-2">
           <div className="no-bar -mt-12 flex min-h-0 flex-col overflow-y-auto border-r border-rail-edge bg-rail px-2 pt-12 pb-4">{list}</div>
-          <div className="no-bar min-h-0 overflow-y-auto pt-1 pr-5 pb-6 pl-2">
-            {needs}
-            {detail}
-          </div>
+          <div className="no-bar min-h-0 overflow-y-auto pt-1 pr-5 pb-6 pl-2">{detail}</div>
         </div>
       ) : at ? (
         <div key={at} className="g-slide flex min-h-0 flex-1 flex-col">
@@ -215,7 +224,6 @@ export function ManagePage({ tab, theme, setTheme }: { tab: ManageTab; theme: Th
         </div>
       ) : (
         <div className="no-bar min-h-0 flex-1 overflow-y-auto px-3 pb-6" data-dir="back">
-          <div className="px-1">{needs}</div>
           {list}
         </div>
       )}
@@ -353,16 +361,96 @@ function Block({ title, children }: { title?: string; children: ReactNode }) {
   );
 }
 
-/** What waits for a person (a pairing, a grant, a login's approval) as cards; skip: the
- *  credentials' own, shown in their page. */
-function Needs({ skip }: { skip?: boolean }) {
-  const needs = useConfirms().filter((c) => !(skip && c.kind.startsWith("secret_")));
-  if (!needs.length) return null;
+/** A need's face: its icon on a round ground. */
+function NeedFace({ c, size }: { c: Need; size: number }) {
   return (
-    <div className="flex flex-col gap-2 pt-2 pb-3">
-      {needs.map((c) => (
-        <ConfirmCard key={c.id} c={c} at="terminals" />
-      ))}
+    <span className="g-disc grid shrink-0 place-items-center rounded-full text-ink-2" style={{ width: size, height: size }}>
+      <ConfirmIcon c={c} size={Math.round(size * 0.55)} />
+    </span>
+  );
+}
+
+/** A request chosen: an app asking to join drawn as the window draws the rest; another kind, its
+ *  card as the chat has it. */
+function NeedDetail({ c }: { c: Need }) {
+  if (c.kind === "app_join") return <PairDetail c={c} />;
+  return (
+    <div className="@container pt-2">
+      <ConfirmCard c={c} at="terminals" />
+    </div>
+  );
+}
+
+/** An app or a computer asking to join: its code to check against the one it shows, what it
+ *  asks for (an agent turned off is not given), the agents it brings (one turned off is off there
+ *  from the start); 拒绝 or 允许 at the foot. The TOKEN goes to it, never here. */
+function PairDetail({ c }: { c: Need }) {
+  const m = c.pair;
+  const wants = c.wants;
+  const asked = wants ? (wants.agents.includes(ALL) ? AGENTS : wants.agents) : [];
+  const [no, setNo] = useState<string[]>([]);
+  const carried = m?.agents?.map((a) => a.agent) ?? [];
+  const [off, setOff] = useState<string[]>([]);
+  const [busy, setBusy] = useState<"" | "allow" | "deny">("");
+  const answer = async (allow: boolean) => {
+    setBusy(allow ? "allow" : "deny");
+    const perms = wants && no.length ? { agents: asked.filter((a) => !no.includes(a)), scope: wants.scope } : undefined;
+    try {
+      const r = await api.answerConfirm(c.id, allow, allow ? { ...(perms ? { perms } : {}), ...(off.length ? { agentsOff: off } : {}) } : undefined);
+      if (r.state === "failed") toast(t("err.confirm"), { error: true, description: r.error });
+      else toast(allow ? t("confirm.pairDone", { name: r.name ?? c.name ?? "" }) : t("toast.denied"));
+    } catch (e) {
+      toast(t("err.confirm"), { error: true, description: errText(e) });
+    } finally {
+      setBusy("");
+    }
+  };
+  const flip = (list: string[], set: (v: string[]) => void, a: string) => set(list.includes(a) ? list.filter((x) => x !== a) : [...list, a]);
+  return (
+    <div className="flex flex-col">
+      <Head
+        face={<NeedFace c={c} size={40} />}
+        name={c.name}
+        figures={
+          <>
+            <span>{m?.os ? (systems[m.os] ?? m.os) : m?.program || m?.type || t("term.channel")}</span>
+            {c.expiresAt ? <span>{t("term.until", { time: clock(c.expiresAt) })}</span> : null}
+          </>
+        }
+      />
+      <Block>
+        <Field label={t("manage.pairCode")}>
+          <span className="font-mono text-2xl font-semibold tracking-[0.3em] text-ink tabular-nums">{c.code}</span>
+        </Field>
+        {m?.login && <Field label={t("manage.logins")}>{m.login.name || m.login.id}</Field>}
+      </Block>
+      {asked.length > 0 && (
+        <Block>
+          <AgentLines>
+            {asked.map((a) => (
+              <AgentLine key={a} a={a} on={!no.includes(a)} onChange={() => flip(no, setNo, a)} />
+            ))}
+          </AgentLines>
+          <Field label={t("manage.folders")}>{wants!.scope.includes(ALL) ? t("manage.all") : wants!.scope.join("、")}</Field>
+        </Block>
+      )}
+      {carried.length > 0 && (
+        <Block title={t("manage.carried")}>
+          <AgentLines>
+            {carried.map((a) => (
+              <AgentLine key={a} a={a} on={!off.includes(a)} onChange={() => flip(off, setOff, a)} />
+            ))}
+          </AgentLines>
+        </Block>
+      )}
+      <div className="flex justify-end gap-2 pt-3">
+        <SecondKey disabled={!!busy} onClick={() => void answer(false)}>
+          {t("ask.deny")}
+        </SecondKey>
+        <MainKey busy={busy === "allow"} disabled={!!busy} onClick={() => void answer(true)}>
+          {t("confirm.allow")}
+        </MainKey>
+      </div>
     </div>
   );
 }
@@ -614,7 +702,7 @@ function LoginDetail({ l }: { l: Login }) {
   return (
     <div className="flex flex-col">
       <Head
-        face={<AvatarKey label={t("term.avatar")} onClick={face.open} src={l.avatar} name={l.name} size={40} {...deviceBadge(l.device)} />}
+        face={<AvatarKey label={t("term.avatar")} onClick={face.open} src={l.avatar} name={l.name} size={40} />}
         name={<Name id={l.id} name={l.name} />}
         figures={
           <>
@@ -698,7 +786,7 @@ function AppDetail({ a, logins }: { a: App; logins: Login[] }) {
   return (
     <div className="flex flex-col">
       <Head
-        face={<AvatarKey label={t("term.avatar")} onClick={face.open} src={a.avatar} name={a.name} size={40} type={a.type} />}
+        face={<AvatarKey label={t("term.avatar")} onClick={face.open} src={a.avatar} name={a.name} size={40} />}
         name={<Name id={a.id} name={a.name} />}
         figures={
           <span className="flex items-center gap-1.5">
@@ -753,7 +841,7 @@ function useComputers(): App[] {
 const osName = (m?: Computer) => (m?.os ? (systems[m.os] ?? m.os) : "");
 
 function ComputerFace({ a, size }: { a: App; size: number }) {
-  return a.host ? <ServerFace size={size} /> : <Avatar src={a.avatar} name={a.name} size={size} type={a.type} />;
+  return a.host ? <ServerFace size={size} /> : <Avatar src={a.avatar} name={a.name} size={size} />;
 }
 
 /** want: asked from outside (the route's 凭据, 新建's credential), as "<what>:<count>": 凭据
@@ -796,7 +884,7 @@ function ComputerDetail({ a, want = "" }: { a: App; want?: string }) {
               </button>
             </Tip>
           ) : (
-            <AvatarKey label={t("term.avatar")} onClick={face.open} src={a.avatar} name={a.name} size={40} type={a.type} />
+            <AvatarKey label={t("term.avatar")} onClick={face.open} src={a.avatar} name={a.name} size={40} />
           )
         }
         name={a.host ? "Iridium" : <Name id={a.id} name={a.name} />}

@@ -10,6 +10,7 @@ import { api, queryClient } from "./api/client";
 import { LOCAL_ME, useMe, useSettings } from "./data";
 import { setLang, t, useLang, type Lang } from "./i18n";
 import { tellTheme } from "./irapp";
+import { useConfirms } from "./store";
 import { Avatar, cn, IconKey, IrMark, keep, kept, Tip } from "./ui";
 
 export type ThemePref = "light" | "dark" | "auto";
@@ -28,11 +29,13 @@ export function MeKey({ open, onOpen, dot, code, manage }: { open: boolean; onOp
   const me: Me = useMe().data ?? LOCAL_ME;
   const local = me.host && !me.named; // the host as Iridium; named, as its own (Me.named)
   const name = local ? t("me.local") : me.name;
+  // The dot: a request waiting (管理's 请求, kumo 2026-11-27), else a newer release.
+  const needs = useConfirms().length > 0;
   // 管理's key at the pill's right end, over it (kumo, 2026-11-27): a key of its own, not in the
   // button; shown as the pointer is over the pill or the key has the focus (a touch screen, always).
   return (
     <div className="group/me relative flex w-full min-w-0">
-    <Tip label={dot ? `${t("nav.me")} · ${t("settings.updateReady")}` : t("nav.me")} align="start">
+    <Tip label={dot ? `${t("nav.me")} · ${t(needs ? "nav.needsYou" : "settings.updateReady")}` : t("nav.me")} align="start">
       <button
         type="button"
         data-settings-key
