@@ -162,12 +162,12 @@ export function ManagePage({ tab }: { tab: ManageTab }) {
 
   const makes = [
     manages && me?.public && { icon: <UserPlus size={15} />, label: t("manage.inviteMember"), run: () => setSel(NEW_INVITE) },
-    manages && { icon: <Waypoints size={15} />, label: pairing ? t("manage.stopPairing") : t("manage.pairApp"), run: () => void api.pairing(!pairing).catch((e) => toast(t("apps.pairing"), { error: true, description: errText(e) })) },
+    manages && { icon: <Waypoints size={15} />, label: t("manage.pairApp"), run: () => void (pairing || api.pairing(true).catch((e) => toast(t("apps.pairing"), { error: true, description: errText(e) }))) },
     manages && { icon: <Monitor size={15} />, label: t("manage.addComputer"), run: () => setSel(NEW_COMPUTER) },
     { icon: <Bot size={15} />, label: t("role.new"), run: () => setSel(NEW_ROLE) },
     me?.host && host && { icon: <KeyRound size={15} />, label: t("manage.newSecret"), run: () => (setSel(`c:${host.id}`), setWant(`new:${Date.now()}`)) },
   ].filter((x) => !!x);
-  const add = !at.startsWith("new:") && <AddMenu items={makes} pairing={pairing} />;
+  const add = !at.startsWith("new:") && <AddMenu items={makes} />;
   const needs = <Needs skip={!!computer?.host} />;
 
   return (
@@ -216,13 +216,14 @@ function Group({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-/** 新建, at the window's foot on the right: a menu of what may be made. Pairing open, it says so. */
-function AddMenu({ items, pairing }: { items: { icon: ReactNode; label: string; run: () => void }[]; pairing: boolean }) {
+/** 新建, at the window's foot on the right: a menu of what may be made; it says nothing else (kumo,
+ *  2026-11-27: pairing is turned off at Iridium's). */
+function AddMenu({ items }: { items: { icon: ReactNode; label: string; run: () => void }[] }) {
   return (
     <Menu.Root>
       <Menu.Trigger className="g-press absolute right-4 bottom-4 z-10 flex h-9 items-center gap-1.5 rounded-full bg-ink px-4 text-sm font-medium text-on-ink shadow-(--shadow-float) outline-none pointer-coarse:h-11">
         <Plus size={15} />
-        {pairing ? t("manage.pairing") : t("manage.new")}
+        {t("manage.new")}
       </Menu.Trigger>
       <MenuPortal>
         <Menu.Positioner side="top" align="end" sideOffset={8} collisionPadding={8} className="z-50">
@@ -739,6 +740,7 @@ function ComputerFace({ a, size }: { a: App; size: number }) {
 /** want: asked from outside (the route's 凭据, 新建's credential), as "<what>:<count>": 凭据
  *  unfolded, a new one being added too. */
 function ComputerDetail({ a, want = "" }: { a: App; want?: string }) {
+  const pairing = !!usePairing()?.open;
   const qc = useQueryClient();
   const me = useMe().data;
   const owner = useApps().data?.logins.find((l) => ofWeb(l) && l.id === a.owner?.id);
@@ -835,6 +837,12 @@ function ComputerDetail({ a, want = "" }: { a: App; want?: string }) {
             {me?.web && me.login && (
               <SecondKey onClick={() => void setOwner(qc, a.id, a.owner?.id === me.login ? { clear: true } : {})}>{a.owner?.id === me.login ? t("apps.notMine") : t("apps.mine")}</SecondKey>
             )}
+          </Field>
+        )}
+        {a.host && managesApps(me) && (
+          <Field label={t("apps.pairing")}>
+            <span className="flex-1" />
+            <Switch label={t("apps.pairing")} on={pairing} onChange={(on) => void api.pairing(on).catch((e) => toast(t("apps.pairing"), { error: true, description: errText(e) }))} />
           </Field>
         )}
         {a.host && me?.host && s && (
