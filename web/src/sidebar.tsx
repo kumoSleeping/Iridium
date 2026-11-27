@@ -505,7 +505,7 @@ export function Sidebar(p: Props) {
   );
 
   const aside = (
-    <aside className={cn("relative flex h-full flex-col select-none [-webkit-touch-callout:none]", p.phone ? "w-full" : "shrink-0")} style={p.phone ? undefined : { width }}>
+    <aside className={cn("relative flex h-full flex-col select-none [-webkit-touch-callout:none]", p.phone ? "w-full" : "shrink-0 bg-rail [--row-bg:var(--rail)]")} style={p.phone ? undefined : { width }}>
       {!p.phone && <Divider width={width} setWidth={setWidth} />}
       {head}
       {/* While searching, the jump box in the tree's place; the tree stays mounted, hidden, and
@@ -781,8 +781,9 @@ function Row({ depth, flip, chevron, expanded, icon, label, end, selected, onCli
       }}
       className={cn(
         "group relative flex cursor-default rounded-md pr-2 transition-opacity duration-(--dur-2) select-none",
-        // The row open: a fill of its own, a step darker than a hover's, its words as any row's (kumo, 2026-11-26: no bold).
-        selected ? "bg-fill-2 [--row-bg:var(--fill-2)]" : "hover:bg-fill hover:[--row-bg:var(--fill)]",
+        // The row open: white paper lifted off the rail; under the pointer a faint wash of ink (kumo,
+        // 2026-11-27, 设计's 方案一; styles.css --picked); its words as any row's (2026-11-26: no bold).
+        selected ? "g-picked [--row-bg:var(--picked)]" : "hover:bg-wash",
         face ? "items-center py-1.5 pointer-coarse:py-2" : two ? "items-start py-[5px] pointer-coarse:py-2" : "h-[30px] items-center pointer-coarse:h-10",
         faded && "opacity-60",
         dim && "opacity-40",
@@ -1092,7 +1093,7 @@ let saidNow: ReturnType<typeof useSaidLine> = () => undefined;
 function RowFace({ s, group, solo, unread, quiet }: { s: Session; group?: { id: string; agent: Agent }[]; solo?: { id: string; agent: Agent }; unread: number; quiet: boolean }) {
   const logo = group ? <FaceStack members={group} size={36} /> : solo ? <Face id={solo.id} agent={solo.agent} size={36} logo={20} low /> : <Logo agent={s.agent} size={20} />;
   return (
-    <span className={cn("relative grid size-9 place-items-center rounded-full", !group && "bg-fill")}>
+    <span className={cn("relative grid size-9 place-items-center rounded-full", !group && "g-disc")}>
       <Face id={s.id} agent={solo?.agent ?? s.agent} size={36} none={logo} className="place-items-center" low channel />
       {unread > 0 && (
         <span
@@ -1233,7 +1234,7 @@ function CrossRow({ k, item, srv, place }: { k: string; item: FavItem; srv: FavS
         onClick={() => crossAsk("open", server, id)}
         aria={`${item.title}, ${srv.title}${item.unread ? `, ${t("status.unreadCount", { n: badge(item.unread) })}` : ""}`}
         icon={
-          <span className="relative grid size-9 place-items-center rounded-full bg-fill">
+          <span className="relative grid size-9 place-items-center rounded-full g-disc">
             {item.face ? <img src={item.face} alt="" draggable={false} className="size-9 rounded-full object-cover" /> : <Logo agent={item.agent as Agent} size={20} />}
             {item.unread > 0 && (
               <span

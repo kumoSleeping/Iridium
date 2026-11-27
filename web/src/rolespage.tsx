@@ -42,15 +42,17 @@ function useKinds(machine: string): Agent[] {
 /** A new role: its name and its agent (where it runs, with more than one computer); a host's
  *  persona taken gives its name where none is typed, and its persona (no intro: a role has none). Made, its own
  *  page in place of this one. */
-/** onBack: its way back, if it has one of its own (管理 gives it the list beside it). */
-export function NewRolePage({ onBack, made }: { onBack?: () => void; made: (r: Role) => void }) {
+/** onBack: its way back, if it has one of its own (管理 gives it the list beside it). agent: the
+ *  agent it is for, not chosen here (管理 makes one from inside an agent's own). */
+export function NewRolePage({ onBack, made, agent: fixed }: { onBack?: () => void; made: (r: Role) => void; agent?: Agent }) {
   useLang();
   const qc = useQueryClient();
   const ms = useMachines(true);
   const [machine, setMachine] = useState("");
   const kinds = useKinds(machine);
-  const [agent, setAgent] = useState<Agent | "">("");
-  const kind = agent && kinds.includes(agent) ? agent : (kinds[0] ?? "");
+  const [agent, setAgent] = useState<Agent | "">(fixed ?? "");
+  // For one agent: none where the computer chosen has not got it (not another in its place).
+  const kind = fixed ? (kinds.includes(fixed) ? fixed : "") : agent && kinds.includes(agent) ? agent : (kinds[0] ?? "");
   const [name, setName] = useState("");
   const [took, setTook] = useState<HostPersona | null>(null);
   const [busy, setBusy] = useState(false);
@@ -102,9 +104,9 @@ export function NewRolePage({ onBack, made }: { onBack?: () => void; made: (r: R
               <Choose label={t("role.computer")} value={machine} onChange={(m) => setMachine(m)} options={ms.map((m) => ({ value: m.id, label: m.name }))} />
             </Item>
           )}
-          <Item label={t("role.agent")}>
+          {!fixed && <Item label={t("role.agent")}>
             <Choose label={t("role.agent")} value={kind} onChange={(a) => setAgent(a as Agent)} options={kinds.map((a) => ({ value: a, label: agentName(a) }))} disabled={!kinds.length} />
-          </Item>
+          </Item>}
           {took && (
             <Item label={t("profile.persona")}>
               <span className="max-w-48 truncate text-sm text-ink-2">{took.name}</span>

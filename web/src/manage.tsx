@@ -16,7 +16,7 @@ import { AddComputer, clock, deviceBadge, nameError, ofWeb, OpenFolder, PasskeyL
 import { MainKey, SecondKey } from "./card";
 import { ConfirmCard, saysOwner } from "./confirms";
 import { SecretsPane, secretsQ } from "./credentials";
-import { isComputer, keptQuery, manages as managesApps, useAgents, useApps, useMe, useSettings, useUpdate } from "./data";
+import { isComputer, keptQuery, manages as managesApps, useAgents, useApps, useMe, useSettings } from "./data";
 import { CacheRows } from "./device/page";
 import { ahead as cacheAhead } from "./device/state";
 import { CacheTotal } from "./device/total";
@@ -58,7 +58,6 @@ function useWide() {
  *  "a:" an agent), or a row being made (NEW_*). What is under one unfolds in its detail. */
 const NEW_INVITE = "new:invite";
 const NEW_COMPUTER = "new:computer";
-const NEW_ROLE = "new:role";
 const NEW_APP = "new:app";
 const IR = "ir";
 
@@ -72,7 +71,6 @@ export function ManagePage({ tab, theme, setTheme }: { tab: ManageTab; theme: Th
   const infos = (useAgents().data ?? []).filter((x) => !x.missing);
   const roles = useRoles();
   const pairing = !!usePairing()?.open;
-  const upd = useUpdate().data;
   const all = useComputers();
   const computers = manages ? all : [];
   const host = computers.find((a) => a.host);
@@ -117,7 +115,7 @@ export function ManagePage({ tab, theme, setTheme }: { tab: ManageTab; theme: Th
       {/* This page and the Iridium it talks to (kumo, 2026-11-27): 外观, 语言, 缓存, 更新; on a
           phone the only settings there are. Oneself is among the members. */}
       <Group>
-        <Row face={<IrMark size={24} round className="text-ink" />} name="Ir" line={upd?.current} on={lit === IR} onClick={() => setSel(IR)} />
+        <Row face={<IrMark size={24} round className="text-ink" />} name="Ir" on={lit === IR} onClick={() => setSel(IR)} />
       </Group>
       {manages && (
         <Group title={t("manage.members")}>
@@ -152,7 +150,6 @@ export function ManagePage({ tab, theme, setTheme }: { tab: ManageTab; theme: Th
           const n = roles.filter((r) => r.agent === x.agent).length;
           return <Row key={x.agent} face={<AgentFace a={x.agent} size={24} />} name={agentName(x.agent)} line={n ? t("manage.roleCount", { n }) : undefined} on={lit === `a:${x.agent}`} onClick={() => setSel(`a:${x.agent}`)} />;
         })}
-        <AddRow label={t("role.new")} on={at === NEW_ROLE} onClick={() => setSel(NEW_ROLE)} />
       </Group>
     </>
   );
@@ -174,10 +171,6 @@ export function ManagePage({ tab, theme, setTheme }: { tab: ManageTab; theme: Th
     ) : at === NEW_COMPUTER ? (
       <div className="-mx-3">
         <AddComputer onBack={() => setSel("")} />
-      </div>
-    ) : at === NEW_ROLE ? (
-      <div className="-mx-3">
-        <NewRolePage made={(r: Role) => setSel(`a:${r.agent}`)} />
       </div>
     ) : login ? (
       <LoginDetail key={login.id} l={login} />
@@ -205,7 +198,7 @@ export function ManagePage({ tab, theme, setTheme }: { tab: ManageTab; theme: Th
       </header>
       {wide ? (
         <div className="grid min-h-0 flex-1 grid-cols-[16rem_minmax(0,1fr)] gap-2">
-          <div className="no-bar flex min-h-0 flex-col overflow-y-auto pb-4 pl-3">{list}</div>
+          <div className="no-bar -mt-12 flex min-h-0 flex-col overflow-y-auto border-r border-rail-edge bg-rail px-2 pt-12 pb-4">{list}</div>
           <div className="no-bar min-h-0 overflow-y-auto pt-1 pr-5 pb-6 pl-2">
             {needs}
             {detail}
@@ -248,7 +241,7 @@ function AddRow({ label, on, onClick }: { label: string; on: boolean; onClick: (
 /** A row being made: a plus in a faint circle. */
 function Draft({ size = 24 }: { size?: number }) {
   return (
-    <span className="grid place-items-center rounded-full bg-fill text-ink-3" style={{ width: size, height: size }}>
+    <span className="grid place-items-center rounded-full g-disc text-ink-3" style={{ width: size, height: size }}>
       <Plus size={Math.round(size * 0.55)} />
     </span>
   );
@@ -256,7 +249,7 @@ function Draft({ size = 24 }: { size?: number }) {
 
 function AgentFace({ a, size }: { a: Agent; size: number }) {
   return (
-    <span className="grid place-items-center rounded-full bg-fill" style={{ width: size, height: size }}>
+    <span className="grid place-items-center rounded-full g-disc" style={{ width: size, height: size }}>
       <Logo agent={a} size={Math.round(size / 2)} />
     </span>
   );
@@ -266,7 +259,7 @@ function AgentFace({ a, size }: { a: Agent; size: number }) {
  *  soft ground. */
 function Row({ face, name, line, on, onClick, faint }: { face: ReactNode; name: ReactNode; line?: ReactNode; on: boolean; onClick: () => void; faint?: boolean }) {
   return (
-    <button type="button" onClick={onClick} aria-current={on || undefined} className={cn("g-press flex h-10 w-full shrink-0 items-center gap-2.5 rounded-lg px-2 text-left pointer-coarse:h-12", on ? "bg-fill" : "hover:bg-fill/60")}>
+    <button type="button" onClick={onClick} aria-current={on || undefined} className={cn("g-press flex h-10 w-full shrink-0 items-center gap-2.5 rounded-lg px-2 text-left pointer-coarse:h-12", on ? "g-picked" : "hover:bg-wash")}>
       <span className="grid shrink-0 place-items-center">{face}</span>
       <span className={cn("min-w-0 flex-1 truncate text-sm", faint && "text-ink-3")}>{name}</span>
       {line && <span className="flex shrink-0 items-center gap-1.5 text-xs whitespace-nowrap text-ink-3 tabular-nums">{line}</span>}
@@ -312,7 +305,7 @@ function Field({ label, children, onClick, open }: { label: ReactNode; children:
     </>
   );
   return onClick ? (
-    <button type="button" onClick={onClick} aria-expanded={open} className="g-press -mx-2 flex min-h-11 items-center gap-3 rounded-md px-2 text-left hover:bg-fill/60">
+    <button type="button" onClick={onClick} aria-expanded={open} className="g-press -mx-2 flex min-h-11 items-center gap-3 rounded-md px-2 text-left hover:bg-wash">
       {body}
     </button>
   ) : (
@@ -341,7 +334,7 @@ function Unfold({ open, children }: { open: boolean; children: ReactNode }) {
  *  what it holds unfolds under it. */
 function FoldRow({ face, name, line, open, onClick }: { face: ReactNode; name: ReactNode; line?: ReactNode; open: boolean; onClick: () => void }) {
   return (
-    <button type="button" onClick={onClick} aria-expanded={open} className="g-press -mx-2 flex min-h-11 items-center gap-3 rounded-md px-2 text-left hover:bg-fill/60">
+    <button type="button" onClick={onClick} aria-expanded={open} className="g-press -mx-2 flex min-h-11 items-center gap-3 rounded-md px-2 text-left hover:bg-wash">
       {face}
       <span className="min-w-0 flex-1 truncate text-sm">{name}</span>
       {line && <span className="flex min-w-0 shrink items-center gap-1.5 truncate text-xs text-ink-3 tabular-nums">{line}</span>}
@@ -374,6 +367,9 @@ function Needs({ skip }: { skip?: boolean }) {
   );
 }
 
+/** An agent's row making a new role for it, among its roles. */
+const NEW_ROLE_HERE = "\u0000new";
+
 // --- Ir ---
 
 /** This page's and its Iridium's: how it looks, its language, what this device keeps, the update,
@@ -381,11 +377,10 @@ function Needs({ skip }: { skip?: boolean }) {
 function IrDetail({ theme, setTheme }: { theme: ThemePref; setTheme: (v: ThemePref) => void }) {
   const lang = useLang();
   const me = useMe().data;
-  const upd = useUpdate().data;
   const [cache, setCache] = useState(false);
   return (
     <div className="flex flex-col">
-      <Head face={<IrMark size={40} round className="text-ink" />} name="Ir" figures={upd?.current ? <span>{upd.current}</span> : undefined} />
+      <Head face={<IrMark size={40} round className="text-ink" />} name="Ir" />
       <Block>
         <Field label={t("me.theme")}>
           <ThemeSwitch theme={theme} setTheme={setTheme} />
@@ -537,7 +532,7 @@ function Name({ id, name, fixed }: { id: string; name: string; fixed?: boolean }
 /** An invite's face: a link's mark in a faint circle. */
 function Pending() {
   return (
-    <span className="grid size-6 place-items-center rounded-full bg-fill text-ink-3">
+    <span className="grid size-6 place-items-center rounded-full g-disc text-ink-3">
       <Link2 size={12} />
     </span>
   );
@@ -702,7 +697,7 @@ function PasskeysFold({ login }: { login: Login }) {
   return (
     <div className="flex flex-col">
       <PasskeyList login={login} />
-      <button type="button" onClick={() => void add()} className="g-press -mx-2 flex min-h-10 items-center gap-2 rounded-md px-2 text-left text-sm text-ink-2 hover:bg-fill/60">
+      <button type="button" onClick={() => void add()} className="g-press -mx-2 flex min-h-10 items-center gap-2 rounded-md px-2 text-left text-sm text-ink-2 hover:bg-wash">
         <Plus size={15} className="text-ink-3" />
         {t("passkey.add")}
       </button>
@@ -899,7 +894,7 @@ function ComputerDetail({ a, want = "" }: { a: App; want?: string }) {
               <div className="flex flex-col gap-2">
                 <SecretsPane adding={adding} done={() => setAdding(false)} />
                 {!adding && (
-                  <button type="button" onClick={() => setAdding(true)} className="g-press -mx-2 flex min-h-10 items-center gap-2 rounded-md px-2 text-left text-sm text-ink-2 hover:bg-fill/60">
+                  <button type="button" onClick={() => setAdding(true)} className="g-press -mx-2 flex min-h-10 items-center gap-2 rounded-md px-2 text-left text-sm text-ink-2 hover:bg-wash">
                     <Plus size={15} className="text-ink-3" />
                     {t("manage.newSecret")}
                   </button>
@@ -954,7 +949,7 @@ function AgentDetail({ a, computers }: { a: Agent; computers: App[] }) {
     <div className="flex flex-col">
       <Head
         face={
-          <span className="grid size-10 place-items-center rounded-full bg-fill">
+          <span className="grid size-10 place-items-center rounded-full g-disc">
             <Logo agent={a} size={20} />
           </span>
         }
@@ -989,8 +984,7 @@ function AgentDetail({ a, computers }: { a: Agent; computers: App[] }) {
           })}
         </Block>
       )}
-      {roles.length > 0 && (
-        <Block title={t("manage.roles")}>
+      <Block title={t("manage.roles")}>
           {roles.map((r) => (
             <div key={r.id} className="flex flex-col">
               <FoldRow face={<RoleFace role={r} size={24} />} name={r.name} line={<RoleLine role={r} at={placeOf(r)} className="truncate" />} open={role === r.id} onClick={() => setRole(role === r.id ? "" : r.id)} />
@@ -1001,8 +995,15 @@ function AgentDetail({ a, computers }: { a: Agent; computers: App[] }) {
               </Unfold>
             </div>
           ))}
-        </Block>
-      )}
+        <div className="flex flex-col">
+          <FoldRow face={<Draft />} name={<span className="text-ink-3">{t("role.new")}</span>} open={role === NEW_ROLE_HERE} onClick={() => setRole(role === NEW_ROLE_HERE ? "" : NEW_ROLE_HERE)} />
+          <Unfold open={role === NEW_ROLE_HERE}>
+            <div className="-mx-3">
+              <NewRolePage agent={a} made={(r: Role) => setRole(r.id)} />
+            </div>
+          </Unfold>
+        </div>
+      </Block>
     </div>
   );
 }
